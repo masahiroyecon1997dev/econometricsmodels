@@ -1,0 +1,51 @@
+{
+  "name": "econometricsmodels",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "dev",
+  "workspaceFolder": "/workspaces/econometricsmodels",
+  "remoteUser": "vscode",
+
+  // -------------------------
+  // VS Code 拡張機能 (コンテナ内に自動インストール)
+  // -------------------------
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "ms-python.python",
+        "charliermarsh.ruff"
+      ],
+      "settings": {
+        // Rust: cargo workspace ルートを認識させる
+        "rust-analyzer.linkedProjects": [],
+        "rust-analyzer.cargo.features": "all",
+        // Python: uv が作成する仮想環境を自動検出
+        "python.defaultInterpreterPath": "/workspaces/econometricsmodels/.venv/bin/python",
+        // Ruff をフォーマッタ・リンターとして使用
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true,
+          "editor.codeActionsOnSave": {
+            "source.fixAll.ruff": "explicit",
+            "source.organizeImports.ruff": "explicit"
+          }
+        },
+        // ターミナルのデフォルトを bash に
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+
+  // -------------------------
+  // コンテナ起動後の初期セットアップ
+  // pyproject.toml が存在する場合に uv sync で仮想環境を作成
+  // -------------------------
+  "postCreateCommand": "[ -f pyproject.toml ] && uv sync || echo 'pyproject.toml が未作成のため uv sync をスキップしました'",
+
+  // -------------------------
+  // ホスト側の Git 設定をコンテナに引き継ぐ
+  // -------------------------
+  "remoteEnv": {
+    "SSH_AUTH_SOCK": "/ssh-agent"
+  }
+}

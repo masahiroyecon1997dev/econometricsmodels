@@ -1,0 +1,16 @@
+[package]
+name = "econometricsmodels-ext"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "_lib"
+crate-type = ["cdylib"]
+
+[dependencies]
+# pyo3・numpy のバージョンは連動している。
+# 競合が出た場合は https://github.com/PyO3/numpy でバージョン対応表を確認すること。
+pyo3 = { version = "0.29", features = ["extension-module"] }
+numpy = "0.29"
+ndarray = { workspace = true }
+ols = { path = "../crates/ols" }

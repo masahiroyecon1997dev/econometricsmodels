@@ -1,0 +1,9 @@
+[workspace]
+members = ["crates/ols", "python"]
+resolver = "2"
+
+[workspace.dependencies]
+ndarray = "0.16"
+thiserror = "2"
+nalgebra = "0.33"
+statrs = "0.17"

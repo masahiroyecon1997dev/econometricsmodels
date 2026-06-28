@@ -8,21 +8,14 @@ services:
         USER_UID: 1000
         USER_GID: 1000
     volumes:
-      # ワークスペースをコンテナにマウント
       - ..:/workspaces/econometricsmodels:cached
-      # Cargo レジストリキャッシュを永続化 (毎回クレートを DL しない)
       - cargo-registry:/home/vscode/.cargo/registry
       - cargo-git:/home/vscode/.cargo/git
-      # SSH エージェントソケットをマウントして GitHub push を可能にする
-      # 事前に WSL 側で以下を実行してください:
-      #   eval $(ssh-agent -s) && ssh-add ~/.ssh/id_ed25519
       - type: bind
         source: ${SSH_AUTH_SOCK}
         target: /ssh-agent
     environment:
-      # コンテナ内でエージェントソケットを参照できるようにする
       - SSH_AUTH_SOCK=/ssh-agent
-    # devcontainer が sleep infinity でコンテナを維持する
     command: sleep infinity
 
 volumes:

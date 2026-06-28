@@ -1,6 +1,4 @@
-# ベースイメージ: Python 3.13 公式スリム (Debian bookworm)
-# 軽量かつ Python 3.13 が既にインストール済み
-FROM python:3.13-slim-bookworm
+FROM python:3.14-slim-bookworm
 
 ARG USERNAME=vscode
 ARG USER_UID=1000
@@ -10,26 +8,17 @@ ARG USER_GID=1000
 # システム依存パッケージ
 # -------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # ビルドツール (Rust クレートのコンパイルに必要)
     build-essential \
     cmake \
-    # パッケージリンク
     pkg-config \
-    # OpenSSL (maturin, reqwest 等が依存)
     libssl-dev \
-    # OpenBLAS (ndarray-linalg の BLAS バックエンド)
     libopenblas-dev \
     liblapack-dev \
-    # バージョン管理
     git \
     git-lfs \
-    # SSH クライアント (GitHub push)
     openssh-client \
-    # CA 証明書
     ca-certificates \
-    # curl (rustup / uv インストーラ)
     curl \
-    # sudo (コンテナ内でパッケージ追加を可能にする)
     sudo \
     && rm -rf /var/lib/apt/lists/*
 
@@ -69,12 +58,13 @@ ENV CARGO_HOME=/home/${USERNAME}/.cargo
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     | sh -s -- -y \
         --default-toolchain stable \
-        --component clippy rustfmt llvm-tools \
+        --component clippy \
+        --component rustfmt \
+        --component llvm-tools \
     && . ${CARGO_HOME}/env
 
 ENV PATH="${CARGO_HOME}/bin:${PATH}"
 
-# カバレッジ計測ツール
 RUN cargo install cargo-llvm-cov --locked
 
 # -------------------------
@@ -84,7 +74,4 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ENV PATH="/home/${USERNAME}/.local/bin:${PATH}"
 
-# -------------------------
-# ワークスペースをデフォルト作業ディレクトリに設定
-# -------------------------
 WORKDIR /workspaces/econometricsmodels

@@ -8,7 +8,6 @@
 ## 1. 概要
 
 OLS (Ordinary Least Squares) は線形回帰モデルの最も基本的な推定量。  
-本モジュールは単純 OLS・加重 OLS (WLS)・一般化 OLS (GLS) を含む。  
 各種ロバスト標準誤差・クラスター標準誤差にも対応する。
 
 ---
@@ -27,7 +26,6 @@ $$
 | $X$ | $n \times k$ | 説明変数行列（定数項を含む場合あり） |
 | $\beta$ | $k \times 1$ | 回帰係数 |
 | $\varepsilon$ | $n \times 1$ | 誤差項 |
-| $\Omega$ | $n \times n$ | 誤差の共分散構造（OLS では $I_n$） |
 
 ### 2.2 OLS 推定量
 
@@ -35,21 +33,6 @@ $$
 \hat{\beta}_{OLS} = (X^\top X)^{-1} X^\top y
 $$
 
-### 2.3 WLS 推定量
-
-$$
-\hat{\beta}_{WLS} = (X^\top W X)^{-1} X^\top W y
-$$
-
-$W = \text{diag}(w_1, \ldots, w_n)$ : 重み行列
-
-### 2.4 GLS 推定量
-
-$$
-\hat{\beta}_{GLS} = (X^\top \Omega^{-1} X)^{-1} X^\top \Omega^{-1} y
-$$
-
----
 
 ## 3. 標準誤差
 

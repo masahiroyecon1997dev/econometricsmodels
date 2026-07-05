@@ -14,6 +14,7 @@
       ],
       "settings": {
         "rust-analyzer.linkedProjects": [],
+        "rust-analyzer.cargo.targetDir": true,
         "rust-analyzer.cargo.features": "all",
         "python.defaultInterpreterPath": "/workspaces/econometricsmodels/.venv/bin/python",
         "[python]": {
@@ -33,6 +34,7 @@
   },
   "postCreateCommand": "[ -f pyproject.toml ] && uv sync || echo 'pyproject.toml が未作成のため uv sync をスキップしました'",
   "remoteEnv": {
-    "SSH_AUTH_SOCK": "/ssh-agent"
+    "SSH_AUTH_SOCK": "/ssh-agent",
+    "GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}"
   }
 }

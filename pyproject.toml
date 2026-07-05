@@ -5,14 +5,14 @@ build-backend = "maturin"
 [project]
 name = "econometricsmodels"
 version = "0.1.0"
-requires-python = ">=3.11"
-dependencies = ["polars>=0.40", "numpy>=1.24"]
+requires-python = ">=3.14"
+dependencies = ["polars==0.40", "numpy==1.24"]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
-    "statsmodels>=0.14",
-    "pytest>=7.0",
-    "pytest-cov>=4.0",
+    "pytest==9.1.1",
+    "pytest-cov==7.1.0",
+    "statsmodels==0.14.6",
 ]
 
 [tool.maturin]
@@ -28,9 +28,4 @@ line-length = 88
 [tool.ruff.lint]
 select = ["E", "F", "I"]
 
-[dependency-groups]
-dev = [
-    "pytest>=9.1.1",
-    "pytest-cov>=7.1.0",
-    "statsmodels>=0.14.6",
-]
+

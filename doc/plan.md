@@ -19,10 +19,10 @@
 
 ## 3. API設計思想
 
-- **R / statsmodels 風**のインターフェースを採用する。
-  - formula指定（例: `y ~ x1 + x2`）による変数指定を基本とする。
-  - `fit()` 実行後、`summary()` で係数・標準誤差・検定統計量などを表示する。
-- 計量経済学ユーザーに馴染みやすいAPIを優先し、sklearn風の `fit/predict/score` インターフェースは今回のスコープでは採用しない（必要になれば別途検討）。
+- formula指定（`y ~ x1 + x2` のような文字列パース方式）は採用しない。
+- 変数は **List で渡す**方式とする（例: `y=["y_col"], x=["x1", "x2"]` のような形）。
+- 推定オプションは **オブジェクト（設定用のクラス／構造体）で渡す**方式とする。
+- スクリプト・プログラムからの呼び出しやすさ（型補完、バリデーション、動的組み立てのしやすさ）を優先する。
 
 ## 4. 実装スコープと優先順位
 
@@ -38,38 +38,89 @@
 
 各フェーズは前段の実装を基盤として進める。フェーズ内のタスク分解は着手時に別途行う。
 
-## 5. 対象プラットフォーム
+## 5. 対象プラットフォーム・Pythonバージョン
 
-- Linux（manylinux）
-- macOS（Apple Silicon / Intel）
-- Windows
+- OS: Linux（manylinux）, macOS（Apple Silicon / Intel）, Windows
+- Python: **3.12以上**
 
-対応Pythonバージョンの範囲は別途確定する（未決定事項として下記「今後の検討事項」に記載）。
+## 6. ドキュメント
 
-## 6. テスト方針
+- **mkdocs** で作成する。
+- ホスティングは **GitHub Pages**。
+- GitHub Actions でビルド・デプロイを自動化する。
+
+## 7. テスト方針
 
 - 既存の検証済みパッケージとの数値比較によりパラメータ推定値の正しさを確認する。
   - **pyfixest**（Python、固定効果推定等）
   - **R の各種パッケージ**（例: fixest, plm, AER, ivreg 等、手法に応じて選定）
 - 各推定手法の実装時に、対応するリファレンス実装との比較テストをセットで用意する。
 
-## 7. CI/CD
+## 8. バージョニング規則
+
+SemVer（`X.Y.Z`）に準拠する。
+
+- **Z**: バグ修正・パフォーマンス改善
+- **Y**: 機能追加
+- **X（メジャー）**: 後方互換性のない破壊的変更
+- 例外: `0.x.x` のプレリリース期間中は、`Y` の変更でも破壊的変更を許容する。
+
+## 9. CI/CD
 
 - GitHub Actions を使用する。
 - パッケージバージョン管理を行う。
 - テストを自動実行し、デグレ（既存機能の劣化）を防止する。
 - マルチプラットフォーム（Linux / macOS / Windows）向けの wheel ビルド・配布パイプラインを構築する（maturin想定）。
+- mkdocs ドキュメントの GitHub Pages への自動デプロイを含む。
 
-## 8. 公開方針
+## 10. 公開方針
 
 - ライセンス: MIT License
 - 公開先: PyPI
 
-## 9. 今後の検討事項（未確定）
+## 11. リポジトリ構成・crate/module分割案（一時的）
 
-- 対応Pythonバージョンの範囲（例: 3.9以上など）
-- ドキュメント整備の方法（Sphinx / mkdocs 等）とホスティング先
-- リポジトリ構成・crate/moduleの分割案
-- Phase 1（OLS等）着手時の具体的なタスク分解
-- バージョニング規則（SemVer等）とリリースフロー
-- IO手法（動学ゲーム等）で必要になる数値最適化ライブラリの選定
+maturin の mixed Rust/Python レイアウトをベースに、**推定ロジック本体（core）と PyO3バインディング層を分離**する構成を推奨する。
+
+```
+econometricsmodels/
+├── Cargo.toml                 # workspaceルート
+├── crates/
+│   ├── core/                  # 純粋Rustの推定ロジック（PyO3非依存、Arrow直接操作）
+│   │   ├── src/
+│   │   │   ├── ols.rs
+│   │   │   ├── wls.rs
+│   │   │   ├── ...            # 手法ごとにmodule分割（Phase単位でディレクトリ化も可）
+│   │   │   └── lib.rs
+│   │   └── Cargo.toml
+│   └── pybindings/            # PyO3バインディング層（coreを呼び出す薄い層）
+│       ├── src/
+│       │   └── lib.rs
+│       └── Cargo.toml
+├── python/
+│   └── econometricsmodels/
+│       ├── __init__.py
+│       └── *.pyi              # 型スタブ
+├── tests/
+│   ├── rust/                  # cargo testによるcore単体テスト
+│   └── python/                 # pyfixest / R比較テスト
+├── docs/                      # mkdocs
+│   └── mkdocs.yml
+├── .github/workflows/
+│   ├── ci.yml                  # test + lint
+│   ├── release.yml             # maturin build & PyPI publish
+│   └── docs.yml                 # mkdocs -> GitHub Pages
+├── pyproject.toml
+└── README.md
+```
+
+**理由**:
+
+- core と pybindings を分けることで、推定ロジックを `cargo test` で高速に単体テストでき、PyO3依存を切り離せる。
+- 手法追加時は core 配下に module を足すだけで済み、フェーズ単位の拡張がしやすい。
+- Rust側ロジックを将来的に他言語バインディング（例: WASM等）へ展開する余地も残る。
+
+## 12. 今後の検討事項（未確定）
+
+- IO手法（動学ゲーム等）で必要になる数値最適化ライブラリの選定（後日、argmin, ipopt-rs等を比較検討）
+- Phase 1（OLS等）の詳細タスク分解（本方針書のリポジトリ構成案をもとに次段階で着手）

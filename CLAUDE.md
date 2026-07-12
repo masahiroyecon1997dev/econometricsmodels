@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 このファイルは、Claude Code がこのリポジトリで作業する際に毎回参照する前提知識です。
-詳細な実装ルール（言語別コーディング規約の細則等）や定型作業は今後 `.claude/rules/` `.claude/commands/` `.claude/skills/` に分離予定ですが、現時点ではこのファイルに集約しています。
+言語別の詳細なコーディング規約・テスト方針は `.claude/rules/`（パス指定で自動ロード）に、定型作業は `.claude/commands/` に、コードレビューは `.claude/agents/` のサブエージェントに分離している。重複記載を避けるため、このファイルには全体像・非交渉事項・各詳細ファイルへの参照のみを置く。
 
 ## 1. プロジェクト概要
 
@@ -90,23 +90,11 @@ econometricsmodels/
 
 ## 6. コーディング規約
 
-### Rust（engine / engine_pybind）
-- エラーハンドリングは **thiserror** で独自エラー型を定義し、`engine_pybind`（PyO3境界）で `PyErr` に変換する。`unwrap`/`expect`はプロトタイプ段階を除き避ける。
-- clippy / fmt はCI（`ci_engine.yml`）で強制。警告ゼロを基準とする（具体的なlintレベルは雛形作成時に`clippy.toml`等で確定）。
-
-### Python（python_package）
-- **型ヒント必須**。
-- **docstringはGoogleスタイルで必須**（全public関数・クラス）。
-- Ruffの **line-length は79（PEP8標準）**。ルールセットの詳細は雛形作成時に`pyproject.toml`で確定。
+詳細は `.claude/rules/rust-style.md`（engine/engine_pybind配下で自動ロード）、`.claude/rules/python-style.md`（python_package配下で自動ロード）を参照。要点: Rustはthiserror+PyErr変換・unwrap/expect回避、Pythonは型ヒント＋Googleスタイルdocstring必須・Ruff line-length=79。
 
 ## 7. テスト方針
 
-- 既存の検証済みパッケージとの数値比較でパラメータ推定値の正しさを検証する。
-  - **pyfixest**（Python、固定効果推定等）
-  - **Rの各種パッケージ**（fixest, plm, AER, ivreg等、手法に応じて選定）
-- 許容誤差は **相対誤差 1e-8程度（厳密）を基本方針** とする。ただし、計算方法自体が実装間で異なる手法（例: FEにおけるHausman検定など）は、手法ごとに個別の許容誤差・比較方法を例外として設定する。
-- テストは `engine_tests`（cargo test、純粋ロジック）と `api_tests`（pytest、リファレンス実装との答え合わせ）に分離。
-- 各推定手法の実装時に、対応するリファレンス実装との比較テストを必ずセットで用意する。
+詳細は `.claude/rules/testing-policy.md`（tests配下で自動ロード）を参照。要点: pyfixest/Rとの数値比較で検証、許容誤差は相対誤差1e-8を基本（手法により例外あり）、engine_tests/api_testsに分離。
 
 ## 8. ビルド・テスト・Lintコマンド（想定。リポジトリ雛形作成後に確定）
 

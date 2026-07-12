@@ -131,8 +131,10 @@ ruff format --check .
 
 ## 11. 開発環境
 
-- `.devcontainer/`でRust + Python 3.12環境を統一する予定。
-- 中身は未確定（詳細は13章参照）。
+- `.devcontainer/`（`devcontainer.json` / `Dockerfile` / `docker-compose.yml`）で開発環境を統一。
+- ベースイメージ: `python:3.14-slim-bookworm`。Rust（stable、clippy/rustfmt/llvm-tools）、uv、R（fixest/plm/ivreg/jsonlite、`benchmark/`のベンチマーク生成用）を導入済み。
+- Claude Code CLIはdevcontainer.jsonの`ghcr.io/anthropics/devcontainer-features/claude-code`featureで導入（Dockerfile側での重複インストールはしない）。`gh`（GitHub CLI）は`ghcr.io/devcontainers/features/github-cli`featureで導入（`/cicd`等のコマンドが前提とするため）。
+- 詳細は`.devcontainer/`配下の各ファイルを参照。
 
 ## 12. 対象プラットフォーム・Pythonバージョン
 
@@ -142,10 +144,13 @@ ruff format --check .
 ## 13. 今後の検討事項（未確定）
 
 - IO手法（動学ゲーム等）で必要になる数値最適化ライブラリの選定（argmin, ipopt-rs等を比較検討予定）
-- `.devcontainer`の詳細な中身
+- Rust側の線形代数クレートの選定（nalgebra vs ndarray+システムBLAS/LAPACK等）。Dockerfileの`libopenblas-dev` `liblapack-dev`の要否にも関わる
+- CIでのPythonビルド対象バージョン（3.12〜3.14の複数バージョンをテストするか）
 - Phase 1（OLS等）の詳細タスク分解
 - `estimator-scaffold`スキル（engine/engine_pybind/python_packageの配線パターンのテンプレート化）: 手法によって内部実装が大きく異なるため、OLS実装後に実コードから抽出する形で作成する。今は作らない。
 - `econometrics-notes`スキル（手法ごとの数式・実装ノウハウ資料）: 着手する手法ごとにその都度作成する。今は作らない。
+- Dockerfileの`cmake` `libssl-dev` `git-lfs`が実際に必要か（使用予定のRustクレートが未確定なため保留）
+- Debian bookworm付属のR（4.2.2固定）で`install.packages()`が問題なく通るか。失敗する場合はCRAN公式aptリポジトリの追加を検討
 
 ## 14. 関連ファイル
 

@@ -14,6 +14,7 @@ RUN apt update && apt install -y --no-install-recommends \
     libssl-dev \
     libopenblas-dev \
     liblapack-dev \
+    gfortran \
     git \
     git-lfs \
     openssh-client \
@@ -46,12 +47,23 @@ RUN mkdir -p /home/${USERNAME}/.ssh \
     && chmod 600 /home/${USERNAME}/.ssh/known_hosts
 
 # -------------------------
-# Node.js (Node 24系) インストール & Claude Codeインストール
+# Node.js (Node 24系) インストール
 # -------------------------
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt install -y nodejs \
-    && npm install -g @anthropic-ai/claude-code \
     && rm -rf /var/lib/apt/lists/*
+
+# -------------------------
+# R インストール（ベンチマーク用リファレンス実装: fixest, plm, ivreg等）
+# ※ Debian bookwormのr-baseは4.2.2で固定。CRAN最新パッケージがより新しいRを
+#    要求してinstall.packagesが失敗する場合は、CRAN公式aptリポジトリの追加を検討する。
+# -------------------------
+RUN apt update && apt install -y --no-install-recommends \
+    r-base \
+    r-base-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN Rscript -e 'install.packages(c("fixest", "plm", "ivreg", "jsonlite"), repos = "https://cloud.r-project.org")'
 
 # 以降は一般ユーザーで実行
 USER ${USERNAME}

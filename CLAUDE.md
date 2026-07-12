@@ -151,4 +151,6 @@ ruff format --check .
 
 ## 14. 関連ファイル
 
-- 方針書: `docs/planning/plan.md`（本リポジトリの正式な方針ドキュメント。より詳細な経緯・議論は別途引き継ぎメモを参照）
+- 方針書: `docs/planning/plan.md`（本リポジトリの正式な方針ドキュメント）
+- 引き継ぎメモ: `docs/planning/handover-1.md`（方針決定までの経緯）、`docs/planning/handover-2.md`（Claude Code設定〜Phase1 OLSのIssue化までの経緯）
+- Phase1 OLSのタスク: `docs/planning/create_phase1_ols_issues.sh` で作成したGitHub Issue群を参照

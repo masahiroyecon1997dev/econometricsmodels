@@ -1,9 +1,20 @@
 [workspace]
-members = ["crates/ols", "python"]
-resolver = "2"
+resolver = "3"
+members = [
+    "engine",
+    "engine_pybind",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
 
 [workspace.dependencies]
-ndarray = "0.16"
-thiserror = "2"
-nalgebra = "0.33"
-statrs = "0.17"
+# 各crateからは `{ workspace = true }` で参照する。
+thiserror = "2.0.18"
+# faer: rust-style.md の方針により明示的にバージョン固定（APIが変わりうるため）。
+# 実際に engine の [dependencies] へ追加するのは別issue（ENGINE_DEPS: engineクレートへの依存追加）で行う。
+# ここでは workspace 単位でバージョンだけ先に固定しておく。
+faer = "=0.24.4"

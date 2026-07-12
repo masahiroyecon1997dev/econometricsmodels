@@ -1,31 +1,26 @@
 [build-system]
-requires = ["maturin>=1.0,<2.0"]
+requires = ["maturin>=1.14,<2.0"]
 build-backend = "maturin"
 
 [project]
 name = "econometricsmodels"
 version = "0.1.0"
-requires-python = ">=3.14"
-dependencies = ["polars==0.40", "numpy==1.24"]
-
-[dependency-groups]
-dev = [
-    "pytest==9.1.1",
-    "pytest-cov==7.1.0",
-    "statsmodels==0.14.6",
+description = "統計・計量経済学の分析手法を提供するPython API"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    "polars>=1.0",
+]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "License :: OSI Approved :: MIT License",
 ]
 
 [tool.maturin]
-manifest-path = "python/Cargo.toml"
-python-source = "python_src"
+manifest-path = "engine_pybind/Cargo.toml"
 module-name = "econometricsmodels._lib"
+python-source = "python_package"
 features = ["pyo3/extension-module"]
-
-[tool.ruff]
-target-version = "py311"
-line-length = 88
-
-[tool.ruff.lint]
-select = ["E", "F", "I"]
-
-

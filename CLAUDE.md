@@ -37,7 +37,7 @@ econometricsmodels/
 ├── pyproject.toml              # maturinの設定（engine_pybindをビルド対象にする）
 ├── .claudeignore
 │
-├── .devcontainer/               # Rust + Python 3.12 環境（中身は未確定、TBD）
+├── .devcontainer/               # Rust + Python 3.14 環境（中身は未確定、TBD）
 │   ├── devcontainer.json
 │   └── Dockerfile
 │

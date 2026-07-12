@@ -82,6 +82,8 @@ econometricsmodels/
 
 **現在のステータス: 全フェーズ未着手。次はリポジトリ雛形の作成（Phase 1のタスク分解の詳細は13章参照）。**
 
+**直近の実装順序（Phase横断で決定済み）**: OLS → WLS → IV → Probit / Logit。Phaseのグルーピング（上記1〜7）は分類上のものであり、実際の着手順序はこの直近の並びを優先する。
+
 ## 5. Git運用
 
 - **コミットメッセージ**: Conventional Commits（`feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `ci:` 等）
@@ -139,6 +141,8 @@ ruff format --check .
 - IO手法（動学ゲーム等）で必要になる数値最適化ライブラリの選定（argmin, ipopt-rs等を比較検討予定）
 - `.devcontainer`の詳細な中身
 - Phase 1（OLS等）の詳細タスク分解
+- `estimator-scaffold`スキル（engine/engine_pybind/python_packageの配線パターンのテンプレート化）: 手法によって内部実装が大きく異なるため、OLS実装後に実コードから抽出する形で作成する。今は作らない。
+- `econometrics-notes`スキル（手法ごとの数式・実装ノウハウ資料）: 着手する手法ごとにその都度作成する。今は作らない。
 
 ## 14. 関連ファイル
 

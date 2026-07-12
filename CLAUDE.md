@@ -140,12 +140,11 @@ ruff format --check .
 ## 12. 対象プラットフォーム・Pythonバージョン
 
 - OS: Linux（manylinux）, macOS（Apple Silicon / Intel）, Windows
-- Python: **3.12以上**
+- Python: **3.12以上**。CIでのビルド・テスト対象は **3.12 / 3.13 / 3.14** の3バージョン。開発環境（devcontainer）は3.14を使用。
 
 ## 13. 今後の検討事項（未確定）
 
 - IO手法（動学ゲーム等）で必要になる数値最適化ライブラリの選定（argmin, ipopt-rs等を比較検討予定。線形代数はfaerで決定済み、これは別途MLE等の数値最適化用）
-- CIでのPythonビルド対象バージョン（3.12〜3.14の複数バージョンをテストするか）
 - Phase 1（OLS等）の詳細タスク分解
 - `estimator-scaffold`スキル（engine/engine_pybind/python_packageの配線パターンのテンプレート化）: 手法によって内部実装が大きく異なるため、OLS実装後に実コードから抽出する形で作成する。今は作らない。
 - `econometrics-notes`スキル（手法ごとの数式・実装ノウハウ資料）: 着手する手法ごとにその都度作成する。今は作らない。

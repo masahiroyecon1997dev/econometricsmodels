@@ -70,6 +70,15 @@ USER ${USERNAME}
 WORKDIR /home/${USERNAME}
 
 # -------------------------
+# vscodeユーザーが書き込めるRの個人ライブラリを用意
+# (/usr/local/lib/R/site-libraryはroot所有のため、VS CodeのR拡張機能が
+#  languageserver等を自動インストールしようとすると権限エラーになる。
+#  R_LIBS_USERを設定しておくと、install.packages()は自動的にこちらを使う。)
+# -------------------------
+ENV R_LIBS_USER=/home/${USERNAME}/R/library
+RUN mkdir -p ${R_LIBS_USER}
+
+# -------------------------
 # Rust (stable) インストール
 # -------------------------
 ENV RUSTUP_HOME=/home/${USERNAME}/.rustup

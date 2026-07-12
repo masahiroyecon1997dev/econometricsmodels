@@ -13,6 +13,12 @@ paths:
 - `engine`: 純粋Rustロジック。PyO3に依存しない。
 - `engine_pybind`: PyO3の薄いバインディング層。`#[pymodule]`を定義し`engine`の関数を呼ぶだけに留める。計算ロジックを`engine_pybind`に書かない。
 
+## 線形代数
+
+- **faer**（pure Rust）を使用する。システムのBLAS/LAPACKには依存しない。`ndarray-linalg`等、システムBLAS/LAPACKを要求するクレートは使わない。
+- Cargo.tomlでfaerのバージョンを明示的に固定する（APIが変わることがあるため）。
+- 設計行列が特異になりうるケース（完全な多重共線性等）は、`col_piv_qr`等のpivotありの分解を使い、数値的に検出・処理する。
+
 ## エラーハンドリング
 
 - 独自エラー型は **thiserror** で定義する。

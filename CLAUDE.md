@@ -11,6 +11,7 @@
 | 目的 | 統計・計量経済学の分析手法を提供するPython API |
 | 用途 | 自作の分析GUIアプリ「economicon」のエンジンとして使用 |
 | 技術スタック | Rust + PyO3（Python拡張） |
+| 線形代数クレート | faer（pure Rust、システムBLAS/LAPACK非依存） |
 | ライセンス | MIT License |
 | 公開先 | PyPI |
 | 開発体制 | 基本一人開発（Claudeと二人三脚）。Git運用の詳細は5章参照 |
@@ -143,14 +144,11 @@ ruff format --check .
 
 ## 13. 今後の検討事項（未確定）
 
-- IO手法（動学ゲーム等）で必要になる数値最適化ライブラリの選定（argmin, ipopt-rs等を比較検討予定）
-- Rust側の線形代数クレートの選定（nalgebra vs ndarray+システムBLAS/LAPACK等）。Dockerfileの`libopenblas-dev` `liblapack-dev`の要否にも関わる
+- IO手法（動学ゲーム等）で必要になる数値最適化ライブラリの選定（argmin, ipopt-rs等を比較検討予定。線形代数はfaerで決定済み、これは別途MLE等の数値最適化用）
 - CIでのPythonビルド対象バージョン（3.12〜3.14の複数バージョンをテストするか）
 - Phase 1（OLS等）の詳細タスク分解
 - `estimator-scaffold`スキル（engine/engine_pybind/python_packageの配線パターンのテンプレート化）: 手法によって内部実装が大きく異なるため、OLS実装後に実コードから抽出する形で作成する。今は作らない。
 - `econometrics-notes`スキル（手法ごとの数式・実装ノウハウ資料）: 着手する手法ごとにその都度作成する。今は作らない。
-- Dockerfileの`cmake` `libssl-dev` `git-lfs`が実際に必要か（使用予定のRustクレートが未確定なため保留）
-- Debian bookworm付属のR（4.2.2固定）で`install.packages()`が問題なく通るか。失敗する場合はCRAN公式aptリポジトリの追加を検討
 
 ## 14. 関連ファイル
 

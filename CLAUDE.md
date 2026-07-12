@@ -55,6 +55,9 @@ econometricsmodels/
 │   ├── engine_tests/             # cargo test（純粋ロジック）
 │   └── api_tests/                 # pytest（pyfixest / R実装との答え合わせ）
 │
+├── benchmark/                     # テスト用データセット生成・リファレンス実装（pyfixest/R）でのベンチマーク値生成スクリプト
+│                                   # tests/とは別ライフサイクル（Rランタイム依存、随時実行するツール）。詳細は.claude/skills/reference-benchmark/
+│
 ├── docs/                          # MkDocs（GitHub Pages公開）
 │   ├── mkdocs.yml
 │   └── planning/                  # plan.md・仕様書（詳細は10章）

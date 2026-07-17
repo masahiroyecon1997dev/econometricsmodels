@@ -6,4 +6,5 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-# faer, thiserror の追加は別issue（ENGINE_DEPS）で行う。
+faer = { workspace = true }
+thiserror = { workspace = true }

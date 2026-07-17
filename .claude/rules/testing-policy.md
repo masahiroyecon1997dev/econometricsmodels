@@ -42,10 +42,10 @@ paths:
 
 ## ベンチマーク値のフィクスチャ化
 
-- リファレンス実装（statsmodels/R）の実行結果は、CIで毎回再計算せず、**JSONファイルとして`tests/api_tests/fixtures/`にコミットし固定する**。
+- リファレンス実装（statsmodels/R）の実行結果は、CIで毎回再計算せず、**JSONファイルとして`tests/api_tests/fixtures/benchmarks/`にコミットし固定する**。ベンチマーク由来のフィクスチャを`fixtures/`直下ではなく`benchmarks/`サブディレクトリに分けているのは、他の目的のフィクスチャ（ベンチマーク比較以外でテストが読み込みたいデータ）と混在させないため。
 - 理由: CIを軽く保つため（Rパッケージのインストールはビルドが重い）。またリファレンス実装側のバージョンアップで数値が変わり、意図せずテストが壊れることを防ぐため。
-- フィクスチャの命名: 手法・シナリオ・cov_type等が分かる形にする（例: `ols.json`に、シナリオ×cov_typeをネストして持たせる。実例は`tests/api_tests/fixtures/ols.json`参照）。
-- **フィクスチャを生成するスクリプトと、生成されたJSON自体は別の場所に置く**。生成スクリプトは`benchmark/fixtures/generate_<手法名>_fixtures.py`（コード、`benchmark/`側で管理）、生成物は`tests/api_tests/fixtures/<手法名>.json`（データ、テスト側で管理）。
+- フィクスチャの命名: 手法・シナリオ・cov_type等が分かる形にする（例: `ols.json`に、シナリオ×cov_typeをネストして持たせる。実例は`tests/api_tests/fixtures/benchmarks/ols.json`参照）。
+- **フィクスチャを生成するスクリプトと、生成されたJSON自体は別の場所に置く**。生成スクリプトは`benchmark/fixtures/generate_<手法名>_fixtures.py`（コード、`benchmark/`側で管理）、生成物は`tests/api_tests/fixtures/benchmarks/<手法名>.json`（データ、テスト側で管理）。
 - 各フィクスチャJSONには`_meta`フィールドを含め、少なくとも以下を記録する。
   - `generated_at`: 生成日時（ISO 8601）
   - リファレンス実装のバージョン（例: `statsmodels_version`）

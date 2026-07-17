@@ -8,7 +8,7 @@
 両者を分けている理由は`.claude/skills/reference-benchmark/SKILL.md`参照。
 
 使用例:
-    python fixtures/generate_ols_fixtures.py --output ../tests/api_tests/fixtures/ols.json
+    python fixtures/generate_ols_fixtures.py --output ../tests/api_tests/fixtures/benchmarks/ols.json
 """
 
 from __future__ import annotations
@@ -108,7 +108,7 @@ def _run_cluster_case(scenario: str) -> dict:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", default="../tests/api_tests/fixtures/ols.json")
+    parser.add_argument("--output", default="../tests/api_tests/fixtures/benchmarks/ols.json")
     args = parser.parse_args()
 
     fixtures = build_fixtures()

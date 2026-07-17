@@ -8,6 +8,24 @@ paths:
 
 このファイルは `engine/` `engine_pybind/` 配下で作業する際に自動的に読み込まれる。CLAUDE.mdの非交渉事項（2章）を前提とした、Rust実装の詳細規約。
 
+## ファイル・ディレクトリ構成（手法が増える前提）
+
+`engine` `engine_pybind`ともに、今後20〜30手法規模に増える前提で以下の構成にする。
+
+- **系統（統計的に近い手法のグループ）＝ディレクトリ**。命名衝突を避け、「この手法はどこにあるか」を一意にする。
+  - `linear/`: OLS, WLS, GLS, 区分回帰
+  - `discrete_choice/`: Logit, Probit, Tobit
+  - `iv/`: 2SLS, GMM
+  - `panel/`: FE, RE
+  - `causal/`: DID, RDD
+  - `io/`: IO構造推定（Nested Logit, Random Coefficient Logit, 単一エージェントモデル, 静学/動学ゲーム等）
+  - `time_series/`: ARCH, GARCH, VAR（Phase7）
+  - 系統名・手法の割り当ては上記を初期案とし、実装時に見直してよい（例: Phase2の"Logit"とPhase6の"Logit"は別系統ディレクトリに属するため衝突しない）
+- **手法＝最初は1ファイル**（例: `linear/ols.rs`）。ファイルが肥大化したら`ols/`ディレクトリに昇格し`mod.rs`+`data.rs`+`options.rs`等に分割する。全手法に最初から複数ファイルを強制しない。
+- **系統内で共有するロジック**は`<系統>/common.rs`に置く。
+- **全手法で共有するロジック**（DataFrameからの列抽出等、統計手法に依存しない処理）は系統ディレクトリの外、クレート直下（例: `column_extraction.rs`）に置く。
+- `engine`と`engine_pybind`で同じ系統名・ディレクトリ構成を揃える（`engine/src/linear/ols.rs` ⇔ `engine_pybind/src/linear/ols.rs`のように対応させる）。
+
 ## 責務分離
 
 - `engine`: 純粋Rustロジック。PyO3に依存しない。
@@ -32,6 +50,7 @@ paths:
 - `engine`はpolars/PyO3を一切知らない設計を維持する（責務分離の原則通り）。`engine_pybind`が polars DataFrame → `faer::Mat<f64>` の変換を担う。
 - 変換時、列ごとに`Vec<f64>`へ抽出してから`faer::Mat`に詰め直す（2回のコピーが発生する）。より少ないコピー（polarsの`&[f64]`を直接借用してengine側で詰める等）も技術的には可能だが、`engine`の関数シグネチャにライフタイムが入り込み「pure Rustロジック、polars非依存」の独立性が損なわれるため、**採用しない**。このプロジェクトの想定データ規模では、この2回のコピーのコストはQR分解本体（O(n×k²)）に対して無視できるレベルであるため。
 - 欠損値（null）は`.rechunk()` + `null_count()`チェックで検出し、常にエラーとする（`testing-policy.md`・`ols-implementation-notes.md`の欠損値方針を参照）。サンプルの自動除外は行わない。
+- クラスター変数等の「グループの同一性」だけが意味を持つ列は、整数決め打ちにせず文字列として扱う（州名・企業ID等、実務では文字列/カテゴリカルの方が多いため）。
 
 ## エラーハンドリング
 

@@ -30,6 +30,8 @@
 | `MissingClusterColumn` | `ValidationError` |
 | `InvalidConfidenceLevel`（新規） | `ValidationError` |
 | `InsufficientClusters`（新規） | `ValidationError` |
+| `InvalidHacLags`（新規、Issue #3） | `ValidationError` |
+| `InvalidTimeColumn`（新規、Issue #3、`time_col`が数値キャスト不可の場合） | `ValidationError` |
 | `SingularMatrix` | `ComputationError` |
 | `ComputationError`（分布計算等の失敗） | `ComputationError` |
 
@@ -39,6 +41,8 @@
 
 - **`InvalidConfidenceLevel`**: `confidence_level`が`(0, 1)`の範囲外だった場合
 - **`InsufficientClusters { g: usize }`**: クラスター数`g < 2`の場合。草案コードでは未検証で、実際に0除算からのNaN伝播でパニックすることを確認済み（`docs/planning/draft-reference/ols-draft-consolidated.md`参照）。`new()`の時点で検証し、`fit()`まで到達させない
+- **`InvalidHacLags { hac_lags: i64, n: usize }`**（Issue #3）: `hac_lags`が負、または`n`以上の場合
+- **`InvalidTimeColumn`**（Issue #3）: `time_col`に指定した列がf64にキャストできない場合（`extract_f64_column`と同じ検証パターンを流用できる）
 
 ## 実装時に見落としやすい点（要注意）
 

@@ -23,7 +23,8 @@
 - **データ入力はpolarsのみ**。pandas等の他形式は受け付けない。
 - **Arrowのゼロコピー**でRust側にデータを渡す。コピーによるメモリ・速度のロスを避ける。
 - **formula文字列パース方式（`y ~ x1 + x2`）は不採用**。
-  - 変数は **List渡し**（例: `y=["y_col"], x=["x1", "x2"]`）
+  - 被説明変数`y`は **単一の列名（`str`）渡し**、説明変数`x`は **List渡し**（例: `y="y_col", x=["x1", "x2"]`）
+    - `y`をList型にしない理由: Phase1〜6（VAR等の一部時系列手法を除く）でyは常に1変数であり、`list[str]`だと「長さ1であること」を全推定関数が実行時検証する必要が生じる。将来的に真に多変量なyが必要な手法（VAR等）が出てきた場合は、その手法だけ`y: list[str]`にする。
   - 推定オプションは **オブジェクト（設定用クラス／構造体）渡し**
   - 理由: スクリプト・プログラムからの呼び出しやすさ（型補完、バリデーション、動的組み立て）を優先するため。
 - 計算コアはRustで実装し高速化。Python側はPyO3バインディングとして薄く保つ。
@@ -36,9 +37,8 @@
 econometricsmodels/
 ├── Cargo.toml                  # Workspaceルート
 ├── pyproject.toml              # maturinの設定（engine_pybindをビルド対象にする）
-├── .claudeignore
 │
-├── .devcontainer/               # Rust + Python 3.14 環境（中身は未確定、TBD）
+├── .devcontainer/               # Rust + Python 3.12 環境（中身は未確定、TBD）
 │   ├── devcontainer.json
 │   └── Dockerfile
 │
@@ -135,7 +135,8 @@ ruff format --check .
 - `.devcontainer/`（`devcontainer.json` / `Dockerfile` / `docker-compose.yml`）で開発環境を統一。
 - ベースイメージ: `python:3.14-slim-bookworm`。Rust（stable、clippy/rustfmt/llvm-tools）、uv、R（fixest/plm/ivreg/jsonlite、`benchmark/`のベンチマーク生成用）を導入済み。
 - Claude Code CLIはdevcontainer.jsonの`ghcr.io/anthropics/devcontainer-features/claude-code`featureで導入（Dockerfile側での重複インストールはしない）。`gh`（GitHub CLI）は`ghcr.io/devcontainers/features/github-cli`featureで導入（`/cicd`等のコマンドが前提とするため）。
-- 詳細は`.devcontainer/`配下の各ファイルを参照。
+- **トークン消費を抑えるための除外設定**: `.claude/settings.json`の`permissions.deny`/`ask`で、lockファイル・`target/`・`.venv/`・ベンチマークのフィクスチャJSON・GitHub Copilot用設定（`.github/agents/` `.github/instructions/`、メンテナンスが最新に追いついていない可能性があるため）等を除外している。
+- 詳細は`.claude/settings.json`を参照。
 
 ## 12. 対象プラットフォーム・Pythonバージョン
 

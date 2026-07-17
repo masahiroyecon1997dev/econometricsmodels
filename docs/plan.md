@@ -93,7 +93,6 @@ econometricsmodels/
 ├── Cargo.toml                  # Workspaceルート
 ├── pyproject.toml              # maturinの設定（engine_pybindをビルド対象にする）
 ├── README.md
-├── .claudeignore                # AIのトークン節約用（target/ や .venv/ を指定）
 │
 ├── .devcontainer/                # 開発コンテナ定義（Rust + Python 3.12 環境を統一）
 │   ├── devcontainer.json

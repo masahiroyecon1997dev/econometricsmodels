@@ -1,0 +1,93 @@
+//! polars DataFrameから検証済みの列を取り出す、全手法共通のユーティリティ。
+//!
+//! 【方針】欠損値（null）は常にエラーとする（自動除外はしない）。
+//! 理由: `docs/planning/specs/ols-implementation-notes.md`
+//! 「欠損値の扱い」を参照（GUIアプリの初心者ユーザーに、暗黙のサンプル除外という
+//! 恣意的な判断をさせないため）。この方針はOLSに限らず全手法で共通。
+//!
+//! 【polarsのバージョン依存に関する注意】
+//! この環境ではpolarsを実際にビルドして検証できていない。`DataFrame::column`の
+//! 戻り値型（`&Series`か`&Column`か）等、pinするpolarsのバージョンに応じて
+//! 微調整が必要な可能性がある。
+
+use polars::prelude::*;
+use pyo3::prelude::*;
+
+use crate::errors::ValidationError;
+
+/// `df`から`name`列をf64のVecとして取り出す。
+///
+/// # Errors（すべて`ValidationError`）
+/// - 列が存在しない
+/// - 数値型にキャストできない
+/// - 欠損値を含む
+pub fn extract_f64_column(df: &DataFrame, name: &str) -> PyResult<Vec<f64>> {
+    let series = df
+        .column(name)
+        .map_err(|_| ValidationError::new_err(format!("列'{name}'がデータに存在しません")))?;
+
+    let series = series.cast(&DataType::Float64).map_err(|e| {
+        ValidationError::new_err(format!("列'{name}'を数値型(f64)に変換できません: {e}"))
+    })?;
+
+    let ca = series
+        .f64()
+        .map_err(|e| ValidationError::new_err(format!("列'{name}'の変換に失敗しました: {e}")))?;
+
+    if ca.null_count() > 0 {
+        return Err(ValidationError::new_err(format!(
+            "列'{name}'に欠損値が{}件含まれています。欠損値は自動では扱えないため、\
+             事前に補完・除外等の処理をユーザー側で行ってください",
+            ca.null_count()
+        )));
+    }
+
+    // rechunk: 複数チャンクに分かれている場合に単一チャンクへ統合する。
+    // 既に単一チャンクの場合は実質コピーが発生しない（安価な操作）。
+    let ca = ca.rechunk();
+
+    match ca.cont_slice() {
+        Ok(slice) => Ok(slice.to_vec()),
+        Err(_) => {
+            // 通常はここに来ないはずだが、フォールバックとしてイテレータ経由で構築
+            Ok(ca
+                .into_iter()
+                .map(|v| v.expect("null_countチェック済み"))
+                .collect())
+        }
+    }
+}
+
+/// `df`から`name`列を、クラスターのグループキーとして文字列のVecで取り出す。
+///
+/// クラスター変数は整数IDとは限らない（州名・産業コード・企業ID等の文字列/
+/// カテゴリカル変数であることが多い）ため、値そのものではなく「グループの
+/// 同一性が判定できればよい」という前提でUtf8として扱う。
+///
+/// # Errors（すべて`ValidationError`）
+/// - 列が存在しない
+/// - 欠損値を含む
+pub fn extract_group_key_column(df: &DataFrame, name: &str) -> PyResult<Vec<String>> {
+    let series = df
+        .column(name)
+        .map_err(|_| ValidationError::new_err(format!("列'{name}'がデータに存在しません")))?;
+
+    if series.null_count() > 0 {
+        return Err(ValidationError::new_err(format!(
+            "列'{name}'に欠損値が含まれています"
+        )));
+    }
+
+    // Utf8にキャストして文字列表現で比較する（元の型が数値・カテゴリカルでもよい）。
+    let series = series.cast(&DataType::String).map_err(|e| {
+        ValidationError::new_err(format!("列'{name}'をグループキーとして解釈できません: {e}"))
+    })?;
+    let ca = series.str().map_err(|e| {
+        ValidationError::new_err(format!("列'{name}'の変換に失敗しました: {e}"))
+    })?;
+
+    Ok(ca
+        .into_iter()
+        .map(|v| v.expect("null_countチェック済み").to_string())
+        .collect())
+}

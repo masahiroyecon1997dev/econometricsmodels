@@ -8,12 +8,23 @@ use pyo3_polars::PyDataFrame;
 use errors::{ComputationError, ValidationError};
 use linear::ols::{extract_ols_input, OLSOptions};
 
-/// OLS推定のエントリポイント。
+// 【現状のスコープ】(開発メモ、日本語のまま)
+// 「パラメータの受け口」（data/y/x/optionsの検証・faer行列への変換）のみ実装済み。
+// 実際の推定計算（正規方程式ソルバー・標準誤差計算等）は別issueで実装するため、
+// ここでは受け取った内容をそのままエラーにしている。
+//
+/// Entry point for OLS estimation.
 ///
-/// 【現状のスコープ】
-/// 「パラメータの受け口」（data/y/x/optionsの検証・faer行列への変換）のみ実装済み。
-/// 実際の推定計算（正規方程式ソルバー・標準誤差計算等）は別issueで実装するため、
-/// ここでは受け取った内容をそのまま`todo!`にしている。
+/// Parameters
+/// ----------
+/// data : polars.DataFrame
+///     The input data. Must contain the `y`, `x`, and (if specified) cluster columns.
+/// y : str
+///     Column name of the dependent variable.
+/// x : list[str]
+///     Column names of the independent variables.
+/// options : OLSOptions
+///     Estimation options.
 #[pyfunction]
 fn fit_ols(
     data: PyDataFrame,
@@ -28,7 +39,7 @@ fn fit_ols(
     //   engine側の計算に渡す。engine側の型が確定していないため、現時点ではここで打ち切る。
     let _ = input;
     Err(ComputationError::new_err(
-        "engine側の計算ロジックは未実装です（パラメータの受け口のみ実装済み）",
+        "engine computation logic is not yet implemented (only the parameter-receiving layer is implemented)",
     ))
 }
 

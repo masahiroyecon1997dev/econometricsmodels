@@ -24,20 +24,20 @@ use crate::errors::ValidationError;
 pub fn extract_f64_column(df: &DataFrame, name: &str) -> PyResult<Vec<f64>> {
     let series = df
         .column(name)
-        .map_err(|_| ValidationError::new_err(format!("列'{name}'がデータに存在しません")))?;
+        .map_err(|_| ValidationError::new_err(format!("column '{name}' does not exist in the data")))?;
 
     let series = series.cast(&DataType::Float64).map_err(|e| {
-        ValidationError::new_err(format!("列'{name}'を数値型(f64)に変換できません: {e}"))
+        ValidationError::new_err(format!("column '{name}' could not be cast to a numeric type (f64): {e}"))
     })?;
 
     let ca = series
         .f64()
-        .map_err(|e| ValidationError::new_err(format!("列'{name}'の変換に失敗しました: {e}")))?;
+        .map_err(|e| ValidationError::new_err(format!("failed to convert column '{name}': {e}")))?;
 
     if ca.null_count() > 0 {
         return Err(ValidationError::new_err(format!(
-            "列'{name}'に欠損値が{}件含まれています。欠損値は自動では扱えないため、\
-             事前に補完・除外等の処理をユーザー側で行ってください",
+            "column '{name}' contains {} missing value(s). Missing values are not handled \
+             automatically; please impute or remove them before calling this function",
             ca.null_count()
         )));
     }
@@ -70,20 +70,20 @@ pub fn extract_f64_column(df: &DataFrame, name: &str) -> PyResult<Vec<f64>> {
 pub fn extract_group_key_column(df: &DataFrame, name: &str) -> PyResult<Vec<String>> {
     let series = df
         .column(name)
-        .map_err(|_| ValidationError::new_err(format!("列'{name}'がデータに存在しません")))?;
+        .map_err(|_| ValidationError::new_err(format!("column '{name}' does not exist in the data")))?;
 
     if series.null_count() > 0 {
         return Err(ValidationError::new_err(format!(
-            "列'{name}'に欠損値が含まれています"
+            "column '{name}' contains missing values"
         )));
     }
 
     // Utf8にキャストして文字列表現で比較する（元の型が数値・カテゴリカルでもよい）。
     let series = series.cast(&DataType::String).map_err(|e| {
-        ValidationError::new_err(format!("列'{name}'をグループキーとして解釈できません: {e}"))
+        ValidationError::new_err(format!("column '{name}' could not be interpreted as a group key: {e}"))
     })?;
     let ca = series.str().map_err(|e| {
-        ValidationError::new_err(format!("列'{name}'の変換に失敗しました: {e}"))
+        ValidationError::new_err(format!("failed to convert column '{name}': {e}"))
     })?;
 
     Ok(ca

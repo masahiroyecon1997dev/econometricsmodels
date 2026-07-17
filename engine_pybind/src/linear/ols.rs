@@ -7,6 +7,10 @@
 //! 本ファイル末尾の`OlsFitInput`は、そこに渡すための最小限の橋渡し用の型で、
 //! `engine`のデータ構造定義issue（「デザイン行列・目的変数のデータ構造定義」）で
 //! 正式に確定するまでの暫定案。
+//!
+//! 【言語方針】`.claude/rules/rust-style.md`「言語方針」参照。
+//! 公開API（`OLSOptions`）のdocコメントと、`ValidationError`のメッセージ文字列は英語。
+//! それ以外（このファイルの説明・非公開関数のdocコメント等）は日本語のまま。
 
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
@@ -15,32 +19,35 @@ use pyo3_polars::PyDataFrame;
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
 use crate::errors::ValidationError;
 
-/// OLSの推定オプション。
+/// Estimation options for OLS.
 ///
-/// フィールドの意味・デフォルト値の根拠は`docs/planning/specs/ols-implementation-notes.md`、
-/// および対応するGitHub Issue（OLS: API・オプション設計 / OLS: 標準誤差の技術仕様確定）を参照。
+/// See `docs/planning/specs/ols-implementation-notes.md` and the corresponding GitHub
+/// issues ("OLS: API and options design" / "OLS: standard error specification") for the
+/// rationale behind each field's meaning and default value.
 #[pyclass]
 #[derive(Debug, Clone)]
 pub struct OLSOptions {
-    /// 標準誤差の種別。"classical" | "hc0" | "hc1" | "hc2" | "hc3" | "cluster"。
-    /// 大文字小文字は区別しない。HACは別途対応予定（未実装）。
+    /// Standard error type: one of "classical", "hc0", "hc1", "hc2", "hc3", "cluster".
+    /// Case-insensitive. HAC support is planned separately and not yet implemented.
     #[pyo3(get, set)]
     pub cov_type: String,
 
-    /// 定数項（切片）をengine側で自動追加するか。
-    /// trueの場合、設計行列の先頭に全要素1の列を追加する。
-    /// ユーザーが`x`に自分で定数列を含めた状態でtrueにすると、
-    /// 多重共線性となり`ComputationError`（特異行列）になる。
+    /// Whether the engine should automatically add an intercept column.
+    /// When true, a column of all 1.0 is prepended to the design matrix.
+    /// If the user's `x` already contains a constant column while this is true,
+    /// the resulting perfect collinearity raises `ComputationError` (singular matrix).
     #[pyo3(get, set)]
     pub include_intercept: bool,
 
-    /// 信頼区間の信頼水準（0, 1)の範囲。デフォルト0.95（95%信頼区間）。
-    /// 「alpha」ではなくこちらの名前を使う（0.05側との混同を避けるため）。
+    /// Confidence level for confidence intervals, in the range (0, 1).
+    /// Defaults to 0.95 (a 95% confidence interval). Named `confidence_level` rather
+    /// than `alpha` to avoid confusion with the significance level (the 0.05 side).
     #[pyo3(get, set)]
     pub confidence_level: f64,
 
-    /// cov_type="cluster"のときに使うクラスター列名。`data`内の列名を指定する
-    /// （別配列としては渡さない）。cov_type≠"cluster"のときは無視される。
+    /// Column name to use as the cluster group key when `cov_type="cluster"`.
+    /// Refers to a column in `data` rather than being passed as a separate array.
+    /// Ignored when `cov_type` is not "cluster".
     #[pyo3(get, set)]
     pub cluster_col: Option<String>,
 }
@@ -99,7 +106,7 @@ impl TryFrom<&str> for CovType {
             "hc3" => Ok(CovType::Hc3),
             "cluster" => Ok(CovType::Cluster),
             other => Err(format!(
-                "未知のcov_type: '{other}'。'classical', 'hc0'〜'hc3', 'cluster'のいずれかを指定してください"
+                "unknown cov_type: '{other}'. Expected one of 'classical', 'hc0' through 'hc3', or 'cluster'"
             )),
         }
     }
@@ -156,25 +163,25 @@ pub fn extract_ols_input(
 
     if !(options.confidence_level > 0.0 && options.confidence_level < 1.0) {
         return Err(ValidationError::new_err(format!(
-            "confidence_levelは(0, 1)の範囲で指定してください: {}",
+            "confidence_level must be in the range (0, 1): {}",
             options.confidence_level
         )));
     }
 
     if cov_type == CovType::Cluster && options.cluster_col.is_none() {
         return Err(ValidationError::new_err(
-            "cov_type='cluster'を指定する場合、options.cluster_colの指定が必要です",
+            "options.cluster_col must be set when cov_type='cluster'",
         ));
     }
 
     if x.is_empty() {
-        return Err(ValidationError::new_err("xに最低1つは列名を指定してください"));
+        return Err(ValidationError::new_err("x must contain at least one column name"));
     }
 
     // ── y/xの重複チェック（完全な多重共線性を早期に、分かりやすいエラーで防ぐ）──
     if x.contains(&y) {
         return Err(ValidationError::new_err(format!(
-            "yに指定した列'{y}'がxにも含まれています"
+            "the column '{y}' specified as y is also included in x"
         )));
     }
     {
@@ -182,15 +189,15 @@ pub fn extract_ols_input(
         for name in &x {
             if !seen.insert(name) {
                 return Err(ValidationError::new_err(format!(
-                    "xに列'{name}'が重複して指定されています"
+                    "column '{name}' is specified more than once in x"
                 )));
             }
         }
     }
     if options.include_intercept && x.iter().any(|name| name == "const") {
         return Err(ValidationError::new_err(
-            "include_intercept=trueのとき、xに'const'という列名は使用できません\
-             （自動追加される定数項の名前と衝突するため）",
+            "when include_intercept=true, x cannot contain a column named 'const' \
+             (it collides with the automatically added intercept)",
         ));
     }
 
@@ -204,7 +211,7 @@ pub fn extract_ols_input(
         let s = extract_f64_column(&df, col_name)?;
         if s.len() != n {
             return Err(ValidationError::new_err(format!(
-                "列'{col_name}'の行数がyと一致しません（y: {n}行, {col_name}: {}行）",
+                "row count of column '{col_name}' does not match y (y: {n} rows, {col_name}: {} rows)",
                 s.len()
             )));
         }
@@ -217,7 +224,7 @@ pub fn extract_ols_input(
             let ids = extract_group_key_column(&df, col_name)?;
             if ids.len() != n {
                 return Err(ValidationError::new_err(format!(
-                    "クラスター列'{col_name}'の行数がyと一致しません"
+                    "row count of cluster column '{col_name}' does not match y"
                 )));
             }
             Some(ids)
@@ -237,7 +244,8 @@ pub fn extract_ols_input(
 
     if n <= k {
         return Err(ValidationError::new_err(format!(
-            "観測数不足: n={n} は k={k}（説明変数の数、定数項含む）より大きい必要があります"
+            "insufficient observations: n={n} must be greater than k={k} \
+             (number of independent variables, including the intercept)"
         )));
     }
 

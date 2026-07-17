@@ -1,13 +1,13 @@
 ---
 name: reference-benchmark
-description: statsmodels（主）・Rパッケージ（クロスチェック）・pyfixest（FE系）と、合成データセット/Wooldridgeデータセットを使って推定手法のベンチマーク値を生成し、tests/api_tests/fixtures/にJSONとして固定する。新しい推定手法のテスト作成（/test-new）の一部として使用する。
+description: statsmodels（主）・Rパッケージ（クロスチェック）・pyfixest（FE系）と、合成データセット/Wooldridgeデータセットを使って推定手法のベンチマーク値を生成し、tests/api_tests/fixtures/benchmarks/にJSONとして固定する。新しい推定手法のテスト作成（/test-new）の一部として使用する。
 argument-hint: "[手法名]"
 allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
 ---
 
 # リファレンスベンチマーク生成
 
-対象の推定手法について、リファレンス実装でベンチマーク値を生成し、`tests/api_tests/fixtures/`にJSONとして固定する。詳細な方針は `.claude/rules/testing-policy.md` を参照。
+対象の推定手法について、リファレンス実装でベンチマーク値を生成し、`tests/api_tests/fixtures/benchmarks/`にJSONとして固定する（他の目的のフィクスチャと混在させないためのサブディレクトリ）。詳細な方針は `.claude/rules/testing-policy.md` を参照。
 
 このスキル自体はスクリプトを持たない。実際のコードは `benchmark/` ディレクトリ（リポジトリ直下、`tests/`とは別）に実プロジェクトコードとして置く。理由: これらのスクリプトはテストの実行コードではなく、テストが使うベンチマーク値を生成するツールであり、Rなど別ランタイムに依存するため`tests/`とはライフサイクルが異なる。`.claude/skills/`側に複製すると二重管理になるため、単一ソースとして`benchmark/`のみに置く。
 
@@ -22,7 +22,7 @@ allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
 - `benchmark/generate_synthetic_datasets.py`: 合成データセット生成。`SCENARIOS`に7種類のバリエーション（baseline, small_n, high_variance, heteroskedastic, autocorrelated, moderate_multicollinearity, perfect_multicollinearity）を実装済み。
 - `benchmark/load_wooldridge.py`: Wooldridgeデータセットをpolars DataFrameとして読み込む（`pip install wooldridge`が必要）。
 - `benchmark/run_statsmodels_benchmark.py`: 主リファレンス。classical/HC0-3/cluster/HACすべて動作検証済み（このSKILL更新時に実行確認）。1回呼べば1ケース分の結果を返す汎用ツール。
-- `benchmark/fixtures/generate_<手法名>_fixtures.py`: 対象手法の全シナリオ×全オプションを回し、`tests/api_tests/fixtures/<手法名>.json`へ書き出す専用スクリプト。生成スクリプト（`benchmark/`側）と生成物（`tests/`側）を分けている（`testing-policy.md`「ベンチマーク値のフィクスチャ化」参照）。`generate_ols_fixtures.py`が実装例（動作確認済み）。
+- `benchmark/fixtures/generate_<手法名>_fixtures.py`: 対象手法の全シナリオ×全オプションを回し、`tests/api_tests/fixtures/benchmarks/<手法名>.json`へ書き出す専用スクリプト。生成スクリプト（`benchmark/`側）と生成物（`tests/`側）を分けている（`testing-policy.md`「ベンチマーク値のフィクスチャ化」参照）。`generate_ols_fixtures.py`が実装例（動作確認済み）。
 - `benchmark/run_pyfixest_benchmark.py`: OLS/WLS（`--weights`指定）で動作確認済み。Phase4以降で主に使用。
 - `benchmark/run_r_benchmark.R`: fixest/plm/ivregでベンチマーク値をJSON出力する **未検証の初版**（開発環境で動作確認が必要）。
 
@@ -32,7 +32,7 @@ allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
 2. 新しいcov_typeを初めて使う場合は、Rの`lm`+`sandwich`/`lmtest`（`run_r_benchmark.R`、未検証につき要動作確認）でも同じ組み合わせを計算し、statsmodelsと一致することを確認する。一致しない場合は既定値（自由度補正等）の違いを疑って調査する。
 3. `benchmark/generate_synthetic_datasets.py`の7シナリオで対象手法を実行する。ただし完全な多重共線性シナリオは数値比較の対象外（想定エラーの発生確認のみ、`testing-policy.md`「テストの3系統」参照）。
 4. Wooldridge等の実データセットでも同様に確認する（`load_wooldridge.py`の`SUGGESTED_DATASETS`は候補であり、実際に使うデータセットは手法実装時に個別に確認する）。
-5. 生成した結果を`tests/api_tests/fixtures/`にJSONとして保存する（`_meta`フィールドにリファレンス実装・バージョン・生成コマンドが含まれることを確認する）。
+5. 生成した結果を`tests/api_tests/fixtures/benchmarks/`にJSONとして保存する（`_meta`フィールドにリファレンス実装・バージョン・生成コマンドが含まれることを確認する）。
 6. テストコード自体の作成・実行は `/test-new` `/test-run` に引き継ぐ。このスキルはベンチマーク値の生成・フィクスチャ化に留める。
 
 ## 既知の未確定事項

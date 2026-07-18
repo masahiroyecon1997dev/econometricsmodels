@@ -24,6 +24,13 @@ paths:
 - 変数は **List渡し**、推定オプションは **オブジェクト渡し**。formula文字列パースを実装しない。
 - `engine_pybind` からの呼び出しを薄くラップする。計算ロジックをPython側に持たない。
 
+## 開発ツールの実行方針
+
+- **`uvx`（`uvx <tool> ...`）は使わない**。`uvx`は実行のたびにPyPIから解決するため、バージョンが実行タイミングで変わりうる上、ハッシュ検証がない（サプライチェーン攻撃への露出面が広い）。
+- maturin・statsmodels等、CLIとして実行する開発ツールは`pyproject.toml`の`[dependency-groups] dev`にバージョン固定（`==`）で追加し、`uv lock`でハッシュごと`uv.lock`に記録する。実行は`uv run <tool> ...`（例: `uv run maturin build`）を使う。
+- `[build-system] requires`（PEP 517、`pip install .`時に使われる方）も、範囲指定（`>=1.0,<2.0`等）ではなく`==`で固定する。
+- バージョンを上げる際は、`uv lock --upgrade-package <package>`を使い、事前に差分・changelogを確認してから行う（無警戒に最新へ追従しない）。
+
 ## テスト
 
 - 対応するリファレンス実装（pyfixest/R）との比較テストは `tests/api_tests/`（pytest）に置く。

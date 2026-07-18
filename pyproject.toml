@@ -42,3 +42,6 @@ benchmark = [
     "pyfixest==0.60.0",
     "wooldridge==0.5.0",
 ]
+dev = [
+    "maturin==1.14.1",
+]

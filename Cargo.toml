@@ -22,6 +22,6 @@ thiserror = "=2.0.18"
 faer = "=0.24.4"
 # statrs: t分布のCDF・逆CDF（classical/HC/HAC標準誤差のp値・信頼区間の計算に使用、Issue #9）。
 # pure Rustでsystem BLAS/LAPACK不要、faerの方針と一貫する。
-# default-features = false でnalgebra/rand機能を無効化し、CDF計算に必要な最小限の依存に絞る
-# （engineの[dependencies]へ追加する際もdefault-features = falseを維持すること）。
-statrs = "=0.18.0"
+# default-features = false でnalgebra/rand機能を無効化し、CDF計算に必要な最小限の依存に絞る。
+# （メンバー側の[dependencies]でdefault-featuresを上書きできないため、ここで指定する）
+statrs = { version = "=0.18.0", default-features = false }

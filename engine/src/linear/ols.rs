@@ -7,8 +7,9 @@
 //! ここ（engine側）の責務とする。詳細は`docs/planning/specs/ols-api-design.md`
 //! 「OLSOptions」の`include_intercept`の項を参照。
 
-use faer::Mat;
-use faer::prelude::SolveLstsq;
+use faer::prelude::{Solve, SolveLstsq};
+use faer::{Mat, Side};
+use statrs::distribution::{ContinuousCDF, StudentsT};
 use thiserror::Error;
 
 /// OLSの計算過程で発生しうるエラー。
@@ -165,29 +166,57 @@ impl OlsInput {
     }
 }
 
-/// OLSの推定結果（係数のみ）。標準誤差・適合度統計量等は後続issueで追加する。
+/// OLSの推定結果。適合度統計量（R²・F統計量・AIC/BIC等）は対応するissueがまだ無いため
+/// 未実装（`docs/planning/specs/ols-implementation-notes.md`参照）。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
-/// `fit`でのバリデーション（観測数・特異性）を通過した状態のみを表す。
+/// `fit`でのバリデーション（観測数・特異性・信頼水準）を通過した状態のみを表す。
+///
+/// 【スコープの注意（Issue #9時点）】標準誤差はclassical（等分散前提）のみ実装。
+/// `cov_type`によるHC/cluster/HACへの分岐はIssue #10・#11で追加する
+/// （現時点では常にclassicalとして計算する）。
 #[derive(Debug)]
 pub struct OlsEstimator {
     input: OlsInput,
     /// 係数 (k, 1)。`input.param_names()`と対応する
     params: Mat<f64>,
+    /// 残差 (n, 1) = y - Xβ̂
+    residuals: Mat<f64>,
+    /// 標準誤差 (k, 1)。Issue #9時点ではclassicalのみ
+    std_errors: Mat<f64>,
+    /// t統計量 (k, 1) = params / std_errors
+    t_stats: Mat<f64>,
+    /// 両側p値 (k, 1)。t分布（自由度 n-k）に基づく
+    p_values: Mat<f64>,
+    /// 信頼区間の下限 (k, 1)
+    conf_lower: Mat<f64>,
+    /// 信頼区間の上限 (k, 1)
+    conf_upper: Mat<f64>,
 }
 
 impl OlsEstimator {
-    /// 正規方程式を列ピボットQR分解（`col_piv_qr`）で解き、OLS係数を求める。
+    /// 正規方程式を列ピボットQR分解（`col_piv_qr`）で解き、OLS係数・classical標準誤差・
+    /// t統計量・p値・信頼区間を求める。
     ///
     /// Cholesky（`X'Xβ=X'y`をXᵀXのCholesky分解で解く）ではなく列ピボットQRを採用する理由:
     /// `X'X`を明示的に作ると条件数が2乗になり数値的に不利な上、特異性検出
     /// （`.claude/rules/rust-style.md`「線形代数」が要求する`col_piv_qr`）と係数計算を
-    /// 同じ分解で一度に行える。
+    /// 同じ分解で一度に行える。標準誤差の計算では`X'X`の逆行列が別途必要になるため
+    /// （classical: `σ̂²(X'X)⁻¹`）、そちらは`X'X`のCholesky分解（対称正定値であることは
+    /// 上記の特異性検出で既に確認済み）で個別に求める。
+    ///
+    /// `confidence_level`は`fit`実行時に一度だけ使用し、信頼区間に固定して含める
+    /// （`docs/planning/specs/ols-implementation-notes.md`「信頼区間」参照。実行時可変引数にはしない）。
     ///
     /// # Errors
+    /// - `confidence_level`が`(0, 1)`の範囲外: `OlsError::InvalidConfidenceLevel`
     /// - 観測数`n`が`k`（定数項を含む説明変数の数）以下: `OlsError::InsufficientObservations`
     /// - 設計行列が特異（完全な多重共線性等）: `OlsError::SingularMatrix`
-    pub fn fit(input: OlsInput) -> Result<Self, OlsError> {
+    pub fn fit(input: OlsInput, confidence_level: f64) -> Result<Self, OlsError> {
+        if !(confidence_level > 0.0 && confidence_level < 1.0) {
+            return Err(OlsError::InvalidConfidenceLevel { confidence_level });
+        }
+
         let n = input.nobs();
         let k = input.k();
 
@@ -199,8 +228,45 @@ impl OlsEstimator {
         ensure_full_rank(&qr, k)?;
 
         let params = qr.solve_lstsq(input.y());
+        let residuals = input.y() - input.x() * &params;
 
-        Ok(Self { input, params })
+        let df = n - k;
+        let ssr: f64 = (0..n).map(|i| (*residuals.get(i, 0)).powi(2)).sum();
+        let sigma2 = ssr / (df as f64);
+
+        let std_errors = classical_std_errors(input.x(), sigma2, k)?;
+
+        let t_dist = StudentsT::new(0.0, 1.0, df as f64)
+            .map_err(|e| OlsError::ComputationFailed(e.to_string()))?;
+        let alpha = 1.0 - confidence_level;
+        let t_crit = t_dist.inverse_cdf(1.0 - alpha / 2.0);
+
+        let mut t_stats = Mat::zeros(k, 1);
+        let mut p_values = Mat::zeros(k, 1);
+        let mut conf_lower = Mat::zeros(k, 1);
+        let mut conf_upper = Mat::zeros(k, 1);
+
+        for j in 0..k {
+            let coef = *params.get(j, 0);
+            let se = *std_errors.get(j, 0);
+            let t_stat = coef / se;
+
+            *t_stats.get_mut(j, 0) = t_stat;
+            *p_values.get_mut(j, 0) = 2.0 * (1.0 - t_dist.cdf(t_stat.abs()));
+            *conf_lower.get_mut(j, 0) = coef - t_crit * se;
+            *conf_upper.get_mut(j, 0) = coef + t_crit * se;
+        }
+
+        Ok(Self {
+            input,
+            params,
+            residuals,
+            std_errors,
+            t_stats,
+            p_values,
+            conf_lower,
+            conf_upper,
+        })
     }
 
     /// 推定に使った入力データ
@@ -212,6 +278,54 @@ impl OlsEstimator {
     pub fn params(&self) -> &Mat<f64> {
         &self.params
     }
+
+    /// 残差 (n, 1)
+    pub fn residuals(&self) -> &Mat<f64> {
+        &self.residuals
+    }
+
+    /// 標準誤差 (k, 1)
+    pub fn std_errors(&self) -> &Mat<f64> {
+        &self.std_errors
+    }
+
+    /// t統計量 (k, 1)
+    pub fn t_stats(&self) -> &Mat<f64> {
+        &self.t_stats
+    }
+
+    /// 両側p値 (k, 1)
+    pub fn p_values(&self) -> &Mat<f64> {
+        &self.p_values
+    }
+
+    /// 信頼区間の下限 (k, 1)
+    pub fn conf_lower(&self) -> &Mat<f64> {
+        &self.conf_lower
+    }
+
+    /// 信頼区間の上限 (k, 1)
+    pub fn conf_upper(&self) -> &Mat<f64> {
+        &self.conf_upper
+    }
+}
+
+/// classical（等分散前提）標準誤差: `σ̂²(X'X)⁻¹`の対角成分の平方根。
+///
+/// `X'X`は対称正定値であることが`ensure_full_rank`（Xの特異性検出）で既に保証されている
+/// ため、Cholesky分解（`Llt`）で逆行列を求める。理論上ここで`LltError`は発生しないはずだが、
+/// 浮動小数点演算の丸めにより境界的なケースで失敗しうるため、`SingularMatrix`として扱う。
+fn classical_std_errors(x: &Mat<f64>, sigma2: f64, k: usize) -> Result<Mat<f64>, OlsError> {
+    let xtx = x.transpose() * x;
+    let llt = xtx.llt(Side::Lower).map_err(|_| OlsError::SingularMatrix)?;
+    let xtx_inv = llt.solve(Mat::<f64>::identity(k, k));
+
+    let mut std_errors = Mat::zeros(k, 1);
+    for j in 0..k {
+        let variance = sigma2 * (*xtx_inv.get(j, j));
+        *std_errors.get_mut(j, 0) = variance.sqrt();
+    }
+    Ok(std_errors)
 }
 
 /// 列ピボットQRの`R`の対角成分から設計行列のランク落ちを検出する。
@@ -388,7 +502,7 @@ mod tests {
         )
         .unwrap();
 
-        let estimator = OlsEstimator::fit(input).unwrap();
+        let estimator = OlsEstimator::fit(input, 0.95).unwrap();
         let params = estimator.params();
 
         assert!(
@@ -417,7 +531,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = OlsEstimator::fit(input);
+        let result = OlsEstimator::fit(input, 0.95);
 
         assert_eq!(
             result.unwrap_err(),
@@ -439,8 +553,73 @@ mod tests {
         )
         .unwrap();
 
-        let result = OlsEstimator::fit(input);
+        let result = OlsEstimator::fit(input, 0.95);
 
         assert_eq!(result.unwrap_err(), OlsError::SingularMatrix);
+    }
+
+    #[test]
+    fn fit_returns_invalid_confidence_level_when_out_of_range() {
+        let y = vec![1.0, 2.0, 3.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0]];
+        let input = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = OlsEstimator::fit(input, 1.5);
+
+        assert_eq!(
+            result.unwrap_err(),
+            OlsError::InvalidConfidenceLevel {
+                confidence_level: 1.5
+            }
+        );
+    }
+
+    /// x = [1,2,3,4,5], y = [2,4,5,4,5] の教科書的データセット。
+    /// 期待値はscipy.stats（`scipy.stats.t`、`ppf`/`cdf`）で独立に計算・検算済み
+    /// （手計算: b0=2.2, b1=0.6, SSR=2.4, df=3, sigma2=0.8）。
+    #[test]
+    fn fit_computes_classical_std_errors_t_stats_p_values_and_conf_int() {
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+        let input = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = OlsEstimator::fit(input, 0.95).unwrap();
+
+        let params = estimator.params();
+        assert!((*params.get(0, 0) - 2.2).abs() < 1e-9);
+        assert!((*params.get(1, 0) - 0.6).abs() < 1e-9);
+
+        let se = estimator.std_errors();
+        assert!((*se.get(0, 0) - 0.938_083_151_964_686).abs() < 1e-9);
+        assert!((*se.get(1, 0) - 0.282_842_712_474_619).abs() < 1e-9);
+
+        let t = estimator.t_stats();
+        assert!((*t.get(0, 0) - 2.345_207_879_911_715).abs() < 1e-9);
+        assert!((*t.get(1, 0) - 2.121_320_343_559_642_4).abs() < 1e-9);
+
+        let p = estimator.p_values();
+        assert!((*p.get(0, 0) - 0.100_743_456_085_420_12).abs() < 1e-6);
+        assert!((*p.get(1, 0) - 0.124_027_062_657_554_59).abs() < 1e-6);
+
+        let lower = estimator.conf_lower();
+        let upper = estimator.conf_upper();
+        assert!((*lower.get(0, 0) - (-0.785_399_261_018_909_6)).abs() < 1e-6);
+        assert!((*upper.get(0, 0) - 5.185_399_261_018_91).abs() < 1e-6);
+        assert!((*lower.get(1, 0) - (-0.300_131_745_291_273_4)).abs() < 1e-6);
+        assert!((*upper.get(1, 0) - 1.500_131_745_291_273_2).abs() < 1e-6);
     }
 }

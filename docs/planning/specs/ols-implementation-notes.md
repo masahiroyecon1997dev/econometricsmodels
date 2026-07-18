@@ -31,6 +31,20 @@
 - `y`と各`x_columns`の長さ不一致 → `OlsError::DimensionMismatch`（`Result`で返る、実データで起こりうるため）
 - `x_names.len() != x_columns.len()` → 引き続き`debug_assert!`のまま（`engine_pybind`側の実装バグでしか起こらない内部契約であり、実データに起因する検証とは性質が異なるため区別）
 
+### classical標準誤差・t統計量・p値・信頼区間（Issue #9で実装済み）
+
+- `engine::linear::ols::OlsEstimator::fit(input: OlsInput, confidence_level: f64) -> Result<Self, OlsError>`。
+  `confidence_level`の範囲検証（`(0, 1)`）もここで行う（`OlsError::InvalidConfidenceLevel`）
+- classical標準誤差: `σ̂²(X'X)⁻¹`の対角成分の平方根（`σ̂² = SSR/(n-k)`）。`X'X`は対称正定値であることが
+  既に特異性検出（Issue #8の`ensure_full_rank`）で保証されているため、`X'X`自体のCholesky分解（`Llt`）で
+  逆行列を求める（`classical_std_errors`関数）。列ピボットQR分解を再利用する方式ではない
+- t統計量: `params / std_errors`。p値: 両側検定、自由度`n-k`のt分布のCDFから計算（正規分布ではない、
+  `ols-standard-errors.md`「検定に使う分布」参照）
+- 信頼区間: `confidence_level`から求めたt分布の臨界値`t_crit`を使い、`coef ± t_crit * std_err`
+- t分布のCDF・逆CDFには**statrs**クレート（`=0.18.0`固定、`default-features = false`でnalgebra/rand機能を除外）を使用。engineへの追加はfaer/thiserror同様、ルートCargo.tomlの`[workspace.dependencies]`で`=`により完全固定
+- **スコープ外（Issue #9時点）**: `cov_type`によるHC/cluster/HACへの分岐（Issue #10・#11）。R²・調整済みR²・F統計量・AIC/BIC・対数尤度等の**適合度統計量は対応するissueがまだ存在しない**（`docs/spec/01_ols.md`の古い草案には式があるが、正式な設計issueとしては未着手）
+- テストは`tests/engine_tests`ではなく`engine`クレート内の`#[cfg(test)]`（`cargo test -p engine`）に実装。既知の厳密解データに加え、scipy.stats.tで独立に検算した教科書的データセット（x=[1..5], y=[2,4,5,4,5]）で標準誤差・t値・p値・信頼区間を1e-6〜1e-9の許容誤差で検証
+
 ### Python側の例外はカテゴリ別に分ける
 
 - 詳細・理由は `.claude/rules/rust-style.md`「エラーハンドリング」を参照（`ValidationError` / `ComputationError`の2階層、`pyo3::create_exception!`で定義）

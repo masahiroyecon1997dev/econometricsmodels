@@ -17,6 +17,19 @@
 ### 特異性判定は相対閾値
 
 - 詳細は `.claude/rules/rust-style.md`「線形代数」を参照。絶対閾値（草案コードの`1e-10`固定）は不採用。具体的な閾値式は実装時に判断
+- Issue #8で確定した具体式: `engine::linear::ols::ensure_full_rank`。`col_piv_qr`の`R`の対角成分（列ピボットにより絶対値降順）のうち最大値`|R[0,0]|`を基準に、`threshold = k * f64::EPSILON * |R[0,0]|`未満の対角成分があればランク落ちと判定する
+
+### 係数の求め方: 列ピボットQR（Cholesky不採用）
+
+- Issue #8で確定。`X'Xβ=X'y`をCholesky分解で解く方式は不採用。理由: `X'X`を明示的に作ると条件数が2乗になり数値的に不利な上、`col_piv_qr`なら特異性検出（上記）と係数計算を同じ分解で一度に行える
+- `engine::linear::ols::OlsEstimator::fit(input: OlsInput) -> Result<Self, OlsError>`で実装。`qr.solve_lstsq(input.y())`で係数を得る（列ピボットの並べ替えは`solve_lstsq`内部で吸収され、返り値は元の列順のまま）
+- `n <= k`（観測数不足）は`OlsEstimator::fit`側で検証する（`OlsInput`自体は`n<=k`でも構築できる。次の項目参照）
+
+### `OlsInput::from_columns`は`Result<Self, OlsError>`を返す（Issue #8で変更）
+
+- Issue #6時点では次元不一致を`debug_assert!`にしていたが、`OlsError`（Issue #7）確定後のIssue #8で`Result`化した。`debug_assert!`だと失敗時にRustのpanicとしてしか表面化せず、PyO3境界で`ValidationError`に変換できないため
+- `y`と各`x_columns`の長さ不一致 → `OlsError::DimensionMismatch`（`Result`で返る、実データで起こりうるため）
+- `x_names.len() != x_columns.len()` → 引き続き`debug_assert!`のまま（`engine_pybind`側の実装バグでしか起こらない内部契約であり、実データに起因する検証とは性質が異なるため区別）
 
 ### Python側の例外はカテゴリ別に分ける
 

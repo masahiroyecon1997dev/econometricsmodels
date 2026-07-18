@@ -8,6 +8,7 @@
 //! 「OLSOptions」の`include_intercept`の項を参照。
 
 use faer::Mat;
+use faer::prelude::SolveLstsq;
 use thiserror::Error;
 
 /// OLSの計算過程で発生しうるエラー。
@@ -62,6 +63,7 @@ pub enum OlsError {
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
 /// `from_columns`で組み立てた後は、getter経由でのみアクセスする。
+#[derive(Debug)]
 pub struct OlsInput {
     /// 被説明変数 (n, 1)
     y: Mat<f64>,
@@ -78,30 +80,32 @@ impl OlsInput {
     /// `OlsInput`を組み立てる。`include_intercept=true`の場合、設計行列の先頭列に
     /// 定数項（すべて1.0）を自動追加する。
     ///
+    /// # Errors
+    /// `y`といずれかの`x_columns`の長さが一致しない場合は`OlsError::DimensionMismatch`を返す。
+    ///
     /// # パニックについて
-    /// `y`と各`x_columns`の長さが一致しない、または`x_names.len() != x_columns.len()`の
-    /// 場合は`debug_assert!`でパニックする。これらは呼び出し側（`engine_pybind`）が事前に
-    /// 検証済みであることを前提とした内部契約であり、ユーザー起因の検証（`ValidationError`）は
-    /// engine_pybind側の責務。次元不一致・観測数不足等、統計的に意味のある検証
-    /// （`InvalidInput`等）は`OlsEstimator`のコンストラクタ（別issue）で行う。
+    /// `x_names.len() != x_columns.len()`の場合は`debug_assert!`でパニックする。これは
+    /// 呼び出し側（`engine_pybind`）の実装バグでしか起こり得ない内部契約であり、
+    /// 実データに起因する`ValidationError`とは性質が異なるため区別している。
     pub fn from_columns(
         y: &[f64],
         x_columns: &[Vec<f64>],
         x_names: Vec<String>,
         include_intercept: bool,
         dep_var_name: String,
-    ) -> Self {
+    ) -> Result<Self, OlsError> {
         debug_assert_eq!(
             x_columns.len(),
             x_names.len(),
             "x_columns and x_names must have the same length"
         );
-        for (i, col) in x_columns.iter().enumerate() {
-            debug_assert_eq!(
-                col.len(),
-                y.len(),
-                "x_columns[{i}] must have the same length as y"
-            );
+        for col in x_columns {
+            if col.len() != y.len() {
+                return Err(OlsError::DimensionMismatch {
+                    y_rows: y.len(),
+                    x_rows: col.len(),
+                });
+            }
         }
 
         let n = y.len();
@@ -126,12 +130,12 @@ impl OlsInput {
         }
         param_names.extend(x_names);
 
-        Self {
+        Ok(Self {
             y: y_mat,
             x,
             param_names,
             dep_var_name,
-        }
+        })
     }
 
     pub fn y(&self) -> &Mat<f64> {
@@ -161,6 +165,73 @@ impl OlsInput {
     }
 }
 
+/// OLSの推定結果（係数のみ）。標準誤差・適合度統計量等は後続issueで追加する。
+///
+/// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
+/// `fit`でのバリデーション（観測数・特異性）を通過した状態のみを表す。
+#[derive(Debug)]
+pub struct OlsEstimator {
+    input: OlsInput,
+    /// 係数 (k, 1)。`input.param_names()`と対応する
+    params: Mat<f64>,
+}
+
+impl OlsEstimator {
+    /// 正規方程式を列ピボットQR分解（`col_piv_qr`）で解き、OLS係数を求める。
+    ///
+    /// Cholesky（`X'Xβ=X'y`をXᵀXのCholesky分解で解く）ではなく列ピボットQRを採用する理由:
+    /// `X'X`を明示的に作ると条件数が2乗になり数値的に不利な上、特異性検出
+    /// （`.claude/rules/rust-style.md`「線形代数」が要求する`col_piv_qr`）と係数計算を
+    /// 同じ分解で一度に行える。
+    ///
+    /// # Errors
+    /// - 観測数`n`が`k`（定数項を含む説明変数の数）以下: `OlsError::InsufficientObservations`
+    /// - 設計行列が特異（完全な多重共線性等）: `OlsError::SingularMatrix`
+    pub fn fit(input: OlsInput) -> Result<Self, OlsError> {
+        let n = input.nobs();
+        let k = input.k();
+
+        if n <= k {
+            return Err(OlsError::InsufficientObservations { n, k });
+        }
+
+        let qr = input.x().col_piv_qr();
+        ensure_full_rank(&qr, k)?;
+
+        let params = qr.solve_lstsq(input.y());
+
+        Ok(Self { input, params })
+    }
+
+    /// 推定に使った入力データ
+    pub fn input(&self) -> &OlsInput {
+        &self.input
+    }
+
+    /// 係数 (k, 1)
+    pub fn params(&self) -> &Mat<f64> {
+        &self.params
+    }
+}
+
+/// 列ピボットQRの`R`の対角成分から設計行列のランク落ちを検出する。
+///
+/// 絶対閾値ではなく相対閾値を使う（`.claude/rules/rust-style.md`「線形代数」参照）。
+/// `R`は列ピボットにより対角成分が絶対値の降順になるため、最大値
+/// （`|R[0,0]|`、通常は最初の対角成分）を基準に相対的な小ささを判定する。
+fn ensure_full_rank(qr: &faer::linalg::solvers::ColPivQr<f64>, k: usize) -> Result<(), OlsError> {
+    let r = qr.thin_R();
+    let max_abs_diag = (0..k).map(|i| (*r.get(i, i)).abs()).fold(0.0_f64, f64::max);
+    let threshold = (k as f64) * f64::EPSILON * max_abs_diag;
+
+    for i in 0..k {
+        if (*r.get(i, i)).abs() <= threshold {
+            return Err(OlsError::SingularMatrix);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,7 +246,8 @@ mod tests {
             vec!["x1".to_string()],
             true,
             "y".to_string(),
-        );
+        )
+        .unwrap();
 
         assert_eq!(input.nobs(), 3);
         assert_eq!(input.k(), 2);
@@ -198,7 +270,8 @@ mod tests {
             vec!["x1".to_string(), "x2".to_string()],
             false,
             "y".to_string(),
-        );
+        )
+        .unwrap();
 
         assert_eq!(input.k(), 2);
         assert_eq!(input.param_names(), ["x1".to_string(), "x2".to_string()]);
@@ -207,14 +280,37 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn from_columns_panics_on_mismatched_column_length() {
+    fn from_columns_returns_dimension_mismatch_on_mismatched_column_length() {
         let y = vec![1.0, 2.0, 3.0];
         let x_columns = vec![vec![10.0, 20.0]]; // yより短い
-        OlsInput::from_columns(
+        let result = OlsInput::from_columns(
             &y,
             &x_columns,
             vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            OlsError::DimensionMismatch {
+                y_rows: 3,
+                x_rows: 2
+            }
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn from_columns_panics_on_mismatched_names_arity() {
+        // x_names.len() != x_columns.len()はengine_pybind側の実装バグでしか
+        // 起こり得ない内部契約違反のため、Errではなくdebug_assert!でパニックする。
+        let y = vec![1.0, 2.0, 3.0];
+        let x_columns = vec![vec![10.0, 20.0, 30.0]];
+        let _ = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
             true,
             "y".to_string(),
         );
@@ -276,5 +372,75 @@ mod tests {
             OlsError::InsufficientClusters { g: 1 },
             OlsError::InsufficientClusters { g: 0 }
         );
+    }
+
+    #[test]
+    fn fit_recovers_known_coefficients_for_exact_fit_data() {
+        // y = 1 + 2*x、ノイズなしの厳密解を持つデータ
+        let y = vec![1.0, 3.0, 5.0, 7.0, 9.0];
+        let x_columns = vec![vec![0.0, 1.0, 2.0, 3.0, 4.0]];
+        let input = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = OlsEstimator::fit(input).unwrap();
+        let params = estimator.params();
+
+        assert!(
+            (*params.get(0, 0) - 1.0).abs() < 1e-9,
+            "const: {}",
+            *params.get(0, 0)
+        );
+        assert!(
+            (*params.get(1, 0) - 2.0).abs() < 1e-9,
+            "x1: {}",
+            *params.get(1, 0)
+        );
+    }
+
+    #[test]
+    fn fit_returns_insufficient_observations_when_n_le_k() {
+        let y = vec![1.0, 2.0];
+        let x_columns = vec![vec![1.0, 2.0]];
+        // include_intercept=trueでk=2、n=2 (n<=k)
+        let input = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = OlsEstimator::fit(input);
+
+        assert_eq!(
+            result.unwrap_err(),
+            OlsError::InsufficientObservations { n: 2, k: 2 }
+        );
+    }
+
+    #[test]
+    fn fit_returns_singular_matrix_for_perfectly_collinear_columns() {
+        let y = vec![1.0, 2.0, 3.0, 4.0];
+        let x1 = vec![1.0, 2.0, 3.0, 4.0];
+        let x2 = vec![2.0, 4.0, 6.0, 8.0]; // x2 = 2 * x1 (完全な多重共線性)
+        let input = OlsInput::from_columns(
+            &y,
+            &[x1, x2],
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = OlsEstimator::fit(input);
+
+        assert_eq!(result.unwrap_err(), OlsError::SingularMatrix);
     }
 }

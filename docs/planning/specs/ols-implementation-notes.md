@@ -42,7 +42,7 @@
   `ols-api-design.md`「検定分布」参照）
 - 信頼区間: `confidence_level`から求めたt分布の臨界値`t_crit`を使い、`coef ± t_crit * std_err`
 - t分布のCDF・逆CDFには**statrs**クレート（`=0.18.0`固定、`default-features = false`でnalgebra/rand機能を除外）を使用。engineへの追加はfaer/thiserror同様、ルートCargo.tomlの`[workspace.dependencies]`で`=`により完全固定
-- **スコープ外（Issue #9時点）**: `cov_type`によるHC/cluster/HACへの分岐（Issue #10・#11）。R²・調整済みR²・F統計量・AIC/BIC・対数尤度等の**適合度統計量はIssue #21**（Issue #11の後に着手）で実装する
+- **スコープ外（Issue #9時点）**: `cov_type`によるHC/cluster/HACへの分岐（Issue #10・#11、いずれも実装済み）。R²・調整済みR²・F統計量・AIC/BIC・対数尤度等の**適合度統計量はIssue #21**（Issue #11の後に着手）で実装する
 
 ### HC0〜HC3ロバスト標準誤差、および`use_t`に関する重要な発見（Issue #10で実装済み）
 
@@ -68,6 +68,34 @@
 `conf_int`が正規分布ベースの値になっている可能性が高い（`coef`/`se`自体は`use_t`に
 依存しないため影響なし）。**Issue #18/#19着手時に再生成が必要**。
 - テストは`tests/engine_tests`ではなく`engine`クレート内の`#[cfg(test)]`（`cargo test -p engine`）に実装。既知の厳密解データに加え、scipy.stats.tで独立に検算した教科書的データセット（x=[1..5], y=[2,4,5,4,5]）で標準誤差・t値・p値・信頼区間を1e-6〜1e-9の許容誤差で検証
+
+### Newey-West HAC標準誤差（Issue #11で実装済み）
+
+- `CovType::Hac { lags: Option<i64>, time_order: Option<Vec<f64>> }`をフィールド付きバリアントとして追加した。
+  他のバリアント（`Classical`/`Hc0`〜`Hc3`）と違い、HACだけがラグ数・時間順序という追加パラメータを持つ。
+  `OlsEstimator::fit`のシグネチャに`hac_lags`/`time_order`を常に生える引数として追加すると、HAC以外の
+  `cov_type`では常に無意味な引数になってしまうため、`CovType`自身にデータを持たせる設計にした
+  （この設計判断はIssue #3で確定した`OLSOptions`側の`hac_lags`/`time_col`フィールドの存在は前提にしつつ、
+  それを`engine`内部でどう表現するかという実装issue #11のスコープ内の判断）。
+  `Vec<f64>`を持つため`Copy`は付与できず、`Clone`のみ（`Hc*`等は元々`Copy`だったが、
+  enum全体で外した。呼び出し側で必要なら`clone()`する）
+- `(X'X)⁻¹Ŝ(X'X)⁻¹`の対角成分の平方根として計算する（`hac_std_errors`関数）。
+  `Ŝ = Ŝ₀ + Σ_{l=1}^{L} w_l(Ŝ_l + Ŝ_l')`（Bartlett重み`w_l = 1 - l/(L+1)`）。
+  `Ŝ_l`（l≥1）は対称でない外積の和（`x_t x_{t-l}'`）のため、HC0-3の`Xw'Xw`のような単純な行列積には
+  落とし込めず、素直な三重ループ（ラグ×観測×`k²`）で計算する。`k`（説明変数の数）は通常小さいため許容
+- ラグ数の解決（`resolve_hac_lags`）: `Some(l)`なら`0 <= l < n`を検証（`OlsError::InvalidHacLags`）。
+  `None`なら経験則`L = floor(4*(n/100)^(2/9))`で自動計算（`ols-standard-errors.md`3.2節）
+- 時間順序の解決（`time_ordering`）: `time_order`（`OlsInput`の行と対応する長さnの配列）が`Some`なら
+  昇順ソートした行インデックス列を返し、`None`なら恒等順序（`OlsInput`の行順をそのまま時系列順とみなす）。
+  実際の`X`/残差の並べ替え自体は`hac_std_errors`内でこのインデックス列を使って行う（`OlsInput`自体は
+  並べ替えない。理由: `OlsInput`は`fit`の全`cov_type`で共有されるため、ここで恒久的に行を並べ替えると
+  Python側に返す残差配列の行と元のDataFrameの行の対応が崩れてしまう）
+- `partial_cmp().unwrap()`（時間順のソート）は、NaN/無限大が含まれないことが`engine_pybind`側の
+  列抽出（`column_extraction::extract_f64_column`）で既に保証されている前提でパニックしない
+- statsmodelsとの数値照合: `sm.OLS(...).fit(cov_type="HAC", cov_kwds={"maxlags": L}, use_t=True)`。
+  `cov_kwds`に`use_correction`は明示していない（既定の`False`＝小標本補正なしで、本実装の式と一致することを
+  確認済み）。テストは3種類: `maxlags`固定値指定、`hac_lags=None`（自動計算L=2、n=5のケース）、
+  `time_order`指定（行をシャッフルした入力から`time_order`で正しく時系列順に復元できることを確認）
 
 ### Python側の例外はカテゴリ別に分ける
 

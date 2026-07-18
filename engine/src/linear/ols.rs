@@ -64,10 +64,14 @@ pub enum OlsError {
 /// 責務（PyO3境界の関心事のため）。ここでは`OlsEstimator::fit`が計算方法を分岐するための
 /// 純粋な列挙型のみを定義する。
 ///
-/// 【スコープの注意（Issue #10時点）】`Cluster`・`Hac`はまだ未実装（対応する実装issueは
-/// Issue #11がHACのみで、clusterには対応するissueが現時点で存在しない。
-/// `docs/planning/specs/ols-implementation-notes.md`参照）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// `Hac`のみ、他のバリアントと異なりラグ数・時間順序という追加パラメータを持つため
+/// フィールド付きバリアントにしている（`fit`のシグネチャに`hac_lags`等を常に生える
+/// 引数として追加するより、cov_type固有のデータをcov_type自身に持たせる方が
+/// 「HAC以外では無意味な引数」を作らずに済むため）。
+///
+/// 【スコープの注意（Issue #11時点）】`Cluster`はまだ未実装（対応する実装issueが
+/// 現時点で存在しない。`docs/planning/specs/ols-implementation-notes.md`参照）。
+#[derive(Debug, Clone, PartialEq)]
 pub enum CovType {
     /// 等分散前提（`σ̂²(X'X)⁻¹`）
     Classical,
@@ -75,6 +79,16 @@ pub enum CovType {
     Hc1,
     Hc2,
     Hc3,
+    /// Newey-West HAC（Bartlettカーネル）。
+    Hac {
+        /// ラグ数（バンド幅）。`None`なら経験則 `L = floor(4*(n/100)^(2/9))` で自動計算する
+        /// （`docs/planning/specs/ols-standard-errors.md`3.2節）。
+        lags: Option<i64>,
+        /// 時系列順序。`None`なら`OlsInput`の行順をそのまま時系列順とみなす。`Some`の場合、
+        /// `OlsInput`の行と対応する長さnの配列で、この値の昇順でラグ付き自己共分散を計算する
+        /// （同3.3節）。値そのものの単位・意味（期間番号・UNIX時刻等）は問わない。
+        time_order: Option<Vec<f64>>,
+    },
 }
 
 /// OLSの被説明変数・設計行列を保持する入力データ。
@@ -189,9 +203,8 @@ impl OlsInput {
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
 /// `fit`でのバリデーション（観測数・特異性・信頼水準）を通過した状態のみを表す。
 ///
-/// 【スコープの注意（Issue #10時点）】`cov_type`はclassical/HC0-3まで対応。
-/// cluster・HACへの分岐は対応するissue（HACはIssue #11。clusterは対応するissueが
-/// 現時点で存在しない）で追加する。
+/// 【スコープの注意（Issue #11時点）】`cov_type`はclassical/HC0-3/HACまで対応。
+/// clusterへの分岐は対応するissueが現時点で存在しないため未実装。
 #[derive(Debug)]
 pub struct OlsEstimator {
     input: OlsInput,
@@ -265,12 +278,17 @@ impl OlsEstimator {
 
         let xtx_inv = xtx_inverse(input.x(), k)?;
 
-        let std_errors = match cov_type {
+        let std_errors = match &cov_type {
             CovType::Classical => classical_std_errors(sigma2, &xtx_inv, k),
             CovType::Hc0 => hc_std_errors(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc0),
             CovType::Hc1 => hc_std_errors(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc1),
             CovType::Hc2 => hc_std_errors(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc2),
             CovType::Hc3 => hc_std_errors(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc3),
+            CovType::Hac { lags, time_order } => {
+                let lags = resolve_hac_lags(*lags, n)?;
+                let order = time_ordering(time_order.as_deref(), n);
+                hac_std_errors(input.x(), &residuals, &xtx_inv, n, k, lags, &order)
+            }
         };
 
         let t_dist = StudentsT::new(0.0, 1.0, df as f64)
@@ -313,8 +331,8 @@ impl OlsEstimator {
     }
 
     /// 使用した標準誤差の種別
-    pub fn cov_type(&self) -> CovType {
-        self.cov_type
+    pub fn cov_type(&self) -> &CovType {
+        &self.cov_type
     }
 
     /// 係数 (k, 1)
@@ -445,6 +463,102 @@ enum HcVariant {
     Hc1,
     Hc2,
     Hc3,
+}
+
+/// `CovType::Hac`の`lags`（`Option<i64>`）を実際に使うラグ数（`usize`）に解決する。
+///
+/// `Some(l)`の場合は`0 <= l < n`を検証してそのまま使う。`None`の場合は経験則
+/// `L = floor(4*(n/100)^(2/9))`で自動計算する（`docs/planning/specs/ols-standard-errors.md`
+/// 3.2節。EViews等でも使われる、データに依存しない決定的な式）。
+fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, OlsError> {
+    match lags {
+        Some(l) => {
+            if l < 0 || (l as usize) >= n {
+                return Err(OlsError::InvalidHacLags { hac_lags: l, n });
+            }
+            Ok(l as usize)
+        }
+        None => Ok((4.0 * (n as f64 / 100.0).powf(2.0 / 9.0)).floor() as usize),
+    }
+}
+
+/// `CovType::Hac`の`time_order`から、時系列の昇順に並べたときの行インデックス列を求める。
+///
+/// `None`（`time_col`未指定）の場合は`OlsInput`の行順をそのまま時系列順とみなし、恒等順序
+/// `[0, 1, ..., n-1]`を返す。
+///
+/// `partial_cmp().unwrap()`について: `time_order`の値はNaN/無限大を含まないことが
+/// `engine_pybind::column_extraction`側で既に保証されている前提（本関数は`engine`の
+/// 責務境界の内側であり、クリーンな値しか受け取らない。モジュール冒頭のdocコメント参照）。
+fn time_ordering(time_order: Option<&[f64]>, n: usize) -> Vec<usize> {
+    match time_order {
+        Some(values) => {
+            let mut order: Vec<usize> = (0..n).collect();
+            order.sort_by(|&a, &b| values[a].partial_cmp(&values[b]).unwrap());
+            order
+        }
+        None => (0..n).collect(),
+    }
+}
+
+/// Newey-West HAC標準誤差: `(X'X)⁻¹Ŝ(X'X)⁻¹`の対角成分の平方根。
+///
+/// `Ŝ = Ŝ₀ + Σ_{l=1}^{L} w_l (Ŝ_l + Ŝ_l')`（Bartlett重み `w_l = 1 - l/(L+1)`）、
+/// `Ŝ_l = Σ_{t=l+1}^{n} ε̂_t ε̂_{t-l} x_t x_{t-l}'`（`docs/planning/specs/ols-standard-errors.md`
+/// 3.1節）。`order`で指定された時系列順に並べ替えた残差・行を使ってラグ付き自己共分散を計算する。
+///
+/// HC0-3の`hc_std_errors`と異なり、`Ŝ_l`（l>=1）は対称でない外積の和（`x_t x_{t-l}'`）のため
+/// `Xw'Xw`のような単純な行列積に落とし込めない。`k`（説明変数の数）は通常小さいため、
+/// 素直な三重ループ（ラグ×観測×`k²`）で計算する。
+fn hac_std_errors(
+    x: &Mat<f64>,
+    residuals: &Mat<f64>,
+    xtx_inv: &Mat<f64>,
+    n: usize,
+    k: usize,
+    lags: usize,
+    order: &[usize],
+) -> Mat<f64> {
+    let e_ord: Vec<f64> = order.iter().map(|&i| *residuals.get(i, 0)).collect();
+    let x_ord: Vec<Vec<f64>> = order
+        .iter()
+        .map(|&i| (0..k).map(|j| *x.get(i, j)).collect())
+        .collect();
+
+    let mut s_hat = Mat::<f64>::zeros(k, k);
+
+    // l=0項: Ŝ₀ = Σ_t ε̂_t² x_t x_t'（HC0のΨ̂と同形）
+    for t in 0..n {
+        let e2 = e_ord[t] * e_ord[t];
+        for a in 0..k {
+            for b in 0..k {
+                *s_hat.get_mut(a, b) += e2 * x_ord[t][a] * x_ord[t][b];
+            }
+        }
+    }
+
+    // l=1..=lags項: w_l * (Ŝ_l + Ŝ_l')
+    for l in 1..=lags {
+        let weight = 1.0 - (l as f64) / ((lags + 1) as f64);
+        for t in l..n {
+            let cross = e_ord[t] * e_ord[t - l];
+            for a in 0..k {
+                for b in 0..k {
+                    // (Ŝ_l + Ŝ_l')[a,b] = Ŝ_l[a,b] + Ŝ_l[b,a]
+                    let s_l_ab = cross * x_ord[t][a] * x_ord[t - l][b];
+                    let s_l_ba = cross * x_ord[t][b] * x_ord[t - l][a];
+                    *s_hat.get_mut(a, b) += weight * (s_l_ab + s_l_ba);
+                }
+            }
+        }
+    }
+
+    let var_hac = xtx_inv * &s_hat * xtx_inv;
+    let mut std_errors = Mat::zeros(k, 1);
+    for j in 0..k {
+        *std_errors.get_mut(j, 0) = (*var_hac.get(j, j)).sqrt();
+    }
+    std_errors
 }
 
 /// 列ピボットQRの`R`の対角成分から設計行列のランク落ちを検出する。
@@ -800,10 +914,11 @@ mod tests {
             )
             .unwrap();
 
+            let cov_type_label = format!("{cov_type:?}");
             let estimator = OlsEstimator::fit(input, cov_type, 0.95).unwrap();
 
             for j in 0..2 {
-                let msg = format!("{cov_type:?}, param {j}");
+                let msg = format!("{cov_type_label}, param {j}");
                 assert!(
                     (*estimator.std_errors().get(j, 0) - se[j]).abs() < 1e-6,
                     "std_errors mismatch: {msg}"
@@ -826,5 +941,133 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// 同じデータセット（x=[1..5], y=[2,4,5,4,5]）でのHAC（Newey-West、`maxlags=1`）。
+    /// 期待値はstatsmodels 0.14.6で独立に計算・検算済み
+    /// （`sm.OLS(Y, X).fit(cov_type="HAC", cov_kwds={"maxlags": 1}, use_t=True)`。
+    /// `use_correction`はstatsmodelsの既定である`False`のまま、明示指定はしていない）。
+    #[test]
+    fn fit_computes_hac_std_errors_with_explicit_lags() {
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+        let input = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let cov_type = CovType::Hac {
+            lags: Some(1),
+            time_order: None,
+        };
+        let estimator = OlsEstimator::fit(input, cov_type, 0.95).unwrap();
+
+        let se = estimator.std_errors();
+        assert!((*se.get(0, 0) - 0.659_090_282_131_361_7).abs() < 1e-6);
+        assert!((*se.get(1, 0) - 0.164_924_225_024_705_7).abs() < 1e-6);
+
+        let t = estimator.t_stats();
+        assert!((*t.get(0, 0) - 3.337_934_209_689_228).abs() < 1e-6);
+        assert!((*t.get(1, 0) - 3.638_034_375_545_013_5).abs() < 1e-6);
+
+        let p = estimator.p_values();
+        assert!((*p.get(0, 0) - 0.044_455_744_969_471_62).abs() < 1e-6);
+        assert!((*p.get(1, 0) - 0.035_791_053_269_350_51).abs() < 1e-6);
+
+        let lower = estimator.conf_lower();
+        let upper = estimator.conf_upper();
+        assert!((*lower.get(0, 0) - 0.102_480_566_782_648_72).abs() < 1e-6);
+        assert!((*upper.get(0, 0) - 4.297_519_433_217_346).abs() < 1e-6);
+        assert!((*lower.get(1, 0) - 0.075_137_509_418_346_96).abs() < 1e-6);
+        assert!((*upper.get(1, 0) - 1.124_862_490_581_653_8).abs() < 1e-6);
+    }
+
+    /// `hac_lags=None`（経験則自動計算）が`L = floor(4*(n/100)^(2/9))`と一致することを確認する。
+    /// n=5の場合L=2。期待値はstatsmodelsで`maxlags=2`を明示指定して独立に計算・検算済み
+    /// （`docs/planning/specs/ols-standard-errors.md`3.2節の式通りベンチマーク側もL=2を使う前提）。
+    #[test]
+    fn fit_computes_hac_std_errors_with_auto_lags() {
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+        let input = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let cov_type = CovType::Hac {
+            lags: None,
+            time_order: None,
+        };
+        let estimator = OlsEstimator::fit(input, cov_type, 0.95).unwrap();
+
+        let se = estimator.std_errors();
+        assert!((*se.get(0, 0) - 0.577_350_269_189_624_1).abs() < 1e-6);
+        assert!((*se.get(1, 0) - 0.164_924_225_024_705_75).abs() < 1e-6);
+    }
+
+    /// `time_order`を指定した場合、行順がシャッフルされていても時系列順に並べ替えてから
+    /// ラグ付き自己共分散を計算することを確認する。データはHAC(maxlags=1)テストと同一の
+    /// (x, y)を、時系列順の逆転を含む順序（time値=xの値そのもの）でシャッフルして与える。
+    /// 期待値は`fit_computes_hac_std_errors_with_explicit_lags`と同じ
+    /// （時系列順に並べ替えれば同一データになるため）。
+    #[test]
+    fn fit_computes_hac_std_errors_respecting_time_order() {
+        // 元の時系列順: time=[1,2,3,4,5], y=[2,4,5,4,5]
+        // これを time順=[3,1,5,2,4] の並びでシャッフルして入力する
+        let shuffled_time = vec![3.0, 1.0, 5.0, 2.0, 4.0];
+        let shuffled_x = shuffled_time.clone();
+        let shuffled_y = vec![5.0, 2.0, 5.0, 4.0, 4.0];
+
+        let input = OlsInput::from_columns(
+            &shuffled_y,
+            &[shuffled_x],
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let cov_type = CovType::Hac {
+            lags: Some(1),
+            time_order: Some(shuffled_time),
+        };
+        let estimator = OlsEstimator::fit(input, cov_type, 0.95).unwrap();
+
+        let se = estimator.std_errors();
+        assert!((*se.get(0, 0) - 0.659_090_282_131_361_7).abs() < 1e-6);
+        assert!((*se.get(1, 0) - 0.164_924_225_024_705_7).abs() < 1e-6);
+    }
+
+    #[test]
+    fn fit_returns_invalid_hac_lags_when_out_of_range() {
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+        let input = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let cov_type = CovType::Hac {
+            lags: Some(-1),
+            time_order: None,
+        };
+        let result = OlsEstimator::fit(input, cov_type, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            OlsError::InvalidHacLags { hac_lags: -1, n: 5 }
+        );
     }
 }

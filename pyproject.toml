@@ -9,7 +9,7 @@ description = "統計・計量経済学の分析手法を提供するPython API"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 dependencies = [
-    "polars>=1.0",
+    "polars==1.42.1",
 ]
 classifiers = [
     "Programming Language :: Rust",
@@ -24,3 +24,21 @@ manifest-path = "engine_pybind/Cargo.toml"
 module-name = "econometricsmodels._lib"
 python-source = "python_package"
 features = ["pyo3/extension-module"]
+
+[dependency-groups]
+# CI（ci_python.yml）が使う: pytest tests/api_tests / ruff check . / ruff format --check .
+# statsmodelsはtests/api_tests/fixtures/benchmarks/のフィクスチャ生成に使った主リファレンス実装のため、
+# `==`で厳密固定する（.claude/rules/testing-policy.md「ベンチマーク値のフィクスチャ化」参照）。
+# バージョンを上げる場合はフィクスチャの再生成とセットで行うこと。
+test = [
+    "pytest>=9.1.1",
+    "numpy>=2.5.0",
+    "statsmodels==0.14.6",
+    "ruff>=0.15.22",
+]
+# benchmark/ 配下のベンチマーク値生成スクリプト専用（CIでは使わない、随時実行するツール。
+# CLAUDE.md 3章「benchmark/はtests/とは別ライフサイクル」参照）。
+benchmark = [
+    "pyfixest>=0.60.0",
+    "wooldridge>=0.5.0",
+]

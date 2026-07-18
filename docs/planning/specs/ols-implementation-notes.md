@@ -71,7 +71,7 @@
 ## テストフィクスチャ関連の決定事項
 
 - フィクスチャ生成スクリプト（`benchmark/fixtures/generate_ols_fixtures.py`、動作確認済み）と生成物（`tests/api_tests/fixtures/ols.json`）は別管理。詳細は`.claude/rules/testing-policy.md`「ベンチマーク値のフィクスチャ化」参照
-- `pyproject.toml`のdev dependenciesに`statsmodels`をバージョン固定（`==`）で追加する必要がある。**Issue #4（python_packageの依存追加）はpolars等の本番依存のみを対象としていたため、statsmodelsの追加はどこにも入っていない**。着手時にIssue #4かIssue #17（ベンチマーク作成）のどちらかに追記すること
+- `pyproject.toml`の`[dependency-groups]`に`statsmodels==0.14.6`（`test`グループ）を追加済み（Issue #5で対応）。既存の`ols.json`フィクスチャがこのバージョンで生成されているため、上げる場合はフィクスチャの再生成とセットで行うこと
 
 ## 未確定（実装時判断でよい）
 

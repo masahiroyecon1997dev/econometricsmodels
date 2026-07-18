@@ -31,14 +31,14 @@ features = ["pyo3/extension-module"]
 # `==`で厳密固定する（.claude/rules/testing-policy.md「ベンチマーク値のフィクスチャ化」参照）。
 # バージョンを上げる場合はフィクスチャの再生成とセットで行うこと。
 test = [
-    "pytest>=9.1.1",
-    "numpy>=2.5.0",
+    "pytest==9.1.1",
+    "numpy==2.5.1",
     "statsmodels==0.14.6",
-    "ruff>=0.15.22",
+    "ruff==0.15.20",
 ]
 # benchmark/ 配下のベンチマーク値生成スクリプト専用（CIでは使わない、随時実行するツール。
 # CLAUDE.md 3章「benchmark/はtests/とは別ライフサイクル」参照）。
 benchmark = [
-    "pyfixest>=0.60.0",
-    "wooldridge>=0.5.0",
+    "pyfixest==0.60.0",
+    "wooldridge==0.5.0",
 ]

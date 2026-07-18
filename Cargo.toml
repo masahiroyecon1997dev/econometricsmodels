@@ -13,8 +13,15 @@ publish = false
 
 [workspace.dependencies]
 # 各crateからは `{ workspace = true }` で参照する。
-thiserror = "2.0.18"
+# サプライチェーン攻撃対策として、全依存を`=`で完全固定する（キャレット等の範囲指定にしない）。
+# アップグレードは意図的に行い、その都度動作確認する。
+thiserror = "=2.0.18"
 # faer: rust-style.md の方針により明示的にバージョン固定（APIが変わりうるため）。
 # 実際に engine の [dependencies] へ追加するのは別issue（ENGINE_DEPS: engineクレートへの依存追加）で行う。
 # ここでは workspace 単位でバージョンだけ先に固定しておく。
 faer = "=0.24.4"
+# statrs: t分布のCDF・逆CDF（classical/HC/HAC標準誤差のp値・信頼区間の計算に使用、Issue #9）。
+# pure Rustでsystem BLAS/LAPACK不要、faerの方針と一貫する。
+# default-features = false でnalgebra/rand機能を無効化し、CDF計算に必要な最小限の依存に絞る
+# （engineの[dependencies]へ追加する際もdefault-features = falseを維持すること）。
+statrs = "=0.18.0"

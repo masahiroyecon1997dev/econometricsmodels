@@ -10,5 +10,6 @@ name = "_lib"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.29.0", features = ["extension-module"] }
+# サプライチェーン攻撃対策として`=`で完全固定する（ルートCargo.tomlの[workspace.dependencies]と同方針）。
+pyo3 = { version = "=0.29.0", features = ["extension-module"] }
 engine = { path = "../engine" }

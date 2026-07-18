@@ -60,6 +60,23 @@ pub enum OlsError {
     ComputationFailed(String),
 }
 
+/// 標準誤差の種別。文字列パース（Python文字列 → この型への変換）は`engine_pybind`側の
+/// 責務（PyO3境界の関心事のため）。ここでは`OlsEstimator::fit`が計算方法を分岐するための
+/// 純粋な列挙型のみを定義する。
+///
+/// 【スコープの注意（Issue #10時点）】`Cluster`・`Hac`はまだ未実装（対応する実装issueは
+/// Issue #11がHACのみで、clusterには対応するissueが現時点で存在しない。
+/// `docs/planning/specs/ols-implementation-notes.md`参照）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CovType {
+    /// 等分散前提（`σ̂²(X'X)⁻¹`）
+    Classical,
+    Hc0,
+    Hc1,
+    Hc2,
+    Hc3,
+}
+
 /// OLSの被説明変数・設計行列を保持する入力データ。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
@@ -172,17 +189,19 @@ impl OlsInput {
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
 /// `fit`でのバリデーション（観測数・特異性・信頼水準）を通過した状態のみを表す。
 ///
-/// 【スコープの注意（Issue #9時点）】標準誤差はclassical（等分散前提）のみ実装。
-/// `cov_type`によるHC/cluster/HACへの分岐はIssue #10・#11で追加する
-/// （現時点では常にclassicalとして計算する）。
+/// 【スコープの注意（Issue #10時点）】`cov_type`はclassical/HC0-3まで対応。
+/// cluster・HACへの分岐は対応するissue（HACはIssue #11。clusterは対応するissueが
+/// 現時点で存在しない）で追加する。
 #[derive(Debug)]
 pub struct OlsEstimator {
     input: OlsInput,
+    /// 使用した標準誤差の種別
+    cov_type: CovType,
     /// 係数 (k, 1)。`input.param_names()`と対応する
     params: Mat<f64>,
     /// 残差 (n, 1) = y - Xβ̂
     residuals: Mat<f64>,
-    /// 標準誤差 (k, 1)。Issue #9時点ではclassicalのみ
+    /// 標準誤差 (k, 1)
     std_errors: Mat<f64>,
     /// t統計量 (k, 1) = params / std_errors
     t_stats: Mat<f64>,
@@ -195,24 +214,34 @@ pub struct OlsEstimator {
 }
 
 impl OlsEstimator {
-    /// 正規方程式を列ピボットQR分解（`col_piv_qr`）で解き、OLS係数・classical標準誤差・
+    /// 正規方程式を列ピボットQR分解（`col_piv_qr`）で解き、OLS係数・標準誤差・
     /// t統計量・p値・信頼区間を求める。
     ///
     /// Cholesky（`X'Xβ=X'y`をXᵀXのCholesky分解で解く）ではなく列ピボットQRを採用する理由:
     /// `X'X`を明示的に作ると条件数が2乗になり数値的に不利な上、特異性検出
     /// （`.claude/rules/rust-style.md`「線形代数」が要求する`col_piv_qr`）と係数計算を
     /// 同じ分解で一度に行える。標準誤差の計算では`X'X`の逆行列が別途必要になるため
-    /// （classical: `σ̂²(X'X)⁻¹`）、そちらは`X'X`のCholesky分解（対称正定値であることは
-    /// 上記の特異性検出で既に確認済み）で個別に求める。
+    /// （classical: `σ̂²(X'X)⁻¹`、HC0-3: `(X'X)⁻¹Ψ̂(X'X)⁻¹`）、そちらは`X'X`自体の
+    /// Cholesky分解（対称正定値であることは上記の特異性検出で既に確認済み）で個別に求める。
     ///
     /// `confidence_level`は`fit`実行時に一度だけ使用し、信頼区間に固定して含める
     /// （`docs/planning/specs/ols-implementation-notes.md`「信頼区間」参照。実行時可変引数にはしない）。
+    ///
+    /// `cov_type`によらず、p値・信頼区間の算出にはt分布（自由度n-k）を使う。
+    /// 主リファレンスのstatsmodelsはHC0-3で正規分布を既定とするが（`use_t=False`）、
+    /// 本プロジェクトはt分布で統一する方針（`docs/planning/specs/ols-api-design.md`
+    /// 「検定分布」、Issue #10で確認済み）。ベンチマーク生成側
+    /// （`benchmark/run_statsmodels_benchmark.py`）は`use_t=True`を明示指定して合わせている。
     ///
     /// # Errors
     /// - `confidence_level`が`(0, 1)`の範囲外: `OlsError::InvalidConfidenceLevel`
     /// - 観測数`n`が`k`（定数項を含む説明変数の数）以下: `OlsError::InsufficientObservations`
     /// - 設計行列が特異（完全な多重共線性等）: `OlsError::SingularMatrix`
-    pub fn fit(input: OlsInput, confidence_level: f64) -> Result<Self, OlsError> {
+    pub fn fit(
+        input: OlsInput,
+        cov_type: CovType,
+        confidence_level: f64,
+    ) -> Result<Self, OlsError> {
         if !(confidence_level > 0.0 && confidence_level < 1.0) {
             return Err(OlsError::InvalidConfidenceLevel { confidence_level });
         }
@@ -234,7 +263,15 @@ impl OlsEstimator {
         let ssr: f64 = (0..n).map(|i| (*residuals.get(i, 0)).powi(2)).sum();
         let sigma2 = ssr / (df as f64);
 
-        let std_errors = classical_std_errors(input.x(), sigma2, k)?;
+        let xtx_inv = xtx_inverse(input.x(), k)?;
+
+        let std_errors = match cov_type {
+            CovType::Classical => classical_std_errors(sigma2, &xtx_inv, k),
+            CovType::Hc0 => hc_std_errors(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc0),
+            CovType::Hc1 => hc_std_errors(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc1),
+            CovType::Hc2 => hc_std_errors(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc2),
+            CovType::Hc3 => hc_std_errors(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc3),
+        };
 
         let t_dist = StudentsT::new(0.0, 1.0, df as f64)
             .map_err(|e| OlsError::ComputationFailed(e.to_string()))?;
@@ -259,6 +296,7 @@ impl OlsEstimator {
 
         Ok(Self {
             input,
+            cov_type,
             params,
             residuals,
             std_errors,
@@ -272,6 +310,11 @@ impl OlsEstimator {
     /// 推定に使った入力データ
     pub fn input(&self) -> &OlsInput {
         &self.input
+    }
+
+    /// 使用した標準誤差の種別
+    pub fn cov_type(&self) -> CovType {
+        self.cov_type
     }
 
     /// 係数 (k, 1)
@@ -310,22 +353,98 @@ impl OlsEstimator {
     }
 }
 
-/// classical（等分散前提）標準誤差: `σ̂²(X'X)⁻¹`の対角成分の平方根。
+/// `(X'X)⁻¹`を求める。classical・HC0-3いずれの標準誤差計算でも共通して必要になる。
 ///
 /// `X'X`は対称正定値であることが`ensure_full_rank`（Xの特異性検出）で既に保証されている
 /// ため、Cholesky分解（`Llt`）で逆行列を求める。理論上ここで`LltError`は発生しないはずだが、
 /// 浮動小数点演算の丸めにより境界的なケースで失敗しうるため、`SingularMatrix`として扱う。
-fn classical_std_errors(x: &Mat<f64>, sigma2: f64, k: usize) -> Result<Mat<f64>, OlsError> {
+fn xtx_inverse(x: &Mat<f64>, k: usize) -> Result<Mat<f64>, OlsError> {
     let xtx = x.transpose() * x;
     let llt = xtx.llt(Side::Lower).map_err(|_| OlsError::SingularMatrix)?;
-    let xtx_inv = llt.solve(Mat::<f64>::identity(k, k));
+    Ok(llt.solve(Mat::<f64>::identity(k, k)))
+}
 
+/// classical（等分散前提）標準誤差: `σ̂²(X'X)⁻¹`の対角成分の平方根。
+fn classical_std_errors(sigma2: f64, xtx_inv: &Mat<f64>, k: usize) -> Mat<f64> {
     let mut std_errors = Mat::zeros(k, 1);
     for j in 0..k {
         let variance = sigma2 * (*xtx_inv.get(j, j));
         *std_errors.get_mut(j, 0) = variance.sqrt();
     }
-    Ok(std_errors)
+    std_errors
+}
+
+/// HC0〜HC3ロバスト標準誤差: `(X'X)⁻¹Ψ̂(X'X)⁻¹`の対角成分の平方根。
+///
+/// `Ψ̂ = Σ_i w_i ε̂_i² x_i x_i'`（`w_i`はHCの種類ごとの重み）を、各行を
+/// `scale_i = sqrt(w_i) * ε̂_i`でスケーリングした行列`Xw`を使って`Ψ̂ = Xw'Xw`として計算する
+/// （符号は二乗で相殺されるため、`scale_i`の符号自体は`ε̂_i`のままでよい）。
+/// `x_i x_i'`の外積を行ごとに手動で積み上げるより、既存の行列積を再利用できて簡潔なため。
+///
+/// - HC0: `w_i = 1`
+/// - HC1: `w_i = n/(n-k)`（定数）
+/// - HC2: `w_i = 1/(1-h_ii)`（`h_ii`はレバレッジ）
+/// - HC3: `w_i = 1/(1-h_ii)²`
+///
+/// レバレッジ`h_ii = x_i'(X'X)⁻¹x_i`はHC2/HC3でのみ必要なため、それ以外では計算しない。
+fn hc_std_errors(
+    x: &Mat<f64>,
+    residuals: &Mat<f64>,
+    xtx_inv: &Mat<f64>,
+    n: usize,
+    k: usize,
+    variant: HcVariant,
+) -> Mat<f64> {
+    let leverage: Option<Vec<f64>> = match variant {
+        HcVariant::Hc2 | HcVariant::Hc3 => {
+            // h_ii = (X (X'X)⁻¹ X')_ii を、n×n の行列を作らずに行ごとの内積で求める。
+            let xh = x * xtx_inv; // (n, k)
+            Some(
+                (0..n)
+                    .map(|i| (0..k).map(|j| (*xh.get(i, j)) * (*x.get(i, j))).sum())
+                    .collect(),
+            )
+        }
+        HcVariant::Hc0 | HcVariant::Hc1 => None,
+    };
+
+    let hc1_correction = ((n as f64) / ((n - k) as f64)).sqrt();
+
+    let x_scaled = Mat::from_fn(n, k, |i, j| {
+        let resid = *residuals.get(i, 0);
+        let scale = match variant {
+            HcVariant::Hc0 => resid,
+            HcVariant::Hc1 => resid * hc1_correction,
+            HcVariant::Hc2 => {
+                let h = leverage.as_ref().expect("Hc2はleverage計算済み")[i];
+                resid / (1.0 - h).sqrt()
+            }
+            HcVariant::Hc3 => {
+                let h = leverage.as_ref().expect("Hc3はleverage計算済み")[i];
+                resid / (1.0 - h)
+            }
+        };
+        scale * (*x.get(i, j))
+    });
+
+    let psi_hat = x_scaled.transpose() * &x_scaled;
+    let var_hc = xtx_inv * &psi_hat * xtx_inv;
+
+    let mut std_errors = Mat::zeros(k, 1);
+    for j in 0..k {
+        *std_errors.get_mut(j, 0) = (*var_hc.get(j, j)).sqrt();
+    }
+    std_errors
+}
+
+/// `hc_std_errors`の内部でのみ使う、HCの種類。`CovType`はclassicalも含む上位概念のため、
+/// HC計算専用の分岐であることを型で明確にする（`CovType::Classical`が紛れ込まない）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HcVariant {
+    Hc0,
+    Hc1,
+    Hc2,
+    Hc3,
 }
 
 /// 列ピボットQRの`R`の対角成分から設計行列のランク落ちを検出する。
@@ -502,7 +621,7 @@ mod tests {
         )
         .unwrap();
 
-        let estimator = OlsEstimator::fit(input, 0.95).unwrap();
+        let estimator = OlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
         let params = estimator.params();
 
         assert!(
@@ -531,7 +650,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = OlsEstimator::fit(input, 0.95);
+        let result = OlsEstimator::fit(input, CovType::Classical, 0.95);
 
         assert_eq!(
             result.unwrap_err(),
@@ -553,7 +672,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = OlsEstimator::fit(input, 0.95);
+        let result = OlsEstimator::fit(input, CovType::Classical, 0.95);
 
         assert_eq!(result.unwrap_err(), OlsError::SingularMatrix);
     }
@@ -571,7 +690,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = OlsEstimator::fit(input, 1.5);
+        let result = OlsEstimator::fit(input, CovType::Classical, 1.5);
 
         assert_eq!(
             result.unwrap_err(),
@@ -597,7 +716,7 @@ mod tests {
         )
         .unwrap();
 
-        let estimator = OlsEstimator::fit(input, 0.95).unwrap();
+        let estimator = OlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
 
         let params = estimator.params();
         assert!((*params.get(0, 0) - 2.2).abs() < 1e-9);
@@ -621,5 +740,91 @@ mod tests {
         assert!((*upper.get(0, 0) - 5.185_399_261_018_91).abs() < 1e-6);
         assert!((*lower.get(1, 0) - (-0.300_131_745_291_273_4)).abs() < 1e-6);
         assert!((*upper.get(1, 0) - 1.500_131_745_291_273_2).abs() < 1e-6);
+    }
+
+    /// 同じデータセット（x=[1..5], y=[2,4,5,4,5]）でのHC0〜HC3。
+    /// 期待値はstatsmodels 0.14.6で`use_t=True`を明示指定して独立に計算・検算済み
+    /// （`sm.OLS(Y, X).fit(cov_type=..., use_t=True)`）。`use_t=True`が必要な理由は
+    /// `docs/planning/specs/ols-api-design.md`「検定分布」、
+    /// および`OlsEstimator::fit`のdocコメント参照
+    /// （statsmodelsはHC0-3でuse_t=Falseが既定＝正規分布のため、素の既定値とは一致しない）。
+    #[test]
+    fn fit_computes_hc_std_errors_t_stats_p_values_and_conf_int() {
+        // (cov_type, [se_const, se_x1], [t_const, t_x1], [p_const, p_x1],
+        //  [lower_const, lower_x1], [upper_const, upper_x1])
+        #[allow(clippy::type_complexity)]
+        let cases: [(CovType, [f64; 2], [f64; 2], [f64; 2], [f64; 2], [f64; 2]); 4] = [
+            (
+                CovType::Hc0,
+                [0.741_350_119_714_024_1, 0.185_472_369_909_913_61],
+                [2.967_558_703_367_644, 3.234_983_196_103_162_8],
+                [0.059_183_855_836_541_795, 0.048_033_568_062_853_735],
+                [-0.159_306_949_405_533_25, 0.009_744_141_647_982_651],
+                [4.559_306_949_405_528, 1.190_255_858_352_018_2],
+            ),
+            (
+                CovType::Hc1,
+                [0.957_078_889_120_43, 0.239_443_799_947_572_34],
+                [2.298_661_087_407_152_2, 2.505_807_208_753_678_2],
+                [0.105_117_351_189_905_94, 0.087_259_022_565_828_92],
+                [-0.845_852_174_546_351, -0.162_017_036_466_242_44],
+                [5.245_852_174_546_345, 1.362_017_036_466_243_2],
+            ),
+            (
+                CovType::Hc2,
+                [1.106_216_202_066_430_8, 0.279_795_843_939_315_45],
+                [1.988_761_325_218_668_2, 2.144_420_701_724_696_3],
+                [0.140_853_196_409_229_89, 0.121_345_243_297_999_42],
+                [-1.320_473_665_111_291_2, -0.290_435_249_778_410_95],
+                [5.720_473_665_111_285, 1.490_435_249_778_412],
+            ),
+            (
+                CovType::Hc3,
+                [1.689_236_634_744_594_6, 0.429_760_255_899_750_37],
+                [1.302_363_419_517_377_2, 1.396_127_240_160_527_1],
+                [0.283_757_574_453_598_06, 0.257_051_084_412_133_5],
+                [-3.175_904_886_992_822, -0.767_688_938_545_941],
+                [7.575_904_886_992_816_5, 1.967_688_938_545_941_7],
+            ),
+        ];
+
+        for (cov_type, se, t, p, lower, upper) in cases {
+            let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
+            let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+            let input = OlsInput::from_columns(
+                &y,
+                &x_columns,
+                vec!["x1".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
+
+            let estimator = OlsEstimator::fit(input, cov_type, 0.95).unwrap();
+
+            for j in 0..2 {
+                let msg = format!("{cov_type:?}, param {j}");
+                assert!(
+                    (*estimator.std_errors().get(j, 0) - se[j]).abs() < 1e-6,
+                    "std_errors mismatch: {msg}"
+                );
+                assert!(
+                    (*estimator.t_stats().get(j, 0) - t[j]).abs() < 1e-6,
+                    "t_stats mismatch: {msg}"
+                );
+                assert!(
+                    (*estimator.p_values().get(j, 0) - p[j]).abs() < 1e-6,
+                    "p_values mismatch: {msg}"
+                );
+                assert!(
+                    (*estimator.conf_lower().get(j, 0) - lower[j]).abs() < 1e-6,
+                    "conf_lower mismatch: {msg}"
+                );
+                assert!(
+                    (*estimator.conf_upper().get(j, 0) - upper[j]).abs() < 1e-6,
+                    "conf_upper mismatch: {msg}"
+                );
+            }
+        }
     }
 }

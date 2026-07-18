@@ -39,10 +39,34 @@
   既に特異性検出（Issue #8の`ensure_full_rank`）で保証されているため、`X'X`自体のCholesky分解（`Llt`）で
   逆行列を求める（`classical_std_errors`関数）。列ピボットQR分解を再利用する方式ではない
 - t統計量: `params / std_errors`。p値: 両側検定、自由度`n-k`のt分布のCDFから計算（正規分布ではない、
-  `ols-standard-errors.md`「検定に使う分布」参照）
+  `ols-api-design.md`「検定分布」参照）
 - 信頼区間: `confidence_level`から求めたt分布の臨界値`t_crit`を使い、`coef ± t_crit * std_err`
 - t分布のCDF・逆CDFには**statrs**クレート（`=0.18.0`固定、`default-features = false`でnalgebra/rand機能を除外）を使用。engineへの追加はfaer/thiserror同様、ルートCargo.tomlの`[workspace.dependencies]`で`=`により完全固定
 - **スコープ外（Issue #9時点）**: `cov_type`によるHC/cluster/HACへの分岐（Issue #10・#11）。R²・調整済みR²・F統計量・AIC/BIC・対数尤度等の**適合度統計量はIssue #21**（Issue #11の後に着手）で実装する
+
+### HC0〜HC3ロバスト標準誤差、および`use_t`に関する重要な発見（Issue #10で実装済み）
+
+- `engine::linear::ols::CovType`（`Classical`/`Hc0`/`Hc1`/`Hc2`/`Hc3`）を新設し、
+  `OlsEstimator::fit(input, cov_type, confidence_level)`で分岐する。文字列パース
+  （Python文字列 → `CovType`）は`engine_pybind`側の責務のまま（後続issueで配線）
+- `(X'X)⁻¹`の計算をclassicalと共通化（`xtx_inverse`関数に分離）。HC0-3は
+  `(X'X)⁻¹Ψ̂(X'X)⁻¹`の対角成分の平方根。`Ψ̂ = Σ w_i ε̂_i² x_i x_i'`は、各行を
+  `sqrt(w_i)*ε̂_i`でスケーリングした行列`Xw`を使い`Ψ̂ = Xw'Xw`として計算する
+  （外積を手動で積み上げるより既存の行列積を再利用でき簡潔なため）
+- レバレッジ`h_ii = x_i'(X'X)⁻¹x_i`はHC2/HC3でのみ必要（`n×n`の帽子行列は作らず、
+  `X(X'X)⁻¹`の行ごとの内積で計算）
+
+**重要な発見（statsmodelsの`use_t`既定値）**: statsmodelsは`cov_type`が`"nonrobust"`
+（classical）以外（HC0-3・cluster・HAC）の場合、`use_t=False`が既定で、p値・信頼区間に
+**正規分布**を使う（`use_t=True`にしない限りt分布にならない）。本プロジェクトは
+`cov_type`によらずt分布で統一する方針（`ols-api-design.md`「検定分布」）のため、
+`benchmark/run_statsmodels_benchmark.py`に明示的に`use_t=True`を追加した
+（Issue #10で発見・修正）。
+
+**既存フィクスチャへの影響**: `tests/api_tests/fixtures/benchmarks/ols.json`は
+`use_t=True`修正前に生成されたもので、HC0-3・cluster・HACの`t_stats`/`p_values`/
+`conf_int`が正規分布ベースの値になっている可能性が高い（`coef`/`se`自体は`use_t`に
+依存しないため影響なし）。**Issue #18/#19着手時に再生成が必要**。
 - テストは`tests/engine_tests`ではなく`engine`クレート内の`#[cfg(test)]`（`cargo test -p engine`）に実装。既知の厳密解データに加え、scipy.stats.tで独立に検算した教科書的データセット（x=[1..5], y=[2,4,5,4,5]）で標準誤差・t値・p値・信頼区間を1e-6〜1e-9の許容誤差で検証
 
 ### Python側の例外はカテゴリ別に分ける

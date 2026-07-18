@@ -8,6 +8,55 @@
 //! 「OLSOptions」の`include_intercept`の項を参照。
 
 use faer::Mat;
+use thiserror::Error;
+
+/// OLSの計算過程で発生しうるエラー。
+///
+/// `engine`はPyO3を知らないため、Python例外への変換は`engine_pybind`側で行う
+/// （`.claude/rules/rust-style.md`「エラーハンドリング」参照）。バリアントと
+/// Python例外の対応は`docs/planning/specs/ols-implementation-notes.md`の表を参照。
+///
+/// 【スコープの注意】欠損値（null）・`time_col`の数値キャスト失敗等、polarsの
+/// 列データそのものに起因する検証は`engine_pybind::column_extraction`の責務であり、
+/// ここには含めない（`engine`は`&[f64]`等、既にクリーンな値しか受け取らない前提）。
+/// 正規方程式ソルバー実装等の後続issueで必要になった場合はバリアントを随時追加する。
+#[derive(Debug, Error, PartialEq)]
+pub enum OlsError {
+    /// yとxの行数が一致しない。
+    #[error("dimension mismatch: y has {y_rows} rows but x has {x_rows} rows")]
+    DimensionMismatch { y_rows: usize, x_rows: usize },
+
+    /// 観測数nが説明変数の数k（定数項を含む）以下。
+    #[error(
+        "insufficient observations: n={n} must be greater than k={k} \
+         (number of independent variables, including the intercept)"
+    )]
+    InsufficientObservations { n: usize, k: usize },
+
+    /// `cov_type=Cluster`のときのクラスター数が2未満。
+    #[error("cov_type='cluster' requires at least 2 clusters, got {g}")]
+    InsufficientClusters { g: usize },
+
+    /// `confidence_level`が`(0, 1)`の範囲外。
+    #[error("confidence_level must be in the range (0, 1): {confidence_level}")]
+    InvalidConfidenceLevel { confidence_level: f64 },
+
+    /// `hac_lags`が負、または観測数`n`以上。
+    #[error("hac_lags must be in the range [0, n): got {hac_lags}, n={n}")]
+    InvalidHacLags { hac_lags: i64, n: usize },
+
+    /// `cov_type=Cluster`なのにクラスターのグループキーが渡されていない。
+    #[error("cov_type='cluster' requires cluster identifiers to be provided")]
+    MissingClusterColumn,
+
+    /// 設計行列が特異（完全な多重共線性等）。
+    #[error("design matrix is singular (perfect multicollinearity detected)")]
+    SingularMatrix,
+
+    /// 上記以外の計算過程での失敗（t分布のCDF計算等）。
+    #[error("computation failed: {0}")]
+    ComputationFailed(String),
+}
 
 /// OLSの被説明変数・設計行列を保持する入力データ。
 ///
@@ -168,6 +217,64 @@ mod tests {
             vec!["x1".to_string()],
             true,
             "y".to_string(),
+        );
+    }
+
+    #[test]
+    fn ols_error_messages_are_human_readable() {
+        assert_eq!(
+            OlsError::DimensionMismatch {
+                y_rows: 10,
+                x_rows: 8
+            }
+            .to_string(),
+            "dimension mismatch: y has 10 rows but x has 8 rows"
+        );
+        assert_eq!(
+            OlsError::InsufficientObservations { n: 2, k: 3 }.to_string(),
+            "insufficient observations: n=2 must be greater than k=3 \
+             (number of independent variables, including the intercept)"
+        );
+        assert_eq!(
+            OlsError::InsufficientClusters { g: 1 }.to_string(),
+            "cov_type='cluster' requires at least 2 clusters, got 1"
+        );
+        assert_eq!(
+            OlsError::InvalidConfidenceLevel {
+                confidence_level: 1.5
+            }
+            .to_string(),
+            "confidence_level must be in the range (0, 1): 1.5"
+        );
+        assert_eq!(
+            OlsError::InvalidHacLags {
+                hac_lags: -1,
+                n: 100
+            }
+            .to_string(),
+            "hac_lags must be in the range [0, n): got -1, n=100"
+        );
+        assert_eq!(
+            OlsError::MissingClusterColumn.to_string(),
+            "cov_type='cluster' requires cluster identifiers to be provided"
+        );
+        assert_eq!(
+            OlsError::SingularMatrix.to_string(),
+            "design matrix is singular (perfect multicollinearity detected)"
+        );
+        assert_eq!(
+            OlsError::ComputationFailed("t-distribution CDF did not converge".to_string())
+                .to_string(),
+            "computation failed: t-distribution CDF did not converge"
+        );
+    }
+
+    #[test]
+    fn ols_error_implements_partial_eq() {
+        assert_eq!(OlsError::SingularMatrix, OlsError::SingularMatrix);
+        assert_ne!(
+            OlsError::InsufficientClusters { g: 1 },
+            OlsError::InsufficientClusters { g: 0 }
         );
     }
 }

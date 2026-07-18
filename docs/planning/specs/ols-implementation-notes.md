@@ -21,28 +21,32 @@
 ### Python側の例外はカテゴリ別に分ける
 
 - 詳細・理由は `.claude/rules/rust-style.md`「エラーハンドリング」を参照（`ValidationError` / `ComputationError`の2階層、`pyo3::create_exception!`で定義）
-- OLSでの`OlsError`との対応（案）:
+- OLSでの`engine::linear::ols::OlsError`との対応（Issue #7で確定・実装済み）:
 
 | `OlsError`のバリアント | Python例外 |
 |---|---|
-| `InvalidInput`（欠損値・次元不一致） | `ValidationError` |
+| `DimensionMismatch` | `ValidationError` |
 | `InsufficientObservations` | `ValidationError` |
 | `MissingClusterColumn` | `ValidationError` |
-| `InvalidConfidenceLevel`（新規） | `ValidationError` |
-| `InsufficientClusters`（新規） | `ValidationError` |
-| `InvalidHacLags`（新規、Issue #3） | `ValidationError` |
-| `InvalidTimeColumn`（新規、Issue #3、`time_col`が数値キャスト不可の場合） | `ValidationError` |
+| `InvalidConfidenceLevel` | `ValidationError` |
+| `InsufficientClusters` | `ValidationError` |
+| `InvalidHacLags`（Issue #3） | `ValidationError` |
 | `SingularMatrix` | `ComputationError` |
-| `ComputationError`（分布計算等の失敗） | `ComputationError` |
+| `ComputationFailed`（分布計算等の失敗） | `ComputationError` |
 
-## エラー型に追加が必要なもの
+**Issue #7での確定事項（スコープの絞り込み）**: 当初案の`InvalidInput`（欠損値・次元不一致を1バリアントにまとめたもの）は、Issue #7実装時に`DimensionMismatch`（次元不一致のみ）に改名した。欠損値検出は`engine`が受け取る時点で既に`&[f64]`（クリーン値のみ）である前提のため、`engine`側のエラーではなく`engine_pybind::column_extraction`側の責務。同じ理由で`InvalidTimeColumn`（`time_col`の数値キャスト失敗）も`engine`のエラー型には含めず、`engine_pybind`側でのみ扱う。
 
-草案コードの`OlsError`には無かったが、今回の設計決定に伴い追加が必要なバリアント。
+## エラー型（`engine::linear::ols::OlsError`、Issue #7で実装済み）
+
+草案コードの`OlsError`には無かったが、今回の設計決定に伴い追加したバリアント。
 
 - **`InvalidConfidenceLevel`**: `confidence_level`が`(0, 1)`の範囲外だった場合
 - **`InsufficientClusters { g: usize }`**: クラスター数`g < 2`の場合。草案コードでは未検証で、実際に0除算からのNaN伝播でパニックすることを確認済み（`docs/planning/draft-reference/ols-draft-consolidated.md`参照）。`new()`の時点で検証し、`fit()`まで到達させない
 - **`InvalidHacLags { hac_lags: i64, n: usize }`**（Issue #3）: `hac_lags`が負、または`n`以上の場合
-- **`InvalidTimeColumn`**（Issue #3）: `time_col`に指定した列がf64にキャストできない場合（`extract_f64_column`と同じ検証パターンを流用できる）
+
+`InvalidTimeColumn`（Issue #3で検討した、`time_col`のf64キャスト失敗）は`OlsError`には含めない。上記「Python側の例外はカテゴリ別に分ける」の注記通り、`engine_pybind::column_extraction`側のみで扱う。
+
+`OlsInput::from_columns`（Issue #6）自体は次元不一致を`debug_assert!`でしか検証しない（呼び出し側との内部契約）。`DimensionMismatch`/`InsufficientObservations`等を実際に`Result`として返す検証は、`OlsEstimator`のコンストラクタ（未実装、正規方程式ソルバー実装issue）で行う。
 
 ## 実装時に見落としやすい点（要注意）
 

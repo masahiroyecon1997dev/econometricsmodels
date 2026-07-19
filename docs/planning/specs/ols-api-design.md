@@ -11,11 +11,12 @@ GitHub Issue #2「OLS: API・オプション設計」の完了条件（設計を
 ## 1. 全体構成（3層）
 
 ```
-python_package (Issue #15, 未実装)      engine_pybind (実装済み)          engine (未実装)
+python_package (Issue #15, 未実装)      engine_pybind (実装済み)          engine (実装済み)
 ┌─────────────────────────┐   ┌──────────────────────────┐   ┌─────────────────┐
 │ OLS(data, y, x, options) │──▶│ fit_ols(data, y, x,      │──▶│ 正規方程式ソルバー│
 │   .fit() -> OlsResults   │   │          options)        │   │ 標準誤差計算 等   │
-│ OLSOptions（_lib再輸出） │   │ OLSOptions (#[pyclass])  │   │ (Issue #6〜#12)  │
+│ OLSOptions（_lib再輸出） │   │ OLSOptions (#[pyclass])  │   │ (Issue #6〜#22)  │
+│                          │   │ OLSResult (#[pyclass])   │   │                  │
 └─────────────────────────┘   └──────────────────────────┘   └─────────────────┘
 ```
 
@@ -35,8 +36,7 @@ python_package (Issue #15, 未実装)      engine_pybind (実装済み)         
 ## 3. `OLSOptions`
 
 `engine_pybind/src/linear/ols.rs`の`#[pyclass] OLSOptions`として実装済み
-（`hac_lags` / `time_col`、および`cov_type`の`"hac"`はIssue #3で確定した追加分で、コードへの反映は
-実装issue #11で行う）。
+（`hac_lags` / `time_col`はIssue #3で確定した追加分で、Issue #14で`OLSOptions`に反映した）。
 python_package層はこれを独自クラスとして再定義せず、`_lib`から再輸出する
 （`engine_pybindからの呼び出しを薄くラップする。計算ロジックをPython側に持たない`、
 `.claude/rules/python-style.md`参照）。
@@ -67,13 +67,15 @@ fn fit_ols(
     y: String,
     x: Vec<String>,
     options: OLSOptions,
-) -> PyResult<PyObject>
+) -> PyResult<OLSResult>
 ```
 
 - `data`はpolars DataFrame（Arrow経由、ゼロコピー）。
-- 現状の実装スコープ: 「パラメータの受け口」（`data`/`y`/`x`/`options`の検証とfaer行列への変換、
-  `engine_pybind/src/linear/ols.rs::extract_ols_input`）のみ。実際の推定計算（正規方程式ソルバー・
-  標準誤差計算等）は`engine`側の別issue（#6〜#12）に委ねており、現状は`ComputationError`を返して打ち切る。
+- Issue #14で実装済み。`engine_pybind/src/linear/ols.rs::fit`が「パラメータの受け口」
+  （`data`/`y`/`x`/`options`の検証とfaer行列への変換）から`engine::linear::ols::OlsInput::from_columns`
+  ＋`OlsEstimator::fit`の呼び出しまでを一気通貫で行う。返り値は`#[pyclass] OLSResult`
+  （`params`/`std_errors`/`t_stats`/`p_values`/`conf_lower`/`conf_upper`/`param_names`/`residuals`/
+  適合度統計量（`r_squared`等、Issue #21）を`#[pyo3(get_all)]`で公開する構造体）。
 - 検証エラーはすべて`ValidationError`、計算過程で発覚する問題（特異行列等）は`ComputationError`
   （`.claude/rules/rust-style.md`「エラーハンドリング」、詳細対応表は`ols-implementation-notes.md`参照）。
 
@@ -85,8 +87,10 @@ fn fit_ols(
 - 係数テーブルにpolars DataFrameは使わない。少数行のテーブルではDataFrameの利点がなく、
   REST APIでJSON化する前提だと変換の中間ステップが増えるだけのため。
 - **Rust/engine_pybind側の責務は配列＋名前リストを返すところまで**
-  （`params`, `std_errors`, `t_stats`, `p_values`, `conf_int`, `param_names`）。
-  テーブル組み立てはpython_package層で行う。
+  （`params`, `std_errors`, `t_stats`, `p_values`, `conf_lower`/`conf_upper`, `param_names`,
+  `residuals`。Issue #14で実装済みの`OLSResult`は、`conf_int`は`conf_lower`/`conf_upper`に分割し
+  （engine内部の表現と揃え、pyo3実装を簡潔にするため）、適合度統計量（`r_squared`等、Issue #21）も
+  含めている）。テーブル組み立てはpython_package層で行う。
 - python_package層で用意する2形式:
   1. `coef_table`（`list[dict]`、行指向）: REST APIレスポンスにほぼそのまま使える。
      アプリ用途が主なので**先に実装**。

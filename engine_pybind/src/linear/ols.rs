@@ -1,37 +1,36 @@
-//! OLSの推定オプション、およびPython（polars DataFrame + 列名 + オプション）から
-//! Rust（faerの行列）への受け渡し・検証。
+//! OLSの推定オプション・結果、およびPython（polars DataFrame + 列名 + オプション）から
+//! `engine::linear::ols`（正規方程式ソルバー・標準誤差・適合度統計量）を呼び出し、
+//! 結果をPython側に返すところまでの一連の処理。
 //!
-//! 【スコープの注意】
-//! ここまでが「パラメータの受け口」の実装で、この先（正規方程式ソルバー・標準誤差計算等）は
-//! `engine::linear::ols`側の別issue（正規方程式ソルバー実装、標準誤差の実装、等）に委ねる。
-//! 本ファイル末尾の`OlsFitInput`は、そこに渡すための最小限の橋渡し用の型で、
-//! `engine`のデータ構造定義issue（「デザイン行列・目的変数のデータ構造定義」）で
-//! 正式に確定するまでの暫定案。
+//! 【責務分離】`.claude/rules/rust-style.md`「Python境界でのデータ受け渡し」参照。
+//! polars DataFrameから列ごとの`Vec<f64>`/`Vec<String>`への抽出はここ（`column_extraction`
+//! 経由）の責務。`faer::Mat`の組み立て（切片列の自動追加を含む）は`engine::linear::ols::OlsInput`
+//! に委ねる（本ファイルはもう`faer`を直接扱わない）。
 //!
 //! 【言語方針】`.claude/rules/rust-style.md`「言語方針」参照。
-//! 公開API（`OLSOptions`）のdocコメントと、`ValidationError`のメッセージ文字列は英語。
+//! 公開API（`OLSOptions`/`OLSResult`）のdocコメントと、`ValidationError`のメッセージ文字列は英語。
 //! それ以外（このファイルの説明・非公開関数のdocコメント等）は日本語のまま。
 
+use engine::linear::ols::{CovType as EngineCovType, OlsError, OlsEstimator, OlsInput};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
-use crate::errors::ValidationError;
+use crate::errors::{ComputationError, ValidationError};
 
 /// Estimation options for OLS.
 ///
-/// See `docs/planning/specs/ols-implementation-notes.md` and the corresponding GitHub
-/// issues ("OLS: API and options design" / "OLS: standard error specification") for the
-/// rationale behind each field's meaning and default value.
+/// See `docs/planning/specs/ols-api-design.md` and `docs/planning/specs/ols-standard-errors.md`
+/// for the rationale behind each field's meaning and default value.
 // `fit_ols`がPython側から`OLSOptions`インスタンスを引数として受け取るため、
 // `FromPyObject`実装を明示的に維持する（pyo3 0.28以降、Cloneを実装する#[pyclass]の
 // FromPyObject自動導出はopt-inに変更されたため）。
 #[pyclass(from_py_object)]
 #[derive(Debug, Clone)]
 pub struct OLSOptions {
-    /// Standard error type: one of "classical", "hc0", "hc1", "hc2", "hc3", "cluster".
-    /// Case-insensitive. HAC support is planned separately and not yet implemented.
+    /// Standard error type: one of "classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster".
+    /// Case-insensitive.
     #[pyo3(get, set)]
     pub cov_type: String,
 
@@ -53,6 +52,18 @@ pub struct OLSOptions {
     /// Ignored when `cov_type` is not "cluster".
     #[pyo3(get, set)]
     pub cluster_col: Option<String>,
+
+    /// Number of lags (bandwidth) for HAC (Newey-West) when `cov_type="hac"`.
+    /// When `None`, computed automatically via `L = floor(4*(n/100)^(2/9))`.
+    /// Ignored when `cov_type` is not "hac".
+    #[pyo3(get, set)]
+    pub hac_lags: Option<i64>,
+
+    /// Column name giving the time order for HAC when `cov_type="hac"`.
+    /// When `None`, the row order of `data` is treated as the time order.
+    /// Ignored when `cov_type` is not "hac".
+    #[pyo3(get, set)]
+    pub time_col: Option<String>,
 }
 
 #[pymethods]
@@ -63,122 +74,126 @@ impl OLSOptions {
         include_intercept = true,
         confidence_level = 0.95,
         cluster_col = None,
+        hac_lags = None,
+        time_col = None,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         cov_type: String,
         include_intercept: bool,
         confidence_level: f64,
         cluster_col: Option<String>,
+        hac_lags: Option<i64>,
+        time_col: Option<String>,
     ) -> Self {
         Self {
             cov_type,
             include_intercept,
             confidence_level,
             cluster_col,
+            hac_lags,
+            time_col,
         }
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "OLSOptions(cov_type={:?}, include_intercept={}, confidence_level={}, cluster_col={:?})",
-            self.cov_type, self.include_intercept, self.confidence_level, self.cluster_col
+            "OLSOptions(cov_type={:?}, include_intercept={}, confidence_level={}, \
+             cluster_col={:?}, hac_lags={:?}, time_col={:?})",
+            self.cov_type,
+            self.include_intercept,
+            self.confidence_level,
+            self.cluster_col,
+            self.hac_lags,
+            self.time_col
         )
     }
 }
 
-/// 標準誤差の種別。文字列パースはengine側ではなくここ（境界）で行う。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CovType {
-    Classical,
-    Hc0,
-    Hc1,
-    Hc2,
-    Hc3,
-    Cluster,
+/// Estimation results for OLS.
+///
+/// Structured data only (no `summary()`); see `docs/planning/specs/ols-api-design.md`
+/// section 5. Row-oriented table construction (e.g. a `coef_table`) is left to
+/// `python_package`. All array-valued fields (`params`, `std_errors`, etc.) share the
+/// same order as `param_names`.
+// `OLSResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
+// 受け取ることは想定していないため`skip_from_py_object`（`OLSOptions`の`from_py_object`とは
+// 対照的。pyo3 0.28以降、Cloneを実装する#[pyclass]のFromPyObject自動導出はopt-inになった）。
+#[pyclass(get_all, skip_from_py_object)]
+#[derive(Debug, Clone)]
+pub struct OLSResult {
+    pub params: Vec<f64>,
+    pub std_errors: Vec<f64>,
+    pub t_stats: Vec<f64>,
+    pub p_values: Vec<f64>,
+    pub conf_lower: Vec<f64>,
+    pub conf_upper: Vec<f64>,
+    pub param_names: Vec<String>,
+    pub residuals: Vec<f64>,
+    pub dep_var_name: String,
+    pub nobs: usize,
+    /// Standard error type actually used (echoes `OLSOptions.cov_type`, normalized to
+    /// lowercase; e.g. `"classical"`, `"hc1"`, `"hac"`, `"cluster"`).
+    pub cov_type: String,
+    pub r_squared: f64,
+    pub r_squared_adj: f64,
+    pub f_statistic: f64,
+    pub f_p_value: f64,
+    pub log_likelihood: f64,
+    pub aic: f64,
+    pub bic: f64,
 }
 
-impl TryFrom<&str> for CovType {
-    type Error = String;
-
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        match s.to_lowercase().as_str() {
-            "classical" | "nonrobust" => Ok(CovType::Classical),
-            "hc0" => Ok(CovType::Hc0),
-            "hc1" => Ok(CovType::Hc1),
-            "hc2" => Ok(CovType::Hc2),
-            "hc3" => Ok(CovType::Hc3),
-            "cluster" => Ok(CovType::Cluster),
-            other => Err(format!(
-                "unknown cov_type: '{other}'. Expected one of 'classical', 'hc0' through 'hc3', or 'cluster'"
-            )),
+/// `engine::linear::ols::OlsError`をPython例外に変換する。
+///
+/// `OlsError`（`engine`クレート）と`PyErr`（`pyo3`クレート）はどちらもこのクレートの
+/// 外で定義された型のため、orphan rule（`impl`の対象は自クレート内で定義された
+/// トレイトか型のどちらかを含む必要がある）により`impl From<OlsError> for PyErr`は
+/// 書けない。関数として実装し、呼び出し側で`.map_err(ols_error_to_pyerr)?`する。
+///
+/// 対応表は`docs/planning/specs/ols-implementation-notes.md`
+/// 「Python側の例外はカテゴリ別に分ける」参照。
+fn ols_error_to_pyerr(err: OlsError) -> PyErr {
+    match err {
+        OlsError::DimensionMismatch { .. }
+        | OlsError::InsufficientObservations { .. }
+        | OlsError::MissingClusterColumn
+        | OlsError::InvalidConfidenceLevel { .. }
+        | OlsError::InsufficientClusters { .. }
+        | OlsError::InvalidHacLags { .. } => ValidationError::new_err(err.to_string()),
+        OlsError::SingularMatrix | OlsError::ComputationFailed(_) => {
+            ComputationError::new_err(err.to_string())
         }
     }
 }
 
-/// 受け口の検証・変換を終えた後、engine側に渡すための暫定データ構造。
-///
-/// TODO(Issue #14: engine_pybind engine呼び出し・エラー変換実装): `engine::linear::ols::OlsInput`/
-/// `OlsEstimator`を直接呼び出す形に差し替え、この型自体を削除する。
-/// `#[allow(dead_code)]`: `fit_ols`は現状ここで受け取った値を`engine`に渡さず
-/// エラーで打ち切っている（Issue #14のスコープ）ため、フィールドが未使用のまま。
-#[allow(dead_code)]
-pub struct OlsFitInput {
-    /// 被説明変数 (n,)
-    pub y: faer::Mat<f64>,
-    /// 設計行列 (n, k)。`include_intercept=true`の場合、先頭列が定数項。
-    pub x: faer::Mat<f64>,
-    /// 係数名（`include_intercept=true`なら先頭が"const"）
-    pub param_names: Vec<String>,
-    /// 被説明変数名
-    pub dep_var_name: String,
-    /// クラスターのグループキー（cov_type=Clusterのときのみ Some）。
-    /// 州名・企業ID等の文字列/カテゴリカル変数を想定し、整数に限定しない。
-    pub cluster_ids: Option<Vec<String>>,
-    /// パース済みの標準誤差種別
-    pub cov_type: CovType,
-    /// 信頼水準（0, 1)
-    pub confidence_level: f64,
-    /// 定数項を含めたかどうか（df_model計算に使う。実行時ヒューリスティックは使わない）
-    pub include_intercept: bool,
+/// `faer::Mat<f64>`（n×1またはk×1の列ベクトル）を`Vec<f64>`に変換する。
+fn mat_to_vec(mat: &faer::Mat<f64>) -> Vec<f64> {
+    (0..mat.nrows()).map(|i| *mat.get(i, 0)).collect()
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `options` を検証し、
-/// engineに渡せる形（faerの行列）に変換する。
+/// `engine::linear::ols::OlsInput::from_columns` + `OlsEstimator::fit`を呼び出して
+/// OLSを推定し、`OLSResult`として返す。
 ///
 /// # Errors
-/// 以下はすべて`ValidationError`として返す（`ComputationError`ではない。
-/// ここでの失敗は全て「入力が悪い」ケースであり、統計計算の結果として
-/// 発覚する問題ではないため）。
-/// - `y`・`x`・`cluster_col`に指定された列が`data`に存在しない
-/// - `y`・`x`・`cluster_col`の列が数値型にキャストできない
-/// - `y`・`x`・`cluster_col`に欠損値（null）が含まれる
-/// - `cov_type`の文字列が不正
-/// - `confidence_level`が(0, 1)の範囲外
-/// - `cov_type="cluster"`なのに`cluster_col`が指定されていない
-/// - 観測数 n が 説明変数の数 k 以下
-pub fn extract_ols_input(
+/// - 列の抽出時に発覚する問題（列が存在しない、数値/文字列型にキャストできない、
+///   欠損値・NaN・無限大を含む等）は`column_extraction`の責務で`ValidationError`
+/// - `y`・`x`の重複、`include_intercept=true`のときの`"const"`列との衝突は
+///   ここ（受け口）の責務で`ValidationError`（`engine`の一般的な`SingularMatrix`より
+///   先に、分かりやすいメッセージで弾く）
+/// - `cov_type`の文字列が不正な場合は`ValidationError`
+/// - それ以外（観測数不足・信頼水準の範囲外・特異行列・クラスター数不足・
+///   `hac_lags`の範囲外・クラスターキー未指定等）は`engine::linear::ols::OlsError`から
+///   `ols_error_to_pyerr`で変換
+pub fn fit(
     data: PyDataFrame,
     y: String,
     x: Vec<String>,
     options: &OLSOptions,
-) -> PyResult<OlsFitInput> {
+) -> PyResult<OLSResult> {
     let df: DataFrame = data.into();
-
-    let cov_type =
-        CovType::try_from(options.cov_type.as_str()).map_err(ValidationError::new_err)?;
-
-    if !(options.confidence_level > 0.0 && options.confidence_level < 1.0) {
-        return Err(ValidationError::new_err(format!(
-            "confidence_level must be in the range (0, 1): {}",
-            options.confidence_level
-        )));
-    }
-
-    if cov_type == CovType::Cluster && options.cluster_col.is_none() {
-        return Err(ValidationError::new_err(
-            "options.cluster_col must be set when cov_type='cluster'",
-        ));
-    }
+    let cov_type_lower = options.cov_type.to_lowercase();
 
     if x.is_empty() {
         return Err(ValidationError::new_err(
@@ -226,61 +241,87 @@ pub fn extract_ols_input(
         x_slices.push(s);
     }
 
-    // ── クラスター列の抽出（指定時のみ）───────────────────────────────────
-    let cluster_ids = match &options.cluster_col {
-        Some(col_name) => {
-            let ids = extract_group_key_column(&df, col_name)?;
-            if ids.len() != n {
-                return Err(ValidationError::new_err(format!(
-                    "row count of cluster column '{col_name}' does not match y"
-                )));
+    // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
+    // `cluster_col`/`time_col`が指定されていても、cov_typeがcluster/hacでなければ
+    // 無視する（`docs/planning/specs/ols-standard-errors.md`3.2/3.3節）。
+    let cluster_groups = if cov_type_lower == "cluster" {
+        match &options.cluster_col {
+            Some(col_name) => {
+                let ids = extract_group_key_column(&df, col_name)?;
+                if ids.len() != n {
+                    return Err(ValidationError::new_err(format!(
+                        "row count of cluster column '{col_name}' does not match y"
+                    )));
+                }
+                Some(ids)
             }
-            Some(ids)
+            None => None,
         }
-        None => None,
-    };
-
-    // ── 設計行列の組み立て（定数項の自動追加を含む）──────────────────────
-    // NOTE: polarsは列ごとに別々のバッファを持つ（columnar layout）。faerのMatは
-    // 1つの連続領域を期待するため、ここで各列を1回コピーして詰め直す必要がある。
-    // 詳細は .claude/rules/rust-style.md「Python境界でのデータ受け渡し」参照。
-    let k = if options.include_intercept {
-        x_slices.len() + 1
     } else {
-        x_slices.len()
+        None
     };
 
-    if n <= k {
-        return Err(ValidationError::new_err(format!(
-            "insufficient observations: n={n} must be greater than k={k} \
-             (number of independent variables, including the intercept)"
-        )));
-    }
-
-    let x_mat = faer::Mat::from_fn(n, k, |i, j| {
-        if options.include_intercept {
-            if j == 0 { 1.0 } else { x_slices[j - 1][i] }
-        } else {
-            x_slices[j][i]
+    let time_order = if cov_type_lower == "hac" {
+        match &options.time_col {
+            Some(col_name) => {
+                let values = extract_f64_column(&df, col_name)?;
+                if values.len() != n {
+                    return Err(ValidationError::new_err(format!(
+                        "row count of time column '{col_name}' does not match y"
+                    )));
+                }
+                Some(values)
+            }
+            None => None,
         }
-    });
+    } else {
+        None
+    };
 
-    let y_mat = faer::Mat::from_fn(n, 1, |i, _| y_slice[i]);
+    let cov_type = match cov_type_lower.as_str() {
+        "classical" | "nonrobust" => EngineCovType::Classical,
+        "hc0" => EngineCovType::Hc0,
+        "hc1" => EngineCovType::Hc1,
+        "hc2" => EngineCovType::Hc2,
+        "hc3" => EngineCovType::Hc3,
+        "hac" => EngineCovType::Hac {
+            lags: options.hac_lags,
+            time_order,
+        },
+        "cluster" => EngineCovType::Cluster {
+            groups: cluster_groups,
+        },
+        other => {
+            return Err(ValidationError::new_err(format!(
+                "unknown cov_type: '{other}'. Expected one of 'classical', 'hc0' through \
+                 'hc3', 'hac', or 'cluster'"
+            )));
+        }
+    };
 
-    let mut param_names = Vec::with_capacity(k);
-    if options.include_intercept {
-        param_names.push("const".to_string());
-    }
-    param_names.extend(x.iter().cloned());
+    let input = OlsInput::from_columns(&y_slice, &x_slices, x, options.include_intercept, y)
+        .map_err(ols_error_to_pyerr)?;
+    let estimator =
+        OlsEstimator::fit(input, cov_type, options.confidence_level).map_err(ols_error_to_pyerr)?;
 
-    Ok(OlsFitInput {
-        y: y_mat,
-        x: x_mat,
-        param_names,
-        dep_var_name: y,
-        cluster_ids,
-        cov_type,
-        confidence_level: options.confidence_level,
-        include_intercept: options.include_intercept,
+    Ok(OLSResult {
+        params: mat_to_vec(estimator.params()),
+        std_errors: mat_to_vec(estimator.std_errors()),
+        t_stats: mat_to_vec(estimator.t_stats()),
+        p_values: mat_to_vec(estimator.p_values()),
+        conf_lower: mat_to_vec(estimator.conf_lower()),
+        conf_upper: mat_to_vec(estimator.conf_upper()),
+        param_names: estimator.input().param_names().to_vec(),
+        residuals: mat_to_vec(estimator.residuals()),
+        dep_var_name: estimator.input().dep_var_name().to_string(),
+        nobs: estimator.input().nobs(),
+        cov_type: cov_type_lower,
+        r_squared: estimator.r_squared(),
+        r_squared_adj: estimator.r_squared_adj(),
+        f_statistic: estimator.f_statistic(),
+        f_p_value: estimator.f_p_value(),
+        log_likelihood: estimator.log_likelihood(),
+        aic: estimator.aic(),
+        bic: estimator.bic(),
     })
 }

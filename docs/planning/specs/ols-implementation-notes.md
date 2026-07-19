@@ -176,6 +176,29 @@ issueの追記は「Python側pyproject.tomlのpolars（`1.42.1`）とバージ�
 
 いずれも成功。「Arrow経由のゼロコピーデータ受け渡し」は、Python→Rust境界の受け渡し自体を指す（`.claude/rules/rust-style.md`「Python境界でのデータ受け渡し」で既に確定済みの通り、polars Seriesからfaer::Matへの詰め替え自体は2回のコピーを許容する設計のまま。ここが変わったわけではない）。
 
+### engine_pybind: engine呼び出し・エラー変換実装（Issue #14で実装済み）
+
+Issue #13までの`extract_ols_input`（受け口の検証・変換のみ、`OlsFitInput`という暫定型を返して`fit_ols`側でエラーに打ち切る）を、`engine::linear::ols::OlsInput::from_columns` + `OlsEstimator::fit`を実際に呼び出す形に差し替えた。着手時に2点確認した。
+
+1. **返り値に適合度統計量を含めるか**: Issue #21で実装済みの`r_squared`等を含める方針で確定（`ols-api-design.md`5章の「`params, std_errors, t_stats, p_values, conf_int, param_names`」というリストはIssue #21着手前の記述だったため、Issue #14で更新した）
+2. **返り値の形式**: `OLSOptions`と同じ`#[pyclass]`パターンで`OLSResult`を新設。`conf_int`は`conf_lower`/`conf_upper`の2配列に分割（engineの内部表現・`Vec<(f64,f64)>`より実装が簡潔なため）
+
+#### 実装内容
+
+- `OLSOptions`に`hac_lags: Option<i64>`・`time_col: Option<String>`を追加（Issue #3で確定していたが、Issue #11時点ではengine側の`CovType::Hac`のみ実装され、engine_pybind側への反映はIssue #14に持ち越されていた）
+- `OLSResult`（`#[pyclass(get_all, skip_from_py_object)]`）: `params`/`std_errors`/`t_stats`/`p_values`/`conf_lower`/`conf_upper`/`param_names`/`residuals`/`dep_var_name`/`nobs`/`cov_type`（実際に使われた種別を小文字文字列で echo）/`r_squared`/`r_squared_adj`/`f_statistic`/`f_p_value`/`log_likelihood`/`aic`/`bic`を公開。`skip_from_py_object`なのは、`OLSResult`がRust側で組み立ててPythonに返すだけの型で、Python側から構築されることを想定しないため（`OLSOptions`の`from_py_object`とは対照的）
+- `engine::linear::ols::OlsError` → `PyErr`の変換: 当初`impl From<OlsError> for PyErr`を試みたが、`OlsError`（`engine`クレート）・`PyErr`（`pyo3`クレート）のどちらもこのクレート外で定義された型のため**orphan ruleに抵触してコンパイルエラー**になった。関数`fn ols_error_to_pyerr(err: OlsError) -> PyErr`として実装し、呼び出し側で`.map_err(ols_error_to_pyerr)?`する形に変更して解消
+- `cov_type`固有の追加列（`cluster_col`/`time_col`）の抽出は、該当する`cov_type`のときのみ行う（`cov_type != "hac"`のとき`time_col`は無視、`cov_type != "cluster"`のとき`cluster_col`は無視、`ols-standard-errors.md`3.2/3.3節の既存方針通り）。誤って無関係な列を要求してエラーになることを避ける
+- **早期バリデーションの重複排除**: `confidence_level`の範囲チェック、`cov_type="cluster"`なのに`cluster_col`未指定のチェックは、Issue #13までの暫定コードではengine_pybind側でも行っていたが、`engine::OlsEstimator::fit`（`InvalidConfidenceLevel`）・`CovType::Cluster`（`MissingClusterColumn`、Issue #22で確定した設計）が既に検知するため、engine_pybind側の重複チェックを削除した。`y`/`x`の重複列名・`"const"`列との衝突等、engineが検知できない（列名を知らない）ものはengine_pybind側の責務として残した
+- `OlsFitInput`・engine_pybind独自の`CovType`列挙型（`Hac`を持たない暫定版）は削除。`faer::Mat`の直接構築もengine_pybindから完全になくなった（`engine::linear::ols::OlsInput::from_columns`に一本化）
+
+#### 検証方法
+
+`cargo build/test/clippy/fmt --workspace`に加え、`uv run maturin develop`で実ビルド・インストールし、実際のPython polars 1.42.1のDataFrameで以下を確認した:
+- classical cov_typeの`fit_ols`結果が、`engine`のテストで使っている教科書的データセット（x=[1..5], y=[2,4,5,4,5]）のオラクル値（`params`/`std_errors`/`r_squared`/`aic`/`bic`等）と完全一致すること
+- HAC（`hac_lags=1`）・cluster（2クラスター）の結果も、対応するengineテストのオラクル値と浮動小数点誤差（1e-13〜1e-14程度）の範囲で一致すること
+- `MissingClusterColumn`・`InvalidHacLags`・未知の`cov_type`文字列・`SingularMatrix`のそれぞれが、想定通り`ValidationError`/`ComputationError`として送出されること
+
 ### Python側の例外はカテゴリ別に分ける
 
 - 詳細・理由は `.claude/rules/rust-style.md`「エラーハンドリング」を参照（`ValidationError` / `ComputationError`の2階層、`pyo3::create_exception!`で定義）

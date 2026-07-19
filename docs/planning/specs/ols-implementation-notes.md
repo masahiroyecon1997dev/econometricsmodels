@@ -109,6 +109,19 @@
   - `Σ`の逆行列はCholesky分解（`Llt`）で求める。正定値行列の主小行列は必ず正定値という定理により理論上失敗しないはずだが、`xtx_inverse`と同様`ComputationFailed`に変換する境界ケース対応をしている
 - テストは`fit_computes_r_squared_and_information_criteria_with_intercept`（classical、切片あり）、`fit_computes_r_squared_without_intercept_uses_uncentered_tss`（切片なし、uncentered TSSの確認）、`fit_computes_robust_wald_f_test_for_hc_and_hac`（HC1・HACのロバストWald F検定）の3つを追加。全てstatsmodels 0.14.6（`use_t=True`）と1e-6〜1e-9の許容誤差で数値照合済み
 
+### クラスター標準誤差（Issue #22で実装済み）
+
+- Issue #22着手時にユーザーに2点確認して確定した:
+  1. 小標本補正（`G/(G-1) * (n-1)/(n-k)`）は常に適用し、無効化するオプションは設けない（`OLSOptions`に新しいフィールドを追加しない）
+  2. `cov_type="cluster"`なのにクラスターキー未指定というエラー（`OlsError::MissingClusterColumn`）は`engine`自体に検知させる。`CovType::Cluster { groups: Option<Vec<String>> }`とし、`None`なら`fit()`が`MissingClusterColumn`を返す（`CovType::Hac`の`lags: Option<i64>`と同じ設計パターン）
+- statsmodelsのソース（`statsmodels.stats.sandwich_covariance.cov_cluster`）を確認したところ、小標本補正`use_correction=True`がデフォルトで、`ols-standard-errors.md`5章に既に書かれていた式と完全に一致することを数値照合で確認した（追加のドキュメント変更は不要だった）
+- `cluster_cov_params`関数: `Ŝ = Σ_g S_g S_g'`（`S_g = Σ_{i∈g} ε̂_i x_i`、クラスター内の観測を先に合計してから外積を取ることでクラスター内相関を許容する）。グループ化は`HashMap<&str, Vec<usize>>`で行う（`ols-implementation-notes.md`「クラスター変数は文字列として扱う」の既存方針通り）
+- クラスター数`G`の検証（`validate_cluster_groups`関数）: `G < 2`なら`OlsError::InsufficientClusters`。`groups.len() != n`は`engine_pybind`側の実装バグでしか起こらない内部契約として`debug_assert_eq!`で検証（`OlsInput::from_columns`の`x_names`/`x_columns`長さ検証と同じパターン）
+- **重要な発見（自由度の切り替え）**: statsmodelsは`cov_type="cluster"`のとき、デフォルト（`df_correction=True`）でt検定・信頼区間・F検定の自由度を`n-k`ではなく**`G-1`（クラスター数-1）に切り替える**（`RegressionResults.get_robustcov_results`のdocstring参照）。これは計量経済学の標準的な慣行（Cameron-Miller等）であり、statsmodels固有の癖ではない。標準誤差自体の値は変わらないが、p値・信頼区間・F検定のp値が大きく変わる（小さいクラスター数のとき特に顕著）。ユーザーに確認し、**`cov_type=Cluster`のときのみ自由度を`G-1`に切り替える**方針で確定した（他のcov_typeは引き続き`n-k`で統一）
+  - `fit()`内で`(cov_params, df_inference)`のタプルを`cov_type`ごとのmatchから返す設計にした。`df_inference`は通常`df_resid`（n-k）と同じだが、`Cluster`のときだけ`G-1`になる。`df_resid`自体（σ̂²・調整済みR²・AIC/BIC等で使う）は影響を受けず、常に`n-k`のまま
+  - `wald_f_test`のF分布の自由度（分母側）も`df_resid`ではなく`df_inference`を受け取るようにシグネチャを変更した
+- テストは`fit_computes_cluster_std_errors_t_stats_p_values_conf_int_and_f_test`（2クラスターのデータセットで標準誤差・t値・p値・信頼区間・F統計量を検証。自由度がG-1=1になることも含めてstatsmodelsと数値照合）、`fit_returns_missing_cluster_column_when_groups_not_provided`、`fit_returns_insufficient_clusters_when_only_one_group`の3つを追加
+
 ### Python側の例外はカテゴリ別に分ける
 
 - 詳細・理由は `.claude/rules/rust-style.md`「エラーハンドリング」を参照（`ValidationError` / `ComputationError`の2階層、`pyo3::create_exception!`で定義）

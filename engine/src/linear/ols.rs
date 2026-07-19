@@ -64,13 +64,10 @@ pub enum OlsError {
 /// 責務（PyO3境界の関心事のため）。ここでは`OlsEstimator::fit`が計算方法を分岐するための
 /// 純粋な列挙型のみを定義する。
 ///
-/// `Hac`のみ、他のバリアントと異なりラグ数・時間順序という追加パラメータを持つため
+/// `Hac`・`Cluster`のみ、他のバリアントと異なり追加パラメータを持つため
 /// フィールド付きバリアントにしている（`fit`のシグネチャに`hac_lags`等を常に生える
 /// 引数として追加するより、cov_type固有のデータをcov_type自身に持たせる方が
-/// 「HAC以外では無意味な引数」を作らずに済むため）。
-///
-/// 【スコープの注意（Issue #11時点）】`Cluster`はまだ未実装（対応する実装issueが
-/// 現時点で存在しない。`docs/planning/specs/ols-implementation-notes.md`参照）。
+/// 「その cov_type 以外では無意味な引数」を作らずに済むため）。
 #[derive(Debug, Clone, PartialEq)]
 pub enum CovType {
     /// 等分散前提（`σ̂²(X'X)⁻¹`）
@@ -88,6 +85,17 @@ pub enum CovType {
         /// `OlsInput`の行と対応する長さnの配列で、この値の昇順でラグ付き自己共分散を計算する
         /// （同3.3節）。値そのものの単位・意味（期間番号・UNIX時刻等）は問わない。
         time_order: Option<Vec<f64>>,
+    },
+    /// クラスターロバスト標準誤差（Stata方式の小標本補正込み。常に補正を適用し、
+    /// 無効化するオプションは設けない。`docs/planning/specs/ols-implementation-notes.md`
+    /// 「クラスター標準誤差」参照）。
+    Cluster {
+        /// クラスターのグループキー。`OlsInput`の行と対応する長さnの配列。
+        /// `None`の場合、`OlsEstimator::fit`は`OlsError::MissingClusterColumn`を返す
+        /// （`hac_lags: Option<i64>`と同じ設計パターンで、値の妥当性検証を`engine`内で
+        /// 行うため`Option`にしている。`engine_pybind`側で`cluster_col`未指定を
+        /// 事前に弾かない）。
+        groups: Option<Vec<String>>,
     },
 }
 
@@ -209,9 +217,6 @@ impl OlsInput {
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
 /// `fit`でのバリデーション（観測数・特異性・信頼水準）を通過した状態のみを表す。
-///
-/// 【スコープの注意（Issue #21時点）】`cov_type`はclassical/HC0-3/HACまで対応。
-/// clusterへの分岐は対応するissueが現時点で存在しないため未実装。
 #[derive(Debug)]
 pub struct OlsEstimator {
     input: OlsInput,
@@ -308,16 +313,43 @@ impl OlsEstimator {
 
         let xtx_inv = xtx_inverse(input.x(), k)?;
 
-        let cov_params = match &cov_type {
-            CovType::Classical => classical_cov_params(sigma2, &xtx_inv, k),
-            CovType::Hc0 => hc_cov_params(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc0),
-            CovType::Hc1 => hc_cov_params(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc1),
-            CovType::Hc2 => hc_cov_params(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc2),
-            CovType::Hc3 => hc_cov_params(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc3),
+        // `df_inference`はt検定・信頼区間・F検定に使う自由度。通常は`df_resid`（n-k）と
+        // 同じだが、`cov_type=Cluster`のときだけ`G-1`（クラスター数-1）に切り替える
+        // （statsmodelsの`df_correction=True`という既定と同じ挙動。標準的な計量経済学の
+        // 慣行でもある。`df_resid`自体は分散推定量`σ̂²`・調整済みR²・AIC/BIC等では
+        // 引き続き`n-k`のまま使う。`docs/planning/specs/ols-implementation-notes.md`
+        // 「クラスター標準誤差」参照）。
+        let (cov_params, df_inference) = match &cov_type {
+            CovType::Classical => (classical_cov_params(sigma2, &xtx_inv, k), df_resid),
+            CovType::Hc0 => (
+                hc_cov_params(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc0),
+                df_resid,
+            ),
+            CovType::Hc1 => (
+                hc_cov_params(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc1),
+                df_resid,
+            ),
+            CovType::Hc2 => (
+                hc_cov_params(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc2),
+                df_resid,
+            ),
+            CovType::Hc3 => (
+                hc_cov_params(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc3),
+                df_resid,
+            ),
             CovType::Hac { lags, time_order } => {
                 let lags = resolve_hac_lags(*lags, n)?;
                 let order = time_ordering(time_order.as_deref(), n);
-                hac_cov_params(input.x(), &residuals, &xtx_inv, n, k, lags, &order)
+                (
+                    hac_cov_params(input.x(), &residuals, &xtx_inv, n, k, lags, &order),
+                    df_resid,
+                )
+            }
+            CovType::Cluster { groups } => {
+                let groups = groups.as_ref().ok_or(OlsError::MissingClusterColumn)?;
+                let n_groups = validate_cluster_groups(groups, n)?;
+                let cov = cluster_cov_params(input.x(), &residuals, &xtx_inv, n, k, groups);
+                (cov, n_groups - 1)
             }
         };
 
@@ -326,7 +358,7 @@ impl OlsEstimator {
             *std_errors.get_mut(j, 0) = (*cov_params.get(j, j)).sqrt();
         }
 
-        let t_dist = StudentsT::new(0.0, 1.0, df_resid as f64)
+        let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
             .map_err(|e| OlsError::ComputationFailed(e.to_string()))?;
         let alpha = 1.0 - confidence_level;
         let t_crit = t_dist.inverse_cdf(1.0 - alpha / 2.0);
@@ -370,7 +402,7 @@ impl OlsEstimator {
             // statsmodels同様NaNを返す（0除算を避ける）。
             (f64::NAN, f64::NAN)
         } else {
-            wald_f_test(&params, &cov_params, k_constant, df_model, df_resid)?
+            wald_f_test(&params, &cov_params, k_constant, df_model, df_inference)?
         };
 
         Ok(Self {
@@ -648,6 +680,78 @@ fn hac_cov_params(
     xtx_inv * &s_hat * xtx_inv
 }
 
+/// `CovType::Cluster`の`groups`（`OlsInput`の行と対応する長さnの配列であるという内部契約、
+/// および実際のクラスター数が2以上であること）を検証し、成功時はクラスター数`G`を返す。
+/// `G`は`fit()`側でt検定・信頼区間・F検定の自由度（`G-1`）の算出に再利用する
+/// （`docs/planning/specs/ols-implementation-notes.md`「クラスター標準誤差」参照）。
+///
+/// `groups.len() != n`は`engine_pybind`側の実装バグでしか起こり得ない内部契約であり
+/// （`OlsInput::from_columns`の`x_names`/`x_columns`の長さ検証と同じ性質）、実データに
+/// 起因する`ValidationError`とは区別して`debug_assert_eq!`で検証する。クラスター数が
+/// 2未満は実データで起こりうるため`OlsError::InsufficientClusters`を返す。
+fn validate_cluster_groups(groups: &[String], n: usize) -> Result<usize, OlsError> {
+    debug_assert_eq!(
+        groups.len(),
+        n,
+        "groups length must match nobs (engine_pybind contract)"
+    );
+    let g = groups
+        .iter()
+        .collect::<std::collections::HashSet<_>>()
+        .len();
+    if g < 2 {
+        return Err(OlsError::InsufficientClusters { g });
+    }
+    Ok(g)
+}
+
+/// クラスターロバストな係数分散共分散行列: `(X'X)⁻¹Ŝ(X'X)⁻¹ * correction`（k×k）。
+///
+/// `Ŝ = Σ_{g=1}^{G} S_g S_g'`、`S_g = Σ_{i∈g} ε̂_i x_i`（クラスター内の`x_i ε̂_i`の合計。
+/// クラスター内の観測を先に合計してから外積を取ることで、クラスター内の相関を許容する）。
+/// `correction = G/(G-1) * (n-1)/(n-k)`（Stata方式の小標本補正。常に適用する。
+/// `docs/planning/specs/ols-standard-errors.md`5章、`docs/planning/specs/
+/// ols-implementation-notes.md`「クラスター標準誤差」参照）。
+///
+/// `groups`が2種類以上の値を持つこと（`G >= 2`）は呼び出し側（`validate_cluster_groups`）で
+/// 検証済みの前提とする。
+fn cluster_cov_params(
+    x: &Mat<f64>,
+    residuals: &Mat<f64>,
+    xtx_inv: &Mat<f64>,
+    n: usize,
+    k: usize,
+    groups: &[String],
+) -> Mat<f64> {
+    let mut group_indices: std::collections::HashMap<&str, Vec<usize>> =
+        std::collections::HashMap::new();
+    for (i, g) in groups.iter().enumerate() {
+        group_indices.entry(g.as_str()).or_default().push(i);
+    }
+    let n_groups = group_indices.len();
+
+    let mut s_hat = Mat::<f64>::zeros(k, k);
+    for indices in group_indices.values() {
+        let mut s_g = vec![0.0_f64; k];
+        for &i in indices {
+            let e = *residuals.get(i, 0);
+            for (a, s_g_a) in s_g.iter_mut().enumerate() {
+                *s_g_a += e * (*x.get(i, a));
+            }
+        }
+        for a in 0..k {
+            for b in 0..k {
+                *s_hat.get_mut(a, b) += s_g[a] * s_g[b];
+            }
+        }
+    }
+
+    let correction =
+        (n_groups as f64 / (n_groups as f64 - 1.0)) * ((n as f64 - 1.0) / ((n - k) as f64));
+    let cov_uncorrected = xtx_inv * &s_hat * xtx_inv;
+    Mat::from_fn(k, k, |i, j| correction * (*cov_uncorrected.get(i, j)))
+}
+
 /// 列ピボットQRの`R`の対角成分から設計行列のランク落ちを検出する。
 ///
 /// 絶対閾値ではなく相対閾値を使う（`.claude/rules/rust-style.md`「線形代数」参照）。
@@ -673,9 +777,10 @@ fn ensure_full_rank(qr: &faer::linalg::solvers::ColPivQr<f64>, k: usize) -> Resu
 /// `df_model × df_model`の部分行列、`q = df_model`）。`params`・`cov_params`の行/列は
 /// `k_constant`が1（切片あり）なら先頭が切片（`OlsInput::from_columns`の設計行列の
 /// 先頭列が定数項という規約）、0（切片なし）なら全パラメータが検定対象になる。
-/// p値はF分布（自由度`(df_model, df_resid)`）の上側確率
+/// p値はF分布（自由度`(df_model, df_inference)`）の上側確率
 /// （`OlsEstimator::fit`のdocコメント「F統計量も同じ方針で」参照。`cov_type=Classical`のとき
-/// 古典的F検定と代数的に一致することを確認済み）。
+/// 古典的F検定と代数的に一致することを確認済み）。`df_inference`は通常`n-k`だが、
+/// `cov_type=Cluster`のときは`G-1`になる（呼び出し元の`fit()`を参照）。
 ///
 /// `Σ`の逆行列はCholesky分解（`Llt`）で求める。正定値行列の主小行列は必ず正定値という
 /// 線形代数の定理により理論上`LltError`は発生しないはずだが、`xtx_inverse`と同様、
@@ -685,7 +790,7 @@ fn wald_f_test(
     cov_params: &Mat<f64>,
     k_constant: usize,
     df_model: usize,
-    df_resid: usize,
+    df_inference: usize,
 ) -> Result<(f64, f64), OlsError> {
     let beta_slopes = Mat::from_fn(df_model, 1, |i, _| *params.get(i + k_constant, 0));
     let v_slopes = Mat::from_fn(df_model, df_model, |i, j| {
@@ -704,7 +809,7 @@ fn wald_f_test(
         .sum();
     let f_statistic = wald / (df_model as f64);
 
-    let f_dist = FisherSnedecor::new(df_model as f64, df_resid as f64)
+    let f_dist = FisherSnedecor::new(df_model as f64, df_inference as f64)
         .map_err(|e| OlsError::ComputationFailed(e.to_string()))?;
     let f_p_value = 1.0 - f_dist.cdf(f_statistic);
 
@@ -1294,5 +1399,97 @@ mod tests {
         let estimator_hac = OlsEstimator::fit(input_hac, cov_type_hac, 0.95).unwrap();
         assert!((estimator_hac.f_statistic() - 13.235_294_117_647_193).abs() < 1e-6);
         assert!((estimator_hac.f_p_value() - 0.035_791_053_269_350_51).abs() < 1e-6);
+    }
+
+    /// 同じデータセット（x=[1..5], y=[2,4,5,4,5]）を2クラスター（groups=["a","a","b","b","b"]）
+    /// でのクラスターロバスト標準誤差。期待値はstatsmodels 0.14.6で独立に計算・検算済み
+    /// （`sm.OLS(Y, X).fit(cov_type="cluster", cov_kwds={"groups": groups}, use_t=True)`。
+    /// 小標本補正はstatsmodelsの既定`use_correction=True`のまま、明示指定はしていない）。
+    #[test]
+    fn fit_computes_cluster_std_errors_t_stats_p_values_conf_int_and_f_test() {
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+        let input = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let groups = vec![
+            "a".to_string(),
+            "a".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+        ];
+        let cov_type = CovType::Cluster {
+            groups: Some(groups),
+        };
+        let estimator = OlsEstimator::fit(input, cov_type, 0.95).unwrap();
+
+        let se = estimator.std_errors();
+        assert!((*se.get(0, 0) - 0.785_196_366_097_886_8).abs() < 1e-6);
+        assert!((*se.get(1, 0) - 0.230_940_107_675_849_05).abs() < 1e-6);
+
+        let t = estimator.t_stats();
+        assert!((*t.get(0, 0) - 2.801_846_894_596_724_5).abs() < 1e-6);
+        assert!((*t.get(1, 0) - 2.598_076_211_353_332).abs() < 1e-6);
+
+        let p = estimator.p_values();
+        assert!((*p.get(0, 0) - 0.218_242_895_017_685_43).abs() < 1e-6);
+        assert!((*p.get(1, 0) - 0.233_908_049_281_92).abs() < 1e-6);
+
+        let lower = estimator.conf_lower();
+        let upper = estimator.conf_upper();
+        assert!((*lower.get(0, 0) - (-7.776_865_785_740_13)).abs() < 1e-6);
+        assert!((*upper.get(0, 0) - 12.176_865_785_740_125).abs() < 1e-6);
+        assert!((*lower.get(1, 0) - (-2.334_372_289_923_566_6)).abs() < 1e-6);
+        assert!((*upper.get(1, 0) - 3.534_372_289_923_567_7).abs() < 1e-6);
+
+        assert!((estimator.f_statistic() - 6.750_000_000_000_083_5).abs() < 1e-6);
+        assert!((estimator.f_p_value() - 0.233_908_049_281_92).abs() < 1e-6);
+    }
+
+    #[test]
+    fn fit_returns_missing_cluster_column_when_groups_not_provided() {
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+        let input = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = OlsEstimator::fit(input, CovType::Cluster { groups: None }, 0.95);
+
+        assert_eq!(result.unwrap_err(), OlsError::MissingClusterColumn);
+    }
+
+    #[test]
+    fn fit_returns_insufficient_clusters_when_only_one_group() {
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+        let input = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let groups = vec!["a".to_string(); 5];
+        let cov_type = CovType::Cluster {
+            groups: Some(groups),
+        };
+        let result = OlsEstimator::fit(input, cov_type, 0.95);
+
+        assert_eq!(result.unwrap_err(), OlsError::InsufficientClusters { g: 1 });
     }
 }

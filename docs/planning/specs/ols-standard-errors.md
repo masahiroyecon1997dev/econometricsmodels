@@ -127,3 +127,11 @@ $$
 \left(\sum_{g=1}^{G} X_g^\top \hat\varepsilon_g \hat\varepsilon_g^\top X_g\right)
 (X^\top X)^{-1} \cdot \frac{G}{G-1}\cdot\frac{n-1}{n-k}
 $$
+
+**実装issue（#22）で確定した追加事項**: 上記の小標本補正は常に適用し、無効化するオプションは設けない
+（`OLSOptions`に対応するフィールドを追加しない）。また、t検定・信頼区間・F検定の自由度は
+`cov_type="cluster"`のときだけ`n-k`ではなく**`G-1`（クラスター数-1）**を使う
+（statsmodelsの既定`df_correction=True`と一致させる、計量経済学の標準的な慣行。
+標準誤差の値自体は自由度に依存しないため変わらないが、p値・信頼区間・F検定のp値はGが小さいほど
+大きく変わる）。詳細は[`ols-implementation-notes.md`](./ols-implementation-notes.md)
+「クラスター標準誤差」参照。

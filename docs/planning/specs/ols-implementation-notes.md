@@ -309,6 +309,23 @@ Issue #13までの`extract_ols_input`（受け口の検証・変換のみ、`Ols
   - `tests/api_tests/test_ols_crosscheck.py`（新規）: 上記フィクスチャを読み込み、本実装の実際の出力と緩い許容誤差（R: 相対誤差1%、pyfixest: 相対誤差15%）で比較する74ケースのテスト。`wooldridge`パッケージが無い環境では`pytest.importorskip`でskipする（`tests/api_tests`本体は`test`依存グループのみで完結させる方針、benchmark依存グループはCIでは使わない想定のため）。
 - **`pyproject.toml`に`pyarrow==25.0.0`を`benchmark`グループへ追加**: `polars.DataFrame.to_pandas()`が内部で要求するが依存関係に漏れていた（`run_pyfixest_benchmark.py`・`run_statsmodels_benchmark.py`とも、これが無いと実行時エラーになる状態だった）。
 
+## tests/api_tests作成（Issue #19で実装済み）
+
+`tests/api_tests/fixtures/benchmarks/ols.json`（statsmodels主リファレンス、Issue #21実装時に作成）は、これまでどのテストからも読み込まれておらず、`test_ols.py`（Issue #15）は都度statsmodelsを直接呼び出す方式で1データセットのみを検証していた。Issue #19で、`ols.json`を読み込んで`testing-policy.md`の基本方針（相対誤差1e-8）に沿った厳密比較を行う`tests/api_tests/test_ols_fixtures.py`（新規、38テスト）を追加した。
+
+- 対象: 合成データ6シナリオ（`perfect_multicollinearity`除く）×classical/HC0-3/HAC + baselineのみcluster。係数・標準誤差・t統計量・p値・信頼区間・R²・調整済みR²・F統計量・F検定p値・AIC/BIC/対数尤度を網羅的に比較する。
+- HACはフィクスチャ生成時と同じ`hac_lags=1`（`generate_ols_fixtures.py`のstatsmodels呼び出しが`maxlags=1`固定のため）を明示的に指定し、自動ラグ選択式の違いを比較対象から除外した。
+- p値等、0に近い極小値は`RTOL * ref`だと許容誤差が過度に厳しくなる（`ref=0`付近で許容誤差もほぼ0になる）ため、絶対誤差フロア`ATOL=1e-10`を`max(RTOL*|ref|, ATOL)`の形で組み合わせている。
+
+### 発見: `ols.json`フィクスチャの陳腐化（信頼区間が正規分布ベースの古い値のまま）
+
+実装したテストを最初に実行したところ、HC0-3/HACの`conf_int`（信頼区間）が本実装の出力と一致しなかった（係数・標準誤差・t統計量は一致）。調査の結果、**`ols.json`に記録されていた信頼区間の臨界値が、t分布ではなく正規分布（`z=1.95996...`）ベースの値になっていた**ことが判明した。
+
+- `run_statsmodels_benchmark.py`を今すぐ再実行すると、`model.fit(cov_type="HC0", use_t=True)`は正しくt分布ベースの信頼区間を返す（本実装の出力と一致）。つまり**現在のスクリプト自体にバグはない**。
+- 一方コミット済みの`ols.json`はこの現在の実行結果と食い違っており、`git log`で確認したところ元は`aaaebd3`「テストのベンチマーク作成用コードの作成、比較用json作成（仮）」で仮生成されたまま、Issue #10（HC-robustでのt分布使用の再確認）以降一度も再生成されていなかったと考えられる（`testing-policy.md`「フィクスチャは一度固定したら手動更新が前提（自動追従しない）」通りの状態）。
+- `benchmark/fixtures/generate_ols_fixtures.py`を再実行し、`ols.json`を現在のスクリプトの出力で上書き・再コミットして解消した。係数・標準誤差は元々一致していたため影響なし、信頼区間のみ修正された。
+- 教訓: フィクスチャを実際に読み込んで検証するテスト（本Issueで初めて追加）がなければ、この陳腐化は発見できなかった。今後cov_type・統計量を追加した際は、フィクスチャ再生成を忘れずに行うこと。
+
 ## 未確定（実装時判断でよい）
 
 - 特異性判定の相対閾値の具体式

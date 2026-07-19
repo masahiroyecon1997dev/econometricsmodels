@@ -48,6 +48,12 @@ benchmark = [
 dev = [
     "maturin==1.14.1",
 ]
+# mkdocsドキュメント生成専用（CIでは使わない。cd_docs.ymlでのCI組み込みは別issue）。
+docs = [
+    "mkdocs==1.6.1",
+    "mkdocs-material==9.7.7",
+    "mkdocstrings[python]==1.0.6",
+]
 
 # .claude/rules/python-style.md「Lint / フォーマット」で確定済みの line-length=79
 # （PEP8標準）のみ設定する。有効化するRuffルール群の詳細は未確定のまま

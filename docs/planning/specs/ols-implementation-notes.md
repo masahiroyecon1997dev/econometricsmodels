@@ -326,6 +326,18 @@ Issue #13までの`extract_ols_input`（受け口の検証・変換のみ、`Ols
 - `benchmark/fixtures/generate_ols_fixtures.py`を再実行し、`ols.json`を現在のスクリプトの出力で上書き・再コミットして解消した。係数・標準誤差は元々一致していたため影響なし、信頼区間のみ修正された。
 - 教訓: フィクスチャを実際に読み込んで検証するテスト（本Issueで初めて追加）がなければ、この陳腐化は発見できなかった。今後cov_type・統計量を追加した際は、フィクスチャ再生成を忘れずに行うこと。
 
+## mkdocsドキュメント作成（Issue #20で実装済み）
+
+`docs/mkdocs.yml`が存在せずmkdocsの土台自体が未構築だったため、OLSのページ追加と合わせて土台構築も本Issueで行った（ユーザー承認済み）。
+
+- **`docs_dir: .`**: `mkdocs.yml`自体を`docs/`直下に置く（CLAUDE.md 3章の想定構成）ため、デフォルトの`docs/mkdocs.yml`相対`docs/`（実質`docs/docs/`）ではなく、`docs/`自身をdocs_dirとして明示指定した。これにより`docs/planning/`・`docs/spec/`・`docs/plan.md`もビルド対象に含まれるが、`nav`には載せていない（CLAUDE.md 10章「ソースとしては誰でも閲覧可能という前提で運用する」通りの状態）。
+- **テーマ**: mkdocs-material（`docs`依存グループに`mkdocs==1.6.1`・`mkdocs-material==9.7.7`・`mkdocstrings[python]==1.0.6`を追加）。
+- **API リファレンスはmkdocstringsで自動生成**: `docs/api/ols.md`は`::: econometricsmodels.OLS`等のディレクティブのみで構成し、docstring（Issue #16でGoogleスタイル整備済み）から自動生成する。二重管理を避けるため。
+- **発見・修正: PyO3コンパイル済みクラスの`__module__`がmkdocstringsのalias解決を壊す**: `OLSOptions`/`OLSResult`（`engine_pybind/src/linear/ols.rs`の`#[pyclass]`）はデフォルトで`__module__ == "builtins"`になる（PyO3の既定動作）。これにより、mkdocstringsの静的解析器（griffe）が`econometricsmodels.OLSOptions → econometricsmodels.linear.ols.OLSOptions(再エクスポート) → econometricsmodels._lib.OLSOptions`というalias連鎖を解決できず、`AliasResolutionError`でビルドが失敗した。`#[pyclass(module = "econometricsmodels._lib")]`を明示することで解消した（`maturin develop`での再ビルドが必要）。今後PyO3で新しい`#[pyclass]`を追加する際は、Python側から`__init__.py`経由で再エクスポートしdocstringを自動生成する予定であれば、最初から`module`属性を明示しておくとよい。
+- **mkdocstringsの`filters`設定**: デフォルトでは`__new__`/`__repr__`等のdunderメソッドがPyO3クラスの動的検査で「メンバー」として拾われ、ノイズになる。`filters: ["!^_"]`で除外した。
+- **ページ構成**: `index.md`（トップ）・`getting-started.md`（インストール・使用例・エラーハンドリング）・`api/ols.md`（APIリファレンス）。`getting-started.md`のコード例は実際に`uv run python`で実行し動作確認済み。
+- **`site/`（ビルド出力）は`.gitignore`に追加**しコミット対象外とした。GitHub Pagesへの自動デプロイ（`cd_docs.yml`）は別issueとし、本Issueではローカルビルド（`uv run mkdocs build -f docs/mkdocs.yml`）の確認までに留めた。
+
 ## 未確定（実装時判断でよい）
 
 - 特異性判定の相対閾値の具体式

@@ -1,0 +1,54 @@
+site_name: econometricsmodels
+site_description: 統計・計量経済学の分析手法を提供するPython API
+repo_url: https://github.com/masahiroyecon1997dev/econometricsmodels
+repo_name: masahiroyecon1997dev/econometricsmodels
+
+# このファイル自体がdocs/直下にあるため、同じdocs/をdocs_dirとして扱う
+# （デフォルトの"docs/mkdocs.yml相対docs/"にはしない）。docs/planning/・docs/spec/・
+# docs/plan.mdはビルド対象に含まれるがnavには載せない
+# （CLAUDE.md 10章「ソースとしては誰でも閲覧可能という前提で運用する」）。
+docs_dir: .
+site_dir: ../site
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - API Reference:
+      - OLS: api/ols.md
+
+theme:
+  name: material
+  language: ja
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: ダークモードに切り替え
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: ライトモードに切り替え
+  features:
+    - navigation.sections
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - pymdownx.superfences
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: false
+            show_root_heading: true
+            merge_init_into_class: true
+            # PyO3コンパイル済みクラスは動的検査でdunderメソッド（__new__/__repr__等）も
+            # メンバーとして拾われるため、明示的に除外する。
+            filters:
+              - "!^_"

@@ -21,6 +21,10 @@ __pycache__/
 python_package/econometricsmodels/*.so
 python_package/econometricsmodels/*.pyd
 
+# mkdocs buildの出力（docs/mkdocs.ymlのsite_dir）。GitHub Pagesへのデプロイはcd_docs.yml
+# （別issue）でビルドして公開する想定で、リポジトリにはコミットしない。
+/site/
+
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore

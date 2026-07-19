@@ -26,7 +26,10 @@ use crate::errors::{ComputationError, ValidationError};
 // `fit_ols`がPython側から`OLSOptions`インスタンスを引数として受け取るため、
 // `FromPyObject`実装を明示的に維持する（pyo3 0.28以降、Cloneを実装する#[pyclass]の
 // FromPyObject自動導出はopt-inに変更されたため）。
-#[pyclass(from_py_object)]
+// module: PyO3の#[pyclass]はデフォルトで__module__="builtins"になり、
+// mkdocstrings（griffe）がPythonでの再エクスポートのalias解決に失敗する原因になる
+// （Issue #20で発覚）。実際のインポート元(`econometricsmodels._lib`)を明示する。
+#[pyclass(from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct OLSOptions {
     /// Standard error type: one of "classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster".
@@ -119,7 +122,7 @@ impl OLSOptions {
 // `OLSResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`OLSOptions`の`from_py_object`とは
 // 対照的。pyo3 0.28以降、Cloneを実装する#[pyclass]のFromPyObject自動導出はopt-inになった）。
-#[pyclass(get_all, skip_from_py_object)]
+#[pyclass(get_all, skip_from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct OLSResult {
     pub params: Vec<f64>,

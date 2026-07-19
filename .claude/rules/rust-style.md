@@ -29,6 +29,7 @@ paths:
 ## 言語方針
 
 - **英語にする**: 例外・バリデーションメッセージ（`ValidationError`/`ComputationError`等、Pythonユーザーに表示される文字列）、公開API（`#[pyclass]` / `#[pyfunction]`）に付ける`///`docコメント（PyO3経由でPythonの`__doc__`になり、`help()`やIDE補完でユーザーに見えるため）。
+- **`#[pyclass]`には`module`属性を明示する**（例: `#[pyclass(module = "econometricsmodels._lib")]`）。PyO3のデフォルトでは`__module__ == "builtins"`になり、mkdocs（mkdocstrings/griffe）がPython側の再エクスポート（`_lib` → `python_package`側モジュール）を解決できず`AliasResolutionError`でドキュメントビルドが失敗する（Issue #20で発覚。詳細は`docs/planning/specs/ols-implementation-notes.md`「mkdocsドキュメント作成」参照）。
 - **日本語のままでよい**: 非公開関数・非公開型（`#[pyclass]`/`#[pyfunction]`が付いていないもの）の`///`/`//!`コメント、実装の背景説明、TODOコメント等の開発者向けの記述。GitHub Issue・CLAUDE.md・rules等の開発ドキュメントは対象外（日本語のまま）。
 - 理由: `econometricsmodels`はeconomicon専用ではなくPyPI公開の独立パッケージであり、Pythonエコシステムの慣習（pandas/numpy/polars等）に合わせる。economicon側はi18nで独自にローカライズするため、例外はクラス（`ValidationError`/`ComputationError`）で分岐する設計になっており、メッセージ文字列の言語はeconomicon側のi18nに機能的な影響を与えない。
 

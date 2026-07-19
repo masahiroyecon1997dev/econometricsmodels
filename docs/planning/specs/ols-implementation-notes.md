@@ -373,6 +373,19 @@ Issue #13までの`extract_ols_input`（受け口の検証・変換のみ、`Ols
   - **`tests/api_tests/**`はissueに明記されていなかったが追加した**。このワークフローの目的が`pytest tests/api_tests`の実行である以上、テストファイル自体の変更でトリガーされないのは明確な抜け穴（新規テスト追加がCIで一度も走らない状態になる）と判断し、確認なしで含めた。
 - Issue #23と同様、ツールチェーンセットアップは`actions-rust-lang/setup-rust-toolchain`、Python/uvセットアップは`astral-sh/setup-uv`（`python-version`入力でマトリクス対応）を使用。全アクションをコミットSHAで固定。
 
+## CI: cd_release.yml作成（Issue #25で実装済み）
+
+`.github/workflows/cd_release.yml`を新規作成し、Linux(manylinux x86_64)・macOS(Apple Silicon/Intel)・Windows(x64)向けwheelビルドの継続的な成功確認を自動化した。0.1.0のプレリリース段階のため、PyPI公開ステップは含めない（ビルドとartifactアップロードまで）。
+
+- **土台に`maturin generate-ci github`の出力を使用**: `uv run maturin generate-ci github -m engine_pybind/Cargo.toml --platform manylinux --platform windows --platform macos`で公式テンプレートを生成し、それを元にCLAUDE.md 12章のサポート対象（Linux x86_64のみ・Windows x64のみ・macOS両アーキ）に絞り込んだ。生成テンプレートにはLinuxのx86/aarch64/armv7/s390x/ppc64le、Windowsのx86/aarch64も含まれていたが、CLAUDE.mdが明示していない組み合わせのため削除した。
+- **ビルド対象Pythonバージョンを明示指定**: `--find-interpreter`ではなく`-i python3.12 -i python3.13 -i python3.14`を使用。`--find-interpreter`はmanylinuxコンテナ内にある未サポートバージョン・free-threaded版まで全て検出してビルドしてしまうため、CLAUDE.md 12章がサポート対象と定める3バージョンに限定した。`-i python3.14`単体でのローカルビルドを実際に行い、`econometricsmodels-0.1.0-cp314-cp314-manylinux_2_34_x86_64.whl`が生成されることを確認済み。
+- **macOSランナー名は生成テンプレートの値をそのまま採用**（`macos-15-intel`=x86_64、`macos-latest`=aarch64）。GitHub Actionsのランナー命名・世代交代はmaturin側が追従しているため、自前で決め打ちしない方針とした。
+- **トリガー: タグpush（`v*`）+ `workflow_dispatch`のみ**（ユーザー確認済み）。マルチOSビルド（Windows/macOS含む）はCI時間コストが高いため、`ci_python.yml`のようにPR毎には回さず、リリース直前の確認用として位置づけた。
+- **将来のPyPI公開ステップは本ワークフローに`release`ジョブとして追加する方針**（ユーザー確認済み）。`maturin generate-ci`の生成テンプレートに同梱されていた`release`ジョブ（`needs: [linux, windows, macos, sdist]`、タグpush時のみ実行、trusted publishing）をそのまま参考にできる。
+- **`sdist`ジョブも追加**（issue本文には明記されていなかったが、`maturin generate-ci`の標準構成であり、将来の`release`ジョブが依存する前提のビルド成果物のため含めた）。ローカルで`maturin sdist`を実行し正常に生成されることを確認済み。
+- **発見: `Cargo.toml`にパッケージメタデータ不足の警告**。`maturin sdist`実行時に`engine`・`engine_pybind`両方で「manifest has no description, documentation, homepage or repository」という警告が出た。Issue #32（公開前チェックリスト）に追記した。
+- **副次的な発見・修正: `actions/checkout`のバージョン不一致**。Issue #23・#24実装時に確認せず`v4`を使っていたが、実際の最新は`v7.0.0`だった。本issue実装時に確認したうえで、`ci_engine.yml`・`ci_python.yml`・`cd_release.yml`全てで`v7.0.0`に統一した（ユーザー確認済み）。他の固定アクション（`actions-rust-lang/setup-rust-toolchain`・`taiki-e/install-action`・`astral-sh/setup-uv`）は再確認の結果、既に最新だった。
+
 ## 未確定（実装時判断でよい）
 
 - 特異性判定の相対閾値の具体式

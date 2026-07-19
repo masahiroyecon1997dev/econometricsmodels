@@ -281,6 +281,16 @@ Issue #13までの`extract_ols_input`（受け口の検証・変換のみ、`Ols
 - フィクスチャ生成スクリプト（`benchmark/fixtures/generate_ols_fixtures.py`、動作確認済み）と生成物（`tests/api_tests/fixtures/ols.json`）は別管理。詳細は`.claude/rules/testing-policy.md`「ベンチマーク値のフィクスチャ化」参照
 - `pyproject.toml`の`[dependency-groups]`に`statsmodels==0.14.6`（`test`グループ）を追加済み（Issue #5で対応）。既存の`ols.json`フィクスチャがこのバージョンで生成されているため、上げる場合はフィクスチャの再生成とセットで行うこと
 
+## テストデータの確認・整備（Issue #17で確認済み）
+
+- **合成データセット**（`benchmark/generate_synthetic_datasets.py`の7シナリオ）: `testing-policy.md`が要求する全バリエーション（小標本`small_n`、高分散`high_variance`、不均一分散`heteroskedastic`、自己相関`autocorrelated`、中程度の多重共線性`moderate_multicollinearity`、完全な多重共線性`perfect_multicollinearity`）に`baseline`を加えた7種で網羅済み。追加実装は不要と確認した。
+  - `maturin develop`でビルドした実バイナリに対し、7シナリオ全てを`OLS(...).fit()`に通して動作確認済み。`perfect_multicollinearity`のみ想定通り`ComputationError`（設計行列が特異）を送出し、それ以外は正常に収束することを確認した。
+- **実データセット**: `benchmark/load_wooldridge.py`の`SUGGESTED_DATASETS["ols"]`候補（`wage1`, `gpa2`）を確定した。
+  - 両データセットとも欠損値なし（`null_count() == 0`）。
+  - 列の型はInt64/Float64混在（例: `wage1`の`educ`/`exper`/`tenure`はInt64、`wage`/`lwage`はFloat64）だが、`column_extraction::extract_f64_column`が`cast(&DataType::Float64)`で吸収するため問題なし。
+  - `wage1`（n=526、`lwage ~ educ + exper + tenure`）・`gpa2`（n=4137、`colgpa ~ sat + hsperc + tothrs`）ともに実バイナリで最終フィットを確認済み。`wage1`の`educ`係数≈0.092はWooldridge教科書の既知値と整合。
+- テストフィクスチャ（`generate_ols_fixtures.py`）は現状合成データのみを対象にしており、実データ（wage1/gpa2）はフィクスチャ化していない。実データは「真の係数と比較できないため、リファレンス実装との一致のみで検証する」（`testing-policy.md`）用途であり、フィクスチャへの組み込みはIssue #19（`tests/api_tests`整備）以降のスコープとする。
+
 ## 未確定（実装時判断でよい）
 
 - 特異性判定の相対閾値の具体式

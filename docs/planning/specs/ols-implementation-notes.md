@@ -338,6 +338,24 @@ Issue #13までの`extract_ols_input`（受け口の検証・変換のみ、`Ols
 - **ページ構成**: `index.md`（トップ）・`getting-started.md`（インストール・使用例・エラーハンドリング）・`api/ols.md`（APIリファレンス）。`getting-started.md`のコード例は実際に`uv run python`で実行し動作確認済み。
 - **`site/`（ビルド出力）は`.gitignore`に追加**しコミット対象外とした。GitHub Pagesへの自動デプロイ（`cd_docs.yml`）は別issueとし、本Issueではローカルビルド（`uv run mkdocs build -f docs/mkdocs.yml`）の確認までに留めた。
 
+## CI: ci_engine.yml作成（Issue #23で実装済み）
+
+`.github/workflows/ci_engine.yml`を新規作成し、`engine`（純粋Rust）の継続的な品質検証を自動化した。
+
+- **トリガー**: `engine/**`・`Cargo.toml`・`Cargo.lock`（workspaceルート）・ワークフローファイル自体の変更。`Cargo.lock`は`engine/`配下ではないが、依存バージョンの変更が`cargo test`/`cargo audit`双方に影響するため対象に含めた。
+- **`test`ジョブ**: `cargo fmt -p engine --check` → `cargo clippy -p engine --all-targets -- -D warnings` → `cargo test -p engine`。全て`-p engine`で明示的にスコープした。
+  - **判断: `engine_pybind`はclippy/fmt対象外**。rust-style.mdの責務分離（`engine`はPyO3非依存の純粋Rust）と一貫させ、`ci_engine.yml`がPython/PyO3環境を一切必要とせず完結するようにした。`engine_pybind`側のclippy/fmtは`ci_python.yml`（Issue #24）側で追加担当する（`maturin develop`によるビルドとは別に、明示的にカバーする必要がある）。
+- **`audit`ジョブ**: `rustsec/audit-check`でworkspace全体の`Cargo.lock`（`engine`+`engine_pybind`両方の依存）をRustSecアドバイザリDBと突き合わせる。
+  - **判断: workspace全体を`ci_engine.yml`側の責務とする**。`Cargo.lock`はworkspaceで1つしかなく分割できないため、`ci_python.yml`のPython依存脆弱性検知（`pip-audit`、`uv.lock`対象）と役割を分けた。
+- **ツールチェーンセットアップアクション**: `dtolnay/rust-toolchain`ではなく`actions-rust-lang/setup-rust-toolchain`を採用した。キャッシュ（`Swatinem/rust-cache`相当）を内蔵し別ステップが不要なこと、rustc/clippyの警告をPRの差分行にインライン注釈（problem matcher）できることが決め手（ソロ開発でPRを自分でレビューする運用と相性が良い）。デフォルトで`RUSTFLAGS="-D warnings"`が付与される（コンパイラ警告もエラー化）が、`cargo test -p engine`をこの設定で実行しても警告は出ないことをローカルで確認済み。
+- **全アクションをコミットSHAで固定**（サプライチェーン攻撃対策）。タグ名はコメントとして併記し、`gh api repos/<owner>/<repo>/git/refs/tags/<tag>`で実際に解決したSHAを使用した（mutableなタグそのものは参照しない）。
+- **`cargo-about`（ライセンス確認）は本issueに含めず、Issue #32（公開前チェックリスト）側に追記**した。依存追加のたびに全PRで回すものではなく、リリース前の1回性の確認作業（ライセンス一覧レポート生成＋配布物へのNOTICE同梱）と位置づけた。
+- **`rustsec/audit-check`アクションは不採用**: `cargo audit --json`の出力をアクション内で`JSON.parse()`しており、出力にANSI制御文字等が混ざると`Unexpected token ... in JSON`で失敗する既知の不具合が未解決のまま残っている（`rustsec/audit-check`のIssue #18・#33、いずれも1年以上オープン）。実際の脆弱性と無関係にCIが赤くなる偽陽性を招くため、`taiki-e/install-action`（RustSec公式のビルド済みバイナリを取得するだけでソースコンパイル不要）で`cargo-audit`をインストールし、テキスト出力のまま`cargo audit`を直接実行する方式に変更した。
+- **発見: `cargo audit`が実際に4件の脆弱性を検知**（実装検証中に判明）。`pyo3 0.28.2`（直接依存、RUSTSEC-2026-0176/0177）、`quick-xml 0.39.4`（`polars`→`object_store`経由の推移依存、RUSTSEC-2026-0194/0195、severity 7.5 high）。加えて`bincode`（`polars`→`polars-utils`経由）・`paste`（`faer`→`gemm`経由）がunmaintained警告（非ブロッキング）。
+  - `quick-xml`/`bincode`は`cargo tree`のデフォルト出力に現れず、`cargo metadata`のresolveノードを直接確認して発見した。`object_store`はpolarsのクラウドストレージ連携機能で、本プロジェクトはローカルDataFrameしか扱わないため未使用。`polars`の`default-features`を絞れば除外できる可能性がある（未検証）。
+  - 恒久対応（`pyo3`アップグレード等、`pyo3-polars`とのバージョン整合検証が必要で規模が不明）はIssue #46に切り出した。
+  - `ci_engine.yml`のマージ自体をブロックしないよう、`.cargo/audit.toml`に該当4件のRUSTSEC IDを一時的にallow-listした（cargo-auditの設定ファイルは`.cargo/audit.toml`固定パスでのみ自動検出される。workspaceルート直下の`audit.toml`は読み込まれないことを実機検証で確認した）。Issue #46完了時にこのallow-listごと削除する。
+
 ## 未確定（実装時判断でよい）
 
 - 特異性判定の相対閾値の具体式

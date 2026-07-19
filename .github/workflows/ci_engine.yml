@@ -1,0 +1,61 @@
+name: CI (engine)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "engine/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/ci_engine.yml"
+  pull_request:
+    paths:
+      - "engine/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/ci_engine.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: cargo test / clippy / fmt (engine)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          components: clippy, rustfmt
+
+      - name: cargo fmt --check
+        run: cargo fmt -p engine --check
+
+      - name: cargo clippy
+        run: cargo clippy -p engine --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test -p engine
+
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # workspace全体のCargo.lock（engine + engine_pybind）を対象にRustSecアドバイザリDBと
+      # 突き合わせる。engine_pybind側の依存もここでカバーする
+      # （役割分担はIssue #23で決定。ci_python.ymlのpip-auditはPython依存＝uv.lock専用）。
+      #
+      # rustsec/audit-checkアクションは不採用: `cargo audit --json`の出力をアクション内で
+      # JSON.parse()しており、出力にANSI制御文字等が混ざると
+      # "Unexpected token ... in JSON"で失敗する既知の不具合が未解決のまま残っている
+      # （rustsec/audit-check#18, #33）。実際の脆弱性と無関係にCIが赤くなる偽陽性を避けるため、
+      # アクションを介さず`cargo audit`をテキスト出力のまま直接実行する。
+      - uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
+        with:
+          tool: cargo-audit
+
+      - name: cargo audit
+        run: cargo audit

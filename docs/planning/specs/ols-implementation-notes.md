@@ -97,6 +97,18 @@
   確認済み）。テストは3種類: `maxlags`固定値指定、`hac_lags=None`（自動計算L=2、n=5のケース）、
   `time_order`指定（行をシャッフルした入力から`time_order`で正しく時系列順に復元できることを確認）
 
+### 適合度統計量（Issue #21で実装済み）
+
+- Issue #21の本文は根拠として`docs/planning/specs/ols-standard-errors.md`「ロバストな標準誤差選択時のF検定」を挙げているが、該当節はこのファイルには存在しない。実際の決定箇所は`ols-api-design.md`6章の1文（「`cov_type`がHC系/clusterの場合、F検定も**ロバストWald検定**に切り替える」）のみで、HACへの言及もない。Issue #21着手時にユーザーに確認し、**HACも同様にロバストWald検定に切り替える**方針で確定した（statsmodelsの実際の挙動が`cov_type != "nonrobust"`なら常にロバストWald検定、という単純な条件分岐であることとも一致する）
+- `OlsInput`に`has_intercept: bool`フィールドを追加（`from_columns`の`include_intercept`引数をそのまま保持）。R²・調整済みR²のcentered/uncentered TSS切り替え、F検定の自由度（`k_constant`）の判定に使う
+- **`(X'X)⁻¹`ベースの標準誤差計算関数を「対角成分の平方根（std_errors）を返す」から「k×kの分散共分散行列（cov_params）を返す」設計に変更**（`classical_std_errors`→`classical_cov_params`、`hc_std_errors`→`hc_cov_params`、`hac_std_errors`→`hac_cov_params`とリネーム）。ロバストWald検定（下記）に完全な共分散行列が必要になったため。`std_errors`は`fit()`側で対角成分の平方根を取って求める。**`cov_params`自体はPython側に公開しない**（`ols-api-design.md`5章の「Rust/engine_pybind側の責務は配列＋名前リストを返すところまで（params, std_errors, t_stats, p_values, conf_int, param_names）」に`cov_params`は含まれないため。`fit()`内のローカル変数として使い切り、`OlsEstimator`のフィールドにもしない）
+- **R²・調整済みR²**: `include_intercept=true`ならcentered TSS（`Σ(y_i-ȳ)²`）、`false`ならuncentered TSS（`Σy_i²`）を使う（statsmodelsの`k_constant`による分岐と一致）。調整済みR²は`1 - ((n-k_constant)/df_resid)*(1-R²)`（草案の`1 - [SSR/(n-k)]/[SST/(n-1)]`という式は`include_intercept=true`のとき代数的に同じ値になるが、`k_constant`を明示的に使う一般形にした）
+- **対数尤度・AIC・BIC**: `llf = -(n/2)*(ln(2π) + ln(SSR/n) + 1)`（分散は最尤推定量`SSR/n`。`ols-implementation-notes.md`「実装時に見落としやすい点」に記載の草案バグ＝不偏推定量`SSR/(n-k)`の誤用を回避）。`aic = -2*llf + 2*k`、`bic = -2*llf + ln(n)*k`（`k`は切片を含む全パラメータ数。草案にあった`n·ln(2π)+n`の欠落を修正）
+- **F統計量**: `cov_type`によらず単一の式`F = (β_slopes' Σ⁻¹ β_slopes) / q`（`Σ`は`cov_params`のうち切片以外の係数に対応する部分行列、`q`はその次元＝`k - k_constant`）で計算する（`wald_f_test`関数）。この式は`cov_type=Classical`のとき代数的に古典的F検定`((SST-SSR)/q)/(SSR/df_resid)`と完全に一致することを手計算・statsmodelsとの数値照合の両方で確認済みのため、分岐を分けていない。HC0-3・HACでは`cov_params`がロバストな分散共分散行列になるため、この式がそのままロバストWald検定になる。p値はF分布（自由度`(q, df_resid)`。statrsの`FisherSnedecor`を追加使用）の上側確率
+  - `q=0`（説明変数が定数項のみ）の場合はstatsmodels同様`f64::NAN`を返す（0除算回避）
+  - `Σ`の逆行列はCholesky分解（`Llt`）で求める。正定値行列の主小行列は必ず正定値という定理により理論上失敗しないはずだが、`xtx_inverse`と同様`ComputationFailed`に変換する境界ケース対応をしている
+- テストは`fit_computes_r_squared_and_information_criteria_with_intercept`（classical、切片あり）、`fit_computes_r_squared_without_intercept_uses_uncentered_tss`（切片なし、uncentered TSSの確認）、`fit_computes_robust_wald_f_test_for_hc_and_hac`（HC1・HACのロバストWald F検定）の3つを追加。全てstatsmodels 0.14.6（`use_t=True`）と1e-6〜1e-9の許容誤差で数値照合済み
+
 ### Python側の例外はカテゴリ別に分ける
 
 - 詳細・理由は `.claude/rules/rust-style.md`「エラーハンドリング」を参照（`ValidationError` / `ComputationError`の2階層、`pyo3::create_exception!`で定義）
@@ -129,8 +141,8 @@
 
 ## 実装時に見落としやすい点（要注意）
 
-- **ロバストF検定への切り替え**: `cov_type`がHC系/clusterの場合、F検定（適合度統計量）もロバストWald検定に切り替える方針が決定済み。SE計算の実装issueとは別に、適合度統計量計算の実装issueでも見落とされないよう明記すること
-- **`log_likelihood` / `AIC` / `BIC`の計算式**: 草案コードはここにバグがあった（対数尤度の分散に不偏推定量`SSR/(n-k)`を誤用。正しくは最尤推定量`SSR/n`。AIC/BIC式も`n·ln(2π)+n`の定数項が欠落）。詳細・検証手順は`docs/planning/draft-reference/ols-draft-consolidated.md`の「検証詳細」を参照。**この部分は草案をそのまま移植しない**
+- **ロバストF検定への切り替え**（Issue #21で解消済み）: `cov_type`がHC系/HAC/clusterの場合、F検定（適合度統計量）もロバストWald検定に切り替える方針が決定済み（HACも含めることをIssue #21着手時に確認）。SE計算の実装issueとは別に、適合度統計量計算の実装issueでも見落とされないよう明記すること
+- **`log_likelihood` / `AIC` / `BIC`の計算式**（Issue #21で解消済み）: 草案コードはここにバグがあった（対数尤度の分散に不偏推定量`SSR/(n-k)`を誤用。正しくは最尤推定量`SSR/n`。AIC/BIC式も`n·ln(2π)+n`の定数項が欠落）。当時参照していた`docs/planning/draft-reference/ols-draft-consolidated.md`は現在リポジトリに存在しないため、`docs/spec/01_ols.md`4章の式を代わりに参照した。**この部分は草案をそのまま移植しない**
 - **草案のテストデータ自体のバグ**: `test_coefficients_and_r_squared`は、テストデータ`y=[2.1,3.9,6.2,8.1]`に対する真のOLS解が切片=0.0であるにもかかわらず、アサーションが切片≈0.2を期待しており失敗する。草案のテストを参考にする場合はこのテストの数値を先に直すこと
 
 ## 信頼区間

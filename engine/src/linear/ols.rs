@@ -9,7 +9,7 @@
 
 use faer::prelude::{Solve, SolveLstsq};
 use faer::{Mat, Side};
-use statrs::distribution::{ContinuousCDF, StudentsT};
+use statrs::distribution::{ContinuousCDF, FisherSnedecor, StudentsT};
 use thiserror::Error;
 
 /// OLSの計算過程で発生しうるエラー。
@@ -105,6 +105,8 @@ pub struct OlsInput {
     param_names: Vec<String>,
     /// 被説明変数名
     dep_var_name: String,
+    /// 定数項を含むか。R²・調整済みR²（center済み/uncenteredのSSTの選択）で必要
+    has_intercept: bool,
 }
 
 impl OlsInput {
@@ -167,6 +169,7 @@ impl OlsInput {
             x,
             param_names,
             dep_var_name,
+            has_intercept: include_intercept,
         })
     }
 
@@ -186,6 +189,11 @@ impl OlsInput {
         &self.dep_var_name
     }
 
+    /// 定数項を含むか
+    pub fn has_intercept(&self) -> bool {
+        self.has_intercept
+    }
+
     /// 観測数 n
     pub fn nobs(&self) -> usize {
         self.y.nrows()
@@ -197,13 +205,12 @@ impl OlsInput {
     }
 }
 
-/// OLSの推定結果。適合度統計量（R²・F統計量・AIC/BIC等）は対応するissueがまだ無いため
-/// 未実装（`docs/planning/specs/ols-implementation-notes.md`参照）。
+/// OLSの推定結果。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
 /// `fit`でのバリデーション（観測数・特異性・信頼水準）を通過した状態のみを表す。
 ///
-/// 【スコープの注意（Issue #11時点）】`cov_type`はclassical/HC0-3/HACまで対応。
+/// 【スコープの注意（Issue #21時点）】`cov_type`はclassical/HC0-3/HACまで対応。
 /// clusterへの分岐は対応するissueが現時点で存在しないため未実装。
 #[derive(Debug)]
 pub struct OlsEstimator {
@@ -224,6 +231,21 @@ pub struct OlsEstimator {
     conf_lower: Mat<f64>,
     /// 信頼区間の上限 (k, 1)
     conf_upper: Mat<f64>,
+    /// 決定係数（`include_intercept`に応じてcentered/uncentered TSSを切り替える）
+    r_squared: f64,
+    /// 自由度調整済み決定係数
+    r_squared_adj: f64,
+    /// F統計量。`cov_type=Classical`なら古典的F検定、それ以外（HC0-3/HAC）は
+    /// `cov_params`を使ったロバストWald検定（`docs/planning/specs/ols-implementation-notes.md`
+    /// 「適合度統計量」参照）
+    f_statistic: f64,
+    /// F統計量のp値（F分布、自由度は`(k - k_constant, n - k)`）
+    f_p_value: f64,
+    /// 対数尤度（正規分布を仮定した最尤推定量ベース。`σ̂²`は`SSR/n`であり、
+    /// classical標準誤差の不偏推定量`SSR/(n-k)`とは異なる点に注意）
+    log_likelihood: f64,
+    aic: f64,
+    bic: f64,
 }
 
 impl OlsEstimator {
@@ -245,6 +267,14 @@ impl OlsEstimator {
     /// 本プロジェクトはt分布で統一する方針（`docs/planning/specs/ols-api-design.md`
     /// 「検定分布」、Issue #10で確認済み）。ベンチマーク生成側
     /// （`benchmark/run_statsmodels_benchmark.py`）は`use_t=True`を明示指定して合わせている。
+    ///
+    /// F統計量も同じ方針で、`cov_type`によらず単一のWald検定の式
+    /// `F = (β_slopes' Σ⁻¹ β_slopes) / q`（`Σ`は切片以外の係数に対応する`cov_params`の
+    /// 部分行列、`q`はその次元）で計算する。`cov_type=Classical`のとき、この式は代数的に
+    /// 古典的F検定`((SST-SSR)/q) / (SSR/df_resid)`と完全に一致する（標準的な計量経済学の
+    /// 恒等式）ため、分岐を分ける必要がない。HC0-3・HACでは`cov_params`がロバストな
+    /// 分散共分散行列になるため、この式がそのままロバストWald検定になる
+    /// （`docs/planning/specs/ols-implementation-notes.md`「適合度統計量」参照）。
     ///
     /// # Errors
     /// - `confidence_level`が`(0, 1)`の範囲外: `OlsError::InvalidConfidenceLevel`
@@ -272,26 +302,31 @@ impl OlsEstimator {
         let params = qr.solve_lstsq(input.y());
         let residuals = input.y() - input.x() * &params;
 
-        let df = n - k;
+        let df_resid = n - k;
         let ssr: f64 = (0..n).map(|i| (*residuals.get(i, 0)).powi(2)).sum();
-        let sigma2 = ssr / (df as f64);
+        let sigma2 = ssr / (df_resid as f64);
 
         let xtx_inv = xtx_inverse(input.x(), k)?;
 
-        let std_errors = match &cov_type {
-            CovType::Classical => classical_std_errors(sigma2, &xtx_inv, k),
-            CovType::Hc0 => hc_std_errors(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc0),
-            CovType::Hc1 => hc_std_errors(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc1),
-            CovType::Hc2 => hc_std_errors(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc2),
-            CovType::Hc3 => hc_std_errors(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc3),
+        let cov_params = match &cov_type {
+            CovType::Classical => classical_cov_params(sigma2, &xtx_inv, k),
+            CovType::Hc0 => hc_cov_params(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc0),
+            CovType::Hc1 => hc_cov_params(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc1),
+            CovType::Hc2 => hc_cov_params(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc2),
+            CovType::Hc3 => hc_cov_params(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc3),
             CovType::Hac { lags, time_order } => {
                 let lags = resolve_hac_lags(*lags, n)?;
                 let order = time_ordering(time_order.as_deref(), n);
-                hac_std_errors(input.x(), &residuals, &xtx_inv, n, k, lags, &order)
+                hac_cov_params(input.x(), &residuals, &xtx_inv, n, k, lags, &order)
             }
         };
 
-        let t_dist = StudentsT::new(0.0, 1.0, df as f64)
+        let mut std_errors = Mat::zeros(k, 1);
+        for j in 0..k {
+            *std_errors.get_mut(j, 0) = (*cov_params.get(j, j)).sqrt();
+        }
+
+        let t_dist = StudentsT::new(0.0, 1.0, df_resid as f64)
             .map_err(|e| OlsError::ComputationFailed(e.to_string()))?;
         let alpha = 1.0 - confidence_level;
         let t_crit = t_dist.inverse_cdf(1.0 - alpha / 2.0);
@@ -312,6 +347,32 @@ impl OlsEstimator {
             *conf_upper.get_mut(j, 0) = coef + t_crit * se;
         }
 
+        let k_constant = usize::from(input.has_intercept());
+        let sst: f64 = if input.has_intercept() {
+            let y_mean: f64 = (0..n).map(|i| *input.y().get(i, 0)).sum::<f64>() / (n as f64);
+            (0..n)
+                .map(|i| (*input.y().get(i, 0) - y_mean).powi(2))
+                .sum()
+        } else {
+            (0..n).map(|i| (*input.y().get(i, 0)).powi(2)).sum()
+        };
+        let r_squared = 1.0 - ssr / sst;
+        let r_squared_adj = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
+
+        let log_likelihood =
+            -(n as f64 / 2.0) * ((2.0 * std::f64::consts::PI).ln() + (ssr / n as f64).ln() + 1.0);
+        let aic = -2.0 * log_likelihood + 2.0 * (k as f64);
+        let bic = -2.0 * log_likelihood + (n as f64).ln() * (k as f64);
+
+        let df_model = k - k_constant;
+        let (f_statistic, f_p_value) = if df_model == 0 {
+            // 説明変数が定数項のみ（傾き係数が無い）モデル。検定対象が存在しないため
+            // statsmodels同様NaNを返す（0除算を避ける）。
+            (f64::NAN, f64::NAN)
+        } else {
+            wald_f_test(&params, &cov_params, k_constant, df_model, df_resid)?
+        };
+
         Ok(Self {
             input,
             cov_type,
@@ -322,6 +383,13 @@ impl OlsEstimator {
             p_values,
             conf_lower,
             conf_upper,
+            r_squared,
+            r_squared_adj,
+            f_statistic,
+            f_p_value,
+            log_likelihood,
+            aic,
+            bic,
         })
     }
 
@@ -369,6 +437,41 @@ impl OlsEstimator {
     pub fn conf_upper(&self) -> &Mat<f64> {
         &self.conf_upper
     }
+
+    /// 決定係数
+    pub fn r_squared(&self) -> f64 {
+        self.r_squared
+    }
+
+    /// 自由度調整済み決定係数
+    pub fn r_squared_adj(&self) -> f64 {
+        self.r_squared_adj
+    }
+
+    /// F統計量
+    pub fn f_statistic(&self) -> f64 {
+        self.f_statistic
+    }
+
+    /// F統計量のp値
+    pub fn f_p_value(&self) -> f64 {
+        self.f_p_value
+    }
+
+    /// 対数尤度
+    pub fn log_likelihood(&self) -> f64 {
+        self.log_likelihood
+    }
+
+    /// 赤池情報量規準
+    pub fn aic(&self) -> f64 {
+        self.aic
+    }
+
+    /// ベイズ情報量規準
+    pub fn bic(&self) -> f64 {
+        self.bic
+    }
 }
 
 /// `(X'X)⁻¹`を求める。classical・HC0-3いずれの標準誤差計算でも共通して必要になる。
@@ -382,17 +485,12 @@ fn xtx_inverse(x: &Mat<f64>, k: usize) -> Result<Mat<f64>, OlsError> {
     Ok(llt.solve(Mat::<f64>::identity(k, k)))
 }
 
-/// classical（等分散前提）標準誤差: `σ̂²(X'X)⁻¹`の対角成分の平方根。
-fn classical_std_errors(sigma2: f64, xtx_inv: &Mat<f64>, k: usize) -> Mat<f64> {
-    let mut std_errors = Mat::zeros(k, 1);
-    for j in 0..k {
-        let variance = sigma2 * (*xtx_inv.get(j, j));
-        *std_errors.get_mut(j, 0) = variance.sqrt();
-    }
-    std_errors
+/// classical（等分散前提）の係数分散共分散行列: `σ̂²(X'X)⁻¹`（k×k）。
+fn classical_cov_params(sigma2: f64, xtx_inv: &Mat<f64>, k: usize) -> Mat<f64> {
+    Mat::from_fn(k, k, |i, j| sigma2 * (*xtx_inv.get(i, j)))
 }
 
-/// HC0〜HC3ロバスト標準誤差: `(X'X)⁻¹Ψ̂(X'X)⁻¹`の対角成分の平方根。
+/// HC0〜HC3ロバストな係数分散共分散行列: `(X'X)⁻¹Ψ̂(X'X)⁻¹`（k×k）。
 ///
 /// `Ψ̂ = Σ_i w_i ε̂_i² x_i x_i'`（`w_i`はHCの種類ごとの重み）を、各行を
 /// `scale_i = sqrt(w_i) * ε̂_i`でスケーリングした行列`Xw`を使って`Ψ̂ = Xw'Xw`として計算する
@@ -405,7 +503,7 @@ fn classical_std_errors(sigma2: f64, xtx_inv: &Mat<f64>, k: usize) -> Mat<f64> {
 /// - HC3: `w_i = 1/(1-h_ii)²`
 ///
 /// レバレッジ`h_ii = x_i'(X'X)⁻¹x_i`はHC2/HC3でのみ必要なため、それ以外では計算しない。
-fn hc_std_errors(
+fn hc_cov_params(
     x: &Mat<f64>,
     residuals: &Mat<f64>,
     xtx_inv: &Mat<f64>,
@@ -446,16 +544,10 @@ fn hc_std_errors(
     });
 
     let psi_hat = x_scaled.transpose() * &x_scaled;
-    let var_hc = xtx_inv * &psi_hat * xtx_inv;
-
-    let mut std_errors = Mat::zeros(k, 1);
-    for j in 0..k {
-        *std_errors.get_mut(j, 0) = (*var_hc.get(j, j)).sqrt();
-    }
-    std_errors
+    xtx_inv * &psi_hat * xtx_inv
 }
 
-/// `hc_std_errors`の内部でのみ使う、HCの種類。`CovType`はclassicalも含む上位概念のため、
+/// `hc_cov_params`の内部でのみ使う、HCの種類。`CovType`はclassicalも含む上位概念のため、
 /// HC計算専用の分岐であることを型で明確にする（`CovType::Classical`が紛れ込まない）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HcVariant {
@@ -501,16 +593,16 @@ fn time_ordering(time_order: Option<&[f64]>, n: usize) -> Vec<usize> {
     }
 }
 
-/// Newey-West HAC標準誤差: `(X'X)⁻¹Ŝ(X'X)⁻¹`の対角成分の平方根。
+/// Newey-West HACの係数分散共分散行列: `(X'X)⁻¹Ŝ(X'X)⁻¹`（k×k）。
 ///
 /// `Ŝ = Ŝ₀ + Σ_{l=1}^{L} w_l (Ŝ_l + Ŝ_l')`（Bartlett重み `w_l = 1 - l/(L+1)`）、
 /// `Ŝ_l = Σ_{t=l+1}^{n} ε̂_t ε̂_{t-l} x_t x_{t-l}'`（`docs/planning/specs/ols-standard-errors.md`
 /// 3.1節）。`order`で指定された時系列順に並べ替えた残差・行を使ってラグ付き自己共分散を計算する。
 ///
-/// HC0-3の`hc_std_errors`と異なり、`Ŝ_l`（l>=1）は対称でない外積の和（`x_t x_{t-l}'`）のため
+/// HC0-3の`hc_cov_params`と異なり、`Ŝ_l`（l>=1）は対称でない外積の和（`x_t x_{t-l}'`）のため
 /// `Xw'Xw`のような単純な行列積に落とし込めない。`k`（説明変数の数）は通常小さいため、
 /// 素直な三重ループ（ラグ×観測×`k²`）で計算する。
-fn hac_std_errors(
+fn hac_cov_params(
     x: &Mat<f64>,
     residuals: &Mat<f64>,
     xtx_inv: &Mat<f64>,
@@ -553,12 +645,7 @@ fn hac_std_errors(
         }
     }
 
-    let var_hac = xtx_inv * &s_hat * xtx_inv;
-    let mut std_errors = Mat::zeros(k, 1);
-    for j in 0..k {
-        *std_errors.get_mut(j, 0) = (*var_hac.get(j, j)).sqrt();
-    }
-    std_errors
+    xtx_inv * &s_hat * xtx_inv
 }
 
 /// 列ピボットQRの`R`の対角成分から設計行列のランク落ちを検出する。
@@ -577,6 +664,51 @@ fn ensure_full_rank(qr: &faer::linalg::solvers::ColPivQr<f64>, k: usize) -> Resu
         }
     }
     Ok(())
+}
+
+/// 傾き係数（切片を除く`df_model`個の係数）が全てゼロという帰無仮説のロバストWald検定を行い、
+/// F統計量とそのp値を返す。
+///
+/// `F = (β_slopes' Σ⁻¹ β_slopes) / q`（`Σ`は`cov_params`のうち傾き係数に対応する
+/// `df_model × df_model`の部分行列、`q = df_model`）。`params`・`cov_params`の行/列は
+/// `k_constant`が1（切片あり）なら先頭が切片（`OlsInput::from_columns`の設計行列の
+/// 先頭列が定数項という規約）、0（切片なし）なら全パラメータが検定対象になる。
+/// p値はF分布（自由度`(df_model, df_resid)`）の上側確率
+/// （`OlsEstimator::fit`のdocコメント「F統計量も同じ方針で」参照。`cov_type=Classical`のとき
+/// 古典的F検定と代数的に一致することを確認済み）。
+///
+/// `Σ`の逆行列はCholesky分解（`Llt`）で求める。正定値行列の主小行列は必ず正定値という
+/// 線形代数の定理により理論上`LltError`は発生しないはずだが、`xtx_inverse`と同様、
+/// 浮動小数点演算の丸めによる境界的な失敗に備えて`ComputationFailed`に変換する。
+fn wald_f_test(
+    params: &Mat<f64>,
+    cov_params: &Mat<f64>,
+    k_constant: usize,
+    df_model: usize,
+    df_resid: usize,
+) -> Result<(f64, f64), OlsError> {
+    let beta_slopes = Mat::from_fn(df_model, 1, |i, _| *params.get(i + k_constant, 0));
+    let v_slopes = Mat::from_fn(df_model, df_model, |i, j| {
+        *cov_params.get(i + k_constant, j + k_constant)
+    });
+
+    let llt = v_slopes.llt(Side::Lower).map_err(|_| {
+        OlsError::ComputationFailed(
+            "failed to invert coefficient covariance submatrix for the F-test".to_string(),
+        )
+    })?;
+    let v_slopes_inv_beta = llt.solve(&beta_slopes);
+
+    let wald: f64 = (0..df_model)
+        .map(|i| (*beta_slopes.get(i, 0)) * (*v_slopes_inv_beta.get(i, 0)))
+        .sum();
+    let f_statistic = wald / (df_model as f64);
+
+    let f_dist = FisherSnedecor::new(df_model as f64, df_resid as f64)
+        .map_err(|e| OlsError::ComputationFailed(e.to_string()))?;
+    let f_p_value = 1.0 - f_dist.cdf(f_statistic);
+
+    Ok((f_statistic, f_p_value))
 }
 
 #[cfg(test)]
@@ -1069,5 +1201,98 @@ mod tests {
             result.unwrap_err(),
             OlsError::InvalidHacLags { hac_lags: -1, n: 5 }
         );
+    }
+
+    /// x=[1..5], y=[2,4,5,4,5]（切片あり、classical）の適合度統計量。
+    /// 期待値はstatsmodels 0.14.6で独立に計算・検算済み
+    /// （`sm.OLS(Y, X).fit(use_t=True)`。`fvalue`/`f_pvalue`は古典的F検定と
+    /// ロバストWald検定の式が代数的に一致することも別途手計算で確認済み）。
+    #[test]
+    fn fit_computes_r_squared_and_information_criteria_with_intercept() {
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+        let input = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = OlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
+
+        assert!((estimator.r_squared() - 0.599_999_999_999_999_9).abs() < 1e-9);
+        assert!((estimator.r_squared_adj() - 0.466_666_666_666_666_56).abs() < 1e-9);
+        assert!((estimator.log_likelihood() - (-5.259_769_728_322_863)).abs() < 1e-9);
+        assert!((estimator.aic() - 14.519_539_456_645_726).abs() < 1e-9);
+        assert!((estimator.bic() - 13.738_415_281_513_927).abs() < 1e-9);
+        assert!((estimator.f_statistic() - 4.499_999_999_999_999).abs() < 1e-6);
+        assert!((estimator.f_p_value() - 0.124_027_062_657_554_59).abs() < 1e-6);
+    }
+
+    /// 同じ(x, y)を切片なしで推定した場合。R²・調整済みR²がuncentered TSS
+    /// （`Σy_i²`）を基準に計算されることを確認する（statsmodelsの`k_constant=0`の
+    /// 挙動と一致。`ols-implementation-notes.md`「適合度統計量」参照）。
+    #[test]
+    fn fit_computes_r_squared_without_intercept_uses_uncentered_tss() {
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+        let input = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            false,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = OlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
+
+        assert!((estimator.r_squared() - 0.920_930_232_558_139_5).abs() < 1e-9);
+        assert!((estimator.r_squared_adj() - 0.901_162_790_697_674_5).abs() < 1e-9);
+        assert!((estimator.log_likelihood() - (-7.863_404_415_393_264)).abs() < 1e-9);
+        assert!((estimator.aic() - 17.726_808_830_786_528).abs() < 1e-9);
+        assert!((estimator.bic() - 17.336_246_743_220_627).abs() < 1e-9);
+        assert!((estimator.f_statistic() - 46.588_235_294_117_66).abs() < 1e-6);
+        assert!((estimator.f_p_value() - 0.002_409_205_984_197_115_5).abs() < 1e-6);
+    }
+
+    /// HC1・HAC(maxlags=1)でのF統計量がロバストWald検定になることを確認する
+    /// （R²・AIC/BIC・対数尤度は`cov_type`に依存しないため、ここではF統計量のみ検証）。
+    /// 期待値はstatsmodelsで独立に計算・検算済み
+    /// （`sm.OLS(Y, X).fit(cov_type=..., use_t=True)`）。
+    #[test]
+    fn fit_computes_robust_wald_f_test_for_hc_and_hac() {
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+
+        let input_hc1 = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let estimator_hc1 = OlsEstimator::fit(input_hc1, CovType::Hc1, 0.95).unwrap();
+        assert!((estimator_hc1.f_statistic() - 6.279_069_767_441_904).abs() < 1e-6);
+        assert!((estimator_hc1.f_p_value() - 0.087_259_022_565_828_96).abs() < 1e-6);
+
+        let input_hac = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let cov_type_hac = CovType::Hac {
+            lags: Some(1),
+            time_order: None,
+        };
+        let estimator_hac = OlsEstimator::fit(input_hac, cov_type_hac, 0.95).unwrap();
+        assert!((estimator_hac.f_statistic() - 13.235_294_117_647_193).abs() < 1e-6);
+        assert!((estimator_hac.f_p_value() - 0.035_791_053_269_350_51).abs() < 1e-6);
     }
 }

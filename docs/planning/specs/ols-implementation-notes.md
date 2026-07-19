@@ -356,6 +356,23 @@ Issue #13までの`extract_ols_input`（受け口の検証・変換のみ、`Ols
   - 恒久対応（`pyo3`アップグレード等、`pyo3-polars`とのバージョン整合検証が必要で規模が不明）はIssue #46に切り出した。
   - `ci_engine.yml`のマージ自体をブロックしないよう、`.cargo/audit.toml`に該当4件のRUSTSEC IDを一時的にallow-listした（cargo-auditの設定ファイルは`.cargo/audit.toml`固定パスでのみ自動検出される。workspaceルート直下の`audit.toml`は読み込まれないことを実機検証で確認した）。Issue #46完了時にこのallow-listごと削除する。
 
+## CI: ci_python.yml作成（Issue #24で実装済み）
+
+`.github/workflows/ci_python.yml`を新規作成し、`python_package`/`engine_pybind`の継続的な品質検証を自動化した。3ジョブ構成。
+
+- **`test`ジョブ**（Python 3.12/3.13/3.14マトリクス、`fail-fast: false`）: `uv sync --locked --group test` → `uv run maturin develop` → `pytest tests/api_tests` → `ruff check .` → `ruff format --check .`。
+  - **`--locked`を採用**（`--frozen`ではなく）。`--locked`は`pyproject.toml`と`uv.lock`の不整合（ロック更新忘れ）をCIで検知できるのに対し、`--frozen`は検証なしに`uv.lock`をそのまま使うため、不整合を見逃す。
+  - **`test`グループのみインストール**（`dev`はuvが既定で含めるためmaturinも入る。`benchmark`/`docs`はCIでは使わない方針、`pyproject.toml`のコメント参照）。ローカル検証で`wooldridge`パッケージ依存の18テストが`pytest.importorskip`により問題なくskipされることを確認した（123 passed, 18 skipped）。
+  - `engine_pybind`はPyO3の`extension-module`機能のみでabi3を使っていないため、Pythonマイナーバージョンごとに別ビルドが必要（マトリクス化が必須）。
+- **`engine_pybind-lint`ジョブ**（マトリクス化不要、単一ジョブ）: `cargo fmt -p engine_pybind --check` → `cargo clippy -p engine_pybind --all-targets -- -D warnings`。Issue #23で「`ci_engine.yml`は`-p engine`のみが対象で`engine_pybind`のclippy/fmtは空白になる」と分かっていた分をここで埋めた。バージョン限定`cfg`（`Py_3_XX`等）を使っていないためPythonマトリクス不要と確認済み（`grep`で該当パターンなし）。
+- **`pip-audit`ジョブ**（Python 3.12固定、マトリクス不要）: `uv sync --locked --group test` → `uv run --with pip-audit pip-audit`。
+  - **判断: `test`グループのみを対象**。本ワークフローが実際にインストールする依存と完全一致させる方針（`benchmark`/`docs`はCIでは使わない）。ローカル検証時点（2026-07-19）でどちらの範囲でも脆弱性は検出されなかった。
+  - `maturin develop`（Rustツールチェーンのセットアップ含む）はこのジョブでは省略した。pip-auditは依存パッケージの監査のみが目的で、`econometricsmodels`自体はPyPI未公開のため常にスキップされ、extension moduleがビルド済みかどうかは監査結果に影響しないことをローカルで確認した。
+- **トリガー**: `python_package/**`・`engine_pybind/**`・`pyproject.toml`・`uv.lock`・`tests/api_tests/**`・ワークフローファイル自体。
+  - **`engine/**`は含めない**（issueの記載通り）。`maturin develop`は`engine`もコンパイルするため`engine`単体の変更がPython統合テストに影響しうるが、`engine`単体の変更は`ci_engine.yml`の`cargo test -p engine`である程度カバーされる前提とし、CLAUDE.md 9章の「対応するパス配下の変更のみでトリガー」方針を文字通り優先した。
+  - **`tests/api_tests/**`はissueに明記されていなかったが追加した**。このワークフローの目的が`pytest tests/api_tests`の実行である以上、テストファイル自体の変更でトリガーされないのは明確な抜け穴（新規テスト追加がCIで一度も走らない状態になる）と判断し、確認なしで含めた。
+- Issue #23と同様、ツールチェーンセットアップは`actions-rust-lang/setup-rust-toolchain`、Python/uvセットアップは`astral-sh/setup-uv`（`python-version`入力でマトリクス対応）を使用。全アクションをコミットSHAで固定。
+
 ## 未確定（実装時判断でよい）
 
 - 特異性判定の相対閾値の具体式

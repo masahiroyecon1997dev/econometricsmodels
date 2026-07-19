@@ -1,0 +1,101 @@
+name: CI (python)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "python_package/**"
+      - "engine_pybind/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "tests/api_tests/**"
+      - ".github/workflows/ci_python.yml"
+  pull_request:
+    paths:
+      - "python_package/**"
+      - "engine_pybind/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "tests/api_tests/**"
+      - ".github/workflows/ci_python.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: pytest / ruff (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # --locked: pyproject.tomlとuv.lockの不整合（ロック忘れ）をCIで検知するため、
+      # --frozen（無検証でuv.lockをそのまま使う）ではなくこちらを使う。
+      # testグループのみ（`dev`はuvが既定で含める。maturinはdevグループに定義済み）。
+      # benchmark/docsグループはCIでは使わない方針（pyproject.tomlのコメント参照）。
+      - name: uv sync (test group)
+        run: uv sync --locked --group test
+
+      - name: maturin develop
+        run: uv run --locked --group test maturin develop
+
+      - name: pytest
+        run: uv run --locked --group test pytest tests/api_tests
+
+      - name: ruff check
+        run: uv run --locked --group test ruff check .
+
+      - name: ruff format --check
+        run: uv run --locked --group test ruff format --check .
+
+  engine_pybind-lint:
+    name: cargo clippy / fmt (engine_pybind)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          components: clippy, rustfmt
+
+      # engine_pybindはci_engine.yml（-p engineのみ対象）の対象外のため、ここで担当する
+      # （Issue #23での決定）。pyo3のビルドスクリプトはリンク済みのPython3を必要とするが、
+      # abi3等のバージョン限定cfgを使っていないため、ubuntu-latestランナーに元から
+      # 入っているpython3で十分（マトリクス化は不要）。
+      - name: cargo fmt --check
+        run: cargo fmt -p engine_pybind --check
+
+      - name: cargo clippy
+        run: cargo clippy -p engine_pybind --all-targets -- -D warnings
+
+  pip-audit:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          python-version: "3.12"
+
+      # testグループのみを対象にする（本ワークフローが実際にインストールする依存と
+      # 一致させる。benchmark/docsグループはCIでは使わない方針のため対象外）。
+      # `--with pip-audit`でプロジェクトのロック環境にpip-auditだけ一時的に重ねて実行する。
+      # pip-auditは依存パッケージのみを監査対象にし、econometricsmodels自体はPyPI未公開の
+      # ためスキップされる（想定通り）。extension moduleのビルド（maturin develop）は
+      # 監査結果に影響しないため、Rustツールチェーンのセットアップごと省略する。
+      - name: uv sync (test group)
+        run: uv sync --locked --group test
+
+      - name: pip-audit
+        run: uv run --locked --group test --with pip-audit pip-audit

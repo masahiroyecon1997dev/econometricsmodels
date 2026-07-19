@@ -139,6 +139,43 @@ Issue #12は「実装（#9〜#11、実際には#21・#22も含む）と並行し
   - これらを実際に踏ませるには丸め誤差でギリギリ破綻する敵対的な浮動小数点データを人為的に作る必要があり、プラットフォーム依存で壊れやすく、実装の振る舞いというより浮動小数点ノイズの検証になるため見送った（`cargo-llvm-cov`の除外マーカーも導入しないことにした。ツール依存設定を増やすより、コード側のdocコメントで理由を説明する方針を優先）
 - 残りの「missed lines」表示（981, 986等）は`assert!`マクロのメッセージ引数（アサーション失敗時のみ評価される）による分析ツールの誤検知で、実際のギャップではない
 
+### engine_pybind: Arrowゼロコピーデータ受け渡し（Issue #13で実装済み）
+
+Issue #13着手時に2点確認した。
+
+1. **ファイル構成**: issueの追記は`engine_pybind/src/`直下に`lib.rs, ols_data.rs, ols_options.rs, errors.rs`という古い草案（`docs/planning/draft-reference/engine_pybind_data_layer/`、現存しない）に基づく指示をしていたが、既に`rust-style.md`「ファイル・ディレクトリ構成」の確立済みルール（系統ディレクトリ`linear/`＋YAGNI）に従って`engine_pybind/src/linear/ols.rs`が実装済みだったため、そちらを維持することにした
+2. **依存クレートのバージョン**: 詳細は次項
+
+#### polars（Rustクレート）とpyo3-polarsのバージョン選定（重要な発見）
+
+issueの追記は「Python側pyproject.tomlのpolars（`1.42.1`）とバージョンを合わせる」としていたが、これは実行不可能だった。**Rustの`polars`クレート（crates.io公開）とPython側`polars`パッケージ（PyPI）は既にバージョン体系が分離している**（polarsモノレポの2026年時点のmainブランチを確認: `py-polars/pyproject.toml`は`version = "1.43.0"`なのに対し、同じコミットの内部Rustワークスペースクレートは`[workspace.package] version = "0.54.4"`）。
+
+実際の互換性は数字ではなく、`pyo3-polars`の`PyDataFrame`/`PySeries`変換が使う`polars_ffi::version_0`という安定版FFIプロトコル（Python側`Series._export(ptr)`メソッドが書き出したバッファを、こちら側の`import_series`で読み取る。Arrow C Data Interfaceに近い、バージョン非依存のインターフェース）によって担保される（`pyo3-polars`のソース、`pyo3-polars/pyo3-polars/src/types.rs`の`PyDataFrame`/`PySeries`の`FromPyObject`実装を確認）。
+
+バージョン選定は以下の手順で行った:
+1. `cargo add polars/pyo3-polars --dry-run`でcrates.io最新版を確認: `polars=0.54.4`, `pyo3-polars=0.27.0`
+2. `pyo3-polars=0.27.0`は`pyo3="^0.28"`を要求することが判明。既に固定済みの`pyo3=0.29.0`と衝突した（rust-style.md「既知のリスク」が警告していた、crates.io公開版とpolars本体リポジトリ内バージョンのズレそのもの。polarsモノレポのmainブランチは内部で既に`pyo3=0.29`に上げているが、対応する`pyo3-polars`の新版はまだcrates.ioに未公開）
+3. ユーザーに確認し、**`pyo3`を`=0.29.0`から`=0.28.2`にダウングレード**して解消することにした（`0.28.0`/`0.28.1`はyanked済みのため除外。`=0.28.2`が最初の非yanked安定版）
+
+最終的な組み合わせ: `pyo3=0.28.2`, `polars=0.54.4`, `pyo3-polars=0.27.0`（すべて`=`で完全固定、`engine_pybind/Cargo.toml`）。
+
+#### 実装時に必要だった修正（草案コードとpolars 0.54.4の差異）
+
+`column_extraction.rs`は当初「polarsを実際にビルドして検証できていない」草案だった。実際にビルドして判明した差異:
+
+- `ChunkedArray::rechunk()`が`Cow<'_, ChunkedArray<T>>`を返すようになり（既に単一チャンクの場合の不要なcloneを避けるため）、`Cow`は`IntoIterator`を実装しないため`.into_iter()`が使えなくなっていた。`ChunkedArray::iter()`メソッド（`Cow`はDerefで透過的に呼べる）に置き換えて解消（`extract_f64_column`・`extract_group_key_column`両方）
+- `lib.rs`の`fit_ols`戻り値型`PyObject`が見つからないエラー。pyo3 0.28では`PyObject`という型エイリアス（`Py<PyAny>`の別名）自体がpreludeから削除されていたため、`Py<PyAny>`に置き換えて解消
+- `#[pyclass]`（`OLSOptions`）でdeprecation警告。pyo3 0.28以降、`Clone`を実装する`#[pyclass]`の`FromPyObject`自動導出がopt-inに変更されたため、`#[pyclass(from_py_object)]`に変更して明示化（`fit_ols`がPython側から`OLSOptions`インスタンスを引数として受け取るため、`FromPyObject`実装自体は必要）
+
+#### 検証方法
+
+`cargo build/test/clippy/fmt --workspace`に加え、`uv run maturin develop`で実際にビルド・インストールし、実際のPython polars 1.42.1のDataFrameを使った手動スモークテスト（`/tmp`配下、コミット対象外）で以下を確認した:
+- 通常の数値データでの`fit_ols`呼び出しが、データ抽出を完了した上で想定通り`ComputationError`（Issue #14未実装のため）に到達すること
+- 欠損値（null）・NaN・infinityを含む列が正しく`ValidationError`になること
+- クラスターのグループキー列（文字列型）の抽出が正しく動作すること
+
+いずれも成功。「Arrow経由のゼロコピーデータ受け渡し」は、Python→Rust境界の受け渡し自体を指す（`.claude/rules/rust-style.md`「Python境界でのデータ受け渡し」で既に確定済みの通り、polars Seriesからfaer::Matへの詰め替え自体は2回のコピーを許容する設計のまま。ここが変わったわけではない）。
+
 ### Python側の例外はカテゴリ別に分ける
 
 - 詳細・理由は `.claude/rules/rust-style.md`「エラーハンドリング」を参照（`ValidationError` / `ComputationError`の2階層、`pyo3::create_exception!`で定義）

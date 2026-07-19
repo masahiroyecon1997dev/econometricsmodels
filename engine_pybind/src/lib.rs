@@ -6,7 +6,7 @@ use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
 use errors::{ComputationError, ValidationError};
-use linear::ols::{extract_ols_input, OLSOptions};
+use linear::ols::{OLSOptions, extract_ols_input};
 
 // 【現状のスコープ】(開発メモ、日本語のまま)
 // 「パラメータの受け口」（data/y/x/optionsの検証・faer行列への変換）のみ実装済み。
@@ -31,7 +31,7 @@ fn fit_ols(
     y: String,
     x: Vec<String>,
     options: OLSOptions,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let input = extract_ols_input(data, y, x, &options)?;
 
     // TODO(正規方程式ソルバー実装 / 標準誤差の実装 issue):

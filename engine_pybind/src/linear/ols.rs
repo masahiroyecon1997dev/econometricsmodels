@@ -24,7 +24,10 @@ use crate::errors::ValidationError;
 /// See `docs/planning/specs/ols-implementation-notes.md` and the corresponding GitHub
 /// issues ("OLS: API and options design" / "OLS: standard error specification") for the
 /// rationale behind each field's meaning and default value.
-#[pyclass]
+// `fit_ols`がPython側から`OLSOptions`インスタンスを引数として受け取るため、
+// `FromPyObject`実装を明示的に維持する（pyo3 0.28以降、Cloneを実装する#[pyclass]の
+// FromPyObject自動導出はopt-inに変更されたため）。
+#[pyclass(from_py_object)]
 #[derive(Debug, Clone)]
 pub struct OLSOptions {
     /// Standard error type: one of "classical", "hc0", "hc1", "hc2", "hc3", "cluster".
@@ -114,9 +117,11 @@ impl TryFrom<&str> for CovType {
 
 /// 受け口の検証・変換を終えた後、engine側に渡すための暫定データ構造。
 ///
-/// TODO(デザイン行列・目的変数のデータ構造定義issue): engine側のfaerベースの
-/// 型が確定したら、ここは`engine::linear::ols::OlsInput`のようなengine側の型を
-/// 直接組み立てる形に差し替える。
+/// TODO(Issue #14: engine_pybind engine呼び出し・エラー変換実装): `engine::linear::ols::OlsInput`/
+/// `OlsEstimator`を直接呼び出す形に差し替え、この型自体を削除する。
+/// `#[allow(dead_code)]`: `fit_ols`は現状ここで受け取った値を`engine`に渡さず
+/// エラーで打ち切っている（Issue #14のスコープ）ため、フィールドが未使用のまま。
+#[allow(dead_code)]
 pub struct OlsFitInput {
     /// 被説明変数 (n,)
     pub y: faer::Mat<f64>,
@@ -159,7 +164,8 @@ pub fn extract_ols_input(
 ) -> PyResult<OlsFitInput> {
     let df: DataFrame = data.into();
 
-    let cov_type = CovType::try_from(options.cov_type.as_str()).map_err(ValidationError::new_err)?;
+    let cov_type =
+        CovType::try_from(options.cov_type.as_str()).map_err(ValidationError::new_err)?;
 
     if !(options.confidence_level > 0.0 && options.confidence_level < 1.0) {
         return Err(ValidationError::new_err(format!(
@@ -175,7 +181,9 @@ pub fn extract_ols_input(
     }
 
     if x.is_empty() {
-        return Err(ValidationError::new_err("x must contain at least one column name"));
+        return Err(ValidationError::new_err(
+            "x must contain at least one column name",
+        ));
     }
 
     // ── y/xの重複チェック（完全な多重共線性を早期に、分かりやすいエラーで防ぐ）──
@@ -251,11 +259,7 @@ pub fn extract_ols_input(
 
     let x_mat = faer::Mat::from_fn(n, k, |i, j| {
         if options.include_intercept {
-            if j == 0 {
-                1.0
-            } else {
-                x_slices[j - 1][i]
-            }
+            if j == 0 { 1.0 } else { x_slices[j - 1][i] }
         } else {
             x_slices[j][i]
         }

@@ -7,10 +7,11 @@
 //! polarsのnull（値が存在しない）とIEEE754のNaN（値は存在するが数値として無効）は別概念であり、
 //! 両方を検出する必要がある。
 //!
-//! 【polarsのバージョン依存に関する注意】
-//! この環境ではpolarsを実際にビルドして検証できていない。`DataFrame::column`の
-//! 戻り値型（`&Series`か`&Column`か）等、pinするpolarsのバージョンに応じて
-//! 微調整が必要な可能性がある。
+//! 【polarsのバージョン依存に関する注意（Issue #13で検証・修正済み）】
+//! polars 0.54.4での実ビルドを確認済み。当初の草案から2点修正した:
+//! `ChunkedArray`の`.rechunk()`が`Cow<'_, ChunkedArray<T>>`を返すようになった影響で
+//! （`IntoIterator`が実装されなくなったため）、値の取り出しは`.into_iter()`ではなく
+//! `.iter()`（`ChunkedArray::iter`メソッド）を使う。
 
 use polars::prelude::*;
 use pyo3::prelude::*;
@@ -25,12 +26,14 @@ use crate::errors::ValidationError;
 /// - 欠損値（null）を含む
 /// - NaN・無限大（infinity）を含む
 pub fn extract_f64_column(df: &DataFrame, name: &str) -> PyResult<Vec<f64>> {
-    let series = df
-        .column(name)
-        .map_err(|_| ValidationError::new_err(format!("column '{name}' does not exist in the data")))?;
+    let series = df.column(name).map_err(|_| {
+        ValidationError::new_err(format!("column '{name}' does not exist in the data"))
+    })?;
 
     let series = series.cast(&DataType::Float64).map_err(|e| {
-        ValidationError::new_err(format!("column '{name}' could not be cast to a numeric type (f64): {e}"))
+        ValidationError::new_err(format!(
+            "column '{name}' could not be cast to a numeric type (f64): {e}"
+        ))
     })?;
 
     let ca = series
@@ -53,7 +56,7 @@ pub fn extract_f64_column(df: &DataFrame, name: &str) -> PyResult<Vec<f64>> {
         Ok(slice) => slice.to_vec(),
         Err(_) => {
             // 通常はここに来ないはずだが、フォールバックとしてイテレータ経由で構築
-            ca.into_iter()
+            ca.iter()
                 .map(|v| v.expect("null_countチェック済み"))
                 .collect()
         }
@@ -82,9 +85,9 @@ pub fn extract_f64_column(df: &DataFrame, name: &str) -> PyResult<Vec<f64>> {
 /// - 列が存在しない
 /// - 欠損値を含む
 pub fn extract_group_key_column(df: &DataFrame, name: &str) -> PyResult<Vec<String>> {
-    let series = df
-        .column(name)
-        .map_err(|_| ValidationError::new_err(format!("column '{name}' does not exist in the data")))?;
+    let series = df.column(name).map_err(|_| {
+        ValidationError::new_err(format!("column '{name}' does not exist in the data"))
+    })?;
 
     if series.null_count() > 0 {
         return Err(ValidationError::new_err(format!(
@@ -94,14 +97,16 @@ pub fn extract_group_key_column(df: &DataFrame, name: &str) -> PyResult<Vec<Stri
 
     // Utf8にキャストして文字列表現で比較する（元の型が数値・カテゴリカルでもよい）。
     let series = series.cast(&DataType::String).map_err(|e| {
-        ValidationError::new_err(format!("column '{name}' could not be interpreted as a group key: {e}"))
+        ValidationError::new_err(format!(
+            "column '{name}' could not be interpreted as a group key: {e}"
+        ))
     })?;
-    let ca = series.str().map_err(|e| {
-        ValidationError::new_err(format!("failed to convert column '{name}': {e}"))
-    })?;
+    let ca = series
+        .str()
+        .map_err(|e| ValidationError::new_err(format!("failed to convert column '{name}': {e}")))?;
 
     Ok(ca
-        .into_iter()
+        .iter()
         .map(|v| v.expect("null_countチェック済み").to_string())
         .collect())
 }

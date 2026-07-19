@@ -17,6 +17,10 @@ target
 __pycache__/
 *.pyc
 
+# maturin developでビルドされるPython拡張モジュール本体（環境・OS依存のバイナリ）
+python_package/econometricsmodels/*.so
+python_package/econometricsmodels/*.pyd
+
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore

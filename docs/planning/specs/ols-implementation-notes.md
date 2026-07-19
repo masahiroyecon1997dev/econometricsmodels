@@ -386,6 +386,17 @@ Issue #13までの`extract_ols_input`（受け口の検証・変換のみ、`Ols
 - **発見: `Cargo.toml`にパッケージメタデータ不足の警告**。`maturin sdist`実行時に`engine`・`engine_pybind`両方で「manifest has no description, documentation, homepage or repository」という警告が出た。Issue #32（公開前チェックリスト）に追記した。
 - **副次的な発見・修正: `actions/checkout`のバージョン不一致**。Issue #23・#24実装時に確認せず`v4`を使っていたが、実際の最新は`v7.0.0`だった。本issue実装時に確認したうえで、`ci_engine.yml`・`ci_python.yml`・`cd_release.yml`全てで`v7.0.0`に統一した（ユーザー確認済み）。他の固定アクション（`actions-rust-lang/setup-rust-toolchain`・`taiki-e/install-action`・`astral-sh/setup-uv`）は再確認の結果、既に最新だった。
 
+## CI: dependabot.yml作成（Issue #26で実装済み）
+
+`.github/dependabot.yml`を新規作成し、`cargo`（workspace全体）・`uv`（python_package）・`github-actions`の3エコシステムでバージョン更新PRを自動化した。全エコシステム共通で`schedule.interval: weekly`、`cooldown.default-days: 10`。
+
+- **`"pip"`ではなく`"uv"`エコシステムを採用**: 2025年に追加された、uv専用の`package-ecosystem`。`dependabot-core`リポジトリに専用の`dependabot-uv` gem（`uv/dependabot-uv.gemspec`）が存在し、ソース上で`ECOSYSTEM = "uv"` / `NAME = "uv"`と確認した。PEP 735の`[dependency-groups]`対応は[dependabot-core#10847](https://github.com/dependabot/dependabot-core/issues/10847)（2026-02-13クローズ）、`uv.lock`更新対応は[#10478](https://github.com/dependabot/dependabot-core/issues/10478)（2025-04-12クローズ）でいずれも解決済みであることを確認した。これにより`test`/`benchmark`/`dev`/`docs`全依存グループが更新対象になる（`"pip"`ではpyproject.tomlの`[project.dependencies]`しか見ない可能性があった）。
+  - 未解決の関連issue: [dependabot-core#13202](https://github.com/dependabot/dependabot-core/issues/13202)（dependency-groups内のproduction/development区分。全依存が一律production扱いになる制約だが、更新PR自体は生成されるため機能的なブロッカーではない）。
+- **cooldownは`default-days`のみ指定**（`semver-major/minor/patch-days`は使わない）。公式ドキュメントで`default-days`は全エコシステム共通、semver系サブキーは一部エコシステム限定（cargoは対応、pip/github-actionsは未確認）と確認したため、エコシステム間で差が出ない`default-days`のみで統一した。
+- **セキュリティアップデートPRのcooldown除外は設定不要**: 2026-07-14のGitHub公式アップデート（[changelog](https://github.blog/changelog/2026-07-14-dependabot-version-updates-introduce-default-package-cooldown/)）で、バージョン更新PRには既定で最低3日のcooldownが自動適用されるようになった一方、セキュリティアップデートPRは常にこの既定cooldownの対象外（設定不要、自動）と明記されている。issueで懸念されていた「除外用の特別なYAML構文」は存在せず、何も書かなければセキュリティPRは即座に作成される。
+- **`cargo audit`（ci_engine.yml）/`pip-audit`（ci_python.yml）とDependabot alertsの役割分担**: 前者はCI実行時点（毎PR/push）のロックファイルをRustSec/PyPIアドバイザリDBと突き合わせるゲート、Dependabotはレジストリの新バージョン・脆弱性情報を継続的に監視しPRを自動生成する仕組み。両者は補完関係にあり、どちらかへの統合・置き換えは行わない。
+- YAML構文の妥当性は`PyYAML`でのパース、およびSchemaStoreが公開する[dependabot-2.0.json](https://json.schemastore.org/dependabot-2.0.json)スキーマに対する`jsonschema`検証の両方で確認した（ローカルで「実行」できないファイルのため）。
+
 ## 未確定（実装時判断でよい）
 
 - 特異性判定の相対閾値の具体式

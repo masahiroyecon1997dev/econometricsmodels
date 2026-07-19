@@ -1,0 +1,29 @@
+version: 2
+
+updates:
+  # engine/engine_pybind（workspaceルート1つでCargo.lock全体をカバーする）
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 10
+    # セキュリティアップデートPRは常にcooldown対象外（GitHub側の既定動作、設定不要）。
+
+  # python_package/pyproject.toml + uv.lock。"pip"ではなく"uv"を使う
+  # （PEP 735の[dependency-groups]・uv.lock更新に対応した専用エコシステム。
+  # test/benchmark/dev/docs全グループが対象になる）。
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 10
+
+  # .github/workflows/配下の全ワークフローで使っているGitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 10

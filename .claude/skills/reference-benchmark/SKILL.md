@@ -15,7 +15,7 @@ allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
 
 - **statsmodels**: 主リファレンス。classical/HC0-3/cluster/HAC、AIC/BIC/log-likelihood、ロバストWald検定まで一貫して対応
 - **R（lm + sandwich/lmtest）**: 独立実装によるクロスチェック。新しいcov_type追加時はstatsmodelsとRの一致を先に確認してからフィクスチャを固定する
-- **pyfixest**: OLSでは主役ではない。Phase4（FE/RE）以降で中心的に使う想定
+- **pyfixest**: OLSの正確性検証には使わない（Issue #27。HC2/HC3にpyfixest自身の実装バグによる系統的乖離があるため、詳細は下記「既知の差異」参照）。性能比較専用。固定効果が絡むPhase4（FE/RE）以降での採否はその時点で個別に判断する
 
 ## `benchmark/` ディレクトリの構成（動作確認済み）
 
@@ -26,7 +26,7 @@ allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
 - `benchmark/run_pyfixest_benchmark.py`: OLS/WLS（`--weights`指定）で動作確認済み。Phase4以降で主に使用。OLSでは`vcov`引数でHC1-3/cluster(`{"CRV1": col}`)/HAC(`"NW"`)も指定可能だが、正式なクロスチェックはRを使う方針（下記参照）。
 - `benchmark/run_r_benchmark.R`: fixest/plm/ivreg、および`lm`（base R + sandwich/lmtestによるOLS標準誤差クロスチェック、classical/HC0-3/cluster/HAC対応）でベンチマーク値をJSON出力する。devcontainerに`fixest`/`sandwich`/`lmtest`/`jsonlite`が導入済みであることを確認し、`lm`分岐はIssue #18で動作検証済み（plm/ivreg分岐は引き続き未検証）。
   - 注意: `read.csv()`はデフォルトで列名を`make.names()`により書き換える（例: `_group`→`X_group`）。クラスター列等を渡す場合は影響を受けるため、本スクリプトは`check.names = FALSE`を指定している。
-- **pyfixestのHC2/HC3に関する既知の差異**: pyfixest（fixest）は標準的なMacKinnon-White公式に加え`sqrt(n/(n-k))`倍の追加小標本補正を掛ける仕様のため、statsmodels/R/本実装とは`n`が小さいほど乖離が大きくなる（例: n=20, k=4で約11.8%）。バグではなく実装差のため、pyfixestとの比較は緩い許容誤差（目安15%）を使う。詳細は`docs/planning/specs/ols-implementation-notes.md`「リファレンス実装によるクロスチェック」参照。
+- **pyfixestのHC2/HC3に関する既知の差異**: fixest（R）本体のソース（`vcov_hc2_hc3_internal`）を確認したところ、HC2/HC3にはssc（`n/(n-k)`の小標本補正）を一切適用しない設計だった。一方pyfixest（Python、v0.60.0時点）はHC1/HC2/HC3を同一分岐で扱っており、HC1用の`N/(N-k)`補正をHC2/HC3にも誤って適用している（`sqrt(N/(N-k))`がSEに掛かり、nが小さいほど乖離が拡大する。例: n=20, k=4で約11.8%）。**fixestの仕様ではなくpyfixest自身の実装バグ**であり、OLSの正確性検証からは除外し性能比較専用とする（Issue #27）。詳細は`docs/planning/specs/ols-implementation-notes.md`「クロスチェックの役割分担見直し」参照。
 
 ## 手順
 

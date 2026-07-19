@@ -9,7 +9,7 @@
 役割分担:
     - 構造・API・エラーパスの検証: `test_ols.py`
     - 主リファレンス（statsmodels）との厳密な数値一致: このファイル
-    - 独立実装（R/pyfixest）との緩いクロスチェック: `test_ols_crosscheck.py`
+    - 独立実装（R）とのクロスチェック: `test_ols_crosscheck.py`
 
 Note:
     `generate_ols_fixtures.py`と同じ決定論的データ生成（`generate_dataset()`、

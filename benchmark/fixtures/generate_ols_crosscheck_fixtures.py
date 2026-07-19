@@ -2,15 +2,20 @@
 生成するスクリプト。
 
 `tests/api_tests/fixtures/benchmarks/ols.json`（statsmodels、主リファレンス）とは別に、
-独立実装（R: lm + sandwich/lmtest、pyfixest）による緩い許容誤差でのクロスチェック値を
-生成する。役割分担は`.claude/rules/testing-policy.md`「リファレンス実装」章の通り:
+独立実装（R: lm + sandwich/lmtest）によるクロスチェック値を生成する。役割分担は
+`.claude/rules/testing-policy.md`「リファレンス実装」章の通り:
 
 - R（lm + sandwich/lmtest）: 全cov_type（classical/HC0-3/cluster/HAC）の正式なクロスチェック。
   fixest（≒pyfixestの実装元）とは独立した実装のため採用。
-- pyfixest: 補助的にclassical/HC1-3のみ（OLSでは主役ではない。HC0はpyfixestが公開しておらず、
-  "hetero"/"HC1"が同じ値を返す仕様のため対象外）。cluster/HACはissue #18の決定によりR側のみで確認する。
 
-厳密一致は期待しない（`testing-policy.md`「許容誤差」2章、cross-check用の緩い許容誤差）。
+pyfixestは正確性検証には使わない（Issue #27）。fixest（R）本体のソース確認により、
+pyfixestのHC2/HC3はfixestの仕様ではなく**pyfixest自身の実装バグ**（HC1用の
+`N/(N-k)`小標本補正をHC2/HC3にも誤って適用）に起因する系統的乖離があると判明した
+ため、性能比較専用（別issue）に位置づけを変更した。詳細は
+`docs/planning/specs/ols-implementation-notes.md`「クロスチェックの役割分担見直し」参照。
+
+classical/HC0-3/clusterはRとほぼ機械精度で一致するため厳密比較、HACのみ小標本補正の
+慣習差により緩い許容誤差で比較する（`tests/api_tests/test_ols_crosscheck.py`参照）。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`ols_crosscheck.json`は
 `tests/api_tests/fixtures/`に置く（`testing-policy.md`「ベンチマーク値のフィクスチャ化」参照）。
@@ -32,7 +37,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import pyfixest  # noqa: E402
 import statsmodels  # noqa: E402
 
 from generate_synthetic_datasets import generate_dataset  # noqa: E402
@@ -52,13 +56,6 @@ NUMERIC_SCENARIOS = [
 ]
 
 R_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
-# pyfixestは"hetero"（HC1相当）以外にHC0を公開していないため対象外。
-PYFIXEST_COV_TYPE_MAP = {
-    "classical": "iid",
-    "hc1": "HC1",
-    "hc2": "HC2",
-    "hc3": "HC3",
-}
 
 
 def _hac_auto_lag(n: int) -> int:
@@ -88,34 +85,12 @@ def _run_r(
     return _normalize_names(raw)
 
 
-def _run_pyfixest_case(
-    dataset_source: str, dataset: str, formula: str, cov_type: str
-) -> dict:
-    import pyfixest as pf
-
-    from generate_synthetic_datasets import generate_dataset as gen
-    from load_wooldridge import load as load_w
-
-    if dataset_source == "synthetic":
-        df, _ = gen(dataset)
-    else:
-        df = load_w(dataset)
-    pandas_df = df.to_pandas()
-    vcov = PYFIXEST_COV_TYPE_MAP[cov_type]
-    model = pf.feols(formula, data=pandas_df, vcov=vcov)
-    raw = {
-        "coef": {str(k): float(v) for k, v in model.coef().to_dict().items()},
-        "se": {str(k): float(v) for k, v in model.se().to_dict().items()},
-    }
-    return _normalize_names(raw)
-
-
 def _normalize_names(raw: dict) -> dict:
     """パラメータ名を本実装のparam_names規則（切片="const"）に揃える。
 
-    R（lm/coeftest）は"(Intercept)"、pyfixest/statsmodels(formula API)は
-    "Intercept"を使うため、フィクスチャの利用側（テストコード）で
-    ソースごとに名前を出し分けなくて済むよう、ここで統一する。
+    R（lm/coeftest）は"(Intercept)"、statsmodels(formula API)は"Intercept"を
+    使うため、フィクスチャの利用側（テストコード）でソースごとに名前を
+    出し分けなくて済むよう、ここで統一する。
     """
 
     def fix(name: str) -> str:
@@ -152,10 +127,6 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             else:
                 entry["r"] = _run_r(csv_path, formula, cov_type)
 
-            if cov_type in PYFIXEST_COV_TYPE_MAP:
-                entry["pyfixest"] = _run_pyfixest_case(
-                    "synthetic", scenario, formula, cov_type
-                )
             fixtures[scenario][cov_type] = entry
 
         if scenario == "baseline":
@@ -202,12 +173,9 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
 
         fixtures[name] = {}
         for cov_type in ["classical", *hc_types]:
-            entry: dict = {"r": _run_r(csv_path, formula, cov_type)}
-            if cov_type in PYFIXEST_COV_TYPE_MAP:
-                entry["pyfixest"] = _run_pyfixest_case(
-                    "wooldridge", name, formula, cov_type
-                )
-            fixtures[name][cov_type] = entry
+            fixtures[name][cov_type] = {
+                "r": _run_r(csv_path, formula, cov_type)
+            }
     return fixtures
 
 
@@ -230,12 +198,12 @@ def build_fixtures() -> dict:
         "method": "ols",
         "purpose": (
             "statsmodels主リファレンス（ols.json）とは独立した実装（R: lm + "
-            "sandwich/lmtest、pyfixest）によるクロスチェック用。緩い許容誤差での"
-            "比較を想定し、厳密一致は期待しない（testing-policy.md参照）"
+            "sandwich/lmtest）によるクロスチェック用。classical/HC0-3/cluster"
+            "は厳密比較、HACのみ緩い許容誤差での比較を想定する"
+            "（testing-policy.md、Issue #27参照）"
         ),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "r_version": r_version,
-        "pyfixest_version": pyfixest.__version__,
         "statsmodels_version": statsmodels.__version__,
         "note": (
             "perfect_multicollinearityシナリオはここに含まない"
@@ -243,6 +211,7 @@ def build_fixtures() -> dict:
             "HACはR側のみ（explicit lagを本実装の自動ラグ式に合わせて指定）。"
             "clusterはbaselineシナリオのみ、疑似グループ（行番号%10）でR側のみ確認。"
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
+            "pyfixestとの比較は正確性検証から除外（Issue #27、性能比較専用issueへ移行）。"
         ),
     }
     return fixtures

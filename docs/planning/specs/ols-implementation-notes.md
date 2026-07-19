@@ -303,6 +303,7 @@ Issue #13までの`extract_ols_input`（受け口の検証・変換のみ、`Ols
   - クラスターSEは`vcovCL(model, cluster=..., type="HC1", cadjust=TRUE)` + 自由度`G-1`で、statsmodels（≒本実装）と厳密一致することを数値照合で確認した。
   - HACは`NeweyWest(model, lag=<本実装と同じ明示ラグ>, prewhite=FALSE, adjust=TRUE)`。厳密一致は期待しない設計だが、statsmodelsとの差は相対誤差0.4%程度で「大きな乖離ではない」ことを確認した。
 - **pyfixestのHC2/HC3に関する既知の差異**: pyfixest（fixest）はHC2/HC3に対し、標準的なMacKinnon-White公式に加えて**`sqrt(n/(n-k))`倍の追加小標本補正（ssc）**を掛ける仕様であることを検証中に発見した。R（sandwich）・statsmodels・本実装はこの追加補正を行わないため、`n`が小さいほど乖離が大きくなる（`small_n`シナリオ n=20, k=4 では約11.8%）。バグではなく実装間の既知の設計差のため、クロスチェックテストではpyfixest比較のみ許容誤差を緩めている（`test_ols_crosscheck.py`の`RTOL_PYFIXEST=0.15`）。
+  - **【Issue #27で訂正】この時点の「fixestの仕様」という結論は数値比較からの逆算のみに基づく推測で、不正確だった**。実際にはfixest（R）本体は「仕様」ではなくpyfixest（Python）側の実装バグである。詳細は下記「クロスチェックの役割分担見直し（Issue #27で実装済み）」参照。
 - **成果物**:
   - `benchmark/fixtures/generate_ols_crosscheck_fixtures.py`（新規）: 合成データ6シナリオ（`perfect_multicollinearity`除く）×R全cov_type、classical/HC1-3×pyfixest、baselineのみcluster、autocorrelatedのみHAC、Wooldridge実データ（wage1/gpa2）でも同様に生成。
   - `tests/api_tests/fixtures/benchmarks/ols_crosscheck.json`（新規、コミット対象）。
@@ -396,6 +397,25 @@ Issue #13までの`extract_ols_input`（受け口の検証・変換のみ、`Ols
 - **セキュリティアップデートPRのcooldown除外は設定不要**: 2026-07-14のGitHub公式アップデート（[changelog](https://github.blog/changelog/2026-07-14-dependabot-version-updates-introduce-default-package-cooldown/)）で、バージョン更新PRには既定で最低3日のcooldownが自動適用されるようになった一方、セキュリティアップデートPRは常にこの既定cooldownの対象外（設定不要、自動）と明記されている。issueで懸念されていた「除外用の特別なYAML構文」は存在せず、何も書かなければセキュリティPRは即座に作成される。
 - **`cargo audit`（ci_engine.yml）/`pip-audit`（ci_python.yml）とDependabot alertsの役割分担**: 前者はCI実行時点（毎PR/push）のロックファイルをRustSec/PyPIアドバイザリDBと突き合わせるゲート、Dependabotはレジストリの新バージョン・脆弱性情報を継続的に監視しPRを自動生成する仕組み。両者は補完関係にあり、どちらかへの統合・置き換えは行わない。
 - YAML構文の妥当性は`PyYAML`でのパース、およびSchemaStoreが公開する[dependabot-2.0.json](https://json.schemastore.org/dependabot-2.0.json)スキーマに対する`jsonschema`検証の両方で確認した（ローカルで「実行」できないファイルのため）。
+
+## クロスチェックの役割分担見直し（Issue #27で実装済み）
+
+Issue #18で導入した`test_ols_crosscheck.py`の設計を見直した。pyfixestを正確性検証から完全に除外し（性能比較専用issueへ移行）、Rクロスチェックの許容誤差をcov_typeごとに分けた。
+
+- **一次情報でのpyfixest除外理由の再確認**: Issue #18時点での「fixestがHC2/HC3にsqrt(n/(n-k))の追加小標本補正を掛ける仕様」という結論は、数値比較からの逆算のみに基づく推測だった。本issueでfixest（R）本体のGitHubソース（`R/VCOV.R`）を直接確認したところ、これは**不正確**だと判明した。
+  - fixest（R）の`vcov_hc2_hc3_internal()`は「we don't allow ssc changes => HC2/HC3 **are** SSCs」という明示コメント付きで、HC2/HC3にはssc（`n/(n-k)`の小標本補正）を一切適用しない設計になっている（適用されるのは`vcov_hetero_internal()`が担当するHC0/HC1のみ）。
+  - 一方pyfixest（Python、v0.60.0タグのソースを確認）の`feols_.py`は、HC1/HC2/HC3を`vcov_type == "hetero"`という同一分岐で扱っており、`get_ssc(vcov_type="hetero", ...)`が返す`N/(N-k)`係数を`self._vcov_hetero()`の戻り値（HC1/HC2/HC3いずれの場合も）に一律で掛けている。`vcov_type != "hetero"`のとき`(N-1)/(N-df_k)`、`"hetero"`のとき`N/(N-df_k)`という分岐は`get_ssc()`内にあるが、HC2/HC3をHC1と区別する分岐が存在しない。
+  - この`N/(N-k)`係数（vcov=分散に掛かる）はSEには`sqrt(N/(N-k))`として反映され、`small_n`シナリオ（n=20, k=4）で`sqrt(20/16)=1.1180`≈**11.8%**——Issue #18で実測した乖離幅と完全に一致する。
+  - **結論: fixest（R）自体は独立実装として妥当な設計だが、pyfixest（Pythonラッパー）側にfixestからの再現バグがある**。「独立実装と言えない」という除外判断自体はこの発見でむしろ補強されるが、docs上の理由付けを「fixestの仕様」から「pyfixestの実装バグ」に訂正した。upstream（`py-econometrics/pyfixest`）への報告は本issueのスコープ外として見送った（ユーザー判断）。
+- **`test_ols_crosscheck.py`からpyfixest比較テストを削除**: `test_synthetic_matches_pyfixest`・`test_wooldridge_matches_pyfixest`を削除。`RTOL_PYFIXEST`定数も削除。
+- **`benchmark/fixtures/generate_ols_crosscheck_fixtures.py`からpyfixest呼び出しを削除**: `_run_pyfixest_case`・`PYFIXEST_COV_TYPE_MAP`を削除し、R（`lm`+`sandwich`/`lmtest`）のみのシンプルな構成にした。`_meta`から`pyfixest_version`を削除。
+- **`ols_crosscheck.json`を再生成**: pyfixestフィールドが無くなり、ファイルサイズが縮小した。
+- **許容誤差をcov_typeごとに分割**: 実装検証のため、現在の実装とRの差を実測した（`benchmark/fixtures/generate_ols_crosscheck_fixtures.py`で使う7シナリオ全てで実測）。
+  - classical/HC0-3/cluster: 最大でも相対誤差**1e-14程度**（機械精度レベル）。`RTOL_STRICT = 1e-8`を採用した（`testing-policy.md`の基本方針と揃える。統計量ごとにあえて緩める理由が無くなったため）。
+  - HAC: 実測で相対誤差**0.40%程度**（Issue #18の記載通り、小標本補正の慣習差＝`prewhite`/`adjust`オプション起因）。`RTOL_HAC = 1e-2`を維持した（`prewhite`/`adjust`のさらなる整合調査はスコープ外とし、現状の余裕を持った許容誤差で運用する）。
+  - `test_hac_matches_r`の係数（`coef`）比較は`RTOL_STRICT`のまま維持した。cov_typeはSE計算方法にのみ影響し、係数自体（通常のOLS推定値）はcov_typeに依存しないため。
+- **`.claude/rules/testing-policy.md`「リファレンス実装」「許容誤差」を更新**: pyfixestをOLSの正確性検証対象から除外する旨を明記し、「同じクロスチェック用パッケージでも統計量・cov_typeごとに許容誤差を分けてよい」という一般原則をOLSの実例付きで追加した。
+- **`.claude/skills/reference-benchmark/SKILL.md`を更新**: 役割分担の記述・pyfixestの既知の差異の説明を、上記の訂正後の理由（pyfixestの実装バグ）に合わせて書き換えた。
 
 ## 未確定（実装時判断でよい）
 

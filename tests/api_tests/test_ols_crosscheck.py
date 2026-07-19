@@ -1,11 +1,22 @@
-"""OLSの独立実装（R: lm + sandwich/lmtest、pyfixest）とのクロスチェックテスト。
+"""OLSの独立実装（R: lm + sandwich/lmtest）とのクロスチェックテスト。
 
 主リファレンス（statsmodels）との厳密比較は`test_ols.py`で行う。ここでは
 `tests/api_tests/fixtures/benchmarks/ols_crosscheck.json`
 （`benchmark/fixtures/generate_ols_crosscheck_fixtures.py`で生成、Issue #18）
-を用いて、statsmodelsとは独立した実装との**緩い許容誤差**での一致を確認する。
-目的は大きな乖離（実装バグの兆候）の検出であり、厳密一致は期待しない
-（`.claude/rules/testing-policy.md`「許容誤差」参照）。
+を用いて、statsmodelsとは独立した実装（R）との一致を確認する。
+
+pyfixestは正確性検証には使わない（Issue #27）。fixest（R）本体のソース
+（`vcov_hc2_hc3_internal`）を確認したところ、HC2/HC3にはssc（`n/(n-k)`の小標本
+補正）を一切適用しない設計だったが、pyfixest（Python、v0.60.0時点）は
+HC1/HC2/HC3を同一分岐で扱っておりHC1用の`N/(N-k)`補正をHC2/HC3にも誤って
+適用していた（`sqrt(N/(N-k))`がSEに掛かり、nが小さいほど乖離が拡大する。
+small_nシナリオ n=20, k=4で約11.8%）。fixestの仕様ではなくpyfixest自身の
+実装バグであり、性能比較専用（別issue）とし正確性検証からは除外する。
+
+classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相対誤差1e-14程度）
+ため`RTOL_STRICT`で厳密比較する。HACのみ小標本補正の慣習差により
+`RTOL_HAC`（緩め）を使う。詳細は`docs/planning/specs/ols-implementation-notes.md`
+「クロスチェックの役割分担見直し」参照。
 
 Note:
     合成データセットは`benchmark/generate_synthetic_datasets.py`の
@@ -36,16 +47,15 @@ FIXTURE_PATH = (
     / "ols_crosscheck.json"
 )
 
-# 緩い許容誤差（相対誤差1%）。R（lm+sandwich）はMacKinnon-White系の標準的な
-# HC0-3公式を採用しており、本実装・statsmodelsと高い精度で一致する。
-RTOL = 1e-2
+# classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相対誤差1e-14程度、
+# Issue #27で測定）。testing-policy.md「許容誤差」の基本方針（相対誤差1e-8）と
+# 揃え、statsmodelsと同水準の厳密比較にする。
+RTOL_STRICT = 1e-8
 
-# pyfixest（fixest）はHC2/HC3に対し、標準的なMacKinnon-White公式に加えて
-# sqrt(n/(n-k))倍の追加小標本補正（ssc）を掛ける仕様であることを検証時に確認した
-# （R/sandwich・statsmodels・本実装はこの追加補正を行わない）。nが小さいほど
-# 乖離が大きくなる（例: small_nシナリオ n=20, k=4 では約11.8%）ため、
-# pyfixestとの比較のみ許容誤差を緩める。バグではなく既知の実装差。
-RTOL_PYFIXEST = 0.15
+# HACのみ小標本補正の慣習差（prewhite/adjust等）により実測で相対誤差0.4%程度の
+# 乖離がある（Issue #18で確認、Issue #27で維持を決定）。バグではなくNewey-West
+# 実装の慣習差のため、HACのみ緩めの許容誤差を使う。
+RTOL_HAC = 1e-2
 
 
 @pytest.fixture(scope="module")
@@ -57,7 +67,7 @@ def _assert_close(
     ours: dict[str, float],
     reference: dict[str, float],
     label: str,
-    rtol: float = RTOL,
+    rtol: float = RTOL_STRICT,
 ) -> None:
     for name, ref_val in reference.items():
         our_val = ours[name]
@@ -92,25 +102,6 @@ def test_synthetic_matches_r(crosscheck, scenario, cov_type):
     _assert_close(res.std_errors, ref["se"], f"{scenario}/{cov_type}/R se")
 
 
-@pytest.mark.parametrize("cov_type", ["classical", "hc1", "hc2", "hc3"])
-@pytest.mark.parametrize("scenario", SYNTHETIC_SCENARIOS)
-def test_synthetic_matches_pyfixest(crosscheck, scenario, cov_type):
-    df, _ = generate_dataset(scenario)
-    options = OLSOptions(cov_type=cov_type)
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
-
-    ref = crosscheck["synthetic"][scenario][cov_type]["pyfixest"]
-    _assert_close(
-        res.params, ref["coef"], f"{scenario}/{cov_type}/pyfixest coef"
-    )
-    _assert_close(
-        res.std_errors,
-        ref["se"],
-        f"{scenario}/{cov_type}/pyfixest se",
-        rtol=RTOL_PYFIXEST,
-    )
-
-
 def test_cluster_matches_r(crosscheck):
     """クラスターロバストSE。generate_ols_crosscheck_fixtures.pyと同じ疑似
     グループ（行番号%10）を再現する。統計的な意味はなく、実装の動作確認用。
@@ -140,8 +131,10 @@ def test_hac_matches_r(crosscheck):
     res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
     ref = entry["r"]
+    # 係数（coef）はcov_typeに依存しない通常のOLS推定値のため厳密比較のまま。
+    # HACで乖離しうるのは標準誤差（se）のみ。
     _assert_close(res.params, ref["coef"], "hac/R coef")
-    _assert_close(res.std_errors, ref["se"], "hac/R se")
+    _assert_close(res.std_errors, ref["se"], "hac/R se", rtol=RTOL_HAC)
 
 
 WOOLDRIDGE_DATASETS = {
@@ -177,25 +170,3 @@ def test_wooldridge_matches_r(
     ref = crosscheck["wooldridge"][dataset_name][cov_type]["r"]
     _assert_close(res.params, ref["coef"], f"{dataset_name}/{cov_type}/R coef")
     _assert_close(res.std_errors, ref["se"], f"{dataset_name}/{cov_type}/R se")
-
-
-@pytest.mark.parametrize("cov_type", ["classical", "hc1", "hc2", "hc3"])
-@pytest.mark.parametrize("dataset_name", list(WOOLDRIDGE_DATASETS))
-def test_wooldridge_matches_pyfixest(
-    crosscheck, load_wooldridge, dataset_name, cov_type
-):
-    y, x = WOOLDRIDGE_DATASETS[dataset_name]
-    df = load_wooldridge(dataset_name)
-    options = OLSOptions(cov_type=cov_type)
-    res = OLS(df, y=y, x=x, options=options).fit()
-
-    ref = crosscheck["wooldridge"][dataset_name][cov_type]["pyfixest"]
-    _assert_close(
-        res.params, ref["coef"], f"{dataset_name}/{cov_type}/pyfixest coef"
-    )
-    _assert_close(
-        res.std_errors,
-        ref["se"],
-        f"{dataset_name}/{cov_type}/pyfixest se",
-        rtol=RTOL_PYFIXEST,
-    )

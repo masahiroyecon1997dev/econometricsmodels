@@ -199,6 +199,29 @@ Issue #13までの`extract_ols_input`（受け口の検証・変換のみ、`Ols
 - HAC（`hac_lags=1`）・cluster（2クラスター）の結果も、対応するengineテストのオラクル値と浮動小数点誤差（1e-13〜1e-14程度）の範囲で一致すること
 - `MissingClusterColumn`・`InvalidHacLags`・未知の`cov_type`文字列・`SingularMatrix`のそれぞれが、想定通り`ValidationError`/`ComputationError`として送出されること
 
+### python_package: OLSラッパー実装（Issue #15で実装済み）
+
+`/implement-python`スキル経由で実装。着手前に2点確認した。
+
+1. **モジュール構成**: `python_package/econometricsmodels/linear/ols.py`を新設（`engine`/`engine_pybind`と同じ`linear/`系統ディレクトリ構成をpython_package側にも揃える方針。CLAUDE.md 3章の当時のリポジトリ構成図はまだ単一ファイルのままだったが、20〜30手法規模を見据えて先に揃えた）
+2. **`tests/api_tests/test_ols.py`（設計確定前の草案）の扱い**: 今回確定済み設計に合わせて全面的に書き直すことにした（Issue #19「tests/api_tests作成」に先送りしない）。旧版は`OLS(df, y="y", x=[...], cov_type=cov_type)`というフラットなキーワード引数渡し、`res.summary()`（5章で「作らない」と確定済み）、`res.to_frame()`/`res.conf_int()`がpolars DataFrameを返す（同章「係数テーブルにpolars DataFrameは使わない」と矛盾）等、`ols-api-design.md`7章に記載の不整合を抱えていた
+
+#### 実装内容
+
+- `OLS`クラス（`data`/`y`/`x`/`options: OLSOptions | None`のオブジェクト渡し）と`OlsResults`クラス（`_lib.OLSResult`の薄いラッパー）を実装。`OLSOptions`自体は独自定義せず`_lib`から再輸出（`ols-api-design.md`3章の既存方針通り）
+- `OlsResults`のプロパティ設計:
+  - `params`/`std_errors`/`t_stats`/`p_values`は`dict[str, float]`（係数名→値。O(1)取り出し用）
+  - `conf_int`は`dict[str, tuple[float, float]]`（`_lib.OLSResult`の`conf_lower`/`conf_upper`2配列から組み立て）
+  - `coef_table()`メソッドで行指向の`list[dict]`（キー: `param`/`coef`/`std_err`/`t_stat`/`p_value`/`conf_lower`/`conf_upper`）を提供。REST APIレスポンスにそのまま使える形（5章の2形式のうち先に実装すべきとされていたもの）
+  - `residuals`はそのまま`list[float]`（`_lib.OLSResult`の値を素通しするだけの薄いラッパーという位置づけを優先し、polars Seriesへの変換等は行わない。design docに明記のない拡張のため見送った）
+  - `summary()`・`predict()`・`fitted_values`・`to_frame()`/`conf_int()`のDataFrame版は実装しない（5章の確定方針、および「薄いラッパー」というissue本文のスコープに照らして見送った）
+- **`pyproject.toml`に`[tool.ruff] line-length = 79`を追加**: `.claude/rules/python-style.md`は元々この値を明記していたが、`[tool.ruff]`セクション自体がリポジトリに存在せず、これまで未設定（デフォルトの88文字）だったことが判明。python_packageの最初の実コードを書くタイミングで顕在化したため追加した
+- 上記追加により`benchmark/`配下の既存スクリプト（Issue #15のスコープ外）でlint/format違反が新たに表面化した（未使用import1件、フォーマット崩れ4ファイル）。CIの`ruff check .`/`ruff format --check .`はリポジトリ全体が対象のため、ユーザーに確認の上、この場で`ruff check --fix`・`ruff format`により機械的に修正した（ロジック変更なし）
+
+#### 検証方法
+
+`uv run maturin develop`で実ビルド・インストールし、`uv run pytest tests/api_tests/`で書き直した29件のテストを実行（全通過）。`ruff check .`・`ruff format --check .`もリポジトリ全体でクリーン。テストはstatsmodels（`use_t=True`）とclassical/HC0-3/clusterの係数・標準誤差・R²・F統計量を数値照合し、HACは動作確認（statsmodelsとの数値照合はしない。既存のengine単体テストで数値照合済みのため）。
+
 ### Python側の例外はカテゴリ別に分ける
 
 - 詳細・理由は `.claude/rules/rust-style.md`「エラーハンドリング」を参照（`ValidationError` / `ComputationError`の2階層、`pyo3::create_exception!`で定義）

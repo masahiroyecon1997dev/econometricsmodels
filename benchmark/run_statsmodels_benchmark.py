@@ -30,7 +30,6 @@ def run(
     cluster_col: str | None = None,
     confidence_level: float = 0.95,
 ) -> dict:
-    import statsmodels.api as sm
     import statsmodels.formula.api as smf
 
     true_beta = None
@@ -43,11 +42,15 @@ def run(
     elif dataset_source == "wooldridge":
         pandas_df = load_wooldridge(dataset).to_pandas()
         if formula is None:
-            raise ValueError("wooldridgeデータセットの場合は--formulaの指定が必須です")
+            raise ValueError(
+                "wooldridgeデータセットの場合は--formulaの指定が必須です"
+            )
     else:
         raise ValueError(f"unknown dataset_source: {dataset_source!r}")
 
-    sm_cov_type = {"classical": "nonrobust"}.get(cov_type.lower(), cov_type.lower())
+    sm_cov_type = {"classical": "nonrobust"}.get(
+        cov_type.lower(), cov_type.lower()
+    )
 
     # statsmodelsはcov_type="nonrobust"以外（HC0-3/cluster/HAC）でuse_t=Falseが既定
     # （p値・信頼区間に正規分布を使う）。本プロジェクトはcov_typeによらずt分布で統一する
@@ -57,7 +60,9 @@ def run(
     if sm_cov_type == "cluster":
         fit_kwargs["cov_kwds"] = {"groups": pandas_df[cluster_col]}
     elif sm_cov_type == "hac":
-        fit_kwargs["cov_kwds"] = {"maxlags": 1}  # ラグ選択方法は別途検討事項（issue参照）
+        fit_kwargs["cov_kwds"] = {
+            "maxlags": 1
+        }  # ラグ選択方法は別途検討事項（issue参照）
 
     model = smf.ols(formula=formula, data=pandas_df).fit(**fit_kwargs)
 
@@ -67,10 +72,15 @@ def run(
     result: dict = {
         "coef": {str(k): float(v) for k, v in model.params.to_dict().items()},
         "se": {str(k): float(v) for k, v in model.bse.to_dict().items()},
-        "t_stats": {str(k): float(v) for k, v in model.tvalues.to_dict().items()},
-        "p_values": {str(k): float(v) for k, v in model.pvalues.to_dict().items()},
+        "t_stats": {
+            str(k): float(v) for k, v in model.tvalues.to_dict().items()
+        },
+        "p_values": {
+            str(k): float(v) for k, v in model.pvalues.to_dict().items()
+        },
         "conf_int": {
-            str(idx): [float(row[0]), float(row[1])] for idx, row in ci.iterrows()
+            str(idx): [float(row[0]), float(row[1])]
+            for idx, row in ci.iterrows()
         },
         "r_squared": float(model.rsquared),
         "r_squared_adj": float(model.rsquared_adj),
@@ -101,9 +111,15 @@ def run(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset-source", choices=["synthetic", "wooldridge"], default="synthetic")
+    parser.add_argument(
+        "--dataset-source",
+        choices=["synthetic", "wooldridge"],
+        default="synthetic",
+    )
     parser.add_argument("--dataset", required=True)
-    parser.add_argument("--formula", default=None, help='省略時はsyntheticのy,x列から自動生成')
+    parser.add_argument(
+        "--formula", default=None, help="省略時はsyntheticのy,x列から自動生成"
+    )
     parser.add_argument("--cov-type", default="classical")
     parser.add_argument("--cluster-col", default=None)
     parser.add_argument("--confidence-level", type=float, default=0.95)

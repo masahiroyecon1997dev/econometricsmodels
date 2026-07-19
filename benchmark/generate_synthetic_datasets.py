@@ -53,7 +53,9 @@ def generate_dataset(
         ValueError: 未知のscenario、またはk不足の場合。
     """
     if scenario not in SCENARIOS:
-        raise ValueError(f"unknown scenario: {scenario!r}. choose from {SCENARIOS}")
+        raise ValueError(
+            f"unknown scenario: {scenario!r}. choose from {SCENARIOS}"
+        )
 
     rng = np.random.default_rng(seed)
 
@@ -76,7 +78,9 @@ def generate_dataset(
     if scenario == "perfect_multicollinearity":
         if k < 3:
             raise ValueError("perfect_multicollinearity requires k >= 3")
-        X[:, 2] = 2 * X[:, 0] + 3 * X[:, 1]  # x3 = 2*x1 + 3*x2（完全な線形従属）
+        X[:, 2] = (
+            2 * X[:, 0] + 3 * X[:, 1]
+        )  # x3 = 2*x1 + 3*x2（完全な線形従属）
 
     # --- 誤差項 ---
     sigma_i = None  # heteroskedasticの場合のみ使用（weight算出に流用）
@@ -97,7 +101,11 @@ def generate_dataset(
 
     y = beta[0] + X @ beta[1:] + errors
 
-    weight = (1.0 / (sigma_i**2)) if sigma_i is not None else rng.uniform(0.5, 1.5, size=n)
+    weight = (
+        (1.0 / (sigma_i**2))
+        if sigma_i is not None
+        else rng.uniform(0.5, 1.5, size=n)
+    )
 
     data: dict[str, np.ndarray] = {"y": y}
     for j in range(k):

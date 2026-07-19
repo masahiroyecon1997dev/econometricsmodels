@@ -4,14 +4,14 @@ GitHub Issue #2「OLS: API・オプション設計」の完了条件（設計を
 確定済み設計のまとめ。パラメータ以外の内部実装の決定事項は
 [`ols-implementation-notes.md`](./ols-implementation-notes.md) を参照。
 
-**ステータス**: 設計確定済み。Rust/PyO3境界（`engine_pybind`）までは実装済み
-（[`engine_pybind/src/linear/ols.rs`](../../../engine_pybind/src/linear/ols.rs)）。
-`python_package`側のラッパー（`OLS` / `OlsResults`クラス）は未実装（Issue #15）。
+**ステータス**: 設計確定済み。`engine`・`engine_pybind`・`python_package`（`OLS` / `OlsResults`
+クラス、[`python_package/econometricsmodels/linear/ols.py`](../../../python_package/econometricsmodels/linear/ols.py)）
+まで実装済み。
 
 ## 1. 全体構成（3層）
 
 ```
-python_package (Issue #15, 未実装)      engine_pybind (実装済み)          engine (実装済み)
+python_package (実装済み)              engine_pybind (実装済み)          engine (実装済み)
 ┌─────────────────────────┐   ┌──────────────────────────┐   ┌─────────────────┐
 │ OLS(data, y, x, options) │──▶│ fit_ols(data, y, x,      │──▶│ 正規方程式ソルバー│
 │   .fit() -> OlsResults   │   │          options)        │   │ 標準誤差計算 等   │
@@ -105,14 +105,12 @@ fn fit_ols(
 - `cov_type`が未指定の場合のデフォルトは**classical**。
 - `cov_type`がHC系/clusterの場合、F検定も**ロバストWald検定**に切り替える（常に古典的F検定のままにはしない）。
 
-## 7. 既知の不整合（本設計確定に伴い後続issueで解消が必要）
+## 7. 既知の不整合（Issue #15で解消済み）
 
-- `tests/api_tests/test_ols.py`は本設計確定前の草案段階のテストで、
-  `OLS(df, y="y", x=["x1", "x2"], cov_type=cov_type)`のように`cov_type`等をフラットな
-  キーワード引数として渡しており、本ドキュメントの「オプションはオブジェクト（`OLSOptions`）渡し」
-  の方針と一致しない。また`res.summary()`を呼んでおり、5章の「summary()は作らない」方針とも
-  一致しない。python_packageの`OLS`/`OlsResults`実装（Issue #15）・テスト整備（Issue #19）の際に
-  書き直しが必要。
+- `tests/api_tests/test_ols.py`は本設計確定前の草案段階のテストだったが、`OLS(df, y="y",
+  x=["x1", "x2"], cov_type=cov_type)`のようなフラットなキーワード引数渡しや`res.summary()`
+  （5章の方針と不一致）を含んでいたため、Issue #15で本ドキュメントの確定済み設計に合わせて
+  全面的に書き直した。詳細は`ols-implementation-notes.md`「python_package: OLSラッパー実装」参照。
 - `docs/spec/01_ols.md`は本ドキュメントより前に書かれた古い草案で、`add_constant`（→`include_intercept`）、
   `summary()`出力、`weights`（WLS用、OLS Phase1のスコープ外）等、現在の設計と整合しない箇所が
   複数ある。CLAUDE.md 3章のリポジトリ構成にも`docs/spec/`は現れず、現行の`docs/planning/`体系に

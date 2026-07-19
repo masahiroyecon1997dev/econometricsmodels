@@ -19,7 +19,9 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # benchmark/ を import path に追加
+sys.path.insert(
+    0, str(Path(__file__).resolve().parent.parent)
+)  # benchmark/ を import path に追加
 
 import statsmodels  # noqa: E402
 
@@ -108,7 +110,9 @@ def _run_cluster_case(scenario: str) -> dict:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", default="../tests/api_tests/fixtures/benchmarks/ols.json")
+    parser.add_argument(
+        "--output", default="../tests/api_tests/fixtures/benchmarks/ols.json"
+    )
     args = parser.parse_args()
 
     fixtures = build_fixtures()

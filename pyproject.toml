@@ -45,3 +45,9 @@ benchmark = [
 dev = [
     "maturin==1.14.1",
 ]
+
+# .claude/rules/python-style.md「Lint / フォーマット」で確定済みの line-length=79
+# （PEP8標準）のみ設定する。有効化するRuffルール群の詳細は未確定のまま
+# （デフォルトのE/Fルールセットを使う）。
+[tool.ruff]
+line-length = 79

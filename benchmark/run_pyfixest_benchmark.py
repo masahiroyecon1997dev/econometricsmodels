@@ -46,7 +46,11 @@ def run(
         raise ValueError(f"unknown dataset_source: {dataset_source!r}")
 
     pandas_df = df.to_pandas()  # pyfixestはpandas入力
-    model = pf.feols(formula, data=pandas_df, weights=weights) if weights else pf.feols(formula, data=pandas_df)
+    model = (
+        pf.feols(formula, data=pandas_df, weights=weights)
+        if weights
+        else pf.feols(formula, data=pandas_df)
+    )
 
     result: dict = {
         "coef": {str(k): float(v) for k, v in model.coef().to_dict().items()},
@@ -59,9 +63,19 @@ def run(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset-source", choices=["synthetic", "wooldridge"], default="synthetic")
-    parser.add_argument("--dataset", required=True, help="synthetic: シナリオ名 / wooldridge: データセット名")
-    parser.add_argument("--formula", required=True, help='例: "y ~ x1 + x2 + x3"')
+    parser.add_argument(
+        "--dataset-source",
+        choices=["synthetic", "wooldridge"],
+        default="synthetic",
+    )
+    parser.add_argument(
+        "--dataset",
+        required=True,
+        help="synthetic: シナリオ名 / wooldridge: データセット名",
+    )
+    parser.add_argument(
+        "--formula", required=True, help='例: "y ~ x1 + x2 + x3"'
+    )
     parser.add_argument("--weights", default=None, help="WLSの場合の重み列名")
     args = parser.parse_args()
 

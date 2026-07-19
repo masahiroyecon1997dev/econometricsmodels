@@ -39,6 +39,9 @@ test = [
 # benchmark/ 配下のベンチマーク値生成スクリプト専用（CIでは使わない、随時実行するツール。
 # CLAUDE.md 3章「benchmark/はtests/とは別ライフサイクル」参照）。
 benchmark = [
+    # polars.DataFrame.to_pandas()が内部で要求する（run_*_benchmark.py各スクリプトが
+    # pandasに変換してリファレンス実装に渡すため）。pandas側は直接依存に含めない。
+    "pyarrow==25.0.0",
     "pyfixest==0.60.0",
     "wooldridge==0.5.0",
 ]

@@ -291,6 +291,24 @@ Issue #13までの`extract_ols_input`（受け口の検証・変換のみ、`Ols
   - `wage1`（n=526、`lwage ~ educ + exper + tenure`）・`gpa2`（n=4137、`colgpa ~ sat + hsperc + tothrs`）ともに実バイナリで最終フィットを確認済み。`wage1`の`educ`係数≈0.092はWooldridge教科書の既知値と整合。
 - テストフィクスチャ（`generate_ols_fixtures.py`）は現状合成データのみを対象にしており、実データ（wage1/gpa2）はフィクスチャ化していない。実データは「真の係数と比較できないため、リファレンス実装との一致のみで検証する」（`testing-policy.md`）用途であり、フィクスチャへの組み込みはIssue #19（`tests/api_tests`整備）以降のスコープとする。
 
+## リファレンス実装によるクロスチェック（Issue #18で実装済み）
+
+`tests/api_tests/fixtures/benchmarks/ols.json`（statsmodels、主リファレンス）はIssue #21以前から存在していたが、`testing-policy.md`が定める「新しいcov_type追加時はstatsmodelsとRの一致を先に確認してからフィクスチャを固定する」というクロスチェック自体は、これまで一度も実施されていなかった（HAC含む全cov_typeが未検証のまま）。Issue #18でこのギャップを解消した。
+
+- **役割分担の確定**: `testing-policy.md`が既に定めている「Rが正式なクロスチェック、pyfixestはOLSでは主役ではない」という分担を踏襲した。pyfixestはv0.60.0でHAC(`vcov="NW"`)・クラスター(`vcov={"CRV1": ...}`)にも対応していることが分かったが、**fixestベースのpyfixestは独立実装とは言えない**（fixestの実装元とほぼ同じ設計思想）ため、正式なクロスチェックには使わないという既存方針を維持することにした。
+  - R側は`lm() + sandwich::vcovHC/vcovCL/NeweyWest + lmtest::coeftest`（base Rの独立実装）で、classical/HC0-3/cluster/HACの全cov_typeを確認する。
+  - pyfixestはclassical/HC1-3のみ補助的に確認する（HC0はpyfixestが公開しておらず、`"hetero"`が`"HC1"`と同一の値を返す仕様のため対象外）。cluster/HACはpyfixestでは確認しない。
+- **`benchmark/run_r_benchmark.R`の拡張**: 従来`fixest`/`plm`/`ivreg`のみだった`package`引数に`lm`を追加し、`sandwich`/`lmtest`ベースのクロスチェック機能を実装した（当初「Rはこのサンドボックス環境に無いため未検証」と記載されていたが、devcontainerには`fixest`/`sandwich`/`lmtest`/`jsonlite`が導入済みで、動作確認できた）。
+  - **`read.csv()`の罠**: デフォルトでは列名が`make.names()`により書き換わる（例: `_group`→`X_group`）ため、クラスター列を正しく渡せていなかった。`check.names = FALSE`を追加して修正した。
+  - クラスターSEは`vcovCL(model, cluster=..., type="HC1", cadjust=TRUE)` + 自由度`G-1`で、statsmodels（≒本実装）と厳密一致することを数値照合で確認した。
+  - HACは`NeweyWest(model, lag=<本実装と同じ明示ラグ>, prewhite=FALSE, adjust=TRUE)`。厳密一致は期待しない設計だが、statsmodelsとの差は相対誤差0.4%程度で「大きな乖離ではない」ことを確認した。
+- **pyfixestのHC2/HC3に関する既知の差異**: pyfixest（fixest）はHC2/HC3に対し、標準的なMacKinnon-White公式に加えて**`sqrt(n/(n-k))`倍の追加小標本補正（ssc）**を掛ける仕様であることを検証中に発見した。R（sandwich）・statsmodels・本実装はこの追加補正を行わないため、`n`が小さいほど乖離が大きくなる（`small_n`シナリオ n=20, k=4 では約11.8%）。バグではなく実装間の既知の設計差のため、クロスチェックテストではpyfixest比較のみ許容誤差を緩めている（`test_ols_crosscheck.py`の`RTOL_PYFIXEST=0.15`）。
+- **成果物**:
+  - `benchmark/fixtures/generate_ols_crosscheck_fixtures.py`（新規）: 合成データ6シナリオ（`perfect_multicollinearity`除く）×R全cov_type、classical/HC1-3×pyfixest、baselineのみcluster、autocorrelatedのみHAC、Wooldridge実データ（wage1/gpa2）でも同様に生成。
+  - `tests/api_tests/fixtures/benchmarks/ols_crosscheck.json`（新規、コミット対象）。
+  - `tests/api_tests/test_ols_crosscheck.py`（新規）: 上記フィクスチャを読み込み、本実装の実際の出力と緩い許容誤差（R: 相対誤差1%、pyfixest: 相対誤差15%）で比較する74ケースのテスト。`wooldridge`パッケージが無い環境では`pytest.importorskip`でskipする（`tests/api_tests`本体は`test`依存グループのみで完結させる方針、benchmark依存グループはCIでは使わない想定のため）。
+- **`pyproject.toml`に`pyarrow==25.0.0`を`benchmark`グループへ追加**: `polars.DataFrame.to_pandas()`が内部で要求するが依存関係に漏れていた（`run_pyfixest_benchmark.py`・`run_statsmodels_benchmark.py`とも、これが無いと実行時エラーになる状態だった）。
+
 ## 未確定（実装時判断でよい）
 
 - 特異性判定の相対閾値の具体式

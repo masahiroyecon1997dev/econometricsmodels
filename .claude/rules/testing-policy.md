@@ -10,7 +10,7 @@ paths:
 
 ## テストの分離
 
-- `tests/engine_tests/`: `engine`の純粋ロジックの単体テスト（`cargo test`）。
+- `engine`の純粋ロジックの単体テストは、対象コードと同じファイル内の`#[cfg(test)] mod tests`に置く（`cargo test -p engine`）。`tests/engine_tests/`ディレクトリは現状未使用（当初案から変更。詳細・理由は`.claude/rules/rust-style.md`「テスト」参照）。
 - `tests/api_tests/`: リファレンス実装との答え合わせテスト（`pytest`）。
 
 ## リファレンス実装

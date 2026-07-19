@@ -1492,4 +1492,65 @@ mod tests {
 
         assert_eq!(result.unwrap_err(), OlsError::InsufficientClusters { g: 1 });
     }
+
+    /// 説明変数が定数項のみ（傾き係数が無い）モデル。F検定は検定対象が存在しないため、
+    /// statsmodels同様NaNを返す（`OlsEstimator::fit`の`df_model == 0`分岐）。
+    #[test]
+    fn fit_returns_nan_f_statistic_when_model_has_no_slope_regressors() {
+        let y = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let input = OlsInput::from_columns(&y, &[], vec![], true, "y".to_string()).unwrap();
+
+        let estimator = OlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
+
+        assert!(estimator.f_statistic().is_nan());
+        assert!(estimator.f_p_value().is_nan());
+    }
+
+    #[test]
+    fn fit_exposes_input_cov_type_and_residuals_via_getters() {
+        // y = 1 + 2*x、ノイズなしの厳密解を持つデータ（残差が全て0に近いことを確認しやすい）
+        let y = vec![1.0, 3.0, 5.0, 7.0, 9.0];
+        let x_columns = vec![vec![0.0, 1.0, 2.0, 3.0, 4.0]];
+        let input = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = OlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
+
+        assert_eq!(estimator.input().nobs(), 5);
+        assert_eq!(estimator.cov_type(), &CovType::Classical);
+        let residuals = estimator.residuals();
+        for i in 0..5 {
+            assert!((*residuals.get(i, 0)).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn fit_panics_when_cluster_groups_length_does_not_match_nobs() {
+        // groups.len() != nはengine_pybind側の実装バグでしか起こり得ない内部契約違反のため、
+        // Errではなくdebug_assert!でパニックする（from_columns_panics_on_mismatched_names_arity
+        // と同じ性質）。
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+        let input = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let groups = vec!["a".to_string(), "b".to_string()]; // n=5のはずが長さ2
+        let cov_type = CovType::Cluster {
+            groups: Some(groups),
+        };
+        let _ = OlsEstimator::fit(input, cov_type, 0.95);
+    }
 }

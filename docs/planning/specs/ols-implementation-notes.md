@@ -122,6 +122,23 @@
   - `wald_f_test`のF分布の自由度（分母側）も`df_resid`ではなく`df_inference`を受け取るようにシグネチャを変更した
 - テストは`fit_computes_cluster_std_errors_t_stats_p_values_conf_int_and_f_test`（2クラスターのデータセットで標準誤差・t値・p値・信頼区間・F統計量を検証。自由度がG-1=1になることも含めてstatsmodelsと数値照合）、`fit_returns_missing_cluster_column_when_groups_not_provided`、`fit_returns_insufficient_clusters_when_only_one_group`の3つを追加
 
+### engine単体テストのカバレッジ（Issue #12で確認・実装済み）
+
+Issue #12は「実装（#9〜#11、実際には#21・#22も含む）と並行して書き足したテストの集約・完了確認用」という位置づけ。着手時に2点確認した。
+
+1. **テスト配置**: `.claude/rules/rust-style.md`「テスト」・`testing-policy.md`「テストの分離」は共に「`tests/engine_tests/`に置く」と書かれていたが、Issue #9以降実際には`engine/src/linear/ols.rs`内の`#[cfg(test)] mod tests`に一貫してインライン実装してきた（`tests/engine_tests/`は`.gitkeep`のみで空）。この乖離を解消するため、両ルールファイルを実態（インライン方式が正式方針）に更新した。`tests/engine_tests/`は削除せず、将来モジュール横断の統合テストが必要になった場合の予約として残す
+2. **カバレッジ目標**: `cargo-llvm-cov`で実測。100%は目指さず、理論上到達不能な防御的エラーパスはドキュメント化して受け入れる方針で確定（詳細は`rust-style.md`「テスト」参照）
+
+実測結果（25テスト時点）: Region 98.94%・Line 98.88%・Function 96.34%。未カバー箇所は以下の3種類。
+
+- **すぐ埋められたギャップ**（このissueで追加): `fit()`の`df_model == 0`分岐（`f64::NAN`を返す経路。`fit_returns_nan_f_statistic_when_model_has_no_slope_regressors`で解消）、`OlsEstimator::input()`/`cov_type()`/`residuals()`の3getter（`fit_exposes_input_cov_type_and_residuals_via_getters`で解消）、`validate_cluster_groups`の`debug_assert_eq!`（`fit_panics_when_cluster_groups_length_does_not_match_nobs`で解消）
+- **理論上到達不能な防御的エラーパス**（受け入れて未カバーのまま。いずれも「事前に検証済みの不変条件により、理論上失敗し得ないはずだが、浮動小数点の丸めに備えて`Result`化してある」という同じ性質）:
+  1. `xtx_inverse`の`Llt`失敗→`SingularMatrix`（特異性は`ensure_full_rank`で先に検出済みのため通常到達しない）
+  2. `StudentsT::new`/`FisherSnedecor::new`の失敗→`ComputationFailed`（自由度は`n>k`・`G>=2`・`df_model>=1`の事前検証により常に有効な正の値になる）
+  3. `wald_f_test`内の`Llt`失敗→`ComputationFailed`（正定値行列の主小行列は必ず正定値という線形代数の定理により理論上到達不能）
+  - これらを実際に踏ませるには丸め誤差でギリギリ破綻する敵対的な浮動小数点データを人為的に作る必要があり、プラットフォーム依存で壊れやすく、実装の振る舞いというより浮動小数点ノイズの検証になるため見送った（`cargo-llvm-cov`の除外マーカーも導入しないことにした。ツール依存設定を増やすより、コード側のdocコメントで理由を説明する方針を優先）
+- 残りの「missed lines」表示（981, 986等）は`assert!`マクロのメッセージ引数（アサーション失敗時のみ評価される）による分析ツールの誤検知で、実際のギャップではない
+
 ### Python側の例外はカテゴリ別に分ける
 
 - 詳細・理由は `.claude/rules/rust-style.md`「エラーハンドリング」を参照（`ValidationError` / `ComputationError`の2階層、`pyo3::create_exception!`で定義）

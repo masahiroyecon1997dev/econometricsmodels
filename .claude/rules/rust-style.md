@@ -83,5 +83,6 @@ paths:
 
 ## テスト
 
-- 対応する純粋ロジックの単体テストは `tests/engine_tests/`（`cargo test`）に置く。
+- 純粋ロジックの単体テストは、対応するソースファイル内の `#[cfg(test)] mod tests`（同じファイルの末尾。`cargo test -p engine`で実行）に置く。`tests/engine_tests/`は現状未使用（Issue #9で当初案から変更。OLS実装（Issue #8〜#22）で一貫してこの方式を採用しており、対象コードと同じファイルにあることでリファクタリング時の追従漏れを防げるため）。将来的にモジュール横断の統合テストが必要になった場合のみ`tests/engine_tests/`の使用を検討する。
 - 許容誤差等のテスト方針の詳細は `testing-policy.md` を参照。
+- **カバレッジの現実的な目標**: `cargo llvm-cov -p engine`で計測する。100%は目指さず、既に検証済みの不変条件（特異性検出済みの行列のCholesky分解、事前検証済みの自由度によるt分布/F分布の構築等）に対する防御的な`Result`化（`unwrap`/`expect`を避けるため`Result`を返すが、実際にはその不変条件により失敗し得ない`map_err`分岐）はカバレッジ対象外として許容する。対象外にする場合は、その箇所のdocコメントに「なぜ理論上到達不能か」を明記すること（`engine::linear::ols`の`xtx_inverse`・`wald_f_test`等を参照）。

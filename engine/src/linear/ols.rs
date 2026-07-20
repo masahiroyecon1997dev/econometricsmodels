@@ -7,8 +7,9 @@
 //! ここ（engine側）の責務とする。詳細は`docs/planning/specs/ols-api-design.md`
 //! 「OLSOptions」の`include_intercept`の項を参照。
 
+use faer::linalg::matmul::matmul;
 use faer::prelude::{Solve, SolveLstsq};
-use faer::{Mat, Side};
+use faer::{Accum, Mat, Par, Side};
 use statrs::distribution::{ContinuousCDF, FisherSnedecor, StudentsT};
 use thiserror::Error;
 
@@ -631,9 +632,18 @@ fn time_ordering(time_order: Option<&[f64]>, n: usize) -> Vec<usize> {
 /// `Ŝ_l = Σ_{t=l+1}^{n} ε̂_t ε̂_{t-l} x_t x_{t-l}'`（`docs/planning/specs/ols-standard-errors.md`
 /// 3.1節）。`order`で指定された時系列順に並べ替えた残差・行を使ってラグ付き自己共分散を計算する。
 ///
-/// HC0-3の`hc_cov_params`と異なり、`Ŝ_l`（l>=1）は対称でない外積の和（`x_t x_{t-l}'`）のため
-/// `Xw'Xw`のような単純な行列積に落とし込めない。`k`（説明変数の数）は通常小さいため、
-/// 素直な三重ループ（ラグ×観測×`k²`）で計算する。
+/// 残差でスケールした行列`Xe`（`Xe[t,a] = ε̂_t・x_t[a]`、`order`の時系列順）を使うと、
+/// `Ŝ₀ = Xe'Xe`、`Ŝ_l = Xe[l:,:]'Xe[:n-l,:]`という行列積に落とし込める（`Ŝ_l'`は転置を
+/// 取るだけで再計算不要）。手書きの三重ループ（ラグ×観測×`k²`）よりfaerの行列積を使う方が
+/// 大幅に高速（Issue #29のプロファイリングで確認、`docs/planning/specs/
+/// ols-implementation-notes.md`「engineコードレビュー」参照）。
+///
+/// **`Par::Seq`を明示指定する理由**: `Ŝ_l`の行列積はラグの数だけ繰り返し呼ぶことになるが、
+/// 1回あたりの行列積は`k×k`という小さい出力サイズのため、faer既定の並列実行（グローバル
+/// スレッドプールへのディスパッチ）のオーバーヘッドが計算本体を上回り、**三重ループより
+/// 遅くなる**ことをIssue #29で実測済み（n=10,000, k=2で0.13倍＝約6倍の悪化）。この関数
+/// 内だけ`Par::Seq`にスコープを切ることで、他のcov_type計算・将来手法のグローバル並列化
+/// 設定に影響を与えずにこの罠を回避する（Issue #48）。
 fn hac_cov_params(
     x: &Mat<f64>,
     residuals: &Mat<f64>,
@@ -643,36 +653,41 @@ fn hac_cov_params(
     lags: usize,
     order: &[usize],
 ) -> Mat<f64> {
-    let e_ord: Vec<f64> = order.iter().map(|&i| *residuals.get(i, 0)).collect();
-    let x_ord: Vec<Vec<f64>> = order
-        .iter()
-        .map(|&i| (0..k).map(|j| *x.get(i, j)).collect())
-        .collect();
+    let xe = Mat::<f64>::from_fn(n, k, |t, a| {
+        let i = order[t];
+        (*residuals.get(i, 0)) * (*x.get(i, a))
+    });
 
+    // l=0項: Ŝ₀ = Xe'Xe（HC0のΨ̂と同形）
     let mut s_hat = Mat::<f64>::zeros(k, k);
-
-    // l=0項: Ŝ₀ = Σ_t ε̂_t² x_t x_t'（HC0のΨ̂と同形）
-    for t in 0..n {
-        let e2 = e_ord[t] * e_ord[t];
-        for a in 0..k {
-            for b in 0..k {
-                *s_hat.get_mut(a, b) += e2 * x_ord[t][a] * x_ord[t][b];
-            }
-        }
-    }
+    matmul(
+        s_hat.as_mut(),
+        Accum::Replace,
+        xe.transpose(),
+        xe.as_ref(),
+        1.0,
+        Par::Seq,
+    );
 
     // l=1..=lags項: w_l * (Ŝ_l + Ŝ_l')
+    let mut s_l = Mat::<f64>::zeros(k, k);
     for l in 1..=lags {
         let weight = 1.0 - (l as f64) / ((lags + 1) as f64);
-        for t in l..n {
-            let cross = e_ord[t] * e_ord[t - l];
-            for a in 0..k {
-                for b in 0..k {
-                    // (Ŝ_l + Ŝ_l')[a,b] = Ŝ_l[a,b] + Ŝ_l[b,a]
-                    let s_l_ab = cross * x_ord[t][a] * x_ord[t - l][b];
-                    let s_l_ba = cross * x_ord[t][b] * x_ord[t - l][a];
-                    *s_hat.get_mut(a, b) += weight * (s_l_ab + s_l_ba);
-                }
+        let xe_top = xe.as_ref().subrows(l, n - l);
+        let xe_bot = xe.as_ref().subrows(0, n - l);
+        matmul(
+            s_l.as_mut(),
+            Accum::Replace,
+            xe_top.transpose(),
+            xe_bot,
+            1.0,
+            Par::Seq,
+        );
+
+        for a in 0..k {
+            for b in 0..k {
+                // (Ŝ_l + Ŝ_l')[a,b] = Ŝ_l[a,b] + Ŝ_l[b,a]
+                *s_hat.get_mut(a, b) += weight * (*s_l.get(a, b) + *s_l.get(b, a));
             }
         }
     }

@@ -36,9 +36,11 @@
 - **サンドイッチ+小標本補正**（`"hc1"`）: `hc0`の`Σ`に`n/(n-k)`を乗じる（OLSのHC1と同じ発想）
 - **クラスター**（`"cluster"`）: `Σ = H⁻¹ (Σ_g S_g S_g') H⁻¹`、`S_g = Σ_{i∈g} sᵢ`（OLSの`cluster_cov_params`と同型の導出）
 
-`H`・`s_i`はモデルごとに異なるが、上記5つの行列演算自体（`-H⁻¹`、外積和、サンドイッチ積）はLogit/Probit/Tobitで完全に共通のため、`discrete_choice/common.rs`に共通関数として実装する候補（各モデル側は`s_i`・`H`を渡すだけでよい設計を目指す。engine内のtrait設計自体は未確定、後述）。
+`H`・`s_i`はモデルごとに異なるが、上記5つの行列演算自体（`-H⁻¹`、外積和、サンドイッチ積）はLogit/Probit/Tobitで完全に共通のため、`discrete_choice/common.rs`に共通関数として実装する（各モデル側は`s_i`・`H`を渡すだけでよい設計。詳細は後述「engine内のtrait設計」）。
 
-**未確定**: クラスターの小標本補正（OLSは`G/(G-1) * (n-1)/(n-k)`を常に適用し無効化オプションを設けない方針）をMLEでも同じ規約にするかは、この会話でまだ決めていない。実装issue着手時に確認する。
+**クラスターの小標本補正**: OLSと同じ規約（`Σ_cluster = correction * H⁻¹ (Σ_g S_g S_g') H⁻¹`、`correction = G/(G-1) * (n-1)/(n-k)`を常に適用し、無効化オプションを設けない）をそのまま踏襲する。根拠は`ols-implementation-notes.md`が確認済みの通り、statsmodelsの`sandwich_covariance.cov_cluster`がOLS専用ではなく線形モデル・MLEモデル共通の汎用関数であること。実装issue着手時にstatsmodelsソースで再確認する。
+
+**OLSとの相違点（自由度切り替え不要）**: OLSは`cov_type=Cluster`のとき検定の自由度を`n-k`から`G-1`に切り替える処理があったが、非線形モデルはz検定（標準正規分布、自由度という概念がない）のため、この切り替え自体が不要。分散共分散行列のスケーリング（`correction`）だけ気にすればよい。
 
 ### 検定分布: 標準正規分布
 
@@ -55,10 +57,26 @@
 
 `.claude/rules/rust-style.md`の既存規約（系統＝ディレクトリ、手法＝最初は1ファイル）通り、`engine/src/discrete_choice/{common.rs, logit.rs, probit.rs, tobit.rs}`とする。`common.rs`には`MleError`（上記）と、`cov_type`の共通行列演算（観測情報行列/OPG/サンドイッチ/クラスター）を置く候補。`engine_pybind`側も同じ系統名で対応させる（`engine_pybind/src/discrete_choice/{logit,probit,tobit}.rs`）。
 
+### engine内のtrait設計
+
+argminの`CostFunction`/`Gradient`/`Hessian`トレイト実装と、`discrete_choice`系統内の共通化範囲を以下のように分ける。
+
+| 置き場所 | 内容 |
+|---|---|
+| 各モデルファイル（`logit.rs`/`probit.rs`/`tobit.rs`） | `{Logit,Probit,Tobit}Problem`構造体（`X`/`y`/Tobit境界値を保持）に対する`CostFunction`（負の対数尤度）/`Gradient`（スコアの符号反転）/`Hessian`トレイト実装。加えてargminのトレイトではない独自メソッド`scores(&self, params) -> Mat<f64>`（n×k、観測ごとのスコア行列。OPG/サンドイッチ/クラスターSEの計算に必須。argminの`Gradient`は合計済みの1本のベクトルしか返さないため別途必要） |
+| `discrete_choice/common.rs` | (a) `method`文字列（`"newton"`/`"bfgs"`/`"lbfgs"`）→argminソルバーへのディスパッチ（収束フラグ・反復回数を返す）。(b) `cov_type`ごとの共通行列演算（`H`と`scores`さえ受け取れば手法に依らず同じ計算） |
+
+**Hessianは`method`の選択に関わらず常に解析的に実装する**: `bfgs`/`lbfgs`は最適化中にHessianを使わない（内部で近似する）が、`cov_type="classical"`（観測情報行列）には収束点でのHessianが必要。対象3手法はいずれも解析的Hessianが書けるため、`Hessian`トレイトは常に実装し、収束点で1回評価してSE計算に使う（BFGSの内部近似Hessianは使い回さない。手法間の結果の一貫性を優先する）。
+
+### 収束判定の`tol`
+
+- **判定基準**: 勾配ノルム（`‖∇ℓ(θ)‖ < tol`）を暫定採用する。`newton`/`bfgs`/`lbfgs`の3手法すべてでGradientトレイトを実装するため共通に使える。**最終決定はLogit/Probit実装・テスト段階に持ち越す**: statsmodels/R glmとの数値照合（`test-new`スキル）の結果次第で、判定基準・閾値を見直す可能性がある
+- **デフォルト値**: `tol = 1e-6`（暫定値。実装後の数値照合結果次第で調整）
+- **Options化**: `max_iter`と同じ扱いで`tol: f64 = 1e-6`をOptionsに追加する
+- **スケール依存への対処（確定）**: 勾配の絶対閾値は説明変数のスケールに依存する（`スコア = Σ 残差項 × x_i`のため、xが大きいスケールの列を含むと勾配も大きくなり、真に収束していても`tol`を割らない事態が起きうる）。対策として**設計行列を内部で標準化（平均0・分散1）してから最適化し、収束後にパラメータを元のスケールへ逆変換して返す**。ユーザーからは完全に不可視の内部処理（Options/Returnに影響しない）。glmnet等、多くのMLE実装で使われる標準的な手法で実装リスクも低いためこちらを採用する
+  - 却下案: Newton減少量`λ² = g'H⁻¹g`（スケール不変な収束基準）は理論的にはより厳密だが、`bfgs`/`lbfgs`では準ニュートン法が内部で保持する近似逆Hessianへのargmin API経由でのアクセスが必要で、実装できるか不確実なため採用しない
+
 ## 未確定（実装issue着手時、または追加相談が必要）
 
-- **engine内のMLE共通のtrait設計**: argminの`CostFunction`/`Gradient`/`Hessian`トレイトをどう実装するか（モデルごとに直接実装するか、`common.rs`に薄い共通ラッパーを噛ませるか）、観測ごとのスコアベクトルをどう保持・再利用するか（`cov_type`計算で必要）。`nonlinear-api-design.md`8章のmaxLikアーキテクチャを参考に、Logit/Probit着手時に確定させる
-- **収束判定の具体的な`tol`**: 勾配ノルム等、収束とみなす閾値のデフォルト値
-- **クラスター標準誤差の小標本補正**: MLEでもOLSと同じ規約（常に適用）にするか
-- **Tobit固有エラーの正確な検証条件**: 下限<上限の検証、両側打ち切り時の整合性チェック等の詳細
+- **Tobit固有エラーの正確な検証条件**: 下限<上限の検証、両側打ち切り時の整合性チェック等の詳細。Tobit実装時に決定する
 - **モデルごとの尤度・勾配・Hessian導出**（数式そのもの）: Logit/Probit/Tobitそれぞれ着手時に別ノート（`logit-implementation-notes.md`等、または本ファイルへの追記）を作成

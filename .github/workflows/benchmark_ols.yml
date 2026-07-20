@@ -1,0 +1,58 @@
+name: Benchmark (OLS performance)
+
+# Issue #47: benchmark/compare_performance.py（Issue #28、OLSのstatsmodels/pyfixestとの
+# 実行時間・メモリ比較）を統一環境で実行し、結果をjob summaryに出力する。
+#
+# トリガーはタグpush（v*）+ workflow_dispatchのみ（ユーザー確認済み）。n=1,000,000込みの
+# フルスイープは数分かかり重いため、cd_release.ymlと同じくPR/push毎には回さない。
+# ソロ開発でコード変更頻度が低いこと、リリース単位で性能を記録できれば十分という判断。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  benchmark:
+    name: compare_performance.py (OLS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          python-version: "3.12"
+
+      # test（statsmodels）+ benchmark（pyfixest, pyarrow）+ dev（maturin）の3グループが必要。
+      # ci_python.ymlのtestグループのみとは異なり、compare_performance.pyがpyfixestとの
+      # 比較も行うため。
+      - name: uv sync (test + benchmark + dev groups)
+        run: uv sync --locked --group test --group benchmark --group dev
+
+      # 【最重要】必ずreleaseビルドで計測する。デフォルトの`maturin develop`（debugビルド）
+      # のままだと最大140倍遅い誤った結果になることをIssue #28で実測済み
+      # （docs/planning/specs/ols-performance-notes.md「最重要の教訓」参照）。
+      - name: maturin develop --release
+        run: uv run --locked --group test --group benchmark --group dev maturin develop --release
+
+      - name: compare_performance.py
+        working-directory: benchmark
+        run: |
+          uv run --locked --group test --group benchmark --group dev \
+            python compare_performance.py --repeats 3 --output results.json
+
+      - name: render job summary
+        working-directory: benchmark
+        run: |
+          uv run --locked --group test --group benchmark --group dev \
+            python render_performance_summary.py results.json >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ols-performance-results
+          path: benchmark/results.json

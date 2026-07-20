@@ -510,6 +510,20 @@ Issue #23実装時に`cargo audit`が検知した4件の脆弱性・2件のunmai
 - **重要な副次的発見: `quick-xml`/`bincode`は実際にはビルドに一切含まれていない**。`cargo build -p engine_pybind --release`のログに`quick-xml`/`object_store`/`bincode`のコンパイルが一度も出現しないこと、`cargo tree -p object_store`（`--target all`込み）が空を返すことを確認した。原因は、これらが`polars-error`/`polars-utils`の**オプション依存**（`object_store`のクラウドストレージ機能・`polars-utils`の`serde`機能）であり、本プロジェクトはpolars DataFrameをローカルでしか扱わずどちらの機能も有効化していないため。一方で`cargo audit`（および`cargo metadata`のresolveノード）は機能フラグを考慮せず`Cargo.lock`を丸ごとスキャンするため、実際にコンパイルされない依存でも警告に含まれる。**実運用上のリスクは実質ゼロだが、`cargo audit`のCI検知からは機能フラグの調整では除外できない**（`Cargo.lock`はワークスペース全体で到達しうる全オプション依存のバージョンを、有効化の有無に関わらず一括して固定する設計のため）。issue本文にあった「`polars`の`default-features`を絞れば除外できるかもしれない（未検証）」という仮説は、この調査により**否定された**。
 - **`.cargo/audit.toml`のignore listは変更なし**（4件のRUSTSEC IDとも解消できていないため）。コメントを更新し、「Issue #46完了時に削除」という古い指示を、新しい追跡先（Issue #49）への参照に差し替えた。
 
+## CI: benchmark_ols.yml作成（Issue #47で実装済み）
+
+`.github/workflows/benchmark_ols.yml`を新規作成し、`benchmark/compare_performance.py`（Issue #28）を統一環境（GitHub Actionsランナー）で実行し、結果をjob summaryに出力する仕組みを追加した。
+
+- **トリガー: タグpush（`v*`）+ `workflow_dispatch`のみ**（ユーザー確認済み、`cd_release.yml`と同じ方針）。n=1,000,000込みのフルスイープは数分かかり重いため毎PR/push実行はしない。週次等の定期スケジュールも見送った——ソロ開発でコード変更頻度が低い段階では、リリース（タグpush）単位で記録できれば十分という判断（ユーザーの意見を採用）。
+- **結果の見せ方: job summaryへのMarkdown表出力のみ**（ユーザー確認済み）。履歴推移を追える仕組み（`github-action-benchmark`アクション、gh-pages蓄積等）はPhase1段階では作り込まず、将来必要になった時点で検討する。
+- **表整形は`benchmark/render_performance_summary.py`として分離**: `compare_performance.py`自体はJSON出力に専念する既存方針を維持し、Markdown整形は別スクリプトの責務にした。`compare_performance.py --output <json>`の結果を受け取り、n軸・k軸それぞれcov_typeごとにライブラリを列とするpivot表を組み立てて標準出力に書く。ワークフロー側で`>> "$GITHUB_STEP_SUMMARY"`にリダイレクトする。
+- **ワークフローファイル名は`benchmark_ols.yml`**（OLS専用、ユーザー確認済み）。将来WLS/IV等の手法を追加する際は、その時点で汎用化するか個別ファイルを増やすか改めて判断する。
+- **パフォーマンスregressionの自動検知・アラートはスコープ外**（ユーザー確認済み）。ベースライン保存の仕組みが別途必要になり複雑化するため、まずは「統一環境で実行して結果を出す」までに留め、将来のstretchとした。
+- **依存グループ: `test`＋`benchmark`＋`dev`の3つが必要**。`ci_python.yml`は`test`グループのみだが、`compare_performance.py`はpyfixestとの比較も行うため`benchmark`グループ（`pyfixest`・`pyarrow`）、`maturin develop --release`のため`dev`グループも必要。`pyproject.toml`の`[dependency-groups]`コメントを、`benchmark`グループが「CIでは使わない」という従来の記述から実態に合わせて更新した。
+- **`uv run maturin develop --release`を必ず使う**。Issue #28で判明した「デフォルトのdebugビルドだと最大140倍遅い誤った結果になる」罠（`docs/planning/specs/ols-performance-notes.md`「最重要の教訓」参照）をCIでも踏まないよう、ワークフロー内にコメントで明記した。
+- **結果JSONは`actions/upload-artifact`でアーティファクト保存**（`ols-performance-results`）。後から個別のCI実行の生データを参照・比較できるようにする。
+- **ローカルで実機検証**: `render_performance_summary.py`は手作りの小さいJSONで出力形式を確認した後、実際に`compare_performance.py --repeats 3`のフルスイープ（release build、n軸・k軸とも全cov_type×全ライブラリ）を通しで実行し、その本物のJSONを整形して意図通りのMarkdown表になることを確認した。
+
 ## 未確定（実装時判断でよい）
 
 - 特異性判定の相対閾値の具体式

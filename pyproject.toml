@@ -27,6 +27,7 @@ features = ["pyo3/extension-module"]
 
 [dependency-groups]
 # CI（ci_python.yml）が使う: pytest tests/api_tests / ruff check . / ruff format --check .
+# benchmark_ols.yml（Issue #47）もstatsmodels目的でこのグループを使う。
 # statsmodelsはtests/api_tests/fixtures/benchmarks/のフィクスチャ生成に使った主リファレンス実装のため、
 # `==`で厳密固定する（.claude/rules/testing-policy.md「ベンチマーク値のフィクスチャ化」参照）。
 # バージョンを上げる場合はフィクスチャの再生成とセットで行うこと。
@@ -36,8 +37,10 @@ test = [
     "statsmodels==0.14.6",
     "ruff==0.15.20",
 ]
-# benchmark/ 配下のベンチマーク値生成スクリプト専用（CIでは使わない、随時実行するツール。
-# CLAUDE.md 3章「benchmark/はtests/とは別ライフサイクル」参照）。
+# benchmark/ 配下のベンチマーク値生成・性能比較スクリプト専用（CLAUDE.md 3章
+# 「benchmark/はtests/とは別ライフサイクル」参照）。ci_python.ymlは使わない
+# （随時実行するツール）が、benchmark_ols.yml（Issue #47、compare_performance.py実行用）
+# はタグpush/workflow_dispatch時にこのグループを使う。
 benchmark = [
     # polars.DataFrame.to_pandas()が内部で要求する（run_*_benchmark.py各スクリプトが
     # pandasに変換してリファレンス実装に渡すため）。pandas側は直接依存に含めない。

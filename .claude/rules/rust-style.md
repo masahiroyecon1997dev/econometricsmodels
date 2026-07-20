@@ -29,7 +29,7 @@ paths:
 ## 言語方針
 
 - **英語にする**: 例外・バリデーションメッセージ（`ValidationError`/`ComputationError`等、Pythonユーザーに表示される文字列）、公開API（`#[pyclass]` / `#[pyfunction]`）に付ける`///`docコメント（PyO3経由でPythonの`__doc__`になり、`help()`やIDE補完でユーザーに見えるため）。
-- **`#[pyclass]`には`module`属性を明示する**（例: `#[pyclass(module = "econometricsmodels._lib")]`）。PyO3のデフォルトでは`__module__ == "builtins"`になり、mkdocs（mkdocstrings/griffe）がPython側の再エクスポート（`_lib` → `python_package`側モジュール）を解決できず`AliasResolutionError`でドキュメントビルドが失敗する（Issue #20で発覚。詳細は`docs/planning/specs/ols-implementation-notes.md`「mkdocsドキュメント作成」参照）。
+- **`#[pyclass]`には`module`属性を明示する**（例: `#[pyclass(module = "econometricsmodels._lib")]`）。PyO3のデフォルトでは`__module__ == "builtins"`になり、mkdocs（mkdocstrings/griffe）がPython側の再エクスポート（`_lib` → `python_package`側モジュール）を解決できず`AliasResolutionError`でドキュメントビルドが失敗する（詳細は`docs/planning/specs/ols-implementation-notes.md`「9. ドキュメント」参照）。
 - **日本語のままでよい**: 非公開関数・非公開型（`#[pyclass]`/`#[pyfunction]`が付いていないもの）の`///`/`//!`コメント、実装の背景説明、TODOコメント等の開発者向けの記述。GitHub Issue・CLAUDE.md・rules等の開発ドキュメントは対象外（日本語のまま）。
 - 理由: `econometricsmodels`はeconomicon専用ではなくPyPI公開の独立パッケージであり、Pythonエコシステムの慣習（pandas/numpy/polars等）に合わせる。economicon側はi18nで独自にローカライズするため、例外はクラス（`ValidationError`/`ComputationError`）で分岐する設計になっており、メッセージ文字列の言語はeconomicon側のi18nに機能的な影響を与えない。
 
@@ -84,6 +84,6 @@ paths:
 
 ## テスト
 
-- 純粋ロジックの単体テストは、対応するソースファイル内の `#[cfg(test)] mod tests`（同じファイルの末尾。`cargo test -p engine`で実行）に置く。`tests/engine_tests/`は現状未使用（Issue #9で当初案から変更。OLS実装（Issue #8〜#22）で一貫してこの方式を採用しており、対象コードと同じファイルにあることでリファクタリング時の追従漏れを防げるため）。将来的にモジュール横断の統合テストが必要になった場合のみ`tests/engine_tests/`の使用を検討する。
+- 純粋ロジックの単体テストは、対応するソースファイル内の `#[cfg(test)] mod tests`（同じファイルの末尾。`cargo test -p engine`で実行）に置く。`tests/engine_tests/`は現状未使用（対象コードと同じファイルにあることでリファクタリング時の追従漏れを防げるため、OLS実装で一貫してこの方式を採用している）。将来的にモジュール横断の統合テストが必要になった場合のみ`tests/engine_tests/`の使用を検討する。
 - 許容誤差等のテスト方針の詳細は `testing-policy.md` を参照。
 - **カバレッジの現実的な目標**: `cargo llvm-cov -p engine`で計測する。100%は目指さず、既に検証済みの不変条件（特異性検出済みの行列のCholesky分解、事前検証済みの自由度によるt分布/F分布の構築等）に対する防御的な`Result`化（`unwrap`/`expect`を避けるため`Result`を返すが、実際にはその不変条件により失敗し得ない`map_err`分岐）はカバレッジ対象外として許容する。対象外にする場合は、その箇所のdocコメントに「なぜ理論上到達不能か」を明記すること（`engine::linear::ols`の`xtx_inverse`・`wald_f_test`等を参照）。

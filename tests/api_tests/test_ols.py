@@ -3,15 +3,6 @@
 statsmodelsとの数値比較（推定値の正しさ）と、確定済み設計
 （`docs/planning/specs/ols-api-design.md`）通りのAPIになっていることの
 両方を検証する。
-
-Note:
-    以前のこのファイルは設計確定前の草案で、`OLS(df, y="y", x=[...],
-    cov_type=cov_type)`のようなフラットなキーワード引数渡しや
-    `res.summary()`（テキスト整形。5章で「作らない」と確定済み）、
-    `res.to_frame()`がpolars DataFrameを返す（同章「係数テーブルに
-    polars DataFrameは使わない」と矛盾）等、確定済み設計と食い違う
-    内容だった（7章「既知の不整合」参照）。Issue #15で確定済み設計に
-    合わせて全面的に書き直した。
 """
 
 from __future__ import annotations
@@ -203,22 +194,14 @@ def test_singular_matrix_raises_computation_error():
 
 
 def test_insufficient_observations_raises(dataset):
-    """観測数nが説明変数の数k（定数項込み）以下の場合`ValidationError`
-
-    （Issue #30で追加。engine側の`OlsError::InsufficientObservations`は
-    Rust単体テストでのみ検証されており、Python API境界からは未検証だった）。
-    """
+    """観測数nが説明変数の数k（定数項込み）以下の場合`ValidationError`。"""
     df = dataset.head(2)  # n=2、include_intercept=trueでk=3（const, x1, x2）
     with pytest.raises(ValidationError):
         OLS(df, y="y", x=["x1", "x2"]).fit()
 
 
 def test_insufficient_clusters_raises(dataset):
-    """クラスターが1種類しかない場合`ValidationError`
-
-    （Issue #30で追加。従来は`cluster_col`が全く未指定のケースのみ
-    検証されており、クラスター数不足自体はPython API境界から未検証だった）。
-    """
+    """クラスターが1種類しかない場合`ValidationError`。"""
     df = dataset.with_columns(pl.lit(0).alias("single_cluster"))
     options = OLSOptions(cov_type="cluster", cluster_col="single_cluster")
     with pytest.raises(ValidationError):
@@ -227,11 +210,7 @@ def test_insufficient_clusters_raises(dataset):
 
 @pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])
 def test_invalid_confidence_level_raises(dataset, confidence_level):
-    """`confidence_level`が(0, 1)の範囲外（境界値0.0を含む）の場合`ValidationError`
-
-    （Issue #30で追加。従来は範囲を大きく外れた1.5のみRust単体テストで
-    検証されており、Python API境界・境界値0.0は未検証だった）。
-    """
+    """`confidence_level`が(0, 1)の範囲外（境界値0.0を含む）の場合`ValidationError`。"""
     options = OLSOptions(confidence_level=confidence_level)
     with pytest.raises(ValidationError):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
@@ -241,28 +220,20 @@ def test_invalid_confidence_level_raises(dataset, confidence_level):
     "hac_lags", [-1, 100]
 )  # 100 == dataset の nobs（上限側境界）
 def test_invalid_hac_lags_raises(dataset, hac_lags):
-    """`hac_lags`が`[0, n)`の範囲外の場合`ValidationError`
-
-    （Issue #30で追加。Rust単体テストでは範囲外の境界を検証済みだが、
-    Python API境界からは未検証だった）。
-    """
+    """`hac_lags`が`[0, n)`の範囲外の場合`ValidationError`。"""
     options = OLSOptions(cov_type="hac", hac_lags=hac_lags)
     with pytest.raises(ValidationError):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
 def test_y_in_x_raises(dataset):
-    """`y`と同じ列名が`x`にも含まれる場合`ValidationError`
-
-    （Issue #30で追加。`engine_pybind::fit`のy/x重複チェックが
-    Python API境界から未検証だった）。
-    """
+    """`y`と同じ列名が`x`にも含まれる場合`ValidationError`。"""
     with pytest.raises(ValidationError):
         OLS(dataset, y="y", x=["y", "x1"]).fit()
 
 
 def test_duplicate_x_column_raises(dataset):
-    """`x`に同じ列名が重複して含まれる場合`ValidationError`（Issue #30で追加）。"""
+    """`x`に同じ列名が重複して含まれる場合`ValidationError`。"""
     with pytest.raises(ValidationError):
         OLS(dataset, y="y", x=["x1", "x1"]).fit()
 
@@ -270,8 +241,7 @@ def test_duplicate_x_column_raises(dataset):
 def test_const_collision_with_include_intercept_raises():
     """`include_intercept=True`のとき`x`に`"const"`という列名を含めると
 
-    自動追加される定数項と衝突し`ValidationError`（Issue #30で追加。
-    `engine_pybind::fit`の対応する検証がPython API境界から未検証だった）。
+    自動追加される定数項と衝突し`ValidationError`になること。
     """
     df = pl.DataFrame({"y": [1.0, 2.0, 3.0], "const": [1.0, 2.0, 3.5]})
     with pytest.raises(ValidationError):
@@ -279,7 +249,7 @@ def test_const_collision_with_include_intercept_raises():
 
 
 def test_empty_x_raises(dataset):
-    """`x`が空リストの場合`ValidationError`（Issue #30で追加）。"""
+    """`x`が空リストの場合`ValidationError`。"""
     with pytest.raises(ValidationError):
         OLS(dataset, y="y", x=[]).fit()
 
@@ -298,19 +268,15 @@ def test_computation_error_is_runtime_error():
     assert issubclass(ComputationError, RuntimeError)
 
 
-# ── オプションの反映確認（Issue #30で追加） ──────────────────────────
+# ── オプションの反映確認 ────────────────────────────────────────────
 #
-# 従来のtest_ols.pyはcov_type以外のOLSOptionsフィールド
-# （include_intercept・confidence_level・hac_lags=None・time_col）を
-# Python API境界からほぼ検証しておらず、対応するengine_pybind側の
-# 列抽出・分岐ロジックが未検証だった。
+# cov_type以外のOLSOptionsフィールド（include_intercept・confidence_level・
+# hac_lags=None・time_col）が、engine_pybind側の列抽出・分岐ロジックを経て
+# 正しく反映されることを確認する。
 
 
 def test_include_intercept_false_matches_statsmodels():
-    """`include_intercept=False`でstatsmodelsと一致すること（uncentered TSSの
-
-    R²等、Rust単体テストでは検証済みだがPython API境界からは未検証だった）。
-    """
+    """`include_intercept=False`でstatsmodelsと一致すること（uncentered TSSのR²等）。"""
     rng = np.random.default_rng(7)
     n = 30
     x1 = rng.normal(0.0, 1.0, n)
@@ -330,8 +296,7 @@ def test_include_intercept_false_matches_statsmodels():
 def test_confidence_level_changes_interval_width(dataset):
     """`confidence_level`を下げると信頼区間が狭くなること
 
-    （既定の0.95以外の値がengine_pybind経由で実際に反映されることの確認。
-    従来はどのテストも既定値0.95のままでしか検証していなかった）。
+    （既定の0.95以外の値がengine_pybind経由で実際に反映されることの確認）。
     """
     wide = OLS(
         dataset,
@@ -374,8 +339,8 @@ def test_hac_time_col_reorders_rows_before_computing_lags():
     `fit_computes_hac_std_errors_respecting_time_order`と同一（時系列順で
     x=[1..5], y=[2,4,5,4,5]をtime順=[3,1,5,2,4]にシャッフルして入力し、
     `time_col`無指定・時系列順の入力と同じ結果になることを確認する）。
-    engine_pybindの`time_col`列抽出（`extract_f64_column`）はこれまで
-    Python API境界から一度も検証されていなかった（Issue #30で追加）。
+    engine_pybindの`time_col`列抽出（`extract_f64_column`）を
+    Python API境界から検証する。
     """
     ordered_df = pl.DataFrame(
         {"y": [2.0, 4.0, 5.0, 4.0, 5.0], "x1": [1.0, 2.0, 3.0, 4.0, 5.0]}

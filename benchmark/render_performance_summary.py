@@ -1,6 +1,6 @@
 """compare_performance.pyの結果JSONをMarkdownに整形する。
 
-GitHub ActionsのJob Summary（`$GITHUB_STEP_SUMMARY`）向け（Issue #47）。
+GitHub ActionsのJob Summary（`$GITHUB_STEP_SUMMARY`）向け。
 `compare_performance.py`自体はJSON出力に専念し、表示形式への整形は
 責務を分けてこちらに置く。
 
@@ -110,7 +110,7 @@ def render(report: dict) -> str:
     results: list[dict] = report["results"]
 
     lines = [
-        "# OLSパフォーマンス比較（Issue #28 / #47）",
+        "# OLSパフォーマンス比較",
         "",
         f"生成日時: {meta['generated_at']} / repeats={meta['repeats']} / "
         f"seed={meta['seed']}",

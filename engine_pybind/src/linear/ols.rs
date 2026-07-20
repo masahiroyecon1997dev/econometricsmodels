@@ -27,8 +27,8 @@ use crate::errors::{ComputationError, ValidationError};
 // `FromPyObject`実装を明示的に維持する（pyo3 0.28以降、Cloneを実装する#[pyclass]の
 // FromPyObject自動導出はopt-inに変更されたため）。
 // module: PyO3の#[pyclass]はデフォルトで__module__="builtins"になり、
-// mkdocstrings（griffe）がPythonでの再エクスポートのalias解決に失敗する原因になる
-// （Issue #20で発覚）。実際のインポート元(`econometricsmodels._lib`)を明示する。
+// mkdocstrings（griffe）がPythonでの再エクスポートのalias解決に失敗する原因になる。
+// 実際のインポート元(`econometricsmodels._lib`)を明示する。
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct OLSOptions {
@@ -154,8 +154,7 @@ pub struct OLSResult {
 /// トレイトか型のどちらかを含む必要がある）により`impl From<OlsError> for PyErr`は
 /// 書けない。関数として実装し、呼び出し側で`.map_err(ols_error_to_pyerr)?`する。
 ///
-/// 対応表は`docs/planning/specs/ols-implementation-notes.md`
-/// 「Python側の例外はカテゴリ別に分ける」参照。
+/// 対応表は`docs/planning/specs/ols-implementation-notes.md`「1. エラーハンドリング」参照。
 fn ols_error_to_pyerr(err: OlsError) -> PyErr {
     match err {
         OlsError::DimensionMismatch { .. }

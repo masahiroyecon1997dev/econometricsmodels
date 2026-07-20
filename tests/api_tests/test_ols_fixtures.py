@@ -1,10 +1,9 @@
 """OLSの主リファレンス（statsmodels）による数値比較テスト。
 
 `tests/api_tests/fixtures/benchmarks/ols.json`（`benchmark/fixtures/generate_ols_fixtures.py`
-で生成。Issue #21実装時に作成済みだったが、これまでどのテストからも読み込まれていなかった）
-を読み込み、6つの合成データシナリオ×classical/HC0-3/HAC + クラスター(baselineのみ)で、
+で生成）を読み込み、6つの合成データシナリオ×classical/HC0-3/HAC + クラスター(baselineのみ)で、
 係数・標準誤差・検定統計量・適合度統計量を相対誤差1e-8で厳密比較する
-（`.claude/rules/testing-policy.md`「許容誤差」の基本方針。Issue #19）。
+（`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。
 
 役割分担:
     - 構造・API・エラーパスの検証: `test_ols.py`

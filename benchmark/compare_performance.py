@@ -4,7 +4,7 @@ CLAUDE.md 1章「計算コアはRustで実装し高速化」の狙いを定量�
 `OLS(...).fit()`全体（Python API呼び出し、Arrow変換・PyO3オーバーヘッド込みの
 エンドツーエンド）を計測する。
 
-## 計測方法（Issue #28で確定）
+## 計測方法
 
 - **`engine`は必ずreleaseビルドで計測する**: `uv run maturin develop`（デフォルト、debug
   ビルド）と`uv run maturin develop --release`とで、`.so`ファイルサイズが924MB→32.7MB、
@@ -69,11 +69,8 @@ COV_TYPES = ["classical", "hc1", "cluster", "hac"]
 N_CLUSTERS = 50
 
 N_SWEEP = [1_000, 10_000, 100_000, 1_000_000]
-# 過去の経緯: engineをdebugビルド（maturin developのデフォルト）で計測した際、
-# HACがn=1,000,000で224秒経過しても完了せず強制終了した。releaseビルドで
-# 再計測したところn=1,000,000でも1.9秒程度で完了することを確認した
-# （上記「engineは必ずreleaseビルドで計測する」参照）。そのため現在はHACも
-# 他のcov_typeと同じN_SWEEPをそのまま使う。
+# HACもreleaseビルドであれば他のcov_typeと同程度の速度になるため、
+# 別のn範囲に絞る必要はない（上記「engineは必ずreleaseビルドで計測する」参照）。
 HAC_N_SWEEP = N_SWEEP
 N_SWEEP_FIXED_K = 5
 
@@ -337,7 +334,7 @@ def build_report(
         "_meta": {
             "purpose": (
                 "OLS(...).fit()のエンドツーエンド実行時間・ピークRSSを"
-                "statsmodels/pyfixestと比較する（Issue #28）"
+                "statsmodels/pyfixestと比較する"
             ),
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "n_sweep": N_SWEEP,

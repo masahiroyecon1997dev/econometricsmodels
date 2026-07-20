@@ -8,11 +8,11 @@
 - R（lm + sandwich/lmtest）: 全cov_type（classical/HC0-3/cluster/HAC）の正式なクロスチェック。
   fixest（≒pyfixestの実装元）とは独立した実装のため採用。
 
-pyfixestは正確性検証には使わない（Issue #27）。fixest（R）本体のソース確認により、
+pyfixestは正確性検証には使わない。fixest（R）本体のソース確認により、
 pyfixestのHC2/HC3はfixestの仕様ではなく**pyfixest自身の実装バグ**（HC1用の
 `N/(N-k)`小標本補正をHC2/HC3にも誤って適用）に起因する系統的乖離があると判明した
-ため、性能比較専用（別issue）に位置づけを変更した。詳細は
-`docs/planning/specs/ols-implementation-notes.md`「クロスチェックの役割分担見直し」参照。
+ため、性能比較専用に位置づけている。詳細は
+`docs/planning/specs/ols-implementation-notes.md`「8. テスト」参照。
 
 classical/HC0-3/clusterはRとほぼ機械精度で一致するため厳密比較、HACのみ小標本補正の
 慣習差により緩い許容誤差で比較する（`tests/api_tests/test_ols_crosscheck.py`参照）。
@@ -200,7 +200,7 @@ def build_fixtures() -> dict:
             "statsmodels主リファレンス（ols.json）とは独立した実装（R: lm + "
             "sandwich/lmtest）によるクロスチェック用。classical/HC0-3/cluster"
             "は厳密比較、HACのみ緩い許容誤差での比較を想定する"
-            "（testing-policy.md、Issue #27参照）"
+            "（testing-policy.md参照）"
         ),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "r_version": r_version,
@@ -211,7 +211,7 @@ def build_fixtures() -> dict:
             "HACはR側のみ（explicit lagを本実装の自動ラグ式に合わせて指定）。"
             "clusterはbaselineシナリオのみ、疑似グループ（行番号%10）でR側のみ確認。"
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
-            "pyfixestとの比較は正確性検証から除外（Issue #27、性能比較専用issueへ移行）。"
+            "pyfixestとの比較は正確性検証から除外（性能比較専用）。"
         ),
     }
     return fixtures

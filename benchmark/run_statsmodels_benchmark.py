@@ -54,8 +54,8 @@ def run(
 
     # statsmodelsはcov_type="nonrobust"以外（HC0-3/cluster/HAC）でuse_t=Falseが既定
     # （p値・信頼区間に正規分布を使う）。本プロジェクトはcov_typeによらずt分布で統一する
-    # 方針のため（docs/planning/specs/ols-standard-errors.md「検定に使う分布」、Issue #10で
-    # HC-robustについても再確認済み）、明示的にuse_t=Trueを指定する。
+    # 方針のため（docs/planning/specs/ols-api-design.md「検定分布」）、
+    # 明示的にuse_t=Trueを指定する。
     fit_kwargs: dict = {"cov_type": sm_cov_type, "use_t": True}
     if sm_cov_type == "cluster":
         fit_kwargs["cov_kwds"] = {"groups": pandas_df[cluster_col]}

@@ -2,21 +2,21 @@
 
 主リファレンス（statsmodels）との厳密比較は`test_ols.py`で行う。ここでは
 `tests/api_tests/fixtures/benchmarks/ols_crosscheck.json`
-（`benchmark/fixtures/generate_ols_crosscheck_fixtures.py`で生成、Issue #18）
+（`benchmark/fixtures/generate_ols_crosscheck_fixtures.py`で生成）
 を用いて、statsmodelsとは独立した実装（R）との一致を確認する。
 
-pyfixestは正確性検証には使わない（Issue #27）。fixest（R）本体のソース
+pyfixestは正確性検証には使わない。fixest（R）本体のソース
 （`vcov_hc2_hc3_internal`）を確認したところ、HC2/HC3にはssc（`n/(n-k)`の小標本
 補正）を一切適用しない設計だったが、pyfixest（Python、v0.60.0時点）は
 HC1/HC2/HC3を同一分岐で扱っておりHC1用の`N/(N-k)`補正をHC2/HC3にも誤って
 適用していた（`sqrt(N/(N-k))`がSEに掛かり、nが小さいほど乖離が拡大する。
 small_nシナリオ n=20, k=4で約11.8%）。fixestの仕様ではなくpyfixest自身の
-実装バグであり、性能比較専用（別issue）とし正確性検証からは除外する。
+実装バグであり、性能比較専用とし正確性検証からは除外する。
 
 classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相対誤差1e-14程度）
 ため`RTOL_STRICT`で厳密比較する。HACのみ小標本補正の慣習差により
 `RTOL_HAC`（緩め）を使う。詳細は`docs/planning/specs/ols-implementation-notes.md`
-「クロスチェックの役割分担見直し」参照。
+「8. テスト」参照。
 
 Note:
     合成データセットは`benchmark/generate_synthetic_datasets.py`の
@@ -47,14 +47,13 @@ FIXTURE_PATH = (
     / "ols_crosscheck.json"
 )
 
-# classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相対誤差1e-14程度、
-# Issue #27で測定）。testing-policy.md「許容誤差」の基本方針（相対誤差1e-8）と
-# 揃え、statsmodelsと同水準の厳密比較にする。
+# classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相対誤差1e-14程度）。
+# testing-policy.md「許容誤差」の基本方針（相対誤差1e-8）と揃え、statsmodelsと
+# 同水準の厳密比較にする。
 RTOL_STRICT = 1e-8
 
 # HACのみ小標本補正の慣習差（prewhite/adjust等）により実測で相対誤差0.4%程度の
-# 乖離がある（Issue #18で確認、Issue #27で維持を決定）。バグではなくNewey-West
-# 実装の慣習差のため、HACのみ緩めの許容誤差を使う。
+# 乖離がある。バグではなくNewey-West実装の慣習差のため、HACのみ緩めの許容誤差を使う。
 RTOL_HAC = 1e-2
 
 

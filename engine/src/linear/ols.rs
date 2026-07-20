@@ -271,7 +271,7 @@ impl OlsEstimator {
     /// `cov_type`によらず、p値・信頼区間の算出にはt分布（自由度n-k）を使う。
     /// 主リファレンスのstatsmodelsはHC0-3で正規分布を既定とするが（`use_t=False`）、
     /// 本プロジェクトはt分布で統一する方針（`docs/planning/specs/ols-api-design.md`
-    /// 「検定分布」、Issue #10で確認済み）。ベンチマーク生成側
+    /// 「検定分布」）。ベンチマーク生成側
     /// （`benchmark/run_statsmodels_benchmark.py`）は`use_t=True`を明示指定して合わせている。
     ///
     /// F統計量も同じ方針で、`cov_type`によらず単一のWald検定の式
@@ -635,15 +635,14 @@ fn time_ordering(time_order: Option<&[f64]>, n: usize) -> Vec<usize> {
 /// 残差でスケールした行列`Xe`（`Xe[t,a] = ε̂_t・x_t[a]`、`order`の時系列順）を使うと、
 /// `Ŝ₀ = Xe'Xe`、`Ŝ_l = Xe[l:,:]'Xe[:n-l,:]`という行列積に落とし込める（`Ŝ_l'`は転置を
 /// 取るだけで再計算不要）。手書きの三重ループ（ラグ×観測×`k²`）よりfaerの行列積を使う方が
-/// 大幅に高速（Issue #29のプロファイリングで確認、`docs/planning/specs/
-/// ols-implementation-notes.md`「engineコードレビュー」参照）。
+/// 大幅に高速（実測値は`docs/planning/specs/ols-implementation-notes.md`「11. パフォーマンス」参照）。
 ///
 /// **`Par::Seq`を明示指定する理由**: `Ŝ_l`の行列積はラグの数だけ繰り返し呼ぶことになるが、
 /// 1回あたりの行列積は`k×k`という小さい出力サイズのため、faer既定の並列実行（グローバル
 /// スレッドプールへのディスパッチ）のオーバーヘッドが計算本体を上回り、**三重ループより
-/// 遅くなる**ことをIssue #29で実測済み（n=10,000, k=2で0.13倍＝約6倍の悪化）。この関数
+/// 遅くなる**ことを実測済み（n=10,000, k=2で0.13倍＝約6倍の悪化）。この関数
 /// 内だけ`Par::Seq`にスコープを切ることで、他のcov_type計算・将来手法のグローバル並列化
-/// 設定に影響を与えずにこの罠を回避する（Issue #48）。
+/// 設定に影響を与えずにこの罠を回避している。
 fn hac_cov_params(
     x: &Mat<f64>,
     residuals: &Mat<f64>,
@@ -1323,8 +1322,7 @@ mod tests {
         );
     }
 
-    /// `hac_lags`の上限側の境界（Issue #30で追加。負値側の境界は上のテストで確認済みだが、
-    /// `l < n`の上限側は未確認だった）。`n=5`のとき`lags=5`（`n`自体）は範囲外（`[0, n)`）、
+    /// `hac_lags`の上限側の境界。`n=5`のとき`lags=5`（`n`自体）は範囲外（`[0, n)`）、
     /// `lags=4`（`n-1`）は許容される最大値であることを確認する。
     #[test]
     fn fit_returns_invalid_hac_lags_when_equal_to_n() {
@@ -1374,8 +1372,7 @@ mod tests {
     }
 
     /// `confidence_level`の境界値（0.0・1.0ちょうど）が範囲外として拒否されることを確認する
-    /// （Issue #30で追加。既存テストは1.5という範囲を大きく外れた値のみで、
-    /// `!(level > 0.0 && level < 1.0)`という判定式の境界そのものは未確認だった）。
+    /// （`!(level > 0.0 && level < 1.0)`という判定式の境界そのものの検証）。
     #[test]
     fn fit_returns_invalid_confidence_level_at_exact_boundaries() {
         for level in [0.0, 1.0, -0.1] {
@@ -1405,9 +1402,7 @@ mod tests {
     /// `CovType::Hac { lags: Some(0), .. }`は`Ŝ = Ŝ₀`（ラグ項なし）に退化し、これは
     /// `HC0`の`Ψ̂ = Σ_i ε̂_i² x_i x_i'`と数学的に同一の式になる（`hac_cov_params`の
     /// l=0項のドキュメント参照）。2つの独立した実装（`hc_cov_params`と`hac_cov_params`）が
-    /// この境界で一致することを確認する内部整合性テスト（Issue #30で追加。
-    /// 従来はどちらの経路も個別にstatsmodels/Rと比較されていたが、両者が互いに
-    /// 整合しているかは未確認だった）。
+    /// この境界で一致することを確認する内部整合性テスト。
     #[test]
     fn fit_hac_with_zero_lags_matches_hc0() {
         let y = vec![2.0, 4.0, 5.0, 4.0, 8.0, 3.0];

@@ -474,7 +474,32 @@ n=1,000,000, k=5での実測:
 - **`cluster_cov_params`のクラスターごとの二重ループ**: `hac_cov_params`と同型の手書きループ（`for a in 0..k { for b in 0..k { s_hat += s_g[a]*s_g[b] } }`）だが、計算量はO(G·k²)（Gはクラスター数、通常n よりずっと小さい。ベンチマークではG=50固定）であり、クラスター内合計を求めるO(n·k)の部分が支配的。k=20でもG=50なら20,000回程度の演算にしかならず、ホットスポットではない。行列積への書き換えは可能だが優先度は低いと判断し、修正issueは起票しない。
 - **HC2/HC3のレバレッジがh≈1に近づく境界ケース**: `hc_cov_params`は`resid / (1.0 - h).sqrt()`（HC2）・`resid / (1.0 - h)`（HC3）で割るが、`h`が1に極めて近い観測（例: 単一の観測だけを識別するダミー変数と切片の組み合わせ等、退化したデザイン）があると発散しうる。ただしこれはHC2/HC3という統計手法自体の数学的性質であり、statsmodels等の参照実装も同様に無防備であるため、engine固有のバグとは言えない。対応の要否はユーザー判断に委ねる（本issueのコメントで報告のみ）。
 
+## テストレビュー（Issue #30で実施済み）
 
+OLS関連の全テスト（Rust側`engine/src/linear/ols.rs`の`#[cfg(test)]`、Python側`tests/api_tests/`の3ファイル）を、有効性・網羅性・ロジック検証としての妥当性の観点でレビューした。Issue #27（クロスチェックの役割分担見直し）が完了した後の状態を対象にした。
+
+### Rust側（`engine/src/linear/ols.rs`）
+
+既存25件のテストは全て、期待値がscipy/statsmodels等で独立に検算済みで、実際の誤り（バグ）は見つからなかった。以下3件のギャップを見つけ、軽微な追加として対応した（設計見直しは不要だったため本issue内で完結）。
+
+- **`hac_lags`の上限側境界が未検証だった**: 既存テストは`lags=-1`（負値、範囲外）のみで、`[0, n)`の上限側（`lags=n`が範囲外、`lags=n-1`が許容される最大値）は未確認だった。`fit_returns_invalid_hac_lags_when_equal_to_n`・`fit_accepts_hac_lags_at_upper_boundary_of_n_minus_one`を追加。
+- **`confidence_level`の厳密な境界（0.0・1.0ちょうど）が未検証だった**: 既存テストは範囲を大きく外れた`1.5`のみで、判定式`!(level > 0.0 && level < 1.0)`の境界そのものは未確認だった。`fit_returns_invalid_confidence_level_at_exact_boundaries`（0.0, 1.0, -0.1をパラメータ化）を追加。
+- **`hac_cov_params`と`hc_cov_params`の内部整合性が未検証だった**: `CovType::Hac { lags: Some(0), .. }`は数学的に`Ŝ = Ŝ₀`に退化し、HC0の`Ψ̂`と同一の式になるはずだが、2つの独立した実装（`hac_cov_params`と`hc_cov_params`）が実際に一致することを確認するテストが無かった。`fit_hac_with_zero_lags_matches_hc0`を追加（相対誤差1e-12未満で一致確認）。
+
+### Python側（`tests/api_tests/`）
+
+`engine_pybind/src/linear/ols.rs`（`OLSOptions`のフィールド・検証ロジック）と突き合わせた結果、`test_ols.py`がcov_type以外のオプション（`include_intercept`・`confidence_level`・`hac_lags=None`・`time_col`）や、いくつかの`ValidationError`経路をPython API境界からほとんど検証していないことが判明した。特に**`time_col`（HACの時系列順序指定）は3ファイルのどこからも一度もテストされていなかった**（Rust側の`fit_computes_hac_std_errors_respecting_time_order`でengine内部のロジックは検証済みだったが、`engine_pybind`の列抽出経路が未検証だった）。
+
+既存3ファイルの役割分担（構造・API・エラーパス＝`test_ols.py`、statsmodels厳密一致＝`test_ols_fixtures.py`、Rクロスチェック＝`test_ols_crosscheck.py`）に自然に収まる内容だったため、新規ファイルは作らず`test_ols.py`に19件追加した。
+
+- **エラーパスの追加（8件）**: `InsufficientObservations`（n<=k）、`InsufficientClusters`（クラスター1種類のみ）、`InvalidConfidenceLevel`（境界値0.0を含む3値をパラメータ化）、`InvalidHacLags`（負値・上限境界の2値をパラメータ化）、y/xの列名重複、xの重複列、`include_intercept=True`時の`"const"`列名衝突、xが空リスト。いずれも`engine_pybind::fit`に対応するチェックが存在するのに、Python API境界からは一度も検証されていなかった。
+- **オプション反映確認の新設セクション（4件）**: `include_intercept=False`（statsmodelsとのインライン比較）、`confidence_level`変更で信頼区間幅が実際に変わること、`hac_lags`省略時（自動計算式）が動作すること、`time_col`指定でDataFrameの行順に関わらず時系列順でラグ付き自己共分散が計算されること（Rust単体テストと同一データをシャッフルして入力し、`time_col`無指定・時系列順の結果と一致することを確認）。
+
+### 参考: 対応不要と判断した点（engine_pybind、本issueのRust側スコープ外）
+
+`engine_pybind::fit`には、`y`列・各`x`列・`cluster_col`・`time_col`それぞれについて「行数がyと一致しない」という`ValidationError`分岐が3箇所ある。しかしこれらは全て同一のpolars DataFrame（`df[col_name]`）から抽出しており、polars DataFrameは構造上すべての列が同じ行数を持つため、**この3つの分岐は実質的に到達不能（dead code）である可能性が高い**（`engine`側の`OlsError::DimensionMismatch`と同種の性質）。対応（削除するか、到達不能である理由をコメントで明記するか）はengine_pybind側の設計判断であり、本issueのRust側スコープ（`engine/src/linear/ols.rs`のみ）外のため、記録に留め修正は行わない。
+
+## 未確定（実装時判断でよい）
 
 - 特異性判定の相対閾値の具体式
 - `SingularMatrix`のエラーメッセージを「定数項が重複している可能性があります」等、状況に応じて分岐させるか（優先度低、後回し可）

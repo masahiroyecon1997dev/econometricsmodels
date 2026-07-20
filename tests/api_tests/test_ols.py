@@ -202,6 +202,88 @@ def test_singular_matrix_raises_computation_error():
         OLS(df, y="y", x=["x1", "x2"]).fit()
 
 
+def test_insufficient_observations_raises(dataset):
+    """観測数nが説明変数の数k（定数項込み）以下の場合`ValidationError`
+
+    （Issue #30で追加。engine側の`OlsError::InsufficientObservations`は
+    Rust単体テストでのみ検証されており、Python API境界からは未検証だった）。
+    """
+    df = dataset.head(2)  # n=2、include_intercept=trueでk=3（const, x1, x2）
+    with pytest.raises(ValidationError):
+        OLS(df, y="y", x=["x1", "x2"]).fit()
+
+
+def test_insufficient_clusters_raises(dataset):
+    """クラスターが1種類しかない場合`ValidationError`
+
+    （Issue #30で追加。従来は`cluster_col`が全く未指定のケースのみ
+    検証されており、クラスター数不足自体はPython API境界から未検証だった）。
+    """
+    df = dataset.with_columns(pl.lit(0).alias("single_cluster"))
+    options = OLSOptions(cov_type="cluster", cluster_col="single_cluster")
+    with pytest.raises(ValidationError):
+        OLS(df, y="y", x=["x1", "x2"], options=options).fit()
+
+
+@pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])
+def test_invalid_confidence_level_raises(dataset, confidence_level):
+    """`confidence_level`が(0, 1)の範囲外（境界値0.0を含む）の場合`ValidationError`
+
+    （Issue #30で追加。従来は範囲を大きく外れた1.5のみRust単体テストで
+    検証されており、Python API境界・境界値0.0は未検証だった）。
+    """
+    options = OLSOptions(confidence_level=confidence_level)
+    with pytest.raises(ValidationError):
+        OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+
+@pytest.mark.parametrize(
+    "hac_lags", [-1, 100]
+)  # 100 == dataset の nobs（上限側境界）
+def test_invalid_hac_lags_raises(dataset, hac_lags):
+    """`hac_lags`が`[0, n)`の範囲外の場合`ValidationError`
+
+    （Issue #30で追加。Rust単体テストでは範囲外の境界を検証済みだが、
+    Python API境界からは未検証だった）。
+    """
+    options = OLSOptions(cov_type="hac", hac_lags=hac_lags)
+    with pytest.raises(ValidationError):
+        OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+
+def test_y_in_x_raises(dataset):
+    """`y`と同じ列名が`x`にも含まれる場合`ValidationError`
+
+    （Issue #30で追加。`engine_pybind::fit`のy/x重複チェックが
+    Python API境界から未検証だった）。
+    """
+    with pytest.raises(ValidationError):
+        OLS(dataset, y="y", x=["y", "x1"]).fit()
+
+
+def test_duplicate_x_column_raises(dataset):
+    """`x`に同じ列名が重複して含まれる場合`ValidationError`（Issue #30で追加）。"""
+    with pytest.raises(ValidationError):
+        OLS(dataset, y="y", x=["x1", "x1"]).fit()
+
+
+def test_const_collision_with_include_intercept_raises():
+    """`include_intercept=True`のとき`x`に`"const"`という列名を含めると
+
+    自動追加される定数項と衝突し`ValidationError`（Issue #30で追加。
+    `engine_pybind::fit`の対応する検証がPython API境界から未検証だった）。
+    """
+    df = pl.DataFrame({"y": [1.0, 2.0, 3.0], "const": [1.0, 2.0, 3.5]})
+    with pytest.raises(ValidationError):
+        OLS(df, y="y", x=["const"]).fit()
+
+
+def test_empty_x_raises(dataset):
+    """`x`が空リストの場合`ValidationError`（Issue #30で追加）。"""
+    with pytest.raises(ValidationError):
+        OLS(dataset, y="y", x=[]).fit()
+
+
 def test_validation_error_is_value_error():
     """ValidationErrorがValueErrorのサブクラスであること。
 
@@ -214,6 +296,112 @@ def test_validation_error_is_value_error():
 def test_computation_error_is_runtime_error():
     """ComputationErrorがRuntimeErrorのサブクラスであること。"""
     assert issubclass(ComputationError, RuntimeError)
+
+
+# ── オプションの反映確認（Issue #30で追加） ──────────────────────────
+#
+# 従来のtest_ols.pyはcov_type以外のOLSOptionsフィールド
+# （include_intercept・confidence_level・hac_lags=None・time_col）を
+# Python API境界からほぼ検証しておらず、対応するengine_pybind側の
+# 列抽出・分岐ロジックが未検証だった。
+
+
+def test_include_intercept_false_matches_statsmodels():
+    """`include_intercept=False`でstatsmodelsと一致すること（uncentered TSSの
+
+    R²等、Rust単体テストでは検証済みだがPython API境界からは未検証だった）。
+    """
+    rng = np.random.default_rng(7)
+    n = 30
+    x1 = rng.normal(0.0, 1.0, n)
+    y = 2.0 * x1 + rng.normal(0.0, 0.5, n)
+    df = pl.DataFrame({"y": y, "x1": x1})
+
+    sm_res = sm.OLS(y, x1.reshape(-1, 1)).fit(use_t=True)  # 定数項なし
+    options = OLSOptions(include_intercept=False)
+    our_res = OLS(df, y="y", x=["x1"], options=options).fit()
+
+    assert our_res.param_names == ["x1"]
+    assert abs(our_res.params["x1"] - sm_res.params[0]) < ATOL_COEF
+    assert abs(our_res.std_errors["x1"] - sm_res.bse[0]) < ATOL_SE
+    assert abs(our_res.r_squared - sm_res.rsquared) < ATOL_STAT
+
+
+def test_confidence_level_changes_interval_width(dataset):
+    """`confidence_level`を下げると信頼区間が狭くなること
+
+    （既定の0.95以外の値がengine_pybind経由で実際に反映されることの確認。
+    従来はどのテストも既定値0.95のままでしか検証していなかった）。
+    """
+    wide = OLS(
+        dataset,
+        y="y",
+        x=["x1", "x2"],
+        options=OLSOptions(confidence_level=0.99),
+    ).fit()
+    narrow = OLS(
+        dataset,
+        y="y",
+        x=["x1", "x2"],
+        options=OLSOptions(confidence_level=0.80),
+    ).fit()
+
+    for name in ["const", "x1", "x2"]:
+        wide_width = wide.conf_int[name][1] - wide.conf_int[name][0]
+        narrow_width = narrow.conf_int[name][1] - narrow.conf_int[name][0]
+        assert narrow_width < wide_width, name
+
+
+def test_hac_auto_lags_runs_and_returns_finite_std_errors(dataset):
+    """`hac_lags`省略時（`None`、自動計算式）でもエラーなく動作すること
+
+    （既存の`test_hac_runs_and_returns_finite_std_errors`は`hac_lags=2`を
+    明示していたため、`None`がPython→Rustに正しく伝播する経路は
+    未検証だった）。
+    """
+    options = OLSOptions(cov_type="hac")  # hac_lags省略 = 自動計算
+    res = OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+    assert res.cov_type == "hac"
+    for se in res.std_errors.values():
+        assert se > 0.0
+
+
+def test_hac_time_col_reorders_rows_before_computing_lags():
+    """`time_col`を指定すると、DataFrameの行順に関わらず時系列順で
+
+    ラグ付き自己共分散を計算すること。データは`engine/src/linear/ols.rs`の
+    `fit_computes_hac_std_errors_respecting_time_order`と同一（時系列順で
+    x=[1..5], y=[2,4,5,4,5]をtime順=[3,1,5,2,4]にシャッフルして入力し、
+    `time_col`無指定・時系列順の入力と同じ結果になることを確認する）。
+    engine_pybindの`time_col`列抽出（`extract_f64_column`）はこれまで
+    Python API境界から一度も検証されていなかった（Issue #30で追加）。
+    """
+    ordered_df = pl.DataFrame(
+        {"y": [2.0, 4.0, 5.0, 4.0, 5.0], "x1": [1.0, 2.0, 3.0, 4.0, 5.0]}
+    )
+    ordered_options = OLSOptions(cov_type="hac", hac_lags=1)
+    ordered_res = OLS(
+        ordered_df, y="y", x=["x1"], options=ordered_options
+    ).fit()
+
+    shuffled_df = pl.DataFrame(
+        {
+            "y": [5.0, 2.0, 5.0, 4.0, 4.0],
+            "x1": [3.0, 1.0, 5.0, 2.0, 4.0],
+            "time": [3.0, 1.0, 5.0, 2.0, 4.0],
+        }
+    )
+    shuffled_options = OLSOptions(cov_type="hac", hac_lags=1, time_col="time")
+    shuffled_res = OLS(
+        shuffled_df, y="y", x=["x1"], options=shuffled_options
+    ).fit()
+
+    for name in ["const", "x1"]:
+        assert (
+            abs(shuffled_res.std_errors[name] - ordered_res.std_errors[name])
+            < 1e-9
+        ), name
 
 
 # ── API構造 ─────────────────────────────────────────────────────────

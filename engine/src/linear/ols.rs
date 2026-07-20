@@ -1323,6 +1323,134 @@ mod tests {
         );
     }
 
+    /// `hac_lags`の上限側の境界（Issue #30で追加。負値側の境界は上のテストで確認済みだが、
+    /// `l < n`の上限側は未確認だった）。`n=5`のとき`lags=5`（`n`自体）は範囲外（`[0, n)`）、
+    /// `lags=4`（`n-1`）は許容される最大値であることを確認する。
+    #[test]
+    fn fit_returns_invalid_hac_lags_when_equal_to_n() {
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+        let input = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let cov_type = CovType::Hac {
+            lags: Some(5),
+            time_order: None,
+        };
+        let result = OlsEstimator::fit(input, cov_type, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            OlsError::InvalidHacLags { hac_lags: 5, n: 5 }
+        );
+    }
+
+    #[test]
+    fn fit_accepts_hac_lags_at_upper_boundary_of_n_minus_one() {
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+        let input = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let cov_type = CovType::Hac {
+            lags: Some(4), // n - 1、許容される最大値
+            time_order: None,
+        };
+        let result = OlsEstimator::fit(input, cov_type, 0.95);
+
+        assert!(result.is_ok());
+    }
+
+    /// `confidence_level`の境界値（0.0・1.0ちょうど）が範囲外として拒否されることを確認する
+    /// （Issue #30で追加。既存テストは1.5という範囲を大きく外れた値のみで、
+    /// `!(level > 0.0 && level < 1.0)`という判定式の境界そのものは未確認だった）。
+    #[test]
+    fn fit_returns_invalid_confidence_level_at_exact_boundaries() {
+        for level in [0.0, 1.0, -0.1] {
+            let y = vec![1.0, 2.0, 3.0];
+            let x_columns = vec![vec![1.0, 2.0, 3.0]];
+            let input = OlsInput::from_columns(
+                &y,
+                &x_columns,
+                vec!["x1".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
+
+            let result = OlsEstimator::fit(input, CovType::Classical, level);
+
+            assert_eq!(
+                result.unwrap_err(),
+                OlsError::InvalidConfidenceLevel {
+                    confidence_level: level
+                },
+                "level={level}"
+            );
+        }
+    }
+
+    /// `CovType::Hac { lags: Some(0), .. }`は`Ŝ = Ŝ₀`（ラグ項なし）に退化し、これは
+    /// `HC0`の`Ψ̂ = Σ_i ε̂_i² x_i x_i'`と数学的に同一の式になる（`hac_cov_params`の
+    /// l=0項のドキュメント参照）。2つの独立した実装（`hc_cov_params`と`hac_cov_params`）が
+    /// この境界で一致することを確認する内部整合性テスト（Issue #30で追加。
+    /// 従来はどちらの経路も個別にstatsmodels/Rと比較されていたが、両者が互いに
+    /// 整合しているかは未確認だった）。
+    #[test]
+    fn fit_hac_with_zero_lags_matches_hc0() {
+        let y = vec![2.0, 4.0, 5.0, 4.0, 8.0, 3.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]];
+
+        let input_hac = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let hac = OlsEstimator::fit(
+            input_hac,
+            CovType::Hac {
+                lags: Some(0),
+                time_order: None,
+            },
+            0.95,
+        )
+        .unwrap();
+
+        let input_hc0 = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let hc0 = OlsEstimator::fit(input_hc0, CovType::Hc0, 0.95).unwrap();
+
+        for j in 0..2 {
+            assert!(
+                (*hac.std_errors().get(j, 0) - *hc0.std_errors().get(j, 0)).abs() < 1e-12,
+                "param {j}: hac(lags=0)={}, hc0={}",
+                *hac.std_errors().get(j, 0),
+                *hc0.std_errors().get(j, 0)
+            );
+        }
+    }
+
     /// x=[1..5], y=[2,4,5,4,5]（切片あり、classical）の適合度統計量。
     /// 期待値はstatsmodels 0.14.6で独立に計算・検算済み
     /// （`sm.OLS(Y, X).fit(use_t=True)`。`fvalue`/`f_pvalue`は古典的F検定と

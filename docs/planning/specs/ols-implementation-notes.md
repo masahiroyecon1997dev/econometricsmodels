@@ -499,6 +499,17 @@ OLS関連の全テスト（Rust側`engine/src/linear/ols.rs`の`#[cfg(test)]`、
 
 `engine_pybind::fit`には、`y`列・各`x`列・`cluster_col`・`time_col`それぞれについて「行数がyと一致しない」という`ValidationError`分岐が3箇所ある。しかしこれらは全て同一のpolars DataFrame（`df[col_name]`）から抽出しており、polars DataFrameは構造上すべての列が同じ行数を持つため、**この3つの分岐は実質的に到達不能（dead code）である可能性が高い**（`engine`側の`OlsError::DimensionMismatch`と同種の性質）。対応（削除するか、到達不能である理由をコメントで明記するか）はengine_pybind側の設計判断であり、本issueのRust側スコープ（`engine/src/linear/ols.rs`のみ）外のため、記録に留め修正は行わない。
 
+## セキュリティ: cargo auditの既知脆弱性・非メンテナンス依存の調査（Issue #46で実施済み）
+
+Issue #23実装時に`cargo audit`が検知した4件の脆弱性・2件のunmaintained警告（`.cargo/audit.toml`に一時allow-list済み）について、恒久対応を試みた。結論として**現時点でコード側から修復できるものは無く、全て上流（`pyo3-polars`/`polars`）の新バージョン公開待ちであることを実測で確認した**。Issue #49（新規）に引き継ぎ、本issueは調査結果の記録のみで完了とする。
+
+- **`pyo3 0.28.2`（RUSTSEC-2026-0176/0177）: `pyo3-polars`が上限**。`pyo3-polars`の最新公開版は`0.27.0`（crates.ioのインデックスキャッシュで確認、これより新しいバージョンは存在しない）で、`pyo3 = "^0.28"`を要求する。`pyo3>=0.29.0`へ上げるには、対応する`pyo3-polars`の新版公開を待つ必要がある。
+- **`quick-xml 0.39.4`（RUSTSEC-2026-0194/0195）: `polars`が上限**。経路は`polars(0.54.4, crates.io最新) → polars-error → object_store(^0.13.1) → quick-xml(^0.39.0)`。`object_store`のインデックスキャッシュを直接確認したところ、`0.13.2`（現在ロック中のバージョン）が`0.13.x`系の最新パッチで、これ以上は上がらない。`object_store 0.14.1`は`quick-xml`要求を`^0.41.0`に上げており修正版だが、`polars-error 0.54.4`（`polars`の最新）は`object_store`を`^0.13.1`（`0.14.x`は範囲外）にしか許容しないため到達不能。`polars`自体の新バージョン公開を待つ必要がある。
+- **`bincode`（unmaintained警告）: 同じく`polars`が上限**。`polars-utils`の`serde`機能経由の推移依存で、`quick-xml`と同様に`polars`の新バージョン待ち。
+- **`paste`（unmaintained警告）: `faer`が上限も、現状追従の必要なし**。`faer`のインデックスキャッシュを確認したが`0.24.4`（`.claude/rules/rust-style.md`で明示的に固定しているバージョン）が最新で、これより新しいリリースは存在しない。新版が出た際に改めて確認する。
+- **重要な副次的発見: `quick-xml`/`bincode`は実際にはビルドに一切含まれていない**。`cargo build -p engine_pybind --release`のログに`quick-xml`/`object_store`/`bincode`のコンパイルが一度も出現しないこと、`cargo tree -p object_store`（`--target all`込み）が空を返すことを確認した。原因は、これらが`polars-error`/`polars-utils`の**オプション依存**（`object_store`のクラウドストレージ機能・`polars-utils`の`serde`機能）であり、本プロジェクトはpolars DataFrameをローカルでしか扱わずどちらの機能も有効化していないため。一方で`cargo audit`（および`cargo metadata`のresolveノード）は機能フラグを考慮せず`Cargo.lock`を丸ごとスキャンするため、実際にコンパイルされない依存でも警告に含まれる。**実運用上のリスクは実質ゼロだが、`cargo audit`のCI検知からは機能フラグの調整では除外できない**（`Cargo.lock`はワークスペース全体で到達しうる全オプション依存のバージョンを、有効化の有無に関わらず一括して固定する設計のため）。issue本文にあった「`polars`の`default-features`を絞れば除外できるかもしれない（未検証）」という仮説は、この調査により**否定された**。
+- **`.cargo/audit.toml`のignore listは変更なし**（4件のRUSTSEC IDとも解消できていないため）。コメントを更新し、「Issue #46完了時に削除」という古い指示を、新しい追跡先（Issue #49）への参照に差し替えた。
+
 ## 未確定（実装時判断でよい）
 
 - 特異性判定の相対閾値の具体式

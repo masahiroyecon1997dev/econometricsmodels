@@ -27,52 +27,54 @@ Issue化済み（2026-07-20）:
 
 ## B. Logit
 
-- [ ] **B1. Logitのデータ構造定義**
+Issue化済み（2026-07-20）:
+
+- [x] **B1. Logitのデータ構造定義** → [#54](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/54)
   `LogitInput::from_columns`（`y`/`x_columns`/`param_names`/`dep_var_name`の保持、次元検証）。OLSの`OlsInput`に相当
-- [ ] **B2. Logitの尤度・スコア・Hessian実装**
+- [x] **B2. Logitの尤度・スコア・Hessian実装** → [#55](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/55)
   `LogitProblem`構造体に対するargminの`CostFunction`（負の対数尤度）/`Gradient`/`Hessian`トレイト実装、および観測ごとのスコア行列を返す`scores()`メソッド
-  - 依存: B1
-- [ ] **B3. Logit: Newton-Raphsonでの最適化・収束判定**
+  - 依存: B1（#54）
+- [x] **B3. Logit: Newton-Raphsonでの最適化・収束判定** → [#56](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/56)
   `LogitEstimator::fit`の骨格。A2のソルバー実行共通化を使い、`method="newton"`（既定）で最適化。`raise_on_non_convergence`の分岐実装
-  - 依存: A2, B2
-- [ ] **B4. Logit: BFGS/L-BFGSソルバー対応**
+  - 依存: A2（#52）, B2（#55）
+- [x] **B4. Logit: BFGS/L-BFGSソルバー対応** → [#57](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/57)
   `method="bfgs"`/`"lbfgs"`の分岐。収束点でのHessian評価（SE用）は`method`に関わらず常に行う
-  - 依存: B3
-- [ ] **B5. Logit: 観測情報行列（classical/nonrobust）でのSE・z値・p値・信頼区間**
+  - 依存: B3（#56）
+- [x] **B5. Logit: 観測情報行列（classical/nonrobust）でのSE・z値・p値・信頼区間** → [#58](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/58)
   A3の観測情報行列計算を使い、`std_errors`/`z_stats`/`p_values`/`conf_lower`/`conf_upper`を算出。標準正規分布（statrs `Normal`）を使用
-  - 依存: A3, B3
-- [ ] **B6. Logit: OPG（BHHH）・サンドイッチ型（HC0/HC1）でのSE**
+  - 依存: A3（#53）, B3（#56）
+- [x] **B6. Logit: OPG（BHHH）・サンドイッチ型（HC0/HC1）でのSE** → [#59](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/59)
   `cov_type="opg"/"hc0"/"hc1"`の分岐。OLSがHC0〜HC3を1 Issueにまとめたのに倣い、3種類まとめて実装
-  - 依存: A3, B5
-- [ ] **B7. Logit: クラスターロバストSE**
+  - 依存: A3（#53）, B5（#58）
+- [x] **B7. Logit: クラスターロバストSE** → [#60](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/60)
   `cov_type="cluster"`。クラスターキー未指定時の`MissingClusterColumn`、クラスター数<2の`InsufficientClusters`を含む
-  - 依存: A3, B5
-- [ ] **B8. Logit: 適合度統計量**
+  - 依存: A3（#53）, B5（#58）
+- [x] **B8. Logit: 適合度統計量** → [#61](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/61)
   `log_likelihood`/`log_likelihood_null`（切片のみモデルの再フィット）/`lr_statistic`/`lr_p_value`（カイ二乗分布）/`pseudo_r_squared`（McFadden）/`aic`/`bic`/`n_obs`/`df_model`/`df_resid`
-  - 依存: B3
-- [ ] **B9. Logit: 限界効果（`marginal_effects`）**
+  - 依存: B3（#56）
+- [x] **B9. Logit: 限界効果（`marginal_effects`）** → [#62](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/62)
   `at="overall"`（既定、AME）/`"mean"`/`"median"`。デルタ法標準誤差（`fit()`時の`cov_params`を再利用）
-  - 依存: B5
-- [ ] **B10. Logit: `predict()` / `pred_table()`**
+  - 依存: B5（#58）
+- [x] **B10. Logit: `predict()` / `pred_table()`** → [#63](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/63)
   予測確率、閾値依存の的中表。コアのReturnには含めない別メソッド
-  - 依存: B3
-- [ ] **B11. engine単体テストのカバレッジ確認・不足分を追加**
+  - 依存: B3（#56）
+- [x] **B11. engine単体テストのカバレッジ確認・不足分を追加** → [#64](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/64)
   `cargo-llvm-cov`で計測し、OLS同様「理論上到達不能な防御的エラーパス」の扱い方針に従う
-  - 依存: B4〜B10
-- [ ] **B12. engine_pybind: データ抽出・`LogitOptions`/`LogitResult` pyclass定義**
+  - 依存: B4〜B10（#57, #58, #59, #60, #61, #62, #63）
+- [x] **B12. engine_pybind: データ抽出・`LogitOptions`/`LogitResult` pyclass定義** → [#65](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/65)
   OLSの`column_extraction.rs`（既存、再利用可）を使ったパラメータの受け口。この時点では実計算に接続せず、OLSの`fit_ols`初期実装と同様に一旦打ち切ってもよい
-  - 依存: B1（データ構造が固まっていれば着手可、A1〜A3・B2以降と並行して進められる）
-- [ ] **B13. engine_pybind: engine呼び出し・エラー変換**
+  - 依存: B1（#54、データ構造が固まっていれば着手可、A1〜A3・B2以降と並行して進められる）
+- [x] **B13. engine_pybind: engine呼び出し・エラー変換** → [#66](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/66)
   B12の受け口と`LogitEstimator::fit`を接続。`MleError` → `ValidationError`/`ComputationError`変換
-  - 依存: B11, B12
-- [ ] **B14. python_package: Logitラッパー（`Logit`/`LogitResults`）実装**
+  - 依存: B11（#64）, B12（#65）
+- [x] **B14. python_package: Logitラッパー（`Logit`/`LogitResults`）実装** → [#67](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/67)
   `discrete_choice/logit.py`。`coef_table()`・`marginal_effects()`・`predict()`・`pred_table()`のPython側ラッパー
-  - 依存: B13
-- [ ] **B15. tests/api_tests: statsmodels/R glmとの数値照合ベンチマーク作成**
+  - 依存: B13（#66）
+- [x] **B15. tests/api_tests: statsmodels/R glmとの数値照合ベンチマーク作成** → [#68](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/68)
   `/test-new`スキル使用。収束判定`tol`の妥当性検証もここで行う（`nonlinear-implementation-notes.md`の暫定事項）
-  - 依存: B14
-- [ ] **B16. ドキュメント（mkdocs）**
-  - 依存: B15
+  - 依存: B14（#67）
+- [x] **B16. ドキュメント（mkdocs）** → [#69](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/69)
+  - 依存: B15（#68）
 
 ## C. Probit（Bと同型、共通基盤流用）
 

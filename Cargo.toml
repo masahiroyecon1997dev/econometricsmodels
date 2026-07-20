@@ -10,6 +10,8 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 publish = false
+description = "統計・計量経済学の分析手法を提供するRustエンジン（econometricsmodelsのPyO3バインディング対象）"
+repository = "https://github.com/masahiroyecon1997dev/econometricsmodels"
 
 [workspace.dependencies]
 # 各crateからは `{ workspace = true }` で参照する。

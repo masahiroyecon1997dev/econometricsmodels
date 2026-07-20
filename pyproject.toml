@@ -6,8 +6,13 @@ build-backend = "maturin"
 name = "econometricsmodels"
 version = "0.1.0"
 description = "統計・計量経済学の分析手法を提供するPython API"
+readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
+authors = [
+    { name = "masahiroyecon1997dev", email = "masahiroyecon1997dev@gmail.com" },
+]
+keywords = ["econometrics", "statistics", "regression", "ols", "polars"]
 dependencies = [
     "polars==1.42.1",
 ]
@@ -19,11 +24,20 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
 ]
 
+[project.urls]
+Repository = "https://github.com/masahiroyecon1997dev/econometricsmodels"
+Issues = "https://github.com/masahiroyecon1997dev/econometricsmodels/issues"
+Changelog = "https://github.com/masahiroyecon1997dev/econometricsmodels/blob/main/CHANGELOG.md"
+
 [tool.maturin]
 manifest-path = "engine_pybind/Cargo.toml"
 module-name = "econometricsmodels._lib"
 python-source = "python_package"
 features = ["pyo3/extension-module"]
+# 依存クレートのライセンス一覧レポート（`cargo about generate about.hbs -o
+# THIRD-PARTY-LICENSES.html`で生成。CIには組み込まず随時手動更新する）を
+# 配布物（wheel/sdist）に同梱する。
+include = ["THIRD-PARTY-LICENSES.html"]
 
 [dependency-groups]
 # CI（ci_python.yml）が使う: pytest tests/api_tests / ruff check . / ruff format --check .

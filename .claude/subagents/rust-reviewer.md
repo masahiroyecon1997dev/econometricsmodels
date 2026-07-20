@@ -25,7 +25,7 @@ CLAUDE.md（特に2章の設計方針、3章のリポジトリ構成）と `.cla
    - アルゴリズムの計算量・メモリ使用量に明らかな問題がないか
 
 4. **テストの網羅性**
-   - 対応するpyfixest/R比較テスト（`tests/api_tests/`）や、純粋ロジックの単体テスト（`tests/engine_tests/`）が用意されているか
+   - 対応するpyfixest/R比較テスト（`tests/api_tests/`）や、純粋ロジックの単体テスト（対象ソースファイル内の`#[cfg(test)] mod tests`）が用意されているか
 
 ## 手順
 

@@ -417,6 +417,15 @@ Issue #18で導入した`test_ols_crosscheck.py`の設計を見直した。pyfix
 - **`.claude/rules/testing-policy.md`「リファレンス実装」「許容誤差」を更新**: pyfixestをOLSの正確性検証対象から除外する旨を明記し、「同じクロスチェック用パッケージでも統計量・cov_typeごとに許容誤差を分けてよい」という一般原則をOLSの実例付きで追加した。
 - **`.claude/skills/reference-benchmark/SKILL.md`を更新**: 役割分担の記述・pyfixestの既知の差異の説明を、上記の訂正後の理由（pyfixestの実装バグ）に合わせて書き換えた。
 
+## パフォーマンス比較（Issue #28で実装済み）
+
+`benchmark/compare_performance.py`を新規作成し、statsmodels/pyfixestとの実行時間・メモリ使用量比較を実施した。詳細な結果・考察は`docs/planning/specs/ols-performance-notes.md`を参照。
+
+- **最重要の教訓: engineは必ずreleaseビルド（`maturin develop --release`）で計測する**。debugビルドのままだとHACがn=1,000,000で224秒経過しても完了せず、engineが最大140倍遅いという誤った結論に至った（`.so`サイズが924MB→32.7MBの差）。この罠を防ぐため、スクリプトに`.so`サイズからdebugビルドを検知する警告機構（`_warn_if_debug_build()`）を追加した。
+- releaseビルドでの正しい計測では、classical/HC1/clusterでengineがstatsmodels/pyfixestと同等以上に高速、HACも大規模（n=1,000,000）ではほぼ互角という、CLAUDE.mdの設計意図を裏付ける結果になった。
+- メモリはengineが一貫して最小（pyfixestの約1/3）。
+- HACのkスケーリング（n固定でkを増やした際の伸び）がpyfixestより大きい点をIssue #29（engineコードレビュー）に引き継いだ。
+
 ## 未確定（実装時判断でよい）
 
 - 特異性判定の相対閾値の具体式

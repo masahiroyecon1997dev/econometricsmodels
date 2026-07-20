@@ -78,22 +78,24 @@ Issue化済み（2026-07-20）:
 
 ## C. Probit（Bと同型、共通基盤流用）
 
-- [ ] **C1. Probitのデータ構造定義**（`ProbitInput::from_columns`） — 依存: なし（Aがあれば着手可）
-- [ ] **C2. Probitの尤度・スコア・Hessian実装** — 依存: C1
-- [ ] **C3. Probit: Newton-Raphsonでの最適化・収束判定** — 依存: A2, C2
-- [ ] **C4. Probit: BFGS/L-BFGSソルバー対応** — 依存: C3
-- [ ] **C5. Probit: 観測情報行列でのSE・z値・p値・信頼区間** — 依存: A3, C3
-- [ ] **C6. Probit: OPG・サンドイッチ型でのSE** — 依存: A3, C5
-- [ ] **C7. Probit: クラスターロバストSE** — 依存: A3, C5
-- [ ] **C8. Probit: 適合度統計量** — 依存: C3
-- [ ] **C9. Probit: 限界効果** — 依存: C5
-- [ ] **C10. Probit: `predict()` / `pred_table()`** — 依存: C3
-- [ ] **C11. engine単体テストのカバレッジ確認** — 依存: C4〜C10
-- [ ] **C12. engine_pybind: データ抽出・`ProbitOptions`/`ProbitResult` pyclass定義** — 依存: C1
-- [ ] **C13. engine_pybind: engine呼び出し・エラー変換** — 依存: C11, C12
-- [ ] **C14. python_package: Probitラッパー実装** — 依存: C13
-- [ ] **C15. tests/api_tests: 数値照合ベンチマーク作成** — 依存: C14
-- [ ] **C16. ドキュメント（mkdocs）** — 依存: C15
+Issue化済み（2026-07-20）:
+
+- [x] **C1. Probitのデータ構造定義**（`ProbitInput::from_columns`） → [#70](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/70) — 依存: なし
+- [x] **C2. Probitの尤度・スコア・Hessian実装** → [#71](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/71) — 依存: C1（#70）
+- [x] **C3. Probit: Newton-Raphsonでの最適化・収束判定** → [#72](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/72) — 依存: A2（#52）, C2（#71）
+- [x] **C4. Probit: BFGS/L-BFGSソルバー対応** → [#73](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/73) — 依存: C3（#72）
+- [x] **C5. Probit: 観測情報行列でのSE・z値・p値・信頼区間** → [#74](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/74) — 依存: A3（#53）, C3（#72）
+- [x] **C6. Probit: OPG・サンドイッチ型でのSE** → [#75](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/75) — 依存: A3（#53）, C5（#74）
+- [x] **C7. Probit: クラスターロバストSE** → [#76](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/76) — 依存: A3（#53）, C5（#74）
+- [x] **C8. Probit: 適合度統計量** → [#77](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/77) — 依存: C3（#72）
+- [x] **C9. Probit: 限界効果** → [#78](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/78) — 依存: C5（#74）
+- [x] **C10. Probit: `predict()` / `pred_table()`** → [#79](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/79) — 依存: C3（#72）
+- [x] **C11. engine単体テストのカバレッジ確認** → [#80](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/80) — 依存: C4〜C10（#73, #74, #75, #76, #77, #78, #79）
+- [x] **C12. engine_pybind: データ抽出・`ProbitOptions`/`ProbitResult` pyclass定義** → [#81](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/81) — 依存: C1（#70）
+- [x] **C13. engine_pybind: engine呼び出し・エラー変換** → [#82](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/82) — 依存: C11（#80）, C12（#81）
+- [x] **C14. python_package: Probitラッパー実装** → [#83](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/83) — 依存: C13（#82）
+- [x] **C15. tests/api_tests: 数値照合ベンチマーク作成** → [#84](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/84) — 依存: C14（#83）
+- [x] **C16. ドキュメント（mkdocs）** → [#85](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/85) — 依存: C15（#84）
 
 ---
 

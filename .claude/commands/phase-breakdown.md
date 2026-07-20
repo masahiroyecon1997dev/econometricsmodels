@@ -20,7 +20,7 @@ $ARGUMENTS
    - `engine_pybind`のバインディング
    - `python_package`のラッパー実装
    - ドキュメント（mkdocs）
-   - pyfixest/R比較テスト（`/テスト-新規`で対応）
+   - pyfixest/R比較テスト（`/test-new`で対応）
 3. 手法間・タスク間の依存関係（共通基盤を先に作る必要があるか等）を整理する。
 4. タスク一覧をMarkdown形式（チェックボックス）で提示する。`docs/planning/specs/`への保存も検討する。
 5. 推奨する着手順序を提示する。

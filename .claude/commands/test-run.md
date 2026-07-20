@@ -1,5 +1,5 @@
 ---
-description: 既存テスト（engine_tests / api_tests）を実行し、失敗があれば原因を調査する
+description: 既存テスト（engine / api_tests）を実行し、失敗があれば原因を調査する
 argument-hint: [テスト対象パターン（省略可）]
 allowed-tools: Bash(cargo test:*), Bash(pytest:*), Read, Grep, Glob
 ---
@@ -12,14 +12,14 @@ $ARGUMENTS が指定されていればそのパターンに絞る。指定がな
 
 ## 手順
 
-1. `cargo test $ARGUMENTS` を実行する（`engine_tests`）。
+1. `cargo test -p engine $ARGUMENTS` を実行する。
 2. `pytest tests/api_tests $ARGUMENTS` を実行する（`api_tests`）。
 3. 失敗があれば、以下の観点で原因を切り分ける。
    - 実装のバグか
    - リファレンス実装（pyfixest/R）との前提の違い（計算方法の差異）か
    - 許容誤差の設定が厳しすぎる／緩すぎるか
 4. 原因の仮説と対応方針を提示する。
-   - 実装修正が必要な場合は `/実装-python` または `/実装-rust` の利用を提案する。
+   - 実装修正が必要な場合は `/implement-python` または `/implement-rust` の利用を提案する。
    - 許容誤差の見直しが必要な場合は根拠とあわせて提案し、テストコード自体の修正はユーザーの確認を得てから行う。
 
 ## 出力形式

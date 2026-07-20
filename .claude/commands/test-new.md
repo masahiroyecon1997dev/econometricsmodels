@@ -26,8 +26,8 @@ $ARGUMENTS
    - `tests/api_tests/` 配下にpytestのテストコードを作成する。
    - 許容誤差は **相対誤差1e-8を基本方針** とする。ただし、計算方法自体がリファレンス実装と異なる手法（例: FEにおけるHausman検定など）は、その旨をコメントで明記した上で個別の許容誤差を設定する。
 
-4. **engine_testsの確認**
-   - 対応する純粋ロジックの単体テスト（`tests/engine_tests/`、cargo test）が必要か確認し、なければ作成を提案する。
+4. **engine単体テストの確認**
+   - 対応する純粋ロジックの単体テスト（対象ソースファイル内の`#[cfg(test)] mod tests`、`cargo test -p engine`）が必要か確認し、なければ作成を提案する（`.claude/rules/rust-style.md`「テスト」参照）。
 
 ## 完了条件
 

@@ -1,11 +1,9 @@
 # OLS 標準誤差の技術仕様
 
-GitHub Issue #3「OLS: 標準誤差の技術仕様確定（classical / HCロバスト / HAC）」の完了条件
-（実装対象の標準誤差の種類・計算式・HACのラグ選択方法の確定）を満たすための設計まとめ。
+classical / HCロバスト（HC0〜HC3） / HAC（Newey-West）の計算式・設計判断のまとめ。
 API・オプションの全体設計は[`ols-api-design.md`](./ols-api-design.md)を参照。
 
-**ステータス**: 技術仕様確定済み。実装は別issue
-（#9 classical / #10 HCロバスト / #11 HAC）で行う。
+**ステータス**: 設計確定済み・実装済み（`engine/src/linear/ols.rs`）。
 
 ## 1. classical（実装対象）
 
@@ -54,14 +52,14 @@ $$
 
 - $L$: ラグ数（バンド幅）。3.2節で確定。
 - クラスターとHACは同時指定不可（`cov_type`は単一選択のまま。組み合わせは将来検討）。
-- **正規化・スケーリングの厳密な係数は、実装issue（#11）着手時にstatsmodelsのソース
-  （`statsmodels.stats.sandwich_covariance.cov_hac`相当）と突き合わせてビット単位で確認すること**。
-  `testing-policy.md`の相対誤差1e-8方針を満たすには、$\hat S$の正規化定数を含めて完全一致させる必要があるため、
-  本ドキュメントの式は「採用するカーネル・関数形」の確定であり、実装時の最終ソースはstatsmodels自体とする。
+- **正規化・スケーリングの厳密な係数はstatsmodelsのソース（`statsmodels.stats.sandwich_covariance.cov_hac`
+  相当）と一致させている**。`testing-policy.md`の相対誤差1e-8方針を満たすには、$\hat S$の正規化定数を
+  含めて完全一致させる必要があるため、本ドキュメントの式は「採用するカーネル・関数形」の確定であり、
+  実装の最終的な正はstatsmodels自体とする。
 
 ### 3.2 ラグ（バンド幅）選択方法: 固定ラグ＋経験則デフォルト
 
-`OLSOptions`に`hac_lags: Optional[int]`を追加する。
+`OLSOptions`は`hac_lags: Optional[int]`を持つ。
 
 | 指定 | 挙動 |
 |---|---|
@@ -76,12 +74,12 @@ $$
   データに依存しない決定的な式である。ベンチマーク生成スクリプト（`benchmark/`）側でも同じ式で$L$を計算し、
   statsmodelsに`maxlags=L`として明示的に渡すことで、`hac_lags=None`のケースも1e-8精度で照合可能にする。
 - `hac_lags`に負の整数、または`n`以上の値が指定された場合は`ValidationError`とする
-  （具体的な妥当性条件は実装時に確定。目安: `0 <= hac_lags < n`）。
+  （妥当性条件: `0 <= hac_lags < n`）。
 - `cov_type != "hac"`のとき、`hac_lags`は`cluster_col`と同様に無視する（エラーにしない）。
 
 ### 3.3 時間順序の扱い: `time_col`（OLS共通オプションとして追加）
 
-`OLSOptions`に`time_col: Optional[str]`を追加する。
+`OLSOptions`は`time_col: Optional[str]`を持つ。
 
 | 指定 | 挙動 |
 |---|---|
@@ -105,22 +103,20 @@ $$
 
 ## 4. `OLSOptions`への影響（[`ols-api-design.md`](./ols-api-design.md)への追記事項）
 
-本issueでの決定に伴い、`OLSOptions`に以下の2フィールドを追加する（`ols-api-design.md`側の表も更新済み）。
+`OLSOptions`は以下の2フィールドを持つ（`ols-api-design.md`側の表にも記載済み）。
 
 | フィールド | 型 | デフォルト | 説明 |
 |---|---|---|---|
 | `hac_lags` | `int \| None` | `None` | `cov_type="hac"`のときのラグ数。`None`なら経験則で自動計算（3.2節） |
 | `time_col` | `str \| None` | `None` | `cov_type="hac"`のときの時間順序列。`None`なら行順をそのまま使用（3.3節） |
 
-`cov_type`が受理する文字列に`"hac"`を追加する（`engine_pybind/src/linear/ols.rs`の`CovType` enumにも
-`Hac`バリアントを追加する想定。現状のenumにはまだ存在せず、実装issue #11で追加する）。
+`cov_type`が受理する文字列に`"hac"`が含まれる（`engine_pybind/src/linear/ols.rs`の`CovType` enumの
+`Hac`バリアントに対応）。
 
-## 5. 参考: クラスター標準誤差（本issueのスコープ外・既存決定の再掲）
+## 5. 参考: クラスター標準誤差
 
-Issue #3のタイトル・内容（classical / HCロバスト / HAC）にクラスターは含まれないため、本issueでの
-新規決定事項ではない。`cluster_col`オプション自体は[`ols-api-design.md`](./ols-api-design.md)（Issue #2）で
-既に確定済み。計算式は標準的なStata方式の小標本補正（statsmodelsの`cov_type="cluster"`既定と一致）を
-参考として記載する。
+`cluster_col`オプション自体は[`ols-api-design.md`](./ols-api-design.md)で確定済み。計算式は標準的な
+Stata方式の小標本補正（statsmodelsの`cov_type="cluster"`既定と一致）を参考として記載する。
 
 $$
 \widehat{\mathrm{Var}}_{CL}(\hat\beta) = (X^\top X)^{-1}
@@ -128,7 +124,7 @@ $$
 (X^\top X)^{-1} \cdot \frac{G}{G-1}\cdot\frac{n-1}{n-k}
 $$
 
-**実装issue（#22）で確定した追加事項**: 上記の小標本補正は常に適用し、無効化するオプションは設けない
+**追加の決定事項**: 上記の小標本補正は常に適用し、無効化するオプションは設けない
 （`OLSOptions`に対応するフィールドを追加しない）。また、t検定・信頼区間・F検定の自由度は
 `cov_type="cluster"`のときだけ`n-k`ではなく**`G-1`（クラスター数-1）**を使う
 （statsmodelsの既定`df_correction=True`と一致させる、計量経済学の標準的な慣行。

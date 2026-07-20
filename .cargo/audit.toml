@@ -2,8 +2,8 @@
 # 以下はIssue #23（ci_engine.yml作成）実装時にcargo auditが実際に検知した既知の脆弱性。
 # Issue #46でコード側からの恒久対応を試みたが、4件とも上流（pyo3-polars/polars）が
 # 対応バージョンを未公開のため現時点では修復不能と判明した（詳細は
-# docs/planning/specs/ols-implementation-notes.md「セキュリティ: cargo auditの既知脆弱性・
-# 非メンテナンス依存の調査」参照）。ここでのallow-listは「無視してよい」という判断ではなく、
+# docs/planning/specs/ols-implementation-notes.md「12. セキュリティ」参照）。
+# ここでのallow-listは「無視してよい」という判断ではなく、
 # 「上流待ちの既知課題でci_engine.ymlをブロックしない」ための措置。上流の対応状況はIssue #49
 # で追跡する。該当RUSTSEC IDが解消できたら、そのタイミングでこのignore listから削除すること。
 [advisories]

@@ -1,10 +1,15 @@
 name: CD (release build)
 
-# 0.1.0のプレリリース段階のため、PyPI公開はまだ行わない（ビルド成功確認とartifact
-# アップロードまで）。トリガーはタグpushとworkflow_dispatchのみ（マルチOSビルドは
-# Windows/macOSランナーを含み重いため、ci_python.ymlのようにPR毎には回さない）。
-# 実際に公開する段階になったら、このワークフローにtag push時のみ実行される
-# `release`ジョブを追加する想定（`needs: [linux, windows, macos, sdist]`）。
+# トリガーはタグpushとworkflow_dispatchのみ（マルチOSビルドはWindows/macOSランナー
+# を含み重いため、ci_python.ymlのようにPR毎には回さない）。
+#
+# GitHub Releaseの作成はPyPI公開が成功した後の最後のステップにしている（tag push
+# → ビルド → PyPI公開 → GitHub Release作成、の順）。GitHubのImmutable Releases
+# （2025-10-28 GA）は、一度publishされたreleaseのtagを削除しても二度と同名tagを
+# 再利用できない仕様のため、「release publishedイベントをトリガーにPyPI公開する」
+# 設計だとPyPI公開失敗時にtagが永久に使えなくなる。本ワークフローはtag pushを
+# トリガーにし、PyPI公開が成功して初めてGitHub Releaseを作ることで、公開失敗時は
+# tagを削除して同じバージョンで再実行できるようにしている。
 on:
   push:
     tags:
@@ -120,3 +125,49 @@ jobs:
         with:
           name: wheels-sdist
           path: dist
+
+  publish-pypi:
+    name: publish to PyPI
+    needs: [linux, windows, macos, sdist]
+    # workflow_dispatchでのビルド確認実行時は公開しない。実際のtag pushのみ対象。
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    # trusted publishing（OIDC）用。environmentの承認ゲート（Required reviewers）は
+    # GitHub側（Settings > Environments > pypi）で設定する。environment名はPyPI側の
+    # pending publisher設定の Environment name と一致させること。
+    environment:
+      name: pypi
+      url: https://pypi.org/project/econometricsmodels/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@2834a314042ef964da07689278dd1e9d773e8afd # v1.14.1
+
+  create-github-release:
+    name: create GitHub Release
+    needs: [publish-pypi]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/* \
+            --repo "${{ github.repository }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes

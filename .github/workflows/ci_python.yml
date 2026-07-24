@@ -10,14 +10,9 @@ on:
       - "uv.lock"
       - "tests/api_tests/**"
       - ".github/workflows/ci_python.yml"
+  # pull_requestにはpathsフィルタを付けない（ci_engine.ymlと同じ理由、
+  # 「必須ステータスチェック」参照）。
   pull_request:
-    paths:
-      - "python_package/**"
-      - "engine_pybind/**"
-      - "pyproject.toml"
-      - "uv.lock"
-      - "tests/api_tests/**"
-      - ".github/workflows/ci_python.yml"
 
 env:
   CARGO_TERM_COLOR: always

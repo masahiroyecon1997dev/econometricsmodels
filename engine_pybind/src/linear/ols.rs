@@ -158,6 +158,8 @@ pub struct OLSResult {
 fn ols_error_to_pyerr(err: OlsError) -> PyErr {
     match err {
         OlsError::DimensionMismatch { .. }
+        | OlsError::WeightDimensionMismatch { .. }
+        | OlsError::NonPositiveWeight { .. }
         | OlsError::InsufficientObservations { .. }
         | OlsError::MissingClusterColumn
         | OlsError::InvalidConfidenceLevel { .. }

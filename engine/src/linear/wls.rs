@@ -299,4 +299,77 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn fit_without_intercept_uses_uncentered_r_squared_and_omits_const() {
+        // include_intercept=falseのとき、WLSがOLS側のuncentered TSS分岐
+        // （has_intercept()=falseのときのr_squared計算）と、original_scale_residualsの
+        // 「切片項を足さない」分岐を正しく通ることを確認する。
+        //
+        // y = 2*x1に対する厳密解（ノイズなし）は使わない: k=1（切片なし・x1のみ）で
+        // 残差がすべて0になると分散が数値的にゼロになり、F検定（wald_f_test）の
+        // Cholesky分解がComputationFailedを返してしまう（本来は理論上到達不能な
+        // 防御的分岐だが、ゼロ分散という退化ケースでは実際に到達しうる）。
+        // このテストの目的はF検定の退化ケースの検証ではないため、小さなノイズを入れる。
+        let y = vec![2.1, 3.9, 6.2, 7.8, 10.1]; // y ≈ 2*x1
+        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let weights = vec![1.0, 2.0, 0.5, 3.0, 1.5];
+
+        let wls = WlsEstimator::fit(
+            &y,
+            std::slice::from_ref(&x1),
+            vec!["x1".to_string()],
+            false,
+            "y".to_string(),
+            &weights,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        assert_eq!(wls.estimator().input().param_names(), ["x1".to_string()]);
+        assert!(!wls.estimator().input().has_intercept());
+        let beta_hat = *wls.estimator().params().get(0, 0);
+        assert!((beta_hat - 2.0).abs() < 0.05);
+        assert!(wls.estimator().r_squared() > 0.99);
+
+        // 内部整合性: residuals()は「元スケールのy - 推定された係数による予測値」であるはず
+        // （original_scale_residualsの定義そのものの確認。真の係数2.0とは比較しない）。
+        for (i, &r) in wls.residuals().iter().enumerate() {
+            let expected = y[i] - beta_hat * x1[i];
+            assert!(
+                (r - expected).abs() < 1e-9,
+                "residual {i}: got {r}, expected {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn fit_with_multiple_x_columns_recovers_known_coefficients() {
+        // original_scale_residualsのx_columnsループ（複数列）が正しく計算できることを確認する
+        // （これまでのテストはx列1本のみだった）。
+        let y = vec![9.0, 8.0, 19.0, 18.0, 29.0, 28.0]; // 1 + 2*x1 + 3*x2
+        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let x2 = vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0];
+        let weights = vec![1.0, 2.0, 0.5, 3.0, 1.5, 2.5];
+
+        let wls = WlsEstimator::fit(
+            &y,
+            &[x1, x2],
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+            &weights,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        assert!((*wls.estimator().params().get(0, 0) - 1.0).abs() < 1e-9); // const
+        assert!((*wls.estimator().params().get(1, 0) - 2.0).abs() < 1e-9); // x1
+        assert!((*wls.estimator().params().get(2, 0) - 3.0).abs() < 1e-9); // x2
+        for r in wls.residuals() {
+            assert!(r.abs() < 1e-9);
+        }
+    }
 }

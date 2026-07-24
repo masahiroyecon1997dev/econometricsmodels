@@ -142,6 +142,9 @@ mod tests {
             );
         }
         assert_eq!(wls.estimator().r_squared(), ols.r_squared());
+        assert_eq!(wls.estimator().r_squared_adj(), ols.r_squared_adj());
+        assert_eq!(wls.estimator().f_statistic(), ols.f_statistic());
+        assert_eq!(wls.estimator().f_p_value(), ols.f_p_value());
 
         // 残差の計算経路自体はwls.rs（手動ループ）とols.rs（faerの行列演算）で異なるため、
         // 丸め誤差レベルでの一致を確認する（構造的な完全一致の保証対象はestimator()側）。
@@ -200,5 +203,100 @@ mod tests {
                 weight: 0.0
             }
         );
+    }
+
+    #[test]
+    fn fit_matches_manually_transformed_ols_for_all_cov_types() {
+        // Issue #36: classical/HC0-3/HAC/clusterのいずれも、WlsEstimator::fitはcov_typeを
+        // そのままOlsEstimator::fitに渡すだけで正しく動作するはず（wls-standard-errors.md
+        // の通り、新しい計算式の実装は不要という前提の確認）。
+        //
+        // 検証方法: `from_columns_weighted`を経由せず、y・x1・切片列をこのテスト内で手動で
+        // sqrt(weight)倍した上で`from_columns`（include_intercept=false）に渡し、素の
+        // OlsEstimator::fitを直接呼ぶ。これは`WlsEstimator::fit`の内部実装と独立した経路で
+        // 同じ変換を行っているため、両者が一致すればcov_typeの受け渡し・適合度統計量の
+        // 計算が正しく配線されていることの確認になる。
+        let y: Vec<f64> = vec![2.0, 4.0, 5.0, 4.0, 6.0, 3.0];
+        let x1: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let weights: Vec<f64> = vec![1.0, 4.0, 0.25, 9.0, 2.0, 0.5];
+        let clusters = ["a", "a", "b", "b", "c", "c"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
+
+        let sqrt_w: Vec<f64> = weights.iter().map(|w| w.sqrt()).collect();
+        let y_tilde: Vec<f64> = y.iter().zip(&sqrt_w).map(|(v, s)| v * s).collect();
+        let const_tilde: Vec<f64> = sqrt_w.clone();
+        let x1_tilde: Vec<f64> = x1.iter().zip(&sqrt_w).map(|(v, s)| v * s).collect();
+        let manual_x_columns = vec![const_tilde, x1_tilde];
+
+        let cov_types = [
+            CovType::Classical,
+            CovType::Hc0,
+            CovType::Hc1,
+            CovType::Hc2,
+            CovType::Hc3,
+            CovType::Hac {
+                lags: Some(1),
+                time_order: None,
+            },
+            CovType::Cluster {
+                groups: Some(clusters.clone()),
+            },
+        ];
+
+        for cov_type in cov_types {
+            let label = format!("{cov_type:?}");
+
+            let manual_input = OlsInput::from_columns(
+                &y_tilde,
+                &manual_x_columns,
+                vec!["const".to_string(), "x1".to_string()],
+                false,
+                "y".to_string(),
+            )
+            .unwrap();
+            let manual = OlsEstimator::fit(manual_input, cov_type.clone(), 0.95).unwrap();
+
+            let wls = WlsEstimator::fit(
+                &y,
+                std::slice::from_ref(&x1),
+                vec!["x1".to_string()],
+                true,
+                "y".to_string(),
+                &weights,
+                cov_type,
+                0.95,
+            )
+            .unwrap();
+
+            for j in 0..2 {
+                assert!(
+                    (*wls.estimator().params().get(j, 0) - *manual.params().get(j, 0)).abs() < 1e-9,
+                    "{label}: params mismatch at index {j}"
+                );
+                assert!(
+                    (*wls.estimator().std_errors().get(j, 0) - *manual.std_errors().get(j, 0))
+                        .abs()
+                        < 1e-9,
+                    "{label}: std_errors mismatch at index {j}"
+                );
+            }
+            // r_squared・f_statistic・f_p_valueはここでは比較しない: `manual`側は
+            // 切片列を自前で用意しているため`include_intercept=false`で渡しており、
+            // `has_intercept`フラグ（centered/uncentered TSSの切替、F検定でconstを
+            // 除外するかの切替に使う）が`wls`側（`include_intercept=true`）と異なる。
+            // これは「同じ回帰に対する2通りの正しい計算」ではなく、意味的に異なる統計量に
+            // なるため単純比較できない。R²・F検定が正しいことは
+            // `fit_with_all_weights_one_matches_ols`（両者ともinclude_intercept=trueで
+            // 揃っている）で別途確認する。
+            //
+            // aicはlog_likelihood（ssr, nのみに依存）とk（パラメータ数、どちらも2）のみで
+            // 決まるため、has_intercept差の影響を受けず比較できる。
+            assert!(
+                (wls.estimator().aic() - manual.aic()).abs() < 1e-9,
+                "{label}: aic mismatch"
+            );
+        }
     }
 }

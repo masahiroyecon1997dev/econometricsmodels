@@ -37,7 +37,13 @@ features = ["pyo3/extension-module"]
 # 依存クレートのライセンス一覧レポート（`cargo about generate about.hbs -o
 # THIRD-PARTY-LICENSES.html`で生成。CIには組み込まず随時手動更新する）を
 # 配布物（wheel/sdist）に同梱する。
-include = ["THIRD-PARTY-LICENSES.html"]
+#
+# LICENSEも明示的に含める。maturinはCLI上「Including license file」と表示するが、
+# 実際にはsdist（tar.gz）にLICENSEファイル自体を含めない一方、PKG-INFOには
+# `License-File: LICENSE`を書き込むため、PyPI側の検証で
+# 「License-File LICENSE does not exist in distribution file」エラーになる
+# （v0.1.0初回リリース時に実際に発生・確認済み）。includeへ明示的に足すことで回避する。
+include = ["THIRD-PARTY-LICENSES.html", "LICENSE"]
 
 [dependency-groups]
 # CI（ci_python.yml）が使う: pytest tests/api_tests / ruff check . / ruff format --check .

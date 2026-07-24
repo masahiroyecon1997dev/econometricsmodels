@@ -147,7 +147,13 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - uses: pypa/gh-action-pypi-publish@2834a314042ef964da07689278dd1e9d773e8afd # v1.14.1
+      # 他のactionと異なりSHAでのピン留めはできない。このactionはDockerコンテナ
+      # actionで、`uses:`に書いたref文字列をそのままghcr.ioのイメージタグとして
+      # 使う実装（pypa/gh-action-pypi-publishのcreate-docker-action.py）のため、
+      # 公開イメージが存在しないコミットSHAを指定するとmanifest unknownで失敗する
+      # （v0.1.0初回リリース時に実際に発生・確認済み）。バージョンタグでの参照が
+      # 唯一動作する方式のため、ここに限りSHAピン留めの方針の例外とする。
+      - uses: pypa/gh-action-pypi-publish@v1.14.1
 
   create-github-release:
     name: create GitHub Release

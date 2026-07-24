@@ -8,12 +8,11 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/ci_engine.yml"
+  # pull_requestにはpathsフィルタを付けない。必須ステータスチェックとして
+  # ブランチルールに登録しているため、対象パスに触れないPRでも必ず結果が
+  # 報告されるようにする（フィルタがあると該当PRで一度もチェックが実行されず、
+  # マージ不能になる）。
   pull_request:
-    paths:
-      - "engine/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - ".github/workflows/ci_engine.yml"
 
 env:
   CARGO_TERM_COLOR: always

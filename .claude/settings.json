@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./**/*.lock)",
+      "Read(./target/**)",
+      "Read(./.venv/**)",
+      "Read(./**/__pycache__/**)",
+      "Read(./**/*.pyc)",
+      "Read(./.pytest_cache/**)",
+      "Read(./.ruff_cache/**)",
+      "Read(./docs/site/**)",
+      "Read(./.github/agents/**)",
+      "Read(./.github/instructions/**)"
+    ],
+    "ask": [
+      "Read(./tests/api_tests/fixtures/benchmarks/**)"
+    ]
+  }
+}

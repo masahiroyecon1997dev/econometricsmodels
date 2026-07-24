@@ -15,7 +15,6 @@ services:
         source: ${SSH_AUTH_SOCK}
         target: /ssh-agent
     environment:
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
       - SSH_AUTH_SOCK=/ssh-agent
     network_mode: "bridge"
     user: vscode

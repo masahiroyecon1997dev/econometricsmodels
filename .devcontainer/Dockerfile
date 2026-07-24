@@ -12,8 +12,7 @@ RUN apt update && apt install -y --no-install-recommends \
     cmake \
     pkg-config \
     libssl-dev \
-    libopenblas-dev \
-    liblapack-dev \
+    gfortran \
     git \
     git-lfs \
     openssh-client \
@@ -46,29 +45,38 @@ RUN mkdir -p /home/${USERNAME}/.ssh \
     && chmod 600 /home/${USERNAME}/.ssh/known_hosts
 
 # -------------------------
-# Node.js (Node 24系) インストール & Claude Codeインストール
+# Node.js (Node 24系) インストール
+# Claude Code CLI自体はdevcontainer.jsonのfeature（ghcr.io/anthropics/devcontainer-features/claude-code）
+# が入れるため、ここでは重複させずNode.jsのみ導入する。
 # -------------------------
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt install -y nodejs \
-    && npm install -g @anthropic-ai/claude-code \
     && rm -rf /var/lib/apt/lists/*
 
 # -------------------------
-# GitHub CLI (gh) インストール
+# R インストール（ベンチマーク用リファレンス実装: fixest, plm, ivreg等）
+# Debian bookwormのr-baseは4.2.2固定（CRAN最新は4.6.1）だが、install.packagesでの
+# パッケージ導入は動作確認済み。languageserverはVS CodeのR拡張機能用。
 # -------------------------
-(type -p wget >/dev/null || (sudo apt update && sudo apt install wget -y)) \
-	&& sudo mkdir -p -m 755 /etc/apt/keyrings \
-	&& out=$(mktemp) && wget -nv -O$out https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-	&& cat $out | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
-	&& sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
-	&& sudo mkdir -p -m 755 /etc/apt/sources.list.d \
-	&& echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-	&& sudo apt update \
-	&& sudo apt install gh -y
+RUN apt update && apt install -y --no-install-recommends \
+    r-base \
+    r-base-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN Rscript -e 'install.packages(c("fixest", "plm", "ivreg", "jsonlite", "languageserver"), repos = "https://cloud.r-project.org")'
 
 # 以降は一般ユーザーで実行
 USER ${USERNAME}
 WORKDIR /home/${USERNAME}
+
+# -------------------------
+# vscodeユーザーが書き込めるRの個人ライブラリを用意
+# (/usr/local/lib/R/site-libraryはroot所有のため、VS CodeのR拡張機能が
+#  languageserver等を自動インストールしようとすると権限エラーになる。
+#  R_LIBS_USERを設定しておくと、install.packages()は自動的にこちらを使う。)
+# -------------------------
+ENV R_LIBS_USER=/home/${USERNAME}/R/library
+RUN mkdir -p ${R_LIBS_USER}
 
 # -------------------------
 # Rust (stable) インストール

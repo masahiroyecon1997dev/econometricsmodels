@@ -1,0 +1,32 @@
+[package]
+name = "engine_pybind"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description.workspace = true
+repository.workspace = true
+
+[lib]
+name = "_lib"
+crate-type = ["cdylib"]
+
+[dependencies]
+# サプライチェーン攻撃対策として`=`で完全固定する（ルートCargo.tomlの[workspace.dependencies]と同方針）。
+# pyo3のバージョンは0.29.0からダウングレードしている。理由は以下pyo3-polarsのコメント参照。
+pyo3 = { version = "=0.28.2", features = ["extension-module"] }
+# polars（Rustクレート）とpyo3-polars: バージョンはPython側pyproject.tomlのpolars==1.42.1と
+# 数字を合わせるものではない（Rustクレートpolarsは0.5x系、Python側は1.x系で既に別の
+# バージョン体系に分離済み）。pyo3-polarsが使うpolars_ffi::version_0という安定版FFI
+# プロトコル（Arrow C Data Interfaceに近い、バージョン非依存のインターフェース）経由で
+# 互換性が担保される。
+# crates.io公開版pyo3-polarsの最新（0.27.0）はpyo3="^0.28"を要求する
+# （polarsモノレポのmainブランチは内部で既にpyo3=0.29へ上げているが、対応する
+# pyo3-polarsの新版はまだcrates.ioに未公開。既知のバージョンズレリスク、
+# rust-style.md「既知のリスク」参照）。そのため、当初pyo3=0.29.0で揃えようとしたが
+# pyo3=0.28.2（yankedされた0.28.0/0.28.1を除く最初の安定版）に統一した。
+# Issue #13で選定。詳細はdocs/planning/specs/ols-implementation-notes.md参照。
+polars = "=0.54.4"
+pyo3-polars = "=0.27.0"
+faer = { workspace = true }
+engine = { path = "../engine" }

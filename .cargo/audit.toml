@@ -1,0 +1,15 @@
+# cargo-audit（.github/workflows/ci_engine.ymlのauditジョブ）の設定。
+# 以下はIssue #23（ci_engine.yml作成）実装時にcargo auditが実際に検知した既知の脆弱性。
+# Issue #46でコード側からの恒久対応を試みたが、4件とも上流（pyo3-polars/polars）が
+# 対応バージョンを未公開のため現時点では修復不能と判明した（詳細は
+# docs/planning/specs/ols-implementation-notes.md「12. セキュリティ」参照）。
+# ここでのallow-listは「無視してよい」という判断ではなく、
+# 「上流待ちの既知課題でci_engine.ymlをブロックしない」ための措置。上流の対応状況はIssue #49
+# で追跡する。該当RUSTSEC IDが解消できたら、そのタイミングでこのignore listから削除すること。
+[advisories]
+ignore = [
+    "RUSTSEC-2026-0176", # pyo3 0.28.2: PyList/PyTuple nth/nth_backのout-of-bounds read。0.29.0+で修正（Issue #49で上流待ち）
+    "RUSTSEC-2026-0177", # pyo3 0.28.2: PyCFunction::new_closureのSync境界欠如。0.29.0+で修正（Issue #49で上流待ち）
+    "RUSTSEC-2026-0194", # quick-xml 0.39.4（polars→object_store経由、ビルドには含まれない未使用のオプション依存）: 重複属性名チェックが二次時間。0.41.0+で修正（Issue #49で上流待ち）
+    "RUSTSEC-2026-0195", # quick-xml 0.39.4（polars→object_store経由、ビルドには含まれない未使用のオプション依存）: 名前空間宣言の無制限確保によるDoS。0.41.0+で修正（Issue #49で上流待ち）
+]

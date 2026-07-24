@@ -1,31 +1,79 @@
 [build-system]
-requires = ["maturin>=1.0,<2.0"]
+requires = ["maturin>=1.14,<2.0"]
 build-backend = "maturin"
 
 [project]
 name = "econometricsmodels"
 version = "0.1.0"
-requires-python = ">=3.14"
-dependencies = ["polars==0.40", "numpy==1.24"]
-
-[dependency-groups]
-dev = [
-    "pytest==9.1.1",
-    "pytest-cov==7.1.0",
-    "statsmodels==0.14.6",
+description = "統計・計量経済学の分析手法を提供するPython API"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [
+    { name = "masahiroyecon1997dev", email = "masahiroyecon1997dev@gmail.com" },
+]
+keywords = ["econometrics", "statistics", "regression", "ols", "polars"]
+dependencies = [
+    "polars==1.42.1",
+]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "License :: OSI Approved :: MIT License",
 ]
 
+[project.urls]
+Repository = "https://github.com/masahiroyecon1997dev/econometricsmodels"
+Issues = "https://github.com/masahiroyecon1997dev/econometricsmodels/issues"
+Changelog = "https://github.com/masahiroyecon1997dev/econometricsmodels/blob/main/CHANGELOG.md"
+
 [tool.maturin]
-manifest-path = "python/Cargo.toml"
-python-source = "python_src"
+manifest-path = "engine_pybind/Cargo.toml"
 module-name = "econometricsmodels._lib"
+python-source = "python_package"
 features = ["pyo3/extension-module"]
+# 依存クレートのライセンス一覧レポート（`cargo about generate about.hbs -o
+# THIRD-PARTY-LICENSES.html`で生成。CIには組み込まず随時手動更新する）を
+# 配布物（wheel/sdist）に同梱する。
+include = ["THIRD-PARTY-LICENSES.html"]
 
+[dependency-groups]
+# CI（ci_python.yml）が使う: pytest tests/api_tests / ruff check . / ruff format --check .
+# benchmark_ols.yml（Issue #47）もstatsmodels目的でこのグループを使う。
+# statsmodelsはtests/api_tests/fixtures/benchmarks/のフィクスチャ生成に使った主リファレンス実装のため、
+# `==`で厳密固定する（.claude/rules/testing-policy.md「ベンチマーク値のフィクスチャ化」参照）。
+# バージョンを上げる場合はフィクスチャの再生成とセットで行うこと。
+test = [
+    "pytest==9.1.1",
+    "numpy==2.5.1",
+    "statsmodels==0.14.6",
+    "ruff==0.15.20",
+]
+# benchmark/ 配下のベンチマーク値生成・性能比較スクリプト専用（CLAUDE.md 3章
+# 「benchmark/はtests/とは別ライフサイクル」参照）。ci_python.ymlは使わない
+# （随時実行するツール）が、benchmark_ols.yml（Issue #47、compare_performance.py実行用）
+# はタグpush/workflow_dispatch時にこのグループを使う。
+benchmark = [
+    # polars.DataFrame.to_pandas()が内部で要求する（run_*_benchmark.py各スクリプトが
+    # pandasに変換してリファレンス実装に渡すため）。pandas側は直接依存に含めない。
+    "pyarrow==25.0.0",
+    "pyfixest==0.60.0",
+    "wooldridge==0.5.0",
+]
+dev = [
+    "maturin==1.14.1",
+]
+# mkdocsドキュメント生成専用（CIでは使わない。cd_docs.ymlでのCI組み込みは別issue）。
+docs = [
+    "mkdocs==1.6.1",
+    "mkdocs-material==9.7.7",
+    "mkdocstrings[python]==1.0.6",
+]
+
+# .claude/rules/python-style.md「Lint / フォーマット」で確定済みの line-length=79
+# （PEP8標準）のみ設定する。有効化するRuffルール群の詳細は未確定のまま
+# （デフォルトのE/Fルールセットを使う）。
 [tool.ruff]
-target-version = "py311"
-line-length = 88
-
-[tool.ruff.lint]
-select = ["E", "F", "I"]
-
-
+line-length = 79

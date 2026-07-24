@@ -13,6 +13,23 @@ target
 # Contains mutation testing data
 **/mutants.out*/
 
+# Python bytecode cache
+__pycache__/
+*.pyc
+
+# maturin developでビルドされるPython拡張モジュール本体（環境・OS依存のバイナリ）
+python_package/econometricsmodels/*.so
+python_package/econometricsmodels/*.pyd
+
+# mkdocs buildの出力（docs/mkdocs.ymlのsite_dir）。GitHub Pagesへのデプロイはcd_docs.yml
+# （別issue）でビルドして公開する想定で、リポジトリにはコミットしない。
+/site/
+
+# benchmark/compare_performance.py等が生成する生のベンチマーク結果JSON（実行環境依存で
+# 再現性が低く、サマリーはdocs/planning/specs/配下のMarkdownに記録するためコミット不要。
+# Issue #28参照）。命名規則: 生成物は先頭アンダースコア（例: _ols_performance_results.json）。
+docs/planning/specs/_*.json
+
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore

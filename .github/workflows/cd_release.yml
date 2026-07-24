@@ -1,0 +1,122 @@
+name: CD (release build)
+
+# 0.1.0のプレリリース段階のため、PyPI公開はまだ行わない（ビルド成功確認とartifact
+# アップロードまで）。トリガーはタグpushとworkflow_dispatchのみ（マルチOSビルドは
+# Windows/macOSランナーを含み重いため、ci_python.ymlのようにPR毎には回さない）。
+# 実際に公開する段階になったら、このワークフローにtag push時のみ実行される
+# `release`ジョブを追加する想定（`needs: [linux, windows, macos, sdist]`）。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # サポート対象Python（CLAUDE.md 12章）に限定してビルドする。--find-interpreterは
+  # 使わない（manylinuxコンテナ内にある未サポートバージョン・free-threaded版まで
+  # 全てビルドしてしまうため）。
+  MATURIN_INTERPRETER_ARGS: -i python3.12 -i python3.13 -i python3.14
+
+jobs:
+  linux:
+    name: build (linux x86_64 manylinux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: |
+            3.12
+            3.13
+            3.14
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          target: x86_64
+          manylinux: auto
+          args: --release --out dist ${{ env.MATURIN_INTERPRETER_ARGS }} --manifest-path engine_pybind/Cargo.toml
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wheels-linux-x86_64
+          path: dist
+
+  windows:
+    name: build (windows x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: |
+            3.12
+            3.13
+            3.14
+          architecture: x64
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          target: x64
+          args: --release --out dist ${{ env.MATURIN_INTERPRETER_ARGS }} --manifest-path engine_pybind/Cargo.toml
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wheels-windows-x64
+          path: dist
+
+  macos:
+    name: build (macos ${{ matrix.platform.target }})
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          # macOS Intel / Apple Siliconのランナー名は`maturin generate-ci github`が
+          # 生成した値をそのまま採用した（GitHub Actionsのランナー命名はmaturin側が
+          # 都度追従しているため、自前で決め打ちしない）。
+          - runner: macos-15-intel
+            target: x86_64
+          - runner: macos-latest
+            target: aarch64
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: |
+            3.12
+            3.13
+            3.14
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist ${{ env.MATURIN_INTERPRETER_ARGS }} --manifest-path engine_pybind/Cargo.toml
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wheels-macos-${{ matrix.platform.target }}
+          path: dist
+
+  sdist:
+    name: build (sdist)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          command: sdist
+          args: --out dist --manifest-path engine_pybind/Cargo.toml
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wheels-sdist
+          path: dist

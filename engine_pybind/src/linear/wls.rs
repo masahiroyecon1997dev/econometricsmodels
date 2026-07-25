@@ -4,11 +4,9 @@
 //! `weight`は`y`と同じく`data`内の列名を指すトップレベル引数として扱う（`WLSOptions`という
 //! 専用のOptions型は新設せず`OLSOptions`をそのまま再利用する。
 //! `docs/planning/specs/wls-api-design.md`1〜3章参照）。エラー変換（`ols_error_to_pyerr`）・
-//! `Mat<f64>`→`Vec<f64>`変換（`mat_to_vec`）も`super::ols`のものをそのまま再利用する
-//! （`OlsError`がOLS・WLS共通のエラー型のため）。
-//!
-//! 【言語方針】`.claude/rules/rust-style.md`「言語方針」参照。公開API（`WLSResult`）の
-//! docコメントと`ValidationError`のメッセージ文字列は英語、それ以外は日本語のまま。
+//! `Mat<f64>`→`Vec<f64>`変換（`mat_to_vec`）は`super::common`のものをそのまま再利用する
+//! （`OlsError`がOLS・WLS共通のエラー型のため。`.claude/rules/rust-style.md`
+//! 「系統内で共有するロジックはcommon.rsに置く」）。
 
 use engine::linear::ols::CovType as EngineCovType;
 use engine::linear::wls::WlsEstimator;
@@ -16,7 +14,8 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
-use super::ols::{OLSOptions, mat_to_vec, ols_error_to_pyerr};
+use super::common::{mat_to_vec, ols_error_to_pyerr};
+use super::ols::OLSOptions;
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
 use crate::errors::ValidationError;
 

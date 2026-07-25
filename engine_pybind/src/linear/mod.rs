@@ -1,8 +1,10 @@
+mod common;
 pub mod ols;
 pub mod wls;
 
 // GLS実装時に追加:
 // pub mod gls;
-// この系統で共有するロジックが出てきたら common.rs を追加する
-// （現時点ではols.rsのols_error_to_pyerr/mat_to_vecをwls.rsがそのまま再利用しており、
-// 専用の共有ロジックは発生していないため未作成。YAGNI: rust-style.md「ファイル・ディレクトリ構成」参照）
+//
+// common.rs: OLS/WLS間で共有するエラー変換（ols_error_to_pyerr）・Mat<f64>→Vec<f64>変換
+// （mat_to_vec）を置く。crate外には公開しないため`mod common;`（pubなし）。
+// rust-style.md「ファイル・ディレクトリ構成」の「系統内で共有するロジックはcommon.rsに置く」参照。

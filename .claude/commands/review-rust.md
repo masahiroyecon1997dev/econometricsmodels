@@ -6,7 +6,7 @@ allowed-tools: Bash(git diff:*), Bash(git log:*)
 
 # Rustレビュー
 
-`rust-reviewer` サブエージェント（`.claude/subagents/rust-reviewer.md`）にレビューを委譲する。
+`rust-reviewer` サブエージェント（`.claude/agents/rust-reviewer.md`）にレビューを委譲する。
 チェック観点・出力形式の詳細はサブエージェント側の定義を単一ソースとする（このコマンドでは重複定義しない）。
 
 ## レビュー対象

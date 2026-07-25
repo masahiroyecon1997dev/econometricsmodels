@@ -833,135 +833,6 @@
         "hac_lag": 5
       }
     },
-    "scale_variance": {
-      "classical": {
-        "r": {
-          "coef": {
-            "const": 1.48170108482544,
-            "x1": -0.366729340282601,
-            "x2": -54.1238332704828,
-            "x3": 1.18358650351987
-          },
-          "se": {
-            "const": 0.0448631348597598,
-            "x1": 4.57235920336405e-08,
-            "x2": 46.5915494607193,
-            "x3": 0.0429876268145707
-          },
-          "aic": 1425.08093274417,
-          "bic": 1441.93936513786,
-          "log_likelihood": -708.540466372086,
-          "f_statistic": null,
-          "f_p_value": null
-        }
-      },
-      "hc0": {
-        "r": {
-          "coef": {
-            "const": 1.48170108482544,
-            "x1": -0.366729340282601,
-            "x2": -54.1238332704828,
-            "x3": 1.18358650351987
-          },
-          "se": {
-            "const": 0.0446700494036295,
-            "x1": 4.77647922250982e-08,
-            "x2": 42.9040341836361,
-            "x3": 0.0424403471407534
-          },
-          "aic": 1425.08093274417,
-          "bic": 1441.93936513786,
-          "log_likelihood": -708.540466372086,
-          "f_statistic": null,
-          "f_p_value": null
-        }
-      },
-      "hc1": {
-        "r": {
-          "coef": {
-            "const": 1.48170108482544,
-            "x1": -0.366729340282601,
-            "x2": -54.1238332704828,
-            "x3": 1.18358650351987
-          },
-          "se": {
-            "const": 0.044849808880031,
-            "x1": 4.79570054452634e-08,
-            "x2": 43.0766869302376,
-            "x3": 0.0426111339359813
-          },
-          "aic": 1425.08093274417,
-          "bic": 1441.93936513786,
-          "log_likelihood": -708.540466372086,
-          "f_statistic": null,
-          "f_p_value": null
-        }
-      },
-      "hc2": {
-        "r": {
-          "coef": {
-            "const": 1.48170108482544,
-            "x1": -0.366729340282601,
-            "x2": -54.1238332704828,
-            "x3": 1.18358650351987
-          },
-          "se": {
-            "const": 0.0448481006049445,
-            "x1": 4.80675880984012e-08,
-            "x2": 43.155519177404,
-            "x3": 0.0426813601093285
-          },
-          "aic": 1425.08093274417,
-          "bic": 1441.93936513786,
-          "log_likelihood": -708.540466372086,
-          "f_statistic": null,
-          "f_p_value": null
-        }
-      },
-      "hc3": {
-        "r": {
-          "coef": {
-            "const": 1.48170108482544,
-            "x1": -0.366729340282601,
-            "x2": -54.1238332704828,
-            "x3": 1.18358650351987
-          },
-          "se": {
-            "const": 0.0450274210285136,
-            "x1": 4.83731395022614e-08,
-            "x2": 43.4095376882619,
-            "x3": 0.0429243722092994
-          },
-          "aic": 1425.08093274417,
-          "bic": 1441.93936513786,
-          "log_likelihood": -708.540466372086,
-          "f_statistic": null,
-          "f_p_value": null
-        }
-      },
-      "hac": {
-        "r": {
-          "coef": {
-            "const": 1.48170108482544,
-            "x1": -0.366729340282601,
-            "x2": -54.1238332704828,
-            "x3": 1.18358650351987
-          },
-          "se": {
-            "const": 0.0412647219627364,
-            "x1": 5.33535457337734e-08,
-            "x2": 43.6363372196076,
-            "x3": 0.0418473503248815
-          },
-          "aic": 1425.08093274417,
-          "bic": 1441.93936513786,
-          "log_likelihood": -708.540466372086,
-          "f_statistic": null,
-          "f_p_value": null
-        },
-        "hac_lag": 5
-      }
-    },
     "high_condition_number": {
       "classical": {
         "r": {
@@ -1461,9 +1332,9 @@
   "_meta": {
     "method": "ols",
     "purpose": "statsmodels主リファレンス（ols.json）とは独立した実装（R: lm + sandwich/lmtest）によるクロスチェック用。係数・標準誤差・AIC・BIC・対数尤度・F統計量・F検定p値を含む。classical/HC0-3/clusterは厳密比較、HACのみ緩い許容誤差での比較を想定する（testing-policy.md参照）",
-    "generated_at": "2026-07-25T07:46:32.826352+00:00",
+    "generated_at": "2026-07-25T08:19:40.590362+00:00",
     "r_version": "4.2.2",
     "statsmodels_version": "0.14.6",
-    "note": "perfect_multicollinearityシナリオはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。HACはR側のみ（explicit lagを本実装の自動ラグ式に合わせて指定）。clusterはbaselineシナリオのみ、R側のみ確認。均等疑似グループ（行番号%10）に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2（cluster_g2）、wage1の実カテゴリ列region（northcen/south/westダミーから合成、基準カテゴリnortheast）を含む（Issue #100）。パラメータ名は全ソースで切片を'const'に正規化済み。pyfixestとの比較は正確性検証から除外（性能比較専用）。scale_variance/high_condition_number/baseline_df1は境界値・悪条件ケース（Issue #101）。scale_varianceはf_statistic/f_p_valueがnull（RのSolve()が'computationally singular'として全cov_typeでエラーになるため、run_lm_crosscheck_benchmark.R側でtryCatchしNAにフォールバック。係数・SE・AIC・BIC・対数尤度は影響を受けず引き続き比較可能。Issue #107参照）。"
+    "note": "perfect_multicollinearityシナリオはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。HACはR側のみ（explicit lagを本実装の自動ラグ式に合わせて指定）。clusterはbaselineシナリオのみ、R側のみ確認。均等疑似グループ（行番号%10）に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2（cluster_g2）、wage1の実カテゴリ列region（northcen/south/westダミーから合成、基準カテゴリnortheast）を含む（Issue #100）。パラメータ名は全ソースで切片を'const'に正規化済み。pyfixestとの比較は正確性検証から除外（性能比較専用）。high_condition_number/baseline_df1は境界値・悪条件ケース（Issue #101）。scale_variance（Issue #101で追加、#107で発覚）はここに含まない。傾き係数の同時共分散部分行列の条件数が倍精度の限界を超え、本実装・RのSolve()の双方が全cov_typeで計算不能（エラー）になるため（perfect_multicollinearityと同様、ComputationErrorの発生確認のみテストコード側で対応）。"
   }
 }

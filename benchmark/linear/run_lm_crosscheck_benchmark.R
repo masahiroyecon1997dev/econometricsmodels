@@ -112,29 +112,21 @@ bic_val <- -2 * loglik_val + log(n_obs) * k_params
 # F統計量・F検定p値はcov_typeに依存する（本実装のwald_f_testと同じロバストWald検定、
 # `F = (β_slopes' Σ⁻¹ β_slopes) / q`。上で計算したvc・df_inferenceをそのまま使う）。
 #
-# 変数間のスケールが極端に異なる設計行列（scale_varianceシナリオ、Issue #101）では、
-# 傾き係数の同時共分散部分行列がスケール比の2乗相当の条件数を持ち、倍精度の限界を
-# 超えて数値的に特異になる。RのSolve()はこの場合"system is computationally singular"
-# として即座にエラーを投げる（本実装・statsmodelsは異なる形で桁違いの値を返す、
-# Issue #107参照）。coef/se等の他の統計量は独立して計算済みのため、F統計量・
-# F検定p値のみtryCatchでNAにフォールバックし、他の統計量の crosscheck は継続する。
-f_statistic_val <- NA
-f_p_value_val <- NA
-tryCatch(
-  {
-    coef_names <- names(coef(model))
-    slope_idx <- which(coef_names != "(Intercept)")
-    beta_slopes <- coef(model)[slope_idx]
-    df_model <- length(slope_idx)
-    v_slopes <- vc[slope_idx, slope_idx, drop = FALSE]
-    wald <- as.numeric(t(beta_slopes) %*% solve(v_slopes) %*% beta_slopes)
-    f_statistic_val <<- wald / df_model
-    f_p_value_val <<- 1 - pf(f_statistic_val, df_model, df_inference)
-  },
-  error = function(e) {
-    invisible(NULL)
-  }
-)
+# 傾き係数の同時共分散部分行列が数値的に特異な場合（変数間のスケールが極端に
+# 異なる設計行列等）、solve()は"system is computationally singular"としてエラーを
+# 投げる。本実装（engine::linear::ols::wald_f_test）も固有値分解による相対閾値判定で
+# 同様のケースをComputationErrorとして検出するため（Issue #107）、この関数の
+# 呼び出し元（generate_ols_crosscheck_fixtures.py）はそのようなケースを
+# NUMERIC_SCENARIOSから除外し、両実装が計算不能で一致することのみ確認する
+# （perfect_multicollinearityと同じ方針）。
+coef_names <- names(coef(model))
+slope_idx <- which(coef_names != "(Intercept)")
+beta_slopes <- coef(model)[slope_idx]
+df_model <- length(slope_idx)
+v_slopes <- vc[slope_idx, slope_idx, drop = FALSE]
+wald <- as.numeric(t(beta_slopes) %*% solve(v_slopes) %*% beta_slopes)
+f_statistic_val <- wald / df_model
+f_p_value_val <- 1 - pf(f_statistic_val, df_model, df_inference)
 
 library(jsonlite)
 result <- list(

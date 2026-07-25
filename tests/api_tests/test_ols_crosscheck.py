@@ -106,29 +106,18 @@ def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
     AIC/BIC/対数尤度はcov_typeに依存しないため常にRTOL_STRICTで比較する。
     F統計量・F検定p値はcov_typeごとのロバストWald検定のため呼び出し元の
     rtol（HACのみRTOL_HAC）を使う。
-
-    `ref["f_statistic"]`が`None`の場合はF統計量比較をスキップする
-    （scale_varianceシナリオ、Issue #101/#107）。傾き係数の同時共分散
-    部分行列がスケール比の2乗相当の条件数を持ち倍精度の限界を超えるため、
-    R側の`solve()`が"computationally singular"として計算そのものを拒否する
-    （`run_lm_crosscheck_benchmark.R`参照）。係数・SE・AIC・BIC・対数尤度は
-    影響を受けないため引き続き比較する。
     """
     _assert_scalar_close(res.aic, ref["aic"], f"{label}/aic")
     _assert_scalar_close(res.bic, ref["bic"], f"{label}/bic")
     _assert_scalar_close(
         res.log_likelihood, ref["log_likelihood"], f"{label}/log_likelihood"
     )
-    if ref["f_statistic"] is not None:
-        _assert_scalar_close(
-            res.f_statistic,
-            ref["f_statistic"],
-            f"{label}/f_statistic",
-            rtol=rtol,
-        )
-        _assert_scalar_close(
-            res.f_p_value, ref["f_p_value"], f"{label}/f_p_value", rtol=rtol
-        )
+    _assert_scalar_close(
+        res.f_statistic, ref["f_statistic"], f"{label}/f_statistic", rtol=rtol
+    )
+    _assert_scalar_close(
+        res.f_p_value, ref["f_p_value"], f"{label}/f_p_value", rtol=rtol
+    )
 
 
 SYNTHETIC_SCENARIOS = [
@@ -138,7 +127,6 @@ SYNTHETIC_SCENARIOS = [
     "heteroskedastic",
     "autocorrelated",
     "moderate_multicollinearity",
-    "scale_variance",
     "high_condition_number",
     # n=k+1（自由度1ちょうど）の成功パス（Issue #101）。
     "baseline_df1",

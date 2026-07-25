@@ -37,8 +37,10 @@ import statsmodels  # noqa: E402
 from generate_synthetic_datasets import imbalanced_cluster_groups  # noqa: E402
 from run_statsmodels_benchmark import DATA_DIR, run  # noqa: E402
 
-# 完全な多重共線性は数値比較の対象外（testing-policy.md「テストの3系統」参照）。
-# ComputationErrorが発生することのみをテストコード側で対応する。
+# 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md「テストの3系統」参照）。
+# ComputationErrorが発生することのみをテストコード側で対応する。scale_varianceは
+# 傾き係数の同時共分散部分行列がスケール比の2乗相当の条件数を持ち倍精度の限界を
+# 超えるため、wald_f_test側で全cov_typeでComputationErrorになる（Issue #107）。
 NUMERIC_SCENARIOS = [
     "baseline",
     "small_n",
@@ -46,7 +48,6 @@ NUMERIC_SCENARIOS = [
     "heteroskedastic",
     "autocorrelated",
     "moderate_multicollinearity",
-    "scale_variance",
     "high_condition_number",
     # n=k+1（自由度1ちょうど）の成功パス（Issue #101）。baselineをn=5,k=3で
     # オーバーライドした専用データ（engine側の`k`は定数項込みでk=4になる
@@ -105,8 +106,10 @@ def build_fixtures() -> dict:
         "primary_reference": "statsmodels",
         "statsmodels_version": statsmodels.__version__,
         "note": (
-            "perfect_multicollinearityシナリオはここに含まない"
-            "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
+            "perfect_multicollinearity・scale_varianceシナリオはここに含まない"
+            "（いずれもComputationErrorの発生確認のみ、テストコード側で対応。"
+            "scale_varianceは傾き係数の同時共分散部分行列の条件数が倍精度の"
+            "限界を超えるため全cov_typeでComputationErrorになる、Issue #107）。"
             "クロスチェック用のRベンチマークは別途 "
             "benchmark/linear/run_lm_crosscheck_benchmark.R で生成する。"
         ),

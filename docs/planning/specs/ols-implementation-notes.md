@@ -75,7 +75,8 @@ OLSのAPI・オプション設計（[`ols-api-design.md`](./ols-api-design.md) /
 - クラスター数`G`の検証（`validate_cluster_groups`関数）: `G < 2`なら`OlsError::InsufficientClusters`。`groups.len() != n`は`engine_pybind`側の実装バグでしか起こらない内部契約として`debug_assert_eq!`で検証。
 - **小標本補正（`G/(G-1) * (n-1)/(n-k)`）は常に適用し、無効化するオプションは設けない**（`OLSOptions`に対応するフィールドを追加しない）。statsmodelsのソース（`statsmodels.stats.sandwich_covariance.cov_cluster`）を確認し、`use_correction=True`がデフォルトで`ols-standard-errors.md`5章の式と完全に一致することを確認済み。
 - **自由度の切り替え**: statsmodelsは`cov_type="cluster"`のとき、デフォルト（`df_correction=True`）でt検定・信頼区間・F検定の自由度を`n-k`ではなく**`G-1`（クラスター数-1）に切り替える**（計量経済学の標準的な慣行、Cameron-Miller等）。標準誤差自体の値は変わらないが、p値・信頼区間・F検定のp値が大きく変わる（クラスター数が小さいとき特に顕著）。本実装も`cov_type=Cluster`のときのみ自由度を`G-1`に切り替える（他のcov_typeは引き続き`n-k`）。`fit()`内で`(cov_params, df_inference)`のタプルを`cov_type`ごとのmatchから返す設計にしている。`df_resid`自体（`σ̂²`・調整済みR²・AIC/BIC等で使う）は影響を受けず、常に`n-k`のまま。
-- **G≤qの境界（Issue #100で判明）**: クラスターロバスト共分散`Ŝ = Σ_g S_g S_g'`はG個のランク1行列（外積）の和のため、`rank(Ŝ) ≤ G`。`wald_f_test`（4章）が使う傾き係数の部分行列（`q × q`、`q`は傾き係数の数）はG < qのとき理論的に特異になりうる（浮動小数点丸めの話ではなく構造的な特異性）。係数・標準誤差自体は`Ŝ`全体の対角成分から計算されるため問題なく求まるが、F検定の共分散部分行列の逆行列計算（Cholesky分解）が失敗し`fit()`全体が`OlsError::ComputationFailed`になる。「G=2ちょうどの成功パス」を検証する場合は、q（傾き係数の数）をG以下に保つ必要がある（`tests/api_tests/test_ols_fixtures.py::test_cluster_g2_matches_statsmodels`はq=1で検証、`test_cluster_g2_with_multiple_slopes_raises_computation_error`はq=3でComputationErrorになることを確認）。
+- **G≤qの境界（Issue #100で判明）**: クラスターロバスト共分散`Ŝ = Σ_g S_g S_g'`はG個のランク1行列（外積）の和のため、`rank(Ŝ) ≤ G`。`wald_f_test`（4章）が使う傾き係数の部分行列（`q × q`、`q`は傾き係数の数）はG < qのとき理論的に特異になりうる（浮動小数点丸めの話ではなく構造的な特異性）。係数・標準誤差自体は`Ŝ`全体の対角成分から計算されるため問題なく求まるが、F検定の共分散部分行列でこの特異性が検出され`fit()`全体が`OlsError::ComputationFailed`になる。「G=2ちょうどの成功パス」を検証する場合は、q（傾き係数の数）をG以下に保つ必要がある（`tests/api_tests/test_ols_fixtures.py::test_cluster_g2_matches_statsmodels`はq=1で検証、`test_cluster_g2_with_multiple_slopes_raises_computation_error`はq=3でComputationErrorになることを確認）。
+  - **検出経路（Issue #107で変化）**: 当初はCholesky分解（`Llt`）自体の失敗として検出されていたが、Issue #107で`ensure_well_conditioned_cov_submatrix`（固有値分解による事前チェック、下記「F統計量」参照）を`Llt`分解の前に追加したため、現在はG<qの構造的特異性もこちらで先に検出される（`test_cluster_g2_with_multiple_slopes_raises_computation_error`のエラーメッセージが"failed to invert..."から"...is near-singular..."に変わったことで実際に確認済み）。`fit()`全体が`ComputationFailed`になるという外部から見える挙動・受け入れ条件は変わらない。
 
 ### 信頼区間
 
@@ -91,6 +92,7 @@ OLSのAPI・オプション設計（[`ols-api-design.md`](./ols-api-design.md) /
 - **F統計量**: `cov_type`によらず単一の式`F = (β_slopes' Σ⁻¹ β_slopes) / q`（`Σ`は`cov_params`のうち切片以外の係数に対応する部分行列、`q`はその次元＝`k - k_constant`）で計算する（`wald_f_test`関数）。この式は`cov_type=Classical`のとき代数的に古典的F検定`((SST-SSR)/q)/(SSR/df_resid)`と完全に一致するため、分岐を分けていない。HC0-3・HAC・clusterでは`cov_params`がロバストな分散共分散行列になるため、この式がそのままロバストWald検定になる。p値はF分布（自由度`(q, df_inference)`、statrsの`FisherSnedecor`）の上側確率。
   - `q=0`（説明変数が定数項のみ）の場合はstatsmodels同様`f64::NAN`を返す（0除算回避）。
   - `Σ`の逆行列はCholesky分解（`Llt`）で求める。正定値行列の主小行列は必ず正定値という定理により理論上失敗しないはずだが、`xtx_inverse`と同様`ComputationFailed`に変換する境界ケース対応をしている。
+  - **`Σ`が数値的にほぼ特異な場合の検出（Issue #107）**: 変数間のスケールが極端に異なる設計行列（例: ある説明変数が1e6オーダー、別の説明変数が1e-3オーダー）では、`Σ`の条件数がスケール比の2乗（≈1e18）相当になり倍精度の限界を超えるが、Cholesky分解自体は（非ピボットのため）失敗せず数値的に無意味なF統計量を返してしまう（実測でstatsmodelsとの相対誤差5e10程度、`SingularMatrix`検出に使う`ensure_full_rank`と同じ発想をCholeskyのL因子対角成分に適用しても検出できないことも実測確認済み）。`ensure_well_conditioned_cov_submatrix`関数が`SelfAdjointEigen`（faerの対称行列固有値分解）で実際の固有値を求め、最大固有値との相対比（`q * f64::EPSILON * max_abs_eigenvalue`）で判定し、Cholesky分解の前に`ComputationFailed`で止める。この経路は理論上到達不能ではなく実際に到達する（下記「5. engine単体テストのカバレッジ」参照）。
 
 ## 5. engine単体テストのカバレッジ
 
@@ -103,6 +105,7 @@ OLSのAPI・オプション設計（[`ols-api-design.md`](./ols-api-design.md) /
   2. `StudentsT::new`/`FisherSnedecor::new`の失敗→`ComputationFailed`（自由度は`n>k`・`G>=2`・`df_model>=1`の事前検証により常に有効な正の値になる）
   3. `wald_f_test`内の`Llt`失敗→`ComputationFailed`（正定値行列の主小行列は必ず正定値という線形代数の定理により理論上到達不能）
   - これらを実際に踏ませるには丸め誤差でギリギリ破綻する敵対的な浮動小数点データを人為的に作る必要があり、プラットフォーム依存で壊れやすく、実装の振る舞いというより浮動小数点ノイズの検証になるため見送っている。`cargo-llvm-cov`の除外マーカーも導入せず、コード側のdocコメントで理由を説明する方針にしている。
+  - **理論上到達不能ではなく実際に到達するケース（Issue #107、上記に追加）**: `ensure_well_conditioned_cov_submatrix`の`ComputationFailed`（`Σ`の数値的なほぼ特異性）は、上記3件とは異なり実データで実際に到達する経路であり、`fit_returns_computation_failed_for_extreme_scale_difference_in_f_test`テストでカバー済み。
 - 「missed lines」表示の一部は`assert!`マクロのメッセージ引数（アサーション失敗時のみ評価される）による分析ツールの誤検知で、実際のギャップではない。
 
 その後のテストレビュー（8章参照）で境界値・内部整合性テストを4件追加し、現在は29テスト。

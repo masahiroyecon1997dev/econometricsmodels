@@ -67,7 +67,8 @@ from run_statsmodels_benchmark import DATA_DIR  # noqa: E402
 LINEAR_DIR = Path(__file__).resolve().parent.parent
 R_SCRIPT = LINEAR_DIR / "run_lm_crosscheck_benchmark.R"
 
-# 完全な多重共線性は数値比較の対象外（generate_ols_fixtures.pyと同じ方針）。
+# 完全な多重共線性・scale_varianceは数値比較の対象外（generate_ols_fixtures.pyと
+# 同じ方針。scale_varianceは全cov_typeでComputationErrorになる、Issue #107）。
 NUMERIC_SCENARIOS = [
     "baseline",
     "small_n",
@@ -75,7 +76,6 @@ NUMERIC_SCENARIOS = [
     "heteroskedastic",
     "autocorrelated",
     "moderate_multicollinearity",
-    "scale_variance",
     "high_condition_number",
     # n=k+1（自由度1ちょうど）の成功パス（Issue #101）。
     "baseline_df1",
@@ -306,12 +306,12 @@ def build_fixtures() -> dict:
             "ダミーから合成、基準カテゴリnortheast）を含む（Issue #100）。"
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
             "pyfixestとの比較は正確性検証から除外（性能比較専用）。"
-            "scale_variance/high_condition_number/baseline_df1は境界値・"
-            "悪条件ケース（Issue #101）。scale_varianceはf_statistic/"
-            "f_p_valueがnull（RのSolve()が'computationally singular'として"
-            "全cov_typeでエラーになるため、run_lm_crosscheck_benchmark.R側で"
-            "tryCatchしNAにフォールバック。係数・SE・AIC・BIC・対数尤度は"
-            "影響を受けず引き続き比較可能。Issue #107参照）。"
+            "high_condition_number/baseline_df1は境界値・悪条件ケース"
+            "（Issue #101）。scale_variance（Issue #101で追加、#107で発覚）は"
+            "ここに含まない。傾き係数の同時共分散部分行列の条件数が倍精度の"
+            "限界を超え、本実装・RのSolve()の双方が全cov_typeで計算不能"
+            "（エラー）になるため（perfect_multicollinearityと同様、"
+            "ComputationErrorの発生確認のみテストコード側で対応）。"
         ),
     }
     return fixtures

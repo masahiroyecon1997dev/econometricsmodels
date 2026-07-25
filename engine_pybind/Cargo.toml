@@ -14,7 +14,7 @@ crate-type = ["cdylib"]
 [dependencies]
 # サプライチェーン攻撃対策として`=`で完全固定する（ルートCargo.tomlの[workspace.dependencies]と同方針）。
 # pyo3のバージョンは0.29.0からダウングレードしている。理由は以下pyo3-polarsのコメント参照。
-pyo3 = { version = "=0.28.2", features = ["extension-module"] }
+pyo3 = { version = "=0.28.3", features = ["extension-module"] }
 # polars（Rustクレート）とpyo3-polars: バージョンはPython側pyproject.tomlのpolars==1.42.1と
 # 数字を合わせるものではない（Rustクレートpolarsは0.5x系、Python側は1.x系で既に別の
 # バージョン体系に分離済み）。pyo3-polarsが使うpolars_ffi::version_0という安定版FFI

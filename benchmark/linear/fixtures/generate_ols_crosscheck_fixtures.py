@@ -75,6 +75,10 @@ NUMERIC_SCENARIOS = [
     "heteroskedastic",
     "autocorrelated",
     "moderate_multicollinearity",
+    "scale_variance",
+    "high_condition_number",
+    # n=k+1（自由度1ちょうど）の成功パス（Issue #101）。
+    "baseline_df1",
 ]
 
 R_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
@@ -302,6 +306,12 @@ def build_fixtures() -> dict:
             "ダミーから合成、基準カテゴリnortheast）を含む（Issue #100）。"
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
             "pyfixestとの比較は正確性検証から除外（性能比較専用）。"
+            "scale_variance/high_condition_number/baseline_df1は境界値・"
+            "悪条件ケース（Issue #101）。scale_varianceはf_statistic/"
+            "f_p_valueがnull（RのSolve()が'computationally singular'として"
+            "全cov_typeでエラーになるため、run_lm_crosscheck_benchmark.R側で"
+            "tryCatchしNAにフォールバック。係数・SE・AIC・BIC・対数尤度は"
+            "影響を受けず引き続き比較可能。Issue #107参照）。"
         ),
     }
     return fixtures

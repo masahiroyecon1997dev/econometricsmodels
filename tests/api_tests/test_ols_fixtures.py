@@ -50,8 +50,23 @@ SCENARIOS = [
     "heteroskedastic",
     "autocorrelated",
     "moderate_multicollinearity",
+    "scale_variance",
+    "high_condition_number",
+    # n=k+1（自由度1ちょうど）の成功パス（Issue #101）。
+    "baseline_df1",
 ]
 COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
+
+# scale_variance × ロバストcov_type（HC0-3/HAC）は、傾き係数の同時共分散
+# 部分行列がスケール比の2乗（≈1e18）相当の条件数を持ち倍精度の限界を
+# 超えて数値的に特異になるため、F統計量・F検定p値がstatsmodelsと桁違いに
+# 乖離する（本実装・statsmodelsの双方がそれぞれ異なる形で数値的に破綻する。
+# 係数・SE自体は列ごとの推定のため影響を受けず、両者一致する）。
+# 本実装側の対応（エラー化 or 疑似逆行列フォールバック）はIssue #107で別途
+# 検討するため、ここではF統計量・F検定p値の比較のみ除外する。
+SKIP_F_TEST_SCENARIO_COV_TYPES = {
+    ("scale_variance", cov) for cov in ("hc0", "hc1", "hc2", "hc3", "hac")
+}
 
 # generate_ols_fixtures.py（run_statsmodels_benchmark.py）はHACのラグを
 # maxlags=1に固定している。同じラグを明示的に指定し、自動ラグ選択式の
@@ -84,7 +99,9 @@ def _assert_dict_close(
         _assert_close(ours[_rename(name)], ref_val, f"{label}/{name}")
 
 
-def _check_result(res, ref: dict, label: str) -> None:
+def _check_result(
+    res, ref: dict, label: str, skip_f_test: bool = False
+) -> None:
     _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
     _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
     _assert_dict_close(res.t_stats, ref["t_stats"], f"{label}/t_stats")
@@ -100,8 +117,13 @@ def _check_result(res, ref: dict, label: str) -> None:
     _assert_close(
         res.r_squared_adj, ref["r_squared_adj"], f"{label}/r_squared_adj"
     )
-    _assert_close(res.f_statistic, ref["f_statistic"], f"{label}/f_statistic")
-    _assert_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")
+    if not skip_f_test:
+        # skip_f_test=Trueのケースは`SKIP_F_TEST_SCENARIO_COV_TYPES`参照
+        # （Issue #107、極端なスケール差下でのロバストWald検定の数値不安定性）。
+        _assert_close(
+            res.f_statistic, ref["f_statistic"], f"{label}/f_statistic"
+        )
+        _assert_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")
     _assert_close(res.aic, ref["aic"], f"{label}/aic")
     _assert_close(res.bic, ref["bic"], f"{label}/bic")
     _assert_close(
@@ -118,7 +140,13 @@ def test_matches_statsmodels(fixtures, scenario, cov_type):
     options = OLSOptions(cov_type=cov_type, **kwargs)
     res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
-    _check_result(res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}")
+    skip_f_test = (scenario, cov_type) in SKIP_F_TEST_SCENARIO_COV_TYPES
+    _check_result(
+        res,
+        fixtures[scenario][cov_type],
+        f"{scenario}/{cov_type}",
+        skip_f_test=skip_f_test,
+    )
 
 
 def test_cluster_matches_statsmodels(fixtures):

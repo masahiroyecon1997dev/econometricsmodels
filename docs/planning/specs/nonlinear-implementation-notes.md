@@ -119,6 +119,14 @@ argminの`CostFunction`/`Gradient`/`Hessian`トレイト実装と、`nonlinear`�
 
 **テスト**: 対角Hessian・列間で観測ごとに片方が常にゼロになるスコア行列（対角のみのΨ）に加えて、列間に相関を持たせたスコア行列（非対角成分を持つΨ）でも検証し、転置・スケーリングの順序の取り違えを対角のみのテストより厳密に検出できるようにした（rust-reviewerの指摘を反映）。5種類（classical/opg/hc0/hc1/cluster）それぞれの正常系・特異行列時のエラー系を検証済み。
 
+### Logitのデータ構造（Issue #54で実装済み）
+
+`engine/src/nonlinear/logit.rs`に`LogitInput::from_columns`を実装した。`OlsInput::from_columns`（`weights=None`パス）と1:1で対応する設計（次元検証・切片列自動追加・`param_names`構築のロジックが同一）。weights/offsetはPhase2で見送り済みのため`from_columns_weighted`に相当するものはない。
+
+`MleError`に`DimensionMismatch { y_rows, x_rows }`（OLSの`OlsError::DimensionMismatch`と同型）を追加した。Issue #51時点のバリアント一覧には含まれていなかった（OLSには元々あったが、当時の設計メモへの転記漏れ）。Logit以降Probit/Tobitでも同じ形で使う。
+
+**`y`の値域検証（単位区間`[0,1]`）は次Issue（B2、尤度・スコア・Hessian実装）に持ち越し**: statsmodelsの`Logit`はコンストラクタ時点で`endog`が単位区間`[0,1]`に収まることを検証する（範囲外は`ValueError: endog must be in the unit interval.`）。Issue #54は次元検証のみがスコープのため`LogitInput::from_columns`では実装していないが、B2で同等の検証を追加する（rust-reviewerの指摘: 当初「statsmodelsも検証していない」という誤った理由でスコープ外としていたdocコメントを訂正済み）。
+
 ## 未確定（実装issue着手時、または追加相談が必要）
 
 - **Tobit固有エラーの正確な検証条件**: 下限<上限の検証、両側打ち切り時の整合性チェック等の詳細。Tobit実装時に決定する

@@ -28,6 +28,10 @@ use thiserror::Error;
 /// （`.claude/rules/rust-style.md`「エラーハンドリング」参照）。
 #[derive(Debug, Error, PartialEq)]
 pub enum MleError {
+    /// yとxの行数が一致しない（OLSの`OlsError::DimensionMismatch`と同型）。
+    #[error("dimension mismatch: y has {y_rows} rows but x has {x_rows} rows")]
+    DimensionMismatch { y_rows: usize, x_rows: usize },
+
     /// `raise_on_non_convergence=true`（既定）かつ`max_iter`回で収束しなかった。
     #[error(
         "failed to converge after {n_iter} iterations. Set raise_on_non_convergence=False \
@@ -926,6 +930,14 @@ mod tests {
     #[test]
     fn mle_error_messages_are_human_readable() {
         assert_eq!(
+            MleError::DimensionMismatch {
+                y_rows: 10,
+                x_rows: 8
+            }
+            .to_string(),
+            "dimension mismatch: y has 10 rows but x has 8 rows"
+        );
+        assert_eq!(
             MleError::NonConvergence { n_iter: 35 }.to_string(),
             "failed to converge after 35 iterations. Set raise_on_non_convergence=False \
              to receive the result anyway, or increase max_iter"
@@ -979,6 +991,26 @@ mod tests {
 
     #[test]
     fn mle_error_implements_partial_eq() {
+        assert_eq!(
+            MleError::DimensionMismatch {
+                y_rows: 10,
+                x_rows: 10
+            },
+            MleError::DimensionMismatch {
+                y_rows: 10,
+                x_rows: 10
+            }
+        );
+        assert_ne!(
+            MleError::DimensionMismatch {
+                y_rows: 10,
+                x_rows: 10
+            },
+            MleError::DimensionMismatch {
+                y_rows: 10,
+                x_rows: 8
+            }
+        );
         assert_eq!(MleError::SingularHessian, MleError::SingularHessian);
         assert_ne!(MleError::SingularHessian, MleError::SingularOpgMatrix);
         assert_ne!(

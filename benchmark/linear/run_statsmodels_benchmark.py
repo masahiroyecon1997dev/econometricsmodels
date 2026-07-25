@@ -1,8 +1,18 @@
 """statsmodelsでベンチマーク値（係数・標準誤差・適合度統計量）を生成するスクリプト。
 
-OLSの主リファレンスとして使用する（classical/HC0-3/cluster/HAC、AIC/BIC/log-likelihood、
+OLS/WLSの主リファレンスとして使用する（classical/HC0-3/cluster/HAC、AIC/BIC/log-likelihood、
 ロバストWald検定まで一貫してカバーできるため）。pyfixestは固定効果が絡む
 Phase4以降で中心的に使う想定（`docs/planning/specs/ols-implementation-notes.md`参照）。
+`--weight-col`を指定すると`smf.wls`を使う（WLS用、`docs/planning/specs/wls-standard-errors.md`
+参照。分散共分散行列の計算式自体はOLSと共通でありstatsmodels側も同じ実装のため、
+このスクリプト自体はOLS/WLSで分岐せず共通で使う）。
+
+合成データは`generate_synthetic_datasets.py`を直接呼ばず、`tests/api_tests/fixtures/
+benchmarks/data/`に固定済みのCSVを読む（`benchmark/freeze_datasets.py`参照。
+ジェネレータ側のコードが将来変わっても既存フィクスチャの期待値と無言で
+不整合にならないようにするため）。Wooldridgeデータは`load_wooldridge.py`経由で
+都度ロードする（データの再配布ライセンスが未確認のためCSVとして固定しない。
+`freeze_datasets.py`のdocstring参照）。
 
 使用例:
     python run_statsmodels_benchmark.py --dataset-source synthetic --dataset heteroskedastic \\
@@ -10,16 +20,43 @@ Phase4以降で中心的に使う想定（`docs/planning/specs/ols-implementatio
 
     python run_statsmodels_benchmark.py --dataset-source wooldridge --dataset wage1 \\
         --formula "lwage ~ educ + exper + tenure" --cov-type cluster --cluster-col nearc4
+
+    python run_statsmodels_benchmark.py --dataset-source synthetic --dataset baseline \\
+        --cov-type classical --weight-col weight
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
-from generate_synthetic_datasets import generate_dataset
-from load_wooldridge import load as load_wooldridge
+import polars as pl
+
+sys.path.insert(
+    0, str(Path(__file__).resolve().parent.parent)
+)  # benchmark/ を import path に追加（load_wooldridge）
+
+from load_wooldridge import load as _load_wooldridge  # noqa: E402
+
+DATA_DIR = (
+    Path(__file__).resolve().parents[2]
+    / "tests"
+    / "api_tests"
+    / "fixtures"
+    / "benchmarks"
+    / "data"
+)
+
+
+def _load_synthetic(dataset: str) -> tuple[pl.DataFrame, list[float]]:
+    df = pl.read_csv(DATA_DIR / f"synthetic_{dataset}.csv")
+    true_betas = json.loads(
+        (DATA_DIR / "synthetic_true_beta.json").read_text()
+    )
+    return df, true_betas[dataset]
 
 
 def run(
@@ -29,18 +66,20 @@ def run(
     cov_type: str,
     cluster_col: str | None = None,
     confidence_level: float = 0.95,
+    weight_col: str | None = None,
 ) -> dict:
     import statsmodels.formula.api as smf
 
     true_beta = None
     if dataset_source == "synthetic":
-        df, true_beta = generate_dataset(dataset)
+        df, true_beta = _load_synthetic(dataset)
         pandas_df = df.to_pandas()
         if formula is None:
-            x_cols = [c for c in df.columns if c not in ("y", "weight")]
+            exclude = {"y", "weight"} | ({weight_col} if weight_col else set())
+            x_cols = [c for c in df.columns if c not in exclude]
             formula = "y ~ " + " + ".join(x_cols)
     elif dataset_source == "wooldridge":
-        pandas_df = load_wooldridge(dataset).to_pandas()
+        pandas_df = _load_wooldridge(dataset).to_pandas()
         if formula is None:
             raise ValueError(
                 "wooldridgeデータセットの場合は--formulaの指定が必須です"
@@ -64,7 +103,12 @@ def run(
             "maxlags": 1
         }  # ラグ選択方法は別途検討事項（issue参照）
 
-    model = smf.ols(formula=formula, data=pandas_df).fit(**fit_kwargs)
+    if weight_col is not None:
+        model = smf.wls(
+            formula=formula, data=pandas_df, weights=pandas_df[weight_col]
+        ).fit(**fit_kwargs)
+    else:
+        model = smf.ols(formula=formula, data=pandas_df).fit(**fit_kwargs)
 
     alpha = 1.0 - confidence_level
     ci = model.conf_int(alpha=alpha)
@@ -93,7 +137,7 @@ def run(
         "df_resid": int(model.df_resid),
     }
     if true_beta is not None:
-        result["true_beta"] = true_beta.tolist()
+        result["true_beta"] = true_beta
 
     import statsmodels
 
@@ -105,6 +149,8 @@ def run(
         "cov_type_statsmodels": sm_cov_type,
         "confidence_level": confidence_level,
         "formula": formula,
+        "weighted": weight_col is not None,
+        "weight_col": weight_col,
     }
     return result
 
@@ -123,6 +169,9 @@ if __name__ == "__main__":
     parser.add_argument("--cov-type", default="classical")
     parser.add_argument("--cluster-col", default=None)
     parser.add_argument("--confidence-level", type=float, default=0.95)
+    parser.add_argument(
+        "--weight-col", default=None, help="指定するとWLS（smf.wls）を使う"
+    )
     args = parser.parse_args()
 
     output = run(
@@ -132,5 +181,6 @@ if __name__ == "__main__":
         args.cov_type,
         args.cluster_col,
         args.confidence_level,
+        args.weight_col,
     )
     print(json.dumps(output, indent=2))

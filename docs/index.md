@@ -14,6 +14,6 @@ pip install econometricsmodels
 
 ## 対応手法
 
-現在実装済みなのは OLS（最小二乗法）のみです。使い方は [Getting Started](getting-started.md) を、詳細なオプション・返り値は [API Reference](api/ols.md) を参照してください。
+現在実装済みなのは OLS（最小二乗法）と WLS（加重最小二乗法）です。使い方は [Getting Started](getting-started.md) を、詳細なオプション・返り値は API Reference（[OLS](api/ols.md) / [WLS](api/wls.md)）を参照してください。
 
-今後、WLS・IV（2SLS/GMM）・Probit/Logit等を順次追加していく予定です。
+今後、IV（2SLS/GMM）・Probit/Logit等を順次追加していく予定です。

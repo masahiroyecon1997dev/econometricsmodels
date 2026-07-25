@@ -8,11 +8,14 @@ from __future__ import annotations
 
 from ._lib import ComputationError, ValidationError
 from .linear.ols import OLS, OLSOptions, OlsResults
+from .linear.wls import WLS, WlsResults
 
 __all__ = [
     "OLS",
     "OLSOptions",
     "OlsResults",
+    "WLS",
+    "WlsResults",
     "ValidationError",
     "ComputationError",
 ]

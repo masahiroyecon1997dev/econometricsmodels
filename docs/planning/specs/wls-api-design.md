@@ -113,17 +113,23 @@ OLSと同じ「List渡し＋オブジェクト渡し」規約（CLAUDE.md 2章�
 テストで検証するまでもなく構造的に保証される**（同じコードパスを通るため）。Issue #37の
 不変条件テストは、この構造的保証が壊れていないことの回帰検知として位置づけられる。
 
-### 4.2 エラー型: `OlsError`をそのまま再利用し、新しいバリアントを1つ追加する
+### 4.2 エラー型: `OlsError`をそのまま再利用し、新しいバリアントを追加する
 
-WLSは`OlsEstimator::fit`をそのまま呼ぶため、`DimensionMismatch` /
-`InsufficientObservations` / `SingularMatrix` 等、既存の`OlsError`バリアントがそのまま
-WLSにも当てはまる。重み固有のエラー（0以下の重み）のためだけに別の`WlsError`型を新設すると、
-既存バリアントの重複定義・`engine_pybind`側の変換関数の二重化が発生する。
+WLSは`OlsEstimator::fit`をそのまま呼ぶため、`InsufficientObservations` / `SingularMatrix` 等、
+既存の`OlsError`バリアントがそのままWLSにも当てはまる。重み固有のエラーのためだけに別の
+`WlsError`型を新設すると、既存バリアントの重複定義・`engine_pybind`側の変換関数の二重化が発生する。
 
-**設計案**: `OlsError`に新バリアント`NonPositiveWeight { row: usize, weight: f64 }`を追加し、
-WLS・OLS共通のエラー型として使い続ける。デメリット（「OLS専用のはずの型にWLSの都合が混入する」）
-はあるが、後続でGLS等が増えたときに同じパターンが繰り返されるようなら、その時点で
-`linear/common.rs`への切り出しを検討する（YAGNI、`rust-style.md`「ファイル・ディレクトリ構成」）。
+**実装（Issue #35）**: `OlsError`に以下の2バリアントを追加し、WLS・OLS共通のエラー型として
+使い続ける。
+
+- `WeightDimensionMismatch { y_rows: usize, weight_rows: usize }`: 重み配列と`y`の行数が
+  一致しない。既存の`DimensionMismatch`（`x_columns`用）と同じ位置づけの防御的チェック
+  （`engine_pybind`側で事前検証済みのはずだが、`engine`側でも独立して検証する）。
+- `NonPositiveWeight { row: usize, weight: f64 }`: 重みが0以下（NaN含む）。
+
+デメリット（「OLS専用のはずの型にWLSの都合が混入する」）はあるが、後続でGLS等が増えたときに
+同じパターンが繰り返されるようなら、その時点で`linear/common.rs`への切り出しを検討する
+（YAGNI、`rust-style.md`「ファイル・ディレクトリ構成」）。
 
 ### 4.3 残差の扱い: 元スケール（unweighted）の残差を公開する
 

@@ -17,12 +17,27 @@ pyfixestのHC2/HC3はfixestの仕様ではなく**pyfixest自身の実装バグ*
 classical/HC0-3/clusterはRとほぼ機械精度で一致するため厳密比較、HACのみ小標本補正の
 慣習差により緩い許容誤差で比較する（`tests/api_tests/test_ols_crosscheck.py`参照）。
 
+係数・標準誤差に加え、AIC/BIC/対数尤度・F統計量・F検定p値もRクロスチェック対象に含める
+（`testing-policy.md`「リファレンス実装」章の方針。全統計量を独立実装でもクロスチェックする）。
+AIC/BICはRの`AIC()`/`BIC()`標準関数（残差分散を1パラメータとして追加でカウントするk+1慣習）
+ではなく、`run_lm_crosscheck_benchmark.R`側で本実装・statsmodelsと同じ式（`-2*loglik + 2*k`等、kは
+回帰係数の数のみ）で手計算した値を使う（実測でRの標準関数はAICがちょうど2、BICがlog(n)だけ
+系統的にずれることを確認済み）。F統計量・F検定p値は本実装の`wald_f_test`と同じロバストWald検定
+（`β_slopes' Σ⁻¹ β_slopes / q`）をcov_typeごとの共分散行列で計算しており、cov_typeに依存する。
+
 このスクリプト自体は`benchmark/`側に置く。生成される`ols_crosscheck.json`は
 `tests/api_tests/fixtures/`に置く（`testing-policy.md`「ベンチマーク値のフィクスチャ化」参照）。
 
+合成データの入力は`tests/api_tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
+（`benchmark/freeze_datasets.py`参照）。`imbalanced_cluster_groups`（純粋にnから
+決定論的にラベルを組み立てるだけで乱数を使わない）のみ、引き続き
+`generate_synthetic_datasets.py`を直接呼ぶ。Wooldridgeデータは`load_wooldridge.py`
+経由で都度ロードする（データの再配布ライセンスが未確認のためCSVとして固定しない。
+`freeze_datasets.py`のdocstring参照）。
+
 使用例:
-    python fixtures/generate_ols_crosscheck_fixtures.py \\
-        --output ../tests/api_tests/fixtures/benchmarks/ols_crosscheck.json
+    python generate_ols_crosscheck_fixtures.py \\
+        --output ../../../tests/api_tests/fixtures/benchmarks/ols_crosscheck.json
 """
 
 from __future__ import annotations
@@ -35,15 +50,22 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(
+    0, str(Path(__file__).resolve().parent.parent)
+)  # benchmark/linear/ を import path に追加（run_statsmodels_benchmark）
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[2])
+)  # benchmark/ を import path に追加（generate_synthetic_datasets）
 
+import polars as pl  # noqa: E402
 import statsmodels  # noqa: E402
 
-from generate_synthetic_datasets import generate_dataset  # noqa: E402
+from generate_synthetic_datasets import imbalanced_cluster_groups  # noqa: E402
 from load_wooldridge import load as load_wooldridge  # noqa: E402
+from run_statsmodels_benchmark import DATA_DIR  # noqa: E402
 
-BENCHMARK_DIR = Path(__file__).resolve().parent.parent
-R_SCRIPT = BENCHMARK_DIR / "run_r_benchmark.R"
+LINEAR_DIR = Path(__file__).resolve().parent.parent
+R_SCRIPT = LINEAR_DIR / "run_lm_crosscheck_benchmark.R"
 
 # 完全な多重共線性は数値比較の対象外（generate_ols_fixtures.pyと同じ方針）。
 NUMERIC_SCENARIOS = [
@@ -74,7 +96,7 @@ def _run_r(
     cluster_col: str | None = None,
     hac_lag: int | None = None,
 ) -> dict:
-    cmd = ["Rscript", str(R_SCRIPT), str(csv_path), formula, "lm", cov_type]
+    cmd = ["Rscript", str(R_SCRIPT), str(csv_path), formula, cov_type]
     if cov_type == "cluster":
         cmd.append(cluster_col or "")
     elif cov_type == "hac":
@@ -96,10 +118,16 @@ def _normalize_names(raw: dict) -> dict:
     def fix(name: str) -> str:
         return "const" if name in ("(Intercept)", "Intercept") else name
 
-    return {
+    result = {
         "coef": {fix(k): v for k, v in raw["coef"].items()},
         "se": {fix(k): v for k, v in raw["se"].items()},
     }
+    # aic/bic/log_likelihood/f_statistic/f_p_valueはrun_lm_crosscheck_benchmark.Rが返す
+    # （run_fixest_benchmark.R等、他パッケージのスクリプトは対象外）。
+    for key in ("aic", "bic", "log_likelihood", "f_statistic", "f_p_value"):
+        if key in raw:
+            result[key] = raw[key]
+    return result
 
 
 def _write_csv(df, tmpdir: Path, name: str) -> Path:
@@ -112,7 +140,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
     fixtures: dict = {}
 
     for scenario in NUMERIC_SCENARIOS:
-        df, _ = generate_dataset(scenario)
+        df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
         formula = "y ~ x1 + x2 + x3"
         csv_path = _write_csv(df, tmpdir, scenario)
         n = df.height
@@ -133,22 +161,54 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             fixtures[scenario]["cluster"] = _run_cluster_case(
                 df, csv_path, formula
             )
+            fixtures[scenario]["cluster_imbalanced"] = _run_cluster_case(
+                df,
+                csv_path,
+                formula,
+                groups=imbalanced_cluster_groups(n),
+                suffix="_cluster_imbalanced",
+            )
+            # G=2×説明変数3個（既定のbaseline）はロバストWald検定の共分散
+            # 部分行列（3x3）のランクがG=2以下になり必然的に特異になり
+            # ComputationErrorになる（成功パスではない。テスト側でエラー
+            # パスとして確認、Rクロスチェックは対象外）。ここでの「G=2境界の
+            # 成功パス」は説明変数1個（q=1）に絞ったデータで確認する。
+            df_g2 = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
+            formula_g2 = "y ~ x1"
+            csv_path_g2 = _write_csv(df_g2, tmpdir, f"{scenario}_g2")
+            fixtures[scenario]["cluster_g2"] = _run_cluster_case(
+                df_g2,
+                csv_path_g2,
+                formula_g2,
+                groups=[str(i % 2) for i in range(df_g2.height)],
+                suffix="_cluster_g2",
+            )
 
     return fixtures
 
 
-def _run_cluster_case(df, csv_path: Path, formula: str) -> dict:
-    """クラスターロバストSEのcrosscheck。generate_ols_fixtures.pyと同じ疑似グループ
-    （行番号%10）を使う。統計的な意味はなく、実装の動作確認用。
+def _run_cluster_case(
+    df,
+    csv_path: Path,
+    formula: str,
+    groups: list | None = None,
+    suffix: str = "_cluster",
+) -> dict:
+    """クラスターロバストSEのcrosscheck。
+
+    Args:
+        df: 疑似グループを付与する対象データ。
+        csv_path: 元データのCSVパス（グループ付きCSVの命名に使う）。
+        formula: 回帰式。
+        groups: 各行のグループラベル。Noneなら既定（行番号%10、10均等グループ）。
+        suffix: 一時CSVファイル名に付けるsuffix（呼び出しごとに衝突しないように）。
     """
-    grouped = (
-        df.with_row_index("_row")
-        .with_columns(
-            (df.with_row_index("_row")["_row"] % 10).alias("cluster_group")
-        )
-        .drop("_row")
+    n = df.height
+    cluster_group = (
+        groups if groups is not None else [i % 10 for i in range(n)]
     )
-    tmp_path = csv_path.with_name(csv_path.stem + "_cluster.csv")
+    grouped = df.with_columns(pl.Series("cluster_group", cluster_group))
+    tmp_path = csv_path.with_name(csv_path.stem + suffix + ".csv")
     grouped.write_csv(tmp_path)
     return {
         "r": _run_r(tmp_path, formula, "cluster", cluster_col="cluster_group")
@@ -176,7 +236,33 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
             fixtures[name][cov_type] = {
                 "r": _run_r(csv_path, formula, cov_type)
             }
+
+        if name == "wage1":
+            fixtures[name]["cluster"] = _run_wage1_region_cluster_case(
+                df, csv_path, formula
+            )
     return fixtures
+
+
+def _run_wage1_region_cluster_case(df, csv_path: Path, formula: str) -> dict:
+    """wage1の地域ダミー（northcen/south/west）から実カテゴリ列regionを作り、
+    クラスターロバストSEをRクロスチェックする（Issue #100「実データでのグループ列」）。
+    いずれのダミーも0の行を基準カテゴリ"northeast"とする（4グループ、不均衡サイズ）。
+    """
+    region = (
+        pl.when(pl.col("northcen") == 1)
+        .then(pl.lit("northcen"))
+        .when(pl.col("south") == 1)
+        .then(pl.lit("south"))
+        .when(pl.col("west") == 1)
+        .then(pl.lit("west"))
+        .otherwise(pl.lit("northeast"))
+        .alias("region")
+    )
+    grouped = df.with_columns(region)
+    tmp_path = csv_path.with_name(csv_path.stem + "_region_cluster.csv")
+    grouped.write_csv(tmp_path)
+    return {"r": _run_r(tmp_path, formula, "cluster", cluster_col="region")}
 
 
 def build_fixtures() -> dict:
@@ -198,7 +284,8 @@ def build_fixtures() -> dict:
         "method": "ols",
         "purpose": (
             "statsmodels主リファレンス（ols.json）とは独立した実装（R: lm + "
-            "sandwich/lmtest）によるクロスチェック用。classical/HC0-3/cluster"
+            "sandwich/lmtest）によるクロスチェック用。係数・標準誤差・AIC・"
+            "BIC・対数尤度・F統計量・F検定p値を含む。classical/HC0-3/cluster"
             "は厳密比較、HACのみ緩い許容誤差での比較を想定する"
             "（testing-policy.md参照）"
         ),
@@ -209,7 +296,10 @@ def build_fixtures() -> dict:
             "perfect_multicollinearityシナリオはここに含まない"
             "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
             "HACはR側のみ（explicit lagを本実装の自動ラグ式に合わせて指定）。"
-            "clusterはbaselineシナリオのみ、疑似グループ（行番号%10）でR側のみ確認。"
+            "clusterはbaselineシナリオのみ、R側のみ確認。均等疑似グループ（行番号%10）"
+            "に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2"
+            "（cluster_g2）、wage1の実カテゴリ列region（northcen/south/west"
+            "ダミーから合成、基準カテゴリnortheast）を含む（Issue #100）。"
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
             "pyfixestとの比較は正確性検証から除外（性能比較専用）。"
         ),
@@ -221,7 +311,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../tests/api_tests/fixtures/benchmarks/ols_crosscheck.json",
+        default="../../../tests/api_tests/fixtures/benchmarks/ols_crosscheck.json",
     )
     args = parser.parse_args()
 

@@ -58,11 +58,10 @@ pub enum MleError {
     #[error("cov_type='cluster' requires at least 2 clusters, got {g}")]
     InsufficientClusters { g: usize },
 
-    /// 収束点のHessianが特異で、観測情報行列（`cov_type="classical"`/`"nonrobust"`既定）の
-    /// 逆行列が計算できない。
-    #[error(
-        "the Hessian at convergence is singular; cannot compute the observed information matrix"
-    )]
+    /// Hessianが特異で逆行列が計算できない。Newton法のステップ求解中（収束前の任意の点）、
+    /// および収束点での観測情報行列計算（`cov_type="classical"`/`"nonrobust"`既定）の
+    /// 両方で発生しうる。
+    #[error("the Hessian is singular and cannot be inverted")]
     SingularHessian,
 
     /// 上記以外の計算過程での失敗（分布のCDF計算等）。
@@ -254,7 +253,10 @@ where
         "Newton (faer-backed)"
     }
 
-    fn next_iter(
+    /// 初期パラメータでの勾配をあらかじめ`state`に格納する。これにより`terminate()`は
+    /// 常に「`state.get_param()`と対応する勾配」を見られる（`next_iter`実行前の最初の
+    /// `terminate()`呼び出しも含む。初期値が既に収束条件を満たす場合を正しく扱うため）。
+    fn init(
         &mut self,
         problem: &mut Problem<O>,
         mut state: NewtonState,
@@ -265,10 +267,31 @@ where
             )
         })?;
         let grad = problem.gradient(&param)?;
+        let state = state.param(param).gradient(grad);
+        Ok((state, None))
+    }
+
+    fn next_iter(
+        &mut self,
+        problem: &mut Problem<O>,
+        mut state: NewtonState,
+    ) -> Result<(NewtonState, Option<KV>), OptimizerError> {
+        let param = state
+            .take_param()
+            .ok_or_else(|| OptimizerError::msg("FaerNewton: parameter vector in state not set"))?;
+        // `init()`（初回）または前回の`next_iter`（2回目以降）で、この`param`に対応する
+        // 勾配が既に`state`に格納されている前提（`terminate()`が常に「返却されるparamと
+        // 対応する勾配」を見られるよう、param/gradientを常にペアで更新する設計）。
+        let grad = state
+            .take_gradient()
+            .ok_or_else(|| OptimizerError::msg("FaerNewton: gradient in state not set"))?;
         let hessian = problem.hessian(&param)?;
         let step = newton_step(&hessian, &grad)?;
         let new_param: Vec<f64> = param.iter().zip(step.iter()).map(|(p, s)| p - s).collect();
-        let state = state.param(new_param).gradient(grad);
+        // 収束判定（terminate）が「更新後のparamに対応する勾配」を見られるよう、
+        // 更新前のgradを使い回さずnew_paramで改めて評価する。
+        let new_grad = problem.gradient(&new_param)?;
+        let state = state.param(new_param).gradient(new_grad);
         Ok((state, None))
     }
 
@@ -295,7 +318,11 @@ fn newton_step(hessian: &[Vec<f64>], grad: &[f64]) -> Result<Vec<f64>, MleError>
     let max_abs_diag = (0..k).map(|i| (*r.get(i, i)).abs()).fold(0.0_f64, f64::max);
     let threshold = (k as f64) * f64::EPSILON * max_abs_diag;
     for i in 0..k {
-        if (*r.get(i, i)).abs() <= threshold {
+        let diag = (*r.get(i, i)).abs();
+        // NaNを明示的にチェックする（`diag <= threshold`だとNaNとの比較は常にfalseになり
+        // すり抜けてしまう）。全ゼロ行列のcol_piv_qrは列選択時の0除算によりRの対角がNaNに
+        // なりうるため（faer 0.24.4で実機確認済み）、この形にしている。
+        if diag.is_nan() || diag <= threshold {
             return Err(MleError::SingularHessian);
         }
     }
@@ -512,6 +539,150 @@ mod tests {
     }
 
     #[test]
+    fn run_solver_newton_returns_non_convergence_error_when_max_iter_is_too_small() {
+        let result = run_solver(
+            quadratic_problem(),
+            Method::Newton,
+            vec![1000.0, -1000.0],
+            0,
+            1e-12,
+            true,
+        );
+
+        assert!(matches!(result, Err(MleError::NonConvergence { .. })));
+    }
+
+    #[test]
+    fn run_solver_newton_returns_result_without_raising_when_raise_on_non_convergence_is_false() {
+        let output = run_solver(
+            quadratic_problem(),
+            Method::Newton,
+            vec![1000.0, -1000.0],
+            0,
+            1e-12,
+            false,
+        )
+        .unwrap();
+
+        assert!(!output.converged);
+        assert_eq!(output.n_iter, 0);
+    }
+
+    /// `Hessian`が常にゼロ行列（特異）を返すダミー問題。`newton_step`の特異性検出を
+    /// `run_solver`経由で（`FaerNewton`・`convert_optimizer_error`のダウンキャストを含めて）
+    /// 検証する。
+    #[derive(Clone)]
+    struct SingularHessianProblem;
+
+    impl CostFunction for SingularHessianProblem {
+        type Param = Vec<f64>;
+        type Output = f64;
+
+        fn cost(&self, _param: &Self::Param) -> Result<Self::Output, OptimizerError> {
+            Ok(0.0)
+        }
+    }
+
+    impl Gradient for SingularHessianProblem {
+        type Param = Vec<f64>;
+        type Gradient = Vec<f64>;
+
+        fn gradient(&self, _param: &Self::Param) -> Result<Self::Gradient, OptimizerError> {
+            Ok(vec![1.0])
+        }
+    }
+
+    impl Hessian for SingularHessianProblem {
+        type Param = Vec<f64>;
+        type Hessian = Vec<Vec<f64>>;
+
+        fn hessian(&self, _param: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
+            Ok(vec![vec![0.0]])
+        }
+    }
+
+    #[test]
+    fn run_solver_newton_returns_singular_hessian_error() {
+        let result = run_solver(
+            SingularHessianProblem,
+            Method::Newton,
+            vec![0.0],
+            35,
+            1e-6,
+            true,
+        );
+
+        assert!(
+            matches!(result, Err(MleError::SingularHessian)),
+            "{:?}",
+            result
+        );
+    }
+
+    /// `FaerNewton`の収束判定が「実際に返却するパラメータでの勾配」を正しく見ているかを
+    /// 検証する回帰テスト（rust-reviewerが指摘: 修正前は「更新前のパラメータ」の勾配で
+    /// 収束判定していたバグがあった）。
+    ///
+    /// `|θ|<1`の領域は勾配に比べてHessianが極端に小さく、Newtonステップが大きくジャンプする。
+    /// ジャンプ先（`|θ|>=1`）では勾配が大きい。`converged=true`が返るなら、実際に返却された
+    /// `params`での勾配（このテスト内で独立に再計算する）がtol未満でなければならない
+    /// （旧実装はこの不変条件を満たさないケースがあった）。
+    #[derive(Clone)]
+    struct IllConditionedProblem;
+
+    impl CostFunction for IllConditionedProblem {
+        type Param = Vec<f64>;
+        type Output = f64;
+
+        fn cost(&self, _param: &Self::Param) -> Result<Self::Output, OptimizerError> {
+            Ok(0.0)
+        }
+    }
+
+    impl Gradient for IllConditionedProblem {
+        type Param = Vec<f64>;
+        type Gradient = Vec<f64>;
+
+        fn gradient(&self, param: &Self::Param) -> Result<Self::Gradient, OptimizerError> {
+            Ok(vec![if param[0].abs() < 1.0 { 1e-8 } else { 500.0 }])
+        }
+    }
+
+    impl Hessian for IllConditionedProblem {
+        type Param = Vec<f64>;
+        type Hessian = Vec<Vec<f64>>;
+
+        fn hessian(&self, param: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
+            Ok(vec![vec![if param[0].abs() < 1.0 { 1e-12 } else { 1.0 }]])
+        }
+    }
+
+    #[test]
+    fn faer_newton_terminate_reflects_gradient_at_returned_params_not_previous_params() {
+        // 開始点[10.0]は|θ|>=1の領域（勾配500、Hessian1.0）から始め、次の点が
+        // どこに着地しても、報告されるconvergedフラグが実際の勾配と矛盾しないことを検証する。
+        let output = run_solver(
+            IllConditionedProblem,
+            Method::Newton,
+            vec![10.0],
+            10,
+            1e-6,
+            false,
+        )
+        .unwrap();
+
+        let actual_grad = IllConditionedProblem.gradient(&output.params).unwrap();
+        if output.converged {
+            assert!(
+                gradient_norm(&actual_grad) < 1e-6,
+                "converged=true was reported but the actual gradient at the returned params {:?} is {:?}",
+                output.params,
+                actual_grad
+            );
+        }
+    }
+
+    #[test]
     fn standardize_columns_scales_to_unit_variance_and_leaves_intercept_untouched() {
         let x = Mat::from_fn(4, 3, |i, j| {
             if j == 0 {
@@ -565,6 +736,38 @@ mod tests {
     }
 
     #[test]
+    fn standardize_and_destandardize_round_trips_with_intercept() {
+        let x = Mat::from_fn(4, 3, |i, j| {
+            if j == 0 {
+                1.0
+            } else if j == 1 {
+                [10.0, 20.0, 30.0, 40.0][i]
+            } else {
+                [100.0, 200.0, 150.0, 50.0][i]
+            }
+        });
+
+        let (_, scale) = standardize_columns(&x, true);
+        let params_std = vec![1.5, 6.0, -3.0];
+        let params_orig = destandardize_params(&params_std, &scale);
+
+        // 切片の係数はスケーリング対象外（scale.stds[0] == 1.0）のため、
+        // 切片なしのケースと同様に線形予測子が一致するはず。切片項自体は
+        // 平均センタリングをしていないため素通しでよい（destandardize_paramsの
+        // 補正対象にならない）。
+        assert_eq!(params_orig[0], params_std[0]);
+        for i in 0..4 {
+            let pred_std: f64 = params_std[0]
+                + (1..3)
+                    .map(|j| (*x.get(i, j) / scale.stds[j]) * params_std[j])
+                    .sum::<f64>();
+            let pred_orig: f64 =
+                params_orig[0] + (1..3).map(|j| *x.get(i, j) * params_orig[j]).sum::<f64>();
+            assert!((pred_std - pred_orig).abs() < 1e-9);
+        }
+    }
+
+    #[test]
     fn mle_error_messages_are_human_readable() {
         assert_eq!(
             MleError::NonConvergence { n_iter: 35 }.to_string(),
@@ -597,7 +800,7 @@ mod tests {
         );
         assert_eq!(
             MleError::SingularHessian.to_string(),
-            "the Hessian at convergence is singular; cannot compute the observed information matrix"
+            "the Hessian is singular and cannot be inverted"
         );
         assert_eq!(
             MleError::ComputationFailed("normal CDF did not converge".to_string()).to_string(),

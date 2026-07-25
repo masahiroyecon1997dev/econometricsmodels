@@ -88,6 +88,10 @@ argminの`CostFunction`/`Gradient`/`Hessian`トレイト実装と、`nonlinear`�
 
 **エラー変換**: `FaerNewton::next_iter`内で`newton_step`が返す`MleError`は、`?`演算子で`argmin::core::Error`（`anyhow::Error`のエイリアス）に自動変換される（thiserrorが`std::error::Error + Send + Sync + 'static`を実装するため、anyhowの`From`実装が効く）。`Executor::run()`が`Err`を返した場合は`e.downcast::<MleError>()`で元の型を復元し、復元できない場合（argmin自体の内部エラー等）は`MleError::ComputationFailed`にまとめる（`convert_optimizer_error`関数）。
 
+**バグ修正（rust-reviewerのレビューで発見・修正済み）**: `FaerNewton::next_iter`の初版実装は、`terminate()`の収束判定に「更新前のパラメータ」での勾配を使っていた（`next_iter`が`problem.gradient(&param)`（更新前）を計算し、`new_param`と一緒に`state`へ格納していたため）。argminの`Executor`は「`next_iter`実行後の`state`」に対して次のループの先頭で`terminate()`を呼ぶため、`terminate()`が見る勾配は返却される`params`（更新後の点）のものではなく1つ前の点のものになり、局所的に曲率（Hessian）が勾配より極端に小さい病的な点でNewtonステップが大きくオーバーシュートすると、「収束した」と誤って報告しつつ実際には勾配が全く小さくない推定値を返してしまうバグがあった。`FaerNewton::init`を新設して初期パラメータでの勾配も`state`に格納し、`next_iter`は`new_param`算出後に`problem.gradient(&new_param)`を改めて評価してから`state`に格納するよう修正した（`terminate()`が常に「返却するparamと対応する勾配」を見られるようにする）。回帰テスト（`faer_newton_terminate_reflects_gradient_at_returned_params_not_previous_params`）を追加済み。
+
+**バグ修正（上記の回帰テスト作成中に発覚）**: `newton_step`の特異性検出（列ピボットQRのR対角成分を相対閾値と比較）は、`diag.abs() <= threshold`という比較を使っていたが、Hessianが全ゼロ行列のとき`col_piv_qr`が列選択時の0除算によりR対角成分に**NaN**を生成することがfaer 0.24.4で実機確認された。NaNとの比較は常に`false`になるため、この比較はNaNをすり抜けてしまい、特異なHessianが検出されないまま`solve_lstsq`に渡っていた。`diag.is_nan() || diag <= threshold`という形に修正した。**OLSの`ensure_full_rank`（`engine/src/linear/ols.rs`）も同じ比較パターンを使っており、理論上同じ弱点を抱えている**（全ゼロ列を含む設計行列等の極端なケース）。今回のスコープ外のため未修正だが、記録として残す。
+
 ### 収束判定の`tol`（Issue #52で実装済み）
 
 - **判定基準**: 勾配ノルム（L2ノルム、`‖∇ℓ(θ)‖ < tol`）。`newton`/`bfgs`/`lbfgs`の3手法すべてで同じ基準を使う（Newtonは独自実装、BFGS/L-BFGSは組み込みの`with_tolerance_grad`）。**最終的な妥当性判断はLogit/Probit実装・テスト段階に持ち越す**: statsmodels/R glmとの数値照合（`test-new`スキル）の結果次第で、閾値を見直す可能性がある

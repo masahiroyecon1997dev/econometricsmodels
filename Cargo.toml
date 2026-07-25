@@ -27,3 +27,11 @@ faer = "=0.24.4"
 # default-features = false でnalgebra/rand機能を無効化し、CDF計算に必要な最小限の依存に絞る。
 # （メンバー側の[dependencies]でdefault-featuresを上書きできないため、ここで指定する）
 statrs = { version = "=0.18.0", default-features = false }
+# argmin: 非線形モデル（Logit/Probit/Tobit）のMLE数値最適化。
+# argmin-mathのfaerバックエンドはfaer 0.23までしか対応しておらず、本プロジェクトのfaerピン
+# （=0.24.4）と噛み合わないため使わない（docs/planning/specs/nonlinear-implementation-notes.md
+# 「argmin-mathのfaerバックエンド不使用」参照）。代わりにargmin-mathの`vec`機能
+# （追加の線形代数クレート不要、`Vec<f64>`/`Vec<Vec<f64>>`への実装のみ）を使う。
+# モデル固有の尤度・勾配・Hessian計算自体は引き続きfaerで行い、argminに値を渡す境界でのみ変換する。
+argmin = "=0.11.0"
+argmin-math = { version = "=0.5.1", default-features = false, features = ["vec"] }

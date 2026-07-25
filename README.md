@@ -48,10 +48,12 @@ print(result.r_squared)
 |---|---|---|---|
 | OLS | classical / HC0-3 / cluster | statsmodels（相対誤差1e-8） | R（`lm` + `sandwich`/`lmtest`、相対誤差1e-8） |
 | OLS | HAC（Newey-West） | statsmodels（相対誤差1e-8） | R（相対誤差1e-2。小標本補正の慣習差のため緩め） |
+| WLS | classical / HC0-3 / cluster | statsmodels（相対誤差1e-8） | R（`lm(weights=)` + `sandwich`/`lmtest`、相対誤差1e-8） |
+| WLS | HAC（Newey-West） | statsmodels（相対誤差1e-8） | R（相対誤差5e-2。小標本補正の慣習差のため緩め） |
 
 ## 実装状況
 
-現在実装済みなのは Phase 1（基礎回帰）のうち **OLS（最小二乗法）のみ** です。区分回帰・WLSを含む他の手法は未着手です。
+現在実装済みなのは Phase 1（基礎回帰）のうち **OLS（最小二乗法）・WLS（加重最小二乗法）** です。区分回帰を含む他の手法は未着手です。
 
 `0.x.x`のプレリリース期間中は、マイナーバージョンの変更でも破壊的変更が入る可能性があります。
 

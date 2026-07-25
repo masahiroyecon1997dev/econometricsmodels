@@ -25,7 +25,33 @@ WLSの実装過程で確認した事項のうち、[`wls-api-design.md`](./wls-a
     `WLS(df, y="nettfa", x=["age", "agesq", "e401k"], weight="inc").fit()`が正常に収束することを
     実バイナリで確認した（欠損値なし、Int64/Float64混在列も`extract_f64_column`のキャストで
     問題なく処理される）。
-  - **未確定（Issue #43で決める）**: 上記の回帰式・重み列の組み合わせは「実データでパイプライン
-    が動くことの確認」用の暫定的な指定であり、statsmodels/Rとのベンチマーク照合に使う最終的な
-    回帰式・重みの定義方法（例えば`inc`をそのまま重みとして使うか、何らかの補助回帰から導出する
-    feasible WLSの重みを使うか）はIssue #43（ベンチマーク作成）で確定する。
+  - **確定（Issue #43）**: ベンチマーク用の最終的な回帰式・重みは、Wooldridge
+    『Introductory Econometrics』Example 8.5・8.6と同じ変数構成
+    `nettfa ~ inc + incsq + age + agesq + male + e401k`（`fsize == 1`の単身世帯サブサンプル、
+    n=2017）とし、重みは`Var(u|inc) ∝ inc`という単純な仮定に基づく`1/inc`（analytic weight）
+    とした。Example 8.6のfeasible GLS（補助回帰の残差から分散を推定する方式）は採用しない
+    — 本実装のWLSは「重み列を渡す」設計であり分散モデルの推定機能自体を持たないため、
+    ベンチマーク用の重みも本実装が実際にサポートする形（既知の重み列）に合わせる必要がある
+    ことによる。`inv_inc`という列名（`inc`列とは別）でCSV/DataFrameに追加し、`weight`が
+    `x`と重複してはいけないという既存のバリデーション（Issue #42で確認済み）と両立させた。
+
+### ベンチマーク作成（Issue #43）
+
+- `benchmark/run_statsmodels_benchmark.py`に`--weight-col`オプションを追加し、指定時は
+  `smf.wls`を使うようにした（OLS/WLSで同じスクリプトを共用、分散共分散行列の計算式自体は
+  共通のため）。
+- `benchmark/run_r_benchmark.R`の`lm`ブランチ（独立実装によるクロスチェック用、Issue #27で
+  確定した役割分担）に重み列指定を追加した。`weight_col`はcov_type固有の引数
+  （`cluster_col`/`hac_lag`）の後ろに置く（classical/HC0-3はarg5、cluster/hacはarg6）。
+  `sandwich`パッケージの`vcovHC`/`vcovCL`/`NeweyWest`は`lm(weights=)`の重み付きモデルに
+  対してそのまま使え、追加の変更は不要だった（重み無しの場合と同じ関数呼び出し）。
+- 生成した`wls.json`（statsmodels主リファレンス）・`wls_crosscheck.json`（Rクロスチェック）を
+  比較した結果、classical/HC0-3/clusterはOLSと同様ほぼ機械精度で一致（相対誤差1e-13〜1e-15
+  程度）。**HACのみOLSより乖離が大きく、実測で最大相対誤差約4.3%**
+  （OLSの実測約0.4%の10倍程度）。原因はOLS側同様、`NeweyWest()`の`prewhite=FALSE`と
+  本実装の重み付きBartlettカーネル計算の小標本補正の慣習差と推測されるが、重み付けにより
+  誤差が増幅されている可能性がある（未調査、実害があれば別issueで深掘りする）。
+  Issue #44のテスト実装時は、**WLSのHAC crosscheck許容誤差は相対誤差5e-2（5%）**を
+  採用する想定（OLSの1e-2ではなく実測値に基づき緩めた値。`testing-policy.md`「同じ
+  クロスチェック用パッケージでも、統計量・cov_typeごとに実測乖離が大きく異なる場合は、
+  許容誤差を分けてよい」に従う）。classical/HC0-3/clusterはOLSと同じく相対誤差1e-8を適用する。

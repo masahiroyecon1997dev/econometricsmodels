@@ -16,6 +16,12 @@
 #   Rscript run_r_benchmark.R data.csv "y ~ x1 + x2 + x3" lm hc3
 #   Rscript run_r_benchmark.R data.csv "y ~ x1 + x2 + x3" lm cluster cluster_col
 #   Rscript run_r_benchmark.R data.csv "y ~ x1 + x2 + x3" lm hac 2   # hac_lag=2
+#
+#   # WLSの標準誤差クロスチェック（lm(weights=) + sandwich/lmtest）。
+#   # weight_colはcov_typeの後、cluster_col/hac_lagがあればさらにその後の引数として渡す
+#   # （classical/hc0-3はarg5、cluster/hacはarg6）。省略時（引数なし or 空文字）はOLSと同じ。
+#   Rscript run_r_benchmark.R data.csv "y ~ x1 + x2 + x3" lm classical weight
+#   Rscript run_r_benchmark.R data.csv "y ~ x1 + x2 + x3" lm cluster cluster_col weight
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 2) {
@@ -59,7 +65,38 @@ if (package == "fixest") {
   library(lmtest)
 
   cov_type <- ifelse(length(args) >= 4, tolower(args[4]), "classical")
-  model <- lm(as.formula(formula_str), data = df)
+
+  # weight_colはcov_type固有の引数（cluster_col/hac_lag）の後ろに置く。
+  # classical/hc0-3はarg5、cluster/hacはarg6（WLSクロスチェック用、fit_wls側の
+  # weight引数に対応。docs/planning/specs/wls-standard-errors.md参照）。
+  weight_col <- NA
+  if (cov_type == "cluster") {
+    if (length(args) < 5) {
+      stop("cluster requires <cluster_col> as arg5")
+    }
+    cluster_col <- args[5]
+    if (length(args) >= 6 && args[6] != "") {
+      weight_col <- args[6]
+    }
+  } else if (cov_type == "hac") {
+    if (length(args) < 5 || is.na(as.integer(args[5]))) {
+      stop("hac requires <hac_lag> (integer) as arg5")
+    }
+    lag <- as.integer(args[5])
+    if (length(args) >= 6 && args[6] != "") {
+      weight_col <- args[6]
+    }
+  } else {
+    if (length(args) >= 5 && args[5] != "") {
+      weight_col <- args[5]
+    }
+  }
+
+  if (!is.na(weight_col)) {
+    model <- lm(as.formula(formula_str), data = df, weights = df[[weight_col]])
+  } else {
+    model <- lm(as.formula(formula_str), data = df)
+  }
   df_inference <- df.residual(model)
 
   if (cov_type == "classical") {
@@ -69,10 +106,6 @@ if (package == "fixest") {
     vc <- vcovHC(model, type = toupper(cov_type))
     ct <- coeftest(model, vcov = vc)
   } else if (cov_type == "cluster") {
-    if (length(args) < 5) {
-      stop("cluster requires <cluster_col> as arg5")
-    }
-    cluster_col <- args[5]
     # cadjust=TRUE: G/(G-1)の小標本補正を適用する（Stata流、本実装のcluster_cov_paramsと同じ方針）
     vc <- vcovCL(model, cluster = df[[cluster_col]], type = "HC1", cadjust = TRUE)
     # 本実装（engine::linear::ols::OlsEstimator::fit）と同じくG-1（クラスター数-1）を
@@ -83,10 +116,6 @@ if (package == "fixest") {
     # 本実装（Newey-West, Bartlettカーネル）と同じlagを明示的に渡し、
     # bwNeweyWest()による自動バンド幅選択（本実装のfloor(4*(n/100)^(2/9))とは
     # 別のアルゴリズム）とは条件を揃えて比較する。
-    if (length(args) < 5 || is.na(as.integer(args[5]))) {
-      stop("hac requires <hac_lag> (integer) as arg5")
-    }
-    lag <- as.integer(args[5])
     vc <- NeweyWest(model, lag = lag, prewhite = FALSE, adjust = TRUE)
     ct <- coeftest(model, vcov = vc)
   } else {

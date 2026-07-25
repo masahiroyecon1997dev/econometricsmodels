@@ -1,6 +1,6 @@
 """OLSの主リファレンス（statsmodels）による数値比較テスト。
 
-`tests/api_tests/fixtures/benchmarks/ols.json`（`benchmark/fixtures/generate_ols_fixtures.py`
+`tests/api_tests/fixtures/benchmarks/ols.json`（`benchmark/linear/fixtures/generate_ols_fixtures.py`
 で生成）を読み込み、6つの合成データシナリオ×classical/HC0-3/HAC + クラスター(baselineのみ)で、
 係数・標準誤差・検定統計量・適合度統計量を相対誤差1e-8で厳密比較する
 （`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。
@@ -11,10 +11,12 @@
     - 独立実装（R）とのクロスチェック: `test_ols_crosscheck.py`
 
 Note:
-    `generate_ols_fixtures.py`と同じ決定論的データ生成（`generate_dataset()`、
-    seed固定）を使ってフィクスチャ生成時と同じデータを再現するため、
-    `benchmark/`をimport pathに追加する（`ols_crosscheck.json`と同じ設計。
-    フィクスチャJSON自体には生データを含めない）。
+    フィクスチャ生成時と同じ入力データを、`tests/api_tests/fixtures/benchmarks/data/`
+    に固定済みのCSV（`benchmark/freeze_datasets.py`参照）から読む。ジェネレータ
+    （`generate_synthetic_datasets.py`）を直接呼ばないことで、ジェネレータ側の
+    コードが将来変わっても既存フィクスチャの期待値と無言で不整合にならない。
+    `imbalanced_cluster_groups`（純粋にnから決定論的にラベルを組み立てるだけで
+    乱数を使わない）のみ、引き続き`generate_synthetic_datasets.py`を直接呼ぶ。
 """
 
 from __future__ import annotations
@@ -27,13 +29,14 @@ import polars as pl
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
-from generate_synthetic_datasets import generate_dataset  # noqa: E402
+from generate_synthetic_datasets import imbalanced_cluster_groups  # noqa: E402
 
 from econometricsmodels import OLS, OLSOptions  # noqa: E402
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "ols.json"
 )
+DATA_DIR = Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"
 
 # testing-policy.md「許容誤差」の基本方針: 相対誤差1e-8。
 # ATOLは0近傍の値（p値のアンダーフロー等）向けの下限フロー。
@@ -110,7 +113,7 @@ def _check_result(res, ref: dict, label: str) -> None:
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_matches_statsmodels(fixtures, scenario, cov_type):
-    df, _ = generate_dataset(scenario)
+    df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     kwargs = {"hac_lags": HAC_LAG_IN_FIXTURE} if cov_type == "hac" else {}
     options = OLSOptions(cov_type=cov_type, **kwargs)
     res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
@@ -123,7 +126,7 @@ def test_cluster_matches_statsmodels(fixtures):
     （行番号%10）を再現する。統計的な意味はなく、実装の動作確認用のため
     `baseline`シナリオのみ（`coef`/`se`のみが記録されている）。
     """
-    df, _ = generate_dataset("baseline")
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = (
         df.with_row_index("_row")
         .with_columns((pl.col("_row") % 10).alias("cluster_group"))
@@ -137,12 +140,72 @@ def test_cluster_matches_statsmodels(fixtures):
     _assert_dict_close(res.std_errors, ref["se"], "cluster/se")
 
 
+def test_cluster_imbalanced_matches_statsmodels(fixtures):
+    """不均衡クラスタ（サイズ[2, 3, 5, 10, 30, 50]のタイル、Issue #100）。
+
+    均等サイズの疑似グループ（行番号%10）だけでは見逃す、実務で起こりやすい
+    グループサイズの偏りを持つケース（`testing-policy.md`「テスト用データセット」3.）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    groups = imbalanced_cluster_groups(df.height)
+    df = df.with_columns(pl.Series("cluster_group", groups))
+    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = fixtures["baseline"]["cluster_imbalanced"]
+    _assert_dict_close(res.params, ref["coef"], "cluster_imbalanced/coef")
+    _assert_dict_close(res.std_errors, ref["se"], "cluster_imbalanced/se")
+
+
+def test_cluster_g2_matches_statsmodels(fixtures):
+    """クラスタ数境界（G=2ちょうど）の成功パス。
+
+    説明変数1個（q=1）に絞っている。baseline既定の3個のままG=2にすると、
+    ロバストWald検定の共分散部分行列（3x3）のランクがG=2以下となり必然的に
+    特異になりComputationErrorになる（成功パスにならない。
+    `test_cluster_g2_with_multiple_slopes_raises_computation_error`参照。
+    Issue #100の実装中に判明した境界条件）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
+    df = (
+        df.with_row_index("_row")
+        .with_columns((pl.col("_row") % 2).alias("cluster_group"))
+        .drop("_row")
+    )
+    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    res = OLS(df, y="y", x=["x1"], options=options).fit()
+
+    ref = fixtures["baseline"]["cluster_g2"]
+    _assert_dict_close(res.params, ref["coef"], "cluster_g2/coef")
+    _assert_dict_close(res.std_errors, ref["se"], "cluster_g2/se")
+
+
+def test_cluster_g2_with_multiple_slopes_raises_computation_error():
+    """G=2×説明変数3個（傾き係数q=3）は、ロバストWald検定の共分散部分行列
+    （3x3）のランクがクラスタ数G=2以下になり必然的に特異になるため、
+    fit()全体がComputationErrorになる（係数・標準誤差自体は計算可能だが、
+    F検定の失敗でfit()全体が失敗する仕様。Issue #100の実装中に判明、
+    数値比較はしない想定）。
+    """
+    from econometricsmodels import ComputationError
+
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    df = (
+        df.with_row_index("_row")
+        .with_columns((pl.col("_row") % 2).alias("cluster_group"))
+        .drop("_row")
+    )
+    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    with pytest.raises(ComputationError):
+        OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+
 def test_perfect_multicollinearity_raises_computation_error():
     """完全な多重共線性は数値比較の対象外（`testing-policy.md`「テストの3系統」）。
     想定エラー（`ComputationError`）が発生することのみを確認する。
     """
     from econometricsmodels import ComputationError
 
-    df, _ = generate_dataset("perfect_multicollinearity")
+    df = pl.read_csv(DATA_DIR / "synthetic_perfect_multicollinearity.csv")
     with pytest.raises(ComputationError):
         OLS(df, y="y", x=["x1", "x2", "x3"]).fit()

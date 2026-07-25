@@ -15,6 +15,7 @@ nav:
   - Getting Started: getting-started.md
   - API Reference:
       - OLS: api/ols.md
+      - WLS: api/wls.md
 
 theme:
   name: material

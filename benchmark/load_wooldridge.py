@@ -20,7 +20,7 @@ import polars as pl
 # 実際に採用するデータセットはモデル実装時に個別に確認する。
 SUGGESTED_DATASETS: dict[str, list[str]] = {
     "ols": ["wage1", "gpa2"],
-    "wls": ["hprice1"],
+    "wls": ["401ksubs"],
     "iv": ["mroz", "card"],
     "probit_logit": ["mroz"],
 }

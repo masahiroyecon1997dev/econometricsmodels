@@ -11,13 +11,14 @@
 //! 公開API（`OLSOptions`/`OLSResult`）のdocコメントと、`ValidationError`のメッセージ文字列は英語。
 //! それ以外（このファイルの説明・非公開関数のdocコメント等）は日本語のまま。
 
-use engine::linear::ols::{CovType as EngineCovType, OlsError, OlsEstimator, OlsInput};
+use engine::linear::ols::{CovType as EngineCovType, OlsEstimator, OlsInput};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
+use super::common::{mat_to_vec, ols_error_to_pyerr};
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
-use crate::errors::{ComputationError, ValidationError};
+use crate::errors::ValidationError;
 
 /// Estimation options for OLS.
 ///
@@ -145,33 +146,6 @@ pub struct OLSResult {
     pub log_likelihood: f64,
     pub aic: f64,
     pub bic: f64,
-}
-
-/// `engine::linear::ols::OlsError`をPython例外に変換する。
-///
-/// `OlsError`（`engine`クレート）と`PyErr`（`pyo3`クレート）はどちらもこのクレートの
-/// 外で定義された型のため、orphan rule（`impl`の対象は自クレート内で定義された
-/// トレイトか型のどちらかを含む必要がある）により`impl From<OlsError> for PyErr`は
-/// 書けない。関数として実装し、呼び出し側で`.map_err(ols_error_to_pyerr)?`する。
-///
-/// 対応表は`docs/planning/specs/ols-implementation-notes.md`「1. エラーハンドリング」参照。
-fn ols_error_to_pyerr(err: OlsError) -> PyErr {
-    match err {
-        OlsError::DimensionMismatch { .. }
-        | OlsError::InsufficientObservations { .. }
-        | OlsError::MissingClusterColumn
-        | OlsError::InvalidConfidenceLevel { .. }
-        | OlsError::InsufficientClusters { .. }
-        | OlsError::InvalidHacLags { .. } => ValidationError::new_err(err.to_string()),
-        OlsError::SingularMatrix | OlsError::ComputationFailed(_) => {
-            ComputationError::new_err(err.to_string())
-        }
-    }
-}
-
-/// `faer::Mat<f64>`（n×1またはk×1の列ベクトル）を`Vec<f64>`に変換する。
-fn mat_to_vec(mat: &faer::Mat<f64>) -> Vec<f64> {
-    (0..mat.nrows()).map(|i| *mat.get(i, 0)).collect()
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `options` を検証し、

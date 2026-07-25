@@ -51,6 +51,27 @@ for row in result.coef_table():
     print(row["param"], row["coef"], row["std_err"], row["p_value"])
 ```
 
+## WLS（加重最小二乗法）
+
+`WLS`は`OLS`に`weight`引数（重み列の列名）を加えたAPIです。重みは分散の逆数に
+比例するanalytic weightとして扱われ、正規化は不要です。0以下の値は
+`ValidationError`になります。
+
+```python
+from econometricsmodels import WLS
+
+df = df.with_columns(pl.Series("w", [1.0, 1.0, 1.0, 1.0, 1.0]))
+
+result = WLS(df, y="y", x=["x1"], weight="w").fit()
+
+print(result.params)
+print(result.std_errors)
+```
+
+推定オプション（`cov_type`等）はOLSと共通の`OLSOptions`をそのまま使います。
+標準誤差の種類の切り替え方は上記「標準誤差の種類を切り替える」を、`weight`
+引数の詳細は [API Reference](api/wls.md) を参照してください。
+
 ## エラーハンドリング
 
 入力・オプションの誤り（列が存在しない、欠損値を含む等）は`ValidationError`（`ValueError`のサブクラス）、計算過程で発覚する問題（設計行列が特異等）は`ComputationError`（`RuntimeError`のサブクラス）を送出します。

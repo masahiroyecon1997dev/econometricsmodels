@@ -29,6 +29,15 @@ pub enum OlsError {
     #[error("dimension mismatch: y has {y_rows} rows but x has {x_rows} rows")]
     DimensionMismatch { y_rows: usize, x_rows: usize },
 
+    /// WLSの重み配列とyの行数が一致しない。
+    #[error("dimension mismatch: y has {y_rows} rows but weight has {weight_rows} rows")]
+    WeightDimensionMismatch { y_rows: usize, weight_rows: usize },
+
+    /// WLSの重みが0以下（NaNを含む）。analytic weightとして扱うため正の値のみ許容する
+    /// （`docs/planning/specs/wls-api-design.md`3.1節参照）。
+    #[error("weight at row {row} must be positive, got {weight}")]
+    NonPositiveWeight { row: usize, weight: f64 },
+
     /// 観測数nが説明変数の数k（定数項を含む）以下。
     #[error(
         "insufficient observations: n={n} must be greater than k={k} \
@@ -137,6 +146,72 @@ impl OlsInput {
         include_intercept: bool,
         dep_var_name: String,
     ) -> Result<Self, OlsError> {
+        Self::from_columns_impl(y, x_columns, x_names, include_intercept, dep_var_name, None)
+    }
+
+    /// `from_columns`のWLS版。各観測の行（自動追加される切片列を含む）を
+    /// `sqrt(weights[i])`倍してから組み立てる。この変換により、`OlsEstimator::fit`
+    /// （無変更）をそのまま適用するとWLSの推定になる
+    /// （`docs/planning/specs/wls-api-design.md`4.1節参照）。`weights`の全要素が1.0のときは
+    /// `from_columns`と数値的に完全に同じ結果になる。
+    ///
+    /// `weights`はanalytic weightとして扱う（`docs/planning/specs/wls-api-design.md`0章）。
+    ///
+    /// # Errors
+    /// - `y`といずれかの`x_columns`の長さが一致しない場合は`OlsError::DimensionMismatch`
+    /// - `weights`の長さが`y`と一致しない場合は`OlsError::WeightDimensionMismatch`
+    /// - `weights`に0以下（NaN含む）の値が含まれる場合は`OlsError::NonPositiveWeight`
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_columns_weighted(
+        y: &[f64],
+        x_columns: &[Vec<f64>],
+        x_names: Vec<String>,
+        include_intercept: bool,
+        dep_var_name: String,
+        weights: &[f64],
+    ) -> Result<Self, OlsError> {
+        if weights.len() != y.len() {
+            return Err(OlsError::WeightDimensionMismatch {
+                y_rows: y.len(),
+                weight_rows: weights.len(),
+            });
+        }
+        for (row, &w) in weights.iter().enumerate() {
+            // `w <= 0.0`だけだとNaNを捕捉できない（NaNとの比較は常にfalse）ため、
+            // `is_nan()`を別途チェックする（clippy::neg_cmp_op_on_partial_ordを避けるため
+            // `!(w > 0.0)`は使わない）。NaN/無限大は`engine_pybind::column_extraction`が
+            // 既に検出している前提だが、`engine`側の防御的チェックとして残す。
+            if w.is_nan() || w <= 0.0 {
+                return Err(OlsError::NonPositiveWeight { row, weight: w });
+            }
+        }
+
+        Self::from_columns_impl(
+            y,
+            x_columns,
+            x_names,
+            include_intercept,
+            dep_var_name,
+            Some(weights),
+        )
+    }
+
+    /// `from_columns`/`from_columns_weighted`共通の組み立てロジック。`weights`が`Some`の場合、
+    /// 設計行列（自動追加される切片列を含む）・yの各行を`sqrt(weights[i])`倍する。`None`の場合は
+    /// 全行`1.0`倍（`sqrt(1.0) = 1.0`）と等価で、`from_columns`はこれまでと完全に同じ結果になる。
+    ///
+    /// **切片列の重み付けについて**: 単純に「`x_columns`を先に重み変換してから、この関数の
+    /// `weights=None`版を呼ぶ」という実装は誤り。それだと自動追加される切片列（すべて1.0）が
+    /// 重み付けされないままになる。重み変換は行列組み立てそのものの中（この関数）で行う必要がある
+    /// （`docs/planning/specs/wls-api-design.md`4.1節参照）。
+    fn from_columns_impl(
+        y: &[f64],
+        x_columns: &[Vec<f64>],
+        x_names: Vec<String>,
+        include_intercept: bool,
+        dep_var_name: String,
+        weights: Option<&[f64]>,
+    ) -> Result<Self, OlsError> {
         debug_assert_eq!(
             x_columns.len(),
             x_names.len(),
@@ -158,14 +233,22 @@ impl OlsInput {
             x_columns.len()
         };
 
+        // 行ごとの`sqrt(weight)`を事前計算する（`Mat::from_fn`のセルごとに`sqrt`を呼び直すより、
+        // 行数分の計算で済む）。`weights=None`（OLS）のときは常に1.0倍で、掛けても値は変わらない
+        // （`raw * 1.0`はIEEE754で丸め誤差なく`raw`と一致する）。
+        let sqrt_weights: Option<Vec<f64>> =
+            weights.map(|w| w.iter().map(|wi| wi.sqrt()).collect());
+        let scale = |i: usize| sqrt_weights.as_ref().map_or(1.0, |sw| sw[i]);
+
         let x = Mat::from_fn(n, k, |i, j| {
-            if include_intercept {
+            let raw = if include_intercept {
                 if j == 0 { 1.0 } else { x_columns[j - 1][i] }
             } else {
                 x_columns[j][i]
-            }
+            };
+            raw * scale(i)
         });
-        let y_mat = Mat::from_fn(n, 1, |i, _| y[i]);
+        let y_mat = Mat::from_fn(n, 1, |i, _| y[i] * scale(i));
 
         let mut param_names = Vec::with_capacity(k);
         if include_intercept {
@@ -737,8 +820,11 @@ fn cluster_cov_params(
     k: usize,
     groups: &[String],
 ) -> Mat<f64> {
-    let mut group_indices: std::collections::HashMap<&str, Vec<usize>> =
-        std::collections::HashMap::new();
+    // `HashMap`は反復順序がプロセスごとのハッシュシードに依存し非決定的なため、`Σ_g S_g S_g'`
+    // の加算順序（延いては浮動小数点丸め誤差）が実行のたびに変わりうる。`BTreeMap`（クラスター
+    // 名の辞書順）を使い、同じ入力に対して常に同じ合計順序・同じ結果になるようにする。
+    let mut group_indices: std::collections::BTreeMap<&str, Vec<usize>> =
+        std::collections::BTreeMap::new();
     for (i, g) in groups.iter().enumerate() {
         group_indices.entry(g.as_str()).or_default().push(i);
     }
@@ -796,9 +882,14 @@ fn ensure_full_rank(qr: &faer::linalg::solvers::ColPivQr<f64>, k: usize) -> Resu
 /// 古典的F検定と代数的に一致することを確認済み）。`df_inference`は通常`n-k`だが、
 /// `cov_type=Cluster`のときは`G-1`になる（呼び出し元の`fit()`を参照）。
 ///
-/// `Σ`の逆行列はCholesky分解（`Llt`）で求める。正定値行列の主小行列は必ず正定値という
-/// 線形代数の定理により理論上`LltError`は発生しないはずだが、`xtx_inverse`と同様、
-/// 浮動小数点演算の丸めによる境界的な失敗に備えて`ComputationFailed`に変換する。
+/// `Σ`の逆行列はCholesky分解（`Llt`）で求める。classical/HC0-3/HACでは`Σ`は
+/// （`cov_params`全体の）正定値行列の主小行列であり理論上必ず正定値のため、`xtx_inverse`と
+/// 同様、浮動小数点演算の丸めによる境界的な失敗に備えて`ComputationFailed`に変換している。
+/// **`CovType::Cluster`は例外**: クラスターロバスト共分散`Ŝ = Σ_g S_g S_g'`はG個の
+/// ランク1行列の和のため`rank(Ŝ) ≤ G`（クラスター数）であり、傾き係数の数`q`がGを超える
+/// と`Σ`は構造的に（丸め誤差ではなく）特異になりうる。この場合の`LltError`は想定内の
+/// 失敗であり、`ComputationFailed`への変換は境界ケース対応ではなく正規の分岐として機能する
+/// （`docs/planning/specs/ols-implementation-notes.md`「クラスター標準誤差」参照）。
 fn wald_f_test(
     params: &Mat<f64>,
     cov_params: &Mat<f64>,
@@ -915,6 +1006,123 @@ mod tests {
     }
 
     #[test]
+    fn from_columns_weighted_with_all_ones_matches_from_columns() {
+        // 重みが全て1のとき、from_columns_weightedはfrom_columnsと数値的に完全一致するはず
+        // （from_columns_impl内の`scale(i) = 1.0`分岐、docs/planning/specs/wls-api-design.md
+        // 4.1節の構造的保証）。
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+        let weights = vec![1.0; 5];
+
+        let weighted = OlsInput::from_columns_weighted(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            &weights,
+        )
+        .unwrap();
+        let plain = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(*weighted.y().get(0, 0), *plain.y().get(0, 0));
+        for i in 0..5 {
+            for j in 0..2 {
+                assert_eq!(*weighted.x().get(i, j), *plain.x().get(i, j));
+            }
+        }
+    }
+
+    #[test]
+    fn from_columns_weighted_scales_intercept_column_too() {
+        // 切片列（すべて1.0）も重み変換の対象であることを確認する回帰テスト
+        // （wls-api-design.md 4.1節「切片列の重み付け」で明記した誤りやすいポイント）。
+        let y = vec![1.0, 2.0];
+        let x_columns = vec![vec![10.0, 20.0]];
+        let weights = vec![4.0, 9.0]; // sqrt(4)=2, sqrt(9)=3
+
+        let input = OlsInput::from_columns_weighted(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            &weights,
+        )
+        .unwrap();
+
+        assert_eq!(*input.x().get(0, 0), 2.0); // 1.0 * sqrt(4)
+        assert_eq!(*input.x().get(1, 0), 3.0); // 1.0 * sqrt(9)
+        assert_eq!(*input.x().get(0, 1), 20.0); // 10.0 * sqrt(4)
+        assert_eq!(*input.x().get(1, 1), 60.0); // 20.0 * sqrt(9)
+        assert_eq!(*input.y().get(0, 0), 2.0); // 1.0 * sqrt(4)
+        assert_eq!(*input.y().get(1, 0), 6.0); // 2.0 * sqrt(9)
+    }
+
+    #[test]
+    fn from_columns_weighted_returns_weight_dimension_mismatch() {
+        let y = vec![1.0, 2.0, 3.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0]];
+        let weights = vec![1.0, 2.0]; // yより短い
+
+        let result = OlsInput::from_columns_weighted(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            &weights,
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            OlsError::WeightDimensionMismatch {
+                y_rows: 3,
+                weight_rows: 2
+            }
+        );
+    }
+
+    #[test]
+    fn from_columns_weighted_rejects_zero_and_negative_and_nan_weights() {
+        let y = vec![1.0, 2.0, 3.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0]];
+
+        for (bad_weight, bad_row) in [(0.0, 0), (-1.0, 1), (f64::NAN, 2)] {
+            let mut weights = vec![1.0, 1.0, 1.0];
+            weights[bad_row] = bad_weight;
+
+            let result = OlsInput::from_columns_weighted(
+                &y,
+                &x_columns,
+                vec!["x1".to_string()],
+                true,
+                "y".to_string(),
+                &weights,
+            );
+
+            match result.unwrap_err() {
+                OlsError::NonPositiveWeight { row, weight } => {
+                    assert_eq!(row, bad_row);
+                    if bad_weight.is_nan() {
+                        assert!(weight.is_nan());
+                    } else {
+                        assert_eq!(weight, bad_weight);
+                    }
+                }
+                other => panic!("expected NonPositiveWeight, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn ols_error_messages_are_human_readable() {
         assert_eq!(
             OlsError::DimensionMismatch {
@@ -923,6 +1131,22 @@ mod tests {
             }
             .to_string(),
             "dimension mismatch: y has 10 rows but x has 8 rows"
+        );
+        assert_eq!(
+            OlsError::WeightDimensionMismatch {
+                y_rows: 10,
+                weight_rows: 8
+            }
+            .to_string(),
+            "dimension mismatch: y has 10 rows but weight has 8 rows"
+        );
+        assert_eq!(
+            OlsError::NonPositiveWeight {
+                row: 3,
+                weight: 0.0
+            }
+            .to_string(),
+            "weight at row 3 must be positive, got 0"
         );
         assert_eq!(
             OlsError::InsufficientObservations { n: 2, k: 3 }.to_string(),
@@ -1589,6 +1813,45 @@ mod tests {
 
         assert!((estimator.f_statistic() - 6.750_000_000_000_083_5).abs() < 1e-6);
         assert!((estimator.f_p_value() - 0.233_908_049_281_92).abs() < 1e-6);
+    }
+
+    /// クラスターロバスト標準誤差は、同じ入力に対して`fit()`を複数回呼んでも
+    /// ビット単位で同じ結果になること（`cluster_cov_params`内部の集約が
+    /// `HashMap`の反復順序に依存し、実行のたびに浮動小数点の丸め誤差レベルで
+    /// 結果がぶれていた回帰。`BTreeMap`化で修正した）。
+    #[test]
+    fn fit_cluster_std_errors_are_deterministic_across_repeated_fits() {
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0, 3.0, 6.0, 1.0, 7.0, 2.5];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]];
+        let groups: Vec<String> = (0..10).map(|i| format!("g{}", i % 4)).collect();
+
+        let build = || {
+            let input = OlsInput::from_columns(
+                &y,
+                &x_columns,
+                vec!["x1".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
+            let cov_type = CovType::Cluster {
+                groups: Some(groups.clone()),
+            };
+            OlsEstimator::fit(input, cov_type, 0.95).unwrap()
+        };
+
+        let first = build();
+        for _ in 0..20 {
+            let repeat = build();
+            assert_eq!(
+                *repeat.std_errors().get(0, 0),
+                *first.std_errors().get(0, 0)
+            );
+            assert_eq!(
+                *repeat.std_errors().get(1, 0),
+                *first.std_errors().get(1, 0)
+            );
+        }
     }
 
     #[test]

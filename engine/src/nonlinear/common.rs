@@ -659,27 +659,34 @@ mod tests {
 
     #[test]
     fn faer_newton_terminate_reflects_gradient_at_returned_params_not_previous_params() {
-        // 開始点[10.0]は|θ|>=1の領域（勾配500、Hessian1.0）から始め、次の点が
-        // どこに着地しても、報告されるconvergedフラグが実際の勾配と矛盾しないことを検証する。
+        // 開始点[0.5]は|θ|<1の領域（勾配1e-8 < tol、ただしHessianは1e-12とさらに小さい）。
+        // 修正前の実装は「更新前のparam」の勾配で収束判定していたため、init()相当の処理が
+        // 無く、この開始点でも1回next_iterを実行してから収束判定していた: 勾配1e-8/Hessian
+        // 1e-12でNewtonステップが[0.5]から遠く離れた点（|θ|>=1の領域、真の勾配500）へ
+        // オーバーシュートし、そこで「更新前(=[0.5])の勾配1e-8」を使って誤ってconverged=true
+        // を返していた（実際に返すparamsの真の勾配は500で全く収束していない）。
+        //
+        // 修正後はinit()が開始点[0.5]の勾配をあらかじめstateに格納するため、最初の
+        // terminate()チェック（next_iter実行前）で正しく収束と判定され、[0.5]から一歩も
+        // 動かずにconverged=trueを返す。
         let output = run_solver(
             IllConditionedProblem,
             Method::Newton,
-            vec![10.0],
+            vec![0.5],
             10,
             1e-6,
             false,
         )
         .unwrap();
 
+        assert!(output.converged, "{:?}", output);
         let actual_grad = IllConditionedProblem.gradient(&output.params).unwrap();
-        if output.converged {
-            assert!(
-                gradient_norm(&actual_grad) < 1e-6,
-                "converged=true was reported but the actual gradient at the returned params {:?} is {:?}",
-                output.params,
-                actual_grad
-            );
-        }
+        assert!(
+            gradient_norm(&actual_grad) < 1e-6,
+            "converged=true was reported but the actual gradient at the returned params {:?} is {:?}",
+            output.params,
+            actual_grad
+        );
     }
 
     #[test]

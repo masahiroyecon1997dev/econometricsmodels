@@ -43,7 +43,10 @@ import polars as pl
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
-from generate_synthetic_datasets import generate_dataset  # noqa: E402
+from generate_synthetic_datasets import (  # noqa: E402
+    generate_dataset,
+    imbalanced_cluster_groups,
+)
 
 from econometricsmodels import OLS, OLSOptions  # noqa: E402
 
@@ -160,6 +163,48 @@ def test_cluster_matches_r(crosscheck):
     _assert_fit_stats_close(res, ref, "cluster/R", rtol=RTOL_STRICT)
 
 
+def test_cluster_imbalanced_matches_r(crosscheck):
+    """不均衡クラスタ（サイズ[2, 3, 5, 10, 30, 50]のタイル、Issue #100）。
+
+    均等サイズの疑似グループ（行番号%10）だけでは見逃す、実務で起こりやすい
+    グループサイズの偏りを持つケース（`testing-policy.md`「テスト用データセット」3.）。
+    """
+    df, _ = generate_dataset("baseline")
+    groups = imbalanced_cluster_groups(df.height)
+    df = df.with_columns(pl.Series("cluster_group", groups))
+    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = crosscheck["synthetic"]["baseline"]["cluster_imbalanced"]["r"]
+    _assert_close(res.params, ref["coef"], "cluster_imbalanced/R coef")
+    _assert_close(res.std_errors, ref["se"], "cluster_imbalanced/R se")
+    _assert_fit_stats_close(res, ref, "cluster_imbalanced/R", rtol=RTOL_STRICT)
+
+
+def test_cluster_g2_matches_r(crosscheck):
+    """クラスタ数境界（G=2ちょうど）の成功パス。
+
+    説明変数1個（q=1）に絞っている。baseline既定の3個のままG=2にすると、
+    ロバストWald検定の共分散部分行列（3x3）のランクがG=2以下となり必然的に
+    特異になりComputationErrorになる（成功パスにならない。
+    `test_ols_fixtures.py::test_cluster_g2_with_multiple_slopes_raises_computation_error`
+    参照。Issue #100の実装中に判明した境界条件）。
+    """
+    df, _ = generate_dataset("baseline", k=1)
+    df = (
+        df.with_row_index("_row")
+        .with_columns((pl.col("_row") % 2).alias("cluster_group"))
+        .drop("_row")
+    )
+    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    res = OLS(df, y="y", x=["x1"], options=options).fit()
+
+    ref = crosscheck["synthetic"]["baseline"]["cluster_g2"]["r"]
+    _assert_close(res.params, ref["coef"], "cluster_g2/R coef")
+    _assert_close(res.std_errors, ref["se"], "cluster_g2/R se")
+    _assert_fit_stats_close(res, ref, "cluster_g2/R", rtol=RTOL_STRICT)
+
+
 def test_hac_matches_r(crosscheck):
     """HAC標準誤差。フィクスチャ生成時に本実装の自動ラグ式で計算した
     ラグ（`hac_lag`）をそのまま使い、ラグ選択方式自体の違いを比較対象から
@@ -211,6 +256,38 @@ def test_wooldridge_matches_r(
 
     ref = crosscheck["wooldridge"][dataset_name][cov_type]["r"]
     label = f"{dataset_name}/{cov_type}/R"
+    _assert_close(res.params, ref["coef"], f"{label} coef")
+    _assert_close(res.std_errors, ref["se"], f"{label} se")
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
+
+
+def test_wooldridge_wage1_region_cluster_matches_r(
+    crosscheck, load_wooldridge
+):
+    """wage1の実カテゴリ列（northcen/south/westダミーから合成したregion、
+    基準カテゴリnortheast、4グループ・不均衡サイズ）でのクラスターロバストSE
+    （Issue #100「実データでのグループ列」）。疑似グループ（行番号%N）ではなく
+    実データに由来するグループ構造での検証。
+    """
+    df = load_wooldridge("wage1")
+    region = (
+        pl.when(pl.col("northcen") == 1)
+        .then(pl.lit("northcen"))
+        .when(pl.col("south") == 1)
+        .then(pl.lit("south"))
+        .when(pl.col("west") == 1)
+        .then(pl.lit("west"))
+        .otherwise(pl.lit("northeast"))
+        .alias("region")
+    )
+    df = df.with_columns(region)
+    options = OLSOptions(cov_type="cluster", cluster_col="region")
+    res = OLS(
+        df, y="lwage", x=["educ", "exper", "tenure"], options=options
+    ).fit()
+
+    ref = crosscheck["wooldridge"]["wage1"]["cluster"]["r"]
+    label = "wage1/cluster(region)/R"
     _assert_close(res.params, ref["coef"], f"{label} coef")
     _assert_close(res.std_errors, ref["se"], f"{label} se")
     _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)

@@ -27,7 +27,10 @@ import polars as pl
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
-from generate_synthetic_datasets import generate_dataset  # noqa: E402
+from generate_synthetic_datasets import (  # noqa: E402
+    generate_dataset,
+    imbalanced_cluster_groups,
+)
 
 from econometricsmodels import OLS, OLSOptions  # noqa: E402
 
@@ -135,6 +138,66 @@ def test_cluster_matches_statsmodels(fixtures):
     ref = fixtures["baseline"]["cluster"]
     _assert_dict_close(res.params, ref["coef"], "cluster/coef")
     _assert_dict_close(res.std_errors, ref["se"], "cluster/se")
+
+
+def test_cluster_imbalanced_matches_statsmodels(fixtures):
+    """不均衡クラスタ（サイズ[2, 3, 5, 10, 30, 50]のタイル、Issue #100）。
+
+    均等サイズの疑似グループ（行番号%10）だけでは見逃す、実務で起こりやすい
+    グループサイズの偏りを持つケース（`testing-policy.md`「テスト用データセット」3.）。
+    """
+    df, _ = generate_dataset("baseline")
+    groups = imbalanced_cluster_groups(df.height)
+    df = df.with_columns(pl.Series("cluster_group", groups))
+    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = fixtures["baseline"]["cluster_imbalanced"]
+    _assert_dict_close(res.params, ref["coef"], "cluster_imbalanced/coef")
+    _assert_dict_close(res.std_errors, ref["se"], "cluster_imbalanced/se")
+
+
+def test_cluster_g2_matches_statsmodels(fixtures):
+    """クラスタ数境界（G=2ちょうど）の成功パス。
+
+    説明変数1個（q=1）に絞っている。baseline既定の3個のままG=2にすると、
+    ロバストWald検定の共分散部分行列（3x3）のランクがG=2以下となり必然的に
+    特異になりComputationErrorになる（成功パスにならない。
+    `test_cluster_g2_with_multiple_slopes_raises_computation_error`参照。
+    Issue #100の実装中に判明した境界条件）。
+    """
+    df, _ = generate_dataset("baseline", k=1)
+    df = (
+        df.with_row_index("_row")
+        .with_columns((pl.col("_row") % 2).alias("cluster_group"))
+        .drop("_row")
+    )
+    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    res = OLS(df, y="y", x=["x1"], options=options).fit()
+
+    ref = fixtures["baseline"]["cluster_g2"]
+    _assert_dict_close(res.params, ref["coef"], "cluster_g2/coef")
+    _assert_dict_close(res.std_errors, ref["se"], "cluster_g2/se")
+
+
+def test_cluster_g2_with_multiple_slopes_raises_computation_error():
+    """G=2×説明変数3個（傾き係数q=3）は、ロバストWald検定の共分散部分行列
+    （3x3）のランクがクラスタ数G=2以下になり必然的に特異になるため、
+    fit()全体がComputationErrorになる（係数・標準誤差自体は計算可能だが、
+    F検定の失敗でfit()全体が失敗する仕様。Issue #100の実装中に判明、
+    数値比較はしない想定）。
+    """
+    from econometricsmodels import ComputationError
+
+    df, _ = generate_dataset("baseline")
+    df = (
+        df.with_row_index("_row")
+        .with_columns((pl.col("_row") % 2).alias("cluster_group"))
+        .drop("_row")
+    )
+    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    with pytest.raises(ComputationError):
+        OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
 
 def test_perfect_multicollinearity_raises_computation_error():

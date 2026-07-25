@@ -45,9 +45,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import polars as pl  # noqa: E402
 import statsmodels  # noqa: E402
 
-from generate_synthetic_datasets import generate_dataset  # noqa: E402
+from generate_synthetic_datasets import (  # noqa: E402
+    generate_dataset,
+    imbalanced_cluster_groups,
+)
 from load_wooldridge import load as load_wooldridge  # noqa: E402
 
 BENCHMARK_DIR = Path(__file__).resolve().parent.parent
@@ -147,22 +151,54 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             fixtures[scenario]["cluster"] = _run_cluster_case(
                 df, csv_path, formula
             )
+            fixtures[scenario]["cluster_imbalanced"] = _run_cluster_case(
+                df,
+                csv_path,
+                formula,
+                groups=imbalanced_cluster_groups(n),
+                suffix="_cluster_imbalanced",
+            )
+            # G=2×説明変数3個（既定のbaseline）はロバストWald検定の共分散
+            # 部分行列（3x3）のランクがG=2以下になり必然的に特異になり
+            # ComputationErrorになる（成功パスではない。テスト側でエラー
+            # パスとして確認、Rクロスチェックは対象外）。ここでの「G=2境界の
+            # 成功パス」は説明変数1個（q=1）に絞ったデータで確認する。
+            df_g2, _ = generate_dataset(scenario, k=1)
+            formula_g2 = "y ~ x1"
+            csv_path_g2 = _write_csv(df_g2, tmpdir, f"{scenario}_g2")
+            fixtures[scenario]["cluster_g2"] = _run_cluster_case(
+                df_g2,
+                csv_path_g2,
+                formula_g2,
+                groups=[str(i % 2) for i in range(df_g2.height)],
+                suffix="_cluster_g2",
+            )
 
     return fixtures
 
 
-def _run_cluster_case(df, csv_path: Path, formula: str) -> dict:
-    """クラスターロバストSEのcrosscheck。generate_ols_fixtures.pyと同じ疑似グループ
-    （行番号%10）を使う。統計的な意味はなく、実装の動作確認用。
+def _run_cluster_case(
+    df,
+    csv_path: Path,
+    formula: str,
+    groups: list | None = None,
+    suffix: str = "_cluster",
+) -> dict:
+    """クラスターロバストSEのcrosscheck。
+
+    Args:
+        df: 疑似グループを付与する対象データ。
+        csv_path: 元データのCSVパス（グループ付きCSVの命名に使う）。
+        formula: 回帰式。
+        groups: 各行のグループラベル。Noneなら既定（行番号%10、10均等グループ）。
+        suffix: 一時CSVファイル名に付けるsuffix（呼び出しごとに衝突しないように）。
     """
-    grouped = (
-        df.with_row_index("_row")
-        .with_columns(
-            (df.with_row_index("_row")["_row"] % 10).alias("cluster_group")
-        )
-        .drop("_row")
+    n = df.height
+    cluster_group = (
+        groups if groups is not None else [i % 10 for i in range(n)]
     )
-    tmp_path = csv_path.with_name(csv_path.stem + "_cluster.csv")
+    grouped = df.with_columns(pl.Series("cluster_group", cluster_group))
+    tmp_path = csv_path.with_name(csv_path.stem + suffix + ".csv")
     grouped.write_csv(tmp_path)
     return {
         "r": _run_r(tmp_path, formula, "cluster", cluster_col="cluster_group")
@@ -190,7 +226,33 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
             fixtures[name][cov_type] = {
                 "r": _run_r(csv_path, formula, cov_type)
             }
+
+        if name == "wage1":
+            fixtures[name]["cluster"] = _run_wage1_region_cluster_case(
+                df, csv_path, formula
+            )
     return fixtures
+
+
+def _run_wage1_region_cluster_case(df, csv_path: Path, formula: str) -> dict:
+    """wage1の地域ダミー（northcen/south/west）から実カテゴリ列regionを作り、
+    クラスターロバストSEをRクロスチェックする（Issue #100「実データでのグループ列」）。
+    いずれのダミーも0の行を基準カテゴリ"northeast"とする（4グループ、不均衡サイズ）。
+    """
+    region = (
+        pl.when(pl.col("northcen") == 1)
+        .then(pl.lit("northcen"))
+        .when(pl.col("south") == 1)
+        .then(pl.lit("south"))
+        .when(pl.col("west") == 1)
+        .then(pl.lit("west"))
+        .otherwise(pl.lit("northeast"))
+        .alias("region")
+    )
+    grouped = df.with_columns(region)
+    tmp_path = csv_path.with_name(csv_path.stem + "_region_cluster.csv")
+    grouped.write_csv(tmp_path)
+    return {"r": _run_r(tmp_path, formula, "cluster", cluster_col="region")}
 
 
 def build_fixtures() -> dict:
@@ -224,7 +286,10 @@ def build_fixtures() -> dict:
             "perfect_multicollinearityシナリオはここに含まない"
             "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
             "HACはR側のみ（explicit lagを本実装の自動ラグ式に合わせて指定）。"
-            "clusterはbaselineシナリオのみ、疑似グループ（行番号%10）でR側のみ確認。"
+            "clusterはbaselineシナリオのみ、R側のみ確認。均等疑似グループ（行番号%10）"
+            "に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2"
+            "（cluster_g2）、wage1の実カテゴリ列region（northcen/south/west"
+            "ダミーから合成、基準カテゴリnortheast）を含む（Issue #100）。"
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
             "pyfixestとの比較は正確性検証から除外（性能比較専用）。"
         ),

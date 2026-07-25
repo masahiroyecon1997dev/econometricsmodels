@@ -879,9 +879,14 @@ fn ensure_full_rank(qr: &faer::linalg::solvers::ColPivQr<f64>, k: usize) -> Resu
 /// 古典的F検定と代数的に一致することを確認済み）。`df_inference`は通常`n-k`だが、
 /// `cov_type=Cluster`のときは`G-1`になる（呼び出し元の`fit()`を参照）。
 ///
-/// `Σ`の逆行列はCholesky分解（`Llt`）で求める。正定値行列の主小行列は必ず正定値という
-/// 線形代数の定理により理論上`LltError`は発生しないはずだが、`xtx_inverse`と同様、
-/// 浮動小数点演算の丸めによる境界的な失敗に備えて`ComputationFailed`に変換する。
+/// `Σ`の逆行列はCholesky分解（`Llt`）で求める。classical/HC0-3/HACでは`Σ`は
+/// （`cov_params`全体の）正定値行列の主小行列であり理論上必ず正定値のため、`xtx_inverse`と
+/// 同様、浮動小数点演算の丸めによる境界的な失敗に備えて`ComputationFailed`に変換している。
+/// **`CovType::Cluster`は例外**: クラスターロバスト共分散`Ŝ = Σ_g S_g S_g'`はG個の
+/// ランク1行列の和のため`rank(Ŝ) ≤ G`（クラスター数）であり、傾き係数の数`q`がGを超える
+/// と`Σ`は構造的に（丸め誤差ではなく）特異になりうる。この場合の`LltError`は想定内の
+/// 失敗であり、`ComputationFailed`への変換は境界ケース対応ではなく正規の分岐として機能する
+/// （`docs/planning/specs/ols-implementation-notes.md`「クラスター標準誤差」参照）。
 fn wald_f_test(
     params: &Mat<f64>,
     cov_params: &Mat<f64>,

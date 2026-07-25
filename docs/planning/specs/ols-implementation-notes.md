@@ -74,6 +74,7 @@ OLSのAPI・オプション設計（[`ols-api-design.md`](./ols-api-design.md) /
 - クラスター数`G`の検証（`validate_cluster_groups`関数）: `G < 2`なら`OlsError::InsufficientClusters`。`groups.len() != n`は`engine_pybind`側の実装バグでしか起こらない内部契約として`debug_assert_eq!`で検証。
 - **小標本補正（`G/(G-1) * (n-1)/(n-k)`）は常に適用し、無効化するオプションは設けない**（`OLSOptions`に対応するフィールドを追加しない）。statsmodelsのソース（`statsmodels.stats.sandwich_covariance.cov_cluster`）を確認し、`use_correction=True`がデフォルトで`ols-standard-errors.md`5章の式と完全に一致することを確認済み。
 - **自由度の切り替え**: statsmodelsは`cov_type="cluster"`のとき、デフォルト（`df_correction=True`）でt検定・信頼区間・F検定の自由度を`n-k`ではなく**`G-1`（クラスター数-1）に切り替える**（計量経済学の標準的な慣行、Cameron-Miller等）。標準誤差自体の値は変わらないが、p値・信頼区間・F検定のp値が大きく変わる（クラスター数が小さいとき特に顕著）。本実装も`cov_type=Cluster`のときのみ自由度を`G-1`に切り替える（他のcov_typeは引き続き`n-k`）。`fit()`内で`(cov_params, df_inference)`のタプルを`cov_type`ごとのmatchから返す設計にしている。`df_resid`自体（`σ̂²`・調整済みR²・AIC/BIC等で使う）は影響を受けず、常に`n-k`のまま。
+- **G≤qの境界（Issue #100で判明）**: クラスターロバスト共分散`Ŝ = Σ_g S_g S_g'`はG個のランク1行列（外積）の和のため、`rank(Ŝ) ≤ G`。`wald_f_test`（4章）が使う傾き係数の部分行列（`q × q`、`q`は傾き係数の数）はG < qのとき理論的に特異になりうる（浮動小数点丸めの話ではなく構造的な特異性）。係数・標準誤差自体は`Ŝ`全体の対角成分から計算されるため問題なく求まるが、F検定の共分散部分行列の逆行列計算（Cholesky分解）が失敗し`fit()`全体が`OlsError::ComputationFailed`になる。「G=2ちょうどの成功パス」を検証する場合は、q（傾き係数の数）をG以下に保つ必要がある（`tests/api_tests/test_ols_fixtures.py::test_cluster_g2_matches_statsmodels`はq=1で検証、`test_cluster_g2_with_multiple_slopes_raises_computation_error`はq=3でComputationErrorになることを確認）。
 
 ### 信頼区間
 

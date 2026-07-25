@@ -19,7 +19,7 @@ allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
 
 ## `benchmark/` ディレクトリの構成（動作確認済み）
 
-`engine`/`engine_pybind`と同じ系統（family）単位でディレクトリを分けている（`linear`=OLS/WLS/GLS、`panel`=FE/RE、`iv`=IV、`discrete_choice`等は未着手）。系統をまたいで使う汎用ツールのみ`benchmark/`直下に置く。
+`engine`/`engine_pybind`と同じ系統（family）単位でディレクトリを分けている（`linear`=OLS/WLS/GLS、`panel`=FE/RE、`iv`=IV、`nonlinear`=Logit/Probit/Tobit等は未着手）。系統をまたいで使う汎用ツールのみ`benchmark/`直下に置く。
 
 - `benchmark/generate_synthetic_datasets.py`（系統非依存、root）: 合成データセット生成。`SCENARIOS`に7種類のバリエーション（baseline, small_n, high_variance, heteroskedastic, autocorrelated, moderate_multicollinearity, perfect_multicollinearity）を実装済み。
 - `benchmark/load_wooldridge.py`（系統非依存、root）: Wooldridgeデータセットをpolars DataFrameとして読み込む（`pip install wooldridge`が必要）。

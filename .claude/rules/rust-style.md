@@ -14,7 +14,7 @@ paths:
 
 - **系統（統計的に近い手法のグループ）＝ディレクトリ**。命名衝突を避け、「この手法はどこにあるか」を一意にする。
   - `linear/`: OLS, WLS, GLS, 区分回帰
-  - `discrete_choice/`: Logit, Probit, Tobit
+  - `nonlinear/`: Logit, Probit, Tobit（MLEベースの非線形モデル。被説明変数が連続なTobitも含むため「discrete_choice」ではなく推定方式で命名）
   - `iv/`: 2SLS, GMM
   - `panel/`: FE, RE
   - `causal/`: DID, RDD

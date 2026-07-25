@@ -4,3 +4,4 @@
 //! （例: `ols`, `fe`, ...）。
 
 pub mod linear;
+pub mod nonlinear;

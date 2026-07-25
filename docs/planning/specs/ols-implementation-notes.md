@@ -69,7 +69,8 @@ OLSのAPI・オプション設計（[`ols-api-design.md`](./ols-api-design.md) /
 ### クラスター標準誤差
 
 - `CovType::Cluster { groups: Option<Vec<String>> }`。`groups`が`None`なら`fit()`が`OlsError::MissingClusterColumn`を返す（`CovType::Hac`の`lags: Option<i64>`と同じ設計パターン）。
-- `cluster_col`で指定する列は`i64`固定にしない。州名・企業ID等、実務では文字列/カテゴリカルなクラスター変数の方が多いため、内部では`Vec<String>`として扱う（`HashMap<&str, Vec<usize>>`でグループ化）。
+- `cluster_col`で指定する列は`i64`固定にしない。州名・企業ID等、実務では文字列/カテゴリカルなクラスター変数の方が多いため、内部では`Vec<String>`として扱う（`BTreeMap<&str, Vec<usize>>`でグループ化）。
+- **グループ化に`HashMap`ではなく`BTreeMap`を使う（WLS Issue #44の統合PRでCI発覚、非決定性バグの修正）**: `cluster_cov_params`は`Ŝ = Σ_g S_g S_g'`をグループ順に加算するが、`HashMap`は反復順序がプロセスごとのランダムなハッシュシードに依存し非決定的（同一プロセス内でも`HashMap::new()`のたびに異なるキーを使うため、同じ入力に対する`fit()`の2回の呼び出し同士でも順序が変わりうる）。浮動小数点加算は結合則が成り立たないため、順序が変わると最終的な標準誤差が1 ULP程度ぶれる。`test_wls.py::test_weight_one_matches_ols[cluster]`（`OLS(...).fit()`と`WLS(...).fit()`という独立な2回の`fit()`呼び出しの結果をexact `==`で比較するテスト）がCI（Python 3.13/3.14ジョブ、3.12では非再現）で断続的に失敗し発覚した。`BTreeMap`（クラスター名の辞書順）に変更し、`fit_cluster_std_errors_are_deterministic_across_repeated_fits`（同一入力で`fit()`を21回呼びビット単位で一致することを検証）で固定した。
 - `cluster_cov_params`関数: `Ŝ = Σ_g S_g S_g'`（`S_g = Σ_{i∈g} ε̂_i x_i`、クラスター内の観測を先に合計してから外積を取ることでクラスター内相関を許容する）。
 - クラスター数`G`の検証（`validate_cluster_groups`関数）: `G < 2`なら`OlsError::InsufficientClusters`。`groups.len() != n`は`engine_pybind`側の実装バグでしか起こらない内部契約として`debug_assert_eq!`で検証。
 - **小標本補正（`G/(G-1) * (n-1)/(n-k)`）は常に適用し、無効化するオプションは設けない**（`OLSOptions`に対応するフィールドを追加しない）。statsmodelsのソース（`statsmodels.stats.sandwich_covariance.cov_cluster`）を確認し、`use_correction=True`がデフォルトで`ols-standard-errors.md`5章の式と完全に一致することを確認済み。

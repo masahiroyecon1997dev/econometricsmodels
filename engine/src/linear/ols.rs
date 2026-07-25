@@ -820,8 +820,11 @@ fn cluster_cov_params(
     k: usize,
     groups: &[String],
 ) -> Mat<f64> {
-    let mut group_indices: std::collections::HashMap<&str, Vec<usize>> =
-        std::collections::HashMap::new();
+    // `HashMap`は反復順序がプロセスごとのハッシュシードに依存し非決定的なため、`Σ_g S_g S_g'`
+    // の加算順序（延いては浮動小数点丸め誤差）が実行のたびに変わりうる。`BTreeMap`（クラスター
+    // 名の辞書順）を使い、同じ入力に対して常に同じ合計順序・同じ結果になるようにする。
+    let mut group_indices: std::collections::BTreeMap<&str, Vec<usize>> =
+        std::collections::BTreeMap::new();
     for (i, g) in groups.iter().enumerate() {
         group_indices.entry(g.as_str()).or_default().push(i);
     }
@@ -1810,6 +1813,45 @@ mod tests {
 
         assert!((estimator.f_statistic() - 6.750_000_000_000_083_5).abs() < 1e-6);
         assert!((estimator.f_p_value() - 0.233_908_049_281_92).abs() < 1e-6);
+    }
+
+    /// クラスターロバスト標準誤差は、同じ入力に対して`fit()`を複数回呼んでも
+    /// ビット単位で同じ結果になること（`cluster_cov_params`内部の集約が
+    /// `HashMap`の反復順序に依存し、実行のたびに浮動小数点の丸め誤差レベルで
+    /// 結果がぶれていた回帰。`BTreeMap`化で修正した）。
+    #[test]
+    fn fit_cluster_std_errors_are_deterministic_across_repeated_fits() {
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0, 3.0, 6.0, 1.0, 7.0, 2.5];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]];
+        let groups: Vec<String> = (0..10).map(|i| format!("g{}", i % 4)).collect();
+
+        let build = || {
+            let input = OlsInput::from_columns(
+                &y,
+                &x_columns,
+                vec!["x1".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
+            let cov_type = CovType::Cluster {
+                groups: Some(groups.clone()),
+            };
+            OlsEstimator::fit(input, cov_type, 0.95).unwrap()
+        };
+
+        let first = build();
+        for _ in 0..20 {
+            let repeat = build();
+            assert_eq!(
+                *repeat.std_errors().get(0, 0),
+                *first.std_errors().get(0, 0)
+            );
+            assert_eq!(
+                *repeat.std_errors().get(1, 0),
+                *first.std_errors().get(1, 0)
+            );
+        }
     }
 
     #[test]

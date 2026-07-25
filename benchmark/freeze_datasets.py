@@ -42,11 +42,21 @@ SYNTHETIC_SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "perfect_multicollinearity",
+    "scale_variance",
+    "high_condition_number",
 ]
 
 # cluster_g2ケース（Issue #100）専用。k=1だとrng呼び出し順序が変わるため
 # baseline（既定k=3）とは別データになる。
 SYNTHETIC_K1_SCENARIOS = ["baseline"]
+
+# n=k+1（自由度1ちょうど）の成功パス確認専用（Issue #101）。SCENARIOSには
+# 追加せず、cluster_g2ケースと同様にbaselineをn=k+1でオーバーライドした
+# 専用データとして固定する。kはbaseline既定と揃え（generate_dataset()の
+# k=3、つまりx1..x3）。engine側の`k`は定数項を含む設計行列の列数
+# （= generate_dataset()のk + 1 = 4）のため、df_resid=1ちょうどにするには
+# n = 4 + 1 = 5 が必要（n = generate_dataset()のk + 2）。
+SYNTHETIC_BOUNDARY_DF1_SCENARIOS = ["baseline"]
 
 
 def freeze(output_dir: Path) -> None:
@@ -62,6 +72,11 @@ def freeze(output_dir: Path) -> None:
         df, true_beta = generate_dataset(scenario, k=1)
         df.write_csv(output_dir / f"synthetic_{scenario}_k1.csv")
         true_betas[f"{scenario}_k1"] = true_beta.tolist()
+
+    for scenario in SYNTHETIC_BOUNDARY_DF1_SCENARIOS:
+        df, true_beta = generate_dataset(scenario, n=5, k=3)
+        df.write_csv(output_dir / f"synthetic_{scenario}_df1.csv")
+        true_betas[f"{scenario}_df1"] = true_beta.tolist()
 
     (output_dir / "synthetic_true_beta.json").write_text(
         json.dumps(true_betas, indent=2)

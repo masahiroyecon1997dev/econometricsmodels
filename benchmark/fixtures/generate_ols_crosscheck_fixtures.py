@@ -17,6 +17,14 @@ pyfixestのHC2/HC3はfixestの仕様ではなく**pyfixest自身の実装バグ*
 classical/HC0-3/clusterはRとほぼ機械精度で一致するため厳密比較、HACのみ小標本補正の
 慣習差により緩い許容誤差で比較する（`tests/api_tests/test_ols_crosscheck.py`参照）。
 
+係数・標準誤差に加え、AIC/BIC/対数尤度・F統計量・F検定p値もRクロスチェック対象に含める
+（`testing-policy.md`「リファレンス実装」章の方針。全統計量を独立実装でもクロスチェックする）。
+AIC/BICはRの`AIC()`/`BIC()`標準関数（残差分散を1パラメータとして追加でカウントするk+1慣習）
+ではなく、`run_r_benchmark.R`側で本実装・statsmodelsと同じ式（`-2*loglik + 2*k`等、kは
+回帰係数の数のみ）で手計算した値を使う（実測でRの標準関数はAICがちょうど2、BICがlog(n)だけ
+系統的にずれることを確認済み）。F統計量・F検定p値は本実装の`wald_f_test`と同じロバストWald検定
+（`β_slopes' Σ⁻¹ β_slopes / q`）をcov_typeごとの共分散行列で計算しており、cov_typeに依存する。
+
 このスクリプト自体は`benchmark/`側に置く。生成される`ols_crosscheck.json`は
 `tests/api_tests/fixtures/`に置く（`testing-policy.md`「ベンチマーク値のフィクスチャ化」参照）。
 
@@ -96,10 +104,16 @@ def _normalize_names(raw: dict) -> dict:
     def fix(name: str) -> str:
         return "const" if name in ("(Intercept)", "Intercept") else name
 
-    return {
+    result = {
         "coef": {fix(k): v for k, v in raw["coef"].items()},
         "se": {fix(k): v for k, v in raw["se"].items()},
     }
+    # aic/bic/log_likelihood/f_statistic/f_p_valueはrun_r_benchmark.Rの
+    # lmブランチのみが返す（fixest/plm/ivreg分岐は対象外）。
+    for key in ("aic", "bic", "log_likelihood", "f_statistic", "f_p_value"):
+        if key in raw:
+            result[key] = raw[key]
+    return result
 
 
 def _write_csv(df, tmpdir: Path, name: str) -> Path:
@@ -198,7 +212,8 @@ def build_fixtures() -> dict:
         "method": "ols",
         "purpose": (
             "statsmodels主リファレンス（ols.json）とは独立した実装（R: lm + "
-            "sandwich/lmtest）によるクロスチェック用。classical/HC0-3/cluster"
+            "sandwich/lmtest）によるクロスチェック用。係数・標準誤差・AIC・"
+            "BIC・対数尤度・F統計量・F検定p値を含む。classical/HC0-3/cluster"
             "は厳密比較、HACのみ緩い許容誤差での比較を想定する"
             "（testing-policy.md参照）"
         ),

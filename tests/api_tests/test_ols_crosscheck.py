@@ -18,6 +18,13 @@ classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相�
 `RTOL_HAC`（緩め）を使う。詳細は`docs/planning/specs/ols-implementation-notes.md`
 「8. テスト」参照。
 
+係数・標準誤差に加え、AIC・BIC・対数尤度・F統計量・F検定p値も検証する
+（`testing-policy.md`「リファレンス実装」章の方針。全統計量を独立実装でも
+クロスチェックする）。AIC・BIC・対数尤度はcov_typeに依存しないためHACでも
+機械精度で一致するが、F統計量・F検定p値は本実装の`wald_f_test`と同じ
+ロバストWald検定（cov_typeごとの共分散行列を使う）のため、HACのみ標準誤差と
+同じ小標本補正の慣習差が乗る（実測で相対誤差0.8%程度、`RTOL_HAC`の範囲内）。
+
 Note:
     合成データセットは`benchmark/generate_synthetic_datasets.py`の
     `generate_dataset()`（seed固定・決定論的）で、フィクスチャ生成時と
@@ -78,6 +85,37 @@ def _assert_close(
         )
 
 
+def _assert_scalar_close(
+    our_val: float, ref_val: float, label: str, rtol: float = RTOL_STRICT
+) -> None:
+    diff = abs(our_val - ref_val)
+    tol = rtol * max(abs(ref_val), 1e-8)
+    assert diff <= tol, (
+        f"[{label}] ours={our_val:.6f}, reference={ref_val:.6f}, "
+        f"diff={diff:.6f} > tol={tol:.6f}"
+    )
+
+
+def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
+    """AIC・BIC・対数尤度・F統計量・F検定p値の検証。
+
+    AIC/BIC/対数尤度はcov_typeに依存しないため常にRTOL_STRICTで比較する。
+    F統計量・F検定p値はcov_typeごとのロバストWald検定のため呼び出し元の
+    rtol（HACのみRTOL_HAC）を使う。
+    """
+    _assert_scalar_close(res.aic, ref["aic"], f"{label}/aic")
+    _assert_scalar_close(res.bic, ref["bic"], f"{label}/bic")
+    _assert_scalar_close(
+        res.log_likelihood, ref["log_likelihood"], f"{label}/log_likelihood"
+    )
+    _assert_scalar_close(
+        res.f_statistic, ref["f_statistic"], f"{label}/f_statistic", rtol=rtol
+    )
+    _assert_scalar_close(
+        res.f_p_value, ref["f_p_value"], f"{label}/f_p_value", rtol=rtol
+    )
+
+
 SYNTHETIC_SCENARIOS = [
     "baseline",
     "small_n",
@@ -97,8 +135,10 @@ def test_synthetic_matches_r(crosscheck, scenario, cov_type):
     res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
     ref = crosscheck["synthetic"][scenario][cov_type]["r"]
-    _assert_close(res.params, ref["coef"], f"{scenario}/{cov_type}/R coef")
-    _assert_close(res.std_errors, ref["se"], f"{scenario}/{cov_type}/R se")
+    label = f"{scenario}/{cov_type}/R"
+    _assert_close(res.params, ref["coef"], f"{label} coef")
+    _assert_close(res.std_errors, ref["se"], f"{label} se")
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
 
 
 def test_cluster_matches_r(crosscheck):
@@ -117,6 +157,7 @@ def test_cluster_matches_r(crosscheck):
     ref = crosscheck["synthetic"]["baseline"]["cluster"]["r"]
     _assert_close(res.params, ref["coef"], "cluster/R coef")
     _assert_close(res.std_errors, ref["se"], "cluster/R se")
+    _assert_fit_stats_close(res, ref, "cluster/R", rtol=RTOL_STRICT)
 
 
 def test_hac_matches_r(crosscheck):
@@ -130,10 +171,12 @@ def test_hac_matches_r(crosscheck):
     res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
     ref = entry["r"]
-    # 係数（coef）はcov_typeに依存しない通常のOLS推定値のため厳密比較のまま。
-    # HACで乖離しうるのは標準誤差（se）のみ。
+    # 係数（coef）・AIC・BIC・対数尤度はcov_typeに依存しない通常のOLS推定値の
+    # ため厳密比較のまま。HACで乖離しうるのは標準誤差（se）とF統計量・F検定p値
+    # （cov_typeごとのロバストWald検定のため、標準誤差と同じ慣習差が乗る）。
     _assert_close(res.params, ref["coef"], "hac/R coef")
     _assert_close(res.std_errors, ref["se"], "hac/R se", rtol=RTOL_HAC)
+    _assert_fit_stats_close(res, ref, "hac/R", rtol=RTOL_HAC)
 
 
 WOOLDRIDGE_DATASETS = {
@@ -167,5 +210,7 @@ def test_wooldridge_matches_r(
     res = OLS(df, y=y, x=x, options=options).fit()
 
     ref = crosscheck["wooldridge"][dataset_name][cov_type]["r"]
-    _assert_close(res.params, ref["coef"], f"{dataset_name}/{cov_type}/R coef")
-    _assert_close(res.std_errors, ref["se"], f"{dataset_name}/{cov_type}/R se")
+    label = f"{dataset_name}/{cov_type}/R"
+    _assert_close(res.params, ref["coef"], f"{label} coef")
+    _assert_close(res.std_errors, ref["se"], f"{label} se")
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)

@@ -60,9 +60,11 @@ if (package == "fixest") {
 
   cov_type <- ifelse(length(args) >= 4, tolower(args[4]), "classical")
   model <- lm(as.formula(formula_str), data = df)
+  df_inference <- df.residual(model)
 
   if (cov_type == "classical") {
-    ct <- coeftest(model)
+    vc <- vcov(model)
+    ct <- coeftest(model, vcov = vc)
   } else if (cov_type %in% c("hc0", "hc1", "hc2", "hc3")) {
     vc <- vcovHC(model, type = toupper(cov_type))
     ct <- coeftest(model, vcov = vc)
@@ -73,7 +75,10 @@ if (package == "fixest") {
     cluster_col <- args[5]
     # cadjust=TRUE: G/(G-1)の小標本補正を適用する（Stata流、本実装のcluster_cov_paramsと同じ方針）
     vc <- vcovCL(model, cluster = df[[cluster_col]], type = "HC1", cadjust = TRUE)
-    ct <- coeftest(model, vcov = vc, df = length(unique(df[[cluster_col]])) - 1)
+    # 本実装（engine::linear::ols::OlsEstimator::fit）と同じくG-1（クラスター数-1）を
+    # F検定の自由度に使う（AIC/BIC/対数尤度等はdf_residualのまま変えない、本実装と同じ方針）。
+    df_inference <- length(unique(df[[cluster_col]])) - 1
+    ct <- coeftest(model, vcov = vc, df = df_inference)
   } else if (cov_type == "hac") {
     # 本実装（Newey-West, Bartlettカーネル）と同じlagを明示的に渡し、
     # bwNeweyWest()による自動バンド幅選択（本実装のfloor(4*(n/100)^(2/9))とは
@@ -92,6 +97,29 @@ if (package == "fixest") {
   ses <- ct[, 2]
   names(coefs) <- rownames(ct)
   names(ses) <- rownames(ct)
+
+  # AIC/BIC/対数尤度はcov_typeに依存しない（残差・SSRのみに基づく）。
+  # R標準のAIC()/BIC()（stats:::AIC.lm）は使わない。推定された残差分散σ²を
+  # 追加の1パラメータとして数える慣習（k+1）のため、本実装・statsmodels
+  # （回帰係数の数kのみを使う。ols.jsonのstatsmodels値と厳密一致確認済み）
+  # とはAICがちょうど2、BICがlog(n)だけ系統的にずれる（実測確認済み）。
+  # ここではloglik/n/kから本実装と同じ式で手計算し、Rの慣習差を比較対象から除外する。
+  n_obs <- nrow(df)
+  k_params <- length(coef(model))
+  loglik_val <- as.numeric(logLik(model))
+  aic_val <- -2 * loglik_val + 2 * k_params
+  bic_val <- -2 * loglik_val + log(n_obs) * k_params
+
+  # F統計量・F検定p値はcov_typeに依存する（本実装のwald_f_testと同じロバストWald検定、
+  # `F = (β_slopes' Σ⁻¹ β_slopes) / q`。上で計算したvc・df_inferenceをそのまま使う）。
+  coef_names <- names(coef(model))
+  slope_idx <- which(coef_names != "(Intercept)")
+  beta_slopes <- coef(model)[slope_idx]
+  df_model <- length(slope_idx)
+  v_slopes <- vc[slope_idx, slope_idx, drop = FALSE]
+  wald <- as.numeric(t(beta_slopes) %*% solve(v_slopes) %*% beta_slopes)
+  f_statistic_val <- wald / df_model
+  f_p_value_val <- 1 - pf(f_statistic_val, df_model, df_inference)
 } else {
   stop(paste("unknown package:", package))
 }
@@ -101,4 +129,11 @@ result <- list(
   coef = as.list(coefs),
   se = as.list(ses)
 )
+if (package == "lm") {
+  result$aic <- aic_val
+  result$bic <- bic_val
+  result$log_likelihood <- loglik_val
+  result$f_statistic <- f_statistic_val
+  result$f_p_value <- f_p_value_val
+}
 cat(toJSON(result, auto_unbox = TRUE, digits = NA))

@@ -8,7 +8,7 @@
 
 ### エラー型: nonlinear系統で共有（`MleError`）
 
-- `engine/src/nonlinear/common.rs`に**Logit/Probit/Tobit共有のエラー型**（仮称`MleError`）を1つ定義し、3手法の`fit()`がこれを使う。OLSの「1手法1エラー型（`OlsError`）」パターンをそのまま横展開せず、共有型にする
+- `engine/src/nonlinear/common.rs`に**Logit/Probit/Tobit共有のエラー型**（仮称`MleError`）を1つ定義し、3手法の`fit()`がこれを使う。OLSの「1手法1エラー型（`LeastSquaresError`、当時は`OlsError`という名前だったが後にIssue #112で改名）」パターンをそのまま横展開せず、共有型にする
 - 理由: `raise_on_non_convergence`未収束・観測数不足・`confidence_level`範囲外等、3手法でほぼ共通のバリアントが多く、手法ごとに別エラー型にすると同じ意味のバリアントが3箇所に重複する。`.claude/rules/rust-style.md`「系統内で共有するロジックは`<系統>/common.rs`に置く」という既存ルールに合致する
 - Tobit固有のバリアント（打ち切り境界の検証等）は、別のenumに分離せず**同じ`MleError`にバリアントとして追加する**（Logit/Probitの`fit()`はそのバリアントを構築しないだけで、型を分ける必要はない。OLSの`CovType::Hac`/`CovType::Cluster`がフィールド付きバリアントとして共存しているのと同じ考え方）
 
@@ -123,7 +123,7 @@ argminの`CostFunction`/`Gradient`/`Hessian`トレイト実装と、`nonlinear`�
 
 `engine/src/nonlinear/logit.rs`に`LogitInput::from_columns`を実装した。`OlsInput::from_columns`（`weights=None`パス）と1:1で対応する設計（次元検証・切片列自動追加・`param_names`構築のロジックが同一）。weights/offsetはPhase2で見送り済みのため`from_columns_weighted`に相当するものはない。
 
-`MleError`に`DimensionMismatch { y_rows, x_rows }`（OLSの`OlsError::DimensionMismatch`と同型）を追加した。Issue #51時点のバリアント一覧には含まれていなかった（OLSには元々あったが、当時の設計メモへの転記漏れ）。Logit以降Probit/Tobitでも同じ形で使う。
+`MleError`に`DimensionMismatch { y_rows, x_rows }`（OLSの`LeastSquaresError::DimensionMismatch`と同型）を追加した。Issue #51時点のバリアント一覧には含まれていなかった（OLSには元々あったが、当時の設計メモへの転記漏れ）。Logit以降Probit/Tobitでも同じ形で使う。
 
 **`y`の値域検証（単位区間`[0,1]`）は次Issue（B2、尤度・スコア・Hessian実装）に持ち越し**: statsmodelsの`Logit`はコンストラクタ時点で`endog`が単位区間`[0,1]`に収まることを検証する（範囲外は`ValueError: endog must be in the unit interval.`）。Issue #54は次元検証のみがスコープのため`LogitInput::from_columns`では実装していないが、B2で同等の検証を追加する（rust-reviewerの指摘: 当初「statsmodelsも検証していない」という誤った理由でスコープ外としていたdocコメントを訂正済み）。
 

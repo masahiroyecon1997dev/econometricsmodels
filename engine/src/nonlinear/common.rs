@@ -1,6 +1,6 @@
 //! nonlinear系統（Logit/Probit/Tobit）で共有するエラー型。
 //!
-//! OLSは1手法1エラー型（`OlsError`）だったが、nonlinear系統は`raise_on_non_convergence`
+//! OLSは1手法1エラー型（`LeastSquaresError`、旧`OlsError`）だったが、nonlinear系統は`raise_on_non_convergence`
 //! 未収束・観測数不足・`confidence_level`範囲外等、3手法でほぼ共通のバリアントが多いため、
 //! `<系統>/common.rs`に共有型として定義する（`.claude/rules/rust-style.md`「ファイル・
 //! ディレクトリ構成」参照）。Tobit専用のバリアント（`InvalidCensoringBounds`）も、別のenumに
@@ -28,7 +28,7 @@ use thiserror::Error;
 /// （`.claude/rules/rust-style.md`「エラーハンドリング」参照）。
 #[derive(Debug, Error, PartialEq)]
 pub enum MleError {
-    /// yとxの行数が一致しない（OLSの`OlsError::DimensionMismatch`と同型）。
+    /// yとxの行数が一致しない（OLSの`LeastSquaresError::DimensionMismatch`と同型）。
     #[error("dimension mismatch: y has {y_rows} rows but x has {x_rows} rows")]
     DimensionMismatch { y_rows: usize, x_rows: usize },
 

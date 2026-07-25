@@ -16,7 +16,7 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
-use super::common::{mat_to_vec, ols_error_to_pyerr};
+use super::common::{least_squares_error_to_pyerr, mat_to_vec};
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
 use crate::errors::ValidationError;
 
@@ -160,8 +160,8 @@ pub struct OLSResult {
 ///   先に、分かりやすいメッセージで弾く）
 /// - `cov_type`の文字列が不正な場合は`ValidationError`
 /// - それ以外（観測数不足・信頼水準の範囲外・特異行列・クラスター数不足・
-///   `hac_lags`の範囲外・クラスターキー未指定等）は`engine::linear::ols::OlsError`から
-///   `ols_error_to_pyerr`で変換
+///   `hac_lags`の範囲外・クラスターキー未指定等）は`engine::linear::common::LeastSquaresError`から
+///   `least_squares_error_to_pyerr`で変換
 pub fn fit(
     data: PyDataFrame,
     y: String,
@@ -276,9 +276,9 @@ pub fn fit(
     };
 
     let input = OlsInput::from_columns(&y_slice, &x_slices, x, options.include_intercept, y)
-        .map_err(ols_error_to_pyerr)?;
-    let estimator =
-        OlsEstimator::fit(input, cov_type, options.confidence_level).map_err(ols_error_to_pyerr)?;
+        .map_err(least_squares_error_to_pyerr)?;
+    let estimator = OlsEstimator::fit(input, cov_type, options.confidence_level)
+        .map_err(least_squares_error_to_pyerr)?;
 
     Ok(OLSResult {
         params: mat_to_vec(estimator.params()),

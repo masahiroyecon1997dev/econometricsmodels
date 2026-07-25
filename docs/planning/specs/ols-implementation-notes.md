@@ -4,9 +4,11 @@ OLSのAPI・オプション設計（[`ols-api-design.md`](./ols-api-design.md) /
 
 ## 1. エラーハンドリング
 
-`engine::linear::ols::OlsError`のバリアントとPython例外の対応（`ValidationError` / `ComputationError`の2階層、`.claude/rules/rust-style.md`「エラーハンドリング」参照）:
+`engine::linear::common::LeastSquaresError`のバリアントとPython例外の対応（`ValidationError` / `ComputationError`の2階層、`.claude/rules/rust-style.md`「エラーハンドリング」参照）:
 
-| `OlsError`のバリアント | Python例外 |
+**改名の経緯（Issue #112）**: 元々`OlsError`という名前で`engine/src/linear/ols.rs`にOLS単体のエラー型として定義していたが、WLSが`WeightDimensionMismatch`/`NonPositiveWeight`バリアントを追加する形で同じ型をそのまま再利用しており（4.2節）、「OLS単体のエラー型」という名前と実態が食い違っていた。実態（OLS/WLS/将来のGLS・区分回帰で共有する最小二乗法系エラー型）に合わせて`engine/src/linear/common.rs`に切り出し、`LeastSquaresError`に改名した（nonlinear系統の`MleError`と同じ、系統名ではなく推定方式名で命名する方針）。
+
+| `LeastSquaresError`のバリアント | Python例外 |
 |---|---|
 | `DimensionMismatch` | `ValidationError` |
 | `InsufficientObservations` | `ValidationError` |
@@ -18,7 +20,7 @@ OLSのAPI・オプション設計（[`ols-api-design.md`](./ols-api-design.md) /
 | `ComputationFailed`（分布計算等の失敗） | `ComputationError` |
 
 - **`InsufficientClusters { g: usize }`はクラスター数`g < 2`を`OlsEstimator::fit`の入口で検証する**。検証しないと0除算からのNaN伝播でパニックする（`correction`計算の`n_groups - 1`が0除算になるため）。
-- **`InvalidTimeColumn`（`time_col`のf64キャスト失敗）は`OlsError`に含めない**。`engine`は`&[f64]`等クリーンな値のみを受け取る前提（モジュール冒頭のdocコメント参照）で、キャスト失敗の検出は`engine_pybind::column_extraction`側の責務。同じ理由で、欠損値（null）検出も`engine`のエラー型には含めない。
+- **`InvalidTimeColumn`（`time_col`のf64キャスト失敗）は`LeastSquaresError`に含めない**。`engine`は`&[f64]`等クリーンな値のみを受け取る前提（モジュール冒頭のdocコメント参照）で、キャスト失敗の検出は`engine_pybind::column_extraction`側の責務。同じ理由で、欠損値（null）検出も`engine`のエラー型には含めない。
 - **`OlsInput::from_columns`は`x_names.len() != x_columns.len()`を`debug_assert!`のままにする**（`Result`化しない）。これは`engine_pybind`側の実装バグでしか起こり得ない内部契約であり、実データに起因する`DimensionMismatch`（こちらは`Result`で返す）とは性質が異なるため区別している。ただし`engine_pybind::fit`は常に同一のpolars DataFrameから列を抽出するため、`DimensionMismatch`自体もPython API境界からは実質到達不能の可能性が高い（テストレビューで確認、8章参照）。
 
 ### `engine_pybind`受け口レベルの追加バリデーション
@@ -61,21 +63,21 @@ OLSのAPI・オプション設計（[`ols-api-design.md`](./ols-api-design.md) /
 - `CovType::Hac { lags: Option<i64>, time_order: Option<Vec<f64>> }`をフィールド付きバリアントとして持つ。他のバリアント（`Classical`/`Hc0`〜`Hc3`）と違い、HACだけがラグ数・時間順序という追加パラメータを持つため。`OlsEstimator::fit`のシグネチャに`hac_lags`/`time_order`を常に生える引数として追加すると、HAC以外の`cov_type`では常に無意味な引数になってしまうため、`CovType`自身にデータを持たせる設計にしている。`Vec<f64>`を持つため`Copy`は付与できず`Clone`のみ。
 - `(X'X)⁻¹Ŝ(X'X)⁻¹`の対角成分の平方根として計算する（`hac_cov_params`関数）。`Ŝ = Ŝ₀ + Σ_{l=1}^{L} w_l(Ŝ_l + Ŝ_l')`（Bartlett重み`w_l = 1 - l/(L+1)`）。残差でスケールした行列`Xe`（`Xe[t,a] = ε̂_t・x_t[a]`、時系列順）を使い、`Ŝ₀ = Xe'Xe`、`Ŝ_l = Xe[l:,:]'Xe[:n-l,:]`という`faer`の行列積で計算する（`Ŝ_l'`は転置を取るだけで再計算不要）。
   - ラグごとの行列積は`faer::linalg::matmul::matmul`を`Par::Seq`明示指定で呼ぶ。**理由**: 1回あたりの行列積は`k×k`という小さい出力サイズのため、faer既定の並列実行（グローバルスレッドプールへのディスパッチ）のオーバーヘッドが計算本体を上回り、素朴に行列積へ置き換えるだけだと手書きループより遅くなることを実測した（n=10,000, k=2で0.13倍＝約6倍の悪化）。`Par::Seq`をこの関数内だけにスコープを切ることで、他のcov_type計算・将来手法のグローバル並列化設定に影響を与えずにこの罠を回避している。書き換え後はk=2〜20の全域で3〜22倍高速化した（エンドツーエンド計測とマイクロベンチマークで倍率が異なる。詳細は11章「パフォーマンス」参照）。
-- ラグ数の解決（`resolve_hac_lags`）: `Some(l)`なら`0 <= l < n`を検証（`OlsError::InvalidHacLags`）。`None`なら経験則`L = floor(4*(n/100)^(2/9))`で自動計算（`ols-standard-errors.md`3.2節）。
+- ラグ数の解決（`resolve_hac_lags`）: `Some(l)`なら`0 <= l < n`を検証（`LeastSquaresError::InvalidHacLags`）。`None`なら経験則`L = floor(4*(n/100)^(2/9))`で自動計算（`ols-standard-errors.md`3.2節）。
 - 時間順序の解決（`time_ordering`）: `time_order`（`OlsInput`の行と対応する長さnの配列）が`Some`なら昇順ソートした行インデックス列を返し、`None`なら恒等順序（`OlsInput`の行順をそのまま時系列順とみなす）。実際の`X`/残差の並べ替え自体は`hac_cov_params`内でこのインデックス列を使って行う（`OlsInput`自体は並べ替えない。理由: `OlsInput`は`fit`の全`cov_type`で共有されるため、ここで恒久的に行を並べ替えるとPython側に返す残差配列の行と元のDataFrameの行の対応が崩れてしまう）。
 - `partial_cmp().unwrap()`（時間順のソート）は、NaN/無限大が含まれないことが`engine_pybind`側の列抽出（`column_extraction::extract_f64_column`）で既に保証されている前提でパニックしない。
 - statsmodelsとの数値照合は`sm.OLS(...).fit(cov_type="HAC", cov_kwds={"maxlags": L}, use_t=True)`。`use_correction`は明示していない（既定の`False`＝小標本補正なしで、本実装の式と一致することを確認済み）。
 
 ### クラスター標準誤差
 
-- `CovType::Cluster { groups: Option<Vec<String>> }`。`groups`が`None`なら`fit()`が`OlsError::MissingClusterColumn`を返す（`CovType::Hac`の`lags: Option<i64>`と同じ設計パターン）。
+- `CovType::Cluster { groups: Option<Vec<String>> }`。`groups`が`None`なら`fit()`が`LeastSquaresError::MissingClusterColumn`を返す（`CovType::Hac`の`lags: Option<i64>`と同じ設計パターン）。
 - `cluster_col`で指定する列は`i64`固定にしない。州名・企業ID等、実務では文字列/カテゴリカルなクラスター変数の方が多いため、内部では`Vec<String>`として扱う（`BTreeMap<&str, Vec<usize>>`でグループ化）。
 - **グループ化に`HashMap`ではなく`BTreeMap`を使う（WLS Issue #44の統合PRでCI発覚、非決定性バグの修正）**: `cluster_cov_params`は`Ŝ = Σ_g S_g S_g'`をグループ順に加算するが、`HashMap`は反復順序がプロセスごとのランダムなハッシュシードに依存し非決定的（同一プロセス内でも`HashMap::new()`のたびに異なるキーを使うため、同じ入力に対する`fit()`の2回の呼び出し同士でも順序が変わりうる）。浮動小数点加算は結合則が成り立たないため、順序が変わると最終的な標準誤差が1 ULP程度ぶれる。`test_wls.py::test_weight_one_matches_ols[cluster]`（`OLS(...).fit()`と`WLS(...).fit()`という独立な2回の`fit()`呼び出しの結果をexact `==`で比較するテスト）がCI（Python 3.13/3.14ジョブ、3.12では非再現）で断続的に失敗し発覚した。`BTreeMap`（クラスター名の辞書順）に変更し、`fit_cluster_std_errors_are_deterministic_across_repeated_fits`（同一入力で`fit()`を21回呼びビット単位で一致することを検証）で固定した。
 - `cluster_cov_params`関数: `Ŝ = Σ_g S_g S_g'`（`S_g = Σ_{i∈g} ε̂_i x_i`、クラスター内の観測を先に合計してから外積を取ることでクラスター内相関を許容する）。
-- クラスター数`G`の検証（`validate_cluster_groups`関数）: `G < 2`なら`OlsError::InsufficientClusters`。`groups.len() != n`は`engine_pybind`側の実装バグでしか起こらない内部契約として`debug_assert_eq!`で検証。
+- クラスター数`G`の検証（`validate_cluster_groups`関数）: `G < 2`なら`LeastSquaresError::InsufficientClusters`。`groups.len() != n`は`engine_pybind`側の実装バグでしか起こらない内部契約として`debug_assert_eq!`で検証。
 - **小標本補正（`G/(G-1) * (n-1)/(n-k)`）は常に適用し、無効化するオプションは設けない**（`OLSOptions`に対応するフィールドを追加しない）。statsmodelsのソース（`statsmodels.stats.sandwich_covariance.cov_cluster`）を確認し、`use_correction=True`がデフォルトで`ols-standard-errors.md`5章の式と完全に一致することを確認済み。
 - **自由度の切り替え**: statsmodelsは`cov_type="cluster"`のとき、デフォルト（`df_correction=True`）でt検定・信頼区間・F検定の自由度を`n-k`ではなく**`G-1`（クラスター数-1）に切り替える**（計量経済学の標準的な慣行、Cameron-Miller等）。標準誤差自体の値は変わらないが、p値・信頼区間・F検定のp値が大きく変わる（クラスター数が小さいとき特に顕著）。本実装も`cov_type=Cluster`のときのみ自由度を`G-1`に切り替える（他のcov_typeは引き続き`n-k`）。`fit()`内で`(cov_params, df_inference)`のタプルを`cov_type`ごとのmatchから返す設計にしている。`df_resid`自体（`σ̂²`・調整済みR²・AIC/BIC等で使う）は影響を受けず、常に`n-k`のまま。
-- **G≤qの境界（Issue #100で判明）**: クラスターロバスト共分散`Ŝ = Σ_g S_g S_g'`はG個のランク1行列（外積）の和のため、`rank(Ŝ) ≤ G`。`wald_f_test`（4章）が使う傾き係数の部分行列（`q × q`、`q`は傾き係数の数）はG < qのとき理論的に特異になりうる（浮動小数点丸めの話ではなく構造的な特異性）。係数・標準誤差自体は`Ŝ`全体の対角成分から計算されるため問題なく求まるが、F検定の共分散部分行列でこの特異性が検出され`fit()`全体が`OlsError::ComputationFailed`になる。「G=2ちょうどの成功パス」を検証する場合は、q（傾き係数の数）をG以下に保つ必要がある（`tests/api_tests/test_ols_fixtures.py::test_cluster_g2_matches_statsmodels`はq=1で検証、`test_cluster_g2_with_multiple_slopes_raises_computation_error`はq=3でComputationErrorになることを確認）。
+- **G≤qの境界（Issue #100で判明）**: クラスターロバスト共分散`Ŝ = Σ_g S_g S_g'`はG個のランク1行列（外積）の和のため、`rank(Ŝ) ≤ G`。`wald_f_test`（4章）が使う傾き係数の部分行列（`q × q`、`q`は傾き係数の数）はG < qのとき理論的に特異になりうる（浮動小数点丸めの話ではなく構造的な特異性）。係数・標準誤差自体は`Ŝ`全体の対角成分から計算されるため問題なく求まるが、F検定の共分散部分行列でこの特異性が検出され`fit()`全体が`LeastSquaresError::ComputationFailed`になる。「G=2ちょうどの成功パス」を検証する場合は、q（傾き係数の数）をG以下に保つ必要がある（`tests/api_tests/test_ols_fixtures.py::test_cluster_g2_matches_statsmodels`はq=1で検証、`test_cluster_g2_with_multiple_slopes_raises_computation_error`はq=3でComputationErrorになることを確認）。
   - **検出経路（Issue #107で変化）**: 当初はCholesky分解（`Llt`）自体の失敗として検出されていたが、Issue #107で`ensure_well_conditioned_cov_submatrix`（固有値分解による事前チェック、下記「F統計量」参照）を`Llt`分解の前に追加したため、現在はG<qの構造的特異性もこちらで先に検出される（`test_cluster_g2_with_multiple_slopes_raises_computation_error`のエラーメッセージが"failed to invert..."から"...is near-singular..."に変わったことで実際に確認済み）。`fit()`全体が`ComputationFailed`になるという外部から見える挙動・受け入れ条件は変わらない。
 
 ### 信頼区間
@@ -137,7 +139,7 @@ OLSのAPI・オプション設計（[`ols-api-design.md`](./ols-api-design.md) /
 ### engine呼び出し・エラー変換
 
 - `OLSResult`（`#[pyclass(get_all, skip_from_py_object)]`）: `params`/`std_errors`/`t_stats`/`p_values`/`conf_lower`/`conf_upper`/`param_names`/`residuals`/`dep_var_name`/`nobs`/`cov_type`（実際に使われた種別を小文字文字列でecho）/`r_squared`/`r_squared_adj`/`f_statistic`/`f_p_value`/`log_likelihood`/`aic`/`bic`を公開。`conf_int`は`conf_lower`/`conf_upper`の2配列に分割している（engineの内部表現・実装の簡潔さを優先）。`skip_from_py_object`なのは、`OLSResult`がRust側で組み立ててPythonに返すだけの型で、Python側から構築されることを想定しないため（`OLSOptions`の`from_py_object`とは対照的）。
-- `engine::linear::ols::OlsError` → `PyErr`の変換は、`impl From<OlsError> for PyErr`ではなく関数`fn ols_error_to_pyerr(err: OlsError) -> PyErr`として実装する。`OlsError`（`engine`クレート）・`PyErr`（`pyo3`クレート）のどちらもこのクレート外で定義された型のため、`impl From`はorphan ruleに抵触する。呼び出し側で`.map_err(ols_error_to_pyerr)?`する。
+- `engine::linear::common::LeastSquaresError` → `PyErr`の変換は、`impl From<LeastSquaresError> for PyErr`ではなく関数`fn least_squares_error_to_pyerr(err: LeastSquaresError) -> PyErr`として実装する。`LeastSquaresError`（`engine`クレート）・`PyErr`（`pyo3`クレート）のどちらもこのクレート外で定義された型のため、`impl From`はorphan ruleに抵触する。呼び出し側で`.map_err(least_squares_error_to_pyerr)?`する。
 - `cov_type`固有の追加列（`cluster_col`/`time_col`）の抽出は、該当する`cov_type`のときのみ行う（`cov_type != "hac"`のとき`time_col`は無視、`cov_type != "cluster"`のとき`cluster_col`は無視）。誤って無関係な列を要求してエラーになることを避ける。
 
 ## 7. python_package実装

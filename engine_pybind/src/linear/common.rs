@@ -1,36 +1,38 @@
 //! `linear`系統（OLS/WLS等）で共有するユーティリティ。
 //!
 //! `.claude/rules/rust-style.md`「ファイル・ディレクトリ構成」: 系統内で共有するロジックは
-//! `<系統>/common.rs`に置く。以前はOLSしかなく未作成だったが、WLSが`OlsError`のエラー変換・
-//! `Mat<f64>`→`Vec<f64>`変換の両方をOLSと共有する形で実装されたため作成した
+//! `<系統>/common.rs`に置く。以前はOLSしかなく未作成だったが、WLSが`LeastSquaresError`の
+//! エラー変換・`Mat<f64>`→`Vec<f64>`変換の両方をOLSと共有する形で実装されたため作成した
 //! （`docs/planning/specs/wls-api-design.md`4.2節）。
+//!
+//! `LeastSquaresError`は元々`OlsError`という名前だったが、OLS単体のエラー型ではなくWLSも
+//! 含む`linear`系統共通のエラー型であることを名前に反映するため、`engine`側で
+//! `engine::linear::common::LeastSquaresError`に改名・移動した（Issue #112）。
 
-use engine::linear::ols::OlsError;
+use engine::linear::common::LeastSquaresError;
 use pyo3::PyErr;
 
 use crate::errors::{ComputationError, ValidationError};
 
-/// `engine::linear::ols::OlsError`をPython例外に変換する。
+/// `engine::linear::common::LeastSquaresError`をPython例外に変換する。
 ///
-/// `OlsError`（`engine`クレート）と`PyErr`（`pyo3`クレート）はどちらもこのクレートの
+/// `LeastSquaresError`（`engine`クレート）と`PyErr`（`pyo3`クレート）はどちらもこのクレートの
 /// 外で定義された型のため、orphan rule（`impl`の対象は自クレート内で定義された
-/// トレイトか型のどちらかを含む必要がある）により`impl From<OlsError> for PyErr`は
-/// 書けない。関数として実装し、呼び出し側で`.map_err(ols_error_to_pyerr)?`する。
+/// トレイトか型のどちらかを含む必要がある）により`impl From<LeastSquaresError> for PyErr`は
+/// 書けない。関数として実装し、呼び出し側で`.map_err(least_squares_error_to_pyerr)?`する。
 ///
-/// `OlsError`という名前だが、WLSも含む`linear`系統共通のエラー型として扱う
-/// （`docs/planning/specs/wls-api-design.md`4.2節）。対応表は
-/// `docs/planning/specs/ols-implementation-notes.md`「1. エラーハンドリング」参照。
-pub(crate) fn ols_error_to_pyerr(err: OlsError) -> PyErr {
+/// 対応表は`docs/planning/specs/ols-implementation-notes.md`「1. エラーハンドリング」参照。
+pub(crate) fn least_squares_error_to_pyerr(err: LeastSquaresError) -> PyErr {
     match err {
-        OlsError::DimensionMismatch { .. }
-        | OlsError::WeightDimensionMismatch { .. }
-        | OlsError::NonPositiveWeight { .. }
-        | OlsError::InsufficientObservations { .. }
-        | OlsError::MissingClusterColumn
-        | OlsError::InvalidConfidenceLevel { .. }
-        | OlsError::InsufficientClusters { .. }
-        | OlsError::InvalidHacLags { .. } => ValidationError::new_err(err.to_string()),
-        OlsError::SingularMatrix | OlsError::ComputationFailed(_) => {
+        LeastSquaresError::DimensionMismatch { .. }
+        | LeastSquaresError::WeightDimensionMismatch { .. }
+        | LeastSquaresError::NonPositiveWeight { .. }
+        | LeastSquaresError::InsufficientObservations { .. }
+        | LeastSquaresError::MissingClusterColumn
+        | LeastSquaresError::InvalidConfidenceLevel { .. }
+        | LeastSquaresError::InsufficientClusters { .. }
+        | LeastSquaresError::InvalidHacLags { .. } => ValidationError::new_err(err.to_string()),
+        LeastSquaresError::SingularMatrix | LeastSquaresError::ComputationFailed(_) => {
             ComputationError::new_err(err.to_string())
         }
     }

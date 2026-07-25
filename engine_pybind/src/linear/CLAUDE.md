@@ -20,11 +20,11 @@
 - `include_intercept=true`のとき`x`に`"const"`という列名がある場合（自動追加する定数項名と衝突）
 - `x`が空リストの場合
 
-`confidence_level`の範囲チェック・`cov_type="cluster"`なのに`cluster_col`未指定、といった`engine`側が既に検知する項目は`engine_pybind`側で重複チェックしない（`OlsError`/`WlsError`のバリアント一覧は`ols-implementation-notes.md`1章の対応表を参照）。
+`confidence_level`の範囲チェック・`cov_type="cluster"`なのに`cluster_col`未指定、といった`engine`側が既に検知する項目は`engine_pybind`側で重複チェックしない（`LeastSquaresError`のバリアント一覧は`ols-implementation-notes.md`1章の対応表を参照）。
 
 ## エラー変換
 
-`OlsError` → `PyErr`は`impl From`ではなく`fn ols_error_to_pyerr(err: OlsError) -> PyErr`という関数として実装する（`OlsError`・`PyErr`ともにこのクレート外定義の型でorphan ruleに抵触するため）。呼び出し側で`.map_err(ols_error_to_pyerr)?`する。WLSも同型のパターンを踏襲する。
+`engine::linear::common::LeastSquaresError`（OLS/WLS共通のエラー型。元々`OlsError`という名前だったがWLSも含む実態に合わせてIssue #112で改名・`linear/common.rs`に移動）→ `PyErr`は`impl From`ではなく`fn least_squares_error_to_pyerr(err: LeastSquaresError) -> PyErr`という関数として実装する（`LeastSquaresError`・`PyErr`ともにこのクレート外定義の型でorphan ruleに抵触するため）。呼び出し側で`.map_err(least_squares_error_to_pyerr)?`する。WLSも同型のパターンを踏襲する。
 
 ## `cov_type`固有の追加列
 

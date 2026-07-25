@@ -3,9 +3,9 @@
 //!
 //! `weight`は`y`と同じく`data`内の列名を指すトップレベル引数として扱う（`WLSOptions`という
 //! 専用のOptions型は新設せず`OLSOptions`をそのまま再利用する。
-//! `docs/planning/specs/wls-api-design.md`1〜3章参照）。エラー変換（`ols_error_to_pyerr`）・
+//! `docs/planning/specs/wls-api-design.md`1〜3章参照）。エラー変換（`least_squares_error_to_pyerr`）・
 //! `Mat<f64>`→`Vec<f64>`変換（`mat_to_vec`）は`super::common`のものをそのまま再利用する
-//! （`OlsError`がOLS・WLS共通のエラー型のため。`.claude/rules/rust-style.md`
+//! （`LeastSquaresError`がOLS・WLS共通のエラー型のため。`.claude/rules/rust-style.md`
 //! 「系統内で共有するロジックはcommon.rsに置く」）。
 
 use engine::linear::ols::CovType as EngineCovType;
@@ -14,7 +14,7 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
-use super::common::{mat_to_vec, ols_error_to_pyerr};
+use super::common::{least_squares_error_to_pyerr, mat_to_vec};
 use super::ols::OLSOptions;
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
 use crate::errors::ValidationError;
@@ -63,7 +63,7 @@ pub struct WLSResult {
 /// - `cov_type`の文字列が不正な場合は`ValidationError`
 /// - それ以外（観測数不足・信頼水準の範囲外・特異行列・クラスター数不足・
 ///   `hac_lags`の範囲外・クラスターキー未指定・重みの次元不一致・非正の重み等）は
-///   `engine::linear::ols::OlsError`から`ols_error_to_pyerr`で変換
+///   `engine::linear::common::LeastSquaresError`から`least_squares_error_to_pyerr`で変換
 pub fn fit(
     data: PyDataFrame,
     y: String,
@@ -133,7 +133,7 @@ pub fn fit(
 
     // ── weight列の抽出 ─────────────────────────────────────────────────
     // NaN/無限大・欠損値の検証はextract_f64_columnがy/xと同じ経路で行う。0以下の値
-    // （analytic weightとして不正）の検証はengine側（OlsError::NonPositiveWeight）に
+    // （analytic weightとして不正）の検証はengine側（LeastSquaresError::NonPositiveWeight）に
     // 委ねる（`docs/planning/specs/wls-api-design.md`4.2節参照。y/xの行数不一致チェックと
     // 同様、ここでも行数チェックだけは事前に行う）。
     let weight_slice = extract_f64_column(&df, &weight)?;
@@ -210,7 +210,7 @@ pub fn fit(
         cov_type,
         options.confidence_level,
     )
-    .map_err(ols_error_to_pyerr)?;
+    .map_err(least_squares_error_to_pyerr)?;
 
     let estimator = wls_estimator.estimator();
 

@@ -17,7 +17,8 @@
 //! 元の（変換前の）`y`・`weights`を使って計算し直す。`OlsEstimator`/`OlsInput`自体は
 //! 重みを一切知らない設計のまま変更しない（係数・SE・F統計量の構造的保証は保つ）。
 
-use super::ols::{CovType, OlsError, OlsEstimator, OlsInput};
+use super::common::LeastSquaresError;
+use super::ols::{CovType, OlsEstimator, OlsInput};
 
 /// WLSの推定結果。
 ///
@@ -64,7 +65,7 @@ impl WlsEstimator {
         weights: &[f64],
         cov_type: CovType,
         confidence_level: f64,
-    ) -> Result<Self, OlsError> {
+    ) -> Result<Self, LeastSquaresError> {
         let input = OlsInput::from_columns_weighted(
             y,
             x_columns,
@@ -350,7 +351,7 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            OlsError::NonPositiveWeight {
+            LeastSquaresError::NonPositiveWeight {
                 row: 1,
                 weight: 0.0
             }

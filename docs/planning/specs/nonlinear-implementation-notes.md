@@ -107,6 +107,18 @@ argminの`CostFunction`/`Gradient`/`Hessian`トレイト実装と、`nonlinear`�
 - 標準偏差が0の列（定数列）はスケーリング対象から除外する（0除算回避、`stds`をそのまま`1.0`にする）
 - テストは`nonlinear/common.rs`内の`#[cfg(test)] mod tests`に実装。ダミーの2次関数（`f(θ) = 0.5(θ-target)'A(θ-target)`、`A`は対角正定値）でnewton/bfgs/lbfgsそれぞれの収束・既知の最小値への到達・Hessianの正しさを検証、`raise_on_non_convergence`の両分岐、`standardize_columns`/`destandardize_params`の往復変換を検証
 
+### `cov_type`共通行列演算（Issue #53で実装済み）
+
+`engine/src/nonlinear/common.rs`に`observed_information_cov_params`/`opg_cov_params`/`sandwich_cov_params`（`SandwichVariant::Hc0`/`Hc1`）/`cluster_cov_params`を実装した。いずれも`H`（収束点のHessian）・`scores`（n×k）のみを受け取り、モデル固有の尤度計算に依存しない（`docs/planning/specs/nonlinear-api-design.md`4章・本ファイル「標準誤差の技術仕様」の数式通り）。
+
+**符号反転を1回の計算に集約**: `neg_hessian_inverse(H) = (-H)⁻¹`をコレスキー分解（OLSの`xtx_inverse`と同じ発想、`-H`は真のMLE最大点で正定値になるはず）で1回だけ計算し、`observed_information_cov_params`（`Σ = -H⁻¹`）・`sandwich_cov_params`・`cluster_cov_params`で同じ戻り値をそのまま再利用する。`-H⁻¹ = (-H)⁻¹`（逆行列の符号反転恒等式）、かつ`H⁻¹ΨH⁻¹ = (-H)⁻¹Ψ(-H)⁻¹`（符号が2回打ち消しあう）が成り立つため、サンドイッチ型・クラスターロバストの計算でも追加の符号反転が不要（rust-reviewerによる代数検証済み）。
+
+**OPG行列特異時のエラー型を分離**: `cov_type="opg"`は`Σsᵢsᵢ'`（OPG行列、Hessianではない）の逆行列を計算するため、これが特異な場合は`MleError::SingularOpgMatrix`という別バリアントを新設して区別した（`MleError::SingularHessian`をそのまま流用する案もあったが、エラーメッセージ「the Hessian is singular」がOPG行列の特異性には不正確になるため、ユーザーに確認の上バリアントを追加する方針を採用）。
+
+**クラスターの`MissingClusterColumn`/`InsufficientClusters`検証はこのIssueのスコープ外**: `cluster_cov_params`はグループ数`G>=2`であることを検証しない（呼び出し側の責務、OLSの`validate_cluster_groups`と同じ役割分担）。この検証は各モデルの`fit()`実装（`logit-probit-issue-breakdown.md`のB7/C7）で行う。
+
+**テスト**: 対角Hessian・列間で観測ごとに片方が常にゼロになるスコア行列（対角のみのΨ）に加えて、列間に相関を持たせたスコア行列（非対角成分を持つΨ）でも検証し、転置・スケーリングの順序の取り違えを対角のみのテストより厳密に検出できるようにした（rust-reviewerの指摘を反映）。5種類（classical/opg/hc0/hc1/cluster）それぞれの正常系・特異行列時のエラー系を検証済み。
+
 ## 未確定（実装issue着手時、または追加相談が必要）
 
 - **Tobit固有エラーの正確な検証条件**: 下限<上限の検証、両側打ち切り時の整合性チェック等の詳細。Tobit実装時に決定する

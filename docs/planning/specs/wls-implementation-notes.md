@@ -37,11 +37,13 @@ WLSの実装過程で確認した事項のうち、[`wls-api-design.md`](./wls-a
 
 ### ベンチマーク作成（Issue #43）
 
-- `benchmark/run_statsmodels_benchmark.py`に`--weight-col`オプションを追加し、指定時は
-  `smf.wls`を使うようにした（OLS/WLSで同じスクリプトを共用、分散共分散行列の計算式自体は
-  共通のため）。
+- `benchmark/run_statsmodels_benchmark.py`（Issue #45の系統別ディレクトリ再編後は
+  `benchmark/linear/run_statsmodels_benchmark.py`）に`--weight-col`オプションを追加し、
+  指定時は`smf.wls`を使うようにした（OLS/WLSで同じスクリプトを共用、分散共分散行列の
+  計算式自体は共通のため）。
 - `benchmark/run_r_benchmark.R`の`lm`ブランチ（独立実装によるクロスチェック用、Issue #27で
-  確定した役割分担）に重み列指定を追加した。`weight_col`はcov_type固有の引数
+  確定した役割分担。系統別ディレクトリ再編後は`benchmark/linear/run_lm_crosscheck_benchmark.R`
+  として独立したファイルに分離）に重み列指定を追加した。`weight_col`はcov_type固有の引数
   （`cluster_col`/`hac_lag`）の後ろに置く（classical/HC0-3はarg5、cluster/hacはarg6）。
   `sandwich`パッケージの`vcovHC`/`vcovCL`/`NeweyWest`は`lm(weights=)`の重み付きモデルに
   対してそのまま使え、追加の変更は不要だった（重み無しの場合と同じ関数呼び出し）。
@@ -55,3 +57,39 @@ WLSの実装過程で確認した事項のうち、[`wls-api-design.md`](./wls-a
   採用する想定（OLSの1e-2ではなく実測値に基づき緩めた値。`testing-policy.md`「同じ
   クロスチェック用パッケージでも、統計量・cov_typeごとに実測乖離が大きく異なる場合は、
   許容誤差を分けてよい」に従う）。classical/HC0-3/clusterはOLSと同じく相対誤差1e-8を適用する。
+
+### tests/api_tests作成（Issue #44）— R²・対数尤度の計算式バグ発覚と修正
+
+`test_wls_fixtures.py`（statsmodels厳密比較）を書いて実行したところ、係数・標準誤差・
+t値・p値・信頼区間・F統計量・F検定p値はいずれも機械精度で一致した一方、**`r_squared`・
+`r_squared_adj`・`log_likelihood`・`aic`・`bic`が重みが一様でない全シナリオ・全cov_typeで
+系統的に乖離**した（例: baselineシナリオでR²相対誤差0.21%、log_likelihoodはbaselineで
+ちょうど`+14.0007`のずれ）。Issue #37〜#39時点のテスト（weight=1でOLSと一致確認、手動
+スモークテスト）は変換が恒等写像になるケース（$w_i\equiv1$）しか見ておらず、この乖離を
+検出できていなかった。
+
+**根本原因**（[`wls-standard-errors.md`](./wls-standard-errors.md) 5章で訂正済み。
+statsmodelsのソース、`statsmodels/regression/linear_model.py`のv0.14.6を直接確認して特定）:
+
+1. `r_squared`（切片ありの場合）: 変換後$\tilde y=\sqrt w\,y$の**単純平均**を使ったcentered
+   TSSを使っていたが、正しくは元の$y$の**重み付き平均**（`np.average(endog,
+   weights=weights)`）を使ったcentered TSSが必要だった。切片なし（uncentered TSS）の場合は
+   代数的に$\sum\tilde y_i^2=\sum w_iy_i^2$が厳密に成り立つため訂正不要だった。
+2. `log_likelihood`（→`aic`/`bic`）: 変換後データに対するOLSの対数尤度をそのまま使うと、
+   `sqrt(weight)`変換のヤコビアンに由来する補正項`+0.5·Σlog(w_i)`が欠落していた
+   （statsmodelsの`WLS.loglike`と同じ導出で確認）。
+
+**修正**: `engine::linear::ols::OlsEstimator`/`OlsInput`自体は重みを一切知らない設計を
+維持したまま、`engine::linear::wls::WlsEstimator::fit`側（元の、変換前の`y`・`weights`に
+アクセスできる層）で`r_squared`/`r_squared_adj`/`log_likelihood`/`aic`/`bic`を計算し直す
+`weighted_fit_statistics`関数を追加し、`WlsEstimator`自身に同名のgetterを生やした
+（`residuals`と同じ「WLS固有の後処理をWlsEstimator層に置く」パターン）。
+`engine_pybind/src/linear/wls.rs`側もこれらの5フィールドは
+`wls_estimator.r_squared()`等（`estimator().r_squared()`ではなく）を呼ぶように変更した。
+新しいエンジン単体テスト（`fit_computes_r_squared_and_information_criteria_matching_statsmodels`）
+で、statsmodelsで独立に計算した既知の期待値と一致することを固定した。
+
+この発見・修正は、Issue #38〜#39時点の「weight=1でOLSと一致すること」を主な検証手段とした
+設計判断が持つ死角（重みが真に非自明な値のときの適合度統計量は未検証だった）を示す実例と
+なった。今後の手法実装でも、構造的な不変条件テストだけでなく、実際の重み・変数を伴う
+リファレンス実装とのクロスチェックを早期に行うことの重要性を再確認した。

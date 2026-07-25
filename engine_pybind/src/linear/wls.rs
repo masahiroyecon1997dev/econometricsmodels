@@ -226,12 +226,16 @@ pub fn fit(
         dep_var_name: estimator.input().dep_var_name().to_string(),
         nobs: estimator.input().nobs(),
         cov_type: cov_type_lower,
-        r_squared: estimator.r_squared(),
-        r_squared_adj: estimator.r_squared_adj(),
+        // r_squared/r_squared_adj/log_likelihood/aic/bicは`estimator`（変換後データに対する
+        // OLS）ではなく`wls_estimator`側の値を使う。元の（変換前の）y・weightsを使って
+        // 計算し直したもので、`estimator`側の値は変換のヤコビアン補正等が欠けており
+        // statsmodelsと一致しない（`engine::linear::wls`モジュール冒頭のdocコメント参照）。
+        r_squared: wls_estimator.r_squared(),
+        r_squared_adj: wls_estimator.r_squared_adj(),
         f_statistic: estimator.f_statistic(),
         f_p_value: estimator.f_p_value(),
-        log_likelihood: estimator.log_likelihood(),
-        aic: estimator.aic(),
-        bic: estimator.bic(),
+        log_likelihood: wls_estimator.log_likelihood(),
+        aic: wls_estimator.aic(),
+        bic: wls_estimator.bic(),
     })
 }

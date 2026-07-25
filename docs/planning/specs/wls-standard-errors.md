@@ -104,24 +104,61 @@ $$
 
 ## 5. 適合度統計量の重み付き定義
 
+**訂正（Issue #44）**: 本節はIssue #35時点で「変換後データにOLSの式をそのまま代入すれば
+statsmodelsと一致する」としていたが、これは誤りだった。Issue #44でのstatsmodelsクロス
+チェック実装時に、$R^2$・対数尤度（→AIC/BIC）が実際には統計的に有意な乖離（$R^2$で相対誤差
+0.2〜1%程度、対数尤度で加法的なずれ）を示すことが判明し、statsmodelsのソース
+（`statsmodels/regression/linear_model.py`、v0.14.6）を直接確認して以下の通り訂正した。
+F統計量・F検定p値・係数・標準誤差・t値・p値・信頼区間は変換後データへの代入のままで
+正しい（これらはIssue #44のクロスチェックでも機械精度で一致することを確認済み）。
+
+### R²（`RegressionResults.centered_tss`／`uncentered_tss`）
+
 $$
-R^2 = 1 - \frac{\tilde{\mathrm{SSR}}}{\tilde{\mathrm{SST}}}, \qquad
-\tilde{\mathrm{SSR}} = \sum_i \tilde\varepsilon_i^2 = \sum_i w_i \hat\varepsilon_i^2, \qquad
-\tilde{\mathrm{SST}} = \begin{cases}
-\sum_i (\tilde y_i - \bar{\tilde y})^2 & \text{（切片ありのとき、centered）} \\
-\sum_i \tilde y_i^2 & \text{（切片なしのとき、uncentered）}
+R^2 = 1 - \frac{\mathrm{SSR}}{\mathrm{SST}}, \qquad
+\mathrm{SSR} = \sum_i w_i \hat\varepsilon_i^2 \quad (= \tilde{\mathrm{SSR}}\text{、変換後データのSSRと数値的に同一}),
+$$
+
+$$
+\mathrm{SST} = \begin{cases}
+\sum_i w_i (y_i - \bar y_w)^2, \quad \bar y_w = \dfrac{\sum_i w_i y_i}{\sum_i w_i} & \text{（切片ありのとき、centered）} \\[4pt]
+\sum_i w_i y_i^2 \; \left(= \sum_i \tilde y_i^2\right) & \text{（切片なしのとき、uncentered）}
 \end{cases}
 $$
 
-- $\bar{\tilde y} = \frac{1}{n}\sum_i \tilde y_i = \frac{1}{n}\sum_i \sqrt{w_i}\, y_i$
-  （**変換後の$\tilde y$の単純平均**であり、元の$y$の加重平均ではない点に注意）。
-- 調整済み$R^2$・対数尤度・AIC・BIC・F統計量（ロバストWald検定への切替含む）は
-  [`ols-api-design.md`](./ols-api-design.md) 6章・[`ols-standard-errors.md`](./ols-standard-errors.md)
-  の式に、変換後の$\tilde{\mathrm{SSR}}$・$\tilde X$・$n$・$k$をそのまま代入したものと一致する。
-- **statsmodelsとの整合性**: `RegressionResults.centered_tss`は、モデルが`wendog`
-  （重み変換後のendog）を持つ場合はそちらを使って計算される。`WLS`は`wendog`を持つため、
-  statsmodelsの`.rsquared`も上記と同じ「変換後データのTSS/SSR」ベースの定義になっている。
-  したがって独自定義ではなく、**主リファレンスと同じ定義**である。
+- **切片ありの場合が訂正対象**: 誤りだった旧式は$\mathrm{SST}=\sum_i(\tilde y_i-\bar{\tilde y})^2$
+  （変換後$\tilde y_i=\sqrt{w_i}y_i$の**単純**平均$\bar{\tilde y}$を使う）だったが、
+  statsmodelsの`centered_tss`実装（`weights is not None`の分岐）は`np.average(endog,
+  weights=weights)`——すなわち**元の$y$の重み付き平均**$\bar y_w=\sum w_i y_i/\sum w_i$——を使う。
+  この2つは一般に異なる値になる（$w_i\equiv1$の自明なケースを除く）。
+- **切片なしの場合は旧式のままで正しい**: `uncentered_tss`は`wendog`（変換後の$\tilde y$）を
+  そのまま二乗和するため、$\sum_i\tilde y_i^2=\sum_i w_i y_i^2$が代数的に厳密に成り立つ
+  （$(\sqrt{w_i}y_i)^2=w_iy_i^2$）。切片なしのuncentered TSSは訂正不要。
+- 調整済み$R^2$は上記の正しい$R^2$を使うこと以外は
+  [`ols-standard-errors.md`](./ols-standard-errors.md)の式のまま（$n$・$k$は重みに依存しない）。
+
+### 対数尤度・AIC・BIC（`WLS.loglike`）
+
+変換後データに対するOLSの対数尤度をそのまま使うと、`sqrt(weight)`変換のヤコビアンに
+由来する補正項が欠落する。statsmodelsの`WLS.loglike`（`np.log(self.weights)`の総和を含む
+実装）と代数的に同値な形で書くと:
+
+$$
+\ell = -\frac{n}{2}\Big(\ln(2\pi) + \ln(\mathrm{SSR}/n) + 1\Big) + \frac{1}{2}\sum_i \ln w_i
+$$
+
+（第1項は[`ols-standard-errors.md`](./ols-standard-errors.md)のOLSの対数尤度の式に
+変換後の$\mathrm{SSR}$・$n$を代入したものそのもの。第2項$\frac{1}{2}\sum_i\ln w_i$が
+今回追加で必要と判明した補正項）。AIC・BIC はこの$\ell$から通常通り
+$\mathrm{AIC}=-2\ell+2k$、$\mathrm{BIC}=-2\ell+\ln(n)\,k$で計算する（式自体は不変、
+$\ell$の値が変わる）。
+
+### 実装上の注意
+
+上記2点は`engine::linear::ols::OlsEstimator::fit`（変換後データに対するOLS計算、重みを
+一切知らない）ではなく`engine::linear::wls::WlsEstimator::fit`側で、元の（変換前の）
+$y$・重みを使って計算し直す（`engine::linear::wls`モジュール冒頭のdocコメント・
+[`wls-implementation-notes.md`](./wls-implementation-notes.md)参照）。
 
 ## 6. `OLSOptions`への影響
 

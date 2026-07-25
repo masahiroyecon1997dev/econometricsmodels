@@ -2,19 +2,36 @@
 //!
 //! `docs/planning/specs/wls-api-design.md`で確定した設計に基づき、`sqrt(weight)`で
 //! 変換した`OlsInput`（`OlsInput::from_columns_weighted`）に対して既存の`OlsEstimator::fit`
-//! （無変更）をそのまま適用する。標準誤差・適合度統計量の計算式が変換後データに対する
-//! OLSの計算式そのままで正しいことの確認は`docs/planning/specs/wls-standard-errors.md`参照。
+//! （無変更）をそのまま適用する。標準誤差・係数・t値・p値・信頼区間・F統計量の計算式が
+//! 変換後データに対するOLSの計算式そのままで正しいことの確認は
+//! `docs/planning/specs/wls-standard-errors.md`参照。
+//!
+//! **ただしR²・対数尤度（→AIC/BIC）はこの変換だけでは正しくならない**（Issue #44で
+//! statsmodelsとのクロスチェック時に判明）。理由:
+//! - R²（切片ありの場合のcentered TSS）: 変換後yの単純平均を使うと、正しい
+//!   「元のyの重み付き平均」（`Σw_i y_i/Σw_i`）とは異なる値になる。
+//! - 対数尤度: 変換後データに対するOLSの対数尤度は、`sqrt(w)`変換のヤコビアンに
+//!   由来する補正項`+0.5·Σlog(w_i)`が欠落する（statsmodelsの`WLS.loglike`と同じ導出）。
+//!
+//! そのためこの2つ（とそこから導かれるR²調整済み・AIC・BIC）は`WlsEstimator::fit`側で
+//! 元の（変換前の）`y`・`weights`を使って計算し直す。`OlsEstimator`/`OlsInput`自体は
+//! 重みを一切知らない設計のまま変更しない（係数・SE・F統計量の構造的保証は保つ）。
 
 use super::ols::{CovType, OlsError, OlsEstimator, OlsInput};
 
 /// WLSの推定結果。
 ///
-/// `estimator()`が返す`OlsEstimator`本体は、`sqrt(weight)`で変換したデータに対する計算結果
-/// （`params`/`std_errors`/`t_stats`/`p_values`/`conf_lower`/`conf_upper`/適合度統計量は
-/// すべてここから取得する。重みが全て1のときOLSと数値的に完全一致するのはこの型を経由する
-/// ためであり、`docs/planning/specs/wls-api-design.md`4.1節の構造的保証がそのまま成り立つ）。
+/// `estimator()`が返す`OlsEstimator`本体は、`sqrt(weight)`で変換したデータに対する
+/// 計算結果であり、`params`/`std_errors`/`t_stats`/`p_values`/`conf_lower`/`conf_upper`/
+/// `f_statistic`/`f_p_value`はここから取得する（変換後データに対するOLSの計算式が
+/// そのまま正しいため。重みが全て1のときOLSと数値的に完全一致するのもこの型を経由する
+/// ためで、`docs/planning/specs/wls-api-design.md`4.1節の構造的保証がそのまま成り立つ）。
 ///
-/// ただし`estimator().residuals()`は**重み付き残差** `sqrt(w_i)(y_i - x_i'β̂)`
+/// 一方`r_squared`/`r_squared_adj`/`log_likelihood`/`aic`/`bic`は`estimator()`側の値を
+/// 使わず、この型が元の（変換前の）`y`・`weights`から計算し直した値を使う（モジュール
+/// 冒頭のdocコメント参照）。
+///
+/// `estimator().residuals()`は**重み付き残差** `sqrt(w_i)(y_i - x_i'β̂)`
 /// （statsmodelsでいう`.wresid`相当）を返す。ユーザー向けに公開する残差は元スケール
 /// （unweighted）の`residuals()`を使う（`docs/planning/specs/wls-api-design.md`4.3節参照）。
 #[derive(Debug)]
@@ -22,6 +39,11 @@ pub struct WlsEstimator {
     estimator: OlsEstimator,
     /// 元スケール（unweighted）の残差 `y_i - x_i'β̂`
     residuals: Vec<f64>,
+    r_squared: f64,
+    r_squared_adj: f64,
+    log_likelihood: f64,
+    aic: f64,
+    bic: f64,
 }
 
 impl WlsEstimator {
@@ -53,14 +75,24 @@ impl WlsEstimator {
         )?;
         let estimator = OlsEstimator::fit(input, cov_type, confidence_level)?;
         let residuals = original_scale_residuals(y, x_columns, include_intercept, &estimator);
+        let (r_squared, r_squared_adj, log_likelihood, aic, bic) =
+            weighted_fit_statistics(y, weights, &residuals, &estimator);
 
         Ok(Self {
             estimator,
             residuals,
+            r_squared,
+            r_squared_adj,
+            log_likelihood,
+            aic,
+            bic,
         })
     }
 
     /// 変換後データ（重み付き）に対する`OlsEstimator`本体。
+    ///
+    /// `r_squared`/`r_squared_adj`/`log_likelihood`/`aic`/`bic`はここではなく
+    /// `WlsEstimator`自身のメソッドを使うこと（型ドキュメント参照）。
     pub fn estimator(&self) -> &OlsEstimator {
         &self.estimator
     }
@@ -69,6 +101,78 @@ impl WlsEstimator {
     pub fn residuals(&self) -> &[f64] {
         &self.residuals
     }
+
+    /// 決定係数（切片ありなら元のyの重み付き平均を使ったcentered TSS、
+    /// 切片なしならuncentered TSSに基づく。statsmodelsの`WLS`と同じ定義）。
+    pub fn r_squared(&self) -> f64 {
+        self.r_squared
+    }
+
+    /// 自由度調整済み決定係数。
+    pub fn r_squared_adj(&self) -> f64 {
+        self.r_squared_adj
+    }
+
+    /// 対数尤度（`sqrt(weight)`変換のヤコビアン補正込み）。
+    pub fn log_likelihood(&self) -> f64 {
+        self.log_likelihood
+    }
+
+    /// 赤池情報量規準。
+    pub fn aic(&self) -> f64 {
+        self.aic
+    }
+
+    /// ベイズ情報量規準。
+    pub fn bic(&self) -> f64 {
+        self.bic
+    }
+}
+
+/// R²・調整済みR²・対数尤度・AIC・BICを、元の（変換前の）`y`・`weights`から計算し直す。
+///
+/// 統計量ごとの理由はモジュール冒頭のdocコメント参照。SSR自体は重み付き残差の二乗和
+/// （`Σ w_i (y_i - ŷ_i)²`）で、`estimator`が変換後データに対して計算したSSRと数学的に
+/// 同一の値になる（`sqrt(w_i)(y_i-ŷ_i)`の二乗が`w_i(y_i-ŷ_i)²`のため）ため、
+/// `original_scale_residuals`と`weights`から計算し直しても内部で二重計算にはならない。
+fn weighted_fit_statistics(
+    y: &[f64],
+    weights: &[f64],
+    residuals: &[f64],
+    estimator: &OlsEstimator,
+) -> (f64, f64, f64, f64, f64) {
+    let n = estimator.input().nobs();
+    let k = estimator.input().k();
+    let k_constant = usize::from(estimator.input().has_intercept());
+    let df_resid = n - k;
+
+    let ssr: f64 = residuals.iter().zip(weights).map(|(r, w)| w * r * r).sum();
+
+    let sst: f64 = if estimator.input().has_intercept() {
+        let weight_sum: f64 = weights.iter().sum();
+        let weighted_mean: f64 =
+            y.iter().zip(weights).map(|(v, w)| v * w).sum::<f64>() / weight_sum;
+        y.iter()
+            .zip(weights)
+            .map(|(v, w)| w * (v - weighted_mean).powi(2))
+            .sum()
+    } else {
+        y.iter().zip(weights).map(|(v, w)| w * v * v).sum()
+    };
+
+    let r_squared = 1.0 - ssr / sst;
+    let r_squared_adj = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
+
+    // statsmodels WLS.loglikeと同じ導出（変換後データに対するOLSの対数尤度に、
+    // sqrt(weight)変換のヤコビアン補正項 +0.5*Σlog(w_i) を加える）。
+    let sum_log_weights: f64 = weights.iter().map(|w| w.ln()).sum();
+    let log_likelihood = -(n as f64 / 2.0)
+        * ((2.0 * std::f64::consts::PI).ln() + (ssr / n as f64).ln() + 1.0)
+        + 0.5 * sum_log_weights;
+    let aic = -2.0 * log_likelihood + 2.0 * (k as f64);
+    let bic = -2.0 * log_likelihood + (n as f64).ln() * (k as f64);
+
+    (r_squared, r_squared_adj, log_likelihood, aic, bic)
 }
 
 /// 元の（重み変換前の）`y`・`x_columns`と推定済みの係数から、元スケールの残差
@@ -141,16 +245,64 @@ mod tests {
                 *ols.conf_lower().get(j, 0)
             );
         }
-        assert_eq!(wls.estimator().r_squared(), ols.r_squared());
-        assert_eq!(wls.estimator().r_squared_adj(), ols.r_squared_adj());
         assert_eq!(wls.estimator().f_statistic(), ols.f_statistic());
         assert_eq!(wls.estimator().f_p_value(), ols.f_p_value());
+
+        // r_squared/r_squared_adj/log_likelihood/aic/bicはWlsEstimator側の（元スケールの
+        // y・weightsから計算し直した）値を使う。重みが全て1なら重み付き平均=単純平均、
+        // ヤコビアン補正項0.5*Σlog(1)=0となり、OLSと完全一致するはず
+        // （Issue #44でstatsmodelsとのクロスチェック時に判明した、WlsEstimator側での
+        // 再計算が必要な理由はモジュール冒頭のdocコメント参照）。
+        // weights=1でも、重み付き平均（Σw*y/Σw）と単純平均（Σy/n）は数学的には同じ値だが
+        // 浮動小数点の加算順序が異なるため、完全な==ではなく丸め誤差レベルで比較する。
+        assert!((wls.r_squared() - ols.r_squared()).abs() < 1e-12);
+        assert!((wls.r_squared_adj() - ols.r_squared_adj()).abs() < 1e-12);
+        assert!((wls.log_likelihood() - ols.log_likelihood()).abs() < 1e-9);
+        assert!((wls.aic() - ols.aic()).abs() < 1e-9);
+        assert!((wls.bic() - ols.bic()).abs() < 1e-9);
 
         // 残差の計算経路自体はwls.rs（手動ループ）とols.rs（faerの行列演算）で異なるため、
         // 丸め誤差レベルでの一致を確認する（構造的な完全一致の保証対象はestimator()側）。
         for i in 0..5 {
             assert!((wls.residuals()[i] - *ols.residuals().get(i, 0)).abs() < 1e-12);
         }
+    }
+
+    /// x=[1..5], y=[2,4,5,4,5], weights=[1,4,0.25,9,2]（切片あり、classical）の
+    /// 適合度統計量。期待値はstatsmodels 0.14.6で独立に計算・検算済み
+    /// （`sm.WLS(y, sm.add_constant(x1), weights=w).fit(use_t=True)`）。
+    /// Issue #44でのstatsmodelsクロスチェック時に発覚した、r_squared/log_likelihood
+    /// （→aic/bic）の計算式修正（モジュール冒頭のdocコメント参照）を固定するための
+    /// エンジン単体テスト。
+    #[test]
+    fn fit_computes_r_squared_and_information_criteria_matching_statsmodels() {
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+        let weights = vec![1.0, 4.0, 0.25, 9.0, 2.0];
+
+        let wls = WlsEstimator::fit(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            &weights,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        assert!((*wls.estimator().params().get(0, 0) - 2.783_764_87).abs() < 1e-6);
+        assert!((*wls.estimator().params().get(1, 0) - 0.358_992_3).abs() < 1e-6);
+        assert!((*wls.estimator().std_errors().get(0, 0) - 0.824_058_49).abs() < 1e-6);
+        assert!((*wls.estimator().std_errors().get(1, 0) - 0.227_478_42).abs() < 1e-6);
+        assert!((wls.r_squared() - 0.453_603_574_100_183_8).abs() < 1e-9);
+        assert!((wls.r_squared_adj() - 0.271_471_432_133_578_5).abs() < 1e-9);
+        assert!((wls.log_likelihood() - (-4.694_800_450_440_493)).abs() < 1e-9);
+        assert!((wls.aic() - 13.389_600_900_880_986).abs() < 1e-9);
+        assert!((wls.bic() - 12.608_476_725_749_187).abs() < 1e-9);
+        assert!((wls.estimator().f_statistic() - 2.490_519_076_986_167_6).abs() < 1e-6);
+        assert!((wls.estimator().f_p_value() - 0.212_642_917_457_664_06).abs() < 1e-6);
     }
 
     #[test]
@@ -292,7 +444,12 @@ mod tests {
             // 揃っている）で別途確認する。
             //
             // aicはlog_likelihood（ssr, nのみに依存）とk（パラメータ数、どちらも2）のみで
-            // 決まるため、has_intercept差の影響を受けず比較できる。
+            // 決まるため、has_intercept差の影響を受けず比較できる。ここでは意図的に
+            // `wls.estimator().aic()`（変換後データに対するOLSのaic、ヤコビアン補正なし）を
+            // 使う。`manual`側も同じ「変換後データに対するOLS」のaicのため、両者は一致する
+            // はず（配線の確認が目的）。`wls.aic()`（ヤコビアン補正込みの正しい値）は
+            // `manual`側に対応する計算がないためここでは比較しない
+            // （`fit_with_all_weights_one_matches_ols`で別途確認）。
             assert!(
                 (wls.estimator().aic() - manual.aic()).abs() < 1e-9,
                 "{label}: aic mismatch"
@@ -331,7 +488,12 @@ mod tests {
         assert!(!wls.estimator().input().has_intercept());
         let beta_hat = *wls.estimator().params().get(0, 0);
         assert!((beta_hat - 2.0).abs() < 0.05);
-        assert!(wls.estimator().r_squared() > 0.99);
+        // 切片なし（uncentered TSS）の場合、Σ(sqrt(w)*y)² == Σw*y² が数学的に厳密に
+        // 成り立つため、wls.r_squared()（元スケールから計算）とwls.estimator().r_squared()
+        // （変換後データから計算）は一致する。ここでは公開APIとして使うべき方
+        // （wls.r_squared()）を確認する。
+        assert!(wls.r_squared() > 0.99);
+        assert!((wls.r_squared() - wls.estimator().r_squared()).abs() < 1e-12);
 
         // 内部整合性: residuals()は「元スケールのy - 推定された係数による予測値」であるはず
         // （original_scale_residualsの定義そのものの確認。真の係数2.0とは比較しない）。

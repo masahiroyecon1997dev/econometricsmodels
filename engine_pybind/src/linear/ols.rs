@@ -155,7 +155,10 @@ pub struct OLSResult {
 /// 書けない。関数として実装し、呼び出し側で`.map_err(ols_error_to_pyerr)?`する。
 ///
 /// 対応表は`docs/planning/specs/ols-implementation-notes.md`「1. エラーハンドリング」参照。
-fn ols_error_to_pyerr(err: OlsError) -> PyErr {
+///
+/// `pub(crate)`にしているのは、`OlsError`がWLSからも共通のエラー型として再利用されているため
+/// （`docs/planning/specs/wls-api-design.md`4.2節）、`linear::wls`からも呼び出すため。
+pub(crate) fn ols_error_to_pyerr(err: OlsError) -> PyErr {
     match err {
         OlsError::DimensionMismatch { .. }
         | OlsError::WeightDimensionMismatch { .. }
@@ -172,7 +175,9 @@ fn ols_error_to_pyerr(err: OlsError) -> PyErr {
 }
 
 /// `faer::Mat<f64>`（n×1またはk×1の列ベクトル）を`Vec<f64>`に変換する。
-fn mat_to_vec(mat: &faer::Mat<f64>) -> Vec<f64> {
+///
+/// `pub(crate)`にしているのは`linear::wls`からも再利用するため（上記`ols_error_to_pyerr`と同様）。
+pub(crate) fn mat_to_vec(mat: &faer::Mat<f64>) -> Vec<f64> {
     (0..mat.nrows()).map(|i| *mat.get(i, 0)).collect()
 }
 

@@ -7,6 +7,13 @@ Phase4以降で中心的に使う想定（`docs/planning/specs/ols-implementatio
 参照。分散共分散行列の計算式自体はOLSと共通でありstatsmodels側も同じ実装のため、
 このスクリプト自体はOLS/WLSで分岐せず共通で使う）。
 
+合成データは`generate_synthetic_datasets.py`を直接呼ばず、`tests/api_tests/fixtures/
+benchmarks/data/`に固定済みのCSVを読む（`benchmark/freeze_datasets.py`参照。
+ジェネレータ側のコードが将来変わっても既存フィクスチャの期待値と無言で
+不整合にならないようにするため）。Wooldridgeデータは`load_wooldridge.py`経由で
+都度ロードする（データの再配布ライセンスが未確認のためCSVとして固定しない。
+`freeze_datasets.py`のdocstring参照）。
+
 使用例:
     python run_statsmodels_benchmark.py --dataset-source synthetic --dataset heteroskedastic \\
         --cov-type HC1
@@ -22,10 +29,34 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
-from generate_synthetic_datasets import generate_dataset
-from load_wooldridge import load as load_wooldridge
+import polars as pl
+
+sys.path.insert(
+    0, str(Path(__file__).resolve().parent.parent)
+)  # benchmark/ を import path に追加（load_wooldridge）
+
+from load_wooldridge import load as _load_wooldridge  # noqa: E402
+
+DATA_DIR = (
+    Path(__file__).resolve().parents[2]
+    / "tests"
+    / "api_tests"
+    / "fixtures"
+    / "benchmarks"
+    / "data"
+)
+
+
+def _load_synthetic(dataset: str) -> tuple[pl.DataFrame, list[float]]:
+    df = pl.read_csv(DATA_DIR / f"synthetic_{dataset}.csv")
+    true_betas = json.loads(
+        (DATA_DIR / "synthetic_true_beta.json").read_text()
+    )
+    return df, true_betas[dataset]
 
 
 def run(
@@ -41,14 +72,14 @@ def run(
 
     true_beta = None
     if dataset_source == "synthetic":
-        df, true_beta = generate_dataset(dataset)
+        df, true_beta = _load_synthetic(dataset)
         pandas_df = df.to_pandas()
         if formula is None:
             exclude = {"y", "weight"} | ({weight_col} if weight_col else set())
             x_cols = [c for c in df.columns if c not in exclude]
             formula = "y ~ " + " + ".join(x_cols)
     elif dataset_source == "wooldridge":
-        pandas_df = load_wooldridge(dataset).to_pandas()
+        pandas_df = _load_wooldridge(dataset).to_pandas()
         if formula is None:
             raise ValueError(
                 "wooldridgeデータセットの場合は--formulaの指定が必須です"
@@ -106,7 +137,7 @@ def run(
         "df_resid": int(model.df_resid),
     }
     if true_beta is not None:
-        result["true_beta"] = true_beta.tolist()
+        result["true_beta"] = true_beta
 
     import statsmodels
 

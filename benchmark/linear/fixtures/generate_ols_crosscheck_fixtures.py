@@ -20,7 +20,7 @@ classical/HC0-3/clusterはRとほぼ機械精度で一致するため厳密比�
 係数・標準誤差に加え、AIC/BIC/対数尤度・F統計量・F検定p値もRクロスチェック対象に含める
 （`testing-policy.md`「リファレンス実装」章の方針。全統計量を独立実装でもクロスチェックする）。
 AIC/BICはRの`AIC()`/`BIC()`標準関数（残差分散を1パラメータとして追加でカウントするk+1慣習）
-ではなく、`run_r_benchmark.R`側で本実装・statsmodelsと同じ式（`-2*loglik + 2*k`等、kは
+ではなく、`run_lm_crosscheck_benchmark.R`側で本実装・statsmodelsと同じ式（`-2*loglik + 2*k`等、kは
 回帰係数の数のみ）で手計算した値を使う（実測でRの標準関数はAICがちょうど2、BICがlog(n)だけ
 系統的にずれることを確認済み）。F統計量・F検定p値は本実装の`wald_f_test`と同じロバストWald検定
 （`β_slopes' Σ⁻¹ β_slopes / q`）をcov_typeごとの共分散行列で計算しており、cov_typeに依存する。
@@ -28,9 +28,16 @@ AIC/BICはRの`AIC()`/`BIC()`標準関数（残差分散を1パラメータと�
 このスクリプト自体は`benchmark/`側に置く。生成される`ols_crosscheck.json`は
 `tests/api_tests/fixtures/`に置く（`testing-policy.md`「ベンチマーク値のフィクスチャ化」参照）。
 
+合成データの入力は`tests/api_tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
+（`benchmark/freeze_datasets.py`参照）。`imbalanced_cluster_groups`（純粋にnから
+決定論的にラベルを組み立てるだけで乱数を使わない）のみ、引き続き
+`generate_synthetic_datasets.py`を直接呼ぶ。Wooldridgeデータは`load_wooldridge.py`
+経由で都度ロードする（データの再配布ライセンスが未確認のためCSVとして固定しない。
+`freeze_datasets.py`のdocstring参照）。
+
 使用例:
-    python fixtures/generate_ols_crosscheck_fixtures.py \\
-        --output ../tests/api_tests/fixtures/benchmarks/ols_crosscheck.json
+    python generate_ols_crosscheck_fixtures.py \\
+        --output ../../../tests/api_tests/fixtures/benchmarks/ols_crosscheck.json
 """
 
 from __future__ import annotations
@@ -43,19 +50,22 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(
+    0, str(Path(__file__).resolve().parent.parent)
+)  # benchmark/linear/ を import path に追加（run_statsmodels_benchmark）
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[2])
+)  # benchmark/ を import path に追加（generate_synthetic_datasets）
 
 import polars as pl  # noqa: E402
 import statsmodels  # noqa: E402
 
-from generate_synthetic_datasets import (  # noqa: E402
-    generate_dataset,
-    imbalanced_cluster_groups,
-)
+from generate_synthetic_datasets import imbalanced_cluster_groups  # noqa: E402
 from load_wooldridge import load as load_wooldridge  # noqa: E402
+from run_statsmodels_benchmark import DATA_DIR  # noqa: E402
 
-BENCHMARK_DIR = Path(__file__).resolve().parent.parent
-R_SCRIPT = BENCHMARK_DIR / "run_r_benchmark.R"
+LINEAR_DIR = Path(__file__).resolve().parent.parent
+R_SCRIPT = LINEAR_DIR / "run_lm_crosscheck_benchmark.R"
 
 # 完全な多重共線性は数値比較の対象外（generate_ols_fixtures.pyと同じ方針）。
 NUMERIC_SCENARIOS = [
@@ -86,7 +96,7 @@ def _run_r(
     cluster_col: str | None = None,
     hac_lag: int | None = None,
 ) -> dict:
-    cmd = ["Rscript", str(R_SCRIPT), str(csv_path), formula, "lm", cov_type]
+    cmd = ["Rscript", str(R_SCRIPT), str(csv_path), formula, cov_type]
     if cov_type == "cluster":
         cmd.append(cluster_col or "")
     elif cov_type == "hac":
@@ -112,8 +122,8 @@ def _normalize_names(raw: dict) -> dict:
         "coef": {fix(k): v for k, v in raw["coef"].items()},
         "se": {fix(k): v for k, v in raw["se"].items()},
     }
-    # aic/bic/log_likelihood/f_statistic/f_p_valueはrun_r_benchmark.Rの
-    # lmブランチのみが返す（fixest/plm/ivreg分岐は対象外）。
+    # aic/bic/log_likelihood/f_statistic/f_p_valueはrun_lm_crosscheck_benchmark.Rが返す
+    # （run_fixest_benchmark.R等、他パッケージのスクリプトは対象外）。
     for key in ("aic", "bic", "log_likelihood", "f_statistic", "f_p_value"):
         if key in raw:
             result[key] = raw[key]
@@ -130,7 +140,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
     fixtures: dict = {}
 
     for scenario in NUMERIC_SCENARIOS:
-        df, _ = generate_dataset(scenario)
+        df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
         formula = "y ~ x1 + x2 + x3"
         csv_path = _write_csv(df, tmpdir, scenario)
         n = df.height
@@ -163,7 +173,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             # ComputationErrorになる（成功パスではない。テスト側でエラー
             # パスとして確認、Rクロスチェックは対象外）。ここでの「G=2境界の
             # 成功パス」は説明変数1個（q=1）に絞ったデータで確認する。
-            df_g2, _ = generate_dataset(scenario, k=1)
+            df_g2 = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
             formula_g2 = "y ~ x1"
             csv_path_g2 = _write_csv(df_g2, tmpdir, f"{scenario}_g2")
             fixtures[scenario]["cluster_g2"] = _run_cluster_case(
@@ -301,7 +311,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../tests/api_tests/fixtures/benchmarks/ols_crosscheck.json",
+        default="../../../tests/api_tests/fixtures/benchmarks/ols_crosscheck.json",
     )
     args = parser.parse_args()
 

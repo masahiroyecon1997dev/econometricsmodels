@@ -826,7 +826,7 @@
   "_meta": {
     "method": "wls",
     "purpose": "statsmodels主リファレンス（wls.json）とは独立した実装（R: lm(weights=) + sandwich/lmtest）によるクロスチェック用。係数・標準誤差・AIC・BIC・対数尤度・F統計量・F検定p値を含む。classical/HC0-3/clusterは厳密比較、HACのみ緩い許容誤差での比較を想定する（testing-policy.md参照）",
-    "generated_at": "2026-07-25T00:49:23.310229+00:00",
+    "generated_at": "2026-07-25T04:15:32.500799+00:00",
     "r_version": "4.2.2",
     "statsmodels_version": "0.14.6",
     "note": "perfect_multicollinearityシナリオはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。HACはR側のみ（explicit lagを本実装の自動ラグ式に合わせて指定）。clusterはbaselineシナリオのみ、疑似グループ（行番号%10）でR側のみ確認。パラメータ名は全ソースで切片を'const'に正規化済み。重みは合成データセットの'weight'列。401ksubsはinv_inc（1/inc）。pyfixestとの比較は正確性検証から除外（性能比較専用）。"

@@ -15,15 +15,18 @@ classical/HC0-3/clusterはRとほぼ機械精度で一致するため厳密比�
 
 係数・標準誤差に加え、AIC/BIC/対数尤度・F統計量・F検定p値もRクロスチェック対象に含める
 （`testing-policy.md`「リファレンス実装」章の方針）。AIC/BICの計算式・F統計量の定義に
-関する注記は`generate_ols_crosscheck_fixtures.py`と同じ（`run_r_benchmark.R`側で
+関する注記は`generate_ols_crosscheck_fixtures.py`と同じ（`run_lm_crosscheck_benchmark.R`側で
 本実装・statsmodelsと同じ式を使う）。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`wls_crosscheck.json`は
-`tests/api_tests/fixtures/benchmarks/`に置く。
+`tests/api_tests/fixtures/benchmarks/`に置く。合成データの入力は`tests/api_tests/
+fixtures/benchmarks/data/`に固定済みのCSVを読む（`benchmark/freeze_datasets.py`
+参照）。401ksubs（Wooldridge）は`load_wooldridge.py`経由で都度ロードする
+（データの再配布ライセンスが未確認のためCSVとして固定しない）。
 
 使用例:
-    python fixtures/generate_wls_crosscheck_fixtures.py \\
-        --output ../tests/api_tests/fixtures/benchmarks/wls_crosscheck.json
+    python generate_wls_crosscheck_fixtures.py \\
+        --output ../../../tests/api_tests/fixtures/benchmarks/wls_crosscheck.json
 """
 
 from __future__ import annotations
@@ -36,16 +39,21 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(
+    0, str(Path(__file__).resolve().parent.parent)
+)  # benchmark/linear/ を import path に追加（run_statsmodels_benchmark）
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[2])
+)  # benchmark/ を import path に追加（load_wooldridge）
 
 import polars as pl  # noqa: E402
 import statsmodels  # noqa: E402
 
-from generate_synthetic_datasets import generate_dataset  # noqa: E402
 from load_wooldridge import load as load_wooldridge  # noqa: E402
+from run_statsmodels_benchmark import DATA_DIR  # noqa: E402
 
-BENCHMARK_DIR = Path(__file__).resolve().parent.parent
-R_SCRIPT = BENCHMARK_DIR / "run_r_benchmark.R"
+LINEAR_DIR = Path(__file__).resolve().parent.parent
+R_SCRIPT = LINEAR_DIR / "run_lm_crosscheck_benchmark.R"
 
 # 完全な多重共線性は数値比較の対象外（generate_wls_fixtures.pyと同じ方針）。
 NUMERIC_SCENARIOS = [
@@ -79,7 +87,7 @@ def _run_r(
     hac_lag: int | None = None,
     weight_col: str | None = None,
 ) -> dict:
-    cmd = ["Rscript", str(R_SCRIPT), str(csv_path), formula, "lm", cov_type]
+    cmd = ["Rscript", str(R_SCRIPT), str(csv_path), formula, cov_type]
     if cov_type == "cluster":
         cmd.append(cluster_col or "")
         cmd.append(weight_col or "")
@@ -123,7 +131,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
     fixtures: dict = {}
 
     for scenario in NUMERIC_SCENARIOS:
-        df, _ = generate_dataset(scenario)
+        df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
         formula = "y ~ x1 + x2 + x3"
         csv_path = _write_csv(df, tmpdir, scenario)
         n = df.height
@@ -238,7 +246,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../tests/api_tests/fixtures/benchmarks/wls_crosscheck.json",
+        default="../../../tests/api_tests/fixtures/benchmarks/wls_crosscheck.json",
     )
     args = parser.parse_args()
 

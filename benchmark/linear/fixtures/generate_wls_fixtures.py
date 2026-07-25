@@ -1,6 +1,6 @@
 """WLSのテストフィクスチャ（tests/api_tests/fixtures/benchmarks/wls.json）を生成するスクリプト。
 
-`benchmark/run_statsmodels_benchmark.py`（`--weight-col`指定でsmf.wlsを使う）を
+`benchmark/linear/run_statsmodels_benchmark.py`（`--weight-col`指定でsmf.wlsを使う）を
 全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つのJSONにまとめて書き出す。
 構成は`generate_ols_fixtures.py`に合わせている（重み列`weight`を追加で渡す点のみ異なる）。
 
@@ -10,10 +10,13 @@
 
 このスクリプト自体は`benchmark/`側に置く。生成される`wls.json`は
 `tests/api_tests/fixtures/benchmarks/`に置く（`.claude/rules/testing-policy.md`
-「ベンチマーク値のフィクスチャ化」参照）。
+「ベンチマーク値のフィクスチャ化」参照）。合成データの入力は`tests/api_tests/
+fixtures/benchmarks/data/`に固定済みのCSVを読む（`benchmark/freeze_datasets.py`
+参照）。401ksubs（Wooldridge）は`load_wooldridge.py`経由で都度ロードする
+（データの再配布ライセンスが未確認のためCSVとして固定しない）。
 
 使用例:
-    python fixtures/generate_wls_fixtures.py --output ../tests/api_tests/fixtures/benchmarks/wls.json
+    python generate_wls_fixtures.py --output ../../../tests/api_tests/fixtures/benchmarks/wls.json
 """
 
 from __future__ import annotations
@@ -26,11 +29,16 @@ from pathlib import Path
 
 sys.path.insert(
     0, str(Path(__file__).resolve().parent.parent)
-)  # benchmark/ を import path に追加
+)  # benchmark/linear/ を import path に追加（run_statsmodels_benchmark）
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[2])
+)  # benchmark/ を import path に追加（load_wooldridge）
 
+import polars as pl  # noqa: E402
 import statsmodels  # noqa: E402
 
-from run_statsmodels_benchmark import run  # noqa: E402
+from load_wooldridge import load as load_wooldridge  # noqa: E402
+from run_statsmodels_benchmark import DATA_DIR, run  # noqa: E402
 
 # 完全な多重共線性は数値比較の対象外（testing-policy.md「テストの3系統」参照）。
 # ComputationErrorが発生することのみをテストコード側で確認する。
@@ -91,9 +99,7 @@ def _run_cluster_case(scenario: str) -> dict:
     """クラスターロバストSE確認用に、決め打ちの疑似グループを付けて実行する。"""
     import statsmodels.formula.api as smf
 
-    from generate_synthetic_datasets import generate_dataset
-
-    df, _ = generate_dataset(scenario)
+    df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     pandas_df = df.to_pandas()
     pandas_df["_group"] = [i % 10 for i in range(len(pandas_df))]
 
@@ -125,10 +131,7 @@ def _run_401ksubs_case() -> dict:
     「実データセット」節で確定した内容（Wooldridge Example 8.5・8.6と同じ変数構成、
     Var(u|inc) ∝ inc という単純WLSの仮定に基づき重み = 1/inc）。
     """
-    import polars as pl
     import statsmodels.formula.api as smf
-
-    from load_wooldridge import load as load_wooldridge
 
     df = load_wooldridge("401ksubs").filter(pl.col("fsize") == 1)
 
@@ -183,7 +186,8 @@ def _run_401ksubs_case() -> dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--output", default="../tests/api_tests/fixtures/benchmarks/wls.json"
+        "--output",
+        default="../../../tests/api_tests/fixtures/benchmarks/wls.json",
     )
     args = parser.parse_args()
 

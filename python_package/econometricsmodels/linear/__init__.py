@@ -1,7 +1,7 @@
-"""線形回帰系の手法（OLS等）。
+"""Linear regression methods (OLS, etc.).
 
-`engine`/`engine_pybind`の`linear/`ディレクトリ構成と対応させている
-（`.claude/rules/rust-style.md`「ファイル・ディレクトリ構成」参照）。
+Mirrors the `linear/` directory structure of `engine`/`engine_pybind`
+(see `.claude/rules/rust-style.md` "ファイル・ディレクトリ構成").
 """
 
 from __future__ import annotations

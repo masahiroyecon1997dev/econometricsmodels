@@ -4,7 +4,7 @@ OLSのAPI・オプションに関する確定済み設計のまとめ。パラ�
 [`ols-implementation-notes.md`](./ols-implementation-notes.md) を参照。
 
 **ステータス**: 設計確定済み。`engine`・`engine_pybind`・`python_package`（`OLS` / `OlsResults`
-クラス、[`python_package/econometricsmodels/linear/ols.py`](../../../python_package/econometricsmodels/linear/ols.py)）
+クラス、[`python_package/econometricsmodels/linear/ols.py`](https://github.com/masahiroyecon1997dev/econometricsmodels/blob/main/python_package/econometricsmodels/linear/ols.py)）
 まで実装済み。
 
 ## 1. 全体構成（3層）

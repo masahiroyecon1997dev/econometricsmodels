@@ -4,7 +4,7 @@ WLS（Weighted Least Squares）のAPI・オプションに関する設計案。�
 重み付き定義の確定は[`wls-standard-errors.md`](./wls-standard-errors.md)（Issue #34）に委ねる。
 
 **ステータス**: 設計提案中（Issue #33）。本ドキュメントは2026-07-24時点の
-[`OLS実装`](../../../engine/src/linear/ols.rs)（`engine/src/linear/ols.rs`,
+[`OLS実装`](https://github.com/masahiroyecon1997dev/econometricsmodels/blob/main/engine/src/linear/ols.rs)（`engine/src/linear/ols.rs`,
 `engine_pybind/src/linear/ols.rs`, `python_package/econometricsmodels/linear/ols.py`）を
 出発点にしている。OLSは今後リファクタリングされる可能性が高いため（進行中のフォローアップ
 Issue #27〜#31）、実装着手時には改めて最新のOLS実装を確認し、本ドキュメントとの差分があれば

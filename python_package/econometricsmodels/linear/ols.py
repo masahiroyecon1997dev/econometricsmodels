@@ -1,13 +1,14 @@
-"""OLS (最小二乗法) のPythonラッパー。
+"""Python wrapper for OLS (Ordinary Least Squares).
 
-`econometricsmodels._lib.fit_ols`（Rust実装、`engine`/`engine_pybind`側）
-を呼び出す薄いラッパー。検証・推定ロジック自体はRust側に置き、ここでは
-polars DataFrameを受け取るPython向けAPIの形（List渡し・オブジェクト渡し、
-CLAUDE.md 2章）を提供するだけに留める
-（`.claude/rules/python-style.md`「設計方針との整合性」参照）。
+A thin wrapper around `econometricsmodels._lib.fit_ols` (the Rust
+implementation, `engine`/`engine_pybind`). Validation and estimation
+logic live entirely on the Rust side; this module only provides the
+Python-facing API shape for polars DataFrames — a list of column names
+for `x`, an options object for estimation settings (CLAUDE.md section 2,
+`.claude/rules/python-style.md` "設計方針との整合性").
 
-`OLSOptions`は`_lib`のものをそのまま再輸出する（独自クラスとして
-再定義しない。`docs/planning/specs/ols-api-design.md`3章参照）。
+`OLSOptions` is re-exported as-is from `_lib` (not redefined as a
+separate class; see `docs/planning/specs/ols-api-design.md` section 3).
 """
 
 from __future__ import annotations
@@ -21,14 +22,16 @@ __all__ = ["OLS", "OLSOptions", "OlsResults"]
 
 
 class OLS:
-    """Ordinary Least Squares（最小二乗法）による回帰推定量。
+    """Ordinary Least Squares regression estimator.
 
     Args:
-        data: 被説明変数・説明変数を含むpolars DataFrame。
-        y: 被説明変数の列名。
-        x: 説明変数の列名のリスト。
-        options: 推定オプション。省略時は`OLSOptions()`の既定値
-            （classical、切片あり、confidence_level=0.95）を使う。
+        data: A polars DataFrame containing the dependent and
+            independent variables.
+        y: Column name of the dependent variable.
+        x: List of column names of the independent variables.
+        options: Estimation options. Defaults to `OLSOptions()`
+            (classical, with intercept, confidence_level=0.95) when
+            omitted.
 
     Examples:
         >>> import polars as pl
@@ -51,36 +54,40 @@ class OLS:
         self._options = options if options is not None else OLSOptions()
 
     def fit(self) -> OlsResults:
-        """OLSを推定する。
+        """Estimate the OLS model.
 
         Returns:
-            推定結果。
+            The estimation results.
 
         Raises:
-            ValidationError: 入力・オプションが不正な場合（列が存在
-                しない、欠損値やNaN/無限大を含む、観測数不足、
-                `confidence_level`が範囲外等）。`ValueError`のサブ
-                クラス。
-            ComputationError: 計算過程で問題が発覚した場合（設計行列
-                が特異等）。`RuntimeError`のサブクラス。
+            ValidationError: The input or options are invalid (a
+                column is missing, contains missing values or
+                NaN/infinity, insufficient observations,
+                `confidence_level` out of range, etc.). A subclass of
+                `ValueError`.
+            ComputationError: A problem was detected during
+                computation (e.g. a singular design matrix). A
+                subclass of `RuntimeError`.
         """
         raw = _lib.fit_ols(self._data, self._y, self._x, self._options)
         return OlsResults(raw)
 
 
 class OlsResults:
-    """OLS推定結果。
+    """OLS estimation results.
 
-    配列系のプロパティ（`params`・`std_errors`等）は、対応する係数名
-    をキーとする辞書として公開する（O(1)での単一パラメータ取り出し
-    用）。行指向の一覧表示には`coef_table()`を使う
-    （`docs/planning/specs/ols-api-design.md`5章参照）。
+    Array-valued properties (`params`, `std_errors`, etc.) are exposed
+    as dictionaries keyed by coefficient name (for O(1) lookup of a
+    single parameter). Use `coef_table()` for a row-oriented listing
+    (see `docs/planning/specs/ols-api-design.md` section 5).
 
     Args:
-        raw: `_lib.fit_ols`が返す推定結果本体（`_lib.OLSResult`）。
+        raw: The estimation result object returned by `_lib.fit_ols`
+            (`_lib.OLSResult`).
 
     Note:
-        通常はユーザーが直接構築せず、`OLS.fit()`の返り値として使う。
+        Users normally do not construct this directly; it is returned
+        by `OLS.fit()`.
     """
 
     def __init__(self, raw: _lib.OLSResult) -> None:
@@ -88,32 +95,32 @@ class OlsResults:
 
     @property
     def param_names(self) -> list[str]:
-        """係数名のリスト（`include_intercept=True`なら先頭が`"const"`）。"""
+        """List of coefficient names (`"const"` first when `include_intercept=True`)."""
         return self._raw.param_names
 
     @property
     def params(self) -> dict[str, float]:
-        """係数名から係数値への辞書。"""
+        """Coefficient name to coefficient value."""
         return dict(zip(self._raw.param_names, self._raw.params))
 
     @property
     def std_errors(self) -> dict[str, float]:
-        """係数名から標準誤差への辞書。"""
+        """Coefficient name to standard error."""
         return dict(zip(self._raw.param_names, self._raw.std_errors))
 
     @property
     def t_stats(self) -> dict[str, float]:
-        """係数名からt統計量への辞書。"""
+        """Coefficient name to t-statistic."""
         return dict(zip(self._raw.param_names, self._raw.t_stats))
 
     @property
     def p_values(self) -> dict[str, float]:
-        """係数名から両側p値への辞書。"""
+        """Coefficient name to two-sided p-value."""
         return dict(zip(self._raw.param_names, self._raw.p_values))
 
     @property
     def conf_int(self) -> dict[str, tuple[float, float]]:
-        """係数名から信頼区間`(下限, 上限)`への辞書。"""
+        """Coefficient name to confidence interval `(lower, upper)`."""
         return {
             name: (lower, upper)
             for name, lower, upper in zip(
@@ -125,71 +132,72 @@ class OlsResults:
 
     @property
     def residuals(self) -> list[float]:
-        """残差（観測順、`y - Xβ̂`）。"""
+        """Residuals (in observation order, `y - Xβ̂`)."""
         return self._raw.residuals
 
     @property
     def dep_var_name(self) -> str:
-        """被説明変数の列名。"""
+        """Column name of the dependent variable."""
         return self._raw.dep_var_name
 
     @property
     def nobs(self) -> int:
-        """観測数。"""
+        """Number of observations."""
         return self._raw.nobs
 
     @property
     def cov_type(self) -> str:
-        """実際に使われた標準誤差の種別（小文字に正規化済み）。"""
+        """Standard error type actually used (normalized to lowercase)."""
         return self._raw.cov_type
 
     @property
     def r_squared(self) -> float:
-        """決定係数。"""
+        """Coefficient of determination (R²)."""
         return self._raw.r_squared
 
     @property
     def r_squared_adj(self) -> float:
-        """自由度調整済み決定係数。"""
+        """Degrees-of-freedom-adjusted R²."""
         return self._raw.r_squared_adj
 
     @property
     def f_statistic(self) -> float:
-        """F統計量。"""
+        """F-statistic."""
         return self._raw.f_statistic
 
     @property
     def f_p_value(self) -> float:
-        """F統計量のp値。"""
+        """P-value of the F-statistic."""
         return self._raw.f_p_value
 
     @property
     def log_likelihood(self) -> float:
-        """対数尤度。"""
+        """Log-likelihood."""
         return self._raw.log_likelihood
 
     @property
     def aic(self) -> float:
-        """赤池情報量規準（AIC）。"""
+        """Akaike Information Criterion (AIC)."""
         return self._raw.aic
 
     @property
     def bic(self) -> float:
-        """ベイズ情報量規準（BIC）。"""
+        """Bayesian Information Criterion (BIC)."""
         return self._raw.bic
 
     def coef_table(self) -> list[dict[str, float | str]]:
-        """係数の要約テーブル（行指向）。
+        """Row-oriented summary table of the coefficients.
 
-        REST APIのレスポンスにほぼそのまま使える形（
-        `docs/planning/specs/ols-api-design.md`5章）。係数テーブル
-        自体にpolars DataFrameは使わない方針のため、`list[dict]`で
-        返す。
+        Shaped to be usable almost as-is in a REST API response (see
+        `docs/planning/specs/ols-api-design.md` section 5). Returned
+        as `list[dict]` rather than a polars DataFrame, per the
+        project's policy of not using DataFrames for the coefficient
+        table itself.
 
         Returns:
-            各要素が1係数分の情報を持つ辞書のリスト。キーは
+            A list of dictionaries, one per coefficient. Keys are
             `param`, `coef`, `std_err`, `t_stat`, `p_value`,
-            `conf_lower`, `conf_upper`。
+            `conf_lower`, `conf_upper`.
         """
         return [
             {

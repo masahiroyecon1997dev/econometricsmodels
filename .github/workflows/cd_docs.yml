@@ -1,0 +1,84 @@
+name: CD (docs)
+
+# mkdocsサイトをGitHub Pagesへデプロイする。docs/・python_package/・engine_pybind/の
+# 変更（docstringが変わりうる）でmainへのpush時に自動実行、workflow_dispatchでの
+# 手動再デプロイにも対応する。cd_release.ymlと異なりタグpushではなくmainへのpushを
+# トリガーにする（ドキュメントは常に最新のmainを反映すべきもののため）。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "python_package/**"
+      - "engine_pybind/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/cd_docs.yml"
+  workflow_dispatch:
+
+# 同時デプロイの競合を防ぐ（GitHub Pages公式テンプレートの推奨設定）。
+# 実行中のデプロイを打ち切らず、完了を待ってから次のデプロイを開始する。
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (mkdocs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          python-version: "3.12"
+
+      # docsグループのみ指定（devはuvが既定で含める。maturinはdevグループに定義済み、
+      # ci_python.ymlと同じパターン）。mkdocstrings-pythonはPyO3コンパイル済み拡張の
+      # docstringを動的import経由で読むため、maturin developでビルド済みの状態が必要
+      # （`#[pyclass(module=...)]`のAliasResolutionError対応、ols-implementation-notes.md
+      # 「9. ドキュメント」参照）。
+      - name: uv sync (docs group)
+        run: uv sync --locked --group docs
+
+      - name: maturin develop
+        run: uv run --locked --group docs maturin develop
+
+      # docs_dirがdocs/自身（`.`）を指す設定のため、mkdocs buildを引数なしで実行する
+      # （自動探索でmkdocs.ymlを見つけさせる）と「docs_dirが設定ファイルの親ディレクトリ
+      # になっている」というエラーで失敗する。--config-fileで明示指定することで
+      # 設定ファイル自身のディレクトリを基準に相対パスを解決させ、この踏み穴を避ける
+      # （Issue #110で実測確認済み）。
+      # --strictは付けない: docs/planning/specs/内のソースファイルへの相対リンクが
+      # 現状WARNINGを出しており（Issue #111、未修正）、付けると必ず失敗するため。
+      # Issue #111解消後に--strict化を再検討する。
+      - name: mkdocs build
+        run: uv run --locked --group docs mkdocs build --config-file docs/mkdocs.yml
+
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    name: deploy (GitHub Pages)
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+        id: deployment

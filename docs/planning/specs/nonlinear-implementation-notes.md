@@ -63,7 +63,7 @@ argminの`CostFunction`/`Gradient`/`Hessian`トレイト実装と、`nonlinear`�
 
 | 置き場所 | 内容 |
 |---|---|
-| 各モデルファイル（`logit.rs`/`probit.rs`/`tobit.rs`） | `{Logit,Probit,Tobit}Problem`構造体（`X`/`y`/Tobit境界値を保持）に対する`CostFunction`（負の対数尤度）/`Gradient`（スコアの符号反転）/`Hessian`トレイト実装。加えてargminのトレイトではない独自メソッド`scores(&self, params) -> Mat<f64>`（n×k、観測ごとのスコア行列。OPG/サンドイッチ/クラスターSEの計算に必須。argminの`Gradient`は合計済みの1本のベクトルしか返さないため別途必要） |
+| 各モデルファイル（`logit.rs`/`probit.rs`/`tobit.rs`） | `{Logit,Probit,Tobit}Problem`構造体（`X`/`y`/Tobit境界値を保持）に対する`CostFunction`（負の対数尤度）/`Gradient`（スコアの符号反転）/`Hessian`（**`CostFunction`/`Gradientと同じ符号＝負の対数尤度のHessian`**。「収束点のHessian評価」節参照。対数尤度そのもののHessianではない点に注意）トレイト実装。加えてargminのトレイトではない独自メソッド`scores(&self, params) -> Mat<f64>`（n×k、観測ごとのスコア行列。OPG/サンドイッチ/クラスターSEの計算に必須。argminの`Gradient`は合計済みの1本のベクトルしか返さないため別途必要） |
 | `nonlinear/common.rs` | (a) `Method`（`Newton`/`Bfgs`/`Lbfgs`）に応じたargminソルバーへのディスパッチ（`run_solver`関数、収束フラグ・反復回数を返す）。(b) `cov_type`ごとの共通行列演算（`H`と`scores`さえ受け取れば手法に依らず同じ計算、Issue #53で実装） |
 
 **Hessianは`method`の選択に関わらず常に解析的に実装する**: `bfgs`/`lbfgs`は最適化中にHessianを使わない（内部で近似する）が、`cov_type="classical"`（観測情報行列）には収束点でのHessianが必要。対象3手法はいずれも解析的Hessianが書けるため、`Hessian`トレイトは常に実装し、収束点で1回評価してSE計算に使う（BFGSの内部近似Hessianは使い回さない。手法間の結果の一貫性を優先する）。
@@ -85,6 +85,18 @@ argminの`CostFunction`/`Gradient`/`Hessian`トレイト実装と、`nonlinear`�
 - BFGS/L-BFGSは組み込みソルバーの`.with_tolerance_grad(tol)`（勾配のL2ノルムがこの値未満で収束と判定、`ArgminL2Norm`トレイト）をそのまま使う。線形探索は`MoreThuenteLineSearch`
 
 **収束点のHessian評価**: `Method`の3分岐で`Executor::run()`実行後、`OptimizationResult.problem.take_problem()`でモデル（`O`）を取り出し、最終パラメータで`.hessian()`を1回呼び直す（Newtonの最後のイテレーションで計算済みのHessianを使い回すのではなく、常に独立して再評価する。3手法で同じコードパスにできて実装がシンプルになるため）。
+
+**`Hessian`トレイトの符号規約（Issue #55着手時に発覚・修正済み）**: `Hessian`トレイトの符号規約はIssue #52時点では明文化されていなかったが、Logitの尤度・スコア・Hessian実装（Issue #55）に着手する際、2つの用途が矛盾する符号を要求していることが判明した。
+
+- **Newton法の内部**（`FaerNewton::next_iter`）: `Δθ = H⁻¹g`（`g`は`Gradient`トレイトが返す「スコアの符号反転」、すなわち`CostFunction`＝負の対数尤度の勾配）。Newtonステップが正しい方向に進むには、`H`も`CostFunction`/`Gradient`と同じ符号（負の対数尤度のHessian）でなければならない。
+- **収束点でのSE計算**（`SolverOutput.hessian`、Issue #53の`observed_information_cov_params`等）: `Σ_classical = -H⁻¹`という式は、`H`が対数尤度そのもののHessian（真の最大点で負定値、`neg_hessian_inverse`のdocコメント「真のMLE最大点では`-H`が正定値になるはず」の前提）であることを要求する。
+
+両者は符号が逆（負の対数尤度のHessian＝対数尤度のHessianの符号反転）だが、Issue #52時点の実装は`SolverOutput.hessian`を`model.hessian(&params)`の戻り値そのまま（符号変換なし）で構築しており、どちらか一方の用途で符号を取り違える状態だった。
+
+**対処（ユーザー確認済み）**: `Hessian`トレイトの契約を「`CostFunction`/`Gradient`と同じ符号（負の対数尤度のHessian）」に統一する（オプティマイザライブラリとして自然な規約で、Newtonの正しさもこれで保証される）。`run_solver`内で`model.hessian(&params)`を呼んだ直後に1回だけ符号反転し、`SolverOutput.hessian`は対数尤度そのもののHessianとして返す（Issue #53のcov_type共通行列演算が前提とする符号と一致させる）。各モデルの`fit()`実装は符号変換を意識しなくてよい。
+
+- 代替案（不採用）: 各モデルの`fit()`側でcov_type関数群に渡す直前に符号反転する。`run_solver`は変更不要だが、Probit/Tobit含め今後実装する全モデルで反転を忘れるリスクがあるため不採用とした。
+- 影響範囲: `run_solver`関数本体（1箇所）、`SolverOutput.hessian`のdocコメント、`QuadraticProblem`を使った既存テスト（`run_solver_newton_converges_to_known_minimum`が検証する`output.hessian`の期待値を`2.0`/`5.0`から`-2.0`/`-5.0`に修正。`QuadraticProblem::hessian`自体はコスト関数のHessian`diag_a`をそのまま返す実装のまま変更していない）。
 
 **エラー変換**: `FaerNewton::next_iter`内で`newton_step`が返す`MleError`は、`?`演算子で`argmin::core::Error`（`anyhow::Error`のエイリアス）に自動変換される（thiserrorが`std::error::Error + Send + Sync + 'static`を実装するため、anyhowの`From`実装が効く）。`Executor::run()`が`Err`を返した場合は`e.downcast::<MleError>()`で元の型を復元し、復元できない場合（argmin自体の内部エラー等）は`CommonError::ComputationFailed`（`MleError::Common`経由、Issue #113で`MleError::ComputationFailed`から移動）にまとめる（`convert_optimizer_error`関数）。
 

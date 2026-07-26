@@ -90,7 +90,11 @@ pub enum Method {
 pub struct SolverOutput {
     /// 収束点（`raise_on_non_convergence=false`で未収束の場合は打ち切り時点）のパラメータ。
     pub params: Vec<f64>,
-    /// 収束点で解析的に評価したHessian（k×k）。`method`の選択に関わらず常に評価する
+    /// 収束点で解析的に評価した**対数尤度そのもの**のHessian（k×k、真の最大点では負定値）。
+    /// `method`の選択に関わらず常に評価する。`cov_type`共通行列演算（`neg_hessian_inverse`
+    /// 等）はこの符号（対数尤度のHessian）を前提とする。モデルの`Hessian`トレイト実装
+    /// 自体は`CostFunction`/`Gradient`と同じ符号（コスト関数＝負の対数尤度のHessian）を
+    /// 返す契約になっており、ここに格納する値は`run_solver`内部で1回符号反転したもの
     /// （`docs/planning/specs/nonlinear-implementation-notes.md`「engine内のtrait設計」参照）。
     pub hessian: Vec<Vec<f64>>,
     /// 収束したかどうか。
@@ -106,6 +110,12 @@ pub struct SolverOutput {
 /// 実装したモデル固有の型（Logit/Probit/Tobitがそれぞれ実装する）。標準化された設計行列を使うかは
 /// 呼び出し側（各モデルの`fit()`）の責務であり、この関数は`Vec<f64>`のパラメータ空間のみを扱う
 /// （`standardize_columns`/`destandardize_params`参照）。
+///
+/// **`Hessian`トレイトの符号規約**: `CostFunction`/`Gradient`と同じ符号（コスト関数＝
+/// 負の対数尤度のHessian）で実装すること。`FaerNewton`のNewtonステップ（`Δθ = H⁻¹g`、
+/// `g`は`Gradient`が返す「スコアの符号反転」）が正しい方向に進むために必要。
+/// `SolverOutput.hessian`（対数尤度そのもののHessian、符号が逆）への変換はこの関数が
+/// 内部で1回だけ行う（呼び出し側・各モデルの実装は意識しなくてよい）。
 ///
 /// # Errors
 /// - 収束点のHessianが特異（`SingularHessian`）
@@ -170,9 +180,22 @@ where
 
     // Hessianはmethodの選択に関わらず、収束点で常に解析的に評価する
     // （bfgs/lbfgsの内部近似Hessianは使い回さない）。
-    let hessian = model
+    //
+    // `Hessian`トレイトの契約は「`CostFunction`/`Gradientと同じ符号（コスト関数=負の
+    // 対数尤度のHessian）」（`FaerNewton`のNewtonステップが正しい方向に進むために必要、
+    // `CostFunction`のdocコメント参照）。一方`SolverOutput.hessian`は`cov_type`共通行列
+    // 演算（`neg_hessian_inverse`等）が前提とする「対数尤度そのもののHessian」（真の
+    // 最大点で負定値）でなければならない。両者は符号が逆（`-loglik`のHessian＝
+    // `loglik`のHessianの符号反転）なので、ここで1回だけ符号反転して契約を合わせる
+    // （Issue #55着手時に発覚、`docs/planning/specs/nonlinear-implementation-notes.md`
+    // 参照）。
+    let cost_hessian = model
         .hessian(&params)
         .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+    let hessian: Vec<Vec<f64>> = cost_hessian
+        .iter()
+        .map(|row| row.iter().map(|v| -v).collect())
+        .collect();
 
     Ok(SolverOutput {
         params,
@@ -598,8 +621,11 @@ mod tests {
             "{:?}",
             output.params
         );
-        assert!((output.hessian[0][0] - 2.0).abs() < 1e-9);
-        assert!((output.hessian[1][1] - 5.0).abs() < 1e-9);
+        // `QuadraticProblem::hessian`は`diag_a`（コスト関数のHessian）をそのまま返すが、
+        // `SolverOutput.hessian`は`run_solver`内部で符号反転した「対数尤度そのもの」
+        // 相当の値になる（`run_solver`のdocコメント「Hessianトレイトの符号規約」参照）。
+        assert!((output.hessian[0][0] - (-2.0)).abs() < 1e-9);
+        assert!((output.hessian[1][1] - (-5.0)).abs() < 1e-9);
         // Newtonは2次関数を1ステップで解くため、収束までの反復回数は小さいはず
         assert!(output.n_iter <= 2, "n_iter={}", output.n_iter);
     }

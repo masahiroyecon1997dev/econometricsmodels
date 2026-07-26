@@ -2,6 +2,7 @@
 
 [![CI (engine)](https://github.com/masahiroyecon1997dev/econometricsmodels/actions/workflows/ci_engine.yml/badge.svg)](https://github.com/masahiroyecon1997dev/econometricsmodels/actions/workflows/ci_engine.yml)
 [![CI (python)](https://github.com/masahiroyecon1997dev/econometricsmodels/actions/workflows/ci_python.yml/badge.svg)](https://github.com/masahiroyecon1997dev/econometricsmodels/actions/workflows/ci_python.yml)
+[![Docs](https://github.com/masahiroyecon1997dev/econometricsmodels/actions/workflows/cd_docs.yml/badge.svg)](https://masahiroyecon1997dev.github.io/econometricsmodels/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 統計・計量経済学の分析手法を提供するPython APIです。分析GUIアプリ「economicon」のエンジンとして使われることを主な用途としており、スクリプト・プログラムからの組み込みやすさ（型補完・バリデーション・動的な組み立て）を優先した設計になっています。
@@ -38,7 +39,7 @@ print(result.std_errors)   # {"const": ..., "x1": ...}
 print(result.r_squared)
 ```
 
-不均一分散に頑健な標準誤差（HC0〜HC3）・クラスター標準誤差・HAC（Newey-West）標準誤差への切り替えなど、詳しい使い方は`docs/getting-started.md`を参照してください。
+不均一分散に頑健な標準誤差（HC0〜HC3）・クラスター標準誤差・HAC（Newey-West）標準誤差への切り替えなど、詳しい使い方は[ドキュメントサイト](https://masahiroyecon1997dev.github.io/econometricsmodels/getting-started/)を参照してください。APIリファレンスも含めた全体は[https://masahiroyecon1997dev.github.io/econometricsmodels/](https://masahiroyecon1997dev.github.io/econometricsmodels/)で公開しています。
 
 ## 検証精度
 

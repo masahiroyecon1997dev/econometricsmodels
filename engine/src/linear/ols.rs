@@ -13,6 +13,7 @@ use faer::{Accum, Mat, Par, Side};
 use statrs::distribution::{ContinuousCDF, FisherSnedecor, StudentsT};
 
 use super::common::LeastSquaresError;
+use crate::error::CommonError;
 
 /// 標準誤差の種別。文字列パース（Python文字列 → この型への変換）は`engine_pybind`側の
 /// 責務（PyO3境界の関心事のため）。ここでは`OlsEstimator::fit`が計算方法を分岐するための
@@ -45,7 +46,7 @@ pub enum CovType {
     /// 「クラスター標準誤差」参照）。
     Cluster {
         /// クラスターのグループキー。`OlsInput`の行と対応する長さnの配列。
-        /// `None`の場合、`OlsEstimator::fit`は`LeastSquaresError::MissingClusterColumn`を返す
+        /// `None`の場合、`OlsEstimator::fit`は`CommonError::MissingClusterColumn`を返す
         /// （`hac_lags: Option<i64>`と同じ設計パターンで、値の妥当性検証を`engine`内で
         /// 行うため`Option`にしている。`engine_pybind`側で`cluster_col`未指定を
         /// 事前に弾かない）。
@@ -77,7 +78,7 @@ impl OlsInput {
     /// 定数項（すべて1.0）を自動追加する。
     ///
     /// # Errors
-    /// `y`といずれかの`x_columns`の長さが一致しない場合は`LeastSquaresError::DimensionMismatch`を返す。
+    /// `y`といずれかの`x_columns`の長さが一致しない場合は`CommonError::DimensionMismatch`を返す。
     ///
     /// # パニックについて
     /// `x_names.len() != x_columns.len()`の場合は`debug_assert!`でパニックする。これは
@@ -102,7 +103,7 @@ impl OlsInput {
     /// `weights`はanalytic weightとして扱う（`docs/planning/specs/wls-api-design.md`0章）。
     ///
     /// # Errors
-    /// - `y`といずれかの`x_columns`の長さが一致しない場合は`LeastSquaresError::DimensionMismatch`
+    /// - `y`といずれかの`x_columns`の長さが一致しない場合は`CommonError::DimensionMismatch`
     /// - `weights`の長さが`y`と一致しない場合は`LeastSquaresError::WeightDimensionMismatch`
     /// - `weights`に0以下（NaN含む）の値が含まれる場合は`LeastSquaresError::NonPositiveWeight`
     #[allow(clippy::too_many_arguments)]
@@ -163,10 +164,11 @@ impl OlsInput {
         );
         for col in x_columns {
             if col.len() != y.len() {
-                return Err(LeastSquaresError::DimensionMismatch {
+                return Err(CommonError::DimensionMismatch {
                     y_rows: y.len(),
                     x_rows: col.len(),
-                });
+                }
+                .into());
             }
         }
 
@@ -310,8 +312,8 @@ impl OlsEstimator {
     /// （`docs/planning/specs/ols-implementation-notes.md`「適合度統計量」参照）。
     ///
     /// # Errors
-    /// - `confidence_level`が`(0, 1)`の範囲外: `LeastSquaresError::InvalidConfidenceLevel`
-    /// - 観測数`n`が`k`（定数項を含む説明変数の数）以下: `LeastSquaresError::InsufficientObservations`
+    /// - `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
+    /// - 観測数`n`が`k`（定数項を含む説明変数の数）以下: `CommonError::InsufficientObservations`
     /// - 設計行列が特異（完全な多重共線性等）: `LeastSquaresError::SingularMatrix`
     pub fn fit(
         input: OlsInput,
@@ -319,14 +321,14 @@ impl OlsEstimator {
         confidence_level: f64,
     ) -> Result<Self, LeastSquaresError> {
         if !(confidence_level > 0.0 && confidence_level < 1.0) {
-            return Err(LeastSquaresError::InvalidConfidenceLevel { confidence_level });
+            return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
         }
 
         let n = input.nobs();
         let k = input.k();
 
         if n <= k {
-            return Err(LeastSquaresError::InsufficientObservations { n, k });
+            return Err(CommonError::InsufficientObservations { n, k }.into());
         }
 
         let qr = input.x().col_piv_qr();
@@ -374,9 +376,7 @@ impl OlsEstimator {
                 )
             }
             CovType::Cluster { groups } => {
-                let groups = groups
-                    .as_ref()
-                    .ok_or(LeastSquaresError::MissingClusterColumn)?;
+                let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
                 let n_groups = validate_cluster_groups(groups, n)?;
                 let cov = cluster_cov_params(input.x(), &residuals, &xtx_inv, n, k, groups);
                 (cov, n_groups - 1)
@@ -389,7 +389,7 @@ impl OlsEstimator {
         }
 
         let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
-            .map_err(|e| LeastSquaresError::ComputationFailed(e.to_string()))?;
+            .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
         let alpha = 1.0 - confidence_level;
         let t_crit = t_dist.inverse_cdf(1.0 - alpha / 2.0);
 
@@ -733,7 +733,7 @@ fn hac_cov_params(
 /// `groups.len() != n`は`engine_pybind`側の実装バグでしか起こり得ない内部契約であり
 /// （`OlsInput::from_columns`の`x_names`/`x_columns`の長さ検証と同じ性質）、実データに
 /// 起因する`ValidationError`とは区別して`debug_assert_eq!`で検証する。クラスター数が
-/// 2未満は実データで起こりうるため`LeastSquaresError::InsufficientClusters`を返す。
+/// 2未満は実データで起こりうるため`CommonError::InsufficientClusters`を返す。
 fn validate_cluster_groups(groups: &[String], n: usize) -> Result<usize, LeastSquaresError> {
     debug_assert_eq!(
         groups.len(),
@@ -745,7 +745,7 @@ fn validate_cluster_groups(groups: &[String], n: usize) -> Result<usize, LeastSq
         .collect::<std::collections::HashSet<_>>()
         .len();
     if g < 2 {
-        return Err(LeastSquaresError::InsufficientClusters { g });
+        return Err(CommonError::InsufficientClusters { g }.into());
     }
     Ok(g)
 }
@@ -872,7 +872,7 @@ fn wald_f_test(
     ensure_well_conditioned_cov_submatrix(&v_slopes, df_model)?;
 
     let llt = v_slopes.llt(Side::Lower).map_err(|_| {
-        LeastSquaresError::ComputationFailed(
+        CommonError::ComputationFailed(
             "failed to invert coefficient covariance submatrix for the F-test".to_string(),
         )
     })?;
@@ -884,7 +884,7 @@ fn wald_f_test(
     let f_statistic = wald / (df_model as f64);
 
     let f_dist = FisherSnedecor::new(df_model as f64, df_inference as f64)
-        .map_err(|e| LeastSquaresError::ComputationFailed(e.to_string()))?;
+        .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
     let f_p_value = 1.0 - f_dist.cdf(f_statistic);
 
     Ok((f_statistic, f_p_value))
@@ -903,7 +903,7 @@ fn ensure_well_conditioned_cov_submatrix(v: &Mat<f64>, k: usize) -> Result<(), L
     // 境界的な失敗に備えた防御的な`Result`化）。
     let eigen =
         faer::linalg::solvers::SelfAdjointEigen::new(v.as_ref(), Side::Lower).map_err(|_| {
-            LeastSquaresError::ComputationFailed(
+            CommonError::ComputationFailed(
                 "failed to compute eigendecomposition of coefficient covariance submatrix \
              for the F-test"
                     .to_string(),
@@ -917,12 +917,13 @@ fn ensure_well_conditioned_cov_submatrix(v: &Mat<f64>, k: usize) -> Result<(), L
 
     for i in 0..k {
         if (*eigenvalues.get(i)).abs() <= threshold {
-            return Err(LeastSquaresError::ComputationFailed(
+            return Err(CommonError::ComputationFailed(
                 "coefficient covariance submatrix is near-singular for the F-test \
                  (condition number exceeds double-precision limits, e.g. due to extreme \
                  scale differences between explanatory variables)"
                     .to_string(),
-            ));
+            )
+            .into());
         }
     }
     Ok(())
@@ -989,10 +990,10 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            LeastSquaresError::DimensionMismatch {
+            LeastSquaresError::Common(CommonError::DimensionMismatch {
                 y_rows: 3,
                 x_rows: 2
-            }
+            })
         );
     }
 
@@ -1131,14 +1132,10 @@ mod tests {
 
     #[test]
     fn least_squares_error_messages_are_human_readable() {
-        assert_eq!(
-            LeastSquaresError::DimensionMismatch {
-                y_rows: 10,
-                x_rows: 8
-            }
-            .to_string(),
-            "dimension mismatch: y has 10 rows but x has 8 rows"
-        );
+        // 6種の共通バリアント（DimensionMismatch等）のメッセージ検証は
+        // `engine::error`側のテストに集約済み（Issue #113）。ここではOLS/WLS固有の
+        // バリアントに加え、`Common`が`CommonError`のDisplayをtransparentに転送する
+        // ことだけを確認する。
         assert_eq!(
             LeastSquaresError::WeightDimensionMismatch {
                 y_rows: 10,
@@ -1156,22 +1153,6 @@ mod tests {
             "weight at row 3 must be positive, got 0"
         );
         assert_eq!(
-            LeastSquaresError::InsufficientObservations { n: 2, k: 3 }.to_string(),
-            "insufficient observations: n=2 must be greater than k=3 \
-             (number of independent variables, including the intercept)"
-        );
-        assert_eq!(
-            LeastSquaresError::InsufficientClusters { g: 1 }.to_string(),
-            "cov_type='cluster' requires at least 2 clusters, got 1"
-        );
-        assert_eq!(
-            LeastSquaresError::InvalidConfidenceLevel {
-                confidence_level: 1.5
-            }
-            .to_string(),
-            "confidence_level must be in the range (0, 1): 1.5"
-        );
-        assert_eq!(
             LeastSquaresError::InvalidHacLags {
                 hac_lags: -1,
                 n: 100
@@ -1180,17 +1161,12 @@ mod tests {
             "hac_lags must be in the range [0, n): got -1, n=100"
         );
         assert_eq!(
-            LeastSquaresError::MissingClusterColumn.to_string(),
-            "cov_type='cluster' requires cluster identifiers to be provided"
-        );
-        assert_eq!(
             LeastSquaresError::SingularMatrix.to_string(),
             "design matrix is singular (perfect multicollinearity detected)"
         );
         assert_eq!(
-            LeastSquaresError::ComputationFailed("t-distribution CDF did not converge".to_string())
-                .to_string(),
-            "computation failed: t-distribution CDF did not converge"
+            LeastSquaresError::Common(CommonError::MissingClusterColumn).to_string(),
+            "cov_type='cluster' requires cluster identifiers to be provided"
         );
     }
 
@@ -1201,8 +1177,8 @@ mod tests {
             LeastSquaresError::SingularMatrix
         );
         assert_ne!(
-            LeastSquaresError::InsufficientClusters { g: 1 },
-            LeastSquaresError::InsufficientClusters { g: 0 }
+            LeastSquaresError::Common(CommonError::InsufficientClusters { g: 1 }),
+            LeastSquaresError::Common(CommonError::InsufficientClusters { g: 0 })
         );
     }
 
@@ -1253,7 +1229,7 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            LeastSquaresError::InsufficientObservations { n: 2, k: 2 }
+            LeastSquaresError::Common(CommonError::InsufficientObservations { n: 2, k: 2 })
         );
     }
 
@@ -1308,7 +1284,7 @@ mod tests {
 
         assert!(matches!(
             result.unwrap_err(),
-            LeastSquaresError::ComputationFailed(_)
+            LeastSquaresError::Common(CommonError::ComputationFailed(_))
         ));
     }
 
@@ -1329,9 +1305,9 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            LeastSquaresError::InvalidConfidenceLevel {
+            LeastSquaresError::Common(CommonError::InvalidConfidenceLevel {
                 confidence_level: 1.5
-            }
+            })
         );
     }
 
@@ -1661,9 +1637,9 @@ mod tests {
 
             assert_eq!(
                 result.unwrap_err(),
-                LeastSquaresError::InvalidConfidenceLevel {
+                LeastSquaresError::Common(CommonError::InvalidConfidenceLevel {
                     confidence_level: level
-                },
+                }),
                 "level={level}"
             );
         }
@@ -1915,7 +1891,10 @@ mod tests {
 
         let result = OlsEstimator::fit(input, CovType::Cluster { groups: None }, 0.95);
 
-        assert_eq!(result.unwrap_err(), LeastSquaresError::MissingClusterColumn);
+        assert_eq!(
+            result.unwrap_err(),
+            LeastSquaresError::Common(CommonError::MissingClusterColumn)
+        );
     }
 
     #[test]
@@ -1939,7 +1918,7 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            LeastSquaresError::InsufficientClusters { g: 1 }
+            LeastSquaresError::Common(CommonError::InsufficientClusters { g: 1 })
         );
     }
 

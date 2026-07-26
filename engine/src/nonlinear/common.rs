@@ -10,6 +10,11 @@
 //!
 //! バリアント一覧・Python例外との対応表は`docs/planning/specs/nonlinear-implementation-notes.md`
 //! 「エラー型: nonlinear系統で共有（MleError）」を参照。
+//!
+//! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
+//! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は、linear系統の
+//! `LeastSquaresError`と文言まで完全に重複していたため`engine::error::CommonError`に
+//! 切り出し、`Common`バリアント経由で保持する（Issue #113）。
 
 use argmin::core::TerminationStatus;
 use argmin::core::{
@@ -22,15 +27,17 @@ use faer::prelude::{Solve, SolveLstsq};
 use faer::{Mat, Side};
 use thiserror::Error;
 
+use crate::error::CommonError;
+
 /// Logit/Probit/Tobitの計算過程で発生しうるエラー。
 ///
 /// `engine`はPyO3を知らないため、Python例外への変換は`engine_pybind`側で行う
 /// （`.claude/rules/rust-style.md`「エラーハンドリング」参照）。
 #[derive(Debug, Error, PartialEq)]
 pub enum MleError {
-    /// yとxの行数が一致しない（OLSの`LeastSquaresError::DimensionMismatch`と同型）。
-    #[error("dimension mismatch: y has {y_rows} rows but x has {x_rows} rows")]
-    DimensionMismatch { y_rows: usize, x_rows: usize },
+    /// 系統をまたいで共通のバリデーション・計算エラー（`CommonError`参照）。
+    #[error(transparent)]
+    Common(#[from] CommonError),
 
     /// `raise_on_non_convergence=true`（既定）かつ`max_iter`回で収束しなかった。
     #[error(
@@ -39,28 +46,9 @@ pub enum MleError {
     )]
     NonConvergence { n_iter: usize },
 
-    /// 観測数nが説明変数の数k（定数項を含む）以下。
-    #[error(
-        "insufficient observations: n={n} must be greater than k={k} \
-         (number of independent variables, including the intercept)"
-    )]
-    InsufficientObservations { n: usize, k: usize },
-
-    /// `confidence_level`が`(0, 1)`の範囲外。
-    #[error("confidence_level must be in the range (0, 1): {confidence_level}")]
-    InvalidConfidenceLevel { confidence_level: f64 },
-
     /// `max_iter`が0以下。
     #[error("max_iter must be a positive integer, got {max_iter}")]
     InvalidMaxIter { max_iter: i64 },
-
-    /// `cov_type="cluster"`なのにクラスターのグループキーが渡されていない。
-    #[error("cov_type='cluster' requires cluster identifiers to be provided")]
-    MissingClusterColumn,
-
-    /// `cov_type="cluster"`のときのクラスター数が2未満。
-    #[error("cov_type='cluster' requires at least 2 clusters, got {g}")]
-    InsufficientClusters { g: usize },
 
     /// Hessianが特異で逆行列が計算できない。Newton法のステップ求解中（収束前の任意の点）、
     /// および収束点での観測情報行列・サンドイッチ型・クラスターロバストSE計算
@@ -73,10 +61,6 @@ pub enum MleError {
     /// 特異という別の原因のため、`SingularHessian`とは区別する。
     #[error("the outer-product-of-gradients (OPG) matrix is singular and cannot be inverted")]
     SingularOpgMatrix,
-
-    /// 上記以外の計算過程での失敗（分布のCDF計算等）。
-    #[error("computation failed: {0}")]
-    ComputationFailed(String),
 
     /// Tobit専用: 打ち切り境界（下限/上限）の指定が不正（下限≧上限等）。
     #[error(
@@ -155,7 +139,7 @@ where
             let linesearch = MoreThuenteLineSearch::new();
             let solver = BFGS::new(linesearch)
                 .with_tolerance_grad(tol)
-                .map_err(|e| MleError::ComputationFailed(e.to_string()))?;
+                .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
             let result = Executor::new(problem, solver)
                 .configure(|state| {
                     state
@@ -171,7 +155,7 @@ where
             let linesearch = MoreThuenteLineSearch::new();
             let solver = LBFGS::new(linesearch, 7)
                 .with_tolerance_grad(tol)
-                .map_err(|e| MleError::ComputationFailed(e.to_string()))?;
+                .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
             let result = Executor::new(problem, solver)
                 .configure(|state| state.param(initial_params).max_iters(max_iter))
                 .run()
@@ -188,7 +172,7 @@ where
     // （bfgs/lbfgsの内部近似Hessianは使い回さない）。
     let hessian = model
         .hessian(&params)
-        .map_err(|e| MleError::ComputationFailed(e.to_string()))?;
+        .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
 
     Ok(SolverOutput {
         params,
@@ -215,10 +199,10 @@ where
     );
     let n_iter = state.get_iter() as usize;
     let params = state.get_best_param().cloned().ok_or_else(|| {
-        MleError::ComputationFailed("solver did not produce a parameter estimate".to_string())
+        CommonError::ComputationFailed("solver did not produce a parameter estimate".to_string())
     })?;
     let model = problem.take_problem().ok_or_else(|| {
-        MleError::ComputationFailed("failed to recover the optimization problem".to_string())
+        CommonError::ComputationFailed("failed to recover the optimization problem".to_string())
     })?;
     Ok((params, converged, n_iter, model))
 }
@@ -229,7 +213,7 @@ where
 fn convert_optimizer_error(e: OptimizerError) -> MleError {
     match e.downcast::<MleError>() {
         Ok(mle_error) => mle_error,
-        Err(other) => MleError::ComputationFailed(other.to_string()),
+        Err(other) => CommonError::ComputationFailed(other.to_string()).into(),
     }
 }
 
@@ -478,8 +462,8 @@ pub fn sandwich_cov_params(
 /// `correction = G/(G-1) * (n-1)/(n-k)`（OLSと同じ小標本補正、常に適用する。無効化
 /// オプションはない）。
 ///
-/// `groups`が2種類以上の値を持つこと（クラスター数`G>=2`）の検証（`MleError::
-/// InsufficientClusters`）、および未指定時の`MleError::MissingClusterColumn`は
+/// `groups`が2種類以上の値を持つこと（クラスター数`G>=2`）の検証（`CommonError::
+/// InsufficientClusters`）、および未指定時の`CommonError::MissingClusterColumn`は
 /// モデルごとの`fit()`実装側の責務（OLSの`validate_cluster_groups`と同じ役割分担、
 /// `docs/planning/specs/logit-probit-issue-breakdown.md`のB7/C7参照）。
 /// `groups.len() != n`もモデル側の内部契約（`debug_assert_eq!`で検証）。
@@ -929,50 +913,22 @@ mod tests {
 
     #[test]
     fn mle_error_messages_are_human_readable() {
-        assert_eq!(
-            MleError::DimensionMismatch {
-                y_rows: 10,
-                x_rows: 8
-            }
-            .to_string(),
-            "dimension mismatch: y has 10 rows but x has 8 rows"
-        );
+        // 6種の共通バリアント（DimensionMismatch等）のメッセージ検証は
+        // `engine::error`側のテストに集約済み（Issue #113）。ここではnonlinear固有の
+        // バリアントに加え、`Common`が`CommonError`のDisplayをtransparentに転送する
+        // ことだけを確認する。
         assert_eq!(
             MleError::NonConvergence { n_iter: 35 }.to_string(),
             "failed to converge after 35 iterations. Set raise_on_non_convergence=False \
              to receive the result anyway, or increase max_iter"
         );
         assert_eq!(
-            MleError::InsufficientObservations { n: 2, k: 3 }.to_string(),
-            "insufficient observations: n=2 must be greater than k=3 \
-             (number of independent variables, including the intercept)"
-        );
-        assert_eq!(
-            MleError::InvalidConfidenceLevel {
-                confidence_level: 1.5
-            }
-            .to_string(),
-            "confidence_level must be in the range (0, 1): 1.5"
-        );
-        assert_eq!(
             MleError::InvalidMaxIter { max_iter: 0 }.to_string(),
             "max_iter must be a positive integer, got 0"
         );
         assert_eq!(
-            MleError::MissingClusterColumn.to_string(),
-            "cov_type='cluster' requires cluster identifiers to be provided"
-        );
-        assert_eq!(
-            MleError::InsufficientClusters { g: 1 }.to_string(),
-            "cov_type='cluster' requires at least 2 clusters, got 1"
-        );
-        assert_eq!(
             MleError::SingularHessian.to_string(),
             "the Hessian is singular and cannot be inverted"
-        );
-        assert_eq!(
-            MleError::ComputationFailed("normal CDF did not converge".to_string()).to_string(),
-            "computation failed: normal CDF did not converge"
         );
         assert_eq!(
             MleError::InvalidCensoringBounds {
@@ -987,35 +943,19 @@ mod tests {
             MleError::SingularOpgMatrix.to_string(),
             "the outer-product-of-gradients (OPG) matrix is singular and cannot be inverted"
         );
+        assert_eq!(
+            MleError::Common(CommonError::MissingClusterColumn).to_string(),
+            "cov_type='cluster' requires cluster identifiers to be provided"
+        );
     }
 
     #[test]
     fn mle_error_implements_partial_eq() {
-        assert_eq!(
-            MleError::DimensionMismatch {
-                y_rows: 10,
-                x_rows: 10
-            },
-            MleError::DimensionMismatch {
-                y_rows: 10,
-                x_rows: 10
-            }
-        );
-        assert_ne!(
-            MleError::DimensionMismatch {
-                y_rows: 10,
-                x_rows: 10
-            },
-            MleError::DimensionMismatch {
-                y_rows: 10,
-                x_rows: 8
-            }
-        );
         assert_eq!(MleError::SingularHessian, MleError::SingularHessian);
         assert_ne!(MleError::SingularHessian, MleError::SingularOpgMatrix);
         assert_ne!(
-            MleError::InsufficientClusters { g: 1 },
-            MleError::InsufficientClusters { g: 0 }
+            MleError::Common(CommonError::InsufficientClusters { g: 1 }),
+            MleError::Common(CommonError::InsufficientClusters { g: 0 })
         );
         assert_eq!(
             MleError::NonConvergence { n_iter: 35 },

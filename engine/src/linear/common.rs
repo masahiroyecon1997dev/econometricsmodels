@@ -11,8 +11,15 @@
 //! なり、WLS固有のバリアント（`WeightDimensionMismatch`/`NonPositiveWeight`）も混在する
 //! ことになった。実態（OLS・WLS共有）に合わせて`common.rs`に切り出し、`LeastSquaresError`に
 //! 改名した（Issue #112）。
+//!
+//! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
+//! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は、nonlinear系統の
+//! `MleError`と文言まで完全に重複していたため`engine::error::CommonError`に切り出し、
+//! `Common`バリアント経由で保持する（Issue #113）。
 
 use thiserror::Error;
+
+use crate::error::CommonError;
 
 /// OLS/WLSの計算過程で発生しうるエラー。
 ///
@@ -26,9 +33,9 @@ use thiserror::Error;
 /// 正規方程式ソルバー実装等の後続issueで必要になった場合はバリアントを随時追加する。
 #[derive(Debug, Error, PartialEq)]
 pub enum LeastSquaresError {
-    /// yとxの行数が一致しない。
-    #[error("dimension mismatch: y has {y_rows} rows but x has {x_rows} rows")]
-    DimensionMismatch { y_rows: usize, x_rows: usize },
+    /// 系統をまたいで共通のバリデーション・計算エラー（`CommonError`参照）。
+    #[error(transparent)]
+    Common(#[from] CommonError),
 
     /// WLSの重み配列とyの行数が一致しない。
     #[error("dimension mismatch: y has {y_rows} rows but weight has {weight_rows} rows")]
@@ -39,34 +46,11 @@ pub enum LeastSquaresError {
     #[error("weight at row {row} must be positive, got {weight}")]
     NonPositiveWeight { row: usize, weight: f64 },
 
-    /// 観測数nが説明変数の数k（定数項を含む）以下。
-    #[error(
-        "insufficient observations: n={n} must be greater than k={k} \
-         (number of independent variables, including the intercept)"
-    )]
-    InsufficientObservations { n: usize, k: usize },
-
-    /// `cov_type=Cluster`のときのクラスター数が2未満。
-    #[error("cov_type='cluster' requires at least 2 clusters, got {g}")]
-    InsufficientClusters { g: usize },
-
-    /// `confidence_level`が`(0, 1)`の範囲外。
-    #[error("confidence_level must be in the range (0, 1): {confidence_level}")]
-    InvalidConfidenceLevel { confidence_level: f64 },
-
     /// `hac_lags`が負、または観測数`n`以上。
     #[error("hac_lags must be in the range [0, n): got {hac_lags}, n={n}")]
     InvalidHacLags { hac_lags: i64, n: usize },
 
-    /// `cov_type=Cluster`なのにクラスターのグループキーが渡されていない。
-    #[error("cov_type='cluster' requires cluster identifiers to be provided")]
-    MissingClusterColumn,
-
     /// 設計行列が特異（完全な多重共線性等）。
     #[error("design matrix is singular (perfect multicollinearity detected)")]
     SingularMatrix,
-
-    /// 上記以外の計算過程での失敗（t分布のCDF計算等）。
-    #[error("computation failed: {0}")]
-    ComputationFailed(String),
 }

@@ -10,6 +10,7 @@
 //! OLSと異なり、Phase2（Logit/Probit/Tobit）では`weights`/`offset`を見送っているため
 //! （`nonlinear-api-design.md`7章）、`from_columns_weighted`に相当するものはない。
 
+use crate::error::CommonError;
 use crate::nonlinear::common::MleError;
 use faer::Mat;
 
@@ -43,7 +44,7 @@ impl LogitInput {
     /// （`docs/planning/specs/nonlinear-implementation-notes.md`参照）。
     ///
     /// # Errors
-    /// `y`といずれかの`x_columns`の長さが一致しない場合は`MleError::DimensionMismatch`を返す。
+    /// `y`といずれかの`x_columns`の長さが一致しない場合は`CommonError::DimensionMismatch`を返す。
     ///
     /// # パニックについて
     /// `x_names.len() != x_columns.len()`の場合は`debug_assert!`でパニックする。これは
@@ -64,10 +65,11 @@ impl LogitInput {
         );
         for col in x_columns {
             if col.len() != y.len() {
-                return Err(MleError::DimensionMismatch {
+                return Err(CommonError::DimensionMismatch {
                     y_rows: y.len(),
                     x_rows: col.len(),
-                });
+                }
+                .into());
             }
         }
 
@@ -195,10 +197,10 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            MleError::DimensionMismatch {
+            MleError::Common(CommonError::DimensionMismatch {
                 y_rows: 3,
                 x_rows: 2
-            }
+            })
         );
     }
 

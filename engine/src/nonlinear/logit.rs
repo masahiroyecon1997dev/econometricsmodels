@@ -31,7 +31,9 @@
 //! （`nonlinear/common.rs`の`SolverOutput.hessian`と同じく対数尤度そのものの符号）。
 
 use crate::error::CommonError;
-use crate::nonlinear::common::MleError;
+use crate::nonlinear::common::{
+    Method, MleError, destandardize_params, run_solver, standardize_columns,
+};
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
 
@@ -274,6 +276,122 @@ impl Hessian for LogitProblem {
     }
 }
 
+/// Logitの推定結果（現時点では骨格のみ）。`fit`でのバリデーション・Newton-Raphsonでの
+/// 最適化を通過した状態を表す。
+///
+/// 標準誤差・z値・p値・信頼区間・適合度統計量等は未実装（Issue #56の完了条件は
+/// Newton-Raphsonでの最適化・収束判定のみ）。`docs/planning/specs/
+/// logit-probit-issue-breakdown.md`のB4（method分岐）・B5以降（標準誤差等）で
+/// `fit`に追加していく想定。
+///
+/// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
+#[derive(Debug)]
+pub struct LogitEstimator {
+    input: LogitInput,
+    /// 係数（元のスケール。`standardize_columns`で標準化した空間で最適化した後、
+    /// `destandardize_params`で逆変換済み）。`input.param_names()`と対応する
+    params: Vec<f64>,
+    /// 収束したかどうか
+    converged: bool,
+    /// 実際の反復回数
+    n_iter: usize,
+}
+
+impl LogitEstimator {
+    /// Newton-Raphson法で負の対数尤度を最小化し、Logitの係数を推定する。
+    ///
+    /// 初期値は常にゼロベクトル（`start_params`によるユーザー指定は未対応。
+    /// `nonlinear-api-design.md`7章では確定オプションだが、対応するIssueが存在しないため
+    /// 本Issueのスコープ外とし、ユーザー確認の上で見送った）。
+    ///
+    /// 設計行列は`standardize_columns`で内部的に標準化してから最適化し（勾配ノルムに
+    /// 基づく収束判定`tol`が設計行列のスケールに依存しないようにするため、
+    /// `docs/planning/specs/nonlinear-implementation-notes.md`「収束判定のtol」参照）、
+    /// 収束後のパラメータを`destandardize_params`で元のスケールへ逆変換する。
+    ///
+    /// `n <= k`（観測数が説明変数の数、定数項を含む、以下）のとき`CommonError::
+    /// InsufficientObservations`で弾く閾値はOLSと同じ式だが、根拠は異なる。OLSでは
+    /// 残差自由度`n-k`が0以下だと分散推定が原理的に不可能という数学的必要条件だが、
+    /// LogitのようなMLEベースのモデルでは`n<=k`はほぼ確実に完全分離
+    /// （perfect separation。ある説明変数の値でyの値が完全に分かれてしまい、
+    /// 尤度が発散してMLEが存在しない状態）を引き起こす経験則としての安全側の判断。
+    /// 数学的な必要条件ではないが、後続のProbit/Tobit実装でもこの閾値をそのまま
+    /// 踏襲する（他パッケージがこの水準で明示的な検証をしていない場合でも、
+    /// 発散した推定量を黙って返すよりは早期にエラーにする方針を優先する）。
+    ///
+    /// # Errors
+    /// - `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
+    /// - `max_iter`が0以下: `MleError::InvalidMaxIter`
+    /// - 観測数`n`が`k`（定数項を含む説明変数の数）以下: `CommonError::InsufficientObservations`
+    /// - `raise_on_non_convergence=true`かつ`max_iter`回で未収束: `MleError::NonConvergence`
+    /// - 収束点（または`raise_on_non_convergence=false`時の打ち切り点）のHessianが特異
+    ///   （設計行列の完全な多重共線性等）: `MleError::SingularHessian`
+    pub fn fit(
+        input: LogitInput,
+        max_iter: i64,
+        tol: f64,
+        raise_on_non_convergence: bool,
+        confidence_level: f64,
+    ) -> Result<Self, MleError> {
+        if !(confidence_level > 0.0 && confidence_level < 1.0) {
+            return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
+        }
+        if max_iter <= 0 {
+            return Err(MleError::InvalidMaxIter { max_iter });
+        }
+
+        let n = input.nobs();
+        let k = input.k();
+        if n <= k {
+            return Err(CommonError::InsufficientObservations { n, k }.into());
+        }
+
+        let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
+        let problem = LogitProblem {
+            x: x_std,
+            y: input.y().clone(),
+        };
+
+        let output = run_solver(
+            problem,
+            Method::Newton,
+            vec![0.0; k],
+            max_iter as u64,
+            tol,
+            raise_on_non_convergence,
+        )?;
+
+        let params = destandardize_params(&output.params, &scale);
+
+        Ok(Self {
+            input,
+            params,
+            converged: output.converged,
+            n_iter: output.n_iter,
+        })
+    }
+
+    /// 推定に使った入力データ
+    pub fn input(&self) -> &LogitInput {
+        &self.input
+    }
+
+    /// 係数（元のスケール）
+    pub fn params(&self) -> &[f64] {
+        &self.params
+    }
+
+    /// 収束したかどうか
+    pub fn converged(&self) -> bool {
+        self.converged
+    }
+
+    /// 実際の反復回数
+    pub fn n_iter(&self) -> usize {
+        self.n_iter
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -490,5 +608,115 @@ mod tests {
         assert!(softplus(1000.0).is_finite());
         assert!((softplus(1000.0) - 1000.0).abs() < 1e-9);
         assert!(softplus(-1000.0).abs() < 1e-12);
+    }
+
+    /// 切片のみ（説明変数なし）のLogitは、MLEの一階条件`Σy_i - n*p = 0`から
+    /// `p = ȳ`、すなわち`θ̂ = ln(ȳ/(1-ȳ))`という閉じた形の解析解を持つ
+    /// （`fit`が最適化ロジックを経ずに正しい値へ収束することを検証できる、
+    /// 数値最適化を要する手法としては数少ない厳密な既知解のケース）。
+    fn intercept_only_input() -> LogitInput {
+        let y = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        LogitInput::from_columns(&y, &[], vec![], true, "y".to_string()).unwrap()
+    }
+
+    #[test]
+    fn fit_newton_converges_to_closed_form_solution_for_intercept_only_model() {
+        let input = intercept_only_input();
+        let estimator = LogitEstimator::fit(input, 35, 1e-6, true, 0.95).unwrap();
+
+        let y_bar: f64 = 4.0 / 7.0;
+        let expected = (y_bar / (1.0 - y_bar)).ln();
+
+        assert!(estimator.converged());
+        assert_eq!(estimator.params().len(), 1);
+        assert!(
+            (estimator.params()[0] - expected).abs() < 1e-6,
+            "params={:?}, expected={}",
+            estimator.params(),
+            expected
+        );
+        // 切片のみの1次元凹関数のNewton法は数回で収束するはず
+        assert!(estimator.n_iter() <= 10, "n_iter={}", estimator.n_iter());
+    }
+
+    #[test]
+    fn fit_returns_invalid_confidence_level_error_out_of_range() {
+        let result = LogitEstimator::fit(intercept_only_input(), 35, 1e-6, true, 1.5);
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::Common(CommonError::InvalidConfidenceLevel {
+                confidence_level: 1.5
+            })
+        );
+    }
+
+    #[test]
+    fn fit_returns_invalid_max_iter_error_for_non_positive_max_iter() {
+        let result = LogitEstimator::fit(intercept_only_input(), 0, 1e-6, true, 0.95);
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::InvalidMaxIter { max_iter: 0 }
+        );
+    }
+
+    #[test]
+    fn fit_returns_insufficient_observations_error_when_n_less_equal_k() {
+        let y = vec![0.0, 1.0];
+        let x_columns = vec![vec![1.0, 2.0]];
+        let input = LogitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = LogitEstimator::fit(input, 35, 1e-6, true, 0.95);
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::Common(CommonError::InsufficientObservations { n: 2, k: 2 })
+        );
+    }
+
+    #[test]
+    fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix() {
+        // x2 = 2*x1（完全な多重共線性）。θ=0でのHessianは0.25*X'Xで、X'X自体が
+        // 構造的に特異（yの値に関わらず常に特異）なので、Newtonの初回ステップで
+        // 確実にnewton_stepの特異性検出に引っかかる（完全分離のような「収束の
+        // 挙動に依存する」ケースと異なり、決定的に再現できる）。
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
+        let input = LogitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = LogitEstimator::fit(input, 35, 1e-6, true, 0.95);
+        assert!(
+            matches!(result, Err(MleError::SingularHessian)),
+            "{:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn fit_returns_non_convergence_error_when_max_iter_is_too_small_and_raise_is_true() {
+        let result = LogitEstimator::fit(intercept_only_input(), 1, 1e-12, true, 0.95);
+        assert!(
+            matches!(result, Err(MleError::NonConvergence { .. })),
+            "{:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn fit_returns_unconverged_result_without_raising_when_raise_on_non_convergence_is_false() {
+        let estimator = LogitEstimator::fit(intercept_only_input(), 1, 1e-12, false, 0.95).unwrap();
+        assert!(!estimator.converged());
     }
 }

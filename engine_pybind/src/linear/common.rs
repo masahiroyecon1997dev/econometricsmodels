@@ -8,11 +8,15 @@
 //! `LeastSquaresError`は元々`OlsError`という名前だったが、OLS単体のエラー型ではなくWLSも
 //! 含む`linear`系統共通のエラー型であることを名前に反映するため、`engine`側で
 //! `engine::linear::common::LeastSquaresError`に改名・移動した（Issue #112）。
+//!
+//! `LeastSquaresError`の`Common`バリアント（`engine::error::CommonError`、nonlinear系統の
+//! `MleError`と共有する6種のバリデーションエラー）は`crate::errors::common_error_to_pyerr`
+//! に委譲する（Issue #113。系統ごとに同じ判定ロジックを重複させない）。
 
 use engine::linear::common::LeastSquaresError;
 use pyo3::PyErr;
 
-use crate::errors::{ComputationError, ValidationError};
+use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
 
 /// `engine::linear::common::LeastSquaresError`をPython例外に変換する。
 ///
@@ -24,17 +28,11 @@ use crate::errors::{ComputationError, ValidationError};
 /// 対応表は`docs/planning/specs/ols-implementation-notes.md`「1. エラーハンドリング」参照。
 pub(crate) fn least_squares_error_to_pyerr(err: LeastSquaresError) -> PyErr {
     match err {
-        LeastSquaresError::DimensionMismatch { .. }
-        | LeastSquaresError::WeightDimensionMismatch { .. }
+        LeastSquaresError::Common(common) => common_error_to_pyerr(common),
+        LeastSquaresError::WeightDimensionMismatch { .. }
         | LeastSquaresError::NonPositiveWeight { .. }
-        | LeastSquaresError::InsufficientObservations { .. }
-        | LeastSquaresError::MissingClusterColumn
-        | LeastSquaresError::InvalidConfidenceLevel { .. }
-        | LeastSquaresError::InsufficientClusters { .. }
         | LeastSquaresError::InvalidHacLags { .. } => ValidationError::new_err(err.to_string()),
-        LeastSquaresError::SingularMatrix | LeastSquaresError::ComputationFailed(_) => {
-            ComputationError::new_err(err.to_string())
-        }
+        LeastSquaresError::SingularMatrix => ComputationError::new_err(err.to_string()),
     }
 }
 

@@ -127,6 +127,15 @@ argminの`CostFunction`/`Gradient`/`Hessian`トレイト実装と、`nonlinear`�
 
 **`y`の値域検証（単位区間`[0,1]`）は次Issue（B2、尤度・スコア・Hessian実装）に持ち越し**: statsmodelsの`Logit`はコンストラクタ時点で`endog`が単位区間`[0,1]`に収まることを検証する（範囲外は`ValueError: endog must be in the unit interval.`）。Issue #54は次元検証のみがスコープのため`LogitInput::from_columns`では実装していないが、B2で同等の検証を追加する（rust-reviewerの指摘: 当初「statsmodelsも検証していない」という誤った理由でスコープ外としていたdocコメントを訂正済み）。
 
+### 系統をまたぐ重複バリデーションエラーの共通化（Issue #113で実装済み）
+
+上記「Logitのデータ構造」節で`MleError`に追加した`DimensionMismatch`をはじめ、`InsufficientObservations`/`InvalidConfidenceLevel`/`MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`の6バリアントが、linear系統の`LeastSquaresError`（Issue #112で`OlsError`から改名）と文言まで完全に重複していることが判明した。IV/panel/causal/io/time_series等、今後7系統・20〜30手法に増える前提のため、`engine/src/error.rs`に`CommonError`として切り出し、`MleError`・`LeastSquaresError`はいずれもthiserrorの`#[error(transparent)] Common(#[from] CommonError)`バリアントで包む設計にした。
+
+- **`MleError`の該当6バリアントは削除し、`Common(CommonError)`に置き換えた**。`?`演算子は`#[from]`により`CommonError`→`MleError`へ自動変換されるため、`.map_err(|e| CommonError::ComputationFailed(e.to_string()))?`のように呼び出し側の変更は最小限で済む。直接`Err(...)`を返す箇所（`?`を経由しない`return Err(...)`）は`.into()`を明示する。
+- **各系統固有のバリアント（`NonConvergence`/`InvalidMaxIter`/`SingularHessian`/`SingularOpgMatrix`/`InvalidCensoringBounds`）は`CommonError`に含めず、従来通り`MleError`に直接定義する**。「意味は同じだが系統固有の追加フィールドが要る」ケースが将来出てきた場合も、`CommonError`を拡張せずその系統独自のバリアントとして追加すればよい（構造上のブロッカーはない）。
+- **`engine_pybind`側**: `engine_pybind/src/errors.rs`に`common_error_to_pyerr(CommonError) -> PyErr`を新設し、`least_squares_error_to_pyerr`（`linear`系統）はこれに委譲する形に変更済み。`MleError`用の変換関数（`mle_error_to_pyerr`相当）はLogitのpybind実装時（B13）にこのヘルパーを再利用する。
+- **テストの重複排除**: 6バリアントのメッセージ・`PartialEq`のテストは`engine::error`側の`common_error_messages_are_human_readable`/`common_error_implements_partial_eq`に集約し、`MleError`・`LeastSquaresError`側のテストは各系統固有のバリアントと`Common`のtransparent転送の確認のみに絞った。
+
 ## 未確定（実装issue着手時、または追加相談が必要）
 
 - **Tobit固有エラーの正確な検証条件**: 下限<上限の検証、両側打ち切り時の整合性チェック等の詳細。Tobit実装時に決定する

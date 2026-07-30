@@ -394,6 +394,27 @@ pub fn destandardize_params(params_std: &[f64], scale: &ColumnScale) -> Vec<f64>
         .collect()
 }
 
+/// `standardize_columns`で標準化した空間で評価した係数分散共分散行列`cov_std`
+/// （`observed_information_cov_params`等の`cov_type`共通行列演算の戻り値）を、
+/// 元のスケールの係数分散共分散行列へ逆変換する。
+///
+/// `θ_orig = D⁻¹θ_std`（`D = diag(stds)`、`destandardize_params`と同じ変換）のとき、
+/// 対数尤度を`θ_std`の関数とみなすと連鎖律により`H_std = D⁻¹ H_orig D⁻¹`
+/// （`H`はHessian、`D`は対角行列なので`D⁻¹` の転置は`D⁻¹`自身）が成り立つ。
+/// 分散共分散行列はHessianの逆行列に比例する（`Σ = -H⁻¹`等）ため、
+/// `Σ_orig = -H_orig⁻¹ = -(D H_std D)⁻¹ = D⁻¹(-H_std⁻¹)D⁻¹ = D⁻¹ Σ_std D⁻¹`
+/// （`H_std = D⁻¹H_origD⁻¹`の逆を取ると`H_orig = D H_std D`になることを使った）。
+/// この関係はOPG（`Σᵢsᵢsᵢ'`の逆行列）・サンドイッチ・クラスターの各`cov_type`でも
+/// 同様に成り立つ（いずれも`H⁻¹`を両側から掛ける、または`H⁻¹`の逆行列を取る形の式のため）。
+/// `D`が対角行列であることから、要素ごとに`Σ_orig[i,j] = Σ_std[i,j] / (stds[i]*stds[j])`
+/// という単純な計算に帰着する。
+pub fn destandardize_cov_params(cov_std: &Mat<f64>, scale: &ColumnScale) -> Mat<f64> {
+    let k = scale.stds.len();
+    Mat::from_fn(k, k, |i, j| {
+        *cov_std.get(i, j) / (scale.stds[i] * scale.stds[j])
+    })
+}
+
 // `cov_type`ごとの係数分散共分散行列の共通計算。モデル固有の尤度計算には依存せず、
 // 収束点で評価した`H`（対数尤度のHessian、k×k）と`scores`（観測ごとのスコア行列、n×k、
 // 各行が観測`i`のスコアベクトル`sᵢ`）だけを受け取る（`docs/planning/specs/
@@ -935,6 +956,31 @@ mod tests {
                 params_orig[0] + (1..3).map(|j| *x.get(i, j) * params_orig[j]).sum::<f64>();
             assert!((pred_std - pred_orig).abs() < 1e-9);
         }
+    }
+
+    #[test]
+    fn destandardize_cov_params_divides_by_outer_product_of_stds() {
+        let x = Mat::from_fn(4, 2, |i, j| {
+            if j == 0 {
+                1.0
+            } else {
+                [10.0, 20.0, 30.0, 40.0][i]
+            }
+        });
+        let (_, scale) = standardize_columns(&x, true);
+        assert_eq!(scale.stds[0], 1.0);
+        assert!(scale.stds[1] > 1.0);
+
+        let cov_std = Mat::from_fn(2, 2, |i, j| [[4.0, 6.0], [6.0, 9.0]][i][j]);
+        let cov_orig = destandardize_cov_params(&cov_std, &scale);
+
+        // 切片列は`stds[0]==1.0`なので影響を受けない。x1列は`stds[1]`で
+        // 割った分だけ小さくなる（`Σ_orig[i,j] = Σ_std[i,j]/(stds[i]*stds[j])`）。
+        let s1 = scale.stds[1];
+        assert!((*cov_orig.get(0, 0) - 4.0).abs() < 1e-12);
+        assert!((*cov_orig.get(0, 1) - 6.0 / s1).abs() < 1e-12);
+        assert!((*cov_orig.get(1, 0) - 6.0 / s1).abs() < 1e-12);
+        assert!((*cov_orig.get(1, 1) - 9.0 / (s1 * s1)).abs() < 1e-12);
     }
 
     #[test]

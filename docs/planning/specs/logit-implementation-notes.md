@@ -79,3 +79,20 @@
 
 - **`newton`との結果一致（切片のみモデル）**: 既知の解析解を持つ切片のみモデルで`bfgs`/`lbfgs`をそれぞれ実行し、`newton`（Issue #56のテスト）と同じ解析解へ収束することを検証（`fit_bfgs_and_lbfgs_converge_to_same_solution_as_newton`）。`newton`は許容誤差`1e-6`だが、`bfgs`/`lbfgs`は準ニュートン法で収束が緩やかなため`common.rs`の既存テスト（`run_solver_bfgs_converges_to_known_minimum`等）に倣い`1e-4`とした。
 - **`newton`との結果一致（非自明なスケールを持つ説明変数）**: 上記の切片のみモデルは`x`が定数列（切片）だけのため`standardize_columns`のスケーリングが実質no-op（`stds`が全て`1.0`のまま）になり、標準化・逆標準化の往復ロジックを一度も通らない（rust-reviewer指摘、Issue #57で対応）。`x1=[10,20,30,40]`という非自明なスケールの説明変数を持つデータセット（閉じた形の解析解は無い）で`newton`/`bfgs`/`lbfgs`を実行し、3手法が同じ解へ収束することをクロスメソッド一致検証で確認した（`fit_bfgs_and_lbfgs_agree_with_newton_when_design_matrix_has_nontrivial_scale`）。標準化空間でのBFGSの初期逆Hessian（`identity_matrix(k)`）・`destandardize_params`が正しく機能していることの間接的な検証になる。
+
+## 観測情報行列でのSE・z値・p値・信頼区間（Issue #58で実装済み）
+
+`LogitEstimator::fit`を拡張し、`run_solver`が返す収束点のHessian（標準化空間、θ_std基準）から`cov_type="classical"`/`"nonrobust"`相当の分散共分散行列を計算する。`cov_type`の選択オプション自体はまだ無く（OPG/サンドイッチ/クラスターはB6・B7）、常に観測情報行列を使う。
+
+- **標準化空間の`cov_params`をどう元のスケールに戻すか（重要な設計判断）**: `run_solver`が返すHessianは標準化された設計行列`x_std`基準（θ_std空間）で評価されている。`destandardize_params`はパラメータベクトルの逆変換（`θ_orig_j = θ_std_j/std_j`）だが、分散共分散行列には別の変換則が必要になる。`θ_orig = D⁻¹θ_std`（`D=diag(stds)`）とすると、連鎖律から`H_std = D⁻¹H_origD⁻¹`が成り立ち、これを`H_orig`について解くと`H_orig = D H_std D`。分散共分散行列はHessianの逆行列に比例する（`Σ=-H⁻¹`等）ため、`Σ_orig = D⁻¹Σ_stdD⁻¹`となる（`D`が対角行列であることから、成分ごとに`Σ_orig[i,j] = Σ_std[i,j]/(stds[i]*stds[j])`という単純な式に帰着する）。この関係はOPG・サンドイッチ・クラスターのいずれの`cov_type`でも同様に成り立つ（`Σ`の式がいずれも`H⁻¹`を両側から掛ける、または`H⁻¹`の逆行列を取る形のため）。この変換を`destandardize_cov_params`として`nonlinear/common.rs`に実装した（`destandardize_params`と対になる関数、Probit実装時にも再利用する想定）。
+- **`cov_params`（k×k行列）をフィールドとして保持**: `nonlinear-api-design.md`のB9（限界効果）が「`fit()`時の`cov_params`を再利用する（再最適化不要）」と明記しているため、対角成分（`std_errors`）だけでなく行列全体を`LogitEstimator`のフィールドとして保持する（OLSの`OlsEstimator`は`cov_params`を`fit()`内のローカル変数としてのみ使い、フィールドとしては保持していないが、OLSには限界効果のような事後的な再利用箇所が無いための違い）。
+- **`Normal::new(0.0, 1.0)`のエラー分岐は理論上到達不能**: 標準正規分布は標準偏差が正であることを要求するstatrsの検証を常に満たすため、`.claude/rules/rust-style.md`「テスト」のカバレッジ方針に従い、docコメントに理由を明記した上で`cargo-llvm-cov`のカバレッジ対象外として許容する。
+
+### テスト
+
+- **既知の解析解（切片のみモデル）**: 切片のみモデルでは全観測で`p_i=ȳ`となるため、観測情報行列も`H=-n*ȳ*(1-ȳ)`という閉じた形になり、`Var(θ̂)=1/(n*ȳ*(1-ȳ))`という解析解を持つ。この値との一致（許容誤差`1e-6`。Newtonの収束判定`tol=1e-6`由来の数値誤差があるため、他の閉じた形テストと同じ桁にした）と、z値・p値・信頼区間が標準正規分布（`statrs::Normal`で独立に検算）の定義式通りであることを検証した。
+- **多変量モデルでの内部整合性**: 多変量（k=3）では標準誤差に閉じた形の解析解が無いため、`cov_params`の対称性・対角成分が正であること、および`std_errors`/`z_stats`/`conf_lower`/`conf_upper`が定義式通りの関係を満たすことを検証した。対角成分だけでなく非対角成分の対称性も確認することで、`destandardize_cov_params`の`stds[i]*stds[j]`の掛け違い（添字の転置ミス等）を検出できるようにしている。
+
+### 発見済みの既知の問題: `bfgs`/`lbfgs`経由での特異性検出漏れ（Issue #129に切り出し）
+
+rust-reviewerの指摘（`bfgs`/`lbfgs`×完全な多重共線性でのテスト欠落）に対応しようとしたところ、テストの欠落ではなく実際のバグを発見した。`Method::Bfgs`で完全な多重共線性のあるデータセットを`fit()`すると、`MleError::SingularHessian`にならず桁違いに巨大な値を含む`Ok`が返る。原因は`observed_information_cov_params`（`neg_hessian_inverse`）が使う非ピボットCholesky分解が特異性を確実に検出できないため（`engine/src/linear/CLAUDE.md`に記録済みのOLSと同じ既知の限界、Issue #107の再発）。`Method::Newton`は`newton_step`内の別の検出経路（ピボット付きQR）でたまたま検出できているだけで、`bfgs`/`lbfgs`はこの経路を経由しないため無防備。ユーザー確認の上、この修正はIssue #58の本来のスコープ（観測情報行列でのSE・z値・p値・信頼区間の実装、`newton`経由では正しく動作する）を超えるため、Issue #129として別途切り出し、#58では現状維持のまま完了とした。

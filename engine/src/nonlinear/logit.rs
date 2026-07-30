@@ -298,7 +298,12 @@ pub struct LogitEstimator {
 }
 
 impl LogitEstimator {
-    /// Newton-Raphson法で負の対数尤度を最小化し、Logitの係数を推定する。
+    /// `method`（Newton-Raphson/BFGS/L-BFGS）で負の対数尤度を最小化し、Logitの係数を推定する。
+    ///
+    /// `method`の選択に関わらず、収束点でのHessian評価（SE計算用、B5以降で使用）は
+    /// 常に解析的に行う（`run_solver`の実装方針、`docs/planning/specs/
+    /// nonlinear-implementation-notes.md`「engine内のtrait設計」参照）。BFGS/L-BFGSが
+    /// 最適化中に内部で保持する近似Hessianは使い回さない。
     ///
     /// 初期値は常にゼロベクトル（`start_params`によるユーザー指定は未対応。
     /// `nonlinear-api-design.md`7章では確定オプションだが、対応するIssueが存在しないため
@@ -328,6 +333,7 @@ impl LogitEstimator {
     ///   （設計行列の完全な多重共線性等）: `MleError::SingularHessian`
     pub fn fit(
         input: LogitInput,
+        method: Method,
         max_iter: i64,
         tol: f64,
         raise_on_non_convergence: bool,
@@ -354,7 +360,7 @@ impl LogitEstimator {
 
         let output = run_solver(
             problem,
-            Method::Newton,
+            method,
             vec![0.0; k],
             max_iter as u64,
             tol,
@@ -622,7 +628,7 @@ mod tests {
     #[test]
     fn fit_newton_converges_to_closed_form_solution_for_intercept_only_model() {
         let input = intercept_only_input();
-        let estimator = LogitEstimator::fit(input, 35, 1e-6, true, 0.95).unwrap();
+        let estimator = LogitEstimator::fit(input, Method::Newton, 35, 1e-6, true, 0.95).unwrap();
 
         let y_bar: f64 = 4.0 / 7.0;
         let expected = (y_bar / (1.0 - y_bar)).ln();
@@ -639,9 +645,77 @@ mod tests {
         assert!(estimator.n_iter() <= 10, "n_iter={}", estimator.n_iter());
     }
 
+    /// `newton`と同じデータセット（既知の解析解を持つ切片のみモデル）で`bfgs`/`lbfgs`を
+    /// 実行し、いずれも同じ解析解へ収束することを検証する（Issue #57完了条件）。
+    #[test]
+    fn fit_bfgs_and_lbfgs_converge_to_same_solution_as_newton() {
+        let y_bar: f64 = 4.0 / 7.0;
+        let expected = (y_bar / (1.0 - y_bar)).ln();
+
+        for method in [Method::Bfgs, Method::Lbfgs] {
+            let estimator =
+                LogitEstimator::fit(intercept_only_input(), method, 100, 1e-6, true, 0.95).unwrap();
+
+            assert!(estimator.converged(), "{:?}", method);
+            assert!(
+                (estimator.params()[0] - expected).abs() < 1e-4,
+                "method={:?}, params={:?}, expected={}",
+                method,
+                estimator.params(),
+                expected
+            );
+        }
+    }
+
+    /// 切片のみモデル（`intercept_only_input`）は`x`が定数列（切片）だけのため、
+    /// `standardize_columns`のスケーリングが実質no-op（`stds`が全て`1.0`のまま）になり、
+    /// 標準化・逆標準化の往復ロジックを通らない（rust-reviewer指摘）。このテストは
+    /// 非自明なスケール（`std`が1から離れた値）を持つ説明変数を含むデータセットで
+    /// `newton`/`bfgs`/`lbfgs`を実行し、3手法が同じ解へ収束することを検証する
+    /// （閉じた形の解析解は存在しないため、`newton`の結果を参照値として使う
+    /// クロスメソッド一致検証。標準化空間でのBFGSの初期逆Hessian
+    /// （`identity_matrix(k)`）・`destandardize_params`が正しく機能していることの
+    /// 間接的な検証になる）。
+    #[test]
+    fn fit_bfgs_and_lbfgs_agree_with_newton_when_design_matrix_has_nontrivial_scale() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![10.0, 20.0, 30.0, 40.0]];
+        let make_input = || {
+            LogitInput::from_columns(
+                &y,
+                &x_columns,
+                vec!["x1".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap()
+        };
+
+        let newton =
+            LogitEstimator::fit(make_input(), Method::Newton, 35, 1e-8, true, 0.95).unwrap();
+        assert!(newton.converged());
+
+        for method in [Method::Bfgs, Method::Lbfgs] {
+            let estimator =
+                LogitEstimator::fit(make_input(), method, 200, 1e-8, true, 0.95).unwrap();
+
+            assert!(estimator.converged(), "{:?}", method);
+            for j in 0..2 {
+                assert!(
+                    (estimator.params()[j] - newton.params()[j]).abs() < 1e-4,
+                    "method={:?}, j={j}, params={:?}, newton_params={:?}",
+                    method,
+                    estimator.params(),
+                    newton.params()
+                );
+            }
+        }
+    }
+
     #[test]
     fn fit_returns_invalid_confidence_level_error_out_of_range() {
-        let result = LogitEstimator::fit(intercept_only_input(), 35, 1e-6, true, 1.5);
+        let result =
+            LogitEstimator::fit(intercept_only_input(), Method::Newton, 35, 1e-6, true, 1.5);
         assert_eq!(
             result.unwrap_err(),
             MleError::Common(CommonError::InvalidConfidenceLevel {
@@ -652,7 +726,8 @@ mod tests {
 
     #[test]
     fn fit_returns_invalid_max_iter_error_for_non_positive_max_iter() {
-        let result = LogitEstimator::fit(intercept_only_input(), 0, 1e-6, true, 0.95);
+        let result =
+            LogitEstimator::fit(intercept_only_input(), Method::Newton, 0, 1e-6, true, 0.95);
         assert_eq!(
             result.unwrap_err(),
             MleError::InvalidMaxIter { max_iter: 0 }
@@ -672,7 +747,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = LogitEstimator::fit(input, 35, 1e-6, true, 0.95);
+        let result = LogitEstimator::fit(input, Method::Newton, 35, 1e-6, true, 0.95);
         assert_eq!(
             result.unwrap_err(),
             MleError::Common(CommonError::InsufficientObservations { n: 2, k: 2 })
@@ -696,7 +771,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = LogitEstimator::fit(input, 35, 1e-6, true, 0.95);
+        let result = LogitEstimator::fit(input, Method::Newton, 35, 1e-6, true, 0.95);
         assert!(
             matches!(result, Err(MleError::SingularHessian)),
             "{:?}",
@@ -706,7 +781,8 @@ mod tests {
 
     #[test]
     fn fit_returns_non_convergence_error_when_max_iter_is_too_small_and_raise_is_true() {
-        let result = LogitEstimator::fit(intercept_only_input(), 1, 1e-12, true, 0.95);
+        let result =
+            LogitEstimator::fit(intercept_only_input(), Method::Newton, 1, 1e-12, true, 0.95);
         assert!(
             matches!(result, Err(MleError::NonConvergence { .. })),
             "{:?}",
@@ -716,7 +792,15 @@ mod tests {
 
     #[test]
     fn fit_returns_unconverged_result_without_raising_when_raise_on_non_convergence_is_false() {
-        let estimator = LogitEstimator::fit(intercept_only_input(), 1, 1e-12, false, 0.95).unwrap();
+        let estimator = LogitEstimator::fit(
+            intercept_only_input(),
+            Method::Newton,
+            1,
+            1e-12,
+            false,
+            0.95,
+        )
+        .unwrap();
         assert!(!estimator.converged());
     }
 }

@@ -56,7 +56,7 @@
 
 ## Newton-Raphsonでの最適化・収束判定（Issue #56で実装済み）
 
-`engine/src/nonlinear/logit.rs`の`LogitEstimator::fit`。A2（Issue #52）の`run_solver`を`Method::Newton`固定で呼び出し、`converged`/`n_iter`を含む結果を返す骨格。
+`engine/src/nonlinear/logit.rs`の`LogitEstimator::fit`。A2（Issue #52）の`run_solver`を呼び出し、`converged`/`n_iter`を含む結果を返す骨格。当初（Issue #56時点）は`Method::Newton`固定だったが、Issue #57で`method: Method`引数を追加し、呼び出し側が`newton`/`bfgs`/`lbfgs`を選べるようにした。
 
 - **`start_params`（ユーザー指定初期値）は見送り**: `nonlinear-api-design.md`7章では確定オプションだが、`logit-probit-issue-breakdown.md`のB3〜B16のどのIssueにも実装担当が明示されていなかったため、ユーザーに確認の上、本Issueでは実装しない方針とした（初期値は常にゼロベクトル固定）。標準化空間への変換ロジック（`destandardize_params`の逆方向）が追加で必要になる点も判断材料にした。将来実装する場合は別Issueで対応する。
 - **`max_iter`の検証を`fit()`に追加**: `MleError::InvalidMaxIter`はIssue #51で型としては定義済みだったが、実際に検証する箇所が無かった。Issue #56本文の「`confidence_level`の範囲検証等」の「等」に該当すると判断し、`max_iter <= 0`の検証をここで実装した。
@@ -70,3 +70,12 @@
 - **バリデーションエラー**: `confidence_level`範囲外・`max_iter<=0`・`n<=k`のそれぞれで対応するエラーを返すことを検証。
 - **収束判定の分岐**: `max_iter`を極端に小さくした場合に`raise_on_non_convergence=true`で`NonConvergence`を返すこと、`false`で`converged=false`の結果を返すことを検証。
 - **`fit()`経由での`SingularHessian`伝播**: 完全分離（収束の挙動に依存し決定的に再現しづらい）ではなく、完全な多重共線性（`x2=2*x1`）を使うことで、θ=0時点のHessianが構造的に特異になり決定的に`MleError::SingularHessian`を再現できるデータセットで検証した（rust-reviewer指摘、Issue #56で対応）。
+
+## BFGS/L-BFGSソルバー対応（Issue #57で実装済み）
+
+`LogitEstimator::fit`に`method: Method`引数を追加し、`run_solver`へそのまま渡すだけ（`run_solver`自体は既にIssue #52で`newton`/`bfgs`/`lbfgs`の3分岐を実装済みで、収束点でのHessian評価も`method`の選択に関わらず常に解析的に行う設計になっていたため、Logit側での追加のロジックは不要だった）。
+
+### テスト
+
+- **`newton`との結果一致（切片のみモデル）**: 既知の解析解を持つ切片のみモデルで`bfgs`/`lbfgs`をそれぞれ実行し、`newton`（Issue #56のテスト）と同じ解析解へ収束することを検証（`fit_bfgs_and_lbfgs_converge_to_same_solution_as_newton`）。`newton`は許容誤差`1e-6`だが、`bfgs`/`lbfgs`は準ニュートン法で収束が緩やかなため`common.rs`の既存テスト（`run_solver_bfgs_converges_to_known_minimum`等）に倣い`1e-4`とした。
+- **`newton`との結果一致（非自明なスケールを持つ説明変数）**: 上記の切片のみモデルは`x`が定数列（切片）だけのため`standardize_columns`のスケーリングが実質no-op（`stds`が全て`1.0`のまま）になり、標準化・逆標準化の往復ロジックを一度も通らない（rust-reviewer指摘、Issue #57で対応）。`x1=[10,20,30,40]`という非自明なスケールの説明変数を持つデータセット（閉じた形の解析解は無い）で`newton`/`bfgs`/`lbfgs`を実行し、3手法が同じ解へ収束することをクロスメソッド一致検証で確認した（`fit_bfgs_and_lbfgs_agree_with_newton_when_design_matrix_has_nontrivial_scale`）。標準化空間でのBFGSの初期逆Hessian（`identity_matrix(k)`）・`destandardize_params`が正しく機能していることの間接的な検証になる。

@@ -28,6 +28,7 @@ use faer::{Mat, Side};
 use thiserror::Error;
 
 use crate::error::CommonError;
+use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 
 /// Logit/Probit/Tobitの計算過程で発生しうるエラー。
 ///
@@ -435,8 +436,24 @@ pub fn destandardize_cov_params(cov_std: &Mat<f64>, scale: &ColumnScale) -> Mat<
 /// 戻り値そのもの。さらに`H⁻¹ Ψ H⁻¹ = (-H)⁻¹ Ψ (-H)⁻¹`（符号が2回打ち消しあう）ため、
 /// サンドイッチ型・クラスターロバストの計算でも同じ戻り値をそのまま両側から掛ければよく、
 /// 追加の符号反転は不要（`sandwich_cov_params`・`cluster_cov_params`参照）。
+///
+/// **Cholesky分解の前に固有値ベースの悪条件検出を行う**（`crate::linear_algebra::
+/// ensure_well_conditioned_symmetric_matrix`、OLSの`wald_f_test`と共有する
+/// ユーティリティ）。非ピボットCholesky（`Llt`）のL因子対角成分は、構造的な
+/// 特異性（完全な多重共線性等）を確実には検出できない（OLSで実測確認済み、
+/// Issue #107）。Newton法は`newton_step`内の別の検出経路（ピボット付きQR）が
+/// 最適化中に必ず通るためこの問題が表面化しなかったが、BFGS/L-BFGSは
+/// `newton_step`を経由しないため、収束後のこの関数が唯一の検出経路になる
+/// （Issue #129で発覚: `Method::Bfgs`で完全な多重共線性のあるデータセットを
+/// 最適化すると、修正前はエラーにならず桁違いに巨大な値を返していた）。
 fn neg_hessian_inverse(hessian: &Mat<f64>, k: usize) -> Result<Mat<f64>, MleError> {
     let neg_h = Mat::from_fn(k, k, |i, j| -(*hessian.get(i, j)));
+    // `context`引数（"negated Hessian"）は`map_err`で`MleError::SingularHessian`に
+    // 潰すため実際には使われない。呼び出し元ごとに専用のエラーバリアントを持つ
+    // 系統（nonlinear）ではこれでよいが、`ensure_well_conditioned_symmetric_matrix`
+    // 自体は`CommonError::ComputationFailed`のメッセージ用に使う汎用引数であることに注意。
+    ensure_well_conditioned_symmetric_matrix(&neg_h, k, "negated Hessian")
+        .map_err(|_| MleError::SingularHessian)?;
     let llt = neg_h
         .llt(Side::Lower)
         .map_err(|_| MleError::SingularHessian)?;
@@ -461,8 +478,12 @@ fn opg_matrix(scores: &Mat<f64>) -> Mat<f64> {
 /// `Ψ = Σᵢ sᵢsᵢ'`は外積の和のため半正定値であり、コレスキー分解で逆行列を求める
 /// （`neg_hessian_inverse`と同じ理由でコレスキーを使うが、対象行列がHessianではなく
 /// スコアの外積和のため、特異時のエラーは`MleError::SingularOpgMatrix`で区別する）。
+/// `neg_hessian_inverse`と同じ理由で、Cholesky分解の前に`ensure_well_conditioned_
+/// symmetric_matrix`による固有値ベースの悪条件検出を行う（Issue #129）。
 pub fn opg_cov_params(scores: &Mat<f64>, k: usize) -> Result<Mat<f64>, MleError> {
     let psi = opg_matrix(scores);
+    ensure_well_conditioned_symmetric_matrix(&psi, k, "OPG matrix")
+        .map_err(|_| MleError::SingularOpgMatrix)?;
     let llt = psi
         .llt(Side::Lower)
         .map_err(|_| MleError::SingularOpgMatrix)?;
@@ -1095,6 +1116,23 @@ mod tests {
     fn opg_cov_params_returns_singular_opg_matrix_error_for_zero_scores() {
         let zero_scores = Mat::<f64>::zeros(4, 2);
         let result = opg_cov_params(&zero_scores, 2);
+        assert!(
+            matches!(result, Err(MleError::SingularOpgMatrix)),
+            "{:?}",
+            result
+        );
+    }
+
+    /// `opg_cov_params`が非ピボットCholeskyでは検出できない「ほぼ特異」（構造的な
+    /// ゼロ行列ではなく、極端なスケール差による悪条件）も検出できることを確認する
+    /// （Issue #129のチェックリスト「opg_cov_paramsが同じ問題を抱えているか実測で
+    /// 確認する」に対応。`ensure_well_conditioned_symmetric_matrix`単体テストと同じ
+    /// スケール差（1e6/1e-3）を`scores`側で再現し、`Ψ=scores'*scores`が
+    /// `diag(1e12, 1e-6)`相当になるよう構成した）。
+    #[test]
+    fn opg_cov_params_returns_singular_opg_matrix_error_for_extreme_scale_difference() {
+        let scores = Mat::from_fn(2, 2, |i, j| if i == j { [1e6, 1e-3][i] } else { 0.0 });
+        let result = opg_cov_params(&scores, 2);
         assert!(
             matches!(result, Err(MleError::SingularOpgMatrix)),
             "{:?}",

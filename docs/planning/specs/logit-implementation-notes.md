@@ -93,6 +93,8 @@
 - **既知の解析解（切片のみモデル）**: 切片のみモデルでは全観測で`p_i=ȳ`となるため、観測情報行列も`H=-n*ȳ*(1-ȳ)`という閉じた形になり、`Var(θ̂)=1/(n*ȳ*(1-ȳ))`という解析解を持つ。この値との一致（許容誤差`1e-6`。Newtonの収束判定`tol=1e-6`由来の数値誤差があるため、他の閉じた形テストと同じ桁にした）と、z値・p値・信頼区間が標準正規分布（`statrs::Normal`で独立に検算）の定義式通りであることを検証した。
 - **多変量モデルでの内部整合性**: 多変量（k=3）では標準誤差に閉じた形の解析解が無いため、`cov_params`の対称性・対角成分が正であること、および`std_errors`/`z_stats`/`conf_lower`/`conf_upper`が定義式通りの関係を満たすことを検証した。対角成分だけでなく非対角成分の対称性も確認することで、`destandardize_cov_params`の`stds[i]*stds[j]`の掛け違い（添字の転置ミス等）を検出できるようにしている。
 
-### 発見済みの既知の問題: `bfgs`/`lbfgs`経由での特異性検出漏れ（Issue #129に切り出し）
+### `bfgs`/`lbfgs`経由での特異性検出漏れ（Issue #129で修正済み）
 
-rust-reviewerの指摘（`bfgs`/`lbfgs`×完全な多重共線性でのテスト欠落）に対応しようとしたところ、テストの欠落ではなく実際のバグを発見した。`Method::Bfgs`で完全な多重共線性のあるデータセットを`fit()`すると、`MleError::SingularHessian`にならず桁違いに巨大な値を含む`Ok`が返る。原因は`observed_information_cov_params`（`neg_hessian_inverse`）が使う非ピボットCholesky分解が特異性を確実に検出できないため（`engine/src/linear/CLAUDE.md`に記録済みのOLSと同じ既知の限界、Issue #107の再発）。`Method::Newton`は`newton_step`内の別の検出経路（ピボット付きQR）でたまたま検出できているだけで、`bfgs`/`lbfgs`はこの経路を経由しないため無防備。ユーザー確認の上、この修正はIssue #58の本来のスコープ（観測情報行列でのSE・z値・p値・信頼区間の実装、`newton`経由では正しく動作する）を超えるため、Issue #129として別途切り出し、#58では現状維持のまま完了とした。
+rust-reviewerの指摘（`bfgs`/`lbfgs`×完全な多重共線性でのテスト欠落、Issue #58時点）に対応しようとしたところ、テストの欠落ではなく実際のバグを発見した。`Method::Bfgs`で完全な多重共線性のあるデータセットを`fit()`すると、`MleError::SingularHessian`にならず桁違いに巨大な値を含む`Ok`が返っていた。原因は`observed_information_cov_params`（`neg_hessian_inverse`）が使う非ピボットCholesky分解が特異性を確実に検出できないため（`engine/src/linear/CLAUDE.md`に記録済みのOLSと同じ既知の限界、Issue #107の再発）。`Method::Newton`は`newton_step`内の別の検出経路（ピボット付きQR）でたまたま検出できているだけで、`bfgs`/`lbfgs`はこの経路を経由しないため無防備だった。
+
+Issue #58時点ではIssue #58本来のスコープを超えるためユーザー確認の上でIssue #129として切り出し、Issue #129で対応した。修正内容は`nonlinear-implementation-notes.md`「`cov_type`共通行列演算の特異性検出（Issue #129で修正済み）」参照。`fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_bfgs`テスト（`bfgs`で正しく`SingularHessian`になることを確認）で検証済み。

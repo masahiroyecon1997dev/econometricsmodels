@@ -14,6 +14,7 @@ use statrs::distribution::{ContinuousCDF, FisherSnedecor, StudentsT};
 
 use super::common::LeastSquaresError;
 use crate::error::CommonError;
+use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 
 /// 標準誤差の種別。文字列パース（Python文字列 → この型への変換）は`engine_pybind`側の
 /// 責務（PyO3境界の関心事のため）。ここでは`OlsEstimator::fit`が計算方法を分岐するための
@@ -844,17 +845,15 @@ fn ensure_full_rank(
 /// 極端に異なる設計行列等で、傾き係数の同時共分散部分行列の条件数が倍精度の限界を
 /// 超える場合を含む）だと、Cholesky分解自体は（非ピボットのため）失敗せずに数値的に
 /// 無意味なF統計量（桁違いに巨大な値等）を黙って返してしまうことがある（Issue #107）。
-/// そのため`Llt`分解の**前**に`ensure_well_conditioned_cov_submatrix`を呼び、固有値分解
-/// （`SelfAdjointEigen`）で実際の固有値（`Σ`は対称正定値のため全て実数・非負のはず）を
-/// 求め、最大固有値との相対比で判定して`ComputationFailed`で止める
-/// （`ensure_full_rank`と同じ相対閾値の考え方だが、`ensure_full_rank`が使う列ピボットQRの
-/// R対角成分とは異なり、`Llt`のL因子対角成分はこの種のほぼ特異性を反映しないため、
-/// 対角成分ではなく固有値そのものを使う。実測確認済み: スケール比1e6/1e-3のケースで
-/// L対角成分は閾値を一切下回らなかった）。
+/// そのため`Llt`分解の**前**に`ensure_well_conditioned_symmetric_matrix`（`crate::
+/// linear_algebra`、固有値分解ベースの相対閾値判定。系統をまたいで共有する純粋な
+/// 線形代数ユーティリティ、`.claude/rules/rust-style.md`「全手法で共有するロジック」
+/// 参照。nonlinear系統の`observed_information_cov_params`等でも同じ理由で使われている、
+/// Issue #129）を呼び、`ComputationFailed`で止める。
 ///
 /// この事前チェックにより、**`CovType::Cluster`のG<qによる構造的特異性も、実際には
-/// 下の`Llt`分解に到達する前に`ensure_well_conditioned_cov_submatrix`側で先に検出される**
-/// （`cargo llvm-cov`で確認: `Llt`失敗の`map_err`分岐は0ヒット）。`Llt`分解自体の
+/// 下の`Llt`分解に到達する前に`ensure_well_conditioned_symmetric_matrix`側で先に検出
+/// される**（`cargo llvm-cov`で確認: `Llt`失敗の`map_err`分岐は0ヒット）。`Llt`分解自体の
 /// `map_err`は、両方のチェックをすり抜けるごく僅かな境界ケースに備えた防御的な
 /// フォールバックとして残している。
 fn wald_f_test(
@@ -869,7 +868,11 @@ fn wald_f_test(
         *cov_params.get(i + k_constant, j + k_constant)
     });
 
-    ensure_well_conditioned_cov_submatrix(&v_slopes, df_model)?;
+    ensure_well_conditioned_symmetric_matrix(
+        &v_slopes,
+        df_model,
+        "coefficient covariance submatrix for the F-test",
+    )?;
 
     let llt = v_slopes.llt(Side::Lower).map_err(|_| {
         CommonError::ComputationFailed(
@@ -888,45 +891,6 @@ fn wald_f_test(
     let f_p_value = 1.0 - f_dist.cdf(f_statistic);
 
     Ok((f_statistic, f_p_value))
-}
-
-/// `wald_f_test`が使う共分散部分行列`Σ`（対称正定値のはず）の固有値分解を行い、
-/// 最小固有値が最大固有値に対して相対的に小さすぎる（数値的にほぼ特異）場合を
-/// 検出する。`ensure_full_rank`と同じ相対閾値の考え方（`k * EPSILON * max_abs`、
-/// 絶対閾値は不採用、`.claude/rules/rust-style.md`「線形代数」参照）を、QRのR対角
-/// 成分ではなく固有値そのものに適用する（非ピボットCholeskyの対角成分では
-/// このケースを検出できないため、`wald_f_test`のdocコメント参照）。`k`は`v`の次元
-/// （`ensure_full_rank`の`k`と同じ命名、`wald_f_test`から見ると傾き係数の数`df_model`）。
-fn ensure_well_conditioned_cov_submatrix(v: &Mat<f64>, k: usize) -> Result<(), LeastSquaresError> {
-    // `v`は対称正定値のはずのため、理論上`SelfAdjointEigen::new`は失敗しない
-    // （`xtx_inverse`・`wald_f_test`内の`Llt`失敗と同様、浮動小数点演算の丸めによる
-    // 境界的な失敗に備えた防御的な`Result`化）。
-    let eigen =
-        faer::linalg::solvers::SelfAdjointEigen::new(v.as_ref(), Side::Lower).map_err(|_| {
-            CommonError::ComputationFailed(
-                "failed to compute eigendecomposition of coefficient covariance submatrix \
-             for the F-test"
-                    .to_string(),
-            )
-        })?;
-    let eigenvalues = eigen.S().column_vector();
-    let max_abs_eigenvalue = (0..k)
-        .map(|i| (*eigenvalues.get(i)).abs())
-        .fold(0.0_f64, f64::max);
-    let threshold = (k as f64) * f64::EPSILON * max_abs_eigenvalue;
-
-    for i in 0..k {
-        if (*eigenvalues.get(i)).abs() <= threshold {
-            return Err(CommonError::ComputationFailed(
-                "coefficient covariance submatrix is near-singular for the F-test \
-                 (condition number exceeds double-precision limits, e.g. due to extreme \
-                 scale differences between explanatory variables)"
-                    .to_string(),
-            )
-            .into());
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]

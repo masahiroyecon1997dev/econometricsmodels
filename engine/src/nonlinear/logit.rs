@@ -958,6 +958,43 @@ mod tests {
         );
     }
 
+    /// 同じ完全な多重共線性のデータセットを`bfgs`/`lbfgs`で最適化した場合の
+    /// `SingularHessian`伝播経路（Issue #129）: `newton`は`newton_step`内の特異性検出
+    /// （最適化のステップ計算中）で検出するが、`bfgs`/`lbfgs`は`newton_step`を
+    /// 一切経由しない（準ニュートン法は内部の近似逆Hessianで降下方向を決めるため、
+    /// モデルの解析的Hessianの特異性に依存しない）。この場合、収束後に
+    /// `observed_information_cov_params`（`neg_hessian_inverse`）が呼ぶ
+    /// `ensure_well_conditioned_symmetric_matrix`（固有値ベースの悪条件検出）が、
+    /// `bfgs`/`lbfgs`にとって唯一の特異性検出経路になる。修正前（Issue #129発覚時点）
+    /// はこのテストは失敗していた（非ピボットCholeskyが特異性を検出できず、
+    /// 桁違いに巨大な値を含む`Ok`が返っていた）。両方のソルバーで同じコードパスを
+    /// 通ることをそれぞれ独立に確認する。
+    #[test]
+    fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_bfgs_and_lbfgs()
+     {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
+
+        for method in [Method::Bfgs, Method::Lbfgs] {
+            let input = LogitInput::from_columns(
+                &y,
+                &x_columns,
+                vec!["x1".to_string(), "x2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
+
+            let result = LogitEstimator::fit(input, method, 100, 1e-6, true, 0.95);
+            assert!(
+                matches!(result, Err(MleError::SingularHessian)),
+                "method={:?}, result={:?}",
+                method,
+                result
+            );
+        }
+    }
+
     #[test]
     fn fit_returns_non_convergence_error_when_max_iter_is_too_small_and_raise_is_true() {
         let result =

@@ -131,6 +131,18 @@ argminの`CostFunction`/`Gradient`/`Hessian`トレイト実装と、`nonlinear`�
 
 **テスト**: 対角Hessian・列間で観測ごとに片方が常にゼロになるスコア行列（対角のみのΨ）に加えて、列間に相関を持たせたスコア行列（非対角成分を持つΨ）でも検証し、転置・スケーリングの順序の取り違えを対角のみのテストより厳密に検出できるようにした（rust-reviewerの指摘を反映）。5種類（classical/opg/hc0/hc1/cluster）それぞれの正常系・特異行列時のエラー系を検証済み。
 
+### `cov_type`共通行列演算の特異性検出（Issue #129で修正済み）
+
+Issue #58（Logitのfit()に観測情報行列SEを実装）のテスト追加中、`Method::Bfgs`で完全な多重共線性のあるデータセットを`fit()`すると、`MleError::SingularHessian`にならず桁違いに巨大な値（標準誤差が数千万オーダー等）を含む`Ok`が返ることが発覚した。
+
+**原因**: `neg_hessian_inverse`・`opg_cov_params`（上記「`cov_type`共通行列演算」）は非ピボットCholesky分解（`Llt`）の失敗で特異性を検出していたが、これはOLSの`wald_f_test`で既に発覚していた既知の限界（Issue #107、非ピボットCholeskyは構造的な特異性・悪条件を確実には検出できない）の再発だった。`Method::Newton`は`newton_step`内の別の検出経路（ピボット付きQR、相対閾値）が最適化ステップ計算の途中で必ず通るため、たまたま検出できていた。`Method::Bfgs`/`Method::Lbfgs`は`newton_step`を一切経由しない（準ニュートン法は内部の近似逆Hessianで降下方向を決めるため、モデルの解析的Hessianの特異性に依存しない）ため、収束後の`observed_information_cov_params`/`opg_cov_params`呼び出しが唯一の検出経路になるが、そこが信頼できなかった。
+
+**修正（OLSのIssue #107と共通化）**: Issue #107でOLSの`wald_f_test`用に実装した`ensure_well_conditioned_cov_submatrix`（`SelfAdjointEigen`による固有値分解ベースの相対閾値判定）を、`context: &str`引数を追加した上で`engine/src/linear_algebra.rs`（新設。系統をまたいで共有する純粋な線形代数ユーティリティ、`.claude/rules/rust-style.md`「全手法で共有するロジック」）に`ensure_well_conditioned_symmetric_matrix`として切り出した。戻り値は`CommonError`にし、呼び出し側（`ols.rs`・`nonlinear/common.rs`）の`?`が`#[from]`経由で`LeastSquaresError`/`MleError`へ自動変換する（Issue #113の`CommonError`集約パターンをそのまま踏襲）。
+
+`neg_hessian_inverse`・`opg_cov_params`はそれぞれCholesky分解の**前**にこの関数を呼び、エラー時は既存の`MleError::SingularHessian`/`MleError::SingularOpgMatrix`にマップする（`ensure_well_conditioned_symmetric_matrix`自体は特異性の種類を区別しない汎用関数のため、どちらのバリアントにするかは呼び出し側の`map_err`で決める）。`sandwich_cov_params`・`cluster_cov_params`は内部で`neg_hessian_inverse`を呼ぶため、修正を意識せず自動的に恩恵を受ける。
+
+**テスト**: `fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_bfgs_and_lbfgs`（Logit、`bfgs`/`lbfgs`両方での特異性検出を確認。`newton_step`を経由しないという主張通り両ソルバーで同じコードパスを通ることを個別に確認するため）・`opg_cov_params_returns_singular_opg_matrix_error_for_extreme_scale_difference`（`opg_cov_params`が構造的なゼロ行列だけでなく極端なスケール差による悪条件も検出できることを確認）・`linear_algebra`モジュール自体の単体テスト（良条件行列・完全特異行列・極端なスケール差行列の3ケース）を追加。`ensure_well_conditioned_symmetric_matrix`には`v`が`k×k`であるという呼び出し元の内部契約を検証する`debug_assert_eq!`も追加した（rust-reviewer指摘）。OLS側は挙動・受け入れ条件を変えない移設のため、既存テストがそのままリグレッションガードになる。
+
 ### Logitのデータ構造（Issue #54で実装済み）
 
 `engine/src/nonlinear/logit.rs`に`LogitInput::from_columns`を実装した。`OlsInput::from_columns`（`weights=None`パス）と1:1で対応する設計（次元検証・切片列自動追加・`param_names`構築のロジックが同一）。weights/offsetはPhase2で見送り済みのため`from_columns_weighted`に相当するものはない。

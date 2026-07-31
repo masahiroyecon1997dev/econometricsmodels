@@ -27,7 +27,7 @@ crate-type = ["cdylib", "rlib"]
 # `pyproject.toml`の`[tool.maturin] features = ["pyo3/extension-module"]`が
 # `maturin build`/`maturin develop`実行時にこのフィーチャを外部から有効化するため、
 # 配布物には引き続き反映される（`cargo`単体のビルド・テストとは別経路）。
-pyo3 = { version = "=0.28.2" }
+pyo3 = { version = "=0.28.3" }
 # polars（Rustクレート）とpyo3-polars: バージョンはPython側pyproject.tomlのpolars==1.42.1と
 # 数字を合わせるものではない（Rustクレートpolarsは0.5x系、Python側は1.x系で既に別の
 # バージョン体系に分離済み）。pyo3-polarsが使うpolars_ffi::version_0という安定版FFI

@@ -14,13 +14,17 @@
 
 ## バリデーションの責務分担（`engine`と重複させない）
 
-`engine`は列名を知らないため検知できず、`engine_pybind::fit`側で`ValidationError`として弾く項目（OLS/WLS共通）:
+`engine`は列名を知らないため検知できず、`engine_pybind`側で`ValidationError`として弾く項目（OLS/WLS/Logit共通）:
 
-- `y`と`x`に同じ列名が含まれる場合／`x`内の重複列名
+- `y`と`x`に同じ列名が含まれる場合（WLSは`weight`も）／`x`内の重複列名
 - `include_intercept=true`のとき`x`に`"const"`という列名がある場合（自動追加する定数項名と衝突）
 - `x`が空リストの場合
 
+これらは元々OLS/WLS/Logitの`fit`/`build_logit_input`にメッセージ文言まで重複して実装されていたが、Issue #134で`engine_pybind/src/validation.rs`（クレート直下、`column_extraction.rs`と同じ位置づけ）に集約した: `validate_x_non_empty`/`validate_no_duplicate_x`/`validate_no_const_collision`/`validate_no_duplicate_roles`（`y`/`weight`等の単一列名ロール間の重複、`roles: &[(&str, &str)]`のペアリストを受け取る汎用関数。ただし`x`のように複数列を取るロール、例えば将来のIVの`instrument`には未対応、着手時に再検討が要る）。**新しい手法を実装する際も、この4関数を呼び出す形にし、同様のチェックを独自実装しないこと。**
+
 `confidence_level`の範囲チェック・`cov_type="cluster"`なのに`cluster_col`未指定、といった`engine`側が既に検知する項目は`engine_pybind`側で重複チェックしない（`LeastSquaresError`のバリアント一覧は`ols-implementation-notes.md`1章の対応表を参照）。
+
+行数不一致チェック（`y`/`x`/`weight`/`cluster_col`/`time_col`の間で行数が食い違っていないかの検証）は、同一DataFrameから抽出する限り理論上到達不能（polarsのDataFrameは全列同じ長さであることを型の不変条件として強制するため）と判明し、Issue #133で全て削除した。**新しい手法でも同種のチェックを追加しないこと。**
 
 ## エラー変換
 

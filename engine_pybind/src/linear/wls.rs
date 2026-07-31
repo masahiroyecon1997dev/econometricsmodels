@@ -18,6 +18,10 @@ use super::common::{least_squares_error_to_pyerr, mat_to_vec};
 use super::ols::OLSOptions;
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
 use crate::errors::ValidationError;
+use crate::validation::{
+    validate_no_const_collision, validate_no_duplicate_roles, validate_no_duplicate_x,
+    validate_x_non_empty,
+};
 
 /// Estimation results for WLS.
 ///
@@ -74,45 +78,12 @@ pub fn fit(
     let df: DataFrame = data.into();
     let cov_type_lower = options.cov_type.to_lowercase();
 
-    if x.is_empty() {
-        return Err(ValidationError::new_err(
-            "x must contain at least one column name",
-        ));
-    }
-
-    // ── y/x/weightの重複チェック（誤って同じ列を複数の役割に指定するミスを、
-    // 分かりやすいエラーで早期に防ぐ。`docs/planning/specs/wls-api-design.md`3章参照）──
-    if x.contains(&y) {
-        return Err(ValidationError::new_err(format!(
-            "the column '{y}' specified as y is also included in x"
-        )));
-    }
-    if weight == y {
-        return Err(ValidationError::new_err(format!(
-            "the column '{weight}' specified as weight is also specified as y"
-        )));
-    }
-    if x.contains(&weight) {
-        return Err(ValidationError::new_err(format!(
-            "the column '{weight}' specified as weight is also included in x"
-        )));
-    }
-    {
-        let mut seen = std::collections::HashSet::new();
-        for name in &x {
-            if !seen.insert(name) {
-                return Err(ValidationError::new_err(format!(
-                    "column '{name}' is specified more than once in x"
-                )));
-            }
-        }
-    }
-    if options.include_intercept && x.iter().any(|name| name == "const") {
-        return Err(ValidationError::new_err(
-            "when include_intercept=true, x cannot contain a column named 'const' \
-             (it collides with the automatically added intercept)",
-        ));
-    }
+    // 誤って同じ列を複数の役割に指定するミスを、分かりやすいエラーで早期に防ぐ
+    // （`docs/planning/specs/wls-api-design.md`3章参照）。
+    validate_x_non_empty(&x)?;
+    validate_no_duplicate_roles(&[("y", &y), ("weight", &weight)], &x)?;
+    validate_no_duplicate_x(&x)?;
+    validate_no_const_collision(&x, options.include_intercept)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
     let y_slice = extract_f64_column(&df, &y)?;

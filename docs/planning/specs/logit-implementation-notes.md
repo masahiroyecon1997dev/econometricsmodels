@@ -245,3 +245,12 @@ Issue #58時点ではIssue #58本来のスコープを超えるためユーザ�
 - 成功パス: 切片あり・切片なしそれぞれでの`LogitInput`構築、`cov_type`/`method`の正しいパース
 - `ValidationError`パス: 空の`x`、y/xの重複、x内の重複、`"const"`列衝突、存在しない列、欠損値、未知の`cov_type`文字列、未知の`method`文字列
 - クラスター系: `cluster_col`指定時のグループキー抽出、未指定時に`groups=None`のまま返す（`engine`側の`MissingClusterColumn`検証に委ねる設計）
+
+### バリデーションロジックの共通化（Issue #134で実装済み）
+
+`build_logit_input`冒頭の`x`空チェック・y/xの重複チェック・x内重複チェック・`"const"`列衝突チェックは、OLS/WLSの`fit()`とメッセージ文言まで完全に重複していた。`engine_pybind/src/validation.rs`（クレート直下、`column_extraction.rs`と同じ位置づけ）に集約し、`validate_x_non_empty`/`validate_no_duplicate_x`/`validate_no_const_collision`/`validate_no_duplicate_roles`の4関数に切り出した。
+
+- **`validate_no_duplicate_roles`**: `y`（Logitは`y`のみ、WLSは`y`+`weight`）のように`x`とは別に単一列名を指定する「ロール」同士、および各ロールと`x`との重複を検証する汎用関数。`roles: &[(&str, &str)]`というペアのリストを受け取る設計にした（将来IV等でロールが増えても流用できるようにするため。ただし`x`のように複数列を取るロール、例えば将来のIVの`instrument`にはそのままでは使えない。着手時に再検討する）。
+- **判定順序のリグレッションと修正**: 初回実装では「ロール同士の全ペアを先に判定→`x`との重複を後で判定」という2段構成にしたが、これはWLSの旧実装（`x.contains(&y)` → `weight == y` → `x.contains(&weight)`の順に1つずつ判定）と異なる優先順位になってしまう（`weight == y`かつ`x`に`y`も含むような複合違反で返るメッセージが変わる）ことがrust-reviewerのレビューで判明した。ロールを先頭から順に処理し、各ロールについて「それより前のロールとの重複」→「`x`との重複」の順に確認する実装に修正し、旧実装と完全に同じ優先順位・メッセージになることを確認した。
+- **`PyErr`はGILがないとメッセージを文字列化できない**: `PyErr::to_string()`（`Display`実装）はPython interpreterのGIL取得を要求するため、`#[cfg(test)]`（Python未初期化）で呼ぶとpanicする。判定ロジック・メッセージ文言そのものを`PyErr`に依存しない純粋関数`find_duplicate_role_message(roles, x) -> Option<String>`に切り出し、これをテストすることでGILなしにメッセージ文言・優先順位を単体テストで固定した（`validate_no_duplicate_roles`はこれを`ValidationError`でラップするだけの薄い関数）。
+- `cov_type`/`method`文字列パースは対象外（戻り値の型が系統ごとに異なるため。`engine_pybind/src/linear/CLAUDE.md`参照）。

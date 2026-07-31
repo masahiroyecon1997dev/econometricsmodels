@@ -2,6 +2,7 @@ mod column_extraction;
 mod errors;
 mod linear;
 mod nonlinear;
+mod validation;
 
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;

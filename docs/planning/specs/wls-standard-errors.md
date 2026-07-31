@@ -4,8 +4,7 @@ classical / HCロバスト（HC0〜HC3） / HAC（Newey-West） / cluster の重
 適合度統計量の重み付き定義のまとめ。API・オプションの全体設計は
 [`wls-api-design.md`](./wls-api-design.md)を参照。
 
-**ステータス**: 設計提案中。[`wls-api-design.md`](./wls-api-design.md)と同様、
-2026-07-24時点のOLS実装（`engine/src/linear/ols.rs`）を前提にしている。
+**ステータス**: 設計確定済み・実装済み（`engine/src/linear/wls.rs`）。
 
 ## 0. 結論: 新しい計算式の導出は不要
 
@@ -167,9 +166,7 @@ $y$・重みを使って計算し直す（`engine::linear::wls`モジュール�
 （`cov_type` / `cluster_col` / `hac_lags` / `time_col`）の意味論をそのまま踏襲しており、
 フィールドの追加・変更は不要。
 
-## 7. 未確定・後続issueで扱う事項
+## 7. 今後の検討事項
 
-- 上記の各計算式がstatsmodels `WLS`のベンチマーク値と相対誤差1e-8で一致することの実証
-  → ベンチマーク作成・tests/api_tests作成で対応
 - HC0の$\hat\Psi$で$w_i$が2乗で効く点など、直感的に分かりにくい箇所はテストのdocコメントに
   計算根拠を明記する（`ols.rs`の既存テストのコメント密度に合わせる）

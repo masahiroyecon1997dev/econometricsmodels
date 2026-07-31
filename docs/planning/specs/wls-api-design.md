@@ -3,11 +3,9 @@
 WLS（Weighted Least Squares）のAPI・オプションに関する設計案。標準誤差・適合度統計量の
 重み付き定義の確定は[`wls-standard-errors.md`](./wls-standard-errors.md)に委ねる。
 
-**ステータス**: 設計提案中。本ドキュメントは2026-07-24時点の
-[`OLS実装`](https://github.com/masahiroyecon1997dev/econometricsmodels/blob/main/engine/src/linear/ols.rs)（`engine/src/linear/ols.rs`,
-`engine_pybind/src/linear/ols.rs`, `python_package/econometricsmodels/linear/ols.py`）を
-出発点にしている。OLSは今後リファクタリングされる可能性が高いため、実装着手時には改めて
-最新のOLS実装を確認し、本ドキュメントとの差分があれば本ドキュメント側を更新すること。
+**ステータス**: 設計確定済み。`engine`・`engine_pybind`・`python_package`（`WLS` / `WlsResults`
+クラス、[`python_package/econometricsmodels/linear/wls.py`](../../../python_package/econometricsmodels/linear/wls.py)）
+まで実装済み。
 
 ## 0. 前提として確定済みの事項
 
@@ -191,9 +189,8 @@ OLSと同じ（[`ols-api-design.md`](./ols-api-design.md) 5章）。`structured 
   classical。ロバストF検定への切替方針。これらはすべてOLSと同じ
   （[`ols-api-design.md`](./ols-api-design.md) 6章）。
 
-## 8. 未確定・後続issueで扱う事項
+## 8. 今後の検討事項
 
-- 標準誤差（classical/HC0-3/HAC/cluster）・適合度統計量の重み付き定義の最終確認とベンチマーク照合
 - `OLSOptions`をWLSと共有する設計は、WLS固有の設定（例: frequency weight対応時の重みタイプ切替）が
   将来必要になった時点で見直す。その際は`OLSOptions`から分離するか、共通フィールドを
   `linear/common.rs`側の構造体に切り出すかを判断する（YAGNI、`rust-style.md`

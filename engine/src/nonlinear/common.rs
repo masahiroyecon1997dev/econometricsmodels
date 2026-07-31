@@ -86,6 +86,27 @@ pub enum Method {
     Lbfgs,
 }
 
+/// 標準誤差（係数分散共分散行列）の種別。文字列パース（Python文字列 → この型への変換、
+/// `"classical"`/`"nonrobust"`のエイリアス化を含む）は`engine_pybind`側の責務
+/// （OLSの`CovType`と同じ設計。`.claude/rules/rust-style.md`参照）。
+///
+/// Logit/Probit/Tobitで共通のバリアント（`nonlinear-api-design.md`4章）のため
+/// `nonlinear/common.rs`に定義する（`Method`と同じ理由）。`"cluster"`は
+/// `logit-probit-issue-breakdown.md`のB7・C7で追加する（クラスターキーの検証
+/// タイミング等、モデルの`fit()`側で決めるべき論点が別にあるため、このIssue
+/// （B6、opg/hc0/hc1）のスコープには含めない）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CovType {
+    /// 観測情報行列（`"classical"`/`"nonrobust"`、既定）: `Σ = -H⁻¹`
+    Classical,
+    /// OPG/BHHH（`"opg"`）: `Σ = (Σᵢ sᵢsᵢ')⁻¹`
+    Opg,
+    /// サンドイッチ型（misspecification-robust、`"hc0"`）: `Σ = H⁻¹(Σᵢ sᵢsᵢ')H⁻¹`
+    Hc0,
+    /// サンドイッチ型+小標本補正（`"hc1"`）: `hc0`の`Σ`に`n/(n-k)`を乗じる
+    Hc1,
+}
+
 /// `run_solver`の出力。
 #[derive(Debug, Clone)]
 pub struct SolverOutput {
@@ -362,6 +383,19 @@ pub struct ColumnScale {
     /// 列ごとの標準偏差。切片列（`has_intercept=true`の先頭列）は`1.0`のまま
     /// （スケーリング対象外）。標準偏差が0の列（定数列）も`1.0`のまま扱う（0除算回避）。
     stds: Vec<f64>,
+}
+
+impl ColumnScale {
+    /// 列ごとの標準偏差（`standardize_columns`のdocコメント参照）。標準化はengine内部の
+    /// 実装詳細であり`engine_pybind`に公開する必然性は無い（rust-reviewer指摘）が、
+    /// `pub(crate)`にすると`cargo clippy --all-targets -- -D warnings`の`lib`ターゲット
+    /// （テストコードを含まないビルド）で`dead_code`エラーになる（唯一の呼び出し元が
+    /// `nonlinear/logit.rs`の`#[cfg(test)] mod tests`のみのため）。`pub`アイテムは
+    /// dead_code検出の対象外という言語仕様上の扱いにより、`pub`のままにしている
+    /// （テストが`fit()`と同じ標準化・逆標準化の手順を独立に再現するために必要）。
+    pub fn stds(&self) -> &[f64] {
+        &self.stds
+    }
 }
 
 /// 設計行列`x`の各列を標準偏差でスケーリングする（切片列は除外）。

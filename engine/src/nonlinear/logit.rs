@@ -32,8 +32,9 @@
 
 use crate::error::CommonError;
 use crate::nonlinear::common::{
-    Method, MleError, destandardize_cov_params, destandardize_params,
-    observed_information_cov_params, run_solver, standardize_columns,
+    CovType, Method, MleError, SandwichVariant, destandardize_cov_params, destandardize_params,
+    observed_information_cov_params, opg_cov_params, run_solver, sandwich_cov_params,
+    standardize_columns,
 };
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
@@ -278,11 +279,11 @@ impl Hessian for LogitProblem {
     }
 }
 
-/// Logitの推定結果。`fit`でのバリデーション・最適化・観測情報行列によるSE計算を
+/// Logitの推定結果。`fit`でのバリデーション・最適化・`cov_type`に応じたSE計算を
 /// 通過した状態を表す。
 ///
 /// 適合度統計量・限界効果等は未実装。`docs/planning/specs/
-/// logit-probit-issue-breakdown.md`のB6以降（OPG/サンドイッチ/クラスターSE等）で
+/// logit-probit-issue-breakdown.md`のB7以降（クラスターロバストSE等）で
 /// `fit`に追加していく想定。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
@@ -292,10 +293,10 @@ pub struct LogitEstimator {
     /// 係数（元のスケール。`standardize_columns`で標準化した空間で最適化した後、
     /// `destandardize_params`で逆変換済み）。`input.param_names()`と対応する
     params: Vec<f64>,
-    /// 係数の分散共分散行列（元のスケール、k×k）。現時点では常に観測情報行列
-    /// （`Σ = -H⁻¹`、`cov_type="classical"`/`"nonrobust"`相当）。限界効果
-    /// （デルタ法、`logit-probit-issue-breakdown.md`のB9）で再利用するため、
-    /// 対角成分（`std_errors`）だけでなく行列そのものを保持する。
+    /// 係数の分散共分散行列（元のスケール、k×k）。`fit`に渡した`cov_type`に応じて
+    /// 観測情報行列（`Classical`）・OPG（`Opg`）・サンドイッチ型（`Hc0`/`Hc1`）の
+    /// いずれかで計算される。限界効果（デルタ法、`logit-probit-issue-breakdown.md`の
+    /// B9）で再利用するため、対角成分（`std_errors`）だけでなく行列そのものを保持する。
     cov_params: Mat<f64>,
     /// 標準誤差（k, 元のスケール）。`cov_params`の対角成分の平方根
     std_errors: Vec<f64>,
@@ -336,10 +337,14 @@ impl LogitEstimator {
     /// 標準化空間のcov_paramsを直接destandardizeする。数学的に等価だが後者の方が
     /// 中間にHessianの逆変換を挟まず単純、`destandardize_cov_params`のdocコメント参照）。
     ///
-    /// `cov_type`は現時点では観測情報行列（`"classical"`/`"nonrobust"`相当）のみで、
-    /// 選択オプションはまだ無い（OPG/サンドイッチ/クラスターは
-    /// `logit-probit-issue-breakdown.md`のB6・B7で追加）。検定分布は標準正規分布
-    /// （`nonlinear-api-design.md`5章、OLSのt分布とは異なる）。
+    /// `cov_type`は観測情報行列（`Classical`）・OPG（`Opg`）・サンドイッチ型
+    /// （`Hc0`/`Hc1`）に対応する（クラスターロバストは`logit-probit-issue-breakdown.md`
+    /// のB7で追加）。`Opg`/`Hc0`/`Hc1`は収束点での観測ごとのスコア（`LogitProblem::
+    /// scores`）が必要なため、標準化空間の設計行列を保持したまま`LogitProblem`を
+    /// クローンしておき（`argmin::core::Executor`向けに元々`Clone`を要求しているため
+    /// 追加コストは`Clone`実装自体のみ）、`run_solver`が返す収束点のパラメータで
+    /// 評価する。検定分布は標準正規分布（`nonlinear-api-design.md`5章、OLSのt分布とは
+    /// 異なる）。
     ///
     /// `n <= k`（観測数が説明変数の数、定数項を含む、以下）のとき`CommonError::
     /// InsufficientObservations`で弾く閾値はOLSと同じ式だが、根拠は異なる。OLSでは
@@ -358,12 +363,14 @@ impl LogitEstimator {
     /// - `raise_on_non_convergence=true`かつ`max_iter`回で未収束: `MleError::NonConvergence`
     /// - 収束点（または`raise_on_non_convergence=false`時の打ち切り点）のHessianが特異
     ///   （設計行列の完全な多重共線性等）: `MleError::SingularHessian`
+    /// - `cov_type=Opg`でOPG行列（`Σᵢ sᵢsᵢ'`）が特異: `MleError::SingularOpgMatrix`
     pub fn fit(
         input: LogitInput,
         method: Method,
         max_iter: i64,
         tol: f64,
         raise_on_non_convergence: bool,
+        cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, MleError> {
         if !(confidence_level > 0.0 && confidence_level < 1.0) {
@@ -384,6 +391,17 @@ impl LogitEstimator {
             x: x_std,
             y: input.y().clone(),
         };
+        // `cov_type`がOPG/サンドイッチ型の場合、収束点でのスコア評価に元の
+        // `LogitProblem`（標準化空間のx_std）が必要になる。`run_solver`は`problem`の
+        // 所有権を取り込む（内部で保持していたモデルを呼び出し元へ返さない設計）ため、
+        // 事前にクローンしておく必要がある（`LogitProblem`は`argmin::core::Executor`
+        // 向けに元々`Clone`を要求しているため、この用途のための追加のtraitではない）。
+        // `Classical`はスコアを使わないため、無駄な複製（設計行列を含む）を避けるために
+        // `cov_type`に応じて条件付きで行う（rust-reviewer指摘）。
+        let problem_for_scores = match cov_type {
+            CovType::Classical => None,
+            CovType::Opg | CovType::Hc0 | CovType::Hc1 => Some(problem.clone()),
+        };
 
         let output = run_solver(
             problem,
@@ -397,7 +415,44 @@ impl LogitEstimator {
         let params = destandardize_params(&output.params, &scale);
 
         let hessian_std = Mat::from_fn(k, k, |i, j| output.hessian[i][j]);
-        let cov_params_std = observed_information_cov_params(&hessian_std, k)?;
+        // `problem_for_scores.as_ref().expect(...)`は各非`Classical`分岐でのみ呼ばれ、
+        // 直前の`match cov_type { CovType::Classical => None, _ => Some(...) }`により
+        // 常に`Some`であることが保証されている内部契約（`cov_type`という同じ値で
+        // 2回目のmatchを行うことになるが、パニックしないことをコンパイラの型システムでは
+        // 表現できないため、`expect`のメッセージで契約を明記して防御的に扱う）。
+        let cov_params_std = match cov_type {
+            CovType::Classical => observed_information_cov_params(&hessian_std, k)?,
+            CovType::Opg => {
+                let problem = problem_for_scores
+                    .as_ref()
+                    .expect("problem_for_scores must be Some for CovType::Opg");
+                opg_cov_params(&problem.scores(&output.params), k)?
+            }
+            CovType::Hc0 => {
+                let problem = problem_for_scores
+                    .as_ref()
+                    .expect("problem_for_scores must be Some for CovType::Hc0");
+                sandwich_cov_params(
+                    &hessian_std,
+                    &problem.scores(&output.params),
+                    n,
+                    k,
+                    SandwichVariant::Hc0,
+                )?
+            }
+            CovType::Hc1 => {
+                let problem = problem_for_scores
+                    .as_ref()
+                    .expect("problem_for_scores must be Some for CovType::Hc1");
+                sandwich_cov_params(
+                    &hessian_std,
+                    &problem.scores(&output.params),
+                    n,
+                    k,
+                    SandwichVariant::Hc1,
+                )?
+            }
+        };
         let cov_params = destandardize_cov_params(&cov_params_std, &scale);
 
         // `Normal::new(0.0, 1.0)`は標準正規分布であり、標準偏差が正であることを
@@ -720,7 +775,16 @@ mod tests {
     #[test]
     fn fit_newton_converges_to_closed_form_solution_for_intercept_only_model() {
         let input = intercept_only_input();
-        let estimator = LogitEstimator::fit(input, Method::Newton, 35, 1e-6, true, 0.95).unwrap();
+        let estimator = LogitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-6,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
 
         let y_bar: f64 = 4.0 / 7.0;
         let expected = (y_bar / (1.0 - y_bar)).ln();
@@ -744,9 +808,16 @@ mod tests {
     #[test]
     fn fit_computes_std_errors_z_stats_p_values_and_ci_matching_closed_form_for_intercept_only_model()
      {
-        let estimator =
-            LogitEstimator::fit(intercept_only_input(), Method::Newton, 35, 1e-6, true, 0.95)
-                .unwrap();
+        let estimator = LogitEstimator::fit(
+            intercept_only_input(),
+            Method::Newton,
+            35,
+            1e-6,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
 
         let n: f64 = 7.0;
         let y_bar: f64 = 4.0 / 7.0;
@@ -794,7 +865,16 @@ mod tests {
         )
         .unwrap();
 
-        let estimator = LogitEstimator::fit(input, Method::Newton, 35, 1e-8, true, 0.95).unwrap();
+        let estimator = LogitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
         let k = 3;
 
         for i in 0..k {
@@ -824,6 +904,158 @@ mod tests {
         }
     }
 
+    /// `cov_type=Opg`/`Hc0`/`Hc1`が返す`cov_params`を、`fit()`と同じ手順
+    /// （標準化→収束点でのscores/Hessian評価→`common.rs`の共通行列演算→
+    /// `destandardize_cov_params`）をテスト側で独立に再現した値と突き合わせる。
+    /// 多変量（k=3）データセットを使う理由: 切片のみモデルでは情報行列の等式
+    /// （`Σᵢsᵢsᵢ' = -H`）が有限標本で厳密に成り立ってしまい、`classical`/`opg`/`hc0`
+    /// が偶然同じ値になるため、`fit()`の`match cov_type`の配線ミス（例えば`Opg`の
+    /// 枝で誤って`observed_information_cov_params`を呼んでいた場合等）を検出できない
+    /// （`fit_cov_params_is_symmetric_and_stats_are_internally_consistent`と同じ
+    /// データセットを再利用する）。
+    #[test]
+    fn fit_cov_type_opg_hc0_hc1_match_independently_recomputed_values() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![10.0, 20.0, 30.0, 40.0], vec![-5.0, 2.0, 8.0, -1.0]];
+        let make_input = || {
+            LogitInput::from_columns(
+                &y,
+                &x_columns,
+                vec!["x1".to_string(), "x2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap()
+        };
+        let k = 3;
+        let n = 4;
+
+        let classical = LogitEstimator::fit(
+            make_input(),
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        // `fit()`と同じ手順を独立に再現する: 標準化→θ_stdへ変換→収束点でのscores/
+        // Hessian評価→destandardize_cov_params。`LogitProblem::hessian`（argminトレイト）は
+        // コスト関数（負の対数尤度）のHessianを返す符号規約のため、`run_solver`が
+        // `SolverOutput.hessian`に格納する対数尤度そのもののHessianに合わせて1回符号反転する
+        // （`run_solver`のdocコメント「Hessianトレイトの符号規約」と同じ変換）。
+        let input_for_reconstruction = make_input();
+        let (x_std, scale) = standardize_columns(
+            input_for_reconstruction.x(),
+            input_for_reconstruction.has_intercept(),
+        );
+        let params_std: Vec<f64> = classical
+            .params()
+            .iter()
+            .zip(scale.stds())
+            .map(|(p, s)| p * s)
+            .collect();
+        let problem_std = LogitProblem {
+            x: x_std,
+            y: input_for_reconstruction.y().clone(),
+        };
+        let scores_std = problem_std.scores(&params_std);
+        let cost_hessian_std = problem_std.hessian(&params_std).unwrap();
+        let hessian_std = Mat::from_fn(k, k, |i, j| -cost_hessian_std[i][j]);
+
+        let expected_opg =
+            destandardize_cov_params(&opg_cov_params(&scores_std, k).unwrap(), &scale);
+        let expected_hc0 = destandardize_cov_params(
+            &sandwich_cov_params(&hessian_std, &scores_std, n, k, SandwichVariant::Hc0).unwrap(),
+            &scale,
+        );
+        let expected_hc1 = destandardize_cov_params(
+            &sandwich_cov_params(&hessian_std, &scores_std, n, k, SandwichVariant::Hc1).unwrap(),
+            &scale,
+        );
+
+        let cases = [
+            (CovType::Opg, &expected_opg),
+            (CovType::Hc0, &expected_hc0),
+            (CovType::Hc1, &expected_hc1),
+        ];
+        for (cov_type, expected) in cases {
+            let estimator =
+                LogitEstimator::fit(make_input(), Method::Newton, 35, 1e-8, true, cov_type, 0.95)
+                    .unwrap();
+            for i in 0..k {
+                for j in 0..k {
+                    assert!(
+                        (*estimator.cov_params().get(i, j) - *expected.get(i, j)).abs() < 1e-8,
+                        "cov_type={:?}, ({i},{j}): actual={}, expected={}",
+                        cov_type,
+                        *estimator.cov_params().get(i, j),
+                        *expected.get(i, j)
+                    );
+                }
+            }
+        }
+    }
+
+    /// `method`（`bfgs`/`lbfgs`）と`cov_type`（`Opg`/`Hc0`/`Hc1`）の組み合わせが
+    /// 正しく機能することを確認する（rust-reviewer指摘: 既存テストは`method`横断が
+    /// `CovType::Classical`のみ、`cov_type`横断が`Method::Newton`のみで、両方を
+    /// 同時に変える組み合わせが未検証だった）。`scores_std`の評価は収束点の
+    /// パラメータにのみ依存し最適化アルゴリズムの種類に依存しない設計のため、
+    /// `newton`で計算した`cov_params`（既に上のテストで正しさを検証済み）と
+    /// `bfgs`/`lbfgs`の結果が一致するはず。
+    #[test]
+    fn fit_non_classical_cov_types_work_with_bfgs_and_lbfgs() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![10.0, 20.0, 30.0, 40.0], vec![-5.0, 2.0, 8.0, -1.0]];
+        let make_input = || {
+            LogitInput::from_columns(
+                &y,
+                &x_columns,
+                vec!["x1".to_string(), "x2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap()
+        };
+        let k = 3;
+
+        for cov_type in [CovType::Opg, CovType::Hc0, CovType::Hc1] {
+            let newton =
+                LogitEstimator::fit(make_input(), Method::Newton, 35, 1e-8, true, cov_type, 0.95)
+                    .unwrap();
+
+            for method in [Method::Bfgs, Method::Lbfgs] {
+                let estimator =
+                    LogitEstimator::fit(make_input(), method, 200, 1e-8, true, cov_type, 0.95)
+                        .unwrap();
+
+                assert!(
+                    estimator.converged(),
+                    "cov_type={:?}, {:?}",
+                    cov_type,
+                    method
+                );
+                for i in 0..k {
+                    for j in 0..k {
+                        assert!(
+                            (*estimator.cov_params().get(i, j) - *newton.cov_params().get(i, j))
+                                .abs()
+                                < 1e-4,
+                            "cov_type={:?}, method={:?}, ({i},{j}): actual={}, newton={}",
+                            cov_type,
+                            method,
+                            *estimator.cov_params().get(i, j),
+                            *newton.cov_params().get(i, j)
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// `newton`と同じデータセット（既知の解析解を持つ切片のみモデル）で`bfgs`/`lbfgs`を
     /// 実行し、いずれも同じ解析解へ収束することを検証する（Issue #57完了条件）。
     #[test]
@@ -832,8 +1064,16 @@ mod tests {
         let expected = (y_bar / (1.0 - y_bar)).ln();
 
         for method in [Method::Bfgs, Method::Lbfgs] {
-            let estimator =
-                LogitEstimator::fit(intercept_only_input(), method, 100, 1e-6, true, 0.95).unwrap();
+            let estimator = LogitEstimator::fit(
+                intercept_only_input(),
+                method,
+                100,
+                1e-6,
+                true,
+                CovType::Classical,
+                0.95,
+            )
+            .unwrap();
 
             assert!(estimator.converged(), "{:?}", method);
             assert!(
@@ -870,13 +1110,29 @@ mod tests {
             .unwrap()
         };
 
-        let newton =
-            LogitEstimator::fit(make_input(), Method::Newton, 35, 1e-8, true, 0.95).unwrap();
+        let newton = LogitEstimator::fit(
+            make_input(),
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
         assert!(newton.converged());
 
         for method in [Method::Bfgs, Method::Lbfgs] {
-            let estimator =
-                LogitEstimator::fit(make_input(), method, 200, 1e-8, true, 0.95).unwrap();
+            let estimator = LogitEstimator::fit(
+                make_input(),
+                method,
+                200,
+                1e-8,
+                true,
+                CovType::Classical,
+                0.95,
+            )
+            .unwrap();
 
             assert!(estimator.converged(), "{:?}", method);
             for j in 0..2 {
@@ -893,8 +1149,15 @@ mod tests {
 
     #[test]
     fn fit_returns_invalid_confidence_level_error_out_of_range() {
-        let result =
-            LogitEstimator::fit(intercept_only_input(), Method::Newton, 35, 1e-6, true, 1.5);
+        let result = LogitEstimator::fit(
+            intercept_only_input(),
+            Method::Newton,
+            35,
+            1e-6,
+            true,
+            CovType::Classical,
+            1.5,
+        );
         assert_eq!(
             result.unwrap_err(),
             MleError::Common(CommonError::InvalidConfidenceLevel {
@@ -905,8 +1168,15 @@ mod tests {
 
     #[test]
     fn fit_returns_invalid_max_iter_error_for_non_positive_max_iter() {
-        let result =
-            LogitEstimator::fit(intercept_only_input(), Method::Newton, 0, 1e-6, true, 0.95);
+        let result = LogitEstimator::fit(
+            intercept_only_input(),
+            Method::Newton,
+            0,
+            1e-6,
+            true,
+            CovType::Classical,
+            0.95,
+        );
         assert_eq!(
             result.unwrap_err(),
             MleError::InvalidMaxIter { max_iter: 0 }
@@ -926,7 +1196,15 @@ mod tests {
         )
         .unwrap();
 
-        let result = LogitEstimator::fit(input, Method::Newton, 35, 1e-6, true, 0.95);
+        let result = LogitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-6,
+            true,
+            CovType::Classical,
+            0.95,
+        );
         assert_eq!(
             result.unwrap_err(),
             MleError::Common(CommonError::InsufficientObservations { n: 2, k: 2 })
@@ -950,7 +1228,15 @@ mod tests {
         )
         .unwrap();
 
-        let result = LogitEstimator::fit(input, Method::Newton, 35, 1e-6, true, 0.95);
+        let result = LogitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-6,
+            true,
+            CovType::Classical,
+            0.95,
+        );
         assert!(
             matches!(result, Err(MleError::SingularHessian)),
             "{:?}",
@@ -985,7 +1271,8 @@ mod tests {
             )
             .unwrap();
 
-            let result = LogitEstimator::fit(input, method, 100, 1e-6, true, 0.95);
+            let result =
+                LogitEstimator::fit(input, method, 100, 1e-6, true, CovType::Classical, 0.95);
             assert!(
                 matches!(result, Err(MleError::SingularHessian)),
                 "method={:?}, result={:?}",
@@ -997,8 +1284,15 @@ mod tests {
 
     #[test]
     fn fit_returns_non_convergence_error_when_max_iter_is_too_small_and_raise_is_true() {
-        let result =
-            LogitEstimator::fit(intercept_only_input(), Method::Newton, 1, 1e-12, true, 0.95);
+        let result = LogitEstimator::fit(
+            intercept_only_input(),
+            Method::Newton,
+            1,
+            1e-12,
+            true,
+            CovType::Classical,
+            0.95,
+        );
         assert!(
             matches!(result, Err(MleError::NonConvergence { .. })),
             "{:?}",
@@ -1014,6 +1308,7 @@ mod tests {
             1,
             1e-12,
             false,
+            CovType::Classical,
             0.95,
         )
         .unwrap();

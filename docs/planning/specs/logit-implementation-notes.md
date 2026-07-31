@@ -97,4 +97,20 @@
 
 rust-reviewerの指摘（`bfgs`/`lbfgs`×完全な多重共線性でのテスト欠落、Issue #58時点）に対応しようとしたところ、テストの欠落ではなく実際のバグを発見した。`Method::Bfgs`で完全な多重共線性のあるデータセットを`fit()`すると、`MleError::SingularHessian`にならず桁違いに巨大な値を含む`Ok`が返っていた。原因は`observed_information_cov_params`（`neg_hessian_inverse`）が使う非ピボットCholesky分解が特異性を確実に検出できないため（`engine/src/linear/CLAUDE.md`に記録済みのOLSと同じ既知の限界、Issue #107の再発）。`Method::Newton`は`newton_step`内の別の検出経路（ピボット付きQR）でたまたま検出できているだけで、`bfgs`/`lbfgs`はこの経路を経由しないため無防備だった。
 
-Issue #58時点ではIssue #58本来のスコープを超えるためユーザー確認の上でIssue #129として切り出し、Issue #129で対応した。修正内容は`nonlinear-implementation-notes.md`「`cov_type`共通行列演算の特異性検出（Issue #129で修正済み）」参照。`fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_bfgs`テスト（`bfgs`で正しく`SingularHessian`になることを確認）で検証済み。
+Issue #58時点ではIssue #58本来のスコープを超えるためユーザー確認の上でIssue #129として切り出し、Issue #129で対応した。修正内容は`nonlinear-implementation-notes.md`「`cov_type`共通行列演算の特異性検出（Issue #129で修正済み）」参照。`fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_bfgs_and_lbfgs`テスト（`bfgs`・`lbfgs`両方で正しく`SingularHessian`になることを確認）で検証済み。
+
+## OPG（BHHH）・サンドイッチ型（HC0/HC1）でのSE（Issue #59で実装済み）
+
+`LogitEstimator::fit`に`cov_type: CovType`引数を追加した。`CovType`（`Classical`/`Opg`/`Hc0`/`Hc1`。`Cluster`はB7で追加）は`Method`と同じ理由で`nonlinear/common.rs`に定義し、Probit/Tobitでも再利用する想定。
+
+- **収束点でのスコア評価に`LogitProblem`のクローンが必要**: `Opg`/`Hc0`/`Hc1`は収束点での観測ごとのスコア（`LogitProblem::scores`）が必要だが、`run_solver`は`problem`の所有権を取り込み、内部で保持していたモデルを呼び出し元へ返さない設計になっている（`SolverOutput`に`model`フィールドが無い）。`run_solver`のシグネチャを変更して`model`を返す設計も検討したが、`LogitProblem`は元々`argmin::core::Executor`向けに`Clone`を要求しているため、`run_solver`に渡す前に`problem.clone()`しておく方が`run_solver`（Logit/Probit/Tobit共通のユーティリティ）のシグネチャを変えずに済み、影響範囲が小さい。
+  - **クローンは`cov_type=Classical`のときは行わない**（rust-reviewer指摘）: 初回実装では`cov_type`に関わらず常に`problem.clone()`していたが、`Classical`はスコアを一切使わないため設計行列を含む無駄な複製になる。`cov_type`に応じて`Option<LogitProblem>`で条件付きにクローンする形に修正した。
+- **`cov_params_std`の計算はいずれも標準化空間で行ってから`destandardize_cov_params`で逆変換**: Issue #58で確立した「標準化空間で`Σ_std`を計算し、最後に一度だけ`destandardize_cov_params`で元のスケールへ変換する」設計をそのまま踏襲する。`opg_cov_params`/`sandwich_cov_params`（`nonlinear/common.rs`、Issue #53で実装済み）はいずれも標準化空間の`scores_std`・`hessian_std`を受け取ってΣ_stdを返すため、`cov_type`ごとの分岐は「どの共通関数を呼ぶか」の違いのみで済む。
+- **`ColumnScale::stds()`ゲッターを追加、可視性は`pub`のまま**: テストで`fit()`と同じ標準化・逆標準化の手順を独立に再現するために必要になった（元は`nonlinear/common.rs`内部でのみ使うprivateフィールドだったが、`destandardize_params`の逆方向の変換をテスト側で書くために公開した）。rust-reviewerからは「engine内部の実装詳細なので`pub(crate)`に絞るべき」という指摘があったが、実際に`pub(crate)`にすると`cargo clippy --all-targets -- -D warnings`の`lib`ターゲット（テストコードを含まないビルド）で`dead_code`エラーになった（唯一の呼び出し元が`logit.rs`の`#[cfg(test)] mod tests`のみで、`pub`アイテムはdead_code検出対象外という言語仕様上の扱いの違いによる）。ビルドを壊すため`pub`のまま据え置いた。
+
+### テスト
+
+- **`cov_type`ごとの独立再計算との一致**: `fit()`が内部で行う手順（標準化→収束点でのscores/Hessian評価→`common.rs`の共通行列演算→`destandardize_cov_params`）をテスト側で独立に再現し、`Opg`/`Hc0`/`Hc1`それぞれで`fit()`が返す`cov_params`と一致することを確認した（`fit_cov_type_opg_hc0_hc1_match_independently_recomputed_values`）。
+  - **多変量（k=3）データセットが必須な理由**: 切片のみモデルでは情報行列の等式`Σᵢsᵢsᵢ' = -H`が有限標本で厳密に成り立ってしまい（`y_i∈{0,1}`かつ全観測で`p_i=ȳ`となる特殊性から`Σ(y_i-ȳ)² = n*ȳ(1-ȳ) = -H`が代数的に導ける）、`classical`/`opg`/`hc0`が偶然同じ値になる。そのため切片のみデータセットでは`fit()`の`match cov_type`の配線ミス（例えば`Opg`の枝で誤って`observed_information_cov_params`を呼ぶ等）を検出できない。実際に`Opg`の枝を意図的に壊して（`observed_information_cov_params`を呼ぶよう改変）このテストが失敗することを確認した上で、多変量データセットを採用した。
+  - Hessianの符号規約に注意: `LogitProblem::hessian`（argminトレイト）はコスト関数（負の対数尤度）のHessianを返すため、`run_solver`が`SolverOutput.hessian`に格納する対数尤度そのもののHessianに合わせて、テスト側でも1回符号反転する必要がある（`run_solver`のdocコメント「Hessianトレイトの符号規約」と同じ変換）。
+- **`method`×`cov_type`の組み合わせ**: 既存テストは`method`横断が`CovType::Classical`のみ、`cov_type`横断が`Method::Newton`のみで、両方を同時に変える組み合わせが未検証だった（rust-reviewer指摘）。`fit_non_classical_cov_types_work_with_bfgs_and_lbfgs`で、`Opg`/`Hc0`/`Hc1`それぞれについて`bfgs`/`lbfgs`の`cov_params`が`newton`の結果と一致することを確認した。

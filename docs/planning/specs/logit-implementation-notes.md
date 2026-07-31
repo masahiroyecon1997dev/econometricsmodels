@@ -151,3 +151,20 @@ Issue #58時点ではIssue #58本来のスコープを超えるためユーザ�
 - **切片のみモデル（`df_model=0`の境界ケース）**: `fit_computes_goodness_of_fit_statistics_for_intercept_only_model`。`log_likelihood`と`log_likelihood_null`が定義上一致すること（同じ「切片のみ」モデルを参照するため）、`lr_statistic≈0`・`pseudo_r_squared≈0`・`lr_p_value`がNaNになることを検証。
 - **多変量モデルでの独立再計算**: `fit_computes_goodness_of_fit_statistics_matching_independently_recomputed_values`。実装の`softplus`ベースの式とは異なる式（`logistic`から直接`Σ[y ln(p) + (1-y) ln(1-p)]`を計算するベルヌーイ対数尤度の定義式そのもの）で`log_likelihood`を独立に再計算し、`log_likelihood_null`・`lr_statistic`・`pseudo_r_squared`・`df_model`・`df_resid`・`lr_p_value`（`statrs::ChiSquared`で独立に検算）・`aic`/`bic`を突き合わせた（`fit_cov_params_is_symmetric_and_stats_are_internally_consistent`と同じデータセットを再利用）。
 - **`include_intercept=false`での非入れ子挙動**: `fit_lr_statistic_can_be_negative_when_include_intercept_is_false`。`lr_statistic`が負になりうること（NaN/Infにはならないこと）、`df_model`/`df_resid`/`aic`/`bic`は`include_intercept`の値に関わらず同じ式で計算されることを回帰テストとして固定した。
+
+## 限界効果（Issue #62で実装済み）
+
+`LogitEstimator::marginal_effects(at, confidence_level)`を追加した（`fit()`とは独立した別メソッド、`nonlinear-api-design.md`6章）。設計方針の詳細（離散変数の自動判定なし・切片除外・代表点の定義・デルタ法ヤコビアンの統一形）は`nonlinear-implementation-notes.md`「限界効果」節（Logit/Probit/Tobit共通の方針）を参照。本節はLogit固有の実装判断のみ記す。
+
+- **`w`・`s`の計算（`overall_w_and_s`/`at_point_w_and_s`）**: Logitのリンク関数`Λ`の微分`p(1-p)`を使い、`at="overall"`は全観測を1回走査した平均、`at="mean"`/`"median"`は代表点`x̄`での1点評価。いずれも`(w, s)`という同じ形の戻り値にまとめ、`dydx_and_jacobian`（`at`に依存しない共通関数、`g_j(θ)=w*θⱼ`・`∂g_j/∂θ_m=θⱼ*s_m+[j==m]*w`）に渡す設計にした。
+- **分散の計算はk×kのヤコビアン行列を都度構築せず、変数`j`ごとに行ベクトルを取り出して二次形式`jac_j·Σ·jac_j'`を計算**（`Σ=cov_params`）。`Mat::from_fn`で一度k×kの`jacobian`を構築してから行を取り出す実装にした（k×k全体を毎回構築するオーバーヘッドはkが小さい想定のため許容、`.claude/rules/rust-style.md`「パフォーマンス」節の並列化検討対象（反復最適化中に繰り返し呼ばれる計算）には該当しない。呼び出し1回につき1回のみの評価のため）。
+- **`column_medians`のNaN比較**: `partial_cmp().unwrap()`を使う（OLSの`time_ordering`と同じ正当化、`x`の値はNaN/無限大を含まないことが`engine_pybind::column_extraction`側で保証されている契約）。
+- **statsmodelsとの数値照合（rust-reviewerが実施）**: `get_margeff(at='overall'/'mean', method='dydx', dummy=False)`とdydx・std_errが機械精度で一致することを確認済み。`dummy=False`がstatsmodelsの既定値であることも`inspect.signature`で確認済み。
+
+### テスト
+
+- **デルタ法ヤコビアンの数値微分検証**: `dydx_and_jacobian_matches_numerical_differentiation_for_overall_w_and_s`/`_for_at_point_w_and_s`。`hessian_matches_numerical_differentiation_of_gradient`と同じ技法（中心差分）で、`overall_w_and_s`/`at_point_w_and_s`が返す`(w,s)`から`dydx_and_jacobian`が計算するヤコビアンを、`w(θ)*θⱼ`を`θ`の関数として直接数値微分した値と比較した。
+- **切片のみモデルでの空結果**: `marginal_effects_returns_empty_result_for_intercept_only_model`。定数項のみ（k=1、出力対象の説明変数が0個）でパニックしないことを確認する境界ケース。
+- **独立再計算によるdydx・SEの検証**: `marginal_effects_overall_matches_independently_recomputed_dydx_and_delta_method_se`。`logistic`から直接計算した定義式（`overall_w_and_s`とは別の式）でdydxを再計算し、標準誤差も`dydx_j`をfit済みパラメータの周りで数値微分して得たヤコビアン行と`cov_params`の二次形式から独立に求めて突き合わせた（`dydx_and_jacobian`内の配線ミスを検出できる設計）。
+- **`at="mean"`/`"median"`が`at="overall"`と異なる値になることの確認**: `marginal_effects_at_mean_differs_from_overall_and_matches_independent_recomputation`・`marginal_effects_at_median_differs_from_mean_and_overall_and_matches_independent_recomputation`。後者は`column_medians`（奇数・偶数nの両方を`column_medians_matches_expected_for_odd_and_even_n`で直接検証済み）が返す中央値を使い、平均・中央値が異なる非対称データセットで代表点が正しく切り替わることを確認した（rust-reviewer指摘、初回実装では`at="median"`のテストが皆無だった）。
+- **`confidence_level`範囲外エラー**: `marginal_effects_returns_invalid_confidence_level_error_out_of_range`。`fit()`と同じ`CommonError::InvalidConfidenceLevel`を返すことを確認。

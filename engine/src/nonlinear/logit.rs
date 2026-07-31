@@ -32,9 +32,9 @@
 
 use crate::error::CommonError;
 use crate::nonlinear::common::{
-    CovType, Method, MleError, SandwichVariant, cluster_cov_params, destandardize_cov_params,
-    destandardize_params, observed_information_cov_params, opg_cov_params, run_solver,
-    sandwich_cov_params, standardize_columns,
+    CovType, MarginalEffectsAt, Method, MleError, SandwichVariant, cluster_cov_params,
+    destandardize_cov_params, destandardize_params, observed_information_cov_params,
+    opg_cov_params, run_solver, sandwich_cov_params, standardize_columns,
 };
 use crate::validation::validate_cluster_groups;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
@@ -196,6 +196,87 @@ fn log_likelihood(x: &Mat<f64>, y: &Mat<f64>, params: &[f64]) -> f64 {
         .sum()
 }
 
+/// 限界効果（`LogitEstimator::marginal_effects`のdocコメント「数式（デルタ法）」参照）の
+/// `at="overall"`（AME）における`w=(1/n)Σᵢpᵢ(1-pᵢ)`・`s_m=(1/n)Σᵢ(1-2pᵢ)pᵢ(1-pᵢ)xᵢₘ`を
+/// 全観測を1回走査して計算する。
+fn overall_w_and_s(x: &Mat<f64>, params: &[f64]) -> (f64, Vec<f64>) {
+    let n = x.nrows();
+    let k = x.ncols();
+    let mut w = 0.0;
+    let mut s = vec![0.0; k];
+    for i in 0..n {
+        let z: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
+        let p = logistic(z);
+        let pq = p * (1.0 - p);
+        w += pq;
+        let coef = (1.0 - 2.0 * p) * pq;
+        for (m, s_m) in s.iter_mut().enumerate() {
+            *s_m += coef * (*x.get(i, m));
+        }
+    }
+    let n_f = n as f64;
+    w /= n_f;
+    for s_m in s.iter_mut() {
+        *s_m /= n_f;
+    }
+    (w, s)
+}
+
+/// 限界効果の`at="mean"`/`"median"`における、代表点`x_bar`（各説明変数の標本平均または
+/// 中央値）で評価した`w=p̄(1-p̄)`・`s_m=(1-2p̄)p̄(1-p̄)x̄ₘ`（`p̄=Λ(x̄'θ)`）を計算する。
+fn at_point_w_and_s(x_bar: &[f64], params: &[f64]) -> (f64, Vec<f64>) {
+    let k = x_bar.len();
+    let z: f64 = (0..k).map(|m| x_bar[m] * params[m]).sum();
+    let p = logistic(z);
+    let pq = p * (1.0 - p);
+    let coef = (1.0 - 2.0 * p) * pq;
+    let s: Vec<f64> = (0..k).map(|m| coef * x_bar[m]).collect();
+    (pq, s)
+}
+
+/// `overall_w_and_s`/`at_point_w_and_s`が返す`(w,s)`から、限界効果`dydx_j=w*θⱼ`と
+/// そのヤコビアン`jacobian[j][m]=∂dydx_j/∂θₘ=θⱼ*s_m + [j==m]*w`を計算する
+/// （`LogitEstimator::marginal_effects`のdocコメント「数式（デルタ法）」参照。
+/// AME・mean・medianのいずれも`g_j(θ)=w(θ)*θⱼ`という同じ形に帰着するため、
+/// `w`・`s`の計算方法（`at`ごとに異なる）とこの式（`at`に依らず共通）を分離できる）。
+fn dydx_and_jacobian(k: usize, params: &[f64], w: f64, s: &[f64]) -> (Vec<f64>, Mat<f64>) {
+    let dydx: Vec<f64> = (0..k).map(|j| w * params[j]).collect();
+    let jacobian = Mat::from_fn(k, k, |j, m| params[j] * s[m] + if j == m { w } else { 0.0 });
+    (dydx, jacobian)
+}
+
+/// 説明変数ごとの標本平均（列ごと、`marginal_effects`の`at="mean"`用）。
+fn column_means(x: &Mat<f64>) -> Vec<f64> {
+    let n = x.nrows();
+    let k = x.ncols();
+    (0..k)
+        .map(|j| (0..n).map(|i| *x.get(i, j)).sum::<f64>() / (n as f64))
+        .collect()
+}
+
+/// 説明変数ごとの標本中央値（列ごと、`marginal_effects`の`at="median"`用）。`n`が偶数の
+/// 場合は中央2値の平均。
+///
+/// `partial_cmp().unwrap()`について: `x`の値はNaN/無限大を含まないことが
+/// `engine_pybind::column_extraction`側で既に保証されている前提（`engine`の責務境界の
+/// 内側であり、クリーンな値しか受け取らない。OLSの`time_ordering`と同じ扱い、
+/// `engine/src/linear/ols.rs`参照）。
+fn column_medians(x: &Mat<f64>) -> Vec<f64> {
+    let n = x.nrows();
+    let k = x.ncols();
+    (0..k)
+        .map(|j| {
+            let mut col: Vec<f64> = (0..n).map(|i| *x.get(i, j)).collect();
+            col.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            if n % 2 == 1 {
+                col[n / 2]
+            } else {
+                (col[n / 2 - 1] + col[n / 2]) / 2.0
+            }
+        })
+        .collect()
+}
+
 /// Logitの負の対数尤度・スコア・Hessian（argminの`CostFunction`/`Gradient`/`Hessian`
 /// トレイト実装）。`LogitInput`の`X`・`y`を保持する（`run_solver`が`problem`の所有権を
 /// 必要とするため、`LogitInput`とは独立した所有データとして持つ。`Clone`は
@@ -289,11 +370,72 @@ impl Hessian for LogitProblem {
     }
 }
 
+/// `LogitEstimator::marginal_effects`の結果。`coef_table`と同じ行指向
+/// （`dydx`/`std_err`/`z`/`p_value`/`conf_low`/`conf_high`、`nonlinear-api-design.md`
+/// 6章）。定数項（切片）は行から除外する（切片の限界効果は経済学的に意味を持たない、
+/// statsmodelsの`get_margeff()`と同じ扱い）。
+///
+/// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
+#[derive(Debug)]
+pub struct MarginalEffects {
+    /// 説明変数名（定数項を除く）。`LogitInput::param_names()`から定数項を除いたもの
+    param_names: Vec<String>,
+    /// 限界効果 `dy/dx`
+    dydx: Vec<f64>,
+    /// デルタ法標準誤差
+    std_errors: Vec<f64>,
+    /// z統計量
+    z_stats: Vec<f64>,
+    /// 両側p値
+    p_values: Vec<f64>,
+    /// 信頼区間の下限
+    conf_lower: Vec<f64>,
+    /// 信頼区間の上限
+    conf_upper: Vec<f64>,
+}
+
+impl MarginalEffects {
+    /// 説明変数名（定数項を除く）
+    pub fn param_names(&self) -> &[String] {
+        &self.param_names
+    }
+
+    /// 限界効果 `dy/dx`
+    pub fn dydx(&self) -> &[f64] {
+        &self.dydx
+    }
+
+    /// デルタ法標準誤差
+    pub fn std_errors(&self) -> &[f64] {
+        &self.std_errors
+    }
+
+    /// z統計量
+    pub fn z_stats(&self) -> &[f64] {
+        &self.z_stats
+    }
+
+    /// 両側p値
+    pub fn p_values(&self) -> &[f64] {
+        &self.p_values
+    }
+
+    /// 信頼区間の下限
+    pub fn conf_lower(&self) -> &[f64] {
+        &self.conf_lower
+    }
+
+    /// 信頼区間の上限
+    pub fn conf_upper(&self) -> &[f64] {
+        &self.conf_upper
+    }
+}
+
 /// Logitの推定結果。`fit`でのバリデーション・最適化・`cov_type`に応じたSE計算・
 /// 適合度統計量の計算を通過した状態を表す。
 ///
-/// 限界効果・`predict`/`pred_table`は未実装。`docs/planning/specs/
-/// logit-probit-issue-breakdown.md`のB9以降で`fit`とは別のメソッドとして追加していく想定。
+/// `predict`/`pred_table`は未実装。`docs/planning/specs/
+/// logit-probit-issue-breakdown.md`のB10で`fit`とは別のメソッドとして追加していく想定。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
 #[derive(Debug)]
@@ -709,6 +851,104 @@ impl LogitEstimator {
     /// 残差自由度（`n-k`）
     pub fn df_resid(&self) -> usize {
         self.df_resid
+    }
+
+    /// 限界効果（`marginal_effects`）。`fit()`とは独立した別メソッド（`fit()`のReturn
+    /// 本体には含めない、`nonlinear-api-design.md`6章で確定済み）。`fit()`時の
+    /// `cov_params`を再利用するため再最適化は不要（`confidence_level`は`fit()`とは
+    /// 独立したパラメータとして受け取り、`fit()`時の値に縛られず事後的に異なる
+    /// CI幅を見られるようにする）。
+    ///
+    /// ## 数式（デルタ法）
+    ///
+    /// `p_i = Λ(x_i'θ)`のとき、変数`j`（連続変数として扱う。`dummy=False`が既定の
+    /// statsmodelsの`get_margeff()`に倣い、離散変数の自動判定は行わない設計、
+    /// `nonlinear-implementation-notes.md`「限界効果」参照）の限界効果は
+    /// `dy/dx_j = p(1-p)θ_j`。
+    ///
+    /// - `at="overall"`（AME）: `g_j(θ) = w(θ)*θ_j`、`w(θ) = (1/n)Σᵢ pᵢ(1-pᵢ)`
+    /// - `at="mean"`/`"median"`: `g_j(θ) = w(θ)*θ_j`、`w(θ) = p̄(1-p̄)`
+    ///   （`p̄=Λ(x̄'θ)`、`x̄`は各説明変数の標本平均または中央値からなる代表点）
+    ///
+    /// いずれも同じ`g_j(θ)=w(θ)*θ_j`という形に帰着するため、`w`とその勾配
+    /// `s_m=∂w/∂θ_m`さえ計算できれば、ヤコビアンは
+    /// `∂g_j/∂θ_m = θ_j*s_m + [j==m]*w`という共通の式で書ける
+    /// （`overall_w_and_s`/`at_point_w_and_s`が`(w,s)`を計算し、
+    /// `dydx_and_jacobian`が上記の共通式を適用する）。
+    ///
+    /// 変数`j`の分散は`Var(g_j) = jac_j · Σ · jac_jᵀ`（`jac_j`はヤコビアンの`j`行目、
+    /// `Σ=cov_params`）。標準誤差はこの平方根、検定分布は標準正規分布
+    /// （`fit()`本体と同じ、`nonlinear-api-design.md`5章）。
+    ///
+    /// 定数項（切片）は出力から除外する（切片の限界効果は意味を持たない、
+    /// statsmodelsも同様）。
+    ///
+    /// # Errors
+    /// `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
+    pub fn marginal_effects(
+        &self,
+        at: MarginalEffectsAt,
+        confidence_level: f64,
+    ) -> Result<MarginalEffects, MleError> {
+        if !(confidence_level > 0.0 && confidence_level < 1.0) {
+            return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
+        }
+
+        let x = self.input.x();
+        let k = self.input.k();
+        let (w, s) = match at {
+            MarginalEffectsAt::Overall => overall_w_and_s(x, &self.params),
+            MarginalEffectsAt::Mean => at_point_w_and_s(&column_means(x), &self.params),
+            MarginalEffectsAt::Median => at_point_w_and_s(&column_medians(x), &self.params),
+        };
+        let (dydx, jacobian) = dydx_and_jacobian(k, &self.params, w, &s);
+
+        // `Normal::new(0.0, 1.0)`は標準正規分布であり、標準偏差が正であることを
+        // 要求するstatrsの検証を常に満たすため、この`map_err`分岐は理論上到達不能
+        // （`.claude/rules/rust-style.md`「テスト」のカバレッジ方針参照、`fit()`と同じ扱い）。
+        let normal =
+            Normal::new(0.0, 1.0).map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+        let alpha = 1.0 - confidence_level;
+        let z_crit = normal.inverse_cdf(1.0 - alpha / 2.0);
+
+        let k_constant = usize::from(self.input.has_intercept());
+        let mut param_names = Vec::with_capacity(k - k_constant);
+        let mut out_dydx = Vec::with_capacity(k - k_constant);
+        let mut std_errors = Vec::with_capacity(k - k_constant);
+        let mut z_stats = Vec::with_capacity(k - k_constant);
+        let mut p_values = Vec::with_capacity(k - k_constant);
+        let mut conf_lower = Vec::with_capacity(k - k_constant);
+        let mut conf_upper = Vec::with_capacity(k - k_constant);
+
+        for (j, &dydx_j) in dydx.iter().enumerate().skip(k_constant) {
+            let jac_row: Vec<f64> = (0..k).map(|m| *jacobian.get(j, m)).collect();
+            let mut var_j = 0.0;
+            for a in 0..k {
+                for b in 0..k {
+                    var_j += jac_row[a] * (*self.cov_params.get(a, b)) * jac_row[b];
+                }
+            }
+            let se = var_j.sqrt();
+            let z = dydx_j / se;
+
+            param_names.push(self.input.param_names()[j].clone());
+            out_dydx.push(dydx_j);
+            std_errors.push(se);
+            z_stats.push(z);
+            p_values.push(2.0 * (1.0 - normal.cdf(z.abs())));
+            conf_lower.push(dydx_j - z_crit * se);
+            conf_upper.push(dydx_j + z_crit * se);
+        }
+
+        Ok(MarginalEffects {
+            param_names,
+            dydx: out_dydx,
+            std_errors,
+            z_stats,
+            p_values,
+            conf_lower,
+            conf_upper,
+        })
     }
 }
 
@@ -1901,5 +2141,340 @@ mod tests {
         )
         .unwrap();
         assert!(!estimator.converged());
+    }
+
+    /// `at="overall"`（AME）のヤコビアン（`dydx_and_jacobian`が`overall_w_and_s`の
+    /// 出力から計算する`∂dydx_j/∂θ_m`）を、`overall_w_and_s`が返す`w`を`θ`の関数として
+    /// 中心差分で数値微分した値と比較する。`hessian_matches_numerical_differentiation_
+    /// of_gradient`と同じ技法（解析解が閉じた形で書けない一般の点で、実装から独立に
+    /// 検証する）。
+    #[test]
+    fn dydx_and_jacobian_matches_numerical_differentiation_for_overall_w_and_s() {
+        let x = Mat::from_fn(4, 3, |i, j| match j {
+            0 => 1.0,
+            1 => [10.0, 20.0, 30.0, 40.0][i],
+            _ => [-5.0, 2.0, 8.0, -1.0][i],
+        });
+        let params = vec![0.3, -0.02, 0.05];
+        let k = 3;
+        let h = 1e-6;
+
+        let (w, s) = overall_w_and_s(&x, &params);
+        let (_, jacobian) = dydx_and_jacobian(k, &params, w, &s);
+
+        for j in 0..k {
+            for m in 0..k {
+                let mut plus = params.clone();
+                plus[m] += h;
+                let mut minus = params.clone();
+                minus[m] -= h;
+                let (w_plus, _) = overall_w_and_s(&x, &plus);
+                let (w_minus, _) = overall_w_and_s(&x, &minus);
+                let dydx_plus_j = w_plus * plus[j];
+                let dydx_minus_j = w_minus * minus[j];
+                let numeric = (dydx_plus_j - dydx_minus_j) / (2.0 * h);
+                assert!(
+                    (*jacobian.get(j, m) - numeric).abs() < 1e-6,
+                    "j={j}, m={m}, analytic={}, numeric={numeric}",
+                    *jacobian.get(j, m)
+                );
+            }
+        }
+    }
+
+    /// `at="mean"`/`"median"`（`at_point_w_and_s`、代表点`x_bar`固定）のヤコビアンについても、
+    /// 上記と同じ数値微分による独立検証を行う。
+    #[test]
+    fn dydx_and_jacobian_matches_numerical_differentiation_for_at_point_w_and_s() {
+        let x_bar = vec![1.0, 25.0, 1.0];
+        let params = vec![0.3, -0.02, 0.05];
+        let k = 3;
+        let h = 1e-6;
+
+        let (w, s) = at_point_w_and_s(&x_bar, &params);
+        let (_, jacobian) = dydx_and_jacobian(k, &params, w, &s);
+
+        for j in 0..k {
+            for m in 0..k {
+                let mut plus = params.clone();
+                plus[m] += h;
+                let mut minus = params.clone();
+                minus[m] -= h;
+                let (w_plus, _) = at_point_w_and_s(&x_bar, &plus);
+                let (w_minus, _) = at_point_w_and_s(&x_bar, &minus);
+                let dydx_plus_j = w_plus * plus[j];
+                let dydx_minus_j = w_minus * minus[j];
+                let numeric = (dydx_plus_j - dydx_minus_j) / (2.0 * h);
+                assert!(
+                    (*jacobian.get(j, m) - numeric).abs() < 1e-6,
+                    "j={j}, m={m}, analytic={}, numeric={numeric}",
+                    *jacobian.get(j, m)
+                );
+            }
+        }
+    }
+
+    /// 切片のみモデル（k=1、`k_constant=1`）は、限界効果の出力対象となる説明変数が
+    /// 存在しない（定数項は出力から除外するため）。`marginal_effects`が空の結果を
+    /// 返す（パニックしない）ことを確認する境界ケース。
+    #[test]
+    fn marginal_effects_returns_empty_result_for_intercept_only_model() {
+        let estimator = LogitEstimator::fit(
+            intercept_only_input(),
+            Method::Newton,
+            35,
+            1e-6,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        let effects = estimator
+            .marginal_effects(MarginalEffectsAt::Overall, 0.95)
+            .unwrap();
+        assert!(effects.param_names().is_empty());
+        assert!(effects.dydx().is_empty());
+    }
+
+    /// `marginal_effects(at="overall")`の`dydx`を、実装の内部ヘルパー（`overall_w_and_s`/
+    /// `dydx_and_jacobian`）とは別に、定義式`dy/dx_j = (1/n)Σᵢpᵢ(1-pᵢ)θⱼ`を`logistic`
+    /// から直接計算する式で独立に再計算し、突き合わせる。標準誤差は、デルタ法の
+    /// ヤコビアンを`overall_w_and_s`経由ではなく数値微分（`dydx_j`自体をfit済みパラメータ
+    /// の周りで直接数値微分したもの）で独立に求め、`marginal_effects`が返す解析的な
+    /// 標準誤差と突き合わせることで、`dydx_and_jacobian`内の式（`θⱼ*s_m + [j==m]*w`）が
+    /// 正しく実装に配線されていることを検証する（配線ミスがあればこのテストで検出できる）。
+    #[test]
+    fn marginal_effects_overall_matches_independently_recomputed_dydx_and_delta_method_se() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![10.0, 20.0, 30.0, 40.0], vec![-5.0, 2.0, 8.0, -1.0]];
+        let input = LogitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = LogitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        let k = 3;
+        let n = 4;
+        let x = estimator.input().x();
+
+        let effects = estimator
+            .marginal_effects(MarginalEffectsAt::Overall, 0.95)
+            .unwrap();
+        assert_eq!(effects.param_names(), ["x1".to_string(), "x2".to_string()]);
+
+        // dydxの独立再計算（`logistic`から直接、`overall_w_and_s`とは別の式）
+        let dydx_j = |params: &[f64], j: usize| -> f64 {
+            (0..n)
+                .map(|i| {
+                    let z: f64 = (0..k).map(|m| *x.get(i, m) * params[m]).sum();
+                    let p = logistic(z);
+                    p * (1.0 - p)
+                })
+                .sum::<f64>()
+                / (n as f64)
+                * params[j]
+        };
+        let params = estimator.params();
+        for (idx, j) in (1..k).enumerate() {
+            assert!((effects.dydx()[idx] - dydx_j(params, j)).abs() < 1e-9);
+        }
+
+        // 標準誤差の独立検証: `dydx_j`をfit済みパラメータの周りで数値微分して
+        // ヤコビアン行（j行目）を求め、`cov_params`との二次形式で分散を計算する。
+        let h = 1e-6;
+        for (idx, j) in (1..k).enumerate() {
+            let mut jac_row = vec![0.0; k];
+            for m in 0..k {
+                let mut plus = params.to_vec();
+                plus[m] += h;
+                let mut minus = params.to_vec();
+                minus[m] -= h;
+                jac_row[m] = (dydx_j(&plus, j) - dydx_j(&minus, j)) / (2.0 * h);
+            }
+            let mut var_j = 0.0;
+            for a in 0..k {
+                for b in 0..k {
+                    var_j += jac_row[a] * (*estimator.cov_params().get(a, b)) * jac_row[b];
+                }
+            }
+            let expected_se = var_j.sqrt();
+            assert!(
+                (effects.std_errors()[idx] - expected_se).abs() < 1e-6,
+                "idx={idx}, actual={}, expected={expected_se}",
+                effects.std_errors()[idx]
+            );
+        }
+
+        // z値・p値・信頼区間の内部整合性（既存のSE系テストと同じ検算パターン）
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        let z_crit = normal.inverse_cdf(0.975);
+        for idx in 0..2 {
+            let se = effects.std_errors()[idx];
+            assert!((effects.z_stats()[idx] - effects.dydx()[idx] / se).abs() < 1e-9);
+            let expected_p = 2.0 * (1.0 - normal.cdf(effects.z_stats()[idx].abs()));
+            assert!((effects.p_values()[idx] - expected_p).abs() < 1e-9);
+            assert!(
+                (effects.conf_upper()[idx] - effects.conf_lower()[idx] - 2.0 * z_crit * se).abs()
+                    < 1e-9
+            );
+        }
+    }
+
+    /// `at="mean"`は`at="overall"`と異なる代表点（標本平均）で評価するため、一般には
+    /// 異なる値になる。実装がこの違いを正しく反映していること（`at`の分岐が機能して
+    /// いること）を確認する。`dydx`を`column_means`から独立に再計算した値とも突き合わせる。
+    #[test]
+    fn marginal_effects_at_mean_differs_from_overall_and_matches_independent_recomputation() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![10.0, 20.0, 30.0, 40.0], vec![-5.0, 2.0, 8.0, -1.0]];
+        let input = LogitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = LogitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        let overall = estimator
+            .marginal_effects(MarginalEffectsAt::Overall, 0.95)
+            .unwrap();
+        let at_mean = estimator
+            .marginal_effects(MarginalEffectsAt::Mean, 0.95)
+            .unwrap();
+
+        assert!((overall.dydx()[0] - at_mean.dydx()[0]).abs() > 1e-9);
+
+        // 独立再計算: x̄=[1, 25, 1]（定数項1、x1の平均25、x2の平均1）でp̄を評価
+        let params = estimator.params();
+        let x_bar = [1.0, 25.0, 1.0];
+        let z_bar: f64 = (0..3).map(|m| x_bar[m] * params[m]).sum();
+        let p_bar = logistic(z_bar);
+        let w = p_bar * (1.0 - p_bar);
+        for (idx, j) in (1..3).enumerate() {
+            assert!((at_mean.dydx()[idx] - w * params[j]).abs() < 1e-9);
+        }
+    }
+
+    /// `column_medians`（`marginal_effects`の`at="median"`が使う代表点の計算）を、
+    /// 奇数・偶数それぞれの観測数で直接検証する。
+    #[test]
+    fn column_medians_matches_expected_for_odd_and_even_n() {
+        // 奇数（n=5）: ソート後の中央1点がそのまま中央値
+        let x_odd = Mat::from_fn(5, 2, |i, j| match j {
+            0 => [10.0, 20.0, 30.0, 40.0, 100.0][i],
+            _ => [-5.0, 2.0, 8.0, -1.0, 50.0][i],
+        });
+        let medians_odd = column_medians(&x_odd);
+        assert!((medians_odd[0] - 30.0).abs() < 1e-12); // sorted: 10,20,30,40,100
+        assert!((medians_odd[1] - 2.0).abs() < 1e-12); // sorted: -5,-1,2,8,50
+
+        // 偶数（n=4）: 中央2値の平均
+        let x_even = Mat::from_fn(4, 1, |i, _| [10.0, 20.0, 30.0, 40.0][i]);
+        let medians_even = column_medians(&x_even);
+        assert!((medians_even[0] - 25.0).abs() < 1e-12); // (20+30)/2
+    }
+
+    /// `at="median"`が`at="mean"`/`at="overall"`と異なる代表点で評価されること
+    /// （非対称なデータセットで平均・中央値が異なる値になるよう構成）、および
+    /// `dydx`を`column_medians`から独立に再計算した値と突き合わせる。
+    #[test]
+    fn marginal_effects_at_median_differs_from_mean_and_overall_and_matches_independent_recomputation()
+     {
+        // x1: 平均40（=200/5）・中央値30（sorted: 10,20,30,40,100）と非対称にずらす
+        let y = vec![0.0, 1.0, 0.0, 1.0, 1.0];
+        let x_columns = vec![
+            vec![10.0, 20.0, 30.0, 40.0, 100.0],
+            vec![-5.0, 2.0, 8.0, -1.0, 50.0],
+        ];
+        let input = LogitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = LogitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        let overall = estimator
+            .marginal_effects(MarginalEffectsAt::Overall, 0.95)
+            .unwrap();
+        let at_mean = estimator
+            .marginal_effects(MarginalEffectsAt::Mean, 0.95)
+            .unwrap();
+        let at_median = estimator
+            .marginal_effects(MarginalEffectsAt::Median, 0.95)
+            .unwrap();
+
+        assert!((at_median.dydx()[0] - at_mean.dydx()[0]).abs() > 1e-9);
+        assert!((at_median.dydx()[0] - overall.dydx()[0]).abs() > 1e-9);
+
+        // 独立再計算: x̄=[1, 30, 2]（定数項1、x1の中央値30、x2の中央値2）でp̄を評価
+        let params = estimator.params();
+        let x_bar = [1.0, 30.0, 2.0];
+        let z_bar: f64 = (0..3).map(|m| x_bar[m] * params[m]).sum();
+        let p_bar = logistic(z_bar);
+        let w = p_bar * (1.0 - p_bar);
+        for (idx, j) in (1..3).enumerate() {
+            assert!((at_median.dydx()[idx] - w * params[j]).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn marginal_effects_returns_invalid_confidence_level_error_out_of_range() {
+        let estimator = LogitEstimator::fit(
+            intercept_only_input(),
+            Method::Newton,
+            35,
+            1e-6,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        let result = estimator.marginal_effects(MarginalEffectsAt::Overall, 1.5);
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::Common(CommonError::InvalidConfidenceLevel {
+                confidence_level: 1.5
+            })
+        );
     }
 }

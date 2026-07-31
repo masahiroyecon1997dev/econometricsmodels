@@ -115,6 +115,24 @@ pub enum CovType {
     },
 }
 
+/// 限界効果（`marginal_effects`）をどの代表点で評価するか。文字列パース（Python文字列 →
+/// この型への変換）は`engine_pybind`側の責務（`Method`/`CovType`と同じ設計。
+/// `.claude/rules/rust-style.md`参照）。
+///
+/// Logit/Probit/Tobitで共通の概念（`nonlinear-api-design.md`6章）のため`nonlinear/
+/// common.rs`に定義する（`Method`/`CovType`と同じ理由）。実際の限界効果・デルタ法
+/// ヤコビアンの計算式はリンク関数（`Λ`/`Φ`等）に依存するため、モデルごとの実装
+/// （`logit.rs`等）に置く。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarginalEffectsAt {
+    /// 平均限界効果（AME、average marginal effects）。全観測での限界効果の平均。既定。
+    Overall,
+    /// 各説明変数の標本平均からなる代表点での限界効果（MEM、marginal effects at the mean）。
+    Mean,
+    /// 各説明変数の標本中央値からなる代表点での限界効果。
+    Median,
+}
+
 /// `run_solver`の出力。
 #[derive(Debug, Clone)]
 pub struct SolverOutput {

@@ -162,6 +162,16 @@ Issue #58（Logitのfit()に観測情報行列SEを実装）のテスト追加�
 - **`engine_pybind`側**: `engine_pybind/src/errors.rs`に`common_error_to_pyerr(CommonError) -> PyErr`を新設し、`least_squares_error_to_pyerr`（`linear`系統）はこれに委譲する形に変更済み。`MleError`用の変換関数（`mle_error_to_pyerr`相当）はLogitのpybind実装時（B13）にこのヘルパーを再利用する。
 - **テストの重複排除**: 6バリアントのメッセージ・`PartialEq`のテストは`engine::error`側の`common_error_messages_are_human_readable`/`common_error_implements_partial_eq`に集約し、`MleError`・`LeastSquaresError`側のテストは各系統固有のバリアントと`Common`のtransparent転送の確認のみに絞った。
 
+## 限界効果（Issue #62でLogit実装済み。Probit/Tobit実装時に同じ方針を踏襲する想定）
+
+`marginal_effects(at="overall"|"mean"|"median", ...)`は`nonlinear-api-design.md`6章で確定済みの「`fit()`のReturn本体には含めない別メソッド」方針に従う。`at`の型（`MarginalEffectsAt`、文字列パースはengine_pybind側の責務）は`Method`/`CovType`と同じ理由で`nonlinear/common.rs`に定義し、Probit/Tobitでも再利用する。実際の限界効果・デルタ法ヤコビアンの計算式（リンク関数`Λ`/`Φ`等に依存する）は`CostFunction`/`Gradient`/`Hessian`と同様、モデルごとの実装（`logit.rs`等）に置く（`common.rs`には汎用の行列演算は置かない）。
+
+- **離散変数（0/1のダミー変数）の自動判定は行わない**: statsmodelsの`get_margeff()`は既定（`dummy=False`）では0/1値の列も含め全ての説明変数を連続変数として扱い、解析的な偏微分`dy/dx=p(1-p)θⱼ`で計算する（`dummy=True`を明示指定したときのみ、値が0/1のみの列を検出して離散差分に切り替える特殊挙動）。本プロジェクトはデータ入力がlist渡し（列の型情報を持たない、CLAUDE.md 2章の非交渉事項）のため、離散変数の自動判定は実装せず、statsmodelsのデフォルト挙動（`dummy=False`相当）に合わせて常に連続変数として扱う方針とした（ユーザー確認済み、Logit実装時にPythonで`inspect.signature`と実際の数値照合により`dummy=False`が既定であることを確認済み）。
+- **定数項（切片）は出力から除外する**: 切片の限界効果は経済学的に意味を持たないため（statsmodelsも同様に除外する）。`include_intercept`の値に関わらず`LogitInput::from_columns`の不変条件（`include_intercept=true`なら列0が常に定数項）を前提に、出力側で先頭`k_constant`列をスキップする設計。
+- **`at="mean"`/`"median"`の代表点**: `fit()`に使った学習データ（`LogitInput::x()`）の各列の標本平均・標本中央値からなる固定ベクトル（statsmodelsの`atexog=None`のデフォルト挙動と同じ、外部から任意の評価点を指定するオプションは見送り）。
+- **デルタ法のヤコビアンの統一形**: `at="overall"`（AME）・`"mean"`・`"median"`はいずれも`g_j(θ)=w(θ)*θⱼ`という同じ形に帰着する（`w`はAMEなら全観測平均の`p(1-p)`、mean/medianなら代表点で評価した`p̄(1-p̄)`）。この性質を使い、`w`とその勾配`s_m=∂w/∂θ_m`の計算（`at`ごとに異なる）と、そこから`dydx`・ヤコビアン`∂g_j/∂θ_m=θⱼ*s_m+[j==m]*w`を計算する部分（`at`に依らず共通）を分離する設計にした（Logitの`overall_w_and_s`/`at_point_w_and_s`と`dydx_and_jacobian`）。Probit/Tobit実装時、`w`/`s`の計算式（リンク関数の微分`p(1-p)`に相当する部分）はモデルごとに異なるが、`dydx_and_jacobian`と同型の共通化ができないか検討する。
+- **分散**: `Var(g_j) = jac_jの行ベクトル · cov_params · jac_jの行ベクトル'`（二次形式）。標準誤差はこの平方根、検定分布は標準正規分布（`fit()`本体と同じ、`nonlinear-api-design.md`5章）。`fit()`時の`cov_params`をそのまま再利用し、再最適化は行わない。
+
 ## 未確定（実装issue着手時、または追加相談が必要）
 
 - **Tobit固有エラーの正確な検証条件**: 下限<上限の検証、両側打ち切り時の整合性チェック等の詳細。Tobit実装時に決定する

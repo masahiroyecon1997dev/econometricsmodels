@@ -189,3 +189,32 @@ Issue #58時点ではIssue #58本来のスコープを超えるためユーザ�
 - **`pred_table`の手計算検証**: `pred_table_matches_hand_computed_counts_for_intercept_only_model`。切片のみモデル（全観測で`p_i=ȳ≈0.571`）を使い、`threshold=0.5`（全観測が予測クラス1）・`threshold=0.99`（全観測が予測クラス0）の2パターンで、手計算した期待値と一致することを確認。
 - **`pred_table`の独立再計算**: `pred_table_matches_independently_recomputed_classification`。`threshold=0.2`（`0.5`以外の値、上記バグを検出できるようにするため）で、`predict()`の出力から独立に再計算した分類結果と突き合わせた。
 - **`actual`クラスのカウントが`threshold`に対して不変であることの回帰テスト**: `pred_table_actual_class_counts_are_invariant_to_threshold`。`threshold∈{0.1,0.3,0.5,0.7,0.9}`の5パターンで、`actual0`/`actual1`の行合計が常に一定（`y=[0,1,0,1]`なので各2件）であることを確認し、上記バグの再発を防止する。
+
+## engine単体テストのカバレッジ（Issue #64で確認・実装済み）
+
+`cargo-llvm-cov -p engine --lib`で実測。OLSと同じ方針（100%は目指さず、理論上到達不能な防御的エラーパスはドキュメント化して受け入れる、`ols-implementation-notes.md`5章参照）。
+
+**実測結果（129テスト時点）**: `nonlinear/logit.rs` Region 97.76%・Line 98.74%・Function 98.01%。`nonlinear/common.rs`（現時点でLogitのみが利用者のため、こちらも合わせて確認）はRegion 94.85%・Line 95.88%。
+
+未カバー箇所を精査し、以下の対応を行った。
+
+### 実データで起こりうる真のギャップ（テスト追加で対応済み）
+
+- **`cov_type=Hc0`/`Hc1`/`Opg`/`Cluster`での`SingularHessian`/`SingularOpgMatrix`エラー伝播が一度も検証されていなかった**: 既存の`fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_bfgs_and_lbfgs`（`CovType::Classical`のみ）に倣い、`fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_hc0_and_hc1`・`fit_returns_singular_opg_matrix_error_for_perfectly_collinear_design_matrix`（`CovType::Opg`、`opg_cov_params`由来の別エラー型`SingularOpgMatrix`）・`_with_cluster`（`CovType::Cluster`）の3テストを追加した。
+  - **`method=Newton`は使えない**: `newton_step`内の特異性検出（ピボット付きQR）が`cov_type`の分岐に到達する前（最適化中）に`SingularHessian`を返してしまうため、`Method::Bfgs`を使う必要がある（Issue #129で確立済みのClassical版と同じ理由）。**当初Hc0/Hc1のテストを`Method::Newton`で書いてしまい、実際にはこの経路を通れていなかったことが`cargo-llvm-cov`の再計測で発覚**した（テストは`Err(SingularHessian)`を返すには返すが、それは`cov_type`の分岐ではなくNewtonの最適化中に発生したものだった）。`Method::Bfgs`に修正して解決した。
+  - **rust-reviewerの指摘でOpg/Clusterの同種ギャップを追加発見**: Hc0/Hc1の修正だけで一旦完了としたところ、rust-reviewerが`cargo-llvm-cov`のHTMLレポート（region単位のハイライト）まで確認し、`CovType::Opg`（`logit.rs`の`opg_cov_params(...)？`呼び出し）・`CovType::Cluster`（`cluster_cov_params(...)?`呼び出し）にも全く同じ構造の未検証パスが残っていることを指摘した。`opg_cov_params`は`neg_hessian_inverse`ではなく別の特異性検出（OPG行列自体の固有値判定）を使うため、返るエラー型は`SingularHessian`ではなく`SingularOpgMatrix`である点に注意（`common.rs`「OPG行列特異時のエラー型を分離」参照）。同じ完全な多重共線性データセット（`x2=2*x1`）を使えば、スコア行列`scores_i=(y_i-p_i)x_i`も同じ構造的多重共線性を持つ（列2=2×列1）ため、`Opg`側もこのデータセットで再現できた。
+- **`log_likelihood_null`の`0*ln(0)`回避分岐（`n1`または`n0`が0の退化ケース）が未カバー**: `fit()`にインラインで書かれていたため、反復最適化を経由せずには独立にテストできなかった（全観測が同じyの完全分離データセットで`fit()`自体の収束が不安定になりうるため、`fit()`経由のテストは避けたい）。`log_likelihood`と同じ理由で`log_likelihood_null(y: &Mat<f64>) -> f64`という独立関数に切り出し（`fit()`はこれを呼ぶだけに変更、計算式・挙動は完全に同値）、全観測y=1・全観測y=0の両方の退化ケースを`fit()`を経由せず直接テストできるようにした（`log_likelihood_null_returns_zero_for_degenerate_all_same_y`）。
+
+### 理論上到達不能な防御的エラーパス（受け入れて未カバーのまま、`common.rs`にdocコメントで明記済み）
+
+`nonlinear/common.rs`（現時点でLogitのみが利用者）の以下の箇所。いずれも「argmin内部の契約により理論上失敗し得ないはずだが、防御的に`Result`化してある」という同じ性質（OLSの`xtx_inverse`等と同じカテゴリ）。
+
+- `extract_outcome`の`state.get_best_param()`/`problem.take_problem()`の`None`分岐: argmin 0.11.0のソース（`IterState::update()`）を実際に確認した上で、`FaerNewton::init`が必ず初期パラメータを設定すること・`take_problem()`は1回しか呼ばないことから理論上到達不能と判断した。
+- `convert_optimizer_error`の`Err(other)`分岐: 本プロジェクトが制御する全エラー経路は`MleError`のみを送出するため、`downcast`は常に成功する。argmin自体の内部エラーに備えた防御的フォールバック。
+- `FaerNewton::name()`: argminの`Observer`（進捗ロギング機構）を使っていないため呼ばれない。分岐を持たない定型実装。
+- `FaerNewton::init()`の`state.take_param()`の`None`分岐: `run_solver`が`Executor::configure`で`init()`実行前に必ず初期パラメータを設定するため到達不能。
+
+### その他（対象外）
+
+- `assert!`マクロのメッセージ引数（アサーション失敗時のみ評価される）は、`cargo-llvm-cov`上「未カバー」に見えるが実際のギャップではない（OLSと同じ誤検知パターン、`ols-implementation-notes.md`5章参照）。
+- `linear/ols.rs`・`linear_algebra.rs`側の未カバー箇所はOLS側の既存スコープ（`ols-implementation-notes.md`参照）であり、本Issueの対象外。

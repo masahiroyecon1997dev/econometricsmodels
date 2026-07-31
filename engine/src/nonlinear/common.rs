@@ -257,6 +257,16 @@ where
 /// `Method`の3分岐で共通の後処理のため、`run_solver`から切り出している。
 /// `I`はソルバーごとに異なる状態型（LBFGSはHessianスロットを使わないため`H=()`）だが、
 /// いずれも`State`トレイト経由で同じ形で取り出せる。
+///
+/// **`ok_or_else`の2箇所は理論上到達不能**（`.claude/rules/rust-style.md`「テスト」の
+/// カバレッジ方針、Issue #64でLogitのカバレッジ確認時に判明・受け入れ済み）:
+/// - `state.get_best_param()`が`None`になるのは`Executor::run()`が`init()`/`next_iter()`を
+///   一度も呼ばずに終了した場合のみだが、`init()`が必ず初期パラメータを`state`に設定する
+///   （`FaerNewton::init`、BFGS/LBFGSも同様に組み込みソルバーが初期化時に設定する）ため
+///   起こり得ない。
+/// - `problem.take_problem()`が`None`になるのは既に一度`take_problem()`を呼んだ後に
+///   再度呼んだ場合のみだが、`run_solver`はこの関数を`Executor::run()`の結果に対して
+///   1回しか呼ばない。
 fn extract_outcome<O, I>(
     state: I,
     mut problem: Problem<O>,
@@ -281,6 +291,15 @@ where
 /// argminの内部エラー（`anyhow::Error`）を`MleError`に変換する。
 /// `FaerNewton::next_iter`内で`MleError`から`?`により変換された値は`downcast`で復元し、
 /// それ以外（argmin自体の内部エラー等）は`ComputationFailed`にまとめる。
+///
+/// **`Err(other)`分岐は実測ではカバーされていない**（Issue #64で判明）:
+/// 本プロジェクトが制御する全てのエラー経路（`FaerNewton`・モデルの`CostFunction`/
+/// `Gradient`/`Hessian`実装）は`MleError`（`?`経由で`anyhow::Error`に変換されたもの）
+/// のみを返すため、`downcast`は常に成功する。この分岐はargmin自体の内部（`Executor`の
+/// 状態管理等）が予期しない`anyhow::Error`を生成した場合に備えた防御的なフォールバックで、
+/// 意図的にargminの内部を破壊するようなテストを書くのは実装の振る舞いというより
+/// argmin内部実装への依存になるため見送っている（OLSの`ols-implementation-notes.md`
+/// 「理論上到達不能な防御的エラーパス」と同じ性質）。
 fn convert_optimizer_error(e: OptimizerError) -> MleError {
     match e.downcast::<MleError>() {
         Ok(mle_error) => mle_error,
@@ -314,6 +333,12 @@ where
     O: Gradient<Param = Vec<f64>, Gradient = Vec<f64>>
         + Hessian<Param = Vec<f64>, Hessian = Vec<Vec<f64>>>,
 {
+    /// `argmin::core::Solver`トレイトの必須メソッド（ロギング・エラーメッセージ表示等、
+    /// argmin内部が使う識別名）。本プロジェクトはargminの`Observer`（進捗ロギング機構）を
+    /// 使っておらず、`run_solver`のテストでも実行結果（`SolverOutput`）のみを検証するため
+    /// 呼ばれない。実装自体は`argmin::solver::newton::Newton`等の組み込みソルバーに倣った
+    /// 定型実装で、分岐を持たない単純な文字列リテラルの返却のため、未カバーでも
+    /// 振る舞いの正しさに影響しない（Issue #64で判明・受け入れ済み）。
     fn name(&self) -> &str {
         "Newton (faer-backed)"
     }
@@ -321,6 +346,12 @@ where
     /// 初期パラメータでの勾配をあらかじめ`state`に格納する。これにより`terminate()`は
     /// 常に「`state.get_param()`と対応する勾配」を見られる（`next_iter`実行前の最初の
     /// `terminate()`呼び出しも含む。初期値が既に収束条件を満たす場合を正しく扱うため）。
+    ///
+    /// **`ok_or_else`分岐は理論上到達不能**（Issue #64で判明・受け入れ済み）:
+    /// `run_solver`は必ず`Executor::configure(|state| state.param(initial_params)...)`
+    /// で`init()`が呼ばれる前に初期パラメータを`state`へ設定しており、argminの
+    /// `Executor::run()`はこの設定後に`init()`を呼ぶ契約のため、`state.take_param()`が
+    /// `None`になることはない。
     fn init(
         &mut self,
         problem: &mut Problem<O>,

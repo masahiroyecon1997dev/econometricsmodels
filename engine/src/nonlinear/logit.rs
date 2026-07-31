@@ -196,6 +196,25 @@ fn log_likelihood(x: &Mat<f64>, y: &Mat<f64>, params: &[f64]) -> f64 {
         .sum()
 }
 
+/// 切片のみモデルの対数尤度 `ℓ_null = n1*ln(ȳ) + n0*ln(1-ȳ)`（`ȳ=n1/n`の閉じた形の
+/// 解析解、`LogitEstimator`の`log_likelihood_null`フィールドdocコメント参照）を`y`から
+/// 直接計算する。`n1`または`n0`が0（全観測が同じ値）のときの`0*ln(0)`（NaN）を避けるため、
+/// 該当項を明示的に0として扱う（情報理論の`0 log 0 = 0`規約）。`log_likelihood`と同じ理由
+/// （`Result`を経由しない内部専用の計算、退化ケースを`fit()`の反復最適化を経由せず
+/// 直接テストできるようにするため）で独立した関数として切り出している。
+fn log_likelihood_null(y: &Mat<f64>) -> f64 {
+    let n = y.nrows();
+    let n1: f64 = (0..n).map(|i| *y.get(i, 0)).sum();
+    let n0 = n as f64 - n1;
+    let y_bar = n1 / n as f64;
+    (if n1 > 0.0 { n1 * y_bar.ln() } else { 0.0 })
+        + (if n0 > 0.0 {
+            n0 * (1.0 - y_bar).ln()
+        } else {
+            0.0
+        })
+}
+
 /// 限界効果（`LogitEstimator::marginal_effects`のdocコメント「数式（デルタ法）」参照）の
 /// `at="overall"`（AME）における`w=(1/n)Σᵢpᵢ(1-pᵢ)`・`s_m=(1/n)Σᵢ(1-2pᵢ)pᵢ(1-pᵢ)xᵢₘ`を
 /// 全観測を1回走査して計算する。
@@ -689,20 +708,7 @@ impl LogitEstimator {
         }
 
         let llf = log_likelihood(input.x(), input.y(), &params);
-
-        // 切片のみモデルの対数尤度: `ȳ=n1/n`の閉じた形の解析解（`fit`の再帰呼び出しは
-        // 経由しない、ユーザー確認済み。`LogitEstimator`の該当フィールドdocコメント参照）。
-        // `0*ln(0)`によるNaNを避けるため、`n1`/`n0`が0の項は明示的に0として扱う
-        // （情報理論の`0 log 0 = 0`規約と同じ）。
-        let n1: f64 = (0..n).map(|i| *input.y().get(i, 0)).sum();
-        let n0 = n as f64 - n1;
-        let y_bar = n1 / n as f64;
-        let llnull = if n1 > 0.0 { n1 * y_bar.ln() } else { 0.0 }
-            + if n0 > 0.0 {
-                n0 * (1.0 - y_bar).ln()
-            } else {
-                0.0
-            };
+        let llnull = log_likelihood_null(input.y());
 
         let lr_statistic = 2.0 * (llf - llnull);
         // `k.saturating_sub(1)`: `include_intercept=false`かつ説明変数も無い（`k=0`）という
@@ -1399,6 +1405,25 @@ mod tests {
         let expected_bic = -2.0 * expected_ll + n.ln();
         assert!((estimator.aic() - expected_aic).abs() < 1e-6);
         assert!((estimator.bic() - expected_bic).abs() < 1e-6);
+    }
+
+    /// `log_likelihood_null`は`n1`（y=1の観測数）または`n0`（y=0の観測数）が0の
+    /// 退化ケース（全観測が同じ値）で、`0*ln(0)`によるNaNを避ける分岐（`if n1 > 0.0
+    /// {...} else {0.0}`等）を通る。この分岐は`fit()`経由（反復最適化）だと、全観測が
+    /// 同じyの場合に完全分離が起きて収束の挙動が不安定になりうるため、`fit()`を
+    /// 経由せず`log_likelihood_null`を直接呼んで検証する
+    /// （`.claude/rules/rust-style.md`「テスト」のカバレッジ方針、Issue #64でこの分岐が
+    /// 未カバーだったことが判明し、`fit()`内にインラインだった計算を独立関数に切り出した
+    /// 上で追加したテスト）。
+    #[test]
+    fn log_likelihood_null_returns_zero_for_degenerate_all_same_y() {
+        // 全観測y=1（n0=0）: n0側の`else{0.0}`分岐を通る。ℓ_null = n*ln(1) + 0 = 0
+        let all_ones = Mat::from_fn(4, 1, |_, _| 1.0);
+        assert!((log_likelihood_null(&all_ones) - 0.0).abs() < 1e-12);
+
+        // 全観測y=0（n1=0）: n1側の`else{0.0}`分岐を通る。ℓ_null = 0 + n*ln(1) = 0
+        let all_zeros = Mat::from_fn(4, 1, |_, _| 0.0);
+        assert!((log_likelihood_null(&all_zeros) - 0.0).abs() < 1e-12);
     }
 
     /// 多変量（k=3）モデルでの適合度統計量を、実装（`softplus`ベース）とは異なる式
@@ -2161,6 +2186,114 @@ mod tests {
                 result
             );
         }
+    }
+
+    /// `sandwich_cov_params`（`cov_type=Hc0`/`Hc1`）も内部で`neg_hessian_inverse`を
+    /// 呼ぶため、`Classical`と同じ完全な多重共線性のデータセットで`SingularHessian`に
+    /// なるはずだが、Issue #64（カバレッジ確認）時点ではこの伝播経路
+    /// （`fit()`の`CovType::Hc0`/`Hc1`分岐の`?`）を通るテストが無かった
+    /// （`cargo-llvm-cov`で判明）。`Opg`/`Cluster`分岐は既存の`fit_cov_type_*`系
+    /// テストが特異でないデータセットでの成功パスのみ検証しているのと対照的に、
+    /// ここでは特異データセットでのエラー伝播を検証する。
+    ///
+    /// `method=Newton`は使わない: `newton_step`内の特異性検出（ピボット付きQR）が
+    /// `cov_type`の分岐に到達する前（最適化中）に`SingularHessian`を返してしまうため
+    /// （`fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_
+    /// with_bfgs_and_lbfgs`のdocコメントと同じ理由。当初`Method::Newton`で書いていて
+    /// この経路を実際には通れていなかったことが`cargo-llvm-cov`の再計測で発覚し、
+    /// `Method::Bfgs`に修正した）。
+    #[test]
+    fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_hc0_and_hc1() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
+
+        for cov_type in [CovType::Hc0, CovType::Hc1] {
+            let input = LogitInput::from_columns(
+                &y,
+                &x_columns,
+                vec!["x1".to_string(), "x2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
+
+            let result =
+                LogitEstimator::fit(input, Method::Bfgs, 100, 1e-6, true, cov_type.clone(), 0.95);
+            assert!(
+                matches!(result, Err(MleError::SingularHessian)),
+                "cov_type={:?}, result={:?}",
+                cov_type,
+                result
+            );
+        }
+    }
+
+    /// `cov_type=Opg`のエラー伝播（`opg_cov_params`が返す`SingularOpgMatrix`。
+    /// `SingularHessian`とは別のエラー型、`common.rs`「OPG行列特異時のエラー型を分離」
+    /// 参照）も、Hc0/Hc1と同じ完全な多重共線性データセットで検証する。
+    /// `scores_i=(y_i-p_i)x_i`かつ`x2=2*x1`のため、スコア行列も`x1`と同じ構造的な
+    /// 多重共線性を持ち（列2=2×列1）、OPG行列`Σsᵢsᵢ'`も特異になる。rust-reviewerの
+    /// 指摘（Hc0/Hc1の修正時、同種のギャップがOpg/Clusterにも残っていることが
+    /// `cargo-llvm-cov`のHTMLレポートで判明）を受けて追加。
+    #[test]
+    fn fit_returns_singular_opg_matrix_error_for_perfectly_collinear_design_matrix() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
+        let input = LogitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = LogitEstimator::fit(input, Method::Bfgs, 100, 1e-6, true, CovType::Opg, 0.95);
+        assert!(
+            matches!(result, Err(MleError::SingularOpgMatrix)),
+            "{:?}",
+            result
+        );
+    }
+
+    /// `cov_type=Cluster`のエラー伝播（`cluster_cov_params`も内部で`neg_hessian_inverse`を
+    /// 呼ぶため`SingularHessian`）も、Hc0/Hc1と同じ完全な多重共線性データセットで検証する
+    /// （rust-reviewerの指摘、上記2テストと同じ経緯）。
+    #[test]
+    fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_cluster() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
+        let groups = vec![
+            "g1".to_string(),
+            "g1".to_string(),
+            "g2".to_string(),
+            "g2".to_string(),
+        ];
+        let input = LogitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = LogitEstimator::fit(
+            input,
+            Method::Bfgs,
+            100,
+            1e-6,
+            true,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        );
+        assert!(
+            matches!(result, Err(MleError::SingularHessian)),
+            "{:?}",
+            result
+        );
     }
 
     #[test]

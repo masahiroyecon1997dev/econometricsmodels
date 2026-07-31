@@ -131,3 +131,23 @@ Issue #58時点ではIssue #58本来のスコープを超えるためユーザ�
 - **エラーハンドリング**: グループキー未指定（`fit_returns_missing_cluster_column_error_when_groups_not_provided`）・クラスター数1（`fit_returns_insufficient_clusters_error_when_only_one_group`）の2ケースを検証。
 - **`bfgs`/`lbfgs`との組み合わせ**: Issue #59で追加した`fit_non_classical_cov_types_work_with_bfgs_and_lbfgs`のcov_typeの配列に`Cluster`を追加し、既存の`Opg`/`Hc0`/`Hc1`と同じ枠組みで検証した。
 - **`method`×`cov_type`の組み合わせ**: 既存テストは`method`横断が`CovType::Classical`のみ、`cov_type`横断が`Method::Newton`のみで、両方を同時に変える組み合わせが未検証だった（rust-reviewer指摘）。`fit_non_classical_cov_types_work_with_bfgs_and_lbfgs`で、`Opg`/`Hc0`/`Hc1`それぞれについて`bfgs`/`lbfgs`の`cov_params`が`newton`の結果と一致することを確認した。
+
+## 適合度統計量（Issue #61で実装済み）
+
+`LogitEstimator`に`log_likelihood`/`log_likelihood_null`/`lr_statistic`/`lr_p_value`/`pseudo_r_squared`（McFadden）/`aic`/`bic`/`n_obs`/`df_model`/`df_resid`を追加した（`nonlinear-api-design.md`5章の仕様通り）。
+
+- **`log_likelihood`**: `LogitProblem::cost`（`-ℓ(θ)`、argminの`CostFunction`）から自由関数`log_likelihood(x, y, params)`（`Result`を経由しない、収束後のパラメータで1回だけ評価する内部専用の計算）を切り出し、`cost`はこれを符号反転して呼ぶ形にリファクタリングした。`fit()`側は元スケールの`input.x()`/`input.y()`と`destandardize_params`済みの`params`を渡す（標準化空間を経由しない。`z_i=x_i'θ`は再パラメータ化に対して不変なため、標準化空間で評価しても値は変わらないが、`LogitProblem`のクローン（`cov_type`によっては行わない設計、Issue #59）に依存せず常に計算できる元スケール側を使う設計にした）。
+- **`log_likelihood_null`（切片のみモデルのllf）**: `nonlinear-implementation-notes.md`「Logitのデータ構造」節で言及されていた「ソルバーの再フィット」ではなく、**閉じた形の解析解を直接計算する方式を採用した（ユーザー確認の上、`logit-probit-issue-breakdown.md`の当初案から変更）**。理由: 切片のみLogitは`p̂=ȳ`という閉じた形のMLEを持つ（既存テスト`fit_newton_converges_to_closed_form_solution_for_intercept_only_model`で検証済みの性質）ため、対数尤度も`ℓ_null = n1*ln(ȳ) + n0*ln(1-ȳ)`（`n1`/`n0`はy=1/0の観測数）という閉じた形で書け、再最適化を経由する必要がない。`n1`または`n0`が0のときの`0*ln(0)`（NaN）を避けるため、該当項を明示的に0として扱う（情報理論の`0 log 0 = 0`規約）。
+- **`include_intercept=false`のときの非入れ子性**: `log_likelihood_null`は`include_intercept`の値に関わらず常に「切片のみ」モデルを参照する（`nonlinear-api-design.md`5章の定義通り、statsmodelsも`k_constant`の有無に関わらず同じ挙動）。そのため`include_intercept=false`でフィットしたモデルは、この「切片のみ」nullモデルの上位集合（入れ子）にならない。この場合`lr_statistic`が負になったり`lr_p_value`が統計的に意味の薄い値（ほぼ1.0）になったりしうるが、これはstatsmodels準拠の仕様上の挙動でありバグではない（rust-reviewerの指摘を受けてdocコメント・回帰テスト`fit_lr_statistic_can_be_negative_when_include_intercept_is_false`で明記・固定した）。
+- **`df_model`の定義（`k-1`固定、OLSの`k-k_constant`とは異なる）**: `include_intercept`の値に関わらず常に`k-1`とする（ユーザー確認済み、statsmodels準拠）。`log_likelihood_null`が常に1パラメータ（切片）のnullモデルを参照するため、LR検定の自由度（本来の意味＝パラメータ数差）は`k-1`で統一するのが自然という判断。OLSの`df_model = k - k_constant`（`include_intercept=false`なら`k`）とは`include_intercept=false`のときに式が異なる点に注意（OLSのdf_modelは同一モデル内の「傾き係数の数」を表すのに対し、Logitのこのdf_modelは「フィット対象モデルと外部の別モデル（null）とのパラメータ数差」を表しており、意味論が異なるため）。
+- **`df_model==0`時の`lr_p_value`**: OLSの`f_p_value`（`df_model==0`時にNaN、検定対象の傾き係数が存在しないため）と同じ扱いをユーザー確認の上で採用した。`ChiSquared::new`の`map_err`分岐は`df_model>0`が保証されているため理論上到達不能（`.claude/rules/rust-style.md`「テスト」のカバレッジ方針参照）。
+- **`aic`/`bic`**: OLSと同じ式（`aic=-2ℓ+2k`、`bic=-2ℓ+ln(n)k`、`k`は定数項を含む全パラメータ数）。
+- **`n_obs`はフィールドとして保持せず`self.input.nobs()`への委譲**: 当初`fit()`内のローカル変数`n`をそのままフィールドに複製していたが、rust-reviewerの指摘（`OlsEstimator`は同種の値を独自フィールドに持たず`input.nobs()`経由でアクセスさせる設計であり、同じ値の出どころが2つになるのは将来の不整合リスク）を受けて、`LogitEstimator::n_obs()`を`self.input.nobs()`へのdelegateに変更した（`n_obs`フィールド自体を削除）。
+
+**発見した既存の問題（Issue #61のスコープ外、[Issue #130](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/130)としてトラッキング）**: `df_model = k.saturating_sub(1)`というアンダーフロー対策コードを書く過程で、`k=0`（`include_intercept=false`かつ説明変数も無い病的な入力）だと、この防御コードに到達する**前の段階**（`cov_params`計算経路、`ensure_well_conditioned_symmetric_matrix`周辺と推測）で`faer`が`attempt to subtract with overflow`というpanicを起こすことが判明した。`fit()`冒頭の`n<=k`チェックは`n>=1`であれば`k=0`でも通過してしまうため、`k>=1`の検証が欠けている。本Issueの差分（適合度統計量）とは無関係の既存コードの問題のため、ユーザー確認の上で別issue化し、`k=0`を直接検証するテストは追加していない。
+
+### テスト
+
+- **切片のみモデル（`df_model=0`の境界ケース）**: `fit_computes_goodness_of_fit_statistics_for_intercept_only_model`。`log_likelihood`と`log_likelihood_null`が定義上一致すること（同じ「切片のみ」モデルを参照するため）、`lr_statistic≈0`・`pseudo_r_squared≈0`・`lr_p_value`がNaNになることを検証。
+- **多変量モデルでの独立再計算**: `fit_computes_goodness_of_fit_statistics_matching_independently_recomputed_values`。実装の`softplus`ベースの式とは異なる式（`logistic`から直接`Σ[y ln(p) + (1-y) ln(1-p)]`を計算するベルヌーイ対数尤度の定義式そのもの）で`log_likelihood`を独立に再計算し、`log_likelihood_null`・`lr_statistic`・`pseudo_r_squared`・`df_model`・`df_resid`・`lr_p_value`（`statrs::ChiSquared`で独立に検算）・`aic`/`bic`を突き合わせた（`fit_cov_params_is_symmetric_and_stats_are_internally_consistent`と同じデータセットを再利用）。
+- **`include_intercept=false`での非入れ子挙動**: `fit_lr_statistic_can_be_negative_when_include_intercept_is_false`。`lr_statistic`が負になりうること（NaN/Infにはならないこと）、`df_model`/`df_resid`/`aic`/`bic`は`include_intercept`の値に関わらず同じ式で計算されることを回帰テストとして固定した。

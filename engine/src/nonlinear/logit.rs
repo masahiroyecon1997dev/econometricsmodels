@@ -39,7 +39,7 @@ use crate::nonlinear::common::{
 use crate::validation::validate_cluster_groups;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
-use statrs::distribution::{ContinuousCDF, Normal};
+use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
 
 /// Logitの被説明変数・設計行列を保持する入力データ。
 ///
@@ -180,6 +180,22 @@ fn logistic(z: f64) -> f64 {
     }
 }
 
+/// 対数尤度 `ℓ(θ) = Σᵢ [yᵢzᵢ - softplus(zᵢ)]`（`zᵢ=xᵢ'θ`、モジュール冒頭の数式参照）を
+/// `x`・`y`・`params`から直接計算する。`LogitProblem::cost`（`-ℓ(θ)`、argminの
+/// `CostFunction`）と同じ数式のΣ部分を共有する（`cost`はこの関数を符号反転して呼ぶ）。
+/// argminのトレイトが要求する`Result`型を経由する必要が無い内部専用の計算
+/// （適合度統計量向け、収束後のパラメータで1回だけ評価する）のため、独立した
+/// 関数として切り出している。
+fn log_likelihood(x: &Mat<f64>, y: &Mat<f64>, params: &[f64]) -> f64 {
+    let n = x.nrows();
+    (0..n)
+        .map(|i| {
+            let z: f64 = (0..x.ncols()).map(|j| *x.get(i, j) * params[j]).sum();
+            (*y.get(i, 0)) * z - softplus(z)
+        })
+        .sum()
+}
+
 /// Logitの負の対数尤度・スコア・Hessian（argminの`CostFunction`/`Gradient`/`Hessian`
 /// トレイト実装）。`LogitInput`の`X`・`y`を保持する（`run_solver`が`problem`の所有権を
 /// 必要とするため、`LogitInput`とは独立した所有データとして持つ。`Clone`は
@@ -225,14 +241,7 @@ impl CostFunction for LogitProblem {
 
     /// 負の対数尤度 `-ℓ(θ) = Σᵢ [softplus(zᵢ) - yᵢzᵢ]`（モジュール冒頭の数式参照）。
     fn cost(&self, param: &Self::Param) -> Result<Self::Output, OptimizerError> {
-        let n = self.x.nrows();
-        let cost: f64 = (0..n)
-            .map(|i| {
-                let z = self.linear_predictor(i, param);
-                softplus(z) - (*self.y.get(i, 0)) * z
-            })
-            .sum();
-        Ok(cost)
+        Ok(-log_likelihood(&self.x, &self.y, param))
     }
 }
 
@@ -280,12 +289,11 @@ impl Hessian for LogitProblem {
     }
 }
 
-/// Logitの推定結果。`fit`でのバリデーション・最適化・`cov_type`に応じたSE計算を
-/// 通過した状態を表す。
+/// Logitの推定結果。`fit`でのバリデーション・最適化・`cov_type`に応じたSE計算・
+/// 適合度統計量の計算を通過した状態を表す。
 ///
-/// 適合度統計量・限界効果等は未実装。`docs/planning/specs/
-/// logit-probit-issue-breakdown.md`のB7以降（クラスターロバストSE等）で
-/// `fit`に追加していく想定。
+/// 限界効果・`predict`/`pred_table`は未実装。`docs/planning/specs/
+/// logit-probit-issue-breakdown.md`のB9以降で`fit`とは別のメソッドとして追加していく想定。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
 #[derive(Debug)]
@@ -313,6 +321,40 @@ pub struct LogitEstimator {
     converged: bool,
     /// 実際の反復回数
     n_iter: usize,
+    /// 対数尤度 `ℓ(θ̂)`（収束点で評価）
+    log_likelihood: f64,
+    /// 切片のみモデルの対数尤度 `ℓ(θ̂_null)`。`ȳ=n1/n`の閉じた形の解析解
+    /// （`nᵢ log(ȳ) + (1-nᵢ) log(1-ȳ)`の総和）から直接計算する（ソルバーの
+    /// 再フィットは経由しない。ユーザー確認済み、`log_likelihood`のdocコメント
+    /// 「切片のみモデルのllf」参照）。`include_intercept`の値に関わらず常にこの
+    /// 「切片のみ」モデルを参照する（`nonlinear-api-design.md`5章の定義通り、
+    /// statsmodelsも`k_constant`の有無に関わらず同じ挙動）。
+    ///
+    /// **`include_intercept=false`のとき、この値が参照する「切片のみ」モデルは
+    /// フィット対象のモデルの部分集合（入れ子）にならない**（statsmodelsで
+    /// `Logit(y, X_without_const).fit()`をした場合と同じ状況、実測でも
+    /// `llr`が負値・`llr_pvalue`がほぼ1.0になる例を確認済み）。この場合
+    /// `lr_statistic`が負になったり`lr_p_value`が統計的に意味の薄い値になったり
+    /// しうるが、これはstatsmodels準拠の仕様上の挙動でありバグではない
+    /// （rust-reviewerの指摘を受けて明記）。
+    log_likelihood_null: f64,
+    /// 尤度比検定統計量 `2*(ℓ(θ̂)-ℓ(θ̂_null))`。`include_intercept=false`のときの
+    /// 非入れ子性については`log_likelihood_null`のdocコメント参照
+    lr_statistic: f64,
+    /// 尤度比検定のp値（自由度`df_model`のカイ二乗分布、上側確率）。
+    /// `df_model==0`（説明変数なし）のときはNaN（OLSの`f_p_value`と同じ扱い）
+    lr_p_value: f64,
+    /// McFadden疑似決定係数 `1 - ℓ(θ̂)/ℓ(θ̂_null)`
+    pseudo_r_squared: f64,
+    /// 赤池情報量規準 `-2ℓ(θ̂) + 2k`
+    aic: f64,
+    /// ベイズ情報量規準 `-2ℓ(θ̂) + ln(n)k`
+    bic: f64,
+    /// モデルの自由度 `k-1`（切片のみのnullモデルとのパラメータ数差。statsmodels準拠、
+    /// `include_intercept`の値に関わらず常にこの式。ユーザー確認済み）
+    df_model: usize,
+    /// 残差自由度 `n-k`
+    df_resid: usize,
 }
 
 impl LogitEstimator {
@@ -504,6 +546,47 @@ impl LogitEstimator {
             conf_upper[j] = params[j] + z_crit * se;
         }
 
+        let llf = log_likelihood(input.x(), input.y(), &params);
+
+        // 切片のみモデルの対数尤度: `ȳ=n1/n`の閉じた形の解析解（`fit`の再帰呼び出しは
+        // 経由しない、ユーザー確認済み。`LogitEstimator`の該当フィールドdocコメント参照）。
+        // `0*ln(0)`によるNaNを避けるため、`n1`/`n0`が0の項は明示的に0として扱う
+        // （情報理論の`0 log 0 = 0`規約と同じ）。
+        let n1: f64 = (0..n).map(|i| *input.y().get(i, 0)).sum();
+        let n0 = n as f64 - n1;
+        let y_bar = n1 / n as f64;
+        let llnull = if n1 > 0.0 { n1 * y_bar.ln() } else { 0.0 }
+            + if n0 > 0.0 {
+                n0 * (1.0 - y_bar).ln()
+            } else {
+                0.0
+            };
+
+        let lr_statistic = 2.0 * (llf - llnull);
+        // `k.saturating_sub(1)`: `include_intercept=false`かつ説明変数も無い（`k=0`）という
+        // 病的な入力（`fit()`冒頭の`n<=k`チェックは`n>=1`なら通過してしまう）でも
+        // このフィールド単体はアンダーフローしないための防御。ただし`k=0`のとき
+        // 実際には本箇所に到達する前（`cov_params`計算経路）で別の既知の問題により
+        // 到達不能（トラッキング: 別issue、本Issueのスコープ外。ユーザー確認済み）。
+        let df_model = k.saturating_sub(1);
+        let lr_p_value = if df_model == 0 {
+            // 説明変数が定数項のみ（傾き係数が無い）モデル。検定対象が存在しないため
+            // OLSの`f_p_value`（`df_model=0`時にNaN）と同じ扱い（ユーザー確認済み）。
+            f64::NAN
+        } else {
+            // `df_model>0`が保証されているため、`ChiSquared::new`の失敗
+            // （自由度が正であることの検証）は理論上到達不能
+            // （`.claude/rules/rust-style.md`「テスト」のカバレッジ方針参照）。
+            let chi2 = ChiSquared::new(df_model as f64)
+                .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+            1.0 - chi2.cdf(lr_statistic)
+        };
+
+        let pseudo_r_squared = 1.0 - llf / llnull;
+        let aic = -2.0 * llf + 2.0 * (k as f64);
+        let bic = -2.0 * llf + (n as f64).ln() * (k as f64);
+        let df_resid = n - k;
+
         Ok(Self {
             input,
             params,
@@ -515,6 +598,15 @@ impl LogitEstimator {
             conf_upper,
             converged: output.converged,
             n_iter: output.n_iter,
+            log_likelihood: llf,
+            log_likelihood_null: llnull,
+            lr_statistic,
+            lr_p_value,
+            pseudo_r_squared,
+            aic,
+            bic,
+            df_model,
+            df_resid,
         })
     }
 
@@ -566,6 +658,57 @@ impl LogitEstimator {
     /// 実際の反復回数
     pub fn n_iter(&self) -> usize {
         self.n_iter
+    }
+
+    /// 対数尤度 `ℓ(θ̂)`
+    pub fn log_likelihood(&self) -> f64 {
+        self.log_likelihood
+    }
+
+    /// 切片のみモデルの対数尤度 `ℓ(θ̂_null)`
+    pub fn log_likelihood_null(&self) -> f64 {
+        self.log_likelihood_null
+    }
+
+    /// 尤度比検定統計量
+    pub fn lr_statistic(&self) -> f64 {
+        self.lr_statistic
+    }
+
+    /// 尤度比検定のp値（`df_model==0`のときNaN）
+    pub fn lr_p_value(&self) -> f64 {
+        self.lr_p_value
+    }
+
+    /// McFadden疑似決定係数
+    pub fn pseudo_r_squared(&self) -> f64 {
+        self.pseudo_r_squared
+    }
+
+    /// 赤池情報量規準
+    pub fn aic(&self) -> f64 {
+        self.aic
+    }
+
+    /// ベイズ情報量規準
+    pub fn bic(&self) -> f64 {
+        self.bic
+    }
+
+    /// 観測数。`self.input.nobs()`への委譲（`OlsEstimator`と同じパターン、
+    /// `n`という同じ値の出どころを2つに分けない）
+    pub fn n_obs(&self) -> usize {
+        self.input.nobs()
+    }
+
+    /// モデルの自由度（`k-1`）
+    pub fn df_model(&self) -> usize {
+        self.df_model
+    }
+
+    /// 残差自由度（`n-k`）
+    pub fn df_resid(&self) -> usize {
+        self.df_resid
     }
 }
 
@@ -926,6 +1069,154 @@ mod tests {
                     < 1e-9
             );
         }
+    }
+
+    /// 切片のみモデルは`log_likelihood`と`log_likelihood_null`が定義上一致する
+    /// （どちらも同じ「切片のみ」モデルを参照するため）。この性質を使い、
+    /// `df_model=0`分岐（`lr_p_value=NaN`、OLSの`f_p_value`と同じ扱い）を含めた
+    /// 適合度統計量一式を検証する。
+    #[test]
+    fn fit_computes_goodness_of_fit_statistics_for_intercept_only_model() {
+        let estimator = LogitEstimator::fit(
+            intercept_only_input(),
+            Method::Newton,
+            35,
+            1e-6,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        let n: f64 = 7.0;
+        let y_bar: f64 = 4.0 / 7.0;
+        // 切片のみモデルの対数尤度の閉じた形: n1*ln(ȳ) + n0*ln(1-ȳ)（n1=4, n0=3）
+        let expected_ll = 4.0 * y_bar.ln() + 3.0 * (1.0 - y_bar).ln();
+
+        assert!((estimator.log_likelihood() - expected_ll).abs() < 1e-6);
+        assert!((estimator.log_likelihood_null() - expected_ll).abs() < 1e-9);
+        assert!(estimator.lr_statistic().abs() < 1e-6);
+        assert!(estimator.pseudo_r_squared().abs() < 1e-6);
+        assert_eq!(estimator.df_model(), 0);
+        assert!(estimator.lr_p_value().is_nan());
+        assert_eq!(estimator.n_obs(), 7);
+        assert_eq!(estimator.df_resid(), 6);
+
+        let expected_aic = -2.0 * expected_ll + 2.0;
+        let expected_bic = -2.0 * expected_ll + n.ln();
+        assert!((estimator.aic() - expected_aic).abs() < 1e-6);
+        assert!((estimator.bic() - expected_bic).abs() < 1e-6);
+    }
+
+    /// 多変量（k=3）モデルでの適合度統計量を、実装（`softplus`ベース）とは異なる式
+    /// （`logistic`から直接`Σ[y ln(p) + (1-y) ln(1-p)]`を計算するベルヌーイ対数尤度の
+    /// 定義式そのもの）で独立に再計算し、突き合わせる。`fit_cov_params_is_symmetric_
+    /// and_stats_are_internally_consistent`と同じデータセットを再利用する。
+    #[test]
+    fn fit_computes_goodness_of_fit_statistics_matching_independently_recomputed_values() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![10.0, 20.0, 30.0, 40.0], vec![-5.0, 2.0, 8.0, -1.0]];
+        let input = LogitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = LogitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        let n = 4usize;
+        let k = 3usize;
+        let x = estimator.input().x();
+        let params = estimator.params();
+        let expected_ll: f64 = (0..n)
+            .map(|i| {
+                let z: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
+                let p = logistic(z);
+                y[i] * p.ln() + (1.0 - y[i]) * (1.0 - p).ln()
+            })
+            .sum();
+        assert!((estimator.log_likelihood() - expected_ll).abs() < 1e-9);
+
+        let y_bar: f64 = 2.0 / 4.0; // n1=2, n0=2
+        let expected_llnull = 2.0 * y_bar.ln() + 2.0 * (1.0 - y_bar).ln();
+        assert!((estimator.log_likelihood_null() - expected_llnull).abs() < 1e-9);
+
+        let expected_lr = 2.0 * (expected_ll - expected_llnull);
+        assert!((estimator.lr_statistic() - expected_lr).abs() < 1e-9);
+
+        let expected_pseudo_r2 = 1.0 - expected_ll / expected_llnull;
+        assert!((estimator.pseudo_r_squared() - expected_pseudo_r2).abs() < 1e-9);
+
+        assert_eq!(estimator.df_model(), k - 1);
+        assert_eq!(estimator.df_resid(), n - k);
+        assert_eq!(estimator.n_obs(), n);
+
+        let chi2 = ChiSquared::new((k - 1) as f64).unwrap();
+        let expected_lr_p = 1.0 - chi2.cdf(expected_lr);
+        assert!((estimator.lr_p_value() - expected_lr_p).abs() < 1e-9);
+
+        let expected_aic = -2.0 * expected_ll + 2.0 * (k as f64);
+        let expected_bic = -2.0 * expected_ll + (n as f64).ln() * (k as f64);
+        assert!((estimator.aic() - expected_aic).abs() < 1e-9);
+        assert!((estimator.bic() - expected_bic).abs() < 1e-9);
+    }
+
+    /// `include_intercept=false`のとき、`log_likelihood_null`が参照する「切片のみ」
+    /// モデルはフィット対象のモデルの部分集合（入れ子）にならない
+    /// （`LogitEstimator`の`log_likelihood_null`フィールドdocコメント参照）。
+    /// この場合`lr_statistic`が負になりうる（statsmodels準拠の仕様上の挙動、
+    /// rust-reviewer指摘・実測で確認済み）ことを回帰テストとして固定する。
+    /// `df_model`/`df_resid`/`aic`/`bic`は`include_intercept`の値に関わらず
+    /// 同じ式（`k-1`/`n-k`/`-2ℓ+2k`/`-2ℓ+ln(n)k`）で計算されることも確認する。
+    #[test]
+    fn fit_lr_statistic_can_be_negative_when_include_intercept_is_false() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![10.0, 20.0, 30.0, 40.0], vec![-5.0, 2.0, 8.0, -1.0]];
+        let input = LogitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            false,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = LogitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        let n = 4usize;
+        let k = 2usize; // 切片なし、x1・x2のみ
+        assert_eq!(estimator.df_model(), k - 1);
+        assert_eq!(estimator.df_resid(), n - k);
+
+        let expected_aic = -2.0 * estimator.log_likelihood() + 2.0 * (k as f64);
+        let expected_bic = -2.0 * estimator.log_likelihood() + (n as f64).ln() * (k as f64);
+        assert!((estimator.aic() - expected_aic).abs() < 1e-9);
+        assert!((estimator.bic() - expected_bic).abs() < 1e-9);
+
+        // 非入れ子のため`lr_statistic`が負になりうる（NaN/Infにはならない）。
+        assert!(estimator.lr_statistic().is_finite());
+        assert!(estimator.lr_p_value().is_finite());
     }
 
     /// `cov_type=Opg`/`Hc0`/`Hc1`が返す`cov_params`を、`fit()`と同じ手順

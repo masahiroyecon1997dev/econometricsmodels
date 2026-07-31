@@ -102,42 +102,47 @@ fn fit_ols(
 - `cov_type`が未指定の場合のデフォルトは**classical**。
 - `cov_type`がHC系/clusterの場合、F検定も**ロバストWald検定**に切り替える（常に古典的F検定のままにはしない）。
 
-## 7. `fitted_values` / `predict()`（Issue #86、設計確定・実装未着手）
+## 7. `predict()`（Issue #86、設計確定・実装未着手）
 
 5章の「薄いラッパー」方針（`summary()`・`to_frame()`等は作らない）は維持したまま、実測値との比較・
-新規データへの予測という実務上の需要に応えるため、この2つは例外的にスコープに含める。
+新規データへの予測という実務上の需要に応えるため、これは例外的にスコープに含める。
 
-### 7.1 `fitted_values`
+**Logit（nonlinear系統）との命名整合**: `LogitEstimator::predict()`（`nonlinear-api-design.md`6章、
+実装済み）は引数を取らず学習データに対する予測確率のみを返し、新規データ対応は将来
+`predict()`と同じ名前のまま引数を追加する形で拡張する前提になっている（`statsmodels`の
+`results.predict(exog=None)`と同じ、1メソッド+オプション引数という設計）。OLSも当初案
+（`fitted_values`プロパティ + `predict(new_data)`必須引数メソッドという2メソッド分離案）から
+変更し、この設計に揃える。Logit側は既に実装・マージ済みでリネームのコストが高い一方、OLSは
+未実装のため、OLS側をLogitの命名に合わせる。
 
-- `OlsResults.fitted_values: list[float]`（`residuals`と対になるプロパティ）。学習データに対する
-  予測値 `ŷ = y - ε̂`。
-- `engine_pybind`側の`OLSResult`に新規フィールド`fitted_values`を追加する（`residuals`と同じ
-  `#[pyo3(get_all)]`パターン）。`engine`側は`OlsInput`が保持する`y`から`fit()`内で計算し、
-  `OlsEstimator`の新規getterとして公開する。
-
-### 7.2 `predict(new_data)`
-
-- **呼び出し場所**: `OlsResults.predict(new_data: pl.DataFrame) -> list[dict[str, float]]`
+- **呼び出し場所**: `OlsResults.predict(new_data: pl.DataFrame | None = None) -> list[dict[str, float]]`
   （`OLS`側ではない）。`OLS`は「fit前の設定」を保持するだけのステートレスな値であり
   （`OLS.fit()`は`self`に何も書き込まず、都度新しい`OlsResults`を返す設計）、`predict`が必要と
   する学習済み係数は`OlsResults`だけが持つ。`OLS`側に置くと`OLS`が「fit前の設定」と「fit後の
   状態」の二重の責務を持つステートフルなオブジェクトに変わってしまうため採用しない。
-  `statsmodels`の`results.predict(new_X)`と同じ設計判断。
-- **戻り値**: 行指向の`list[dict[str, float]]`（`coef_table()`と同じ形式方針）。点予測のみの
-  現段階では各要素は1キー（予測値）のみだが、将来信頼区間・予測区間を追加する場合に
-  `conf_lower`/`conf_upper`等のキーを追加できるようにするため、単純な`list[float]`ではなく
-  この形にする。
+- **`new_data=None`（デフォルト）**: 学習データに対する予測値 `ŷ = y - ε̂` を返す
+  （旧案の`fitted_values`が担っていた役割）。`OLSResult`は効率化のため`fit()`時に計算した
+  値を内部フィールドとして保持してよいが、Python側に独立したプロパティとしては公開しない
+  （公開APIは`predict()`の1メソッドのみに統一する）。
+- **`new_data`指定時**: 新規データに対する予測値を返す（out-of-sample）。
+- **戻り値**: どちらの場合も行指向の`list[dict[str, float]]`（`coef_table()`と同じ形式方針）で
+  統一する。点予測のみの現段階では各要素は1キー（予測値）のみだが、将来信頼区間・予測区間を
+  追加する場合に`conf_lower`/`conf_upper`等のキーを追加できるようにするため、単純な`list[float]`
+  ではなくこの形にする。
 - **新規データの列の対応付け**: `new_data`はfit時に`x`で渡したのと同じ列名を持つ列を含む必要が
   ある（列名でマッチング、列順は問わない）。`include_intercept=True`でfitした場合、定数項の列は
   `new_data`に含める必要はなく、`fit()`時と同様に自動で付加される。
-- **層構成**: `engine_pybind`側が、fit結果の`param_names`（`include_intercept`時は先頭の`"const"`
-  を除いたもの）を使って`new_data`から必要な列を`column_extraction::extract_f64_column`で抽出し、
-  `engine`側の新規関数（`OlsEstimator`に列データを渡して`new_X・params`を計算する想定、`const`列の
-  自動付加を含む）を呼ぶ。`engine`が設計行列の組み立てを担い`engine_pybind`は列抽出のみに留める、
-  という既存の責務分担（`OlsInput::from_columns`と同じパターン）をそのまま踏襲する。具体的な
-  関数シグネチャは実装時に確定する。
+- **層構成**: `engine_pybind`側が、`new_data`が`Some`の場合はfit結果の`param_names`
+  （`include_intercept`時は先頭の`"const"`を除いたもの）を使って`new_data`から必要な列を
+  `column_extraction::extract_f64_column`で抽出し、`engine`側の新規関数（列データを渡して
+  `new_X・params`を計算する想定、`const`列の自動付加を含む）を呼ぶ。`None`の場合は`fit()`時に
+  計算済みの値をそのまま返す。`engine`が設計行列の組み立てを担い`engine_pybind`は列抽出のみに
+  留める、という既存の責務分担（`OlsInput::from_columns`と同じパターン）をそのまま踏襲する。
+  具体的な関数シグネチャは実装時に確定する。
 - **エラーハンドリング**: 列不足・型不一致・NaN/無限大は、既存の`ValidationError`の枠組みに
   そのまま乗せる（`fit()`の列抽出と同じ検証パターンを再利用し、専用のエラーバリアントは
   新設しない）。
 - **スコープ外**: 信頼区間・予測区間（点予測のみ）、WLSへの適用（`WlsEstimator`は内部で
   `OlsEstimator`を使う設計のため同じパターンを流用できる見込みだが、別issueで扱う）。
+- **今後の課題**: Logit側の新規データ対応（同issueの別issueでトラッキング）も、この統一設計
+  （`predict(new_data=None)`）に揃える形で実装することになる。

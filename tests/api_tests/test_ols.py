@@ -432,3 +432,138 @@ def test_default_options_use_classical():
     df = pl.DataFrame({"y": [1.0, 2.0, 3.0], "x1": [1.0, 2.0, 3.5]})
     res = OLS(df, y="y", x=["x1"]).fit()
     assert res.cov_type == "classical"
+
+
+# ── predict() ──────────────────────────────────────────────────────
+
+
+def test_predict_none_matches_statsmodels_fitted_values(dataset):
+    """`predict(new_data=None)`が学習データに対するstatsmodelsのfittedvaluesと一致すること。"""
+    sm_res = _sm_fit(dataset)
+    res = _our_fit(dataset)
+
+    predicted = res.predict()
+
+    assert len(predicted) == len(dataset)
+    for row, expected in zip(predicted, sm_res.fittedvalues):
+        assert row["fitted"] == pytest.approx(expected, abs=ATOL_COEF)
+
+
+def test_predict_new_data_matches_statsmodels(dataset):
+    """新規データに対する`predict()`がstatsmodelsの`.predict()`と一致すること。
+
+    列順を学習時（x1, x2）と入れ替えて渡し、列名でマッチングされる
+    （列順に依存しない）ことも合わせて確認する。
+    """
+    res = _our_fit(dataset)
+    sm_res = _sm_fit(dataset)
+
+    new_data = pl.DataFrame({"x2": [0.5, -1.0, 2.0], "x1": [1.0, 2.0, -0.5]})
+    predicted = res.predict(new_data)
+
+    sm_new_x = sm.add_constant(
+        np.column_stack(
+            [
+                new_data["x1"].to_numpy(),
+                new_data["x2"].to_numpy(),
+            ]
+        )
+    )
+    expected = sm_res.predict(sm_new_x)
+
+    assert len(predicted) == 3
+    for row, exp in zip(predicted, expected):
+        assert row["fitted"] == pytest.approx(exp, abs=ATOL_COEF)
+
+
+def test_predict_new_data_without_intercept_matches_statsmodels():
+    """`include_intercept=False`でfitした場合のpredict()もstatsmodelsと一致すること。"""
+    rng = np.random.default_rng(7)
+    n = 50
+    x1 = rng.normal(0.0, 1.0, n)
+    y = 2.0 * x1 + rng.normal(0.0, 0.1, n)
+    df = pl.DataFrame({"y": y, "x1": x1})
+
+    options = OLSOptions(include_intercept=False)
+    res = OLS(df, y="y", x=["x1"], options=options).fit()
+    sm_res = sm.OLS(y, x1.reshape(-1, 1)).fit(use_t=True)
+
+    new_x1 = np.array([1.0, 2.0, -3.0])
+    new_data = pl.DataFrame({"x1": new_x1})
+    predicted = res.predict(new_data)
+    expected = sm_res.predict(new_x1.reshape(-1, 1))
+
+    for row, exp in zip(predicted, expected):
+        assert row["fitted"] == pytest.approx(exp, abs=ATOL_COEF)
+
+
+def test_predict_with_include_intercept_false_and_x_named_const():
+    """`include_intercept=False`かつ`x`に`"const"`という名前の列を含む場合でも
+    predict()が正しく動作すること。
+
+    `include_intercept=True`のときのみ`"const"`という列名との衝突チェックが
+    働く仕様のため（`ols-api-design.md`3章）、`include_intercept=False`なら
+    ユーザーが`"const"`という名前の（切片ではない）通常の説明変数を`x`に
+    含めることは正当な入力。`predict()`の内部実装が誤って列名から
+    「自動追加された切片列かどうか」を推測すると、この場合に値を無視して
+    1.0固定にしてしまう回帰バグがあったため、固定用に追加。
+    """
+    df = pl.DataFrame(
+        {
+            "y": [3.0, 7.0, 9.0, 19.0, 11.0],
+            "const": [2.0, 5.0, 1.0, 8.0, 3.0],
+            "x2": [1.0, 2.0, 3.0, 4.0, 5.0],
+        }
+    )
+    options = OLSOptions(include_intercept=False)
+    res = OLS(df, y="y", x=["const", "x2"], options=options).fit()
+
+    new_data = pl.DataFrame({"const": [100.0, 200.0], "x2": [10.0, 20.0]})
+    predicted = res.predict(new_data)
+
+    coef_const = res.params["const"]
+    coef_x2 = res.params["x2"]
+    for row, (c, x2) in zip(predicted, [(100.0, 10.0), (200.0, 20.0)]):
+        expected = coef_const * c + coef_x2 * x2
+        assert row["fitted"] == pytest.approx(expected, abs=ATOL_COEF)
+
+
+def test_predict_new_data_structure(dataset):
+    res = _our_fit(dataset)
+    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
+
+    predicted = res.predict(new_data)
+
+    assert isinstance(predicted, list)
+    assert len(predicted) == 2
+    for row in predicted:
+        assert set(row.keys()) == {"fitted"}
+        assert isinstance(row["fitted"], float)
+
+
+def test_predict_missing_column_raises(dataset):
+    res = _our_fit(dataset)
+    new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
+
+    with pytest.raises(ValidationError):
+        res.predict(new_data)
+
+
+def test_predict_non_numeric_dtype_raises(dataset):
+    res = _our_fit(dataset)
+    new_data = pl.DataFrame({"x1": ["a", "b"], "x2": [1.0, 2.0]})
+
+    with pytest.raises(ValidationError):
+        res.predict(new_data)
+
+
+def test_predict_null_or_non_finite_values_raise(dataset):
+    res = _our_fit(dataset)
+
+    new_data_null = pl.DataFrame({"x1": [1.0, None], "x2": [1.0, 2.0]})
+    with pytest.raises(ValidationError):
+        res.predict(new_data_null)
+
+    new_data_inf = pl.DataFrame({"x1": [1.0, float("inf")], "x2": [1.0, 2.0]})
+    with pytest.raises(ValidationError):
+        res.predict(new_data_inf)

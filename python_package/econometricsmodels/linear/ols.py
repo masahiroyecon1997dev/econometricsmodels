@@ -219,3 +219,33 @@ class OlsResults:
                 self._raw.conf_upper,
             )
         ]
+
+    def predict(
+        self, new_data: pl.DataFrame | None = None
+    ) -> list[dict[str, float]]:
+        """Predicted values.
+
+        Unified into a single method rather than a separate
+        `fitted_values` property, to match the naming used by Logit's
+        `predict()` (`docs/planning/specs/ols-api-design.md` section 7).
+
+        Args:
+            new_data: New data to predict on. Must contain columns with
+                the same names as the `x` columns passed at fit time
+                (matched by name; column order does not matter). If
+                `include_intercept=True` was used at fit time, the
+                constant column is added automatically and must not be
+                included here. If `None` (default), returns the fitted
+                values for the training data used in `fit()`.
+
+        Returns:
+            Row-oriented predictions, one dict per observation. Each
+            dict currently has a single key, `"fitted"`.
+
+        Raises:
+            ValidationError: `new_data` is missing a required `x`
+                column, or a column contains missing/NaN/infinite
+                values.
+        """
+        raw = self._raw.predict(new_data)
+        return [{"fitted": value} for value in raw]

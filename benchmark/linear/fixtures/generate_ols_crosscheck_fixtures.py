@@ -17,6 +17,11 @@ pyfixestのHC2/HC3はfixestの仕様ではなく**pyfixest自身の実装バグ*
 classical/HC0-3/clusterはRとほぼ機械精度で一致するため厳密比較、HACのみ小標本補正の
 慣習差により緩い許容誤差で比較する（`tests/api_tests/test_ols_crosscheck.py`参照）。
 
+`predict()`（`docs/planning/specs/ols-api-design.md`7章、Issue #86）も対象に含める。
+`run_lm_predict_crosscheck.R`を使い、全シナリオで学習データに対する予測値（fitted）を、
+baselineシナリオのみ新規データに対する予測値（predicted、`PREDICT_NEW_DATA`参照）を
+crosscheckする。
+
 係数・標準誤差に加え、AIC/BIC/対数尤度・F統計量・F検定p値もRクロスチェック対象に含める
 （`testing-policy.md`「リファレンス実装」章の方針。全統計量を独立実装でもクロスチェックする）。
 AIC/BICはRの`AIC()`/`BIC()`標準関数（残差分散を1パラメータとして追加でカウントするk+1慣習）
@@ -66,6 +71,17 @@ from run_statsmodels_benchmark import DATA_DIR  # noqa: E402
 
 LINEAR_DIR = Path(__file__).resolve().parent.parent
 R_SCRIPT = LINEAR_DIR / "run_lm_crosscheck_benchmark.R"
+PREDICT_R_SCRIPT = LINEAR_DIR / "run_lm_predict_crosscheck.R"
+
+# fitted_values/predict()（Issue #86）のout-of-sample crosscheck用の新規データ
+# （baselineシナリオのみ）。学習データの実現値とは無関係に、x1/x2/x3の値域内で
+# 手で選んだ値。predict(new_data)の列名マッチング（列順は問わない）も合わせて
+# 確認するため、Python側テストではx3/x1/x2の順に並べ替えて渡す想定。
+PREDICT_NEW_DATA = {
+    "x1": [1.0, -1.0, 0.0, 2.5, -2.0],
+    "x2": [0.5, -0.5, 2.0, -1.5, 0.0],
+    "x3": [0, 1, 2, 0, 1],
+}
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（generate_ols_fixtures.pyと
 # 同じ方針。scale_varianceは全cov_typeでComputationErrorになる、Issue #107）。
@@ -140,6 +156,22 @@ def _write_csv(df, tmpdir: Path, name: str) -> Path:
     return path
 
 
+def _run_r_predict(
+    csv_path: Path, formula: str, new_data_csv_path: Path | None = None
+) -> dict:
+    """`run_lm_predict_crosscheck.R`を呼び、fitted_values/predict()の
+    crosscheck用の値を得る（`ols-api-design.md`7章）。
+
+    `new_data_csv_path`を渡さない場合は学習データに対する予測値（fitted）のみ、
+    渡す場合はout-of-sample予測値（predicted）も含む。
+    """
+    cmd = ["Rscript", str(PREDICT_R_SCRIPT), str(csv_path), formula]
+    if new_data_csv_path is not None:
+        cmd.append(str(new_data_csv_path))
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    return json.loads(proc.stdout)
+
+
 def build_synthetic_fixtures(tmpdir: Path) -> dict:
     fixtures: dict = {}
 
@@ -160,6 +192,20 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
                 entry["r"] = _run_r(csv_path, formula, cov_type)
 
             fixtures[scenario][cov_type] = entry
+
+        # fitted_values/predict()（Issue #86）。全シナリオで学習データに対する
+        # 予測値（fitted）をcrosscheckし、baselineシナリオのみout-of-sample予測値
+        # （predicted）も合わせて確認する。
+        if scenario == "baseline":
+            new_data_df = pl.DataFrame(PREDICT_NEW_DATA)
+            new_data_csv_path = _write_csv(
+                new_data_df, tmpdir, "predict_new_data"
+            )
+            fixtures[scenario]["predict"] = _run_r_predict(
+                csv_path, formula, new_data_csv_path
+            )
+        else:
+            fixtures[scenario]["predict"] = _run_r_predict(csv_path, formula)
 
         if scenario == "baseline":
             fixtures[scenario]["cluster"] = _run_cluster_case(

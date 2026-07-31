@@ -25,6 +25,12 @@ classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相�
 ロバストWald検定（cov_typeごとの共分散行列を使う）のため、HACのみ標準誤差と
 同じ小標本補正の慣習差が乗る（実測で相対誤差0.8%程度、`RTOL_HAC`の範囲内）。
 
+`predict()`（`docs/planning/specs/ols-api-design.md`7章、Issue #86）も対象に含める。
+`run_lm_predict_crosscheck.R`（`fitted()`・`predict(model, newdata=...)`）を使い、
+全シナリオで`predict(new_data=None)`（学習データの予測値）を、baselineシナリオのみ
+`predict(new_data)`（新規データの予測値、列順を入れ替えて列名マッチングも確認）を
+crosscheckする。
+
 Note:
     合成データはフィクスチャ生成時と同じ入力データを、`tests/api_tests/fixtures/
     benchmarks/data/`に固定済みのCSV（`benchmark/freeze_datasets.py`参照）から読む。
@@ -46,6 +52,16 @@ import polars as pl
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
+sys.path.insert(
+    0,
+    str(
+        Path(__file__).resolve().parents[2]
+        / "benchmark"
+        / "linear"
+        / "fixtures"
+    ),
+)
+from generate_ols_crosscheck_fixtures import PREDICT_NEW_DATA  # noqa: E402
 from generate_synthetic_datasets import imbalanced_cluster_groups  # noqa: E402
 
 from econometricsmodels import OLS, OLSOptions  # noqa: E402
@@ -146,6 +162,53 @@ def test_synthetic_matches_r(crosscheck, scenario, cov_type):
     _assert_close(res.params, ref["coef"], f"{label} coef")
     _assert_close(res.std_errors, ref["se"], f"{label} se")
     _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
+
+
+@pytest.mark.parametrize("scenario", SYNTHETIC_SCENARIOS)
+def test_predict_none_matches_r_fitted_values(crosscheck, scenario):
+    """`predict(new_data=None)`（学習データに対する予測値）がRの`fitted()`と一致すること。"""
+    df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
+    res = OLS(df, y="y", x=["x1", "x2", "x3"]).fit()
+
+    predicted = [row["fitted"] for row in res.predict()]
+    ref = crosscheck["synthetic"][scenario]["predict"]["fitted"]
+
+    assert len(predicted) == len(ref)
+    for i, (our_val, ref_val) in enumerate(zip(predicted, ref)):
+        diff = abs(our_val - ref_val)
+        tol = RTOL_STRICT * max(abs(ref_val), 1e-8)
+        assert diff <= tol, (
+            f"[{scenario}/predict(None)/R] row {i}: ours={our_val:.6f}, "
+            f"reference={ref_val:.6f}, diff={diff:.6f} > tol={tol:.6f}"
+        )
+
+
+def test_predict_new_data_matches_r(crosscheck):
+    """`predict(new_data)`（新規データに対する予測値）がRの`predict(model, newdata=...)`
+    と一致すること（baselineシナリオのみ。列順を学習時と入れ替えて渡し、列名マッチングも
+    合わせて確認する）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    res = OLS(df, y="y", x=["x1", "x2", "x3"]).fit()
+
+    new_data = pl.DataFrame(
+        {
+            "x3": PREDICT_NEW_DATA["x3"],
+            "x1": PREDICT_NEW_DATA["x1"],
+            "x2": PREDICT_NEW_DATA["x2"],
+        }
+    )
+    predicted = [row["fitted"] for row in res.predict(new_data)]
+    ref = crosscheck["synthetic"]["baseline"]["predict"]["predicted"]
+
+    assert len(predicted) == len(ref)
+    for i, (our_val, ref_val) in enumerate(zip(predicted, ref)):
+        diff = abs(our_val - ref_val)
+        tol = RTOL_STRICT * max(abs(ref_val), 1e-8)
+        assert diff <= tol, (
+            f"[baseline/predict(new_data)/R] row {i}: ours={our_val:.6f}, "
+            f"reference={ref_val:.6f}, diff={diff:.6f} > tol={tol:.6f}"
+        )
 
 
 def test_cluster_matches_r(crosscheck):

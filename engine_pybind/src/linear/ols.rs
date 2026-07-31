@@ -123,29 +123,120 @@ impl OLSOptions {
 // `OLSResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`OLSOptions`の`from_py_object`とは
 // 対照的。pyo3 0.28以降、Cloneを実装する#[pyclass]のFromPyObject自動導出はopt-inになった）。
-#[pyclass(get_all, skip_from_py_object, module = "econometricsmodels._lib")]
+//
+// `get_all`（クラス単位で全フィールドに#[pyo3(get)]を付与する）ではなく、フィールドごとに
+// 個別`#[pyo3(get)]`を付ける方式にしている。`fitted_values`（`predict(new_data=None)`が
+// 返す値のキャッシュ、`ols-api-design.md`7章）はPython側に独立したプロパティとして
+// 公開しない設計上の決定のため、この1フィールドだけ`#[pyo3(get)]`を付けずに残す必要がある。
+#[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct OLSResult {
+    #[pyo3(get)]
     pub params: Vec<f64>,
+    #[pyo3(get)]
     pub std_errors: Vec<f64>,
+    #[pyo3(get)]
     pub t_stats: Vec<f64>,
+    #[pyo3(get)]
     pub p_values: Vec<f64>,
+    #[pyo3(get)]
     pub conf_lower: Vec<f64>,
+    #[pyo3(get)]
     pub conf_upper: Vec<f64>,
+    #[pyo3(get)]
     pub param_names: Vec<String>,
+    #[pyo3(get)]
     pub residuals: Vec<f64>,
+    #[pyo3(get)]
     pub dep_var_name: String,
+    #[pyo3(get)]
     pub nobs: usize,
     /// Standard error type actually used (echoes `OLSOptions.cov_type`, normalized to
     /// lowercase; e.g. `"classical"`, `"hc1"`, `"hac"`, `"cluster"`).
+    #[pyo3(get)]
     pub cov_type: String,
+    #[pyo3(get)]
     pub r_squared: f64,
+    #[pyo3(get)]
     pub r_squared_adj: f64,
+    #[pyo3(get)]
     pub f_statistic: f64,
+    #[pyo3(get)]
     pub f_p_value: f64,
+    #[pyo3(get)]
     pub log_likelihood: f64,
+    #[pyo3(get)]
     pub aic: f64,
+    #[pyo3(get)]
     pub bic: f64,
+    /// Fitted values for the training data (`ŷ = Xβ̂`), cached at fit time.
+    /// Not exposed to Python directly; only `predict(new_data=None)` reads it
+    /// (`ols-api-design.md` section 7 — the Python-facing surface is unified into a
+    /// single `predict()` method rather than a separate `fitted_values` property).
+    fitted_values: Vec<f64>,
+    /// Whether `fit()` was called with `include_intercept=True`. Not exposed to
+    /// Python; only `predict()` reads it to decide whether to auto-prepend a
+    /// constant column for out-of-sample data.
+    ///
+    /// This must NOT be inferred from `param_names[0] == "const"`: when
+    /// `include_intercept=False`, a user-supplied `x` column may legitimately be
+    /// named `"const"` (the collision check in `fit()` only rejects that name when
+    /// `include_intercept=True`), which would make such an inference silently
+    /// wrong instead of erroring.
+    has_intercept: bool,
+}
+
+#[pymethods]
+impl OLSResult {
+    /// Predicted values.
+    ///
+    /// With `new_data=None` (default), returns the fitted values for the training
+    /// data used in `fit()`. With `new_data` given, computes out-of-sample
+    /// predictions for a new polars DataFrame: it must contain columns with the same
+    /// names as the `x` columns passed at fit time (matched by name; column order
+    /// does not matter). If `include_intercept=True` was used at fit time, the
+    /// constant column is added automatically and must not be included in `new_data`.
+    ///
+    /// # Errors
+    /// - A required `x` column is missing from `new_data`, cannot be cast to a
+    ///   numeric type, or contains missing/NaN/infinite values: `ValidationError`
+    ///   (same validation as `fit()`'s column extraction, via `extract_f64_column`).
+    #[pyo3(signature = (new_data=None))]
+    fn predict(&self, new_data: Option<PyDataFrame>) -> PyResult<Vec<f64>> {
+        let Some(new_data) = new_data else {
+            return Ok(self.fitted_values.clone());
+        };
+
+        let df: DataFrame = new_data.into();
+        let has_intercept = self.has_intercept;
+        let x_names: &[String] = if has_intercept {
+            &self.param_names[1..]
+        } else {
+            &self.param_names[..]
+        };
+
+        let mut x_columns: Vec<Vec<f64>> = Vec::with_capacity(x_names.len());
+        let mut expected_len: Option<usize> = None;
+        for name in x_names {
+            let col = extract_f64_column(&df, name)?;
+            match expected_len {
+                Some(n) if col.len() != n => {
+                    return Err(ValidationError::new_err(format!(
+                        "row count of column '{name}' does not match other columns in new_data"
+                    )));
+                }
+                Some(_) => {}
+                None => expected_len = Some(col.len()),
+            }
+            x_columns.push(col);
+        }
+
+        Ok(engine::linear::ols::predict_new_data(
+            &self.params,
+            has_intercept,
+            &x_columns,
+        ))
+    }
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `options` を検証し、
@@ -299,5 +390,7 @@ pub fn fit(
         log_likelihood: estimator.log_likelihood(),
         aic: estimator.aic(),
         bic: estimator.bic(),
+        fitted_values: mat_to_vec(&estimator.fitted_values()),
+        has_intercept: estimator.input().has_intercept(),
     })
 }

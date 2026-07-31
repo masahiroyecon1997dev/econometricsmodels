@@ -220,17 +220,9 @@ pub struct LogitResult {
 ///
 /// # Errors
 /// - `cov_type`が既知の値のいずれでもない: `ValidationError`
-/// - `cov_type="cluster"`で指定された`cluster_col`の行数が`n`と一致しない: `ValidationError`
-///   （`cluster_col`未指定自体は`ValidationError`にせず、`groups=None`のまま`engine`側の
-///   `CommonError::MissingClusterColumn`検証に委ねる。OLSの`fit()`と同じ役割分担）
 ///
-/// **行数不一致チェックは理論上到達不能**（ユーザー確認済み）: `df`（`y`・`cluster_col`
-/// はいずれも同じ`DataFrame`の列）は、polars 0.54.4の`DataFrame::new(height, columns)`が
-/// 構築時に全列の長さが`height`と一致することを強制する（`validate_columns_slice`）ため、
-/// 同一`DataFrame`内の列同士で行数が食い違う状態はAPI上構築できない（Python側の
-/// `polars.DataFrame`も同じ不変条件を持つ）。OLSの`fit()`にある同種のチェック
-/// （`engine_pybind/src/linear/ols.rs`の`cluster_col`/`time_col`行数チェック）も同じ状況。
-/// 実測での再現を試みる過程で判明したため、防御的に残しつつテストは作成していない。
+/// `cluster_col`未指定自体はここでは`ValidationError`にせず、`groups=None`のまま
+/// `engine`側の`CommonError::MissingClusterColumn`検証に委ねる（OLSの`fit()`と同じ役割分担）。
 ///
 /// `#[allow(dead_code)]`について: `build_logit_input`のdocコメント参照。
 #[allow(dead_code)]
@@ -238,7 +230,6 @@ fn parse_cov_type(
     df: &DataFrame,
     cov_type_lower: &str,
     cluster_col: &Option<String>,
-    n: usize,
 ) -> PyResult<EngineCovType> {
     match cov_type_lower {
         "classical" | "nonrobust" => Ok(EngineCovType::Classical),
@@ -246,18 +237,10 @@ fn parse_cov_type(
         "hc0" => Ok(EngineCovType::Hc0),
         "hc1" => Ok(EngineCovType::Hc1),
         "cluster" => {
-            let groups = match cluster_col {
-                Some(col_name) => {
-                    let ids = extract_group_key_column(df, col_name)?;
-                    if ids.len() != n {
-                        return Err(ValidationError::new_err(format!(
-                            "row count of cluster column '{col_name}' does not match y"
-                        )));
-                    }
-                    Some(ids)
-                }
-                None => None,
-            };
+            let groups = cluster_col
+                .as_ref()
+                .map(|col_name| extract_group_key_column(df, col_name))
+                .transpose()?;
             Ok(EngineCovType::Cluster { groups })
         }
         other => Err(ValidationError::new_err(format!(
@@ -350,25 +333,14 @@ pub(crate) fn build_logit_input(
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
     let y_slice = extract_f64_column(df, &y)?;
-    let n = y_slice.len();
 
-    // ── x列の抽出（列ごとに検証しつつスライスを集める）────────────────────
-    // `s.len() != n`の分岐は理論上到達不能（`parse_cov_type`のdocコメント
-    // 「行数不一致チェックは理論上到達不能」参照。`y`と`x`は同じ`df`の列のため、
-    // polarsのDataFrame不変条件により行数は常に一致する）。
+    // ── x列の抽出 ──────────────────────────────────────────────────────
     let mut x_slices: Vec<Vec<f64>> = Vec::with_capacity(x.len());
     for col_name in &x {
-        let s = extract_f64_column(df, col_name)?;
-        if s.len() != n {
-            return Err(ValidationError::new_err(format!(
-                "row count of column '{col_name}' does not match y (y: {n} rows, {col_name}: {} rows)",
-                s.len()
-            )));
-        }
-        x_slices.push(s);
+        x_slices.push(extract_f64_column(df, col_name)?);
     }
 
-    let cov_type = parse_cov_type(df, &cov_type_lower, &options.cluster_col, n)?;
+    let cov_type = parse_cov_type(df, &cov_type_lower, &options.cluster_col)?;
     let method = parse_method(&method_lower)?;
 
     let input = LogitInput::from_columns(&y_slice, &x_slices, x, options.include_intercept, y)

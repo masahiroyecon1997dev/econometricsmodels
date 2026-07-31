@@ -186,7 +186,7 @@ OLS関連の全テスト（Rust側`#[cfg(test)]`、Python側`tests/api_tests/`�
 
 - **Rust側**: `hac_lags`の上限側境界（`lags=n`が範囲外、`n-1`が最大許容値）、`confidence_level`の厳密な境界（0.0・1.0ちょうど）、`CovType::Hac { lags: Some(0), .. }`と`HC0`が数学的に同一の式になるという内部整合性、の3点が未検証だったため追加した（25件→29件）。
 - **Python側**: `engine_pybind`の`OLSOptions`と突き合わせたところ、cov_type以外のオプション（`include_intercept`・`confidence_level`・`hac_lags=None`・`time_col`）や複数の`ValidationError`経路がPython API境界からほとんど検証されていなかった。特に**`time_col`（HACの時系列順序指定）は3ファイルのどこからも一度もテストされていなかった**（engine内部のロジックはRust単体テストで検証済みだったが、`engine_pybind`の列抽出経路が未検証だった）。`test_ols.py`に19件追加した（44件→63件）: エラーパス8件（観測数不足・クラスター数不足・confidence_level境界・hac_lags境界・y/x重複・const衝突・空x）、オプション反映確認4件（`include_intercept=False`・confidence_levelによる信頼区間幅の変化・hac_lags自動計算・time_col指定時の時系列順序復元）。
-- **参考（対応不要と判断）**: `engine_pybind::fit`の「行数がyと一致しない」という`ValidationError`分岐が3箇所ある（`y`列・各`x`列・`cluster_col`・`time_col`それぞれ）。これらは全て同一のpolars DataFrameから抽出しており、polars DataFrameは構造上すべての列が同じ行数を持つため、実質的に到達不能（dead code）である可能性が高い（1章の`DimensionMismatch`と同種）。対応（削除するか、到達不能である理由をコメントで明記するか）はengine_pybind側の設計判断として未着手のまま残している。
+- **`engine_pybind::fit`の「行数がyと一致しない」という`ValidationError`分岐（削除済み、Issue #133）**: `y`列・各`x`列・`cluster_col`・`time_col`の行数チェックは、全て同一のpolars DataFrameから抽出しており、polars 0.54.4のソース（`polars-core/src/frame/validation.rs`の`validate_columns_slice`、および`with_column`/`hstack`/`replace`等の変更系メソッド）を確認した結果、DataFrameは構築時・変更時のいずれでも全列同じ長さであることを型の不変条件として強制するため、実質的に到達不能（dead code）であることを確認した（1章の`DimensionMismatch`と同種）。`OLSResult::predict()`内の新規データx列間の行数チェックも同じ理由で到達不能。ユーザー確認の上、これらのチェックはすべて削除した（`Option::map().transpose()?`パターンに簡略化）。既存テストにこれらの分岐を検証するものは無かったため、テストの追加削除は不要だった。
 
 ## 9. ドキュメント
 

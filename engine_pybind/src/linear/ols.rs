@@ -216,19 +216,8 @@ impl OLSResult {
         };
 
         let mut x_columns: Vec<Vec<f64>> = Vec::with_capacity(x_names.len());
-        let mut expected_len: Option<usize> = None;
         for name in x_names {
-            let col = extract_f64_column(&df, name)?;
-            match expected_len {
-                Some(n) if col.len() != n => {
-                    return Err(ValidationError::new_err(format!(
-                        "row count of column '{name}' does not match other columns in new_data"
-                    )));
-                }
-                Some(_) => {}
-                None => expected_len = Some(col.len()),
-            }
-            x_columns.push(col);
+            x_columns.push(extract_f64_column(&df, name)?);
         }
 
         Ok(engine::linear::ols::predict_new_data(
@@ -293,54 +282,32 @@ pub fn fit(
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
     let y_slice = extract_f64_column(&df, &y)?;
-    let n = y_slice.len();
 
-    // ── x列の抽出（列ごとに検証しつつスライスを集める）────────────────────
+    // ── x列の抽出 ──────────────────────────────────────────────────────
     let mut x_slices: Vec<Vec<f64>> = Vec::with_capacity(x.len());
     for col_name in &x {
-        let s = extract_f64_column(&df, col_name)?;
-        if s.len() != n {
-            return Err(ValidationError::new_err(format!(
-                "row count of column '{col_name}' does not match y (y: {n} rows, {col_name}: {} rows)",
-                s.len()
-            )));
-        }
-        x_slices.push(s);
+        x_slices.push(extract_f64_column(&df, col_name)?);
     }
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
     // `cluster_col`/`time_col`が指定されていても、cov_typeがcluster/hacでなければ
     // 無視する（`docs/planning/specs/ols-standard-errors.md`3.2/3.3節）。
     let cluster_groups = if cov_type_lower == "cluster" {
-        match &options.cluster_col {
-            Some(col_name) => {
-                let ids = extract_group_key_column(&df, col_name)?;
-                if ids.len() != n {
-                    return Err(ValidationError::new_err(format!(
-                        "row count of cluster column '{col_name}' does not match y"
-                    )));
-                }
-                Some(ids)
-            }
-            None => None,
-        }
+        options
+            .cluster_col
+            .as_ref()
+            .map(|col_name| extract_group_key_column(&df, col_name))
+            .transpose()?
     } else {
         None
     };
 
     let time_order = if cov_type_lower == "hac" {
-        match &options.time_col {
-            Some(col_name) => {
-                let values = extract_f64_column(&df, col_name)?;
-                if values.len() != n {
-                    return Err(ValidationError::new_err(format!(
-                        "row count of time column '{col_name}' does not match y"
-                    )));
-                }
-                Some(values)
-            }
-            None => None,
-        }
+        options
+            .time_col
+            .as_ref()
+            .map(|col_name| extract_f64_column(&df, col_name))
+            .transpose()?
     } else {
         None
     };

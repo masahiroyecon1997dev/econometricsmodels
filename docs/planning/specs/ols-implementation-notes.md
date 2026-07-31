@@ -153,7 +153,7 @@ OLSのAPI・オプション設計（[`ols-api-design.md`](./ols-api-design.md) /
   - `conf_int`は`dict[str, tuple[float, float]]`（`_lib.OLSResult`の`conf_lower`/`conf_upper`2配列から組み立て）。
   - `coef_table()`メソッドで行指向の`list[dict]`（キー: `param`/`coef`/`std_err`/`t_stat`/`p_value`/`conf_lower`/`conf_upper`）を提供。REST APIレスポンスにそのまま使える形。
   - `residuals`はそのまま`list[float]`（`_lib.OLSResult`の値を素通しするだけの薄いラッパーという位置づけを優先し、polars Seriesへの変換等は行わない）。
-- **`summary()`・`predict()`・`fitted_values`・`to_frame()`/`conf_int()`のDataFrame版は実装しない**（`ols-api-design.md`5章の確定方針、「薄いラッパー」というスコープに照らして見送っている）。
+- **`summary()`・`to_frame()`/`conf_int()`のDataFrame版は実装しない**（`ols-api-design.md`5章の確定方針、「薄いラッパー」というスコープに照らして見送っている）。**`predict()`・`fitted_values`は例外的にスコープに含める**（Issue #86、設計は`ols-api-design.md`7章参照。本ドキュメント作成時点では未実装）。
 
 ## 8. テスト
 

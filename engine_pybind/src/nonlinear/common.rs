@@ -22,16 +22,6 @@ use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
 ///
 /// 対応表は`docs/planning/specs/nonlinear-implementation-notes.md`「エラー型: nonlinear系統で
 /// 共有（MleError）」参照。
-///
-/// `#[allow(dead_code)]`について: Issue #65時点では呼び出し元が`build_logit_input`
-/// （同じく本Issueで新設、テストからのみ呼ばれる）のみで、`LogitEstimator::fit`を
-/// 実際に呼ぶ`fit_logit`（Issue #66で実装予定）がまだ無いため、`cargo build`
-/// （`#[cfg(test)]`を含まないlibターゲットのビルド）からは到達不能に見え`dead_code`警告に
-/// なる（`engine_pybind`は`engine`と異なりPython拡張モジュール専用の薄いバインディング層
-/// であり、クレート外に`pub`なRust APIを公開する設計ではないため、`pub`化での回避は
-/// 見送った。rust-reviewerの指摘）。Issue #66で`fit_logit`がこの関数を実際に呼ぶように
-/// なった時点でこの属性は不要になる（削除すること）。
-#[allow(dead_code)]
 pub(crate) fn mle_error_to_pyerr(err: MleError) -> PyErr {
     match err {
         MleError::Common(common) => common_error_to_pyerr(common),

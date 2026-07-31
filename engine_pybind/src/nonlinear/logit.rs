@@ -1,12 +1,6 @@
 //! Logitの推定オプション・結果、およびPython（polars DataFrame + 列名 + オプション）から
 //! `engine::nonlinear::logit`（Newton/BFGS/L-BFGSソルバー・標準誤差・適合度統計量）を
-//! 呼び出すためのデータ抽出・バリデーションまでの処理。
-//!
-//! 【本Issue（#65）のスコープ】`LogitOptions`/`LogitResult`のpyclass定義と、データ抽出・
-//! バリデーション・`engine::nonlinear::logit::LogitInput`構築までを担う`build_logit_input`
-//! を実装する。`LogitEstimator::fit()`の呼び出し・`LogitResult`の実際の構築・
-//! `#[pymodule]`への登録はIssue #66（engine呼び出し・エラー変換）のスコープとし、
-//! ここでは行わない（ユーザー確認済み）。
+//! 呼び出し、結果をPython側に返すところまでの一連の処理。
 //!
 //! 【責務分離】`.claude/rules/rust-style.md`「Python境界でのデータ受け渡し」参照。
 //! polars DataFrameから列ごとの`Vec<f64>`/`Vec<String>`への抽出はここ（`column_extraction`
@@ -20,15 +14,16 @@
 //! `build_logit_input`が`PyDataFrame`ではなく`polars::DataFrame`（プレーンなpolars型）を
 //! 受け取る設計にしているのは、`column_extraction::extract_f64_column`等が既に同じ
 //! シグネチャ（`&DataFrame`）を使っているため、およびPythonインタプリタ（GIL）を
-//! 起動せずに`cargo test`で直接ユニットテストできるようにするため。`fit_logit`
-//! （Issue #66で実装予定の`#[pyfunction]`本体）が`PyDataFrame`を受け取り、
-//! `.into()`で`DataFrame`に変換してから`build_logit_input`を呼ぶ想定
-//! （`ols.rs`の`fit`関数と同じ変換パターン）。
+//! 起動せずに`cargo test`で直接ユニットテストできるようにするため（Issue #65）。
+//! `fit`（本ファイルの`pub(crate)`関数、`#[pyfunction] fit_logit`本体は`lib.rs`側にあり
+//! これに委譲する、Issue #66）が`PyDataFrame`を受け取り、`.into()`で`DataFrame`に変換して
+//! から`build_logit_input`を呼ぶ（`ols.rs`の`fit`関数と同じ変換パターン）。
 
 use engine::nonlinear::common::{CovType as EngineCovType, Method as EngineMethod};
-use engine::nonlinear::logit::LogitInput;
+use engine::nonlinear::logit::{LogitEstimator, LogitInput};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
+use pyo3_polars::PyDataFrame;
 
 use super::common::mle_error_to_pyerr;
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
@@ -159,9 +154,6 @@ impl LogitOptions {
 /// section 5. Row-oriented table construction (e.g. a `coef_table`) is left to
 /// `python_package`. All array-valued fields (`params`, `std_errors`, etc.) share the
 /// same order as `param_names`.
-///
-/// Not yet populated by any code in this crate (Issue #65 defines the type only;
-/// `fit_logit`, which constructs and returns it, is implemented in Issue #66).
 // `LogitResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`LogitOptions`の`from_py_object`とは
 // 対照的。`OLSResult`と同じ理由）。
@@ -227,9 +219,6 @@ pub struct LogitResult {
 ///
 /// `cluster_col`未指定自体はここでは`ValidationError`にせず、`groups=None`のまま
 /// `engine`側の`CommonError::MissingClusterColumn`検証に委ねる（OLSの`fit()`と同じ役割分担）。
-///
-/// `#[allow(dead_code)]`について: `build_logit_input`のdocコメント参照。
-#[allow(dead_code)]
 fn parse_cov_type(
     df: &DataFrame,
     cov_type_lower: &str,
@@ -259,9 +248,6 @@ fn parse_cov_type(
 ///
 /// # Errors
 /// `method`が既知の値のいずれでもない: `ValidationError`
-///
-/// `#[allow(dead_code)]`について: `build_logit_input`のdocコメント参照。
-#[allow(dead_code)]
 fn parse_method(method_lower: &str) -> PyResult<EngineMethod> {
     match method_lower {
         "newton" => Ok(EngineMethod::Newton),
@@ -275,8 +261,7 @@ fn parse_method(method_lower: &str) -> PyResult<EngineMethod> {
 
 /// Pythonから渡された `data` / `y` / `x` / `options` を検証し、
 /// `engine::nonlinear::logit::LogitInput::from_columns`を呼び出すところまでを行う。
-/// `LogitEstimator::fit`の呼び出し・`LogitResult`の構築はIssue #66で実装する
-/// （このファイル冒頭のdocコメント「本Issueのスコープ」参照）。
+/// `LogitEstimator::fit`の呼び出し・`LogitResult`の構築は`fit`（本ファイル、Issue #66）が行う。
 ///
 /// # Errors
 /// - 列の抽出時に発覚する問題（列が存在しない、数値/文字列型にキャストできない、
@@ -286,17 +271,6 @@ fn parse_method(method_lower: &str) -> PyResult<EngineMethod> {
 /// - `cov_type`/`method`の文字列が不正な場合は`ValidationError`
 /// - それ以外（次元不一致等）は`engine::nonlinear::common::MleError`から
 ///   `mle_error_to_pyerr`で変換
-///
-/// `#[allow(dead_code)]`について: Issue #65時点では呼び出し元が本ファイルの
-/// `#[cfg(test)] mod tests`のみで、`LogitEstimator::fit`を実際に呼ぶ`fit_logit`
-/// （Issue #66で実装予定の`#[pyfunction]`）がまだ無いため、`cargo build`
-/// （`#[cfg(test)]`を含まないlibターゲットのビルド）からは到達不能に見え`dead_code`警告に
-/// なる。`engine_pybind`はPython拡張モジュール専用の薄いバインディング層であり、
-/// クレート外に`pub`なRust APIを公開する設計ではないため、`pub`化での回避（`engine`側の
-/// `ColumnScale::stds()`と同じ手法）は見送り、`#[allow(dead_code)]`で明示的に抑制する
-/// 方針にした（rust-reviewerの指摘）。Issue #66で`fit_logit`がこの関数を実際に呼ぶように
-/// なった時点でこの属性は不要になる（削除すること）。
-#[allow(dead_code)]
 pub(crate) fn build_logit_input(
     df: &DataFrame,
     y: String,
@@ -329,6 +303,61 @@ pub(crate) fn build_logit_input(
         .map_err(mle_error_to_pyerr)?;
 
     Ok((input, cov_type, method))
+}
+
+/// Pythonから渡された `data` / `y` / `x` / `options` を検証し、
+/// `build_logit_input`で構築した`LogitInput`に対して`engine::nonlinear::logit::
+/// LogitEstimator::fit`を呼び出してLogitを推定し、`LogitResult`として返す。
+///
+/// # Errors
+/// - `build_logit_input`が返すエラー（列抽出・y/xの重複・`"const"`列衝突・
+///   `cov_type`/`method`文字列の検証等）は`ValidationError`
+/// - `LogitEstimator::fit`が返す`MleError`（`confidence_level`範囲外・`max_iter`が
+///   0以下・観測数不足・未収束・特異Hessian・特異OPG行列・クラスターキー未指定・
+///   クラスター数不足等）は`mle_error_to_pyerr`で変換（詳細は
+///   `engine::nonlinear::logit::LogitEstimator::fit`のdocコメント参照）
+pub(crate) fn fit(
+    data: PyDataFrame,
+    y: String,
+    x: Vec<String>,
+    options: &LogitOptions,
+) -> PyResult<LogitResult> {
+    let df: DataFrame = data.into();
+    let (input, cov_type, method) = build_logit_input(&df, y, x, options)?;
+
+    let estimator = LogitEstimator::fit(
+        input,
+        method,
+        options.max_iter,
+        options.tol,
+        options.raise_on_non_convergence,
+        cov_type,
+        options.confidence_level,
+    )
+    .map_err(mle_error_to_pyerr)?;
+
+    Ok(LogitResult {
+        params: estimator.params().to_vec(),
+        std_errors: estimator.std_errors().to_vec(),
+        z_stats: estimator.z_stats().to_vec(),
+        p_values: estimator.p_values().to_vec(),
+        conf_lower: estimator.conf_lower().to_vec(),
+        conf_upper: estimator.conf_upper().to_vec(),
+        param_names: estimator.input().param_names().to_vec(),
+        log_likelihood: estimator.log_likelihood(),
+        log_likelihood_null: estimator.log_likelihood_null(),
+        lr_statistic: estimator.lr_statistic(),
+        lr_p_value: estimator.lr_p_value(),
+        pseudo_r_squared: estimator.pseudo_r_squared(),
+        aic: estimator.aic(),
+        bic: estimator.bic(),
+        n_obs: estimator.n_obs(),
+        df_model: estimator.df_model(),
+        df_resid: estimator.df_resid(),
+        converged: estimator.converged(),
+        n_iter: estimator.n_iter(),
+        cov_type: options.cov_type.to_lowercase(),
+    })
 }
 
 #[cfg(test)]

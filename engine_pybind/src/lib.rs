@@ -10,6 +10,7 @@ use pyo3_polars::PyDataFrame;
 use errors::{ComputationError, ValidationError};
 use linear::ols::{OLSOptions, OLSResult};
 use linear::wls::WLSResult;
+use nonlinear::logit::{LogitOptions, LogitResult};
 
 /// Entry point for OLS estimation.
 ///
@@ -60,6 +61,28 @@ fn fit_wls(
     linear::wls::fit(data, y, x, weight, &options)
 }
 
+/// Entry point for Logit estimation.
+///
+/// Parameters
+/// ----------
+/// data : polars.DataFrame
+///     The input data. Must contain the `y`, `x`, and (if specified) cluster columns.
+/// y : str
+///     Column name of the dependent variable.
+/// x : list[str]
+///     Column names of the independent variables.
+/// options : LogitOptions
+///     Estimation options.
+#[pyfunction]
+fn fit_logit(
+    data: PyDataFrame,
+    y: String,
+    x: Vec<String>,
+    options: LogitOptions,
+) -> PyResult<LogitResult> {
+    nonlinear::logit::fit(data, y, x, &options)
+}
+
 #[pymodule]
 fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fit_ols, m)?)?;
@@ -67,6 +90,9 @@ fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<OLSResult>()?;
     m.add_function(wrap_pyfunction!(fit_wls, m)?)?;
     m.add_class::<WLSResult>()?;
+    m.add_function(wrap_pyfunction!(fit_logit, m)?)?;
+    m.add_class::<LogitOptions>()?;
+    m.add_class::<LogitResult>()?;
     m.add("ValidationError", m.py().get_type::<ValidationError>())?;
     m.add("ComputationError", m.py().get_type::<ComputationError>())?;
     Ok(())

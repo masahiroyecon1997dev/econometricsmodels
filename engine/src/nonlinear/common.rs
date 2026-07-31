@@ -91,11 +91,12 @@ pub enum Method {
 /// （OLSの`CovType`と同じ設計。`.claude/rules/rust-style.md`参照）。
 ///
 /// Logit/Probit/Tobitで共通のバリアント（`nonlinear-api-design.md`4章）のため
-/// `nonlinear/common.rs`に定義する（`Method`と同じ理由）。`"cluster"`は
-/// `logit-probit-issue-breakdown.md`のB7・C7で追加する（クラスターキーの検証
-/// タイミング等、モデルの`fit()`側で決めるべき論点が別にあるため、このIssue
-/// （B6、opg/hc0/hc1）のスコープには含めない）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// `nonlinear/common.rs`に定義する（`Method`と同じ理由）。
+///
+/// `Cluster`のみ、他のバリアントと異なり追加データ（グループキー）を持つため
+/// フィールド付きバリアントにしている（OLSの`CovType::Cluster`と同じ設計パターン。
+/// `groups`が`None`の場合、モデルの`fit()`は`CommonError::MissingClusterColumn`を返す）。
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CovType {
     /// 観測情報行列（`"classical"`/`"nonrobust"`、既定）: `Σ = -H⁻¹`
     Classical,
@@ -105,6 +106,13 @@ pub enum CovType {
     Hc0,
     /// サンドイッチ型+小標本補正（`"hc1"`）: `hc0`の`Σ`に`n/(n-k)`を乗じる
     Hc1,
+    /// クラスターロバスト（`"cluster"`）: `Σ = correction * H⁻¹(Σ_g S_gS_g')H⁻¹`
+    /// （`docs/planning/specs/nonlinear-implementation-notes.md`「標準誤差の技術仕様」参照）。
+    Cluster {
+        /// クラスターのグループキー。モデルの入力データの行と対応する長さnの配列。
+        /// `None`の場合、モデルの`fit()`は`CommonError::MissingClusterColumn`を返す。
+        groups: Option<Vec<String>>,
+    },
 }
 
 /// `run_solver`の出力。

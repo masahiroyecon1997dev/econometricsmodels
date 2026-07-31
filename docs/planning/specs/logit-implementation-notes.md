@@ -101,7 +101,7 @@ Issue #58時点ではIssue #58本来のスコープを超えるためユーザ�
 
 ## OPG（BHHH）・サンドイッチ型（HC0/HC1）でのSE（Issue #59で実装済み）
 
-`LogitEstimator::fit`に`cov_type: CovType`引数を追加した。`CovType`（`Classical`/`Opg`/`Hc0`/`Hc1`。`Cluster`はB7で追加）は`Method`と同じ理由で`nonlinear/common.rs`に定義し、Probit/Tobitでも再利用する想定。
+`LogitEstimator::fit`に`cov_type: CovType`引数を追加した。`CovType`（`Classical`/`Opg`/`Hc0`/`Hc1`。`Cluster`はB7/Issue #60で追加）は`Method`と同じ理由で`nonlinear/common.rs`に定義し、Probit/Tobitでも再利用する想定。
 
 - **収束点でのスコア評価に`LogitProblem`のクローンが必要**: `Opg`/`Hc0`/`Hc1`は収束点での観測ごとのスコア（`LogitProblem::scores`）が必要だが、`run_solver`は`problem`の所有権を取り込み、内部で保持していたモデルを呼び出し元へ返さない設計になっている（`SolverOutput`に`model`フィールドが無い）。`run_solver`のシグネチャを変更して`model`を返す設計も検討したが、`LogitProblem`は元々`argmin::core::Executor`向けに`Clone`を要求しているため、`run_solver`に渡す前に`problem.clone()`しておく方が`run_solver`（Logit/Probit/Tobit共通のユーティリティ）のシグネチャを変えずに済み、影響範囲が小さい。
   - **クローンは`cov_type=Classical`のときは行わない**（rust-reviewer指摘）: 初回実装では`cov_type`に関わらず常に`problem.clone()`していたが、`Classical`はスコアを一切使わないため設計行列を含む無駄な複製になる。`cov_type`に応じて`Option<LogitProblem>`で条件付きにクローンする形に修正した。
@@ -113,4 +113,21 @@ Issue #58時点ではIssue #58本来のスコープを超えるためユーザ�
 - **`cov_type`ごとの独立再計算との一致**: `fit()`が内部で行う手順（標準化→収束点でのscores/Hessian評価→`common.rs`の共通行列演算→`destandardize_cov_params`）をテスト側で独立に再現し、`Opg`/`Hc0`/`Hc1`それぞれで`fit()`が返す`cov_params`と一致することを確認した（`fit_cov_type_opg_hc0_hc1_match_independently_recomputed_values`）。
   - **多変量（k=3）データセットが必須な理由**: 切片のみモデルでは情報行列の等式`Σᵢsᵢsᵢ' = -H`が有限標本で厳密に成り立ってしまい（`y_i∈{0,1}`かつ全観測で`p_i=ȳ`となる特殊性から`Σ(y_i-ȳ)² = n*ȳ(1-ȳ) = -H`が代数的に導ける）、`classical`/`opg`/`hc0`が偶然同じ値になる。そのため切片のみデータセットでは`fit()`の`match cov_type`の配線ミス（例えば`Opg`の枝で誤って`observed_information_cov_params`を呼ぶ等）を検出できない。実際に`Opg`の枝を意図的に壊して（`observed_information_cov_params`を呼ぶよう改変）このテストが失敗することを確認した上で、多変量データセットを採用した。
   - Hessianの符号規約に注意: `LogitProblem::hessian`（argminトレイト）はコスト関数（負の対数尤度）のHessianを返すため、`run_solver`が`SolverOutput.hessian`に格納する対数尤度そのもののHessianに合わせて、テスト側でも1回符号反転する必要がある（`run_solver`のdocコメント「Hessianトレイトの符号規約」と同じ変換）。
+
+## クラスターロバストSE（Issue #60で実装済み）
+
+`CovType`に`Cluster { groups: Option<Vec<String>> }`を追加した（OLSの`CovType::Cluster`と同じ、フィールド付きバリアントの設計パターン）。クラスター単位の集約→サンドイッチ計算そのもの（`cluster_cov_params`）は`nonlinear/common.rs`にIssue #53時点で既に実装・テスト済みだったため、本Issueで新規に実装したのは(1)`CovType::Cluster`バリアントの追加、(2)`LogitEstimator::fit`への配線、(3)クラスターキー未指定・クラスター数不足のバリデーションの3点のみ。
+
+- **クラスターグループの検証ロジックをOLSと共有**: `groups.len()==n`の内部契約チェック＋distinct count`>=2`の検証（`CommonError::MissingClusterColumn`/`InsufficientClusters`）は、OLSの`validate_cluster_groups`（`engine/src/linear/ols.rs`）と完全に同一のロジックだった。ユーザー確認の上、`engine::validation::validate_cluster_groups(groups: &[String], n: usize) -> Result<usize, CommonError>`として共有化し、OLS側もこの共有関数を呼ぶよう変更した（モデル固有の計算に一切依存しない純粋な検証ロジックのため）。
+  - **配置場所を`engine/src/error.rs`から`engine/src/validation.rs`（新設）へ**: 当初`CommonError`と同じ`error.rs`に置いたが、rust-reviewerの指摘（`error.rs`冒頭のdocコメントは「エラー**型**の定義」とスコープを明記しており、検証**関数**を置く設計ではない。Issue #129で`ensure_well_conditioned_symmetric_matrix`を独立モジュール`engine::linear_algebra`に切り出した前例と一貫しない）を受けて、`engine::linear_algebra`と同じ位置付けの独立モジュール`engine/src/validation.rs`（系統をまたぐ入力バリデーションロジック集約）に移設した。
+- **検証は`fit()`冒頭で早期に行う（OLSとは異なるタイミング）**: OLSは`cov_type=Cluster`の検証を残差計算後（事後）に行っている（OLSの`fit()`が閉形式解のため、検証タイミングを変えてもコストが変わらない）。Logitは反復最適化（Newton/BFGS/L-BFGS）のため、グループキー未指定・クラスター数不足を最適化の実行前（`n<=k`チェックの直後）に検証し、無駄な最適化計算を避ける設計にした。
+- **`problem_for_scores`のクローン対象に`Cluster`を追加**: `Cluster`も収束点でのスコア（`LogitProblem::scores`）が必要なため、Issue #59で導入した「`cov_type`に応じた条件付きクローン」の対象に含めた。
+- **`CovType`は`Copy`を外して`Clone`のみに変更**: `Cluster`が`Vec<String>`を持つフィールド付きバリアントになったため、既存の`Copy`実装が使えなくなった。同じ`cov_type`値を複数箇所で使うテストコードは`cov_type.clone()`で明示的に複製するよう修正した（本体側の`fit()`は`cov_type`を1回受け取って内部で使い切るのみのため影響なし）。
+
+### テスト
+
+- **独立再計算との一致**: `Opg`/`Hc0`/`Hc1`と同じ技法（`fit_cov_type_opg_hc0_hc1_match_independently_recomputed_values`）で、多変量（k=3）データセット・`cluster_cov_params`の直接呼び出しによる独立再計算と`fit()`の結果を突き合わせた（`fit_cov_type_cluster_matches_independently_recomputed_values`、2:2の均等サイズグループ）。`Cluster`の枝を意図的に`sandwich_cov_params`（Hc0）に差し替えてこのテストが失敗することを確認済み（配線ミスに対する検出力の確認）。
+  - **不均衡なグループサイズのケースを追加**: rust-reviewerの指摘（`testing-policy.md`が指摘する通り、均等サイズのグループのみのテストは実務で起こりやすい偏ったグループサイズを見逃しうる。OLS側の対応するテストは2:3の不均衡を使っている）を受けて、3:2の不均衡なグループでも同じ独立再計算の技法で検証するテストを追加した（`fit_cov_type_cluster_matches_independently_recomputed_values_with_unbalanced_groups`）。
+- **エラーハンドリング**: グループキー未指定（`fit_returns_missing_cluster_column_error_when_groups_not_provided`）・クラスター数1（`fit_returns_insufficient_clusters_error_when_only_one_group`）の2ケースを検証。
+- **`bfgs`/`lbfgs`との組み合わせ**: Issue #59で追加した`fit_non_classical_cov_types_work_with_bfgs_and_lbfgs`のcov_typeの配列に`Cluster`を追加し、既存の`Opg`/`Hc0`/`Hc1`と同じ枠組みで検証した。
 - **`method`×`cov_type`の組み合わせ**: 既存テストは`method`横断が`CovType::Classical`のみ、`cov_type`横断が`Method::Newton`のみで、両方を同時に変える組み合わせが未検証だった（rust-reviewer指摘）。`fit_non_classical_cov_types_work_with_bfgs_and_lbfgs`で、`Opg`/`Hc0`/`Hc1`それぞれについて`bfgs`/`lbfgs`の`cov_params`が`newton`の結果と一致することを確認した。

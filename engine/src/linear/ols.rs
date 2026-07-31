@@ -15,6 +15,7 @@ use statrs::distribution::{ContinuousCDF, FisherSnedecor, StudentsT};
 use super::common::LeastSquaresError;
 use crate::error::CommonError;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
+use crate::validation::validate_cluster_groups;
 
 /// 標準誤差の種別。文字列パース（Python文字列 → この型への変換）は`engine_pybind`側の
 /// 責務（PyO3境界の関心事のため）。ここでは`OlsEstimator::fit`が計算方法を分岐するための
@@ -724,31 +725,6 @@ fn hac_cov_params(
     }
 
     xtx_inv * &s_hat * xtx_inv
-}
-
-/// `CovType::Cluster`の`groups`（`OlsInput`の行と対応する長さnの配列であるという内部契約、
-/// および実際のクラスター数が2以上であること）を検証し、成功時はクラスター数`G`を返す。
-/// `G`は`fit()`側でt検定・信頼区間・F検定の自由度（`G-1`）の算出に再利用する
-/// （`docs/planning/specs/ols-implementation-notes.md`「クラスター標準誤差」参照）。
-///
-/// `groups.len() != n`は`engine_pybind`側の実装バグでしか起こり得ない内部契約であり
-/// （`OlsInput::from_columns`の`x_names`/`x_columns`の長さ検証と同じ性質）、実データに
-/// 起因する`ValidationError`とは区別して`debug_assert_eq!`で検証する。クラスター数が
-/// 2未満は実データで起こりうるため`CommonError::InsufficientClusters`を返す。
-fn validate_cluster_groups(groups: &[String], n: usize) -> Result<usize, LeastSquaresError> {
-    debug_assert_eq!(
-        groups.len(),
-        n,
-        "groups length must match nobs (engine_pybind contract)"
-    );
-    let g = groups
-        .iter()
-        .collect::<std::collections::HashSet<_>>()
-        .len();
-    if g < 2 {
-        return Err(CommonError::InsufficientClusters { g }.into());
-    }
-    Ok(g)
 }
 
 /// クラスターロバストな係数分散共分散行列: `(X'X)⁻¹Ŝ(X'X)⁻¹ * correction`（k×k）。

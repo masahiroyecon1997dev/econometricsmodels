@@ -7,3 +7,4 @@ pub mod error;
 pub mod linear;
 pub mod linear_algebra;
 pub mod nonlinear;
+pub mod validation;

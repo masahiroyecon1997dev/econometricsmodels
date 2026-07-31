@@ -32,10 +32,11 @@
 
 use crate::error::CommonError;
 use crate::nonlinear::common::{
-    CovType, Method, MleError, SandwichVariant, destandardize_cov_params, destandardize_params,
-    observed_information_cov_params, opg_cov_params, run_solver, sandwich_cov_params,
-    standardize_columns,
+    CovType, Method, MleError, SandwichVariant, cluster_cov_params, destandardize_cov_params,
+    destandardize_params, observed_information_cov_params, opg_cov_params, run_solver,
+    sandwich_cov_params, standardize_columns,
 };
+use crate::validation::validate_cluster_groups;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
 use statrs::distribution::{ContinuousCDF, Normal};
@@ -338,8 +339,11 @@ impl LogitEstimator {
     /// 中間にHessianの逆変換を挟まず単純、`destandardize_cov_params`のdocコメント参照）。
     ///
     /// `cov_type`は観測情報行列（`Classical`）・OPG（`Opg`）・サンドイッチ型
-    /// （`Hc0`/`Hc1`）に対応する（クラスターロバストは`logit-probit-issue-breakdown.md`
-    /// のB7で追加）。`Opg`/`Hc0`/`Hc1`は収束点での観測ごとのスコア（`LogitProblem::
+    /// （`Hc0`/`Hc1`）・クラスターロバスト（`Cluster`）に対応する。`Cluster`の
+    /// グループキー未指定・クラスター数不足は、最適化を実行する前（`fit()`冒頭）に
+    /// 検証して早期に返す（OLSの`cov_type=Cluster`は閉形式解のため事後検証でも
+    /// コストが変わらないが、Logitは反復最適化のため無駄な計算を避ける）。
+    /// `Opg`/`Hc0`/`Hc1`/`Cluster`は収束点での観測ごとのスコア（`LogitProblem::
     /// scores`）が必要なため、標準化空間の設計行列を保持したまま`LogitProblem`を
     /// クローンしておき（`argmin::core::Executor`向けに元々`Clone`を要求しているため
     /// 追加コストは`Clone`実装自体のみ）、`run_solver`が返す収束点のパラメータで
@@ -364,6 +368,8 @@ impl LogitEstimator {
     /// - 収束点（または`raise_on_non_convergence=false`時の打ち切り点）のHessianが特異
     ///   （設計行列の完全な多重共線性等）: `MleError::SingularHessian`
     /// - `cov_type=Opg`でOPG行列（`Σᵢ sᵢsᵢ'`）が特異: `MleError::SingularOpgMatrix`
+    /// - `cov_type=Cluster`でグループキー未指定: `CommonError::MissingClusterColumn`
+    /// - `cov_type=Cluster`でクラスター数が2未満: `CommonError::InsufficientClusters`
     pub fn fit(
         input: LogitInput,
         method: Method,
@@ -385,6 +391,10 @@ impl LogitEstimator {
         if n <= k {
             return Err(CommonError::InsufficientObservations { n, k }.into());
         }
+        if let CovType::Cluster { groups } = &cov_type {
+            let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
+            validate_cluster_groups(groups, n)?;
+        }
 
         let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
         let problem = LogitProblem {
@@ -398,9 +408,11 @@ impl LogitEstimator {
         // 向けに元々`Clone`を要求しているため、この用途のための追加のtraitではない）。
         // `Classical`はスコアを使わないため、無駄な複製（設計行列を含む）を避けるために
         // `cov_type`に応じて条件付きで行う（rust-reviewer指摘）。
-        let problem_for_scores = match cov_type {
+        let problem_for_scores = match &cov_type {
             CovType::Classical => None,
-            CovType::Opg | CovType::Hc0 | CovType::Hc1 => Some(problem.clone()),
+            CovType::Opg | CovType::Hc0 | CovType::Hc1 | CovType::Cluster { .. } => {
+                Some(problem.clone())
+            }
         };
 
         let output = run_solver(
@@ -420,7 +432,7 @@ impl LogitEstimator {
         // 常に`Some`であることが保証されている内部契約（`cov_type`という同じ値で
         // 2回目のmatchを行うことになるが、パニックしないことをコンパイラの型システムでは
         // 表現できないため、`expect`のメッセージで契約を明記して防御的に扱う）。
-        let cov_params_std = match cov_type {
+        let cov_params_std = match &cov_type {
             CovType::Classical => observed_information_cov_params(&hessian_std, k)?,
             CovType::Opg => {
                 let problem = problem_for_scores
@@ -451,6 +463,18 @@ impl LogitEstimator {
                     k,
                     SandwichVariant::Hc1,
                 )?
+            }
+            CovType::Cluster { groups } => {
+                let problem = problem_for_scores
+                    .as_ref()
+                    .expect("problem_for_scores must be Some for CovType::Cluster");
+                // `groups`のNone・クラスター数不足の検証はfit()冒頭で完了済み
+                // （MissingClusterColumn/InsufficientClustersを最適化前に早期に返す
+                // ため）。ここでの`expect`はその契約を明記する防御的な扱い。
+                let groups = groups
+                    .as_ref()
+                    .expect("groups is validated as Some at the top of fit()");
+                cluster_cov_params(&hessian_std, &problem.scores(&output.params), n, k, groups)?
             }
         };
         let cov_params = destandardize_cov_params(&cov_params_std, &scale);
@@ -982,9 +1006,16 @@ mod tests {
             (CovType::Hc1, &expected_hc1),
         ];
         for (cov_type, expected) in cases {
-            let estimator =
-                LogitEstimator::fit(make_input(), Method::Newton, 35, 1e-8, true, cov_type, 0.95)
-                    .unwrap();
+            let estimator = LogitEstimator::fit(
+                make_input(),
+                Method::Newton,
+                35,
+                1e-8,
+                true,
+                cov_type.clone(),
+                0.95,
+            )
+            .unwrap();
             for i in 0..k {
                 for j in 0..k {
                     assert!(
@@ -999,7 +1030,246 @@ mod tests {
         }
     }
 
-    /// `method`（`bfgs`/`lbfgs`）と`cov_type`（`Opg`/`Hc0`/`Hc1`）の組み合わせが
+    /// `cov_type=Cluster`が返す`cov_params`を、`fit()`と同じ手順をテスト側で独立に
+    /// 再現した値と突き合わせる（上の`fit_cov_type_opg_hc0_hc1_match_independently_
+    /// recomputed_values`と同じ技法・同じ多変量データセット。情報行列の等式が
+    /// 厳密に成り立つ切片のみモデルでは配線ミスを検出できないため）。
+    #[test]
+    fn fit_cov_type_cluster_matches_independently_recomputed_values() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![10.0, 20.0, 30.0, 40.0], vec![-5.0, 2.0, 8.0, -1.0]];
+        let make_input = || {
+            LogitInput::from_columns(
+                &y,
+                &x_columns,
+                vec!["x1".to_string(), "x2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap()
+        };
+        let k = 3;
+        let n = 4;
+        let groups = vec![
+            "a".to_string(),
+            "a".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+        ];
+
+        let classical = LogitEstimator::fit(
+            make_input(),
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        let input_for_reconstruction = make_input();
+        let (x_std, scale) = standardize_columns(
+            input_for_reconstruction.x(),
+            input_for_reconstruction.has_intercept(),
+        );
+        let params_std: Vec<f64> = classical
+            .params()
+            .iter()
+            .zip(scale.stds())
+            .map(|(p, s)| p * s)
+            .collect();
+        let problem_std = LogitProblem {
+            x: x_std,
+            y: input_for_reconstruction.y().clone(),
+        };
+        let scores_std = problem_std.scores(&params_std);
+        let cost_hessian_std = problem_std.hessian(&params_std).unwrap();
+        let hessian_std = Mat::from_fn(k, k, |i, j| -cost_hessian_std[i][j]);
+
+        let expected_cluster = destandardize_cov_params(
+            &cluster_cov_params(&hessian_std, &scores_std, n, k, &groups).unwrap(),
+            &scale,
+        );
+
+        let estimator = LogitEstimator::fit(
+            make_input(),
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        )
+        .unwrap();
+        for i in 0..k {
+            for j in 0..k {
+                assert!(
+                    (*estimator.cov_params().get(i, j) - *expected_cluster.get(i, j)).abs() < 1e-8,
+                    "({i},{j}): actual={}, expected={}",
+                    *estimator.cov_params().get(i, j),
+                    *expected_cluster.get(i, j)
+                );
+            }
+        }
+    }
+
+    /// 上のテストは2:2の均等サイズのグループのみを検証しているが、
+    /// `testing-policy.md`が指摘する通り均等サイズのみのテストは実務で起こりやすい
+    /// 偏った分布のグループサイズ（クラスター内の観測数がクラスターごとに異なる場合）
+    /// を見逃しうる。OLS側の対応するテスト（`fit_computes_cluster_std_errors_t_stats_
+    /// p_values_conf_int_and_f_test`、2:3の不均衡）に倣い、3:2の不均衡なグループでも
+    /// 同じ独立再計算の技法で検証する。
+    #[test]
+    fn fit_cov_type_cluster_matches_independently_recomputed_values_with_unbalanced_groups() {
+        let y = vec![0.0, 1.0, 0.0, 1.0, 1.0];
+        let x_columns = vec![
+            vec![10.0, 20.0, 30.0, 40.0, 50.0],
+            vec![-5.0, 2.0, 8.0, -1.0, 3.0],
+        ];
+        let make_input = || {
+            LogitInput::from_columns(
+                &y,
+                &x_columns,
+                vec!["x1".to_string(), "x2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap()
+        };
+        let k = 3;
+        let n = 5;
+        let groups = vec![
+            "a".to_string(),
+            "a".to_string(),
+            "a".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+        ];
+
+        let classical = LogitEstimator::fit(
+            make_input(),
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        let input_for_reconstruction = make_input();
+        let (x_std, scale) = standardize_columns(
+            input_for_reconstruction.x(),
+            input_for_reconstruction.has_intercept(),
+        );
+        let params_std: Vec<f64> = classical
+            .params()
+            .iter()
+            .zip(scale.stds())
+            .map(|(p, s)| p * s)
+            .collect();
+        let problem_std = LogitProblem {
+            x: x_std,
+            y: input_for_reconstruction.y().clone(),
+        };
+        let scores_std = problem_std.scores(&params_std);
+        let cost_hessian_std = problem_std.hessian(&params_std).unwrap();
+        let hessian_std = Mat::from_fn(k, k, |i, j| -cost_hessian_std[i][j]);
+
+        let expected_cluster = destandardize_cov_params(
+            &cluster_cov_params(&hessian_std, &scores_std, n, k, &groups).unwrap(),
+            &scale,
+        );
+
+        let estimator = LogitEstimator::fit(
+            make_input(),
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        )
+        .unwrap();
+        for i in 0..k {
+            for j in 0..k {
+                assert!(
+                    (*estimator.cov_params().get(i, j) - *expected_cluster.get(i, j)).abs() < 1e-8,
+                    "({i},{j}): actual={}, expected={}",
+                    *estimator.cov_params().get(i, j),
+                    *expected_cluster.get(i, j)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fit_returns_missing_cluster_column_error_when_groups_not_provided() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0]];
+        let input = LogitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = LogitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Cluster { groups: None },
+            0.95,
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::Common(CommonError::MissingClusterColumn)
+        );
+    }
+
+    #[test]
+    fn fit_returns_insufficient_clusters_error_when_only_one_group() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0]];
+        let input = LogitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let groups = vec!["a".to_string(); 4];
+
+        let result = LogitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::Common(CommonError::InsufficientClusters { g: 1 })
+        );
+    }
+
+    /// `method`（`bfgs`/`lbfgs`）と`cov_type`（`Opg`/`Hc0`/`Hc1`/`Cluster`）の組み合わせが
     /// 正しく機能することを確認する（rust-reviewer指摘: 既存テストは`method`横断が
     /// `CovType::Classical`のみ、`cov_type`横断が`Method::Newton`のみで、両方を
     /// 同時に変える組み合わせが未検証だった）。`scores_std`の評価は収束点の
@@ -1021,16 +1291,43 @@ mod tests {
             .unwrap()
         };
         let k = 3;
+        let groups = vec![
+            "a".to_string(),
+            "a".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+        ];
 
-        for cov_type in [CovType::Opg, CovType::Hc0, CovType::Hc1] {
-            let newton =
-                LogitEstimator::fit(make_input(), Method::Newton, 35, 1e-8, true, cov_type, 0.95)
-                    .unwrap();
+        for cov_type in [
+            CovType::Opg,
+            CovType::Hc0,
+            CovType::Hc1,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+        ] {
+            let newton = LogitEstimator::fit(
+                make_input(),
+                Method::Newton,
+                35,
+                1e-8,
+                true,
+                cov_type.clone(),
+                0.95,
+            )
+            .unwrap();
 
             for method in [Method::Bfgs, Method::Lbfgs] {
-                let estimator =
-                    LogitEstimator::fit(make_input(), method, 200, 1e-8, true, cov_type, 0.95)
-                        .unwrap();
+                let estimator = LogitEstimator::fit(
+                    make_input(),
+                    method,
+                    200,
+                    1e-8,
+                    true,
+                    cov_type.clone(),
+                    0.95,
+                )
+                .unwrap();
 
                 assert!(
                     estimator.converged(),

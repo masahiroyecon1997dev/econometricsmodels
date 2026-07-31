@@ -129,6 +129,8 @@ argminの`CostFunction`/`Gradient`/`Hessian`トレイト実装と、`nonlinear`�
 
 **クラスターの`MissingClusterColumn`/`InsufficientClusters`検証はこのIssueのスコープ外**: `cluster_cov_params`はグループ数`G>=2`であることを検証しない（呼び出し側の責務、OLSの`validate_cluster_groups`と同じ役割分担）。この検証は各モデルの`fit()`実装（`logit-probit-issue-breakdown.md`のB7/C7）で行う。
 
+**追記（Logit・Issue #60）**: 実際に`fit()`側の検証を実装する段階で、この検証ロジック（`groups.len()==n`の内部契約チェック＋distinct count`>=2`の検証）がOLSの`validate_cluster_groups`と文言まで完全に同一だったため、ユーザー確認の上で`engine::validation::validate_cluster_groups`（`engine/src/validation.rs`、新設）に共有化し、OLS側もこれを呼ぶよう変更した。モデル固有の計算に一切依存しない純粋な検証ロジックである点が、Issue #129で`ensure_well_conditioned_symmetric_matrix`を共有化した判断根拠と同じ。当初は`CommonError`と同じ`error.rs`に置いたが、rust-reviewerの指摘（`error.rs`はエラー型定義専用のスコープ）を受けて独立モジュール`engine/src/validation.rs`に移設した。Logit側は反復最適化のコストを避けるため`fit()`冒頭（最適化の実行前）でこの検証を行う設計にした（OLSは閉形式解のため検証タイミングによるコスト差がなく、事後検証のまま）。
+
 **テスト**: 対角Hessian・列間で観測ごとに片方が常にゼロになるスコア行列（対角のみのΨ）に加えて、列間に相関を持たせたスコア行列（非対角成分を持つΨ）でも検証し、転置・スケーリングの順序の取り違えを対角のみのテストより厳密に検出できるようにした（rust-reviewerの指摘を反映）。5種類（classical/opg/hc0/hc1/cluster）それぞれの正常系・特異行列時のエラー系を検証済み。
 
 ### `cov_type`共通行列演算の特異性検出（Issue #129で修正済み）

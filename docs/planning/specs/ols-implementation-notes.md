@@ -6,9 +6,9 @@ OLSのAPI・オプション設計（[`ols-api-design.md`](./ols-api-design.md) /
 
 `engine::linear::common::LeastSquaresError`のバリアントとPython例外の対応（`ValidationError` / `ComputationError`の2階層、`.claude/rules/rust-style.md`「エラーハンドリング」参照）:
 
-**改名の経緯（Issue #112）**: 元々`OlsError`という名前で`engine/src/linear/ols.rs`にOLS単体のエラー型として定義していたが、WLSが`WeightDimensionMismatch`/`NonPositiveWeight`バリアントを追加する形で同じ型をそのまま再利用しており（4.2節）、「OLS単体のエラー型」という名前と実態が食い違っていた。実態（OLS/WLS/将来のGLS・区分回帰で共有する最小二乗法系エラー型）に合わせて`engine/src/linear/common.rs`に切り出し、`LeastSquaresError`に改名した（nonlinear系統の`MleError`と同じ、系統名ではなく推定方式名で命名する方針）。
+**改名の経緯**: 元々`OlsError`という名前で`engine/src/linear/ols.rs`にOLS単体のエラー型として定義していたが、WLSが`WeightDimensionMismatch`/`NonPositiveWeight`バリアントを追加する形で同じ型をそのまま再利用しており（4.2節）、「OLS単体のエラー型」という名前と実態が食い違っていた。実態（OLS/WLS/将来のGLS・区分回帰で共有する最小二乗法系エラー型）に合わせて`engine/src/linear/common.rs`に切り出し、`LeastSquaresError`に改名した（nonlinear系統の`MleError`と同じ、系統名ではなく推定方式名で命名する方針）。
 
-**系統をまたぐ共通化（Issue #113）**: `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/`MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`の6バリアントは、nonlinear系統の`MleError`と文言まで完全に重複していたため`engine::error::CommonError`に切り出した。`LeastSquaresError`はこれを`#[error(transparent)] Common(#[from] CommonError)`バリアントとして保持する（下表の6バリアントは実体としては`LeastSquaresError::Common(CommonError::X)`）。`WeightDimensionMismatch`/`NonPositiveWeight`/`InvalidHacLags`/`SingularMatrix`はOLS/WLS固有のため`LeastSquaresError`に残る。詳細は`nonlinear-implementation-notes.md`「系統をまたぐ重複バリデーションエラーの共通化」参照。
+**系統をまたぐ共通化**: `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/`MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`の6バリアントは、nonlinear系統の`MleError`と文言まで完全に重複していたため`engine::error::CommonError`に切り出した。`LeastSquaresError`はこれを`#[error(transparent)] Common(#[from] CommonError)`バリアントとして保持する（下表の6バリアントは実体としては`LeastSquaresError::Common(CommonError::X)`）。`WeightDimensionMismatch`/`NonPositiveWeight`/`InvalidHacLags`/`SingularMatrix`はOLS/WLS固有のため`LeastSquaresError`に残る。詳細は`nonlinear-implementation-notes.md`「系統をまたぐ重複バリデーションエラーの共通化」参照。
 
 | `LeastSquaresError`のバリアント | Python例外 |
 |---|---|
@@ -74,15 +74,13 @@ OLSのAPI・オプション設計（[`ols-api-design.md`](./ols-api-design.md) /
 
 - `CovType::Cluster { groups: Option<Vec<String>> }`。`groups`が`None`なら`fit()`が`CommonError::MissingClusterColumn`を返す（`CovType::Hac`の`lags: Option<i64>`と同じ設計パターン）。
 - `cluster_col`で指定する列は`i64`固定にしない。州名・企業ID等、実務では文字列/カテゴリカルなクラスター変数の方が多いため、内部では`Vec<String>`として扱う（`BTreeMap<&str, Vec<usize>>`でグループ化）。
-- **グループ化に`HashMap`ではなく`BTreeMap`を使う（WLS Issue #44の統合PRでCI発覚、非決定性バグの修正）**: `cluster_cov_params`は`Ŝ = Σ_g S_g S_g'`をグループ順に加算するが、`HashMap`は反復順序がプロセスごとのランダムなハッシュシードに依存し非決定的（同一プロセス内でも`HashMap::new()`のたびに異なるキーを使うため、同じ入力に対する`fit()`の2回の呼び出し同士でも順序が変わりうる）。浮動小数点加算は結合則が成り立たないため、順序が変わると最終的な標準誤差が1 ULP程度ぶれる。`test_wls.py::test_weight_one_matches_ols[cluster]`（`OLS(...).fit()`と`WLS(...).fit()`という独立な2回の`fit()`呼び出しの結果をexact `==`で比較するテスト）がCI（Python 3.13/3.14ジョブ、3.12では非再現）で断続的に失敗し発覚した。`BTreeMap`（クラスター名の辞書順）に変更し、`fit_cluster_std_errors_are_deterministic_across_repeated_fits`（同一入力で`fit()`を21回呼びビット単位で一致することを検証）で固定した。
+- **グループ化に`HashMap`ではなく`BTreeMap`を使う（統合PRでCI発覚、非決定性バグの修正）**: `cluster_cov_params`は`Ŝ = Σ_g S_g S_g'`をグループ順に加算するが、`HashMap`は反復順序がプロセスごとのランダムなハッシュシードに依存し非決定的（同一プロセス内でも`HashMap::new()`のたびに異なるキーを使うため、同じ入力に対する`fit()`の2回の呼び出し同士でも順序が変わりうる）。浮動小数点加算は結合則が成り立たないため、順序が変わると最終的な標準誤差が1 ULP程度ぶれる。`test_wls.py::test_weight_one_matches_ols[cluster]`（`OLS(...).fit()`と`WLS(...).fit()`という独立な2回の`fit()`呼び出しの結果をexact `==`で比較するテスト）がCI（Python 3.13/3.14ジョブ、3.12では非再現）で断続的に失敗し発覚した。`BTreeMap`（クラスター名の辞書順）に変更し、`fit_cluster_std_errors_are_deterministic_across_repeated_fits`（同一入力で`fit()`を21回呼びビット単位で一致することを検証）で固定した。
 - `cluster_cov_params`関数: `Ŝ = Σ_g S_g S_g'`（`S_g = Σ_{i∈g} ε̂_i x_i`、クラスター内の観測を先に合計してから外積を取ることでクラスター内相関を許容する）。
 - クラスター数`G`の検証（`validate_cluster_groups`関数）: `G < 2`なら`CommonError::InsufficientClusters`。`groups.len() != n`は`engine_pybind`側の実装バグでしか起こらない内部契約として`debug_assert_eq!`で検証。
-  - **Issue #60で`engine::validation::validate_cluster_groups`に共有化**: Logit（nonlinear系統）のクラスターロバストSE実装時に、この検証ロジックがLogit側でも文言まで完全に同一で必要になったため、`engine/src/validation.rs`（新設。`engine::linear_algebra`と同じ位置付けの、系統をまたぐ純粋な入力バリデーションユーティリティ）に切り出した。`ols.rs`側はこの共有関数を呼ぶだけに変更し、挙動・受け入れ条件（`G<2`で`InsufficientClusters`）は変わらない。
+  - **`engine::validation::validate_cluster_groups`への共有化**: Logit（nonlinear系統）のクラスターロバストSE実装時に、この検証ロジックがLogit側でも文言まで完全に同一で必要になったため、`engine/src/validation.rs`（新設。`engine::linear_algebra`と同じ位置付けの、系統をまたぐ純粋な入力バリデーションユーティリティ）に切り出した。`ols.rs`側はこの共有関数を呼ぶだけに変更し、挙動・受け入れ条件（`G<2`で`InsufficientClusters`）は変わらない。
 - **小標本補正（`G/(G-1) * (n-1)/(n-k)`）は常に適用し、無効化するオプションは設けない**（`OLSOptions`に対応するフィールドを追加しない）。statsmodelsのソース（`statsmodels.stats.sandwich_covariance.cov_cluster`）を確認し、`use_correction=True`がデフォルトで`ols-standard-errors.md`5章の式と完全に一致することを確認済み。
 - **自由度の切り替え**: statsmodelsは`cov_type="cluster"`のとき、デフォルト（`df_correction=True`）でt検定・信頼区間・F検定の自由度を`n-k`ではなく**`G-1`（クラスター数-1）に切り替える**（計量経済学の標準的な慣行、Cameron-Miller等）。標準誤差自体の値は変わらないが、p値・信頼区間・F検定のp値が大きく変わる（クラスター数が小さいとき特に顕著）。本実装も`cov_type=Cluster`のときのみ自由度を`G-1`に切り替える（他のcov_typeは引き続き`n-k`）。`fit()`内で`(cov_params, df_inference)`のタプルを`cov_type`ごとのmatchから返す設計にしている。`df_resid`自体（`σ̂²`・調整済みR²・AIC/BIC等で使う）は影響を受けず、常に`n-k`のまま。
-- **G≤qの境界（Issue #100で判明）**: クラスターロバスト共分散`Ŝ = Σ_g S_g S_g'`はG個のランク1行列（外積）の和のため、`rank(Ŝ) ≤ G`。`wald_f_test`（4章）が使う傾き係数の部分行列（`q × q`、`q`は傾き係数の数）はG < qのとき理論的に特異になりうる（浮動小数点丸めの話ではなく構造的な特異性）。係数・標準誤差自体は`Ŝ`全体の対角成分から計算されるため問題なく求まるが、F検定の共分散部分行列でこの特異性が検出され`fit()`全体が`CommonError::ComputationFailed`になる。「G=2ちょうどの成功パス」を検証する場合は、q（傾き係数の数）をG以下に保つ必要がある（`tests/api_tests/test_ols_fixtures.py::test_cluster_g2_matches_statsmodels`はq=1で検証、`test_cluster_g2_with_multiple_slopes_raises_computation_error`はq=3でComputationErrorになることを確認）。
-  - **検出経路（Issue #107で変化）**: 当初はCholesky分解（`Llt`）自体の失敗として検出されていたが、Issue #107で`ensure_well_conditioned_cov_submatrix`（固有値分解による事前チェック、下記「F統計量」参照）を`Llt`分解の前に追加したため、現在はG<qの構造的特異性もこちらで先に検出される（`test_cluster_g2_with_multiple_slopes_raises_computation_error`のエラーメッセージが"failed to invert..."から"...is near-singular..."に変わったことで実際に確認済み）。`fit()`全体が`ComputationFailed`になるという外部から見える挙動・受け入れ条件は変わらない。
-    - **Issue #129で`crate::linear_algebra::ensure_well_conditioned_symmetric_matrix`に汎化**: nonlinear系統（Logit等）の`observed_information_cov_params`/`opg_cov_params`で全く同じ非ピボットCholeskyの限界が発覚したため、`ensure_well_conditioned_cov_submatrix`（OLS専用、`ols.rs`内のprivate関数）を`context: &str`引数を追加した上で`engine/src/linear_algebra.rs`（系統をまたぐ純粋な線形代数ユーティリティ、`.claude/rules/rust-style.md`「全手法で共有するロジック」）に切り出した。`ols.rs`側は`ensure_well_conditioned_symmetric_matrix(&v_slopes, df_model, "coefficient covariance submatrix for the F-test")`という呼び出しに置き換わっている（返り値は`CommonError`で、`LeastSquaresError`への変換は呼び出し側の`?`が`#[from]`経由で自動的に行う）。
+- **G≤qの境界**: クラスターロバスト共分散`Ŝ = Σ_g S_g S_g'`はG個のランク1行列（外積）の和のため、`rank(Ŝ) ≤ G`。`wald_f_test`（4章）が使う傾き係数の部分行列（`q × q`、`q`は傾き係数の数）はG < qのとき構造的に特異になる（浮動小数点丸めではなく数学的な必然）。係数・標準誤差自体は`Ŝ`全体の対角成分から計算されるため問題なく求まるが、F検定の共分散部分行列でこの特異性が検出され`fit()`全体が`CommonError::ComputationFailed`になる（検出の仕組み自体は4章`ensure_well_conditioned_symmetric_matrix`参照）。「G=2ちょうどの成功パス」を検証する場合は、q（傾き係数の数）をG以下に保つ必要がある（`tests/api_tests/test_ols_fixtures.py::test_cluster_g2_matches_statsmodels`はq=1で検証、`test_cluster_g2_with_multiple_slopes_raises_computation_error`はq=3でComputationErrorになることを確認）。
 
 ### 信頼区間
 
@@ -98,7 +96,7 @@ OLSのAPI・オプション設計（[`ols-api-design.md`](./ols-api-design.md) /
 - **F統計量**: `cov_type`によらず単一の式`F = (β_slopes' Σ⁻¹ β_slopes) / q`（`Σ`は`cov_params`のうち切片以外の係数に対応する部分行列、`q`はその次元＝`k - k_constant`）で計算する（`wald_f_test`関数）。この式は`cov_type=Classical`のとき代数的に古典的F検定`((SST-SSR)/q)/(SSR/df_resid)`と完全に一致するため、分岐を分けていない。HC0-3・HAC・clusterでは`cov_params`がロバストな分散共分散行列になるため、この式がそのままロバストWald検定になる。p値はF分布（自由度`(q, df_inference)`、statrsの`FisherSnedecor`）の上側確率。
   - `q=0`（説明変数が定数項のみ）の場合はstatsmodels同様`f64::NAN`を返す（0除算回避）。
   - `Σ`の逆行列はCholesky分解（`Llt`）で求める。正定値行列の主小行列は必ず正定値という定理により理論上失敗しないはずだが、`xtx_inverse`と同様`ComputationFailed`に変換する境界ケース対応をしている。
-  - **`Σ`が数値的にほぼ特異な場合の検出（Issue #107）**: 変数間のスケールが極端に異なる設計行列（例: ある説明変数が1e6オーダー、別の説明変数が1e-3オーダー）では、`Σ`の条件数がスケール比の2乗（≈1e18）相当になり倍精度の限界を超えるが、Cholesky分解自体は（非ピボットのため）失敗せず数値的に無意味なF統計量を返してしまう（実測でstatsmodelsとの相対誤差5e10程度、`SingularMatrix`検出に使う`ensure_full_rank`と同じ発想をCholeskyのL因子対角成分に適用しても検出できないことも実測確認済み）。`ensure_well_conditioned_symmetric_matrix`関数（Issue #129で`crate::linear_algebra`に汎化、旧名`ensure_well_conditioned_cov_submatrix`）が`SelfAdjointEigen`（faerの対称行列固有値分解）で実際の固有値を求め、最大固有値との相対比（`q * f64::EPSILON * max_abs_eigenvalue`）で判定し、Cholesky分解の前に`ComputationFailed`で止める。この経路は理論上到達不能ではなく実際に到達する（下記「5. engine単体テストのカバレッジ」参照）。
+  - **`Σ`が数値的にほぼ特異な場合の検出**: 変数間のスケールが極端に異なる設計行列（例: ある説明変数が1e6オーダー、別の説明変数が1e-3オーダー）では、`Σ`の条件数がスケール比の2乗（≈1e18）相当になり倍精度の限界を超えるが、Cholesky分解自体は（非ピボットのため）失敗せず数値的に無意味なF統計量を返してしまう（実測でstatsmodelsとの相対誤差5e10程度、`SingularMatrix`検出に使う`ensure_full_rank`と同じ発想をCholeskyのL因子対角成分に適用しても検出できないことも実測確認済み）。`ensure_well_conditioned_symmetric_matrix`関数（`crate::linear_algebra`に汎化済み、旧名`ensure_well_conditioned_cov_submatrix`。nonlinear系統の`observed_information_cov_params`/`opg_cov_params`が同じ非ピボットCholeskyの限界を抱えていたため系統をまたいで共有している）が`SelfAdjointEigen`（faerの対称行列固有値分解）で実際の固有値を求め、最大固有値との相対比（`q * f64::EPSILON * max_abs_eigenvalue`）で判定し、Cholesky分解の前に`ComputationFailed`で止める。この経路は理論上到達不能ではなく実際に到達する（下記「5. engine単体テストのカバレッジ」参照）。
 
 ## 5. engine単体テストのカバレッジ
 
@@ -111,7 +109,7 @@ OLSのAPI・オプション設計（[`ols-api-design.md`](./ols-api-design.md) /
   2. `StudentsT::new`/`FisherSnedecor::new`の失敗→`ComputationFailed`（自由度は`n>k`・`G>=2`・`df_model>=1`の事前検証により常に有効な正の値になる）
   3. `wald_f_test`内の`Llt`失敗→`ComputationFailed`（正定値行列の主小行列は必ず正定値という線形代数の定理により理論上到達不能）
   - これらを実際に踏ませるには丸め誤差でギリギリ破綻する敵対的な浮動小数点データを人為的に作る必要があり、プラットフォーム依存で壊れやすく、実装の振る舞いというより浮動小数点ノイズの検証になるため見送っている。`cargo-llvm-cov`の除外マーカーも導入せず、コード側のdocコメントで理由を説明する方針にしている。
-  - **理論上到達不能ではなく実際に到達するケース（Issue #107、上記に追加）**: `ensure_well_conditioned_symmetric_matrix`の`ComputationFailed`（`Σ`の数値的なほぼ特異性）は、上記3件とは異なり実データで実際に到達する経路であり、`fit_returns_computation_failed_for_extreme_scale_difference_in_f_test`テストでカバー済み。
+  - **理論上到達不能ではなく実際に到達するケース（上記に追加）**: `ensure_well_conditioned_symmetric_matrix`の`ComputationFailed`（`Σ`の数値的なほぼ特異性）は、上記3件とは異なり実データで実際に到達する経路であり、`fit_returns_computation_failed_for_extreme_scale_difference_in_f_test`テストでカバー済み。
 - 「missed lines」表示の一部は`assert!`マクロのメッセージ引数（アサーション失敗時のみ評価される）による分析ツールの誤検知で、実際のギャップではない。
 
 その後のテストレビュー（8章参照）で境界値・内部整合性テストを4件追加し、現在は29テスト。
@@ -132,7 +130,7 @@ OLSのAPI・オプション設計（[`ols-api-design.md`](./ols-api-design.md) /
 
 実際の互換性は数字ではなく、`pyo3-polars`の`PyDataFrame`/`PySeries`変換が使う`polars_ffi::version_0`という安定版FFIプロトコル（Arrow C Data Interfaceに近い、バージョン非依存のインターフェース）によって担保される。
 
-最終的な組み合わせ: `pyo3=0.28.2`, `polars=0.54.4`, `pyo3-polars=0.27.0`（すべて`=`で完全固定、`engine_pybind/Cargo.toml`）。**`pyo3-polars=0.27.0`は`pyo3="^0.28"`を要求する**ため、`pyo3`は`0.28.2`に固定している（`0.28.0`/`0.28.1`はyanked済みのため除外）。`pyo3-polars`は`pola-rs/pyo3-polars`が2025年7月にアーカイブ済みでpolars本体リポジトリに統合されており、crates.io公開版と本体リポジトリ内のバージョンにズレが生じうる既知のリスクがある（`.claude/rules/rust-style.md`「既知のリスク」参照）。`pyo3`を上げる場合は対応する`pyo3-polars`の新版公開を待つ必要がある（現状の上流待ち状況はIssue #49で追跡、12章参照）。
+最終的な組み合わせ: `pyo3=0.28.2`, `polars=0.54.4`, `pyo3-polars=0.27.0`（すべて`=`で完全固定、`engine_pybind/Cargo.toml`）。**`pyo3-polars=0.27.0`は`pyo3="^0.28"`を要求する**ため、`pyo3`は`0.28.2`に固定している（`0.28.0`/`0.28.1`はyanked済みのため除外）。`pyo3-polars`は`pola-rs/pyo3-polars`が2025年7月にアーカイブ済みでpolars本体リポジトリに統合されており、crates.io公開版と本体リポジトリ内のバージョンにズレが生じうる既知のリスクがある（`.claude/rules/rust-style.md`「既知のリスク」参照）。`pyo3`を上げる場合は対応する`pyo3-polars`の新版公開を待つ必要がある（現状の上流待ち状況は12章参照）。
 
 ### 実装時に踏んだpolars 0.54.4特有の差異
 
@@ -247,7 +245,7 @@ releaseビルドでの正しい計測では、classical/HC1/clusterでengineがs
 
 ## 12. セキュリティ
 
-`cargo audit`が検知した既知の脆弱性・非メンテナンス依存について調査した結果、**4件すべて現時点では上流（`pyo3-polars`/`polars`）の新バージョン公開待ちで、コード側からは修復不能**と判明した。継続監視はIssue #49で追跡している。
+`cargo audit`が検知した既知の脆弱性・非メンテナンス依存について調査した結果、**4件すべて現時点では上流（`pyo3-polars`/`polars`）の新バージョン公開待ちで、コード側からは修復不能**と判明した。継続監視の対象として保持している。
 
 - **`pyo3 0.28.2`（RUSTSEC-2026-0176/0177）**: `pyo3-polars`の最新公開版（`0.27.0`）が`pyo3 = "^0.28"`を要求する。`pyo3>=0.29.0`へ上げるには対応する`pyo3-polars`の新版公開を待つ必要がある。
 - **`quick-xml 0.39.4`（RUSTSEC-2026-0194/0195、severity 7.5 high）**: 経路は`polars → polars-error → object_store(^0.13.1) → quick-xml(^0.39.0)`。修正版（`object_store 0.14.1`が要求する`quick-xml ^0.41.0`）に到達するには`polars`自体の新バージョンが必要（`polars-error`は`object_store`を`^0.13.1`にしか許容しない）。

@@ -10,12 +10,12 @@
 //! `OlsEstimator::fit`を無変更で流用する、`docs/planning/specs/wls-api-design.md`4.1節）に
 //! なり、WLS固有のバリアント（`WeightDimensionMismatch`/`NonPositiveWeight`）も混在する
 //! ことになった。実態（OLS・WLS共有）に合わせて`common.rs`に切り出し、`LeastSquaresError`に
-//! 改名した（Issue #112）。
+//! 改名した。
 //!
 //! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
 //! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は、nonlinear系統の
 //! `MleError`と文言まで完全に重複していたため`engine::error::CommonError`に切り出し、
-//! `Common`バリアント経由で保持する（Issue #113）。
+//! `Common`バリアント経由で保持する。
 
 use thiserror::Error;
 

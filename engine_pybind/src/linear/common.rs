@@ -7,11 +7,11 @@
 //!
 //! `LeastSquaresError`は元々`OlsError`という名前だったが、OLS単体のエラー型ではなくWLSも
 //! 含む`linear`系統共通のエラー型であることを名前に反映するため、`engine`側で
-//! `engine::linear::common::LeastSquaresError`に改名・移動した（Issue #112）。
+//! `engine::linear::common::LeastSquaresError`に改名・移動した。
 //!
 //! `LeastSquaresError`の`Common`バリアント（`engine::error::CommonError`、nonlinear系統の
 //! `MleError`と共有する6種のバリデーションエラー）は`crate::errors::common_error_to_pyerr`
-//! に委譲する（Issue #113。系統ごとに同じ判定ロジックを重複させない）。
+//! に委譲する（系統ごとに同じ判定ロジックを重複させない）。
 
 use engine::linear::common::LeastSquaresError;
 use pyo3::PyErr;

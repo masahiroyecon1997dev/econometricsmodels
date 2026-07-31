@@ -1,14 +1,13 @@
 # WLS API・オプション設計
 
 WLS（Weighted Least Squares）のAPI・オプションに関する設計案。標準誤差・適合度統計量の
-重み付き定義の確定は[`wls-standard-errors.md`](./wls-standard-errors.md)（Issue #34）に委ねる。
+重み付き定義の確定は[`wls-standard-errors.md`](./wls-standard-errors.md)に委ねる。
 
-**ステータス**: 設計提案中（Issue #33）。本ドキュメントは2026-07-24時点の
+**ステータス**: 設計提案中。本ドキュメントは2026-07-24時点の
 [`OLS実装`](https://github.com/masahiroyecon1997dev/econometricsmodels/blob/main/engine/src/linear/ols.rs)（`engine/src/linear/ols.rs`,
 `engine_pybind/src/linear/ols.rs`, `python_package/econometricsmodels/linear/ols.py`）を
-出発点にしている。OLSは今後リファクタリングされる可能性が高いため（進行中のフォローアップ
-Issue #27〜#31）、実装着手時には改めて最新のOLS実装を確認し、本ドキュメントとの差分があれば
-本ドキュメント側を更新すること。
+出発点にしている。OLSは今後リファクタリングされる可能性が高いため、実装着手時には改めて
+最新のOLS実装を確認し、本ドキュメントとの差分があれば本ドキュメント側を更新すること。
 
 ## 0. 前提として確定済みの事項
 
@@ -110,8 +109,8 @@ OLSと同じ「List渡し＋オブジェクト渡し」規約（CLAUDE.md 2章�
   （切片列も含む）。`None`の場合は現状と全く同じ（`sqrt(1.0) = 1.0`と等価）。
 
 この設計により、**「重みが全て1のときWLSはOLSと数値的に完全一致する」という不変条件が、
-テストで検証するまでもなく構造的に保証される**（同じコードパスを通るため）。Issue #37の
-不変条件テストは、この構造的保証が壊れていないことの回帰検知として位置づけられる。
+テストで検証するまでもなく構造的に保証される**（同じコードパスを通るため）。不変条件テストは、
+この構造的保証が壊れていないことの回帰検知として位置づけられる。
 
 ### 4.2 エラー型: `OlsError`をそのまま再利用し、新しいバリアントを追加する
 
@@ -119,7 +118,7 @@ WLSは`OlsEstimator::fit`をそのまま呼ぶため、`InsufficientObservations
 既存の`OlsError`バリアントがそのままWLSにも当てはまる。重み固有のエラーのためだけに別の
 `WlsError`型を新設すると、既存バリアントの重複定義・`engine_pybind`側の変換関数の二重化が発生する。
 
-**実装（Issue #35）**: `OlsError`に以下の2バリアントを追加し、WLS・OLS共通のエラー型として
+**実装**: `OlsError`に以下の2バリアントを追加し、WLS・OLS共通のエラー型として
 使い続ける。
 
 - `WeightDimensionMismatch { y_rows: usize, weight_rows: usize }`: 重み配列と`y`の行数が
@@ -155,7 +154,7 @@ statsmodelsの`WLS`も内部的に同じ変換方式（`wexog = sqrt(weights) * 
 `wendog = sqrt(weights) * endog`）で実装されており、`.rsquared`等の適合度統計量も変換後データの
 `wexog`/`wendog`ベースで計算される。したがって、この「変換後データにOLSの計算式をそのまま
 適用する」設計は、独自の重み付き公式を新たに導出する必要がなく、**そのままstatsmodelsとの
-数値一致が期待できる**。[`wls-standard-errors.md`](./wls-standard-errors.md)（Issue #34）は、
+数値一致が期待できる**。[`wls-standard-errors.md`](./wls-standard-errors.md)は、
 新しい計算式の導出ではなく、この前提の確認とベンチマークでの実証が主な作業になる見込み。
 
 ## 5. Rust/PyO3境界のインターフェース
@@ -195,7 +194,6 @@ OLSと同じ（[`ols-api-design.md`](./ols-api-design.md) 5章）。`structured 
 ## 8. 未確定・後続issueで扱う事項
 
 - 標準誤差（classical/HC0-3/HAC/cluster）・適合度統計量の重み付き定義の最終確認とベンチマーク照合
-  → Issue #34, #43
 - `OLSOptions`をWLSと共有する設計は、WLS固有の設定（例: frequency weight対応時の重みタイプ切替）が
   将来必要になった時点で見直す。その際は`OLSOptions`から分離するか、共通フィールドを
   `linear/common.rs`側の構造体に切り出すかを判断する（YAGNI、`rust-style.md`

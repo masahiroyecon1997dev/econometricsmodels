@@ -70,7 +70,7 @@ paths:
   - `ValidationError`: 入力・パラメータが不正（次元不一致、欠損値、観測数不足、クラスター数不足、`confidence_level`の範囲外等）。Python側の`ValueError`も継承させ、素の`except ValueError`でも捕まえられるようにする。
   - `ComputationError`: 計算過程で発覚した問題（特異行列等）。Python側の`RuntimeError`を継承させる。
   - メモリ不足等は専用の例外クラスを設けない（Rust/Pythonのメモリ確保失敗は通常このレイヤーで綺麗に変換できるものではないため）。
-- **系統をまたいで同じ意味・同じメッセージのバリアントが複数の系統のエラー型に重複する場合は`engine::error::CommonError`に切り出す**（`DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/`MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`がOLS/WLSとnonlinearで重複していたことから、Issue #113で導入）。各系統のエラー型（`LeastSquaresError`/`MleError`等）はthiserrorの`#[error(transparent)] Common(#[from] CommonError)`バリアントでこれを包む。`?`演算子は`#[from]`により自動変換されるため、`CommonError`のバリアントを直接構築する箇所（`return Err(...)`等`?`を経由しない箇所）でのみ`.into()`を明示する。系統固有の追加バリアント（`SingularHessian`等）や、将来「意味は同じだが系統固有の追加フィールドが要る」ケースは`CommonError`に含めず、各系統のエラー型に直接定義してよい（`CommonError`を使うかどうかは系統ごとに選べる）。`engine_pybind`側の変換は`engine_pybind/src/errors.rs`の`common_error_to_pyerr`に集約し、各系統の`*_error_to_pyerr`関数はこれに委譲する。
+- **系統をまたいで同じ意味・同じメッセージのバリアントが複数の系統のエラー型に重複する場合は`engine::error::CommonError`に切り出す**（`DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/`MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`がOLS/WLSとnonlinearで重複していたことから導入）。各系統のエラー型（`LeastSquaresError`/`MleError`等）はthiserrorの`#[error(transparent)] Common(#[from] CommonError)`バリアントでこれを包む。`?`演算子は`#[from]`により自動変換されるため、`CommonError`のバリアントを直接構築する箇所（`return Err(...)`等`?`を経由しない箇所）でのみ`.into()`を明示する。系統固有の追加バリアント（`SingularHessian`等）や、将来「意味は同じだが系統固有の追加フィールドが要る」ケースは`CommonError`に含めず、各系統のエラー型に直接定義してよい（`CommonError`を使うかどうかは系統ごとに選べる）。`engine_pybind`側の変換は`engine_pybind/src/errors.rs`の`common_error_to_pyerr`に集約し、各系統の`*_error_to_pyerr`関数はこれに委譲する。
 
 ## Lint / フォーマット
 

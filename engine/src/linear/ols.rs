@@ -820,12 +820,12 @@ fn ensure_full_rank(
 /// `Σ`が数値的にほぼ特異（上記のクラスターの構造的特異性に加え、変数間のスケールが
 /// 極端に異なる設計行列等で、傾き係数の同時共分散部分行列の条件数が倍精度の限界を
 /// 超える場合を含む）だと、Cholesky分解自体は（非ピボットのため）失敗せずに数値的に
-/// 無意味なF統計量（桁違いに巨大な値等）を黙って返してしまうことがある（Issue #107）。
+/// 無意味なF統計量（桁違いに巨大な値等）を黙って返してしまうことがある。
 /// そのため`Llt`分解の**前**に`ensure_well_conditioned_symmetric_matrix`（`crate::
 /// linear_algebra`、固有値分解ベースの相対閾値判定。系統をまたいで共有する純粋な
 /// 線形代数ユーティリティ、`.claude/rules/rust-style.md`「全手法で共有するロジック」
-/// 参照。nonlinear系統の`observed_information_cov_params`等でも同じ理由で使われている、
-/// Issue #129）を呼び、`ComputationFailed`で止める。
+/// 参照。nonlinear系統の`observed_information_cov_params`等でも同じ理由で使われている）
+/// を呼び、`ComputationFailed`で止める。
 ///
 /// この事前チェックにより、**`CovType::Cluster`のG<qによる構造的特異性も、実際には
 /// 下の`Llt`分解に到達する前に`ensure_well_conditioned_symmetric_matrix`側で先に検出
@@ -1073,7 +1073,7 @@ mod tests {
     #[test]
     fn least_squares_error_messages_are_human_readable() {
         // 6種の共通バリアント（DimensionMismatch等）のメッセージ検証は
-        // `engine::error`側のテストに集約済み（Issue #113）。ここではOLS/WLS固有の
+        // `engine::error`側のテストに集約済み。ここではOLS/WLS固有の
         // バリアントに加え、`Common`が`CommonError`のDisplayをtransparentに転送する
         // ことだけを確認する。
         assert_eq!(
@@ -1198,8 +1198,8 @@ mod tests {
         // スケール）。x1・x2・x3は互いに線形従属ではないため設計行列自体は
         // フルランク（SingularMatrixにはならない）だが、傾き係数の同時共分散
         // 部分行列（wald_f_testが使う3x3部分行列）の条件数がスケール比の2乗
-        // （≈1e18）相当となり倍精度の限界を超える（Issue #107、
-        // ensure_well_conditioned_cov_submatrixで検出）。
+        // （≈1e18）相当となり倍精度の限界を超える
+        // （ensure_well_conditioned_symmetric_matrixで検出）。
         let n = 10;
         let x1: Vec<f64> = (1..=n).map(|i| 1e6 * (i as f64)).collect();
         let x2: Vec<f64> = (1..=n).map(|i| 1e-3 * (i as f64).powi(2)).collect();

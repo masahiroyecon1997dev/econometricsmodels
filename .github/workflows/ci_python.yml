@@ -54,7 +54,7 @@ jobs:
         run: uv run --locked --group test ruff format --check .
 
   engine_pybind-lint:
-    name: cargo clippy / fmt (engine_pybind)
+    name: cargo test / clippy / fmt (engine_pybind)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -67,6 +67,15 @@ jobs:
       # （Issue #23での決定）。pyo3のビルドスクリプトはリンク済みのPython3を必要とするが、
       # abi3等のバージョン限定cfgを使っていないため、ubuntu-latestランナーに元から
       # 入っているpython3で十分（マトリクス化は不要）。
+      #
+      # cargo test: Issue #65で`crate-type = ["cdylib", "rlib"]`・`pyo3`の
+      # `extension-module`フィーチャ非直接指定への変更により`cargo test -p engine_pybind`が
+      # 可能になった（`extension-module`はmaturin実行時のみ`pyproject.toml`側から有効化する
+      # 設計、`engine_pybind/Cargo.toml`のコメント参照）。これに伴い追加した
+      # `nonlinear/logit.rs`の`build_logit_input`系テストがCIで実行されるようにする。
+      - name: cargo test
+        run: cargo test -p engine_pybind
+
       - name: cargo fmt --check
         run: cargo fmt -p engine_pybind --check
 

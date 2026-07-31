@@ -218,3 +218,30 @@ Issue #58時点ではIssue #58本来のスコープを超えるためユーザ�
 
 - `assert!`マクロのメッセージ引数（アサーション失敗時のみ評価される）は、`cargo-llvm-cov`上「未カバー」に見えるが実際のギャップではない（OLSと同じ誤検知パターン、`ols-implementation-notes.md`5章参照）。
 - `linear/ols.rs`・`linear_algebra.rs`側の未カバー箇所はOLS側の既存スコープ（`ols-implementation-notes.md`参照）であり、本Issueの対象外。
+
+## engine_pybind: データ抽出・LogitOptions/LogitResult pyclass定義（Issue #65で実装済み）
+
+`engine_pybind/src/nonlinear/{mod.rs, common.rs, logit.rs}`を新設した。`engine_pybind/src/discrete_choice/`（未使用の`.gitkeep`のみのプレースホルダー）は削除し、`.claude/rules/rust-style.md`が想定する`nonlinear/`（`engine`側と同じ名称）に統一した（ユーザー確認済み）。
+
+- **スコープの区切り方（ユーザー確認済み）**: `LogitEstimator::fit()`の呼び出し・`LogitResult`の実際の構築・`#[pymodule]`への`fit_logit`関数登録はIssue #66（engine呼び出し・エラー変換）に送り、本Issueでは行わない。代わりに、データ抽出・バリデーション・`engine::nonlinear::logit::LogitInput`構築までを行う`pub(crate) fn build_logit_input(df: &DataFrame, y: String, x: Vec<String>, options: &LogitOptions) -> PyResult<(LogitInput, EngineCovType, EngineMethod)>`を切り出した。OLSの`fit()`と同じ検証（y/x重複、`include_intercept=true`時の`"const"`列衝突、列抽出、`cov_type`/`method`文字列パース）をここに集約している。
+- **`LogitOptions`から`start_params`を除外**: Issue本文のフィールド一覧には`start_params`が含まれていたが、`LogitEstimator::fit()`（engine側）は`start_params`引数を受け付けない（Issue #56で見送り済み、初期値は常にゼロベクトル固定）。ユーザー確認の上、今回は`LogitOptions`から完全に除外した。将来Issue #56の見送りが解除された時点で別issueとして追加する。
+- **`LogitResult`は個別`#[pyo3(get)]`方式**: Issue本文は`get_all`と書いていたが、`OLSResult`の既存実装（フィールドごとに個別`#[pyo3(get)]`）と一貫性を持たせるため、そちらに揃えた。将来`marginal_effects`/`predict`/`pred_table`用の内部専用フィールド（`cov_params`等）を追加する際、`OLSResult`の`fitted_values`/`has_intercept`と同様に`#[pyo3(get)]`を付けずに済ませられるようにするため。
+- **`mle_error_to_pyerr`のエラー型マッピング**: `nonlinear-implementation-notes.md`の対応表通り、`NonConvergence`/`SingularHessian`/`SingularOpgMatrix`→`ComputationError`、`InvalidMaxIter`/`InvalidCensoringBounds`→`ValidationError`、`Common`は`common_error_to_pyerr`に委譲。
+
+### 構造的な発見・修正（`engine_pybind`クレート全体に影響）
+
+- **`cargo test -p engine_pybind`が実行できない構造的制約を発見・修正した**: 当初`engine_pybind/Cargo.toml`は`pyo3 = { features = ["extension-module"] }`・`crate-type = ["cdylib"]`だった。`extension-module`はPythonインタプリタにdlopenされる前提でlibpythonへの静的リンクを意図的に省く仕様のため、`cargo test`が生成する単体テストバイナリ（dlopenされず自身で起動する）とリンクできず、`PyExc_TypeError`等のCPython C APIシンボル未定義でビルド失敗する（これがOLS側に`#[cfg(test)]`が1件も無かった実際の理由と推測される）。ユーザー確認の上、以下の構造的修正を行った:
+  - `crate-type`に`"rlib"`を追加（`["cdylib", "rlib"]`。`cargo test`が生成する単体テストバイナリがクレートをリンクするために必要）
+  - `pyo3`依存から`features = ["extension-module"]`を削除。`pyproject.toml`の`[tool.maturin] features = ["pyo3/extension-module"]`が`maturin build`/`maturin develop`実行時に外部からこのフィーチャを有効化する既存の仕組みがあるため、配布物（wheel）には引き続き反映される（`cargo`単体のビルド・テストとは別経路）。
+  - 修正後、`uv run maturin build --release`でのwheelビルド成功・`uv run maturin develop --release`後の`uv run pytest tests/api_tests`（271件）全通過を確認し、OLS/WLSの既存機能に回帰が無いことを確認済み。
+  - `.github/workflows/ci_python.yml`の`engine_pybind-lint`ジョブに`cargo test -p engine_pybind`ステップを追加した（rust-reviewerの指摘: 構造的修正をしても、CIがこれを実行しなければリグレッション検知に活かせないため）。
+- **`dead_code`警告への対処は`#[allow(dead_code)]`を採用**: `build_logit_input`・`parse_cov_type`・`parse_method`・`mle_error_to_pyerr`はIssue #65時点では`#[cfg(test)] mod tests`からのみ呼ばれ、`cargo build`（テストコードを含まないlibターゲットのビルド）からは到達不能に見えるため`dead_code`警告になる。当初`engine`側の`ColumnScale::stds()`と同じ手法（`pub`にして回避）を試みたが、rust-reviewerの指摘（`engine_pybind`はPython拡張モジュール専用の薄いバインディング層であり、クレート外に`pub`なRust APIを公開する設計ではない。`engine`とは事情が異なる）を受けて、各関数に`#[allow(dead_code)]`＋理由コメント（Issue #66で実際に呼ばれるようになったら属性を削除する旨）を付ける方式に変更した。
+- **y/x列間の行数不一致チェックは理論上到達不能と判明**: `build_logit_input`（およびOLSの`fit()`）の`s.len() != n`チェックについて、polars 0.54.4の`DataFrame::new(height, columns)`が構築時に全列の長さが`height`と一致することを強制する（`validate_columns_slice`）ため、同一`DataFrame`内の列同士で行数が食い違う状態はAPI上構築できないことが判明した（Python側の`polars.DataFrame`も同じ不変条件）。ユーザー確認の上、検証コードは防御的に残しつつ、docコメントで理由を明記しテストは作成していない（OLS側の同種チェックの扱いは対象外・現状維持）。
+
+### テスト
+
+`engine_pybind/src/nonlinear/logit.rs`の`#[cfg(test)] mod tests`に、`build_logit_input`の検証を12件実装した（`Series`/`DataFrame`を直接組み立てる、`polars::df!`マクロ利用。Pythonインタプリタ（GIL）を起動せずに検証できる設計、ファイル冒頭のdocコメント参照）。
+
+- 成功パス: 切片あり・切片なしそれぞれでの`LogitInput`構築、`cov_type`/`method`の正しいパース
+- `ValidationError`パス: 空の`x`、y/xの重複、x内の重複、`"const"`列衝突、存在しない列、欠損値、未知の`cov_type`文字列、未知の`method`文字列
+- クラスター系: `cluster_col`指定時のグループキー抽出、未指定時に`groups=None`のまま返す（`engine`側の`MissingClusterColumn`検証に委ねる設計）

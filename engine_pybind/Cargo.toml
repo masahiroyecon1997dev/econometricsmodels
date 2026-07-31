@@ -9,12 +9,25 @@ repository.workspace = true
 
 [lib]
 name = "_lib"
-crate-type = ["cdylib"]
+# `rlib`はIssue #65で追加した（`cargo test -p engine_pybind`を可能にするため。詳細は下記
+# `pyo3`のコメント参照）。`cdylib`のみだと`cargo test`が生成する単体テストバイナリが
+# クレート自体をリンクできない。
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # サプライチェーン攻撃対策として`=`で完全固定する（ルートCargo.tomlの[workspace.dependencies]と同方針）。
 # pyo3のバージョンは0.29.0からダウングレードしている。理由は以下pyo3-polarsのコメント参照。
-pyo3 = { version = "=0.28.2", features = ["extension-module"] }
+#
+# `extension-module`フィーチャはここでは有効化しない（Issue #65で判明・修正）。
+# `extension-module`はPythonインタプリタにdlopenされる前提でlibpythonへの静的リンクを
+# 意図的に省く仕様のため、`cargo build`/`cargo test`が生成する単体の実行バイナリ
+# （dlopenされず自身で起動する）とは相性が悪く、`PyExc_TypeError`等のCPython C API
+# シンボルがリンク時に未定義になりビルド失敗する（`cargo test -p engine_pybind`実行時に
+# 実際に発生・確認済み）。実際のPython拡張モジュール（wheel）としてのビルドは
+# `pyproject.toml`の`[tool.maturin] features = ["pyo3/extension-module"]`が
+# `maturin build`/`maturin develop`実行時にこのフィーチャを外部から有効化するため、
+# 配布物には引き続き反映される（`cargo`単体のビルド・テストとは別経路）。
+pyo3 = { version = "=0.28.2" }
 # polars（Rustクレート）とpyo3-polars: バージョンはPython側pyproject.tomlのpolars==1.42.1と
 # 数字を合わせるものではない（Rustクレートpolarsは0.5x系、Python側は1.x系で既に別の
 # バージョン体系に分離済み）。pyo3-polarsが使うpolars_ffi::version_0という安定版FFI

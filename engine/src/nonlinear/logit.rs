@@ -950,6 +950,59 @@ impl LogitEstimator {
             conf_upper,
         })
     }
+
+    /// 予測確率 `p_i = Λ(x_i'θ)` を、`fit()`に使った学習データ（`self.input.x()`）の
+    /// 各行について返す（`fit()`のReturn本体には含めない別メソッド、
+    /// `nonlinear-api-design.md`6章）。
+    ///
+    /// **新規データでの予測（out-of-sample）は未対応**（本Issueのスコープ外、
+    /// 別issueでトラッキング。ユーザー確認済み）。
+    pub fn predict(&self) -> Vec<f64> {
+        let x = self.input.x();
+        let n = x.nrows();
+        let k = x.ncols();
+        (0..n)
+            .map(|i| {
+                let z: f64 = (0..k).map(|j| *x.get(i, j) * self.params[j]).sum();
+                logistic(z)
+            })
+            .collect()
+    }
+
+    /// 分類の的中表（2×2、`table[actual][predicted]`のカウント。行=実測クラス、
+    /// 列=予測クラス）。`predict()`が返す予測確率のみを`threshold`で二値化し
+    /// （`predicted = 1 if p > threshold else 0`）、実測`y`は`threshold`に関わらず
+    /// 常に`0.5`で二値化する（`actual = 1 if y >= 0.5 else 0`）。
+    ///
+    /// statsmodelsの`pred_table(threshold)`（`BinaryResults.pred_table`）の実装を
+    /// 数値照合の上で確認した挙動: `pred = (self.predict() > threshold)`で
+    /// 予測確率のみを`threshold`で二値化した**後**、`histogram2d(actual, pred,
+    /// bins=[0, 0.5, 1])`で固定の0.5分割によりクロス集計する。`actual`（生の`endog`）は
+    /// この固定分割にしか通らず、`threshold`の影響を受けない（rust-reviewerの
+    /// 指摘・Python数値照合で発覚した実装ミスを修正: 初版では`actual`も`threshold`で
+    /// 二値化していたため、`threshold≠0.5`のときstatsmodelsと一致しなかった）。
+    /// `y`が厳密に0/1でない場合（現状値域検証は未実装、`nonlinear-implementation-
+    /// notes.md`参照）も、常に`0.5`分割になる点でstatsmodelsと同じ扱い。
+    ///
+    /// `threshold`の値域は検証しない（`[0,1]`の範囲外でも、`predicted`が単に自明な
+    /// 分類結果（全て一方のクラスに分類される等）になるだけで計算上は破綻しない。
+    /// statsmodelsも検証していない）。
+    ///
+    /// **新規データでの的中表（out-of-sample）は未対応**（本Issueのスコープ外、
+    /// 別issueでトラッキング。ユーザー確認済み）。
+    pub fn pred_table(&self, threshold: f64) -> Mat<f64> {
+        let predicted = self.predict();
+        let y = self.input.y();
+        let n = y.nrows();
+
+        let mut table = Mat::zeros(2, 2);
+        for (i, &p_i) in predicted.iter().enumerate().take(n) {
+            let actual = usize::from(*y.get(i, 0) >= 0.5);
+            let pred = usize::from(p_i > threshold);
+            *table.get_mut(actual, pred) += 1.0;
+        }
+        table
+    }
 }
 
 #[cfg(test)]
@@ -2476,5 +2529,198 @@ mod tests {
                 confidence_level: 1.5
             })
         );
+    }
+
+    /// 切片のみモデルは全観測で`p_i=ȳ`（closed form、他のテストと同じ性質）なので、
+    /// `predict()`が返す予測確率が`ȳ`と一致することを検証できる。
+    #[test]
+    fn predict_matches_closed_form_for_intercept_only_model() {
+        let estimator = LogitEstimator::fit(
+            intercept_only_input(),
+            Method::Newton,
+            35,
+            1e-6,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        let y_bar: f64 = 4.0 / 7.0;
+        let predicted = estimator.predict();
+        assert_eq!(predicted.len(), 7);
+        for p in predicted {
+            assert!((p - y_bar).abs() < 1e-6);
+        }
+    }
+
+    /// 多変量モデルでは`predict()`に閉じた形の解析解が無いため、`logistic`から直接
+    /// `p_i=Λ(x_i'θ)`を計算する式で独立に再計算し、突き合わせる。
+    #[test]
+    fn predict_matches_independently_recomputed_logistic_of_linear_predictor() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![10.0, 20.0, 30.0, 40.0], vec![-5.0, 2.0, 8.0, -1.0]];
+        let input = LogitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = LogitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        let params = estimator.params();
+        let x = estimator.input().x();
+        let n = 4;
+        let k = 3;
+        let predicted = estimator.predict();
+        for (i, &p_i) in predicted.iter().enumerate().take(n) {
+            let z: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
+            let expected = 1.0 / (1.0 + (-z).exp());
+            assert!((p_i - expected).abs() < 1e-12);
+        }
+    }
+
+    /// 切片のみモデルは全観測で`p_i=ȳ=4/7≈0.571`（closed form）のため、`threshold`に
+    /// よって全観測が一方のクラスに分類される自明なケースになる。この性質を使い、
+    /// `pred_table`の的中表を手計算で検証する（`y=[0,0,0,1,1,1,1]`、実測は
+    /// `y_i>threshold`で二値化）。
+    #[test]
+    fn pred_table_matches_hand_computed_counts_for_intercept_only_model() {
+        let estimator = LogitEstimator::fit(
+            intercept_only_input(),
+            Method::Newton,
+            35,
+            1e-6,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        // threshold=0.5: p_i=4/7>0.5 なので全観測が予測クラス1。
+        // 実測は y=[0,0,0,1,1,1,1] なので actual0が3件・actual1が4件。
+        let table_low = estimator.pred_table(0.5);
+        assert!((*table_low.get(0, 0) - 0.0).abs() < 1e-12);
+        assert!((*table_low.get(0, 1) - 3.0).abs() < 1e-12);
+        assert!((*table_low.get(1, 0) - 0.0).abs() < 1e-12);
+        assert!((*table_low.get(1, 1) - 4.0).abs() < 1e-12);
+
+        // threshold=0.99: p_i=4/7<0.99 なので全観測が予測クラス0。
+        let table_high = estimator.pred_table(0.99);
+        assert!((*table_high.get(0, 0) - 3.0).abs() < 1e-12);
+        assert!((*table_high.get(0, 1) - 0.0).abs() < 1e-12);
+        assert!((*table_high.get(1, 0) - 4.0).abs() < 1e-12);
+        assert!((*table_high.get(1, 1) - 0.0).abs() < 1e-12);
+    }
+
+    /// `pred_table`が返すカウントの総和が観測数`n`と一致すること、および`predict()`の
+    /// 出力から独立に再計算した分類結果（同じ`threshold`での二値化）と一致することを
+    /// 多変量モデルで検証する（`pred_table`内部の配線ミスを検出できる設計、
+    /// `fit_cov_type_opg_hc0_hc1_match_independently_recomputed_values`と同じ技法）。
+    #[test]
+    fn pred_table_matches_independently_recomputed_classification() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![10.0, 20.0, 30.0, 40.0], vec![-5.0, 2.0, 8.0, -1.0]];
+        let input = LogitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = LogitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        // `threshold≠0.5`にする（`actual`側は`threshold`に依存せず常に0.5固定である
+        // ことを検出できるようにするため。`threshold=0.5`固定のテストでは、この
+        // 区別がつかない、rust-reviewer指摘）。
+        let threshold = 0.2;
+        let predicted = estimator.predict();
+        let table = estimator.pred_table(threshold);
+
+        let mut expected = [[0.0; 2]; 2];
+        for i in 0..4 {
+            let actual = usize::from(y[i] >= 0.5);
+            let pred = usize::from(predicted[i] > threshold);
+            expected[actual][pred] += 1.0;
+        }
+
+        let mut total = 0.0;
+        for (a, row) in expected.iter().enumerate() {
+            for (p, &expected_count) in row.iter().enumerate() {
+                assert!((*table.get(a, p) - expected_count).abs() < 1e-12);
+                total += *table.get(a, p);
+            }
+        }
+        assert!((total - 4.0).abs() < 1e-12);
+    }
+
+    /// `pred_table`の実測クラス（行方向の合計、`actual0`の件数+`actual1`の件数）は
+    /// `threshold`の値に関わらず不変であるべき（statsmodelsの`pred_table`が実測`y`を
+    /// 常に固定の0.5分割でバケット化し、`threshold`は予測確率側にのみ適用する仕様、
+    /// `pred_table`のdocコメント参照）。この不変性が保たれているかを回帰テストとして
+    /// 固定する（初版実装は`actual`も`threshold`で二値化しており、`threshold≠0.5`で
+    /// この不変性が壊れていた。rust-reviewerの指摘・statsmodelsとの数値照合で発覚し
+    /// 修正済み）。
+    #[test]
+    fn pred_table_actual_class_counts_are_invariant_to_threshold() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![10.0, 20.0, 30.0, 40.0], vec![-5.0, 2.0, 8.0, -1.0]];
+        let input = LogitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = LogitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        for threshold in [0.1, 0.3, 0.5, 0.7, 0.9] {
+            let table = estimator.pred_table(threshold);
+            let actual0 = *table.get(0, 0) + *table.get(0, 1);
+            let actual1 = *table.get(1, 0) + *table.get(1, 1);
+            // y=[0,1,0,1] → actual0=2件・actual1=2件（`threshold`に関わらず常に一定）
+            assert!(
+                (actual0 - 2.0).abs() < 1e-12,
+                "threshold={threshold}, actual0={actual0}"
+            );
+            assert!(
+                (actual1 - 2.0).abs() < 1e-12,
+                "threshold={threshold}, actual1={actual1}"
+            );
+        }
     }
 }

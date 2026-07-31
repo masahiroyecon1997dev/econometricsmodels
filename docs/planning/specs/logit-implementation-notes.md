@@ -168,3 +168,24 @@ Issue #58時点ではIssue #58本来のスコープを超えるためユーザ�
 - **独立再計算によるdydx・SEの検証**: `marginal_effects_overall_matches_independently_recomputed_dydx_and_delta_method_se`。`logistic`から直接計算した定義式（`overall_w_and_s`とは別の式）でdydxを再計算し、標準誤差も`dydx_j`をfit済みパラメータの周りで数値微分して得たヤコビアン行と`cov_params`の二次形式から独立に求めて突き合わせた（`dydx_and_jacobian`内の配線ミスを検出できる設計）。
 - **`at="mean"`/`"median"`が`at="overall"`と異なる値になることの確認**: `marginal_effects_at_mean_differs_from_overall_and_matches_independent_recomputation`・`marginal_effects_at_median_differs_from_mean_and_overall_and_matches_independent_recomputation`。後者は`column_medians`（奇数・偶数nの両方を`column_medians_matches_expected_for_odd_and_even_n`で直接検証済み）が返す中央値を使い、平均・中央値が異なる非対称データセットで代表点が正しく切り替わることを確認した（rust-reviewer指摘、初回実装では`at="median"`のテストが皆無だった）。
 - **`confidence_level`範囲外エラー**: `marginal_effects_returns_invalid_confidence_level_error_out_of_range`。`fit()`と同じ`CommonError::InvalidConfidenceLevel`を返すことを確認。
+
+## predict() / pred_table()（Issue #63で実装済み）
+
+`LogitEstimator::predict()`（引数なし、`Vec<f64>`を直接返す。エラーなし）と`LogitEstimator::pred_table(threshold)`（`Mat<f64>`の2×2的中表を直接返す。エラーなし）を追加した。いずれも`fit()`とは独立した別メソッド（`nonlinear-api-design.md`6章）。
+
+- **対象データ範囲は学習データのみ（in-sample限定）**: `predict()`/`pred_table()`ともに、`fit()`に使った`self.input.x()`/`self.input.y()`に対してのみ計算する。新規データ（未知のX）を受け付けるout-of-sample対応は、着手前にユーザーへ確認し、本Issueのスコープ外として見送った（別GitHub issueとして追加作成予定）。
+- **`predict()`は`p_i=Λ(x_i'θ)`をそのまま計算するのみ**で、バリデーションを要する引数が無いためエラーなし（`Result`を返さない設計）。
+- **`threshold`の値域は検証しない**: `[0,1]`の範囲外でも`predicted`側が単に自明な分類結果（全て一方のクラスに分類される）になるだけで計算上破綻しないため（`confidence_level`とは異なり、範囲外でも統計的に無意味な値やNaN/panicを生まない）。statsmodelsも検証していない。
+
+### バグ修正（rust-reviewerの指摘・statsmodelsとの数値照合で発覚）
+
+初版実装は`pred_table`の実測クラス（`actual`）も`predicted`と同じ`threshold`で二値化していたが、statsmodelsの`BinaryResults.pred_table(threshold)`の実際のソース（`pred = (self.predict() > threshold)`で予測確率のみを`threshold`で二値化した**後**、`histogram2d(actual, pred, bins=[0, 0.5, 1])`で固定の0.5分割によりクロス集計する）をPythonで数値照合したところ、`threshold≠0.5`のとき初版実装がstatsmodelsと乖離することが判明した。`actual`は`threshold`に一切依存せず常に`0.5`で二値化するのが正しい仕様のため、`actual = if y_i >= 0.5 { 1 } else { 0 }`（`threshold`ではなく固定`0.5`）に修正した。`>=`（`>`ではなく）を使うのは、numpyの`histogram2d`のビン境界規約（最後のビンのみ右端を含む半開区間、`0.5`ちょうどの値は上側ビンに入る）に合わせるため。`y`が厳密に0/1でない場合（値域検証は未実装、`nonlinear-implementation-notes.md`参照）もこの規約で扱われる。
+
+修正前の初回実装のテスト（4件）は全て`threshold=0.5`のみを使っていたため、この乖離を検出できていなかった（`y∈{0,1}`かつ`threshold=0.5`では`y_i>threshold`と`y_i>=0.5`が偶然一致するため）。
+
+### テスト
+
+- **`predict()`の閉じた形検証・独立再計算**: `predict_matches_closed_form_for_intercept_only_model`（切片のみモデルは全観測で`p_i=ȳ`）・`predict_matches_independently_recomputed_logistic_of_linear_predictor`（多変量モデルで`logistic`から直接計算した値と1e-12精度で突き合わせ）。
+- **`pred_table`の手計算検証**: `pred_table_matches_hand_computed_counts_for_intercept_only_model`。切片のみモデル（全観測で`p_i=ȳ≈0.571`）を使い、`threshold=0.5`（全観測が予測クラス1）・`threshold=0.99`（全観測が予測クラス0）の2パターンで、手計算した期待値と一致することを確認。
+- **`pred_table`の独立再計算**: `pred_table_matches_independently_recomputed_classification`。`threshold=0.2`（`0.5`以外の値、上記バグを検出できるようにするため）で、`predict()`の出力から独立に再計算した分類結果と突き合わせた。
+- **`actual`クラスのカウントが`threshold`に対して不変であることの回帰テスト**: `pred_table_actual_class_counts_are_invariant_to_threshold`。`threshold∈{0.1,0.3,0.5,0.7,0.9}`の5パターンで、`actual0`/`actual1`の行合計が常に一定（`y=[0,1,0,1]`なので各2件）であることを確認し、上記バグの再発を防止する。

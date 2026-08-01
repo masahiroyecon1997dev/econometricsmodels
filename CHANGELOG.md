@@ -5,6 +5,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-01
+
+Added Logit (binary logistic regression) to Phase 2 (generalized and discrete choice models).
+
+### Added
+
+- Logit estimation (`Logit` / `LogitOptions` / `LogitResults`), estimated by maximum likelihood
+- Solver options: Newton-Raphson (default), BFGS, L-BFGS (`method`)
+- Standard error options: classical (observed information), OPG (BHHH), HC0/HC1, cluster-robust
+- Goodness-of-fit statistics: log-likelihood, likelihood-ratio test, McFadden pseudo R², AIC, BIC
+- `predict()` and `pred_table()` (classification table)
+- `marginal_effects()` (average marginal effects, and at-mean / at-median), with delta-method standard errors
+- Logit API reference and usage examples in mkdocs
+- OLS: added `fitted_values` and `predict()` (in-sample and out-of-sample)
+
+### Fixed
+
+- OLS: the robust Wald F-test could become numerically unstable when explanatory variables had extreme differences in scale
+- A gap in singular-matrix detection for non-pivoted Cholesky decompositions could miss near-singular covariance matrices (affects OLS and Logit)
+- Logit: `y` values outside {0.0, 1.0} were silently accepted instead of raising an error
+- Logit: a non-positive `tol` was silently accepted instead of raising an error
+- Logit: a degenerate input (no intercept and no explanatory variables) caused an internal panic instead of a graceful error
+- Logit: under (quasi-)complete separation, the solver could falsely report convergence due to floating-point underflow in the gradient norm
+
 ## [0.2.0] - 2026-07-25
 
 Added WLS (Weighted Least Squares) to Phase 1 (basic regression).
@@ -35,6 +59,7 @@ Initial release. Only OLS (Ordinary Least Squares) from Phase 1 (basic regressio
 - Python API taking a polars DataFrame as input (`OLS` / `OLSOptions` / `OlsResults`)
 - Rust computational core (`engine`) and PyO3 bindings (`engine_pybind`)
 
-[Unreleased]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/releases/tag/v0.1.0

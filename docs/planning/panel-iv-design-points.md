@@ -79,11 +79,22 @@
     （2SLS/GMM共有）という系統単位の共有エラー型にする。詳細:
     [`panel-api-design.md`](./specs/panel-api-design.md)4.4節
 
-### 1.5 リファレンス実装・テスト方針
+### 1.5 リファレンス実装・テスト方針（確定・Issue #123）
 
-- [ ] Python主リファレンスの確定（FE/RE: pyfixest、IV: linearmodels等の候補を検討）
-- [ ] R側交差検証パッケージの確定（`run_r_benchmark.R`に`plm`/`ivreg`の枠は用意済み、詳細オプションの対応付けが必要）
-- [ ] 許容誤差（既存方針は相対誤差1e-8基本）がFE/RE/IVでも維持できるか（反復計算を伴うGMM等は要検討）
+- [x] Python主リファレンスの確定（FE/RE: pyfixest、IV: linearmodels等の候補を検討）
+  - **`linearmodels`をFE/RE/IV共通の主リファレンス**とする（`PanelOLS`/`RandomEffects`/
+    `IV2SLS`/`IVGMM`）。`pyfixest`は既存方針通り性能比較のみ。詳細:
+    [`panel-api-design.md`](./specs/panel-api-design.md)5.1節、
+    [`iv-api-design.md`](./specs/iv-api-design.md)5.1節
+- [x] R側交差検証パッケージの確定（`run_r_benchmark.R`に`plm`/`ivreg`の枠は用意済み、詳細オプションの対応付けが必要）
+  - **RE: `plm`（`model="random"`）、FE: `fixest`（新規スクリプト作成要）、IV: `ivreg`**
+    （2SLSのみ）。ハウスマン検定はlinearmodelsに専用メソッドが無い可能性が高いため
+    `plm::phtest`のみを参照値とする例外、GMMは`ivreg`が非対応のためPython単独検証の例外を
+    それぞれ許容する。詳細: [`panel-api-design.md`](./specs/panel-api-design.md)5.2〜5.3節、
+    [`iv-api-design.md`](./specs/iv-api-design.md)5.2〜5.3節
+- [x] 許容誤差（既存方針は相対誤差1e-8基本）がFE/RE/IVでも維持できるか（反復計算を伴うGMM等は要検討）
+  - 既存方針（相対誤差1e-8基本）を維持し、テスト実装・実測値を見てから個別に緩和を検討する
+    （先に緩めない）。詳細: [`panel-api-design.md`](./specs/panel-api-design.md)5.4節
 
 ---
 

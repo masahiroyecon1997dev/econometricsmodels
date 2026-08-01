@@ -1,8 +1,8 @@
 # Getting Started
 
-## OLS（最小二乗法）
+## OLS (Ordinary Least Squares)
 
-`OLS`に被説明変数（`y`）・説明変数（`x`）の列名と、推定対象のpolars DataFrameを渡して`.fit()`を呼びます。
+Pass the column names of the dependent variable (`y`) and independent variables (`x`), along with the polars DataFrame to estimate on, to `OLS`, then call `.fit()`.
 
 ```python
 import polars as pl
@@ -22,40 +22,55 @@ print(result.std_errors)   # {"const": ..., "x1": ...}
 print(result.r_squared)
 ```
 
-`include_intercept`（デフォルト`True`）により、`x`で指定した列とは別に定数項（`const`）が自動的に設計行列へ追加されます。
+With `include_intercept` (default `True`), a constant term (`const`) is automatically added to the design matrix, separate from the columns specified in `x`.
 
-## 標準誤差の種類を切り替える
+## Switching the type of standard error
 
-`OLSOptions`で`cov_type`を指定すると、不均一分散に頑健な標準誤差（HC0〜HC3）・クラスター標準誤差・HAC（Newey-West）標準誤差に切り替えられます。
+Setting `cov_type` on `OLSOptions` lets you switch to heteroskedasticity-robust standard errors (HC0-HC3), cluster-robust standard errors, or HAC (Newey-West) standard errors.
 
 ```python
 from econometricsmodels import OLS, OLSOptions
 
-# 不均一分散に頑健な標準誤差（HC1）
+# Heteroskedasticity-robust standard errors (HC1)
 options = OLSOptions(cov_type="hc1")
 result = OLS(df, y="y", x=["x1"], options=options).fit()
 
-# クラスター標準誤差（dataに含まれる列名を指定する）
+# Cluster-robust standard errors (specify a column name from data)
 options = OLSOptions(cov_type="cluster", cluster_col="group_id")
 result = OLS(df, y="y", x=["x1"], options=options).fit()
 ```
 
-指定できるオプションの詳細は [API Reference](api/ols.md) を参照してください。
+See the [API Reference](api/ols.md) for the full list of available options.
 
-## 結果の取り出し方
+## Retrieving results
 
-`OlsResults`は係数・標準誤差等を係数名（`str`）から値への辞書として公開しています。REST APIのレスポンス等、行指向の一覧が必要な場合は`coef_table()`を使います。
+`OlsResults` exposes coefficients, standard errors, etc. as dictionaries keyed by coefficient name (`str`). If you need a row-oriented listing — e.g. for a REST API response — use `coef_table()`.
 
 ```python
 for row in result.coef_table():
     print(row["param"], row["coef"], row["std_err"], row["p_value"])
 ```
 
-## WLS（加重最小二乗法）
+## Predicted values
 
-`WLS`は`OLS`に`weight`引数（重み列の列名）を加えたAPIです。重みは分散の逆数に
-比例するanalytic weightとして扱われ、正規化は不要です。0以下の値は
-`ValidationError`になります。
+`OlsResults.predict()` returns predicted values. With no arguments, it returns the fitted values for the training data used in `fit()`; passing `new_data` returns out-of-sample predictions for new data instead.
+
+```python
+# Fitted values for the training data
+fitted = result.predict()
+
+# Predictions for new data (columns must match the `x` columns used at fit
+# time by name; column order does not matter, and the constant column must
+# not be included)
+new_data = pl.DataFrame({"x1": [6.0, 7.0]})
+predicted = result.predict(new_data)
+
+print(predicted)  # [{"fitted": ...}, {"fitted": ...}]
+```
+
+## WLS (Weighted Least Squares)
+
+`WLS` is `OLS` with an added `weight` argument (the column name of the weight column). Weights are treated as analytic weights proportional to the inverse of the variance, and do not need to be normalized. Values less than or equal to 0 raise a `ValidationError`.
 
 ```python
 from econometricsmodels import WLS
@@ -68,13 +83,11 @@ print(result.params)
 print(result.std_errors)
 ```
 
-推定オプション（`cov_type`等）はOLSと共通の`OLSOptions`をそのまま使います。
-標準誤差の種類の切り替え方は上記「標準誤差の種類を切り替える」を、`weight`
-引数の詳細は [API Reference](api/wls.md) を参照してください。
+Estimation options (`cov_type`, etc.) use the same `OLSOptions` as OLS. See "Switching the type of standard error" above for how to switch standard error types, and the [API Reference](api/wls.md) for details on the `weight` argument.
 
-## エラーハンドリング
+## Error handling
 
-入力・オプションの誤り（列が存在しない、欠損値を含む等）は`ValidationError`（`ValueError`のサブクラス）、計算過程で発覚する問題（設計行列が特異等）は`ComputationError`（`RuntimeError`のサブクラス）を送出します。
+Invalid input or options (a missing column, missing values, etc.) raise `ValidationError` (a subclass of `ValueError`). Problems detected during computation (e.g. a singular design matrix) raise `ComputationError` (a subclass of `RuntimeError`).
 
 ```python
 from econometricsmodels import ComputationError, ValidationError
@@ -82,7 +95,7 @@ from econometricsmodels import ComputationError, ValidationError
 try:
     result = OLS(df, y="y", x=["x1", "x2"]).fit()
 except ValidationError as e:
-    print("入力エラー:", e)
+    print("Input error:", e)
 except ComputationError as e:
-    print("計算エラー:", e)
+    print("Computation error:", e)
 ```

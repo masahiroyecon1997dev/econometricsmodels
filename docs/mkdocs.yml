@@ -1,5 +1,5 @@
 site_name: econometricsmodels
-site_description: 統計・計量経済学の分析手法を提供するPython API
+site_description: A Python API providing statistical and econometric analysis methods
 repo_url: https://github.com/masahiroyecon1997dev/econometricsmodels
 repo_name: masahiroyecon1997dev/econometricsmodels
 
@@ -19,18 +19,18 @@ nav:
 
 theme:
   name: material
-  language: ja
+  language: en
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
       toggle:
         icon: material/brightness-7
-        name: ダークモードに切り替え
+        name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       toggle:
         icon: material/brightness-4
-        name: ライトモードに切り替え
+        name: Switch to light mode
   features:
     - navigation.sections
     - content.code.copy

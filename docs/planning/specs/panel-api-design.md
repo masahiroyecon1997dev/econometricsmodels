@@ -1,0 +1,106 @@
+# FE / RE API・オプション設計
+
+`docs/panel-iv-design-points.md`の論点をモデルごとにIssue化したうちの、FE/RE共通部分の確定事項をまとめる。
+IV固有の設計は[`iv-api-design.md`](./iv-api-design.md)を参照。
+
+**ステータス**: 一部確定（1章: 引数設計、Issue #119／2章: 結果設計、Issue #120）。他は未確定（3章参照）。
+
+## 1. 引数設計（Issue #119、確定）
+
+### 1.1 `y` / `x` / `entity` / `time` のシグネチャ
+
+- `fit_fe(data, y, x, entity, options)` / `fit_re(data, y, x, entity, options)`
+- `y: str`、`x: list[str]`はOLSと同じ。
+- `entity: str`（エンティティID列名）は**独立の必須引数**とする。FE/REいずれもパネル構造が
+  無ければモデルとして成立しないため、`y`/`x`と同格に扱う。
+- `time`（時点ID列名）は必須ではないため`Options`内に置く（`FeOptions.time` /
+  `ReOptions.time`、`str | None`、デフォルト`None`）。
+  - FEの2-way（entity + time FE）を指定する場合は`time`が実質的に必須になるが、これは
+    `OLSOptions.cluster_col`が`cov_type="cluster"`のときのみ必須になるのと同じ「条件付き必須」
+    パターンであり、`Options`に置くという判断自体は変えない。未指定時のバリデーションエラーで
+    担保する。
+- **命名規則**: `entity`/`time`は**bareネーミング**（`_col`サフィックスなし）を採用する。
+  `y`/`x`/`weight`（WLS、`engine_pybind/src/linear/wls.rs`）と同じく、モデルを構成する中核的な
+  変数という位置づけのため。既存`OLSOptions.cluster_col`/`time_col`
+  （`engine_pybind/src/linear/ols.rs:58-74`）は「診断・ロバストSE計算のための補助列」という
+  別の位置づけであり`_col`サフィックスを持つが、これを遡って改名することはしない
+  （新規追加分から新しい命名規則を適用する）。
+- FE/RE間で`entity`/`time`の命名は統一する（`panel-iv-design-points.md`1.1「3モデルで表記を
+  揃えるか」への回答）。IV側の対応する引数は性質が異なるため`iv-api-design.md`を参照。
+
+### 1.2 モデル固有オプションの置き場所
+
+`FeOptions`/`ReOptions`という別々の`#[pyclass]`構造体に含める（`OLSOptions`/`LogitOptions`の
+前例を踏襲）。共有可能なフィールド（`entity`/`time`等）を内部実装上どこまで共通化するか
+（トレイト・共通struct等）はAPI設計とは別問題として#122（内部実装・共通化方針）で扱う。
+
+### 1.3 `weights` / `offset` の扱い
+
+- `offset`: 線形モデル（link functionを前提としない）のため**該当なし**。今後も追加予定なし。
+- `weights`: 汎用の頻度/分析重みオプションとしては**見送り**
+  （`nonlinear-api-design.md`のLogit/Probit/Tobitにおける判断を踏襲、Phase6で再検討）。
+  - **注**: この判断はGLS（直近の実装順序でFE/RE/IVの後に着手予定）の引数設計を拘束しない。
+    GLSは重み・共分散構造の指定自体がモデルの本質であり、WLSの`weight: str`（必須の独立引数）
+    に近い位置づけになる見込み。GLS着手時に別途設計する。
+
+## 2. 結果（Return）設計（Issue #120、確定）
+
+### 2.1 共通コア項目
+
+OLS（`OLSResult`, `engine_pybind/src/linear/ols.rs:137-191`）の項目を土台にするが、以下の点で
+機械的な流用ではなく調整する。
+
+| フィールド | 由来 | 備考 |
+|---|---|---|
+| `params` / `std_errors` / `t_stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` | OLS共通 | 検定分布（t/z）は#121で確定 |
+| `residuals` / `dep_var_name` | OLS共通 | そのまま踏襲 |
+| `n_obs` | Logit由来の表記 | OLSは現状`nobs`だが、この機会に`n_obs`へ統一する
+  （既存OLSのリネームは別Issueで追跡、[後述](#22-olsのnobsn_obsリネーム別issue)） |
+| `df_resid` / `df_model` | Logit由来、**新規追加** | OLSには無いが、FEは自由度調整が
+  `n - n_entities - k`という非自明な式になるため明示的に返す価値が高い |
+| `n_entities` | **新規追加**（FE/RE限定） | パネルユニット数。pyfixest/plmの前例に倣う |
+| `cov_type` | OLS共通 | サポート対象は#121で確定 |
+| `f_statistic` / `f_p_value` | OLS共通 | そのまま踏襲 |
+| `log_likelihood` / `aic` / `bic` | OLS共通 | FE/REは最小二乗族で正規性下の尤度が定義できるため含める |
+| `r_squared_within` / `r_squared_between` / `r_squared_overall` | **新規追加**（OLSの`r_squared`/`r_squared_adj`を置き換え） | 詳細は2.3 |
+
+### 2.2 OLSの`nobs`→`n_obs`リネーム（別Issue）
+
+既存`OLSResult.nobs`（`ols.rs:157`）とLogitの`LogitResult.n_obs`（`logit.rs:206`）で表記が
+不一致だったため、この機会に`n_obs`へ統一する。OLSは実装済みのため、リネームは
+FE/RE本体の実装Issueとは別に切り出す（Issue番号は本ドキュメント末尾の関連Issue参照）。
+
+### 2.3 R²の種類（within/between/overall）
+
+- `r_squared_within` / `r_squared_between` / `r_squared_overall`の3フィールドを`fit()`の
+  戻り値に含める。
+- **bareの`r_squared`/`r_squared_adj`は廃止する**（OLSの`r_squared`をそのまま流用しない）。
+  パネルモデルでは「どのR²か」が一意に決まらないため、曖昧な単一フィールドを残さず
+  明示的な3フィールドのみとする。
+- 修正済み（adjusted）版の3種展開は本Issueのスコープ外とし、必要になった時点で別途検討する
+  （v1は非修正の3種のみ）。
+
+### 2.4 モデル固有の追加結果の配置
+
+- **RE: ハウスマン検定は`fit()`内で自動計算**し、`ReResult`に`hausman_statistic` /
+  `hausman_p_value` / `hausman_df`として含める。
+  - v1は**classical Hausman検定のみ**実装する（`cov_type`に依存しない、常にclassical SE
+    前提での計算）。`cov_type="cluster"`等でfitした場合でも、ハウスマン検定自体は内部で
+    classical前提のまま計算する（整合性の注記をdocstringに明記する）。
+  - 将来的に`cov_type`と連動するrobust版（Wooldridgeの回帰ベース検定等）を追加できるよう、
+    フィールド名・置き場所には拡張余地を残す（v1では実装しない）。
+  - `RE.fit()`は内部でFE推定を実行してハウスマン検定の比較対象を得る（`entity`/`time`/`x`は
+    RE呼び出し時と同一の指定を使う）。**FE推定が失敗した場合**（singleton除外後の変動不足等）
+    は、`hausman_statistic`等を`None`にしたうえで、RE本体の結果は正常に返す
+    （REの主要な結果自体は有効なため、診断情報の欠落だけに留める）。
+  - REとFEの内部設計共有範囲（同じ推定ルーチンを呼ぶか等）はIssue #122/#125で扱う。
+- **パネル固有R²（2.3）**: `fit()`の結果本体に含める（別メソッド化しない）。
+- **IV: 第一段階回帰結果は別メソッド**（`iv-api-design.md`2章参照）。
+
+## 3. その他の論点（未確定）
+
+- 標準誤差・検定: Issue #121
+- 内部実装・共通化: Issue #122
+- リファレンス実装・テスト方針: Issue #123
+- FE固有論点（within変換・自由度調整・singleton等）: Issue #124
+- RE固有論点（分散成分推定・ハウスマン検定の実装詳細等）: Issue #125

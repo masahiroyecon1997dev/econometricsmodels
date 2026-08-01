@@ -27,7 +27,8 @@ pub(crate) fn mle_error_to_pyerr(err: MleError) -> PyErr {
         MleError::Common(common) => common_error_to_pyerr(common),
         MleError::InvalidMaxIter { .. }
         | MleError::InvalidTol { .. }
-        | MleError::InvalidCensoringBounds { .. } => ValidationError::new_err(err.to_string()),
+        | MleError::InvalidCensoringBounds { .. }
+        | MleError::InvalidBinaryY { .. } => ValidationError::new_err(err.to_string()),
         MleError::NonConvergence { .. }
         | MleError::SingularHessian
         | MleError::SingularOpgMatrix => ComputationError::new_err(err.to_string()),

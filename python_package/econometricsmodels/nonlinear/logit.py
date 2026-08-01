@@ -67,10 +67,10 @@ class Logit:
         Raises:
             ValidationError: The input or options are invalid (a
                 column is missing, contains missing values or
-                NaN/infinity, insufficient observations,
-                `confidence_level` out of range, an unknown
-                `cov_type`/`method` string, etc.). A subclass of
-                `ValueError`.
+                NaN/infinity, `y` contains a value other than 0.0/1.0,
+                insufficient observations, `confidence_level` out of
+                range, an unknown `cov_type`/`method` string, etc.).
+                A subclass of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. non-convergence, a singular
                 Hessian/OPG matrix). A subclass of `RuntimeError`.

@@ -385,3 +385,20 @@ Issue #56のrust-reviewerレビューで見つかったnice-to-have3件への対
 同じレビューで、OLSも`n<=k`のみの検証で`k=0`を弾いておらず、`ensure_well_conditioned_symmetric_matrix`を同様に経由することが判明した（未検証だが構造的に同型のリスク）。ユーザー確認の上、Issue #118のスコープには含めず、[Issue #140](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/140)として別途トラッキングする（OLS/WLSでの実際の再現確認とProbit/Tobit実装時の横展開）。
 
 いずれもPythonバインディング層（`engine_pybind`）の追加変更は`common_error_to_pyerr`への1バリアント追加のみ（バリデーション・計算ロジックの追加は無し）。`cargo test -p engine`（131件）・`cargo test -p engine_pybind`（31件）・`pytest tests/api_tests`（361件）、`cargo clippy --all-targets -- -D warnings`・`cargo fmt --check`・ruffいずれもパス。
+
+## yの値域検証（Issue #135で実装済み）
+
+Issue #54の時点で「B2（尤度・スコア・Hessian実装）に持ち越し」と仕様書に明記されながら、B2実装後も未実装のまま残っていた検証を追加した。
+
+- **実装前にパフォーマンス影響を実測**: `y`の値域検証はO(n)の単純な走査（`{0.0, 1.0}`との完全一致比較）で、`fit()`本体（Newton法の反復最適化、各反復でO(n·k²)のHessian計算）に対してどの程度のオーバーヘッドになるかを、実装着手前にユーザーの要望で実測した。n=1,000,000・k=6（切片含む）の合成データで一時的なベンチマークテスト（コミットはせず削除済み）を書いて計測した結果、`fit()`全体（Newton法5回で収束、約323ms）に対し検証単体は約0.5ms（**約0.16%**）で、無視できるレベルと確認できた。`engine_pybind`の`extract_f64_column`が既に全列に対して同オーダーのNaN/無限大チェック走査を行っている（`column_extraction.rs`）ことも踏まえ、懸念なしと判断した。
+- **検証範囲は`{0.0, 1.0}`の完全一致のみ**（ユーザー確認済み）。statsmodelsの`Logit`は単位区間`[0,1]`を許容する（比率データ／frequency weights的な用途を想定した設計）が、本実装は常に真の2値アウトカムのみを扱うため、より厳格にした。浮動小数点の完全一致比較で問題ない（ユーザーが明示的に0/1でコーディングした値であり、計算過程で生じた値ではないため）。
+- **エラー型**: `MleError::InvalidBinaryY { row: usize, value: f64 }`を新設（`engine/src/nonlinear/common.rs`）。`CommonError`（系統横断で共有、`validate_cluster_groups`等）ではなく`MleError`に置いたのは、この制約がLogit/Probit（2値選択モデル）に固有で、OLS/WLS/IV/panel等には存在しないため。Tobit専用の`InvalidCensoringBounds`と対称的に、Tobitの`fit()`はこのバリアントを構築しないだけで型は分けない（`MleError`モジュールdocコメントの既定方針通り）。
+- **検証関数の置き場所**: `engine::validation`（OLS/nonlinearの両方で使う`validate_cluster_groups`が置かれている、系統横断の共有場所）ではなく`engine::nonlinear::common`に`validate_binary_y`を実装した。`.claude/rules/rust-style.md`「系統内で共有するロジックは`<系統>/common.rs`に置く」「全手法で共有するロジックは系統ディレクトリの外に置く」の区別に従い、この検証はnonlinear系統内（Logit/Probit）にしか適用されず「全手法で共有」の基準を満たさないため（ユーザーへの提案時に指摘し確認済み）。
+- `LogitEstimator::fit()`冒頭（`tol`検証の直後）で`validate_binary_y(input.y())`を呼ぶ。`LogitInput::from_columns`（次元検証のみがスコープ、Issue #54の既定方針）ではなく`fit()`側に置いたのは、`confidence_level`/`max_iter`/`tol`/`k==0`等の他の業務バリデーションと同じ場所に揃えるため。
+- `engine_pybind/src/lib.rs`の`fit_logit`docstringに「`y`は0.0/1.0でなければならない」旨を実装に裏付けられた形で書き戻した（Issue #66で一旦削除されていた記述）。`python_package/econometricsmodels/nonlinear/logit.py`の`fit()`docstringの`Raises`にも明記した。
+- テスト: Rust単体テスト（`validate_binary_y`自体の3件、`LogitEstimator::fit`統合テスト1件）・`test_logit.py`のAPIレベルテスト（`0.5`・`2.0`・`-1.0`の3ケース）を追加。既存の全フィクスチャ・合成データセットは元々正しく0/1でエンコードされていたため、既存テストへの影響は無し。
+
+### rust-reviewerレビューで対応した軽微な指摘
+
+- **エラーメッセージの語順**: 当初`"y must be coded as 0.0 or 1.0 (binary outcome), but found {value} at row {row}"`だったが、既存の行単位バリデーション（`LeastSquaresError::NonPositiveWeight`の`"weight at row {row} must be positive, got {weight}"`）と語順を揃え、`"y at row {row} must be coded as 0.0 or 1.0 (binary outcome), got {value}"`に修正した。
+- **`y`が全て`0.0`または全て`1.0`（分散ゼロ）の退化ケースのテストが無い指摘**: `validate_binary_y`自体はこのケースを問題なく通過する（`{0.0, 1.0}`の完全一致検証であり分散は見ない）。その後段の`fit()`（切片が`±∞`に発散する完全分離の極端な形）は、Issue #138（勾配ノルム収束判定が完全分離下でアンダーフローし誤って収束済みと判定する既知の限界）と同じ問題領域であり、Issue #135（値域検証）のスコープには含めない（本implementation notesの「収束判定`tol`の妥当性検証」節、Issue #68の`complete_separation`シナリオ見送りの経緯と同じ理由）。ユーザー確認は不要と判断（既存の確定方針の適用のみ）。

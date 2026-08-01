@@ -78,6 +78,35 @@ pub enum MleError {
         lower: Option<f64>,
         upper: Option<f64>,
     },
+
+    /// Logit/Probit専用: `y`（被説明変数）が`{0.0, 1.0}`の2値でない値を含む。
+    ///
+    /// statsmodelsの`Logit`はコンストラクタ時点で単位区間`[0,1]`を要求する
+    /// （比率データ／frequency weights的な用途も許容する設計）が、本実装は
+    /// 常に真の2値アウトカムのみを想定するため、より厳格に`{0.0, 1.0}`の完全一致を
+    /// 要求する（ユーザー確認済み、Issue #135）。`InvalidCensoringBounds`（Tobit専用）
+    /// と対称的に、Tobit（連続な打ち切り被説明変数）の`fit()`はこのバリアントを
+    /// 構築しない（`MleError`モジュールdocコメント「別のenumに分離せず同じ`MleError`に
+    /// 含める」の方針通り）。
+    #[error("y at row {row} must be coded as 0.0 or 1.0 (binary outcome), got {value}")]
+    InvalidBinaryY { row: usize, value: f64 },
+}
+
+/// `y`が`{0.0, 1.0}`の2値でない値を含む場合にエラーを返す（Logit/Probit専用、
+/// `MleError::InvalidBinaryY`のdocコメント参照）。statsmodelsは`Logit`のコンストラクタ
+/// 時点でこの検証を行うが、本実装では`fit()`冒頭（`LogitInput::from_columns`の
+/// 次元検証とは別、`nonlinear-implementation-notes.md`参照）で行う。O(n)の単純走査
+/// （既にengine_pybind側で行っているNaN/無限大チェックと同オーダー）で、
+/// 反復最適化本体（O(n·k²)を`max_iter`回）に対して計算コストは無視できる
+/// （Issue #135、実測: n=1,000,000で`fit()`全体の約0.16%）。
+pub fn validate_binary_y(y: &Mat<f64>) -> Result<(), MleError> {
+    for i in 0..y.nrows() {
+        let value = *y.get(i, 0);
+        if value != 0.0 && value != 1.0 {
+            return Err(MleError::InvalidBinaryY { row: i, value });
+        }
+    }
+    Ok(())
 }
 
 /// 数値最適化ソルバーの種類。文字列パース（Python文字列 → この型への変換）は
@@ -1364,6 +1393,30 @@ mod tests {
             matches!(result, Err(MleError::SingularHessian)),
             "{:?}",
             result
+        );
+    }
+
+    #[test]
+    fn validate_binary_y_ok_for_all_zero_and_one() {
+        let y = Mat::from_fn(4, 1, |i, _| [0.0, 1.0, 0.0, 1.0][i]);
+        assert_eq!(validate_binary_y(&y), Ok(()));
+    }
+
+    #[test]
+    fn validate_binary_y_returns_invalid_binary_y_error_for_non_binary_value() {
+        let y = Mat::from_fn(3, 1, |i, _| [0.0, 0.5, 1.0][i]);
+        assert_eq!(
+            validate_binary_y(&y),
+            Err(MleError::InvalidBinaryY { row: 1, value: 0.5 })
+        );
+    }
+
+    #[test]
+    fn validate_binary_y_reports_first_violation_row() {
+        let y = Mat::from_fn(3, 1, |i, _| [2.0, 0.0, -1.0][i]);
+        assert_eq!(
+            validate_binary_y(&y),
+            Err(MleError::InvalidBinaryY { row: 0, value: 2.0 })
         );
     }
 }

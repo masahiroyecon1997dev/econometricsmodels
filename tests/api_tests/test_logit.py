@@ -270,6 +270,16 @@ def test_non_positive_tol_raises(binary_dataset, tol):
         ).fit()
 
 
+@pytest.mark.parametrize("bad_value", [0.5, 2.0, -1.0])
+def test_non_binary_y_raises(binary_dataset, bad_value):
+    """`y`が`{0.0, 1.0}`以外の値を含む場合は`ValidationError`
+    （engine側の`MleError::InvalidBinaryY`。Issue #135）。
+    """
+    df = binary_dataset.with_columns(binary_dataset["y"].scatter(0, bad_value))
+    with pytest.raises(ValidationError):
+        Logit(df, y="y", x=["x1", "x2"]).fit()
+
+
 def test_insufficient_observations_raises(binary_dataset):
     df = binary_dataset.head(2)
     with pytest.raises(ValidationError):

@@ -34,7 +34,7 @@ use crate::error::CommonError;
 use crate::nonlinear::common::{
     CovType, MarginalEffectsAt, Method, MleError, SandwichVariant, cluster_cov_params,
     destandardize_cov_params, destandardize_params, observed_information_cov_params,
-    opg_cov_params, run_solver, sandwich_cov_params, standardize_columns,
+    opg_cov_params, run_solver, sandwich_cov_params, standardize_columns, validate_binary_y,
 };
 use crate::validation::validate_cluster_groups;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
@@ -580,6 +580,7 @@ impl LogitEstimator {
     /// - `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
     /// - `max_iter`が0以下: `MleError::InvalidMaxIter`
     /// - `tol`が0以下: `MleError::InvalidTol`
+    /// - `y`が`{0.0, 1.0}`以外の値を含む: `MleError::InvalidBinaryY`
     /// - `k`（定数項を含む説明変数の数）が0（定数項も説明変数も無い）: `CommonError::NoRegressors`
     /// - 観測数`n`が`k`以下: `CommonError::InsufficientObservations`
     /// - `raise_on_non_convergence=true`かつ`max_iter`回で未収束: `MleError::NonConvergence`
@@ -606,6 +607,7 @@ impl LogitEstimator {
         if tol <= 0.0 {
             return Err(MleError::InvalidTol { tol });
         }
+        validate_binary_y(input.y())?;
 
         let n = input.nobs();
         let k = input.k();
@@ -2181,6 +2183,44 @@ mod tests {
                 0.95,
             );
             assert_eq!(result.unwrap_err(), MleError::InvalidTol { tol });
+        }
+    }
+
+    #[test]
+    fn fit_returns_invalid_binary_y_error_for_non_binary_values() {
+        // 0.5（連続値）・2.0（0/1ではない2値）・statsmodelsなら許容する単位区間内の
+        // 中間値も含め、{0.0, 1.0}の完全一致以外は全て弾かれることを確認する
+        // （Issue #135、statsmodelsより厳格な`{0.0, 1.0}`のみ許容という設計判断、
+        // ユーザー確認済み）。
+        for (bad_value, bad_row) in [(0.5, 1), (2.0, 2)] {
+            let mut y = vec![0.0, 1.0, 0.0, 1.0];
+            y[bad_row] = bad_value;
+            let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0]];
+            let input = LogitInput::from_columns(
+                &y,
+                &x_columns,
+                vec!["x1".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
+
+            let result = LogitEstimator::fit(
+                input,
+                Method::Newton,
+                35,
+                1e-6,
+                true,
+                CovType::Classical,
+                0.95,
+            );
+            assert_eq!(
+                result.unwrap_err(),
+                MleError::InvalidBinaryY {
+                    row: bad_row,
+                    value: bad_value
+                }
+            );
         }
     }
 

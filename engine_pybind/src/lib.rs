@@ -68,7 +68,8 @@ fn fit_wls(
 /// data : polars.DataFrame
 ///     The input data. Must contain the `y`, `x`, and (if specified) cluster columns.
 /// y : str
-///     Column name of the dependent variable.
+///     Column name of the dependent variable. Must be coded as 0.0 or 1.0
+///     (binary outcome); any other value raises `ValidationError`.
 /// x : list[str]
 ///     Column names of the independent variables.
 /// options : LogitOptions

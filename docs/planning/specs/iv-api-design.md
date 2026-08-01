@@ -4,7 +4,7 @@
 FE/RE共通の設計は[`panel-api-design.md`](./panel-api-design.md)を参照。
 
 **ステータス**: 一部確定（1章: 引数設計、Issue #119／2章: 結果設計、Issue #120／3章: 標準誤差・検定、
-Issue #121）。他は未確定（4章参照）。
+Issue #121／4章: 内部実装・共通化、Issue #122）。他は未確定（5章参照）。
 
 ## 1. 引数設計（Issue #119、確定）
 
@@ -106,8 +106,24 @@ Issue #121）。他は未確定（4章参照）。
 - Issue #126（2SLSとGMMの実装方針の違い）と接続する決定であり、実装の詳細（GMM目的関数・
   重み行列の設計）は同Issueで確定する。
 
-## 4. その他の論点（未確定）
+## 4. 内部実装・共通化（Issue #122、確定）
 
-- 内部実装・共通化: Issue #122
+`panel-api-design.md`4章の方針をそのまま踏襲する。IV固有の追加点は以下。
+
+- **`instruments`の複数列ロール対応**（`panel-api-design.md`4.2の3）がIV実装の前提になる。
+  `validate_no_duplicate_roles`の拡張なしに`x_exog`/`x_endog`/`instruments`間の重複検証は
+  実装できない。
+- IVのサンドイッチ型分散計算は独自実装でよい（`panel-api-design.md`4.4、OLS/nonlinear
+  どちらの既存計算にも寄せない）。
+- GMMが数値最適化を要する場合、`nonlinear/common.rs`の`run_solver`
+  （Newton/BFGS/L-BFGS、`CostFunction`/`Gradient`/`Hessian`トレイトのみに依存するモデル
+  非依存の設計）を転用できる可能性がある。効率的2-step GMMは閉形式で済むことが多いため
+  必須ではないが、選択肢として残す（詳細はIssue #126）。
+- **新規エラー型**: `LeastSquaresError`/`MleError`/`PanelError`（`panel-api-design.md`4.4）の
+  前例に倣い、**`IvError`を2SLS/GMMで共有する**（`engine/src/iv/common.rs`に定義）。個別に
+  `TwoSlsError`/`GmmError`を作らない。
+
+## 5. その他の論点（未確定）
+
 - リファレンス実装・テスト方針: Issue #123
 - IV固有論点（2SLS/GMM方式・丁度識別/過剰識別・弱操作変数診断・内生性検定等）: Issue #126

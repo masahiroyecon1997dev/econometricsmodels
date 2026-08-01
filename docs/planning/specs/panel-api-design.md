@@ -4,7 +4,7 @@
 IV固有の設計は[`iv-api-design.md`](./iv-api-design.md)を参照。
 
 **ステータス**: 一部確定（1章: 引数設計、Issue #119／2章: 結果設計、Issue #120／3章: 標準誤差・検定、
-Issue #121）。他は未確定（4章参照）。
+Issue #121／4章: 内部実装・共通化、Issue #122）。他は未確定（5章参照）。
 
 ## 1. 引数設計（Issue #119、確定）
 
@@ -132,9 +132,65 @@ Newey-West型HACだが、これをパネルにそのまま適用すると異な�
 **t分布**（OLS準拠）。自由度は#120で新規追加した`df_resid`（`n - n_entities - k`調整済み）を
 使う。
 
-## 4. その他の論点（未確定）
+## 4. 内部実装・共通化（Issue #122、確定）
 
-- 内部実装・共通化: Issue #122
+### 4.1 既存の共通化パターン（前提）
+
+- `CommonError`（`engine/src/error.rs`）、`ensure_well_conditioned_symmetric_matrix`
+  （`engine::linear_algebra`）、`engine_pybind/src/validation.rs`の列名検証4関数
+  （`validate_x_non_empty`等）は既に系統横断で共有済み。
+- **WLSはOLSを「並行輸入」ではなく「委譲」で再利用している**: 重み変換
+  （`sqrt(weight)`）したデータをそのまま`OlsEstimator::fit`に渡し、その後で重み付き用に
+  補正が必要な統計量（R²・調整済みR²・log_likelihood）だけ`weighted_fit_statistics`で
+  計算し直す設計。「無理のない共通化」の実例として以降の方針の土台にする。
+
+### 4.2 新規に切り出す共通化（FE/RE/IV着手前に実施）
+
+1. **t/z検定の後処理の共通関数化**: OLS（t分布、`ols.rs:396-420`）とLogit（z分布、
+   `logit.rs:694-717`）で、`std_err`/`stat`/`p_value`/`conf_low`/`conf_high`を計算する
+   ループがほぼ同型のまま系統ごとに独立実装されている。`statrs::distribution::
+   ContinuousCDF`をジェネリックに取る関数としてcrate直下（`engine`直下、系統をまたぐ
+   位置）に切り出す。FE/RE/2SLS（t分布）・GMM（z分布、Issue #121）もこの関数を使う。
+2. **`engine_pybind`の`cov_type`文字列パース＋`cluster_col`/`time_col`抽出ブロックの共通化**:
+   `ols.rs:297-316`と`wls.rs:124-143`がほぼ完全一致で重複している。FE/RE/IVで重複を
+   増やす前に共通関数化する。
+3. **`validate_no_duplicate_roles`の複数列ロール対応拡張**: IVの`instruments`（複数列
+   ロール）に必要（詳細は`iv-api-design.md`4章）。
+
+### 4.3 FEの内部実装方針（緩い方針、確定）
+
+FEは**まずOlsEstimatorへの委譲を試す**（within変換したデータを`OlsEstimator::fit`に渡す、
+WLSと同型のパターン）。ただし以下はFE固有の再計算・補正が必要になる見込みで、無理に
+OLSの計算をそのまま使わない（WLSがR²等を素のOLS計算のまま使わなかったのと同じ教訓）。
+
+- 自由度（`n - n_entities - k`、単純な`n-k`ではない）→ 検定統計量・adjusted R²・
+  AIC/BICすべてに波及
+- パネル固有R²（within/between/overall、Issue #120）はOLSに存在しない新規計算
+- `cov_type`デフォルトのentity単位cluster化、HACのDriscoll-Kraay別実装（Issue #121）
+
+この委譲パターンが実際にうまくいくかは、within変換の実装方法（Issue #124）次第のため、
+今は結論を固定せず「まず委譲を試して、補正が管理可能な範囲に収まるか実装時に判断する」
+という緩い方針とする。うまくいかない場合はFE専用実装に切り替えてよい。
+
+### 4.4 新規エラー型の設計
+
+`LeastSquaresError`（OLS/WLS共有、`engine/src/linear/common.rs`）・`MleError`（nonlinear共有、
+`engine/src/nonlinear/common.rs`）の前例に倣い、**`PanelError`をFE/REで共有する**
+（`engine/src/panel/common.rs`に定義）。個別に`FeError`/`ReError`を作らない。`CommonError`
+（`DimensionMismatch`等）は`#[from]`でラップする既存パターンを踏襲し、FE/RE固有のバリアント
+（自由度計算失敗、singleton関連等）は`PanelError`に直接追加する。
+
+### 4.5 共通化しない（意図的に見送り）
+
+- OLSの`X'X`ベース分散計算とnonlinearのHessianベース分散計算は数式の前提が異なるため
+  統一しない（`nonlinear/common.rs`のコメントでも同じ判断が既にされている）。IVの
+  サンドイッチ型分散も無理にどちらかに寄せず独自実装でよい。
+- `engine_pybind`の`fit()`関数全体のマクロ・テンプレート化はしない。手法ごとの抽出列・
+  結果フィールドの差が大きく、無理に共通化すると可読性が落ちる。「抽出→バリデーション→
+  engine呼出→結果構築」という大枠の流れだけ踏襲し、実装は個別に書く。
+
+## 5. その他の論点（未確定）
+
 - リファレンス実装・テスト方針: Issue #123
 - FE固有論点（within変換・自由度調整・singleton等）: Issue #124
 - RE固有論点（分散成分推定・ハウスマン検定の実装詳細等）: Issue #125

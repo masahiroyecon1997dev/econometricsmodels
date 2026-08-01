@@ -62,11 +62,22 @@
     デフォルトから意図的に逸脱、fixest前例踏襲）。IVは`entity`のような常在するグルーピング列が
     無いため`"classical"`のまま。詳細: [`panel-api-design.md`](./specs/panel-api-design.md)3.2節
 
-### 1.4 内部実装・共通化
+### 1.4 内部実装・共通化（確定・Issue #122）
 
-- [ ] OLSエンジンとの共通化の粒度（内部で`OlsEstimator`をそのまま呼ぶか、行列演算のみ共有するか）
-- [ ] `rust-style.md`のディレクトリ方針（`panel/`, `iv/`）に対応する`common.rs`の設計（FE/RE間、OLS/IV間でどこまで共有するか）
-- [ ] 新規エラー型の設計（`OlsError`同様にモデル別`FeError`/`ReError`/`IvError`を作るか、共通型に寄せるか）
+- [x] OLSエンジンとの共通化の粒度（内部で`OlsEstimator`をそのまま呼ぶか、行列演算のみ共有するか）
+  - FEは**まずOlsEstimatorへの委譲を試す**（within変換データを`OlsEstimator::fit`に渡す、
+    WLSと同型のパターン）緩い方針で確定。自由度調整・パネルR²・cov_typeデフォルト等の
+    FE固有補正は別途必要。詳細: [`panel-api-design.md`](./specs/panel-api-design.md)4.3節
+- [x] `rust-style.md`のディレクトリ方針（`panel/`, `iv/`）に対応する`common.rs`の設計（FE/RE間、OLS/IV間でどこまで共有するか）
+  - 系統横断で新規に切り出す共通化（t/z検定後処理のジェネリック関数化、`engine_pybind`の
+    `cov_type`パース＋列抽出の共通化、`validate_no_duplicate_roles`の複数列ロール対応拡張）を
+    決定。OLSのX'Xベース分散計算とnonlinearのHessianベース分散計算は統一しない。詳細:
+    [`panel-api-design.md`](./specs/panel-api-design.md)4.2節・4.5節、
+    [`iv-api-design.md`](./specs/iv-api-design.md)4章
+- [x] 新規エラー型の設計（`OlsError`同様にモデル別`FeError`/`ReError`/`IvError`を作るか、共通型に寄せるか）
+  - `LeastSquaresError`/`MleError`の前例に倣い、`PanelError`（FE/RE共有）・`IvError`
+    （2SLS/GMM共有）という系統単位の共有エラー型にする。詳細:
+    [`panel-api-design.md`](./specs/panel-api-design.md)4.4節
 
 ### 1.5 リファレンス実装・テスト方針
 

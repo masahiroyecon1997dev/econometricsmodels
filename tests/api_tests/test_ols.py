@@ -1,7 +1,7 @@
 """OLS python_packageラッパーの統合テスト。
 
 statsmodelsとの数値比較（推定値の正しさ）と、確定済み設計
-（`docs/planning/specs/ols-api-design.md`）通りのAPIになっていることの
+（`docs/spec/ols-spec.md`）通りのAPIになっていることの
 両方を検証する。
 """
 
@@ -41,8 +41,8 @@ def _sm_fit(df: pl.DataFrame, cov_type: str = "classical"):
 
     `use_t=True`を明示指定する（本プロジェクトはcov_typeによらず
     t分布で統一する方針だが、statsmodelsの既定は`cov_type="nonrobust"`
-    以外でuse_t=False。`docs/planning/specs/ols-api-design.md`
-    「検定分布」参照）。
+    以外でuse_t=False。`docs/spec/ols-spec.md`
+    「標準誤差」参照）。
     """
     y = df["y"].to_numpy()
     x = _sm_design(df)
@@ -502,7 +502,7 @@ def test_predict_with_include_intercept_false_and_x_named_const():
     predict()が正しく動作すること。
 
     `include_intercept=True`のときのみ`"const"`という列名との衝突チェックが
-    働く仕様のため（`ols-api-design.md`3章）、`include_intercept=False`なら
+    働く仕様のため（`ols-spec.md`「API引数」）、`include_intercept=False`なら
     ユーザーが`"const"`という名前の（切片ではない）通常の説明変数を`x`に
     含めることは正当な入力。`predict()`の内部実装が誤って列名から
     「自動追加された切片列かどうか」を推測すると、この場合に値を無視して

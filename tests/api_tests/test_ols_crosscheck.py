@@ -15,8 +15,7 @@ small_nシナリオ n=20, k=4で約11.8%）。fixestの仕様ではなくpyfixes
 
 classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相対誤差1e-14程度）
 ため`RTOL_STRICT`で厳密比較する。HACのみ小標本補正の慣習差により
-`RTOL_HAC`（緩め）を使う。詳細は`docs/planning/specs/ols-implementation-notes.md`
-「8. テスト」参照。
+`RTOL_HAC`（緩め）を使う。詳細は`docs/spec/ols-spec.md`「テスト」参照。
 
 係数・標準誤差に加え、AIC・BIC・対数尤度・F統計量・F検定p値も検証する
 （`testing-policy.md`「リファレンス実装」章の方針。全統計量を独立実装でも
@@ -25,7 +24,7 @@ classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相�
 ロバストWald検定（cov_typeごとの共分散行列を使う）のため、HACのみ標準誤差と
 同じ小標本補正の慣習差が乗る（実測で相対誤差0.8%程度、`RTOL_HAC`の範囲内）。
 
-`predict()`（`docs/planning/specs/ols-api-design.md`7章、Issue #86）も対象に含める。
+`predict()`（`docs/spec/ols-spec.md`「predict()」、Issue #86）も対象に含める。
 `run_lm_predict_crosscheck.R`（`fitted()`・`predict(model, newdata=...)`）を使い、
 全シナリオで`predict(new_data=None)`（学習データの予測値）を、baselineシナリオのみ
 `predict(new_data)`（新規データの予測値、列順を入れ替えて列名マッチングも確認）を

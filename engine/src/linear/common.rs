@@ -25,7 +25,7 @@ use crate::error::CommonError;
 ///
 /// `engine`はPyO3を知らないため、Python例外への変換は`engine_pybind`側で行う
 /// （`.claude/rules/rust-style.md`「エラーハンドリング」参照）。バリアントと
-/// Python例外の対応は`docs/planning/specs/ols-implementation-notes.md`の表を参照。
+/// Python例外の対応は`docs/spec/ols-spec.md`の表を参照。
 ///
 /// 【スコープの注意】欠損値（null）・`time_col`の数値キャスト失敗等、polarsの
 /// 列データそのものに起因する検証は`engine_pybind::column_extraction`の責務であり、

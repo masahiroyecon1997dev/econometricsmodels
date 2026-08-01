@@ -4,8 +4,8 @@
 //! `engine_pybind`はpolars DataFrameから列ごとに`Vec<f64>`を抽出するところまでを担い
 //! （`column_extraction::extract_f64_column`）、それらの列を本モジュールの
 //! `OlsInput::from_columns`に渡す。`faer::Mat`への組み立て（切片列の自動追加を含む）は
-//! ここ（engine側）の責務とする。詳細は`docs/planning/specs/ols-api-design.md`
-//! 「OLSOptions」の`include_intercept`の項を参照。
+//! ここ（engine側）の責務とする。詳細は`docs/spec/ols-spec.md`
+//! 「API引数」の`include_intercept`の項を参照。
 
 use faer::linalg::matmul::matmul;
 use faer::prelude::{Solve, SolveLstsq};
@@ -36,7 +36,7 @@ pub enum CovType {
     /// Newey-West HAC（Bartlettカーネル）。
     Hac {
         /// ラグ数（バンド幅）。`None`なら経験則 `L = floor(4*(n/100)^(2/9))` で自動計算する
-        /// （`docs/planning/specs/ols-standard-errors.md`3.2節）。
+        /// （`docs/spec/ols-spec.md`「標準誤差」のHAC参照）。
         lags: Option<i64>,
         /// 時系列順序。`None`なら`OlsInput`の行順をそのまま時系列順とみなす。`Some`の場合、
         /// `OlsInput`の行と対応する長さnの配列で、この値の昇順でラグ付き自己共分散を計算する
@@ -44,8 +44,8 @@ pub enum CovType {
         time_order: Option<Vec<f64>>,
     },
     /// クラスターロバスト標準誤差（Stata方式の小標本補正込み。常に補正を適用し、
-    /// 無効化するオプションは設けない。`docs/planning/specs/ols-implementation-notes.md`
-    /// 「クラスター標準誤差」参照）。
+    /// 無効化するオプションは設けない。`docs/spec/ols-spec.md`
+    /// 「標準誤差」のクラスター参照）。
     Cluster {
         /// クラスターのグループキー。`OlsInput`の行と対応する長さnの配列。
         /// `None`の場合、`OlsEstimator::fit`は`CommonError::MissingClusterColumn`を返す
@@ -281,7 +281,7 @@ pub struct OlsEstimator {
     /// 自由度調整済み決定係数
     r_squared_adj: f64,
     /// F統計量。`cov_type=Classical`なら古典的F検定、それ以外（HC0-3/HAC）は
-    /// `cov_params`を使ったロバストWald検定（`docs/planning/specs/ols-implementation-notes.md`
+    /// `cov_params`を使ったロバストWald検定（`docs/spec/ols-spec.md`
     /// 「適合度統計量」参照）
     f_statistic: f64,
     /// F統計量のp値（F分布、自由度は`(k - k_constant, n - k)`）
@@ -305,12 +305,12 @@ impl OlsEstimator {
     /// Cholesky分解（対称正定値であることは上記の特異性検出で既に確認済み）で個別に求める。
     ///
     /// `confidence_level`は`fit`実行時に一度だけ使用し、信頼区間に固定して含める
-    /// （`docs/planning/specs/ols-implementation-notes.md`「信頼区間」参照。実行時可変引数にはしない）。
+    /// （`docs/spec/ols-spec.md`「API引数」参照。実行時可変引数にはしない）。
     ///
     /// `cov_type`によらず、p値・信頼区間の算出にはt分布（自由度n-k）を使う。
     /// 主リファレンスのstatsmodelsはHC0-3で正規分布を既定とするが（`use_t=False`）、
-    /// 本プロジェクトはt分布で統一する方針（`docs/planning/specs/ols-api-design.md`
-    /// 「検定分布」）。ベンチマーク生成側
+    /// 本プロジェクトはt分布で統一する方針（`docs/spec/ols-spec.md`
+    /// 「標準誤差」）。ベンチマーク生成側
     /// （`benchmark/run_statsmodels_benchmark.py`）は`use_t=True`を明示指定して合わせている。
     ///
     /// F統計量も同じ方針で、`cov_type`によらず単一のWald検定の式
@@ -319,7 +319,7 @@ impl OlsEstimator {
     /// 古典的F検定`((SST-SSR)/q) / (SSR/df_resid)`と完全に一致する（標準的な計量経済学の
     /// 恒等式）ため、分岐を分ける必要がない。HC0-3・HACでは`cov_params`がロバストな
     /// 分散共分散行列になるため、この式がそのままロバストWald検定になる
-    /// （`docs/planning/specs/ols-implementation-notes.md`「適合度統計量」参照）。
+    /// （`docs/spec/ols-spec.md`「適合度統計量」参照）。
     ///
     /// # Errors
     /// - `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
@@ -357,8 +357,8 @@ impl OlsEstimator {
         // 同じだが、`cov_type=Cluster`のときだけ`G-1`（クラスター数-1）に切り替える
         // （statsmodelsの`df_correction=True`という既定と同じ挙動。標準的な計量経済学の
         // 慣行でもある。`df_resid`自体は分散推定量`σ̂²`・調整済みR²・AIC/BIC等では
-        // 引き続き`n-k`のまま使う。`docs/planning/specs/ols-implementation-notes.md`
-        // 「クラスター標準誤差」参照）。
+        // 引き続き`n-k`のまま使う。`docs/spec/ols-spec.md`
+        // 「標準誤差」のクラスター参照）。
         let (cov_params, df_inference) = match &cov_type {
             CovType::Classical => (classical_cov_params(sigma2, &xtx_inv, k), df_resid),
             CovType::Hc0 => (
@@ -546,7 +546,7 @@ impl OlsEstimator {
     }
 
     /// 学習データに対する予測値 `ŷ = Xβ̂`（`predict(new_data=None)`のPython APIが返す値、
-    /// `docs/planning/specs/ols-api-design.md`7章参照）。`fit()`のReturn本体には含めず、
+    /// `docs/spec/ols-spec.md`「predict()」参照）。`fit()`のReturn本体には含めず、
     /// 必要なときに計算する別メソッドとする（Logitの`predict()`と同じ設計方針）。
     pub fn fitted_values(&self) -> Mat<f64> {
         self.input.x() * &self.params
@@ -554,7 +554,7 @@ impl OlsEstimator {
 }
 
 /// 学習済み係数`params`を使って、新規データ（`new_x_columns`）に対する予測値を計算する
-/// （`predict(new_data)`のPython APIが`new_data`指定時に呼ぶ経路、`ols-api-design.md`7章）。
+/// （`predict(new_data)`のPython APIが`new_data`指定時に呼ぶ経路、`docs/spec/ols-spec.md`「predict()」）。
 ///
 /// `OlsEstimator`のメソッドにしていない理由: `engine_pybind`側の`OLSResult`は`params`・
 /// `param_names`等のフラットな値のみを保持し、`OlsEstimator`本体（`faer::Mat`を含む）は
@@ -585,7 +585,7 @@ pub fn predict_new_data(
     );
 
     // `x`は空リストにできない（engine_pybind側でValidationErrorとして弾く、
-    // `ols-implementation-notes.md`1章参照）ため、fit時にx列が1本もないケース
+    // `docs/spec/ols-spec.md`参照）ため、fit時にx列が1本もないケース
     // （has_intercept=falseかつexpected=0）は到達しない。したがって`new_x_columns`は
     // 常に少なくとも1列持ち、`.first()`でnを安全に取得できる。
     let n = new_x_columns.first().map_or(0, |col| col.len());
@@ -687,8 +687,8 @@ enum HcVariant {
 /// `CovType::Hac`の`lags`（`Option<i64>`）を実際に使うラグ数（`usize`）に解決する。
 ///
 /// `Some(l)`の場合は`0 <= l < n`を検証してそのまま使う。`None`の場合は経験則
-/// `L = floor(4*(n/100)^(2/9))`で自動計算する（`docs/planning/specs/ols-standard-errors.md`
-/// 3.2節。EViews等でも使われる、データに依存しない決定的な式）。
+/// `L = floor(4*(n/100)^(2/9))`で自動計算する（`docs/spec/ols-spec.md`
+/// 「標準誤差」のHAC。EViews等でも使われる、データに依存しない決定的な式）。
 fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, LeastSquaresError> {
     match lags {
         Some(l) => {
@@ -723,13 +723,13 @@ fn time_ordering(time_order: Option<&[f64]>, n: usize) -> Vec<usize> {
 /// Newey-West HACの係数分散共分散行列: `(X'X)⁻¹Ŝ(X'X)⁻¹`（k×k）。
 ///
 /// `Ŝ = Ŝ₀ + Σ_{l=1}^{L} w_l (Ŝ_l + Ŝ_l')`（Bartlett重み `w_l = 1 - l/(L+1)`）、
-/// `Ŝ_l = Σ_{t=l+1}^{n} ε̂_t ε̂_{t-l} x_t x_{t-l}'`（`docs/planning/specs/ols-standard-errors.md`
-/// 3.1節）。`order`で指定された時系列順に並べ替えた残差・行を使ってラグ付き自己共分散を計算する。
+/// `Ŝ_l = Σ_{t=l+1}^{n} ε̂_t ε̂_{t-l} x_t x_{t-l}'`（`docs/spec/ols-spec.md`
+/// 「標準誤差」のHAC）。`order`で指定された時系列順に並べ替えた残差・行を使ってラグ付き自己共分散を計算する。
 ///
 /// 残差でスケールした行列`Xe`（`Xe[t,a] = ε̂_t・x_t[a]`、`order`の時系列順）を使うと、
 /// `Ŝ₀ = Xe'Xe`、`Ŝ_l = Xe[l:,:]'Xe[:n-l,:]`という行列積に落とし込める（`Ŝ_l'`は転置を
 /// 取るだけで再計算不要）。手書きの三重ループ（ラグ×観測×`k²`）よりfaerの行列積を使う方が
-/// 大幅に高速（実測値は`docs/planning/specs/ols-implementation-notes.md`「11. パフォーマンス」参照）。
+/// 大幅に高速（実測値は`docs/spec/ols-performance-notes.md`参照）。
 ///
 /// **`Par::Seq`を明示指定する理由**: `Ŝ_l`の行列積はラグの数だけ繰り返し呼ぶことになるが、
 /// 1回あたりの行列積は`k×k`という小さい出力サイズのため、faer既定の並列実行（グローバル
@@ -793,8 +793,7 @@ fn hac_cov_params(
 /// `Ŝ = Σ_{g=1}^{G} S_g S_g'`、`S_g = Σ_{i∈g} ε̂_i x_i`（クラスター内の`x_i ε̂_i`の合計。
 /// クラスター内の観測を先に合計してから外積を取ることで、クラスター内の相関を許容する）。
 /// `correction = G/(G-1) * (n-1)/(n-k)`（Stata方式の小標本補正。常に適用する。
-/// `docs/planning/specs/ols-standard-errors.md`5章、`docs/planning/specs/
-/// ols-implementation-notes.md`「クラスター標準誤差」参照）。
+/// `docs/spec/ols-spec.md`「標準誤差」のクラスター参照）。
 ///
 /// `groups`が2種類以上の値を持つこと（`G >= 2`）は呼び出し側（`validate_cluster_groups`）で
 /// 検証済みの前提とする。
@@ -1357,7 +1356,7 @@ mod tests {
     /// 同じデータセット（x=[1..5], y=[2,4,5,4,5]）でのHC0〜HC3。
     /// 期待値はstatsmodels 0.14.6で`use_t=True`を明示指定して独立に計算・検算済み
     /// （`sm.OLS(Y, X).fit(cov_type=..., use_t=True)`）。`use_t=True`が必要な理由は
-    /// `docs/planning/specs/ols-api-design.md`「検定分布」、
+    /// `docs/spec/ols-spec.md`「標準誤差」、
     /// および`OlsEstimator::fit`のdocコメント参照
     /// （statsmodelsはHC0-3でuse_t=Falseが既定＝正規分布のため、素の既定値とは一致しない）。
     #[test]
@@ -1486,7 +1485,7 @@ mod tests {
 
     /// `hac_lags=None`（経験則自動計算）が`L = floor(4*(n/100)^(2/9))`と一致することを確認する。
     /// n=5の場合L=2。期待値はstatsmodelsで`maxlags=2`を明示指定して独立に計算・検算済み
-    /// （`docs/planning/specs/ols-standard-errors.md`3.2節の式通りベンチマーク側もL=2を使う前提）。
+    /// （`docs/spec/ols-spec.md`「標準誤差」のHACの式通りベンチマーク側もL=2を使う前提）。
     #[test]
     fn fit_computes_hac_std_errors_with_auto_lags() {
         let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
@@ -1723,7 +1722,7 @@ mod tests {
 
     /// 同じ(x, y)を切片なしで推定した場合。R²・調整済みR²がuncentered TSS
     /// （`Σy_i²`）を基準に計算されることを確認する（statsmodelsの`k_constant=0`の
-    /// 挙動と一致。`ols-implementation-notes.md`「適合度統計量」参照）。
+    /// 挙動と一致。`docs/spec/ols-spec.md`「適合度統計量」参照）。
     #[test]
     fn fit_computes_r_squared_without_intercept_uses_uncentered_tss() {
         let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];

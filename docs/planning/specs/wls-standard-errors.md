@@ -44,7 +44,7 @@ $$
 $$
 
 $\hat\Psi$は変換後の残差・設計行列（$\tilde\varepsilon_i, \tilde x_i$）に対する
-[`ols-standard-errors.md`](./ols-standard-errors.md) 2章と同じ式で計算する。
+[`ols-spec.md`](../../spec/ols-spec.md)「標準誤差」のHC0〜HC3と同じ式で計算する。
 $\tilde\varepsilon_i^2 = w_i \hat\varepsilon_i^2$、$\tilde x_i \tilde x_i^\top = w_i\, x_i x_i^\top$
 なので、例えばHC0は
 
@@ -63,7 +63,7 @@ HC2/HC3で使うレバレッジ$\tilde h_{ii}$も、変換後の設計行列$\ti
 レバレッジとは異なる値になる点に注意（`engine`側の実装は`OlsEstimator::fit`の既存コードを
 そのまま再利用するため、意識的な実装作業は不要。この節は「それが正しい」ことの確認）。
 
-4種類すべてを実装する理由はOLSと同じ（[`ols-standard-errors.md`](./ols-standard-errors.md) 2章）。
+4種類すべてを実装する理由はOLSと同じ（[`ols-spec.md`](../../spec/ols-spec.md)「標準誤差」）。
 
 ## 3. HAC（Newey-West、実装対象）
 
@@ -71,7 +71,7 @@ $$
 \widehat{\mathrm{Var}}_{HAC}(\hat\beta) = (\tilde X^\top \tilde X)^{-1}\, \hat S \,(\tilde X^\top \tilde X)^{-1}
 $$
 
-$\hat S$は[`ols-standard-errors.md`](./ols-standard-errors.md) 3.1節と同じ式（Bartlettカーネル）を、
+$\hat S$は[`ols-spec.md`](../../spec/ols-spec.md)「標準誤差」のHACと同じ式（Bartlettカーネル）を、
 変換後の残差・設計行列（$\tilde\varepsilon_i, \tilde x_i$）に適用して計算する。
 
 - **ラグ選択（3.2節相当）**: 経験則 $L = \lfloor 4(n/100)^{2/9}\rfloor$ は観測数`n`のみに依存し、
@@ -98,7 +98,7 @@ $$
 （$\tilde\varepsilon_i \tilde x_i$）だけが変換後の値になる。
 
 小標本補正（$G/(G-1) \cdot (n-1)/(n-k)$）・自由度（t検定・信頼区間・F検定で`G-1`を使う）もOLSと
-同じ（[`ols-standard-errors.md`](./ols-standard-errors.md) 5章）。$G$（クラスター数）・$n$（観測数）
+同じ（[`ols-spec.md`](../../spec/ols-spec.md)「標準誤差」のクラスター）。$G$（クラスター数）・$n$（観測数）
 は重みに依存しない値であり、変わらない。
 
 ## 5. 適合度統計量の重み付き定義
@@ -134,7 +134,7 @@ $$
   そのまま二乗和するため、$\sum_i\tilde y_i^2=\sum_i w_i y_i^2$が代数的に厳密に成り立つ
   （$(\sqrt{w_i}y_i)^2=w_iy_i^2$）。切片なしのuncentered TSSは訂正不要。
 - 調整済み$R^2$は上記の正しい$R^2$を使うこと以外は
-  [`ols-standard-errors.md`](./ols-standard-errors.md)の式のまま（$n$・$k$は重みに依存しない）。
+  [`ols-spec.md`](../../spec/ols-spec.md)の式のまま（$n$・$k$は重みに依存しない）。
 
 ### 対数尤度・AIC・BIC（`WLS.loglike`）
 
@@ -146,7 +146,7 @@ $$
 \ell = -\frac{n}{2}\Big(\ln(2\pi) + \ln(\mathrm{SSR}/n) + 1\Big) + \frac{1}{2}\sum_i \ln w_i
 $$
 
-（第1項は[`ols-standard-errors.md`](./ols-standard-errors.md)のOLSの対数尤度の式に
+（第1項は[`ols-spec.md`](../../spec/ols-spec.md)のOLSの対数尤度の式に
 変換後の$\mathrm{SSR}$・$n$を代入したものそのもの。第2項$\frac{1}{2}\sum_i\ln w_i$が
 今回追加で必要と判明した補正項）。AIC・BIC はこの$\ell$から通常通り
 $\mathrm{AIC}=-2\ell+2k$、$\mathrm{BIC}=-2\ell+\ln(n)\,k$で計算する（式自体は不変、

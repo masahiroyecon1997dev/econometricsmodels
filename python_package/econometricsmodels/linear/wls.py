@@ -94,7 +94,7 @@ class WlsResults:
     as dictionaries keyed by coefficient name (for O(1) lookup of a
     single parameter). Use `coef_table()` for a row-oriented listing
     (same shape as `OlsResults`; see
-    `docs/planning/specs/ols-api-design.md` section 5).
+    `docs/spec/ols-spec.md`, "結果構造体").
 
     Args:
         raw: The estimation result object returned by `_lib.fit_wls`
@@ -207,7 +207,7 @@ class WlsResults:
         """Row-oriented summary table of the coefficients.
 
         Shaped to be usable almost as-is in a REST API response (see
-        `docs/planning/specs/ols-api-design.md` section 5). Returned
+        `docs/spec/ols-spec.md`, "結果構造体"). Returned
         as `list[dict]` rather than a polars DataFrame, per the
         project's policy of not using DataFrames for the coefficient
         table itself.

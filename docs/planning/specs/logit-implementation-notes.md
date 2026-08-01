@@ -1,6 +1,6 @@
 # Logit 内部実装ノート（数式・実装判断）
 
-`docs/planning/specs/`配下。`nonlinear-api-design.md`・`nonlinear-implementation-notes.md`（nonlinear系統共通の設計・実装判断）とは別に、**Logit固有の数式導出・実装判断**をまとめる。OLSの`ols-implementation-notes.md`と同じ位置づけ。
+`docs/planning/specs/`配下。`nonlinear-api-design.md`・`nonlinear-implementation-notes.md`（nonlinear系統共通の設計・実装判断）とは別に、**Logit固有の数式導出・実装判断**をまとめる。OLSの`docs/spec/ols-spec.md`と同じ位置づけ。
 
 ## データ構造（Issue #54で実装済み）
 
@@ -192,7 +192,7 @@ Issue #58時点ではIssue #58本来のスコープを超えるためユーザ�
 
 ## engine単体テストのカバレッジ（Issue #64で確認・実装済み）
 
-`cargo-llvm-cov -p engine --lib`で実測。OLSと同じ方針（100%は目指さず、理論上到達不能な防御的エラーパスはドキュメント化して受け入れる、`ols-implementation-notes.md`5章参照）。
+`cargo-llvm-cov -p engine --lib`で実測。OLSと同じ方針（100%は目指さず、理論上到達不能な防御的エラーパスはドキュメント化して受け入れる、`.claude/rules/testing-policy.md`「engine（Rust）のカバレッジ方針」参照）。
 
 **実測結果（129テスト時点）**: `nonlinear/logit.rs` Region 97.76%・Line 98.74%・Function 98.01%。`nonlinear/common.rs`（現時点でLogitのみが利用者のため、こちらも合わせて確認）はRegion 94.85%・Line 95.88%。
 
@@ -216,8 +216,8 @@ Issue #58時点ではIssue #58本来のスコープを超えるためユーザ�
 
 ### その他（対象外）
 
-- `assert!`マクロのメッセージ引数（アサーション失敗時のみ評価される）は、`cargo-llvm-cov`上「未カバー」に見えるが実際のギャップではない（OLSと同じ誤検知パターン、`ols-implementation-notes.md`5章参照）。
-- `linear/ols.rs`・`linear_algebra.rs`側の未カバー箇所はOLS側の既存スコープ（`ols-implementation-notes.md`参照）であり、本Issueの対象外。
+- `assert!`マクロのメッセージ引数（アサーション失敗時のみ評価される）は、`cargo-llvm-cov`上「未カバー」に見えるが実際のギャップではない（OLSと同じ誤検知パターン、`.claude/rules/testing-policy.md`「engine（Rust）のカバレッジ方針」参照）。
+- `linear/ols.rs`・`linear_algebra.rs`側の未カバー箇所はOLS側の既存スコープ（`docs/spec/ols-spec.md`参照）であり、本Issueの対象外。
 
 ## engine_pybind: データ抽出・LogitOptions/LogitResult pyclass定義（Issue #65で実装済み）
 
@@ -402,3 +402,31 @@ Issue #54の時点で「B2（尤度・スコア・Hessian実装）に持ち越�
 
 - **エラーメッセージの語順**: 当初`"y must be coded as 0.0 or 1.0 (binary outcome), but found {value} at row {row}"`だったが、既存の行単位バリデーション（`LeastSquaresError::NonPositiveWeight`の`"weight at row {row} must be positive, got {weight}"`）と語順を揃え、`"y at row {row} must be coded as 0.0 or 1.0 (binary outcome), got {value}"`に修正した。
 - **`y`が全て`0.0`または全て`1.0`（分散ゼロ）の退化ケースのテストが無い指摘**: `validate_binary_y`自体はこのケースを問題なく通過する（`{0.0, 1.0}`の完全一致検証であり分散は見ない）。その後段の`fit()`（切片が`±∞`に発散する完全分離の極端な形）は、Issue #138（勾配ノルム収束判定が完全分離下でアンダーフローし誤って収束済みと判定する既知の限界）と同じ問題領域であり、Issue #135（値域検証）のスコープには含めない（本implementation notesの「収束判定`tol`の妥当性検証」節、Issue #68の`complete_separation`シナリオ見送りの経緯と同じ理由）。ユーザー確認は不要と判断（既存の確定方針の適用のみ）。
+
+## 完全分離下での勾配ノルム収束判定のアンダーフロー対策（Issue #138で実装済み）
+
+Issue #68のtol妥当性検証中に発見された既知の限界（准/完全分離データで、係数が発散する過程でロジスティックのスコア項`p(1-p)`が浮動小数点アンダーフローによりほぼ0.0になり、真には収束していないのに勾配ノルムが先に`tol`を割り込み「収束済み」と誤判定する問題）に対応した。
+
+### 実機診断で判明したメカニズム
+
+准分離データ（`x1`の真の係数を100とした合成データ）でNewton法の反復を1回ごとに計測したところ、以下が判明した（コミットには含まれない一時的な診断コード、実測後に削除済み）。
+
+- パラメータノルムは反復ごとに際限なく増加し続ける（真の停留点が存在しない、上限に到達しない発散）。
+- **ステップ幅（更新前後のパラメータの差のノルム）は反復が進んでも縮小せず、ほぼ一定値（約97）のまま推移し続ける**。真の停留点への収束ならNewton法の局所2次収束性質によりステップ幅も勾配ノルムと共に縮小するはずで、この「勾配ノルムだけが先に0へ近づき、ステップ幅は縮小しない」という乖離が、完全分離下での発散を検出する直接的な手がかりになる。
+- 一方、勾配ノルムは滑らかに0へ近づき、23反復目で`tol=1e-6`を割り込んで（誤って）「収束」と判定される。
+
+### 当初の設計（ステップ幅ベース、technical dead endと判明）
+
+上記の知見に基づき、当初はNewton/BFGS/LBFGSの3手法統一で「最終反復のステップ幅（相対値）」を事後チェックする設計をユーザー承認のもとで採用した。argminの`IterState`が`.param()`呼び出しのたびに内部で「1つ前のパラメータ」（`prev_param`）を自動的に保持する仕組みを持つため、各ソルバーの`next_iter`/`terminate`を変更せず`Executor::run()`の結果から事後的に取得できる、という想定だった。
+
+しかし実装・実機検証したところ、**この前提が成立しないことが判明した**。自作Newton実装（`FaerNewton::next_iter`）は`state.take_param()`で現在のパラメータを取り出してから`.param(new_param)`を呼ぶが、`take_param()`の時点で`state.param`が`None`になるため、`.param()`内部の「現在値を`prev_param`へ退避する」`swap`処理が空振りし、`prev_param`が常に`None`のままになる（`argmin-0.11.0/src/core/state/iterstate.rs`の`IterState::param`実装を確認）。さらに、argmin本体のBFGS/LBFGS実装のソース（`argmin-0.11.0/src/solver/quasinewton/{bfgs,lbfgs}.rs`）を確認したところ、**全く同じ`take_param()`→`.param()`というパターンを内部で使っており、組み込みソルバーでも同様に`prev_param`は機能しない**ことが判明した。3手法統一でステップ幅を追跡するという前提が技術的に成立しなかったため、この設計は実装途中で破棄し、ユーザーに経緯を報告のうえ再設計した（一時的に実装した`SeparationSuspected`・関連テストもコミット前に全てrevertした）。
+
+### 採用した設計: 標準化パラメータ空間でのノルムの事後チェック
+
+`fit()`が最適化前に設計行列を標準化する（`standardize_columns`）ことを活かし、**標準化パラメータ空間（`run_solver`が返す`params`、`destandardize_params`適用前）でのノルムの大きさ**を事後チェックする方式に変更した。ステップ幅ベースの方式より理論的な直接性は劣る（発散のメカニズムそのものではなく結果的な大きさを見る）が、`run_solver`の`params`だけで完結し、ソルバー内部の状態（`prev_param`等）に依存しないため3手法へ確実に統一適用できる。
+
+- **エラー型**: `MleError::SeparationSuspected { n_iter: usize }`を新設。既存の`NonConvergence`（`max_iter`到達による通常の未収束）とは原因が異なるため区別した。`engine_pybind`側は`ComputationError`に変換（計算過程で発覚した問題であり、入力自体が不正なわけではないため`ValidationError`ではない）。
+- **閾値**: `SEPARATION_PARAM_NORM_THRESHOLD = 100.0`（`engine::nonlinear::common`の内部定数、`LogitOptions`等の公開オプションとしては設けない。ユーザー確認済み）。実測で、既存の`near_separation`シナリオ（`beta1=20`、意図的に境界ケースに留めてある合成データ、既存の合格テストが使う）は標準化パラメータノルムが約31、本Issue発見時の病的データ（`beta1=100`）は約1282と、40倍以上の開きがあることを確認済み。`100`はこのギャップの中間（正常な境界ケース側に3倍強のマージンを残す）に位置する。
+- **`run_solver`内の判定位置**: 3手法共通の後処理（`extract_outcome`呼び出し後、`SolverOutput`構築前）に1箇所だけ実装。`converged && gradient_norm(&params) > SEPARATION_PARAM_NORM_THRESHOLD`のとき`converged`を`false`に取り消し、`raise_on_non_convergence=true`なら`SeparationSuspected`を即座に返す（`false`なら通常の非収束と同じく`converged=false`のまま後続処理を継続）。
+- **テスト**: 准分離データ（`beta1=100`の合成DGP）で、Newton/BFGS/LBFGSいずれも`SeparationSuspected`を返すことを確認する統合テストを追加。`raise_on_non_convergence=false`時に`converged=false`を返すことも別テストで確認。既存135件（本Issue着手前）は全てパスしたまま（正常収束データで閾値100が誤検知しないことを確認）。
+- `cargo test -p engine`（137件）・`cargo test -p engine_pybind`（31件）・`pytest tests/api_tests`（364件）、`cargo clippy --all-targets -- -D warnings`・`cargo fmt --check`・ruffいずれもパス。

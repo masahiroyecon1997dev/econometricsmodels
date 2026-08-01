@@ -44,8 +44,8 @@ jobs:
       # docsグループのみ指定（devはuvが既定で含める。maturinはdevグループに定義済み、
       # ci_python.ymlと同じパターン）。mkdocstrings-pythonはPyO3コンパイル済み拡張の
       # docstringを動的import経由で読むため、maturin developでビルド済みの状態が必要
-      # （`#[pyclass(module=...)]`のAliasResolutionError対応、ols-implementation-notes.md
-      # 「9. ドキュメント」参照）。
+      # （`#[pyclass(module=...)]`のAliasResolutionError対応、`.claude/rules/rust-style.md`
+      # 「言語方針」参照）。
       - name: uv sync (docs group)
         run: uv sync --locked --group docs
 

@@ -90,7 +90,44 @@ pub enum MleError {
     /// 含める」の方針通り）。
     #[error("y at row {row} must be coded as 0.0 or 1.0 (binary outcome), got {value}")]
     InvalidBinaryY { row: usize, value: f64 },
+
+    /// 勾配ノルム基準（`‖∇ℓ(θ)‖ < tol`）は満たしたが、標準化パラメータ空間でのノルムが
+    /// 異常に大きい。(準)完全分離（quasi-/complete separation）では、係数が発散していく
+    /// 過程でロジスティックのスコア項`p(1-p)`が浮動小数点アンダーフローによりほぼ0.0に
+    /// なり、真には収束していないのに勾配ノルムだけが先に`tol`を割り込む（Issue #138）。
+    ///
+    /// 当初はNewton法のステップ幅（更新前後のパラメータの差）が縮小しているかを見る、
+    /// より直接的な基準を検討した（真の停留点への収束ならステップ幅も勾配ノルムと共に
+    /// 縮小するはずという理屈）。しかしargminの`IterState`は、ソルバーが`take_param()`で
+    /// 現在のパラメータを取り出してから新しい`param()`を設定する実装パターン（自作の
+    /// `FaerNewton`、および組み込みのBFGS/LBFGSも同じパターン）だと、`prev_param`が
+    /// 正しく追跡されない（`take_param()`の時点で`param`が`None`になるため、`param()`
+    /// 内部の退避swapが空振りする）ことが実装時に判明し、3手法統一では使えなかった
+    /// （ユーザー確認済み）。代わりに、`fit()`が最適化前に標準化する設計行列
+    /// （`standardize_columns`）を活かし、標準化パラメータ空間でのノルムの大きさを
+    /// 事後チェックする、より単純だが3手法へ確実に統一適用できる基準を採用した。
+    /// 実測（既存の`near_separation`シナリオ=境界ケース vs 本Issue発見時の病的データ）で
+    /// 標準化パラメータノルムに40倍以上の差があることを確認済み
+    /// （`SEPARATION_PARAM_NORM_THRESHOLD`のdocコメント参照）。
+    #[error(
+        "convergence could not be verified after {n_iter} iterations: the gradient norm \
+         dropped below tol, but the (standardized) parameter norm is implausibly large. This \
+         pattern is typical of (quasi-)complete separation, where no finite MLE exists"
+    )]
+    SeparationSuspected { n_iter: usize },
 }
+
+/// [`SeparationSuspected`](MleError::SeparationSuspected)を検出する閾値。標準化
+/// パラメータ空間（`fit()`が最適化に使う空間、`standardize_columns`参照）でのノルムが
+/// これを超える場合、勾配ノルム基準で収束と判定されていても取り消す。`LogitOptions`等に
+/// 公開の調整用オプションとしては設けず（Issue #138、ユーザー確認済み）、内部実装の
+/// 詳細として固定する。
+///
+/// 値の根拠: 既存の`near_separation`シナリオ（`beta1=20`、意図的に境界ケースに留めてある
+/// 合成データ、既存の合格テストが使う）は標準化パラメータノルムが約31。一方、本Issue発見時の
+/// 病的データ（`beta1=100`）は約1282。両者の間には40倍以上の開きがあり、`100`はこの
+/// ギャップの中間（正常な境界ケース側に3倍強のマージンを残す）に位置する。
+const SEPARATION_PARAM_NORM_THRESHOLD: f64 = 100.0;
 
 /// `y`が`{0.0, 1.0}`の2値でない値を含む場合にエラーを返す（Logit/Probit専用、
 /// `MleError::InvalidBinaryY`のdocコメント参照）。statsmodelsは`Logit`のコンストラクタ
@@ -219,7 +256,7 @@ where
 {
     let k = initial_params.len();
 
-    let (params, converged, n_iter, model) = match method {
+    let (params, mut converged, n_iter, model) = match method {
         Method::Newton => {
             let solver = FaerNewton { tol };
             let result = Executor::new(problem, solver)
@@ -256,6 +293,18 @@ where
             extract_outcome(result.state, result.problem)?
         }
     };
+
+    // 勾配ノルム基準では収束と判定されたが、標準化パラメータ空間でのノルムが異常に
+    // 大きい場合（准/完全分離の兆候、`MleError::SeparationSuspected`のdocコメント参照）は、
+    // 収束の判定を取り消す。`raise_on_non_convergence`の扱いは通常の`NonConvergence`と
+    // 揃える（`true`なら専用エラーで即座に返す、`false`なら`converged=false`のまま
+    // 後続処理を継続する）。
+    if converged && l2_norm(&params) > SEPARATION_PARAM_NORM_THRESHOLD {
+        converged = false;
+        if raise_on_non_convergence {
+            return Err(MleError::SeparationSuspected { n_iter });
+        }
+    }
 
     if !converged && raise_on_non_convergence {
         return Err(MleError::NonConvergence { n_iter });
@@ -333,8 +382,8 @@ where
 /// のみを返すため、`downcast`は常に成功する。この分岐はargmin自体の内部（`Executor`の
 /// 状態管理等）が予期しない`anyhow::Error`を生成した場合に備えた防御的なフォールバックで、
 /// 意図的にargminの内部を破壊するようなテストを書くのは実装の振る舞いというより
-/// argmin内部実装への依存になるため見送っている（OLSの`ols-implementation-notes.md`
-/// 「理論上到達不能な防御的エラーパス」と同じ性質）。
+/// argmin内部実装への依存になるため見送っている（`.claude/rules/testing-policy.md`
+/// 「engine（Rust）のカバレッジ方針」の理論上到達不能な防御的エラーパスと同じ性質）。
 fn convert_optimizer_error(e: OptimizerError) -> MleError {
     match e.downcast::<MleError>() {
         Ok(mle_error) => mle_error,
@@ -348,7 +397,11 @@ fn identity_matrix(k: usize) -> Vec<Vec<f64>> {
         .collect()
 }
 
-fn gradient_norm(g: &[f64]) -> f64 {
+/// L2ノルム。勾配ベクトルの収束判定（`FaerNewton::terminate`）だけでなく、
+/// パラメータベクトルのノルム（`SEPARATION_PARAM_NORM_THRESHOLD`の判定）にも流用する
+/// 中立的な名前にしている（元は`gradient_norm`という名前だったが、勾配以外の用途にも
+/// 使うようになったため改名した。rust-reviewer指摘、Issue #138）。
+fn l2_norm(g: &[f64]) -> f64 {
     g.iter().map(|x| x * x).sum::<f64>().sqrt()
 }
 
@@ -428,7 +481,7 @@ where
 
     fn terminate(&mut self, state: &NewtonState) -> TerminationStatus {
         if let Some(g) = state.get_gradient()
-            && gradient_norm(g) < self.tol
+            && l2_norm(g) < self.tol
         {
             return TerminationStatus::Terminated(TerminationReason::SolverConverged);
         }
@@ -1013,7 +1066,7 @@ mod tests {
         assert!(output.converged, "{:?}", output);
         let actual_grad = IllConditionedProblem.gradient(&output.params).unwrap();
         assert!(
-            gradient_norm(&actual_grad) < 1e-6,
+            l2_norm(&actual_grad) < 1e-6,
             "converged=true was reported but the actual gradient at the returned params {:?} is {:?}",
             output.params,
             actual_grad

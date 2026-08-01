@@ -26,8 +26,8 @@ use crate::validation::{
 
 /// Estimation options for OLS.
 ///
-/// See `docs/planning/specs/ols-api-design.md` and `docs/planning/specs/ols-standard-errors.md`
-/// for the rationale behind each field's meaning and default value.
+/// See `docs/spec/ols-spec.md` ("API引数") for the rationale behind each
+/// field's meaning and default value.
 // `fit_ols`がPython側から`OLSOptions`インスタンスを引数として受け取るため、
 // `FromPyObject`実装を明示的に維持する（pyo3 0.28以降、Cloneを実装する#[pyclass]の
 // FromPyObject自動導出はopt-inに変更されたため）。
@@ -120,8 +120,8 @@ impl OLSOptions {
 
 /// Estimation results for OLS.
 ///
-/// Structured data only (no `summary()`); see `docs/planning/specs/ols-api-design.md`
-/// section 5. Row-oriented table construction (e.g. a `coef_table`) is left to
+/// Structured data only (no `summary()`); see `docs/spec/ols-spec.md`
+/// ("結果構造体"). Row-oriented table construction (e.g. a `coef_table`) is left to
 /// `python_package`. All array-valued fields (`params`, `std_errors`, etc.) share the
 /// same order as `param_names`.
 // `OLSResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
@@ -130,7 +130,7 @@ impl OLSOptions {
 //
 // `get_all`（クラス単位で全フィールドに#[pyo3(get)]を付与する）ではなく、フィールドごとに
 // 個別`#[pyo3(get)]`を付ける方式にしている。`fitted_values`（`predict(new_data=None)`が
-// 返す値のキャッシュ、`ols-api-design.md`7章）はPython側に独立したプロパティとして
+// 返す値のキャッシュ、`docs/spec/ols-spec.md`「predict()」）はPython側に独立したプロパティとして
 // 公開しない設計上の決定のため、この1フィールドだけ`#[pyo3(get)]`を付けずに残す必要がある。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
@@ -175,7 +175,7 @@ pub struct OLSResult {
     pub bic: f64,
     /// Fitted values for the training data (`ŷ = Xβ̂`), cached at fit time.
     /// Not exposed to Python directly; only `predict(new_data=None)` reads it
-    /// (`ols-api-design.md` section 7 — the Python-facing surface is unified into a
+    /// (`docs/spec/ols-spec.md` "predict()" — the Python-facing surface is unified into a
     /// single `predict()` method rather than a separate `fitted_values` property).
     fitted_values: Vec<f64>,
     /// Whether `fit()` was called with `include_intercept=True`. Not exposed to
@@ -273,7 +273,7 @@ pub fn fit(
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
     // `cluster_col`/`time_col`が指定されていても、cov_typeがcluster/hacでなければ
-    // 無視する（`docs/planning/specs/ols-standard-errors.md`3.2/3.3節）。
+    // 無視する（`docs/spec/ols-spec.md`「標準誤差」のHAC参照）。
     let cluster_groups = if cov_type_lower == "cluster" {
         options
             .cluster_col

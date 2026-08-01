@@ -159,7 +159,10 @@ ruff format --check .
 ## 14. 関連ファイル
 
 - 方針書: `docs/plan.md`（本リポジトリの正式な方針ドキュメント）
-- 仕様書: `docs/spec/`（手法ごとの数式・API仕様）、`docs/planning/specs/`（実装過程の設計ノート・実装ノート、手法ごと）
+- 仕様書: `docs/spec/`（実装済みの手法ごとの数式・API仕様の正本。method非依存のCI/CD・セキュリティ運用ノートも
+  ここに置く、例: `ci-cd-notes.md`）、`docs/planning/specs/`（実装途中の手法の設計ノート・実装ノート）。
+  ある手法の実装が完了したら、その手法の仕様書は`docs/planning/specs/`から`docs/spec/`へ集約する
+  （経緯は削除し理由のみ簡潔に記載、1ファイルにまとめる。Issue #141参照）。
 - Phase1 OLS/WLSのタスク: GitHub Issue群（クローズ済み）を参照
 
 ## 15. 実装・テスト・ベンチマーク作成・仕様検討時の確認方針

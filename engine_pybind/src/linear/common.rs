@@ -25,7 +25,7 @@ use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
 /// トレイトか型のどちらかを含む必要がある）により`impl From<LeastSquaresError> for PyErr`は
 /// 書けない。関数として実装し、呼び出し側で`.map_err(least_squares_error_to_pyerr)?`する。
 ///
-/// 対応表は`docs/planning/specs/ols-implementation-notes.md`「1. エラーハンドリング」参照。
+/// 対応表は`docs/spec/ols-spec.md`「engine/engine_pybind間のデータ受け渡し・エラー変換」参照。
 pub(crate) fn least_squares_error_to_pyerr(err: LeastSquaresError) -> PyErr {
     match err {
         LeastSquaresError::Common(common) => common_error_to_pyerr(common),

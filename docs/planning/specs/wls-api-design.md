@@ -68,7 +68,7 @@ OLSと同じ「List渡し＋オブジェクト渡し」規約（CLAUDE.md 2章�
   `column_extraction::extract_f64_column`が`weight`列にもそのまま適用されることで検出されるため、
   追加が必要なのは**0以下の値の検証のみ**（3.1節参照）。
 - `include_intercept=True`のときの`"const"`列衝突チェック等、OLSの`fit()`受け口が行っている
-  検証（[`ols-api-design.md`](./ols-api-design.md) 3章補足）はそのまま踏襲する。加えて、
+  検証（[`ols-spec.md`](../../spec/ols-spec.md)「API引数」）はそのまま踏襲する。加えて、
   `weight`列についても`y`/`x`との重複チェック（`weight == y`、`x.contains(weight)`）を
   `wls.rs`の受け口で行う（`y`/`x`間の重複チェックと同じパターン。誤って同じ列を複数の役割に
   指定してしまう典型的なミスを早期に分かりやすいエラーで防ぐ）。
@@ -77,8 +77,8 @@ OLSと同じ「List渡し＋オブジェクト渡し」規約（CLAUDE.md 2章�
 
 - **0以下（0を含む）・NaN・無限大の重みは常にエラー**とし、該当観測を自動的に落とす
   （ゼロ重み＝実質除外として許容する）ことはしない。OLSの欠損値ポリシー
-  （常にエラー、自動除外はしない。[`ols-implementation-notes.md`](./ols-implementation-notes.md)
-  「欠損値の扱い」）と同じ考え方を重みにも適用する。
+  （常にエラー、自動除外はしない。[`ols-spec.md`](../../spec/ols-spec.md)「API引数」）と
+  同じ考え方を重みにも適用する。
 - ゼロ重みの許容（観測を明示的に無視する手段としての活用）が将来必要になった場合は、
   別issueで検討する。
 
@@ -178,7 +178,7 @@ fn fit_wls(
 
 ## 6. Python向け出力方針
 
-OLSと同じ（[`ols-api-design.md`](./ols-api-design.md) 5章）。`structured only`、
+OLSと同じ（[`ols-spec.md`](../../spec/ols-spec.md)「結果構造体」）。`structured only`、
 `coef_table()` / 統計量ごとの`dict`の2形式、DataFrame不使用。
 
 ## 7. その他の確定事項
@@ -187,7 +187,7 @@ OLSと同じ（[`ols-api-design.md`](./ols-api-design.md) 5章）。`structured 
   （4.1節の構造的保証）。
 - 欠損値（NaN/無限大）は常にエラー。検定分布はt分布。`cov_type`未指定時のデフォルトは
   classical。ロバストF検定への切替方針。これらはすべてOLSと同じ
-  （[`ols-api-design.md`](./ols-api-design.md) 6章）。
+  （[`ols-spec.md`](../../spec/ols-spec.md)「API引数」）。
 
 ## 8. 今後の検討事項
 

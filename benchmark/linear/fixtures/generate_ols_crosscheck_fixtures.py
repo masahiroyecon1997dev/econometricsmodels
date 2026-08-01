@@ -12,12 +12,12 @@ pyfixestは正確性検証には使わない。fixest（R）本体のソース�
 pyfixestのHC2/HC3はfixestの仕様ではなく**pyfixest自身の実装バグ**（HC1用の
 `N/(N-k)`小標本補正をHC2/HC3にも誤って適用）に起因する系統的乖離があると判明した
 ため、性能比較専用に位置づけている。詳細は
-`docs/planning/specs/ols-implementation-notes.md`「8. テスト」参照。
+`docs/spec/ols-spec.md`「テスト」参照。
 
 classical/HC0-3/clusterはRとほぼ機械精度で一致するため厳密比較、HACのみ小標本補正の
 慣習差により緩い許容誤差で比較する（`tests/api_tests/test_ols_crosscheck.py`参照）。
 
-`predict()`（`docs/planning/specs/ols-api-design.md`7章、Issue #86）も対象に含める。
+`predict()`（`docs/spec/ols-spec.md`「predict()」、Issue #86）も対象に含める。
 `run_lm_predict_crosscheck.R`を使い、全シナリオで学習データに対する予測値（fitted）を、
 baselineシナリオのみ新規データに対する予測値（predicted、`PREDICT_NEW_DATA`参照）を
 crosscheckする。
@@ -160,7 +160,7 @@ def _run_r_predict(
     csv_path: Path, formula: str, new_data_csv_path: Path | None = None
 ) -> dict:
     """`run_lm_predict_crosscheck.R`を呼び、fitted_values/predict()の
-    crosscheck用の値を得る（`ols-api-design.md`7章）。
+    crosscheck用の値を得る（`ols-spec.md`「predict()」）。
 
     `new_data_csv_path`を渡さない場合は学習データに対する予測値（fitted）のみ、
     渡す場合はout-of-sample予測値（predicted）も含む。

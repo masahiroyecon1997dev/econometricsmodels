@@ -2,7 +2,7 @@
 # 学習データに対する予測値（fitted）・新規データに対する予測値（predict）の
 # Rクロスチェック用スクリプト。run_lm_crosscheck_benchmark.R（標準誤差・適合度
 # 統計量のクロスチェック）とは別に、OLSのfitted_values/predict()
-# （docs/planning/specs/ols-api-design.md 7章）専用に用意する。
+# （docs/spec/ols-spec.md「predict()」）専用に用意する。
 #
 # 事前準備: install.packages("jsonlite")
 #

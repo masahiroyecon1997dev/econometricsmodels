@@ -196,7 +196,7 @@ OLSの計算をそのまま使わない（WLSがR²等を素のOLS計算のま�
 
 **`linearmodels`をFE/RE共通の主リファレンスとする**（`PanelOLS`＝FE、`RandomEffects`＝RE）。
 `PanelOLS`の`cov_type="kernel"`でDriscoll-Kraay型SE（Issue #121）の検証もカバーできる。
-`pyfixest`は既存方針（`ols-api-design.md`／`testing-policy.md`、HC2/HC3の実装バグにより
+`pyfixest`は既存方針（`docs/spec/ols-spec.md`／`testing-policy.md`、HC2/HC3の実装バグにより
 精度検証には使わない）を踏襲し、性能比較（実行時間・メモリ）のみに使う。
 
 ### 5.2 Rクロスチェックパッケージ

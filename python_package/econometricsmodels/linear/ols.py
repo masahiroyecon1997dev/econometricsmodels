@@ -8,7 +8,7 @@ for `x`, an options object for estimation settings (CLAUDE.md section 2,
 `.claude/rules/python-style.md` "設計方針との整合性").
 
 `OLSOptions` is re-exported as-is from `_lib` (not redefined as a
-separate class; see `docs/planning/specs/ols-api-design.md` section 3).
+separate class; see `docs/spec/ols-spec.md`, "API引数").
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ class OlsResults:
     Array-valued properties (`params`, `std_errors`, etc.) are exposed
     as dictionaries keyed by coefficient name (for O(1) lookup of a
     single parameter). Use `coef_table()` for a row-oriented listing
-    (see `docs/planning/specs/ols-api-design.md` section 5).
+    (see `docs/spec/ols-spec.md`, "結果構造体").
 
     Args:
         raw: The estimation result object returned by `_lib.fit_ols`
@@ -189,7 +189,7 @@ class OlsResults:
         """Row-oriented summary table of the coefficients.
 
         Shaped to be usable almost as-is in a REST API response (see
-        `docs/planning/specs/ols-api-design.md` section 5). Returned
+        `docs/spec/ols-spec.md`, "結果構造体"). Returned
         as `list[dict]` rather than a polars DataFrame, per the
         project's policy of not using DataFrames for the coefficient
         table itself.
@@ -227,7 +227,7 @@ class OlsResults:
 
         Unified into a single method rather than a separate
         `fitted_values` property, to match the naming used by Logit's
-        `predict()` (`docs/planning/specs/ols-api-design.md` section 7).
+        `predict()` (`docs/spec/ols-spec.md`, "predict()").
 
         Args:
             new_data: New data to predict on. Must contain columns with

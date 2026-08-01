@@ -1,6 +1,6 @@
 # 非線形モデル（MLEベース） 内部実装ノート（パラメータ設計以外）
 
-`docs/planning/specs/`配下。非線形モデルのAPI・オプション設計（`nonlinear-api-design.md`）とは別に、**パラメータ以外の内部実装で決めたこと・まだ決まっていないこと**をまとめる。OLSの`ols-implementation-notes.md`と同じ位置づけ。実装issue（engine関連）着手時に必ず参照すること。
+`docs/planning/specs/`配下。非線形モデルのAPI・オプション設計（`nonlinear-api-design.md`）とは別に、**パラメータ以外の内部実装で決めたこと・まだ決まっていないこと**をまとめる。OLSの`docs/spec/ols-spec.md`と同じ位置づけ。実装issue（engine関連）着手時に必ず参照すること。
 
 **現状**: Logit/Probit/Tobitともに実装未着手（Issue化前）。本ノートはOLSのように「Issue #Nで実装済み」を積み上げていく形ではなく、設計段階で先に決まった内部実装レベルの事項を記録する。実装着手後は同じ形式（`Issue #Nで実装済み`）で追記していく。
 
@@ -38,7 +38,7 @@
 
 `H`・`s_i`はモデルごとに異なるが、上記5つの行列演算自体（`-H⁻¹`、外積和、サンドイッチ積）はLogit/Probit/Tobitで完全に共通のため、`nonlinear/common.rs`に共通関数として実装する（各モデル側は`s_i`・`H`を渡すだけでよい設計。詳細は後述「engine内のtrait設計」）。
 
-**クラスターの小標本補正**: OLSと同じ規約（`Σ_cluster = correction * H⁻¹ (Σ_g S_g S_g') H⁻¹`、`correction = G/(G-1) * (n-1)/(n-k)`を常に適用し、無効化オプションを設けない）をそのまま踏襲する。根拠は`ols-implementation-notes.md`が確認済みの通り、statsmodelsの`sandwich_covariance.cov_cluster`がOLS専用ではなく線形モデル・MLEモデル共通の汎用関数であること。実装issue着手時にstatsmodelsソースで再確認する。
+**クラスターの小標本補正**: OLSと同じ規約（`Σ_cluster = correction * H⁻¹ (Σ_g S_g S_g') H⁻¹`、`correction = G/(G-1) * (n-1)/(n-k)`を常に適用し、無効化オプションを設けない）をそのまま踏襲する。根拠は`docs/spec/ols-spec.md`が確認済みの通り、statsmodelsの`sandwich_covariance.cov_cluster`がOLS専用ではなく線形モデル・MLEモデル共通の汎用関数であること。実装issue着手時にstatsmodelsソースで再確認する。
 
 **OLSとの相違点（自由度切り替え不要）**: OLSは`cov_type=Cluster`のとき検定の自由度を`n-k`から`G-1`に切り替える処理があったが、非線形モデルはz検定（標準正規分布、自由度という概念がない）のため、この切り替え自体が不要。分散共分散行列のスケーリング（`correction`）だけ気にすればよい。
 
@@ -108,7 +108,7 @@ argminの`CostFunction`/`Gradient`/`Hessian`トレイト実装と、`nonlinear`�
 
 - **判定基準**: 勾配ノルム（L2ノルム、`‖∇ℓ(θ)‖ < tol`）。`newton`/`bfgs`/`lbfgs`の3手法すべてで同じ基準を使う（Newtonは独自実装、BFGS/L-BFGSは組み込みの`with_tolerance_grad`）。
 - **デフォルト値**: `tol = 1e-6`で確定・維持（Logit実装・statsmodels/R glmとの数値照合で妥当性を検証済み。結論・根拠は`logit-implementation-notes.md`「収束判定`tol`の妥当性検証」参照。要点: 通常データでは高精度に一致するが、準完全分離の境界ケースでは`1e-8`程度が必要。ただし`1e-8`に締めると`bfgs`が`max_iter`を使い切りやすくなるリスクがあるため、既定値は`1e-6`を維持し、境界ケースの数値比較テストのみ`tol`を明示的に締める運用とした）。Probit/Tobit実装時もこの結論を踏襲する想定（モデル固有の事情があれば個別に再検証する）。
-- **既知の限界（未修正、Issue #138）**: 完全分離に近いデータでは、係数発散の過程でスコア項が浮動小数点アンダーフローし、`tol`の値によらず「収束済み」と誤判定しうる。`tol`の調整では解決しない構造的な限界のため別issueで対処を検討する。
+- **既知の限界とその対処（Issue #138で実装済み）**: 完全分離に近いデータでは、係数発散の過程でスコア項が浮動小数点アンダーフローし、`tol`の値によらず「収束済み」と誤判定しうる。`tol`の調整では解決しない構造的な限界のため、`run_solver`の後処理として標準化パラメータ空間でのノルムを事後チェックし、異常に大きい場合は収束判定を取り消して`MleError::SeparationSuspected`を返す対処を追加した（勾配ノルム基準自体は`tol`のまま維持し、別の判定軸を追加する形。詳細・設計の変遷は`logit-implementation-notes.md`「完全分離下での勾配ノルム収束判定のアンダーフロー対策」参照）。
 - **Options化**: `max_iter`と同じ扱いで`tol: f64 = 1e-6`をOptionsに追加する（`run_solver`関数の引数として実装済み。engine_pybind側の配線はLogitで実装済み）。
 
 **スケール依存への対処（Issue #52で実装内容が確定）**: 勾配の絶対閾値は説明変数のスケールに依存する（`スコア = Σ 残差項 × x_i`のため、xが大きいスケールの列を含むと勾配も大きくなり、真に収束していても`tol`を割らない事態が起きうる）。

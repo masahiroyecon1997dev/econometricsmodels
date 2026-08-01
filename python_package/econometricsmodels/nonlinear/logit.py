@@ -9,7 +9,7 @@ for `x`, an options object for estimation settings (CLAUDE.md section 2,
 
 `LogitOptions` is re-exported as-is from `_lib` (not redefined as a
 separate class; same policy as `OLSOptions`, see
-`docs/planning/specs/ols-api-design.md` section 3).
+`docs/spec/ols-spec.md`, "API引数").
 
 `summary()` is not implemented (structured-data-only output policy; see
 `docs/planning/specs/nonlinear-api-design.md` section 5 and the

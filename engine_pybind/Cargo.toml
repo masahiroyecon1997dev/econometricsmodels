@@ -38,7 +38,7 @@ pyo3 = { version = "=0.28.3" }
 # pyo3-polarsの新版はまだcrates.ioに未公開。既知のバージョンズレリスク、
 # rust-style.md「既知のリスク」参照）。そのため、当初pyo3=0.29.0で揃えようとしたが
 # pyo3=0.28.2（yankedされた0.28.0/0.28.1を除く最初の安定版）に統一した。
-# Issue #13で選定。詳細はdocs/planning/specs/ols-implementation-notes.md参照。
+# Issue #13で選定。詳細はdocs/spec/ols-spec.md参照。
 polars = "=0.54.4"
 pyo3-polars = "=0.27.0"
 faer = { workspace = true }

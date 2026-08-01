@@ -35,7 +35,7 @@ allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
   - `benchmark/iv/run_ivreg_benchmark.R`: ivreg/AERパッケージ。未検証（Phase3着手時に確認）。
   - `benchmark/nonlinear/run_glm_crosscheck_benchmark.R`: base R `glm` + sandwich（HC0/HC1/cluster）+ 手計算OPG（`sandwich::estfun()`のスコア寄与から`Σ=(Σsᵢsᵢ')⁻¹`）+ `marginaleffects`パッケージ（限界効果、`vcov=`引数でカスタム共分散行列を直接渡す）によるLogitクロスチェック。動作検証済み、正式なクロスチェックとして使用中（Issue #68）。**注意**: `marginaleffects::datagrid()`/`slopes(newdata="mean"|"median")`のショートカット文字列は、整数のみの数値列を`FUN_integer`（既定`round(mean(x))`）で丸めてしまい、本実装・statsmodelsの「生の標本平均・中央値」の定義とずれる。`datagrid(FUN_numeric=mean, FUN_integer=mean)`のように両方明示すること（`docs/planning/specs/logit-implementation-notes.md`「R側の限界効果リファレンス」参照）。
   - 注意: `read.csv()`はデフォルトで列名を`make.names()`により書き換える（例: `_group`→`X_group`）。クラスター列等を渡す場合は影響を受けるため、各スクリプトとも`check.names = FALSE`を指定している。
-- **pyfixestのHC2/HC3に関する既知の差異**: pyfixest自身の実装バグ（HC1用の小標本補正をHC2/HC3にも誤って適用）による系統的乖離があり、OLSの正確性検証からは除外し性能比較専用とする。詳細は`testing-policy.md`「リファレンス実装」・`docs/planning/specs/ols-implementation-notes.md`「8. テスト」参照。
+- **pyfixestのHC2/HC3に関する既知の差異**: pyfixest自身の実装バグ（HC1用の小標本補正をHC2/HC3にも誤って適用）による系統的乖離があり、OLSの正確性検証からは除外し性能比較専用とする。詳細は`testing-policy.md`「リファレンス実装」・`docs/spec/ols-spec.md`「テスト」参照。
 
 ## 手順
 

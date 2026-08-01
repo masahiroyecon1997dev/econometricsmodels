@@ -2,8 +2,7 @@
 
 WLSの実装過程で確認した事項のうち、[`wls-api-design.md`](./wls-api-design.md)・
 [`wls-standard-errors.md`](./wls-standard-errors.md)（パラメータ・計算式の設計）には
-含まれない実装ノート。構成は[`ols-implementation-notes.md`](./ols-implementation-notes.md)
-に合わせている。
+含まれない実装ノート。構成は[`ols-spec.md`](../../spec/ols-spec.md)に合わせている。
 
 ## 8. テスト
 

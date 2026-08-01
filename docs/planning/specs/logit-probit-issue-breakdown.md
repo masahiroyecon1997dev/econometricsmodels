@@ -1,6 +1,6 @@
 # Logit / Probit Issueタスク分解
 
-`docs/planning/specs/nonlinear-api-design.md`・`nonlinear-implementation-notes.md`で確定した設計を、OLS実装時の粒度（`ols-implementation-notes.md`のIssue #2〜#22相当。engine型定義→ソルバー→標準誤差種別ごと→適合度統計量→engine_pybind境界→python_packageラッパー→テストという流れ）に倣ってIssue単位に分解する。
+`docs/planning/specs/nonlinear-api-design.md`・`nonlinear-implementation-notes.md`で確定した設計を、OLS実装時の粒度（OLS実装時のIssue #2〜#22相当。engine型定義→ソルバー→標準誤差種別ごと→適合度統計量→engine_pybind境界→python_packageラッパー→テストという流れ）に倣ってIssue単位に分解する。
 
 数式（尤度・スコア・Hessianの導出）の細部はこの時点では確定させず、各Issue本文の中で決める。
 

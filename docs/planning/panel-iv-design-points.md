@@ -1,6 +1,6 @@
 # FE / RE / IV API設計 論点整理（Issue分解前のドラフト）
 
-`ols-api-design.md` / `nonlinear-api-design.md`に続く設計ドキュメントの前段として、Issue分解（各モデル20個程度を想定）に入る前に詰めておくべき論点を洗い出す。各論点は「確定 / 未決定」のステータスを埋めていく形で運用する想定。
+`docs/spec/ols-spec.md` / `nonlinear-api-design.md`に続く設計ドキュメントの前段として、Issue分解（各モデル20個程度を想定）に入る前に詰めておくべき論点を洗い出す。各論点は「確定 / 未決定」のステータスを埋めていく形で運用する想定。
 
 対象: Phase 3（IV: 2SLS, GMM）、Phase 4（FE, RE）。既存実装（OLS/WLS）の規約（List渡し、`ValidationError`/`ComputationError`の2階層、`cov_type`パターン等）を踏襲することを前提とする。
 

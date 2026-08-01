@@ -3,7 +3,8 @@
 [`panel-iv-design-points.md`](../panel-iv-design-points.md)の論点をモデルごとにIssue化したうちの、IV固有の確定事項をまとめる。
 FE/RE共通の設計は[`panel-api-design.md`](./panel-api-design.md)を参照。
 
-**ステータス**: 一部確定（1章: 引数設計、Issue #119／2章: 結果設計、Issue #120）。他は未確定（3章参照）。
+**ステータス**: 一部確定（1章: 引数設計、Issue #119／2章: 結果設計、Issue #120／3章: 標準誤差・検定、
+Issue #121）。他は未確定（4章参照）。
 
 ## 1. 引数設計（Issue #119、確定）
 
@@ -82,9 +83,31 @@ FE/RE共通の設計は[`panel-api-design.md`](./panel-api-design.md)を参照�
 - Sargan/Hansen検定・Wu-Hausman内生性検定は`fit()`の結果本体に含めるか別メソッドにするかを
   含め、Issue #126で確定する（本Issueのスコープ外）。
 
-## 3. その他の論点（未確定）
+## 3. 標準誤差・検定（Issue #121、確定）
 
-- 標準誤差・検定: Issue #121
+### 3.1 `cov_type`のサポート対象
+
+`panel-api-design.md`3.1と同じ範囲（`classical` / `hc0`〜`hc3` / `cluster` / `hac`）を
+サポートする。IVはパネル構造を前提としないため、`hac`はOLSの実装（グローバルな時系列順序に
+対する通常のNewey-West型）をそのまま踏襲してよい（Driscoll-Kraay型は不要）。
+
+- **デフォルトは`"classical"`のまま**（OLS踏襲）。FE/REと異なり`entity`のような常に存在する
+  グルーピング列が無いため、`"cluster"`をデフォルトにする実装上の根拠がない。
+- 2SLSの分散はサンドイッチ型（`(X'PzX)^-1 X'Pz Ω Pz X (X'PzX)^-1`、`Ω`の推定方法が
+  `cov_type`で変わる）。GMMは重み行列の選択（1-step/2-step efficient、Issue #126）と
+  `cov_type`の計算が密接に連動するため、具体的な対応表はIssue #126で確定する。
+
+### 3.2 検定分布
+
+**2SLSとGMMで分ける**。
+- **2SLS**: t分布（OLS系、`panel-api-design.md`3.3と同じ理由）。自由度は`df_resid`を使う。
+- **GMM**: z分布。2-step efficient GMMはM推定量としての漸近正規性が根拠であり、有限標本の
+  t分布としての正当化がない（非線形モデル・MLE系のz分布判断と同じ理由）。
+- Issue #126（2SLSとGMMの実装方針の違い）と接続する決定であり、実装の詳細（GMM目的関数・
+  重み行列の設計）は同Issueで確定する。
+
+## 4. その他の論点（未確定）
+
 - 内部実装・共通化: Issue #122
 - リファレンス実装・テスト方針: Issue #123
 - IV固有論点（2SLS/GMM方式・丁度識別/過剰識別・弱操作変数診断・内生性検定等）: Issue #126

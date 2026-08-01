@@ -44,11 +44,23 @@
     追加できる拡張余地を残す。内部FE推定が失敗した場合はハウスマン関連フィールドを`None`にし
     RE本体の結果は返す。詳細: [`panel-api-design.md`](./specs/panel-api-design.md)2.4節
 
-### 1.3 標準誤差・検定
+### 1.3 標準誤差・検定（確定・Issue #121）
 
-- [ ] `cov_type`のサポート対象をモデルごとに確定（OLSの`classical`/`hc0-3`/`hac`/`cluster`のうちどれを含める・除外するか）
-- [ ] 検定分布（t分布 or z分布）の統一方針。OLS系はt分布、非線形（MLE）はz分布という既存判断をFE/RE/IVにどう当てはめるか
-- [ ] クラスター標準誤差のデフォルト挙動（パネルではエンティティ単位クラスターが慣行だが、デフォルトにするか明示指定必須にするか）
+- [x] `cov_type`のサポート対象をモデルごとに確定（OLSの`classical`/`hc0-3`/`hac`/`cluster`のうちどれを含める・除外するか）
+  - FE/RE/IVとも`classical`/`hc0-3`/`cluster`/`hac`をすべて実装。ただしFE/REの`hac`はOLS流用
+    ではなく**Driscoll-Kraay型のパネルHAC**を別途実装する（エンティティを跨いだ時系列相関の
+    混同を避けるため）。IVの`hac`はパネル構造を前提としないためOLS流用でよい。詳細:
+    [`panel-api-design.md`](./specs/panel-api-design.md)3.1節、
+    [`iv-api-design.md`](./specs/iv-api-design.md)3.1節
+- [x] 検定分布（t分布 or z分布）の統一方針。OLS系はt分布、非線形（MLE）はz分布という既存判断をFE/RE/IVにどう当てはめるか
+  - FE/RE/IVの2SLSはt分布（OLS系）。**IVのGMMのみz分布**（M推定量としての漸近正規性が根拠、
+    有限標本のt分布としての正当化がないため）。詳細:
+    [`panel-api-design.md`](./specs/panel-api-design.md)3.3節、
+    [`iv-api-design.md`](./specs/iv-api-design.md)3.2節
+- [x] クラスター標準誤差のデフォルト挙動（パネルではエンティティ単位クラスターが慣行だが、デフォルトにするか明示指定必須にするか）
+  - **FE/REは`cov_type`のデフォルト自体を`"cluster"`（entity単位）にする**（OLSの`"classical"`
+    デフォルトから意図的に逸脱、fixest前例踏襲）。IVは`entity`のような常在するグルーピング列が
+    無いため`"classical"`のまま。詳細: [`panel-api-design.md`](./specs/panel-api-design.md)3.2節
 
 ### 1.4 内部実装・共通化
 

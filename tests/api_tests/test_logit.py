@@ -9,6 +9,9 @@
 
 from __future__ import annotations
 
+import math
+import random
+
 import polars as pl
 import pytest
 
@@ -305,12 +308,13 @@ def test_non_convergence_raises_computation_error_with_tiny_max_iter(
     """`max_iter`を人為的に1に絞ると`raise_on_non_convergence=True`（既定）で
     `ComputationError`（engine側の`NonConvergence`）。
 
-    Issue #68のtol妥当性検証中に判明した通り、完全分離等の病理的なデータで
-    NonConvergenceを再現しようとすると、勾配ノルム基準が浮動小数点アンダー
-    フローにより誤って「収束済み」と判定してしまう既知の限界がある
-    （`docs/planning/specs/logit-implementation-notes.md`参照）。そのため
-    NonConvergence自体の発生確認は、専用データセットに頼らずmax_iterを
-    人為的に小さくする方法で行う。
+    完全分離等の病理的なデータは、Issue #138の対応により`NonConvergence`では
+    なく専用の`SeparationSuspected`（`ComputationError`のサブタイプ、
+    `test_separation_suspected_raises_computation_error_for_near_separation_data`
+    参照）を返すため、`NonConvergence`自体の発生確認には使えない。そのため
+    `NonConvergence`の発生確認は、専用データセットに頼らずmax_iterを
+    人為的に小さくする方法で行う（Issue #68のtol妥当性検証中に判明した経緯は
+    `docs/planning/specs/logit-implementation-notes.md`参照）。
     """
     with pytest.raises(ComputationError):
         Logit(
@@ -319,6 +323,33 @@ def test_non_convergence_raises_computation_error_with_tiny_max_iter(
             x=["x1", "x2"],
             options=LogitOptions(max_iter=1),
         ).fit()
+
+
+def test_separation_suspected_raises_computation_error_for_near_separation_data():
+    """准完全分離データ（`x1`の真の係数を極端に大きくし、ほぼ全観測がx1の符号だけで
+    完全に分類できるようにしたDGP）は`ComputationError`（engine側の
+    `SeparationSuspected`）。
+
+    勾配ノルム基準の収束判定が浮動小数点アンダーフローにより誤って「収束済み」と
+    判定してしまう問題（Issue #138）が、Python API境界を通しても正しく検出され
+    エラーになることを確認する（`engine`側のRust単体テスト
+    `fit_returns_separation_suspected_error_for_near_separation_data`
+    のAPIレベル版）。
+    """
+    random.seed(42)
+    n = 200
+    beta = (0.0, 100.0, 0.5)
+    x1 = [random.uniform(-2.0, 2.0) for _ in range(n)]
+    x2 = [random.uniform(-1.0, 1.0) for _ in range(n)]
+    y = []
+    for i in range(n):
+        z = beta[0] + beta[1] * x1[i] + beta[2] * x2[i]
+        p = 1.0 / (1.0 + math.exp(-z))
+        y.append(1.0 if random.random() < p else 0.0)
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+
+    with pytest.raises(ComputationError):
+        Logit(df, y="y", x=["x1", "x2"]).fit()
 
 
 def test_raise_on_non_convergence_false_returns_result_without_raising(

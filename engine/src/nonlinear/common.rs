@@ -129,6 +129,16 @@ pub enum MleError {
 /// ギャップの中間（正常な境界ケース側に3倍強のマージンを残す）に位置する。
 const SEPARATION_PARAM_NORM_THRESHOLD: f64 = 100.0;
 
+/// 標準化パラメータ空間でのノルムが[`SEPARATION_PARAM_NORM_THRESHOLD`]を超えるか
+/// （[`MleError::SeparationSuspected`]の判定条件そのもの）。`run_solver`本体から
+/// 切り出しているのは、実際の最適化トラジェクトリ（`beta1`を振っても、ロジスティック
+/// 関数の浮動小数点飽和により`y`の実現値が広い範囲で同一になり、閾値付近の境界データを
+/// 意図的に作るのが難しい）に頼らず、境界値そのものを直接検証できるようにするため
+/// （Issue #138、rust-reviewerの指摘を受けて追加）。
+fn separation_suspected(params: &[f64]) -> bool {
+    l2_norm(params) > SEPARATION_PARAM_NORM_THRESHOLD
+}
+
 /// `y`が`{0.0, 1.0}`の2値でない値を含む場合にエラーを返す（Logit/Probit専用、
 /// `MleError::InvalidBinaryY`のdocコメント参照）。statsmodelsは`Logit`のコンストラクタ
 /// 時点でこの検証を行うが、本実装では`fit()`冒頭（`LogitInput::from_columns`の
@@ -299,7 +309,7 @@ where
     // 収束の判定を取り消す。`raise_on_non_convergence`の扱いは通常の`NonConvergence`と
     // 揃える（`true`なら専用エラーで即座に返す、`false`なら`converged=false`のまま
     // 後続処理を継続する）。
-    if converged && l2_norm(&params) > SEPARATION_PARAM_NORM_THRESHOLD {
+    if converged && separation_suspected(&params) {
         converged = false;
         if raise_on_non_convergence {
             return Err(MleError::SeparationSuspected { n_iter });
@@ -1471,5 +1481,32 @@ mod tests {
             validate_binary_y(&y),
             Err(MleError::InvalidBinaryY { row: 0, value: 2.0 })
         );
+    }
+
+    /// [`SEPARATION_PARAM_NORM_THRESHOLD`]の境界値を直接検証する（実際の最適化
+    /// トラジェクトリに頼らない理由は`separation_suspected`のdocコメント参照）。
+    #[test]
+    fn separation_suspected_is_false_just_below_threshold() {
+        assert!(!separation_suspected(&[
+            SEPARATION_PARAM_NORM_THRESHOLD - 0.1,
+            0.0
+        ]));
+    }
+
+    #[test]
+    fn separation_suspected_is_false_exactly_at_threshold() {
+        // `>`（`>=`ではない）で判定するため、ちょうど閾値と一致する場合はfalse。
+        assert!(!separation_suspected(&[
+            SEPARATION_PARAM_NORM_THRESHOLD,
+            0.0
+        ]));
+    }
+
+    #[test]
+    fn separation_suspected_is_true_just_above_threshold() {
+        assert!(separation_suspected(&[
+            SEPARATION_PARAM_NORM_THRESHOLD + 0.1,
+            0.0
+        ]));
     }
 }

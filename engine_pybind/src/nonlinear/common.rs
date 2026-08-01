@@ -31,7 +31,8 @@ pub(crate) fn mle_error_to_pyerr(err: MleError) -> PyErr {
         | MleError::InvalidBinaryY { .. } => ValidationError::new_err(err.to_string()),
         MleError::NonConvergence { .. }
         | MleError::SingularHessian
-        | MleError::SingularOpgMatrix => ComputationError::new_err(err.to_string()),
+        | MleError::SingularOpgMatrix
+        | MleError::SeparationSuspected { .. } => ComputationError::new_err(err.to_string()),
     }
 }
 

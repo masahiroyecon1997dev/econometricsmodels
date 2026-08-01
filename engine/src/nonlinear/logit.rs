@@ -2436,6 +2436,113 @@ mod tests {
         assert!(!estimator.converged());
     }
 
+    /// 准完全分離データ（`x1`の真の係数を極端に大きくし、ほぼ全観測がx1の符号だけで
+    /// 完全に分類できるようにしたDGP）で、勾配ノルム基準では収束済みと誤判定されず
+    /// `SeparationSuspected`を返すことを確認する（Issue #138）。
+    ///
+    /// 疑似乱数生成は`benchmark/nonlinear/generate_logit_datasets.py`の
+    /// `_NEAR_SEPARATION_BETA1`と同じ設計思想（真のlogit DGPで生成）だが、
+    /// このケースを確実に再現するため既存の`near_separation`シナリオ
+    /// （`beta1=20`、意図的に境界ケースに留めてある）よりさらに極端な`beta1=100`を使う。
+    /// 実機診断で、この`beta1`だと標準化パラメータ空間でのノルムが約1282に達し、
+    /// `near_separation`シナリオ（約31）を大きく上回ることを確認済み
+    /// （`SEPARATION_PARAM_NORM_THRESHOLD`のdocコメント参照）。
+    /// `beta1`（`x1`の真の係数）を指定して准分離データを生成する。`beta1`が大きいほど
+    /// `y`が`x1`の符号だけで決まりやすくなる（`SeparationSuspected`のテスト用、
+    /// `beta1=100`）。小さい`beta1`（例: `20`）は`benchmark/nonlinear/
+    /// generate_logit_datasets.py`の`near_separation`シナリオ（意図的に境界ケースに
+    /// 留めてある、既存の合格テストが使う）と同じ設計思想の、正常に収束するデータになる。
+    fn near_separation_input_with_beta1(beta1: f64) -> LogitInput {
+        fn lcg(seed: &mut u64) -> f64 {
+            *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((*seed >> 11) as f64) / ((1u64 << 53) as f64)
+        }
+
+        let n = 200;
+        let mut seed = 42u64;
+        let beta = [0.0, beta1, 0.5];
+        let x1: Vec<f64> = (0..n).map(|_| lcg(&mut seed) * 4.0 - 2.0).collect();
+        let x2: Vec<f64> = (0..n).map(|_| lcg(&mut seed) * 2.0 - 1.0).collect();
+        let y: Vec<f64> = (0..n)
+            .map(|i| {
+                let z = beta[0] + beta[1] * x1[i] + beta[2] * x2[i];
+                let p = 1.0 / (1.0 + (-z).exp());
+                if lcg(&mut seed) < p { 1.0 } else { 0.0 }
+            })
+            .collect();
+
+        LogitInput::from_columns(
+            &y,
+            &[x1, x2],
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap()
+    }
+
+    fn near_separation_input() -> LogitInput {
+        near_separation_input_with_beta1(100.0)
+    }
+
+    #[test]
+    fn fit_returns_separation_suspected_error_for_near_separation_data() {
+        for method in [Method::Newton, Method::Bfgs, Method::Lbfgs] {
+            let result = LogitEstimator::fit(
+                near_separation_input(),
+                method,
+                35,
+                1e-6,
+                true,
+                CovType::Classical,
+                0.95,
+            );
+            assert!(
+                matches!(result, Err(MleError::SeparationSuspected { .. })),
+                "method={:?}, result={:?}",
+                method,
+                result
+            );
+        }
+    }
+
+    #[test]
+    fn fit_returns_unconverged_result_for_near_separation_data_without_raising() {
+        let estimator = LogitEstimator::fit(
+            near_separation_input(),
+            Method::Newton,
+            35,
+            1e-6,
+            false,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        assert!(!estimator.converged());
+    }
+
+    /// `beta1=20`（`SeparationSuspected`を誤検知させてはいけない境界ケース、`tests/
+    /// api_tests/fixtures/benchmarks/data/logit_near_separation.csv`と同じ設計思想）で
+    /// 3手法とも正常に収束することを固定するリグレッションテスト（rust-reviewer指摘、
+    /// Issue #138）。`SEPARATION_PARAM_NORM_THRESHOLD`を将来変更する際にこのテストが
+    /// 壊れないか確認することで、閾値の調整が既存の合格ケースを誤検知させないことを保証する。
+    #[test]
+    fn fit_converges_normally_for_mild_near_separation_data_across_all_methods() {
+        for method in [Method::Newton, Method::Bfgs, Method::Lbfgs] {
+            let result = LogitEstimator::fit(
+                near_separation_input_with_beta1(20.0),
+                method,
+                35,
+                1e-6,
+                true,
+                CovType::Classical,
+                0.95,
+            );
+            assert!(result.is_ok(), "method={:?}, result={:?}", method, result);
+            assert!(result.unwrap().converged(), "method={:?}", method);
+        }
+    }
+
     /// `at="overall"`（AME）のヤコビアン（`dydx_and_jacobian`が`overall_w_and_s`の
     /// 出力から計算する`∂dydx_j/∂θ_m`）を、`overall_w_and_s`が返す`w`を`θ`の関数として
     /// 中心差分で数値微分した値と比較する。`hessian_matches_numerical_differentiation_

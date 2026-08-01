@@ -1,8 +1,8 @@
 # OLS: パフォーマンス比較（statsmodels/pyfixest）
 
-Issue #28で実施した、`OLS(...).fit()`（Rust engine + PyO3）とPython製リファレンス実装（statsmodels/pyfixest）の実行時間・メモリ使用量比較の記録。CLAUDE.md 1章「計算コアはRustで実装し高速化」の狙いを定量的に裏付けることが目的。
+`OLS(...).fit()`（Rust engine + PyO3）とPython製リファレンス実装（statsmodels/pyfixest）の実行時間・メモリ使用量比較の記録。CLAUDE.md 1章「計算コアはRustで実装し高速化」の狙いを定量的に裏付けることが目的。
 
-再実行可能なスクリプトは`benchmark/compare_performance.py`（コミット対象）。生の計測結果JSONはコミットしない（`.gitignore`の`docs/planning/specs/_*.json`参照。実行環境依存で再現性が低いため）。
+再実行可能なスクリプトは`benchmark/compare_performance.py`（コミット対象）。生の計測結果JSONはコミットしない（`.gitignore`の`docs/spec/_*.json`参照。実行環境依存で再現性が低いため）。
 
 ## 最重要の教訓: engineは必ずreleaseビルドで計測する
 
@@ -79,7 +79,7 @@ Issue #28で実施した、`OLS(...).fit()`（Rust engine + PyO3）とPython製�
 
 - **classical/HC1/cluster**: 全nでengineがstatsmodels/pyfixestと同等以上に高速。特にnが大きいほど差が開く（n=1,000,000のclassicalでengineはstatsmodelsの1.9倍、pyfixestの2.6倍速い）。CLAUDE.mdの設計意図を裏付ける結果。
 - **HAC**: n=1,000,000で3者ほぼ互角（engine 1.76s、statsmodels 1.70s、pyfixest 1.43s）。debugビルド時の壊滅的な結果からは一変したが、pyfixestよりはまだ1.2倍程度遅い。
-- **HACのkスケーリングに気になる点が残る**: n=10,000固定でk=2→20に増やすと、engineは0.0104s→0.0914s（**約8.8倍**）に対しpyfixestは0.0122s→0.0216s（**約1.8倍**）に留まる。絶対的な遅さはdebugビルドの罠が主因で解消されたが、この相対的なk方向の伸びの違いは実装差（アルゴリズム上の余地）を示唆している可能性がある。**Issue #29（engineコードレビュー）に引き継ぎ事項として記載した**。
+- **HACのkスケーリングに気になる点が残る**: n=10,000固定でk=2→20に増やすと、engineは0.0104s→0.0914s（**約8.8倍**）に対しpyfixestは0.0122s→0.0216s（**約1.8倍**）に留まる。絶対的な遅さはdebugビルドの罠が主因で解消されたが、この相対的なk方向の伸びの違いは実装差（アルゴリズム上の余地）を示唆している可能性がある（下記「今後の検討事項」参照）。
 - **メモリはengineが一貫して軽い**: 全cov_type・全nでengineのピークRSSが最小（例: n=1,000,000でengine 400〜473MB、statsmodels 538〜631MB、pyfixest 1,202〜1,355MB）。pyfixestはnumba/pandas等の依存が重く、常にengineの約3倍のメモリを使う。
 - **小規模n（1,000）ではPyO3/Arrow変換オーバーヘッドの影響は小さい**: classicalでengine 0.0015sとstatsmodels/pyfixestより既に高速。当初懸念していた「小規模では変換オーバーヘッドが支配的で遅くなる」という仮説は、releaseビルドでは当てはまらなかった（debugビルドの結果を見て一時的にそう誤解していた）。
 
@@ -97,10 +97,10 @@ uv run maturin develop --release
 # 2. フルスイープを実行
 cd benchmark
 uv run python compare_performance.py --repeats 3 \
-    --output ../docs/planning/specs/_ols_performance_results.json
+    --output ../docs/spec/_ols_performance_results.json
 ```
 
-## Issue #29への引き継ぎ事項
+## 今後の検討事項
 
-- **HACのkスケーリング**: n=10,000固定でk=2→20の伸びが、engine（約8.8倍）はpyfixest（約1.8倍）より大きい。`hac_cov_params`のNewey-West計算（Issue #29が既に着目している三重ループ）のk方向の計算量・実装を重点的に見る価値がある。
-- **releaseビルドでの再計測が前提**: コードレビューでの改善見込みの見積もりは、debugビルドの数値（誤り）ではなく本ドキュメントのreleaseビルド数値を基準にすること。
+- **HACのkスケーリング**（上記「考察」参照）: `hac_cov_params`のNewey-West計算（三重ループ）のk方向の計算量・実装を重点的に見る価値がある。
+- **releaseビルドでの再計測が前提**: 改善見込みの見積もりは、debugビルドの数値（誤り）ではなく本ドキュメントのreleaseビルド数値を基準にすること。

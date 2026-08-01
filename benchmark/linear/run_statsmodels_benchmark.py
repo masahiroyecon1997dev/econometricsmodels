@@ -2,7 +2,7 @@
 
 OLS/WLSの主リファレンスとして使用する（classical/HC0-3/cluster/HAC、AIC/BIC/log-likelihood、
 ロバストWald検定まで一貫してカバーできるため）。pyfixestは固定効果が絡む
-Phase4以降で中心的に使う想定（`docs/planning/specs/ols-implementation-notes.md`参照）。
+Phase4以降で中心的に使う想定（`docs/spec/ols-spec.md`「テスト」参照）。
 `--weight-col`を指定すると`smf.wls`を使う（WLS用、`docs/planning/specs/wls-standard-errors.md`
 参照。分散共分散行列の計算式自体はOLSと共通でありstatsmodels側も同じ実装のため、
 このスクリプト自体はOLS/WLSで分岐せず共通で使う）。
@@ -93,7 +93,7 @@ def run(
 
     # statsmodelsはcov_type="nonrobust"以外（HC0-3/cluster/HAC）でuse_t=Falseが既定
     # （p値・信頼区間に正規分布を使う）。本プロジェクトはcov_typeによらずt分布で統一する
-    # 方針のため（docs/planning/specs/ols-api-design.md「検定分布」）、
+    # 方針のため（docs/spec/ols-spec.md「標準誤差」）、
     # 明示的にuse_t=Trueを指定する。
     fit_kwargs: dict = {"cov_type": sm_cov_type, "use_t": True}
     if sm_cov_type == "cluster":

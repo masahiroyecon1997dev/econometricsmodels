@@ -11,3 +11,5 @@ repository.workspace = true
 faer = { workspace = true }
 thiserror = { workspace = true }
 statrs = { workspace = true }
+argmin = { workspace = true }
+argmin-math = { workspace = true }

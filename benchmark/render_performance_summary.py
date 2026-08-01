@@ -119,7 +119,7 @@ def render(report: dict) -> str:
         "> GitHub Actionsランナーは共有インフラのため実行時間が変動しうる。"
         "CI上の数値は参考値であり、ローカルdevcontainerでの数値ほど"
         "安定しない前提で読むこと"
-        "（`docs/planning/specs/ols-performance-notes.md`参照）。",
+        "（`docs/spec/ols-performance-notes.md`参照）。",
         "",
     ]
 

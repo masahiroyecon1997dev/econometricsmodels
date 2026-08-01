@@ -1,22 +1,22 @@
 # Logit / Probit Issueタスク分解
 
-`docs/planning/specs/nonlinear-api-design.md`・`nonlinear-implementation-notes.md`で確定した設計を、OLS実装時の粒度（`ols-implementation-notes.md`のIssue #2〜#22相当。engine型定義→ソルバー→標準誤差種別ごと→適合度統計量→engine_pybind境界→python_packageラッパー→テストという流れ）に倣ってIssue単位に分解する。
+`docs/planning/specs/nonlinear-api-design.md`・`nonlinear-implementation-notes.md`で確定した設計を、OLS実装時の粒度（OLS実装時のIssue #2〜#22相当。engine型定義→ソルバー→標準誤差種別ごと→適合度統計量→engine_pybind境界→python_packageラッパー→テストという流れ）に倣ってIssue単位に分解する。
 
 数式（尤度・スコア・Hessianの導出）の細部はこの時点では確定させず、各Issue本文の中で決める。
 
 ## 全体方針
 
-- **discrete_choice系統の共通基盤（A）を先に作り、Logit（B）・Probit（C）で使い回す**。OLSは1手法しかなかったため系統共通化の判断が不要だったが、Logit/Probitは`MleError`・ソルバー実行・`cov_type`共通行列演算を共有する設計（`nonlinear-implementation-notes.md`確定済み）のため、先に切り出す
+- **nonlinear系統の共通基盤（A）を先に作り、Logit（B）・Probit（C）で使い回す**。OLSは1手法しかなかったため系統共通化の判断が不要だったが、Logit/Probitは`MleError`・ソルバー実行・`cov_type`共通行列演算を共有する設計（`nonlinear-implementation-notes.md`確定済み）のため、先に切り出す
 - **Logit→Probitの順で着手**（`nonlinear-api-design.md`1章の優先順位、かつLogitの尤度・勾配・Hessianの方が解析的に単純なため、共通基盤を検証しながら実装する1本目として適している）
 - Probit側（C）はLogitで確立したパターンをなぞるため、B・Cはほぼ1:1で対応する。Probit単体でのIssue数は16件（目安15〜20の範囲内）
 
 ---
 
-## A. 共通基盤（discrete_choice系統、engine側）
+## A. 共通基盤（nonlinear系統、engine側）
 
 Issue化済み（2026-07-20）:
 
-- [x] **A1. discrete_choice系統の共通エラー型（`MleError`）をthiserrorで定義** → [#51](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/51)
+- [x] **A1. nonlinear系統の共通エラー型（`MleError`）をthiserrorで定義** → [#51](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/51)
   `nonlinear-implementation-notes.md`のバリアント一覧（`NonConvergence`/`InsufficientObservations`/`InvalidConfidenceLevel`/`InvalidMaxIter`/`MissingClusterColumn`/`InsufficientClusters`/`SingularHessian`/`ComputationFailed`/Tobit専用の`InvalidCensoringBounds`）を実装。Tobit専用分はバリアントだけ先に用意し、実際に使うのはTobit実装時
 - [x] **A2. common.rs: ソルバー実行の共通化** → [#52](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/52)
   `method`（`"newton"`/`"bfgs"`/`"lbfgs"`）文字列→argminソルバーへのディスパッチ。設計行列の内部標準化・逆変換、`max_iter`・`tol`（勾配ノルム基準）による収束判定、収束フラグ・反復回数の返却
@@ -68,7 +68,7 @@ Issue化済み（2026-07-20）:
   B12の受け口と`LogitEstimator::fit`を接続。`MleError` → `ValidationError`/`ComputationError`変換
   - 依存: B11（#64）, B12（#65）
 - [x] **B14. python_package: Logitラッパー（`Logit`/`LogitResults`）実装** → [#67](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/67)
-  `discrete_choice/logit.py`。`coef_table()`・`marginal_effects()`・`predict()`・`pred_table()`のPython側ラッパー
+  `nonlinear/logit.py`。`coef_table()`・`marginal_effects()`・`predict()`・`pred_table()`のPython側ラッパー
   - 依存: B13（#66）
 - [x] **B15. tests/api_tests: statsmodels/R glmとの数値照合ベンチマーク作成** → [#68](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/68)
   `/test-new`スキル使用。収束判定`tol`の妥当性検証もここで行う（`nonlinear-implementation-notes.md`の暫定事項）

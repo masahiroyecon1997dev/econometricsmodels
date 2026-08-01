@@ -1,15 +1,10 @@
 # WLS
 
-`WLS`は`sqrt(weight)`変換したデータに`OLS`のソルバーをそのまま適用する実装のため、
-正規方程式ソルバー・標準誤差の一般形（HC0-3・クラスター・HAC）・推定オプション
-（`OLSOptions`）は[OLS](ols.md)と共通です。ここでは重み（analytic weight）の
-意味論とWLS固有のAPIのみを説明します。
+`WLS` is implemented by applying `OLS`'s solver directly to `sqrt(weight)`-transformed data, so the normal-equations solver, the general form of standard errors (HC0-3 / cluster / HAC), and the estimation options (`OLSOptions`) are shared with [OLS](ols.md). This page only covers the semantics of weights (analytic weights) and the API specific to WLS.
 
-## 重み（analytic weight）
+## Weights (analytic weight)
 
-`weight`引数には、`data`内の重み列の列名を指定します。分散の逆数に比例する
-analytic weightとして扱われ、正規化（合計を1にする等）は不要です。0以下の値・
-欠損値・NaNを含む場合は`ValidationError`になります。
+The `weight` argument specifies the column name of the weight column in `data`. Weights are treated as analytic weights proportional to the inverse of the variance, and do not need to be normalized (e.g. to sum to 1). Values less than or equal to 0, missing values, or NaN raise a `ValidationError`.
 
 ::: econometricsmodels.WLS
     options:

@@ -63,7 +63,7 @@ RUN apt update && apt install -y --no-install-recommends \
     r-base-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN Rscript -e 'install.packages(c("fixest", "plm", "ivreg", "jsonlite", "languageserver"), repos = "https://cloud.r-project.org")'
+RUN Rscript -e 'install.packages(c("fixest", "plm", "ivreg", "jsonlite", "languageserver", "marginaleffects"), repos = "https://cloud.r-project.org")'
 
 # 以降は一般ユーザーで実行
 USER ${USERNAME}

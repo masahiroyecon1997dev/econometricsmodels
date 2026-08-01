@@ -11,6 +11,10 @@
 このスクリプトは呼ばれない（フィクスチャJSON同様、意図的に更新する場合のみ
 手動で再実行する）。
 
+`generate_synthetic_datasets.py`（連続y、OLS/WLS用）に加え、`nonlinear/
+generate_logit_datasets.py`（2値y、真のlogit DGP、Logit/Probit用）も同様に
+`logit_<scenario>.csv`として固定する（Issue #68）。
+
 **Wooldridgeデータセットはここでは固定しない**（`wooldridge`パッケージ自体は
 MITライセンスだが、同梱される実データの著作権はWooldridge『Introductory
 Econometrics』教科書側にある可能性があり、フィルタ後の部分集合であっても
@@ -27,9 +31,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
-from generate_synthetic_datasets import generate_dataset
+sys.path.insert(
+    0, str(Path(__file__).resolve().parent / "nonlinear")
+)  # benchmark/nonlinear/ を import path に追加（generate_logit_datasets）
+
+from generate_logit_datasets import generate_logit_dataset  # noqa: E402
+from generate_synthetic_datasets import generate_dataset  # noqa: E402
 
 # generate_ols_fixtures.py / generate_wls_fixtures.py のNUMERIC_SCENARIOSに
 # perfect_multicollinearity（ComputationErrorパスのテストで使う、数値比較はしない）
@@ -42,11 +52,33 @@ SYNTHETIC_SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "perfect_multicollinearity",
+    "scale_variance",
+    "high_condition_number",
+]
+
+# generate_logit_fixtures.pyのNUMERIC_SCENARIOSに、エラーパス確認用の
+# perfect_multicollinearityを加えた全シナリオ（generate_logit_datasets.py参照）。
+LOGIT_SCENARIOS = [
+    "baseline",
+    "small_n",
+    "moderate_multicollinearity",
+    "high_condition_number",
+    "near_separation",
+    "perfect_multicollinearity",
+    "scale_variance",
 ]
 
 # cluster_g2ケース（Issue #100）専用。k=1だとrng呼び出し順序が変わるため
 # baseline（既定k=3）とは別データになる。
 SYNTHETIC_K1_SCENARIOS = ["baseline"]
+
+# n=k+1（自由度1ちょうど）の成功パス確認専用（Issue #101）。SCENARIOSには
+# 追加せず、cluster_g2ケースと同様にbaselineをn=k+1でオーバーライドした
+# 専用データとして固定する。kはbaseline既定と揃え（generate_dataset()の
+# k=3、つまりx1..x3）。engine側の`k`は定数項を含む設計行列の列数
+# （= generate_dataset()のk + 1 = 4）のため、df_resid=1ちょうどにするには
+# n = 4 + 1 = 5 が必要（n = generate_dataset()のk + 2）。
+SYNTHETIC_BOUNDARY_DF1_SCENARIOS = ["baseline"]
 
 
 def freeze(output_dir: Path) -> None:
@@ -63,8 +95,23 @@ def freeze(output_dir: Path) -> None:
         df.write_csv(output_dir / f"synthetic_{scenario}_k1.csv")
         true_betas[f"{scenario}_k1"] = true_beta.tolist()
 
+    for scenario in SYNTHETIC_BOUNDARY_DF1_SCENARIOS:
+        df, true_beta = generate_dataset(scenario, n=5, k=3)
+        df.write_csv(output_dir / f"synthetic_{scenario}_df1.csv")
+        true_betas[f"{scenario}_df1"] = true_beta.tolist()
+
     (output_dir / "synthetic_true_beta.json").write_text(
         json.dumps(true_betas, indent=2)
+    )
+
+    logit_true_betas: dict[str, list[float]] = {}
+    for scenario in LOGIT_SCENARIOS:
+        df, true_beta = generate_logit_dataset(scenario)
+        df.write_csv(output_dir / f"logit_{scenario}.csv")
+        logit_true_betas[scenario] = true_beta.tolist()
+
+    (output_dir / "logit_true_beta.json").write_text(
+        json.dumps(logit_true_betas, indent=2)
     )
 
     print(f"wrote frozen datasets to {output_dir}")

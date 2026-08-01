@@ -4,6 +4,7 @@ updates:
   # engine/engine_pybind（workspaceルート1つでCargo.lock全体をカバーする）
   - package-ecosystem: "cargo"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     cooldown:
@@ -15,6 +16,7 @@ updates:
   # test/benchmark/dev/docs全グループが対象になる）。
   - package-ecosystem: "uv"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     cooldown:
@@ -23,6 +25,7 @@ updates:
   # .github/workflows/配下の全ワークフローで使っているGitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     cooldown:

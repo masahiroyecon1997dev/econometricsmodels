@@ -16,14 +16,18 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
-use super::common::{mat_to_vec, ols_error_to_pyerr};
+use super::common::{least_squares_error_to_pyerr, mat_to_vec};
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
 use crate::errors::ValidationError;
+use crate::validation::{
+    validate_no_const_collision, validate_no_duplicate_roles, validate_no_duplicate_x,
+    validate_x_non_empty,
+};
 
 /// Estimation options for OLS.
 ///
-/// See `docs/planning/specs/ols-api-design.md` and `docs/planning/specs/ols-standard-errors.md`
-/// for the rationale behind each field's meaning and default value.
+/// See `docs/spec/ols-spec.md` ("API引数") for the rationale behind each
+/// field's meaning and default value.
 // `fit_ols`がPython側から`OLSOptions`インスタンスを引数として受け取るため、
 // `FromPyObject`実装を明示的に維持する（pyo3 0.28以降、Cloneを実装する#[pyclass]の
 // FromPyObject自動導出はopt-inに変更されたため）。
@@ -116,36 +120,116 @@ impl OLSOptions {
 
 /// Estimation results for OLS.
 ///
-/// Structured data only (no `summary()`); see `docs/planning/specs/ols-api-design.md`
-/// section 5. Row-oriented table construction (e.g. a `coef_table`) is left to
+/// Structured data only (no `summary()`); see `docs/spec/ols-spec.md`
+/// ("結果構造体"). Row-oriented table construction (e.g. a `coef_table`) is left to
 /// `python_package`. All array-valued fields (`params`, `std_errors`, etc.) share the
 /// same order as `param_names`.
 // `OLSResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`OLSOptions`の`from_py_object`とは
 // 対照的。pyo3 0.28以降、Cloneを実装する#[pyclass]のFromPyObject自動導出はopt-inになった）。
-#[pyclass(get_all, skip_from_py_object, module = "econometricsmodels._lib")]
+//
+// `get_all`（クラス単位で全フィールドに#[pyo3(get)]を付与する）ではなく、フィールドごとに
+// 個別`#[pyo3(get)]`を付ける方式にしている。`fitted_values`（`predict(new_data=None)`が
+// 返す値のキャッシュ、`docs/spec/ols-spec.md`「predict()」）はPython側に独立したプロパティとして
+// 公開しない設計上の決定のため、この1フィールドだけ`#[pyo3(get)]`を付けずに残す必要がある。
+#[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct OLSResult {
+    #[pyo3(get)]
     pub params: Vec<f64>,
+    #[pyo3(get)]
     pub std_errors: Vec<f64>,
+    #[pyo3(get)]
     pub t_stats: Vec<f64>,
+    #[pyo3(get)]
     pub p_values: Vec<f64>,
+    #[pyo3(get)]
     pub conf_lower: Vec<f64>,
+    #[pyo3(get)]
     pub conf_upper: Vec<f64>,
+    #[pyo3(get)]
     pub param_names: Vec<String>,
+    #[pyo3(get)]
     pub residuals: Vec<f64>,
+    #[pyo3(get)]
     pub dep_var_name: String,
+    #[pyo3(get)]
     pub nobs: usize,
     /// Standard error type actually used (echoes `OLSOptions.cov_type`, normalized to
     /// lowercase; e.g. `"classical"`, `"hc1"`, `"hac"`, `"cluster"`).
+    #[pyo3(get)]
     pub cov_type: String,
+    #[pyo3(get)]
     pub r_squared: f64,
+    #[pyo3(get)]
     pub r_squared_adj: f64,
+    #[pyo3(get)]
     pub f_statistic: f64,
+    #[pyo3(get)]
     pub f_p_value: f64,
+    #[pyo3(get)]
     pub log_likelihood: f64,
+    #[pyo3(get)]
     pub aic: f64,
+    #[pyo3(get)]
     pub bic: f64,
+    /// Fitted values for the training data (`ŷ = Xβ̂`), cached at fit time.
+    /// Not exposed to Python directly; only `predict(new_data=None)` reads it
+    /// (`docs/spec/ols-spec.md` "predict()" — the Python-facing surface is unified into a
+    /// single `predict()` method rather than a separate `fitted_values` property).
+    fitted_values: Vec<f64>,
+    /// Whether `fit()` was called with `include_intercept=True`. Not exposed to
+    /// Python; only `predict()` reads it to decide whether to auto-prepend a
+    /// constant column for out-of-sample data.
+    ///
+    /// This must NOT be inferred from `param_names[0] == "const"`: when
+    /// `include_intercept=False`, a user-supplied `x` column may legitimately be
+    /// named `"const"` (the collision check in `fit()` only rejects that name when
+    /// `include_intercept=True`), which would make such an inference silently
+    /// wrong instead of erroring.
+    has_intercept: bool,
+}
+
+#[pymethods]
+impl OLSResult {
+    /// Predicted values.
+    ///
+    /// With `new_data=None` (default), returns the fitted values for the training
+    /// data used in `fit()`. With `new_data` given, computes out-of-sample
+    /// predictions for a new polars DataFrame: it must contain columns with the same
+    /// names as the `x` columns passed at fit time (matched by name; column order
+    /// does not matter). If `include_intercept=True` was used at fit time, the
+    /// constant column is added automatically and must not be included in `new_data`.
+    ///
+    /// # Errors
+    /// - A required `x` column is missing from `new_data`, cannot be cast to a
+    ///   numeric type, or contains missing/NaN/infinite values: `ValidationError`
+    ///   (same validation as `fit()`'s column extraction, via `extract_f64_column`).
+    #[pyo3(signature = (new_data=None))]
+    fn predict(&self, new_data: Option<PyDataFrame>) -> PyResult<Vec<f64>> {
+        let Some(new_data) = new_data else {
+            return Ok(self.fitted_values.clone());
+        };
+
+        let df: DataFrame = new_data.into();
+        let has_intercept = self.has_intercept;
+        let x_names: &[String] = if has_intercept {
+            &self.param_names[1..]
+        } else {
+            &self.param_names[..]
+        };
+
+        let mut x_columns: Vec<Vec<f64>> = Vec::with_capacity(x_names.len());
+        for name in x_names {
+            x_columns.push(extract_f64_column(&df, name)?);
+        }
+
+        Ok(engine::linear::ols::predict_new_data(
+            &self.params,
+            has_intercept,
+            &x_columns,
+        ))
+    }
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `options` を検証し、
@@ -160,8 +244,8 @@ pub struct OLSResult {
 ///   先に、分かりやすいメッセージで弾く）
 /// - `cov_type`の文字列が不正な場合は`ValidationError`
 /// - それ以外（観測数不足・信頼水準の範囲外・特異行列・クラスター数不足・
-///   `hac_lags`の範囲外・クラスターキー未指定等）は`engine::linear::ols::OlsError`から
-///   `ols_error_to_pyerr`で変換
+///   `hac_lags`の範囲外・クラスターキー未指定等）は`engine::linear::common::LeastSquaresError`から
+///   `least_squares_error_to_pyerr`で変換
 pub fn fit(
     data: PyDataFrame,
     y: String,
@@ -171,85 +255,41 @@ pub fn fit(
     let df: DataFrame = data.into();
     let cov_type_lower = options.cov_type.to_lowercase();
 
-    if x.is_empty() {
-        return Err(ValidationError::new_err(
-            "x must contain at least one column name",
-        ));
-    }
-
-    // ── y/xの重複チェック（完全な多重共線性を早期に、分かりやすいエラーで防ぐ）──
-    if x.contains(&y) {
-        return Err(ValidationError::new_err(format!(
-            "the column '{y}' specified as y is also included in x"
-        )));
-    }
-    {
-        let mut seen = std::collections::HashSet::new();
-        for name in &x {
-            if !seen.insert(name) {
-                return Err(ValidationError::new_err(format!(
-                    "column '{name}' is specified more than once in x"
-                )));
-            }
-        }
-    }
-    if options.include_intercept && x.iter().any(|name| name == "const") {
-        return Err(ValidationError::new_err(
-            "when include_intercept=true, x cannot contain a column named 'const' \
-             (it collides with the automatically added intercept)",
-        ));
-    }
+    // 完全な多重共線性を早期に、分かりやすいエラーで防ぐ（`validation.rs`に集約、
+    // WLS/Logitと共通、`.claude/rules/rust-style.md`参照）。
+    validate_x_non_empty(&x)?;
+    validate_no_duplicate_roles(&[("y", &y)], &x)?;
+    validate_no_duplicate_x(&x)?;
+    validate_no_const_collision(&x, options.include_intercept)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
     let y_slice = extract_f64_column(&df, &y)?;
-    let n = y_slice.len();
 
-    // ── x列の抽出（列ごとに検証しつつスライスを集める）────────────────────
+    // ── x列の抽出 ──────────────────────────────────────────────────────
     let mut x_slices: Vec<Vec<f64>> = Vec::with_capacity(x.len());
     for col_name in &x {
-        let s = extract_f64_column(&df, col_name)?;
-        if s.len() != n {
-            return Err(ValidationError::new_err(format!(
-                "row count of column '{col_name}' does not match y (y: {n} rows, {col_name}: {} rows)",
-                s.len()
-            )));
-        }
-        x_slices.push(s);
+        x_slices.push(extract_f64_column(&df, col_name)?);
     }
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
     // `cluster_col`/`time_col`が指定されていても、cov_typeがcluster/hacでなければ
-    // 無視する（`docs/planning/specs/ols-standard-errors.md`3.2/3.3節）。
+    // 無視する（`docs/spec/ols-spec.md`「標準誤差」のHAC参照）。
     let cluster_groups = if cov_type_lower == "cluster" {
-        match &options.cluster_col {
-            Some(col_name) => {
-                let ids = extract_group_key_column(&df, col_name)?;
-                if ids.len() != n {
-                    return Err(ValidationError::new_err(format!(
-                        "row count of cluster column '{col_name}' does not match y"
-                    )));
-                }
-                Some(ids)
-            }
-            None => None,
-        }
+        options
+            .cluster_col
+            .as_ref()
+            .map(|col_name| extract_group_key_column(&df, col_name))
+            .transpose()?
     } else {
         None
     };
 
     let time_order = if cov_type_lower == "hac" {
-        match &options.time_col {
-            Some(col_name) => {
-                let values = extract_f64_column(&df, col_name)?;
-                if values.len() != n {
-                    return Err(ValidationError::new_err(format!(
-                        "row count of time column '{col_name}' does not match y"
-                    )));
-                }
-                Some(values)
-            }
-            None => None,
-        }
+        options
+            .time_col
+            .as_ref()
+            .map(|col_name| extract_f64_column(&df, col_name))
+            .transpose()?
     } else {
         None
     };
@@ -276,9 +316,9 @@ pub fn fit(
     };
 
     let input = OlsInput::from_columns(&y_slice, &x_slices, x, options.include_intercept, y)
-        .map_err(ols_error_to_pyerr)?;
-    let estimator =
-        OlsEstimator::fit(input, cov_type, options.confidence_level).map_err(ols_error_to_pyerr)?;
+        .map_err(least_squares_error_to_pyerr)?;
+    let estimator = OlsEstimator::fit(input, cov_type, options.confidence_level)
+        .map_err(least_squares_error_to_pyerr)?;
 
     Ok(OLSResult {
         params: mat_to_vec(estimator.params()),
@@ -299,5 +339,7 @@ pub fn fit(
         log_likelihood: estimator.log_likelihood(),
         aic: estimator.aic(),
         bic: estimator.bic(),
+        fitted_values: mat_to_vec(&estimator.fitted_values()),
+        has_intercept: estimator.input().has_intercept(),
     })
 }

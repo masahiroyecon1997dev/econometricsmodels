@@ -4,71 +4,18 @@
 //! `engine_pybind`はpolars DataFrameから列ごとに`Vec<f64>`を抽出するところまでを担い
 //! （`column_extraction::extract_f64_column`）、それらの列を本モジュールの
 //! `OlsInput::from_columns`に渡す。`faer::Mat`への組み立て（切片列の自動追加を含む）は
-//! ここ（engine側）の責務とする。詳細は`docs/planning/specs/ols-api-design.md`
-//! 「OLSOptions」の`include_intercept`の項を参照。
+//! ここ（engine側）の責務とする。詳細は`docs/spec/ols-spec.md`
+//! 「API引数」の`include_intercept`の項を参照。
 
 use faer::linalg::matmul::matmul;
 use faer::prelude::{Solve, SolveLstsq};
 use faer::{Accum, Mat, Par, Side};
 use statrs::distribution::{ContinuousCDF, FisherSnedecor, StudentsT};
-use thiserror::Error;
 
-/// OLSの計算過程で発生しうるエラー。
-///
-/// `engine`はPyO3を知らないため、Python例外への変換は`engine_pybind`側で行う
-/// （`.claude/rules/rust-style.md`「エラーハンドリング」参照）。バリアントと
-/// Python例外の対応は`docs/planning/specs/ols-implementation-notes.md`の表を参照。
-///
-/// 【スコープの注意】欠損値（null）・`time_col`の数値キャスト失敗等、polarsの
-/// 列データそのものに起因する検証は`engine_pybind::column_extraction`の責務であり、
-/// ここには含めない（`engine`は`&[f64]`等、既にクリーンな値しか受け取らない前提）。
-/// 正規方程式ソルバー実装等の後続issueで必要になった場合はバリアントを随時追加する。
-#[derive(Debug, Error, PartialEq)]
-pub enum OlsError {
-    /// yとxの行数が一致しない。
-    #[error("dimension mismatch: y has {y_rows} rows but x has {x_rows} rows")]
-    DimensionMismatch { y_rows: usize, x_rows: usize },
-
-    /// WLSの重み配列とyの行数が一致しない。
-    #[error("dimension mismatch: y has {y_rows} rows but weight has {weight_rows} rows")]
-    WeightDimensionMismatch { y_rows: usize, weight_rows: usize },
-
-    /// WLSの重みが0以下（NaNを含む）。analytic weightとして扱うため正の値のみ許容する
-    /// （`docs/planning/specs/wls-api-design.md`3.1節参照）。
-    #[error("weight at row {row} must be positive, got {weight}")]
-    NonPositiveWeight { row: usize, weight: f64 },
-
-    /// 観測数nが説明変数の数k（定数項を含む）以下。
-    #[error(
-        "insufficient observations: n={n} must be greater than k={k} \
-         (number of independent variables, including the intercept)"
-    )]
-    InsufficientObservations { n: usize, k: usize },
-
-    /// `cov_type=Cluster`のときのクラスター数が2未満。
-    #[error("cov_type='cluster' requires at least 2 clusters, got {g}")]
-    InsufficientClusters { g: usize },
-
-    /// `confidence_level`が`(0, 1)`の範囲外。
-    #[error("confidence_level must be in the range (0, 1): {confidence_level}")]
-    InvalidConfidenceLevel { confidence_level: f64 },
-
-    /// `hac_lags`が負、または観測数`n`以上。
-    #[error("hac_lags must be in the range [0, n): got {hac_lags}, n={n}")]
-    InvalidHacLags { hac_lags: i64, n: usize },
-
-    /// `cov_type=Cluster`なのにクラスターのグループキーが渡されていない。
-    #[error("cov_type='cluster' requires cluster identifiers to be provided")]
-    MissingClusterColumn,
-
-    /// 設計行列が特異（完全な多重共線性等）。
-    #[error("design matrix is singular (perfect multicollinearity detected)")]
-    SingularMatrix,
-
-    /// 上記以外の計算過程での失敗（t分布のCDF計算等）。
-    #[error("computation failed: {0}")]
-    ComputationFailed(String),
-}
+use super::common::LeastSquaresError;
+use crate::error::CommonError;
+use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
+use crate::validation::validate_cluster_groups;
 
 /// 標準誤差の種別。文字列パース（Python文字列 → この型への変換）は`engine_pybind`側の
 /// 責務（PyO3境界の関心事のため）。ここでは`OlsEstimator::fit`が計算方法を分岐するための
@@ -89,7 +36,7 @@ pub enum CovType {
     /// Newey-West HAC（Bartlettカーネル）。
     Hac {
         /// ラグ数（バンド幅）。`None`なら経験則 `L = floor(4*(n/100)^(2/9))` で自動計算する
-        /// （`docs/planning/specs/ols-standard-errors.md`3.2節）。
+        /// （`docs/spec/ols-spec.md`「標準誤差」のHAC参照）。
         lags: Option<i64>,
         /// 時系列順序。`None`なら`OlsInput`の行順をそのまま時系列順とみなす。`Some`の場合、
         /// `OlsInput`の行と対応する長さnの配列で、この値の昇順でラグ付き自己共分散を計算する
@@ -97,11 +44,11 @@ pub enum CovType {
         time_order: Option<Vec<f64>>,
     },
     /// クラスターロバスト標準誤差（Stata方式の小標本補正込み。常に補正を適用し、
-    /// 無効化するオプションは設けない。`docs/planning/specs/ols-implementation-notes.md`
-    /// 「クラスター標準誤差」参照）。
+    /// 無効化するオプションは設けない。`docs/spec/ols-spec.md`
+    /// 「標準誤差」のクラスター参照）。
     Cluster {
         /// クラスターのグループキー。`OlsInput`の行と対応する長さnの配列。
-        /// `None`の場合、`OlsEstimator::fit`は`OlsError::MissingClusterColumn`を返す
+        /// `None`の場合、`OlsEstimator::fit`は`CommonError::MissingClusterColumn`を返す
         /// （`hac_lags: Option<i64>`と同じ設計パターンで、値の妥当性検証を`engine`内で
         /// 行うため`Option`にしている。`engine_pybind`側で`cluster_col`未指定を
         /// 事前に弾かない）。
@@ -133,7 +80,7 @@ impl OlsInput {
     /// 定数項（すべて1.0）を自動追加する。
     ///
     /// # Errors
-    /// `y`といずれかの`x_columns`の長さが一致しない場合は`OlsError::DimensionMismatch`を返す。
+    /// `y`といずれかの`x_columns`の長さが一致しない場合は`CommonError::DimensionMismatch`を返す。
     ///
     /// # パニックについて
     /// `x_names.len() != x_columns.len()`の場合は`debug_assert!`でパニックする。これは
@@ -145,7 +92,7 @@ impl OlsInput {
         x_names: Vec<String>,
         include_intercept: bool,
         dep_var_name: String,
-    ) -> Result<Self, OlsError> {
+    ) -> Result<Self, LeastSquaresError> {
         Self::from_columns_impl(y, x_columns, x_names, include_intercept, dep_var_name, None)
     }
 
@@ -158,9 +105,9 @@ impl OlsInput {
     /// `weights`はanalytic weightとして扱う（`docs/planning/specs/wls-api-design.md`0章）。
     ///
     /// # Errors
-    /// - `y`といずれかの`x_columns`の長さが一致しない場合は`OlsError::DimensionMismatch`
-    /// - `weights`の長さが`y`と一致しない場合は`OlsError::WeightDimensionMismatch`
-    /// - `weights`に0以下（NaN含む）の値が含まれる場合は`OlsError::NonPositiveWeight`
+    /// - `y`といずれかの`x_columns`の長さが一致しない場合は`CommonError::DimensionMismatch`
+    /// - `weights`の長さが`y`と一致しない場合は`LeastSquaresError::WeightDimensionMismatch`
+    /// - `weights`に0以下（NaN含む）の値が含まれる場合は`LeastSquaresError::NonPositiveWeight`
     #[allow(clippy::too_many_arguments)]
     pub fn from_columns_weighted(
         y: &[f64],
@@ -169,9 +116,9 @@ impl OlsInput {
         include_intercept: bool,
         dep_var_name: String,
         weights: &[f64],
-    ) -> Result<Self, OlsError> {
+    ) -> Result<Self, LeastSquaresError> {
         if weights.len() != y.len() {
-            return Err(OlsError::WeightDimensionMismatch {
+            return Err(LeastSquaresError::WeightDimensionMismatch {
                 y_rows: y.len(),
                 weight_rows: weights.len(),
             });
@@ -182,7 +129,7 @@ impl OlsInput {
             // `!(w > 0.0)`は使わない）。NaN/無限大は`engine_pybind::column_extraction`が
             // 既に検出している前提だが、`engine`側の防御的チェックとして残す。
             if w.is_nan() || w <= 0.0 {
-                return Err(OlsError::NonPositiveWeight { row, weight: w });
+                return Err(LeastSquaresError::NonPositiveWeight { row, weight: w });
             }
         }
 
@@ -211,7 +158,7 @@ impl OlsInput {
         include_intercept: bool,
         dep_var_name: String,
         weights: Option<&[f64]>,
-    ) -> Result<Self, OlsError> {
+    ) -> Result<Self, LeastSquaresError> {
         debug_assert_eq!(
             x_columns.len(),
             x_names.len(),
@@ -219,10 +166,11 @@ impl OlsInput {
         );
         for col in x_columns {
             if col.len() != y.len() {
-                return Err(OlsError::DimensionMismatch {
+                return Err(CommonError::DimensionMismatch {
                     y_rows: y.len(),
                     x_rows: col.len(),
-                });
+                }
+                .into());
             }
         }
 
@@ -241,12 +189,7 @@ impl OlsInput {
         let scale = |i: usize| sqrt_weights.as_ref().map_or(1.0, |sw| sw[i]);
 
         let x = Mat::from_fn(n, k, |i, j| {
-            let raw = if include_intercept {
-                if j == 0 { 1.0 } else { x_columns[j - 1][i] }
-            } else {
-                x_columns[j][i]
-            };
-            raw * scale(i)
+            design_matrix_element(include_intercept, x_columns, i, j) * scale(i)
         });
         let y_mat = Mat::from_fn(n, 1, |i, _| y[i] * scale(i));
 
@@ -297,6 +240,19 @@ impl OlsInput {
     }
 }
 
+/// 設計行列の`(i, j)`要素を返す（`has_intercept`なら先頭列が定数項1.0、それ以外は
+/// `columns[j または j-1][i]`）。`from_columns_impl`（学習データの設計行列組み立て）と
+/// `predict_new_data`（新規データの設計行列組み立て）が独立に同じ規約を重複実装すると、
+/// 将来どちらか一方だけ規約を変更（例: 切片列の位置）した場合に静かに不整合になる
+/// リスクがあるため、共有ヘルパーとして切り出している。
+fn design_matrix_element(has_intercept: bool, columns: &[Vec<f64>], i: usize, j: usize) -> f64 {
+    if has_intercept {
+        if j == 0 { 1.0 } else { columns[j - 1][i] }
+    } else {
+        columns[j][i]
+    }
+}
+
 /// OLSの推定結果。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
@@ -325,7 +281,7 @@ pub struct OlsEstimator {
     /// 自由度調整済み決定係数
     r_squared_adj: f64,
     /// F統計量。`cov_type=Classical`なら古典的F検定、それ以外（HC0-3/HAC）は
-    /// `cov_params`を使ったロバストWald検定（`docs/planning/specs/ols-implementation-notes.md`
+    /// `cov_params`を使ったロバストWald検定（`docs/spec/ols-spec.md`
     /// 「適合度統計量」参照）
     f_statistic: f64,
     /// F統計量のp値（F分布、自由度は`(k - k_constant, n - k)`）
@@ -349,12 +305,12 @@ impl OlsEstimator {
     /// Cholesky分解（対称正定値であることは上記の特異性検出で既に確認済み）で個別に求める。
     ///
     /// `confidence_level`は`fit`実行時に一度だけ使用し、信頼区間に固定して含める
-    /// （`docs/planning/specs/ols-implementation-notes.md`「信頼区間」参照。実行時可変引数にはしない）。
+    /// （`docs/spec/ols-spec.md`「API引数」参照。実行時可変引数にはしない）。
     ///
     /// `cov_type`によらず、p値・信頼区間の算出にはt分布（自由度n-k）を使う。
     /// 主リファレンスのstatsmodelsはHC0-3で正規分布を既定とするが（`use_t=False`）、
-    /// 本プロジェクトはt分布で統一する方針（`docs/planning/specs/ols-api-design.md`
-    /// 「検定分布」）。ベンチマーク生成側
+    /// 本プロジェクトはt分布で統一する方針（`docs/spec/ols-spec.md`
+    /// 「標準誤差」）。ベンチマーク生成側
     /// （`benchmark/run_statsmodels_benchmark.py`）は`use_t=True`を明示指定して合わせている。
     ///
     /// F統計量も同じ方針で、`cov_type`によらず単一のWald検定の式
@@ -363,26 +319,26 @@ impl OlsEstimator {
     /// 古典的F検定`((SST-SSR)/q) / (SSR/df_resid)`と完全に一致する（標準的な計量経済学の
     /// 恒等式）ため、分岐を分ける必要がない。HC0-3・HACでは`cov_params`がロバストな
     /// 分散共分散行列になるため、この式がそのままロバストWald検定になる
-    /// （`docs/planning/specs/ols-implementation-notes.md`「適合度統計量」参照）。
+    /// （`docs/spec/ols-spec.md`「適合度統計量」参照）。
     ///
     /// # Errors
-    /// - `confidence_level`が`(0, 1)`の範囲外: `OlsError::InvalidConfidenceLevel`
-    /// - 観測数`n`が`k`（定数項を含む説明変数の数）以下: `OlsError::InsufficientObservations`
-    /// - 設計行列が特異（完全な多重共線性等）: `OlsError::SingularMatrix`
+    /// - `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
+    /// - 観測数`n`が`k`（定数項を含む説明変数の数）以下: `CommonError::InsufficientObservations`
+    /// - 設計行列が特異（完全な多重共線性等）: `LeastSquaresError::SingularMatrix`
     pub fn fit(
         input: OlsInput,
         cov_type: CovType,
         confidence_level: f64,
-    ) -> Result<Self, OlsError> {
+    ) -> Result<Self, LeastSquaresError> {
         if !(confidence_level > 0.0 && confidence_level < 1.0) {
-            return Err(OlsError::InvalidConfidenceLevel { confidence_level });
+            return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
         }
 
         let n = input.nobs();
         let k = input.k();
 
         if n <= k {
-            return Err(OlsError::InsufficientObservations { n, k });
+            return Err(CommonError::InsufficientObservations { n, k }.into());
         }
 
         let qr = input.x().col_piv_qr();
@@ -401,8 +357,8 @@ impl OlsEstimator {
         // 同じだが、`cov_type=Cluster`のときだけ`G-1`（クラスター数-1）に切り替える
         // （statsmodelsの`df_correction=True`という既定と同じ挙動。標準的な計量経済学の
         // 慣行でもある。`df_resid`自体は分散推定量`σ̂²`・調整済みR²・AIC/BIC等では
-        // 引き続き`n-k`のまま使う。`docs/planning/specs/ols-implementation-notes.md`
-        // 「クラスター標準誤差」参照）。
+        // 引き続き`n-k`のまま使う。`docs/spec/ols-spec.md`
+        // 「標準誤差」のクラスター参照）。
         let (cov_params, df_inference) = match &cov_type {
             CovType::Classical => (classical_cov_params(sigma2, &xtx_inv, k), df_resid),
             CovType::Hc0 => (
@@ -430,7 +386,7 @@ impl OlsEstimator {
                 )
             }
             CovType::Cluster { groups } => {
-                let groups = groups.as_ref().ok_or(OlsError::MissingClusterColumn)?;
+                let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
                 let n_groups = validate_cluster_groups(groups, n)?;
                 let cov = cluster_cov_params(input.x(), &residuals, &xtx_inv, n, k, groups);
                 (cov, n_groups - 1)
@@ -443,7 +399,7 @@ impl OlsEstimator {
         }
 
         let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
-            .map_err(|e| OlsError::ComputationFailed(e.to_string()))?;
+            .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
         let alpha = 1.0 - confidence_level;
         let t_crit = t_dist.inverse_cdf(1.0 - alpha / 2.0);
 
@@ -588,6 +544,59 @@ impl OlsEstimator {
     pub fn bic(&self) -> f64 {
         self.bic
     }
+
+    /// 学習データに対する予測値 `ŷ = Xβ̂`（`predict(new_data=None)`のPython APIが返す値、
+    /// `docs/spec/ols-spec.md`「predict()」参照）。`fit()`のReturn本体には含めず、
+    /// 必要なときに計算する別メソッドとする（Logitの`predict()`と同じ設計方針）。
+    pub fn fitted_values(&self) -> Mat<f64> {
+        self.input.x() * &self.params
+    }
+}
+
+/// 学習済み係数`params`を使って、新規データ（`new_x_columns`）に対する予測値を計算する
+/// （`predict(new_data)`のPython APIが`new_data`指定時に呼ぶ経路、`docs/spec/ols-spec.md`「predict()」）。
+///
+/// `OlsEstimator`のメソッドにしていない理由: `engine_pybind`側の`OLSResult`は`params`・
+/// `param_names`等のフラットな値のみを保持し、`OlsEstimator`本体（`faer::Mat`を含む）は
+/// `fit()`呼び出し後に破棄されるため、`OLSResult`から呼べる独立関数として提供する。
+///
+/// `new_x_columns`は、fit時に`x`で渡した列（`param_names`から`has_intercept`なら`"const"`を
+/// 除いたもの）と同じ本数・同じ順序である必要がある。`has_intercept`が`true`の場合、定数項の
+/// 列はここで自動的に先頭に付加するため`new_x_columns`に含めない
+/// （`OlsInput::from_columns`の切片列自動追加と同じ挙動）。
+///
+/// # パニックについて
+/// `new_x_columns.len()`が`params.len() - usize::from(has_intercept)`と一致しない場合は
+/// `debug_assert_eq!`でパニックする。呼び出し側（`engine_pybind`）が`param_names`に基づいて
+/// 必要な列だけを渡す実装契約であり、実データに起因する`ValidationError`とは性質が異なる
+/// ため区別している（`OlsInput::from_columns`の`x_names.len() != x_columns.len()`と同じ
+/// パターン）。
+pub fn predict_new_data(
+    params: &[f64],
+    has_intercept: bool,
+    new_x_columns: &[Vec<f64>],
+) -> Vec<f64> {
+    let k = params.len();
+    let expected = k - usize::from(has_intercept);
+    debug_assert_eq!(
+        new_x_columns.len(),
+        expected,
+        "new_x_columns length must match the number of x columns used at fit time"
+    );
+
+    // `x`は空リストにできない（engine_pybind側でValidationErrorとして弾く、
+    // `docs/spec/ols-spec.md`参照）ため、fit時にx列が1本もないケース
+    // （has_intercept=falseかつexpected=0）は到達しない。したがって`new_x_columns`は
+    // 常に少なくとも1列持ち、`.first()`でnを安全に取得できる。
+    let n = new_x_columns.first().map_or(0, |col| col.len());
+
+    (0..n)
+        .map(|i| {
+            (0..k)
+                .map(|j| design_matrix_element(has_intercept, new_x_columns, i, j) * params[j])
+                .sum()
+        })
+        .collect()
 }
 
 /// `(X'X)⁻¹`を求める。classical・HC0-3いずれの標準誤差計算でも共通して必要になる。
@@ -595,9 +604,11 @@ impl OlsEstimator {
 /// `X'X`は対称正定値であることが`ensure_full_rank`（Xの特異性検出）で既に保証されている
 /// ため、Cholesky分解（`Llt`）で逆行列を求める。理論上ここで`LltError`は発生しないはずだが、
 /// 浮動小数点演算の丸めにより境界的なケースで失敗しうるため、`SingularMatrix`として扱う。
-fn xtx_inverse(x: &Mat<f64>, k: usize) -> Result<Mat<f64>, OlsError> {
+fn xtx_inverse(x: &Mat<f64>, k: usize) -> Result<Mat<f64>, LeastSquaresError> {
     let xtx = x.transpose() * x;
-    let llt = xtx.llt(Side::Lower).map_err(|_| OlsError::SingularMatrix)?;
+    let llt = xtx
+        .llt(Side::Lower)
+        .map_err(|_| LeastSquaresError::SingularMatrix)?;
     Ok(llt.solve(Mat::<f64>::identity(k, k)))
 }
 
@@ -676,13 +687,13 @@ enum HcVariant {
 /// `CovType::Hac`の`lags`（`Option<i64>`）を実際に使うラグ数（`usize`）に解決する。
 ///
 /// `Some(l)`の場合は`0 <= l < n`を検証してそのまま使う。`None`の場合は経験則
-/// `L = floor(4*(n/100)^(2/9))`で自動計算する（`docs/planning/specs/ols-standard-errors.md`
-/// 3.2節。EViews等でも使われる、データに依存しない決定的な式）。
-fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, OlsError> {
+/// `L = floor(4*(n/100)^(2/9))`で自動計算する（`docs/spec/ols-spec.md`
+/// 「標準誤差」のHAC。EViews等でも使われる、データに依存しない決定的な式）。
+fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, LeastSquaresError> {
     match lags {
         Some(l) => {
             if l < 0 || (l as usize) >= n {
-                return Err(OlsError::InvalidHacLags { hac_lags: l, n });
+                return Err(LeastSquaresError::InvalidHacLags { hac_lags: l, n });
             }
             Ok(l as usize)
         }
@@ -712,13 +723,13 @@ fn time_ordering(time_order: Option<&[f64]>, n: usize) -> Vec<usize> {
 /// Newey-West HACの係数分散共分散行列: `(X'X)⁻¹Ŝ(X'X)⁻¹`（k×k）。
 ///
 /// `Ŝ = Ŝ₀ + Σ_{l=1}^{L} w_l (Ŝ_l + Ŝ_l')`（Bartlett重み `w_l = 1 - l/(L+1)`）、
-/// `Ŝ_l = Σ_{t=l+1}^{n} ε̂_t ε̂_{t-l} x_t x_{t-l}'`（`docs/planning/specs/ols-standard-errors.md`
-/// 3.1節）。`order`で指定された時系列順に並べ替えた残差・行を使ってラグ付き自己共分散を計算する。
+/// `Ŝ_l = Σ_{t=l+1}^{n} ε̂_t ε̂_{t-l} x_t x_{t-l}'`（`docs/spec/ols-spec.md`
+/// 「標準誤差」のHAC）。`order`で指定された時系列順に並べ替えた残差・行を使ってラグ付き自己共分散を計算する。
 ///
 /// 残差でスケールした行列`Xe`（`Xe[t,a] = ε̂_t・x_t[a]`、`order`の時系列順）を使うと、
 /// `Ŝ₀ = Xe'Xe`、`Ŝ_l = Xe[l:,:]'Xe[:n-l,:]`という行列積に落とし込める（`Ŝ_l'`は転置を
 /// 取るだけで再計算不要）。手書きの三重ループ（ラグ×観測×`k²`）よりfaerの行列積を使う方が
-/// 大幅に高速（実測値は`docs/planning/specs/ols-implementation-notes.md`「11. パフォーマンス」参照）。
+/// 大幅に高速（実測値は`docs/spec/ols-performance-notes.md`参照）。
 ///
 /// **`Par::Seq`を明示指定する理由**: `Ŝ_l`の行列積はラグの数だけ繰り返し呼ぶことになるが、
 /// 1回あたりの行列積は`k×k`という小さい出力サイズのため、faer既定の並列実行（グローバル
@@ -777,38 +788,12 @@ fn hac_cov_params(
     xtx_inv * &s_hat * xtx_inv
 }
 
-/// `CovType::Cluster`の`groups`（`OlsInput`の行と対応する長さnの配列であるという内部契約、
-/// および実際のクラスター数が2以上であること）を検証し、成功時はクラスター数`G`を返す。
-/// `G`は`fit()`側でt検定・信頼区間・F検定の自由度（`G-1`）の算出に再利用する
-/// （`docs/planning/specs/ols-implementation-notes.md`「クラスター標準誤差」参照）。
-///
-/// `groups.len() != n`は`engine_pybind`側の実装バグでしか起こり得ない内部契約であり
-/// （`OlsInput::from_columns`の`x_names`/`x_columns`の長さ検証と同じ性質）、実データに
-/// 起因する`ValidationError`とは区別して`debug_assert_eq!`で検証する。クラスター数が
-/// 2未満は実データで起こりうるため`OlsError::InsufficientClusters`を返す。
-fn validate_cluster_groups(groups: &[String], n: usize) -> Result<usize, OlsError> {
-    debug_assert_eq!(
-        groups.len(),
-        n,
-        "groups length must match nobs (engine_pybind contract)"
-    );
-    let g = groups
-        .iter()
-        .collect::<std::collections::HashSet<_>>()
-        .len();
-    if g < 2 {
-        return Err(OlsError::InsufficientClusters { g });
-    }
-    Ok(g)
-}
-
 /// クラスターロバストな係数分散共分散行列: `(X'X)⁻¹Ŝ(X'X)⁻¹ * correction`（k×k）。
 ///
 /// `Ŝ = Σ_{g=1}^{G} S_g S_g'`、`S_g = Σ_{i∈g} ε̂_i x_i`（クラスター内の`x_i ε̂_i`の合計。
 /// クラスター内の観測を先に合計してから外積を取ることで、クラスター内の相関を許容する）。
 /// `correction = G/(G-1) * (n-1)/(n-k)`（Stata方式の小標本補正。常に適用する。
-/// `docs/planning/specs/ols-standard-errors.md`5章、`docs/planning/specs/
-/// ols-implementation-notes.md`「クラスター標準誤差」参照）。
+/// `docs/spec/ols-spec.md`「標準誤差」のクラスター参照）。
 ///
 /// `groups`が2種類以上の値を持つこと（`G >= 2`）は呼び出し側（`validate_cluster_groups`）で
 /// 検証済みの前提とする。
@@ -857,14 +842,17 @@ fn cluster_cov_params(
 /// 絶対閾値ではなく相対閾値を使う（`.claude/rules/rust-style.md`「線形代数」参照）。
 /// `R`は列ピボットにより対角成分が絶対値の降順になるため、最大値
 /// （`|R[0,0]|`、通常は最初の対角成分）を基準に相対的な小ささを判定する。
-fn ensure_full_rank(qr: &faer::linalg::solvers::ColPivQr<f64>, k: usize) -> Result<(), OlsError> {
+fn ensure_full_rank(
+    qr: &faer::linalg::solvers::ColPivQr<f64>,
+    k: usize,
+) -> Result<(), LeastSquaresError> {
     let r = qr.thin_R();
     let max_abs_diag = (0..k).map(|i| (*r.get(i, i)).abs()).fold(0.0_f64, f64::max);
     let threshold = (k as f64) * f64::EPSILON * max_abs_diag;
 
     for i in 0..k {
         if (*r.get(i, i)).abs() <= threshold {
-            return Err(OlsError::SingularMatrix);
+            return Err(LeastSquaresError::SingularMatrix);
         }
     }
     Ok(())
@@ -887,23 +875,43 @@ fn ensure_full_rank(qr: &faer::linalg::solvers::ColPivQr<f64>, k: usize) -> Resu
 /// 同様、浮動小数点演算の丸めによる境界的な失敗に備えて`ComputationFailed`に変換している。
 /// **`CovType::Cluster`は例外**: クラスターロバスト共分散`Ŝ = Σ_g S_g S_g'`はG個の
 /// ランク1行列の和のため`rank(Ŝ) ≤ G`（クラスター数）であり、傾き係数の数`q`がGを超える
-/// と`Σ`は構造的に（丸め誤差ではなく）特異になりうる。この場合の`LltError`は想定内の
-/// 失敗であり、`ComputationFailed`への変換は境界ケース対応ではなく正規の分岐として機能する
-/// （`docs/planning/specs/ols-implementation-notes.md`「クラスター標準誤差」参照）。
+/// と`Σ`は構造的に（丸め誤差ではなく）特異になる。
+///
+/// `Σ`が数値的にほぼ特異（上記のクラスターの構造的特異性に加え、変数間のスケールが
+/// 極端に異なる設計行列等で、傾き係数の同時共分散部分行列の条件数が倍精度の限界を
+/// 超える場合を含む）だと、Cholesky分解自体は（非ピボットのため）失敗せずに数値的に
+/// 無意味なF統計量（桁違いに巨大な値等）を黙って返してしまうことがある。
+/// そのため`Llt`分解の**前**に`ensure_well_conditioned_symmetric_matrix`（`crate::
+/// linear_algebra`、固有値分解ベースの相対閾値判定。系統をまたいで共有する純粋な
+/// 線形代数ユーティリティ、`.claude/rules/rust-style.md`「全手法で共有するロジック」
+/// 参照。nonlinear系統の`observed_information_cov_params`等でも同じ理由で使われている）
+/// を呼び、`ComputationFailed`で止める。
+///
+/// この事前チェックにより、**`CovType::Cluster`のG<qによる構造的特異性も、実際には
+/// 下の`Llt`分解に到達する前に`ensure_well_conditioned_symmetric_matrix`側で先に検出
+/// される**（`cargo llvm-cov`で確認: `Llt`失敗の`map_err`分岐は0ヒット）。`Llt`分解自体の
+/// `map_err`は、両方のチェックをすり抜けるごく僅かな境界ケースに備えた防御的な
+/// フォールバックとして残している。
 fn wald_f_test(
     params: &Mat<f64>,
     cov_params: &Mat<f64>,
     k_constant: usize,
     df_model: usize,
     df_inference: usize,
-) -> Result<(f64, f64), OlsError> {
+) -> Result<(f64, f64), LeastSquaresError> {
     let beta_slopes = Mat::from_fn(df_model, 1, |i, _| *params.get(i + k_constant, 0));
     let v_slopes = Mat::from_fn(df_model, df_model, |i, j| {
         *cov_params.get(i + k_constant, j + k_constant)
     });
 
+    ensure_well_conditioned_symmetric_matrix(
+        &v_slopes,
+        df_model,
+        "coefficient covariance submatrix for the F-test",
+    )?;
+
     let llt = v_slopes.llt(Side::Lower).map_err(|_| {
-        OlsError::ComputationFailed(
+        CommonError::ComputationFailed(
             "failed to invert coefficient covariance submatrix for the F-test".to_string(),
         )
     })?;
@@ -915,7 +923,7 @@ fn wald_f_test(
     let f_statistic = wald / (df_model as f64);
 
     let f_dist = FisherSnedecor::new(df_model as f64, df_inference as f64)
-        .map_err(|e| OlsError::ComputationFailed(e.to_string()))?;
+        .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
     let f_p_value = 1.0 - f_dist.cdf(f_statistic);
 
     Ok((f_statistic, f_p_value))
@@ -982,10 +990,10 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            OlsError::DimensionMismatch {
+            LeastSquaresError::Common(CommonError::DimensionMismatch {
                 y_rows: 3,
                 x_rows: 2
-            }
+            })
         );
     }
 
@@ -1083,7 +1091,7 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            OlsError::WeightDimensionMismatch {
+            LeastSquaresError::WeightDimensionMismatch {
                 y_rows: 3,
                 weight_rows: 2
             }
@@ -1109,7 +1117,7 @@ mod tests {
             );
 
             match result.unwrap_err() {
-                OlsError::NonPositiveWeight { row, weight } => {
+                LeastSquaresError::NonPositiveWeight { row, weight } => {
                     assert_eq!(row, bad_row);
                     if bad_weight.is_nan() {
                         assert!(weight.is_nan());
@@ -1123,17 +1131,13 @@ mod tests {
     }
 
     #[test]
-    fn ols_error_messages_are_human_readable() {
+    fn least_squares_error_messages_are_human_readable() {
+        // 6種の共通バリアント（DimensionMismatch等）のメッセージ検証は
+        // `engine::error`側のテストに集約済み。ここではOLS/WLS固有の
+        // バリアントに加え、`Common`が`CommonError`のDisplayをtransparentに転送する
+        // ことだけを確認する。
         assert_eq!(
-            OlsError::DimensionMismatch {
-                y_rows: 10,
-                x_rows: 8
-            }
-            .to_string(),
-            "dimension mismatch: y has 10 rows but x has 8 rows"
-        );
-        assert_eq!(
-            OlsError::WeightDimensionMismatch {
+            LeastSquaresError::WeightDimensionMismatch {
                 y_rows: 10,
                 weight_rows: 8
             }
@@ -1141,7 +1145,7 @@ mod tests {
             "dimension mismatch: y has 10 rows but weight has 8 rows"
         );
         assert_eq!(
-            OlsError::NonPositiveWeight {
+            LeastSquaresError::NonPositiveWeight {
                 row: 3,
                 weight: 0.0
             }
@@ -1149,23 +1153,7 @@ mod tests {
             "weight at row 3 must be positive, got 0"
         );
         assert_eq!(
-            OlsError::InsufficientObservations { n: 2, k: 3 }.to_string(),
-            "insufficient observations: n=2 must be greater than k=3 \
-             (number of independent variables, including the intercept)"
-        );
-        assert_eq!(
-            OlsError::InsufficientClusters { g: 1 }.to_string(),
-            "cov_type='cluster' requires at least 2 clusters, got 1"
-        );
-        assert_eq!(
-            OlsError::InvalidConfidenceLevel {
-                confidence_level: 1.5
-            }
-            .to_string(),
-            "confidence_level must be in the range (0, 1): 1.5"
-        );
-        assert_eq!(
-            OlsError::InvalidHacLags {
+            LeastSquaresError::InvalidHacLags {
                 hac_lags: -1,
                 n: 100
             }
@@ -1173,26 +1161,24 @@ mod tests {
             "hac_lags must be in the range [0, n): got -1, n=100"
         );
         assert_eq!(
-            OlsError::MissingClusterColumn.to_string(),
-            "cov_type='cluster' requires cluster identifiers to be provided"
-        );
-        assert_eq!(
-            OlsError::SingularMatrix.to_string(),
+            LeastSquaresError::SingularMatrix.to_string(),
             "design matrix is singular (perfect multicollinearity detected)"
         );
         assert_eq!(
-            OlsError::ComputationFailed("t-distribution CDF did not converge".to_string())
-                .to_string(),
-            "computation failed: t-distribution CDF did not converge"
+            LeastSquaresError::Common(CommonError::MissingClusterColumn).to_string(),
+            "cov_type='cluster' requires cluster identifiers to be provided"
         );
     }
 
     #[test]
-    fn ols_error_implements_partial_eq() {
-        assert_eq!(OlsError::SingularMatrix, OlsError::SingularMatrix);
+    fn least_squares_error_implements_partial_eq() {
+        assert_eq!(
+            LeastSquaresError::SingularMatrix,
+            LeastSquaresError::SingularMatrix
+        );
         assert_ne!(
-            OlsError::InsufficientClusters { g: 1 },
-            OlsError::InsufficientClusters { g: 0 }
+            LeastSquaresError::Common(CommonError::InsufficientClusters { g: 1 }),
+            LeastSquaresError::Common(CommonError::InsufficientClusters { g: 0 })
         );
     }
 
@@ -1243,7 +1229,7 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            OlsError::InsufficientObservations { n: 2, k: 2 }
+            LeastSquaresError::Common(CommonError::InsufficientObservations { n: 2, k: 2 })
         );
     }
 
@@ -1263,7 +1249,43 @@ mod tests {
 
         let result = OlsEstimator::fit(input, CovType::Classical, 0.95);
 
-        assert_eq!(result.unwrap_err(), OlsError::SingularMatrix);
+        assert_eq!(result.unwrap_err(), LeastSquaresError::SingularMatrix);
+    }
+
+    #[test]
+    fn fit_returns_computation_failed_for_extreme_scale_difference_in_f_test() {
+        // x1は1e6オーダー、x2は1e-3オーダーとスケールが極端に異なる（x3は通常
+        // スケール）。x1・x2・x3は互いに線形従属ではないため設計行列自体は
+        // フルランク（SingularMatrixにはならない）だが、傾き係数の同時共分散
+        // 部分行列（wald_f_testが使う3x3部分行列）の条件数がスケール比の2乗
+        // （≈1e18）相当となり倍精度の限界を超える
+        // （ensure_well_conditioned_symmetric_matrixで検出）。
+        let n = 10;
+        let x1: Vec<f64> = (1..=n).map(|i| 1e6 * (i as f64)).collect();
+        let x2: Vec<f64> = (1..=n).map(|i| 1e-3 * (i as f64).powi(2)).collect();
+        let x3: Vec<f64> = (0..n).map(|i| (i % 3) as f64).collect();
+        let y: Vec<f64> = (0..n)
+            .map(|i| {
+                let noise = if i % 2 == 0 { 0.1 } else { -0.1 };
+                1.0 + 2.0 * x1[i] + 3.0 * x2[i] + 0.5 * x3[i] + noise
+            })
+            .collect();
+
+        let input = OlsInput::from_columns(
+            &y,
+            &[x1, x2, x3],
+            vec!["x1".to_string(), "x2".to_string(), "x3".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = OlsEstimator::fit(input, CovType::Classical, 0.95);
+
+        assert!(matches!(
+            result.unwrap_err(),
+            LeastSquaresError::Common(CommonError::ComputationFailed(_))
+        ));
     }
 
     #[test]
@@ -1283,9 +1305,9 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            OlsError::InvalidConfidenceLevel {
+            LeastSquaresError::Common(CommonError::InvalidConfidenceLevel {
                 confidence_level: 1.5
-            }
+            })
         );
     }
 
@@ -1334,7 +1356,7 @@ mod tests {
     /// 同じデータセット（x=[1..5], y=[2,4,5,4,5]）でのHC0〜HC3。
     /// 期待値はstatsmodels 0.14.6で`use_t=True`を明示指定して独立に計算・検算済み
     /// （`sm.OLS(Y, X).fit(cov_type=..., use_t=True)`）。`use_t=True`が必要な理由は
-    /// `docs/planning/specs/ols-api-design.md`「検定分布」、
+    /// `docs/spec/ols-spec.md`「標準誤差」、
     /// および`OlsEstimator::fit`のdocコメント参照
     /// （statsmodelsはHC0-3でuse_t=Falseが既定＝正規分布のため、素の既定値とは一致しない）。
     #[test]
@@ -1463,7 +1485,7 @@ mod tests {
 
     /// `hac_lags=None`（経験則自動計算）が`L = floor(4*(n/100)^(2/9))`と一致することを確認する。
     /// n=5の場合L=2。期待値はstatsmodelsで`maxlags=2`を明示指定して独立に計算・検算済み
-    /// （`docs/planning/specs/ols-standard-errors.md`3.2節の式通りベンチマーク側もL=2を使う前提）。
+    /// （`docs/spec/ols-spec.md`「標準誤差」のHACの式通りベンチマーク側もL=2を使う前提）。
     #[test]
     fn fit_computes_hac_std_errors_with_auto_lags() {
         let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
@@ -1542,7 +1564,7 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            OlsError::InvalidHacLags { hac_lags: -1, n: 5 }
+            LeastSquaresError::InvalidHacLags { hac_lags: -1, n: 5 }
         );
     }
 
@@ -1569,7 +1591,7 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            OlsError::InvalidHacLags { hac_lags: 5, n: 5 }
+            LeastSquaresError::InvalidHacLags { hac_lags: 5, n: 5 }
         );
     }
 
@@ -1615,9 +1637,9 @@ mod tests {
 
             assert_eq!(
                 result.unwrap_err(),
-                OlsError::InvalidConfidenceLevel {
+                LeastSquaresError::Common(CommonError::InvalidConfidenceLevel {
                     confidence_level: level
-                },
+                }),
                 "level={level}"
             );
         }
@@ -1700,7 +1722,7 @@ mod tests {
 
     /// 同じ(x, y)を切片なしで推定した場合。R²・調整済みR²がuncentered TSS
     /// （`Σy_i²`）を基準に計算されることを確認する（statsmodelsの`k_constant=0`の
-    /// 挙動と一致。`ols-implementation-notes.md`「適合度統計量」参照）。
+    /// 挙動と一致。`docs/spec/ols-spec.md`「適合度統計量」参照）。
     #[test]
     fn fit_computes_r_squared_without_intercept_uses_uncentered_tss() {
         let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
@@ -1869,7 +1891,10 @@ mod tests {
 
         let result = OlsEstimator::fit(input, CovType::Cluster { groups: None }, 0.95);
 
-        assert_eq!(result.unwrap_err(), OlsError::MissingClusterColumn);
+        assert_eq!(
+            result.unwrap_err(),
+            LeastSquaresError::Common(CommonError::MissingClusterColumn)
+        );
     }
 
     #[test]
@@ -1891,7 +1916,10 @@ mod tests {
         };
         let result = OlsEstimator::fit(input, cov_type, 0.95);
 
-        assert_eq!(result.unwrap_err(), OlsError::InsufficientClusters { g: 1 });
+        assert_eq!(
+            result.unwrap_err(),
+            LeastSquaresError::Common(CommonError::InsufficientClusters { g: 1 })
+        );
     }
 
     /// 説明変数が定数項のみ（傾き係数が無い）モデル。F検定は検定対象が存在しないため、
@@ -1929,6 +1957,80 @@ mod tests {
         for i in 0..5 {
             assert!((*residuals.get(i, 0)).abs() < 1e-9);
         }
+    }
+
+    #[test]
+    fn fitted_values_equals_y_minus_residuals() {
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+        let input = OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let estimator = OlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
+
+        let fitted = estimator.fitted_values();
+        for (i, &y_i) in y.iter().enumerate() {
+            let expected = y_i - *estimator.residuals().get(i, 0);
+            assert!((*fitted.get(i, 0) - expected).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn predict_new_data_matches_manually_computed_linear_combination_with_intercept() {
+        // params = [const=1.0, x1=2.0]、新規データx1=[10, 20]に対する予測値は1+2*10=21, 1+2*20=41
+        let params = vec![1.0, 2.0];
+        let new_x_columns = vec![vec![10.0, 20.0]];
+
+        let predicted = predict_new_data(&params, true, &new_x_columns);
+
+        assert_eq!(predicted, vec![21.0, 41.0]);
+    }
+
+    #[test]
+    fn predict_new_data_matches_manually_computed_linear_combination_without_intercept() {
+        // params = [x1=2.0, x2=3.0]（切片なし）、新規データ(x1,x2)=(10,1)と(20,2)に対する
+        // 予測値は2*10+3*1=23, 2*20+3*2=46
+        let params = vec![2.0, 3.0];
+        let new_x_columns = vec![vec![10.0, 20.0], vec![1.0, 2.0]];
+
+        let predicted = predict_new_data(&params, false, &new_x_columns);
+
+        assert_eq!(predicted, vec![23.0, 46.0]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn predict_new_data_panics_when_column_count_does_not_match_params() {
+        // new_x_columns.len()が期待する列数（params.len() - has_intercept）と
+        // 一致しない場合はengine_pybind側の実装バグでしか起こり得ない内部契約違反のため、
+        // from_columns_panics_on_mismatched_names_arityと同じ性質でdebug_assert_eq!が
+        // パニックする。
+        let params = vec![1.0, 2.0, 3.0]; // has_intercept=trueなら期待列数は2
+        let new_x_columns = vec![vec![10.0, 20.0]]; // 1列しかない
+
+        let _ = predict_new_data(&params, true, &new_x_columns);
+    }
+
+    #[test]
+    fn predict_new_data_ignores_column_name_and_uses_has_intercept_flag_directly() {
+        // has_intercept=falseで学習した場合、xの列名がたまたま"const"であっても
+        // （include_intercept=falseならこの列名は許可される、engine_pybind::fitの
+        // 衝突チェックはinclude_intercept=trueのときのみ適用）、predict_new_dataは
+        // param_names等の文字列を一切見ずhas_intercept引数のみで組み立てるため
+        // 誤動作しない（この引数自体をどう決定するかはengine_pybind側の責務）。
+        // params = [const=2.0, x2=3.0]（切片なし、"const"という名前のただの説明変数）
+        let params = vec![2.0, 3.0];
+        let new_x_columns = vec![vec![100.0, 200.0], vec![10.0, 20.0]];
+
+        let predicted = predict_new_data(&params, false, &new_x_columns);
+
+        // 2*100+3*10=230, 2*200+3*20=460（"const"列も普通の説明変数として2倍される）
+        assert_eq!(predicted, vec![230.0, 460.0]);
     }
 
     #[test]

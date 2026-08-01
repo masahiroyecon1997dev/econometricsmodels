@@ -6,18 +6,14 @@
 //! 変換後データに対するOLSの計算式そのままで正しいことの確認は
 //! `docs/planning/specs/wls-standard-errors.md`参照。
 //!
-//! **ただしR²・対数尤度（→AIC/BIC）はこの変換だけでは正しくならない**（Issue #44で
-//! statsmodelsとのクロスチェック時に判明）。理由:
-//! - R²（切片ありの場合のcentered TSS）: 変換後yの単純平均を使うと、正しい
-//!   「元のyの重み付き平均」（`Σw_i y_i/Σw_i`）とは異なる値になる。
-//! - 対数尤度: 変換後データに対するOLSの対数尤度は、`sqrt(w)`変換のヤコビアンに
-//!   由来する補正項`+0.5·Σlog(w_i)`が欠落する（statsmodelsの`WLS.loglike`と同じ導出）。
-//!
+//! **ただしR²・対数尤度（→AIC/BIC）はこの変換だけでは正しくならない**（正しい導出・
+//! statsmodelsとの数式対応は`docs/planning/specs/wls-standard-errors.md`5章参照）。
 //! そのためこの2つ（とそこから導かれるR²調整済み・AIC・BIC）は`WlsEstimator::fit`側で
 //! 元の（変換前の）`y`・`weights`を使って計算し直す。`OlsEstimator`/`OlsInput`自体は
 //! 重みを一切知らない設計のまま変更しない（係数・SE・F統計量の構造的保証は保つ）。
 
-use super::ols::{CovType, OlsError, OlsEstimator, OlsInput};
+use super::common::LeastSquaresError;
+use super::ols::{CovType, OlsEstimator, OlsInput};
 
 /// WLSの推定結果。
 ///
@@ -64,7 +60,7 @@ impl WlsEstimator {
         weights: &[f64],
         cov_type: CovType,
         confidence_level: f64,
-    ) -> Result<Self, OlsError> {
+    ) -> Result<Self, LeastSquaresError> {
         let input = OlsInput::from_columns_weighted(
             y,
             x_columns,
@@ -251,8 +247,7 @@ mod tests {
         // r_squared/r_squared_adj/log_likelihood/aic/bicはWlsEstimator側の（元スケールの
         // y・weightsから計算し直した）値を使う。重みが全て1なら重み付き平均=単純平均、
         // ヤコビアン補正項0.5*Σlog(1)=0となり、OLSと完全一致するはず
-        // （Issue #44でstatsmodelsとのクロスチェック時に判明した、WlsEstimator側での
-        // 再計算が必要な理由はモジュール冒頭のdocコメント参照）。
+        // （WlsEstimator側での再計算が必要な理由はモジュール冒頭のdocコメント参照）。
         // weights=1でも、重み付き平均（Σw*y/Σw）と単純平均（Σy/n）は数学的には同じ値だが
         // 浮動小数点の加算順序が異なるため、完全な==ではなく丸め誤差レベルで比較する。
         assert!((wls.r_squared() - ols.r_squared()).abs() < 1e-12);
@@ -271,9 +266,8 @@ mod tests {
     /// x=[1..5], y=[2,4,5,4,5], weights=[1,4,0.25,9,2]（切片あり、classical）の
     /// 適合度統計量。期待値はstatsmodels 0.14.6で独立に計算・検算済み
     /// （`sm.WLS(y, sm.add_constant(x1), weights=w).fit(use_t=True)`）。
-    /// Issue #44でのstatsmodelsクロスチェック時に発覚した、r_squared/log_likelihood
-    /// （→aic/bic）の計算式修正（モジュール冒頭のdocコメント参照）を固定するための
-    /// エンジン単体テスト。
+    /// r_squared/log_likelihood（→aic/bic）の計算式修正（モジュール冒頭のdocコメント
+    /// 参照）を固定するためのエンジン単体テスト。
     #[test]
     fn fit_computes_r_squared_and_information_criteria_matching_statsmodels() {
         let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
@@ -350,7 +344,7 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            OlsError::NonPositiveWeight {
+            LeastSquaresError::NonPositiveWeight {
                 row: 1,
                 weight: 0.0
             }
@@ -359,8 +353,8 @@ mod tests {
 
     #[test]
     fn fit_matches_manually_transformed_ols_for_all_cov_types() {
-        // Issue #36: classical/HC0-3/HAC/clusterのいずれも、WlsEstimator::fitはcov_typeを
-        // そのままOlsEstimator::fitに渡すだけで正しく動作するはず（wls-standard-errors.md
+        // classical/HC0-3/HAC/clusterのいずれも、WlsEstimator::fitはcov_typeをそのまま
+        // OlsEstimator::fitに渡すだけで正しく動作するはず（wls-standard-errors.md
         // の通り、新しい計算式の実装は不要という前提の確認）。
         //
         // 検証方法: `from_columns_weighted`を経由せず、y・x1・切片列をこのテスト内で手動で

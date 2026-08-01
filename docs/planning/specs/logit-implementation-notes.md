@@ -262,3 +262,32 @@ Issue #58時点ではIssue #58本来のスコープを超えるためユーザ�
 - **テストは追加していない（OLSの前例通り）**: `fit`/`fit_logit`は`PyDataFrame`を引数に取るため、`build_logit_input`と異なりGILなしの`#[cfg(test)]`では直接呼べない。OLSの同等Issue（`cd2f662`「OLSのengine呼び出し・エラー変換を実装」）も、この段階ではテストを追加せず、後続の`python_package`ラッパー・statsmodelsベンチマークIssue（`d412c53`、Issue #19相当）で初めてpytestのカバレッジが付いたことを`git log`で確認済み。Logitも同じ流れ（Issue #66→#67→#68）を踏襲する。
 - **数値検証**: `engine`のユニットテスト`fit_cov_type_opg_hc0_hc1_match_independently_recomputed_values`・`fit_cov_type_cluster_matches_independently_recomputed_values`と同じ入力（`y=[0,1,0,1]`、`x1=[10,20,30,40]`、`x2=[-5,2,8,-1]`、cluster`=[a,a,b,b]`、`tol=1e-8`）で、一時的なRustテスト（コミット対象外）から`params`/`std_errors`のオラクル値を出力させ、`uv run maturin develop --release`でビルドした`fit_logit`をPythonから同じデータで呼び出した結果と突き合わせ、classical/opg/hc0/hc1/clusterの全cov_typeで一致することを確認した（完了条件通り）。
 - **`y`の値域検証（単位区間`[0,1]`）が未実装であることが判明**: rust-reviewerの指摘で、`fit_logit`のdocstringに「yは0.0/1.0でなければならない」と書いたところ、実際には`LogitInput::from_columns`にその検証が無いことが分かった。これはIssue #54時点で「B2（尤度・スコア・Hessian実装）に持ち越し」と明記されていたにもかかわらず、B2以降も未実装のまま残っていた既存のギャップ（本Issueが原因ではない）。ユーザー確認の上、docstringから未実装の保証を外し、検証実装自体はIssue #135として切り出した。
+
+## engine_pybind: predict()/pred_table()/marginal_effects()の公開、python_packageラッパー（Issue #67で実装済み）
+
+Issue #67は当初「python_packageラッパー実装」というタイトルだったが、着手前の調査で`LogitResult`（Issue #65/#66）に`predict`/`pred_table`/`marginal_effects`のpymethodsが1つも無いことが判明した（engine側の`LogitEstimator::predict()`/`pred_table()`/`marginal_effects()`はIssue #62/#63で実装済みだったが、engine_pybind層の配線が無かった）。OLSの`predict()`実装（engine拡張・engine_pybind配線・python_packageラッパーを1つのIssueにまとめたコミット`c6caed7`、Issue #86）と同じ方針で、engine_pybind配線をIssue #67のスコープに含めてまとめて実装することをユーザー確認済み。
+
+### engine_pybind側
+
+- `LogitResult`に非公開フィールド`estimator: LogitEstimator`を追加し、`#[pymethods] impl LogitResult`で`predict()`/`pred_table(threshold=0.5)`/`marginal_effects(at="overall", confidence_level=0.95)`を実装（詳細な設計判断は`engine_pybind/src/nonlinear/CLAUDE.md`参照）。
+- `marginal_effects`の結果用に新規pyclass`MarginalEffectsResult`を追加。`at`文字列パースは`parse_marginal_effects_at`。
+- `pred_table`の2×2`Mat<f64>`をPython向けの`Vec<Vec<f64>>`に変換する`mat_to_nested_vec`を`nonlinear/common.rs`に追加。
+- 数値検証: `y=[0,1,0,1]`・`x1=[10,20,30,40]`・`x2=[-5,2,8,-1]`・`tol=1e-8`のデータで、一時的なRustテスト（コミット対象外）から`predict()`/`pred_table(0.5)`/`marginal_effects(at="overall")`のオラクル値を取得し、`uv run maturin develop --release`でビルドした結果と突き合わせて一致を確認した。`at="mean"`/`"median"`が`"overall"`と異なる値になること、`at`不正値・`confidence_level`範囲外で`ValidationError`になることも確認した。
+
+### python_package側
+
+- `python_package/econometricsmodels/nonlinear/logit.py`に`Logit`/`LogitResults`を実装（`OLS`/`OlsResults`と同型）。`LogitOptions`は`_lib`から再輸出。`coef_table()`は`OlsResults`と同形状だが`t_stat`ではなく`z_stat`。
+- `predict()`は`[{"probability": p}, ...]`（OLSの`{"fitted": v}`に倣った命名）。
+- `pred_table()`は`[{"actual": 0, "predicted_0": .., "predicted_1": ..}, {"actual": 1, ...}]`という行指向`list[dict]`（仕様書に明記の無い実装判断、ユーザー確認済み。詳細は`python_package/econometricsmodels/nonlinear/CLAUDE.md`参照）。
+- `marginal_effects()`のキー（`param`/`dydx`/`std_err`/`z`/`p_value`/`conf_low`/`conf_high`）は`nonlinear-api-design.md`6章の確定済み命名をそのまま使用（`coef_table()`の`conf_lower`/`conf_upper`とは意図的に異なる）。
+
+### テストに関する方針転換
+
+Issue #66では「OLSの`engine呼び出し`Issue（`cd2f662`）もテスト無しでマージされた」という前例を根拠にテスト追加を見送ったが、Issue #67のレビュー（rust-reviewer・python-reviewer双方）で、この前例の理解が不正確だったことが判明した。実際には`2d554e4`（OLSのpython_packageラッパー実装コミット）は`tests/api_tests/test_ols.py`を「確定済み設計に合わせて全面的に書き直し」ており、ラッパー実装時点でテストが完全にゼロだったわけではない（統計的な数値比較=Issue #19相当は別issueだが、構造・APIレベルのテストはラッパーと同時だった）。Logitは`test_logit.py`自体が存在しない状態だったため、ユーザー確認の上、`tests/api_tests/test_logit.py`（構造・API・エラーパスのスモークテスト25件）を本Issueで追加した。statsmodelsとの厳密な数値比較（フィクスチャ化）は引き続きIssue #68で行う。
+
+### レビューで対応した軽微な指摘
+
+- `parse_marginal_effects_at`に直接の単体テストが無かった（`parse_cov_type`/`parse_method`と異なり`build_logit_input`経由の間接テストも無い）ため、`#[cfg(test)]`ユニットテストを2件追加。
+- `python_package/econometricsmodels/nonlinear/logit.py`の新規docstring1行が79文字制限（`.claude/rules/python-style.md`）を超過していたため修正。
+- `engine::nonlinear::logit::LogitEstimator`のdocコメントに「`predict`/`pred_table`は未実装」という古い記述が残っていたため修正（diff範囲外だが機会があったため合わせて対応）。
+- `engine_pybind/src/nonlinear/CLAUDE.md`・`python_package/econometricsmodels/nonlinear/CLAUDE.md`を新規作成し、本Issueまでに蓄積した設計判断を集約した（Probit実装時の調査コスト削減のため、両レビュアーからの提案）。

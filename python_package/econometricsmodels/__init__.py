@@ -10,6 +10,7 @@ from __future__ import annotations
 from ._lib import ComputationError, ValidationError
 from .linear.ols import OLS, OLSOptions, OlsResults
 from .linear.wls import WLS, WlsResults
+from .nonlinear.logit import Logit, LogitOptions, LogitResults
 
 __all__ = [
     "OLS",
@@ -17,6 +18,9 @@ __all__ = [
     "OlsResults",
     "WLS",
     "WlsResults",
+    "Logit",
+    "LogitOptions",
+    "LogitResults",
     "ValidationError",
     "ComputationError",
 ]

@@ -453,8 +453,8 @@ impl MarginalEffects {
 /// Logitの推定結果。`fit`でのバリデーション・最適化・`cov_type`に応じたSE計算・
 /// 適合度統計量の計算を通過した状態を表す。
 ///
-/// `predict`/`pred_table`は未実装。`docs/planning/specs/
-/// logit-probit-issue-breakdown.md`のB10で`fit`とは別のメソッドとして追加していく想定。
+/// `marginal_effects`/`predict`/`pred_table`は`fit`とは別のメソッドとして提供する
+/// （`docs/planning/specs/nonlinear-api-design.md`6章）。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
 #[derive(Debug)]

@@ -10,7 +10,7 @@ use pyo3_polars::PyDataFrame;
 use errors::{ComputationError, ValidationError};
 use linear::ols::{OLSOptions, OLSResult};
 use linear::wls::WLSResult;
-use nonlinear::logit::{LogitOptions, LogitResult};
+use nonlinear::logit::{LogitOptions, LogitResult, MarginalEffectsResult};
 
 /// Entry point for OLS estimation.
 ///
@@ -93,6 +93,7 @@ fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fit_logit, m)?)?;
     m.add_class::<LogitOptions>()?;
     m.add_class::<LogitResult>()?;
+    m.add_class::<MarginalEffectsResult>()?;
     m.add("ValidationError", m.py().get_type::<ValidationError>())?;
     m.add("ComputationError", m.py().get_type::<ComputationError>())?;
     Ok(())

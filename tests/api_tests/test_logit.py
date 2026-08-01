@@ -1,0 +1,270 @@
+"""Logit python_packageラッパーの構造・API・エラーパスのスモークテスト。
+
+主リファレンス（statsmodels）との厳密な数値比較はIssue #68で別途実施する
+（`test_ols_fixtures.py`/`test_wls_fixtures.py`と同じ役割分担）。ここでは
+`fit()`の成功パス・`coef_table()`/`predict()`/`pred_table()`/
+`marginal_effects()`の構造・`ValidationError`/`ComputationError`パスのみを
+検証する。
+"""
+
+from __future__ import annotations
+
+import polars as pl
+import pytest
+
+from econometricsmodels import (
+    ComputationError,
+    Logit,
+    LogitOptions,
+    LogitResults,
+    ValidationError,
+)
+
+
+@pytest.fixture(scope="module")
+def binary_dataset(dataset: pl.DataFrame) -> pl.DataFrame:
+    """共有`dataset`フィクスチャの`y`を中央値で0/1化したLogit用データセット。"""
+    median = dataset["y"].median()
+    y_binary = (dataset["y"] > median).cast(pl.Float64)
+    return dataset.with_columns(y_binary.alias("y"))
+
+
+# ── 成功パス・API構造 ────────────────────────────────────────────────
+
+
+def test_fit_succeeds_and_returns_logit_results(binary_dataset):
+    res = Logit(binary_dataset, y="y", x=["x1", "x2"]).fit()
+    assert isinstance(res, LogitResults)
+
+
+def test_default_options_use_classical_and_converge(binary_dataset):
+    res = Logit(binary_dataset, y="y", x=["x1", "x2"]).fit()
+    assert res.cov_type == "classical"
+    assert res.converged
+
+
+def test_param_names_include_const_first(binary_dataset):
+    res = Logit(binary_dataset, y="y", x=["x1", "x2"]).fit()
+    assert res.param_names == ["const", "x1", "x2"]
+
+
+def test_params_std_errors_z_stats_p_values_share_keys(binary_dataset):
+    res = Logit(binary_dataset, y="y", x=["x1", "x2"]).fit()
+    expected_keys = {"const", "x1", "x2"}
+    assert set(res.params.keys()) == expected_keys
+    assert set(res.std_errors.keys()) == expected_keys
+    assert set(res.z_stats.keys()) == expected_keys
+    assert set(res.p_values.keys()) == expected_keys
+
+
+def test_conf_int_structure(binary_dataset):
+    res = Logit(binary_dataset, y="y", x=["x1", "x2"]).fit()
+    ci = res.conf_int
+    assert set(ci.keys()) == {"const", "x1", "x2"}
+    for lower, upper in ci.values():
+        assert lower < upper
+
+
+def test_n_obs_matches_dataset_size(binary_dataset):
+    res = Logit(binary_dataset, y="y", x=["x1", "x2"]).fit()
+    assert res.n_obs == binary_dataset.height
+
+
+def test_coef_table_structure(binary_dataset):
+    res = Logit(binary_dataset, y="y", x=["x1", "x2"]).fit()
+    table = res.coef_table()
+
+    assert isinstance(table, list)
+    assert len(table) == 3  # const, x1, x2
+    expected_keys = {
+        "param",
+        "coef",
+        "std_err",
+        "z_stat",
+        "p_value",
+        "conf_lower",
+        "conf_upper",
+    }
+    for row in table:
+        assert expected_keys <= set(row.keys())
+    assert [row["param"] for row in table] == ["const", "x1", "x2"]
+
+
+# ── predict() / pred_table() ─────────────────────────────────────────
+
+
+def test_predict_returns_row_oriented_probabilities(binary_dataset):
+    res = Logit(binary_dataset, y="y", x=["x1", "x2"]).fit()
+    predicted = res.predict()
+
+    assert len(predicted) == binary_dataset.height
+    for row in predicted:
+        assert set(row.keys()) == {"probability"}
+        assert 0.0 <= row["probability"] <= 1.0
+
+
+def test_pred_table_default_threshold_sums_to_n_obs(binary_dataset):
+    res = Logit(binary_dataset, y="y", x=["x1", "x2"]).fit()
+    table = res.pred_table()
+
+    assert len(table) == 2
+    total = sum(row["predicted_0"] + row["predicted_1"] for row in table)
+    assert total == binary_dataset.height
+    assert {row["actual"] for row in table} == {0, 1}
+
+
+def test_pred_table_actual_counts_invariant_to_threshold(binary_dataset):
+    """`actual`の行合計はthresholdに関わらず一定（固定0.5分割のため）。"""
+    res = Logit(binary_dataset, y="y", x=["x1", "x2"]).fit()
+    table_default = res.pred_table(0.5)
+    table_other = res.pred_table(0.9)
+
+    def row_totals(table):
+        return {
+            row["actual"]: row["predicted_0"] + row["predicted_1"]
+            for row in table
+        }
+
+    assert row_totals(table_default) == row_totals(table_other)
+
+
+# ── marginal_effects() ────────────────────────────────────────────────
+
+
+def test_marginal_effects_default_excludes_intercept(binary_dataset):
+    res = Logit(binary_dataset, y="y", x=["x1", "x2"]).fit()
+    effects = res.marginal_effects()
+
+    assert [row["param"] for row in effects] == ["x1", "x2"]
+    expected_keys = {
+        "param",
+        "dydx",
+        "std_err",
+        "z",
+        "p_value",
+        "conf_low",
+        "conf_high",
+    }
+    for row in effects:
+        assert expected_keys <= set(row.keys())
+
+
+def test_marginal_effects_mean_and_median_differ_from_overall(
+    binary_dataset,
+):
+    res = Logit(binary_dataset, y="y", x=["x1", "x2"]).fit()
+    overall = [row["dydx"] for row in res.marginal_effects(at="overall")]
+    mean = [row["dydx"] for row in res.marginal_effects(at="mean")]
+    median = [row["dydx"] for row in res.marginal_effects(at="median")]
+
+    assert overall != mean
+    assert overall != median
+
+
+def test_marginal_effects_at_is_case_insensitive(binary_dataset):
+    res = Logit(binary_dataset, y="y", x=["x1", "x2"]).fit()
+    assert res.marginal_effects(at="OVERALL") == res.marginal_effects(
+        at="overall"
+    )
+
+
+def test_marginal_effects_unknown_at_raises(binary_dataset):
+    res = Logit(binary_dataset, y="y", x=["x1", "x2"]).fit()
+    with pytest.raises(ValidationError):
+        res.marginal_effects(at="bogus")
+
+
+def test_marginal_effects_confidence_level_out_of_range_raises(
+    binary_dataset,
+):
+    res = Logit(binary_dataset, y="y", x=["x1", "x2"]).fit()
+    with pytest.raises(ValidationError):
+        res.marginal_effects(confidence_level=1.5)
+
+
+# ── エラーハンドリング ──────────────────────────────────────────────
+
+
+def test_y_in_x_raises(binary_dataset):
+    with pytest.raises(ValidationError):
+        Logit(binary_dataset, y="y", x=["y", "x1"]).fit()
+
+
+def test_duplicate_x_column_raises(binary_dataset):
+    with pytest.raises(ValidationError):
+        Logit(binary_dataset, y="y", x=["x1", "x1"]).fit()
+
+
+def test_const_collision_with_include_intercept_raises():
+    df = pl.DataFrame(
+        {"y": [0.0, 1.0, 0.0, 1.0], "const": [1.0, 2.0, 3.0, 3.5]}
+    )
+    with pytest.raises(ValidationError):
+        Logit(df, y="y", x=["const"]).fit()
+
+
+def test_empty_x_raises(binary_dataset):
+    with pytest.raises(ValidationError):
+        Logit(binary_dataset, y="y", x=[]).fit()
+
+
+def test_missing_column_raises(binary_dataset):
+    with pytest.raises(ValidationError):
+        Logit(binary_dataset, y="y", x=["does_not_exist"]).fit()
+
+
+def test_unknown_cov_type_raises(binary_dataset):
+    with pytest.raises(ValidationError):
+        Logit(
+            binary_dataset,
+            y="y",
+            x=["x1", "x2"],
+            options=LogitOptions(cov_type="bogus"),
+        ).fit()
+
+
+def test_unknown_method_raises(binary_dataset):
+    with pytest.raises(ValidationError):
+        Logit(
+            binary_dataset,
+            y="y",
+            x=["x1", "x2"],
+            options=LogitOptions(method="bogus"),
+        ).fit()
+
+
+def test_insufficient_observations_raises(binary_dataset):
+    df = binary_dataset.head(2)
+    with pytest.raises(ValidationError):
+        Logit(df, y="y", x=["x1", "x2"]).fit()
+
+
+def test_singular_hessian_raises_computation_error():
+    """完全な多重共線性は`ComputationError`。"""
+    df = pl.DataFrame(
+        {
+            "y": [0.0, 1.0, 0.0, 1.0, 1.0],
+            "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "x2": [2.0, 4.0, 6.0, 8.0, 10.0],  # x2 = 2 * x1
+        }
+    )
+    with pytest.raises(ComputationError):
+        Logit(df, y="y", x=["x1", "x2"]).fit()
+
+
+def test_cluster_cov_type_requires_at_least_two_groups():
+    """クラスター数が1つだけの場合`ValidationError`（engine側の`InsufficientClusters`）。"""
+    df = pl.DataFrame(
+        {
+            "y": [0.0, 1.0, 0.0, 1.0],
+            "x1": [1.0, 2.0, 3.0, 4.0],
+            "cluster": ["a", "a", "a", "a"],
+        }
+    )
+    with pytest.raises(ValidationError):
+        Logit(
+            df,
+            y="y",
+            x=["x1"],
+            options=LogitOptions(cov_type="cluster", cluster_col="cluster"),
+        ).fit()

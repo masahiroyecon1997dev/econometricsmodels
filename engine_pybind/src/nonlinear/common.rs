@@ -33,3 +33,32 @@ pub(crate) fn mle_error_to_pyerr(err: MleError) -> PyErr {
         | MleError::SingularOpgMatrix => ComputationError::new_err(err.to_string()),
     }
 }
+
+/// `faer::Mat<f64>`を行指向の`Vec<Vec<f64>>`に変換する（`pred_table`のような小さい
+/// 2次元行列をPython側にそのまま返すため）。`engine_pybind/src/linear/common.rs`の
+/// `mat_to_vec`は列ベクトル（n×1）専用のため、任意の形状に対応するこちらを別途用意した。
+pub(crate) fn mat_to_nested_vec(mat: &faer::Mat<f64>) -> Vec<Vec<f64>> {
+    (0..mat.nrows())
+        .map(|i| (0..mat.ncols()).map(|j| *mat.get(i, j)).collect())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mat_to_nested_vec_preserves_row_major_order() {
+        let mat = faer::Mat::from_fn(2, 3, |i, j| (i * 3 + j) as f64);
+        assert_eq!(
+            mat_to_nested_vec(&mat),
+            vec![vec![0.0, 1.0, 2.0], vec![3.0, 4.0, 5.0]]
+        );
+    }
+
+    #[test]
+    fn mat_to_nested_vec_handles_single_row() {
+        let mat = faer::Mat::from_fn(1, 2, |_, j| j as f64);
+        assert_eq!(mat_to_nested_vec(&mat), vec![vec![0.0, 1.0]]);
+    }
+}

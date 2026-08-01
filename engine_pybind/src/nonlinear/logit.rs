@@ -19,13 +19,15 @@
 //! これに委譲する、Issue #66）が`PyDataFrame`を受け取り、`.into()`で`DataFrame`に変換して
 //! から`build_logit_input`を呼ぶ（`ols.rs`の`fit`関数と同じ変換パターン）。
 
-use engine::nonlinear::common::{CovType as EngineCovType, Method as EngineMethod};
+use engine::nonlinear::common::{
+    CovType as EngineCovType, MarginalEffectsAt, Method as EngineMethod,
+};
 use engine::nonlinear::logit::{LogitEstimator, LogitInput};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
-use super::common::mle_error_to_pyerr;
+use super::common::{mat_to_nested_vec, mle_error_to_pyerr};
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
 use crate::errors::ValidationError;
 use crate::validation::{
@@ -154,16 +156,23 @@ impl LogitOptions {
 /// section 5. Row-oriented table construction (e.g. a `coef_table`) is left to
 /// `python_package`. All array-valued fields (`params`, `std_errors`, etc.) share the
 /// same order as `param_names`.
+///
+/// `predict()` / `pred_table()` / `marginal_effects()` are provided as separate methods
+/// (not part of this struct's fields), matching `nonlinear-api-design.md` section 6.
 // `LogitResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`LogitOptions`の`from_py_object`とは
 // 対照的。`OLSResult`と同じ理由）。
 //
 // `get_all`ではなく、フィールドごとに個別`#[pyo3(get)]`を付ける方式にしている
-// （`OLSResult`と同じ設計。将来`marginal_effects`/`predict`/`pred_table`の呼び出しに
-// 必要な内部専用フィールド（`cov_params`等）を追加する際、`OLSResult`の`fitted_values`/
-// `has_intercept`と同様に`#[pyo3(get)]`を付けずに済ませられるようにするため）。
+// （`OLSResult`と同じ設計。`predict`/`pred_table`/`marginal_effects`の呼び出しに必要な
+// `estimator`フィールドを`#[pyo3(get)]`を付けずに済ませられるようにするため）。
+//
+// `Clone`を派生しない: `estimator`（`engine::nonlinear::logit::LogitEstimator`）が
+// `Clone`を実装していないため（`.claude/rules/rust-style.md`「推定量構造体の設計」の
+// 通りprivateフィールドのみで、Cloneを要求する既存の呼び出し元も無い）。`OLSResult`との
+// 差異はこの点のみ。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct LogitResult {
     #[pyo3(get)]
     pub params: Vec<f64>,
@@ -207,6 +216,103 @@ pub struct LogitResult {
     /// to lowercase; e.g. `"classical"`, `"opg"`, `"hc1"`, `"cluster"`).
     #[pyo3(get)]
     pub cov_type: String,
+    /// Not exposed to Python; only `predict`/`pred_table`/`marginal_effects` read it
+    /// (`OLSResult`の`fitted_values`/`has_intercept`と同じ位置づけ、コメント参照)。
+    estimator: LogitEstimator,
+}
+
+#[pymethods]
+impl LogitResult {
+    /// Predicted probabilities for the training data used in `fit()`.
+    ///
+    /// Out-of-sample prediction (a `new_data` argument) is not yet supported
+    /// (tracked separately; see `docs/planning/specs/logit-implementation-notes.md`).
+    fn predict(&self) -> Vec<f64> {
+        self.estimator.predict()
+    }
+
+    /// 2x2 classification table as `[[row0], [row1]]`, where row/column index 0 is the
+    /// negative class and 1 is the positive class: `table[actual][predicted]`.
+    ///
+    /// `actual` always uses a fixed 0.5 split; only `predicted` depends on `threshold`
+    /// (matches statsmodels' `BinaryResults.pred_table(threshold)`; see
+    /// `engine::nonlinear::logit::LogitEstimator::pred_table` for the exact semantics).
+    /// Out-of-sample data is not yet supported (same limitation as `predict()`).
+    #[pyo3(signature = (threshold=0.5))]
+    fn pred_table(&self, threshold: f64) -> Vec<Vec<f64>> {
+        mat_to_nested_vec(&self.estimator.pred_table(threshold))
+    }
+
+    /// Marginal effects (`dy/dx`) with delta-method standard errors.
+    ///
+    /// Independent of `fit()`'s `confidence_level` (re-evaluated here so callers can
+    /// use a different confidence level without re-fitting). See
+    /// `docs/planning/specs/nonlinear-api-design.md` section 6.
+    ///
+    /// # Errors
+    /// - `at` is not one of `"overall"`, `"mean"`, `"median"` (case-insensitive):
+    ///   `ValidationError`
+    /// - `confidence_level` is outside `(0, 1)`: `ValidationError`
+    #[pyo3(signature = (at="overall".to_string(), confidence_level=0.95))]
+    fn marginal_effects(
+        &self,
+        at: String,
+        confidence_level: f64,
+    ) -> PyResult<MarginalEffectsResult> {
+        let at = parse_marginal_effects_at(&at.to_lowercase())?;
+        let effects = self
+            .estimator
+            .marginal_effects(at, confidence_level)
+            .map_err(mle_error_to_pyerr)?;
+
+        Ok(MarginalEffectsResult {
+            param_names: effects.param_names().to_vec(),
+            dydx: effects.dydx().to_vec(),
+            std_errors: effects.std_errors().to_vec(),
+            z_stats: effects.z_stats().to_vec(),
+            p_values: effects.p_values().to_vec(),
+            conf_lower: effects.conf_lower().to_vec(),
+            conf_upper: effects.conf_upper().to_vec(),
+        })
+    }
+}
+
+/// `LogitResult::marginal_effects`の結果。定数項は除外される（`engine`側の
+/// `MarginalEffects`のdocコメント参照）。フィールドの並びは`param_names`と対応する
+/// （`LogitResult`本体と同じ規約）。
+#[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
+#[derive(Debug, Clone)]
+pub struct MarginalEffectsResult {
+    #[pyo3(get)]
+    pub param_names: Vec<String>,
+    #[pyo3(get)]
+    pub dydx: Vec<f64>,
+    #[pyo3(get)]
+    pub std_errors: Vec<f64>,
+    #[pyo3(get)]
+    pub z_stats: Vec<f64>,
+    #[pyo3(get)]
+    pub p_values: Vec<f64>,
+    #[pyo3(get)]
+    pub conf_lower: Vec<f64>,
+    #[pyo3(get)]
+    pub conf_upper: Vec<f64>,
+}
+
+/// `at`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::MarginalEffectsAt`に
+/// パースする。
+///
+/// # Errors
+/// `at`が既知の値のいずれでもない: `ValidationError`
+fn parse_marginal_effects_at(at_lower: &str) -> PyResult<MarginalEffectsAt> {
+    match at_lower {
+        "overall" => Ok(MarginalEffectsAt::Overall),
+        "mean" => Ok(MarginalEffectsAt::Mean),
+        "median" => Ok(MarginalEffectsAt::Median),
+        other => Err(ValidationError::new_err(format!(
+            "unknown at: '{other}'. Expected one of 'overall', 'mean', or 'median'"
+        ))),
+    }
 }
 
 /// `cov_type`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::CovType`に
@@ -357,6 +463,7 @@ pub(crate) fn fit(
         converged: estimator.converged(),
         n_iter: estimator.n_iter(),
         cov_type: options.cov_type.to_lowercase(),
+        estimator,
     })
 }
 
@@ -364,6 +471,31 @@ pub(crate) fn fit(
 mod tests {
     use super::*;
     use polars::df;
+
+    // `parse_marginal_effects_at`自体は渡された文字列をそのまま照合する（`parse_cov_type`/
+    // `parse_method`と同じ設計）。大文字小文字を区別しない処理は呼び出し側
+    // （`LogitResult::marginal_effects`）が`.to_lowercase()`してから渡すことで実現するため、
+    // ここでは小文字化済みの入力を渡す。
+    #[test]
+    fn parse_marginal_effects_at_accepts_known_lowercase_values() {
+        assert!(matches!(
+            parse_marginal_effects_at("overall"),
+            Ok(MarginalEffectsAt::Overall)
+        ));
+        assert!(matches!(
+            parse_marginal_effects_at("mean"),
+            Ok(MarginalEffectsAt::Mean)
+        ));
+        assert!(matches!(
+            parse_marginal_effects_at("median"),
+            Ok(MarginalEffectsAt::Median)
+        ));
+    }
+
+    #[test]
+    fn parse_marginal_effects_at_returns_validation_error_for_unknown_value() {
+        assert!(parse_marginal_effects_at("bogus").is_err());
+    }
 
     /// `build_logit_input`のテスト全体で使う既定の`LogitOptions`（`cov_type="classical"`・
     /// `include_intercept=true`・`method="newton"`）。フィールドごとに上書きして使う。

@@ -25,9 +25,9 @@ use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
 pub(crate) fn mle_error_to_pyerr(err: MleError) -> PyErr {
     match err {
         MleError::Common(common) => common_error_to_pyerr(common),
-        MleError::InvalidMaxIter { .. } | MleError::InvalidCensoringBounds { .. } => {
-            ValidationError::new_err(err.to_string())
-        }
+        MleError::InvalidMaxIter { .. }
+        | MleError::InvalidTol { .. }
+        | MleError::InvalidCensoringBounds { .. } => ValidationError::new_err(err.to_string()),
         MleError::NonConvergence { .. }
         | MleError::SingularHessian
         | MleError::SingularOpgMatrix => ComputationError::new_err(err.to_string()),

@@ -307,11 +307,24 @@ pub struct LogitProblem {
 }
 
 impl LogitProblem {
-    pub fn new(input: &LogitInput) -> Self {
+    /// `input`の`x`・`y`をそのまま（未標準化のスケールで）複製して構築する。
+    /// 閉じた形の解と突き合わせる単体テスト専用（`LogitEstimator::fit`は標準化後の
+    /// 設計行列を使うため、こちらではなく`from_standardized`を使う。Issue #118、
+    /// 構築経路を2種類の明示的なコンストラクタに統一）。
+    #[cfg(test)]
+    fn new(input: &LogitInput) -> Self {
         Self {
             x: input.x().clone(),
             y: input.y().clone(),
         }
+    }
+
+    /// `standardize_columns`で標準化済みの設計行列`x_std`と`y`から構築する。
+    /// `LogitEstimator::fit`が最適化・収束点でのスコア評価に使う経路（Issue #118、
+    /// フィールドリテラルでの直接構築を避け、両方の構築経路を明示的なコンストラクタに
+    /// 統一する）。
+    fn from_standardized(x_std: Mat<f64>, y: Mat<f64>) -> Self {
+        Self { x: x_std, y }
     }
 
     /// 観測`i`の線形予測子 `z_i = x_i'θ`。
@@ -566,7 +579,9 @@ impl LogitEstimator {
     /// # Errors
     /// - `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
     /// - `max_iter`が0以下: `MleError::InvalidMaxIter`
-    /// - 観測数`n`が`k`（定数項を含む説明変数の数）以下: `CommonError::InsufficientObservations`
+    /// - `tol`が0以下: `MleError::InvalidTol`
+    /// - `k`（定数項を含む説明変数の数）が0（定数項も説明変数も無い）: `CommonError::NoRegressors`
+    /// - 観測数`n`が`k`以下: `CommonError::InsufficientObservations`
     /// - `raise_on_non_convergence=true`かつ`max_iter`回で未収束: `MleError::NonConvergence`
     /// - 収束点（または`raise_on_non_convergence=false`時の打ち切り点）のHessianが特異
     ///   （設計行列の完全な多重共線性等）: `MleError::SingularHessian`
@@ -588,9 +603,23 @@ impl LogitEstimator {
         if max_iter <= 0 {
             return Err(MleError::InvalidMaxIter { max_iter });
         }
+        if tol <= 0.0 {
+            return Err(MleError::InvalidTol { tol });
+        }
 
         let n = input.nobs();
         let k = input.k();
+        // `k == 0`（`include_intercept=false`かつ説明変数も無い病的な入力）は`n<=k`単体では
+        // 弾けない（実データでは`n>=1`のため）。この経路を通すと後段の`cov_params`計算
+        // （0×0行列に対する`ensure_well_conditioned_symmetric_matrix`）で`faer`がpanicする
+        // ことが判明していたため、ここで明示的に弾く（Issue #130の根本原因、Issue #118で対応）。
+        // `n<=k`（観測数不足）とは原因が異なる不正のため、`InsufficientObservations`とは
+        // 別バリアント`NoRegressors`で表現する（`k=0`だと`n>k`は常に成立するため、
+        // `InsufficientObservations`のメッセージを流用すると「条件を満たしているのに
+        // エラーになる」という誤解を招く。rust-reviewerの指摘を受けて分離）。
+        if k == 0 {
+            return Err(CommonError::NoRegressors { n }.into());
+        }
         if n <= k {
             return Err(CommonError::InsufficientObservations { n, k }.into());
         }
@@ -600,10 +629,7 @@ impl LogitEstimator {
         }
 
         let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
-        let problem = LogitProblem {
-            x: x_std,
-            y: input.y().clone(),
-        };
+        let problem = LogitProblem::from_standardized(x_std, input.y().clone());
         // `cov_type`がOPG/サンドイッチ型の場合、収束点でのスコア評価に元の
         // `LogitProblem`（標準化空間のx_std）が必要になる。`run_solver`は`problem`の
         // 所有権を取り込む（内部で保持していたモデルを呼び出し元へ返さない設計）ため、
@@ -1590,10 +1616,8 @@ mod tests {
             .zip(scale.stds())
             .map(|(p, s)| p * s)
             .collect();
-        let problem_std = LogitProblem {
-            x: x_std,
-            y: input_for_reconstruction.y().clone(),
-        };
+        let problem_std =
+            LogitProblem::from_standardized(x_std, input_for_reconstruction.y().clone());
         let scores_std = problem_std.scores(&params_std);
         let cost_hessian_std = problem_std.hessian(&params_std).unwrap();
         let hessian_std = Mat::from_fn(k, k, |i, j| -cost_hessian_std[i][j]);
@@ -1688,10 +1712,8 @@ mod tests {
             .zip(scale.stds())
             .map(|(p, s)| p * s)
             .collect();
-        let problem_std = LogitProblem {
-            x: x_std,
-            y: input_for_reconstruction.y().clone(),
-        };
+        let problem_std =
+            LogitProblem::from_standardized(x_std, input_for_reconstruction.y().clone());
         let scores_std = problem_std.scores(&params_std);
         let cost_hessian_std = problem_std.hessian(&params_std).unwrap();
         let hessian_std = Mat::from_fn(k, k, |i, j| -cost_hessian_std[i][j]);
@@ -1780,10 +1802,8 @@ mod tests {
             .zip(scale.stds())
             .map(|(p, s)| p * s)
             .collect();
-        let problem_std = LogitProblem {
-            x: x_std,
-            y: input_for_reconstruction.y().clone(),
-        };
+        let problem_std =
+            LogitProblem::from_standardized(x_std, input_for_reconstruction.y().clone());
         let scores_std = problem_std.scores(&params_std);
         let cost_hessian_std = problem_std.hessian(&params_std).unwrap();
         let hessian_std = Mat::from_fn(k, k, |i, j| -cost_hessian_std[i][j]);
@@ -2115,6 +2135,53 @@ mod tests {
             result.unwrap_err(),
             MleError::Common(CommonError::InsufficientObservations { n: 2, k: 2 })
         );
+    }
+
+    #[test]
+    fn fit_returns_no_regressors_error_when_k_is_zero() {
+        // `include_intercept=false`かつ説明変数も無い（k=0）病的な入力。
+        // 以前はこの経路が`fit()`冒頭の`n<=k`チェック（n>=1なら常に通過してしまう）を
+        // すり抜け、後段の`cov_params`計算（0×0行列に対する
+        // `ensure_well_conditioned_symmetric_matrix`）で`faer`がpanicしていた
+        // （Issue #130）。`k==0`を明示的に検証することでグレースフルなエラーに
+        // なることを確認する（Issue #118でIssue #130を解消）。`n<=k`（観測数不足）とは
+        // 別の不正のため、`InsufficientObservations`ではなく専用の`NoRegressors`を返す
+        // （`k=0`だと`n>k`は常に成立してしまい、`InsufficientObservations`のメッセージ
+        // だと「条件を満たしているのにエラーになる」という誤解を招くため。
+        // rust-reviewerの指摘を受けて分離）。
+        let y = vec![0.0, 1.0, 0.0, 1.0, 1.0];
+        let input = LogitInput::from_columns(&y, &[], vec![], false, "y".to_string()).unwrap();
+        assert_eq!(input.k(), 0);
+
+        let result = LogitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-6,
+            true,
+            CovType::Classical,
+            0.95,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::Common(CommonError::NoRegressors { n: 5 })
+        );
+    }
+
+    #[test]
+    fn fit_returns_invalid_tol_error_for_non_positive_tol() {
+        for tol in [0.0, -1.0] {
+            let result = LogitEstimator::fit(
+                intercept_only_input(),
+                Method::Newton,
+                35,
+                tol,
+                true,
+                CovType::Classical,
+                0.95,
+            );
+            assert_eq!(result.unwrap_err(), MleError::InvalidTol { tol });
+        }
     }
 
     #[test]

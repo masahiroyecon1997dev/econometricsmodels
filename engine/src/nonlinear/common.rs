@@ -51,6 +51,12 @@ pub enum MleError {
     #[error("max_iter must be a positive integer, got {max_iter}")]
     InvalidMaxIter { max_iter: i64 },
 
+    /// `tol`が0以下。勾配ノルムに基づく収束判定`‖∇ℓ(θ)‖ < tol`が理論上満たされないため、
+    /// 常に`max_iter`まで反復して`NonConvergence`（または`converged=false`）になる
+    /// （Issue #118、`InvalidMaxIter`と同じ形の早期バリデーション）。
+    #[error("tol must be a positive number, got {tol}")]
+    InvalidTol { tol: f64 },
+
     /// Hessianが特異で逆行列が計算できない。Newton法のステップ求解中（収束前の任意の点）、
     /// および収束点での観測情報行列・サンドイッチ型・クラスターロバストSE計算
     /// （いずれもHessianの逆行列を使う）の両方で発生しうる。

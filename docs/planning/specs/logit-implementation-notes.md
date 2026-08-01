@@ -367,3 +367,21 @@ Issue #52策定時点で「最終的な妥当性判断はLogit/Probit実装・�
 - `docs/getting-started.md`にLogitセクションを追加（WLSセクションの後、エラーハンドリングの前）。基本的な`fit()`、`predict()`/`pred_table()`、`marginal_effects()`の使用例を含む。`docs/index.md`の「Supported methods」もLogit追加を反映。
 - Python側の全public docstring（`python_package/econometricsmodels/nonlinear/logit.py`）は既にGoogleスタイル・英語で書かれており（Issue #65〜#67で整備済み）、本Issueでの追加修正は不要だった。
 - `mkdocs build`（`--config-file docs/mkdocs.yml`、CI（`cd_docs.yml`）と同じ非strictモード）で正常にビルドできることを確認済み。`--strict`は既存の未解消警告（Issue #111、`docs/planning/specs/`配下の相対リンク）のため使わない方針を踏襲。
+
+## fit()のtolバリデーション・LogitProblem構築経路の一貫性・退化ケーステスト（Issue #118で実装済み）
+
+Issue #56のrust-reviewerレビューで見つかったnice-to-have3件への対応。
+
+1. **`tol`のバリデーション**: `LogitEstimator::fit`冒頭に`tol<=0.0`の検証を追加（`MleError::InvalidTol`、既存の`InvalidMaxIter`と同じパターン）。`engine_pybind`側`ValidationError`への変換配線も追加。境界値テスト（`tol=0.0`・`tol=-1.0`）をRust単体テスト・`test_logit.py`のAPIレベルテスト双方に追加。
+2. **`LogitProblem`の構築経路統一**: `LogitProblem::new(&input)`（未標準化のxをコピー、閉じた形の解と突き合わせる単体テスト専用）を`#[cfg(test)]`限定にし、`LogitEstimator::fit`が使う標準化後の設計行列での構築経路には新設の`LogitProblem::from_standardized(x_std, y)`を使う。フィールドリテラル直接構築（`fit()`内1箇所・テスト内3箇所）を全て置き換えた。
+3. **`k=0`の退化ケース対応（Issue #130を根本修正）**: `k=0`（`include_intercept=false`かつ説明変数0個）は、`fit()`冒頭の`n<=k`チェックが`n>=1`なら常に通過してしまうため、後段の`cov_params`計算（0×0行列に対する`ensure_well_conditioned_symmetric_matrix`）で`faer`が`attempt to subtract with overflow`panicを起こす既知のバグだった（Issue #130、Issue #61実装中に発見・別issue化）。「Issue #118のk=0テスト追加」と「Issue #130の根本原因」が同一だったため、ユーザー確認の上で#118内で根本修正した。`k==0`を明示的に検証し、新設した`CommonError::NoRegressors { n }`（`engine/src/error.rs`）で早期にグレースフルなエラーを返す。Issue #130のrepro手順（n=5, k=0）をそのままテスト化し、panicせずエラーになることを確認済み。Issue #130はクローズする。
+
+### rust-reviewerレビューで判明した追加修正: `NoRegressors`の新設
+
+当初は`k=0`のケースも既存の`CommonError::InsufficientObservations`（`n<=k`用）を流用していたが、rust-reviewerのレビューで「`k=0`だと`n>k`は`n`の値に関わらず常に成立してしまい、`InsufficientObservations`のメッセージ（`"n={n} must be greater than k={k}"`）を流用すると『条件を満たしているのになぜかエラーになる』という誤解を招くメッセージになる」との指摘を受けた。ユーザー確認の上で専用バリアント`CommonError::NoRegressors { n: usize }`を新設し、`n<=k`（観測数不足）とは意味的に区別した。`engine_pybind::errors::common_error_to_pyerr`でも`ValidationError`への変換を追加済み（Python側の例外クラスは変わらない）。
+
+### フォローアップ: OLS/WLSにも同型の脆弱性がある可能性（Issue #140として新規issue化）
+
+同じレビューで、OLSも`n<=k`のみの検証で`k=0`を弾いておらず、`ensure_well_conditioned_symmetric_matrix`を同様に経由することが判明した（未検証だが構造的に同型のリスク）。ユーザー確認の上、Issue #118のスコープには含めず、[Issue #140](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/140)として別途トラッキングする（OLS/WLSでの実際の再現確認とProbit/Tobit実装時の横展開）。
+
+いずれもPythonバインディング層（`engine_pybind`）の追加変更は`common_error_to_pyerr`への1バリアント追加のみ（バリデーション・計算ロジックの追加は無し）。`cargo test -p engine`（131件）・`cargo test -p engine_pybind`（31件）・`pytest tests/api_tests`（361件）、`cargo clippy --all-targets -- -D warnings`・`cargo fmt --check`・ruffいずれもパス。

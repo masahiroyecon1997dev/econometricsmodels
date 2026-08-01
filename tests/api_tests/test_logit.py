@@ -256,6 +256,20 @@ def test_unknown_method_raises(binary_dataset):
         ).fit()
 
 
+@pytest.mark.parametrize("tol", [0.0, -1.0])
+def test_non_positive_tol_raises(binary_dataset, tol):
+    """`tol<=0`は勾配ノルム基準の収束条件が理論上満たされないため`ValidationError`
+    （engine側の`MleError::InvalidTol`。Issue #118）。
+    """
+    with pytest.raises(ValidationError):
+        Logit(
+            binary_dataset,
+            y="y",
+            x=["x1", "x2"],
+            options=LogitOptions(tol=tol),
+        ).fit()
+
+
 def test_insufficient_observations_raises(binary_dataset):
     df = binary_dataset.head(2)
     with pytest.raises(ValidationError):

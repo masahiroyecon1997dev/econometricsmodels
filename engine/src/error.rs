@@ -28,12 +28,25 @@ pub enum CommonError {
     #[error("dimension mismatch: y has {y_rows} rows but x has {x_rows} rows")]
     DimensionMismatch { y_rows: usize, x_rows: usize },
 
-    /// 観測数nが説明変数の数k（定数項を含む）以下。
+    /// 観測数nが説明変数の数k（定数項を含む）以下。`k>=1`であることが前提
+    /// （`k=0`は別バリアント`NoRegressors`で扱う。`.claude/rules/rust-style.md`
+    /// 「エラーハンドリング」、Issue #118）。
     #[error(
         "insufficient observations: n={n} must be greater than k={k} \
          (number of independent variables, including the intercept)"
     )]
     InsufficientObservations { n: usize, k: usize },
+
+    /// 定数項も説明変数も無い（`include_intercept=false`かつ説明変数0個、`k=0`）。
+    /// `InsufficientObservations`（`n<=k`）とは原因が異なる別の不正のため区別する
+    /// （`k=0`だと`n`の値に関わらず不等式`n>k`は常に成立してしまい、
+    /// `InsufficientObservations`のメッセージを流用すると「条件を満たしているのに
+    /// エラーになる」という誤解を招くメッセージになっていた。Issue #118）。
+    #[error(
+        "no regressors: k=0 (include_intercept=false and no independent variables). \
+         At least one of the two is required"
+    )]
+    NoRegressors { n: usize },
 
     /// `confidence_level`が`(0, 1)`の範囲外。
     #[error("confidence_level must be in the range (0, 1): {confidence_level}")]
@@ -70,6 +83,11 @@ mod tests {
             CommonError::InsufficientObservations { n: 2, k: 3 }.to_string(),
             "insufficient observations: n=2 must be greater than k=3 \
              (number of independent variables, including the intercept)"
+        );
+        assert_eq!(
+            CommonError::NoRegressors { n: 5 }.to_string(),
+            "no regressors: k=0 (include_intercept=false and no independent variables). \
+             At least one of the two is required"
         );
         assert_eq!(
             CommonError::InvalidConfidenceLevel {

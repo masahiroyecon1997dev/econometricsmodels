@@ -23,4 +23,4 @@
 
 ## テスト
 
-`tests/api_tests/test_logit.py`は構造・API・エラーパスのスモークテストのみ（Issue #67で追加）。statsmodels/R glmとの厳密な数値比較は別issue（フィクスチャ化。OLSの`test_ols_fixtures.py`/`test_ols_crosscheck.py`と同じ役割分担）で行う。
+`tests/api_tests/test_logit.py`は構造・API・エラーパスのスモークテストのみ（Issue #67で追加）。statsmodels/R glmとの厳密な数値比較は`test_logit_fixtures.py`（statsmodels主リファレンス）・`test_logit_crosscheck.py`（Rクロスチェック）で行う（Issue #68、OLSの`test_ols_fixtures.py`/`test_ols_crosscheck.py`と同じ役割分担）。詳細は`docs/planning/specs/logit-implementation-notes.md`「statsmodels/R glmとの数値照合ベンチマーク作成」参照。

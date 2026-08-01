@@ -11,6 +11,10 @@
 このスクリプトは呼ばれない（フィクスチャJSON同様、意図的に更新する場合のみ
 手動で再実行する）。
 
+`generate_synthetic_datasets.py`（連続y、OLS/WLS用）に加え、`nonlinear/
+generate_logit_datasets.py`（2値y、真のlogit DGP、Logit/Probit用）も同様に
+`logit_<scenario>.csv`として固定する（Issue #68）。
+
 **Wooldridgeデータセットはここでは固定しない**（`wooldridge`パッケージ自体は
 MITライセンスだが、同梱される実データの著作権はWooldridge『Introductory
 Econometrics』教科書側にある可能性があり、フィルタ後の部分集合であっても
@@ -27,9 +31,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
-from generate_synthetic_datasets import generate_dataset
+sys.path.insert(
+    0, str(Path(__file__).resolve().parent / "nonlinear")
+)  # benchmark/nonlinear/ を import path に追加（generate_logit_datasets）
+
+from generate_logit_datasets import generate_logit_dataset  # noqa: E402
+from generate_synthetic_datasets import generate_dataset  # noqa: E402
 
 # generate_ols_fixtures.py / generate_wls_fixtures.py のNUMERIC_SCENARIOSに
 # perfect_multicollinearity（ComputationErrorパスのテストで使う、数値比較はしない）
@@ -44,6 +54,18 @@ SYNTHETIC_SCENARIOS = [
     "perfect_multicollinearity",
     "scale_variance",
     "high_condition_number",
+]
+
+# generate_logit_fixtures.pyのNUMERIC_SCENARIOSに、エラーパス確認用の
+# perfect_multicollinearityを加えた全シナリオ（generate_logit_datasets.py参照）。
+LOGIT_SCENARIOS = [
+    "baseline",
+    "small_n",
+    "moderate_multicollinearity",
+    "high_condition_number",
+    "near_separation",
+    "perfect_multicollinearity",
+    "scale_variance",
 ]
 
 # cluster_g2ケース（Issue #100）専用。k=1だとrng呼び出し順序が変わるため
@@ -80,6 +102,16 @@ def freeze(output_dir: Path) -> None:
 
     (output_dir / "synthetic_true_beta.json").write_text(
         json.dumps(true_betas, indent=2)
+    )
+
+    logit_true_betas: dict[str, list[float]] = {}
+    for scenario in LOGIT_SCENARIOS:
+        df, true_beta = generate_logit_dataset(scenario)
+        df.write_csv(output_dir / f"logit_{scenario}.csv")
+        logit_true_betas[scenario] = true_beta.tolist()
+
+    (output_dir / "logit_true_beta.json").write_text(
+        json.dumps(logit_true_betas, indent=2)
     )
 
     print(f"wrote frozen datasets to {output_dir}")

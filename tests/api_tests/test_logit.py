@@ -43,6 +43,29 @@ def test_default_options_use_classical_and_converge(binary_dataset):
     assert res.converged
 
 
+@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
+def test_method_option_converges_to_same_params(binary_dataset, method):
+    """`method`（newton/bfgs/lbfgs）はいずれも同じ最尤解に収束する。
+
+    `engine/src/nonlinear/logit.rs`のRust単体テストは3手法の一致を検証済み
+    だが、engine_pybindの文字列→`Method`パースやpython_packageラッパーの
+    配線（例: "bfgs"と"lbfgs"の実装取り違え）を検出するAPIレベルのテストが
+    無かったため追加した。
+    """
+    baseline = Logit(binary_dataset, y="y", x=["x1", "x2"]).fit()
+    res = Logit(
+        binary_dataset,
+        y="y",
+        x=["x1", "x2"],
+        options=LogitOptions(method=method),
+    ).fit()
+    assert res.converged
+    for name in res.param_names:
+        assert res.params[name] == pytest.approx(
+            baseline.params[name], rel=1e-4
+        )
+
+
 def test_param_names_include_const_first(binary_dataset):
     res = Logit(binary_dataset, y="y", x=["x1", "x2"]).fit()
     assert res.param_names == ["const", "x1", "x2"]
@@ -250,6 +273,45 @@ def test_singular_hessian_raises_computation_error():
     )
     with pytest.raises(ComputationError):
         Logit(df, y="y", x=["x1", "x2"]).fit()
+
+
+def test_non_convergence_raises_computation_error_with_tiny_max_iter(
+    binary_dataset,
+):
+    """`max_iter`を人為的に1に絞ると`raise_on_non_convergence=True`（既定）で
+    `ComputationError`（engine側の`NonConvergence`）。
+
+    Issue #68のtol妥当性検証中に判明した通り、完全分離等の病理的なデータで
+    NonConvergenceを再現しようとすると、勾配ノルム基準が浮動小数点アンダー
+    フローにより誤って「収束済み」と判定してしまう既知の限界がある
+    （`docs/planning/specs/logit-implementation-notes.md`参照）。そのため
+    NonConvergence自体の発生確認は、専用データセットに頼らずmax_iterを
+    人為的に小さくする方法で行う。
+    """
+    with pytest.raises(ComputationError):
+        Logit(
+            binary_dataset,
+            y="y",
+            x=["x1", "x2"],
+            options=LogitOptions(max_iter=1),
+        ).fit()
+
+
+def test_raise_on_non_convergence_false_returns_result_without_raising(
+    binary_dataset,
+):
+    """`raise_on_non_convergence=False`だと未収束でも例外を投げず、
+    `converged=False`の`LogitResults`を返す（engine側のもう一方の分岐、
+    APIレベルでの配線確認）。
+    """
+    res = Logit(
+        binary_dataset,
+        y="y",
+        x=["x1", "x2"],
+        options=LogitOptions(max_iter=1, raise_on_non_convergence=False),
+    ).fit()
+    assert res.converged is False
+    assert res.n_iter == 1
 
 
 def test_cluster_cov_type_requires_at_least_two_groups():

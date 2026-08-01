@@ -291,3 +291,72 @@ Issue #66では「OLSの`engine呼び出し`Issue（`cd2f662`）もテスト無�
 - `python_package/econometricsmodels/nonlinear/logit.py`の新規docstring1行が79文字制限（`.claude/rules/python-style.md`）を超過していたため修正。
 - `engine::nonlinear::logit::LogitEstimator`のdocコメントに「`predict`/`pred_table`は未実装」という古い記述が残っていたため修正（diff範囲外だが機会があったため合わせて対応）。
 - `engine_pybind/src/nonlinear/CLAUDE.md`・`python_package/econometricsmodels/nonlinear/CLAUDE.md`を新規作成し、本Issueまでに蓄積した設計判断を集約した（Probit実装時の調査コスト削減のため、両レビュアーからの提案）。
+
+## statsmodels/R glmとの数値照合ベンチマーク作成（Issue #68で実装済み）
+
+`/test-new`スキル・`.claude/skills/reference-benchmark/`の手順に沿い、`benchmark/nonlinear/`を新設した（`engine`/`engine_pybind`と同じ系統ディレクトリ構成、`nonlinear`系統のベンチマークは本Issueが初）。
+
+### 合成データセット: 真のlogit DGPで新規設計（ユーザー確認済み）
+
+OLSの`generate_synthetic_datasets.py`の9シナリオは誤差項の分散構造（不均一分散・自己相関）に依存するものが多く、そのままlogitの2値DGPに転用できない。`benchmark/nonlinear/generate_logit_datasets.py`を新設し、`sigmoid(Xβ)`からのベルヌーイ乱数で2値yを生成する、logit向けに再設計した7シナリオを採用した。
+
+- **踏襲**: `baseline`/`small_n`/`moderate_multicollinearity`/`high_condition_number`/`perfect_multicollinearity`（OLSと同じ意図）
+- **除外**: `heteroskedastic`/`autocorrelated`/`high_variance`（OLSの誤差項構造に依存し、logitのDGPには直接対応しない）
+- **新規追加**: `near_separation`（logit特有の病理、準完全分離。`x1`の係数を極端に大きくし、`x1`の値域のほとんどでp≈0/1になる状況を作る。収束はするが標準誤差が大きく膨らむ、成功パスの数値比較対象）
+
+当初「完全分離でNonConvergenceになるエラーパス」シナリオ（`complete_separation`）も検討したが、下記「tolの妥当性検証」で判明した既知の限界により本実装では狙い通りに動作しないため不採用（ユーザー確認済み、Issue #138としてフォローアップ）。NonConvergence自体の発生確認は`tests/api_tests/test_logit.py`で`LogitOptions(max_iter=1)`により人為的に確認する。
+
+実データは`load_wooldridge.py`の`SUGGESTED_DATASETS["probit_logit"]`で候補指定済みの`mroz`（労働参加モデル、Wooldridge教科書の定番例）を採用（ユーザー確認済み）。回帰式は`inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6`。クラスターロバストSEの実データ検証（`testing-policy.md`「テスト用データセット」3.）は、mrozの`city`（都市部居住ダミー、484/269の2値）を使う（OLSのwage1/regionクラスターと同じ趣旨）。
+
+#### `scale_variance`: OLSからの単純な移植では動作しないと判明（レビューで発覚・対応済み）
+
+`heteroskedastic`/`autocorrelated`/`high_variance`とは異なり、`scale_variance`（変数間のスケールが極端に異なるケース、`x1*=1e6, x2*=1e-3`）は誤差項構造ではなく設計行列のスケールの問題であり、当初「誤差項構造に依存するため転用不可」として一括除外していたのは技術的に不正確だった（python-reviewer・testing-completeness-reviewerの双方から指摘、ユーザー確認の上で再検討）。
+
+素直にOLSの実装（p計算前に`X[:,0]*=1e6, X[:,1]*=1e-3`）を移植すると、sigmoidの非線形性によりスケールの大きいx1が線形予測子を支配し、ほぼ完全分離を起こしてしまい（`near_separation`と交絡し、設計行列のスケール自体を検証する意図が果たせない）、本来の目的を果たせないことが実装時に判明した。このため、**真のDGP（p・yの生成）は未スケーリングのXで行い、出力直前にのみ列とtrue_betaをスケーリングする**設計にした（`x_scaled @ beta_scaled == x_raw @ beta_raw`が成立するように、真の係数も逆スケーリングして返す）。この設計により、yはスケールの影響を受けず、推定側が読む設計行列のみが極端なスケール差を持つ、意図通りの数値比較シナリオになる（statsmodels・本実装とも収束し、baselineと同じ元データから復元される係数がスケールに応じて正しく変換されることを確認済み）。
+
+Rクロスチェック（`run_glm_crosscheck_benchmark.R`）では、`opg`の手計算（`solve(t(scores) %*% scores)`）がこのシナリオで"computationally singular"エラーになることが判明した（スコア行列の列スケール差がそのまま見かけの条件数を悪化させるため、実際の条件数は1e18程度だが真に悪条件ではない）。列を各々のノルムで正規化してから反転し、`Σ=D⁻¹(D⁻¹MD⁻¹)⁻¹D⁻¹`の恒等式で元のスケールに戻す方式（本実装の`standardize_columns`/`destandardize_params`と同じ発想）に変更し、numpyの素の反転結果と完全一致することを確認した上で採用した。
+
+#### `n=k+1`境界ケース（OLSの`baseline_df1`相当）は非採用（レビューで検討・ユーザー確認済み）
+
+OLSには自由度がちょうど1（`n=k+1`）の境界値ケースがあるが、Logitには同型のシナリオを追加しなかった。実機確認により、5観測4パラメータ（`k=3`、切片含む）のデータでは、乱数シードを変えても常に完全ないし準完全分離が発生し、係数が数十〜百のオーダーまで発散することが判明した。これはOLSの閉形式解（`n=k+1`でも一意に定まる）とは根本的に事情が異なり、**ロジスティック回帰のMLEは`n`がパラメータ数`k`以下（またはそれに近い）だと構造的にほぼ確実に完全分離を起こす**という統計理論上の一般的な事実に起因する（`near_separation`シナリオで既に同種の境界的性質を検証済み）。意味のある「小標本の成功パス」を作れないため、構造的な差異として本ノートに記録し追加しない。
+
+### `cov_type="hc1"`はstatsmodelsのdiscrete modelで未実装と判明（ユーザー確認済み・重要）
+
+ベンチマーク作成中、`Logit.fit(cov_type="HC0")`と`"HC1"`が完全に同一の`bse`を返すことが発覚した。原因を`statsmodels.base.covtype.get_robustcov_results`のソースで追跡したところ、`HC1`指定時は`getattr(self, "cov_HC1", None)`でモデル固有の補正済みプロパティ（`n/(n-k)`小標本補正）を探すが、これは`RegressionResults`（OLS等）にしか定義されておらず、`LogitResults`は未定義のため、補正なしの`cov_white_simple(use_correction=False)`（`HC0`と同じ計算）に暗黙にフォールバックすることを確認した（`hasattr(LogitResults, "cov_HC1")`が`False`であることを実機確認）。
+
+一方R（`sandwich::vcovHC(glm_obj, type="HC1")`）は`n/(n-k)`補正を正しく適用し、本実装が既に実装済みの式（`nonlinear-implementation-notes.md`「標準誤差の技術仕様」、`hc0`の`Σ`に`n/(n-k)`を乗じる）と一致することを実機確認した（本実装の`hc1`標準誤差はRの値と機械精度で一致、statsmodelsの`hc1`＝`hc0`値とは一致しない）。
+
+このため`cov_type="hc1"`に限り、Rを主リファレンスとして扱う（ユーザー確認済み）。`benchmark/nonlinear/fixtures/generate_logit_fixtures.py`（statsmodels）はCOV_TYPESから`hc1`を除外し、`generate_logit_crosscheck_fixtures.py`（R）が`hc1`の数値比較の主リファレンスを担う。`test_logit_fixtures.py`は`hc1`を検証対象に含めず、`test_logit_crosscheck.py`が担う。
+
+### `cov_type="opg"`はstatsmodelsのdiscrete modelでネイティブ非対応
+
+`Logit.fit(cov_type="opg")`は"cov_type not recognized"エラーになる（`opg`/`oim`は`GenericLikelihoodModel`系専用で、組み込み`DiscreteModel`では非対応）。このため`opg`の係数標準誤差は`model.score_obs(params)`（statsmodels自身が検証済みのスコア計算）から`Σ = (Σᵢ sᵢsᵢ')⁻¹`を手計算する方式にした。
+
+`opg`の限界効果（`get_margeff()`）はさらに難しく、fit済み結果の`cov_params_default`を事後的に上書きしてもキャッシュされた内部プロパティ（`bse`/`cov_params()`双方）に反映されないことが実装時に判明した（原因はstatsmodels内部のキャッシュ機構の詳細に依存）。このため`opg`の限界効果はstatsmodels側では算出せず、R（`marginaleffects`パッケージ、`vcov=`引数でカスタム共分散行列を直接渡せる）を唯一の数値照合対象とした。
+
+### R側の限界効果リファレンス: `margins`ではなく`marginaleffects`を採用（ユーザー確認済み）
+
+両パッケージを実機比較し、AME（overall）・at meanの数値がstatsmodelsの`get_margeff()`と一致することを確認した上で、より活発にメンテナンスされている`marginaleffects`（v0.32.0、2026-02-14公開）を採用した（`margins`はv0.3.28、2024-07-31が最新でメンテナ交代済み）。`marginaleffects`はtidyなdata.frameを返しJSON化しやすい点も採用理由。devcontainerの`Dockerfile`に`marginaleffects`を追加した。
+
+**`datagrid()`の"mean"/"median"ショートカット文字列は使わない（重要なバグ発見）**: `slopes(model, newdata="mean")`のようなショートカット文字列は、整数のみを値に持つ数値列（Wooldridge `mroz`データの`age`/`educ`/`exper`等）を`FUN_integer`（既定で`round(mean(x))`相当）により丸めてしまい、本実装・statsmodelsが使う「生の標本平均・中央値」（`nonlinear-implementation-notes.md`「限界効果」節の`at="mean"`/`"median"`の代表点の定義）と評価点がずれることが判明した（mrozデータの`age`のdydxで最大約7%の乖離として顕在化）。`datagrid(model=model, FUN_numeric=mean, FUN_integer=mean)`のように`FUN_numeric`・`FUN_integer`を両方明示することで、全列を統一的に生の平均・中央値にできる（`run_glm_crosscheck_benchmark.R`参照）。
+
+### 収束判定`tol`の妥当性検証（結論: 既定値`1e-6`を維持）
+
+Issue #52策定時点で「最終的な妥当性判断はLogit/Probit実装・テスト段階に持ち越す」とされていた事項（`nonlinear-implementation-notes.md`「収束判定の`tol`」）。本Issueでの数値照合結果から、以下の結論に至った。
+
+1. **通常のデータでは`tol=1e-6`で高精度に一致**: `baseline`/`small_n`/`moderate_multicollinearity`/`high_condition_number`シナリオおよびWooldridge実データ（`mroz`）では、statsmodelsとの係数・標準誤差の相対誤差は最大でも約6e-7（実測）で、`RTOL=1e-8`の基本方針を余裕をもって満たす。
+2. **`near_separation`（準完全分離の境界ケース）では`tol=1e-6`だと精度不足**: statsmodelsとの相対誤差が最大約7e-8となり、`RTOL=1e-8`をわずかに超える。`tol=1e-8`まで締めると一致精度が大幅に改善する（実測diff: 2e-8→4e-13）。
+3. **既定値は`1e-6`のまま変更しない（ユーザー確認済み）**: `tol=1e-8`に締めると、`bfgs`法が`max_iter=35`のうち34回を要するようになることを実測確認した。より難しいデータセットでは`bfgs`/`lbfgs`が`max_iter`不足によるNonConvergenceを起こすリスクが上がるため、全ユーザー向けの既定値としては`1e-6`の方が安全側と判断した。`near_separation`の数値比較テスト（`test_logit_fixtures.py`/`test_logit_crosscheck.py`）に限り、`LogitOptions(tol=1e-8)`を明示指定することで対応する。
+4. **既知の限界（未修正、Issue #138）**: `tol`の値によらず、完全分離に近いデータでは勾配ノルム基準がスコア項`p(1-p)`の浮動小数点アンダーフローにより「収束済み」と誤判定しうる（実機確認: `x1`係数を100〜2000まで極端化しても常に`converged=True`、有限だが非常に大きい値を返す。statsmodelsは同程度のデータで非収束またはHessian特異エラーになる）。この問題は`tol`の調整では解決しない（アンダーフローは任意の`tol>0`で発生し得る）ため、既知の限界として記録し別issueで対処を検討する。
+
+### テスト・フィクスチャ
+
+- `tests/api_tests/fixtures/benchmarks/logit.json`（statsmodels主リファレンス）・`logit_crosscheck.json`（Rクロスチェック）を新規作成。
+- `tests/api_tests/test_logit_fixtures.py`（26件）・`test_logit_crosscheck.py`（32件）を新規作成。許容誤差はOLSの基本方針（`RTOL=1e-8`）を`test_logit_fixtures.py`（statsmodels）に適用、`test_logit_crosscheck.py`（R、反復最適化同士の比較のため機械精度一致は期待できない）は実測最大相対誤差（約9.5e-5、near_separation）に基づき`RTOL=2e-4`を基本としつつ、以下は実測値に基づき個別に緩めた（`testing-policy.md`「許容誤差」の方針通り）:
+  - 限界効果の`std_err`: `RTOL=5e-3`（デルタ法のヤコビアン経由でノイズが1桁大きい、実測最大~1.8e-3）
+  - p値: `ATOL=3e-5`（標準正規分布CDFの裾で係数のわずかな差が増幅される、実測最大絶対誤差~1.19e-5）
+  - `near_separation`の信頼区間: `RTOL=6e-4`（実測最大相対誤差~4.05e-4）
+- `test_logit.py`に`test_non_convergence_raises_computation_error_with_tiny_max_iter`（`LogitOptions(max_iter=1)`によるNonConvergence確認）・`test_raise_on_non_convergence_false_returns_result_without_raising`（同じ設定で`raise_on_non_convergence=False`なら例外を投げず`converged=False`を返すことの確認）・`test_method_option_converges_to_same_params`（`method="newton"/"bfgs"/"lbfgs"`のAPIレベル成功パス、3手法が同じ解に収束することを確認。engine単体テストは3手法の一致を検証済みだが、engine_pybindの文字列パース・python_packageラッパーの配線を検出するAPIレベルのテストが無かったため追加）を追加。
+- クラスターロバストSEの境界ケース（G=2ちょうど）は、OLSの`wald_f_test`と異なりLogitの`cluster_cov_params`がq×q部分行列の反転を要求しないため、説明変数を1個に絞る必要がないことを実機確認した（`k=3`のままG=2で正常に計算できる）。
+- Rクロスチェックはz値・p値・信頼区間（`coeftest`の全4列＋標準正規分布ベースの手計算信頼区間）も比較対象に追加した（当初は係数・標準誤差のみで、`testing-policy.md`「公開する統計量は全て独立実装でもcrosscheckする」の要求を満たしていなかった。python-reviewer・testing-completeness-reviewerの指摘を受けて追加）。
+- `test_logit_crosscheck.py`は当初`lr_p_value`をフィクスチャに含めながらテストで未検証だった（Rスクリプトは`lr_p_value`を出力していたが、テスト側でassertが漏れていた）。レビュー指摘を受けて追加。

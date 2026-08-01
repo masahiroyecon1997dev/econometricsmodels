@@ -98,15 +98,26 @@
 
 ---
 
-## 2. FE（固定効果）固有論点
+## 2. FE（固定効果）固有論点（確定・Issue #124）
 
-- [ ] within変換（固体内偏差）の実装方法：polarsのgroup_by機能で固体内平均を引く方式でよいか
-- [ ] 1-way（entity FE）と2-way（entity + time FE）のスコープ（v1をentity onlyにするか）
-- [ ] 自由度調整：`n - n_entities - k`への調整方針（2-wayの場合の一般化も含む）
-- [ ] singleton（観測数1のエンティティ）の扱い：自動除外（fixest方式）か、エラーにするか
-- [ ] 不均衡パネルのサポート範囲（v1からサポートするか、バランスパネル前提にするか）
-- [ ] 固定効果自体（α_i）の取得方法：`fit()`戻り値に含めるか、別メソッドにするか
-- [ ] within変換後に分散ゼロになる説明変数（時間不変変数）の検出・エラーメッセージ
+- [x] within変換（固体内偏差）の実装方法：polarsのgroup_by機能で固体内平均を引く方式でよいか
+  - polarsの`group_by`で実装。2-wayは閉形式の二重デミーニング（バランスパネル限定）。
+- [x] 1-way（entity FE）と2-way（entity + time FE）のスコープ（v1をentity onlyにするか）
+  - v1から2-wayまでサポート。
+- [x] 自由度調整：`n - n_entities - k`への調整方針（2-wayの場合の一般化も含む）
+  - 2-wayは`n - n_entities - n_periods + 1 - k`（entity/timeダミー間の1自由度重複を補正）。
+- [x] singleton（観測数1のエンティティ）の扱い：自動除外（fixest方式）か、エラーにするか
+  - 自動除外せず常に`ValidationError`。2-wayの場合timeのsingletonも同様に検出。
+- [x] 不均衡パネルのサポート範囲（v1からサポートするか、バランスパネル前提にするか）
+  - **2-wayのみバランスパネル必須（回避オプションなしの常時ハードエラー）。1-wayは不均衡も
+    v1からサポート**（1-wayは数学的に不均衡でも正確に成立するため制約しない）。
+- [x] 固定効果自体（α_i）の取得方法：`fit()`戻り値に含めるか、別メソッドにするか
+  - 別メソッド`fixed_effects()`。1-wayは`dict[str, float]`、2-wayは
+    `dict[str, dict[str, float]]`（`"entity"`/`"time"`キー）。
+- [x] within変換後に分散ゼロになる説明変数（時間不変変数）の検出・エラーメッセージ
+  - 新規バリデーションとして実装（デミーニング後の列分散チェック、1-way/2-way共通ロジック）。
+
+詳細: [`panel-api-design.md`](./specs/panel-api-design.md)6章
 
 ## 3. RE（変量効果）固有論点
 

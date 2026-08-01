@@ -1,39 +1,39 @@
 # Changelog
 
-このプロジェクトの変更点はこのファイルに記録します。
-フォーマットは [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、バージョニングは [Semantic Versioning](https://semver.org/lang/ja/) に準拠します（`0.x.x`のプレリリース期間中は、マイナーバージョンの変更でも破壊的変更を許容します。CLAUDE.md 9章参照）。
+All notable changes to this project are documented in this file.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/) (during the `0.x.x` pre-release period, breaking changes may occur even in minor version bumps — see CLAUDE.md section 9).
 
 ## [Unreleased]
 
 ## [0.2.0] - 2026-07-25
 
-Phase 1（基礎回帰）に WLS（加重最小二乗法）を追加しました。
+Added WLS (Weighted Least Squares) to Phase 1 (basic regression).
 
 ### Added
 
-- WLS推定（`WLS` / `WlsResults`）。重み列は`y`/`x`と同列のトップレベル引数`weight`で指定する（analytic weight、正規化不要）
-- WLSもOLSと同じ標準誤差オプション（classical / HC0-HC3 / クラスター / HAC）に対応
-- mkdocsにWLSのAPIリファレンス・使用例を追加
+- WLS estimation (`WLS` / `WlsResults`). The weight column is specified via the top-level `weight` argument, alongside `y`/`x` (an analytic weight; no normalization required)
+- WLS supports the same standard error options as OLS (classical / HC0-HC3 / cluster / HAC)
+- Added WLS API reference and usage examples to mkdocs
 
 ### Changed
 
-- OLSの決定係数・対数尤度・AIC・BIC・F統計量・F検定p値も、主リファレンス（statsmodels）に加えR独立実装でクロスチェックするようにした（従来は係数・標準誤差のみ）
+- OLS's coefficient of determination, log-likelihood, AIC, BIC, F-statistic, and F-test p-value are now also cross-checked against an independent R implementation, in addition to the primary reference (statsmodels) (previously only coefficients and standard errors were cross-checked)
 
 ### Fixed
 
-- WLSの決定係数（R² / 自由度調整済みR²）・対数尤度・AIC・BICが、重みが一様でない場合に系統的に誤っていた不具合を修正
-- クラスターロバスト標準誤差の計算が、実行プロセスごとに非決定的（内部のグループ集約がHashMapの反復順序に依存）だった不具合を修正（OLS/WLS共通）
+- Fixed a bug where WLS's coefficient of determination (R² / adjusted R²), log-likelihood, AIC, and BIC were systematically incorrect when weights were non-uniform
+- Fixed a bug where cluster-robust standard error computation was non-deterministic across runs (internal group aggregation depended on `HashMap` iteration order) (affected both OLS and WLS)
 
 ## [0.1.0] - 2026-07-24
 
-初回リリース。Phase 1（基礎回帰）のうち OLS（最小二乗法）のみ実装済みです。
+Initial release. Only OLS (Ordinary Least Squares) from Phase 1 (basic regression) is implemented.
 
 ### Added
 
-- OLS推定（classical / HC0-HC3 ロバスト標準誤差 / クラスター標準誤差 / HAC（Newey-West）標準誤差）
-- 決定係数（R² / 自由度調整済みR²）、対数尤度、AIC、BIC、Wald F検定
-- polars DataFrameを入力とするPython API（`OLS` / `OLSOptions` / `OlsResults`）
-- Rust製計算コア（`engine`）とPyO3バインディング（`engine_pybind`）
+- OLS estimation (classical / HC0-HC3 robust standard errors / cluster-robust standard errors / HAC (Newey-West) standard errors)
+- Coefficient of determination (R² / adjusted R²), log-likelihood, AIC, BIC, Wald F-test
+- Python API taking a polars DataFrame as input (`OLS` / `OLSOptions` / `OlsResults`)
+- Rust computational core (`engine`) and PyO3 bindings (`engine_pybind`)
 
 [Unreleased]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.1.0...v0.2.0

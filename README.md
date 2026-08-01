@@ -5,21 +5,21 @@
 [![Docs](https://github.com/masahiroyecon1997dev/econometricsmodels/actions/workflows/cd_docs.yml/badge.svg)](https://masahiroyecon1997dev.github.io/econometricsmodels/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-統計・計量経済学の分析手法を提供するPython APIです。分析GUIアプリ「economicon」のエンジンとして使われることを主な用途としており、スクリプト・プログラムからの組み込みやすさ（型補完・バリデーション・動的な組み立て）を優先した設計になっています。
+A Python API providing statistical and econometric analysis methods. It is primarily intended for use as the analysis engine for [economicon](https://github.com/masahiroyecon1997dev/economicon), a GUI application for data analysis, and its design prioritizes ease of embedding from scripts and programs (type completion, validation, dynamic construction).
 
-- 計算コアは **Rust** で実装し、**PyO3** で薄くPythonにバインディングしています。
-- データ入力は **polars** DataFrameのみに限定し、**Arrowのゼロコピー**でRust側に受け渡します。
-- `y ~ x1 + x2` のようなformula文字列パースは採用せず、被説明変数は列名（`str`）、説明変数は列名のリスト（`list[str]`）、推定オプションは専用クラスのインスタンスとして渡します。
+- The computational core is implemented in **Rust** and thinly bound to Python via **PyO3**.
+- Data input is restricted to **polars** DataFrames only, passed to the Rust side via **Arrow zero-copy**.
+- Formula-string parsing (e.g. `y ~ x1 + x2`) is not used. The dependent variable is passed as a single column name (`str`), independent variables as a list of column names (`list[str]`), and estimation options as an instance of a dedicated class.
 
-## インストール
+## Installation
 
 ```bash
 pip install econometricsmodels
 ```
 
-対応Pythonバージョンは3.12以上です。
+Requires Python 3.12 or later.
 
-## クイックスタート
+## Quickstart
 
 ```python
 import polars as pl
@@ -39,25 +39,27 @@ print(result.std_errors)   # {"const": ..., "x1": ...}
 print(result.r_squared)
 ```
 
-不均一分散に頑健な標準誤差（HC0〜HC3）・クラスター標準誤差・HAC（Newey-West）標準誤差への切り替えなど、詳しい使い方は[ドキュメントサイト](https://masahiroyecon1997dev.github.io/econometricsmodels/getting-started/)を参照してください。APIリファレンスも含めた全体は[https://masahiroyecon1997dev.github.io/econometricsmodels/](https://masahiroyecon1997dev.github.io/econometricsmodels/)で公開しています。
+For more details — including how to switch to heteroskedasticity-robust standard errors (HC0-HC3), cluster-robust standard errors, and HAC (Newey-West) standard errors — see the [documentation site](https://masahiroyecon1997dev.github.io/econometricsmodels/getting-started/). The full documentation, including the API reference, is published at [https://masahiroyecon1997dev.github.io/econometricsmodels/](https://masahiroyecon1997dev.github.io/econometricsmodels/).
 
-## 検証精度
+## Implementation status
 
-各手法の推定値（係数・標準誤差・信頼区間・R²・調整済みR²・AIC・BIC・対数尤度・F統計量・F検定p値）は、リファレンス実装との数値比較で検証しています。主リファレンスに加え、独立実装によるクロスチェックも行っています。
+Implemented: **OLS** (Ordinary Least Squares), **WLS** (Weighted Least Squares).
 
-| 手法 | cov_type | 主リファレンス | 独立クロスチェック |
-|---|---|---|---|
-| OLS | classical / HC0-3 / cluster | statsmodels（相対誤差1e-8） | R（`lm` + `sandwich`/`lmtest`、相対誤差1e-8） |
-| OLS | HAC（Newey-West） | statsmodels（相対誤差1e-8） | R（相対誤差1e-2。小標本補正の慣習差のため緩め） |
-| WLS | classical / HC0-3 / cluster | statsmodels（相対誤差1e-8） | R（`lm(weights=)` + `sandwich`/`lmtest`、相対誤差1e-8） |
-| WLS | HAC（Newey-West） | statsmodels（相対誤差1e-8） | R（相対誤差5e-2。小標本補正の慣習差のため緩め） |
+In progress: **Logit**.
 
-## 実装状況
+Planned next, in this order: **Probit → Tobit → IV (2SLS/GMM) → FE (Fixed Effects) → RE (Random Effects) → GLS**.
 
-現在実装済みなのは Phase 1（基礎回帰）のうち **OLS（最小二乗法）・WLS（加重最小二乗法）** です。区分回帰を含む他の手法は未着手です。
+During the `0.x.x` pre-release period, breaking changes may occur even in minor version bumps.
 
-`0.x.x`のプレリリース期間中は、マイナーバージョンの変更でも破壊的変更が入る可能性があります。
+## Verification accuracy
 
-## ライセンス
+Estimates for each implemented method (coefficients, standard errors, confidence intervals, R², adjusted R², AIC, BIC, log-likelihood, F-statistic, F-test p-value) are verified by numerical comparison against reference implementations. In addition to a primary reference, an independent implementation is used as a cross-check.
+
+| `cov_type` | Primary reference | Independent cross-check |
+|---|---|---|
+| classical / HC0-3 / cluster | statsmodels (relative tolerance 1e-8) | R (`lm`/`lm(weights=)` + `sandwich`/`lmtest`, relative tolerance 1e-8) |
+| HAC (Newey-West) | statsmodels (relative tolerance 1e-8) | R (relative tolerance 1e-2 for OLS, 5e-2 for WLS — looser due to differing small-sample correction conventions) |
+
+## License
 
 [MIT License](LICENSE)

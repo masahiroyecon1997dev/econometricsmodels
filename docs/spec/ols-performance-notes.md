@@ -2,7 +2,7 @@
 
 `OLS(...).fit()`（Rust engine + PyO3）とPython製リファレンス実装（statsmodels/pyfixest）の実行時間・メモリ使用量比較の記録。CLAUDE.md 1章「計算コアはRustで実装し高速化」の狙いを定量的に裏付けることが目的。
 
-再実行可能なスクリプトは`benchmark/compare_performance.py`（コミット対象）。生の計測結果JSONはコミットしない（`.gitignore`の`docs/planning/specs/_*.json`参照。実行環境依存で再現性が低いため）。
+再実行可能なスクリプトは`benchmark/compare_performance.py`（コミット対象）。生の計測結果JSONはコミットしない（`.gitignore`の`docs/spec/_*.json`参照。実行環境依存で再現性が低いため）。
 
 ## 最重要の教訓: engineは必ずreleaseビルドで計測する
 
@@ -97,7 +97,7 @@ uv run maturin develop --release
 # 2. フルスイープを実行
 cd benchmark
 uv run python compare_performance.py --repeats 3 \
-    --output ../docs/planning/specs/_ols_performance_results.json
+    --output ../docs/spec/_ols_performance_results.json
 ```
 
 ## 今後の検討事項

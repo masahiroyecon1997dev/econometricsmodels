@@ -16,6 +16,7 @@ nav:
   - API Reference:
       - OLS: api/ols.md
       - WLS: api/wls.md
+      - Logit: api/logit.md
 
 theme:
   name: material

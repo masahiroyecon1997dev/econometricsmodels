@@ -360,3 +360,10 @@ Issue #52策定時点で「最終的な妥当性判断はLogit/Probit実装・�
 - クラスターロバストSEの境界ケース（G=2ちょうど）は、OLSの`wald_f_test`と異なりLogitの`cluster_cov_params`がq×q部分行列の反転を要求しないため、説明変数を1個に絞る必要がないことを実機確認した（`k=3`のままG=2で正常に計算できる）。
 - Rクロスチェックはz値・p値・信頼区間（`coeftest`の全4列＋標準正規分布ベースの手計算信頼区間）も比較対象に追加した（当初は係数・標準誤差のみで、`testing-policy.md`「公開する統計量は全て独立実装でもcrosscheckする」の要求を満たしていなかった。python-reviewer・testing-completeness-reviewerの指摘を受けて追加）。
 - `test_logit_crosscheck.py`は当初`lr_p_value`をフィクスチャに含めながらテストで未検証だった（Rスクリプトは`lr_p_value`を出力していたが、テスト側でassertが漏れていた）。レビュー指摘を受けて追加。
+
+## mkdocsドキュメント作成（Issue #69で実装済み）
+
+- `docs/api/logit.md`を新規作成（`docs/api/ols.md`/`wls.md`と同じ構成: mkdocstringsディレクティブによる`Logit`/`LogitOptions`/`LogitResults`の自動APIリファレンスに加え、Logit固有の補足セクション（標準誤差の種類、ソルバーオプション、限界効果）を手書きで追加）。`docs/mkdocs.yml`のnavに`API Reference > Logit`を追加。
+- `docs/getting-started.md`にLogitセクションを追加（WLSセクションの後、エラーハンドリングの前）。基本的な`fit()`、`predict()`/`pred_table()`、`marginal_effects()`の使用例を含む。`docs/index.md`の「Supported methods」もLogit追加を反映。
+- Python側の全public docstring（`python_package/econometricsmodels/nonlinear/logit.py`）は既にGoogleスタイル・英語で書かれており（Issue #65〜#67で整備済み）、本Issueでの追加修正は不要だった。
+- `mkdocs build`（`--config-file docs/mkdocs.yml`、CI（`cd_docs.yml`）と同じ非strictモード）で正常にビルドできることを確認済み。`--strict`は既存の未解消警告（Issue #111、`docs/planning/specs/`配下の相対リンク）のため使わない方針を踏襲。

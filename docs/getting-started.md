@@ -85,6 +85,55 @@ print(result.std_errors)
 
 Estimation options (`cov_type`, etc.) use the same `OLSOptions` as OLS. See "Switching the type of standard error" above for how to switch standard error types, and the [API Reference](api/wls.md) for details on the `weight` argument.
 
+## Logit (binary logistic regression)
+
+`Logit` estimates a binary logistic regression model by maximum likelihood. The dependent variable `y` must be coded 0/1.
+
+```python
+import polars as pl
+from econometricsmodels import Logit
+
+df = pl.DataFrame(
+    {
+        "y": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+    }
+)
+
+result = Logit(df, y="y", x=["x1"]).fit()
+
+print(result.params)         # {"const": ..., "x1": ...}
+print(result.std_errors)     # {"const": ..., "x1": ...}
+print(result.pseudo_r_squared)
+```
+
+`LogitOptions` supports `cov_type` (`"classical"`, `"opg"`, `"hc0"`, `"hc1"`, or `"cluster"`) and `method` (`"newton"`, `"bfgs"`, or `"lbfgs"`); see the [API Reference](api/logit.md) for the full list of options.
+
+### Predicted values and classification table
+
+`LogitResults.predict()` returns fitted probabilities for the training data. `pred_table()` returns a 2x2 classification (confusion) table for a given probability threshold (default 0.5).
+
+```python
+predicted = result.predict()
+print(predicted)  # [{"probability": ...}, ...]
+
+table = result.pred_table()
+for row in table:
+    print(row["actual"], row["predicted_0"], row["predicted_1"])
+```
+
+### Marginal effects
+
+`LogitResults.marginal_effects()` returns `dy/dx` for each explanatory variable (the constant term is excluded), with delta-method standard errors. Use `at` to choose the representative point: `"overall"` (default, average marginal effects), `"mean"`, or `"median"`.
+
+```python
+for row in result.marginal_effects():
+    print(row["param"], row["dydx"], row["std_err"], row["p_value"])
+
+# Marginal effects evaluated at the mean of the explanatory variables
+mean_effects = result.marginal_effects(at="mean")
+```
+
 ## Error handling
 
 Invalid input or options (a missing column, missing values, etc.) raise `ValidationError` (a subclass of `ValueError`). Problems detected during computation (e.g. a singular design matrix) raise `ComputationError` (a subclass of `RuntimeError`).

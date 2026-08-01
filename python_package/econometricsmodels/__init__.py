@@ -1,7 +1,8 @@
-"""economicon 用の分析エンジン `econometricsmodels` のトップレベルパッケージ。
+"""Top-level package for `econometricsmodels`, the analysis engine for economicon.
 
-`engine_pybind` でビルドされるネイティブ拡張（`econometricsmodels._lib`）の
-薄いラッパーとして、polars DataFrame を受け取るPython APIを公開する。
+Exposes a Python API that accepts polars DataFrames, as a thin wrapper
+around the native extension (`econometricsmodels._lib`) built by
+`engine_pybind`.
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ from __future__ import annotations
 from ._lib import ComputationError, ValidationError
 from .linear.ols import OLS, OLSOptions, OlsResults
 from .linear.wls import WLS, WlsResults
+from .nonlinear.logit import Logit, LogitOptions, LogitResults
 
 __all__ = [
     "OLS",
@@ -16,8 +18,11 @@ __all__ = [
     "OlsResults",
     "WLS",
     "WlsResults",
+    "Logit",
+    "LogitOptions",
+    "LogitResults",
     "ValidationError",
     "ComputationError",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

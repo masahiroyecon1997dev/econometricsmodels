@@ -50,6 +50,9 @@ SCENARIOS = [
     "heteroskedastic",
     "autocorrelated",
     "moderate_multicollinearity",
+    "high_condition_number",
+    # n=k+1（自由度1ちょうど）の成功パス（Issue #101）。
+    "baseline_df1",
 ]
 COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
 
@@ -209,3 +212,22 @@ def test_perfect_multicollinearity_raises_computation_error():
     df = pl.read_csv(DATA_DIR / "synthetic_perfect_multicollinearity.csv")
     with pytest.raises(ComputationError):
         OLS(df, y="y", x=["x1", "x2", "x3"]).fit()
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+def test_scale_variance_raises_computation_error(cov_type):
+    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
+    傾き係数の同時共分散部分行列がスケール比の2乗（≈1e18）相当の条件数を持ち
+    倍精度浮動小数点の限界を超えて数値的に特異になる（Issue #101で発見、
+    #107で原因調査）。`wald_f_test`が固有値分解による相対閾値判定で検出し、
+    全cov_typeで`ComputationError`になる（classicalも含む。傾き係数の
+    共分散部分行列自体は`cov_type`によらず同じ条件数を持つため）。
+    perfect_multicollinearityと同様、数値比較はせずエラーパスのみ確認する。
+    """
+    from econometricsmodels import ComputationError
+
+    df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
+    kwargs = {"hac_lags": HAC_LAG_IN_FIXTURE} if cov_type == "hac" else {}
+    options = OLSOptions(cov_type=cov_type, **kwargs)
+    with pytest.raises(ComputationError):
+        OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()

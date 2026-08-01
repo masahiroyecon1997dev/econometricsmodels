@@ -1,19 +1,19 @@
 # econometricsmodels
 
-統計・計量経済学の分析手法を提供するPython APIです。分析GUIアプリ「economicon」のエンジンとして使われることを主な用途としており、スクリプト・プログラムからの組み込みやすさ（型補完・バリデーション・動的な組み立て）を優先した設計になっています。
+A Python API providing statistical and econometric analysis methods. It is primarily intended for use as the analysis engine for [economicon](https://github.com/masahiroyecon1997dev/economicon), a GUI application for data analysis, and its design prioritizes ease of embedding from scripts and programs (type completion, validation, dynamic construction).
 
-- 計算コアは **Rust** で実装し、**PyO3** で薄くPythonにバインディングしています。
-- データ入力は **polars** DataFrameのみに限定し、**Arrowのゼロコピー**でRust側に受け渡します。
-- `y ~ x1 + x2` のようなformula文字列パースは採用せず、被説明変数は列名（`str`）、説明変数は列名のリスト（`list[str]`）、推定オプションは専用クラスのインスタンスとして渡します。
+- The computational core is implemented in **Rust** and thinly bound to Python via **PyO3**.
+- Data input is restricted to **polars** DataFrames only, passed to the Rust side via **Arrow zero-copy**.
+- Formula-string parsing (e.g. `y ~ x1 + x2`) is not used. The dependent variable is passed as a single column name (`str`), independent variables as a list of column names (`list[str]`), and estimation options as an instance of a dedicated class.
 
-## インストール
+## Installation
 
 ```bash
 pip install econometricsmodels
 ```
 
-## 対応手法
+## Supported methods
 
-現在実装済みなのは OLS（最小二乗法）と WLS（加重最小二乗法）です。使い方は [Getting Started](getting-started.md) を、詳細なオプション・返り値は API Reference（[OLS](api/ols.md) / [WLS](api/wls.md)）を参照してください。
+Currently implemented: OLS (Ordinary Least Squares), WLS (Weighted Least Squares), and Logit (binary logistic regression). See [Getting Started](getting-started.md) for usage, and the API Reference ([OLS](api/ols.md) / [WLS](api/wls.md) / [Logit](api/logit.md)) for detailed options and return values.
 
-今後、IV（2SLS/GMM）・Probit/Logit等を順次追加していく予定です。
+IV (2SLS/GMM), Probit, and others will be added in the future.

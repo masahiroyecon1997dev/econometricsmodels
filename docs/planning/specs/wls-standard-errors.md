@@ -4,8 +4,7 @@ classical / HCロバスト（HC0〜HC3） / HAC（Newey-West） / cluster の重
 適合度統計量の重み付き定義のまとめ。API・オプションの全体設計は
 [`wls-api-design.md`](./wls-api-design.md)を参照。
 
-**ステータス**: 設計提案中（Issue #34）。[`wls-api-design.md`](./wls-api-design.md)と同様、
-2026-07-24時点のOLS実装（`engine/src/linear/ols.rs`）を前提にしている。
+**ステータス**: 設計確定済み・実装済み（`engine/src/linear/wls.rs`）。
 
 ## 0. 結論: 新しい計算式の導出は不要
 
@@ -22,7 +21,7 @@ $$
 「この変換後データにOLSの計算式をそのまま当てはめると、教科書的なWLSの重み付き公式と
 一致する」ことを明示的に確認する内容であり、独自に新しい式を導出するものではない。
 本issueの主な作業は、この前提の確認と、statsmodels `WLS`（内部的に同じ変換方式を採用）との
-ベンチマーク照合（Issue #43）である。
+ベンチマーク照合である。
 
 ## 1. classical（実装対象）
 
@@ -45,7 +44,7 @@ $$
 $$
 
 $\hat\Psi$は変換後の残差・設計行列（$\tilde\varepsilon_i, \tilde x_i$）に対する
-[`ols-standard-errors.md`](./ols-standard-errors.md) 2章と同じ式で計算する。
+[`ols-spec.md`](../../spec/ols-spec.md)「標準誤差」のHC0〜HC3と同じ式で計算する。
 $\tilde\varepsilon_i^2 = w_i \hat\varepsilon_i^2$、$\tilde x_i \tilde x_i^\top = w_i\, x_i x_i^\top$
 なので、例えばHC0は
 
@@ -64,7 +63,7 @@ HC2/HC3で使うレバレッジ$\tilde h_{ii}$も、変換後の設計行列$\ti
 レバレッジとは異なる値になる点に注意（`engine`側の実装は`OlsEstimator::fit`の既存コードを
 そのまま再利用するため、意識的な実装作業は不要。この節は「それが正しい」ことの確認）。
 
-4種類すべてを実装する理由はOLSと同じ（[`ols-standard-errors.md`](./ols-standard-errors.md) 2章）。
+4種類すべてを実装する理由はOLSと同じ（[`ols-spec.md`](../../spec/ols-spec.md)「標準誤差」）。
 
 ## 3. HAC（Newey-West、実装対象）
 
@@ -72,7 +71,7 @@ $$
 \widehat{\mathrm{Var}}_{HAC}(\hat\beta) = (\tilde X^\top \tilde X)^{-1}\, \hat S \,(\tilde X^\top \tilde X)^{-1}
 $$
 
-$\hat S$は[`ols-standard-errors.md`](./ols-standard-errors.md) 3.1節と同じ式（Bartlettカーネル）を、
+$\hat S$は[`ols-spec.md`](../../spec/ols-spec.md)「標準誤差」のHACと同じ式（Bartlettカーネル）を、
 変換後の残差・設計行列（$\tilde\varepsilon_i, \tilde x_i$）に適用して計算する。
 
 - **ラグ選択（3.2節相当）**: 経験則 $L = \lfloor 4(n/100)^{2/9}\rfloor$ は観測数`n`のみに依存し、
@@ -99,18 +98,18 @@ $$
 （$\tilde\varepsilon_i \tilde x_i$）だけが変換後の値になる。
 
 小標本補正（$G/(G-1) \cdot (n-1)/(n-k)$）・自由度（t検定・信頼区間・F検定で`G-1`を使う）もOLSと
-同じ（[`ols-standard-errors.md`](./ols-standard-errors.md) 5章）。$G$（クラスター数）・$n$（観測数）
+同じ（[`ols-spec.md`](../../spec/ols-spec.md)「標準誤差」のクラスター）。$G$（クラスター数）・$n$（観測数）
 は重みに依存しない値であり、変わらない。
 
 ## 5. 適合度統計量の重み付き定義
 
-**訂正（Issue #44）**: 本節はIssue #35時点で「変換後データにOLSの式をそのまま代入すれば
-statsmodelsと一致する」としていたが、これは誤りだった。Issue #44でのstatsmodelsクロス
-チェック実装時に、$R^2$・対数尤度（→AIC/BIC）が実際には統計的に有意な乖離（$R^2$で相対誤差
-0.2〜1%程度、対数尤度で加法的なずれ）を示すことが判明し、statsmodelsのソース
-（`statsmodels/regression/linear_model.py`、v0.14.6）を直接確認して以下の通り訂正した。
-F統計量・F検定p値・係数・標準誤差・t値・p値・信頼区間は変換後データへの代入のままで
-正しい（これらはIssue #44のクロスチェックでも機械精度で一致することを確認済み）。
+**訂正**: 本節は当初「変換後データにOLSの式をそのまま代入すればstatsmodelsと一致する」と
+していたが、これは誤りだった。statsmodelsクロスチェック実装時に、$R^2$・対数尤度（→AIC/BIC）
+が実際には統計的に有意な乖離（$R^2$で相対誤差0.2〜1%程度、対数尤度で加法的なずれ）を示す
+ことが判明し、statsmodelsのソース（`statsmodels/regression/linear_model.py`、v0.14.6）を
+直接確認して以下の通り訂正した。F統計量・F検定p値・係数・標準誤差・t値・p値・信頼区間は
+変換後データへの代入のままで正しい（これらはクロスチェックでも機械精度で一致することを
+確認済み）。
 
 ### R²（`RegressionResults.centered_tss`／`uncentered_tss`）
 
@@ -135,7 +134,7 @@ $$
   そのまま二乗和するため、$\sum_i\tilde y_i^2=\sum_i w_i y_i^2$が代数的に厳密に成り立つ
   （$(\sqrt{w_i}y_i)^2=w_iy_i^2$）。切片なしのuncentered TSSは訂正不要。
 - 調整済み$R^2$は上記の正しい$R^2$を使うこと以外は
-  [`ols-standard-errors.md`](./ols-standard-errors.md)の式のまま（$n$・$k$は重みに依存しない）。
+  [`ols-spec.md`](../../spec/ols-spec.md)の式のまま（$n$・$k$は重みに依存しない）。
 
 ### 対数尤度・AIC・BIC（`WLS.loglike`）
 
@@ -147,7 +146,7 @@ $$
 \ell = -\frac{n}{2}\Big(\ln(2\pi) + \ln(\mathrm{SSR}/n) + 1\Big) + \frac{1}{2}\sum_i \ln w_i
 $$
 
-（第1項は[`ols-standard-errors.md`](./ols-standard-errors.md)のOLSの対数尤度の式に
+（第1項は[`ols-spec.md`](../../spec/ols-spec.md)のOLSの対数尤度の式に
 変換後の$\mathrm{SSR}$・$n$を代入したものそのもの。第2項$\frac{1}{2}\sum_i\ln w_i$が
 今回追加で必要と判明した補正項）。AIC・BIC はこの$\ell$から通常通り
 $\mathrm{AIC}=-2\ell+2k$、$\mathrm{BIC}=-2\ell+\ln(n)\,k$で計算する（式自体は不変、
@@ -167,9 +166,7 @@ $y$・重みを使って計算し直す（`engine::linear::wls`モジュール�
 （`cov_type` / `cluster_col` / `hac_lags` / `time_col`）の意味論をそのまま踏襲しており、
 フィールドの追加・変更は不要。
 
-## 7. 未確定・後続issueで扱う事項
+## 7. 今後の検討事項
 
-- 上記の各計算式がstatsmodels `WLS`のベンチマーク値と相対誤差1e-8で一致することの実証
-  → Issue #43（ベンチマーク作成）、Issue #44（tests/api_tests作成）
 - HC0の$\hat\Psi$で$w_i$が2乗で効く点など、直感的に分かりにくい箇所はテストのdocコメントに
   計算根拠を明記する（`ols.rs`の既存テストのコメント密度に合わせる）

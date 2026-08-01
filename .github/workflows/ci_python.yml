@@ -26,7 +26,7 @@ jobs:
       matrix:
         python-version: ["3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
 
@@ -54,10 +54,10 @@ jobs:
         run: uv run --locked --group test ruff format --check .
 
   engine_pybind-lint:
-    name: cargo clippy / fmt (engine_pybind)
+    name: cargo test / clippy / fmt (engine_pybind)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
@@ -67,6 +67,15 @@ jobs:
       # （Issue #23での決定）。pyo3のビルドスクリプトはリンク済みのPython3を必要とするが、
       # abi3等のバージョン限定cfgを使っていないため、ubuntu-latestランナーに元から
       # 入っているpython3で十分（マトリクス化は不要）。
+      #
+      # cargo test: Issue #65で`crate-type = ["cdylib", "rlib"]`・`pyo3`の
+      # `extension-module`フィーチャ非直接指定への変更により`cargo test -p engine_pybind`が
+      # 可能になった（`extension-module`はmaturin実行時のみ`pyproject.toml`側から有効化する
+      # 設計、`engine_pybind/Cargo.toml`のコメント参照）。これに伴い追加した
+      # `nonlinear/logit.rs`の`build_logit_input`系テストがCIで実行されるようにする。
+      - name: cargo test
+        run: cargo test -p engine_pybind
+
       - name: cargo fmt --check
         run: cargo fmt -p engine_pybind --check
 
@@ -77,7 +86,7 @@ jobs:
     name: pip-audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:

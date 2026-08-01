@@ -1,7 +1,8 @@
 """推定手法テスト用の合成データセット生成スクリプト。
 
 `.claude/rules/testing-policy.md` で定めるデータセットバリエーション（小標本、
-高分散、不均一分散、自己相関、多重共線性）を持つデータを生成する。
+高分散、不均一分散、自己相関、多重共線性、スケール差・高条件数等の境界値・
+悪条件ケース）を持つデータを生成する。
 
 使用例:
     from generate_synthetic_datasets import generate_dataset
@@ -24,6 +25,8 @@ SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "perfect_multicollinearity",
+    "scale_variance",
+    "high_condition_number",
 ]
 
 
@@ -66,11 +69,14 @@ def generate_dataset(
         beta = rng.uniform(-3, 3, size=k + 1)  # beta[0] = intercept
 
     # --- 説明変数 ---
-    if scenario == "moderate_multicollinearity":
+    if scenario in ("moderate_multicollinearity", "high_condition_number"):
         if k < 2:
-            raise ValueError("moderate_multicollinearity requires k >= 2")
+            raise ValueError(f"{scenario} requires k >= 2")
+        # x1とx2の相関: moderate=0.8程度、high_condition_number=0.999
+        # （特異ではないが条件数が非常に大きい設計行列、Issue #101）
+        rho = 0.999 if scenario == "high_condition_number" else 0.8
         cov = np.eye(k)
-        cov[0, 1] = cov[1, 0] = 0.8  # x1とx2の相関を約0.8にする
+        cov[0, 1] = cov[1, 0] = rho
         X = rng.multivariate_normal(mean=np.zeros(k), cov=cov, size=n)
     else:
         X = rng.normal(loc=0.0, scale=1.0, size=(n, k))
@@ -81,6 +87,14 @@ def generate_dataset(
         X[:, 2] = (
             2 * X[:, 0] + 3 * X[:, 1]
         )  # x3 = 2*x1 + 3*x2（完全な線形従属）
+
+    if scenario == "scale_variance":
+        if k < 2:
+            raise ValueError("scale_variance requires k >= 2")
+        # 変数間のスケールが極端に異なるケース（x1は10^6オーダー、
+        # x2は10^-3オーダー、Issue #101）。
+        X[:, 0] *= 1e6
+        X[:, 1] *= 1e-3
 
     # --- 誤差項 ---
     sigma_i = None  # heteroskedasticの場合のみ使用（weight算出に流用）

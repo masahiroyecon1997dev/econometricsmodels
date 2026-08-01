@@ -14,7 +14,7 @@ paths:
 
 - **系統（統計的に近い手法のグループ）＝ディレクトリ**。命名衝突を避け、「この手法はどこにあるか」を一意にする。
   - `linear/`: OLS, WLS, GLS, 区分回帰
-  - `discrete_choice/`: Logit, Probit, Tobit
+  - `nonlinear/`: Logit, Probit, Tobit（MLEベースの非線形モデル。被説明変数が連続なTobitも含むため「discrete_choice」ではなく推定方式で命名）
   - `iv/`: 2SLS, GMM
   - `panel/`: FE, RE
   - `causal/`: DID, RDD
@@ -29,7 +29,7 @@ paths:
 ## 言語方針
 
 - **英語にする**: 例外・バリデーションメッセージ（`ValidationError`/`ComputationError`等、Pythonユーザーに表示される文字列）、公開API（`#[pyclass]` / `#[pyfunction]`）に付ける`///`docコメント（PyO3経由でPythonの`__doc__`になり、`help()`やIDE補完でユーザーに見えるため）。
-- **`#[pyclass]`には`module`属性を明示する**（例: `#[pyclass(module = "econometricsmodels._lib")]`）。PyO3のデフォルトでは`__module__ == "builtins"`になり、mkdocs（mkdocstrings/griffe）がPython側の再エクスポート（`_lib` → `python_package`側モジュール）を解決できず`AliasResolutionError`でドキュメントビルドが失敗する（詳細は`docs/planning/specs/ols-implementation-notes.md`「9. ドキュメント」参照）。
+- **`#[pyclass]`には`module`属性を明示する**（例: `#[pyclass(module = "econometricsmodels._lib")]`）。PyO3のデフォルトでは`__module__ == "builtins"`になり、mkdocs（mkdocstrings/griffe）がPython側の再エクスポート（`_lib` → `python_package`側モジュール）を解決できず`AliasResolutionError`でドキュメントビルドが失敗する。
 - **日本語のままでよい**: 非公開関数・非公開型（`#[pyclass]`/`#[pyfunction]`が付いていないもの）の`///`/`//!`コメント、実装の背景説明、TODOコメント等の開発者向けの記述。GitHub Issue・CLAUDE.md・rules等の開発ドキュメントは対象外（日本語のまま）。
 - 理由: `econometricsmodels`はeconomicon専用ではなくPyPI公開の独立パッケージであり、Pythonエコシステムの慣習（pandas/numpy/polars等）に合わせる。economicon側はi18nで独自にローカライズするため、例外はクラス（`ValidationError`/`ComputationError`）で分岐する設計になっており、メッセージ文字列の言語はeconomicon側のi18nに機能的な影響を与えない。
 
@@ -56,9 +56,9 @@ paths:
 - **既知のリスク**: `pyo3-polars`の単体リポジトリ（`pola-rs/pyo3-polars`）は2025年7月にアーカイブ済みで、本体`pola-rs/polars`リポジトリに統合されている。crates.io版`pyo3-polars`とpolars本体リポジトリ内のバージョンにズレがあり、`pyo3`自体のバージョンとの組み合わせでビルドが失敗する事例が報告されている（2026年1月時点）。**リポジトリ雛形作成時、本格的な実装に入る前に`pyo3-polars`込みで一度`cargo build`が通ることを確認しておくこと**。詰まる場合は、`pyo3-polars`を経由せずpolars本体のArrow C Data Interface相当の機能を薄く自前で使う代替案を検討する。
 - `engine`はpolars/PyO3を一切知らない設計を維持する（責務分離の原則通り）。`polars DataFrame → faer::Mat<f64>`の変換は2段階に分かれる。
   1. `engine_pybind`: polars DataFrameから列ごとに`Vec<f64>`へ抽出する（`column_extraction::extract_f64_column`）。
-  2. `engine`: 抽出済みの列（`&[f64]`/`&[Vec<f64>]`）から`faer::Mat`を組み立てる（例: `engine::linear::ols::OlsInput::from_columns`）。切片列の自動追加等、設計行列の組み立てに関わるロジックはここに置く（「計算ロジックをengine_pybindに書かない」原則、`docs/planning/specs/ols-api-design.md`参照）。
+  2. `engine`: 抽出済みの列（`&[f64]`/`&[Vec<f64>]`）から`faer::Mat`を組み立てる（例: `engine::linear::ols::OlsInput::from_columns`）。切片列の自動追加等、設計行列の組み立てに関わるロジックはここに置く（「計算ロジックをengine_pybindに書かない」原則、`docs/spec/ols-spec.md`参照）。
 - 変換時、列ごとに`Vec<f64>`へ抽出してから`faer::Mat`に詰め直す（2回のコピーが発生する）。より少ないコピー（polarsの`&[f64]`を直接借用してengine側で詰める等）も技術的には可能だが、`engine`の関数シグネチャにライフタイムが入り込み「pure Rustロジック、polars非依存」の独立性が損なわれるため、**採用しない**。このプロジェクトの想定データ規模では、この2回のコピーのコストはQR分解本体（O(n×k²)）に対して無視できるレベルであるため。
-- 欠損値（null）は`.rechunk()` + `null_count()`チェックで検出し、常にエラーとする（`testing-policy.md`・`ols-implementation-notes.md`の欠損値方針を参照）。サンプルの自動除外は行わない。
+- 欠損値（null）は`.rechunk()` + `null_count()`チェックで検出し、常にエラーとする（`testing-policy.md`・`docs/spec/ols-spec.md`の欠損値方針を参照）。サンプルの自動除外は行わない。
 - クラスター変数等の「グループの同一性」だけが意味を持つ列は、整数決め打ちにせず文字列として扱う（州名・企業ID等、実務では文字列/カテゴリカルの方が多いため）。
 
 ## エラーハンドリング
@@ -70,6 +70,7 @@ paths:
   - `ValidationError`: 入力・パラメータが不正（次元不一致、欠損値、観測数不足、クラスター数不足、`confidence_level`の範囲外等）。Python側の`ValueError`も継承させ、素の`except ValueError`でも捕まえられるようにする。
   - `ComputationError`: 計算過程で発覚した問題（特異行列等）。Python側の`RuntimeError`を継承させる。
   - メモリ不足等は専用の例外クラスを設けない（Rust/Pythonのメモリ確保失敗は通常このレイヤーで綺麗に変換できるものではないため）。
+- **系統をまたいで同じ意味・同じメッセージのバリアントが複数の系統のエラー型に重複する場合は`engine::error::CommonError`に切り出す**（`DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/`MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`がOLS/WLSとnonlinearで重複していたことから導入）。各系統のエラー型（`LeastSquaresError`/`MleError`等）はthiserrorの`#[error(transparent)] Common(#[from] CommonError)`バリアントでこれを包む。`?`演算子は`#[from]`により自動変換されるため、`CommonError`のバリアントを直接構築する箇所（`return Err(...)`等`?`を経由しない箇所）でのみ`.into()`を明示する。系統固有の追加バリアント（`SingularHessian`等）や、将来「意味は同じだが系統固有の追加フィールドが要る」ケースは`CommonError`に含めず、各系統のエラー型に直接定義してよい（`CommonError`を使うかどうかは系統ごとに選べる）。`engine_pybind`側の変換は`engine_pybind/src/errors.rs`の`common_error_to_pyerr`に集約し、各系統の`*_error_to_pyerr`関数はこれに委譲する。
 
 ## Lint / フォーマット
 
@@ -81,6 +82,13 @@ paths:
 
 - Arrowのゼロコピー原則（CLAUDE.md 2章）を壊す不要な`clone`・コピーを避ける。
 - 大きなデータに対する計算量・メモリ使用量に注意する。
+- **並列化（`rayon`）の採用検討**: 現時点で`rayon`はどのクレートの依存にも含まれていない（未導入）。以下のような「独立した単位の処理を大量に繰り返す」箇所は将来の候補になりうるが、**採用するかどうかは実測してから決める**（`hac_cov_params`で`Par::Seq`を明示指定した教訓——k×kの小さい出力サイズではfaer既定の並列ディスパッチのオーバーヘッドが計算本体を上回り逐次より遅くなった、実測n=10,000,k=2で6倍悪化——と同じ姿勢。並列化＝常に速いとは限らない）。
+  - **MLEベースの手法**（Logit/Probit/Tobit等）の`CostFunction`/`Gradient`/`Hessian`・観測ごとのスコア計算: Newton/BFGS/L-BFGSの反復ごとに観測数`n`に比例する和を取る処理が繰り返し呼ばれるため、`n`が大きいデータセットでは最適化全体の支配的なコストになりうる（`engine/src/nonlinear/logit.rs`の`LogitProblem`が該当。Probit/Tobitも同型の構造になる見込み）。
+  - **パネルデータ（FE/RE）の個体（グループ）ごとの計算、クラスターロバストSEのクラスターごとの計算**。ただしOLSの`cluster_cov_params`は計算量がO(G·k²)（`G`はクラスター数、通常`n`よりずっと小さい）で実測上ボトルネックにならないことを確認済み（`docs/spec/ols-spec.md`「パフォーマンス」）。クラスター数`G`が非常に大きいケース等、前提が変わる場合は再検討する。
+  - **将来のブートストラップ・permutation検定等**、繰り返し数が多く各試行が独立な推論手続き。
+  - **IO手法**（動学ゲーム・シミュレーテッド最尤法等）の市場・シミュレーション試行ごとの計算（Phase6着手時に本格検討、CLAUDE.md 13章参照）。
+  - **`faer`自身の`Par`（行列積内部の並列化）とは別軸の並列化であることに注意**: 上記`Par::Seq`の教訓は「faerの行列積内部の並列化」の話であり、「観測・グループ単位でrayonのイテレータを並列化する」話とは粒度が異なる。前者の実測結果を根拠に後者を一律に否定しない（それぞれ独立に実測して判断する）。
+  - 採用する場合はバージョンを明示固定（`=`指定、他クレートと同じ方針）し、小規模データでのオーバーヘッド逆転が起きないよう、必要なら適用範囲・閾値を絞る（`Par::Seq`と同じ発想）。
 
 ## テスト
 

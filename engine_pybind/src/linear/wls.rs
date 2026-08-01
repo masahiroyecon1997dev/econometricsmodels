@@ -3,9 +3,9 @@
 //!
 //! `weight`は`y`と同じく`data`内の列名を指すトップレベル引数として扱う（`WLSOptions`という
 //! 専用のOptions型は新設せず`OLSOptions`をそのまま再利用する。
-//! `docs/planning/specs/wls-api-design.md`1〜3章参照）。エラー変換（`ols_error_to_pyerr`）・
+//! `docs/planning/specs/wls-api-design.md`1〜3章参照）。エラー変換（`least_squares_error_to_pyerr`）・
 //! `Mat<f64>`→`Vec<f64>`変換（`mat_to_vec`）は`super::common`のものをそのまま再利用する
-//! （`OlsError`がOLS・WLS共通のエラー型のため。`.claude/rules/rust-style.md`
+//! （`LeastSquaresError`がOLS・WLS共通のエラー型のため。`.claude/rules/rust-style.md`
 //! 「系統内で共有するロジックはcommon.rsに置く」）。
 
 use engine::linear::ols::CovType as EngineCovType;
@@ -14,10 +14,14 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
-use super::common::{mat_to_vec, ols_error_to_pyerr};
+use super::common::{least_squares_error_to_pyerr, mat_to_vec};
 use super::ols::OLSOptions;
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
 use crate::errors::ValidationError;
+use crate::validation::{
+    validate_no_const_collision, validate_no_duplicate_roles, validate_no_duplicate_x,
+    validate_x_non_empty,
+};
 
 /// Estimation results for WLS.
 ///
@@ -63,7 +67,7 @@ pub struct WLSResult {
 /// - `cov_type`の文字列が不正な場合は`ValidationError`
 /// - それ以外（観測数不足・信頼水準の範囲外・特異行列・クラスター数不足・
 ///   `hac_lags`の範囲外・クラスターキー未指定・重みの次元不一致・非正の重み等）は
-///   `engine::linear::ols::OlsError`から`ols_error_to_pyerr`で変換
+///   `engine::linear::common::LeastSquaresError`から`least_squares_error_to_pyerr`で変換
 pub fn fit(
     data: PyDataFrame,
     y: String,
@@ -74,107 +78,45 @@ pub fn fit(
     let df: DataFrame = data.into();
     let cov_type_lower = options.cov_type.to_lowercase();
 
-    if x.is_empty() {
-        return Err(ValidationError::new_err(
-            "x must contain at least one column name",
-        ));
-    }
-
-    // ── y/x/weightの重複チェック（誤って同じ列を複数の役割に指定するミスを、
-    // 分かりやすいエラーで早期に防ぐ。`docs/planning/specs/wls-api-design.md`3章参照）──
-    if x.contains(&y) {
-        return Err(ValidationError::new_err(format!(
-            "the column '{y}' specified as y is also included in x"
-        )));
-    }
-    if weight == y {
-        return Err(ValidationError::new_err(format!(
-            "the column '{weight}' specified as weight is also specified as y"
-        )));
-    }
-    if x.contains(&weight) {
-        return Err(ValidationError::new_err(format!(
-            "the column '{weight}' specified as weight is also included in x"
-        )));
-    }
-    {
-        let mut seen = std::collections::HashSet::new();
-        for name in &x {
-            if !seen.insert(name) {
-                return Err(ValidationError::new_err(format!(
-                    "column '{name}' is specified more than once in x"
-                )));
-            }
-        }
-    }
-    if options.include_intercept && x.iter().any(|name| name == "const") {
-        return Err(ValidationError::new_err(
-            "when include_intercept=true, x cannot contain a column named 'const' \
-             (it collides with the automatically added intercept)",
-        ));
-    }
+    // 誤って同じ列を複数の役割に指定するミスを、分かりやすいエラーで早期に防ぐ
+    // （`docs/planning/specs/wls-api-design.md`3章参照）。
+    validate_x_non_empty(&x)?;
+    validate_no_duplicate_roles(&[("y", &y), ("weight", &weight)], &x)?;
+    validate_no_duplicate_x(&x)?;
+    validate_no_const_collision(&x, options.include_intercept)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
     let y_slice = extract_f64_column(&df, &y)?;
-    let n = y_slice.len();
 
-    // ── x列の抽出（列ごとに検証しつつスライスを集める）────────────────────
+    // ── x列の抽出 ──────────────────────────────────────────────────────
     let mut x_slices: Vec<Vec<f64>> = Vec::with_capacity(x.len());
     for col_name in &x {
-        let s = extract_f64_column(&df, col_name)?;
-        if s.len() != n {
-            return Err(ValidationError::new_err(format!(
-                "row count of column '{col_name}' does not match y (y: {n} rows, {col_name}: {} rows)",
-                s.len()
-            )));
-        }
-        x_slices.push(s);
+        x_slices.push(extract_f64_column(&df, col_name)?);
     }
 
     // ── weight列の抽出 ─────────────────────────────────────────────────
     // NaN/無限大・欠損値の検証はextract_f64_columnがy/xと同じ経路で行う。0以下の値
-    // （analytic weightとして不正）の検証はengine側（OlsError::NonPositiveWeight）に
-    // 委ねる（`docs/planning/specs/wls-api-design.md`4.2節参照。y/xの行数不一致チェックと
-    // 同様、ここでも行数チェックだけは事前に行う）。
+    // （analytic weightとして不正）の検証はengine側（LeastSquaresError::NonPositiveWeight）に
+    // 委ねる（`docs/planning/specs/wls-api-design.md`4.2節参照）。
     let weight_slice = extract_f64_column(&df, &weight)?;
-    if weight_slice.len() != n {
-        return Err(ValidationError::new_err(format!(
-            "row count of weight column '{weight}' does not match y (y: {n} rows, weight: {} rows)",
-            weight_slice.len()
-        )));
-    }
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ、OLSと同じ）─────
     let cluster_groups = if cov_type_lower == "cluster" {
-        match &options.cluster_col {
-            Some(col_name) => {
-                let ids = extract_group_key_column(&df, col_name)?;
-                if ids.len() != n {
-                    return Err(ValidationError::new_err(format!(
-                        "row count of cluster column '{col_name}' does not match y"
-                    )));
-                }
-                Some(ids)
-            }
-            None => None,
-        }
+        options
+            .cluster_col
+            .as_ref()
+            .map(|col_name| extract_group_key_column(&df, col_name))
+            .transpose()?
     } else {
         None
     };
 
     let time_order = if cov_type_lower == "hac" {
-        match &options.time_col {
-            Some(col_name) => {
-                let values = extract_f64_column(&df, col_name)?;
-                if values.len() != n {
-                    return Err(ValidationError::new_err(format!(
-                        "row count of time column '{col_name}' does not match y"
-                    )));
-                }
-                Some(values)
-            }
-            None => None,
-        }
+        options
+            .time_col
+            .as_ref()
+            .map(|col_name| extract_f64_column(&df, col_name))
+            .transpose()?
     } else {
         None
     };
@@ -210,7 +152,7 @@ pub fn fit(
         cov_type,
         options.confidence_level,
     )
-    .map_err(ols_error_to_pyerr)?;
+    .map_err(least_squares_error_to_pyerr)?;
 
     let estimator = wls_estimator.estimator();
 

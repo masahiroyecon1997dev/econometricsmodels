@@ -6,7 +6,7 @@ allowed-tools: Bash(git diff:*), Bash(git log:*)
 
 # テスト網羅性レビュー
 
-`testing-completeness-reviewer` サブエージェント（`.claude/subagents/testing-completeness-reviewer.md`）にレビューを委譲する。
+`testing-completeness-reviewer` サブエージェント（`.claude/agents/testing-completeness-reviewer.md`）にレビューを委譲する。
 チェック観点・出力形式の詳細はサブエージェント側の定義を単一ソースとする（このコマンドでは重複定義しない）。
 
 ## レビュー対象

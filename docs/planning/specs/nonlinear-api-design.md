@@ -73,7 +73,7 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
 
 - HC2/HC3は対象外（レバレッジ・hat行列に依存した補正で線形回帰特有の概念のため）
 - HACも対象外（今回のスコープ外の時系列拡張として保留）
-- `"classical"` / `"nonrobust"`のエイリアス化はOLSの既存実装（[`engine_pybind/src/linear/ols.rs:102`](../../../engine_pybind/src/linear/ols.rs#L102)）に倣った
+- `"classical"` / `"nonrobust"`のエイリアス化はOLSの既存実装（[`engine_pybind/src/linear/ols.rs:102`](https://github.com/masahiroyecon1997dev/econometricsmodels/blob/main/engine_pybind/src/linear/ols.rs#L102)）に倣った
 
 ---
 

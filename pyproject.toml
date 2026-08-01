@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "econometricsmodels"
-version = "0.2.0"
+version = "0.3.0"
 description = "統計・計量経済学の分析手法を提供するPython API"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -55,7 +55,7 @@ test = [
     "pytest==9.1.1",
     "numpy==2.5.1",
     "statsmodels==0.14.6",
-    "ruff==0.15.20",
+    "ruff==0.15.22",
 ]
 # benchmark/ 配下のベンチマーク値生成・性能比較スクリプト専用（CLAUDE.md 3章
 # 「benchmark/はtests/とは別ライフサイクル」参照）。ci_python.ymlは使わない

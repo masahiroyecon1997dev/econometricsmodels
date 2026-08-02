@@ -139,24 +139,43 @@
 
 詳細: [`panel-api-design.md`](./specs/panel-api-design.md)7章
 
-## 4. IV（操作変数法）固有論点
+## 4. IV（操作変数法）固有論点（確定・Issue #126）
 
 - [x] 引数の切り分け：内生変数（endogenous x）／外生変数（exogenous x）／操作変数（instruments）の3区分をどう引数に落とすか
   - `x_exog`/`x_endog`/`instruments`をすべて独立引数化（Issue #119、1.1節参照）。加えて
     `instruments`は除外操作変数のみとし`x_exog`との重複入力は不可（バリデーションエラー）、
     第一段階設計行列は内部で`x_exog ++ instruments`をunion。詳細:
     [`iv-api-design.md`](./specs/iv-api-design.md)1.1.1節
-- [ ] 2SLSとGMMの実装方針の違い（GMMの重み行列: 1-step か 2-step efficient GMM か）
-- [ ] 丁度識別（just-identified）の場合の扱い：GMMが2SLSに一致するケースを分岐するか共通コードで吸収するか
-- [ ] 弱操作変数診断：第一段階F統計量（Stock-Yogo基準）を結果に含めるか
-- [ ] 過剰識別検定：Sargan検定（2SLS）／Hansen J検定（GMM）を含めるか
-- [ ] 内生性検定：Wu-Hausman検定（回帰ベース）を含めるか
-- [ ] 標準誤差の計算方法（1.3の`cov_type`対応表と連動、2SLS特有のサンドイッチ型分散の扱い）
+- [x] 2SLSとGMMの実装方針の違い（GMMの重み行列: 1-step か 2-step efficient GMM か）
+  - `weight_type`（点推定の重み行列）と`cov_type`（報告用SE）を分離。`gmm_iterations`
+    （デフォルト2＝efficient two-step、1で1-step）を追加。2SLSはGMMの特殊ケース
+    （`weight_type="unadjusted"`, `gmm_iterations=1`）として無理のない範囲で共通コード化。
+- [x] 丁度識別（just-identified）の場合の扱い：GMMが2SLSに一致するケースを分岐するか共通コードで吸収するか
+  - 共通GMM推定コアで自然に吸収（丁度識別では重み行列が点推定に影響しないGMMの一般的性質）、
+    特別分岐は不要。
+- [x] 弱操作変数診断：第一段階F統計量（Stock-Yogo基準）を結果に含めるか
+  - x_exogを直交化した「部分F統計量」として専用計算し`fit()`の結果本体に含める（単純に
+    `first_stage()`のOlsResults.f_statisticを流用すると不正確になるため注意）。Stock-Yogo
+    臨界値照合・複数内生変数の同時検定はv1スコープ外。
+- [x] 過剰識別検定：Sargan検定（2SLS）／Hansen J検定（GMM）を含めるか
+  - `fit()`の結果本体に含める。自由度`len(instruments) - len(x_endog)`、丁度識別時は`None`。
+- [x] 内生性検定：Wu-Hausman検定（回帰ベース）を含めるか
+  - 含める。「回帰ベース」は第一段階残差を構造式に追加回帰する方式
+    （linearmodelsの`wooldridge_regression`相当）で実装、`fit()`の結果本体に含める。
+- [x] 標準誤差の計算方法（1.3の`cov_type`対応表と連動、2SLS特有のサンドイッチ型分散の扱い）
+  - 2SLSは`classical`/`hc0-3`/`cluster`/`hac`（#121で確定済み）。GMMは`weight_type`と独立に
+    `cov_type`を選択可能、サポート対象は2SLSと同じ範囲。
+
+詳細: [`iv-api-design.md`](./specs/iv-api-design.md)6章
 
 ---
 
 ## 5. 次のステップ
 
-1. 上記論点を1つずつ「確定」させ、`panel-api-design.md`（FE/RE共通）・`iv-api-design.md`（IV単独）としてドキュメント化する
-2. `nonlinear-api-design.md`同様、他パッケージ調査（pyfixest, plm, linearmodels等）のセクションを追加する
-3. 設計確定後、Issue分解（各モデル20個程度）に着手する
+1. ~~上記論点を1つずつ「確定」させ、`panel-api-design.md`（FE/RE共通）・`iv-api-design.md`
+   （IV単独）としてドキュメント化する~~ **完了**（Issue #119〜#126、全論点確定・ドキュメント化済み）
+2. ~~`nonlinear-api-design.md`同様、他パッケージ調査（pyfixest, plm, linearmodels等）のセクションを追加する~~
+   各論点の確定時にlinearmodels/plm/fixest/ivregのソースコード・ドキュメントを都度確認する形で
+   実施済み（独立セクションとしては追加していないが、`panel-api-design.md`・`iv-api-design.md`
+   各所に確認内容を反映済み）
+3. **次のステップ**: 設計確定を受け、Issue分解（各モデル20個程度を想定）に着手する

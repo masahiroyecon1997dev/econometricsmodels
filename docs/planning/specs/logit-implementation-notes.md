@@ -178,6 +178,17 @@ Probit側のIssue #77（適合度統計量実装）で、本実装（Issue #61/#
 - **`at="mean"`/`"median"`が`at="overall"`と異なる値になることの確認**: `marginal_effects_at_mean_differs_from_overall_and_matches_independent_recomputation`・`marginal_effects_at_median_differs_from_mean_and_overall_and_matches_independent_recomputation`。後者は`column_medians`（奇数・偶数nの両方を`column_medians_matches_expected_for_odd_and_even_n`で直接検証済み）が返す中央値を使い、平均・中央値が異なる非対称データセットで代表点が正しく切り替わることを確認した（rust-reviewer指摘、初回実装では`at="median"`のテストが皆無だった）。
 - **`confidence_level`範囲外エラー**: `marginal_effects_returns_invalid_confidence_level_error_out_of_range`。`fit()`と同じ`CommonError::InvalidConfidenceLevel`を返すことを確認。
 
+### 追記（Probit Issue #78時点）: `column_means`・`column_medians`・`MarginalEffects`・`dydx_and_jacobian`・デルタ法本体の`nonlinear/common.rs`への集約
+
+Issue #77（適合度統計量）でgoodness-of-fit計算を事後的に`common.rs`へ共通化した経緯を踏まえ、Probit側のIssue #78（限界効果）では着手前にユーザーへ方針を確認し、**最初から共通化を組み込んで設計した**。以下を`common.rs`へ移設・新設した:
+
+- `column_means`/`column_medians`（元はlogit.rsのprivate関数）
+- `MarginalEffects`構造体（元はlogit.rsの`pub struct`）
+- `dydx_and_jacobian`（元はlogit.rsのprivate関数。`w`・`s`の計算方法に依らない`dydx_j=w*θⱼ`・ヤコビアン`θⱼ*s_m+[j==m]*w`の計算。`pub`にして、Logit/Probitそれぞれのテスト——モデル固有の`overall_w_and_s`等が返す実際の`w(θ)`を使った数値微分によるヤコビアンの独立検証——から直接呼べるようにした）
+- `marginal_effects_from_w_s`（元は`LogitEstimator::marginal_effects`本体にインラインで書かれていた、confidence_level検証・デルタ法標準誤差・定数項の除外を含む一連の処理。引数が8個になり`clippy::too_many_arguments`に抵触したため、フィット済みモデルの情報を`FittedModelForMarginalEffects<'a>`構造体に束ねた）
+
+`LogitEstimator::marginal_effects`は、Probit固有の`overall_w_and_s`/`at_point_w_and_s`に相当するLogit版（リンク関数`Λ`の微分`p(1-p)`を使う）で`(w,s)`を計算した後、`marginal_effects_from_w_s`を呼ぶだけに簡略化された。数式・エラー型・テストカバレッジに変更はない（`column_medians_matches_expected_for_odd_and_even_n`テストは`common.rs`へ移設）。共通化の詳細な設計判断は`probit-implementation-notes.md`「限界効果（Issue #78で実装済み）」節参照。
+
 ## predict() / pred_table()（Issue #63で実装済み）
 
 `LogitEstimator::predict()`（引数なし、`Vec<f64>`を直接返す。エラーなし）と`LogitEstimator::pred_table(threshold)`（`Mat<f64>`の2×2的中表を直接返す。エラーなし）を追加した。いずれも`fit()`とは独立した別メソッド（`nonlinear-api-design.md`6章）。

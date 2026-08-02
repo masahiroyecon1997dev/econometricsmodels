@@ -32,9 +32,10 @@
 
 use crate::error::CommonError;
 use crate::nonlinear::common::{
-    CovType, GoodnessOfFit, MarginalEffectsAt, Method, MleError, SandwichVariant,
-    cluster_cov_params, destandardize_cov_params, destandardize_params, goodness_of_fit,
-    log_likelihood_null, observed_information_cov_params, opg_cov_params, run_solver,
+    CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
+    Method, MleError, SandwichVariant, cluster_cov_params, column_means, column_medians,
+    destandardize_cov_params, destandardize_params, goodness_of_fit, log_likelihood_null,
+    marginal_effects_from_w_s, observed_information_cov_params, opg_cov_params, run_solver,
     sandwich_cov_params, standardize_columns, validate_binary_y,
 };
 use crate::validation::validate_cluster_groups;
@@ -235,49 +236,6 @@ fn at_point_w_and_s(x_bar: &[f64], params: &[f64]) -> (f64, Vec<f64>) {
     (pq, s)
 }
 
-/// `overall_w_and_s`/`at_point_w_and_s`が返す`(w,s)`から、限界効果`dydx_j=w*θⱼ`と
-/// そのヤコビアン`jacobian[j][m]=∂dydx_j/∂θₘ=θⱼ*s_m + [j==m]*w`を計算する
-/// （`LogitEstimator::marginal_effects`のdocコメント「数式（デルタ法）」参照。
-/// AME・mean・medianのいずれも`g_j(θ)=w(θ)*θⱼ`という同じ形に帰着するため、
-/// `w`・`s`の計算方法（`at`ごとに異なる）とこの式（`at`に依らず共通）を分離できる）。
-fn dydx_and_jacobian(k: usize, params: &[f64], w: f64, s: &[f64]) -> (Vec<f64>, Mat<f64>) {
-    let dydx: Vec<f64> = (0..k).map(|j| w * params[j]).collect();
-    let jacobian = Mat::from_fn(k, k, |j, m| params[j] * s[m] + if j == m { w } else { 0.0 });
-    (dydx, jacobian)
-}
-
-/// 説明変数ごとの標本平均（列ごと、`marginal_effects`の`at="mean"`用）。
-fn column_means(x: &Mat<f64>) -> Vec<f64> {
-    let n = x.nrows();
-    let k = x.ncols();
-    (0..k)
-        .map(|j| (0..n).map(|i| *x.get(i, j)).sum::<f64>() / (n as f64))
-        .collect()
-}
-
-/// 説明変数ごとの標本中央値（列ごと、`marginal_effects`の`at="median"`用）。`n`が偶数の
-/// 場合は中央2値の平均。
-///
-/// `partial_cmp().unwrap()`について: `x`の値はNaN/無限大を含まないことが
-/// `engine_pybind::column_extraction`側で既に保証されている前提（`engine`の責務境界の
-/// 内側であり、クリーンな値しか受け取らない。OLSの`time_ordering`と同じ扱い、
-/// `engine/src/linear/ols.rs`参照）。
-fn column_medians(x: &Mat<f64>) -> Vec<f64> {
-    let n = x.nrows();
-    let k = x.ncols();
-    (0..k)
-        .map(|j| {
-            let mut col: Vec<f64> = (0..n).map(|i| *x.get(i, j)).collect();
-            col.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            if n % 2 == 1 {
-                col[n / 2]
-            } else {
-                (col[n / 2 - 1] + col[n / 2]) / 2.0
-            }
-        })
-        .collect()
-}
-
 /// Logitの負の対数尤度・スコア・Hessian（argminの`CostFunction`/`Gradient`/`Hessian`
 /// トレイト実装）。`LogitInput`の`X`・`y`を保持する（`run_solver`が`problem`の所有権を
 /// 必要とするため、`LogitInput`とは独立した所有データとして持つ。`Clone`は
@@ -381,67 +339,6 @@ impl Hessian for LogitProblem {
             }
         }
         Ok(h)
-    }
-}
-
-/// `LogitEstimator::marginal_effects`の結果。`coef_table`と同じ行指向
-/// （`dydx`/`std_err`/`z`/`p_value`/`conf_low`/`conf_high`、`nonlinear-api-design.md`
-/// 6章）。定数項（切片）は行から除外する（切片の限界効果は経済学的に意味を持たない、
-/// statsmodelsの`get_margeff()`と同じ扱い）。
-///
-/// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
-#[derive(Debug)]
-pub struct MarginalEffects {
-    /// 説明変数名（定数項を除く）。`LogitInput::param_names()`から定数項を除いたもの
-    param_names: Vec<String>,
-    /// 限界効果 `dy/dx`
-    dydx: Vec<f64>,
-    /// デルタ法標準誤差
-    std_errors: Vec<f64>,
-    /// z統計量
-    z_stats: Vec<f64>,
-    /// 両側p値
-    p_values: Vec<f64>,
-    /// 信頼区間の下限
-    conf_lower: Vec<f64>,
-    /// 信頼区間の上限
-    conf_upper: Vec<f64>,
-}
-
-impl MarginalEffects {
-    /// 説明変数名（定数項を除く）
-    pub fn param_names(&self) -> &[String] {
-        &self.param_names
-    }
-
-    /// 限界効果 `dy/dx`
-    pub fn dydx(&self) -> &[f64] {
-        &self.dydx
-    }
-
-    /// デルタ法標準誤差
-    pub fn std_errors(&self) -> &[f64] {
-        &self.std_errors
-    }
-
-    /// z統計量
-    pub fn z_stats(&self) -> &[f64] {
-        &self.z_stats
-    }
-
-    /// 両側p値
-    pub fn p_values(&self) -> &[f64] {
-        &self.p_values
-    }
-
-    /// 信頼区間の下限
-    pub fn conf_lower(&self) -> &[f64] {
-        &self.conf_lower
-    }
-
-    /// 信頼区間の上限
-    pub fn conf_upper(&self) -> &[f64] {
-        &self.conf_upper
     }
 }
 
@@ -877,8 +774,10 @@ impl LogitEstimator {
     /// いずれも同じ`g_j(θ)=w(θ)*θ_j`という形に帰着するため、`w`とその勾配
     /// `s_m=∂w/∂θ_m`さえ計算できれば、ヤコビアンは
     /// `∂g_j/∂θ_m = θ_j*s_m + [j==m]*w`という共通の式で書ける
-    /// （`overall_w_and_s`/`at_point_w_and_s`が`(w,s)`を計算し、
-    /// `dydx_and_jacobian`が上記の共通式を適用する）。
+    /// （`overall_w_and_s`/`at_point_w_and_s`が`(w,s)`を計算し、`w`・`s`の計算方法に
+    /// 依らない残りの計算——ヤコビアン・デルタ法標準誤差・定数項の除外——は
+    /// `nonlinear/common.rs`の`marginal_effects_from_w_s`に共通化されている
+    /// （Probitでも同型の式になることを確認済み、Issue #78）。
     ///
     /// 変数`j`の分散は`Var(g_j) = jac_j · Σ · jac_jᵀ`（`jac_j`はヤコビアンの`j`行目、
     /// `Σ=cov_params`）。標準誤差はこの平方根、検定分布は標準正規分布
@@ -894,10 +793,6 @@ impl LogitEstimator {
         at: MarginalEffectsAt,
         confidence_level: f64,
     ) -> Result<MarginalEffects, MleError> {
-        if !(confidence_level > 0.0 && confidence_level < 1.0) {
-            return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
-        }
-
         let x = self.input.x();
         let k = self.input.k();
         let (w, s) = match at {
@@ -905,54 +800,18 @@ impl LogitEstimator {
             MarginalEffectsAt::Mean => at_point_w_and_s(&column_means(x), &self.params),
             MarginalEffectsAt::Median => at_point_w_and_s(&column_medians(x), &self.params),
         };
-        let (dydx, jacobian) = dydx_and_jacobian(k, &self.params, w, &s);
-
-        // `Normal::new(0.0, 1.0)`は標準正規分布であり、標準偏差が正であることを
-        // 要求するstatrsの検証を常に満たすため、この`map_err`分岐は理論上到達不能
-        // （`.claude/rules/rust-style.md`「テスト」のカバレッジ方針参照、`fit()`と同じ扱い）。
-        let normal =
-            Normal::new(0.0, 1.0).map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
-        let alpha = 1.0 - confidence_level;
-        let z_crit = normal.inverse_cdf(1.0 - alpha / 2.0);
-
-        let k_constant = usize::from(self.input.has_intercept());
-        let mut param_names = Vec::with_capacity(k - k_constant);
-        let mut out_dydx = Vec::with_capacity(k - k_constant);
-        let mut std_errors = Vec::with_capacity(k - k_constant);
-        let mut z_stats = Vec::with_capacity(k - k_constant);
-        let mut p_values = Vec::with_capacity(k - k_constant);
-        let mut conf_lower = Vec::with_capacity(k - k_constant);
-        let mut conf_upper = Vec::with_capacity(k - k_constant);
-
-        for (j, &dydx_j) in dydx.iter().enumerate().skip(k_constant) {
-            let jac_row: Vec<f64> = (0..k).map(|m| *jacobian.get(j, m)).collect();
-            let mut var_j = 0.0;
-            for a in 0..k {
-                for b in 0..k {
-                    var_j += jac_row[a] * (*self.cov_params.get(a, b)) * jac_row[b];
-                }
-            }
-            let se = var_j.sqrt();
-            let z = dydx_j / se;
-
-            param_names.push(self.input.param_names()[j].clone());
-            out_dydx.push(dydx_j);
-            std_errors.push(se);
-            z_stats.push(z);
-            p_values.push(2.0 * (1.0 - normal.cdf(z.abs())));
-            conf_lower.push(dydx_j - z_crit * se);
-            conf_upper.push(dydx_j + z_crit * se);
-        }
-
-        Ok(MarginalEffects {
-            param_names,
-            dydx: out_dydx,
-            std_errors,
-            z_stats,
-            p_values,
-            conf_lower,
-            conf_upper,
-        })
+        marginal_effects_from_w_s(
+            FittedModelForMarginalEffects {
+                param_names: self.input.param_names(),
+                has_intercept: self.input.has_intercept(),
+                k,
+                params: &self.params,
+                cov_params: &self.cov_params,
+            },
+            w,
+            &s,
+            confidence_level,
+        )
     }
 
     /// 予測確率 `p_i = Λ(x_i'θ)` を、`fit()`に使った学習データ（`self.input.x()`）の
@@ -1012,6 +871,7 @@ impl LogitEstimator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nonlinear::common::dydx_and_jacobian;
     use statrs::distribution::ChiSquared;
 
     #[test]
@@ -2731,25 +2591,6 @@ mod tests {
         for (idx, j) in (1..3).enumerate() {
             assert!((at_mean.dydx()[idx] - w * params[j]).abs() < 1e-9);
         }
-    }
-
-    /// `column_medians`（`marginal_effects`の`at="median"`が使う代表点の計算）を、
-    /// 奇数・偶数それぞれの観測数で直接検証する。
-    #[test]
-    fn column_medians_matches_expected_for_odd_and_even_n() {
-        // 奇数（n=5）: ソート後の中央1点がそのまま中央値
-        let x_odd = Mat::from_fn(5, 2, |i, j| match j {
-            0 => [10.0, 20.0, 30.0, 40.0, 100.0][i],
-            _ => [-5.0, 2.0, 8.0, -1.0, 50.0][i],
-        });
-        let medians_odd = column_medians(&x_odd);
-        assert!((medians_odd[0] - 30.0).abs() < 1e-12); // sorted: 10,20,30,40,100
-        assert!((medians_odd[1] - 2.0).abs() < 1e-12); // sorted: -5,-1,2,8,50
-
-        // 偶数（n=4）: 中央2値の平均
-        let x_even = Mat::from_fn(4, 1, |i, _| [10.0, 20.0, 30.0, 40.0][i]);
-        let medians_even = column_medians(&x_even);
-        assert!((medians_even[0] - 25.0).abs() < 1e-12); // (20+30)/2
     }
 
     /// `at="median"`が`at="mean"`/`at="overall"`と異なる代表点で評価されること

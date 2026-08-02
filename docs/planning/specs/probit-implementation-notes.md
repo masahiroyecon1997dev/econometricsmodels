@@ -193,3 +193,23 @@ Logitの対応するテスト（Issue #61で3種）と同じ構成:
 - **`fit_computes_goodness_of_fit_statistics_for_intercept_only_model`**: 切片のみモデル（`df_model=0`の境界ケース）。`log_likelihood`と`log_likelihood_null`が定義上一致すること、`lr_statistic≈0`・`pseudo_r_squared≈0`・`lr_p_value`がNaNになることを検証。
 - **`fit_computes_goodness_of_fit_statistics_matching_independently_recomputed_values`**: 多変量（k=3）モデル。実装（`clamped_pdf_cdf`ベース）とは異なる式（標準正規CDF`Φ`から直接`Σ[y ln Φ(z) + (1-y) ln(1-Φ(z))]`を計算するベルヌーイ対数尤度の定義式そのもの）で`log_likelihood`を独立に再計算し、`log_likelihood_null`・`lr_statistic`・`pseudo_r_squared`・`df_model`・`df_resid`・`lr_p_value`（`statrs::ChiSquared`で独立に検算）・`aic`/`bic`を突き合わせた（`fit_cov_params_is_symmetric_and_stats_are_internally_consistent`と同じデータセットを再利用）。
 - **`fit_lr_statistic_can_be_negative_when_include_intercept_is_false`**: `include_intercept=false`での非入れ子挙動。`lr_statistic`が負になりうること（NaN/Infにはならないこと）、`df_model`/`df_resid`/`aic`/`bic`は`include_intercept`の値に関わらず同じ式で計算されることを回帰テストとして固定した。
+
+## 限界効果（Issue #78で実装済み）
+
+`ProbitEstimator::marginal_effects(at, confidence_level)`を追加した（`fit()`とは独立した別メソッド、`nonlinear-api-design.md`6章）。着手前にユーザーへ方針を確認し、Issue #77（適合度統計量）でgoodness-of-fit計算を事後的に`nonlinear/common.rs`へ集約した経緯を踏まえ、**今回は最初から共通化を組み込んで設計した**（「dydx_and_jacobian・column_means・column_medianはリンク関数に依存せず、Logit/Probitで完全に同一の式になる」という判断、ユーザー確認済み）。
+
+- **数式**: `dy/dx_j = φ(x_i'θ)θ_j`（`φ`は標準正規PDF）。Logitの`p(1-p)θ_j`とは異なるが、`at="overall"`（AME）・`"mean"`・`"median"`いずれも`g_j(θ)=w(θ)*θⱼ`という同じ形に帰着する性質はLogitと共通（`w`はAMEなら全観測平均の`φ(z)`、mean/medianなら代表点で評価した`φ(z̄)`）。`w`の勾配`s_m=∂w/∂θ_m`は`φ'(z)=-zφ(z)`（標準正規PDFの導関数）を使って`s_m=-zφ(z)xₘ`（AMEは全観測平均）と導出した。
+- **`nonlinear/common.rs`への共通化**: `column_means`/`column_medians`/`MarginalEffects`構造体/`dydx_and_jacobian`（`w`・`sから`dydx`とヤコビアンを計算する部分、リンク関数に依らない）/`marginal_effects_from_w_s`（confidence_level検証・デルタ法標準誤差・定数項除外を含む、`dydx_and_jacobian`の呼び出しを含む一連の処理）をLogit/Probit共通として`common.rs`に配置した。Probit固有なのは`overall_w_and_s`/`at_point_w_and_s`（`w`/`s`を`φ`ベースで計算する部分）のみで、`probit.rs`に残している。これに伴いLogit側（Issue #62）の`marginal_effects`実装もリファクタリングしたが、数式・エラー型・テストカバレッジに変更はない。
+- **`marginal_effects_from_w_s`の引数を構造体に束ねた**: 当初`param_names`/`has_intercept`/`k`/`params`/`cov_params`/`w`/`s`/`confidence_level`の8引数だったが、`clippy::too_many_arguments`（既定閾値7）に抵触したため、フィット済みモデルの情報（`w`/`s`/`confidence_level`を除く5つ）を`FittedModelForMarginalEffects<'a>`構造体に束ねた。
+- **`dydx_and_jacobian`を`pub`にした理由**: `marginal_effects_from_w_s`からの呼び出しに加え、Logit/Probitそれぞれのテスト（モデル固有の`overall_w_and_s`等が返す実際の`w(θ)`を使った数値微分によるヤコビアンの独立検証）が直接呼ぶ必要があるため。
+- **`U_CLAMP`を`overall_w_and_s`/`at_point_w_and_s`には適用していない**: 既存の`cost`/`gradient`/`hessian`は`λ=φ(u)/Φ(u)`という`Φ`で割る計算のため`U_CLAMP`によるクランプが必要だった（モジュール冒頭「数値安定化について」参照）が、限界効果の`w=φ(z)`は`Φ`で割らない単独の`φ`評価のみで、`z`が極端でも滑らかに0へ収束するだけで`0.0/0.0`のNaN化リスクが無いため、クランプ不要と判断した（rust-reviewerでも確認済み）。
+
+### テスト
+
+Logitの対応するテスト（Issue #62で7種）と同じ構成:
+
+- **`dydx_and_jacobian_matches_numerical_differentiation_for_overall_w_and_s`**・**`..._for_at_point_w_and_s`**: `dydx_and_jacobian`のヤコビアンを、Probit固有の`overall_w_and_s`/`at_point_w_and_s`が返す`w(θ)`の中心差分数値微分と突き合わせる。
+- **`marginal_effects_returns_empty_result_for_intercept_only_model`**: 切片のみモデル（`k_constant=1`、出力対象の説明変数が無い）で空の結果を返す境界ケース。
+- **`marginal_effects_overall_matches_independently_recomputed_dydx_and_delta_method_se`**: `at="overall"`の`dydx`を`Normal::standard().pdf`から直接計算する式で独立に再計算し、標準誤差も`dydx_j`の数値微分によるヤコビアンから独立に導出して突き合わせる。
+- **`marginal_effects_at_mean_differs_from_overall_and_matches_independent_recomputation`**・**`..._at_median_..._and_overall_..._`**: `at="mean"`/`"median"`が`at="overall"`と異なる代表点で評価されること、`dydx`を`column_means`/`column_medians`から独立に再計算した値と突き合わせる。
+- **`marginal_effects_returns_invalid_confidence_level_error_out_of_range`**: `confidence_level`範囲外エラーの検証。

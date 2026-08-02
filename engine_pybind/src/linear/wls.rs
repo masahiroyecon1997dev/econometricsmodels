@@ -3,7 +3,7 @@
 //!
 //! `weight`は`y`と同じく`data`内の列名を指すトップレベル引数として扱う（`WLSOptions`という
 //! 専用のOptions型は新設せず`OLSOptions`をそのまま再利用する。
-//! `docs/planning/specs/wls-api-design.md`1〜3章参照）。エラー変換（`least_squares_error_to_pyerr`）・
+//! `docs/spec/wls-spec.md`「API引数」参照）。エラー変換（`least_squares_error_to_pyerr`）・
 //! `Mat<f64>`→`Vec<f64>`変換（`mat_to_vec`）は`super::common`のものをそのまま再利用する
 //! （`LeastSquaresError`がOLS・WLS共通のエラー型のため。`.claude/rules/rust-style.md`
 //! 「系統内で共有するロジックはcommon.rsに置く」）。
@@ -27,7 +27,7 @@ use crate::validation::{
 ///
 /// Field-for-field identical to `OLSResult` today, but kept as a separate type: WLS-specific
 /// fields (e.g. weighted residuals) may be added later without affecting `OLSResult`
-/// (`docs/planning/specs/wls-api-design.md` section 5 and 8).
+/// (`docs/spec/wls-spec.md`, "結果構造体").
 #[pyclass(get_all, skip_from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct WLSResult {
@@ -40,7 +40,7 @@ pub struct WLSResult {
     pub param_names: Vec<String>,
     /// Original-scale (unweighted) residuals `y_i - x_i'β̂`. Not the weighted residuals
     /// used internally for the standard error calculations
-    /// (`docs/planning/specs/wls-api-design.md` section 4.3).
+    /// (`docs/spec/wls-spec.md`, "結果構造体").
     pub residuals: Vec<f64>,
     pub dep_var_name: String,
     pub nobs: usize,
@@ -79,7 +79,7 @@ pub fn fit(
     let cov_type_lower = options.cov_type.to_lowercase();
 
     // 誤って同じ列を複数の役割に指定するミスを、分かりやすいエラーで早期に防ぐ
-    // （`docs/planning/specs/wls-api-design.md`3章参照）。
+    // （`docs/spec/wls-spec.md`「API引数」参照）。
     validate_x_non_empty(&x)?;
     validate_no_duplicate_roles(&[("y", &y), ("weight", &weight)], &x)?;
     validate_no_duplicate_x(&x)?;
@@ -97,7 +97,7 @@ pub fn fit(
     // ── weight列の抽出 ─────────────────────────────────────────────────
     // NaN/無限大・欠損値の検証はextract_f64_columnがy/xと同じ経路で行う。0以下の値
     // （analytic weightとして不正）の検証はengine側（LeastSquaresError::NonPositiveWeight）に
-    // 委ねる（`docs/planning/specs/wls-api-design.md`4.2節参照）。
+    // 委ねる（`docs/spec/wls-spec.md`「エラー型」参照）。
     let weight_slice = extract_f64_column(&df, &weight)?;
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ、OLSと同じ）─────

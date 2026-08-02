@@ -49,7 +49,7 @@ fn fit_ols(
 ///     Column name of the analytic weight (must be positive; not a frequency weight).
 /// options : OLSOptions
 ///     Estimation options. `WLS` reuses `OLSOptions` rather than defining a separate
-///     options type (`docs/planning/specs/wls-api-design.md` section 3).
+///     options type (`docs/spec/wls-spec.md`, "API引数").
 #[pyfunction]
 fn fit_wls(
     data: PyDataFrame,

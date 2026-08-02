@@ -6,7 +6,7 @@
 
 シナリオが持つ`weight`列は、OLS実装時（Issue #15）から既に含まれている合成データ生成
 ロジックのもの（heteroskedasticシナリオは`1/sigma_i^2`、それ以外は`uniform(0.5, 1.5)`。
-いずれも正の値）をそのまま使う。詳細は`docs/planning/specs/wls-implementation-notes.md`参照。
+いずれも正の値）をそのまま使う。詳細は`docs/spec/wls-spec.md`参照。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`wls.json`は
 `tests/api_tests/fixtures/benchmarks/`に置く（`.claude/rules/testing-policy.md`
@@ -89,7 +89,7 @@ def build_fixtures() -> dict:
             "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
             "重みは合成データセットの'weight'列（OLS実装時から存在、常に正）を使う。"
             "クロスチェック用のRベンチマークはwls_crosscheck.json（別スクリプト）で生成する。"
-            "401ksubsの回帰式・重み定義はdocs/planning/specs/wls-implementation-notes.md参照。"
+            "401ksubsの回帰式・重み定義はdocs/spec/wls-spec.md参照。"
         ),
     }
     return fixtures
@@ -127,8 +127,7 @@ def _run_cluster_case(scenario: str) -> dict:
 def _run_401ksubs_case() -> dict:
     """実データ（401ksubs、fsize==1）でのWLSベンチマーク。
 
-    回帰式・重み定義はdocs/planning/specs/wls-implementation-notes.md「8. テスト」
-    「実データセット」節で確定した内容（Wooldridge Example 8.5・8.6と同じ変数構成、
+    回帰式・重み定義はdocs/spec/wls-spec.md「テスト」で確定した内容（Wooldridge Example 8.5・8.6と同じ変数構成、
     Var(u|inc) ∝ inc という単純WLSの仮定に基づき重み = 1/inc）。
     """
     import statsmodels.formula.api as smf

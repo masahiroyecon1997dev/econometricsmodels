@@ -8,7 +8,7 @@ for `x`, an options object for estimation settings (CLAUDE.md section 2,
 `.claude/rules/python-style.md` "設計方針との整合性").
 
 `weight`, like `y`, is a top-level argument referring to a column name
-in `data` (see `docs/planning/specs/wls-api-design.md` sections 1-3).
+in `data` (see `docs/spec/wls-spec.md`, "API引数").
 Since the estimation options WLS needs are identical to OLS's, no
 separate options class is introduced; WLS reuses `OLSOptions` as-is
 (see section 3).
@@ -105,7 +105,7 @@ class WlsResults:
         by `WLS.fit()`. `residuals` are on the original (unweighted)
         scale, `y_i - x_i'β̂`, which differs from the weighted
         residuals used in the standard error computation (see
-        `docs/planning/specs/wls-api-design.md` section 4.3).
+        `docs/spec/wls-spec.md`, "結果構造体").
     """
 
     def __init__(self, raw: _lib.WLSResult) -> None:

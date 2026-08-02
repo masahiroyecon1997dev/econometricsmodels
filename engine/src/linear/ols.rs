@@ -99,10 +99,10 @@ impl OlsInput {
     /// `from_columns`のWLS版。各観測の行（自動追加される切片列を含む）を
     /// `sqrt(weights[i])`倍してから組み立てる。この変換により、`OlsEstimator::fit`
     /// （無変更）をそのまま適用するとWLSの推定になる
-    /// （`docs/planning/specs/wls-api-design.md`4.1節参照）。`weights`の全要素が1.0のときは
+    /// （`docs/spec/wls-spec.md`「sqrt(w)変換」参照）。`weights`の全要素が1.0のときは
     /// `from_columns`と数値的に完全に同じ結果になる。
     ///
-    /// `weights`はanalytic weightとして扱う（`docs/planning/specs/wls-api-design.md`0章）。
+    /// `weights`はanalytic weightとして扱う（`docs/spec/wls-spec.md`「API引数」）。
     ///
     /// # Errors
     /// - `y`といずれかの`x_columns`の長さが一致しない場合は`CommonError::DimensionMismatch`
@@ -150,7 +150,7 @@ impl OlsInput {
     /// **切片列の重み付けについて**: 単純に「`x_columns`を先に重み変換してから、この関数の
     /// `weights=None`版を呼ぶ」という実装は誤り。それだと自動追加される切片列（すべて1.0）が
     /// 重み付けされないままになる。重み変換は行列組み立てそのものの中（この関数）で行う必要がある
-    /// （`docs/planning/specs/wls-api-design.md`4.1節参照）。
+    /// （`docs/spec/wls-spec.md`「sqrt(w)変換」参照）。
     fn from_columns_impl(
         y: &[f64],
         x_columns: &[Vec<f64>],
@@ -1016,8 +1016,8 @@ mod tests {
     #[test]
     fn from_columns_weighted_with_all_ones_matches_from_columns() {
         // 重みが全て1のとき、from_columns_weightedはfrom_columnsと数値的に完全一致するはず
-        // （from_columns_impl内の`scale(i) = 1.0`分岐、docs/planning/specs/wls-api-design.md
-        // 4.1節の構造的保証）。
+        // （from_columns_impl内の`scale(i) = 1.0`分岐、docs/spec/wls-spec.md
+        // 「sqrt(w)変換」の構造的保証）。
         let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
         let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
         let weights = vec![1.0; 5];
@@ -1051,7 +1051,7 @@ mod tests {
     #[test]
     fn from_columns_weighted_scales_intercept_column_too() {
         // 切片列（すべて1.0）も重み変換の対象であることを確認する回帰テスト
-        // （wls-api-design.md 4.1節「切片列の重み付け」で明記した誤りやすいポイント）。
+        // （wls-spec.md「sqrt(w)変換」で明記した誤りやすいポイント）。
         let y = vec![1.0, 2.0];
         let x_columns = vec![vec![10.0, 20.0]];
         let weights = vec![4.0, 9.0]; // sqrt(4)=2, sqrt(9)=3

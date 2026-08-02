@@ -7,7 +7,7 @@
 //!
 //! 元々`OlsError`という名前でOLS単体のエラー型として`linear/ols.rs`に定義されていたが、
 //! WLSが同じ型をそのまま再利用する設計（`OlsInput::from_columns_weighted`・
-//! `OlsEstimator::fit`を無変更で流用する、`docs/planning/specs/wls-api-design.md`4.1節）に
+//! `OlsEstimator::fit`を無変更で流用する、`docs/spec/wls-spec.md`「sqrt(w)変換」）に
 //! なり、WLS固有のバリアント（`WeightDimensionMismatch`/`NonPositiveWeight`）も混在する
 //! ことになった。実態（OLS・WLS共有）に合わせて`common.rs`に切り出し、`LeastSquaresError`に
 //! 改名した。
@@ -42,7 +42,7 @@ pub enum LeastSquaresError {
     WeightDimensionMismatch { y_rows: usize, weight_rows: usize },
 
     /// WLSの重みが0以下（NaNを含む）。analytic weightとして扱うため正の値のみ許容する
-    /// （`docs/planning/specs/wls-api-design.md`3.1節参照）。
+    /// （`docs/spec/wls-spec.md`「API引数」参照）。
     #[error("weight at row {row} must be positive, got {weight}")]
     NonPositiveWeight { row: usize, weight: f64 },
 

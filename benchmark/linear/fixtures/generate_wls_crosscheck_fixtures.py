@@ -192,7 +192,7 @@ def build_401ksubs_fixture(tmpdir: Path) -> dict:
     """実データ（401ksubs、fsize==1）でのWLSクロスチェック。
 
     回帰式・重み定義はgenerate_wls_fixtures.py（statsmodels側）と揃える
-    （docs/planning/specs/wls-implementation-notes.md参照）。
+    （docs/spec/wls-spec.md参照）。
     """
     df = load_wooldridge("401ksubs").filter(pl.col("fsize") == 1)
     df = df.with_columns((1.0 / pl.col("inc")).alias("inv_inc"))

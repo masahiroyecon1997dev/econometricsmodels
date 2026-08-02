@@ -9,8 +9,7 @@ pyfixest除外の理由は`test_ols_crosscheck.py`と同じ（Issue #27で確定
 classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相対誤差1e-13〜1e-15
 程度）ため`RTOL_STRICT`で厳密比較する。**HACのみOLSより乖離が大きく、実測で
 最大相対誤差約4.3%**（OLSの実測約0.4%の10倍程度）だったため、`RTOL_HAC`は
-OLSの1e-2ではなく5e-2を採用する（`docs/planning/specs/wls-implementation-notes.md`
-「ベンチマーク作成（Issue #43）」参照。`testing-policy.md`「同じクロスチェック用
+OLSの1e-2ではなく5e-2を採用する（`docs/spec/wls-spec.md`「テスト」参照。`testing-policy.md`「同じクロスチェック用
 パッケージでも、統計量・cov_typeごとに実測乖離が大きく異なる場合は、許容誤差を
 分けてよい」に従う）。
 
@@ -47,7 +46,7 @@ DATA_DIR = Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"
 # 程度）。testing-policy.md「許容誤差」の基本方針（相対誤差1e-8）と揃える。
 RTOL_STRICT = 1e-8
 
-# HACのみ実測最大相対誤差約4.3%（wls-implementation-notes.md参照）。
+# HACのみ実測最大相対誤差約4.3%（wls-spec.md「テスト」参照）。
 RTOL_HAC = 5e-2
 
 

@@ -146,8 +146,8 @@ def test_cluster_matches_statsmodels(fixtures):
 def test_401ksubs_matches_statsmodels(fixtures):
     """実データ（401ksubs、fsize==1）でのWLSベンチマーク。
 
-    回帰式・重み定義は`docs/planning/specs/wls-implementation-notes.md`
-    「8. テスト」参照（`nettfa ~ inc + incsq + age + agesq + male + e401k`、
+    回帰式・重み定義は`docs/spec/wls-spec.md`
+    「テスト」参照（`nettfa ~ inc + incsq + age + agesq + male + e401k`、
     重み=1/inc）。
     """
     pytest.importorskip("wooldridge")

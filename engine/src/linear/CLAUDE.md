@@ -1,11 +1,11 @@
 # engine/src/linear/ 実装ノート（OLS/WLS）
 
-このファイルは `engine/src/linear/` 配下のファイルを読み書きするときだけ自動ロードされる。ここに書くのは「削除するとClaudeが同じ間違いを繰り返す」レベルの既知の罠のみ。設計の背景・数式の導出は`docs/spec/ols-spec.md`・`docs/planning/specs/wls-implementation-notes.md`・`wls-standard-errors.md`が正本（このファイルはその要約ではなく差分の索引）。
+このファイルは `engine/src/linear/` 配下のファイルを読み書きするときだけ自動ロードされる。ここに書くのは「削除するとClaudeが同じ間違いを繰り返す」レベルの既知の罠のみ。設計の背景・数式の導出は`docs/spec/ols-spec.md`・`docs/spec/wls-spec.md`が正本（このファイルはその要約ではなく差分の索引）。
 
 ## 踏んだ罠（再発防止）
 
 - **クラスターのグループ化は`BTreeMap`、`HashMap`は使わない**: `HashMap`はプロセスごとのハッシュシードで反復順序が変わり、浮動小数点加算の非結合性により`fit()`を複数回呼ぶと標準誤差が1 ULP程度ぶれる非決定性バグを起こす（WLSで発覚、`fit_cluster_std_errors_are_deterministic_across_repeated_fits`で固定。詳細は`ols-spec.md`「標準誤差」クラスターの節）。クラスター系の実装を今後増やす場合も同じ罠がある。
-- **`WlsEstimator`のR²・調整済みR²・log_likelihood（→AIC/BIC）は、変換後データに対する単純なOLS計算をそのまま使ってはいけない**。重み付き平均TSS・変換のヤコビアン補正項（`+0.5*Σlog(w_i)`）が必要（`wls-standard-errors.md`5章）。`weighted_fit_statistics`関数（`WlsEstimator`層）で計算し直している。将来、重み付け系の手法（GLS等）を追加する際も同種の見落としに注意する。
+- **`WlsEstimator`のR²・調整済みR²・log_likelihood（→AIC/BIC）は、変換後データに対する単純なOLS計算をそのまま使ってはいけない**。重み付き平均TSS・変換のヤコビアン補正項（`+0.5*Σlog(w_i)`）が必要（`wls-spec.md`「適合度統計量」）。`weighted_fit_statistics`関数（`WlsEstimator`層）で計算し直している。将来、重み付け系の手法（GLS等）を追加する際も同種の見落としに注意する。
 - **係数計算は列ピボットQR（`col_piv_qr` + `solve_lstsq`）、`X'Xβ=X'y`をCholeskyで解く方式は使わない**（`X'X`の条件数が2乗になり不利、QRなら特異性検出と計算を同時に行える）。ただし`xtx_inverse`（標準誤差計算用の`(X'X)⁻¹`）は`X'X`自体のCholesky分解で求めている（QR分解の`R`因子から導出する案は実測で高速化しないことを確認済み、詳細は`ols-performance-notes.md`）。
 - **クラスター数`G`と傾き係数の数`q`の関係（G≤qで構造的に特異）**: クラスターロバスト共分散`Ŝ`はG個のランク1行列の和なので`rank(Ŝ)≤G`。`wald_f_test`が使う`q×q`部分行列がG<qで特異になり`fit()`全体が`ComputationError`になる。「クラスタ数境界の成功パス」のテストを書くときはqをG以下に保つ。他のクラスターロバストSEを持つ手法（IV等）でも同じ制約が当てはまる。
 - **HACの行列積は`Par::Seq`を明示指定**: `k×k`という小さい出力サイズではfaerの既定並列実行のディスパッチオーバーヘッドが計算本体を上回り、素朴な並列化は逐次より遅くなる（実測n=10,000,k=2で6倍悪化）。この罠は「小さい行列の頻繁な積」全般に当てはまるため、他手法で同種の計算を書くときも並列化の要否を実測してから決める。

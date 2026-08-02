@@ -1,6 +1,10 @@
-# engine_pybind/src/nonlinear/ 実装ノート（Logit）
+# engine_pybind/src/nonlinear/ 実装ノート（Logit/Probit）
 
-このファイルは `engine_pybind/src/nonlinear/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景は`docs/planning/specs/nonlinear-api-design.md`・`nonlinear-implementation-notes.md`・`logit-implementation-notes.md`が正本。ここは差分の索引のみ。
+このファイルは `engine_pybind/src/nonlinear/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景は`docs/planning/specs/nonlinear-api-design.md`・`nonlinear-implementation-notes.md`・`logit-implementation-notes.md`・`probit-implementation-notes.md`が正本。ここは差分の索引のみ。
+
+## Probitの実装状況（Issue #81/#82で実装済み）
+
+`probit.rs`は`logit.rs`とほぼ完全に同型のパターン（`ProbitOptions`/`ProbitResult`/`build_probit_input`/`fit`）。`ProbitResult`は現時点で`estimator`フィールドを持たない（`predict()`/`pred_table()`/`marginal_effects()`のpymethods未実装、Issue #83相当で追加予定。下記「`LogitResult`の設計: `estimator`フィールド」節と同じ設計をProbit側でも踏襲する想定）。`mle_error_to_pyerr`は最初からLogit/Probit共有で実装されているため、Probit追加時の変更は不要だった。
 
 ## バージョン固定・polars特有の差異
 

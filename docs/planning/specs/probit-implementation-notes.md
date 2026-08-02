@@ -283,3 +283,12 @@ Issue #77/#78/#79で`common.rs`へ新規追加したコード（`goodness_of_fit
 - クラスター系: `cluster_col`指定時のグループキー抽出、未指定時に`groups=None`のまま返す（`engine`側の`MissingClusterColumn`検証に委ねる設計）
 
 `cargo build -p engine_pybind`/`cargo clippy -p engine_pybind --all-targets -- -D warnings`/`cargo fmt --check`/`cargo test -p engine_pybind`すべて成功（43件pass、変更前31件から+12、デグレなし）。
+
+## engine_pybind: engine呼び出し・`fit_probit`登録（Issue #82で実装済み）
+
+`build_probit_input`の後段として`engine_pybind/src/nonlinear/probit.rs`に`pub(crate) fn fit(data: PyDataFrame, y, x, options: &ProbitOptions) -> PyResult<ProbitResult>`を追加した。`build_probit_input`→`engine::nonlinear::probit::ProbitEstimator::fit`（`MleError`は`mle_error_to_pyerr`で変換）→`ProbitResult`構築、という流れ（`logit.rs`の`fit`と完全に同じ構造）。`engine_pybind/src/lib.rs`に`#[pyfunction] fit_probit`を追加してこれに委譲し、`#[pymodule]`に`fit_probit`/`ProbitOptions`/`ProbitResult`を登録した。Issue #81時点で残していた`#[allow(dead_code)]`（`build_probit_input`/`parse_cov_type`/`parse_method`）は、これらが実際に呼ばれるようになったため全て削除した。
+
+- **`mle_error_to_pyerr`は変更不要だった**: Issue本文は「共通化できる可能性がある」と示唆していたが、`nonlinear/common.rs`の`mle_error_to_pyerr`は既にLogit実装時（Issue #66）の時点でLogit/Probit/Tobit共有の`engine::nonlinear::common::MleError`全バリアント（`InvalidBinaryY`を含む）を対象にした実装になっており、Probit固有の変更は不要だった。
+- **数値検証**: `engine`のユニットテスト`fit_cov_type_opg_hc0_hc1_match_independently_recomputed_values`・`fit_cov_type_cluster_matches_independently_recomputed_values`と同じ入力（`y=[0,1,0,1]`、`x1=[10,20,30,40]`、`x2=[-5,2,8,-1]`、cluster`=[a,a,b,b]`、`tol=1e-8`）で、一時的なRustサンプル（`engine/examples/probit_oracle.rs`、コミット対象外、検証後削除）から`params`/`std_errors`のオラクル値を出力させ、`uv run maturin develop --release`でビルドした`fit_probit`をPythonから同じデータで呼び出した結果と突き合わせ、classical/opg/hc0/hc1/clusterの全cov_typeで許容誤差1e-9で一致することを確認した（完了条件通り）。
+- **テストは追加していない（Logitの前例通り）**: `fit`/`fit_probit`は`PyDataFrame`を引数に取るため、`build_probit_input`と異なりGILなしの`#[cfg(test)]`では直接呼べない（`engine_pybind/src/nonlinear/CLAUDE.md`「テストの制約: `PyDataFrame`引数の関数はcargo testから直接呼べない」参照）。
+- **`uv run pytest tests/api_tests`（398件）で既存OLS/WLS/Logit機能への回帰が無いことも確認済み**。

@@ -11,6 +11,7 @@ use errors::{ComputationError, ValidationError};
 use linear::ols::{OLSOptions, OLSResult};
 use linear::wls::WLSResult;
 use nonlinear::logit::{LogitOptions, LogitResult, MarginalEffectsResult};
+use nonlinear::probit::{ProbitOptions, ProbitResult};
 
 /// Entry point for OLS estimation.
 ///
@@ -84,6 +85,29 @@ fn fit_logit(
     nonlinear::logit::fit(data, y, x, &options)
 }
 
+/// Entry point for Probit estimation.
+///
+/// Parameters
+/// ----------
+/// data : polars.DataFrame
+///     The input data. Must contain the `y`, `x`, and (if specified) cluster columns.
+/// y : str
+///     Column name of the dependent variable. Must be coded as 0.0 or 1.0
+///     (binary outcome); any other value raises `ValidationError`.
+/// x : list[str]
+///     Column names of the independent variables.
+/// options : ProbitOptions
+///     Estimation options.
+#[pyfunction]
+fn fit_probit(
+    data: PyDataFrame,
+    y: String,
+    x: Vec<String>,
+    options: ProbitOptions,
+) -> PyResult<ProbitResult> {
+    nonlinear::probit::fit(data, y, x, &options)
+}
+
 #[pymodule]
 fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fit_ols, m)?)?;
@@ -95,6 +119,9 @@ fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<LogitOptions>()?;
     m.add_class::<LogitResult>()?;
     m.add_class::<MarginalEffectsResult>()?;
+    m.add_function(wrap_pyfunction!(fit_probit, m)?)?;
+    m.add_class::<ProbitOptions>()?;
+    m.add_class::<ProbitResult>()?;
     m.add("ValidationError", m.py().get_type::<ValidationError>())?;
     m.add("ComputationError", m.py().get_type::<ComputationError>())?;
     Ok(())

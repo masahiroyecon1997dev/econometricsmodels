@@ -2098,6 +2098,144 @@ mod tests {
         );
     }
 
+    /// 同じ完全な多重共線性のデータセットを`bfgs`/`lbfgs`で最適化した場合の
+    /// `SingularHessian`伝播経路（`LogitEstimator`の対応するテスト・Issue #129と同じ理由）:
+    /// `newton`は`newton_step`内の特異性検出（最適化のステップ計算中）で検出するが、
+    /// `bfgs`/`lbfgs`は`newton_step`を一切経由しない（準ニュートン法は内部の近似逆Hessianで
+    /// 降下方向を決めるため、モデルの解析的Hessianの特異性に依存しない）。この場合、
+    /// 収束後に`observed_information_cov_params`（`neg_hessian_inverse`）が呼ぶ
+    /// `ensure_well_conditioned_symmetric_matrix`（固有値ベースの悪条件検出）が、
+    /// `bfgs`/`lbfgs`にとって唯一の特異性検出経路になる。Issue #80（カバレッジ確認）で、
+    /// Logit側で既に判明済みのギャップパターンとして追加（`probit-implementation-notes.md`
+    /// 「既知のテストギャップ」参照）。
+    #[test]
+    fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_bfgs_and_lbfgs()
+     {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
+
+        for method in [Method::Bfgs, Method::Lbfgs] {
+            let input = ProbitInput::from_columns(
+                &y,
+                &x_columns,
+                vec!["x1".to_string(), "x2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
+
+            let result =
+                ProbitEstimator::fit(input, method, 100, 1e-6, true, CovType::Classical, 0.95);
+            assert!(
+                matches!(result, Err(MleError::SingularHessian)),
+                "method={:?}, result={:?}",
+                method,
+                result
+            );
+        }
+    }
+
+    /// `sandwich_cov_params`（`cov_type=Hc0`/`Hc1`）も内部で`neg_hessian_inverse`を
+    /// 呼ぶため、`Classical`と同じ完全な多重共線性のデータセットで`SingularHessian`に
+    /// なるはずだが、`fit()`の`CovType::Hc0`/`Hc1`分岐の`?`（エラー伝播）を通るテストが
+    /// 無かった（`cargo-llvm-cov`で判明。`LogitEstimator`の対応するテストと同じ理由、
+    /// Issue #80）。
+    ///
+    /// `method=Newton`は使わない: `newton_step`内の特異性検出（ピボット付きQR）が
+    /// `cov_type`の分岐に到達する前（最適化中）に`SingularHessian`を返してしまうため
+    /// （上の`_with_bfgs_and_lbfgs`テストと同じ理由）。
+    #[test]
+    fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_hc0_and_hc1() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
+
+        for cov_type in [CovType::Hc0, CovType::Hc1] {
+            let input = ProbitInput::from_columns(
+                &y,
+                &x_columns,
+                vec!["x1".to_string(), "x2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
+
+            let result =
+                ProbitEstimator::fit(input, Method::Bfgs, 100, 1e-6, true, cov_type.clone(), 0.95);
+            assert!(
+                matches!(result, Err(MleError::SingularHessian)),
+                "cov_type={:?}, result={:?}",
+                cov_type,
+                result
+            );
+        }
+    }
+
+    /// `cov_type=Opg`のエラー伝播（`opg_cov_params`が返す`SingularOpgMatrix`。
+    /// `SingularHessian`とは別のエラー型）も、Hc0/Hc1と同じ完全な多重共線性データセットで
+    /// 検証する。`scores_i=λᵢxᵢ`かつ`x2=2*x1`のため、スコア行列も`x1`と同じ構造的な
+    /// 多重共線性を持ち（列2=2×列1）、OPG行列`Σsᵢsᵢ'`も特異になる
+    /// （`LogitEstimator`の対応するテストと同じ理由、Issue #80）。
+    #[test]
+    fn fit_returns_singular_opg_matrix_error_for_perfectly_collinear_design_matrix() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
+        let input = ProbitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = ProbitEstimator::fit(input, Method::Bfgs, 100, 1e-6, true, CovType::Opg, 0.95);
+        assert!(
+            matches!(result, Err(MleError::SingularOpgMatrix)),
+            "{:?}",
+            result
+        );
+    }
+
+    /// `cov_type=Cluster`のエラー伝播（`cluster_cov_params`も内部で`neg_hessian_inverse`を
+    /// 呼ぶため`SingularHessian`）も、Hc0/Hc1と同じ完全な多重共線性データセットで検証する
+    /// （`LogitEstimator`の対応するテストと同じ理由、Issue #80）。
+    #[test]
+    fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_cluster() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
+        let groups = vec![
+            "g1".to_string(),
+            "g1".to_string(),
+            "g2".to_string(),
+            "g2".to_string(),
+        ];
+        let input = ProbitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = ProbitEstimator::fit(
+            input,
+            Method::Bfgs,
+            100,
+            1e-6,
+            true,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        );
+        assert!(
+            matches!(result, Err(MleError::SingularHessian)),
+            "{:?}",
+            result
+        );
+    }
+
     #[test]
     fn fit_returns_non_convergence_error_when_max_iter_is_too_small_and_raise_is_true() {
         let result = ProbitEstimator::fit(

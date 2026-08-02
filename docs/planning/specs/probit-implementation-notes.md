@@ -237,3 +237,30 @@ Logitの対応するテスト（Issue #63で5種）と同数・同構成:
 
 - **`common.rs::pred_table`に`debug_assert_eq!(predicted.len(), y.nrows())`を追加**: `enumerate().take(n)`が契約違反（長さ不一致）時にサイレントに不正確な集計を返すのを防ぐ防御（実際には長さが異なることはない内部契約だが、テスト実行時に即座に検知できるようにするため）。
 - 上記「実測クラスカウントの`threshold`不変性」の配線テストをProbit側にも追加。
+
+## engine単体テストのカバレッジ（Issue #80で確認・実装済み）
+
+`cargo-llvm-cov -p engine --lib`で実測。OLS/Logitと同じ方針（100%は目指さず、理論上到達不能な防御的エラーパスはドキュメント化して受け入れる、`.claude/rules/testing-policy.md`「engine（Rust）のカバレッジ方針」参照）。
+
+**実測結果（199テスト時点、修正前）**: `nonlinear/probit.rs` Region 97.80%・Line 98.69%・Function 100.00%。`--show-missing-lines`で未カバー行を確認したところ、`mod tests`（901行目）より前（本体コード）にあったのは`fit()`の`CovType::Hc0`/`Hc1`分岐内の`sandwich_cov_params(...)?`（エラー伝播、616・628行目）のみで、それ以外はすべてテストコード内（`assert!(cond, "fmt {}", expr)`のフォーマット引数がテスト成功時は評価されないことによる既知のノイズ、Logit側の`nonlinear-implementation-notes.md`・`logit-implementation-notes.md`「Issue #64」節で確認済みと同じパターン）。
+
+### 実データで起こりうる真のギャップ（テスト追加で対応済み）
+
+`probit-implementation-notes.md`「既知のテストギャップ」節（Issue #75/#76時点で記録済み）で予告していた通り、Logit側のIssue #64（コミット`25c4529`）で発見済みの`cov_type`ごとの特異行列エラー伝播ギャップを、ほぼそのままProbit版として移植した:
+
+- **`fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_bfgs_and_lbfgs`**: `Method::Newton`は`newton_step`内の特異性検出（ピボット付きQR）が最適化中に検出してしまうため、`bfgs`/`lbfgs`（`newton_step`を経由しない準ニュートン法）でのみ通る`observed_information_cov_params`経由の検出経路を検証。
+- **`fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_hc0_and_hc1`**: `sandwich_cov_params`内の`neg_hessian_inverse`経由。上記と同じ理由で`Method::Bfgs`を使う。
+- **`fit_returns_singular_opg_matrix_error_for_perfectly_collinear_design_matrix`**: `opg_cov_params`が返す別のエラー型`SingularOpgMatrix`（`x2=2*x1`によりスコア行列`sᵢ=λᵢxᵢ`も構造的に多重共線性を持ち、OPG行列`Σsᵢsᵢ'`も特異になる）。
+- **`fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_cluster`**: `cluster_cov_params`も内部で`neg_hessian_inverse`を呼ぶため`SingularHessian`。
+
+いずれもデータセット（`x2=2*x1`の完全な多重共線性）・アサーション構造はLogit版と同一。Probitの`W=diag(λᵢ(λᵢ+zᵢ))`はLogitの`W=diag(pᵢ(1-pᵢ))`と式は異なるが、`X'WX`の特異性は設計行列`X`自体の構造的な多重共線性（`W`の対角成分の値によらず`X`の列が線形従属である限り常に特異）に由来するため、同じデータセットで同様に検出できる。
+
+修正後の`nonlinear/probit.rs`カバレッジ: Region 97.93%・Line 98.88%・Function 100.00%（Logit側のRegion 97.82%・Line 98.85%と同水準）。
+
+### `common.rs`・`logit.rs`側の再確認
+
+Issue #77/#78/#79で`common.rs`へ新規追加したコード（`goodness_of_fit`/`marginal_effects_from_w_s`/`pred_table`）に起因する新しいカバレッジギャップが無いことを確認した。`common.rs`・`logit.rs`の未カバー行は、いずれも既存のLogit Issue #64で「理論上到達不能な防御的エラーパス」としてdocコメント付きで受け入れ済みのもの（`convert_optimizer_error`の`Err(other)`分岐、`FaerNewton::name`等）のみだった。
+
+### 完了条件
+
+カバレッジ実測結果（修正前後の数値）・未カバー箇所の扱い（実データで起こりうるギャップ4件はテスト追加、それ以外は理論上到達不能または既存の許容済みパターンとして受け入れ）を本節にまとめた。

@@ -264,3 +264,22 @@ Issue #77/#78/#79で`common.rs`へ新規追加したコード（`goodness_of_fit
 ### 完了条件
 
 カバレッジ実測結果（修正前後の数値）・未カバー箇所の扱い（実データで起こりうるギャップ4件はテスト追加、それ以外は理論上到達不能または既存の許容済みパターンとして受け入れ）を本節にまとめた。
+
+## engine_pybind: データ抽出・ProbitOptions/ProbitResult pyclass定義（Issue #81で実装済み）
+
+`engine_pybind/src/nonlinear/probit.rs`を新設した（`mod.rs`に`pub mod probit;`を追加）。Logitの対応するIssue（#65、コミット`ee813b0`）とほぼ完全に同型のパターンで実装した。ただし現在の`logit.rs`はさらに後続issue（#66・#67・#133・#134）で進化しているため、着手前にその変遷を確認した上で、Issue #81本文が明示する`ProbitResult`のフィールド一覧（`estimator`フィールドを含まない、スカラー・ベクトルのみ）がIssue #65時点のスコープと一致することを確認して踏襲した。
+
+- **スコープの区切り方（Logitの前例をそのまま踏襲）**: `ProbitEstimator::fit()`の呼び出し・`ProbitResult`の実際の構築・`#[pymodule]`への登録（`lib.rs`の変更）はIssue #82（Logitの#66に相当）に送り、本Issueでは行わない。データ抽出・バリデーション・`engine::nonlinear::probit::ProbitInput`構築までを行う`pub(crate) fn build_probit_input(df: &DataFrame, y: String, x: Vec<String>, options: &ProbitOptions) -> PyResult<(ProbitInput, EngineCovType, EngineMethod)>`を切り出した。
+- **`ProbitOptions`はLogitOptionsとフィールド単位で完全に同一**（`nonlinear-api-design.md`7章、Logit/Probitが同じオプション面を共有する設計通り）。`start_params`は同じ理由（engine側`ProbitEstimator::fit`が未対応）で除外。
+- **バリデーション・エラー変換は既存の共有インフラをそのまま再利用**: `engine_pybind/src/validation.rs`の`validate_x_non_empty`/`validate_no_duplicate_roles`/`validate_no_duplicate_x`/`validate_no_const_collision`、`nonlinear/common.rs`の`mle_error_to_pyerr`。Logit実装時（Issue #65→#134）に発見・解消済みの問題（`cargo test -p engine_pybind`が実行できない構造的制約、y/x列間の行数不一致チェックが理論上到達不能と判明し削除、バリデーションの重複実装をvalidation.rsへ集約）はいずれもクレート全体・共有インフラに対する修正のため、Probit側で再発することはない（そのまま恩恵を受ける）。`parse_cov_type`/`parse_method`も現在の`logit.rs`の対応する実装（`n: usize`引数を持たない`Option::map().transpose()?`パターン）をそのまま踏襲した。
+- **`#[allow(dead_code)]`を`parse_cov_type`/`parse_method`/`build_probit_input`に付与**: Issue #81時点では`#[cfg(test)] mod tests`以外に呼び出し元が無いため。Logit実装時（Issue #65）と全く同じ理由・同じ対応方針（`engine_pybind`はPython拡張モジュール専用の薄いバインディング層でありクレート外にRust APIを公開する設計ではないため`pub`化での回避は見送り）。Issue #82で`fit`が実際に呼ぶようになった時点でこれらの属性は不要になる（削除すること）。
+
+### テスト
+
+`engine_pybind/src/nonlinear/probit.rs`の`#[cfg(test)] mod tests`に、`build_probit_input`の検証をLogitの対応するテスト（12件）と同数・同構成で実装した（`Series`/`DataFrame`を直接組み立てる、`polars::df!`マクロ利用。Pythonインタプリタ（GIL）を起動せずに検証できる設計）。
+
+- 成功パス: 切片あり・切片なしそれぞれでの`ProbitInput`構築、`cov_type`/`method`の正しいパース
+- `ValidationError`パス: 空の`x`、y/xの重複、x内の重複、`"const"`列衝突、存在しない列、欠損値、未知の`cov_type`文字列、未知の`method`文字列
+- クラスター系: `cluster_col`指定時のグループキー抽出、未指定時に`groups=None`のまま返す（`engine`側の`MissingClusterColumn`検証に委ねる設計）
+
+`cargo build -p engine_pybind`/`cargo clippy -p engine_pybind --all-targets -- -D warnings`/`cargo fmt --check`/`cargo test -p engine_pybind`すべて成功（43件pass、変更前31件から+12、デグレなし）。

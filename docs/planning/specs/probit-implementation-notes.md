@@ -314,3 +314,52 @@ Issue #83は当初「python_packageラッパー実装のみ」（依存: #82）�
 `tests/api_tests/test_probit.py`を新設した（`test_logit.py`と同型、36件）。統計量・API構造・`ValidationError`/`ComputationError`の各パスを検証するスモークテストのみで、statsmodels/R glmとの厳密な数値照合はIssue #84で別途実施する。`SeparationSuspected`検出（Issue #138由来）は`engine::nonlinear::common::run_solver`（Logit/Probit共有の最適化ループ）に実装されているため、Probit側でも同じ准完全分離DGPで`ComputationError`になることを確認した。
 
 `uv run ruff check .`/`uv run ruff format --check .`（リポジトリ全体）、`uv run maturin develop --release`でのビルド後`uv run pytest tests/api_tests`（434件、398件+36件、既存機能への回帰なし）すべて成功（完了条件通り）。
+
+## statsmodels/R glmとの数値照合ベンチマーク作成（Issue #84で実装済み）
+
+`/test-new`スキル・`.claude/skills/reference-benchmark/`の手順に沿い、Logitの`benchmark/nonlinear/`資産（Issue #68）をProbit向けに拡張した。合成データ生成・`run_statsmodels_benchmark.py`・`run_glm_crosscheck_benchmark.R`はLogit/Probitで共有できるロジックが大半だったため、重複実装ではなく一般化する方針をユーザー確認の上で採用した（`--weight-col`でOLS/WLSを共有する`linear`系統の`run_statsmodels_benchmark.py`と同じ設計）。
+
+### 合成データセット: `generate_logit_datasets.py`を`generate_binary_choice_datasets.py`へ一般化（ユーザー確認済み）
+
+シナリオ構成（baseline/small_n/moderate_multicollinearity/high_condition_number/near_separation/perfect_multicollinearity/scale_variance）とX生成ロジックはリンク関数に一切依存せず完全に共有できることが分かったため、`generate_logit_dataset(scenario, ...)`に`link: "logit"|"probit"`引数を追加した`generate_binary_choice_dataset(scenario, link, ...)`へ一般化し、ファイルも`generate_binary_choice_datasets.py`にリネームした（`generate_logit_dataset`/`generate_probit_dataset`という名前付きエイリアスは既存呼び出し元（`freeze_datasets.py`）との互換のため維持）。リファクタリング後、既存の`logit_*.csv`（7シナリオ）が旧実装とバイト単位で完全に一致することを確認済み（既存のフィクスチャJSON・凍結CSVへの影響が無いことの検証）。
+
+**`near_separation`の較正値はリンク関数ごとに異なる**（重要な実装判断）: 標準正規分布のΦはロジスティック分布のΛより裾が薄く、同じベータ値でもΦの方が0/1に速く飽和するため、Logitと同じ`beta1=20`をProbitにそのまま使うと収束後の標準誤差が過大（またはengine・statsmodelsで不安定）になる懸念があった。実測較正の結果、Probitは`beta1=10`で「収束するが標準誤差が大きく膨らむ」という同種の挙動になることを確認した（`beta1=6/8/10/12`で試行し、engine・statsmodelsのclassical SEが完全一致することも確認済み）。
+
+### `cov_type="hc1"`/`"opg"`の既知の欠落はLogitと同様
+
+statsmodelsのdiscrete model（`Probit.fit`）でも、Logitと全く同じ欠落が実機確認された: `hc1`はn/(n-k)小標本補正が未実装でHC0と同一値を返す（`hasattr(ProbitResults, "cov_HC1")`が`False`）、`opg`は"cov_type not recognized"エラーになる。対処もLogitと同じ（`hc1`はRを主リファレンスに、`opg`は`model.score_obs(params)`から手計算）。
+
+### R側のクロスチェックで発覚した重要な問題: `glm()`の既定共分散は非正準リンクで「期待情報行列」を返す（ユーザー確認不要、実装で対応済み・重要）
+
+Probitのクロスチェック値生成時、`classical`で最大約2-3%・`hc0`/`hc1`で最大約8%という無視できない乖離が発覚した（`opg`は誤差~1e-5と正常）。原因を`numDeriv::hessian()`による数値微分Hessianとの比較で特定した:
+
+- R標準の`glm()`は`vcov(model)`（および`sandwich::vcovHC`/`vcovCL`が内部で使う`bread.glm()`）を、IRLS（Fisher scoring）の作業重みに基づく**期待情報行列**で計算する。
+- **Logit（binomial族の正準リンク）では期待情報行列と観測情報行列（真の対数尤度のHessian）が理論上一致する**ため、この違いは表面化しなかった（Issue #68時点で発覚しなかった理由）。
+- **Probit（非正準リンク）では両者が一致しない**。本実装（`nonlinear/probit.rs`）・statsmodelsはどちらも観測情報行列（`Σ=-H⁻¹`、`H`の重みは`λᵢ(λᵢ+zᵢ)`）を使うため、Rの`glm()`の既定`vcov()`をそのまま参照値にすると本実装が「間違っている」ように見えるが、実際にはRの既定値が異なる量を計算しているだけだった（`numDeriv`の数値微分Hessianが本実装の`classical`標準誤差と機械精度で一致することを確認し、本実装側が正しいことを検証済み）。
+
+対処として`run_glm_crosscheck_benchmark.R`に`observed_hessian_weights()`/`observed_bread()`を新設し、本実装と同じ解析式（Logit: `pᵢ(1-pᵢ)`、Probit: `λᵢ(λᵢ+zᵢ)`）で観測情報行列を明示的に計算し、`sandwich::sandwich(bread.=observed_bread, meat.=...)`でclassical/hc0/hc1/clusterすべてに適用するよう変更した。Logitでは正準リンクの性質によりこの変更前後で数学的に完全に同じ値になることを実機確認済み（凍結済みの`logit_crosscheck.json`と新実装の出力が一致、既存フィクスチャの再生成は不要と判断）。`scale_variance`シナリオでは既存の`opg`ブランチと同じ理由（列スケール差による見かけ上の特異性）で`observed_bread()`も列正規化してから反転する対応が必要だった（同じ`Σ=D⁻¹(D⁻¹MD⁻¹)⁻¹D⁻¹`の恒等式を使用）。
+
+この発見はLogitの「statsmodelsの`hc1`未実装」（Issue #68）と同種の、ベンチマーク作成時に初めて顕在化する参照実装側の落とし穴であり、独立した検証（`numDeriv`によるHessianの数値微分）で原因を特定してから対処した。
+
+### near_separationの`tol`妥当性検証: Logitと同じ結論
+
+`beta1=10`のnear_separationデータで、既定`tol=1e-6`とstatsmodelsとの相対誤差は最大約4.4e-8（`RTOL=1e-8`の基本方針をわずかに超過）、`tol=1e-8`まで締めると約6.6e-11まで改善することを実測確認した。Logit（Issue #68）と同じ結論（既定値`1e-6`は変更しない、near_separationの数値比較テストのみ`tol=1e-8`を明示指定）を踏襲した（`nonlinear-implementation-notes.md`「収束判定の`tol`」に追記済み）。
+
+### テスト・フィクスチャ
+
+- `tests/api_tests/fixtures/benchmarks/probit.json`（statsmodels主リファレンス）・`probit_crosscheck.json`（Rクロスチェック）を新規作成。`tests/api_tests/fixtures/benchmarks/data/probit_*.csv`（7シナリオ）・`probit_true_beta.json`も`freeze_datasets.py`で新規凍結。
+- `tests/api_tests/test_probit_fixtures.py`（26件）・`test_probit_crosscheck.py`（32件）を新規作成。`test_logit_fixtures.py`/`test_logit_crosscheck.py`と完全に同型（件数もLogitと一致）。
+- 許容誤差は`test_probit_fixtures.py`（statsmodels）に`RTOL=1e-8`、`test_probit_crosscheck.py`（R）に基本方針`RTOL=2e-4`を適用（Logitと同じ基本方針）。個別に緩めた項目（Logitと同じ理由・同じ性質の乖離）:
+  - 限界効果の`std_err`: `RTOL=1e-3`（実測最大~7e-4、Logitの`5e-3`より小さい実測値だがマージンを持たせた）
+  - p値: `ATOL=5e-5`（実測最大絶対誤差~2.9e-5）
+  - Wooldridge mrozのクラスターロバストSE（`cluster_col="city"`、G=2）: `RTOL=2e-3`（実測最大相対誤差~1.1e-3、const）。合成データのクラスターケース（G=2/G=10いずれも~5e-5水準）より大きいが、実データ・クラスタ数境界（G=2）・相関の強い説明変数（exper/expersq等）が重なる境界的なケースであるため個別の許容誤差とした（`testing-policy.md`「許容誤差」の「統計量・cov_typeごとに実測乖離が大きく異なる場合は許容誤差を分けてよい」方針通り）。
+- Wooldridge実データは`mroz`（Logitと同じ、労働参加モデル）を採用。probit_logitは経済学の教科書でも定番の比較対象であり、同じデータ・同じformulaを使うことが自然と判断した。
+
+`uv run maturin develop --release`でのビルド後、`uv run ruff check .`/`uv run ruff format --check .`（リポジトリ全体）、`uv run pytest tests/api_tests`（492件、434件+26件+32件、既存機能への回帰なし）すべて成功。
+
+### testing-completeness-reviewerレビューで対応した指摘
+
+must-fixなし。should-fix 2件のうち1件を対応、1件は対応見送り（理由下記）。
+
+- **対応済み**: `run_glm_crosscheck_benchmark.R`の`observed_bread()`が、logit（正準リンク）では`glm()`既定の`bread()`と数学的に一致するという不変条件を、目視確認のみに頼っていた（将来このスクリプトの計算式を変更した際に、Logit側のクロスチェック値が気づかれずに壊れるリスクが残っていた）。`link == "logit"`のときのみ`stopifnot(isTRUE(all.equal(bread_obs, bread(model), tolerance = 1e-6)))`を追加し、自動検証するようにした。フィクスチャの再生成結果がバイト単位で不変であることを確認済み（副作用なし）。
+- **対応見送り**: `test_probit_fixtures.py`/`test_probit_crosscheck.py`が`method`（bfgs/lbfgs）をパラメータ化しておらず、常にデフォルト（Newton）でのみリファレンス実装と数値比較している点。ただしこれは`test_logit_fixtures.py`/`test_logit_crosscheck.py`（Issue #68）から完全に踏襲した既存の設計であり、Probitで新たに生じたギャップではない。レビュー自体も「Logit/Probit双方に一括で追加するかどうかをユーザーに確認してから着手するのが望ましい」と明記しており、Issue #84単体のスコープ外と判断した。

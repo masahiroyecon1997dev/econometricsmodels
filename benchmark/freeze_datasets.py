@@ -12,8 +12,10 @@
 手動で再実行する）。
 
 `generate_synthetic_datasets.py`（連続y、OLS/WLS用）に加え、`nonlinear/
-generate_logit_datasets.py`（2値y、真のlogit DGP、Logit/Probit用）も同様に
-`logit_<scenario>.csv`として固定する（Issue #68）。
+generate_binary_choice_datasets.py`（2値y、真のlogit/probit DGP、Logit/Probit用。
+元は`generate_logit_datasets.py`という名前でLogit専用だったが、Probit追加
+（Issue #84）にあたり`link`引数で一般化した）も同様に`logit_<scenario>.csv`・
+`probit_<scenario>.csv`として固定する（Logit: Issue #68、Probit: Issue #84）。
 
 **Wooldridgeデータセットはここでは固定しない**（`wooldridge`パッケージ自体は
 MITライセンスだが、同梱される実データの著作権はWooldridge『Introductory
@@ -36,9 +38,12 @@ from pathlib import Path
 
 sys.path.insert(
     0, str(Path(__file__).resolve().parent / "nonlinear")
-)  # benchmark/nonlinear/ を import path に追加（generate_logit_datasets）
+)  # benchmark/nonlinear/ を import path に追加（generate_binary_choice_datasets）
 
-from generate_logit_datasets import generate_logit_dataset  # noqa: E402
+from generate_binary_choice_datasets import (  # noqa: E402
+    generate_logit_dataset,
+    generate_probit_dataset,
+)
 from generate_synthetic_datasets import generate_dataset  # noqa: E402
 
 # generate_ols_fixtures.py / generate_wls_fixtures.py のNUMERIC_SCENARIOSに
@@ -57,7 +62,7 @@ SYNTHETIC_SCENARIOS = [
 ]
 
 # generate_logit_fixtures.pyのNUMERIC_SCENARIOSに、エラーパス確認用の
-# perfect_multicollinearityを加えた全シナリオ（generate_logit_datasets.py参照）。
+# perfect_multicollinearityを加えた全シナリオ（generate_binary_choice_datasets.py参照）。
 LOGIT_SCENARIOS = [
     "baseline",
     "small_n",
@@ -67,6 +72,11 @@ LOGIT_SCENARIOS = [
     "perfect_multicollinearity",
     "scale_variance",
 ]
+
+# generate_probit_fixtures.pyのNUMERIC_SCENARIOSに、エラーパス確認用の
+# perfect_multicollinearityを加えた全シナリオ。LOGIT_SCENARIOSと同じシナリオ構成
+# （generate_binary_choice_datasets.py参照、Issue #84）。
+PROBIT_SCENARIOS = list(LOGIT_SCENARIOS)
 
 # cluster_g2ケース（Issue #100）専用。k=1だとrng呼び出し順序が変わるため
 # baseline（既定k=3）とは別データになる。
@@ -112,6 +122,16 @@ def freeze(output_dir: Path) -> None:
 
     (output_dir / "logit_true_beta.json").write_text(
         json.dumps(logit_true_betas, indent=2)
+    )
+
+    probit_true_betas: dict[str, list[float]] = {}
+    for scenario in PROBIT_SCENARIOS:
+        df, true_beta = generate_probit_dataset(scenario)
+        df.write_csv(output_dir / f"probit_{scenario}.csv")
+        probit_true_betas[scenario] = true_beta.tolist()
+
+    (output_dir / "probit_true_beta.json").write_text(
+        json.dumps(probit_true_betas, indent=2)
     )
 
     print(f"wrote frozen datasets to {output_dir}")

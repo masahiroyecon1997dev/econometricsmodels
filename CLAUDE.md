@@ -86,7 +86,7 @@ econometricsmodels/
 6. Phase 6（IO手法）: ロジット, Nested Logit, Random Coefficient Logit, シングルエージェントモデル, 静学ゲーム, 動学ゲーム
 7. Phase 7（後回し・時系列）: ARCH, GARCH, VAR
 
-**現在のステータス: Phase 1のOLS・WLSが実装済み（マージ済み）。Logitを実装中。次はProbit。**
+**現在のステータス: Phase 1のOLS・WLSが実装済み（マージ済み）。Logit実装済み。Probitを実装中（Issue #84まで完了、ドキュメント作成のIssue #85が残り）。次はTobit。**
 
 **直近の実装順序（Phase横断で決定済み）**: OLS → WLS → Logit → Probit → Tobit → IV（2SLS/GMM） → FE → RE → GLS。Phaseのグルーピング（上記1〜7）は分類上のものであり、実際の着手順序はこの直近の並びを優先する。
 

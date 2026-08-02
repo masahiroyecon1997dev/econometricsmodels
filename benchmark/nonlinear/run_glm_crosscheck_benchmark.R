@@ -1,17 +1,37 @@
 #!/usr/bin/env Rscript
-# base R glm + sandwich/lmtest/marginaleffectsによるLogitの標準誤差・
+# base R glm + sandwich/lmtest/marginaleffectsによるLogit/Probitの標準誤差・
 # 適合度統計量・限界効果のクロスチェック用スクリプト。
 # `benchmark/linear/run_lm_crosscheck_benchmark.R`（OLS/WLS用）と同じ役割分担
 # （testing-policy.md「リファレンス実装」: 独立実装によるクロスチェック用）。
+# 元々Logit専用だったが、Probit追加（Issue #84）にあたり第5引数`link`
+# （`logit`/`probit`、既定`logit`）で`glm(family=binomial(link=...))`を切り替える
+# よう一般化した（`run_statsmodels_benchmark.py`の`--model`と同じ発想。
+# 以下の各種回避策（opgの手計算・hc1の扱い・marginaleffectsの罠）はいずれも
+# `glm`のfamily/linkに依存しないロジックであることを実機確認済み）。
 #
-# `cov_type="opg"`はstatsmodelsのLogit.fit()がネイティブに受け付けないため
-# （run_statsmodels_benchmark.pyのdocstring参照）、Rでも同様に`sandwich::estfun()`
-# （スコア寄与）から`Σ = (Σᵢ sᵢsᵢ')⁻¹`を手計算する。
+# `cov_type="opg"`はstatsmodelsのLogit.fit()/Probit.fit()がネイティブに受け付けない
+# ため（run_statsmodels_benchmark.pyのdocstring参照）、Rでも同様に
+# `sandwich::estfun()`（スコア寄与）から`Σ = (Σᵢ sᵢsᵢ')⁻¹`を手計算する。
 #
 # `cov_type="hc1"`は、statsmodelsのdiscrete modelがn/(n-k)小標本補正を実装しておらず
 # HC0と同一値を返すバグ的な欠落が発覚したため（run_statsmodels_benchmark.pyの
 # docstring参照）、このスクリプト（`sandwich::vcovHC(type="HC1")`、補正を正しく
 # 適用）がhc1の主リファレンスを担う（ユーザー確認済み）。
+#
+# **classical/hc0/hc1/clusterは「観測情報行列のHessian」を明示的に手計算する**
+# （Probit追加、Issue #84で発覚・修正）: `glm()`の既定の`vcov()`/`vcovHC()`/`vcovCL()`
+# は`bread.glm()`が内部で使うIRLS（Fisher scoring）の作業重み（＝期待情報行列）を
+# ベースにしている。Logit（binomial族の正準リンク）では期待情報行列と観測情報行列
+# （真の対数尤度のHessian）が理論上一致するため問題にならなかったが、Probit（非正準
+# リンク）では一致せず、ベンチマーク作成時に`classical`で最大約2-3%・`hc0`/`hc1`で
+# 最大約8%の乖離として発覚した（本実装・statsmodelsはどちらも観測情報行列を使うため、
+# 一致しないのはRの`glm()`側の计算対象の違いであり、本実装側の不整合ではない。
+# `numDeriv::hessian()`による数値微分Hessianで検証済み）。このため`observed_bread()`
+# （本実装の`nonlinear/probit.rs`・`logit.rs`と同じ解析的Hessian公式、`λᵢ(λᵢ+zᵢ)`
+# （probit）・`pᵢ(1-pᵢ)`（logit）で明示的に計算）を`sandwich::sandwich(bread.=...)`
+# に渡すことで、リンク関数によらず観測情報行列ベースの共分散を一貫して使う。
+# Logitでは正準リンクの性質により`bread.glm()`の値と数学的に完全に一致するため、
+# 既存のLogitクロスチェック値（凍結済みfixture）への影響は無い（実機確認済み）。
 #
 # 限界効果は`marginaleffects`パッケージを使う。`vcov=`引数に上で計算した
 # 共分散行列を直接渡すことで、classical/opg/hc0/hc1/cluster全てのcov_typeで
@@ -20,18 +40,22 @@
 # 事前準備: install.packages(c("sandwich", "lmtest", "jsonlite", "marginaleffects"))
 #
 # 使用例:
-#   Rscript run_glm_crosscheck_benchmark.R data.csv "y ~ x1 + x2 + x3" classical
-#   Rscript run_glm_crosscheck_benchmark.R data.csv "y ~ x1 + x2 + x3" opg
-#   Rscript run_glm_crosscheck_benchmark.R data.csv "y ~ x1 + x2 + x3" hc0
-#   Rscript run_glm_crosscheck_benchmark.R data.csv "y ~ x1 + x2 + x3" cluster cluster_col
+#   Rscript run_glm_crosscheck_benchmark.R data.csv "y ~ x1 + x2 + x3" classical logit
+#   Rscript run_glm_crosscheck_benchmark.R data.csv "y ~ x1 + x2 + x3" opg probit
+#   Rscript run_glm_crosscheck_benchmark.R data.csv "y ~ x1 + x2 + x3" hc0 logit
+#   Rscript run_glm_crosscheck_benchmark.R data.csv "y ~ x1 + x2 + x3" cluster logit cluster_col
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 2) {
-  stop("usage: Rscript run_glm_crosscheck_benchmark.R <data.csv> <formula> [cov_type=classical] [cluster_col]")
+  stop("usage: Rscript run_glm_crosscheck_benchmark.R <data.csv> <formula> [cov_type=classical] [link=logit] [cluster_col]")
 }
 data_path <- args[1]
 formula_str <- args[2]
 cov_type <- ifelse(length(args) >= 3, tolower(args[3]), "classical")
+link <- ifelse(length(args) >= 4, tolower(args[4]), "logit")
+if (!(link %in% c("logit", "probit"))) {
+  stop(paste("unknown link:", link))
+}
 
 # check.names=FALSE: run_lm_crosscheck_benchmark.Rと同じ理由
 # （Python側で書き出した列名をmake.names()による書き換えなしでそのまま使う）。
@@ -42,10 +66,53 @@ library(lmtest)
 library(marginaleffects)
 library(jsonlite)
 
-model <- glm(as.formula(formula_str), data = df, family = binomial(link = "logit"))
+model <- glm(as.formula(formula_str), data = df, family = binomial(link = link))
+
+# 観測情報行列（真の対数尤度のHessian）の重みを、本実装（nonlinear/probit.rs・
+# logit.rs）と同じ解析式で計算する（上記docコメント参照）。
+observed_hessian_weights <- function(model, link) {
+  X <- model.matrix(model)
+  y <- model$y
+  z <- as.numeric(X %*% coef(model))
+  if (link == "logit") {
+    p <- plogis(z)
+    p * (1 - p)
+  } else {
+    q <- 2 * y - 1
+    lam <- q * dnorm(q * z) / pnorm(q * z)
+    lam * (lam + z)
+  }
+}
+
+# sandwich::bread()と同じ規約（n * (X'WX)^-1 = n * (-H)^-1）で返す。
+# opgブランチと同じ理由（scale_varianceシナリオでの見かけ上の特異性回避）で、
+# 列を各々のノルムで正規化してから反転し、Σ=D⁻¹(D⁻¹MD⁻¹)⁻¹D⁻¹の恒等式で
+# 元のスケールに戻す（本実装のstandardize_columns/destandardize_paramsと同じ発想）。
+observed_bread <- function(model, link) {
+  X <- model.matrix(model)
+  n <- nrow(X)
+  w <- observed_hessian_weights(model, link)
+  d <- sqrt(colSums(X^2))
+  x_scaled <- sweep(X, 2, d, "/")
+  m_scaled <- t(x_scaled) %*% (x_scaled * w)
+  inv_scaled <- solve(m_scaled)
+  m_inv <- sweep(sweep(inv_scaled, 1, d, "/"), 2, d, "/")
+  n * m_inv
+}
+
+bread_obs <- observed_bread(model, link)
+
+# logit（正準リンク）では期待情報行列（glmの既定bread）と観測情報行列
+# （observed_bread）が理論上一致するはず（上記docコメント参照）。この不変条件を
+# 自動チェックしておくことで、将来このスクリプトの計算式を変更した際に
+# Logit側のクロスチェック値が気づかれずに壊れることを防ぐ（testing-completeness-
+# reviewerの指摘、Issue #84）。probitでは一致しないため、logitのときのみ検証する。
+if (link == "logit") {
+  stopifnot(isTRUE(all.equal(bread_obs, bread(model), tolerance = 1e-6)))
+}
 
 if (cov_type == "classical") {
-  vc <- vcov(model)
+  vc <- bread_obs / nrow(model.matrix(model))
 } else if (cov_type == "opg") {
   # 列スケーリング後に反転する（scale_varianceシナリオ対応）: t(scores)%*%scoresは
   # 説明変数間のスケール差（例: x1が1e6倍、x2が1e-3倍）がそのままスコア行列の列スケール
@@ -62,14 +129,16 @@ if (cov_type == "classical") {
   inv_scaled <- solve(t(scores_scaled) %*% scores_scaled)
   vc <- sweep(sweep(inv_scaled, 1, s, "/"), 2, s, "/")
 } else if (cov_type %in% c("hc0", "hc1")) {
-  vc <- vcovHC(model, type = toupper(cov_type))
+  meat <- meatHC(model, type = toupper(cov_type))
+  vc <- sandwich(model, bread. = bread_obs, meat. = meat)
 } else if (cov_type == "cluster") {
-  if (length(args) < 4) {
-    stop("cluster requires <cluster_col> as arg4")
+  if (length(args) < 5) {
+    stop("cluster requires <cluster_col> as arg5")
   }
-  cluster_col <- args[4]
+  cluster_col <- args[5]
   # cadjust=TRUE: G/(G-1)の小標本補正（run_lm_crosscheck_benchmark.Rと同じ方針）。
-  vc <- vcovCL(model, cluster = df[[cluster_col]], type = "HC1", cadjust = TRUE)
+  meat <- meatCL(model, cluster = df[[cluster_col]], type = "HC1", cadjust = TRUE)
+  vc <- sandwich(model, bread. = bread_obs, meat. = meat)
 } else {
   stop(paste("unknown cov_type:", cov_type))
 }
@@ -97,7 +166,7 @@ names(conf_high) <- rownames(ct)
 # 本実装・statsmodelsと同じ式（k=回帰係数の数のみ）に一致することを
 # ベンチマーク作成時に実測確認済み（OLSのガウス分布族k+1慣習とは異なる）。
 y_name <- all.vars(as.formula(formula_str))[1]
-null_model <- glm(as.formula(paste(y_name, "~ 1")), data = df, family = binomial(link = "logit"))
+null_model <- glm(as.formula(paste(y_name, "~ 1")), data = df, family = binomial(link = link))
 ll <- as.numeric(logLik(model))
 ll_null <- as.numeric(logLik(null_model))
 k_params <- length(coef(model))

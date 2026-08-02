@@ -104,10 +104,10 @@ argminの`CostFunction`/`Gradient`/`Hessian`トレイト実装と、`nonlinear`�
 
 **バグ修正（上記の回帰テスト作成中に発覚）**: `newton_step`の特異性検出（列ピボットQRのR対角成分を相対閾値と比較）は、`diag.abs() <= threshold`という比較を使っていたが、Hessianが全ゼロ行列のとき`col_piv_qr`が列選択時の0除算によりR対角成分に**NaN**を生成することがfaer 0.24.4で実機確認された。NaNとの比較は常に`false`になるため、この比較はNaNをすり抜けてしまい、特異なHessianが検出されないまま`solve_lstsq`に渡っていた。`diag.is_nan() || diag <= threshold`という形に修正した。**OLSの`ensure_full_rank`（`engine/src/linear/ols.rs`）も同じ比較パターンを使っており、理論上同じ弱点を抱えている**。ただしrust-reviewerの再検証により、実際にNaNが出るのは設計行列`X`全体が完全にゼロ（`include_intercept=false`かつ全説明変数列がゼロ）の場合のみで、単一の全ゼロ列（他に非ゼロ列がある通常の多重共線性ケース）は既存の閾値比較で正しく検出できることを確認済み（該当列のR対角成分が`NaN`ではなく厳密に`0.0`になるため）。リスクは実在するが限定的。今回のスコープ外のため未修正だったが、[Issue #109](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/109)として別途対応し、`ensure_full_rank`も同じ`diag.is_nan() || diag <= threshold`の形に修正済み（`docs/spec/ols-spec.md`「内部実装の計算仕様」参照）。
 
-### 収束判定の`tol`（Issue #52で実装済み、妥当性はLogit・Issue #68で検証済み）
+### 収束判定の`tol`（Issue #52で実装済み、妥当性はLogit・Issue #68、Probit・Issue #84で検証済み）
 
 - **判定基準**: 勾配ノルム（L2ノルム、`‖∇ℓ(θ)‖ < tol`）。`newton`/`bfgs`/`lbfgs`の3手法すべてで同じ基準を使う（Newtonは独自実装、BFGS/L-BFGSは組み込みの`with_tolerance_grad`）。
-- **デフォルト値**: `tol = 1e-6`で確定・維持（Logit実装・statsmodels/R glmとの数値照合で妥当性を検証済み。結論・根拠は`logit-implementation-notes.md`「収束判定`tol`の妥当性検証」参照。要点: 通常データでは高精度に一致するが、準完全分離の境界ケースでは`1e-8`程度が必要。ただし`1e-8`に締めると`bfgs`が`max_iter`を使い切りやすくなるリスクがあるため、既定値は`1e-6`を維持し、境界ケースの数値比較テストのみ`tol`を明示的に締める運用とした）。Probit/Tobit実装時もこの結論を踏襲する想定（モデル固有の事情があれば個別に再検証する）。
+- **デフォルト値**: `tol = 1e-6`で確定・維持（Logit実装・statsmodels/R glmとの数値照合で妥当性を検証済み。結論・根拠は`logit-implementation-notes.md`「収束判定`tol`の妥当性検証」参照。要点: 通常データでは高精度に一致するが、準完全分離の境界ケースでは`1e-8`程度が必要。ただし`1e-8`に締めると`bfgs`が`max_iter`を使い切りやすくなるリスクがあるため、既定値は`1e-6`を維持し、境界ケースの数値比較テストのみ`tol`を明示的に締める運用とした）。**Probit実装時（Issue #84）に同じ結論であることを実測確認済み**（通常シナリオはRTOL=1e-8で一致、near_separation境界ケースのみtol=1e-6だと相対誤差~4.4e-8とわずかに超過しtol=1e-8で解消、既定値は据え置き。詳細は`probit-implementation-notes.md`参照）。Tobit実装時も同じ結論を踏襲する想定（モデル固有の事情があれば個別に再検証する）。
 - **既知の限界とその対処（Issue #138で実装済み）**: 完全分離に近いデータでは、係数発散の過程でスコア項が浮動小数点アンダーフローし、`tol`の値によらず「収束済み」と誤判定しうる。`tol`の調整では解決しない構造的な限界のため、`run_solver`の後処理として標準化パラメータ空間でのノルムを事後チェックし、異常に大きい場合は収束判定を取り消して`MleError::SeparationSuspected`を返す対処を追加した（勾配ノルム基準自体は`tol`のまま維持し、別の判定軸を追加する形。詳細・設計の変遷は`logit-implementation-notes.md`「完全分離下での勾配ノルム収束判定のアンダーフロー対策」参照）。
 - **Options化**: `max_iter`と同じ扱いで`tol: f64 = 1e-6`をOptionsに追加する（`run_solver`関数の引数として実装済み。engine_pybind側の配線はLogitで実装済み）。
 

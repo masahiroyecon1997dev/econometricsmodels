@@ -18,7 +18,6 @@ import pytest
 from econometricsmodels import (
     OLS,
     WLS,
-    ComputationError,
     OLSOptions,
     ValidationError,
     WlsResults,
@@ -184,20 +183,6 @@ def test_insufficient_observations_raises(dataset):
     """観測数nが説明変数の数k（定数項込み）以下の場合`ValidationError`。"""
     df = dataset.with_columns(pl.lit(1.0).alias("weight")).head(2)
     with pytest.raises(ValidationError):
-        WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
-
-
-def test_singular_matrix_raises_computation_error():
-    """完全な多重共線性は`ComputationError`（OLSと同じ検証）。"""
-    df = pl.DataFrame(
-        {
-            "y": [1.0, 2.0, 3.0, 4.0],
-            "x1": [1.0, 2.0, 3.0, 4.0],
-            "x2": [2.0, 4.0, 6.0, 8.0],  # x2 = 2 * x1（完全な多重共線性）
-            "weight": [1.0, 1.0, 1.0, 1.0],
-        }
-    )
-    with pytest.raises(ComputationError):
         WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
 
 

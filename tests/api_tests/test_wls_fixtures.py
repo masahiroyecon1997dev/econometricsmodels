@@ -208,6 +208,18 @@ def test_cluster_g2_with_multiple_slopes_raises_computation_error():
         ).fit()
 
 
+def test_perfect_multicollinearity_raises_computation_error():
+    """完全な多重共線性は数値比較の対象外（`testing-policy.md`「テストの3系統」）。
+    想定エラー（`ComputationError`）が発生することのみを確認する
+    （OLS・Logitと同じ凍結CSVパターンに統一、Issue #151）。
+    """
+    from econometricsmodels import ComputationError
+
+    df = pl.read_csv(DATA_DIR / "synthetic_perfect_multicollinearity.csv")
+    with pytest.raises(ComputationError):
+        WLS(df, y="y", x=["x1", "x2", "x3"], weight="weight").fit()
+
+
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 def test_scale_variance_raises_computation_error(cov_type):
     """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、

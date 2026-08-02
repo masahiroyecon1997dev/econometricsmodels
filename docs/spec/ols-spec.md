@@ -181,6 +181,12 @@ $$
   役割分担する。一般的なテスト方針は`.claude/rules/testing-policy.md`を参照。
 - pyfixestはOLSの正確性検証には使わない（HC2/HC3にHC1用の小標本補正を誤って適用する既知の
   実装バグがあるため）。性能比較専用（[`ols-performance-notes.md`](./ols-performance-notes.md)）。
+- `engine`側は上記の固定シナリオ単体テストに加え、property-basedテスト（`proptest`、
+  `engine/src/linear/ols.rs`の`mod proptests`）で不変条件を検証する（Issue #102。詳細な方針は
+  `testing-policy.md`「property-basedテスト」参照）。対象プロパティ: 定数項ありなら残差和は常に0、
+  yのスカラー倍で係数（切片含む）も同じ倍率でスケールする、xの列順序を入れ替えても係数名で
+  対応付ければ値は変わらない、HC0の標準誤差は常にHC1以下。いずれも意図的なバグ注入により
+  実際に検出できることを確認済み。
 
 ### 3.7 パフォーマンス（要約）
 

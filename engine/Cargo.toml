@@ -13,3 +13,6 @@ thiserror = { workspace = true }
 statrs = { workspace = true }
 argmin = { workspace = true }
 argmin-math = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

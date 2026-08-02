@@ -40,14 +40,25 @@
 //! `1-Φ(z)`を手動計算せず常に`Φ(q_i z_i)`の形（`q_i`で符号を吸収）で評価するため、
 //! `statrs`の`cdf`実装（`erfc`ベース）が両裾で提供する精度をそのまま活かせる
 //! （手動で`1.0 - cdf(z)`を計算する場合に生じる桁落ちを避けられる）。
-//! ただし、Logitの`log_likelihood`が使う`softplus`のような「対数を経由しても
-//! アンダーフローしない」変形は用意していない（`statrs`に`Normal`用の`ln_cdf`が無いため）。
-//! `z_i`が極端な値（完全分離に近いデータ等）で`Φ(q_i z_i)`が0にアンダーフローすると
-//! `cost`が`+inf`になりうる。Logitの完全分離対応（`nonlinear-implementation-notes.md`
-//! 参照、勾配ノルム収束判定のアンダーフロー対応は`LogitEstimator::fit`実装後の
-//! 別Issueで対応した経緯がある）と同様、本Issue（#71）のスコープは尤度・スコア・
-//! Hessianの数式が閉じた形・数値微分と一致することの検証までとし、極端な入力での
-//! 頑健性は`ProbitEstimator::fit`実装以降の別Issueで必要に応じて対応する。
+//!
+//! `λ_i = φ(u)/Φ(u)`（`u=q_i z_i`）は、`u`が極端に負（実測`|u|≳39`）だと`φ(u)`・`Φ(u)`が
+//! ともに0にアンダーフローし`0.0/0.0`のNaNになる（Issue #71実装時にrust-reviewerの
+//! レビューで判明。`Logit`の`logistic`/`softplus`が有限の`z`ではどれだけ極端でも
+//! 絶対にNaNを産まない設計だったのとは異なる、Probit固有のリスク）。既定手法の
+//! `Method::Newton`（`FaerNewton`）はline searchなしで`gradient`/`hessian`を直接
+//! 使うため、Logitで実際に問題になった「(準)完全分離データでの収束判定誤検知」
+//! （勾配ノルムのアンダーフロー、`nonlinear-implementation-notes.md`参照）よりも
+//! 緩い条件でこのNaN汚染に到達しうる（Issue #72のコメント参照）。
+//!
+//! 対策として、`u`を`φ`/`Φ`評価前に`[-U_CLAMP, U_CLAMP]`にクランプする
+//! （`U_CLAMP`のdocコメント参照）。R言語`stats::binomial(link="probit")`の
+//! `linkinv`が線形予測子を`pnorm`評価前に同じ閾値でクランプする実装
+//! （`thresh <- -qnorm(.Machine$double.eps); eta <- pmin(pmax(eta, -thresh), thresh)`）
+//! を参考にした（ユーザー確認済み）。statsmodelsの`Probit`は`Φ`の**出力**を
+//! `np.clip(cdf, FLOAT_EPS, 1-FLOAT_EPS)`でクリップする方式だが、`score`/`loglike`
+//! にのみ適用され`hessian`には適用されていない（非対称）。今回は`u`（入力側）を
+//! クランプする方式を採用し、`cost`/`gradient`/`hessian`/`scores`すべてに同じ
+//! 関所（`clamped_pdf_cdf`）を経由させることでこの非対称性を避けている。
 
 use crate::error::CommonError;
 use crate::nonlinear::common::MleError;
@@ -175,6 +186,26 @@ impl ProbitInput {
     }
 }
 
+/// `φ(u)`・`Φ(u)`を評価する前に`u`をこの絶対値以下にクランプする閾値。`u`がこれより
+/// 極端になると`λ_i=φ(u)/Φ(u)`（一般化残差）が`0.0/0.0`のNaNになりうる
+/// （実測では`|u|≳39`から発生。本閾値`≈8.126`はそれよりずっと手前で安全に倒す、
+/// モジュール冒頭「数値安定化について」参照）。
+///
+/// R言語`stats::binomial(link="probit")$linkinv`の`thresh <- -qnorm(.Machine$double.eps)`
+/// と同じ値（`-Φ⁻¹(f64::EPSILON)`）。`Normal::inverse_cdf`は反復計算のためホットパスで
+/// 毎回呼ぶのを避け、コンパイル時定数としてハードコードしている（Rとscipyの両方で
+/// `8.125890664701908`と算出されることを確認済み）。
+const U_CLAMP: f64 = 8.125_890_664_701_908;
+
+/// `u`を`[-U_CLAMP, U_CLAMP]`にクランプしてから`(φ(u), Φ(u))`を評価する
+/// （`U_CLAMP`のdocコメント参照）。`cost`/`linear_predictor_and_residual`の両方が
+/// 経由する共通の関所にすることで、`statsmodels`の`Probit`実装に見られる非対称性
+/// （`score`/`loglike`はクリップするが`hessian`はしない）を避ける。
+fn clamped_pdf_cdf(normal: &Normal, u: f64) -> (f64, f64) {
+    let u = u.clamp(-U_CLAMP, U_CLAMP);
+    (normal.pdf(u), normal.cdf(u))
+}
+
 /// Probitの負の対数尤度・スコア・Hessian（argminの`CostFunction`/`Gradient`/`Hessian`
 /// トレイト実装）。`ProbitInput`の`X`・`y`を保持する（`run_solver`が`problem`の所有権を
 /// 必要とするため、`ProbitInput`とは独立した所有データとして持つ。`Clone`は
@@ -216,8 +247,8 @@ impl ProbitProblem {
     ) -> (f64, f64) {
         let z = self.linear_predictor(i, params);
         let q = 2.0 * (*self.y.get(i, 0)) - 1.0;
-        let u = q * z;
-        let lambda = q * normal.pdf(u) / normal.cdf(u);
+        let (phi, big_phi) = clamped_pdf_cdf(normal, q * z);
+        let lambda = q * phi / big_phi;
         (z, lambda)
     }
 
@@ -247,7 +278,8 @@ impl CostFunction for ProbitProblem {
             .map(|i| {
                 let z = self.linear_predictor(i, param);
                 let q = 2.0 * (*self.y.get(i, 0)) - 1.0;
-                -normal.cdf(q * z).ln()
+                let (_, big_phi) = clamped_pdf_cdf(&normal, q * z);
+                -big_phi.ln()
             })
             .sum();
         Ok(cost)
@@ -512,6 +544,31 @@ mod tests {
                     numeric
                 );
             }
+        }
+    }
+
+    #[test]
+    fn cost_gradient_hessian_stay_finite_for_extreme_linear_predictor() {
+        // z_i=1000（クランプが無ければu=q*z=±1000でφ(u)/Φ(u)が0にアンダーフローし
+        // NaNになる、モジュール冒頭「数値安定化について」参照）。U_CLAMPでのクランプ
+        // によりcost/gradient/hessianが常に有限であることを確認する。
+        let y = vec![1.0, 0.0];
+        let input = ProbitInput::from_columns(&y, &[], vec![], true, "y".to_string()).unwrap();
+        let problem = ProbitProblem::new(&input);
+        let params = vec![1000.0];
+
+        let cost = problem.cost(&params).unwrap();
+        assert!(cost.is_finite(), "{cost}");
+
+        let grad = problem.gradient(&params).unwrap();
+        assert!(grad[0].is_finite(), "{:?}", grad);
+
+        let hessian = problem.hessian(&params).unwrap();
+        assert!(hessian[0][0].is_finite(), "{:?}", hessian);
+
+        let scores = problem.scores(&params);
+        for i in 0..2 {
+            assert!(scores.get(i, 0).is_finite(), "row {i}");
         }
     }
 }

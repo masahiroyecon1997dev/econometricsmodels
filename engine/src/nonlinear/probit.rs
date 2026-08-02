@@ -61,7 +61,9 @@
 //! 関所（`clamped_pdf_cdf`）を経由させることでこの非対称性を避けている。
 
 use crate::error::CommonError;
-use crate::nonlinear::common::MleError;
+use crate::nonlinear::common::{
+    Method, MleError, destandardize_params, run_solver, standardize_columns, validate_binary_y,
+};
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
 use statrs::distribution::{Continuous, ContinuousCDF, Normal};
@@ -89,9 +91,9 @@ impl ProbitInput {
     /// `ProbitInput`を組み立てる。`include_intercept=true`の場合、設計行列の先頭列に
     /// 定数項（すべて1.0）を自動追加する。
     ///
-    /// `y`が{0.0, 1.0}の二値であることの検証は、このIssue（#70、次元検証のみがスコープ）では
-    /// 行わない。`LogitInput::from_columns`と同じ方針で、尤度・スコア・Hessianを実装する
-    /// 後続Issueで`validate_binary_y`（`nonlinear/common.rs`）による検証を追加する予定。
+    /// `y`が{0.0, 1.0}の二値であることの検証は、この関数自体では行わない
+    /// （`LogitInput::from_columns`と同じ方針）。`ProbitEstimator::fit`冒頭で
+    /// `validate_binary_y`（`nonlinear/common.rs`）により検証される。
     ///
     /// # Errors
     /// `y`といずれかの`x_columns`の長さが一致しない場合は`CommonError::DimensionMismatch`を返す。
@@ -227,6 +229,13 @@ impl ProbitProblem {
         }
     }
 
+    /// `standardize_columns`で標準化済みの設計行列`x_std`と`y`から構築する。
+    /// `ProbitEstimator::fit`が最適化・収束点でのスコア評価に使う経路
+    /// （`LogitProblem::from_standardized`と同じ位置づけ）。
+    fn from_standardized(x_std: Mat<f64>, y: Mat<f64>) -> Self {
+        Self { x: x_std, y }
+    }
+
     /// 観測`i`の線形予測子 `z_i = x_i'θ`。
     fn linear_predictor(&self, i: usize, params: &[f64]) -> f64 {
         (0..self.x.ncols())
@@ -328,6 +337,127 @@ impl Hessian for ProbitProblem {
             }
         }
         Ok(h)
+    }
+}
+
+/// Probitの推定結果（現時点では骨格のみ）。`fit`でのバリデーション・Newton-Raphsonでの
+/// 最適化を通過した状態を表す。
+///
+/// 標準誤差・z値・p値・信頼区間・適合度統計量等は未実装（本Issue #72の完了条件は
+/// Newton-Raphsonでの最適化・収束判定のみ、`LogitEstimator`の骨格実装（Issue #56）と
+/// 同じ切り分け）。`docs/planning/specs/logit-probit-issue-breakdown.md`の対応する
+/// 後続Issueで`fit`に追加していく想定。
+///
+/// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
+#[derive(Debug)]
+pub struct ProbitEstimator {
+    input: ProbitInput,
+    /// 係数（元のスケール。`standardize_columns`で標準化した空間で最適化した後、
+    /// `destandardize_params`で逆変換済み）。`input.param_names()`と対応する
+    params: Vec<f64>,
+    /// 収束したかどうか
+    converged: bool,
+    /// 実際の反復回数
+    n_iter: usize,
+}
+
+impl ProbitEstimator {
+    /// Newton-Raphson法で負の対数尤度を最小化し、Probitの係数を推定する。
+    /// `LogitEstimator::fit`の骨格実装（Issue #56）と同じ設計・スコープ。
+    ///
+    /// 初期値は常にゼロベクトル（`start_params`によるユーザー指定は未対応、
+    /// `LogitEstimator::fit`と同じ理由でユーザー確認の上見送り）。
+    ///
+    /// 設計行列は`standardize_columns`で内部的に標準化してから最適化し、収束後の
+    /// パラメータを`destandardize_params`で元のスケールへ逆変換する
+    /// （`LogitEstimator::fit`のdocコメント参照）。
+    ///
+    /// `n <= k`で`CommonError::InsufficientObservations`、`k == 0`で
+    /// `CommonError::NoRegressors`を返す閾値・使い分けは`LogitEstimator::fit`と同じ
+    /// （後者はIssue #118でLogitのfaer内部panic、Issue #130を修正した経緯があり、
+    /// Probitでは当初から同じ検証を入れている）。
+    ///
+    /// `y`が`{0.0, 1.0}`の二値であることの検証（`validate_binary_y`）も、Logitでは
+    /// Issue #54→#55を経てIssue #135で事後的に追加された経緯があるが、Probitでは
+    /// 既に共有実装（`nonlinear/common.rs`）があるため当初から呼び出している。
+    ///
+    /// # Errors
+    /// - `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
+    /// - `max_iter`が0以下: `MleError::InvalidMaxIter`
+    /// - `tol`が0以下: `MleError::InvalidTol`
+    /// - `y`が`{0.0, 1.0}`以外の値を含む: `MleError::InvalidBinaryY`
+    /// - `k`（定数項を含む説明変数の数）が0（定数項も説明変数も無い）: `CommonError::NoRegressors`
+    /// - 観測数`n`が`k`以下: `CommonError::InsufficientObservations`
+    /// - `raise_on_non_convergence=true`かつ`max_iter`回で未収束: `MleError::NonConvergence`
+    /// - 収束点（または`raise_on_non_convergence=false`時の打ち切り点）のHessianが特異
+    ///   （設計行列の完全な多重共線性等）: `MleError::SingularHessian`
+    pub fn fit(
+        input: ProbitInput,
+        max_iter: i64,
+        tol: f64,
+        raise_on_non_convergence: bool,
+        confidence_level: f64,
+    ) -> Result<Self, MleError> {
+        if !(confidence_level > 0.0 && confidence_level < 1.0) {
+            return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
+        }
+        if max_iter <= 0 {
+            return Err(MleError::InvalidMaxIter { max_iter });
+        }
+        if tol <= 0.0 {
+            return Err(MleError::InvalidTol { tol });
+        }
+        validate_binary_y(input.y())?;
+
+        let n = input.nobs();
+        let k = input.k();
+        if k == 0 {
+            return Err(CommonError::NoRegressors { n }.into());
+        }
+        if n <= k {
+            return Err(CommonError::InsufficientObservations { n, k }.into());
+        }
+
+        let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
+        let problem = ProbitProblem::from_standardized(x_std, input.y().clone());
+
+        let output = run_solver(
+            problem,
+            Method::Newton,
+            vec![0.0; k],
+            max_iter as u64,
+            tol,
+            raise_on_non_convergence,
+        )?;
+
+        let params = destandardize_params(&output.params, &scale);
+
+        Ok(Self {
+            input,
+            params,
+            converged: output.converged,
+            n_iter: output.n_iter,
+        })
+    }
+
+    /// 推定に使った入力データ
+    pub fn input(&self) -> &ProbitInput {
+        &self.input
+    }
+
+    /// 係数（元のスケール）
+    pub fn params(&self) -> &[f64] {
+        &self.params
+    }
+
+    /// 収束したかどうか
+    pub fn converged(&self) -> bool {
+        self.converged
+    }
+
+    /// 実際の反復回数
+    pub fn n_iter(&self) -> usize {
+        self.n_iter
     }
 }
 
@@ -570,5 +700,152 @@ mod tests {
         for i in 0..2 {
             assert!(scores.get(i, 0).is_finite(), "row {i}");
         }
+    }
+
+    /// 切片のみ（説明変数なし）のProbitは、MLEの一階条件`Σ(y_i-Φ(θ))=0`（`z_i=θ`が
+    /// 全観測共通）から`Φ(θ̂) = ȳ`、すなわち`θ̂ = Φ⁻¹(ȳ)`という閉じた形の解析解を持つ
+    /// （`LogitInput`の`θ̂ = ln(ȳ/(1-ȳ))`に相当するProbit版。`fit`が最適化ロジックを
+    /// 経ずに正しい値へ収束することを検証できる）。
+    fn intercept_only_input() -> ProbitInput {
+        let y = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        ProbitInput::from_columns(&y, &[], vec![], true, "y".to_string()).unwrap()
+    }
+
+    #[test]
+    fn fit_newton_converges_to_closed_form_solution_for_intercept_only_model() {
+        let input = intercept_only_input();
+        let estimator = ProbitEstimator::fit(input, 35, 1e-6, true, 0.95).unwrap();
+
+        let y_bar: f64 = 4.0 / 7.0;
+        let expected = Normal::standard().inverse_cdf(y_bar);
+
+        assert!(estimator.converged());
+        assert_eq!(estimator.params().len(), 1);
+        assert!(
+            (estimator.params()[0] - expected).abs() < 1e-6,
+            "params={:?}, expected={}",
+            estimator.params(),
+            expected
+        );
+        // 切片のみの1次元凹関数のNewton法は数回で収束するはず
+        assert!(estimator.n_iter() <= 10, "n_iter={}", estimator.n_iter());
+    }
+
+    #[test]
+    fn fit_returns_invalid_confidence_level_error_out_of_range() {
+        let result = ProbitEstimator::fit(intercept_only_input(), 35, 1e-6, true, 1.5);
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::Common(CommonError::InvalidConfidenceLevel {
+                confidence_level: 1.5
+            })
+        );
+    }
+
+    #[test]
+    fn fit_returns_invalid_max_iter_error_for_non_positive_max_iter() {
+        let result = ProbitEstimator::fit(intercept_only_input(), 0, 1e-6, true, 0.95);
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::InvalidMaxIter { max_iter: 0 }
+        );
+    }
+
+    #[test]
+    fn fit_returns_invalid_tol_error_for_non_positive_tol() {
+        for tol in [0.0, -1.0] {
+            let result = ProbitEstimator::fit(intercept_only_input(), 35, tol, true, 0.95);
+            assert_eq!(result.unwrap_err(), MleError::InvalidTol { tol });
+        }
+    }
+
+    #[test]
+    fn fit_returns_invalid_binary_y_error_for_non_binary_y() {
+        let y = vec![0.0, 1.0, 0.5, 1.0];
+        let input = ProbitInput::from_columns(&y, &[], vec![], true, "y".to_string()).unwrap();
+        let result = ProbitEstimator::fit(input, 35, 1e-6, true, 0.95);
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::InvalidBinaryY { row: 2, value: 0.5 }
+        );
+    }
+
+    #[test]
+    fn fit_returns_no_regressors_error_when_k_is_zero() {
+        // `include_intercept=false`かつ説明変数も無い（k=0）病的な入力。`n<=k`チェック
+        // （`n>=1`なら常に通過してしまう）をすり抜けて後段の分散共分散行列計算で
+        // panicすることをLogit実装（Issue #118/#130）で経験済みのため、Probitでは
+        // 当初からk==0を明示的に検証している（モジュールdocコメント・`fit`のdocコメント参照）。
+        let y = vec![0.0, 1.0, 0.0, 1.0, 1.0];
+        let input = ProbitInput::from_columns(&y, &[], vec![], false, "y".to_string()).unwrap();
+        assert_eq!(input.k(), 0);
+
+        let result = ProbitEstimator::fit(input, 35, 1e-6, true, 0.95);
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::Common(CommonError::NoRegressors { n: 5 })
+        );
+    }
+
+    #[test]
+    fn fit_returns_insufficient_observations_error_when_n_less_equal_k() {
+        let y = vec![0.0, 1.0];
+        let x_columns = vec![vec![1.0, 2.0]];
+        let input = ProbitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = ProbitEstimator::fit(input, 35, 1e-6, true, 0.95);
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::Common(CommonError::InsufficientObservations { n: 2, k: 2 })
+        );
+    }
+
+    #[test]
+    fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix() {
+        // x2 = 2*x1（完全な多重共線性）。θ=0でのHessianはw*X'X（w=λ(λ+z)、z=0のとき
+        // w=2/π）で、X'X自体が構造的に特異（yの値に関わらず常に特異）なので、
+        // Newtonの初回ステップで確実に特異性検出に引っかかる（Logitの対応するテストと
+        // 同じ理由、完全分離のような「収束の挙動に依存する」ケースと異なり決定的に再現できる）。
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
+        let input = ProbitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = ProbitEstimator::fit(input, 35, 1e-6, true, 0.95);
+        assert!(
+            matches!(result, Err(MleError::SingularHessian)),
+            "{:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn fit_returns_non_convergence_error_when_max_iter_is_too_small_and_raise_is_true() {
+        let result = ProbitEstimator::fit(intercept_only_input(), 1, 1e-12, true, 0.95);
+        assert!(
+            matches!(result, Err(MleError::NonConvergence { .. })),
+            "{:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn fit_returns_unconverged_result_without_raising_when_raise_on_non_convergence_is_false() {
+        let estimator =
+            ProbitEstimator::fit(intercept_only_input(), 1, 1e-12, false, 0.95).unwrap();
+        assert!(!estimator.converged());
     }
 }

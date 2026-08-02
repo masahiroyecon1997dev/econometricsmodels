@@ -62,3 +62,34 @@ Logit（`logit-implementation-notes.md`「符号規約」節）と同じ。`Cost
 - **`scores`の総和が`-gradient`に一致すること**: Logitと同じ理由で`θ=[0.3,-0.2]`で検証。
 - **数値微分との比較**: `gradient`を`cost`の中心差分（`h=1e-6`）、`hessian`を`gradient`の中心差分（`h=1e-5`）と比較。
 - **極端な線形予測子でも有限であること**: `z=1000`相当（`U_CLAMP`が無ければ`λ`がNaNになる領域）で`cost`/`gradient`/`hessian`/`scores`が有限値を返すことを確認。
+
+## Newton-Raphsonでの最適化・収束判定（Issue #72で実装済み）
+
+`ProbitEstimator::fit`。`LogitEstimator::fit`の骨格実装（Issue #56、`Method::Newton`固定・`cov_type`/`method`分岐なし）と同じスコープ・同じ設計。`params`/`converged`/`n_iter`のみを保持し、標準誤差・適合度統計量等は後続Issueに持ち越す。
+
+`LogitEstimator::fit`と異なり、以下は当初から実装している（Logitでは事後的な別Issue・別コミットで追加されたが、既に確立済みのパターン・共有インフラのため今回は最初から含めた。判断が分かれる新規の設計選択ではなく、既知のバグの再現を避けるための対応）:
+
+- `tol <= 0.0`の検証（`MleError::InvalidTol`）
+- `k == 0`（定数項も説明変数も無い病的な入力）の検証（`CommonError::NoRegressors`）。Logitでは当初漏れており、`n<=k`チェックをすり抜けて後段の分散共分散行列計算で`faer`が内部panicする実バグ（Issue #130）として顕在化し、Issue #118で修正された経緯がある。
+- `validate_binary_y`によるyの値域検証（`MleError::InvalidBinaryY`）。Logitでは「Issue #54時点でB2に持ち越しと明記されながら未実装のまま残る」形でIssue #135まで放置されていたが、`nonlinear/common.rs`に既に共有実装があるため今回はゼロコストで含めた。
+- `ProbitProblem`の構築を`from_standardized`コンストラクタ経由に統一（`new`はテスト専用として`#[cfg(test)]`化）。
+
+### 既知の解析解によるテスト
+
+切片のみ（説明変数なし）のProbitは、MLEの一階条件`Σ(y_i-Φ(θ))=0`（全観測で`z_i=θ`共通）から`Φ(θ̂)=ȳ`、すなわち`θ̂=Φ⁻¹(ȳ)`という閉じた形の解析解を持つ（Logitの`θ̂=ln(ȳ/(1-ȳ))`に相当）。`fit_newton_converges_to_closed_form_solution_for_intercept_only_model`テストで検証。
+
+### テスト
+
+`engine/src/nonlinear/probit.rs`の`#[cfg(test)] mod tests`に実装。10種: 切片のみモデルでの解析解一致、`confidence_level`範囲外エラー、`max_iter`非正エラー、`tol`非正エラー、`y`の値域エラー、`k=0`（`NoRegressors`）エラー、`n<=k`（`InsufficientObservations`）エラー、完全な多重共線性による`SingularHessian`エラー、`raise_on_non_convergence=true`での`NonConvergence`エラー、`raise_on_non_convergence=false`での未収束結果取得。Logitの`LogitEstimator::fit`骨格実装（Issue #56、コミット`c5e54f7`）時点の7種＋直後の修正（コミット`7525793`）で追加された`tol`/`k=0`検証テストに、Probit固有の`InvalidBinaryY`テストを加えた構成（rust-reviewerの指摘を受けて`NonConvergence`系2件を追加済み）。
+
+### 未検証のリスク: `U_CLAMP`とNewton法（line searchなし）の相互作用
+
+rust-reviewerのレビューで指摘され、ユーザー確認の上でテストは見送り、記録のみ残す。
+
+`U_CLAMP`は一般化残差`λᵢ`（`φ(u)/Φ(u)`のNaN化）のみを防ぐ局所的な保護であり、Hessianの`w=λᵢ(λᵢ+zᵢ)`に使う`zᵢ`自体（生の線形予測子、クランプ前の値）は無制限のままである。`run_solver`（`nonlinear/common.rs`）のNewton実装はline searchなしで生のステップ`Δθ=H⁻¹g`をそのまま適用するため、理論上は次の経路が存在する: Hessianがまだ厳密特異ではないが悪条件な中間反復で`θ`（延いては標準化空間の`z`）が大きくジャンプし、次の反復でHessian要素が極端な値になり、さらに次の反復で発散的に増幅する。
+
+最終的にNaN化すれば`newton_step`のNaNチェックが`SingularHessian`として捕捉する見込みだが、これは`U_CLAMP`自体が意図した保護機構ではなく「NaNチェックによる偶発的な保護」である。この経路を実データで踏むかどうかは未検証。
+
+また、Logitの`SEPARATION_PARAM_NORM_THRESHOLD=100`（`SeparationSuspected`判定の閾値、`nonlinear/common.rs`）はLogitのロジスティック関数の飽和特性から較正された値であり、Probitのリンク関数（正規分布CDF、テイルの減衰特性が異なる）で同程度に適切かは未検証・未較正。
+
+Logitの(準)完全分離対応（`SeparationSuspected`、Issue #138）は`LogitEstimator::fit`骨格実装（Issue #56）よりずっと後に、実運用で問題が顕在化してから発見・対応された別Issueであり、本Issue（#72、Issue #56相当のスコープ）には元々含まれていない。Probitでも同様に、method分岐（BFGS/L-BFGS、Issue #73）実装時、または実際に収束の問題が観測された時点で改めて検討する。

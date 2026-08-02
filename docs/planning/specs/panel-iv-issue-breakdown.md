@@ -101,114 +101,120 @@ Issue化済み（2026-08-02）:
 
 ## C. FE/RE共通基盤（panel系統、IV完了後・FE着手前）
 
-- [ ] **C1. `PanelError`型定義**
+Issue化済み（2026-08-02）:
+
+- [x] **C1. `PanelError`型定義** → [#172](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/172)
   FE/REで共有するエラー型を`engine/src/panel/common.rs`に定義。詳細: `panel-api-design.md`4.4節
   - 依存: なし
-- [ ] **C2. θパラメータ化した準偏差変換関数`quasi_demean`の実装**
+- [x] **C2. θパラメータ化した準偏差変換関数`quasi_demean`の実装** → [#173](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/173)
   FE/RE共有。FEは全エンティティに`θ_i=1.0`を渡すことで特殊ケースとして扱う。
   詳細: `panel-api-design.md`7.4節
-  - 依存: C1
-- [ ] **C3. ハウスマン統計量計算関数`hausman_statistic`の実装**
+  - 依存: C1（#172）
+- [x] **C3. ハウスマン統計量計算関数`hausman_statistic`の実装** → [#174](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/174)
   FE/RE共有（`(β_FE - β_RE)'[Var(β_FE) - Var(β_RE)]⁻¹(β_FE - β_RE)`）。RE実装時まで実際には
   呼ばれないが、共有関数のため先にまとめて用意する。詳細: `panel-api-design.md`7.3節
-  - 依存: C1
+  - 依存: C1（#172）
 
 ## D. FE
 
-- [ ] **D1. FEデータ構造定義**
+Issue化済み（2026-08-02）:
+
+- [x] **D1. FEデータ構造定義** → [#175](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/175)
   `FeInput::from_columns`相当。`entity`/`time`列の保持。詳細: `panel-api-design.md`1章
-  - 依存: C1
-- [ ] **D2. within変換の実装**
+  - 依存: C1（#172）
+- [x] **D2. within変換の実装** → [#176](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/176)
   1-way: `quasi_demean`のθ=1呼び出し（不均衡パネル対応）。2-way: 閉形式の二重デミーニング
   ＋バランスパネル検証（不均衡ならハードエラー、回避オプションなし）。
   詳細: `panel-api-design.md`6.1節・6.4節
-  - 依存: C2, D1
-- [ ] **D3. singleton検出バリデーション**
+  - 依存: C2（#173）, D1（#175）
+- [x] **D3. singleton検出バリデーション** → [#179](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/179)
   entity（常時）・time（2-wayの場合のみ）を対称に検出。詳細: `panel-api-design.md`6.5節
-  - 依存: D2
-- [ ] **D4. 分散ゼロ説明変数の検出バリデーション**
+  - 依存: D2（#176）
+- [x] **D4. 分散ゼロ説明変数の検出バリデーション** → [#177](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/177)
   デミーニング後の設計行列の列分散チェック。1-way/2-way共通ロジック。
   詳細: `panel-api-design.md`6.7節
-  - 依存: D2
-- [ ] **D5. `OlsEstimator`への委譲によるパラメータ推定**
+  - 依存: D2（#176）
+- [x] **D5. `OlsEstimator`への委譲によるパラメータ推定** → [#178](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/178)
   まず委譲を試す緩い方針。うまくいかない場合はFE専用実装に切り替え。
   詳細: `panel-api-design.md`4.3節
-  - 依存: D2, D3, D4
-- [ ] **D6. 自由度調整の実装とdf_resid/df_model反映**
+  - 依存: D2（#176）, D3（#179）, D4（#177）
+- [x] **D6. 自由度調整の実装とdf_resid/df_model反映** → [#180](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/180)
   1-way: `n - n_entities - k`。2-way: `n - n_entities - n_periods + 1 - k`。
   詳細: `panel-api-design.md`6.3節
-  - 依存: D5
-- [ ] **D7. cov_type対応（classical/hc0-3/cluster）**
+  - 依存: D5（#178）
+- [x] **D7. cov_type対応（classical/hc0-3/cluster）** → [#181](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/181)
   `cov_type`デフォルトを`"cluster"`（entity単位）にする（OLSの`"classical"`から意図的に逸脱）。
   詳細: `panel-api-design.md`3.1節・3.2節
-  - 依存: A1, A2, D5
-- [ ] **D8. Driscoll-Kraay型パネルHACの実装**
+  - 依存: A1（#152）, A2（#153）, D5（#178）
+- [x] **D8. Driscoll-Kraay型パネルHACの実装** → [#182](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/182)
   OLSのHAC実装は流用しない別アルゴリズム。詳細: `panel-api-design.md`3.1節
-  - 依存: D7
-- [ ] **D9. パネル固有R²（within/between/overall）の実装**
+  - 依存: D7（#181）
+- [x] **D9. パネル固有R²（within/between/overall）の実装** → [#183](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/183)
   bareの`r_squared`は廃止。詳細: `panel-api-design.md`2.3節
-  - 依存: D5
-- [ ] **D10. 固定効果自体（α_i）の復元ロジック実装**
+  - 依存: D5（#178）
+- [x] **D10. 固定効果自体（α_i）の復元ロジック実装** → [#184](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/184)
   `α_i = ȳ_i - x̄_i'β̂`。within変換時に保持したグループ平均を使う。
   詳細: `panel-api-design.md`6.6節
-  - 依存: D5
-- [ ] **D11. engine単体テストのカバレッジ確認・不足分を追加**
-  - 依存: D6〜D10
-- [ ] **D12. engine_pybind: データ抽出・`FeOptions`/`FeResult` pyclass定義**
-  - 依存: D1
-- [ ] **D13. engine_pybind: engine呼び出し・エラー変換実装**
-  - 依存: D11, D12
-- [ ] **D14. engine_pybind: `fixed_effects()`メソッド実装**
+  - 依存: D5（#178）
+- [x] **D11. engine単体テストのカバレッジ確認・不足分を追加** → [#185](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/185)
+  - 依存: D6〜D10（#180, #181, #182, #183, #184）
+- [x] **D12. engine_pybind: データ抽出・`FeOptions`/`FeResult` pyclass定義** → [#186](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/186)
+  - 依存: D1（#175）
+- [x] **D13. engine_pybind: engine呼び出し・エラー変換実装** → [#187](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/187)
+  - 依存: D11（#185）, D12（#186）
+- [x] **D14. engine_pybind: `fixed_effects()`メソッド実装** → [#188](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/188)
   1-way: `dict[str, float]`。2-way: `dict[str, dict[str, float]]`
   （`"entity"`/`"time"`キー）。詳細: `panel-api-design.md`6.6節
-  - 依存: D13
-- [ ] **D15. python_package: FE/FeResultsラッパー実装**
-  - 依存: D14
-- [ ] **D16. tests/api_tests: fixest/linearmodelsとの数値照合ベンチマーク作成**
-  - 依存: D15
-- [ ] **D17. ドキュメント（mkdocs）**
-  - 依存: D16
+  - 依存: D13（#187）
+- [x] **D15. python_package: FE/FeResultsラッパー実装** → [#189](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/189)
+  - 依存: D14（#188）
+- [x] **D16. tests/api_tests: fixest/linearmodelsとの数値照合ベンチマーク作成** → [#190](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/190)
+  - 依存: D15（#189）
+- [x] **D17. ドキュメント（mkdocs）** → [#191](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/191)
+  - 依存: D16（#190）
 
 ## E. RE（Dに依存）
 
-- [ ] **E1. REデータ構造定義**
+Issue化済み（2026-08-02）:
+
+- [x] **E1. REデータ構造定義** → [#192](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/192)
   `ReInput::from_columns`相当。`entity`/`time`列の扱いはFE（D1）を踏襲。
-  - 依存: D1
-- [ ] **E2. Swamy-Arora分散成分推定（σ_ε²・σ_u²）の実装**
+  - 依存: D1（#175）
+- [x] **E2. Swamy-Arora分散成分推定（σ_ε²・σ_u²）の実装** → [#193](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/193)
   σ_ε²はFEのwithin回帰残差分散を再利用（RE→FE→`OlsEstimator`の委譲チェーン）。
   詳細: `panel-api-design.md`7.1節
-  - 依存: E1, D5
-- [ ] **E3. θ計算・準偏差変換の実装**
+  - 依存: E1（#192）, D5（#178）
+- [x] **E3. θ計算・準偏差変換の実装** → [#194](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/194)
   `θ_i = 1 - sqrt(σ_ε² / (T_i・σ_u² + σ_ε²))`。`quasi_demean`（C2）を再利用。
   詳細: `panel-api-design.md`7.2節
-  - 依存: C2, E2
-- [ ] **E4. `OlsEstimator`への委譲によるパラメータ推定**
-  - 依存: E3
-- [ ] **E5. df_resid（`n - k`）・適合度統計量の実装**
+  - 依存: C2（#173）, E2（#193）
+- [x] **E4. `OlsEstimator`への委譲によるパラメータ推定** → [#195](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/195)
+  - 依存: E3（#194）
+- [x] **E5. df_resid（`n - k`）・適合度統計量の実装** → [#196](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/196)
   FEの`n - n_entities - k`とは別式。詳細: `panel-api-design.md`7.5節
-  - 依存: E4
-- [ ] **E6. cov_type対応**
+  - 依存: E4（#195）
+- [x] **E6. cov_type対応** → [#197](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/197)
   詳細: `panel-api-design.md`3章（FEと同じ範囲）
-  - 依存: A1, A2, E4
-- [ ] **E7. ハウスマン検定の実装**
+  - 依存: A1（#152）, A2（#153）, E4（#195）
+- [x] **E7. ハウスマン検定の実装** → [#198](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/198)
   内部でFE推定を呼び出し、`hausman_statistic`（C3）で比較。REの切片は比較対象から除外。
   内部FE推定が失敗した場合はハウスマン関連フィールドを`None`にしてRE本体の結果は返す。
   詳細: `panel-api-design.md`7.3節
-  - 依存: C3, D5, E4
-- [ ] **E8. engine単体テストのカバレッジ確認・不足分を追加**
-  - 依存: E5〜E7
-- [ ] **E9. engine_pybind: データ抽出・`ReOptions`/`ReResult` pyclass定義**
-  - 依存: E1
-- [ ] **E10. engine_pybind: engine呼び出し・エラー変換実装**
-  - 依存: E8, E9
-- [ ] **E11. python_package: RE/ReResultsラッパー実装**
-  - 依存: E10
-- [ ] **E12. tests/api_tests: plm/linearmodelsとの数値照合ベンチマーク作成**
+  - 依存: C3（#174）, D5（#178）, E4（#195）
+- [x] **E8. engine単体テストのカバレッジ確認・不足分を追加** → [#199](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/199)
+  - 依存: E5〜E7（#196, #197, #198）
+- [x] **E9. engine_pybind: データ抽出・`ReOptions`/`ReResult` pyclass定義** → [#200](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/200)
+  - 依存: E1（#192）
+- [x] **E10. engine_pybind: engine呼び出し・エラー変換実装** → [#201](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/201)
+  - 依存: E8（#199）, E9（#200）
+- [x] **E11. python_package: RE/ReResultsラッパー実装** → [#202](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/202)
+  - 依存: E10（#201）
+- [x] **E12. tests/api_tests: plm/linearmodelsとの数値照合ベンチマーク作成** → [#203](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/203)
   ハウスマン検定は`plm::phtest`のみを参照値とする（Rクロスチェックの例外規定、
   `panel-api-design.md`5.3節）。
-  - 依存: E11
-- [ ] **E13. ドキュメント（mkdocs）**
-  - 依存: E12
+  - 依存: E11（#202）
+- [x] **E13. ドキュメント（mkdocs）** → [#204](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/204)
+  - 依存: E12（#203）
 
 ---
 
@@ -225,6 +231,7 @@ Issue化済み（2026-08-02）:
 9. **E1〜E13**（RE。Dに依存するためFE完了後に着手）
 
 IV（A含む）で20 Issue、FE（C含む）で20 Issue、RE（Eのみ）で13 Issue、合計53 Issue。
+**全53件Issue化済み**（IV分: #152〜#171、FE/RE分: #172〜#204）。
 
 ## 未確定・Issue化時に決める事項
 

@@ -44,18 +44,20 @@ sys.path.insert(
 )  # benchmark/linear/ を import path に追加（run_statsmodels_benchmark）
 sys.path.insert(
     0, str(Path(__file__).resolve().parents[2])
-)  # benchmark/ を import path に追加（load_wooldridge）
+)  # benchmark/ を import path に追加（load_wooldridge, generate_synthetic_datasets）
 
 import polars as pl  # noqa: E402
 import statsmodels  # noqa: E402
 
+from generate_synthetic_datasets import imbalanced_cluster_groups  # noqa: E402
 from load_wooldridge import load as load_wooldridge  # noqa: E402
 from run_statsmodels_benchmark import DATA_DIR  # noqa: E402
 
 LINEAR_DIR = Path(__file__).resolve().parent.parent
 R_SCRIPT = LINEAR_DIR / "run_lm_crosscheck_benchmark.R"
 
-# 完全な多重共線性は数値比較の対象外（generate_wls_fixtures.pyと同じ方針）。
+# 完全な多重共線性・scale_varianceは数値比較の対象外（generate_wls_fixtures.pyと
+# 同じ方針。scale_varianceは全cov_typeでComputationErrorになる、Issue #106）。
 NUMERIC_SCENARIOS = [
     "baseline",
     "small_n",
@@ -63,6 +65,9 @@ NUMERIC_SCENARIOS = [
     "heteroskedastic",
     "autocorrelated",
     "moderate_multicollinearity",
+    "high_condition_number",
+    # n=k+1（自由度1ちょうど）の成功パス（Issue #150、OLSのIssue #101相当）。
+    "baseline_df1",
 ]
 
 R_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
@@ -160,22 +165,53 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             fixtures[scenario]["cluster"] = _run_cluster_case(
                 df, csv_path, formula
             )
+            fixtures[scenario]["cluster_imbalanced"] = _run_cluster_case(
+                df,
+                csv_path,
+                formula,
+                groups=imbalanced_cluster_groups(n),
+                suffix="_cluster_imbalanced",
+            )
+            # OLS側（generate_ols_crosscheck_fixtures.py）と同じ理由でq=1
+            # （説明変数1個）に絞る。baseline既定の3個のままG=2にすると、
+            # ロバストWald検定の共分散部分行列が特異になりComputationError
+            # になる（成功パスにならない）。
+            df_g2 = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
+            formula_g2 = "y ~ x1"
+            csv_path_g2 = _write_csv(df_g2, tmpdir, f"{scenario}_g2")
+            fixtures[scenario]["cluster_g2"] = _run_cluster_case(
+                df_g2,
+                csv_path_g2,
+                formula_g2,
+                groups=[str(i % 2) for i in range(df_g2.height)],
+                suffix="_cluster_g2",
+            )
 
     return fixtures
 
 
-def _run_cluster_case(df, csv_path: Path, formula: str) -> dict:
-    """クラスターロバストSEのcrosscheck。generate_wls_fixtures.pyと同じ疑似グループ
-    （行番号%10）を使う。統計的な意味はなく、実装の動作確認用。
+def _run_cluster_case(
+    df,
+    csv_path: Path,
+    formula: str,
+    groups: list | None = None,
+    suffix: str = "_cluster",
+) -> dict:
+    """クラスターロバストSEのcrosscheck。
+
+    Args:
+        df: 疑似グループを付与する対象データ。
+        csv_path: 元データのCSVパス（グループ付きCSVの命名に使う）。
+        formula: 回帰式。
+        groups: 各行のグループラベル。Noneなら既定（行番号%10、10均等グループ）。
+        suffix: 一時CSVファイル名に付けるsuffix（呼び出しごとに衝突しないように）。
     """
-    grouped = (
-        df.with_row_index("_row")
-        .with_columns(
-            (df.with_row_index("_row")["_row"] % 10).alias("cluster_group")
-        )
-        .drop("_row")
+    n = df.height
+    cluster_group = (
+        groups if groups is not None else [i % 10 for i in range(n)]
     )
-    tmp_path = csv_path.with_name(csv_path.stem + "_cluster.csv")
+    grouped = df.with_columns(pl.Series("cluster_group", cluster_group))
+    tmp_path = csv_path.with_name(csv_path.stem + suffix + ".csv")
     grouped.write_csv(tmp_path)
     return {
         "r": _run_r(
@@ -230,10 +266,17 @@ def build_fixtures() -> dict:
         "r_version": r_version,
         "statsmodels_version": statsmodels.__version__,
         "note": (
-            "perfect_multicollinearityシナリオはここに含まない"
-            "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
+            "perfect_multicollinearity・scale_varianceシナリオはここに含まない"
+            "（いずれもComputationErrorの発生確認のみ、テストコード側で対応。"
+            "scale_varianceはOLSと同じ理由（Issue #107）でロバストWald検定の"
+            "共分散部分行列が全cov_typeで数値的にほぼ特異になる、Issue #106で"
+            "WLSでも実測確認済み）。"
             "HACはR側のみ（explicit lagを本実装の自動ラグ式に合わせて指定）。"
-            "clusterはbaselineシナリオのみ、疑似グループ（行番号%10）でR側のみ確認。"
+            "clusterはbaselineシナリオのみ、疑似グループ（行番号%10）に加え、"
+            "不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2"
+            "（cluster_g2）をR側のみ確認（Issue #150、OLSのIssue #100相当）。"
+            "high_condition_number/baseline_df1は境界値・悪条件ケース"
+            "（Issue #150、OLSのIssue #101相当）。"
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
             "重みは合成データセットの'weight'列。401ksubsはinv_inc（1/inc）。"
             "pyfixestとの比較は正確性検証から除外（性能比較専用）。"

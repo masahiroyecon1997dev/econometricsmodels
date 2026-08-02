@@ -17,7 +17,7 @@ repository = "https://github.com/masahiroyecon1997dev/econometricsmodels"
 # 各crateからは `{ workspace = true }` で参照する。
 # サプライチェーン攻撃対策として、全依存を`=`で完全固定する（キャレット等の範囲指定にしない）。
 # アップグレードは意図的に行い、その都度動作確認する。
-thiserror = "=2.0.18"
+thiserror = "=2.0.19"
 # faer: rust-style.md の方針により明示的にバージョン固定（APIが変わりうるため）。
 # 実際に engine の [dependencies] へ追加するのは別issue（ENGINE_DEPS: engineクレートへの依存追加）で行う。
 # ここでは workspace 単位でバージョンだけ先に固定しておく。

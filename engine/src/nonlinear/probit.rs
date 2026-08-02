@@ -62,7 +62,8 @@
 
 use crate::error::CommonError;
 use crate::nonlinear::common::{
-    Method, MleError, destandardize_params, run_solver, standardize_columns, validate_binary_y,
+    Method, MleError, destandardize_cov_params, destandardize_params,
+    observed_information_cov_params, run_solver, standardize_columns, validate_binary_y,
 };
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
@@ -340,13 +341,11 @@ impl Hessian for ProbitProblem {
     }
 }
 
-/// Probitの推定結果（現時点では骨格のみ）。`fit`でのバリデーション・Newton-Raphsonでの
-/// 最適化を通過した状態を表す。
+/// Probitの推定結果。`fit`でのバリデーション・最適化・観測情報行列によるSE計算を
+/// 通過した状態を表す。
 ///
-/// 標準誤差・z値・p値・信頼区間・適合度統計量等は未実装（本Issue #72の完了条件は
-/// Newton-Raphsonでの最適化・収束判定のみ、`LogitEstimator`の骨格実装（Issue #56）と
-/// 同じ切り分け）。`docs/planning/specs/logit-probit-issue-breakdown.md`の対応する
-/// 後続Issueで`fit`に追加していく想定。
+/// 適合度統計量・限界効果等は未実装。`docs/planning/specs/
+/// logit-probit-issue-breakdown.md`の対応する後続Issueで`fit`に追加していく想定。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
 #[derive(Debug)]
@@ -355,6 +354,21 @@ pub struct ProbitEstimator {
     /// 係数（元のスケール。`standardize_columns`で標準化した空間で最適化した後、
     /// `destandardize_params`で逆変換済み）。`input.param_names()`と対応する
     params: Vec<f64>,
+    /// 係数の分散共分散行列（元のスケール、k×k）。現時点では常に観測情報行列
+    /// （`Σ = -H⁻¹`、`cov_type="classical"`/`"nonrobust"`相当）。限界効果
+    /// （デルタ法、`logit-probit-issue-breakdown.md`の対応する後続Issue）で
+    /// 再利用するため、対角成分（`std_errors`）だけでなく行列そのものを保持する。
+    cov_params: Mat<f64>,
+    /// 標準誤差（k, 元のスケール）。`cov_params`の対角成分の平方根
+    std_errors: Vec<f64>,
+    /// z統計量（k）= `params / std_errors`
+    z_stats: Vec<f64>,
+    /// 両側p値（k）。標準正規分布に基づく
+    p_values: Vec<f64>,
+    /// 信頼区間の下限（k）
+    conf_lower: Vec<f64>,
+    /// 信頼区間の上限（k）
+    conf_upper: Vec<f64>,
     /// 収束したかどうか
     converged: bool,
     /// 実際の反復回数
@@ -362,21 +376,29 @@ pub struct ProbitEstimator {
 }
 
 impl ProbitEstimator {
-    /// `method`（Newton-Raphson/BFGS/L-BFGS）で負の対数尤度を最小化し、Probitの係数を
-    /// 推定する。`LogitEstimator::fit`（Issue #56の骨格実装＋Issue #57のmethod分岐）と
-    /// 同じ設計・スコープ。
+    /// `method`（Newton-Raphson/BFGS/L-BFGS）で負の対数尤度を最小化し、Probitの係数・
+    /// 観測情報行列によるSE・z値・p値・信頼区間を推定する。`LogitEstimator::fit`
+    /// （Issue #56の骨格実装＋Issue #57のmethod分岐＋Issue #58のSE計算）と同じ設計・スコープ。
     ///
-    /// `method`の選択に関わらず、収束点でのHessian評価（SE計算用、後続Issueで使用）は
-    /// 常に解析的に行う（`run_solver`の実装方針、`docs/planning/specs/
-    /// nonlinear-implementation-notes.md`「engine内のtrait設計」参照）。BFGS/L-BFGSが
-    /// 最適化中に内部で保持する近似Hessianは使い回さない。
+    /// `method`の選択に関わらず、収束点でのHessian評価（SE計算用）は常に解析的に行う
+    /// （`run_solver`の実装方針、`docs/planning/specs/nonlinear-implementation-notes.md`
+    /// 「engine内のtrait設計」参照）。BFGS/L-BFGSが最適化中に内部で保持する近似Hessianは
+    /// 使い回さない。
     ///
     /// 初期値は常にゼロベクトル（`start_params`によるユーザー指定は未対応、
     /// `LogitEstimator::fit`と同じ理由でユーザー確認の上見送り）。
     ///
     /// 設計行列は`standardize_columns`で内部的に標準化してから最適化し、収束後の
     /// パラメータを`destandardize_params`で元のスケールへ逆変換する
-    /// （`LogitEstimator::fit`のdocコメント参照）。
+    /// （`LogitEstimator::fit`のdocコメント参照）。`run_solver`が返すHessianは
+    /// 標準化空間（θ_std）で評価されたものであり、分散共分散行列もいったん標準化空間で
+    /// 計算してから`destandardize_cov_params`で元のスケールへ逆変換する
+    /// （`destandardize_params`を先に適用してから逆算するのではなく、標準化空間の
+    /// `cov_params`を直接destandardizeする。`LogitEstimator::fit`と同じ理由）。
+    ///
+    /// `cov_type`は現時点では観測情報行列（`"classical"`/`"nonrobust"`相当）のみで、
+    /// 選択オプションはまだ無い（OPG/サンドイッチ/クラスターは後続Issueで追加）。
+    /// 検定分布は標準正規分布（`nonlinear-api-design.md`5章、OLSのt分布とは異なる）。
     ///
     /// `n <= k`で`CommonError::InsufficientObservations`、`k == 0`で
     /// `CommonError::NoRegressors`を返す閾値・使い分けは`LogitEstimator::fit`と同じ
@@ -439,9 +461,40 @@ impl ProbitEstimator {
 
         let params = destandardize_params(&output.params, &scale);
 
+        let hessian_std = Mat::from_fn(k, k, |i, j| output.hessian[i][j]);
+        let cov_params_std = observed_information_cov_params(&hessian_std, k)?;
+        let cov_params = destandardize_cov_params(&cov_params_std, &scale);
+
+        let normal = Normal::standard();
+        let alpha = 1.0 - confidence_level;
+        let z_crit = normal.inverse_cdf(1.0 - alpha / 2.0);
+
+        let mut std_errors = vec![0.0; k];
+        let mut z_stats = vec![0.0; k];
+        let mut p_values = vec![0.0; k];
+        let mut conf_lower = vec![0.0; k];
+        let mut conf_upper = vec![0.0; k];
+
+        for j in 0..k {
+            let se = (*cov_params.get(j, j)).sqrt();
+            let z = params[j] / se;
+
+            std_errors[j] = se;
+            z_stats[j] = z;
+            p_values[j] = 2.0 * (1.0 - normal.cdf(z.abs()));
+            conf_lower[j] = params[j] - z_crit * se;
+            conf_upper[j] = params[j] + z_crit * se;
+        }
+
         Ok(Self {
             input,
             params,
+            cov_params,
+            std_errors,
+            z_stats,
+            p_values,
+            conf_lower,
+            conf_upper,
             converged: output.converged,
             n_iter: output.n_iter,
         })
@@ -450,6 +503,36 @@ impl ProbitEstimator {
     /// 推定に使った入力データ
     pub fn input(&self) -> &ProbitInput {
         &self.input
+    }
+
+    /// 係数の分散共分散行列（元のスケール、k×k）
+    pub fn cov_params(&self) -> &Mat<f64> {
+        &self.cov_params
+    }
+
+    /// 標準誤差（k、元のスケール）
+    pub fn std_errors(&self) -> &[f64] {
+        &self.std_errors
+    }
+
+    /// z統計量（k）
+    pub fn z_stats(&self) -> &[f64] {
+        &self.z_stats
+    }
+
+    /// 両側p値（k）
+    pub fn p_values(&self) -> &[f64] {
+        &self.p_values
+    }
+
+    /// 信頼区間の下限（k）
+    pub fn conf_lower(&self) -> &[f64] {
+        &self.conf_lower
+    }
+
+    /// 信頼区間の上限（k）
+    pub fn conf_upper(&self) -> &[f64] {
+        &self.conf_upper
     }
 
     /// 係数（元のスケール）
@@ -736,6 +819,97 @@ mod tests {
         );
         // 切片のみの1次元凹関数のNewton法は数回で収束するはず
         assert!(estimator.n_iter() <= 10, "n_iter={}", estimator.n_iter());
+    }
+
+    /// 切片のみモデルは観測情報行列も閉じた形で書ける。MLEの一階条件`Σλᵢ=0`が
+    /// 収束点で厳密に成り立つことを使うと、Hessian（`-ℓ`の2階微分）は
+    /// `H(θ̂) = Σᵢλᵢ² = n*φ(θ̂)²/(ȳ(1-ȳ))`という形に単純化できる
+    /// （`λᵢ(λᵢ+θ)`の`θ`の項が`θ*Σλᵢ=0`で消える。導出はモジュールdocコメント
+    /// 「数式」節の`λᵢ`の定義と合わせて`probit-implementation-notes.md`参照）。
+    /// `Var(θ̂) = H(θ̂)⁻¹ = ȳ(1-ȳ)/(n*φ(θ̂)²)`。z値・p値・信頼区間はこの分散から
+    /// 標準正規分布（独立に`statrs::Normal`で検算）で導出できる。
+    #[test]
+    fn fit_computes_std_errors_z_stats_p_values_and_ci_matching_closed_form_for_intercept_only_model()
+     {
+        let estimator =
+            ProbitEstimator::fit(intercept_only_input(), Method::Newton, 35, 1e-6, true, 0.95)
+                .unwrap();
+
+        let n: f64 = 7.0;
+        let y_bar: f64 = 4.0 / 7.0;
+        let theta_hat = Normal::standard().inverse_cdf(y_bar);
+        let phi_theta_hat = Normal::standard().pdf(theta_hat);
+        let expected_var = y_bar * (1.0 - y_bar) / (n * phi_theta_hat * phi_theta_hat);
+        let expected_se = expected_var.sqrt();
+
+        // Newtonの収束判定（勾配ノルム`tol=1e-6`）による数値誤差があるため、
+        // 他の閉じた形テスト（`fit_newton_converges_to_closed_form_solution_...`）と
+        // 同じ桁の許容誤差（1e-6）を使う。
+        assert!((*estimator.cov_params().get(0, 0) - expected_var).abs() < 1e-6);
+        assert!((estimator.std_errors()[0] - expected_se).abs() < 1e-6);
+
+        let expected_z = estimator.params()[0] / expected_se;
+        assert!((estimator.z_stats()[0] - expected_z).abs() < 1e-6);
+
+        // p値・信頼区間はstatrsのNormalで独立に検算する（本体実装と同じ計算式を
+        // 繰り返すのではなく、標準正規分布の性質から直接導出する）。
+        let normal = Normal::standard();
+        let expected_p = 2.0 * (1.0 - normal.cdf(expected_z.abs()));
+        assert!((estimator.p_values()[0] - expected_p).abs() < 1e-6);
+
+        let z_crit = normal.inverse_cdf(0.975);
+        let expected_lower = estimator.params()[0] - z_crit * expected_se;
+        let expected_upper = estimator.params()[0] + z_crit * expected_se;
+        assert!((estimator.conf_lower()[0] - expected_lower).abs() < 1e-6);
+        assert!((estimator.conf_upper()[0] - expected_upper).abs() < 1e-6);
+    }
+
+    /// 多変量（説明変数が2つ以上）の場合、標準誤差に閉じた形の解析解は無いため、
+    /// `cov_params`の対称性・各種統計量の内部整合性（z値・信頼区間の定義式通りの関係）を
+    /// 検証する回帰テスト。特に`destandardize_cov_params`が非対角成分も含めて
+    /// 正しく元のスケールへ逆変換できているかを確認する（対角成分だけでは
+    /// `destandardize_cov_params`の`stds[i]*stds[j]`の掛け違い（転置ミス等）を検出できない）。
+    #[test]
+    fn fit_cov_params_is_symmetric_and_stats_are_internally_consistent() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![10.0, 20.0, 30.0, 40.0], vec![-5.0, 2.0, 8.0, -1.0]];
+        let input = ProbitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = ProbitEstimator::fit(input, Method::Newton, 35, 1e-8, true, 0.95).unwrap();
+        let k = 3;
+
+        for i in 0..k {
+            for j in 0..k {
+                assert!(
+                    (*estimator.cov_params().get(i, j) - *estimator.cov_params().get(j, i)).abs()
+                        < 1e-9,
+                    "cov_params is not symmetric at ({i},{j})"
+                );
+            }
+            assert!(
+                *estimator.cov_params().get(i, i) > 0.0,
+                "diagonal[{i}] <= 0"
+            );
+        }
+
+        let normal = Normal::standard();
+        let z_crit = normal.inverse_cdf(0.975);
+        for j in 0..k {
+            let se = estimator.std_errors()[j];
+            assert!((se * se - *estimator.cov_params().get(j, j)).abs() < 1e-9);
+            assert!((estimator.z_stats()[j] - estimator.params()[j] / se).abs() < 1e-9);
+            assert!(
+                (estimator.conf_upper()[j] - estimator.conf_lower()[j] - 2.0 * z_crit * se).abs()
+                    < 1e-9
+            );
+        }
     }
 
     /// `newton`と同じデータセット（既知の解析解を持つ切片のみモデル）で`bfgs`/`lbfgs`を

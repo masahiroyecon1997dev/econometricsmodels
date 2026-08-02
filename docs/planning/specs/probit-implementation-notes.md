@@ -118,3 +118,34 @@ rust-reviewerのレビューで指摘され、ユーザー確認の上でテス�
 **あえて修正しない判断（ユーザー確認済み）**: `gradient()`を`cost()`の真の微分（クランプ領域で0）に揃える「修正」は、実は逆に危険である。完全分離に近い強く誤分類された点で`gradient`が0になると、勾配ノルム基準の収束判定が誤検知しうる（Logitの完全分離問題、Issue #138と同じクラスのバグをU_CLAMP経由で再現することになる）。現状の実装（クランプ済みλをそのまま使う、有限だが大きな値を返す）は、`u→-∞`での真の（クランプ無し）Millsの比の漸近的な発散（`λ~|u|`）と整合する挙動に近く、意図的な設計判断として維持する。
 
 BFGS/L-BFGS×分離データでの実際の挙動（line search失敗の有無等）は未検証。method分岐の後続issue、または実際に収束の問題が観測された時点で改めて検討する。
+
+## 観測情報行列でのSE・z値・p値・信頼区間（Issue #74で実装済み）
+
+`ProbitEstimator::fit`を拡張し、`run_solver`が返す収束点のHessianから観測情報行列（`Σ=-H⁻¹`、`cov_type="classical"`/`"nonrobust"`相当）による`std_errors`/`z_stats`/`p_values`/`conf_lower`/`conf_upper`を算出する。`LogitEstimator::fit`（Issue #58、コミット`75cc31d`）と同じ設計。検定分布は標準正規分布。
+
+`destandardize_cov_params`・`observed_information_cov_params`はLogit実装時（Issue #58）に`nonlinear/common.rs`へ新設された系統共通インフラであり、Probitでは新規実装不要でそのまま再利用した。非ピボットCholeskyの特異性検出漏れ対策（Issue #129、`ensure_well_conditioned_symmetric_matrix`）も同じ共通関数経由のため、Probitは当初から恩恵を受けている。
+
+`Normal::new(0.0, 1.0).map_err(...)`（Logitが使う、理論上到達不能な`Result`分岐を明示する書き方）ではなく`Normal::standard()`（`Result`を返さない）を使った。`probit.rs`内の他の箇所（`ProbitProblem`のcost/gradient/hessian/scores、`clamped_pdf_cdf`）で既に`Normal::standard()`に統一しているため、ファイル内の一貫性を優先した（Logitとの差分だが、機能的には同一）。
+
+### 閉じた形の解析解（切片のみモデル、Fisher情報量の導出）
+
+切片のみモデルは観測情報行列も閉じた形で書ける。MLEの一階条件`Σᵢλᵢ=0`（収束点で厳密に成立、`gradient(-ℓ)=-Σλᵢxᵢ`が0になる条件そのもの）を使うと、Hessian`H(θ)=Σᵢλᵢ(λᵢ+θ)`（`x_i=1`のため`xᵢxᵢ'=1`）は収束点`θ̂`で
+
+```
+H(θ̂) = Σᵢλᵢ² + θ̂·Σᵢλᵢ = Σᵢλᵢ²
+```
+
+（第2項が`Σλᵢ=0`で消える）に単純化できる。`y=1`の観測（`n1=n·ȳ`件）では`λ₁=φ(θ̂)/ȳ`、`y=0`の観測（`n0=n·(1-ȳ)`件）では`λ₀=-φ(θ̂)/(1-ȳ)`（`Φ(θ̂)=ȳ`を使用）なので、
+
+```
+H(θ̂) = n1·λ₁² + n0·λ₀² = n·φ(θ̂)²/ȳ + n·φ(θ̂)²/(1-ȳ) = n·φ(θ̂)²/(ȳ(1-ȳ))
+```
+
+これはprobitの切片のみモデルにおけるFisher情報量の標準的な結果と一致する。`Var(θ̂) = H(θ̂)⁻¹ = ȳ(1-ȳ)/(n·φ(θ̂)²)`。`fit_computes_std_errors_z_stats_p_values_and_ci_matching_closed_form_for_intercept_only_model`テストでこの式を実装から独立に検算した（自分で導出した式のため、rust-reviewerに数式検証を依頼済み）。
+
+### テスト
+
+Logitの対応するテスト2種と同じ構成:
+
+- **`fit_computes_std_errors_z_stats_p_values_and_ci_matching_closed_form_for_intercept_only_model`**: 上記の閉じた形`Var(θ̂)=ȳ(1-ȳ)/(n·φ(θ̂)²)`から`cov_params`/`std_errors`/`z_stats`/`p_values`/`conf_lower`/`conf_upper`を検算（許容誤差`1e-6`、Newtonの収束判定`tol=1e-6`に起因する数値誤差を考慮）。
+- **`fit_cov_params_is_symmetric_and_stats_are_internally_consistent`**: 多変量（説明変数2つ）データで`cov_params`の対称性・対角成分の正値性、および`std_errors`/`z_stats`/信頼区間幅の内部整合性（定義式通りの関係）を検証する回帰テスト。`destandardize_cov_params`の非対角成分の逆変換（`stds[i]*stds[j]`の掛け違い等）を対角成分だけのテストでは検出できないため。

@@ -1,11 +1,12 @@
 # FE / RE API・オプション設計
 
-`docs/panel-iv-design-points.md`の論点をモデルごとにIssue化したうちの、FE/RE共通部分の確定事項をまとめる。
-IV固有の設計は[`iv-api-design.md`](./iv-api-design.md)を参照。
+[`panel-iv-design-points.md`](../panel-iv-design-points.md)の論点をモデルごとにIssue化したうちの、
+FE/RE共通部分の確定事項をまとめる。IV固有の設計は[`iv-api-design.md`](./iv-api-design.md)を参照。
 
-**ステータス**: 一部確定（1章: 引数設計、Issue #119／2章: 結果設計、Issue #120／3章: 標準誤差・検定、
+**ステータス**: 確定（1章: 引数設計、Issue #119／2章: 結果設計、Issue #120／3章: 標準誤差・検定、
 Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレンス実装・テスト方針、Issue #123／
-6章: FE固有論点、Issue #124）。他は未確定（7章参照）。
+6章: FE固有論点、Issue #124／7章: RE固有論点、Issue #125）。FE/RE側の論点はすべて確定。
+IV固有論点（Issue #126）は`iv-api-design.md`参照。
 
 ## 1. 引数設計（Issue #119、確定）
 
@@ -287,6 +288,64 @@ Issue #121で「2-way clustering（entity+time同時）はv1スコープ外、2-
 クラスターのデフォルトはentity単位のまま維持する**（`cluster_col`で上書き可能な既存挙動を
 変えない）。2-way clustering自体はv1スコープ外のまま据え置く。
 
-## 7. その他の論点（未確定）
+## 7. RE固有論点（Issue #125、確定）
 
-- RE固有論点（分散成分推定・ハウスマン検定の実装詳細等）: Issue #125
+### 7.1 分散成分の推定方法
+
+**Swamy-Arora法を採用する**。R `plm`のデフォルト（`random.method="swar"`）、Python
+`linearmodels.RandomEffects`の実装、いずれもSwamy-Arora相当であり、Issue #123で確定した
+2つの参照実装（主リファレンスlinearmodels、クロスチェックplm）と自然に整合する
+（`linearmodels/panel/model.py`のソースで実装を確認済み）。
+
+- **σ_ε²（idiosyncratic variance）**: within変換済み残差の分散、分母は`n - k - n_entities + 1`
+  （FEのdf調整に類似した式。linearmodelsのソースで確認済み）。
+- **σ_u²（individual variance）**: between回帰（エンティティ平均に対するOLS）から、調和平均
+  `t_bar = n_entities / Σ(1/T_i)`を使う標準式`max(0, ssr/(n_entities - k) - σ_ε²/t_bar)`。
+- linearmodelsが提供する`small_sample`補正（不均衡パネル向けのtraceベースの追加調整、
+  デフォルト`False`）はv1では実装しない（linearmodelsのデフォルト挙動に合わせる）。
+
+### 7.2 θ（準偏差変換の重み）計算
+
+`θ_i = 1 - sqrt(σ_ε² / (T_i・σ_u² + σ_ε²))`（linearmodelsのソースで確認済み、Baltagiの教科書
+通りの式）。
+
+- **REはentity方向のみ（2-way REはv1スコープ外）**なので、Issue #124のFE・1-wayと同じ扱いで
+  **不均衡パネルもv1から無条件でサポートする**。`T_i`（エンティティごとの観測数）を直接使う
+  この式は教科書レベルで不均衡対応済みであり、FEの2-wayのような反復アルゴリズムは不要。
+
+### 7.3 ハウスマン検定の実装場所・インターフェース
+
+- Issue #120の決定通り、**`RE.fit()`内で自動計算し`ReResult`にのみ含める**（`FeResult`には
+  追加しない）。
+- **計算部分（カイ二乗統計量そのもの）は共通関数化する**: `engine/src/panel/common.rs`に
+  `hausman_statistic(beta_fe, cov_fe, beta_re, cov_re) -> (stat, df, p_value)`を実装し、
+  RE側からのみ呼ぶ。
+- **比較対象はFE/RE間で重なりのあるスロープ係数のみ**（REの切片は比較から除外する。FEには
+  切片が存在しないため、次元を揃える必要がある）。
+- REが時間不変変数を含む場合、内部FE推定はIssue #124の分散ゼロ検証
+  （[6.7](#67-within変換後に分散ゼロになる説明変数の検出)）で失敗する。この場合はIssue #120で
+  決めた「FE推定失敗時はハウスマン関連フィールドを`None`にする」フォールバックがそのまま
+  適用される。
+- linearmodelsのソースコードを確認したところ`hausman`という文字列は一切登場せず、専用実装が
+  無いことを確定した。Issue #123で決めた「`plm::phtest`のみを参照値とする例外」の妥当性を
+  裏付ける。
+
+### 7.4 FEとの内部設計共有範囲
+
+- **θでパラメータ化した共通の準偏差変換関数を実装する**:
+  `quasi_demean(data, entity, theta: &[f64]) -> transformed_data`。FEは全エンティティに
+  `θ_i = 1.0`を渡すことでこの関数の特殊ケースとして扱える（Issue #124の`OlsEstimator`委譲
+  方針とあわせ、FE/RE双方がこの関数の出力を`OlsEstimator::fit`に渡す設計にできる）。
+- **σ_ε²の推定（7.1）はFEのwithin回帰の残差分散をそのまま利用する**。`RE.fit()`は内部で
+  FE推定を呼び出し、その残差分散を再利用する（RE → FE → `OlsEstimator`という委譲チェーンとして
+  整理する）。
+- ハウスマン統計量の計算関数（7.3）も共有する。
+- 上記以外（between回帰によるσ_u²推定、θ計算そのもの）はRE固有のロジックとし、無理に
+  共通化しない。
+
+### 7.5 REのdf_resid
+
+**`n - k`**（linearmodelsのソースで`df_resid = wy.shape[0] - wx.shape[1]`と確認済み）。
+FEの`n - n_entities - k`（6.3）とは異なる式であることに注意する。REはGLS変換であり
+FEのように個体ダミー相当の自由度を消費しないため、通常のOLSと同じ式になる。7.1の
+σ_ε²推定で使う中間的な自由度調整（`n - k - n_entities + 1`）とは別物なので混同しないこと。

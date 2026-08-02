@@ -119,12 +119,25 @@
 
 詳細: [`panel-api-design.md`](./specs/panel-api-design.md)6章
 
-## 3. RE（変量効果）固有論点
+## 3. RE（変量効果）固有論点（確定・Issue #125）
 
-- [ ] 分散成分の推定方法（Swamy-Arora法 / Wallace-Hussain法など、方式の選定）
-- [ ] θ（準偏差変換の重み）計算：バランス/不均衡パネルでの扱いの違い
-- [ ] ハウスマン検定の実装場所・インターフェース（1.2参照）
-- [ ] FEとの内部設計共有範囲（within/between変換ロジックの共通化）
+- [x] 分散成分の推定方法（Swamy-Arora法 / Wallace-Hussain法など、方式の選定）
+  - Swamy-Arora法。R plmのデフォルト・Python linearmodelsの実装いずれも相当し、#123の
+    参照実装選定と整合（linearmodelsのソースコードで実装式を確認済み）。
+- [x] θ（準偏差変換の重み）計算：バランス/不均衡パネルでの扱いの違い
+  - `θ_i = 1 - sqrt(σ_ε² / (T_i・σ_u² + σ_ε²))`。REはentity方向のみ（2-wayスコープ外）なので
+    FEの1-wayと同様、不均衡パネルもv1から無条件でサポート。
+- [x] ハウスマン検定の実装場所・インターフェース（1.2参照）
+  - `RE.fit()`内で自動計算し`ReResult`にのみ含める（FEには追加しない）。計算部分
+    （カイ二乗統計量）は`hausman_statistic`として`engine/src/panel/common.rs`に共通関数化。
+    linearmodelsに専用実装が無いことをソースコードで確認済み（#123の例外判断の裏付け）。
+- [x] FEとの内部設計共有範囲（within/between変換ロジックの共通化）
+  - θでパラメータ化した準偏差変換関数`quasi_demean`をFE/REで共有（FEは`θ_i=1.0`の特殊
+    ケース）。σ_ε²推定もFEのwithin回帰残差分散を再利用（RE→FE→`OlsEstimator`の委譲チェーン）。
+- [x]（追加決定）REのdf_resid: `n - k`（FEの`n - n_entities - k`とは別式、linearmodelsソースで
+  確認済み）。
+
+詳細: [`panel-api-design.md`](./specs/panel-api-design.md)7章
 
 ## 4. IV（操作変数法）固有論点
 

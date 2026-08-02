@@ -149,3 +149,30 @@ Logitの対応するテスト2種と同じ構成:
 
 - **`fit_computes_std_errors_z_stats_p_values_and_ci_matching_closed_form_for_intercept_only_model`**: 上記の閉じた形`Var(θ̂)=ȳ(1-ȳ)/(n·φ(θ̂)²)`から`cov_params`/`std_errors`/`z_stats`/`p_values`/`conf_lower`/`conf_upper`を検算（許容誤差`1e-6`、Newtonの収束判定`tol=1e-6`に起因する数値誤差を考慮）。
 - **`fit_cov_params_is_symmetric_and_stats_are_internally_consistent`**: 多変量（説明変数2つ）データで`cov_params`の対称性・対角成分の正値性、および`std_errors`/`z_stats`/信頼区間幅の内部整合性（定義式通りの関係）を検証する回帰テスト。`destandardize_cov_params`の非対角成分の逆変換（`stds[i]*stds[j]`の掛け違い等）を対角成分だけのテストでは検出できないため。
+
+## OPG（BHHH）・サンドイッチ型（HC0/HC1）・クラスターロバストSE（Issue #75/#76で実装済み）
+
+`ProbitEstimator::fit`に`cov_type: CovType`引数を追加し、`Classical`/`Opg`/`Hc0`/`Hc1`/`Cluster`を選べるようにした。`LogitEstimator::fit`（Issue #59、コミット`0c485dc`、およびクラスター対応Issue #60、コミット`a91888e`）と同じ設計。`opg_cov_params`/`sandwich_cov_params`/`SandwichVariant`/`cluster_cov_params`はいずれもLogit実装時に`nonlinear/common.rs`へ新設された共通インフラで、新規実装は不要だった。
+
+### Issue #76（クラスター）を同時に実装した理由
+
+`CovType`は`Logit`/`Probit`/`Tobit`共通の1つの列挙型として`nonlinear/common.rs`に定義されており、既に`Cluster`バリアントを含んでいる（Logitのクラスター実装、Issue #60時点で追加済み）。`ProbitEstimator::fit`の`match cov_type`をコンパイルするには全バリアントを網羅する必要があるため、Issue #75（OPG/HC0/HC1のみ）に着手した時点で`Cluster`アームを何らかの形で書かないとビルドが通らない状態になった。
+
+対応方針をユーザーに確認し、「今回（#75）でClusterも一緒に実装し、#76もクローズする」を選択した。理由: `Cluster`に必要な共有インフラ（`validate_cluster_groups`＝`engine/src/validation.rs`、`cluster_cov_params`＝`nonlinear/common.rs`）はLogit実装時（Issue #60）に既に完成・テスト済みで、Probit側は新規設計判断を伴わない配線作業のみだったため。仮の`NotYetImplemented`のようなエラー型を新設して`Cluster`を一時的に弾く案は、後で使われなくなる型を増やすだけで不自然と判断し採用しなかった。
+
+`Logit`は反復最適化のため、グループキー未指定・クラスター数不足の検証を`fit()`冒頭（最適化実行前）で行う設計だった（OLSは閉形式解のため事後検証でもコストが変わらない）。Probitも同じ理由でこの設計をそのまま踏襲した。
+
+### テスト
+
+Logitの対応するテスト（Issue #59で2種、Issue #60で4種の計6種）と同じ構成:
+
+- **`fit_cov_type_opg_hc0_hc1_match_independently_recomputed_values`**: `fit()`と同じ手順（標準化→収束点でのscores/Hessian評価→共通行列演算→`destandardize_cov_params`）をテスト側で独立に再現し、`opg`/`hc0`/`hc1`それぞれの`cov_params`と突き合わせる。多変量（k=3）データセットが必須な理由: 切片のみモデルでは情報行列の等式（`Σᵢsᵢsᵢ' = -H`）が有限標本で厳密に成り立ってしまい、`classical`/`opg`/`hc0`が偶然同じ値になるため、`match cov_type`の配線ミスを検出できない。
+- **`fit_cov_type_cluster_matches_independently_recomputed_values`**（2:2の均等グループ）・**`fit_cov_type_cluster_matches_independently_recomputed_values_with_unbalanced_groups`**（3:2の不均衡グループ）: 同じ独立再現の技法で`cluster`を検証。不均衡ケースは`testing-policy.md`の指摘（均等サイズのみのテストは実務で起こりやすい偏ったグループサイズを見逃しうる）に倣う。
+- **`fit_returns_missing_cluster_column_error_when_groups_not_provided`**・**`fit_returns_insufficient_clusters_error_when_only_one_group`**: `cov_type=Cluster`のグループキー未指定・クラスター数不足エラーを検証。
+- **`fit_non_classical_cov_types_work_with_bfgs_and_lbfgs`**: `method`（`bfgs`/`lbfgs`）と`cov_type`（`Opg`/`Hc0`/`Hc1`/`Cluster`）の組み合わせを検証（Logitでrust-reviewerが指摘した「method横断・cov_type横断が別々にしか検証されておらず組み合わせが未検証」という穴を踏まえた構成）。
+
+### 既知のテストギャップ（未対応、後続issueで拾う）
+
+Logit側には、Issue #59/#60より後の「engine単体テストのカバレッジ確認」issue（コミット`25c4529`、`cargo-llvm-cov`で`fit()`内の`CovType::Hc0`/`Hc1`/`Opg`分岐の`?`（エラー伝播）を実際に通るテストが無いというギャップを検出）で追加された、完全な多重共線性データセットに対する`cov_type`ごとのエラー伝播テストが3種ある（`fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_bfgs_and_lbfgs`／`..._with_hc0_and_hc1`／`fit_returns_singular_opg_matrix_error_for_perfectly_collinear_design_matrix`）。Probit側には対応するテストがまだ無い（rust-reviewer指摘）。
+
+「Logitで既に判明済みのギャップパターン」であることが分かっているため、Probitのengine単体テストカバレッジ確認issue（`logit-probit-issue-breakdown.md`のC11相当、#80）着手時に確実に拾うこと。

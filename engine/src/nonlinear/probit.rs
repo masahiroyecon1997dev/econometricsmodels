@@ -62,9 +62,11 @@
 
 use crate::error::CommonError;
 use crate::nonlinear::common::{
-    Method, MleError, destandardize_cov_params, destandardize_params,
-    observed_information_cov_params, run_solver, standardize_columns, validate_binary_y,
+    CovType, Method, MleError, SandwichVariant, cluster_cov_params, destandardize_cov_params,
+    destandardize_params, observed_information_cov_params, opg_cov_params, run_solver,
+    sandwich_cov_params, standardize_columns, validate_binary_y,
 };
+use crate::validation::validate_cluster_groups;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
 use statrs::distribution::{Continuous, ContinuousCDF, Normal};
@@ -341,7 +343,7 @@ impl Hessian for ProbitProblem {
     }
 }
 
-/// Probitの推定結果。`fit`でのバリデーション・最適化・観測情報行列によるSE計算を
+/// Probitの推定結果。`fit`でのバリデーション・最適化・`cov_type`に応じたSE計算を
 /// 通過した状態を表す。
 ///
 /// 適合度統計量・限界効果等は未実装。`docs/planning/specs/
@@ -354,10 +356,11 @@ pub struct ProbitEstimator {
     /// 係数（元のスケール。`standardize_columns`で標準化した空間で最適化した後、
     /// `destandardize_params`で逆変換済み）。`input.param_names()`と対応する
     params: Vec<f64>,
-    /// 係数の分散共分散行列（元のスケール、k×k）。現時点では常に観測情報行列
-    /// （`Σ = -H⁻¹`、`cov_type="classical"`/`"nonrobust"`相当）。限界効果
-    /// （デルタ法、`logit-probit-issue-breakdown.md`の対応する後続Issue）で
-    /// 再利用するため、対角成分（`std_errors`）だけでなく行列そのものを保持する。
+    /// 係数の分散共分散行列（元のスケール、k×k）。`fit`に渡した`cov_type`に応じて
+    /// 観測情報行列（`Classical`）・OPG（`Opg`）・サンドイッチ型（`Hc0`/`Hc1`）の
+    /// いずれかで計算される。限界効果（デルタ法、`logit-probit-issue-breakdown.md`の
+    /// 対応する後続Issue）で再利用するため、対角成分（`std_errors`）だけでなく
+    /// 行列そのものを保持する。
     cov_params: Mat<f64>,
     /// 標準誤差（k, 元のスケール）。`cov_params`の対角成分の平方根
     std_errors: Vec<f64>,
@@ -396,9 +399,16 @@ impl ProbitEstimator {
     /// （`destandardize_params`を先に適用してから逆算するのではなく、標準化空間の
     /// `cov_params`を直接destandardizeする。`LogitEstimator::fit`と同じ理由）。
     ///
-    /// `cov_type`は現時点では観測情報行列（`"classical"`/`"nonrobust"`相当）のみで、
-    /// 選択オプションはまだ無い（OPG/サンドイッチ/クラスターは後続Issueで追加）。
-    /// 検定分布は標準正規分布（`nonlinear-api-design.md`5章、OLSのt分布とは異なる）。
+    /// `cov_type`は観測情報行列（`Classical`）・OPG（`Opg`）・サンドイッチ型
+    /// （`Hc0`/`Hc1`）・クラスターロバスト（`Cluster`）に対応する。`Cluster`の
+    /// グループキー未指定・クラスター数不足は、最適化を実行する前（`fit()`冒頭）に
+    /// 検証して早期に返す（`LogitEstimator::fit`と同じ、反復最適化のため無駄な計算を
+    /// 避ける）。`Opg`/`Hc0`/`Hc1`/`Cluster`は収束点での観測ごとのスコア
+    /// （`ProbitProblem::scores`）が必要なため、標準化空間の設計行列を保持したまま
+    /// `ProbitProblem`をクローンしておき（`argmin::core::Executor`向けに元々`Clone`を
+    /// 要求しているため追加コストは`Clone`実装自体のみ）、`run_solver`が返す収束点の
+    /// パラメータで評価する。検定分布は標準正規分布（`nonlinear-api-design.md`5章、
+    /// OLSのt分布とは異なる）。
     ///
     /// `n <= k`で`CommonError::InsufficientObservations`、`k == 0`で
     /// `CommonError::NoRegressors`を返す閾値・使い分けは`LogitEstimator::fit`と同じ
@@ -419,12 +429,16 @@ impl ProbitEstimator {
     /// - `raise_on_non_convergence=true`かつ`max_iter`回で未収束: `MleError::NonConvergence`
     /// - 収束点（または`raise_on_non_convergence=false`時の打ち切り点）のHessianが特異
     ///   （設計行列の完全な多重共線性等）: `MleError::SingularHessian`
+    /// - `cov_type=Opg`でOPG行列（`Σᵢ sᵢsᵢ'`）が特異: `MleError::SingularOpgMatrix`
+    /// - `cov_type=Cluster`でグループキー未指定: `CommonError::MissingClusterColumn`
+    /// - `cov_type=Cluster`でクラスター数が2未満: `CommonError::InsufficientClusters`
     pub fn fit(
         input: ProbitInput,
         method: Method,
         max_iter: i64,
         tol: f64,
         raise_on_non_convergence: bool,
+        cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, MleError> {
         if !(confidence_level > 0.0 && confidence_level < 1.0) {
@@ -446,9 +460,26 @@ impl ProbitEstimator {
         if n <= k {
             return Err(CommonError::InsufficientObservations { n, k }.into());
         }
+        if let CovType::Cluster { groups } = &cov_type {
+            let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
+            validate_cluster_groups(groups, n)?;
+        }
 
         let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
         let problem = ProbitProblem::from_standardized(x_std, input.y().clone());
+        // `cov_type`がOPG/サンドイッチ型/クラスターロバストの場合、収束点でのスコア評価に
+        // 元の`ProbitProblem`（標準化空間のx_std）が必要になる。`run_solver`は`problem`の
+        // 所有権を取り込む（内部で保持していたモデルを呼び出し元へ返さない設計）ため、
+        // 事前にクローンしておく必要がある（`ProbitProblem`は`argmin::core::Executor`
+        // 向けに元々`Clone`を要求しているため、この用途のための追加のtraitではない）。
+        // `Classical`はスコアを使わないため、無駄な複製（設計行列を含む）を避けるために
+        // `cov_type`に応じて条件付きで行う（`LogitEstimator::fit`と同じ、rust-reviewer指摘）。
+        let problem_for_scores = match &cov_type {
+            CovType::Classical => None,
+            CovType::Opg | CovType::Hc0 | CovType::Hc1 | CovType::Cluster { .. } => {
+                Some(problem.clone())
+            }
+        };
 
         let output = run_solver(
             problem,
@@ -462,7 +493,55 @@ impl ProbitEstimator {
         let params = destandardize_params(&output.params, &scale);
 
         let hessian_std = Mat::from_fn(k, k, |i, j| output.hessian[i][j]);
-        let cov_params_std = observed_information_cov_params(&hessian_std, k)?;
+        // `problem_for_scores.as_ref().expect(...)`は各非`Classical`分岐でのみ呼ばれ、
+        // 直前の`match cov_type { CovType::Classical => None, _ => Some(...) }`により
+        // 常に`Some`であることが保証されている内部契約（`LogitEstimator::fit`と同じ、
+        // `expect`のメッセージで契約を明記して防御的に扱う）。
+        let cov_params_std = match &cov_type {
+            CovType::Classical => observed_information_cov_params(&hessian_std, k)?,
+            CovType::Opg => {
+                let problem = problem_for_scores
+                    .as_ref()
+                    .expect("problem_for_scores must be Some for CovType::Opg");
+                opg_cov_params(&problem.scores(&output.params), k)?
+            }
+            CovType::Hc0 => {
+                let problem = problem_for_scores
+                    .as_ref()
+                    .expect("problem_for_scores must be Some for CovType::Hc0");
+                sandwich_cov_params(
+                    &hessian_std,
+                    &problem.scores(&output.params),
+                    n,
+                    k,
+                    SandwichVariant::Hc0,
+                )?
+            }
+            CovType::Hc1 => {
+                let problem = problem_for_scores
+                    .as_ref()
+                    .expect("problem_for_scores must be Some for CovType::Hc1");
+                sandwich_cov_params(
+                    &hessian_std,
+                    &problem.scores(&output.params),
+                    n,
+                    k,
+                    SandwichVariant::Hc1,
+                )?
+            }
+            CovType::Cluster { groups } => {
+                let problem = problem_for_scores
+                    .as_ref()
+                    .expect("problem_for_scores must be Some for CovType::Cluster");
+                // `groups`のNone・クラスター数不足の検証はfit()冒頭で完了済み
+                // （MissingClusterColumn/InsufficientClustersを最適化前に早期に返す
+                // ため）。ここでの`expect`はその契約を明記する防御的な扱い。
+                let groups = groups
+                    .as_ref()
+                    .expect("groups is validated as Some at the top of fit()");
+                cluster_cov_params(&hessian_std, &problem.scores(&output.params), n, k, groups)?
+            }
+        };
         let cov_params = destandardize_cov_params(&cov_params_std, &scale);
 
         let normal = Normal::standard();
@@ -804,7 +883,16 @@ mod tests {
     #[test]
     fn fit_newton_converges_to_closed_form_solution_for_intercept_only_model() {
         let input = intercept_only_input();
-        let estimator = ProbitEstimator::fit(input, Method::Newton, 35, 1e-6, true, 0.95).unwrap();
+        let estimator = ProbitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-6,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
 
         let y_bar: f64 = 4.0 / 7.0;
         let expected = Normal::standard().inverse_cdf(y_bar);
@@ -831,9 +919,16 @@ mod tests {
     #[test]
     fn fit_computes_std_errors_z_stats_p_values_and_ci_matching_closed_form_for_intercept_only_model()
      {
-        let estimator =
-            ProbitEstimator::fit(intercept_only_input(), Method::Newton, 35, 1e-6, true, 0.95)
-                .unwrap();
+        let estimator = ProbitEstimator::fit(
+            intercept_only_input(),
+            Method::Newton,
+            35,
+            1e-6,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
 
         let n: f64 = 7.0;
         let y_bar: f64 = 4.0 / 7.0;
@@ -882,7 +977,16 @@ mod tests {
         )
         .unwrap();
 
-        let estimator = ProbitEstimator::fit(input, Method::Newton, 35, 1e-8, true, 0.95).unwrap();
+        let estimator = ProbitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
         let k = 3;
 
         for i in 0..k {
@@ -912,6 +1016,423 @@ mod tests {
         }
     }
 
+    /// `cov_type=Opg`/`Hc0`/`Hc1`が返す`cov_params`を、`fit()`と同じ手順
+    /// （標準化→収束点でのscores/Hessian評価→`common.rs`の共通行列演算→
+    /// `destandardize_cov_params`）をテスト側で独立に再現した値と突き合わせる。
+    /// 多変量（k=3）データセットを使う理由: 切片のみモデルでは情報行列の等式
+    /// （`Σᵢsᵢsᵢ' = -H`）が有限標本で厳密に成り立ってしまい、`classical`/`opg`/`hc0`
+    /// が偶然同じ値になるため、`fit()`の`match cov_type`の配線ミスを検出できない
+    /// （`fit_cov_params_is_symmetric_and_stats_are_internally_consistent`と同じ
+    /// データセットを再利用する。Logitの対応するテストと同じ構成）。
+    #[test]
+    fn fit_cov_type_opg_hc0_hc1_match_independently_recomputed_values() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![10.0, 20.0, 30.0, 40.0], vec![-5.0, 2.0, 8.0, -1.0]];
+        let make_input = || {
+            ProbitInput::from_columns(
+                &y,
+                &x_columns,
+                vec!["x1".to_string(), "x2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap()
+        };
+        let k = 3;
+        let n = 4;
+
+        let classical = ProbitEstimator::fit(
+            make_input(),
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        // `fit()`と同じ手順を独立に再現する: 標準化→θ_stdへ変換→収束点でのscores/
+        // Hessian評価→destandardize_cov_params。`ProbitProblem::hessian`（argminトレイト）は
+        // コスト関数（負の対数尤度）のHessianを返す符号規約のため、`run_solver`が
+        // `SolverOutput.hessian`に格納する対数尤度そのもののHessianに合わせて1回符号反転する
+        // （`run_solver`のdocコメント「Hessianトレイトの符号規約」と同じ変換）。
+        let input_for_reconstruction = make_input();
+        let (x_std, scale) = standardize_columns(
+            input_for_reconstruction.x(),
+            input_for_reconstruction.has_intercept(),
+        );
+        let params_std: Vec<f64> = classical
+            .params()
+            .iter()
+            .zip(scale.stds())
+            .map(|(p, s)| p * s)
+            .collect();
+        let problem_std =
+            ProbitProblem::from_standardized(x_std, input_for_reconstruction.y().clone());
+        let scores_std = problem_std.scores(&params_std);
+        let cost_hessian_std = problem_std.hessian(&params_std).unwrap();
+        let hessian_std = Mat::from_fn(k, k, |i, j| -cost_hessian_std[i][j]);
+
+        let expected_opg =
+            destandardize_cov_params(&opg_cov_params(&scores_std, k).unwrap(), &scale);
+        let expected_hc0 = destandardize_cov_params(
+            &sandwich_cov_params(&hessian_std, &scores_std, n, k, SandwichVariant::Hc0).unwrap(),
+            &scale,
+        );
+        let expected_hc1 = destandardize_cov_params(
+            &sandwich_cov_params(&hessian_std, &scores_std, n, k, SandwichVariant::Hc1).unwrap(),
+            &scale,
+        );
+
+        let cases = [
+            (CovType::Opg, &expected_opg),
+            (CovType::Hc0, &expected_hc0),
+            (CovType::Hc1, &expected_hc1),
+        ];
+        for (cov_type, expected) in cases {
+            let estimator = ProbitEstimator::fit(
+                make_input(),
+                Method::Newton,
+                35,
+                1e-8,
+                true,
+                cov_type.clone(),
+                0.95,
+            )
+            .unwrap();
+            for i in 0..k {
+                for j in 0..k {
+                    assert!(
+                        (*estimator.cov_params().get(i, j) - *expected.get(i, j)).abs() < 1e-8,
+                        "cov_type={:?}, ({i},{j}): actual={}, expected={}",
+                        cov_type,
+                        *estimator.cov_params().get(i, j),
+                        *expected.get(i, j)
+                    );
+                }
+            }
+        }
+    }
+
+    /// `cov_type=Cluster`が返す`cov_params`を、`fit()`と同じ手順をテスト側で独立に
+    /// 再現した値と突き合わせる（上の`fit_cov_type_opg_hc0_hc1_match_independently_
+    /// recomputed_values`と同じ技法・同じ多変量データセット。情報行列の等式が
+    /// 厳密に成り立つ切片のみモデルでは配線ミスを検出できないため。Logitの
+    /// 対応するテストと同じ構成）。
+    #[test]
+    fn fit_cov_type_cluster_matches_independently_recomputed_values() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![10.0, 20.0, 30.0, 40.0], vec![-5.0, 2.0, 8.0, -1.0]];
+        let make_input = || {
+            ProbitInput::from_columns(
+                &y,
+                &x_columns,
+                vec!["x1".to_string(), "x2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap()
+        };
+        let k = 3;
+        let n = 4;
+        let groups = vec![
+            "a".to_string(),
+            "a".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+        ];
+
+        let classical = ProbitEstimator::fit(
+            make_input(),
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        let input_for_reconstruction = make_input();
+        let (x_std, scale) = standardize_columns(
+            input_for_reconstruction.x(),
+            input_for_reconstruction.has_intercept(),
+        );
+        let params_std: Vec<f64> = classical
+            .params()
+            .iter()
+            .zip(scale.stds())
+            .map(|(p, s)| p * s)
+            .collect();
+        let problem_std =
+            ProbitProblem::from_standardized(x_std, input_for_reconstruction.y().clone());
+        let scores_std = problem_std.scores(&params_std);
+        let cost_hessian_std = problem_std.hessian(&params_std).unwrap();
+        let hessian_std = Mat::from_fn(k, k, |i, j| -cost_hessian_std[i][j]);
+
+        let expected_cluster = destandardize_cov_params(
+            &cluster_cov_params(&hessian_std, &scores_std, n, k, &groups).unwrap(),
+            &scale,
+        );
+
+        let estimator = ProbitEstimator::fit(
+            make_input(),
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        )
+        .unwrap();
+        for i in 0..k {
+            for j in 0..k {
+                assert!(
+                    (*estimator.cov_params().get(i, j) - *expected_cluster.get(i, j)).abs() < 1e-8,
+                    "({i},{j}): actual={}, expected={}",
+                    *estimator.cov_params().get(i, j),
+                    *expected_cluster.get(i, j)
+                );
+            }
+        }
+    }
+
+    /// 上のテストは2:2の均等サイズのグループのみを検証しているが、`testing-policy.md`が
+    /// 指摘する通り均等サイズのみのテストは実務で起こりやすい偏った分布のグループサイズ
+    /// を見逃しうる。OLS/Logit側の対応するテストに倣い、3:2の不均衡なグループでも
+    /// 同じ独立再計算の技法で検証する。
+    #[test]
+    fn fit_cov_type_cluster_matches_independently_recomputed_values_with_unbalanced_groups() {
+        let y = vec![0.0, 1.0, 0.0, 1.0, 1.0];
+        let x_columns = vec![
+            vec![10.0, 20.0, 30.0, 40.0, 50.0],
+            vec![-5.0, 2.0, 8.0, -1.0, 3.0],
+        ];
+        let make_input = || {
+            ProbitInput::from_columns(
+                &y,
+                &x_columns,
+                vec!["x1".to_string(), "x2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap()
+        };
+        let k = 3;
+        let n = 5;
+        let groups = vec![
+            "a".to_string(),
+            "a".to_string(),
+            "a".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+        ];
+
+        let classical = ProbitEstimator::fit(
+            make_input(),
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        let input_for_reconstruction = make_input();
+        let (x_std, scale) = standardize_columns(
+            input_for_reconstruction.x(),
+            input_for_reconstruction.has_intercept(),
+        );
+        let params_std: Vec<f64> = classical
+            .params()
+            .iter()
+            .zip(scale.stds())
+            .map(|(p, s)| p * s)
+            .collect();
+        let problem_std =
+            ProbitProblem::from_standardized(x_std, input_for_reconstruction.y().clone());
+        let scores_std = problem_std.scores(&params_std);
+        let cost_hessian_std = problem_std.hessian(&params_std).unwrap();
+        let hessian_std = Mat::from_fn(k, k, |i, j| -cost_hessian_std[i][j]);
+
+        let expected_cluster = destandardize_cov_params(
+            &cluster_cov_params(&hessian_std, &scores_std, n, k, &groups).unwrap(),
+            &scale,
+        );
+
+        let estimator = ProbitEstimator::fit(
+            make_input(),
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        )
+        .unwrap();
+        for i in 0..k {
+            for j in 0..k {
+                assert!(
+                    (*estimator.cov_params().get(i, j) - *expected_cluster.get(i, j)).abs() < 1e-8,
+                    "({i},{j}): actual={}, expected={}",
+                    *estimator.cov_params().get(i, j),
+                    *expected_cluster.get(i, j)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fit_returns_missing_cluster_column_error_when_groups_not_provided() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0]];
+        let input = ProbitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = ProbitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Cluster { groups: None },
+            0.95,
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::Common(CommonError::MissingClusterColumn)
+        );
+    }
+
+    #[test]
+    fn fit_returns_insufficient_clusters_error_when_only_one_group() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0]];
+        let input = ProbitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let groups = vec!["a".to_string(); 4];
+
+        let result = ProbitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::Common(CommonError::InsufficientClusters { g: 1 })
+        );
+    }
+
+    /// `method`（`bfgs`/`lbfgs`）と`cov_type`（`Opg`/`Hc0`/`Hc1`/`Cluster`）の組み合わせが
+    /// 正しく機能することを確認する（Logitの対応するテストと同じ理由: `method`横断が
+    /// `CovType::Classical`のみ、`cov_type`横断が`Method::Newton`のみのテストでは、
+    /// 両方を同時に変える組み合わせが未検証になる）。`scores_std`の評価は収束点の
+    /// パラメータにのみ依存し最適化アルゴリズムの種類に依存しない設計のため、
+    /// `newton`で計算した`cov_params`（既に上のテストで正しさを検証済み）と
+    /// `bfgs`/`lbfgs`の結果が一致するはず。
+    #[test]
+    fn fit_non_classical_cov_types_work_with_bfgs_and_lbfgs() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![10.0, 20.0, 30.0, 40.0], vec![-5.0, 2.0, 8.0, -1.0]];
+        let make_input = || {
+            ProbitInput::from_columns(
+                &y,
+                &x_columns,
+                vec!["x1".to_string(), "x2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap()
+        };
+        let k = 3;
+        let groups = vec![
+            "a".to_string(),
+            "a".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+        ];
+
+        for cov_type in [
+            CovType::Opg,
+            CovType::Hc0,
+            CovType::Hc1,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+        ] {
+            let newton = ProbitEstimator::fit(
+                make_input(),
+                Method::Newton,
+                35,
+                1e-8,
+                true,
+                cov_type.clone(),
+                0.95,
+            )
+            .unwrap();
+
+            for method in [Method::Bfgs, Method::Lbfgs] {
+                let estimator = ProbitEstimator::fit(
+                    make_input(),
+                    method,
+                    200,
+                    1e-8,
+                    true,
+                    cov_type.clone(),
+                    0.95,
+                )
+                .unwrap();
+
+                assert!(
+                    estimator.converged(),
+                    "cov_type={:?}, {:?}",
+                    cov_type,
+                    method
+                );
+                for i in 0..k {
+                    for j in 0..k {
+                        assert!(
+                            (*estimator.cov_params().get(i, j) - *newton.cov_params().get(i, j))
+                                .abs()
+                                < 1e-4,
+                            "cov_type={:?}, method={:?}, ({i},{j}): actual={}, newton={}",
+                            cov_type,
+                            method,
+                            *estimator.cov_params().get(i, j),
+                            *newton.cov_params().get(i, j)
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// `newton`と同じデータセット（既知の解析解を持つ切片のみモデル）で`bfgs`/`lbfgs`を
     /// 実行し、いずれも同じ解析解へ収束することを検証する（Issue #73完了条件）。
     #[test]
@@ -920,9 +1441,16 @@ mod tests {
         let expected = Normal::standard().inverse_cdf(y_bar);
 
         for method in [Method::Bfgs, Method::Lbfgs] {
-            let estimator =
-                ProbitEstimator::fit(intercept_only_input(), method, 100, 1e-6, true, 0.95)
-                    .unwrap();
+            let estimator = ProbitEstimator::fit(
+                intercept_only_input(),
+                method,
+                100,
+                1e-6,
+                true,
+                CovType::Classical,
+                0.95,
+            )
+            .unwrap();
 
             assert!(estimator.converged(), "{:?}", method);
             assert!(
@@ -957,13 +1485,29 @@ mod tests {
             .unwrap()
         };
 
-        let newton =
-            ProbitEstimator::fit(make_input(), Method::Newton, 35, 1e-8, true, 0.95).unwrap();
+        let newton = ProbitEstimator::fit(
+            make_input(),
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
         assert!(newton.converged());
 
         for method in [Method::Bfgs, Method::Lbfgs] {
-            let estimator =
-                ProbitEstimator::fit(make_input(), method, 200, 1e-8, true, 0.95).unwrap();
+            let estimator = ProbitEstimator::fit(
+                make_input(),
+                method,
+                200,
+                1e-8,
+                true,
+                CovType::Classical,
+                0.95,
+            )
+            .unwrap();
 
             assert!(estimator.converged(), "{:?}", method);
             for j in 0..2 {
@@ -980,8 +1524,15 @@ mod tests {
 
     #[test]
     fn fit_returns_invalid_confidence_level_error_out_of_range() {
-        let result =
-            ProbitEstimator::fit(intercept_only_input(), Method::Newton, 35, 1e-6, true, 1.5);
+        let result = ProbitEstimator::fit(
+            intercept_only_input(),
+            Method::Newton,
+            35,
+            1e-6,
+            true,
+            CovType::Classical,
+            1.5,
+        );
         assert_eq!(
             result.unwrap_err(),
             MleError::Common(CommonError::InvalidConfidenceLevel {
@@ -992,8 +1543,15 @@ mod tests {
 
     #[test]
     fn fit_returns_invalid_max_iter_error_for_non_positive_max_iter() {
-        let result =
-            ProbitEstimator::fit(intercept_only_input(), Method::Newton, 0, 1e-6, true, 0.95);
+        let result = ProbitEstimator::fit(
+            intercept_only_input(),
+            Method::Newton,
+            0,
+            1e-6,
+            true,
+            CovType::Classical,
+            0.95,
+        );
         assert_eq!(
             result.unwrap_err(),
             MleError::InvalidMaxIter { max_iter: 0 }
@@ -1003,8 +1561,15 @@ mod tests {
     #[test]
     fn fit_returns_invalid_tol_error_for_non_positive_tol() {
         for tol in [0.0, -1.0] {
-            let result =
-                ProbitEstimator::fit(intercept_only_input(), Method::Newton, 35, tol, true, 0.95);
+            let result = ProbitEstimator::fit(
+                intercept_only_input(),
+                Method::Newton,
+                35,
+                tol,
+                true,
+                CovType::Classical,
+                0.95,
+            );
             assert_eq!(result.unwrap_err(), MleError::InvalidTol { tol });
         }
     }
@@ -1013,7 +1578,15 @@ mod tests {
     fn fit_returns_invalid_binary_y_error_for_non_binary_y() {
         let y = vec![0.0, 1.0, 0.5, 1.0];
         let input = ProbitInput::from_columns(&y, &[], vec![], true, "y".to_string()).unwrap();
-        let result = ProbitEstimator::fit(input, Method::Newton, 35, 1e-6, true, 0.95);
+        let result = ProbitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-6,
+            true,
+            CovType::Classical,
+            0.95,
+        );
         assert_eq!(
             result.unwrap_err(),
             MleError::InvalidBinaryY { row: 2, value: 0.5 }
@@ -1030,7 +1603,15 @@ mod tests {
         let input = ProbitInput::from_columns(&y, &[], vec![], false, "y".to_string()).unwrap();
         assert_eq!(input.k(), 0);
 
-        let result = ProbitEstimator::fit(input, Method::Newton, 35, 1e-6, true, 0.95);
+        let result = ProbitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-6,
+            true,
+            CovType::Classical,
+            0.95,
+        );
         assert_eq!(
             result.unwrap_err(),
             MleError::Common(CommonError::NoRegressors { n: 5 })
@@ -1050,7 +1631,15 @@ mod tests {
         )
         .unwrap();
 
-        let result = ProbitEstimator::fit(input, Method::Newton, 35, 1e-6, true, 0.95);
+        let result = ProbitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-6,
+            true,
+            CovType::Classical,
+            0.95,
+        );
         assert_eq!(
             result.unwrap_err(),
             MleError::Common(CommonError::InsufficientObservations { n: 2, k: 2 })
@@ -1074,7 +1663,15 @@ mod tests {
         )
         .unwrap();
 
-        let result = ProbitEstimator::fit(input, Method::Newton, 35, 1e-6, true, 0.95);
+        let result = ProbitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-6,
+            true,
+            CovType::Classical,
+            0.95,
+        );
         assert!(
             matches!(result, Err(MleError::SingularHessian)),
             "{:?}",
@@ -1084,8 +1681,15 @@ mod tests {
 
     #[test]
     fn fit_returns_non_convergence_error_when_max_iter_is_too_small_and_raise_is_true() {
-        let result =
-            ProbitEstimator::fit(intercept_only_input(), Method::Newton, 1, 1e-12, true, 0.95);
+        let result = ProbitEstimator::fit(
+            intercept_only_input(),
+            Method::Newton,
+            1,
+            1e-12,
+            true,
+            CovType::Classical,
+            0.95,
+        );
         assert!(
             matches!(result, Err(MleError::NonConvergence { .. })),
             "{:?}",
@@ -1101,6 +1705,7 @@ mod tests {
             1,
             1e-12,
             false,
+            CovType::Classical,
             0.95,
         )
         .unwrap();

@@ -35,8 +35,8 @@ use crate::nonlinear::common::{
     CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
     Method, MleError, SandwichVariant, cluster_cov_params, column_means, column_medians,
     destandardize_cov_params, destandardize_params, goodness_of_fit, log_likelihood_null,
-    marginal_effects_from_w_s, observed_information_cov_params, opg_cov_params, run_solver,
-    sandwich_cov_params, standardize_columns, validate_binary_y,
+    marginal_effects_from_w_s, observed_information_cov_params, opg_cov_params, pred_table,
+    run_solver, sandwich_cov_params, standardize_columns, validate_binary_y,
 };
 use crate::validation::validate_cluster_groups;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
@@ -833,38 +833,15 @@ impl LogitEstimator {
     }
 
     /// 分類の的中表（2×2、`table[actual][predicted]`のカウント。行=実測クラス、
-    /// 列=予測クラス）。`predict()`が返す予測確率のみを`threshold`で二値化し
-    /// （`predicted = 1 if p > threshold else 0`）、実測`y`は`threshold`に関わらず
-    /// 常に`0.5`で二値化する（`actual = 1 if y >= 0.5 else 0`）。
+    /// 列=予測クラス）。`predict()`が返す予測確率のみを`threshold`で二値化し、実測`y`は
+    /// `threshold`に関わらず常に`0.5`で二値化する。数式・statsmodelsとの整合性の詳細は
+    /// `nonlinear/common.rs`の`pred_table`のdocコメント参照（リンク関数に依存しない計算
+    /// のため`common.rs`に共通化されている、Issue #79）。
     ///
-    /// statsmodelsの`pred_table(threshold)`（`BinaryResults.pred_table`）の実装を
-    /// 数値照合の上で確認した挙動: `pred = (self.predict() > threshold)`で
-    /// 予測確率のみを`threshold`で二値化した**後**、`histogram2d(actual, pred,
-    /// bins=[0, 0.5, 1])`で固定の0.5分割によりクロス集計する。`actual`（生の`endog`）は
-    /// この固定分割にしか通らず、`threshold`の影響を受けない（rust-reviewerの
-    /// 指摘・Python数値照合で発覚した実装ミスを修正: 初版では`actual`も`threshold`で
-    /// 二値化していたため、`threshold≠0.5`のときstatsmodelsと一致しなかった）。
-    /// `y`が厳密に0/1でない場合（現状値域検証は未実装、`nonlinear-implementation-
-    /// notes.md`参照）も、常に`0.5`分割になる点でstatsmodelsと同じ扱い。
-    ///
-    /// `threshold`の値域は検証しない（`[0,1]`の範囲外でも、`predicted`が単に自明な
-    /// 分類結果（全て一方のクラスに分類される等）になるだけで計算上は破綻しない。
-    /// statsmodelsも検証していない）。
-    ///
-    /// **新規データでの的中表（out-of-sample）は未対応**（本Issueのスコープ外、
+    /// **新規データでの的中表（out-of-sample）は未対応**（Issue #63のスコープ外、
     /// 別issueでトラッキング。ユーザー確認済み）。
     pub fn pred_table(&self, threshold: f64) -> Mat<f64> {
-        let predicted = self.predict();
-        let y = self.input.y();
-        let n = y.nrows();
-
-        let mut table = Mat::zeros(2, 2);
-        for (i, &p_i) in predicted.iter().enumerate().take(n) {
-            let actual = usize::from(*y.get(i, 0) >= 0.5);
-            let pred = usize::from(p_i > threshold);
-            *table.get_mut(actual, pred) += 1.0;
-        }
-        table
+        pred_table(&self.predict(), self.input.y(), threshold)
     }
 }
 

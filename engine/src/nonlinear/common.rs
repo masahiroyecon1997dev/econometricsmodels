@@ -518,6 +518,49 @@ pub fn marginal_effects_from_w_s(
     })
 }
 
+/// 分類の的中表（2×2、`table[actual][predicted]`のカウント。行=実測クラス、
+/// 列=予測クラス）。`predicted`（各モデルの`predict()`が返す予測確率、リンク関数依存で
+/// モデルごとに実装）のみを`threshold`で二値化し（`predicted_class = 1 if p > threshold
+/// else 0`）、実測`y`は`threshold`に関わらず常に`0.5`で二値化する
+/// （`actual = 1 if y >= 0.5 else 0`）。リンク関数に依存しない計算のため
+/// `nonlinear/common.rs`に置く（元はLogitの`pred_table`、Issue #79で`common.rs`へ
+/// 移設。Probitでも同一の関数をそのまま使う）。
+///
+/// statsmodelsの`pred_table(threshold)`（`BinaryResults.pred_table`）の実装を数値照合の
+/// 上で確認した挙動: `pred = (self.predict() > threshold)`で予測確率のみを`threshold`で
+/// 二値化した**後**、`histogram2d(actual, pred, bins=[0, 0.5, 1])`で固定の0.5分割により
+/// クロス集計する。`actual`（生の`endog`）はこの固定分割にしか通らず、`threshold`の
+/// 影響を受けない（Logit実装時、rust-reviewerの指摘・Python数値照合で発覚した実装ミスを
+/// 修正済み: 初版では`actual`も`threshold`で二値化していたため、`threshold≠0.5`のとき
+/// statsmodelsと一致しなかった）。`y`が厳密に0/1でない場合（値域検証は
+/// `validate_binary_y`で行うため`fit()`を経由した`y`は常に0/1だが、この関数自体は
+/// `y`の値域を前提にしない）も、常に`0.5`分割になる点でstatsmodelsと同じ扱い。
+///
+/// `threshold`の値域は検証しない（`[0,1]`の範囲外でも、`predicted_class`が単に自明な
+/// 分類結果（全て一方のクラスに分類される等）になるだけで計算上は破綻しない。
+/// statsmodelsも検証していない）。
+///
+/// `predicted.len()`は`y.nrows()`と一致する契約（呼び出し側は各モデルの`predict()`と
+/// `self.input.y()`という常に同じ`n`を持つペアを渡すため）。`debug_assert_eq!`は
+/// この契約が破られた場合に`enumerate().take(n)`がサイレントに打ち切って不正確な
+/// 集計を返すのを防ぐための防御（rust-reviewer指摘、Issue #79）。
+pub fn pred_table(predicted: &[f64], y: &Mat<f64>, threshold: f64) -> Mat<f64> {
+    let n = y.nrows();
+    debug_assert_eq!(
+        predicted.len(),
+        n,
+        "predicted length must match y.nrows() (caller contract)"
+    );
+
+    let mut table = Mat::zeros(2, 2);
+    for (i, &p_i) in predicted.iter().enumerate().take(n) {
+        let actual = usize::from(*y.get(i, 0) >= 0.5);
+        let pred = usize::from(p_i > threshold);
+        *table.get_mut(actual, pred) += 1.0;
+    }
+    table
+}
+
 /// `run_solver`の出力。
 #[derive(Debug, Clone)]
 pub struct SolverOutput {
@@ -2011,5 +2054,49 @@ mod tests {
                 confidence_level: 1.5
             })
         );
+    }
+
+    /// `pred_table`をLogit/Probitの`predict()`とは独立に、合成した`predicted`/`y`から
+    /// 手計算した2×2カウントと突き合わせる（`threshold`が予測側のみに適用され、
+    /// 実測`y`側は常に固定0.5分割であることを含めて検証する）。
+    #[test]
+    fn pred_table_matches_hand_computed_counts() {
+        let predicted = vec![0.9, 0.6, 0.3, 0.1];
+        let y = Mat::from_fn(4, 1, |i, _| [0.0, 1.0, 0.0, 1.0][i]);
+
+        // threshold=0.5: predicted_class=[1,1,0,0]、actual=[0,1,0,1]
+        // (actual=0,pred=1)=1件（obs0）、(actual=0,pred=0)=1件（obs2）、
+        // (actual=1,pred=1)=1件（obs1）、(actual=1,pred=0)=1件（obs3）
+        let table = pred_table(&predicted, &y, 0.5);
+        assert!((*table.get(0, 0) - 1.0).abs() < 1e-12);
+        assert!((*table.get(0, 1) - 1.0).abs() < 1e-12);
+        assert!((*table.get(1, 0) - 1.0).abs() < 1e-12);
+        assert!((*table.get(1, 1) - 1.0).abs() < 1e-12);
+    }
+
+    /// `pred_table`の実測クラス（行方向の合計）は`threshold`の値に関わらず不変であるべき
+    /// （`y`は常に固定の0.5分割でバケット化され、`threshold`は`predicted`側にのみ適用される
+    /// 仕様、`pred_table`のdocコメント参照）。元はLogitの単体テスト（Issue #63時点、
+    /// rust-reviewerの指摘・statsmodelsとの数値照合で発覚した実装ミスの回帰テスト）を
+    /// Issue #79で`common.rs`へ移設した。
+    #[test]
+    fn pred_table_actual_class_counts_are_invariant_to_threshold() {
+        let predicted = vec![0.9, 0.6, 0.3, 0.1];
+        let y = Mat::from_fn(4, 1, |i, _| [0.0, 1.0, 0.0, 1.0][i]);
+
+        for threshold in [0.1, 0.3, 0.5, 0.7, 0.9] {
+            let table = pred_table(&predicted, &y, threshold);
+            let actual0 = *table.get(0, 0) + *table.get(0, 1);
+            let actual1 = *table.get(1, 0) + *table.get(1, 1);
+            // y=[0,1,0,1] → actual0=2件・actual1=2件（`threshold`に関わらず常に一定）
+            assert!(
+                (actual0 - 2.0).abs() < 1e-12,
+                "threshold={threshold}, actual0={actual0}"
+            );
+            assert!(
+                (actual1 - 2.0).abs() < 1e-12,
+                "threshold={threshold}, actual1={actual1}"
+            );
+        }
     }
 }

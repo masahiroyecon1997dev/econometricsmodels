@@ -210,6 +210,10 @@ Issue #77（適合度統計量）でgoodness-of-fit計算を事後的に`common.
 - **`pred_table`の独立再計算**: `pred_table_matches_independently_recomputed_classification`。`threshold=0.2`（`0.5`以外の値、上記バグを検出できるようにするため）で、`predict()`の出力から独立に再計算した分類結果と突き合わせた。
 - **`actual`クラスのカウントが`threshold`に対して不変であることの回帰テスト**: `pred_table_actual_class_counts_are_invariant_to_threshold`。`threshold∈{0.1,0.3,0.5,0.7,0.9}`の5パターンで、`actual0`/`actual1`の行合計が常に一定（`y=[0,1,0,1]`なので各2件）であることを確認し、上記バグの再発を防止する。
 
+### 追記（Probit Issue #79時点）: `pred_table`の`nonlinear/common.rs`への集約
+
+Probit側のIssue #79（predict/pred_table）で、`pred_table`の計算本体（2×2カウント、`predicted: &[f64]`と`y: &Mat<f64>`のみに依存）が**リンク関数を一切参照しない**（`φ`/`Φ`/`logistic`いずれも登場しない）ことに気づいたため、`common.rs`の`pred_table`関数へ移設した。Issue #77/#78の共通化とは異なり、この判断には設計上の曖昧さが無い（`marginal_effects`の`dydx_and_jacobian`等のように「リンク関数に依存するかどうか」を検討する必要がなく、`pred_table`は最初からモデル非依存の純粋関数として書かれていた）ため、ユーザーに確認を求めずそのまま共通化した。`LogitEstimator::pred_table`は`pred_table(&self.predict(), self.input.y(), threshold)`という1行呼び出しに簡略化された（`predict()`自体はリンク関数依存のため`logit.rs`に残る）。数式・エラー型・テストカバレッジに変更はない。バグ修正の経緯（上記「バグ修正」節）を含むdocコメントは`common.rs`側に移設した。詳細は`probit-implementation-notes.md`「predict() / pred_table()（Issue #79で実装済み）」節参照。
+
 ## engine単体テストのカバレッジ（Issue #64で確認・実装済み）
 
 `cargo-llvm-cov -p engine --lib`で実測。OLSと同じ方針（100%は目指さず、理論上到達不能な防御的エラーパスはドキュメント化して受け入れる、`.claude/rules/testing-policy.md`「engine（Rust）のカバレッジ方針」参照）。

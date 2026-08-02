@@ -213,3 +213,27 @@ Logitの対応するテスト（Issue #62で7種）と同じ構成:
 - **`marginal_effects_overall_matches_independently_recomputed_dydx_and_delta_method_se`**: `at="overall"`の`dydx`を`Normal::standard().pdf`から直接計算する式で独立に再計算し、標準誤差も`dydx_j`の数値微分によるヤコビアンから独立に導出して突き合わせる。
 - **`marginal_effects_at_mean_differs_from_overall_and_matches_independent_recomputation`**・**`..._at_median_..._and_overall_..._`**: `at="mean"`/`"median"`が`at="overall"`と異なる代表点で評価されること、`dydx`を`column_means`/`column_medians`から独立に再計算した値と突き合わせる。
 - **`marginal_effects_returns_invalid_confidence_level_error_out_of_range`**: `confidence_level`範囲外エラーの検証。
+
+## predict() / pred_table()（Issue #79で実装済み）
+
+`ProbitEstimator::predict()`（引数なし、`Vec<f64>`を直接返す。エラーなし）と`ProbitEstimator::pred_table(threshold)`（`Mat<f64>`の2×2的中表を直接返す。エラーなし）を追加した（`fit()`とは独立した別メソッド、`nonlinear-api-design.md`6章）。LogitのIssue #63（コミット`ad46976`）を踏襲。
+
+- **`predict()`は`p_i=Φ(x_i'θ)`をそのまま計算する**（Logitの`Λ(x_i'θ)`を`Φ`に置き換えたのみ）。バリデーションを要する引数が無いためエラーなし。
+- **`pred_table()`は`nonlinear/common.rs`へ最初から共通化して実装した**: `marginal_effects`（Issue #78）の`dydx_and_jacobian`等とは異なり、`pred_table`の計算そのもの（2×2カウント、`predicted: &[f64]`と`y: &Mat<f64>`のみに依存）は**リンク関数を一切参照しない**（`φ`/`Φ`/`logistic`のいずれも登場しない）ため、共通化の判断に曖昧さが無く、ユーザーに確認を求めずそのまま`common.rs`の`pred_table`関数へ移設した（`predict()`自体はリンク関数依存のため各モデルファイルに残す）。Logit側（Issue #63）の`pred_table`実装もこれに伴いリファクタリングしたが、数式・テストカバレッジに変更はない。
+- **`pred_table`の`actual`側二値化の仕様**（`threshold`に関わらず常に`0.5`固定分割）は、Logit実装時にrust-reviewerの指摘・statsmodelsとの数値照合で発覚した実装ミス（初版は`actual`も`threshold`で二値化していた）の修正を踏まえたもの。共通化した`pred_table`関数のdocコメントに、この経緯を含めて記載している（`common.rs`参照）。
+- **`in-sample`限定**: `predict()`/`pred_table()`ともに、`fit()`に使った`self.input.x()`/`self.input.y()`に対してのみ計算する。新規データ（out-of-sample）対応はLogit実装時に別issue化されたスコープ外（`logit-implementation-notes.md`参照）と同じ扱い。
+
+### テスト
+
+Logitの対応するテスト（Issue #63で5種）と同数・同構成:
+
+- **`predict_matches_closed_form_for_intercept_only_model`**: 切片のみモデルでは全観測`p_i=ȳ`（closed form）になることを検証。
+- **`predict_matches_independently_recomputed_normal_cdf_of_linear_predictor`**: 多変量モデルで`Normal::standard().cdf`から直接計算した`p_i=Φ(x_i'θ)`と突き合わせる。
+- **`pred_table_matches_hand_computed_counts_for_intercept_only_model`**: 切片のみモデル（`p_i=ȳ=4/7`固定）で、`threshold`により全観測が一方のクラスに分類される自明なケースを手計算で検証。
+- **`pred_table_matches_independently_recomputed_classification`**: 多変量モデルで、`predict()`の出力から独立に再計算した分類結果と突き合わせる（`threshold≠0.5`を使い、`actual`側が`threshold`に依存しないことも間接的に確認）。
+- **`pred_table_actual_class_counts_are_invariant_to_threshold`**: 初回実装では`common.rs`側の合成データによる一般テストのみでこの性質をカバーし、`ProbitEstimator`経由の配線テストは省略していたが、rust-reviewerの指摘（Logit側には`predict()`→`pred_table()`という実際の呼び出し経路を通した対称のテストが既存のまま残っており、Probit側だけこの層のカバレッジが薄い）を受けて追加した。
+
+### rust-reviewer指摘への対応
+
+- **`common.rs::pred_table`に`debug_assert_eq!(predicted.len(), y.nrows())`を追加**: `enumerate().take(n)`が契約違反（長さ不一致）時にサイレントに不正確な集計を返すのを防ぐ防御（実際には長さが異なることはない内部契約だが、テスト実行時に即座に検知できるようにするため）。
+- 上記「実測クラスカウントの`threshold`不変性」の配線テストをProbit側にも追加。

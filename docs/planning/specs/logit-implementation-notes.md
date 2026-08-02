@@ -152,6 +152,15 @@ Issue #58時点ではIssue #58本来のスコープを超えるためユーザ�
 - **多変量モデルでの独立再計算**: `fit_computes_goodness_of_fit_statistics_matching_independently_recomputed_values`。実装の`softplus`ベースの式とは異なる式（`logistic`から直接`Σ[y ln(p) + (1-y) ln(1-p)]`を計算するベルヌーイ対数尤度の定義式そのもの）で`log_likelihood`を独立に再計算し、`log_likelihood_null`・`lr_statistic`・`pseudo_r_squared`・`df_model`・`df_resid`・`lr_p_value`（`statrs::ChiSquared`で独立に検算）・`aic`/`bic`を突き合わせた（`fit_cov_params_is_symmetric_and_stats_are_internally_consistent`と同じデータセットを再利用）。
 - **`include_intercept=false`での非入れ子挙動**: `fit_lr_statistic_can_be_negative_when_include_intercept_is_false`。`lr_statistic`が負になりうること（NaN/Infにはならないこと）、`df_model`/`df_resid`/`aic`/`bic`は`include_intercept`の値に関わらず同じ式で計算されることを回帰テストとして固定した。
 
+### 追記（Probit Issue #77時点）: `log_likelihood_null`・goodness-of-fit計算の`nonlinear/common.rs`への集約
+
+Probit側のIssue #77（適合度統計量実装）で、本実装（Issue #61/#64）とほぼ同一のコードが重複して移植されたことがrust-reviewerのレビューで指摘された。ユーザー確認の上、以下をLogit/Probit間で完全に共通の計算として`nonlinear/common.rs`へ集約した（Tobit着手時にも同じ計算が必要になる見込みのため、先に共通化しておく判断）。
+
+- `log_likelihood_null(y: &Mat<f64>) -> f64`（Issue #64で独立関数化していたもの、および対応するテスト`log_likelihood_null_returns_zero_for_degenerate_all_same_y`）を`common.rs`へ移設。この式がリンク関数に依存しないのは、切片のみモデルのMLEが`link(θ̂)=ȳ`を満たすため（Logitの`logistic(θ̂)=ȳ`、Probitの`Φ(θ̂)=ȳ`いずれも成り立つ）。
+- `lr_statistic`/`lr_p_value`/`pseudo_r_squared`/`aic`/`bic`/`df_model`/`df_resid`のインライン計算ブロックを`common.rs`の`GoodnessOfFit`構造体＋`goodness_of_fit(llf, llnull, n, k)`関数へ切り出し、`fit()`側はこれを呼んで分解するだけにした。
+- 本体コードで`ChiSquared`を直接使わなくなったため、`ChiSquared`のimportをモジュールトップレベルからテストモジュール内（独立再計算による検算にのみ使用）へ移動した。
+- 数式・エラー型・`LogitEstimator`のフィールド構成（`log_likelihood`/`log_likelihood_null`等）自体に変更はない。リファクタリングのみで、Issue #61/#64時点の仕様・テストカバレッジを後退させていない（`cargo test -p engine`で全件pass確認済み）。
+
 ## 限界効果（Issue #62で実装済み）
 
 `LogitEstimator::marginal_effects(at, confidence_level)`を追加した（`fit()`とは独立した別メソッド、`nonlinear-api-design.md`6章）。設計方針の詳細（離散変数の自動判定なし・切片除外・代表点の定義・デルタ法ヤコビアンの統一形）は`nonlinear-implementation-notes.md`「限界効果」節（Logit/Probit/Tobit共通の方針）を参照。本節はLogit固有の実装判断のみ記す。

@@ -32,14 +32,15 @@
 
 use crate::error::CommonError;
 use crate::nonlinear::common::{
-    CovType, MarginalEffectsAt, Method, MleError, SandwichVariant, cluster_cov_params,
-    destandardize_cov_params, destandardize_params, observed_information_cov_params,
-    opg_cov_params, run_solver, sandwich_cov_params, standardize_columns, validate_binary_y,
+    CovType, GoodnessOfFit, MarginalEffectsAt, Method, MleError, SandwichVariant,
+    cluster_cov_params, destandardize_cov_params, destandardize_params, goodness_of_fit,
+    log_likelihood_null, observed_information_cov_params, opg_cov_params, run_solver,
+    sandwich_cov_params, standardize_columns, validate_binary_y,
 };
 use crate::validation::validate_cluster_groups;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
-use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
+use statrs::distribution::{ContinuousCDF, Normal};
 
 /// Logitの被説明変数・設計行列を保持する入力データ。
 ///
@@ -194,25 +195,6 @@ fn log_likelihood(x: &Mat<f64>, y: &Mat<f64>, params: &[f64]) -> f64 {
             (*y.get(i, 0)) * z - softplus(z)
         })
         .sum()
-}
-
-/// 切片のみモデルの対数尤度 `ℓ_null = n1*ln(ȳ) + n0*ln(1-ȳ)`（`ȳ=n1/n`の閉じた形の
-/// 解析解、`LogitEstimator`の`log_likelihood_null`フィールドdocコメント参照）を`y`から
-/// 直接計算する。`n1`または`n0`が0（全観測が同じ値）のときの`0*ln(0)`（NaN）を避けるため、
-/// 該当項を明示的に0として扱う（情報理論の`0 log 0 = 0`規約）。`log_likelihood`と同じ理由
-/// （`Result`を経由しない内部専用の計算、退化ケースを`fit()`の反復最適化を経由せず
-/// 直接テストできるようにするため）で独立した関数として切り出している。
-fn log_likelihood_null(y: &Mat<f64>) -> f64 {
-    let n = y.nrows();
-    let n1: f64 = (0..n).map(|i| *y.get(i, 0)).sum();
-    let n0 = n as f64 - n1;
-    let y_bar = n1 / n as f64;
-    (if n1 > 0.0 { n1 * y_bar.ln() } else { 0.0 })
-        + (if n0 > 0.0 {
-            n0 * (1.0 - y_bar).ln()
-        } else {
-            0.0
-        })
 }
 
 /// 限界効果（`LogitEstimator::marginal_effects`のdocコメント「数式（デルタ法）」参照）の
@@ -737,31 +719,19 @@ impl LogitEstimator {
 
         let llf = log_likelihood(input.x(), input.y(), &params);
         let llnull = log_likelihood_null(input.y());
-
-        let lr_statistic = 2.0 * (llf - llnull);
-        // `k.saturating_sub(1)`: `include_intercept=false`かつ説明変数も無い（`k=0`）という
-        // 病的な入力（`fit()`冒頭の`n<=k`チェックは`n>=1`なら通過してしまう）でも
-        // このフィールド単体はアンダーフローしないための防御。ただし`k=0`のとき
-        // 実際には本箇所に到達する前（`cov_params`計算経路）で別の既知の問題により
-        // 到達不能（トラッキング: 別issue、本Issueのスコープ外。ユーザー確認済み）。
-        let df_model = k.saturating_sub(1);
-        let lr_p_value = if df_model == 0 {
-            // 説明変数が定数項のみ（傾き係数が無い）モデル。検定対象が存在しないため
-            // OLSの`f_p_value`（`df_model=0`時にNaN）と同じ扱い（ユーザー確認済み）。
-            f64::NAN
-        } else {
-            // `df_model>0`が保証されているため、`ChiSquared::new`の失敗
-            // （自由度が正であることの検証）は理論上到達不能
-            // （`.claude/rules/rust-style.md`「テスト」のカバレッジ方針参照）。
-            let chi2 = ChiSquared::new(df_model as f64)
-                .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
-            1.0 - chi2.cdf(lr_statistic)
-        };
-
-        let pseudo_r_squared = 1.0 - llf / llnull;
-        let aic = -2.0 * llf + 2.0 * (k as f64);
-        let bic = -2.0 * llf + (n as f64).ln() * (k as f64);
-        let df_resid = n - k;
+        // `k=0`（`include_intercept=false`かつ説明変数も無い病的な入力）のとき、実際には
+        // ここに到達する前（`cov_params`計算経路）で別の既知の問題により到達不能
+        // （トラッキング: 別issue、本Issueのスコープ外。ユーザー確認済み）。
+        let gof = goodness_of_fit(llf, llnull, n, k)?;
+        let GoodnessOfFit {
+            lr_statistic,
+            lr_p_value,
+            pseudo_r_squared,
+            aic,
+            bic,
+            df_model,
+            df_resid,
+        } = gof;
 
         Ok(Self {
             input,
@@ -1042,6 +1012,7 @@ impl LogitEstimator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use statrs::distribution::ChiSquared;
 
     #[test]
     fn from_columns_with_intercept_prepends_const_column() {
@@ -1433,25 +1404,6 @@ mod tests {
         let expected_bic = -2.0 * expected_ll + n.ln();
         assert!((estimator.aic() - expected_aic).abs() < 1e-6);
         assert!((estimator.bic() - expected_bic).abs() < 1e-6);
-    }
-
-    /// `log_likelihood_null`は`n1`（y=1の観測数）または`n0`（y=0の観測数）が0の
-    /// 退化ケース（全観測が同じ値）で、`0*ln(0)`によるNaNを避ける分岐（`if n1 > 0.0
-    /// {...} else {0.0}`等）を通る。この分岐は`fit()`経由（反復最適化）だと、全観測が
-    /// 同じyの場合に完全分離が起きて収束の挙動が不安定になりうるため、`fit()`を
-    /// 経由せず`log_likelihood_null`を直接呼んで検証する
-    /// （`.claude/rules/rust-style.md`「テスト」のカバレッジ方針、Issue #64でこの分岐が
-    /// 未カバーだったことが判明し、`fit()`内にインラインだった計算を独立関数に切り出した
-    /// 上で追加したテスト）。
-    #[test]
-    fn log_likelihood_null_returns_zero_for_degenerate_all_same_y() {
-        // 全観測y=1（n0=0）: n0側の`else{0.0}`分岐を通る。ℓ_null = n*ln(1) + 0 = 0
-        let all_ones = Mat::from_fn(4, 1, |_, _| 1.0);
-        assert!((log_likelihood_null(&all_ones) - 0.0).abs() < 1e-12);
-
-        // 全観測y=0（n1=0）: n1側の`else{0.0}`分岐を通る。ℓ_null = 0 + n*ln(1) = 0
-        let all_zeros = Mat::from_fn(4, 1, |_, _| 0.0);
-        assert!((log_likelihood_null(&all_zeros) - 0.0).abs() < 1e-12);
     }
 
     /// 多変量（k=3）モデルでの適合度統計量を、実装（`softplus`ベース）とは異なる式

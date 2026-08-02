@@ -176,3 +176,20 @@ Logitの対応するテスト（Issue #59で2種、Issue #60で4種の計6種）
 Logit側には、Issue #59/#60より後の「engine単体テストのカバレッジ確認」issue（コミット`25c4529`、`cargo-llvm-cov`で`fit()`内の`CovType::Hc0`/`Hc1`/`Opg`分岐の`?`（エラー伝播）を実際に通るテストが無いというギャップを検出）で追加された、完全な多重共線性データセットに対する`cov_type`ごとのエラー伝播テストが3種ある（`fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_bfgs_and_lbfgs`／`..._with_hc0_and_hc1`／`fit_returns_singular_opg_matrix_error_for_perfectly_collinear_design_matrix`）。Probit側には対応するテストがまだ無い（rust-reviewer指摘）。
 
 「Logitで既に判明済みのギャップパターン」であることが分かっているため、Probitのengine単体テストカバレッジ確認issue（`logit-probit-issue-breakdown.md`のC11相当、#80）着手時に確実に拾うこと。
+
+## 適合度統計量（Issue #77で実装済み）
+
+`ProbitEstimator`に`log_likelihood`/`log_likelihood_null`/`lr_statistic`/`lr_p_value`/`pseudo_r_squared`（McFadden）/`aic`/`bic`/`n_obs`/`df_model`/`df_resid`を追加した（`nonlinear-api-design.md`5章の仕様通り）。`LogitEstimator`の対応する実装（Issue #61、コミット`6ae9d69`）とほぼ同じ設計をそのまま踏襲した。
+
+- **`log_likelihood`**: `ProbitProblem::cost`（`-ℓ(θ)`、argminの`CostFunction`）から自由関数`log_likelihood(x, y, params)`（`Σᵢ log Φ(qᵢzᵢ)`、既存の`clamped_pdf_cdf`を経由して数値安定化する）を切り出し、`cost`はこれを符号反転して呼ぶ形にリファクタリングした。Logitと同様、`fit()`側は元スケールの`input.x()`/`input.y()`と`destandardize_params`済みの`params`を渡す。この関数はリンク関数固有（`Φ`ベース）のため`probit.rs`内に留まる。
+- **`log_likelihood_null`（切片のみモデルのllf）・`lr_statistic`/`lr_p_value`/`pseudo_r_squared`/`aic`/`bic`/`df_model`/`df_resid`は`nonlinear/common.rs`の共通実装を使う**: 当初はLogitの実装（Issue #61、コミット`6ae9d69`）とほぼ同一のコードをそのまま移植する形で書いたが、rust-reviewerのレビューで「Logit/Probit間でこの計算がほぼ完全に重複している」との指摘を受け、ユーザー確認の上で`nonlinear/common.rs`へ集約した（`log_likelihood_null(y: &Mat<f64>) -> f64`、`GoodnessOfFit`構造体、`goodness_of_fit(llf, llnull, n, k) -> Result<GoodnessOfFit, MleError>`）。この計算がリンク関数に依存しないのは、切片のみモデルのMLEが「`link(θ̂) = ȳ`を満たす」という性質を持つため（Logitの`logistic(θ̂)=ȳ`、Probitの`Φ(θ̂)=ȳ`。どちらも既存テスト`fit_newton_converges_to_closed_form_solution_for_intercept_only_model`で検証済み）で、ベルヌーイ尤度が`p=link(θ)`のみに依存する形に落ちることに由来する。共通化の詳細な経緯・Logit側への影響は`logit-implementation-notes.md`「追記（Probit Issue #77時点）」節参照。Tobit着手時にも同じ計算が必要になる見込みのため、先に共通化しておいた。
+- **`include_intercept=false`のときの非入れ子性・`df_model=k-1`固定・`df_model==0`時の`lr_p_value=NaN`**: Logitと同じ設計判断（詳細は`logit-implementation-notes.md`「適合度統計量」節参照、ユーザー確認済みの経緯を含め重複記載しない）。
+- **Logit側Issue #130の`k=0`パニックはProbitでは再現しない**: Logit実装時に発覚した「`k=0`（`include_intercept=false`かつ説明変数も無い）で`cov_params`計算経路がfaerの`attempt to subtract with overflow`でパニックする」問題（`logit-implementation-notes.md`参照）は、Probitでは`fit()`冒頭で`k==0`のとき`CommonError::NoRegressors`を返すチェックが当初（Issue #72）から入っているため、そもそも到達しない。したがって本Issueでも追加の対応は不要だった。
+
+### テスト
+
+Logitの対応するテスト（Issue #61で3種）と同じ構成:
+
+- **`fit_computes_goodness_of_fit_statistics_for_intercept_only_model`**: 切片のみモデル（`df_model=0`の境界ケース）。`log_likelihood`と`log_likelihood_null`が定義上一致すること、`lr_statistic≈0`・`pseudo_r_squared≈0`・`lr_p_value`がNaNになることを検証。
+- **`fit_computes_goodness_of_fit_statistics_matching_independently_recomputed_values`**: 多変量（k=3）モデル。実装（`clamped_pdf_cdf`ベース）とは異なる式（標準正規CDF`Φ`から直接`Σ[y ln Φ(z) + (1-y) ln(1-Φ(z))]`を計算するベルヌーイ対数尤度の定義式そのもの）で`log_likelihood`を独立に再計算し、`log_likelihood_null`・`lr_statistic`・`pseudo_r_squared`・`df_model`・`df_resid`・`lr_p_value`（`statrs::ChiSquared`で独立に検算）・`aic`/`bic`を突き合わせた（`fit_cov_params_is_symmetric_and_stats_are_internally_consistent`と同じデータセットを再利用）。
+- **`fit_lr_statistic_can_be_negative_when_include_intercept_is_false`**: `include_intercept=false`での非入れ子挙動。`lr_statistic`が負になりうること（NaN/Infにはならないこと）、`df_model`/`df_resid`/`aic`/`bic`は`include_intercept`の値に関わらず同じ式で計算されることを回帰テストとして固定した。

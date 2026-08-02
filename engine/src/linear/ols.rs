@@ -851,7 +851,13 @@ fn ensure_full_rank(
     let threshold = (k as f64) * f64::EPSILON * max_abs_diag;
 
     for i in 0..k {
-        if (*r.get(i, i)).abs() <= threshold {
+        let diag = (*r.get(i, i)).abs();
+        // NaNを明示的にチェックする（`diag <= threshold`だとNaNとの比較は常にfalseになり
+        // すり抜けてしまう）。全ゼロ設計行列（`include_intercept=false`かつ全説明変数列が
+        // ゼロ）のcol_piv_qrは列選択時の0除算によりRの対角がNaNになりうるため
+        // （faer 0.24.4で実機確認済み、Issue #109。`nonlinear::common::newton_step`と
+        // 同じ修正パターン）。
+        if diag.is_nan() || diag <= threshold {
             return Err(LeastSquaresError::SingularMatrix);
         }
     }
@@ -1248,6 +1254,25 @@ mod tests {
         .unwrap();
 
         let result = OlsEstimator::fit(input, CovType::Classical, 0.95);
+
+        assert_eq!(result.unwrap_err(), LeastSquaresError::SingularMatrix);
+    }
+
+    #[test]
+    fn ensure_full_rank_detects_nan_diagonal_from_all_zero_matrix() {
+        // 全ゼロ行列のcol_piv_qrは列選択時の0除算によりRの対角成分がNaNになりうる
+        // （faer 0.24.4で実機確認済み）。`diag <= threshold`のみだとNaNとの比較は
+        // 常にfalseになりすり抜けてしまうため、`diag.is_nan()`の明示チェックが
+        // 必要（Issue #109）。`OlsEstimator::fit`経由だと、この後段の`xtx_inverse`
+        // （全ゼロのX'Xは非正定値でCholesky分解が失敗する）が偶然同じ
+        // `SingularMatrix`を返し検出漏れを覆い隠してしまうため、`ensure_full_rank`
+        // を直接呼び出して検証する。
+        let zeros = Mat::<f64>::zeros(4, 2);
+        let qr = zeros.col_piv_qr();
+        let diag = (*qr.thin_R().get(0, 0)).abs();
+        assert!(diag.is_nan(), "precondition: expected R diagonal to be NaN");
+
+        let result = ensure_full_rank(&qr, 2);
 
         assert_eq!(result.unwrap_err(), LeastSquaresError::SingularMatrix);
     }

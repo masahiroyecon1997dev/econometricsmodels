@@ -292,3 +292,25 @@ Issue #77/#78/#79で`common.rs`へ新規追加したコード（`goodness_of_fit
 - **数値検証**: `engine`のユニットテスト`fit_cov_type_opg_hc0_hc1_match_independently_recomputed_values`・`fit_cov_type_cluster_matches_independently_recomputed_values`と同じ入力（`y=[0,1,0,1]`、`x1=[10,20,30,40]`、`x2=[-5,2,8,-1]`、cluster`=[a,a,b,b]`、`tol=1e-8`）で、一時的なRustサンプル（`engine/examples/probit_oracle.rs`、コミット対象外、検証後削除）から`params`/`std_errors`のオラクル値を出力させ、`uv run maturin develop --release`でビルドした`fit_probit`をPythonから同じデータで呼び出した結果と突き合わせ、classical/opg/hc0/hc1/clusterの全cov_typeで許容誤差1e-9で一致することを確認した（完了条件通り）。
 - **テストは追加していない（Logitの前例通り）**: `fit`/`fit_probit`は`PyDataFrame`を引数に取るため、`build_probit_input`と異なりGILなしの`#[cfg(test)]`では直接呼べない（`engine_pybind/src/nonlinear/CLAUDE.md`「テストの制約: `PyDataFrame`引数の関数はcargo testから直接呼べない」参照）。
 - **`uv run pytest tests/api_tests`（398件）で既存OLS/WLS/Logit機能への回帰が無いことも確認済み**。
+
+## engine_pybind配線の追加・python_packageラッパー実装（Issue #83で実装済み）
+
+Issue #83は当初「python_packageラッパー実装のみ」（依存: #82）というスコープだったが、着手前の調査で`ProbitResult`（Issue #81/#82時点）に`predict()`/`pred_table()`/`marginal_effects()`のpymethodsが1つも無いことが判明した（`engine::nonlinear::probit::ProbitEstimator`自体はIssue #77-79で実装済みだったが、engine_pybind層の配線が無かった）。Logit Issue #67で全く同じギャップが発覚し、OLSのpredict実装（コミット`c6caed7`、engine拡張・engine_pybind配線・python_packageラッパーを1つのIssueにまとめた前例）に倣ってengine_pybind配線もまとめて実装した経緯（コミット`cd222c5`）を確認し、ユーザー確認の上で同じ方針を踏襲。engine_pybind配線もIssue #83にまとめて実装した（`engine_pybind/src/nonlinear/CLAUDE.md`「Probitの実装状況」節にも同じ経緯を記録）。
+
+### engine_pybind: `ProbitResult`への`estimator`フィールド・pymethods追加
+
+`LogitResult`（Issue #67）と完全に同じ設計。`ProbitResult`に非公開`estimator: ProbitEstimator`フィールドを追加し（`#[derive(Clone)]`は`ProbitEstimator`がCloneを実装していないため外す、`LogitResult`と同じ理由）、`predict()`/`pred_table(threshold=0.5)`/`marginal_effects(at="overall", confidence_level=0.95)`をpymethodsとして実装した（いずれも`self.estimator`への単純委譲）。`fit()`が返す`ProbitResult`構築時に`estimator`（ムーブ）を最後のフィールドとして渡す。
+
+**`MarginalEffectsResult`と`parse_marginal_effects_at`を`logit.rs`から`nonlinear/common.rs`へ移動**: `engine::nonlinear::common::MarginalEffects`（marginal_effectsの返り値の元となるengine側の型）は元々Logit/Probit共有だったため、対応するengine_pybind側のpyclass・パース関数もLogit専用の位置に置いたままにせず、`rust-style.md`「系統内で共有するロジックは`<系統>/common.rs`に置く」に従って共有化した（ユーザー確認済み、Probit専用に重複定義する代替案・移動せず`super::logit::MarginalEffectsResult`をそのまま参照する代替案も検討した上で選択）。`logit.rs`は`super::common::{MarginalEffectsResult, parse_marginal_effects_at}`をimportするだけに変更、テスト（`parse_marginal_effects_at_*`の2件）も`common.rs`側の`#[cfg(test)] mod tests`に移動した。`engine_pybind/src/lib.rs`の`#[pymodule]`登録も`nonlinear::logit::MarginalEffectsResult`から`nonlinear::common::MarginalEffectsResult`に変更（登録自体は1回のまま、Logit/Probit両方がこの1つのpyclassを共有する）。
+
+`cargo build`/`clippy -D warnings`/`fmt --check`/`test -p engine_pybind`すべて成功（43件pass、件数はテスト移動のみで変わらず）。
+
+### python_package: `Probit`/`ProbitResults`
+
+`python_package/econometricsmodels/nonlinear/probit.py`を新設した。`logit.py`と完全に同型（`Probit`/`ProbitResults`のフィールド・メソッド構成、`coef_table()`の`z_stat`キー、`predict()`の`{"probability": p}`、`pred_table()`の行指向`list[dict]`、`marginal_effects()`のキー命名`param`/`dydx`/`std_err`/`z`/`p_value`/`conf_low`/`conf_high`まですべて一致）。`ProbitOptions`は`_lib`からの再輸出、`summary()`は未実装（いずれもLogitと同じ確定済み方針）。トップレベル`__init__.py`に`Probit`/`ProbitOptions`/`ProbitResults`を追加した。
+
+### テスト
+
+`tests/api_tests/test_probit.py`を新設した（`test_logit.py`と同型、36件）。統計量・API構造・`ValidationError`/`ComputationError`の各パスを検証するスモークテストのみで、statsmodels/R glmとの厳密な数値照合はIssue #84で別途実施する。`SeparationSuspected`検出（Issue #138由来）は`engine::nonlinear::common::run_solver`（Logit/Probit共有の最適化ループ）に実装されているため、Probit側でも同じ准完全分離DGPで`ComputationError`になることを確認した。
+
+`uv run ruff check .`/`uv run ruff format --check .`（リポジトリ全体）、`uv run maturin develop --release`でのビルド後`uv run pytest tests/api_tests`（434件、398件+36件、既存機能への回帰なし）すべて成功（完了条件通り）。

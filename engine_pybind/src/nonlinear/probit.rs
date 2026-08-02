@@ -25,7 +25,9 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
-use super::common::mle_error_to_pyerr;
+use super::common::{
+    MarginalEffectsResult, mat_to_nested_vec, mle_error_to_pyerr, parse_marginal_effects_at,
+};
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
 use crate::errors::ValidationError;
 use crate::validation::{
@@ -154,16 +156,21 @@ impl ProbitOptions {
 /// section 5. Row-oriented table construction (e.g. a `coef_table`) is left to
 /// `python_package`. All array-valued fields (`params`, `std_errors`, etc.) share the
 /// same order as `param_names`.
+///
+/// `predict()` / `pred_table()` / `marginal_effects()` are provided as separate methods
+/// (not part of this struct's fields), matching `nonlinear-api-design.md` section 6.
 // `ProbitResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`ProbitOptions`の`from_py_object`とは
 // 対照的。`LogitResult`と同じ理由）。
 //
 // `get_all`ではなく、フィールドごとに個別`#[pyo3(get)]`を付ける方式にしている
-// （`LogitResult`と同じ設計。将来`predict`/`pred_table`/`marginal_effects`の呼び出しに
-// 必要な`estimator`フィールド（Issue #83相当）を`#[pyo3(get)]`を付けずに済ませられる
-// ようにするため）。
+// （`LogitResult`と同じ設計。`predict`/`pred_table`/`marginal_effects`の呼び出しに必要な
+// `estimator`フィールドを`#[pyo3(get)]`を付けずに済ませられるようにするため）。
+//
+// `Clone`を派生しない: `estimator`（`engine::nonlinear::probit::ProbitEstimator`）が
+// `Clone`を実装していないため（`LogitResult`と同じ理由）。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ProbitResult {
     #[pyo3(get)]
     pub params: Vec<f64>,
@@ -207,6 +214,65 @@ pub struct ProbitResult {
     /// to lowercase; e.g. `"classical"`, `"opg"`, `"hc1"`, `"cluster"`).
     #[pyo3(get)]
     pub cov_type: String,
+    /// Not exposed to Python; only `predict`/`pred_table`/`marginal_effects` read it
+    /// (`LogitResult`の`estimator`と同じ位置づけ、コメント参照)。
+    estimator: ProbitEstimator,
+}
+
+#[pymethods]
+impl ProbitResult {
+    /// Predicted probabilities for the training data used in `fit()`.
+    ///
+    /// Out-of-sample prediction (a `new_data` argument) is not yet supported
+    /// (tracked separately; see `docs/planning/specs/probit-implementation-notes.md`).
+    fn predict(&self) -> Vec<f64> {
+        self.estimator.predict()
+    }
+
+    /// 2x2 classification table as `[[row0], [row1]]`, where row/column index 0 is the
+    /// negative class and 1 is the positive class: `table[actual][predicted]`.
+    ///
+    /// `actual` always uses a fixed 0.5 split; only `predicted` depends on `threshold`
+    /// (matches statsmodels' `BinaryResults.pred_table(threshold)`; see
+    /// `engine::nonlinear::probit::ProbitEstimator::pred_table` for the exact semantics).
+    /// Out-of-sample data is not yet supported (same limitation as `predict()`).
+    #[pyo3(signature = (threshold=0.5))]
+    fn pred_table(&self, threshold: f64) -> Vec<Vec<f64>> {
+        mat_to_nested_vec(&self.estimator.pred_table(threshold))
+    }
+
+    /// Marginal effects (`dy/dx`) with delta-method standard errors.
+    ///
+    /// Independent of `fit()`'s `confidence_level` (re-evaluated here so callers can
+    /// use a different confidence level without re-fitting). See
+    /// `docs/planning/specs/nonlinear-api-design.md` section 6.
+    ///
+    /// # Errors
+    /// - `at` is not one of `"overall"`, `"mean"`, `"median"` (case-insensitive):
+    ///   `ValidationError`
+    /// - `confidence_level` is outside `(0, 1)`: `ValidationError`
+    #[pyo3(signature = (at="overall".to_string(), confidence_level=0.95))]
+    fn marginal_effects(
+        &self,
+        at: String,
+        confidence_level: f64,
+    ) -> PyResult<MarginalEffectsResult> {
+        let at = parse_marginal_effects_at(&at.to_lowercase())?;
+        let effects = self
+            .estimator
+            .marginal_effects(at, confidence_level)
+            .map_err(mle_error_to_pyerr)?;
+
+        Ok(MarginalEffectsResult {
+            param_names: effects.param_names().to_vec(),
+            dydx: effects.dydx().to_vec(),
+            std_errors: effects.std_errors().to_vec(),
+            z_stats: effects.z_stats().to_vec(),
+            p_values: effects.p_values().to_vec(),
+            conf_lower: effects.conf_lower().to_vec(),
+            conf_upper: effects.conf_upper().to_vec(),
+        })
+    }
 }
 
 /// `cov_type`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::CovType`に
@@ -358,6 +424,7 @@ pub(crate) fn fit(
         converged: estimator.converged(),
         n_iter: estimator.n_iter(),
         cov_type: options.cov_type.to_lowercase(),
+        estimator,
     })
 }
 

@@ -10,7 +10,8 @@ use pyo3_polars::PyDataFrame;
 use errors::{ComputationError, ValidationError};
 use linear::ols::{OLSOptions, OLSResult};
 use linear::wls::WLSResult;
-use nonlinear::logit::{LogitOptions, LogitResult, MarginalEffectsResult};
+use nonlinear::common::MarginalEffectsResult;
+use nonlinear::logit::{LogitOptions, LogitResult};
 use nonlinear::probit::{ProbitOptions, ProbitResult};
 
 /// Entry point for OLS estimation.

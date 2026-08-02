@@ -1,20 +1,22 @@
-# python_package/econometricsmodels/nonlinear/ 実装ノート（Logit）
+# python_package/econometricsmodels/nonlinear/ 実装ノート（Logit/Probit）
 
-このファイルは `python_package/econometricsmodels/nonlinear/` 配下のファイルを読み書きするときだけ自動ロードされる。詳細は`docs/planning/specs/nonlinear-api-design.md`6章・`logit-implementation-notes.md`が正本。
+このファイルは `python_package/econometricsmodels/nonlinear/` 配下のファイルを読み書きするときだけ自動ロードされる。詳細は`docs/planning/specs/nonlinear-api-design.md`6章・`logit-implementation-notes.md`・`probit-implementation-notes.md`が正本。
+
+`probit.py`は`logit.py`と完全に同型のパターン（`Probit`/`ProbitResults`、フィールド・メソッド構成も同一。`z_stat`ベースの検定等、下記の各節はLogit/Probit共通で成り立つ。Issue #83）。
 
 ## 確定済みのスコープ（再提案しない）
 
 以下は既にユーザー承認済みで見送りが確定している。「使いやすさ」目的で再提案しない（CLAUDE.md 2章の非交渉事項に準ずる運用、`linear/CLAUDE.md`と同じ方針）。
 
 - `summary()`は実装しない（structured onlyの出力方針、`linear/CLAUDE.md`のOLSと同じ）。
-- `LogitOptions`は`_lib`からそのまま再輸出する（独自クラスとして再定義しない、`OLSOptions`と同じ方針）。
+- `LogitOptions`/`ProbitOptions`は`_lib`からそのまま再輸出する（独自クラスとして再定義しない、`OLSOptions`と同じ方針）。
 - `predict()`はout-of-sample（`new_data`引数）未対応。`OLS.predict(new_data=None)`とは異なり引数を取らない（engine側がまだ対応していないため。別issueでトラッキング）。
 
 ## 実装パターン
 
-- `Logit`/`LogitResults`は`OLS`/`OlsResults`と同型（`data`/`y`/`x`/`options`を保持するだけのコンストラクタ、`fit()`呼び出し時に初めて`_lib.fit_logit`を呼ぶ。コンストラクタでは検証しない）。
+- `Logit`/`LogitResults`（`Probit`/`ProbitResults`も同様）は`OLS`/`OlsResults`と同型（`data`/`y`/`x`/`options`を保持するだけのコンストラクタ、`fit()`呼び出し時に初めて`_lib.fit_logit`/`_lib.fit_probit`を呼ぶ。コンストラクタでは検証しない）。
 - `params`/`std_errors`/`z_stats`/`p_values`は係数名→値の`dict[str, float]`（O(1)取り出し用）。行指向で欲しい場合は`coef_table()`。
-- `coef_table()`のキーは`OlsResults.coef_table()`と同じ形状だが、`t_stat`ではなく`z_stat`（Logitは正規分布ベースのz検定、`nonlinear-api-design.md`5章）。
+- `coef_table()`のキーは`OlsResults.coef_table()`と同じ形状だが、`t_stat`ではなく`z_stat`（Logit/Probitは正規分布ベースのz検定、`nonlinear-api-design.md`5章）。
 
 ## `marginal_effects()`/`pred_table()`のキー命名（混同注意）
 
@@ -23,4 +25,4 @@
 
 ## テスト
 
-`tests/api_tests/test_logit.py`は構造・API・エラーパスのスモークテストのみ（Issue #67で追加）。statsmodels/R glmとの厳密な数値比較は`test_logit_fixtures.py`（statsmodels主リファレンス）・`test_logit_crosscheck.py`（Rクロスチェック）で行う（Issue #68、OLSの`test_ols_fixtures.py`/`test_ols_crosscheck.py`と同じ役割分担）。詳細は`docs/planning/specs/logit-implementation-notes.md`「statsmodels/R glmとの数値照合ベンチマーク作成」参照。
+`tests/api_tests/test_logit.py`/`test_probit.py`は構造・API・エラーパスのスモークテストのみ（Logit: Issue #67、Probit: Issue #83で追加、`test_probit.py`は`test_logit.py`と同型）。statsmodels/R glmとの厳密な数値比較は`test_logit_fixtures.py`/`test_logit_crosscheck.py`（Issue #68）、Probit側は`docs/planning/specs/probit-implementation-notes.md`参照（Issue #84で実施予定）で行う（OLSの`test_ols_fixtures.py`/`test_ols_crosscheck.py`と同じ役割分担）。

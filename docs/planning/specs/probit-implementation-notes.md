@@ -93,3 +93,28 @@ rust-reviewerのレビューで指摘され、ユーザー確認の上でテス�
 また、Logitの`SEPARATION_PARAM_NORM_THRESHOLD=100`（`SeparationSuspected`判定の閾値、`nonlinear/common.rs`）はLogitのロジスティック関数の飽和特性から較正された値であり、Probitのリンク関数（正規分布CDF、テイルの減衰特性が異なる）で同程度に適切かは未検証・未較正。
 
 Logitの(準)完全分離対応（`SeparationSuspected`、Issue #138）は`LogitEstimator::fit`骨格実装（Issue #56）よりずっと後に、実運用で問題が顕在化してから発見・対応された別Issueであり、本Issue（#72、Issue #56相当のスコープ）には元々含まれていない。Probitでも同様に、method分岐（BFGS/L-BFGS、Issue #73）実装時、または実際に収束の問題が観測された時点で改めて検討する。
+
+## BFGS/L-BFGSソルバー対応（Issue #73で実装済み）
+
+`ProbitEstimator::fit`に`method: Method`引数を追加し、`run_solver`（既存のnewton/bfgs/lbfgs 3分岐）へ素通しする。`LogitEstimator::fit`（Issue #57、コミット`ef69aba`）と全く同じ変更（シグネチャへの引数追加のみ、バリデーション・後処理ロジックは無変更）。
+
+`method`の選択に関わらず、収束点でのHessian評価（SE計算用、後続Issueで使用）は常に解析的に行う（`run_solver`の実装方針）。BFGS/L-BFGSが最適化中に内部で保持する近似Hessianは使い回さない。
+
+### テスト
+
+Logitの対応するテスト2種と同じ構成:
+
+- **`fit_bfgs_and_lbfgs_converge_to_same_solution_as_newton`**: 切片のみモデル（既知の解析解`θ̂=Φ⁻¹(ȳ)`を持つ）で`bfgs`/`lbfgs`を実行し、解析解に収束することを確認。
+- **`fit_bfgs_and_lbfgs_agree_with_newton_when_design_matrix_has_nontrivial_scale`**: 切片のみモデルは`x`が定数列だけのため`standardize_columns`のスケーリングが実質no-opになり、標準化・逆標準化の往復ロジックを通らない（Logitでrust-reviewerが指摘した点）。非自明なスケール（`x1=[10,20,30,40]`）を持つデータセットで`newton`/`bfgs`/`lbfgs`が同じ解に収束することを、閉じた形の解析解ではなく`newton`の結果を参照値として検証する。
+
+いずれも「よく分離された」通常のデータのみを使っており、`U_CLAMP`が実際に発火する境界データ（Logitの`near_separation`シナリオに相当するもの）でのBFGS/L-BFGSの挙動は次節の理由により未検証のまま。
+
+### 未検証のリスク: `U_CLAMP`領域での`cost()`/`gradient()`の数学的非整合とline search（BFGS/L-BFGS固有）
+
+rust-reviewerのレビューで指摘され、ユーザー確認の上でテストは見送り、記録のみ残す（Issue #72の「未検証のリスク」節と同じ扱い）。
+
+`u`が`U_CLAMP`でクランプされる領域では、`cost() = -log Φ(clamp(u(θ)))`はその領域内で`θ`に対して定数（`clamp`の微分が0のため）になるはずだが、`gradient()`はクランプ後の`λᵢ`（有限だが非ゼロ）をそのまま`xᵢ`に掛けた値を返しており、`cost()`の真の微分（0）と一致しない。この非整合はNewton法（line searchなし、`cost()`を呼ばない設計）には影響しにくいが、BFGS/L-BFGSが使うline search（Strong Wolfe条件、勾配から予測する減少量と実際の`cost()`の減少量を突き合わせる）は影響を受けうる。line searchが受理可能なステップを見つけられずエラーになる、あるいは逆に不適切なステップを受理する可能性が理論上ある。
+
+**あえて修正しない判断（ユーザー確認済み）**: `gradient()`を`cost()`の真の微分（クランプ領域で0）に揃える「修正」は、実は逆に危険である。完全分離に近い強く誤分類された点で`gradient`が0になると、勾配ノルム基準の収束判定が誤検知しうる（Logitの完全分離問題、Issue #138と同じクラスのバグをU_CLAMP経由で再現することになる）。現状の実装（クランプ済みλをそのまま使う、有限だが大きな値を返す）は、`u→-∞`での真の（クランプ無し）Millsの比の漸近的な発散（`λ~|u|`）と整合する挙動に近く、意図的な設計判断として維持する。
+
+BFGS/L-BFGS×分離データでの実際の挙動（line search失敗の有無等）は未検証。method分岐の後続issue、または実際に収束の問題が観測された時点で改めて検討する。

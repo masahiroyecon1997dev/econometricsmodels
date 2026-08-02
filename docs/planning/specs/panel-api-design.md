@@ -56,8 +56,7 @@ OLS（`OLSResult`, `engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
 |---|---|---|
 | `params` / `std_errors` / `t_stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` | OLS共通 | 検定分布（t/z）は#121で確定 |
 | `residuals` / `dep_var_name` | OLS共通 | そのまま踏襲 |
-| `n_obs` | Logit由来の表記 | OLSは現状`nobs`だが、この機会に`n_obs`へ統一する
-  （既存OLSのリネームは別Issueで追跡、[後述](#22-olsのnobsn_obsリネーム別issue)） |
+| `n_obs` | Logit由来の表記 | OLS/WLSも`n_obs`に統一済み（Issue #139、[後述](#22-olsのnobsn_obsリネーム完了)） |
 | `df_resid` / `df_model` | Logit由来、**新規追加** | OLSには無いが、FEは自由度調整が
   `n - n_entities - k`という非自明な式になるため明示的に返す価値が高い |
 | `n_entities` | **新規追加**（FE/RE限定） | パネルユニット数。pyfixest/plmの前例に倣う |
@@ -66,11 +65,11 @@ OLS（`OLSResult`, `engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
 | `log_likelihood` / `aic` / `bic` | OLS共通 | FE/REは最小二乗族で正規性下の尤度が定義できるため含める |
 | `r_squared_within` / `r_squared_between` / `r_squared_overall` | **新規追加**（OLSの`r_squared`/`r_squared_adj`を置き換え） | 詳細は2.3 |
 
-### 2.2 OLSの`nobs`→`n_obs`リネーム（別Issue）
+### 2.2 OLSの`nobs`→`n_obs`リネーム（完了）
 
 既存`OLSResult.nobs`（`ols.rs:157`）とLogitの`LogitResult.n_obs`（`logit.rs:206`）で表記が
-不一致だったため、この機会に`n_obs`へ統一する。OLSは実装済みのため、リネームは
-FE/RE本体の実装Issueとは別に切り出す（Issue番号は本ドキュメント末尾の関連Issue参照）。
+不一致だったため、`n_obs`へ統一した（Issue #139。OLS・WLS双方のResult型・Python側プロパティを
+リネーム済み）。
 
 ### 2.3 R²の種類（within/between/overall）
 

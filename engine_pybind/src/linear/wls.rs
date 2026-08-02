@@ -43,7 +43,7 @@ pub struct WLSResult {
     /// (`docs/spec/wls-spec.md`, "結果構造体").
     pub residuals: Vec<f64>,
     pub dep_var_name: String,
-    pub nobs: usize,
+    pub n_obs: usize,
     /// Standard error type actually used (echoes `OLSOptions.cov_type`, normalized to
     /// lowercase; e.g. `"classical"`, `"hc1"`, `"hac"`, `"cluster"`).
     pub cov_type: String,
@@ -166,7 +166,7 @@ pub fn fit(
         param_names: estimator.input().param_names().to_vec(),
         residuals: wls_estimator.residuals().to_vec(),
         dep_var_name: estimator.input().dep_var_name().to_string(),
-        nobs: estimator.input().nobs(),
+        n_obs: estimator.input().nobs(),
         cov_type: cov_type_lower,
         // r_squared/r_squared_adj/log_likelihood/aic/bicは`estimator`（変換後データに対する
         // OLS）ではなく`wls_estimator`側の値を使う。元の（変換前の）y・weightsを使って

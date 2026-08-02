@@ -218,7 +218,7 @@ def test_invalid_confidence_level_raises(dataset, confidence_level):
 
 @pytest.mark.parametrize(
     "hac_lags", [-1, 100]
-)  # 100 == dataset の nobs（上限側境界）
+)  # 100 == dataset の n_obs（上限側境界）
 def test_invalid_hac_lags_raises(dataset, hac_lags):
     """`hac_lags`が`[0, n)`の範囲外の場合`ValidationError`。"""
     options = OLSOptions(cov_type="hac", hac_lags=hac_lags)
@@ -412,9 +412,9 @@ def test_params_std_errors_t_stats_p_values_share_keys(dataset):
     assert set(res.p_values.keys()) == expected_keys
 
 
-def test_nobs_and_dep_var_name(dataset):
+def test_n_obs_and_dep_var_name(dataset):
     res = _our_fit(dataset)
-    assert res.nobs == 100
+    assert res.n_obs == 100
     assert res.dep_var_name == "y"
 
 

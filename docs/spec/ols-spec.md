@@ -34,7 +34,7 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
 
 `OLSResult`（`#[pyclass]`、`skip_from_py_object`）が公開する配列＋名前リスト:
 `params` / `std_errors` / `t_stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` /
-`residuals` / `dep_var_name` / `nobs` / `cov_type`（実際に使われた種別の小文字文字列） /
+`residuals` / `dep_var_name` / `n_obs` / `cov_type`（実際に使われた種別の小文字文字列） /
 `r_squared` / `r_squared_adj` / `f_statistic` / `f_p_value` / `log_likelihood` / `aic` / `bic`。
 
 - `conf_int`は`conf_lower`/`conf_upper`の2配列に分割（engine内部表現・pyo3実装の簡潔さを優先）。

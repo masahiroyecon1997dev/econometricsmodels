@@ -106,7 +106,7 @@ def _check_result(res, ref: dict, label: str) -> None:
     _assert_close(
         res.log_likelihood, ref["log_likelihood"], f"{label}/log_likelihood"
     )
-    assert res.nobs == ref["nobs"], f"{label}/nobs"
+    assert res.n_obs == ref["nobs"], f"{label}/n_obs"
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)

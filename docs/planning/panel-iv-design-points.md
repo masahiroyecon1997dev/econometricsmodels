@@ -26,7 +26,7 @@
 ### 1.2 結果（Return）設計（確定・Issue #120）
 
 - [x] 共通コア項目の再定義（`params`/`std_errors`/`t_stats`/`p_values`/`conf_lower`/`conf_upper`/`param_names`はOLSと共通のはず。追加が必要な項目の洗い出し）
-  - OLSの項目を土台にしつつ、`n_obs`表記への統一（既存OLSの`nobs`は別Issueでリネーム）、
+  - OLSの項目を土台にしつつ、`n_obs`表記への統一（既存OLSの`nobs`はIssue #139でリネーム済み）、
     `df_resid`/`df_model`・`n_entities`（FE/RE限定）の新規追加、IVでは`log_likelihood`/
     `aic`/`bic`を除外、を確定。詳細: [`panel-api-design.md`](./specs/panel-api-design.md)2.1節、
     [`iv-api-design.md`](./specs/iv-api-design.md)2.1節

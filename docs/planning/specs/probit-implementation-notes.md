@@ -363,3 +363,14 @@ must-fixなし。should-fix 2件のうち1件を対応、1件は対応見送り�
 
 - **対応済み**: `run_glm_crosscheck_benchmark.R`の`observed_bread()`が、logit（正準リンク）では`glm()`既定の`bread()`と数学的に一致するという不変条件を、目視確認のみに頼っていた（将来このスクリプトの計算式を変更した際に、Logit側のクロスチェック値が気づかれずに壊れるリスクが残っていた）。`link == "logit"`のときのみ`stopifnot(isTRUE(all.equal(bread_obs, bread(model), tolerance = 1e-6)))`を追加し、自動検証するようにした。フィクスチャの再生成結果がバイト単位で不変であることを確認済み（副作用なし）。
 - **対応見送り**: `test_probit_fixtures.py`/`test_probit_crosscheck.py`が`method`（bfgs/lbfgs）をパラメータ化しておらず、常にデフォルト（Newton）でのみリファレンス実装と数値比較している点。ただしこれは`test_logit_fixtures.py`/`test_logit_crosscheck.py`（Issue #68）から完全に踏襲した既存の設計であり、Probitで新たに生じたギャップではない。レビュー自体も「Logit/Probit双方に一括で追加するかどうかをユーザーに確認してから着手するのが望ましい」と明記しており、Issue #84単体のスコープ外と判断した。
+
+## mkdocsドキュメント作成（Issue #85で実装済み）
+
+`docs/api/logit.md`（Issue #69）と同じ構成で`docs/api/probit.md`を新規作成した。`Probit`/`ProbitOptions`/`ProbitResults`の自動APIリファレンス（mkdocstrings）に加え、標準誤差の種類・ソルバーオプション・限界効果の補足セクションを手書きで追加した。内容はLogitとほぼ同一（リンク関数`Φ`/`Λ`の違いのみ）なため、冗長な重複を避け「Logitと同一」であることを明記した上で共通の説明・例を参照させる構成にした（下記アンカー設計参照）。
+
+- `docs/mkdocs.yml`のnavに`API Reference > Probit`を追加。
+- `docs/getting-started.md`にProbitセクションを追加（Logitセクションの後、エラーハンドリングの前）。Logitと重複する`predict()`/`pred_table()`/`marginal_effects()`の使用例はそのまま複製せず、「Logitの例をそのまま`Probit`/`ProbitOptions`に置き換えるだけで動く」と明記してLogitセクションの該当箇所にリンクした。
+- **アンカー衝突の回避（実装時の判断）**: `getting-started.md`に「Marginal effects」のような同名見出しをProbitセクションにも追加すると、mkdocs（github-style slugify）が2つ目の見出しに`marginal-effects-1`等の別IDを付与し、`docs/api/logit.md`が参照している`../getting-started.md#marginal-effects`（Logitセクション内の見出し）とは別物になってしまう。見出しを複製せず、Probit側は文章内でLogitセクションの既存アンカーへ直接リンクする設計にすることでこの問題を回避した（`mkdocs build`のビルド後HTMLで`id="marginal-effects"`が1つだけ存在することを確認済み）。
+- `docs/index.md`の「Supported methods」にProbitを追加し、「将来追加予定」欄からProbitを外してTobitに置き換えた。
+- Python側の全public docstring（`python_package/econometricsmodels/nonlinear/probit.py`）はIssue #83で既にGoogleスタイル・英語で整備済みのため、本Issueでの追加修正は不要だった（Logitと同じ状況）。
+- `uv run --locked --group docs mkdocs build --config-file docs/mkdocs.yml`（CI（`cd_docs.yml`）と同じ非strictモード）で正常にビルドできることを確認済み。既存の未解消警告（`docs/planning/`配下の相対リンク等、Issue #111）以外に新規の警告・エラーは発生しなかった。`docs/api/probit/index.html`に`ProbitOptions`/`ProbitResults`が115回出現し、`docs/api/logit/index.html`のLogit（116回）とほぼ同数であることから、mkdocstringsのAPIリファレンス自動生成が正常に機能していることを確認した。

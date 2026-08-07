@@ -17,6 +17,7 @@ nav:
       - OLS: api/ols.md
       - WLS: api/wls.md
       - Logit: api/logit.md
+      - Probit: api/probit.md
 
 theme:
   name: material

@@ -61,6 +61,7 @@
 //! 関所（`clamped_pdf_cdf`）を経由させることでこの非対称性を避けている。
 
 use crate::error::CommonError;
+use crate::inference;
 use crate::nonlinear::common::{
     CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
     Method, MleError, SandwichVariant, cluster_cov_params, column_means, column_medians,
@@ -643,8 +644,7 @@ impl ProbitEstimator {
         let cov_params = destandardize_cov_params(&cov_params_std, &scale);
 
         let normal = Normal::standard();
-        let alpha = 1.0 - confidence_level;
-        let z_crit = normal.inverse_cdf(1.0 - alpha / 2.0);
+        let z_crit = inference::critical_value(&normal, confidence_level);
 
         let mut std_errors = vec![0.0; k];
         let mut z_stats = vec![0.0; k];
@@ -654,13 +654,13 @@ impl ProbitEstimator {
 
         for j in 0..k {
             let se = (*cov_params.get(j, j)).sqrt();
-            let z = params[j] / se;
+            let stat = inference::compute_inference_stat(&normal, params[j], se, z_crit);
 
             std_errors[j] = se;
-            z_stats[j] = z;
-            p_values[j] = 2.0 * (1.0 - normal.cdf(z.abs()));
-            conf_lower[j] = params[j] - z_crit * se;
-            conf_upper[j] = params[j] + z_crit * se;
+            z_stats[j] = stat.stat;
+            p_values[j] = stat.p_value;
+            conf_lower[j] = stat.conf_low;
+            conf_upper[j] = stat.conf_high;
         }
 
         let llf = log_likelihood(input.x(), input.y(), &params);

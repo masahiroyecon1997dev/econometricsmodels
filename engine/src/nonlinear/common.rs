@@ -29,6 +29,7 @@ use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
 use thiserror::Error;
 
 use crate::error::CommonError;
+use crate::inference;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 
 /// Logit/Probit/Tobitの計算過程で発生しうるエラー。
@@ -475,8 +476,7 @@ pub fn marginal_effects_from_w_s(
     // （`.claude/rules/rust-style.md`「テスト」のカバレッジ方針参照、`fit()`と同じ扱い）。
     let normal =
         Normal::new(0.0, 1.0).map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
-    let alpha = 1.0 - confidence_level;
-    let z_crit = normal.inverse_cdf(1.0 - alpha / 2.0);
+    let z_crit = inference::critical_value(&normal, confidence_level);
 
     let k_constant = usize::from(has_intercept);
     let mut out_param_names = Vec::with_capacity(k - k_constant);
@@ -496,15 +496,15 @@ pub fn marginal_effects_from_w_s(
             }
         }
         let se = var_j.sqrt();
-        let z = dydx_j / se;
+        let stat = inference::compute_inference_stat(&normal, dydx_j, se, z_crit);
 
         out_param_names.push(param_names[j].clone());
         out_dydx.push(dydx_j);
         std_errors.push(se);
-        z_stats.push(z);
-        p_values.push(2.0 * (1.0 - normal.cdf(z.abs())));
-        conf_lower.push(dydx_j - z_crit * se);
-        conf_upper.push(dydx_j + z_crit * se);
+        z_stats.push(stat.stat);
+        p_values.push(stat.p_value);
+        conf_lower.push(stat.conf_low);
+        conf_upper.push(stat.conf_high);
     }
 
     Ok(MarginalEffects {

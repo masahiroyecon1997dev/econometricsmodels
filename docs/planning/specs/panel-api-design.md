@@ -147,11 +147,14 @@ Newey-West型HACだが、これをパネルにそのまま適用すると異な�
 
 ### 4.2 新規に切り出す共通化（FE/RE/IV着手前に実施）
 
-1. **t/z検定の後処理の共通関数化**: OLS（t分布、`ols.rs:396-420`）とLogit（z分布、
-   `logit.rs:694-717`）で、`std_err`/`stat`/`p_value`/`conf_low`/`conf_high`を計算する
-   ループがほぼ同型のまま系統ごとに独立実装されている。`statrs::distribution::
-   ContinuousCDF`をジェネリックに取る関数としてcrate直下（`engine`直下、系統をまたぐ
-   位置）に切り出す。FE/RE/2SLS（t分布）・GMM（z分布、Issue #121）もこの関数を使う。
+1. **t/z検定の後処理の共通関数化（完了、Issue #152）**: OLS（t分布、`ols.rs:396-420`）と
+   Logit（z分布、`logit.rs:694-717`）で、`std_err`/`stat`/`p_value`/`conf_low`/
+   `conf_high`を計算するループがほぼ同型のまま系統ごとに独立実装されていた。
+   `statrs::distribution::ContinuousCDF`をジェネリックに取る関数として`engine/src/
+   inference.rs`（crate直下、系統をまたぐ位置）に切り出した。実装時に、Issueのスコープ
+   （OLS・Logit）に加えて、同型の重複がある`probit.rs`（z分布）・`nonlinear/common.rs`の
+   `marginal_effects_from_w_s`（限界効果のSE/z値/CI、Logit/Probit共通）も対象に含めた
+   （ユーザー確認済み）。FE/RE/2SLS（t分布）・GMM（z分布、3章）もこの関数を使う。
 2. **`engine_pybind`の`cov_type`文字列パース＋`cluster_col`/`time_col`抽出ブロックの共通化**:
    `ols.rs:297-316`と`wls.rs:124-143`がほぼ完全一致で重複している。FE/RE/IVで重複を
    増やす前に共通関数化する。

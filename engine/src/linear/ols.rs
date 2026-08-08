@@ -14,6 +14,7 @@ use statrs::distribution::{ContinuousCDF, FisherSnedecor, StudentsT};
 
 use super::common::LeastSquaresError;
 use crate::error::CommonError;
+use crate::inference;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::validation::validate_cluster_groups;
 
@@ -400,8 +401,7 @@ impl OlsEstimator {
 
         let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
             .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
-        let alpha = 1.0 - confidence_level;
-        let t_crit = t_dist.inverse_cdf(1.0 - alpha / 2.0);
+        let t_crit = inference::critical_value(&t_dist, confidence_level);
 
         let mut t_stats = Mat::zeros(k, 1);
         let mut p_values = Mat::zeros(k, 1);
@@ -411,12 +411,12 @@ impl OlsEstimator {
         for j in 0..k {
             let coef = *params.get(j, 0);
             let se = *std_errors.get(j, 0);
-            let t_stat = coef / se;
+            let stat = inference::compute_inference_stat(&t_dist, coef, se, t_crit);
 
-            *t_stats.get_mut(j, 0) = t_stat;
-            *p_values.get_mut(j, 0) = 2.0 * (1.0 - t_dist.cdf(t_stat.abs()));
-            *conf_lower.get_mut(j, 0) = coef - t_crit * se;
-            *conf_upper.get_mut(j, 0) = coef + t_crit * se;
+            *t_stats.get_mut(j, 0) = stat.stat;
+            *p_values.get_mut(j, 0) = stat.p_value;
+            *conf_lower.get_mut(j, 0) = stat.conf_low;
+            *conf_upper.get_mut(j, 0) = stat.conf_high;
         }
 
         let k_constant = usize::from(input.has_intercept());

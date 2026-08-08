@@ -31,6 +31,7 @@
 //! （`nonlinear/common.rs`の`SolverOutput.hessian`と同じく対数尤度そのものの符号）。
 
 use crate::error::CommonError;
+use crate::inference;
 use crate::nonlinear::common::{
     CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
     Method, MleError, SandwichVariant, cluster_cov_params, column_means, column_medians,
@@ -41,7 +42,7 @@ use crate::nonlinear::common::{
 use crate::validation::validate_cluster_groups;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
-use statrs::distribution::{ContinuousCDF, Normal};
+use statrs::distribution::Normal;
 
 /// Logitの被説明変数・設計行列を保持する入力データ。
 ///
@@ -594,8 +595,7 @@ impl LogitEstimator {
         // （`.claude/rules/rust-style.md`「テスト」のカバレッジ方針参照）。
         let normal =
             Normal::new(0.0, 1.0).map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
-        let alpha = 1.0 - confidence_level;
-        let z_crit = normal.inverse_cdf(1.0 - alpha / 2.0);
+        let z_crit = inference::critical_value(&normal, confidence_level);
 
         let mut std_errors = vec![0.0; k];
         let mut z_stats = vec![0.0; k];
@@ -605,13 +605,13 @@ impl LogitEstimator {
 
         for j in 0..k {
             let se = (*cov_params.get(j, j)).sqrt();
-            let z = params[j] / se;
+            let stat = inference::compute_inference_stat(&normal, params[j], se, z_crit);
 
             std_errors[j] = se;
-            z_stats[j] = z;
-            p_values[j] = 2.0 * (1.0 - normal.cdf(z.abs()));
-            conf_lower[j] = params[j] - z_crit * se;
-            conf_upper[j] = params[j] + z_crit * se;
+            z_stats[j] = stat.stat;
+            p_values[j] = stat.p_value;
+            conf_lower[j] = stat.conf_low;
+            conf_upper[j] = stat.conf_high;
         }
 
         let llf = log_likelihood(input.x(), input.y(), &params);
@@ -849,7 +849,7 @@ impl LogitEstimator {
 mod tests {
     use super::*;
     use crate::nonlinear::common::dydx_and_jacobian;
-    use statrs::distribution::ChiSquared;
+    use statrs::distribution::{ChiSquared, ContinuousCDF};
 
     #[test]
     fn from_columns_with_intercept_prepends_const_column() {

@@ -21,6 +21,8 @@ Requires Python 3.12 or later.
 
 ## Quickstart
 
+### OLS
+
 ```python
 import polars as pl
 from econometricsmodels import OLS
@@ -37,28 +39,62 @@ result = OLS(df, y="y", x=["x1"]).fit()
 print(result.params)       # {"const": ..., "x1": ...}
 print(result.std_errors)   # {"const": ..., "x1": ...}
 print(result.r_squared)
+
+# Row-oriented parameter table (param/coef/std_err/t_stat/p_value/conf_lower/conf_upper).
+print(result.coef_table())
+
+# Overall-fit statistics.
+print(result.f_statistic, result.f_p_value)
+print(result.aic, result.bic)
 ```
 
-For more details — including how to switch to heteroskedasticity-robust standard errors (HC0-HC3), cluster-robust standard errors, and HAC (Newey-West) standard errors — see the [documentation site](https://masahiroyecon1997dev.github.io/econometricsmodels/getting-started/). The full documentation, including the API reference, is published at [https://masahiroyecon1997dev.github.io/econometricsmodels/](https://masahiroyecon1997dev.github.io/econometricsmodels/).
+### Logit
+
+```python
+from econometricsmodels import Logit
+
+df = pl.DataFrame(
+    {
+        "y": [0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0],
+        "x1": [1.0, 1.5, 2.0, 2.5, 3.0, 3.2, 3.8, 4.0, 4.5, 5.0],
+    }
+)
+
+result = Logit(df, y="y", x=["x1"]).fit()
+
+print(result.coef_table())  # same shape as OLS, but z_stat instead of t_stat
+print(result.aic, result.bic)
+
+# Likelihood-ratio test for overall significance (the Logit/Probit analogue
+# of OLS's F-statistic), plus McFadden pseudo R-squared.
+print(result.lr_statistic, result.lr_p_value)
+print(result.pseudo_r_squared)
+```
+
+`Probit` has the same API shape as `Logit` (drop-in replacement).
+
+For more details — including how to switch to heteroskedasticity-robust standard errors (HC0-HC3), cluster-robust standard errors, HAC (Newey-West) standard errors, and Logit/Probit-specific features (marginal effects, classification tables) — see the [documentation site](https://masahiroyecon1997dev.github.io/econometricsmodels/getting-started/). The full documentation, including the API reference, is published at [https://masahiroyecon1997dev.github.io/econometricsmodels/](https://masahiroyecon1997dev.github.io/econometricsmodels/).
 
 ## Implementation status
 
-Implemented: **OLS** (Ordinary Least Squares), **WLS** (Weighted Least Squares).
+Implemented: **OLS** (Ordinary Least Squares), **WLS** (Weighted Least Squares), **Logit**, **Probit**.
 
-In progress: **Logit**.
+In progress: **IV** (2SLS/GMM).
 
-Planned next, in this order: **Probit → Tobit → IV (2SLS/GMM) → FE (Fixed Effects) → RE (Random Effects) → GLS**.
+Planned next, in this order: **Tobit → FE (Fixed Effects) → RE (Random Effects) → GLS**.
 
 During the `0.x.x` pre-release period, breaking changes may occur even in minor version bumps.
 
 ## Verification accuracy
 
-Estimates for each implemented method (coefficients, standard errors, confidence intervals, R², adjusted R², AIC, BIC, log-likelihood, F-statistic, F-test p-value) are verified by numerical comparison against reference implementations. In addition to a primary reference, an independent implementation is used as a cross-check.
+Estimates for each implemented method (coefficients, standard errors, confidence intervals, AIC, BIC, log-likelihood, and the model's overall-significance test — F-statistic/p-value for OLS/WLS, likelihood-ratio statistic/p-value for Logit/Probit — plus R²/adjusted R² for OLS/WLS and McFadden pseudo R² for Logit/Probit) are verified by numerical comparison against reference implementations. In addition to a primary reference, an independent implementation is used as a cross-check.
 
-| `cov_type` | Primary reference | Independent cross-check |
-|---|---|---|
-| classical / HC0-3 / cluster | statsmodels (relative tolerance 1e-8) | R (`lm`/`lm(weights=)` + `sandwich`/`lmtest`, relative tolerance 1e-8) |
-| HAC (Newey-West) | statsmodels (relative tolerance 1e-8) | R (relative tolerance 1e-2 for OLS, 5e-2 for WLS — looser due to differing small-sample correction conventions) |
+| Method | `cov_type` | Primary reference | Independent cross-check |
+|---|---|---|---|
+| OLS / WLS | classical / HC0-3 / cluster | statsmodels (relative tolerance 1e-8) | R (`lm`/`lm(weights=)` + `sandwich`/`lmtest`, relative tolerance 1e-8) |
+| OLS / WLS | HAC (Newey-West) | statsmodels (relative tolerance 1e-8) | R (relative tolerance 1e-2 for OLS, 5e-2 for WLS — looser due to differing small-sample correction conventions) |
+| Logit / Probit | classical / OPG / HC0 / cluster | statsmodels (relative tolerance 1e-8) | R (`glm` + `sandwich`/`marginaleffects`, relative tolerance ~2e-4 — looser due to differing optimizer convergence) |
+| Logit / Probit | HC1 | R (`glm` + `sandwich`, relative tolerance ~2e-4) — used as the primary reference here, since statsmodels' discrete-choice models omit the `n/(n-k)` small-sample correction for HC1 | — |
 
 ## License
 

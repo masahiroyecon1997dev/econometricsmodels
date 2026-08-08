@@ -1,15 +1,22 @@
-"""Logitのベンチマーク用に、真のlogit DGP（sigmoid(Xβ)からのベルヌーイ乱数）で
-2値yを持つ合成データセットを生成するスクリプト。
+"""Logit/Probitのベンチマーク用に、真の二値選択DGP（リンク関数(Xβ)からの
+ベルヌーイ乱数）で2値yを持つ合成データセットを生成するスクリプト。
+
+元々`generate_logit_datasets.py`としてLogit専用に実装していたが、Probit追加
+（Issue #84）にあたり、シナリオ・X生成ロジック（`moderate_multicollinearity`/
+`high_condition_number`/`perfect_multicollinearity`/`scale_variance`等）が
+リンク関数に一切依存せず完全に共有できることが分かったため、`link`引数
+（`"logit"`または`"probit"`）を追加して一般化した（`run_statsmodels_benchmark.py`が
+`--weight-col`でOLS/WLSを共有している設計と同じ発想。ユーザー確認済み）。
 
 `generate_synthetic_datasets.py`（OLS/WLS用）と同型の設計だが、OLSの9シナリオの
 うち誤差項の分散構造（不均一分散・自己相関）に依存するもの（heteroskedastic/
-autocorrelated/high_variance）はlogitの2値DGPに直接転用できないため、
-Logit向けに再設計している（`docs/planning/specs/logit-implementation-notes.md`
+autocorrelated/high_variance）は2値DGPに直接転用できないため、Logit/Probit向けに
+再設計している（`docs/planning/specs/logit-implementation-notes.md`
 「Issue #68」参照。ユーザー確認済み）。
 
 `scale_variance`（変数間のスケールが極端に異なるケース）は誤差項構造とは無関係
 （設計行列のスケールの問題）なため、上記3つとは扱いを分けている。素直にOLSの
-実装（`X[:,0]*=1e6, X[:,1]*=1e-3`をp計算の前に適用）を移植すると、sigmoidの
+実装（`X[:,0]*=1e6, X[:,1]*=1e-3`をp計算の前に適用）を移植すると、リンク関数の
 非線形性によりx1（1e6倍）が線形予測子を支配し、ほぼ完全分離を起こしてしまい
 （near_separationと交絡し、設計行列のスケール自体を検証する意図が果たせない）、
 本来の目的を果たせないことが実装時に判明した。そのため、**真のDGP（p・yの生成）
@@ -19,22 +26,30 @@ Logit向けに再設計している（`docs/planning/specs/logit-implementation-
 逆スケーリングして返す（`x_scaled @ beta_scaled == x_raw @ beta_raw`が成立する
 ように）。
 
-`near_separation`はlogit特有の病理（準完全分離）を突く専用シナリオ。x1の係数を
-極端に大きくすることで、x1の値域のほとんどでp≈0/1になる状況を作る（収束はするが
-標準誤差が大きく膨らむ、成功パスの数値比較対象）。
+`near_separation`はlogit/probit特有の病理（準完全分離）を突く専用シナリオ。x1の
+係数を極端に大きくすることで、x1の値域のほとんどでp≈0/1になる状況を作る（収束は
+するが標準誤差が大きく膨らむ、成功パスの数値比較対象）。**較正値`_NEAR_SEPARATION_BETA1`
+はリンク関数ごとに異なる**（標準正規分布のΦはロジスティック分布のΛより裾が薄く、
+同じベータ値でもΦの方が0/1に速く飽和するため、probitの較正値はlogitより小さい値で
+同程度の「収束するが標準誤差が大きく膨らむ」挙動になる。ベンチマーク作成時に実測
+確認済み: logitはbeta1=20、probitはbeta1=10で、いずれもengine・statsmodelsの推定値が
+完全一致し、既定`tol=1e-6`でも収束することを確認した上で採用）。
 
 **「完全分離でNonConvergenceになる」シナリオは採用していない**（ベンチマーク作成時に
 検討・破棄。理由: 本実装の収束判定（勾配ノルム`‖∇ℓ(θ)‖ < tol`）は、完全分離下で
-係数が発散する過程でスコア項`p(1-p)`が浮動小数点アンダーフローによりほぼ0になり、
+係数が発散する過程でスコア項が浮動小数点アンダーフローによりほぼ0になり、
 どんな`tol>0`でも「収束済み」と誤判定してしまう既知の限界がある
-`docs/planning/specs/logit-implementation-notes.md`「Issue #68」参照、ユーザー確認済み、
-修正は別issue）。このためNonConvergenceの発生確認は、専用データセットではなく
-`LogitOptions(max_iter=1)`等で人為的に打ち切ることで行う（`tests/api_tests/test_logit.py`）。
+（logit: `docs/planning/specs/logit-implementation-notes.md`「Issue #138」参照、
+probitも同じ`nonlinear/common.rs`の`run_solver`を共有するため同じ限界を持つ。
+ユーザー確認済み、修正は別issue）。このためNonConvergenceの発生確認は、専用
+データセットではなく`LogitOptions(max_iter=1)`/`ProbitOptions(max_iter=1)`等で
+人為的に打ち切ることで行う（`tests/api_tests/test_logit.py`/`test_probit.py`）。
 
 使用例:
-    from generate_logit_datasets import generate_logit_dataset
+    from generate_binary_choice_datasets import generate_logit_dataset, generate_probit_dataset
 
     df, true_beta = generate_logit_dataset("baseline", n=500, seed=42)
+    df, true_beta = generate_probit_dataset("baseline", n=500, seed=42)
     # df の列: y（0.0/1.0）, x1, x2, x3
 """
 
@@ -42,6 +57,7 @@ from __future__ import annotations
 
 import numpy as np
 import polars as pl
+from scipy.stats import norm
 
 SCENARIOS = [
     "baseline",
@@ -53,27 +69,36 @@ SCENARIOS = [
     "scale_variance",
 ]
 
-# near_separationでx1の係数を上書きする値。ベンチマーク作成時の実測確認:
-# beta1=20 -> 収束するが標準誤差が大きく膨らむ（成功パス、数値比較対象）。
-_NEAR_SEPARATION_BETA1 = 20.0
+# near_separationでx1の係数を上書きする値。ベンチマーク作成時の実測確認（モジュール
+# docstring参照）: logitはbeta1=20、probitはbeta1=10でいずれも収束するが標準誤差が
+# 大きく膨らむ（成功パス、数値比較対象）。
+_NEAR_SEPARATION_BETA1 = {"logit": 20.0, "probit": 10.0}
 
 # scale_varianceで出力直前に列へ適用するスケール（OLSのgenerate_synthetic_datasets.py
 # と同じ倍率）。x1は1e6倍、x2は1e-3倍。
 _SCALE_VARIANCE_X1_SCALE = 1e6
 _SCALE_VARIANCE_X2_SCALE = 1e-3
 
+_LINK_CDF = {
+    "logit": lambda z: 1.0 / (1.0 + np.exp(-z)),
+    "probit": norm.cdf,
+}
 
-def generate_logit_dataset(
+
+def generate_binary_choice_dataset(
     scenario: str,
+    link: str,
     n: int = 500,
     k: int = 3,
     seed: int = 42,
     beta: np.ndarray | None = None,
 ) -> tuple[pl.DataFrame, np.ndarray]:
-    """指定シナリオに沿った、2値yを持つ合成データセットを生成する。
+    """指定シナリオ・リンク関数に沿った、2値yを持つ合成データセットを生成する。
 
     Args:
         scenario: SCENARIOSのいずれか。
+        link: `"logit"`または`"probit"`。yの生成に使う逆リンク関数
+            （ロジスティック分布のΛ、または標準正規分布のΦ）を切り替える。
         n: サンプルサイズ（"small_n"シナリオでは40に強制される）。
         k: 説明変数の数（x1..xk）。"perfect_multicollinearity"はk>=3、
             "scale_variance"はk>=2が必要。
@@ -87,11 +112,15 @@ def generate_logit_dataset(
         x1の係数を上書き済みの値）。
 
     Raises:
-        ValueError: 未知のscenario、またはk不足の場合。
+        ValueError: 未知のscenario/link、またはk不足の場合。
     """
     if scenario not in SCENARIOS:
         raise ValueError(
             f"unknown scenario: {scenario!r}. choose from {SCENARIOS}"
+        )
+    if link not in _LINK_CDF:
+        raise ValueError(
+            f"unknown link: {link!r}. choose from {list(_LINK_CDF)}"
         )
 
     rng = np.random.default_rng(seed)
@@ -123,13 +152,13 @@ def generate_logit_dataset(
 
     if scenario == "near_separation":
         beta = beta.copy()
-        beta[1] = _NEAR_SEPARATION_BETA1
+        beta[1] = _NEAR_SEPARATION_BETA1[link]
 
     if scenario == "scale_variance" and k < 2:
         raise ValueError(f"{scenario} requires k >= 2")
 
     x_const = np.column_stack([np.ones(n), X])
-    p = 1.0 / (1.0 + np.exp(-(x_const @ beta)))
+    p = _LINK_CDF[link](x_const @ beta)
     y = rng.binomial(1, p).astype(np.float64)
 
     if scenario == "scale_variance":
@@ -149,11 +178,43 @@ def generate_logit_dataset(
     return pl.DataFrame(data), beta
 
 
+def generate_logit_dataset(
+    scenario: str,
+    n: int = 500,
+    k: int = 3,
+    seed: int = 42,
+    beta: np.ndarray | None = None,
+) -> tuple[pl.DataFrame, np.ndarray]:
+    """`generate_binary_choice_dataset(scenario, link="logit", ...)`のエイリアス。
+
+    既存の呼び出し元（`freeze_datasets.py`等）との互換のため名前付きで残している。
+    """
+    return generate_binary_choice_dataset(
+        scenario, "logit", n=n, k=k, seed=seed, beta=beta
+    )
+
+
+def generate_probit_dataset(
+    scenario: str,
+    n: int = 500,
+    k: int = 3,
+    seed: int = 42,
+    beta: np.ndarray | None = None,
+) -> tuple[pl.DataFrame, np.ndarray]:
+    """`generate_binary_choice_dataset(scenario, link="probit", ...)`のエイリアス。"""
+    return generate_binary_choice_dataset(
+        scenario, "probit", n=n, k=k, seed=seed, beta=beta
+    )
+
+
 if __name__ == "__main__":
     import sys
 
-    scenario_arg = sys.argv[1] if len(sys.argv) > 1 else "baseline"
-    result_df, true_beta = generate_logit_dataset(scenario_arg)
-    print(f"scenario={scenario_arg}, true_beta={true_beta}")
+    link_arg = sys.argv[1] if len(sys.argv) > 1 else "logit"
+    scenario_arg = sys.argv[2] if len(sys.argv) > 2 else "baseline"
+    result_df, true_beta = generate_binary_choice_dataset(
+        scenario_arg, link_arg
+    )
+    print(f"link={link_arg}, scenario={scenario_arg}, true_beta={true_beta}")
     print(f"y mean (class balance): {result_df['y'].mean():.3f}")
     print(result_df.head())

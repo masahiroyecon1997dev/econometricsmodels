@@ -6,7 +6,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 license = "MIT"
 publish = false
@@ -35,3 +35,6 @@ statrs = { version = "=0.19.0", default-features = false }
 # モデル固有の尤度・勾配・Hessian計算自体は引き続きfaerで行い、argminに値を渡す境界でのみ変換する。
 argmin = "=0.11.0"
 argmin-math = { version = "=0.5.1", default-features = false, features = ["vec"] }
+# proptest: property-basedテスト（testing-policy.md「将来的に検討する技術」、Issue #102）。
+# dev-dependency専用（配布物には含まれない）。
+proptest = "=1.11.0"

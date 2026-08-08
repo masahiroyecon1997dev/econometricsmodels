@@ -1,13 +1,13 @@
 //! WLS（Weighted Least Squares）の推定。
 //!
-//! `docs/planning/specs/wls-api-design.md`で確定した設計に基づき、`sqrt(weight)`で
+//! `docs/spec/wls-spec.md`で確定した設計に基づき、`sqrt(weight)`で
 //! 変換した`OlsInput`（`OlsInput::from_columns_weighted`）に対して既存の`OlsEstimator::fit`
 //! （無変更）をそのまま適用する。標準誤差・係数・t値・p値・信頼区間・F統計量の計算式が
 //! 変換後データに対するOLSの計算式そのままで正しいことの確認は
-//! `docs/planning/specs/wls-standard-errors.md`参照。
+//! `docs/spec/wls-spec.md`「標準誤差」参照。
 //!
 //! **ただしR²・対数尤度（→AIC/BIC）はこの変換だけでは正しくならない**（正しい導出・
-//! statsmodelsとの数式対応は`docs/planning/specs/wls-standard-errors.md`5章参照）。
+//! statsmodelsとの数式対応は`docs/spec/wls-spec.md`「適合度統計量」参照）。
 //! そのためこの2つ（とそこから導かれるR²調整済み・AIC・BIC）は`WlsEstimator::fit`側で
 //! 元の（変換前の）`y`・`weights`を使って計算し直す。`OlsEstimator`/`OlsInput`自体は
 //! 重みを一切知らない設計のまま変更しない（係数・SE・F統計量の構造的保証は保つ）。
@@ -21,7 +21,7 @@ use super::ols::{CovType, OlsEstimator, OlsInput};
 /// 計算結果であり、`params`/`std_errors`/`t_stats`/`p_values`/`conf_lower`/`conf_upper`/
 /// `f_statistic`/`f_p_value`はここから取得する（変換後データに対するOLSの計算式が
 /// そのまま正しいため。重みが全て1のときOLSと数値的に完全一致するのもこの型を経由する
-/// ためで、`docs/planning/specs/wls-api-design.md`4.1節の構造的保証がそのまま成り立つ）。
+/// ためで、`docs/spec/wls-spec.md`「sqrt(w)変換」の構造的保証がそのまま成り立つ）。
 ///
 /// 一方`r_squared`/`r_squared_adj`/`log_likelihood`/`aic`/`bic`は`estimator()`側の値を
 /// 使わず、この型が元の（変換前の）`y`・`weights`から計算し直した値を使う（モジュール
@@ -29,7 +29,7 @@ use super::ols::{CovType, OlsEstimator, OlsInput};
 ///
 /// `estimator().residuals()`は**重み付き残差** `sqrt(w_i)(y_i - x_i'β̂)`
 /// （statsmodelsでいう`.wresid`相当）を返す。ユーザー向けに公開する残差は元スケール
-/// （unweighted）の`residuals()`を使う（`docs/planning/specs/wls-api-design.md`4.3節参照）。
+/// （unweighted）の`residuals()`を使う（`docs/spec/wls-spec.md`「結果構造体」参照）。
 #[derive(Debug)]
 pub struct WlsEstimator {
     estimator: OlsEstimator,
@@ -203,7 +203,7 @@ mod tests {
 
     #[test]
     fn fit_with_all_weights_one_matches_ols() {
-        // wls-api-design.md 4.1節の構造的保証: 重みが全て1のときWLSはOLSと完全一致する。
+        // wls-spec.md「sqrt(w)変換」の構造的保証: 重みが全て1のときWLSはOLSと完全一致する。
         let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
         let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
         let weights = vec![1.0; 5];
@@ -354,7 +354,7 @@ mod tests {
     #[test]
     fn fit_matches_manually_transformed_ols_for_all_cov_types() {
         // classical/HC0-3/HAC/clusterのいずれも、WlsEstimator::fitはcov_typeをそのまま
-        // OlsEstimator::fitに渡すだけで正しく動作するはず（wls-standard-errors.md
+        // OlsEstimator::fitに渡すだけで正しく動作するはず（wls-spec.md「標準誤差」
         // の通り、新しい計算式の実装は不要という前提の確認）。
         //
         // 検証方法: `from_columns_weighted`を経由せず、y・x1・切片列をこのテスト内で手動で

@@ -99,10 +99,10 @@ impl OlsInput {
     /// `from_columns`のWLS版。各観測の行（自動追加される切片列を含む）を
     /// `sqrt(weights[i])`倍してから組み立てる。この変換により、`OlsEstimator::fit`
     /// （無変更）をそのまま適用するとWLSの推定になる
-    /// （`docs/planning/specs/wls-api-design.md`4.1節参照）。`weights`の全要素が1.0のときは
+    /// （`docs/spec/wls-spec.md`「sqrt(w)変換」参照）。`weights`の全要素が1.0のときは
     /// `from_columns`と数値的に完全に同じ結果になる。
     ///
-    /// `weights`はanalytic weightとして扱う（`docs/planning/specs/wls-api-design.md`0章）。
+    /// `weights`はanalytic weightとして扱う（`docs/spec/wls-spec.md`「API引数」）。
     ///
     /// # Errors
     /// - `y`といずれかの`x_columns`の長さが一致しない場合は`CommonError::DimensionMismatch`
@@ -150,7 +150,7 @@ impl OlsInput {
     /// **切片列の重み付けについて**: 単純に「`x_columns`を先に重み変換してから、この関数の
     /// `weights=None`版を呼ぶ」という実装は誤り。それだと自動追加される切片列（すべて1.0）が
     /// 重み付けされないままになる。重み変換は行列組み立てそのものの中（この関数）で行う必要がある
-    /// （`docs/planning/specs/wls-api-design.md`4.1節参照）。
+    /// （`docs/spec/wls-spec.md`「sqrt(w)変換」参照）。
     fn from_columns_impl(
         y: &[f64],
         x_columns: &[Vec<f64>],
@@ -851,7 +851,13 @@ fn ensure_full_rank(
     let threshold = (k as f64) * f64::EPSILON * max_abs_diag;
 
     for i in 0..k {
-        if (*r.get(i, i)).abs() <= threshold {
+        let diag = (*r.get(i, i)).abs();
+        // NaNを明示的にチェックする（`diag <= threshold`だとNaNとの比較は常にfalseになり
+        // すり抜けてしまう）。全ゼロ設計行列（`include_intercept=false`かつ全説明変数列が
+        // ゼロ）のcol_piv_qrは列選択時の0除算によりRの対角がNaNになりうるため
+        // （faer 0.24.4で実機確認済み、Issue #109。`nonlinear::common::newton_step`と
+        // 同じ修正パターン）。
+        if diag.is_nan() || diag <= threshold {
             return Err(LeastSquaresError::SingularMatrix);
         }
     }
@@ -1016,8 +1022,8 @@ mod tests {
     #[test]
     fn from_columns_weighted_with_all_ones_matches_from_columns() {
         // 重みが全て1のとき、from_columns_weightedはfrom_columnsと数値的に完全一致するはず
-        // （from_columns_impl内の`scale(i) = 1.0`分岐、docs/planning/specs/wls-api-design.md
-        // 4.1節の構造的保証）。
+        // （from_columns_impl内の`scale(i) = 1.0`分岐、docs/spec/wls-spec.md
+        // 「sqrt(w)変換」の構造的保証）。
         let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
         let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
         let weights = vec![1.0; 5];
@@ -1051,7 +1057,7 @@ mod tests {
     #[test]
     fn from_columns_weighted_scales_intercept_column_too() {
         // 切片列（すべて1.0）も重み変換の対象であることを確認する回帰テスト
-        // （wls-api-design.md 4.1節「切片列の重み付け」で明記した誤りやすいポイント）。
+        // （wls-spec.md「sqrt(w)変換」で明記した誤りやすいポイント）。
         let y = vec![1.0, 2.0];
         let x_columns = vec![vec![10.0, 20.0]];
         let weights = vec![4.0, 9.0]; // sqrt(4)=2, sqrt(9)=3
@@ -1248,6 +1254,25 @@ mod tests {
         .unwrap();
 
         let result = OlsEstimator::fit(input, CovType::Classical, 0.95);
+
+        assert_eq!(result.unwrap_err(), LeastSquaresError::SingularMatrix);
+    }
+
+    #[test]
+    fn ensure_full_rank_detects_nan_diagonal_from_all_zero_matrix() {
+        // 全ゼロ行列のcol_piv_qrは列選択時の0除算によりRの対角成分がNaNになりうる
+        // （faer 0.24.4で実機確認済み）。`diag <= threshold`のみだとNaNとの比較は
+        // 常にfalseになりすり抜けてしまうため、`diag.is_nan()`の明示チェックが
+        // 必要（Issue #109）。`OlsEstimator::fit`経由だと、この後段の`xtx_inverse`
+        // （全ゼロのX'Xは非正定値でCholesky分解が失敗する）が偶然同じ
+        // `SingularMatrix`を返し検出漏れを覆い隠してしまうため、`ensure_full_rank`
+        // を直接呼び出して検証する。
+        let zeros = Mat::<f64>::zeros(4, 2);
+        let qr = zeros.col_piv_qr();
+        let diag = (*qr.thin_R().get(0, 0)).abs();
+        assert!(diag.is_nan(), "precondition: expected R diagonal to be NaN");
+
+        let result = ensure_full_rank(&qr, 2);
 
         assert_eq!(result.unwrap_err(), LeastSquaresError::SingularMatrix);
     }
@@ -2055,5 +2080,172 @@ mod tests {
             groups: Some(groups),
         };
         let _ = OlsEstimator::fit(input, cov_type, 0.95);
+    }
+
+    /// property-basedテスト（Issue #102）。固定シナリオでの値の一致確認（上記）とは別に、
+    /// OLSが満たすべき不変条件をランダムなデータで検証する（`testing-policy.md`
+    /// 「将来的に検討する技術」参照）。
+    mod proptests {
+        use super::*;
+        use proptest::collection;
+        use proptest::prelude::*;
+
+        const MAX_K: usize = 4;
+
+        /// `(n, k, y, x_cols, keys)`を生成する共通ストラテジ。
+        ///
+        /// `n = k+10..=60`という十分なマージンを取り、値は独立な連続一様分布
+        /// （`-100.0..100.0`）からサンプリングする。この条件下では生成される設計行列は
+        /// 実務上ほぼ確実にフルランクになるため、各プロパティ側では追加の制約は課さず、
+        /// `prop_assume!(result.is_ok())`で非フルランクになるレアケース（丸め誤差起因の
+        /// 境界事例等）のみを除外する（Issue #102「ランダムに生成する設計行列は
+        /// SingularMatrixにならない範囲に制約する」に対応）。
+        ///
+        /// `keys`は列順序入れ替えテスト専用の補助データ（他のプロパティでは未使用）。
+        fn ols_case_strategy()
+        -> impl Strategy<Value = (usize, usize, Vec<f64>, Vec<Vec<f64>>, Vec<u64>)> {
+            (1..=MAX_K).prop_flat_map(|k| {
+                (k + 10..=60usize).prop_flat_map(move |n| {
+                    (
+                        Just(n),
+                        Just(k),
+                        collection::vec(-100.0f64..100.0, n),
+                        collection::vec(collection::vec(-100.0f64..100.0, n), k),
+                        collection::vec(any::<u64>(), k),
+                    )
+                })
+            })
+        }
+
+        fn x_names(k: usize) -> Vec<String> {
+            (1..=k).map(|i| format!("x{i}")).collect()
+        }
+
+        /// 相対誤差ベースの近似比較（絶対誤差フロア込み）。乱数生成で値のスケールが
+        /// 揃わないため、固定フィクスチャ比較（`testing-policy.md`のRTOL=1e-8）より
+        /// 緩めた閾値にしている（col_piv_qrの数値誤差の蓄積を考慮）。
+        fn assert_approx_eq(actual: f64, expected: f64, msg: &str) {
+            let tol = 1e-6 * expected.abs().max(1.0);
+            let diff = (actual - expected).abs();
+            assert!(
+                diff <= tol,
+                "{msg}: actual={actual}, expected={expected}, diff={diff}, tol={tol}"
+            );
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            /// 定数項ありOLSでの残差和は常に0（正規方程式`X'e=0`のうち切片列に対応する
+            /// 行から従う）。
+            #[test]
+            fn residuals_sum_to_zero_when_intercept_included(
+                (n, k, y, x_cols, _keys) in ols_case_strategy()
+            ) {
+                let input = OlsInput::from_columns(&y, &x_cols, x_names(k), true, "y".to_string()).unwrap();
+                let result = OlsEstimator::fit(input, CovType::Classical, 0.95);
+                prop_assume!(result.is_ok());
+                let est = result.unwrap();
+
+                let sum: f64 = (0..n).map(|i| *est.residuals().get(i, 0)).sum();
+                let scale = y.iter().fold(1.0_f64, |acc, v| acc.max(v.abs()));
+                prop_assert!(
+                    sum.abs() <= 1e-6 * scale * (n as f64),
+                    "residual sum should be ~0, got {sum} (scale={scale}, n={n})"
+                );
+            }
+
+            /// yをc倍すると、切片を含む全ての係数がc倍にスケールする
+            /// （OLSはyに関して線形なため、切片も例外ではない）。
+            #[test]
+            fn coefficients_scale_linearly_with_y(
+                (_n, k, y, x_cols, _keys) in ols_case_strategy(),
+                c in prop_oneof![-10.0f64..-0.1, 0.1f64..10.0],
+            ) {
+                let input1 = OlsInput::from_columns(&y, &x_cols, x_names(k), true, "y".to_string()).unwrap();
+                let result1 = OlsEstimator::fit(input1, CovType::Classical, 0.95);
+                prop_assume!(result1.is_ok());
+                let est1 = result1.unwrap();
+
+                let y_scaled: Vec<f64> = y.iter().map(|v| v * c).collect();
+                let input2 =
+                    OlsInput::from_columns(&y_scaled, &x_cols, x_names(k), true, "y".to_string()).unwrap();
+                let result2 = OlsEstimator::fit(input2, CovType::Classical, 0.95);
+                prop_assume!(result2.is_ok());
+                let est2 = result2.unwrap();
+
+                for i in 0..=k {
+                    let expected = c * *est1.params().get(i, 0);
+                    let actual = *est2.params().get(i, 0);
+                    assert_approx_eq(actual, expected, &format!("param[{i}] scaled by c={c}"));
+                }
+            }
+
+            /// xの列順序を入れ替えても、係数名で対応付ければ係数・標準誤差の値は変わらない。
+            #[test]
+            fn coefficients_and_se_are_invariant_to_column_order(
+                (_n, k, y, x_cols, keys) in ols_case_strategy()
+                    .prop_filter("need >=2 columns to permute", |(_, k, _, _, _)| *k >= 2)
+            ) {
+                let names = x_names(k);
+                let input1 =
+                    OlsInput::from_columns(&y, &x_cols, names.clone(), true, "y".to_string()).unwrap();
+                let result1 = OlsEstimator::fit(input1, CovType::Classical, 0.95);
+                prop_assume!(result1.is_ok());
+                let est1 = result1.unwrap();
+
+                let mut order: Vec<usize> = (0..k).collect();
+                order.sort_by_key(|&i| keys[i]);
+                let permuted_x: Vec<Vec<f64>> = order.iter().map(|&i| x_cols[i].clone()).collect();
+                let permuted_names: Vec<String> = order.iter().map(|&i| names[i].clone()).collect();
+
+                let input2 =
+                    OlsInput::from_columns(&y, &permuted_x, permuted_names, true, "y".to_string()).unwrap();
+                let result2 = OlsEstimator::fit(input2, CovType::Classical, 0.95);
+                prop_assume!(result2.is_ok());
+                let est2 = result2.unwrap();
+
+                let names1 = est1.input().param_names().to_vec();
+                let names2 = est2.input().param_names().to_vec();
+                for (idx1, name) in names1.iter().enumerate() {
+                    let idx2 = names2
+                        .iter()
+                        .position(|n| n == name)
+                        .expect("name should exist in permuted result");
+                    let p1 = *est1.params().get(idx1, 0);
+                    let p2 = *est2.params().get(idx2, 0);
+                    assert_approx_eq(p2, p1, &format!("param[{name}] under column permutation"));
+                    let se1 = *est1.std_errors().get(idx1, 0);
+                    let se2 = *est2.std_errors().get(idx2, 0);
+                    assert_approx_eq(se2, se1, &format!("std_error[{name}] under column permutation"));
+                }
+            }
+
+            /// HC0の標準誤差は常にHC1以下（`HC1 = HC0 * n/(n-k)`で`n/(n-k) >= 1`のため）。
+            #[test]
+            fn hc0_std_errors_are_at_most_hc1_std_errors(
+                (_n, k, y, x_cols, _keys) in ols_case_strategy()
+            ) {
+                let input1 = OlsInput::from_columns(&y, &x_cols, x_names(k), true, "y".to_string()).unwrap();
+                let result1 = OlsEstimator::fit(input1, CovType::Hc0, 0.95);
+                prop_assume!(result1.is_ok());
+                let est_hc0 = result1.unwrap();
+
+                let input2 = OlsInput::from_columns(&y, &x_cols, x_names(k), true, "y".to_string()).unwrap();
+                let result2 = OlsEstimator::fit(input2, CovType::Hc1, 0.95);
+                prop_assume!(result2.is_ok());
+                let est_hc1 = result2.unwrap();
+
+                for i in 0..=k {
+                    let se_hc0 = *est_hc0.std_errors().get(i, 0);
+                    let se_hc1 = *est_hc1.std_errors().get(i, 0);
+                    // 浮動小数点の丸め誤差の余地として小さな絶対許容誤差を加える。
+                    prop_assert!(
+                        se_hc0 <= se_hc1 + 1e-9,
+                        "HC0 se[{i}]={se_hc0} should be <= HC1 se[{i}]={se_hc1}"
+                    );
+                }
+            }
+        }
     }
 }

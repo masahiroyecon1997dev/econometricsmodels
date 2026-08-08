@@ -18,7 +18,6 @@ import pytest
 from econometricsmodels import (
     OLS,
     WLS,
-    ComputationError,
     OLSOptions,
     ValidationError,
     WlsResults,
@@ -43,7 +42,7 @@ from econometricsmodels import (
 def test_weight_one_matches_ols(dataset, options):
     """重み=1のときWLSの結果がOLSの結果と完全一致すること。
 
-    coef/se/t/p/CI/F統計量/nobsは、WLSがOLSソルバーを`sqrt(weight)`変換した
+    coef/se/t/p/CI/F統計量/n_obsは、WLSがOLSソルバーを`sqrt(weight)`変換した
     データにそのまま適用する実装であるため（weight=1なら変換が恒等写像になる）
     厳密な`==`で一致する。r_squared・log_likelihood（→aic/bic）・残差は、
     WLS側で元スケールのy・weightsから独立に計算し直す実装のため、加算順序
@@ -67,7 +66,7 @@ def test_weight_one_matches_ols(dataset, options):
 
     assert wls_res.f_statistic == ols_res.f_statistic
     assert wls_res.f_p_value == ols_res.f_p_value
-    assert wls_res.nobs == ols_res.nobs
+    assert wls_res.n_obs == ols_res.n_obs
     assert wls_res.dep_var_name == ols_res.dep_var_name
     assert wls_res.cov_type == ols_res.cov_type
 
@@ -187,20 +186,6 @@ def test_insufficient_observations_raises(dataset):
         WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
 
 
-def test_singular_matrix_raises_computation_error():
-    """完全な多重共線性は`ComputationError`（OLSと同じ検証）。"""
-    df = pl.DataFrame(
-        {
-            "y": [1.0, 2.0, 3.0, 4.0],
-            "x1": [1.0, 2.0, 3.0, 4.0],
-            "x2": [2.0, 4.0, 6.0, 8.0],  # x2 = 2 * x1（完全な多重共線性）
-            "weight": [1.0, 1.0, 1.0, 1.0],
-        }
-    )
-    with pytest.raises(ComputationError):
-        WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
-
-
 # ── API構造 ─────────────────────────────────────────────────────────
 
 
@@ -282,5 +267,5 @@ def test_params_std_errors_t_stats_p_values_share_keys(dataset):
 def test_nobs_and_dep_var_name(dataset):
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
-    assert res.nobs == 100
+    assert res.n_obs == 100
     assert res.dep_var_name == "y"

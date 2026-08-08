@@ -154,7 +154,7 @@ pub struct OLSResult {
     #[pyo3(get)]
     pub dep_var_name: String,
     #[pyo3(get)]
-    pub nobs: usize,
+    pub n_obs: usize,
     /// Standard error type actually used (echoes `OLSOptions.cov_type`, normalized to
     /// lowercase; e.g. `"classical"`, `"hc1"`, `"hac"`, `"cluster"`).
     #[pyo3(get)]
@@ -330,7 +330,7 @@ pub fn fit(
         param_names: estimator.input().param_names().to_vec(),
         residuals: mat_to_vec(estimator.residuals()),
         dep_var_name: estimator.input().dep_var_name().to_string(),
-        nobs: estimator.input().nobs(),
+        n_obs: estimator.input().nobs(),
         cov_type: cov_type_lower,
         r_squared: estimator.r_squared(),
         r_squared_adj: estimator.r_squared_adj(),

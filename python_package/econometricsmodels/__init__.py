@@ -11,6 +11,7 @@ from ._lib import ComputationError, ValidationError
 from .linear.ols import OLS, OLSOptions, OlsResults
 from .linear.wls import WLS, WlsResults
 from .nonlinear.logit import Logit, LogitOptions, LogitResults
+from .nonlinear.probit import Probit, ProbitOptions, ProbitResults
 
 __all__ = [
     "OLS",
@@ -21,8 +22,11 @@ __all__ = [
     "Logit",
     "LogitOptions",
     "LogitResults",
+    "Probit",
+    "ProbitOptions",
+    "ProbitResults",
     "ValidationError",
     "ComputationError",
 ]
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

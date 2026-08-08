@@ -96,6 +96,17 @@ pub enum IvError {
     /// 再利用もしない。Issue #166で追加（`engine/src/iv/two_sls.rs`のcov_type対応）。
     #[error("hac_lags must be in the range [0, n): got {hac_lags}, n={n}")]
     InvalidHacLags { hac_lags: i64, n: usize },
+
+    /// `gmm_iterations`が1（1-step GMM）・2（2-step efficient GMM）のいずれでもない。
+    ///
+    /// `iv-api-design.md`6.2節は「デフォルト2＝efficient two-step、1で1-step GMM」の
+    /// 2値しか定義しておらず、3以上の反復（収束条件付きiterated GMM等）は仕様上未確定
+    /// （ユーザー確認済み、拡張する場合は別issueで収束条件・反復回数の設計から検討する）。
+    /// そのため現時点では1・2以外を一律エラーにする。Issue #165で追加。
+    #[error(
+        "gmm_iterations must be 1 (1-step GMM) or 2 (2-step efficient GMM): got {gmm_iterations}"
+    )]
+    InvalidGmmIterations { gmm_iterations: i64 },
 }
 
 /// IVの被説明変数・3つの設計行列（外生説明変数・内生説明変数・操作変数）を保持する

@@ -10,35 +10,34 @@
 //!
 //! `β̂(W) = (X'ZWZ'X)⁻¹X'ZWZ'y`
 //!
-//! ## `weight_type`と点推定への影響
+//! ## `weight_type`・`gmm_iterations`と点推定への影響
 //!
 //! `W`の選び方（`weight_type`）が点推定`β̂`自体を左右する（`iv-api-design.md`6.2節、
-//! `cov_type`が点推定に影響しないOLS/2SLSとの重要な違い）。本実装は以下の2段階で計算する。
+//! `cov_type`が点推定に影響しないOLS/2SLSとの重要な違い）。`gmm_iterations`
+//! （Issue #165）は、標準的なGMM文献（Hansen 1982、Hayashi、Wooldridge等）・
+//! `iv-api-design.md`6.2節の用語法通り次の2値のみを受け付ける
+//! （`IvError::InvalidGmmIterations`、それ以外は仕様上未確定。3以上への一般化
+//! （収束条件付きiterated GMM）はユーザー確認の上、将来の別issueで扱う）。
 //!
-//! **これは`iv-api-design.md`6.2節の`gmm_iterations`の定義（デフォルト2＝efficient
-//! two-step、1で1-step GMM）に照らすと「2-step efficient GMM」（`gmm_iterations=2`の
-//! デフォルト挙動）に相当する。**標準的なGMM文献（Hansen 1982、Hayashi、Wooldridge等）の
-//! 用語法では「1-step GMM」は残差に基づく重みの再構築を一切行わず、アドホックな
-//! `W₀=(Z'Z)⁻¹`のみを使って打ち切る推定を指し、この場合`weight_type`は点推定に一切影響
-//! しない（下記の通り常に`Unadjusted`と同じ`β̂₀`になる）。本Issue（#160）の完了条件は
-//! 「`weight_type`ごとに正しい重み行列を使って点推定できる」ことであり、これを満たすには
-//! 残差に基づく`S`の構築（下記ステップ2）が本質的に必要なため、本実装は常に2-step相当の
-//! 手続きを行う（`gmm_iterations`による分岐は無く、`fit()`はステップ2まで固定で実行する）。
-//! Issue #165の残りスコープは、`gmm_iterations=1`のときステップ2を省略し`β̂₀`をそのまま
-//! 返す分岐を追加すること（`gmm_iterations`に応じた3段階以上の反復は`iv-api-design.md`が
-//! 定義していないため不要）。
-//!
-//! 1. **初期推定**: `W₀ = (Z'Z)⁻¹`で`β̂₀`を求める（`weight_type`によらず共通。この`W₀`は
-//!    2SLSの射影公式`(X'PzX)⁻¹X'Pzy`（`Pz=Z(Z'Z)⁻¹Z'`）と同じ重みであり、`β̂₀`は2SLSの
-//!    点推定と数値的に一致する）。
-//! 2. **`weight_type`に応じた重み付け**: `β̂₀`の残差`ê₀ = y - Xβ̂₀`からモーメント条件の
-//!    分散共分散行列`S`（下記「`weight_type`ごとの`S`」）を構築し、`W₁ = S⁻¹`で
-//!    `β̂₁ = β̂(W₁)`を最終推定値とする。
+//! 1. **`gmm_iterations=1`（1-step GMM）**: `W₀ = (Z'Z)⁻¹`による初期推定`β̂₀`を、
+//!    残差に基づく重みの再構築を一切行わずそのまま最終推定値とする（この`W₀`は2SLSの
+//!    射影公式`(X'PzX)⁻¹X'Pzy`（`Pz=Z(Z'Z)⁻¹Z'`）と同じ重みであり、`β̂₀`は2SLSの点推定と
+//!    数値的に一致する）。**この場合`weight_type`は点推定に一切影響しない**（常に
+//!    `Unadjusted`と同じ結果になる、`fit_with_one_iteration_ignores_weight_type`で検証）。
+//!    ただし`weight_type`自体の引数の妥当性（`Cluster`の`groups`未指定、`Kernel`の
+//!    `lags`範囲外等）は`gmm_iterations`によらず常に検証する（`validate_weight_type`。
+//!    点推定に使わないからといって呼び出し元の設定ミスを黙って見逃さない方針、
+//!    ユーザー確認済み。`fit_returns_missing_cluster_column_error_when_one_step_gmm_
+//!    has_invalid_cluster_weight_type`等で検証）。
+//! 2. **`gmm_iterations=2`（デフォルト、2-step efficient GMM）**: `β̂₀`の残差
+//!    `ê₀ = y - Xβ̂₀`から`weight_type`に応じたモーメント条件の分散共分散行列`S`
+//!    （下記「`weight_type`ごとの`S`」）を構築し、`W₁ = S⁻¹`で`β̂₁ = β̂(W₁)`を最終推定値
+//!    とする。`weight_type`が点推定に意味を持つのはこちらのみ。
 //!
 //! `S`は「その逆行列を重みとして使う」以外の用途を持たないため、**任意の正のスカラー倍で
 //! 点推定`β̂(S⁻¹)`が変わらない**（`S`をスカラー`c`倍すると`W=S⁻¹`が`1/c`倍され、
 //! `β̂(W) = (X'ZWZ'X)⁻¹X'ZWZ'y`の分子・分母両方に`1/c`が乗り相殺するため。
-//! `fit_scaling_moment_covariance_by_positive_constant_does_not_change_beta`で検証済み）。
+//! `gmm_point_estimate_is_invariant_to_positive_scaling_of_s`で検証済み）。
 //! そのため、`two_sls.rs`のSE計算（`hc_cov_params`等）にある小標本補正・レバレッジ補正
 //! （HC1の`n/(n-k)`補正、HC2/HC3のレバレッジ調整、クラスターの`(G/(G-1))((n-1)/(n-k))`
 //! 補正）は、それら自体が正のスカラー（対角成分ごとに異なるレバレッジ補正を除く）である
@@ -74,12 +73,12 @@
 //!    `GmmEstimator`側に`cov_type`対応の推論統計量を実装する必要があり、本Issueの
 //!    スコープ外（GMM自体の`cov_type`対応は`iv-api-design.md`6.7節で「2SLSと同じ範囲を
 //!    踏襲する」とされているが、実装Issueはまだ存在しない）。
-//! 2. `GmmEstimator::fit`は現状`gmm_iterations`を分岐しておらず、常に2-step efficient
-//!    GMM相当の手続きを行う（`gmm_iterations=1`の分岐はIssue #165で追加予定）。2SLSが
-//!    必要とするのは`weight_type=Unadjusted`の結果（この場合`S=Z'Z`となりステップ2は
-//!    ステップ1と数値的に同じ`β̂`を返す、上記参照）1点のみであり、2SLS呼び出し側が
-//!    この1点のためだけに`GmmEstimator`の（`gmm_iterations`対応も含め将来増える）
-//!    汎用性を引きずるのは過剰設計になる。
+//! 2. `GmmEstimator::fit`は`gmm_iterations`（1/2の2値、Issue #165）に対応済みだが、
+//!    2SLSが必要とするのは`gmm_iterations=2, weight_type=Unadjusted`（この場合`S=Z'Z`と
+//!    なり初期推定`β̂₀`と再推定`β̂₁`が数値的に同じ`β̂`になる、上記参照。実際には
+//!    `weight_type`が無視される`gmm_iterations=1`でも同一の結果になる）1点のみであり、
+//!    2SLS呼び出し側がこの1点のためだけに`GmmEstimator`の汎用性
+//!    （`weight_type`×`gmm_iterations`の組み合わせ全体）を引きずるのは過剰設計になる。
 //! 3. `two_sls.rs`は第一段階回帰（`first_stage_estimators()`、`OlsEstimator`委譲）を
 //!    弱操作変数診断（Issue #163）等の内部で公開している。GMMは第一段階回帰を必要とせず
 //!    （モーメント条件`Z'(y-Xβ)=0`を直接使うため）、この点でも構造が異なる。
@@ -126,19 +125,22 @@ pub struct GmmEstimator {
     params: Mat<f64>,
     param_names: Vec<String>,
     dep_var_name: String,
-    /// 最終推定値`β̂₁`に基づく残差 `e = y - Xβ̂₁`（n, 1）。
+    /// 最終推定値に基づく残差 `e = y - Xβ̂`（n, 1）。
     residuals: Mat<f64>,
     weight_type: WeightType,
+    /// 使用した反復回数（1または2、モジュール冒頭のdocコメント参照）。
+    gmm_iterations: i64,
     nobs: usize,
     k: usize,
 }
 
 impl GmmEstimator {
-    /// `IvInput`からGMMの点推定を求める（2-step efficient GMM相当固定、`gmm_iterations`
-    /// による1-step/2-step切り替えは未対応でIssue #165で追加予定。モジュール冒頭の
-    /// docコメント「`weight_type`と点推定への影響」参照）。
+    /// `IvInput`からGMMの点推定を求める（`gmm_iterations`は1・2のみ受け付ける、
+    /// モジュール冒頭のdocコメント「`weight_type`・`gmm_iterations`と点推定への影響」
+    /// 参照）。
     ///
     /// # Errors
+    /// - `gmm_iterations`が1・2のいずれでもない: `IvError::InvalidGmmIterations`
     /// - 識別の順序条件`len(instruments) >= len(x_endog)`を満たさない:
     ///   `IvError::InsufficientInstruments`
     /// - `weight_type=Kernel`の`lags`が不正: `IvError::InvalidHacLags`
@@ -147,7 +149,14 @@ impl GmmEstimator {
     ///   `CommonError::InsufficientClusters)`
     /// - `Z'Z`または`X'WX`型のブレッド行列が（数値的に）特異:
     ///   `IvError::Common(CommonError::ComputationFailed)`
-    pub fn fit(input: IvInput, weight_type: WeightType) -> Result<Self, IvError> {
+    pub fn fit(
+        input: IvInput,
+        weight_type: WeightType,
+        gmm_iterations: i64,
+    ) -> Result<Self, IvError> {
+        if gmm_iterations != 1 && gmm_iterations != 2 {
+            return Err(IvError::InvalidGmmIterations { gmm_iterations });
+        }
         if input.k_instruments() < input.k_endog() {
             return Err(IvError::InsufficientInstruments {
                 n_instruments: input.k_instruments(),
@@ -156,6 +165,13 @@ impl GmmEstimator {
         }
 
         let n = input.nobs();
+
+        // weight_type自体の妥当性は、gmm_iterations=1（点推定にweight_typeが影響しない
+        // 場合）でも常に検証する。設定ミス（例: Cluster指定なのにgroups未指定）を
+        // gmm_iterations次第で黙って見逃さないため（ユーザー確認済み、モジュール冒頭の
+        // docコメント参照）。
+        validate_weight_type(&weight_type, n)?;
+
         let x_exog_columns = mat_to_columns(input.x_exog());
 
         // Z = x_exog ++ instruments（全操作変数、iv-api-design.md 1.1.1節）。
@@ -179,32 +195,39 @@ impl GmmEstimator {
         // 初期推定: W₀ = (Z'Z)⁻¹（weight_typeによらず共通、2SLSと同じ重み）。
         let ztz = z.transpose() * &z;
         let beta0 = gmm_point_estimate(&z, &x, y, &ztz)?;
-        let residuals0 = y - &x * &beta0;
 
-        let s1 = match &weight_type {
-            WeightType::Unadjusted => ztz,
-            WeightType::Robust => robust_moment_covariance(&z, &residuals0, n, l),
-            WeightType::Cluster { groups } => {
-                let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-                validate_cluster_groups(groups, n)?;
-                cluster_moment_covariance(&z, &residuals0, n, l, groups)
-            }
-            WeightType::Kernel { lags, time_order } => {
-                let lags = resolve_hac_lags(*lags, n)?;
-                let order = time_ordering(time_order.as_deref(), n);
-                kernel_moment_covariance(&z, &residuals0, n, l, lags, &order)
-            }
+        // gmm_iterations=1（1-step GMM）はここで打ち切り、weight_typeに応じた
+        // 重み付け（ステップ2）を一切行わない（weight_type自体の妥当性検証は上記で
+        // 実施済み。モジュール冒頭のdocコメント参照）。
+        let beta = if gmm_iterations == 1 {
+            beta0
+        } else {
+            let residuals0 = y - &x * &beta0;
+            let s1 = match &weight_type {
+                WeightType::Unadjusted => ztz,
+                WeightType::Robust => robust_moment_covariance(&z, &residuals0, n, l),
+                WeightType::Cluster { groups } => {
+                    let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
+                    validate_cluster_groups(groups, n)?;
+                    cluster_moment_covariance(&z, &residuals0, n, l, groups)
+                }
+                WeightType::Kernel { lags, time_order } => {
+                    let lags = resolve_hac_lags(*lags, n)?;
+                    let order = time_ordering(time_order.as_deref(), n);
+                    kernel_moment_covariance(&z, &residuals0, n, l, lags, &order)
+                }
+            };
+            gmm_point_estimate(&z, &x, y, &s1)?
         };
-
-        let beta1 = gmm_point_estimate(&z, &x, y, &s1)?;
-        let residuals1 = y - &x * &beta1;
+        let residuals = y - &x * &beta;
 
         Ok(Self {
-            params: beta1,
+            params: beta,
             param_names,
             dep_var_name: input.dep_var_name().to_string(),
-            residuals: residuals1,
+            residuals,
             weight_type,
+            gmm_iterations,
             nobs: n,
             k,
         })
@@ -235,6 +258,11 @@ impl GmmEstimator {
         &self.weight_type
     }
 
+    /// 使用した反復回数（1または2）。
+    pub fn gmm_iterations(&self) -> i64 {
+        self.gmm_iterations
+    }
+
     /// 観測数 n。
     pub fn nobs(&self) -> usize {
         self.nobs
@@ -244,6 +272,27 @@ impl GmmEstimator {
     pub fn k(&self) -> usize {
         self.k
     }
+}
+
+/// `weight_type`自体の引数が妥当かどうかだけを検証する（`S`は構築しない）。
+///
+/// `gmm_iterations=1`では`weight_type`が点推定に一切影響しないが（モジュール冒頭の
+/// docコメント参照）、それでも呼び出し元の設定ミス（`Cluster`指定なのに`groups`未指定、
+/// `Kernel`の`lags`が範囲外等）は黙って無視せず常にエラーにする（ユーザー確認済み）。
+/// `gmm_iterations=2`では`fit()`本体の`match`が`S`構築の過程で同じ検証を重ねて行う
+/// （冗長だが検証コスト自体は軽微で、各分岐を自己完結させる方を優先した）。
+fn validate_weight_type(weight_type: &WeightType, n: usize) -> Result<(), IvError> {
+    match weight_type {
+        WeightType::Unadjusted | WeightType::Robust => {}
+        WeightType::Cluster { groups } => {
+            let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
+            validate_cluster_groups(groups, n)?;
+        }
+        WeightType::Kernel { lags, .. } => {
+            resolve_hac_lags(*lags, n)?;
+        }
+    }
+    Ok(())
 }
 
 /// 重み行列`W=S⁻¹`によるGMMの点推定 `β̂(W) = (X'ZWZ'X)⁻¹X'ZWZ'y` を求める。
@@ -439,7 +488,7 @@ mod tests {
             .unwrap()
         };
 
-        let gmm = GmmEstimator::fit(build_input(), WeightType::Unadjusted).unwrap();
+        let gmm = GmmEstimator::fit(build_input(), WeightType::Unadjusted, 2).unwrap();
         let two_sls =
             crate::iv::two_sls::TwoSlsEstimator::fit(build_input(), OlsCovType::Classical, 0.95)
                 .unwrap();
@@ -477,7 +526,7 @@ mod tests {
         )
         .unwrap();
 
-        let estimator = GmmEstimator::fit(input, WeightType::Unadjusted).unwrap();
+        let estimator = GmmEstimator::fit(input, WeightType::Unadjusted, 2).unwrap();
         assert_eq!(estimator.param_names(), ["const", "x_endog"]);
         assert!((*estimator.params().get(0, 0) - 1.0).abs() < 1e-8);
         assert!((*estimator.params().get(1, 0) - 2.0).abs() < 1e-8);
@@ -501,13 +550,165 @@ mod tests {
         )
         .unwrap();
 
-        let result = GmmEstimator::fit(input, WeightType::Unadjusted);
+        let result = GmmEstimator::fit(input, WeightType::Unadjusted, 2);
         assert_eq!(
             result.unwrap_err(),
             IvError::InsufficientInstruments {
                 n_instruments: 1,
                 n_endog: 2,
             }
+        );
+    }
+
+    /// `gmm_iterations`が1・2以外（0・負・3以上）なら`InvalidGmmIterations`
+    /// （`iv-api-design.md`6.2節が定義するのは1・2の2値のみ、モジュール冒頭のdocコメント
+    /// 「`weight_type`・`gmm_iterations`と点推定への影響」参照）。
+    #[test]
+    fn fit_returns_invalid_gmm_iterations_error_for_disallowed_values() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let build_input = || {
+            IvInput::from_columns(
+                &y,
+                &[],
+                vec![],
+                std::slice::from_ref(&x_endog),
+                vec!["endog1".to_string()],
+                &[z1.clone(), z2.clone()],
+                vec!["z1".to_string(), "z2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap()
+        };
+
+        for invalid in [0_i64, -1, 3, 100] {
+            let result = GmmEstimator::fit(build_input(), WeightType::Unadjusted, invalid);
+            assert_eq!(
+                result.unwrap_err(),
+                IvError::InvalidGmmIterations {
+                    gmm_iterations: invalid
+                },
+                "gmm_iterations={invalid}"
+            );
+        }
+    }
+
+    /// `gmm_iterations=1`（1-step GMM）は`weight_type`によらず常に`W₀=(Z'Z)⁻¹`による
+    /// 初期推定`β̂₀`（=2SLSの点推定）と一致する（`weight_type`ごとの重み付け＝ステップ2を
+    /// 一切行わないため。モジュール冒頭のdocコメント参照）。
+    #[test]
+    fn fit_with_one_iteration_ignores_weight_type() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let build_input = || {
+            IvInput::from_columns(
+                &y,
+                &[],
+                vec![],
+                std::slice::from_ref(&x_endog),
+                vec!["endog1".to_string()],
+                &[z1.clone(), z2.clone()],
+                vec!["z1".to_string(), "z2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap()
+        };
+
+        let unadjusted = GmmEstimator::fit(build_input(), WeightType::Unadjusted, 1).unwrap();
+        let robust = GmmEstimator::fit(build_input(), WeightType::Robust, 1).unwrap();
+        let kernel = GmmEstimator::fit(
+            build_input(),
+            WeightType::Kernel {
+                lags: Some(2),
+                time_order: None,
+            },
+            1,
+        )
+        .unwrap();
+
+        assert_eq!(unadjusted.gmm_iterations(), 1);
+        for j in 0..2 {
+            let base = *unadjusted.params().get(j, 0);
+            assert!(
+                (base - *robust.params().get(j, 0)).abs() < 1e-8,
+                "param {j}: unadjusted={base}, robust={}",
+                *robust.params().get(j, 0)
+            );
+            assert!(
+                (base - *kernel.params().get(j, 0)).abs() < 1e-8,
+                "param {j}: unadjusted={base}, kernel={}",
+                *kernel.params().get(j, 0)
+            );
+        }
+
+        // 2-step（weight_type=Unadjustedなら1-stepと数値的に同じはず、上記参照）とも一致する。
+        let two_step = GmmEstimator::fit(build_input(), WeightType::Unadjusted, 2).unwrap();
+        for j in 0..2 {
+            assert!(
+                (*unadjusted.params().get(j, 0) - *two_step.params().get(j, 0)).abs() < 1e-8,
+                "param {j}"
+            );
+        }
+    }
+
+    /// `gmm_iterations=1`は`weight_type`の値を点推定に使わないが、それでも`weight_type`
+    /// 自体の引数が不正（`Cluster`で`groups`未指定）なら`MissingClusterColumn`になる
+    /// （`gmm_iterations`によらず`weight_type`自体の妥当性は常に検証する方針、
+    /// ユーザー確認済み。モジュール冒頭のdocコメント参照）。
+    #[test]
+    fn fit_returns_missing_cluster_column_error_when_one_step_gmm_has_invalid_cluster_weight_type()
+    {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            &[z1, z2],
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = GmmEstimator::fit(input, WeightType::Cluster { groups: None }, 1);
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::Common(CommonError::MissingClusterColumn)
+        );
+    }
+
+    /// 同様に`gmm_iterations=1`でも`weight_type=Kernel`の`lags`が範囲外なら
+    /// `InvalidHacLags`になる。
+    #[test]
+    fn fit_returns_invalid_hac_lags_error_when_one_step_gmm_has_invalid_kernel_weight_type() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let n = y.len();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            &[z1, z2],
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = GmmEstimator::fit(
+            input,
+            WeightType::Kernel {
+                lags: Some(-1),
+                time_order: None,
+            },
+            1,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::InvalidHacLags { hac_lags: -1, n }
         );
     }
 
@@ -533,7 +734,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = GmmEstimator::fit(input, WeightType::Unadjusted);
+        let result = GmmEstimator::fit(input, WeightType::Unadjusted, 2);
         assert_eq!(
             result.unwrap_err(),
             IvError::Common(CommonError::ComputationFailed(
@@ -571,6 +772,7 @@ mod tests {
             WeightType::Cluster {
                 groups: Some(groups),
             },
+            2,
         );
         assert_eq!(
             result.unwrap_err(),
@@ -602,8 +804,8 @@ mod tests {
             .unwrap()
         };
 
-        let unadjusted = GmmEstimator::fit(build_input(), WeightType::Unadjusted).unwrap();
-        let robust = GmmEstimator::fit(build_input(), WeightType::Robust).unwrap();
+        let unadjusted = GmmEstimator::fit(build_input(), WeightType::Unadjusted, 2).unwrap();
+        let robust = GmmEstimator::fit(build_input(), WeightType::Robust, 2).unwrap();
 
         let diff = (*unadjusted.params().get(1, 0) - *robust.params().get(1, 0)).abs();
         assert!(
@@ -650,7 +852,7 @@ mod tests {
             "y".to_string(),
         )
         .unwrap();
-        let estimator = GmmEstimator::fit(input, WeightType::Robust).unwrap();
+        let estimator = GmmEstimator::fit(input, WeightType::Robust, 2).unwrap();
 
         // オラクル: 手作業でZ・X・yを組み立て、W₀=(Z'Z)⁻¹で初期推定→残差→
         // S=Σêᵢ²zᵢzᵢ'→W₁=S⁻¹で最終推定、という同じ2段階を`gmm_point_estimate`とは
@@ -755,7 +957,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = GmmEstimator::fit(input, WeightType::Cluster { groups: None });
+        let result = GmmEstimator::fit(input, WeightType::Cluster { groups: None }, 2);
         assert_eq!(
             result.unwrap_err(),
             IvError::Common(CommonError::MissingClusterColumn)
@@ -786,6 +988,7 @@ mod tests {
             WeightType::Cluster {
                 groups: Some(groups),
             },
+            2,
         );
         assert_eq!(
             result.unwrap_err(),
@@ -826,6 +1029,7 @@ mod tests {
             WeightType::Cluster {
                 groups: Some(groups.clone()),
             },
+            2,
         )
         .unwrap();
 
@@ -918,6 +1122,7 @@ mod tests {
                 lags: Some(-1),
                 time_order: None,
             },
+            2,
         );
         assert_eq!(
             result.unwrap_err(),
@@ -930,6 +1135,7 @@ mod tests {
                 lags: Some(n as i64),
                 time_order: None,
             },
+            2,
         );
         assert_eq!(
             result.unwrap_err(),
@@ -960,13 +1166,14 @@ mod tests {
             .unwrap()
         };
 
-        let robust = GmmEstimator::fit(build_input(), WeightType::Robust).unwrap();
+        let robust = GmmEstimator::fit(build_input(), WeightType::Robust, 2).unwrap();
         let kernel = GmmEstimator::fit(
             build_input(),
             WeightType::Kernel {
                 lags: Some(0),
                 time_order: None,
             },
+            2,
         )
         .unwrap();
 
@@ -1006,6 +1213,7 @@ mod tests {
                 lags: Some(2),
                 time_order: None,
             },
+            2,
         )
         .unwrap();
 
@@ -1105,7 +1313,7 @@ mod tests {
             "y".to_string(),
         )
         .unwrap();
-        let estimator = GmmEstimator::fit(input, WeightType::Robust).unwrap();
+        let estimator = GmmEstimator::fit(input, WeightType::Robust, 2).unwrap();
 
         let x = Mat::from_fn(n, 2, |i, j| if j == 0 { 1.0 } else { x_endog[i] });
         for (i, &y_i) in y.iter().enumerate() {

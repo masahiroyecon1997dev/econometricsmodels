@@ -24,25 +24,38 @@
 //! （弱操作変数診断等で必要になる）SE・F統計量も含めてそのまま公開してよい
 //! （`first_stage_estimators()`、Issue #158の`first_stage()`実装で利用予定）。
 //!
-//! ## 内部委譲時の`cov_type`/`confidence_level`
+//! ## 第一段階・第二段階での`cov_type`/`confidence_level`の扱い
 //!
-//! 第一段階・第二段階いずれの`OlsEstimator::fit`呼び出しも`cov_type`/`confidence_level`を
-//! 要求するが、点推定（`params()`）の値はどちらにも依存しない（`cov_type`は分散の推定方法
-//! の選択、`confidence_level`は信頼区間の幅にのみ影響する）。そのため呼び出し元から値を
-//! 受け取らず、内部専用の固定値（[`INTERNAL_COV_TYPE`]/[`INTERNAL_CONFIDENCE_LEVEL`]）を使う。
-//! `Classical`を選んでいるのは、`Cluster`のようにクラスター列や十分なクラスター数を追加で
-//! 要求せず、この内部委譲で余計な失敗経路を作らないため。
+//! 点推定（`params()`）の値は`cov_type`/`confidence_level`のどちらにも依存しない
+//! （`cov_type`は分散の推定方法の選択、`confidence_level`は信頼区間の幅にのみ影響する）。
+//! それでも**第一段階**には`fit()`の呼び出し元から渡された`cov_type`/`confidence_level`を
+//! そのまま使う。第一段階は正しい通常のOLS回帰としてSE・F統計量込みで公開する設計
+//! （`first_stage_estimators()`参照）のため、弱操作変数診断（Issue #158）等で
+//! ユーザーが指定した`cov_type`（HC系・cluster・hac）を反映する必要があるため
+//! （一般的な実務慣行として、Stata `ivregress`・`linearmodels`も第一段階の診断に
+//! ユーザー指定のvcovをそのまま使う）。
+//!
+//! 一方**第二段階**は、モジュール冒頭の「このIssue（#157）のスコープ」で説明した通り
+//! 標準誤差自体を公開しない設計であり、`cov_type`を変えても意味を持たない
+//! （どの`cov_type`を選んでも、二段階回帰によるナイーブな第二段階OLSのSEは2SLSとして
+//! 誤りのまま）。そのため第二段階には呼び出し元の`cov_type`を使わず、内部専用の
+//! 固定値[`SECOND_STAGE_COV_TYPE`]（`Classical`。`Cluster`のようにクラスター列や
+//! 十分なクラスター数を追加で要求せず、余計な失敗経路を作らないため）を使う。
+//! `confidence_level`は第二段階でも呼び出し元の値をそのまま使う（`(0, 1)`の範囲内で
+//! あればよく、公開しないため実質的に意味を持たないが、内部専用の別値を用意する
+//! 理由もないため。`x_endog=[]`の退化ケースでは第一段階ループが一度も回らないため、
+//! この`confidence_level`検証が範囲外エラーを検知する唯一の経路になる）。
 
 use crate::iv::common::{IvError, IvInput, mat_column_to_vec, mat_to_columns};
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use faer::Mat;
 
-/// 点推定のみに使う内部専用の`cov_type`。モジュール冒頭のdocコメント参照。
-const INTERNAL_COV_TYPE: CovType = CovType::Classical;
-
-/// 点推定のみに使う内部専用の`confidence_level`。`(0, 1)`の範囲内であること以外に
-/// 意味を持たない（モジュール冒頭のdocコメント参照）。
-const INTERNAL_CONFIDENCE_LEVEL: f64 = 0.95;
+/// 第二段階のOLS委譲にのみ使う内部専用の`cov_type`。モジュール冒頭のdocコメント参照。
+///
+/// Issue #166（正しいサンドイッチ型SEの実装）着手時にこの固定値は廃止し、第二段階にも
+/// 呼び出し元の`cov_type`を反映するよう書き換える見込み（`Ω`の推定方法が`cov_type`に
+/// 依存するため）。
+const SECOND_STAGE_COV_TYPE: CovType = CovType::Classical;
 
 /// 2SLSの点推定結果。
 ///
@@ -60,15 +73,23 @@ pub struct TwoSlsEstimator {
 impl TwoSlsEstimator {
     /// `IvInput`から2SLSの点推定を行う。
     ///
+    /// `cov_type`/`confidence_level`は第一段階（`first_stage_estimators()`で公開する
+    /// `OlsEstimator`）にそのまま使う。第二段階には使わない（モジュール冒頭のdocコメント
+    /// 「第一段階・第二段階での`cov_type`/`confidence_level`の扱い」参照）。
+    ///
     /// # Errors
     /// - 識別の順序条件`len(instruments) >= len(x_endog)`を満たさない:
     ///   `IvError::InsufficientInstruments`
     /// - 第一段階回帰（内生変数ごと）が失敗: `IvError::FirstStageFailed`
+    ///   （`cov_type=Cluster`でグループキー未指定・信頼水準が範囲外等、`cov_type`/
+    ///   `confidence_level`起因のエラーもここに含まれる）
     /// - 第二段階回帰が失敗: `IvError::SecondStageFailed`
+    ///   （`x_endog=[]`の退化ケースでは第一段階ループが一度も回らないため、
+    ///   `confidence_level`が範囲外の場合のエラーもここ経由になる）
     ///
     /// 識別可能性の検証をここで行う理由は`IvInput`の構造体docコメント参照
     /// （`OlsEstimator::fit`が`n<=k`を検証するのと同じ層分け、ユーザー確認済み）。
-    pub fn fit(input: IvInput) -> Result<Self, IvError> {
+    pub fn fit(input: IvInput, cov_type: CovType, confidence_level: f64) -> Result<Self, IvError> {
         if input.k_instruments() < input.k_endog() {
             return Err(IvError::InsufficientInstruments {
                 n_instruments: input.k_instruments(),
@@ -105,12 +126,11 @@ impl TwoSlsEstimator {
                 endog_name: endog_name.clone(),
                 source,
             })?;
-            let estimator =
-                OlsEstimator::fit(ols_input, INTERNAL_COV_TYPE, INTERNAL_CONFIDENCE_LEVEL)
-                    .map_err(|source| IvError::FirstStageFailed {
-                        endog_name: endog_name.clone(),
-                        source,
-                    })?;
+            let estimator = OlsEstimator::fit(ols_input, cov_type.clone(), confidence_level)
+                .map_err(|source| IvError::FirstStageFailed {
+                    endog_name: endog_name.clone(),
+                    source,
+                })?;
 
             let fitted: Mat<f64> = estimator.fitted_values();
             x_endog_hat_columns.push(mat_column_to_vec(&fitted, 0));
@@ -135,12 +155,9 @@ impl TwoSlsEstimator {
             input.dep_var_name().to_string(),
         )
         .map_err(|source| IvError::SecondStageFailed { source })?;
-        let second_stage = OlsEstimator::fit(
-            second_stage_input,
-            INTERNAL_COV_TYPE,
-            INTERNAL_CONFIDENCE_LEVEL,
-        )
-        .map_err(|source| IvError::SecondStageFailed { source })?;
+        let second_stage =
+            OlsEstimator::fit(second_stage_input, SECOND_STAGE_COV_TYPE, confidence_level)
+                .map_err(|source| IvError::SecondStageFailed { source })?;
 
         Ok(Self {
             first_stage,
@@ -215,7 +232,7 @@ mod tests {
         )
         .unwrap();
 
-        let estimator = TwoSlsEstimator::fit(input).unwrap();
+        let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
         assert_eq!(estimator.param_names(), ["const", "x_endog"]);
         assert!((*estimator.params().get(0, 0) - 1.0).abs() < 1e-8);
         assert!((*estimator.params().get(1, 0) - 2.0).abs() < 1e-8);
@@ -240,11 +257,44 @@ mod tests {
         )
         .unwrap();
 
-        let estimator = TwoSlsEstimator::fit(input).unwrap();
+        let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
         assert_eq!(estimator.param_names(), ["const", "x1"]);
         assert!(estimator.first_stage_estimators().is_empty());
         assert!((*estimator.params().get(0, 0) - 0.0).abs() < 1e-8);
         assert!((*estimator.params().get(1, 0) - 2.0).abs() < 1e-8);
+    }
+
+    #[test]
+    fn fit_returns_second_stage_failed_when_confidence_level_is_invalid_and_x_endog_is_empty() {
+        // `x_endog=[]`だと第一段階ループが一度も回らないため、`confidence_level`の
+        // 範囲チェックは第二段階の`OlsEstimator::fit`経由でのみ働く（モジュール冒頭の
+        // docコメント参照）。
+        let y = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+        let x_exog = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+        let input = IvInput::from_columns(
+            &y,
+            &x_exog,
+            vec!["x1".to_string()],
+            &[],
+            vec![],
+            &[],
+            vec![],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = TwoSlsEstimator::fit(input, CovType::Classical, 1.5);
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::SecondStageFailed {
+                source: crate::linear::common::LeastSquaresError::Common(
+                    CommonError::InvalidConfidenceLevel {
+                        confidence_level: 1.5
+                    }
+                ),
+            }
+        );
     }
 
     #[test]
@@ -265,7 +315,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = TwoSlsEstimator::fit(input);
+        let result = TwoSlsEstimator::fit(input, CovType::Classical, 0.95);
         assert_eq!(
             result.unwrap_err(),
             IvError::InsufficientInstruments {
@@ -296,12 +346,86 @@ mod tests {
         )
         .unwrap();
 
-        let estimator = TwoSlsEstimator::fit(input).unwrap();
+        let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
         assert_eq!(estimator.nobs(), 6);
         assert_eq!(estimator.k(), 2);
         assert_eq!(estimator.dep_var_name(), "y");
         assert_eq!(estimator.first_stage_estimators().len(), 1);
         assert_eq!(estimator.first_stage_estimators()[0].0, "endog1");
+    }
+
+    /// 呼び出し元が指定した`cov_type`は第一段階（`first_stage_estimators()`で公開する
+    /// `OlsEstimator`）にそのまま反映され、第二段階には反映されない（常に`Classical`）
+    /// ことを確認する（モジュール冒頭のdocコメント「第一段階・第二段階での`cov_type`/
+    /// `confidence_level`の扱い」参照）。`second_stage`は非公開フィールドだが、この
+    /// テストは同一モジュールの子モジュールのため直接参照できる。
+    #[test]
+    fn fit_uses_caller_provided_cov_type_for_first_stage_but_not_second_stage() {
+        let y = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let x_endog = vec![vec![5.0, 4.0, 3.0, 6.0, 2.0, 1.0]];
+        let instruments = vec![
+            vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0],
+            vec![1.0, 3.0, 2.0, 5.0, 4.0, 6.0],
+        ];
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            &x_endog,
+            vec!["endog1".to_string()],
+            &instruments,
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = TwoSlsEstimator::fit(input, CovType::Hc0, 0.95).unwrap();
+        assert_eq!(
+            estimator.first_stage_estimators()[0].1.cov_type(),
+            &CovType::Hc0
+        );
+        assert_eq!(estimator.second_stage.cov_type(), &CovType::Classical);
+    }
+
+    /// `confidence_level`が第一段階に反映されていることを、信頼区間の幅の変化で間接的に
+    /// 確認する（`OlsEstimator`は`confidence_level`自体を公開するgetterを持たないため）。
+    #[test]
+    fn fit_uses_caller_provided_confidence_level_for_first_stage() {
+        let y = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let x_endog = vec![vec![5.0, 4.0, 3.0, 6.0, 2.0, 1.0]];
+        let instruments = vec![
+            vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0],
+            vec![1.0, 3.0, 2.0, 5.0, 4.0, 6.0],
+        ];
+        let build_input = || {
+            IvInput::from_columns(
+                &y,
+                &[],
+                vec![],
+                &x_endog,
+                vec!["endog1".to_string()],
+                &instruments,
+                vec!["z1".to_string(), "z2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap()
+        };
+
+        let narrow = TwoSlsEstimator::fit(build_input(), CovType::Classical, 0.80).unwrap();
+        let wide = TwoSlsEstimator::fit(build_input(), CovType::Classical, 0.99).unwrap();
+
+        let narrow_first_stage = &narrow.first_stage_estimators()[0].1;
+        let wide_first_stage = &wide.first_stage_estimators()[0].1;
+        let narrow_width =
+            *narrow_first_stage.conf_upper().get(0, 0) - *narrow_first_stage.conf_lower().get(0, 0);
+        let wide_width =
+            *wide_first_stage.conf_upper().get(0, 0) - *wide_first_stage.conf_lower().get(0, 0);
+        assert!(
+            wide_width > narrow_width,
+            "wide={wide_width}, narrow={narrow_width}"
+        );
     }
 
     /// 2SLSの射影公式`β̂ = (X'PzX)⁻¹X'Pzy`（`Pz=Z(Z'Z)⁻¹Z'`）を`faer`の行列演算で直接計算する。
@@ -372,7 +496,7 @@ mod tests {
             "y".to_string(),
         )
         .unwrap();
-        let estimator = TwoSlsEstimator::fit(input).unwrap();
+        let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
 
         let n = y.len();
         let z = Mat::from_fn(n, 3, |i, j| match j {
@@ -409,7 +533,7 @@ mod tests {
             "y".to_string(),
         )
         .unwrap();
-        let estimator = TwoSlsEstimator::fit(input).unwrap();
+        let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
         assert_eq!(estimator.param_names(), ["const", "x1", "endog1"]);
 
         let n = y.len();
@@ -454,7 +578,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = TwoSlsEstimator::fit(input);
+        let result = TwoSlsEstimator::fit(input, CovType::Classical, 0.95);
         assert_eq!(
             result.unwrap_err(),
             IvError::SecondStageFailed {
@@ -483,7 +607,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = TwoSlsEstimator::fit(input);
+        let result = TwoSlsEstimator::fit(input, CovType::Classical, 0.95);
         assert_eq!(
             result.unwrap_err(),
             IvError::FirstStageFailed {
@@ -513,7 +637,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = TwoSlsEstimator::fit(input);
+        let result = TwoSlsEstimator::fit(input, CovType::Classical, 0.95);
         assert!(matches!(
             result,
             Err(IvError::FirstStageFailed {

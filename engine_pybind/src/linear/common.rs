@@ -14,8 +14,12 @@
 //! に委譲する（系統ごとに同じ判定ロジックを重複させない）。
 
 use engine::linear::common::LeastSquaresError;
-use pyo3::PyErr;
+use engine::linear::ols::CovType as EngineCovType;
+use polars::prelude::DataFrame;
+use pyo3::{PyErr, PyResult};
 
+use super::ols::OLSOptions;
+use crate::column_extraction::{extract_f64_column, extract_group_key_column};
 use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
 
 /// `engine::linear::common::LeastSquaresError`をPython例外に変換する。
@@ -39,4 +43,72 @@ pub(crate) fn least_squares_error_to_pyerr(err: LeastSquaresError) -> PyErr {
 /// `faer::Mat<f64>`（n×1またはk×1の列ベクトル）を`Vec<f64>`に変換する。
 pub(crate) fn mat_to_vec(mat: &faer::Mat<f64>) -> Vec<f64> {
     (0..mat.nrows()).map(|i| *mat.get(i, 0)).collect()
+}
+
+/// `OLSOptions.cov_type`をパースし、該当する`cov_type`のときのみ`cluster_col`/`time_col`を
+/// 抽出したうえで`engine::linear::ols::CovType`を組み立てる（OLS/WLS共通、
+/// `docs/spec/ols-spec.md`「標準誤差」参照）。
+///
+/// `cluster_col`/`time_col`が指定されていても、`cov_type`がcluster/hacでなければ無視する。
+/// 戻り値の2つ目は`*Result.cov_type`にそのまま格納する小文字化済み文字列
+/// （呼び出し側で二重に`to_lowercase()`しないよう、ここでまとめて返す）。
+///
+/// `common.rs`が`super::ols::OLSOptions`という特定モジュールの型に依存する点は、
+/// `mat_to_vec`等の汎用型のみを扱うヘルパーとは毛色が異なる。これは`WLSOptions`という
+/// 専用型を新設せずWLSが`OLSOptions`をそのまま再利用する既存方針（`docs/spec/wls-spec.md`
+/// 「API引数」）を踏まえた判断で、`OLSOptions`は実質的に`linear`系統共通のオプション型
+/// という位置づけのため許容する。将来GLS等で`cov_type`の型が分岐する場合は、この関数を
+/// 無理に拡張せず素直に系統・手法ごとの実装に切り替えること。
+///
+/// # Errors
+/// `cov_type`の文字列が既知の値のいずれでもない場合は`ValidationError`。それ以外
+/// （列の抽出時に発覚する問題等）は`column_extraction`の責務で`ValidationError`。
+pub(crate) fn parse_cov_type(
+    df: &DataFrame,
+    options: &OLSOptions,
+) -> PyResult<(EngineCovType, String)> {
+    let cov_type_lower = options.cov_type.to_lowercase();
+
+    let cluster_groups = if cov_type_lower == "cluster" {
+        options
+            .cluster_col
+            .as_ref()
+            .map(|col_name| extract_group_key_column(df, col_name))
+            .transpose()?
+    } else {
+        None
+    };
+
+    let time_order = if cov_type_lower == "hac" {
+        options
+            .time_col
+            .as_ref()
+            .map(|col_name| extract_f64_column(df, col_name))
+            .transpose()?
+    } else {
+        None
+    };
+
+    let cov_type = match cov_type_lower.as_str() {
+        "classical" | "nonrobust" => EngineCovType::Classical,
+        "hc0" => EngineCovType::Hc0,
+        "hc1" => EngineCovType::Hc1,
+        "hc2" => EngineCovType::Hc2,
+        "hc3" => EngineCovType::Hc3,
+        "hac" => EngineCovType::Hac {
+            lags: options.hac_lags,
+            time_order,
+        },
+        "cluster" => EngineCovType::Cluster {
+            groups: cluster_groups,
+        },
+        other => {
+            return Err(ValidationError::new_err(format!(
+                "unknown cov_type: '{other}'. Expected one of 'classical', 'hc0' through \
+                 'hc3', 'hac', or 'cluster'"
+            )));
+        }
+    };
+
+    Ok((cov_type, cov_type_lower))
 }

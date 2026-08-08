@@ -8,16 +8,14 @@
 //! （`LeastSquaresError`がOLS・WLS共通のエラー型のため。`.claude/rules/rust-style.md`
 //! 「系統内で共有するロジックはcommon.rsに置く」）。
 
-use engine::linear::ols::CovType as EngineCovType;
 use engine::linear::wls::WlsEstimator;
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
-use super::common::{least_squares_error_to_pyerr, mat_to_vec};
+use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
 use super::ols::OLSOptions;
-use crate::column_extraction::{extract_f64_column, extract_group_key_column};
-use crate::errors::ValidationError;
+use crate::column_extraction::extract_f64_column;
 use crate::validation::{
     validate_no_const_collision, validate_no_duplicate_roles, validate_no_duplicate_x,
     validate_x_non_empty,
@@ -76,7 +74,6 @@ pub fn fit(
     options: &OLSOptions,
 ) -> PyResult<WLSResult> {
     let df: DataFrame = data.into();
-    let cov_type_lower = options.cov_type.to_lowercase();
 
     // 誤って同じ列を複数の役割に指定するミスを、分かりやすいエラーで早期に防ぐ
     // （`docs/spec/wls-spec.md`「API引数」参照）。
@@ -101,46 +98,7 @@ pub fn fit(
     let weight_slice = extract_f64_column(&df, &weight)?;
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ、OLSと同じ）─────
-    let cluster_groups = if cov_type_lower == "cluster" {
-        options
-            .cluster_col
-            .as_ref()
-            .map(|col_name| extract_group_key_column(&df, col_name))
-            .transpose()?
-    } else {
-        None
-    };
-
-    let time_order = if cov_type_lower == "hac" {
-        options
-            .time_col
-            .as_ref()
-            .map(|col_name| extract_f64_column(&df, col_name))
-            .transpose()?
-    } else {
-        None
-    };
-
-    let cov_type = match cov_type_lower.as_str() {
-        "classical" | "nonrobust" => EngineCovType::Classical,
-        "hc0" => EngineCovType::Hc0,
-        "hc1" => EngineCovType::Hc1,
-        "hc2" => EngineCovType::Hc2,
-        "hc3" => EngineCovType::Hc3,
-        "hac" => EngineCovType::Hac {
-            lags: options.hac_lags,
-            time_order,
-        },
-        "cluster" => EngineCovType::Cluster {
-            groups: cluster_groups,
-        },
-        other => {
-            return Err(ValidationError::new_err(format!(
-                "unknown cov_type: '{other}'. Expected one of 'classical', 'hc0' through \
-                 'hc3', 'hac', or 'cluster'"
-            )));
-        }
-    };
+    let (cov_type, cov_type_lower) = parse_cov_type(&df, options)?;
 
     let wls_estimator = WlsEstimator::fit(
         &y_slice,

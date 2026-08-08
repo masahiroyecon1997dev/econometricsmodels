@@ -277,7 +277,32 @@ pub fn fit(
     let estimator = OlsEstimator::fit(input, cov_type, options.confidence_level)
         .map_err(least_squares_error_to_pyerr)?;
 
-    Ok(OLSResult {
+    Ok(ols_estimator_to_result(&estimator, cov_type_lower))
+}
+
+/// フィット済み`OlsEstimator`を`OLSResult`（pyclass、Pythonに返す形）に変換する。
+///
+/// `fit`（本ファイル、OLS本体）と`iv::common`の`first_stage()`（IVの第一段階回帰
+/// `x_endog[i] ~ x_exog + instruments`の結果を`dict[str, OlsResults]`として返す、
+/// Issue #170）の両方で使う共通の変換ロジック。第一段階回帰はそれ自体が正しい
+/// （ナイーブな）通常のOLS回帰であり（`engine::iv::two_sls`のモジュールdocコメント
+/// 「第一段階の各`OlsEstimator`はそれ自体が正しい」参照）、`OLSResult`への変換方法に
+/// OLS本体との違いは無いため、このように同じ関数をそのまま再利用できる（`OLSResult`の
+/// 非公開フィールド`fitted_values`/`has_intercept`にアクセスする都合上、`OLSResult`と
+/// 同じ`linear::ols`モジュール内に置く）。
+///
+/// `cov_type_lower`を引数で受け取るのは、`fit`ではPythonから渡された`OLSOptions.cov_type`
+/// をパース時に一度だけ小文字化した値、`first_stage()`では`IvResult.cov_type`
+/// （呼び出し元が指定した`cov_type`、第一段階にもそのまま使われる、`iv::two_sls`の
+/// モジュールdocコメント参照）と、呼び出し元ごとに文字列の出どころが異なるため。
+/// **呼び出し元が正規化済み（`to_lowercase()`済み）の値を渡す責任を持つ**（この関数自体は
+/// 正規化・妥当性検証を行わない。`OlsEstimator`が実際に使った`cov_type`と一致する文字列を
+/// 呼び出し元の責任で渡す契約）。
+pub(crate) fn ols_estimator_to_result(
+    estimator: &OlsEstimator,
+    cov_type_lower: String,
+) -> OLSResult {
+    OLSResult {
         params: mat_to_vec(estimator.params()),
         std_errors: mat_to_vec(estimator.std_errors()),
         t_stats: mat_to_vec(estimator.t_stats()),
@@ -298,5 +323,5 @@ pub fn fit(
         bic: estimator.bic(),
         fitted_values: mat_to_vec(&estimator.fitted_values()),
         has_intercept: estimator.input().has_intercept(),
-    })
+    }
 }

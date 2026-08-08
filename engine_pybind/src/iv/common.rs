@@ -22,9 +22,12 @@
 //! 弱操作変数診断（`weak_instrument_f_statistics`）・過剰識別検定
 //! （`overid_statistic`/`overid_p_value`）・内生性検定（`wu_hausman_statistic`/
 //! `wu_hausman_p_value`）はいずれも別issue（#163/#167/#164）のスコープのため、
-//! 現時点では空/`None`のプレースホルダーを返す。`first_stage()`（内生変数ごとの第一段階
-//! 回帰結果を返す別メソッド）の配線もIssue #170のスコープでありここでは行わない
-//! （本ファイル`IvResult`のdocコメント参照）。
+//! 現時点では空/`None`のプレースホルダーを返す。
+//!
+//! 【Issue #170のスコープ】`IvResult::first_stage()`（内生変数ごとの第一段階回帰結果を
+//! `dict[str, OlsResults]`として返す別メソッド）を実装した。`OlsEstimator → OLSResult`
+//! 変換は`linear::ols::ols_estimator_to_result`（OLS本体の`fit`と共有、Issue #170で
+//! 抽出）を再利用する。
 
 use std::collections::HashMap;
 
@@ -38,6 +41,7 @@ use pyo3_polars::PyDataFrame;
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
 use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
 use crate::linear::common::{least_squares_error_is_computation_error, mat_to_vec};
+use crate::linear::ols::{OLSResult, ols_estimator_to_result};
 use crate::validation::{
     RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
     validate_no_duplicate_within_role,
@@ -207,8 +211,12 @@ impl IvOptions {
 /// naming already used internally by `engine::inference::InferenceStat`).
 ///
 /// `first_stage()`（内生変数ごとの第一段階回帰結果）はここにフィールドとして含めない。
-/// `fit()`の戻り値本体には含めず別メソッドとして公開する設計（`iv-api-design.md`2.2節）
-/// のため、`engine_pybind`側の配線はIssue #170で行う。
+/// `fit()`の戻り値本体には含めず別メソッドとして公開する（`iv-api-design.md`2.2節、
+/// Issue #170で実装済み）。`predict()`/`marginal_effects()`用に`LogitResult`/
+/// `ProbitResult`が推定量そのものを非公開フィールド`estimator`として保持するのと同じ
+/// パターンで、`first_stage()`も非公開フィールド`estimator: TwoSlsEstimator`から
+/// `first_stage_estimators()`を呼んでオンデマンドに構築する（下記`estimator`フィールド
+/// 参照）。
 ///
 /// `fit_iv` (`fit` in this file) constructs and returns it. The core fields above are
 /// populated by `TwoSlsEstimator`/`GmmEstimator` (`method="gmm"` is not yet implemented,
@@ -217,8 +225,13 @@ impl IvOptions {
 // `IvResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`IvOptions`の`from_py_object`とは
 // 対照的、`OLSResult`/`LogitResult`と同じ理由）。
+//
+// `Clone`を派生しない: `estimator`（`engine::iv::two_sls::TwoSlsEstimator`）が`Clone`を
+// 実装していないため（`LogitResult`/`ProbitResult`と同じ理由、`.claude/rules/
+// rust-style.md`「推定量構造体の設計」の通りprivateフィールドのみで、Cloneを要求する
+// 既存の呼び出し元も無い）。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct IvResult {
     #[pyo3(get)]
     pub params: Vec<f64>,
@@ -278,6 +291,33 @@ pub struct IvResult {
     pub wu_hausman_statistic: Option<f64>,
     #[pyo3(get)]
     pub wu_hausman_p_value: Option<f64>,
+    /// `first_stage()`が読む。Python側には公開しない（`OLSResult`の`fitted_values`/
+    /// `has_intercept`、`LogitResult`/`ProbitResult`の`estimator`と同じ位置づけ）。
+    estimator: TwoSlsEstimator,
+}
+
+#[pymethods]
+impl IvResult {
+    /// Per-endogenous-variable first-stage regression results
+    /// (`x_endog[i] ~ x_exog + instruments`), keyed by the endogenous variable name.
+    ///
+    /// Each value is a full `OlsResults` (the same type OLS's `fit_ols` returns) — the
+    /// first stage is a genuine, valid OLS regression in its own right, so no IV-specific
+    /// result type is needed (`iv-api-design.md` 2.2節). Its `f_statistic`/`f_p_value`
+    /// include `x_exog`'s contribution and are **not** the weak-instrument partial
+    /// F-statistic (`weak_instrument_f_statistics`, computed separately by Issue #163).
+    fn first_stage(&self) -> HashMap<String, OLSResult> {
+        self.estimator
+            .first_stage_estimators()
+            .iter()
+            .map(|(name, estimator)| {
+                (
+                    name.clone(),
+                    ols_estimator_to_result(estimator, self.cov_type.clone()),
+                )
+            })
+            .collect()
+    }
 }
 
 /// `IvOptions.cov_type`をパースし、該当する`cov_type`のときのみ`cluster_col`/`time_col`を
@@ -500,6 +540,7 @@ pub(crate) fn fit(
         overid_p_value: None,
         wu_hausman_statistic: None,
         wu_hausman_p_value: None,
+        estimator,
     })
 }
 

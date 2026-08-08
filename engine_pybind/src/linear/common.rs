@@ -40,6 +40,23 @@ pub(crate) fn least_squares_error_to_pyerr(err: LeastSquaresError) -> PyErr {
     }
 }
 
+/// `LeastSquaresError`が`ComputationError`（計算過程で発覚した問題）に分類されるか。
+/// `ValidationError`（入力・パラメータが不正）との判定基準は[`least_squares_error_to_pyerr`]と
+/// 同一にする（`SingularMatrix`または`CommonError::ComputationFailed`のみ`true`）。
+///
+/// `least_squares_error_to_pyerr`自体を呼ばずこの判定だけを独立させているのは、
+/// `IvError::FirstStageFailed`/`SecondStageFailed`（`engine_pybind/src/iv/common.rs`）が
+/// 内側の`LeastSquaresError`から分類だけを借りつつ、Pythonに渡すメッセージは
+/// `IvError`自身の`to_string()`（文脈付き）を使いたいため（`source.to_string()`を
+/// 使う`least_squares_error_to_pyerr`をそのまま呼ぶとメッセージの文脈が失われる）。
+pub(crate) fn least_squares_error_is_computation_error(err: &LeastSquaresError) -> bool {
+    matches!(
+        err,
+        LeastSquaresError::SingularMatrix
+            | LeastSquaresError::Common(engine::error::CommonError::ComputationFailed(_))
+    )
+}
+
 /// `faer::Mat<f64>`（n×1またはk×1の列ベクトル）を`Vec<f64>`に変換する。
 pub(crate) fn mat_to_vec(mat: &faer::Mat<f64>) -> Vec<f64> {
     (0..mat.nrows()).map(|i| *mat.get(i, 0)).collect()

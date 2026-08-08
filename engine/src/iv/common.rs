@@ -39,6 +39,7 @@ use faer::Mat;
 use thiserror::Error;
 
 use crate::error::CommonError;
+use crate::linear::common::LeastSquaresError;
 
 /// 2SLS/GMMの計算過程で発生しうるエラー。
 ///
@@ -64,6 +65,27 @@ pub enum IvError {
     InsufficientInstruments {
         n_instruments: usize,
         n_endog: usize,
+    },
+
+    /// 2SLSの第一段階回帰（`x_endog[endog_name] ~ x_exog + instruments`）が
+    /// `OlsEstimator::fit`（内部委譲、`two_sls.rs`参照）で失敗した。
+    ///
+    /// `LeastSquaresError`をそのまま`#[from]`で透過させず`endog_name`を付与するのは、
+    /// 内生変数が複数ある場合にどの変数の第一段階回帰が失敗したかをエラーメッセージから
+    /// 判別できるようにするため（`CommonError::NoRegressors`をUXの観点で`Insufficient
+    /// Observations`と分離したのと同じ考え方）。
+    #[error("first stage regression for endogenous variable '{endog_name}' failed: {source}")]
+    FirstStageFailed {
+        endog_name: String,
+        #[source]
+        source: LeastSquaresError,
+    },
+
+    /// 2SLSの第二段階回帰（`y ~ x_exog + x̂_endog`）が`OlsEstimator::fit`で失敗した。
+    #[error("second stage regression failed: {source}")]
+    SecondStageFailed {
+        #[source]
+        source: LeastSquaresError,
     },
 }
 
@@ -267,6 +289,22 @@ impl IvInput {
     pub fn k_instruments(&self) -> usize {
         self.instruments.ncols()
     }
+}
+
+/// `Mat<f64>`の1列を`Vec<f64>`として取り出す。
+///
+/// `IvInput`は`faer::Mat`で設計行列を保持するが、`OlsInput::from_columns`は列ごとの
+/// `Vec<f64>`を受け取るAPI（`OlsInput`に`Mat`を直接渡すコンストラクタは無い）。2SLS
+/// （`two_sls.rs`）が第一段階・第二段階の設計行列を`OlsInput`経由で組み立てる際に
+/// 必要になる変換で、GMM（`gmm.rs`、Issue #160）でも同じ変換が必要になる見込みのため
+/// ここに置く。
+pub(crate) fn mat_column_to_vec(m: &Mat<f64>, col: usize) -> Vec<f64> {
+    (0..m.nrows()).map(|i| *m.get(i, col)).collect()
+}
+
+/// `Mat<f64>`の全列を`Vec<Vec<f64>>`（列ごと）として取り出す。[`mat_column_to_vec`]参照。
+pub(crate) fn mat_to_columns(m: &Mat<f64>) -> Vec<Vec<f64>> {
+    (0..m.ncols()).map(|j| mat_column_to_vec(m, j)).collect()
 }
 
 #[cfg(test)]
@@ -564,5 +602,27 @@ mod tests {
         let input = result.unwrap();
         assert_eq!(input.k_endog(), 0);
         assert_eq!(input.k_instruments(), 0);
+    }
+
+    #[test]
+    fn mat_column_to_vec_extracts_requested_column() {
+        let m = Mat::from_fn(3, 2, |i, j| (i * 10 + j) as f64);
+        assert_eq!(mat_column_to_vec(&m, 0), vec![0.0, 10.0, 20.0]);
+        assert_eq!(mat_column_to_vec(&m, 1), vec![1.0, 11.0, 21.0]);
+    }
+
+    #[test]
+    fn mat_to_columns_returns_all_columns_in_order() {
+        let m = Mat::from_fn(2, 3, |i, j| (i * 10 + j) as f64);
+        assert_eq!(
+            mat_to_columns(&m),
+            vec![vec![0.0, 10.0], vec![1.0, 11.0], vec![2.0, 12.0]]
+        );
+    }
+
+    #[test]
+    fn mat_to_columns_returns_empty_vec_for_zero_column_matrix() {
+        let m: Mat<f64> = Mat::from_fn(3, 0, |_, _| 0.0);
+        assert_eq!(mat_to_columns(&m), Vec::<Vec<f64>>::new());
     }
 }

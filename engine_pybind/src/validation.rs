@@ -39,13 +39,19 @@ pub fn validate_x_non_empty(x: &[String]) -> PyResult<()> {
     Ok(())
 }
 
-/// `x`内に重複した列名が無いことを検証する。
-pub fn validate_no_duplicate_x(x: &[String]) -> PyResult<()> {
+/// 単一の複数列ロール（`x`/`x_exog`/`x_endog`/`instruments`等）の内部に、重複した列名が
+/// 無いことを検証する。`role_name`はエラーメッセージに使う。
+///
+/// 元は`validate_no_duplicate_x`という`x`専用の関数だったが、IVの`x_exog`/`x_endog`/
+/// `instruments`という3つの複数列ロールそれぞれで同じ検証が必要になったため汎用化した
+/// （Issue #159）。既存の呼び出し元（OLS/WLS/Logit/Probit）は`role_name="x"`で呼ぶため、
+/// メッセージ文言は変わらない。
+pub fn validate_no_duplicate_within_role(role_name: &str, columns: &[String]) -> PyResult<()> {
     let mut seen = HashSet::new();
-    for name in x {
+    for name in columns {
         if !seen.insert(name) {
             return Err(ValidationError::new_err(format!(
-                "column '{name}' is specified more than once in x"
+                "column '{name}' is specified more than once in {role_name}"
             )));
         }
     }
@@ -177,15 +183,25 @@ mod tests {
     }
 
     #[test]
-    fn validate_no_duplicate_x_ok_for_distinct_names() {
+    fn validate_no_duplicate_within_role_ok_for_distinct_names() {
         let x = ["x1".to_string(), "x2".to_string()];
-        assert!(validate_no_duplicate_x(&x).is_ok());
+        assert!(validate_no_duplicate_within_role("x", &x).is_ok());
     }
 
     #[test]
-    fn validate_no_duplicate_x_returns_error_for_duplicate_name() {
+    fn validate_no_duplicate_within_role_returns_error_for_duplicate_name() {
         let x = ["x1".to_string(), "x1".to_string()];
-        assert!(validate_no_duplicate_x(&x).is_err());
+        assert!(validate_no_duplicate_within_role("x", &x).is_err());
+    }
+
+    #[test]
+    fn validate_no_duplicate_within_role_returns_error_using_custom_role_name() {
+        // `role_name`がメッセージにそのまま使われることの直接確認は`PyErr::to_string()`が
+        // GILを要求するためできない（`nonlinear/CLAUDE.md`「テストの制約」参照）。ここでは
+        // `role_name`が異なっても（`x`専用だった旧実装から汎用化した後も）挙動そのもの
+        // （重複検出）が変わらないことのみ確認する。
+        let instruments = ["z1".to_string(), "z1".to_string()];
+        assert!(validate_no_duplicate_within_role("instruments", &instruments).is_err());
     }
 
     #[test]

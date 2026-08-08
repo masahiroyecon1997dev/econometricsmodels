@@ -17,8 +17,8 @@ use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
 use super::ols::OLSOptions;
 use crate::column_extraction::extract_f64_column;
 use crate::validation::{
-    RoleValue, validate_no_const_collision, validate_no_duplicate_roles, validate_no_duplicate_x,
-    validate_x_non_empty,
+    RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
+    validate_no_duplicate_within_role, validate_x_non_empty,
 };
 
 /// Estimation results for WLS.
@@ -83,7 +83,7 @@ pub fn fit(
         ("weight", RoleValue::Single(&weight)),
         ("x", RoleValue::Multi(&x)),
     ])?;
-    validate_no_duplicate_x(&x)?;
+    validate_no_duplicate_within_role("x", &x)?;
     validate_no_const_collision(&x, options.include_intercept)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────

@@ -5,7 +5,10 @@ FE/RE共通の設計は[`panel-api-design.md`](./panel-api-design.md)を参照�
 
 **ステータス**: 確定（1章: 引数設計／2章: 結果設計／3章: 標準誤差・検定／
 4章: 内部実装・共通化／5章: リファレンス実装・テスト方針／
-6章: IV固有論点）。IV側の論点はすべて確定。
+6章: IV固有論点）。IV側の論点はすべて確定。ただし3.2節のGMMの検定分布（z分布のまま
+確定とするか、実務慣行に合わせてt分布・切り替えオプションにすべきか）の細部は、
+Issue #171（`linearmodels`/`ivreg`とのベンチマーク作成）でリファレンス実装を確認して
+から最終判断する未決着事項として残っている（Issue #159時点で追記）。
 
 ## 1. 引数設計（確定）
 
@@ -62,7 +65,7 @@ FE/RE共通の設計は[`panel-api-design.md`](./panel-api-design.md)を参照�
 
 | フィールド | FE/REとの違い |
 |---|---|
-| `params` / `std_errors` / `t_stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` / `residuals` / `dep_var_name` / `n_obs` / `df_resid` / `df_model` / `cov_type` / `f_statistic` / `f_p_value` | 共通（そのまま踏襲） |
+| `params` / `std_errors` / `stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` / `residuals` / `dep_var_name` / `n_obs` / `df_resid` / `df_model` / `cov_type` / `f_statistic` / `f_p_value` | `t_stats`ではなく**`stats`**という分布非依存の名前にする（Issue #159で確定）。1つの`IvResult`型を2SLS（t分布）・GMM（z分布、3章参照）の両方が共有するため、`OLSResult.t_stats`/`LogitResult.z_stats`のような分布固定の名前は使えない。`engine::inference::InferenceStat`が同じ理由で`stat`という分布非依存の名前を使っている前例に倣った。それ以外は共通（そのまま踏襲） |
 | `n_entities` | **含めない**（IVはパネル構造を前提としない） |
 | `log_likelihood` / `aic` / `bic` | **除外する**。2SLS/GMMは尤度ベースの推定法ではなく
   （Stataの`ivregress`もデフォルトでは出力しない）、正規性を仮定した疑似尤度を計算して
@@ -110,6 +113,12 @@ FE/RE共通の設計は[`panel-api-design.md`](./panel-api-design.md)を参照�
   t分布としての正当化がない（非線形モデル・MLE系のz分布判断と同じ理由）。
 - 2SLSとGMMの実装方針の違いと接続する決定であり、実装の詳細（GMM目的関数・
   重み行列の設計）は6章で確定する。
+- **未確定事項（Issue #159時点で追記）**: `linearmodels`・R `ivreg`（GMM未対応のため参考程度）が
+  実際にGMMをz分布で報告しているか、それともStataの`ivregress`のように既定でz分布・
+  `small`オプション指定時のみt分布に切り替える設計になっているかを、Issue #171
+  （tests/api_tests: linearmodels/ivregとの数値照合ベンチマーク作成）着手時にリファレンス
+  実装のソースを確認する。確認の結果、GMMにもt分布（またはオプションで切り替え可能）に
+  すべきと判断した場合は、別issueを切ってオプション追加を検討する（ユーザー確認済み）。
 
 ## 4. 内部実装・共通化（確定）
 

@@ -3,7 +3,7 @@
 
 Logit/Probitの主リファレンスとして使用する。`benchmark/linear/
 run_statsmodels_benchmark.py`（OLS/WLS用）と同型の設計。元々Logit専用だったが、
-Probit追加（Issue #84）にあたり`--model logit`/`--model probit`で切り替えられる
+Probit追加にあたり`--model logit`/`--model probit`で切り替えられる
 よう一般化した（`--weight-col`でOLS/WLSを切り替える`linear`系統の設計と同じ発想。
 `smf.logit`/`smf.probit`のAPI形状が完全に同じで、下記の各種既知の欠落・回避策も
 両モデルで同一のため、一般化の実装コストが小さいことをベンチマーク作成時に

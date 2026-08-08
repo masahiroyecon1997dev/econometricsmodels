@@ -51,7 +51,7 @@ pub(crate) fn mat_to_nested_vec(mat: &faer::Mat<f64>) -> Vec<Vec<f64>> {
 ///
 /// 元々`logit.rs`にLogit専用として定義していたが、`engine::nonlinear::common::
 /// MarginalEffects`がLogit/Probitで既に共有されているのに合わせ、こちらも
-/// `<系統>/common.rs`に移動した（`rust-style.md`「ファイル・ディレクトリ構成」、Issue #83）。
+/// `<系統>/common.rs`に移動した（`rust-style.md`「ファイル・ディレクトリ構成」参照）。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct MarginalEffectsResult {

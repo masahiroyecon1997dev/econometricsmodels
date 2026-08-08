@@ -40,7 +40,7 @@ from run_statsmodels_benchmark import DATA_DIR, run  # noqa: E402
 # 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md「テストの3系統」参照）。
 # ComputationErrorが発生することのみをテストコード側で対応する。scale_varianceは
 # 傾き係数の同時共分散部分行列がスケール比の2乗相当の条件数を持ち倍精度の限界を
-# 超えるため、wald_f_test側で全cov_typeでComputationErrorになる（Issue #107）。
+# 超えるため、wald_f_test側で全cov_typeでComputationErrorになる。
 NUMERIC_SCENARIOS = [
     "baseline",
     "small_n",
@@ -49,7 +49,7 @@ NUMERIC_SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "high_condition_number",
-    # n=k+1（自由度1ちょうど）の成功パス（Issue #101）。baselineをn=5,k=3で
+    # n=k+1（自由度1ちょうど）の成功パス。baselineをn=5,k=3で
     # オーバーライドした専用データ（engine側の`k`は定数項込みでk=4になる
     # ため、df_resid=1にはn=5が必要。freeze_datasets.py参照）。同じx1..x3の
     # 列構成のため、他シナリオと同じ自動フォーミュラ生成に乗る。
@@ -77,14 +77,14 @@ def build_fixtures() -> dict:
 
         # クラスターロバストSEは、シナリオ依存ではなくグルーピングの動作確認が目的のため、
         # baselineシナリオでのみ、複数のグルーピングパターンで確認する
-        # （testing-policy.md「テスト用データセット」3.、Issue #100）。
+        # （testing-policy.md「テスト用データセット」3.）。
         # 実際のクラスター構造を統計的に検証するものではない。
         if scenario == "baseline":
             n = pl.read_csv(DATA_DIR / "synthetic_baseline.csv").height
             fixtures[scenario]["cluster"] = _run_cluster_case()
             fixtures[scenario]["cluster_imbalanced"] = _run_cluster_case(
                 groups=imbalanced_cluster_groups(n),
-                note="不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。Issue #100。",
+                note="不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。",
             )
             # G=2×説明変数3個（既定のbaseline）はロバストWald検定の共分散
             # 部分行列（3x3）のランクがG=2以下になり必然的に特異になるため
@@ -95,7 +95,7 @@ def build_fixtures() -> dict:
             fixtures[scenario]["cluster_g2"] = _run_cluster_case(
                 groups=[str(i % 2) for i in range(n_g2)],
                 note="クラスタ数境界（G=2ちょうど）の成功パス確認用。"
-                "説明変数1個（q=1）に絞っている（Issue #100、"
+                "説明変数1個（q=1）に絞っている（"
                 "3個だとロバストWald検定の共分散行列が特異になりComputationError）。",
                 k1=True,
             )
@@ -109,7 +109,7 @@ def build_fixtures() -> dict:
             "perfect_multicollinearity・scale_varianceシナリオはここに含まない"
             "（いずれもComputationErrorの発生確認のみ、テストコード側で対応。"
             "scale_varianceは傾き係数の同時共分散部分行列の条件数が倍精度の"
-            "限界を超えるため全cov_typeでComputationErrorになる、Issue #107）。"
+            "限界を超えるため全cov_typeでComputationErrorになる）。"
             "クロスチェック用のRベンチマークは別途 "
             "benchmark/linear/run_lm_crosscheck_benchmark.R で生成する。"
         ),

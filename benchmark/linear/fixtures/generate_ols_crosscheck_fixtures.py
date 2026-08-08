@@ -17,7 +17,7 @@ pyfixestのHC2/HC3はfixestの仕様ではなく**pyfixest自身の実装バグ*
 classical/HC0-3/clusterはRとほぼ機械精度で一致するため厳密比較、HACのみ小標本補正の
 慣習差により緩い許容誤差で比較する（`tests/api_tests/test_ols_crosscheck.py`参照）。
 
-`predict()`（`docs/spec/ols-spec.md`「predict()」、Issue #86）も対象に含める。
+`predict()`（`docs/spec/ols-spec.md`「predict()」）も対象に含める。
 `run_lm_predict_crosscheck.R`を使い、全シナリオで学習データに対する予測値（fitted）を、
 baselineシナリオのみ新規データに対する予測値（predicted、`PREDICT_NEW_DATA`参照）を
 crosscheckする。
@@ -73,7 +73,7 @@ LINEAR_DIR = Path(__file__).resolve().parent.parent
 R_SCRIPT = LINEAR_DIR / "run_lm_crosscheck_benchmark.R"
 PREDICT_R_SCRIPT = LINEAR_DIR / "run_lm_predict_crosscheck.R"
 
-# fitted_values/predict()（Issue #86）のout-of-sample crosscheck用の新規データ
+# fitted_values/predict()のout-of-sample crosscheck用の新規データ
 # （baselineシナリオのみ）。学習データの実現値とは無関係に、x1/x2/x3の値域内で
 # 手で選んだ値。predict(new_data)の列名マッチング（列順は問わない）も合わせて
 # 確認するため、Python側テストではx3/x1/x2の順に並べ替えて渡す想定。
@@ -84,7 +84,7 @@ PREDICT_NEW_DATA = {
 }
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（generate_ols_fixtures.pyと
-# 同じ方針。scale_varianceは全cov_typeでComputationErrorになる、Issue #107）。
+# 同じ方針。scale_varianceは全cov_typeでComputationErrorになる）。
 NUMERIC_SCENARIOS = [
     "baseline",
     "small_n",
@@ -93,7 +93,7 @@ NUMERIC_SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "high_condition_number",
-    # n=k+1（自由度1ちょうど）の成功パス（Issue #101）。
+    # n=k+1（自由度1ちょうど）の成功パス。
     "baseline_df1",
 ]
 
@@ -193,7 +193,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
 
             fixtures[scenario][cov_type] = entry
 
-        # fitted_values/predict()（Issue #86）。全シナリオで学習データに対する
+        # fitted_values/predict()。全シナリオで学習データに対する
         # 予測値（fitted）をcrosscheckし、baselineシナリオのみout-of-sample予測値
         # （predicted）も合わせて確認する。
         if scenario == "baseline":
@@ -296,7 +296,7 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
 
 def _run_wage1_region_cluster_case(df, csv_path: Path, formula: str) -> dict:
     """wage1の地域ダミー（northcen/south/west）から実カテゴリ列regionを作り、
-    クラスターロバストSEをRクロスチェックする（Issue #100「実データでのグループ列」）。
+    クラスターロバストSEをRクロスチェックする（「実データでのグループ列」）。
     いずれのダミーも0の行を基準カテゴリ"northeast"とする（4グループ、不均衡サイズ）。
     """
     region = (
@@ -349,12 +349,11 @@ def build_fixtures() -> dict:
             "clusterはbaselineシナリオのみ、R側のみ確認。均等疑似グループ（行番号%10）"
             "に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2"
             "（cluster_g2）、wage1の実カテゴリ列region（northcen/south/west"
-            "ダミーから合成、基準カテゴリnortheast）を含む（Issue #100）。"
+            "ダミーから合成、基準カテゴリnortheast）を含む。"
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
             "pyfixestとの比較は正確性検証から除外（性能比較専用）。"
-            "high_condition_number/baseline_df1は境界値・悪条件ケース"
-            "（Issue #101）。scale_variance（Issue #101で追加、#107で発覚）は"
-            "ここに含まない。傾き係数の同時共分散部分行列の条件数が倍精度の"
+            "high_condition_number/baseline_df1は境界値・悪条件ケース。"
+            "scale_varianceはここに含まない。傾き係数の同時共分散部分行列の条件数が倍精度の"
             "限界を超え、本実装・RのSolve()の双方が全cov_typeで計算不能"
             "（エラー）になるため（perfect_multicollinearityと同様、"
             "ComputationErrorの発生確認のみテストコード側で対応）。"

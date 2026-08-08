@@ -45,7 +45,7 @@ jobs:
 
       # workspace全体のCargo.lock（engine + engine_pybind）を対象にRustSecアドバイザリDBと
       # 突き合わせる。engine_pybind側の依存もここでカバーする
-      # （役割分担はIssue #23で決定。ci_python.ymlのpip-auditはPython依存＝uv.lock専用）。
+      # （ci_python.ymlのpip-auditはPython依存＝uv.lock専用）。
       #
       # rustsec/audit-checkアクションは不採用: `cargo audit --json`の出力をアクション内で
       # JSON.parse()しており、出力にANSI制御文字等が混ざると

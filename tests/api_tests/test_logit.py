@@ -1,6 +1,6 @@
 """Logit python_packageラッパーの構造・API・エラーパスのスモークテスト。
 
-主リファレンス（statsmodels）との厳密な数値比較はIssue #68で別途実施する
+主リファレンス（statsmodels）との厳密な数値比較は別途実施する
 （`test_ols_fixtures.py`/`test_wls_fixtures.py`と同じ役割分担）。ここでは
 `fit()`の成功パス・`coef_table()`/`predict()`/`pred_table()`/
 `marginal_effects()`の構造・`ValidationError`/`ComputationError`パスのみを
@@ -262,7 +262,7 @@ def test_unknown_method_raises(binary_dataset):
 @pytest.mark.parametrize("tol", [0.0, -1.0])
 def test_non_positive_tol_raises(binary_dataset, tol):
     """`tol<=0`は勾配ノルム基準の収束条件が理論上満たされないため`ValidationError`
-    （engine側の`MleError::InvalidTol`。Issue #118）。
+    （engine側の`MleError::InvalidTol`）。
     """
     with pytest.raises(ValidationError):
         Logit(
@@ -276,7 +276,7 @@ def test_non_positive_tol_raises(binary_dataset, tol):
 @pytest.mark.parametrize("bad_value", [0.5, 2.0, -1.0])
 def test_non_binary_y_raises(binary_dataset, bad_value):
     """`y`が`{0.0, 1.0}`以外の値を含む場合は`ValidationError`
-    （engine側の`MleError::InvalidBinaryY`。Issue #135）。
+    （engine側の`MleError::InvalidBinaryY`）。
     """
     df = binary_dataset.with_columns(binary_dataset["y"].scatter(0, bad_value))
     with pytest.raises(ValidationError):
@@ -308,13 +308,12 @@ def test_non_convergence_raises_computation_error_with_tiny_max_iter(
     """`max_iter`を人為的に1に絞ると`raise_on_non_convergence=True`（既定）で
     `ComputationError`（engine側の`NonConvergence`）。
 
-    完全分離等の病理的なデータは、Issue #138の対応により`NonConvergence`では
-    なく専用の`SeparationSuspected`（`ComputationError`のサブタイプ、
+    完全分離等の病理的なデータは`NonConvergence`ではなく専用の
+    `SeparationSuspected`（`ComputationError`のサブタイプ、
     `test_separation_suspected_raises_computation_error_for_near_separation_data`
     参照）を返すため、`NonConvergence`自体の発生確認には使えない。そのため
     `NonConvergence`の発生確認は、専用データセットに頼らずmax_iterを
-    人為的に小さくする方法で行う（Issue #68のtol妥当性検証中に判明した経緯は
-    `docs/planning/specs/logit-implementation-notes.md`参照）。
+    人為的に小さくする方法で行う（`docs/spec/logit-spec.md`参照）。
     """
     with pytest.raises(ComputationError):
         Logit(
@@ -331,7 +330,7 @@ def test_separation_suspected_raises_computation_error_for_near_separation_data(
     `SeparationSuspected`）。
 
     勾配ノルム基準の収束判定が浮動小数点アンダーフローにより誤って「収束済み」と
-    判定してしまう問題（Issue #138）が、Python API境界を通しても正しく検出され
+    判定してしまう問題が、Python API境界を通しても正しく検出され
     エラーになることを確認する（`engine`側のRust単体テスト
     `fit_returns_separation_suspected_error_for_near_separation_data`
     のAPIレベル版）。

@@ -1,8 +1,8 @@
 # python_package/econometricsmodels/nonlinear/ 実装ノート（Logit/Probit）
 
-このファイルは `python_package/econometricsmodels/nonlinear/` 配下のファイルを読み書きするときだけ自動ロードされる。詳細は`docs/planning/specs/nonlinear-api-design.md`6章・`logit-implementation-notes.md`・`probit-implementation-notes.md`が正本。
+このファイルは `python_package/econometricsmodels/nonlinear/` 配下のファイルを読み書きするときだけ自動ロードされる。詳細は`docs/planning/specs/nonlinear-api-design.md`6章・`docs/spec/logit-spec.md`・`docs/spec/probit-spec.md`が正本。
 
-`probit.py`は`logit.py`と完全に同型のパターン（`Probit`/`ProbitResults`、フィールド・メソッド構成も同一。`z_stat`ベースの検定等、下記の各節はLogit/Probit共通で成り立つ。Issue #83）。
+`probit.py`は`logit.py`と完全に同型のパターン（`Probit`/`ProbitResults`、フィールド・メソッド構成も同一。`z_stat`ベースの検定等、下記の各節はLogit/Probit共通で成り立つ）。
 
 ## 確定済みのスコープ（再提案しない）
 
@@ -21,8 +21,8 @@
 ## `marginal_effects()`/`pred_table()`のキー命名（混同注意）
 
 - `marginal_effects()`の行指向キー（`param`/`dydx`/`std_err`/`z`/`p_value`/`conf_low`/`conf_high`）は`nonlinear-api-design.md`6章で確定済みの命名をそのまま使う。`coef_table()`の`conf_lower`/`conf_upper`とは**意図的に異なる**（statsmodelsの`get_margeff().summary_frame()`のカラム名に近い形を踏襲したもので、表記揺れではない）。
-- `pred_table()`の返り値形状（`[{"actual": 0, "predicted_0": .., "predicted_1": ..}, {"actual": 1, ...}]`という行指向`list[dict]`）は仕様書に明記が無く、`coef_table()`/`predict()`との一貫性（このプロジェクトの行指向`list[dict]`慣習）を優先した実装時の判断（ユーザー確認済み、Issue #67）。`_lib.LogitResult.pred_table()`自体は`Vec<Vec<f64>>`（`table[actual][predicted]`の2×2）を返すだけで、ラベル付けはこのモジュール側の責務。
+- `pred_table()`の返り値形状（`[{"actual": 0, "predicted_0": .., "predicted_1": ..}, {"actual": 1, ...}]`という行指向`list[dict]`）は仕様書に明記が無く、`coef_table()`/`predict()`との一貫性（このプロジェクトの行指向`list[dict]`慣習）を優先した実装時の判断（ユーザー確認済み）。`_lib.LogitResult.pred_table()`自体は`Vec<Vec<f64>>`（`table[actual][predicted]`の2×2）を返すだけで、ラベル付けはこのモジュール側の責務。
 
 ## テスト
 
-`tests/api_tests/test_logit.py`/`test_probit.py`は構造・API・エラーパスのスモークテストのみ（Logit: Issue #67、Probit: Issue #83で追加、`test_probit.py`は`test_logit.py`と同型）。statsmodels/R glmとの厳密な数値比較は`test_logit_fixtures.py`/`test_logit_crosscheck.py`（Issue #68）、Probit側は`docs/planning/specs/probit-implementation-notes.md`参照（Issue #84で実施予定）で行う（OLSの`test_ols_fixtures.py`/`test_ols_crosscheck.py`と同じ役割分担）。
+`tests/api_tests/test_logit.py`/`test_probit.py`は構造・API・エラーパスのスモークテストのみ（`test_probit.py`は`test_logit.py`と同型）。statsmodels/R glmとの厳密な数値比較は`test_logit_fixtures.py`/`test_logit_crosscheck.py`、Probit側は`test_probit_fixtures.py`/`test_probit_crosscheck.py`で行う（OLSの`test_ols_fixtures.py`/`test_ols_crosscheck.py`と同じ役割分担）。

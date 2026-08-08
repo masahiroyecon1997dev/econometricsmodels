@@ -249,7 +249,7 @@ pub struct LogitProblem {
 impl LogitProblem {
     /// `input`の`x`・`y`をそのまま（未標準化のスケールで）複製して構築する。
     /// 閉じた形の解と突き合わせる単体テスト専用（`LogitEstimator::fit`は標準化後の
-    /// 設計行列を使うため、こちらではなく`from_standardized`を使う。Issue #118、
+    /// 設計行列を使うため、こちらではなく`from_standardized`を使う。
     /// 構築経路を2種類の明示的なコンストラクタに統一）。
     #[cfg(test)]
     fn new(input: &LogitInput) -> Self {
@@ -260,7 +260,7 @@ impl LogitProblem {
     }
 
     /// `standardize_columns`で標準化済みの設計行列`x_std`と`y`から構築する。
-    /// `LogitEstimator::fit`が最適化・収束点でのスコア評価に使う経路（Issue #118、
+    /// `LogitEstimator::fit`が最適化・収束点でのスコア評価に使う経路（
     /// フィールドリテラルでの直接構築を避け、両方の構築経路を明示的なコンストラクタに
     /// 統一する）。
     fn from_standardized(x_std: Mat<f64>, y: Mat<f64>) -> Self {
@@ -357,8 +357,8 @@ pub struct LogitEstimator {
     params: Vec<f64>,
     /// 係数の分散共分散行列（元のスケール、k×k）。`fit`に渡した`cov_type`に応じて
     /// 観測情報行列（`Classical`）・OPG（`Opg`）・サンドイッチ型（`Hc0`/`Hc1`）の
-    /// いずれかで計算される。限界効果（デルタ法、`logit-probit-issue-breakdown.md`の
-    /// B9）で再利用するため、対角成分（`std_errors`）だけでなく行列そのものを保持する。
+    /// いずれかで計算される。限界効果（デルタ法）で再利用するため、対角成分
+    /// （`std_errors`）だけでなく行列そのものを保持する。
     cov_params: Mat<f64>,
     /// 標準誤差（k, 元のスケール）。`cov_params`の対角成分の平方根
     std_errors: Vec<f64>,
@@ -493,7 +493,7 @@ impl LogitEstimator {
         // `k == 0`（`include_intercept=false`かつ説明変数も無い病的な入力）は`n<=k`単体では
         // 弾けない（実データでは`n>=1`のため）。この経路を通すと後段の`cov_params`計算
         // （0×0行列に対する`ensure_well_conditioned_symmetric_matrix`）で`faer`がpanicする
-        // ことが判明していたため、ここで明示的に弾く（Issue #130の根本原因、Issue #118で対応）。
+        // ことが判明していたため、ここで明示的に弾く（修正済み）。
         // `n<=k`（観測数不足）とは原因が異なる不正のため、`InsufficientObservations`とは
         // 別バリアント`NoRegressors`で表現する（`k=0`だと`n>k`は常に成立するため、
         // `InsufficientObservations`のメッセージを流用すると「条件を満たしているのに
@@ -777,7 +777,7 @@ impl LogitEstimator {
     /// （`overall_w_and_s`/`at_point_w_and_s`が`(w,s)`を計算し、`w`・`s`の計算方法に
     /// 依らない残りの計算——ヤコビアン・デルタ法標準誤差・定数項の除外——は
     /// `nonlinear/common.rs`の`marginal_effects_from_w_s`に共通化されている
-    /// （Probitでも同型の式になることを確認済み、Issue #78）。
+    /// （Probitでも同型の式になることを確認済み）。
     ///
     /// 変数`j`の分散は`Var(g_j) = jac_j · Σ · jac_jᵀ`（`jac_j`はヤコビアンの`j`行目、
     /// `Σ=cov_params`）。標準誤差はこの平方根、検定分布は標準正規分布
@@ -836,9 +836,9 @@ impl LogitEstimator {
     /// 列=予測クラス）。`predict()`が返す予測確率のみを`threshold`で二値化し、実測`y`は
     /// `threshold`に関わらず常に`0.5`で二値化する。数式・statsmodelsとの整合性の詳細は
     /// `nonlinear/common.rs`の`pred_table`のdocコメント参照（リンク関数に依存しない計算
-    /// のため`common.rs`に共通化されている、Issue #79）。
+    /// のため`common.rs`に共通化されている）。
     ///
-    /// **新規データでの的中表（out-of-sample）は未対応**（Issue #63のスコープ外、
+    /// **新規データでの的中表（out-of-sample）は未対応**（スコープ外、
     /// 別issueでトラッキング。ユーザー確認済み）。
     pub fn pred_table(&self, threshold: f64) -> Mat<f64> {
         pred_table(&self.predict(), self.input.y(), threshold)
@@ -1774,7 +1774,7 @@ mod tests {
     }
 
     /// `newton`と同じデータセット（既知の解析解を持つ切片のみモデル）で`bfgs`/`lbfgs`を
-    /// 実行し、いずれも同じ解析解へ収束することを検証する（Issue #57完了条件）。
+    /// 実行し、いずれも同じ解析解へ収束することを検証する。
     #[test]
     fn fit_bfgs_and_lbfgs_converge_to_same_solution_as_newton() {
         let y_bar: f64 = 4.0 / 7.0;
@@ -1934,8 +1934,8 @@ mod tests {
         // 以前はこの経路が`fit()`冒頭の`n<=k`チェック（n>=1なら常に通過してしまう）を
         // すり抜け、後段の`cov_params`計算（0×0行列に対する
         // `ensure_well_conditioned_symmetric_matrix`）で`faer`がpanicしていた
-        // （Issue #130）。`k==0`を明示的に検証することでグレースフルなエラーに
-        // なることを確認する（Issue #118でIssue #130を解消）。`n<=k`（観測数不足）とは
+        // すり抜けていた。`k==0`を明示的に検証することでグレースフルなエラーに
+        // なることを確認する。`n<=k`（観測数不足）とは
         // 別の不正のため、`InsufficientObservations`ではなく専用の`NoRegressors`を返す
         // （`k=0`だと`n>k`は常に成立してしまい、`InsufficientObservations`のメッセージ
         // だと「条件を満たしているのにエラーになる」という誤解を招くため。
@@ -1979,7 +1979,7 @@ mod tests {
     fn fit_returns_invalid_binary_y_error_for_non_binary_values() {
         // 0.5（連続値）・2.0（0/1ではない2値）・statsmodelsなら許容する単位区間内の
         // 中間値も含め、{0.0, 1.0}の完全一致以外は全て弾かれることを確認する
-        // （Issue #135、statsmodelsより厳格な`{0.0, 1.0}`のみ許容という設計判断、
+        // （statsmodelsより厳格な`{0.0, 1.0}`のみ許容という設計判断、
         // ユーザー確認済み）。
         for (bad_value, bad_row) in [(0.5, 1), (2.0, 2)] {
             let mut y = vec![0.0, 1.0, 0.0, 1.0];
@@ -2047,13 +2047,13 @@ mod tests {
     }
 
     /// 同じ完全な多重共線性のデータセットを`bfgs`/`lbfgs`で最適化した場合の
-    /// `SingularHessian`伝播経路（Issue #129）: `newton`は`newton_step`内の特異性検出
+    /// `SingularHessian`伝播経路: `newton`は`newton_step`内の特異性検出
     /// （最適化のステップ計算中）で検出するが、`bfgs`/`lbfgs`は`newton_step`を
     /// 一切経由しない（準ニュートン法は内部の近似逆Hessianで降下方向を決めるため、
     /// モデルの解析的Hessianの特異性に依存しない）。この場合、収束後に
     /// `observed_information_cov_params`（`neg_hessian_inverse`）が呼ぶ
     /// `ensure_well_conditioned_symmetric_matrix`（固有値ベースの悪条件検出）が、
-    /// `bfgs`/`lbfgs`にとって唯一の特異性検出経路になる。修正前（Issue #129発覚時点）
+    /// `bfgs`/`lbfgs`にとって唯一の特異性検出経路になる。修正前（発覚時点）
     /// はこのテストは失敗していた（非ピボットCholeskyが特異性を検出できず、
     /// 桁違いに巨大な値を含む`Ok`が返っていた）。両方のソルバーで同じコードパスを
     /// 通ることをそれぞれ独立に確認する。
@@ -2086,7 +2086,7 @@ mod tests {
 
     /// `sandwich_cov_params`（`cov_type=Hc0`/`Hc1`）も内部で`neg_hessian_inverse`を
     /// 呼ぶため、`Classical`と同じ完全な多重共線性のデータセットで`SingularHessian`に
-    /// なるはずだが、Issue #64（カバレッジ確認）時点ではこの伝播経路
+    /// なるはずだが、カバレッジ確認時点ではこの伝播経路
     /// （`fit()`の`CovType::Hc0`/`Hc1`分岐の`?`）を通るテストが無かった
     /// （`cargo-llvm-cov`で判明）。`Opg`/`Cluster`分岐は既存の`fit_cov_type_*`系
     /// テストが特異でないデータセットでの成功パスのみ検証しているのと対照的に、
@@ -2227,7 +2227,7 @@ mod tests {
 
     /// 准完全分離データ（`x1`の真の係数を極端に大きくし、ほぼ全観測がx1の符号だけで
     /// 完全に分類できるようにしたDGP）で、勾配ノルム基準では収束済みと誤判定されず
-    /// `SeparationSuspected`を返すことを確認する（Issue #138）。
+    /// `SeparationSuspected`を返すことを確認する。
     ///
     /// 疑似乱数生成は`benchmark/nonlinear/generate_logit_datasets.py`の
     /// `_NEAR_SEPARATION_BETA1`と同じ設計思想（真のlogit DGPで生成）だが、
@@ -2312,8 +2312,8 @@ mod tests {
 
     /// `beta1=20`（`SeparationSuspected`を誤検知させてはいけない境界ケース、`tests/
     /// api_tests/fixtures/benchmarks/data/logit_near_separation.csv`と同じ設計思想）で
-    /// 3手法とも正常に収束することを固定するリグレッションテスト（rust-reviewer指摘、
-    /// Issue #138）。`SEPARATION_PARAM_NORM_THRESHOLD`を将来変更する際にこのテストが
+    /// 3手法とも正常に収束することを固定するリグレッションテスト（rust-reviewer指摘）。
+    /// `SEPARATION_PARAM_NORM_THRESHOLD`を将来変更する際にこのテストが
     /// 壊れないか確認することで、閾値の調整が既存の合格ケースを誤検知させないことを保証する。
     #[test]
     fn fit_converges_normally_for_mild_near_separation_data_across_all_methods() {

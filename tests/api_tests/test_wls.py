@@ -1,7 +1,7 @@
 """WLS python_packageラッパーの統合テスト。
 
 構造・API・エラーパスの検証、および**OLSとの不変条件回帰テスト**
-（Issue #44）を行う。主リファレンス（statsmodels）・独立実装（R）との
+を行う。主リファレンス（statsmodels）・独立実装（R）との
 数値比較は`test_wls_fixtures.py`・`test_wls_crosscheck.py`で行う。
 
 役割分担はOLSの`test_ols.py`と同じ3分割:
@@ -27,7 +27,7 @@ from econometricsmodels import (
 #
 # 「共通化・パフォーマンス改善で実装の中身が変わっても結果が変わらない」ことを
 # 保証する目的のテスト。内部実装（sqrt(w)変換方式か将来別方式に変わるか等）が
-# 変わっても壊れないよう、public API経由でのみ比較する（Issue #44）。
+# 変わっても壊れないよう、public API経由でのみ比較する。
 
 
 @pytest.mark.parametrize(

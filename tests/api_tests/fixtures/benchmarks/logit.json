@@ -3440,6 +3440,6 @@
     "generated_at": "2026-08-01T06:42:53.549004+00:00",
     "primary_reference": "statsmodels",
     "statsmodels_version": "0.14.6",
-    "note": "perfect_multicollinearityシナリオはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。cov_type='hc1'はstatsmodelsのdiscrete modelで未実装（HC0と同一値を返す）ため含まない。logit_crosscheck.json（R側）が主リファレンスを担う。cov_type='opg'の限界効果（margeff）はstatsmodels側では算出できないためnullになっている（run_statsmodels_benchmark.py参照）。near_separationはlogit特有の病理（準完全分離）の境界値ケース。完全分離下でのNonConvergence検出には既知の限界があり、専用シナリオは採用していない（docs/planning/specs/logit-implementation-notes.md参照）。scale_varianceは真のDGPを未スケーリングのXで計算した後に列のみをスケーリングする設計のため成功パス（generate_logit_datasets.py参照）。n=k+1（自由度1ちょうど）の境界値ケースはOLSと異なり非採用（n<=kではlogitのMLEが構造的にほぼ確実に完全分離を起こすため、意味のある成功パスにならない。logit-implementation-notes.md参照）。mrozのcluster（city列、都市部居住ダミー）は実データでのクラスターロバストSE確認用。"
+    "note": "perfect_multicollinearityシナリオはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。cov_type='hc1'はstatsmodelsのdiscrete modelで未実装（HC0と同一値を返す）ため含まない。logit_crosscheck.json（R側）が主リファレンスを担う。cov_type='opg'の限界効果（margeff）はstatsmodels側では算出できないためnullになっている（run_statsmodels_benchmark.py参照）。near_separationはlogit特有の病理（準完全分離）の境界値ケース。完全分離下でのNonConvergence検出には既知の限界があり、専用シナリオは採用していない（docs/spec/logit-spec.md参照）。scale_varianceは真のDGPを未スケーリングのXで計算した後に列のみをスケーリングする設計のため成功パス（generate_logit_datasets.py参照）。n=k+1（自由度1ちょうど）の境界値ケースはOLSと異なり非採用（n<=kではlogitのMLEが構造的にほぼ確実に完全分離を起こすため、意味のある成功パスにならない。docs/spec/logit-spec.md参照）。mrozのcluster（city列、都市部居住ダミー）は実データでのクラスターロバストSE確認用。"
   }
 }

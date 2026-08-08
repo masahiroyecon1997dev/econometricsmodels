@@ -51,7 +51,7 @@ SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "high_condition_number",
-    # n=k+1（自由度1ちょうど）の成功パス（Issue #106、OLSのIssue #101相当）。
+    # n=k+1（自由度1ちょうど）の成功パス（OLSの同種ケース相当）。
     "baseline_df1",
 ]
 COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
@@ -148,7 +148,7 @@ def test_cluster_matches_statsmodels(fixtures):
 
 
 def test_cluster_imbalanced_matches_statsmodels(fixtures):
-    """不均衡クラスタ（サイズ[2, 3, 5, 10, 30, 50]のタイル、Issue #106、OLSのIssue #100相当）。
+    """不均衡クラスタ（サイズ[2, 3, 5, 10, 30, 50]のタイル、OLSの同種ケース相当）。
 
     均等サイズの疑似グループ（行番号%10）だけでは見逃す、実務で起こりやすい
     グループサイズの偏りを持つケース（`testing-policy.md`「テスト用データセット」3.）。
@@ -167,7 +167,7 @@ def test_cluster_imbalanced_matches_statsmodels(fixtures):
 
 
 def test_cluster_g2_matches_statsmodels(fixtures):
-    """クラスタ数境界（G=2ちょうど）の成功パス（Issue #106、OLSのIssue #100相当）。
+    """クラスタ数境界（G=2ちょうど）の成功パス（OLSの同種ケース相当）。
 
     説明変数1個（q=1）に絞っている。baseline既定の3個のままG=2にすると、
     ロバストWald検定の共分散部分行列（3x3）のランクがG=2以下となり必然的に
@@ -191,7 +191,7 @@ def test_cluster_g2_matches_statsmodels(fixtures):
 def test_cluster_g2_with_multiple_slopes_raises_computation_error():
     """G=2×説明変数3個（傾き係数q=3）は、ロバストWald検定の共分散部分行列
     （3x3）のランクがクラスタ数G=2以下になり必然的に特異になるため、
-    fit()全体がComputationErrorになる（OLSと同じ挙動、Issue #106）。
+    fit()全体がComputationErrorになる（OLSと同じ挙動）。
     """
     from econometricsmodels import ComputationError
 
@@ -211,7 +211,7 @@ def test_cluster_g2_with_multiple_slopes_raises_computation_error():
 def test_perfect_multicollinearity_raises_computation_error():
     """完全な多重共線性は数値比較の対象外（`testing-policy.md`「テストの3系統」）。
     想定エラー（`ComputationError`）が発生することのみを確認する
-    （OLS・Logitと同じ凍結CSVパターンに統一、Issue #151）。
+    （OLS・Logitと同じ凍結CSVパターンに統一）。
     """
     from econometricsmodels import ComputationError
 
@@ -225,7 +225,7 @@ def test_scale_variance_raises_computation_error(cov_type):
     """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
     傾き係数の同時共分散部分行列がスケール比の2乗（≈1e18）相当の条件数を持ち
     倍精度浮動小数点の限界を超えて数値的に特異になる（OLSと同じ理由、
-    `test_ols_fixtures.py`参照。Issue #106でWLSでも実測確認済み）。
+    `test_ols_fixtures.py`参照。WLSでも実測確認済み）。
     数値比較はせずエラーパスのみ確認する。
     """
     from econometricsmodels import ComputationError

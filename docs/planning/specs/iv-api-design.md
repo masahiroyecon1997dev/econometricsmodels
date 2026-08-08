@@ -3,11 +3,11 @@
 [`panel-iv-design-points.md`](../panel-iv-design-points.md)の論点をモデルごとにIssue化したうちの、IV固有の確定事項をまとめる。
 FE/RE共通の設計は[`panel-api-design.md`](./panel-api-design.md)を参照。
 
-**ステータス**: 確定（1章: 引数設計、Issue #119／2章: 結果設計、Issue #120／3章: 標準誤差・検定、
-Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレンス実装・テスト方針、Issue #123／
-6章: IV固有論点、Issue #126）。IV側の論点はすべて確定。
+**ステータス**: 確定（1章: 引数設計／2章: 結果設計／3章: 標準誤差・検定／
+4章: 内部実装・共通化／5章: リファレンス実装・テスト方針／
+6章: IV固有論点）。IV側の論点はすべて確定。
 
-## 1. 引数設計（Issue #119、確定）
+## 1. 引数設計（確定）
 
 ### 1.1 `y` / `x_exog` / `x_endog` / `instruments` のシグネチャ
 
@@ -20,7 +20,7 @@ Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレン
   異なるため。`panel-api-design.md`の`entity`（FE/REで必須→独立引数）と同じ原則。
 - `x_exog`は空リストを許容する（内生変数のみのモデルも成立するため）。`x_endog`/
   `instruments`は最低1要素を要求する見込み（丁度識別・過剰識別の判定を含む具体的な
-  バリデーションルールはIssue #126で確定）。
+  バリデーションルールは確定）。
 - **命名規則**: bareネーミング（`_col`サフィックスなし）。`panel-api-design.md`の`entity`/
   `time`と同じ考え方（モデルを構成する中核的な変数）。
 
@@ -37,7 +37,7 @@ Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレン
   2. CLAUDE.md 2章の非交渉事項（formula不採用・プログラムから動的に組み立てやすいAPI）と
      整合する。`x_exog`を変更するたびに`instruments`側も手動で同期する重複入力は、
      プログラムからの動的構築とヒューマンエラー防止の両面で相性が悪い。
-  3. 過剰識別検定（Sargan/Hansen、Issue #126）の自由度が`len(instruments) - len(x_endog)`
+  3. 過剰識別検定（Sargan/Hansen）の自由度が`len(instruments) - len(x_endog)`
      とそのまま一致し、`x_exog`分を差し引く補正が不要になる。
 - **パラメータ名は`instruments`のまま維持する**（`excluded_instruments`等への改名はしない）。
   linearmodelsの命名を踏襲し、意味は本節にドキュメント化することで対応する。
@@ -48,13 +48,13 @@ Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレン
 ### 1.2 モデル固有オプションの置き場所
 
 `IvOptions`という独立の`#[pyclass]`構造体に含める（`OLSOptions`/`LogitOptions`の前例を踏襲）。
-2SLS/GMMの方式切り替え等、IV固有の詳細はIssue #126で確定。
+2SLS/GMMの方式切り替え等、IV固有の詳細は6章で確定。
 
 ### 1.3 `weights` / `offset` の扱い
 
 `panel-api-design.md`1.3と同じ（`offset`は該当なし、`weights`は汎用オプションとしては見送り）。
 
-## 2. 結果（Return）設計（Issue #120、確定）
+## 2. 結果（Return）設計（確定）
 
 ### 2.1 共通コア項目（`panel-api-design.md`2.1との差分）
 
@@ -72,7 +72,7 @@ Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレン
   維持する（IVはパネルのwithin/between区別を持たないため） |
 | `f_statistic` / `f_p_value` | **GMMは常にロバストWald検定（χ²）とする**。OLSが
   `cov_type`がHC系/clusterのとき`f_statistic`/`f_p_value`を古典的F検定からロバストWald検定に
-  切り替える既存挙動（`ols-api-design.md`6章）を、GMMにも一貫適用する。GMMはIssue #121で
+  切り替える既存挙動（`ols-api-design.md`6章）を、GMMにも一貫適用する。GMMは3章で
   z分布と決定済みで古典的F検定の正当化が無いため、フィールド名はそのまま流用しつつ常に
   Wald版にする（新規フィールドは追加しない）。2SLSはOLSと同じ切り替えロジック（classical時は
   F検定、HC/cluster/hac時はロバストWald検定）。 |
@@ -86,9 +86,9 @@ Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレン
   第一段階回帰（`x_endog[i] ~ x_exog + instruments`）が存在するため、変数名キーのdictで
   複数の完全な回帰結果を返す。
 - 弱操作変数診断（第一段階F統計量）・Sargan/Hansen J（過剰識別）・Wu-Hausman（内生性）は
-  いずれも`fit()`の結果本体に含める（別メソッド化しない）。詳細はIssue #126（6章）で確定。
+  いずれも`fit()`の結果本体に含める（別メソッド化しない）。詳細は6章で確定。
 
-## 3. 標準誤差・検定（Issue #121、確定）
+## 3. 標準誤差・検定（確定）
 
 ### 3.1 `cov_type`のサポート対象
 
@@ -108,10 +108,10 @@ Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレン
 - **2SLS**: t分布（OLS系、`panel-api-design.md`3.3と同じ理由）。自由度は`df_resid`を使う。
 - **GMM**: z分布。2-step efficient GMMはM推定量としての漸近正規性が根拠であり、有限標本の
   t分布としての正当化がない（非線形モデル・MLE系のz分布判断と同じ理由）。
-- Issue #126（2SLSとGMMの実装方針の違い）と接続する決定であり、実装の詳細（GMM目的関数・
-  重み行列の設計）は同Issueで確定する。
+- 2SLSとGMMの実装方針の違いと接続する決定であり、実装の詳細（GMM目的関数・
+  重み行列の設計）は6章で確定する。
 
-## 4. 内部実装・共通化（Issue #122、確定）
+## 4. 内部実装・共通化（確定）
 
 `panel-api-design.md`4章の方針をそのまま踏襲する。IV固有の追加点は以下。
 
@@ -123,16 +123,16 @@ Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレン
 - GMMが数値最適化を要する場合、`nonlinear/common.rs`の`run_solver`
   （Newton/BFGS/L-BFGS、`CostFunction`/`Gradient`/`Hessian`トレイトのみに依存するモデル
   非依存の設計）を転用できる可能性がある。効率的2-step GMMは閉形式で済むことが多いため
-  必須ではないが、選択肢として残す（詳細はIssue #126）。
+  必須ではないが、選択肢として残す（詳細は6章）。
 - **新規エラー型**: `LeastSquaresError`/`MleError`/`PanelError`（`panel-api-design.md`4.4）の
   前例に倣い、**`IvError`を2SLS/GMMで共有する**（`engine/src/iv/common.rs`に定義）。個別に
   `TwoSlsError`/`GmmError`を作らない。
 
-## 5. リファレンス実装・テスト方針（Issue #123、確定）
+## 5. リファレンス実装・テスト方針（確定）
 
 ### 5.1 Python主リファレンス
 
-**`linearmodels`を主リファレンスとする**（`IV2SLS`＝2SLS、`IVGMM`＝GMM）。Issue #126で
+**`linearmodels`を主リファレンスとする**（`IV2SLS`＝2SLS、`IVGMM`＝GMM）。6章で
 挙がっている診断（Sargan/Hansen J、first-stage F統計量、Wu-Hausman系）も概ね
 `linearmodels`でカバーできる見込み。
 
@@ -153,14 +153,14 @@ GMMは`ivreg`が対応していないため、**Python（`linearmodels`）のみ
 `panel-api-design.md`5.4と同じ（既存方針の相対誤差1e-8を基本、GMM等で乖離が大きい場合は
 実測値に基づき個別に緩和を検討）。
 
-## 6. IV固有論点（Issue #126、確定）
+## 6. IV固有論点（確定）
 
 `linearmodels`（`linearmodels/iv/model.py`・`results.py`）のソースコードを確認しながら
 確定した。
 
 ### 6.1 引数の切り分け
 
-Issue #119（1.1.1節）で確定済み。`x_exog`/`x_endog`/`instruments`をすべて独立引数化、
+1.1.1節で確定済み。`x_exog`/`x_endog`/`instruments`をすべて独立引数化、
 `instruments`は除外操作変数のみ。
 
 ### 6.2 2SLSとGMMの実装方針の違い
@@ -180,7 +180,7 @@ Issue #119（1.1.1節）で確定済み。`x_exog`/`x_endog`/`instruments`をす
   `linearmodels.IVGMM.fit(iter_limit=2, ...)`と同じ考え方。
 - **2SLSはGMMの特殊ケース（`weight_type="unadjusted"`、`gmm_iterations=1`）として実装できる**
   ことを踏まえ、共通のGMM推定コアを実装し、2SLSはそのコアを固定パラメータで呼び出す設計に
-  する。ただし無理な共通化はしない方針（Issue #122）に従い、実際にどこまで一体化できるかは
+  する。ただし無理な共通化はしない方針（4章）に従い、実際にどこまで一体化できるかは
   実装時に判断する（うまく一体化できない場合は2SLS側を素直に閉形式で実装してよい）。
 
 ### 6.3 丁度識別（just-identified）の場合の扱い
@@ -208,7 +208,7 @@ Issue #119（1.1.1節）で確定済み。`x_exog`/`x_endog`/`instruments`をす
 - **Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含める**（別メソッド化
   しない。OLS/REの適合度統計量と同じeager計算方針を踏襲。`linearmodels`は遅延プロパティだが
   本プロジェクトは一貫してeager計算とする）。
-- 自由度は`len(instruments) - len(x_endog)`（Issue #119で確定した`instruments`＝除外操作変数
+- 自由度は`len(instruments) - len(x_endog)`（1.1.1節で確定した`instruments`＝除外操作変数
   のみという定義とそのまま整合）。
 - **丁度識別（自由度0）の場合は`None`を返す**（`linearmodels`も`InvalidTestStatistic`相当の
   扱いをしている）。
@@ -230,4 +230,4 @@ Issue #119（1.1.1節）で確定済み。`x_exog`/`x_endog`/`instruments`をす
 - **GMM**: 6.2の`weight_type`とは独立に`cov_type`を選択できる。サポート対象は2SLSと同じ範囲を
   踏襲する。
 
-- IV固有論点（2SLS/GMM方式・丁度識別/過剰識別・弱操作変数診断・内生性検定等）: Issue #126
+- IV固有論点（2SLS/GMM方式・丁度識別/過剰識別・弱操作変数診断・内生性検定等）: 本章（6章）で確定。

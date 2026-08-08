@@ -4,7 +4,7 @@
 `tests/api_tests/fixtures/benchmarks/wls_crosscheck.json`
 （`benchmark/linear/fixtures/generate_wls_crosscheck_fixtures.py`で生成）
 を用いて、statsmodelsとは独立した実装（R）との一致を確認する。役割分担・
-pyfixest除外の理由は`test_ols_crosscheck.py`と同じ（Issue #27で確定済み）。
+pyfixest除外の理由は`test_ols_crosscheck.py`と同じ。
 
 classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相対誤差1e-13〜1e-15
 程度）ため`RTOL_STRICT`で厳密比較する。**HACのみOLSより乖離が大きく、実測で
@@ -119,7 +119,7 @@ SYNTHETIC_SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "high_condition_number",
-    # n=k+1（自由度1ちょうど）の成功パス（Issue #150、OLSのIssue #101相当）。
+    # n=k+1（自由度1ちょうど）の成功パス（OLSの同種ケース相当）。
     "baseline_df1",
 ]
 NON_HAC_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
@@ -163,8 +163,8 @@ def test_cluster_matches_r(crosscheck):
 
 
 def test_cluster_imbalanced_matches_r(crosscheck):
-    """不均衡クラスタ（サイズ[2, 3, 5, 10, 30, 50]のタイル、Issue #150、
-    OLSのIssue #100相当）。
+    """不均衡クラスタ（サイズ[2, 3, 5, 10, 30, 50]のタイル、
+    OLSの同種ケース相当）。
 
     均等サイズの疑似グループ（行番号%10）だけでは見逃す、実務で起こりやすい
     グループサイズの偏りを持つケース（`testing-policy.md`「テスト用データセット」3.）。
@@ -184,7 +184,7 @@ def test_cluster_imbalanced_matches_r(crosscheck):
 
 
 def test_cluster_g2_matches_r(crosscheck):
-    """クラスタ数境界（G=2ちょうど）の成功パス（Issue #150、OLSのIssue #100相当）。
+    """クラスタ数境界（G=2ちょうど）の成功パス（OLSの同種ケース相当）。
 
     説明変数1個（q=1）に絞っている。baseline既定の3個のままG=2にすると、
     ロバストWald検定の共分散部分行列（3x3）のランクがG=2以下となり必然的に

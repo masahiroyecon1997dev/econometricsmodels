@@ -40,8 +40,9 @@ econometricsmodels/
 ├── Cargo.toml                  # Workspaceルート
 ├── pyproject.toml              # maturinの設定（engine_pybindをビルド対象にする）
 │
-├── .devcontainer/               # Rust + Python 3.12 環境（中身は未確定、TBD）
+├── .devcontainer/               # Rust + Python 3.14 環境（詳細は10章）
 │   ├── devcontainer.json
+│   ├── docker-compose.yml
 │   └── Dockerfile
 │
 ├── engine/                       # 純粋Rustの計算心臓部（PyO3非依存）
@@ -55,7 +56,6 @@ econometricsmodels/
 │   └── py.typed
 │
 ├── tests/
-│   ├── engine_tests/             # cargo test（純粋ロジック）
 │   └── api_tests/                 # pytest（pyfixest / R実装との答え合わせ）
 │
 ├── benchmark/                     # テスト用データセット生成・リファレンス実装（pyfixest/R）でのベンチマーク値生成スクリプト
@@ -63,7 +63,7 @@ econometricsmodels/
 │
 ├── docs/                          # MkDocs（GitHub Pages公開）
 │   ├── mkdocs.yml
-│   └── planning/                  # plan.md・仕様書（詳細は10章）
+│   └── planning/                  # plan.md・仕様書（詳細は9章）
 │
 └── .github/workflows/
     ├── ci_engine.yml               # cargo test / clippy / fmt（engine/配下トリガー）
@@ -78,19 +78,7 @@ econometricsmodels/
 
 「基礎から積み上げる」順に段階実装する。**一度に全フェーズ／全手法を実装しない**。フェーズ・タスク単位に細分化して、1つずつ完了させてから次に進む。
 
-1. Phase 1（基礎回帰）: OLS, 区分回帰, WLS
-2. Phase 2（一般化・離散選択）: GLS, Logit, Probit, Tobit
-3. Phase 3（操作変数）: IV（2SLS, GMM）
-4. Phase 4（パネルデータ）: FE（固定効果）, RE（変量効果）
-5. Phase 5（因果推論）: DID, RDD
-6. Phase 6（IO手法）: ロジット, Nested Logit, Random Coefficient Logit, シングルエージェントモデル, 静学ゲーム, 動学ゲーム
-7. Phase 7（後回し・時系列）: ARCH, GARCH, VAR
-
-**現在のステータス: Phase 1のOLS・WLSが実装済み（マージ済み）。Logit・Probit実装済み。次はIV。**
-
-**直近の実装順序（Phase横断で決定済み）**: OLS → WLS → Logit → Probit → IV（2SLS/GMM） → Tobit → FE → RE → GLS。Phaseのグルーピング（上記1〜7）は分類上のものであり、実際の着手順序はこの直近の並びを優先する。
-
-（旧: 当初は「OLS → WLS → IV → Probit / Logit」の順で決定していたが、実際にはLogitをIVより先に実装した。その後さらに「Tobit → IV」から「IV → Tobit」に順序を入れ替えた。実態に合わせて上記の順序に更新済み。）
+フェーズ構成・手法の割り当ては `docs/plan.md` 4章を正本とする（このファイルには複製しない）。現在の実装状況・直近の着手順序はgit logおよびGitHub Issueを参照する。
 
 **新しい手法の実装に着手する前に**、既存の類似手法（系統内、無ければ直近で実装した手法）の実装を`Explore`エージェント（読み取り専用の探索用サブエージェント）で調査してから着手する。設計判断・実装パターンを毎回メインセッションでファイルを読み込んで再発見するコストを避けるため。調査結果は各系統のネストCLAUDE.md（1章参照）に集約されているため、まずそちらを確認し、記載が無い・古い場合にのみ既存コードの探索に切り替える。
 
@@ -106,24 +94,9 @@ econometricsmodels/
 
 ## 7. テスト方針
 
-詳細は `.claude/rules/testing-policy.md`（tests配下で自動ロード）を参照。要点: pyfixest/Rとの数値比較で検証、許容誤差は相対誤差1e-8を基本（手法により例外あり）、engine_tests/api_testsに分離。
+詳細は `.claude/rules/testing-policy.md`（tests配下で自動ロード）を参照。要点: pyfixest/Rとの数値比較で検証、許容誤差は相対誤差1e-8を基本（手法により例外あり）、engineの単体テストはソース内`mod tests`、`tests/api_tests`はpytestに分離。
 
-## 8. ビルド・テスト・Lintコマンド（想定。リポジトリ雛形作成後に確定）
-
-```bash
-# Rust側
-cargo test                # engine のユニットテスト
-cargo clippy --all-targets -- -D warnings
-cargo fmt --check
-
-# Python側（maturinでビルド後）
-maturin develop
-pytest tests/api_tests
-ruff check .
-ruff format --check .
-```
-
-## 9. バージョニング・CI/CD
+## 8. バージョニング・CI/CD
 
 - SemVer（`X.Y.Z`）。Z=バグ修正/性能改善、Y=機能追加、X=破壊的変更。
 - **例外**: `0.x.x`のプレリリース期間中は、`Y`の変更でも破壊的変更を許容する。
@@ -131,12 +104,12 @@ ruff format --check .
 - マルチプラットフォーム（Linux/macOS/Windows）向けwheelビルド・配布は`cd_release.yml`（maturin-action想定）。
 - mkdocsドキュメントは`cd_docs.yml`でGitHub Pagesに自動デプロイ。
 
-## 10. ドキュメント運用
+## 9. ドキュメント運用
 
 - **mkdocs** + **GitHub Pages**。GitHub Actionsでビルド・デプロイを自動化。
 - `plan.md`や仕様書などの内部ドキュメントも`docs/planning/`配下に格納する。mkdocsのnavには含めない（非公開ナビゲーション）が、リポジトリ自体がMITでpublicなため、**ソースとしては誰でも閲覧可能**という前提で運用する（ユーザー確認済み）。
 
-## 11. 開発環境
+## 10. 開発環境
 
 - `.devcontainer/`（`devcontainer.json` / `Dockerfile` / `docker-compose.yml`）で開発環境を統一。
 - ベースイメージ: `python:3.14-slim-bookworm`。Rust（stable、clippy/rustfmt/llvm-tools）、uv、R（fixest/plm/ivreg/jsonlite、`benchmark/`のベンチマーク生成用）を導入済み。
@@ -144,28 +117,26 @@ ruff format --check .
 - **トークン消費を抑えるための除外設定**: `.claude/settings.json`の`permissions.deny`/`ask`で、lockファイル・`target/`・`.venv/`・ベンチマークのフィクスチャJSON・GitHub Copilot用設定（`.github/agents/` `.github/instructions/`、メンテナンスが最新に追いついていない可能性があるため）等を除外している。
 - 詳細は`.claude/settings.json`を参照。
 
-## 12. 対象プラットフォーム・Pythonバージョン
+## 11. 対象プラットフォーム・Pythonバージョン
 
 - OS: Linux（manylinux）, macOS（Apple Silicon / Intel）, Windows
 - Python: **3.12以上**。CIでのビルド・テスト対象は **3.12 / 3.13 / 3.14** の3バージョン。開発環境（devcontainer）は3.14を使用。
 
-## 13. 今後の検討事項（未確定）
+## 12. 今後の検討事項（未確定）
 
 - IO手法（動学ゲーム等）で必要になる数値最適化ライブラリの選定（argmin, ipopt-rs等を比較検討予定。線形代数はfaerで決定済み、これは別途MLE等の数値最適化用）
 - 並列化クレート`rayon`の採用: 現時点では未導入。候補箇所・採用判断基準（実測してから決める方針）は`.claude/rules/rust-style.md`「パフォーマンス」節に記載済み。パフォーマンス検討時は都度この基準に照らして採用可否を判断する。
-- `estimator-scaffold`スキル（engine/engine_pybind/python_packageの配線パターンのテンプレート化）: 手法によって内部実装が大きく異なるため、OLS実装後に実コードから抽出する形で作成する。今は作らない。
-- `econometrics-notes`スキル（手法ごとの数式・実装ノウハウ資料）: 着手する手法ごとにその都度作成する。今は作らない。
+- 実装手法が増えてきた段階で、配線パターンのテンプレート化や手法ごとの実装ノウハウ資料化など、スキルとして切り出す余地がないか随時検討する。
 
-## 14. 関連ファイル
+## 13. 関連ファイル
 
-- 方針書: `docs/plan.md`（本リポジトリの正式な方針ドキュメント）
+- 方針書: `docs/plan.md`（本リポジトリの正式な方針ドキュメント。実装フェーズ・手法の割り当てもここが正本）
 - 仕様書: `docs/spec/`（実装済みの手法ごとの数式・API仕様の正本。method非依存のCI/CD・セキュリティ運用ノートも
   ここに置く、例: `ci-cd-notes.md`）、`docs/planning/specs/`（実装途中の手法の設計ノート・実装ノート）。
   ある手法の実装が完了したら、その手法の仕様書は`docs/planning/specs/`から`docs/spec/`へ集約する
-  （経緯は削除し理由のみ簡潔に記載、1ファイルにまとめる。Issue #141参照）。
-- Phase1 OLS/WLSのタスク: GitHub Issue群（クローズ済み）を参照
+  （経緯は削除し理由のみ簡潔に記載、1ファイルにまとめる）。
 
-## 15. 実装・テスト・ベンチマーク作成・仕様検討時の確認方針
+## 14. 実装・テスト・ベンチマーク作成・仕様検討時の確認方針
 
 - 実装・テストコード作成・ベンチマーク作成・仕様検討のいずれの段階でも、判断が分かれる点や設計上の選択肢に気づいたら、**独自判断で埋めずに先にユーザーへ確認する**。
 - 特に以下のような場面で確認が必要になりやすい。
@@ -174,12 +145,12 @@ ruff format --check .
   - 既存ドキュメント・issueの記述と、実装時に判明した事実が食い違う
 - 疑問点は着手前の計画段階でまとめて確認する。実装中に新たに判明した場合は、その都度確認してから進める（まとめて後から確認する方式は取らない）。
 
-## 16. コンテキスト管理
+## 15. コンテキスト管理
 
 - **セッション運用**: 異なる手法・異なるフェーズの作業は1つの長いセッションに混在させず、タスクの区切りで`/clear`する。
 - **compaction時に保持すべき情報**: 会話が要約される場合、少なくとも以下は要約後も残す。
   - 変更・作成したファイルの一覧
   - 直前に実行した、またはこれから実行する予定のテスト・Lintコマンドとその結果
-  - ユーザーとの間で未解決のまま残っている疑問点・確認待ちの判断（15章）
+  - ユーザーとの間で未解決のまま残っている疑問点・確認待ちの判断（14章）
 - **調査・大量ファイル読み込みを伴うタスク**（既存実装の調査、複数ファイルにまたがる横断検索等）は`Explore`エージェント等のサブエージェントに委譲し、メインセッションの文脈を汚さない（4章参照）。
 - **ベンチマーク/検証スクリプトの出力**: 標準出力には要約（pass/fail・主要指標の差分等）またはファイル書き出し完了メッセージのみを出し、生の実行結果（フルの回帰結果・データフレーム全体等）を垂れ流さない（既存の`benchmark/`配下のスクリプトは実装済み、新規追加時も踏襲する）。

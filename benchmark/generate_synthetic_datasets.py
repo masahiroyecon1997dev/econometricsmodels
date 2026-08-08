@@ -73,7 +73,7 @@ def generate_dataset(
         if k < 2:
             raise ValueError(f"{scenario} requires k >= 2")
         # x1とx2の相関: moderate=0.8程度、high_condition_number=0.999
-        # （特異ではないが条件数が非常に大きい設計行列、Issue #101）
+        # （特異ではないが条件数が非常に大きい設計行列）
         rho = 0.999 if scenario == "high_condition_number" else 0.8
         cov = np.eye(k)
         cov[0, 1] = cov[1, 0] = rho
@@ -92,7 +92,7 @@ def generate_dataset(
         if k < 2:
             raise ValueError("scale_variance requires k >= 2")
         # 変数間のスケールが極端に異なるケース（x1は10^6オーダー、
-        # x2は10^-3オーダー、Issue #101）。
+        # x2は10^-3オーダー）。
         X[:, 0] *= 1e6
         X[:, 1] *= 1e-3
 

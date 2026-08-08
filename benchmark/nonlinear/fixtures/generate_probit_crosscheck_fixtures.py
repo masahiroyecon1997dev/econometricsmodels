@@ -3,7 +3,7 @@ probit_crosscheck.json）を生成するスクリプト。
 
 `tests/api_tests/fixtures/benchmarks/probit.json`（statsmodels、主リファレンス）とは
 別に、独立実装（R: glm + sandwich/marginaleffects）によるクロスチェック値を生成する。
-`generate_logit_crosscheck_fixtures.py`と完全に同型の設計（Issue #84）。
+`generate_logit_crosscheck_fixtures.py`と完全に同型の設計。
 
 **`cov_type="hc1"`はここでは主リファレンスの役割を担う**（statsmodelsのdiscrete model
 がn/(n-k)小標本補正を実装しておらずHC0と同一値になるバグ的な欠落があるため、Probitでも

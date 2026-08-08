@@ -7,7 +7,7 @@
 以下は既にユーザー承認済みで見送りが確定している。「使いやすさ」目的で再提案しない（CLAUDE.md 2章の非交渉事項に準ずる運用）。
 
 - `summary()` / `conf_int()`のDataFrame版は実装しない。「薄いラッパー」というスコープを優先する。
-- **`predict()`は例外的に実装する**（Issue #86）。`fitted_values`という別名のプロパティは作らず、`predict(new_data=None)`の1メソッドに統一する。`new_data=None`（デフォルト）で学習データの予測値、指定時は新規データの予測値を返す。Logitの`predict()`（引数なしで学習データの予測確率を返す設計）と命名を揃えるための判断（`ols-spec.md`「predict()」参照）。WLSへの適用は別issue。
+- **`predict()`は例外的に実装する**。`fitted_values`という別名のプロパティは作らず、`predict(new_data=None)`の1メソッドに統一する。`new_data=None`（デフォルト）で学習データの予測値、指定時は新規データの予測値を返す。Logitの`predict()`（引数なしで学習データの予測確率を返す設計）と命名を揃えるための判断（`ols-spec.md`「predict()」参照）。WLSへの適用は別issue。
 - `OLSOptions`（`WLSOptions`も同様）は独自クラスとして再定義せず、`_lib`からそのまま再輸出する。
 - `params`/`std_errors`/`t_stats`/`p_values`は係数名→値の`dict[str, float]`（O(1)取り出し用）。行指向で欲しい場合は`coef_table()`（`list[dict]`、REST APIレスポンスにそのまま使える形）を使う。DataFrameには変換しない。
 - `residuals`はそのまま`list[float]`を素通しする（polars Seriesへの変換等はしない）。

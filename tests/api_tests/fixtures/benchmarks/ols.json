@@ -458,7 +458,7 @@
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
         "generated_at": "2026-07-25T08:19:29.969711+00:00",
-        "note": "不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。Issue #100。",
+        "note": "不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。",
         "formula": "y ~ x1 + x2 + x3"
       }
     },
@@ -475,7 +475,7 @@
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
         "generated_at": "2026-07-25T08:19:29.975220+00:00",
-        "note": "クラスタ数境界（G=2ちょうど）の成功パス確認用。説明変数1個（q=1）に絞っている（Issue #100、3個だとロバストWald検定の共分散行列が特異になりComputationError）。",
+        "note": "クラスタ数境界（G=2ちょうど）の成功パス確認用。説明変数1個（q=1）に絞っている（3個だとロバストWald検定の共分散行列が特異になりComputationError）。",
         "formula": "y ~ x1"
       }
     }
@@ -3439,6 +3439,6 @@
     "generated_at": "2026-07-25T08:19:30.287964+00:00",
     "primary_reference": "statsmodels",
     "statsmodels_version": "0.14.6",
-    "note": "perfect_multicollinearity・scale_varianceシナリオはここに含まない（いずれもComputationErrorの発生確認のみ、テストコード側で対応。scale_varianceは傾き係数の同時共分散部分行列の条件数が倍精度の限界を超えるため全cov_typeでComputationErrorになる、Issue #107）。クロスチェック用のRベンチマークは別途 benchmark/linear/run_lm_crosscheck_benchmark.R で生成する。"
+    "note": "perfect_multicollinearity・scale_varianceシナリオはここに含まない（いずれもComputationErrorの発生確認のみ、テストコード側で対応。scale_varianceは傾き係数の同時共分散部分行列の条件数が倍精度の限界を超えるため全cov_typeでComputationErrorになる）。クロスチェック用のRベンチマークは別途 benchmark/linear/run_lm_crosscheck_benchmark.R で生成する。"
   }
 }

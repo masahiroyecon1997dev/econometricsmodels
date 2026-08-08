@@ -3,7 +3,7 @@
 `tests/api_tests/fixtures/benchmarks/probit_crosscheck.json`（`benchmark/nonlinear/
 fixtures/generate_probit_crosscheck_fixtures.py`で生成）を読み込み、係数・標準誤差・
 適合度統計量・限界効果をRとクロスチェックする。役割分担は`test_probit_fixtures.py`
-と同じ（`test_logit_crosscheck.py`と同型、Issue #84。
+と同じ（`test_logit_crosscheck.py`と同型。
 `.claude/rules/testing-policy.md`「リファレンス実装」参照）。
 
 Note:
@@ -20,7 +20,7 @@ Note:
     観測情報行列を使うため、Rの`glm()`の既定`vcov()`をそのまま使うと不適切な
     比較になる。Logit（正準リンク）はこの2つの情報行列が理論上一致するため
     影響を受けない。詳細は`run_glm_crosscheck_benchmark.R`のコメント・
-    `docs/planning/specs/probit-implementation-notes.md`参照）。
+    `docs/spec/probit-spec.md`参照）。
 
     許容誤差はOLSのRクロスチェック（classical/HC0-3/clusterで機械精度一致）より
     緩い。ProbitはRのglm（IRLS/Fisher scoring）と本実装（Newton/BFGS/L-BFGS）が

@@ -14,9 +14,9 @@
 //! `build_logit_input`が`PyDataFrame`ではなく`polars::DataFrame`（プレーンなpolars型）を
 //! 受け取る設計にしているのは、`column_extraction::extract_f64_column`等が既に同じ
 //! シグネチャ（`&DataFrame`）を使っているため、およびPythonインタプリタ（GIL）を
-//! 起動せずに`cargo test`で直接ユニットテストできるようにするため（Issue #65）。
+//! 起動せずに`cargo test`で直接ユニットテストできるようにするため。
 //! `fit`（本ファイルの`pub(crate)`関数、`#[pyfunction] fit_logit`本体は`lib.rs`側にあり
-//! これに委譲する、Issue #66）が`PyDataFrame`を受け取り、`.into()`で`DataFrame`に変換して
+//! これに委譲する）が`PyDataFrame`を受け取り、`.into()`で`DataFrame`に変換して
 //! から`build_logit_input`を呼ぶ（`ols.rs`の`fit`関数と同じ変換パターン）。
 
 use engine::nonlinear::common::{CovType as EngineCovType, Method as EngineMethod};
@@ -42,10 +42,10 @@ use crate::validation::{
 /// each field's meaning and default value.
 ///
 /// `start_params` (user-specified initial values) is intentionally omitted: the
-/// underlying engine (`LogitEstimator::fit`) does not accept it yet (deferred,
-/// see `docs/planning/specs/logit-implementation-notes.md`). It will be added once
-/// the engine side supports it.
-// `fit_logit`（Issue #66）がPython側から`LogitOptions`インスタンスを引数として受け取るため、
+/// underlying engine (`LogitEstimator::fit`) does not accept it yet (see
+/// `docs/spec/logit-spec.md`, "未実装・未対応"). It will be added once the
+/// engine side supports it.
+// `fit_logit`がPython側から`LogitOptions`インスタンスを引数として受け取るため、
 // `FromPyObject`実装を明示的に維持する（`OLSOptions`と同じ理由、pyo3 0.28以降、Cloneを
 // 実装する#[pyclass]のFromPyObject自動導出はopt-inに変更されたため）。
 // module: PyO3の#[pyclass]はデフォルトで__module__="builtins"になり、
@@ -226,7 +226,7 @@ impl LogitResult {
     /// Predicted probabilities for the training data used in `fit()`.
     ///
     /// Out-of-sample prediction (a `new_data` argument) is not yet supported
-    /// (tracked separately; see `docs/planning/specs/logit-implementation-notes.md`).
+    /// (see `docs/spec/logit-spec.md`, "未実装・未対応").
     fn predict(&self) -> Vec<f64> {
         self.estimator.predict()
     }
@@ -329,7 +329,7 @@ fn parse_method(method_lower: &str) -> PyResult<EngineMethod> {
 
 /// Pythonから渡された `data` / `y` / `x` / `options` を検証し、
 /// `engine::nonlinear::logit::LogitInput::from_columns`を呼び出すところまでを行う。
-/// `LogitEstimator::fit`の呼び出し・`LogitResult`の構築は`fit`（本ファイル、Issue #66）が行う。
+/// `LogitEstimator::fit`の呼び出し・`LogitResult`の構築は`fit`（本ファイル）が行う。
 ///
 /// # Errors
 /// - 列の抽出時に発覚する問題（列が存在しない、数値/文字列型にキャストできない、

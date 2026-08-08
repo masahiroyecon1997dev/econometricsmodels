@@ -4,7 +4,7 @@
 `tests/api_tests/fixtures/benchmarks/wls.json`（statsmodels、主リファレンス）とは別に、
 独立実装（R: lm(weights=) + sandwich/lmtest）によるクロスチェック値を生成する。
 役割分担・許容誤差の方針はOLSの`generate_ols_crosscheck_fixtures.py`と同じ
-（`.claude/rules/testing-policy.md`「リファレンス実装」章、Issue #27で確定済み）:
+（`.claude/rules/testing-policy.md`「リファレンス実装」章の通り確定済み）:
 
 - R（lm(weights=) + sandwich/lmtest）: 全cov_type（classical/HC0-3/cluster/HAC）の
   正式なクロスチェック。fixest（≒pyfixestの実装元）とは独立した実装のため採用。
@@ -57,7 +57,7 @@ LINEAR_DIR = Path(__file__).resolve().parent.parent
 R_SCRIPT = LINEAR_DIR / "run_lm_crosscheck_benchmark.R"
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（generate_wls_fixtures.pyと
-# 同じ方針。scale_varianceは全cov_typeでComputationErrorになる、Issue #106）。
+# 同じ方針。scale_varianceは全cov_typeでComputationErrorになる）。
 NUMERIC_SCENARIOS = [
     "baseline",
     "small_n",
@@ -66,7 +66,7 @@ NUMERIC_SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "high_condition_number",
-    # n=k+1（自由度1ちょうど）の成功パス（Issue #150、OLSのIssue #101相当）。
+    # n=k+1（自由度1ちょうど）の成功パス（OLSの同種ケース相当）。
     "baseline_df1",
 ]
 
@@ -268,15 +268,15 @@ def build_fixtures() -> dict:
         "note": (
             "perfect_multicollinearity・scale_varianceシナリオはここに含まない"
             "（いずれもComputationErrorの発生確認のみ、テストコード側で対応。"
-            "scale_varianceはOLSと同じ理由（Issue #107）でロバストWald検定の"
-            "共分散部分行列が全cov_typeで数値的にほぼ特異になる、Issue #106で"
+            "scale_varianceはOLSと同じ理由でロバストWald検定の"
+            "共分散部分行列が全cov_typeで数値的にほぼ特異になる、"
             "WLSでも実測確認済み）。"
             "HACはR側のみ（explicit lagを本実装の自動ラグ式に合わせて指定）。"
             "clusterはbaselineシナリオのみ、疑似グループ（行番号%10）に加え、"
             "不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2"
-            "（cluster_g2）をR側のみ確認（Issue #150、OLSのIssue #100相当）。"
+            "（cluster_g2）をR側のみ確認（OLSの同種ケース相当）。"
             "high_condition_number/baseline_df1は境界値・悪条件ケース"
-            "（Issue #150、OLSのIssue #101相当）。"
+            "（OLSの同種ケース相当）。"
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
             "重みは合成データセットの'weight'列。401ksubsはinv_inc（1/inc）。"
             "pyfixestとの比較は正確性検証から除外（性能比較専用）。"

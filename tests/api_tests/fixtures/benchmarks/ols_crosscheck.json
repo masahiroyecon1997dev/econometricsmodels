@@ -4399,6 +4399,6 @@
     "generated_at": "2026-07-31T09:48:37.736876+00:00",
     "r_version": "4.2.2",
     "statsmodels_version": "0.14.6",
-    "note": "perfect_multicollinearityシナリオはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。HACはR側のみ（explicit lagを本実装の自動ラグ式に合わせて指定）。clusterはbaselineシナリオのみ、R側のみ確認。均等疑似グループ（行番号%10）に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2（cluster_g2）、wage1の実カテゴリ列region（northcen/south/westダミーから合成、基準カテゴリnortheast）を含む（Issue #100）。パラメータ名は全ソースで切片を'const'に正規化済み。pyfixestとの比較は正確性検証から除外（性能比較専用）。high_condition_number/baseline_df1は境界値・悪条件ケース（Issue #101）。scale_variance（Issue #101で追加、#107で発覚）はここに含まない。傾き係数の同時共分散部分行列の条件数が倍精度の限界を超え、本実装・RのSolve()の双方が全cov_typeで計算不能（エラー）になるため（perfect_multicollinearityと同様、ComputationErrorの発生確認のみテストコード側で対応）。"
+    "note": "perfect_multicollinearityシナリオはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。HACはR側のみ（explicit lagを本実装の自動ラグ式に合わせて指定）。clusterはbaselineシナリオのみ、R側のみ確認。均等疑似グループ（行番号%10）に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2（cluster_g2）、wage1の実カテゴリ列region（northcen/south/westダミーから合成、基準カテゴリnortheast）を含む。パラメータ名は全ソースで切片を'const'に正規化済み。pyfixestとの比較は正確性検証から除外（性能比較専用）。high_condition_number/baseline_df1は境界値・悪条件ケース。scale_varianceはここに含まない。傾き係数の同時共分散部分行列の条件数が倍精度の限界を超え、本実装・RのSolve()の双方が全cov_typeで計算不能（エラー）になるため（perfect_multicollinearityと同様、ComputationErrorの発生確認のみテストコード側で対応）。"
   }
 }

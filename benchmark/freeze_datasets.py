@@ -14,8 +14,8 @@
 `generate_synthetic_datasets.py`（連続y、OLS/WLS用）に加え、`nonlinear/
 generate_binary_choice_datasets.py`（2値y、真のlogit/probit DGP、Logit/Probit用。
 元は`generate_logit_datasets.py`という名前でLogit専用だったが、Probit追加
-（Issue #84）にあたり`link`引数で一般化した）も同様に`logit_<scenario>.csv`・
-`probit_<scenario>.csv`として固定する（Logit: Issue #68、Probit: Issue #84）。
+にあたり`link`引数で一般化した）も同様に`logit_<scenario>.csv`・
+`probit_<scenario>.csv`として固定する。
 
 **Wooldridgeデータセットはここでは固定しない**（`wooldridge`パッケージ自体は
 MITライセンスだが、同梱される実データの著作権はWooldridge『Introductory
@@ -75,14 +75,14 @@ LOGIT_SCENARIOS = [
 
 # generate_probit_fixtures.pyのNUMERIC_SCENARIOSに、エラーパス確認用の
 # perfect_multicollinearityを加えた全シナリオ。LOGIT_SCENARIOSと同じシナリオ構成
-# （generate_binary_choice_datasets.py参照、Issue #84）。
+# （generate_binary_choice_datasets.py参照）。
 PROBIT_SCENARIOS = list(LOGIT_SCENARIOS)
 
-# cluster_g2ケース（Issue #100）専用。k=1だとrng呼び出し順序が変わるため
+# cluster_g2ケース専用。k=1だとrng呼び出し順序が変わるため
 # baseline（既定k=3）とは別データになる。
 SYNTHETIC_K1_SCENARIOS = ["baseline"]
 
-# n=k+1（自由度1ちょうど）の成功パス確認専用（Issue #101）。SCENARIOSには
+# n=k+1（自由度1ちょうど）の成功パス確認専用。SCENARIOSには
 # 追加せず、cluster_g2ケースと同様にbaselineをn=k+1でオーバーライドした
 # 専用データとして固定する。kはbaseline既定と揃え（generate_dataset()の
 # k=3、つまりx1..x3）。engine側の`k`は定数項を含む設計行列の列数

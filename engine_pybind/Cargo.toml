@@ -9,7 +9,7 @@ repository.workspace = true
 
 [lib]
 name = "_lib"
-# `rlib`はIssue #65で追加した（`cargo test -p engine_pybind`を可能にするため。詳細は下記
+# `rlib`は追加した（`cargo test -p engine_pybind`を可能にするため。詳細は下記
 # `pyo3`のコメント参照）。`cdylib`のみだと`cargo test`が生成する単体テストバイナリが
 # クレート自体をリンクできない。
 crate-type = ["cdylib", "rlib"]
@@ -18,7 +18,7 @@ crate-type = ["cdylib", "rlib"]
 # サプライチェーン攻撃対策として`=`で完全固定する（ルートCargo.tomlの[workspace.dependencies]と同方針）。
 # pyo3のバージョンは0.29.0からダウングレードしている。理由は以下pyo3-polarsのコメント参照。
 #
-# `extension-module`フィーチャはここでは有効化しない（Issue #65で判明・修正）。
+# `extension-module`フィーチャはここでは有効化しない（判明・修正済み）。
 # `extension-module`はPythonインタプリタにdlopenされる前提でlibpythonへの静的リンクを
 # 意図的に省く仕様のため、`cargo build`/`cargo test`が生成する単体の実行バイナリ
 # （dlopenされず自身で起動する）とは相性が悪く、`PyExc_TypeError`等のCPython C API
@@ -38,7 +38,7 @@ pyo3 = { version = "=0.28.3" }
 # pyo3-polarsの新版はまだcrates.ioに未公開。既知のバージョンズレリスク、
 # rust-style.md「既知のリスク」参照）。そのため、当初pyo3=0.29.0で揃えようとしたが
 # pyo3=0.28.2（yankedされた0.28.0/0.28.1を除く最初の安定版）に統一した。
-# Issue #13で選定。詳細はdocs/spec/ols-spec.md参照。
+# 詳細はdocs/spec/ols-spec.md参照。
 polars = "=0.54.4"
 pyo3-polars = "=0.27.0"
 faer = { workspace = true }

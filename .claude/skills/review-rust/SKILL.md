@@ -1,4 +1,5 @@
 ---
+name: review-rust
 description: rust-reviewerサブエージェントに委譲してコードレビューを行う（規約準拠・設計方針整合性・パフォーマンス）
 argument-hint: [レビュー対象ファイル（省略時はgit diff）]
 allowed-tools: Bash(git diff:*), Bash(git log:*)

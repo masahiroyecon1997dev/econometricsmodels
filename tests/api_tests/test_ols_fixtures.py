@@ -51,7 +51,7 @@ SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "high_condition_number",
-    # n=k+1（自由度1ちょうど）の成功パス（Issue #101）。
+    # n=k+1（自由度1ちょうど）の成功パス。
     "baseline_df1",
 ]
 COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
@@ -144,7 +144,7 @@ def test_cluster_matches_statsmodels(fixtures):
 
 
 def test_cluster_imbalanced_matches_statsmodels(fixtures):
-    """不均衡クラスタ（サイズ[2, 3, 5, 10, 30, 50]のタイル、Issue #100）。
+    """不均衡クラスタ（サイズ[2, 3, 5, 10, 30, 50]のタイル）。
 
     均等サイズの疑似グループ（行番号%10）だけでは見逃す、実務で起こりやすい
     グループサイズの偏りを持つケース（`testing-policy.md`「テスト用データセット」3.）。
@@ -167,7 +167,7 @@ def test_cluster_g2_matches_statsmodels(fixtures):
     ロバストWald検定の共分散部分行列（3x3）のランクがG=2以下となり必然的に
     特異になりComputationErrorになる（成功パスにならない。
     `test_cluster_g2_with_multiple_slopes_raises_computation_error`参照。
-    Issue #100の実装中に判明した境界条件）。
+    実装中に判明した境界条件）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
     df = (
@@ -187,7 +187,7 @@ def test_cluster_g2_with_multiple_slopes_raises_computation_error():
     """G=2×説明変数3個（傾き係数q=3）は、ロバストWald検定の共分散部分行列
     （3x3）のランクがクラスタ数G=2以下になり必然的に特異になるため、
     fit()全体がComputationErrorになる（係数・標準誤差自体は計算可能だが、
-    F検定の失敗でfit()全体が失敗する仕様。Issue #100の実装中に判明、
+    F検定の失敗でfit()全体が失敗する仕様。実装中に判明、
     数値比較はしない想定）。
     """
     from econometricsmodels import ComputationError
@@ -218,8 +218,7 @@ def test_perfect_multicollinearity_raises_computation_error():
 def test_scale_variance_raises_computation_error(cov_type):
     """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
     傾き係数の同時共分散部分行列がスケール比の2乗（≈1e18）相当の条件数を持ち
-    倍精度浮動小数点の限界を超えて数値的に特異になる（Issue #101で発見、
-    #107で原因調査）。`wald_f_test`が固有値分解による相対閾値判定で検出し、
+    倍精度浮動小数点の限界を超えて数値的に特異になる（発見・原因調査済み）。`wald_f_test`が固有値分解による相対閾値判定で検出し、
     全cov_typeで`ComputationError`になる（classicalも含む。傾き係数の
     共分散部分行列自体は`cov_type`によらず同じ条件数を持つため）。
     perfect_multicollinearityと同様、数値比較はせずエラーパスのみ確認する。

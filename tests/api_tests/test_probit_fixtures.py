@@ -4,8 +4,8 @@
 generate_probit_fixtures.py`で生成）を読み込み、真のprobit DGPによる合成データ
 シナリオ×classical/opg/hc0 + クラスター(baseline・mrozの実データ両方) +
 Wooldridge実データ（mroz）で、係数・標準誤差・検定統計量・適合度統計量・
-限界効果を相対誤差1e-8で厳密比較する（`test_logit_fixtures.py`と完全に同型、
-Issue #84。`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。
+限界効果を相対誤差1e-8で厳密比較する（`test_logit_fixtures.py`と完全に同型。
+`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。
 
 役割分担:
     - 構造・API・エラーパスの検証: `test_probit.py`

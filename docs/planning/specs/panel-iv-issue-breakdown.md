@@ -1,10 +1,10 @@
 # FE / RE / IV Issueタスク分解
 
 `docs/planning/specs/panel-api-design.md`（FE/RE共通・FE固有・RE固有）・
-`iv-api-design.md`（IV共通差分・IV固有）で確定した設計を、Logit/Probit実装時の粒度
-（`logit-probit-issue-breakdown.md`。engine共通基盤→engine型定義→推定コア→標準誤差→
-適合度統計量→診断メソッド→engine_pybind境界→python_packageラッパー→ベンチマーク→
-ドキュメント、という流れ）に倣ってIssue単位に分解する。
+`iv-api-design.md`（IV共通差分・IV固有）で確定した設計を、Logit/Probit実装時と同じ粒度
+（engine共通基盤→engine型定義→推定コア→標準誤差→適合度統計量→診断メソッド→
+engine_pybind境界→python_packageラッパー→ベンチマーク→ドキュメント、という流れ）に
+倣ってIssue単位に分解する。
 
 数式・アルゴリズムの細部（Driscoll-Kraayのバンド幅パラメータ設計等）はこの時点では確定させず、
 各Issue本文の中で決める。
@@ -58,7 +58,7 @@ Issue化済み（2026-08-02）:
 - [x] **B4. GMM共通推定コアの実装（`weight_type`対応）** → [#160](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/160)
   `weight_type`（unadjusted/robust/cluster/kernel）ごとの重み行列で点推定。2SLSをこのコアの
   特殊ケース（`weight_type="unadjusted"`, 1-step）として吸収できるかはB3実装後に判断する
-  （無理なら独立実装のままでよい、Issue #122の「無理をしない」方針）。詳細: `iv-api-design.md`6.2節
+  （無理なら独立実装のままでよい、「無理をしない」という既定方針に従う）。詳細: `iv-api-design.md`6.2節
   - 依存: B2（#156）、B3（#157、共通化の可否判断のため）
 - [x] **B5. `gmm_iterations`（1-step/2-step efficient）の実装** → [#165](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/165)
   デフォルト2（efficient two-step）、1で1-step GMM。詳細: `iv-api-design.md`6.2節
@@ -236,7 +236,7 @@ IV（A含む）で20 Issue、FE（C含む）で20 Issue、RE（Eのみ）で13 I
 ## 未確定・Issue化時に決める事項
 
 - 2SLSをGMM共通コア（B4）の特殊ケースとして実装できるか、それとも独立実装のままにするかの
-  実際の判断（B4着手時、Issue #122の「無理をしない」方針に従う）
+  実際の判断（B4着手時、「無理をしない」という既定方針に従う）
 - FEの`OlsEstimator`委譲（D5）が実装上うまくいくか、補正が管理可能な範囲に収まるかの判断
   （D5着手時、うまくいかない場合はFE専用実装に切り替え）
 - Driscoll-Kraayのバンド幅パラメータの具体的な設計（D8着手時）

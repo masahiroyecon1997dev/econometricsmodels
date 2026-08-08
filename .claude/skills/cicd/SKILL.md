@@ -1,4 +1,5 @@
 ---
+name: cicd
 description: CI/CDワークフローの作成・編集、またはCI失敗時の原因調査を支援する
 argument-hint: [作成/編集したい内容 or 失敗調査の対象]
 allowed-tools: Bash(gh:*), Bash(git:*), Read, Write, Edit, Grep, Glob
@@ -6,7 +7,7 @@ allowed-tools: Bash(gh:*), Bash(git:*), Read, Write, Edit, Grep, Glob
 
 # CI/CD支援
 
-対応するCLAUDE.mdの方針: 9章（バージョニング・CI/CD）
+対応するCLAUDE.mdの方針: 8章（バージョニング・CI/CD）
 
 ## 対象
 

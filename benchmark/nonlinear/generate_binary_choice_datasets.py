@@ -2,7 +2,7 @@
 ベルヌーイ乱数）で2値yを持つ合成データセットを生成するスクリプト。
 
 元々`generate_logit_datasets.py`としてLogit専用に実装していたが、Probit追加
-（Issue #84）にあたり、シナリオ・X生成ロジック（`moderate_multicollinearity`/
+にあたり、シナリオ・X生成ロジック（`moderate_multicollinearity`/
 `high_condition_number`/`perfect_multicollinearity`/`scale_variance`等）が
 リンク関数に一切依存せず完全に共有できることが分かったため、`link`引数
 （`"logit"`または`"probit"`）を追加して一般化した（`run_statsmodels_benchmark.py`が
@@ -11,8 +11,7 @@
 `generate_synthetic_datasets.py`（OLS/WLS用）と同型の設計だが、OLSの9シナリオの
 うち誤差項の分散構造（不均一分散・自己相関）に依存するもの（heteroskedastic/
 autocorrelated/high_variance）は2値DGPに直接転用できないため、Logit/Probit向けに
-再設計している（`docs/planning/specs/logit-implementation-notes.md`
-「Issue #68」参照。ユーザー確認済み）。
+再設計している（`docs/spec/logit-spec.md`参照）。
 
 `scale_variance`（変数間のスケールが極端に異なるケース）は誤差項構造とは無関係
 （設計行列のスケールの問題）なため、上記3つとは扱いを分けている。素直にOLSの
@@ -39,9 +38,8 @@ autocorrelated/high_variance）は2値DGPに直接転用できないため、Log
 検討・破棄。理由: 本実装の収束判定（勾配ノルム`‖∇ℓ(θ)‖ < tol`）は、完全分離下で
 係数が発散する過程でスコア項が浮動小数点アンダーフローによりほぼ0になり、
 どんな`tol>0`でも「収束済み」と誤判定してしまう既知の限界がある
-（logit: `docs/planning/specs/logit-implementation-notes.md`「Issue #138」参照、
-probitも同じ`nonlinear/common.rs`の`run_solver`を共有するため同じ限界を持つ。
-ユーザー確認済み、修正は別issue）。このためNonConvergenceの発生確認は、専用
+（logit: `docs/spec/logit-spec.md`参照、probitも同じ`nonlinear/common.rs`の
+`run_solver`を共有するため同じ限界を持つ。既知の限界として記録のみ）。このためNonConvergenceの発生確認は、専用
 データセットではなく`LogitOptions(max_iter=1)`/`ProbitOptions(max_iter=1)`等で
 人為的に打ち切ることで行う（`tests/api_tests/test_logit.py`/`test_probit.py`）。
 
@@ -135,7 +133,7 @@ def generate_binary_choice_dataset(
         if k < 2:
             raise ValueError(f"{scenario} requires k >= 2")
         # x1とx2の相関: moderate=0.8程度、high_condition_number=0.999
-        # （OLSのgenerate_synthetic_datasets.pyと同じ設計、Issue #101参照）
+        # （OLSのgenerate_synthetic_datasets.pyと同じ設計）
         rho = 0.999 if scenario == "high_condition_number" else 0.8
         cov = np.eye(k)
         cov[0, 1] = cov[1, 0] = rho

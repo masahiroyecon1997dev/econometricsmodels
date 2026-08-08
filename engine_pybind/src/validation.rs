@@ -3,7 +3,7 @@
 //! `.claude/rules/rust-style.md`「全手法で共有するロジックは系統ディレクトリの外、
 //! クレート直下に置く」の方針、`column_extraction.rs`と同じ位置づけ。
 //!
-//! Issue #134: OLS/WLS/Logitの`fit`/`build_logit_input`冒頭で、メッセージ文言まで
+//! OLS/WLS/Logitの`fit`/`build_logit_input`冒頭で、メッセージ文言まで
 //! ほぼ同一のまま重複していたバリデーション（xが空・yやweight等のロール間の重複・
 //! x内の重複・`include_intercept=true`時の`"const"`列衝突）をここに集約する。
 //!

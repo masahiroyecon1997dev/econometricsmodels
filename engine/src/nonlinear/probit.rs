@@ -42,13 +42,13 @@
 //! （手動で`1.0 - cdf(z)`を計算する場合に生じる桁落ちを避けられる）。
 //!
 //! `λ_i = φ(u)/Φ(u)`（`u=q_i z_i`）は、`u`が極端に負（実測`|u|≳39`）だと`φ(u)`・`Φ(u)`が
-//! ともに0にアンダーフローし`0.0/0.0`のNaNになる（Issue #71実装時にrust-reviewerの
+//! ともに0にアンダーフローし`0.0/0.0`のNaNになる（実装時にrust-reviewerの
 //! レビューで判明。`Logit`の`logistic`/`softplus`が有限の`z`ではどれだけ極端でも
 //! 絶対にNaNを産まない設計だったのとは異なる、Probit固有のリスク）。既定手法の
 //! `Method::Newton`（`FaerNewton`）はline searchなしで`gradient`/`hessian`を直接
 //! 使うため、Logitで実際に問題になった「(準)完全分離データでの収束判定誤検知」
 //! （勾配ノルムのアンダーフロー、`nonlinear-implementation-notes.md`参照）よりも
-//! 緩い条件でこのNaN汚染に到達しうる（Issue #72のコメント参照）。
+//! 緩い条件でこのNaN汚染に到達しうる。
 //!
 //! 対策として、`u`を`φ`/`Φ`評価前に`[-U_CLAMP, U_CLAMP]`にクランプする
 //! （`U_CLAMP`のdocコメント参照）。R言語`stats::binomial(link="probit")`の
@@ -247,7 +247,7 @@ fn log_likelihood(x: &Mat<f64>, y: &Mat<f64>, params: &[f64]) -> f64 {
 /// なりうる）。`fit()`を通過した収束済み・有限の`θ`と、`engine_pybind`側で既に有限性が
 /// 保証された`x`から計算する`z`は実質常に有限のため到達不能だが、`logistic`/`softplus`
 /// （Logit）が「有限の`z`では絶対にNaNを生まない」設計だったのとは異なる前提であることに
-/// 注意（rust-reviewer指摘、Issue #78）。
+/// 注意（rust-reviewer指摘）。
 fn overall_w_and_s(x: &Mat<f64>, params: &[f64]) -> (f64, Vec<f64>) {
     let n = x.nrows();
     let k = x.ncols();
@@ -408,8 +408,7 @@ impl Hessian for ProbitProblem {
 /// Probitの推定結果。`fit`でのバリデーション・最適化・`cov_type`に応じたSE計算・
 /// 適合度統計量の計算を通過した状態を表す。
 ///
-/// 限界効果等は未実装。`docs/planning/specs/logit-probit-issue-breakdown.md`の
-/// 対応する後続Issueで`fit`とは別のメソッドとして追加していく想定。
+/// 限界効果等は`fit`とは別のメソッドとして提供する（`docs/spec/probit-spec.md`参照）。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
 #[derive(Debug)]
@@ -420,9 +419,8 @@ pub struct ProbitEstimator {
     params: Vec<f64>,
     /// 係数の分散共分散行列（元のスケール、k×k）。`fit`に渡した`cov_type`に応じて
     /// 観測情報行列（`Classical`）・OPG（`Opg`）・サンドイッチ型（`Hc0`/`Hc1`）の
-    /// いずれかで計算される。限界効果（デルタ法、`logit-probit-issue-breakdown.md`の
-    /// 対応する後続Issue）で再利用するため、対角成分（`std_errors`）だけでなく
-    /// 行列そのものを保持する。
+    /// いずれかで計算される。限界効果（デルタ法）で再利用するため、対角成分
+    /// （`std_errors`）だけでなく行列そのものを保持する。
     cov_params: Mat<f64>,
     /// 標準誤差（k, 元のスケール）。`cov_params`の対角成分の平方根
     std_errors: Vec<f64>,
@@ -480,7 +478,7 @@ pub struct ProbitEstimator {
 impl ProbitEstimator {
     /// `method`（Newton-Raphson/BFGS/L-BFGS）で負の対数尤度を最小化し、Probitの係数・
     /// 観測情報行列によるSE・z値・p値・信頼区間を推定する。`LogitEstimator::fit`
-    /// （Issue #56の骨格実装＋Issue #57のmethod分岐＋Issue #58のSE計算）と同じ設計・スコープ。
+    /// （骨格実装＋method分岐＋SE計算）と同じ設計・スコープ。
     ///
     /// `method`の選択に関わらず、収束点でのHessian評価（SE計算用）は常に解析的に行う
     /// （`run_solver`の実装方針、`docs/planning/specs/nonlinear-implementation-notes.md`
@@ -511,11 +509,11 @@ impl ProbitEstimator {
     ///
     /// `n <= k`で`CommonError::InsufficientObservations`、`k == 0`で
     /// `CommonError::NoRegressors`を返す閾値・使い分けは`LogitEstimator::fit`と同じ
-    /// （後者はIssue #118でLogitのfaer内部panic、Issue #130を修正した経緯があり、
+    /// （後者はLogitのfaer内部panicを修正した経緯があり、
     /// Probitでは当初から同じ検証を入れている）。
     ///
     /// `y`が`{0.0, 1.0}`の二値であることの検証（`validate_binary_y`）も、Logitでは
-    /// Issue #54→#55を経てIssue #135で事後的に追加された経緯があるが、Probitでは
+    /// 事後的に追加された経緯があるが、Probitでは
     /// 既に共有実装（`nonlinear/common.rs`）があるため当初から呼び出している。
     ///
     /// # Errors
@@ -815,7 +813,7 @@ impl ProbitEstimator {
     /// statsmodelsの`get_margeff()`に倣い、離散変数の自動判定は行わない設計、
     /// `nonlinear-implementation-notes.md`「限界効果」参照）の限界効果は
     /// `dy/dx_j = φ(x_i'θ)θ_j`（Logitの`p(1-p)θ_j`とは異なり標準正規PDF`φ`を使う。
-    /// Issue #78参照）。
+    /// 参照）。
     ///
     /// - `at="overall"`（AME）: `g_j(θ) = w(θ)*θ_j`、`w(θ) = (1/n)Σᵢ φ(zᵢ)`
     /// - `at="mean"`/`"median"`: `g_j(θ) = w(θ)*θ_j`、`w(θ) = φ(z̄)`
@@ -827,7 +825,7 @@ impl ProbitEstimator {
     /// （`overall_w_and_s`/`at_point_w_and_s`が`(w,s)`を計算し、`w`・`s`の計算方法に
     /// 依らない残りの計算——ヤコビアン・デルタ法標準誤差・定数項の除外——は
     /// `nonlinear/common.rs`の`marginal_effects_from_w_s`に共通化されている
-    /// （Logitと数式まで同型であることを確認済み、Issue #78）。
+    /// （Logitと数式まで同型であることを確認済み）。
     ///
     /// 変数`j`の分散は`Var(g_j) = jac_j · Σ · jac_jᵀ`（`jac_j`はヤコビアンの`j`行目、
     /// `Σ=cov_params`）。標準誤差はこの平方根、検定分布は標準正規分布
@@ -888,7 +886,7 @@ impl ProbitEstimator {
     /// 列=予測クラス）。`predict()`が返す予測確率のみを`threshold`で二値化し、実測`y`は
     /// `threshold`に関わらず常に`0.5`で二値化する。数式・statsmodelsとの整合性の詳細は
     /// `nonlinear/common.rs`の`pred_table`のdocコメント参照（リンク関数に依存しない計算
-    /// のため`common.rs`に共通化されている、Logitと共通、Issue #79）。
+    /// のため`common.rs`に共通化されている、Logitと共通）。
     ///
     /// **新規データでの的中表（out-of-sample）は未対応**（本Issueのスコープ外、
     /// 別issueでトラッキング。`LogitEstimator::pred_table`と同じ、ユーザー確認済み）。
@@ -1182,7 +1180,7 @@ mod tests {
     /// 収束点で厳密に成り立つことを使うと、Hessian（`-ℓ`の2階微分）は
     /// `H(θ̂) = Σᵢλᵢ² = n*φ(θ̂)²/(ȳ(1-ȳ))`という形に単純化できる
     /// （`λᵢ(λᵢ+θ)`の`θ`の項が`θ*Σλᵢ=0`で消える。導出はモジュールdocコメント
-    /// 「数式」節の`λᵢ`の定義と合わせて`probit-implementation-notes.md`参照）。
+    /// 「数式」節の`λᵢ`の定義と合わせて`docs/spec/probit-spec.md`参照）。
     /// `Var(θ̂) = H(θ̂)⁻¹ = ȳ(1-ȳ)/(n*φ(θ̂)²)`。z値・p値・信頼区間はこの分散から
     /// 標準正規分布（独立に`statrs::Normal`で検算）で導出できる。
     #[test]
@@ -1853,7 +1851,7 @@ mod tests {
     }
 
     /// `newton`と同じデータセット（既知の解析解を持つ切片のみモデル）で`bfgs`/`lbfgs`を
-    /// 実行し、いずれも同じ解析解へ収束することを検証する（Issue #73完了条件）。
+    /// 実行し、いずれも同じ解析解へ収束することを検証する。
     #[test]
     fn fit_bfgs_and_lbfgs_converge_to_same_solution_as_newton() {
         let y_bar: f64 = 4.0 / 7.0;
@@ -2016,7 +2014,7 @@ mod tests {
     fn fit_returns_no_regressors_error_when_k_is_zero() {
         // `include_intercept=false`かつ説明変数も無い（k=0）病的な入力。`n<=k`チェック
         // （`n>=1`なら常に通過してしまう）をすり抜けて後段の分散共分散行列計算で
-        // panicすることをLogit実装（Issue #118/#130）で経験済みのため、Probitでは
+        // panicすることをLogit実装で経験済みのため、Probitでは
         // 当初からk==0を明示的に検証している（モジュールdocコメント・`fit`のdocコメント参照）。
         let y = vec![0.0, 1.0, 0.0, 1.0, 1.0];
         let input = ProbitInput::from_columns(&y, &[], vec![], false, "y".to_string()).unwrap();
@@ -2099,15 +2097,14 @@ mod tests {
     }
 
     /// 同じ完全な多重共線性のデータセットを`bfgs`/`lbfgs`で最適化した場合の
-    /// `SingularHessian`伝播経路（`LogitEstimator`の対応するテスト・Issue #129と同じ理由）:
+    /// `SingularHessian`伝播経路（`LogitEstimator`の対応するテストと同じ理由）:
     /// `newton`は`newton_step`内の特異性検出（最適化のステップ計算中）で検出するが、
     /// `bfgs`/`lbfgs`は`newton_step`を一切経由しない（準ニュートン法は内部の近似逆Hessianで
     /// 降下方向を決めるため、モデルの解析的Hessianの特異性に依存しない）。この場合、
     /// 収束後に`observed_information_cov_params`（`neg_hessian_inverse`）が呼ぶ
     /// `ensure_well_conditioned_symmetric_matrix`（固有値ベースの悪条件検出）が、
-    /// `bfgs`/`lbfgs`にとって唯一の特異性検出経路になる。Issue #80（カバレッジ確認）で、
-    /// Logit側で既に判明済みのギャップパターンとして追加（`probit-implementation-notes.md`
-    /// 「既知のテストギャップ」参照）。
+    /// `bfgs`/`lbfgs`にとって唯一の特異性検出経路になる。Logit側で既に判明済みの
+    /// ギャップパターンとして追加（`docs/spec/probit-spec.md`参照）。
     #[test]
     fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_bfgs_and_lbfgs()
      {
@@ -2138,8 +2135,7 @@ mod tests {
     /// `sandwich_cov_params`（`cov_type=Hc0`/`Hc1`）も内部で`neg_hessian_inverse`を
     /// 呼ぶため、`Classical`と同じ完全な多重共線性のデータセットで`SingularHessian`に
     /// なるはずだが、`fit()`の`CovType::Hc0`/`Hc1`分岐の`?`（エラー伝播）を通るテストが
-    /// 無かった（`cargo-llvm-cov`で判明。`LogitEstimator`の対応するテストと同じ理由、
-    /// Issue #80）。
+    /// 無かった（`cargo-llvm-cov`で判明。`LogitEstimator`の対応するテストと同じ理由）。
     ///
     /// `method=Newton`は使わない: `newton_step`内の特異性検出（ピボット付きQR）が
     /// `cov_type`の分岐に到達する前（最適化中）に`SingularHessian`を返してしまうため
@@ -2174,7 +2170,7 @@ mod tests {
     /// `SingularHessian`とは別のエラー型）も、Hc0/Hc1と同じ完全な多重共線性データセットで
     /// 検証する。`scores_i=λᵢxᵢ`かつ`x2=2*x1`のため、スコア行列も`x1`と同じ構造的な
     /// 多重共線性を持ち（列2=2×列1）、OPG行列`Σsᵢsᵢ'`も特異になる
-    /// （`LogitEstimator`の対応するテストと同じ理由、Issue #80）。
+    /// （`LogitEstimator`の対応するテストと同じ理由）。
     #[test]
     fn fit_returns_singular_opg_matrix_error_for_perfectly_collinear_design_matrix() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
@@ -2198,7 +2194,7 @@ mod tests {
 
     /// `cov_type=Cluster`のエラー伝播（`cluster_cov_params`も内部で`neg_hessian_inverse`を
     /// 呼ぶため`SingularHessian`）も、Hc0/Hc1と同じ完全な多重共線性データセットで検証する
-    /// （`LogitEstimator`の対応するテストと同じ理由、Issue #80）。
+    /// （`LogitEstimator`の対応するテストと同じ理由）。
     #[test]
     fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_cluster() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
@@ -2731,7 +2727,7 @@ mod tests {
     /// 側の合成データによる一般テスト（`pred_table_actual_class_counts_are_invariant_
     /// to_threshold`）で既にカバーされているが、`ProbitEstimator`側の配線（`predict()`の
     /// 出力を正しく`pred_table`へ渡せているか）を壊す変更を検知できるようにするため、
-    /// `LogitEstimator`の対応するテストと対称に追加する（rust-reviewer指摘、Issue #79）。
+    /// `LogitEstimator`の対応するテストと対称に追加する（rust-reviewer指摘）。
     #[test]
     fn pred_table_actual_class_counts_are_invariant_to_threshold() {
         let y = vec![0.0, 1.0, 0.0, 1.0];

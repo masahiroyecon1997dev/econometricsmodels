@@ -4,7 +4,7 @@
 `benchmark/nonlinear/run_statsmodels_benchmark.py`（`--model probit`、1回呼べば
 1ケース分の結果を返す汎用ツール）を全シナリオ×全cov_typeの組み合わせで呼び出し、
 結果を1つのJSONにまとめて書き出す。`generate_logit_fixtures.py`と完全に同型の設計
-（Issue #84。シナリオ構成・cov_type構成もLogitと同一、`generate_binary_choice_datasets.py`
+（シナリオ構成・cov_type構成もLogitと同一、`generate_binary_choice_datasets.py`
 参照）。
 
 **`cov_type="hc1"`はここに含めない**（statsmodelsのdiscrete modelがn/(n-k)小標本補正を
@@ -136,7 +136,7 @@ def build_fixtures() -> dict:
             "nullになっている（run_statsmodels_benchmark.py参照）。"
             "near_separationはprobit特有の病理（準完全分離）の境界値ケース"
             "（較正値はlogitと異なりbeta1=10、generate_binary_choice_datasets.py参照）。"
-            "完全分離下でのNonConvergence検出には既知の限界（logitのIssue #138と同じ、"
+            "完全分離下でのNonConvergence検出には既知の限界（logitと同じ、"
             "nonlinear/common.rsのrun_solverを共有するため）があり、専用シナリオは"
             "採用していない。"
             "scale_varianceは真のDGPを未スケーリングのXで計算した後に列のみを"

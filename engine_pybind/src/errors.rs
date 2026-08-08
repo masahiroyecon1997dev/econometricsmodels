@@ -31,7 +31,7 @@ create_exception!(econometricsmodels, ComputationError, PyRuntimeError);
 ///
 /// `engine::linear::common::LeastSquaresError`・`engine::nonlinear::common::MleError`
 /// 等、`CommonError`を`#[error(transparent)] Common(#[from] CommonError)`で包む
-/// 各系統のエラー型は、`Common`アームでこの関数に委譲する（Issue #113。系統ごとに
+/// 各系統のエラー型は、`Common`アームでこの関数に委譲する（系統ごとに
 /// 同じ判定ロジックを重複させない）。orphan ruleにより`impl From`ではなく関数として
 /// 実装する（`least_squares_error_to_pyerr`と同じ理由、`engine_pybind/src/linear/
 /// CLAUDE.md`参照）。

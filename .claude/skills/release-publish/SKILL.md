@@ -1,4 +1,5 @@
 ---
+name: release-publish
 description: バージョンバンプ済みのコミットを、devへのPR〜mainへの反映〜タグ付け〜PyPI公開確認まで進める（side-effectがあるため明示的な呼び出しのみ）
 argument-hint: 対象バージョン番号（例: 0.2.0）
 allowed-tools: Read, Bash(git:*), Bash(gh:*), Monitor, AskUserQuestion
@@ -7,7 +8,7 @@ disable-model-invocation: true
 
 # リリース公開フロー支援
 
-対応するCLAUDE.mdの方針: 9章（バージョニング・CI/CD）、5章（Git運用「マージはCIがgreenであることに加え、内容を確認してからmergeする。自動セルフマージはしない」）
+対応するCLAUDE.mdの方針: 8章（バージョニング・CI/CD）、5章（Git運用「マージはCIがgreenであることに加え、内容を確認してからmergeする。自動セルフマージはしない」）
 
 ## 前提
 

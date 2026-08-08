@@ -1,6 +1,6 @@
 # cargo-audit（.github/workflows/ci_engine.ymlのauditジョブ）の設定。
-# 以下はIssue #23（ci_engine.yml作成）実装時にcargo auditが実際に検知した既知の脆弱性。
-# Issue #46でコード側からの恒久対応を試みたが、4件とも上流（pyo3-polars/polars）が
+# 以下はci_engine.yml作成実装時にcargo auditが実際に検知した既知の脆弱性。
+# コード側からの恒久対応を試みたが、4件とも上流（pyo3-polars/polars）が
 # 対応バージョンを未公開のため現時点では修復不能と判明した（詳細は
 # docs/spec/ci-cd-notes.md「セキュリティ」参照）。
 # ここでのallow-listは「無視してよい」という判断ではなく、

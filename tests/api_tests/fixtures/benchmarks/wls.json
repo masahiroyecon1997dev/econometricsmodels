@@ -459,7 +459,7 @@
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
         "generated_at": "2026-08-02T02:25:02.577450+00:00",
-        "note": "不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。Issue #106。",
+        "note": "不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。",
         "formula": "y ~ x1 + x2 + x3",
         "weight_col": "weight"
       }
@@ -477,7 +477,7 @@
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
         "generated_at": "2026-08-02T02:25:02.583875+00:00",
-        "note": "クラスタ数境界（G=2ちょうど）の成功パス確認用。説明変数1個（q=1）に絞っている（Issue #106、OLSのIssue #100相当。3個だとロバストWald検定の共分散行列が特異になりComputationError）。",
+        "note": "クラスタ数境界（G=2ちょうど）の成功パス確認用。説明変数1個（q=1）に絞っている（OLSの同種ケース相当。3個だとロバストWald検定の共分散行列が特異になりComputationError）。",
         "formula": "y ~ x1",
         "weight_col": "weight"
       }
@@ -3528,6 +3528,6 @@
     "generated_at": "2026-08-02T02:25:02.967265+00:00",
     "primary_reference": "statsmodels",
     "statsmodels_version": "0.14.6",
-    "note": "perfect_multicollinearity・scale_varianceシナリオはここに含まない（いずれもComputationErrorの発生確認のみ、テストコード側で対応。scale_varianceはOLSと同じ理由（Issue #107）でロバストWald検定の共分散部分行列が全cov_typeで数値的にほぼ特異になる、Issue #106でWLSでも実測確認済み）。重みは合成データセットの'weight'列（OLS実装時から存在、常に正）を使う。クロスチェック用のRベンチマークはwls_crosscheck.json（別スクリプト）で生成する。401ksubsの回帰式・重み定義はdocs/spec/wls-spec.md参照。"
+    "note": "perfect_multicollinearity・scale_varianceシナリオはここに含まない（いずれもComputationErrorの発生確認のみ、テストコード側で対応。scale_varianceはOLSと同じ理由でロバストWald検定の共分散部分行列が全cov_typeで数値的にほぼ特異になる、WLSでも実測確認済み）。重みは合成データセットの'weight'列（OLS実装時から存在、常に正）を使う。クロスチェック用のRベンチマークはwls_crosscheck.json（別スクリプト）で生成する。401ksubsの回帰式・重み定義はdocs/spec/wls-spec.md参照。"
   }
 }

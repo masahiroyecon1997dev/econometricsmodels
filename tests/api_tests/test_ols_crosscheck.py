@@ -24,7 +24,7 @@ classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相�
 ロバストWald検定（cov_typeごとの共分散行列を使う）のため、HACのみ標準誤差と
 同じ小標本補正の慣習差が乗る（実測で相対誤差0.8%程度、`RTOL_HAC`の範囲内）。
 
-`predict()`（`docs/spec/ols-spec.md`「predict()」、Issue #86）も対象に含める。
+`predict()`（`docs/spec/ols-spec.md`「predict()」）も対象に含める。
 `run_lm_predict_crosscheck.R`（`fitted()`・`predict(model, newdata=...)`）を使い、
 全シナリオで`predict(new_data=None)`（学習データの予測値）を、baselineシナリオのみ
 `predict(new_data)`（新規データの予測値、列順を入れ替えて列名マッチングも確認）を
@@ -143,7 +143,7 @@ SYNTHETIC_SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "high_condition_number",
-    # n=k+1（自由度1ちょうど）の成功パス（Issue #101）。
+    # n=k+1（自由度1ちょうど）の成功パス。
     "baseline_df1",
 ]
 NON_HAC_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
@@ -230,7 +230,7 @@ def test_cluster_matches_r(crosscheck):
 
 
 def test_cluster_imbalanced_matches_r(crosscheck):
-    """不均衡クラスタ（サイズ[2, 3, 5, 10, 30, 50]のタイル、Issue #100）。
+    """不均衡クラスタ（サイズ[2, 3, 5, 10, 30, 50]のタイル）。
 
     均等サイズの疑似グループ（行番号%10）だけでは見逃す、実務で起こりやすい
     グループサイズの偏りを持つケース（`testing-policy.md`「テスト用データセット」3.）。
@@ -254,7 +254,7 @@ def test_cluster_g2_matches_r(crosscheck):
     ロバストWald検定の共分散部分行列（3x3）のランクがG=2以下となり必然的に
     特異になりComputationErrorになる（成功パスにならない。
     `test_ols_fixtures.py::test_cluster_g2_with_multiple_slopes_raises_computation_error`
-    参照。Issue #100の実装中に判明した境界条件）。
+    参照。実装中に判明した境界条件）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
     df = (
@@ -334,7 +334,7 @@ def test_wooldridge_wage1_region_cluster_matches_r(
 ):
     """wage1の実カテゴリ列（northcen/south/westダミーから合成したregion、
     基準カテゴリnortheast、4グループ・不均衡サイズ）でのクラスターロバストSE
-    （Issue #100「実データでのグループ列」）。疑似グループ（行番号%N）ではなく
+    （「実データでのグループ列」）。疑似グループ（行番号%N）ではなく
     実データに由来するグループ構造での検証。
     """
     df = load_wooldridge("wage1")

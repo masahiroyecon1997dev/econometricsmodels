@@ -1,6 +1,6 @@
 name: Benchmark (OLS performance)
 
-# Issue #47: benchmark/compare_performance.py（Issue #28、OLSのstatsmodels/pyfixestとの
+# benchmark/compare_performance.py（OLSのstatsmodels/pyfixestとの
 # 実行時間・メモリ比較）を統一環境で実行し、結果をjob summaryに出力する。
 #
 # トリガーはタグpush（v*）+ workflow_dispatchのみ（ユーザー確認済み）。n=1,000,000込みの
@@ -35,7 +35,7 @@ jobs:
         run: uv sync --locked --group test --group benchmark --group dev
 
       # 【最重要】必ずreleaseビルドで計測する。デフォルトの`maturin develop`（debugビルド）
-      # のままだと最大140倍遅い誤った結果になることをIssue #28で実測済み
+      # のままだと最大140倍遅い誤った結果になることを実測済み
       # （docs/spec/ols-performance-notes.md「最重要の教訓」参照）。
       - name: maturin develop --release
         run: uv run --locked --group test --group benchmark --group dev maturin develop --release

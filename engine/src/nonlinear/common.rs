@@ -14,7 +14,7 @@
 //! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
 //! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は、linear系統の
 //! `LeastSquaresError`と文言まで完全に重複していたため`engine::error::CommonError`に
-//! 切り出し、`Common`バリアント経由で保持する（Issue #113）。
+//! 切り出し、`Common`バリアント経由で保持する。
 
 use argmin::core::TerminationStatus;
 use argmin::core::{
@@ -55,7 +55,7 @@ pub enum MleError {
 
     /// `tol`が0以下。勾配ノルムに基づく収束判定`‖∇ℓ(θ)‖ < tol`が理論上満たされないため、
     /// 常に`max_iter`まで反復して`NonConvergence`（または`converged=false`）になる
-    /// （Issue #118、`InvalidMaxIter`と同じ形の早期バリデーション）。
+    /// （`InvalidMaxIter`と同じ形の早期バリデーション）。
     #[error("tol must be a positive number, got {tol}")]
     InvalidTol { tol: f64 },
 
@@ -86,7 +86,7 @@ pub enum MleError {
     /// statsmodelsの`Logit`はコンストラクタ時点で単位区間`[0,1]`を要求する
     /// （比率データ／frequency weights的な用途も許容する設計）が、本実装は
     /// 常に真の2値アウトカムのみを想定するため、より厳格に`{0.0, 1.0}`の完全一致を
-    /// 要求する（ユーザー確認済み、Issue #135）。`InvalidCensoringBounds`（Tobit専用）
+    /// 要求する（ユーザー確認済み）。`InvalidCensoringBounds`（Tobit専用）
     /// と対称的に、Tobit（連続な打ち切り被説明変数）の`fit()`はこのバリアントを
     /// 構築しない（`MleError`モジュールdocコメント「別のenumに分離せず同じ`MleError`に
     /// 含める」の方針通り）。
@@ -96,7 +96,7 @@ pub enum MleError {
     /// 勾配ノルム基準（`‖∇ℓ(θ)‖ < tol`）は満たしたが、標準化パラメータ空間でのノルムが
     /// 異常に大きい。(準)完全分離（quasi-/complete separation）では、係数が発散していく
     /// 過程でロジスティックのスコア項`p(1-p)`が浮動小数点アンダーフローによりほぼ0.0に
-    /// なり、真には収束していないのに勾配ノルムだけが先に`tol`を割り込む（Issue #138）。
+    /// なり、真には収束していないのに勾配ノルムだけが先に`tol`を割り込む。
     ///
     /// 当初はNewton法のステップ幅（更新前後のパラメータの差）が縮小しているかを見る、
     /// より直接的な基準を検討した（真の停留点への収束ならステップ幅も勾配ノルムと共に
@@ -108,7 +108,7 @@ pub enum MleError {
     /// （ユーザー確認済み）。代わりに、`fit()`が最適化前に標準化する設計行列
     /// （`standardize_columns`）を活かし、標準化パラメータ空間でのノルムの大きさを
     /// 事後チェックする、より単純だが3手法へ確実に統一適用できる基準を採用した。
-    /// 実測（既存の`near_separation`シナリオ=境界ケース vs 本Issue発見時の病的データ）で
+    /// 実測（既存の`near_separation`シナリオ=境界ケース vs 発見時の病的データ）で
     /// 標準化パラメータノルムに40倍以上の差があることを確認済み
     /// （`SEPARATION_PARAM_NORM_THRESHOLD`のdocコメント参照）。
     #[error(
@@ -122,11 +122,11 @@ pub enum MleError {
 /// [`SeparationSuspected`](MleError::SeparationSuspected)を検出する閾値。標準化
 /// パラメータ空間（`fit()`が最適化に使う空間、`standardize_columns`参照）でのノルムが
 /// これを超える場合、勾配ノルム基準で収束と判定されていても取り消す。`LogitOptions`等に
-/// 公開の調整用オプションとしては設けず（Issue #138、ユーザー確認済み）、内部実装の
+/// 公開の調整用オプションとしては設けず（ユーザー確認済み）、内部実装の
 /// 詳細として固定する。
 ///
 /// 値の根拠: 既存の`near_separation`シナリオ（`beta1=20`、意図的に境界ケースに留めてある
-/// 合成データ、既存の合格テストが使う）は標準化パラメータノルムが約31。一方、本Issue発見時の
+/// 合成データ、既存の合格テストが使う）は標準化パラメータノルムが約31。一方、発見時の
 /// 病的データ（`beta1=100`）は約1282。両者の間には40倍以上の開きがあり、`100`はこの
 /// ギャップの中間（正常な境界ケース側に3倍強のマージンを残す）に位置する。
 const SEPARATION_PARAM_NORM_THRESHOLD: f64 = 100.0;
@@ -136,7 +136,7 @@ const SEPARATION_PARAM_NORM_THRESHOLD: f64 = 100.0;
 /// 切り出しているのは、実際の最適化トラジェクトリ（`beta1`を振っても、ロジスティック
 /// 関数の浮動小数点飽和により`y`の実現値が広い範囲で同一になり、閾値付近の境界データを
 /// 意図的に作るのが難しい）に頼らず、境界値そのものを直接検証できるようにするため
-/// （Issue #138、rust-reviewerの指摘を受けて追加）。
+/// （rust-reviewerの指摘を受けて追加）。
 fn separation_suspected(params: &[f64]) -> bool {
     l2_norm(params) > SEPARATION_PARAM_NORM_THRESHOLD
 }
@@ -147,7 +147,7 @@ fn separation_suspected(params: &[f64]) -> bool {
 /// 次元検証とは別、`nonlinear-implementation-notes.md`参照）で行う。O(n)の単純走査
 /// （既にengine_pybind側で行っているNaN/無限大チェックと同オーダー）で、
 /// 反復最適化本体（O(n·k²)を`max_iter`回）に対して計算コストは無視できる
-/// （Issue #135、実測: n=1,000,000で`fit()`全体の約0.16%）。
+/// （実測: n=1,000,000で`fit()`全体の約0.16%）。
 pub fn validate_binary_y(y: &Mat<f64>) -> Result<(), MleError> {
     for i in 0..y.nrows() {
         let value = *y.get(i, 0);
@@ -163,14 +163,13 @@ pub fn validate_binary_y(y: &Mat<f64>) -> Result<(), MleError> {
 /// `link(θ̂)=ȳ`を満たす」という性質（`fit_newton_converges_to_closed_form_solution_
 /// for_intercept_only_model`で検証済み）を持つため、この式はリンク関数（ロジスティック/
 /// 標準正規CDF）に依存しない。ベルヌーイ尤度が切片のみモデルでは`p=link(θ)`のみに
-/// 依存する形に落ちることに由来する（`docs/planning/specs/logit-implementation-notes.md`
-/// 「適合度統計量」節参照）。
+/// 依存する形に落ちることに由来する（`docs/spec/logit-spec.md`「適合度統計量」節参照）。
 ///
 /// `n1`または`n0`が0（全観測が同じ値）のときの`0*ln(0)`（NaN）を避けるため、該当項を
 /// 明示的に0として扱う（情報理論の`0 log 0 = 0`規約）。`Result`を経由しない内部専用の
 /// 計算（適合度統計量向け、収束後に1回だけ評価する）で、退化ケースを`fit()`の反復
 /// 最適化を経由せず直接テストできるよう独立した関数として切り出している
-/// （元はLogit/Probitそれぞれに同一のコードが重複していたが、Issue #77のレビューで
+/// （元はLogit/Probitそれぞれに同一のコードが重複していたが、レビューで
 /// 指摘を受けてこちらへ集約した）。
 pub fn log_likelihood_null(y: &Mat<f64>) -> f64 {
     let n = y.nrows();
@@ -208,7 +207,7 @@ pub struct GoodnessOfFit {
 /// 収束点の対数尤度`llf`・切片のみモデルの対数尤度`llnull`（[`log_likelihood_null`]）・
 /// 観測数`n`・パラメータ数`k`から[`GoodnessOfFit`]一式を計算する。モデル固有の尤度計算
 /// （リンク関数）には依存しないため、Logit/Probit間で完全に共通の計算として
-/// `nonlinear/common.rs`に置く（Issue #77のレビュー指摘を受けて集約。元はLogit/Probit
+/// `nonlinear/common.rs`に置く（レビュー指摘を受けて集約。元はLogit/Probit
 /// それぞれの`fit()`にほぼ同一のコードが重複していた）。
 ///
 /// `df_model = k.saturating_sub(1)`: `include_intercept=false`かつ説明変数も無い
@@ -297,7 +296,7 @@ pub enum CovType {
 /// 微分（Logitなら`p(1-p)`、Probitなら`φ(z)`）の計算式のみモデルごとの実装
 /// （`logit.rs`等の`overall_w_and_s`/`at_point_w_and_s`）に置き、`w`・その勾配`s`から
 /// `dydx`・デルタ法標準誤差を求める部分は`w`/`s`の意味に依存しないためこのモジュールの
-/// `marginal_effects_from_w_s`に共通化している（Issue #78、`dydx_and_jacobian`のdoc
+/// `marginal_effects_from_w_s`に共通化している（`dydx_and_jacobian`のdoc
 /// コメント参照）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarginalEffectsAt {
@@ -312,7 +311,7 @@ pub enum MarginalEffectsAt {
 /// 説明変数ごとの標本平均（列ごと、`marginal_effects`の`at="mean"`用）。切片列
 /// （`has_intercept=true`の先頭列、常に1.0）も含めて計算する（呼び出し側の
 /// `at_point_w_and_s`が切片の代表点として1.0が返ることを前提とするため、
-/// 除外しない。元はLogitの`column_means`。Issue #78でモデル間の重複を避けるため
+/// 除外しない。元はLogitの`column_means`。モデル間の重複を避けるため
 /// `common.rs`へ移設した）。
 pub fn column_means(x: &Mat<f64>) -> Vec<f64> {
     let n = x.nrows();
@@ -323,7 +322,7 @@ pub fn column_means(x: &Mat<f64>) -> Vec<f64> {
 }
 
 /// 説明変数ごとの標本中央値（列ごと、`marginal_effects`の`at="median"`用）。`n`が偶数の
-/// 場合は中央2値の平均。元はLogitの`column_medians`（Issue #78で`common.rs`へ移設）。
+/// 場合は中央2値の平均。元はLogitの`column_medians`（`common.rs`へ移設）。
 ///
 /// `partial_cmp().unwrap()`について: `x`の値はNaN/無限大を含まないことが
 /// `engine_pybind::column_extraction`側で既に保証されている前提（`engine`の責務境界の
@@ -349,7 +348,7 @@ pub fn column_medians(x: &Mat<f64>) -> Vec<f64> {
 /// `conf_low`/`conf_high`、`nonlinear-api-design.md`6章）。定数項（切片）は行から除外する
 /// （切片の限界効果は経済学的に意味を持たない、statsmodelsの`get_margeff()`と同じ扱い）。
 /// Logit/Probit/Tobitいずれでも同じ形の結果になるため`common.rs`に置く（元はLogitの
-/// `MarginalEffects`、Issue #78で`common.rs`へ移設）。
+/// `MarginalEffects`、`common.rs`へ移設）。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
 #[derive(Debug)]
@@ -415,7 +414,7 @@ impl MarginalEffects {
 /// 帰着する（Logitなら`w=p(1-p)`、Probitなら`w=φ(z)`。`docs/planning/specs/
 /// nonlinear-implementation-notes.md`「限界効果」参照）ため、`w`・`s`の計算方法
 /// （`at`・リンク関数ごとに異なる）とこの式（それらに依らず共通）を分離できる。
-/// 元はLogitの`dydx_and_jacobian`（Issue #78で`common.rs`へ移設、Probitでも同型の
+/// 元はLogitの`dydx_and_jacobian`（`common.rs`へ移設、Probitでも同型の
 /// 式であることを確認済み）。`pub`にしているのは`marginal_effects_from_w_s`からの
 /// 呼び出しに加え、Logit/Probitそれぞれのテスト（モデル固有の`overall_w_and_s`等が
 /// 返す実際の`w(θ)`を使った数値微分によるヤコビアンの独立検証）が直接呼ぶため。
@@ -523,7 +522,7 @@ pub fn marginal_effects_from_w_s(
 /// モデルごとに実装）のみを`threshold`で二値化し（`predicted_class = 1 if p > threshold
 /// else 0`）、実測`y`は`threshold`に関わらず常に`0.5`で二値化する
 /// （`actual = 1 if y >= 0.5 else 0`）。リンク関数に依存しない計算のため
-/// `nonlinear/common.rs`に置く（元はLogitの`pred_table`、Issue #79で`common.rs`へ
+/// `nonlinear/common.rs`に置く（元はLogitの`pred_table`、`common.rs`へ
 /// 移設。Probitでも同一の関数をそのまま使う）。
 ///
 /// statsmodelsの`pred_table(threshold)`（`BinaryResults.pred_table`）の実装を数値照合の
@@ -543,7 +542,7 @@ pub fn marginal_effects_from_w_s(
 /// `predicted.len()`は`y.nrows()`と一致する契約（呼び出し側は各モデルの`predict()`と
 /// `self.input.y()`という常に同じ`n`を持つペアを渡すため）。`debug_assert_eq!`は
 /// この契約が破られた場合に`enumerate().take(n)`がサイレントに打ち切って不正確な
-/// 集計を返すのを防ぐための防御（rust-reviewer指摘、Issue #79）。
+/// 集計を返すのを防ぐための防御（rust-reviewer指摘）。
 pub fn pred_table(predicted: &[f64], y: &Mat<f64>, threshold: f64) -> Mat<f64> {
     let n = y.nrows();
     debug_assert_eq!(
@@ -675,7 +674,7 @@ where
     // 演算（`neg_hessian_inverse`等）が前提とする「対数尤度そのもののHessian」（真の
     // 最大点で負定値）でなければならない。両者は符号が逆（`-loglik`のHessian＝
     // `loglik`のHessianの符号反転）なので、ここで1回だけ符号反転して契約を合わせる
-    // （Issue #55着手時に発覚、`docs/planning/specs/nonlinear-implementation-notes.md`
+    // （実装時に発覚、`docs/planning/specs/nonlinear-implementation-notes.md`
     // 参照）。
     let cost_hessian = model
         .hessian(&params)
@@ -699,7 +698,7 @@ where
 /// いずれも`State`トレイト経由で同じ形で取り出せる。
 ///
 /// **`ok_or_else`の2箇所は理論上到達不能**（`.claude/rules/rust-style.md`「テスト」の
-/// カバレッジ方針、Issue #64でLogitのカバレッジ確認時に判明・受け入れ済み）:
+/// カバレッジ方針、Logitのカバレッジ確認時に判明・受け入れ済み）:
 /// - `state.get_best_param()`が`None`になるのは`Executor::run()`が`init()`/`next_iter()`を
 ///   一度も呼ばずに終了した場合のみだが、`init()`が必ず初期パラメータを`state`に設定する
 ///   （`FaerNewton::init`、BFGS/LBFGSも同様に組み込みソルバーが初期化時に設定する）ため
@@ -732,7 +731,7 @@ where
 /// `FaerNewton::next_iter`内で`MleError`から`?`により変換された値は`downcast`で復元し、
 /// それ以外（argmin自体の内部エラー等）は`ComputationFailed`にまとめる。
 ///
-/// **`Err(other)`分岐は実測ではカバーされていない**（Issue #64で判明）:
+/// **`Err(other)`分岐は実測ではカバーされていない**（判明済み）:
 /// 本プロジェクトが制御する全てのエラー経路（`FaerNewton`・モデルの`CostFunction`/
 /// `Gradient`/`Hessian`実装）は`MleError`（`?`経由で`anyhow::Error`に変換されたもの）
 /// のみを返すため、`downcast`は常に成功する。この分岐はargmin自体の内部（`Executor`の
@@ -756,7 +755,7 @@ fn identity_matrix(k: usize) -> Vec<Vec<f64>> {
 /// L2ノルム。勾配ベクトルの収束判定（`FaerNewton::terminate`）だけでなく、
 /// パラメータベクトルのノルム（`SEPARATION_PARAM_NORM_THRESHOLD`の判定）にも流用する
 /// 中立的な名前にしている（元は`gradient_norm`という名前だったが、勾配以外の用途にも
-/// 使うようになったため改名した。rust-reviewer指摘、Issue #138）。
+/// 使うようになったため改名した（rust-reviewer指摘）。
 fn l2_norm(g: &[f64]) -> f64 {
     g.iter().map(|x| x * x).sum::<f64>().sqrt()
 }
@@ -782,7 +781,7 @@ where
     /// 使っておらず、`run_solver`のテストでも実行結果（`SolverOutput`）のみを検証するため
     /// 呼ばれない。実装自体は`argmin::solver::newton::Newton`等の組み込みソルバーに倣った
     /// 定型実装で、分岐を持たない単純な文字列リテラルの返却のため、未カバーでも
-    /// 振る舞いの正しさに影響しない（Issue #64で判明・受け入れ済み）。
+    /// 振る舞いの正しさに影響しない（判明・受け入れ済み）。
     fn name(&self) -> &str {
         "Newton (faer-backed)"
     }
@@ -791,7 +790,7 @@ where
     /// 常に「`state.get_param()`と対応する勾配」を見られる（`next_iter`実行前の最初の
     /// `terminate()`呼び出しも含む。初期値が既に収束条件を満たす場合を正しく扱うため）。
     ///
-    /// **`ok_or_else`分岐は理論上到達不能**（Issue #64で判明・受け入れ済み）:
+    /// **`ok_or_else`分岐は理論上到達不能**（判明・受け入れ済み）:
     /// `run_solver`は必ず`Executor::configure(|state| state.param(initial_params)...)`
     /// で`init()`が呼ばれる前に初期パラメータを`state`へ設定しており、argminの
     /// `Executor::run()`はこの設定後に`init()`を呼ぶ契約のため、`state.take_param()`が
@@ -975,11 +974,11 @@ pub fn destandardize_cov_params(cov_std: &Mat<f64>, scale: &ColumnScale) -> Mat<
 /// **Cholesky分解の前に固有値ベースの悪条件検出を行う**（`crate::linear_algebra::
 /// ensure_well_conditioned_symmetric_matrix`、OLSの`wald_f_test`と共有する
 /// ユーティリティ）。非ピボットCholesky（`Llt`）のL因子対角成分は、構造的な
-/// 特異性（完全な多重共線性等）を確実には検出できない（OLSで実測確認済み、
-/// Issue #107）。Newton法は`newton_step`内の別の検出経路（ピボット付きQR）が
+/// 特異性（完全な多重共線性等）を確実には検出できない（OLSで実測確認済み）。
+/// Newton法は`newton_step`内の別の検出経路（ピボット付きQR）が
 /// 最適化中に必ず通るためこの問題が表面化しなかったが、BFGS/L-BFGSは
 /// `newton_step`を経由しないため、収束後のこの関数が唯一の検出経路になる
-/// （Issue #129で発覚: `Method::Bfgs`で完全な多重共線性のあるデータセットを
+/// （発覚済み: `Method::Bfgs`で完全な多重共線性のあるデータセットを
 /// 最適化すると、修正前はエラーにならず桁違いに巨大な値を返していた）。
 fn neg_hessian_inverse(hessian: &Mat<f64>, k: usize) -> Result<Mat<f64>, MleError> {
     let neg_h = Mat::from_fn(k, k, |i, j| -(*hessian.get(i, j)));
@@ -1014,7 +1013,7 @@ fn opg_matrix(scores: &Mat<f64>) -> Mat<f64> {
 /// （`neg_hessian_inverse`と同じ理由でコレスキーを使うが、対象行列がHessianではなく
 /// スコアの外積和のため、特異時のエラーは`MleError::SingularOpgMatrix`で区別する）。
 /// `neg_hessian_inverse`と同じ理由で、Cholesky分解の前に`ensure_well_conditioned_
-/// symmetric_matrix`による固有値ベースの悪条件検出を行う（Issue #129）。
+/// symmetric_matrix`による固有値ベースの悪条件検出を行う。
 pub fn opg_cov_params(scores: &Mat<f64>, k: usize) -> Result<Mat<f64>, MleError> {
     let psi = opg_matrix(scores);
     ensure_well_conditioned_symmetric_matrix(&psi, k, "OPG matrix")
@@ -1064,8 +1063,7 @@ pub fn sandwich_cov_params(
 ///
 /// `groups`が2種類以上の値を持つこと（クラスター数`G>=2`）の検証（`CommonError::
 /// InsufficientClusters`）、および未指定時の`CommonError::MissingClusterColumn`は
-/// モデルごとの`fit()`実装側の責務（OLSの`validate_cluster_groups`と同じ役割分担、
-/// `docs/planning/specs/logit-probit-issue-breakdown.md`のB7/C7参照）。
+/// モデルごとの`fit()`実装側の責務（OLSの`validate_cluster_groups`と同じ役割分担）。
 /// `groups.len() != n`もモデル側の内部契約（`debug_assert_eq!`で検証）。
 pub fn cluster_cov_params(
     hessian: &Mat<f64>,
@@ -1542,7 +1540,7 @@ mod tests {
     #[test]
     fn mle_error_messages_are_human_readable() {
         // 6種の共通バリアント（DimensionMismatch等）のメッセージ検証は
-        // `engine::error`側のテストに集約済み（Issue #113）。ここではnonlinear固有の
+        // `engine::error`側のテストに集約済み。ここではnonlinear固有の
         // バリアントに加え、`Common`が`CommonError`のDisplayをtransparentに転送する
         // ことだけを確認する。
         assert_eq!(
@@ -1660,7 +1658,7 @@ mod tests {
 
     /// `opg_cov_params`が非ピボットCholeskyでは検出できない「ほぼ特異」（構造的な
     /// ゼロ行列ではなく、極端なスケール差による悪条件）も検出できることを確認する
-    /// （Issue #129のチェックリスト「opg_cov_paramsが同じ問題を抱えているか実測で
+    /// （「opg_cov_paramsが同じ問題を抱えているか実測で
     /// 確認する」に対応。`ensure_well_conditioned_symmetric_matrix`単体テストと同じ
     /// スケール差（1e6/1e-3）を`scores`側で再現し、`Ψ=scores'*scores`が
     /// `diag(1e12, 1e-6)`相当になるよう構成した）。
@@ -1861,7 +1859,7 @@ mod tests {
     /// {...} else {0.0}`等）を通る。この分岐は`fit()`経由（反復最適化）だと、全観測が
     /// 同じyの場合に完全分離が起きて収束の挙動が不安定になりうるため、`fit()`を
     /// 経由せず`log_likelihood_null`を直接呼んで検証する（Logitのカバレッジ確認
-    /// Issue #64で判明したギャップと同じ理由。Issue #77のcommon.rsへの集約に伴い、
+    /// 判明したギャップと同じ理由。common.rsへの集約に伴い、
     /// このテストもLogit/Probitそれぞれの重複から本モジュールへ集約した）。
     #[test]
     fn log_likelihood_null_returns_zero_for_degenerate_all_same_y() {
@@ -1919,7 +1917,7 @@ mod tests {
         assert!((means[1] - 25.0).abs() < 1e-12); // (10+20+30+40)/4
     }
 
-    /// `column_medians`（元はLogitの単体テスト、Issue #78で`common.rs`集約に伴い移設）を、
+    /// `column_medians`（元はLogitの単体テスト、`common.rs`集約に伴い移設）を、
     /// 奇数・偶数それぞれの観測数で直接検証する。
     #[test]
     fn column_medians_matches_expected_for_odd_and_even_n() {
@@ -2076,9 +2074,9 @@ mod tests {
 
     /// `pred_table`の実測クラス（行方向の合計）は`threshold`の値に関わらず不変であるべき
     /// （`y`は常に固定の0.5分割でバケット化され、`threshold`は`predicted`側にのみ適用される
-    /// 仕様、`pred_table`のdocコメント参照）。元はLogitの単体テスト（Issue #63時点、
+    /// 仕様、`pred_table`のdocコメント参照）。元はLogitの単体テスト（
     /// rust-reviewerの指摘・statsmodelsとの数値照合で発覚した実装ミスの回帰テスト）を
-    /// Issue #79で`common.rs`へ移設した。
+    /// `common.rs`へ移設した。
     #[test]
     fn pred_table_actual_class_counts_are_invariant_to_threshold() {
         let predicted = vec![0.9, 0.6, 0.3, 0.1];

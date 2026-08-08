@@ -51,7 +51,7 @@ ATOL = 1e-9
 # 基準）だとstatsmodelsとの数値一致がRTOL=1e-8を満たさない（実測diff~7e-8相対）。
 # tol=1e-8まで締めると一致することを確認済みだが、既定値自体は変更しない
 # （BFGSがmax_iter=35のうち34回を要するようになり、他の難しいデータで
-# NonConvergenceリスクが上がるため。ユーザー確認済み、Issue #68）。
+# NonConvergenceリスクが上がるため。ユーザー確認済み）。
 # このシナリオの数値比較テストに限り、明示的にtol=1e-8を指定する。
 _NEAR_SEPARATION_TOL = 1e-8
 

@@ -855,7 +855,7 @@ fn ensure_full_rank(
         // NaNを明示的にチェックする（`diag <= threshold`だとNaNとの比較は常にfalseになり
         // すり抜けてしまう）。全ゼロ設計行列（`include_intercept=false`かつ全説明変数列が
         // ゼロ）のcol_piv_qrは列選択時の0除算によりRの対角がNaNになりうるため
-        // （faer 0.24.4で実機確認済み、Issue #109。`nonlinear::common::newton_step`と
+        // （faer 0.24.4で実機確認済み。`nonlinear::common::newton_step`と
         // 同じ修正パターン）。
         if diag.is_nan() || diag <= threshold {
             return Err(LeastSquaresError::SingularMatrix);
@@ -1263,7 +1263,7 @@ mod tests {
         // 全ゼロ行列のcol_piv_qrは列選択時の0除算によりRの対角成分がNaNになりうる
         // （faer 0.24.4で実機確認済み）。`diag <= threshold`のみだとNaNとの比較は
         // 常にfalseになりすり抜けてしまうため、`diag.is_nan()`の明示チェックが
-        // 必要（Issue #109）。`OlsEstimator::fit`経由だと、この後段の`xtx_inverse`
+        // 必要。`OlsEstimator::fit`経由だと、この後段の`xtx_inverse`
         // （全ゼロのX'Xは非正定値でCholesky分解が失敗する）が偶然同じ
         // `SingularMatrix`を返し検出漏れを覆い隠してしまうため、`ensure_full_rank`
         // を直接呼び出して検証する。
@@ -2082,7 +2082,7 @@ mod tests {
         let _ = OlsEstimator::fit(input, cov_type, 0.95);
     }
 
-    /// property-basedテスト（Issue #102）。固定シナリオでの値の一致確認（上記）とは別に、
+    /// property-basedテスト。固定シナリオでの値の一致確認（上記）とは別に、
     /// OLSが満たすべき不変条件をランダムなデータで検証する（`testing-policy.md`
     /// 「将来的に検討する技術」参照）。
     mod proptests {
@@ -2098,8 +2098,8 @@ mod tests {
         /// （`-100.0..100.0`）からサンプリングする。この条件下では生成される設計行列は
         /// 実務上ほぼ確実にフルランクになるため、各プロパティ側では追加の制約は課さず、
         /// `prop_assume!(result.is_ok())`で非フルランクになるレアケース（丸め誤差起因の
-        /// 境界事例等）のみを除外する（Issue #102「ランダムに生成する設計行列は
-        /// SingularMatrixにならない範囲に制約する」に対応）。
+        /// 境界事例等）のみを除外する（「ランダムに生成する設計行列は
+        /// SingularMatrixにならない範囲に制約する」という方針に対応）。
         ///
         /// `keys`は列順序入れ替えテスト専用の補助データ（他のプロパティでは未使用）。
         fn ols_case_strategy()

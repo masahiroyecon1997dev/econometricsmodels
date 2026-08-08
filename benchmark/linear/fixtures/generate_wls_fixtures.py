@@ -4,7 +4,7 @@
 全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つのJSONにまとめて書き出す。
 構成は`generate_ols_fixtures.py`に合わせている（重み列`weight`を追加で渡す点のみ異なる）。
 
-シナリオが持つ`weight`列は、OLS実装時（Issue #15）から既に含まれている合成データ生成
+シナリオが持つ`weight`列は、OLS実装時から既に含まれている合成データ生成
 ロジックのもの（heteroskedasticシナリオは`1/sigma_i^2`、それ以外は`uniform(0.5, 1.5)`。
 いずれも正の値）をそのまま使う。詳細は`docs/spec/wls-spec.md`参照。
 
@@ -43,7 +43,7 @@ from run_statsmodels_benchmark import DATA_DIR, run  # noqa: E402
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md
 # 「テストの3系統」参照）。ComputationErrorが発生することのみをテスト
-# コード側で確認する（OLSと同じ挙動をWLSでも実測確認済み、Issue #106）。
+# コード側で確認する（OLSと同じ挙動をWLSでも実測確認済み）。
 NUMERIC_SCENARIOS = [
     "baseline",
     "small_n",
@@ -52,7 +52,7 @@ NUMERIC_SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "high_condition_number",
-    # n=k+1（自由度1ちょうど）の成功パス（Issue #106、OLSのIssue #101相当）。
+    # n=k+1（自由度1ちょうど）の成功パス（OLSの同種ケース相当）。
     "baseline_df1",
 ]
 
@@ -78,13 +78,13 @@ def build_fixtures() -> dict:
 
         # クラスターロバストSEは、シナリオ依存ではなくグルーピングの動作確認が目的のため、
         # baselineシナリオでのみ、複数のグルーピングパターンで確認する
-        # （generate_ols_fixtures.pyと同じ方針、Issue #100・#106）。
+        # （generate_ols_fixtures.pyと同じ方針）。
         if scenario == "baseline":
             n = pl.read_csv(DATA_DIR / "synthetic_baseline.csv").height
             fixtures[scenario]["cluster"] = _run_cluster_case()
             fixtures[scenario]["cluster_imbalanced"] = _run_cluster_case(
                 groups=imbalanced_cluster_groups(n),
-                note="不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。Issue #106。",
+                note="不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。",
             )
             # OLS側（generate_ols_fixtures.py）と同じ理由でq=1（説明変数1個）に
             # 絞る。baseline既定の3個のままG=2にすると、ロバストWald検定の
@@ -94,7 +94,7 @@ def build_fixtures() -> dict:
             fixtures[scenario]["cluster_g2"] = _run_cluster_case(
                 groups=[str(i % 2) for i in range(n_g2)],
                 note="クラスタ数境界（G=2ちょうど）の成功パス確認用。"
-                "説明変数1個（q=1）に絞っている（Issue #106、OLSのIssue #100"
+                "説明変数1個（q=1）に絞っている（OLSの同種ケース"
                 "相当。3個だとロバストWald検定の共分散行列が特異になり"
                 "ComputationError）。",
                 k1=True,
@@ -110,8 +110,8 @@ def build_fixtures() -> dict:
         "note": (
             "perfect_multicollinearity・scale_varianceシナリオはここに含まない"
             "（いずれもComputationErrorの発生確認のみ、テストコード側で対応。"
-            "scale_varianceはOLSと同じ理由（Issue #107）でロバストWald検定の"
-            "共分散部分行列が全cov_typeで数値的にほぼ特異になる、Issue #106で"
+            "scale_varianceはOLSと同じ理由でロバストWald検定の"
+            "共分散部分行列が全cov_typeで数値的にほぼ特異になる、"
             "WLSでも実測確認済み）。"
             "重みは合成データセットの'weight'列（OLS実装時から存在、常に正）を使う。"
             "クロスチェック用のRベンチマークはwls_crosscheck.json（別スクリプト）で生成する。"

@@ -1,6 +1,6 @@
 """Probit python_packageラッパーの構造・API・エラーパスのスモークテスト。
 
-主リファレンス（statsmodels）との厳密な数値比較はIssue #84で別途実施する
+主リファレンス（statsmodels）との厳密な数値比較は別途実施する
 （`test_ols_fixtures.py`/`test_wls_fixtures.py`/`test_logit_fixtures.py`と
 同じ役割分担）。ここでは`fit()`の成功パス・`coef_table()`/`predict()`/
 `pred_table()`/`marginal_effects()`の構造・`ValidationError`/
@@ -321,7 +321,7 @@ def test_non_convergence_raises_computation_error_with_tiny_max_iter(
 def test_separation_suspected_raises_computation_error_for_near_separation_data():
     """准完全分離データ（`x1`の真の係数を極端に大きくし、ほぼ全観測がx1の符号だけで
     完全に分類できるようにしたDGP）は`ComputationError`（engine側の
-    `SeparationSuspected`）。`test_logit.py`のLogit版（Issue #138）のProbit版。
+    `SeparationSuspected`）。`test_logit.py`のLogit版のProbit版。
     """
     random.seed(42)
     n = 200

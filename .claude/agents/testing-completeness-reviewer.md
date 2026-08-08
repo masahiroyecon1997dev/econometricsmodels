@@ -37,7 +37,6 @@ CLAUDE.md（特に7章）と`.claude/rules/testing-policy.md`は通常自動的�
 
 - 4観点それぞれで「揃っている項目」「欠けている項目」を明示する。
 - 欠けている項目には重要度（must fix / should fix / nice to have）を付ける。
-- 良い点があれば簡潔に触れる。
 - 指摘のみを行い、コード自体は修正しない。対応が必要な場合は「`/test-new`・`/implement-python`・`/implement-rust`での対応を推奨」と伝える。
 
 ## 制約

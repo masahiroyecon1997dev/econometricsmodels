@@ -1,4 +1,5 @@
 ---
+name: review-testing
 description: testing-completeness-reviewerサブエージェントに委譲してテストの網羅性をレビューする（カバレッジ率では見えない構造的な抜けの検出）
 argument-hint: [対象の推定手法名（省略時は直近のgit diffから推定）]
 allowed-tools: Bash(git diff:*), Bash(git log:*)

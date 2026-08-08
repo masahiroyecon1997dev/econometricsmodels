@@ -5,6 +5,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-08
+
+Added Probit (binary probit regression) to Phase 2 (generalized and discrete choice models).
+
+### Added
+
+- Probit estimation (`Probit` / `ProbitOptions` / `ProbitResults`), estimated by maximum likelihood
+- Solver options: Newton-Raphson (default), BFGS, L-BFGS (`method`)
+- Standard error options: classical (observed information), OPG (BHHH), HC0/HC1, cluster-robust
+- Goodness-of-fit statistics: log-likelihood, likelihood-ratio test, McFadden pseudo R², AIC, BIC
+- `predict()` and `pred_table()` (classification table)
+- `marginal_effects()` (average marginal effects, and at-mean / at-median), with delta-method standard errors
+- Probit API reference and usage examples in mkdocs
+
+### Changed
+
+- `OlsResults`/`WlsResults`: renamed the `nobs` property to `n_obs`, for naming consistency with Logit/Probit/FE/RE/IV (breaking change, permitted during the `0.x.x` pre-release period)
+
+### Fixed
+
+- OLS: a NaN diagonal in the QR decomposition (produced when the design matrix is all-zero, e.g. `include_intercept=False` with all-zero explanatory columns) could evade `ensure_full_rank`'s singularity check, instead of raising a `SingularMatrix` error
+
 ## [0.3.0] - 2026-08-01
 
 Added Logit (binary logistic regression) to Phase 2 (generalized and discrete choice models).
@@ -59,7 +81,8 @@ Initial release. Only OLS (Ordinary Least Squares) from Phase 1 (basic regressio
 - Python API taking a polars DataFrame as input (`OLS` / `OLSOptions` / `OlsResults`)
 - Rust computational core (`engine`) and PyO3 bindings (`engine_pybind`)
 
-[Unreleased]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/releases/tag/v0.1.0

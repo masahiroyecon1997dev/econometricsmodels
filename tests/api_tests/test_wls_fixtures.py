@@ -30,6 +30,7 @@ import polars as pl
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
+from generate_synthetic_datasets import imbalanced_cluster_groups  # noqa: E402
 
 from econometricsmodels import WLS, OLSOptions  # noqa: E402
 
@@ -49,6 +50,9 @@ SCENARIOS = [
     "heteroskedastic",
     "autocorrelated",
     "moderate_multicollinearity",
+    "high_condition_number",
+    # n=k+1（自由度1ちょうど）の成功パス（Issue #106、OLSのIssue #101相当）。
+    "baseline_df1",
 ]
 COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
 
@@ -106,7 +110,7 @@ def _check_result(res, ref: dict, label: str) -> None:
     _assert_close(
         res.log_likelihood, ref["log_likelihood"], f"{label}/log_likelihood"
     )
-    assert res.nobs == ref["nobs"], f"{label}/nobs"
+    assert res.n_obs == ref["nobs"], f"{label}/n_obs"
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
@@ -143,11 +147,103 @@ def test_cluster_matches_statsmodels(fixtures):
     _assert_dict_close(res.std_errors, ref["se"], "cluster/se")
 
 
+def test_cluster_imbalanced_matches_statsmodels(fixtures):
+    """不均衡クラスタ（サイズ[2, 3, 5, 10, 30, 50]のタイル、Issue #106、OLSのIssue #100相当）。
+
+    均等サイズの疑似グループ（行番号%10）だけでは見逃す、実務で起こりやすい
+    グループサイズの偏りを持つケース（`testing-policy.md`「テスト用データセット」3.）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    groups = imbalanced_cluster_groups(df.height)
+    df = df.with_columns(pl.Series("cluster_group", groups))
+    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    res = WLS(
+        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+    ).fit()
+
+    ref = fixtures["baseline"]["cluster_imbalanced"]
+    _assert_dict_close(res.params, ref["coef"], "cluster_imbalanced/coef")
+    _assert_dict_close(res.std_errors, ref["se"], "cluster_imbalanced/se")
+
+
+def test_cluster_g2_matches_statsmodels(fixtures):
+    """クラスタ数境界（G=2ちょうど）の成功パス（Issue #106、OLSのIssue #100相当）。
+
+    説明変数1個（q=1）に絞っている。baseline既定の3個のままG=2にすると、
+    ロバストWald検定の共分散部分行列（3x3）のランクがG=2以下となり必然的に
+    特異になりComputationErrorになる（成功パスにならない。
+    `test_cluster_g2_with_multiple_slopes_raises_computation_error`参照）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
+    df = (
+        df.with_row_index("_row")
+        .with_columns((pl.col("_row") % 2).alias("cluster_group"))
+        .drop("_row")
+    )
+    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    res = WLS(df, y="y", x=["x1"], weight="weight", options=options).fit()
+
+    ref = fixtures["baseline"]["cluster_g2"]
+    _assert_dict_close(res.params, ref["coef"], "cluster_g2/coef")
+    _assert_dict_close(res.std_errors, ref["se"], "cluster_g2/se")
+
+
+def test_cluster_g2_with_multiple_slopes_raises_computation_error():
+    """G=2×説明変数3個（傾き係数q=3）は、ロバストWald検定の共分散部分行列
+    （3x3）のランクがクラスタ数G=2以下になり必然的に特異になるため、
+    fit()全体がComputationErrorになる（OLSと同じ挙動、Issue #106）。
+    """
+    from econometricsmodels import ComputationError
+
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    df = (
+        df.with_row_index("_row")
+        .with_columns((pl.col("_row") % 2).alias("cluster_group"))
+        .drop("_row")
+    )
+    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    with pytest.raises(ComputationError):
+        WLS(
+            df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        ).fit()
+
+
+def test_perfect_multicollinearity_raises_computation_error():
+    """完全な多重共線性は数値比較の対象外（`testing-policy.md`「テストの3系統」）。
+    想定エラー（`ComputationError`）が発生することのみを確認する
+    （OLS・Logitと同じ凍結CSVパターンに統一、Issue #151）。
+    """
+    from econometricsmodels import ComputationError
+
+    df = pl.read_csv(DATA_DIR / "synthetic_perfect_multicollinearity.csv")
+    with pytest.raises(ComputationError):
+        WLS(df, y="y", x=["x1", "x2", "x3"], weight="weight").fit()
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+def test_scale_variance_raises_computation_error(cov_type):
+    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
+    傾き係数の同時共分散部分行列がスケール比の2乗（≈1e18）相当の条件数を持ち
+    倍精度浮動小数点の限界を超えて数値的に特異になる（OLSと同じ理由、
+    `test_ols_fixtures.py`参照。Issue #106でWLSでも実測確認済み）。
+    数値比較はせずエラーパスのみ確認する。
+    """
+    from econometricsmodels import ComputationError
+
+    df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
+    kwargs = {"hac_lags": HAC_LAG_IN_FIXTURE} if cov_type == "hac" else {}
+    options = OLSOptions(cov_type=cov_type, **kwargs)
+    with pytest.raises(ComputationError):
+        WLS(
+            df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        ).fit()
+
+
 def test_401ksubs_matches_statsmodels(fixtures):
     """実データ（401ksubs、fsize==1）でのWLSベンチマーク。
 
-    回帰式・重み定義は`docs/planning/specs/wls-implementation-notes.md`
-    「8. テスト」参照（`nettfa ~ inc + incsq + age + agesq + male + e401k`、
+    回帰式・重み定義は`docs/spec/wls-spec.md`
+    「テスト」参照（`nettfa ~ inc + incsq + age + agesq + male + e401k`、
     重み=1/inc）。
     """
     pytest.importorskip("wooldridge")

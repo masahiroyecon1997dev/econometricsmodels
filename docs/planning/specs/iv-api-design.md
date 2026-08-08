@@ -3,9 +3,9 @@
 [`panel-iv-design-points.md`](../panel-iv-design-points.md)の論点をモデルごとにIssue化したうちの、IV固有の確定事項をまとめる。
 FE/RE共通の設計は[`panel-api-design.md`](./panel-api-design.md)を参照。
 
-**ステータス**: 一部確定（1章: 引数設計、Issue #119／2章: 結果設計、Issue #120／3章: 標準誤差・検定、
-Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレンス実装・テスト方針、Issue #123）。
-他は未確定（6章参照）。
+**ステータス**: 確定（1章: 引数設計、Issue #119／2章: 結果設計、Issue #120／3章: 標準誤差・検定、
+Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレンス実装・テスト方針、Issue #123／
+6章: IV固有論点、Issue #126）。IV側の論点はすべて確定。
 
 ## 1. 引数設計（Issue #119、確定）
 
@@ -70,6 +70,12 @@ Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレン
   誤解させるため、統計的な誠実さを優先して含めない |
 | `r_squared` / `r_squared_adj` | FE/REのような3分割はせず、**OLSと同じ単一フィールド**を
   維持する（IVはパネルのwithin/between区別を持たないため） |
+| `f_statistic` / `f_p_value` | **GMMは常にロバストWald検定（χ²）とする**。OLSが
+  `cov_type`がHC系/clusterのとき`f_statistic`/`f_p_value`を古典的F検定からロバストWald検定に
+  切り替える既存挙動（`ols-api-design.md`6章）を、GMMにも一貫適用する。GMMはIssue #121で
+  z分布と決定済みで古典的F検定の正当化が無いため、フィールド名はそのまま流用しつつ常に
+  Wald版にする（新規フィールドは追加しない）。2SLSはOLSと同じ切り替えロジック（classical時は
+  F検定、HC/cluster/hac時はロバストWald検定）。 |
 
 ### 2.2 モデル固有の追加結果の配置
 
@@ -79,10 +85,8 @@ Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレン
   既存の`OlsResults`型（新規のIV専用型は作らない）。内生変数が複数ある場合、内生変数の数だけ
   第一段階回帰（`x_endog[i] ~ x_exog + instruments`）が存在するため、変数名キーのdictで
   複数の完全な回帰結果を返す。
-- 弱操作変数診断（第一段階F統計量、Stock-Yogo基準）を`first_stage()`の出力にどう含めるか
-  （各`OlsResults`に追加情報を添えるか等）はIssue #126で確定する。
-- Sargan/Hansen検定・Wu-Hausman内生性検定は`fit()`の結果本体に含めるか別メソッドにするかを
-  含め、Issue #126で確定する（本Issueのスコープ外）。
+- 弱操作変数診断（第一段階F統計量）・Sargan/Hansen J（過剰識別）・Wu-Hausman（内生性）は
+  いずれも`fit()`の結果本体に含める（別メソッド化しない）。詳細はIssue #126（6章）で確定。
 
 ## 3. 標準誤差・検定（Issue #121、確定）
 
@@ -95,8 +99,8 @@ Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレン
 - **デフォルトは`"classical"`のまま**（OLS踏襲）。FE/REと異なり`entity`のような常に存在する
   グルーピング列が無いため、`"cluster"`をデフォルトにする実装上の根拠がない。
 - 2SLSの分散はサンドイッチ型（`(X'PzX)^-1 X'Pz Ω Pz X (X'PzX)^-1`、`Ω`の推定方法が
-  `cov_type`で変わる）。GMMは重み行列の選択（1-step/2-step efficient、Issue #126）と
-  `cov_type`の計算が密接に連動するため、具体的な対応表はIssue #126で確定する。
+  `cov_type`で変わる）。**GMMは`cov_type`（最終SEの計算方法）と`weight_type`（点推定に使う
+  重み行列）を分離する**（詳細は6.2）。
 
 ### 3.2 検定分布
 
@@ -149,6 +153,81 @@ GMMは`ivreg`が対応していないため、**Python（`linearmodels`）のみ
 `panel-api-design.md`5.4と同じ（既存方針の相対誤差1e-8を基本、GMM等で乖離が大きい場合は
 実測値に基づき個別に緩和を検討）。
 
-## 6. その他の論点（未確定）
+## 6. IV固有論点（Issue #126、確定）
+
+`linearmodels`（`linearmodels/iv/model.py`・`results.py`）のソースコードを確認しながら
+確定した。
+
+### 6.1 引数の切り分け
+
+Issue #119（1.1.1節）で確定済み。`x_exog`/`x_endog`/`instruments`をすべて独立引数化、
+`instruments`は除外操作変数のみ。
+
+### 6.2 2SLSとGMMの実装方針の違い
+
+- **`weight_type`（GMMの点推定に使う重み行列）と`cov_type`（最終的な報告用SE計算）を分離
+  する**。`linearmodels.IVGMM`と同じ構造（`weight_type`はコンストラクタ/Options側、
+  `cov_type`は`fit()`側という区別ではなく、`IvOptions`に両方のフィールドを持たせる）。
+  他のモデルと違い、**GMMは`cov_type`相当の選択が点推定自体に影響する**
+  （効率的GMMの重み行列は仮定する誤差構造に依存するため）。この分離をしないと、GMMだけ
+  「SEを変えたら係数も変わる」という他モデルには無い挙動を`cov_type`の名の下に隠すことに
+  なり紛らわしい。
+  - `weight_type`の取りうる値: `unadjusted`/`homoskedastic`、`robust`/`heteroskedastic`、
+    `cluster`、`kernel`（Driscoll-Kraayではなく通常のHAC、IVはパネル構造を前提としないため
+    3.1と同じ理由）。
+- **GMMのstep数（1-step/2-step efficient）を選択可能にする**。`IvOptions`に
+  `gmm_iterations: int`（デフォルト`2`＝efficient two-step、`1`で1-step GMM）を追加する。
+  `linearmodels.IVGMM.fit(iter_limit=2, ...)`と同じ考え方。
+- **2SLSはGMMの特殊ケース（`weight_type="unadjusted"`、`gmm_iterations=1`）として実装できる**
+  ことを踏まえ、共通のGMM推定コアを実装し、2SLSはそのコアを固定パラメータで呼び出す設計に
+  する。ただし無理な共通化はしない方針（Issue #122）に従い、実際にどこまで一体化できるかは
+  実装時に判断する（うまく一体化できない場合は2SLS側を素直に閉形式で実装してよい）。
+
+### 6.3 丁度識別（just-identified）の場合の扱い
+
+丁度識別（`len(instruments) == len(x_endog)`）では、GMMの点推定は`weight_type`によらず2SLSと
+数値的に一致する（GMMの一般的性質: 丁度識別ではモーメント条件を正確に0にできるため重み行列が
+点推定に影響しない）。6.2の共通GMM推定コアで自然に吸収され、特別な分岐コードは不要。
+
+### 6.4 弱操作変数診断（第一段階F統計量）
+
+- **x_exogを直交化した後の操作変数係数のみを検定する「部分F統計量」として専用計算する**
+  （`linearmodels.iv.results.FirstStageResults.diagnostics`と同じ方式）。`first_stage()`が
+  返す`OlsResults.f_statistic`（x_exog込みの全回帰係数に対する検定）をそのまま使うと、
+  x_exogの寄与が混ざり弱操作変数診断として不正確になるため、**別計算が必要**。
+- 内生変数ごとに計算し、**`fit()`の主結果にサマリーとして含める**
+  （フィールド名は実装時に確定、例: 内生変数名キーの`dict[str, float]`）。詳細な内訳
+  （各内生変数のOLS回帰そのもの）は`first_stage()`側に残す。
+- **v1のスコープ**: 生の部分F統計量のみ返す。Stock-Yogo臨界値テーブルとの照合（弱操作変数の
+  合否判定）はテーブルが経験的なシミュレーション値でクローズドフォームでないため実装コストが
+  高く、v1では実装しない。複数内生変数の同時検定（Cragg-Donald統計量等）も同様にv1スコープ外
+  とし、各内生変数ごとの部分F統計量のみ返す。
+
+### 6.5 過剰識別検定（Sargan / Hansen J）
+
+- **Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含める**（別メソッド化
+  しない。OLS/REの適合度統計量と同じeager計算方針を踏襲。`linearmodels`は遅延プロパティだが
+  本プロジェクトは一貫してeager計算とする）。
+- 自由度は`len(instruments) - len(x_endog)`（Issue #119で確定した`instruments`＝除外操作変数
+  のみという定義とそのまま整合）。
+- **丁度識別（自由度0）の場合は`None`を返す**（`linearmodels`も`InvalidTestStatistic`相当の
+  扱いをしている）。
+
+### 6.6 内生性検定（Wu-Hausman）
+
+- 「Wu-Hausman検定（回帰ベース）」は、**第一段階残差を構造式に追加回帰し係数のジョイント
+  有意性を検定する方式**（`linearmodels.iv.results.IVResults.wooldridge_regression`相当）で
+  実装する。`linearmodels`には数式が異なる`wu_hausman`（SSR差に基づく古典公式）という別
+  メソッドも存在するが、「回帰ベース」という表現とv1の実装コストを踏まえ
+  `wooldridge_regression`相当を採用する。
+- `first_stage()`で計算する残差をそのまま再利用できる。
+- **`fit()`の結果本体に含める**（内生変数全体のジョイント検定のみ、変数ごとのサブセット検定
+  はv1スコープ外）。
+
+### 6.7 標準誤差の計算方法
+
+- **2SLS**: `classical`/`hc0`〜`hc3`/`cluster`/`hac`（3.1で確定済み）。
+- **GMM**: 6.2の`weight_type`とは独立に`cov_type`を選択できる。サポート対象は2SLSと同じ範囲を
+  踏襲する。
 
 - IV固有論点（2SLS/GMM方式・丁度識別/過剰識別・弱操作変数診断・内生性検定等）: Issue #126

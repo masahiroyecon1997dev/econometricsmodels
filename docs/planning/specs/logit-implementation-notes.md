@@ -152,6 +152,15 @@ Issue #58時点ではIssue #58本来のスコープを超えるためユーザ�
 - **多変量モデルでの独立再計算**: `fit_computes_goodness_of_fit_statistics_matching_independently_recomputed_values`。実装の`softplus`ベースの式とは異なる式（`logistic`から直接`Σ[y ln(p) + (1-y) ln(1-p)]`を計算するベルヌーイ対数尤度の定義式そのもの）で`log_likelihood`を独立に再計算し、`log_likelihood_null`・`lr_statistic`・`pseudo_r_squared`・`df_model`・`df_resid`・`lr_p_value`（`statrs::ChiSquared`で独立に検算）・`aic`/`bic`を突き合わせた（`fit_cov_params_is_symmetric_and_stats_are_internally_consistent`と同じデータセットを再利用）。
 - **`include_intercept=false`での非入れ子挙動**: `fit_lr_statistic_can_be_negative_when_include_intercept_is_false`。`lr_statistic`が負になりうること（NaN/Infにはならないこと）、`df_model`/`df_resid`/`aic`/`bic`は`include_intercept`の値に関わらず同じ式で計算されることを回帰テストとして固定した。
 
+### 追記（Probit Issue #77時点）: `log_likelihood_null`・goodness-of-fit計算の`nonlinear/common.rs`への集約
+
+Probit側のIssue #77（適合度統計量実装）で、本実装（Issue #61/#64）とほぼ同一のコードが重複して移植されたことがrust-reviewerのレビューで指摘された。ユーザー確認の上、以下をLogit/Probit間で完全に共通の計算として`nonlinear/common.rs`へ集約した（Tobit着手時にも同じ計算が必要になる見込みのため、先に共通化しておく判断）。
+
+- `log_likelihood_null(y: &Mat<f64>) -> f64`（Issue #64で独立関数化していたもの、および対応するテスト`log_likelihood_null_returns_zero_for_degenerate_all_same_y`）を`common.rs`へ移設。この式がリンク関数に依存しないのは、切片のみモデルのMLEが`link(θ̂)=ȳ`を満たすため（Logitの`logistic(θ̂)=ȳ`、Probitの`Φ(θ̂)=ȳ`いずれも成り立つ）。
+- `lr_statistic`/`lr_p_value`/`pseudo_r_squared`/`aic`/`bic`/`df_model`/`df_resid`のインライン計算ブロックを`common.rs`の`GoodnessOfFit`構造体＋`goodness_of_fit(llf, llnull, n, k)`関数へ切り出し、`fit()`側はこれを呼んで分解するだけにした。
+- 本体コードで`ChiSquared`を直接使わなくなったため、`ChiSquared`のimportをモジュールトップレベルからテストモジュール内（独立再計算による検算にのみ使用）へ移動した。
+- 数式・エラー型・`LogitEstimator`のフィールド構成（`log_likelihood`/`log_likelihood_null`等）自体に変更はない。リファクタリングのみで、Issue #61/#64時点の仕様・テストカバレッジを後退させていない（`cargo test -p engine`で全件pass確認済み）。
+
 ## 限界効果（Issue #62で実装済み）
 
 `LogitEstimator::marginal_effects(at, confidence_level)`を追加した（`fit()`とは独立した別メソッド、`nonlinear-api-design.md`6章）。設計方針の詳細（離散変数の自動判定なし・切片除外・代表点の定義・デルタ法ヤコビアンの統一形）は`nonlinear-implementation-notes.md`「限界効果」節（Logit/Probit/Tobit共通の方針）を参照。本節はLogit固有の実装判断のみ記す。
@@ -168,6 +177,17 @@ Issue #58時点ではIssue #58本来のスコープを超えるためユーザ�
 - **独立再計算によるdydx・SEの検証**: `marginal_effects_overall_matches_independently_recomputed_dydx_and_delta_method_se`。`logistic`から直接計算した定義式（`overall_w_and_s`とは別の式）でdydxを再計算し、標準誤差も`dydx_j`をfit済みパラメータの周りで数値微分して得たヤコビアン行と`cov_params`の二次形式から独立に求めて突き合わせた（`dydx_and_jacobian`内の配線ミスを検出できる設計）。
 - **`at="mean"`/`"median"`が`at="overall"`と異なる値になることの確認**: `marginal_effects_at_mean_differs_from_overall_and_matches_independent_recomputation`・`marginal_effects_at_median_differs_from_mean_and_overall_and_matches_independent_recomputation`。後者は`column_medians`（奇数・偶数nの両方を`column_medians_matches_expected_for_odd_and_even_n`で直接検証済み）が返す中央値を使い、平均・中央値が異なる非対称データセットで代表点が正しく切り替わることを確認した（rust-reviewer指摘、初回実装では`at="median"`のテストが皆無だった）。
 - **`confidence_level`範囲外エラー**: `marginal_effects_returns_invalid_confidence_level_error_out_of_range`。`fit()`と同じ`CommonError::InvalidConfidenceLevel`を返すことを確認。
+
+### 追記（Probit Issue #78時点）: `column_means`・`column_medians`・`MarginalEffects`・`dydx_and_jacobian`・デルタ法本体の`nonlinear/common.rs`への集約
+
+Issue #77（適合度統計量）でgoodness-of-fit計算を事後的に`common.rs`へ共通化した経緯を踏まえ、Probit側のIssue #78（限界効果）では着手前にユーザーへ方針を確認し、**最初から共通化を組み込んで設計した**。以下を`common.rs`へ移設・新設した:
+
+- `column_means`/`column_medians`（元はlogit.rsのprivate関数）
+- `MarginalEffects`構造体（元はlogit.rsの`pub struct`）
+- `dydx_and_jacobian`（元はlogit.rsのprivate関数。`w`・`s`の計算方法に依らない`dydx_j=w*θⱼ`・ヤコビアン`θⱼ*s_m+[j==m]*w`の計算。`pub`にして、Logit/Probitそれぞれのテスト——モデル固有の`overall_w_and_s`等が返す実際の`w(θ)`を使った数値微分によるヤコビアンの独立検証——から直接呼べるようにした）
+- `marginal_effects_from_w_s`（元は`LogitEstimator::marginal_effects`本体にインラインで書かれていた、confidence_level検証・デルタ法標準誤差・定数項の除外を含む一連の処理。引数が8個になり`clippy::too_many_arguments`に抵触したため、フィット済みモデルの情報を`FittedModelForMarginalEffects<'a>`構造体に束ねた）
+
+`LogitEstimator::marginal_effects`は、Probit固有の`overall_w_and_s`/`at_point_w_and_s`に相当するLogit版（リンク関数`Λ`の微分`p(1-p)`を使う）で`(w,s)`を計算した後、`marginal_effects_from_w_s`を呼ぶだけに簡略化された。数式・エラー型・テストカバレッジに変更はない（`column_medians_matches_expected_for_odd_and_even_n`テストは`common.rs`へ移設）。共通化の詳細な設計判断は`probit-implementation-notes.md`「限界効果（Issue #78で実装済み）」節参照。
 
 ## predict() / pred_table()（Issue #63で実装済み）
 
@@ -189,6 +209,10 @@ Issue #58時点ではIssue #58本来のスコープを超えるためユーザ�
 - **`pred_table`の手計算検証**: `pred_table_matches_hand_computed_counts_for_intercept_only_model`。切片のみモデル（全観測で`p_i=ȳ≈0.571`）を使い、`threshold=0.5`（全観測が予測クラス1）・`threshold=0.99`（全観測が予測クラス0）の2パターンで、手計算した期待値と一致することを確認。
 - **`pred_table`の独立再計算**: `pred_table_matches_independently_recomputed_classification`。`threshold=0.2`（`0.5`以外の値、上記バグを検出できるようにするため）で、`predict()`の出力から独立に再計算した分類結果と突き合わせた。
 - **`actual`クラスのカウントが`threshold`に対して不変であることの回帰テスト**: `pred_table_actual_class_counts_are_invariant_to_threshold`。`threshold∈{0.1,0.3,0.5,0.7,0.9}`の5パターンで、`actual0`/`actual1`の行合計が常に一定（`y=[0,1,0,1]`なので各2件）であることを確認し、上記バグの再発を防止する。
+
+### 追記（Probit Issue #79時点）: `pred_table`の`nonlinear/common.rs`への集約
+
+Probit側のIssue #79（predict/pred_table）で、`pred_table`の計算本体（2×2カウント、`predicted: &[f64]`と`y: &Mat<f64>`のみに依存）が**リンク関数を一切参照しない**（`φ`/`Φ`/`logistic`いずれも登場しない）ことに気づいたため、`common.rs`の`pred_table`関数へ移設した。Issue #77/#78の共通化とは異なり、この判断には設計上の曖昧さが無い（`marginal_effects`の`dydx_and_jacobian`等のように「リンク関数に依存するかどうか」を検討する必要がなく、`pred_table`は最初からモデル非依存の純粋関数として書かれていた）ため、ユーザーに確認を求めずそのまま共通化した。`LogitEstimator::pred_table`は`pred_table(&self.predict(), self.input.y(), threshold)`という1行呼び出しに簡略化された（`predict()`自体はリンク関数依存のため`logit.rs`に残る）。数式・エラー型・テストカバレッジに変更はない。バグ修正の経緯（上記「バグ修正」節）を含むdocコメントは`common.rs`側に移設した。詳細は`probit-implementation-notes.md`「predict() / pred_table()（Issue #79で実装済み）」節参照。
 
 ## engine単体テストのカバレッジ（Issue #64で確認・実装済み）
 

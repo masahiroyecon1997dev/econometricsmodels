@@ -73,8 +73,9 @@ def _run_r(
     formula: str,
     cov_type: str,
     cluster_col: str | None = None,
+    link: str = "logit",
 ) -> dict:
-    cmd = ["Rscript", str(R_SCRIPT), str(csv_path), formula, cov_type]
+    cmd = ["Rscript", str(R_SCRIPT), str(csv_path), formula, cov_type, link]
     if cov_type == "cluster":
         cmd.append(cluster_col or "")
 

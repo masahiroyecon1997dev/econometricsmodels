@@ -1,6 +1,6 @@
 # engine_pybind/src/linear/ 実装ノート（OLS/WLS）
 
-このファイルは `engine_pybind/src/linear/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景は`docs/spec/ols-spec.md`「engine/engine_pybind間のデータ受け渡し・エラー変換」・`docs/planning/specs/wls-implementation-notes.md`が正本。ここは差分の索引のみ。
+このファイルは `engine_pybind/src/linear/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景は`docs/spec/ols-spec.md`「engine/engine_pybind間のデータ受け渡し・エラー変換」・`docs/spec/wls-spec.md`が正本。ここは差分の索引のみ。
 
 ## バージョン固定（変更時は要注意）
 

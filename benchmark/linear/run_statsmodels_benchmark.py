@@ -3,7 +3,7 @@
 OLS/WLSの主リファレンスとして使用する（classical/HC0-3/cluster/HAC、AIC/BIC/log-likelihood、
 ロバストWald検定まで一貫してカバーできるため）。pyfixestは固定効果が絡む
 Phase4以降で中心的に使う想定（`docs/spec/ols-spec.md`「テスト」参照）。
-`--weight-col`を指定すると`smf.wls`を使う（WLS用、`docs/planning/specs/wls-standard-errors.md`
+`--weight-col`を指定すると`smf.wls`を使う（WLS用、`docs/spec/wls-spec.md`
 参照。分散共分散行列の計算式自体はOLSと共通でありstatsmodels側も同じ実装のため、
 このスクリプト自体はOLS/WLSで分岐せず共通で使う）。
 

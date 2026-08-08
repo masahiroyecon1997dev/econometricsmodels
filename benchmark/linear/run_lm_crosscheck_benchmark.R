@@ -38,7 +38,7 @@ cov_type <- ifelse(length(args) >= 3, tolower(args[3]), "classical")
 
 # weight_colはcov_type固有の引数（cluster_col/hac_lag）の後ろに置く。
 # classical/hc0-3はarg4、cluster/hacはarg5（WLSクロスチェック用、fit_wls側の
-# weight引数に対応。docs/planning/specs/wls-standard-errors.md参照）。
+# weight引数に対応。docs/spec/wls-spec.md参照）。
 weight_col <- NA
 if (cov_type == "cluster") {
   if (length(args) < 4) {

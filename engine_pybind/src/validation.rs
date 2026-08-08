@@ -64,7 +64,7 @@ pub fn validate_no_const_collision(x: &[String], include_intercept: bool) -> PyR
 ///
 /// 判定順序は、リストの先頭から処理し、各ロールについて「それより前のロールとの重複」→
 /// 「`x`との重複」の順に確認する（旧実装、`weight`==`y` → `weight`が`x`に含まれる、の
-/// 優先順位と一致させるため。`docs/planning/specs/wls-api-design.md`3章参照）。
+/// 優先順位と一致させるため。`docs/spec/wls-spec.md`「API引数」参照）。
 pub fn validate_no_duplicate_roles(roles: &[(&str, &str)], x: &[String]) -> PyResult<()> {
     match find_duplicate_role_message(roles, x) {
         Some(message) => Err(ValidationError::new_err(message)),

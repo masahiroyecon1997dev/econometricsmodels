@@ -30,6 +30,9 @@ python_package/econometricsmodels/*.pyd
 # Issue #28参照）。命名規則: 生成物は先頭アンダースコア（例: _ols_performance_results.json）。
 docs/spec/_*.json
 
+# Claude Codeの個人ローカル設定（settings.jsonはコミット対象、settings.local.jsonは個人用）
+.claude/settings.local.json
+
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore

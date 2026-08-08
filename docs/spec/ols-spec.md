@@ -34,7 +34,7 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
 
 `OLSResult`（`#[pyclass]`、`skip_from_py_object`）が公開する配列＋名前リスト:
 `params` / `std_errors` / `t_stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` /
-`residuals` / `dep_var_name` / `nobs` / `cov_type`（実際に使われた種別の小文字文字列） /
+`residuals` / `dep_var_name` / `n_obs` / `cov_type`（実際に使われた種別の小文字文字列） /
 `r_squared` / `r_squared_adj` / `f_statistic` / `f_p_value` / `log_likelihood` / `aic` / `bic`。
 
 - `conf_int`は`conf_lower`/`conf_upper`の2配列に分割（engine内部表現・pyo3実装の簡潔さを優先）。
@@ -53,7 +53,11 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
 - 係数は列ピボットQR分解（`col_piv_qr().solve_lstsq()`）で求める。`X'Xβ=X'y`をCholeskyで解く方式は
   不採用（`X'X`の明示計算で条件数が2乗になり不利な上、QRなら特異性検出と計算を同時に行える）。
 - 特異性判定は相対閾値: `col_piv_qr`の`R`対角成分のうち`threshold = k * f64::EPSILON * |R[0,0]|`
-  未満のものがあればランク落ち（絶対閾値は不採用、データスケール依存を避けるため）。
+  未満のものがあればランク落ち（絶対閾値は不採用、データスケール依存を避けるため）。この比較は
+  `diag.is_nan() || diag <= threshold`という形で、NaNも明示的に検出する（`include_intercept=false`
+  かつ全説明変数列がゼロという設計行列全体が完全にゼロのケースで、`col_piv_qr`が列選択時の0除算に
+  よりR対角成分にNaNを生成しうるため。単純な`<=`比較だとNaNとの比較が常にfalseになりすり抜ける。
+  Issue #109）。
 - 標準誤差計算用の`(X'X)⁻¹`（`xtx_inverse`）は`X'X`自体のCholesky分解で求める（QR分解の`R`因子から
   導出する案は実測で高速化しないことを確認済み）。
 
@@ -177,6 +181,12 @@ $$
   役割分担する。一般的なテスト方針は`.claude/rules/testing-policy.md`を参照。
 - pyfixestはOLSの正確性検証には使わない（HC2/HC3にHC1用の小標本補正を誤って適用する既知の
   実装バグがあるため）。性能比較専用（[`ols-performance-notes.md`](./ols-performance-notes.md)）。
+- `engine`側は上記の固定シナリオ単体テストに加え、property-basedテスト（`proptest`、
+  `engine/src/linear/ols.rs`の`mod proptests`）で不変条件を検証する（Issue #102。詳細な方針は
+  `testing-policy.md`「property-basedテスト」参照）。対象プロパティ: 定数項ありなら残差和は常に0、
+  yのスカラー倍で係数（切片含む）も同じ倍率でスケールする、xの列順序を入れ替えても係数名で
+  対応付ければ値は変わらない、HC0の標準誤差は常にHC1以下。いずれも意図的なバグ注入により
+  実際に検出できることを確認済み。
 
 ### 3.7 パフォーマンス（要約）
 

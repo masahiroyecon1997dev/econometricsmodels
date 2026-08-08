@@ -32,14 +32,16 @@
 
 use crate::error::CommonError;
 use crate::nonlinear::common::{
-    CovType, MarginalEffectsAt, Method, MleError, SandwichVariant, cluster_cov_params,
-    destandardize_cov_params, destandardize_params, observed_information_cov_params,
-    opg_cov_params, run_solver, sandwich_cov_params, standardize_columns, validate_binary_y,
+    CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
+    Method, MleError, SandwichVariant, cluster_cov_params, column_means, column_medians,
+    destandardize_cov_params, destandardize_params, goodness_of_fit, log_likelihood_null,
+    marginal_effects_from_w_s, observed_information_cov_params, opg_cov_params, pred_table,
+    run_solver, sandwich_cov_params, standardize_columns, validate_binary_y,
 };
 use crate::validation::validate_cluster_groups;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
-use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
+use statrs::distribution::{ContinuousCDF, Normal};
 
 /// Logitの被説明変数・設計行列を保持する入力データ。
 ///
@@ -196,25 +198,6 @@ fn log_likelihood(x: &Mat<f64>, y: &Mat<f64>, params: &[f64]) -> f64 {
         .sum()
 }
 
-/// 切片のみモデルの対数尤度 `ℓ_null = n1*ln(ȳ) + n0*ln(1-ȳ)`（`ȳ=n1/n`の閉じた形の
-/// 解析解、`LogitEstimator`の`log_likelihood_null`フィールドdocコメント参照）を`y`から
-/// 直接計算する。`n1`または`n0`が0（全観測が同じ値）のときの`0*ln(0)`（NaN）を避けるため、
-/// 該当項を明示的に0として扱う（情報理論の`0 log 0 = 0`規約）。`log_likelihood`と同じ理由
-/// （`Result`を経由しない内部専用の計算、退化ケースを`fit()`の反復最適化を経由せず
-/// 直接テストできるようにするため）で独立した関数として切り出している。
-fn log_likelihood_null(y: &Mat<f64>) -> f64 {
-    let n = y.nrows();
-    let n1: f64 = (0..n).map(|i| *y.get(i, 0)).sum();
-    let n0 = n as f64 - n1;
-    let y_bar = n1 / n as f64;
-    (if n1 > 0.0 { n1 * y_bar.ln() } else { 0.0 })
-        + (if n0 > 0.0 {
-            n0 * (1.0 - y_bar).ln()
-        } else {
-            0.0
-        })
-}
-
 /// 限界効果（`LogitEstimator::marginal_effects`のdocコメント「数式（デルタ法）」参照）の
 /// `at="overall"`（AME）における`w=(1/n)Σᵢpᵢ(1-pᵢ)`・`s_m=(1/n)Σᵢ(1-2pᵢ)pᵢ(1-pᵢ)xᵢₘ`を
 /// 全観測を1回走査して計算する。
@@ -251,49 +234,6 @@ fn at_point_w_and_s(x_bar: &[f64], params: &[f64]) -> (f64, Vec<f64>) {
     let coef = (1.0 - 2.0 * p) * pq;
     let s: Vec<f64> = (0..k).map(|m| coef * x_bar[m]).collect();
     (pq, s)
-}
-
-/// `overall_w_and_s`/`at_point_w_and_s`が返す`(w,s)`から、限界効果`dydx_j=w*θⱼ`と
-/// そのヤコビアン`jacobian[j][m]=∂dydx_j/∂θₘ=θⱼ*s_m + [j==m]*w`を計算する
-/// （`LogitEstimator::marginal_effects`のdocコメント「数式（デルタ法）」参照。
-/// AME・mean・medianのいずれも`g_j(θ)=w(θ)*θⱼ`という同じ形に帰着するため、
-/// `w`・`s`の計算方法（`at`ごとに異なる）とこの式（`at`に依らず共通）を分離できる）。
-fn dydx_and_jacobian(k: usize, params: &[f64], w: f64, s: &[f64]) -> (Vec<f64>, Mat<f64>) {
-    let dydx: Vec<f64> = (0..k).map(|j| w * params[j]).collect();
-    let jacobian = Mat::from_fn(k, k, |j, m| params[j] * s[m] + if j == m { w } else { 0.0 });
-    (dydx, jacobian)
-}
-
-/// 説明変数ごとの標本平均（列ごと、`marginal_effects`の`at="mean"`用）。
-fn column_means(x: &Mat<f64>) -> Vec<f64> {
-    let n = x.nrows();
-    let k = x.ncols();
-    (0..k)
-        .map(|j| (0..n).map(|i| *x.get(i, j)).sum::<f64>() / (n as f64))
-        .collect()
-}
-
-/// 説明変数ごとの標本中央値（列ごと、`marginal_effects`の`at="median"`用）。`n`が偶数の
-/// 場合は中央2値の平均。
-///
-/// `partial_cmp().unwrap()`について: `x`の値はNaN/無限大を含まないことが
-/// `engine_pybind::column_extraction`側で既に保証されている前提（`engine`の責務境界の
-/// 内側であり、クリーンな値しか受け取らない。OLSの`time_ordering`と同じ扱い、
-/// `engine/src/linear/ols.rs`参照）。
-fn column_medians(x: &Mat<f64>) -> Vec<f64> {
-    let n = x.nrows();
-    let k = x.ncols();
-    (0..k)
-        .map(|j| {
-            let mut col: Vec<f64> = (0..n).map(|i| *x.get(i, j)).collect();
-            col.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            if n % 2 == 1 {
-                col[n / 2]
-            } else {
-                (col[n / 2 - 1] + col[n / 2]) / 2.0
-            }
-        })
-        .collect()
 }
 
 /// Logitの負の対数尤度・スコア・Hessian（argminの`CostFunction`/`Gradient`/`Hessian`
@@ -399,67 +339,6 @@ impl Hessian for LogitProblem {
             }
         }
         Ok(h)
-    }
-}
-
-/// `LogitEstimator::marginal_effects`の結果。`coef_table`と同じ行指向
-/// （`dydx`/`std_err`/`z`/`p_value`/`conf_low`/`conf_high`、`nonlinear-api-design.md`
-/// 6章）。定数項（切片）は行から除外する（切片の限界効果は経済学的に意味を持たない、
-/// statsmodelsの`get_margeff()`と同じ扱い）。
-///
-/// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
-#[derive(Debug)]
-pub struct MarginalEffects {
-    /// 説明変数名（定数項を除く）。`LogitInput::param_names()`から定数項を除いたもの
-    param_names: Vec<String>,
-    /// 限界効果 `dy/dx`
-    dydx: Vec<f64>,
-    /// デルタ法標準誤差
-    std_errors: Vec<f64>,
-    /// z統計量
-    z_stats: Vec<f64>,
-    /// 両側p値
-    p_values: Vec<f64>,
-    /// 信頼区間の下限
-    conf_lower: Vec<f64>,
-    /// 信頼区間の上限
-    conf_upper: Vec<f64>,
-}
-
-impl MarginalEffects {
-    /// 説明変数名（定数項を除く）
-    pub fn param_names(&self) -> &[String] {
-        &self.param_names
-    }
-
-    /// 限界効果 `dy/dx`
-    pub fn dydx(&self) -> &[f64] {
-        &self.dydx
-    }
-
-    /// デルタ法標準誤差
-    pub fn std_errors(&self) -> &[f64] {
-        &self.std_errors
-    }
-
-    /// z統計量
-    pub fn z_stats(&self) -> &[f64] {
-        &self.z_stats
-    }
-
-    /// 両側p値
-    pub fn p_values(&self) -> &[f64] {
-        &self.p_values
-    }
-
-    /// 信頼区間の下限
-    pub fn conf_lower(&self) -> &[f64] {
-        &self.conf_lower
-    }
-
-    /// 信頼区間の上限
-    pub fn conf_upper(&self) -> &[f64] {
-        &self.conf_upper
     }
 }
 
@@ -737,31 +616,19 @@ impl LogitEstimator {
 
         let llf = log_likelihood(input.x(), input.y(), &params);
         let llnull = log_likelihood_null(input.y());
-
-        let lr_statistic = 2.0 * (llf - llnull);
-        // `k.saturating_sub(1)`: `include_intercept=false`かつ説明変数も無い（`k=0`）という
-        // 病的な入力（`fit()`冒頭の`n<=k`チェックは`n>=1`なら通過してしまう）でも
-        // このフィールド単体はアンダーフローしないための防御。ただし`k=0`のとき
-        // 実際には本箇所に到達する前（`cov_params`計算経路）で別の既知の問題により
-        // 到達不能（トラッキング: 別issue、本Issueのスコープ外。ユーザー確認済み）。
-        let df_model = k.saturating_sub(1);
-        let lr_p_value = if df_model == 0 {
-            // 説明変数が定数項のみ（傾き係数が無い）モデル。検定対象が存在しないため
-            // OLSの`f_p_value`（`df_model=0`時にNaN）と同じ扱い（ユーザー確認済み）。
-            f64::NAN
-        } else {
-            // `df_model>0`が保証されているため、`ChiSquared::new`の失敗
-            // （自由度が正であることの検証）は理論上到達不能
-            // （`.claude/rules/rust-style.md`「テスト」のカバレッジ方針参照）。
-            let chi2 = ChiSquared::new(df_model as f64)
-                .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
-            1.0 - chi2.cdf(lr_statistic)
-        };
-
-        let pseudo_r_squared = 1.0 - llf / llnull;
-        let aic = -2.0 * llf + 2.0 * (k as f64);
-        let bic = -2.0 * llf + (n as f64).ln() * (k as f64);
-        let df_resid = n - k;
+        // `k=0`（`include_intercept=false`かつ説明変数も無い病的な入力）のとき、実際には
+        // ここに到達する前（`cov_params`計算経路）で別の既知の問題により到達不能
+        // （トラッキング: 別issue、本Issueのスコープ外。ユーザー確認済み）。
+        let gof = goodness_of_fit(llf, llnull, n, k)?;
+        let GoodnessOfFit {
+            lr_statistic,
+            lr_p_value,
+            pseudo_r_squared,
+            aic,
+            bic,
+            df_model,
+            df_resid,
+        } = gof;
 
         Ok(Self {
             input,
@@ -907,8 +774,10 @@ impl LogitEstimator {
     /// いずれも同じ`g_j(θ)=w(θ)*θ_j`という形に帰着するため、`w`とその勾配
     /// `s_m=∂w/∂θ_m`さえ計算できれば、ヤコビアンは
     /// `∂g_j/∂θ_m = θ_j*s_m + [j==m]*w`という共通の式で書ける
-    /// （`overall_w_and_s`/`at_point_w_and_s`が`(w,s)`を計算し、
-    /// `dydx_and_jacobian`が上記の共通式を適用する）。
+    /// （`overall_w_and_s`/`at_point_w_and_s`が`(w,s)`を計算し、`w`・`s`の計算方法に
+    /// 依らない残りの計算——ヤコビアン・デルタ法標準誤差・定数項の除外——は
+    /// `nonlinear/common.rs`の`marginal_effects_from_w_s`に共通化されている
+    /// （Probitでも同型の式になることを確認済み、Issue #78）。
     ///
     /// 変数`j`の分散は`Var(g_j) = jac_j · Σ · jac_jᵀ`（`jac_j`はヤコビアンの`j`行目、
     /// `Σ=cov_params`）。標準誤差はこの平方根、検定分布は標準正規分布
@@ -924,10 +793,6 @@ impl LogitEstimator {
         at: MarginalEffectsAt,
         confidence_level: f64,
     ) -> Result<MarginalEffects, MleError> {
-        if !(confidence_level > 0.0 && confidence_level < 1.0) {
-            return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
-        }
-
         let x = self.input.x();
         let k = self.input.k();
         let (w, s) = match at {
@@ -935,54 +800,18 @@ impl LogitEstimator {
             MarginalEffectsAt::Mean => at_point_w_and_s(&column_means(x), &self.params),
             MarginalEffectsAt::Median => at_point_w_and_s(&column_medians(x), &self.params),
         };
-        let (dydx, jacobian) = dydx_and_jacobian(k, &self.params, w, &s);
-
-        // `Normal::new(0.0, 1.0)`は標準正規分布であり、標準偏差が正であることを
-        // 要求するstatrsの検証を常に満たすため、この`map_err`分岐は理論上到達不能
-        // （`.claude/rules/rust-style.md`「テスト」のカバレッジ方針参照、`fit()`と同じ扱い）。
-        let normal =
-            Normal::new(0.0, 1.0).map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
-        let alpha = 1.0 - confidence_level;
-        let z_crit = normal.inverse_cdf(1.0 - alpha / 2.0);
-
-        let k_constant = usize::from(self.input.has_intercept());
-        let mut param_names = Vec::with_capacity(k - k_constant);
-        let mut out_dydx = Vec::with_capacity(k - k_constant);
-        let mut std_errors = Vec::with_capacity(k - k_constant);
-        let mut z_stats = Vec::with_capacity(k - k_constant);
-        let mut p_values = Vec::with_capacity(k - k_constant);
-        let mut conf_lower = Vec::with_capacity(k - k_constant);
-        let mut conf_upper = Vec::with_capacity(k - k_constant);
-
-        for (j, &dydx_j) in dydx.iter().enumerate().skip(k_constant) {
-            let jac_row: Vec<f64> = (0..k).map(|m| *jacobian.get(j, m)).collect();
-            let mut var_j = 0.0;
-            for a in 0..k {
-                for b in 0..k {
-                    var_j += jac_row[a] * (*self.cov_params.get(a, b)) * jac_row[b];
-                }
-            }
-            let se = var_j.sqrt();
-            let z = dydx_j / se;
-
-            param_names.push(self.input.param_names()[j].clone());
-            out_dydx.push(dydx_j);
-            std_errors.push(se);
-            z_stats.push(z);
-            p_values.push(2.0 * (1.0 - normal.cdf(z.abs())));
-            conf_lower.push(dydx_j - z_crit * se);
-            conf_upper.push(dydx_j + z_crit * se);
-        }
-
-        Ok(MarginalEffects {
-            param_names,
-            dydx: out_dydx,
-            std_errors,
-            z_stats,
-            p_values,
-            conf_lower,
-            conf_upper,
-        })
+        marginal_effects_from_w_s(
+            FittedModelForMarginalEffects {
+                param_names: self.input.param_names(),
+                has_intercept: self.input.has_intercept(),
+                k,
+                params: &self.params,
+                cov_params: &self.cov_params,
+            },
+            w,
+            &s,
+            confidence_level,
+        )
     }
 
     /// 予測確率 `p_i = Λ(x_i'θ)` を、`fit()`に使った学習データ（`self.input.x()`）の
@@ -1004,44 +833,23 @@ impl LogitEstimator {
     }
 
     /// 分類の的中表（2×2、`table[actual][predicted]`のカウント。行=実測クラス、
-    /// 列=予測クラス）。`predict()`が返す予測確率のみを`threshold`で二値化し
-    /// （`predicted = 1 if p > threshold else 0`）、実測`y`は`threshold`に関わらず
-    /// 常に`0.5`で二値化する（`actual = 1 if y >= 0.5 else 0`）。
+    /// 列=予測クラス）。`predict()`が返す予測確率のみを`threshold`で二値化し、実測`y`は
+    /// `threshold`に関わらず常に`0.5`で二値化する。数式・statsmodelsとの整合性の詳細は
+    /// `nonlinear/common.rs`の`pred_table`のdocコメント参照（リンク関数に依存しない計算
+    /// のため`common.rs`に共通化されている、Issue #79）。
     ///
-    /// statsmodelsの`pred_table(threshold)`（`BinaryResults.pred_table`）の実装を
-    /// 数値照合の上で確認した挙動: `pred = (self.predict() > threshold)`で
-    /// 予測確率のみを`threshold`で二値化した**後**、`histogram2d(actual, pred,
-    /// bins=[0, 0.5, 1])`で固定の0.5分割によりクロス集計する。`actual`（生の`endog`）は
-    /// この固定分割にしか通らず、`threshold`の影響を受けない（rust-reviewerの
-    /// 指摘・Python数値照合で発覚した実装ミスを修正: 初版では`actual`も`threshold`で
-    /// 二値化していたため、`threshold≠0.5`のときstatsmodelsと一致しなかった）。
-    /// `y`が厳密に0/1でない場合（現状値域検証は未実装、`nonlinear-implementation-
-    /// notes.md`参照）も、常に`0.5`分割になる点でstatsmodelsと同じ扱い。
-    ///
-    /// `threshold`の値域は検証しない（`[0,1]`の範囲外でも、`predicted`が単に自明な
-    /// 分類結果（全て一方のクラスに分類される等）になるだけで計算上は破綻しない。
-    /// statsmodelsも検証していない）。
-    ///
-    /// **新規データでの的中表（out-of-sample）は未対応**（本Issueのスコープ外、
+    /// **新規データでの的中表（out-of-sample）は未対応**（Issue #63のスコープ外、
     /// 別issueでトラッキング。ユーザー確認済み）。
     pub fn pred_table(&self, threshold: f64) -> Mat<f64> {
-        let predicted = self.predict();
-        let y = self.input.y();
-        let n = y.nrows();
-
-        let mut table = Mat::zeros(2, 2);
-        for (i, &p_i) in predicted.iter().enumerate().take(n) {
-            let actual = usize::from(*y.get(i, 0) >= 0.5);
-            let pred = usize::from(p_i > threshold);
-            *table.get_mut(actual, pred) += 1.0;
-        }
-        table
+        pred_table(&self.predict(), self.input.y(), threshold)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nonlinear::common::dydx_and_jacobian;
+    use statrs::distribution::ChiSquared;
 
     #[test]
     fn from_columns_with_intercept_prepends_const_column() {
@@ -1433,25 +1241,6 @@ mod tests {
         let expected_bic = -2.0 * expected_ll + n.ln();
         assert!((estimator.aic() - expected_aic).abs() < 1e-6);
         assert!((estimator.bic() - expected_bic).abs() < 1e-6);
-    }
-
-    /// `log_likelihood_null`は`n1`（y=1の観測数）または`n0`（y=0の観測数）が0の
-    /// 退化ケース（全観測が同じ値）で、`0*ln(0)`によるNaNを避ける分岐（`if n1 > 0.0
-    /// {...} else {0.0}`等）を通る。この分岐は`fit()`経由（反復最適化）だと、全観測が
-    /// 同じyの場合に完全分離が起きて収束の挙動が不安定になりうるため、`fit()`を
-    /// 経由せず`log_likelihood_null`を直接呼んで検証する
-    /// （`.claude/rules/rust-style.md`「テスト」のカバレッジ方針、Issue #64でこの分岐が
-    /// 未カバーだったことが判明し、`fit()`内にインラインだった計算を独立関数に切り出した
-    /// 上で追加したテスト）。
-    #[test]
-    fn log_likelihood_null_returns_zero_for_degenerate_all_same_y() {
-        // 全観測y=1（n0=0）: n0側の`else{0.0}`分岐を通る。ℓ_null = n*ln(1) + 0 = 0
-        let all_ones = Mat::from_fn(4, 1, |_, _| 1.0);
-        assert!((log_likelihood_null(&all_ones) - 0.0).abs() < 1e-12);
-
-        // 全観測y=0（n1=0）: n1側の`else{0.0}`分岐を通る。ℓ_null = 0 + n*ln(1) = 0
-        let all_zeros = Mat::from_fn(4, 1, |_, _| 0.0);
-        assert!((log_likelihood_null(&all_zeros) - 0.0).abs() < 1e-12);
     }
 
     /// 多変量（k=3）モデルでの適合度統計量を、実装（`softplus`ベース）とは異なる式
@@ -2779,25 +2568,6 @@ mod tests {
         for (idx, j) in (1..3).enumerate() {
             assert!((at_mean.dydx()[idx] - w * params[j]).abs() < 1e-9);
         }
-    }
-
-    /// `column_medians`（`marginal_effects`の`at="median"`が使う代表点の計算）を、
-    /// 奇数・偶数それぞれの観測数で直接検証する。
-    #[test]
-    fn column_medians_matches_expected_for_odd_and_even_n() {
-        // 奇数（n=5）: ソート後の中央1点がそのまま中央値
-        let x_odd = Mat::from_fn(5, 2, |i, j| match j {
-            0 => [10.0, 20.0, 30.0, 40.0, 100.0][i],
-            _ => [-5.0, 2.0, 8.0, -1.0, 50.0][i],
-        });
-        let medians_odd = column_medians(&x_odd);
-        assert!((medians_odd[0] - 30.0).abs() < 1e-12); // sorted: 10,20,30,40,100
-        assert!((medians_odd[1] - 2.0).abs() < 1e-12); // sorted: -5,-1,2,8,50
-
-        // 偶数（n=4）: 中央2値の平均
-        let x_even = Mat::from_fn(4, 1, |i, _| [10.0, 20.0, 30.0, 40.0][i]);
-        let medians_even = column_medians(&x_even);
-        assert!((medians_even[0] - 25.0).abs() < 1e-12); // (20+30)/2
     }
 
     /// `at="median"`が`at="mean"`/`at="overall"`と異なる代表点で評価されること

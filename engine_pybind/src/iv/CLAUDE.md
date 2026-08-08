@@ -10,14 +10,18 @@
   - この罠は`build_iv_input`/`parse_iv_cov_type`が自分自身のテストから呼ばれる場合だけでなく、それらが呼ぶ先（`iv_error_to_pyerr`）にも伝播する（`build_iv_input`経由でテストから間接的に到達可能になるため）。
   - **対処**: テストから実際に呼ばれる「本番未接続」関数（Logitの`build_logit_input`、IVの`build_iv_input`/`parse_iv_cov_type`/`iv_error_to_pyerr`と同じパターン）には`#[allow(dead_code)]`（無条件に抑制、`cargo build`/`cargo test`どちらでも警告を出さない）を使う。`#[expect(dead_code, ...)]`は「テストからも含めてどこからも一切呼ばれていない」関数（`iv_error_to_pyerr`が元々そうだった、Issue #155時点）にのみ適格。次に手法を2段階（データ抽出issue→engine呼び出しissue）に分けて実装するとき（GMM等）も同じ罠を踏む可能性が高いため注意する。
 
-## 実装フェーズの分割方針
+## 実装フェーズの分割方針（#159/#169で実装済み）
 
-Logit（Issue #65/#66）と同じ2段階に分ける。
+Logit（Issue #65/#66）と同じ2段階に分けた。
 
-1. **データ抽出・pyclass定義issue**（IVでは#159）: `IvOptions`/`IvResult`のpyclass定義、列抽出・バリデーション・`engine::iv::common::IvInput`構築までを行う`build_iv_input`を実装する。`#[pymodule]`への登録・実際の`TwoSlsEstimator::fit`呼び出しは行わない。
-2. **engine呼び出し・エラー変換issue**（IVでは#169）: `build_iv_input`を実際に呼び出す`fit`関数を追加し、`lib.rs`に`#[pyfunction] fit_iv`を新設して`#[pymodule]`に登録する。この時点で上記の`#[allow(dead_code)]`属性は全て不要になる（削除すること）。
+1. **データ抽出・pyclass定義issue**（IVでは#159）: `IvOptions`/`IvResult`のpyclass定義、列抽出・バリデーション・`engine::iv::common::IvInput`構築までを行う`build_iv_input`を実装した。この時点では`#[pymodule]`への登録・実際の`TwoSlsEstimator::fit`呼び出しは行わなかった。
+2. **engine呼び出し・エラー変換issue**（IVでは#169）: `build_iv_input`を実際に呼び出す`fit`関数を追加し、`lib.rs`に`#[pyfunction] fit_iv`を新設して`#[pymodule]`に登録した。この時点で`iv_error_to_pyerr`/`parse_iv_cov_type`/`build_iv_input`の`#[allow(dead_code)]`属性はすべて削除済み（本番経路から呼ばれるようになったため）。
 
-`IvOptions`/`IvResult`/`build_iv_input`は`iv/common.rs`に置く（`two_sls.rs`/`gmm.rs`のような手法ごとのファイル分割はしない）。`fit_iv`という単一エントリポイントを`IvOptions.method`（`"2sls"`/`"gmm"`）で2SLS/GMMに振り分ける設計のため、これらは系統内で真に共有されるロジックであり、`<系統>/common.rs`に置くという既存方針にそのまま合致する。
+`IvOptions`/`IvResult`/`build_iv_input`/`fit`は`iv/common.rs`に置く（`two_sls.rs`/`gmm.rs`のような手法ごとのファイル分割はしない）。`fit_iv`という単一エントリポイントを`IvOptions.method`（`"2sls"`/`"gmm"`）で2SLS/GMMに振り分ける設計のため、これらは系統内で真に共有されるロジックであり、`<系統>/common.rs`に置くという既存方針にそのまま合致する。
+
+**`method="gmm"`は`ValidationError`**（`GmmEstimator`、engine側の実装であるIssue #160が未実装のため）。`fit`は`build_iv_input`の完了（列抽出・バリデーション・`cov_type`パース）を待ってから`method`を判定するため、`method="gmm"`でもデータ不正（列重複等）が先に検出される（GMM実装を待たずに他のバリデーションが機能する、意図した挙動）。
+
+`weak_instrument_f_statistics`（空`HashMap`）・`overid_statistic`/`overid_p_value`・`wu_hausman_statistic`/`wu_hausman_p_value`（いずれも`None`）は`fit`ではプレースホルダーのまま返す。実際の計算はそれぞれ別issue（#163/#167/#164）。`first_stage()`（内生変数ごとの第一段階回帰結果を返す別メソッド）もIssue #169のスコープ外で、配線はIssue #170で行う。
 
 ## `IvResult.stats`の命名（`t_stats`/`z_stats`ではない理由）
 

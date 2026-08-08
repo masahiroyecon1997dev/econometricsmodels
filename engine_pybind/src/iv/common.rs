@@ -11,24 +11,33 @@
 //! `IvError`の`Common`バリアント（`engine::error::CommonError`）は`crate::errors::
 //! common_error_to_pyerr`に委譲する（系統ごとに同じ判定ロジックを重複させない）。
 //!
-//! 【本Issue（#159）のスコープ】`IvOptions`/`IvResult`のpyclass定義と、データ抽出・
-//! バリデーション・`engine::iv::common::IvInput`構築までを担う`build_iv_input`を実装する。
-//! `TwoSlsEstimator::fit`/将来の`GmmEstimator::fit`の呼び出し・`IvResult`の実際の構築・
-//! `#[pymodule]`への登録はIssue #169（engine呼び出し・エラー変換）のスコープとし、
-//! ここでは行わない（Logit/Probitの`build_logit_input`/`build_probit_input`と同じ前例、
-//! ユーザー確認済み）。弱操作変数診断・過剰識別検定・内生性検定の各フィールドの実際の
-//! 計算はさらに別issue（#163/#167/#164）で行う。
+//! 【Issue #159のスコープ】`IvOptions`/`IvResult`のpyclass定義と、データ抽出・
+//! バリデーション・`engine::iv::common::IvInput`構築までを担う`build_iv_input`を実装した
+//! （Logit/Probitの`build_logit_input`/`build_probit_input`と同じ前例）。
+//!
+//! 【Issue #169のスコープ】`build_iv_input`の出力を実際に`TwoSlsEstimator::fit`
+//! （`engine::iv::two_sls`、2SLSの点推定・cov_type対応SEはIssue #157/#166で実装済み）に
+//! 渡し、`IvResult`を構築する`fit`を実装する。`method="gmm"`は`GmmEstimator`
+//! （engine側の実装、Issue #160）が未実装のため`ValidationError`を返す（ユーザー確認済み）。
+//! 弱操作変数診断（`weak_instrument_f_statistics`）・過剰識別検定
+//! （`overid_statistic`/`overid_p_value`）・内生性検定（`wu_hausman_statistic`/
+//! `wu_hausman_p_value`）はいずれも別issue（#163/#167/#164）のスコープのため、
+//! 現時点では空/`None`のプレースホルダーを返す。`first_stage()`（内生変数ごとの第一段階
+//! 回帰結果を返す別メソッド）の配線もIssue #170のスコープでありここでは行わない
+//! （本ファイル`IvResult`のdocコメント参照）。
 
 use std::collections::HashMap;
 
 use engine::iv::common::{IvError, IvInput};
+use engine::iv::two_sls::TwoSlsEstimator;
 use engine::linear::ols::CovType as EngineCovType;
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
+use pyo3_polars::PyDataFrame;
 
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
 use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
-use crate::linear::common::least_squares_error_is_computation_error;
+use crate::linear::common::{least_squares_error_is_computation_error, mat_to_vec};
 use crate::validation::{
     RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
     validate_no_duplicate_within_role,
@@ -50,17 +59,10 @@ use crate::validation::{
 /// （「第一段階/第二段階のどの内生変数で失敗したか」という文脈を含む）を使うため、
 /// `least_squares_error_to_pyerr`自体はそのまま呼ばない。
 ///
-/// この関数は`engine_pybind`側の2SLS/GMM `fit()`接続（Issue #169）が実装されるまで
-/// `#[pymodule]`等の「本番」経路からは呼び出されない。Issue #159で追加した`build_iv_input`
-/// のテストがこの関数を間接的に呼ぶようになったため（`build_iv_input`が`iv_error_to_pyerr`
-/// を呼ぶ）、`#[allow(dead_code)]`を使う（`#[expect]`は使わない。`#[expect]`は`cargo build`
-/// （テストコードなし）では未到達で正しく発火するが、`--all-targets`/`cargo test`では
-/// テスト経由で到達可能になり「期待した警告が発火しない」`unfulfilled_lint_expectations`
-/// エラーになってしまうため、テストからのみ呼ばれる関数には`#[expect]`は使えない。
-/// `#[allow]`はどちらの状況でも無条件に警告を抑制するため、この非対称性に対応できる。
-/// `build_iv_input`/`parse_iv_cov_type`も同じ理由で`#[allow(dead_code)]`にしている）。
-/// 接続issueで実際に呼び出されるようになったら、この属性ごと削除すること。
-#[allow(dead_code)]
+/// Issue #169で`fit`（本ファイル）が実際に`#[pymodule]`経路（`fit_iv`）から呼び出すように
+/// なった。Issue #159時点では`#[cfg(test)] mod tests`からしか呼ばれておらず
+/// `#[allow(dead_code)]`が必要だった（`--all-targets`ビルドでの`#[expect]`の罠、
+/// `engine_pybind/src/iv/CLAUDE.md`参照）が、本番経路から呼ばれるようになった今は不要。
 pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
     let message = err.to_string();
     match err {
@@ -208,9 +210,10 @@ impl IvOptions {
 /// `fit()`の戻り値本体には含めず別メソッドとして公開する設計（`iv-api-design.md`2.2節）
 /// のため、`engine_pybind`側の配線はIssue #170で行う。
 ///
-/// Not yet populated by any code in this crate (Issue #159 defines the type only;
-/// `fit_iv`, which constructs and returns it, is implemented in Issue #169 for the
-/// core fields above, and in Issue #163/#167/#164 for the diagnostic fields below).
+/// `fit_iv` (`fit` in this file) constructs and returns it. The core fields above are
+/// populated by `TwoSlsEstimator`/`GmmEstimator` (`method="gmm"` is not yet implemented,
+/// see `fit`'s doc comment). The diagnostic fields below are placeholders (empty map /
+/// `None`) until Issue #163/#167/#164 implement the underlying computations.
 // `IvResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`IvOptions`の`from_py_object`とは
 // 対照的、`OLSResult`/`LogitResult`と同じ理由）。
@@ -280,19 +283,16 @@ pub struct IvResult {
 /// `IvOptions.cov_type`をパースし、該当する`cov_type`のときのみ`cluster_col`/`time_col`を
 /// 抽出したうえで`engine::linear::ols::CovType`を組み立てる。
 ///
-/// 2SLSの分散計算が`OlsEstimator`への委譲で構成される（`engine::iv::two_sls::
-/// TwoSlsEstimator`）ため、対応するcov_typeの範囲は`engine::linear::common::
-/// parse_cov_type`（OLS/WLS用）と同じだが、`OLSOptions`ではなく`IvOptions`という別の
-/// 型に依存するため独立実装している（`linear/common.rs`の`parse_cov_type`のdocコメントが
+/// `engine::linear::ols::CovType`（型そのもの）を流用しているのは、`TwoSlsEstimator::fit`が
+/// 第一段階（`OlsEstimator`への委譲）・第二段階（独立実装のサンドイッチ計算、Issue #166）
+/// のどちらもこの型で`cov_type`を受け取るため。対応するcov_typeの範囲は`engine::linear::
+/// common::parse_cov_type`（OLS/WLS用）と同じだが、`OLSOptions`ではなく`IvOptions`という
+/// 別の型に依存するため独立実装している（`linear/common.rs`の`parse_cov_type`のdocコメントが
 /// 明記する通り、無理に共通化せず系統ごとに素直に実装する方針）。
 ///
 /// # Errors
 /// `cov_type`の文字列が既知の値のいずれでもない場合は`ValidationError`。それ以外
 /// （列の抽出時に発覚する問題等）は`column_extraction`の責務で`ValidationError`。
-///
-/// `#[allow(dead_code)]`について: `build_iv_input`のdocコメント参照
-/// （`#[expect]`ではなく`#[allow]`を使う理由）。
-#[allow(dead_code)]
 fn parse_iv_cov_type(df: &DataFrame, options: &IvOptions) -> PyResult<(EngineCovType, String)> {
     let cov_type_lower = options.cov_type.to_lowercase();
 
@@ -342,16 +342,15 @@ fn parse_iv_cov_type(df: &DataFrame, options: &IvOptions) -> PyResult<(EngineCov
 
 /// Pythonから渡された `data` / `y` / `x_exog` / `x_endog` / `instruments` / `options` を
 /// 検証し、`engine::iv::common::IvInput::from_columns`を呼び出すところまでを行う。
-/// `TwoSlsEstimator::fit`/将来の`GmmEstimator::fit`の呼び出し・`IvResult`の構築は
-/// Issue #169（engine呼び出し・エラー変換）で実装する（このファイル冒頭のdocコメント
-/// 「本Issueのスコープ」参照）。
+/// `TwoSlsEstimator::fit`/将来の`GmmEstimator::fit`の呼び出し・`IvResult`の構築は`fit`
+/// （本ファイル）が行う。
 ///
 /// 戻り値に`method`のパース済み小文字文字列（`"2sls"`/`"gmm"`のいずれか）を含めるのは、
-/// `cov_type_lower`と同じ理由（Issue #169の`fit_iv`が2SLS/GMMのどちらを呼ぶか分岐する際、
-/// ここでの妥当性チェックと同じ正規化ロジックを再実装せずに済ませるため。`Logit`の
-/// `build_logit_input`が`method`を`EngineMethod`にパースして返す設計と同じ考え方だが、
-/// IVには対応する`engine`側のenumがまだ無い——GMMの`engine`実装（Issue #160）が
-/// 無いため——ので、ここでは正規化済み文字列のまま返す）。
+/// `cov_type_lower`と同じ理由（`fit`が2SLS/GMMのどちらを呼ぶか分岐する際、ここでの妥当性
+/// チェックと同じ正規化ロジックを再実装せずに済ませるため。`Logit`の`build_logit_input`が
+/// `method`を`EngineMethod`にパースして返す設計と同じ考え方だが、IVには対応する`engine`側の
+/// enumがまだ無い——GMMの`engine`実装（Issue #160）が無いため——ので、ここでは正規化済み
+/// 文字列のまま返す）。
 ///
 /// # Errors
 /// - 列の抽出時に発覚する問題（列が存在しない、数値/文字列型にキャストできない、
@@ -364,19 +363,6 @@ fn parse_iv_cov_type(df: &DataFrame, options: &IvOptions) -> PyResult<(EngineCov
 /// - それ以外（行数不一致等）は`engine::iv::common::IvError`から`iv_error_to_pyerr`で変換
 ///   （`IvInput::from_columns`はこの時点では識別可能性を検証しないため、
 ///   `InsufficientInstruments`はここでは発生しない。`IvInput`の構造体docコメント参照）
-///
-/// `#[allow(dead_code)]`について: Issue #159時点では呼び出し元が本ファイルの
-/// `#[cfg(test)] mod tests`のみで、`TwoSlsEstimator::fit`を実際に呼ぶ`fit_iv`
-/// （Issue #169で実装予定の`#[pyfunction]`）がまだ無いため、`cargo build`
-/// （`#[cfg(test)]`を含まないlibターゲットのビルド）からは到達不能に見え`dead_code`警告に
-/// なる（Logit「`build_logit_input`、Issue #65」と同じ状況）。ここで`#[expect]`ではなく
-/// `#[allow]`を使うのは、テストからは実際に呼ばれているため（`--all-targets`/`cargo test`
-/// では到達可能になり、`#[expect]`だと「期待した警告が発火しない」
-/// `unfulfilled_lint_expectations`エラーになってしまう）。`iv_error_to_pyerr`のdocコメント
-/// 「`#[expect]`と`#[allow]`の使い分け」も参照。Issue #169でこの関数が実際に
-/// `#[pymodule]`経路から呼ばれるようになった時点でこの属性・`parse_iv_cov_type`の属性
-/// ともに不要になる（削除すること）。
-#[allow(dead_code)]
 pub(crate) fn build_iv_input(
     df: &DataFrame,
     y: String,
@@ -447,6 +433,74 @@ pub(crate) fn build_iv_input(
     .map_err(iv_error_to_pyerr)?;
 
     Ok((input, cov_type, cov_type_lower, method_lower))
+}
+
+/// Pythonから渡された `data` / `y` / `x_exog` / `x_endog` / `instruments` / `options` を
+/// 検証し、`build_iv_input`で構築した`IvInput`に対して`method`に応じた推定
+/// （現時点では`TwoSlsEstimator::fit`のみ、将来`GmmEstimator::fit`）を呼び出し、
+/// `IvResult`として返す。
+///
+/// `method="gmm"`は`GmmEstimator`（engine側の実装、Issue #160）がまだ無いため
+/// `ValidationError`を返す（`build_iv_input`自体は"2sls"/"gmm"どちらの文字列も妥当な
+/// `method`として受理する設計のまま。Issue #160実装後、この分岐だけ差し替える想定、
+/// ユーザー確認済み）。
+///
+/// `weak_instrument_f_statistics`・`overid_statistic`/`overid_p_value`・
+/// `wu_hausman_statistic`/`wu_hausman_p_value`はいずれも別issue（#163/#167/#164）の
+/// スコープのため、現時点では空/`None`のプレースホルダーを返す（`IvResult`のdocコメント
+/// 参照）。
+///
+/// # Errors
+/// - `build_iv_input`が返すエラー（列抽出・y/x_exog/x_endog/instrumentsの重複・
+///   `"const"`列衝突・`method`/`cov_type`文字列の検証等）は`ValidationError`
+/// - `method="gmm"`: `ValidationError`（未実装、上記docコメント参照）
+/// - `TwoSlsEstimator::fit`が返す`engine::iv::common::IvError`（識別の順序条件・
+///   第一段階/第二段階回帰の失敗・`cov_type`起因のエラー等）は`iv_error_to_pyerr`で変換
+pub(crate) fn fit(
+    data: PyDataFrame,
+    y: String,
+    x_exog: Vec<String>,
+    x_endog: Vec<String>,
+    instruments: Vec<String>,
+    options: &IvOptions,
+) -> PyResult<IvResult> {
+    let df: DataFrame = data.into();
+    let (input, cov_type, cov_type_lower, method_lower) =
+        build_iv_input(&df, y, x_exog, x_endog, instruments, options)?;
+
+    if method_lower == "gmm" {
+        return Err(ValidationError::new_err(
+            "method='gmm' is not yet implemented (2sls is the only supported method for now)",
+        ));
+    }
+
+    let estimator = TwoSlsEstimator::fit(input, cov_type, options.confidence_level)
+        .map_err(iv_error_to_pyerr)?;
+
+    Ok(IvResult {
+        params: mat_to_vec(estimator.params()),
+        std_errors: mat_to_vec(estimator.std_errors()),
+        stats: mat_to_vec(estimator.t_stats()),
+        p_values: mat_to_vec(estimator.p_values()),
+        conf_lower: mat_to_vec(estimator.conf_lower()),
+        conf_upper: mat_to_vec(estimator.conf_upper()),
+        param_names: estimator.param_names().to_vec(),
+        residuals: mat_to_vec(estimator.residuals()),
+        dep_var_name: estimator.dep_var_name().to_string(),
+        n_obs: estimator.nobs(),
+        df_resid: estimator.df_resid(),
+        df_model: estimator.df_model(),
+        cov_type: cov_type_lower,
+        f_statistic: estimator.f_statistic(),
+        f_p_value: estimator.f_p_value(),
+        r_squared: estimator.r_squared(),
+        r_squared_adj: estimator.r_squared_adj(),
+        weak_instrument_f_statistics: HashMap::new(),
+        overid_statistic: None,
+        overid_p_value: None,
+        wu_hausman_statistic: None,
+        wu_hausman_p_value: None,
+    })
 }
 
 #[cfg(test)]

@@ -1,0 +1,15 @@
+# engine/src/iv/ 実装ノート（2SLS/GMM）
+
+このファイルは `engine/src/iv/` 配下のファイルを読み書きするときだけ自動ロードされる。ここに書くのは「削除するとClaudeが同じ間違いを繰り返す」レベルの既知の罠のみ。設計の背景・数式の導出は`docs/planning/specs/iv-api-design.md`が正本（このファイルはその要約ではなく差分の索引）。
+
+## 踏んだ罠（再発防止）
+
+- **クラスター数`G`と操作変数の数`l`（全操作変数`x_exog ++ instruments`の列数）の関係（`G<l`で構造的に特異）**: `two_sls.rs`のクラスターロバストSE（`cluster_cov_params`、係数の分散共分散行列版、`engine/src/linear/CLAUDE.md`の`G≤q`の罠と同じ構造）だけでなく、`gmm.rs`の`WeightType::Cluster`（モーメント条件の分散共分散行列`S`、l×l）にも同じ制約が当てはまる。`S`はG個のランク1行列の和なので`rank(S)≤G`であり、`G<l`だと`S`が必然的に特異になり`ComputationFailed`になる（`gmm.rs`の`fit_returns_computation_error_when_cluster_count_is_less_than_instrument_count`で固定。実装中に2グループ・3操作変数のテストケースで実際に踏んだ）。クラスター系の境界値テストを書くときは、常に「G ≥ 対象の分散共分散行列の次元」を確認する。
+- **GMMの重み行列`S`はスカラー倍で点推定`β̂`が変わらない**: `β̂(W) = (X'ZWZ'X)⁻¹X'ZWZ'y`で`W=S⁻¹`のため、`S`を正の定数`c`倍すると`W`が`1/c`倍され、分子・分母両方に乗って相殺する（`gmm.rs`の`gmm_point_estimate_is_invariant_to_positive_scaling_of_s`で検証済み）。そのため`gmm.rs`の`robust_moment_covariance`/`cluster_moment_covariance`/`kernel_moment_covariance`は、`two_sls.rs`の対応する`hc_cov_params`/`cluster_cov_params`/`hac_cov_params`が持つ小標本補正（HC1の`n/(n-k)`、クラスターの`(G/(G-1))((n-1)/(n-k))`）を意図的に適用していない（これらは全成分に一律に乗るスカラーのため）。ただしHC2/HC3のレバレッジ補正は成分ごとに異なる重みのため、この理屈は適用できない（GMMの`weight_type`にHC2/HC3相当の区分が無いのはこのため、`iv-api-design.md`6.2節）。
+- **`gmm_iterations`の用語（1-step/2-step）を混同しない**: 標準的なGMM文献（Hansen 1982、Hayashi、Wooldridge）・`iv-api-design.md`6.2節の用語法では、「1-step GMM」（`gmm_iterations=1`）は残差に基づく重みの再構築を一切行わずアドホックな`W₀=(Z'Z)⁻¹`のみで打ち切る推定（`weight_type`によらず常に2SLSと同じ結果）を指し、「2-step efficient GMM」（`gmm_iterations=2`、デフォルト）が「初期推定→残差からS構築→S⁻¹で再推定」という2段階手続きを指す。Issue #160（`GmmEstimator::fit`）が実装しているのは後者（2-step相当）——`weight_type`が点推定に意味を持つには残差ベースの`S`構築が必須なため——であり、Issue #165の残りスコープは`gmm_iterations=1`のとき`S`構築のステップを省略して`β̂₀`をそのまま返す分岐を追加することだけになる（実装当初「v1は1-step固定」と逆の用語でdocコメントを書いてしまい、rust-reviewerの指摘で訂正した経緯がある）。
+
+## 2SLSとGMMの独立実装方針
+
+- `TwoSlsEstimator`（`two_sls.rs`）と`GmmEstimator`（`gmm.rs`）は、点推定の意味では`weight_type=Unadjusted`のGMMコアが2SLSと数値的に一致する（`gmm.rs`の`fit_matches_two_sls_point_estimate_when_weight_type_is_unadjusted`で検証済み）が、実装は意図的に独立させている（`TwoSlsEstimator`は`cov_type`対応の推論統計量一式を持つのに対し`GmmEstimator`は点推定のみのスコープで持たないため、委譲すると過剰設計になる。詳細な理由は`gmm.rs`冒頭のdocコメント「2SLSとの共通化の判断」参照）。
+- 同じ理由で、`gmm.rs`のモーメント共分散行列計算（`robust_moment_covariance`等）は`two_sls.rs`のサンドイッチ型分散計算（`hc_cov_params`等）と数式上ほぼ同型だが、コードは共有せず独立に実装している（`iv-api-design.md`4章の「IVのサンドイッチ型分散計算はOLS/nonlinearに寄せず独立実装でよい」という既存方針を、2SLS/GMM間の関係にも適用した判断）。
+- GMMの`cov_type`対応（`iv-api-design.md`6.7節、2SLSと同じ範囲を踏襲する予定）はまだ実装Issueが存在しない（Issue #160の完了条件は点推定のみ）。着手する際は本ファイルの「GMMの重み行列`S`はスカラー倍で点推定`β̂`が変わらない」の教訓が直接は使えない点に注意する（SE計算では小標本補正を省略できない、点推定と違いスカラー倍で結果が変わってしまうため）。

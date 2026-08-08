@@ -511,10 +511,23 @@ mod tests {
         assert_params_close(estimator.params(), &expected_beta);
     }
 
-    /// `x_exog`が定数項のみではなく実変数を含む、教科書的な2SLSの典型ケース
-    /// （外生変数＋内生変数＋操作変数が同時に存在する）を射影公式で独立検証する。
-    #[test]
-    fn fit_matches_independently_recomputed_projection_formula_with_nontrivial_x_exog() {
+    /// `x_exog`に実変数（`x1`）を含む、教科書的な2SLSの典型ケース（外生変数＋内生変数＋
+    /// 操作変数が同時に存在する、過剰識別）のテストデータとfit済み`TwoSlsEstimator`。
+    /// `(x1, x_endog, z1, z2, y, estimator)`を返す。射影公式・第一段階の閉形式解の
+    /// 独立検証（`first_stage_estimators_match_independently_recomputed_ols_closed_form`・
+    /// `fit_matches_independently_recomputed_projection_formula_with_nontrivial_x_exog`）が
+    /// 同じデータ・同じfit呼び出しを共有するため、ここに集約する（重複していた際、
+    /// 片方だけデータを更新すると気づかずに非退化性が崩れるリスクがあったため、
+    /// レビューを受けて統合）。
+    #[allow(clippy::type_complexity)]
+    fn nontrivial_x_exog_fitted_estimator() -> (
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        TwoSlsEstimator,
+    ) {
         let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
         let x_endog = vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0, 8.0, 7.0];
         let z1 = vec![3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0];
@@ -534,6 +547,46 @@ mod tests {
         )
         .unwrap();
         let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
+        (x1, x_endog, z1, z2, y, estimator)
+    }
+
+    /// 第一段階回帰（`x_endog[j] ~ x_exog + instruments`）の係数を、通常のOLS閉形式解
+    /// `β̂=(Z'Z)⁻¹Z'x_endog`（`Z=[x_exog, instruments]`）で独立に計算し、
+    /// `first_stage_estimators()`が返す`OlsEstimator`の`params()`と数値一致することを
+    /// 確認する（既存テストは操作変数が内生変数を完全予測する退化ケースでしか第一段階を
+    /// 検証しておらず、一般的な非退化ケースでの独立検証が無かったため追加。Issue #158）。
+    #[test]
+    fn first_stage_estimators_match_independently_recomputed_ols_closed_form() {
+        use faer::Side;
+        use faer::prelude::Solve;
+
+        let (x1, x_endog, z1, z2, _y, estimator) = nontrivial_x_exog_fitted_estimator();
+
+        let n = x1.len();
+        // 第一段階の設計行列 Z = [const, x1, z1, z2]（`x_exog ++ instruments`のunion）
+        let z = Mat::from_fn(n, 4, |i, j| match j {
+            0 => 1.0,
+            1 => x1[i],
+            2 => z1[i],
+            _ => z2[i],
+        });
+        let x_endog_mat = Mat::from_fn(n, 1, |i, _| x_endog[i]);
+
+        let ztz = z.transpose() * &z;
+        let zt_x_endog = z.transpose() * &x_endog_mat;
+        let expected_beta = ztz.llt(Side::Lower).unwrap().solve(zt_x_endog);
+
+        assert_eq!(estimator.first_stage_estimators().len(), 1);
+        let (name, first_stage) = &estimator.first_stage_estimators()[0];
+        assert_eq!(name, "endog1");
+        assert_params_close(first_stage.params(), &expected_beta);
+    }
+
+    /// `x_exog`が定数項のみではなく実変数を含む、教科書的な2SLSの典型ケース
+    /// （外生変数＋内生変数＋操作変数が同時に存在する）を射影公式で独立検証する。
+    #[test]
+    fn fit_matches_independently_recomputed_projection_formula_with_nontrivial_x_exog() {
+        let (x1, x_endog, z1, z2, y, estimator) = nontrivial_x_exog_fitted_estimator();
         assert_eq!(estimator.param_names(), ["const", "x1", "endog1"]);
 
         let n = y.len();

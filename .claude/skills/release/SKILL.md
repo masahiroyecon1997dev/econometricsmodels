@@ -1,4 +1,5 @@
 ---
+name: release
 description: SemVerに基づくバージョンアップ・CHANGELOG作成を支援する（side-effectがあるため明示的な呼び出しのみ。タグ付け・PR作成以降は/release-publish）
 argument-hint: [patch/minor/major または具体的なバージョン番号]
 allowed-tools: Read, Edit, Bash(git log:*), Bash(git status:*), Bash(cargo:*), Bash(uv lock:*), AskUserQuestion
@@ -7,7 +8,7 @@ disable-model-invocation: true
 
 # リリース支援
 
-対応するCLAUDE.mdの方針: 9章（バージョニング・CI/CD）
+対応するCLAUDE.mdの方針: 8章（バージョニング・CI/CD）
 
 ## バージョンアップ種別
 

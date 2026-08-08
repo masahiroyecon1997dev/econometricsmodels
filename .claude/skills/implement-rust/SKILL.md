@@ -1,4 +1,5 @@
 ---
+name: implement-rust
 description: engine/engine_pybind側の実装計画立案・実装・規約チェックまでを一括で行う
 argument-hint: [実装したい内容]
 allowed-tools: Read, Write, Edit, Bash(cargo build:*), Bash(cargo clippy:*), Bash(cargo fmt:*), Bash(cargo test:*), Grep, Glob

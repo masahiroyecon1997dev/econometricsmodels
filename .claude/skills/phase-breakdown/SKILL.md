@@ -1,4 +1,5 @@
 ---
+name: phase-breakdown
 description: 対象フェーズを実装可能なタスク単位に分解する（高い粒度の計画コマンド）
 argument-hint: [対象フェーズ（例: Phase 1）]
 allowed-tools: Read, Write, Grep, Glob, Bash(gh issue list:*), Bash(gh issue create:*)
@@ -6,7 +7,7 @@ allowed-tools: Read, Write, Grep, Glob, Bash(gh issue list:*), Bash(gh issue cre
 
 # フェーズタスク分解
 
-対応するCLAUDE.mdの方針: 4章（実装フェーズと進め方）、13章（今後の検討事項）
+対応するCLAUDE.mdの方針: 4章（実装フェーズと進め方）、12章（今後の検討事項）
 
 ## 対象フェーズ
 
@@ -14,7 +15,7 @@ $ARGUMENTS
 
 ## 手順
 
-1. CLAUDE.md 4章から対象フェーズに含まれる手法を確認する。
+1. `docs/plan.md` 4章から対象フェーズに含まれる手法を確認する。
 2. 各手法について、以下を基本単位としてタスクに分解する。
    - `engine`側の実装
    - `engine_pybind`のバインディング

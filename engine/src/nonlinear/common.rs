@@ -31,6 +31,7 @@ use thiserror::Error;
 use crate::error::CommonError;
 use crate::inference;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
+use crate::validation::validate_cluster_groups;
 
 /// Logit/Probit/Tobitの計算過程で発生しうるエラー。
 ///
@@ -154,6 +155,56 @@ pub fn validate_binary_y(y: &Mat<f64>) -> Result<(), MleError> {
         if value != 0.0 && value != 1.0 {
             return Err(MleError::InvalidBinaryY { row: i, value });
         }
+    }
+    Ok(())
+}
+
+/// `fit()`冒頭で行う共通の入力検証（Logit/Probit）。検証順序:
+/// `confidence_level`→`max_iter`→`tol`→`y`の二値性→`k==0`→`n<=k`→
+/// `cov_type=Cluster`のグループ列。元はLogit/Probitそれぞれの`fit()`に一字一句
+/// 同一のブロックとして重複していたため、こちらへ集約した。
+///
+/// `k==0`（`include_intercept=false`かつ説明変数も無い病的な入力）は`n<=k`単体では
+/// 弾けない（実データでは`n>=1`のため）。この経路を通すと後段の`cov_params`計算
+/// （0×0行列に対する`ensure_well_conditioned_symmetric_matrix`）で`faer`がpanicする
+/// ことが判明していたため、ここで明示的に弾く。`InsufficientObservations`と
+/// `NoRegressors`を分けている理由は`CommonError::NoRegressors`のdocコメント参照。
+///
+/// Tobitは`y`が連続値のため`validate_binary_y`をそのまま適用できない。この関数を
+/// Tobitでどう扱うかは別issueで検討する（Issue #212）。
+///
+/// 引数は検証順序に揃えている。`n`（観測数）は`y`から自明に求まる（`y.nrows()`）ため
+/// 引数に取らない。`k`と型が同じ`usize`の引数を並べると呼び出し側で取り違えても
+/// コンパイルが通ってしまうため（レビュー指摘）、そのリスクをそもそも作らない設計。
+pub fn validate_fit_preconditions(
+    confidence_level: f64,
+    max_iter: i64,
+    tol: f64,
+    y: &Mat<f64>,
+    k: usize,
+    cov_type: &CovType,
+) -> Result<(), MleError> {
+    if !(confidence_level > 0.0 && confidence_level < 1.0) {
+        return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
+    }
+    if max_iter <= 0 {
+        return Err(MleError::InvalidMaxIter { max_iter });
+    }
+    if tol <= 0.0 {
+        return Err(MleError::InvalidTol { tol });
+    }
+    validate_binary_y(y)?;
+
+    let n = y.nrows();
+    if k == 0 {
+        return Err(CommonError::NoRegressors { n }.into());
+    }
+    if n <= k {
+        return Err(CommonError::InsufficientObservations { n, k }.into());
+    }
+    if let CovType::Cluster { groups } = cov_type {
+        let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
+        validate_cluster_groups(groups, n)?;
     }
     Ok(())
 }
@@ -558,6 +609,20 @@ pub fn pred_table(predicted: &[f64], y: &Mat<f64>, threshold: f64) -> Mat<f64> {
         *table.get_mut(actual, pred) += 1.0;
     }
     table
+}
+
+/// 予測確率 `p_i = link(x_i'θ)` を`x`の各行について計算する（Logit/Probit共通）。
+/// ループ構造は完全に共通で、差分はリンク関数（Logitはロジスティック関数、Probitは
+/// 標準正規分布のCDF）のみのため、`link`をクロージャで受け取る形に共通化している。
+pub fn predict_from_link(x: &Mat<f64>, params: &[f64], link: impl Fn(f64) -> f64) -> Vec<f64> {
+    let n = x.nrows();
+    let k = x.ncols();
+    (0..n)
+        .map(|i| {
+            let z: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
+            link(z)
+        })
+        .collect()
 }
 
 /// `run_solver`の出力。
@@ -1824,6 +1889,56 @@ mod tests {
         assert_eq!(
             validate_binary_y(&y),
             Err(MleError::InvalidBinaryY { row: 0, value: 2.0 })
+        );
+    }
+
+    #[test]
+    fn validate_fit_preconditions_ok_for_valid_inputs() {
+        let y = Mat::from_fn(4, 1, |i, _| [0.0, 1.0, 0.0, 1.0][i]);
+        assert_eq!(
+            validate_fit_preconditions(0.95, 100, 1e-8, &y, 2, &CovType::Classical),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn validate_fit_preconditions_returns_invalid_confidence_level_before_other_checks() {
+        // `confidence_level`が範囲外かつ`y`も不正（二値でない）という同時違反ケースで、
+        // 検証順序通り`InvalidConfidenceLevel`が先に返ることを確認する。
+        let y = Mat::from_fn(2, 1, |i, _| [0.0, 2.0][i]);
+        assert_eq!(
+            validate_fit_preconditions(1.5, 100, 1e-8, &y, 2, &CovType::Classical),
+            Err(CommonError::InvalidConfidenceLevel {
+                confidence_level: 1.5
+            }
+            .into())
+        );
+    }
+
+    #[test]
+    fn validate_fit_preconditions_returns_no_regressors_when_k_is_zero() {
+        let y = Mat::from_fn(3, 1, |i, _| [0.0, 1.0, 0.0][i]);
+        assert_eq!(
+            validate_fit_preconditions(0.95, 100, 1e-8, &y, 0, &CovType::Classical),
+            Err(CommonError::NoRegressors { n: 3 }.into())
+        );
+    }
+
+    #[test]
+    fn validate_fit_preconditions_returns_insufficient_observations_when_n_less_equal_k() {
+        let y = Mat::from_fn(2, 1, |i, _| [0.0, 1.0][i]);
+        assert_eq!(
+            validate_fit_preconditions(0.95, 100, 1e-8, &y, 2, &CovType::Classical),
+            Err(CommonError::InsufficientObservations { n: 2, k: 2 }.into())
+        );
+    }
+
+    #[test]
+    fn validate_fit_preconditions_returns_missing_cluster_column_when_groups_is_none() {
+        let y = Mat::from_fn(4, 1, |i, _| [0.0, 1.0, 0.0, 1.0][i]);
+        assert_eq!(
+            validate_fit_preconditions(0.95, 100, 1e-8, &y, 2, &CovType::Cluster { groups: None }),
+            Err(CommonError::MissingClusterColumn.into())
         );
     }
 

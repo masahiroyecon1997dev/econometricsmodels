@@ -8,9 +8,13 @@
       "Read(./**/*.pyc)",
       "Read(./.pytest_cache/**)",
       "Read(./.ruff_cache/**)",
-      "Read(./docs/site/**)",
+      "Read(./site/**)",
       "Read(./.github/agents/**)",
-      "Read(./.github/instructions/**)"
+      "Read(./.github/instructions/**)",
+      "Read(./about.hbs)",
+      "Read(./LICENSE)",
+      "Read(./THIRD-PARTY-LICENSES.html)",
+      "Read(./python_package/econometricsmodels/*.so)"
     ],
     "ask": [
       "Read(./tests/api_tests/fixtures/benchmarks/**)"

@@ -1,4 +1,4 @@
-//! 2SLS（二段階最小二乗法）の点推定。
+//! 2SLS（二段階最小二乗法）の点推定・標準誤差・適合度統計量。
 //!
 //! ## 数式
 //!
@@ -10,51 +10,68 @@
 //! （`β̂_2SLS = (X'PzX)⁻¹X'Pzy`、`Pz`は全操作変数`Z`への射影行列）と数値的に一致する
 //! （教科書的な2SLSの2段階回帰による構成、`iv-api-design.md`6.2節）。
 //!
-//! ## このIssue（#157）のスコープ
+//! ## 標準誤差・適合度統計量（Issue #166）
 //!
-//! 点推定（係数）のみを対象とする。第二段階の設計行列に`x̂_endog`（推定値）を使う都合上、
-//! **第二段階の`OlsEstimator`がナイーブに計算する標準誤差・t値・p値・信頼区間は2SLSとして
-//! 正しくない**（教科書的に有名な罠。2SLSの正しい分散は`(X'PzX)⁻¹X'Pz Ω Pz X(X'PzX)⁻¹`という
-//! サンドイッチ型で、`Ω`の推定方法は`cov_type`により変わる。`iv-api-design.md`3.1節）。
-//! 正しいSEの実装はIssue #166（`cov_type`対応）に委ねる。そのため`TwoSlsEstimator`は
-//! `params()`/`param_names()`等の点推定に関する値のみを公開し、第二段階の`OlsEstimator`
-//! 自体（および誤った`std_errors()`等）は外部に公開しない。
+//! 第二段階の設計行列に`x̂_endog`（推定値）を使う都合上、**第二段階の`OlsEstimator`が
+//! ナイーブに計算する標準誤差・t値・p値・信頼区間は2SLSとして正しくない**（教科書的に
+//! 有名な罠。`X = [x_exog, x_endog]`を実際の（推定値ではない）内生変数、
+//! `X̂ = Pz X = [x_exog, x̂_endog]`を第二段階の設計行列とすると、2SLSの正しい分散は
+//! `(X'PzX)⁻¹X'Pz Ω Pz X(X'PzX)⁻¹ = (X̂'X̂)⁻¹X̂'ΩX̂(X̂'X̂)⁻¹`というサンドイッチ型で、
+//! `Ω`の推定方法は`cov_type`により変わる。`iv-api-design.md`3.1節）。
+//!
+//! 上式の`(X̂'X̂)⁻¹X̂'ΩX̂(X̂'X̂)⁻¹`は、**設計行列にX̂を使い、残差に構造残差
+//! `e = y - Xβ̂`（実際のXを使う。第二段階回帰自身の残差`y - X̂β̂`ではない）を使えば、
+//! OLSのclassical/HC0-3/cluster/hacサンドイッチ公式とまったく同じ形**になる
+//! （`Pz`が射影行列＝冪等・対称であることから代数的に導出できる、Wooldridge (2010) 5章）。
+//! そのため本モジュールは、第二段階の`OlsEstimator`（`params()`のみ利用、後述）とは別に、
+//! この`(X̂, e)`に対する独立実装のサンドイッチ計算（`classical_cov_params`/`hc_cov_params`/
+//! `hac_cov_params`/`cluster_cov_params`/`wald_f_test`、いずれも本ファイル下部）を行う。
+//! OLS（`engine::linear::ols`）の同名の同型計算とは**意図的に独立実装**にしている
+//! （`iv-api-design.md`4章「IVのサンドイッチ型分散計算は独自実装でよい……OLS/nonlinear
+//! どちらの既存計算にも寄せない」）。
 //!
 //! 第一段階の各`OlsEstimator`はそれ自体が正しい（ナイーブな）OLS回帰であり、
 //! （弱操作変数診断等で必要になる）SE・F統計量も含めてそのまま公開してよい
-//! （`first_stage_estimators()`、Issue #158の`first_stage()`実装で利用予定）。
+//! （`first_stage_estimators()`、Issue #158の`first_stage()`実装で利用済み）。
+//!
+//! ## `second_stage`フィールドの位置づけ（変わらず内部実装専用）
+//!
+//! `second_stage: OlsEstimator`は`SECOND_STAGE_COV_TYPE`（`Classical`固定）で内部的に
+//! フィットするが、これは**係数`β̂`と設計行列`X̂`（`input().x()`）を得るためだけ**に使う
+//! （`Cluster`のようにクラスター列や十分なクラスター数を追加で要求せず、`β̂`計算に
+//! 無関係な失敗経路を作らないため）。`second_stage`自身の`std_errors()`/`t_stats()`等
+//! （ナイーブな第二段階OLSのSEで2SLSとして誤り）は`TwoSlsEstimator`の外部に公開しない。
+//! 呼び出し元が指定した`cov_type`を反映した正しいSE・F統計量等は、`TwoSlsEstimator`
+//! 自身のトップレベルフィールド（`std_errors()`/`t_stats()`/`f_statistic()`等）として
+//! 独立に計算・保持する。
 //!
 //! ## 第一段階・第二段階での`cov_type`/`confidence_level`の扱い
 //!
 //! 点推定（`params()`）の値は`cov_type`/`confidence_level`のどちらにも依存しない
 //! （`cov_type`は分散の推定方法の選択、`confidence_level`は信頼区間の幅にのみ影響する）。
-//! それでも**第一段階**には`fit()`の呼び出し元から渡された`cov_type`/`confidence_level`を
-//! そのまま使う。第一段階は正しい通常のOLS回帰としてSE・F統計量込みで公開する設計
-//! （`first_stage_estimators()`参照）のため、弱操作変数診断（Issue #158）等で
-//! ユーザーが指定した`cov_type`（HC系・cluster・hac）を反映する必要があるため
-//! （一般的な実務慣行として、Stata `ivregress`・`linearmodels`も第一段階の診断に
-//! ユーザー指定のvcovをそのまま使う）。
-//!
-//! 一方**第二段階**は、モジュール冒頭の「このIssue（#157）のスコープ」で説明した通り
-//! 標準誤差自体を公開しない設計であり、`cov_type`を変えても意味を持たない
-//! （どの`cov_type`を選んでも、二段階回帰によるナイーブな第二段階OLSのSEは2SLSとして
-//! 誤りのまま）。そのため第二段階には呼び出し元の`cov_type`を使わず、内部専用の
-//! 固定値[`SECOND_STAGE_COV_TYPE`]（`Classical`。`Cluster`のようにクラスター列や
-//! 十分なクラスター数を追加で要求せず、余計な失敗経路を作らないため）を使う。
-//! `confidence_level`は第二段階でも呼び出し元の値をそのまま使う（`(0, 1)`の範囲内で
-//! あればよく、公開しないため実質的に意味を持たないが、内部専用の別値を用意する
-//! 理由もないため。`x_endog=[]`の退化ケースでは第一段階ループが一度も回らないため、
-//! この`confidence_level`検証が範囲外エラーを検知する唯一の経路になる）。
+//! **第一段階・第二段階のいずれにも**、`fit()`の呼び出し元から渡された`cov_type`/
+//! `confidence_level`をそのまま使う（第一段階は文字通り`OlsEstimator::fit`に渡す。
+//! 第二段階は上記の独立実装のサンドイッチ計算に渡す。`second_stage`フィールド自身の
+//! 内部委譲フィットだけは`SECOND_STAGE_COV_TYPE`固定のまま、前節参照）。
+//! `confidence_level`の`(0, 1)`範囲チェックは、第二段階の内部委譲フィット
+//! （`OlsEstimator::fit(second_stage_input, ...)`）に一度だけ委ねる（独立実装の
+//! サンドイッチ計算側では検証しない。`x_endog=[]`の退化ケースでは第一段階ループが
+//! 一度も回らないため、この検証が範囲外エラーを検知する唯一の経路になる）。
 
+use crate::error::CommonError;
+use crate::inference;
 use crate::iv::common::{IvError, IvInput, mat_column_to_vec, mat_to_columns};
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
-use faer::Mat;
+use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
+use crate::validation::validate_cluster_groups;
+use faer::linalg::matmul::matmul;
+use faer::prelude::Solve;
+use faer::{Accum, Mat, Par, Side};
+use statrs::distribution::{ContinuousCDF, FisherSnedecor, StudentsT};
 
-/// 第二段階のOLS委譲にのみ使う内部専用の`cov_type`。モジュール冒頭のdocコメント参照。
-///
-/// Issue #166（正しいサンドイッチ型SEの実装）着手時にこの固定値は廃止し、第二段階にも
-/// 呼び出し元の`cov_type`を反映するよう書き換える見込み（`Ω`の推定方法が`cov_type`に
-/// 依存するため）。
+/// `second_stage`（`β̂`・`X̂`を得るためだけの内部委譲フィット）にのみ使う固定`cov_type`。
+/// モジュール冒頭「`second_stage`フィールドの位置づけ」参照。呼び出し元が指定した
+/// `cov_type`は、独立実装のサンドイッチ計算（`fit()`本体）側で使う。
 const SECOND_STAGE_COV_TYPE: CovType = CovType::Classical;
 
 /// 2SLSの点推定結果。
@@ -65,17 +82,41 @@ pub struct TwoSlsEstimator {
     /// 内生変数ごとの第一段階回帰（`x_endog[j] ~ x_exog + instruments`）。
     /// タプルの`String`は内生変数名（`IvInput::x_endog_names`と対応）。
     first_stage: Vec<(String, OlsEstimator)>,
-    /// 第二段階回帰（`y ~ x_exog + x̂_endog`）。モジュール冒頭のdocコメントの通り、
-    /// `params()`/`param_names()`以外の値（`std_errors()`等）は外部に公開しないこと。
+    /// 第二段階回帰（`y ~ x_exog + x̂_endog`）。`params()`/`param_names()`/`input()`（design
+    /// 行列`X̂`）を得るためだけに使う内部実装専用フィールド。モジュール冒頭のdocコメント
+    /// 「`second_stage`フィールドの位置づけ」参照。
     second_stage: OlsEstimator,
+    /// 呼び出し元が指定した`cov_type`（第一段階・SE計算の両方に反映済み）。
+    cov_type: CovType,
+    /// 構造残差 `e = y - Xβ̂`（n, 1）。`X`は実際の内生変数を使う（第二段階回帰自身の残差
+    /// `y - X̂β̂`とは異なる。モジュール冒頭のdocコメント参照）。
+    residuals: Mat<f64>,
+    /// 標準誤差 (k, 1)。`cov_type`に応じたサンドイッチ型分散の対角成分の平方根。
+    std_errors: Mat<f64>,
+    /// t統計量 (k, 1) = params / std_errors（`iv-api-design.md`3.2節、2SLSはt分布）。
+    t_stats: Mat<f64>,
+    /// 両側p値 (k, 1)。t分布（自由度`df_inference`）に基づく
+    p_values: Mat<f64>,
+    conf_lower: Mat<f64>,
+    conf_upper: Mat<f64>,
+    df_resid: usize,
+    df_model: usize,
+    r_squared: f64,
+    r_squared_adj: f64,
+    /// F統計量。`cov_type=Classical`なら古典的F検定、それ以外（HC0-3/HAC/cluster）は
+    /// ロバストWald検定（OLSと同じ切り替えロジック、`iv-api-design.md`2.1節）
+    f_statistic: f64,
+    f_p_value: f64,
 }
 
 impl TwoSlsEstimator {
-    /// `IvInput`から2SLSの点推定を行う。
+    /// `IvInput`から2SLSの点推定・標準誤差・適合度統計量を求める。
     ///
     /// `cov_type`/`confidence_level`は第一段階（`first_stage_estimators()`で公開する
-    /// `OlsEstimator`）にそのまま使う。第二段階には使わない（モジュール冒頭のdocコメント
-    /// 「第一段階・第二段階での`cov_type`/`confidence_level`の扱い」参照）。
+    /// `OlsEstimator`）・第二段階（このメソッドが独立に計算するサンドイッチ型SE）の
+    /// どちらにも反映される（モジュール冒頭のdocコメント「第一段階・第二段階での
+    /// `cov_type`/`confidence_level`の扱い」参照。`second_stage`フィールド自身の内部
+    /// 委譲フィットだけは対象外）。
     ///
     /// # Errors
     /// - 識別の順序条件`len(instruments) >= len(x_endog)`を満たさない:
@@ -83,9 +124,13 @@ impl TwoSlsEstimator {
     /// - 第一段階回帰（内生変数ごと）が失敗: `IvError::FirstStageFailed`
     ///   （`cov_type=Cluster`でグループキー未指定・信頼水準が範囲外等、`cov_type`/
     ///   `confidence_level`起因のエラーもここに含まれる）
-    /// - 第二段階回帰が失敗: `IvError::SecondStageFailed`
+    /// - 第二段階回帰（`second_stage`の内部委譲フィット）が失敗: `IvError::SecondStageFailed`
     ///   （`x_endog=[]`の退化ケースでは第一段階ループが一度も回らないため、
     ///   `confidence_level`が範囲外の場合のエラーもここ経由になる）
+    /// - `cov_type=Hac`の`hac_lags`が不正: `IvError::InvalidHacLags`
+    /// - `cov_type=Cluster`でグループキー未指定・クラスター数不足:
+    ///   `IvError::Common(CommonError::MissingClusterColumn` /
+    ///   `CommonError::InsufficientClusters)`
     ///
     /// 識別可能性の検証をここで行う理由は`IvInput`の構造体docコメント参照
     /// （`OlsEstimator::fit`が`n<=k`を検証するのと同じ層分け、ユーザー確認済み）。
@@ -97,11 +142,16 @@ impl TwoSlsEstimator {
             });
         }
 
+        // `x_exog`は`second_stage_columns`（第二段階）・`structural_columns`
+        // （サンドイッチSE計算）でも同じ内容を使うため、`Mat`からの変換を一度だけ行い
+        // 使い回す（毎回`mat_to_columns`で`Mat`を走査し直す無駄を避ける）。
+        let x_exog_columns = mat_to_columns(input.x_exog());
+
         // 全操作変数（`x_exog ++ instruments`のunion、`iv-api-design.md`1.1.1節）。
         // `x_exog`は`IvInput::from_columns`の時点で`include_intercept=true`なら先頭に
         // "const"列を含んでいるため、ここでは`include_intercept=false`でOLSに渡す
         // （二重に定数項を追加しないため）。
-        let mut instrument_columns = mat_to_columns(input.x_exog());
+        let mut instrument_columns = x_exog_columns.clone();
         instrument_columns.extend(mat_to_columns(input.instruments()));
         let mut instrument_names: Vec<String> = input.x_exog_names().to_vec();
         instrument_names.extend(input.instrument_names().iter().cloned());
@@ -138,7 +188,7 @@ impl TwoSlsEstimator {
         }
 
         // 第二段階: y ~ x_exog + x̂_endog
-        let mut second_stage_columns = mat_to_columns(input.x_exog());
+        let mut second_stage_columns = x_exog_columns.clone();
         second_stage_columns.extend(x_endog_hat_columns);
         let mut second_stage_names: Vec<String> = input.x_exog_names().to_vec();
         second_stage_names.extend(input.x_endog_names().iter().cloned());
@@ -159,9 +209,125 @@ impl TwoSlsEstimator {
             OlsEstimator::fit(second_stage_input, SECOND_STAGE_COV_TYPE, confidence_level)
                 .map_err(|source| IvError::SecondStageFailed { source })?;
 
+        // ── ここから独立実装のサンドイッチ型SE計算（モジュール冒頭のdocコメント参照）──
+        let x_hat = second_stage.input().x(); // X̂ = [x_exog, x̂_endog]
+        let beta = second_stage.params();
+        let n = x_hat.nrows();
+        let k = x_hat.ncols();
+
+        // 構造残差 e = y - Xβ̂。X = [x_exog, x_endog]（実際の内生変数、推定値ではない）。
+        // 列の並びは`second_stage_columns`（x_exog ++ x̂_endog）と揃える必要があるため、
+        // 同じ順序（x_exog ++ x_endog）で組み立てる。
+        let mut structural_columns = x_exog_columns;
+        structural_columns.extend(mat_to_columns(input.x_endog()));
+        let x_structural = Mat::from_fn(n, k, |i, j| structural_columns[j][i]);
+        let residuals = input.y() - &x_structural * beta;
+
+        let df_resid = n - k;
+        let ssr: f64 = (0..n).map(|i| (*residuals.get(i, 0)).powi(2)).sum();
+
+        let xtx_inv = xtx_inverse(x_hat, k)?;
+
+        // `df_inference`はt検定・信頼区間・F検定に使う自由度。`cov_type=Cluster`のときだけ
+        // `G-1`に切り替える（OLSと同じ慣行、`ols.rs`の`fit()`docコメント参照）。
+        let (cov_params, df_inference) = match &cov_type {
+            CovType::Classical => {
+                let sigma2 = ssr / (df_resid as f64);
+                (classical_cov_params(sigma2, &xtx_inv, k), df_resid)
+            }
+            CovType::Hc0 => (
+                hc_cov_params(x_hat, &residuals, &xtx_inv, n, k, HcVariant::Hc0),
+                df_resid,
+            ),
+            CovType::Hc1 => (
+                hc_cov_params(x_hat, &residuals, &xtx_inv, n, k, HcVariant::Hc1),
+                df_resid,
+            ),
+            CovType::Hc2 => (
+                hc_cov_params(x_hat, &residuals, &xtx_inv, n, k, HcVariant::Hc2),
+                df_resid,
+            ),
+            CovType::Hc3 => (
+                hc_cov_params(x_hat, &residuals, &xtx_inv, n, k, HcVariant::Hc3),
+                df_resid,
+            ),
+            CovType::Hac { lags, time_order } => {
+                let lags = resolve_hac_lags(*lags, n)?;
+                let order = time_ordering(time_order.as_deref(), n);
+                (
+                    hac_cov_params(x_hat, &residuals, &xtx_inv, n, k, lags, &order),
+                    df_resid,
+                )
+            }
+            CovType::Cluster { groups } => {
+                let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
+                let n_groups = validate_cluster_groups(groups, n)?;
+                let cov = cluster_cov_params(x_hat, &residuals, &xtx_inv, n, k, groups);
+                (cov, n_groups - 1)
+            }
+        };
+
+        let mut std_errors = Mat::<f64>::zeros(k, 1);
+        for j in 0..k {
+            *std_errors.get_mut(j, 0) = (*cov_params.get(j, j)).sqrt();
+        }
+
+        let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
+            .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+        let t_crit = inference::critical_value(&t_dist, confidence_level);
+
+        let mut t_stats = Mat::<f64>::zeros(k, 1);
+        let mut p_values = Mat::<f64>::zeros(k, 1);
+        let mut conf_lower = Mat::<f64>::zeros(k, 1);
+        let mut conf_upper = Mat::<f64>::zeros(k, 1);
+        for j in 0..k {
+            let coef = *beta.get(j, 0);
+            let se = *std_errors.get(j, 0);
+            let stat = inference::compute_inference_stat(&t_dist, coef, se, t_crit);
+
+            *t_stats.get_mut(j, 0) = stat.stat;
+            *p_values.get_mut(j, 0) = stat.p_value;
+            *conf_lower.get_mut(j, 0) = stat.conf_low;
+            *conf_upper.get_mut(j, 0) = stat.conf_high;
+        }
+
+        let k_constant = usize::from(input.has_intercept());
+        let sst: f64 = if input.has_intercept() {
+            let y_mean: f64 = (0..n).map(|i| *input.y().get(i, 0)).sum::<f64>() / (n as f64);
+            (0..n)
+                .map(|i| (*input.y().get(i, 0) - y_mean).powi(2))
+                .sum()
+        } else {
+            (0..n).map(|i| (*input.y().get(i, 0)).powi(2)).sum()
+        };
+        let r_squared = 1.0 - ssr / sst;
+        let r_squared_adj = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
+
+        let df_model = k - k_constant;
+        let (f_statistic, f_p_value) = if df_model == 0 {
+            // 説明変数が定数項のみ（傾き係数が無い）モデル。検定対象が存在しないため
+            // OLSと同様NaNを返す（0除算を避ける）。
+            (f64::NAN, f64::NAN)
+        } else {
+            wald_f_test(beta, &cov_params, k_constant, df_model, df_inference)?
+        };
+
         Ok(Self {
             first_stage,
             second_stage,
+            cov_type,
+            residuals,
+            std_errors,
+            t_stats,
+            p_values,
+            conf_lower,
+            conf_upper,
+            df_resid,
+            df_model,
+            r_squared,
+            r_squared_adj,
+            f_statistic,
+            f_p_value,
         })
     }
 
@@ -190,11 +356,323 @@ impl TwoSlsEstimator {
         self.second_stage.input().k()
     }
 
+    /// 使用した標準誤差の種別（呼び出し元が指定した`cov_type`）。
+    pub fn cov_type(&self) -> &CovType {
+        &self.cov_type
+    }
+
+    /// 構造残差 `e = y - Xβ̂`（n, 1）。モジュール冒頭のdocコメント参照
+    /// （第二段階回帰自身の残差`y - X̂β̂`ではない）。
+    pub fn residuals(&self) -> &Mat<f64> {
+        &self.residuals
+    }
+
+    /// 標準誤差 (k, 1)。
+    pub fn std_errors(&self) -> &Mat<f64> {
+        &self.std_errors
+    }
+
+    /// t統計量 (k, 1)。
+    pub fn t_stats(&self) -> &Mat<f64> {
+        &self.t_stats
+    }
+
+    /// 両側p値 (k, 1)。
+    pub fn p_values(&self) -> &Mat<f64> {
+        &self.p_values
+    }
+
+    /// 信頼区間の下限 (k, 1)。
+    pub fn conf_lower(&self) -> &Mat<f64> {
+        &self.conf_lower
+    }
+
+    /// 信頼区間の上限 (k, 1)。
+    pub fn conf_upper(&self) -> &Mat<f64> {
+        &self.conf_upper
+    }
+
+    /// 残差の自由度 n - k。
+    pub fn df_resid(&self) -> usize {
+        self.df_resid
+    }
+
+    /// モデルの自由度（定数項を除く傾き係数の数）。
+    pub fn df_model(&self) -> usize {
+        self.df_model
+    }
+
+    /// 決定係数。
+    pub fn r_squared(&self) -> f64 {
+        self.r_squared
+    }
+
+    /// 自由度調整済み決定係数。
+    pub fn r_squared_adj(&self) -> f64 {
+        self.r_squared_adj
+    }
+
+    /// F統計量。
+    pub fn f_statistic(&self) -> f64 {
+        self.f_statistic
+    }
+
+    /// F統計量のp値。
+    pub fn f_p_value(&self) -> f64 {
+        self.f_p_value
+    }
+
     /// 内生変数ごとの第一段階回帰結果（`x_endog_names`と対応する順序）。
     /// タプルの`String`は内生変数名。
     pub fn first_stage_estimators(&self) -> &[(String, OlsEstimator)] {
         &self.first_stage
     }
+}
+
+/// `(X̂'X̂)⁻¹`を求める。モジュール冒頭のdocコメント「標準誤差・適合度統計量」参照。
+///
+/// `X̂`（第二段階の設計行列）は`second_stage`の内部委譲フィット（`OlsEstimator::fit`）が
+/// 既に`col_piv_qr`で特異性を検証済みのため、理論上ここで`LltError`は発生しないはずだが、
+/// 浮動小数点演算の丸めにより境界的なケースで失敗しうる（`ols.rs`の`xtx_inverse`と同じ
+/// 防御的な扱い）。
+fn xtx_inverse(x: &Mat<f64>, k: usize) -> Result<Mat<f64>, IvError> {
+    let xtx = x.transpose() * x;
+    let llt = xtx.llt(Side::Lower).map_err(|_| {
+        CommonError::ComputationFailed(
+            "failed to invert X̂'X̂ (2SLS second-stage bread matrix)".to_string(),
+        )
+    })?;
+    Ok(llt.solve(Mat::<f64>::identity(k, k)))
+}
+
+/// classical（等分散前提）の係数分散共分散行列: `σ̂²(X̂'X̂)⁻¹`（k×k）。`σ̂²`は構造残差
+/// （`e = y - Xβ̂`）のSSRを`df_resid`で割った値。
+fn classical_cov_params(sigma2: f64, xtx_inv: &Mat<f64>, k: usize) -> Mat<f64> {
+    Mat::from_fn(k, k, |i, j| sigma2 * (*xtx_inv.get(i, j)))
+}
+
+/// `hc_cov_params`の内部でのみ使う、HCの種類（`ols.rs`の`HcVariant`と同じ位置づけ）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HcVariant {
+    Hc0,
+    Hc1,
+    Hc2,
+    Hc3,
+}
+
+/// HC0〜HC3ロバストな係数分散共分散行列: `(X̂'X̂)⁻¹Ψ̂(X̂'X̂)⁻¹`（k×k）。`Ψ̂`は構造残差
+/// （`residuals`引数、`e = y - Xβ̂`）を使って計算する。数式・実装方針は`ols.rs`の
+/// `hc_cov_params`と同型（モジュール冒頭のdocコメント「独立実装」参照。設計行列に`X̂`、
+/// 残差に構造残差`e`を使う点のみがOLSとの違い）。
+fn hc_cov_params(
+    x: &Mat<f64>,
+    residuals: &Mat<f64>,
+    xtx_inv: &Mat<f64>,
+    n: usize,
+    k: usize,
+    variant: HcVariant,
+) -> Mat<f64> {
+    let leverage: Option<Vec<f64>> = match variant {
+        HcVariant::Hc2 | HcVariant::Hc3 => {
+            let xh = x * xtx_inv; // (n, k)
+            Some(
+                (0..n)
+                    .map(|i| (0..k).map(|j| (*xh.get(i, j)) * (*x.get(i, j))).sum())
+                    .collect(),
+            )
+        }
+        HcVariant::Hc0 | HcVariant::Hc1 => None,
+    };
+
+    let hc1_correction = ((n as f64) / ((n - k) as f64)).sqrt();
+
+    let x_scaled = Mat::from_fn(n, k, |i, j| {
+        let resid = *residuals.get(i, 0);
+        let scale = match variant {
+            HcVariant::Hc0 => resid,
+            HcVariant::Hc1 => resid * hc1_correction,
+            HcVariant::Hc2 => {
+                let h = leverage.as_ref().expect("Hc2はleverage計算済み")[i];
+                resid / (1.0 - h).sqrt()
+            }
+            HcVariant::Hc3 => {
+                let h = leverage.as_ref().expect("Hc3はleverage計算済み")[i];
+                resid / (1.0 - h)
+            }
+        };
+        scale * (*x.get(i, j))
+    });
+
+    let psi_hat = x_scaled.transpose() * &x_scaled;
+    xtx_inv * &psi_hat * xtx_inv
+}
+
+/// `CovType::Hac`の`lags`（`Option<i64>`）を実際に使うラグ数（`usize`）に解決する
+/// （`ols.rs`の`resolve_hac_lags`と同じ経験則。数式・境界条件は同一だがエラー型が
+/// `IvError`のため独立実装、モジュール冒頭のdocコメント参照）。
+fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, IvError> {
+    match lags {
+        Some(l) => {
+            if l < 0 || (l as usize) >= n {
+                return Err(IvError::InvalidHacLags { hac_lags: l, n });
+            }
+            Ok(l as usize)
+        }
+        None => Ok((4.0 * (n as f64 / 100.0).powf(2.0 / 9.0)).floor() as usize),
+    }
+}
+
+/// `CovType::Hac`の`time_order`から、時系列の昇順に並べたときの行インデックス列を求める
+/// （`ols.rs`の`time_ordering`と同型）。`None`の場合は`IvInput`の行順をそのまま時系列順と
+/// みなす。
+///
+/// `partial_cmp().unwrap()`について: `time_order`の値はNaN/無限大を含まないことが
+/// `engine_pybind::column_extraction`側で既に保証されている前提（`ols.rs`の
+/// `time_ordering`と同じ理由）。
+fn time_ordering(time_order: Option<&[f64]>, n: usize) -> Vec<usize> {
+    match time_order {
+        Some(values) => {
+            let mut order: Vec<usize> = (0..n).collect();
+            order.sort_by(|&a, &b| values[a].partial_cmp(&values[b]).unwrap());
+            order
+        }
+        None => (0..n).collect(),
+    }
+}
+
+/// Newey-West HACの係数分散共分散行列: `(X̂'X̂)⁻¹Ŝ(X̂'X̂)⁻¹`（k×k）。数式・実装方針は
+/// `ols.rs`の`hac_cov_params`と同型（`Par::Seq`を明示指定する理由も同じ、
+/// `.claude/rules/rust-style.md`「パフォーマンス」参照）。設計行列に`X̂`、残差に構造残差
+/// `e`を使う点のみがOLSとの違い。
+fn hac_cov_params(
+    x: &Mat<f64>,
+    residuals: &Mat<f64>,
+    xtx_inv: &Mat<f64>,
+    n: usize,
+    k: usize,
+    lags: usize,
+    order: &[usize],
+) -> Mat<f64> {
+    let xe = Mat::<f64>::from_fn(n, k, |t, a| {
+        let i = order[t];
+        (*residuals.get(i, 0)) * (*x.get(i, a))
+    });
+
+    let mut s_hat = Mat::<f64>::zeros(k, k);
+    matmul(
+        s_hat.as_mut(),
+        Accum::Replace,
+        xe.transpose(),
+        xe.as_ref(),
+        1.0,
+        Par::Seq,
+    );
+
+    let mut s_l = Mat::<f64>::zeros(k, k);
+    for l in 1..=lags {
+        let weight = 1.0 - (l as f64) / ((lags + 1) as f64);
+        let xe_top = xe.as_ref().subrows(l, n - l);
+        let xe_bot = xe.as_ref().subrows(0, n - l);
+        matmul(
+            s_l.as_mut(),
+            Accum::Replace,
+            xe_top.transpose(),
+            xe_bot,
+            1.0,
+            Par::Seq,
+        );
+
+        for a in 0..k {
+            for b in 0..k {
+                *s_hat.get_mut(a, b) += weight * (*s_l.get(a, b) + *s_l.get(b, a));
+            }
+        }
+    }
+
+    xtx_inv * &s_hat * xtx_inv
+}
+
+/// クラスターロバストな係数分散共分散行列: `(X̂'X̂)⁻¹Ŝ(X̂'X̂)⁻¹ * correction`（k×k）。数式・
+/// 実装方針は`ols.rs`の`cluster_cov_params`と同型（`BTreeMap`を使う理由も同じ、
+/// `engine/src/linear/CLAUDE.md`「踏んだ罠」参照）。設計行列に`X̂`、残差に構造残差`e`を
+/// 使う点のみがOLSとの違い。`groups`が`G>=2`であることは`validate_cluster_groups`
+/// （呼び出し元）で検証済みの前提。
+fn cluster_cov_params(
+    x: &Mat<f64>,
+    residuals: &Mat<f64>,
+    xtx_inv: &Mat<f64>,
+    n: usize,
+    k: usize,
+    groups: &[String],
+) -> Mat<f64> {
+    let mut group_indices: std::collections::BTreeMap<&str, Vec<usize>> =
+        std::collections::BTreeMap::new();
+    for (i, g) in groups.iter().enumerate() {
+        group_indices.entry(g.as_str()).or_default().push(i);
+    }
+    let n_groups = group_indices.len();
+
+    let mut s_hat = Mat::<f64>::zeros(k, k);
+    for indices in group_indices.values() {
+        let mut s_g = vec![0.0_f64; k];
+        for &i in indices {
+            let e = *residuals.get(i, 0);
+            for (a, s_g_a) in s_g.iter_mut().enumerate() {
+                *s_g_a += e * (*x.get(i, a));
+            }
+        }
+        for a in 0..k {
+            for b in 0..k {
+                *s_hat.get_mut(a, b) += s_g[a] * s_g[b];
+            }
+        }
+    }
+
+    let correction =
+        (n_groups as f64 / (n_groups as f64 - 1.0)) * ((n as f64 - 1.0) / ((n - k) as f64));
+    let cov_uncorrected = xtx_inv * &s_hat * xtx_inv;
+    Mat::from_fn(k, k, |i, j| correction * (*cov_uncorrected.get(i, j)))
+}
+
+/// 傾き係数（切片を除く`df_model`個の係数）が全てゼロという帰無仮説のロバストWald検定を行い、
+/// F統計量とそのp値を返す。数式・実装方針は`ols.rs`の`wald_f_test`と同型（`cov_type=
+/// Classical`のとき代数的に古典的F検定と一致することも同じ、`ensure_well_conditioned_
+/// symmetric_matrix`による事前の条件数チェックが必要な理由も同じ）。
+fn wald_f_test(
+    params: &Mat<f64>,
+    cov_params: &Mat<f64>,
+    k_constant: usize,
+    df_model: usize,
+    df_inference: usize,
+) -> Result<(f64, f64), IvError> {
+    let beta_slopes = Mat::from_fn(df_model, 1, |i, _| *params.get(i + k_constant, 0));
+    let v_slopes = Mat::from_fn(df_model, df_model, |i, j| {
+        *cov_params.get(i + k_constant, j + k_constant)
+    });
+
+    ensure_well_conditioned_symmetric_matrix(
+        &v_slopes,
+        df_model,
+        "coefficient covariance submatrix for the 2SLS F-test",
+    )?;
+
+    let llt = v_slopes.llt(Side::Lower).map_err(|_| {
+        CommonError::ComputationFailed(
+            "failed to invert coefficient covariance submatrix for the 2SLS F-test".to_string(),
+        )
+    })?;
+    let v_slopes_inv_beta = llt.solve(&beta_slopes);
+
+    let wald: f64 = (0..df_model)
+        .map(|i| (*beta_slopes.get(i, 0)) * (*v_slopes_inv_beta.get(i, 0)))
+        .sum();
+    let f_statistic = wald / (df_model as f64);
+
+    let f_dist = FisherSnedecor::new(df_model as f64, df_inference as f64)
+        .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+    let f_p_value = 1.0 - f_dist.cdf(f_statistic);
+
+    Ok((f_statistic, f_p_value))
 }
 
 #[cfg(test)]
@@ -262,6 +740,26 @@ mod tests {
         assert!(estimator.first_stage_estimators().is_empty());
         assert!((*estimator.params().get(0, 0) - 0.0).abs() < 1e-8);
         assert!((*estimator.params().get(1, 0) - 2.0).abs() < 1e-8);
+
+        // `x_endog=[]`だと`X̂ = X`（推定値=実際の値）のため、SE・適合度統計量も
+        // 素のOLSと数値的に一致するはず（Issue #166、`OlsEstimator`への直接fitと照合）。
+        let ols_input =
+            OlsInput::from_columns(&y, &x_exog, vec!["x1".to_string()], true, "y".to_string())
+                .unwrap();
+        let ols_estimator = OlsEstimator::fit(ols_input, CovType::Classical, 0.95).unwrap();
+        for j in 0..2 {
+            assert!(
+                (*estimator.std_errors().get(j, 0) - *ols_estimator.std_errors().get(j, 0)).abs()
+                    < 1e-8
+            );
+            assert!(
+                (*estimator.t_stats().get(j, 0) - *ols_estimator.t_stats().get(j, 0)).abs() < 1e-8
+            );
+        }
+        assert!((estimator.r_squared() - ols_estimator.r_squared()).abs() < 1e-8);
+        assert!((estimator.f_statistic() - ols_estimator.f_statistic()).abs() < 1e-8);
+        assert_eq!(estimator.df_resid(), 3);
+        assert_eq!(estimator.df_model(), 1);
     }
 
     #[test]
@@ -359,8 +857,14 @@ mod tests {
     /// ことを確認する（モジュール冒頭のdocコメント「第一段階・第二段階での`cov_type`/
     /// `confidence_level`の扱い」参照）。`second_stage`は非公開フィールドだが、この
     /// テストは同一モジュールの子モジュールのため直接参照できる。
+    /// 呼び出し元が指定した`cov_type`は第一段階（`OlsEstimator`委譲）・第二段階
+    /// （`TwoSlsEstimator`自身が独立に計算する正しいSE）の両方に反映される
+    /// （Issue #166）。内部実装専用の`second_stage`フィールド自身の委譲フィットだけは
+    /// 常に`Classical`のまま（モジュール冒頭のdocコメント「`second_stage`フィールドの
+    /// 位置づけ」参照。`second_stage`は非公開フィールドだが、このテストは同一モジュールの
+    /// 子モジュールのため直接参照できる）。
     #[test]
-    fn fit_uses_caller_provided_cov_type_for_first_stage_but_not_second_stage() {
+    fn fit_uses_caller_provided_cov_type_for_first_stage_and_second_stage_se() {
         let y = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         let x_endog = vec![vec![5.0, 4.0, 3.0, 6.0, 2.0, 1.0]];
         let instruments = vec![
@@ -385,6 +889,7 @@ mod tests {
             estimator.first_stage_estimators()[0].1.cov_type(),
             &CovType::Hc0
         );
+        assert_eq!(estimator.cov_type(), &CovType::Hc0);
         assert_eq!(estimator.second_stage.cov_type(), &CovType::Classical);
     }
 
@@ -519,6 +1024,38 @@ mod tests {
     /// 同じデータ・同じfit呼び出しを共有するため、ここに集約する（重複していた際、
     /// 片方だけデータを更新すると気づかずに非退化性が崩れるリスクがあったため、
     /// レビューを受けて統合）。
+    /// `nontrivial_x_exog_*`ヘルパー群が共有する生データ（`(x1, x_endog, z1, z2, y)`）。
+    /// cov_typeごとに別々の`IvInput`が必要なテスト（Issue #166のSE検証群）が同じデータで
+    /// 独立に`fit()`しなおせるように、フィット済みestimatorとは切り離して公開する。
+    #[allow(clippy::type_complexity)]
+    fn nontrivial_x_exog_columns() -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let x_endog = vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0, 8.0, 7.0];
+        let z1 = vec![3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0];
+        let z2 = vec![1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0, 5.0];
+        let y = vec![5.0, 3.0, 8.0, 6.0, 11.0, 10.0, 15.0, 13.0];
+        (x1, x_endog, z1, z2, y)
+    }
+
+    /// `nontrivial_x_exog_columns()`から`IvInput`を組み立てる（`IvInput`は`Clone`を
+    /// 実装しないため、cov_typeごとに別々の`fit()`呼び出しが必要なテストは、この関数を
+    /// その都度呼んで新しい`IvInput`を得る）。
+    fn nontrivial_x_exog_input() -> IvInput {
+        let (x1, x_endog, z1, z2, y) = nontrivial_x_exog_columns();
+        IvInput::from_columns(
+            &y,
+            std::slice::from_ref(&x1),
+            vec!["x1".to_string()],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            &[z1, z2],
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap()
+    }
+
     #[allow(clippy::type_complexity)]
     fn nontrivial_x_exog_fitted_estimator() -> (
         Vec<f64>,
@@ -528,26 +1065,436 @@ mod tests {
         Vec<f64>,
         TwoSlsEstimator,
     ) {
+        let (x1, x_endog, z1, z2, y) = nontrivial_x_exog_columns();
+        let estimator =
+            TwoSlsEstimator::fit(nontrivial_x_exog_input(), CovType::Classical, 0.95).unwrap();
+        (x1, x_endog, z1, z2, y, estimator)
+    }
+
+    /// SE検証テスト群が共有するオラクル: `(X̂, e)`を返す。`X̂`は第二段階の設計行列
+    /// （`second_stage.input().x()`、サンドイッチ公式の「パン」に使う。`second_stage`は
+    /// 非公開フィールドだが同一モジュールの子モジュールから直接参照できる）、`e`は構造残差
+    /// `y - Xβ̂`（`X`は実際の内生変数、`nontrivial_x_exog_columns()`と対応する列順
+    /// `[const, x1, x_endog]`。サンドイッチ公式の「具」に使う）。`TwoSlsEstimator::fit`
+    /// とは独立に（`Mat`演算のみで）計算する。
+    fn nontrivial_x_exog_x_hat_and_structural_residuals(
+        estimator: &TwoSlsEstimator,
+    ) -> (Mat<f64>, Mat<f64>) {
+        let (x1, x_endog, _z1, _z2, y) = nontrivial_x_exog_columns();
+        let n = y.len();
+        let x_structural = Mat::from_fn(n, 3, |i, j| match j {
+            0 => 1.0,
+            1 => x1[i],
+            _ => x_endog[i],
+        });
+        let y_mat = Mat::from_fn(n, 1, |i, _| y[i]);
+        let e = &y_mat - &x_structural * estimator.params();
+        let x_hat = estimator.second_stage.input().x().clone();
+        (x_hat, e)
+    }
+
+    /// `(X'X)⁻¹`を`TwoSlsEstimator::fit`内部の`xtx_inverse`とは別に（テストのオラクルとして）
+    /// 直接計算する。
+    fn manual_xtx_inverse(x: &Mat<f64>, k: usize) -> Mat<f64> {
+        let xtx = x.transpose() * x;
+        xtx.llt(Side::Lower)
+            .unwrap()
+            .solve(Mat::<f64>::identity(k, k))
+    }
+
+    /// classicalの標準誤差を素朴な式（`σ̂²(X'X)⁻¹`の対角成分の平方根）で独立計算する。
+    fn manual_classical_std_errors(x: &Mat<f64>, e: &Mat<f64>, n: usize, k: usize) -> Vec<f64> {
+        let ssr: f64 = (0..n).map(|i| (*e.get(i, 0)).powi(2)).sum();
+        let sigma2 = ssr / ((n - k) as f64);
+        let xtx_inv = manual_xtx_inverse(x, k);
+        (0..k)
+            .map(|j| (sigma2 * (*xtx_inv.get(j, j))).sqrt())
+            .collect()
+    }
+
+    /// レバレッジ `h_ii = x_i'(X'X)⁻¹x_i` を素朴な二重ループで独立計算する（HC2/HC3用）。
+    fn manual_leverage(x: &Mat<f64>, xtx_inv: &Mat<f64>, n: usize, k: usize) -> Vec<f64> {
+        (0..n)
+            .map(|i| {
+                let mut h = 0.0;
+                for a in 0..k {
+                    for b in 0..k {
+                        h += (*x.get(i, a)) * (*xtx_inv.get(a, b)) * (*x.get(i, b));
+                    }
+                }
+                h
+            })
+            .collect()
+    }
+
+    /// HC0〜HC3の標準誤差を、行列積のショートカット（`x_scaled.transpose() * x_scaled`）を
+    /// 使わず素朴な三重ループ（外積`x_i x_i'`の直接積み上げ）で独立計算する
+    /// （`TwoSlsEstimator::fit`内部の`hc_cov_params`とは別経路の実装）。`weight(i)`は
+    /// 観測`i`の`e_i²`に掛ける係数（HC0: 1、HC1: `n/(n-k)`、HC2: `1/(1-h_ii)`、
+    /// HC3: `1/(1-h_ii)²`）。
+    fn manual_hc_std_errors_with_weight(
+        x: &Mat<f64>,
+        e: &Mat<f64>,
+        n: usize,
+        k: usize,
+        weight: impl Fn(usize) -> f64,
+    ) -> Vec<f64> {
+        let xtx_inv = manual_xtx_inverse(x, k);
+        let mut psi = Mat::<f64>::zeros(k, k);
+        for i in 0..n {
+            let scaled_e2 = weight(i) * (*e.get(i, 0)).powi(2);
+            for a in 0..k {
+                for b in 0..k {
+                    *psi.get_mut(a, b) += scaled_e2 * (*x.get(i, a)) * (*x.get(i, b));
+                }
+            }
+        }
+        let cov = &xtx_inv * &psi * &xtx_inv;
+        (0..k).map(|j| (*cov.get(j, j)).sqrt()).collect()
+    }
+
+    fn manual_hc0_std_errors(x: &Mat<f64>, e: &Mat<f64>, n: usize, k: usize) -> Vec<f64> {
+        manual_hc_std_errors_with_weight(x, e, n, k, |_| 1.0)
+    }
+
+    fn manual_hc1_std_errors(x: &Mat<f64>, e: &Mat<f64>, n: usize, k: usize) -> Vec<f64> {
+        let correction = (n as f64) / ((n - k) as f64);
+        manual_hc_std_errors_with_weight(x, e, n, k, move |_| correction)
+    }
+
+    fn manual_hc2_std_errors(x: &Mat<f64>, e: &Mat<f64>, n: usize, k: usize) -> Vec<f64> {
+        let xtx_inv = manual_xtx_inverse(x, k);
+        let leverage = manual_leverage(x, &xtx_inv, n, k);
+        manual_hc_std_errors_with_weight(x, e, n, k, move |i| 1.0 / (1.0 - leverage[i]))
+    }
+
+    fn manual_hc3_std_errors(x: &Mat<f64>, e: &Mat<f64>, n: usize, k: usize) -> Vec<f64> {
+        let xtx_inv = manual_xtx_inverse(x, k);
+        let leverage = manual_leverage(x, &xtx_inv, n, k);
+        manual_hc_std_errors_with_weight(x, e, n, k, move |i| 1.0 / (1.0 - leverage[i]).powi(2))
+    }
+
+    /// クラスターロバスト標準誤差を素朴なループ（クラスターごとの手動集約）で独立計算する。
+    fn manual_cluster_std_errors(
+        x: &Mat<f64>,
+        e: &Mat<f64>,
+        n: usize,
+        k: usize,
+        groups: &[String],
+    ) -> Vec<f64> {
+        let xtx_inv = manual_xtx_inverse(x, k);
+        let mut group_sums: std::collections::BTreeMap<&str, Vec<f64>> =
+            std::collections::BTreeMap::new();
+        for (i, group) in groups.iter().enumerate().take(n) {
+            let s_g = group_sums.entry(group.as_str()).or_insert(vec![0.0; k]);
+            for (a, s_g_a) in s_g.iter_mut().enumerate() {
+                *s_g_a += (*e.get(i, 0)) * (*x.get(i, a));
+            }
+        }
+        let n_groups = group_sums.len();
+        let mut s_hat = Mat::<f64>::zeros(k, k);
+        for s_g in group_sums.values() {
+            for a in 0..k {
+                for b in 0..k {
+                    *s_hat.get_mut(a, b) += s_g[a] * s_g[b];
+                }
+            }
+        }
+        let correction =
+            (n_groups as f64 / (n_groups as f64 - 1.0)) * ((n as f64 - 1.0) / ((n - k) as f64));
+        let cov = &xtx_inv * &s_hat * &xtx_inv;
+        (0..k)
+            .map(|j| (correction * (*cov.get(j, j))).sqrt())
+            .collect()
+    }
+
+    fn assert_slices_close(actual: &[f64], expected: &[f64]) {
+        assert_eq!(actual.len(), expected.len());
+        for (i, (a, e)) in actual.iter().zip(expected.iter()).enumerate() {
+            assert!((a - e).abs() < 1e-8, "index {i}: got {a}, expected {e}");
+        }
+    }
+
+    /// classicalの標準誤差が構造残差（`y - Xβ̂`、第二段階回帰自身の残差`y - X̂β̂`ではない）
+    /// を使って計算されていることを確認する（モジュール冒頭のdocコメント「標準誤差・
+    /// 適合度統計量」参照。誤って第二段階の`OlsEstimator`自身のSEを使っていないことの
+    /// 回帰テスト）。
+    #[test]
+    fn fit_computes_classical_std_errors_using_structural_residuals() {
+        let estimator =
+            TwoSlsEstimator::fit(nontrivial_x_exog_input(), CovType::Classical, 0.95).unwrap();
+        let (x, e) = nontrivial_x_exog_x_hat_and_structural_residuals(&estimator);
+        let n = x.nrows();
+        let k = x.ncols();
+
+        let expected_se = manual_classical_std_errors(&x, &e, n, k);
+        let actual_se: Vec<f64> = (0..k).map(|j| *estimator.std_errors().get(j, 0)).collect();
+        assert_slices_close(&actual_se, &expected_se);
+
+        // `residuals()`が構造残差（`y - Xβ̂`）そのものであることを確認する
+        // （第二段階回帰自身の残差`y - X̂β̂`ではない）。
+        assert_eq!(estimator.residuals().nrows(), n);
+        for i in 0..n {
+            assert!((*estimator.residuals().get(i, 0) - *e.get(i, 0)).abs() < 1e-8);
+        }
+
+        // 構造残差は第二段階の`OlsEstimator`自身の残差（`y - X̂β̂`）とは異なる値になる
+        // はず（`x_endog`が操作変数に完全予測されない、内生性が残る非退化ケースのため。
+        // `second_stage`は非公開フィールドだが、同一モジュールの子モジュールから
+        // 直接参照できる）。
+        let second_stage_residuals = estimator.second_stage.residuals();
+        let mut any_differs = false;
+        for i in 0..n {
+            if (*estimator.residuals().get(i, 0) - *second_stage_residuals.get(i, 0)).abs() > 1e-8 {
+                any_differs = true;
+            }
+        }
+        assert!(
+            any_differs,
+            "expected structural residuals to differ from the second-stage OLS's own residuals"
+        );
+    }
+
+    #[test]
+    fn fit_computes_hc0_std_errors_matching_manual_sandwich_formula() {
+        let estimator =
+            TwoSlsEstimator::fit(nontrivial_x_exog_input(), CovType::Hc0, 0.95).unwrap();
+        let (x, e) = nontrivial_x_exog_x_hat_and_structural_residuals(&estimator);
+        let n = x.nrows();
+        let k = x.ncols();
+
+        let expected_se = manual_hc0_std_errors(&x, &e, n, k);
+        let actual_se: Vec<f64> = (0..k).map(|j| *estimator.std_errors().get(j, 0)).collect();
+        assert_slices_close(&actual_se, &expected_se);
+        assert_eq!(estimator.cov_type(), &CovType::Hc0);
+    }
+
+    #[test]
+    fn fit_computes_hc1_std_errors_matching_manual_sandwich_formula() {
+        let estimator =
+            TwoSlsEstimator::fit(nontrivial_x_exog_input(), CovType::Hc1, 0.95).unwrap();
+        let (x, e) = nontrivial_x_exog_x_hat_and_structural_residuals(&estimator);
+        let n = x.nrows();
+        let k = x.ncols();
+
+        let expected_se = manual_hc1_std_errors(&x, &e, n, k);
+        let actual_se: Vec<f64> = (0..k).map(|j| *estimator.std_errors().get(j, 0)).collect();
+        assert_slices_close(&actual_se, &expected_se);
+    }
+
+    /// HC2はレバレッジ`h_ii`によるスケーリングを要する（`iv-api-design.md`3.1節の
+    /// 「未確定事項」参照: IVのHC2/HC3はlinearmodels/ivregどちらにも確立した参照実装が
+    /// 無く、`X̂`のみからレバレッジを計算する自作の拡張。妥当性の最終確認はIssue #171に
+    /// 委ねるが、少なくとも本実装が意図した式（下記`manual_hc2_std_errors`と同一の式）
+    /// 通りに計算されていることはここで固定する）。
+    #[test]
+    fn fit_computes_hc2_std_errors_matching_manual_sandwich_formula() {
+        let estimator =
+            TwoSlsEstimator::fit(nontrivial_x_exog_input(), CovType::Hc2, 0.95).unwrap();
+        let (x, e) = nontrivial_x_exog_x_hat_and_structural_residuals(&estimator);
+        let n = x.nrows();
+        let k = x.ncols();
+
+        let expected_se = manual_hc2_std_errors(&x, &e, n, k);
+        let actual_se: Vec<f64> = (0..k).map(|j| *estimator.std_errors().get(j, 0)).collect();
+        assert_slices_close(&actual_se, &expected_se);
+    }
+
+    /// HC3も同様（`fit_computes_hc2_std_errors_matching_manual_sandwich_formula`のdoc
+    /// コメント参照）。
+    #[test]
+    fn fit_computes_hc3_std_errors_matching_manual_sandwich_formula() {
+        let estimator =
+            TwoSlsEstimator::fit(nontrivial_x_exog_input(), CovType::Hc3, 0.95).unwrap();
+        let (x, e) = nontrivial_x_exog_x_hat_and_structural_residuals(&estimator);
+        let n = x.nrows();
+        let k = x.ncols();
+
+        let expected_se = manual_hc3_std_errors(&x, &e, n, k);
+        let actual_se: Vec<f64> = (0..k).map(|j| *estimator.std_errors().get(j, 0)).collect();
+        assert_slices_close(&actual_se, &expected_se);
+    }
+
+    /// クラスターロバストSEのテスト専用データ・グループ。`nontrivial_x_exog_input()`
+    /// （操作変数2個）だと第一段階の傾き係数`q=3`（x1, z1, z2）に対しクラスター数`G=4`が
+    /// 際どく、`Ŝ`（rank≤G）の傾き部分行列が数値的にほぼ特異になり`fit()`自体が
+    /// `ComputationFailed`で失敗する（`engine/src/linear/CLAUDE.md`「クラスター数`G`と
+    /// 傾き係数の数`q`の関係」参照、IVの第一段階にも同じ制約が当てはまる）。操作変数を
+    /// 1個に減らし（`q=2`）安全な余裕を持たせた専用データを使う。
+    fn cluster_test_input_and_groups() -> (IvInput, Vec<String>) {
+        let y = vec![5.0, 3.0, 8.0, 6.0, 11.0, 10.0, 15.0, 13.0];
         let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
         let x_endog = vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0, 8.0, 7.0];
         let z1 = vec![3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0];
-        let z2 = vec![1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0, 5.0];
-        let y = vec![5.0, 3.0, 8.0, 6.0, 11.0, 10.0, 15.0, 13.0];
-
+        let groups = vec![
+            "a".to_string(),
+            "a".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+            "c".to_string(),
+            "c".to_string(),
+            "d".to_string(),
+            "d".to_string(),
+        ];
         let input = IvInput::from_columns(
             &y,
-            std::slice::from_ref(&x1),
+            &[x1],
             vec!["x1".to_string()],
-            std::slice::from_ref(&x_endog),
+            &[x_endog],
             vec!["endog1".to_string()],
-            &[z1.clone(), z2.clone()],
-            vec!["z1".to_string(), "z2".to_string()],
+            &[z1],
+            vec!["z1".to_string()],
             true,
             "y".to_string(),
         )
         .unwrap();
-        let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
-        (x1, x_endog, z1, z2, y, estimator)
+        (input, groups)
+    }
+
+    #[test]
+    fn fit_computes_cluster_std_errors_matching_manual_formula() {
+        let (input, groups) = cluster_test_input_and_groups();
+        let cov_type = CovType::Cluster {
+            groups: Some(groups.clone()),
+        };
+        let estimator = TwoSlsEstimator::fit(input, cov_type, 0.95).unwrap();
+
+        let y = [5.0, 3.0, 8.0, 6.0, 11.0, 10.0, 15.0, 13.0];
+        let x1 = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let x_endog = [2.0, 1.0, 4.0, 3.0, 6.0, 5.0, 8.0, 7.0];
+        let n = y.len();
+        let x_structural = Mat::from_fn(n, 3, |i, j| match j {
+            0 => 1.0,
+            1 => x1[i],
+            _ => x_endog[i],
+        });
+        let y_mat = Mat::from_fn(n, 1, |i, _| y[i]);
+        let e = &y_mat - &x_structural * estimator.params();
+        let x_hat = estimator.second_stage.input().x();
+        let k = x_hat.ncols();
+
+        let expected_se = manual_cluster_std_errors(x_hat, &e, n, k, &groups);
+        let actual_se: Vec<f64> = (0..k).map(|j| *estimator.std_errors().get(j, 0)).collect();
+        assert_slices_close(&actual_se, &expected_se);
+    }
+
+    /// `cov_type=Hac{lags: Some(0), ..}`は自己相関項（`l=1..=lags`のループ）が空になり、
+    /// `l=0`項（HC0のΨ̂と同形）のみが残るため、HC0と数値的に一致するはず
+    /// （`ols.rs`の`fit_hac_with_zero_lags_matches_hc0`と同じ内部整合性テスト）。
+    #[test]
+    fn fit_hac_with_zero_lags_matches_hc0() {
+        let hac_estimator = TwoSlsEstimator::fit(
+            nontrivial_x_exog_input(),
+            CovType::Hac {
+                lags: Some(0),
+                time_order: None,
+            },
+            0.95,
+        )
+        .unwrap();
+        let hc0_estimator =
+            TwoSlsEstimator::fit(nontrivial_x_exog_input(), CovType::Hc0, 0.95).unwrap();
+
+        for j in 0..hac_estimator.k() {
+            assert!(
+                (*hac_estimator.std_errors().get(j, 0) - *hc0_estimator.std_errors().get(j, 0))
+                    .abs()
+                    < 1e-8
+            );
+        }
+    }
+
+    /// `x_endog=[]`（第一段階ループが一度も回らない退化ケース）の`IvInput`を組み立てる。
+    /// 独立実装のサンドイッチ計算（`fit()`本体、第二段階）固有のcov_typeエラー
+    /// （`InvalidHacLags`/`MissingClusterColumn`/`InsufficientClusters`）を検証するテストで
+    /// 使う。`x_endog`が1つでもあると、同じ`cov_type`が第一段階にも渡るため
+    /// （モジュール冒頭のdocコメント参照）、エラーは先に`FirstStageFailed`として
+    /// 発生してしまい、第二段階固有の経路を検証できない。
+    fn x_endog_empty_input() -> IvInput {
+        let y = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+        let x_exog = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+        IvInput::from_columns(
+            &y,
+            &x_exog,
+            vec!["x1".to_string()],
+            &[],
+            vec![],
+            &[],
+            vec![],
+            true,
+            "y".to_string(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn fit_returns_invalid_hac_lags_error_when_out_of_range() {
+        let result = TwoSlsEstimator::fit(
+            x_endog_empty_input(),
+            CovType::Hac {
+                lags: Some(-1),
+                time_order: None,
+            },
+            0.95,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::InvalidHacLags { hac_lags: -1, n: 5 }
+        );
+    }
+
+    #[test]
+    fn fit_returns_missing_cluster_column_error_when_groups_not_provided() {
+        let result = TwoSlsEstimator::fit(
+            x_endog_empty_input(),
+            CovType::Cluster { groups: None },
+            0.95,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::Common(CommonError::MissingClusterColumn)
+        );
+    }
+
+    #[test]
+    fn fit_returns_insufficient_clusters_error_when_only_one_group() {
+        let groups = vec!["a".to_string(); 5];
+        let result = TwoSlsEstimator::fit(
+            x_endog_empty_input(),
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::Common(CommonError::InsufficientClusters { g: 1 })
+        );
+    }
+
+    /// `r_squared`/`r_squared_adj`/`df_resid`/`df_model`を、構造残差のSSR・元の`y`のTSSから
+    /// 素朴な式で独立計算し照合する。
+    #[test]
+    fn fit_computes_r_squared_matching_manual_formula() {
+        let estimator =
+            TwoSlsEstimator::fit(nontrivial_x_exog_input(), CovType::Classical, 0.95).unwrap();
+        let (_x, e) = nontrivial_x_exog_x_hat_and_structural_residuals(&estimator);
+        let (_x1, _x_endog, _z1, _z2, y) = nontrivial_x_exog_columns();
+        let n = y.len();
+        let k = 3;
+
+        let ssr: f64 = (0..n).map(|i| (*e.get(i, 0)).powi(2)).sum();
+        let y_mean: f64 = y.iter().sum::<f64>() / (n as f64);
+        let sst: f64 = y.iter().map(|v| (v - y_mean).powi(2)).sum();
+        let expected_r_squared = 1.0 - ssr / sst;
+        let expected_df_resid = n - k;
+        let expected_r_squared_adj =
+            1.0 - ((n - 1) as f64 / expected_df_resid as f64) * (1.0 - expected_r_squared);
+
+        assert!((estimator.r_squared() - expected_r_squared).abs() < 1e-8);
+        assert!((estimator.r_squared_adj() - expected_r_squared_adj).abs() < 1e-8);
+        assert_eq!(estimator.df_resid(), expected_df_resid);
+        assert_eq!(estimator.df_model(), k - 1);
     }
 
     /// 第一段階回帰（`x_endog[j] ~ x_exog + instruments`）の係数を、通常のOLS閉形式解

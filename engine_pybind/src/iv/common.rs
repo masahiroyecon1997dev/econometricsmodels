@@ -65,7 +65,9 @@ pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
     let message = err.to_string();
     match err {
         IvError::Common(common) => common_error_to_pyerr(common),
-        IvError::InsufficientInstruments { .. } => ValidationError::new_err(message),
+        IvError::InsufficientInstruments { .. } | IvError::InvalidHacLags { .. } => {
+            ValidationError::new_err(message)
+        }
         IvError::FirstStageFailed { source, .. } | IvError::SecondStageFailed { source } => {
             if least_squares_error_is_computation_error(&source) {
                 ComputationError::new_err(message)

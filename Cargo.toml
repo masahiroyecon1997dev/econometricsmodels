@@ -6,7 +6,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 license = "MIT"
 publish = false
@@ -17,7 +17,7 @@ repository = "https://github.com/masahiroyecon1997dev/econometricsmodels"
 # 各crateからは `{ workspace = true }` で参照する。
 # サプライチェーン攻撃対策として、全依存を`=`で完全固定する（キャレット等の範囲指定にしない）。
 # アップグレードは意図的に行い、その都度動作確認する。
-thiserror = "=2.0.18"
+thiserror = "=2.0.19"
 # faer: rust-style.md の方針により明示的にバージョン固定（APIが変わりうるため）。
 # 実際に engine の [dependencies] へ追加するのは別issue（ENGINE_DEPS: engineクレートへの依存追加）で行う。
 # ここでは workspace 単位でバージョンだけ先に固定しておく。
@@ -26,7 +26,7 @@ faer = "=0.24.4"
 # pure Rustでsystem BLAS/LAPACK不要、faerの方針と一貫する。
 # default-features = false でnalgebra/rand機能を無効化し、CDF計算に必要な最小限の依存に絞る。
 # （メンバー側の[dependencies]でdefault-featuresを上書きできないため、ここで指定する）
-statrs = { version = "=0.18.0", default-features = false }
+statrs = { version = "=0.19.0", default-features = false }
 # argmin: 非線形モデル（Logit/Probit/Tobit）のMLE数値最適化。
 # argmin-mathのfaerバックエンドはfaer 0.23までしか対応しておらず、本プロジェクトのfaerピン
 # （=0.24.4）と噛み合わないため使わない（docs/planning/specs/nonlinear-implementation-notes.md
@@ -35,3 +35,6 @@ statrs = { version = "=0.18.0", default-features = false }
 # モデル固有の尤度・勾配・Hessian計算自体は引き続きfaerで行い、argminに値を渡す境界でのみ変換する。
 argmin = "=0.11.0"
 argmin-math = { version = "=0.5.1", default-features = false, features = ["vec"] }
+# proptest: property-basedテスト（testing-policy.md「将来的に検討する技術」、Issue #102）。
+# dev-dependency専用（配布物には含まれない）。
+proptest = "=1.11.0"

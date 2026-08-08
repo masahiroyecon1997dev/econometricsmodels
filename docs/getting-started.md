@@ -134,6 +134,30 @@ for row in result.marginal_effects():
 mean_effects = result.marginal_effects(at="mean")
 ```
 
+## Probit (probit regression)
+
+`Probit` estimates a binary probit regression model by maximum likelihood. The dependent variable `y` must be coded 0/1. Its API is identical to [Logit](#logit-binary-logistic-regression) — the only difference is the link function (the standard normal CDF `Φ` in place of the logistic CDF `Λ`).
+
+```python
+import polars as pl
+from econometricsmodels import Probit
+
+df = pl.DataFrame(
+    {
+        "y": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+    }
+)
+
+result = Probit(df, y="y", x=["x1"]).fit()
+
+print(result.params)         # {"const": ..., "x1": ...}
+print(result.std_errors)     # {"const": ..., "x1": ...}
+print(result.pseudo_r_squared)
+```
+
+`ProbitOptions` supports the same `cov_type` and `method` choices as `LogitOptions`; see the [API Reference](api/probit.md) for the full list of options. `ProbitResults.predict()`, `pred_table()`, and `marginal_effects()` work exactly like their [Logit](#predicted-values-and-classification-table) counterparts (substitute `Probit`/`ProbitOptions` for `Logit`/`LogitOptions` in the examples above).
+
 ## Error handling
 
 Invalid input or options (a missing column, missing values, etc.) raise `ValidationError` (a subclass of `ValueError`). Problems detected during computation (e.g. a singular design matrix) raise `ComputationError` (a subclass of `RuntimeError`).

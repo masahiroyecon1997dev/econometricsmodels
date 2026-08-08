@@ -141,9 +141,9 @@ class OlsResults:
         return self._raw.dep_var_name
 
     @property
-    def nobs(self) -> int:
+    def n_obs(self) -> int:
         """Number of observations."""
-        return self._raw.nobs
+        return self._raw.n_obs
 
     @property
     def cov_type(self) -> str:

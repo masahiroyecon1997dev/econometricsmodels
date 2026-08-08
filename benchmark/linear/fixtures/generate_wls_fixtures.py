@@ -6,7 +6,7 @@
 
 シナリオが持つ`weight`列は、OLS実装時（Issue #15）から既に含まれている合成データ生成
 ロジックのもの（heteroskedasticシナリオは`1/sigma_i^2`、それ以外は`uniform(0.5, 1.5)`。
-いずれも正の値）をそのまま使う。詳細は`docs/planning/specs/wls-implementation-notes.md`参照。
+いずれも正の値）をそのまま使う。詳細は`docs/spec/wls-spec.md`参照。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`wls.json`は
 `tests/api_tests/fixtures/benchmarks/`に置く（`.claude/rules/testing-policy.md`
@@ -32,16 +32,18 @@ sys.path.insert(
 )  # benchmark/linear/ を import path に追加（run_statsmodels_benchmark）
 sys.path.insert(
     0, str(Path(__file__).resolve().parents[2])
-)  # benchmark/ を import path に追加（load_wooldridge）
+)  # benchmark/ を import path に追加（load_wooldridge, generate_synthetic_datasets）
 
 import polars as pl  # noqa: E402
 import statsmodels  # noqa: E402
 
+from generate_synthetic_datasets import imbalanced_cluster_groups  # noqa: E402
 from load_wooldridge import load as load_wooldridge  # noqa: E402
 from run_statsmodels_benchmark import DATA_DIR, run  # noqa: E402
 
-# 完全な多重共線性は数値比較の対象外（testing-policy.md「テストの3系統」参照）。
-# ComputationErrorが発生することのみをテストコード側で確認する。
+# 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md
+# 「テストの3系統」参照）。ComputationErrorが発生することのみをテスト
+# コード側で確認する（OLSと同じ挙動をWLSでも実測確認済み、Issue #106）。
 NUMERIC_SCENARIOS = [
     "baseline",
     "small_n",
@@ -49,6 +51,9 @@ NUMERIC_SCENARIOS = [
     "heteroskedastic",
     "autocorrelated",
     "moderate_multicollinearity",
+    "high_condition_number",
+    # n=k+1（自由度1ちょうど）の成功パス（Issue #106、OLSのIssue #101相当）。
+    "baseline_df1",
 ]
 
 # classical/HC系は全シナリオで確認。HACはautocorrelatedシナリオが本来の目的
@@ -72,10 +77,28 @@ def build_fixtures() -> dict:
             fixtures[scenario][cov_type] = result
 
         # クラスターロバストSEは、シナリオ依存ではなくグルーピングの動作確認が目的のため、
-        # baselineシナリオでのみ、決め打ちの疑似グループ（10グループ）を使って確認する
-        # （generate_ols_fixtures.pyと同じ方針）。
+        # baselineシナリオでのみ、複数のグルーピングパターンで確認する
+        # （generate_ols_fixtures.pyと同じ方針、Issue #100・#106）。
         if scenario == "baseline":
-            fixtures[scenario]["cluster"] = _run_cluster_case(scenario)
+            n = pl.read_csv(DATA_DIR / "synthetic_baseline.csv").height
+            fixtures[scenario]["cluster"] = _run_cluster_case()
+            fixtures[scenario]["cluster_imbalanced"] = _run_cluster_case(
+                groups=imbalanced_cluster_groups(n),
+                note="不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。Issue #106。",
+            )
+            # OLS側（generate_ols_fixtures.py）と同じ理由でq=1（説明変数1個）に
+            # 絞る。baseline既定の3個のままG=2にすると、ロバストWald検定の
+            # 共分散部分行列が特異になりComputationErrorになる（成功パスに
+            # ならない）。
+            n_g2 = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv").height
+            fixtures[scenario]["cluster_g2"] = _run_cluster_case(
+                groups=[str(i % 2) for i in range(n_g2)],
+                note="クラスタ数境界（G=2ちょうど）の成功パス確認用。"
+                "説明変数1個（q=1）に絞っている（Issue #106、OLSのIssue #100"
+                "相当。3個だとロバストWald検定の共分散行列が特異になり"
+                "ComputationError）。",
+                k1=True,
+            )
 
     fixtures["401ksubs"] = _run_401ksubs_case()
 
@@ -85,23 +108,41 @@ def build_fixtures() -> dict:
         "primary_reference": "statsmodels",
         "statsmodels_version": statsmodels.__version__,
         "note": (
-            "perfect_multicollinearityシナリオはここに含まない"
-            "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
+            "perfect_multicollinearity・scale_varianceシナリオはここに含まない"
+            "（いずれもComputationErrorの発生確認のみ、テストコード側で対応。"
+            "scale_varianceはOLSと同じ理由（Issue #107）でロバストWald検定の"
+            "共分散部分行列が全cov_typeで数値的にほぼ特異になる、Issue #106で"
+            "WLSでも実測確認済み）。"
             "重みは合成データセットの'weight'列（OLS実装時から存在、常に正）を使う。"
             "クロスチェック用のRベンチマークはwls_crosscheck.json（別スクリプト）で生成する。"
-            "401ksubsの回帰式・重み定義はdocs/planning/specs/wls-implementation-notes.md参照。"
+            "401ksubsの回帰式・重み定義はdocs/spec/wls-spec.md参照。"
         ),
     }
     return fixtures
 
 
-def _run_cluster_case(scenario: str) -> dict:
-    """クラスターロバストSE確認用に、決め打ちの疑似グループを付けて実行する。"""
+def _run_cluster_case(
+    groups: list | None = None,
+    note: str = "決め打ちの疑似グループ（行番号%10）。統計的な意味はなく、実装の動作確認用。",
+    k1: bool = False,
+) -> dict:
+    """クラスターロバストSE確認用に、疑似グループを付けて実行する。
+
+    Args:
+        groups: 各行のグループラベル。Noneなら既定（行番号%10、10均等グループ）。
+        note: フィクスチャの`_meta.note`に記録する説明文。
+        k1: TrueならG=2境界ケース用の説明変数1個版（synthetic_baseline_k1.csv）を使う。
+    """
     import statsmodels.formula.api as smf
 
-    df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
+    filename = "synthetic_baseline_k1.csv" if k1 else "synthetic_baseline.csv"
+    df = pl.read_csv(DATA_DIR / filename)
     pandas_df = df.to_pandas()
-    pandas_df["_group"] = [i % 10 for i in range(len(pandas_df))]
+    pandas_df["_group"] = (
+        groups
+        if groups is not None
+        else [i % 10 for i in range(len(pandas_df))]
+    )
 
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
     formula = "y ~ " + " + ".join(x_cols)
@@ -117,7 +158,7 @@ def _run_cluster_case(scenario: str) -> dict:
             "reference": "statsmodels",
             "statsmodels_version": statsmodels.__version__,
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "note": "決め打ちの疑似グループ（行番号%10）。統計的な意味はなく、実装の動作確認用。",
+            "note": note,
             "formula": formula,
             "weight_col": "weight",
         },
@@ -127,8 +168,7 @@ def _run_cluster_case(scenario: str) -> dict:
 def _run_401ksubs_case() -> dict:
     """実データ（401ksubs、fsize==1）でのWLSベンチマーク。
 
-    回帰式・重み定義はdocs/planning/specs/wls-implementation-notes.md「8. テスト」
-    「実データセット」節で確定した内容（Wooldridge Example 8.5・8.6と同じ変数構成、
+    回帰式・重み定義はdocs/spec/wls-spec.md「テスト」で確定した内容（Wooldridge Example 8.5・8.6と同じ変数構成、
     Var(u|inc) ∝ inc という単純WLSの仮定に基づき重み = 1/inc）。
     """
     import statsmodels.formula.api as smf

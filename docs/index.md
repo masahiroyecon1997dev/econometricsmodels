@@ -14,6 +14,6 @@ pip install econometricsmodels
 
 ## Supported methods
 
-Currently implemented: OLS (Ordinary Least Squares), WLS (Weighted Least Squares), and Logit (binary logistic regression). See [Getting Started](getting-started.md) for usage, and the API Reference ([OLS](api/ols.md) / [WLS](api/wls.md) / [Logit](api/logit.md)) for detailed options and return values.
+Currently implemented: OLS (Ordinary Least Squares), WLS (Weighted Least Squares), Logit (binary logistic regression), and Probit (binary probit regression). See [Getting Started](getting-started.md) for usage, and the API Reference ([OLS](api/ols.md) / [WLS](api/wls.md) / [Logit](api/logit.md) / [Probit](api/probit.md)) for detailed options and return values.
 
-IV (2SLS/GMM), Probit, and others will be added in the future.
+Tobit, IV (2SLS/GMM), and others will be added in the future.

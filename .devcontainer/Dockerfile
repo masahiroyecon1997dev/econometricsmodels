@@ -55,10 +55,17 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
 
 # -------------------------
 # R インストール（ベンチマーク用リファレンス実装: fixest, plm, ivreg等）
-# Debian bookwormのr-baseは4.2.2固定（CRAN最新は4.6.1）だが、install.packagesでの
-# パッケージ導入は動作確認済み。languageserverはVS CodeのR拡張機能用。
+# Debian bookworm標準のr-baseは4.2.2固定で、ivregの依存先（car→MatrixModels→
+# Matrix>=1.6.0、R>=4.4が必要）が導入できない制約があった（Issue #171）。
+# CRAN公式のDebian向けAPTリポジトリ（bookworm-cran40。suite名の"cran40"は
+# 歴史的な命名で、実体は常に最新のRリリースを追従する）を追加し、R 4.6.1系を導入する。
+# languageserverはVS CodeのR拡張機能用。
 # -------------------------
-RUN apt update && apt install -y --no-install-recommends \
+RUN curl -fsSL https://cloud.r-project.org/bin/linux/debian/marutter_pubkey.asc \
+        -o /etc/apt/trusted.gpg.d/cran_debian_key.asc \
+    && echo "deb https://cloud.r-project.org/bin/linux/debian bookworm-cran40/" \
+        > /etc/apt/sources.list.d/cran.list \
+    && apt update && apt install -y --no-install-recommends \
     r-base \
     r-base-dev \
     && rm -rf /var/lib/apt/lists/*

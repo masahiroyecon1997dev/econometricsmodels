@@ -21,18 +21,25 @@ Logit（Issue #65/#66）と同じ2段階に分けた。
 
 `IvOptions`/`IvResult`/`build_iv_input`/`fit`は`iv/common.rs`に置く（`two_sls.rs`/`gmm.rs`のような手法ごとのファイル分割はしない）。`fit_iv`という単一エントリポイントを`IvOptions.method`（`"2sls"`/`"gmm"`）で2SLS/GMMに振り分ける設計のため、これらは系統内で真に共有されるロジックであり、`<系統>/common.rs`に置くという既存方針にそのまま合致する。
 
-**`method="gmm"`は`ValidationError`**（`GmmEstimator`、engine側の実装であるIssue #160が未実装のため）。`fit`は`build_iv_input`の完了（列抽出・バリデーション・`cov_type`パース）を待ってから`method`を判定するため、`method="gmm"`でもデータ不正（列重複等）が先に検出される（GMM実装を待たずに他のバリデーションが機能する、意図した挙動）。
-
 `weak_instrument_f_statistics`（空`HashMap`）・`overid_statistic`/`overid_p_value`・`wu_hausman_statistic`/`wu_hausman_p_value`（いずれも`None`）は`fit`ではプレースホルダーのまま返す。実際の計算はそれぞれ別issue（#163/#167/#164）。
 
-**`weak_instrument_f_statistics`は後日（#163完了後）配線済み**: `TwoSlsEstimator::weak_instrument_f_statistics()`（`&[(String, f64)]`）を`.iter().cloned().collect()`で`HashMap<String, f64>`に詰め替えるだけ（`fit`、`iv/common.rs`）。`method="gmm"`は`fit`冒頭で`TwoSlsEstimator::fit`を呼ぶ前に`ValidationError`を返すため`IvResult`自体が構築されず、この配線コードには到達しない（「空のまま返る」ではなく「そもそも呼ばれない」、rust-reviewerの指摘でdoc表現を訂正）。`overid_statistic`系はまだ#167が未着手のため引き続きプレースホルダー。
+**`weak_instrument_f_statistics`は後日（#163完了後）配線済み**: `TwoSlsEstimator::weak_instrument_f_statistics()`（`&[(String, f64)]`）を`.iter().cloned().collect()`で`HashMap<String, f64>`に詰め替えるだけ（`fit`、`iv/common.rs`）。`overid_statistic`系はまだ#167が未着手のため引き続きプレースホルダー。
 
 **`wu_hausman_statistic`/`wu_hausman_p_value`も後日（#164完了後）配線済み**: `TwoSlsEstimator::wu_hausman_statistic()`/`wu_hausman_p_value()`（どちらも`Option<f64>`）をそのまま代入するだけ（`weak_instrument_f_statistics`と異なり型変換が要らない）。`engine`側の判断で`x_endog=[]`だけでなく拡張回帰が特異な場合（第一段階残差の分散がゼロ等）も`None`になる——この場合も`fit()`自体は失敗しない（`engine/src/iv/CLAUDE.md`「Wu-Hausmanの拡張回帰が特異な場合は…」参照）。
 
-3. **`first_stage()`メソッドissue**（IVでは#170）: `IvResult`に非公開フィールド`estimator: TwoSlsEstimator`を追加し（`LogitResult`/`ProbitResult`が`predict()`/`marginal_effects()`用に推定量そのものを保持するのと同じパターン）、`first_stage()`が`estimator.first_stage_estimators()`から`dict[str, OlsResults]`をオンデマンドに構築する。`OlsEstimator → OLSResult`変換は新設した`linear::ols::ols_estimator_to_result`（`linear::ols::fit`本体から抽出、`pub(crate)`）を再利用する——第一段階回帰はそれ自体が正しい（ナイーブな）通常のOLS回帰であり（`engine::iv::two_sls`のモジュールdocコメント参照）、2SLSの第二段階（サンドイッチ型分散を独自実装、Issue #166）とは異なりOLSとの共有を避ける理由が無いため。`first_stage()`が返す各`OlsResults.f_statistic`/`f_p_value`は通常のOLS F検定（`x_exog`の寄与を含む）であり、弱操作変数診断の部分F統計量（`weak_instrument_f_statistics`、Issue #163）とは別物（`IvResult`のdocコメント参照）。`IvResult`は`estimator`フィールドの追加により`#[derive(Clone)]`を外した（`TwoSlsEstimator`が`Clone`未実装のため、`LogitResult`/`ProbitResult`と同じトレードオフ）。
+3. **`first_stage()`メソッドissue**（IVでは#170）: 当初は`IvResult`に非公開フィールド`estimator: TwoSlsEstimator`を追加し（`LogitResult`/`ProbitResult`が`predict()`/`marginal_effects()`用に推定量そのものを保持するのと同じパターン）、`first_stage()`が`estimator.first_stage_estimators()`から`dict[str, OlsResults]`をオンデマンドに構築する設計だった（**GMM配線時にこの`estimator`フィールドは廃止、下記「GMM配線」節参照**）。`OlsEstimator → OLSResult`変換は新設した`linear::ols::ols_estimator_to_result`（`linear::ols::fit`本体から抽出、`pub(crate)`）を再利用する——第一段階回帰はそれ自体が正しい（ナイーブな）通常のOLS回帰であり（`engine::iv::two_sls`のモジュールdocコメント参照）、2SLSの第二段階（サンドイッチ型分散を独自実装、Issue #166）とは異なりOLSとの共有を避ける理由が無いため。`first_stage()`が返す各`OlsResults.f_statistic`/`f_p_value`は通常のOLS F検定（`x_exog`の寄与を含む）であり、弱操作変数診断の部分F統計量（`weak_instrument_f_statistics`、Issue #163）とは別物（`IvResult`のdocコメント参照）。
+
+## GMM配線（本ファイル冒頭「実装フェーズの分割方針」に続く4段階目、engine側のGMM cov_type対応完了後に実施）
+
+**`method="gmm"`は実装済み**（当初`GmmEstimator`が点推定のみ・engine側cov_type対応も無かったため`ValidationError`を返していたが、`engine::iv::gmm::GmmEstimator`にcov_type対応SEを実装したうえで本ファイルにも配線した）。
+
+- **`IvOptions`に`gmm_convergence: Option<f64>`（既定`None`）・`raise_on_non_convergence: bool`（既定`true`）を追加**（`GmmEstimator::fit`のシグネチャに対応、Issue #229で追加された引数が今回初めてPython側に配線された）。
+- **`parse_weight_type`**（`parse_iv_cov_type`と対になる新規関数）が`IvOptions.weight_type`文字列を`engine::iv::gmm::WeightType`にパースする。`cluster_col`/`hac_lags`/`time_col`は`cov_type`と共用（`IvOptions`に別フィールドを増やさない設計、`weight_type`と`cov_type`が異なるクラスター変数を使いたいニーズが出てきたら別フィールド化を検討）。
+- **`IvResult`の非公開フィールドを`estimator: TwoSlsEstimator`から`first_stage: Vec<(String, OlsEstimator)>`に置き換えた**（`method`非依存の表現にするため）。`first_stage`/`weak_instrument_f_statistics`は`method`によらず`engine::iv::common::compute_first_stage`（`engine/src/iv/CLAUDE.md`参照、2SLS/GMM間で共有するロジックとして抽出済み）から構築する。**`method="2sls"`では第一段階回帰が二重計算になる**（`fit`が明示的に1回、`TwoSlsEstimator::fit`が内部でもう1回）——`OlsEstimator`が`Clone`未実装のため`TwoSlsEstimator::first_stage_estimators()`の借用結果を`IvResult`へ所有権ごと移せず、OLS自体が軽量という前提で許容した設計判断（rust-reviewerの指摘で認識済み、恒久対応する場合は`TwoSlsEstimator`に第一段階結果を外部注入する`fit`のバリエーションを追加する案がある。着手前にユーザー確認すること）。
+- **識別の順序条件（`k_instruments < k_endog`）チェックは`compute_first_stage`呼び出しより前に行う**（`fit`冒頭、`compute_first_stage`自体はこの条件を検証しないため、過小識別な入力で無駄な第一段階回帰が走るのを防ぐ、rust-reviewerの指摘で追加）。
+- **`wu_hausman_statistic`/`wu_hausman_p_value`は`method="gmm"`では常に`None`**（`GmmEstimator`はWu-Hausman検定を実装しない）。`overid_statistic`/`overid_p_value`は`method="gmm"`では`GmmEstimator::hansen_j_statistic()`/`hansen_j_p_value()`から構築する（Hansen J検定、`method="2sls"`のSargan検定と対）。
+- **`IvResult`に`converged: bool`/`n_iterations: i64`を追加**（rust-reviewerの指摘: `raise_on_non_convergence=False`を指定してもGMMが収束したかをPython側で確認する手段が元々無かった、`LogitResult`/`ProbitResult`の`converged`/`n_iter`と同じ位置づけ）。`method="2sls"`では常に`converged=true`・`n_iterations=1`（2SLSは閉形式・非反復のため）。
 
 ## `IvResult.stats`の命名（`t_stats`/`z_stats`ではない理由）
 
-`IvResult`は`method="2sls"`（t分布）・`method="gmm"`（z分布、`iv-api-design.md`3.2節）の両方で共有される単一の型のため、`OLSResult.t_stats`・`LogitResult.z_stats`のような分布固定の名前は使えない。`engine::inference::InferenceStat`（Issue #152）が同じ理由で`stat`という分布非依存の名前を使っている前例に倣い、`stats`とした（ユーザー確認済み、`iv-api-design.md`2.1節に反映済み）。
-
-GMMの検定分布をz分布のまま確定とするか、Stata `ivregress`等の実務慣行に合わせてt分布（またはオプションで切り替え可能）にすべきかは、Issue #171（`linearmodels`/`ivreg`とのベンチマーク作成）でリファレンス実装のソースを確認してから判断する未確定事項として残っている（`iv-api-design.md`3.2節参照）。
+`IvResult`は`method="2sls"`（t分布）・`method="gmm"`（z分布、`iv-api-design.md`3.2節）の両方で共有される単一の型のため、`OLSResult.t_stats`・`LogitResult.z_stats`のような分布固定の名前は使えない。`engine::inference::InferenceStat`（Issue #152）が同じ理由で`stat`という分布非依存の名前を使っている前例に倣い、`stats`とした（ユーザー確認済み、`iv-api-design.md`2.1節に反映済み）。GMM側は`GmmEstimator::z_stats()`から配線する（`engine/src/iv/gmm.rs`参照、z分布で確定済み）。

@@ -139,8 +139,11 @@ Issue #171（`linearmodels`/`ivreg`とのベンチマーク作成）でリファ
   t分布・F分布で独自に計算し直す必要があった（`run_linearmodels_benchmark.py`参照）。
   GMMについては、`linearmodels`の既定（`debiased=False`→z分布）が本実装の設計
   （GMMは常にz分布）と一致することも合わせて確認できた。GMM自体のcov_type対応・SE計算は
-  まだ未実装（6.2節・6.7節）のため、GMMのz分布での数値照合は別issue（GMMのcov_type対応
-  issue）に持ち越す。
+  Issue #171の作業中に実装した（当初Issue #166でクローズ済みの完了条件だったが、実際には
+  GMM側が未実装のまま残っていたことが発覚したため。`engine/src/iv/gmm.rs`のモジュール
+  docコメント「標準誤差・検定統計量（cov_type対応）」・`engine/src/iv/CLAUDE.md`参照）。
+  `linearmodels`（`IVGMM`）との数値照合は`method="gmm"`のPython配線が別途必要なため、
+  そちらの完了後に改めて行う。
 
 ## 4. 内部実装・共通化（確定）
 

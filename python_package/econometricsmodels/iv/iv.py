@@ -10,10 +10,9 @@ settings (CLAUDE.md section 2, `.claude/rules/python-style.md`
 
 `IvOptions` is re-exported as-is from `_lib` (not redefined as a
 separate class; same policy as `OLSOptions`/`LogitOptions`, see
-`docs/spec/ols-spec.md`, "API引数"). `IvOptions.method` selects `"2sls"`
-(the only method currently implemented; `"gmm"` raises
-`ValidationError`) — a single `IV`/`IvResults` pair serves both methods
-(`docs/planning/specs/iv-api-design.md` section 1.2).
+`docs/spec/ols-spec.md`, "API引数"). `IvOptions.method` selects
+`"2sls"` (default) or `"gmm"` — a single `IV`/`IvResults` pair serves
+both methods (`docs/planning/specs/iv-api-design.md` section 1.2).
 
 `summary()` is not implemented (structured-data-only output policy; see
 the `OlsResults`/`LogitResults` precedent).
@@ -92,10 +91,10 @@ class IV:
                 column is missing, contains missing values or
                 NaN/infinity, `y`/`x_exog`/`x_endog`/`instruments`
                 overlap, insufficient observations,
-                `confidence_level` out of range, an unknown
-                `cov_type` string, `method="gmm"` (not yet
-                implemented), or too few instruments for
-                identification). A subclass of `ValueError`.
+                `confidence_level` out of range, an unknown `cov_type`
+                or (`method="gmm"` only) `weight_type` string, or too
+                few instruments for identification). A subclass of
+                `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. a singular first- or second-stage
                 design matrix). A subclass of `RuntimeError`.
@@ -208,6 +207,23 @@ class IvResults:
         return self._raw.df_model
 
     @property
+    def converged(self) -> bool:
+        """Whether GMM iteration converged (`method="gmm"` only).
+
+        Only meaningful when `IvOptions.gmm_convergence` is set (fixed
+        iteration count otherwise trivially satisfies convergence).
+        Always `True` for `method="2sls"` (2SLS is a closed-form,
+        non-iterative estimator).
+        """
+        return self._raw.converged
+
+    @property
+    def n_iterations(self) -> int:
+        """Number of GMM iterations actually run (`method="gmm"`
+        only). Always `1` for `method="2sls"`."""
+        return self._raw.n_iterations
+
+    @property
     def cov_type(self) -> str:
         """Standard error type actually used (normalized to lowercase)."""
         return self._raw.cov_type
@@ -243,21 +259,19 @@ class IvResults:
         (homoskedastic) formula regardless of `cov_type`. Not the
         same as the plain F-statistic of the corresponding regression
         in `first_stage()`, which includes `x_exog`'s contribution
-        too. Empty when `x_endog=[]`. `method="gmm"` is not yet
-        implemented and raises `ValidationError` before this result
-        is ever returned; see
+        too. Empty when `x_endog=[]`. Computed the same way for both
+        `method="2sls"` and `method="gmm"`; see
         `docs/planning/specs/iv-api-design.md` section 6.4.
         """
         return self._raw.weak_instrument_f_statistics
 
     @property
     def overid_statistic(self) -> float | None:
-        """Overidentification test statistic: Sargan (`method="2sls"`).
+        """Overidentification test statistic: Sargan (`method="2sls"`)
+        or Hansen J (`method="gmm"`).
 
         `None` when just-identified (`len(instruments) ==
-        len(x_endog)`, degrees of freedom 0). `method="gmm"` is not
-        yet implemented and raises `ValidationError` before this
-        result is ever returned; see
+        len(x_endog)`, degrees of freedom 0); see
         `docs/planning/specs/iv-api-design.md` section 6.5.
         """
         return self._raw.overid_statistic
@@ -287,7 +301,8 @@ class IvResults:
         such as when an instrument perfectly predicts its endogenous
         variable, or there are too few observations for the extra
         residual columns) — neither case affects the validity of
-        the other results. See
+        the other results. **Always `None` for `method="gmm"`**
+        (not implemented for GMM). See
         `docs/planning/specs/iv-api-design.md` section 6.6.
         """
         return self._raw.wu_hausman_statistic

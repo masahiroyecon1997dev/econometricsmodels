@@ -82,6 +82,10 @@ pub struct TwoSlsEstimator {
     /// 内生変数ごとの第一段階回帰（`x_endog[j] ~ x_exog + instruments`）。
     /// タプルの`String`は内生変数名（`IvInput::x_endog_names`と対応）。
     first_stage: Vec<(String, OlsEstimator)>,
+    /// 内生変数ごとの弱操作変数診断（部分F統計量、Issue #163、`iv-api-design.md`6.4節）。
+    /// `first_stage`と同じ順序・同じ内生変数名（`Vec<(String, f64)>`にしている理由も
+    /// `first_stage`と同じ、`HashMap`にすると走査順序が非決定的になるため）。
+    weak_instrument_f_statistics: Vec<(String, f64)>,
     /// 第二段階回帰（`y ~ x_exog + x̂_endog`）。`params()`/`param_names()`/`input()`（design
     /// 行列`X̂`）を得るためだけに使う内部実装専用フィールド。モジュール冒頭のdocコメント
     /// 「`second_stage`フィールドの位置づけ」参照。
@@ -185,6 +189,24 @@ impl TwoSlsEstimator {
             let fitted: Mat<f64> = estimator.fitted_values();
             x_endog_hat_columns.push(mat_column_to_vec(&fitted, 0));
             first_stage.push((endog_name.clone(), estimator));
+        }
+
+        // 弱操作変数診断（部分F統計量、Issue #163、iv-api-design.md 6.4節）。内生変数ごとに、
+        // x_exogを直交化した後の操作変数（instruments）係数のみを検定する部分F検定を行う
+        // （`first_stage`のOlsEstimator.f_statistic()をそのまま使うとx_exogの寄与が混ざり
+        // 不正確になるため、専用計算が必要）。
+        let mut weak_instrument_f_statistics = Vec::with_capacity(first_stage.len());
+        for (j, (endog_name, unrestricted)) in first_stage.iter().enumerate() {
+            let y_endog = mat_column_to_vec(input.x_endog(), j);
+            let f_stat = partial_f_statistic(
+                unrestricted,
+                &x_exog_columns,
+                input.x_exog_names(),
+                &y_endog,
+                endog_name,
+                input.k_instruments(),
+            )?;
+            weak_instrument_f_statistics.push((endog_name.clone(), f_stat));
         }
 
         // 第二段階: y ~ x_exog + x̂_endog
@@ -314,6 +336,7 @@ impl TwoSlsEstimator {
 
         Ok(Self {
             first_stage,
+            weak_instrument_f_statistics,
             second_stage,
             cov_type,
             residuals,
@@ -427,6 +450,95 @@ impl TwoSlsEstimator {
     pub fn first_stage_estimators(&self) -> &[(String, OlsEstimator)] {
         &self.first_stage
     }
+
+    /// 内生変数ごとの弱操作変数診断（部分F統計量、`first_stage_estimators()`と同じ順序）。
+    /// タプルの`String`は内生変数名。Stock-Yogo臨界値との照合は行わない（v1スコープ外、
+    /// `iv-api-design.md`6.4節）。
+    pub fn weak_instrument_f_statistics(&self) -> &[(String, f64)] {
+        &self.weak_instrument_f_statistics
+    }
+}
+
+/// 弱操作変数診断の部分F統計量（Issue #163、`iv-api-design.md`6.4節）。
+///
+/// `x_exog`を直交化した後の操作変数（`instruments`）係数のみを検定する、常に等分散前提の
+/// 古典的ネストF検定: `F = [(SSR_r - SSR_u)/q] / [SSR_u/(n-k_u)]`。`SSR_u`は制限なしモデル
+/// （`x_endog[j] ~ x_exog + instruments`、`unrestricted`＝`first_stage_estimators()`が
+/// 保持する`OlsEstimator`そのもの）の残差平方和、`SSR_r`は制限モデル（`x_endog[j] ~ x_exog`、
+/// `instruments`を除く）の残差平方和、`q`は除外操作変数の数（`instruments`のみ、`x_exog`は
+/// 含まない、`iv-api-design.md`1.1.1節の定義と一致）。
+///
+/// **`cov_type`には依存しない**（呼び出し元が`fit()`に指定した`cov_type`によらず常に
+/// 等分散前提のF検定を使う）。Stock-Yogoの臨界値表自体が等分散前提の古典的F統計量向けに
+/// キャリブレーションされているため（v1では臨界値照合自体は行わないが、意味合いは
+/// この統計量に引き継がれる）、この慣行に合わせる方針をユーザーに確認済み。
+/// `OlsEstimator`が係数の分散共分散行列全体（`cov_params`）を公開しておらず
+/// （`std_errors()`は対角成分のみ）、`cov_type`対応のロバスト部分Wald検定には
+/// 既存コードの拡張が必要になる点も判断材料にした。
+fn partial_f_statistic(
+    unrestricted: &OlsEstimator,
+    x_exog_columns: &[Vec<f64>],
+    x_exog_names: &[String],
+    y_endog: &[f64],
+    endog_name: &str,
+    q: usize,
+) -> Result<f64, IvError> {
+    let ssr_u: f64 = {
+        let resid = unrestricted.residuals();
+        (0..resid.nrows()).map(|i| (*resid.get(i, 0)).powi(2)).sum()
+    };
+    let n = unrestricted.input().nobs();
+    let k_u = unrestricted.input().k();
+    let df_u = n - k_u;
+
+    let ssr_r: f64 =
+        if x_exog_columns.is_empty() {
+            // 制限モデルに回帰変数が1つも無い（x_exog=[]かつinclude_intercept=false）場合、
+            // 「常に0を予測する」モデルのSSRをy_endog自体の二乗和として直接計算する
+            // （OlsEstimatorは回帰変数0個の入力を受け付けない、CommonError::NoRegressors
+            // になるため、この退化ケースだけは特別扱いする）。
+            y_endog.iter().map(|v| v.powi(2)).sum()
+        } else {
+            // `x_exog_columns`は`unrestricted`の設計行列（`x_exog ++ instruments`、
+            // `OlsEstimator::fit`がcol_piv_qrで既にfull column rankを検証済み）の列の
+            // 真部分集合のため、`x_exog_columns`自体も必然的にfull column rankになる
+            // （full column rankな行列から任意の列部分集合を取っても線形独立性は保たれる）。
+            // よってここで`OlsEstimator::fit`が`SingularMatrix`等で失敗することは理論上ない。
+            // `CovType::Classical`・`confidence_level=0.95`は残差（SSR）の計算に使わない
+            // （点推定・残差はcov_type/confidence_levelに依存しないため）ので、呼び出し元が
+            // `fit()`に指定した値と一致させる必要はなく、固定値で足りる。
+            //
+            // `y_endog`・`x_exog_columns`はどちらも同じ`IvInput`（同じ`n`で構築済み）から
+            // 取り出しているため、ここで`DimensionMismatch`（`LeastSquaresError::Common`
+            // 経由）が実際に発生することは理論上ない（第一段階ループの`OlsInput::from_columns`
+            // 呼び出しと同じ理由、本ファイル冒頭の`fit()`のコメント参照）。
+            //
+            // エラー変換先を専用の`IvError`バリアントに分けず`FirstStageFailed`を再利用する
+            // 理由: 上記の通りこの`OlsEstimator::fit`呼び出しは（フルランク保証・次元一致の
+            // 両方から）理論上到達不能であり、実際に到達した場合の文言の精度より
+            // バリアント数を増やさないことを優先した（`xtx_inverse`と同じ「理論上到達不能な
+            // 防御的Result化」の扱い）。
+            let restricted_input = OlsInput::from_columns(
+                y_endog,
+                x_exog_columns,
+                x_exog_names.to_vec(),
+                false,
+                endog_name.to_string(),
+            )
+            .map_err(|source| IvError::FirstStageFailed {
+                endog_name: endog_name.to_string(),
+                source,
+            })?;
+            let restricted = OlsEstimator::fit(restricted_input, CovType::Classical, 0.95)
+                .map_err(|source| IvError::FirstStageFailed {
+                    endog_name: endog_name.to_string(),
+                    source,
+                })?;
+            let resid = restricted.residuals();
+            (0..resid.nrows()).map(|i| (*resid.get(i, 0)).powi(2)).sum()
+        };
+
+    Ok(((ssr_r - ssr_u) / (q as f64)) / (ssr_u / (df_u as f64)))
 }
 
 /// `(X̂'X̂)⁻¹`を求める。モジュール冒頭のdocコメント「標準誤差・適合度統計量」参照。
@@ -1647,5 +1759,194 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    /// 正規方程式`β=(X'X)⁻¹X'y`を`faer`演算で直接解く、SUT（`partial_f_statistic`・
+    /// `OlsEstimator`）とは独立した最小限のOLSオラクル（SEや検定統計量は不要なため
+    /// 点推定のみ）。
+    fn manual_ols_beta(x: &Mat<f64>, y: &Mat<f64>) -> Mat<f64> {
+        let xtx = x.transpose() * x;
+        let xty = x.transpose() * y;
+        let k = x.ncols();
+        xtx.llt(Side::Lower)
+            .unwrap()
+            .solve(Mat::<f64>::identity(k, k))
+            * &xty
+    }
+
+    /// 弱操作変数診断（部分F統計量）が、`TwoSlsEstimator::fit`・`partial_f_statistic`
+    /// （SUT）とは独立に手計算したネストF検定のオラクルと数値一致することを確認する。
+    /// `nontrivial_x_exog_columns()`（過剰識別、x_exog=[x1]・instruments=[z1,z2]）を使う。
+    #[test]
+    fn fit_computes_weak_instrument_f_statistic_matching_manual_nested_f_test() {
+        let (x1, x_endog, z1, z2, _y, estimator) = nontrivial_x_exog_fitted_estimator();
+        let n = x1.len();
+        let y_endog = Mat::from_fn(n, 1, |i, _| x_endog[i]);
+
+        // 制限なしモデル: x_endog ~ const + x1 + z1 + z2（k_u=4）。
+        let x_u = Mat::from_fn(n, 4, |i, j| match j {
+            0 => 1.0,
+            1 => x1[i],
+            2 => z1[i],
+            _ => z2[i],
+        });
+        let beta_u = manual_ols_beta(&x_u, &y_endog);
+        let resid_u = &y_endog - &x_u * &beta_u;
+        let ssr_u: f64 = (0..n).map(|i| (*resid_u.get(i, 0)).powi(2)).sum();
+
+        // 制限モデル: x_endog ~ const + x1（k_r=2、instruments=[z1,z2]を除く）。
+        let x_r = Mat::from_fn(n, 2, |i, j| if j == 0 { 1.0 } else { x1[i] });
+        let beta_r = manual_ols_beta(&x_r, &y_endog);
+        let resid_r = &y_endog - &x_r * &beta_r;
+        let ssr_r: f64 = (0..n).map(|i| (*resid_r.get(i, 0)).powi(2)).sum();
+
+        let q = 2.0; // z1, z2
+        let df_u = (n - 4) as f64;
+        let expected_f = ((ssr_r - ssr_u) / q) / (ssr_u / df_u);
+
+        let got = estimator.weak_instrument_f_statistics();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].0, "endog1");
+        assert!(
+            (got[0].1 - expected_f).abs() < 1e-8,
+            "got={}, expected={}",
+            got[0].1,
+            expected_f
+        );
+    }
+
+    /// 完了条件「単体テストで既知のケース（強い操作変数・弱い操作変数）を確認」に対応する。
+    /// 同じ`x_exog`（定数項のみ）・同じ`z1`/`z2`の下で、内生変数の生成方法だけを変え、
+    /// 操作変数が強く効く場合とほぼ無関係な場合とで部分F統計量が大きく異なることを確認する
+    /// （弱操作変数の経験則である閾値10を跨いだ値になっていることも合わせて確認する。
+    /// Stock-Yogo臨界値との正式な照合はv1スコープ外、`iv-api-design.md`6.4節）。
+    #[test]
+    fn fit_weak_instrument_f_statistic_is_large_for_strong_instruments_and_small_for_weak_instruments()
+     {
+        let n = 30;
+        let z1: Vec<f64> = (0..n).map(|i| i as f64).collect();
+        let z2: Vec<f64> = (0..n)
+            .map(|i| ((i as f64) * 1.7).sin() * 5.0 + (i as f64))
+            .collect();
+        // 小さく符号が交互に振れるだけの摂動（分散を極端に大きくしない程度のノイズ）。
+        let small_noise: Vec<f64> = (0..n)
+            .map(|i| if i % 2 == 0 { 0.05 } else { -0.05 })
+            .collect();
+        // z1・z2とはほぼ無関係な、大きな分散を持つノイズ（弱操作変数シナリオ用）。
+        let large_noise: Vec<f64> = (0..n)
+            .map(|i| ((i as f64) * 2.3).sin() * 50.0 + ((i as f64) * 0.7).cos() * 40.0)
+            .collect();
+
+        let y: Vec<f64> = (0..n).map(|i| 1.0 + (i as f64) * 0.1).collect();
+
+        let build_input = |x_endog: &[f64]| {
+            IvInput::from_columns(
+                &y,
+                &[],
+                vec![],
+                std::slice::from_ref(&x_endog.to_vec()),
+                vec!["endog1".to_string()],
+                &[z1.clone(), z2.clone()],
+                vec!["z1".to_string(), "z2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap()
+        };
+
+        let strong_x_endog: Vec<f64> = (0..n)
+            .map(|i| 2.0 * z1[i] + 1.5 * z2[i] + small_noise[i])
+            .collect();
+        let strong =
+            TwoSlsEstimator::fit(build_input(&strong_x_endog), CovType::Classical, 0.95).unwrap();
+        let strong_f = strong.weak_instrument_f_statistics()[0].1;
+
+        let weak_x_endog: Vec<f64> = (0..n)
+            .map(|i| 0.001 * z1[i] + 0.001 * z2[i] + large_noise[i])
+            .collect();
+        let weak =
+            TwoSlsEstimator::fit(build_input(&weak_x_endog), CovType::Classical, 0.95).unwrap();
+        let weak_f = weak.weak_instrument_f_statistics()[0].1;
+
+        assert!(strong_f > 100.0, "strong_f={strong_f}");
+        assert!(weak_f < 5.0, "weak_f={weak_f}");
+        assert!(strong_f > weak_f, "strong_f={strong_f}, weak_f={weak_f}");
+    }
+
+    /// `x_endog=[]`の退化ケース（第一段階ループが一度も回らない）では、
+    /// `weak_instrument_f_statistics()`も空になる。
+    #[test]
+    fn weak_instrument_f_statistics_is_empty_when_x_endog_is_empty() {
+        let y = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+        let x_exog = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+        let input = IvInput::from_columns(
+            &y,
+            &x_exog,
+            vec!["x1".to_string()],
+            &[],
+            vec![],
+            &[],
+            vec![],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
+        assert!(estimator.weak_instrument_f_statistics().is_empty());
+    }
+
+    /// `x_exog=[]`かつ`include_intercept=false`（制限モデルに回帰変数が1つも無い退化ケース、
+    /// `partial_f_statistic`の`x_exog_columns.is_empty()`分岐）でも計算できることを、
+    /// 手計算したネストF検定のオラクル（制限モデルのSSRを`y_endog`自体の二乗和として
+    /// 直接計算）と数値照合して確認する。
+    #[test]
+    fn fit_computes_weak_instrument_f_statistic_when_x_exog_is_empty_and_no_intercept() {
+        let n = 10;
+        let z1: Vec<f64> = (0..n).map(|i| (i as f64) + 1.0).collect();
+        let z2: Vec<f64> = (0..n)
+            .map(|i| ((i as f64) * 1.3).sin() * 3.0 + (i as f64))
+            .collect();
+        let x_endog: Vec<f64> = (0..n)
+            .map(|i| 1.5 * z1[i] + 0.5 * z2[i] + if i % 2 == 0 { 0.2 } else { -0.2 })
+            .collect();
+        let y: Vec<f64> = (0..n)
+            .map(|i| 2.0 * x_endog[i] + (i as f64) * 0.05)
+            .collect();
+
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            &[z1.clone(), z2.clone()],
+            vec!["z1".to_string(), "z2".to_string()],
+            false, // include_intercept=false かつ x_exog=[]
+            "y".to_string(),
+        )
+        .unwrap();
+        let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
+
+        let y_endog = Mat::from_fn(n, 1, |i, _| x_endog[i]);
+        let x_u = Mat::from_fn(n, 2, |i, j| if j == 0 { z1[i] } else { z2[i] });
+        let beta_u = manual_ols_beta(&x_u, &y_endog);
+        let resid_u = &y_endog - &x_u * &beta_u;
+        let ssr_u: f64 = (0..n).map(|i| (*resid_u.get(i, 0)).powi(2)).sum();
+        // 制限モデル（回帰変数なし、予測値は常に0）: SSR_r = Σ x_endog_i²。
+        let ssr_r: f64 = x_endog.iter().map(|v| v.powi(2)).sum();
+
+        let q = 2.0;
+        let df_u = (n - 2) as f64;
+        let expected_f = ((ssr_r - ssr_u) / q) / (ssr_u / df_u);
+
+        let got = estimator.weak_instrument_f_statistics();
+        assert_eq!(got.len(), 1);
+        assert!(
+            (got[0].1 - expected_f).abs() < 1e-8,
+            "got={}, expected={}",
+            got[0].1,
+            expected_f
+        );
     }
 }

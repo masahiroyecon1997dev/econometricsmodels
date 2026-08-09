@@ -269,9 +269,22 @@ class IvResults:
 
     @property
     def wu_hausman_statistic(self) -> float | None:
-        """Wu-Hausman endogeneity test statistic.
+        """Wu-Hausman endogeneity test statistic (regression-based).
 
-        Not yet computed (placeholder `None`); see
+        Adds the first-stage residuals to the structural equation and
+        tests their joint significance (`linearmodels`'
+        `wooldridge_regression` formulation), jointly over all
+        endogenous variables. Unlike
+        `weak_instrument_f_statistics`, this is always computed under
+        the same `cov_type` passed to `fit()`.
+
+        `None` when there are no endogenous variables to test
+        (`x_endog=[]`), or when the augmented regression cannot be
+        estimated (e.g. the first-stage residual has zero variance,
+        such as when an instrument perfectly predicts its endogenous
+        variable, or there are too few observations for the extra
+        residual columns) — neither case affects the validity of
+        the other results. See
         `docs/planning/specs/iv-api-design.md` section 6.6.
         """
         return self._raw.wu_hausman_statistic
@@ -280,7 +293,7 @@ class IvResults:
     def wu_hausman_p_value(self) -> float | None:
         """P-value of the Wu-Hausman test.
 
-        Not yet computed (placeholder `None`).
+        `None` under the same conditions as `wu_hausman_statistic`.
         """
         return self._raw.wu_hausman_p_value
 

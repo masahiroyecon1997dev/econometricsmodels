@@ -107,6 +107,24 @@ pub enum IvError {
         "gmm_iterations must be 1 (1-step GMM) or 2 (2-step efficient GMM): got {gmm_iterations}"
     )]
     InvalidGmmIterations { gmm_iterations: i64 },
+
+    /// Wu-Hausman内生性検定（回帰ベース、Issue #164、`iv-api-design.md`6.6節）のための
+    /// 拡張回帰（構造式に第一段階残差を追加した`y ~ x_exog + x_endog + 第一段階残差`）が
+    /// `OlsEstimator::fit`または`OlsEstimator::wald_test_last_columns`で失敗した。
+    ///
+    /// **設計行列の特異性（`SingularMatrix`）・観測数不足（`InsufficientObservations`）・
+    /// Wald検定側の数値的なほぼ特異性（`ComputationFailed`）は、このバリアントを経由せず
+    /// `wu_hausman_statistic`/`wu_hausman_p_value`を`None`にするだけで`fit()`自体は成功
+    /// させる**（ユーザー確認済み、`two_sls.rs`の`fit()`実装参照）。このバリアントは
+    /// それら以外の（`confidence_level`・`cov_type=Cluster/Hac`の妥当性は`fit()`の
+    /// 第二段階側で既に検証済みのため）理論上到達不能な失敗を防御的に伝播するためだけに
+    /// 存在する（`FirstStageFailed`/`SecondStageFailed`と同じ理由で`LeastSquaresError`を
+    /// そのまま透過させず専用バリアントにする）。
+    #[error("Wu-Hausman regression-based exogeneity test failed: {source}")]
+    HausmanRegressionFailed {
+        #[source]
+        source: LeastSquaresError,
+    },
 }
 
 /// IVの被説明変数・3つの設計行列（外生説明変数・内生説明変数・操作変数）を保持する

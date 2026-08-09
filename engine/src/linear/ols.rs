@@ -292,6 +292,15 @@ pub struct OlsEstimator {
     log_likelihood: f64,
     aic: f64,
     bic: f64,
+    /// 係数の分散共分散行列 (k, k)。Python側には公開しない（`docs/spec/ols-spec.md`
+    /// 「結果構造体」）。クレート内の他系統から呼ばれる[`Self::wald_test_last_columns`]
+    /// のためだけに保持している（Issue #164、`engine::iv::two_sls`のWu-Hausman検定が
+    /// 唯一の呼び出し元。それまでは`fit()`内のローカル変数として使い切っていた）。
+    cov_params: Mat<f64>,
+    /// t検定・F検定・信頼区間に使う自由度。通常`df_resid`と同じだが`cov_type=Cluster`の
+    /// ときだけ`G-1`になる（`fit()`のdocコメント「df_inference」参照）。`cov_params`と
+    /// 同じ理由で保持している。
+    df_inference: usize,
 }
 
 impl OlsEstimator {
@@ -462,6 +471,8 @@ impl OlsEstimator {
             log_likelihood,
             aic,
             bic,
+            cov_params,
+            df_inference,
         })
     }
 
@@ -543,6 +554,35 @@ impl OlsEstimator {
     /// ベイズ情報量規準
     pub fn bic(&self) -> f64 {
         self.bic
+    }
+
+    /// 設計行列の**末尾`q`列**に対応する係数が全てゼロという帰無仮説のロバストWald検定を行い、
+    /// F統計量とそのp値を返す（`fit()`が呼ぶ内部関数`wald_f_test`の対象列を、「切片を除く
+    /// 全傾き係数」から「任意の末尾`q`列」に一般化したもの。数式・分布・p値の向きは
+    /// `wald_f_test`のdocコメントと同じ）。
+    ///
+    /// クレート内の他系統から、この`OlsEstimator`自身が構築した設計行列の一部（末尾に
+    /// 追加した列）だけをまとめて検定したい場合に使う（Issue #164、`engine::iv::two_sls`の
+    /// Wu-Hausman検定——構造式に第一段階残差を追加回帰し、追加した残差係数のジョイント
+    /// 有意性を検定する——が現時点で唯一の呼び出し元）。
+    ///
+    /// # Panics
+    /// `q == 0`または`q > self.input.k()`は呼び出し元の実装バグでしか起こり得ない
+    /// （検定対象が空、または設計行列の列数を超える）内部契約違反のため、`debug_assert!`で
+    /// 検出する（`IvInput::from_columns`の引数長チェックと同じ方針、
+    /// `.claude/rules/rust-style.md`は触れていないがこのファイル内で既に使われている
+    /// パターン）。
+    ///
+    /// # Errors
+    /// `wald_f_test`と同じ（末尾`q`列に対応する`cov_params`の部分行列が数値的にほぼ特異な
+    /// 場合、`LeastSquaresError::Common(CommonError::ComputationFailed)`）。
+    pub fn wald_test_last_columns(&self, q: usize) -> Result<(f64, f64), LeastSquaresError> {
+        let k = self.input.k();
+        debug_assert!(
+            q > 0 && q <= k,
+            "wald_test_last_columns: q must be in (0, k], got q={q}, k={k}"
+        );
+        wald_f_test(&self.params, &self.cov_params, k - q, q, self.df_inference)
     }
 
     /// 学習データに対する予測値 `ŷ = Xβ̂`（`predict(new_data=None)`のPython APIが返す値、
@@ -1311,6 +1351,56 @@ mod tests {
             result.unwrap_err(),
             LeastSquaresError::Common(CommonError::ComputationFailed(_))
         ));
+    }
+
+    /// `wald_test_last_columns`が「切片を除く全傾き係数」（`q = df_model`）を対象に呼ばれた
+    /// 場合、`fit()`が計算する`f_statistic()`/`f_p_value()`（同じ`wald_f_test`を
+    /// `k_constant=1`で呼ぶ）と数値的に一致するはず（対象列の一般化が既存の挙動を
+    /// 壊していないことの確認、Issue #164でIVのWu-Hausman検定用に追加）。
+    #[test]
+    fn wald_test_last_columns_matches_f_statistic_when_q_equals_df_model() {
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0, 7.0, 6.0];
+        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
+        let x2 = vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0, 8.0];
+        let input = OlsInput::from_columns(
+            &y,
+            &[x1, x2],
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let estimator = OlsEstimator::fit(input, CovType::Hc1, 0.95).unwrap();
+
+        let (stat, p_value) = estimator.wald_test_last_columns(2).unwrap();
+        assert!((stat - estimator.f_statistic()).abs() < 1e-10);
+        assert!((p_value - estimator.f_p_value()).abs() < 1e-10);
+    }
+
+    /// `q=1`（末尾1列だけを対象）のとき、`F = t²`という標準的な恒等式
+    /// （`wald_f_test`のdocコメント参照、1自由度のF検定は両側t検定と代数的に等価）により、
+    /// 既に個別に検証済みの`t_stats()`/`p_values()`（`fit()`本体が計算）と一致するはず。
+    #[test]
+    fn wald_test_last_columns_matches_squared_t_statistic_for_single_column() {
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0, 7.0, 6.0];
+        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
+        let x2 = vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0, 8.0];
+        let input = OlsInput::from_columns(
+            &y,
+            &[x1, x2],
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let estimator = OlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
+
+        let (stat, p_value) = estimator.wald_test_last_columns(1).unwrap();
+        let k = estimator.input().k();
+        let t_last = *estimator.t_stats().get(k - 1, 0);
+        let p_last = *estimator.p_values().get(k - 1, 0);
+        assert!((stat - t_last.powi(2)).abs() < 1e-10);
+        assert!((p_value - p_last).abs() < 1e-10);
     }
 
     #[test]

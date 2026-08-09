@@ -38,7 +38,11 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
 `r_squared` / `r_squared_adj` / `f_statistic` / `f_p_value` / `log_likelihood` / `aic` / `bic`。
 
 - `conf_int`は`conf_lower`/`conf_upper`の2配列に分割（engine内部表現・pyo3実装の簡潔さを優先）。
-- `k×kの分散共分散行列（cov_params）はPython側に公開しない`（`fit()`内のローカル変数として使い切る）。
+- `k×kの分散共分散行列（cov_params）はPython側に公開しない`。`OlsEstimator`自体は非公開
+  フィールドとして保持する（クレート内の他系統からの部分Wald検定の再利用のため、
+  `engine/src/linear/CLAUDE.md`参照。Issue #164でIVのWu-Hausman検定用に追加するまでは
+  `fit()`内のローカル変数として使い切っていた）が、`engine_pybind`側に公開する`OLSResult`
+  には引き続き含めない。
 - `summary()`（テキスト整形）・DataFrame版の`coef_table()`/`conf_int()`は作らない
   （economiconのGUIエンジンという用途上、テキスト表示・対話的操作を前提にしないため）。
 - python_package層（`OlsResults`）:

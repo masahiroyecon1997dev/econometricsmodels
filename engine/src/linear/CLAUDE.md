@@ -12,6 +12,7 @@
 - **HAC以外は`n-k`、`cov_type=Cluster`のときだけ検定の自由度を`G-1`に切り替える**（`df_resid`自体、つまりσ̂²・調整済みR²・AIC/BICの計算に使う自由度は影響を受けず常に`n-k`のまま）。
 - **相対閾値との比較（`diag <= threshold`）だけではNaNをすり抜ける**: `ensure_full_rank`（`col_piv_qr`のR対角成分の特異性判定）は、設計行列全体が完全にゼロ（`include_intercept=false`かつ全説明変数列がゼロ）だと、`col_piv_qr`が列選択時の0除算によりR対角成分にNaNを生成しうる（faer 0.24.4で実機確認済み）。NaNとの比較は常に`false`になるため、`diag.is_nan() || diag <= threshold`という形で明示的にNaNもチェックする必要がある（`nonlinear::common::newton_step`の同型の罠を先に踏んで修正済みだった、`nonlinear-implementation-notes.md`参照）。相対閾値で特異性を判定する他の箇所（IV等、将来col_piv_qrを使う手法）でも同じ罠がある。
 - **非ピボットCholesky（`Llt`）のL因子対角成分は、設計行列の列間スケール差に起因する数値的なほぼ特異性を検出できない**（`ensure_full_rank`と同じ相対閾値の発想をL因子対角成分に適用しても検出できないことを実測確認済み）。`SelfAdjointEigen`による固有値ベースの判定が必要で、`engine::linear_algebra::ensure_well_conditioned_symmetric_matrix`として系統をまたいで共有している。詳細な導出・具体例は`ols-spec.md`「適合度統計量」参照。他手法で対称正定値行列の条件数チェックが必要になった場合も、非ピボットCholeskyの対角成分に頼らずこの共有関数を使う。
+- **`OlsEstimator`は`cov_params`/`df_inference`を非公開フィールドとして保持する（Issue #164）**: 元々は`fit()`内のローカル変数として使い切っていたが、IV系統（`engine::iv::two_sls`）のWu-Hausman検定が「構造式に第一段階残差を追加回帰し、追加した係数だけのジョイントWald検定を行う」ために、`OlsEstimator::wald_test_last_columns(q)`（設計行列の**末尾q列**に対応する係数のロバストWald検定、既存の`wald_f_test`——切片を除く全傾き係数が対象——の対象列を一般化したもの）を新設する必要があり、その内部実装に`cov_params`/`df_inference`が要る。`OLSResult`（Python公開）には引き続き含めない（`ols-spec.md`「結果構造体」）。他系統がOLSの「一部の列だけを検定したい」ケースに直面したら、まずこのメソッドの再利用を検討する（サンドイッチ計算自体を複製しない）。
 
 ## 全手法共通ルールの再掲（見落とし防止）
 

@@ -29,6 +29,16 @@
 //! 済み）の戻り値`&[(String, f64)]`を`HashMap<String, f64>`へ詰め替えるだけで`fit`に配線した
 //! （`method="gmm"`は未実装のため対象外、常に空のまま返る）。
 //!
+//! 【Issue #164のスコープ】`wu_hausman_statistic`/`wu_hausman_p_value`は`TwoSlsEstimator::
+//! wu_hausman_statistic()`/`wu_hausman_p_value()`（`engine::iv::two_sls`、Issue #164で
+//! 計算ロジックを実装済み）をそのまま返す配線のみ（`Option<f64>`同士でそのまま代入できる）。
+//! `x_endog=[]`に加え、拡張回帰が想定内の理由で失敗する場合（第一段階残差の分散がゼロ・
+//! 観測数不足等）も`engine`側の判断で`None`になる（`fit()`全体は失敗させない、
+//! `engine/src/iv/CLAUDE.md`参照）。それ以外の理論上到達不能な失敗は`IvError::
+//! HausmanRegressionFailed`として`fit()`自体を失敗させる（`iv_error_to_pyerr`の
+//! `FirstStageFailed`/`SecondStageFailed`と同じ分類ロジックに合流する）。
+//! `overid_statistic`/`overid_p_value`は引き続き別issue（#167）のスコープ。
+//!
 //! 【Issue #170のスコープ】`IvResult::first_stage()`（内生変数ごとの第一段階回帰結果を
 //! `dict[str, OlsResults]`として返す別メソッド）を実装した。`OlsEstimator → OLSResult`
 //! 変換は`linear::ols::ols_estimator_to_result`（OLS本体の`fit`と共有、Issue #170で
@@ -61,7 +71,11 @@ use crate::validation::{
 /// 同じ理由、`engine_pybind/src/linear/common.rs`参照）。
 ///
 /// `FirstStageFailed`/`SecondStageFailed`は2SLS（`engine::iv::two_sls`）が内部で委譲する
-/// `OlsEstimator::fit`の失敗を包んだもの（Issue #157）。`ValidationError`/`ComputationError`の
+/// `OlsEstimator::fit`の失敗を包んだもの（Issue #157）。`HausmanRegressionFailed`
+/// （Issue #164）も同型だが、Wu-Hausman検定の拡張回帰が理論上到達不能な理由で失敗した
+/// 場合のみ構築される防御的なバリアント（想定内の失敗——設計行列の特異性・観測数不足等
+/// ——は`wu_hausman_statistic`が`None`になるだけで`IvError`自体は発生しない、
+/// `engine/src/iv/CLAUDE.md`参照）。`ValidationError`/`ComputationError`の
 /// 判定は`least_squares_error_is_computation_error`（`engine_pybind/src/linear/common.rs`）に
 /// 委譲し、`least_squares_error_to_pyerr`と同じ基準を保つ（分類ロジックを重複させない）。
 /// Pythonに渡すメッセージは`source.to_string()`ではなく`IvError`自身の`to_string()`
@@ -79,7 +93,9 @@ pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
         IvError::InsufficientInstruments { .. }
         | IvError::InvalidHacLags { .. }
         | IvError::InvalidGmmIterations { .. } => ValidationError::new_err(message),
-        IvError::FirstStageFailed { source, .. } | IvError::SecondStageFailed { source } => {
+        IvError::FirstStageFailed { source, .. }
+        | IvError::SecondStageFailed { source }
+        | IvError::HausmanRegressionFailed { source } => {
             if least_squares_error_is_computation_error(&source) {
                 ComputationError::new_err(message)
             } else {
@@ -226,9 +242,11 @@ impl IvOptions {
 /// `fit_iv` (`fit` in this file) constructs and returns it. The core fields above are
 /// populated by `TwoSlsEstimator`/`GmmEstimator` (`method="gmm"` is not yet implemented,
 /// see `fit`'s doc comment). `weak_instrument_f_statistics` is populated from
-/// `TwoSlsEstimator::weak_instrument_f_statistics()` (Issue #163). The remaining
-/// diagnostic fields below are placeholders (`None`) until Issue #167/#164 implement the
-/// underlying computations.
+/// `TwoSlsEstimator::weak_instrument_f_statistics()` (Issue #163).
+/// `wu_hausman_statistic`/`wu_hausman_p_value` are populated from `TwoSlsEstimator::
+/// wu_hausman_statistic()`/`wu_hausman_p_value()` (Issue #164). `overid_statistic`/
+/// `overid_p_value` remain placeholders (`None`) until Issue #167 implements the
+/// underlying computation.
 // `IvResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`IvOptions`の`from_py_object`とは
 // 対照的、`OLSResult`/`LogitResult`と同じ理由）。
@@ -294,8 +312,14 @@ pub struct IvResult {
     pub overid_p_value: Option<f64>,
     /// Wu-Hausman endogeneity test statistic (joint test over all endogenous
     /// variables, regression-based / `wooldridge_regression` formulation,
-    /// `iv-api-design.md` 6.6節). `None` when there are no endogenous variables to
-    /// test (`x_endog=[]`).
+    /// `iv-api-design.md` 6.6節). Always computed under the `cov_type` passed to
+    /// `fit()` (unlike `weak_instrument_f_statistics`, which is always classical;
+    /// `linearmodels`' `wooldridge_regression` uses the same covariance as the
+    /// underlying model, and this mirrors that). `None` when there are no endogenous
+    /// variables to test (`x_endog=[]`), or when the augmented regression cannot be
+    /// estimated (e.g. the first-stage residual has zero variance, or there are too
+    /// few observations for the extra residual columns) — neither case fails `fit()`
+    /// itself, since the other results remain valid.
     #[pyo3(get)]
     pub wu_hausman_statistic: Option<f64>,
     #[pyo3(get)]
@@ -495,10 +519,10 @@ pub(crate) fn build_iv_input(
 /// ユーザー確認済み）。
 ///
 /// `weak_instrument_f_statistics`は`TwoSlsEstimator::weak_instrument_f_statistics()`
-/// （Issue #163）から構築する。`overid_statistic`/`overid_p_value`・
-/// `wu_hausman_statistic`/`wu_hausman_p_value`はいずれも別issue（#167/#164）の
-/// スコープのため、現時点では`None`のプレースホルダーを返す（`IvResult`のdocコメント
-/// 参照）。
+/// （Issue #163）から、`wu_hausman_statistic`/`wu_hausman_p_value`は`TwoSlsEstimator::
+/// wu_hausman_statistic()`/`wu_hausman_p_value()`（Issue #164）から構築する。
+/// `overid_statistic`/`overid_p_value`は別issue（#167）のスコープのため、現時点では
+/// `None`のプレースホルダーを返す（`IvResult`のdocコメント参照）。
 ///
 /// # Errors
 /// - `build_iv_input`が返すエラー（列抽出・y/x_exog/x_endog/instrumentsの重複・
@@ -552,8 +576,8 @@ pub(crate) fn fit(
             .collect(),
         overid_statistic: None,
         overid_p_value: None,
-        wu_hausman_statistic: None,
-        wu_hausman_p_value: None,
+        wu_hausman_statistic: estimator.wu_hausman_statistic(),
+        wu_hausman_p_value: estimator.wu_hausman_p_value(),
         estimator,
     })
 }

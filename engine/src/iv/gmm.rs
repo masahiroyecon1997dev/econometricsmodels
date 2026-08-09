@@ -1643,6 +1643,160 @@ mod tests {
         }
     }
 
+    /// `lags=None`（経験則自動計算`L = floor(4*(n/100)^(2/9))`）が、`heteroskedastic_test_
+    /// columns()`の`n=16`では`L=2`と一致するため、`lags=Some(2)`を明示指定した場合と
+    /// 数値的に一致するはず（`two_sls.rs`の
+    /// `fit_computes_hac_std_errors_with_auto_lags_matching_explicit_lags`と同じ検証方針）。
+    #[test]
+    fn fit_with_kernel_weight_type_and_auto_lags_matches_explicit_lags_two() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let build_input = || {
+            IvInput::from_columns(
+                &y,
+                &[],
+                vec![],
+                std::slice::from_ref(&x_endog),
+                vec!["endog1".to_string()],
+                &[z1.clone(), z2.clone()],
+                vec!["z1".to_string(), "z2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap()
+        };
+
+        let auto_estimator = GmmEstimator::fit(
+            build_input(),
+            WeightType::Kernel {
+                lags: None,
+                time_order: None,
+            },
+            2,
+            None,
+            true,
+        )
+        .unwrap();
+        let explicit_estimator = GmmEstimator::fit(
+            build_input(),
+            WeightType::Kernel {
+                lags: Some(2),
+                time_order: None,
+            },
+            2,
+            None,
+            true,
+        )
+        .unwrap();
+
+        for j in 0..2 {
+            assert!(
+                (*auto_estimator.params().get(j, 0) - *explicit_estimator.params().get(j, 0)).abs()
+                    < 1e-8
+            );
+        }
+    }
+
+    /// `time_order`を指定した場合、行順がシャッフルされていても時系列順に並べ替えてから
+    /// ラグ付きモーメント共分散を計算することを確認する（`two_sls.rs`の
+    /// `fit_computes_hac_std_errors_respecting_time_order`と同じ検証方針）。
+    #[test]
+    fn fit_with_kernel_weight_type_respects_time_order() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let n = y.len();
+        let shuffle: Vec<usize> = vec![3, 1, 6, 0, 5, 2, 7, 4, 11, 9, 14, 8, 13, 10, 15, 12];
+        assert_eq!(shuffle.len(), n);
+        let shuffled_time: Vec<f64> = shuffle.iter().map(|&i| i as f64).collect();
+        let shuffled_y: Vec<f64> = shuffle.iter().map(|&i| y[i]).collect();
+        let shuffled_x_endog: Vec<f64> = shuffle.iter().map(|&i| x_endog[i]).collect();
+        let shuffled_z1: Vec<f64> = shuffle.iter().map(|&i| z1[i]).collect();
+        let shuffled_z2: Vec<f64> = shuffle.iter().map(|&i| z2[i]).collect();
+
+        let shuffled_input = IvInput::from_columns(
+            &shuffled_y,
+            &[],
+            vec![],
+            std::slice::from_ref(&shuffled_x_endog),
+            vec!["endog1".to_string()],
+            &[shuffled_z1, shuffled_z2],
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let shuffled_estimator = GmmEstimator::fit(
+            shuffled_input,
+            WeightType::Kernel {
+                lags: Some(2),
+                time_order: Some(shuffled_time),
+            },
+            2,
+            None,
+            true,
+        )
+        .unwrap();
+
+        let unshuffled_input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            &[z1, z2],
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let unshuffled_estimator = GmmEstimator::fit(
+            unshuffled_input,
+            WeightType::Kernel {
+                lags: Some(2),
+                time_order: None,
+            },
+            2,
+            None,
+            true,
+        )
+        .unwrap();
+
+        for j in 0..2 {
+            assert!(
+                (*shuffled_estimator.params().get(j, 0) - *unshuffled_estimator.params().get(j, 0))
+                    .abs()
+                    < 1e-8
+            );
+        }
+    }
+
+    /// `dep_var_name()`/`weight_type()`/`gmm_convergence()`/`nobs()`/`k()`が、
+    /// `fit()`に渡した値・入力データと整合することを確認する（`two_sls.rs`の
+    /// `fit_succeeds_when_over_identified`と同じ「基本メタデータgetter群」の検証方針）。
+    #[test]
+    fn fit_exposes_basic_metadata_getters() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let n = y.len();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            &[z1, z2],
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = GmmEstimator::fit(input, WeightType::Robust, 5, Some(1e-6), true).unwrap();
+
+        assert_eq!(estimator.dep_var_name(), "y");
+        assert_eq!(estimator.weight_type(), &WeightType::Robust);
+        assert_eq!(estimator.gmm_convergence(), Some(1e-6));
+        assert_eq!(estimator.nobs(), n);
+        assert_eq!(estimator.k(), 2);
+    }
+
     /// `residuals()`が最終推定値に基づく`y - Xβ̂`であることを確認する。
     #[test]
     fn residuals_are_consistent_with_final_params() {

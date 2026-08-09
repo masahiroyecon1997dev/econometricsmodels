@@ -1,7 +1,7 @@
 ---
 name: test-run
 description: 既存テスト（engine / api_tests）を実行し、失敗があれば原因を調査する
-argument-hint: [テスト対象パターン（省略可）]
+argument-hint: "[テスト対象パターン（省略可）]"
 allowed-tools: Bash(cargo test:*), Bash(pytest:*), Read, Grep, Glob
 ---
 

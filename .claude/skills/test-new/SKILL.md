@@ -1,7 +1,7 @@
 ---
 name: test-new
 description: 新しい推定手法について、リファレンス実装とのベンチマーク作成とテストコード作成を行う
-argument-hint: [対象の推定手法名]
+argument-hint: "[対象の推定手法名]"
 allowed-tools: Read, Write, Edit, Bash(pytest:*), Bash(Rscript:*)
 ---
 

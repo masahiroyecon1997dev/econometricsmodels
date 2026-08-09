@@ -1,7 +1,7 @@
 ---
 name: phase-breakdown
 description: 対象フェーズを実装可能なタスク単位に分解する（高い粒度の計画コマンド）
-argument-hint: [対象フェーズ（例: Phase 1）]
+argument-hint: "[対象フェーズ（例: Phase 1）]"
 allowed-tools: Read, Write, Grep, Glob, Bash(gh issue list:*), Bash(gh issue create:*)
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: cicd
 description: CI/CDワークフローの作成・編集、またはCI失敗時の原因調査を支援する
-argument-hint: [作成/編集したい内容 or 失敗調査の対象]
+argument-hint: "[作成/編集したい内容 or 失敗調査の対象]"
 allowed-tools: Bash(gh:*), Bash(git:*), Read, Write, Edit, Grep, Glob
 ---
 

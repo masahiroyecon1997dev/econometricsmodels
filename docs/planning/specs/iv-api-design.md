@@ -195,9 +195,27 @@ GMMは`ivreg`が対応していないため、**Python（`linearmodels`）のみ
   - `weight_type`の取りうる値: `unadjusted`/`homoskedastic`、`robust`/`heteroskedastic`、
     `cluster`、`kernel`（Driscoll-Kraayではなく通常のHAC、IVはパネル構造を前提としないため
     3.1と同じ理由）。
-- **GMMのstep数（1-step/2-step efficient）を選択可能にする**。`IvOptions`に
+- **GMMのstep数（1-step/2-step efficient/iterated）を選択可能にする**。`IvOptions`に
   `gmm_iterations: int`（デフォルト`2`＝efficient two-step、`1`で1-step GMM）を追加する。
-  `linearmodels.IVGMM.fit(iter_limit=2, ...)`と同じ考え方。
+  `linearmodels.IVGMM.fit(iter_limit=2, ...)`と同じ考え方。当初は1・2の2値のみ許容していた
+  が（Issue #165）、Issue #229で3以上（iterated GMM）・収束条件に一般化した:
+  - `gmm_iterations`は1以上の任意の整数を受け付ける。`gmm_convergence: float | None`
+    （既定`None`）を追加し、`Some`のときは`gmm_iterations`を「固定反復回数」ではなく
+    「収束判定の上限反復回数（安全弁）」として扱う。両者は排他ではなく併用方式
+    （ユーザー確認済み）。
+  - 収束判定は係数のelementwise・絶対誤差と相対誤差の併用（`tol = max(rtol * |前回値|,
+    atol)`、`atol`は内部固定値`1e-8`でユーザーには公開しない、ユーザー確認済み）で行う。
+  - 収束しない場合の挙動は`nonlinear`のMLE実装（`LogitOptions`/`ProbitOptions`の
+    `max_iter`/`tol`/`raise_on_non_convergence`/`converged`）と同じ設計に揃える:
+    `raise_on_non_convergence: bool`（既定`true`）が`true`なら未収束時にエラー、
+    `false`なら`converged=False`のまま結果を返す。
+  - `gmm_iterations`を「methodそのもの」（例: `"1step_gmm"`/`"2step_gmm"`/
+    `"iterated_gmm"`）に分割する案も検討したが不採用。反復回数はGMMという1つの
+    `method="gmm"`のパラメータとして扱う（`linearmodels`等の慣行と同じ、詳細は
+    `engine/src/iv/CLAUDE.md`参照）。
+  - `engine`側の実装は`engine::iv::gmm::GmmEstimator::fit`のみ完了（Issue #229）。
+    `IvOptions`/`IvResult`（`engine_pybind`）・`python_package`への配線は
+    `method="gmm"`自体がまだ未実装（本節冒頭、6章の前提）のため別issueで行う。
 - **2SLSはGMMの特殊ケース（`weight_type="unadjusted"`、`gmm_iterations=1`）として実装できる**
   ことを踏まえ、共通のGMM推定コアを実装し、2SLSはそのコアを固定パラメータで呼び出す設計に
   する。ただし無理な共通化はしない方針（4章）に従い、実際にどこまで一体化できるかは

@@ -92,7 +92,12 @@ pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
         IvError::Common(common) => common_error_to_pyerr(common),
         IvError::InsufficientInstruments { .. }
         | IvError::InvalidHacLags { .. }
-        | IvError::InvalidGmmIterations { .. } => ValidationError::new_err(message),
+        | IvError::InvalidGmmIterations { .. }
+        | IvError::InvalidGmmConvergence { .. } => ValidationError::new_err(message),
+        // `MleError::NonConvergence`（`nonlinear/common.rs`の`mle_error_to_pyerr`）と同じ
+        // 分類: パラメータの不正ではなく、計算過程（反復推定）で発覚した問題のため
+        // `ComputationError`（Issue #229、`engine/src/iv/CLAUDE.md`参照）。
+        IvError::GmmNonConvergence { .. } => ComputationError::new_err(message),
         IvError::FirstStageFailed { source, .. }
         | IvError::SecondStageFailed { source }
         | IvError::HausmanRegressionFailed { source } => {

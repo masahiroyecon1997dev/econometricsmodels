@@ -97,16 +97,37 @@ pub enum IvError {
     #[error("hac_lags must be in the range [0, n): got {hac_lags}, n={n}")]
     InvalidHacLags { hac_lags: i64, n: usize },
 
-    /// `gmm_iterations`が1（1-step GMM）・2（2-step efficient GMM）のいずれでもない。
+    /// `gmm_iterations`が1未満。
     ///
-    /// `iv-api-design.md`6.2節は「デフォルト2＝efficient two-step、1で1-step GMM」の
-    /// 2値しか定義しておらず、3以上の反復（収束条件付きiterated GMM等）は仕様上未確定
-    /// （ユーザー確認済み、拡張する場合は別issueで収束条件・反復回数の設計から検討する）。
-    /// そのため現時点では1・2以外を一律エラーにする。Issue #165で追加。
-    #[error(
-        "gmm_iterations must be 1 (1-step GMM) or 2 (2-step efficient GMM): got {gmm_iterations}"
-    )]
+    /// Issue #165時点では1（1-step GMM）・2（2-step efficient GMM）の2値のみを許容していたが、
+    /// Issue #229で3以上（iterated GMM）・収束条件（`gmm_convergence`）ベースの反復に一般化した
+    /// （`gmm_convergence`指定時は`gmm_iterations`が最大反復回数＝安全弁として働く、
+    /// `gmm.rs`の`fit()`参照）。いずれのモードでも1以上であることは共通の前提のため、
+    /// この検証自体は残す。
+    #[error("gmm_iterations must be a positive integer: got {gmm_iterations}")]
     InvalidGmmIterations { gmm_iterations: i64 },
+
+    /// `gmm_convergence`（`Some`のとき）が0以下。
+    ///
+    /// 収束判定の許容誤差として意味を持たないため（Issue #229）。
+    #[error("gmm_convergence must be a positive number, got {gmm_convergence}")]
+    InvalidGmmConvergence { gmm_convergence: f64 },
+
+    /// `raise_on_non_convergence=true`（既定）かつ`gmm_convergence`指定時、`gmm_iterations`回
+    /// （収束モードでの上限反復回数）以内に係数が収束しなかった（Issue #229）。
+    ///
+    /// `nonlinear::common::MleError::NonConvergence`と同型のメッセージ・意味論
+    /// （`raise_on_non_convergence=false`にすると`converged=false`のまま結果を返す）。
+    /// 文言は`MleError::NonConvergence`（"failed to converge after {n_iter} iterations.
+    /// Set raise_on_non_convergence=False to receive the result anyway, or increase
+    /// max_iter"）とほぼ揃えているが、`IvError`は2SLS/GMM共有の型のため先頭に"GMM "を
+    /// 付けて対象を明示している点のみ意図的な差異（rust-reviewerの指摘で文体差を確認、
+    /// この差は意図的と判断）。
+    #[error(
+        "GMM failed to converge after {n_iter} iterations. Set raise_on_non_convergence=False \
+         to receive the result anyway, or increase gmm_iterations"
+    )]
+    GmmNonConvergence { n_iter: usize },
 
     /// Wu-Hausman内生性検定（回帰ベース、Issue #164、`iv-api-design.md`6.6節）のための
     /// 拡張回帰（構造式に第一段階残差を追加した`y ~ x_exog + x_endog + 第一段階残差`）が

@@ -13,11 +13,9 @@
 //! ## `weight_type`・`gmm_iterations`と点推定への影響
 //!
 //! `W`の選び方（`weight_type`）が点推定`β̂`自体を左右する（`iv-api-design.md`6.2節、
-//! `cov_type`が点推定に影響しないOLS/2SLSとの重要な違い）。`gmm_iterations`
-//! （Issue #165）は、標準的なGMM文献（Hansen 1982、Hayashi、Wooldridge等）・
-//! `iv-api-design.md`6.2節の用語法通り次の2値のみを受け付ける
-//! （`IvError::InvalidGmmIterations`、それ以外は仕様上未確定。3以上への一般化
-//! （収束条件付きiterated GMM）はユーザー確認の上、将来の別issueで扱う）。
+//! `cov_type`が点推定に影響しないOLS/2SLSとの重要な違い）。`gmm_iterations`は
+//! 1以上の任意の整数を受け付ける（`IvError::InvalidGmmIterations`、Issue #165で
+//! 1・2の2値のみに限定していたが、Issue #229で3以上（iterated GMM）に一般化した）。
 //!
 //! 1. **`gmm_iterations=1`（1-step GMM）**: `W₀ = (Z'Z)⁻¹`による初期推定`β̂₀`を、
 //!    残差に基づく重みの再構築を一切行わずそのまま最終推定値とする（この`W₀`は2SLSの
@@ -29,10 +27,31 @@
 //!    点推定に使わないからといって呼び出し元の設定ミスを黙って見逃さない方針、
 //!    ユーザー確認済み。`fit_returns_missing_cluster_column_error_when_one_step_gmm_
 //!    has_invalid_cluster_weight_type`等で検証）。
-//! 2. **`gmm_iterations=2`（デフォルト、2-step efficient GMM）**: `β̂₀`の残差
-//!    `ê₀ = y - Xβ̂₀`から`weight_type`に応じたモーメント条件の分散共分散行列`S`
-//!    （下記「`weight_type`ごとの`S`」）を構築し、`W₁ = S⁻¹`で`β̂₁ = β̂(W₁)`を最終推定値
-//!    とする。`weight_type`が点推定に意味を持つのはこちらのみ。
+//! 2. **`gmm_iterations>=2`（デフォルト2＝2-step efficient GMM）**: 直前の推定値`β̂_{k-1}`の
+//!    残差`ê_{k-1} = y - Xβ̂_{k-1}`から`weight_type`に応じたモーメント条件の分散共分散行列
+//!    `S_k`（下記「`weight_type`ごとの`S`」）を構築し、`W_k = S_k⁻¹`で`β̂_k = β̂(W_k)`を
+//!    求める、という手続きを`gmm_iterations`回に達するまで繰り返す（`k=1,...,gmm_iterations-1`）。
+//!    3回目以降の反復（`gmm_iterations>=3`、Issue #229）は、標準的な2-step efficient GMMを
+//!    「Sの再構築を1回だけ行う特殊ケース」として素直に一般化したもの——各ステップで
+//!    「直前の残差からSを再構築→再推定」を繰り返すだけで、2-stepと3-step以降で
+//!    アルゴリズムを分岐させる必要はない（`fit()`のループ参照）。`weight_type`が
+//!    点推定に意味を持つのは`gmm_iterations>=2`のときのみ。
+//!
+//! ## 収束条件（`gmm_convergence`、Issue #229）
+//!
+//! `gmm_convergence: Option<f64>`（既定`None`）を指定すると、`gmm_iterations`を
+//! 「固定反復回数」ではなく「収束判定の上限反復回数（安全弁）」として扱う: 各ステップで
+//! 係数`β̂_k`と`β̂_{k-1}`をelementwiseで比較し、`gmm_coefficients_converged`
+//! （絶対誤差と相対誤差の併用、`tests/api_tests`のクロスチェックで使う
+//! `tol = max(rtol * |ref|, atol)`と同じ考え方——`atol`はユーザーに公開せず内部固定値
+//! `GMM_CONVERGENCE_ATOL`とする。係数がゼロに近いときに相対誤差だけで判定すると
+//! 不安定になることを防ぐための床で、ユーザーが調整する必要は薄いと判断した、
+//! ユーザー確認済み）で収束と判定できた時点で早期終了する。`gmm_iterations`回に
+//! 達しても収束しなかった場合、`raise_on_non_convergence=true`（既定）なら
+//! `IvError::GmmNonConvergence`、`false`なら`converged=false`のまま結果を返す
+//! （`nonlinear::common::run_solver`の`raise_on_non_convergence`と同じ設計、
+//! `engine/src/iv/CLAUDE.md`参照）。`gmm_convergence=None`（既定）のときは
+//! `converged`は常に`true`（収束判定自体を行わないため）。
 //!
 //! `S`は「その逆行列を重みとして使う」以外の用途を持たないため、**任意の正のスカラー倍で
 //! 点推定`β̂(S⁻¹)`が変わらない**（`S`をスカラー`c`倍すると`W=S⁻¹`が`1/c`倍され、
@@ -103,8 +122,9 @@
 //!    `GmmEstimator`側に`cov_type`対応の推論統計量を実装する必要があり、本Issueの
 //!    スコープ外（GMM自体の`cov_type`対応は`iv-api-design.md`6.7節で「2SLSと同じ範囲を
 //!    踏襲する」とされているが、実装Issueはまだ存在しない）。
-//! 2. `GmmEstimator::fit`は`gmm_iterations`（1/2の2値、Issue #165）に対応済みだが、
-//!    2SLSが必要とするのは`gmm_iterations=2, weight_type=Unadjusted`（この場合`S=Z'Z`と
+//! 2. `GmmEstimator::fit`は`gmm_iterations`（Issue #165で1/2の2値、Issue #229で3以上・
+//!    収束条件に一般化）に対応済みだが、2SLSが必要とするのは
+//!    `gmm_iterations=2, weight_type=Unadjusted`（この場合`S=Z'Z`と
 //!    なり初期推定`β̂₀`と再推定`β̂₁`が数値的に同じ`β̂`になる、上記参照。実際には
 //!    `weight_type`が無視される`gmm_iterations=1`でも同一の結果になる）1点のみであり、
 //!    2SLS呼び出し側がこの1点のためだけに`GmmEstimator`の汎用性
@@ -159,8 +179,16 @@ pub struct GmmEstimator {
     /// 最終推定値に基づく残差 `e = y - Xβ̂`（n, 1）。
     residuals: Mat<f64>,
     weight_type: WeightType,
-    /// 使用した反復回数（1または2、モジュール冒頭のdocコメント参照）。
+    /// 指定された`gmm_iterations`（固定反復回数、または`gmm_convergence`指定時は
+    /// 収束判定の上限反復回数。モジュール冒頭のdocコメント参照）。
     gmm_iterations: i64,
+    /// 指定された`gmm_convergence`（`None`なら固定回数モード、Issue #229）。
+    gmm_convergence: Option<f64>,
+    /// 実際に実行した反復回数（1以上、`gmm_iterations`以下）。
+    n_iterations: i64,
+    /// 収束したかどうか。`gmm_convergence=None`のときは収束判定自体を行わないため
+    /// 常に`true`（モジュール冒頭のdocコメント「収束条件」参照）。
+    converged: bool,
     nobs: usize,
     k: usize,
     /// Hansen J過剰識別検定（Issue #167、`iv-api-design.md`6.5節）の統計量。丁度識別
@@ -171,12 +199,15 @@ pub struct GmmEstimator {
 }
 
 impl GmmEstimator {
-    /// `IvInput`からGMMの点推定を求める（`gmm_iterations`は1・2のみ受け付ける、
-    /// モジュール冒頭のdocコメント「`weight_type`・`gmm_iterations`と点推定への影響」
-    /// 参照）。
+    /// `IvInput`からGMMの点推定を求める（`gmm_iterations`は1以上の任意の整数、
+    /// モジュール冒頭のdocコメント「`weight_type`・`gmm_iterations`と点推定への影響」・
+    /// 「収束条件」参照）。
     ///
     /// # Errors
-    /// - `gmm_iterations`が1・2のいずれでもない: `IvError::InvalidGmmIterations`
+    /// - `gmm_iterations`が1未満: `IvError::InvalidGmmIterations`
+    /// - `gmm_convergence`が`Some`かつ0以下: `IvError::InvalidGmmConvergence`
+    /// - `raise_on_non_convergence=true`かつ`gmm_convergence`指定時に`gmm_iterations`回
+    ///   以内に収束しなかった: `IvError::GmmNonConvergence`
     /// - 識別の順序条件`len(instruments) >= len(x_endog)`を満たさない:
     ///   `IvError::InsufficientInstruments`
     /// - `weight_type=Kernel`の`lags`が不正: `IvError::InvalidHacLags`
@@ -189,9 +220,18 @@ impl GmmEstimator {
         input: IvInput,
         weight_type: WeightType,
         gmm_iterations: i64,
+        gmm_convergence: Option<f64>,
+        raise_on_non_convergence: bool,
     ) -> Result<Self, IvError> {
-        if gmm_iterations != 1 && gmm_iterations != 2 {
+        if gmm_iterations < 1 {
             return Err(IvError::InvalidGmmIterations { gmm_iterations });
+        }
+        if let Some(tol) = gmm_convergence
+            && tol <= 0.0
+        {
+            return Err(IvError::InvalidGmmConvergence {
+                gmm_convergence: tol,
+            });
         }
         if input.k_instruments() < input.k_endog() {
             return Err(IvError::InsufficientInstruments {
@@ -242,36 +282,87 @@ impl GmmEstimator {
             (0..n).map(|i| (*residuals0.get(i, 0)).powi(2)).sum::<f64>() / (n as f64);
         let unadjusted_s = Mat::from_fn(l, l, |i, j| sigma2_0 * (*ztz.get(i, j)));
 
-        // gmm_iterations=1（1-step GMM）はここで打ち切り、weight_typeに応じた
-        // 重み付け（ステップ2）を一切行わない（weight_type自体の妥当性検証は上記で
-        // 実施済み。モジュール冒頭のdocコメント参照）。`s_used`はHansen J検定
-        // （下記）に使う重み行列で、1-step GMMではweight_typeによらず常に
+        // 反復本体（Issue #229でN回・収束条件に一般化。モジュール冒頭のdocコメント
+        // 「weight_type・gmm_iterationsと点推定への影響」「収束条件」参照）。
+        // gmm_iterations=1なら1度も回らず打ち切り（weight_typeに応じた重み付けを
+        // 一切行わない、weight_type自体の妥当性検証は上記で実施済み）。`s_used`は
+        // Hansen J検定（下記）に使う重み行列で、ループが1度も回らない場合は常に
         // `unadjusted_s`（σ̂²₀・Z'Z）を使う（点推定同様weight_typeを無視する扱い、
         // モジュール冒頭のdocコメント「Hansen J過剰識別検定」参照、ユーザー確認済み）。
-        let (beta, s_used) = if gmm_iterations == 1 {
-            (beta0, unadjusted_s)
-        } else {
-            let s1 = match &weight_type {
-                // 点推定は正のスカラー倍不変のため`unadjusted_s`（σ̂²₀・Z'Z）を使っても
-                // `Z'Z`単体を使った場合と`β̂`は変わらない。Hansen Jにそのまま使い回せる
-                // よう、あらかじめ正しくスケーリングされた`unadjusted_s`を使う。
-                WeightType::Unadjusted => unadjusted_s,
-                WeightType::Robust => robust_moment_covariance(&z, &residuals0, n, l),
+        let mut beta = beta0;
+        let mut residuals = residuals0;
+        let mut s_used = unadjusted_s;
+        let mut n_iterations: i64 = 1;
+        // gmm_convergence=Noneのときは収束判定自体を行わないため常にtrue。
+        // gmm_iterations=1のときは比較対象となる前回推定値が無いため、
+        // gmm_convergenceの指定有無によらず「判定不能＝トリビアルに収束扱い」とする
+        // （比較する2点目が無いのに`GmmNonConvergence`を返すのは呼び出し元にとって
+        // 意味不明なため）。それ以外（gmm_convergence=Someかつgmm_iterations>=2）は
+        // ループ内で実際に収束条件を満たした場合のみtrueに更新する。
+        let mut converged = gmm_convergence.is_none() || gmm_iterations <= 1;
+
+        // Kernelのlags解決・時系列順序（`O(n log n)`のソートを含む）はweight_typeに対して
+        // 不変な前処理のため、ループの外で一度だけ計算し使い回す（ループ内で反復のたびに
+        // 再計算すると、gmm_iterationsが大きいiterated GMMで無駄なコストが反復回数倍に
+        // 膨らむ。rust-reviewerの指摘、Issue #229）。Clusterのgroups検証は`validate_weight_type`
+        // （`fit()`冒頭）で既に1回行っているため、ループ内では再検証しない。
+        let kernel_precomputed = match &weight_type {
+            WeightType::Kernel { lags, time_order } => {
+                let lags = resolve_hac_lags(*lags, n)?;
+                let order = time_ordering(time_order.as_deref(), n);
+                Some((lags, order))
+            }
+            _ => None,
+        };
+
+        while n_iterations < gmm_iterations {
+            // 点推定は正のスカラー倍不変のため`unadjusted_s`相当（σ̂²・Z'Z）を使っても
+            // `Z'Z`単体を使った場合と`β̂`は変わらない。Hansen Jにそのまま使い回せる
+            // よう、あらかじめ正しくスケーリングされたSを使う（`iv/CLAUDE.md`参照）。
+            let s_next = match &weight_type {
+                WeightType::Unadjusted => {
+                    let sigma2: f64 =
+                        (0..n).map(|i| (*residuals.get(i, 0)).powi(2)).sum::<f64>() / (n as f64);
+                    Mat::from_fn(l, l, |i, j| sigma2 * (*ztz.get(i, j)))
+                }
+                WeightType::Robust => robust_moment_covariance(&z, &residuals, n, l),
                 WeightType::Cluster { groups } => {
                     let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-                    validate_cluster_groups(groups, n)?;
-                    cluster_moment_covariance(&z, &residuals0, n, l, groups)
+                    cluster_moment_covariance(&z, &residuals, n, l, groups)
                 }
-                WeightType::Kernel { lags, time_order } => {
-                    let lags = resolve_hac_lags(*lags, n)?;
-                    let order = time_ordering(time_order.as_deref(), n);
-                    kernel_moment_covariance(&z, &residuals0, n, l, lags, &order)
+                WeightType::Kernel { .. } => {
+                    // `kernel_precomputed`は`weight_type=Kernel`のとき（このアームに入る
+                    // ときは常に）ループ開始前にSomeとして構築済み（`weight_type`は
+                    // ループ中不変のため、上記matchと同じ分岐に必ず入る）。
+                    let (lags, order) = kernel_precomputed
+                        .as_ref()
+                        .expect("kernel_precomputed is Some whenever weight_type is Kernel");
+                    kernel_moment_covariance(&z, &residuals, n, l, *lags, order)
                 }
             };
-            let beta1 = gmm_point_estimate(&z, &x, y, &s1)?;
-            (beta1, s1)
-        };
-        let residuals = y - &x * &beta;
+            let beta_next = gmm_point_estimate(&z, &x, y, &s_next)?;
+            n_iterations += 1;
+
+            let just_converged = match gmm_convergence {
+                Some(tol) => gmm_coefficients_converged(&beta, &beta_next, tol),
+                None => false,
+            };
+
+            beta = beta_next;
+            residuals = y - &x * &beta;
+            s_used = s_next;
+
+            if just_converged {
+                converged = true;
+                break;
+            }
+        }
+
+        if gmm_convergence.is_some() && !converged && raise_on_non_convergence {
+            return Err(IvError::GmmNonConvergence {
+                n_iter: n_iterations as usize,
+            });
+        }
 
         // Hansen J過剰識別検定（Issue #167、iv-api-design.md 6.5節）。
         // `J = (Z'ê)'S⁻¹(Z'ê)`（`n`で割らない、モジュール冒頭のdocコメント
@@ -316,6 +407,9 @@ impl GmmEstimator {
             residuals,
             weight_type,
             gmm_iterations,
+            gmm_convergence,
+            n_iterations,
+            converged,
             nobs: n,
             k,
             hansen_j_statistic,
@@ -348,9 +442,25 @@ impl GmmEstimator {
         &self.weight_type
     }
 
-    /// 使用した反復回数（1または2）。
+    /// 指定された`gmm_iterations`（固定反復回数、または収束モード時の上限反復回数）。
     pub fn gmm_iterations(&self) -> i64 {
         self.gmm_iterations
+    }
+
+    /// 指定された`gmm_convergence`。`None`なら固定回数モード（Issue #229）。
+    pub fn gmm_convergence(&self) -> Option<f64> {
+        self.gmm_convergence
+    }
+
+    /// 実際に実行した反復回数。
+    pub fn n_iterations(&self) -> i64 {
+        self.n_iterations
+    }
+
+    /// 収束したかどうか。`gmm_convergence=None`のときは常に`true`
+    /// （`fit()`のdocコメント「収束条件」参照）。
+    pub fn converged(&self) -> bool {
+        self.converged
     }
 
     /// 観測数 n。
@@ -373,6 +483,27 @@ impl GmmEstimator {
     pub fn hansen_j_p_value(&self) -> Option<f64> {
         self.hansen_j_p_value
     }
+}
+
+/// GMMの収束判定に使う絶対誤差の床（Issue #229）。ユーザーには公開せず内部固定値とする
+/// （モジュール冒頭のdocコメント「収束条件」参照）。`tests/api_tests`のクロスチェックが
+/// 使う`ATOL`の既定値と同じ`1e-8`を踏襲する（`.claude/rules/testing-policy.md`
+/// 「許容誤差は相対誤差1e-8を基本」）。
+const GMM_CONVERGENCE_ATOL: f64 = 1e-8;
+
+/// 係数ベクトルが収束したかをelementwiseで判定する: 各係数`i`について
+/// `|next_i - prev_i| <= max(rtol * |prev_i|, GMM_CONVERGENCE_ATOL)`を満たせば収束
+/// （`tests/api_tests`の数値クロスチェックと同じ`tol = max(rtol * |ref|, atol)`の考え方、
+/// モジュール冒頭のdocコメント「収束条件」参照）。全係数がこの条件を満たして初めて
+/// 収束とする（ベクトルノルムの比ではなくelementwise maxを取る設計、いずれか1つの係数が
+/// 収束していない状態を見逃さないため、ユーザー確認済み）。
+fn gmm_coefficients_converged(prev: &Mat<f64>, next: &Mat<f64>, rtol: f64) -> bool {
+    let k = prev.nrows();
+    (0..k).all(|i| {
+        let diff = (*next.get(i, 0) - *prev.get(i, 0)).abs();
+        let tol = (rtol * prev.get(i, 0).abs()).max(GMM_CONVERGENCE_ATOL);
+        diff <= tol
+    })
 }
 
 /// `weight_type`自体の引数が妥当かどうかだけを検証する（`S`は構築しない）。
@@ -589,7 +720,7 @@ mod tests {
             .unwrap()
         };
 
-        let gmm = GmmEstimator::fit(build_input(), WeightType::Unadjusted, 2).unwrap();
+        let gmm = GmmEstimator::fit(build_input(), WeightType::Unadjusted, 2, None, true).unwrap();
         let two_sls =
             crate::iv::two_sls::TwoSlsEstimator::fit(build_input(), OlsCovType::Classical, 0.95)
                 .unwrap();
@@ -627,7 +758,7 @@ mod tests {
         )
         .unwrap();
 
-        let estimator = GmmEstimator::fit(input, WeightType::Unadjusted, 2).unwrap();
+        let estimator = GmmEstimator::fit(input, WeightType::Unadjusted, 2, None, true).unwrap();
         assert_eq!(estimator.param_names(), ["const", "x_endog"]);
         assert!((*estimator.params().get(0, 0) - 1.0).abs() < 1e-8);
         assert!((*estimator.params().get(1, 0) - 2.0).abs() < 1e-8);
@@ -651,7 +782,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = GmmEstimator::fit(input, WeightType::Unadjusted, 2);
+        let result = GmmEstimator::fit(input, WeightType::Unadjusted, 2, None, true);
         assert_eq!(
             result.unwrap_err(),
             IvError::InsufficientInstruments {
@@ -661,9 +792,9 @@ mod tests {
         );
     }
 
-    /// `gmm_iterations`が1・2以外（0・負・3以上）なら`InvalidGmmIterations`
-    /// （`iv-api-design.md`6.2節が定義するのは1・2の2値のみ、モジュール冒頭のdocコメント
-    /// 「`weight_type`・`gmm_iterations`と点推定への影響」参照）。
+    /// `gmm_iterations`が1未満（0・負）なら`InvalidGmmIterations`（Issue #229で1以上の
+    /// 任意の整数に一般化、モジュール冒頭のdocコメント「`weight_type`・`gmm_iterations`と
+    /// 点推定への影響」参照）。
     #[test]
     fn fit_returns_invalid_gmm_iterations_error_for_disallowed_values() {
         let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
@@ -682,14 +813,108 @@ mod tests {
             .unwrap()
         };
 
-        for invalid in [0_i64, -1, 3, 100] {
-            let result = GmmEstimator::fit(build_input(), WeightType::Unadjusted, invalid);
+        for invalid in [0_i64, -1, -100] {
+            let result =
+                GmmEstimator::fit(build_input(), WeightType::Unadjusted, invalid, None, true);
             assert_eq!(
                 result.unwrap_err(),
                 IvError::InvalidGmmIterations {
                     gmm_iterations: invalid
                 },
                 "gmm_iterations={invalid}"
+            );
+        }
+    }
+
+    /// `gmm_iterations>=3`（iterated GMM、Issue #229）は正常に受理され、`n_iterations`が
+    /// 指定通りになる。固定回数モード（`gmm_convergence=None`）では`converged`は常に`true`
+    /// （収束判定自体を行わないため、モジュール冒頭のdocコメント「収束条件」参照）。
+    #[test]
+    fn fit_accepts_gmm_iterations_greater_than_two() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            &[z1, z2],
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = GmmEstimator::fit(input, WeightType::Robust, 5, None, true).unwrap();
+        assert_eq!(estimator.gmm_iterations(), 5);
+        assert_eq!(estimator.n_iterations(), 5);
+        assert!(estimator.converged());
+    }
+
+    /// 3回目以降の反復（`gmm_iterations=3`）は「2回目の反復と同じ手続き（直前の残差から
+    /// Sを再構築して再推定）をもう一度繰り返すだけ」であることを、`gmm_iterations=3`の
+    /// 結果を`GmmEstimator::fit`とは独立に手計算したオラクル（3回分のS再構築を明示的に
+    /// 書き下ろす）と数値照合して確認する（モジュール冒頭のdocコメント
+    /// 「`weight_type`・`gmm_iterations`と点推定への影響」参照）。
+    #[test]
+    fn fit_computes_three_step_gmm_matching_manual_iteration() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let n = y.len();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            &[z1.clone(), z2.clone()],
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let estimator = GmmEstimator::fit(input, WeightType::Robust, 3, None, true).unwrap();
+
+        let z = Mat::from_fn(n, 3, |i, j| match j {
+            0 => 1.0,
+            1 => z1[i],
+            _ => z2[i],
+        });
+        let x = Mat::from_fn(n, 2, |i, j| if j == 0 { 1.0 } else { x_endog[i] });
+        let y_mat = Mat::from_fn(n, 1, |i, _| y[i]);
+
+        let solve3 = |s: &Mat<f64>| -> Mat<f64> {
+            let zty = z.transpose() * &y_mat;
+            let ztx = z.transpose() * &x;
+            let s_inv = s
+                .llt(Side::Lower)
+                .unwrap()
+                .solve(Mat::<f64>::identity(3, 3));
+            let bread = ztx.transpose() * &s_inv * &ztx;
+            let meat = ztx.transpose() * &s_inv * &zty;
+            bread
+                .llt(Side::Lower)
+                .unwrap()
+                .solve(Mat::<f64>::identity(2, 2))
+                * &meat
+        };
+
+        let ztz = z.transpose() * &z;
+        let beta0 = solve3(&ztz);
+        let e0 = &y_mat - &x * &beta0;
+        let z_scaled0 = Mat::from_fn(n, 3, |i, j| (*e0.get(i, 0)) * (*z.get(i, j)));
+        let s1 = z_scaled0.transpose() * &z_scaled0;
+        let beta1 = solve3(&s1);
+        let e1 = &y_mat - &x * &beta1;
+        let z_scaled1 = Mat::from_fn(n, 3, |i, j| (*e1.get(i, 0)) * (*z.get(i, j)));
+        let s2 = z_scaled1.transpose() * &z_scaled1;
+        let expected_beta = solve3(&s2);
+
+        for j in 0..2 {
+            assert!(
+                (*estimator.params().get(j, 0) - *expected_beta.get(j, 0)).abs() < 1e-8,
+                "param {j}: got {}, expected {}",
+                *estimator.params().get(j, 0),
+                *expected_beta.get(j, 0)
             );
         }
     }
@@ -715,8 +940,9 @@ mod tests {
             .unwrap()
         };
 
-        let unadjusted = GmmEstimator::fit(build_input(), WeightType::Unadjusted, 1).unwrap();
-        let robust = GmmEstimator::fit(build_input(), WeightType::Robust, 1).unwrap();
+        let unadjusted =
+            GmmEstimator::fit(build_input(), WeightType::Unadjusted, 1, None, true).unwrap();
+        let robust = GmmEstimator::fit(build_input(), WeightType::Robust, 1, None, true).unwrap();
         let kernel = GmmEstimator::fit(
             build_input(),
             WeightType::Kernel {
@@ -724,6 +950,8 @@ mod tests {
                 time_order: None,
             },
             1,
+            None,
+            true,
         )
         .unwrap();
 
@@ -743,7 +971,8 @@ mod tests {
         }
 
         // 2-step（weight_type=Unadjustedなら1-stepと数値的に同じはず、上記参照）とも一致する。
-        let two_step = GmmEstimator::fit(build_input(), WeightType::Unadjusted, 2).unwrap();
+        let two_step =
+            GmmEstimator::fit(build_input(), WeightType::Unadjusted, 2, None, true).unwrap();
         for j in 0..2 {
             assert!(
                 (*unadjusted.params().get(j, 0) - *two_step.params().get(j, 0)).abs() < 1e-8,
@@ -773,7 +1002,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = GmmEstimator::fit(input, WeightType::Cluster { groups: None }, 1);
+        let result = GmmEstimator::fit(input, WeightType::Cluster { groups: None }, 1, None, true);
         assert_eq!(
             result.unwrap_err(),
             IvError::Common(CommonError::MissingClusterColumn)
@@ -806,6 +1035,8 @@ mod tests {
                 time_order: None,
             },
             1,
+            None,
+            true,
         );
         assert_eq!(
             result.unwrap_err(),
@@ -835,7 +1066,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = GmmEstimator::fit(input, WeightType::Unadjusted, 2);
+        let result = GmmEstimator::fit(input, WeightType::Unadjusted, 2, None, true);
         assert_eq!(
             result.unwrap_err(),
             IvError::Common(CommonError::ComputationFailed(
@@ -874,6 +1105,8 @@ mod tests {
                 groups: Some(groups),
             },
             2,
+            None,
+            true,
         );
         assert_eq!(
             result.unwrap_err(),
@@ -905,8 +1138,9 @@ mod tests {
             .unwrap()
         };
 
-        let unadjusted = GmmEstimator::fit(build_input(), WeightType::Unadjusted, 2).unwrap();
-        let robust = GmmEstimator::fit(build_input(), WeightType::Robust, 2).unwrap();
+        let unadjusted =
+            GmmEstimator::fit(build_input(), WeightType::Unadjusted, 2, None, true).unwrap();
+        let robust = GmmEstimator::fit(build_input(), WeightType::Robust, 2, None, true).unwrap();
 
         let diff = (*unadjusted.params().get(1, 0) - *robust.params().get(1, 0)).abs();
         assert!(
@@ -953,7 +1187,7 @@ mod tests {
             "y".to_string(),
         )
         .unwrap();
-        let estimator = GmmEstimator::fit(input, WeightType::Robust, 2).unwrap();
+        let estimator = GmmEstimator::fit(input, WeightType::Robust, 2, None, true).unwrap();
 
         // オラクル: 手作業でZ・X・yを組み立て、W₀=(Z'Z)⁻¹で初期推定→残差→
         // S=Σêᵢ²zᵢzᵢ'→W₁=S⁻¹で最終推定、という同じ2段階を`gmm_point_estimate`とは
@@ -1058,7 +1292,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = GmmEstimator::fit(input, WeightType::Cluster { groups: None }, 2);
+        let result = GmmEstimator::fit(input, WeightType::Cluster { groups: None }, 2, None, true);
         assert_eq!(
             result.unwrap_err(),
             IvError::Common(CommonError::MissingClusterColumn)
@@ -1090,6 +1324,8 @@ mod tests {
                 groups: Some(groups),
             },
             2,
+            None,
+            true,
         );
         assert_eq!(
             result.unwrap_err(),
@@ -1131,6 +1367,8 @@ mod tests {
                 groups: Some(groups.clone()),
             },
             2,
+            None,
+            true,
         )
         .unwrap();
 
@@ -1224,6 +1462,8 @@ mod tests {
                 time_order: None,
             },
             2,
+            None,
+            true,
         );
         assert_eq!(
             result.unwrap_err(),
@@ -1237,6 +1477,8 @@ mod tests {
                 time_order: None,
             },
             2,
+            None,
+            true,
         );
         assert_eq!(
             result.unwrap_err(),
@@ -1267,7 +1509,7 @@ mod tests {
             .unwrap()
         };
 
-        let robust = GmmEstimator::fit(build_input(), WeightType::Robust, 2).unwrap();
+        let robust = GmmEstimator::fit(build_input(), WeightType::Robust, 2, None, true).unwrap();
         let kernel = GmmEstimator::fit(
             build_input(),
             WeightType::Kernel {
@@ -1275,6 +1517,8 @@ mod tests {
                 time_order: None,
             },
             2,
+            None,
+            true,
         )
         .unwrap();
 
@@ -1315,6 +1559,8 @@ mod tests {
                 time_order: None,
             },
             2,
+            None,
+            true,
         )
         .unwrap();
 
@@ -1414,7 +1660,7 @@ mod tests {
             "y".to_string(),
         )
         .unwrap();
-        let estimator = GmmEstimator::fit(input, WeightType::Robust, 2).unwrap();
+        let estimator = GmmEstimator::fit(input, WeightType::Robust, 2, None, true).unwrap();
 
         let x = Mat::from_fn(n, 2, |i, j| if j == 0 { 1.0 } else { x_endog[i] });
         for (i, &y_i) in y.iter().enumerate() {
@@ -1449,7 +1695,7 @@ mod tests {
         )
         .unwrap();
 
-        let estimator = GmmEstimator::fit(input, WeightType::Unadjusted, 2).unwrap();
+        let estimator = GmmEstimator::fit(input, WeightType::Unadjusted, 2, None, true).unwrap();
         assert_eq!(estimator.hansen_j_statistic(), None);
         assert_eq!(estimator.hansen_j_p_value(), None);
     }
@@ -1478,7 +1724,7 @@ mod tests {
             "y".to_string(),
         )
         .unwrap();
-        let estimator = GmmEstimator::fit(input, WeightType::Robust, 2).unwrap();
+        let estimator = GmmEstimator::fit(input, WeightType::Robust, 2, None, true).unwrap();
 
         let z = Mat::from_fn(n, 3, |i, j| match j {
             0 => 1.0,
@@ -1555,7 +1801,7 @@ mod tests {
             "y".to_string(),
         )
         .unwrap();
-        let estimator = GmmEstimator::fit(input, WeightType::Robust, 1).unwrap();
+        let estimator = GmmEstimator::fit(input, WeightType::Robust, 1, None, true).unwrap();
 
         let z = Mat::from_fn(n, 3, |i, j| match j {
             0 => 1.0,
@@ -1624,7 +1870,7 @@ mod tests {
             .unwrap()
         };
 
-        let gmm = GmmEstimator::fit(build_input(), WeightType::Unadjusted, 2).unwrap();
+        let gmm = GmmEstimator::fit(build_input(), WeightType::Unadjusted, 2, None, true).unwrap();
         let two_sls =
             crate::iv::two_sls::TwoSlsEstimator::fit(build_input(), OlsCovType::Classical, 0.95)
                 .unwrap();
@@ -1641,5 +1887,205 @@ mod tests {
             (gmm_p - sargan_p).abs() < 1e-8,
             "hansen_j_p={gmm_p}, sargan_p={sargan_p}"
         );
+    }
+
+    /// `gmm_convergence`が`Some`かつ0以下（0・負）なら`InvalidGmmConvergence`（Issue #229）。
+    #[test]
+    fn fit_returns_invalid_gmm_convergence_error_for_non_positive_values() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let build_input = || {
+            IvInput::from_columns(
+                &y,
+                &[],
+                vec![],
+                std::slice::from_ref(&x_endog),
+                vec!["endog1".to_string()],
+                &[z1.clone(), z2.clone()],
+                vec!["z1".to_string(), "z2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap()
+        };
+
+        for invalid in [0.0_f64, -1.0, -1e-8] {
+            let result = GmmEstimator::fit(
+                build_input(),
+                WeightType::Unadjusted,
+                2,
+                Some(invalid),
+                true,
+            );
+            assert_eq!(
+                result.unwrap_err(),
+                IvError::InvalidGmmConvergence {
+                    gmm_convergence: invalid
+                },
+                "gmm_convergence={invalid}"
+            );
+        }
+    }
+
+    /// `gmm_convergence`を指定すると、上限（`gmm_iterations`）に達する前でも収束条件を
+    /// 満たした時点で早期終了する（Issue #229、`fit()`のdocコメント「収束条件」参照）。
+    /// 極めて緩い許容誤差（`rtol=1.0`）を使うことで、実際の収束の速さに依存せず
+    /// 「上限に達する前に打ち切られる」ことを決定的に検証する。
+    #[test]
+    fn fit_stops_early_when_gmm_convergence_is_satisfied() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            &[z1, z2],
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = GmmEstimator::fit(input, WeightType::Robust, 10, Some(1.0), true).unwrap();
+        assert!(estimator.converged());
+        assert!(
+            estimator.n_iterations() < 10,
+            "n_iterations={}",
+            estimator.n_iterations()
+        );
+    }
+
+    /// 上記テストは`rtol=1.0`という極めて緩い許容誤差のため、ループの1回目
+    /// （`n_iterations=2`、`β̂₀`と`β̂₁`の比較）で必ず収束してしまい、`while`ループが
+    /// 複数周する経路（2回目以降のS再構築後に収束）を検証できていなかった
+    /// （rust-reviewerの指摘）。`heteroskedastic_test_columns()`・`weight_type=Robust`の
+    /// 実測収束系列（`β̂₀→β̂₁`の相対誤差最大値が約`3.7e-3`、`β̂₁→β̂₂`が約`5.8e-5`、
+    /// `GmmEstimator::fit`とは独立に固定`gmm_iterations`を1,2,3...と変えて`params()`を
+    /// 比較して確認済み）から、`rtol=1e-3`は1回目では満たされず2回目で満たされることが
+    /// 決定的に保証できる（両者の間には約2桁の余裕があり、境界的な値ではない）。
+    #[test]
+    fn fit_stops_early_after_multiple_iterations_when_gmm_convergence_is_satisfied() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            &[z1, z2],
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = GmmEstimator::fit(input, WeightType::Robust, 10, Some(1e-3), true).unwrap();
+        assert!(estimator.converged());
+        assert_eq!(estimator.n_iterations(), 3);
+    }
+
+    /// `weight_type=Unadjusted`は点推定が正のスカラー倍不変のため、`gmm_convergence`を
+    /// 指定していても2回目のS再構築（`β̂₁`）は初期推定`β̂₀`と数値的に完全一致し
+    /// （`fit_matches_two_sls_point_estimate_when_weight_type_is_unadjusted`と同じ根拠）、
+    /// どんなに厳しい許容誤差でも常に`n_iterations=2`で収束する。
+    #[test]
+    fn fit_with_unadjusted_weight_type_always_converges_at_second_iteration() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            &[z1, z2],
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator =
+            GmmEstimator::fit(input, WeightType::Unadjusted, 10, Some(1e-300), true).unwrap();
+        assert!(estimator.converged());
+        assert_eq!(estimator.n_iterations(), 2);
+    }
+
+    /// `gmm_convergence`指定時に`gmm_iterations`回（上限）以内に収束せず、
+    /// `raise_on_non_convergence=true`（既定）なら`IvError::GmmNonConvergence`。
+    /// `weight_type=Robust`は`Unadjusted`と点推定が異なる（既存テスト
+    /// `fit_with_robust_weight_type_differs_from_unadjusted_when_heteroskedastic`で
+    /// `diff > 1e-4`を確認済み）ため、極めて厳しい許容誤差（`rtol=1e-300`）と組み合わせれば
+    /// `gmm_iterations=2`（1回だけSを再構築）では収束しないことが決定的に保証できる。
+    #[test]
+    fn fit_returns_gmm_non_convergence_error_when_not_converged_within_max_iterations() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            &[z1, z2],
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = GmmEstimator::fit(input, WeightType::Robust, 2, Some(1e-300), true);
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::GmmNonConvergence { n_iter: 2 }
+        );
+    }
+
+    /// 上記と同じ非収束ケースで`raise_on_non_convergence=false`なら、`fit()`は
+    /// エラーにせず`converged=false`のまま結果を返す（`nonlinear::common::run_solver`の
+    /// `raise_on_non_convergence`と同じ設計、`engine/src/iv/CLAUDE.md`参照）。
+    #[test]
+    fn fit_returns_result_with_converged_false_when_raise_on_non_convergence_is_false() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            &[z1, z2],
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator =
+            GmmEstimator::fit(input, WeightType::Robust, 2, Some(1e-300), false).unwrap();
+        assert!(!estimator.converged());
+        assert_eq!(estimator.n_iterations(), 2);
+    }
+
+    /// `gmm_iterations=1`は比較対象となる前回推定値が無いため、`gmm_convergence`を
+    /// 指定していても収束判定不能＝トリビアルに`converged=true`（`GmmNonConvergence`には
+    /// ならない）。`fit()`のdocコメント「反復本体」参照。
+    #[test]
+    fn fit_treats_single_iteration_as_trivially_converged_even_with_gmm_convergence_set() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            &[z1, z2],
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator =
+            GmmEstimator::fit(input, WeightType::Robust, 1, Some(1e-300), true).unwrap();
+        assert!(estimator.converged());
+        assert_eq!(estimator.n_iterations(), 1);
     }
 }

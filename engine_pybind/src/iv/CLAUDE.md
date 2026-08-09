@@ -4,6 +4,8 @@
 
 ## 踏んだ罠（再発防止）
 
+- **`engine`側で共有エラー型（`IvError`等）に新バリアントを追加すると、その手法（GMM等）が`engine_pybind`側でまだ配線されていなくても`engine_pybind`のビルドが壊れる**（Issue #229、rust-reviewerの指摘）: `iv_error_to_pyerr`（本ファイル）は`IvError`を網羅的に`match`しているため、`method="gmm"`が未実装で`GmmEstimator::fit`を呼ぶ経路自体が無くても、`IvError`に新バリアントを追加した時点でnon-exhaustive patterns（E0004）になる。「engineのみのIssue」（本ファイル冒頭「実装フェーズの分割方針」参照）で共有エラー型を拡張する際は、`cargo build -p engine`だけでなく**必ず`cargo build --workspace`（または少なくとも`-p engine_pybind`）まで確認する**こと（`cargo build -p engine`はパッケージ境界を跨ぐこの種の破壊を検出できない）。
+
 - **`#[cfg(test)] mod tests`からしか呼ばれない関数に`#[expect(dead_code, ...)]`を使うと`--all-targets`ビルドで`unfulfilled_lint_expectations`エラーになる**（Issue #159）。`#[expect]`は「指定したlintが実際に発火する」ことを検証する属性のため、以下の非対称性が問題になる。
   - `cargo build`（テストコードを含まない）: 関数が本当に未到達 → `dead_code`が発火 → `#[expect]`が正しく警告を吸収する。
   - `cargo clippy --all-targets -- -D warnings` / `cargo test`（テストコードを含む）: `#[cfg(test)] mod tests`内のテストがその関数を実際に呼ぶため到達可能になる → `dead_code`が発火しない → `#[expect]`の期待が外れ`unfulfilled_lint_expectations`が`-D warnings`下でエラーになる。

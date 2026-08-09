@@ -93,9 +93,20 @@ Issue化済み（2026-08-02）:
 - [x] **B15. python_package: IV/IvResultsラッパー実装** → [#161](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/161)
   2SLS/GMM両対応。
   - 依存: B14（#170）
-- [x] **B16. tests/api_tests: linearmodels/ivregとの数値照合ベンチマーク作成** → [#171](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/171)
+- [ ] **B16. tests/api_tests: linearmodels/ivregとの数値照合ベンチマーク作成** → [#171](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/171)（進行中、issueはまだopen）
   GMMはPython（linearmodels）単独検証（Rクロスチェック省略、`iv-api-design.md`5.3節）。
   - 依存: B15（#161）
+  - **完了済み**: 2SLSのlinearmodelsクロスチェック（`tests/api_tests/test_iv_fixtures.py`、
+    コミット`8d84a18`）、GMMのlinearmodelsクロスチェック（`tests/api_tests/test_iv_gmm_fixtures.py`、
+    コミット`01aff46`）、ValidationError系のAPI/構造テスト（`tests/api_tests/test_iv.py`、
+    コミット`5e38f2f`）。副次的に発見・修正したバグ2件（G=2クラスター境界での
+    `has_intercept`混同バグ、GMM `cov_type=Classical`のσ̂²非中心化バグ）は
+    `engine/src/iv/CLAUDE.md`参照。
+  - **未完了**: 2SLSの`ivreg`（R）クロスチェック。devcontainerのR更新
+    （Debian bookworm標準4.2.2→CRAN APTリポジトリ経由で4.6.1系、`.devcontainer/Dockerfile`
+    修正済み・コミット済み）が前提条件だったが、コンテナ再構築・`ivreg`導入確認・
+    `benchmark/iv/run_ivreg_benchmark.R`（雛形のみで未検証）を使った実装がまだ手つかず
+    （`iv-api-design.md`5.2節参照）。
 - [x] **B17. ドキュメント（mkdocs）** → [#162](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/162)
   - 依存: B16（#171）
 

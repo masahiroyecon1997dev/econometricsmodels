@@ -174,13 +174,18 @@ Issue #171（`linearmodels`/`ivreg`とのベンチマーク作成）でリファ
 
 **`ivreg`**。ただし`ivreg`は2SLSのみ対応でGMMには対応していない見込み（要実装時再確認）。
 
-**現状の既知の問題（Issue #171で発覚）**: devcontainerのRには`ivreg`が未導入で、インストールも
-できない状態（`ivreg`が要求する`car`パッケージの依存先`MatrixModels`が`Matrix>=1.6.0`
-（→R>=4.4）を要求するが、devcontainerのRは4.2.2で更新できない）。CLAUDE.md §10の
-「導入済み」という記述は実態と食い違っている（要修正）。当面はPython
-（`linearmodels`）側のみで2SLS/GMMともに検証し、Rクロスチェックは実装を保留する
-（ユーザー確認済み。代替候補として、AERパッケージの`ivreg()`関数や`gmm`パッケージは
-依存が軽く導入できる可能性がある。Rクロスチェックに実際に着手する際に確認する）。
+**経緯（Issue #171）**: devcontainerのRには当初`ivreg`が未導入で、インストールもできない状態
+だった（`ivreg`が要求する`car`パッケージの依存先`MatrixModels`が`Matrix>=1.6.0`（→R>=4.4）を
+要求するが、devcontainerのRはDebian bookworm標準の4.2.2固定で更新できなかった）。当面は
+Python（`linearmodels`）側のみで2SLS/GMMともに検証し、2SLS/GMMともにlinearmodelsとの
+数値照合を実装・コミット済み（GMM側は本節・5.3節の方針通りRクロスチェック省略が最終形）。
+
+この制約は`.devcontainer/Dockerfile`にCRAN公式のDebian向けAPTリポジトリ（`bookworm-cran40`）を
+追加しR 4.6.1系に更新することで解消した（コミット済み）。**未着手（次のタスク）**:
+コンテナ再構築後に`ivreg`が実際に導入されるか（`Rscript -e 'library(ivreg)'`等）を確認し、
+問題なければ2SLSの`ivreg`クロスチェック（`benchmark/iv/run_ivreg_benchmark.R`は雛形のみで
+未検証、CLAUDE.md §10参照）を実装する。導入できなければ代替候補（AERパッケージの`ivreg()`
+関数や`gmm`パッケージ、依存が軽い）を検討する。
 
 ### 5.3 GMMのRクロスチェック省略（例外規定）
 

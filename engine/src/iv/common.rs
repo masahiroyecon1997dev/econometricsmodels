@@ -367,6 +367,38 @@ pub(crate) fn mat_to_columns(m: &Mat<f64>) -> Vec<Vec<f64>> {
     (0..m.ncols()).map(|j| mat_column_to_vec(m, j)).collect()
 }
 
+/// `x_exog`由来の列・列名（`IvInput::x_exog()`/`x_exog_names()`。`has_intercept=true`なら
+/// 先頭が定数項）から、新たに`OlsInput::from_columns`を呼ぶ直前に定数項列を取り除く。
+///
+/// `IvInput`は`has_intercept=true`のとき`x_exog`の先頭に定数項列（すべて1.0）を
+/// 焼き込み済み（`IvInput::from_columns`）だが、`OlsInput::from_columns`の
+/// `include_intercept`引数は「定数項列を新規に追加するか」と「`k_constant`
+/// （Wald F検定の検定対象・R²のTSSの種類等、統計量計算で定数項を除外する基準）」の
+/// 両方を1つの真偽値に兼ねる。焼き込み済みの定数項列をそのまま渡しつつ
+/// `include_intercept=false`を指定すると、二重に定数項列が追加される事態は避けられる
+/// 一方、`k_constant`が誤って`0`になり、本来は傾き係数のみを対象とすべきWald F検定が
+/// 定数項列まで「傾き係数」として検定対象に含めてしまう（クラスターロバストSEでは
+/// 検定対象の次元`q`が実際より1個多くなり、`G≤q`の構造的特異性
+/// （`engine/src/linear/CLAUDE.md`「G≤qで構造的に特異」参照）に不必要に近づく。
+/// `engine/src/iv/CLAUDE.md`「修正済み」節に経緯を記録した`G=2`クラスター境界の
+/// `ComputationError`の根本原因であり、この関数の導入で修正した）。
+///
+/// この関数で定数項列を先に取り除いてから`OlsInput::from_columns`に
+/// `input.has_intercept()`をそのまま渡せば、二重追加を避けつつ`k_constant`も
+/// 正しく設定できる（`x_exog_columns`が空でも`has_intercept=true`なら「定数項のみ」の
+/// モデルとして正しく機能する）。
+pub(crate) fn without_baked_in_intercept<'a>(
+    x_exog_columns: &'a [Vec<f64>],
+    x_exog_names: &'a [String],
+    has_intercept: bool,
+) -> (&'a [Vec<f64>], &'a [String]) {
+    if has_intercept {
+        (&x_exog_columns[1..], &x_exog_names[1..])
+    } else {
+        (x_exog_columns, x_exog_names)
+    }
+}
+
 /// [`compute_first_stage`]の戻り値: 内生変数ごとの第一段階回帰（`x_endog_names`と同じ順序）、
 /// 弱操作変数診断（部分F統計量、同じく`x_endog_names`と同じ順序）。
 pub type FirstStageResult = (Vec<(String, OlsEstimator)>, Vec<(String, f64)>);
@@ -395,11 +427,16 @@ pub fn compute_first_stage(
     confidence_level: f64,
 ) -> Result<FirstStageResult, IvError> {
     let x_exog_columns = mat_to_columns(input.x_exog());
+    // 定数項列は`OlsInput::from_columns`側の`include_intercept=input.has_intercept()`で
+    // 追加させるため、ここでは焼き込み済みの定数項列を除いた「素の」x_exog列を使う
+    // （[`without_baked_in_intercept`]のdocコメント参照）。
+    let (x_exog_bare, x_exog_names_bare) =
+        without_baked_in_intercept(&x_exog_columns, input.x_exog_names(), input.has_intercept());
 
     // 全操作変数（`x_exog ++ instruments`のunion、`iv-api-design.md`1.1.1節）。
-    let mut instrument_columns = x_exog_columns.clone();
+    let mut instrument_columns: Vec<Vec<f64>> = x_exog_bare.to_vec();
     instrument_columns.extend(mat_to_columns(input.instruments()));
-    let mut instrument_names: Vec<String> = input.x_exog_names().to_vec();
+    let mut instrument_names: Vec<String> = x_exog_names_bare.to_vec();
     instrument_names.extend(input.instrument_names().iter().cloned());
 
     let mut first_stage = Vec::with_capacity(input.k_endog());
@@ -412,7 +449,7 @@ pub fn compute_first_stage(
             &y_endog,
             &instrument_columns,
             instrument_names.clone(),
-            false,
+            input.has_intercept(),
             endog_name.clone(),
         )
         .map_err(|source| IvError::FirstStageFailed {
@@ -434,8 +471,9 @@ pub fn compute_first_stage(
         let y_endog = mat_column_to_vec(input.x_endog(), j);
         let f_stat = partial_f_statistic(
             unrestricted,
-            &x_exog_columns,
-            input.x_exog_names(),
+            x_exog_bare,
+            x_exog_names_bare,
+            input.has_intercept(),
             &y_endog,
             endog_name,
             input.k_instruments(),
@@ -461,10 +499,12 @@ pub fn compute_first_stage(
 /// 引き継がれる）、この慣行に合わせる方針をユーザーに確認済み。`OlsEstimator`が係数の
 /// 分散共分散行列全体（`cov_params`）を公開しておらず（`std_errors()`は対角成分のみ）、
 /// `cov_type`対応のロバスト部分Wald検定には既存コードの拡張が必要になる点も判断材料にした。
+#[allow(clippy::too_many_arguments)]
 fn partial_f_statistic(
     unrestricted: &OlsEstimator,
     x_exog_columns: &[Vec<f64>],
     x_exog_names: &[String],
+    has_intercept: bool,
     y_endog: &[f64],
     endog_name: &str,
     q: usize,
@@ -477,17 +517,24 @@ fn partial_f_statistic(
     let k_u = unrestricted.input().k();
     let df_u = n - k_u;
 
+    // `x_exog_columns`/`x_exog_names`は`without_baked_in_intercept`で定数項列を
+    // 取り除いた「素の」x_exog（`compute_first_stage`参照）のため、退化ケース
+    // （制限モデルに回帰変数が1つも無い）は「x_exogが空」だけでなく「定数項も無い」
+    // ことを合わせて判定する必要がある（`x_exog=[]`でも`has_intercept=true`なら
+    // 「定数項のみ」の正当な制限モデルになる）。
     let ssr_r: f64 =
-        if x_exog_columns.is_empty() {
-            // 制限モデルに回帰変数が1つも無い（x_exog=[]かつinclude_intercept=false）場合、
+        if x_exog_columns.is_empty() && !has_intercept {
+            // 制限モデルに回帰変数が1つも無い（x_exog=[]かつhas_intercept=false）場合、
             // 「常に0を予測する」モデルのSSRをy_endog自体の二乗和として直接計算する
             // （OlsEstimatorは回帰変数0個の入力を受け付けない、CommonError::NoRegressors
             // になるため、この退化ケースだけは特別扱いする）。
             y_endog.iter().map(|v| v.powi(2)).sum()
         } else {
-            // `x_exog_columns`は`unrestricted`の設計行列（`x_exog ++ instruments`、
+            // `x_exog_columns`（定数項を除いた素のx_exog）に`OlsInput::from_columns`が
+            // `has_intercept`に応じて定数項列を追加したものは、`unrestricted`の設計行列
+            // （`x_exog ++ instruments`に同じ`has_intercept`で定数項を追加したもの、
             // `OlsEstimator::fit`がcol_piv_qrで既にfull column rankを検証済み）の列の
-            // 真部分集合のため、`x_exog_columns`自体も必然的にfull column rankになる
+            // 真部分集合のため、この制限モデルの設計行列も必然的にfull column rankになる
             // （full column rankな行列から任意の列部分集合を取っても線形独立性は保たれる）。
             // よってここで`OlsEstimator::fit`が`SingularMatrix`等で失敗することは理論上ない。
             // `CovType::Classical`・`confidence_level=0.95`は残差（SSR）の計算に使わない
@@ -507,7 +554,7 @@ fn partial_f_statistic(
                 y_endog,
                 x_exog_columns,
                 x_exog_names.to_vec(),
-                false,
+                has_intercept,
                 endog_name.to_string(),
             )
             .map_err(|source| IvError::FirstStageFailed {

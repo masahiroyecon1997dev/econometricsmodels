@@ -60,7 +60,10 @@
 
 use crate::error::CommonError;
 use crate::inference;
-use crate::iv::common::{IvError, IvInput, compute_first_stage, mat_column_to_vec, mat_to_columns};
+use crate::iv::common::{
+    IvError, IvInput, compute_first_stage, mat_column_to_vec, mat_to_columns,
+    without_baked_in_intercept,
+};
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
@@ -166,11 +169,21 @@ impl TwoSlsEstimator {
         // （サンドイッチSE計算）でも同じ内容を使うため、`Mat`からの変換を一度だけ行い
         // 使い回す（毎回`mat_to_columns`で`Mat`を走査し直す無駄を避ける）。
         let x_exog_columns = mat_to_columns(input.x_exog());
+        // 定数項列を新規に`OlsInput::from_columns`へ渡す際は、焼き込み済みの定数項列を
+        // 除いた「素の」x_exog列を使う（`common::without_baked_in_intercept`のdoc
+        // コメント参照。`second_stage_columns`/`hausman_columns`の構築で使う）。
+        let (x_exog_bare, x_exog_names_bare) = without_baked_in_intercept(
+            &x_exog_columns,
+            input.x_exog_names(),
+            input.has_intercept(),
+        );
 
         // 全操作変数（`x_exog ++ instruments`のunion、`iv-api-design.md`1.1.1節）。Sargan
         // 過剰識別検定（下記）専用に保持する（第一段階自体は`compute_first_stage`内部で
         // 独立に構築するため、ここでの計算とは重複するが`mat_to_columns`はcheapなため
-        // 許容する）。
+        // 許容する）。`Z = [x_exog, instruments]`は`OlsInput::from_columns`を経由せず
+        // 直接行列代数（`Z'Z`等）で使うため、定数項の扱いは通常の回帰変数と同じで良く
+        // `x_exog_columns`（定数項込み）をそのまま使う。
         let mut instrument_columns = x_exog_columns.clone();
         instrument_columns.extend(mat_to_columns(input.instruments()));
 
@@ -189,9 +202,9 @@ impl TwoSlsEstimator {
             .collect();
 
         // 第二段階: y ~ x_exog + x̂_endog
-        let mut second_stage_columns = x_exog_columns.clone();
+        let mut second_stage_columns: Vec<Vec<f64>> = x_exog_bare.to_vec();
         second_stage_columns.extend(x_endog_hat_columns);
-        let mut second_stage_names: Vec<String> = input.x_exog_names().to_vec();
+        let mut second_stage_names: Vec<String> = x_exog_names_bare.to_vec();
         second_stage_names.extend(input.x_endog_names().iter().cloned());
 
         let y = mat_column_to_vec(input.y(), 0);
@@ -202,7 +215,7 @@ impl TwoSlsEstimator {
             &y,
             &second_stage_columns,
             second_stage_names,
-            false,
+            input.has_intercept(),
             input.dep_var_name().to_string(),
         )
         .map_err(|source| IvError::SecondStageFailed { source })?;
@@ -218,8 +231,10 @@ impl TwoSlsEstimator {
 
         // 構造残差 e = y - Xβ̂。X = [x_exog, x_endog]（実際の内生変数、推定値ではない）。
         // 列の並びは`second_stage_columns`（x_exog ++ x̂_endog）と揃える必要があるため、
-        // 同じ順序（x_exog ++ x_endog）で組み立てる。
-        let mut structural_columns = x_exog_columns;
+        // 同じ順序（x_exog ++ x_endog）で組み立てる。`x_exog_columns`は下のWu-Hausman
+        // 検定でも（`x_exog_bare`経由で）必要になり、`x_exog_bare`が`x_exog_columns`を
+        // 借用したままのため、借用チェッカー上`move`できず`clone`が必須になる。
+        let mut structural_columns = x_exog_columns.clone();
         structural_columns.extend(mat_to_columns(input.x_endog()));
         let x_structural = Mat::from_fn(n, k, |i, j| structural_columns[j][i]);
         let residuals = input.y() - &x_structural * beta;
@@ -340,11 +355,15 @@ impl TwoSlsEstimator {
         let (wu_hausman_statistic, wu_hausman_p_value) = if input.k_endog() == 0 {
             (None, None)
         } else {
-            let mut hausman_columns = structural_columns;
+            // `x_exog_bare`（定数項を除いた素のx_exog）を使い、`OlsInput::from_columns`に
+            // `input.has_intercept()`を渡して定数項を1回だけ正しく追加させる
+            // （`without_baked_in_intercept`のdocコメント参照）。
+            let mut hausman_columns: Vec<Vec<f64>> = x_exog_bare.to_vec();
+            hausman_columns.extend(mat_to_columns(input.x_endog()));
             for (_, estimator) in &first_stage {
                 hausman_columns.push(mat_column_to_vec(estimator.residuals(), 0));
             }
-            let mut hausman_names: Vec<String> = input.x_exog_names().to_vec();
+            let mut hausman_names: Vec<String> = x_exog_names_bare.to_vec();
             hausman_names.extend(input.x_endog_names().iter().cloned());
             hausman_names.extend(
                 first_stage
@@ -357,7 +376,7 @@ impl TwoSlsEstimator {
                     &y,
                     &hausman_columns,
                     hausman_names,
-                    false,
+                    input.has_intercept(),
                     input.dep_var_name().to_string(),
                 )?;
                 let hausman_estimator =
@@ -1867,6 +1886,93 @@ mod tests {
             result.unwrap_err(),
             IvError::Common(CommonError::InsufficientClusters { g: 1 })
         );
+    }
+
+    /// `G=2`クラスター・`x_exog=[]`・丁度識別（`instruments`1本）という、Issue #171の
+    /// ベンチマーク作成中に発見した`ComputationError`（`engine/src/iv/CLAUDE.md`
+    /// 「修正済み」参照）の再現条件そのもの。第一段階回帰の`OlsInput::
+    /// from_columns`に`has_intercept=false`を渡していたため、`IvInput::x_exog()`が
+    /// 焼き込み済みの定数項列まで「傾き係数」としてWald F検定の対象に含めてしまい
+    /// （真のq=1のところq=2）、`rank(Ŝ)≤G-1=1`の構造的特異性で必ず失敗していた
+    /// （`without_baked_in_intercept`の導入で修正、`common.rs`参照）。
+    #[test]
+    fn fit_succeeds_with_cluster_g2_boundary_when_x_exog_is_empty() {
+        let y = vec![5.0, 3.0, 8.0, 6.0, 11.0, 10.0, 15.0, 13.0];
+        let x_endog = vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0, 8.0, 7.0];
+        let z1 = vec![3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0];
+        let groups = vec![
+            "a".to_string(),
+            "a".to_string(),
+            "a".to_string(),
+            "a".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+        ];
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            std::slice::from_ref(&z1),
+            vec!["z1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let cov_type = CovType::Cluster {
+            groups: Some(groups.clone()),
+        };
+        let estimator = TwoSlsEstimator::fit(input, cov_type, 0.95).unwrap();
+
+        // 第一段階（`endog1 ~ const + z1`）が、素の`OlsEstimator::fit`
+        // （同じG=2クラスター、`has_intercept=true`）と一致することを確認する
+        // （`compute_first_stage`の`has_intercept`修正が正しく効いていることの直接確認、
+        // `test_matches_closed_form_ols_when_instrument_perfectly_predicts_endog`と
+        // 同じ発想）。
+        let (_, first_stage_estimator) = &estimator.first_stage_estimators()[0];
+        let ols_input = OlsInput::from_columns(
+            &x_endog,
+            &[z1],
+            vec!["z1".to_string()],
+            true,
+            "endog1".to_string(),
+        )
+        .unwrap();
+        let expected = OlsEstimator::fit(
+            ols_input,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        )
+        .unwrap();
+
+        assert_slices_close(
+            &(0..2)
+                .map(|j| *first_stage_estimator.params().get(j, 0))
+                .collect::<Vec<_>>(),
+            &(0..2)
+                .map(|j| *expected.params().get(j, 0))
+                .collect::<Vec<_>>(),
+        );
+        assert_slices_close(
+            &(0..2)
+                .map(|j| *first_stage_estimator.std_errors().get(j, 0))
+                .collect::<Vec<_>>(),
+            &(0..2)
+                .map(|j| *expected.std_errors().get(j, 0))
+                .collect::<Vec<_>>(),
+        );
+
+        // `has_intercept=false`を渡していた旧版では、`first_stage()`が返す`r_squared`/
+        // `f_statistic`も定数項を傾き係数扱いした非中心化TSS・過大なqで静かに間違って
+        // いた（`engine/src/iv/CLAUDE.md`「修正済み」参照）。修正後は素の
+        // `OlsEstimator::fit`と一致する。
+        assert!((first_stage_estimator.r_squared() - expected.r_squared()).abs() < 1e-10);
+        assert!((first_stage_estimator.f_statistic() - expected.f_statistic()).abs() < 1e-8);
     }
 
     /// `r_squared`/`r_squared_adj`/`df_resid`/`df_model`を、構造残差のSSR・元の`y`のTSSから

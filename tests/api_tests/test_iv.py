@@ -200,6 +200,29 @@ def test_cluster_cov_type_label(clustered_dataset):
     assert res.cov_type == "cluster"
 
 
+def test_cluster_g2_boundary_succeeds_when_x_exog_is_empty():
+    """`G=2`クラスター・`x_exog=[]`・丁度識別（`instruments`1本）という、Issue #171の
+    ベンチマーク作成中に発見した`ComputationError`（`engine/src/iv/CLAUDE.md`
+    「修正済み」参照）の再現条件そのもの。第一段階回帰の`has_intercept`の
+    取り違えが原因で、真の傾き係数数`q=1`（`z1`のみ）のところ`q=2`（定数項も
+    含めて誤ってカウント）になり、`G=2`クラスターの構造的特異性
+    （`rank(Ŝ)≤G-1=1`）で必ず失敗していた（`without_baked_in_intercept`の
+    導入で修正、`engine/src/iv/two_sls.rs`の同名Rustテストと対）。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline_g2.csv")
+    df = df.with_columns((pl.int_range(pl.len()) % 2).alias("cluster_group"))
+    options = IvOptions(cov_type="cluster", cluster_col="cluster_group")
+    res = IV(
+        df,
+        y="y",
+        x_exog=[],
+        x_endog=["endog1"],
+        instruments=["z1"],
+        options=options,
+    ).fit()
+    assert res.params["endog1"] != 0.0
+
+
 def test_residuals_length_matches_n_obs(iv_dataset):
     res = IV(
         iv_dataset,

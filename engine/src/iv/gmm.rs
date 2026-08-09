@@ -46,9 +46,12 @@
 //!
 //! ## `weight_type`ごとの`S`
 //!
-//! - `Unadjusted`（別名`homoskedastic`）: `S = Z'Z`（`σ̂²`によるスケーリングは上記の理由で
-//!   省略可能）。この場合`W₁ ∝ W₀`となり、`β̂₁ = β̂₀`（2SLSと厳密に一致、
+//! - `Unadjusted`（別名`homoskedastic`）: **点推定では**`S = Z'Z`で足りる（`σ̂²`による
+//!   スケーリングは上記の正のスカラー倍不変性の理由で省略可能）。この場合`W₁ ∝ W₀`となり、
+//!   `β̂₁ = β̂₀`（2SLSと厳密に一致、
 //!   `fit_matches_two_sls_point_estimate_when_weight_type_is_unadjusted`で検証）。
+//!   **ただしHansen J検定（下記）に使う`S`はこの限りでなく、`σ̂²・Z'Z`が必要**
+//!   （後述「Hansen J過剰識別検定」参照、点推定とHansen Jで`S`の要件が異なる点に注意）。
 //! - `Robust`（別名`heteroskedastic`）: `S = Σᵢ êᵢ² zᵢzᵢ'`（`two_sls.rs`の`hc_cov_params`
 //!   のHC0相当だがレバレッジ調整は無し）。
 //! - `Cluster`: `S = Σ_g (Σ_{i∈g} êᵢzᵢ)(Σ_{i∈g} êᵢzᵢ)'`（`two_sls.rs`の
@@ -59,6 +62,33 @@
 //!
 //! 上記4関数は、数式としては`two_sls.rs`の`hc_cov_params`/`cluster_cov_params`/
 //! `hac_cov_params`と同型だが、独立に実装している（後述「2SLSとの共通化の判断」参照）。
+//!
+//! ## Hansen J過剰識別検定（Issue #167、`iv-api-design.md`6.5節）
+//!
+//! `J = (Z'ê)'S⁻¹(Z'ê)`（`ê`は最終推定`β̂`に基づく残差、`S`は最終推定に実際に使った
+//! 重み行列）。自由度は`len(instruments) - len(x_endog)`（丁度識別＝自由度0では`None`、
+//! `two_sls.rs`のSargan検定と同じ）。
+//!
+//! **`n`で割ってはいけない**（rust-reviewerの指摘で発覚・修正した実装当初のバグ）:
+//! 標準形`J = n·ḡₙ(β̂)'Ŝ⁻¹ḡₙ(β̂)`（`ḡₙ(β̂) = (1/n)Z'ê`は正規化済み平均モーメント条件、
+//! `Ŝ`は正規化済み共分散行列）で書くと、本実装の`S`（上記「`weight_type`ごとの`S`」、
+//! `n`で割らない生の和）は`S = n·Ŝ`の関係にあるため、代入すると
+//! `J = n・[(1/n)Z'ê]'・(n・S⁻¹)・[(1/n)Z'ê] = (Z'ê)'S⁻¹(Z'ê)`となり、`n`は完全に相殺する。
+//!
+//! **`weight_type=Unadjusted`はHansen Jのためだけに`σ̂²`スケーリングが必要**（点推定は
+//! 上記の通り不要、ユーザー確認済み）: `Robust`/`Cluster`/`Kernel`の`S`は各観測の
+//! `êᵢ²`（またはクラスター和・カーネル重み付き和）で個別に分散を見積もっており、
+//! `S = n・Ŝ`の関係が最初から成り立っている。一方`Unadjusted`の`S = Z'Z`は「共通の
+//! 分散`σ̂²`」で見積もる版であり、`Ŝ_homoskedastic = σ̂²・(1/n)Z'Z`が正しい正規化済み
+//! 共分散行列のため、`n・Ŝ_homoskedastic = σ̂²・Z'Z`が必要（`σ̂²`を掛けないと`Z'Z`単体は
+//! `S = n・Ŝ`の関係を満たさない）。`σ̂²`はstep-0残差`ê₀ = y - Xβ̂₀`から
+//! `σ̂²₀ = ê₀'ê₀/n`で計算する（`Robust`等が`ê₀`から`S`を構築するのと同じ「初期残差」を
+//! 使う設計、`gmm_iterations=1`ではstep-0残差＝最終残差なので同じ値になる）。この
+//! スケーリングにより、`weight_type=Unadjusted`かつ`gmm_iterations=2`のHansen Jは
+//! `two_sls.rs`のSargan統計量と数値的に一致する
+//! （`fit_computes_hansen_j_statistic_matching_two_sls_sargan_when_weight_type_is_unadjusted`
+//! で検証、点推定の`fit_matches_two_sls_point_estimate_when_weight_type_is_unadjusted`と
+//! 対になる不変条件チェック）。
 //!
 //! ## 2SLSとの共通化の判断（Issue #160完了条件）
 //!
@@ -92,6 +122,7 @@ use std::collections::BTreeMap;
 use faer::linalg::matmul::matmul;
 use faer::prelude::Solve;
 use faer::{Accum, Mat, Par, Side};
+use statrs::distribution::{ChiSquared, ContinuousCDF};
 
 use crate::error::CommonError;
 use crate::iv::common::{IvError, IvInput, mat_to_columns};
@@ -132,6 +163,11 @@ pub struct GmmEstimator {
     gmm_iterations: i64,
     nobs: usize,
     k: usize,
+    /// Hansen J過剰識別検定（Issue #167、`iv-api-design.md`6.5節）の統計量。丁度識別
+    /// （自由度`len(instruments) - len(x_endog)`が0）なら`None`（モジュール冒頭の
+    /// docコメント「Hansen J過剰識別検定」参照）。
+    hansen_j_statistic: Option<f64>,
+    hansen_j_p_value: Option<f64>,
 }
 
 impl GmmEstimator {
@@ -195,16 +231,31 @@ impl GmmEstimator {
         // 初期推定: W₀ = (Z'Z)⁻¹（weight_typeによらず共通、2SLSと同じ重み）。
         let ztz = z.transpose() * &z;
         let beta0 = gmm_point_estimate(&z, &x, y, &ztz)?;
+        let residuals0 = y - &x * &beta0;
+
+        // weight_type=UnadjustedのHansen J検定専用の重み行列`σ̂²₀・Z'Z`（モジュール冒頭の
+        // docコメント「Hansen J過剰識別検定」参照。`σ̂²`によるスケーリングは点推定には
+        // 不要だがHansen Jには必須、ユーザー確認済み）。`σ̂²₀`はstep-0残差から計算する
+        // （`gmm_iterations=1`ではstep-0残差＝最終残差のため、この一箇所の計算で両方の
+        // ケースをカバーできる）。
+        let sigma2_0: f64 =
+            (0..n).map(|i| (*residuals0.get(i, 0)).powi(2)).sum::<f64>() / (n as f64);
+        let unadjusted_s = Mat::from_fn(l, l, |i, j| sigma2_0 * (*ztz.get(i, j)));
 
         // gmm_iterations=1（1-step GMM）はここで打ち切り、weight_typeに応じた
         // 重み付け（ステップ2）を一切行わない（weight_type自体の妥当性検証は上記で
-        // 実施済み。モジュール冒頭のdocコメント参照）。
-        let beta = if gmm_iterations == 1 {
-            beta0
+        // 実施済み。モジュール冒頭のdocコメント参照）。`s_used`はHansen J検定
+        // （下記）に使う重み行列で、1-step GMMではweight_typeによらず常に
+        // `unadjusted_s`（σ̂²₀・Z'Z）を使う（点推定同様weight_typeを無視する扱い、
+        // モジュール冒頭のdocコメント「Hansen J過剰識別検定」参照、ユーザー確認済み）。
+        let (beta, s_used) = if gmm_iterations == 1 {
+            (beta0, unadjusted_s)
         } else {
-            let residuals0 = y - &x * &beta0;
             let s1 = match &weight_type {
-                WeightType::Unadjusted => ztz,
+                // 点推定は正のスカラー倍不変のため`unadjusted_s`（σ̂²₀・Z'Z）を使っても
+                // `Z'Z`単体を使った場合と`β̂`は変わらない。Hansen Jにそのまま使い回せる
+                // よう、あらかじめ正しくスケーリングされた`unadjusted_s`を使う。
+                WeightType::Unadjusted => unadjusted_s,
                 WeightType::Robust => robust_moment_covariance(&z, &residuals0, n, l),
                 WeightType::Cluster { groups } => {
                     let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
@@ -217,9 +268,46 @@ impl GmmEstimator {
                     kernel_moment_covariance(&z, &residuals0, n, l, lags, &order)
                 }
             };
-            gmm_point_estimate(&z, &x, y, &s1)?
+            let beta1 = gmm_point_estimate(&z, &x, y, &s1)?;
+            (beta1, s1)
         };
         let residuals = y - &x * &beta;
+
+        // Hansen J過剰識別検定（Issue #167、iv-api-design.md 6.5節）。
+        // `J = (Z'ê)'S⁻¹(Z'ê)`（`n`で割らない、モジュール冒頭のdocコメント
+        // 「Hansen J過剰識別検定」参照。`ê`は最終推定に基づく残差、`S`は最終推定`beta`に
+        // 実際に使った重み行列`s_used`）。自由度は`len(instruments) - len(x_endog)`
+        // （`two_sls.rs`のSargan検定と同じ、`iv-api-design.md`1.1.1節の`instruments`＝
+        // 除外操作変数のみという定義に対応）。丁度識別（自由度0）では`None`
+        // （`iv-api-design.md`6.3節・6.5節）。
+        //
+        // `s_used`は`beta`計算時（`gmm_point_estimate`内の`llt`、または`unadjusted_s`
+        // 自体が正定値`Z'Z`の正のスカラー倍）で既に反転成功済み・正定値性が保証された
+        // 行列のため、ここでの特異性は理論上到達不能（`two_sls.rs`の`xtx_inverse`と
+        // 同じ防御的`Result`化）。
+        let q = input.k_instruments();
+        let k_endog = input.k_endog();
+        let (hansen_j_statistic, hansen_j_p_value) = if q == k_endog {
+            (None, None)
+        } else {
+            let df = q - k_endog;
+            let zte = z.transpose() * &residuals;
+            let llt_s = s_used.llt(Side::Lower).map_err(|_| {
+                CommonError::ComputationFailed(
+                    "failed to invert GMM weight matrix S for the Hansen J overidentification \
+                     test"
+                        .to_string(),
+                )
+            })?;
+            let s_inv_zte = llt_s.solve(&zte);
+            let stat: f64 = (0..l)
+                .map(|i| (*zte.get(i, 0)) * (*s_inv_zte.get(i, 0)))
+                .sum();
+            let chi2 = ChiSquared::new(df as f64)
+                .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+            let p_value = 1.0 - chi2.cdf(stat);
+            (Some(stat), Some(p_value))
+        };
 
         Ok(Self {
             params: beta,
@@ -230,6 +318,8 @@ impl GmmEstimator {
             gmm_iterations,
             nobs: n,
             k,
+            hansen_j_statistic,
+            hansen_j_p_value,
         })
     }
 
@@ -271,6 +361,17 @@ impl GmmEstimator {
     /// 係数の数 k（定数項を含む、`x_exog`と`x_endog`の合計）。
     pub fn k(&self) -> usize {
         self.k
+    }
+
+    /// Hansen J過剰識別検定の統計量。丁度識別（自由度0）の場合は`None`
+    /// （`iv-api-design.md`6.5節、`fit()`のdocコメント参照）。
+    pub fn hansen_j_statistic(&self) -> Option<f64> {
+        self.hansen_j_statistic
+    }
+
+    /// Hansen J過剰識別検定のp値。`hansen_j_statistic()`と同じ条件で`None`。
+    pub fn hansen_j_p_value(&self) -> Option<f64> {
+        self.hansen_j_p_value
     }
 }
 
@@ -1325,5 +1426,220 @@ mod tests {
                 "row {i}"
             );
         }
+    }
+
+    /// 丁度識別（`len(instruments) == len(x_endog)`）ではHansen J過剰識別検定の自由度が
+    /// 0のため`None`になる（`iv-api-design.md`6.3節・6.5節、`two_sls.rs`のSargan検定と
+    /// 同じ扱い）。
+    #[test]
+    fn fit_sets_hansen_j_statistic_to_none_when_just_identified() {
+        let z = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let x_endog = z.clone();
+        let y: Vec<f64> = x_endog.iter().map(|&x| 1.0 + 2.0 * x).collect();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            &[x_endog],
+            vec!["x_endog".to_string()],
+            &[z],
+            vec!["z".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = GmmEstimator::fit(input, WeightType::Unadjusted, 2).unwrap();
+        assert_eq!(estimator.hansen_j_statistic(), None);
+        assert_eq!(estimator.hansen_j_p_value(), None);
+    }
+
+    /// 2-step efficient GMM（`gmm_iterations=2`）のHansen J統計量を、`GmmEstimator::fit`とは
+    /// 独立に「W₀=(Z'Z)⁻¹で初期推定→残差→S=Σêᵢ²zᵢzᵢ'（=最終推定に使った重み行列）→
+    /// 最終推定の残差でJ=(Z'ê)'S⁻¹(Z'ê)/nを計算」という同じ手順を再現した手計算オラクルと
+    /// 数値照合する（`fit()`のdocコメント「Hansen J過剰識別検定」参照、Issue #167。
+    /// `fit_computes_robust_weighted_estimate_matching_manual_formula`と同じデータ・
+    /// 同じ`S`構築だが、点推定ではなくJ統計量を検証する点が異なる）。
+    #[test]
+    fn fit_computes_hansen_j_statistic_matching_manual_formula_with_two_step_gmm() {
+        use statrs::distribution::{ChiSquared, ContinuousCDF};
+
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let n = y.len();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            &[z1.clone(), z2.clone()],
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let estimator = GmmEstimator::fit(input, WeightType::Robust, 2).unwrap();
+
+        let z = Mat::from_fn(n, 3, |i, j| match j {
+            0 => 1.0,
+            1 => z1[i],
+            _ => z2[i],
+        });
+        let x = Mat::from_fn(n, 2, |i, j| if j == 0 { 1.0 } else { x_endog[i] });
+        let y_mat = Mat::from_fn(n, 1, |i, _| y[i]);
+
+        let ztz = z.transpose() * &z;
+        let ztz_inv = ztz
+            .llt(Side::Lower)
+            .unwrap()
+            .solve(Mat::<f64>::identity(3, 3));
+        let zty = z.transpose() * &y_mat;
+        let ztx = z.transpose() * &x;
+        let bread0 = ztx.transpose() * &ztz_inv * &ztx;
+        let meat0 = ztx.transpose() * &ztz_inv * &zty;
+        let beta0 = bread0
+            .llt(Side::Lower)
+            .unwrap()
+            .solve(Mat::<f64>::identity(2, 2))
+            * &meat0;
+        let e0 = &y_mat - &x * &beta0;
+
+        let z_scaled = Mat::from_fn(n, 3, |i, j| (*e0.get(i, 0)) * (*z.get(i, j)));
+        let s = z_scaled.transpose() * &z_scaled;
+        let s_inv = s
+            .llt(Side::Lower)
+            .unwrap()
+            .solve(Mat::<f64>::identity(3, 3));
+        let bread1 = ztx.transpose() * &s_inv * &ztx;
+        let meat1 = ztx.transpose() * &s_inv * &zty;
+        let beta1 = bread1
+            .llt(Side::Lower)
+            .unwrap()
+            .solve(Mat::<f64>::identity(2, 2))
+            * &meat1;
+
+        let e1 = &y_mat - &x * &beta1;
+        let zte1 = z.transpose() * &e1;
+        let s_inv_zte1 = s.llt(Side::Lower).unwrap().solve(&zte1);
+        // `J = (Z'ê)'S⁻¹(Z'ê)`（`n`で割らない、`fit()`冒頭のdocコメント
+        // 「Hansen J過剰識別検定」参照。rust-reviewerの指摘で発覚した実装当初のバグ
+        // ——本テストのオラクルも当初は本番コードと同じ`/n`を含んでいたため検出できず、
+        // 独立検証になっていなかった——の修正を反映済み）。
+        let expected_stat: f64 = (0..3)
+            .map(|i| (*zte1.get(i, 0)) * (*s_inv_zte1.get(i, 0)))
+            .sum();
+        let expected_p_value = 1.0 - ChiSquared::new(1.0).unwrap().cdf(expected_stat);
+
+        assert!((estimator.hansen_j_statistic().unwrap() - expected_stat).abs() < 1e-8);
+        assert!((estimator.hansen_j_p_value().unwrap() - expected_p_value).abs() < 1e-8);
+    }
+
+    /// 1-step GMM（`gmm_iterations=1`）のHansen J統計量は、`weight_type`によらず
+    /// `σ̂²₀・Z'Z`（`σ̂²₀`はstep-0＝最終残差の分散）を重み行列として計算する
+    /// （`fit()`冒頭のdocコメント「Hansen J過剰識別検定」参照、ユーザー確認済み）。
+    #[test]
+    fn fit_computes_hansen_j_statistic_matching_manual_formula_with_one_step_gmm() {
+        use statrs::distribution::{ChiSquared, ContinuousCDF};
+
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let n = y.len();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            &[z1.clone(), z2.clone()],
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let estimator = GmmEstimator::fit(input, WeightType::Robust, 1).unwrap();
+
+        let z = Mat::from_fn(n, 3, |i, j| match j {
+            0 => 1.0,
+            1 => z1[i],
+            _ => z2[i],
+        });
+        let x = Mat::from_fn(n, 2, |i, j| if j == 0 { 1.0 } else { x_endog[i] });
+        let y_mat = Mat::from_fn(n, 1, |i, _| y[i]);
+
+        let ztz = z.transpose() * &z;
+        let ztz_inv = ztz
+            .llt(Side::Lower)
+            .unwrap()
+            .solve(Mat::<f64>::identity(3, 3));
+        let zty = z.transpose() * &y_mat;
+        let ztx = z.transpose() * &x;
+        let bread0 = ztx.transpose() * &ztz_inv * &ztx;
+        let meat0 = ztx.transpose() * &ztz_inv * &zty;
+        let beta0 = bread0
+            .llt(Side::Lower)
+            .unwrap()
+            .solve(Mat::<f64>::identity(2, 2))
+            * &meat0;
+        let e0 = &y_mat - &x * &beta0;
+
+        // 1-step GMMのHansen J用の重みは`σ̂²₀・Z'Z`（`weight_type`に関わらず）。
+        let sigma2_0: f64 = (0..n).map(|i| (*e0.get(i, 0)).powi(2)).sum::<f64>() / (n as f64);
+        let s = Mat::from_fn(3, 3, |i, j| sigma2_0 * (*ztz.get(i, j)));
+        let zte0 = z.transpose() * e0;
+        let s_inv_zte0 = s.llt(Side::Lower).unwrap().solve(&zte0);
+        let expected_stat: f64 = (0..3)
+            .map(|i| (*zte0.get(i, 0)) * (*s_inv_zte0.get(i, 0)))
+            .sum();
+        let expected_p_value = 1.0 - ChiSquared::new(1.0).unwrap().cdf(expected_stat);
+
+        assert!((estimator.hansen_j_statistic().unwrap() - expected_stat).abs() < 1e-8);
+        assert!((estimator.hansen_j_p_value().unwrap() - expected_p_value).abs() < 1e-8);
+    }
+
+    /// `weight_type=Unadjusted`かつ`gmm_iterations=2`のHansen J統計量は、`two_sls.rs`の
+    /// Sargan統計量と数値的に一致するはず（`fit()`冒頭のdocコメント「Hansen J過剰識別検定」
+    /// 参照）。点推定側の`fit_matches_two_sls_point_estimate_when_weight_type_is_unadjusted`
+    /// と対になる不変条件チェック（同じデータセットを使う）。`GmmEstimator`単体の
+    /// 手計算オラクルでは検出できなかった`σ̂²`スケーリング漏れ（rust-reviewerの指摘）を、
+    /// 独立実装である`TwoSlsEstimator`との数値一致という形で検証する。
+    #[test]
+    fn fit_computes_hansen_j_statistic_matching_two_sls_sargan_when_weight_type_is_unadjusted() {
+        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let x_endog = vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0, 8.0, 7.0];
+        let z1 = vec![3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0];
+        let z2 = vec![1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0, 5.0];
+        let y = vec![5.0, 3.0, 8.0, 6.0, 11.0, 10.0, 15.0, 13.0];
+
+        let build_input = || {
+            IvInput::from_columns(
+                &y,
+                std::slice::from_ref(&x1),
+                vec!["x1".to_string()],
+                std::slice::from_ref(&x_endog),
+                vec!["endog1".to_string()],
+                &[z1.clone(), z2.clone()],
+                vec!["z1".to_string(), "z2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap()
+        };
+
+        let gmm = GmmEstimator::fit(build_input(), WeightType::Unadjusted, 2).unwrap();
+        let two_sls =
+            crate::iv::two_sls::TwoSlsEstimator::fit(build_input(), OlsCovType::Classical, 0.95)
+                .unwrap();
+
+        let gmm_j = gmm.hansen_j_statistic().unwrap();
+        let sargan = two_sls.sargan_statistic().unwrap();
+        assert!(
+            (gmm_j - sargan).abs() < 1e-8,
+            "hansen_j={gmm_j}, sargan={sargan}"
+        );
+        let gmm_p = gmm.hansen_j_p_value().unwrap();
+        let sargan_p = two_sls.sargan_p_value().unwrap();
+        assert!(
+            (gmm_p - sargan_p).abs() < 1e-8,
+            "hansen_j_p={gmm_p}, sargan_p={sargan_p}"
+        );
     }
 }

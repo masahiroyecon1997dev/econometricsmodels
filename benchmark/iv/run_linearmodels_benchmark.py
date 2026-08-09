@@ -1,10 +1,9 @@
-"""linearmodelsでIV（2SLS）のベンチマーク値（係数・標準誤差・適合度統計量・
+"""linearmodelsでIV（2SLS/GMM）のベンチマーク値（係数・標準誤差・適合度統計量・
 診断統計量）を生成するスクリプト。
 
 IVの主リファレンス（`docs/planning/specs/iv-api-design.md`5.1節、Issue #171）。
-GMMは現時点で`method="gmm"`がPython側に配線されていないため対象外
-（`engine_pybind/src/iv/CLAUDE.md`「実装フェーズの分割方針」参照。配線issueで
-本スクリプトを拡張する）。
+2SLSは`run()`、GMMは`run_gmm()`（`method="gmm"`のPython配線完了後に追加、
+`run_gmm()`のモジュールdocコメント参照）。
 
 合成データは`generate_iv_datasets.py`を直接呼ばず、`tests/api_tests/fixtures/
 benchmarks/data/`に固定済みのCSVを読む（`benchmark/freeze_datasets.py`参照。
@@ -158,6 +157,39 @@ def _nested_f_test(
     return ((ssr_r - res_u.ssr) / q) / (res_u.ssr / df_u)
 
 
+def _weak_instrument_diagnostics(
+    pdf,
+    formula: str,
+    x_exog_cols: list[str],
+    x_endog_cols: list[str],
+    instrument_cols: list[str],
+) -> dict:
+    """弱操作変数診断（部分F統計量）を2種類計算する。`method`（2SLS/GMM）に
+    依存しない共通ロジック（`engine::iv::common::compute_first_stage`が
+    `method`非依存で計算するのと同じ位置づけ、`run()`から抽出）。
+
+    `weak_instrument_f_linearmodels`（`linearmodels`の`first_stage.diagnostics`の
+    `f.stat`、常にclassical/debiased=Trueで再fitして計算）と
+    `weak_instrument_f_independent`（`statsmodels`でSSRベースのnested F検定を
+    独立計算した値）の両方を返す。両者は機械精度で一致することを確認済み
+    （`iv.json`の`_meta.note`参照）。
+    """
+    from linearmodels.iv import IV2SLS
+
+    classical_mod = IV2SLS.from_formula(formula, pdf)
+    classical_res = classical_mod.fit(cov_type="unadjusted", debiased=True)
+    diag = classical_res.first_stage.diagnostics
+    return {
+        "weak_instrument_f_linearmodels": {
+            col: float(diag.loc[col, "f.stat"]) for col in x_endog_cols
+        },
+        "weak_instrument_f_independent": {
+            col: _nested_f_test(pdf, col, x_exog_cols, instrument_cols)
+            for col in x_endog_cols
+        },
+    }
+
+
 def run(
     dataset: str,
     x_exog_cols: list[str],
@@ -285,16 +317,11 @@ def run(
         # 依存しない）。ここでも常にclassical/debiased=Trueで再fitして計算する
         # （リクエストされたcov_typeに合わせて計算すると、本実装の固定値と
         # 意味の異なる比較になってしまうため）。
-        classical_mod = IV2SLS.from_formula(formula, pdf)
-        classical_res = classical_mod.fit(cov_type="unadjusted", debiased=True)
-        diag = classical_res.first_stage.diagnostics
-        result["weak_instrument_f_linearmodels"] = {
-            col: float(diag.loc[col, "f.stat"]) for col in x_endog_cols
-        }
-        result["weak_instrument_f_independent"] = {
-            col: _nested_f_test(pdf, col, x_exog_cols, instrument_cols)
-            for col in x_endog_cols
-        }
+        result.update(
+            _weak_instrument_diagnostics(
+                pdf, formula, x_exog_cols, x_endog_cols, instrument_cols
+            )
+        )
 
     if true_beta is not None:
         result["true_beta"] = true_beta
@@ -315,26 +342,251 @@ def run(
     return result
 
 
+# engine weight_type -> linearmodels weight_type（`IVGMM`のcov_typeと同じ文字列
+# 集合を使うため、`_COV_TYPE_MAP`のキー側とは独立に別テーブルにする。GMMの
+# cov_type自体は`_COV_TYPE_MAP`をそのまま再利用できる、`run_gmm()`のモジュール
+# docコメント参照）。
+_WEIGHT_TYPE_MAP: dict[str, str] = {
+    "unadjusted": "unadjusted",
+    "robust": "robust",
+    "cluster": "clustered",
+    "kernel": "kernel",
+}
+
+
+def run_gmm(
+    dataset: str,
+    x_exog_cols: list[str],
+    x_endog_cols: list[str],
+    instrument_cols: list[str],
+    weight_type: str,
+    cov_type: str,
+    cluster_col: str | None = None,
+    hac_lags: int | None = None,
+    gmm_iterations: int = 2,
+    confidence_level: float = 0.95,
+) -> dict:
+    """`linearmodels.iv.IVGMM`でGMMのベンチマーク値を生成する（`run()`のGMM版、
+    Issue #171）。
+
+    ## `weight_type`の対応関係（実測して確定）
+
+    `IVGMM`のコンストラクタ引数`weight_type`は`engine::iv::gmm::WeightType`と
+    同じ4値（`unadjusted`/`robust`/`kernel`は文字列そのまま、`cluster`だけ
+    `linearmodels`側は`clustered`）を取る。`_WEIGHT_TYPE_MAP`参照。
+
+    ## `cov_type`/`debiased`の対応関係
+
+    `run()`のモジュールdocコメントの表（`_COV_TYPE_MAP`）がGMMでもそのまま
+    使えることを実測確認済み（`baseline`シナリオ、`weight_type="unadjusted"`で
+    `coef`/`se`が相対誤差1e-10程度以下で一致）。`hc2`/`hc3`が対象外な理由も
+    `run()`と同じ（`IVGMMCovariance`が対応する`score_cov_estimator`を持たない）。
+
+    ## `gmm_iterations`と`iter_limit`/`tol`の対応関係
+
+    `IVGMM.fit()`の反復ループは`while iters < iter_limit and norm > tol`
+    （`iters`は1始まり）のため、既定の`iter_limit=2`では`tol`の値に関わらず
+    必ず2回目のステップまで実行してから打ち切る（`tol`が効くのは
+    `iter_limit>=3`のときのみ）。本実装の既定`gmm_iterations=2`
+    （`gmm_convergence=None`の固定反復モード）と一致するため、`tol`は
+    linearmodelsの既定値のまま渡さず気にしなくてよい。`iter_limit`に
+    `gmm_iterations`をそのまま渡す。
+
+    ## 検定分布・F統計量の対応関係
+
+    本実装のGMMは`cov_type`によらず常にz分布・カイ二乗形式（qで割らない）で
+    検定統計量を報告する設計（`iv-api-design.md`3.2節、`gmm.rs`のモジュールdoc
+    コメント参照）。`linearmodels`の`tstats`/`pvalues`は`run()`と同じく
+    `debiased`で分布が切り替わる（`OLSResults.pvalues`のdocstring参照）ため、
+    `coef`/`se`のみ使って本関数側でz分布から独自に計算し直す。
+
+    `f_statistic`も同様に`debiased`と連動してF分布形式に切り替わる
+    （`_CommonIVResults.f_statistic`のdocstring「Despite name, always
+    implemented using a quadratic-form test... If debiased is True, divides
+    statistic by number of parameters tested and uses an F-distribution」
+    参照）ため、そのまま使うと`coef`/`se`に必要な`debiased`（cov_typeとの対応
+    表通り）と検定統計量に必要な`debiased=False`相当（カイ二乗形式）が両立
+    できない。`res.cov`（係数の分散共分散行列）から傾き係数の部分行列を
+    切り出し、カイ二乗形式のWald統計量を直接計算し直す（本実装の
+    `gmm_wald_chi2_test`と同じ定義）。
+
+    ## Hansen J検定（過剰識別検定）の対応関係
+
+    `res.j_stat.stat`/`.pval`はカイ二乗検定として実装されており（`debiased`に
+    連動しない）、本実装の`overid_statistic`/`overid_p_value`（Hansen J、
+    `gmm.rs`参照）とそのまま対応する。`weight_type="unadjusted"`のとき、
+    `res.j_stat.stat`が`run()`が返す`sargan_statistic`と機械精度で一致することも
+    実測確認済み（本実装の`fit_computes_hansen_j_statistic_matching_two_sls_
+    sargan_when_weight_type_is_unadjusted`と同じ不変条件）。
+
+    ## Wu-Hausman検定
+
+    GMMには存在しない（`gmm.rs`参照）ため、このフィクスチャには含めない
+    （2SLS用の`iv.json`と異なり`wu_hausman_statistic`キー自体を持たない）。
+    """
+    import numpy as np
+    from linearmodels.iv import IVGMM
+    from scipy import stats as scipy_stats
+
+    df, true_beta = _load_iv_dataset(dataset)
+    pdf = df.to_pandas()
+    n = len(pdf)
+
+    exog_part = " + ".join(x_exog_cols)
+    endog_part = " + ".join(x_endog_cols)
+    instr_part = " + ".join(instrument_cols)
+    formula = f"y ~ 1{' + ' + exog_part if exog_part else ''} + [{endog_part} ~ {instr_part}]"
+
+    lm_weight_type = _WEIGHT_TYPE_MAP[weight_type]
+    weight_config: dict = {}
+    weight_hac_lag_used = None
+    if weight_type == "cluster":
+        weight_config["clusters"] = pdf[cluster_col]
+    elif weight_type == "kernel":
+        weight_hac_lag_used = (
+            hac_lags if hac_lags is not None else _hac_auto_lag(n)
+        )
+        weight_config["kernel"] = "bartlett"
+        weight_config["bandwidth"] = weight_hac_lag_used
+
+    mod = IVGMM.from_formula(
+        formula, pdf, weight_type=lm_weight_type, **weight_config
+    )
+
+    lm_cov_type, debiased = _COV_TYPE_MAP[cov_type]
+    cov_config: dict = {"debiased": debiased}
+    cov_hac_lag_used = None
+    if cov_type == "cluster":
+        cov_config["clusters"] = pdf[cluster_col]
+    elif cov_type == "hac":
+        cov_hac_lag_used = (
+            hac_lags if hac_lags is not None else _hac_auto_lag(n)
+        )
+        cov_config["kernel"] = "bartlett"
+        cov_config["bandwidth"] = cov_hac_lag_used
+
+    res = mod.fit(
+        iter_limit=gmm_iterations, cov_type=lm_cov_type, **cov_config
+    )
+
+    def _fix_name(name: str) -> str:
+        return "const" if name == "Intercept" else name
+
+    # z分布で独自に計算し直す（本関数のdocコメント「検定分布・F統計量の対応関係」参照）。
+    coef = {_fix_name(k): float(v) for k, v in res.params.to_dict().items()}
+    se = {_fix_name(k): float(v) for k, v in res.std_errors.to_dict().items()}
+    alpha = 1.0 - confidence_level
+    z_crit = float(scipy_stats.norm.ppf(1 - alpha / 2))
+    z_stats = {k: coef[k] / se[k] for k in coef}
+    p_values = {
+        k: float(2 * (1 - scipy_stats.norm.cdf(abs(v))))
+        for k, v in z_stats.items()
+    }
+    conf_int = {
+        k: [coef[k] - z_crit * se[k], coef[k] + z_crit * se[k]] for k in coef
+    }
+
+    # ロバストWald検定（カイ二乗形式、qで割らない）を`res.cov`から独自に計算し直す
+    # （本関数のdocコメント参照）。
+    param_names = list(res.params.index)
+    slope_idx = [i for i, nm in enumerate(param_names) if nm != "Intercept"]
+    beta_slopes = res.params.to_numpy()[slope_idx]
+    cov_slopes = res.cov.to_numpy()[np.ix_(slope_idx, slope_idx)]
+    q = len(slope_idx)
+    f_statistic = float(beta_slopes @ np.linalg.inv(cov_slopes) @ beta_slopes)
+    f_p_value = float(1 - scipy_stats.chi2.cdf(f_statistic, q))
+
+    result: dict = {
+        "coef": coef,
+        "se": se,
+        "z_stats": z_stats,
+        "p_values": p_values,
+        "conf_int": conf_int,
+        "r_squared": float(res.rsquared),
+        "r_squared_adj": float(res.rsquared_adj),
+        "f_statistic": f_statistic,
+        "f_p_value": f_p_value,
+        "nobs": int(res.nobs),
+        "df_resid": int(res.df_resid),
+        "hansen_j_statistic": (
+            float(res.j_stat.stat)
+            if len(instrument_cols) > len(x_endog_cols)
+            else None
+        ),
+        "hansen_j_p_value": (
+            float(res.j_stat.pval)
+            if len(instrument_cols) > len(x_endog_cols)
+            else None
+        ),
+    }
+
+    if x_endog_cols:
+        result.update(
+            _weak_instrument_diagnostics(
+                pdf, formula, x_exog_cols, x_endog_cols, instrument_cols
+            )
+        )
+
+    if true_beta is not None:
+        result["true_beta"] = true_beta
+
+    import linearmodels
+
+    result["_meta"] = {
+        "reference": "linearmodels",
+        "linearmodels_version": linearmodels.__version__,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "weight_type_requested": weight_type,
+        "weight_type_linearmodels": lm_weight_type,
+        "cov_type_requested": cov_type,
+        "cov_type_linearmodels": lm_cov_type,
+        "debiased": debiased,
+        "gmm_iterations": gmm_iterations,
+        "confidence_level": confidence_level,
+        "formula": formula,
+        "hac_lag": cov_hac_lag_used,
+        "weight_hac_lag": weight_hac_lag_used,
+    }
+    return result
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", required=True)
+    parser.add_argument("--method", choices=["2sls", "gmm"], default="2sls")
     parser.add_argument("--x-exog", nargs="*", default=["x1"])
     parser.add_argument("--x-endog", nargs="*", default=["endog1"])
     parser.add_argument("--instruments", nargs="*", default=["z1", "z2"])
+    parser.add_argument("--weight-type", default="unadjusted")
     parser.add_argument("--cov-type", default="classical")
     parser.add_argument("--cluster-col", default=None)
     parser.add_argument("--hac-lags", type=int, default=None)
+    parser.add_argument("--gmm-iterations", type=int, default=2)
     parser.add_argument("--confidence-level", type=float, default=0.95)
     args = parser.parse_args()
 
-    output = run(
-        args.dataset,
-        args.x_exog,
-        args.x_endog,
-        args.instruments,
-        args.cov_type,
-        args.cluster_col,
-        args.hac_lags,
-        args.confidence_level,
-    )
+    if args.method == "gmm":
+        output = run_gmm(
+            args.dataset,
+            args.x_exog,
+            args.x_endog,
+            args.instruments,
+            args.weight_type,
+            args.cov_type,
+            args.cluster_col,
+            args.hac_lags,
+            args.gmm_iterations,
+            args.confidence_level,
+        )
+    else:
+        output = run(
+            args.dataset,
+            args.x_exog,
+            args.x_endog,
+            args.instruments,
+            args.cov_type,
+            args.cluster_col,
+            args.hac_lags,
+            args.confidence_level,
+        )
     print(json.dumps(output, indent=2))

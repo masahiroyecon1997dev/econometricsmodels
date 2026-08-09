@@ -809,6 +809,39 @@ def test_singular_first_stage_design_matrix_raises_computation_error():
         ).fit()
 
 
+def test_gmm_cluster_weight_type_raises_computation_error_when_cluster_count_is_less_than_instrument_count(
+    iv_dataset,
+):
+    """`method="gmm"`固有のComputationErrorパス。`weight_type="cluster"`の重み行列`S`
+    （l×l、`l`は全操作変数の数）はG個のランク1行列の和のため`rank(S)≤G`
+    （`engine/src/iv/CLAUDE.md`「クラスター数Gと操作変数の数lの関係」参照）。
+    `G=2 < l=3`（`x_exog=[]`・`instruments=["z1","z2"]`で`l=const+z1+z2=3`）だと
+    `S`が構造的に特異になり`ComputationError`（`gmm.rs`の第一段階とは別の、GMM
+    自体の重み行列反転経路。2SLS/GMM共通の第一段階回帰の特異性
+    （`test_singular_first_stage_design_matrix_raises_computation_error`）とは
+    別のGMM固有の失敗パス）。
+    """
+    n = iv_dataset.height
+    df = iv_dataset.with_columns(
+        (pl.int_range(pl.len()) < n // 2).cast(pl.Int64).alias("cluster_group")
+    )
+    options = IvOptions(
+        method="gmm",
+        weight_type="cluster",
+        cluster_col="cluster_group",
+        cov_type="classical",
+    )
+    with pytest.raises(ComputationError):
+        IV(
+            df,
+            y="y",
+            x_exog=[],
+            x_endog=["endog1"],
+            instruments=["z1", "z2"],
+            options=options,
+        ).fit()
+
+
 def test_insufficient_observations_raises(iv_dataset):
     """観測数nが説明変数の数k（定数項込み）以下の場合`ValidationError`。"""
     df = iv_dataset.head(2)  # n=2、k=3（const, x1, endog1）

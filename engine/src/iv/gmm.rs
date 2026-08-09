@@ -137,8 +137,16 @@
 //! `hac_cov_params`もNewey-Westの重み付け以外に追加の小標本補正を持たないため、補正の
 //! 有無という観点では点推定用とSE用が最初から同じ計算になる）:
 //!
-//! - `classical`: `σ̂²・Z'Z`（`σ̂² = ssr/df_resid`。Hansen Jの`σ̂²₀`とは異なり、最終残差・
-//!   `df_resid`補正を使う——2SLSの`classical_cov_params`と同じ考え方）。
+//! - `classical`: `σ̂²・Z'Z`（`σ̂² = Σ(êᵢ-ē)²/df_resid`、**残差を中心化**した標本分散。
+//!   Hansen Jの`σ̂²₀`とは異なり、最終残差・`df_resid`補正を使う——2SLSの
+//!   `classical_cov_params`と同じ考え方だが、中心化の要否だけは異なる。2SLS/OLSは
+//!   一次条件（正規方程式）により定数項を含む限り常に`ē=0`が保証されるため中心化の
+//!   有無で結果が変わらないが、GMMの一次条件`X'ZWZ'ê=0`は`weight_type=Unadjusted`
+//!   以外では`ē=0`を保証しない（`X'ZW`による重み付き制約であり、`ē=(1/n)Σêᵢ`という
+//!   単純平均をゼロにする制約とは一般に一致しない）ため、非中心化SSRを使うと
+//!   `weight_type≠Unadjusted`のときのみ`σ̂²`が系統的にずれる（初版のバグ、Issue #171の
+//!   GMMクロスチェック実装中に発覚・修正。`linearmodels`の`HomoskedasticWeightMatrix`
+//!   が常に中心化する設計と実測突き合わせて判明）。
 //! - `hc0`〜`hc3`: `two_sls.rs`の`hc_cov_params`と同型（`X̂`→`Z`）。HC2/HC3のレバレッジは
 //!   `Z`から計算する自己拡張で、**外部参照実装での検証は不可能**（2SLS自身のHC2/HC3が
 //!   既にこの位置づけ、`iv-api-design.md`3.1節参照。ユーザー確認済み）。**HC1の小標本補正
@@ -529,7 +537,15 @@ impl GmmEstimator {
 
         let omega_hat = match &cov_type {
             CovType::Classical => {
-                let sigma2 = ssr / (df_resid as f64);
+                // 残差を中心化した標本分散を使う（`weight_type=Unadjusted`以外では
+                // GMMの一次条件が`ē=0`を保証しないため、モジュール冒頭のdocコメント
+                // 「標準誤差・検定統計量」`classical`の項参照）。
+                let mean_residual: f64 =
+                    (0..n).map(|i| *residuals.get(i, 0)).sum::<f64>() / (n as f64);
+                let centered_ssr: f64 = (0..n)
+                    .map(|i| (*residuals.get(i, 0) - mean_residual).powi(2))
+                    .sum();
+                let sigma2 = centered_ssr / (df_resid as f64);
                 Mat::from_fn(l, l, |i, j| sigma2 * (*ztz.get(i, j)))
             }
             CovType::Hc0 => gmm_hc_omega(&z, &residuals, &ztz, n, k, l, HcVariant::Hc0)?,
@@ -3002,7 +3018,6 @@ mod tests {
             .unwrap()
             .solve(Mat::<f64>::identity(k, k));
 
-        let ssr: f64 = (0..n).map(|i| (*residuals.get(i, 0)).powi(2)).sum();
         let df_resid = n - k;
 
         let input_for = || {
@@ -3045,8 +3060,14 @@ mod tests {
             }
         };
 
-        // classical: Ω̂ = σ̂²・Z'Z（σ̂² = ssr/df_resid）。
-        let sigma2 = ssr / (df_resid as f64);
+        // classical: Ω̂ = σ̂²・Z'Z（σ̂² = Σ(ê-ē)²/df_resid、中心化。この専用テストは
+        // weight_type=Robustを使っており、GMMの一次条件はē=0を保証しないため
+        // 中心化の有無が実際に効く。モジュール冒頭のdocコメント「classical」の項参照）。
+        let mean_residual: f64 = (0..n).map(|i| *residuals.get(i, 0)).sum::<f64>() / (n as f64);
+        let centered_ssr: f64 = (0..n)
+            .map(|i| (*residuals.get(i, 0) - mean_residual).powi(2))
+            .sum();
+        let sigma2 = centered_ssr / (df_resid as f64);
         let omega_classical = Mat::from_fn(l, l, |i, j| sigma2 * (*ztz.get(i, j)));
         assert_se_matches(CovType::Classical, &omega_classical);
 

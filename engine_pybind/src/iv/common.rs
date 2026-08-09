@@ -37,7 +37,13 @@
 //! `engine/src/iv/CLAUDE.md`参照）。それ以外の理論上到達不能な失敗は`IvError::
 //! HausmanRegressionFailed`として`fit()`自体を失敗させる（`iv_error_to_pyerr`の
 //! `FirstStageFailed`/`SecondStageFailed`と同じ分類ロジックに合流する）。
-//! `overid_statistic`/`overid_p_value`は引き続き別issue（#167）のスコープ。
+//!
+//! 【Issue #167のフォローアップ】`overid_statistic`/`overid_p_value`は`TwoSlsEstimator::
+//! sargan_statistic()`/`sargan_p_value()`（`engine::iv::two_sls`、Issue #167で計算ロジックを
+//! 実装済み）をそのまま返す配線のみ（`wu_hausman_statistic`と同じ`Option<f64>`同士の代入）。
+//! `method="gmm"`はまだ`ValidationError`で弾かれるため（Issue #160未実装）、GMMのHansen J
+//! （`engine::iv::gmm::GmmEstimator::hansen_j_statistic()`）はこの配線の対象外
+//! （`method="gmm"`が実際に配線される際に合わせて対応する）。
 //!
 //! 【Issue #170のスコープ】`IvResult::first_stage()`（内生変数ごとの第一段階回帰結果を
 //! `dict[str, OlsResults]`として返す別メソッド）を実装した。`OlsEstimator → OLSResult`
@@ -250,8 +256,8 @@ impl IvOptions {
 /// `TwoSlsEstimator::weak_instrument_f_statistics()` (Issue #163).
 /// `wu_hausman_statistic`/`wu_hausman_p_value` are populated from `TwoSlsEstimator::
 /// wu_hausman_statistic()`/`wu_hausman_p_value()` (Issue #164). `overid_statistic`/
-/// `overid_p_value` remain placeholders (`None`) until Issue #167 implements the
-/// underlying computation.
+/// `overid_p_value` are populated from `TwoSlsEstimator::sargan_statistic()`/
+/// `sargan_p_value()` (Issue #167).
 // `IvResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`IvOptions`の`from_py_object`とは
 // 対照的、`OLSResult`/`LogitResult`と同じ理由）。
@@ -525,9 +531,9 @@ pub(crate) fn build_iv_input(
 ///
 /// `weak_instrument_f_statistics`は`TwoSlsEstimator::weak_instrument_f_statistics()`
 /// （Issue #163）から、`wu_hausman_statistic`/`wu_hausman_p_value`は`TwoSlsEstimator::
-/// wu_hausman_statistic()`/`wu_hausman_p_value()`（Issue #164）から構築する。
-/// `overid_statistic`/`overid_p_value`は別issue（#167）のスコープのため、現時点では
-/// `None`のプレースホルダーを返す（`IvResult`のdocコメント参照）。
+/// wu_hausman_statistic()`/`wu_hausman_p_value()`（Issue #164）から、`overid_statistic`/
+/// `overid_p_value`は`TwoSlsEstimator::sargan_statistic()`/`sargan_p_value()`
+/// （Issue #167）から構築する（`IvResult`のdocコメント参照）。
 ///
 /// # Errors
 /// - `build_iv_input`が返すエラー（列抽出・y/x_exog/x_endog/instrumentsの重複・
@@ -579,8 +585,8 @@ pub(crate) fn fit(
             .iter()
             .cloned()
             .collect(),
-        overid_statistic: None,
-        overid_p_value: None,
+        overid_statistic: estimator.sargan_statistic(),
+        overid_p_value: estimator.sargan_p_value(),
         wu_hausman_statistic: estimator.wu_hausman_statistic(),
         wu_hausman_p_value: estimator.wu_hausman_p_value(),
         estimator,

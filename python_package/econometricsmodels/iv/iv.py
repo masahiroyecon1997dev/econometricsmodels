@@ -252,9 +252,12 @@ class IvResults:
 
     @property
     def overid_statistic(self) -> float | None:
-        """Overidentification test statistic (Sargan/Hansen J).
+        """Overidentification test statistic: Sargan (`method="2sls"`).
 
-        Not yet computed (placeholder `None`); see
+        `None` when just-identified (`len(instruments) ==
+        len(x_endog)`, degrees of freedom 0). `method="gmm"` is not
+        yet implemented and raises `ValidationError` before this
+        result is ever returned; see
         `docs/planning/specs/iv-api-design.md` section 6.5.
         """
         return self._raw.overid_statistic
@@ -263,7 +266,7 @@ class IvResults:
     def overid_p_value(self) -> float | None:
         """P-value of the overidentification test.
 
-        Not yet computed (placeholder `None`).
+        Same conditions as `overid_statistic` for when this is `None`.
         """
         return self._raw.overid_p_value
 

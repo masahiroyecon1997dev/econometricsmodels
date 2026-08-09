@@ -24,6 +24,11 @@
 //! `wu_hausman_p_value`）はいずれも別issue（#163/#167/#164）のスコープのため、
 //! 現時点では空/`None`のプレースホルダーを返す。
 //!
+//! 【Issue #163のフォローアップ】`weak_instrument_f_statistics`は`TwoSlsEstimator::
+//! weak_instrument_f_statistics()`（`engine::iv::two_sls`、Issue #163で計算ロジックを実装
+//! 済み）の戻り値`&[(String, f64)]`を`HashMap<String, f64>`へ詰め替えるだけで`fit`に配線した
+//! （`method="gmm"`は未実装のため対象外、常に空のまま返る）。
+//!
 //! 【Issue #170のスコープ】`IvResult::first_stage()`（内生変数ごとの第一段階回帰結果を
 //! `dict[str, OlsResults]`として返す別メソッド）を実装した。`OlsEstimator → OLSResult`
 //! 変換は`linear::ols::ols_estimator_to_result`（OLS本体の`fit`と共有、Issue #170で
@@ -220,8 +225,10 @@ impl IvOptions {
 ///
 /// `fit_iv` (`fit` in this file) constructs and returns it. The core fields above are
 /// populated by `TwoSlsEstimator`/`GmmEstimator` (`method="gmm"` is not yet implemented,
-/// see `fit`'s doc comment). The diagnostic fields below are placeholders (empty map /
-/// `None`) until Issue #163/#167/#164 implement the underlying computations.
+/// see `fit`'s doc comment). `weak_instrument_f_statistics` is populated from
+/// `TwoSlsEstimator::weak_instrument_f_statistics()` (Issue #163). The remaining
+/// diagnostic fields below are placeholders (`None`) until Issue #167/#164 implement the
+/// underlying computations.
 // `IvResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`IvOptions`の`from_py_object`とは
 // 対照的、`OLSResult`/`LogitResult`と同じ理由）。
@@ -273,7 +280,9 @@ pub struct IvResult {
     /// variable (keyed by variable name), testing the excluded instruments' joint
     /// significance after partialling out `x_exog` (`iv-api-design.md` 6.4節).
     /// **Not** the same as the plain F-statistic of the corresponding regression in
-    /// `first_stage()`, which includes `x_exog`'s contribution too.
+    /// `first_stage()`, which includes `x_exog`'s contribution too. Empty when
+    /// `x_endog=[]`. (`method="gmm"` raises `ValidationError` before an `IvResult` is
+    /// ever constructed, so this field is never observed to be empty for that reason.)
     #[pyo3(get)]
     pub weak_instrument_f_statistics: HashMap<String, f64>,
     /// Overidentification test statistic: Sargan (`method="2sls"`) or Hansen J
@@ -485,9 +494,10 @@ pub(crate) fn build_iv_input(
 /// `method`として受理する設計のまま。Issue #160実装後、この分岐だけ差し替える想定、
 /// ユーザー確認済み）。
 ///
-/// `weak_instrument_f_statistics`・`overid_statistic`/`overid_p_value`・
-/// `wu_hausman_statistic`/`wu_hausman_p_value`はいずれも別issue（#163/#167/#164）の
-/// スコープのため、現時点では空/`None`のプレースホルダーを返す（`IvResult`のdocコメント
+/// `weak_instrument_f_statistics`は`TwoSlsEstimator::weak_instrument_f_statistics()`
+/// （Issue #163）から構築する。`overid_statistic`/`overid_p_value`・
+/// `wu_hausman_statistic`/`wu_hausman_p_value`はいずれも別issue（#167/#164）の
+/// スコープのため、現時点では`None`のプレースホルダーを返す（`IvResult`のdocコメント
 /// 参照）。
 ///
 /// # Errors
@@ -535,7 +545,11 @@ pub(crate) fn fit(
         f_p_value: estimator.f_p_value(),
         r_squared: estimator.r_squared(),
         r_squared_adj: estimator.r_squared_adj(),
-        weak_instrument_f_statistics: HashMap::new(),
+        weak_instrument_f_statistics: estimator
+            .weak_instrument_f_statistics()
+            .iter()
+            .cloned()
+            .collect(),
         overid_statistic: None,
         overid_p_value: None,
         wu_hausman_statistic: None,

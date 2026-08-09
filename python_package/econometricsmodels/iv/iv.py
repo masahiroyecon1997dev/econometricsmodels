@@ -238,7 +238,14 @@ class IvResults:
         """Weak-instrument diagnostic: partial F-statistic for each
         endogenous variable, keyed by variable name.
 
-        Not yet computed (placeholder empty dict); see
+        Tests the excluded instruments' joint significance after
+        partialling out `x_exog`, always under the classical
+        (homoskedastic) formula regardless of `cov_type`. Not the
+        same as the plain F-statistic of the corresponding regression
+        in `first_stage()`, which includes `x_exog`'s contribution
+        too. Empty when `x_endog=[]`. `method="gmm"` is not yet
+        implemented and raises `ValidationError` before this result
+        is ever returned; see
         `docs/planning/specs/iv-api-design.md` section 6.4.
         """
         return self._raw.weak_instrument_f_statistics

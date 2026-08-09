@@ -23,6 +23,8 @@ Logit（Issue #65/#66）と同じ2段階に分けた。
 
 `weak_instrument_f_statistics`（空`HashMap`）・`overid_statistic`/`overid_p_value`・`wu_hausman_statistic`/`wu_hausman_p_value`（いずれも`None`）は`fit`ではプレースホルダーのまま返す。実際の計算はそれぞれ別issue（#163/#167/#164）。
 
+**`weak_instrument_f_statistics`は後日（#163完了後）配線済み**: `TwoSlsEstimator::weak_instrument_f_statistics()`（`&[(String, f64)]`）を`.iter().cloned().collect()`で`HashMap<String, f64>`に詰め替えるだけ（`fit`、`iv/common.rs`）。`method="gmm"`は`fit`冒頭で`TwoSlsEstimator::fit`を呼ぶ前に`ValidationError`を返すため`IvResult`自体が構築されず、この配線コードには到達しない（「空のまま返る」ではなく「そもそも呼ばれない」、rust-reviewerの指摘でdoc表現を訂正）。`overid_statistic`系・`wu_hausman_statistic`系はそれぞれ#167/#164が未着手のため引き続きプレースホルダー。
+
 3. **`first_stage()`メソッドissue**（IVでは#170）: `IvResult`に非公開フィールド`estimator: TwoSlsEstimator`を追加し（`LogitResult`/`ProbitResult`が`predict()`/`marginal_effects()`用に推定量そのものを保持するのと同じパターン）、`first_stage()`が`estimator.first_stage_estimators()`から`dict[str, OlsResults]`をオンデマンドに構築する。`OlsEstimator → OLSResult`変換は新設した`linear::ols::ols_estimator_to_result`（`linear::ols::fit`本体から抽出、`pub(crate)`）を再利用する——第一段階回帰はそれ自体が正しい（ナイーブな）通常のOLS回帰であり（`engine::iv::two_sls`のモジュールdocコメント参照）、2SLSの第二段階（サンドイッチ型分散を独自実装、Issue #166）とは異なりOLSとの共有を避ける理由が無いため。`first_stage()`が返す各`OlsResults.f_statistic`/`f_p_value`は通常のOLS F検定（`x_exog`の寄与を含む）であり、弱操作変数診断の部分F統計量（`weak_instrument_f_statistics`、Issue #163）とは別物（`IvResult`のdocコメント参照）。`IvResult`は`estimator`フィールドの追加により`#[derive(Clone)]`を外した（`TwoSlsEstimator`が`Clone`未実装のため、`LogitResult`/`ProbitResult`と同じトレードオフ）。
 
 ## `IvResult.stats`の命名（`t_stats`/`z_stats`ではない理由）

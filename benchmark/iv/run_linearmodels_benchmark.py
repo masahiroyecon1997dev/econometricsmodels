@@ -1,0 +1,324 @@
+"""linearmodelsでIV（2SLS）のベンチマーク値（係数・標準誤差・適合度統計量・
+診断統計量）を生成するスクリプト。
+
+IVの主リファレンス（`docs/planning/specs/iv-api-design.md`5.1節、Issue #171）。
+GMMは現時点で`method="gmm"`がPython側に配線されていないため対象外
+（`engine_pybind/src/iv/CLAUDE.md`「実装フェーズの分割方針」参照。配線issueで
+本スクリプトを拡張する）。
+
+合成データは`generate_iv_datasets.py`を直接呼ばず、`tests/api_tests/fixtures/
+benchmarks/data/`に固定済みのCSVを読む（`benchmark/freeze_datasets.py`参照。
+`run_statsmodels_benchmark.py`と同じ理由）。
+
+## `cov_type`/`debiased`の対応関係（実装時に実測して確定、`iv-api-design.md`3.1節の
+「未確定事項」に対応）
+
+`engine::iv::two_sls`の`cov_type`と`linearmodels.iv.IV2SLS.fit()`の
+`cov_type`/`debiased`の対応は、`baseline`シナリオで実際に`econometricsmodels.IV`と
+突き合わせて実測確認した（`coef`/`se`が相対誤差1e-10程度以下で一致）。
+
+| engine cov_type | linearmodels cov_type | debiased |
+|---|---|---|
+| classical        | unadjusted             | True  |
+| hc0              | robust                 | False |
+| hc1              | robust                 | True  |
+| cluster          | clustered              | True  |
+| hac              | kernel (bartlett)      | False |
+
+`debiased`はいずれのcov_typeでもs²・S（モーメント分散共分散行列）のスケーリングに
+影響する（`n`のみ使うか`n/(n-k)`補正を掛けるか）。`classical`/`hc1`/`clustered`は
+補正あり（`engine`の対応するcov_typeが常にn-k分母を使うため）、`hc0`/`kernel`(hac)は
+補正なし（`engine`のhc0・hacがn-k補正を持たないため）。
+
+`hc2`/`hc3`は対応するlinearmodels側の実装が無い（`HomoskedasticCovariance`/
+`HeteroskedasticCovariance`/`KernelCovariance`/`ClusteredCovariance`のみ、レバレッジ
+`h_ii`によるスケーリングは未実装）ため、本スクリプトの対象外（`iv-api-design.md`
+3.1節の既存の記述通り。R `ivreg`側にも確立した参照実装が無いことは以前から判明
+済み）。`engine`側は独自のOLS拡張として実装済みで、`engine`のRust単体テスト
+（`two_sls.rs`の`fit_computes_hc2_std_errors_matching_manual_sandwich_formula`等、
+独立な素朴ループでの手計算とのクロスチェック）による検証に留める。
+
+## 検定分布（`iv-api-design.md`3.2節の「未確定事項」に対応）
+
+`linearmodels`の`pvalues`/`tstats`/`f_statistic`は`debiased=False`だと正規分布/
+カイ二乗形式（`f_statistic`はqで割らない生の二次形式）、`debiased=True`だと
+t(df_resid)分布/F分布（`f_statistic`はqで割る）を使う仕様（`linearmodels.iv.
+results.IVResults.pvalues`/`f_statistic`のdocstring参照、実装ソースで確認済み）。
+本実装の2SLSは`cov_type`によらず常にt分布・F分布で報告する設計（`iv-api-design.md`
+3.2節）のため、`hc0`/`hac`（`debiased=False`）と突き合わせる際は`linearmodels`が
+返す`coef`/`se`のみ使い、t統計量・p値・信頼区間・F統計量は本関数側で
+t(df_resid)・F(q, df_resid)分布を使って独自に計算し直す（`debiased`の値に
+関係なく一貫した比較ができるようにするため。`run()`本体のコメント参照）。
+
+## Wu-Hausman検定の対応関係（実装時に実測して発覚、`iv-api-design.md`6.6節の
+実装が前提とする定式化を再確認）
+
+`linearmodels`にはWu-Hausman系の検定が2つある（`res.wu_hausman()`: SSR差分に
+基づく射影ベースの検定・`cov_type`非依存、`res.wooldridge_regression`:
+augmented regressionのWald検定・モデルの`cov_type`を使う）。本実装
+（`wald_test_last_columns`によるaugmented regression Wald検定）と数式が対応
+するのは名前に反して`wooldridge_regression`の方で、`classical`/`hc0`/`hc1`/
+`cluster`では`wooldridge_regression.stat / n_endog`が本実装の
+`wu_hausman_statistic`と機械精度で一致することを実測確認した（`wu_hausman()`は
+asymptotically equivalentな別定式化のため、classicalでも相対誤差1e-5〜1e-2程度の
+ズレが残り、一致しない）。`hac`（kernel）のみ`wooldridge_regression`でも一致しない
+（実測相対誤差が大きい、原因未特定）ため、`hac`の`wu_hausman_statistic`/
+`wu_hausman_p_value`は`None`にする（R `ivreg`クロスチェック実装時に別途確認、
+ユーザー確認済み）。
+
+使用例:
+    python run_linearmodels_benchmark.py --dataset baseline --cov-type classical
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+import polars as pl
+
+DATA_DIR = (
+    Path(__file__).resolve().parents[2]
+    / "tests"
+    / "api_tests"
+    / "fixtures"
+    / "benchmarks"
+    / "data"
+)
+
+# engine cov_type -> (linearmodels cov_type, debiased)。モジュールdocstring参照。
+_COV_TYPE_MAP: dict[str, tuple[str, bool]] = {
+    "classical": ("unadjusted", True),
+    "hc0": ("robust", False),
+    "hc1": ("robust", True),
+    "cluster": ("clustered", True),
+    "hac": ("kernel", False),
+}
+
+
+def _hac_auto_lag(n: int) -> int:
+    """本実装（`engine::iv::two_sls::resolve_hac_lags`、`ols.rs`と同式）と同じ
+    自動ラグ式。R側・本実装の両方に同じ明示ラグを渡す既存方針
+    （`generate_ols_crosscheck_fixtures.py`の`_hac_auto_lag`）と同じ理由。
+    """
+    return int(4 * (n / 100) ** (2 / 9))
+
+
+def _load_iv_dataset(scenario: str) -> tuple[pl.DataFrame, list[float] | None]:
+    df = pl.read_csv(DATA_DIR / f"iv_{scenario}.csv")
+    true_betas = json.loads((DATA_DIR / "iv_true_beta.json").read_text())
+    # クラスター確認用の一時CSV（`generate_iv_fixtures.py`の`_run_cluster_case`）は
+    # `iv_true_beta.json`にエントリが無いため、`None`を許容する
+    # （`generate_ols_fixtures.py`のクラスターケースが`true_beta`比較をしないのと同じ扱い）。
+    return df, true_betas.get(scenario)
+
+
+def _nested_f_test(
+    pdf,
+    y_col: str,
+    x_exog_cols: list[str],
+    instrument_cols: list[str],
+) -> float:
+    """古典的（等分散前提、`cov_type`に依存しない）nested F検定によるpartial
+    F統計量を、`statsmodels.OLS`で独立計算する（`engine::iv::two_sls::
+    partial_f_statistic`と同じSSRベースの定義。`linearmodels`の
+    `first_stage.diagnostics`の`f.stat`は`debiased`次第でn/(n-k)分母の慣習が
+    異なるため、それとは別に本実装と同じ定義の値も用意する。両方をフィクスチャに
+    含める、ユーザー確認済み）。
+    """
+    import statsmodels.api as sm
+
+    n = len(pdf)
+    y = pdf[y_col].to_numpy()
+
+    x_u_cols = x_exog_cols + instrument_cols
+    x_u = sm.add_constant(pdf[x_u_cols].to_numpy()) if x_u_cols else None
+    if x_u is None:
+        raise ValueError("instrument_cols must be non-empty")
+    res_u = sm.OLS(y, x_u).fit()
+
+    if x_exog_cols:
+        x_r = sm.add_constant(pdf[x_exog_cols].to_numpy())
+        res_r = sm.OLS(y, x_r).fit()
+        ssr_r = res_r.ssr
+    else:
+        ssr_r = float((y**2).sum())
+
+    q = len(instrument_cols)
+    df_u = n - x_u.shape[1]
+    return ((ssr_r - res_u.ssr) / q) / (res_u.ssr / df_u)
+
+
+def run(
+    dataset: str,
+    x_exog_cols: list[str],
+    x_endog_cols: list[str],
+    instrument_cols: list[str],
+    cov_type: str,
+    cluster_col: str | None = None,
+    hac_lags: int | None = None,
+    confidence_level: float = 0.95,
+) -> dict:
+    from linearmodels.iv import IV2SLS
+
+    from scipy import stats as scipy_stats
+
+    df, true_beta = _load_iv_dataset(dataset)
+    pdf = df.to_pandas()
+    n = len(pdf)
+
+    exog_part = " + ".join(x_exog_cols)
+    endog_part = " + ".join(x_endog_cols)
+    instr_part = " + ".join(instrument_cols)
+    formula = f"y ~ 1{' + ' + exog_part if exog_part else ''} + [{endog_part} ~ {instr_part}]"
+
+    lm_cov_type, debiased = _COV_TYPE_MAP[cov_type]
+    cov_config: dict = {"debiased": debiased}
+    hac_lag_used = None
+    if cov_type == "cluster":
+        cov_config["clusters"] = pdf[cluster_col]
+    elif cov_type == "hac":
+        hac_lag_used = hac_lags if hac_lags is not None else _hac_auto_lag(n)
+        cov_config["kernel"] = "bartlett"
+        cov_config["bandwidth"] = hac_lag_used
+
+    mod = IV2SLS.from_formula(formula, pdf)
+    res = mod.fit(cov_type=lm_cov_type, **cov_config)
+
+    def _fix_name(name: str) -> str:
+        return "const" if name == "Intercept" else name
+
+    # 本実装はcov_typeによらず常にt分布（df=df_resid）で推論統計量を報告する
+    # （iv-api-design.md 3.2節）。`linearmodels`は`debiased=False`のとき正規分布・
+    # F統計量は生のカイ二乗形式（qで割らない）を返す仕様のため（`IVResults.pvalues`/
+    # `f_statistic`のdocstring参照、モジュールdocstringの表は`coef`/`se`のみに
+    # ついての対応関係）、coef/seは`linearmodels`の値をそのまま使いつつ、
+    # t統計量・p値・信頼区間・F統計量はdf_resid・t分布を使って本実装と同じ規則で
+    # 独自に計算し直す（`debiased`の値によらず一貫した比較ができるようにするため）。
+    coef = {_fix_name(k): float(v) for k, v in res.params.to_dict().items()}
+    se = {_fix_name(k): float(v) for k, v in res.std_errors.to_dict().items()}
+    df_resid = int(res.df_resid)
+    alpha = 1.0 - confidence_level
+    t_crit = float(scipy_stats.t.ppf(1 - alpha / 2, df_resid))
+    t_stats = {k: coef[k] / se[k] for k in coef}
+    p_values = {
+        k: float(2 * (1 - scipy_stats.t.cdf(abs(v), df_resid)))
+        for k, v in t_stats.items()
+    }
+    conf_int = {
+        k: [coef[k] - t_crit * se[k], coef[k] + t_crit * se[k]] for k in coef
+    }
+
+    q = len(coef) - 1  # 定数項を除く傾き係数の数（本実装のdf_model）
+    raw_f = float(res.f_statistic.stat)
+    f_statistic = raw_f if debiased else raw_f / q
+    f_p_value = float(1 - scipy_stats.f.cdf(f_statistic, q, df_resid))
+
+    # Wu-Hausman検定: 本実装（`wald_test_last_columns`によるaugmented regression
+    # Wald検定、iv-api-design.md 6.6節）と数式が対応するのは`res.wu_hausman()`
+    # （SSR差分に基づく射影ベースの検定、cov_type非依存の別定式化）ではなく
+    # `res.wooldridge_regression`（augmented regression、モデルのcov_typeをそのまま
+    # 使う）の方だと実測で判明した（`wu_hausman()`は理論上asymptotically
+    # equivalentだが有限標本では厳密には一致しない別定式化であり、classical/hc0/
+    # hc1/clusterでは`wooldridge_regression`をqで割った値が機械精度で一致する一方、
+    # `wu_hausman()`は相対誤差1e-5〜1e-2程度のズレが残る）。ただしhac（kernel）のみ
+    # `wooldridge_regression`でも一致しない（実測相対誤差大、原因未特定）ため
+    # `None`にする（モジュールdocstringの既知の未解決事項）。
+    n_endog = len(x_endog_cols)
+    if not x_endog_cols or cov_type == "hac":
+        wu_hausman_statistic = None
+        wu_hausman_p_value = None
+    else:
+        wr_stat = float(res.wooldridge_regression.stat) / n_endog
+        wu_hausman_statistic = wr_stat
+        wu_hausman_p_value = float(
+            1 - scipy_stats.f.cdf(wr_stat, n_endog, df_resid)
+        )
+
+    result: dict = {
+        "coef": coef,
+        "se": se,
+        "t_stats": t_stats,
+        "p_values": p_values,
+        "conf_int": conf_int,
+        "r_squared": float(res.rsquared),
+        "r_squared_adj": float(res.rsquared_adj),
+        "f_statistic": f_statistic,
+        "f_p_value": f_p_value,
+        "nobs": int(res.nobs),
+        "df_resid": df_resid,
+        "sargan_statistic": (
+            float(res.sargan.stat)
+            if len(instrument_cols) > len(x_endog_cols)
+            else None
+        ),
+        "sargan_p_value": (
+            float(res.sargan.pval)
+            if len(instrument_cols) > len(x_endog_cols)
+            else None
+        ),
+        "wu_hausman_statistic": wu_hausman_statistic,
+        "wu_hausman_p_value": wu_hausman_p_value,
+    }
+
+    if x_endog_cols:
+        # weak_instrument_f_statisticsは本実装では常にclassical（等分散前提）で
+        # 計算する設計（`engine/src/iv/CLAUDE.md`「弱操作変数診断」参照、cov_typeに
+        # 依存しない）。ここでも常にclassical/debiased=Trueで再fitして計算する
+        # （リクエストされたcov_typeに合わせて計算すると、本実装の固定値と
+        # 意味の異なる比較になってしまうため）。
+        classical_mod = IV2SLS.from_formula(formula, pdf)
+        classical_res = classical_mod.fit(cov_type="unadjusted", debiased=True)
+        diag = classical_res.first_stage.diagnostics
+        result["weak_instrument_f_linearmodels"] = {
+            col: float(diag.loc[col, "f.stat"]) for col in x_endog_cols
+        }
+        result["weak_instrument_f_independent"] = {
+            col: _nested_f_test(pdf, col, x_exog_cols, instrument_cols)
+            for col in x_endog_cols
+        }
+
+    if true_beta is not None:
+        result["true_beta"] = true_beta
+
+    import linearmodels
+
+    result["_meta"] = {
+        "reference": "linearmodels",
+        "linearmodels_version": linearmodels.__version__,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "cov_type_requested": cov_type,
+        "cov_type_linearmodels": lm_cov_type,
+        "debiased": debiased,
+        "confidence_level": confidence_level,
+        "formula": formula,
+        "hac_lag": hac_lag_used,
+    }
+    return result
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dataset", required=True)
+    parser.add_argument("--x-exog", nargs="*", default=["x1"])
+    parser.add_argument("--x-endog", nargs="*", default=["endog1"])
+    parser.add_argument("--instruments", nargs="*", default=["z1", "z2"])
+    parser.add_argument("--cov-type", default="classical")
+    parser.add_argument("--cluster-col", default=None)
+    parser.add_argument("--hac-lags", type=int, default=None)
+    parser.add_argument("--confidence-level", type=float, default=0.95)
+    args = parser.parse_args()
+
+    output = run(
+        args.dataset,
+        args.x_exog,
+        args.x_endog,
+        args.instruments,
+        args.cov_type,
+        args.cluster_col,
+        args.hac_lags,
+        args.confidence_level,
+    )
+    print(json.dumps(output, indent=2))

@@ -112,7 +112,7 @@ econometricsmodels/
 ## 10. 開発環境
 
 - `.devcontainer/`（`devcontainer.json` / `Dockerfile` / `docker-compose.yml`）で開発環境を統一。
-- ベースイメージ: `python:3.14-slim-bookworm`。Rust（stable、clippy/rustfmt/llvm-tools）、uv、R（fixest/plm/ivreg/jsonlite、`benchmark/`のベンチマーク生成用）を導入済み。
+- ベースイメージ: `python:3.14-slim-bookworm`。Rust（stable、clippy/rustfmt/llvm-tools）、uv、R（fixest/plm/jsonlite、`benchmark/`のベンチマーク生成用）を導入済み。**`ivreg`は`Dockerfile`が`install.packages()`でインストールを試みているが、実際には失敗し導入されていない**（Issue #171で発覚。`ivreg`の依存先`car`→`MatrixModels`が`Matrix>=1.6.0`（→R>=4.4）を要求するが、devcontainerのRはDebian bookwormのr-base 4.2.2固定でこれを満たせない。`install.packages()`はベクタの一部が失敗してもRUNコマンド自体は成功扱いになるため、ビルドは通ってしまいこの状態に気づきにくい）。IVのRクロスチェック（`ivreg`）に着手する際は、まずこの制約の解消（R自体の更新、または`AER::ivreg()`/`gmm`パッケージ等の依存が軽い代替）を検討する。
 - Claude Code CLIはdevcontainer.jsonの`ghcr.io/anthropics/devcontainer-features/claude-code`featureで導入（Dockerfile側での重複インストールはしない）。`gh`（GitHub CLI）は`ghcr.io/devcontainers/features/github-cli`featureで導入（`/cicd`等のコマンドが前提とするため）。
 - **トークン消費を抑えるための除外設定**: `.claude/settings.json`の`permissions.deny`/`ask`で、lockファイル・`target/`・`.venv/`・ベンチマークのフィクスチャJSON・GitHub Copilot用設定（`.github/agents/` `.github/instructions/`、メンテナンスが最新に追いついていない可能性があるため）等を除外している。
 - 詳細は`.claude/settings.json`を参照。

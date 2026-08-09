@@ -39,11 +39,15 @@ from pathlib import Path
 sys.path.insert(
     0, str(Path(__file__).resolve().parent / "nonlinear")
 )  # benchmark/nonlinear/ を import path に追加（generate_binary_choice_datasets）
+sys.path.insert(
+    0, str(Path(__file__).resolve().parent / "iv")
+)  # benchmark/iv/ を import path に追加（generate_iv_datasets）
 
 from generate_binary_choice_datasets import (  # noqa: E402
     generate_logit_dataset,
     generate_probit_dataset,
 )
+from generate_iv_datasets import generate_iv_dataset  # noqa: E402
 from generate_synthetic_datasets import generate_dataset  # noqa: E402
 
 # generate_ols_fixtures.py / generate_wls_fixtures.py のNUMERIC_SCENARIOSに
@@ -77,6 +81,33 @@ LOGIT_SCENARIOS = [
 # perfect_multicollinearityを加えた全シナリオ。LOGIT_SCENARIOSと同じシナリオ構成
 # （generate_binary_choice_datasets.py参照）。
 PROBIT_SCENARIOS = list(LOGIT_SCENARIOS)
+
+# generate_iv_datasets.pyのSCENARIOS全て（IV: 2SLS/GMM用、Issue #171）。
+# moderate_multicollinearity/high_condition_number/scale_varianceはk_exog=2、
+# perfect_multicollinearityはk_exog=3が必要（generate_iv_datasets.pyのdocstring参照）。
+IV_SCENARIOS = [
+    "baseline",
+    "just_identified",
+    "weak_instruments",
+    "small_n",
+    "heteroskedastic",
+    "autocorrelated",
+    "moderate_multicollinearity",
+    "high_condition_number",
+    "perfect_multicollinearity",
+    "scale_variance",
+]
+IV_K_EXOG_OVERRIDES = {
+    "moderate_multicollinearity": 2,
+    "high_condition_number": 2,
+    "scale_variance": 2,
+    "perfect_multicollinearity": 3,
+}
+
+# クラスターロバストSEのG=2境界ケース専用（`testing-policy.md`「クラスタ数G」の罠、
+# `SYNTHETIC_K1_SCENARIOS`と同じ理由）。x_exog=0にしてq=1（endog1のみ）に絞る
+# （baseline既定のx_exog=['x1']込みだとq=2になりG=2で必然的に特異になるため）。
+IV_G2_BOUNDARY_SCENARIOS = ["baseline"]
 
 # cluster_g2ケース専用。k=1だとrng呼び出し順序が変わるため
 # baseline（既定k=3）とは別データになる。
@@ -132,6 +163,28 @@ def freeze(output_dir: Path) -> None:
 
     (output_dir / "probit_true_beta.json").write_text(
         json.dumps(probit_true_betas, indent=2)
+    )
+
+    iv_true_betas: dict[str, list[float]] = {}
+    for scenario in IV_SCENARIOS:
+        kwargs = {}
+        if scenario in IV_K_EXOG_OVERRIDES:
+            kwargs["k_exog"] = IV_K_EXOG_OVERRIDES[scenario]
+        df, true_beta = generate_iv_dataset(scenario, **kwargs)
+        df.write_csv(output_dir / f"iv_{scenario}.csv")
+        iv_true_betas[scenario] = true_beta.tolist()
+
+    (output_dir / "iv_true_beta.json").write_text(
+        json.dumps(iv_true_betas, indent=2)
+    )
+
+    for scenario in IV_G2_BOUNDARY_SCENARIOS:
+        df, true_beta = generate_iv_dataset(scenario, k_exog=0)
+        df.write_csv(output_dir / f"iv_{scenario}_g2.csv")
+        iv_true_betas[f"{scenario}_g2"] = true_beta.tolist()
+
+    (output_dir / "iv_true_beta.json").write_text(
+        json.dumps(iv_true_betas, indent=2)
     )
 
     print(f"wrote frozen datasets to {output_dir}")

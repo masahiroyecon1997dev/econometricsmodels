@@ -106,15 +106,19 @@ Issue #171（`linearmodels`/`ivreg`とのベンチマーク作成）でリファ
 - 2SLSの分散はサンドイッチ型（`(X'PzX)^-1 X'Pz Ω Pz X (X'PzX)^-1`、`Ω`の推定方法が
   `cov_type`で変わる）。**GMMは`cov_type`（最終SEの計算方法）と`weight_type`（点推定に使う
   重み行列）を分離する**（詳細は6.2）。
-- **未確定事項（Issue #166時点で追記）**: `hc2`/`hc3`（レバレッジ`h_ii`によるスケーリング）は
-  `linearmodels.iv.covariance`（`Homoskedastic`/`Heteroskedastic`/`Kernel`/`Clustered`のみ）・
-  R `ivreg`（`hatvalues.ivreg`の実装がソース上コメントアウトされている）のいずれにも
-  確立した参照実装が無い。実装（`engine/src/iv/two_sls.rs`）はOLSのHC2/HC3を代数的に拡張し、
-  レバレッジを第二段階の設計行列`X̂`のみから計算する自作の拡張になっており、
-  「classical/HC0/HC1/cluster/HACのように射影`Pz`の代数的恒等式から一意に導かれる」という
-  確立した根拠を持たない。Issue #171（`linearmodels`/`ivreg`との数値照合ベンチマーク作成）
-  着手時に妥当性を再確認し、式が不適切と判明した場合は別issueを切って修正を検討する
-  （ユーザー確認済み、GMMの検定分布の扱いと同じ方針）。
+- **`hc2`/`hc3`（レバレッジ`h_ii`によるスケーリング）は引き続き外部の参照実装で検証できない**
+  （Issue #171で再確認、`benchmark/iv/run_linearmodels_benchmark.py`のモジュールdocstring
+  参照）: `linearmodels.iv.covariance`は`Homoskedastic`/`Heteroskedastic`/`Kernel`/
+  `Clustered`のみで、R `ivreg`も同様（`hatvalues.ivreg`の実装がソース上コメントアウトされて
+  いる）。実装（`engine/src/iv/two_sls.rs`）はOLSのHC2/HC3を代数的に拡張した自作の拡張の
+  ままで、外部パッケージとの数値照合はできない（`engine`のRust単体テストによる独立な
+  手計算クロスチェックのみで検証を継続する）。
+- **`classical`/`hc0`〜`hc1`/`cluster`/`hac`は`linearmodels`の`cov_type`/`debiased`との対応が
+  実測で確定した**（Issue #171）: `classical`↔(`unadjusted`, `debiased=True`)、
+  `hc0`↔(`robust`, `debiased=False`)、`hc1`↔(`robust`, `debiased=True`)、
+  `cluster`↔(`clustered`, `debiased=True`)、`hac`↔(`kernel`(bartlett), `debiased=False`)。
+  いずれも`coef`/`se`が相対誤差1e-10以下（実質機械精度）で一致することを確認した
+  （詳細な対応表・検証根拠は`run_linearmodels_benchmark.py`のモジュールdocstring参照）。
 
 ### 3.2 検定分布
 
@@ -124,12 +128,19 @@ Issue #171（`linearmodels`/`ivreg`とのベンチマーク作成）でリファ
   t分布としての正当化がない（非線形モデル・MLE系のz分布判断と同じ理由）。
 - 2SLSとGMMの実装方針の違いと接続する決定であり、実装の詳細（GMM目的関数・
   重み行列の設計）は6章で確定する。
-- **未確定事項（Issue #159時点で追記）**: `linearmodels`・R `ivreg`（GMM未対応のため参考程度）が
-  実際にGMMをz分布で報告しているか、それともStataの`ivregress`のように既定でz分布・
-  `small`オプション指定時のみt分布に切り替える設計になっているかを、Issue #171
-  （tests/api_tests: linearmodels/ivregとの数値照合ベンチマーク作成）着手時にリファレンス
-  実装のソースを確認する。確認の結果、GMMにもt分布（またはオプションで切り替え可能）に
-  すべきと判断した場合は、別issueを切ってオプション追加を検討する（ユーザー確認済み）。
+- **`linearmodels`の分布切り替え方式が判明した（Issue #171で確認）**: `IV2SLS`/`IVGMM`とも
+  `fit(debiased=False)`（既定）では正規分布（z）・`f_statistic`もカイ二乗形式（qで割らない生の
+  二次形式）、`fit(debiased=True)`ではt(df_resid)分布・F分布（`f_statistic`もqで割った形式）を
+  返す（`linearmodels.iv.results.IVResults.pvalues`/`f_statistic`のソースで確認済み。Stataの
+  `ivregress`の`small`オプションと同じ発想）。本実装の2SLSは`cov_type`によらず常にt分布/F分布
+  という設計だが、`linearmodels`は`debiased`という別軸で切り替わるため、`hc0`/`hac`
+  （`debiased=False`で`coef`/`se`が一致する組み合わせ）をベンチマークする際は
+  `linearmodels`の`pvalues`/`tstats`/`f_statistic`をそのまま使わず、`coef`/`se`のみ借りて
+  t分布・F分布で独自に計算し直す必要があった（`run_linearmodels_benchmark.py`参照）。
+  GMMについては、`linearmodels`の既定（`debiased=False`→z分布）が本実装の設計
+  （GMMは常にz分布）と一致することも合わせて確認できた。GMM自体のcov_type対応・SE計算は
+  まだ未実装（6.2節・6.7節）のため、GMMのz分布での数値照合は別issue（GMMのcov_type対応
+  issue）に持ち越す。
 
 ## 4. 内部実装・共通化（確定）
 
@@ -159,6 +170,14 @@ Issue #171（`linearmodels`/`ivreg`とのベンチマーク作成）でリファ
 ### 5.2 Rクロスチェックパッケージ
 
 **`ivreg`**。ただし`ivreg`は2SLSのみ対応でGMMには対応していない見込み（要実装時再確認）。
+
+**現状の既知の問題（Issue #171で発覚）**: devcontainerのRには`ivreg`が未導入で、インストールも
+できない状態（`ivreg`が要求する`car`パッケージの依存先`MatrixModels`が`Matrix>=1.6.0`
+（→R>=4.4）を要求するが、devcontainerのRは4.2.2で更新できない）。CLAUDE.md §10の
+「導入済み」という記述は実態と食い違っている（要修正）。当面はPython
+（`linearmodels`）側のみで2SLS/GMMともに検証し、Rクロスチェックは実装を保留する
+（ユーザー確認済み。代替候補として、AERパッケージの`ivreg()`関数や`gmm`パッケージは
+依存が軽く導入できる可能性がある。Rクロスチェックに実際に着手する際に確認する）。
 
 ### 5.3 GMMのRクロスチェック省略（例外規定）
 

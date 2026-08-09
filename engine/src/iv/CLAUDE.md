@@ -31,6 +31,7 @@
 - **推定量構造体の単純なgetter（`dep_var_name()`・`nobs()`・`k()`等）は、実際に計算結果として公開している値でも、テストが一度も呼び出していないと`cargo llvm-cov`で未カバーになる**（Issue #168、`gmm.rs`の`GmmEstimator`・`two_sls.rs`の`TwoSlsEstimator`双方で発覚）。既存の値検証テスト（`fit_matches_...`等）は`params()`/`std_errors()`等の主要な値しか読まないことが多く、他のgetterを素通りしやすい。`two_sls.rs`の`fit_succeeds_when_over_identified`（`nobs`/`k`/`dep_var_name`をまとめて確認）のような「基本メタデータgetter群」テストを1つ用意し、新しいgetterを追加するたびにそこに追記する運用にすると見落としにくい。
 
 - **`linearmodels`とのベンチマーク照合（Issue #171）で判明した対応関係は`benchmark/iv/run_linearmodels_benchmark.py`のモジュールdocstringが正本**: `cov_type`↔`linearmodels`の`cov_type`/`debiased`の対応表、`debiased`が推論統計量の分布（t/F vs z/カイ二乗）を切り替える仕様、`wu_hausman_statistic`の照合には`res.wu_hausman()`ではなく`res.wooldridge_regression`（モデルの`cov_type`をそのまま使うaugmented regression）を使う必要があること（`hac`のみそれでも一致せず原因未特定）等。`/test-new`でIVのpytestを書く際・GMMの`cov_type`対応を実装する際は、まずこのdocstringを確認してから再調査する（`docs/planning/specs/iv-api-design.md`3.1節・3.2節にも要点を反映済み）。
+- **`wu_hausman_p_value`のF分布p値は、augmented regression（第一段階残差をn_endog列追加した拡張回帰）自身の`df_resid`（＝主構造式の`df_resid - n_endog`）を使う**（`OlsEstimator::wald_test_last_columns`が内部で使う`df_inference`と同じ、`engine/src/linear/CLAUDE.md`参照）。統計量自体（`wr_stat`）は主モデルのdfに依存しないため、この分母dfを取り違えても機械精度で一致してしまい見逃しやすい——`run_linearmodels_benchmark.py`の初版は主構造式の`df_resid`をそのまま流用しており、`wu_hausman_statistic`は機械精度一致するのに`wu_hausman_p_value`だけ最大0.2%程度（small_nシナリオ、df=37と36の違い）乖離するバグがあった（`tests/api_tests/test_iv_fixtures.py`作成時に発覚、Issue #171。統計量とp値で別々のdfを検証する落とし穴として記録）。
 
 ## 2SLSとGMMの独立実装方針
 

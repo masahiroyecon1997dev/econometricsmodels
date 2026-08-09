@@ -66,6 +66,13 @@ asymptotically equivalentな別定式化のため、classicalでも相対誤差1
 `wu_hausman_p_value`は`None`にする（R `ivreg`クロスチェック実装時に別途確認、
 ユーザー確認済み）。
 
+`wu_hausman_p_value`のF分布p値計算には、主モデルの`df_resid`ではなく
+augmented regression自身の`df_resid`（= 主モデルの`df_resid - n_endog`、
+第一段階残差をn_endog列追加した分だけ小さい）を使う必要がある（`run()`本体の
+該当コメント参照。統計量自体は主モデルのdfに依存しないため機械精度で
+一致するが、p値だけ最大0.2%程度乖離するバグが初版にあった。`test_iv_fixtures.py`
+作成時に発覚・修正、Issue #171）。
+
 使用例:
     python run_linearmodels_benchmark.py --dataset baseline --cov-type classical
 """
@@ -226,6 +233,14 @@ def run(
     # `wu_hausman()`は相対誤差1e-5〜1e-2程度のズレが残る）。ただしhac（kernel）のみ
     # `wooldridge_regression`でも一致しない（実測相対誤差大、原因未特定）ため
     # `None`にする（モジュールdocstringの既知の未解決事項）。
+    #
+    # p値のF分布の分母自由度は、augmented regression（第一段階残差をn_endog列
+    # 追加した拡張回帰）自身のdf_resid（= 主モデルのdf_resid - n_endog）を使う
+    # 必要がある（本実装の`wald_test_last_columns`はaugmented regression側の
+    # `OlsEstimator`が持つ`df_inference`をそのまま使うため）。初版は主モデルの
+    # `df_resid`をそのまま流用しており、F統計量自体は機械精度で一致するのに
+    # p値だけ最大0.2%程度乖離するバグがあった（`test_iv_fixtures.py`作成時に
+    # small_nシナリオ等で発覚、Issue #171）。
     n_endog = len(x_endog_cols)
     if not x_endog_cols or cov_type == "hac":
         wu_hausman_statistic = None
@@ -233,8 +248,9 @@ def run(
     else:
         wr_stat = float(res.wooldridge_regression.stat) / n_endog
         wu_hausman_statistic = wr_stat
+        wu_hausman_df_resid = df_resid - n_endog
         wu_hausman_p_value = float(
-            1 - scipy_stats.f.cdf(wr_stat, n_endog, df_resid)
+            1 - scipy_stats.f.cdf(wr_stat, n_endog, wu_hausman_df_resid)
         )
 
     result: dict = {

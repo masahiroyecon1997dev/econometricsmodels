@@ -41,7 +41,7 @@ CLAUDE.md 1章「計算コアはRustで実装し高速化」の狙いを定量�
 
 使用例:
     # 一括実行（n軸・k軸両方、結果をJSONに保存）
-    python compare_performance.py --output ../docs/planning/specs/_ols_performance_results.json
+    python compare_performance.py --output ../../docs/spec/_ols_performance_results.json
 
     # 単体計測（デバッグ用）
     python compare_performance.py --worker --library engine --cov-type hac --n 1000 --k 5
@@ -61,7 +61,11 @@ from pathlib import Path
 
 import polars as pl
 
-from generate_synthetic_datasets import generate_dataset
+sys.path.insert(
+    0, str(Path(__file__).resolve().parent.parent)
+)  # benchmark/ を import path に追加（generate_synthetic_datasets）
+
+from generate_synthetic_datasets import generate_dataset  # noqa: E402
 
 LIBRARIES = ["engine", "statsmodels", "pyfixest"]
 COV_TYPES = ["classical", "hc1", "cluster", "hac"]

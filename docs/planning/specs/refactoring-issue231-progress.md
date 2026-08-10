@@ -86,15 +86,62 @@
 **現状構成（着手前スナップショット）**:
 ```
 benchmark/
-├── iv/{fixtures/, ...}
-├── linear/{fixtures/, ...}
-├── nonlinear/{fixtures/, ...}
-└── panel/
+├── README.md
+├── generate_synthetic_datasets.py   # 系統非依存: 合成データ生成
+├── freeze_datasets.py               # 系統非依存: 上記をCSV固定
+├── load_wooldridge.py               # 系統非依存: Wooldridgeデータロード
+├── compare_performance.py           # OLS専用パフォーマンス測定（root直下、系統構造と不整合）
+├── render_performance_summary.py    # 上記の結果整形（同上）
+├── linear/     (OLS/WLS) fixtures/ + run_statsmodels_benchmark.py +
+│                run_lm_crosscheck_benchmark.R + run_lm_predict_crosscheck.R +
+│                run_pyfixest_benchmark.py + run_fixest_benchmark.R（未使用、後述）
+├── nonlinear/  (Logit/Probit) fixtures/ + generate_binary_choice_datasets.py +
+│                run_statsmodels_benchmark.py + run_glm_crosscheck_benchmark.R
+├── iv/         (2SLS/GMM) fixtures/ + generate_iv_datasets.py +
+│                run_linearmodels_benchmark.py + run_ivreg_benchmark.R
+└── panel/      run_plm_benchmark.R（FE/RE用スキャフォールド、engine側未実装＝Issue #231対象外）
 ```
 
-**状態**: 未着手
+`linear`/`nonlinear`/`iv`の3系統は既に「系統ディレクトリ＋`fixtures/`」で一貫した構造
+（`reference-benchmark`スキルに文書化済み）。問題は`compare_performance.py`/
+`render_performance_summary.py`がroot直下にありながら中身はOLS専用（`LIBRARIES`/
+`COV_TYPES`/回帰式ハードコード）という不整合のみだった。
 
-**メモ**: (着手後に記載)
+**状態**: ステップ1（ディレクトリ配置整理）完了。ステップ2（コード整理）は未着手。
+
+**メモ**:
+- ユーザー確認の結果、`compare_performance.py`/`render_performance_summary.py`は
+  `benchmark/performance/`という新規の系統横断ディレクトリへ移動することに決定
+  （今後WLS/Logit/Probitへ性能測定を拡張する際、系統ごとにコードを複製せず
+  1箇所に集約しやすくするため）。
+- `panel/run_plm_benchmark.R`はFE/RE着手時（Issue #231とは別スコープ）まで触らず
+  そのまま残すことに決定。
+- 実施内容:
+  - `git mv`で`benchmark/compare_performance.py`→`benchmark/performance/compare_performance.py`、
+    `benchmark/render_performance_summary.py`→`benchmark/performance/render_performance_summary.py`。
+  - `compare_performance.py`の`generate_synthetic_datasets`インポートが
+    ディレクトリ移動で壊れるため、他の`benchmark/<系統>/fixtures/*.py`と同じ
+    `sys.path.insert(0, str(Path(__file__).resolve().parent.parent))`パターンで修正
+    （移動前は同一ディレクトリだったため素の`import`で通っていた）。
+  - 移動に伴い参照更新: `.github/workflows/benchmark_ols.yml`（`working-directory`・
+    artifactパス）、`docs/spec/ols-performance-notes.md`（パス・再現コマンドの相対パス、
+    ついでに既存の誤記`../docs/planning/specs/_ols_performance_results.json`→
+    正しくは`docs/spec/`配下、`.gitignore`の`docs/spec/_*.json`と整合させて修正）、
+    `docs/spec/ci-cd-notes.md`、`.claude/skills/cicd/SKILL.md`、
+    `.claude/skills/reference-benchmark/SKILL.md`（`benchmark/performance/`の説明を追加）。
+  - 移動後、`compare_performance.py --worker`単体実行・`_run_isolated`経由の
+    サブプロセス再帰呼び出し（実際のCIスイープが使う経路）の両方で動作確認済み。
+- **ステップ2（コード整理）で対応が必要な項目（今回は着手しない）**:
+  - `linear/run_fixest_benchmark.R`: ファイル自身のコメントで「現時点でどの
+    フィクスチャ生成スクリプトからも呼ばれていない未検証コード」と明記されている
+    未使用ファイル。削除候補（ユーザー原文の「Fixestが使用されていない」はこれに該当）。
+  - `linear/run_pyfixest_benchmark.py`: fixture生成には未接続（pyfixestは精度検証に
+    使わない方針のため）。手動実行専用として残すか、`compare_performance.py`の
+    多手法対応化（WLS/Logit/Probit拡張）と合わせて整理するかは未確定。
+  - `compare_performance.py`自体のOLS専用ハードコード（`LIBRARIES`/`COV_TYPES`/
+    `_fit_once_*`）をWLS/Logit/Probitに拡張する際の一般化方法は未確定
+    （測定基盤（サブプロセス隔離・RSS計測・HACラグ整合等）と手法固有の
+    フィッティング処理を分離する設計が必要になる見込み）。
 
 ---
 

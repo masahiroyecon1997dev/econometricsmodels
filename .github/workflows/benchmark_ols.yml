@@ -1,6 +1,6 @@
 name: Benchmark (OLS performance)
 
-# benchmark/compare_performance.py（OLSのstatsmodels/pyfixestとの
+# benchmark/performance/compare_performance.py（OLSのstatsmodels/pyfixestとの
 # 実行時間・メモリ比較）を統一環境で実行し、結果をjob summaryに出力する。
 #
 # トリガーはタグpush（v*）+ workflow_dispatchのみ（ユーザー確認済み）。n=1,000,000込みの
@@ -44,13 +44,13 @@ jobs:
         run: uv run --locked --group test --group benchmark --group dev maturin develop --release
 
       - name: compare_performance.py
-        working-directory: benchmark
+        working-directory: benchmark/performance
         run: |
           uv run --locked --group test --group benchmark --group dev \
             python compare_performance.py --repeats 3 --output results.json
 
       - name: render job summary
-        working-directory: benchmark
+        working-directory: benchmark/performance
         run: |
           uv run --locked --group test --group benchmark --group dev \
             python render_performance_summary.py results.json >> "$GITHUB_STEP_SUMMARY"
@@ -58,4 +58,4 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ols-performance-results
-          path: benchmark/results.json
+          path: benchmark/performance/results.json

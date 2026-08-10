@@ -23,7 +23,7 @@ $ARGUMENTS
    - `ci_engine.yml`: `cargo test` / `clippy` / `fmt`（`-p engine`）・`cargo audit`。`engine/` 配下の変更をトリガーとする。
    - `ci_python.yml`: `pytest` / `Ruff`・`engine_pybind`のclippy/fmt・`pip-audit`。`python_package/` `engine_pybind/` 配下の変更をトリガーとする。
    - `cd_release.yml`: maturin-actionでのマルチOS（Linux/macOS/Windows）wheelビルド。タグpush + `workflow_dispatch`トリガー。
-   - `benchmark_ols.yml`: `benchmark/compare_performance.py`の定期実行、job summaryへの結果出力。タグpush + `workflow_dispatch`トリガー。
+   - `benchmark_ols.yml`: `benchmark/performance/compare_performance.py`の定期実行、job summaryへの結果出力。タグpush + `workflow_dispatch`トリガー。
    - `cd_docs.yml`: mkdocs → GitHub Pages（未実装）。
 2. 既存のワークフローファイルがあれば内容を読み、既存の構成・命名規則に合わせる。
 3. path-triggerを適切に設定し、無関係な変更でCIが走らないようにする（engine側とpython側のワークフローを混在させない）。

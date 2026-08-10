@@ -172,7 +172,7 @@ Issue #171（`linearmodels`/`ivreg`とのベンチマーク作成）でリファ
 
 ### 5.2 Rクロスチェックパッケージ
 
-**`ivreg`**。ただし`ivreg`は2SLSのみ対応でGMMには対応していない見込み（要実装時再確認）。
+**`ivreg`**。`ivreg`は2SLSのみ対応でGMMには対応していない（実装時に再確認済み、5.3節）。
 
 **経緯（Issue #171）**: devcontainerのRには当初`ivreg`が未導入で、インストールもできない状態
 だった（`ivreg`が要求する`car`パッケージの依存先`MatrixModels`が`Matrix>=1.6.0`（→R>=4.4）を
@@ -181,11 +181,28 @@ Python（`linearmodels`）側のみで2SLS/GMMともに検証し、2SLS/GMMと�
 数値照合を実装・コミット済み（GMM側は本節・5.3節の方針通りRクロスチェック省略が最終形）。
 
 この制約は`.devcontainer/Dockerfile`にCRAN公式のDebian向けAPTリポジトリ（`bookworm-cran40`）を
-追加しR 4.6.1系に更新することで解消した（コミット済み）。**未着手（次のタスク）**:
-コンテナ再構築後に`ivreg`が実際に導入されるか（`Rscript -e 'library(ivreg)'`等）を確認し、
-問題なければ2SLSの`ivreg`クロスチェック（`benchmark/iv/run_ivreg_benchmark.R`は雛形のみで
-未検証、CLAUDE.md §10参照）を実装する。導入できなければ代替候補（AERパッケージの`ivreg()`
-関数や`gmm`パッケージ、依存が軽い）を検討する。
+追加しR 4.6.1系に更新することで解消した（コミット済み）。**完了**: コンテナ再構築後に
+`ivreg`が実際に導入されていること（R 4.5.3、`Rscript -e 'library(ivreg)'`で確認済み）を
+確認し、2SLSの`ivreg`クロスチェックを実装した（`benchmark/iv/run_ivreg_benchmark.R`・
+`benchmark/iv/fixtures/generate_iv_crosscheck_fixtures.py`・
+`tests/api_tests/test_iv_crosscheck.py`）。
+
+`ivreg`はclassical/hc0/hc1/cluster/hacの`vcov`（`vcov()`/`sandwich::vcovHC`/`vcovCL`/
+`NeweyWest`）を`coeftest()`経由でそのまま使える（`lm`と同じ`sandwich`基盤）。
+`hc2`/`hc3`は既存方針通り対象外（3.1節、ivreg側にレバレッジ算出の確立した参照実装が
+無いため）。`summary(model, diagnostics=TRUE)`は弱操作変数F統計量・Wu-Hausman・
+Sarganを一括で返すが、`vcov.`に行列を渡すと警告付きでNULL（classical）にフォールバック
+する仕様のため、**常にclassical（iid）vcovで計算される**（実測確認済み）。これは
+本実装の`weak_instrument_f_statistics`/`overid_statistic`が常にclassicalという設計
+（6.4節・6.5節）と一致するためcov_typeによらず一律クロスチェックできるが、
+`wu_hausman_statistic`はcov_typeに依存する設計のため、`ivreg`側ではclassical cov_type
+のときのみクロスチェックする（hc0/hc1/clusterは既存のlinearmodelsクロスチェックに
+委ねる。ユーザー確認済み）。
+
+`f_p_value`が浮動小数点アンダーフローに近い極小値（1e-9〜1e-12オーダー）のケースがあり、
+その領域では相対誤差比較が意味を持たない（F統計量自体は0.6%程度しか違わなくても、
+F分布の裾の確率はその差を大きく増幅する）ため、`f_p_value`の比較のみ絶対誤差フロア
+（実測）を使う（`test_iv_crosscheck.py`参照）。
 
 ### 5.3 GMMのRクロスチェック省略（例外規定）
 

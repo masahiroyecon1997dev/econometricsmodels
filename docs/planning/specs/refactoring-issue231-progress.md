@@ -131,17 +131,85 @@ benchmark/
     `.claude/skills/reference-benchmark/SKILL.md`（`benchmark/performance/`の説明を追加）。
   - 移動後、`compare_performance.py --worker`単体実行・`_run_isolated`経由の
     サブプロセス再帰呼び出し（実際のCIスイープが使う経路）の両方で動作確認済み。
-- **ステップ2（コード整理）で対応が必要な項目（今回は着手しない）**:
-  - `linear/run_fixest_benchmark.R`: ファイル自身のコメントで「現時点でどの
-    フィクスチャ生成スクリプトからも呼ばれていない未検証コード」と明記されている
-    未使用ファイル。削除候補（ユーザー原文の「Fixestが使用されていない」はこれに該当）。
-  - `linear/run_pyfixest_benchmark.py`: fixture生成には未接続（pyfixestは精度検証に
-    使わない方針のため）。手動実行専用として残すか、`compare_performance.py`の
-    多手法対応化（WLS/Logit/Probit拡張）と合わせて整理するかは未確定。
-  - `compare_performance.py`自体のOLS専用ハードコード（`LIBRARIES`/`COV_TYPES`/
-    `_fit_once_*`）をWLS/Logit/Probitに拡張する際の一般化方法は未確定
-    （測定基盤（サブプロセス隔離・RSS計測・HACラグ整合等）と手法固有の
-    フィッティング処理を分離する設計が必要になる見込み）。
+### ステップ2（コード整理）の調査結果・決定事項（実装はまだ、次回着手）
+
+ユーザーからの追加指摘を受けて`benchmark/`（一部`tests/api_tests/`との重複）を
+再調査した。**以下は調査・方針決定のみで、コード変更は未実施**。
+
+**1. `generate_synthetic_datasets.py`は2つの役割が同居していた**
+`generate_dataset()`/`SCENARIOS`（linear専用DGP、`iv`/`nonlinear`の自前DGPからは
+一切importされていないことを確認済み）と、`imbalanced_cluster_groups()`
+（全系統のfixture生成・テストから使われる真の系統非依存ユーティリティ、
+20ファイル超からimportされていることを確認済み）が1ファイルに混在。
+「linearだけrootにある」という不整合の正体はこれだった。
+→ **決定**: 分割する。linear専用DGPは`benchmark/linear/`へ移動、
+`imbalanced_cluster_groups`はroot（`benchmark/_common.py`、後述）に残す。
+
+**2. `freeze_datasets.py`の肥大化**
+201行中、SYNTHETIC(linear)/LOGIT/PROBIT/IVの4ブロックがほぼ同一パターン
+（シナリオループ→生成→CSV書き出し→true_beta収集→JSON書き出し）をベタ書き。
+→ **決定**: 共通ヘルパー（`_freeze_family(generator_fn, scenarios, prefix,
+output_dir, overrides=...)`相当）で圧縮した上で、**freeze処理自体も各系統
+ディレクトリに分割**する（rootは薄いディスパッチャのみ残す）。
+
+**3. `linear/run_pyfixest_benchmark.py`**
+fixture生成には未接続（pyfixestは精度検証に使わない方針のため）、
+`compare_performance.py`もpyfixestを直接importしていて経由していない。
+他に依存箇所なし。→ **決定**: 削除する。
+
+**4. `linear/run_fixest_benchmark.R`**
+内容を確認したところ、固定効果構文（`| entity`等）を含まない素の
+`feols(formula, data=df, weights=...)`呼び出しで、`panel-api-design.md`が
+想定する将来のFEクロスチェック用スクリプト（固定効果項必須）とは中身が違う
+ため、panelへ移動しても「そのまま使える叩き台」にはならないと判明。
+→ **決定**: 今回削除する。FE着手時（Issue #231とは別スコープ）に
+固定効果構文込みで新規作成する（CLAUDE.mdの「将来のための設計をしない」方針）。
+
+**5. SCENARIOSの重複（3〜4階層）**
+同じシナリオ名リストが、`generate_*_datasets.py`の`SCENARIOS`（全シナリオ）→
+`fixtures/generate_*_fixtures.py`の`NUMERIC_SCENARIOS`（数値比較サブセット）→
+`tests/api_tests/test_*_fixtures.py`の`SCENARIOS`（pytest parametrize用）
+という3階層（＋`freeze_datasets.py`独自コピーで4階層目）で再定義されていた。
+OLSで実測したところ、`generate_ols_fixtures.py`の`NUMERIC_SCENARIOS`と
+`test_ols_fixtures.py`の`SCENARIOS`は**完全に同一リスト**（`COV_TYPES`も同様）。
+`tests/`が`benchmark/`を参照する形になるが、依存関係を調査した結果、
+`generate_ols_fixtures.py`はstatsmodels（既に`test`依存グループに含まれ
+pytest実行時に既存）のみに依存し、Rサブプロセス呼び出しは関数呼び出し時のみ
+（`subprocess`のimport自体はモジュールロード時に無害）と確認できたため、
+`tests/`側の「Rランタイム非依存」という既存方針を壊さずにimport可能と判断。
+→ **決定**: `tests/`も含めて一元化する。`benchmark/<系統>/fixtures/
+generate_<手法>_fixtures.py`側の`NUMERIC_SCENARIOS`/`COV_TYPES`を正とし、
+`tests/api_tests/test_*_fixtures.py`はそこからimportする形にする
+（フルシナリオ⊃数値比較サブセットという包含関係の表現方法は実装時に設計）。
+実装はフェーズ2・3どちらに属するかも含め次回着手時に決める。
+
+**6. Issue番号の残存（`freeze_datasets.py`以外）**
+5ファイルで確認: `iv/generate_iv_datasets.py`、
+`iv/fixtures/generate_iv_crosscheck_fixtures.py`、`iv/run_linearmodels_benchmark.py`
+（4箇所、いずれもIssue #171）、`linear/run_lm_crosscheck_benchmark.R`（Issue #107）、
+`nonlinear/run_glm_crosscheck_benchmark.R`（Issue #84）。経緯の記録と非自明な
+WHYの説明が混在しているため、一律削除ではなく`refactor`スキルの観点3
+（要約して残すか削除か）に沿って個別判断する。
+
+**7. 追加で見つかった共通化候補**
+- `_hac_auto_lag(n) = int(4 * (n/100)**(2/9))`: 完全に同一の実装が**5ファイル**
+  （`benchmark/performance/compare_performance.py`、
+  `linear/fixtures/generate_wls_crosscheck_fixtures.py`、
+  `linear/fixtures/generate_ols_crosscheck_fixtures.py`、
+  `iv/fixtures/generate_iv_crosscheck_fixtures.py`、
+  `iv/run_linearmodels_benchmark.py`）にコピペされている。
+- `_load_synthetic`/`_load_iv_dataset`（ユーザー指摘）: `linear/nonlinear/iv`の
+  各`run_statsmodels_benchmark.py`/`run_linearmodels_benchmark.py`で、
+  「`{prefix}_{scenario}.csv`と`{prefix}_true_beta.json`を読む」という
+  同一パターンが3箇所に実装されている。`prefix`引数化で統合可能。
+- `DATA_DIR`のパス構築が上記3ファイルで重複（`parents[N]`の深さのみ違う）。
+- `_meta`辞書の構築（13箇所）は`method`/`generated_at`/`primary_reference`/
+  `{ref}_version`/`note`という共通の形はあるが、`note`は手法固有の文章のため
+  優先度は上記2つより低いと判断。
+→ **決定**: `benchmark/_common.py`を新設し、`_hac_auto_lag`・
+`DATA_DIR`構築・`_load_frozen_dataset`相当（`_load_synthetic`/`_load_iv_dataset`の
+統合版）・`imbalanced_cluster_groups`（項目1）を集約する。`_meta`辞書は
+今回は見送り。
 
 ---
 

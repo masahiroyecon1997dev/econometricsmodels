@@ -120,6 +120,15 @@ Issue化済み（2026-08-02）:
     （1e-5）で比較する方式に変更。
 - [x] **B17. ドキュメント（mkdocs）** → [#162](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/162)
   - 依存: B16（#171）
+  - **完了済み**: Logit/Probit（`docs/api/logit.md`/`probit.md`）と同じ構成で`docs/api/iv.md`を
+    新規作成（mkdocstringsによる`IV`/`IvOptions`/`IvResults`の自動リファレンスに、IV固有の
+    手書き補足セクション: 標準誤差の種類、GMMの`weight_type`/反復設定、3種の診断
+    （弱操作変数F統計量・過剰識別検定・Wu-Hausman検定）、`first_stage()`）。`docs/mkdocs.yml`の
+    navに`API Reference > IV`を追加、`docs/getting-started.md`にIVセクション（基本的な`fit()`・
+    診断・`first_stage()`の使用例）を追加、`docs/index.md`の「Supported methods」もIV追加を反映
+    （Tobit/FE/REは未実装のため「will be added in the future」側に残した）。
+    `uv run --group docs mkdocs build --config-file docs/mkdocs.yml`で正常にビルドできることを
+    確認済み（既存の未解消警告のみ、IV追加による新規警告なし）。
 
 ## C. FE/RE共通基盤（panel系統、IV完了後・FE着手前）
 

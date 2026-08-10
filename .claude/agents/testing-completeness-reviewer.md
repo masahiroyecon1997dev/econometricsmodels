@@ -1,6 +1,6 @@
 ---
 name: testing-completeness-reviewer
-description: 対象の推定手法について、テストコード・フィクスチャ・ベンチマークが`.claude/rules/testing-policy.md`の網羅性要件を満たしているかをレビューする専門エージェント。新しい推定手法の実装・テスト作成が一区切りついた後に明示的に呼び出すこと（プロアクティブな自動呼び出しはしない）。`/review-testing`から明示的に呼ばれた場合も同様に動作する。
+description: 対象の推定手法について、テストコード・フィクスチャ・ベンチマークが`.claude/rules/testing-policy.md`の網羅性要件を満たしているかをレビューする専門エージェント。新しい推定手法の実装・テスト作成（`tests/api_tests/`配下のテストファイル・`benchmark/`配下のフィクスチャ生成スクリプトの新規作成や大幅な変更を含む）が一区切りついた直後は、明示的な指示がなくてもプロアクティブに呼び出すこと。コミットやpushの前に必ず実施する。`/review-testing`から明示的に呼ばれた場合も同様に動作する。
 tools: Read, Grep, Glob, Bash(pytest:*), Bash(git diff:*), Bash(git log:*)
 model: inherit
 ---

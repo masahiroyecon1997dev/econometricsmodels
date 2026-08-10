@@ -30,7 +30,20 @@ import polars as pl
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
-from generate_synthetic_datasets import imbalanced_cluster_groups  # noqa: E402
+sys.path.insert(
+    0,
+    str(
+        Path(__file__).resolve().parents[2]
+        / "benchmark"
+        / "linear"
+        / "fixtures"
+    ),
+)
+from _common import imbalanced_cluster_groups  # noqa: E402
+from generate_wls_fixtures import (  # noqa: E402
+    COV_TYPES,
+    NUMERIC_SCENARIOS as SCENARIOS,
+)
 
 from econometricsmodels import WLS, OLSOptions  # noqa: E402
 
@@ -43,18 +56,8 @@ DATA_DIR = Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"
 RTOL = 1e-8
 ATOL = 1e-10
 
-SCENARIOS = [
-    "baseline",
-    "small_n",
-    "high_variance",
-    "heteroskedastic",
-    "autocorrelated",
-    "moderate_multicollinearity",
-    "high_condition_number",
-    # n=k+1（自由度1ちょうど）の成功パス（OLSの同種ケース相当）。
-    "baseline_df1",
-]
-COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
+# SCENARIOS/COV_TYPESはgenerate_wls_fixtures.pyのNUMERIC_SCENARIOS/COV_TYPESと
+# 常に一致させる必要があるため、そちらをimportして単一の定義元にする（Issue #231）。
 
 # generate_wls_fixtures.py（run_statsmodels_benchmark.py）はHACのラグを
 # maxlags=1に固定している。同じラグを明示的に指定し、自動ラグ選択式の

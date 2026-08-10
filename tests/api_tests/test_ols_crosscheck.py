@@ -60,8 +60,11 @@ sys.path.insert(
         / "fixtures"
     ),
 )
-from generate_ols_crosscheck_fixtures import PREDICT_NEW_DATA  # noqa: E402
-from generate_synthetic_datasets import imbalanced_cluster_groups  # noqa: E402
+from generate_ols_crosscheck_fixtures import (  # noqa: E402
+    PREDICT_NEW_DATA,
+    NUMERIC_SCENARIOS as SYNTHETIC_SCENARIOS,
+)
+from _common import imbalanced_cluster_groups  # noqa: E402
 
 from econometricsmodels import OLS, OLSOptions  # noqa: E402
 
@@ -135,17 +138,6 @@ def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
     )
 
 
-SYNTHETIC_SCENARIOS = [
-    "baseline",
-    "small_n",
-    "high_variance",
-    "heteroskedastic",
-    "autocorrelated",
-    "moderate_multicollinearity",
-    "high_condition_number",
-    # n=k+1（自由度1ちょうど）の成功パス。
-    "baseline_df1",
-]
 NON_HAC_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
 
 

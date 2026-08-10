@@ -1,7 +1,7 @@
 """linearmodelsでIV（2SLS/GMM）のベンチマーク値（係数・標準誤差・適合度統計量・
 診断統計量）を生成するスクリプト。
 
-IVの主リファレンス（`docs/planning/specs/iv-api-design.md`5.1節、Issue #171）。
+IVの主リファレンス（`docs/planning/specs/iv-api-design.md`5.1節参照）。
 2SLSは`run()`、GMMは`run_gmm()`（`method="gmm"`のPython配線完了後に追加、
 `run_gmm()`のモジュールdocコメント参照）。
 
@@ -70,7 +70,7 @@ augmented regression自身の`df_resid`（= 主モデルの`df_resid - n_endog`�
 第一段階残差をn_endog列追加した分だけ小さい）を使う必要がある（`run()`本体の
 該当コメント参照。統計量自体は主モデルのdfに依存しないため機械精度で
 一致するが、p値だけ最大0.2%程度乖離するバグが初版にあった。`test_iv_fixtures.py`
-作成時に発覚・修正、Issue #171）。
+作成時に発覚・修正済み）。
 
 使用例:
     python run_linearmodels_benchmark.py --dataset baseline --cov-type classical
@@ -80,19 +80,25 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import polars as pl
 
-DATA_DIR = (
-    Path(__file__).resolve().parents[2]
-    / "tests"
-    / "api_tests"
-    / "fixtures"
-    / "benchmarks"
-    / "data"
-)
+sys.path.insert(
+    0, str(Path(__file__).resolve().parent.parent)
+)  # benchmark/ を import path に追加（_common）
+
+from _common import hac_auto_lag, load_frozen_dataset  # noqa: E402
+
+
+def _load_iv_dataset(scenario: str) -> tuple[pl.DataFrame, list[float] | None]:
+    # クラスター確認用の一時CSV（`generate_iv_fixtures.py`の`_run_cluster_case`）は
+    # `iv_true_beta.json`にエントリが無いため、`None`を許容する
+    # （`generate_ols_fixtures.py`のクラスターケースが`true_beta`比較をしないのと同じ扱い）。
+    return load_frozen_dataset("iv", scenario)
+
 
 # engine cov_type -> (linearmodels cov_type, debiased)。モジュールdocstring参照。
 _COV_TYPE_MAP: dict[str, tuple[str, bool]] = {
@@ -102,23 +108,6 @@ _COV_TYPE_MAP: dict[str, tuple[str, bool]] = {
     "cluster": ("clustered", True),
     "hac": ("kernel", False),
 }
-
-
-def _hac_auto_lag(n: int) -> int:
-    """本実装（`engine::iv::two_sls::resolve_hac_lags`、`ols.rs`と同式）と同じ
-    自動ラグ式。R側・本実装の両方に同じ明示ラグを渡す既存方針
-    （`generate_ols_crosscheck_fixtures.py`の`_hac_auto_lag`）と同じ理由。
-    """
-    return int(4 * (n / 100) ** (2 / 9))
-
-
-def _load_iv_dataset(scenario: str) -> tuple[pl.DataFrame, list[float] | None]:
-    df = pl.read_csv(DATA_DIR / f"iv_{scenario}.csv")
-    true_betas = json.loads((DATA_DIR / "iv_true_beta.json").read_text())
-    # クラスター確認用の一時CSV（`generate_iv_fixtures.py`の`_run_cluster_case`）は
-    # `iv_true_beta.json`にエントリが無いため、`None`を許容する
-    # （`generate_ols_fixtures.py`のクラスターケースが`true_beta`比較をしないのと同じ扱い）。
-    return df, true_betas.get(scenario)
 
 
 def _nested_f_test(
@@ -219,7 +208,7 @@ def run(
     if cov_type == "cluster":
         cov_config["clusters"] = pdf[cluster_col]
     elif cov_type == "hac":
-        hac_lag_used = hac_lags if hac_lags is not None else _hac_auto_lag(n)
+        hac_lag_used = hac_lags if hac_lags is not None else hac_auto_lag(n)
         cov_config["kernel"] = "bartlett"
         cov_config["bandwidth"] = hac_lag_used
 
@@ -272,7 +261,7 @@ def run(
     # `OlsEstimator`が持つ`df_inference`をそのまま使うため）。初版は主モデルの
     # `df_resid`をそのまま流用しており、F統計量自体は機械精度で一致するのに
     # p値だけ最大0.2%程度乖離するバグがあった（`test_iv_fixtures.py`作成時に
-    # small_nシナリオ等で発覚、Issue #171）。
+    # small_nシナリオ等で発覚・修正済み）。
     n_endog = len(x_endog_cols)
     if not x_endog_cols or cov_type == "hac":
         wu_hausman_statistic = None
@@ -366,8 +355,7 @@ def run_gmm(
     gmm_iterations: int = 2,
     confidence_level: float = 0.95,
 ) -> dict:
-    """`linearmodels.iv.IVGMM`でGMMのベンチマーク値を生成する（`run()`のGMM版、
-    Issue #171）。
+    """`linearmodels.iv.IVGMM`でGMMのベンチマーク値を生成する（`run()`のGMM版）。
 
     ## `weight_type`の対応関係（実測して確定）
 
@@ -444,7 +432,7 @@ def run_gmm(
         weight_config["clusters"] = pdf[cluster_col]
     elif weight_type == "kernel":
         weight_hac_lag_used = (
-            hac_lags if hac_lags is not None else _hac_auto_lag(n)
+            hac_lags if hac_lags is not None else hac_auto_lag(n)
         )
         weight_config["kernel"] = "bartlett"
         weight_config["bandwidth"] = weight_hac_lag_used
@@ -460,7 +448,7 @@ def run_gmm(
         cov_config["clusters"] = pdf[cluster_col]
     elif cov_type == "hac":
         cov_hac_lag_used = (
-            hac_lags if hac_lags is not None else _hac_auto_lag(n)
+            hac_lags if hac_lags is not None else hac_auto_lag(n)
         )
         cov_config["kernel"] = "bartlett"
         cov_config["bandwidth"] = cov_hac_lag_used

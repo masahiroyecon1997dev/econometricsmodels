@@ -54,7 +54,14 @@ import polars as pl
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
-from generate_synthetic_datasets import imbalanced_cluster_groups  # noqa: E402
+sys.path.insert(
+    0,
+    str(Path(__file__).resolve().parents[2] / "benchmark" / "iv" / "fixtures"),
+)
+from _common import imbalanced_cluster_groups  # noqa: E402
+from generate_iv_crosscheck_fixtures import (  # noqa: E402
+    NUMERIC_SCENARIOS as SCENARIOS,
+)
 
 from econometricsmodels import IV, IvOptions  # noqa: E402
 
@@ -82,16 +89,6 @@ RTOL_HAC_SMALL_N = 0.1
 # 使う絶対誤差フロア（モジュールdocコメント参照、実測最大乖離1.523e-6にマージン）。
 ATOL_F_PVALUE = 1e-5
 
-SCENARIOS = [
-    "baseline",
-    "just_identified",
-    "weak_instruments",
-    "small_n",
-    "heteroskedastic",
-    "autocorrelated",
-    "moderate_multicollinearity",
-    "high_condition_number",
-]
 COV_TYPES = ["classical", "hc0", "hc1", "hac"]
 
 INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}

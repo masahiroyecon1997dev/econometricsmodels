@@ -51,7 +51,12 @@ import polars as pl
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
-from generate_synthetic_datasets import imbalanced_cluster_groups  # noqa: E402
+sys.path.insert(
+    0,
+    str(Path(__file__).resolve().parents[2] / "benchmark" / "iv" / "fixtures"),
+)
+from _common import imbalanced_cluster_groups  # noqa: E402
+from generate_iv_fixtures import NUMERIC_SCENARIOS as SCENARIOS  # noqa: E402
 
 from econometricsmodels import IV, ComputationError, IvOptions  # noqa: E402
 
@@ -65,16 +70,8 @@ DATA_DIR = Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"
 RTOL = 1e-8
 ATOL = 1e-10
 
-SCENARIOS = [
-    "baseline",
-    "just_identified",
-    "weak_instruments",
-    "small_n",
-    "heteroskedastic",
-    "autocorrelated",
-    "moderate_multicollinearity",
-    "high_condition_number",
-]
+# SCENARIOSはgenerate_iv_fixtures.pyのNUMERIC_SCENARIOSと常に一致させる必要が
+# あるため、そちらをimportして単一の定義元にする（Issue #231）。
 # hc2/hc3はlinearmodelsに対応する実装が無いため対象外（モジュールdocコメント参照）。
 COV_TYPES = ["classical", "hc0", "hc1", "hac"]
 

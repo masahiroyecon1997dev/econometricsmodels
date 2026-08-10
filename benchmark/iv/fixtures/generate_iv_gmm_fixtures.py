@@ -44,13 +44,13 @@ sys.path.insert(
 )  # benchmark/iv/ を import path に追加（run_linearmodels_benchmark）
 sys.path.insert(
     0, str(Path(__file__).resolve().parents[2])
-)  # benchmark/ を import path に追加（generate_synthetic_datasets）
+)  # benchmark/ を import path に追加（_common）
 
 import linearmodels  # noqa: E402
 import polars as pl  # noqa: E402
 
-from generate_synthetic_datasets import imbalanced_cluster_groups  # noqa: E402
-from run_linearmodels_benchmark import DATA_DIR, run_gmm  # noqa: E402
+from _common import DATA_DIR, imbalanced_cluster_groups  # noqa: E402
+from run_linearmodels_benchmark import run_gmm  # noqa: E402
 
 # `generate_iv_fixtures.py`のNUMERIC_SCENARIOSと同一（2SLSと同じ合成データセットを
 # 再利用する）。

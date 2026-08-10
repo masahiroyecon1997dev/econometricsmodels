@@ -39,12 +39,22 @@ Note:
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import polars as pl
 import pytest
 
-from econometricsmodels import IV, IvOptions
+sys.path.insert(
+    0,
+    str(Path(__file__).resolve().parents[2] / "benchmark" / "iv" / "fixtures"),
+)
+from generate_iv_gmm_fixtures import (  # noqa: E402
+    COV_TYPES,
+    NUMERIC_SCENARIOS as SCENARIOS,
+)
+
+from econometricsmodels import IV, IvOptions  # noqa: E402
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "iv_gmm.json"
@@ -56,17 +66,8 @@ DATA_DIR = Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"
 RTOL = 1e-8
 ATOL = 1e-10
 
-SCENARIOS = [
-    "baseline",
-    "just_identified",
-    "weak_instruments",
-    "small_n",
-    "heteroskedastic",
-    "autocorrelated",
-    "moderate_multicollinearity",
-    "high_condition_number",
-]
-COV_TYPES = ["classical", "hc0", "hc1", "hac"]
+# SCENARIOS/COV_TYPESはgenerate_iv_gmm_fixtures.pyのNUMERIC_SCENARIOS/COV_TYPESと
+# 常に一致させる必要があるため、そちらをimportして単一の定義元にする（Issue #231）。
 
 INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
 X_EXOG_BY_SCENARIO = {
@@ -209,7 +210,7 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
-    from generate_synthetic_datasets import imbalanced_cluster_groups
+    from _common import imbalanced_cluster_groups
 
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     groups = imbalanced_cluster_groups(df.height)

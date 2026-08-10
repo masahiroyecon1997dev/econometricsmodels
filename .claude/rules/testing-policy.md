@@ -27,7 +27,7 @@ paths:
 
 各推定手法は、以下の観点で網羅的にテストする。**全てのオプションの組み合わせで、リファレンス実装と統計量が一致することを確認する**。
 
-1. **合成データセット**（`benchmark/generate_synthetic_datasets.py`で生成し、`benchmark/freeze_datasets.py`で`tests/api_tests/fixtures/benchmarks/data/`にCSVとして固定したものを使用。フィクスチャ生成・pytest実行時ともにこのCSVを読み、ジェネレータを直接呼ばない）。以下のバリエーションを持たせる。
+1. **合成データセット**（`benchmark/<系統>/generate_*_datasets.py`（linearなら`generate_synthetic_datasets.py`）で生成し、`benchmark/freeze_datasets.py`で`tests/api_tests/fixtures/benchmarks/data/`にCSVとして固定したものを使用。フィクスチャ生成・pytest実行時ともにこのCSVを読み、ジェネレータを直接呼ばない）。以下のバリエーションを持たせる。
    - サンプル数が少ない
    - 分散が大きい
    - 不均一分散（heteroskedasticity）

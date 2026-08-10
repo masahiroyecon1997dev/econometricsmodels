@@ -33,7 +33,19 @@ import polars as pl
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
-from generate_synthetic_datasets import imbalanced_cluster_groups  # noqa: E402
+sys.path.insert(
+    0,
+    str(
+        Path(__file__).resolve().parents[2]
+        / "benchmark"
+        / "nonlinear"
+        / "fixtures"
+    ),
+)
+from _common import imbalanced_cluster_groups  # noqa: E402
+from generate_probit_fixtures import (  # noqa: E402
+    NUMERIC_SCENARIOS as SCENARIOS,
+)
 
 from econometricsmodels import (  # noqa: E402
     ComputationError,
@@ -60,14 +72,6 @@ ATOL = 1e-9
 # 指定する。
 _NEAR_SEPARATION_TOL = 1e-8
 
-SCENARIOS = [
-    "baseline",
-    "small_n",
-    "moderate_multicollinearity",
-    "high_condition_number",
-    "near_separation",
-    "scale_variance",
-]
 COV_TYPES = ["classical", "opg", "hc0"]
 
 MARGEFF_AT = ["overall", "mean", "median"]

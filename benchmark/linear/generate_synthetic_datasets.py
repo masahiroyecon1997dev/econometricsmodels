@@ -1,8 +1,11 @@
-"""推定手法テスト用の合成データセット生成スクリプト。
+"""linear系統（OLS/WLS）テスト用の合成データセット生成スクリプト。
 
 `.claude/rules/testing-policy.md` で定めるデータセットバリエーション（小標本、
 高分散、不均一分散、自己相関、多重共線性、スケール差・高条件数等の境界値・
 悪条件ケース）を持つデータを生成する。
+
+系統非依存のクラスターラベル生成（`imbalanced_cluster_groups`）は
+`benchmark/_common.py`へ分離した（Issue #231、他系統からも使われるため）。
 
 使用例:
     from generate_synthetic_datasets import generate_dataset
@@ -127,42 +130,6 @@ def generate_dataset(
     data["weight"] = weight
 
     return pl.DataFrame(data), beta
-
-
-# [2, 3, 5, 10, 30, 50]（合計100）を1タイルとして繰り返す不均衡なクラスタサイズ
-# パターン（testing-policy.md「テスト用データセット」3.参照）。
-_IMBALANCED_CLUSTER_TILE = [2, 3, 5, 10, 30, 50]
-
-
-def imbalanced_cluster_groups(n: int) -> list[str]:
-    """不均衡なクラスタグループ（グループ数・サイズが偏ったラベル列）を生成する。
-
-    `_IMBALANCED_CLUSTER_TILE`（サイズ合計100）をnに応じてタイル状に繰り返す。
-    均等サイズの疑似グループ（行番号%10等）だけでは見逃す、実務的に起こりやすい
-    グループサイズの偏りを再現する。
-
-    Args:
-        n: 観測数。100の倍数である必要がある（タイルが端数なく割り切れるように）。
-
-    Returns:
-        長さnのグループラベル（"g0", "g1", ...）のリスト。
-
-    Raises:
-        ValueError: nが100の倍数でない場合。
-    """
-    if n % 100 != 0:
-        raise ValueError(
-            f"n must be a multiple of 100 to tile the imbalanced cluster "
-            f"pattern exactly, got n={n}"
-        )
-    n_tiles = n // 100
-    labels: list[str] = []
-    group_idx = 0
-    for _ in range(n_tiles):
-        for size in _IMBALANCED_CLUSTER_TILE:
-            labels.extend([f"g{group_idx}"] * size)
-            group_idx += 1
-    return labels
 
 
 if __name__ == "__main__":

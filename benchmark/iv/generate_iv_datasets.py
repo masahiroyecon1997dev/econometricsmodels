@@ -7,8 +7,7 @@
 （`SCENARIOS`+`generate_*_dataset(scenario, ...)`関数）だが、IVはOLS/Logit/Probit
 と異なり「操作変数が内生変数と相関し（関連性）、かつ構造誤差とは無相関
 （除外制約）」という識別のための構造をDGP自体に組み込む必要があるため、
-シナリオ構成を新たに設計している（`docs/planning/specs/iv-api-design.md`5章、
-Issue #171）。
+シナリオ構成を新たに設計している（`docs/planning/specs/iv-api-design.md`5章参照）。
 
 構造方程式（線形IVの標準的なDGP、`linearmodels`のドキュメント例と同型）:
     x_endog = pi0 + Z @ pi + x_exog @ gamma + v   （第一段階）

@@ -117,7 +117,7 @@ $$
   8.5・8.6と同じ変数構成`nettfa ~ inc + incsq + age + agesq + male + e401k`、重みは`1/inc`
   （`inv_inc`列）。Example 8.6のfeasible GLS（分散モデル自体の推定）は本実装のスコープ外のため
   不採用、既知の重み列を渡す設計に合わせた。
-- 合成データセット（`benchmark/generate_synthetic_datasets.py`の7シナリオ）はOLS実装時から
+- 合成データセット（`benchmark/linear/generate_synthetic_datasets.py`の7シナリオ）はOLS実装時から
   `weight`列（heteroskedasticシナリオは`1/sigma_i^2`、他は`uniform(0.5, 1.5)`）を含むため、
   WLS用の追加実装は不要だった。
 - `test_wls_fixtures.py`（statsmodels主リファレンス）/ `test_wls_crosscheck.py`（Rクロスチェック）

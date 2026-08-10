@@ -38,15 +38,12 @@ sys.path.insert(
 )  # benchmark/nonlinear/ を import path に追加（run_statsmodels_benchmark）
 sys.path.insert(
     0, str(Path(__file__).resolve().parents[2])
-)  # benchmark/ を import path に追加（load_wooldridge, generate_synthetic_datasets）
+)  # benchmark/ を import path に追加（load_wooldridge, _common）
 
 import polars as pl  # noqa: E402
 
+from _common import DATA_DIR, imbalanced_cluster_groups  # noqa: E402
 from load_wooldridge import load as load_wooldridge  # noqa: E402
-from run_statsmodels_benchmark import DATA_DIR  # noqa: E402
-from generate_synthetic_datasets import (  # noqa: E402
-    imbalanced_cluster_groups as _imbalanced_cluster_groups_ols,
-)
 
 NONLINEAR_DIR = Path(__file__).resolve().parent.parent
 R_SCRIPT = NONLINEAR_DIR / "run_glm_crosscheck_benchmark.R"
@@ -159,7 +156,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         baseline_csv,
         formula="y ~ x1 + x2 + x3",
         tmpdir=tmpdir,
-        groups=_imbalanced_cluster_groups_ols(n),
+        groups=imbalanced_cluster_groups(n),
         suffix="_cluster_imbalanced",
     )
     fixtures["baseline"]["cluster_g2"] = _run_cluster_case(

@@ -115,7 +115,7 @@ bic_val <- -2 * loglik_val + log(n_obs) * k_params
 # 傾き係数の同時共分散部分行列が数値的に特異な場合（変数間のスケールが極端に
 # 異なる設計行列等）、solve()は"system is computationally singular"としてエラーを
 # 投げる。本実装（engine::linear::ols::wald_f_test）も固有値分解による相対閾値判定で
-# 同様のケースをComputationErrorとして検出するため（Issue #107）、この関数の
+# 同様のケースをComputationErrorとして検出するため、この関数の
 # 呼び出し元（generate_ols_crosscheck_fixtures.py）はそのようなケースを
 # NUMERIC_SCENARIOSから除外し、両実装が計算不能で一致することのみ確認する
 # （perfect_multicollinearityと同じ方針）。

@@ -30,13 +30,13 @@ sys.path.insert(
 )  # benchmark/iv/ を import path に追加（run_linearmodels_benchmark）
 sys.path.insert(
     0, str(Path(__file__).resolve().parents[2])
-)  # benchmark/ を import path に追加（generate_synthetic_datasets）
+)  # benchmark/ を import path に追加（_common）
 
 import linearmodels  # noqa: E402
 import polars as pl  # noqa: E402
 
-from generate_synthetic_datasets import imbalanced_cluster_groups  # noqa: E402
-from run_linearmodels_benchmark import DATA_DIR, run  # noqa: E402
+from _common import DATA_DIR, imbalanced_cluster_groups  # noqa: E402
+from run_linearmodels_benchmark import run  # noqa: E402
 
 # 丁度識別・過剰識別を問わずx_exog=['x1'], x_endog=['endog1'], instruments=[...]の
 # 構造で数値比較できるシナリオ。perfect_multicollinearityはComputationErrorの発生

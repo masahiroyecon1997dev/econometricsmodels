@@ -31,11 +31,15 @@ from pathlib import Path
 sys.path.insert(
     0, str(Path(__file__).resolve().parent.parent)
 )  # benchmark/nonlinear/ を import path に追加（run_statsmodels_benchmark）
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[2])
+)  # benchmark/ を import path に追加（_common）
 
 import polars as pl  # noqa: E402
 import statsmodels  # noqa: E402
 
-from run_statsmodels_benchmark import DATA_DIR, run  # noqa: E402
+from _common import DATA_DIR, imbalanced_cluster_groups  # noqa: E402
+from run_statsmodels_benchmark import run  # noqa: E402
 
 # perfect_multicollinearityは数値比較の対象外（ComputationErrorの発生確認のみ、
 # testing-policy.md「テストの3系統」）。generate_logit_fixtures.pyと同じシナリオ構成
@@ -84,7 +88,7 @@ def build_fixtures() -> dict:
     n = pl.read_csv(DATA_DIR / "probit_baseline.csv").height
     fixtures["baseline"]["cluster"] = _run_cluster_case()
     fixtures["baseline"]["cluster_imbalanced"] = _run_cluster_case(
-        groups=_imbalanced_cluster_groups(n),
+        groups=imbalanced_cluster_groups(n),
         note="不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。",
     )
     fixtures["baseline"]["cluster_g2"] = _run_cluster_case(
@@ -148,24 +152,6 @@ def build_fixtures() -> dict:
         ),
     }
     return fixtures
-
-
-# 疑似グループのパターン生成（generate_logit_fixtures.pyと同じ設計、[2,3,5,10,30,50]の
-# タイルをnに応じて繰り返す）。
-_IMBALANCED_CLUSTER_TILE = [2, 3, 5, 10, 30, 50]
-
-
-def _imbalanced_cluster_groups(n: int) -> list[str]:
-    if n % 100 != 0:
-        raise ValueError(f"n must be a multiple of 100, got n={n}")
-    n_tiles = n // 100
-    labels: list[str] = []
-    group_idx = 0
-    for _ in range(n_tiles):
-        for size in _IMBALANCED_CLUSTER_TILE:
-            labels.extend([f"g{group_idx}"] * size)
-            group_idx += 1
-    return labels
 
 
 def _run_cluster_case(

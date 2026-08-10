@@ -3,7 +3,7 @@ iv_crosscheck.json）を生成するスクリプト。
 
 `tests/api_tests/fixtures/benchmarks/iv.json`（linearmodels、主リファレンス）とは
 別に、独立実装（R: ivreg + sandwich/lmtest）によるクロスチェック値を生成する
-（`docs/planning/specs/iv-api-design.md`5.2節、Issue #171）。
+（`docs/planning/specs/iv-api-design.md`5.2節参照）。
 
 シナリオ・cov_type・クラスタケースの構成は`generate_iv_fixtures.py`
 （linearmodelsクロスチェック）と揃える（ユーザー確認済み）。
@@ -44,16 +44,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(
-    0, str(Path(__file__).resolve().parent.parent)
-)  # benchmark/iv/ を import path に追加（run_linearmodels_benchmark.DATA_DIR）
-sys.path.insert(
     0, str(Path(__file__).resolve().parents[2])
-)  # benchmark/ を import path に追加（generate_synthetic_datasets）
+)  # benchmark/ を import path に追加（_common）
 
 import polars as pl  # noqa: E402
 
-from generate_synthetic_datasets import imbalanced_cluster_groups  # noqa: E402
-from run_linearmodels_benchmark import DATA_DIR  # noqa: E402
+from _common import DATA_DIR, hac_auto_lag, imbalanced_cluster_groups  # noqa: E402
 
 IV_DIR = Path(__file__).resolve().parent.parent
 R_SCRIPT = IV_DIR / "run_ivreg_benchmark.R"
@@ -75,14 +71,6 @@ X_EXOG_BY_SCENARIO = {
     "high_condition_number": ["x1", "x2"],
 }
 COV_TYPES = ["classical", "hc0", "hc1", "hac", "cluster"]
-
-
-def _hac_auto_lag(n: int) -> int:
-    """本実装（`engine::iv::two_sls::resolve_hac_lags`）と同じ自動ラグ式。
-    R側・本実装の両方に同じ明示ラグを渡す既存方針
-    （`generate_ols_crosscheck_fixtures.py`の`_hac_auto_lag`）と同じ理由。
-    """
-    return int(4 * (n / 100) ** (2 / 9))
 
 
 def _ivreg_formula(
@@ -154,7 +142,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             if cov_type == "cluster":
                 continue  # baselineのみ別途複数パターンで確認（下記）
             if cov_type == "hac":
-                lag = _hac_auto_lag(n)
+                lag = hac_auto_lag(n)
                 entry = _run_r(csv_path, formula, cov_type, hac_lag=lag)
                 entry["hac_lag"] = lag
             else:

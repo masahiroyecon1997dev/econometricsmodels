@@ -107,7 +107,7 @@ benchmark/
 `render_performance_summary.py`がroot直下にありながら中身はOLS専用（`LIBRARIES`/
 `COV_TYPES`/回帰式ハードコード）という不整合のみだった。
 
-**状態**: ステップ1（ディレクトリ配置整理）完了。ステップ2（コード整理）は未着手。
+**状態**: 完了（ステップ1: ディレクトリ配置整理、ステップ2: コード整理とも完了）。
 
 **メモ**:
 - ユーザー確認の結果、`compare_performance.py`/`render_performance_summary.py`は
@@ -210,6 +210,55 @@ WHYの説明が混在しているため、一律削除ではなく`refactor`ス�
 `DATA_DIR`構築・`_load_frozen_dataset`相当（`_load_synthetic`/`_load_iv_dataset`の
 統合版）・`imbalanced_cluster_groups`（項目1）を集約する。`_meta`辞書は
 今回は見送り。
+
+### ステップ2 実施結果（完了）
+
+上記7項目の決定事項を全て実装した。
+
+1. **`benchmark/_common.py`新設**: `imbalanced_cluster_groups`・`hac_auto_lag`・
+   `DATA_DIR`・`load_frozen_dataset`・`freeze_scenarios`の5関数/定数を集約。
+2. **`generate_synthetic_datasets.py`分割**: linear専用DGP部分は
+   `benchmark/linear/generate_synthetic_datasets.py`へ`git mv`、
+   `imbalanced_cluster_groups`は`_common.py`へ。importer側（`compare_performance.py`
+   他）のパスを追従。
+3. **`imbalanced_cluster_groups`のimport元統一**: `_common`からimportする形に
+   22ファイル（`benchmark/`17・`tests/api_tests/`9、重複あり）を統一。
+   `generate_logit_fixtures.py`/`generate_probit_fixtures.py`に**未申告だった
+   ローカル再実装**（`_imbalanced_cluster_groups`、_common.pyと byte-for-byte
+   同一）を発見し、合わせて統合（当初の想定外の追加成果）。
+4. **`_hac_auto_lag`/`_load_synthetic`/`_load_iv_dataset`/`DATA_DIR`統合**:
+   5+3ファイルを`_common.py`参照に統一。既存の`from run_statsmodels_benchmark
+   import DATA_DIR`という間接import（8ファイル）を壊さないよう、各
+   `run_*_benchmark.py`が`_common`からimportし直すことで透過的に維持しつつ、
+   実際には11ファイル全てを`_common`直接参照に更新（再エクスポート依存を残さず
+   単一定義元を明確化）。
+5. **`freeze_datasets.py`の系統別分割**: `benchmark/{linear,nonlinear,iv}/
+   freeze_<系統>_datasets.py`を新設、`freeze_scenarios`ヘルパーで各ブロックを
+   圧縮。root`freeze_datasets.py`は3つの`freeze()`を呼ぶだけの薄い
+   ディスパッチャに変更。**分割後の出力を一時ディレクトリに生成し、
+   コミット済みの`tests/api_tests/fixtures/benchmarks/data/`と`diff -rq`で
+   完全一致することを確認済み**（40ファイル、バイト単位で同一）。
+6. **未使用ファイル削除**: `benchmark/linear/run_pyfixest_benchmark.py`・
+   `run_fixest_benchmark.R`を`git rm`。参照していた
+   `.claude/skills/reference-benchmark/SKILL.md`の該当記述も削除。
+7. **SCENARIOS/NUMERIC_SCENARIOSの一元化**: `benchmark/<系統>/fixtures/
+   generate_<手法>_fixtures.py`側のリストを正とし、`tests/api_tests/
+   test_*_fixtures.py`・`test_*_crosscheck.py`はそこからimportする形に
+   10ペア全て変更（COV_TYPESは値が一致するOLS/WLS/IV-GMMの3ペアのみ合わせて
+   統一、Logit/Probit/IV(2SLS)/IV-crosscheckはgenerator側にのみ`cluster`が
+   含まれ意図的に非対称なため据え置き）。
+8. **Issue番号コメントの整理**: `benchmark/`配下で確認した6ファイル・
+   10箇所すべてについて、`refactor`スキルの観点3
+   （非自明なWHYが無ければ削除）に沿って個別判断し、全て「単なる経緯の記録」と
+   判断して番号のみ削除（周辺の設計判断の説明文は保持）。
+9. **ドキュメント整合**: `.claude/skills/reference-benchmark/SKILL.md`
+   （ディレクトリ構成節・手順1/4）、`.claude/rules/testing-policy.md`、
+   `docs/spec/wls-spec.md`の`benchmark/generate_synthetic_datasets.py`パス言及を
+   `benchmark/linear/generate_synthetic_datasets.py`に修正。
+
+**最終確認**: `ruff check .` / `ruff format --check .` 全件パス、
+`pytest tests/api_tests/`（Rクロスチェック含む）670件全件パス、
+freeze出力のバイト一致確認済み。
 
 ---
 

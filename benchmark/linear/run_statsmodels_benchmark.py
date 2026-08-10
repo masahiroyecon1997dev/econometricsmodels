@@ -37,26 +37,14 @@ import polars as pl
 
 sys.path.insert(
     0, str(Path(__file__).resolve().parent.parent)
-)  # benchmark/ を import path に追加（load_wooldridge）
+)  # benchmark/ を import path に追加（load_wooldridge, _common）
 
+from _common import load_frozen_dataset  # noqa: E402
 from load_wooldridge import load as _load_wooldridge  # noqa: E402
-
-DATA_DIR = (
-    Path(__file__).resolve().parents[2]
-    / "tests"
-    / "api_tests"
-    / "fixtures"
-    / "benchmarks"
-    / "data"
-)
 
 
 def _load_synthetic(dataset: str) -> tuple[pl.DataFrame, list[float]]:
-    df = pl.read_csv(DATA_DIR / f"synthetic_{dataset}.csv")
-    true_betas = json.loads(
-        (DATA_DIR / "synthetic_true_beta.json").read_text()
-    )
-    return df, true_betas[dataset]
+    return load_frozen_dataset("synthetic", dataset)
 
 
 def run(

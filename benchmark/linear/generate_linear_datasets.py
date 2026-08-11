@@ -5,12 +5,12 @@
 悪条件ケース）を持つデータを生成する。
 
 系統非依存のクラスターラベル生成（`imbalanced_cluster_groups`）は
-`benchmark/_common.py`へ分離した（Issue #231、他系統からも使われるため）。
+`benchmark/_common.py`へ分離した（他系統からも使われるため）。
 
 使用例:
-    from generate_synthetic_datasets import generate_dataset
+    from generate_linear_datasets import generate_linear_dataset
 
-    df, true_beta = generate_dataset("heteroskedastic", n=500, seed=42)
+    df, true_beta = generate_linear_dataset("heteroskedastic", n=500, seed=42)
     # df の列: y, x1, x2, x3, weight
     df.write_csv("heteroskedastic.csv")  # Rベンチマーク用にCSV出力する場合
 """
@@ -33,7 +33,7 @@ SCENARIOS = [
 ]
 
 
-def generate_dataset(
+def generate_linear_dataset(
     scenario: str,
     n: int = 500,
     k: int = 3,
@@ -134,8 +134,12 @@ def generate_dataset(
 
 if __name__ == "__main__":
     import sys
+    from pathlib import Path
+
+    sys.path.insert(
+        0, str(Path(__file__).resolve().parent.parent)
+    )  # benchmark/ を import path に追加（_common）
+    from _common import preview_dataset
 
     scenario_arg = sys.argv[1] if len(sys.argv) > 1 else "baseline"
-    result_df, true_beta = generate_dataset(scenario_arg)
-    print(f"scenario={scenario_arg}, true_beta={true_beta}")
-    print(result_df.head())
+    preview_dataset(scenario_arg, generate_linear_dataset)

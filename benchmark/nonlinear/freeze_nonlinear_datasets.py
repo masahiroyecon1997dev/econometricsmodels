@@ -10,26 +10,25 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from pathlib import Path
 
 sys.path.insert(
     0, str(Path(__file__).resolve().parent)
-)  # benchmark/nonlinear/ を import path に追加（generate_binary_choice_datasets）
+)  # benchmark/nonlinear/ を import path に追加（generate_nonlinear_datasets）
 sys.path.insert(
     0, str(Path(__file__).resolve().parent.parent)
 )  # benchmark/ を import path に追加（_common）
 
-from _common import freeze_scenarios  # noqa: E402
-from generate_binary_choice_datasets import (  # noqa: E402
+from _common import freeze_scenarios, run_freeze_cli  # noqa: E402
+from generate_nonlinear_datasets import (  # noqa: E402
     generate_logit_dataset,
     generate_probit_dataset,
 )
 
 # generate_logit_fixtures.pyのNUMERIC_SCENARIOSに、エラーパス確認用の
-# perfect_multicollinearityを加えた全シナリオ（generate_binary_choice_datasets.py参照）。
+# perfect_multicollinearityを加えた全シナリオ（generate_nonlinear_datasets.py参照）。
 LOGIT_SCENARIOS = [
     "baseline",
     "small_n",
@@ -42,7 +41,7 @@ LOGIT_SCENARIOS = [
 
 # generate_probit_fixtures.pyのNUMERIC_SCENARIOSに、エラーパス確認用の
 # perfect_multicollinearityを加えた全シナリオ。LOGIT_SCENARIOSと同じシナリオ構成
-# （generate_binary_choice_datasets.py参照）。
+# （generate_nonlinear_datasets.py参照）。
 PROBIT_SCENARIOS = list(LOGIT_SCENARIOS)
 
 
@@ -73,13 +72,9 @@ def freeze(output_dir: Path) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output-dir",
-        default="../../tests/api_tests/fixtures/benchmarks/data",
+    run_freeze_cli(
+        freeze,
+        "../../tests/api_tests/fixtures/benchmarks/data",
+        "wrote frozen nonlinear datasets",
+        description=__doc__,
     )
-    args = parser.parse_args()
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    freeze(output_dir)
-    print(f"wrote frozen nonlinear datasets to {output_dir}")

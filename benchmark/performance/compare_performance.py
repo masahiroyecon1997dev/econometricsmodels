@@ -63,13 +63,13 @@ import polars as pl
 
 sys.path.insert(
     0, str(Path(__file__).resolve().parent.parent / "linear")
-)  # benchmark/linear/ を import path に追加（generate_synthetic_datasets）
+)  # benchmark/linear/ を import path に追加（generate_linear_datasets）
 sys.path.insert(
     0, str(Path(__file__).resolve().parent.parent)
 )  # benchmark/ を import path に追加（_common）
 
 from _common import hac_auto_lag  # noqa: E402
-from generate_synthetic_datasets import generate_dataset  # noqa: E402
+from generate_linear_datasets import generate_linear_dataset  # noqa: E402
 
 LIBRARIES = ["engine", "statsmodels", "pyfixest"]
 COV_TYPES = ["classical", "hc1", "cluster", "hac"]
@@ -118,7 +118,7 @@ def _warn_if_debug_build() -> None:
 
 
 def _build_dataframe(n: int, k: int, seed: int) -> pl.DataFrame:
-    df, _ = generate_dataset("baseline", n=n, k=k, seed=seed)
+    df, _ = generate_linear_dataset("baseline", n=n, k=k, seed=seed)
     return df.with_row_index("time_id").with_columns(
         (pl.col("time_id") % N_CLUSTERS).alias("cluster_group")
     )

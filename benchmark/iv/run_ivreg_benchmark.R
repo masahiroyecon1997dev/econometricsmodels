@@ -50,6 +50,13 @@ suppressMessages({
   library(jsonlite)
 })
 
+# coeftest()からの係数・標準誤差抽出とロバストWald F検定はrun_lm_crosscheck_benchmark.R
+# と共通のため、benchmark/_common.Rに抽出している（Rには__file__相当が無いため、
+# commandArgs()の--file=から自身のディレクトリを特定してsource()する）。
+script_args <- commandArgs(trailingOnly = FALSE)
+script_dir <- dirname(sub("^--file=", "", grep("^--file=", script_args, value = TRUE)))
+source(file.path(script_dir, "..", "_common.R"))
+
 model <- ivreg(as.formula(formula_str), data = df)
 df_inference <- df.residual(model)
 
@@ -75,28 +82,19 @@ if (cov_type == "classical") {
   stop(paste("unknown cov_type:", cov_type))
 }
 
-ct <- coeftest(model, vcov = vc, df = df_inference)
-coefs <- ct[, 1]
-ses <- ct[, 2]
-names(coefs) <- rownames(ct)
-names(ses) <- rownames(ct)
+coef_se <- extract_coef_se(model, vc, df_inference)
+coefs <- coef_se$coefs
+ses <- coef_se$ses
 
 s <- summary(model)
 r_squared_val <- s$r.squared
 r_squared_adj_val <- s$adj.r.squared
 
-# ロバストWald検定（本実装のIV版wald_f_testと同じ定義、run_lm_crosscheck_benchmark.Rを
-# 踏襲）。傾き係数の同時共分散部分行列が数値的に特異な場合はsolve()がエラーになるが、
-# 本実装（engine）も同様の場合にComputationErrorとして検出するため、そのようなケースは
-# 呼び出し元（generate_iv_crosscheck_fixtures.py）が対象シナリオから除外する想定。
-coef_names <- names(coef(model))
-slope_idx <- which(coef_names != "(Intercept)")
-beta_slopes <- coef(model)[slope_idx]
-df_model <- length(slope_idx)
-v_slopes <- vc[slope_idx, slope_idx, drop = FALSE]
-wald <- as.numeric(t(beta_slopes) %*% solve(v_slopes) %*% beta_slopes)
-f_statistic_val <- wald / df_model
-f_p_value_val <- 1 - pf(f_statistic_val, df_model, df_inference)
+# ロバストWald検定（本実装のIV版wald_f_testと同じ定義。特異な場合の扱い・
+# NUMERIC_SCENARIOSからの除外方針はwald_f_test()のコメント参照）。
+f_test <- wald_f_test(model, vc, df_inference)
+f_statistic_val <- f_test$f_statistic
+f_p_value_val <- f_test$f_p_value
 
 # 弱操作変数F統計量・Sargan（過剰識別検定）: summary(diagnostics=TRUE)は常にclassical
 # （iid）vcovで計算する仕様のため、要求されたcov_typeによらず同じ値になる。

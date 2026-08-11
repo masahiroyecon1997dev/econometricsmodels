@@ -4,7 +4,7 @@
 `benchmark/nonlinear/run_statsmodels_benchmark.py`（`--model probit`、1回呼べば
 1ケース分の結果を返す汎用ツール）を全シナリオ×全cov_typeの組み合わせで呼び出し、
 結果を1つのJSONにまとめて書き出す。`generate_logit_fixtures.py`と完全に同型の設計
-（シナリオ構成・cov_type構成もLogitと同一、`generate_binary_choice_datasets.py`
+（シナリオ構成・cov_type構成もLogitと同一、`generate_nonlinear_datasets.py`
 参照）。
 
 **`cov_type="hc1"`はここに含めない**（statsmodelsのdiscrete modelがn/(n-k)小標本補正を
@@ -43,14 +43,14 @@ from run_statsmodels_benchmark import run  # noqa: E402
 
 # perfect_multicollinearityは数値比較の対象外（ComputationErrorの発生確認のみ、
 # testing-policy.md「テストの3系統」）。generate_logit_fixtures.pyと同じシナリオ構成
-# （generate_binary_choice_datasets.py参照）。
+# （generate_nonlinear_datasets.py参照）。
 NUMERIC_SCENARIOS = [
     "baseline",
     "small_n",
     "moderate_multicollinearity",
     "high_condition_number",
     # probit特有の病理（準完全分離）。収束するが標準誤差が大きく膨らむ境界値ケース。
-    # 較正値はlogit（beta1=20）と異なりbeta1=10（generate_binary_choice_datasets.py参照）。
+    # 較正値はlogit（beta1=20）と異なりbeta1=10（generate_nonlinear_datasets.py参照）。
     "near_separation",
     # 変数間のスケールが極端に異なるケース（真のDGPは未スケーリングのXで計算済みの
     # ため成功パス）。
@@ -139,7 +139,7 @@ def build_fixtures() -> dict:
             "cov_type='opg'の限界効果（margeff）はstatsmodels側では算出できないため"
             "nullになっている（run_statsmodels_benchmark.py参照）。"
             "near_separationはprobit特有の病理（準完全分離）の境界値ケース"
-            "（較正値はlogitと異なりbeta1=10、generate_binary_choice_datasets.py参照）。"
+            "（較正値はlogitと異なりbeta1=10、generate_nonlinear_datasets.py参照）。"
             "完全分離下でのNonConvergence検出には既知の限界（logitと同じ、"
             "nonlinear/common.rsのrun_solverを共有するため）があり、専用シナリオは"
             "採用していない。"

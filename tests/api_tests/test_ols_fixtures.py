@@ -13,10 +13,10 @@
 Note:
     フィクスチャ生成時と同じ入力データを、`tests/api_tests/fixtures/benchmarks/data/`
     に固定済みのCSV（`benchmark/freeze_datasets.py`参照）から読む。ジェネレータ
-    （`generate_synthetic_datasets.py`）を直接呼ばないことで、ジェネレータ側の
+    （`generate_linear_datasets.py`）を直接呼ばないことで、ジェネレータ側の
     コードが将来変わっても既存フィクスチャの期待値と無言で不整合にならない。
     `imbalanced_cluster_groups`（純粋にnから決定論的にラベルを組み立てるだけで
-    乱数を使わない）のみ、引き続き`generate_synthetic_datasets.py`を直接呼ぶ。
+    乱数を使わない）のみ、引き続き`generate_linear_datasets.py`を直接呼ぶ。
 """
 
 from __future__ import annotations

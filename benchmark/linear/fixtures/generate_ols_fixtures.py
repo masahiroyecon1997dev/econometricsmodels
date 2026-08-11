@@ -10,7 +10,7 @@
 入力データは`tests/api_tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
 （`benchmark/freeze_datasets.py`参照）。`imbalanced_cluster_groups`（純粋にnから
 決定論的にラベルを組み立てるだけで乱数を使わない）のみ、引き続き
-`generate_synthetic_datasets.py`を直接呼ぶ。
+`generate_linear_datasets.py`を直接呼ぶ。
 
 使用例:
     python generate_ols_fixtures.py --output ../../../tests/api_tests/fixtures/benchmarks/ols.json

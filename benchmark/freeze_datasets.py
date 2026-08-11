@@ -1,6 +1,6 @@
 """ベンチマーク・テストで使う合成入力データセットを、CSVとして固定（凍結）するスクリプト。
 
-`generate_synthetic_datasets.py`（seed固定・決定論的）は「データがどう作られたか」の
+`generate_linear_datasets.py`（seed固定・決定論的）は「データがどう作られたか」の
 再現可能なコードとして残すが、フィクスチャ生成・pytestの実行時にこれを毎回呼び出す
 設計だと、ジェネレータ側のコードが将来変わったときに、既に固定した
 `tests/api_tests/fixtures/benchmarks/*.json`の期待値と無言で不整合になる
@@ -11,14 +11,14 @@
 このスクリプトは呼ばれない（フィクスチャJSON同様、意図的に更新する場合のみ
 手動で再実行する）。
 
-実際のシナリオ定義・生成処理は系統ごとに分割している（Issue #231、手法が増える
-たびに本ファイルが肥大化するのを避けるため）。このファイルは各系統の`freeze()`を
-呼び出す薄いディスパッチャに徹する。
+実際のシナリオ定義・生成処理は系統ごとに分割している（手法が増えるたびに本ファイルが
+肥大化するのを避けるため）。このファイルは各系統の`freeze()`を呼び出す薄いディスパッチャに
+徹する。
 
 - `benchmark/linear/freeze_linear_datasets.py`: 連続y（OLS/WLS用、
-  `generate_synthetic_datasets.py`）
+  `generate_linear_datasets.py`）
 - `benchmark/nonlinear/freeze_nonlinear_datasets.py`: 2値y（Logit/Probit用、
-  真のlogit/probit DGP、`generate_binary_choice_datasets.py`）
+  真のlogit/probit DGP、`generate_nonlinear_datasets.py`）
 - `benchmark/iv/freeze_iv_datasets.py`: IV（2SLS/GMM用、`generate_iv_datasets.py`）
 
 **Wooldridgeデータセットはここでは固定しない**（`wooldridge`パッケージ自体は
@@ -35,7 +35,6 @@ MITライセンスの本リポジトリにCSVとしてコミットして再配�
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
@@ -49,24 +48,22 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parent / "iv")
 )  # benchmark/iv/ を import path に追加（freeze_iv_datasets）
 
+from _common import run_freeze_cli  # noqa: E402
 from freeze_iv_datasets import freeze as _freeze_iv  # noqa: E402
 from freeze_linear_datasets import freeze as _freeze_linear  # noqa: E402
 from freeze_nonlinear_datasets import freeze as _freeze_nonlinear  # noqa: E402
 
 
 def freeze(output_dir: Path) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
     _freeze_linear(output_dir)
     _freeze_nonlinear(output_dir)
     _freeze_iv(output_dir)
-    print(f"wrote frozen datasets to {output_dir}")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output-dir",
-        default="../tests/api_tests/fixtures/benchmarks/data",
+    run_freeze_cli(
+        freeze,
+        "../tests/api_tests/fixtures/benchmarks/data",
+        "wrote frozen datasets",
+        description=__doc__,
     )
-    args = parser.parse_args()
-    freeze(Path(args.output_dir))

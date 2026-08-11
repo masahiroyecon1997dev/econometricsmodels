@@ -47,7 +47,7 @@ NUMERIC_SCENARIOS = [
     "high_condition_number",
     # logit特有の病理（準完全分離）。収束するが標準誤差が大きく膨らむ境界値ケース。
     "near_separation",
-    # 変数間のスケールが極端に異なるケース（generate_binary_choice_datasets.py参照。
+    # 変数間のスケールが極端に異なるケース（generate_nonlinear_datasets.py参照。
     # 真のDGPは未スケーリングのXで計算済みのため成功パス）。
     "scale_variance",
 ]
@@ -133,7 +133,7 @@ def build_fixtures() -> dict:
             "完全分離下でのNonConvergence検出には既知の限界があり、専用シナリオは"
             "採用していない（docs/spec/logit-spec.md参照）。"
             "scale_varianceは真のDGPを未スケーリングのXで計算した後に列のみを"
-            "スケーリングする設計のため成功パス（generate_binary_choice_datasets.py参照）。"
+            "スケーリングする設計のため成功パス（generate_nonlinear_datasets.py参照）。"
             "n=k+1（自由度1ちょうど）の境界値ケースはOLSと異なり非採用（n<=kでは"
             "logitのMLEが構造的にほぼ確実に完全分離を起こすため、意味のある成功パスに"
             "ならない。docs/spec/logit-spec.md参照）。"

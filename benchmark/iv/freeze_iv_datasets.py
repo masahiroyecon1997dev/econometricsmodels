@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -22,7 +21,7 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parent.parent)
 )  # benchmark/ を import path に追加（_common）
 
-from _common import freeze_scenarios  # noqa: E402
+from _common import freeze_scenarios, run_freeze_cli  # noqa: E402
 from generate_iv_datasets import generate_iv_dataset  # noqa: E402
 
 # generate_iv_datasets.pyのSCENARIOS全て（IV: 2SLS/GMM用）。
@@ -85,13 +84,9 @@ def freeze(output_dir: Path) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output-dir",
-        default="../../tests/api_tests/fixtures/benchmarks/data",
+    run_freeze_cli(
+        freeze,
+        "../../tests/api_tests/fixtures/benchmarks/data",
+        "wrote frozen iv datasets",
+        description=__doc__,
     )
-    args = parser.parse_args()
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    freeze(output_dir)
-    print(f"wrote frozen iv datasets to {output_dir}")

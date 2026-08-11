@@ -36,7 +36,7 @@ AIC/BICはRの`AIC()`/`BIC()`標準関数（残差分散を1パラメータと�
 合成データの入力は`tests/api_tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
 （`benchmark/freeze_datasets.py`参照）。`imbalanced_cluster_groups`（純粋にnから
 決定論的にラベルを組み立てるだけで乱数を使わない）のみ、引き続き
-`generate_synthetic_datasets.py`を直接呼ぶ。Wooldridgeデータは`load_wooldridge.py`
+`generate_linear_datasets.py`を直接呼ぶ。Wooldridgeデータは`load_wooldridge.py`
 経由で都度ロードする（データの再配布ライセンスが未確認のためCSVとして固定しない。
 `freeze_datasets.py`のdocstring参照）。
 

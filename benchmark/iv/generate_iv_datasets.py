@@ -2,8 +2,8 @@
 内生説明変数x_endog、構造誤差u・第一段階誤差vの相関）で合成データセットを
 生成するスクリプト。
 
-`generate_synthetic_datasets.py`（OLS/WLS用）・
-`nonlinear/generate_binary_choice_datasets.py`（Logit/Probit用）と同型の設計
+`generate_linear_datasets.py`（OLS/WLS用）・
+`nonlinear/generate_nonlinear_datasets.py`（Logit/Probit用）と同型の設計
 （`SCENARIOS`+`generate_*_dataset(scenario, ...)`関数）だが、IVはOLS/Logit/Probit
 と異なり「操作変数が内生変数と相関し（関連性）、かつ構造誤差とは無相関
 （除外制約）」という識別のための構造をDGP自体に組み込む必要があるため、
@@ -17,11 +17,11 @@
 （除外制約: instrumentsは構造誤差とは無相関という仮定を満たすように、DGP上も
 本当に無相関にしている）。
 
-`k_exog`/`k_endog`/`k_instruments`は呼び出し側が指定する（OLSの`generate_dataset`の
+`k_exog`/`k_endog`/`k_instruments`は呼び出し側が指定する（OLSの`generate_linear_dataset`の
 `k`引数と同じ設計）。`just_identified`シナリオのみ`k_instruments`を`k_endog`に
 強制する（丁度識別、Sargan/Hansen Jが`None`になる分岐の検証用）。
 `moderate_multicollinearity`/`high_condition_number`/`perfect_multicollinearity`/
-`scale_variance`は`x_exog`側の列間relationshipを操作する設計（OLSの`generate_dataset`
+`scale_variance`は`x_exog`側の列間relationshipを操作する設計（OLSの`generate_linear_dataset`
 と同じ発想を`x_exog`に適用、instrumentsやx_endogには適用しない）ため、
 呼び出し側が対応する`k_exog`（2以上、`perfect_multicollinearity`のみ3以上）を
 渡す必要がある（不足時は`ValueError`、OLSと同じ方針）。
@@ -138,7 +138,7 @@ def generate_iv_dataset(
     # --- 外生説明変数 x_exog ---
     if scenario in ("moderate_multicollinearity", "high_condition_number"):
         # x1とx2の相関: moderate=0.8程度、high_condition_number=0.999
-        # （`generate_synthetic_datasets.py`と同じ設計）。
+        # （`generate_linear_datasets.py`と同じ設計）。
         rho = 0.999 if scenario == "high_condition_number" else 0.8
         cov = np.eye(k_exog)
         cov[0, 1] = cov[1, 0] = rho
@@ -160,7 +160,7 @@ def generate_iv_dataset(
     # --- 内生性: 構造誤差uと第一段階誤差vの相関（二変量正規分布） ---
     cov_uv = np.array([[1.0, _RHO_ENDOG], [_RHO_ENDOG, 1.0]])
     if scenario == "heteroskedastic":
-        # 分散がx_exogの最初の列に依存（`generate_synthetic_datasets.py`の
+        # 分散がx_exogの最初の列に依存（`generate_linear_datasets.py`の
         # heteroskedasticシナリオと同じ発想）。
         sigma_i = 0.5 + 2.0 * np.abs(x_exog[:, 0])
         uv = rng.multivariate_normal(mean=[0.0, 0.0], cov=cov_uv, size=n)
@@ -168,7 +168,7 @@ def generate_iv_dataset(
         v = uv[:, 1]
     elif scenario == "autocorrelated":
         # AR(1): u_t = rho_ar * u_{t-1} + innovation_t
-        # （`generate_synthetic_datasets.py`のautocorrelatedシナリオと同じ発想。
+        # （`generate_linear_datasets.py`のautocorrelatedシナリオと同じ発想。
         # vは自己相関させない: HAC/Kernelの検証対象は構造誤差uの時系列相関のため）。
         rho_ar = 0.7
         uv_innov = rng.multivariate_normal(mean=[0.0, 0.0], cov=cov_uv, size=n)
@@ -194,7 +194,7 @@ def generate_iv_dataset(
         # 変数間のスケールが極端に異なるケース（x1は10^6オーダー、x2は10^-3
         # オーダー）。x_endogは既にスケーリング前のx_exogから計算済みのため、
         # yへの影響はスケーリング後のbeta_exogを逆スケーリングして相殺する
-        # （`generate_binary_choice_datasets.py`のscale_varianceと同じ発想:
+        # （`generate_nonlinear_datasets.py`のscale_varianceと同じ発想:
         # 真のDGPは未スケーリングのXで行い、出力直前にのみ列をスケーリングする）。
         x_exog = x_exog.copy()
         x_exog[:, 0] *= 1e6
@@ -219,8 +219,12 @@ def generate_iv_dataset(
 
 if __name__ == "__main__":
     import sys
+    from pathlib import Path
+
+    sys.path.insert(
+        0, str(Path(__file__).resolve().parent.parent)
+    )  # benchmark/ を import path に追加（_common）
+    from _common import preview_dataset
 
     scenario_arg = sys.argv[1] if len(sys.argv) > 1 else "baseline"
-    result_df, true_beta = generate_iv_dataset(scenario_arg)
-    print(f"scenario={scenario_arg}, true_beta={true_beta}")
-    print(result_df.head())
+    preview_dataset(scenario_arg, generate_iv_dataset)

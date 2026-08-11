@@ -21,7 +21,7 @@
 | # | フェーズ | 状態 |
 |---|---|---|
 | 1 | リファクタリング用スキル（or 既存スキル/エージェントの代用整理） | 完了 |
-| 2 | `benchmark/`ディレクトリの整理とリファクタリング | 未着手 |
+| 2 | `benchmark/`ディレクトリの整理とリファクタリング | 完了 |
 | 3 | `tests/`ディレクトリの整理とリファクタリング | 未着手 |
 | 4 | ロジック整理前のテスト拡充（OLS/WLS/Logit/Probitレビュー＋IV #232〜238） | 未着手 |
 | 5 | `python_package/`のリファクタリング | 未着手 |
@@ -259,6 +259,54 @@ WHYの説明が混在しているため、一律削除ではなく`refactor`ス�
 **最終確認**: `ruff check .` / `ruff format --check .` 全件パス、
 `pytest tests/api_tests/`（Rクロスチェック含む）670件全件パス、
 freeze出力のバイト一致確認済み。
+
+### 追加ラウンド: ユーザー再指摘への対応（完了）
+
+ステップ2完了後、ユーザーから4点の追加指摘を受けて対応した。
+
+1. **`freeze_datasets.py`のIssue #231記述削除**: モジュールdocstring内の
+   唯一の言及を削除。
+2. **命名規則の系統名統一**: `generate_synthetic_datasets.py`→
+   `generate_linear_datasets.py`（関数`generate_dataset`→`generate_linear_dataset`）、
+   `generate_binary_choice_datasets.py`→`generate_nonlinear_datasets.py`
+   （中身が実際に表す内容を正確に表しているため関数名`generate_binary_choice_dataset`
+   は維持、ファイル名のみ系統名に統一）。呼び出し元（`freeze_<系統>_datasets.py`・
+   `fixtures/generate_*.py`・テスト・SKILL.md・`testing-policy.md`・
+   `wls-spec.md`）を全て追従。
+3. **`__main__`ブロックの共通化**: `_common.py`に`run_freeze_cli`
+   （`freeze_datasets.py`・`freeze_<系統>_datasets.py`4ファイルで完全に同一だった
+   argparse定義・出力先ディレクトリ作成・freeze呼び出し・完了printを集約）と
+   `preview_dataset`（`generate_<系統>_datasets.py`3ファイルで同型だった、単体実行
+   時のシナリオ1件プレビュー表示を集約）を追加。各`freeze()`関数からmkdir/print
+   を除去し純粋化（ディレクトリ作成・printは`run_freeze_cli`側の責務に統一）。
+4. **Rスクリプトの共通化**: `run_lm_crosscheck_benchmark.R`と
+   `run_ivreg_benchmark.R`で完全に同一だった「`coeftest()`からの係数・標準誤差
+   抽出」「ロバストWald F検定」の2ブロックを`benchmark/_common.R`に抽出し
+   `source()`で読み込む形にした。cov_type→vcov分岐自体（lmはHC0-3・weight対応、
+   ivregはHC0-1のみ対応という実質的な差分がある）は共通化していない（過剰な
+   抽象化を避けるため）。`run_glm_crosscheck_benchmark.R`はProbit対応の観測情報
+   行列計算が特殊で共通化できる箇所が見当たらず対象外とした。Rには`__file__`
+   相当が無いため、各スクリプトが`commandArgs(trailingOnly=FALSE)`の`--file=`
+   から自身のディレクトリを特定して`source()`する方式にした。
+
+**最終確認**: `ruff check .` / `ruff format --check .` 全件パス、
+`pytest tests/api_tests/`670件全件パス、freeze出力のバイト一致確認済み、
+Rスクリプト（`run_lm_crosscheck_benchmark.R`・`run_ivreg_benchmark.R`）を
+実際に実行し既存crosscheckフィクスチャとバイト一致することを確認済み。
+
+さらにユーザー指示により、`benchmark/*/fixtures/generate_*.py`11本全てを
+実行し`tests/api_tests/fixtures/benchmarks/*.json`と再照合した
+（`_meta.generated_at`のみ差異を許容、それ以外は完全一致を要求）。
+10本は一致を確認。**残り1本（`generate_logit_crosscheck_fixtures.py`）は
+`near_separation`シナリオ×`classical`×logitの組み合わせでR側が
+`stopifnot(isTRUE(all.equal(bread_obs, bread(model), tolerance=1e-6)))`
+（`run_glm_crosscheck_benchmark.R`の不変条件チェック）で失敗し実行不能**。
+`git stash`で今回の変更を全て戻した状態（今回のリファクタリング前のコード）
+でも同じ入力・同じコマンドで同一エラーが再現することを確認済みのため、
+**今回のリファクタリングが原因ではなく、既存の潜在バグ（環境のRパッケージ
+バージョン差等による数値不安定性の可能性）**。フェーズ2のスコープ外のため
+今回は修正しない。フェーズ4（テスト拡充、Logit/Probitレビュー）着手時に
+要調査・要修正。
 
 ---
 

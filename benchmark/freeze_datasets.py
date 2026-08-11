@@ -40,11 +40,11 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parent / "nonlinear")
 )  # benchmark/nonlinear/ を import path に追加（generate_binary_choice_datasets）
 
-from generate_binary_choice_datasets import (  # noqa: E402
+from generate_binary_choice_datasets import (
     generate_logit_dataset,
     generate_probit_dataset,
 )
-from generate_synthetic_datasets import generate_dataset  # noqa: E402
+from generate_synthetic_datasets import generate_dataset
 
 # generate_ols_fixtures.py / generate_wls_fixtures.py のNUMERIC_SCENARIOSに
 # perfect_multicollinearity（ComputationErrorパスのテストで使う、数値比較はしない）

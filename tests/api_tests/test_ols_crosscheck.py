@@ -60,10 +60,9 @@ sys.path.insert(
         / "fixtures"
     ),
 )
-from generate_ols_crosscheck_fixtures import PREDICT_NEW_DATA  # noqa: E402
-from generate_synthetic_datasets import imbalanced_cluster_groups  # noqa: E402
-
-from econometricsmodels import OLS, OLSOptions  # noqa: E402
+from econometricsmodels import OLS, OLSOptions
+from generate_ols_crosscheck_fixtures import PREDICT_NEW_DATA
+from generate_synthetic_datasets import imbalanced_cluster_groups
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parent

@@ -17,8 +17,8 @@ df = pl.DataFrame(
 
 result = OLS(df, y="y", x=["x1"]).fit()
 
-print(result.params)       # {"const": ..., "x1": ...}
-print(result.std_errors)   # {"const": ..., "x1": ...}
+print(result.params)  # {"const": ..., "x1": ...}
+print(result.std_errors)  # {"const": ..., "x1": ...}
 print(result.r_squared)
 ```
 
@@ -102,8 +102,8 @@ df = pl.DataFrame(
 
 result = Logit(df, y="y", x=["x1"]).fit()
 
-print(result.params)         # {"const": ..., "x1": ...}
-print(result.std_errors)     # {"const": ..., "x1": ...}
+print(result.params)  # {"const": ..., "x1": ...}
+print(result.std_errors)  # {"const": ..., "x1": ...}
 print(result.pseudo_r_squared)
 ```
 
@@ -151,8 +151,8 @@ df = pl.DataFrame(
 
 result = Probit(df, y="y", x=["x1"]).fit()
 
-print(result.params)         # {"const": ..., "x1": ...}
-print(result.std_errors)     # {"const": ..., "x1": ...}
+print(result.params)  # {"const": ..., "x1": ...}
+print(result.std_errors)  # {"const": ..., "x1": ...}
 print(result.pseudo_r_squared)
 ```
 

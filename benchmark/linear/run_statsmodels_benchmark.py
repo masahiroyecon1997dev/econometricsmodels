@@ -30,7 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
@@ -39,7 +39,7 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parent.parent)
 )  # benchmark/ を import path に追加（load_wooldridge）
 
-from load_wooldridge import load as _load_wooldridge  # noqa: E402
+from load_wooldridge import load as _load_wooldridge
 
 DATA_DIR = (
     Path(__file__).resolve().parents[2]
@@ -144,7 +144,7 @@ def run(
     result["_meta"] = {
         "reference": "statsmodels",
         "statsmodels_version": statsmodels.__version__,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "cov_type_requested": cov_type,
         "cov_type_statsmodels": sm_cov_type,
         "confidence_level": confidence_level,

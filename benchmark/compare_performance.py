@@ -56,11 +56,10 @@ import statistics
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
-
 from generate_synthetic_datasets import generate_dataset
 
 LIBRARIES = ["engine", "statsmodels", "pyfixest"]
@@ -336,7 +335,7 @@ def build_report(
                 "OLS(...).fit()のエンドツーエンド実行時間・ピークRSSを"
                 "statsmodels/pyfixestと比較する"
             ),
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "n_sweep": N_SWEEP,
             "hac_n_sweep": HAC_N_SWEEP,
             "n_sweep_fixed_k": N_SWEEP_FIXED_K,

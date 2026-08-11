@@ -30,7 +30,7 @@ import json
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(
@@ -40,13 +40,12 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parents[2])
 )  # benchmark/ を import path に追加（load_wooldridge, generate_synthetic_datasets）
 
-import polars as pl  # noqa: E402
-
-from load_wooldridge import load as load_wooldridge  # noqa: E402
-from run_statsmodels_benchmark import DATA_DIR  # noqa: E402
-from generate_synthetic_datasets import (  # noqa: E402
+import polars as pl
+from generate_synthetic_datasets import (
     imbalanced_cluster_groups as _imbalanced_cluster_groups_ols,
 )
+from load_wooldridge import load as load_wooldridge
+from run_statsmodels_benchmark import DATA_DIR
 
 NONLINEAR_DIR = Path(__file__).resolve().parent.parent
 R_SCRIPT = NONLINEAR_DIR / "run_glm_crosscheck_benchmark.R"
@@ -249,7 +248,7 @@ def build_fixtures() -> dict:
             "cov_type='opg'の限界効果もここのみが数値照合対象（statsmodels側は"
             "算出不可）。"
         ),
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "r_version": r_version,
         "marginaleffects_version": marginaleffects_version,
         "note": (

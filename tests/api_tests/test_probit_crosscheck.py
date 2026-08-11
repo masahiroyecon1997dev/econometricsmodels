@@ -42,9 +42,8 @@ import polars as pl
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
-from generate_synthetic_datasets import imbalanced_cluster_groups  # noqa: E402
-
-from econometricsmodels import Probit, ProbitOptions  # noqa: E402
+from econometricsmodels import Probit, ProbitOptions
+from generate_synthetic_datasets import imbalanced_cluster_groups
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parent

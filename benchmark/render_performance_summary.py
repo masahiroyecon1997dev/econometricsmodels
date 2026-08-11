@@ -112,14 +112,18 @@ def render(report: dict) -> str:
     lines = [
         "# OLSパフォーマンス比較",
         "",
-        f"生成日時: {meta['generated_at']} / repeats={meta['repeats']} / "
-        f"seed={meta['seed']}",
+        (
+            f"生成日時: {meta['generated_at']} / repeats={meta['repeats']} / "
+            f"seed={meta['seed']}"
+        ),
         "",
         "> [!NOTE]",
-        "> GitHub Actionsランナーは共有インフラのため実行時間が変動しうる。"
-        "CI上の数値は参考値であり、ローカルdevcontainerでの数値ほど"
-        "安定しない前提で読むこと"
-        "（`docs/spec/ols-performance-notes.md`参照）。",
+        (
+            "> GitHub Actionsランナーは共有インフラのため実行時間が変動しうる。"
+            "CI上の数値は参考値であり、ローカルdevcontainerでの数値ほど"
+            "安定しない前提で読むこと"
+            "（`docs/spec/ols-performance-notes.md`参照）。"
+        ),
         "",
     ]
 

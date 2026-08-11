@@ -15,18 +15,18 @@ from .nonlinear.probit import Probit, ProbitOptions, ProbitResults
 
 __all__ = [
     "OLS",
-    "OLSOptions",
-    "OlsResults",
     "WLS",
-    "WlsResults",
+    "ComputationError",
     "Logit",
     "LogitOptions",
     "LogitResults",
+    "OLSOptions",
+    "OlsResults",
     "Probit",
     "ProbitOptions",
     "ProbitResults",
     "ValidationError",
-    "ComputationError",
+    "WlsResults",
 ]
 
 __version__ = "0.4.0"

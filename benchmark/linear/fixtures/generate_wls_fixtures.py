@@ -24,7 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(
@@ -34,12 +34,11 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parents[2])
 )  # benchmark/ を import path に追加（load_wooldridge, generate_synthetic_datasets）
 
-import polars as pl  # noqa: E402
-import statsmodels  # noqa: E402
-
-from generate_synthetic_datasets import imbalanced_cluster_groups  # noqa: E402
-from load_wooldridge import load as load_wooldridge  # noqa: E402
-from run_statsmodels_benchmark import DATA_DIR, run  # noqa: E402
+import polars as pl
+import statsmodels
+from generate_synthetic_datasets import imbalanced_cluster_groups
+from load_wooldridge import load as load_wooldridge
+from run_statsmodels_benchmark import DATA_DIR, run
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md
 # 「テストの3系統」参照）。ComputationErrorが発生することのみをテスト
@@ -104,7 +103,7 @@ def build_fixtures() -> dict:
 
     fixtures["_meta"] = {
         "method": "wls",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "primary_reference": "statsmodels",
         "statsmodels_version": statsmodels.__version__,
         "note": (
@@ -157,7 +156,7 @@ def _run_cluster_case(
         "_meta": {
             "reference": "statsmodels",
             "statsmodels_version": statsmodels.__version__,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "note": note,
             "formula": formula,
             "weight_col": "weight",
@@ -209,7 +208,7 @@ def _run_401ksubs_case() -> dict:
         "_meta": {
             "reference": "statsmodels",
             "statsmodels_version": statsmodels.__version__,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "formula": formula,
             "weight": "1/inc",
             "filter": "fsize == 1",

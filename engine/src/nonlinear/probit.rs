@@ -67,9 +67,9 @@ use crate::nonlinear::common::{
     Method, MleError, SandwichVariant, cluster_cov_params, column_means, column_medians,
     destandardize_cov_params, destandardize_params, goodness_of_fit, log_likelihood_null,
     marginal_effects_from_w_s, observed_information_cov_params, opg_cov_params, pred_table,
-    run_solver, sandwich_cov_params, standardize_columns, validate_binary_y,
+    predict_from_link, run_solver, sandwich_cov_params, standardize_columns,
+    validate_fit_preconditions,
 };
-use crate::validation::validate_cluster_groups;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
 use statrs::distribution::{Continuous, ContinuousCDF, Normal};
@@ -538,29 +538,9 @@ impl ProbitEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, MleError> {
-        if !(confidence_level > 0.0 && confidence_level < 1.0) {
-            return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
-        }
-        if max_iter <= 0 {
-            return Err(MleError::InvalidMaxIter { max_iter });
-        }
-        if tol <= 0.0 {
-            return Err(MleError::InvalidTol { tol });
-        }
-        validate_binary_y(input.y())?;
-
         let n = input.nobs();
         let k = input.k();
-        if k == 0 {
-            return Err(CommonError::NoRegressors { n }.into());
-        }
-        if n <= k {
-            return Err(CommonError::InsufficientObservations { n, k }.into());
-        }
-        if let CovType::Cluster { groups } = &cov_type {
-            let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-            validate_cluster_groups(groups, n)?;
-        }
+        validate_fit_preconditions(confidence_level, max_iter, tol, input.y(), k, &cov_type)?;
 
         let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
         let problem = ProbitProblem::from_standardized(x_std, input.y().clone());
@@ -870,16 +850,8 @@ impl ProbitEstimator {
     /// **新規データでの予測（out-of-sample）は未対応**（本Issueのスコープ外、
     /// 別issueでトラッキング。`LogitEstimator::predict`と同じ、ユーザー確認済み）。
     pub fn predict(&self) -> Vec<f64> {
-        let x = self.input.x();
-        let n = x.nrows();
-        let k = x.ncols();
         let normal = Normal::standard();
-        (0..n)
-            .map(|i| {
-                let z: f64 = (0..k).map(|j| *x.get(i, j) * self.params[j]).sum();
-                normal.cdf(z)
-            })
-            .collect()
+        predict_from_link(self.input.x(), &self.params, |z| normal.cdf(z))
     }
 
     /// 分類の的中表（2×2、`table[actual][predicted]`のカウント。行=実測クラス、

@@ -37,9 +37,9 @@ use crate::nonlinear::common::{
     Method, MleError, SandwichVariant, cluster_cov_params, column_means, column_medians,
     destandardize_cov_params, destandardize_params, goodness_of_fit, log_likelihood_null,
     marginal_effects_from_w_s, observed_information_cov_params, opg_cov_params, pred_table,
-    run_solver, sandwich_cov_params, standardize_columns, validate_binary_y,
+    predict_from_link, run_solver, sandwich_cov_params, standardize_columns,
+    validate_fit_preconditions,
 };
-use crate::validation::validate_cluster_groups;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
 use statrs::distribution::Normal;
@@ -478,37 +478,9 @@ impl LogitEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, MleError> {
-        if !(confidence_level > 0.0 && confidence_level < 1.0) {
-            return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
-        }
-        if max_iter <= 0 {
-            return Err(MleError::InvalidMaxIter { max_iter });
-        }
-        if tol <= 0.0 {
-            return Err(MleError::InvalidTol { tol });
-        }
-        validate_binary_y(input.y())?;
-
         let n = input.nobs();
         let k = input.k();
-        // `k == 0`（`include_intercept=false`かつ説明変数も無い病的な入力）は`n<=k`単体では
-        // 弾けない（実データでは`n>=1`のため）。この経路を通すと後段の`cov_params`計算
-        // （0×0行列に対する`ensure_well_conditioned_symmetric_matrix`）で`faer`がpanicする
-        // ことが判明していたため、ここで明示的に弾く（修正済み）。
-        // `n<=k`（観測数不足）とは原因が異なる不正のため、`InsufficientObservations`とは
-        // 別バリアント`NoRegressors`で表現する（`k=0`だと`n>k`は常に成立するため、
-        // `InsufficientObservations`のメッセージを流用すると「条件を満たしているのに
-        // エラーになる」という誤解を招く。rust-reviewerの指摘を受けて分離）。
-        if k == 0 {
-            return Err(CommonError::NoRegressors { n }.into());
-        }
-        if n <= k {
-            return Err(CommonError::InsufficientObservations { n, k }.into());
-        }
-        if let CovType::Cluster { groups } = &cov_type {
-            let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-            validate_cluster_groups(groups, n)?;
-        }
+        validate_fit_preconditions(confidence_level, max_iter, tol, input.y(), k, &cov_type)?;
 
         let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
         let problem = LogitProblem::from_standardized(x_std, input.y().clone());
@@ -821,15 +793,7 @@ impl LogitEstimator {
     /// **新規データでの予測（out-of-sample）は未対応**（本Issueのスコープ外、
     /// 別issueでトラッキング。ユーザー確認済み）。
     pub fn predict(&self) -> Vec<f64> {
-        let x = self.input.x();
-        let n = x.nrows();
-        let k = x.ncols();
-        (0..n)
-            .map(|i| {
-                let z: f64 = (0..k).map(|j| *x.get(i, j) * self.params[j]).sum();
-                logistic(z)
-            })
-            .collect()
+        predict_from_link(self.input.x(), &self.params, logistic)
     }
 
     /// 分類の的中表（2×2、`table[actual][predicted]`のカウント。行=実測クラス、

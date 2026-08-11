@@ -1,13 +1,16 @@
-"""推定手法テスト用の合成データセット生成スクリプト。
+"""linear系統（OLS/WLS）テスト用の合成データセット生成スクリプト。
 
 `.claude/rules/testing-policy.md` で定めるデータセットバリエーション（小標本、
 高分散、不均一分散、自己相関、多重共線性、スケール差・高条件数等の境界値・
 悪条件ケース）を持つデータを生成する。
 
-使用例:
-    from generate_synthetic_datasets import generate_dataset
+系統非依存のクラスターラベル生成（`imbalanced_cluster_groups`）は
+`benchmark/_common.py`へ分離した（他系統からも使われるため）。
 
-    df, true_beta = generate_dataset("heteroskedastic", n=500, seed=42)
+使用例:
+    from generate_linear_datasets import generate_linear_dataset
+
+    df, true_beta = generate_linear_dataset("heteroskedastic", n=500, seed=42)
     # df の列: y, x1, x2, x3, weight
     df.write_csv("heteroskedastic.csv")  # Rベンチマーク用にCSV出力する場合
 """
@@ -30,7 +33,7 @@ SCENARIOS = [
 ]
 
 
-def generate_dataset(
+def generate_linear_dataset(
     scenario: str,
     n: int = 500,
     k: int = 3,
@@ -129,46 +132,14 @@ def generate_dataset(
     return pl.DataFrame(data), beta
 
 
-# [2, 3, 5, 10, 30, 50]（合計100）を1タイルとして繰り返す不均衡なクラスタサイズ
-# パターン（testing-policy.md「テスト用データセット」3.参照）。
-_IMBALANCED_CLUSTER_TILE = [2, 3, 5, 10, 30, 50]
-
-
-def imbalanced_cluster_groups(n: int) -> list[str]:
-    """不均衡なクラスタグループ（グループ数・サイズが偏ったラベル列）を生成する。
-
-    `_IMBALANCED_CLUSTER_TILE`（サイズ合計100）をnに応じてタイル状に繰り返す。
-    均等サイズの疑似グループ（行番号%10等）だけでは見逃す、実務的に起こりやすい
-    グループサイズの偏りを再現する。
-
-    Args:
-        n: 観測数。100の倍数である必要がある（タイルが端数なく割り切れるように）。
-
-    Returns:
-        長さnのグループラベル（"g0", "g1", ...）のリスト。
-
-    Raises:
-        ValueError: nが100の倍数でない場合。
-    """
-    if n % 100 != 0:
-        raise ValueError(
-            f"n must be a multiple of 100 to tile the imbalanced cluster "
-            f"pattern exactly, got n={n}"
-        )
-    n_tiles = n // 100
-    labels: list[str] = []
-    group_idx = 0
-    for _ in range(n_tiles):
-        for size in _IMBALANCED_CLUSTER_TILE:
-            labels.extend([f"g{group_idx}"] * size)
-            group_idx += 1
-    return labels
-
-
 if __name__ == "__main__":
     import sys
+    from pathlib import Path
+
+    sys.path.insert(
+        0, str(Path(__file__).resolve().parent.parent)
+    )  # benchmark/ を import path に追加（_common）
+    from _common import preview_dataset
 
     scenario_arg = sys.argv[1] if len(sys.argv) > 1 else "baseline"
-    result_df, true_beta = generate_dataset(scenario_arg)
-    print(f"scenario={scenario_arg}, true_beta={true_beta}")
-    print(result_df.head())
+    preview_dataset(scenario_arg, generate_linear_dataset)

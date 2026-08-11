@@ -44,13 +44,16 @@ sys.path.insert(
 )  # benchmark/linear/ を import path に追加（run_statsmodels_benchmark）
 sys.path.insert(
     0, str(Path(__file__).resolve().parents[2])
-)  # benchmark/ を import path に追加（load_wooldridge, generate_synthetic_datasets）
+)  # benchmark/ を import path に追加（load_wooldridge, _common）
 
 import polars as pl
 import statsmodels
-from generate_synthetic_datasets import imbalanced_cluster_groups
+from _common import (
+    DATA_DIR,
+    hac_auto_lag,
+    imbalanced_cluster_groups,
+)
 from load_wooldridge import load as load_wooldridge
-from run_statsmodels_benchmark import DATA_DIR
 
 LINEAR_DIR = Path(__file__).resolve().parent.parent
 R_SCRIPT = LINEAR_DIR / "run_lm_crosscheck_benchmark.R"
@@ -72,15 +75,6 @@ NUMERIC_SCENARIOS = [
 R_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
 
 WEIGHT_COL = "weight"
-
-
-def _hac_auto_lag(n: int) -> int:
-    """本実装（engine::linear::ols::resolve_hac_lags）と同じ自動ラグ式。
-
-    generate_ols_crosscheck_fixtures.pyと同じ理由（自動選択式の実装差を
-    比較対象から除外し、HAC公式自体の妥当性のみを確認するため）。
-    """
-    return int(4 * (n / 100) ** (2 / 9))
 
 
 def _run_r(
@@ -144,7 +138,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         for cov_type in R_COV_TYPES:
             entry: dict = {}
             if cov_type == "hac":
-                lag = _hac_auto_lag(n)
+                lag = hac_auto_lag(n)
                 entry["r"] = _run_r(
                     csv_path,
                     formula,

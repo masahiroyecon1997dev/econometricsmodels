@@ -23,6 +23,9 @@ env:
   # 全てビルドしてしまうため）。
   MATURIN_INTERPRETER_ARGS: -i python3.12 -i python3.13 -i python3.14
 
+permissions:
+  contents: read
+
 jobs:
   linux:
     name: build (linux x86_64 manylinux)

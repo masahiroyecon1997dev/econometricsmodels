@@ -10,7 +10,7 @@
 入力データは`tests/api_tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
 （`benchmark/freeze_datasets.py`参照）。`imbalanced_cluster_groups`（純粋にnから
 決定論的にラベルを組み立てるだけで乱数を使わない）のみ、引き続き
-`generate_synthetic_datasets.py`を直接呼ぶ。
+`generate_linear_datasets.py`を直接呼ぶ。
 
 使用例:
     python generate_ols_fixtures.py --output ../../../tests/api_tests/fixtures/benchmarks/ols.json
@@ -29,12 +29,12 @@ sys.path.insert(
 )  # benchmark/linear/ を import path に追加（run_statsmodels_benchmark）
 sys.path.insert(
     0, str(Path(__file__).resolve().parents[2])
-)  # benchmark/ を import path に追加（generate_synthetic_datasets）
+)  # benchmark/ を import path に追加（_common）
 
 import polars as pl
 import statsmodels
-from generate_synthetic_datasets import imbalanced_cluster_groups
-from run_statsmodels_benchmark import DATA_DIR, run
+from _common import DATA_DIR, imbalanced_cluster_groups
+from run_statsmodels_benchmark import run
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md「テストの3系統」参照）。
 # ComputationErrorが発生することのみをテストコード側で対応する。scale_varianceは

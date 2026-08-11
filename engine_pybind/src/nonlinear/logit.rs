@@ -31,8 +31,8 @@ use super::common::{
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
 use crate::errors::ValidationError;
 use crate::validation::{
-    validate_no_const_collision, validate_no_duplicate_roles, validate_no_duplicate_x,
-    validate_x_non_empty,
+    RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
+    validate_no_duplicate_within_role, validate_x_non_empty,
 };
 
 /// Estimation options for Logit.
@@ -351,8 +351,8 @@ pub(crate) fn build_logit_input(
     // 完全な多重共線性を早期に、分かりやすいエラーで防ぐ（`validation.rs`に集約、
     // OLS/WLSと共通、`.claude/rules/rust-style.md`参照）。
     validate_x_non_empty(&x)?;
-    validate_no_duplicate_roles(&[("y", &y)], &x)?;
-    validate_no_duplicate_x(&x)?;
+    validate_no_duplicate_roles(&[("y", RoleValue::Single(&y)), ("x", RoleValue::Multi(&x))])?;
+    validate_no_duplicate_within_role("x", &x)?;
     validate_no_const_collision(&x, options.include_intercept)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────

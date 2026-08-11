@@ -1,7 +1,7 @@
 ---
 name: implement-python
 description: python_package側の実装計画立案・実装・規約チェックまでを一括で行う
-argument-hint: [実装したい内容]
+argument-hint: "[実装したい内容]"
 allowed-tools: Read, Write, Edit, Bash(ruff check:*), Bash(ruff format:*), Bash(pytest:*), Grep, Glob
 ---
 

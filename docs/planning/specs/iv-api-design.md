@@ -5,7 +5,12 @@ FE/RE共通の設計は[`panel-api-design.md`](./panel-api-design.md)を参照�
 
 **ステータス**: 確定（1章: 引数設計／2章: 結果設計／3章: 標準誤差・検定／
 4章: 内部実装・共通化／5章: リファレンス実装・テスト方針／
-6章: IV固有論点）。IV側の論点はすべて確定。
+6章: IV固有論点）。IV側の論点はすべて確定。ただし以下2点の細部は、
+Issue #171（`linearmodels`/`ivreg`とのベンチマーク作成）でリファレンス実装を確認して
+から最終判断する未決着事項として残っている。
+- 3.2節のGMMの検定分布（z分布のまま確定とするか、実務慣行に合わせてt分布・
+  切り替えオプションにすべきか。Issue #159時点で追記）
+- 3.1節のIV版HC2/HC3（レバレッジ算出式に確立した参照実装が無い。Issue #166時点で追記）
 
 ## 1. 引数設計（確定）
 
@@ -62,7 +67,7 @@ FE/RE共通の設計は[`panel-api-design.md`](./panel-api-design.md)を参照�
 
 | フィールド | FE/REとの違い |
 |---|---|
-| `params` / `std_errors` / `t_stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` / `residuals` / `dep_var_name` / `n_obs` / `df_resid` / `df_model` / `cov_type` / `f_statistic` / `f_p_value` | 共通（そのまま踏襲） |
+| `params` / `std_errors` / `stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` / `residuals` / `dep_var_name` / `n_obs` / `df_resid` / `df_model` / `cov_type` / `f_statistic` / `f_p_value` | `t_stats`ではなく**`stats`**という分布非依存の名前にする（Issue #159で確定）。1つの`IvResult`型を2SLS（t分布）・GMM（z分布、3章参照）の両方が共有するため、`OLSResult.t_stats`/`LogitResult.z_stats`のような分布固定の名前は使えない。`engine::inference::InferenceStat`が同じ理由で`stat`という分布非依存の名前を使っている前例に倣った。それ以外は共通（そのまま踏襲） |
 | `n_entities` | **含めない**（IVはパネル構造を前提としない） |
 | `log_likelihood` / `aic` / `bic` | **除外する**。2SLS/GMMは尤度ベースの推定法ではなく
   （Stataの`ivregress`もデフォルトでは出力しない）、正規性を仮定した疑似尤度を計算して
@@ -101,6 +106,19 @@ FE/RE共通の設計は[`panel-api-design.md`](./panel-api-design.md)を参照�
 - 2SLSの分散はサンドイッチ型（`(X'PzX)^-1 X'Pz Ω Pz X (X'PzX)^-1`、`Ω`の推定方法が
   `cov_type`で変わる）。**GMMは`cov_type`（最終SEの計算方法）と`weight_type`（点推定に使う
   重み行列）を分離する**（詳細は6.2）。
+- **`hc2`/`hc3`（レバレッジ`h_ii`によるスケーリング）は引き続き外部の参照実装で検証できない**
+  （Issue #171で再確認、`benchmark/iv/run_linearmodels_benchmark.py`のモジュールdocstring
+  参照）: `linearmodels.iv.covariance`は`Homoskedastic`/`Heteroskedastic`/`Kernel`/
+  `Clustered`のみで、R `ivreg`も同様（`hatvalues.ivreg`の実装がソース上コメントアウトされて
+  いる）。実装（`engine/src/iv/two_sls.rs`）はOLSのHC2/HC3を代数的に拡張した自作の拡張の
+  ままで、外部パッケージとの数値照合はできない（`engine`のRust単体テストによる独立な
+  手計算クロスチェックのみで検証を継続する）。
+- **`classical`/`hc0`〜`hc1`/`cluster`/`hac`は`linearmodels`の`cov_type`/`debiased`との対応が
+  実測で確定した**（Issue #171）: `classical`↔(`unadjusted`, `debiased=True`)、
+  `hc0`↔(`robust`, `debiased=False`)、`hc1`↔(`robust`, `debiased=True`)、
+  `cluster`↔(`clustered`, `debiased=True`)、`hac`↔(`kernel`(bartlett), `debiased=False`)。
+  いずれも`coef`/`se`が相対誤差1e-10以下（実質機械精度）で一致することを確認した
+  （詳細な対応表・検証根拠は`run_linearmodels_benchmark.py`のモジュールdocstring参照）。
 
 ### 3.2 検定分布
 
@@ -110,6 +128,22 @@ FE/RE共通の設計は[`panel-api-design.md`](./panel-api-design.md)を参照�
   t分布としての正当化がない（非線形モデル・MLE系のz分布判断と同じ理由）。
 - 2SLSとGMMの実装方針の違いと接続する決定であり、実装の詳細（GMM目的関数・
   重み行列の設計）は6章で確定する。
+- **`linearmodels`の分布切り替え方式が判明した（Issue #171で確認）**: `IV2SLS`/`IVGMM`とも
+  `fit(debiased=False)`（既定）では正規分布（z）・`f_statistic`もカイ二乗形式（qで割らない生の
+  二次形式）、`fit(debiased=True)`ではt(df_resid)分布・F分布（`f_statistic`もqで割った形式）を
+  返す（`linearmodels.iv.results.IVResults.pvalues`/`f_statistic`のソースで確認済み。Stataの
+  `ivregress`の`small`オプションと同じ発想）。本実装の2SLSは`cov_type`によらず常にt分布/F分布
+  という設計だが、`linearmodels`は`debiased`という別軸で切り替わるため、`hc0`/`hac`
+  （`debiased=False`で`coef`/`se`が一致する組み合わせ）をベンチマークする際は
+  `linearmodels`の`pvalues`/`tstats`/`f_statistic`をそのまま使わず、`coef`/`se`のみ借りて
+  t分布・F分布で独自に計算し直す必要があった（`run_linearmodels_benchmark.py`参照）。
+  GMMについては、`linearmodels`の既定（`debiased=False`→z分布）が本実装の設計
+  （GMMは常にz分布）と一致することも合わせて確認できた。GMM自体のcov_type対応・SE計算は
+  Issue #171の作業中に実装した（当初Issue #166でクローズ済みの完了条件だったが、実際には
+  GMM側が未実装のまま残っていたことが発覚したため。`engine/src/iv/gmm.rs`のモジュール
+  docコメント「標準誤差・検定統計量（cov_type対応）」・`engine/src/iv/CLAUDE.md`参照）。
+  `linearmodels`（`IVGMM`）との数値照合は`method="gmm"`のPython配線が別途必要なため、
+  そちらの完了後に改めて行う。
 
 ## 4. 内部実装・共通化（確定）
 
@@ -138,7 +172,37 @@ FE/RE共通の設計は[`panel-api-design.md`](./panel-api-design.md)を参照�
 
 ### 5.2 Rクロスチェックパッケージ
 
-**`ivreg`**。ただし`ivreg`は2SLSのみ対応でGMMには対応していない見込み（要実装時再確認）。
+**`ivreg`**。`ivreg`は2SLSのみ対応でGMMには対応していない（実装時に再確認済み、5.3節）。
+
+**経緯（Issue #171）**: devcontainerのRには当初`ivreg`が未導入で、インストールもできない状態
+だった（`ivreg`が要求する`car`パッケージの依存先`MatrixModels`が`Matrix>=1.6.0`（→R>=4.4）を
+要求するが、devcontainerのRはDebian bookworm標準の4.2.2固定で更新できなかった）。当面は
+Python（`linearmodels`）側のみで2SLS/GMMともに検証し、2SLS/GMMともにlinearmodelsとの
+数値照合を実装・コミット済み（GMM側は本節・5.3節の方針通りRクロスチェック省略が最終形）。
+
+この制約は`.devcontainer/Dockerfile`にCRAN公式のDebian向けAPTリポジトリ（`bookworm-cran40`）を
+追加しR 4.6.1系に更新することで解消した（コミット済み）。**完了**: コンテナ再構築後に
+`ivreg`が実際に導入されていること（R 4.5.3、`Rscript -e 'library(ivreg)'`で確認済み）を
+確認し、2SLSの`ivreg`クロスチェックを実装した（`benchmark/iv/run_ivreg_benchmark.R`・
+`benchmark/iv/fixtures/generate_iv_crosscheck_fixtures.py`・
+`tests/api_tests/test_iv_crosscheck.py`）。
+
+`ivreg`はclassical/hc0/hc1/cluster/hacの`vcov`（`vcov()`/`sandwich::vcovHC`/`vcovCL`/
+`NeweyWest`）を`coeftest()`経由でそのまま使える（`lm`と同じ`sandwich`基盤）。
+`hc2`/`hc3`は既存方針通り対象外（3.1節、ivreg側にレバレッジ算出の確立した参照実装が
+無いため）。`summary(model, diagnostics=TRUE)`は弱操作変数F統計量・Wu-Hausman・
+Sarganを一括で返すが、`vcov.`に行列を渡すと警告付きでNULL（classical）にフォールバック
+する仕様のため、**常にclassical（iid）vcovで計算される**（実測確認済み）。これは
+本実装の`weak_instrument_f_statistics`/`overid_statistic`が常にclassicalという設計
+（6.4節・6.5節）と一致するためcov_typeによらず一律クロスチェックできるが、
+`wu_hausman_statistic`はcov_typeに依存する設計のため、`ivreg`側ではclassical cov_type
+のときのみクロスチェックする（hc0/hc1/clusterは既存のlinearmodelsクロスチェックに
+委ねる。ユーザー確認済み）。
+
+`f_p_value`が浮動小数点アンダーフローに近い極小値（1e-9〜1e-12オーダー）のケースがあり、
+その領域では相対誤差比較が意味を持たない（F統計量自体は0.6%程度しか違わなくても、
+F分布の裾の確率はその差を大きく増幅する）ため、`f_p_value`の比較のみ絶対誤差フロア
+（実測）を使う（`test_iv_crosscheck.py`参照）。
 
 ### 5.3 GMMのRクロスチェック省略（例外規定）
 
@@ -175,9 +239,27 @@ GMMは`ivreg`が対応していないため、**Python（`linearmodels`）のみ
   - `weight_type`の取りうる値: `unadjusted`/`homoskedastic`、`robust`/`heteroskedastic`、
     `cluster`、`kernel`（Driscoll-Kraayではなく通常のHAC、IVはパネル構造を前提としないため
     3.1と同じ理由）。
-- **GMMのstep数（1-step/2-step efficient）を選択可能にする**。`IvOptions`に
+- **GMMのstep数（1-step/2-step efficient/iterated）を選択可能にする**。`IvOptions`に
   `gmm_iterations: int`（デフォルト`2`＝efficient two-step、`1`で1-step GMM）を追加する。
-  `linearmodels.IVGMM.fit(iter_limit=2, ...)`と同じ考え方。
+  `linearmodels.IVGMM.fit(iter_limit=2, ...)`と同じ考え方。当初は1・2の2値のみ許容していた
+  が（Issue #165）、Issue #229で3以上（iterated GMM）・収束条件に一般化した:
+  - `gmm_iterations`は1以上の任意の整数を受け付ける。`gmm_convergence: float | None`
+    （既定`None`）を追加し、`Some`のときは`gmm_iterations`を「固定反復回数」ではなく
+    「収束判定の上限反復回数（安全弁）」として扱う。両者は排他ではなく併用方式
+    （ユーザー確認済み）。
+  - 収束判定は係数のelementwise・絶対誤差と相対誤差の併用（`tol = max(rtol * |前回値|,
+    atol)`、`atol`は内部固定値`1e-8`でユーザーには公開しない、ユーザー確認済み）で行う。
+  - 収束しない場合の挙動は`nonlinear`のMLE実装（`LogitOptions`/`ProbitOptions`の
+    `max_iter`/`tol`/`raise_on_non_convergence`/`converged`）と同じ設計に揃える:
+    `raise_on_non_convergence: bool`（既定`true`）が`true`なら未収束時にエラー、
+    `false`なら`converged=False`のまま結果を返す。
+  - `gmm_iterations`を「methodそのもの」（例: `"1step_gmm"`/`"2step_gmm"`/
+    `"iterated_gmm"`）に分割する案も検討したが不採用。反復回数はGMMという1つの
+    `method="gmm"`のパラメータとして扱う（`linearmodels`等の慣行と同じ、詳細は
+    `engine/src/iv/CLAUDE.md`参照）。
+  - `engine`側の実装は`engine::iv::gmm::GmmEstimator::fit`のみ完了（Issue #229）。
+    `IvOptions`/`IvResult`（`engine_pybind`）・`python_package`への配線は
+    `method="gmm"`自体がまだ未実装（本節冒頭、6章の前提）のため別issueで行う。
 - **2SLSはGMMの特殊ケース（`weight_type="unadjusted"`、`gmm_iterations=1`）として実装できる**
   ことを踏まえ、共通のGMM推定コアを実装し、2SLSはそのコアを固定パラメータで呼び出す設計に
   する。ただし無理な共通化はしない方針（4章）に従い、実際にどこまで一体化できるかは

@@ -34,7 +34,7 @@ Note:
     合成データはフィクスチャ生成時と同じ入力データを、`tests/api_tests/fixtures/
     benchmarks/data/`に固定済みのCSV（`benchmark/freeze_datasets.py`参照）から読む。
     `imbalanced_cluster_groups`（純粋にnから決定論的にラベルを組み立てるだけで
-    乱数を使わない）のみ、引き続き`generate_synthetic_datasets.py`を直接呼ぶ。
+    乱数を使わない）のみ、引き続き`generate_linear_datasets.py`を直接呼ぶ。
     Wooldridgeデータは`load_wooldridge.py`経由で都度ロードする（データの再配布
     ライセンスが未確認のためCSVとして固定しない。`freeze_datasets.py`のdocstring
     参照）。`wooldridge`パッケージ（benchmark依存グループ）が無い環境では、
@@ -60,9 +60,14 @@ sys.path.insert(
         / "fixtures"
     ),
 )
+from _common import imbalanced_cluster_groups
 from econometricsmodels import OLS, OLSOptions
-from generate_ols_crosscheck_fixtures import PREDICT_NEW_DATA
-from generate_synthetic_datasets import imbalanced_cluster_groups
+from generate_ols_crosscheck_fixtures import (
+    NUMERIC_SCENARIOS as SYNTHETIC_SCENARIOS,
+)
+from generate_ols_crosscheck_fixtures import (
+    PREDICT_NEW_DATA,
+)
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parent
@@ -134,17 +139,6 @@ def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
     )
 
 
-SYNTHETIC_SCENARIOS = [
-    "baseline",
-    "small_n",
-    "high_variance",
-    "heteroskedastic",
-    "autocorrelated",
-    "moderate_multicollinearity",
-    "high_condition_number",
-    # n=k+1（自由度1ちょうど）の成功パス。
-    "baseline_df1",
-]
 NON_HAC_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
 
 

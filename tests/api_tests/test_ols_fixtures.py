@@ -13,10 +13,10 @@
 Note:
     フィクスチャ生成時と同じ入力データを、`tests/api_tests/fixtures/benchmarks/data/`
     に固定済みのCSV（`benchmark/freeze_datasets.py`参照）から読む。ジェネレータ
-    （`generate_synthetic_datasets.py`）を直接呼ばないことで、ジェネレータ側の
+    （`generate_linear_datasets.py`）を直接呼ばないことで、ジェネレータ側の
     コードが将来変わっても既存フィクスチャの期待値と無言で不整合にならない。
     `imbalanced_cluster_groups`（純粋にnから決定論的にラベルを組み立てるだけで
-    乱数を使わない）のみ、引き続き`generate_synthetic_datasets.py`を直接呼ぶ。
+    乱数を使わない）のみ、引き続き`generate_linear_datasets.py`を直接呼ぶ。
 """
 
 from __future__ import annotations
@@ -29,8 +29,23 @@ import polars as pl
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
+sys.path.insert(
+    0,
+    str(
+        Path(__file__).resolve().parents[2]
+        / "benchmark"
+        / "linear"
+        / "fixtures"
+    ),
+)
+from _common import imbalanced_cluster_groups
 from econometricsmodels import OLS, OLSOptions
-from generate_synthetic_datasets import imbalanced_cluster_groups
+from generate_ols_fixtures import (
+    COV_TYPES,
+)
+from generate_ols_fixtures import (
+    NUMERIC_SCENARIOS as SCENARIOS,
+)
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "ols.json"
@@ -42,18 +57,8 @@ DATA_DIR = Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"
 RTOL = 1e-8
 ATOL = 1e-10
 
-SCENARIOS = [
-    "baseline",
-    "small_n",
-    "high_variance",
-    "heteroskedastic",
-    "autocorrelated",
-    "moderate_multicollinearity",
-    "high_condition_number",
-    # n=k+1（自由度1ちょうど）の成功パス。
-    "baseline_df1",
-]
-COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
+# SCENARIOS/COV_TYPESはgenerate_ols_fixtures.pyのNUMERIC_SCENARIOS/COV_TYPESと
+# 常に一致させる必要があるため、そちらをimportして単一の定義元にする（Issue #231）。
 
 # generate_ols_fixtures.py（run_statsmodels_benchmark.py）はHACのラグを
 # maxlags=1に固定している。同じラグを明示的に指定し、自動ラグ選択式の

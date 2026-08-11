@@ -173,7 +173,53 @@ Logitのfit()に観測情報行列SEを実装するテスト追加中、`Method:
 - **デルタ法のヤコビアンの統一形**: `at="overall"`（AME）・`"mean"`・`"median"`はいずれも`g_j(θ)=w(θ)*θⱼ`という同じ形に帰着する（`w`はAMEなら全観測平均の`p(1-p)`、mean/medianなら代表点で評価した`p̄(1-p̄)`）。この性質を使い、`w`とその勾配`s_m=∂w/∂θ_m`の計算（`at`ごとに異なる）と、そこから`dydx`・ヤコビアン`∂g_j/∂θ_m=θⱼ*s_m+[j==m]*w`を計算する部分（`at`に依らず共通）を分離する設計にした（Logitの`overall_w_and_s`/`at_point_w_and_s`と`dydx_and_jacobian`）。Probit/Tobit実装時、`w`/`s`の計算式（リンク関数の微分`p(1-p)`に相当する部分）はモデルごとに異なるが、`dydx_and_jacobian`と同型の共通化ができないか検討する。
 - **分散**: `Var(g_j) = jac_jの行ベクトル · cov_params · jac_jの行ベクトル'`（二次形式）。標準誤差はこの平方根、検定分布は標準正規分布（`fit()`本体と同じ、`nonlinear-api-design.md`5章）。`fit()`時の`cov_params`をそのまま再利用し、再最適化は行わない。
 
+## Tobit固有の設計判断（確定、実装ノート）
+
+`nonlinear-api-design.md`5〜7章のユーザー確認済み方針を、内部実装レベルまで具体化した記録。実装issue着手時に参照すること。
+
+### 打ち切り境界のバリデーション
+
+- `TobitOptions.lower: Option<f64>`（既定`Some(0.0)`）/ `upper: Option<f64>`（既定`None`）。両方`None`、または両方`Some`で`lower >= upper`は既存の`MleError::InvalidCensoringBounds { lower, upper }`（`nonlinear-api-design.md`7章）
+- **新規エラーバリアント**: `y`の実測値が指定した境界と矛盾する場合（`lower`指定時に`y < lower`の行がある、または`upper`指定時に`y > upper`の行がある）用に、`InvalidCensoringBounds`とは別のバリアントを新設する（暫定名`YOutOfCensoringBounds { row: usize, value: f64 }`。`InvalidBinaryY`と同型の「行番号+値」を持つエラーパターンを踏襲）。`InvalidCensoringBounds`は「境界設定自体が不正」、新バリアントは「境界設定は妥当だがデータと矛盾」という意味の違いを明確に分ける
+- 検証は`fit()`冒頭、`LogitInput`/`ProbitInput`の`from_columns`に相当する`TobitInput::from_columns`内でO(n)の1回スキャンとして実装する（`extract_f64_column`の非有限値チェックと同オーダーのコストで、Newton反復本体のO(n·k)コストに対して無視できる）
+
+### パラメータ化（内部最適化変数）
+
+- `TobitProblem`の`params`は`(β, log σ)`という`k+1`次元ベクトルとして扱う。`σ`ではなく`log σ`を最適化変数にすることで正値制約を回避する（AER::tobitの`summary.tobit`が`Log(scale)`をそのまま報告しているのと同じ流儀）
+- 収束後、`σ = exp(log σ)`へ逆変換し、そのSEはデルタ法（`Var(σ) ≈ σ² · Var(log σ)`）で計算する
+- Olsen(1978)の`(δ=β/σ, γ=1/σ)`変換（大域凹性が数学的に保証される）は**採用しない**。ゼロベクトル初期値からのNewton収束はLogit/Probitで実績があり、`(β, log σ)`パラメータ化でもまず同様に運用し、収束性に問題が出た場合に再検討する
+
+### `standardize_columns`とσの扱い
+
+- 既存の`standardize_columns`/`destandardize_params`/`transform_cov_params_to_original_scale`（`nonlinear/common.rs`）は`params.len() == x.ncols() == ColumnScale.stds.len()`の1:1対応（`zip`ベース）が前提。Tobitは`params`がk+1次元（`β`のk個+`log σ`）になるため、そのままでは対応が崩れる
+- `log σ`（`k+1`番目の要素）はXの列スケーリングと無関係な量（yのスケールに定義される）なので、**標準化対象に含めない**。実装は`ColumnScale.stds`にσ用の`1.0`（スケーリングなし）を末尾に追加する形にし、既存の`zip`ベースのロジックをそのまま再利用する
+
+### `llnull`・GOF・有意性検定
+
+- `log_likelihood_null`・`pseudo_r_squared`は実装しない（`nonlinear-api-design.md`5章で確定。理由: 閉形式が存在せず、主リファレンスのAER::tobitもpseudo R2を実装していないため）
+- モデル全体の有意性検定は**Wald検定**を採用する（AER::tobitの`summary.tobit`と同じ方式:切片以外の係数が同時にゼロという帰無仮説を`cov_params`から直接計算。`linearHypothesis`相当のロジックを自前実装する）。尤度比検定（LR）は計量経済学の実務で好まれる場合があるため、v1では見送るが**将来拡張のTODOとして明記する**（`llnull`のためのintercept-only再最適化が必要になる。実装コストは`TobitInput`をk=1（切片のみ）で構築し既存のNewton/BFGS/L-BFGS基盤にそのまま渡せるため軽微）
+
+### `predict()` / `marginal_effects()` / `pred_table()`
+
+- `predict()`は`E[y*|x]=x'β`・`E[y|x]`（打ち切り考慮の条件付き期待値）・`P(uncensored|x)=Φ(z)`の3種を返す。デフォルトは`E[y|x]`
+- `marginal_effects()`はLogit/Probitの`dydx_and_jacobian`共通化パターンを流用せず独立実装する（Issue #211「限界効果のw_and_s計算の共通化検討」の結論。対象ごとに式が異なり同型の`(w,s)`分解に無理に収める価値がないため、Tobit実装時に`overall_w_and_s`/`at_point_w_and_s`相当のTobit版を独自に書く）
+- `pred_table()`は廃止し、打ち切り予測の適合度チェック（観測打ち切り比率 vs モデル含意の平均`Φ(z)`）に置き換える。出力の具体形式は実装issue着手時に決定する
+
+### `cov_type`共通行列演算・バリデーション
+
+- `observed_information_cov_params`/`opg_cov_params`/`sandwich_cov_params`/`cluster_cov_params`（`nonlinear/common.rs`）はモデル非依存のため、Tobitの`H`（負の対数尤度のHessian、`(k+1)×(k+1)`）・`scores`（n×(k+1)）を渡すだけでそのまま再利用できる
+- 不均一分散下でのMLE非一致性の限界（ロバストSEはこれを解決しない）はLogit/Probitと同じ既存の前提を踏襲し、Tobit固有の新たな設計判断は不要
+- Issue #212「fit()共通バリデーション関数のTobit対応拡張検討」の結論: `validate_fit_preconditions`の`validate_binary_y`呼び出しはTobitでは行わない（`y`は連続変数のため）。上記「打ち切り境界のバリデーション」の検証はTobit専用の追加ステップとして`validate_fit_preconditions`とは別に呼ぶ（具体的な関数分割は実装issue着手時に決定）
+
+### テスト参照実装
+
+- 主リファレンス: R `AER::tobit`（`survival::survreg`エンジン）。クロスチェック: R `censReg`（`maxLik`エンジン）
+- `RTOL`は実測してから決定する（`survreg`は内部で`(β, log σ)`パラメータ化・独自のNewton-Raphson実装のため、Logit/Probitのstatsmodels比較ほど高精度で一致するとは限らない）
+- Wooldridge `mroz`データセットの`hours`（左打ち切り、多くの0値。Wooldridge Example 17.2相当）をベンチマークデータセットに使う。`inlf`列を使うLogit/Probitと同じデータセットの別列を再利用できる
+
 ## 未確定（実装issue着手時、または追加相談が必要）
 
-- **Tobit固有エラーの正確な検証条件**: 下限<上限の検証、両側打ち切り時の整合性チェック等の詳細。Tobit実装時に決定する
-- **モデルごとの尤度・勾配・Hessian導出**（数式そのもの）: Logit/Probitは実装完了済み、`docs/spec/logit-spec.md`・`docs/spec/probit-spec.md`参照。Tobitは着手時に決定する
+- **Tobitの尤度・勾配・Hessianの閉形式の書き下し**: 標準的な打ち切り正規回帰の尤度（打ち切り観測はΦ、非打ち切り観測はφ）で導出可能という方向性のみ確認済み。実際の数式・実装は着手時に行う
+- **`YOutOfCensoringBounds`（暫定名）等、新規エラーバリアントの正式な命名・メッセージ文言**: 実装issue着手時に確定する
+- **Tobitの分離相当の病理ケースの検出閾値**: `y`が連続なため`SEPARATION_PARAM_NORM_THRESHOLD`をそのまま流用できるかは未検証。実装・テスト段階で経験的に較正する
+- **打ち切り予測の適合度チェックの具体的な出力形式**: 「観測打ち切り比率 vs モデル含意の平均Φ(z)」という方針のみ確定。具体的なフィールド名・粒度は実装issue着手時に決定する

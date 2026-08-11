@@ -31,8 +31,20 @@ import polars as pl
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
+sys.path.insert(
+    0,
+    str(
+        Path(__file__).resolve().parents[2]
+        / "benchmark"
+        / "linear"
+        / "fixtures"
+    ),
+)
+from _common import imbalanced_cluster_groups
 from econometricsmodels import WLS, OLSOptions
-from generate_synthetic_datasets import imbalanced_cluster_groups
+from generate_wls_crosscheck_fixtures import (
+    NUMERIC_SCENARIOS as SYNTHETIC_SCENARIOS,
+)
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parent
@@ -110,17 +122,6 @@ def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
     )
 
 
-SYNTHETIC_SCENARIOS = [
-    "baseline",
-    "small_n",
-    "high_variance",
-    "heteroskedastic",
-    "autocorrelated",
-    "moderate_multicollinearity",
-    "high_condition_number",
-    # n=k+1（自由度1ちょうど）の成功パス（OLSの同種ケース相当）。
-    "baseline_df1",
-]
 NON_HAC_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
 
 

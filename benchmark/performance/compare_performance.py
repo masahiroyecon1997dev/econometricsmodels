@@ -30,7 +30,7 @@ CLAUDE.md 1章「計算コアはRustで実装し高速化」の狙いを定量�
 - **実行時間**: ウォームアップ後、`repeats`回実行し中央値を採用する
   （`time.perf_counter()`。外れ値の影響を避けるため平均ではなく中央値）。
 - **HACのラグ数を明示的に揃える**: 3ライブラリとも自動ラグ選択式が異なりうるため、
-  `_hac_auto_lag(n)`（engineの自動選択式と同じ）で計算した同一のラグ数を明示指定する。
+  `_common.hac_auto_lag(n)`（engineの自動選択式と同じ）で計算した同一のラグ数を明示指定する。
   ラグ選択方式自体の違いではなく、Newey-West計算そのものの性能差を見るため。
 
 ## 既知の限界
@@ -41,7 +41,7 @@ CLAUDE.md 1章「計算コアはRustで実装し高速化」の狙いを定量�
 
 使用例:
     # 一括実行（n軸・k軸両方、結果をJSONに保存）
-    python compare_performance.py --output ../docs/planning/specs/_ols_performance_results.json
+    python compare_performance.py --output ../../docs/spec/_ols_performance_results.json
 
     # 単体計測（デバッグ用）
     python compare_performance.py --worker --library engine --cov-type hac --n 1000 --k 5
@@ -60,7 +60,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
-from generate_synthetic_datasets import generate_dataset
+
+sys.path.insert(
+    0, str(Path(__file__).resolve().parent.parent / "linear")
+)  # benchmark/linear/ を import path に追加（generate_linear_datasets）
+sys.path.insert(
+    0, str(Path(__file__).resolve().parent.parent)
+)  # benchmark/ を import path に追加（_common）
+
+from _common import hac_auto_lag
+from generate_linear_datasets import generate_linear_dataset
 
 LIBRARIES = ["engine", "statsmodels", "pyfixest"]
 COV_TYPES = ["classical", "hc1", "cluster", "hac"]
@@ -108,17 +117,8 @@ def _warn_if_debug_build() -> None:
         )
 
 
-def _hac_auto_lag(n: int) -> int:
-    """engine::linear::ols::resolve_hac_lagsと同じ自動ラグ式。
-
-    3ライブラリに同じ明示ラグを渡すことで、自動選択式の実装差を計測対象から
-    除外する（generate_ols_crosscheck_fixtures.pyの`_hac_auto_lag`と同じ）。
-    """
-    return int(4 * (n / 100) ** (2 / 9))
-
-
 def _build_dataframe(n: int, k: int, seed: int) -> pl.DataFrame:
-    df, _ = generate_dataset("baseline", n=n, k=k, seed=seed)
+    df, _ = generate_linear_dataset("baseline", n=n, k=k, seed=seed)
     return df.with_row_index("time_id").with_columns(
         (pl.col("time_id") % N_CLUSTERS).alias("cluster_group")
     )
@@ -185,7 +185,7 @@ def _worker(
     df = _build_dataframe(n, k, seed)
     x_cols = [f"x{j + 1}" for j in range(k)]
     formula = "y ~ " + " + ".join(x_cols)
-    lag = _hac_auto_lag(n)
+    lag = hac_auto_lag(n)
 
     if library == "engine":
         _warn_if_debug_build()

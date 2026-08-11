@@ -32,13 +32,13 @@ sys.path.insert(
 )  # benchmark/linear/ を import path に追加（run_statsmodels_benchmark）
 sys.path.insert(
     0, str(Path(__file__).resolve().parents[2])
-)  # benchmark/ を import path に追加（load_wooldridge, generate_synthetic_datasets）
+)  # benchmark/ を import path に追加（load_wooldridge, _common）
 
 import polars as pl
 import statsmodels
-from generate_synthetic_datasets import imbalanced_cluster_groups
+from _common import DATA_DIR, imbalanced_cluster_groups
 from load_wooldridge import load as load_wooldridge
-from run_statsmodels_benchmark import DATA_DIR, run
+from run_statsmodels_benchmark import run
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md
 # 「テストの3系統」参照）。ComputationErrorが発生することのみをテスト

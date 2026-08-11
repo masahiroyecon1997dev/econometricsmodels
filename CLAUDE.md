@@ -3,7 +3,7 @@
 このファイルは、Claude Code がこのリポジトリで作業する際に毎回参照する前提知識です。
 言語別の詳細なコーディング規約・テスト方針は `.claude/rules/`（パス指定で自動ロード）に、定型作業は `.claude/skills/` に、コードレビューは `.claude/agents/` のサブエージェントに分離している。重複記載を避けるため、このファイルには全体像・非交渉事項・各詳細ファイルへの参照のみを置く。
 
-手法固有の実装ノウハウ（設計判断の理由・既知の落とし穴等）は、対応する `engine/src/<系統>/CLAUDE.md` 等のネストCLAUDE.md（該当ディレクトリ配下のファイルを読み書きしたときだけ自動ロード）に置く。現状は `linear`（OLS/WLS）系統のみ作成済み。他系統は実装着手時にその都度作成する（4章参照）。
+手法固有の実装ノウハウ（設計判断の理由・既知の落とし穴等）は、対応する `engine/src/<系統>/CLAUDE.md` 等のネストCLAUDE.md（該当ディレクトリ配下のファイルを読み書きしたときだけ自動ロード）に置く。現状は `linear`（OLS/WLS）系統が`engine`/`engine_pybind`/`python_package`の3箇所、`nonlinear`（Logit/Probit）系統が`engine_pybind`/`python_package`の2箇所（`engine/src/nonlinear/`はまだ未作成）で作成済み。他系統・未作成箇所は実装着手時にその都度作成する（4章参照）。
 
 ## 1. プロジェクト概要
 
@@ -112,7 +112,7 @@ econometricsmodels/
 ## 10. 開発環境
 
 - `.devcontainer/`（`devcontainer.json` / `Dockerfile` / `docker-compose.yml`）で開発環境を統一。
-- ベースイメージ: `python:3.14-slim-bookworm`。Rust（stable、clippy/rustfmt/llvm-tools）、uv、R（fixest/plm/ivreg/jsonlite、`benchmark/`のベンチマーク生成用）を導入済み。
+- ベースイメージ: `python:3.14-slim-bookworm`。Rust（stable、clippy/rustfmt/llvm-tools）、uv、R（fixest/plm/ivreg/jsonlite、`benchmark/`のベンチマーク生成用）を導入済み。**旧経緯**: `ivreg`は当初`Dockerfile`が`install.packages()`でインストールを試みていたが実際には失敗し導入されていなかった（Issue #171で発覚。依存先`car`→`MatrixModels`が`Matrix>=1.6.0`（→R>=4.4）を要求するが、Debian bookworm標準のr-baseは4.2.2固定でこれを満たせなかった。`install.packages()`はベクタの一部が失敗してもRUNコマンド自体は成功扱いになるため、ビルドは通ってしまいこの状態に気づきにくかった）。CRAN公式のDebian向けAPTリポジトリ（`bookworm-cran40`、実体は最新のRリリースを追従）を追加してR 4.6.1系に更新し解消した。IVのRクロスチェック（`ivreg`）に着手する際は、コンテナ再構築後に`ivreg`が実際に導入されているか（`Rscript -e 'library(ivreg)'`等）を確認してから進める。
 - Claude Code CLIはdevcontainer.jsonの`ghcr.io/anthropics/devcontainer-features/claude-code`featureで導入（Dockerfile側での重複インストールはしない）。`gh`（GitHub CLI）は`ghcr.io/devcontainers/features/github-cli`featureで導入（`/cicd`等のコマンドが前提とするため）。
 - **トークン消費を抑えるための除外設定**: `.claude/settings.json`の`permissions.deny`/`ask`で、lockファイル・`target/`・`.venv/`・ベンチマークのフィクスチャJSON・GitHub Copilot用設定（`.github/agents/` `.github/instructions/`、メンテナンスが最新に追いついていない可能性があるため）等を除外している。
 - 詳細は`.claude/settings.json`を参照。

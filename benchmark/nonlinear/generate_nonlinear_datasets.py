@@ -8,7 +8,7 @@
 （`"logit"`または`"probit"`）を追加して一般化した（`run_statsmodels_benchmark.py`が
 `--weight-col`でOLS/WLSを共有している設計と同じ発想。ユーザー確認済み）。
 
-`generate_synthetic_datasets.py`（OLS/WLS用）と同型の設計だが、OLSの9シナリオの
+`generate_linear_datasets.py`（OLS/WLS用）と同型の設計だが、OLSの9シナリオの
 うち誤差項の分散構造（不均一分散・自己相関）に依存するもの（heteroskedastic/
 autocorrelated/high_variance）は2値DGPに直接転用できないため、Logit/Probit向けに
 再設計している（`docs/spec/logit-spec.md`参照）。
@@ -44,7 +44,7 @@ autocorrelated/high_variance）は2値DGPに直接転用できないため、Log
 人為的に打ち切ることで行う（`tests/api_tests/test_logit.py`/`test_probit.py`）。
 
 使用例:
-    from generate_binary_choice_datasets import generate_logit_dataset, generate_probit_dataset
+    from generate_nonlinear_datasets import generate_logit_dataset, generate_probit_dataset
 
     df, true_beta = generate_logit_dataset("baseline", n=500, seed=42)
     df, true_beta = generate_probit_dataset("baseline", n=500, seed=42)
@@ -72,7 +72,7 @@ SCENARIOS = [
 # 大きく膨らむ（成功パス、数値比較対象）。
 _NEAR_SEPARATION_BETA1 = {"logit": 20.0, "probit": 10.0}
 
-# scale_varianceで出力直前に列へ適用するスケール（OLSのgenerate_synthetic_datasets.py
+# scale_varianceで出力直前に列へ適用するスケール（OLSのgenerate_linear_datasets.py
 # と同じ倍率）。x1は1e6倍、x2は1e-3倍。
 _SCALE_VARIANCE_X1_SCALE = 1e6
 _SCALE_VARIANCE_X2_SCALE = 1e-3
@@ -133,7 +133,7 @@ def generate_binary_choice_dataset(
         if k < 2:
             raise ValueError(f"{scenario} requires k >= 2")
         # x1とx2の相関: moderate=0.8程度、high_condition_number=0.999
-        # （OLSのgenerate_synthetic_datasets.pyと同じ設計）
+        # （OLSのgenerate_linear_datasets.pyと同じ設計）
         rho = 0.999 if scenario == "high_condition_number" else 0.8
         cov = np.eye(k)
         cov[0, 1] = cov[1, 0] = rho
@@ -207,12 +207,24 @@ def generate_probit_dataset(
 
 if __name__ == "__main__":
     import sys
+    from pathlib import Path
+
+    sys.path.insert(
+        0, str(Path(__file__).resolve().parent.parent)
+    )  # benchmark/ を import path に追加（_common）
+    from _common import preview_dataset
 
     link_arg = sys.argv[1] if len(sys.argv) > 1 else "logit"
     scenario_arg = sys.argv[2] if len(sys.argv) > 2 else "baseline"
-    result_df, true_beta = generate_binary_choice_dataset(
-        scenario_arg, link_arg
+    generator = (
+        generate_logit_dataset
+        if link_arg == "logit"
+        else generate_probit_dataset
     )
-    print(f"link={link_arg}, scenario={scenario_arg}, true_beta={true_beta}")
-    print(f"y mean (class balance): {result_df['y'].mean():.3f}")
-    print(result_df.head())
+    preview_dataset(
+        scenario_arg,
+        generator,
+        extra_info_fn=lambda df: (
+            f"link={link_arg}, y mean (class balance): {df['y'].mean():.3f}"
+        ),
+    )

@@ -36,7 +36,7 @@ AIC/BICはRの`AIC()`/`BIC()`標準関数（残差分散を1パラメータと�
 合成データの入力は`tests/api_tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
 （`benchmark/freeze_datasets.py`参照）。`imbalanced_cluster_groups`（純粋にnから
 決定論的にラベルを組み立てるだけで乱数を使わない）のみ、引き続き
-`generate_synthetic_datasets.py`を直接呼ぶ。Wooldridgeデータは`load_wooldridge.py`
+`generate_linear_datasets.py`を直接呼ぶ。Wooldridgeデータは`load_wooldridge.py`
 経由で都度ロードする（データの再配布ライセンスが未確認のためCSVとして固定しない。
 `freeze_datasets.py`のdocstring参照）。
 
@@ -60,13 +60,16 @@ sys.path.insert(
 )  # benchmark/linear/ を import path に追加（run_statsmodels_benchmark）
 sys.path.insert(
     0, str(Path(__file__).resolve().parents[2])
-)  # benchmark/ を import path に追加（generate_synthetic_datasets）
+)  # benchmark/ を import path に追加（_common）
 
 import polars as pl
 import statsmodels
-from generate_synthetic_datasets import imbalanced_cluster_groups
+from _common import (
+    DATA_DIR,
+    hac_auto_lag,
+    imbalanced_cluster_groups,
+)
 from load_wooldridge import load as load_wooldridge
-from run_statsmodels_benchmark import DATA_DIR
 
 LINEAR_DIR = Path(__file__).resolve().parent.parent
 R_SCRIPT = LINEAR_DIR / "run_lm_crosscheck_benchmark.R"
@@ -97,15 +100,6 @@ NUMERIC_SCENARIOS = [
 ]
 
 R_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
-
-
-def _hac_auto_lag(n: int) -> int:
-    """本実装（engine::linear::ols::resolve_hac_lags）と同じ自動ラグ式。
-
-    R側・本実装の両方に同じ明示ラグを渡すことで、自動選択式の実装差を
-    比較対象から除外し、HAC公式自体の妥当性のみを確認する。
-    """
-    return int(4 * (n / 100) ** (2 / 9))
 
 
 def _run_r(
@@ -142,7 +136,7 @@ def _normalize_names(raw: dict) -> dict:
         "se": {fix(k): v for k, v in raw["se"].items()},
     }
     # aic/bic/log_likelihood/f_statistic/f_p_valueはrun_lm_crosscheck_benchmark.Rが返す
-    # （run_fixest_benchmark.R等、他パッケージのスクリプトは対象外）。
+    # （fixest等、他パッケージのスクリプトは対象外）。
     for key in ("aic", "bic", "log_likelihood", "f_statistic", "f_p_value"):
         if key in raw:
             result[key] = raw[key]
@@ -184,7 +178,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         for cov_type in R_COV_TYPES:
             entry: dict = {}
             if cov_type == "hac":
-                lag = _hac_auto_lag(n)
+                lag = hac_auto_lag(n)
                 entry["r"] = _run_r(csv_path, formula, cov_type, hac_lag=lag)
                 entry["hac_lag"] = lag
             else:

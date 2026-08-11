@@ -29,8 +29,20 @@ import polars as pl
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
+sys.path.insert(
+    0,
+    str(
+        Path(__file__).resolve().parents[2]
+        / "benchmark"
+        / "nonlinear"
+        / "fixtures"
+    ),
+)
+from _common import imbalanced_cluster_groups
 from econometricsmodels import Logit, LogitOptions
-from generate_synthetic_datasets import imbalanced_cluster_groups
+from generate_logit_crosscheck_fixtures import (
+    NUMERIC_SCENARIOS as SCENARIOS,
+)
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parent
@@ -56,14 +68,6 @@ ATOL_P_VALUE = 3e-5
 # 大きいことを実測確認した（相対誤差最大~4.05e-4、opg/x2）。この場合のみ緩いRTOLを使う。
 RTOL_NEAR_SEPARATION_CONF_INT = 6e-4
 
-SCENARIOS = [
-    "baseline",
-    "small_n",
-    "moderate_multicollinearity",
-    "high_condition_number",
-    "near_separation",
-    "scale_variance",
-]
 COV_TYPES = ["classical", "opg", "hc0", "hc1"]
 MARGEFF_AT = ["overall", "mean", "median"]
 

@@ -1,7 +1,7 @@
 ---
 name: implement-rust
 description: engine/engine_pybind側の実装計画立案・実装・規約チェックまでを一括で行う
-argument-hint: [実装したい内容]
+argument-hint: "[実装したい内容]"
 allowed-tools: Read, Write, Edit, Bash(cargo build:*), Bash(cargo clippy:*), Bash(cargo fmt:*), Bash(cargo test:*), Grep, Glob
 ---
 
@@ -30,8 +30,13 @@ $ARGUMENTS
    - `cargo fmt --check` を実行し、崩れていれば `cargo fmt` で修正する。
    - 関連する既存テストがあれば `cargo test` で実行し、デグレがないか確認する。
 
+4. **コードレビュー**
+   - `.claude/agents/rust-reviewer.md`（`rust-reviewer`サブエージェント）に、変更したファイルと実装の背景（対応するIssue番号・設計判断）を渡してレビューを依頼する。実装直後は明示的な指示がなくてもプロアクティブに呼び出す（このスキル自身のIssue完了条件には含めない、後続ステップとして必ず実施する）。
+   - 指摘があれば内容を確認し、修正するかどうかを判断する（自明な指摘は反映、設計判断に関わる指摘はユーザーに確認してから対応する）。
+
 ## 完了条件
 
 - `cargo build` / `cargo clippy` / `cargo fmt --check` すべて成功
 - `engine` と `engine_pybind` の責務分離が保たれている
 - CLAUDE.mdの設計方針からの逸脱がない
+- `rust-reviewer`サブエージェントによるレビューを実施済み

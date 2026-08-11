@@ -66,30 +66,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
-import polars as pl
 
 sys.path.insert(
     0, str(Path(__file__).resolve().parents[1])
-)  # benchmark/ を import path に追加（load_wooldridge）
+)  # benchmark/ を import path に追加（load_wooldridge, _common）
 
+from _common import load_frozen_dataset as _load_synthetic
 from load_wooldridge import load as _load_wooldridge
 
-DATA_DIR = (
-    Path(__file__).resolve().parents[2]
-    / "tests"
-    / "api_tests"
-    / "fixtures"
-    / "benchmarks"
-    / "data"
-)
-
 MARGEFF_AT = ["overall", "mean", "median"]
-
-
-def _load_synthetic(model: str, dataset: str) -> tuple:
-    df = pl.read_csv(DATA_DIR / f"{model}_{dataset}.csv")
-    true_betas = json.loads((DATA_DIR / f"{model}_true_beta.json").read_text())
-    return df, true_betas.get(dataset)
 
 
 def _margeff_frame(fit_result, at: str) -> dict:

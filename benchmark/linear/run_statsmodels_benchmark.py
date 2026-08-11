@@ -7,7 +7,7 @@ Phase4以降で中心的に使う想定（`docs/spec/ols-spec.md`「テスト」
 参照。分散共分散行列の計算式自体はOLSと共通でありstatsmodels側も同じ実装のため、
 このスクリプト自体はOLS/WLSで分岐せず共通で使う）。
 
-合成データは`generate_synthetic_datasets.py`を直接呼ばず、`tests/api_tests/fixtures/
+合成データは`generate_linear_datasets.py`を直接呼ばず、`tests/api_tests/fixtures/
 benchmarks/data/`に固定済みのCSVを読む（`benchmark/freeze_datasets.py`参照。
 ジェネレータ側のコードが将来変わっても既存フィクスチャの期待値と無言で
 不整合にならないようにするため）。Wooldridgeデータは`load_wooldridge.py`経由で
@@ -37,26 +37,14 @@ import polars as pl
 
 sys.path.insert(
     0, str(Path(__file__).resolve().parent.parent)
-)  # benchmark/ を import path に追加（load_wooldridge）
+)  # benchmark/ を import path に追加（load_wooldridge, _common）
 
+from _common import load_frozen_dataset
 from load_wooldridge import load as _load_wooldridge
-
-DATA_DIR = (
-    Path(__file__).resolve().parents[2]
-    / "tests"
-    / "api_tests"
-    / "fixtures"
-    / "benchmarks"
-    / "data"
-)
 
 
 def _load_synthetic(dataset: str) -> tuple[pl.DataFrame, list[float]]:
-    df = pl.read_csv(DATA_DIR / f"synthetic_{dataset}.csv")
-    true_betas = json.loads(
-        (DATA_DIR / "synthetic_true_beta.json").read_text()
-    )
-    return df, true_betas[dataset]
+    return load_frozen_dataset("synthetic", dataset)
 
 
 def run(

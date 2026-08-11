@@ -36,7 +36,6 @@
   },
   "postCreateCommand": "[ -f pyproject.toml ] && uv sync || echo 'pyproject.toml が未作成のため uv sync をスキップしました'",
   "remoteEnv": {
-    "SSH_AUTH_SOCK": "/ssh-agent",
     "GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}"
   }
 }

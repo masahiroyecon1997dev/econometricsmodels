@@ -42,8 +42,20 @@ import polars as pl
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
+sys.path.insert(
+    0,
+    str(
+        Path(__file__).resolve().parents[2]
+        / "benchmark"
+        / "nonlinear"
+        / "fixtures"
+    ),
+)
+from _common import imbalanced_cluster_groups
 from econometricsmodels import Probit, ProbitOptions
-from generate_synthetic_datasets import imbalanced_cluster_groups
+from generate_probit_crosscheck_fixtures import (
+    NUMERIC_SCENARIOS as SCENARIOS,
+)
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parent
@@ -72,14 +84,6 @@ ATOL_P_VALUE = 5e-5
 # テストに限り緩いRTOLを使う。
 RTOL_MROZ_CLUSTER = 2e-3
 
-SCENARIOS = [
-    "baseline",
-    "small_n",
-    "moderate_multicollinearity",
-    "high_condition_number",
-    "near_separation",
-    "scale_variance",
-]
 COV_TYPES = ["classical", "opg", "hc0", "hc1"]
 MARGEFF_AT = ["overall", "mean", "median"]
 

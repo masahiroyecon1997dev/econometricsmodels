@@ -32,12 +32,24 @@ import polars as pl
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
+sys.path.insert(
+    0,
+    str(
+        Path(__file__).resolve().parents[2]
+        / "benchmark"
+        / "nonlinear"
+        / "fixtures"
+    ),
+)
+from _common import imbalanced_cluster_groups
 from econometricsmodels import (
     ComputationError,
     Logit,
     LogitOptions,
 )
-from generate_synthetic_datasets import imbalanced_cluster_groups
+from generate_logit_fixtures import (
+    NUMERIC_SCENARIOS as SCENARIOS,
+)
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "logit.json"
@@ -58,14 +70,6 @@ ATOL = 1e-9
 # このシナリオの数値比較テストに限り、明示的にtol=1e-8を指定する。
 _NEAR_SEPARATION_TOL = 1e-8
 
-SCENARIOS = [
-    "baseline",
-    "small_n",
-    "moderate_multicollinearity",
-    "high_condition_number",
-    "near_separation",
-    "scale_variance",
-]
 COV_TYPES = ["classical", "opg", "hc0"]
 
 MARGEFF_AT = ["overall", "mean", "median"]

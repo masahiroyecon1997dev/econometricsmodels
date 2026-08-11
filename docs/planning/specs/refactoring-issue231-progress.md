@@ -23,7 +23,7 @@
 | 1 | リファクタリング用スキル（or 既存スキル/エージェントの代用整理） | 完了 |
 | 2 | `benchmark/`ディレクトリの整理とリファクタリング | 完了 |
 | 3 | `tests/`ディレクトリの整理とリファクタリング | 未着手 |
-| 3.5 | crosscheckテストの許容誤差計算式バグ修正（`refactor`スキル範囲外） | 未着手 |
+| 3.5 | crosscheckテストの許容誤差計算式バグ修正（`refactor`スキル範囲外） | 完了 |
 | 4 | ロジック整理前のテスト拡充（OLS/WLS/Logit/Probitレビュー＋IV #232〜238） | 未着手 |
 | 5 | `python_package/`のリファクタリング | 未着手 |
 | 6 | `engine_pybind/`のリファクタリング | 未着手 |
@@ -483,7 +483,58 @@ tests/api_tests/
 4. フェーズ3で新設する`tests/_assertions.py`へ、修正後の式で統合する
    （フェーズ3時点で除外していた2ファイルの`_assert_close`をここで合流させる）。
 
-**状態**: 未着手
+**状態**: 完了
+
+**メモ（実施結果）**:
+
+1. **コミット履歴による意図確認**: `git log --all -S`で`test_ols_crosscheck.pyと
+   異なり`というコメント文言をpickaxe検索し、導入元コミット`4ac9b80`
+   （`fix(wls): R²・対数尤度（→AIC/BIC）の計算式を修正し、tests/api_testsを
+   作成する`）を特定。コミットメッセージ・当該diffのコメントから、
+   `tol = rtol * max(|ref|, 1e-8)`という式（ols/iv crosscheckが使い続けていた
+   もの）は、`|ref|`が0近傍のとき許容誤差が`rtol*1e-8`という極小値
+   （例: `RTOL_STRICT=1e-8`なら`1e-16`）まで縮んでしまい、機械精度ノイズで
+   偽陽性の失敗を起こすバグであることが、WLSのRクロスチェックテスト作成時
+   （`cluster`/`f_p_value`が5e-13程度まで下がるケースで発覚）に判明済み
+   だったと確認できた。正しい式は`tol = max(rtol * |ref|, atol)`
+   （常に絶対誤差フロア`atol`以上を保証する）で、`test_wls_crosscheck.py`は
+   この時点で修正済みだったが、`test_ols_crosscheck.py`・
+   `test_iv_crosscheck.py`は追従していなかった。
+   - 数学的な影響範囲も確認: 修正前の式をB、修正後の式をAとすると、
+     `|ref| >= atol`の領域ではA=B、`|ref| < atol`の領域では常にA≥B
+     （Aの方が緩い）となることを確認済み。つまり今回の修正は許容誤差を
+     **緩める方向にのみ**作用し、修正によって新たにテストが失敗すること
+     は理論上あり得ない（既存のRクロスチェックフィクスチャに対して
+     ステップ3「本物の数値不一致か許容誤差の詰めすぎか」の切り分けは
+     不要と判明）。
+2. **修正**: `test_ols_crosscheck.py`（`_assert_close`のdict版・
+   `_assert_scalar_close`に加え、同じ式をヘルパー経由せず直書きしていた
+   `test_predict_none_matches_r_fitted_values`・
+   `test_predict_new_data_matches_r`内のループも発見し、`_assert_scalar_close`
+   呼び出しに統一）、`test_iv_crosscheck.py`（`_assert_close`のスカラー版・
+   `_assert_dict_close`）の計算式を`max(rtol * abs(ref_val), atol)`に修正。
+   絶対誤差フロアの値（`1e-8`、修正前と同じ数値）は`tests/_tolerances.py`の
+   `TOLERANCES["ols_crosscheck"]["atol"]`・`TOLERANCES["iv_crosscheck"]["atol"]`
+   として追加（値自体は変更していない）。
+3. **`tests/_assertions.py`への統合**: 式が他ファイルと一致したため、
+   `functools.partial`で`tests/_assertions.py`の`assert_close`/
+   `assert_dict_close`を束縛する形に置き換え、ファイル内の独自実装を削除
+   （フェーズ3で6ファイルのfixtures系に適用したのと同じパターン）。
+   `test_iv_crosscheck.py`の`_assert_p_value_close`（元々正しい式だった）も、
+   `atol`のみ`ATOL_F_PVALUE`に差し替えた`partial(assert_close,
+   atol=ATOL_F_PVALUE)`に簡潔化。
+4. **検証**: `pytest tests`670件全件パス（新規失敗0件、事前の数学的分析
+   通り）。`ruff check .`／`ruff format --check .`全件パス。
+
+**除外事項（今回のスコープ外）**: `test_wls_crosscheck.py`・
+`test_logit_crosscheck.py`・`test_probit_crosscheck.py`は元々正しい式を
+使っており今回のバグ修正の対象外だが、これで全5つのcrosscheckファイルが
+同じ計算式を使う状態になったため、`tests/_assertions.py`へさらに統合する
+余地がある（フェーズ3時点では計算式の不一致を理由に全crosscheckファイルを
+統合対象から除外していたが、その前提が解消された）。当フェーズの計画
+（ステップ4）はols/iv crosscheckの2ファイルのみを対象としていたため、
+残り3ファイルの統合は今回実施せず、次回リファクタリング時の候補として
+記録するに留める。
 
 **メモ**: (着手後に記載)
 

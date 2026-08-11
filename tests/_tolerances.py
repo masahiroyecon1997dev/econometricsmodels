@@ -5,9 +5,12 @@
 個別に緩めてよい）通り、値は手法・比較対象（主リファレンス/クロスチェック）
 ごとに異なる。そのため単一のRTOL/ATOL定数への集約はせず、ファイルごとに
 使っていた値をこの1ファイルに辞書化して見落としを防ぐ（計算式自体は
-`tests/_assertions.py`の`assert_close`/`assert_dict_close`に統一済み。ただし
-`ols_crosscheck`/`iv_crosscheck`は計算式が他と異なる別問題があり、値の集約とは
-独立にフェーズ3.5で扱う）。
+`tests/_assertions.py`の`assert_close`/`assert_dict_close`に統一済み。
+`ols_crosscheck`/`iv_crosscheck`はフェーズ3.5で計算式のバグ
+（`tol = rtol * max(|ref|, atol)`という誤った式を使っていた。正しくは
+`tol = max(rtol * |ref|, atol)`。`wls_crosscheck`のRクロスチェックテスト
+作成時に発覚し修正済みだったが、ols/iv側が追従していなかった）を修正し、
+他ファイルと同じ計算式・同じ`atol`命名に揃えた）。
 
 キーはテストファイル名の接頭辞（例: `test_ols_fixtures.py` → `"ols_fixtures"`）。
 """
@@ -27,8 +30,9 @@ TOLERANCES: dict[str, dict[str, float]] = {
     "probit_fixtures": {"rtol": 1e-8, "atol": 1e-9},
     # --- 独立実装（R）とのクロスチェック ---
     # classical/HC0-3/clusterは機械精度一致（実測1e-14程度）のためRTOL_STRICTを
-    # 適用、HACのみ小標本補正の慣習差により緩める。
-    "ols_crosscheck": {"rtol_strict": 1e-8, "rtol_hac": 1e-2},
+    # 適用、HACのみ小標本補正の慣習差により緩める。ATOLは絶対誤差フロア
+    # （ref値が0近傍のとき、相対誤差比較が意味を持たなくなるのを防ぐ）。
+    "ols_crosscheck": {"rtol_strict": 1e-8, "rtol_hac": 1e-2, "atol": 1e-8},
     # HACの実測最大相対誤差が約4.3%（OLSの10倍程度）のためOLSより緩い。
     "wls_crosscheck": {"rtol_strict": 1e-8, "rtol_hac": 5e-2},
     "iv_crosscheck": {
@@ -39,6 +43,8 @@ TOLERANCES: dict[str, dict[str, float]] = {
         "rtol_hac_small_n": 0.1,
         # f_p_valueは絶対誤差フロア（実測最大乖離1.523e-6にマージン）を使う。
         "atol_f_pvalue": 1e-5,
+        # ols_crosscheckと同じ絶対誤差フロア（f_p_value以外の統計量向け）。
+        "atol": 1e-8,
     },
     "logit_crosscheck": {
         "rtol": 2e-4,

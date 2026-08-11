@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import json
 import sys
+from functools import partial
 from pathlib import Path
 
 import polars as pl
@@ -59,6 +60,7 @@ sys.path.insert(
         / "fixtures"
     ),
 )
+from _assertions import assert_close, assert_dict_close
 from _common import imbalanced_cluster_groups
 from _helpers import DATA_DIR, with_cluster_groups, wooldridge_loader
 from _tolerances import TOLERANCES
@@ -86,37 +88,21 @@ RTOL_STRICT = TOLERANCES["ols_crosscheck"]["rtol_strict"]
 # 乖離がある。バグではなくNewey-West実装の慣習差のため、HACのみ緩めの許容誤差を使う。
 RTOL_HAC = TOLERANCES["ols_crosscheck"]["rtol_hac"]
 
+# 絶対誤差フロア（ref値が0近傍のとき相対誤差比較が意味を持たなくなるのを防ぐ、
+# フェーズ3.5でtest_wls_crosscheck.pyと同じ計算式に修正）。
+ATOL = TOLERANCES["ols_crosscheck"]["atol"]
+
 
 @pytest.fixture(scope="module")
 def crosscheck() -> dict:
     return json.loads(FIXTURE_PATH.read_text())
 
 
-def _assert_close(
-    ours: dict[str, float],
-    reference: dict[str, float],
-    label: str,
-    rtol: float = RTOL_STRICT,
-) -> None:
-    for name, ref_val in reference.items():
-        our_val = ours[name]
-        diff = abs(our_val - ref_val)
-        tol = rtol * max(abs(ref_val), 1e-8)
-        assert diff <= tol, (
-            f"[{label}] {name}: ours={our_val:.6f}, reference={ref_val:.6f}, "
-            f"diff={diff:.6f} > tol={tol:.6f}"
-        )
-
-
-def _assert_scalar_close(
-    our_val: float, ref_val: float, label: str, rtol: float = RTOL_STRICT
-) -> None:
-    diff = abs(our_val - ref_val)
-    tol = rtol * max(abs(ref_val), 1e-8)
-    assert diff <= tol, (
-        f"[{label}] ours={our_val:.6f}, reference={ref_val:.6f}, "
-        f"diff={diff:.6f} > tol={tol:.6f}"
-    )
+# _assert_close（dict版）はtests/_assertions.pyのassert_dict_closeに、
+# _assert_scalar_close（scalar版）はassert_closeに対応する
+# （フェーズ3.5で計算式のバグを修正した上で統合）。
+_assert_close = partial(assert_dict_close, rtol=RTOL_STRICT, atol=ATOL)
+_assert_scalar_close = partial(assert_close, rtol=RTOL_STRICT, atol=ATOL)
 
 
 def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
@@ -167,11 +153,8 @@ def test_predict_none_matches_r_fitted_values(crosscheck, scenario):
 
     assert len(predicted) == len(ref)
     for i, (our_val, ref_val) in enumerate(zip(predicted, ref)):
-        diff = abs(our_val - ref_val)
-        tol = RTOL_STRICT * max(abs(ref_val), 1e-8)
-        assert diff <= tol, (
-            f"[{scenario}/predict(None)/R] row {i}: ours={our_val:.6f}, "
-            f"reference={ref_val:.6f}, diff={diff:.6f} > tol={tol:.6f}"
+        _assert_scalar_close(
+            our_val, ref_val, f"{scenario}/predict(None)/R row {i}"
         )
 
 
@@ -195,11 +178,8 @@ def test_predict_new_data_matches_r(crosscheck):
 
     assert len(predicted) == len(ref)
     for i, (our_val, ref_val) in enumerate(zip(predicted, ref)):
-        diff = abs(our_val - ref_val)
-        tol = RTOL_STRICT * max(abs(ref_val), 1e-8)
-        assert diff <= tol, (
-            f"[baseline/predict(new_data)/R] row {i}: ours={our_val:.6f}, "
-            f"reference={ref_val:.6f}, diff={diff:.6f} > tol={tol:.6f}"
+        _assert_scalar_close(
+            our_val, ref_val, f"baseline/predict(new_data)/R row {i}"
         )
 
 

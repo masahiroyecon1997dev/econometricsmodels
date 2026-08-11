@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import json
 import sys
+from functools import partial
 from pathlib import Path
 
 import polars as pl
@@ -57,6 +58,7 @@ sys.path.insert(
     0,
     str(Path(__file__).resolve().parents[1] / "benchmark" / "iv" / "fixtures"),
 )
+from _assertions import assert_close, assert_dict_close
 from _common import imbalanced_cluster_groups
 from _helpers import DATA_DIR, with_cluster_groups
 from _tolerances import TOLERANCES
@@ -88,6 +90,10 @@ RTOL_HAC_SMALL_N = TOLERANCES["iv_crosscheck"]["rtol_hac_small_n"]
 # 使う絶対誤差フロア（モジュールdocコメント参照、実測最大乖離1.523e-6にマージン）。
 ATOL_F_PVALUE = TOLERANCES["iv_crosscheck"]["atol_f_pvalue"]
 
+# f_p_value以外の統計量向けの絶対誤差フロア（フェーズ3.5でtest_wls_crosscheck.py
+# と同じ計算式に修正）。
+ATOL = TOLERANCES["iv_crosscheck"]["atol"]
+
 COV_TYPES = ["classical", "hc0", "hc1", "hac"]
 
 INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
@@ -102,40 +108,15 @@ def crosscheck() -> dict:
     return json.loads(FIXTURE_PATH.read_text())["synthetic"]
 
 
-def _assert_close(
-    our_val: float, ref_val: float, label: str, rtol: float = RTOL_STRICT
-) -> None:
-    diff = abs(our_val - ref_val)
-    tol = rtol * max(abs(ref_val), 1e-8)
-    assert diff <= tol, (
-        f"[{label}] ours={our_val:.6f}, reference={ref_val:.6f}, "
-        f"diff={diff:.6f} > tol={tol:.6f}"
-    )
+# _assert_close/_assert_dict_closeはtests/_assertions.pyのassert_close/
+# assert_dict_closeに対応する（フェーズ3.5で計算式のバグを修正した上で統合）。
+_assert_close = partial(assert_close, rtol=RTOL_STRICT, atol=ATOL)
+_assert_dict_close = partial(assert_dict_close, rtol=RTOL_STRICT, atol=ATOL)
 
-
-def _assert_dict_close(
-    ours: dict[str, float],
-    ref: dict[str, float],
-    label: str,
-    rtol: float = RTOL_STRICT,
-) -> None:
-    for name, ref_val in ref.items():
-        _assert_close(ours[name], ref_val, f"{label}/{name}", rtol=rtol)
-
-
-def _assert_p_value_close(
-    our_val: float, ref_val: float, label: str, rtol: float
-) -> None:
-    """f_p_value専用の比較。アンダーフローに近い極小値では相対誤差比較が
-    意味を持たなくなるため、絶対誤差フロア（`ATOL_F_PVALUE`）を使う
-    （モジュールdocコメント参照）。
-    """
-    diff = abs(our_val - ref_val)
-    tol = max(rtol * abs(ref_val), ATOL_F_PVALUE)
-    assert diff <= tol, (
-        f"[{label}] ours={our_val!r}, reference={ref_val!r}, "
-        f"diff={diff!r} > tol={tol!r}"
-    )
+# f_p_value専用の比較。アンダーフローに近い極小値では相対誤差比較が意味を
+# 持たなくなるため、絶対誤差フロアのみ`ATOL_F_PVALUE`に差し替える
+# （モジュールdocコメント参照）。rtolは呼び出し元が都度指定する。
+_assert_p_value_close = partial(assert_close, atol=ATOL_F_PVALUE)
 
 
 def _check_result(res, ref: dict, label: str, rtol: float) -> None:

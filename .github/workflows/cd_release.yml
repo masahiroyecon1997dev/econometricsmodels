@@ -153,7 +153,7 @@ jobs:
       # 公開イメージが存在しないコミットSHAを指定するとmanifest unknownで失敗する
       # （v0.1.0初回リリース時に実際に発生・確認済み）。バージョンタグでの参照が
       # 唯一動作する方式のため、ここに限りSHAピン留めの方針の例外とする。
-      - uses: pypa/gh-action-pypi-publish@v1.14.1
+      - uses: pypa/gh-action-pypi-publish@v1.14.2
         with:
           # tag再push（公開失敗後の再実行）で、既に成功済みのファイルを
           # 再アップロードしようとして400エラーになるのを防ぐ。

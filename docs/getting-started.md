@@ -17,8 +17,8 @@ df = pl.DataFrame(
 
 result = OLS(df, y="y", x=["x1"]).fit()
 
-print(result.params)       # {"const": ..., "x1": ...}
-print(result.std_errors)   # {"const": ..., "x1": ...}
+print(result.params)  # {"const": ..., "x1": ...}
+print(result.std_errors)  # {"const": ..., "x1": ...}
 print(result.r_squared)
 ```
 
@@ -102,8 +102,8 @@ df = pl.DataFrame(
 
 result = Logit(df, y="y", x=["x1"]).fit()
 
-print(result.params)         # {"const": ..., "x1": ...}
-print(result.std_errors)     # {"const": ..., "x1": ...}
+print(result.params)  # {"const": ..., "x1": ...}
+print(result.std_errors)  # {"const": ..., "x1": ...}
 print(result.pseudo_r_squared)
 ```
 
@@ -151,8 +151,8 @@ df = pl.DataFrame(
 
 result = Probit(df, y="y", x=["x1"]).fit()
 
-print(result.params)         # {"const": ..., "x1": ...}
-print(result.std_errors)     # {"const": ..., "x1": ...}
+print(result.params)  # {"const": ..., "x1": ...}
+print(result.std_errors)  # {"const": ..., "x1": ...}
 print(result.pseudo_r_squared)
 ```
 
@@ -174,12 +174,10 @@ df = pl.DataFrame(
     }
 )
 
-result = IV(
-    df, y="y", x_exog=[], x_endog=["endog1"], instruments=["z1"]
-).fit()
+result = IV(df, y="y", x_exog=[], x_endog=["endog1"], instruments=["z1"]).fit()
 
-print(result.params)         # {"const": ..., "endog1": ...}
-print(result.std_errors)     # {"const": ..., "endog1": ...}
+print(result.params)  # {"const": ..., "endog1": ...}
+print(result.std_errors)  # {"const": ..., "endog1": ...}
 print(result.r_squared)
 ```
 
@@ -189,11 +187,17 @@ print(result.r_squared)
 
 ```python
 print(result.weak_instrument_f_statistics)  # {"endog1": ...}
-print(result.overid_statistic, result.overid_p_value)          # None, None (just-identified)
-print(result.wu_hausman_statistic, result.wu_hausman_p_value)  # method="2sls" only
+print(
+    result.overid_statistic, result.overid_p_value
+)  # None, None (just-identified)
+print(
+    result.wu_hausman_statistic, result.wu_hausman_p_value
+)  # method="2sls" only
 
 first_stage = result.first_stage()
-print(first_stage["endog1"].params)  # OlsResults for endog1 ~ x_exog + instruments
+print(
+    first_stage["endog1"].params
+)  # OlsResults for endog1 ~ x_exog + instruments
 ```
 
 See the [API Reference](api/iv.md#diagnostics) for what each diagnostic tests and when it is `None`.

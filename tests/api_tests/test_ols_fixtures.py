@@ -38,13 +38,14 @@ sys.path.insert(
         / "fixtures"
     ),
 )
-from _common import imbalanced_cluster_groups  # noqa: E402
-from generate_ols_fixtures import (  # noqa: E402
+from _common import imbalanced_cluster_groups
+from econometricsmodels import OLS, OLSOptions
+from generate_ols_fixtures import (
     COV_TYPES,
+)
+from generate_ols_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
-
-from econometricsmodels import OLS, OLSOptions  # noqa: E402
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "ols.json"

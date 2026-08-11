@@ -11,7 +11,6 @@ import numpy as np
 import polars as pl
 import pytest
 import statsmodels.api as sm
-
 from econometricsmodels import (
     OLS,
     ComputationError,

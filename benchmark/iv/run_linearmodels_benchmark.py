@@ -81,7 +81,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
@@ -90,7 +90,7 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parent.parent)
 )  # benchmark/ を import path に追加（_common）
 
-from _common import hac_auto_lag, load_frozen_dataset  # noqa: E402
+from _common import hac_auto_lag, load_frozen_dataset
 
 
 def _load_iv_dataset(scenario: str) -> tuple[pl.DataFrame, list[float] | None]:
@@ -190,7 +190,6 @@ def run(
     confidence_level: float = 0.95,
 ) -> dict:
     from linearmodels.iv import IV2SLS
-
     from scipy import stats as scipy_stats
 
     df, true_beta = _load_iv_dataset(dataset)
@@ -320,7 +319,7 @@ def run(
     result["_meta"] = {
         "reference": "linearmodels",
         "linearmodels_version": linearmodels.__version__,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "cov_type_requested": cov_type,
         "cov_type_linearmodels": lm_cov_type,
         "debiased": debiased,
@@ -523,7 +522,7 @@ def run_gmm(
     result["_meta"] = {
         "reference": "linearmodels",
         "linearmodels_version": linearmodels.__version__,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "weight_type_requested": weight_type,
         "weight_type_linearmodels": lm_weight_type,
         "cov_type_requested": cov_type,

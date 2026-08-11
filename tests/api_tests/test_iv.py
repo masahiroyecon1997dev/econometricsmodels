@@ -12,7 +12,6 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-
 from econometricsmodels import (
     IV,
     ComputationError,

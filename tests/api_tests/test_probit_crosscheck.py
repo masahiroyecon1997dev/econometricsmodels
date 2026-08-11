@@ -51,12 +51,11 @@ sys.path.insert(
         / "fixtures"
     ),
 )
-from _common import imbalanced_cluster_groups  # noqa: E402
-from generate_probit_crosscheck_fixtures import (  # noqa: E402
+from _common import imbalanced_cluster_groups
+from econometricsmodels import Probit, ProbitOptions
+from generate_probit_crosscheck_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
-
-from econometricsmodels import Probit, ProbitOptions  # noqa: E402
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parent

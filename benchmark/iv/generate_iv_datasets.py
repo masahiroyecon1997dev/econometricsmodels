@@ -116,9 +116,11 @@ def generate_iv_dataset(
             "for identification"
         )
 
-    if scenario in ("moderate_multicollinearity", "high_condition_number"):
-        if k_exog < 2:
-            raise ValueError(f"{scenario} requires k_exog >= 2")
+    if (
+        scenario in ("moderate_multicollinearity", "high_condition_number")
+        and k_exog < 2
+    ):
+        raise ValueError(f"{scenario} requires k_exog >= 2")
     if scenario == "perfect_multicollinearity" and k_exog < 3:
         raise ValueError(f"{scenario} requires k_exog >= 3")
     if scenario == "scale_variance" and k_exog < 2:

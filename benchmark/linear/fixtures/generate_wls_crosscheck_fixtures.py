@@ -36,7 +36,7 @@ import json
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(
@@ -46,11 +46,14 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parents[2])
 )  # benchmark/ を import path に追加（load_wooldridge, _common）
 
-import polars as pl  # noqa: E402
-import statsmodels  # noqa: E402
-
-from _common import DATA_DIR, hac_auto_lag, imbalanced_cluster_groups  # noqa: E402
-from load_wooldridge import load as load_wooldridge  # noqa: E402
+import polars as pl
+import statsmodels
+from _common import (
+    DATA_DIR,
+    hac_auto_lag,
+    imbalanced_cluster_groups,
+)
+from load_wooldridge import load as load_wooldridge
 
 LINEAR_DIR = Path(__file__).resolve().parent.parent
 R_SCRIPT = LINEAR_DIR / "run_lm_crosscheck_benchmark.R"
@@ -252,7 +255,7 @@ def build_fixtures() -> dict:
             "classical/HC0-3/clusterは厳密比較、HACのみ緩い許容誤差での"
             "比較を想定する（testing-policy.md参照）"
         ),
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "r_version": r_version,
         "statsmodels_version": statsmodels.__version__,
         "note": (

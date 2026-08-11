@@ -49,12 +49,13 @@ sys.path.insert(
     0,
     str(Path(__file__).resolve().parents[2] / "benchmark" / "iv" / "fixtures"),
 )
-from generate_iv_gmm_fixtures import (  # noqa: E402
+from econometricsmodels import IV, IvOptions
+from generate_iv_gmm_fixtures import (
     COV_TYPES,
+)
+from generate_iv_gmm_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
-
-from econometricsmodels import IV, IvOptions  # noqa: E402
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "iv_gmm.json"

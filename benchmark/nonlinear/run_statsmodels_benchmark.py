@@ -62,7 +62,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -71,8 +71,8 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parents[1])
 )  # benchmark/ を import path に追加（load_wooldridge, _common）
 
-from _common import load_frozen_dataset as _load_synthetic  # noqa: E402
-from load_wooldridge import load as _load_wooldridge  # noqa: E402
+from _common import load_frozen_dataset as _load_synthetic
+from load_wooldridge import load as _load_wooldridge
 
 MARGEFF_AT = ["overall", "mean", "median"]
 
@@ -210,7 +210,7 @@ def run(
     result["_meta"] = {
         "reference": "statsmodels",
         "statsmodels_version": statsmodels.__version__,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "model": model,
         "cov_type_requested": cov_type,
         "confidence_level": confidence_level,

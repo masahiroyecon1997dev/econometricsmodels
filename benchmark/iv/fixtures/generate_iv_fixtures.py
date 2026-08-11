@@ -22,7 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(
@@ -32,11 +32,10 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parents[2])
 )  # benchmark/ を import path に追加（_common）
 
-import linearmodels  # noqa: E402
-import polars as pl  # noqa: E402
-
-from _common import DATA_DIR, imbalanced_cluster_groups  # noqa: E402
-from run_linearmodels_benchmark import run  # noqa: E402
+import linearmodels
+import polars as pl
+from _common import DATA_DIR, imbalanced_cluster_groups
+from run_linearmodels_benchmark import run
 
 # 丁度識別・過剰識別を問わずx_exog=['x1'], x_endog=['endog1'], instruments=[...]の
 # 構造で数値比較できるシナリオ。perfect_multicollinearityはComputationErrorの発生
@@ -106,7 +105,7 @@ def build_fixtures() -> dict:
 
     fixtures["_meta"] = {
         "method": "2sls",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "primary_reference": "linearmodels",
         "linearmodels_version": linearmodels.__version__,
         "note": (

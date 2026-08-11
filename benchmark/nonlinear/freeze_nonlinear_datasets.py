@@ -21,8 +21,8 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parent.parent)
 )  # benchmark/ を import path に追加（_common）
 
-from _common import freeze_scenarios, run_freeze_cli  # noqa: E402
-from generate_nonlinear_datasets import (  # noqa: E402
+from _common import freeze_scenarios, run_freeze_cli
+from generate_nonlinear_datasets import (
     generate_logit_dataset,
     generate_probit_dataset,
 )

@@ -21,8 +21,8 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parent.parent)
 )  # benchmark/ を import path に追加（_common）
 
-from _common import freeze_scenarios, run_freeze_cli  # noqa: E402
-from generate_iv_datasets import generate_iv_dataset  # noqa: E402
+from _common import freeze_scenarios, run_freeze_cli
+from generate_iv_datasets import generate_iv_dataset
 
 # generate_iv_datasets.pyのSCENARIOS全て（IV: 2SLS/GMM用）。
 # moderate_multicollinearity/high_condition_number/scale_varianceはk_exog=2、

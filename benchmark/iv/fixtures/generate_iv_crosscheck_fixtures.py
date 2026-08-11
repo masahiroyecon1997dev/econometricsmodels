@@ -40,16 +40,19 @@ import json
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(
     0, str(Path(__file__).resolve().parents[2])
 )  # benchmark/ を import path に追加（_common）
 
-import polars as pl  # noqa: E402
-
-from _common import DATA_DIR, hac_auto_lag, imbalanced_cluster_groups  # noqa: E402
+import polars as pl
+from _common import (
+    DATA_DIR,
+    hac_auto_lag,
+    imbalanced_cluster_groups,
+)
 
 IV_DIR = Path(__file__).resolve().parent.parent
 R_SCRIPT = IV_DIR / "run_ivreg_benchmark.R"
@@ -218,7 +221,7 @@ def build_fixtures() -> dict:
             "Sargan（過剰識別検定）・Wu-Hausman（classicalのみ）を含む"
             "（iv-api-design.md 5.2節）"
         ),
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "r_version": r_version,
         "ivreg_version": ivreg_version,
         "note": (

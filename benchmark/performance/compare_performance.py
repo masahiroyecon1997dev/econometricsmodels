@@ -56,7 +56,7 @@ import statistics
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
@@ -68,8 +68,8 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parent.parent)
 )  # benchmark/ を import path に追加（_common）
 
-from _common import hac_auto_lag  # noqa: E402
-from generate_linear_datasets import generate_linear_dataset  # noqa: E402
+from _common import hac_auto_lag
+from generate_linear_datasets import generate_linear_dataset
 
 LIBRARIES = ["engine", "statsmodels", "pyfixest"]
 COV_TYPES = ["classical", "hc1", "cluster", "hac"]
@@ -335,7 +335,7 @@ def build_report(
                 "OLS(...).fit()のエンドツーエンド実行時間・ピークRSSを"
                 "statsmodels/pyfixestと比較する"
             ),
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "n_sweep": N_SWEEP,
             "hac_n_sweep": HAC_N_SWEEP,
             "n_sweep_fixed_k": N_SWEEP_FIXED_K,

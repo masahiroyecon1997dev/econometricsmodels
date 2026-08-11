@@ -48,10 +48,10 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parent / "iv")
 )  # benchmark/iv/ を import path に追加（freeze_iv_datasets）
 
-from _common import run_freeze_cli  # noqa: E402
-from freeze_iv_datasets import freeze as _freeze_iv  # noqa: E402
-from freeze_linear_datasets import freeze as _freeze_linear  # noqa: E402
-from freeze_nonlinear_datasets import freeze as _freeze_nonlinear  # noqa: E402
+from _common import run_freeze_cli
+from freeze_iv_datasets import freeze as _freeze_iv
+from freeze_linear_datasets import freeze as _freeze_linear
+from freeze_nonlinear_datasets import freeze as _freeze_nonlinear
 
 
 def freeze(output_dir: Path) -> None:

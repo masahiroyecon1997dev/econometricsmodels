@@ -21,8 +21,8 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parent.parent)
 )  # benchmark/ を import path に追加（_common）
 
-from _common import freeze_scenarios, run_freeze_cli  # noqa: E402
-from generate_linear_datasets import generate_linear_dataset  # noqa: E402
+from _common import freeze_scenarios, run_freeze_cli
+from generate_linear_datasets import generate_linear_dataset
 
 # generate_ols_fixtures.py / generate_wls_fixtures.py のNUMERIC_SCENARIOSに
 # perfect_multicollinearity（ComputationErrorパスのテストで使う、数値比較はしない）

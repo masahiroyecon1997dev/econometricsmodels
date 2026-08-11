@@ -25,4 +25,4 @@
 
 ## テスト
 
-`tests/api_tests/test_logit.py`/`test_probit.py`は構造・API・エラーパスのスモークテストのみ（`test_probit.py`は`test_logit.py`と同型）。statsmodels/R glmとの厳密な数値比較は`test_logit_fixtures.py`/`test_logit_crosscheck.py`、Probit側は`test_probit_fixtures.py`/`test_probit_crosscheck.py`で行う（OLSの`test_ols_fixtures.py`/`test_ols_crosscheck.py`と同じ役割分担）。
+`tests/test_logit.py`/`test_probit.py`は構造・API・エラーパスのスモークテストのみ（`test_probit.py`は`test_logit.py`と同型）。statsmodels/R glmとの厳密な数値比較は`test_logit_fixtures.py`/`test_logit_crosscheck.py`、Probit側は`test_probit_fixtures.py`/`test_probit_crosscheck.py`で行う（OLSの`test_ols_fixtures.py`/`test_ols_crosscheck.py`と同じ役割分担）。

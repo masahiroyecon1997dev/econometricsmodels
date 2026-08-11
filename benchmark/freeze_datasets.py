@@ -3,11 +3,11 @@
 `generate_linear_datasets.py`（seed固定・決定論的）は「データがどう作られたか」の
 再現可能なコードとして残すが、フィクスチャ生成・pytestの実行時にこれを毎回呼び出す
 設計だと、ジェネレータ側のコードが将来変わったときに、既に固定した
-`tests/api_tests/fixtures/benchmarks/*.json`の期待値と無言で不整合になる
+`tests/fixtures/benchmarks/*.json`の期待値と無言で不整合になる
 （同じseedでも呼び出し順序やパラメータが変われば出力が変わるため）。
 
 このスクリプトは、現在frozen対象になっている合成データを一度だけCSVとして
-`tests/api_tests/fixtures/benchmarks/data/`に書き出す。以後の通常運用では
+`tests/fixtures/benchmarks/data/`に書き出す。以後の通常運用では
 このスクリプトは呼ばれない（フィクスチャJSON同様、意図的に更新する場合のみ
 手動で再実行する）。
 
@@ -27,10 +27,10 @@ Econometrics』教科書側にある可能性があり、フィルタ後の部�
 MITライセンスの本リポジトリにCSVとしてコミットして再配布してよいか未確認の
 ため。ユーザー確認済み）。Wooldridgeデータは引き続き`load_wooldridge.py`経由で
 都度ロードする（`run_statsmodels_benchmark.py`・各`generate_*_crosscheck_fixtures.py`・
-`tests/api_tests/test_ols_crosscheck.py`参照）。
+`tests/test_ols_crosscheck.py`参照）。
 
 使用例:
-    python freeze_datasets.py --output-dir ../tests/api_tests/fixtures/benchmarks/data
+    python freeze_datasets.py --output-dir ../tests/fixtures/benchmarks/data
 """
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ def freeze(output_dir: Path) -> None:
 if __name__ == "__main__":
     run_freeze_cli(
         freeze,
-        "../tests/api_tests/fixtures/benchmarks/data",
+        "../tests/fixtures/benchmarks/data",
         "wrote frozen datasets",
         description=__doc__,
     )

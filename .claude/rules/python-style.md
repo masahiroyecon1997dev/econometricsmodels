@@ -35,5 +35,5 @@ paths:
 
 ## テスト
 
-- 対応するリファレンス実装（pyfixest/R）との比較テストは `tests/api_tests/`（pytest）に置く。
+- 対応するリファレンス実装（pyfixest/R）との比較テストは `tests/`（pytest）に置く。
 - 許容誤差等のテスト方針の詳細は `testing-policy.md` を参照。

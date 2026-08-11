@@ -185,7 +185,7 @@ Python（`linearmodels`）側のみで2SLS/GMMともに検証し、2SLS/GMMと�
 `ivreg`が実際に導入されていること（R 4.5.3、`Rscript -e 'library(ivreg)'`で確認済み）を
 確認し、2SLSの`ivreg`クロスチェックを実装した（`benchmark/iv/run_ivreg_benchmark.R`・
 `benchmark/iv/fixtures/generate_iv_crosscheck_fixtures.py`・
-`tests/api_tests/test_iv_crosscheck.py`）。
+`tests/test_iv_crosscheck.py`）。
 
 `ivreg`はclassical/hc0/hc1/cluster/hacの`vcov`（`vcov()`/`sandwich::vcovHC`/`vcovCL`/
 `NeweyWest`）を`coeftest()`経由でそのまま使える（`lm`と同じ`sandwich`基盤）。

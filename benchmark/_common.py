@@ -34,7 +34,6 @@ DATA_DIR = (
     Path(__file__).resolve().parent
     / ".."
     / "tests"
-    / "api_tests"
     / "fixtures"
     / "benchmarks"
     / "data"

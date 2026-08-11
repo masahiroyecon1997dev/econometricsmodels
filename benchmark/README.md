@@ -1,6 +1,6 @@
 # benchmark/
 
-`tests/api_tests/fixtures/benchmarks/`に固定するベンチマーク値（統計量の期待値）を、
+`tests/fixtures/benchmarks/`に固定するベンチマーク値（統計量の期待値）を、
 リファレンス実装（statsmodels・R・pyfixest）を使って生成するための開発用ツール群です。
 `tests/`とはライフサイクルが異なる（Rランタイムに依存し、随時手動実行するツールである）
 ため、`tests/`とは分離しています。
@@ -28,8 +28,8 @@
 - **R本体（r-base）と上記Rパッケージの別途インストールが必要です**。
   devcontainer環境には`.devcontainer/Dockerfile`で導入済みですが、devcontainer外で
   直接これらのスクリプトを実行する場合は各自インストールしてください。
-- `pytest tests/api_tests/`の実行自体にはRは不要です。合成データのクロスチェック
-  フィクスチャは`tests/api_tests/fixtures/benchmarks/`にJSONとして固定済みで、
+- `pytest tests/`の実行自体にはRは不要です。合成データのクロスチェック
+  フィクスチャは`tests/fixtures/benchmarks/`にJSONとして固定済みで、
   pytestはそれを読むだけだからです。Rが必要になるのは、
   `benchmark/<系統>/fixtures/generate_*_crosscheck_fixtures.py`でこれらの
   フィクスチャを再生成する場合のみです。

@@ -3,15 +3,14 @@
 主リファレンス（linearmodels）との厳密な数値比較は別途`test_iv_fixtures.py`で
 実施する（`test_logit.py`/`test_probit.py`と同じ役割分担）。ここでは`fit()`の
 成功パス・`coef_table()`/`first_stage()`の構造・オプションの反映確認・
-`ValidationError`/`ComputationError`パスのみを検証する（Issue #171）。
+`ValidationError`/`ComputationError`パスのみを検証する。
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import polars as pl
 import pytest
+from _helpers import DATA_DIR, with_cluster_groups
 from econometricsmodels import (
     IV,
     ComputationError,
@@ -19,8 +18,6 @@ from econometricsmodels import (
     IvResults,
     ValidationError,
 )
-
-DATA_DIR = Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"
 
 
 @pytest.fixture(scope="module")
@@ -34,24 +31,39 @@ def iv_dataset() -> pl.DataFrame:
 @pytest.fixture(scope="module")
 def clustered_dataset(iv_dataset: pl.DataFrame) -> pl.DataFrame:
     """`iv_dataset`に10グループの疑似クラスター列を付与したもの。"""
-    return (
-        iv_dataset.with_row_index("_row")
-        .with_columns((pl.col("_row") % 10).alias("cluster_group"))
-        .drop("_row")
-    )
+    return with_cluster_groups(iv_dataset, 10)
+
+
+def _our_fit(
+    df: pl.DataFrame,
+    *,
+    x_exog: list[str] | None = None,
+    x_endog: list[str] | None = None,
+    instruments: list[str] | None = None,
+    options: IvOptions | None = None,
+) -> IvResults:
+    """既定は`x_exog=["x1"], x_endog=["endog1"], instruments=["z1", "z2"]`
+    （このファイルの大半のテストが使う共通パターン）。異なる変数構成が
+    必要なテストのみ明示的に上書きする。
+    """
+    kwargs = {}
+    if options is not None:
+        kwargs["options"] = options
+    return IV(
+        df,
+        y="y",
+        x_exog=["x1"] if x_exog is None else x_exog,
+        x_endog=["endog1"] if x_endog is None else x_endog,
+        instruments=["z1", "z2"] if instruments is None else instruments,
+        **kwargs,
+    ).fit()
 
 
 # ── 成功パス・API構造 ────────────────────────────────────────────────
 
 
 def test_fit_succeeds_and_returns_iv_results(iv_dataset):
-    res = IV(
-        iv_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-    ).fit()
+    res = _our_fit(iv_dataset)
     assert isinstance(res, IvResults)
 
 
@@ -59,13 +71,7 @@ def test_default_options_use_2sls_classical(iv_dataset):
     """`options`省略時は`IvOptions()`の既定値（method="2sls", classical）が
     使われ、2SLSは常に`converged=True`/`n_iterations=1`（閉形式・非反復）。
     """
-    res = IV(
-        iv_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-    ).fit()
+    res = _our_fit(iv_dataset)
     assert res.cov_type == "classical"
     assert res.converged
     assert res.n_iterations == 1
@@ -76,14 +82,7 @@ def test_gmm_method_runs_and_converges(iv_dataset):
     GMM）が成功パスで動作すること。
     """
     options = IvOptions(method="gmm")
-    res = IV(
-        iv_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-        options=options,
-    ).fit()
+    res = _our_fit(iv_dataset, options=options)
     assert res.converged
     assert res.n_iterations == 2
 
@@ -92,24 +91,12 @@ def test_param_names_order(iv_dataset):
     """`param_names`は定数項→x_exog→x_endogの順（`IvInput::from_columns`の
     設計行列の列順、`docs/planning/specs/iv-api-design.md`参照）。
     """
-    res = IV(
-        iv_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-    ).fit()
+    res = _our_fit(iv_dataset)
     assert res.param_names == ["const", "x1", "endog1"]
 
 
 def test_coef_table_structure(iv_dataset):
-    res = IV(
-        iv_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-    ).fit()
+    res = _our_fit(iv_dataset)
     table = res.coef_table()
 
     assert isinstance(table, list)
@@ -129,13 +116,7 @@ def test_coef_table_structure(iv_dataset):
 
 
 def test_conf_int_structure(iv_dataset):
-    res = IV(
-        iv_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-    ).fit()
+    res = _our_fit(iv_dataset)
     ci = res.conf_int
 
     assert isinstance(ci, dict)
@@ -145,13 +126,7 @@ def test_conf_int_structure(iv_dataset):
 
 
 def test_params_std_errors_stats_p_values_share_keys(iv_dataset):
-    res = IV(
-        iv_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-    ).fit()
+    res = _our_fit(iv_dataset)
     expected_keys = {"const", "x1", "endog1"}
 
     assert set(res.params.keys()) == expected_keys
@@ -161,13 +136,7 @@ def test_params_std_errors_stats_p_values_share_keys(iv_dataset):
 
 
 def test_n_obs_and_dep_var_name(iv_dataset):
-    res = IV(
-        iv_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-    ).fit()
+    res = _our_fit(iv_dataset)
     assert res.n_obs == iv_dataset.height
     assert res.dep_var_name == "y"
 
@@ -175,32 +144,18 @@ def test_n_obs_and_dep_var_name(iv_dataset):
 def test_cov_type_label(iv_dataset):
     for cov_type in ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]:
         options = IvOptions(cov_type=cov_type)
-        res = IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-            options=options,
-        ).fit()
+        res = _our_fit(iv_dataset, options=options)
         assert res.cov_type == cov_type
 
 
 def test_cluster_cov_type_label(clustered_dataset):
     options = IvOptions(cov_type="cluster", cluster_col="cluster_group")
-    res = IV(
-        clustered_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-        options=options,
-    ).fit()
+    res = _our_fit(clustered_dataset, options=options)
     assert res.cov_type == "cluster"
 
 
 def test_cluster_g2_boundary_succeeds_when_x_exog_is_empty():
-    """`G=2`クラスター・`x_exog=[]`・丁度識別（`instruments`1本）という、Issue #171の
+    """`G=2`クラスター・`x_exog=[]`・丁度識別（`instruments`1本）という、
     ベンチマーク作成中に発見した`ComputationError`（`engine/src/iv/CLAUDE.md`
     「修正済み」参照）の再現条件そのもの。第一段階回帰の`has_intercept`の
     取り違えが原因で、真の傾き係数数`q=1`（`z1`のみ）のところ`q=2`（定数項も
@@ -223,13 +178,7 @@ def test_cluster_g2_boundary_succeeds_when_x_exog_is_empty():
 
 
 def test_residuals_length_matches_n_obs(iv_dataset):
-    res = IV(
-        iv_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-    ).fit()
+    res = _our_fit(iv_dataset)
     assert len(res.residuals) == res.n_obs == iv_dataset.height
 
 
@@ -237,13 +186,7 @@ def test_first_stage_structure(iv_dataset):
     """`first_stage()`は`x_endog`の変数名をキーにした`OlsResults`の辞書を返す。"""
     from econometricsmodels import OlsResults
 
-    res = IV(
-        iv_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-    ).fit()
+    res = _our_fit(iv_dataset)
     first_stage = res.first_stage()
 
     assert set(first_stage.keys()) == {"endog1"}
@@ -258,13 +201,7 @@ def test_first_stage_structure(iv_dataset):
 
 
 def test_weak_instrument_f_statistics_keyed_by_endog_name(iv_dataset):
-    res = IV(
-        iv_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-    ).fit()
+    res = _our_fit(iv_dataset)
     assert set(res.weak_instrument_f_statistics.keys()) == {"endog1"}
     assert res.weak_instrument_f_statistics["endog1"] > 0.0
 
@@ -284,13 +221,7 @@ def test_overid_statistic_present_when_over_identified(iv_dataset):
     """`instruments`が2本、`x_endog`が1本（過剰識別）なので`overid_statistic`
     はNoneにならない（2SLSのSargan検定）。
     """
-    res = IV(
-        iv_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-    ).fit()
+    res = _our_fit(iv_dataset)
     assert res.overid_statistic is not None
     assert res.overid_p_value is not None
 
@@ -312,14 +243,7 @@ def test_overid_statistic_present_for_gmm_hansen_j(iv_dataset):
     Noneにならない。
     """
     options = IvOptions(method="gmm")
-    res = IV(
-        iv_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-        options=options,
-    ).fit()
+    res = _our_fit(iv_dataset, options=options)
     assert res.overid_statistic is not None
     assert res.overid_p_value is not None
 
@@ -330,26 +254,13 @@ def test_wu_hausman_is_none_for_gmm(iv_dataset):
     `engine_pybind/src/iv/CLAUDE.md`参照）。
     """
     options = IvOptions(method="gmm")
-    res = IV(
-        iv_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-        options=options,
-    ).fit()
+    res = _our_fit(iv_dataset, options=options)
     assert res.wu_hausman_statistic is None
     assert res.wu_hausman_p_value is None
 
 
 def test_wu_hausman_is_not_none_for_2sls(iv_dataset):
-    res = IV(
-        iv_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-    ).fit()
+    res = _our_fit(iv_dataset)
     assert res.wu_hausman_statistic is not None
     assert res.wu_hausman_p_value is not None
 
@@ -358,22 +269,8 @@ def test_wu_hausman_is_not_none_for_2sls(iv_dataset):
 
 
 def test_confidence_level_changes_interval_width(iv_dataset):
-    wide = IV(
-        iv_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-        options=IvOptions(confidence_level=0.99),
-    ).fit()
-    narrow = IV(
-        iv_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-        options=IvOptions(confidence_level=0.80),
-    ).fit()
+    wide = _our_fit(iv_dataset, options=IvOptions(confidence_level=0.99))
+    narrow = _our_fit(iv_dataset, options=IvOptions(confidence_level=0.80))
 
     for name in ["const", "x1", "endog1"]:
         wide_width = wide.conf_int[name][1] - wide.conf_int[name][0]
@@ -384,14 +281,7 @@ def test_confidence_level_changes_interval_width(iv_dataset):
 def test_hac_auto_lags_runs_and_returns_finite_std_errors(iv_dataset):
     """`hac_lags`省略時（`None`、自動計算式）でもエラーなく動作すること。"""
     options = IvOptions(cov_type="hac")
-    res = IV(
-        iv_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-        options=options,
-    ).fit()
+    res = _our_fit(iv_dataset, options=options)
     assert res.cov_type == "hac"
     for se in res.std_errors.values():
         assert se > 0.0
@@ -450,14 +340,7 @@ def test_include_intercept_false_omits_const(iv_dataset):
     （`x_endog`/`instruments`には元々自動で切片が付かない仕様と対称）。
     """
     options = IvOptions(include_intercept=False)
-    res = IV(
-        iv_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-        options=options,
-    ).fit()
+    res = _our_fit(iv_dataset, options=options)
     assert res.param_names == ["x1", "endog1"]
 
 
@@ -477,14 +360,7 @@ def test_gmm_weight_type_options_run(
         {"cluster_col": "cluster_group"} if weight_type == "cluster" else {}
     )
     options = IvOptions(method="gmm", weight_type=weight_type, **kwargs)
-    res = IV(
-        df,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-        options=options,
-    ).fit()
+    res = _our_fit(df, options=options)
     assert res.converged
 
 
@@ -501,14 +377,7 @@ def test_gmm_cov_type_options_run_independently_of_weight_type(
     df = clustered_dataset if cov_type == "cluster" else iv_dataset
     kwargs = {"cluster_col": "cluster_group"} if cov_type == "cluster" else {}
     options = IvOptions(method="gmm", cov_type=cov_type, **kwargs)
-    res = IV(
-        df,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-        options=options,
-    ).fit()
+    res = _our_fit(df, options=options)
     assert res.cov_type == cov_type
     assert res.converged
 
@@ -524,14 +393,7 @@ def test_gmm_convergence_stops_before_max_iterations(iv_dataset):
         gmm_convergence=1e-4,
         gmm_iterations=10,
     )
-    res = IV(
-        iv_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-        options=options,
-    ).fit()
+    res = _our_fit(iv_dataset, options=options)
     assert res.converged
     assert res.n_iterations < 10
 
@@ -550,14 +412,7 @@ def test_gmm_raise_on_non_convergence_true_raises_computation_error(
         gmm_iterations=2,
     )
     with pytest.raises(ComputationError):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-            options=options,
-        ).fit()
+        _our_fit(iv_dataset, options=options)
 
 
 def test_gmm_raise_on_non_convergence_false_returns_converged_false(
@@ -570,14 +425,7 @@ def test_gmm_raise_on_non_convergence_false_returns_converged_false(
         gmm_iterations=2,
         raise_on_non_convergence=False,
     )
-    res = IV(
-        iv_dataset,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-        options=options,
-    ).fit()
+    res = _our_fit(iv_dataset, options=options)
     assert res.converged is False
     assert res.n_iterations == 2
 
@@ -588,40 +436,19 @@ def test_gmm_raise_on_non_convergence_false_returns_converged_false(
 def test_unknown_method_raises(iv_dataset):
     options = IvOptions(method="invalid")
     with pytest.raises(ValidationError):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-            options=options,
-        ).fit()
+        _our_fit(iv_dataset, options=options)
 
 
 def test_unknown_cov_type_raises(iv_dataset):
     options = IvOptions(cov_type="invalid")
     with pytest.raises(ValidationError):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-            options=options,
-        ).fit()
+        _our_fit(iv_dataset, options=options)
 
 
 def test_unknown_weight_type_raises(iv_dataset):
     options = IvOptions(method="gmm", weight_type="invalid")
     with pytest.raises(ValidationError):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-            options=options,
-        ).fit()
+        _our_fit(iv_dataset, options=options)
 
 
 def test_y_in_x_exog_raises(iv_dataset):
@@ -845,13 +672,7 @@ def test_insufficient_observations_raises(iv_dataset):
     """観測数nが説明変数の数k（定数項込み）以下の場合`ValidationError`。"""
     df = iv_dataset.head(2)  # n=2、k=3（const, x1, endog1）
     with pytest.raises(ValidationError):
-        IV(
-            df,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-        ).fit()
+        _our_fit(df)
 
 
 def test_insufficient_instruments_raises(iv_dataset):
@@ -871,14 +692,7 @@ def test_insufficient_instruments_raises(iv_dataset):
 def test_cluster_without_col_raises(iv_dataset):
     options = IvOptions(cov_type="cluster")
     with pytest.raises(ValidationError):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-            options=options,
-        ).fit()
+        _our_fit(iv_dataset, options=options)
 
 
 def test_insufficient_clusters_raises(iv_dataset):
@@ -886,14 +700,7 @@ def test_insufficient_clusters_raises(iv_dataset):
     df = iv_dataset.with_columns(pl.lit(0).alias("single_cluster"))
     options = IvOptions(cov_type="cluster", cluster_col="single_cluster")
     with pytest.raises(ValidationError):
-        IV(
-            df,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-            options=options,
-        ).fit()
+        _our_fit(df, options=options)
 
 
 @pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])
@@ -903,14 +710,7 @@ def test_invalid_confidence_level_raises(iv_dataset, confidence_level):
     """
     options = IvOptions(confidence_level=confidence_level)
     with pytest.raises(ValidationError):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-            options=options,
-        ).fit()
+        _our_fit(iv_dataset, options=options)
 
 
 @pytest.mark.parametrize("hac_lags", [-1, 500])  # 500 == iv_dataset の n_obs
@@ -918,39 +718,18 @@ def test_invalid_hac_lags_raises(iv_dataset, hac_lags):
     """`hac_lags`が`[0, n)`の範囲外の場合`ValidationError`。"""
     options = IvOptions(cov_type="hac", hac_lags=hac_lags)
     with pytest.raises(ValidationError):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-            options=options,
-        ).fit()
+        _our_fit(iv_dataset, options=options)
 
 
 @pytest.mark.parametrize("gmm_iterations", [0, -1])
 def test_invalid_gmm_iterations_raises(iv_dataset, gmm_iterations):
     options = IvOptions(method="gmm", gmm_iterations=gmm_iterations)
     with pytest.raises(ValidationError):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-            options=options,
-        ).fit()
+        _our_fit(iv_dataset, options=options)
 
 
 @pytest.mark.parametrize("gmm_convergence", [0.0, -1.0])
 def test_invalid_gmm_convergence_raises(iv_dataset, gmm_convergence):
     options = IvOptions(method="gmm", gmm_convergence=gmm_convergence)
     with pytest.raises(ValidationError):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-            options=options,
-        ).fit()
+        _our_fit(iv_dataset, options=options)

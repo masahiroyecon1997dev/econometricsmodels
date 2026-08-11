@@ -1,4 +1,4 @@
-"""Probitのテストフィクスチャ（tests/api_tests/fixtures/benchmarks/probit.json）を
+"""Probitのテストフィクスチャ（tests/fixtures/benchmarks/probit.json）を
 生成するスクリプト。
 
 `benchmark/nonlinear/run_statsmodels_benchmark.py`（`--model probit`、1回呼べば
@@ -13,11 +13,11 @@
 `generate_probit_crosscheck_fixtures.py`（R側、正しく補正を適用する
 `sandwich::vcovHC`）が主リファレンスの役割を担う（ユーザー確認済み）。
 
-入力データは`tests/api_tests/fixtures/benchmarks/data/`に固定済みのprobit_*.csvを読む
+入力データは`tests/fixtures/benchmarks/data/`に固定済みのprobit_*.csvを読む
 （`benchmark/freeze_datasets.py`参照）。
 
 使用例:
-    python generate_probit_fixtures.py --output ../../../tests/api_tests/fixtures/benchmarks/probit.json
+    python generate_probit_fixtures.py --output ../../../tests/fixtures/benchmarks/probit.json
 """
 
 from __future__ import annotations
@@ -192,7 +192,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/api_tests/fixtures/benchmarks/probit.json",
+        default="../../../tests/fixtures/benchmarks/probit.json",
     )
     args = parser.parse_args()
 

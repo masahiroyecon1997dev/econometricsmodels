@@ -1,13 +1,13 @@
 ---
 name: reference-benchmark
-description: statsmodels（主）・Rパッケージ（クロスチェック）・pyfixest（FE系）と、合成データセット/Wooldridgeデータセットを使って推定手法のベンチマーク値を生成し、tests/api_tests/fixtures/benchmarks/にJSONとして固定する。新しい推定手法のテスト作成（/test-new）の一部として使用する。
+description: statsmodels（主）・Rパッケージ（クロスチェック）・pyfixest（FE系）と、合成データセット/Wooldridgeデータセットを使って推定手法のベンチマーク値を生成し、tests/fixtures/benchmarks/にJSONとして固定する。新しい推定手法のテスト作成（/test-new）の一部として使用する。
 argument-hint: "[手法名]"
 allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
 ---
 
 # リファレンスベンチマーク生成
 
-対象の推定手法について、リファレンス実装でベンチマーク値を生成し、`tests/api_tests/fixtures/benchmarks/`にJSONとして固定する（他の目的のフィクスチャと混在させないためのサブディレクトリ）。詳細な方針は `.claude/rules/testing-policy.md` を参照。
+対象の推定手法について、リファレンス実装でベンチマーク値を生成し、`tests/fixtures/benchmarks/`にJSONとして固定する（他の目的のフィクスチャと混在させないためのサブディレクトリ）。詳細な方針は `.claude/rules/testing-policy.md` を参照。
 
 このスキル自体はスクリプトを持たない。実際のコードは `benchmark/` ディレクトリ（リポジトリ直下、`tests/`とは別）に実プロジェクトコードとして置く。理由: これらのスクリプトはテストの実行コードではなく、テストが使うベンチマーク値を生成するツールであり、Rなど別ランタイムに依存するため`tests/`とはライフサイクルが異なる。`.claude/skills/`側に複製すると二重管理になるため、単一ソースとして`benchmark/`のみに置く。
 
@@ -26,10 +26,10 @@ allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
 - `benchmark/linear/generate_linear_datasets.py`（linear系統専用）: 合成データセット生成。`SCENARIOS`に7種類のバリエーション（baseline, small_n, high_variance, heteroskedastic, autocorrelated, moderate_multicollinearity, perfect_multicollinearity）を実装済み。系統非依存の`imbalanced_cluster_groups`は`_common.py`側に分離済み。
 - `benchmark/nonlinear/generate_nonlinear_datasets.py`: 2値選択モデル（Logit/Probit）専用の合成データ生成。`generate_binary_choice_dataset(scenario, link="logit"|"probit", ...)`（元は`generate_logit_datasets.py`としてLogit専用だったが、Probit追加時に`link`引数で一般化した。シナリオ・X生成ロジックはOLSの`generate_linear_datasets.py`と別設計、`generate_logit_dataset`/`generate_probit_dataset`という名前付きエイリアスも提供）。
 - `benchmark/load_wooldridge.py`（系統非依存、root）: Wooldridgeデータセットをpolars DataFrameとして読み込む（`pip install wooldridge`が必要）。
-- `benchmark/<系統>/freeze_<系統>_datasets.py`（Issue #231で系統ごとに分割）: 各系統の合成データセットを`tests/api_tests/fixtures/benchmarks/data/`にCSVとして**固定**する。`benchmark/freeze_datasets.py`（root）はこれらを順に呼ぶ薄いディスパッチャ。フィクスチャ生成・pytest実行時は、このCSVを読むだけでよい（ジェネレータを直接呼ばない）。理由: ジェネレータ側のコードが将来変わっても、既に固定したフィクスチャJSONの期待値と無言で不整合にならないようにするため。新しいシナリオ・データセットを追加した場合のみ、対応する`freeze_<系統>_datasets.py`（または`freeze_datasets.py`）を再実行してCSVを更新する（フィクスチャJSON同様、自動追従はしない）。
+- `benchmark/<系統>/freeze_<系統>_datasets.py`（Issue #231で系統ごとに分割）: 各系統の合成データセットを`tests/fixtures/benchmarks/data/`にCSVとして**固定**する。`benchmark/freeze_datasets.py`（root）はこれらを順に呼ぶ薄いディスパッチャ。フィクスチャ生成・pytest実行時は、このCSVを読むだけでよい（ジェネレータを直接呼ばない）。理由: ジェネレータ側のコードが将来変わっても、既に固定したフィクスチャJSONの期待値と無言で不整合にならないようにするため。新しいシナリオ・データセットを追加した場合のみ、対応する`freeze_<系統>_datasets.py`（または`freeze_datasets.py`）を再実行してCSVを更新する（フィクスチャJSON同様、自動追従はしない）。
 - `benchmark/performance/`（系統をまたぐ横断ツール、Issue #231で`benchmark/`直下から独立ディレクトリに整理）: リファレンス実装との**性能比較**（正確性検証とは別軸、`testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」参照）。`compare_performance.py`（`.github/workflows/benchmark_ols.yml`から定期実行）・`render_performance_summary.py`（結果JSON→job summary用Markdown整形）。現状はOLS専用実装（`LIBRARIES`/`COV_TYPES`/回帰式がハードコード）だが、WLS/Logit/Probitへの拡張時にこのディレクトリへ集約していく。
 - `benchmark/<系統>/run_statsmodels_benchmark.py`: 主リファレンス。1回呼べば1ケース分の結果を返す汎用ツール。`linear`系統では`--weight-col`指定でWLS（`smf.wls`）にも対応、`nonlinear`系統では`--model logit`/`--model probit`でLogit/Probitを切り替える。
-- `benchmark/<系統>/fixtures/generate_<手法名>_fixtures.py`: 対象手法の全シナリオ×全オプションを回し、`tests/api_tests/fixtures/benchmarks/<手法名>.json`へ書き出す専用スクリプト。生成スクリプト（`benchmark/`側）と生成物（`tests/`側）を分けている（`testing-policy.md`「ベンチマーク値のフィクスチャ化」参照）。`linear/fixtures/generate_ols_fixtures.py`（statsmodels主リファレンス）・`generate_ols_crosscheck_fixtures.py`（Rクロスチェック）が実装例。フィクスチャ生成スクリプト自体は手法ごとに分ける（`run_statsmodels_benchmark.py`のような汎用ツールとは異なる粒度、`generate_logit_fixtures.py`/`generate_probit_fixtures.py`のように別ファイル）。
+- `benchmark/<系統>/fixtures/generate_<手法名>_fixtures.py`: 対象手法の全シナリオ×全オプションを回し、`tests/fixtures/benchmarks/<手法名>.json`へ書き出す専用スクリプト。生成スクリプト（`benchmark/`側）と生成物（`tests/`側）を分けている（`testing-policy.md`「ベンチマーク値のフィクスチャ化」参照）。`linear/fixtures/generate_ols_fixtures.py`（statsmodels主リファレンス）・`generate_ols_crosscheck_fixtures.py`（Rクロスチェック）が実装例。フィクスチャ生成スクリプト自体は手法ごとに分ける（`run_statsmodels_benchmark.py`のような汎用ツールとは異なる粒度、`generate_logit_fixtures.py`/`generate_probit_fixtures.py`のように別ファイル）。
 - Rスクリプトはパッケージ単位で1ファイルに分けている（旧`run_r_benchmark.R`の単一ディスパッチャから分割）。`coeftest()`からの係数・標準誤差抽出（`extract_coef_se`）とロバストWald F検定（`wald_f_test`）は`run_lm_crosscheck_benchmark.R`と`run_ivreg_benchmark.R`で完全に同一だったため、`benchmark/_common.R`に共通化して`source()`している（Rには`__file__`相当が無いため、各スクリプトが`commandArgs()`の`--file=`から自身のディレクトリを特定してsourceする）。cov_type→vcov分岐自体（lmはHC0-3・weight対応、ivregはHC0-1のみ対応等の差分がある）は共通化していない。
   - `benchmark/linear/run_lm_crosscheck_benchmark.R`: base R `lm` + sandwich/lmtestによるOLS/WLS標準誤差クロスチェック（classical/HC0-3/cluster/HAC対応、`weights`引数でWLSにも対応）。動作検証済み、正式なクロスチェックとして使用中。
   - `benchmark/panel/run_plm_benchmark.R`: plmパッケージ。未検証（Phase4着手時に確認）。
@@ -40,18 +40,18 @@ allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
 
 ## 手順
 
-1. 対象手法が新しい合成シナリオを必要とする場合は、対象系統の`generate_*_datasets.py`（linearなら`benchmark/linear/generate_linear_datasets.py`）を更新した上で`benchmark/freeze_datasets.py`（または対象系統の`freeze_<系統>_datasets.py`のみ）を再実行し、`tests/api_tests/fixtures/benchmarks/data/`のCSVを更新する。既存シナリオを使う場合はこの手順は不要（既に固定済みのCSVを読むだけでよい）。Wooldridgeデータセットはこの固定化の対象外（下記「既知の未確定事項」参照）で、`load_wooldridge.py`経由で都度ロードする。
+1. 対象手法が新しい合成シナリオを必要とする場合は、対象系統の`generate_*_datasets.py`（linearなら`benchmark/linear/generate_linear_datasets.py`）を更新した上で`benchmark/freeze_datasets.py`（または対象系統の`freeze_<系統>_datasets.py`のみ）を再実行し、`tests/fixtures/benchmarks/data/`のCSVを更新する。既存シナリオを使う場合はこの手順は不要（既に固定済みのCSVを読むだけでよい）。Wooldridgeデータセットはこの固定化の対象外（下記「既知の未確定事項」参照）で、`load_wooldridge.py`経由で都度ロードする。
 2. `$ARGUMENTS`（手法名）に応じて、対象の全cov_type/オプションの組み合わせで`benchmark/<系統>/run_statsmodels_benchmark.py`を実行する（固定済みCSVを読む）。
 3. 新しい統計量・cov_typeを初めて使う場合は、Rの`lm`+`sandwich`/`lmtest`（`benchmark/<系統>/run_lm_crosscheck_benchmark.R`）でも同じ組み合わせを計算し、statsmodelsと一致することを確認する。一致しない場合は既定値（自由度補正等）の違いを疑って調査する。fixest/pyfixestは実装系統がfixestと同一のため、独立実装によるクロスチェックとしては使わない（補助的な確認に留める）。
    - AIC/BICはR標準の`AIC()`/`BIC()`関数をそのまま使わない。残差分散を1パラメータとして追加でカウントする慣習（k+1）のため、本実装・statsmodels（回帰係数の数kのみ使用）とはAICがちょうど2、BICが`log(n)`だけ系統的にずれる。本実装と同じ式（`-2*loglik + 2*k`等）で手計算した値と比較する（`run_lm_crosscheck_benchmark.R`が実装例）。
 4. `benchmark/linear/generate_linear_datasets.py`の7シナリオ（固定済みCSV経由）で対象手法を実行する。ただし完全な多重共線性シナリオは数値比較の対象外（想定エラーの発生確認のみ、`testing-policy.md`「テストの3系統」参照）。境界値・悪条件（`n=k+1`、極端なスケール差、高条件数）やクラスター系の不均衡・境界値ケースも対象手法に応じて検討する（`testing-policy.md`「テスト用データセット」参照）。
 5. Wooldridge等の実データセットでも同様に確認する（`load_wooldridge.py`の`SUGGESTED_DATASETS`は候補であり、実際に使うデータセットは手法実装時に個別に確認する）。
-6. 生成した結果を`tests/api_tests/fixtures/benchmarks/`にJSONとして保存する（`_meta`フィールドにリファレンス実装・バージョン・生成コマンドが含まれることを確認する）。
-7. テストコード自体の作成・実行は `/test-new` `/test-run` に引き継ぐ。このスキルはベンチマーク値の生成・フィクスチャ化に留める。pytest側は合成データについては`tests/api_tests/fixtures/benchmarks/data/`の固定CSVを直接読む（ジェネレータを呼ばない）ため`wooldridge`パッケージは不要だが、Wooldridge実データのクロスチェックテストは`pytest.importorskip("wooldridge")`で任意扱いにする（下記参照）。
+6. 生成した結果を`tests/fixtures/benchmarks/`にJSONとして保存する（`_meta`フィールドにリファレンス実装・バージョン・生成コマンドが含まれることを確認する）。
+7. テストコード自体の作成・実行は `/test-new` `/test-run` に引き継ぐ。このスキルはベンチマーク値の生成・フィクスチャ化に留める。pytest側は合成データについては`tests/fixtures/benchmarks/data/`の固定CSVを直接読む（ジェネレータを呼ばない）ため`wooldridge`パッケージは不要だが、Wooldridge実データのクロスチェックテストは`pytest.importorskip("wooldridge")`で任意扱いにする（下記参照）。
 
 ## 既知の未確定事項
 
 - `load_wooldridge.py`の`SUGGESTED_DATASETS`は候補に過ぎない。手法ごとに実際に使うデータセットは個別に相談して確定する。
 - **Wooldridgeデータセットは`freeze_datasets.py`での固定化対象外**（`wooldridge`パッケージ自体はMITライセンスだが、同梱データの著作権が原典の教科書側にある可能性があり、フィルタ後の部分集合であってもリポジトリにCSVとして再配布してよいか未確認のため。ユーザー確認済み）。合成データセットとは異なり、Wooldridgeデータは`load_wooldridge.py`経由で都度ロードし続ける。ライセンスが明確になれば固定化を再検討する。
 - `run_plm_benchmark.R`/`run_ivreg_benchmark.R`は引き続き未検証。特に`plm`のindex指定（individual/time列）は手法・データセットごとに調整が必要。
-- フィクスチャJSONの正式なディレクトリ構成・命名規則は、実際に`tests/api_tests/`を作る際に確定する。
+- フィクスチャJSONの正式なディレクトリ構成・命名規則は、実際に`tests/`を作る際に確定する。

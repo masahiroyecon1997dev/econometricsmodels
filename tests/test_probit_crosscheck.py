@@ -1,6 +1,6 @@
 """Probitの独立実装（R: glm + sandwich + marginaleffects）による数値比較テスト。
 
-`tests/api_tests/fixtures/benchmarks/probit_crosscheck.json`（`benchmark/nonlinear/
+`tests/fixtures/benchmarks/probit_crosscheck.json`（`benchmark/nonlinear/
 fixtures/generate_probit_crosscheck_fixtures.py`で生成）を読み込み、係数・標準誤差・
 適合度統計量・限界効果をRとクロスチェックする。役割分担は`test_probit_fixtures.py`
 と同じ（`test_logit_crosscheck.py`と同型。
@@ -41,17 +41,23 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
 sys.path.insert(
     0,
     str(
-        Path(__file__).resolve().parents[2]
+        Path(__file__).resolve().parents[1]
         / "benchmark"
         / "nonlinear"
         / "fixtures"
     ),
 )
 from _common import imbalanced_cluster_groups
+from _helpers import (
+    DATA_DIR,
+    MROZ_X,
+    load_wooldridge_dataset,
+    with_cluster_groups,
+)
+from _tolerances import TOLERANCES
 from econometricsmodels import Probit, ProbitOptions
 from generate_probit_crosscheck_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
@@ -63,26 +69,25 @@ FIXTURE_PATH = (
     / "benchmarks"
     / "probit_crosscheck.json"
 )
-DATA_DIR = Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"
 
-RTOL = 2e-4
-ATOL = 1e-8
+RTOL = TOLERANCES["probit_crosscheck"]["rtol"]
+ATOL = TOLERANCES["probit_crosscheck"]["atol"]
 
 # marginal_effects()のstd_err（デルタ法、ヤコビアン経由）は係数・標準誤差本体より
 # 数値ノイズが1桁大きいことを実測確認した（mroz/hc1/median付近で相対誤差~7e-4が
 # 最大）。dydx自体はRTOL=2e-4で十分（実測最大~2e-5）。
-RTOL_MARGEFF_SE = 1e-3
+RTOL_MARGEFF_SE = TOLERANCES["probit_crosscheck"]["rtol_margeff_se"]
 
 # p値は標準正規分布CDFの裾で係数・zのわずかな数値差が増幅されるため、係数・SE本体
 # より緩いATOLが必要（実測最大絶対誤差~2.9e-5、mroz）。
-ATOL_P_VALUE = 5e-5
+ATOL_P_VALUE = TOLERANCES["probit_crosscheck"]["atol_p_value"]
 
 # Wooldridge mrozのクラスターロバストSE（cluster_col="city"、G=2）は、合成データの
 # クラスターケース（G=2/G=10いずれも~5e-5水準）より数値ノイズが大きいことを実測
 # 確認した（相対誤差最大~1.1e-3、const）。実データ・クラスタ数境界（G=2）・
 # 相関の強い説明変数（exper/expersqなど）が重なる境界的なケースのため、この
 # テストに限り緩いRTOLを使う。
-RTOL_MROZ_CLUSTER = 2e-3
+RTOL_MROZ_CLUSTER = TOLERANCES["probit_crosscheck"]["rtol_mroz_cluster"]
 
 COV_TYPES = ["classical", "opg", "hc0", "hc1"]
 MARGEFF_AT = ["overall", "mean", "median"]
@@ -90,8 +95,6 @@ MARGEFF_AT = ["overall", "mean", "median"]
 # near_separationは既定tol=1e-6だとstatsmodels/Rとの一致精度が下がる境界ケース
 # （test_probit_fixtures.py参照）。ここでも同じ理由でtol=1e-8を明示指定する。
 _NEAR_SEPARATION_TOL = 1e-8
-
-MROZ_X = ["nwifeinc", "educ", "exper", "expersq", "age", "kidslt6", "kidsge6"]
 
 
 @pytest.fixture(scope="module")
@@ -195,11 +198,7 @@ def test_matches_r_glm(fixtures, scenario, cov_type):
 
 def test_cluster_matches_r_glm(fixtures):
     df = pl.read_csv(DATA_DIR / "probit_baseline.csv")
-    df = (
-        df.with_row_index("_row")
-        .with_columns((pl.col("_row") % 10).alias("cluster_group"))
-        .drop("_row")
-    )
+    df = with_cluster_groups(df, 10)
     options = ProbitOptions(cov_type="cluster", cluster_col="cluster_group")
     res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
@@ -222,11 +221,7 @@ def test_cluster_imbalanced_matches_r_glm(fixtures):
 
 def test_cluster_g2_matches_r_glm(fixtures):
     df = pl.read_csv(DATA_DIR / "probit_baseline.csv")
-    df = (
-        df.with_row_index("_row")
-        .with_columns((pl.col("_row") % 2).alias("cluster_group"))
-        .drop("_row")
-    )
+    df = with_cluster_groups(df, 2)
     options = ProbitOptions(cov_type="cluster", cluster_col="cluster_group")
     res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
@@ -237,9 +232,7 @@ def test_cluster_g2_matches_r_glm(fixtures):
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 def test_mroz_matches_r_glm(fixtures, cov_type):
-    wooldridge = pytest.importorskip("wooldridge")
-    pandas_df = wooldridge.data("mroz")
-    df = pl.from_pandas(pandas_df)
+    df = load_wooldridge_dataset("mroz")
     options = ProbitOptions(cov_type=cov_type)
     res = Probit(df, y="inlf", x=MROZ_X, options=options).fit()
 
@@ -256,9 +249,7 @@ def test_mroz_cluster_matches_r_glm(fixtures):
     クラスターケースより数値ノイズが大きいため`RTOL_MROZ_CLUSTER`を使う
     （モジュールdocstring参照）。
     """
-    wooldridge = pytest.importorskip("wooldridge")
-    pandas_df = wooldridge.data("mroz")
-    df = pl.from_pandas(pandas_df)
+    df = load_wooldridge_dataset("mroz")
     options = ProbitOptions(cov_type="cluster", cluster_col="city")
     res = Probit(df, y="inlf", x=MROZ_X, options=options).fit()
 

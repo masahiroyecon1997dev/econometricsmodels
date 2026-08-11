@@ -1,19 +1,19 @@
-"""OLSのテストフィクスチャ（tests/api_tests/fixtures/ols.json）を生成するスクリプト。
+"""OLSのテストフィクスチャ（tests/fixtures/ols.json）を生成するスクリプト。
 
 `benchmark/linear/run_statsmodels_benchmark.py`（1回呼べば1ケース分の結果を返す汎用ツール）を
 全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つのJSONにまとめて書き出す。
 
 このスクリプト自体は`benchmark/`側に置く（ベンチマーク生成ツールの一部）。
-生成される`ols.json`は`tests/api_tests/fixtures/`に置く（テストが読むデータ）。
+生成される`ols.json`は`tests/fixtures/`に置く（テストが読むデータ）。
 両者を分けている理由は`.claude/skills/reference-benchmark/SKILL.md`参照。
 
-入力データは`tests/api_tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
+入力データは`tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
 （`benchmark/freeze_datasets.py`参照）。`imbalanced_cluster_groups`（純粋にnから
 決定論的にラベルを組み立てるだけで乱数を使わない）のみ、引き続き
 `generate_linear_datasets.py`を直接呼ぶ。
 
 使用例:
-    python generate_ols_fixtures.py --output ../../../tests/api_tests/fixtures/benchmarks/ols.json
+    python generate_ols_fixtures.py --output ../../../tests/fixtures/benchmarks/ols.json
 """
 
 from __future__ import annotations
@@ -165,7 +165,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/api_tests/fixtures/benchmarks/ols.json",
+        default="../../../tests/fixtures/benchmarks/ols.json",
     )
     args = parser.parse_args()
 

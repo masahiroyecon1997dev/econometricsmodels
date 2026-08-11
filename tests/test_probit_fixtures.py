@@ -1,6 +1,6 @@
 """Probitの主リファレンス（statsmodels）による数値比較テスト。
 
-`tests/api_tests/fixtures/benchmarks/probit.json`（`benchmark/nonlinear/fixtures/
+`tests/fixtures/benchmarks/probit.json`（`benchmark/nonlinear/fixtures/
 generate_probit_fixtures.py`で生成）を読み込み、真のprobit DGPによる合成データ
 シナリオ×classical/opg/hc0 + クラスター(baseline・mrozの実データ両方) +
 Wooldridge実データ（mroz）で、係数・標準誤差・検定統計量・適合度統計量・
@@ -27,22 +27,31 @@ from __future__ import annotations
 
 import json
 import sys
+from functools import partial
 from pathlib import Path
 
 import polars as pl
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
 sys.path.insert(
     0,
     str(
-        Path(__file__).resolve().parents[2]
+        Path(__file__).resolve().parents[1]
         / "benchmark"
         / "nonlinear"
         / "fixtures"
     ),
 )
+from _assertions import assert_close, assert_dict_close, check_margeff
+from _assertions import rename_intercept as _rename
 from _common import imbalanced_cluster_groups
+from _helpers import (
+    DATA_DIR,
+    MROZ_X,
+    load_wooldridge_dataset,
+    with_cluster_groups,
+)
+from _tolerances import TOLERANCES
 from econometricsmodels import (
     ComputationError,
     Probit,
@@ -55,13 +64,12 @@ from generate_probit_fixtures import (
 FIXTURE_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "probit.json"
 )
-DATA_DIR = Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"
 
-RTOL = 1e-8
+RTOL = TOLERANCES["probit_fixtures"]["rtol"]
 # OLS（閉形式解）のATOL=1e-10より緩い。Probitは反復最適化（Newton/BFGS/L-BFGS）の
 # ため、ゼロ近傍の値（信頼区間の境界等）で閉形式解より1桁大きい浮動小数点誤差が
 # 乗ることを実測確認した（Logitと同じ理由、`test_logit_fixtures.py`参照）。
-ATOL = 1e-9
+ATOL = TOLERANCES["probit_fixtures"]["atol"]
 
 # near_separation（probit特有の準完全分離境界ケース）は、既定のtol=1e-6（勾配ノルム
 # 基準）だとstatsmodelsとの数値一致がRTOL=1e-8を満たさない（実測diff~4.4e-8相対、
@@ -81,52 +89,9 @@ def fixtures() -> dict:
     return json.loads(FIXTURE_PATH.read_text())
 
 
-def _rename(name: str) -> str:
-    return "const" if name == "Intercept" else name
-
-
-def _assert_close(ours: float, ref: float, label: str) -> None:
-    diff = abs(ours - ref)
-    tol = max(RTOL * abs(ref), ATOL)
-    assert diff <= tol, (
-        f"{label}: ours={ours!r}, ref={ref!r}, diff={diff!r} > tol={tol!r}"
-    )
-
-
-def _assert_dict_close(
-    ours: dict[str, float], ref: dict[str, float], label: str
-) -> None:
-    for name, ref_val in ref.items():
-        _assert_close(ours[_rename(name)], ref_val, f"{label}/{name}")
-
-
-def _check_margeff(res, ref_margeff: dict, label: str) -> None:
-    for at in MARGEFF_AT:
-        effects = {row["param"]: row for row in res.marginal_effects(at=at)}
-        for name, ref_stats in ref_margeff[at].items():
-            row = effects[_rename(name)]
-            _assert_close(
-                row["dydx"], ref_stats["dydx"], f"{label}/{at}/{name}/dydx"
-            )
-            _assert_close(
-                row["std_err"], ref_stats["se"], f"{label}/{at}/{name}/se"
-            )
-            _assert_close(row["z"], ref_stats["z"], f"{label}/{at}/{name}/z")
-            _assert_close(
-                row["p_value"],
-                ref_stats["p_value"],
-                f"{label}/{at}/{name}/p_value",
-            )
-            _assert_close(
-                row["conf_low"],
-                ref_stats["conf_low"],
-                f"{label}/{at}/{name}/conf_low",
-            )
-            _assert_close(
-                row["conf_high"],
-                ref_stats["conf_high"],
-                f"{label}/{at}/{name}/conf_high",
-            )
+_assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
+_assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
+_check_margeff = partial(check_margeff, rtol=RTOL, atol=ATOL)
 
 
 def _check_result(res, ref: dict, label: str) -> None:
@@ -194,11 +159,7 @@ def test_matches_statsmodels(fixtures, scenario, cov_type):
 def test_cluster_matches_statsmodels(fixtures):
     """クラスターロバストSE（baselineシナリオ、行番号%10の疑似グループ）。"""
     df = pl.read_csv(DATA_DIR / "probit_baseline.csv")
-    df = (
-        df.with_row_index("_row")
-        .with_columns((pl.col("_row") % 10).alias("cluster_group"))
-        .drop("_row")
-    )
+    df = with_cluster_groups(df, 10)
     options = ProbitOptions(cov_type="cluster", cluster_col="cluster_group")
     res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
@@ -228,11 +189,7 @@ def test_cluster_g2_matches_statsmodels(fixtures):
     正常に計算できることを実機確認済み、generate_probit_fixtures.py参照）。
     """
     df = pl.read_csv(DATA_DIR / "probit_baseline.csv")
-    df = (
-        df.with_row_index("_row")
-        .with_columns((pl.col("_row") % 2).alias("cluster_group"))
-        .drop("_row")
-    )
+    df = with_cluster_groups(df, 2)
     options = ProbitOptions(cov_type="cluster", cluster_col="cluster_group")
     res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
@@ -248,15 +205,10 @@ def test_perfect_multicollinearity_raises_computation_error():
         Probit(df, y="y", x=["x1", "x2", "x3"]).fit()
 
 
-MROZ_X = ["nwifeinc", "educ", "exper", "expersq", "age", "kidslt6", "kidsge6"]
-
-
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 def test_mroz_matches_statsmodels(fixtures, cov_type):
     """Wooldridge実データ（mroz、労働参加モデル）とのクロスチェック。"""
-    wooldridge = pytest.importorskip("wooldridge")
-    pandas_df = wooldridge.data("mroz")
-    df = pl.from_pandas(pandas_df)
+    df = load_wooldridge_dataset("mroz")
     options = ProbitOptions(cov_type=cov_type)
     res = Probit(df, y="inlf", x=MROZ_X, options=options).fit()
 
@@ -269,9 +221,7 @@ def test_mroz_cluster_matches_statsmodels(fixtures):
     `testing-policy.md`「テスト用データセット」3.の「実データでのグループ列も
     検証する」を満たす（Logitのmrozクラスターと同じ趣旨）。
     """
-    wooldridge = pytest.importorskip("wooldridge")
-    pandas_df = wooldridge.data("mroz")
-    df = pl.from_pandas(pandas_df)
+    df = load_wooldridge_dataset("mroz")
     options = ProbitOptions(cov_type="cluster", cluster_col="city")
     res = Probit(df, y="inlf", x=MROZ_X, options=options).fit()
 

@@ -27,7 +27,7 @@ CLAUDE.md（特に2章の設計方針）と `.claude/rules/python-style.md` `.cl
    - 本来Rust側に持っていくべき計算処理がPython側に残っていないか
 
 4. **テストの網羅性**
-   - 対応するpyfixest/R比較テスト（`tests/api_tests/`）が用意されているか
+   - 対応するpyfixest/R比較テスト（`tests/`）が用意されているか
 
 ## 手順
 

@@ -46,9 +46,9 @@ features = ["pyo3/extension-module"]
 include = ["THIRD-PARTY-LICENSES.html", "LICENSE"]
 
 [dependency-groups]
-# CI（ci_python.yml）が使う: pytest tests/api_tests / ruff check . / ruff format --check .
+# CI（ci_python.yml）が使う: pytest tests / ruff check . / ruff format --check .
 # benchmark_ols.ymlもstatsmodels目的でこのグループを使う。
-# statsmodelsはtests/api_tests/fixtures/benchmarks/のフィクスチャ生成に使った主リファレンス実装のため、
+# statsmodelsはtests/fixtures/benchmarks/のフィクスチャ生成に使った主リファレンス実装のため、
 # `==`で厳密固定する（.claude/rules/testing-policy.md「ベンチマーク値のフィクスチャ化」参照）。
 # バージョンを上げる場合はフィクスチャの再生成とセットで行うこと。
 test = [

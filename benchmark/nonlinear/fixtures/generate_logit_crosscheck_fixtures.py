@@ -1,7 +1,7 @@
-"""Logitのクロスチェック用フィクスチャ（tests/api_tests/fixtures/benchmarks/
+"""Logitのクロスチェック用フィクスチャ（tests/fixtures/benchmarks/
 logit_crosscheck.json）を生成するスクリプト。
 
-`tests/api_tests/fixtures/benchmarks/logit.json`（statsmodels、主リファレンス）とは
+`tests/fixtures/benchmarks/logit.json`（statsmodels、主リファレンス）とは
 別に、独立実装（R: glm + sandwich/marginaleffects）によるクロスチェック値を生成する。
 `benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py`と同型の設計。
 
@@ -16,11 +16,11 @@ logit_crosscheck.json）を生成するスクリプト。
 直接渡す）が唯一の数値照合対象になる。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`logit_crosscheck.json`は
-`tests/api_tests/fixtures/benchmarks/`に置く。
+`tests/fixtures/benchmarks/`に置く。
 
 使用例:
     python generate_logit_crosscheck_fixtures.py \\
-        --output ../../../tests/api_tests/fixtures/benchmarks/logit_crosscheck.json
+        --output ../../../tests/fixtures/benchmarks/logit_crosscheck.json
 """
 
 from __future__ import annotations
@@ -257,7 +257,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/api_tests/fixtures/benchmarks/logit_crosscheck.json",
+        default="../../../tests/fixtures/benchmarks/logit_crosscheck.json",
     )
     args = parser.parse_args()
 

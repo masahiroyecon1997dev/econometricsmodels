@@ -1,7 +1,7 @@
 """OLSの独立実装（R: lm + sandwich/lmtest）とのクロスチェックテスト。
 
 主リファレンス（statsmodels）との厳密比較は`test_ols.py`で行う。ここでは
-`tests/api_tests/fixtures/benchmarks/ols_crosscheck.json`
+`tests/fixtures/benchmarks/ols_crosscheck.json`
 （`benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py`で生成）
 を用いて、statsmodelsとは独立した実装（R）との一致を確認する。
 
@@ -31,7 +31,7 @@ classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相�
 crosscheckする。
 
 Note:
-    合成データはフィクスチャ生成時と同じ入力データを、`tests/api_tests/fixtures/
+    合成データはフィクスチャ生成時と同じ入力データを、`tests/fixtures/
     benchmarks/data/`に固定済みのCSV（`benchmark/freeze_datasets.py`参照）から読む。
     `imbalanced_cluster_groups`（純粋にnから決定論的にラベルを組み立てるだけで
     乱数を使わない）のみ、引き続き`generate_linear_datasets.py`を直接呼ぶ。
@@ -50,17 +50,18 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
 sys.path.insert(
     0,
     str(
-        Path(__file__).resolve().parents[2]
+        Path(__file__).resolve().parents[1]
         / "benchmark"
         / "linear"
         / "fixtures"
     ),
 )
 from _common import imbalanced_cluster_groups
+from _helpers import DATA_DIR, with_cluster_groups, wooldridge_loader
+from _tolerances import TOLERANCES
 from econometricsmodels import OLS, OLSOptions
 from generate_ols_crosscheck_fixtures import (
     NUMERIC_SCENARIOS as SYNTHETIC_SCENARIOS,
@@ -75,16 +76,15 @@ FIXTURE_PATH = (
     / "benchmarks"
     / "ols_crosscheck.json"
 )
-DATA_DIR = Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"
 
 # classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相対誤差1e-14程度）。
 # testing-policy.md「許容誤差」の基本方針（相対誤差1e-8）と揃え、statsmodelsと
 # 同水準の厳密比較にする。
-RTOL_STRICT = 1e-8
+RTOL_STRICT = TOLERANCES["ols_crosscheck"]["rtol_strict"]
 
 # HACのみ小標本補正の慣習差（prewhite/adjust等）により実測で相対誤差0.4%程度の
 # 乖離がある。バグではなくNewey-West実装の慣習差のため、HACのみ緩めの許容誤差を使う。
-RTOL_HAC = 1e-2
+RTOL_HAC = TOLERANCES["ols_crosscheck"]["rtol_hac"]
 
 
 @pytest.fixture(scope="module")
@@ -208,11 +208,7 @@ def test_cluster_matches_r(crosscheck):
     グループ（行番号%10）を再現する。統計的な意味はなく、実装の動作確認用。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    df = (
-        df.with_row_index("_row")
-        .with_columns((pl.col("_row") % 10).alias("cluster_group"))
-        .drop("_row")
-    )
+    df = with_cluster_groups(df, 10)
     options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
     res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
@@ -250,11 +246,7 @@ def test_cluster_g2_matches_r(crosscheck):
     参照。実装中に判明した境界条件）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
-    df = (
-        df.with_row_index("_row")
-        .with_columns((pl.col("_row") % 2).alias("cluster_group"))
-        .drop("_row")
-    )
+    df = with_cluster_groups(df, 2)
     options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
     res = OLS(df, y="y", x=["x1"], options=options).fit()
 
@@ -291,18 +283,10 @@ WOOLDRIDGE_DATASETS = {
 
 @pytest.fixture(scope="module")
 def load_wooldridge():
-    """`wooldridge`パッケージ（benchmark依存グループ）が無い環境ではskipする。
-
-    tests/api_tests本体はtest依存グループのみで完結させる方針
-    （.claude/rules/testing-policy.md、CLAUDE.md 3章「benchmark/はtests/とは
-    別ライフサイクル」）のため、実データクロスチェックのみ任意扱いにする。
-    Wooldridgeデータはデータの再配布ライセンスが未確認のためCSVとして固定
-    せず（`benchmark/freeze_datasets.py`のdocstring参照）、都度ロードする。
+    """`wooldridge_loader`（`tests/_helpers.py`）参照。複数データセット名を
+    `pytest.mark.parametrize`で振るため、ロード関数自体をfixtureとして返す。
     """
-    pytest.importorskip("wooldridge")
-    from load_wooldridge import load
-
-    return load
+    return wooldridge_loader()
 
 
 @pytest.mark.parametrize("cov_type", ["classical", "hc0", "hc1", "hc2", "hc3"])

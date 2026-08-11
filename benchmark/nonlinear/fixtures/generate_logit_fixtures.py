@@ -1,4 +1,4 @@
-"""Logitのテストフィクスチャ（tests/api_tests/fixtures/benchmarks/logit.json）を
+"""Logitのテストフィクスチャ（tests/fixtures/benchmarks/logit.json）を
 生成するスクリプト。
 
 `benchmark/nonlinear/run_statsmodels_benchmark.py`（1回呼べば1ケース分の結果を返す
@@ -10,11 +10,11 @@
 docstring参照）。`hc1`は`generate_logit_crosscheck_fixtures.py`（R側、正しく補正を
 適用する`sandwich::vcovHC`）が主リファレンスの役割を担う（ユーザー確認済み）。
 
-入力データは`tests/api_tests/fixtures/benchmarks/data/`に固定済みのlogit_*.csvを読む
+入力データは`tests/fixtures/benchmarks/data/`に固定済みのlogit_*.csvを読む
 （`benchmark/freeze_datasets.py`参照）。
 
 使用例:
-    python generate_logit_fixtures.py --output ../../../tests/api_tests/fixtures/benchmarks/logit.json
+    python generate_logit_fixtures.py --output ../../../tests/fixtures/benchmarks/logit.json
 """
 
 from __future__ import annotations
@@ -182,7 +182,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/api_tests/fixtures/benchmarks/logit.json",
+        default="../../../tests/fixtures/benchmarks/logit.json",
     )
     args = parser.parse_args()
 

@@ -187,7 +187,7 @@ def test_insufficient_observations_raises(dataset):
 
 def test_invalid_cov_type_raises(dataset):
     """`cov_type`が未知の文字列の場合`ValidationError`
-    （OLSと同じ検証、Issue #153で共通化された経路）。
+    （OLSと同じ検証、共通化された経路）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
     options = OLSOptions(cov_type="invalid")
@@ -197,7 +197,7 @@ def test_invalid_cov_type_raises(dataset):
 
 def test_cluster_without_col_raises(dataset):
     """`cov_type="cluster"`なのに`cluster_col`未指定の場合`ValidationError`
-    （OLSと同じ検証、Issue #153で共通化された経路）。
+    （OLSと同じ検証、共通化された経路）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
     options = OLSOptions(cov_type="cluster")

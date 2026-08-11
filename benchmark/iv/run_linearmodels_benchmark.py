@@ -5,7 +5,7 @@ IVの主リファレンス（`docs/planning/specs/iv-api-design.md`5.1節参照�
 2SLSは`run()`、GMMは`run_gmm()`（`method="gmm"`のPython配線完了後に追加、
 `run_gmm()`のモジュールdocコメント参照）。
 
-合成データは`generate_iv_datasets.py`を直接呼ばず、`tests/api_tests/fixtures/
+合成データは`generate_iv_datasets.py`を直接呼ばず、`tests/fixtures/
 benchmarks/data/`に固定済みのCSVを読む（`benchmark/freeze_datasets.py`参照。
 `run_statsmodels_benchmark.py`と同じ理由）。
 

@@ -1,11 +1,11 @@
 """GMM（`method="gmm"`）の主リファレンス（linearmodels `IVGMM`）による数値比較
 テスト。
 
-`tests/api_tests/fixtures/benchmarks/iv_gmm.json`（`benchmark/iv/fixtures/
+`tests/fixtures/benchmarks/iv_gmm.json`（`benchmark/iv/fixtures/
 generate_iv_gmm_fixtures.py`で生成）を読み込み、8つの合成データシナリオ×
 classical/HC0/HC1/HAC（+クラスター、baselineのみ）を`weight_type="unadjusted"`
 固定で、加えてbaselineシナリオ×`cov_type="classical"`固定で他の`weight_type`
-（robust/cluster/kernel）を検証する（Issue #171、ユーザー確認済みの検証範囲。
+（robust/cluster/kernel）を検証する（ユーザー確認済みの検証範囲。
 `weight_type`×`cov_type`の全組み合わせ（8シナリオ×4weight_type×6cov_type）は
 規模が大きすぎるため）。
 
@@ -32,7 +32,7 @@ Note:
       計算する設計のため、フィクスチャの`weak_instrument_f_independent`と比較する
       （`test_iv_fixtures.py`と同じ理由）。
 
-    フィクスチャ生成時と同じ入力データを、`tests/api_tests/fixtures/benchmarks/data/`
+    フィクスチャ生成時と同じ入力データを、`tests/fixtures/benchmarks/data/`
     に固定済みのCSV（`benchmark/freeze_datasets.py`参照）から読む。
 """
 
@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import sys
+from functools import partial
 from pathlib import Path
 
 import polars as pl
@@ -47,8 +48,13 @@ import pytest
 
 sys.path.insert(
     0,
-    str(Path(__file__).resolve().parents[2] / "benchmark" / "iv" / "fixtures"),
+    str(Path(__file__).resolve().parents[1] / "benchmark" / "iv" / "fixtures"),
 )
+from _assertions import assert_close, assert_dict_close
+from _assertions import rename_intercept as _rename
+from _common import imbalanced_cluster_groups
+from _helpers import DATA_DIR, with_cluster_groups
+from _tolerances import TOLERANCES
 from econometricsmodels import IV, IvOptions
 from generate_iv_gmm_fixtures import (
     COV_TYPES,
@@ -60,15 +66,12 @@ from generate_iv_gmm_fixtures import (
 FIXTURE_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "iv_gmm.json"
 )
-DATA_DIR = Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"
 
-# testing-policy.md「許容誤差」の基本方針: 相対誤差1e-8。
-# ATOLは0近傍の値（p値のアンダーフロー等）向けの下限フロー。
-RTOL = 1e-8
-ATOL = 1e-10
+RTOL = TOLERANCES["iv_gmm_fixtures"]["rtol"]
+ATOL = TOLERANCES["iv_gmm_fixtures"]["atol"]
 
 # SCENARIOS/COV_TYPESはgenerate_iv_gmm_fixtures.pyのNUMERIC_SCENARIOS/COV_TYPESと
-# 常に一致させる必要があるため、そちらをimportして単一の定義元にする（Issue #231）。
+# 常に一致させる必要があるため、そちらをimportして単一の定義元にする。
 
 INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
 X_EXOG_BY_SCENARIO = {
@@ -85,23 +88,8 @@ def fixtures() -> dict:
     return json.loads(FIXTURE_PATH.read_text())
 
 
-def _rename(name: str) -> str:
-    return "const" if name == "Intercept" else name
-
-
-def _assert_close(ours: float, ref: float, label: str) -> None:
-    diff = abs(ours - ref)
-    tol = max(RTOL * abs(ref), ATOL)
-    assert diff <= tol, (
-        f"{label}: ours={ours!r}, ref={ref!r}, diff={diff!r} > tol={tol!r}"
-    )
-
-
-def _assert_dict_close(
-    ours: dict[str, float], ref: dict[str, float], label: str
-) -> None:
-    for name, ref_val in ref.items():
-        _assert_close(ours[_rename(name)], ref_val, f"{label}/{name}")
+_assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
+_assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
 
 
 def _check_result(res, ref: dict, label: str) -> None:
@@ -179,11 +167,7 @@ def test_cluster_matches_linearmodels(fixtures):
     `generate_iv_gmm_fixtures.py`と同じ疑似グループ（行番号%10）を再現する。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
-    df = (
-        df.with_row_index("_row")
-        .with_columns((pl.col("_row") % 10).alias("cluster_group"))
-        .drop("_row")
-    )
+    df = with_cluster_groups(df, 10)
     options = IvOptions(
         method="gmm",
         weight_type="unadjusted",
@@ -208,11 +192,6 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
     """不均衡クラスタ（`weight_type="unadjusted"`固定、サイズ
     [2, 3, 5, 10, 30, 50]のタイル）。
     """
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
-    from _common import imbalanced_cluster_groups
-
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
@@ -245,11 +224,7 @@ def test_other_weight_types_match_linearmodels(fixtures, weight_type):
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     kwargs = {}
     if weight_type == "cluster":
-        df = (
-            df.with_row_index("_row")
-            .with_columns((pl.col("_row") % 10).alias("cluster_group"))
-            .drop("_row")
-        )
+        df = with_cluster_groups(df, 10)
         kwargs["cluster_col"] = "cluster_group"
 
     options = IvOptions(

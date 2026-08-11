@@ -1,4 +1,4 @@
-"""GMM（`method="gmm"`）のテストフィクスチャ（tests/api_tests/fixtures/benchmarks/
+"""GMM（`method="gmm"`）のテストフィクスチャ（tests/fixtures/benchmarks/
 iv_gmm.json）を生成するスクリプト。
 
 `benchmark/iv/run_linearmodels_benchmark.py`の`run_gmm()`（1回呼べば1ケース分の
@@ -21,14 +21,14 @@ GMM固有の`weight_type`軸（`cov_type`とは独立、`iv-api-design.md`6.2節
       のみで動作確認する。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`iv_gmm.json`は
-`tests/api_tests/fixtures/benchmarks/`に置く（両者を分ける理由は
+`tests/fixtures/benchmarks/`に置く（両者を分ける理由は
 `.claude/skills/reference-benchmark/SKILL.md`参照）。
 
-入力データは`tests/api_tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
+入力データは`tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
 （`benchmark/freeze_datasets.py`参照）。
 
 使用例:
-    python generate_iv_gmm_fixtures.py --output ../../../tests/api_tests/fixtures/benchmarks/iv_gmm.json
+    python generate_iv_gmm_fixtures.py --output ../../../tests/fixtures/benchmarks/iv_gmm.json
 """
 
 from __future__ import annotations
@@ -191,7 +191,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/api_tests/fixtures/benchmarks/iv_gmm.json",
+        default="../../../tests/fixtures/benchmarks/iv_gmm.json",
     )
     args = parser.parse_args()
 

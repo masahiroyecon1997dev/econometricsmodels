@@ -1,4 +1,4 @@
-"""WLSのテストフィクスチャ（tests/api_tests/fixtures/benchmarks/wls.json）を生成するスクリプト。
+"""WLSのテストフィクスチャ（tests/fixtures/benchmarks/wls.json）を生成するスクリプト。
 
 `benchmark/linear/run_statsmodels_benchmark.py`（`--weight-col`指定でsmf.wlsを使う）を
 全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つのJSONにまとめて書き出す。
@@ -9,14 +9,14 @@
 いずれも正の値）をそのまま使う。詳細は`docs/spec/wls-spec.md`参照。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`wls.json`は
-`tests/api_tests/fixtures/benchmarks/`に置く（`.claude/rules/testing-policy.md`
-「ベンチマーク値のフィクスチャ化」参照）。合成データの入力は`tests/api_tests/
+`tests/fixtures/benchmarks/`に置く（`.claude/rules/testing-policy.md`
+「ベンチマーク値のフィクスチャ化」参照）。合成データの入力は`tests/
 fixtures/benchmarks/data/`に固定済みのCSVを読む（`benchmark/freeze_datasets.py`
 参照）。401ksubs（Wooldridge）は`load_wooldridge.py`経由で都度ロードする
 （データの再配布ライセンスが未確認のためCSVとして固定しない）。
 
 使用例:
-    python generate_wls_fixtures.py --output ../../../tests/api_tests/fixtures/benchmarks/wls.json
+    python generate_wls_fixtures.py --output ../../../tests/fixtures/benchmarks/wls.json
 """
 
 from __future__ import annotations
@@ -226,7 +226,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/api_tests/fixtures/benchmarks/wls.json",
+        default="../../../tests/fixtures/benchmarks/wls.json",
     )
     args = parser.parse_args()
 

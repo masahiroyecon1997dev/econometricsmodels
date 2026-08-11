@@ -115,8 +115,7 @@ econometricsmodels/
 │       ├── __init__.py            # engine_pybindからのインポート、Polarsラッパーロジック
 │       └── py.typed               # 型定義があることを明示する空ファイル
 │
-├── tests/
-│   └── api_tests/                 # pyfixest / R実装との答え合わせテスト（pytest）
+├── tests/                          # pyfixest / R実装との答え合わせテスト（pytest）
 │
 ├── docs/                          # MkDocsドキュメント（GitHub Pages公開）
 │   ├── mkdocs.yml

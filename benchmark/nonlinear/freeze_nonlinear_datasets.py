@@ -5,7 +5,7 @@
 
 使用例:
     python freeze_nonlinear_datasets.py --output-dir \\
-        ../../tests/api_tests/fixtures/benchmarks/data
+        ../../tests/fixtures/benchmarks/data
 """
 
 from __future__ import annotations
@@ -74,7 +74,7 @@ def freeze(output_dir: Path) -> None:
 if __name__ == "__main__":
     run_freeze_cli(
         freeze,
-        "../../tests/api_tests/fixtures/benchmarks/data",
+        "../../tests/fixtures/benchmarks/data",
         "wrote frozen nonlinear datasets",
         description=__doc__,
     )

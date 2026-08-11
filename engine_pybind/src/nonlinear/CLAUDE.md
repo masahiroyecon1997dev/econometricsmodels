@@ -38,4 +38,4 @@ Probit対応は当初「python_packageラッパー実装のみ」というスコ
 
 ## テストの制約: `PyDataFrame`引数の関数はcargo testから直接呼べない
 
-`fit`（`build_logit_input`/`build_probit_input`の後段、`LogitEstimator::fit`/`ProbitEstimator::fit`を呼ぶ関数）は`PyDataFrame`を引数に取るため、GILなしの`#[cfg(test)]`では呼べない（`build_logit_input`/`build_probit_input`が`PyDataFrame`ではなくプレーンな`polars::DataFrame`を受け取る設計にしているのはこの制約を避けるため）。`fit`自体の検証は`uv run maturin develop`後のPythonからの数値照合、または`tests/api_tests/`のpytestで行う（OLSの前例と同じ、`engine_pybind/src/linear/CLAUDE.md`参照）。
+`fit`（`build_logit_input`/`build_probit_input`の後段、`LogitEstimator::fit`/`ProbitEstimator::fit`を呼ぶ関数）は`PyDataFrame`を引数に取るため、GILなしの`#[cfg(test)]`では呼べない（`build_logit_input`/`build_probit_input`が`PyDataFrame`ではなくプレーンな`polars::DataFrame`を受け取る設計にしているのはこの制約を避けるため）。`fit`自体の検証は`uv run maturin develop`後のPythonからの数値照合、または`tests/`のpytestで行う（OLSの前例と同じ、`engine_pybind/src/linear/CLAUDE.md`参照）。

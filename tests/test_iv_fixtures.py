@@ -1,6 +1,6 @@
 """IV(2SLS)の主リファレンス（linearmodels）による数値比較テスト。
 
-`tests/api_tests/fixtures/benchmarks/iv.json`（`benchmark/iv/fixtures/
+`tests/fixtures/benchmarks/iv.json`（`benchmark/iv/fixtures/
 generate_iv_fixtures.py`で生成）を読み込み、8つの合成データシナリオ×
 classical/HC0/HC1/HAC（+クラスター、baselineのみ）で、係数・標準誤差・
 検定統計量・適合度統計量・診断統計量を相対誤差1e-8で厳密比較する
@@ -8,9 +8,7 @@ classical/HC0/HC1/HAC（+クラスター、baselineのみ）で、係数・標�
 
 役割分担:
     - 主リファレンス（linearmodels）との厳密な数値一致: このファイル
-    - 独立実装（R `ivreg`）とのクロスチェック: 別issue（Issue #171の
-      Rクロスチェック部分、`.devcontainer`の`ivreg`未導入制約により保留中、
-      `CLAUDE.md`10章参照）
+    - 独立実装（R `ivreg`）とのクロスチェック: `test_iv_crosscheck.py`
 
 Note:
     - `method="gmm"`はこのフィクスチャの対象外（フィクスチャ生成時点で
@@ -37,7 +35,7 @@ Note:
       （`first_stage()`は通常のOLS回帰の結果をそのまま返すだけで、
       `test_ols_fixtures.py`が既にOLSの数値一致を検証済みのため）。
 
-    フィクスチャ生成時と同じ入力データを、`tests/api_tests/fixtures/benchmarks/data/`
+    フィクスチャ生成時と同じ入力データを、`tests/fixtures/benchmarks/data/`
     に固定済みのCSV（`benchmark/freeze_datasets.py`参照）から読む。
 """
 
@@ -45,32 +43,33 @@ from __future__ import annotations
 
 import json
 import sys
+from functools import partial
 from pathlib import Path
 
 import polars as pl
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
 sys.path.insert(
     0,
-    str(Path(__file__).resolve().parents[2] / "benchmark" / "iv" / "fixtures"),
+    str(Path(__file__).resolve().parents[1] / "benchmark" / "iv" / "fixtures"),
 )
+from _assertions import assert_close, assert_dict_close
+from _assertions import rename_intercept as _rename
 from _common import imbalanced_cluster_groups
+from _helpers import DATA_DIR, with_cluster_groups
+from _tolerances import TOLERANCES
 from econometricsmodels import IV, ComputationError, IvOptions
 from generate_iv_fixtures import NUMERIC_SCENARIOS as SCENARIOS
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "iv.json"
 )
-DATA_DIR = Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"
 
-# testing-policy.md「許容誤差」の基本方針: 相対誤差1e-8。
-# ATOLは0近傍の値（p値のアンダーフロー等）向けの下限フロー。
-RTOL = 1e-8
-ATOL = 1e-10
+RTOL = TOLERANCES["iv_fixtures"]["rtol"]
+ATOL = TOLERANCES["iv_fixtures"]["atol"]
 
 # SCENARIOSはgenerate_iv_fixtures.pyのNUMERIC_SCENARIOSと常に一致させる必要が
-# あるため、そちらをimportして単一の定義元にする（Issue #231）。
+# あるため、そちらをimportして単一の定義元にする。
 # hc2/hc3はlinearmodelsに対応する実装が無いため対象外（モジュールdocコメント参照）。
 COV_TYPES = ["classical", "hc0", "hc1", "hac"]
 
@@ -93,24 +92,8 @@ def fixtures() -> dict:
     return json.loads(FIXTURE_PATH.read_text())
 
 
-def _rename(name: str) -> str:
-    """linearmodels(formula API)の切片名"Intercept"を本実装の"const"に揃える。"""
-    return "const" if name == "Intercept" else name
-
-
-def _assert_close(ours: float, ref: float, label: str) -> None:
-    diff = abs(ours - ref)
-    tol = max(RTOL * abs(ref), ATOL)
-    assert diff <= tol, (
-        f"{label}: ours={ours!r}, ref={ref!r}, diff={diff!r} > tol={tol!r}"
-    )
-
-
-def _assert_dict_close(
-    ours: dict[str, float], ref: dict[str, float], label: str
-) -> None:
-    for name, ref_val in ref.items():
-        _assert_close(ours[_rename(name)], ref_val, f"{label}/{name}")
+_assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
+_assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
 
 
 def _check_result(res, ref: dict, label: str) -> None:
@@ -196,11 +179,7 @@ def test_cluster_matches_linearmodels(fixtures):
     `baseline`シナリオのみ（`coef`/`se`のみが記録されている）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
-    df = (
-        df.with_row_index("_row")
-        .with_columns((pl.col("_row") % 10).alias("cluster_group"))
-        .drop("_row")
-    )
+    df = with_cluster_groups(df, 10)
     options = IvOptions(cov_type="cluster", cluster_col="cluster_group")
     res = IV(
         df,

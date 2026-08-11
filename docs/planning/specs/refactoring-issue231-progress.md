@@ -23,6 +23,7 @@
 | 1 | リファクタリング用スキル（or 既存スキル/エージェントの代用整理） | 完了 |
 | 2 | `benchmark/`ディレクトリの整理とリファクタリング | 完了 |
 | 3 | `tests/`ディレクトリの整理とリファクタリング | 未着手 |
+| 3.5 | crosscheckテストの許容誤差計算式バグ修正（`refactor`スキル範囲外） | 未着手 |
 | 4 | ロジック整理前のテスト拡充（OLS/WLS/Logit/Probitレビュー＋IV #232〜238） | 未着手 |
 | 5 | `python_package/`のリファクタリング | 未着手 |
 | 6 | `engine_pybind/`のリファクタリング | 未着手 |
@@ -328,6 +329,159 @@ tests/api_tests/
 ├── test_{ols,wls,logit,probit,iv}_crosscheck.py      # Rクロスチェック
 └── fixtures/benchmarks/
 ```
+
+**状態**: 完了
+
+**メモ（現状調査・計画）**:
+
+`Explore`エージェントによる17ファイル横断調査の結果、以下を計画として確定した
+（ユーザー確認済み、実装はこれから）。
+
+1. **ディレクトリ移動**: `tests/api_tests/` → `tests/`へフラット化（`git mv`）。
+   Rust側テストは`engine`の`mod tests`に完全分離済みで、Python側に
+   `api_tests`以外の種別が今後増える見込みが薄いため中間ディレクトリ不要と判断。
+   参照更新対象: `CLAUDE.md`3章の構成図、`pyproject.toml`（コメント）、
+   `.github/workflows/ci_python.yml`（pathsトリガー・実行コマンド）、
+   `.claude/rules/testing-policy.md`、`.claude/rules/python-style.md`、
+   `.claude/skills/test-new/SKILL.md`・`test-run/SKILL.md`・
+   `reference-benchmark/SKILL.md`、`docs/spec/ci-cd-notes.md`。
+2. **`tests/_assertions.py`新設**: `assert_close`/`assert_dict_close`/
+   `check_result`（ols・wls用／logit・probit用／iv・iv_gmm用の3パターン）/
+   `check_margeff`（fixtures用／crosscheck用の2パターン）を集約。
+   **`test_ols_crosscheck.py`・`test_iv_crosscheck.py`の基本`_assert_close`は
+   許容誤差の計算式が他と異なる（フェーズ3.5参照）ため統合対象から除外し、
+   現状のファイル内実装のまま残す**（挙動を変えないため）。
+3. **`tests/_tolerances.py`新設**: 許容誤差の値を手法ごとに辞書化して集約
+   （計算式の統一はフェーズ3.5で別途対応、値の集約のみ今回実施）。
+4. **`tests/_helpers.py`新設**: クラスター列付与ヘルパー
+   （`with_cluster_groups`、「行番号%N」パターン22箇所）、
+   `separation_suspected`DGP（logit/probit共通）、`MROZ_X`定数、
+   Wooldridgeロードの一本化。クラスター列ヘルパーは`benchmark/_common.py`の
+   `imbalanced_cluster_groups`とは役割が近いが、`benchmark/`と`tests/`は
+   ライフサイクルが別（testing-policy.md）という既存方針を踏まえ、
+   テスト専用ロジックのため`tests/`側に置くことをユーザー確認済み。
+5. **`conftest.py`拡張**: `binary_dataset`フィクスチャ（logit/probit共通）、
+   `DATA_DIR`定数、`sys.path`への`benchmark/`直下挿入（系統別サブディレクトリの
+   挿入は各ファイルに残す）、`fixtures()`JSON読み込みの汎用化。
+6. **COV_TYPESの一元化拡張**: logit/probit系（fixtures・crosscheck）にも、
+   既にols/wls/ivで適用済み（フェーズ2）の「`generate_*_fixtures.py`から
+   importして単一定義元にする」パターンを適用（値は現状と同一のため挙動不変）。
+7. **IVの`fit()`呼び出し共通化**: `test_iv.py`に`_our_fit`ヘルパー
+   （`test_ols.py`と同様の形）を追加し、40箇所以上の重複呼び出しを整理。
+8. **Issue番号コメント整理**: `#153`（test_wls.py 2箇所、番号のみ削除・
+   「OLSと共有される検証経路」という説明は残す）、`#171`（4ファイル5箇所、
+   現状との記述一致を確認しつつ経緯のみ削除）、`#231`（4ファイル、
+   「単一定義元にする」という設計判断の説明を残し番号のみ削除）。
+
+**除外事項**: crosscheckテストの許容誤差計算式の不一致（`tol`計算式が
+`test_ols_crosscheck.py`・`test_iv_crosscheck.py`のみ他と異なる）は
+ロジックの挙動を変える修正のため、`refactor`スキルの範囲外としフェーズ3.5へ
+切り出した（ユーザー指示）。
+
+### 実施結果（完了）
+
+計画の1〜8を全て実装した。
+
+1. **ディレクトリ移動**: `git mv`で17ファイル＋`fixtures/`を`tests/api_tests/`
+   から`tests/`へ移動。付随して各ファイル内の`sys.path.insert`の
+   `parents[2]`（旧`tests/api_tests/test_x.py`基準）を`parents[1]`
+   （新`tests/test_x.py`基準）に修正、docstring内のパス表記・
+   `benchmark/_common.py`の`DATA_DIR`組み立て・`benchmark/`配下の
+   フィクスチャ生成スクリプトのデフォルト出力パスも追従。参照更新した
+   非コードファイル: `CLAUDE.md`（3章構成図・6章要点）、`docs/plan.md`、
+   `pyproject.toml`（コメント）、`.github/workflows/ci_python.yml`
+   （pathsトリガー・実行コマンド）、`.claude/settings.json`（`ask`パス）、
+   `.claude/rules/testing-policy.md`・`python-style.md`、
+   `.claude/skills/reference-benchmark/SKILL.md`・`test-run/SKILL.md`・
+   `test-new/SKILL.md`、`.claude/agents/rust-reviewer.md`・
+   `python-reviewer.md`・`testing-completeness-reviewer.md`、
+   `docs/spec/ci-cd-notes.md`、`python_package/econometricsmodels/
+   nonlinear/CLAUDE.md`、`engine_pybind/src/nonlinear/CLAUDE.md`、
+   `engine/src/iv/CLAUDE.md`、`benchmark/README.md`、
+   `docs/planning/specs/iv-api-design.md`。`docs/planning/specs/
+   panel-iv-issue-breakdown.md`（完了済みIssueのチェックリスト、履歴的な
+   記録）と本ドキュメントの「着手前スナップショット」節は、過去の状態を
+   記述する文書のため意図的に更新対象から除外した。
+   移動後、`freeze_datasets.py`の出力を一時ディレクトリに生成し
+   コミット済み`tests/fixtures/benchmarks/data/`と`diff -rq`で完全一致
+   することを確認済み。
+2. **`tests/_assertions.py`新設**: `assert_close`/`assert_dict_close`/
+   `rename_intercept`/`check_margeff`を集約し、fixtures系6ファイル
+   （ols/wls/logit/probit/iv/iv_gmm）から`functools.partial`で
+   `rtol`/`atol`を束縛する形で参照するよう変更。crosscheck系5ファイルは
+   計算式が現状不統一（フェーズ3.5参照）のため、今回は対象外とし
+   ファイル内実装のまま維持。
+3. **`tests/_tolerances.py`新設**: 全11ファイル（fixtures 6・crosscheck 5）
+   の許容誤差の値を手法名をキーにした辞書に集約。計算式は変更していないため
+   挙動は不変（`ols_crosscheck`/`iv_crosscheck`の異なる式もそのまま）。
+4. **`tests/_helpers.py`新設**: `with_cluster_groups`（「行番号%N」パターン、
+   正規表現による一括置換で23箇所を集約）、`separation_suspected_dataset`
+   （`test_logit.py`/`test_probit.py`で完全同一実装だったDGP）、`MROZ_X`
+   （4ファイル）、`wooldridge_loader`/`load_wooldridge_dataset`
+   （3種類あったWooldridgeロードの書き方を統一。`test_ols_crosscheck.py`の
+   複数データセット対応fixtureは`wooldridge_loader()`、単発ロードは
+   `load_wooldridge_dataset(name)`）、`DATA_DIR`（12ファイルで重複していた
+   `Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"`
+   の組み立てを集約）を追加。
+5. **`conftest.py`拡張**: `binary_dataset`フィクスチャ（`test_logit.py`/
+   `test_probit.py`の完全同一実装を統合）、`benchmark/`直下への
+   `sys.path.insert`（11ファイルが個別に行っていたものを一度だけに集約。
+   系統別サブディレクトリの挿入は各ファイルに残置）を追加。
+6. **COV_TYPESの一元化拡張**: 調査の結果、logit/probitの
+   `generate_*_fixtures.py`側`COV_TYPES`には`"cluster"`が追加で含まれており
+   （fixture生成用の全網羅リストのため）、テスト側の意図的に絞った
+   リスト（cluster抜き、クラスターは専用テストで別途検証）とは値が
+   一致しないと判明（フェーズ2でOLS等について確認済みの「意図的な非対称」と
+   同じ構造）。単純importすると挙動が変わるため、ユーザー確認の結果
+   **据え置き**（現状のハードコードのまま）で決定。
+7. **IVの`fit()`呼び出し共通化**: `test_iv.py`に`_our_fit`ヘルパー
+   （`x_exog=["x1"], x_endog=["endog1"], instruments=["z1", "z2"]`が
+   既定、`options`含め呼び出し側で上書き可能）を追加。正規表現による
+   一括変換で、既定値と完全一致していた36箇所の`IV(...).fit()`呼び出しを
+   `_our_fit(...)`に置換（異なる`x_exog`/`x_endog`/`instruments`を使う
+   残り約20箇所は、それぞれ意図的に異なるテストケースであり
+   重複ではないため元のまま維持）。
+8. **Issue番号コメント整理**: `#153`（`test_wls.py`2箇所）・`#171`
+   （`test_iv.py`2箇所・`test_iv_fixtures.py`2箇所・`test_iv_crosscheck.py`
+   1箇所・`test_iv_gmm_fixtures.py`1箇所）・`#231`（4ファイル）の
+   全11箇所を番号のみ削除し周辺の説明文は保持。調査中に`test_iv_fixtures.py`
+   のdocstringが「Rクロスチェックは別issueで保留中（`ivreg`未導入のため）」
+   という**現状と矛盾する記述**（実際には`test_iv_crosscheck.py`として
+   実装済み）であることを発見し、あわせて修正した。
+
+**最終確認**: `pytest tests`670件全件パス、`ruff check .`／
+`ruff format --check .`全件パス。`cargo test`は対象外
+（`engine`/`engine_pybind`/`python_package`は今回変更していない）。
+
+---
+
+## フェーズ3.5: crosscheckテストの許容誤差計算式バグ修正
+
+**背景**: フェーズ3の現状調査で発覚。`test_ols_crosscheck.py`の`_assert_close`
+（dict版）・`_assert_scalar_close`と、`test_iv_crosscheck.py`の`_assert_close`
+（スカラー版）・`_assert_dict_close`が
+`tol = rtol * max(abs(ref_val), 1e-8)`という式を使っている。これは他の大半
+（`*_fixtures.py`全6ファイル、`test_wls_crosscheck.py`、`test_logit_crosscheck.py`、
+`test_probit_crosscheck.py`、`test_iv_crosscheck.py`の`_assert_p_value_close`のみ）が
+使う`tol = max(rtol * abs(ref_val), atol)`と**数学的に別物**（前者は`|ref|`が
+小さいとき許容誤差が`rtol*1e-8`という極小値まで縮み、本来検出すべきでない
+誤差でテストが誤って失敗しうる／逆に緩すぎて見逃しうる）。
+
+`test_wls_crosscheck.py:79-82`のコメントは、この不一致を認識した上で
+`test_ols_crosscheck.py`と異なる（＝修正済みの）式を採用した旨を明記しており、
+**`test_ols_crosscheck.py`と`test_iv_crosscheck.py`が未修正のまま取り残された
+可能性が高い**（本来の意図は`max(rtol*|ref|, atol)`と推測されるが、要検証）。
+
+**進め方（`refactor`スキルではなく通常の実装フローとして対応）**:
+1. どちらの式が正しい意図か（`ATOL`をなぜ`1e-8`固定にしていたか等）を
+   コミット履歴・関連Issueから確認する。
+2. 該当2ファイルの許容誤差式を正しい式に修正し、修正後に既存のRクロスチェック
+   フィクスチャに対して実際にテストがパスするか（許容誤差を厳しくする方向の
+   修正であれば、逆に既存の実測乖離を超えて失敗するケースが無いか）確認する。
+3. 修正により新たにテストが失敗する場合、それが「これまで見逃していた本物の
+   数値不一致」か「許容誤差の詰めすぎ」かを切り分ける。
+4. フェーズ3で新設する`tests/_assertions.py`へ、修正後の式で統合する
+   （フェーズ3時点で除外していた2ファイルの`_assert_close`をここで合流させる）。
 
 **状態**: 未着手
 

@@ -1,7 +1,7 @@
 """WLSの独立実装（R: lm(weights=) + sandwich/lmtest）とのクロスチェックテスト。
 
 主リファレンス（statsmodels）との厳密比較は`test_wls_fixtures.py`で行う。ここでは
-`tests/api_tests/fixtures/benchmarks/wls_crosscheck.json`
+`tests/fixtures/benchmarks/wls_crosscheck.json`
 （`benchmark/linear/fixtures/generate_wls_crosscheck_fixtures.py`で生成）
 を用いて、statsmodelsとは独立した実装（R）との一致を確認する。役割分担・
 pyfixest除外の理由は`test_ols_crosscheck.py`と同じ。
@@ -14,7 +14,7 @@ OLSの1e-2ではなく5e-2を採用する（`docs/spec/wls-spec.md`「テスト�
 分けてよい」に従う）。
 
 Note:
-    合成データはフィクスチャ生成時と同じ入力データを、`tests/api_tests/
+    合成データはフィクスチャ生成時と同じ入力データを、`tests/
     fixtures/benchmarks/data/`に固定済みのCSVから読む（重み列`weight`も
     同じCSVに含まれる）。401ksubs（Wooldridge）は`load_wooldridge.py`経由で
     都度ロードする（データの再配布ライセンスが未確認のためCSVとして
@@ -30,17 +30,18 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
 sys.path.insert(
     0,
     str(
-        Path(__file__).resolve().parents[2]
+        Path(__file__).resolve().parents[1]
         / "benchmark"
         / "linear"
         / "fixtures"
     ),
 )
 from _common import imbalanced_cluster_groups
+from _helpers import DATA_DIR, load_wooldridge_dataset, with_cluster_groups
+from _tolerances import TOLERANCES
 from econometricsmodels import WLS, OLSOptions
 from generate_wls_crosscheck_fixtures import (
     NUMERIC_SCENARIOS as SYNTHETIC_SCENARIOS,
@@ -52,14 +53,13 @@ FIXTURE_PATH = (
     / "benchmarks"
     / "wls_crosscheck.json"
 )
-DATA_DIR = Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"
 
 # classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相対誤差1e-13〜1e-15
 # 程度）。testing-policy.md「許容誤差」の基本方針（相対誤差1e-8）と揃える。
-RTOL_STRICT = 1e-8
+RTOL_STRICT = TOLERANCES["wls_crosscheck"]["rtol_strict"]
 
 # HACのみ実測最大相対誤差約4.3%（wls-spec.md「テスト」参照）。
-RTOL_HAC = 5e-2
+RTOL_HAC = TOLERANCES["wls_crosscheck"]["rtol_hac"]
 
 
 @pytest.fixture(scope="module")
@@ -146,11 +146,7 @@ def test_cluster_matches_r(crosscheck):
     グループ（行番号%10）を再現する。統計的な意味はなく、実装の動作確認用。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    df = (
-        df.with_row_index("_row")
-        .with_columns((pl.col("_row") % 10).alias("cluster_group"))
-        .drop("_row")
-    )
+    df = with_cluster_groups(df, 10)
     options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
     res = WLS(
         df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
@@ -193,11 +189,7 @@ def test_cluster_g2_matches_r(crosscheck):
     参照）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
-    df = (
-        df.with_row_index("_row")
-        .with_columns((pl.col("_row") % 2).alias("cluster_group"))
-        .drop("_row")
-    )
+    df = with_cluster_groups(df, 2)
     options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
     res = WLS(df, y="y", x=["x1"], weight="weight", options=options).fit()
 
@@ -229,11 +221,7 @@ def test_401ksubs_matches_r(crosscheck):
     """実データ（401ksubs、fsize==1）でのWLSクロスチェック。回帰式・重み定義は
     `test_wls_fixtures.py::test_401ksubs_matches_statsmodels`と揃える。
     """
-    pytest.importorskip("wooldridge")
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
-    from load_wooldridge import load as load_wooldridge
-
-    df = load_wooldridge("401ksubs").filter(pl.col("fsize") == 1)
+    df = load_wooldridge_dataset("401ksubs").filter(pl.col("fsize") == 1)
     df = df.with_columns((1.0 / pl.col("inc")).alias("inv_inc"))
 
     res = WLS(

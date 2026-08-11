@@ -11,7 +11,7 @@ paths:
 ## テストの分離
 
 - `engine`の純粋ロジックの単体テストは、対象コードと同じファイル内の`#[cfg(test)] mod tests`に置く（`cargo test -p engine`）。
-- `tests/api_tests/`: リファレンス実装との答え合わせテスト（`pytest`）。
+- `tests/`: リファレンス実装との答え合わせテスト（`pytest`）。
 
 ## リファレンス実装
 
@@ -27,7 +27,7 @@ paths:
 
 各推定手法は、以下の観点で網羅的にテストする。**全てのオプションの組み合わせで、リファレンス実装と統計量が一致することを確認する**。
 
-1. **合成データセット**（`benchmark/<系統>/generate_*_datasets.py`（linearなら`generate_linear_datasets.py`）で生成し、`benchmark/freeze_datasets.py`で`tests/api_tests/fixtures/benchmarks/data/`にCSVとして固定したものを使用。フィクスチャ生成・pytest実行時ともにこのCSVを読み、ジェネレータを直接呼ばない）。以下のバリエーションを持たせる。
+1. **合成データセット**（`benchmark/<系統>/generate_*_datasets.py`（linearなら`generate_linear_datasets.py`）で生成し、`benchmark/freeze_datasets.py`で`tests/fixtures/benchmarks/data/`にCSVとして固定したものを使用。フィクスチャ生成・pytest実行時ともにこのCSVを読み、ジェネレータを直接呼ばない）。以下のバリエーションを持たせる。
    - サンプル数が少ない
    - 分散が大きい
    - 不均一分散（heteroskedasticity）
@@ -58,11 +58,11 @@ paths:
 
 ## ベンチマーク値のフィクスチャ化
 
-- リファレンス実装（statsmodels/R）の実行結果は、CIで毎回再計算せず、**JSONファイルとして`tests/api_tests/fixtures/benchmarks/`にコミットし固定する**。ベンチマーク由来のフィクスチャを`fixtures/`直下ではなく`benchmarks/`サブディレクトリに分けているのは、他の目的のフィクスチャ（ベンチマーク比較以外でテストが読み込みたいデータ）と混在させないため。
+- リファレンス実装（statsmodels/R）の実行結果は、CIで毎回再計算せず、**JSONファイルとして`tests/fixtures/benchmarks/`にコミットし固定する**。ベンチマーク由来のフィクスチャを`fixtures/`直下ではなく`benchmarks/`サブディレクトリに分けているのは、他の目的のフィクスチャ（ベンチマーク比較以外でテストが読み込みたいデータ）と混在させないため。
 - 理由: CIを軽く保つため（Rパッケージのインストールはビルドが重い）。またリファレンス実装側のバージョンアップで数値が変わり、意図せずテストが壊れることを防ぐため。
-- フィクスチャの命名: 手法・シナリオ・cov_type等が分かる形にする（例: `ols.json`に、シナリオ×cov_typeをネストして持たせる。実例は`tests/api_tests/fixtures/benchmarks/ols.json`参照）。
-- **フィクスチャを生成するスクリプトと、生成されたJSON自体は別の場所に置く**。生成スクリプトは`benchmark/<系統>/fixtures/generate_<手法名>_fixtures.py`（コード、`benchmark/`側で管理。系統ディレクトリ構成は`.claude/skills/reference-benchmark/SKILL.md`参照）、生成物は`tests/api_tests/fixtures/benchmarks/<手法名>.json`（データ、テスト側で管理）。
-- **合成データセット自体も同様にCSVとしてtests側（`tests/api_tests/fixtures/benchmarks/data/`）に固定する**（`benchmark/freeze_datasets.py`で生成）。理由: ジェネレータ側のコードが将来変わっても、既に固定したフィクスチャJSONの期待値と無言で不整合にならないようにするため。
+- フィクスチャの命名: 手法・シナリオ・cov_type等が分かる形にする（例: `ols.json`に、シナリオ×cov_typeをネストして持たせる。実例は`tests/fixtures/benchmarks/ols.json`参照）。
+- **フィクスチャを生成するスクリプトと、生成されたJSON自体は別の場所に置く**。生成スクリプトは`benchmark/<系統>/fixtures/generate_<手法名>_fixtures.py`（コード、`benchmark/`側で管理。系統ディレクトリ構成は`.claude/skills/reference-benchmark/SKILL.md`参照）、生成物は`tests/fixtures/benchmarks/<手法名>.json`（データ、テスト側で管理）。
+- **合成データセット自体も同様にCSVとしてtests側（`tests/fixtures/benchmarks/data/`）に固定する**（`benchmark/freeze_datasets.py`で生成）。理由: ジェネレータ側のコードが将来変わっても、既に固定したフィクスチャJSONの期待値と無言で不整合にならないようにするため。
   - **Wooldridgeデータセットはこの固定化の対象外**とする（`wooldridge`パッケージ自体はMITライセンスだが、同梱される実データの著作権は原典の教科書側にある可能性があり、フィルタ後の部分集合であってもMITライセンスの本リポジトリにCSVとして再配布してよいか未確認のため。ユーザー確認済み）。Wooldridgeデータは引き続き`load_wooldridge.py`経由で都度ロードし、`pytest.importorskip("wooldridge")`で任意扱いにする。
 - 各フィクスチャJSONには`_meta`フィールドを含め、少なくとも以下を記録する。
   - `generated_at`: 生成日時（ISO 8601）

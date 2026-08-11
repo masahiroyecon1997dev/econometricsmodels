@@ -1,7 +1,7 @@
-"""OLSのクロスチェック用フィクスチャ（tests/api_tests/fixtures/benchmarks/ols_crosscheck.json）を
+"""OLSのクロスチェック用フィクスチャ（tests/fixtures/benchmarks/ols_crosscheck.json）を
 生成するスクリプト。
 
-`tests/api_tests/fixtures/benchmarks/ols.json`（statsmodels、主リファレンス）とは別に、
+`tests/fixtures/benchmarks/ols.json`（statsmodels、主リファレンス）とは別に、
 独立実装（R: lm + sandwich/lmtest）によるクロスチェック値を生成する。役割分担は
 `.claude/rules/testing-policy.md`「リファレンス実装」章の通り:
 
@@ -15,7 +15,7 @@ pyfixestのHC2/HC3はfixestの仕様ではなく**pyfixest自身の実装バグ*
 `docs/spec/ols-spec.md`「テスト」参照。
 
 classical/HC0-3/clusterはRとほぼ機械精度で一致するため厳密比較、HACのみ小標本補正の
-慣習差により緩い許容誤差で比較する（`tests/api_tests/test_ols_crosscheck.py`参照）。
+慣習差により緩い許容誤差で比較する（`tests/test_ols_crosscheck.py`参照）。
 
 `predict()`（`docs/spec/ols-spec.md`「predict()」）も対象に含める。
 `run_lm_predict_crosscheck.R`を使い、全シナリオで学習データに対する予測値（fitted）を、
@@ -31,9 +31,9 @@ AIC/BICはRの`AIC()`/`BIC()`標準関数（残差分散を1パラメータと�
 （`β_slopes' Σ⁻¹ β_slopes / q`）をcov_typeごとの共分散行列で計算しており、cov_typeに依存する。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`ols_crosscheck.json`は
-`tests/api_tests/fixtures/`に置く（`testing-policy.md`「ベンチマーク値のフィクスチャ化」参照）。
+`tests/fixtures/`に置く（`testing-policy.md`「ベンチマーク値のフィクスチャ化」参照）。
 
-合成データの入力は`tests/api_tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
+合成データの入力は`tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
 （`benchmark/freeze_datasets.py`参照）。`imbalanced_cluster_groups`（純粋にnから
 決定論的にラベルを組み立てるだけで乱数を使わない）のみ、引き続き
 `generate_linear_datasets.py`を直接呼ぶ。Wooldridgeデータは`load_wooldridge.py`
@@ -42,7 +42,7 @@ AIC/BICはRの`AIC()`/`BIC()`標準関数（残差分散を1パラメータと�
 
 使用例:
     python generate_ols_crosscheck_fixtures.py \\
-        --output ../../../tests/api_tests/fixtures/benchmarks/ols_crosscheck.json
+        --output ../../../tests/fixtures/benchmarks/ols_crosscheck.json
 """
 
 from __future__ import annotations
@@ -359,7 +359,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/api_tests/fixtures/benchmarks/ols_crosscheck.json",
+        default="../../../tests/fixtures/benchmarks/ols_crosscheck.json",
     )
     args = parser.parse_args()
 

@@ -55,8 +55,7 @@ econometricsmodels/
 │   ├── __init__.py               # engine_pybindからのインポート、Polarsラッパー
 │   └── py.typed
 │
-├── tests/
-│   └── api_tests/                 # pytest（pyfixest / R実装との答え合わせ）
+├── tests/                          # pytest（pyfixest / R実装との答え合わせ）
 │
 ├── benchmark/                     # テスト用データセット生成・リファレンス実装（pyfixest/R）でのベンチマーク値生成スクリプト
 │                                   # tests/とは別ライフサイクル（Rランタイム依存、随時実行するツール）。詳細は.claude/skills/reference-benchmark/
@@ -94,7 +93,7 @@ econometricsmodels/
 
 ## 7. テスト方針
 
-詳細は `.claude/rules/testing-policy.md`（tests配下で自動ロード）を参照。要点: pyfixest/Rとの数値比較で検証、許容誤差は相対誤差1e-8を基本（手法により例外あり）、engineの単体テストはソース内`mod tests`、`tests/api_tests`はpytestに分離。
+詳細は `.claude/rules/testing-policy.md`（tests配下で自動ロード）を参照。要点: pyfixest/Rとの数値比較で検証、許容誤差は相対誤差1e-8を基本（手法により例外あり）、engineの単体テストはソース内`mod tests`、`tests/`はpytestに分離。
 
 ## 8. バージョニング・CI/CD
 

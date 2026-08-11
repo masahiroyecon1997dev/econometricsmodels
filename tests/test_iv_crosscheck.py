@@ -1,10 +1,10 @@
 """IV(2SLS)の独立実装（R: ivreg + sandwich/lmtest）とのクロスチェックテスト。
 
 主リファレンス（linearmodels）との厳密比較は`test_iv_fixtures.py`で行う。ここでは
-`tests/api_tests/fixtures/benchmarks/iv_crosscheck.json`
+`tests/fixtures/benchmarks/iv_crosscheck.json`
 （`benchmark/iv/fixtures/generate_iv_crosscheck_fixtures.py`で生成）を用いて、
 linearmodelsとは独立した実装（R `ivreg`）との一致を確認する
-（`docs/planning/specs/iv-api-design.md`5.2節、Issue #171）。
+（`docs/planning/specs/iv-api-design.md`5.2節）。
 
 シナリオ・cov_type・クラスタケースの構成は`test_iv_fixtures.py`と揃える。
 
@@ -40,7 +40,7 @@ Note:
       （`test_ols_crosscheck.py`が既にOLSの数値一致を検証済みのため、
       `test_iv_fixtures.py`と同じ理由）。
 
-    フィクスチャ生成時と同じ入力データを、`tests/api_tests/fixtures/benchmarks/data/`
+    フィクスチャ生成時と同じ入力データを、`tests/fixtures/benchmarks/data/`
     に固定済みのCSV（`benchmark/freeze_datasets.py`参照）から読む。
 """
 
@@ -53,12 +53,13 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
 sys.path.insert(
     0,
-    str(Path(__file__).resolve().parents[2] / "benchmark" / "iv" / "fixtures"),
+    str(Path(__file__).resolve().parents[1] / "benchmark" / "iv" / "fixtures"),
 )
 from _common import imbalanced_cluster_groups
+from _helpers import DATA_DIR, with_cluster_groups
+from _tolerances import TOLERANCES
 from econometricsmodels import IV, IvOptions
 from generate_iv_crosscheck_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
@@ -70,23 +71,22 @@ FIXTURE_PATH = (
     / "benchmarks"
     / "iv_crosscheck.json"
 )
-DATA_DIR = Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"
 
 # classical/hc0/hc1/clusterはRとほぼ機械精度で一致する（OLSクロスチェックの実測
 # 傾向と同じ、`test_ols_crosscheck.py`参照）。
-RTOL_STRICT = 1e-8
+RTOL_STRICT = TOLERANCES["iv_crosscheck"]["rtol_strict"]
 
 # HACのみ小標本補正の慣習差により実測で相対誤差0.3〜0.8%程度の乖離がある
 # （`test_ols_crosscheck.py`の`RTOL_HAC`と同じ理由）。
-RTOL_HAC = 1e-2
+RTOL_HAC = TOLERANCES["iv_crosscheck"]["rtol_hac"]
 
 # small_nシナリオ（n=40, hac_lag=3）のみ実測乖離がRTOL_HACを超える（SE最大3.8%、
 # F統計量最大8.1%）ため専用に緩めた値を使う（モジュールdocコメント参照）。
-RTOL_HAC_SMALL_N = 0.1
+RTOL_HAC_SMALL_N = TOLERANCES["iv_crosscheck"]["rtol_hac_small_n"]
 
 # f_p_valueが浮動小数点アンダーフローに近い極小値のとき、相対誤差比較の代わりに
 # 使う絶対誤差フロア（モジュールdocコメント参照、実測最大乖離1.523e-6にマージン）。
-ATOL_F_PVALUE = 1e-5
+ATOL_F_PVALUE = TOLERANCES["iv_crosscheck"]["atol_f_pvalue"]
 
 COV_TYPES = ["classical", "hc0", "hc1", "hac"]
 
@@ -220,11 +220,7 @@ def test_cluster_matches_r(crosscheck):
     `baseline`シナリオのみ（`coef`/`se`/`r_squared`等が記録されている）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
-    df = (
-        df.with_row_index("_row")
-        .with_columns((pl.col("_row") % 10).alias("cluster_group"))
-        .drop("_row")
-    )
+    df = with_cluster_groups(df, 10)
     options = IvOptions(cov_type="cluster", cluster_col="cluster_group")
     res = IV(
         df,

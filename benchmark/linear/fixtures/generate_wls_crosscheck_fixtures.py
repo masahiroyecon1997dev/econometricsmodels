@@ -1,7 +1,7 @@
-"""WLSのクロスチェック用フィクスチャ（tests/api_tests/fixtures/benchmarks/wls_crosscheck.json）を
+"""WLSのクロスチェック用フィクスチャ（tests/fixtures/benchmarks/wls_crosscheck.json）を
 生成するスクリプト。
 
-`tests/api_tests/fixtures/benchmarks/wls.json`（statsmodels、主リファレンス）とは別に、
+`tests/fixtures/benchmarks/wls.json`（statsmodels、主リファレンス）とは別に、
 独立実装（R: lm(weights=) + sandwich/lmtest）によるクロスチェック値を生成する。
 役割分担・許容誤差の方針はOLSの`generate_ols_crosscheck_fixtures.py`と同じ
 （`.claude/rules/testing-policy.md`「リファレンス実装」章の通り確定済み）:
@@ -11,7 +11,7 @@
 - pyfixestは正確性検証には使わない（性能比較専用）。
 
 classical/HC0-3/clusterはRとほぼ機械精度で一致するため厳密比較、HACのみ小標本補正の
-慣習差により緩い許容誤差で比較する（`tests/api_tests/test_wls_crosscheck.py`参照）。
+慣習差により緩い許容誤差で比較する（`tests/test_wls_crosscheck.py`参照）。
 
 係数・標準誤差に加え、AIC/BIC/対数尤度・F統計量・F検定p値もRクロスチェック対象に含める
 （`testing-policy.md`「リファレンス実装」章の方針）。AIC/BICの計算式・F統計量の定義に
@@ -19,14 +19,14 @@ classical/HC0-3/clusterはRとほぼ機械精度で一致するため厳密比�
 本実装・statsmodelsと同じ式を使う）。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`wls_crosscheck.json`は
-`tests/api_tests/fixtures/benchmarks/`に置く。合成データの入力は`tests/api_tests/
+`tests/fixtures/benchmarks/`に置く。合成データの入力は`tests/
 fixtures/benchmarks/data/`に固定済みのCSVを読む（`benchmark/freeze_datasets.py`
 参照）。401ksubs（Wooldridge）は`load_wooldridge.py`経由で都度ロードする
 （データの再配布ライセンスが未確認のためCSVとして固定しない）。
 
 使用例:
     python generate_wls_crosscheck_fixtures.py \\
-        --output ../../../tests/api_tests/fixtures/benchmarks/wls_crosscheck.json
+        --output ../../../tests/fixtures/benchmarks/wls_crosscheck.json
 """
 
 from __future__ import annotations
@@ -282,7 +282,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/api_tests/fixtures/benchmarks/wls_crosscheck.json",
+        default="../../../tests/fixtures/benchmarks/wls_crosscheck.json",
     )
     args = parser.parse_args()
 

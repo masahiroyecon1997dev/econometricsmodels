@@ -1,7 +1,7 @@
-"""IV（2SLS）のクロスチェック用フィクスチャ（tests/api_tests/fixtures/benchmarks/
+"""IV（2SLS）のクロスチェック用フィクスチャ（tests/fixtures/benchmarks/
 iv_crosscheck.json）を生成するスクリプト。
 
-`tests/api_tests/fixtures/benchmarks/iv.json`（linearmodels、主リファレンス）とは
+`tests/fixtures/benchmarks/iv.json`（linearmodels、主リファレンス）とは
 別に、独立実装（R: ivreg + sandwich/lmtest）によるクロスチェック値を生成する
 （`docs/planning/specs/iv-api-design.md`5.2節参照）。
 
@@ -22,15 +22,15 @@ iv_crosscheck.json）を生成するスクリプト。
   コストは掛けない。ユーザー確認済み）。他のcov_typeでは`None`。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`iv_crosscheck.json`は
-`tests/api_tests/fixtures/benchmarks/`に置く（`testing-policy.md`「ベンチマーク値の
+`tests/fixtures/benchmarks/`に置く（`testing-policy.md`「ベンチマーク値の
 フィクスチャ化」参照）。
 
-入力データは`tests/api_tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
+入力データは`tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
 （`benchmark/freeze_datasets.py`参照）。
 
 使用例:
     python generate_iv_crosscheck_fixtures.py \\
-        --output ../../../tests/api_tests/fixtures/benchmarks/iv_crosscheck.json
+        --output ../../../tests/fixtures/benchmarks/iv_crosscheck.json
 """
 
 from __future__ import annotations
@@ -249,7 +249,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/api_tests/fixtures/benchmarks/iv_crosscheck.json",
+        default="../../../tests/fixtures/benchmarks/iv_crosscheck.json",
     )
     args = parser.parse_args()
 

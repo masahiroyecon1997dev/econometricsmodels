@@ -1,6 +1,6 @@
 """Logitの独立実装（R: glm + sandwich + marginaleffects）による数値比較テスト。
 
-`tests/api_tests/fixtures/benchmarks/logit_crosscheck.json`（`benchmark/nonlinear/
+`tests/fixtures/benchmarks/logit_crosscheck.json`（`benchmark/nonlinear/
 fixtures/generate_logit_crosscheck_fixtures.py`で生成）を読み込み、係数・標準誤差・
 適合度統計量・限界効果をRとクロスチェックする。役割分担は`test_logit_fixtures.py`
 と同じ（`.claude/rules/testing-policy.md`「リファレンス実装」参照）。
@@ -28,17 +28,23 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmark"))
 sys.path.insert(
     0,
     str(
-        Path(__file__).resolve().parents[2]
+        Path(__file__).resolve().parents[1]
         / "benchmark"
         / "nonlinear"
         / "fixtures"
     ),
 )
 from _common import imbalanced_cluster_groups
+from _helpers import (
+    DATA_DIR,
+    MROZ_X,
+    load_wooldridge_dataset,
+    with_cluster_groups,
+)
+from _tolerances import TOLERANCES
 from econometricsmodels import Logit, LogitOptions
 from generate_logit_crosscheck_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
@@ -50,23 +56,24 @@ FIXTURE_PATH = (
     / "benchmarks"
     / "logit_crosscheck.json"
 )
-DATA_DIR = Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"
 
-RTOL = 2e-4
-ATOL = 1e-8
+RTOL = TOLERANCES["logit_crosscheck"]["rtol"]
+ATOL = TOLERANCES["logit_crosscheck"]["atol"]
 
 # marginal_effects()のstd_err（デルタ法、ヤコビアン経由）は係数・標準誤差本体より
 # 数値ノイズが1桁大きいことを実測確認した（mroz/opg/median/ageで相対誤差~1.8e-3が
 # 最大）。dydx自体はRTOL=2e-4で十分（実測最大~6.6e-6）。
-RTOL_MARGEFF_SE = 5e-3
+RTOL_MARGEFF_SE = TOLERANCES["logit_crosscheck"]["rtol_margeff_se"]
 
 # p値は標準正規分布CDFの裾で係数・zのわずかな数値差が増幅されるため、係数・SE本体
 # より緩いATOLが必要（実測最大絶対誤差~1.19e-5、near_separation/classical/const）。
-ATOL_P_VALUE = 3e-5
+ATOL_P_VALUE = TOLERANCES["logit_crosscheck"]["atol_p_value"]
 
 # near_separation（準完全分離の境界ケース）のconf_intは、係数・SE本体より数値ノイズが
 # 大きいことを実測確認した（相対誤差最大~4.05e-4、opg/x2）。この場合のみ緩いRTOLを使う。
-RTOL_NEAR_SEPARATION_CONF_INT = 6e-4
+RTOL_NEAR_SEPARATION_CONF_INT = TOLERANCES["logit_crosscheck"][
+    "rtol_near_separation_conf_int"
+]
 
 COV_TYPES = ["classical", "opg", "hc0", "hc1"]
 MARGEFF_AT = ["overall", "mean", "median"]
@@ -74,8 +81,6 @@ MARGEFF_AT = ["overall", "mean", "median"]
 # near_separationは既定tol=1e-6だとstatsmodels/Rとの一致精度が下がる境界ケース
 # （test_logit_fixtures.py参照）。ここでも同じ理由でtol=1e-8を明示指定する。
 _NEAR_SEPARATION_TOL = 1e-8
-
-MROZ_X = ["nwifeinc", "educ", "exper", "expersq", "age", "kidslt6", "kidsge6"]
 
 
 @pytest.fixture(scope="module")
@@ -183,11 +188,7 @@ def test_matches_r_glm(fixtures, scenario, cov_type):
 
 def test_cluster_matches_r_glm(fixtures):
     df = pl.read_csv(DATA_DIR / "logit_baseline.csv")
-    df = (
-        df.with_row_index("_row")
-        .with_columns((pl.col("_row") % 10).alias("cluster_group"))
-        .drop("_row")
-    )
+    df = with_cluster_groups(df, 10)
     options = LogitOptions(cov_type="cluster", cluster_col="cluster_group")
     res = Logit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
@@ -210,11 +211,7 @@ def test_cluster_imbalanced_matches_r_glm(fixtures):
 
 def test_cluster_g2_matches_r_glm(fixtures):
     df = pl.read_csv(DATA_DIR / "logit_baseline.csv")
-    df = (
-        df.with_row_index("_row")
-        .with_columns((pl.col("_row") % 2).alias("cluster_group"))
-        .drop("_row")
-    )
+    df = with_cluster_groups(df, 2)
     options = LogitOptions(cov_type="cluster", cluster_col="cluster_group")
     res = Logit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
@@ -225,9 +222,7 @@ def test_cluster_g2_matches_r_glm(fixtures):
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 def test_mroz_matches_r_glm(fixtures, cov_type):
-    wooldridge = pytest.importorskip("wooldridge")
-    pandas_df = wooldridge.data("mroz")
-    df = pl.from_pandas(pandas_df)
+    df = load_wooldridge_dataset("mroz")
     options = LogitOptions(cov_type=cov_type)
     res = Logit(df, y="inlf", x=MROZ_X, options=options).fit()
 
@@ -241,9 +236,7 @@ def test_mroz_cluster_matches_r_glm(fixtures):
     `testing-policy.md`「テスト用データセット」3.の「実データでのグループ列も
     検証する」を満たす（OLSのwage1/regionクラスターと同じ趣旨）。
     """
-    wooldridge = pytest.importorskip("wooldridge")
-    pandas_df = wooldridge.data("mroz")
-    df = pl.from_pandas(pandas_df)
+    df = load_wooldridge_dataset("mroz")
     options = LogitOptions(cov_type="cluster", cluster_col="city")
     res = Logit(df, y="inlf", x=MROZ_X, options=options).fit()
 

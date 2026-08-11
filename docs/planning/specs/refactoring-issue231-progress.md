@@ -341,6 +341,15 @@ tests/api_tests/
 既存実装を壊さないよう、着手前にテストを拡充する。
 
 **進め方**:
+0. **着手前に`benchmark/`を再生成する**: `benchmark/freeze_datasets.py`で
+   合成データセットCSV（`tests/api_tests/fixtures/benchmarks/data/`）を、
+   `benchmark/*/fixtures/generate_*.py`各スクリプトで参照用パラメータJSON
+   （`tests/api_tests/fixtures/benchmarks/*.json`）をそれぞれ再生成し、
+   コミット済みの状態と一致することを確認する（フェーズ2追加ラウンドの
+   「最終確認」で発見した`generate_logit_crosscheck_fixtures.py`の
+   `near_separation`ケース失敗も含め、この時点で一連の生成過程が整合的で
+   あることを確定させる）。生成データ・参照用パラメータJSONとも生成過程の
+   パラメータ・シード値は変えていないため、通常は差分が出ないはず。
 1. `review-testing`スキルでOLS/WLS/Logit/Probitのテストをレビューし、
    不足があれば充足する。
 2. IV分（[#232](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/232)〜

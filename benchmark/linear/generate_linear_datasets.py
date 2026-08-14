@@ -29,6 +29,7 @@ SCENARIOS = [
     "moderate_multicollinearity",
     "perfect_multicollinearity",
     "scale_variance",
+    "scale_variance_mild",
     "high_condition_number",
 ]
 
@@ -95,9 +96,22 @@ def generate_linear_dataset(
         if k < 2:
             raise ValueError("scale_variance requires k >= 2")
         # 変数間のスケールが極端に異なるケース（x1は10^6オーダー、
-        # x2は10^-3オーダー）。
+        # x2は10^-3オーダー）。傾き係数の同時共分散部分行列の条件数が
+        # 倍精度の限界を超え、全cov_typeで数値的に特異になる
+        # （ComputationErrorパス専用、数値比較の対象外）。
         X[:, 0] *= 1e6
         X[:, 1] *= 1e-3
+
+    if scenario == "scale_variance_mild":
+        if k < 2:
+            raise ValueError("scale_variance_mild requires k >= 2")
+        # scale_varianceより緩いスケール差（x1は10^2オーダー、x2は10^-1
+        # オーダー、スケール比1e3程度）。条件数は倍精度の限界より十分低く
+        # 成功パスになるため、faer等の数値計算ライブラリ依存部分の将来の
+        # 精度リグレッションを検知する成功パスケースとして使う
+        # （testing-policy.md「テスト用データセット」1.）。
+        X[:, 0] *= 1e2
+        X[:, 1] *= 1e-1
 
     # --- 誤差項 ---
     sigma_i = None  # heteroskedasticの場合のみ使用（weight算出に流用）

@@ -48,6 +48,11 @@ NUMERIC_SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "high_condition_number",
+    # scale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）より
+    # 緩いスケール差（x1*1e2, x2*1e-1）の成功パス。faer等の数値計算
+    # ライブラリ依存部分の将来の精度リグレッションを検知する
+    # （testing-policy.md「テスト用データセット」1.、ユーザー確認済み）。
+    "scale_variance_mild",
     # n=k+1（自由度1ちょうど）の成功パス。baselineをn=5,k=3で
     # オーバーライドした専用データ（engine側の`k`は定数項込みでk=4になる
     # ため、df_resid=1にはn=5が必要。freeze_datasets.py参照）。同じx1..x3の

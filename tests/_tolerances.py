@@ -32,9 +32,25 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # classical/HC0-3/clusterは機械精度一致（実測1e-14程度）のためRTOL_STRICTを
     # 適用、HACのみ小標本補正の慣習差により緩める。ATOLは絶対誤差フロア
     # （ref値が0近傍のとき、相対誤差比較が意味を持たなくなるのを防ぐ）。
-    "ols_crosscheck": {"rtol_strict": 1e-8, "rtol_hac": 1e-2, "atol": 1e-8},
-    # HACの実測最大相対誤差が約4.3%（OLSの10倍程度）のためOLSより緩い。
-    "wls_crosscheck": {"rtol_strict": 1e-8, "rtol_hac": 5e-2},
+    "ols_crosscheck": {
+        "rtol_strict": 1e-8,
+        "rtol_hac": 1e-2,
+        "atol": 1e-8,
+        # p_valuesのみ絶対誤差フロアで比較する（HAC/autocorrelatedシナリオで
+        # 裾確率がゼロ近傍に潰れ、相対誤差比較が意味を持たなくなるため。
+        # 実測最大絶対乖離~1.69e-7にマージン。IV/Logit/Probitクロスチェックの
+        # atol_f_pvalue/atol_p_valueと同じ理由）。
+        "atol_p_value": 1e-6,
+    },
+    "wls_crosscheck": {
+        "rtol_strict": 1e-8,
+        # HACの実測最大相対誤差が約4.3%（OLSの10倍程度）のためOLSより緩い。
+        "rtol_hac": 5e-2,
+        "atol": 1e-8,
+        # ols_crosscheckと同じ理由（HAC/autocorrelatedで裾確率がゼロ近傍に
+        # 潰れるため）。値もOLSと同じ実測オーダーのため揃える。
+        "atol_p_value": 1e-6,
+    },
     "iv_crosscheck": {
         "rtol_strict": 1e-8,
         "rtol_hac": 1e-2,

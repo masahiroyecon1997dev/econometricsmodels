@@ -13,6 +13,11 @@ OLSの1e-2ではなく5e-2を採用する（`docs/spec/wls-spec.md`「テスト�
 パッケージでも、統計量・cov_typeごとに実測乖離が大きく異なる場合は、許容誤差を
 分けてよい」に従う）。
 
+係数・標準誤差に加え、t値・p値・信頼区間・R²・調整済みR²・AIC・BIC・対数尤度・
+F統計量・F検定p値も検証する（`test_ols_crosscheck.py`と同じ方針）。p_valuesのみ
+HAC/autocorrelatedで裾確率がゼロ近傍に潰れるため絶対誤差フロア（`ATOL_P_VALUE`）
+で比較する。
+
 Note:
     合成データはフィクスチャ生成時と同じ入力データを、`tests/
     fixtures/benchmarks/data/`に固定済みのCSVから読む（重み列`weight`も
@@ -25,6 +30,7 @@ from __future__ import annotations
 
 import json
 import sys
+from functools import partial
 from pathlib import Path
 
 import polars as pl
@@ -39,6 +45,7 @@ sys.path.insert(
         / "fixtures"
     ),
 )
+from _assertions import assert_close, assert_dict_close
 from _common import imbalanced_cluster_groups
 from _helpers import DATA_DIR, load_wooldridge_dataset, with_cluster_groups
 from _tolerances import TOLERANCES
@@ -46,6 +53,8 @@ from econometricsmodels import WLS, OLSOptions
 from generate_wls_crosscheck_fixtures import (
     NUMERIC_SCENARIOS as SYNTHETIC_SCENARIOS,
 )
+from generate_wls_crosscheck_fixtures import WOOLDRIDGE_COV_TYPES
+from generate_wls_fixtures import _add_age_bin
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parent
@@ -61,54 +70,34 @@ RTOL_STRICT = TOLERANCES["wls_crosscheck"]["rtol_strict"]
 # HACのみ実測最大相対誤差約4.3%（wls-spec.md「テスト」参照）。
 RTOL_HAC = TOLERANCES["wls_crosscheck"]["rtol_hac"]
 
+# 絶対誤差フロア（ref値が0近傍のとき相対誤差比較が意味を持たなくなるのを防ぐ）。
+ATOL = TOLERANCES["wls_crosscheck"]["atol"]
+
+# p_values専用の絶対誤差フロア（HAC/autocorrelatedで裾確率がゼロ近傍に
+# 潰れるため、_tolerances.py参照）。
+ATOL_P_VALUE = TOLERANCES["wls_crosscheck"]["atol_p_value"]
+
 
 @pytest.fixture(scope="module")
 def crosscheck() -> dict:
     return json.loads(FIXTURE_PATH.read_text())
 
 
-def _assert_close(
-    ours: dict[str, float],
-    reference: dict[str, float],
-    label: str,
-    rtol: float = RTOL_STRICT,
-) -> None:
-    for name, ref_val in reference.items():
-        our_val = ours[name]
-        diff = abs(our_val - ref_val)
-        # test_ols_crosscheck.pyと異なりmax(rtol*|ref|, ATOL)の順（絶対誤差フロアとして
-        # 使う）。cluster/f_p_valueが5e-13程度まで下がるケースがあり、`rtol*max(|ref|,1e-8)`
-        # のままだと許容誤差自体が1e-16まで縮んでしまい、ほぼゼロ同士の比較で偽陽性の
-        # 失敗になることが判明したため（WLSのRクロスチェックテスト作成時に発覚）。
-        tol = max(rtol * abs(ref_val), 1e-8)
-        assert diff <= tol, (
-            f"[{label}] {name}: ours={our_val:.6f}, reference={ref_val:.6f}, "
-            f"diff={diff:.6f} > tol={tol:.6f}"
-        )
-
-
-def _assert_scalar_close(
-    our_val: float, ref_val: float, label: str, rtol: float = RTOL_STRICT
-) -> None:
-    diff = abs(our_val - ref_val)
-    # test_ols_crosscheck.pyと異なりmax(rtol*|ref|, ATOL)の順（絶対誤差フロアとして
-    # 使う）。cluster/f_p_valueが5e-13程度まで下がるケースがあり、`rtol*max(|ref|,1e-8)`
-    # のままだと許容誤差自体が1e-16まで縮んでしまい、ほぼゼロ同士の比較で偽陽性の
-    # 失敗になることが判明したため（WLSのRクロスチェックテスト作成時に発覚）。
-    tol = max(rtol * abs(ref_val), 1e-8)
-    assert diff <= tol, (
-        f"[{label}] ours={our_val:.6f}, reference={ref_val:.6f}, "
-        f"diff={diff:.6f} > tol={tol:.6f}"
-    )
+# _assert_close（dict版）はtests/_assertions.pyのassert_dict_closeに、
+# _assert_scalar_close（scalar版）はassert_closeに対応する
+# （test_ols_crosscheck.pyと同じ計算式に統合）。
+_assert_close = partial(assert_dict_close, rtol=RTOL_STRICT, atol=ATOL)
+_assert_scalar_close = partial(assert_close, rtol=RTOL_STRICT, atol=ATOL)
 
 
 def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
-    """AIC・BIC・対数尤度・F統計量・F検定p値の検証。
-
-    AIC/BIC/対数尤度はcov_typeに依存しないため常にRTOL_STRICTで比較する。
-    F統計量・F検定p値はcov_typeごとのロバストWald検定のため呼び出し元の
-    rtol（HACのみRTOL_HAC）を使う。
+    """R²・調整済みR²・AIC・BIC・対数尤度・F統計量・F検定p値・t値・p値・
+    信頼区間の検証（`test_ols_crosscheck.py`と同じ方針）。
     """
+    _assert_scalar_close(res.r_squared, ref["r_squared"], f"{label}/r_squared")
+    _assert_scalar_close(
+        res.r_squared_adj, ref["r_squared_adj"], f"{label}/r_squared_adj"
+    )
     _assert_scalar_close(res.aic, ref["aic"], f"{label}/aic")
     _assert_scalar_close(res.bic, ref["bic"], f"{label}/bic")
     _assert_scalar_close(
@@ -120,6 +109,22 @@ def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
     _assert_scalar_close(
         res.f_p_value, ref["f_p_value"], f"{label}/f_p_value", rtol=rtol
     )
+    _assert_close(res.t_stats, ref["t_stats"], f"{label}/t_stats", rtol=rtol)
+    _assert_close(
+        res.p_values,
+        ref["p_values"],
+        f"{label}/p_values",
+        rtol=rtol,
+        atol=ATOL_P_VALUE,
+    )
+    for name, (ref_lower, ref_upper) in ref["conf_int"].items():
+        our_lower, our_upper = res.conf_int[name]
+        _assert_scalar_close(
+            our_lower, ref_lower, f"{label}/conf_lower/{name}", rtol=rtol
+        )
+        _assert_scalar_close(
+            our_upper, ref_upper, f"{label}/conf_upper/{name}", rtol=rtol
+        )
 
 
 NON_HAC_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
@@ -217,21 +222,52 @@ def test_hac_matches_r(crosscheck):
     _assert_fit_stats_close(res, ref, "hac/R", rtol=RTOL_HAC)
 
 
-def test_401ksubs_matches_r(crosscheck):
+@pytest.mark.parametrize("cov_type", WOOLDRIDGE_COV_TYPES)
+def test_401ksubs_matches_r(crosscheck, cov_type):
     """実データ（401ksubs、fsize==1）でのWLSクロスチェック。回帰式・重み定義は
     `test_wls_fixtures.py::test_401ksubs_matches_statsmodels`と揃える。
+    HACは時系列順の無いクロスセクションデータのため対象外
+    （`generate_wls_crosscheck_fixtures.py`のWOOLDRIDGE_COV_TYPESと同じ方針）。
     """
     df = load_wooldridge_dataset("401ksubs").filter(pl.col("fsize") == 1)
     df = df.with_columns((1.0 / pl.col("inc")).alias("inv_inc"))
+    options = OLSOptions(cov_type=cov_type)
 
     res = WLS(
         df,
         y="nettfa",
         x=["inc", "incsq", "age", "agesq", "male", "e401k"],
         weight="inv_inc",
+        options=options,
     ).fit()
 
-    ref = crosscheck["401ksubs"]["r"]
-    _assert_close(res.params, ref["coef"], "401ksubs/R coef")
-    _assert_close(res.std_errors, ref["se"], "401ksubs/R se")
-    _assert_fit_stats_close(res, ref, "401ksubs/R", rtol=RTOL_STRICT)
+    ref = crosscheck["401ksubs"][cov_type]["r"]
+    label = f"401ksubs/{cov_type}/R"
+    _assert_close(res.params, ref["coef"], f"{label} coef")
+    _assert_close(res.std_errors, ref["se"], f"{label} se")
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
+
+
+def test_401ksubs_cluster_matches_r(crosscheck):
+    """実データ（401ksubs、fsize==1）でのクラスターロバストSE。地域等の実
+    カテゴリ列が無いため、ageの分位ビン（8分位、`_add_age_bin`）を疑似的な
+    クラスター列として使う（`test_wls_fixtures.py`
+    ::test_401ksubs_cluster_matches_statsmodelsと同じグループ構成）。
+    """
+    df = load_wooldridge_dataset("401ksubs").filter(pl.col("fsize") == 1)
+    df = df.with_columns((1.0 / pl.col("inc")).alias("inv_inc"))
+    df = _add_age_bin(df)
+    options = OLSOptions(cov_type="cluster", cluster_col="age_bin")
+
+    res = WLS(
+        df,
+        y="nettfa",
+        x=["inc", "incsq", "age", "agesq", "male", "e401k"],
+        weight="inv_inc",
+        options=options,
+    ).fit()
+
+    ref = crosscheck["401ksubs"]["cluster"]["r"]
+    _assert_close(res.params, ref["coef"], "401ksubs/cluster/R coef")
+    _assert_close(res.std_errors, ref["se"], "401ksubs/cluster/R se")
+    _assert_fit_stats_close(res, ref, "401ksubs/cluster/R", rtol=RTOL_STRICT)

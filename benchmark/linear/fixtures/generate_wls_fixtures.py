@@ -51,6 +51,8 @@ NUMERIC_SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "high_condition_number",
+    # scale_varianceより緩いスケール差の成功パス（OLSの同種ケース相当）。
+    "scale_variance_mild",
     # n=k+1（自由度1ちょうど）の成功パス（OLSの同種ケース相当）。
     "baseline_df1",
 ]
@@ -58,6 +60,11 @@ NUMERIC_SCENARIOS = [
 # classical/HC系は全シナリオで確認。HACはautocorrelatedシナリオが本来の目的
 # （他のシナリオでも動くことの確認はできるが、統計的な意味は薄い。OLSと同じ方針）。
 COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
+
+# 401ksubs（クロスセクションデータ）ではHACは時系列順が無いため対象外
+# （OLSのwage1/gpa2実データcrosscheckと同じくHC0-3のみを対象にする）。
+# クラスターはage分位ビン（_run_401ksubs_caseのcluster_col="age_bin"）で別途追加。
+WOOLDRIDGE_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
 
 
 def build_fixtures() -> dict:
@@ -99,7 +106,13 @@ def build_fixtures() -> dict:
                 k1=True,
             )
 
-    fixtures["401ksubs"] = _run_401ksubs_case()
+    fixtures["401ksubs"] = {
+        cov_type: _run_401ksubs_case(cov_type)
+        for cov_type in WOOLDRIDGE_COV_TYPES
+    }
+    fixtures["401ksubs"]["cluster"] = _run_401ksubs_case(
+        "cluster", cluster_col="age_bin"
+    )
 
     fixtures["_meta"] = {
         "method": "wls",
@@ -115,6 +128,8 @@ def build_fixtures() -> dict:
             "重みは合成データセットの'weight'列（OLS実装時から存在、常に正）を使う。"
             "クロスチェック用のRベンチマークはwls_crosscheck.json（別スクリプト）で生成する。"
             "401ksubsの回帰式・重み定義はdocs/spec/wls-spec.md参照。"
+            "401ksubsはclassical/HC0-3（HACは時系列順が無いため対象外）と"
+            "クラスター（ageの分位ビン、_add_age_bin参照）をcov_type別に持つ。"
         ),
     }
     return fixtures
@@ -164,23 +179,39 @@ def _run_cluster_case(
     }
 
 
-def _run_401ksubs_case() -> dict:
+def _run_401ksubs_case(cov_type: str, cluster_col: str | None = None) -> dict:
     """実データ（401ksubs、fsize==1）でのWLSベンチマーク。
 
     回帰式・重み定義はdocs/spec/wls-spec.md「テスト」で確定した内容（Wooldridge Example 8.5・8.6と同じ変数構成、
     Var(u|inc) ∝ inc という単純WLSの仮定に基づき重み = 1/inc）。
+
+    Args:
+        cov_type: "classical"/"hc0"-"hc3"/"cluster"（HACは時系列順の無い
+            クロスセクションデータのため対象外、OLSのwage1/gpa2と同じ方針）。
+        cluster_col: cov_type="cluster"のときのグループ列名
+            （`age_bin`、地域等の自然なカテゴリ列が無いため年齢の分位ビンで代用。
+            `_add_age_bin`参照）。
     """
     import statsmodels.formula.api as smf
 
     df = load_wooldridge("401ksubs").filter(pl.col("fsize") == 1)
+    if cov_type.lower() == "cluster":
+        df = _add_age_bin(df)
 
     formula = "nettfa ~ inc + incsq + age + agesq + male + e401k"
     pandas_df = df.to_pandas()
     pandas_df["inv_inc"] = 1.0 / pandas_df["inc"]
 
+    sm_cov_type = {"classical": "nonrobust"}.get(
+        cov_type.lower(), cov_type.lower()
+    )
+    fit_kwargs: dict = {"cov_type": sm_cov_type, "use_t": True}
+    if sm_cov_type == "cluster":
+        fit_kwargs["cov_kwds"] = {"groups": pandas_df[cluster_col]}
+
     model = smf.wls(
         formula=formula, data=pandas_df, weights=pandas_df["inv_inc"]
-    ).fit(cov_type="nonrobust", use_t=True)
+    ).fit(**fit_kwargs)
 
     ci = model.conf_int(alpha=0.05)
     return {
@@ -212,14 +243,37 @@ def _run_401ksubs_case() -> dict:
             "formula": formula,
             "weight": "1/inc",
             "filter": "fsize == 1",
+            "cov_type": cov_type,
             "note": (
                 "Wooldridge『Introductory Econometrics』Example 8.5と同じ変数構成"
                 "（nettfa ~ inc + incsq + age + agesq + male + e401k、fsize==1の"
                 "単身世帯サブサンプル）。重みはVar(u|inc) ∝ incという単純な仮定に"
                 "基づく1/inc（feasible GLSではない、analytic weight）。"
+                + (
+                    "地域等の実カテゴリ列が無いため、ageの分位ビン（8分位、"
+                    "_add_age_bin参照）を疑似的なクラスター列として使う。"
+                    if cov_type.lower() == "cluster"
+                    else ""
+                )
             ),
         },
     }
+
+
+def _add_age_bin(df: pl.DataFrame, n_bins: int = 8) -> pl.DataFrame:
+    """`age`を分位点で`n_bins`個にビン化した`age_bin`列を追加する。
+
+    401ksubsには地域等の自然なカテゴリ列が無いため（marr/maleのような
+    2値変数のみ）、実データでのクラスターロバストSE検証（testing-policy.md
+    「実データでのグループ列も検証する」）用に、実データの分布から作る
+    疑似グループとして年齢の分位ビンを使う（G=8、q=6の説明変数より十分大きい）。
+    """
+    return df.with_columns(
+        pl.col("age")
+        .qcut(n_bins, allow_duplicates=True)
+        .alias("age_bin")
+        .cast(pl.Utf8)
+    )
 
 
 if __name__ == "__main__":

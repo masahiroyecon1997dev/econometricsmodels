@@ -92,6 +92,10 @@ RTOL_HAC = TOLERANCES["ols_crosscheck"]["rtol_hac"]
 # フェーズ3.5でtest_wls_crosscheck.pyと同じ計算式に修正）。
 ATOL = TOLERANCES["ols_crosscheck"]["atol"]
 
+# p_values専用の絶対誤差フロア（HAC/autocorrelatedで裾確率がゼロ近傍に
+# 潰れるため、_tolerances.py参照）。
+ATOL_P_VALUE = TOLERANCES["ols_crosscheck"]["atol_p_value"]
+
 
 @pytest.fixture(scope="module")
 def crosscheck() -> dict:
@@ -106,12 +110,18 @@ _assert_scalar_close = partial(assert_close, rtol=RTOL_STRICT, atol=ATOL)
 
 
 def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
-    """AIC・BIC・対数尤度・F統計量・F検定p値の検証。
+    """R²・調整済みR²・AIC・BIC・対数尤度・F統計量・F検定p値・t値・p値・
+    信頼区間の検証。
 
-    AIC/BIC/対数尤度はcov_typeに依存しないため常にRTOL_STRICTで比較する。
-    F統計量・F検定p値はcov_typeごとのロバストWald検定のため呼び出し元の
+    R²・調整済みR²・AIC/BIC/対数尤度はcov_typeに依存しないため常に
+    RTOL_STRICTで比較する。F統計量・F検定p値・t値・p値・信頼区間は
+    cov_typeごとの共分散行列（標準誤差）に依存するため呼び出し元の
     rtol（HACのみRTOL_HAC）を使う。
     """
+    _assert_scalar_close(res.r_squared, ref["r_squared"], f"{label}/r_squared")
+    _assert_scalar_close(
+        res.r_squared_adj, ref["r_squared_adj"], f"{label}/r_squared_adj"
+    )
     _assert_scalar_close(res.aic, ref["aic"], f"{label}/aic")
     _assert_scalar_close(res.bic, ref["bic"], f"{label}/bic")
     _assert_scalar_close(
@@ -123,6 +133,22 @@ def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
     _assert_scalar_close(
         res.f_p_value, ref["f_p_value"], f"{label}/f_p_value", rtol=rtol
     )
+    _assert_close(res.t_stats, ref["t_stats"], f"{label}/t_stats", rtol=rtol)
+    _assert_close(
+        res.p_values,
+        ref["p_values"],
+        f"{label}/p_values",
+        rtol=rtol,
+        atol=ATOL_P_VALUE,
+    )
+    for name, (ref_lower, ref_upper) in ref["conf_int"].items():
+        our_lower, our_upper = res.conf_int[name]
+        _assert_scalar_close(
+            our_lower, ref_lower, f"{label}/conf_lower/{name}", rtol=rtol
+        )
+        _assert_scalar_close(
+            our_upper, ref_upper, f"{label}/conf_upper/{name}", rtol=rtol
+        )
 
 
 NON_HAC_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]

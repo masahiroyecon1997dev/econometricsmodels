@@ -61,7 +61,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.515321+00:00",
+        "generated_at": "2026-08-14T23:15:12.024802+00:00",
         "cov_type_requested": "classical",
         "cov_type_statsmodels": "nonrobust",
         "confidence_level": 0.95,
@@ -131,7 +131,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.524756+00:00",
+        "generated_at": "2026-08-14T23:15:12.038190+00:00",
         "cov_type_requested": "hc0",
         "cov_type_statsmodels": "hc0",
         "confidence_level": 0.95,
@@ -201,7 +201,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.534530+00:00",
+        "generated_at": "2026-08-14T23:15:12.054640+00:00",
         "cov_type_requested": "hc1",
         "cov_type_statsmodels": "hc1",
         "confidence_level": 0.95,
@@ -271,7 +271,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.542325+00:00",
+        "generated_at": "2026-08-14T23:15:12.066938+00:00",
         "cov_type_requested": "hc2",
         "cov_type_statsmodels": "hc2",
         "confidence_level": 0.95,
@@ -341,7 +341,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.551558+00:00",
+        "generated_at": "2026-08-14T23:15:12.076742+00:00",
         "cov_type_requested": "hc3",
         "cov_type_statsmodels": "hc3",
         "confidence_level": 0.95,
@@ -411,7 +411,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.560084+00:00",
+        "generated_at": "2026-08-14T23:15:12.087145+00:00",
         "cov_type_requested": "hac",
         "cov_type_statsmodels": "hac",
         "confidence_level": 0.95,
@@ -436,7 +436,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.569530+00:00",
+        "generated_at": "2026-08-14T23:15:12.098231+00:00",
         "note": "決め打ちの疑似グループ（行番号%10）。統計的な意味はなく、実装の動作確認用。",
         "formula": "y ~ x1 + x2 + x3",
         "weight_col": "weight"
@@ -458,7 +458,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.577450+00:00",
+        "generated_at": "2026-08-14T23:15:12.107089+00:00",
         "note": "不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。",
         "formula": "y ~ x1 + x2 + x3",
         "weight_col": "weight"
@@ -476,7 +476,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.583875+00:00",
+        "generated_at": "2026-08-14T23:15:12.115254+00:00",
         "note": "クラスタ数境界（G=2ちょうど）の成功パス確認用。説明変数1個（q=1）に絞っている（OLSの同種ケース相当。3個だとロバストWald検定の共分散行列が特異になりComputationError）。",
         "formula": "y ~ x1",
         "weight_col": "weight"
@@ -545,7 +545,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.590085+00:00",
+        "generated_at": "2026-08-14T23:15:12.122996+00:00",
         "cov_type_requested": "classical",
         "cov_type_statsmodels": "nonrobust",
         "confidence_level": 0.95,
@@ -615,7 +615,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.597923+00:00",
+        "generated_at": "2026-08-14T23:15:12.130754+00:00",
         "cov_type_requested": "hc0",
         "cov_type_statsmodels": "hc0",
         "confidence_level": 0.95,
@@ -685,7 +685,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.604072+00:00",
+        "generated_at": "2026-08-14T23:15:12.138299+00:00",
         "cov_type_requested": "hc1",
         "cov_type_statsmodels": "hc1",
         "confidence_level": 0.95,
@@ -755,7 +755,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.611189+00:00",
+        "generated_at": "2026-08-14T23:15:12.145729+00:00",
         "cov_type_requested": "hc2",
         "cov_type_statsmodels": "hc2",
         "confidence_level": 0.95,
@@ -825,7 +825,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.618381+00:00",
+        "generated_at": "2026-08-14T23:15:12.154298+00:00",
         "cov_type_requested": "hc3",
         "cov_type_statsmodels": "hc3",
         "confidence_level": 0.95,
@@ -895,7 +895,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.625164+00:00",
+        "generated_at": "2026-08-14T23:15:12.162479+00:00",
         "cov_type_requested": "hac",
         "cov_type_statsmodels": "hac",
         "confidence_level": 0.95,
@@ -967,7 +967,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.634027+00:00",
+        "generated_at": "2026-08-14T23:15:12.170454+00:00",
         "cov_type_requested": "classical",
         "cov_type_statsmodels": "nonrobust",
         "confidence_level": 0.95,
@@ -1037,7 +1037,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.641657+00:00",
+        "generated_at": "2026-08-14T23:15:12.181393+00:00",
         "cov_type_requested": "hc0",
         "cov_type_statsmodels": "hc0",
         "confidence_level": 0.95,
@@ -1107,7 +1107,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.650527+00:00",
+        "generated_at": "2026-08-14T23:15:12.190201+00:00",
         "cov_type_requested": "hc1",
         "cov_type_statsmodels": "hc1",
         "confidence_level": 0.95,
@@ -1177,7 +1177,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.657681+00:00",
+        "generated_at": "2026-08-14T23:15:12.199574+00:00",
         "cov_type_requested": "hc2",
         "cov_type_statsmodels": "hc2",
         "confidence_level": 0.95,
@@ -1247,7 +1247,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.665877+00:00",
+        "generated_at": "2026-08-14T23:15:12.210302+00:00",
         "cov_type_requested": "hc3",
         "cov_type_statsmodels": "hc3",
         "confidence_level": 0.95,
@@ -1317,7 +1317,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.673698+00:00",
+        "generated_at": "2026-08-14T23:15:12.219112+00:00",
         "cov_type_requested": "hac",
         "cov_type_statsmodels": "hac",
         "confidence_level": 0.95,
@@ -1389,7 +1389,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.681385+00:00",
+        "generated_at": "2026-08-14T23:15:12.228193+00:00",
         "cov_type_requested": "classical",
         "cov_type_statsmodels": "nonrobust",
         "confidence_level": 0.95,
@@ -1459,7 +1459,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.688979+00:00",
+        "generated_at": "2026-08-14T23:15:12.237323+00:00",
         "cov_type_requested": "hc0",
         "cov_type_statsmodels": "hc0",
         "confidence_level": 0.95,
@@ -1529,7 +1529,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.695791+00:00",
+        "generated_at": "2026-08-14T23:15:12.246319+00:00",
         "cov_type_requested": "hc1",
         "cov_type_statsmodels": "hc1",
         "confidence_level": 0.95,
@@ -1599,7 +1599,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.705190+00:00",
+        "generated_at": "2026-08-14T23:15:12.256821+00:00",
         "cov_type_requested": "hc2",
         "cov_type_statsmodels": "hc2",
         "confidence_level": 0.95,
@@ -1669,7 +1669,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.712972+00:00",
+        "generated_at": "2026-08-14T23:15:12.265295+00:00",
         "cov_type_requested": "hc3",
         "cov_type_statsmodels": "hc3",
         "confidence_level": 0.95,
@@ -1739,7 +1739,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.720764+00:00",
+        "generated_at": "2026-08-14T23:15:12.275170+00:00",
         "cov_type_requested": "hac",
         "cov_type_statsmodels": "hac",
         "confidence_level": 0.95,
@@ -1811,7 +1811,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.727965+00:00",
+        "generated_at": "2026-08-14T23:15:12.284279+00:00",
         "cov_type_requested": "classical",
         "cov_type_statsmodels": "nonrobust",
         "confidence_level": 0.95,
@@ -1881,7 +1881,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.737701+00:00",
+        "generated_at": "2026-08-14T23:15:12.293717+00:00",
         "cov_type_requested": "hc0",
         "cov_type_statsmodels": "hc0",
         "confidence_level": 0.95,
@@ -1951,7 +1951,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.746767+00:00",
+        "generated_at": "2026-08-14T23:15:12.302031+00:00",
         "cov_type_requested": "hc1",
         "cov_type_statsmodels": "hc1",
         "confidence_level": 0.95,
@@ -2021,7 +2021,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.755940+00:00",
+        "generated_at": "2026-08-14T23:15:12.310978+00:00",
         "cov_type_requested": "hc2",
         "cov_type_statsmodels": "hc2",
         "confidence_level": 0.95,
@@ -2091,7 +2091,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.765126+00:00",
+        "generated_at": "2026-08-14T23:15:12.320400+00:00",
         "cov_type_requested": "hc3",
         "cov_type_statsmodels": "hc3",
         "confidence_level": 0.95,
@@ -2161,7 +2161,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.772560+00:00",
+        "generated_at": "2026-08-14T23:15:12.328904+00:00",
         "cov_type_requested": "hac",
         "cov_type_statsmodels": "hac",
         "confidence_level": 0.95,
@@ -2233,7 +2233,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.781301+00:00",
+        "generated_at": "2026-08-14T23:15:12.339501+00:00",
         "cov_type_requested": "classical",
         "cov_type_statsmodels": "nonrobust",
         "confidence_level": 0.95,
@@ -2303,7 +2303,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.788504+00:00",
+        "generated_at": "2026-08-14T23:15:12.347320+00:00",
         "cov_type_requested": "hc0",
         "cov_type_statsmodels": "hc0",
         "confidence_level": 0.95,
@@ -2373,7 +2373,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.796221+00:00",
+        "generated_at": "2026-08-14T23:15:12.355734+00:00",
         "cov_type_requested": "hc1",
         "cov_type_statsmodels": "hc1",
         "confidence_level": 0.95,
@@ -2443,7 +2443,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.804771+00:00",
+        "generated_at": "2026-08-14T23:15:12.363673+00:00",
         "cov_type_requested": "hc2",
         "cov_type_statsmodels": "hc2",
         "confidence_level": 0.95,
@@ -2513,7 +2513,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.812117+00:00",
+        "generated_at": "2026-08-14T23:15:12.372376+00:00",
         "cov_type_requested": "hc3",
         "cov_type_statsmodels": "hc3",
         "confidence_level": 0.95,
@@ -2583,7 +2583,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.820695+00:00",
+        "generated_at": "2026-08-14T23:15:12.380740+00:00",
         "cov_type_requested": "hac",
         "cov_type_statsmodels": "hac",
         "confidence_level": 0.95,
@@ -2655,7 +2655,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.828234+00:00",
+        "generated_at": "2026-08-14T23:15:12.388194+00:00",
         "cov_type_requested": "classical",
         "cov_type_statsmodels": "nonrobust",
         "confidence_level": 0.95,
@@ -2725,7 +2725,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.836289+00:00",
+        "generated_at": "2026-08-14T23:15:12.396953+00:00",
         "cov_type_requested": "hc0",
         "cov_type_statsmodels": "hc0",
         "confidence_level": 0.95,
@@ -2795,7 +2795,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.844758+00:00",
+        "generated_at": "2026-08-14T23:15:12.404567+00:00",
         "cov_type_requested": "hc1",
         "cov_type_statsmodels": "hc1",
         "confidence_level": 0.95,
@@ -2865,7 +2865,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.853065+00:00",
+        "generated_at": "2026-08-14T23:15:12.414017+00:00",
         "cov_type_requested": "hc2",
         "cov_type_statsmodels": "hc2",
         "confidence_level": 0.95,
@@ -2935,7 +2935,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.860524+00:00",
+        "generated_at": "2026-08-14T23:15:12.422598+00:00",
         "cov_type_requested": "hc3",
         "cov_type_statsmodels": "hc3",
         "confidence_level": 0.95,
@@ -3005,7 +3005,429 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.869513+00:00",
+        "generated_at": "2026-08-14T23:15:12.432536+00:00",
+        "cov_type_requested": "hac",
+        "cov_type_statsmodels": "hac",
+        "confidence_level": 0.95,
+        "formula": "y ~ x1 + x2 + x3",
+        "weighted": true,
+        "weight_col": "weight"
+      }
+    }
+  },
+  "scale_variance_mild": {
+    "classical": {
+      "coef": {
+        "Intercept": 1.484975903199,
+        "x1": -0.3664723900343463,
+        "x2": 1.5514299157519345,
+        "x3": 1.1703723637375063
+      },
+      "se": {
+        "Intercept": 0.04451379089206476,
+        "x1": 0.00046091103229976984,
+        "x2": 0.4667387617629639,
+        "x3": 0.043073192376722094
+      },
+      "t_stats": {
+        "Intercept": 33.359906524243456,
+        "x1": -795.1044005299443,
+        "x2": 3.323979156759724,
+        "x3": 27.171711664678163
+      },
+      "p_values": {
+        "Intercept": 7.85225942340518e-129,
+        "x1": 0.0,
+        "x2": 0.0009530720146431728,
+        "x3": 2.964408199318849e-100
+      },
+      "conf_int": {
+        "Intercept": [
+          1.397517063825535,
+          1.572434742572465
+        ],
+        "x1": [
+          -0.3673779688028926,
+          -0.3655668112658
+        ],
+        "x2": [
+          0.6344010674703592,
+          2.46845876403351
+        ],
+        "x3": [
+          1.0857439522298797,
+          1.2550007752451329
+        ]
+      },
+      "r_squared": 0.9992165829691367,
+      "r_squared_adj": 0.9992118445596758,
+      "f_statistic": 210875.94713404294,
+      "f_p_value": 0.0,
+      "aic": 1439.750626919207,
+      "bic": 1456.6090593128959,
+      "log_likelihood": -715.8753134596035,
+      "nobs": 500,
+      "df_resid": 496,
+      "true_beta": [
+        1.64373629133578,
+        -0.3667293614876863,
+        2.151587519468295,
+        1.1842081743561836
+      ],
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.14.6",
+        "generated_at": "2026-08-14T23:15:12.445067+00:00",
+        "cov_type_requested": "classical",
+        "cov_type_statsmodels": "nonrobust",
+        "confidence_level": 0.95,
+        "formula": "y ~ x1 + x2 + x3",
+        "weighted": true,
+        "weight_col": "weight"
+      }
+    },
+    "hc0": {
+      "coef": {
+        "Intercept": 1.484975903199,
+        "x1": -0.3664723900343463,
+        "x2": 1.5514299157519345,
+        "x3": 1.1703723637375063
+      },
+      "se": {
+        "Intercept": 0.045446009112343616,
+        "x1": 0.00046556565667698534,
+        "x2": 0.4260217264359672,
+        "x3": 0.043380248307083445
+      },
+      "t_stats": {
+        "Intercept": 32.675606333839,
+        "x1": -787.1551193231784,
+        "x2": 3.6416685335064023,
+        "x3": 26.979383692149113
+      },
+      "p_values": {
+        "Intercept": 9.25037547765275e-126,
+        "x1": 0.0,
+        "x2": 0.00029935939797700917,
+        "x3": 2.4312073616746475e-99
+      },
+      "conf_int": {
+        "Intercept": [
+          1.3956854803554575,
+          1.5742663260425425
+        ],
+        "x1": [
+          -0.3673871140146931,
+          -0.3655576660539995
+        ],
+        "x2": [
+          0.7144001998979306,
+          2.3884596316059383
+        ],
+        "x3": [
+          1.0851406615472852,
+          1.2556040659277274
+        ]
+      },
+      "r_squared": 0.9992165829691367,
+      "r_squared_adj": 0.9992118445596758,
+      "f_statistic": 206845.76688717768,
+      "f_p_value": 0.0,
+      "aic": 1439.750626919207,
+      "bic": 1456.6090593128959,
+      "log_likelihood": -715.8753134596035,
+      "nobs": 500,
+      "df_resid": 496,
+      "true_beta": [
+        1.64373629133578,
+        -0.3667293614876863,
+        2.151587519468295,
+        1.1842081743561836
+      ],
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.14.6",
+        "generated_at": "2026-08-14T23:15:12.456973+00:00",
+        "cov_type_requested": "hc0",
+        "cov_type_statsmodels": "hc0",
+        "confidence_level": 0.95,
+        "formula": "y ~ x1 + x2 + x3",
+        "weighted": true,
+        "weight_col": "weight"
+      }
+    },
+    "hc1": {
+      "coef": {
+        "Intercept": 1.484975903199,
+        "x1": -0.3664723900343463,
+        "x2": 1.5514299157519345,
+        "x3": 1.1703723637375063
+      },
+      "se": {
+        "Intercept": 0.045628891175641874,
+        "x1": 0.0004674391678951742,
+        "x2": 0.4277361065072268,
+        "x3": 0.04355481741604915
+      },
+      "t_stats": {
+        "Intercept": 32.544641452776006,
+        "x1": -784.0001762893129,
+        "x2": 3.627072608904767,
+        "x3": 26.871249454629687
+      },
+      "p_values": {
+        "Intercept": 3.6029135622811605e-125,
+        "x1": 0.0,
+        "x2": 0.0003163260042043369,
+        "x3": 7.946856784381497e-99
+      },
+      "conf_int": {
+        "Intercept": [
+          1.395326161306737,
+          1.574625645091263
+        ],
+        "x1": [
+          -0.3673907950113777,
+          -0.36555398505731485
+        ],
+        "x2": [
+          0.7110318574523067,
+          2.3918279740515622
+        ],
+        "x3": [
+          1.0847976754444475,
+          1.2559470520305651
+        ]
+      },
+      "r_squared": 0.9992165829691367,
+      "r_squared_adj": 0.9992118445596758,
+      "f_statistic": 205191.00075208108,
+      "f_p_value": 0.0,
+      "aic": 1439.750626919207,
+      "bic": 1456.6090593128959,
+      "log_likelihood": -715.8753134596035,
+      "nobs": 500,
+      "df_resid": 496,
+      "true_beta": [
+        1.64373629133578,
+        -0.3667293614876863,
+        2.151587519468295,
+        1.1842081743561836
+      ],
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.14.6",
+        "generated_at": "2026-08-14T23:15:12.467643+00:00",
+        "cov_type_requested": "hc1",
+        "cov_type_statsmodels": "hc1",
+        "confidence_level": 0.95,
+        "formula": "y ~ x1 + x2 + x3",
+        "weighted": true,
+        "weight_col": "weight"
+      }
+    },
+    "hc2": {
+      "coef": {
+        "Intercept": 1.484975903199,
+        "x1": -0.3664723900343463,
+        "x2": 1.5514299157519345,
+        "x3": 1.1703723637375063
+      },
+      "se": {
+        "Intercept": 0.045632162767276864,
+        "x1": 0.00046846476306149244,
+        "x2": 0.4284239824093051,
+        "x3": 0.04363296174696349
+      },
+      "t_stats": {
+        "Intercept": 32.54230816918207,
+        "x1": -782.2837893706036,
+        "x2": 3.6212489950428095,
+        "x3": 26.823124465506975
+      },
+      "p_values": {
+        "Intercept": 3.691322678638369e-125,
+        "x1": 0.0,
+        "x2": 0.0003233442045881769,
+        "x3": 1.3466114314377917e-98
+      },
+      "conf_int": {
+        "Intercept": [
+          1.3953197334199727,
+          1.5746320729780272
+        ],
+        "x1": [
+          -0.367392810057976,
+          -0.36555197001071654
+        ],
+        "x2": [
+          0.7096803475758592,
+          2.3931794839280096
+        ],
+        "x3": [
+          1.0846441407229956,
+          1.256100586752017
+        ]
+      },
+      "r_squared": 0.9992165829691367,
+      "r_squared_adj": 0.9992118445596758,
+      "f_statistic": 204287.26002010563,
+      "f_p_value": 0.0,
+      "aic": 1439.750626919207,
+      "bic": 1456.6090593128959,
+      "log_likelihood": -715.8753134596035,
+      "nobs": 500,
+      "df_resid": 496,
+      "true_beta": [
+        1.64373629133578,
+        -0.3667293614876863,
+        2.151587519468295,
+        1.1842081743561836
+      ],
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.14.6",
+        "generated_at": "2026-08-14T23:15:12.478693+00:00",
+        "cov_type_requested": "hc2",
+        "cov_type_statsmodels": "hc2",
+        "confidence_level": 0.95,
+        "formula": "y ~ x1 + x2 + x3",
+        "weighted": true,
+        "weight_col": "weight"
+      }
+    },
+    "hc3": {
+      "coef": {
+        "Intercept": 1.484975903199,
+        "x1": -0.3664723900343463,
+        "x2": 1.5514299157519345,
+        "x3": 1.1703723637375063
+      },
+      "se": {
+        "Intercept": 0.04581962622905531,
+        "x1": 0.0004713896794095748,
+        "x2": 0.43084824072562916,
+        "x3": 0.04388782167801067
+      },
+      "t_stats": {
+        "Intercept": 32.409166669660465,
+        "x1": -777.4298124077736,
+        "x2": 3.600873275330162,
+        "x3": 26.667360533956593
+      },
+      "p_values": {
+        "Intercept": 1.4736464880220772e-124,
+        "x1": 0.0,
+        "x2": 0.0003490669788178526,
+        "x3": 7.432089556386218e-98
+      },
+      "conf_int": {
+        "Intercept": [
+          1.394951413030639,
+          1.5750003933673609
+        ],
+        "x1": [
+          -0.36739855681159866,
+          -0.3655462232570939
+        ],
+        "x2": [
+          0.7049172659681553,
+          2.397942565535714
+        ],
+        "x3": [
+          1.0841434025624055,
+          1.2566013249126071
+        ]
+      },
+      "r_squared": 0.9992165829691367,
+      "r_squared_adj": 0.9992118445596758,
+      "f_statistic": 201753.8252170014,
+      "f_p_value": 0.0,
+      "aic": 1439.750626919207,
+      "bic": 1456.6090593128959,
+      "log_likelihood": -715.8753134596035,
+      "nobs": 500,
+      "df_resid": 496,
+      "true_beta": [
+        1.64373629133578,
+        -0.3667293614876863,
+        2.151587519468295,
+        1.1842081743561836
+      ],
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.14.6",
+        "generated_at": "2026-08-14T23:15:12.489592+00:00",
+        "cov_type_requested": "hc3",
+        "cov_type_statsmodels": "hc3",
+        "confidence_level": 0.95,
+        "formula": "y ~ x1 + x2 + x3",
+        "weighted": true,
+        "weight_col": "weight"
+      }
+    },
+    "hac": {
+      "coef": {
+        "Intercept": 1.484975903199,
+        "x1": -0.3664723900343463,
+        "x2": 1.5514299157519345,
+        "x3": 1.1703723637375063
+      },
+      "se": {
+        "Intercept": 0.043864297643293165,
+        "x1": 0.00047553042844321374,
+        "x2": 0.43818059730416664,
+        "x3": 0.04235651856342301
+      },
+      "t_stats": {
+        "Intercept": 33.853862548419315,
+        "x1": -770.6602314264085,
+        "x2": 3.540617556543693,
+        "x3": 27.631458000615325
+      },
+      "p_values": {
+        "Intercept": 4.932836283009346e-131,
+        "x1": 0.0,
+        "x2": 0.0004368191660989889,
+        "x3": 1.961714770975164e-102
+      },
+      "conf_int": {
+        "Intercept": [
+          1.3987931610659654,
+          1.5711586453320345
+        ],
+        "x1": [
+          -0.36740669238256135,
+          -0.3655380876861312
+        ],
+        "x2": [
+          0.6905109576448263,
+          2.4123488738590426
+        ],
+        "x3": [
+          1.0871520430409383,
+          1.2535926844340743
+        ]
+      },
+      "r_squared": 0.9992165829691367,
+      "r_squared_adj": 0.9992118445596758,
+      "f_statistic": 198867.69601039108,
+      "f_p_value": 0.0,
+      "aic": 1439.750626919207,
+      "bic": 1456.6090593128959,
+      "log_likelihood": -715.8753134596035,
+      "nobs": 500,
+      "df_resid": 496,
+      "true_beta": [
+        1.64373629133578,
+        -0.3667293614876863,
+        2.151587519468295,
+        1.1842081743561836
+      ],
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.14.6",
+        "generated_at": "2026-08-14T23:15:12.502117+00:00",
         "cov_type_requested": "hac",
         "cov_type_statsmodels": "hac",
         "confidence_level": 0.95,
@@ -3077,7 +3499,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.880076+00:00",
+        "generated_at": "2026-08-14T23:15:12.509632+00:00",
         "cov_type_requested": "classical",
         "cov_type_statsmodels": "nonrobust",
         "confidence_level": 0.95,
@@ -3147,7 +3569,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.887615+00:00",
+        "generated_at": "2026-08-14T23:15:12.517947+00:00",
         "cov_type_requested": "hc0",
         "cov_type_statsmodels": "hc0",
         "confidence_level": 0.95,
@@ -3217,7 +3639,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.894131+00:00",
+        "generated_at": "2026-08-14T23:15:12.526640+00:00",
         "cov_type_requested": "hc1",
         "cov_type_statsmodels": "hc1",
         "confidence_level": 0.95,
@@ -3287,7 +3709,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.901801+00:00",
+        "generated_at": "2026-08-14T23:15:12.534306+00:00",
         "cov_type_requested": "hc2",
         "cov_type_statsmodels": "hc2",
         "confidence_level": 0.95,
@@ -3357,7 +3779,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.908162+00:00",
+        "generated_at": "2026-08-14T23:15:12.542071+00:00",
         "cov_type_requested": "hc3",
         "cov_type_statsmodels": "hc3",
         "confidence_level": 0.95,
@@ -3427,7 +3849,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T02:25:02.916377+00:00",
+        "generated_at": "2026-08-14T23:15:12.549270+00:00",
         "cov_type_requested": "hac",
         "cov_type_statsmodels": "hac",
         "confidence_level": 0.95,
@@ -3438,96 +3860,534 @@
     }
   },
   "401ksubs": {
-    "coef": {
-      "Intercept": 1.0995579235489639,
-      "inc": 0.5578407750648888,
-      "incsq": 0.0025108112465652152,
-      "age": -1.0929277327296194,
-      "agesq": 0.01998376775876516,
-      "male": 1.8042124555025176,
-      "e401k": 5.478553018643583
+    "classical": {
+      "coef": {
+        "Intercept": 1.0995579235489639,
+        "inc": 0.5578407750648888,
+        "incsq": 0.0025108112465652152,
+        "age": -1.0929277327296194,
+        "agesq": 0.01998376775876516,
+        "male": 1.8042124555025176,
+        "e401k": 5.478553018643583
+      },
+      "se": {
+        "Intercept": 11.747303380788257,
+        "inc": 0.18076820680555097,
+        "incsq": 0.0022946063941117222,
+        "age": 0.5778928342108176,
+        "agesq": 0.006770372485086595,
+        "male": 1.5641654576341655,
+        "e401k": 1.724938512949555
+      },
+      "t_stats": {
+        "Intercept": 0.09360087910449304,
+        "inc": 3.085945172122816,
+        "incsq": 1.094223067192833,
+        "age": -1.8912290792152564,
+        "agesq": 2.9516496769984677,
+        "male": 1.1534664997854054,
+        "e401k": 3.1760859749577643
+      },
+      "p_values": {
+        "Intercept": 0.9254355399899227,
+        "inc": 0.002056727648748675,
+        "incsq": 0.2739882656827803,
+        "age": 0.05873743812899814,
+        "agesq": 0.0031974173346239927,
+        "male": 0.24885610082089168,
+        "e401k": 0.001515403483281516
+      },
+      "conf_int": {
+        "Intercept": [
+          -21.938606400934276,
+          24.137722248032205
+        ],
+        "inc": [
+          0.20332812496688768,
+          0.91235342516289
+        ],
+        "incsq": [
+          -0.001989244421870975,
+          0.0070108669150014055
+        ],
+        "age": [
+          -2.2262593276438567,
+          0.04040386218461789
+        ],
+        "agesq": [
+          0.0067060861672203,
+          0.03326144935031002
+        ],
+        "male": [
+          -1.2633426825208618,
+          4.871767593525897
+        ],
+        "e401k": [
+          2.0956986202501495,
+          8.861407417037018
+        ]
+      },
+      "r_squared": 0.11210033992999824,
+      "r_squared_adj": 0.10944989318352072,
+      "f_statistic": 42.29488484497074,
+      "f_p_value": 8.248193619339697e-49,
+      "aic": 20179.133079737236,
+      "bic": 20218.398645502915,
+      "log_likelihood": -10082.566539868618,
+      "nobs": 2017,
+      "df_resid": 2010,
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.14.6",
+        "generated_at": "2026-08-14T23:15:12.603654+00:00",
+        "formula": "nettfa ~ inc + incsq + age + agesq + male + e401k",
+        "weight": "1/inc",
+        "filter": "fsize == 1",
+        "cov_type": "classical",
+        "note": "Wooldridge『Introductory Econometrics』Example 8.5と同じ変数構成（nettfa ~ inc + incsq + age + agesq + male + e401k、fsize==1の単身世帯サブサンプル）。重みはVar(u|inc) ∝ incという単純な仮定に基づく1/inc（feasible GLSではない、analytic weight）。"
+      }
     },
-    "se": {
-      "Intercept": 11.747303380788257,
-      "inc": 0.18076820680555097,
-      "incsq": 0.0022946063941117222,
-      "age": 0.5778928342108176,
-      "agesq": 0.006770372485086595,
-      "male": 1.5641654576341655,
-      "e401k": 1.724938512949555
+    "hc0": {
+      "coef": {
+        "Intercept": 1.0995579235489639,
+        "inc": 0.5578407750648888,
+        "incsq": 0.0025108112465652152,
+        "age": -1.0929277327296194,
+        "agesq": 0.01998376775876516,
+        "male": 1.8042124555025176,
+        "e401k": 5.478553018643583
+      },
+      "se": {
+        "Intercept": 10.99708836441722,
+        "inc": 0.2289462086280734,
+        "incsq": 0.003174376805502999,
+        "age": 0.6310206108836293,
+        "agesq": 0.00810860876720133,
+        "male": 1.3154658002011643,
+        "e401k": 1.5047898698493551
+      },
+      "t_stats": {
+        "Intercept": 0.09998627701371879,
+        "inc": 2.4365582571018227,
+        "incsq": 0.7909619432112005,
+        "age": -1.7320000549572754,
+        "agesq": 2.464512511640455,
+        "male": 1.3715388535578903,
+        "e401k": 3.640742889365704
+      },
+      "p_values": {
+        "Intercept": 0.9203651913812524,
+        "inc": 0.014914060575871533,
+        "incsq": 0.42905951696888117,
+        "age": 0.0834269681376144,
+        "agesq": 0.013803084623554122,
+        "male": 0.17036012071041487,
+        "e401k": 0.0002787253793253989
+      },
+      "conf_int": {
+        "Intercept": [
+          -20.46732603423185,
+          22.666441881329778
+        ],
+        "inc": [
+          0.10884408153716507,
+          1.0068374685926127
+        ],
+        "incsq": [
+          -0.00371460169310631,
+          0.00873622418623674
+        ],
+        "age": [
+          -2.3304505968660663,
+          0.14459513140682745
+        ],
+        "agesq": [
+          0.004081610883576437,
+          0.03588592463395389
+        ],
+        "male": [
+          -0.7756066132579851,
+          4.384031524263021
+        ],
+        "e401k": [
+          2.527442012852826,
+          8.429664024434341
+        ]
+      },
+      "r_squared": 0.11210033992999824,
+      "r_squared_adj": 0.10944989318352072,
+      "f_statistic": 31.30499473570175,
+      "f_p_value": 3.849054884111986e-36,
+      "aic": 20179.133079737236,
+      "bic": 20218.398645502915,
+      "log_likelihood": -10082.566539868618,
+      "nobs": 2017,
+      "df_resid": 2010,
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.14.6",
+        "generated_at": "2026-08-14T23:15:12.666822+00:00",
+        "formula": "nettfa ~ inc + incsq + age + agesq + male + e401k",
+        "weight": "1/inc",
+        "filter": "fsize == 1",
+        "cov_type": "hc0",
+        "note": "Wooldridge『Introductory Econometrics』Example 8.5と同じ変数構成（nettfa ~ inc + incsq + age + agesq + male + e401k、fsize==1の単身世帯サブサンプル）。重みはVar(u|inc) ∝ incという単純な仮定に基づく1/inc（feasible GLSではない、analytic weight）。"
+      }
     },
-    "t_stats": {
-      "Intercept": 0.09360087910449304,
-      "inc": 3.085945172122816,
-      "incsq": 1.094223067192833,
-      "age": -1.8912290792152564,
-      "agesq": 2.9516496769984677,
-      "male": 1.1534664997854054,
-      "e401k": 3.1760859749577643
+    "hc1": {
+      "coef": {
+        "Intercept": 1.0995579235489639,
+        "inc": 0.5578407750648888,
+        "incsq": 0.0025108112465652152,
+        "age": -1.0929277327296194,
+        "agesq": 0.01998376775876516,
+        "male": 1.8042124555025176,
+        "e401k": 5.478553018643583
+      },
+      "se": {
+        "Intercept": 11.016220880075588,
+        "inc": 0.22934452468922953,
+        "incsq": 0.0031798995231464566,
+        "age": 0.6321184479945455,
+        "agesq": 0.008122715963494126,
+        "male": 1.3177544214422041,
+        "e401k": 1.5074078733420433
+      },
+      "t_stats": {
+        "Intercept": 0.09981262499353764,
+        "inc": 2.4323265437480317,
+        "incsq": 0.7895882333039285,
+        "age": -1.7289919890758356,
+        "agesq": 2.46023224849645,
+        "male": 1.3691568217452186,
+        "e401k": 3.634419798071769
+      },
+      "p_values": {
+        "Intercept": 0.9205030385033842,
+        "inc": 0.015088937635208561,
+        "incsq": 0.42986141413087964,
+        "age": 0.08396407618167413,
+        "agesq": 0.013968304370796911,
+        "male": 0.17110322648803453,
+        "e401k": 0.00028560435579522
+      },
+      "conf_int": {
+        "Intercept": [
+          -20.50484767008226,
+          22.70396351718019
+        ],
+        "inc": [
+          0.1080629260181033,
+          1.0076186241116742
+        ],
+        "incsq": [
+          -0.0037254325427458776,
+          0.008747055035876309
+        ],
+        "age": [
+          -2.3326036145368425,
+          0.1467481490776037
+        ],
+        "agesq": [
+          0.004053944627260737,
+          0.03591359089026959
+        ],
+        "male": [
+          -0.780094931173891,
+          4.388519842178926
+        ],
+        "e401k": [
+          2.5223077286080473,
+          8.43479830867912
+        ]
+      },
+      "r_squared": 0.11210033992999824,
+      "r_squared_adj": 0.10944989318352072,
+      "f_statistic": 31.196350729166195,
+      "f_p_value": 5.153435009235916e-36,
+      "aic": 20179.133079737236,
+      "bic": 20218.398645502915,
+      "log_likelihood": -10082.566539868618,
+      "nobs": 2017,
+      "df_resid": 2010,
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.14.6",
+        "generated_at": "2026-08-14T23:15:12.716272+00:00",
+        "formula": "nettfa ~ inc + incsq + age + agesq + male + e401k",
+        "weight": "1/inc",
+        "filter": "fsize == 1",
+        "cov_type": "hc1",
+        "note": "Wooldridge『Introductory Econometrics』Example 8.5と同じ変数構成（nettfa ~ inc + incsq + age + agesq + male + e401k、fsize==1の単身世帯サブサンプル）。重みはVar(u|inc) ∝ incという単純な仮定に基づく1/inc（feasible GLSではない、analytic weight）。"
+      }
     },
-    "p_values": {
-      "Intercept": 0.9254355399899227,
-      "inc": 0.002056727648748675,
-      "incsq": 0.2739882656827803,
-      "age": 0.05873743812899814,
-      "agesq": 0.0031974173346239927,
-      "male": 0.24885610082089168,
-      "e401k": 0.001515403483281516
+    "hc2": {
+      "coef": {
+        "Intercept": 1.0995579235489639,
+        "inc": 0.5578407750648888,
+        "incsq": 0.0025108112465652152,
+        "age": -1.0929277327296194,
+        "agesq": 0.01998376775876516,
+        "male": 1.8042124555025176,
+        "e401k": 5.478553018643583
+      },
+      "se": {
+        "Intercept": 11.027039528813612,
+        "inc": 0.23107578827924405,
+        "incsq": 0.0032125150850428946,
+        "age": 0.6326192704231366,
+        "agesq": 0.008129610979406055,
+        "male": 1.3181094334852959,
+        "e401k": 1.5078171880342057
+      },
+      "t_stats": {
+        "Intercept": 0.09971469864380401,
+        "inc": 2.4141030924051847,
+        "incsq": 0.7815718152594107,
+        "age": -1.7276232069228603,
+        "agesq": 2.4581456369053916,
+        "male": 1.368788060891034,
+        "e401k": 3.633433192114069
+      },
+      "p_values": {
+        "Intercept": 0.9205807747057715,
+        "inc": 0.015862845340475794,
+        "incsq": 0.43455830522505584,
+        "age": 0.08420940604745981,
+        "agesq": 0.014049479958837187,
+        "male": 0.17121848302956585,
+        "e401k": 0.00028669194698075054
+      },
+      "conf_int": {
+        "Intercept": [
+          -20.526064608073582,
+          22.72518045517151
+        ],
+        "inc": [
+          0.10466766722696846,
+          1.0110138829028092
+        ],
+        "incsq": [
+          -0.003789396386204143,
+          0.008811018879334574
+        ],
+        "age": [
+          -2.3335857998974534,
+          0.1477303344382146
+        ],
+        "agesq": [
+          0.004040422501846087,
+          0.035927113015684235
+        ],
+        "male": [
+          -0.7807911612380005,
+          4.389216072243036
+        ],
+        "e401k": [
+          2.5215050031796835,
+          8.435601034107483
+        ]
+      },
+      "r_squared": 0.11210033992999824,
+      "r_squared_adj": 0.10944989318352072,
+      "f_statistic": 31.13872440852158,
+      "f_p_value": 6.016367685018134e-36,
+      "aic": 20179.133079737236,
+      "bic": 20218.398645502915,
+      "log_likelihood": -10082.566539868618,
+      "nobs": 2017,
+      "df_resid": 2010,
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.14.6",
+        "generated_at": "2026-08-14T23:15:12.776128+00:00",
+        "formula": "nettfa ~ inc + incsq + age + agesq + male + e401k",
+        "weight": "1/inc",
+        "filter": "fsize == 1",
+        "cov_type": "hc2",
+        "note": "Wooldridge『Introductory Econometrics』Example 8.5と同じ変数構成（nettfa ~ inc + incsq + age + agesq + male + e401k、fsize==1の単身世帯サブサンプル）。重みはVar(u|inc) ∝ incという単純な仮定に基づく1/inc（feasible GLSではない、analytic weight）。"
+      }
     },
-    "conf_int": {
-      "Intercept": [
-        -21.938606400934276,
-        24.137722248032205
-      ],
-      "inc": [
-        0.20332812496688768,
-        0.91235342516289
-      ],
-      "incsq": [
-        -0.001989244421870975,
-        0.0070108669150014055
-      ],
-      "age": [
-        -2.2262593276438567,
-        0.04040386218461789
-      ],
-      "agesq": [
-        0.0067060861672203,
-        0.03326144935031002
-      ],
-      "male": [
-        -1.2633426825208618,
-        4.871767593525897
-      ],
-      "e401k": [
-        2.0956986202501495,
-        8.861407417037018
-      ]
+    "hc3": {
+      "coef": {
+        "Intercept": 1.0995579235489639,
+        "inc": 0.5578407750648888,
+        "incsq": 0.0025108112465652152,
+        "age": -1.0929277327296194,
+        "agesq": 0.01998376775876516,
+        "male": 1.8042124555025176,
+        "e401k": 5.478553018643583
+      },
+      "se": {
+        "Intercept": 11.057423797833048,
+        "inc": 0.23330213775103506,
+        "incsq": 0.003252253725733153,
+        "age": 0.6342237692241928,
+        "agesq": 0.008150689507731594,
+        "male": 1.3207621042367625,
+        "e401k": 1.5108600235807121
+      },
+      "t_stats": {
+        "Intercept": 0.09944069646353314,
+        "inc": 2.391065853242118,
+        "incsq": 0.7720219448743056,
+        "age": -1.723252558109784,
+        "agesq": 2.451788617368988,
+        "male": 1.3660389329122444,
+        "e401k": 3.626115545541742
+      },
+      "p_values": {
+        "Intercept": 0.9207982880097586,
+        "inc": 0.01689103319246295,
+        "incsq": 0.44019218791840686,
+        "age": 0.08499665610243778,
+        "agesq": 0.014299361664640676,
+        "male": 0.1720795595899187,
+        "e401k": 0.00029488063798155937
+      },
+      "conf_int": {
+        "Intercept": [
+          -20.585652562845727,
+          22.784768409943656
+        ],
+        "inc": [
+          0.10030147327485434,
+          1.0153800768549233
+        ],
+        "incsq": [
+          -0.003867329619438844,
+          0.008888952112569275
+        ],
+        "age": [
+          -2.3367324545669517,
+          0.15087698910771286
+        ],
+        "agesq": [
+          0.003999084453143252,
+          0.03596845106438707
+        ],
+        "male": [
+          -0.7859934330011513,
+          4.394418344006187
+        ],
+        "e401k": [
+          2.51553756171159,
+          8.441568475575577
+        ]
+      },
+      "r_squared": 0.11210033992999824,
+      "r_squared_adj": 0.10944989318352072,
+      "f_statistic": 30.974159124216232,
+      "f_p_value": 9.362468720659477e-36,
+      "aic": 20179.133079737236,
+      "bic": 20218.398645502915,
+      "log_likelihood": -10082.566539868618,
+      "nobs": 2017,
+      "df_resid": 2010,
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.14.6",
+        "generated_at": "2026-08-14T23:15:12.823011+00:00",
+        "formula": "nettfa ~ inc + incsq + age + agesq + male + e401k",
+        "weight": "1/inc",
+        "filter": "fsize == 1",
+        "cov_type": "hc3",
+        "note": "Wooldridge『Introductory Econometrics』Example 8.5と同じ変数構成（nettfa ~ inc + incsq + age + agesq + male + e401k、fsize==1の単身世帯サブサンプル）。重みはVar(u|inc) ∝ incという単純な仮定に基づく1/inc（feasible GLSではない、analytic weight）。"
+      }
     },
-    "r_squared": 0.11210033992999824,
-    "r_squared_adj": 0.10944989318352072,
-    "f_statistic": 42.29488484497074,
-    "f_p_value": 8.248193619339697e-49,
-    "aic": 20179.133079737236,
-    "bic": 20218.398645502915,
-    "log_likelihood": -10082.566539868618,
-    "nobs": 2017,
-    "df_resid": 2010,
-    "_meta": {
-      "reference": "statsmodels",
-      "statsmodels_version": "0.14.6",
-      "generated_at": "2026-08-02T02:25:02.967172+00:00",
-      "formula": "nettfa ~ inc + incsq + age + agesq + male + e401k",
-      "weight": "1/inc",
-      "filter": "fsize == 1",
-      "note": "Wooldridge『Introductory Econometrics』Example 8.5と同じ変数構成（nettfa ~ inc + incsq + age + agesq + male + e401k、fsize==1の単身世帯サブサンプル）。重みはVar(u|inc) ∝ incという単純な仮定に基づく1/inc（feasible GLSではない、analytic weight）。"
+    "cluster": {
+      "coef": {
+        "Intercept": 1.0995579235489639,
+        "inc": 0.5578407750648888,
+        "incsq": 0.0025108112465652152,
+        "age": -1.0929277327296194,
+        "agesq": 0.01998376775876516,
+        "male": 1.8042124555025176,
+        "e401k": 5.478553018643583
+      },
+      "se": {
+        "Intercept": 6.734384830535694,
+        "inc": 0.34705128549055125,
+        "incsq": 0.00272471239617964,
+        "age": 0.3970731646726407,
+        "agesq": 0.004427503798347964,
+        "male": 0.9959942913112864,
+        "e401k": 0.9968351757694887
+      },
+      "t_stats": {
+        "Intercept": 0.16327518418063114,
+        "inc": 1.6073727382291356,
+        "incsq": 0.9214958797433671,
+        "age": -2.7524593197595273,
+        "agesq": 4.513551804568007,
+        "male": 1.8114686712984704,
+        "e401k": 5.495946724005314
+      },
+      "p_values": {
+        "Intercept": 0.8749156573069304,
+        "inc": 0.1520079279603844,
+        "incsq": 0.3874480086849619,
+        "age": 0.02840306290316537,
+        "agesq": 0.0027532977516227294,
+        "male": 0.11297157899867133,
+        "e401k": 0.0009104389339034062
+      },
+      "conf_int": {
+        "Intercept": [
+          -14.824731766294299,
+          17.023847613392228
+        ],
+        "inc": [
+          -0.2628051111525196,
+          1.3784866612822972
+        ],
+        "incsq": [
+          -0.003932109764056647,
+          0.008953732257187078
+        ],
+        "age": [
+          -2.0318565675712406,
+          -0.15399889788799814
+        ],
+        "agesq": [
+          0.009514384903172397,
+          0.030453150614357924
+        ],
+        "male": [
+          -0.5509398001801182,
+          4.1593647111851535
+        ],
+        "e401k": [
+          3.121412387178295,
+          7.835693650108872
+        ]
+      },
+      "r_squared": 0.11210033992999824,
+      "r_squared_adj": 0.10944989318352072,
+      "f_statistic": 2139.65075956643,
+      "f_p_value": 4.671561037365213e-11,
+      "aic": 20179.133079737236,
+      "bic": 20218.398645502915,
+      "log_likelihood": -10082.566539868618,
+      "nobs": 2017,
+      "df_resid": 2010,
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.14.6",
+        "generated_at": "2026-08-14T23:15:12.865493+00:00",
+        "formula": "nettfa ~ inc + incsq + age + agesq + male + e401k",
+        "weight": "1/inc",
+        "filter": "fsize == 1",
+        "cov_type": "cluster",
+        "note": "Wooldridge『Introductory Econometrics』Example 8.5と同じ変数構成（nettfa ~ inc + incsq + age + agesq + male + e401k、fsize==1の単身世帯サブサンプル）。重みはVar(u|inc) ∝ incという単純な仮定に基づく1/inc（feasible GLSではない、analytic weight）。地域等の実カテゴリ列が無いため、ageの分位ビン（8分位、_add_age_bin参照）を疑似的なクラスター列として使う。"
+      }
     }
   },
   "_meta": {
     "method": "wls",
-    "generated_at": "2026-08-02T02:25:02.967265+00:00",
+    "generated_at": "2026-08-14T23:15:12.865593+00:00",
     "primary_reference": "statsmodels",
     "statsmodels_version": "0.14.6",
-    "note": "perfect_multicollinearity・scale_varianceシナリオはここに含まない（いずれもComputationErrorの発生確認のみ、テストコード側で対応。scale_varianceはOLSと同じ理由でロバストWald検定の共分散部分行列が全cov_typeで数値的にほぼ特異になる、WLSでも実測確認済み）。重みは合成データセットの'weight'列（OLS実装時から存在、常に正）を使う。クロスチェック用のRベンチマークはwls_crosscheck.json（別スクリプト）で生成する。401ksubsの回帰式・重み定義はdocs/spec/wls-spec.md参照。"
+    "note": "perfect_multicollinearity・scale_varianceシナリオはここに含まない（いずれもComputationErrorの発生確認のみ、テストコード側で対応。scale_varianceはOLSと同じ理由でロバストWald検定の共分散部分行列が全cov_typeで数値的にほぼ特異になる、WLSでも実測確認済み）。重みは合成データセットの'weight'列（OLS実装時から存在、常に正）を使う。クロスチェック用のRベンチマークはwls_crosscheck.json（別スクリプト）で生成する。401ksubsの回帰式・重み定義はdocs/spec/wls-spec.md参照。401ksubsはclassical/HC0-3（HACは時系列順が無いため対象外）とクラスター（ageの分位ビン、_add_age_bin参照）をcov_type別に持つ。"
   }
 }

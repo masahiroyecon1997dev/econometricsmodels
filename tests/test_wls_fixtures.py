@@ -47,6 +47,8 @@ from _tolerances import TOLERANCES
 from econometricsmodels import WLS, OLSOptions
 from generate_wls_fixtures import (
     COV_TYPES,
+    WOOLDRIDGE_COV_TYPES,
+    _add_age_bin,
 )
 from generate_wls_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
@@ -217,21 +219,111 @@ def test_scale_variance_raises_computation_error(cov_type):
         ).fit()
 
 
-def test_401ksubs_matches_statsmodels(fixtures):
+@pytest.mark.parametrize("cov_type", WOOLDRIDGE_COV_TYPES)
+def test_401ksubs_matches_statsmodels(fixtures, cov_type):
     """実データ（401ksubs、fsize==1）でのWLSベンチマーク。
 
     回帰式・重み定義は`docs/spec/wls-spec.md`
     「テスト」参照（`nettfa ~ inc + incsq + age + agesq + male + e401k`、
-    重み=1/inc）。
+    重み=1/inc）。HACは時系列順の無いクロスセクションデータのため対象外
+    （`generate_wls_fixtures.py`のWOOLDRIDGE_COV_TYPESと同じ方針）。
     """
     df = load_wooldridge_dataset("401ksubs").filter(pl.col("fsize") == 1)
     df = df.with_columns((1.0 / pl.col("inc")).alias("inv_inc"))
+    options = OLSOptions(cov_type=cov_type)
 
     res = WLS(
         df,
         y="nettfa",
         x=["inc", "incsq", "age", "agesq", "male", "e401k"],
         weight="inv_inc",
+        options=options,
     ).fit()
 
-    _check_result(res, fixtures["401ksubs"], "401ksubs")
+    _check_result(res, fixtures["401ksubs"][cov_type], f"401ksubs/{cov_type}")
+
+
+def test_401ksubs_cluster_matches_statsmodels(fixtures):
+    """実データ（401ksubs、fsize==1）でのクラスターロバストSE。
+
+    地域等の実カテゴリ列が無いため、ageの分位ビン（8分位、`_add_age_bin`）を
+    疑似的なクラスター列として使う（`testing-policy.md`「実データでの
+    グループ列も検証する」）。
+    """
+    df = load_wooldridge_dataset("401ksubs").filter(pl.col("fsize") == 1)
+    df = df.with_columns((1.0 / pl.col("inc")).alias("inv_inc"))
+    df = _add_age_bin(df)
+    options = OLSOptions(cov_type="cluster", cluster_col="age_bin")
+
+    res = WLS(
+        df,
+        y="nettfa",
+        x=["inc", "incsq", "age", "agesq", "male", "e401k"],
+        weight="inv_inc",
+        options=options,
+    ).fit()
+
+    _check_result(res, fixtures["401ksubs"]["cluster"], "401ksubs/cluster")
+
+
+@pytest.mark.parametrize(
+    "cov_type", ["classical", "hc0", "hc1", "hc2", "hc3", "cluster", "hac"]
+)
+def test_include_intercept_false_matches_statsmodels(cov_type):
+    """`include_intercept=False`が、WLSでもcov_typeによらずstatsmodelsと
+    一致すること（`test_ols.py::test_include_intercept_false_matches_
+    statsmodels_robust_cov_types`と同じ観点。テスト網羅性レビュー、
+    Issue #231フェーズ4で判明したWLS側の抜け）。frozen fixtureではなく
+    OLS側と同様にstatsmodelsとの直接比較で確認する。
+    """
+    import statsmodels.formula.api as smf
+
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    if cov_type == "cluster":
+        df = with_cluster_groups(df, 10)
+    pandas_df = df.to_pandas()
+
+    fit_kwargs: dict = {"use_t": True}
+    if cov_type == "cluster":
+        fit_kwargs["cov_type"] = "cluster"
+        fit_kwargs["cov_kwds"] = {"groups": pandas_df["cluster_group"]}
+    elif cov_type == "hac":
+        fit_kwargs["cov_type"] = "HAC"
+        fit_kwargs["cov_kwds"] = {"maxlags": HAC_LAG_IN_FIXTURE}
+    elif cov_type != "classical":
+        fit_kwargs["cov_type"] = cov_type.upper()
+
+    sm_res = smf.wls(
+        formula="y ~ x1 + x2 + x3 - 1",  # 切片なし
+        data=pandas_df,
+        weights=pandas_df["weight"],
+    ).fit(**fit_kwargs)
+
+    options = OLSOptions(
+        include_intercept=False,
+        cov_type=cov_type,
+        cluster_col="cluster_group" if cov_type == "cluster" else None,
+        hac_lags=HAC_LAG_IN_FIXTURE if cov_type == "hac" else None,
+    )
+    our_res = WLS(
+        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+    ).fit()
+
+    sm_params = sm_res.params.to_dict()
+    sm_bse = sm_res.bse.to_dict()
+
+    assert our_res.param_names == ["x1", "x2", "x3"]
+    for name in ["x1", "x2", "x3"]:
+        _assert_close(
+            our_res.params[name],
+            sm_params[name],
+            f"[{cov_type}] params[{name}]",
+        )
+        _assert_close(
+            our_res.std_errors[name],
+            sm_bse[name],
+            f"[{cov_type}] std_errors[{name}]",
+        )
+    _assert_close(
+        our_res.r_squared, sm_res.rsquared, f"[{cov_type}] r_squared"
+    )

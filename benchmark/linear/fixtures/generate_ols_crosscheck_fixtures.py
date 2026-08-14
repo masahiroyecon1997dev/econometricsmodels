@@ -22,8 +22,13 @@ classical/HC0-3/clusterはRとほぼ機械精度で一致するため厳密比�
 baselineシナリオのみ新規データに対する予測値（predicted、`PREDICT_NEW_DATA`参照）を
 crosscheckする。
 
-係数・標準誤差に加え、AIC/BIC/対数尤度・F統計量・F検定p値もRクロスチェック対象に含める
-（`testing-policy.md`「リファレンス実装」章の方針。全統計量を独立実装でもクロスチェックする）。
+係数・標準誤差に加え、t値・p値・信頼区間・R²・調整済みR²・AIC/BIC/対数尤度・
+F統計量・F検定p値もRクロスチェック対象に含める（`testing-policy.md`
+「リファレンス実装」章の方針。全統計量を独立実装でもクロスチェックする）。
+信頼区間はconfidence_level=0.95固定（フィクスチャ側でconfidence_levelを
+変えていないため）で、cov_typeごとのvcov・df_inferenceに基づく手計算値
+（`coefs ± qt(0.975, df_inference) * ses`）。R²・調整済みR²はAIC/BIC等と同じく
+cov_typeに依存しない（`summary(model)`の値をそのまま使う）。
 AIC/BICはRの`AIC()`/`BIC()`標準関数（残差分散を1パラメータとして追加でカウントするk+1慣習）
 ではなく、`run_lm_crosscheck_benchmark.R`側で本実装・statsmodelsと同じ式（`-2*loglik + 2*k`等、kは
 回帰係数の数のみ）で手計算した値を使う（実測でRの標準関数はAICがちょうど2、BICがlog(n)だけ
@@ -95,6 +100,9 @@ NUMERIC_SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "high_condition_number",
+    # scale_varianceより緩いスケール差の成功パス（generate_ols_fixtures.py
+    # と同じ理由）。
+    "scale_variance_mild",
     # n=k+1（自由度1ちょうど）の成功パス。
     "baseline_df1",
 ]
@@ -135,9 +143,23 @@ def _normalize_names(raw: dict) -> dict:
         "coef": {fix(k): v for k, v in raw["coef"].items()},
         "se": {fix(k): v for k, v in raw["se"].items()},
     }
-    # aic/bic/log_likelihood/f_statistic/f_p_valueはrun_lm_crosscheck_benchmark.Rが返す
-    # （fixest等、他パッケージのスクリプトは対象外）。
-    for key in ("aic", "bic", "log_likelihood", "f_statistic", "f_p_value"):
+    if "t_stats" in raw:
+        result["t_stats"] = {fix(k): v for k, v in raw["t_stats"].items()}
+    if "p_values" in raw:
+        result["p_values"] = {fix(k): v for k, v in raw["p_values"].items()}
+    if "conf_int" in raw:
+        result["conf_int"] = {fix(k): v for k, v in raw["conf_int"].items()}
+    # aic/bic/log_likelihood/f_statistic/f_p_value/r_squared/r_squared_adjは
+    # run_lm_crosscheck_benchmark.Rが返す（fixest等、他パッケージのスクリプトは対象外）。
+    for key in (
+        "aic",
+        "bic",
+        "log_likelihood",
+        "f_statistic",
+        "f_p_value",
+        "r_squared",
+        "r_squared_adj",
+    ):
         if key in raw:
             result[key] = raw[key]
     return result
@@ -327,10 +349,11 @@ def build_fixtures() -> dict:
         "method": "ols",
         "purpose": (
             "statsmodels主リファレンス（ols.json）とは独立した実装（R: lm + "
-            "sandwich/lmtest）によるクロスチェック用。係数・標準誤差・AIC・"
-            "BIC・対数尤度・F統計量・F検定p値を含む。classical/HC0-3/cluster"
-            "は厳密比較、HACのみ緩い許容誤差での比較を想定する"
-            "（testing-policy.md参照）"
+            "sandwich/lmtest）によるクロスチェック用。係数・標準誤差・t値・"
+            "p値・信頼区間・R²・調整済みR²・AIC・BIC・対数尤度・F統計量・"
+            "F検定p値を含む（信頼区間はconfidence_level=0.95固定で計算）。"
+            "classical/HC0-3/clusterは厳密比較、HACのみ緩い許容誤差での比較を"
+            "想定する（testing-policy.md参照）"
         ),
         "generated_at": datetime.now(UTC).isoformat(),
         "r_version": r_version,

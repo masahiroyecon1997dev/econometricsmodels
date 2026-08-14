@@ -22,9 +22,9 @@
 |---|---|---|
 | 1 | リファクタリング用スキル（or 既存スキル/エージェントの代用整理） | 完了 |
 | 2 | `benchmark/`ディレクトリの整理とリファクタリング | 完了 |
-| 3 | `tests/`ディレクトリの整理とリファクタリング | 未着手 |
+| 3 | `tests/`ディレクトリの整理とリファクタリング | 完了 |
 | 3.5 | crosscheckテストの許容誤差計算式バグ修正（`refactor`スキル範囲外） | 完了 |
-| 4 | ロジック整理前のテスト拡充（OLS/WLS/Logit/Probitレビュー＋IV #232〜238） | 未着手 |
+| 4 | ロジック整理前のテスト拡充（OLS/WLS/Logit/Probitレビュー＋IV #232〜238） | 一部完了（linear系統〔OLS/WLS〕のみ。Logit/Probit・IV分は未着手） |
 | 5 | `python_package/`のリファクタリング | 未着手 |
 | 6 | `engine_pybind/`のリファクタリング | 未着手 |
 | 7 | `engine/`のリファクタリング | 未着手 |
@@ -547,9 +547,9 @@ tests/api_tests/
 
 **進め方**:
 0. **着手前に`benchmark/`を再生成する**: `benchmark/freeze_datasets.py`で
-   合成データセットCSV（`tests/api_tests/fixtures/benchmarks/data/`）を、
+   合成データセットCSV（`tests/fixtures/benchmarks/data/`）を、
    `benchmark/*/fixtures/generate_*.py`各スクリプトで参照用パラメータJSON
-   （`tests/api_tests/fixtures/benchmarks/*.json`）をそれぞれ再生成し、
+   （`tests/fixtures/benchmarks/*.json`）をそれぞれ再生成し、
    コミット済みの状態と一致することを確認する（フェーズ2追加ラウンドの
    「最終確認」で発見した`generate_logit_crosscheck_fixtures.py`の
    `near_separation`ケース失敗も含め、この時点で一連の生成過程が整合的で
@@ -561,9 +561,126 @@ tests/api_tests/
    [#238](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/238)）の
    テスト拡充も合わせて実施する。
 
-**状態**: 未着手
+**状態**: 一部完了（linear系統〔OLS/WLS〕: 完了。Logit/Probitレビュー・IV分〔#232〜238〕は未着手）
 
-**メモ**: (着手後に記載)
+**メモ（linear系統〔OLS/WLS〕実施結果）**:
+
+- **ステップ0（前提確認）**: `benchmark/freeze_datasets.py`でCSVを、
+  `generate_ols_fixtures.py`/`generate_wls_fixtures.py`（statsmodels）で
+  `ols.json`/`wls.json`を再生成し、`generated_at`以外は完全一致を確認。
+  Rクロスチェック側（`generate_ols_crosscheck_fixtures.py`/
+  `generate_wls_crosscheck_fixtures.py`）も同様に確認したところ、数値は完全
+  一致・`_meta.r_version`のみ差分（4.2.2 → 4.5.3、コンテナのRバージョンが
+  記録時点から更新されているだけで実測値には影響なし）だった。
+- **ステップ1（`review-testing`スキルでのレビュー、linear系統分）**:
+  `testing-completeness-reviewer`に`engine/src/linear/`・
+  `engine_pybind/src/linear/`（`mod tests`が0件だった）・
+  `python_package/econometricsmodels/linear/`・`tests/test_ols*.py`・
+  `tests/test_wls*.py`・`benchmark/linear/`のレビューを依頼し、
+  must fix 1件・should fix 7件・nice to have 4件、計12件の指摘を得た。
+  ユーザー確認の上、全12件をこのフェーズで対応する方針とした（未対応の
+  指摘は無し）。
+  1. **[must fix] Rクロスチェックに`r_squared`/`r_squared_adj`が欠落**:
+     `run_lm_crosscheck_benchmark.R`に`r.squared`/`adj.r.squared`
+     （cov_type非依存、`summary(model)`から取得）・`t_stats`/`p_values`
+     （`coeftest()`の列を`_common.R::extract_coef_se`が返すよう拡張）・
+     `conf_int`（`coefs ± qt(0.975, df_inference) * ses`の手計算、
+     confidence_level=0.95固定）を追加。`generate_ols_crosscheck_fixtures.py`/
+     `generate_wls_crosscheck_fixtures.py`の`_normalize_names`を対応する
+     フィールドを抽出するよう拡張し、`test_ols_crosscheck.py`/
+     `test_wls_crosscheck.py`の`_assert_fit_stats_close`にアサーションを
+     追加。実装中、HAC/autocorrelatedシナリオのみ`p_values`が浮動小数点
+     アンダーフロー近傍（0に丸まる/1e-24等の極小値）で相対誤差比較が
+     破綻することが判明し（実測最大絶対乖離1.69e-7）、IV/Logit/Probit
+     クロスチェックの`atol_f_pvalue`/`atol_p_value`と同じ「p値のみ絶対誤差
+     フロアで比較する」パターンを適用（`TOLERANCES["ols_crosscheck"/
+     "wls_crosscheck"]["atol_p_value"] = 1e-6`）。
+  2. **[should fix→A統合] Rクロスチェックに`conf_int`/`t_stats`/`p_values`が欠落**:
+     上記1と同時に対応。
+  3. **[should fix] WLS実データ（401ksubs）がclassicalのみ検証**:
+     `_run_401ksubs_case()`を`cov_type`引数対応に拡張し、
+     `WOOLDRIDGE_COV_TYPES = ["classical","hc0","hc1","hc2","hc3"]`
+     （401ksubsはクロスセクションデータのためHACは対象外、OLSのwage1/gpa2と
+     同じ方針）でstatsmodels/R双方をcov_type別に生成。
+  4. **[should fix] `scale_variance`に成功パスが無い**: ユーザー確認の上、
+     `scale_variance_mild`シナリオ（x1を1e2倍・x2を1e-1倍、既存の
+     `scale_variance`のx1×1e6・x2×1e-3より緩いスケール差）を
+     `generate_linear_datasets.py`に追加し全cov_typeで成功パスになることを
+     確認、`freeze_linear_datasets.py`のSYNTHETIC_SCENARIOSと4つの
+     `NUMERIC_SCENARIOS`（ols/wls×fixtures/crosscheck）に追加。既存の
+     `test_matches_statsmodels`等のparametrizeされたテストがSCENARIOSを
+     importしているため、シナリオ追加だけで既存テストの対象に自動的に
+     含まれた（新規テスト関数の追加は不要）。
+  5. **[should fix] WLS実データでのクラスターロバストSEが無い**:
+     ユーザー確認の上、401ksubsに地域等の自然なカテゴリ列が無いため
+     （marr/maleのような2値変数のみ）、`age`を分位点でビン化した
+     `age_bin`列（8分位、`_add_age_bin`）を疑似的なクラスター列として使う
+     方針を採用。`generate_wls_fixtures.py`/`generate_wls_crosscheck_fixtures.py`
+     ・`test_wls_fixtures.py::test_401ksubs_cluster_matches_statsmodels`・
+     `test_wls_crosscheck.py::test_401ksubs_cluster_matches_r`を追加。
+  6. **[should fix] WLSにOLS相当のValidationErrorテストが欠落**:
+     `test_insufficient_clusters_raises`/`test_invalid_confidence_level_raises`/
+     `test_invalid_hac_lags_raises`/`test_missing_column_raises`/
+     `test_null_values_raise`/`test_non_numeric_dtype_raises`を
+     `test_wls.py`に追加（`weight`列自体の検証は既存の`test_missing_weight_
+     column_raises`等が別途担当、`y`/`x`側の検証が抜けていた）。
+  7. **[should fix] WLSにHACオプション配線確認テストが欠落**:
+     `test_hac_auto_lags_runs_and_returns_finite_std_errors`（`hac_lags=None`
+     自動計算）・`test_hac_time_col_reorders_rows_before_computing_lags`
+     （`time_col`配線）を`test_wls.py`に追加（OLSの同名テストと同一データ、
+     重み=1でOLSと同じ結果になることを利用）。
+  8. **[should fix] `include_intercept=False`×ロバストcov_typeが参照実装と
+     未比較**: ユーザー確認の上、statsmodelsとの直接比較のみ（Rクロスチェック
+     は対象外、`run_lm_crosscheck_benchmark.R`に切片なしformula組み立て
+     ロジックが無いため今回は追加しない）とし、OLSの既存テスト
+     （`test_include_intercept_false_matches_statsmodels`、cov_type固定）は
+     そのまま残し、新規に`test_include_intercept_false_matches_statsmodels_
+     robust_cov_types`（HC0-3/cluster/HACをparametrize）を追加。WLSには
+     同等のテストが元々存在しなかったため、`test_wls_fixtures.py`に
+     `test_include_intercept_false_matches_statsmodels`（cov_type
+     parametrize込み）を新規追加。
+  9. **[nice to have] `cov_type`大文字小文字非依存性・`"nonrobust"`エイリアス
+     未テスト**: `engine_pybind/src/linear/common.rs`に同ファイル初の
+     `#[cfg(test)] mod tests`を追加（`parse_cov_type_is_case_insensitive`/
+     `parse_cov_type_accepts_nonrobust_as_classical_alias`/
+     `parse_cov_type_returns_validation_error_for_unknown_value`、
+     `OLSOptions`をstruct literalで直接構築しGIL不要で実行）。Python側も
+     `test_ols.py`/`test_wls.py`に`test_cov_type_is_case_insensitive`・
+     `test_nonrobust_is_alias_for_classical`を追加。
+  10. **[nice to have] WLSのy/x列自体のValidationErrorテスト不足**:
+      上記6で統合対応。
+  11. **[nice to have] WLSに`cov_type`ラベル・`confidence_level`反映テストが
+      無い**: `test_cov_type_label`・`test_confidence_level_changes_
+      interval_width`を`test_wls.py`に追加（OLSの同名テストと同じ観点）。
+  12. **[nice to have] `TOLERANCES["wls_crosscheck"]`に`atol`キーが無く
+      ハードコード**: `test_wls_crosscheck.py`の独自`_assert_close`/
+      `_assert_scalar_close`（`tol = max(rtol*|ref|, 1e-8)`をハードコード）を
+      `tests/_assertions.py`の共有関数へ統合し（`test_ols_crosscheck.py`と
+      同じ計算式のため、フェーズ3.5の「除外事項」注記の解消も兼ねる）、
+      `TOLERANCES["wls_crosscheck"]["atol"]`として一元化。
+- **検証**: `cargo test -p engine`（317件）・`cargo test -p engine_pybind`
+  （68件）・`uv run pytest tests`（752件、フェーズ3の670件から82件増）・
+  `ruff check`/`ruff format --check`・`cargo fmt --check`・
+  `cargo clippy --all-targets -- -D warnings`（engine・engine_pybind）
+  全てグリーン。
+- **`rust-reviewer`によるレビューと対応**: `engine_pybind/src/linear/
+  common.rs`の`parse_cov_type`テスト追加について`rust-reviewer`にレビュー
+  依頼し、must fix 1件を検出・修正した。
+  - **[must fix→対応済み]** 成功系2テスト（`parse_cov_type_is_case_insensitive`/
+    `parse_cov_type_accepts_nonrobust_as_classical_alias`）が
+    `parse_cov_type(...).unwrap()`を使っていたが、`PyErr`の`Debug`実装
+    （`unwrap()`失敗時のpanicメッセージ生成に使われる）はGIL取得を要求し、
+    GIL未初期化のこのテスト環境ではErrの場合に二重パニック（テストバイナリ
+    全体がSIGABRTでクラッシュし、他のテスト結果も失われる）を起こす
+    バグだった。レビュー中に実際に`"nonrobust"`分岐を一時的に壊して
+    `thread panicked while processing panic. aborting.`の再現を確認済み。
+    `.unwrap()`を`let-else`（Err値のDebug/Displayに触れない）に置き換えて
+    修正し、同じ再現手順でPASS/FAILが正しく報告されること（アボートしない
+    こと）を確認した。ついでに`cluster`/`hac`自体の大文字小文字混在ケース
+    （`"CLUSTER"`/`"Hac"`、指摘のnice to have）も
+    `parse_cov_type_is_case_insensitive`に追加した。
+- **未対応・今後**: Logit/Probitの`review-testing`レビュー、IV分
+  （#232〜238）のテスト拡充は本フェーズの別ラウンドとして未着手。
 
 ---
 

@@ -292,6 +292,54 @@ def test_include_intercept_false_matches_statsmodels():
     assert abs(our_res.r_squared - sm_res.rsquared) < ATOL_STAT
 
 
+@pytest.mark.parametrize(
+    "cov_type", ["classical", "hc0", "hc1", "hc2", "hc3", "cluster", "hac"]
+)
+def test_include_intercept_false_matches_statsmodels_robust_cov_types(
+    dataset, cov_type
+):
+    """`include_intercept=False`が、ロバスト系cov_type（HC0-3/cluster/HAC）でも
+    statsmodelsと一致すること。
+
+    上の`test_include_intercept_false_matches_statsmodels`はcov_typeを指定
+    しない（classical相当）比較のみだったため、include_intercept=Falseが
+    engine_pybind側のcov_type分岐ロジックとも独立に正しく配線されていることを
+    確認する（テスト網羅性レビュー、Issue #231フェーズ4で判明した抜け）。
+    """
+    y = dataset["y"].to_numpy()
+    x = np.column_stack([dataset["x1"].to_numpy(), dataset["x2"].to_numpy()])
+
+    fit_kwargs: dict = {"use_t": True}
+    if cov_type == "cluster":
+        fit_kwargs["cov_type"] = "cluster"
+        fit_kwargs["cov_kwds"] = {"groups": dataset["cluster"].to_numpy()}
+    elif cov_type == "hac":
+        fit_kwargs["cov_type"] = "HAC"
+        fit_kwargs["cov_kwds"] = {"maxlags": 2}
+    elif cov_type != "classical":
+        fit_kwargs["cov_type"] = cov_type.upper()
+
+    sm_res = sm.OLS(y, x).fit(**fit_kwargs)  # 定数項なし
+
+    options = OLSOptions(
+        include_intercept=False,
+        cov_type=cov_type,
+        cluster_col="cluster" if cov_type == "cluster" else None,
+        hac_lags=2 if cov_type == "hac" else None,
+    )
+    our_res = OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+    assert our_res.param_names == ["x1", "x2"]
+    for i, name in enumerate(["x1", "x2"]):
+        assert abs(our_res.params[name] - sm_res.params[i]) < ATOL_COEF, (
+            f"[{cov_type}] params[{name}]"
+        )
+        assert abs(our_res.std_errors[name] - sm_res.bse[i]) < ATOL_SE, (
+            f"[{cov_type}] std_errors[{name}]"
+        )
+    assert abs(our_res.r_squared - sm_res.rsquared) < ATOL_STAT
+
+
 def test_confidence_level_changes_interval_width(dataset):
     """`confidence_level`を下げると信頼区間が狭くなること
 
@@ -424,6 +472,40 @@ def test_cov_type_label(dataset):
 
     res = _our_fit_cluster(dataset)
     assert res.cov_type == "cluster"
+
+
+@pytest.mark.parametrize(
+    "cov_type, expected_label",
+    [
+        ("CLASSICAL", "classical"),
+        ("Classical", "classical"),
+        ("HC0", "hc0"),
+        ("Hc1", "hc1"),
+        ("HC2", "hc2"),
+        ("hc3", "hc3"),
+        ("nonrobust", "nonrobust"),
+        ("NONROBUST", "nonrobust"),
+    ],
+)
+def test_cov_type_is_case_insensitive(dataset, cov_type, expected_label):
+    """`cov_type`が大文字小文字を区別しないこと（`engine_pybind`側の
+    `parse_cov_type`のRust単体テストと対になる、Python API境界での確認。
+    テスト網羅性レビュー、Issue #231フェーズ4で判明した抜け）。
+    """
+    options = OLSOptions(cov_type=cov_type)
+    res = OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+    assert res.cov_type == expected_label
+
+
+@pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
+def test_nonrobust_is_alias_for_classical(dataset, cov_type):
+    """`"nonrobust"`が`"classical"`と同じ計算方法（標準誤差も一致）の
+    エイリアスであること。
+    """
+    res = _our_fit(dataset, cov_type)
+    classical_res = _our_fit(dataset, "classical")
+    for name in res.param_names:
+        assert res.std_errors[name] == classical_res.std_errors[name], name
 
 
 def test_default_options_use_classical():

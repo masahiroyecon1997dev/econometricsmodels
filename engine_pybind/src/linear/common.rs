@@ -129,3 +129,72 @@ pub(crate) fn parse_cov_type(
 
     Ok((cov_type, cov_type_lower))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `cov_type`以外はデフォルト値の`OLSOptions`を返す。cluster/hac以外のケースでは
+    /// `cluster_col`/`time_col`が抽出されないため、`df`は空でよい。
+    fn options(cov_type: &str) -> OLSOptions {
+        OLSOptions {
+            cov_type: cov_type.to_string(),
+            include_intercept: true,
+            confidence_level: 0.95,
+            cluster_col: None,
+            hac_lags: None,
+            time_col: None,
+        }
+    }
+
+    /// `unwrap()`/`expect()`は使わない：`PyErr`の`Debug`実装（`unwrap()`失敗時の
+    /// panicメッセージ生成に使われる）はGIL取得を要求し、GIL未初期化のこのテスト
+    /// 環境では二重パニック（テストバイナリ全体がSIGABRTでクラッシュし、他のテスト
+    /// 結果も失われる）を起こす（`validation.rs`と同じ制約、`nonlinear/CLAUDE.md`
+    /// 「テストの制約」参照。`let-else`のpanicメッセージ自体はErr値のDebug/Displayに
+    /// 触れないため安全）。
+    #[test]
+    fn parse_cov_type_is_case_insensitive() {
+        let df = DataFrame::empty();
+        for (input, expected) in [
+            ("classical", "classical"),
+            ("CLASSICAL", "classical"),
+            ("Classical", "classical"),
+            ("HC0", "hc0"),
+            ("Hc1", "hc1"),
+            ("HC2", "hc2"),
+            ("hc3", "hc3"),
+            ("CLUSTER", "cluster"),
+            ("Hac", "hac"),
+        ] {
+            let Ok((_, normalized)) = parse_cov_type(&df, &options(input)) else {
+                panic!("expected Ok for input={input}");
+            };
+            assert_eq!(normalized, expected, "input={input}");
+        }
+    }
+
+    #[test]
+    fn parse_cov_type_accepts_nonrobust_as_classical_alias() {
+        let df = DataFrame::empty();
+        for input in ["nonrobust", "NONROBUST", "NonRobust"] {
+            let Ok((cov_type, normalized)) = parse_cov_type(&df, &options(input)) else {
+                panic!("expected Ok for input={input}");
+            };
+            assert!(
+                matches!(cov_type, EngineCovType::Classical),
+                "input={input}"
+            );
+            // `parse_cov_type`のdocコメント通り、`*Result.cov_type`にはエイリアスでは
+            // なく小文字化した入力文字列（"nonrobust"）がそのまま格納される
+            // （"classical"に正規化はしない）。
+            assert_eq!(normalized, "nonrobust", "input={input}");
+        }
+    }
+
+    #[test]
+    fn parse_cov_type_returns_validation_error_for_unknown_value() {
+        let df = DataFrame::empty();
+        assert!(parse_cov_type(&df, &options("bogus")).is_err());
+    }
+}

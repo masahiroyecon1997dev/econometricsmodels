@@ -205,6 +205,72 @@ def test_cluster_without_col_raises(dataset):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 
 
+def test_missing_column_raises(dataset):
+    """`y`/`x`に存在しない列名を指定した場合`ValidationError`
+    （`weight`列自体の検証は`test_missing_weight_column_raises`が対象、
+    OLSと同じ検証）。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    with pytest.raises(ValidationError):
+        WLS(df, y="y", x=["x1", "nonexistent"], weight="weight").fit()
+
+
+def test_null_values_raise():
+    """`y`/`x`に欠損値が含まれる場合`ValidationError`（OLSと同じ検証、
+    `weight`列自体の欠損値検証は`test_null_weight_raises`が対象）。
+    """
+    df = pl.DataFrame(
+        {"y": [1.0, None, 3.0], "x1": [1.0, 2.0, 3.0], "weight": [1.0] * 3}
+    )
+    with pytest.raises(ValidationError):
+        WLS(df, y="y", x=["x1"], weight="weight").fit()
+
+
+def test_non_numeric_dtype_raises():
+    """`y`が非数値型の場合`ValidationError`（OLSと同じ検証）。"""
+    df = pl.DataFrame(
+        {"y": ["a", "b", "c"], "x1": [1.0, 2.0, 3.0], "weight": [1.0] * 3}
+    )
+    with pytest.raises(ValidationError):
+        WLS(df, y="y", x=["x1"], weight="weight").fit()
+
+
+def test_insufficient_clusters_raises(dataset):
+    """クラスターが1種類しかない場合`ValidationError`（OLSと同じ検証、
+    共通化された経路）。
+    """
+    df = dataset.with_columns(
+        pl.lit(1.0).alias("weight"), pl.lit(0).alias("single_cluster")
+    )
+    options = OLSOptions(cov_type="cluster", cluster_col="single_cluster")
+    with pytest.raises(ValidationError):
+        WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
+
+
+@pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])
+def test_invalid_confidence_level_raises(dataset, confidence_level):
+    """`confidence_level`が(0, 1)の範囲外（境界値0.0を含む）の場合
+    `ValidationError`（OLSと同じ検証、共通化された経路）。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    options = OLSOptions(confidence_level=confidence_level)
+    with pytest.raises(ValidationError):
+        WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
+
+
+@pytest.mark.parametrize(
+    "hac_lags", [-1, 100]
+)  # 100 == dataset の n_obs（上限側境界）
+def test_invalid_hac_lags_raises(dataset, hac_lags):
+    """`hac_lags`が`[0, n)`の範囲外の場合`ValidationError`（OLSと同じ検証、
+    共通化された経路）。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    options = OLSOptions(cov_type="hac", hac_lags=hac_lags)
+    with pytest.raises(ValidationError):
+        WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
+
+
 # ── API構造 ─────────────────────────────────────────────────────────
 
 
@@ -288,3 +354,151 @@ def test_nobs_and_dep_var_name(dataset):
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
     assert res.n_obs == 100
     assert res.dep_var_name == "y"
+
+
+# ── オプションの反映確認（OLSと同じ観点、共通化された経路の検証） ──────
+
+
+def test_cov_type_label(dataset):
+    """全cov_typeで`res.cov_type`が指定通り反映されること（OLSと同じ検証）。"""
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    for cov_type in ["classical", "hc0", "hc1", "hc2", "hc3"]:
+        options = OLSOptions(cov_type=cov_type)
+        res = WLS(
+            df, y="y", x=["x1", "x2"], weight="weight", options=options
+        ).fit()
+        assert res.cov_type == cov_type
+
+    cluster_options = OLSOptions(cov_type="cluster", cluster_col="cluster")
+    cluster_res = WLS(
+        df, y="y", x=["x1", "x2"], weight="weight", options=cluster_options
+    ).fit()
+    assert cluster_res.cov_type == "cluster"
+
+
+@pytest.mark.parametrize(
+    "cov_type, expected_label",
+    [
+        ("CLASSICAL", "classical"),
+        ("Classical", "classical"),
+        ("HC0", "hc0"),
+        ("Hc1", "hc1"),
+        ("HC2", "hc2"),
+        ("hc3", "hc3"),
+        ("nonrobust", "nonrobust"),
+        ("NONROBUST", "nonrobust"),
+    ],
+)
+def test_cov_type_is_case_insensitive(dataset, cov_type, expected_label):
+    """`cov_type`が大文字小文字を区別しないこと（OLSの`test_ols.py::
+    test_cov_type_is_case_insensitive`と同じ観点、共通化された経路の検証）。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    options = OLSOptions(cov_type=cov_type)
+    res = WLS(
+        df, y="y", x=["x1", "x2"], weight="weight", options=options
+    ).fit()
+    assert res.cov_type == expected_label
+
+
+@pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
+def test_nonrobust_is_alias_for_classical(dataset, cov_type):
+    """`"nonrobust"`が`"classical"`と同じ計算方法（標準誤差も一致）の
+    エイリアスであること（OLSと同じ検証）。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    options = OLSOptions(cov_type=cov_type)
+    res = WLS(
+        df, y="y", x=["x1", "x2"], weight="weight", options=options
+    ).fit()
+
+    classical_options = OLSOptions(cov_type="classical")
+    classical_res = WLS(
+        df, y="y", x=["x1", "x2"], weight="weight", options=classical_options
+    ).fit()
+    for name in res.param_names:
+        assert res.std_errors[name] == classical_res.std_errors[name], name
+
+
+def test_confidence_level_changes_interval_width(dataset):
+    """`confidence_level`を下げると信頼区間が狭くなること（OLSと同じ検証、
+    既定の0.95以外の値がengine_pybind経由で実際に反映されることの確認）。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    wide = WLS(
+        df,
+        y="y",
+        x=["x1", "x2"],
+        weight="weight",
+        options=OLSOptions(confidence_level=0.99),
+    ).fit()
+    narrow = WLS(
+        df,
+        y="y",
+        x=["x1", "x2"],
+        weight="weight",
+        options=OLSOptions(confidence_level=0.80),
+    ).fit()
+
+    for name in ["const", "x1", "x2"]:
+        wide_width = wide.conf_int[name][1] - wide.conf_int[name][0]
+        narrow_width = narrow.conf_int[name][1] - narrow.conf_int[name][0]
+        assert narrow_width < wide_width, name
+
+
+def test_hac_auto_lags_runs_and_returns_finite_std_errors(dataset):
+    """`hac_lags`省略時（`None`、自動計算式）でもエラーなく動作すること
+    （OLSと同じ検証。既存のHAC動作確認テストは`test_weight_one_matches_ols`
+    経由で`hac_lags`を明示していなかったが、`cov_type="hac"`自体のテストは
+    無かった）。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    options = OLSOptions(cov_type="hac")  # hac_lags省略 = 自動計算
+    res = WLS(
+        df, y="y", x=["x1", "x2"], weight="weight", options=options
+    ).fit()
+
+    assert res.cov_type == "hac"
+    for se in res.std_errors.values():
+        assert se > 0.0
+
+
+def test_hac_time_col_reorders_rows_before_computing_lags():
+    """`time_col`を指定すると、DataFrameの行順に関わらず時系列順で
+    ラグ付き自己共分散を計算すること（OLSと同じ検証データ・観点、重み=1で
+    OLSと同じ結果になることを利用する）。
+    """
+    ordered_df = pl.DataFrame(
+        {
+            "y": [2.0, 4.0, 5.0, 4.0, 5.0],
+            "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "weight": [1.0] * 5,
+        }
+    )
+    ordered_options = OLSOptions(cov_type="hac", hac_lags=1)
+    ordered_res = WLS(
+        ordered_df, y="y", x=["x1"], weight="weight", options=ordered_options
+    ).fit()
+
+    shuffled_df = pl.DataFrame(
+        {
+            "y": [5.0, 2.0, 5.0, 4.0, 4.0],
+            "x1": [3.0, 1.0, 5.0, 2.0, 4.0],
+            "time": [3.0, 1.0, 5.0, 2.0, 4.0],
+            "weight": [1.0] * 5,
+        }
+    )
+    shuffled_options = OLSOptions(cov_type="hac", hac_lags=1, time_col="time")
+    shuffled_res = WLS(
+        shuffled_df,
+        y="y",
+        x=["x1"],
+        weight="weight",
+        options=shuffled_options,
+    ).fit()
+
+    for name in ["const", "x1"]:
+        assert (
+            abs(shuffled_res.std_errors[name] - ordered_res.std_errors[name])
+            < 1e-9
+        ), name

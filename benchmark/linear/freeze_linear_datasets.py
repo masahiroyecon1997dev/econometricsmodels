@@ -25,8 +25,8 @@ from _common import freeze_scenarios, run_freeze_cli
 from generate_linear_datasets import generate_linear_dataset
 
 # generate_ols_fixtures.py / generate_wls_fixtures.py のNUMERIC_SCENARIOSに
-# perfect_multicollinearity（ComputationErrorパスのテストで使う、数値比較はしない）
-# を加えた全シナリオ。
+# perfect_multicollinearity・scale_variance（いずれもComputationErrorパスの
+# テストで使う、数値比較はしない）を加えた全シナリオ。
 SYNTHETIC_SCENARIOS = [
     "baseline",
     "small_n",
@@ -36,6 +36,7 @@ SYNTHETIC_SCENARIOS = [
     "moderate_multicollinearity",
     "perfect_multicollinearity",
     "scale_variance",
+    "scale_variance_mild",
     "high_condition_number",
 ]
 

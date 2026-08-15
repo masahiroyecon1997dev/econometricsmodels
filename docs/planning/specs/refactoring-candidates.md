@@ -181,3 +181,16 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   名前付き定数として集約する余地がある。項目9と合わせて対応すると効率が良さそう。
 - **気づいた経緯**: 2026-08-15、`generate_iv_datasets.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 11. `_run_cluster_case`（generate_ols_fixtures.py）が`run_statsmodels_benchmark.py`の`coef`/`se`抽出ロジックと重複
+
+- **対象**: [benchmark/linear/fixtures/generate_ols_fixtures.py:154-158](../../../benchmark/linear/fixtures/generate_ols_fixtures.py#L154-L158)・
+  [benchmark/linear/run_statsmodels_benchmark.py:104-106](../../../benchmark/linear/run_statsmodels_benchmark.py#L104-L106)
+- **内容**: `_run_cluster_case`は、CSVに無い疑似グループ列`_group`を動的に追加する必要が
+  あるため`run()`を再利用できず、statsmodelsを独自に直接呼んでいる（正当な理由）。
+  ただし`{str(name): float(v) for name, v in model.params.to_dict().items()}`という
+  `coef`/`se`抽出の辞書内包表記は、`run()`内の同種のコードとほぼ同じパターンで重複している。
+- **Claudeの所感**: `_common.py`に`extract_coef_se(model) -> dict`のような小さな
+  ヘルパーを切り出せる余地はあるが、規模は小さく優先度は低い。
+- **気づいた経緯**: 2026-08-15、`generate_ols_fixtures.py`解説中に発見。
+- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）

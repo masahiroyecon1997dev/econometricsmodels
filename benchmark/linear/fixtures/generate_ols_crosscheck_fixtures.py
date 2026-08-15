@@ -1,7 +1,7 @@
-"""OLSのクロスチェック用フィクスチャ（tests/api_tests/fixtures/benchmarks/ols_crosscheck.json）を
+"""OLSのクロスチェック用フィクスチャ（tests/fixtures/benchmarks/ols_crosscheck.json）を
 生成するスクリプト。
 
-`tests/api_tests/fixtures/benchmarks/ols.json`（statsmodels、主リファレンス）とは別に、
+`tests/fixtures/benchmarks/ols.json`（statsmodels、主リファレンス）とは別に、
 独立実装（R: lm + sandwich/lmtest）によるクロスチェック値を生成する。役割分担は
 `.claude/rules/testing-policy.md`「リファレンス実装」章の通り:
 
@@ -15,15 +15,20 @@ pyfixestのHC2/HC3はfixestの仕様ではなく**pyfixest自身の実装バグ*
 `docs/spec/ols-spec.md`「テスト」参照。
 
 classical/HC0-3/clusterはRとほぼ機械精度で一致するため厳密比較、HACのみ小標本補正の
-慣習差により緩い許容誤差で比較する（`tests/api_tests/test_ols_crosscheck.py`参照）。
+慣習差により緩い許容誤差で比較する（`tests/test_ols_crosscheck.py`参照）。
 
-`predict()`（`docs/spec/ols-spec.md`「predict()」、Issue #86）も対象に含める。
+`predict()`（`docs/spec/ols-spec.md`「predict()」）も対象に含める。
 `run_lm_predict_crosscheck.R`を使い、全シナリオで学習データに対する予測値（fitted）を、
 baselineシナリオのみ新規データに対する予測値（predicted、`PREDICT_NEW_DATA`参照）を
 crosscheckする。
 
-係数・標準誤差に加え、AIC/BIC/対数尤度・F統計量・F検定p値もRクロスチェック対象に含める
-（`testing-policy.md`「リファレンス実装」章の方針。全統計量を独立実装でもクロスチェックする）。
+係数・標準誤差に加え、t値・p値・信頼区間・R²・調整済みR²・AIC/BIC/対数尤度・
+F統計量・F検定p値もRクロスチェック対象に含める（`testing-policy.md`
+「リファレンス実装」章の方針。全統計量を独立実装でもクロスチェックする）。
+信頼区間はconfidence_level=0.95固定（フィクスチャ側でconfidence_levelを
+変えていないため）で、cov_typeごとのvcov・df_inferenceに基づく手計算値
+（`coefs ± qt(0.975, df_inference) * ses`）。R²・調整済みR²はAIC/BIC等と同じく
+cov_typeに依存しない（`summary(model)`の値をそのまま使う）。
 AIC/BICはRの`AIC()`/`BIC()`標準関数（残差分散を1パラメータとして追加でカウントするk+1慣習）
 ではなく、`run_lm_crosscheck_benchmark.R`側で本実装・statsmodelsと同じ式（`-2*loglik + 2*k`等、kは
 回帰係数の数のみ）で手計算した値を使う（実測でRの標準関数はAICがちょうど2、BICがlog(n)だけ
@@ -31,18 +36,18 @@ AIC/BICはRの`AIC()`/`BIC()`標準関数（残差分散を1パラメータと�
 （`β_slopes' Σ⁻¹ β_slopes / q`）をcov_typeごとの共分散行列で計算しており、cov_typeに依存する。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`ols_crosscheck.json`は
-`tests/api_tests/fixtures/`に置く（`testing-policy.md`「ベンチマーク値のフィクスチャ化」参照）。
+`tests/fixtures/`に置く（`testing-policy.md`「ベンチマーク値のフィクスチャ化」参照）。
 
-合成データの入力は`tests/api_tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
+合成データの入力は`tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
 （`benchmark/freeze_datasets.py`参照）。`imbalanced_cluster_groups`（純粋にnから
 決定論的にラベルを組み立てるだけで乱数を使わない）のみ、引き続き
-`generate_synthetic_datasets.py`を直接呼ぶ。Wooldridgeデータは`load_wooldridge.py`
+`generate_linear_datasets.py`を直接呼ぶ。Wooldridgeデータは`load_wooldridge.py`
 経由で都度ロードする（データの再配布ライセンスが未確認のためCSVとして固定しない。
 `freeze_datasets.py`のdocstring参照）。
 
 使用例:
     python generate_ols_crosscheck_fixtures.py \\
-        --output ../../../tests/api_tests/fixtures/benchmarks/ols_crosscheck.json
+        --output ../../../tests/fixtures/benchmarks/ols_crosscheck.json
 """
 
 from __future__ import annotations
@@ -52,7 +57,7 @@ import json
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(
@@ -60,20 +65,22 @@ sys.path.insert(
 )  # benchmark/linear/ を import path に追加（run_statsmodels_benchmark）
 sys.path.insert(
     0, str(Path(__file__).resolve().parents[2])
-)  # benchmark/ を import path に追加（generate_synthetic_datasets）
+)  # benchmark/ を import path に追加（_common）
 
-import polars as pl  # noqa: E402
-import statsmodels  # noqa: E402
-
-from generate_synthetic_datasets import imbalanced_cluster_groups  # noqa: E402
-from load_wooldridge import load as load_wooldridge  # noqa: E402
-from run_statsmodels_benchmark import DATA_DIR  # noqa: E402
+import polars as pl
+import statsmodels
+from _common import (
+    DATA_DIR,
+    hac_auto_lag,
+    imbalanced_cluster_groups,
+)
+from load_wooldridge import load as load_wooldridge
 
 LINEAR_DIR = Path(__file__).resolve().parent.parent
 R_SCRIPT = LINEAR_DIR / "run_lm_crosscheck_benchmark.R"
 PREDICT_R_SCRIPT = LINEAR_DIR / "run_lm_predict_crosscheck.R"
 
-# fitted_values/predict()（Issue #86）のout-of-sample crosscheck用の新規データ
+# fitted_values/predict()のout-of-sample crosscheck用の新規データ
 # （baselineシナリオのみ）。学習データの実現値とは無関係に、x1/x2/x3の値域内で
 # 手で選んだ値。predict(new_data)の列名マッチング（列順は問わない）も合わせて
 # 確認するため、Python側テストではx3/x1/x2の順に並べ替えて渡す想定。
@@ -84,7 +91,7 @@ PREDICT_NEW_DATA = {
 }
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（generate_ols_fixtures.pyと
-# 同じ方針。scale_varianceは全cov_typeでComputationErrorになる、Issue #107）。
+# 同じ方針。scale_varianceは全cov_typeでComputationErrorになる）。
 NUMERIC_SCENARIOS = [
     "baseline",
     "small_n",
@@ -93,20 +100,14 @@ NUMERIC_SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "high_condition_number",
-    # n=k+1（自由度1ちょうど）の成功パス（Issue #101）。
+    # scale_varianceより緩いスケール差の成功パス（generate_ols_fixtures.py
+    # と同じ理由）。
+    "scale_variance_mild",
+    # n=k+1（自由度1ちょうど）の成功パス。
     "baseline_df1",
 ]
 
 R_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
-
-
-def _hac_auto_lag(n: int) -> int:
-    """本実装（engine::linear::ols::resolve_hac_lags）と同じ自動ラグ式。
-
-    R側・本実装の両方に同じ明示ラグを渡すことで、自動選択式の実装差を
-    比較対象から除外し、HAC公式自体の妥当性のみを確認する。
-    """
-    return int(4 * (n / 100) ** (2 / 9))
 
 
 def _run_r(
@@ -142,9 +143,23 @@ def _normalize_names(raw: dict) -> dict:
         "coef": {fix(k): v for k, v in raw["coef"].items()},
         "se": {fix(k): v for k, v in raw["se"].items()},
     }
-    # aic/bic/log_likelihood/f_statistic/f_p_valueはrun_lm_crosscheck_benchmark.Rが返す
-    # （run_fixest_benchmark.R等、他パッケージのスクリプトは対象外）。
-    for key in ("aic", "bic", "log_likelihood", "f_statistic", "f_p_value"):
+    if "t_stats" in raw:
+        result["t_stats"] = {fix(k): v for k, v in raw["t_stats"].items()}
+    if "p_values" in raw:
+        result["p_values"] = {fix(k): v for k, v in raw["p_values"].items()}
+    if "conf_int" in raw:
+        result["conf_int"] = {fix(k): v for k, v in raw["conf_int"].items()}
+    # aic/bic/log_likelihood/f_statistic/f_p_value/r_squared/r_squared_adjは
+    # run_lm_crosscheck_benchmark.Rが返す（fixest等、他パッケージのスクリプトは対象外）。
+    for key in (
+        "aic",
+        "bic",
+        "log_likelihood",
+        "f_statistic",
+        "f_p_value",
+        "r_squared",
+        "r_squared_adj",
+    ):
         if key in raw:
             result[key] = raw[key]
     return result
@@ -185,7 +200,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         for cov_type in R_COV_TYPES:
             entry: dict = {}
             if cov_type == "hac":
-                lag = _hac_auto_lag(n)
+                lag = hac_auto_lag(n)
                 entry["r"] = _run_r(csv_path, formula, cov_type, hac_lag=lag)
                 entry["hac_lag"] = lag
             else:
@@ -193,7 +208,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
 
             fixtures[scenario][cov_type] = entry
 
-        # fitted_values/predict()（Issue #86）。全シナリオで学習データに対する
+        # fitted_values/predict()。全シナリオで学習データに対する
         # 予測値（fitted）をcrosscheckし、baselineシナリオのみout-of-sample予測値
         # （predicted）も合わせて確認する。
         if scenario == "baseline":
@@ -296,7 +311,7 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
 
 def _run_wage1_region_cluster_case(df, csv_path: Path, formula: str) -> dict:
     """wage1の地域ダミー（northcen/south/west）から実カテゴリ列regionを作り、
-    クラスターロバストSEをRクロスチェックする（Issue #100「実データでのグループ列」）。
+    クラスターロバストSEをRクロスチェックする（「実データでのグループ列」）。
     いずれのダミーも0の行を基準カテゴリ"northeast"とする（4グループ、不均衡サイズ）。
     """
     region = (
@@ -334,12 +349,13 @@ def build_fixtures() -> dict:
         "method": "ols",
         "purpose": (
             "statsmodels主リファレンス（ols.json）とは独立した実装（R: lm + "
-            "sandwich/lmtest）によるクロスチェック用。係数・標準誤差・AIC・"
-            "BIC・対数尤度・F統計量・F検定p値を含む。classical/HC0-3/cluster"
-            "は厳密比較、HACのみ緩い許容誤差での比較を想定する"
-            "（testing-policy.md参照）"
+            "sandwich/lmtest）によるクロスチェック用。係数・標準誤差・t値・"
+            "p値・信頼区間・R²・調整済みR²・AIC・BIC・対数尤度・F統計量・"
+            "F検定p値を含む（信頼区間はconfidence_level=0.95固定で計算）。"
+            "classical/HC0-3/clusterは厳密比較、HACのみ緩い許容誤差での比較を"
+            "想定する（testing-policy.md参照）"
         ),
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "r_version": r_version,
         "statsmodels_version": statsmodels.__version__,
         "note": (
@@ -349,12 +365,11 @@ def build_fixtures() -> dict:
             "clusterはbaselineシナリオのみ、R側のみ確認。均等疑似グループ（行番号%10）"
             "に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2"
             "（cluster_g2）、wage1の実カテゴリ列region（northcen/south/west"
-            "ダミーから合成、基準カテゴリnortheast）を含む（Issue #100）。"
+            "ダミーから合成、基準カテゴリnortheast）を含む。"
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
             "pyfixestとの比較は正確性検証から除外（性能比較専用）。"
-            "high_condition_number/baseline_df1は境界値・悪条件ケース"
-            "（Issue #101）。scale_variance（Issue #101で追加、#107で発覚）は"
-            "ここに含まない。傾き係数の同時共分散部分行列の条件数が倍精度の"
+            "high_condition_number/baseline_df1は境界値・悪条件ケース。"
+            "scale_varianceはここに含まない。傾き係数の同時共分散部分行列の条件数が倍精度の"
             "限界を超え、本実装・RのSolve()の双方が全cov_typeで計算不能"
             "（エラー）になるため（perfect_multicollinearityと同様、"
             "ComputationErrorの発生確認のみテストコード側で対応）。"
@@ -367,7 +382,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/api_tests/fixtures/benchmarks/ols_crosscheck.json",
+        default="../../../tests/fixtures/benchmarks/ols_crosscheck.json",
     )
     args = parser.parse_args()
 

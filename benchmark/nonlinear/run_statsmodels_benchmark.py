@@ -3,7 +3,7 @@
 
 Logit/Probitの主リファレンスとして使用する。`benchmark/linear/
 run_statsmodels_benchmark.py`（OLS/WLS用）と同型の設計。元々Logit専用だったが、
-Probit追加（Issue #84）にあたり`--model logit`/`--model probit`で切り替えられる
+Probit追加にあたり`--model logit`/`--model probit`で切り替えられる
 よう一般化した（`--weight-col`でOLS/WLSを切り替える`linear`系統の設計と同じ発想。
 `smf.logit`/`smf.probit`のAPI形状が完全に同じで、下記の各種既知の欠落・回避策も
 両モデルで同一のため、一般化の実装コストが小さいことをベンチマーク作成時に
@@ -62,34 +62,19 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
-import polars as pl
 
 sys.path.insert(
     0, str(Path(__file__).resolve().parents[1])
-)  # benchmark/ を import path に追加（load_wooldridge）
+)  # benchmark/ を import path に追加（load_wooldridge, _common）
 
-from load_wooldridge import load as _load_wooldridge  # noqa: E402
-
-DATA_DIR = (
-    Path(__file__).resolve().parents[2]
-    / "tests"
-    / "api_tests"
-    / "fixtures"
-    / "benchmarks"
-    / "data"
-)
+from _common import load_frozen_dataset as _load_synthetic
+from load_wooldridge import load as _load_wooldridge
 
 MARGEFF_AT = ["overall", "mean", "median"]
-
-
-def _load_synthetic(model: str, dataset: str) -> tuple:
-    df = pl.read_csv(DATA_DIR / f"{model}_{dataset}.csv")
-    true_betas = json.loads((DATA_DIR / f"{model}_true_beta.json").read_text())
-    return df, true_betas.get(dataset)
 
 
 def _margeff_frame(fit_result, at: str) -> dict:
@@ -118,6 +103,7 @@ def run(
     cluster_col: str | None = None,
     confidence_level: float = 0.95,
     model: str = "logit",
+    method: str = "newton",
 ) -> dict:
     import statsmodels.formula.api as smf
 
@@ -146,7 +132,9 @@ def run(
     alpha = 1.0 - confidence_level
 
     if cov_type.lower() == "opg":
-        base = smf_fit(formula=formula, data=pandas_df).fit(disp=0)
+        base = smf_fit(formula=formula, data=pandas_df).fit(
+            disp=0, method=method
+        )
         params = base.params.to_numpy()
         param_names = list(base.params.index)
         scores = base.model.score_obs(params)
@@ -176,7 +164,7 @@ def run(
         sm_cov_type = {"classical": "nonrobust"}.get(
             cov_type.lower(), cov_type.lower()
         )
-        fit_kwargs: dict = {"cov_type": sm_cov_type}
+        fit_kwargs: dict = {"cov_type": sm_cov_type, "method": method}
         if sm_cov_type == "cluster":
             fit_kwargs["cov_kwds"] = {"groups": pandas_df[cluster_col]}
 
@@ -214,7 +202,11 @@ def run(
     result["df_model"] = float(model_for_stats.df_model)
     result["df_resid"] = float(model_for_stats.df_resid)
     result["converged"] = bool(model_for_stats.mle_retvals["converged"])
-    result["n_iter"] = int(model_for_stats.mle_retvals["iterations"])
+    # bfgs（lbfgsと異なりHessian近似`Hinv`のみを返す）は"iterations"キーを持たない
+    # （scipy.optimize.fmin_bfgsの戻り値の都合）。他手法との反復回数比較は
+    # 用途上不要なため、無い場合はNoneのまま出力する。
+    n_iter = model_for_stats.mle_retvals.get("iterations")
+    result["n_iter"] = int(n_iter) if n_iter is not None else None
     result["pred_table"] = model_for_stats.pred_table().tolist()
 
     if true_beta is not None:
@@ -225,9 +217,10 @@ def run(
     result["_meta"] = {
         "reference": "statsmodels",
         "statsmodels_version": statsmodels.__version__,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "model": model,
         "cov_type_requested": cov_type,
+        "method_requested": method,
         "confidence_level": confidence_level,
         "formula": formula,
     }
@@ -251,6 +244,7 @@ if __name__ == "__main__":
     parser.add_argument("--cov-type", default="classical")
     parser.add_argument("--cluster-col", default=None)
     parser.add_argument("--confidence-level", type=float, default=0.95)
+    parser.add_argument("--method", default="newton")
     args = parser.parse_args()
 
     output = run(
@@ -261,5 +255,6 @@ if __name__ == "__main__":
         args.cluster_col,
         args.confidence_level,
         args.model,
+        args.method,
     )
     print(json.dumps(output, indent=2))

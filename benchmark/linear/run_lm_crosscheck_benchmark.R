@@ -34,6 +34,13 @@ df <- read.csv(data_path, check.names = FALSE)
 library(sandwich)
 library(lmtest)
 
+# coeftest()からの係数・標準誤差抽出とロバストWald F検定はrun_ivreg_benchmark.R
+# と共通のため、benchmark/_common.Rに抽出している（Rには__file__相当が無いため、
+# commandArgs()の--file=から自身のディレクトリを特定してsource()する）。
+script_args <- commandArgs(trailingOnly = FALSE)
+script_dir <- dirname(sub("^--file=", "", grep("^--file=", script_args, value = TRUE)))
+source(file.path(script_dir, "..", "_common.R"))
+
 cov_type <- ifelse(length(args) >= 3, tolower(args[3]), "classical")
 
 # weight_colはcov_type固有の引数（cluster_col/hac_lag）の後ろに置く。
@@ -71,31 +78,40 @@ df_inference <- df.residual(model)
 
 if (cov_type == "classical") {
   vc <- vcov(model)
-  ct <- coeftest(model, vcov = vc)
 } else if (cov_type %in% c("hc0", "hc1", "hc2", "hc3")) {
   vc <- vcovHC(model, type = toupper(cov_type))
-  ct <- coeftest(model, vcov = vc)
 } else if (cov_type == "cluster") {
   # cadjust=TRUE: G/(G-1)の小標本補正を適用する（Stata流、本実装のcluster_cov_paramsと同じ方針）
   vc <- vcovCL(model, cluster = df[[cluster_col]], type = "HC1", cadjust = TRUE)
   # 本実装（engine::linear::ols::OlsEstimator::fit）と同じくG-1（クラスター数-1）を
   # F検定の自由度に使う（AIC/BIC/対数尤度等はdf_residualのまま変えない、本実装と同じ方針）。
   df_inference <- length(unique(df[[cluster_col]])) - 1
-  ct <- coeftest(model, vcov = vc, df = df_inference)
 } else if (cov_type == "hac") {
   # 本実装（Newey-West, Bartlettカーネル）と同じlagを明示的に渡し、
   # bwNeweyWest()による自動バンド幅選択（本実装のfloor(4*(n/100)^(2/9))とは
   # 別のアルゴリズム）とは条件を揃えて比較する。
   vc <- NeweyWest(model, lag = lag, prewhite = FALSE, adjust = TRUE)
-  ct <- coeftest(model, vcov = vc)
 } else {
   stop(paste("unknown cov_type:", cov_type))
 }
 
-coefs <- ct[, 1]
-ses <- ct[, 2]
-names(coefs) <- rownames(ct)
-names(ses) <- rownames(ct)
+coef_se <- extract_coef_se(model, vc, df_inference)
+coefs <- coef_se$coefs
+ses <- coef_se$ses
+t_stats <- coef_se$t_stats
+p_values <- coef_se$p_values
+
+# 信頼区間（既定confidence_level=0.95固定。本実装・statsmodelsのcov_typeによらず
+# t分布を使う方針と揃え、上で計算したvc・df_inferenceベースのses・t臨界値から
+# 手計算する（baseのconfint(model)はclassicalのvcovしか使わないため使えない）。
+crit <- qt(0.975, df_inference)
+conf_lower <- coefs - crit * ses
+conf_upper <- coefs + crit * ses
+
+# R²・調整済みR²はcov_typeに依存しない（残差・SSTのみに基づく）ため、
+# summary()の値をそのまま使う（本実装・statsmodelsと同じ定義）。
+r_squared_val <- summary(model)$r.squared
+r_squared_adj_val <- summary(model)$adj.r.squared
 
 # AIC/BIC/対数尤度はcov_typeに依存しない（残差・SSRのみに基づく）。
 # R標準のAIC()/BIC()（stats:::AIC.lm）は使わない。推定された残差分散σ²を
@@ -110,28 +126,26 @@ aic_val <- -2 * loglik_val + 2 * k_params
 bic_val <- -2 * loglik_val + log(n_obs) * k_params
 
 # F統計量・F検定p値はcov_typeに依存する（本実装のwald_f_testと同じロバストWald検定、
-# `F = (β_slopes' Σ⁻¹ β_slopes) / q`。上で計算したvc・df_inferenceをそのまま使う）。
-#
-# 傾き係数の同時共分散部分行列が数値的に特異な場合（変数間のスケールが極端に
-# 異なる設計行列等）、solve()は"system is computationally singular"としてエラーを
-# 投げる。本実装（engine::linear::ols::wald_f_test）も固有値分解による相対閾値判定で
-# 同様のケースをComputationErrorとして検出するため（Issue #107）、この関数の
-# 呼び出し元（generate_ols_crosscheck_fixtures.py）はそのようなケースを
-# NUMERIC_SCENARIOSから除外し、両実装が計算不能で一致することのみ確認する
-# （perfect_multicollinearityと同じ方針）。
-coef_names <- names(coef(model))
-slope_idx <- which(coef_names != "(Intercept)")
-beta_slopes <- coef(model)[slope_idx]
-df_model <- length(slope_idx)
-v_slopes <- vc[slope_idx, slope_idx, drop = FALSE]
-wald <- as.numeric(t(beta_slopes) %*% solve(v_slopes) %*% beta_slopes)
-f_statistic_val <- wald / df_model
-f_p_value_val <- 1 - pf(f_statistic_val, df_model, df_inference)
+# `F = (β_slopes' Σ⁻¹ β_slopes) / q`。上で計算したvc・df_inferenceをそのまま使う。
+# 特異な場合の扱い・NUMERIC_SCENARIOSからの除外方針はwald_f_test()のコメント参照）。
+f_test <- wald_f_test(model, vc, df_inference)
+f_statistic_val <- f_test$f_statistic
+f_p_value_val <- f_test$f_p_value
 
 library(jsonlite)
 result <- list(
   coef = as.list(coefs),
   se = as.list(ses),
+  t_stats = as.list(t_stats),
+  p_values = as.list(p_values),
+  conf_int = mapply(
+    function(lo, hi) list(lo, hi),
+    conf_lower,
+    conf_upper,
+    SIMPLIFY = FALSE
+  ),
+  r_squared = r_squared_val,
+  r_squared_adj = r_squared_adj_val,
   aic = aic_val,
   bic = bic_val,
   log_likelihood = loglik_val,

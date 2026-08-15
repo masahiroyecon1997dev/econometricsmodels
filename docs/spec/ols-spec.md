@@ -38,7 +38,11 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
 `r_squared` / `r_squared_adj` / `f_statistic` / `f_p_value` / `log_likelihood` / `aic` / `bic`。
 
 - `conf_int`は`conf_lower`/`conf_upper`の2配列に分割（engine内部表現・pyo3実装の簡潔さを優先）。
-- `k×kの分散共分散行列（cov_params）はPython側に公開しない`（`fit()`内のローカル変数として使い切る）。
+- `k×kの分散共分散行列（cov_params）はPython側に公開しない`。`OlsEstimator`自体は非公開
+  フィールドとして保持する（クレート内の他系統からの部分Wald検定の再利用のため、
+  `engine/src/linear/CLAUDE.md`参照。Issue #164でIVのWu-Hausman検定用に追加するまでは
+  `fit()`内のローカル変数として使い切っていた）が、`engine_pybind`側に公開する`OLSResult`
+  には引き続き含めない。
 - `summary()`（テキスト整形）・DataFrame版の`coef_table()`/`conf_int()`は作らない
   （economiconのGUIエンジンという用途上、テキスト表示・対話的操作を前提にしないため）。
 - python_package層（`OlsResults`）:
@@ -56,8 +60,7 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
   未満のものがあればランク落ち（絶対閾値は不採用、データスケール依存を避けるため）。この比較は
   `diag.is_nan() || diag <= threshold`という形で、NaNも明示的に検出する（`include_intercept=false`
   かつ全説明変数列がゼロという設計行列全体が完全にゼロのケースで、`col_piv_qr`が列選択時の0除算に
-  よりR対角成分にNaNを生成しうるため。単純な`<=`比較だとNaNとの比較が常にfalseになりすり抜ける。
-  Issue #109）。
+  よりR対角成分にNaNを生成しうるため。単純な`<=`比較だとNaNとの比較が常にfalseになりすり抜ける）。
 - 標準誤差計算用の`(X'X)⁻¹`（`xtx_inverse`）は`X'X`自体のCholesky分解で求める（QR分解の`R`因子から
   導出する案は実測で高速化しないことを確認済み）。
 
@@ -182,7 +185,7 @@ $$
 - pyfixestはOLSの正確性検証には使わない（HC2/HC3にHC1用の小標本補正を誤って適用する既知の
   実装バグがあるため）。性能比較専用（[`ols-performance-notes.md`](./ols-performance-notes.md)）。
 - `engine`側は上記の固定シナリオ単体テストに加え、property-basedテスト（`proptest`、
-  `engine/src/linear/ols.rs`の`mod proptests`）で不変条件を検証する（Issue #102。詳細な方針は
+  `engine/src/linear/ols.rs`の`mod proptests`）で不変条件を検証する（詳細な方針は
   `testing-policy.md`「property-basedテスト」参照）。対象プロパティ: 定数項ありなら残差和は常に0、
   yのスカラー倍で係数（切片含む）も同じ倍率でスケールする、xの列順序を入れ替えても係数名で
   対応付ければ値は変わらない、HC0の標準誤差は常にHC1以下。いずれも意図的なバグ注入により

@@ -1,4 +1,4 @@
-"""Logitのテストフィクスチャ（tests/api_tests/fixtures/benchmarks/logit.json）を
+"""Logitのテストフィクスチャ（tests/fixtures/benchmarks/logit.json）を
 生成するスクリプト。
 
 `benchmark/nonlinear/run_statsmodels_benchmark.py`（1回呼べば1ケース分の結果を返す
@@ -10,11 +10,11 @@
 docstring参照）。`hc1`は`generate_logit_crosscheck_fixtures.py`（R側、正しく補正を
 適用する`sandwich::vcovHC`）が主リファレンスの役割を担う（ユーザー確認済み）。
 
-入力データは`tests/api_tests/fixtures/benchmarks/data/`に固定済みのlogit_*.csvを読む
+入力データは`tests/fixtures/benchmarks/data/`に固定済みのlogit_*.csvを読む
 （`benchmark/freeze_datasets.py`参照）。
 
 使用例:
-    python generate_logit_fixtures.py --output ../../../tests/api_tests/fixtures/benchmarks/logit.json
+    python generate_logit_fixtures.py --output ../../../tests/fixtures/benchmarks/logit.json
 """
 
 from __future__ import annotations
@@ -22,17 +22,20 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(
     0, str(Path(__file__).resolve().parent.parent)
 )  # benchmark/nonlinear/ を import path に追加（run_statsmodels_benchmark）
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[2])
+)  # benchmark/ を import path に追加（_common）
 
-import polars as pl  # noqa: E402
-import statsmodels  # noqa: E402
-
-from run_statsmodels_benchmark import DATA_DIR, run  # noqa: E402
+import polars as pl
+import statsmodels
+from _common import DATA_DIR, imbalanced_cluster_groups
+from run_statsmodels_benchmark import run
 
 # perfect_multicollinearityは数値比較の対象外（ComputationErrorの発生確認のみ、
 # testing-policy.md「テストの3系統」）。
@@ -43,13 +46,19 @@ NUMERIC_SCENARIOS = [
     "high_condition_number",
     # logit特有の病理（準完全分離）。収束するが標準誤差が大きく膨らむ境界値ケース。
     "near_separation",
-    # 変数間のスケールが極端に異なるケース（generate_binary_choice_datasets.py参照。
+    # 変数間のスケールが極端に異なるケース（generate_nonlinear_datasets.py参照。
     # 真のDGPは未スケーリングのXで計算済みのため成功パス）。
     "scale_variance",
 ]
 
 # hc1はstatsmodelsで未実装のためここには含めない（上記docstring参照）。
 COV_TYPES = ["classical", "opg", "hc0", "cluster"]
+
+# newton以外のmethod（bfgs/lbfgs）が主リファレンスに対しフルの統計量（std_errors含む）で
+# 一致することの確認用（Issue #231フェーズ4のtesting-completeness-reviewer指摘）。
+# baselineシナリオ・classical cov_typeの1ケースのみで十分（method自体の違いは
+# 収束後の最適化点の精度差であり、シナリオ×cov_typeを掛け合わせる必要はない）。
+METHODS = ["bfgs", "lbfgs"]
 
 MROZ_FORMULA = (
     "inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6"
@@ -78,7 +87,7 @@ def build_fixtures() -> dict:
     n = pl.read_csv(DATA_DIR / "logit_baseline.csv").height
     fixtures["baseline"]["cluster"] = _run_cluster_case()
     fixtures["baseline"]["cluster_imbalanced"] = _run_cluster_case(
-        groups=_imbalanced_cluster_groups(n),
+        groups=imbalanced_cluster_groups(n),
         note="不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。",
     )
     fixtures["baseline"]["cluster_g2"] = _run_cluster_case(
@@ -113,9 +122,20 @@ def build_fixtures() -> dict:
         cluster_col="city",
     )
 
+    fixtures["method"] = {
+        method: run(
+            dataset_source="synthetic",
+            dataset="baseline",
+            formula=None,
+            cov_type="classical",
+            method=method,
+        )
+        for method in METHODS
+    }
+
     fixtures["_meta"] = {
         "method": "logit",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "primary_reference": "statsmodels",
         "statsmodels_version": statsmodels.__version__,
         "note": (
@@ -127,35 +147,20 @@ def build_fixtures() -> dict:
             "nullになっている（run_statsmodels_benchmark.py参照）。"
             "near_separationはlogit特有の病理（準完全分離）の境界値ケース。"
             "完全分離下でのNonConvergence検出には既知の限界があり、専用シナリオは"
-            "採用していない（docs/planning/specs/logit-implementation-notes.md参照）。"
+            "採用していない（docs/spec/logit-spec.md参照）。"
             "scale_varianceは真のDGPを未スケーリングのXで計算した後に列のみを"
-            "スケーリングする設計のため成功パス（generate_binary_choice_datasets.py参照）。"
+            "スケーリングする設計のため成功パス（generate_nonlinear_datasets.py参照）。"
             "n=k+1（自由度1ちょうど）の境界値ケースはOLSと異なり非採用（n<=kでは"
             "logitのMLEが構造的にほぼ確実に完全分離を起こすため、意味のある成功パスに"
-            "ならない。logit-implementation-notes.md参照）。"
+            "ならない。docs/spec/logit-spec.md参照）。"
             "mrozのcluster（city列、都市部居住ダミー）は実データでのクラスターロバスト"
             "SE確認用。"
+            "methodはbfgs/lbfgsがnewtonと同じ最尤解・標準誤差に収束することを主"
+            "リファレンスに対して確認するためのfixture（baselineシナリオ・classical"
+            "cov_typeの1ケースのみ、Issue #231フェーズ4で追加）。"
         ),
     }
     return fixtures
-
-
-# 疑似グループのパターン生成（OLSのgenerate_synthetic_datasets.imbalanced_cluster_groupsと
-# 同じ設計、[2,3,5,10,30,50]のタイルをnに応じて繰り返す）。
-_IMBALANCED_CLUSTER_TILE = [2, 3, 5, 10, 30, 50]
-
-
-def _imbalanced_cluster_groups(n: int) -> list[str]:
-    if n % 100 != 0:
-        raise ValueError(f"n must be a multiple of 100, got n={n}")
-    n_tiles = n // 100
-    labels: list[str] = []
-    group_idx = 0
-    for _ in range(n_tiles):
-        for size in _IMBALANCED_CLUSTER_TILE:
-            labels.extend([f"g{group_idx}"] * size)
-            group_idx += 1
-    return labels
 
 
 def _run_cluster_case(
@@ -186,7 +191,7 @@ def _run_cluster_case(
         "_meta": {
             "reference": "statsmodels",
             "statsmodels_version": statsmodels.__version__,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "note": note,
             "formula": formula,
         },
@@ -197,7 +202,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/api_tests/fixtures/benchmarks/logit.json",
+        default="../../../tests/fixtures/benchmarks/logit.json",
     )
     args = parser.parse_args()
 

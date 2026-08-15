@@ -36,7 +36,7 @@
 6. **Phase 6（IO手法）**: ロジット, Nested Logit, Random Coefficient Logit, シングルエージェントモデル, 静学ゲーム, 動学ゲーム
 7. **Phase 7（後回し・時系列）**: ARCH, GARCH, VAR
 
-各フェーズは前段の実装を基盤として進める。フェーズ内のタスク分解は、リポジトリ構成確定後（本方針書の第11章）に着手時にあわせて行う。
+各フェーズは前段の実装を基盤として進める。フェーズ内のタスク分解は、本方針書のリポジトリ構成（第11章）を踏まえ、各フェーズの着手時に行う。
 
 ## 5. 対象プラットフォーム・Pythonバージョン
 
@@ -115,9 +115,7 @@ econometricsmodels/
 │       ├── __init__.py            # engine_pybindからのインポート、Polarsラッパーロジック
 │       └── py.typed               # 型定義があることを明示する空ファイル
 │
-├── tests/
-│   ├── engine_tests/              # engineの純粋ロジックテスト（cargo test）
-│   └── api_tests/                 # pyfixest / R実装との答え合わせテスト（pytest）
+├── tests/                          # pyfixest / R実装との答え合わせテスト（pytest）
 │
 ├── docs/                          # MkDocsドキュメント（GitHub Pages公開）
 │   ├── mkdocs.yml
@@ -142,5 +140,3 @@ econometricsmodels/
 ## 12. 今後の検討事項（未確定）
 
 - IO手法（動学ゲーム等）で必要になる数値最適化ライブラリの選定（後日、argmin, ipopt-rs等を比較検討）
-- `.devcontainer` の詳細な中身（VSCode拡張機能、追加ツール等）
-- Phase 1（OLS等）の詳細タスク分解（本方針書のリポジトリ構成をもとに次段階で着手）

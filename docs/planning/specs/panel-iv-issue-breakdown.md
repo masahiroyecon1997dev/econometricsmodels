@@ -1,10 +1,10 @@
 # FE / RE / IV Issueタスク分解
 
 `docs/planning/specs/panel-api-design.md`（FE/RE共通・FE固有・RE固有）・
-`iv-api-design.md`（IV共通差分・IV固有）で確定した設計を、Logit/Probit実装時の粒度
-（`logit-probit-issue-breakdown.md`。engine共通基盤→engine型定義→推定コア→標準誤差→
-適合度統計量→診断メソッド→engine_pybind境界→python_packageラッパー→ベンチマーク→
-ドキュメント、という流れ）に倣ってIssue単位に分解する。
+`iv-api-design.md`（IV共通差分・IV固有）で確定した設計を、Logit/Probit実装時と同じ粒度
+（engine共通基盤→engine型定義→推定コア→標準誤差→適合度統計量→診断メソッド→
+engine_pybind境界→python_packageラッパー→ベンチマーク→ドキュメント、という流れ）に
+倣ってIssue単位に分解する。
 
 数式・アルゴリズムの細部（Driscoll-Kraayのバンド幅パラメータ設計等）はこの時点では確定させず、
 各Issue本文の中で決める。
@@ -58,7 +58,7 @@ Issue化済み（2026-08-02）:
 - [x] **B4. GMM共通推定コアの実装（`weight_type`対応）** → [#160](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/160)
   `weight_type`（unadjusted/robust/cluster/kernel）ごとの重み行列で点推定。2SLSをこのコアの
   特殊ケース（`weight_type="unadjusted"`, 1-step）として吸収できるかはB3実装後に判断する
-  （無理なら独立実装のままでよい、Issue #122の「無理をしない」方針）。詳細: `iv-api-design.md`6.2節
+  （無理なら独立実装のままでよい、「無理をしない」という既定方針に従う）。詳細: `iv-api-design.md`6.2節
   - 依存: B2（#156）、B3（#157、共通化の可否判断のため）
 - [x] **B5. `gmm_iterations`（1-step/2-step efficient）の実装** → [#165](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/165)
   デフォルト2（efficient two-step）、1で1-step GMM。詳細: `iv-api-design.md`6.2節
@@ -96,8 +96,39 @@ Issue化済み（2026-08-02）:
 - [x] **B16. tests/api_tests: linearmodels/ivregとの数値照合ベンチマーク作成** → [#171](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/171)
   GMMはPython（linearmodels）単独検証（Rクロスチェック省略、`iv-api-design.md`5.3節）。
   - 依存: B15（#161）
+  - **完了済み**: 2SLSのlinearmodelsクロスチェック（`tests/api_tests/test_iv_fixtures.py`、
+    コミット`8d84a18`）、GMMのlinearmodelsクロスチェック（`tests/api_tests/test_iv_gmm_fixtures.py`、
+    コミット`01aff46`）、ValidationError系のAPI/構造テスト（`tests/api_tests/test_iv.py`、
+    コミット`5e38f2f`）。副次的に発見・修正したバグ2件（G=2クラスター境界での
+    `has_intercept`混同バグ、GMM `cov_type=Classical`のσ̂²非中心化バグ）は
+    `engine/src/iv/CLAUDE.md`参照。
+    2SLSの`ivreg`（R）クロスチェック（`tests/api_tests/test_iv_crosscheck.py`、
+    `benchmark/iv/fixtures/generate_iv_crosscheck_fixtures.py`、
+    `benchmark/iv/run_ivreg_benchmark.R`）も完了。devcontainerのR更新
+    （Debian bookworm標準4.2.2→CRAN APTリポジトリ経由で4.6.1系、`.devcontainer/Dockerfile`
+    修正済み）後にコンテナ再構築・`ivreg`導入確認（R 4.5.3、`ivreg`利用可能）を行い、
+    シナリオ・cov_type構成はlinearmodelsクロスチェック（`generate_iv_fixtures.py`）と揃えた。
+    `ivreg`の`summary(diagnostics=TRUE)`は弱操作変数F統計量・Sargan・Wu-Hausmanを
+    一括で返すが常にclassical（iid）vcov固定（実測確認済み）のため、weak_instrument_f・
+    sarganはcov_typeによらず一律クロスチェック、wu_hausmanはclassical cov_typeのみ
+    クロスチェック（hc0/hc1/clusterは既存のlinearmodelsクロスチェックに委ねる、
+    ユーザー確認済み）。テスト実装中に2件の許容誤差の細部を確認・確定
+    （`test_iv_crosscheck.py`のモジュールdocコメント参照）: small_nシナリオ
+    （n=40, hac_lag=3）のみHACの実測乖離が他シナリオ（0.3〜0.8%程度）より大きい
+    （SE最大3.8%、F統計量最大8.1%）ため専用の緩めた許容誤差（10%）を設定、
+    `f_p_value`がアンダーフローに近い極小値のときは相対誤差ではなく絶対誤差フロア
+    （1e-5）で比較する方式に変更。
 - [x] **B17. ドキュメント（mkdocs）** → [#162](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/162)
   - 依存: B16（#171）
+  - **完了済み**: Logit/Probit（`docs/api/logit.md`/`probit.md`）と同じ構成で`docs/api/iv.md`を
+    新規作成（mkdocstringsによる`IV`/`IvOptions`/`IvResults`の自動リファレンスに、IV固有の
+    手書き補足セクション: 標準誤差の種類、GMMの`weight_type`/反復設定、3種の診断
+    （弱操作変数F統計量・過剰識別検定・Wu-Hausman検定）、`first_stage()`）。`docs/mkdocs.yml`の
+    navに`API Reference > IV`を追加、`docs/getting-started.md`にIVセクション（基本的な`fit()`・
+    診断・`first_stage()`の使用例）を追加、`docs/index.md`の「Supported methods」もIV追加を反映
+    （Tobit/FE/REは未実装のため「will be added in the future」側に残した）。
+    `uv run --group docs mkdocs build --config-file docs/mkdocs.yml`で正常にビルドできることを
+    確認済み（既存の未解消警告のみ、IV追加による新規警告なし）。
 
 ## C. FE/RE共通基盤（panel系統、IV完了後・FE着手前）
 
@@ -236,7 +267,7 @@ IV（A含む）で20 Issue、FE（C含む）で20 Issue、RE（Eのみ）で13 I
 ## 未確定・Issue化時に決める事項
 
 - 2SLSをGMM共通コア（B4）の特殊ケースとして実装できるか、それとも独立実装のままにするかの
-  実際の判断（B4着手時、Issue #122の「無理をしない」方針に従う）
+  実際の判断（B4着手時、「無理をしない」という既定方針に従う）
 - FEの`OlsEstimator`委譲（D5）が実装上うまくいくか、補正が管理可能な範囲に収まるかの判断
   （D5着手時、うまくいかない場合はFE専用実装に切り替え）
 - Driscoll-Kraayのバンド幅パラメータの具体的な設計（D8着手時）

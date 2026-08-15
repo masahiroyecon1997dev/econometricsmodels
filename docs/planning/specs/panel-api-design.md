@@ -3,12 +3,12 @@
 [`panel-iv-design-points.md`](../panel-iv-design-points.md)の論点をモデルごとにIssue化したうちの、
 FE/RE共通部分の確定事項をまとめる。IV固有の設計は[`iv-api-design.md`](./iv-api-design.md)を参照。
 
-**ステータス**: 確定（1章: 引数設計、Issue #119／2章: 結果設計、Issue #120／3章: 標準誤差・検定、
-Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレンス実装・テスト方針、Issue #123／
-6章: FE固有論点、Issue #124／7章: RE固有論点、Issue #125）。FE/RE側の論点はすべて確定。
-IV固有論点（Issue #126）は`iv-api-design.md`参照。
+**ステータス**: 確定（1章: 引数設計／2章: 結果設計／3章: 標準誤差・検定／
+4章: 内部実装・共通化／5章: リファレンス実装・テスト方針／
+6章: FE固有論点／7章: RE固有論点）。FE/RE側の論点はすべて確定。
+IV固有論点は`iv-api-design.md`参照。
 
-## 1. 引数設計（Issue #119、確定）
+## 1. 引数設計（確定）
 
 ### 1.1 `y` / `x` / `entity` / `time` のシグネチャ
 
@@ -46,7 +46,7 @@ IV固有論点（Issue #126）は`iv-api-design.md`参照。
     GLSは重み・共分散構造の指定自体がモデルの本質であり、WLSの`weight: str`（必須の独立引数）
     に近い位置づけになる見込み。GLS着手時に別途設計する。
 
-## 2. 結果（Return）設計（Issue #120、確定）
+## 2. 結果（Return）設計（確定）
 
 ### 2.1 共通コア項目
 
@@ -57,7 +57,7 @@ OLS（`OLSResult`, `engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
 |---|---|---|
 | `params` / `std_errors` / `t_stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` | OLS共通 | 検定分布（t/z）は#121で確定 |
 | `residuals` / `dep_var_name` | OLS共通 | そのまま踏襲 |
-| `n_obs` | Logit由来の表記 | OLS/WLSも`n_obs`に統一済み（Issue #139、[後述](#22-olsのnobsn_obsリネーム完了)） |
+| `n_obs` | Logit由来の表記 | OLS/WLSも`n_obs`に統一済み（[後述](#22-olsのnobsn_obsリネーム完了)） |
 | `df_resid` / `df_model` | Logit由来、**新規追加** | OLSには無いが、FEは自由度調整が
   `n - n_entities - k`という非自明な式になるため明示的に返す価値が高い |
 | `n_entities` | **新規追加**（FE/RE限定） | パネルユニット数。pyfixest/plmの前例に倣う |
@@ -69,7 +69,7 @@ OLS（`OLSResult`, `engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
 ### 2.2 OLSの`nobs`→`n_obs`リネーム（完了）
 
 既存`OLSResult.nobs`（`ols.rs:157`）とLogitの`LogitResult.n_obs`（`logit.rs:206`）で表記が
-不一致だったため、`n_obs`へ統一した（Issue #139。OLS・WLS双方のResult型・Python側プロパティを
+不一致だったため、`n_obs`へ統一した（OLS・WLS双方のResult型・Python側プロパティを
 リネーム済み）。
 
 ### 2.3 R²の種類（within/between/overall）
@@ -95,11 +95,11 @@ OLS（`OLSResult`, `engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
     RE呼び出し時と同一の指定を使う）。**FE推定が失敗した場合**（singleton除外後の変動不足等）
     は、`hausman_statistic`等を`None`にしたうえで、RE本体の結果は正常に返す
     （REの主要な結果自体は有効なため、診断情報の欠落だけに留める）。
-  - REとFEの内部設計共有範囲（同じ推定ルーチンを呼ぶか等）はIssue #122/#125で扱う。
+  - REとFEの内部設計共有範囲（同じ推定ルーチンを呼ぶか等）は4章/7章で扱う。
 - **パネル固有R²（2.3）**: `fit()`の結果本体に含める（別メソッド化しない）。
 - **IV: 第一段階回帰結果は別メソッド**（`iv-api-design.md`2章参照）。
 
-## 3. 標準誤差・検定（Issue #121、確定）
+## 3. 標準誤差・検定（確定）
 
 ### 3.1 `cov_type`のサポート対象
 
@@ -110,7 +110,7 @@ Newey-West型HACだが、これをパネルにそのまま適用すると異な�
 **Driscoll-Kraay型のパネルHAC**（fixestの`vcov="DK"`、Stataの`xtscc`相当。時間方向にクロス
 セクション平均を取ってからHACカーネルを適用し、エンティティ間・エンティティ内の両方の相関に
 ロバストにする）を別アルゴリズムとして実装する。具体的な実装（`time`引数の利用、バンド幅
-パラメータの設計等）はIssue #122（内部実装・共通化）で扱う。
+パラメータの設計等）は4章（内部実装・共通化）で扱う。
 
 ### 3.2 `cov_type`のデフォルト
 
@@ -120,20 +120,20 @@ Newey-West型HACだが、これをパネルにそのまま適用すると異な�
     デフォルトにしている前例がある。パネルデータでは異分散だけでなくエンティティ内の
     系列相関がほぼ常に存在し、`hc0`〜`hc3`（クラスタリングなしの異分散ロバスト）だけでは
     標準誤差を過小評価するリスクが高い（Cameron & Miller 2015）。
-  - FE/REは`entity`が必須引数（Issue #119）のため、OLSと違いクラスター対象列が常に確実に
+  - FE/REは`entity`が必須引数（1章）のため、OLSと違いクラスター対象列が常に確実に
     存在し、デフォルト化の実装上の障害がない。
 - `cov_type="cluster"`時、`cluster_col`省略なら`entity`引数の列を自動的にクラスターキーとして
   使う。`cluster_col`を明示指定すれば任意の列（例: `entity`より粗い粒度の`state`等）でも
   クラスター可能（OLSの`cluster_col`と同じ任意指定パターン）。
 - **2-way clustering（entity+time同時）はv1スコープ外**。2-way FEのスコープ確定
-  （Issue #124）と合わせて別途検討する。
+  （6章）と合わせて別途検討する。
 
 ### 3.3 検定分布
 
 **t分布**（OLS準拠）。自由度は#120で新規追加した`df_resid`（`n - n_entities - k`調整済み）を
 使う。
 
-## 4. 内部実装・共通化（Issue #122、確定）
+## 4. 内部実装・共通化（確定）
 
 ### 4.1 既存の共通化パターン（前提）
 
@@ -147,11 +147,14 @@ Newey-West型HACだが、これをパネルにそのまま適用すると異な�
 
 ### 4.2 新規に切り出す共通化（FE/RE/IV着手前に実施）
 
-1. **t/z検定の後処理の共通関数化**: OLS（t分布、`ols.rs:396-420`）とLogit（z分布、
-   `logit.rs:694-717`）で、`std_err`/`stat`/`p_value`/`conf_low`/`conf_high`を計算する
-   ループがほぼ同型のまま系統ごとに独立実装されている。`statrs::distribution::
-   ContinuousCDF`をジェネリックに取る関数としてcrate直下（`engine`直下、系統をまたぐ
-   位置）に切り出す。FE/RE/2SLS（t分布）・GMM（z分布、Issue #121）もこの関数を使う。
+1. **t/z検定の後処理の共通関数化（完了、Issue #152）**: OLS（t分布、`ols.rs:396-420`）と
+   Logit（z分布、`logit.rs:694-717`）で、`std_err`/`stat`/`p_value`/`conf_low`/
+   `conf_high`を計算するループがほぼ同型のまま系統ごとに独立実装されていた。
+   `statrs::distribution::ContinuousCDF`をジェネリックに取る関数として`engine/src/
+   inference.rs`（crate直下、系統をまたぐ位置）に切り出した。実装時に、Issueのスコープ
+   （OLS・Logit）に加えて、同型の重複がある`probit.rs`（z分布）・`nonlinear/common.rs`の
+   `marginal_effects_from_w_s`（限界効果のSE/z値/CI、Logit/Probit共通）も対象に含めた
+   （ユーザー確認済み）。FE/RE/2SLS（t分布）・GMM（z分布、3章）もこの関数を使う。
 2. **`engine_pybind`の`cov_type`文字列パース＋`cluster_col`/`time_col`抽出ブロックの共通化**:
    `ols.rs:297-316`と`wls.rs:124-143`がほぼ完全一致で重複している。FE/RE/IVで重複を
    増やす前に共通関数化する。
@@ -166,10 +169,10 @@ OLSの計算をそのまま使わない（WLSがR²等を素のOLS計算のま�
 
 - 自由度（`n - n_entities - k`、単純な`n-k`ではない）→ 検定統計量・adjusted R²・
   AIC/BICすべてに波及
-- パネル固有R²（within/between/overall、Issue #120）はOLSに存在しない新規計算
-- `cov_type`デフォルトのentity単位cluster化、HACのDriscoll-Kraay別実装（Issue #121）
+- パネル固有R²（within/between/overall、2章）はOLSに存在しない新規計算
+- `cov_type`デフォルトのentity単位cluster化、HACのDriscoll-Kraay別実装（3章）
 
-この委譲パターンが実際にうまくいくかは、within変換の実装方法（Issue #124）次第のため、
+この委譲パターンが実際にうまくいくかは、within変換の実装方法（6章）次第のため、
 今は結論を固定せず「まず委譲を試して、補正が管理可能な範囲に収まるか実装時に判断する」
 という緩い方針とする。うまくいかない場合はFE専用実装に切り替えてよい。
 
@@ -190,12 +193,12 @@ OLSの計算をそのまま使わない（WLSがR²等を素のOLS計算のま�
   結果フィールドの差が大きく、無理に共通化すると可読性が落ちる。「抽出→バリデーション→
   engine呼出→結果構築」という大枠の流れだけ踏襲し、実装は個別に書く。
 
-## 5. リファレンス実装・テスト方針（Issue #123、確定）
+## 5. リファレンス実装・テスト方針（確定）
 
 ### 5.1 Python主リファレンス
 
 **`linearmodels`をFE/RE共通の主リファレンスとする**（`PanelOLS`＝FE、`RandomEffects`＝RE）。
-`PanelOLS`の`cov_type="kernel"`でDriscoll-Kraay型SE（Issue #121）の検証もカバーできる。
+`PanelOLS`の`cov_type="kernel"`でDriscoll-Kraay型SE（3章）の検証もカバーできる。
 `pyfixest`は既存方針（`docs/spec/ols-spec.md`／`testing-policy.md`、HC2/HC3の実装バグにより
 精度検証には使わない）を踏襲し、性能比較（実行時間・メモリ）のみに使う。
 
@@ -221,7 +224,7 @@ Rクロスチェックを省略しない」という原則から意図的に外�
 OLSのHAC（実測乖離に基づき1e-2に緩和した前例、`testing-policy.md`）と同様、実装・テスト後の
 実測値に基づいて個別に緩和を検討する（先に緩めない）。
 
-## 6. FE固有論点（Issue #124、確定）
+## 6. FE固有論点（確定）
 
 ### 6.1 within変換の実装方法
 
@@ -281,19 +284,19 @@ v1では扱わない。
 あれば`ValidationError`にする（1-way/2-wayで同じロジックを共有できる。時間不変変数だけで
 なく、2-wayでtime FEと完全共線な「エンティティ間で変動しない列」も同じチェックで検出できる）。
 
-### 6.8 2-way FEとクラスター標準誤差のデフォルト（Issue #121との接続）
+### 6.8 2-way FEとクラスター標準誤差のデフォルト（3章との接続）
 
-Issue #121で「2-way clustering（entity+time同時）はv1スコープ外、2-way FEのスコープ確定と
+3章で「2-way clustering（entity+time同時）はv1スコープ外、2-way FEのスコープ確定と
 合わせて別途検討する」としていた保留事項を、6.2の決定を受けて確定する。**2-way FEでも
 クラスターのデフォルトはentity単位のまま維持する**（`cluster_col`で上書き可能な既存挙動を
 変えない）。2-way clustering自体はv1スコープ外のまま据え置く。
 
-## 7. RE固有論点（Issue #125、確定）
+## 7. RE固有論点（確定）
 
 ### 7.1 分散成分の推定方法
 
 **Swamy-Arora法を採用する**。R `plm`のデフォルト（`random.method="swar"`）、Python
-`linearmodels.RandomEffects`の実装、いずれもSwamy-Arora相当であり、Issue #123で確定した
+`linearmodels.RandomEffects`の実装、いずれもSwamy-Arora相当であり、5章で確定した
 2つの参照実装（主リファレンスlinearmodels、クロスチェックplm）と自然に整合する
 （`linearmodels/panel/model.py`のソースで実装を確認済み）。
 
@@ -309,32 +312,32 @@ Issue #121で「2-way clustering（entity+time同時）はv1スコープ外、2-
 `θ_i = 1 - sqrt(σ_ε² / (T_i・σ_u² + σ_ε²))`（linearmodelsのソースで確認済み、Baltagiの教科書
 通りの式）。
 
-- **REはentity方向のみ（2-way REはv1スコープ外）**なので、Issue #124のFE・1-wayと同じ扱いで
+- **REはentity方向のみ（2-way REはv1スコープ外）**なので、6章のFE・1-wayと同じ扱いで
   **不均衡パネルもv1から無条件でサポートする**。`T_i`（エンティティごとの観測数）を直接使う
   この式は教科書レベルで不均衡対応済みであり、FEの2-wayのような反復アルゴリズムは不要。
 
 ### 7.3 ハウスマン検定の実装場所・インターフェース
 
-- Issue #120の決定通り、**`RE.fit()`内で自動計算し`ReResult`にのみ含める**（`FeResult`には
+- 2章の決定通り、**`RE.fit()`内で自動計算し`ReResult`にのみ含める**（`FeResult`には
   追加しない）。
 - **計算部分（カイ二乗統計量そのもの）は共通関数化する**: `engine/src/panel/common.rs`に
   `hausman_statistic(beta_fe, cov_fe, beta_re, cov_re) -> (stat, df, p_value)`を実装し、
   RE側からのみ呼ぶ。
 - **比較対象はFE/RE間で重なりのあるスロープ係数のみ**（REの切片は比較から除外する。FEには
   切片が存在しないため、次元を揃える必要がある）。
-- REが時間不変変数を含む場合、内部FE推定はIssue #124の分散ゼロ検証
-  （[6.7](#67-within変換後に分散ゼロになる説明変数の検出)）で失敗する。この場合はIssue #120で
+- REが時間不変変数を含む場合、内部FE推定は6章の分散ゼロ検証
+  （[6.7](#67-within変換後に分散ゼロになる説明変数の検出)）で失敗する。この場合は2章で
   決めた「FE推定失敗時はハウスマン関連フィールドを`None`にする」フォールバックがそのまま
   適用される。
 - linearmodelsのソースコードを確認したところ`hausman`という文字列は一切登場せず、専用実装が
-  無いことを確定した。Issue #123で決めた「`plm::phtest`のみを参照値とする例外」の妥当性を
+  無いことを確定した。5章で決めた「`plm::phtest`のみを参照値とする例外」の妥当性を
   裏付ける。
 
 ### 7.4 FEとの内部設計共有範囲
 
 - **θでパラメータ化した共通の準偏差変換関数を実装する**:
   `quasi_demean(data, entity, theta: &[f64]) -> transformed_data`。FEは全エンティティに
-  `θ_i = 1.0`を渡すことでこの関数の特殊ケースとして扱える（Issue #124の`OlsEstimator`委譲
+  `θ_i = 1.0`を渡すことでこの関数の特殊ケースとして扱える（6章の`OlsEstimator`委譲
   方針とあわせ、FE/RE双方がこの関数の出力を`OlsEstimator::fit`に渡す設計にできる）。
 - **σ_ε²の推定（7.1）はFEのwithin回帰の残差分散をそのまま利用する**。`RE.fit()`は内部で
   FE推定を呼び出し、その残差分散を再利用する（RE → FE → `OlsEstimator`という委譲チェーンとして

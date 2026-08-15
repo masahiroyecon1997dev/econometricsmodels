@@ -18,7 +18,7 @@ paths:
 
 - Ruffの **line-length は79（PEP8標準）**。
 - `ruff check .` / `ruff format --check .` をエラーなしで通す。
-- ルールセットの詳細（有効化するRuffルール群）はリポジトリ雛形作成時に`pyproject.toml`で確定する。
+- ルールセットは現状デフォルトのまま（`pyproject.toml`ではline-lengthのみ明示）。追加のルール選定が必要になった時点で検討する。
 
 ## 設計方針との整合性
 
@@ -35,5 +35,5 @@ paths:
 
 ## テスト
 
-- 対応するリファレンス実装（pyfixest/R）との比較テストは `tests/api_tests/`（pytest）に置く。
+- 対応するリファレンス実装（pyfixest/R）との比較テストは `tests/`（pytest）に置く。
 - 許容誤差等のテスト方針の詳細は `testing-policy.md` を参照。

@@ -1,7 +1,7 @@
-"""Logitのクロスチェック用フィクスチャ（tests/api_tests/fixtures/benchmarks/
+"""Logitのクロスチェック用フィクスチャ（tests/fixtures/benchmarks/
 logit_crosscheck.json）を生成するスクリプト。
 
-`tests/api_tests/fixtures/benchmarks/logit.json`（statsmodels、主リファレンス）とは
+`tests/fixtures/benchmarks/logit.json`（statsmodels、主リファレンス）とは
 別に、独立実装（R: glm + sandwich/marginaleffects）によるクロスチェック値を生成する。
 `benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py`と同型の設計。
 
@@ -16,11 +16,11 @@ logit_crosscheck.json）を生成するスクリプト。
 直接渡す）が唯一の数値照合対象になる。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`logit_crosscheck.json`は
-`tests/api_tests/fixtures/benchmarks/`に置く。
+`tests/fixtures/benchmarks/`に置く。
 
 使用例:
     python generate_logit_crosscheck_fixtures.py \\
-        --output ../../../tests/api_tests/fixtures/benchmarks/logit_crosscheck.json
+        --output ../../../tests/fixtures/benchmarks/logit_crosscheck.json
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ import json
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(
@@ -38,15 +38,11 @@ sys.path.insert(
 )  # benchmark/nonlinear/ を import path に追加（run_statsmodels_benchmark）
 sys.path.insert(
     0, str(Path(__file__).resolve().parents[2])
-)  # benchmark/ を import path に追加（load_wooldridge, generate_synthetic_datasets）
+)  # benchmark/ を import path に追加（load_wooldridge, _common）
 
-import polars as pl  # noqa: E402
-
-from load_wooldridge import load as load_wooldridge  # noqa: E402
-from run_statsmodels_benchmark import DATA_DIR  # noqa: E402
-from generate_synthetic_datasets import (  # noqa: E402
-    imbalanced_cluster_groups as _imbalanced_cluster_groups_ols,
-)
+import polars as pl
+from _common import DATA_DIR, imbalanced_cluster_groups
+from load_wooldridge import load as load_wooldridge
 
 NONLINEAR_DIR = Path(__file__).resolve().parent.parent
 R_SCRIPT = NONLINEAR_DIR / "run_glm_crosscheck_benchmark.R"
@@ -153,7 +149,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         baseline_csv,
         formula="y ~ x1 + x2 + x3",
         tmpdir=tmpdir,
-        groups=_imbalanced_cluster_groups_ols(n),
+        groups=imbalanced_cluster_groups(n),
         suffix="_cluster_imbalanced",
     )
     fixtures["baseline"]["cluster_g2"] = _run_cluster_case(
@@ -243,7 +239,7 @@ def build_fixtures() -> dict:
             "cov_type='opg'の限界効果もここのみが数値照合対象（statsmodels側は"
             "算出不可）。"
         ),
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "r_version": r_version,
         "marginaleffects_version": marginaleffects_version,
         "note": (
@@ -261,7 +257,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/api_tests/fixtures/benchmarks/logit_crosscheck.json",
+        default="../../../tests/fixtures/benchmarks/logit_crosscheck.json",
     )
     args = parser.parse_args()
 

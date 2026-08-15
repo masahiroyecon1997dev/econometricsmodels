@@ -238,8 +238,13 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `generate_logit_fixtures.py`（`smf.logit`+`disp=0`版）・`generate_probit_fixtures.py`
   （`smf.probit`+`disp=0`版）にも同型の`_run_cluster_case`があることを確認済み
   （linear 2ファイル＋nonlinear 2ファイルの計4ファイル全てに存在、2026-08-15）。
-- **状態**: 未対応（着手要否はユーザー判断待ち、項目12と合わせて検討。iv系統にも
-  同型の重複が無いか着手時に確認する）
+  さらに`benchmark/iv/fixtures/generate_iv_fixtures.py`にも同型の`_run_cluster_case`
+  （加えて`_run_cluster_g2_case`というG=2境界専用のバリエーション）があることを確認済み
+  （linear 2＋nonlinear 2＋iv 1の計5ファイルで確認、2026-08-15）。IVは`x_exog`/`x_endog`/
+  `instruments`の3種の列グループを持つ分、他4ファイルより`run()`の引数がやや複雑だが、
+  「CSVを読み疑似グループ列を追加→一時CSV書き出し→`run()`呼び出し→`finally`で削除」という
+  骨格は完全に同型。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目12と合わせて検討）
 
 ### 14. `COV_TYPES`への`cluster`混入がOLS/WLSとLogitで不統一、メインループ自体の共通化余地
 
@@ -250,13 +255,19 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   専用の複数パターンとして後段で個別処理する）はOLS/WLS/Logit/Probit（Probit側も確認済み）
   で完全に同じだが、Logit・Probitだけ`COV_TYPES`に`cluster`を含めた上で`continue`
   スキップしている。意味のある設計差ではなく単なる書き方のブレ。`cluster`を`COV_TYPES`
-  から除けば`continue`も不要になりOLS/WLSと統一できる。
+  から除けば`continue`も不要になりOLS/WLSと統一できる。IVの`generate_iv_fixtures.py`
+  （`COV_TYPES = ["classical", "hc0", "hc1", "hac", "cluster"]`）もLogit/Probit側
+  （`cluster`を含めて`continue`でスキップ）と同じ書き方であることを確認済み
+  （2026-08-15）。
 - **Claudeの所感**: 統一後、メインループ本体（`for scenario: for cov_type: run(...)`の
   二重ループ＋辞書構築）自体を`_common.py`に`build_numeric_fixtures(run_fn, scenarios,
   cov_types, **extra_kwargs)`のような共通ヘルパーとして切り出せる可能性がある
-  （`weight_col`/`model`等のオプション差分は`**extra_kwargs`で吸収）。OLS/WLS/Logit/Probit
-  の4ファイル分の重複を解消できる見込みで、影響範囲は大きい。
+  （`weight_col`/`model`等のオプション差分は`**extra_kwargs`で吸収）。OLS/WLS/Logit/Probit/IV
+  の5ファイル分の重複を解消できる見込みで、影響範囲は大きい。ただしIVは`x_exog`/
+  `x_endog`/`instruments`という3列グループ＋シナリオ別列構成（`X_EXOG_BY_SCENARIO`等）を
+  持つ分、他4ファイルより`**extra_kwargs`の吸収範囲が広くなる点は考慮が必要。
 - **気づいた経緯**: 2026-08-15、`generate_logit_fixtures.py`解説後のユーザー指摘。
+  `generate_iv_fixtures.py`解説時にIVも同型であることを確認済み。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 15. `_run_cluster_case`を`_common.py`へ一般化して集約する案（項目13の発展形）

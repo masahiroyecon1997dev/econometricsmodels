@@ -175,3 +175,30 @@
   2026-08-15、Issue #231フェーズ4のテスト拡充作業に伴い本メモへ転記・集約。
 - **状態**: 未対応（実装当時からの既知の未検証事項、ユーザー確認済み・
   意図的にスコープ外）
+
+### 11. IV系統: `scale_variance`に成功パス（`scale_variance_mild`相当）が無い
+
+- **対象**: [benchmark/iv/generate_iv_datasets.py](../../../benchmark/iv/generate_iv_datasets.py)・
+  [benchmark/iv/fixtures/generate_iv_fixtures.py](../../../benchmark/iv/fixtures/generate_iv_fixtures.py)
+- **内容**: ユーザー指摘（2026-08-15）。実測確認したところ、`scale_variance`シナリオの
+  扱いが系統ごとに異なっていた。
+  - **linear（OLS/WLS）**: `scale_variance`（1e6/1e-3）は`ComputationError`専用
+    （数値比較対象外）。より緩いスケール差の`scale_variance_mild`（1e2/1e-1）が
+    成功パスとして別途用意されている（Issue #231フェーズ4で追加済み）。
+  - **nonlinear（Logit/Probit）**: `scale_variance`自体が既に成功パス
+    （`generate_logit_fixtures.py`の`NUMERIC_SCENARIOS`に含まれている。
+    真のDGPを未スケーリングのXで計算する設計のため、そもそも数値的に破綻しない）。
+    → **linearのような`_mild`変種が無くても問題ない**（ユーザーの推測「separationが
+    あるから問題ない」とは理由が異なり、正しくは「scale_variance自体が既に
+    成功パスとして設計されているため」）。
+  - **IV（2SLS/GMM）**: `scale_variance`は`generate_iv_fixtures.py`の
+    `NUMERIC_SCENARIOS`に含まれておらず、`test_iv_fixtures.py::
+    test_scale_variance_raises_computation_error`の存在からも`ComputationError`
+    専用と確認できた。**linearが元々持っていた「成功パスが無い」という同じ
+    状態のまま**で、`scale_variance_mild`に相当するものが無い。
+- **Claudeの所感**: IV側はlinear（OLS/WLS）がフェーズ4で修正したのと同じ抜けが
+  残っている可能性が高い。IV用の`scale_variance_mild`（例: x1×1e2, x2×1e-1）を
+  追加し成功パスとして数値比較する価値があると考える。
+- **気づいた経緯**: 2026-08-15、`generate_iv_datasets.py`解説後のユーザー指摘・
+  Claudeによる3系統横断の実測確認。
+- **状態**: 未対応（要否・優先度はユーザー判断待ち）

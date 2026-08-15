@@ -94,6 +94,23 @@ pub enum MleError {
     #[error("y at row {row} must be coded as 0.0 or 1.0 (binary outcome), got {value}")]
     InvalidBinaryY { row: usize, value: f64 },
 
+    /// Tobit専用: `y`の実測値が、指定された打ち切り境界の範囲外にある行を含む。
+    ///
+    /// `InvalidCensoringBounds`（境界の指定自体が不正）とは異なり、境界の指定自体は
+    /// 妥当だが実測`y`との整合性が取れないケース（`lower`指定時に`y < lower`の行がある、
+    /// または`upper`指定時に`y > upper`の行がある）。`InvalidBinaryY`と同型の
+    /// 「行番号+値」パターンで、`TobitInput::from_columns`が構築する
+    /// （`engine/src/nonlinear/tobit.rs`参照）。
+    #[error(
+        "y at row {row} is out of the censoring bounds (lower={lower:?}, upper={upper:?}): got {value}"
+    )]
+    YOutOfCensoringBounds {
+        row: usize,
+        value: f64,
+        lower: Option<f64>,
+        upper: Option<f64>,
+    },
+
     /// 勾配ノルム基準（`‖∇ℓ(θ)‖ < tol`）は満たしたが、標準化パラメータ空間でのノルムが
     /// 異常に大きい。(準)完全分離（quasi-/complete separation）では、係数が発散していく
     /// 過程でロジスティックのスコア項`p(1-p)`が浮動小数点アンダーフローによりほぼ0.0に

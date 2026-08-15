@@ -4,8 +4,8 @@ build-backend = "maturin"
 
 [project]
 name = "econometricsmodels"
-version = "0.4.0"
-description = "統計・計量経済学の分析手法を提供するPython API"
+version = "0.5.0"
+description = "A Python API providing statistical and econometric analysis methods"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }

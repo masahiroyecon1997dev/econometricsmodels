@@ -25,7 +25,9 @@ Newey-West小標本補正の慣習差がより強く出るためと考えられ�
 ケースがあり、その領域では相対誤差比較が意味を持たない（F統計量自体は0.6%程度
 しか違わなくても、F分布の裾の確率はその差を大きく増幅する）。`f_p_value`の比較
 のみ`ATOL_F_PVALUE`（絶対誤差フロア、実測最大乖離1.523e-6にマージンを載せた値）を
-使う（他の統計量の比較式は変更しない。ユーザー確認済み）。
+使う（他の統計量の比較式は変更しない。ユーザー確認済み）。係数ごとの`p_values`
+（Issue #232で追加）も同じ理由（t分布の裾での増幅）でhacケースにて実測乖離が
+`RTOL_HAC`を超えることがあるため、同じ`ATOL_F_PVALUE`を使う。
 
 Note:
     - `hc2`/`hc3`はivreg側にレバレッジ算出の確立した参照実装が無いため対象外
@@ -33,10 +35,13 @@ Note:
     - `weak_instrument_f`・`sargan_statistic`/`sargan_p_value`はivregの
       `summary(diagnostics=TRUE)`が常にclassical vcovで計算する仕様のため、
       全cov_typeで同じ値になる（`run_ivreg_benchmark.R`参照）。
-    - `wu_hausman_statistic`/`wu_hausman_p_value`はclassical cov_typeのときのみ
-      フィクスチャに実測値があり、他のcov_typeは`None`（ivregの`diagnostics=TRUE`が
-      classical vcov固定のため。hc0/hc1/clusterは`test_iv_fixtures.py`
-      （linearmodels）側で既にクロスチェック済み。ユーザー確認済み）。
+    - `wu_hausman_statistic`/`wu_hausman_p_value`は全cov_typeでフィクスチャに
+      実測値がある（Issue #233。`summary(diagnostics=TRUE, vcov.=<関数>)`で
+      cov_type別のロバスト共分散を診断表に反映できることが判明、
+      `run_ivreg_benchmark.R`のモジュールコメント参照）。ただしcluster
+      cov_typeのみ、ivreg側のWald検定がF分布の分母自由度にクラスター数を
+      反映しない既知の制約によりp値が一致しないため、`_check_result`の
+      `check_wu_hausman_p_value=False`で統計量のみ比較する（ユーザー確認済み）。
     - GMMはivregが対応していないため対象外（5.3節、Rクロスチェック省略の例外規定）。
     - 第一段階回帰の結果（`first_stage()`）自体はここでは比較しない
       （`test_ols_crosscheck.py`が既にOLSの数値一致を検証済みのため、
@@ -97,6 +102,16 @@ ATOL_F_PVALUE = TOLERANCES["iv_crosscheck"]["atol_f_pvalue"]
 # と同じ計算式に修正）。
 ATOL = TOLERANCES["iv_crosscheck"]["atol"]
 
+# p_values/wu_hausman_p_value・conf_int・wu_hausman_statistic（Issue #232/#233で
+# 追加）のhacケース専用の緩めた許容誤差（モジュールdocコメント・_tolerances.py
+# 参照）。
+ATOL_HAC_PVALUE = TOLERANCES["iv_crosscheck"]["atol_hac_pvalue"]
+ATOL_HAC_CONF_INT = TOLERANCES["iv_crosscheck"]["atol_hac_conf_int"]
+RTOL_HAC_WU_HAUSMAN = TOLERANCES["iv_crosscheck"]["rtol_hac_wu_hausman"]
+RTOL_HAC_WU_HAUSMAN_SMALL_N = TOLERANCES["iv_crosscheck"][
+    "rtol_hac_wu_hausman_small_n"
+]
+
 COV_TYPES = ["classical", "hc0", "hc1", "hac"]
 
 INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
@@ -127,9 +142,60 @@ _assert_dict_close = partial(assert_dict_close, rtol=RTOL_STRICT, atol=ATOL)
 _assert_p_value_close = partial(assert_close, atol=ATOL_F_PVALUE)
 
 
-def _check_result(res, ref: dict, label: str, rtol: float) -> None:
+def _check_result(
+    res,
+    ref: dict,
+    label: str,
+    rtol: float,
+    *,
+    check_wu_hausman: bool = True,
+    check_wu_hausman_p_value: bool = True,
+) -> None:
+    # hac呼び出し（rtolがRTOL_HAC/RTOL_HAC_SMALL_N）ではp_values/conf_int/
+    # wu_hausman_statisticの実測乖離がclassical/hc0/hc1/cluster向けの許容誤差を
+    # 超えるため、専用に緩めた値を使う（モジュールdocコメント・_tolerances.py
+    # 参照）。
+    is_hac = rtol != RTOL_STRICT
+    p_value_atol = ATOL_HAC_PVALUE if is_hac else ATOL_F_PVALUE
+    conf_int_atol = ATOL_HAC_CONF_INT if is_hac else ATOL
+    if rtol == RTOL_HAC_SMALL_N:
+        wu_hausman_rtol = RTOL_HAC_WU_HAUSMAN_SMALL_N
+    elif is_hac:
+        wu_hausman_rtol = RTOL_HAC_WU_HAUSMAN
+    else:
+        wu_hausman_rtol = rtol
+
     _assert_dict_close(res.params, ref["coef"], f"{label}/coef", rtol=rtol)
     _assert_dict_close(res.std_errors, ref["se"], f"{label}/se", rtol=rtol)
+    _assert_dict_close(res.stats, ref["t_stats"], f"{label}/stats", rtol=rtol)
+    # p_valuesはf_p_valueと同じ理由（t分布の裾でp値が統計量の僅かな差を増幅する、
+    # モジュールdocコメント参照）で絶対誤差フロアを使う。
+    _assert_dict_close(
+        res.p_values,
+        ref["p_values"],
+        f"{label}/p_values",
+        rtol=rtol,
+        atol=p_value_atol,
+    )
+    for name, (ref_lower, ref_upper) in ref["conf_int"].items():
+        our_lower, our_upper = res.conf_int[name]
+        _assert_close(
+            our_lower,
+            ref_lower,
+            f"{label}/conf_lower/{name}",
+            rtol=rtol,
+            atol=conf_int_atol,
+        )
+        _assert_close(
+            our_upper,
+            ref_upper,
+            f"{label}/conf_upper/{name}",
+            rtol=rtol,
+            atol=conf_int_atol,
+        )
+    assert res.n_obs == ref["nobs"], f"{label}/n_obs"
+    assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
+
     _assert_close(res.r_squared, ref["r_squared"], f"{label}/r_squared")
     _assert_close(
         res.r_squared_adj, ref["r_squared_adj"], f"{label}/r_squared_adj"
@@ -162,19 +228,41 @@ def _check_result(res, ref: dict, label: str, rtol: float) -> None:
             f"{label}/overid_p_value",
         )
 
-    # wu_hausmanはclassical cov_typeのときのみフィクスチャに実測値がある
-    # （モジュールdocコメント参照）。他のcov_typeはrefがNoneなので比較をスキップする。
-    if ref["wu_hausman_statistic"] is not None:
+    # wu_hausmanは全cov_typeでフィクスチャに実測値を持つ（Issue #233）。
+    # 境界的なサンプルサイズ（df1シナリオ等、拡張回帰がsaturatedになる）では
+    # 本実装・ivreg双方がNoneを返すため、refがNoneのケースは本実装側もNoneに
+    # なることだけ確認する。
+    # check_wu_hausman=Falseの場合は比較自体を丸ごとスキップする（cluster_g2:
+    # 拡張回帰の傾き係数がq=2（endog1・第一段階残差）に対しG=2クラスタでは
+    # G-1=1<qとなり構造的にクラスタロバスト共分散が特異になる——本実装のG≤qの
+    # 罠と同じ原理（engine/src/iv/CLAUDE.md参照）——ため本実装は正しくNoneを
+    # 返すが、ivreg側はこの構造的特異性を検出せず値を返すため比較不能）。
+    if not check_wu_hausman:
+        pass
+    elif ref["wu_hausman_statistic"] is None:
+        assert res.wu_hausman_statistic is None, (
+            f"{label}/wu_hausman_statistic"
+        )
+        assert res.wu_hausman_p_value is None, f"{label}/wu_hausman_p_value"
+    else:
         _assert_close(
             res.wu_hausman_statistic,
             ref["wu_hausman_statistic"],
             f"{label}/wu_hausman_statistic",
+            rtol=wu_hausman_rtol,
         )
-        _assert_close(
-            res.wu_hausman_p_value,
-            ref["wu_hausman_p_value"],
-            f"{label}/wu_hausman_p_value",
-        )
+        # cluster cov_typeはivregのWald検定がF分布の分母自由度にクラスター数を
+        # 反映しない既知の制約によりp値が一致しないため、統計量のみ比較する
+        # （呼び出し元がcheck_wu_hausman_p_value=Falseを渡す。モジュール
+        # docコメント参照、ユーザー確認済み）。
+        if check_wu_hausman_p_value:
+            _assert_close(
+                res.wu_hausman_p_value,
+                ref["wu_hausman_p_value"],
+                f"{label}/wu_hausman_p_value",
+                rtol=wu_hausman_rtol,
+                atol=p_value_atol,
+            )
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
@@ -227,7 +315,13 @@ def test_cluster_matches_r(crosscheck):
     ).fit()
 
     ref = crosscheck["baseline"]["cluster"]
-    _check_result(res, ref, "cluster/R", rtol=RTOL_STRICT)
+    _check_result(
+        res,
+        ref,
+        "cluster/R",
+        rtol=RTOL_STRICT,
+        check_wu_hausman_p_value=False,
+    )
 
 
 def test_cluster_g2_matches_r(crosscheck):
@@ -247,7 +341,13 @@ def test_cluster_g2_matches_r(crosscheck):
     ).fit()
 
     ref = crosscheck["baseline"]["cluster_g2"]
-    _check_result(res, ref, "cluster_g2/R", rtol=RTOL_STRICT)
+    _check_result(
+        res,
+        ref,
+        "cluster_g2/R",
+        rtol=RTOL_STRICT,
+        check_wu_hausman=False,
+    )
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
@@ -269,6 +369,37 @@ def test_multi_endog_matches_r(crosscheck, cov_type):
     rtol = RTOL_HAC if cov_type == "hac" else RTOL_STRICT
     ref = crosscheck["multi_endog"][cov_type]
     _check_result(res, ref, f"multi_endog/{cov_type}/R", rtol=rtol)
+
+
+# df1（n=3）はhacを対象外にする（Newey-Westのラグ選択・小標本補正の慣習差が
+# n=3では極端に増幅され統計的に意味のある比較にならない、実測でse最大42%乖離。
+# ユーザー確認済み）。
+DF1_COV_TYPES = [ct for ct in COV_TYPES if ct != "hac"]
+
+
+@pytest.mark.parametrize("cov_type", DF1_COV_TYPES)
+def test_df1_matches_r(crosscheck, cov_type):
+    """自由度1境界（df_resid=1ちょうど）の成功パス（`test_iv_fixtures.py`の
+    同名テストと同じ再現条件、Issue #235）。x_exog=[]・x_endog=['endog1']・
+    instruments=['z1']（丁度識別、n=3）。augmented regressionがsaturated
+    （残差自由度0）になるため、wu_hausman_statistic/wu_hausman_p_valueは
+    本実装・ivreg双方でNoneになる（`_check_result`参照）。hacは対象外
+    （モジュールdocコメント参照）。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline_df1.csv")
+    options = IvOptions(cov_type=cov_type)
+    res = IV(
+        df,
+        y="y",
+        x_exog=[],
+        x_endog=["endog1"],
+        instruments=["z1"],
+        options=options,
+    ).fit()
+
+    rtol = RTOL_HAC if cov_type == "hac" else RTOL_STRICT
+    ref = crosscheck["df1"][cov_type]
+    _check_result(res, ref, f"df1/{cov_type}/R", rtol=rtol)
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
@@ -312,4 +443,10 @@ def test_cluster_imbalanced_matches_r(crosscheck):
     ).fit()
 
     ref = crosscheck["baseline"]["cluster_imbalanced"]
-    _check_result(res, ref, "cluster_imbalanced/R", rtol=RTOL_STRICT)
+    _check_result(
+        res,
+        ref,
+        "cluster_imbalanced/R",
+        rtol=RTOL_STRICT,
+        check_wu_hausman_p_value=False,
+    )

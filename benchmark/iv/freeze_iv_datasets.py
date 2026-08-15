@@ -57,6 +57,12 @@ IV_G2_BOUNDARY_SCENARIOS = ["baseline"]
 # 過剰識別（Sargan/Hansen Jが非nullになる）にする。
 IV_MULTI_ENDOG_SCENARIOS = ["baseline"]
 
+# 自由度1境界（df_resid=1ちょうど）の成功パス確認専用（Issue #235）。IVは
+# OLSと異なり内生変数1本・操作変数1本が最低限必要なため、x_exog=0・k_endog=1・
+# k_instruments=1（丁度識別）の最小構成にする。df_resid = n - (k_exog + k_endog + 1) = 1
+# を満たすにはn = 0 + 1 + 1 + 1 = 3が必要。
+IV_BOUNDARY_DF1_SCENARIOS = ["baseline"]
+
 
 def freeze(output_dir: Path) -> None:
     iv_true_betas: dict[str, list[float]] = {}
@@ -94,6 +100,20 @@ def freeze(output_dir: Path) -> None:
         key_suffix="_multi_endog",
         k_endog=2,
         k_instruments=3,
+    )
+
+    freeze_scenarios(
+        output_dir,
+        generate_iv_dataset,
+        IV_BOUNDARY_DF1_SCENARIOS,
+        "iv",
+        iv_true_betas,
+        filename_suffix="_df1",
+        key_suffix="_df1",
+        n=3,
+        k_exog=0,
+        k_endog=1,
+        k_instruments=1,
     )
 
     (output_dir / "iv_true_beta.json").write_text(

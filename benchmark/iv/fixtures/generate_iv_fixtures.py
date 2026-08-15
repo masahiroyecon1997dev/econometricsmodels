@@ -138,6 +138,20 @@ def build_fixtures() -> dict:
             y_col="lwage",
         )
 
+    # 自由度1境界（df_resid=1ちょうど）の成功パス確認（Issue #235）。
+    # x_exog=[]・x_endog=['endog1']・instruments=['z1']（丁度識別、n=3）。
+    fixtures["df1"] = {}
+    for cov_type in COV_TYPES:
+        if cov_type == "cluster":
+            continue  # n=3では意味のあるクラスタ数を確保できないため対象外
+        fixtures["df1"][cov_type] = run(
+            dataset="baseline_df1",
+            x_exog_cols=[],
+            x_endog_cols=["endog1"],
+            instrument_cols=["z1"],
+            cov_type=cov_type,
+        )
+
     fixtures["_meta"] = {
         "method": "2sls",
         "generated_at": datetime.now(UTC).isoformat(),
@@ -172,6 +186,10 @@ def build_fixtures() -> dict:
             "他の実データセット（mroz等）と異なりtrue_betaと比較できないため"
             "`true_beta`キーは持たない。cluster cov_typeは対応する自然な"
             "カテゴリ列が無いため対象外（Issue #231フェーズ4）。"
+            "df1（自由度1境界、n=3・x_exog=[]・x_endog=['endog1']・"
+            "instruments=['z1']）は境界値・悪条件シナリオの一環（Issue #235、"
+            "testing-policy.md「テスト用データセット」）。cluster cov_typeは"
+            "n=3では意味のあるクラスタ数を確保できないため対象外。"
         ),
     }
     return fixtures

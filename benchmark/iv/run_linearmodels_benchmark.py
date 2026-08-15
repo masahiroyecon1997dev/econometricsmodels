@@ -149,7 +149,14 @@ def _nested_f_test(
         res_r = sm.OLS(y, x_r).fit()
         ssr_r = res_r.ssr
     else:
-        ssr_r = float((y**2).sum())
+        # x_exog_cols=[]でも、本実装は常にinclude_intercept=trueのため制限
+        # モデルは「切片のみ」（回帰変数0個ではない）。SSR_rは中心化した
+        # 二乗和を使う必要がある（`engine::iv::two_sls::partial_f_statistic`の
+        # 「x_exog=[]かつinclude_intercept=falseの退化ケース」注記が示す通り、
+        # 非中心化二乗和は切片も無い場合専用。df1境界シナリオ追加（Issue #235）で
+        # 発覚: 非中心化版は本実装（classical weak_instrument_f_statistics）と
+        # 一致しなかった（実測11.607 vs 本実装2.696、中心化版は2.696で一致）。
+        ssr_r = float(((y - y.mean()) ** 2).sum())
 
     q = len(instrument_cols)
     df_u = n - x_u.shape[1]
@@ -276,8 +283,20 @@ def run(
     # `df_resid`をそのまま流用しており、F統計量自体は機械精度で一致するのに
     # p値だけ最大0.2%程度乖離するバグがあった（`test_iv_fixtures.py`作成時に
     # small_nシナリオ等で発覚・修正済み）。
+    # augmented regression（第一段階残差をn_endog列追加した拡張回帰）の
+    # 残差自由度が0以下（境界的なサンプルサイズ、df=1境界シナリオ等）だと
+    # `res.wooldridge_regression`の内部でZeroDivisionErrorになる。本実装は
+    # 同じ状況で`InsufficientObservations`を検出しwu_hausman_statistic/
+    # wu_hausman_p_valueをNoneにする設計（`engine/src/iv/CLAUDE.md`
+    # 「Wu-Hausmanの拡張回帰が想定内の理由で失敗した場合」参照）のため、
+    # ここでも同じくNoneにして揃える（Issue #235で発覚）。
     n_endog = len(x_endog_cols)
-    if not x_endog_cols or cov_type == "hac":
+    wu_hausman_df_resid_candidate = df_resid - n_endog
+    if (
+        not x_endog_cols
+        or cov_type == "hac"
+        or wu_hausman_df_resid_candidate <= 0
+    ):
         wu_hausman_statistic = None
         wu_hausman_p_value = None
     else:

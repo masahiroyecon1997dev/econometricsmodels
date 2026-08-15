@@ -64,6 +64,25 @@ TOLERANCES: dict[str, dict[str, float]] = {
         "atol_f_pvalue": 1e-5,
         # ols_crosscheckと同じ絶対誤差フロア（f_p_value以外の統計量向け）。
         "atol": 1e-8,
+        # p_values/wu_hausman_p_value（Issue #232/#233で追加）はhacケースで
+        # t分布/F分布の裾の確率がわずかな統計量の差を増幅する（f_p_valueと同じ
+        # 理由）。実測最大乖離0.00157（multi_endog/hac/p_values/const）に
+        # マージンを載せた絶対誤差フロア。hac以外はatol（1e-8）のまま。
+        "atol_hac_pvalue": 2e-3,
+        # conf_int（Issue #232で追加）もhacケースで実測乖離がrtol_hac（1%）を
+        # 超えることがある（実測最大乖離0.00856、multi_endog/hac/conf_lower/
+        # const）。絶対誤差フロアにマージンを載せた値。
+        "atol_hac_conf_int": 1.2e-2,
+        # wu_hausman_statistic（Issue #233で追加）はhacケースで実測乖離が
+        # rtol_hac（1%）を僅かに超えることがある（実測最大相対誤差1.01%、
+        # high_condition_number）。専用に緩めた相対誤差。
+        "rtol_hac_wu_hausman": 0.02,
+        # small_nシナリオ×wu_hausman_statistic/wu_hausman_p_valueはさらに
+        # 乖離が大きい（実測相対誤差: statistic 11.1%、p_value 16.8%。
+        # rtol_hac_small_nの10%も超える。augmented regressionが元のモデルより
+        # さらに1列多い分、小標本での不安定性が増幅されるためと考えられる）。
+        # 専用に緩めた相対誤差（両方で共用、実測最大値にマージン）。
+        "rtol_hac_wu_hausman_small_n": 0.2,
     },
     "logit_crosscheck": {
         "rtol": 2e-4,

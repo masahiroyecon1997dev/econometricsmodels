@@ -922,6 +922,85 @@ tests/api_tests/
   全てグリーン。今回はengine/engine_pybind/python_packageへの変更が無かった
   ため`rust-reviewer`/`python-reviewer`の呼び出しは対象外。
 
+**追加ラウンド: GitHub Issue #232〜238の実施状況確認・残件対応（完了）**:
+
+- **経緯**: 上記メモ完了後、ユーザーから「Issue #232〜238はすでに実施済みか」と
+  確認依頼があった。実際にコードを確認したところ、上記の`testing-completeness-
+  reviewer`レビュー（直近の`git diff`ベースで対象推定）とこれら7件のIssue本文が
+  1対1対応しておらず、**完了していたのは#234（high_variance）・#236（Wooldridge
+  card）・#238（複数内生変数）の3件のみ**（クローズ済み）で、
+  #232・#233・#235・#237は未着手と判明した。ユーザー確認の上、残り4件も
+  引き続き実装した。
+- **#235（自由度1境界df=1シナリオ追加）**: `x_exog=[]`・`x_endog=['endog1']`・
+  `instruments=['z1']`（丁度識別、n=3）の最小構成で追加
+  （`freeze_iv_datasets.py`の`IV_BOUNDARY_DF1_SCENARIOS`）。実装中に2件の
+  副次的なバグを発見・修正した。
+  1. `run_linearmodels_benchmark.py`の`_nested_f_test`が`x_exog_cols=[]`の
+     とき制限モデルのSSRを非中心化（`(y**2).sum()`）で計算していたが、
+     本実装は常に切片を含む（`include_intercept=false`の退化ケース専用の式を
+     誤って全`x_exog=[]`ケースに適用していた）。df1追加で顕在化（本実装の
+     `weak_instrument_f_statistics`と2.6958 vs 11.607で不一致）、中心化SSRに
+     修正して解消。この修正で`cluster_g2`フィクスチャの
+     `weak_instrument_f_independent`も無言で誤っていたことが判明したが、
+     この値を比較するテストはこれまで無かったため既存テストへの影響はゼロ。
+  2. augmented regressionがsaturated（残差自由度0）になる境界のため、
+     linearmodelsの`wooldridge_regression`が`ZeroDivisionError`、ivregの
+     HC0診断が`solve()`エラーで落ちた。本実装が同じ状況で
+     `wu_hausman_statistic`/`wu_hausman_p_value`を`None`にする設計
+     （`engine/src/iv/CLAUDE.md`）と揃え、両ベンチマークスクリプト側も
+     同じ状況を検出して`None`/`NA`を返すよう修正（ユーザー確認不要、
+     本実装の既存設計への追従のみ）。
+- **#232（Rクロスチェックにt値・p値・信頼区間を追加）・#237（nobs/df_resid
+  追加）**: `run_ivreg_benchmark.R`に`extract_coef_se`の`t_stats`/`p_values`と
+  手計算信頼区間、`nrow(df)`/`df.residual(model)`を追加（OLS/WLSクロスチェック
+  の`run_lm_crosscheck_benchmark.R`と同じパターン）。`nobs`/`df_resid`は
+  cov_type非依存の構造残差自由度（n-k）を返す必要があり、cluster時に
+  `df_inference`をG-1へ上書きする既存変数をそのまま使うと誤った値になる
+  （linearmodelsの`df_resid`もcluster時n-k固定であることを`iv.json`で確認）
+  ためcluster分岐と独立に`df.residual(model)`を保持するよう実装した。
+- **#233（wu_hausmanのcov_type=hacケースを外部リファレンスで検証）**:
+  ユーザーは当初「R側でHAC augmented regressionを手動実装する」案（Issue本文の
+  選択肢2）を、手動実装自体の正しさが別途検証されない点を理由に却下し、
+  「別パッケージで参照できないか」を確認するよう指示。`ivreg:::ivdiag`の
+  ソースを確認したところ、`summary.ivreg`の`vcov.`引数は**関数**として渡せば
+  診断表（Wu-Hausman・弱操作変数F統計量）にも反映される仕様だったが、
+  既存コードは**行列**を渡して警告付きでNULLにフォールバックしていたことが
+  判明（コメント「vcov.に行列を渡すと警告付きでNULLにフォールバックする」は
+  事実だが、関数として渡す代替を見落としていた）。手動実装は不要で、ivreg
+  自身の診断機構をcov_type別のvcov関数（`vcov_fn`）で呼び分けるだけで全
+  cov_typeのwu_hausmanクロスチェックが可能と判明（弱操作変数F統計量・Sargan
+  は常にclassical固定を維持するため、`vcov.`無しのデフォルト呼び出しと
+  使い分けた）。ただし**cluster cov_typeのみ**、`ivdiag`内の`wald()`が
+  F分布の分母自由度に常に`obj1$df.residual`（n-k）を使い、本実装のG-1
+  （標準的な慣行）に追従しない既知の制約を発見。統計量は高精度で一致する
+  （実測: 112.32で完全一致）がp値は一致しない（R側8.5e-24 vs 本実装2.2e-06、
+  df=9で計算すると本実装の値が再現できることを確認）ため、ユーザー確認の上
+  cluster cov_typeのみp値をクロスチェック対象から除外した
+  （`gmm_iterations=1`のHansen J除外と同型のパターン）。
+  さらにcluster_g2（G=2境界）ケースでは、augmented regressionの傾き係数が
+  q=2（endog1・第一段階残差）に対しG-1=1<qとなり構造的にクラスタロバスト
+  共分散が特異になる（本実装のG≤qの罠と同じ原理、`engine/src/iv/CLAUDE.md`
+  参照）ため本実装は正しく`None`を返すが、ivreg側はこの特異性を検出せず
+  値を返すため、この1ケースのみwu_hausman比較自体を対象外にした。
+  linearmodels側の`hac`不一致原因調査自体は次セッション送りとした
+  （ユーザー確認済み）。
+- **HAC許容誤差の拡張**: #232/#233で追加した新規フィールド（t_stats/p_values/
+  conf_int/wu_hausman）は、既存のcoef/se向けの`RTOL_HAC`/`RTOL_HAC_SMALL_N`
+  では収まらない乖離（p_values最大28.7%、conf_int最大1.66%、
+  wu_hausman_statistic最大11.1%（small_n）等）を示した。実測値に基づき
+  専用の許容誤差を追加（`_tolerances.py`の`atol_hac_pvalue`・
+  `atol_hac_conf_int`・`rtol_hac_wu_hausman`・
+  `rtol_hac_wu_hausman_small_n`、いずれもhacケースでのみ適用しclassical/
+  hc0/hc1/clusterの厳密比較には影響しない）。df1×hac（n=3でのNewey-West
+  ラグ選択が統計的にほぼ無意味、実測se最大42%乖離）はユーザー確認の上
+  crosscheck対象外にした。
+- **検証**: `uv run pytest tests`（885件、上記完了時点の878件から7件増）・
+  `ruff check`/`ruff format --check`・`cargo test -p engine -p engine_pybind`
+  （317+72件、変更なし）全てグリーン。engine/engine_pybind/python_packageへの
+  変更は無かったため`rust-reviewer`/`python-reviewer`の呼び出しは対象外。
+  完了条件を満たしたことを確認の上、Issue #232・#233・#235・#237をクローズ
+  （#234・#236・#238は前段の完了時点で既にクローズ済み）。
+
 ---
 
 ## フェーズ5: `python_package/`のリファクタリング

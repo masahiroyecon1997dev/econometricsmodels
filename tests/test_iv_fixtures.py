@@ -21,11 +21,14 @@ Note:
       （`two_sls.rs`の`fit_computes_hc2_std_errors_matching_manual_sandwich_formula`
       等、独立な素朴ループでの手計算とのクロスチェック）による検証に留める。
     - `wu_hausman_statistic`はcov_type="hac"のときlinearmodels側との対応式が
-      不明なためフィクスチャ自体が`None`（原因未特定、R `ivreg`クロスチェック
-      実装時に別途確認、`run_linearmodels_benchmark.py`のモジュールdoc
-      コメント参照）。本実装側は`hac`でも値を返す（`None`にはならない）ため、
-      `ref`が`None`のときは比較をスキップするだけで、本実装側の値が`None`で
-      あることは要求しない。
+      不明なためフィクスチャ自体が`None`（原因未特定、次セッションで別途調査
+      予定、`run_linearmodels_benchmark.py`のモジュールdocコメント参照）。
+      本実装側は`hac`でも値を返す（`None`にはならない）ため、`ref`が`None`の
+      ときは比較をスキップするだけで、本実装側の値が`None`であることは
+      要求しない。df1（自由度1境界、Issue #235）は逆にaugmented regressionが
+      saturated（残差自由度0）になるため全cov_typeでフィクスチャが`None`に
+      なり、本実装側も同じ理由でNoneを返す（`engine/src/iv/CLAUDE.md`
+      「Wu-Hausmanの拡張回帰が想定内の理由で失敗した場合」参照）。
     - `weak_instrument_f_statistics`は本実装が常にclassical（等分散前提）で
       計算する設計のため、フィクスチャの`weak_instrument_f_independent`
       （statsmodelsで独立計算した同じ定義のnested F検定）と比較する
@@ -287,6 +290,29 @@ def test_card_matches_linearmodels(fixtures, cov_type):
     ).fit()
 
     _check_result(res, fixtures["card"][cov_type], f"card/{cov_type}")
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+def test_df1_matches_linearmodels(fixtures, cov_type):
+    """自由度1境界（df_resid=1ちょうど）の成功パス。`x_exog=[]`・
+    `x_endog=['endog1']`・`instruments=['z1']`（丁度識別、n=3）。境界値・
+    悪条件シナリオの一環（Issue #235、`testing-policy.md`「テスト用データセット」）。
+    augmented regressionがsaturated（残差自由度0）になるため
+    `wu_hausman_statistic`/`wu_hausman_p_value`は全cov_typeで`None`になる
+    （`_check_result`のref Noneスキップ、`run_linearmodels_benchmark.py`参照）。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline_df1.csv")
+    options = IvOptions(cov_type=cov_type)
+    res = IV(
+        df,
+        y="y",
+        x_exog=[],
+        x_endog=["endog1"],
+        instruments=["z1"],
+        options=options,
+    ).fit()
+
+    _check_result(res, fixtures["df1"][cov_type], f"df1/{cov_type}")
 
 
 def test_perfect_multicollinearity_raises_computation_error():

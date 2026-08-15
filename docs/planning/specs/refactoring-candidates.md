@@ -166,3 +166,18 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   低リスクな改善だと考える。
 - **気づいた経緯**: 2026-08-15、`generate_nonlinear_datasets.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 10. `heteroskedastic`/`autocorrelated`の誤差項生成式がlinear・IVの2系統でマジックナンバーとして重複
+
+- **対象**: [benchmark/linear/generate_linear_datasets.py:121,124](../../../benchmark/linear/generate_linear_datasets.py#L121-L124)・
+  [benchmark/iv/generate_iv_datasets.py:178,186](../../../benchmark/iv/generate_iv_datasets.py#L178-L186)
+- **内容**: ユーザー指摘（2026-08-15）。`heteroskedastic`の分散式`sigma_i = 0.5 + 2.0 *
+  np.abs(X[:,0]/x_exog[:,0])`と、`autocorrelated`のAR(1)係数`rho(_ar) = 0.7`が、
+  linear・IVの2系統で全く同じ値のマジックナンバーとして直書きされている
+  （nonlinearはこの2シナリオ自体を持たないため対象外、モジュールdocstringで
+  理由明記済み）。項目9（`scale_variance`のスケール倍率重複）と同種の問題。
+- **Claudeの所感**: `_common.py`に`HETEROSKEDASTIC_SIGMA_BASE = 0.5`・
+  `HETEROSKEDASTIC_SIGMA_SLOPE = 2.0`・`AUTOCORRELATED_RHO = 0.7`のような
+  名前付き定数として集約する余地がある。項目9と合わせて対応すると効率が良さそう。
+- **気づいた経緯**: 2026-08-15、`generate_iv_datasets.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

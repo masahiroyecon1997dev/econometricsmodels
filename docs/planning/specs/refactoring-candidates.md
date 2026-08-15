@@ -191,6 +191,27 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   ただし`{str(name): float(v) for name, v in model.params.to_dict().items()}`という
   `coef`/`se`抽出の辞書内包表記は、`run()`内の同種のコードとほぼ同じパターンで重複している。
 - **Claudeの所感**: `_common.py`に`extract_coef_se(model) -> dict`のような小さな
-  ヘルパーを切り出せる余地はあるが、規模は小さく優先度は低い。
+  ヘルパーを切り出せる余地はあるが、規模は小さく優先度は低い。項目12でより根本的な
+  代替案（`_run_cluster_case`自体の解消）を検討済み。
 - **気づいた経緯**: 2026-08-15、`generate_ols_fixtures.py`解説中に発見。
 - **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
+
+### 12. クラスター用の疑似グループ列をfreeze時にCSVへ焼き込み、`_run_cluster_case`を`run()`一律呼び出しに統合できないか
+
+- **対象**: [benchmark/linear/fixtures/generate_ols_fixtures.py:82-105,124-166](../../../benchmark/linear/fixtures/generate_ols_fixtures.py#L82-L166)・
+  [benchmark/linear/freeze_linear_datasets.py](../../../benchmark/linear/freeze_linear_datasets.py)
+- **内容**: ユーザー提案（2026-08-15）。現状`_run_cluster_case`は、CSVに無い疑似グループ列
+  `_group`をpandas DataFrameに動的に追加してから独自にstatsmodelsを呼んでいる（項目11参照）。
+  3パターンの疑似グループ（既定=行番号%10、不均衡=`imbalanced_cluster_groups(n)`、
+  G=2境界=行番号%2）はいずれも`n`のみから決まる決定論的なラベルで`X`/`y`/`weight`の値に
+  依存しないため、`freeze_linear_datasets.py`が凍結CSV書き出し時にこれらの列を
+  あらかじめ焼き込んでおけば、`generate_ols_fixtures.py`のメインループ
+  （`for cov_type in COV_TYPES: result = run(...)`）に`cluster_col`引数付きで
+  そのまま乗せられ、`_run_cluster_case`自体（および項目11のcoef/se抽出重複）を
+  解消できる可能性がある。
+- **Claudeの所感**: 技術的には実現できそうだが、「`generate_linear_dataset()`自体に
+  テスト用ラベル列を混在させるか、`freeze_linear_datasets.py`側で後付けするか」という
+  設計判断が必要（Claudeは後付け案を推奨、DGP関数を純粋に保てるため）。着手前に
+  ユーザー確認が必要な設計判断を含む。
+- **気づいた経緯**: 2026-08-15、`generate_ols_fixtures.py`解説後のユーザー提案。
+- **状態**: 未対応（設計方針の確認・着手要否はユーザー判断待ち）

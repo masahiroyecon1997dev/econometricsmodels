@@ -5,7 +5,7 @@ IVの主リファレンス（`docs/planning/specs/iv-api-design.md`5.1節参照�
 2SLSは`run()`、GMMは`run_gmm()`（`method="gmm"`のPython配線完了後に追加、
 `run_gmm()`のモジュールdocコメント参照）。
 
-合成データは`generate_iv_datasets.py`を直接呼ばず、`tests/api_tests/fixtures/
+合成データは`generate_iv_datasets.py`を直接呼ばず、`tests/fixtures/
 benchmarks/data/`に固定済みのCSVを読む（`benchmark/freeze_datasets.py`参照。
 `run_statsmodels_benchmark.py`と同じ理由）。
 
@@ -91,13 +91,23 @@ sys.path.insert(
 )  # benchmark/ を import path に追加（_common）
 
 from _common import hac_auto_lag, load_frozen_dataset
+from load_wooldridge import load as _load_wooldridge
 
 
-def _load_iv_dataset(scenario: str) -> tuple[pl.DataFrame, list[float] | None]:
-    # クラスター確認用の一時CSV（`generate_iv_fixtures.py`の`_run_cluster_case`）は
-    # `iv_true_beta.json`にエントリが無いため、`None`を許容する
-    # （`generate_ols_fixtures.py`のクラスターケースが`true_beta`比較をしないのと同じ扱い）。
-    return load_frozen_dataset("iv", scenario)
+def _load_iv_dataset(
+    dataset_source: str, scenario: str
+) -> tuple[pl.DataFrame, list[float] | None]:
+    if dataset_source == "synthetic":
+        # クラスター確認用の一時CSV（`generate_iv_fixtures.py`の
+        # `_run_cluster_case`）は`iv_true_beta.json`にエントリが無いため、
+        # `None`を許容する（`generate_ols_fixtures.py`のクラスターケースが
+        # `true_beta`比較をしないのと同じ扱い）。
+        return load_frozen_dataset("iv", scenario)
+    if dataset_source == "wooldridge":
+        # Wooldridgeデータはtrue_betaと比較できないため常に`None`
+        # （`run_statsmodels_benchmark.py`のwooldridge分岐と同じ扱い）。
+        return _load_wooldridge(scenario), None
+    raise ValueError(f"unknown dataset_source: {dataset_source!r}")
 
 
 # engine cov_type -> (linearmodels cov_type, debiased)。モジュールdocstring参照。
@@ -139,7 +149,14 @@ def _nested_f_test(
         res_r = sm.OLS(y, x_r).fit()
         ssr_r = res_r.ssr
     else:
-        ssr_r = float((y**2).sum())
+        # x_exog_cols=[]でも、本実装は常にinclude_intercept=trueのため制限
+        # モデルは「切片のみ」（回帰変数0個ではない）。SSR_rは中心化した
+        # 二乗和を使う必要がある（`engine::iv::two_sls::partial_f_statistic`の
+        # 「x_exog=[]かつinclude_intercept=falseの退化ケース」注記が示す通り、
+        # 非中心化二乗和は切片も無い場合専用。df1境界シナリオ追加（Issue #235）で
+        # 発覚: 非中心化版は本実装（classical weak_instrument_f_statistics）と
+        # 一致しなかった（実測11.607 vs 本実装2.696、中心化版は2.696で一致）。
+        ssr_r = float(((y - y.mean()) ** 2).sum())
 
     q = len(instrument_cols)
     df_u = n - x_u.shape[1]
@@ -188,18 +205,23 @@ def run(
     cluster_col: str | None = None,
     hac_lags: int | None = None,
     confidence_level: float = 0.95,
+    dataset_source: str = "synthetic",
+    y_col: str = "y",
 ) -> dict:
     from linearmodels.iv import IV2SLS
     from scipy import stats as scipy_stats
 
-    df, true_beta = _load_iv_dataset(dataset)
+    df, true_beta = _load_iv_dataset(dataset_source, dataset)
     pdf = df.to_pandas()
     n = len(pdf)
 
     exog_part = " + ".join(x_exog_cols)
     endog_part = " + ".join(x_endog_cols)
     instr_part = " + ".join(instrument_cols)
-    formula = f"y ~ 1{' + ' + exog_part if exog_part else ''} + [{endog_part} ~ {instr_part}]"
+    formula = (
+        f"{y_col} ~ 1{' + ' + exog_part if exog_part else ''} + "
+        f"[{endog_part} ~ {instr_part}]"
+    )
 
     lm_cov_type, debiased = _COV_TYPE_MAP[cov_type]
     cov_config: dict = {"debiased": debiased}
@@ -261,8 +283,20 @@ def run(
     # `df_resid`をそのまま流用しており、F統計量自体は機械精度で一致するのに
     # p値だけ最大0.2%程度乖離するバグがあった（`test_iv_fixtures.py`作成時に
     # small_nシナリオ等で発覚・修正済み）。
+    # augmented regression（第一段階残差をn_endog列追加した拡張回帰）の
+    # 残差自由度が0以下（境界的なサンプルサイズ、df=1境界シナリオ等）だと
+    # `res.wooldridge_regression`の内部でZeroDivisionErrorになる。本実装は
+    # 同じ状況で`InsufficientObservations`を検出しwu_hausman_statistic/
+    # wu_hausman_p_valueをNoneにする設計（`engine/src/iv/CLAUDE.md`
+    # 「Wu-Hausmanの拡張回帰が想定内の理由で失敗した場合」参照）のため、
+    # ここでも同じくNoneにして揃える（Issue #235で発覚）。
     n_endog = len(x_endog_cols)
-    if not x_endog_cols or cov_type == "hac":
+    wu_hausman_df_resid_candidate = df_resid - n_endog
+    if (
+        not x_endog_cols
+        or cov_type == "hac"
+        or wu_hausman_df_resid_candidate <= 0
+    ):
         wu_hausman_statistic = None
         wu_hausman_p_value = None
     else:

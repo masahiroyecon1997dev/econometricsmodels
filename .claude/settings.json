@@ -17,7 +17,7 @@
       "Read(./python_package/econometricsmodels/*.so)"
     ],
     "ask": [
-      "Read(./tests/api_tests/fixtures/benchmarks/**)"
+      "Read(./tests/fixtures/benchmarks/**)"
     ]
   }
 }

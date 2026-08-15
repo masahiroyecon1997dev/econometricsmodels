@@ -22,8 +22,9 @@
 |---|---|---|
 | 1 | リファクタリング用スキル（or 既存スキル/エージェントの代用整理） | 完了 |
 | 2 | `benchmark/`ディレクトリの整理とリファクタリング | 完了 |
-| 3 | `tests/`ディレクトリの整理とリファクタリング | 未着手 |
-| 4 | ロジック整理前のテスト拡充（OLS/WLS/Logit/Probitレビュー＋IV #232〜238） | 未着手 |
+| 3 | `tests/`ディレクトリの整理とリファクタリング | 完了 |
+| 3.5 | crosscheckテストの許容誤差計算式バグ修正（`refactor`スキル範囲外） | 完了 |
+| 4 | ロジック整理前のテスト拡充（OLS/WLS/Logit/Probitレビュー＋IV #232〜238） | 完了（linear系統〔OLS/WLS〕・nonlinear系統〔Logit/Probit〕・IV系統〔2SLS/GMM〕全て完了） |
 | 5 | `python_package/`のリファクタリング | 未着手 |
 | 6 | `engine_pybind/`のリファクタリング | 未着手 |
 | 7 | `engine/`のリファクタリング | 未着手 |
@@ -329,7 +330,211 @@ tests/api_tests/
 └── fixtures/benchmarks/
 ```
 
-**状態**: 未着手
+**状態**: 完了
+
+**メモ（現状調査・計画）**:
+
+`Explore`エージェントによる17ファイル横断調査の結果、以下を計画として確定した
+（ユーザー確認済み、実装はこれから）。
+
+1. **ディレクトリ移動**: `tests/api_tests/` → `tests/`へフラット化（`git mv`）。
+   Rust側テストは`engine`の`mod tests`に完全分離済みで、Python側に
+   `api_tests`以外の種別が今後増える見込みが薄いため中間ディレクトリ不要と判断。
+   参照更新対象: `CLAUDE.md`3章の構成図、`pyproject.toml`（コメント）、
+   `.github/workflows/ci_python.yml`（pathsトリガー・実行コマンド）、
+   `.claude/rules/testing-policy.md`、`.claude/rules/python-style.md`、
+   `.claude/skills/test-new/SKILL.md`・`test-run/SKILL.md`・
+   `reference-benchmark/SKILL.md`、`docs/spec/ci-cd-notes.md`。
+2. **`tests/_assertions.py`新設**: `assert_close`/`assert_dict_close`/
+   `check_result`（ols・wls用／logit・probit用／iv・iv_gmm用の3パターン）/
+   `check_margeff`（fixtures用／crosscheck用の2パターン）を集約。
+   **`test_ols_crosscheck.py`・`test_iv_crosscheck.py`の基本`_assert_close`は
+   許容誤差の計算式が他と異なる（フェーズ3.5参照）ため統合対象から除外し、
+   現状のファイル内実装のまま残す**（挙動を変えないため）。
+3. **`tests/_tolerances.py`新設**: 許容誤差の値を手法ごとに辞書化して集約
+   （計算式の統一はフェーズ3.5で別途対応、値の集約のみ今回実施）。
+4. **`tests/_helpers.py`新設**: クラスター列付与ヘルパー
+   （`with_cluster_groups`、「行番号%N」パターン22箇所）、
+   `separation_suspected`DGP（logit/probit共通）、`MROZ_X`定数、
+   Wooldridgeロードの一本化。クラスター列ヘルパーは`benchmark/_common.py`の
+   `imbalanced_cluster_groups`とは役割が近いが、`benchmark/`と`tests/`は
+   ライフサイクルが別（testing-policy.md）という既存方針を踏まえ、
+   テスト専用ロジックのため`tests/`側に置くことをユーザー確認済み。
+5. **`conftest.py`拡張**: `binary_dataset`フィクスチャ（logit/probit共通）、
+   `DATA_DIR`定数、`sys.path`への`benchmark/`直下挿入（系統別サブディレクトリの
+   挿入は各ファイルに残す）、`fixtures()`JSON読み込みの汎用化。
+6. **COV_TYPESの一元化拡張**: logit/probit系（fixtures・crosscheck）にも、
+   既にols/wls/ivで適用済み（フェーズ2）の「`generate_*_fixtures.py`から
+   importして単一定義元にする」パターンを適用（値は現状と同一のため挙動不変）。
+7. **IVの`fit()`呼び出し共通化**: `test_iv.py`に`_our_fit`ヘルパー
+   （`test_ols.py`と同様の形）を追加し、40箇所以上の重複呼び出しを整理。
+8. **Issue番号コメント整理**: `#153`（test_wls.py 2箇所、番号のみ削除・
+   「OLSと共有される検証経路」という説明は残す）、`#171`（4ファイル5箇所、
+   現状との記述一致を確認しつつ経緯のみ削除）、`#231`（4ファイル、
+   「単一定義元にする」という設計判断の説明を残し番号のみ削除）。
+
+**除外事項**: crosscheckテストの許容誤差計算式の不一致（`tol`計算式が
+`test_ols_crosscheck.py`・`test_iv_crosscheck.py`のみ他と異なる）は
+ロジックの挙動を変える修正のため、`refactor`スキルの範囲外としフェーズ3.5へ
+切り出した（ユーザー指示）。
+
+### 実施結果（完了）
+
+計画の1〜8を全て実装した。
+
+1. **ディレクトリ移動**: `git mv`で17ファイル＋`fixtures/`を`tests/api_tests/`
+   から`tests/`へ移動。付随して各ファイル内の`sys.path.insert`の
+   `parents[2]`（旧`tests/api_tests/test_x.py`基準）を`parents[1]`
+   （新`tests/test_x.py`基準）に修正、docstring内のパス表記・
+   `benchmark/_common.py`の`DATA_DIR`組み立て・`benchmark/`配下の
+   フィクスチャ生成スクリプトのデフォルト出力パスも追従。参照更新した
+   非コードファイル: `CLAUDE.md`（3章構成図・6章要点）、`docs/plan.md`、
+   `pyproject.toml`（コメント）、`.github/workflows/ci_python.yml`
+   （pathsトリガー・実行コマンド）、`.claude/settings.json`（`ask`パス）、
+   `.claude/rules/testing-policy.md`・`python-style.md`、
+   `.claude/skills/reference-benchmark/SKILL.md`・`test-run/SKILL.md`・
+   `test-new/SKILL.md`、`.claude/agents/rust-reviewer.md`・
+   `python-reviewer.md`・`testing-completeness-reviewer.md`、
+   `docs/spec/ci-cd-notes.md`、`python_package/econometricsmodels/
+   nonlinear/CLAUDE.md`、`engine_pybind/src/nonlinear/CLAUDE.md`、
+   `engine/src/iv/CLAUDE.md`、`benchmark/README.md`、
+   `docs/planning/specs/iv-api-design.md`。`docs/planning/specs/
+   panel-iv-issue-breakdown.md`（完了済みIssueのチェックリスト、履歴的な
+   記録）と本ドキュメントの「着手前スナップショット」節は、過去の状態を
+   記述する文書のため意図的に更新対象から除外した。
+   移動後、`freeze_datasets.py`の出力を一時ディレクトリに生成し
+   コミット済み`tests/fixtures/benchmarks/data/`と`diff -rq`で完全一致
+   することを確認済み。
+2. **`tests/_assertions.py`新設**: `assert_close`/`assert_dict_close`/
+   `rename_intercept`/`check_margeff`を集約し、fixtures系6ファイル
+   （ols/wls/logit/probit/iv/iv_gmm）から`functools.partial`で
+   `rtol`/`atol`を束縛する形で参照するよう変更。crosscheck系5ファイルは
+   計算式が現状不統一（フェーズ3.5参照）のため、今回は対象外とし
+   ファイル内実装のまま維持。
+3. **`tests/_tolerances.py`新設**: 全11ファイル（fixtures 6・crosscheck 5）
+   の許容誤差の値を手法名をキーにした辞書に集約。計算式は変更していないため
+   挙動は不変（`ols_crosscheck`/`iv_crosscheck`の異なる式もそのまま）。
+4. **`tests/_helpers.py`新設**: `with_cluster_groups`（「行番号%N」パターン、
+   正規表現による一括置換で23箇所を集約）、`separation_suspected_dataset`
+   （`test_logit.py`/`test_probit.py`で完全同一実装だったDGP）、`MROZ_X`
+   （4ファイル）、`wooldridge_loader`/`load_wooldridge_dataset`
+   （3種類あったWooldridgeロードの書き方を統一。`test_ols_crosscheck.py`の
+   複数データセット対応fixtureは`wooldridge_loader()`、単発ロードは
+   `load_wooldridge_dataset(name)`）、`DATA_DIR`（12ファイルで重複していた
+   `Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"`
+   の組み立てを集約）を追加。
+5. **`conftest.py`拡張**: `binary_dataset`フィクスチャ（`test_logit.py`/
+   `test_probit.py`の完全同一実装を統合）、`benchmark/`直下への
+   `sys.path.insert`（11ファイルが個別に行っていたものを一度だけに集約。
+   系統別サブディレクトリの挿入は各ファイルに残置）を追加。
+6. **COV_TYPESの一元化拡張**: 調査の結果、logit/probitの
+   `generate_*_fixtures.py`側`COV_TYPES`には`"cluster"`が追加で含まれており
+   （fixture生成用の全網羅リストのため）、テスト側の意図的に絞った
+   リスト（cluster抜き、クラスターは専用テストで別途検証）とは値が
+   一致しないと判明（フェーズ2でOLS等について確認済みの「意図的な非対称」と
+   同じ構造）。単純importすると挙動が変わるため、ユーザー確認の結果
+   **据え置き**（現状のハードコードのまま）で決定。
+7. **IVの`fit()`呼び出し共通化**: `test_iv.py`に`_our_fit`ヘルパー
+   （`x_exog=["x1"], x_endog=["endog1"], instruments=["z1", "z2"]`が
+   既定、`options`含め呼び出し側で上書き可能）を追加。正規表現による
+   一括変換で、既定値と完全一致していた36箇所の`IV(...).fit()`呼び出しを
+   `_our_fit(...)`に置換（異なる`x_exog`/`x_endog`/`instruments`を使う
+   残り約20箇所は、それぞれ意図的に異なるテストケースであり
+   重複ではないため元のまま維持）。
+8. **Issue番号コメント整理**: `#153`（`test_wls.py`2箇所）・`#171`
+   （`test_iv.py`2箇所・`test_iv_fixtures.py`2箇所・`test_iv_crosscheck.py`
+   1箇所・`test_iv_gmm_fixtures.py`1箇所）・`#231`（4ファイル）の
+   全11箇所を番号のみ削除し周辺の説明文は保持。調査中に`test_iv_fixtures.py`
+   のdocstringが「Rクロスチェックは別issueで保留中（`ivreg`未導入のため）」
+   という**現状と矛盾する記述**（実際には`test_iv_crosscheck.py`として
+   実装済み）であることを発見し、あわせて修正した。
+
+**最終確認**: `pytest tests`670件全件パス、`ruff check .`／
+`ruff format --check .`全件パス。`cargo test`は対象外
+（`engine`/`engine_pybind`/`python_package`は今回変更していない）。
+
+---
+
+## フェーズ3.5: crosscheckテストの許容誤差計算式バグ修正
+
+**背景**: フェーズ3の現状調査で発覚。`test_ols_crosscheck.py`の`_assert_close`
+（dict版）・`_assert_scalar_close`と、`test_iv_crosscheck.py`の`_assert_close`
+（スカラー版）・`_assert_dict_close`が
+`tol = rtol * max(abs(ref_val), 1e-8)`という式を使っている。これは他の大半
+（`*_fixtures.py`全6ファイル、`test_wls_crosscheck.py`、`test_logit_crosscheck.py`、
+`test_probit_crosscheck.py`、`test_iv_crosscheck.py`の`_assert_p_value_close`のみ）が
+使う`tol = max(rtol * abs(ref_val), atol)`と**数学的に別物**（前者は`|ref|`が
+小さいとき許容誤差が`rtol*1e-8`という極小値まで縮み、本来検出すべきでない
+誤差でテストが誤って失敗しうる／逆に緩すぎて見逃しうる）。
+
+`test_wls_crosscheck.py:79-82`のコメントは、この不一致を認識した上で
+`test_ols_crosscheck.py`と異なる（＝修正済みの）式を採用した旨を明記しており、
+**`test_ols_crosscheck.py`と`test_iv_crosscheck.py`が未修正のまま取り残された
+可能性が高い**（本来の意図は`max(rtol*|ref|, atol)`と推測されるが、要検証）。
+
+**進め方（`refactor`スキルではなく通常の実装フローとして対応）**:
+1. どちらの式が正しい意図か（`ATOL`をなぜ`1e-8`固定にしていたか等）を
+   コミット履歴・関連Issueから確認する。
+2. 該当2ファイルの許容誤差式を正しい式に修正し、修正後に既存のRクロスチェック
+   フィクスチャに対して実際にテストがパスするか（許容誤差を厳しくする方向の
+   修正であれば、逆に既存の実測乖離を超えて失敗するケースが無いか）確認する。
+3. 修正により新たにテストが失敗する場合、それが「これまで見逃していた本物の
+   数値不一致」か「許容誤差の詰めすぎ」かを切り分ける。
+4. フェーズ3で新設する`tests/_assertions.py`へ、修正後の式で統合する
+   （フェーズ3時点で除外していた2ファイルの`_assert_close`をここで合流させる）。
+
+**状態**: 完了
+
+**メモ（実施結果）**:
+
+1. **コミット履歴による意図確認**: `git log --all -S`で`test_ols_crosscheck.pyと
+   異なり`というコメント文言をpickaxe検索し、導入元コミット`4ac9b80`
+   （`fix(wls): R²・対数尤度（→AIC/BIC）の計算式を修正し、tests/api_testsを
+   作成する`）を特定。コミットメッセージ・当該diffのコメントから、
+   `tol = rtol * max(|ref|, 1e-8)`という式（ols/iv crosscheckが使い続けていた
+   もの）は、`|ref|`が0近傍のとき許容誤差が`rtol*1e-8`という極小値
+   （例: `RTOL_STRICT=1e-8`なら`1e-16`）まで縮んでしまい、機械精度ノイズで
+   偽陽性の失敗を起こすバグであることが、WLSのRクロスチェックテスト作成時
+   （`cluster`/`f_p_value`が5e-13程度まで下がるケースで発覚）に判明済み
+   だったと確認できた。正しい式は`tol = max(rtol * |ref|, atol)`
+   （常に絶対誤差フロア`atol`以上を保証する）で、`test_wls_crosscheck.py`は
+   この時点で修正済みだったが、`test_ols_crosscheck.py`・
+   `test_iv_crosscheck.py`は追従していなかった。
+   - 数学的な影響範囲も確認: 修正前の式をB、修正後の式をAとすると、
+     `|ref| >= atol`の領域ではA=B、`|ref| < atol`の領域では常にA≥B
+     （Aの方が緩い）となることを確認済み。つまり今回の修正は許容誤差を
+     **緩める方向にのみ**作用し、修正によって新たにテストが失敗すること
+     は理論上あり得ない（既存のRクロスチェックフィクスチャに対して
+     ステップ3「本物の数値不一致か許容誤差の詰めすぎか」の切り分けは
+     不要と判明）。
+2. **修正**: `test_ols_crosscheck.py`（`_assert_close`のdict版・
+   `_assert_scalar_close`に加え、同じ式をヘルパー経由せず直書きしていた
+   `test_predict_none_matches_r_fitted_values`・
+   `test_predict_new_data_matches_r`内のループも発見し、`_assert_scalar_close`
+   呼び出しに統一）、`test_iv_crosscheck.py`（`_assert_close`のスカラー版・
+   `_assert_dict_close`）の計算式を`max(rtol * abs(ref_val), atol)`に修正。
+   絶対誤差フロアの値（`1e-8`、修正前と同じ数値）は`tests/_tolerances.py`の
+   `TOLERANCES["ols_crosscheck"]["atol"]`・`TOLERANCES["iv_crosscheck"]["atol"]`
+   として追加（値自体は変更していない）。
+3. **`tests/_assertions.py`への統合**: 式が他ファイルと一致したため、
+   `functools.partial`で`tests/_assertions.py`の`assert_close`/
+   `assert_dict_close`を束縛する形に置き換え、ファイル内の独自実装を削除
+   （フェーズ3で6ファイルのfixtures系に適用したのと同じパターン）。
+   `test_iv_crosscheck.py`の`_assert_p_value_close`（元々正しい式だった）も、
+   `atol`のみ`ATOL_F_PVALUE`に差し替えた`partial(assert_close,
+   atol=ATOL_F_PVALUE)`に簡潔化。
+4. **検証**: `pytest tests`670件全件パス（新規失敗0件、事前の数学的分析
+   通り）。`ruff check .`／`ruff format --check .`全件パス。
+
+**除外事項（今回のスコープ外）**: `test_wls_crosscheck.py`・
+`test_logit_crosscheck.py`・`test_probit_crosscheck.py`は元々正しい式を
+使っており今回のバグ修正の対象外だが、これで全5つのcrosscheckファイルが
+同じ計算式を使う状態になったため、`tests/_assertions.py`へさらに統合する
+余地がある（フェーズ3時点では計算式の不一致を理由に全crosscheckファイルを
+統合対象から除外していたが、その前提が解消された）。当フェーズの計画
+（ステップ4）はols/iv crosscheckの2ファイルのみを対象としていたため、
+残り3ファイルの統合は今回実施せず、次回リファクタリング時の候補として
+記録するに留める。
 
 **メモ**: (着手後に記載)
 
@@ -342,9 +547,9 @@ tests/api_tests/
 
 **進め方**:
 0. **着手前に`benchmark/`を再生成する**: `benchmark/freeze_datasets.py`で
-   合成データセットCSV（`tests/api_tests/fixtures/benchmarks/data/`）を、
+   合成データセットCSV（`tests/fixtures/benchmarks/data/`）を、
    `benchmark/*/fixtures/generate_*.py`各スクリプトで参照用パラメータJSON
-   （`tests/api_tests/fixtures/benchmarks/*.json`）をそれぞれ再生成し、
+   （`tests/fixtures/benchmarks/*.json`）をそれぞれ再生成し、
    コミット済みの状態と一致することを確認する（フェーズ2追加ラウンドの
    「最終確認」で発見した`generate_logit_crosscheck_fixtures.py`の
    `near_separation`ケース失敗も含め、この時点で一連の生成過程が整合的で
@@ -356,9 +561,445 @@ tests/api_tests/
    [#238](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/238)）の
    テスト拡充も合わせて実施する。
 
-**状態**: 未着手
+**状態**: 完了（linear系統〔OLS/WLS〕・nonlinear系統〔Logit/Probit〕・IV系統〔2SLS/GMM、#232〜238〕全て完了）
 
-**メモ**: (着手後に記載)
+**メモ（linear系統〔OLS/WLS〕実施結果）**:
+
+- **ステップ0（前提確認）**: `benchmark/freeze_datasets.py`でCSVを、
+  `generate_ols_fixtures.py`/`generate_wls_fixtures.py`（statsmodels）で
+  `ols.json`/`wls.json`を再生成し、`generated_at`以外は完全一致を確認。
+  Rクロスチェック側（`generate_ols_crosscheck_fixtures.py`/
+  `generate_wls_crosscheck_fixtures.py`）も同様に確認したところ、数値は完全
+  一致・`_meta.r_version`のみ差分（4.2.2 → 4.5.3、コンテナのRバージョンが
+  記録時点から更新されているだけで実測値には影響なし）だった。
+- **ステップ1（`review-testing`スキルでのレビュー、linear系統分）**:
+  `testing-completeness-reviewer`に`engine/src/linear/`・
+  `engine_pybind/src/linear/`（`mod tests`が0件だった）・
+  `python_package/econometricsmodels/linear/`・`tests/test_ols*.py`・
+  `tests/test_wls*.py`・`benchmark/linear/`のレビューを依頼し、
+  must fix 1件・should fix 7件・nice to have 4件、計12件の指摘を得た。
+  ユーザー確認の上、全12件をこのフェーズで対応する方針とした（未対応の
+  指摘は無し）。
+  1. **[must fix] Rクロスチェックに`r_squared`/`r_squared_adj`が欠落**:
+     `run_lm_crosscheck_benchmark.R`に`r.squared`/`adj.r.squared`
+     （cov_type非依存、`summary(model)`から取得）・`t_stats`/`p_values`
+     （`coeftest()`の列を`_common.R::extract_coef_se`が返すよう拡張）・
+     `conf_int`（`coefs ± qt(0.975, df_inference) * ses`の手計算、
+     confidence_level=0.95固定）を追加。`generate_ols_crosscheck_fixtures.py`/
+     `generate_wls_crosscheck_fixtures.py`の`_normalize_names`を対応する
+     フィールドを抽出するよう拡張し、`test_ols_crosscheck.py`/
+     `test_wls_crosscheck.py`の`_assert_fit_stats_close`にアサーションを
+     追加。実装中、HAC/autocorrelatedシナリオのみ`p_values`が浮動小数点
+     アンダーフロー近傍（0に丸まる/1e-24等の極小値）で相対誤差比較が
+     破綻することが判明し（実測最大絶対乖離1.69e-7）、IV/Logit/Probit
+     クロスチェックの`atol_f_pvalue`/`atol_p_value`と同じ「p値のみ絶対誤差
+     フロアで比較する」パターンを適用（`TOLERANCES["ols_crosscheck"/
+     "wls_crosscheck"]["atol_p_value"] = 1e-6`）。
+  2. **[should fix→A統合] Rクロスチェックに`conf_int`/`t_stats`/`p_values`が欠落**:
+     上記1と同時に対応。
+  3. **[should fix] WLS実データ（401ksubs）がclassicalのみ検証**:
+     `_run_401ksubs_case()`を`cov_type`引数対応に拡張し、
+     `WOOLDRIDGE_COV_TYPES = ["classical","hc0","hc1","hc2","hc3"]`
+     （401ksubsはクロスセクションデータのためHACは対象外、OLSのwage1/gpa2と
+     同じ方針）でstatsmodels/R双方をcov_type別に生成。
+  4. **[should fix] `scale_variance`に成功パスが無い**: ユーザー確認の上、
+     `scale_variance_mild`シナリオ（x1を1e2倍・x2を1e-1倍、既存の
+     `scale_variance`のx1×1e6・x2×1e-3より緩いスケール差）を
+     `generate_linear_datasets.py`に追加し全cov_typeで成功パスになることを
+     確認、`freeze_linear_datasets.py`のSYNTHETIC_SCENARIOSと4つの
+     `NUMERIC_SCENARIOS`（ols/wls×fixtures/crosscheck）に追加。既存の
+     `test_matches_statsmodels`等のparametrizeされたテストがSCENARIOSを
+     importしているため、シナリオ追加だけで既存テストの対象に自動的に
+     含まれた（新規テスト関数の追加は不要）。
+  5. **[should fix] WLS実データでのクラスターロバストSEが無い**:
+     ユーザー確認の上、401ksubsに地域等の自然なカテゴリ列が無いため
+     （marr/maleのような2値変数のみ）、`age`を分位点でビン化した
+     `age_bin`列（8分位、`_add_age_bin`）を疑似的なクラスター列として使う
+     方針を採用。`generate_wls_fixtures.py`/`generate_wls_crosscheck_fixtures.py`
+     ・`test_wls_fixtures.py::test_401ksubs_cluster_matches_statsmodels`・
+     `test_wls_crosscheck.py::test_401ksubs_cluster_matches_r`を追加。
+  6. **[should fix] WLSにOLS相当のValidationErrorテストが欠落**:
+     `test_insufficient_clusters_raises`/`test_invalid_confidence_level_raises`/
+     `test_invalid_hac_lags_raises`/`test_missing_column_raises`/
+     `test_null_values_raise`/`test_non_numeric_dtype_raises`を
+     `test_wls.py`に追加（`weight`列自体の検証は既存の`test_missing_weight_
+     column_raises`等が別途担当、`y`/`x`側の検証が抜けていた）。
+  7. **[should fix] WLSにHACオプション配線確認テストが欠落**:
+     `test_hac_auto_lags_runs_and_returns_finite_std_errors`（`hac_lags=None`
+     自動計算）・`test_hac_time_col_reorders_rows_before_computing_lags`
+     （`time_col`配線）を`test_wls.py`に追加（OLSの同名テストと同一データ、
+     重み=1でOLSと同じ結果になることを利用）。
+  8. **[should fix] `include_intercept=False`×ロバストcov_typeが参照実装と
+     未比較**: ユーザー確認の上、statsmodelsとの直接比較のみ（Rクロスチェック
+     は対象外、`run_lm_crosscheck_benchmark.R`に切片なしformula組み立て
+     ロジックが無いため今回は追加しない）とし、OLSの既存テスト
+     （`test_include_intercept_false_matches_statsmodels`、cov_type固定）は
+     そのまま残し、新規に`test_include_intercept_false_matches_statsmodels_
+     robust_cov_types`（HC0-3/cluster/HACをparametrize）を追加。WLSには
+     同等のテストが元々存在しなかったため、`test_wls_fixtures.py`に
+     `test_include_intercept_false_matches_statsmodels`（cov_type
+     parametrize込み）を新規追加。
+  9. **[nice to have] `cov_type`大文字小文字非依存性・`"nonrobust"`エイリアス
+     未テスト**: `engine_pybind/src/linear/common.rs`に同ファイル初の
+     `#[cfg(test)] mod tests`を追加（`parse_cov_type_is_case_insensitive`/
+     `parse_cov_type_accepts_nonrobust_as_classical_alias`/
+     `parse_cov_type_returns_validation_error_for_unknown_value`、
+     `OLSOptions`をstruct literalで直接構築しGIL不要で実行）。Python側も
+     `test_ols.py`/`test_wls.py`に`test_cov_type_is_case_insensitive`・
+     `test_nonrobust_is_alias_for_classical`を追加。
+  10. **[nice to have] WLSのy/x列自体のValidationErrorテスト不足**:
+      上記6で統合対応。
+  11. **[nice to have] WLSに`cov_type`ラベル・`confidence_level`反映テストが
+      無い**: `test_cov_type_label`・`test_confidence_level_changes_
+      interval_width`を`test_wls.py`に追加（OLSの同名テストと同じ観点）。
+  12. **[nice to have] `TOLERANCES["wls_crosscheck"]`に`atol`キーが無く
+      ハードコード**: `test_wls_crosscheck.py`の独自`_assert_close`/
+      `_assert_scalar_close`（`tol = max(rtol*|ref|, 1e-8)`をハードコード）を
+      `tests/_assertions.py`の共有関数へ統合し（`test_ols_crosscheck.py`と
+      同じ計算式のため、フェーズ3.5の「除外事項」注記の解消も兼ねる）、
+      `TOLERANCES["wls_crosscheck"]["atol"]`として一元化。
+- **検証**: `cargo test -p engine`（317件）・`cargo test -p engine_pybind`
+  （68件）・`uv run pytest tests`（752件、フェーズ3の670件から82件増）・
+  `ruff check`/`ruff format --check`・`cargo fmt --check`・
+  `cargo clippy --all-targets -- -D warnings`（engine・engine_pybind）
+  全てグリーン。
+- **`rust-reviewer`によるレビューと対応**: `engine_pybind/src/linear/
+  common.rs`の`parse_cov_type`テスト追加について`rust-reviewer`にレビュー
+  依頼し、must fix 1件を検出・修正した。
+  - **[must fix→対応済み]** 成功系2テスト（`parse_cov_type_is_case_insensitive`/
+    `parse_cov_type_accepts_nonrobust_as_classical_alias`）が
+    `parse_cov_type(...).unwrap()`を使っていたが、`PyErr`の`Debug`実装
+    （`unwrap()`失敗時のpanicメッセージ生成に使われる）はGIL取得を要求し、
+    GIL未初期化のこのテスト環境ではErrの場合に二重パニック（テストバイナリ
+    全体がSIGABRTでクラッシュし、他のテスト結果も失われる）を起こす
+    バグだった。レビュー中に実際に`"nonrobust"`分岐を一時的に壊して
+    `thread panicked while processing panic. aborting.`の再現を確認済み。
+    `.unwrap()`を`let-else`（Err値のDebug/Displayに触れない）に置き換えて
+    修正し、同じ再現手順でPASS/FAILが正しく報告されること（アボートしない
+    こと）を確認した。ついでに`cluster`/`hac`自体の大文字小文字混在ケース
+    （`"CLUSTER"`/`"Hac"`、指摘のnice to have）も
+    `parse_cov_type_is_case_insensitive`に追加した。
+- **未対応・今後**: Logit/Probitの`review-testing`レビュー、IV分
+  （#232〜238）のテスト拡充は本フェーズの別ラウンドとして未着手（→nonlinear系統・
+  IV系統とも下記の通り完了、フェーズ4全体が完了）。
+
+**メモ（nonlinear系統〔Logit/Probit〕実施結果）**:
+
+- **ステップ0（前提確認）**: `benchmark/nonlinear/freeze_nonlinear_datasets.py`で
+  CSVを、`generate_logit_fixtures.py`/`generate_probit_fixtures.py`
+  （statsmodels）で`logit.json`/`probit.json`を再生成したところ、CSVは完全一致
+  したが、statsmodels側は`_meta.note`のファイル名参照
+  （`generate_logit_datasets.py`→`generate_nonlinear_datasets.py`、フェーズ2の
+  リネームに追従していなかった）と`_meta.model`フィールド（`logit.json`のみ
+  未追随だった）の差分のみで数値は完全一致と確認。
+  Rクロスチェック側（`generate_logit_crosscheck_fixtures.py`）の再生成時に、
+  フェーズ2で「今回のリファクタリングと無関係の既存バグ」と暫定判断していた
+  `near_separation`シナリオ×logitの生成失敗を実際に調査した。
+  - **原因判明**: `run_glm_crosscheck_benchmark.R`の不変条件チェック
+    （logitでは期待情報行列と観測情報行列が理論上一致するはず、という
+    `stopifnot(...tolerance=1e-6)`）が、`near_separation`シナリオ
+    （500件中161件のfitted probabilityが浮動小数点上ちょうど0/1に潰れる
+    強い準分離ケース）でFrobeniusノルム相対誤差約1.7e-4となり失敗していた。
+    調査の結果、これは計算式のバグではなく浮動小数点精度の限界（IRLS内部の
+    期待情報行列と直接計算する観測情報行列が数値的に微小にずれる）と判明。
+    さらに、コミット済み`logit_crosscheck.json`の`near_separation`は
+    Probit対応時の観測情報行列（`observed_bread`）採用（2026-08-02）より
+    **前**（2026-08-01）に生成されたものであり、この不変条件チェックが
+    実際には「今の計算式（`bread_obs`）に対して過去の陳腐化したフィクスチャが
+    追従できていない」ことを正しく検知していたと確認できた（コミットされた
+    SEの値が新計算式`bread_obs`ではなく旧計算式`bread(model)`と一致することを
+    実測確認）。
+  - **対応（ユーザー確認済み）**: `stopifnot`のtoleranceを実測値
+    （1.7e-4）に対し約6倍のマージンを持つ1e-3に緩め、理由をコード内コメントに
+    明記した上で、`near_separation`（logit）のclassical/opg/hc0/hc1を現在の
+    `bread_obs`式で再生成した。`test_logit_crosscheck.py`の`rtol=2e-4`が
+    この差分を十分にカバーしており、既存テストは新規失敗なくパス。
+    probit側の`near_separation`はこの不変条件チェック自体が`link=="logit"`
+    限定で対象外のため、再生成しても数値は完全一致（`r_version`のメタ情報のみ
+    4.2.2→4.5.3に更新、OLS/WLSフェーズ4で見た同種の環境差と同じで実測値には
+    影響なし）。
+- **ステップ1（`review-testing`スキルでのレビュー、nonlinear系統分）**:
+  `testing-completeness-reviewer`に`engine/src/nonlinear/`・
+  `engine_pybind/src/nonlinear/`・`python_package/econometricsmodels/nonlinear/`・
+  `tests/test_logit*.py`・`tests/test_probit*.py`・`benchmark/nonlinear/`の
+  レビューを依頼し、must fix 0件・should fix 5件・nice to have 8件、計13件の
+  指摘を得た。ユーザー確認の上、should fix全5件は対応、nice to haveは
+  8件中4件を選んで対応（残り4件は`docs/planning/specs/test-coverage-candidates.md`
+  へ記録し今回は見送り）。
+  1. **[should fix] `method="bfgs"/"lbfgs"`が主リファレンスに対しフルの統計量
+     （std_errors含む）で照合されていない**: `run_statsmodels_benchmark.py`に
+     `--method`引数を追加（statsmodelsの`fit(method=...)`にそのまま渡せる、
+     `"bfgs"`/`"lbfgs"`の文字列がRust側`Method`のバリアント名と一致するため
+     変換不要）。`generate_logit_fixtures.py`/`generate_probit_fixtures.py`に
+     `fixtures["method"]`（baselineシナリオ・classical cov_typeの1ケースのみ、
+     bfgs/lbfgs）を追加し、`test_logit_fixtures.py`/`test_probit_fixtures.py`に
+     `test_method_matches_statsmodels`を追加。bfgs（statsmodelsの`mle_retvals`に
+     `"iterations"`キーが無い、`fmin_bfgs`の戻り値の都合）は`n_iter=None`で
+     許容するようフィールド抽出側を修正。method間の実測最大相対誤差
+     （~7.7e-5、係数・SEとも）に対し約13倍のマージンを持つ
+     `TOLERANCES["logit_fixtures"/"probit_fixtures"]["rtol_method"]=1e-3`を新設。
+  2. **[should fix] `method=bfgs/lbfgs`×完全多重共線性の`ComputationError`が
+     API境界で未検証**: `engine`側には既存の回帰テスト
+     （`fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_
+     with_bfgs_and_lbfgs`、過去にbfgsのみ検出漏れし桁違いに巨大なSEを含む`Ok`が
+     返る実バグがあった経緯）があったが、`method`の文字列パース〜
+     `engine_pybind`配線を経由するAPI境界の確認が無かった。
+     `test_logit.py`/`test_probit.py`の`test_singular_hessian_raises_
+     computation_error`を`method`でparametrize（newton/bfgs/lbfgs）して対応。
+  3. **[should fix] `fit()`本体の`confidence_level`範囲外`ValidationError`が
+     未検証**: `marginal_effects(confidence_level=1.5)`側は既存だったが
+     `LogitOptions`/`ProbitOptions`側が無かった（OLS/WLSとの非対称）。
+     `test_invalid_confidence_level_raises`を追加。
+  4. **[should fix] 欠損値・非数値dtypeのValidationErrorがPython API境界で
+     未検証**: `test_null_values_raise`/`test_non_numeric_dtype_raises`を
+     `test_logit.py`/`test_probit.py`に追加（OLSと同型）。
+  5. **[should fix] `include_intercept=False`の成功パスが構造テスト・数値
+     照合テストとも一切未検証**: `df_model`が`include_intercept`の値に関わらず
+     常に`k-1`になる・`log_likelihood_null`が常に切片のみモデルを参照する
+     という特殊挙動が`engine`側の単体テストのみで、statsmodelsとの数値一致が
+     未確認だった。構造テスト（`test_include_intercept_false_omits_const_and_
+     converges`）を`test_logit.py`/`test_probit.py`に、数値照合テスト
+     （`test_include_intercept_false_matches_statsmodels`、classical/opg/hc0を
+     parametrize、`run_statsmodels_benchmark.run()`を`formula="y ~ ... - 1"`で
+     直接呼ぶ方式）を`test_logit_fixtures.py`/`test_probit_fixtures.py`に追加。
+  6. **[nice to have] `cov_type`大文字小文字非依存性・`"nonrobust"`エイリアスが
+     未テスト**: `engine_pybind/src/nonlinear/{logit,probit}.rs`の`mod tests`に
+     `build_{logit,probit}_input_cov_type_is_case_insensitive`/
+     `_accepts_nonrobust_as_classical_alias`を追加。linear系統と異なり
+     nonlinear系統の`parse_cov_type`は「呼び出し元が`to_lowercase()`済みの
+     文字列を渡す」設計のため、`parse_cov_type`単体ではなく実際にPythonから
+     渡された文字列を受ける`build_{logit,probit}_input`をテスト対象にした
+     （`parse_cov_type`単体だと「小文字を渡せば小文字のまま通る」という
+     トートロジーになるため）。Python側も`test_logit.py`/`test_probit.py`に
+     同名テストを追加。
+  7. **[nice to have] `cov_type`ラベル反映テスト欠如**: `test_cov_type_label`を
+     `test_logit.py`/`test_probit.py`に追加（OLSと同型）。
+  8. **[nice to have] `confidence_level`の信頼区間幅反映テスト欠如**:
+     `test_confidence_level_changes_interval_width`を追加（OLSと同型）。
+  9. **[nice to have] `max_iter<=0`のAPI境界テスト欠如**: `tol<=0`側は既存
+     だったが対応する`max_iter`側が無かった。
+     `test_non_positive_max_iter_raises`を追加。
+  - **見送った4件**（`docs/planning/specs/test-coverage-candidates.md`
+    3〜5番に記録）: n=k+1境界値で「ほぼ確実に完全分離する」という主張自体の
+    未検証、`raise_on_non_convergence=False`がclassical cov_typeでしか
+    未検証、`cov_type="cluster"`×`cluster_col`未指定のAPI境界未検証
+    （OLS側にも同種の欠落がある既存パターン）。あわせて、実装当時から
+    `docs/spec/logit-spec.md`/`probit-spec.md`4章に記載されていた
+    `SEPARATION_PARAM_NORM_THRESHOLD`の多変量モデルでの誤検知リスク等の
+    既知の未検証事項も、同ドキュメントの6〜10番として転記・集約した。
+- **検証**: `cargo test -p engine`（317件）・`cargo test -p engine_pybind`
+  （72件、should/nice to have対応前の68件から+4）・`uv run pytest tests`
+  （810件、linear系統フェーズ4完了時点の752件から58件増）・
+  `ruff check`/`ruff format --check`・`cargo fmt --check`・
+  `cargo clippy --all-targets -- -D warnings`（engine・engine_pybind）
+  全てグリーン。
+- **`rust-reviewer`によるレビューと対応**: `engine_pybind/src/nonlinear/
+  {logit,probit}.rs`への`mod tests`追加（項目6）について`rust-reviewer`に
+  レビュー依頼し、should fix 1件・nice to have 1件を検出・対応した。
+  - **[should fix→対応済み]** 今回追加した4テスト自体は`let-else`パターンで
+    安全だったが、レビュー中に**同じ`mod tests`内の既存テスト**
+    （`build_{logit,probit}_input_succeeds_for_well_formed_data`等、
+    logit.rs 4箇所・probit.rs 4箇所の計8箇所）が`build_{logit,probit}_input
+    (...).unwrap()`という、`linear/common.rs`で過去に修正したのと同種の
+    GIL/SIGABRTリスクパターンを抱えたまま残っていることが発覚した
+    （pyo3のソースで`PyErr`の`Debug`実装が`Python::attach`を要求することを
+    確認済み）。今回のスコープ外の既存コードだったが、同じファイル・同じ
+    `mod tests`を触っている機会のため、8箇所全てを`let-else`パターンに
+    置き換えて修正した。
+  - **[nice to have→対応済み]** 新規追加した`cov_type_is_case_insensitive`
+    テストが、`Ok`であることのみを確認し実際に正しい`EngineCovType`
+    バリアントにマッピングされているかを確認していなかった（誤った
+    match分岐でも`Ok`である限り通ってしまう）指摘を受け、各入力に対応する
+    期待バリアントを`matches!`で突き合わせる形に強化した。
+
+**メモ（IV系統〔2SLS/GMM〕実施結果、Issue #232〜238）**:
+
+- **ステップ0（前提確認）**: `benchmark/iv/freeze_iv_datasets.py`でCSVを、
+  `generate_iv_fixtures.py`（linearmodels 2SLS）・`generate_iv_gmm_fixtures.py`
+  （linearmodels GMM）で`iv.json`/`iv_gmm.json`を再生成したところ、数値・
+  タイムスタンプ以外は完全一致（タイムスタンプのみの差分は`git checkout --`で
+  戻した）。Rクロスチェック（`generate_iv_crosscheck_fixtures.py`）も同様に
+  完全一致を確認。
+- **ステップ1（`review-testing`スキルでのレビュー、IV系統分）**:
+  `testing-completeness-reviewer`に`engine/src/iv/`・`engine_pybind/src/iv/`・
+  `python_package/econometricsmodels/iv/`・`tests/test_iv*.py`・
+  `benchmark/iv/`のレビューを依頼し、must fix 1件・should fix 5件・
+  nice to have 3件、計9件の指摘を得た。ユーザー確認の上、must fix・should fix
+  全6件、nice to have全3件を対応した（未対応の指摘は無し）。
+  1. **[must fix] 複数内生変数（`k_endog>=2`）がPython API境界・フィクスチャ・
+     linearmodels/Rクロスチェックのいずれにも一切存在しない**: 対応の過程で
+     `generate_iv_datasets.py`のDGP自体の見落としを発見した。第一段階誤差`v`が
+     全内生変数に単一列としてブロードキャストされており、`k_endog=2`だと
+     第一段階回帰残差が事実上完全共線（相関~0.99999999999998を実測）になり、
+     Wu-Hausman検定の拡張回帰が推定不能（`wu_hausman_statistic=None`）になる
+     ことが判明した。ユーザー確認の上、`v`を内生変数ごとに独立な誤差
+     （構造誤差`u`とはそれぞれ相関`_RHO_ENDOG`、`v_i`・`v_j`間は無相関）の
+     `(n, k_endog)`行列に一般化する修正を実施（`k_endog=1`では従来と数学的に
+     完全に一致する一般化のため、既存シナリオへの影響はゼロ、再生成CSVが
+     バイト単位で一致することを確認済み）。`freeze_iv_datasets.py`に
+     `iv_baseline_multi_endog.csv`（`k_endog=2, k_instruments=3`、過剰識別）を
+     追加し、`generate_iv_fixtures.py`/`generate_iv_crosscheck_fixtures.py`/
+     `generate_iv_gmm_fixtures.py`の3スクリプト全てにフィクスチャを追加、
+     `test_iv_fixtures.py`/`test_iv_crosscheck.py`/`test_iv_gmm_fixtures.py`に
+     数値照合テストを追加。Rクロスチェック側は`weak_instrument_f`が単一の
+     内生変数を前提にスカラーで返す設計だったため、内生変数名をキーにした
+     dict形式（本実装の`weak_instrument_f_statistics`と同じ形）に一般化した
+     （`run_ivreg_benchmark.R`、既存の全synthetic/wooldridgeエントリにも遡及
+     適用、`test_iv_crosscheck.py`の該当箇所も合わせて修正）。
+  2. **[should fix] `weight_type="kernel"`×`cov_type="hac"`の組み合わせが
+     構造テストにも一度も現れない**: `generate_iv_gmm_fixtures.py`に
+     `kernel_hac`フィクスチャを追加、`test_iv_gmm_fixtures.py`に
+     `test_kernel_hac_matches_linearmodels`を追加。
+  3. **[should fix] `gmm_iterations`が1（1-step）・3以上（iterated）の成功パスが
+     フィクスチャで数値照合されていない**: `generate_iv_gmm_fixtures.py`に
+     `gmm_iterations`フィクスチャ（1・3）を追加。実装中、`weight_type=
+     "unadjusted"`では係数が反復回数に依らず不変（重み`S=Z'Z`が残差に依存
+     しないため）にも関わらず、linearmodelsの`iter_limit=1`のHansen J統計量
+     （0.30086708530935663）が`iter_limit=2/3`の値（0.32832429087644643、
+     2SLSのSarganと機械精度一致）と異なることを発見した。本実装は
+     `gmm_iterations=1`でも一貫して後者を返す（`gmm.rs`のσ̂²・Z'Zスケーリング
+     設計通り、内部的に自己無矛盾）。linearmodels側の`iter_limit=1`固有の
+     計算式の違いが原因と考えられるが未特定のため、ユーザー確認の上
+     `gmm_iterations=1`のときのみHansen J（`overid_statistic`/
+     `overid_p_value`）の比較を除外する（係数・SE等の他統計量は引き続き
+     比較する）方針とした（`test_iv_gmm_fixtures.py`の`_check_result`に
+     `check_overid`引数を追加）。
+  4. **[should fix] 「分散が大きい」データセットシナリオがIVに存在しない**:
+     `generate_iv_datasets.py`に`high_variance`シナリオ（構造誤差`u`の分散を
+     100倍、OLSの`high_variance`と同じ標準偏差10相当）を追加。既存シナリオへの
+     影響はゼロ（`u_var=1.0`固定で数学的に同一）。追加時、Rクロスチェックの
+     `high_variance`×`hac`の`f_p_value`が既存の`RTOL_HAC`（1%）をわずかに
+     超える乖離（実測相対誤差2.37%）を示すことが判明したが、`f_statistic`
+     自体は0.6%程度しか違わずF分布の裾で増幅されるだけの既知のパターン
+     （`small_n`×`hac`と同種）と判断し、`RTOL_HAC_SMALL_N`（10%）を
+     `high_variance`にも適用する形で解消した。
+  5. **[should fix] 実データセットでの検証が皆無**: Wooldridge `card`
+     （Card 1995、大学近接ダミー`nearc2`/`nearc4`を操作変数とする教育年数
+     `educ`の内生性補正、教科書的定番例）を追加。`run_linearmodels_benchmark.py`
+     の`run()`は元々合成データ専用（`_load_iv_dataset`が凍結CSV固定読み込み）
+     だったため、OLS/Logit側の`dataset_source`パターンに倣い
+     `dataset_source`/`y_col`引数を追加して一般化した（IVの合成データは
+     常に`y`列固定のため、実データ対応には`y_col`パラメータ化が必要だった）。
+     `generate_iv_fixtures.py`/`generate_iv_crosscheck_fixtures.py`双方に
+     `card`フィクスチャを追加、`test_iv_fixtures.py`/`test_iv_crosscheck.py`に
+     数値照合テストを追加（`cluster` cov_typeは対応する自然なカテゴリ列が
+     無いため対象外）。
+  6. **[should fix] `cov_type`/`weight_type`の大文字小文字非依存性のテストが
+     無い**: `engine_pybind/src/iv/common.rs`の`parse_iv_cov_type`/
+     `parse_weight_type`は既に`.to_lowercase()`・エイリアス
+     （`nonrobust`↔`classical`、`homoskedastic`↔`unadjusted`、
+     `heteroskedastic`↔`robust`）に対応済みだったが、Python API境界での
+     確認テストが無かった。`test_iv.py`に`test_cov_type_is_case_insensitive`・
+     `test_nonrobust_is_alias_for_classical`・
+     `test_weight_type_is_case_insensitive_and_aliased`を追加（`IvResults`は
+     `cov_type`ラベルは公開するが`weight_type`ラベルは公開しないため、後者は
+     正準表記との`params`一致で確認）。
+  7. **[nice to have] G=2クラスター境界の成功パスが構造確認のみで数値
+     クロスチェックが無い（コメントとコードの乖離あり）**: `generate_iv_
+     fixtures.py`/`generate_iv_crosscheck_fixtures.py`双方のコメントが
+     「IVの第一段階回帰でComputationErrorが再現するため原因究明後に追加予定」
+     という古い記述のままだったが、`engine/src/iv/CLAUDE.md`の記録によれば
+     原因（`k_constant`取り違えバグ）は既に特定・修正済みと判明。両スクリプトに
+     `cluster_g2`フィクスチャを追加し、`test_iv_fixtures.py`/
+     `test_iv_crosscheck.py`に数値照合テストを追加、古いコメントも修正した。
+  8. **[nice to have] 存在しない`cluster_col`列名の`ValidationError`パス未検証
+     （OLS側にも同種の欠落があるとの指摘）**: 実際に確認したところ、5手法
+     全て（OLS/WLS/Logit/Probit/IV）で`column_extraction`の既存の汎用チェック
+     経由で正しく`ValidationError`を返すことを確認済み（挙動自体は正しい、
+     テストが無いだけ）。ユーザー指示で対象をIVだけでなくOLS/WLS/Logit/Probit
+     にも広げ、`test_cluster_col_nonexistent_column_raises`を5ファイル全てに
+     追加した。
+  9. **[nice to have] `x_exog`/`x_endog`/`instruments`列の欠損値・非数値dtype
+     バリデーションが`y`列のみで未検証**: `test_iv.py`の`test_null_values_
+     raise`/`test_non_numeric_dtype_raises`を`bad_col`（`y`/`x1`/`endog1`/
+     `z1`）でparametrizeする形に拡張した。
+- **検証**: `cargo test -p engine`（317件）・`cargo test -p engine_pybind`
+  （72件、IV分の変更はテストコード・ベンチマークスクリプトのみで
+  engine/engine_pybindには変更なし）・`uv run pytest tests`（878件、
+  nonlinear系統フェーズ4完了時点の810件から68件増）・`ruff check`/
+  `ruff format --check`・`cargo fmt --check`・
+  `cargo clippy --all-targets -- -D warnings`（engine・engine_pybind）
+  全てグリーン。今回はengine/engine_pybind/python_packageへの変更が無かった
+  ため`rust-reviewer`/`python-reviewer`の呼び出しは対象外。
+
+**追加ラウンド: GitHub Issue #232〜238の実施状況確認・残件対応（完了）**:
+
+- **経緯**: 上記メモ完了後、ユーザーから「Issue #232〜238はすでに実施済みか」と
+  確認依頼があった。実際にコードを確認したところ、上記の`testing-completeness-
+  reviewer`レビュー（直近の`git diff`ベースで対象推定）とこれら7件のIssue本文が
+  1対1対応しておらず、**完了していたのは#234（high_variance）・#236（Wooldridge
+  card）・#238（複数内生変数）の3件のみ**（クローズ済み）で、
+  #232・#233・#235・#237は未着手と判明した。ユーザー確認の上、残り4件も
+  引き続き実装した。
+- **#235（自由度1境界df=1シナリオ追加）**: `x_exog=[]`・`x_endog=['endog1']`・
+  `instruments=['z1']`（丁度識別、n=3）の最小構成で追加
+  （`freeze_iv_datasets.py`の`IV_BOUNDARY_DF1_SCENARIOS`）。実装中に2件の
+  副次的なバグを発見・修正した。
+  1. `run_linearmodels_benchmark.py`の`_nested_f_test`が`x_exog_cols=[]`の
+     とき制限モデルのSSRを非中心化（`(y**2).sum()`）で計算していたが、
+     本実装は常に切片を含む（`include_intercept=false`の退化ケース専用の式を
+     誤って全`x_exog=[]`ケースに適用していた）。df1追加で顕在化（本実装の
+     `weak_instrument_f_statistics`と2.6958 vs 11.607で不一致）、中心化SSRに
+     修正して解消。この修正で`cluster_g2`フィクスチャの
+     `weak_instrument_f_independent`も無言で誤っていたことが判明したが、
+     この値を比較するテストはこれまで無かったため既存テストへの影響はゼロ。
+  2. augmented regressionがsaturated（残差自由度0）になる境界のため、
+     linearmodelsの`wooldridge_regression`が`ZeroDivisionError`、ivregの
+     HC0診断が`solve()`エラーで落ちた。本実装が同じ状況で
+     `wu_hausman_statistic`/`wu_hausman_p_value`を`None`にする設計
+     （`engine/src/iv/CLAUDE.md`）と揃え、両ベンチマークスクリプト側も
+     同じ状況を検出して`None`/`NA`を返すよう修正（ユーザー確認不要、
+     本実装の既存設計への追従のみ）。
+- **#232（Rクロスチェックにt値・p値・信頼区間を追加）・#237（nobs/df_resid
+  追加）**: `run_ivreg_benchmark.R`に`extract_coef_se`の`t_stats`/`p_values`と
+  手計算信頼区間、`nrow(df)`/`df.residual(model)`を追加（OLS/WLSクロスチェック
+  の`run_lm_crosscheck_benchmark.R`と同じパターン）。`nobs`/`df_resid`は
+  cov_type非依存の構造残差自由度（n-k）を返す必要があり、cluster時に
+  `df_inference`をG-1へ上書きする既存変数をそのまま使うと誤った値になる
+  （linearmodelsの`df_resid`もcluster時n-k固定であることを`iv.json`で確認）
+  ためcluster分岐と独立に`df.residual(model)`を保持するよう実装した。
+- **#233（wu_hausmanのcov_type=hacケースを外部リファレンスで検証）**:
+  ユーザーは当初「R側でHAC augmented regressionを手動実装する」案（Issue本文の
+  選択肢2）を、手動実装自体の正しさが別途検証されない点を理由に却下し、
+  「別パッケージで参照できないか」を確認するよう指示。`ivreg:::ivdiag`の
+  ソースを確認したところ、`summary.ivreg`の`vcov.`引数は**関数**として渡せば
+  診断表（Wu-Hausman・弱操作変数F統計量）にも反映される仕様だったが、
+  既存コードは**行列**を渡して警告付きでNULLにフォールバックしていたことが
+  判明（コメント「vcov.に行列を渡すと警告付きでNULLにフォールバックする」は
+  事実だが、関数として渡す代替を見落としていた）。手動実装は不要で、ivreg
+  自身の診断機構をcov_type別のvcov関数（`vcov_fn`）で呼び分けるだけで全
+  cov_typeのwu_hausmanクロスチェックが可能と判明（弱操作変数F統計量・Sargan
+  は常にclassical固定を維持するため、`vcov.`無しのデフォルト呼び出しと
+  使い分けた）。ただし**cluster cov_typeのみ**、`ivdiag`内の`wald()`が
+  F分布の分母自由度に常に`obj1$df.residual`（n-k）を使い、本実装のG-1
+  （標準的な慣行）に追従しない既知の制約を発見。統計量は高精度で一致する
+  （実測: 112.32で完全一致）がp値は一致しない（R側8.5e-24 vs 本実装2.2e-06、
+  df=9で計算すると本実装の値が再現できることを確認）ため、ユーザー確認の上
+  cluster cov_typeのみp値をクロスチェック対象から除外した
+  （`gmm_iterations=1`のHansen J除外と同型のパターン）。
+  さらにcluster_g2（G=2境界）ケースでは、augmented regressionの傾き係数が
+  q=2（endog1・第一段階残差）に対しG-1=1<qとなり構造的にクラスタロバスト
+  共分散が特異になる（本実装のG≤qの罠と同じ原理、`engine/src/iv/CLAUDE.md`
+  参照）ため本実装は正しく`None`を返すが、ivreg側はこの特異性を検出せず
+  値を返すため、この1ケースのみwu_hausman比較自体を対象外にした。
+  linearmodels側の`hac`不一致原因調査自体は次セッション送りとした
+  （ユーザー確認済み）。
+- **HAC許容誤差の拡張**: #232/#233で追加した新規フィールド（t_stats/p_values/
+  conf_int/wu_hausman）は、既存のcoef/se向けの`RTOL_HAC`/`RTOL_HAC_SMALL_N`
+  では収まらない乖離（p_values最大28.7%、conf_int最大1.66%、
+  wu_hausman_statistic最大11.1%（small_n）等）を示した。実測値に基づき
+  専用の許容誤差を追加（`_tolerances.py`の`atol_hac_pvalue`・
+  `atol_hac_conf_int`・`rtol_hac_wu_hausman`・
+  `rtol_hac_wu_hausman_small_n`、いずれもhacケースでのみ適用しclassical/
+  hc0/hc1/clusterの厳密比較には影響しない）。df1×hac（n=3でのNewey-West
+  ラグ選択が統計的にほぼ無意味、実測se最大42%乖離）はユーザー確認の上
+  crosscheck対象外にした。
+- **検証**: `uv run pytest tests`（885件、上記完了時点の878件から7件増）・
+  `ruff check`/`ruff format --check`・`cargo test -p engine -p engine_pybind`
+  （317+72件、変更なし）全てグリーン。engine/engine_pybind/python_packageへの
+  変更は無かったため`rust-reviewer`/`python-reviewer`の呼び出しは対象外。
+  完了条件を満たしたことを確認の上、Issue #232・#233・#235・#237をクローズ
+  （#234・#236・#238は前段の完了時点で既にクローズ済み）。
 
 ---
 

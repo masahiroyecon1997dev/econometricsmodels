@@ -1,6 +1,6 @@
 ---
 name: test-run
-description: 既存テスト（engine / api_tests）を実行し、失敗があれば原因を調査する
+description: 既存テスト（engine / tests）を実行し、失敗があれば原因を調査する
 argument-hint: "[テスト対象パターン（省略可）]"
 allowed-tools: Bash(cargo test:*), Bash(pytest:*), Read, Grep, Glob
 ---
@@ -14,7 +14,7 @@ $ARGUMENTS が指定されていればそのパターンに絞る。指定がな
 ## 手順
 
 1. `cargo test -p engine $ARGUMENTS` を実行する。
-2. `pytest tests/api_tests $ARGUMENTS` を実行する（`api_tests`）。
+2. `pytest tests $ARGUMENTS` を実行する。
 3. 失敗があれば、以下の観点で原因を切り分ける。
    - 実装のバグか
    - リファレンス実装（pyfixest/R）との前提の違い（計算方法の差異）か

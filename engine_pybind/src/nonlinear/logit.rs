@@ -463,13 +463,14 @@ mod tests {
         let df = well_formed_df();
         let options = default_options();
 
-        let (input, cov_type, method) = build_logit_input(
+        let Ok((input, cov_type, method)) = build_logit_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string(), "x2".to_string()],
             &options,
-        )
-        .unwrap();
+        ) else {
+            panic!("expected Ok");
+        };
 
         assert_eq!(input.nobs(), 4);
         assert_eq!(input.k(), 3); // const + x1 + x2
@@ -488,8 +489,11 @@ mod tests {
         let mut options = default_options();
         options.include_intercept = false;
 
-        let (input, _, _) =
-            build_logit_input(&df, "y".to_string(), vec!["x1".to_string()], &options).unwrap();
+        let Ok((input, _, _)) =
+            build_logit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
+        else {
+            panic!("expected Ok");
+        };
 
         assert_eq!(input.k(), 1);
         assert_eq!(input.param_names(), ["x1".to_string()]);
@@ -605,8 +609,11 @@ mod tests {
         options.cov_type = "cluster".to_string();
         options.cluster_col = Some("cluster".to_string());
 
-        let (_, cov_type, _) =
-            build_logit_input(&df, "y".to_string(), vec!["x1".to_string()], &options).unwrap();
+        let Ok((_, cov_type, _)) =
+            build_logit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
+        else {
+            panic!("expected Ok");
+        };
 
         match cov_type {
             EngineCovType::Cluster { groups } => {
@@ -633,12 +640,74 @@ mod tests {
         let mut options = default_options();
         options.cov_type = "cluster".to_string();
 
-        let (_, cov_type, _) =
-            build_logit_input(&df, "y".to_string(), vec!["x1".to_string()], &options).unwrap();
+        let Ok((_, cov_type, _)) =
+            build_logit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
+        else {
+            panic!("expected Ok");
+        };
 
         match cov_type {
             EngineCovType::Cluster { groups } => assert!(groups.is_none()),
             other => panic!("expected Cluster, got {other:?}"),
+        }
+    }
+
+    /// `parse_cov_type`自体は前処理済みの小文字文字列を受け取る想定
+    /// （`parse_cov_type`のdocコメント参照）で、大文字小文字を区別しない処理は
+    /// 呼び出し元の`build_logit_input`が`options.cov_type.to_lowercase()`してから
+    /// 渡すことで実現している。そのため、この不変条件は`parse_cov_type`単体ではなく
+    /// `build_logit_input`（実際にPythonから渡される文字列を受ける入口）を通して
+    /// 検証する（`testing-completeness-reviewer`指摘、Issue #231フェーズ4。
+    /// `.unwrap()`ではなく`let-else`を使う理由は`engine_pybind/src/linear/common.rs`
+    /// の`parse_cov_type`テストと同じ、`PyErr`のDebug実装はGIL取得を要求するため）。
+    #[test]
+    fn build_logit_input_cov_type_is_case_insensitive() {
+        let df = well_formed_df();
+        for (input, is_expected) in [
+            (
+                "classical",
+                (|c: &EngineCovType| matches!(c, EngineCovType::Classical))
+                    as fn(&EngineCovType) -> bool,
+            ),
+            ("CLASSICAL", |c| matches!(c, EngineCovType::Classical)),
+            ("Classical", |c| matches!(c, EngineCovType::Classical)),
+            ("OPG", |c| matches!(c, EngineCovType::Opg)),
+            ("Hc0", |c| matches!(c, EngineCovType::Hc0)),
+            ("HC1", |c| matches!(c, EngineCovType::Hc1)),
+            ("CLUSTER", |c| matches!(c, EngineCovType::Cluster { .. })),
+        ] {
+            let mut options = default_options();
+            options.cov_type = input.to_string();
+            let Ok((_, cov_type, _)) = build_logit_input(
+                &df,
+                "y".to_string(),
+                vec!["x1".to_string(), "x2".to_string()],
+                &options,
+            ) else {
+                panic!("expected Ok for cov_type={input}");
+            };
+            assert!(is_expected(&cov_type), "input={input}, got={cov_type:?}");
+        }
+    }
+
+    #[test]
+    fn build_logit_input_accepts_nonrobust_as_classical_alias() {
+        let df = well_formed_df();
+        for input in ["nonrobust", "NONROBUST", "NonRobust"] {
+            let mut options = default_options();
+            options.cov_type = input.to_string();
+            let Ok((_, cov_type, _)) = build_logit_input(
+                &df,
+                "y".to_string(),
+                vec!["x1".to_string(), "x2".to_string()],
+                &options,
+            ) else {
+                panic!("expected Ok for cov_type={input}");
+            };
+            assert!(
+                matches!(cov_type, EngineCovType::Classical),
+                "input={input}"
+            );
         }
     }
 }

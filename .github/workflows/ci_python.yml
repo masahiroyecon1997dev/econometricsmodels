@@ -8,7 +8,7 @@ on:
       - "engine_pybind/**"
       - "pyproject.toml"
       - "uv.lock"
-      - "tests/api_tests/**"
+      - "tests/**"
       - ".github/workflows/ci_python.yml"
   # pull_requestにはpathsフィルタを付けない（ci_engine.ymlと同じ理由、
   # 「必須ステータスチェック」参照）。
@@ -48,7 +48,7 @@ jobs:
         run: uv run --locked --group test maturin develop
 
       - name: pytest
-        run: uv run --locked --group test pytest tests/api_tests
+        run: uv run --locked --group test pytest tests
 
       - name: ruff check
         run: uv run --locked --group test ruff check .

@@ -1,4 +1,4 @@
-"""GMM（`method="gmm"`）のテストフィクスチャ（tests/api_tests/fixtures/benchmarks/
+"""GMM（`method="gmm"`）のテストフィクスチャ（tests/fixtures/benchmarks/
 iv_gmm.json）を生成するスクリプト。
 
 `benchmark/iv/run_linearmodels_benchmark.py`の`run_gmm()`（1回呼べば1ケース分の
@@ -21,14 +21,14 @@ GMM固有の`weight_type`軸（`cov_type`とは独立、`iv-api-design.md`6.2節
       のみで動作確認する。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`iv_gmm.json`は
-`tests/api_tests/fixtures/benchmarks/`に置く（両者を分ける理由は
+`tests/fixtures/benchmarks/`に置く（両者を分ける理由は
 `.claude/skills/reference-benchmark/SKILL.md`参照）。
 
-入力データは`tests/api_tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
+入力データは`tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
 （`benchmark/freeze_datasets.py`参照）。
 
 使用例:
-    python generate_iv_gmm_fixtures.py --output ../../../tests/api_tests/fixtures/benchmarks/iv_gmm.json
+    python generate_iv_gmm_fixtures.py --output ../../../tests/fixtures/benchmarks/iv_gmm.json
 """
 
 from __future__ import annotations
@@ -58,6 +58,7 @@ NUMERIC_SCENARIOS = [
     "just_identified",
     "weak_instruments",
     "small_n",
+    "high_variance",
     "heteroskedastic",
     "autocorrelated",
     "moderate_multicollinearity",
@@ -74,6 +75,9 @@ X_EXOG_BY_SCENARIO = {
 COV_TYPES = ["classical", "hc0", "hc1", "hac"]
 # `weight_type`と`cov_type`が独立な軸であることの確認用（baselineのみ）。
 OTHER_WEIGHT_TYPES = ["robust", "cluster", "kernel"]
+# 1-step（gmm_iterations=1）・iterated GMM（3以上、固定回数モード）の成功パス確認用
+# （既定値2以外、Issue #231フェーズ4）。
+GMM_ITERATIONS_SCENARIOS = [1, 3]
 
 
 def build_fixtures() -> dict:
@@ -129,6 +133,49 @@ def build_fixtures() -> dict:
                         )
                     }
 
+    # 複数内生変数（k_endog>=2）。2SLSのiv.jsonと同じ構成（Issue #231フェーズ4、
+    # testing-completeness-reviewer指摘のmust fix）。weight_type='unadjusted'固定で
+    # cov_typeのみ変える（上記と同じ検証範囲の絞り方）。
+    fixtures["multi_endog"] = {"unadjusted": {}}
+    for cov_type in COV_TYPES:
+        fixtures["multi_endog"]["unadjusted"][cov_type] = run_gmm(
+            dataset="baseline_multi_endog",
+            x_exog_cols=["x1"],
+            x_endog_cols=["endog1", "endog2"],
+            instrument_cols=["z1", "z2", "z3"],
+            weight_type="unadjusted",
+            cov_type=cov_type,
+        )
+
+    # weight_type='kernel' × cov_type='hac'の組み合わせ（実務上最も典型的な
+    # 「HACカーネル重み＋HAC標準誤差」の組み合わせ経路、Issue #231フェーズ4、
+    # testing-completeness-reviewer指摘のshould fix。上記OTHER_WEIGHT_TYPESループは
+    # cov_type='classical'固定のためこの組み合わせを通らない）。
+    fixtures["kernel_hac"] = run_gmm(
+        dataset="baseline",
+        x_exog_cols=["x1"],
+        x_endog_cols=["endog1"],
+        instrument_cols=["z1", "z2"],
+        weight_type="kernel",
+        cov_type="hac",
+    )
+
+    # gmm_iterations: 1（1-step）・3以上（iterated、固定回数モード）の成功パス
+    # （Issue #231フェーズ4、testing-completeness-reviewer指摘のshould fix）。
+    # baselineシナリオ・weight_type='unadjusted'・cov_type='classical'固定。
+    fixtures["gmm_iterations"] = {
+        n_iter: run_gmm(
+            dataset="baseline",
+            x_exog_cols=["x1"],
+            x_endog_cols=["endog1"],
+            instrument_cols=["z1", "z2"],
+            weight_type="unadjusted",
+            cov_type="classical",
+            gmm_iterations=n_iter,
+        )
+        for n_iter in GMM_ITERATIONS_SCENARIOS
+    }
+
     fixtures["_meta"] = {
         "method": "gmm",
         "generated_at": datetime.now(UTC).isoformat(),
@@ -150,6 +197,12 @@ def build_fixtures() -> dict:
             "perfect_multicollinearity/G=2クラスター境界はここに含まない"
             "（2SLSの`iv.json`と同じ理由、G=2境界は`engine/src/iv/CLAUDE.md`"
             "「修正済み」参照）。"
+            "multi_endog（複数内生変数、x_endog=['endog1','endog2']）は"
+            "generate_iv_datasets.pyの第一段階誤差vが内生変数ごとに独立になる"
+            "よう修正した後のデータで生成（Issue #231フェーズ4、"
+            "generate_iv_fixtures.pyの同名注記参照）。"
+            "kernel_hac（weight_type='kernel'×cov_type='hac'）・gmm_iterations"
+            "（1/3、既定値2以外の成功パス）も同フェーズで追加。"
         ),
     }
     return fixtures
@@ -191,7 +244,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/api_tests/fixtures/benchmarks/iv_gmm.json",
+        default="../../../tests/fixtures/benchmarks/iv_gmm.json",
     )
     args = parser.parse_args()
 

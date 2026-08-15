@@ -14,10 +14,10 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
     アクションは不採用（`cargo audit --json`の出力にANSI制御文字が混ざると`JSON.parse()`が
     失敗する既知の不具合が長期未解決のため）。テキスト出力のまま`cargo audit`を直接実行する。
 - **`ci_python.yml`**（`python_package`/`engine_pybind`の品質検証、3ジョブ、
-  `python_package/**`・`engine_pybind/**`・`pyproject.toml`・`uv.lock`・`tests/api_tests/**`を
+  `python_package/**`・`engine_pybind/**`・`pyproject.toml`・`uv.lock`・`tests/**`を
   トリガー。`engine/**`は含めない）:
   - `test`ジョブ（Python 3.12/3.13/3.14マトリクス）: `uv sync --locked --group test` →
-    `uv run maturin develop` → `pytest tests/api_tests` → `ruff check .` → `ruff format --check .`。
+    `uv run maturin develop` → `pytest tests` → `ruff check .` → `ruff format --check .`。
     `engine_pybind`はabi3を使っていないためPythonマイナーバージョンごとに別ビルドが必要。
   - `engine_pybind-lint`ジョブ: `cargo fmt -p engine_pybind --check` →
     `cargo clippy -p engine_pybind --all-targets -- -D warnings`。

@@ -98,6 +98,20 @@ if (cov_type == "classical") {
 coef_se <- extract_coef_se(model, vc, df_inference)
 coefs <- coef_se$coefs
 ses <- coef_se$ses
+t_stats <- coef_se$t_stats
+p_values <- coef_se$p_values
+
+# 信頼区間（既定confidence_level=0.95固定。本実装・statsmodelsのcov_typeによらず
+# t分布を使う方針と揃え、上で計算したvc・df_inferenceベースのses・t臨界値から
+# 手計算する（baseのconfint(model)はclassicalのvcovしか使わないため使えない）。
+crit <- qt(0.975, df_inference)
+conf_lower <- coefs - crit * ses
+conf_upper <- coefs + crit * ses
+
+# R²・調整済みR²はcov_typeに依存しない（残差・SSTのみに基づく）ため、
+# summary()の値をそのまま使う（本実装・statsmodelsと同じ定義）。
+r_squared_val <- summary(model)$r.squared
+r_squared_adj_val <- summary(model)$adj.r.squared
 
 # AIC/BIC/対数尤度はcov_typeに依存しない（残差・SSRのみに基づく）。
 # R標準のAIC()/BIC()（stats:::AIC.lm）は使わない。推定された残差分散σ²を
@@ -122,6 +136,16 @@ library(jsonlite)
 result <- list(
   coef = as.list(coefs),
   se = as.list(ses),
+  t_stats = as.list(t_stats),
+  p_values = as.list(p_values),
+  conf_int = mapply(
+    function(lo, hi) list(lo, hi),
+    conf_lower,
+    conf_upper,
+    SIMPLIFY = FALSE
+  ),
+  r_squared = r_squared_val,
+  r_squared_adj = r_squared_adj_val,
   aic = aic_val,
   bic = bic_val,
   log_likelihood = loglik_val,

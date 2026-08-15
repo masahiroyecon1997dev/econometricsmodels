@@ -5,7 +5,7 @@
 
 使用例:
     python freeze_linear_datasets.py --output-dir \\
-        ../../tests/api_tests/fixtures/benchmarks/data
+        ../../tests/fixtures/benchmarks/data
 """
 
 from __future__ import annotations
@@ -25,8 +25,8 @@ from _common import freeze_scenarios, run_freeze_cli
 from generate_linear_datasets import generate_linear_dataset
 
 # generate_ols_fixtures.py / generate_wls_fixtures.py のNUMERIC_SCENARIOSに
-# perfect_multicollinearity（ComputationErrorパスのテストで使う、数値比較はしない）
-# を加えた全シナリオ。
+# perfect_multicollinearity・scale_variance（いずれもComputationErrorパスの
+# テストで使う、数値比較はしない）を加えた全シナリオ。
 SYNTHETIC_SCENARIOS = [
     "baseline",
     "small_n",
@@ -36,6 +36,7 @@ SYNTHETIC_SCENARIOS = [
     "moderate_multicollinearity",
     "perfect_multicollinearity",
     "scale_variance",
+    "scale_variance_mild",
     "high_condition_number",
 ]
 
@@ -90,7 +91,7 @@ def freeze(output_dir: Path) -> None:
 if __name__ == "__main__":
     run_freeze_cli(
         freeze,
-        "../../tests/api_tests/fixtures/benchmarks/data",
+        "../../tests/fixtures/benchmarks/data",
         "wrote frozen linear datasets",
         description=__doc__,
     )

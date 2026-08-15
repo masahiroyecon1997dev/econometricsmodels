@@ -1,7 +1,7 @@
-"""OLSのクロスチェック用フィクスチャ（tests/api_tests/fixtures/benchmarks/ols_crosscheck.json）を
+"""OLSのクロスチェック用フィクスチャ（tests/fixtures/benchmarks/ols_crosscheck.json）を
 生成するスクリプト。
 
-`tests/api_tests/fixtures/benchmarks/ols.json`（statsmodels、主リファレンス）とは別に、
+`tests/fixtures/benchmarks/ols.json`（statsmodels、主リファレンス）とは別に、
 独立実装（R: lm + sandwich/lmtest）によるクロスチェック値を生成する。役割分担は
 `.claude/rules/testing-policy.md`「リファレンス実装」章の通り:
 
@@ -15,15 +15,20 @@ pyfixestのHC2/HC3はfixestの仕様ではなく**pyfixest自身の実装バグ*
 `docs/spec/ols-spec.md`「テスト」参照。
 
 classical/HC0-3/clusterはRとほぼ機械精度で一致するため厳密比較、HACのみ小標本補正の
-慣習差により緩い許容誤差で比較する（`tests/api_tests/test_ols_crosscheck.py`参照）。
+慣習差により緩い許容誤差で比較する（`tests/test_ols_crosscheck.py`参照）。
 
 `predict()`（`docs/spec/ols-spec.md`「predict()」）も対象に含める。
 `run_lm_predict_crosscheck.R`を使い、全シナリオで学習データに対する予測値（fitted）を、
 baselineシナリオのみ新規データに対する予測値（predicted、`PREDICT_NEW_DATA`参照）を
 crosscheckする。
 
-係数・標準誤差に加え、AIC/BIC/対数尤度・F統計量・F検定p値もRクロスチェック対象に含める
-（`testing-policy.md`「リファレンス実装」章の方針。全統計量を独立実装でもクロスチェックする）。
+係数・標準誤差に加え、t値・p値・信頼区間・R²・調整済みR²・AIC/BIC/対数尤度・
+F統計量・F検定p値もRクロスチェック対象に含める（`testing-policy.md`
+「リファレンス実装」章の方針。全統計量を独立実装でもクロスチェックする）。
+信頼区間はconfidence_level=0.95固定（フィクスチャ側でconfidence_levelを
+変えていないため）で、cov_typeごとのvcov・df_inferenceに基づく手計算値
+（`coefs ± qt(0.975, df_inference) * ses`）。R²・調整済みR²はAIC/BIC等と同じく
+cov_typeに依存しない（`summary(model)`の値をそのまま使う）。
 AIC/BICはRの`AIC()`/`BIC()`標準関数（残差分散を1パラメータとして追加でカウントするk+1慣習）
 ではなく、`run_lm_crosscheck_benchmark.R`側で本実装・statsmodelsと同じ式（`-2*loglik + 2*k`等、kは
 回帰係数の数のみ）で手計算した値を使う（実測でRの標準関数はAICがちょうど2、BICがlog(n)だけ
@@ -31,9 +36,9 @@ AIC/BICはRの`AIC()`/`BIC()`標準関数（残差分散を1パラメータと�
 （`β_slopes' Σ⁻¹ β_slopes / q`）をcov_typeごとの共分散行列で計算しており、cov_typeに依存する。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`ols_crosscheck.json`は
-`tests/api_tests/fixtures/`に置く（`testing-policy.md`「ベンチマーク値のフィクスチャ化」参照）。
+`tests/fixtures/`に置く（`testing-policy.md`「ベンチマーク値のフィクスチャ化」参照）。
 
-合成データの入力は`tests/api_tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
+合成データの入力は`tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
 （`benchmark/freeze_datasets.py`参照）。`imbalanced_cluster_groups`（純粋にnから
 決定論的にラベルを組み立てるだけで乱数を使わない）のみ、引き続き
 `generate_linear_datasets.py`を直接呼ぶ。Wooldridgeデータは`load_wooldridge.py`
@@ -42,7 +47,7 @@ AIC/BICはRの`AIC()`/`BIC()`標準関数（残差分散を1パラメータと�
 
 使用例:
     python generate_ols_crosscheck_fixtures.py \\
-        --output ../../../tests/api_tests/fixtures/benchmarks/ols_crosscheck.json
+        --output ../../../tests/fixtures/benchmarks/ols_crosscheck.json
 """
 
 from __future__ import annotations
@@ -95,6 +100,9 @@ NUMERIC_SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "high_condition_number",
+    # scale_varianceより緩いスケール差の成功パス（generate_ols_fixtures.py
+    # と同じ理由）。
+    "scale_variance_mild",
     # n=k+1（自由度1ちょうど）の成功パス。
     "baseline_df1",
 ]
@@ -135,9 +143,23 @@ def _normalize_names(raw: dict) -> dict:
         "coef": {fix(k): v for k, v in raw["coef"].items()},
         "se": {fix(k): v for k, v in raw["se"].items()},
     }
-    # aic/bic/log_likelihood/f_statistic/f_p_valueはrun_lm_crosscheck_benchmark.Rが返す
-    # （fixest等、他パッケージのスクリプトは対象外）。
-    for key in ("aic", "bic", "log_likelihood", "f_statistic", "f_p_value"):
+    if "t_stats" in raw:
+        result["t_stats"] = {fix(k): v for k, v in raw["t_stats"].items()}
+    if "p_values" in raw:
+        result["p_values"] = {fix(k): v for k, v in raw["p_values"].items()}
+    if "conf_int" in raw:
+        result["conf_int"] = {fix(k): v for k, v in raw["conf_int"].items()}
+    # aic/bic/log_likelihood/f_statistic/f_p_value/r_squared/r_squared_adjは
+    # run_lm_crosscheck_benchmark.Rが返す（fixest等、他パッケージのスクリプトは対象外）。
+    for key in (
+        "aic",
+        "bic",
+        "log_likelihood",
+        "f_statistic",
+        "f_p_value",
+        "r_squared",
+        "r_squared_adj",
+    ):
         if key in raw:
             result[key] = raw[key]
     return result
@@ -327,10 +349,11 @@ def build_fixtures() -> dict:
         "method": "ols",
         "purpose": (
             "statsmodels主リファレンス（ols.json）とは独立した実装（R: lm + "
-            "sandwich/lmtest）によるクロスチェック用。係数・標準誤差・AIC・"
-            "BIC・対数尤度・F統計量・F検定p値を含む。classical/HC0-3/cluster"
-            "は厳密比較、HACのみ緩い許容誤差での比較を想定する"
-            "（testing-policy.md参照）"
+            "sandwich/lmtest）によるクロスチェック用。係数・標準誤差・t値・"
+            "p値・信頼区間・R²・調整済みR²・AIC・BIC・対数尤度・F統計量・"
+            "F検定p値を含む（信頼区間はconfidence_level=0.95固定で計算）。"
+            "classical/HC0-3/clusterは厳密比較、HACのみ緩い許容誤差での比較を"
+            "想定する（testing-policy.md参照）"
         ),
         "generated_at": datetime.now(UTC).isoformat(),
         "r_version": r_version,
@@ -359,7 +382,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/api_tests/fixtures/benchmarks/ols_crosscheck.json",
+        default="../../../tests/fixtures/benchmarks/ols_crosscheck.json",
     )
     args = parser.parse_args()
 

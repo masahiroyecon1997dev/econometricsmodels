@@ -43,6 +43,7 @@ SCENARIOS = [
     "just_identified",
     "weak_instruments",
     "small_n",
+    "high_variance",
     "heteroskedastic",
     "autocorrelated",
     "moderate_multicollinearity",
@@ -53,6 +54,10 @@ SCENARIOS = [
 
 # 内生性の強さ: 構造誤差uと第一段階誤差vの相関（シナリオ間で共通の固定値）。
 _RHO_ENDOG = 0.6
+
+# high_varianceシナリオでの構造誤差uの分散（`generate_linear_datasets.py`の
+# high_variance、errors ~ N(0, 10.0)と同じ標準偏差10）。既定は分散1。
+_U_VAR_HIGH_VARIANCE = 100.0
 
 # 操作変数の関連性の強さ（第一段階係数piのスケール）。`weak_instruments`のみ
 # `_PI_WEAK`に差し替える。実測値（`generate_iv_dataset("baseline"/"weak_instruments")`
@@ -125,6 +130,9 @@ def generate_iv_dataset(
         raise ValueError(f"{scenario} requires k_exog >= 3")
     if scenario == "scale_variance" and k_exog < 2:
         raise ValueError(f"{scenario} requires k_exog >= 2")
+    if scenario in ("heteroskedastic", "autocorrelated") and k_endog != 1:
+        # 下記の誤差生成ロジック（二変量正規分布の分岐）がk_endog=1専用のため。
+        raise ValueError(f"{scenario} requires k_endog == 1")
 
     rng = np.random.default_rng(seed)
 
@@ -159,7 +167,10 @@ def generate_iv_dataset(
     # 除外制約を満たすようにする） ---
     z = rng.normal(0.0, 1.0, size=(n, k_instruments))
 
-    # --- 内生性: 構造誤差uと第一段階誤差vの相関（二変量正規分布） ---
+    # --- 内生性: 構造誤差uと第一段階誤差vの相関 ---
+    # heteroskedastic/autocorrelated分岐は二変量正規分布（k_endog=1専用、
+    # 呼び出し側で強制済み）のまま、それ以外（"else"分岐）は内生変数ごとに
+    # 独立な第一段階誤差v_jに一般化する（下記参照）。
     cov_uv = np.array([[1.0, _RHO_ENDOG], [_RHO_ENDOG, 1.0]])
     if scenario == "heteroskedastic":
         # 分散がx_exogの最初の列に依存（`generate_linear_datasets.py`の
@@ -167,7 +178,7 @@ def generate_iv_dataset(
         sigma_i = 0.5 + 2.0 * np.abs(x_exog[:, 0])
         uv = rng.multivariate_normal(mean=[0.0, 0.0], cov=cov_uv, size=n)
         u = uv[:, 0] * sigma_i
-        v = uv[:, 1]
+        v = uv[:, 1:2]  # (n, 1)
     elif scenario == "autocorrelated":
         # AR(1): u_t = rho_ar * u_{t-1} + innovation_t
         # （`generate_linear_datasets.py`のautocorrelatedシナリオと同じ発想。
@@ -178,10 +189,28 @@ def generate_iv_dataset(
         u[0] = uv_innov[0, 0]
         for t in range(1, n):
             u[t] = rho_ar * u[t - 1] + uv_innov[t, 0]
-        v = uv_innov[:, 1]
+        v = uv_innov[:, 1:2]  # (n, 1)
     else:
-        uv = rng.multivariate_normal(mean=[0.0, 0.0], cov=cov_uv, size=n)
-        u, v = uv[:, 0], uv[:, 1]
+        # 内生変数ごとに独立な第一段階誤差v_j（構造誤差uとはそれぞれ相関
+        # _RHO_ENDOGを持つが、v_i・v_j（i≠j）同士は無相関）。k_endog=1では
+        # 従来の二変量正規分布と数学的に完全に一致する一般化。
+        # vをk_endog本の内生変数全てに共有（同一列をブロードキャスト）すると、
+        # 複数内生変数の第一段階回帰残差が事実上完全共線（相関~0.99999999999998を
+        # 実測）になり、Wu-Hausman検定の拡張回帰が推定不能になるため、内生変数
+        # ごとに独立なvが必須。
+        # high_varianceは構造誤差uの分散のみ拡大する（vの分散は1のまま、
+        # u-v_j間の共分散はcorr(u,v_j)=_RHO_ENDOGを保つようスケーリング）。
+        u_var = _U_VAR_HIGH_VARIANCE if scenario == "high_variance" else 1.0
+        dim = 1 + k_endog
+        cov_u_v = np.eye(dim)
+        cov_u_v[0, 0] = u_var
+        cov_u_v[0, 1:] = _RHO_ENDOG * np.sqrt(u_var)
+        cov_u_v[1:, 0] = _RHO_ENDOG * np.sqrt(u_var)
+        draws = rng.multivariate_normal(
+            mean=np.zeros(dim), cov=cov_u_v, size=n
+        )
+        u = draws[:, 0]
+        v = draws[:, 1:]  # (n, k_endog)
 
     # --- 第一段階: x_endog = pi0 + Z @ pi + x_exog @ gamma + v ---
     pi_strength = _PI_WEAK if scenario == "weak_instruments" else _PI_STRONG
@@ -190,7 +219,7 @@ def generate_iv_dataset(
     )
     gamma = rng.uniform(-0.5, 0.5, size=(k_exog, k_endog))
     pi0 = rng.uniform(-1.0, 1.0, size=k_endog)
-    x_endog = pi0 + z @ pi + x_exog @ gamma + v[:, None]
+    x_endog = pi0 + z @ pi + x_exog @ gamma + v
 
     if scenario == "scale_variance":
         # 変数間のスケールが極端に異なるケース（x1は10^6オーダー、x2は10^-3

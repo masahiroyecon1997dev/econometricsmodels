@@ -1,19 +1,19 @@
-"""OLSのテストフィクスチャ（tests/api_tests/fixtures/ols.json）を生成するスクリプト。
+"""OLSのテストフィクスチャ（tests/fixtures/ols.json）を生成するスクリプト。
 
 `benchmark/linear/run_statsmodels_benchmark.py`（1回呼べば1ケース分の結果を返す汎用ツール）を
 全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つのJSONにまとめて書き出す。
 
 このスクリプト自体は`benchmark/`側に置く（ベンチマーク生成ツールの一部）。
-生成される`ols.json`は`tests/api_tests/fixtures/`に置く（テストが読むデータ）。
+生成される`ols.json`は`tests/fixtures/`に置く（テストが読むデータ）。
 両者を分けている理由は`.claude/skills/reference-benchmark/SKILL.md`参照。
 
-入力データは`tests/api_tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
+入力データは`tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
 （`benchmark/freeze_datasets.py`参照）。`imbalanced_cluster_groups`（純粋にnから
 決定論的にラベルを組み立てるだけで乱数を使わない）のみ、引き続き
 `generate_linear_datasets.py`を直接呼ぶ。
 
 使用例:
-    python generate_ols_fixtures.py --output ../../../tests/api_tests/fixtures/benchmarks/ols.json
+    python generate_ols_fixtures.py --output ../../../tests/fixtures/benchmarks/ols.json
 """
 
 from __future__ import annotations
@@ -48,6 +48,11 @@ NUMERIC_SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "high_condition_number",
+    # scale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）より
+    # 緩いスケール差（x1*1e2, x2*1e-1）の成功パス。faer等の数値計算
+    # ライブラリ依存部分の将来の精度リグレッションを検知する
+    # （testing-policy.md「テスト用データセット」1.、ユーザー確認済み）。
+    "scale_variance_mild",
     # n=k+1（自由度1ちょうど）の成功パス。baselineをn=5,k=3で
     # オーバーライドした専用データ（engine側の`k`は定数項込みでk=4になる
     # ため、df_resid=1にはn=5が必要。freeze_datasets.py参照）。同じx1..x3の
@@ -165,7 +170,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/api_tests/fixtures/benchmarks/ols.json",
+        default="../../../tests/fixtures/benchmarks/ols.json",
     )
     args = parser.parse_args()
 

@@ -41,7 +41,7 @@ autocorrelated/high_variance）は2値DGPに直接転用できないため、Log
 （logit: `docs/spec/logit-spec.md`参照、probitも同じ`nonlinear/common.rs`の
 `run_solver`を共有するため同じ限界を持つ。既知の限界として記録のみ）。このためNonConvergenceの発生確認は、専用
 データセットではなく`LogitOptions(max_iter=1)`/`ProbitOptions(max_iter=1)`等で
-人為的に打ち切ることで行う（`tests/api_tests/test_logit.py`/`test_probit.py`）。
+人為的に打ち切ることで行う（`tests/test_logit.py`/`test_probit.py`）。
 
 使用例:
     from generate_nonlinear_datasets import generate_logit_dataset, generate_probit_dataset

@@ -1,4 +1,4 @@
-"""IV（2SLS）のテストフィクスチャ（tests/api_tests/fixtures/benchmarks/iv.json）を
+"""IV（2SLS）のテストフィクスチャ（tests/fixtures/benchmarks/iv.json）を
 生成するスクリプト。
 
 `benchmark/iv/run_linearmodels_benchmark.py`（1回呼べば1ケース分の結果を返す汎用
@@ -7,14 +7,14 @@
 （`run_linearmodels_benchmark.py`のモジュールdocstring参照）。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`iv.json`は
-`tests/api_tests/fixtures/benchmarks/`に置く（両者を分ける理由は
+`tests/fixtures/benchmarks/`に置く（両者を分ける理由は
 `.claude/skills/reference-benchmark/SKILL.md`参照）。
 
-入力データは`tests/api_tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
+入力データは`tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
 （`benchmark/freeze_datasets.py`参照）。
 
 使用例:
-    python generate_iv_fixtures.py --output ../../../tests/api_tests/fixtures/benchmarks/iv.json
+    python generate_iv_fixtures.py --output ../../../tests/fixtures/benchmarks/iv.json
 """
 
 from __future__ import annotations
@@ -45,6 +45,7 @@ NUMERIC_SCENARIOS = [
     "just_identified",
     "weak_instruments",
     "small_n",
+    "high_variance",
     "heteroskedastic",
     "autocorrelated",
     "moderate_multicollinearity",
@@ -63,6 +64,10 @@ X_EXOG_BY_SCENARIO = {
 }
 
 COV_TYPES = ["classical", "hc0", "hc1", "hac", "cluster"]
+
+# Wooldridge card（Card 1995の教育収益率推定、大学近接ダミーnearc2/nearc4を
+# 操作変数として教育年数educの内生性を補正する教科書的定番例）。
+CARD_X_EXOG = ["exper", "expersq", "black", "smsa", "south"]
 
 
 def build_fixtures() -> dict:
@@ -92,16 +97,60 @@ def build_fixtures() -> dict:
                 "baseline",
                 groups=imbalanced_cluster_groups(n),
             )
-            # G=2境界の成功パスは、実装時に`econometricsmodels.IV`で実際に試したところ
+            fixtures[scenario]["cluster_g2"] = _run_cluster_g2_case()
+            # G=2境界の成功パス。実装時に`econometricsmodels.IV`で実際に試したところ
             # `TwoSlsEstimator`の第一段階回帰（`x_exog=[]`・instruments=1本・G=2の
-            # クラスターロバストF検定）が`ComputationError`（"near-singular"）を返すことが
-            # 判明した。同一のデータ・モデル形状（`endog1 ~ const + z1`、G=2クラスター）を
-            # 素のOLS（`econometricsmodels.OLS`）で単独fitすると成功する
-            # （F統計量が計算できる）ため、IVの第一段階呼び出し経路に固有の問題である
-            # 可能性が高い。原因未特定のため、ここではフィクスチャ化を見送り、
-            # `iv_baseline_g2.csv`（`freeze_datasets.py`のIV_G2_BOUNDARY_SCENARIOS）は
-            # 凍結済みのまま残し、原因究明後に追加する（ユーザー確認済み、
-            # `engine/src/iv/CLAUDE.md`に再現手順を記録）。
+            # クラスターロバストF検定）が`ComputationError`（"near-singular"）を
+            # 返すバグが発覚したが、原因（`without_baked_in_intercept`未導入による
+            # `k_constant`取り違え）は判明・修正済み（`engine/src/iv/CLAUDE.md`
+            # 「修正済み」参照）。修正後にフィクスチャ化した。
+
+    # 複数内生変数（k_endog>=2）の成功パス確認（Issue #231フェーズ4、
+    # testing-completeness-reviewer指摘のmust fix）。x_exog=['x1']・
+    # x_endog=['endog1', 'endog2']・instruments=['z1','z2','z3']（過剰識別）。
+    fixtures["multi_endog"] = {}
+    for cov_type in COV_TYPES:
+        if cov_type == "cluster":
+            continue
+        fixtures["multi_endog"][cov_type] = run(
+            dataset="baseline_multi_endog",
+            x_exog_cols=["x1"],
+            x_endog_cols=["endog1", "endog2"],
+            instrument_cols=["z1", "z2", "z3"],
+            cov_type=cov_type,
+        )
+
+    # 実データセット（Wooldridge card、Card 1995の大学近接操作変数による教育の
+    # 収益率推定）。testing-policy.md「テスト用データセット」2.（実データセット）の
+    # 要求に対しIV系統は未対応だった（Issue #231フェーズ4、
+    # testing-completeness-reviewer指摘のshould fix）。
+    fixtures["card"] = {}
+    for cov_type in COV_TYPES:
+        if cov_type == "cluster":
+            continue
+        fixtures["card"][cov_type] = run(
+            dataset="card",
+            x_exog_cols=CARD_X_EXOG,
+            x_endog_cols=["educ"],
+            instrument_cols=["nearc2", "nearc4"],
+            cov_type=cov_type,
+            dataset_source="wooldridge",
+            y_col="lwage",
+        )
+
+    # 自由度1境界（df_resid=1ちょうど）の成功パス確認（Issue #235）。
+    # x_exog=[]・x_endog=['endog1']・instruments=['z1']（丁度識別、n=3）。
+    fixtures["df1"] = {}
+    for cov_type in COV_TYPES:
+        if cov_type == "cluster":
+            continue  # n=3では意味のあるクラスタ数を確保できないため対象外
+        fixtures["df1"][cov_type] = run(
+            dataset="baseline_df1",
+            x_exog_cols=[],
+            x_endog_cols=["endog1"],
+            instrument_cols=["z1"],
+            cov_type=cov_type,
+        )
 
     fixtures["_meta"] = {
         "method": "2sls",
@@ -124,9 +173,23 @@ def build_fixtures() -> dict:
             "（独立計算自体のミスパターン検出用、ユーザー確認済み）。"
             "perfect_multicollinearityはここに含まない"
             "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
-            "cluster_g2（G=2境界の成功パス）は、実装時にIVの第一段階回帰で"
-            "ComputationErrorが再現したため今回は含めない（本スクリプト内の"
-            "コメント・`engine/src/iv/CLAUDE.md`参照、原因究明後に追加予定）。"
+            "cluster_g2（G=2境界の成功パス）は、`engine/src/iv/CLAUDE.md`"
+            "「修正済み」に記録の`k_constant`取り違えバグの修正後にフィクスチャ化"
+            "した。"
+            "multi_endog（複数内生変数、x_endog=['endog1','endog2']）は、"
+            "generate_iv_datasets.pyの第一段階誤差vが内生変数ごとに独立になる"
+            "よう修正した後のデータで生成（Issue #231フェーズ4。修正前はv"
+            "が全内生変数で単一列のため第一段階回帰残差が事実上完全共線になり、"
+            "Wu-Hausman検定の拡張回帰が推定不能だった）。"
+            "cardはWooldridge実データ（Card 1995、大学近接ダミーnearc2/nearc4を"
+            "操作変数として教育年数educの内生性を補正する教科書的定番例）。"
+            "他の実データセット（mroz等）と異なりtrue_betaと比較できないため"
+            "`true_beta`キーは持たない。cluster cov_typeは対応する自然な"
+            "カテゴリ列が無いため対象外（Issue #231フェーズ4）。"
+            "df1（自由度1境界、n=3・x_exog=[]・x_endog=['endog1']・"
+            "instruments=['z1']）は境界値・悪条件シナリオの一環（Issue #235、"
+            "testing-policy.md「テスト用データセット」）。cluster cov_typeは"
+            "n=3では意味のあるクラスタ数を確保できないため対象外。"
         ),
     }
     return fixtures
@@ -158,11 +221,36 @@ def _run_cluster_case(dataset: str, groups: list | None = None) -> dict:
         tmp_path.unlink()
 
 
+def _run_cluster_g2_case() -> dict:
+    """G=2境界の成功パス確認用（`tests/test_iv.py::test_cluster_g2_boundary_
+    succeeds_when_x_exog_is_empty`と同じ再現条件: `x_exog=[]`・`instruments`1本
+    ・行番号%2の疑似グループ、`engine/src/iv/CLAUDE.md`「修正済み」参照）。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline_g2.csv")
+    n = df.height
+    grouped = df.with_columns(
+        pl.Series("cluster_group", [str(i % 2) for i in range(n)])
+    )
+    tmp_path = DATA_DIR / "iv_baseline_g2_cluster_tmp.csv"
+    grouped.write_csv(tmp_path)
+    try:
+        return run(
+            dataset="baseline_g2_cluster_tmp",
+            x_exog_cols=[],
+            x_endog_cols=["endog1"],
+            instrument_cols=["z1"],
+            cov_type="cluster",
+            cluster_col="cluster_group",
+        )
+    finally:
+        tmp_path.unlink()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/api_tests/fixtures/benchmarks/iv.json",
+        default="../../../tests/fixtures/benchmarks/iv.json",
     )
     args = parser.parse_args()
 

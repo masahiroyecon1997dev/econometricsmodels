@@ -215,3 +215,24 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   ユーザー確認が必要な設計判断を含む。
 - **気づいた経緯**: 2026-08-15、`generate_ols_fixtures.py`解説後のユーザー提案。
 - **状態**: 未対応（設計方針の確認・着手要否はユーザー判断待ち）
+
+### 13. `_run_cluster_case`が`generate_ols_fixtures.py`と`generate_wls_fixtures.py`でほぼ完全に重複、`_run_401ksubs_case`も`run()`の結果辞書構築と大部分が重複
+
+- **対象**: [benchmark/linear/fixtures/generate_wls_fixtures.py:138-179](../../../benchmark/linear/fixtures/generate_wls_fixtures.py#L138-L179)
+  （`_run_cluster_case`）・[benchmark/linear/fixtures/generate_ols_fixtures.py:124-166](../../../benchmark/linear/fixtures/generate_ols_fixtures.py#L124-L166)
+  （同名関数）・[benchmark/linear/fixtures/generate_wls_fixtures.py:182-260](../../../benchmark/linear/fixtures/generate_wls_fixtures.py#L182-L260)
+  （`_run_401ksubs_case`）
+- **内容**: `generate_wls_fixtures.py`の`_run_cluster_case`は、`smf.ols`→`smf.wls`（+重み引数）・
+  `_meta`に`weight_col`が1行増える以外、`generate_ols_fixtures.py`の同名関数と
+  **ほぼ完全に同一のコード**（関数まるごとのコピーに近い）。`_run_401ksubs_case`も、
+  `run_statsmodels_benchmark.py`の`run()`が構築する結果辞書（`coef`/`se`/`t_stats`/
+  `p_values`/`conf_int`/`r_squared`等13キー）とほぼ同一のロジックを再実装している。
+  いずれも`fsize==1`フィルタや`inv_inc`派生列・疑似グループ列といった`run()`が
+  対応しない前処理が必要なため`run()`をバイパスしている、項目11・12と同根の問題。
+- **Claudeの所感**: 項目12の対応（`cluster_col`引数の拡張・列の事前焼き込み）に加えて、
+  `run()`側に「読み込み後にDataFrameへ任意の前処理を挟めるフック」
+  （例: `preprocess_fn: Callable[[pl.DataFrame], pl.DataFrame] | None`引数）を
+  追加できれば、`_run_cluster_case`・`_run_401ksubs_case`とも`run()`一本化できる
+  可能性がある。範囲が広がるため、項目12とまとめて検討する方が効率的。
+- **気づいた経緯**: 2026-08-15、`generate_wls_fixtures.py`解説中に発見。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目12と合わせて検討）

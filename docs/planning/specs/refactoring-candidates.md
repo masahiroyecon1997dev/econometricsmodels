@@ -239,3 +239,49 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   あることを確認済み（linear 2ファイルに続く3ファイル目の実例、2026-08-15）。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目12と合わせて検討。nonlinear/iv系統にも
   同型の重複が無いか着手時に確認する）
+
+### 14. `COV_TYPES`への`cluster`混入がOLS/WLSとLogitで不統一、メインループ自体の共通化余地
+
+- **対象**: [benchmark/nonlinear/fixtures/generate_logit_fixtures.py:55,73-75](../../../benchmark/nonlinear/fixtures/generate_logit_fixtures.py#L55-L75)
+  （`COV_TYPES = ["classical", "opg", "hc0", "cluster"]` + メインループ内`if cov_type ==
+  "cluster": continue`）と、OLS/WLSの`COV_TYPES`（`cluster`を含まない、`continue`不要）
+- **内容**: ユーザー指摘（2026-08-15）。実際の挙動（clusterはメインループで処理せず、
+  専用の複数パターンとして後段で個別処理する）はOLS/WLS/Logitで完全に同じだが、
+  Logitだけ`COV_TYPES`に`cluster`を含めた上で`continue`スキップしている。意味のある
+  設計差ではなく単なる書き方のブレ。`cluster`を`COV_TYPES`から除けば`continue`も
+  不要になりOLS/WLSと統一できる。
+- **Claudeの所感**: 統一後、メインループ本体（`for scenario: for cov_type: run(...)`の
+  二重ループ＋辞書構築）自体を`_common.py`に`build_numeric_fixtures(run_fn, scenarios,
+  cov_types, **extra_kwargs)`のような共通ヘルパーとして切り出せる可能性がある
+  （`weight_col`等のオプション差分は`**extra_kwargs`で吸収）。OLS/WLS/Logit/Probit
+  （Probit未確認）の4ファイル分の重複を解消できる見込みで、影響範囲は大きい。
+- **気づいた経緯**: 2026-08-15、`generate_logit_fixtures.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 15. `_run_cluster_case`を`_common.py`へ一般化して集約する案（項目13の発展形）
+
+- **対象**: 項目13で列挙した`_run_cluster_case`の重複箇所全て
+- **内容**: ユーザー提案（2026-08-15）。`_run_cluster_case`自体を`_common.py`に切り出し、
+  「どの凍結CSVを使うか（prefix）」「どのstatsmodels関数を使うか（`smf.ols`/`smf.wls`/
+  `smf.logit`/`smf.probit`）」をパラメータ化すれば、項目13の重複をより根本的に解消できる。
+  ただしOLSのG=2境界ケースが`k1`（説明変数を1個に減らした専用データ）を必須とするのに対し、
+  Logitは同じデータのままG=2境界ケースが成立する（項目16参照、F検定とLR検定の構造的な違いに
+  起因する実質的な差）ため、**完全に同一のコードにはできず、`k1`相当のパラメータ化は必要**。
+- **Claudeの所感**: 項目13・14と合わせて検討する価値がある。既存の`k1`引数の発想を
+  さらに一般化する形が現実的。
+- **気づいた経緯**: 2026-08-15、`generate_logit_fixtures.py`解説後のユーザー提案。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目13・14とまとめて検討）
+
+### 16. `MROZ_FORMULA`が4ファイルで完全重複
+
+- **対象**: [benchmark/nonlinear/fixtures/generate_logit_fixtures.py:63-65](../../../benchmark/nonlinear/fixtures/generate_logit_fixtures.py#L63-L65)・
+  `generate_logit_crosscheck_fixtures.py:62-64`・`generate_probit_fixtures.py:67-69`・
+  `generate_probit_crosscheck_fixtures.py:62-64`
+- **内容**: ユーザーの「`MROZ_FORMULA`を`build_fixtures()`内に移してよいか」という質問を
+  きっかけに`grep`で確認したところ、同一の文字列（`"inlf ~ nwifeinc + educ + exper + expersq
+  + age + kidslt6 + kidsge6"`）が4ファイルに独立して重複定義されていた。
+- **Claudeの所感**: 関数内へのローカル化は可読性向上の意図は理解できるが、逆に他ファイルからの
+  import経路を断ってしまう。むしろ`_common.py`等に括り出し4ファイルともそこからimportする
+  方向が、項目4（SCENARIOSリストの重複）と同じパターンで整合的。
+- **気づいた経緯**: 2026-08-15、`generate_logit_fixtures.py`解説後のユーザー質問をきっかけに発見。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

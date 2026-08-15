@@ -26,8 +26,11 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # Logit/Probitは反復最適化（Newton/BFGS/L-BFGS）のため、ゼロ近傍の値
     # （信頼区間の境界等）で閉形式解（OLS/WLS）より1桁大きい浮動小数点誤差が
     # 乗ることを実測確認済み（ATOLのみ1e-9、RTOLは同じ1e-8）。
-    "logit_fixtures": {"rtol": 1e-8, "atol": 1e-9},
-    "probit_fixtures": {"rtol": 1e-8, "atol": 1e-9},
+    # rtol_method: method="bfgs"/"lbfgs"がnewtonと異なる最適化経路で収束するため、
+    # 収束後の係数・標準誤差が既定のRTOLより1桁以上大きくばらつく（実測最大相対誤差
+    # ~7.7e-5、Issue #231フェーズ4）。実測値に対し約13倍のマージンを持たせた。
+    "logit_fixtures": {"rtol": 1e-8, "atol": 1e-9, "rtol_method": 1e-3},
+    "probit_fixtures": {"rtol": 1e-8, "atol": 1e-9, "rtol_method": 1e-3},
     # --- 独立実装（R）とのクロスチェック ---
     # classical/HC0-3/clusterは機械精度一致（実測1e-14程度）のためRTOL_STRICTを
     # 適用、HACのみ小標本補正の慣習差により緩める。ATOLは絶対誤差フロア

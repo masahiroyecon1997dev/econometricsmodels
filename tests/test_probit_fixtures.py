@@ -60,6 +60,7 @@ from econometricsmodels import (
 from generate_probit_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
+from run_statsmodels_benchmark import run
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "probit.json"
@@ -92,6 +93,13 @@ def fixtures() -> dict:
 _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
 _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
 _check_margeff = partial(check_margeff, rtol=RTOL, atol=ATOL)
+
+# method="bfgs"/"lbfgs"はnewtonと異なる最適化経路で収束するため、既定のRTOLより
+# 緩めた許容誤差を使う（tests/_tolerances.py参照、test_logit_fixtures.pyと同じ方針）。
+RTOL_METHOD = TOLERANCES["probit_fixtures"]["rtol_method"]
+_assert_dict_close_method = partial(
+    assert_dict_close, rtol=RTOL_METHOD, atol=ATOL
+)
 
 
 def _check_result(res, ref: dict, label: str) -> None:
@@ -196,6 +204,47 @@ def test_cluster_g2_matches_statsmodels(fixtures):
     ref = fixtures["baseline"]["cluster_g2"]
     _assert_dict_close(res.params, ref["coef"], "cluster_g2/coef")
     _assert_dict_close(res.std_errors, ref["se"], "cluster_g2/se")
+
+
+@pytest.mark.parametrize("method", ["bfgs", "lbfgs"])
+def test_method_matches_statsmodels(fixtures, method):
+    """`method="bfgs"/"lbfgs"`が主リファレンス（statsmodelsの同じmethod）と
+    フルの統計量（std_errors含む）で一致すること（`test_logit_fixtures.py`と
+    同じ方針、Issue #231フェーズ4）。
+    """
+    df = pl.read_csv(DATA_DIR / "probit_baseline.csv")
+    options = ProbitOptions(cov_type="classical", method=method)
+    res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = fixtures["method"][method]
+    label = f"method/{method}"
+    _assert_dict_close_method(res.params, ref["coef"], f"{label}/coef")
+    _assert_dict_close_method(res.std_errors, ref["se"], f"{label}/se")
+    assert res.converged == ref["converged"], f"{label}/converged"
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+def test_include_intercept_false_matches_statsmodels(cov_type):
+    """`include_intercept=False`の成功パスが検証されていなかった
+    （`test_logit_fixtures.py`と同じ理由、Issue #231フェーズ4）。
+    """
+    df = pl.read_csv(DATA_DIR / "probit_baseline.csv")
+    ref = run(
+        dataset_source="synthetic",
+        dataset="baseline",
+        formula="y ~ x1 + x2 + x3 - 1",
+        cov_type=cov_type,
+        model="probit",
+    )
+
+    options = ProbitOptions(cov_type=cov_type, include_intercept=False)
+    res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    label = f"include_intercept_false/{cov_type}"
+    _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
+    _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
+    assert res.converged == ref["converged"], f"{label}/converged"
+    assert res.df_model == ref["df_model"], f"{label}/df_model"
 
 
 def test_perfect_multicollinearity_raises_computation_error():

@@ -59,6 +59,7 @@ from econometricsmodels import (
 from generate_logit_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
+from run_statsmodels_benchmark import run
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "logit.json"
@@ -91,6 +92,13 @@ def fixtures() -> dict:
 _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
 _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
 _check_margeff = partial(check_margeff, rtol=RTOL, atol=ATOL)
+
+# method="bfgs"/"lbfgs"はnewtonと異なる最適化経路で収束するため、既定のRTOLより
+# 緩めた許容誤差を使う（tests/_tolerances.py参照）。
+RTOL_METHOD = TOLERANCES["logit_fixtures"]["rtol_method"]
+_assert_dict_close_method = partial(
+    assert_dict_close, rtol=RTOL_METHOD, atol=ATOL
+)
 
 
 def _check_result(res, ref: dict, label: str) -> None:
@@ -195,6 +203,58 @@ def test_cluster_g2_matches_statsmodels(fixtures):
     ref = fixtures["baseline"]["cluster_g2"]
     _assert_dict_close(res.params, ref["coef"], "cluster_g2/coef")
     _assert_dict_close(res.std_errors, ref["se"], "cluster_g2/se")
+
+
+@pytest.mark.parametrize("method", ["bfgs", "lbfgs"])
+def test_method_matches_statsmodels(fixtures, method):
+    """`method="bfgs"/"lbfgs"`が主リファレンス（statsmodelsの同じmethod）と
+    フルの統計量（std_errors含む）で一致すること。
+
+    既定の`method="newton"`のみ全シナリオ×cov_typeで数値照合しており、bfgs/lbfgsは
+    `test_logit.py::test_method_option_converges_to_same_params`で自身のnewton結果
+    とparamsのみ緩い許容誤差(rel=1e-4)で比較していたが、主リファレンスに対する
+    フルの統計量照合が無かった（`testing-completeness-reviewer`指摘、
+    Issue #231フェーズ4）。
+    """
+    df = pl.read_csv(DATA_DIR / "logit_baseline.csv")
+    options = LogitOptions(cov_type="classical", method=method)
+    res = Logit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = fixtures["method"][method]
+    label = f"method/{method}"
+    _assert_dict_close_method(res.params, ref["coef"], f"{label}/coef")
+    _assert_dict_close_method(res.std_errors, ref["se"], f"{label}/se")
+    assert res.converged == ref["converged"], f"{label}/converged"
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+def test_include_intercept_false_matches_statsmodels(cov_type):
+    """`include_intercept=False`の成功パスが構造テスト・数値照合テストとも
+    一切検証されていなかった（`df_model`は`include_intercept`の値に関わらず
+    常に`k-1`、`log_likelihood_null`は常に「切片のみ」モデルを参照するため
+    `include_intercept=False`時は`lr_statistic`が負値になりうる、という特殊挙動が
+    `engine`側の単体テストのみで数値照合が無かった。`testing-completeness-reviewer`
+    指摘、Issue #231フェーズ4）。frozen fixtureではなく`run_statsmodels_benchmark`
+    経由の直接比較で確認する（`test_wls_fixtures.py::test_include_intercept_false_
+    matches_statsmodels`と同じ方針）。
+    """
+    df = pl.read_csv(DATA_DIR / "logit_baseline.csv")
+    ref = run(
+        dataset_source="synthetic",
+        dataset="baseline",
+        formula="y ~ x1 + x2 + x3 - 1",
+        cov_type=cov_type,
+        model="logit",
+    )
+
+    options = LogitOptions(cov_type=cov_type, include_intercept=False)
+    res = Logit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    label = f"include_intercept_false/{cov_type}"
+    _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
+    _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
+    assert res.converged == ref["converged"], f"{label}/converged"
+    assert res.df_model == ref["df_model"], f"{label}/df_model"
 
 
 def test_perfect_multicollinearity_raises_computation_error():

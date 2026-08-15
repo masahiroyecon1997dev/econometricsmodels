@@ -24,7 +24,7 @@
 | 2 | `benchmark/`ディレクトリの整理とリファクタリング | 完了 |
 | 3 | `tests/`ディレクトリの整理とリファクタリング | 完了 |
 | 3.5 | crosscheckテストの許容誤差計算式バグ修正（`refactor`スキル範囲外） | 完了 |
-| 4 | ロジック整理前のテスト拡充（OLS/WLS/Logit/Probitレビュー＋IV #232〜238） | 一部完了（linear系統〔OLS/WLS〕のみ。Logit/Probit・IV分は未着手） |
+| 4 | ロジック整理前のテスト拡充（OLS/WLS/Logit/Probitレビュー＋IV #232〜238） | 一部完了（linear系統〔OLS/WLS〕・nonlinear系統〔Logit/Probit〕完了。IV分〔#232〜238〕は未着手） |
 | 5 | `python_package/`のリファクタリング | 未着手 |
 | 6 | `engine_pybind/`のリファクタリング | 未着手 |
 | 7 | `engine/`のリファクタリング | 未着手 |
@@ -561,7 +561,7 @@ tests/api_tests/
    [#238](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/238)）の
    テスト拡充も合わせて実施する。
 
-**状態**: 一部完了（linear系統〔OLS/WLS〕: 完了。Logit/Probitレビュー・IV分〔#232〜238〕は未着手）
+**状態**: 一部完了（linear系統〔OLS/WLS〕・nonlinear系統〔Logit/Probit〕: 完了。IV分〔#232〜238〕は未着手）
 
 **メモ（linear系統〔OLS/WLS〕実施結果）**:
 
@@ -680,7 +680,137 @@ tests/api_tests/
     （`"CLUSTER"`/`"Hac"`、指摘のnice to have）も
     `parse_cov_type_is_case_insensitive`に追加した。
 - **未対応・今後**: Logit/Probitの`review-testing`レビュー、IV分
-  （#232〜238）のテスト拡充は本フェーズの別ラウンドとして未着手。
+  （#232〜238）のテスト拡充は本フェーズの別ラウンドとして未着手（→nonlinear系統は
+  下記の通り完了）。
+
+**メモ（nonlinear系統〔Logit/Probit〕実施結果）**:
+
+- **ステップ0（前提確認）**: `benchmark/nonlinear/freeze_nonlinear_datasets.py`で
+  CSVを、`generate_logit_fixtures.py`/`generate_probit_fixtures.py`
+  （statsmodels）で`logit.json`/`probit.json`を再生成したところ、CSVは完全一致
+  したが、statsmodels側は`_meta.note`のファイル名参照
+  （`generate_logit_datasets.py`→`generate_nonlinear_datasets.py`、フェーズ2の
+  リネームに追従していなかった）と`_meta.model`フィールド（`logit.json`のみ
+  未追随だった）の差分のみで数値は完全一致と確認。
+  Rクロスチェック側（`generate_logit_crosscheck_fixtures.py`）の再生成時に、
+  フェーズ2で「今回のリファクタリングと無関係の既存バグ」と暫定判断していた
+  `near_separation`シナリオ×logitの生成失敗を実際に調査した。
+  - **原因判明**: `run_glm_crosscheck_benchmark.R`の不変条件チェック
+    （logitでは期待情報行列と観測情報行列が理論上一致するはず、という
+    `stopifnot(...tolerance=1e-6)`）が、`near_separation`シナリオ
+    （500件中161件のfitted probabilityが浮動小数点上ちょうど0/1に潰れる
+    強い準分離ケース）でFrobeniusノルム相対誤差約1.7e-4となり失敗していた。
+    調査の結果、これは計算式のバグではなく浮動小数点精度の限界（IRLS内部の
+    期待情報行列と直接計算する観測情報行列が数値的に微小にずれる）と判明。
+    さらに、コミット済み`logit_crosscheck.json`の`near_separation`は
+    Probit対応時の観測情報行列（`observed_bread`）採用（2026-08-02）より
+    **前**（2026-08-01）に生成されたものであり、この不変条件チェックが
+    実際には「今の計算式（`bread_obs`）に対して過去の陳腐化したフィクスチャが
+    追従できていない」ことを正しく検知していたと確認できた（コミットされた
+    SEの値が新計算式`bread_obs`ではなく旧計算式`bread(model)`と一致することを
+    実測確認）。
+  - **対応（ユーザー確認済み）**: `stopifnot`のtoleranceを実測値
+    （1.7e-4）に対し約6倍のマージンを持つ1e-3に緩め、理由をコード内コメントに
+    明記した上で、`near_separation`（logit）のclassical/opg/hc0/hc1を現在の
+    `bread_obs`式で再生成した。`test_logit_crosscheck.py`の`rtol=2e-4`が
+    この差分を十分にカバーしており、既存テストは新規失敗なくパス。
+    probit側の`near_separation`はこの不変条件チェック自体が`link=="logit"`
+    限定で対象外のため、再生成しても数値は完全一致（`r_version`のメタ情報のみ
+    4.2.2→4.5.3に更新、OLS/WLSフェーズ4で見た同種の環境差と同じで実測値には
+    影響なし）。
+- **ステップ1（`review-testing`スキルでのレビュー、nonlinear系統分）**:
+  `testing-completeness-reviewer`に`engine/src/nonlinear/`・
+  `engine_pybind/src/nonlinear/`・`python_package/econometricsmodels/nonlinear/`・
+  `tests/test_logit*.py`・`tests/test_probit*.py`・`benchmark/nonlinear/`の
+  レビューを依頼し、must fix 0件・should fix 5件・nice to have 8件、計13件の
+  指摘を得た。ユーザー確認の上、should fix全5件は対応、nice to haveは
+  8件中4件を選んで対応（残り4件は`docs/planning/specs/test-coverage-candidates.md`
+  へ記録し今回は見送り）。
+  1. **[should fix] `method="bfgs"/"lbfgs"`が主リファレンスに対しフルの統計量
+     （std_errors含む）で照合されていない**: `run_statsmodels_benchmark.py`に
+     `--method`引数を追加（statsmodelsの`fit(method=...)`にそのまま渡せる、
+     `"bfgs"`/`"lbfgs"`の文字列がRust側`Method`のバリアント名と一致するため
+     変換不要）。`generate_logit_fixtures.py`/`generate_probit_fixtures.py`に
+     `fixtures["method"]`（baselineシナリオ・classical cov_typeの1ケースのみ、
+     bfgs/lbfgs）を追加し、`test_logit_fixtures.py`/`test_probit_fixtures.py`に
+     `test_method_matches_statsmodels`を追加。bfgs（statsmodelsの`mle_retvals`に
+     `"iterations"`キーが無い、`fmin_bfgs`の戻り値の都合）は`n_iter=None`で
+     許容するようフィールド抽出側を修正。method間の実測最大相対誤差
+     （~7.7e-5、係数・SEとも）に対し約13倍のマージンを持つ
+     `TOLERANCES["logit_fixtures"/"probit_fixtures"]["rtol_method"]=1e-3`を新設。
+  2. **[should fix] `method=bfgs/lbfgs`×完全多重共線性の`ComputationError`が
+     API境界で未検証**: `engine`側には既存の回帰テスト
+     （`fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_
+     with_bfgs_and_lbfgs`、過去にbfgsのみ検出漏れし桁違いに巨大なSEを含む`Ok`が
+     返る実バグがあった経緯）があったが、`method`の文字列パース〜
+     `engine_pybind`配線を経由するAPI境界の確認が無かった。
+     `test_logit.py`/`test_probit.py`の`test_singular_hessian_raises_
+     computation_error`を`method`でparametrize（newton/bfgs/lbfgs）して対応。
+  3. **[should fix] `fit()`本体の`confidence_level`範囲外`ValidationError`が
+     未検証**: `marginal_effects(confidence_level=1.5)`側は既存だったが
+     `LogitOptions`/`ProbitOptions`側が無かった（OLS/WLSとの非対称）。
+     `test_invalid_confidence_level_raises`を追加。
+  4. **[should fix] 欠損値・非数値dtypeのValidationErrorがPython API境界で
+     未検証**: `test_null_values_raise`/`test_non_numeric_dtype_raises`を
+     `test_logit.py`/`test_probit.py`に追加（OLSと同型）。
+  5. **[should fix] `include_intercept=False`の成功パスが構造テスト・数値
+     照合テストとも一切未検証**: `df_model`が`include_intercept`の値に関わらず
+     常に`k-1`になる・`log_likelihood_null`が常に切片のみモデルを参照する
+     という特殊挙動が`engine`側の単体テストのみで、statsmodelsとの数値一致が
+     未確認だった。構造テスト（`test_include_intercept_false_omits_const_and_
+     converges`）を`test_logit.py`/`test_probit.py`に、数値照合テスト
+     （`test_include_intercept_false_matches_statsmodels`、classical/opg/hc0を
+     parametrize、`run_statsmodels_benchmark.run()`を`formula="y ~ ... - 1"`で
+     直接呼ぶ方式）を`test_logit_fixtures.py`/`test_probit_fixtures.py`に追加。
+  6. **[nice to have] `cov_type`大文字小文字非依存性・`"nonrobust"`エイリアスが
+     未テスト**: `engine_pybind/src/nonlinear/{logit,probit}.rs`の`mod tests`に
+     `build_{logit,probit}_input_cov_type_is_case_insensitive`/
+     `_accepts_nonrobust_as_classical_alias`を追加。linear系統と異なり
+     nonlinear系統の`parse_cov_type`は「呼び出し元が`to_lowercase()`済みの
+     文字列を渡す」設計のため、`parse_cov_type`単体ではなく実際にPythonから
+     渡された文字列を受ける`build_{logit,probit}_input`をテスト対象にした
+     （`parse_cov_type`単体だと「小文字を渡せば小文字のまま通る」という
+     トートロジーになるため）。Python側も`test_logit.py`/`test_probit.py`に
+     同名テストを追加。
+  7. **[nice to have] `cov_type`ラベル反映テスト欠如**: `test_cov_type_label`を
+     `test_logit.py`/`test_probit.py`に追加（OLSと同型）。
+  8. **[nice to have] `confidence_level`の信頼区間幅反映テスト欠如**:
+     `test_confidence_level_changes_interval_width`を追加（OLSと同型）。
+  9. **[nice to have] `max_iter<=0`のAPI境界テスト欠如**: `tol<=0`側は既存
+     だったが対応する`max_iter`側が無かった。
+     `test_non_positive_max_iter_raises`を追加。
+  - **見送った4件**（`docs/planning/specs/test-coverage-candidates.md`
+    3〜5番に記録）: n=k+1境界値で「ほぼ確実に完全分離する」という主張自体の
+    未検証、`raise_on_non_convergence=False`がclassical cov_typeでしか
+    未検証、`cov_type="cluster"`×`cluster_col`未指定のAPI境界未検証
+    （OLS側にも同種の欠落がある既存パターン）。あわせて、実装当時から
+    `docs/spec/logit-spec.md`/`probit-spec.md`4章に記載されていた
+    `SEPARATION_PARAM_NORM_THRESHOLD`の多変量モデルでの誤検知リスク等の
+    既知の未検証事項も、同ドキュメントの6〜10番として転記・集約した。
+- **検証**: `cargo test -p engine`（317件）・`cargo test -p engine_pybind`
+  （72件、should/nice to have対応前の68件から+4）・`uv run pytest tests`
+  （810件、linear系統フェーズ4完了時点の752件から58件増）・
+  `ruff check`/`ruff format --check`・`cargo fmt --check`・
+  `cargo clippy --all-targets -- -D warnings`（engine・engine_pybind）
+  全てグリーン。
+- **`rust-reviewer`によるレビューと対応**: `engine_pybind/src/nonlinear/
+  {logit,probit}.rs`への`mod tests`追加（項目6）について`rust-reviewer`に
+  レビュー依頼し、should fix 1件・nice to have 1件を検出・対応した。
+  - **[should fix→対応済み]** 今回追加した4テスト自体は`let-else`パターンで
+    安全だったが、レビュー中に**同じ`mod tests`内の既存テスト**
+    （`build_{logit,probit}_input_succeeds_for_well_formed_data`等、
+    logit.rs 4箇所・probit.rs 4箇所の計8箇所）が`build_{logit,probit}_input
+    (...).unwrap()`という、`linear/common.rs`で過去に修正したのと同種の
+    GIL/SIGABRTリスクパターンを抱えたまま残っていることが発覚した
+    （pyo3のソースで`PyErr`の`Debug`実装が`Python::attach`を要求することを
+    確認済み）。今回のスコープ外の既存コードだったが、同じファイル・同じ
+    `mod tests`を触っている機会のため、8箇所全てを`let-else`パターンに
+    置き換えて修正した。
+  - **[nice to have→対応済み]** 新規追加した`cov_type_is_case_insensitive`
+    テストが、`Ok`であることのみを確認し実際に正しい`EngineCovType`
+    バリアントにマッピングされているかを確認していなかった（誤った
+    match分岐でも`Ok`である限り通ってしまう）指摘を受け、各入力に対応する
+    期待バリアントを`matches!`で突き合わせる形に強化した。
 
 ---
 

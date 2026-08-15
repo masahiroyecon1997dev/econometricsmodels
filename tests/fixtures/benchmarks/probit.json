@@ -154,9 +154,10 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.672638+00:00",
+        "generated_at": "2026-08-15T02:22:09.500992+00:00",
         "model": "probit",
         "cov_type_requested": "classical",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -236,9 +237,10 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.681372+00:00",
+        "generated_at": "2026-08-15T02:22:09.514733+00:00",
         "model": "probit",
         "cov_type_requested": "opg",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -397,9 +399,10 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.695995+00:00",
+        "generated_at": "2026-08-15T02:22:09.533322+00:00",
         "model": "probit",
         "cov_type_requested": "hc0",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -420,7 +423,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.904908+00:00",
+        "generated_at": "2026-08-15T02:22:09.696291+00:00",
         "note": "決め打ちの疑似グループ（行番号%10）。統計的な意味はなく、実装の動作確認用。",
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -441,7 +444,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.913589+00:00",
+        "generated_at": "2026-08-15T02:22:09.703301+00:00",
         "note": "不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。",
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -462,7 +465,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.923559+00:00",
+        "generated_at": "2026-08-15T02:22:09.709944+00:00",
         "note": "クラスタ数境界（G=2ちょうど）の成功パス確認用。Probitのcluster_cov_paramsはLogitと同じくOLSのwald_f_testのようなq×q部分行列の反転を要求しないため、説明変数を1個に絞る必要はない（k=3のままG=2で正常に計算できることを実機確認済み）。",
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -623,9 +626,10 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.708106+00:00",
+        "generated_at": "2026-08-15T02:22:09.543301+00:00",
         "model": "probit",
         "cov_type_requested": "classical",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -705,9 +709,10 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.718249+00:00",
+        "generated_at": "2026-08-15T02:22:09.550772+00:00",
         "model": "probit",
         "cov_type_requested": "opg",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -866,9 +871,10 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.727835+00:00",
+        "generated_at": "2026-08-15T02:22:09.561505+00:00",
         "model": "probit",
         "cov_type_requested": "hc0",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -1029,9 +1035,10 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.741040+00:00",
+        "generated_at": "2026-08-15T02:22:09.573555+00:00",
         "model": "probit",
         "cov_type_requested": "classical",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -1111,9 +1118,10 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.753429+00:00",
+        "generated_at": "2026-08-15T02:22:09.582679+00:00",
         "model": "probit",
         "cov_type_requested": "opg",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -1272,9 +1280,10 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.768479+00:00",
+        "generated_at": "2026-08-15T02:22:09.594635+00:00",
         "model": "probit",
         "cov_type_requested": "hc0",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -1435,9 +1444,10 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.784227+00:00",
+        "generated_at": "2026-08-15T02:22:09.605628+00:00",
         "model": "probit",
         "cov_type_requested": "classical",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -1517,9 +1527,10 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.796386+00:00",
+        "generated_at": "2026-08-15T02:22:09.615659+00:00",
         "model": "probit",
         "cov_type_requested": "opg",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -1678,9 +1689,10 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.811907+00:00",
+        "generated_at": "2026-08-15T02:22:09.626336+00:00",
         "model": "probit",
         "cov_type_requested": "hc0",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -1841,9 +1853,10 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.826422+00:00",
+        "generated_at": "2026-08-15T02:22:09.637343+00:00",
         "model": "probit",
         "cov_type_requested": "classical",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -1923,9 +1936,10 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.839035+00:00",
+        "generated_at": "2026-08-15T02:22:09.646683+00:00",
         "model": "probit",
         "cov_type_requested": "opg",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -2084,9 +2098,10 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.853059+00:00",
+        "generated_at": "2026-08-15T02:22:09.657269+00:00",
         "model": "probit",
         "cov_type_requested": "hc0",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -2247,9 +2262,10 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.869094+00:00",
+        "generated_at": "2026-08-15T02:22:09.667958+00:00",
         "model": "probit",
         "cov_type_requested": "classical",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -2329,9 +2345,10 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.880198+00:00",
+        "generated_at": "2026-08-15T02:22:09.677248+00:00",
         "model": "probit",
         "cov_type_requested": "opg",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -2490,9 +2507,10 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.894600+00:00",
+        "generated_at": "2026-08-15T02:22:09.688404+00:00",
         "model": "probit",
         "cov_type_requested": "hc0",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -2775,9 +2793,10 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:28.958144+00:00",
+        "generated_at": "2026-08-15T02:22:09.772267+00:00",
         "model": "probit",
         "cov_type_requested": "classical",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6"
       }
@@ -2883,9 +2902,10 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:29.021404+00:00",
+        "generated_at": "2026-08-15T02:22:09.810494+00:00",
         "model": "probit",
         "cov_type_requested": "opg",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6"
       }
@@ -3166,9 +3186,10 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:29.078461+00:00",
+        "generated_at": "2026-08-15T02:22:09.863405+00:00",
         "model": "probit",
         "cov_type_requested": "hc0",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6"
       }
@@ -3449,19 +3470,346 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-02T10:20:29.130542+00:00",
+        "generated_at": "2026-08-15T02:22:09.907755+00:00",
         "model": "probit",
         "cov_type_requested": "cluster",
+        "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6"
       }
     }
   },
+  "method": {
+    "bfgs": {
+      "coef": {
+        "Intercept": 0.5084746555547166,
+        "x1": -0.18406829381968157,
+        "x2": 0.7483655565979708,
+        "x3": 0.4977568059190407
+      },
+      "se": {
+        "Intercept": 0.06866825580315292,
+        "x1": 0.066972849940254,
+        "x2": 0.07861812634887637,
+        "x3": 0.06791358220624816
+      },
+      "z_stats": {
+        "Intercept": 7.40479934443551,
+        "x1": -2.7484016879061826,
+        "x2": 9.518995063263379,
+        "x3": 7.329267427057415
+      },
+      "p_values": {
+        "Intercept": 1.313489217245482e-13,
+        "x1": 0.005988659136915616,
+        "x2": 1.7486179953673075e-21,
+        "x3": 2.3141419644091357e-13
+      },
+      "conf_int": {
+        "Intercept": [
+          0.37388734729935336,
+          0.6430619638100799
+        ],
+        "x1": [
+          -0.3153326676445849,
+          -0.05280391999477821
+        ],
+        "x2": [
+          0.5942768604221537,
+          0.9024542527737879
+        ],
+        "x3": [
+          0.364648630733694,
+          0.6308649811043874
+        ]
+      },
+      "margeff": {
+        "overall": {
+          "x1": {
+            "dydx": -0.04968676178371836,
+            "se": 0.017684229155996337,
+            "z": -2.8096651171742284,
+            "p_value": 0.004959307280480545,
+            "conf_low": -0.08434721402382434,
+            "conf_high": -0.015026309543612379
+          },
+          "x2": {
+            "dydx": 0.20201122293364399,
+            "se": 0.01485666773687754,
+            "z": 13.597344068764988,
+            "p_value": 4.152405375342624e-42,
+            "conf_low": 0.17289268923908582,
+            "conf_high": 0.23112975662820215
+          },
+          "x3": {
+            "dydx": 0.1343627592167068,
+            "se": 0.015625130201659433,
+            "z": 8.599144934001067,
+            "p_value": 8.031221074366022e-18,
+            "conf_low": 0.10373806676770522,
+            "conf_high": 0.16498745166570836
+          }
+        },
+        "mean": {
+          "x1": {
+            "dydx": -0.06523061047715921,
+            "se": 0.02363946425057732,
+            "z": -2.75939462018756,
+            "p_value": 0.005790856034761065,
+            "conf_low": -0.1115631090221129,
+            "conf_high": -0.018898111932205516
+          },
+          "x2": {
+            "dydx": 0.26520777209347374,
+            "se": 0.027367732947007218,
+            "z": 9.690527622693548,
+            "p_value": 3.308152065693173e-22,
+            "conf_low": 0.21156800117882935,
+            "conf_high": 0.31884754300811813
+          },
+          "x3": {
+            "dydx": 0.1763963779175755,
+            "se": 0.023767485151250753,
+            "z": 7.421751893186425,
+            "p_value": 1.1558117877727924e-13,
+            "conf_low": 0.12981296301803352,
+            "conf_high": 0.2229797928171175
+          }
+        },
+        "median": {
+          "x1": {
+            "dydx": -0.06289758014797833,
+            "se": 0.02272991954294906,
+            "z": -2.7671712620509252,
+            "p_value": 0.005654504147733825,
+            "conf_low": -0.10744740382365162,
+            "conf_high": -0.01834775647230505
+          },
+          "x2": {
+            "dydx": 0.25572238216223564,
+            "se": 0.025586548066252233,
+            "z": 9.99440727604536,
+            "p_value": 1.6124899309991567e-23,
+            "conf_low": 0.2055736694636783,
+            "conf_high": 0.305871094860793
+          },
+          "x3": {
+            "dydx": 0.170087405847117,
+            "se": 0.022951581813755877,
+            "z": 7.4107051630391885,
+            "p_value": 1.2562960468495822e-13,
+            "conf_low": 0.125103132103931,
+            "conf_high": 0.21507167959030302
+          }
+        }
+      },
+      "log_likelihood": -239.16955993968944,
+      "log_likelihood_null": -327.2801247711278,
+      "lr_statistic": 176.22112966287676,
+      "lr_p_value": 5.774053342112571e-38,
+      "pseudo_r_squared": 0.26922064055388484,
+      "aic": 486.33911987937887,
+      "bic": 503.19755227306763,
+      "nobs": 500,
+      "df_model": 3.0,
+      "df_resid": 496.0,
+      "converged": true,
+      "n_iter": null,
+      "pred_table": [
+        [
+          108.0,
+          73.0
+        ],
+        [
+          45.0,
+          274.0
+        ]
+      ],
+      "true_beta": [
+        0.5479120971119267,
+        -0.12224312049589536,
+        0.7171958398227649,
+        0.3947360581187278
+      ],
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.14.6",
+        "generated_at": "2026-08-15T02:22:09.933759+00:00",
+        "model": "probit",
+        "cov_type_requested": "classical",
+        "method_requested": "bfgs",
+        "confidence_level": 0.95,
+        "formula": "y ~ x1 + x2 + x3"
+      }
+    },
+    "lbfgs": {
+      "coef": {
+        "Intercept": 0.5084548793263592,
+        "x1": -0.18405771605843071,
+        "x2": 0.74835264809292,
+        "x3": 0.49776080372837345
+      },
+      "se": {
+        "Intercept": 0.06866786300075979,
+        "x1": 0.06697261816610686,
+        "x2": 0.0786176273704036,
+        "x3": 0.06791345562375072
+      },
+      "z_stats": {
+        "Intercept": 7.404553703975517,
+        "x1": -2.748253257800479,
+        "x2": 9.518891285882852,
+        "x3": 7.329339954162138
+      },
+      "p_values": {
+        "Intercept": 1.315922670693967e-13,
+        "x1": 0.005991371094915343,
+        "x2": 1.750364905893365e-21,
+        "x3": 2.3128900503286714e-13
+      },
+      "conf_int": {
+        "Intercept": [
+          0.3738683409495395,
+          0.6430414177031789
+        ],
+        "x1": [
+          -0.3153216356143531,
+          -0.05279379650250829
+        ],
+        "x2": [
+          0.5942649298969386,
+          0.9024403662889015
+        ],
+        "x3": [
+          0.3646528766401629,
+          0.630868730816584
+        ]
+      },
+      "margeff": {
+        "overall": {
+          "x1": {
+            "dydx": -0.04968437310508159,
+            "se": 0.017684373256530158,
+            "z": -2.809507149863797,
+            "p_value": 0.004961741703192893,
+            "conf_low": -0.08434510777704401,
+            "conf_high": -0.015023638433119171
+          },
+          "x2": {
+            "dydx": 0.20200963577218847,
+            "se": 0.014856842507389221,
+            "z": 13.597077284201987,
+            "p_value": 4.167576594882135e-42,
+            "conf_low": 0.17289075953372185,
+            "conf_high": 0.2311285120106551
+          },
+          "x3": {
+            "dydx": 0.13436510035620974,
+            "se": 0.01562517942458179,
+            "z": 8.59926767591701,
+            "p_value": 8.02263712199236e-18,
+            "conf_low": 0.10374031143205314,
+            "conf_high": 0.16498988928036634
+          }
+        },
+        "mean": {
+          "x1": {
+            "dydx": -0.06522748441538441,
+            "se": 0.02363961828934142,
+            "z": -2.7592444013697985,
+            "p_value": 0.005793518838456306,
+            "conf_low": -0.11156028487076795,
+            "conf_high": -0.018894683960000866
+          },
+          "x2": {
+            "dydx": 0.26520572859437436,
+            "se": 0.027367845060683085,
+            "z": 9.69041325710264,
+            "p_value": 3.311858673225582e-22,
+            "conf_low": 0.21156573794096312,
+            "conf_high": 0.3188457192477856
+          },
+          "x3": {
+            "dydx": 0.1763994781803907,
+            "se": 0.023767680475543968,
+            "z": 7.421821341039106,
+            "p_value": 1.1552057558139894e-13,
+            "conf_low": 0.1298156804522687,
+            "conf_high": 0.2229832759085127
+          }
+        },
+        "median": {
+          "x1": {
+            "dydx": -0.06289469988305245,
+            "se": 0.022730121363417347,
+            "z": -2.767019976597106,
+            "p_value": 0.005657128851517392,
+            "conf_low": -0.10744491911957492,
+            "conf_high": -0.01834448064652998
+          },
+          "x2": {
+            "dydx": 0.2557209565370778,
+            "se": 0.02558673515610283,
+            "z": 9.994278479725633,
+            "p_value": 1.6145873300606113e-23,
+            "conf_low": 0.20557187714915143,
+            "conf_high": 0.3058700359250042
+          },
+          "x3": {
+            "dydx": 0.17009075758662842,
+            "se": 0.022951814442527904,
+            "z": 7.410776085374046,
+            "p_value": 1.255624313157113e-13,
+            "conf_low": 0.12510602789942749,
+            "conf_high": 0.21507548727382936
+          }
+        }
+      },
+      "log_likelihood": -239.1695598692178,
+      "log_likelihood_null": -327.2801247711278,
+      "lr_statistic": 176.22112980382002,
+      "lr_p_value": 5.774052937488916e-38,
+      "pseudo_r_squared": 0.26922064076920993,
+      "aic": 486.3391197384356,
+      "bic": 503.1975521321244,
+      "nobs": 500,
+      "df_model": 3.0,
+      "df_resid": 496.0,
+      "converged": true,
+      "n_iter": 6,
+      "pred_table": [
+        [
+          108.0,
+          73.0
+        ],
+        [
+          45.0,
+          274.0
+        ]
+      ],
+      "true_beta": [
+        0.5479120971119267,
+        -0.12224312049589536,
+        0.7171958398227649,
+        0.3947360581187278
+      ],
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.14.6",
+        "generated_at": "2026-08-15T02:22:09.967737+00:00",
+        "model": "probit",
+        "cov_type_requested": "classical",
+        "method_requested": "lbfgs",
+        "confidence_level": 0.95,
+        "formula": "y ~ x1 + x2 + x3"
+      }
+    }
+  },
   "_meta": {
     "method": "probit",
-    "generated_at": "2026-08-02T10:20:29.130750+00:00",
+    "generated_at": "2026-08-15T02:22:09.967837+00:00",
     "primary_reference": "statsmodels",
     "statsmodels_version": "0.14.6",
-    "note": "perfect_multicollinearityシナリオはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。cov_type='hc1'はstatsmodelsのdiscrete modelで未実装（HC0と同一値を返す）ため含まない。probit_crosscheck.json（R側）が主リファレンスを担う。cov_type='opg'の限界効果（margeff）はstatsmodels側では算出できないためnullになっている（run_statsmodels_benchmark.py参照）。near_separationはprobit特有の病理（準完全分離）の境界値ケース（較正値はlogitと異なりbeta1=10、generate_binary_choice_datasets.py参照）。完全分離下でのNonConvergence検出には既知の限界（logitと同じ、nonlinear/common.rsのrun_solverを共有するため）があり、専用シナリオは採用していない。scale_varianceは真のDGPを未スケーリングのXで計算した後に列のみをスケーリングする設計のため成功パス。n=k+1（自由度1ちょうど）の境界値ケースはLogitと同じ理由で非採用（n<=kではMLEが構造的にほぼ確実に完全分離を起こすため）。mrozのcluster（city列、都市部居住ダミー）は実データでのクラスターロバストSE確認用。"
+    "note": "perfect_multicollinearityシナリオはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。cov_type='hc1'はstatsmodelsのdiscrete modelで未実装（HC0と同一値を返す）ため含まない。probit_crosscheck.json（R側）が主リファレンスを担う。cov_type='opg'の限界効果（margeff）はstatsmodels側では算出できないためnullになっている（run_statsmodels_benchmark.py参照）。near_separationはprobit特有の病理（準完全分離）の境界値ケース（較正値はlogitと異なりbeta1=10、generate_nonlinear_datasets.py参照）。完全分離下でのNonConvergence検出には既知の限界（logitと同じ、nonlinear/common.rsのrun_solverを共有するため）があり、専用シナリオは採用していない。scale_varianceは真のDGPを未スケーリングのXで計算した後に列のみをスケーリングする設計のため成功パス。n=k+1（自由度1ちょうど）の境界値ケースはLogitと同じ理由で非採用（n<=kではMLEが構造的にほぼ確実に完全分離を起こすため）。mrozのcluster（city列、都市部居住ダミー）は実データでのクラスターロバストSE確認用。methodはbfgs/lbfgsがnewtonと同じ最尤解・標準誤差に収束することを主リファレンスに対して確認するためのfixture（baselineシナリオ・classicalcov_typeの1ケースのみ、Issue #231フェーズ4で追加）。"
   }
 }

@@ -59,6 +59,11 @@ NUMERIC_SCENARIOS = [
 # hc1はstatsmodelsで未実装のためここには含めない（上記docstring参照）。
 COV_TYPES = ["classical", "opg", "hc0", "cluster"]
 
+# newton以外のmethod（bfgs/lbfgs）が主リファレンスに対しフルの統計量（std_errors含む）で
+# 一致することの確認用（Issue #231フェーズ4のtesting-completeness-reviewer指摘、
+# generate_logit_fixtures.pyと同じ方針）。
+METHODS = ["bfgs", "lbfgs"]
+
 MROZ_FORMULA = (
     "inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6"
 )
@@ -125,6 +130,18 @@ def build_fixtures() -> dict:
         model="probit",
     )
 
+    fixtures["method"] = {
+        method: run(
+            dataset_source="synthetic",
+            dataset="baseline",
+            formula=None,
+            cov_type="classical",
+            model="probit",
+            method=method,
+        )
+        for method in METHODS
+    }
+
     fixtures["_meta"] = {
         "method": "probit",
         "generated_at": datetime.now(UTC).isoformat(),
@@ -148,6 +165,9 @@ def build_fixtures() -> dict:
             "（n<=kではMLEが構造的にほぼ確実に完全分離を起こすため）。"
             "mrozのcluster（city列、都市部居住ダミー）は実データでのクラスターロバスト"
             "SE確認用。"
+            "methodはbfgs/lbfgsがnewtonと同じ最尤解・標準誤差に収束することを主"
+            "リファレンスに対して確認するためのfixture（baselineシナリオ・classical"
+            "cov_typeの1ケースのみ、Issue #231フェーズ4で追加）。"
         ),
     }
     return fixtures

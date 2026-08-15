@@ -60,7 +60,6 @@ from econometricsmodels import (
 from generate_probit_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
-from run_statsmodels_benchmark import run
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "probit.json"
@@ -227,24 +226,44 @@ def test_method_matches_statsmodels(fixtures, method):
 def test_include_intercept_false_matches_statsmodels(cov_type):
     """`include_intercept=False`の成功パスが検証されていなかった
     （`test_logit_fixtures.py`と同じ理由、Issue #231フェーズ4）。
+
+    `run_statsmodels_benchmark.run()`はformula API（`patsy`経由でpandasを
+    要求する）を使うため、ここでは使わない。OLS側と同じ配列API
+    （`sm.Probit(y, x)`）で直接比較する（`test_logit_fixtures.py`の
+    同名テストと同じ理由、`.claude/rules/testing-policy.md`参照）。
     """
+    import numpy as np
+    import statsmodels.api as sm
+
     df = pl.read_csv(DATA_DIR / "probit_baseline.csv")
-    ref = run(
-        dataset_source="synthetic",
-        dataset="baseline",
-        formula="y ~ x1 + x2 + x3 - 1",
-        cov_type=cov_type,
-        model="probit",
-    )
+    y = df["y"].to_numpy()
+    x_cols = ["x1", "x2", "x3"]
+    x = np.column_stack([df[c].to_numpy() for c in x_cols])
+
+    if cov_type == "opg":
+        base = sm.Probit(y, x).fit(disp=0)
+        scores = base.model.score_obs(base.params)
+        opg_cov = np.linalg.inv(scores.T @ scores)
+        sm_se = np.sqrt(np.diag(opg_cov))
+        sm_params = base.params
+        fitted = base
+    else:
+        sm_cov_type = {"classical": "nonrobust"}.get(cov_type, cov_type)
+        fitted = sm.Probit(y, x).fit(disp=0, cov_type=sm_cov_type)
+        sm_params = fitted.params
+        sm_se = fitted.bse
 
     options = ProbitOptions(cov_type=cov_type, include_intercept=False)
-    res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    res = Probit(df, y="y", x=x_cols, options=options).fit()
 
     label = f"include_intercept_false/{cov_type}"
-    _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
-    _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
-    assert res.converged == ref["converged"], f"{label}/converged"
-    assert res.df_model == ref["df_model"], f"{label}/df_model"
+    for i, name in enumerate(x_cols):
+        _assert_close(res.params[name], sm_params[i], f"{label}/coef/{name}")
+        _assert_close(res.std_errors[name], sm_se[i], f"{label}/se/{name}")
+    assert res.converged == bool(fitted.mle_retvals["converged"]), (
+        f"{label}/converged"
+    )
+    assert res.df_model == fitted.df_model, f"{label}/df_model"
 
 
 def test_perfect_multicollinearity_raises_computation_error():

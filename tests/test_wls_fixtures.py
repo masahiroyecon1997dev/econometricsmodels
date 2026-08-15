@@ -275,29 +275,37 @@ def test_include_intercept_false_matches_statsmodels(cov_type):
     statsmodels_robust_cov_types`と同じ観点。テスト網羅性レビュー、
     Issue #231フェーズ4で判明したWLS側の抜け）。frozen fixtureではなく
     OLS側と同様にstatsmodelsとの直接比較で確認する。
+
+    OLS側と同じ配列API（`sm.WLS(y, x, weights=w)`）を使い、formula API
+    （`patsy`経由でpandasを要求する）は使わない。`tests/`はpyarrow等の
+    formula API依存パッケージをdev依存に持たない方針のため、`to_pandas()`
+    はCIでModuleNotFoundErrorになる（`tests/`と`benchmark/`の依存分離方針、
+    `.claude/rules/testing-policy.md`参照）。
     """
-    import statsmodels.formula.api as smf
+    import numpy as np
+    import statsmodels.api as sm
 
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     if cov_type == "cluster":
         df = with_cluster_groups(df, 10)
-    pandas_df = df.to_pandas()
+
+    y = df["y"].to_numpy()
+    x = np.column_stack(
+        [df["x1"].to_numpy(), df["x2"].to_numpy(), df["x3"].to_numpy()]
+    )
+    weights = df["weight"].to_numpy()
 
     fit_kwargs: dict = {"use_t": True}
     if cov_type == "cluster":
         fit_kwargs["cov_type"] = "cluster"
-        fit_kwargs["cov_kwds"] = {"groups": pandas_df["cluster_group"]}
+        fit_kwargs["cov_kwds"] = {"groups": df["cluster_group"].to_numpy()}
     elif cov_type == "hac":
         fit_kwargs["cov_type"] = "HAC"
         fit_kwargs["cov_kwds"] = {"maxlags": HAC_LAG_IN_FIXTURE}
     elif cov_type != "classical":
         fit_kwargs["cov_type"] = cov_type.upper()
 
-    sm_res = smf.wls(
-        formula="y ~ x1 + x2 + x3 - 1",  # 切片なし
-        data=pandas_df,
-        weights=pandas_df["weight"],
-    ).fit(**fit_kwargs)
+    sm_res = sm.WLS(y, x, weights=weights).fit(**fit_kwargs)  # 定数項なし
 
     options = OLSOptions(
         include_intercept=False,
@@ -309,19 +317,16 @@ def test_include_intercept_false_matches_statsmodels(cov_type):
         df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
     ).fit()
 
-    sm_params = sm_res.params.to_dict()
-    sm_bse = sm_res.bse.to_dict()
-
     assert our_res.param_names == ["x1", "x2", "x3"]
-    for name in ["x1", "x2", "x3"]:
+    for i, name in enumerate(["x1", "x2", "x3"]):
         _assert_close(
             our_res.params[name],
-            sm_params[name],
+            sm_res.params[i],
             f"[{cov_type}] params[{name}]",
         )
         _assert_close(
             our_res.std_errors[name],
-            sm_bse[name],
+            sm_res.bse[i],
             f"[{cov_type}] std_errors[{name}]",
         )
     _assert_close(

@@ -1,6 +1,6 @@
 ---
 name: testing-completeness-reviewer
-description: 対象の推定手法について、テストコード・フィクスチャ・ベンチマークが`.claude/rules/testing-policy.md`の網羅性要件を満たしているかをレビューする専門エージェント。新しい推定手法の実装・テスト作成が一区切りついた後に明示的に呼び出すこと（プロアクティブな自動呼び出しはしない）。`/review-testing`から明示的に呼ばれた場合も同様に動作する。
+description: 対象の推定手法について、テストコード・フィクスチャ・ベンチマークが`.claude/rules/testing-policy.md`の網羅性要件を満たしているかをレビューする専門エージェント。新しい推定手法の実装・テスト作成（`tests/`配下のテストファイル・`benchmark/`配下のフィクスチャ生成スクリプトの新規作成や大幅な変更を含む）が一区切りついた直後は、明示的な指示がなくてもプロアクティブに呼び出すこと。コミットやpushの前に必ず実施する。`/review-testing`から明示的に呼ばれた場合も同様に動作する。
 tools: Read, Grep, Glob, Bash(pytest:*), Bash(git diff:*), Bash(git log:*)
 model: inherit
 ---
@@ -30,14 +30,13 @@ CLAUDE.md（特に7章）と`.claude/rules/testing-policy.md`は通常自動的�
 ## 手順
 
 1. レビュー対象の手法を確認する（明示的に指定されていればそれを、なければ直近の`git diff`から対象手法を推定する）。
-2. 対象手法の`tests/api_tests/`配下のテストファイル、`tests/api_tests/fixtures/benchmarks/`のフィクスチャ、`benchmark/fixtures/generate_*.py`を読み、上記4観点で`testing-policy.md`の要件と突き合わせる。
+2. 対象手法の`tests/`配下のテストファイル、`tests/fixtures/benchmarks/`のフィクスチャ、`benchmark/fixtures/generate_*.py`を読み、上記4観点で`testing-policy.md`の要件と突き合わせる。
 3. 抜けている項目をリストアップする。**既存テストが全て通っていることは網羅性がある証拠にしない**。カバレッジ率が高くても、検証していない統計量・シナリオ・オプション組み合わせがあれば指摘する。
 
 ## 出力形式
 
 - 4観点それぞれで「揃っている項目」「欠けている項目」を明示する。
 - 欠けている項目には重要度（must fix / should fix / nice to have）を付ける。
-- 良い点があれば簡潔に触れる。
 - 指摘のみを行い、コード自体は修正しない。対応が必要な場合は「`/test-new`・`/implement-python`・`/implement-rust`での対応を推奨」と伝える。
 
 ## 制約

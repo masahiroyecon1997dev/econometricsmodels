@@ -249,8 +249,7 @@ class LogitResults:
         """Predicted probabilities `p_i = Λ(x_i'β̂)` for the training data.
 
         Out-of-sample prediction (a `new_data` argument) is not yet
-        supported (tracked separately; see
-        `docs/planning/specs/logit-implementation-notes.md`).
+        supported (see `docs/spec/logit-spec.md`, "未実装・未対応").
 
         Returns:
             Row-oriented predictions, one dict per observation. Each

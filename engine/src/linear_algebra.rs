@@ -8,8 +8,8 @@ use faer::{Mat, Side};
 /// （`SelfAdjointEigen`）による相対閾値判定で確認する。
 ///
 /// 非ピボットCholesky分解（`Llt`）のL因子対角成分は、行列の成分間のスケール差に
-/// 起因する数値的なほぼ特異性を検出できない（OLSの`wald_f_test`で実測確認済み、
-/// Issue #107。`col_piv_qr`のR対角成分を使う`ensure_full_rank`とは異なり、
+/// 起因する数値的なほぼ特異性を検出できない（OLSの`wald_f_test`で実測確認済み。
+/// `col_piv_qr`のR対角成分を使う`ensure_full_rank`とは異なり、
 /// Choleskyはピボットしないため）。分散共分散行列（傾き係数の同時共分散部分行列、
 /// 観測情報行列の逆行列、OPG行列の逆行列等）にCholesky分解を適用する前は、
 /// この関数で固有値ベースの判定を先に行う必要がある。
@@ -76,7 +76,7 @@ mod tests {
     #[test]
     fn ensure_well_conditioned_symmetric_matrix_rejects_extreme_scale_difference() {
         // スケール比1e6/1e-3相当の対角行列。非ピボットCholeskyのL因子対角成分では
-        // 検出できないケース（OLSのwald_f_testで実測確認済み、Issue #107）だが、
+        // 検出できないケース（OLSのwald_f_testで実測確認済み）だが、
         // 固有値ベースの判定なら検出できるはず。
         let v = Mat::from_fn(2, 2, |i, j| if i == j { [1e12, 1e-6][i] } else { 0.0 });
         let result = ensure_well_conditioned_symmetric_matrix(&v, 2, "test matrix");

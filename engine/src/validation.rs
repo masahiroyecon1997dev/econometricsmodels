@@ -15,8 +15,8 @@ use crate::error::CommonError;
 /// （nonlinear系統はz検定のため`G`自体は使わないが、検証結果として返す型は揃える）。
 ///
 /// OLS（`engine::linear::ols`）とnonlinear（`engine::nonlinear::common`）の両方で
-/// 同一のロジック・エラーメッセージが必要だったため共有化した（Issue #60。
-/// Issue #129で`ensure_well_conditioned_symmetric_matrix`を`engine::linear_algebra`に
+/// 同一のロジック・エラーメッセージが必要だったため共有化した
+/// （`ensure_well_conditioned_symmetric_matrix`を`engine::linear_algebra`に
 /// 共有化したのと同じ理由：モデル固有の計算に一切依存しない純粋な検証ロジックのため）。
 ///
 /// `groups.len() != n`は呼び出し側（`engine_pybind`）の実装バグでしか起こり得ない内部契約

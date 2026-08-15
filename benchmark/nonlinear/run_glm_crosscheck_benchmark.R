@@ -3,7 +3,7 @@
 # 適合度統計量・限界効果のクロスチェック用スクリプト。
 # `benchmark/linear/run_lm_crosscheck_benchmark.R`（OLS/WLS用）と同じ役割分担
 # （testing-policy.md「リファレンス実装」: 独立実装によるクロスチェック用）。
-# 元々Logit専用だったが、Probit追加（Issue #84）にあたり第5引数`link`
+# 元々Logit専用だったが、Probit追加にあたり第5引数`link`
 # （`logit`/`probit`、既定`logit`）で`glm(family=binomial(link=...))`を切り替える
 # よう一般化した（`run_statsmodels_benchmark.py`の`--model`と同じ発想。
 # 以下の各種回避策（opgの手計算・hc1の扱い・marginaleffectsの罠）はいずれも
@@ -19,7 +19,7 @@
 # 適用）がhc1の主リファレンスを担う（ユーザー確認済み）。
 #
 # **classical/hc0/hc1/clusterは「観測情報行列のHessian」を明示的に手計算する**
-# （Probit追加、Issue #84で発覚・修正）: `glm()`の既定の`vcov()`/`vcovHC()`/`vcovCL()`
+# （Probit追加時に発覚・修正）: `glm()`の既定の`vcov()`/`vcovHC()`/`vcovCL()`
 # は`bread.glm()`が内部で使うIRLS（Fisher scoring）の作業重み（＝期待情報行列）を
 # ベースにしている。Logit（binomial族の正準リンク）では期待情報行列と観測情報行列
 # （真の対数尤度のHessian）が理論上一致するため問題にならなかったが、Probit（非正準
@@ -106,9 +106,17 @@ bread_obs <- observed_bread(model, link)
 # （observed_bread）が理論上一致するはず（上記docコメント参照）。この不変条件を
 # 自動チェックしておくことで、将来このスクリプトの計算式を変更した際に
 # Logit側のクロスチェック値が気づかれずに壊れることを防ぐ（testing-completeness-
-# reviewerの指摘、Issue #84）。probitでは一致しないため、logitのときのみ検証する。
+# reviewerの指摘）。probitでは一致しないため、logitのときのみ検証する。
+#
+# tolerance=1e-3（理論上の完全一致からすると緩め）: near_separationシナリオ
+# （500件中161件のfitted probabilityが浮動小数点上ちょうど0/1に潰れる強い準分離
+# ケース）では、IRLS内部の期待情報行列と直接計算する観測情報行列が数値精度の
+# 限界で理論値からずれ、Frobeniusノルムの相対誤差が実測で最大約1.7e-4に達する
+# （Issue #231フェーズ4で発覚・調査済み）。計算式そのものの誤りではなく浮動小数点
+# 精度損失のため、実測値に対して約6倍のマージンを持つ1e-3まで緩めても、将来
+# 計算式が本当に壊れた場合（通常は桁違いの乖離になる）の検知能力は保つ。
 if (link == "logit") {
-  stopifnot(isTRUE(all.equal(bread_obs, bread(model), tolerance = 1e-6)))
+  stopifnot(isTRUE(all.equal(bread_obs, bread(model), tolerance = 1e-3)))
 }
 
 if (cov_type == "classical") {

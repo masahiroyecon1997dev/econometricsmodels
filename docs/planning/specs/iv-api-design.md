@@ -3,11 +3,16 @@
 [`panel-iv-design-points.md`](../panel-iv-design-points.md)の論点をモデルごとにIssue化したうちの、IV固有の確定事項をまとめる。
 FE/RE共通の設計は[`panel-api-design.md`](./panel-api-design.md)を参照。
 
-**ステータス**: 確定（1章: 引数設計、Issue #119／2章: 結果設計、Issue #120／3章: 標準誤差・検定、
-Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレンス実装・テスト方針、Issue #123／
-6章: IV固有論点、Issue #126）。IV側の論点はすべて確定。
+**ステータス**: 確定（1章: 引数設計／2章: 結果設計／3章: 標準誤差・検定／
+4章: 内部実装・共通化／5章: リファレンス実装・テスト方針／
+6章: IV固有論点）。IV側の論点はすべて確定。ただし以下2点の細部は、
+Issue #171（`linearmodels`/`ivreg`とのベンチマーク作成）でリファレンス実装を確認して
+から最終判断する未決着事項として残っている。
+- 3.2節のGMMの検定分布（z分布のまま確定とするか、実務慣行に合わせてt分布・
+  切り替えオプションにすべきか。Issue #159時点で追記）
+- 3.1節のIV版HC2/HC3（レバレッジ算出式に確立した参照実装が無い。Issue #166時点で追記）
 
-## 1. 引数設計（Issue #119、確定）
+## 1. 引数設計（確定）
 
 ### 1.1 `y` / `x_exog` / `x_endog` / `instruments` のシグネチャ
 
@@ -20,7 +25,7 @@ Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレン
   異なるため。`panel-api-design.md`の`entity`（FE/REで必須→独立引数）と同じ原則。
 - `x_exog`は空リストを許容する（内生変数のみのモデルも成立するため）。`x_endog`/
   `instruments`は最低1要素を要求する見込み（丁度識別・過剰識別の判定を含む具体的な
-  バリデーションルールはIssue #126で確定）。
+  バリデーションルールは確定）。
 - **命名規則**: bareネーミング（`_col`サフィックスなし）。`panel-api-design.md`の`entity`/
   `time`と同じ考え方（モデルを構成する中核的な変数）。
 
@@ -37,7 +42,7 @@ Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレン
   2. CLAUDE.md 2章の非交渉事項（formula不採用・プログラムから動的に組み立てやすいAPI）と
      整合する。`x_exog`を変更するたびに`instruments`側も手動で同期する重複入力は、
      プログラムからの動的構築とヒューマンエラー防止の両面で相性が悪い。
-  3. 過剰識別検定（Sargan/Hansen、Issue #126）の自由度が`len(instruments) - len(x_endog)`
+  3. 過剰識別検定（Sargan/Hansen）の自由度が`len(instruments) - len(x_endog)`
      とそのまま一致し、`x_exog`分を差し引く補正が不要になる。
 - **パラメータ名は`instruments`のまま維持する**（`excluded_instruments`等への改名はしない）。
   linearmodelsの命名を踏襲し、意味は本節にドキュメント化することで対応する。
@@ -48,13 +53,13 @@ Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレン
 ### 1.2 モデル固有オプションの置き場所
 
 `IvOptions`という独立の`#[pyclass]`構造体に含める（`OLSOptions`/`LogitOptions`の前例を踏襲）。
-2SLS/GMMの方式切り替え等、IV固有の詳細はIssue #126で確定。
+2SLS/GMMの方式切り替え等、IV固有の詳細は6章で確定。
 
 ### 1.3 `weights` / `offset` の扱い
 
 `panel-api-design.md`1.3と同じ（`offset`は該当なし、`weights`は汎用オプションとしては見送り）。
 
-## 2. 結果（Return）設計（Issue #120、確定）
+## 2. 結果（Return）設計（確定）
 
 ### 2.1 共通コア項目（`panel-api-design.md`2.1との差分）
 
@@ -62,7 +67,7 @@ Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレン
 
 | フィールド | FE/REとの違い |
 |---|---|
-| `params` / `std_errors` / `t_stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` / `residuals` / `dep_var_name` / `n_obs` / `df_resid` / `df_model` / `cov_type` / `f_statistic` / `f_p_value` | 共通（そのまま踏襲） |
+| `params` / `std_errors` / `stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` / `residuals` / `dep_var_name` / `n_obs` / `df_resid` / `df_model` / `cov_type` / `f_statistic` / `f_p_value` | `t_stats`ではなく**`stats`**という分布非依存の名前にする（Issue #159で確定）。1つの`IvResult`型を2SLS（t分布）・GMM（z分布、3章参照）の両方が共有するため、`OLSResult.t_stats`/`LogitResult.z_stats`のような分布固定の名前は使えない。`engine::inference::InferenceStat`が同じ理由で`stat`という分布非依存の名前を使っている前例に倣った。それ以外は共通（そのまま踏襲） |
 | `n_entities` | **含めない**（IVはパネル構造を前提としない） |
 | `log_likelihood` / `aic` / `bic` | **除外する**。2SLS/GMMは尤度ベースの推定法ではなく
   （Stataの`ivregress`もデフォルトでは出力しない）、正規性を仮定した疑似尤度を計算して
@@ -72,7 +77,7 @@ Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレン
   維持する（IVはパネルのwithin/between区別を持たないため） |
 | `f_statistic` / `f_p_value` | **GMMは常にロバストWald検定（χ²）とする**。OLSが
   `cov_type`がHC系/clusterのとき`f_statistic`/`f_p_value`を古典的F検定からロバストWald検定に
-  切り替える既存挙動（`ols-api-design.md`6章）を、GMMにも一貫適用する。GMMはIssue #121で
+  切り替える既存挙動（`ols-api-design.md`6章）を、GMMにも一貫適用する。GMMは3章で
   z分布と決定済みで古典的F検定の正当化が無いため、フィールド名はそのまま流用しつつ常に
   Wald版にする（新規フィールドは追加しない）。2SLSはOLSと同じ切り替えロジック（classical時は
   F検定、HC/cluster/hac時はロバストWald検定）。 |
@@ -86,9 +91,9 @@ Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレン
   第一段階回帰（`x_endog[i] ~ x_exog + instruments`）が存在するため、変数名キーのdictで
   複数の完全な回帰結果を返す。
 - 弱操作変数診断（第一段階F統計量）・Sargan/Hansen J（過剰識別）・Wu-Hausman（内生性）は
-  いずれも`fit()`の結果本体に含める（別メソッド化しない）。詳細はIssue #126（6章）で確定。
+  いずれも`fit()`の結果本体に含める（別メソッド化しない）。詳細は6章で確定。
 
-## 3. 標準誤差・検定（Issue #121、確定）
+## 3. 標準誤差・検定（確定）
 
 ### 3.1 `cov_type`のサポート対象
 
@@ -101,6 +106,19 @@ Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレン
 - 2SLSの分散はサンドイッチ型（`(X'PzX)^-1 X'Pz Ω Pz X (X'PzX)^-1`、`Ω`の推定方法が
   `cov_type`で変わる）。**GMMは`cov_type`（最終SEの計算方法）と`weight_type`（点推定に使う
   重み行列）を分離する**（詳細は6.2）。
+- **`hc2`/`hc3`（レバレッジ`h_ii`によるスケーリング）は引き続き外部の参照実装で検証できない**
+  （Issue #171で再確認、`benchmark/iv/run_linearmodels_benchmark.py`のモジュールdocstring
+  参照）: `linearmodels.iv.covariance`は`Homoskedastic`/`Heteroskedastic`/`Kernel`/
+  `Clustered`のみで、R `ivreg`も同様（`hatvalues.ivreg`の実装がソース上コメントアウトされて
+  いる）。実装（`engine/src/iv/two_sls.rs`）はOLSのHC2/HC3を代数的に拡張した自作の拡張の
+  ままで、外部パッケージとの数値照合はできない（`engine`のRust単体テストによる独立な
+  手計算クロスチェックのみで検証を継続する）。
+- **`classical`/`hc0`〜`hc1`/`cluster`/`hac`は`linearmodels`の`cov_type`/`debiased`との対応が
+  実測で確定した**（Issue #171）: `classical`↔(`unadjusted`, `debiased=True`)、
+  `hc0`↔(`robust`, `debiased=False`)、`hc1`↔(`robust`, `debiased=True`)、
+  `cluster`↔(`clustered`, `debiased=True`)、`hac`↔(`kernel`(bartlett), `debiased=False`)。
+  いずれも`coef`/`se`が相対誤差1e-10以下（実質機械精度）で一致することを確認した
+  （詳細な対応表・検証根拠は`run_linearmodels_benchmark.py`のモジュールdocstring参照）。
 
 ### 3.2 検定分布
 
@@ -108,10 +126,26 @@ Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレン
 - **2SLS**: t分布（OLS系、`panel-api-design.md`3.3と同じ理由）。自由度は`df_resid`を使う。
 - **GMM**: z分布。2-step efficient GMMはM推定量としての漸近正規性が根拠であり、有限標本の
   t分布としての正当化がない（非線形モデル・MLE系のz分布判断と同じ理由）。
-- Issue #126（2SLSとGMMの実装方針の違い）と接続する決定であり、実装の詳細（GMM目的関数・
-  重み行列の設計）は同Issueで確定する。
+- 2SLSとGMMの実装方針の違いと接続する決定であり、実装の詳細（GMM目的関数・
+  重み行列の設計）は6章で確定する。
+- **`linearmodels`の分布切り替え方式が判明した（Issue #171で確認）**: `IV2SLS`/`IVGMM`とも
+  `fit(debiased=False)`（既定）では正規分布（z）・`f_statistic`もカイ二乗形式（qで割らない生の
+  二次形式）、`fit(debiased=True)`ではt(df_resid)分布・F分布（`f_statistic`もqで割った形式）を
+  返す（`linearmodels.iv.results.IVResults.pvalues`/`f_statistic`のソースで確認済み。Stataの
+  `ivregress`の`small`オプションと同じ発想）。本実装の2SLSは`cov_type`によらず常にt分布/F分布
+  という設計だが、`linearmodels`は`debiased`という別軸で切り替わるため、`hc0`/`hac`
+  （`debiased=False`で`coef`/`se`が一致する組み合わせ）をベンチマークする際は
+  `linearmodels`の`pvalues`/`tstats`/`f_statistic`をそのまま使わず、`coef`/`se`のみ借りて
+  t分布・F分布で独自に計算し直す必要があった（`run_linearmodels_benchmark.py`参照）。
+  GMMについては、`linearmodels`の既定（`debiased=False`→z分布）が本実装の設計
+  （GMMは常にz分布）と一致することも合わせて確認できた。GMM自体のcov_type対応・SE計算は
+  Issue #171の作業中に実装した（当初Issue #166でクローズ済みの完了条件だったが、実際には
+  GMM側が未実装のまま残っていたことが発覚したため。`engine/src/iv/gmm.rs`のモジュール
+  docコメント「標準誤差・検定統計量（cov_type対応）」・`engine/src/iv/CLAUDE.md`参照）。
+  `linearmodels`（`IVGMM`）との数値照合は`method="gmm"`のPython配線が別途必要なため、
+  そちらの完了後に改めて行う。
 
-## 4. 内部実装・共通化（Issue #122、確定）
+## 4. 内部実装・共通化（確定）
 
 `panel-api-design.md`4章の方針をそのまま踏襲する。IV固有の追加点は以下。
 
@@ -123,22 +157,52 @@ Issue #121／4章: 内部実装・共通化、Issue #122／5章: リファレン
 - GMMが数値最適化を要する場合、`nonlinear/common.rs`の`run_solver`
   （Newton/BFGS/L-BFGS、`CostFunction`/`Gradient`/`Hessian`トレイトのみに依存するモデル
   非依存の設計）を転用できる可能性がある。効率的2-step GMMは閉形式で済むことが多いため
-  必須ではないが、選択肢として残す（詳細はIssue #126）。
+  必須ではないが、選択肢として残す（詳細は6章）。
 - **新規エラー型**: `LeastSquaresError`/`MleError`/`PanelError`（`panel-api-design.md`4.4）の
   前例に倣い、**`IvError`を2SLS/GMMで共有する**（`engine/src/iv/common.rs`に定義）。個別に
   `TwoSlsError`/`GmmError`を作らない。
 
-## 5. リファレンス実装・テスト方針（Issue #123、確定）
+## 5. リファレンス実装・テスト方針（確定）
 
 ### 5.1 Python主リファレンス
 
-**`linearmodels`を主リファレンスとする**（`IV2SLS`＝2SLS、`IVGMM`＝GMM）。Issue #126で
+**`linearmodels`を主リファレンスとする**（`IV2SLS`＝2SLS、`IVGMM`＝GMM）。6章で
 挙がっている診断（Sargan/Hansen J、first-stage F統計量、Wu-Hausman系）も概ね
 `linearmodels`でカバーできる見込み。
 
 ### 5.2 Rクロスチェックパッケージ
 
-**`ivreg`**。ただし`ivreg`は2SLSのみ対応でGMMには対応していない見込み（要実装時再確認）。
+**`ivreg`**。`ivreg`は2SLSのみ対応でGMMには対応していない（実装時に再確認済み、5.3節）。
+
+**経緯（Issue #171）**: devcontainerのRには当初`ivreg`が未導入で、インストールもできない状態
+だった（`ivreg`が要求する`car`パッケージの依存先`MatrixModels`が`Matrix>=1.6.0`（→R>=4.4）を
+要求するが、devcontainerのRはDebian bookworm標準の4.2.2固定で更新できなかった）。当面は
+Python（`linearmodels`）側のみで2SLS/GMMともに検証し、2SLS/GMMともにlinearmodelsとの
+数値照合を実装・コミット済み（GMM側は本節・5.3節の方針通りRクロスチェック省略が最終形）。
+
+この制約は`.devcontainer/Dockerfile`にCRAN公式のDebian向けAPTリポジトリ（`bookworm-cran40`）を
+追加しR 4.6.1系に更新することで解消した（コミット済み）。**完了**: コンテナ再構築後に
+`ivreg`が実際に導入されていること（R 4.5.3、`Rscript -e 'library(ivreg)'`で確認済み）を
+確認し、2SLSの`ivreg`クロスチェックを実装した（`benchmark/iv/run_ivreg_benchmark.R`・
+`benchmark/iv/fixtures/generate_iv_crosscheck_fixtures.py`・
+`tests/test_iv_crosscheck.py`）。
+
+`ivreg`はclassical/hc0/hc1/cluster/hacの`vcov`（`vcov()`/`sandwich::vcovHC`/`vcovCL`/
+`NeweyWest`）を`coeftest()`経由でそのまま使える（`lm`と同じ`sandwich`基盤）。
+`hc2`/`hc3`は既存方針通り対象外（3.1節、ivreg側にレバレッジ算出の確立した参照実装が
+無いため）。`summary(model, diagnostics=TRUE)`は弱操作変数F統計量・Wu-Hausman・
+Sarganを一括で返すが、`vcov.`に行列を渡すと警告付きでNULL（classical）にフォールバック
+する仕様のため、**常にclassical（iid）vcovで計算される**（実測確認済み）。これは
+本実装の`weak_instrument_f_statistics`/`overid_statistic`が常にclassicalという設計
+（6.4節・6.5節）と一致するためcov_typeによらず一律クロスチェックできるが、
+`wu_hausman_statistic`はcov_typeに依存する設計のため、`ivreg`側ではclassical cov_type
+のときのみクロスチェックする（hc0/hc1/clusterは既存のlinearmodelsクロスチェックに
+委ねる。ユーザー確認済み）。
+
+`f_p_value`が浮動小数点アンダーフローに近い極小値（1e-9〜1e-12オーダー）のケースがあり、
+その領域では相対誤差比較が意味を持たない（F統計量自体は0.6%程度しか違わなくても、
+F分布の裾の確率はその差を大きく増幅する）ため、`f_p_value`の比較のみ絶対誤差フロア
+（実測）を使う（`test_iv_crosscheck.py`参照）。
 
 ### 5.3 GMMのRクロスチェック省略（例外規定）
 
@@ -153,14 +217,14 @@ GMMは`ivreg`が対応していないため、**Python（`linearmodels`）のみ
 `panel-api-design.md`5.4と同じ（既存方針の相対誤差1e-8を基本、GMM等で乖離が大きい場合は
 実測値に基づき個別に緩和を検討）。
 
-## 6. IV固有論点（Issue #126、確定）
+## 6. IV固有論点（確定）
 
 `linearmodels`（`linearmodels/iv/model.py`・`results.py`）のソースコードを確認しながら
 確定した。
 
 ### 6.1 引数の切り分け
 
-Issue #119（1.1.1節）で確定済み。`x_exog`/`x_endog`/`instruments`をすべて独立引数化、
+1.1.1節で確定済み。`x_exog`/`x_endog`/`instruments`をすべて独立引数化、
 `instruments`は除外操作変数のみ。
 
 ### 6.2 2SLSとGMMの実装方針の違い
@@ -175,12 +239,30 @@ Issue #119（1.1.1節）で確定済み。`x_exog`/`x_endog`/`instruments`をす
   - `weight_type`の取りうる値: `unadjusted`/`homoskedastic`、`robust`/`heteroskedastic`、
     `cluster`、`kernel`（Driscoll-Kraayではなく通常のHAC、IVはパネル構造を前提としないため
     3.1と同じ理由）。
-- **GMMのstep数（1-step/2-step efficient）を選択可能にする**。`IvOptions`に
+- **GMMのstep数（1-step/2-step efficient/iterated）を選択可能にする**。`IvOptions`に
   `gmm_iterations: int`（デフォルト`2`＝efficient two-step、`1`で1-step GMM）を追加する。
-  `linearmodels.IVGMM.fit(iter_limit=2, ...)`と同じ考え方。
+  `linearmodels.IVGMM.fit(iter_limit=2, ...)`と同じ考え方。当初は1・2の2値のみ許容していた
+  が（Issue #165）、Issue #229で3以上（iterated GMM）・収束条件に一般化した:
+  - `gmm_iterations`は1以上の任意の整数を受け付ける。`gmm_convergence: float | None`
+    （既定`None`）を追加し、`Some`のときは`gmm_iterations`を「固定反復回数」ではなく
+    「収束判定の上限反復回数（安全弁）」として扱う。両者は排他ではなく併用方式
+    （ユーザー確認済み）。
+  - 収束判定は係数のelementwise・絶対誤差と相対誤差の併用（`tol = max(rtol * |前回値|,
+    atol)`、`atol`は内部固定値`1e-8`でユーザーには公開しない、ユーザー確認済み）で行う。
+  - 収束しない場合の挙動は`nonlinear`のMLE実装（`LogitOptions`/`ProbitOptions`の
+    `max_iter`/`tol`/`raise_on_non_convergence`/`converged`）と同じ設計に揃える:
+    `raise_on_non_convergence: bool`（既定`true`）が`true`なら未収束時にエラー、
+    `false`なら`converged=False`のまま結果を返す。
+  - `gmm_iterations`を「methodそのもの」（例: `"1step_gmm"`/`"2step_gmm"`/
+    `"iterated_gmm"`）に分割する案も検討したが不採用。反復回数はGMMという1つの
+    `method="gmm"`のパラメータとして扱う（`linearmodels`等の慣行と同じ、詳細は
+    `engine/src/iv/CLAUDE.md`参照）。
+  - `engine`側の実装は`engine::iv::gmm::GmmEstimator::fit`のみ完了（Issue #229）。
+    `IvOptions`/`IvResult`（`engine_pybind`）・`python_package`への配線は
+    `method="gmm"`自体がまだ未実装（本節冒頭、6章の前提）のため別issueで行う。
 - **2SLSはGMMの特殊ケース（`weight_type="unadjusted"`、`gmm_iterations=1`）として実装できる**
   ことを踏まえ、共通のGMM推定コアを実装し、2SLSはそのコアを固定パラメータで呼び出す設計に
-  する。ただし無理な共通化はしない方針（Issue #122）に従い、実際にどこまで一体化できるかは
+  する。ただし無理な共通化はしない方針（4章）に従い、実際にどこまで一体化できるかは
   実装時に判断する（うまく一体化できない場合は2SLS側を素直に閉形式で実装してよい）。
 
 ### 6.3 丁度識別（just-identified）の場合の扱い
@@ -208,7 +290,7 @@ Issue #119（1.1.1節）で確定済み。`x_exog`/`x_endog`/`instruments`をす
 - **Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含める**（別メソッド化
   しない。OLS/REの適合度統計量と同じeager計算方針を踏襲。`linearmodels`は遅延プロパティだが
   本プロジェクトは一貫してeager計算とする）。
-- 自由度は`len(instruments) - len(x_endog)`（Issue #119で確定した`instruments`＝除外操作変数
+- 自由度は`len(instruments) - len(x_endog)`（1.1.1節で確定した`instruments`＝除外操作変数
   のみという定義とそのまま整合）。
 - **丁度識別（自由度0）の場合は`None`を返す**（`linearmodels`も`InvalidTestStatistic`相当の
   扱いをしている）。
@@ -230,4 +312,4 @@ Issue #119（1.1.1節）で確定済み。`x_exog`/`x_endog`/`instruments`をす
 - **GMM**: 6.2の`weight_type`とは独立に`cov_type`を選択できる。サポート対象は2SLSと同じ範囲を
   踏襲する。
 
-- IV固有論点（2SLS/GMM方式・丁度識別/過剰識別・弱操作変数診断・内生性検定等）: Issue #126
+- IV固有論点（2SLS/GMM方式・丁度識別/過剰識別・弱操作変数診断・内生性検定等）: 本章（6章）で確定。

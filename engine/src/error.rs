@@ -3,7 +3,7 @@
 //! `engine::linear::common::LeastSquaresError`と`engine::nonlinear::common::MleError`で、
 //! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
 //! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`の6バリアントが
-//! エラーメッセージの文言まで完全に重複していた（Issue #113）。IV/panel/causal/io/
+//! エラーメッセージの文言まで完全に重複していた。IV/panel/causal/io/
 //! time_series等、今後7系統・20〜30手法に増える前提のため、系統をまたぐ共通バリデーション
 //! エラーをここに集約し、各系統のエラー型はthiserrorの
 //! `#[error(transparent)] Common(#[from] CommonError)`で包む設計にする。
@@ -30,7 +30,7 @@ pub enum CommonError {
 
     /// 観測数nが説明変数の数k（定数項を含む）以下。`k>=1`であることが前提
     /// （`k=0`は別バリアント`NoRegressors`で扱う。`.claude/rules/rust-style.md`
-    /// 「エラーハンドリング」、Issue #118）。
+    /// 「エラーハンドリング」参照）。
     #[error(
         "insufficient observations: n={n} must be greater than k={k} \
          (number of independent variables, including the intercept)"
@@ -41,7 +41,7 @@ pub enum CommonError {
     /// `InsufficientObservations`（`n<=k`）とは原因が異なる別の不正のため区別する
     /// （`k=0`だと`n`の値に関わらず不等式`n>k`は常に成立してしまい、
     /// `InsufficientObservations`のメッセージを流用すると「条件を満たしているのに
-    /// エラーになる」という誤解を招くメッセージになっていた。Issue #118）。
+    /// エラーになる」という誤解を招くメッセージになっていた）。
     #[error(
         "no regressors: k=0 (include_intercept=false and no independent variables). \
          At least one of the two is required"

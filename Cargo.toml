@@ -6,7 +6,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 license = "MIT"
 publish = false
@@ -22,7 +22,7 @@ thiserror = "=2.0.19"
 # 実際に engine の [dependencies] へ追加するのは別issue（ENGINE_DEPS: engineクレートへの依存追加）で行う。
 # ここでは workspace 単位でバージョンだけ先に固定しておく。
 faer = "=0.24.4"
-# statrs: t分布のCDF・逆CDF（classical/HC/HAC標準誤差のp値・信頼区間の計算に使用、Issue #9）。
+# statrs: t分布のCDF・逆CDF（classical/HC/HAC標準誤差のp値・信頼区間の計算に使用）。
 # pure Rustでsystem BLAS/LAPACK不要、faerの方針と一貫する。
 # default-features = false でnalgebra/rand機能を無効化し、CDF計算に必要な最小限の依存に絞る。
 # （メンバー側の[dependencies]でdefault-featuresを上書きできないため、ここで指定する）
@@ -35,6 +35,6 @@ statrs = { version = "=0.19.0", default-features = false }
 # モデル固有の尤度・勾配・Hessian計算自体は引き続きfaerで行い、argminに値を渡す境界でのみ変換する。
 argmin = "=0.11.0"
 argmin-math = { version = "=0.5.1", default-features = false, features = ["vec"] }
-# proptest: property-basedテスト（testing-policy.md「将来的に検討する技術」、Issue #102）。
+# proptest: property-basedテスト（testing-policy.md「将来的に検討する技術」）。
 # dev-dependency専用（配布物には含まれない）。
 proptest = "=1.11.0"

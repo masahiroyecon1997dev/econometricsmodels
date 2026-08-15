@@ -11,11 +11,6 @@ services:
       - ..:/workspaces/econometricsmodels:cached
       - cargo-registry:/home/vscode/.cargo/registry
       - cargo-git:/home/vscode/.cargo/git
-      - type: bind
-        source: ${SSH_AUTH_SOCK}
-        target: /ssh-agent
-    environment:
-      - SSH_AUTH_SOCK=/ssh-agent
     network_mode: "bridge"
     user: vscode
     command: sleep infinity

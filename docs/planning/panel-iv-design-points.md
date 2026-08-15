@@ -8,7 +8,7 @@
 
 ## 1. 共通論点（FE / RE / IV）
 
-### 1.1 引数設計（確定・Issue #119）
+### 1.1 引数設計（確定）
 
 - [x] モデル固有の識別子列（エンティティID・時点ID・操作変数列）の渡し方
   - 必須なもの（FE/REの`entity`、IVの`x_exog`/`x_endog`/`instruments`）は`y`/`x`と同格の
@@ -23,10 +23,10 @@
   - `offset`は線形モデルのため該当なし。`weights`は汎用オプションとしては見送り（Phase6再検討
     の判断を踏襲）。ただしGLSの共分散構造引数はこの判断の対象外（GLS着手時に別途設計）。
 
-### 1.2 結果（Return）設計（確定・Issue #120）
+### 1.2 結果（Return）設計（確定）
 
 - [x] 共通コア項目の再定義（`params`/`std_errors`/`t_stats`/`p_values`/`conf_lower`/`conf_upper`/`param_names`はOLSと共通のはず。追加が必要な項目の洗い出し）
-  - OLSの項目を土台にしつつ、`n_obs`表記への統一（既存OLSの`nobs`はIssue #139でリネーム済み）、
+  - OLSの項目を土台にしつつ、`n_obs`表記への統一（既存OLSの`nobs`はリネーム済み）、
     `df_resid`/`df_model`・`n_entities`（FE/RE限定）の新規追加、IVでは`log_likelihood`/
     `aic`/`bic`を除外、を確定。詳細: [`panel-api-design.md`](./specs/panel-api-design.md)2.1節、
     [`iv-api-design.md`](./specs/iv-api-design.md)2.1節
@@ -44,7 +44,7 @@
     追加できる拡張余地を残す。内部FE推定が失敗した場合はハウスマン関連フィールドを`None`にし
     RE本体の結果は返す。詳細: [`panel-api-design.md`](./specs/panel-api-design.md)2.4節
 
-### 1.3 標準誤差・検定（確定・Issue #121）
+### 1.3 標準誤差・検定（確定）
 
 - [x] `cov_type`のサポート対象をモデルごとに確定（OLSの`classical`/`hc0-3`/`hac`/`cluster`のうちどれを含める・除外するか）
   - FE/RE/IVとも`classical`/`hc0-3`/`cluster`/`hac`をすべて実装。ただしFE/REの`hac`はOLS流用
@@ -62,7 +62,7 @@
     デフォルトから意図的に逸脱、fixest前例踏襲）。IVは`entity`のような常在するグルーピング列が
     無いため`"classical"`のまま。詳細: [`panel-api-design.md`](./specs/panel-api-design.md)3.2節
 
-### 1.4 内部実装・共通化（確定・Issue #122）
+### 1.4 内部実装・共通化（確定）
 
 - [x] OLSエンジンとの共通化の粒度（内部で`OlsEstimator`をそのまま呼ぶか、行列演算のみ共有するか）
   - FEは**まずOlsEstimatorへの委譲を試す**（within変換データを`OlsEstimator::fit`に渡す、
@@ -79,7 +79,7 @@
     （2SLS/GMM共有）という系統単位の共有エラー型にする。詳細:
     [`panel-api-design.md`](./specs/panel-api-design.md)4.4節
 
-### 1.5 リファレンス実装・テスト方針（確定・Issue #123）
+### 1.5 リファレンス実装・テスト方針（確定）
 
 - [x] Python主リファレンスの確定（FE/RE: pyfixest、IV: linearmodels等の候補を検討）
   - **`linearmodels`をFE/RE/IV共通の主リファレンス**とする（`PanelOLS`/`RandomEffects`/
@@ -98,7 +98,7 @@
 
 ---
 
-## 2. FE（固定効果）固有論点（確定・Issue #124）
+## 2. FE（固定効果）固有論点（確定）
 
 - [x] within変換（固体内偏差）の実装方法：polarsのgroup_by機能で固体内平均を引く方式でよいか
   - polarsの`group_by`で実装。2-wayは閉形式の二重デミーニング（バランスパネル限定）。
@@ -119,7 +119,7 @@
 
 詳細: [`panel-api-design.md`](./specs/panel-api-design.md)6章
 
-## 3. RE（変量効果）固有論点（確定・Issue #125）
+## 3. RE（変量効果）固有論点（確定）
 
 - [x] 分散成分の推定方法（Swamy-Arora法 / Wallace-Hussain法など、方式の選定）
   - Swamy-Arora法。R plmのデフォルト・Python linearmodelsの実装いずれも相当し、#123の
@@ -139,10 +139,10 @@
 
 詳細: [`panel-api-design.md`](./specs/panel-api-design.md)7章
 
-## 4. IV（操作変数法）固有論点（確定・Issue #126）
+## 4. IV（操作変数法）固有論点（確定）
 
 - [x] 引数の切り分け：内生変数（endogenous x）／外生変数（exogenous x）／操作変数（instruments）の3区分をどう引数に落とすか
-  - `x_exog`/`x_endog`/`instruments`をすべて独立引数化（Issue #119、1.1節参照）。加えて
+  - `x_exog`/`x_endog`/`instruments`をすべて独立引数化（1.1節参照）。加えて
     `instruments`は除外操作変数のみとし`x_exog`との重複入力は不可（バリデーションエラー）、
     第一段階設計行列は内部で`x_exog ++ instruments`をunion。詳細:
     [`iv-api-design.md`](./specs/iv-api-design.md)1.1.1節
@@ -173,7 +173,7 @@
 ## 5. 次のステップ
 
 1. ~~上記論点を1つずつ「確定」させ、`panel-api-design.md`（FE/RE共通）・`iv-api-design.md`
-   （IV単独）としてドキュメント化する~~ **完了**（Issue #119〜#126、全論点確定・ドキュメント化済み）
+   （IV単独）としてドキュメント化する~~ **完了**（全論点確定・ドキュメント化済み）
 2. ~~`nonlinear-api-design.md`同様、他パッケージ調査（pyfixest, plm, linearmodels等）のセクションを追加する~~
    各論点の確定時にlinearmodels/plm/fixest/ivregのソースコード・ドキュメントを都度確認する形で
    実施済み（独立セクションとしては追加していないが、`panel-api-design.md`・`iv-api-design.md`

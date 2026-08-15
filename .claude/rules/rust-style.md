@@ -53,7 +53,7 @@ paths:
 ## Python境界でのデータ受け渡し（engine_pybind）
 
 - polars DataFrameの受け取りには**pyo3-polars**（`PyDataFrame`）を使う。
-- **既知のリスク**: `pyo3-polars`の単体リポジトリ（`pola-rs/pyo3-polars`）は2025年7月にアーカイブ済みで、本体`pola-rs/polars`リポジトリに統合されている。crates.io版`pyo3-polars`とpolars本体リポジトリ内のバージョンにズレがあり、`pyo3`自体のバージョンとの組み合わせでビルドが失敗する事例が報告されている（2026年1月時点）。**リポジトリ雛形作成時、本格的な実装に入る前に`pyo3-polars`込みで一度`cargo build`が通ることを確認しておくこと**。詰まる場合は、`pyo3-polars`を経由せずpolars本体のArrow C Data Interface相当の機能を薄く自前で使う代替案を検討する。
+- **既知のリスク**: `pyo3-polars`の単体リポジトリ（`pola-rs/pyo3-polars`）は2025年7月にアーカイブ済みで、本体`pola-rs/polars`リポジトリに統合されている。crates.io版`pyo3-polars`とpolars本体リポジトリ内のバージョンにズレがあり、`pyo3`自体のバージョンとの組み合わせでビルドが失敗する事例が報告されている（2026年1月時点）。現在は`engine_pybind/Cargo.toml`で`pyo3-polars = "=0.27.0"`に固定して`cargo build`が通ることを確認済み（詳細は同ファイルのコメント参照）。バージョンを上げる際は同様の確認を行うこと。詰まる場合は、`pyo3-polars`を経由せずpolars本体のArrow C Data Interface相当の機能を薄く自前で使う代替案を検討する。
 - `engine`はpolars/PyO3を一切知らない設計を維持する（責務分離の原則通り）。`polars DataFrame → faer::Mat<f64>`の変換は2段階に分かれる。
   1. `engine_pybind`: polars DataFrameから列ごとに`Vec<f64>`へ抽出する（`column_extraction::extract_f64_column`）。
   2. `engine`: 抽出済みの列（`&[f64]`/`&[Vec<f64>]`）から`faer::Mat`を組み立てる（例: `engine::linear::ols::OlsInput::from_columns`）。切片列の自動追加等、設計行列の組み立てに関わるロジックはここに置く（「計算ロジックをengine_pybindに書かない」原則、`docs/spec/ols-spec.md`参照）。
@@ -76,7 +76,7 @@ paths:
 
 - `cargo clippy --all-targets -- -D warnings` で警告ゼロを基準とする。
 - `cargo fmt --check` でフォーマット崩れを許容しない。
-- 具体的なlintレベルの追加設定（`clippy.toml`等）はリポジトリ雛形作成時に確定する。
+- `clippy.toml`等の追加設定は導入していない（現状`-D warnings`のみ）。必要になった時点で追加を検討する。
 
 ## パフォーマンス
 
@@ -86,12 +86,14 @@ paths:
   - **MLEベースの手法**（Logit/Probit/Tobit等）の`CostFunction`/`Gradient`/`Hessian`・観測ごとのスコア計算: Newton/BFGS/L-BFGSの反復ごとに観測数`n`に比例する和を取る処理が繰り返し呼ばれるため、`n`が大きいデータセットでは最適化全体の支配的なコストになりうる（`engine/src/nonlinear/logit.rs`の`LogitProblem`が該当。Probit/Tobitも同型の構造になる見込み）。
   - **パネルデータ（FE/RE）の個体（グループ）ごとの計算、クラスターロバストSEのクラスターごとの計算**。ただしOLSの`cluster_cov_params`は計算量がO(G·k²)（`G`はクラスター数、通常`n`よりずっと小さい）で実測上ボトルネックにならないことを確認済み（`docs/spec/ols-spec.md`「パフォーマンス」）。クラスター数`G`が非常に大きいケース等、前提が変わる場合は再検討する。
   - **将来のブートストラップ・permutation検定等**、繰り返し数が多く各試行が独立な推論手続き。
-  - **IO手法**（動学ゲーム・シミュレーテッド最尤法等）の市場・シミュレーション試行ごとの計算（Phase6着手時に本格検討、CLAUDE.md 13章参照）。
+  - **IO手法**（動学ゲーム・シミュレーテッド最尤法等）の市場・シミュレーション試行ごとの計算（Phase6着手時に本格検討、CLAUDE.md 12章参照）。
   - **`faer`自身の`Par`（行列積内部の並列化）とは別軸の並列化であることに注意**: 上記`Par::Seq`の教訓は「faerの行列積内部の並列化」の話であり、「観測・グループ単位でrayonのイテレータを並列化する」話とは粒度が異なる。前者の実測結果を根拠に後者を一律に否定しない（それぞれ独立に実測して判断する）。
   - 採用する場合はバージョンを明示固定（`=`指定、他クレートと同じ方針）し、小規模データでのオーバーヘッド逆転が起きないよう、必要なら適用範囲・閾値を絞る（`Par::Seq`と同じ発想）。
 
 ## テスト
 
-- 純粋ロジックの単体テストは、対応するソースファイル内の `#[cfg(test)] mod tests`（同じファイルの末尾。`cargo test -p engine`で実行）に置く。`tests/engine_tests/`は現状未使用（対象コードと同じファイルにあることでリファクタリング時の追従漏れを防げるため、OLS実装で一貫してこの方式を採用している）。将来的にモジュール横断の統合テストが必要になった場合のみ`tests/engine_tests/`の使用を検討する。
+- 純粋ロジックの単体テストは、対応するソースファイル内の `#[cfg(test)] mod tests`（同じファイルの末尾。`cargo test -p engine`で実行）に置く（対象コードと同じファイルにあることでリファクタリング時の追従漏れを防げるため、OLS実装で一貫してこの方式を採用している）。
 - 許容誤差等のテスト方針の詳細は `testing-policy.md` を参照。
 - **カバレッジの現実的な目標**: `cargo llvm-cov -p engine`で計測する。100%は目指さず、既に検証済みの不変条件（特異性検出済みの行列のCholesky分解、事前検証済みの自由度によるt分布/F分布の構築等）に対する防御的な`Result`化（`unwrap`/`expect`を避けるため`Result`を返すが、実際にはその不変条件により失敗し得ない`map_err`分岐）はカバレッジ対象外として許容する。対象外にする場合は、その箇所のdocコメントに「なぜ理論上到達不能か」を明記すること（`engine::linear::ols`の`xtx_inverse`・`wald_f_test`等を参照）。
+- **`cargo llvm-cov -p engine report`（テスト実行を伴わない`report`サブコマンド）は直前に生成済みのプロファイルをそのまま再表示するだけで、その間に追加・変更したテストを反映しない**（Issue #168で実際に踏んだ罠: テスト追加後に`report --show-missing-lines`だけ再実行し、数値が全く変わらないことに気づかず古い欠落行リストを見続けるところだった）。テスト追加・変更後にカバレッジを再計測する際は、`report`ではなく`cargo llvm-cov -p engine`（引数無し、または`--show-missing-lines`等のオプション付き）本体を再実行し、テストの再ビルド・再実行から行うこと。
+- **カバレッジの数値（%）だけでなく`--show-missing-lines`の欠落行を機能単位で読むこと**: HAC/Kernelラグ付き共分散のように、`lags`のデフォルト分岐（`None`）や明示的な正のラグ値での重み付けループ本体が一度もテストで通っていなくても、他の分岐（`lags=Some(0)`等の退化ケースのみ）が厚くテストされていると全体のカバレッジ%は高く出てしまう（Issue #168で発覚: `iv/two_sls.rs`のNewey-West重み付けループが`lags>=1`で一度も実行されていなかったが、モジュール全体は96%台だった）。%だけで「十分」と判断せず、欠落行が計算ロジックの中核（分岐・ループ本体）かdocコメント済みの防御的`Result`化か`assert!`メッセージ引数（後述）かを個別に確認する。

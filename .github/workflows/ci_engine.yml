@@ -17,6 +17,9 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: cargo test / clippy / fmt (engine)
@@ -45,14 +48,14 @@ jobs:
 
       # workspace全体のCargo.lock（engine + engine_pybind）を対象にRustSecアドバイザリDBと
       # 突き合わせる。engine_pybind側の依存もここでカバーする
-      # （役割分担はIssue #23で決定。ci_python.ymlのpip-auditはPython依存＝uv.lock専用）。
+      # （ci_python.ymlのpip-auditはPython依存＝uv.lock専用）。
       #
       # rustsec/audit-checkアクションは不採用: `cargo audit --json`の出力をアクション内で
       # JSON.parse()しており、出力にANSI制御文字等が混ざると
       # "Unexpected token ... in JSON"で失敗する既知の不具合が未解決のまま残っている
       # （rustsec/audit-check#18, #33）。実際の脆弱性と無関係にCIが赤くなる偽陽性を避けるため、
       # アクションを介さず`cargo audit`をテキスト出力のまま直接実行する。
-      - uses: taiki-e/install-action@7572810d7dd469b651bb7793945692cf78da5dd7 # v2.85.0
+      - uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
         with:
           tool: cargo-audit
 

@@ -1,0 +1,183 @@
+# リファクタリング候補メモ
+
+コード解説（`/explain-code`スキル等）や通常の実装作業の過程で気づいた、
+リファクタリングの余地がある箇所を随時記録する場所。
+
+`refactoring-issue231-progress.md`との違い: あちらは
+[#231](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/231)
+としてスコープ・フェーズを確定させた上で実施する計画書だが、こちらは
+Issue化する前の**気づいた時点での未整理のメモ**を溜める場所。ここに溜まった
+項目は、着手時にIssue化するか`refactor`スキルの対象範囲として指定するかを
+都度ユーザーが判断する。
+
+## 記録フォーマット
+
+各項目は以下を含める。
+
+- **対象**: ファイルパス・行
+- **内容**: 何が気になったか
+- **気づいた経緯**: どの作業中に気づいたか（日付）
+- **状態**: 未対応 / 対応済み（対応したIssue・PR等） / 対応不要と判断（理由）
+
+---
+
+## 一覧
+
+### 1. `benchmark/load_wooldridge.py`の`SUGGESTED_DATASETS`が未使用
+
+- **対象**: [benchmark/load_wooldridge.py:21-26](../../../benchmark/load_wooldridge.py#L21-L26)
+- **内容**: 手法ごとの候補データセット名を持つ辞書`SUGGESTED_DATASETS`が、
+  定義箇所以外どこからもimport・参照されていない（`grep`で確認済み）。
+  コメントも「要検討・要確定」のまま更新されておらず、実際に採用された
+  データセット（`mroz`, `401ksubs`等）は各`generate_*.py`側に個別に
+  ハードコードされている。実質的にデッドコードの疑い。
+- **気づいた経緯**: 2026-08-14、`load_wooldridge.py`のコード解説中に発見。
+- **状態**: 未対応（残す/削除するかの方針をユーザーに確認待ち）
+
+### 2. `generate_linear_datasets.py`の`k`下限チェックが4箇所で同型パターン重複
+
+- **対象**: [benchmark/linear/generate_linear_datasets.py:76-114](../../../benchmark/linear/generate_linear_datasets.py#L76-L114)
+- **内容**: `moderate_multicollinearity`/`high_condition_number`（k>=2）・
+  `perfect_multicollinearity`（k>=3）・`scale_variance`（k>=2）・
+  `scale_variance_mild`（k>=2）の4箇所で、いずれも
+  `if k < N: raise ValueError(f"{scenario} requires k >= N")`という
+  同型の2行パターンを繰り返している。`_require_min_k(scenario, k, minimum)`
+  のような小さなヘルパーに切り出せる余地はあるが、規模が小さく
+  優先度は低い（nice to have）と判断。
+- **気づいた経緯**: 2026-08-15、`generate_linear_datasets.py`のコード解説中に発見。
+- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
+
+### 3. `sys.path.insert`によるimportが静的解析（IDEの定義ジャンプ）と相性が悪い
+
+- **対象**: `benchmark/`配下の各ファイル冒頭にある`sys.path.insert(0, str(Path(__file__)...))`
+  パターン全般（例: [benchmark/freeze_datasets.py:41-49](../../../benchmark/freeze_datasets.py#L41-L49)）
+- **内容**: ユーザー指摘（2026-08-15）。`Path(__file__).resolve()...`による動的なパス追加は
+  実行時にしか解決されないため、VSCode（Pylance等）の静的解析は`sys.path.insert`の中身を
+  実行せずに解析するので、`from generate_linear_datasets import ...`等の「定義へ移動」
+  （Go to Definition）が効かず不便。
+- **Claudeの所感**: `benchmark/`全体を正式なPythonパッケージ化する（`__init__.py`追加）と、
+  実行方法が`python freeze_linear_datasets.py`のような直接実行から
+  `python -m benchmark.linear.freeze_linear_datasets`等に変わってしまうトレードオフがある。
+  一方、**`.vscode/settings.json`（または`pyrightconfig.json`）に
+  `"python.analysis.extraPaths": ["benchmark", "benchmark/linear", "benchmark/nonlinear", "benchmark/iv"]`
+  を追加する**方法であれば、実行時のimportの仕組み（`sys.path.insert`）自体は変えずに、
+  IDEの静的解析にだけ「このパスも見てよい」と教えられるため、定義ジャンプの不便さだけを
+  低リスクで解消できる可能性がある。
+- **気づいた経緯**: 2026-08-15、`generate_linear_datasets.py`解説後の雑談から。
+- **状態**: 未対応（`.vscode/settings.json`追加の要否をユーザー判断待ち）
+
+### 4. `generate_*_datasets.py`の`SCENARIOS`と`freeze_*_datasets.py`側リストが3系統とも完全重複
+
+- **対象**:
+  - [benchmark/linear/generate_linear_datasets.py:23-34](../../../benchmark/linear/generate_linear_datasets.py#L23-L34) ↔
+    [benchmark/linear/freeze_linear_datasets.py:30-41](../../../benchmark/linear/freeze_linear_datasets.py#L30-L41)（`SCENARIOS`↔`SYNTHETIC_SCENARIOS`）
+  - [benchmark/nonlinear/generate_nonlinear_datasets.py:60-68](../../../benchmark/nonlinear/generate_nonlinear_datasets.py#L60-L68) ↔
+    [benchmark/nonlinear/freeze_nonlinear_datasets.py:32-40](../../../benchmark/nonlinear/freeze_nonlinear_datasets.py#L32-L40)（`SCENARIOS`↔`LOGIT_SCENARIOS`。`PROBIT_SCENARIOS`は`list(LOGIT_SCENARIOS)`で既に間接的に連動）
+  - [benchmark/iv/generate_iv_datasets.py:41-52](../../../benchmark/iv/generate_iv_datasets.py#L41-L52) ↔
+    [benchmark/iv/freeze_iv_datasets.py:30-41](../../../benchmark/iv/freeze_iv_datasets.py#L30-L41)（`SCENARIOS`↔`IV_SCENARIOS`）
+- **内容**: ユーザー指摘（2026-08-15、linear系統で発覚）を受けてnonlinear/iv系統も
+  Pythonスクリプトで機械的に比較したところ、**3系統とも**順序・要素完全一致だった
+  （実測確認済み）。Issue #231フェーズ2で対応済みの「`NUMERIC_SCENARIOS`/
+  `test_*_fixtures.py`側`SCENARIOS`の一元化」（`refactoring-issue231-progress.md`
+  フェーズ2ステップ2項目5）と同種の重複だが、この`generate_*_datasets.py`↔
+  `freeze_*_datasets.py`間のペアはその時の対応範囲に含まれていなかった模様。
+- **Claudeの所感**: 3系統とも`freeze_*_datasets.py`側で
+  `from generate_*_datasets import SCENARIOS as ...`の形にimportし直せば単一定義元に
+  統一できる（値が完全一致のため挙動を変えないリファクタリングとして低リスク）。
+- **気づいた経緯**: 2026-08-15、`generate_linear_datasets.py`解説後の雑談（linear分）→
+  `generate_nonlinear_datasets.py`解説時に3系統横断で実測確認。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 5. `unknown scenario`検証（`ValueError`）が3系統の`generate_*_dataset`関数で完全重複
+
+- **対象**: [benchmark/linear/generate_linear_datasets.py:62-65](../../../benchmark/linear/generate_linear_datasets.py#L62-L65)・
+  [benchmark/nonlinear/generate_nonlinear_datasets.py:106-109](../../../benchmark/nonlinear/generate_nonlinear_datasets.py#L106-L109)・
+  [benchmark/iv/generate_iv_datasets.py:106-109](../../../benchmark/iv/generate_iv_datasets.py#L106-L109)
+- **内容**: ユーザー指摘（2026-08-15）。`if scenario not in SCENARIOS: raise ValueError(f"unknown
+  scenario: {scenario!r}. choose from {SCENARIOS}")`という同型の検証が3ファイルで重複している
+  （項目4の`SCENARIOS`重複と直接関連するが、こちらは検証ロジック自体の重複）。
+  nonlinear側にはさらに同型の`unknown link`検証（`generate_nonlinear_datasets.py:119-122`）が
+  同じ関数内にもう1つある。当初のコード解説時に見落としていた項目。
+- **Claudeの所感**: `_common.py`に`validate_scenario(scenario, valid_scenarios)`のような
+  小さなヘルパーを切り出せば3箇所（＋nonlinearのlink検証）を統合できる。ただし規模は小さく、
+  優先度は`nice to have`程度。
+- **気づいた経緯**: 2026-08-15、`generate_nonlinear_datasets.py`解説後のユーザー指摘で発覚
+  （当初の解説時は見落とし）。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 6. 線形予測子の組み立て方（`column_stack`版 vs `beta[0]+X@beta[1:]`版）の書き方の不統一
+
+- **対象**: [benchmark/linear/generate_linear_datasets.py:133](../../../benchmark/linear/generate_linear_datasets.py#L133)
+  （`y = beta[0] + X @ beta[1:] + errors`）と
+  [benchmark/nonlinear/generate_nonlinear_datasets.py:158-159](../../../benchmark/nonlinear/generate_nonlinear_datasets.py#L158-L159)
+  （`x_const = np.column_stack([np.ones(n), X]); p = _LINK_CDF[link](x_const @ beta)`）
+- **内容**: ユーザー指摘（2026-08-15）。同じ「切片＋線形結合」という数学的に同じ計算を、
+  linear側とnonlinear側で異なる書き方（切片を別扱い vs 切片列を結合してから1回の行列積）で
+  実装している。
+- **Claudeの所感**: 統一するなら`_linear_predictor(X, beta)`のような小さな共通ヘルパーに
+  切り出せるが、1〜2行の違いであり効果は小さい。優先度は低い。
+- **気づいた経緯**: 2026-08-15、`generate_nonlinear_datasets.py`解説後のユーザー指摘。
+- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
+
+### 7. 説明変数X生成ロジック（multicollinearity/high_condition_number/perfect_multicollinearity/scale_variance）が3系統でほぼ同一
+
+- **対象**: [benchmark/linear/generate_linear_datasets.py:76-114](../../../benchmark/linear/generate_linear_datasets.py#L76-L114)
+  （`X`）・[benchmark/nonlinear/generate_nonlinear_datasets.py:132-156](../../../benchmark/nonlinear/generate_nonlinear_datasets.py#L132-L156)
+  （`X`）・[benchmark/iv/generate_iv_datasets.py:141-156](../../../benchmark/iv/generate_iv_datasets.py#L141-L156)
+  （`x_exog`）
+- **内容**: ユーザー指摘（2026-08-15）。`rho=0.8/0.999`の相関構造を持つ`multivariate_normal`
+  生成、`X[:,2]=2*X[:,0]+3*X[:,1]`という完全多重共線性の作り方が3系統でほぼ同一ロジック
+  （IV側のdocstringにも「OLSと同じ発想をx_exogに適用」と明記済み）。
+- **Claudeの所感**: `_common.py`に`_correlated_design_matrix(rng, scenario, k)`のような
+  共通関数を切り出せる余地はあるが、変数名（`X` vs `x_exog`）・呼び出し文脈の違いもあり
+  設計にやや検討が要る規模。ユーザー自身も「無理にすることではない」とコメント済みで、
+  優先度は中程度・任意対応と位置づける。
+- **気づいた経緯**: 2026-08-15、`generate_nonlinear_datasets.py`解説後のユーザー指摘。
+- **状態**: 未対応（任意対応、着手要否はユーザー判断待ち）
+
+### 8. `generate_logit_dataset`/`generate_probit_dataset`の後方互換用ラッパーが不要では
+
+- **対象**: [benchmark/nonlinear/generate_nonlinear_datasets.py:179-206](../../../benchmark/nonlinear/generate_nonlinear_datasets.py#L179-L206)
+- **内容**: ユーザー指摘（2026-08-15）。docstringに「既存の呼び出し元との互換のため名前付きで
+  残している」とあるこの2つの薄いラッパー関数の実際の呼び出し箇所を`grep`で確認したところ、
+  `freeze_nonlinear_datasets.py`と本ファイル自身の`__main__`ブロックの2箇所のみだった。
+  後方互換性が不要なら、これらの呼び出し元を`generate_binary_choice_dataset(scenario,
+  link="logit"/"probit")`に直接書き換えることでラッパー自体を削除できる。
+- **Claudeの所感**: 呼び出し箇所が少なく（2箇所）、いずれも`benchmark/nonlinear/`内で
+  完結しているため、削除は低リスクだと考える。
+- **気づいた経緯**: 2026-08-15、`generate_nonlinear_datasets.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 9. `scale_variance`のスケール倍率（1e6/1e-3）が3系統ともマジックナンバーとして重複
+
+- **対象**: [benchmark/linear/generate_linear_datasets.py:102-103](../../../benchmark/linear/generate_linear_datasets.py#L102-L103)
+  （`X[:,0]*=1e6, X[:,1]*=1e-3`、直書き）・
+  [benchmark/nonlinear/generate_nonlinear_datasets.py:77-78](../../../benchmark/nonlinear/generate_nonlinear_datasets.py#L77-L78)
+  （`_SCALE_VARIANCE_X1_SCALE = 1e6`等、名前付き定数）・
+  [benchmark/iv/generate_iv_datasets.py:231-232](../../../benchmark/iv/generate_iv_datasets.py#L231-L232)
+  （`x_exog[:,0]*=1e6, x_exog[:,1]*=1e-3`、直書き）
+- **内容**: ユーザー指摘（2026-08-15）。3系統とも`1e6`/`1e-3`という同じ倍率を使っており、
+  nonlinear/iv側のコメントには「OLSと同じ倍率」と明記されている（意図的に値を揃えている）。
+  にもかかわらず値の実体は3ファイルに分散しており（うち2ファイルはマジックナンバー直書き）、
+  値を変えたくなった場合の追従漏れリスクがある。
+- **Claudeの所感**: `_common.py`に`SCALE_VARIANCE_X1_SCALE = 1e6`・
+  `SCALE_VARIANCE_X2_SCALE = 1e-3`として集約し、3ファイルともそこから参照する形に
+  統一するのが妥当。「同じであるべき」という意図が既にコード上に書いてある以上、
+  低リスクな改善だと考える。
+- **気づいた経緯**: 2026-08-15、`generate_nonlinear_datasets.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 10. `heteroskedastic`/`autocorrelated`の誤差項生成式がlinear・IVの2系統でマジックナンバーとして重複
+
+- **対象**: [benchmark/linear/generate_linear_datasets.py:121,124](../../../benchmark/linear/generate_linear_datasets.py#L121-L124)・
+  [benchmark/iv/generate_iv_datasets.py:178,186](../../../benchmark/iv/generate_iv_datasets.py#L178-L186)
+- **内容**: ユーザー指摘（2026-08-15）。`heteroskedastic`の分散式`sigma_i = 0.5 + 2.0 *
+  np.abs(X[:,0]/x_exog[:,0])`と、`autocorrelated`のAR(1)係数`rho(_ar) = 0.7`が、
+  linear・IVの2系統で全く同じ値のマジックナンバーとして直書きされている
+  （nonlinearはこの2シナリオ自体を持たないため対象外、モジュールdocstringで
+  理由明記済み）。項目9（`scale_variance`のスケール倍率重複）と同種の問題。
+- **Claudeの所感**: `_common.py`に`HETEROSKEDASTIC_SIGMA_BASE = 0.5`・
+  `HETEROSKEDASTIC_SIGMA_SLOPE = 2.0`・`AUTOCORRELATED_RHO = 0.7`のような
+  名前付き定数として集約する余地がある。項目9と合わせて対応すると効率が良さそう。
+- **気づいた経緯**: 2026-08-15、`generate_iv_datasets.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

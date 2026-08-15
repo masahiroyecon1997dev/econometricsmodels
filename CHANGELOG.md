@@ -5,6 +5,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-15
+
+Added IV (instrumental variables) to Phase 3 (2SLS/GMM).
+
+### Added
+
+- IV estimation (`IV` / `IvOptions` / `IvResults`), by two-stage least squares (2SLS) or generalized method of moments (GMM) (`method`)
+- Independent variables split into `x_exog` (exogenous) and `x_endog` (endogenous), plus `instruments` (excluded instruments), consistent with this project's list-based API design
+- Standard error options: classical, HC0-HC3, cluster-robust, HAC (Newey-West) — the same range as OLS/WLS
+- GMM-specific options: `weight_type` (unadjusted/robust/cluster/kernel) for the point-estimation weight matrix, independent of `cov_type`; `gmm_iterations` (fixed iteration count) or `gmm_convergence` (convergence-based stopping)
+- Diagnostics: `weak_instrument_f_statistics` (partial F-statistics per endogenous variable), `overid_statistic`/`overid_p_value` (Sargan for 2SLS, Hansen J for GMM), `wu_hausman_statistic`/`wu_hausman_p_value` (regression-based endogeneity test, 2SLS only)
+- `first_stage()`: per-endogenous-variable first-stage `OlsResults`
+- IV API reference and usage examples in mkdocs
+
 ## [0.4.0] - 2026-08-08
 
 Added Probit (binary probit regression) to Phase 2 (generalized and discrete choice models).
@@ -81,7 +95,8 @@ Initial release. Only OLS (Ordinary Least Squares) from Phase 1 (basic regressio
 - Python API taking a polars DataFrame as input (`OLS` / `OLSOptions` / `OlsResults`)
 - Rust computational core (`engine`) and PyO3 bindings (`engine_pybind`)
 
-[Unreleased]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.1.0...v0.2.0

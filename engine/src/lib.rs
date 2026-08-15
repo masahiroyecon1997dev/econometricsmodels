@@ -4,6 +4,8 @@
 //! （例: `ols`, `fe`, ...）。
 
 pub mod error;
+pub mod inference;
+pub mod iv;
 pub mod linear;
 pub mod linear_algebra;
 pub mod nonlinear;

@@ -55,12 +55,24 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
 
 # -------------------------
 # R インストール（ベンチマーク用リファレンス実装: fixest, plm, ivreg等）
-# Debian bookwormのr-baseは4.2.2固定（CRAN最新は4.6.1）だが、install.packagesでの
-# パッケージ導入は動作確認済み。languageserverはVS CodeのR拡張機能用。
+# Debian bookworm標準のr-baseは4.2.2固定で、ivregの依存先（car→MatrixModels→
+# Matrix>=1.6.0、R>=4.4が必要）が導入できない制約があった（Issue #171）。
+# CRAN公式のDebian向けAPTリポジトリ（bookworm-cran40）を追加しR 4.x系を導入する。
+# 2025年後半以降、CRANのDebian向け署名鍵配布はmarutter_pubkey.ascのURL経由ではなく
+# keyserver.ubuntu.comからのGPG鍵取得方式に変更されている（Ubuntu向けとは別方式）。
+# languageserverはVS CodeのR拡張機能用。
 # -------------------------
 RUN apt update && apt install -y --no-install-recommends \
-    r-base \
-    r-base-dev \
+        gnupg dirmngr ca-certificates \
+    && gpg --keyserver keyserver.ubuntu.com \
+        --recv-key '95C0FAF38DB3CCAD0C080A7BDC78B2DDEABC47B7' \
+    && gpg --armor --export '95C0FAF38DB3CCAD0C080A7BDC78B2DDEABC47B7' \
+        > /etc/apt/trusted.gpg.d/cran_debian_key.asc \
+    && echo "deb https://cloud.r-project.org/bin/linux/debian bookworm-cran40/" \
+        > /etc/apt/sources.list.d/cran.list \
+    && apt update && apt install -y --no-install-recommends \
+        r-base \
+        r-base-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN Rscript -e 'install.packages(c("fixest", "plm", "ivreg", "jsonlite", "languageserver", "marginaleffects"), repos = "https://cloud.r-project.org")'

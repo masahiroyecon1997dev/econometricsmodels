@@ -1,22 +1,22 @@
-"""WLSのテストフィクスチャ（tests/api_tests/fixtures/benchmarks/wls.json）を生成するスクリプト。
+"""WLSのテストフィクスチャ（tests/fixtures/benchmarks/wls.json）を生成するスクリプト。
 
 `benchmark/linear/run_statsmodels_benchmark.py`（`--weight-col`指定でsmf.wlsを使う）を
 全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つのJSONにまとめて書き出す。
 構成は`generate_ols_fixtures.py`に合わせている（重み列`weight`を追加で渡す点のみ異なる）。
 
-シナリオが持つ`weight`列は、OLS実装時（Issue #15）から既に含まれている合成データ生成
+シナリオが持つ`weight`列は、OLS実装時から既に含まれている合成データ生成
 ロジックのもの（heteroskedasticシナリオは`1/sigma_i^2`、それ以外は`uniform(0.5, 1.5)`。
 いずれも正の値）をそのまま使う。詳細は`docs/spec/wls-spec.md`参照。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`wls.json`は
-`tests/api_tests/fixtures/benchmarks/`に置く（`.claude/rules/testing-policy.md`
-「ベンチマーク値のフィクスチャ化」参照）。合成データの入力は`tests/api_tests/
+`tests/fixtures/benchmarks/`に置く（`.claude/rules/testing-policy.md`
+「ベンチマーク値のフィクスチャ化」参照）。合成データの入力は`tests/
 fixtures/benchmarks/data/`に固定済みのCSVを読む（`benchmark/freeze_datasets.py`
 参照）。401ksubs（Wooldridge）は`load_wooldridge.py`経由で都度ロードする
 （データの再配布ライセンスが未確認のためCSVとして固定しない）。
 
 使用例:
-    python generate_wls_fixtures.py --output ../../../tests/api_tests/fixtures/benchmarks/wls.json
+    python generate_wls_fixtures.py --output ../../../tests/fixtures/benchmarks/wls.json
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(
@@ -32,18 +32,17 @@ sys.path.insert(
 )  # benchmark/linear/ を import path に追加（run_statsmodels_benchmark）
 sys.path.insert(
     0, str(Path(__file__).resolve().parents[2])
-)  # benchmark/ を import path に追加（load_wooldridge, generate_synthetic_datasets）
+)  # benchmark/ を import path に追加（load_wooldridge, _common）
 
-import polars as pl  # noqa: E402
-import statsmodels  # noqa: E402
-
-from generate_synthetic_datasets import imbalanced_cluster_groups  # noqa: E402
-from load_wooldridge import load as load_wooldridge  # noqa: E402
-from run_statsmodels_benchmark import DATA_DIR, run  # noqa: E402
+import polars as pl
+import statsmodels
+from _common import DATA_DIR, imbalanced_cluster_groups
+from load_wooldridge import load as load_wooldridge
+from run_statsmodels_benchmark import run
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md
 # 「テストの3系統」参照）。ComputationErrorが発生することのみをテスト
-# コード側で確認する（OLSと同じ挙動をWLSでも実測確認済み、Issue #106）。
+# コード側で確認する（OLSと同じ挙動をWLSでも実測確認済み）。
 NUMERIC_SCENARIOS = [
     "baseline",
     "small_n",
@@ -52,13 +51,20 @@ NUMERIC_SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "high_condition_number",
-    # n=k+1（自由度1ちょうど）の成功パス（Issue #106、OLSのIssue #101相当）。
+    # scale_varianceより緩いスケール差の成功パス（OLSの同種ケース相当）。
+    "scale_variance_mild",
+    # n=k+1（自由度1ちょうど）の成功パス（OLSの同種ケース相当）。
     "baseline_df1",
 ]
 
 # classical/HC系は全シナリオで確認。HACはautocorrelatedシナリオが本来の目的
 # （他のシナリオでも動くことの確認はできるが、統計的な意味は薄い。OLSと同じ方針）。
 COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
+
+# 401ksubs（クロスセクションデータ）ではHACは時系列順が無いため対象外
+# （OLSのwage1/gpa2実データcrosscheckと同じくHC0-3のみを対象にする）。
+# クラスターはage分位ビン（_run_401ksubs_caseのcluster_col="age_bin"）で別途追加。
+WOOLDRIDGE_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
 
 
 def build_fixtures() -> dict:
@@ -78,13 +84,13 @@ def build_fixtures() -> dict:
 
         # クラスターロバストSEは、シナリオ依存ではなくグルーピングの動作確認が目的のため、
         # baselineシナリオでのみ、複数のグルーピングパターンで確認する
-        # （generate_ols_fixtures.pyと同じ方針、Issue #100・#106）。
+        # （generate_ols_fixtures.pyと同じ方針）。
         if scenario == "baseline":
             n = pl.read_csv(DATA_DIR / "synthetic_baseline.csv").height
             fixtures[scenario]["cluster"] = _run_cluster_case()
             fixtures[scenario]["cluster_imbalanced"] = _run_cluster_case(
                 groups=imbalanced_cluster_groups(n),
-                note="不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。Issue #106。",
+                note="不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。",
             )
             # OLS側（generate_ols_fixtures.py）と同じ理由でq=1（説明変数1個）に
             # 絞る。baseline既定の3個のままG=2にすると、ロバストWald検定の
@@ -94,28 +100,36 @@ def build_fixtures() -> dict:
             fixtures[scenario]["cluster_g2"] = _run_cluster_case(
                 groups=[str(i % 2) for i in range(n_g2)],
                 note="クラスタ数境界（G=2ちょうど）の成功パス確認用。"
-                "説明変数1個（q=1）に絞っている（Issue #106、OLSのIssue #100"
+                "説明変数1個（q=1）に絞っている（OLSの同種ケース"
                 "相当。3個だとロバストWald検定の共分散行列が特異になり"
                 "ComputationError）。",
                 k1=True,
             )
 
-    fixtures["401ksubs"] = _run_401ksubs_case()
+    fixtures["401ksubs"] = {
+        cov_type: _run_401ksubs_case(cov_type)
+        for cov_type in WOOLDRIDGE_COV_TYPES
+    }
+    fixtures["401ksubs"]["cluster"] = _run_401ksubs_case(
+        "cluster", cluster_col="age_bin"
+    )
 
     fixtures["_meta"] = {
         "method": "wls",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "primary_reference": "statsmodels",
         "statsmodels_version": statsmodels.__version__,
         "note": (
             "perfect_multicollinearity・scale_varianceシナリオはここに含まない"
             "（いずれもComputationErrorの発生確認のみ、テストコード側で対応。"
-            "scale_varianceはOLSと同じ理由（Issue #107）でロバストWald検定の"
-            "共分散部分行列が全cov_typeで数値的にほぼ特異になる、Issue #106で"
+            "scale_varianceはOLSと同じ理由でロバストWald検定の"
+            "共分散部分行列が全cov_typeで数値的にほぼ特異になる、"
             "WLSでも実測確認済み）。"
             "重みは合成データセットの'weight'列（OLS実装時から存在、常に正）を使う。"
             "クロスチェック用のRベンチマークはwls_crosscheck.json（別スクリプト）で生成する。"
             "401ksubsの回帰式・重み定義はdocs/spec/wls-spec.md参照。"
+            "401ksubsはclassical/HC0-3（HACは時系列順が無いため対象外）と"
+            "クラスター（ageの分位ビン、_add_age_bin参照）をcov_type別に持つ。"
         ),
     }
     return fixtures
@@ -157,7 +171,7 @@ def _run_cluster_case(
         "_meta": {
             "reference": "statsmodels",
             "statsmodels_version": statsmodels.__version__,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "note": note,
             "formula": formula,
             "weight_col": "weight",
@@ -165,23 +179,39 @@ def _run_cluster_case(
     }
 
 
-def _run_401ksubs_case() -> dict:
+def _run_401ksubs_case(cov_type: str, cluster_col: str | None = None) -> dict:
     """実データ（401ksubs、fsize==1）でのWLSベンチマーク。
 
     回帰式・重み定義はdocs/spec/wls-spec.md「テスト」で確定した内容（Wooldridge Example 8.5・8.6と同じ変数構成、
     Var(u|inc) ∝ inc という単純WLSの仮定に基づき重み = 1/inc）。
+
+    Args:
+        cov_type: "classical"/"hc0"-"hc3"/"cluster"（HACは時系列順の無い
+            クロスセクションデータのため対象外、OLSのwage1/gpa2と同じ方針）。
+        cluster_col: cov_type="cluster"のときのグループ列名
+            （`age_bin`、地域等の自然なカテゴリ列が無いため年齢の分位ビンで代用。
+            `_add_age_bin`参照）。
     """
     import statsmodels.formula.api as smf
 
     df = load_wooldridge("401ksubs").filter(pl.col("fsize") == 1)
+    if cov_type.lower() == "cluster":
+        df = _add_age_bin(df)
 
     formula = "nettfa ~ inc + incsq + age + agesq + male + e401k"
     pandas_df = df.to_pandas()
     pandas_df["inv_inc"] = 1.0 / pandas_df["inc"]
 
+    sm_cov_type = {"classical": "nonrobust"}.get(
+        cov_type.lower(), cov_type.lower()
+    )
+    fit_kwargs: dict = {"cov_type": sm_cov_type, "use_t": True}
+    if sm_cov_type == "cluster":
+        fit_kwargs["cov_kwds"] = {"groups": pandas_df[cluster_col]}
+
     model = smf.wls(
         formula=formula, data=pandas_df, weights=pandas_df["inv_inc"]
-    ).fit(cov_type="nonrobust", use_t=True)
+    ).fit(**fit_kwargs)
 
     ci = model.conf_int(alpha=0.05)
     return {
@@ -209,25 +239,48 @@ def _run_401ksubs_case() -> dict:
         "_meta": {
             "reference": "statsmodels",
             "statsmodels_version": statsmodels.__version__,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "formula": formula,
             "weight": "1/inc",
             "filter": "fsize == 1",
+            "cov_type": cov_type,
             "note": (
                 "Wooldridge『Introductory Econometrics』Example 8.5と同じ変数構成"
                 "（nettfa ~ inc + incsq + age + agesq + male + e401k、fsize==1の"
                 "単身世帯サブサンプル）。重みはVar(u|inc) ∝ incという単純な仮定に"
                 "基づく1/inc（feasible GLSではない、analytic weight）。"
+                + (
+                    "地域等の実カテゴリ列が無いため、ageの分位ビン（8分位、"
+                    "_add_age_bin参照）を疑似的なクラスター列として使う。"
+                    if cov_type.lower() == "cluster"
+                    else ""
+                )
             ),
         },
     }
+
+
+def _add_age_bin(df: pl.DataFrame, n_bins: int = 8) -> pl.DataFrame:
+    """`age`を分位点で`n_bins`個にビン化した`age_bin`列を追加する。
+
+    401ksubsには地域等の自然なカテゴリ列が無いため（marr/maleのような
+    2値変数のみ）、実データでのクラスターロバストSE検証（testing-policy.md
+    「実データでのグループ列も検証する」）用に、実データの分布から作る
+    疑似グループとして年齢の分位ビンを使う（G=8、q=6の説明変数より十分大きい）。
+    """
+    return df.with_columns(
+        pl.col("age")
+        .qcut(n_bins, allow_duplicates=True)
+        .alias("age_bin")
+        .cast(pl.Utf8)
+    )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/api_tests/fixtures/benchmarks/wls.json",
+        default="../../../tests/fixtures/benchmarks/wls.json",
     )
     args = parser.parse_args()
 

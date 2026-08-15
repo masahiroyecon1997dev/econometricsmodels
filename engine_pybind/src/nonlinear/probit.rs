@@ -14,9 +14,9 @@
 //! `build_probit_input`が`PyDataFrame`ではなく`polars::DataFrame`（プレーンなpolars型）を
 //! 受け取る設計にしているのは、`column_extraction::extract_f64_column`等が既に同じ
 //! シグネチャ（`&DataFrame`）を使っているため、およびPythonインタプリタ（GIL）を
-//! 起動せずに`cargo test`で直接ユニットテストできるようにするため（Issue #81）。
+//! 起動せずに`cargo test`で直接ユニットテストできるようにするため。
 //! `fit`（本ファイルの`pub(crate)`関数、`#[pyfunction] fit_probit`本体は`lib.rs`側にあり
-//! これに委譲する、Issue #82）が`PyDataFrame`を受け取り、`.into()`で`DataFrame`に変換して
+//! これに委譲する）が`PyDataFrame`を受け取り、`.into()`で`DataFrame`に変換して
 //! から`build_probit_input`を呼ぶ（`logit.rs`の`fit`関数と同じ変換パターン）。
 
 use engine::nonlinear::common::{CovType as EngineCovType, Method as EngineMethod};
@@ -31,8 +31,8 @@ use super::common::{
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
 use crate::errors::ValidationError;
 use crate::validation::{
-    validate_no_const_collision, validate_no_duplicate_roles, validate_no_duplicate_x,
-    validate_x_non_empty,
+    RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
+    validate_no_duplicate_within_role, validate_x_non_empty,
 };
 
 /// Estimation options for Probit.
@@ -45,7 +45,7 @@ use crate::validation::{
 /// `start_params` (user-specified initial values) is intentionally omitted: the
 /// underlying engine (`ProbitEstimator::fit`) does not accept it yet (deferred,
 /// same as `LogitOptions`). It will be added once the engine side supports it.
-// `fit`（Issue #82）がPython側から`ProbitOptions`インスタンスを引数として受け取るため、
+// `fit`がPython側から`ProbitOptions`インスタンスを引数として受け取るため、
 // `FromPyObject`実装を明示的に維持する（`LogitOptions`と同じ理由、pyo3 0.28以降、Cloneを
 // 実装する#[pyclass]のFromPyObject自動導出はopt-inに変更されたため）。
 // module: PyO3の#[pyclass]はデフォルトで__module__="builtins"になり、
@@ -224,7 +224,7 @@ impl ProbitResult {
     /// Predicted probabilities for the training data used in `fit()`.
     ///
     /// Out-of-sample prediction (a `new_data` argument) is not yet supported
-    /// (tracked separately; see `docs/planning/specs/probit-implementation-notes.md`).
+    /// (see `docs/spec/probit-spec.md`, "未実装・未対応").
     fn predict(&self) -> Vec<f64> {
         self.estimator.predict()
     }
@@ -328,7 +328,7 @@ fn parse_method(method_lower: &str) -> PyResult<EngineMethod> {
 
 /// Pythonから渡された `data` / `y` / `x` / `options` を検証し、
 /// `engine::nonlinear::probit::ProbitInput::from_columns`を呼び出すところまでを行う。
-/// `ProbitEstimator::fit`の呼び出し・`ProbitResult`の構築は`fit`（本ファイル、Issue #82）が行う。
+/// `ProbitEstimator::fit`の呼び出し・`ProbitResult`の構築は`fit`（本ファイル）が行う。
 ///
 /// # Errors
 /// - 列の抽出時に発覚する問題（列が存在しない、数値/文字列型にキャストできない、
@@ -350,8 +350,8 @@ pub(crate) fn build_probit_input(
     // 完全な多重共線性を早期に、分かりやすいエラーで防ぐ（`validation.rs`に集約、
     // OLS/WLS/Logitと共通、`.claude/rules/rust-style.md`参照）。
     validate_x_non_empty(&x)?;
-    validate_no_duplicate_roles(&[("y", &y)], &x)?;
-    validate_no_duplicate_x(&x)?;
+    validate_no_duplicate_roles(&[("y", RoleValue::Single(&y)), ("x", RoleValue::Multi(&x))])?;
+    validate_no_duplicate_within_role("x", &x)?;
     validate_no_const_collision(&x, options.include_intercept)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
@@ -462,13 +462,14 @@ mod tests {
         let df = well_formed_df();
         let options = default_options();
 
-        let (input, cov_type, method) = build_probit_input(
+        let Ok((input, cov_type, method)) = build_probit_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string(), "x2".to_string()],
             &options,
-        )
-        .unwrap();
+        ) else {
+            panic!("expected Ok");
+        };
 
         assert_eq!(input.nobs(), 4);
         assert_eq!(input.k(), 3); // const + x1 + x2
@@ -487,8 +488,11 @@ mod tests {
         let mut options = default_options();
         options.include_intercept = false;
 
-        let (input, _, _) =
-            build_probit_input(&df, "y".to_string(), vec!["x1".to_string()], &options).unwrap();
+        let Ok((input, _, _)) =
+            build_probit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
+        else {
+            panic!("expected Ok");
+        };
 
         assert_eq!(input.k(), 1);
         assert_eq!(input.param_names(), ["x1".to_string()]);
@@ -604,8 +608,11 @@ mod tests {
         options.cov_type = "cluster".to_string();
         options.cluster_col = Some("cluster".to_string());
 
-        let (_, cov_type, _) =
-            build_probit_input(&df, "y".to_string(), vec!["x1".to_string()], &options).unwrap();
+        let Ok((_, cov_type, _)) =
+            build_probit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
+        else {
+            panic!("expected Ok");
+        };
 
         match cov_type {
             EngineCovType::Cluster { groups } => {
@@ -632,12 +639,69 @@ mod tests {
         let mut options = default_options();
         options.cov_type = "cluster".to_string();
 
-        let (_, cov_type, _) =
-            build_probit_input(&df, "y".to_string(), vec!["x1".to_string()], &options).unwrap();
+        let Ok((_, cov_type, _)) =
+            build_probit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
+        else {
+            panic!("expected Ok");
+        };
 
         match cov_type {
             EngineCovType::Cluster { groups } => assert!(groups.is_none()),
             other => panic!("expected Cluster, got {other:?}"),
+        }
+    }
+
+    /// `build_probit_input`（Python境界から渡された文字列を受ける入口）を通した
+    /// 大文字小文字非依存性の検証（`build_logit_input`の同名テストと同じ理由、
+    /// `testing-completeness-reviewer`指摘、Issue #231フェーズ4）。
+    #[test]
+    fn build_probit_input_cov_type_is_case_insensitive() {
+        let df = well_formed_df();
+        for (input, is_expected) in [
+            (
+                "classical",
+                (|c: &EngineCovType| matches!(c, EngineCovType::Classical))
+                    as fn(&EngineCovType) -> bool,
+            ),
+            ("CLASSICAL", |c| matches!(c, EngineCovType::Classical)),
+            ("Classical", |c| matches!(c, EngineCovType::Classical)),
+            ("OPG", |c| matches!(c, EngineCovType::Opg)),
+            ("Hc0", |c| matches!(c, EngineCovType::Hc0)),
+            ("HC1", |c| matches!(c, EngineCovType::Hc1)),
+            ("CLUSTER", |c| matches!(c, EngineCovType::Cluster { .. })),
+        ] {
+            let mut options = default_options();
+            options.cov_type = input.to_string();
+            let Ok((_, cov_type, _)) = build_probit_input(
+                &df,
+                "y".to_string(),
+                vec!["x1".to_string(), "x2".to_string()],
+                &options,
+            ) else {
+                panic!("expected Ok for cov_type={input}");
+            };
+            assert!(is_expected(&cov_type), "input={input}, got={cov_type:?}");
+        }
+    }
+
+    #[test]
+    fn build_probit_input_accepts_nonrobust_as_classical_alias() {
+        let df = well_formed_df();
+        for input in ["nonrobust", "NONROBUST", "NonRobust"] {
+            let mut options = default_options();
+            options.cov_type = input.to_string();
+            let Ok((_, cov_type, _)) = build_probit_input(
+                &df,
+                "y".to_string(),
+                vec!["x1".to_string(), "x2".to_string()],
+                &options,
+            ) else {
+                panic!("expected Ok for cov_type={input}");
+            };
+            assert!(
+                matches!(cov_type, EngineCovType::Classical),
+                "input={input}"
+            );
         }
     }
 }

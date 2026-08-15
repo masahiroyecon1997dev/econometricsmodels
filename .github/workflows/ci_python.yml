@@ -8,7 +8,7 @@ on:
       - "engine_pybind/**"
       - "pyproject.toml"
       - "uv.lock"
-      - "tests/api_tests/**"
+      - "tests/**"
       - ".github/workflows/ci_python.yml"
   # pull_requestにはpathsフィルタを付けない（ci_engine.ymlと同じ理由、
   # 「必須ステータスチェック」参照）。
@@ -16,6 +16,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -45,7 +48,7 @@ jobs:
         run: uv run --locked --group test maturin develop
 
       - name: pytest
-        run: uv run --locked --group test pytest tests/api_tests
+        run: uv run --locked --group test pytest tests
 
       - name: ruff check
         run: uv run --locked --group test ruff check .
@@ -63,12 +66,12 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      # engine_pybindはci_engine.yml（-p engineのみ対象）の対象外のため、ここで担当する
-      # （Issue #23での決定）。pyo3のビルドスクリプトはリンク済みのPython3を必要とするが、
+      # engine_pybindはci_engine.yml（-p engineのみ対象）の対象外のため、ここで担当する。
+      # pyo3のビルドスクリプトはリンク済みのPython3を必要とするが、
       # abi3等のバージョン限定cfgを使っていないため、ubuntu-latestランナーに元から
       # 入っているpython3で十分（マトリクス化は不要）。
       #
-      # cargo test: Issue #65で`crate-type = ["cdylib", "rlib"]`・`pyo3`の
+      # cargo test: `crate-type = ["cdylib", "rlib"]`・`pyo3`の
       # `extension-module`フィーチャ非直接指定への変更により`cargo test -p engine_pybind`が
       # 可能になった（`extension-module`はmaturin実行時のみ`pyproject.toml`側から有効化する
       # 設計、`engine_pybind/Cargo.toml`のコメント参照）。これに伴い追加した

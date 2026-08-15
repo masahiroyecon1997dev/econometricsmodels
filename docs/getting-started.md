@@ -17,8 +17,8 @@ df = pl.DataFrame(
 
 result = OLS(df, y="y", x=["x1"]).fit()
 
-print(result.params)       # {"const": ..., "x1": ...}
-print(result.std_errors)   # {"const": ..., "x1": ...}
+print(result.params)  # {"const": ..., "x1": ...}
+print(result.std_errors)  # {"const": ..., "x1": ...}
 print(result.r_squared)
 ```
 
@@ -102,8 +102,8 @@ df = pl.DataFrame(
 
 result = Logit(df, y="y", x=["x1"]).fit()
 
-print(result.params)         # {"const": ..., "x1": ...}
-print(result.std_errors)     # {"const": ..., "x1": ...}
+print(result.params)  # {"const": ..., "x1": ...}
+print(result.std_errors)  # {"const": ..., "x1": ...}
 print(result.pseudo_r_squared)
 ```
 
@@ -151,12 +151,56 @@ df = pl.DataFrame(
 
 result = Probit(df, y="y", x=["x1"]).fit()
 
-print(result.params)         # {"const": ..., "x1": ...}
-print(result.std_errors)     # {"const": ..., "x1": ...}
+print(result.params)  # {"const": ..., "x1": ...}
+print(result.std_errors)  # {"const": ..., "x1": ...}
 print(result.pseudo_r_squared)
 ```
 
 `ProbitOptions` supports the same `cov_type` and `method` choices as `LogitOptions`; see the [API Reference](api/probit.md) for the full list of options. `ProbitResults.predict()`, `pred_table()`, and `marginal_effects()` work exactly like their [Logit](#predicted-values-and-classification-table) counterparts (substitute `Probit`/`ProbitOptions` for `Logit`/`LogitOptions` in the examples above).
+
+## IV (instrumental variables: 2SLS/GMM)
+
+`IV` estimates a linear model with endogenous regressors. Independent variables are split into `x_exog` (exogenous) and `x_endog` (endogenous), plus `instruments` (excluded instruments — at least one per endogenous variable for identification).
+
+```python
+import polars as pl
+from econometricsmodels import IV
+
+df = pl.DataFrame(
+    {
+        "y": [1.0, 2.4, 2.9, 4.3, 5.1, 5.8, 7.2, 7.9],
+        "endog1": [1.1, 1.9, 2.8, 3.6, 4.4, 5.3, 6.0, 6.9],
+        "z1": [0.9, 2.1, 2.7, 3.9, 4.2, 5.6, 5.8, 7.1],
+    }
+)
+
+result = IV(df, y="y", x_exog=[], x_endog=["endog1"], instruments=["z1"]).fit()
+
+print(result.params)  # {"const": ..., "endog1": ...}
+print(result.std_errors)  # {"const": ..., "endog1": ...}
+print(result.r_squared)
+```
+
+`IvOptions.method` selects `"2sls"` (default) or `"gmm"`. `cov_type` supports the same range as [OLS](#switching-the-type-of-standard-error); for `method="gmm"`, a separate `weight_type` selects the weight matrix used for point estimation. See the [API Reference](api/iv.md) for the full list of options.
+
+### Diagnostics and first-stage results
+
+```python
+print(result.weak_instrument_f_statistics)  # {"endog1": ...}
+print(
+    result.overid_statistic, result.overid_p_value
+)  # None, None (just-identified)
+print(
+    result.wu_hausman_statistic, result.wu_hausman_p_value
+)  # method="2sls" only
+
+first_stage = result.first_stage()
+print(
+    first_stage["endog1"].params
+)  # OlsResults for endog1 ~ x_exog + instruments
+```
+
+See the [API Reference](api/iv.md#diagnostics) for what each diagnostic tests and when it is `None`.
 
 ## Error handling
 

@@ -11,6 +11,27 @@ A Python API providing statistical and econometric analysis methods. It is prima
 - Data input is restricted to **polars** DataFrames only, passed to the Rust side via **Arrow zero-copy**.
 - Formula-string parsing (e.g. `y ~ x1 + x2`) is not used. The dependent variable is passed as a single column name (`str`), independent variables as a list of column names (`list[str]`), and estimation options as an instance of a dedicated class.
 
+## Is this for you?
+
+**Good fit:**
+
+- Calling estimation methods from scripts, pipelines, or GUI apps — the `str`/`list[str]` + options-object API (see above) is built for programmatic construction, not interactive formula-writing.
+- Exploratory or experimental analysis, where you value having validation (see [Verification accuracy](#verification-accuracy) below) but don't need the full breadth of diagnostics a mature package offers.
+- Environments where a pure-Rust computational core (no system BLAS/LAPACK dependency) simplifies installation.
+- Working with large datasets, where the **polars + Arrow zero-copy** handoff to the Rust core (see above) avoids the extra data copy that pandas/numpy-conversion-based wrappers typically incur.
+- Projects that will lean on more than one econometric method over time — the roadmap covers a broad range (see [Implementation status](#implementation-status)), all under one consistent API.
+
+**Probably not a good fit:**
+
+- Published research or other work where correctness has to be beyond question — see the disclaimer below.
+- Workflows built around R-style formula syntax (`y ~ x1 + x2`); this is a deliberate design choice (see above), not a missing feature, and isn't planned.
+- Use cases that need the long tail of diagnostics, edge-case handling, and model types that statsmodels/R packages have accumulated over years of real-world use.
+- Cases where you only ever need a single method, or where install footprint is tight — this package bundles everything into one Rust-compiled extension by design, so it's not the leanest choice if you don't need the breadth.
+
+## Disclaimer
+
+This is a solo-maintained, pre-1.0 project. Estimates are checked against statsmodels/R reference implementations (see [Verification accuracy](#verification-accuracy)), but it has not had the years of community scrutiny and edge-case hardening that established packages have. **If you're using this for an important decision — an academic paper or otherwise — we strongly recommend double-checking against a trusted, established package such as [statsmodels](https://www.statsmodels.org/) or an R equivalent.**
+
 ## Installation
 
 ```bash
@@ -36,8 +57,8 @@ df = pl.DataFrame(
 
 result = OLS(df, y="y", x=["x1"]).fit()
 
-print(result.params)       # {"const": ..., "x1": ...}
-print(result.std_errors)   # {"const": ..., "x1": ...}
+print(result.params)  # {"const": ..., "x1": ...}
+print(result.std_errors)  # {"const": ..., "x1": ...}
 print(result.r_squared)
 
 # Row-oriented parameter table (param/coef/std_err/t_stat/p_value/conf_lower/conf_upper).
@@ -77,9 +98,7 @@ For more details — including how to switch to heteroskedasticity-robust standa
 
 ## Implementation status
 
-Implemented: **OLS** (Ordinary Least Squares), **WLS** (Weighted Least Squares), **Logit**, **Probit**.
-
-In progress: **IV** (2SLS/GMM).
+Implemented: **OLS** (Ordinary Least Squares), **WLS** (Weighted Least Squares), **Logit**, **Probit**, **IV** (2SLS/GMM).
 
 Planned next, in this order: **Tobit → FE (Fixed Effects) → RE (Random Effects) → GLS**.
 
@@ -95,6 +114,10 @@ Estimates for each implemented method (coefficients, standard errors, confidence
 | OLS / WLS | HAC (Newey-West) | statsmodels (relative tolerance 1e-8) | R (relative tolerance 1e-2 for OLS, 5e-2 for WLS — looser due to differing small-sample correction conventions) |
 | Logit / Probit | classical / OPG / HC0 / cluster | statsmodels (relative tolerance 1e-8) | R (`glm` + `sandwich`/`marginaleffects`, relative tolerance ~2e-4 — looser due to differing optimizer convergence) |
 | Logit / Probit | HC1 | R (`glm` + `sandwich`, relative tolerance ~2e-4) — used as the primary reference here, since statsmodels' discrete-choice models omit the `n/(n-k)` small-sample correction for HC1 | — |
+| IV (2SLS) | classical / HC0-HC1 / cluster | linearmodels (relative tolerance 1e-8) | R (`ivreg` + `sandwich`/`lmtest`, relative tolerance 1e-8) |
+| IV (2SLS) | HAC (Newey-West) | linearmodels (relative tolerance 1e-8) | R (relative tolerance 1e-2, loosened to 1e-1 for a small-`n` scenario) |
+| IV (2SLS / GMM) | HC2/HC3 | Verified against a manually-derived sandwich formula only (no cross-implementation reference: linearmodels has no HC2/HC3 for IV, and `ivreg` has no established leverage formula for it) | — |
+| IV (GMM) | classical / HC0-HC1 / cluster / HAC | linearmodels `IVGMM` (relative tolerance 1e-8) | — (`ivreg` does not support GMM) |
 
 ## License
 

@@ -235,9 +235,10 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   追加できれば、`_run_cluster_case`・`_run_401ksubs_case`とも`run()`一本化できる
   可能性がある。範囲が広がるため、項目12とまとめて検討する方が効率的。
 - **気づいた経緯**: 2026-08-15、`generate_wls_fixtures.py`解説中に発見。
-  `generate_logit_fixtures.py`にも同型の`_run_cluster_case`（`smf.logit`+`disp=0`版）が
-  あることを確認済み（linear 2ファイルに続く3ファイル目の実例、2026-08-15）。
-- **状態**: 未対応（着手要否はユーザー判断待ち、項目12と合わせて検討。nonlinear/iv系統にも
+  `generate_logit_fixtures.py`（`smf.logit`+`disp=0`版）・`generate_probit_fixtures.py`
+  （`smf.probit`+`disp=0`版）にも同型の`_run_cluster_case`があることを確認済み
+  （linear 2ファイル＋nonlinear 2ファイルの計4ファイル全てに存在、2026-08-15）。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目12と合わせて検討。iv系統にも
   同型の重複が無いか着手時に確認する）
 
 ### 14. `COV_TYPES`への`cluster`混入がOLS/WLSとLogitで不統一、メインループ自体の共通化余地
@@ -246,15 +247,15 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   （`COV_TYPES = ["classical", "opg", "hc0", "cluster"]` + メインループ内`if cov_type ==
   "cluster": continue`）と、OLS/WLSの`COV_TYPES`（`cluster`を含まない、`continue`不要）
 - **内容**: ユーザー指摘（2026-08-15）。実際の挙動（clusterはメインループで処理せず、
-  専用の複数パターンとして後段で個別処理する）はOLS/WLS/Logitで完全に同じだが、
-  Logitだけ`COV_TYPES`に`cluster`を含めた上で`continue`スキップしている。意味のある
-  設計差ではなく単なる書き方のブレ。`cluster`を`COV_TYPES`から除けば`continue`も
-  不要になりOLS/WLSと統一できる。
+  専用の複数パターンとして後段で個別処理する）はOLS/WLS/Logit/Probit（Probit側も確認済み）
+  で完全に同じだが、Logit・Probitだけ`COV_TYPES`に`cluster`を含めた上で`continue`
+  スキップしている。意味のある設計差ではなく単なる書き方のブレ。`cluster`を`COV_TYPES`
+  から除けば`continue`も不要になりOLS/WLSと統一できる。
 - **Claudeの所感**: 統一後、メインループ本体（`for scenario: for cov_type: run(...)`の
   二重ループ＋辞書構築）自体を`_common.py`に`build_numeric_fixtures(run_fn, scenarios,
   cov_types, **extra_kwargs)`のような共通ヘルパーとして切り出せる可能性がある
-  （`weight_col`等のオプション差分は`**extra_kwargs`で吸収）。OLS/WLS/Logit/Probit
-  （Probit未確認）の4ファイル分の重複を解消できる見込みで、影響範囲は大きい。
+  （`weight_col`/`model`等のオプション差分は`**extra_kwargs`で吸収）。OLS/WLS/Logit/Probit
+  の4ファイル分の重複を解消できる見込みで、影響範囲は大きい。
 - **気づいた経緯**: 2026-08-15、`generate_logit_fixtures.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 

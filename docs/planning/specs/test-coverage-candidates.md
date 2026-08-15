@@ -220,3 +220,26 @@
   考えるが、面白い観点として記録しておく。
 - **気づいた経緯**: 2026-08-15、`generate_ols_fixtures.py`解説後のユーザー指摘。
 - **状態**: 未対応（要否・優先度はユーザー判断待ち）
+
+### 13. OLSに主リファレンス（statsmodels）側の実データ検証が無い（Rクロスチェック側のみ）
+
+- **対象**: [benchmark/linear/fixtures/generate_ols_fixtures.py](../../../benchmark/linear/fixtures/generate_ols_fixtures.py)（statsmodels側、
+  実データ無し）・[benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py](../../../benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py)
+  （Rクロスチェック側、wage1/gpa2あり）
+- **内容**: ユーザー指摘（2026-08-15）。実測確認したところ、OLSの実データ（wage1/gpa2）
+  検証は`generate_ols_crosscheck_fixtures.py`（Rクロスチェック側）にのみ存在し、
+  `generate_ols_fixtures.py`（statsmodels＝`testing-policy.md`が定める主リファレンス側）
+  には実データが一切含まれていなかった。対照的にWLSは`generate_wls_fixtures.py`
+  （statsmodels側）・`generate_wls_crosscheck_fixtures.py`（R側）の両方に401ksubsが
+  存在し、非対称な状態だった。
+  - ユーザーからの「WLSが内包しているから不要では」という疑問に対し、
+    `engine/src/linear/wls.rs`の`fit_with_all_weights_one_matches_ols`
+    （重み=1でOLSと一致することを確認するRust単体テスト）の存在を確認したが、
+    これは**合成データでの単体テスト**であり、OLS・WLSは別実装（`ols.rs`/`wls.rs`、
+    片方がもう片方を内部で呼ぶ関係ではない）である上、WLSの実データ統合テストは
+    常に`weights=1/inc`（重み≠1）で動くため、実データ経由でOLS相当のコードパスが
+    検証されたことは一度もないと判明した。
+- **Claudeの所感**: 別実装である以上、実データによる早期発見の観点から、
+  wage1/gpa2をstatsmodels側（`generate_ols_fixtures.py`）にも追加することを推奨する。
+- **気づいた経緯**: 2026-08-15、`generate_wls_fixtures.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

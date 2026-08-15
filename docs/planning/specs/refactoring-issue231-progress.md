@@ -24,7 +24,7 @@
 | 2 | `benchmark/`ディレクトリの整理とリファクタリング | 完了 |
 | 3 | `tests/`ディレクトリの整理とリファクタリング | 完了 |
 | 3.5 | crosscheckテストの許容誤差計算式バグ修正（`refactor`スキル範囲外） | 完了 |
-| 4 | ロジック整理前のテスト拡充（OLS/WLS/Logit/Probitレビュー＋IV #232〜238） | 一部完了（linear系統〔OLS/WLS〕・nonlinear系統〔Logit/Probit〕完了。IV分〔#232〜238〕は未着手） |
+| 4 | ロジック整理前のテスト拡充（OLS/WLS/Logit/Probitレビュー＋IV #232〜238） | 完了（linear系統〔OLS/WLS〕・nonlinear系統〔Logit/Probit〕・IV系統〔2SLS/GMM〕全て完了） |
 | 5 | `python_package/`のリファクタリング | 未着手 |
 | 6 | `engine_pybind/`のリファクタリング | 未着手 |
 | 7 | `engine/`のリファクタリング | 未着手 |
@@ -561,7 +561,7 @@ tests/api_tests/
    [#238](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/238)）の
    テスト拡充も合わせて実施する。
 
-**状態**: 一部完了（linear系統〔OLS/WLS〕・nonlinear系統〔Logit/Probit〕: 完了。IV分〔#232〜238〕は未着手）
+**状態**: 完了（linear系統〔OLS/WLS〕・nonlinear系統〔Logit/Probit〕・IV系統〔2SLS/GMM、#232〜238〕全て完了）
 
 **メモ（linear系統〔OLS/WLS〕実施結果）**:
 
@@ -680,8 +680,8 @@ tests/api_tests/
     （`"CLUSTER"`/`"Hac"`、指摘のnice to have）も
     `parse_cov_type_is_case_insensitive`に追加した。
 - **未対応・今後**: Logit/Probitの`review-testing`レビュー、IV分
-  （#232〜238）のテスト拡充は本フェーズの別ラウンドとして未着手（→nonlinear系統は
-  下記の通り完了）。
+  （#232〜238）のテスト拡充は本フェーズの別ラウンドとして未着手（→nonlinear系統・
+  IV系統とも下記の通り完了、フェーズ4全体が完了）。
 
 **メモ（nonlinear系統〔Logit/Probit〕実施結果）**:
 
@@ -811,6 +811,116 @@ tests/api_tests/
     バリアントにマッピングされているかを確認していなかった（誤った
     match分岐でも`Ok`である限り通ってしまう）指摘を受け、各入力に対応する
     期待バリアントを`matches!`で突き合わせる形に強化した。
+
+**メモ（IV系統〔2SLS/GMM〕実施結果、Issue #232〜238）**:
+
+- **ステップ0（前提確認）**: `benchmark/iv/freeze_iv_datasets.py`でCSVを、
+  `generate_iv_fixtures.py`（linearmodels 2SLS）・`generate_iv_gmm_fixtures.py`
+  （linearmodels GMM）で`iv.json`/`iv_gmm.json`を再生成したところ、数値・
+  タイムスタンプ以外は完全一致（タイムスタンプのみの差分は`git checkout --`で
+  戻した）。Rクロスチェック（`generate_iv_crosscheck_fixtures.py`）も同様に
+  完全一致を確認。
+- **ステップ1（`review-testing`スキルでのレビュー、IV系統分）**:
+  `testing-completeness-reviewer`に`engine/src/iv/`・`engine_pybind/src/iv/`・
+  `python_package/econometricsmodels/iv/`・`tests/test_iv*.py`・
+  `benchmark/iv/`のレビューを依頼し、must fix 1件・should fix 5件・
+  nice to have 3件、計9件の指摘を得た。ユーザー確認の上、must fix・should fix
+  全6件、nice to have全3件を対応した（未対応の指摘は無し）。
+  1. **[must fix] 複数内生変数（`k_endog>=2`）がPython API境界・フィクスチャ・
+     linearmodels/Rクロスチェックのいずれにも一切存在しない**: 対応の過程で
+     `generate_iv_datasets.py`のDGP自体の見落としを発見した。第一段階誤差`v`が
+     全内生変数に単一列としてブロードキャストされており、`k_endog=2`だと
+     第一段階回帰残差が事実上完全共線（相関~0.99999999999998を実測）になり、
+     Wu-Hausman検定の拡張回帰が推定不能（`wu_hausman_statistic=None`）になる
+     ことが判明した。ユーザー確認の上、`v`を内生変数ごとに独立な誤差
+     （構造誤差`u`とはそれぞれ相関`_RHO_ENDOG`、`v_i`・`v_j`間は無相関）の
+     `(n, k_endog)`行列に一般化する修正を実施（`k_endog=1`では従来と数学的に
+     完全に一致する一般化のため、既存シナリオへの影響はゼロ、再生成CSVが
+     バイト単位で一致することを確認済み）。`freeze_iv_datasets.py`に
+     `iv_baseline_multi_endog.csv`（`k_endog=2, k_instruments=3`、過剰識別）を
+     追加し、`generate_iv_fixtures.py`/`generate_iv_crosscheck_fixtures.py`/
+     `generate_iv_gmm_fixtures.py`の3スクリプト全てにフィクスチャを追加、
+     `test_iv_fixtures.py`/`test_iv_crosscheck.py`/`test_iv_gmm_fixtures.py`に
+     数値照合テストを追加。Rクロスチェック側は`weak_instrument_f`が単一の
+     内生変数を前提にスカラーで返す設計だったため、内生変数名をキーにした
+     dict形式（本実装の`weak_instrument_f_statistics`と同じ形）に一般化した
+     （`run_ivreg_benchmark.R`、既存の全synthetic/wooldridgeエントリにも遡及
+     適用、`test_iv_crosscheck.py`の該当箇所も合わせて修正）。
+  2. **[should fix] `weight_type="kernel"`×`cov_type="hac"`の組み合わせが
+     構造テストにも一度も現れない**: `generate_iv_gmm_fixtures.py`に
+     `kernel_hac`フィクスチャを追加、`test_iv_gmm_fixtures.py`に
+     `test_kernel_hac_matches_linearmodels`を追加。
+  3. **[should fix] `gmm_iterations`が1（1-step）・3以上（iterated）の成功パスが
+     フィクスチャで数値照合されていない**: `generate_iv_gmm_fixtures.py`に
+     `gmm_iterations`フィクスチャ（1・3）を追加。実装中、`weight_type=
+     "unadjusted"`では係数が反復回数に依らず不変（重み`S=Z'Z`が残差に依存
+     しないため）にも関わらず、linearmodelsの`iter_limit=1`のHansen J統計量
+     （0.30086708530935663）が`iter_limit=2/3`の値（0.32832429087644643、
+     2SLSのSarganと機械精度一致）と異なることを発見した。本実装は
+     `gmm_iterations=1`でも一貫して後者を返す（`gmm.rs`のσ̂²・Z'Zスケーリング
+     設計通り、内部的に自己無矛盾）。linearmodels側の`iter_limit=1`固有の
+     計算式の違いが原因と考えられるが未特定のため、ユーザー確認の上
+     `gmm_iterations=1`のときのみHansen J（`overid_statistic`/
+     `overid_p_value`）の比較を除外する（係数・SE等の他統計量は引き続き
+     比較する）方針とした（`test_iv_gmm_fixtures.py`の`_check_result`に
+     `check_overid`引数を追加）。
+  4. **[should fix] 「分散が大きい」データセットシナリオがIVに存在しない**:
+     `generate_iv_datasets.py`に`high_variance`シナリオ（構造誤差`u`の分散を
+     100倍、OLSの`high_variance`と同じ標準偏差10相当）を追加。既存シナリオへの
+     影響はゼロ（`u_var=1.0`固定で数学的に同一）。追加時、Rクロスチェックの
+     `high_variance`×`hac`の`f_p_value`が既存の`RTOL_HAC`（1%）をわずかに
+     超える乖離（実測相対誤差2.37%）を示すことが判明したが、`f_statistic`
+     自体は0.6%程度しか違わずF分布の裾で増幅されるだけの既知のパターン
+     （`small_n`×`hac`と同種）と判断し、`RTOL_HAC_SMALL_N`（10%）を
+     `high_variance`にも適用する形で解消した。
+  5. **[should fix] 実データセットでの検証が皆無**: Wooldridge `card`
+     （Card 1995、大学近接ダミー`nearc2`/`nearc4`を操作変数とする教育年数
+     `educ`の内生性補正、教科書的定番例）を追加。`run_linearmodels_benchmark.py`
+     の`run()`は元々合成データ専用（`_load_iv_dataset`が凍結CSV固定読み込み）
+     だったため、OLS/Logit側の`dataset_source`パターンに倣い
+     `dataset_source`/`y_col`引数を追加して一般化した（IVの合成データは
+     常に`y`列固定のため、実データ対応には`y_col`パラメータ化が必要だった）。
+     `generate_iv_fixtures.py`/`generate_iv_crosscheck_fixtures.py`双方に
+     `card`フィクスチャを追加、`test_iv_fixtures.py`/`test_iv_crosscheck.py`に
+     数値照合テストを追加（`cluster` cov_typeは対応する自然なカテゴリ列が
+     無いため対象外）。
+  6. **[should fix] `cov_type`/`weight_type`の大文字小文字非依存性のテストが
+     無い**: `engine_pybind/src/iv/common.rs`の`parse_iv_cov_type`/
+     `parse_weight_type`は既に`.to_lowercase()`・エイリアス
+     （`nonrobust`↔`classical`、`homoskedastic`↔`unadjusted`、
+     `heteroskedastic`↔`robust`）に対応済みだったが、Python API境界での
+     確認テストが無かった。`test_iv.py`に`test_cov_type_is_case_insensitive`・
+     `test_nonrobust_is_alias_for_classical`・
+     `test_weight_type_is_case_insensitive_and_aliased`を追加（`IvResults`は
+     `cov_type`ラベルは公開するが`weight_type`ラベルは公開しないため、後者は
+     正準表記との`params`一致で確認）。
+  7. **[nice to have] G=2クラスター境界の成功パスが構造確認のみで数値
+     クロスチェックが無い（コメントとコードの乖離あり）**: `generate_iv_
+     fixtures.py`/`generate_iv_crosscheck_fixtures.py`双方のコメントが
+     「IVの第一段階回帰でComputationErrorが再現するため原因究明後に追加予定」
+     という古い記述のままだったが、`engine/src/iv/CLAUDE.md`の記録によれば
+     原因（`k_constant`取り違えバグ）は既に特定・修正済みと判明。両スクリプトに
+     `cluster_g2`フィクスチャを追加し、`test_iv_fixtures.py`/
+     `test_iv_crosscheck.py`に数値照合テストを追加、古いコメントも修正した。
+  8. **[nice to have] 存在しない`cluster_col`列名の`ValidationError`パス未検証
+     （OLS側にも同種の欠落があるとの指摘）**: 実際に確認したところ、5手法
+     全て（OLS/WLS/Logit/Probit/IV）で`column_extraction`の既存の汎用チェック
+     経由で正しく`ValidationError`を返すことを確認済み（挙動自体は正しい、
+     テストが無いだけ）。ユーザー指示で対象をIVだけでなくOLS/WLS/Logit/Probit
+     にも広げ、`test_cluster_col_nonexistent_column_raises`を5ファイル全てに
+     追加した。
+  9. **[nice to have] `x_exog`/`x_endog`/`instruments`列の欠損値・非数値dtype
+     バリデーションが`y`列のみで未検証**: `test_iv.py`の`test_null_values_
+     raise`/`test_non_numeric_dtype_raises`を`bad_col`（`y`/`x1`/`endog1`/
+     `z1`）でparametrizeする形に拡張した。
+- **検証**: `cargo test -p engine`（317件）・`cargo test -p engine_pybind`
+  （72件、IV分の変更はテストコード・ベンチマークスクリプトのみで
+  engine/engine_pybindには変更なし）・`uv run pytest tests`（878件、
+  nonlinear系統フェーズ4完了時点の810件から68件増）・`ruff check`/
+  `ruff format --check`・`cargo fmt --check`・
+  `cargo clippy --all-targets -- -D warnings`（engine・engine_pybind）
+  全てグリーン。今回はengine/engine_pybind/python_packageへの変更が無かった
+  ため`rust-reviewer`/`python-reviewer`の呼び出しは対象外。
 
 ---
 

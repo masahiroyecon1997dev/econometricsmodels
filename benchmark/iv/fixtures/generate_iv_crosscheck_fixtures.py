@@ -53,9 +53,14 @@ from _common import (
     hac_auto_lag,
     imbalanced_cluster_groups,
 )
+from load_wooldridge import load as load_wooldridge
 
 IV_DIR = Path(__file__).resolve().parent.parent
 R_SCRIPT = IV_DIR / "run_ivreg_benchmark.R"
+
+# generate_iv_fixtures.pyのCARD_X_EXOGと同じ（Wooldridge card実データ、
+# Issue #231フェーズ4）。
+CARD_X_EXOG = ["exper", "expersq", "black", "smsa", "south"]
 
 # generate_iv_fixtures.pyと同じシナリオ・構成（ユーザー確認済み）。
 NUMERIC_SCENARIOS = [
@@ -63,6 +68,7 @@ NUMERIC_SCENARIOS = [
     "just_identified",
     "weak_instruments",
     "small_n",
+    "high_variance",
     "heteroskedastic",
     "autocorrelated",
     "moderate_multicollinearity",
@@ -77,11 +83,14 @@ COV_TYPES = ["classical", "hc0", "hc1", "hac", "cluster"]
 
 
 def _ivreg_formula(
-    x_exog_cols: list[str], x_endog_cols: list[str], instrument_cols: list[str]
+    x_exog_cols: list[str],
+    x_endog_cols: list[str],
+    instrument_cols: list[str],
+    y_col: str = "y",
 ) -> str:
     lhs = " + ".join(x_exog_cols + x_endog_cols)
     instruments = " + ".join(x_exog_cols + instrument_cols)
-    return f"y ~ {lhs} | {instruments}"
+    return f"{y_col} ~ {lhs} | {instruments}"
 
 
 def _normalize_names(raw: dict) -> dict:
@@ -165,6 +174,28 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
                 groups=imbalanced_cluster_groups(n),
                 suffix="_cluster_imbalanced",
             )
+            fixtures[scenario]["cluster_g2"] = _run_cluster_g2_case(tmpdir)
+
+    # 複数内生変数（k_endog>=2）。generate_iv_fixtures.pyのmulti_endogと同じ構成
+    # （Issue #231フェーズ4、testing-completeness-reviewer指摘のmust fix）。
+    multi_endog_csv = DATA_DIR / "iv_baseline_multi_endog.csv"
+    multi_endog_formula = _ivreg_formula(
+        ["x1"], ["endog1", "endog2"], ["z1", "z2", "z3"]
+    )
+    multi_endog_n = pl.read_csv(multi_endog_csv).height
+    fixtures["multi_endog"] = {}
+    for cov_type in COV_TYPES:
+        if cov_type == "cluster":
+            continue
+        if cov_type == "hac":
+            lag = hac_auto_lag(multi_endog_n)
+            entry = _run_r(
+                multi_endog_csv, multi_endog_formula, cov_type, hac_lag=lag
+            )
+            entry["hac_lag"] = lag
+        else:
+            entry = _run_r(multi_endog_csv, multi_endog_formula, cov_type)
+        fixtures["multi_endog"][cov_type] = entry
 
     return fixtures
 
@@ -190,10 +221,57 @@ def _run_cluster_case(
     return _run_r(tmp_path, formula, "cluster", cluster_col="cluster_group")
 
 
+def _run_cluster_g2_case(tmpdir: Path) -> dict:
+    """G=2境界の成功パス確認用（`generate_iv_fixtures.py`の
+    `_run_cluster_g2_case`と同じ再現条件、`engine/src/iv/CLAUDE.md`
+    「修正済み」参照）。
+    """
+    csv_path = DATA_DIR / "iv_baseline_g2.csv"
+    df = pl.read_csv(csv_path)
+    n = df.height
+    formula = _ivreg_formula([], ["endog1"], ["z1"])
+    grouped = df.with_columns(
+        pl.Series("cluster_group", [str(i % 2) for i in range(n)])
+    )
+    tmp_path = tmpdir / (csv_path.stem + "_cluster_g2.csv")
+    grouped.write_csv(tmp_path)
+    return _run_r(tmp_path, formula, "cluster", cluster_col="cluster_group")
+
+
+def build_wooldridge_fixtures(tmpdir: Path) -> dict:
+    """実データセット（card、`generate_iv_fixtures.py`のCARD_X_EXOGと同じ構成）の
+    Rクロスチェック（Issue #231フェーズ4、testing-completeness-reviewer指摘の
+    should fix）。
+    """
+    df = load_wooldridge("card")
+    csv_path = tmpdir / "card.csv"
+    df.write_csv(csv_path)
+    formula = _ivreg_formula(
+        CARD_X_EXOG, ["educ"], ["nearc2", "nearc4"], y_col="lwage"
+    )
+    n = df.height
+
+    fixtures: dict = {}
+    for cov_type in COV_TYPES:
+        if cov_type == "cluster":
+            continue  # 対応する自然なカテゴリ列が無いため対象外（generate_iv_fixtures.py参照）。
+        if cov_type == "hac":
+            lag = hac_auto_lag(n)
+            entry = _run_r(csv_path, formula, cov_type, hac_lag=lag)
+            entry["hac_lag"] = lag
+        else:
+            entry = _run_r(csv_path, formula, cov_type)
+        fixtures[cov_type] = entry
+    return fixtures
+
+
 def build_fixtures() -> dict:
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = Path(tmp)
-        fixtures = {"synthetic": build_synthetic_fixtures(tmpdir)}
+        fixtures = {
+            "synthetic": build_synthetic_fixtures(tmpdir),
+            "wooldridge": {"card": build_wooldridge_fixtures(tmpdir)},
+        }
 
     r_version = subprocess.run(
         ["Rscript", "-e", "cat(as.character(getRversion()))"],
@@ -238,8 +316,17 @@ def build_fixtures() -> dict:
             "クロスチェック済み、ユーザー確認済み）。"
             "perfect_multicollinearityはここに含まない（ComputationErrorの"
             "発生確認のみ、テストコード側で対応）。cluster_g2（G=2境界の成功"
-            "パス）はgenerate_iv_fixtures.pyと同じ理由（IVの第一段階回帰で"
-            "ComputationErrorが再現）でここにも含めない。"
+            "パス）は`engine/src/iv/CLAUDE.md`「修正済み」に記録の`k_constant`"
+            "取り違えバグの修正後にフィクスチャ化した。"
+            "multi_endog（複数内生変数、x_endog=['endog1','endog2']）は"
+            "generate_iv_datasets.pyの第一段階誤差vが内生変数ごとに独立になる"
+            "よう修正した後のデータで生成（Issue #231フェーズ4、"
+            "generate_iv_fixtures.pyの同名注記参照）。weak_instrument_fは"
+            "内生変数名をキーにしたdict（本実装のweak_instrument_f_statistics"
+            "と同じ形、run_ivreg_benchmark.R参照）。"
+            "wooldridge.card（Wooldridge実データ、Card 1995、`generate_iv_fixtures.py`"
+            "のCARD_X_EXOGと同じ構成）はcluster cov_typeを除く4種のみ（対応する"
+            "自然なカテゴリ列が無いため）。"
         ),
     }
     return fixtures

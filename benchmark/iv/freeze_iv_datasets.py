@@ -32,6 +32,7 @@ IV_SCENARIOS = [
     "just_identified",
     "weak_instruments",
     "small_n",
+    "high_variance",
     "heteroskedastic",
     "autocorrelated",
     "moderate_multicollinearity",
@@ -50,6 +51,11 @@ IV_K_EXOG_OVERRIDES = {
 # linearのSYNTHETIC_K1_SCENARIOSと同じ理由）。x_exog=0にしてq=1（endog1のみ）に絞る
 # （baseline既定のx_exog=['x1']込みだとq=2になりG=2で必然的に特異になるため）。
 IV_G2_BOUNDARY_SCENARIOS = ["baseline"]
+
+# 複数内生変数（k_endog>=2）の成功パス確認専用（Issue #231フェーズ4、
+# testing-completeness-reviewer指摘のmust fix）。k_instruments=3・k_endog=2で
+# 過剰識別（Sargan/Hansen Jが非nullになる）にする。
+IV_MULTI_ENDOG_SCENARIOS = ["baseline"]
 
 
 def freeze(output_dir: Path) -> None:
@@ -76,6 +82,18 @@ def freeze(output_dir: Path) -> None:
         filename_suffix="_g2",
         key_suffix="_g2",
         k_exog=0,
+    )
+
+    freeze_scenarios(
+        output_dir,
+        generate_iv_dataset,
+        IV_MULTI_ENDOG_SCENARIOS,
+        "iv",
+        iv_true_betas,
+        filename_suffix="_multi_endog",
+        key_suffix="_multi_endog",
+        k_endog=2,
+        k_instruments=3,
     )
 
     (output_dir / "iv_true_beta.json").write_text(

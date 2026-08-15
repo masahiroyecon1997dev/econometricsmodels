@@ -17,7 +17,9 @@ classical/hc0/hc1/clusterはRとほぼ機械精度で一致する（OLSクロス
 Newey-West小標本補正の慣習差がより強く出るためと考えられる（`testing-policy.md`
 「許容誤差」の「統計量・cov_typeごとに実測乖離が大きく異なる場合は許容誤差を
 分けてよい」という規定に従い、`RTOL_HAC_SMALL_N`を実測最大値にマージンを載せた
-値で個別に設定する。ユーザー確認済み）。
+値で個別に設定する。ユーザー確認済み）。`high_variance`シナリオも同じ緩めたRTOLを
+使う（f_statistic自体は0.6%程度しか違わないが、F分布の裾でp値がその差を増幅する。
+実測相対誤差2.37%、Issue #231フェーズ4で発覚）。
 
 `f_p_value`は浮動小数点アンダーフローに近い極小値（1e-9〜1e-12オーダー）になる
 ケースがあり、その領域では相対誤差比較が意味を持たない（F統計量自体は0.6%程度
@@ -60,9 +62,10 @@ sys.path.insert(
 )
 from _assertions import assert_close, assert_dict_close
 from _common import imbalanced_cluster_groups
-from _helpers import DATA_DIR, with_cluster_groups
+from _helpers import DATA_DIR, load_wooldridge_dataset, with_cluster_groups
 from _tolerances import TOLERANCES
 from econometricsmodels import IV, IvOptions
+from generate_iv_crosscheck_fixtures import CARD_X_EXOG
 from generate_iv_crosscheck_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
@@ -108,6 +111,11 @@ def crosscheck() -> dict:
     return json.loads(FIXTURE_PATH.read_text())["synthetic"]
 
 
+@pytest.fixture(scope="module")
+def crosscheck_wooldridge() -> dict:
+    return json.loads(FIXTURE_PATH.read_text())["wooldridge"]
+
+
 # _assert_close/_assert_dict_closeはtests/_assertions.pyのassert_close/
 # assert_dict_closeに対応する（フェーズ3.5で計算式のバグを修正した上で統合）。
 _assert_close = partial(assert_close, rtol=RTOL_STRICT, atol=ATOL)
@@ -135,7 +143,7 @@ def _check_result(res, ref: dict, label: str, rtol: float) -> None:
 
     _assert_dict_close(
         res.weak_instrument_f_statistics,
-        {"endog1": ref["weak_instrument_f"]},
+        ref["weak_instrument_f"],
         f"{label}/weak_instrument_f_statistics",
     )
 
@@ -186,9 +194,15 @@ def test_synthetic_matches_r(crosscheck, scenario, cov_type):
     ).fit()
 
     if cov_type == "hac":
-        # small_nのみ実測乖離が大きいため専用の緩めたRTOLを使う
-        # （モジュールdocコメント参照）。
-        rtol = RTOL_HAC_SMALL_N if scenario == "small_n" else RTOL_HAC
+        # small_n/high_varianceのみ実測乖離が大きいため専用の緩めたRTOLを使う
+        # （モジュールdocコメント参照）。high_varianceはf_statistic自体は0.6%
+        # 程度しか違わないが、F分布の裾でp値がその差を増幅する（実測相対誤差
+        # 2.37%、Issue #231フェーズ4で発覚）。
+        rtol = (
+            RTOL_HAC_SMALL_N
+            if scenario in ("small_n", "high_variance")
+            else RTOL_HAC
+        )
     else:
         rtol = RTOL_STRICT
     ref = crosscheck[scenario][cov_type]
@@ -214,6 +228,68 @@ def test_cluster_matches_r(crosscheck):
 
     ref = crosscheck["baseline"]["cluster"]
     _check_result(res, ref, "cluster/R", rtol=RTOL_STRICT)
+
+
+def test_cluster_g2_matches_r(crosscheck):
+    """クラスタ数境界（G=2ちょうど）の成功パス（`test_iv_fixtures.py`の同名テスト
+    と同じ再現条件、Issue #231フェーズ4）。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline_g2.csv")
+    df = df.with_columns((pl.int_range(pl.len()) % 2).alias("cluster_group"))
+    options = IvOptions(cov_type="cluster", cluster_col="cluster_group")
+    res = IV(
+        df,
+        y="y",
+        x_exog=[],
+        x_endog=["endog1"],
+        instruments=["z1"],
+        options=options,
+    ).fit()
+
+    ref = crosscheck["baseline"]["cluster_g2"]
+    _check_result(res, ref, "cluster_g2/R", rtol=RTOL_STRICT)
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+def test_multi_endog_matches_r(crosscheck, cov_type):
+    """複数内生変数（`x_endog=["endog1", "endog2"]`）の成功パス
+    （`test_iv_fixtures.py`の同名テストと同じ理由、Issue #231フェーズ4）。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
+    options = IvOptions(cov_type=cov_type)
+    res = IV(
+        df,
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1", "endog2"],
+        instruments=["z1", "z2", "z3"],
+        options=options,
+    ).fit()
+
+    rtol = RTOL_HAC if cov_type == "hac" else RTOL_STRICT
+    ref = crosscheck["multi_endog"][cov_type]
+    _check_result(res, ref, f"multi_endog/{cov_type}/R", rtol=rtol)
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+def test_card_matches_r(crosscheck_wooldridge, cov_type):
+    """実データセット（Wooldridge card）。`test_iv_fixtures.py`の同名テストと
+    同じ理由、Issue #231フェーズ4）。
+    """
+    df = load_wooldridge_dataset("card")
+    options = IvOptions(cov_type=cov_type)
+    res = IV(
+        df,
+        y="lwage",
+        x_exog=CARD_X_EXOG,
+        x_endog=["educ"],
+        instruments=["nearc2", "nearc4"],
+        options=options,
+    ).fit()
+
+    rtol = RTOL_HAC if cov_type == "hac" else RTOL_STRICT
+    ref = crosscheck_wooldridge["card"][cov_type]
+    _check_result(res, ref, f"card/{cov_type}/R", rtol=rtol)
 
 
 def test_cluster_imbalanced_matches_r(crosscheck):

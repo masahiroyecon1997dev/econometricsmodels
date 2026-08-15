@@ -154,6 +154,74 @@ def test_cluster_cov_type_label(clustered_dataset):
     assert res.cov_type == "cluster"
 
 
+@pytest.mark.parametrize(
+    "cov_type, expected_label",
+    [
+        ("CLASSICAL", "classical"),
+        ("Classical", "classical"),
+        ("HC0", "hc0"),
+        ("Hc1", "hc1"),
+        ("HC2", "hc2"),
+        ("hc3", "hc3"),
+        ("HAC", "hac"),
+        ("nonrobust", "nonrobust"),
+        ("NONROBUST", "nonrobust"),
+    ],
+)
+def test_cov_type_is_case_insensitive(iv_dataset, cov_type, expected_label):
+    """`cov_type`が大文字小文字を区別しないこと（`engine_pybind`側の
+    `parse_iv_cov_type`のRust実装と対になる、Python API境界での確認。
+    OLS/WLS/Logit/Probitの`test_cov_type_is_case_insensitive`と同型、
+    `testing-completeness-reviewer`指摘、Issue #231フェーズ4）。
+    """
+    options = IvOptions(cov_type=cov_type)
+    res = _our_fit(iv_dataset, options=options)
+    assert res.cov_type == expected_label
+
+
+@pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
+def test_nonrobust_is_alias_for_classical(iv_dataset, cov_type):
+    """`"nonrobust"`が`"classical"`と同じ計算方法（標準誤差も一致）のエイリアス
+    であること（OLS/WLS/Logit/Probitの同名テストと同型、Issue #231フェーズ4）。
+    """
+    res = _our_fit(iv_dataset, options=IvOptions(cov_type=cov_type))
+    classical_res = _our_fit(
+        iv_dataset, options=IvOptions(cov_type="classical")
+    )
+    for name in res.param_names:
+        assert res.std_errors[name] == classical_res.std_errors[name], name
+
+
+@pytest.mark.parametrize(
+    "weight_type, expected",
+    [
+        ("UNADJUSTED", "unadjusted"),
+        ("Unadjusted", "unadjusted"),
+        ("ROBUST", "robust"),
+        ("KERNEL", "kernel"),
+        ("homoskedastic", "unadjusted"),
+        ("HOMOSKEDASTIC", "unadjusted"),
+        ("heteroskedastic", "robust"),
+        ("HETEROSKEDASTIC", "robust"),
+    ],
+)
+def test_weight_type_is_case_insensitive_and_aliased(
+    iv_dataset, weight_type, expected
+):
+    """`weight_type`が大文字小文字を区別しないこと、および`"homoskedastic"`/
+    `"heteroskedastic"`が`"unadjusted"`/`"robust"`のエイリアスであること
+    （`engine_pybind`側の`parse_weight_type`と対になる、Python API境界での確認。
+    `testing-completeness-reviewer`指摘、Issue #231フェーズ4）。
+    """
+    options = IvOptions(method="gmm", weight_type=weight_type)
+    res = _our_fit(iv_dataset, options=options)
+
+    canonical_options = IvOptions(method="gmm", weight_type=expected)
+    canonical_res = _our_fit(iv_dataset, options=canonical_options)
+    for name in res.param_names:
+        assert res.params[name] == canonical_res.params[name], name
+
+
 def test_cluster_g2_boundary_succeeds_when_x_exog_is_empty():
     """`G=2`クラスター・`x_exog=[]`・丁度識別（`instruments`1本）という、
     ベンチマーク作成中に発見した`ComputationError`（`engine/src/iv/CLAUDE.md`
@@ -579,28 +647,44 @@ def test_missing_column_raises(iv_dataset):
         ).fit()
 
 
-def test_null_values_raise():
-    df = pl.DataFrame(
-        {
-            "y": [1.0, None, 3.0, 4.0],
-            "endog1": [2.0, 1.0, 4.0, 3.0],
-            "z1": [1.0, 3.0, 2.0, 4.0],
-        }
-    )
+@pytest.mark.parametrize("bad_col", ["y", "x1", "endog1", "z1"])
+def test_null_values_raise(bad_col):
+    """欠損値は`column_extraction`の責務で`ValidationError`。`y`列だけでなく
+    `x_exog`/`x_endog`/`instruments`側の列でも検証する（`testing-completeness-
+    reviewer`指摘、Issue #231フェーズ4）。
+    """
+    values: dict[str, list[float | None]] = {
+        "y": [1.0, 2.0, 3.0, 4.0],
+        "x1": [0.5, 1.5, 2.5, 3.5],
+        "endog1": [2.0, 1.0, 4.0, 3.0],
+        "z1": [1.0, 3.0, 2.0, 4.0],
+    }
+    values[bad_col] = [values[bad_col][0], None, *values[bad_col][2:]]
+    df = pl.DataFrame(values)
     with pytest.raises(ValidationError):
-        IV(df, y="y", x_exog=[], x_endog=["endog1"], instruments=["z1"]).fit()
+        IV(
+            df, y="y", x_exog=["x1"], x_endog=["endog1"], instruments=["z1"]
+        ).fit()
 
 
-def test_non_numeric_dtype_raises():
-    df = pl.DataFrame(
-        {
-            "y": ["a", "b", "c", "d"],
-            "endog1": [2.0, 1.0, 4.0, 3.0],
-            "z1": [1.0, 3.0, 2.0, 4.0],
-        }
-    )
+@pytest.mark.parametrize("bad_col", ["y", "x1", "endog1", "z1"])
+def test_non_numeric_dtype_raises(bad_col):
+    """数値/文字列型にキャストできない列は`ValidationError`。`y`列だけでなく
+    `x_exog`/`x_endog`/`instruments`側の列でも検証する（`test_null_values_raise`
+    と同じ理由、Issue #231フェーズ4）。
+    """
+    values: dict[str, list] = {
+        "y": [1.0, 2.0, 3.0, 4.0],
+        "x1": [0.5, 1.5, 2.5, 3.5],
+        "endog1": [2.0, 1.0, 4.0, 3.0],
+        "z1": [1.0, 3.0, 2.0, 4.0],
+    }
+    values[bad_col] = ["a", "b", "c", "d"]
+    df = pl.DataFrame(values)
     with pytest.raises(ValidationError):
-        IV(df, y="y", x_exog=[], x_endog=["endog1"], instruments=["z1"]).fit()
+        IV(
+            df, y="y", x_exog=["x1"], x_endog=["endog1"], instruments=["z1"]
+        ).fit()
 
 
 def test_singular_first_stage_design_matrix_raises_computation_error():
@@ -691,6 +775,15 @@ def test_insufficient_instruments_raises(iv_dataset):
 
 def test_cluster_without_col_raises(iv_dataset):
     options = IvOptions(cov_type="cluster")
+    with pytest.raises(ValidationError):
+        _our_fit(iv_dataset, options=options)
+
+
+def test_cluster_col_nonexistent_column_raises(iv_dataset):
+    """`cluster_col`が実在しない列名を指すと`ValidationError`（OLS/WLS/Logit/
+    Probitと同じ理由、Issue #231フェーズ4）。
+    """
+    options = IvOptions(cov_type="cluster", cluster_col="does_not_exist")
     with pytest.raises(ValidationError):
         _our_fit(iv_dataset, options=options)
 

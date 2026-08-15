@@ -205,6 +205,16 @@ def test_cluster_without_col_raises(dataset):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 
 
+def test_cluster_col_nonexistent_column_raises(dataset):
+    """`cluster_col`が実在しない列名を指すと`ValidationError`
+    （`test_ols.py`と同じ理由、Issue #231フェーズ4）。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    options = OLSOptions(cov_type="cluster", cluster_col="does_not_exist")
+    with pytest.raises(ValidationError):
+        WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
+
+
 def test_missing_column_raises(dataset):
     """`y`/`x`に存在しない列名を指定した場合`ValidationError`
     （`weight`列自体の検証は`test_missing_weight_column_raises`が対象、

@@ -28,9 +28,10 @@
 #   Rscript run_ivreg_benchmark.R data.csv "y ~ x1 + endog1 | x1 + z1 + z2" cluster cluster_col
 #   Rscript run_ivreg_benchmark.R data.csv "y ~ x1 + endog1 | x1 + z1 + z2" hac 2   # hac_lag=2
 #
-# 注: 弱操作変数F統計量はivregの診断表の"Weak instruments"行を単一の内生変数前提で
-# 読む。本プロジェクトの全フィクスチャはx_endog=1本のため現時点で問題にならない
-# （x_endogが複数のケースを追加する場合は診断表の行の分かれ方を再確認すること）。
+# 注: 弱操作変数F統計量は内生変数名をキーにしたdictとして返す（本実装の
+# weak_instrument_f_statisticsと同じ形。内生変数が1本のときは診断表の行名が
+# "Weak instruments"、2本以上のときは"Weak instruments (<列名>)"に分かれる、
+# 実機確認済み。Issue #231フェーズ4で複数内生変数シナリオ対応時に一般化）。
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 2) {
@@ -99,7 +100,20 @@ f_p_value_val <- f_test$f_p_value
 # 弱操作変数F統計量・Sargan（過剰識別検定）: summary(diagnostics=TRUE)は常にclassical
 # （iid）vcovで計算する仕様のため、要求されたcov_typeによらず同じ値になる。
 diag_table <- summary(model, diagnostics = TRUE)$diagnostics
-weak_instrument_f_val <- unname(diag_table["Weak instruments", "statistic"])
+# 内生変数名ごとのdict（本実装のweak_instrument_f_statisticsと同じ形）で返す。
+# ivregの診断表の行名は、内生変数が1本のときは"Weak instruments"だが、2本以上の
+# ときは"Weak instruments (<列名>)"に分かれる（実機確認済み、Issue #231
+# フェーズ4で複数内生変数シナリオ追加時に対応）。
+endog_names <- names(model$endogenous)
+weak_instrument_f_val <- list()
+for (col in endog_names) {
+  row_name <- if (length(endog_names) == 1) {
+    "Weak instruments"
+  } else {
+    paste0("Weak instruments (", col, ")")
+  }
+  weak_instrument_f_val[[col]] <- unname(diag_table[row_name, "statistic"])
+}
 sargan_row <- diag_table["Sargan", ]
 # 丁度識別（instruments数 == x_endog数）のときSargan統計量はNA（本実装のoverid_statistic
 # = Noneと対応）。

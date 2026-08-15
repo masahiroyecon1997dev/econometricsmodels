@@ -544,3 +544,12 @@ def test_cluster_cov_type_requires_at_least_two_groups():
             x=["x1"],
             options=LogitOptions(cov_type="cluster", cluster_col="cluster"),
         ).fit()
+
+
+def test_cluster_col_nonexistent_column_raises(binary_dataset):
+    """`cluster_col`が実在しない列名を指すと`ValidationError`（OLSと同じ理由、
+    Issue #231フェーズ4）。
+    """
+    options = LogitOptions(cov_type="cluster", cluster_col="does_not_exist")
+    with pytest.raises(ValidationError):
+        Logit(binary_dataset, y="y", x=["x1", "x2"], options=options).fit()

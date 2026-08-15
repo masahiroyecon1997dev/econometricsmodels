@@ -56,9 +56,10 @@ sys.path.insert(
 from _assertions import assert_close, assert_dict_close
 from _assertions import rename_intercept as _rename
 from _common import imbalanced_cluster_groups
-from _helpers import DATA_DIR, with_cluster_groups
+from _helpers import DATA_DIR, load_wooldridge_dataset, with_cluster_groups
 from _tolerances import TOLERANCES
 from econometricsmodels import IV, ComputationError, IvOptions
+from generate_iv_fixtures import CARD_X_EXOG
 from generate_iv_fixtures import NUMERIC_SCENARIOS as SCENARIOS
 
 FIXTURE_PATH = (
@@ -217,6 +218,75 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
     ref = fixtures["baseline"]["cluster_imbalanced"]
     _assert_dict_close(res.params, ref["coef"], "cluster_imbalanced/coef")
     _assert_dict_close(res.std_errors, ref["se"], "cluster_imbalanced/se")
+
+
+def test_cluster_g2_matches_linearmodels(fixtures):
+    """クラスタ数境界（G=2ちょうど）の成功パス。`x_exog=[]`・`instruments`1本・
+    行番号%2の疑似グループ（`engine/src/iv/CLAUDE.md`「修正済み」の再現条件と
+    同じ、Issue #231フェーズ4でフィクスチャ化。以前は構造確認
+    （`test_iv.py::test_cluster_g2_boundary_succeeds_when_x_exog_is_empty`）
+    のみでリファレンス実装との数値照合が無かった）。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline_g2.csv")
+    df = df.with_columns((pl.int_range(pl.len()) % 2).alias("cluster_group"))
+    options = IvOptions(cov_type="cluster", cluster_col="cluster_group")
+    res = IV(
+        df,
+        y="y",
+        x_exog=[],
+        x_endog=["endog1"],
+        instruments=["z1"],
+        options=options,
+    ).fit()
+
+    ref = fixtures["baseline"]["cluster_g2"]
+    _assert_dict_close(res.params, ref["coef"], "cluster_g2/coef")
+    _assert_dict_close(res.std_errors, ref["se"], "cluster_g2/se")
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+def test_multi_endog_matches_linearmodels(fixtures, cov_type):
+    """複数内生変数（`x_endog=["endog1", "endog2"]`）の成功パス。
+    `weak_instrument_f_statistics`・`overid_statistic`（Sargan、過剰識別）・
+    `wu_hausman_statistic`（複数内生変数のジョイント検定）が正しく機能することを
+    確認する（`testing-completeness-reviewer`指摘のmust fix、Issue #231
+    フェーズ4）。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
+    options = IvOptions(cov_type=cov_type)
+    res = IV(
+        df,
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1", "endog2"],
+        instruments=["z1", "z2", "z3"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res, fixtures["multi_endog"][cov_type], f"multi_endog/{cov_type}"
+    )
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+def test_card_matches_linearmodels(fixtures, cov_type):
+    """実データセット（Wooldridge card、Card 1995の大学近接操作変数による教育の
+    収益率推定）。`testing-policy.md`「テスト用データセット」2.が要求する実データ
+    検証がIV系統に無かった（`testing-completeness-reviewer`指摘のshould fix、
+    Issue #231フェーズ4）。
+    """
+    df = load_wooldridge_dataset("card")
+    options = IvOptions(cov_type=cov_type)
+    res = IV(
+        df,
+        y="lwage",
+        x_exog=CARD_X_EXOG,
+        x_endog=["educ"],
+        instruments=["nearc2", "nearc4"],
+        options=options,
+    ).fit()
+
+    _check_result(res, fixtures["card"][cov_type], f"card/{cov_type}")
 
 
 def test_perfect_multicollinearity_raises_computation_error():

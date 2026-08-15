@@ -91,13 +91,23 @@ sys.path.insert(
 )  # benchmark/ を import path に追加（_common）
 
 from _common import hac_auto_lag, load_frozen_dataset
+from load_wooldridge import load as _load_wooldridge
 
 
-def _load_iv_dataset(scenario: str) -> tuple[pl.DataFrame, list[float] | None]:
-    # クラスター確認用の一時CSV（`generate_iv_fixtures.py`の`_run_cluster_case`）は
-    # `iv_true_beta.json`にエントリが無いため、`None`を許容する
-    # （`generate_ols_fixtures.py`のクラスターケースが`true_beta`比較をしないのと同じ扱い）。
-    return load_frozen_dataset("iv", scenario)
+def _load_iv_dataset(
+    dataset_source: str, scenario: str
+) -> tuple[pl.DataFrame, list[float] | None]:
+    if dataset_source == "synthetic":
+        # クラスター確認用の一時CSV（`generate_iv_fixtures.py`の
+        # `_run_cluster_case`）は`iv_true_beta.json`にエントリが無いため、
+        # `None`を許容する（`generate_ols_fixtures.py`のクラスターケースが
+        # `true_beta`比較をしないのと同じ扱い）。
+        return load_frozen_dataset("iv", scenario)
+    if dataset_source == "wooldridge":
+        # Wooldridgeデータはtrue_betaと比較できないため常に`None`
+        # （`run_statsmodels_benchmark.py`のwooldridge分岐と同じ扱い）。
+        return _load_wooldridge(scenario), None
+    raise ValueError(f"unknown dataset_source: {dataset_source!r}")
 
 
 # engine cov_type -> (linearmodels cov_type, debiased)。モジュールdocstring参照。
@@ -188,18 +198,23 @@ def run(
     cluster_col: str | None = None,
     hac_lags: int | None = None,
     confidence_level: float = 0.95,
+    dataset_source: str = "synthetic",
+    y_col: str = "y",
 ) -> dict:
     from linearmodels.iv import IV2SLS
     from scipy import stats as scipy_stats
 
-    df, true_beta = _load_iv_dataset(dataset)
+    df, true_beta = _load_iv_dataset(dataset_source, dataset)
     pdf = df.to_pandas()
     n = len(pdf)
 
     exog_part = " + ".join(x_exog_cols)
     endog_part = " + ".join(x_endog_cols)
     instr_part = " + ".join(instrument_cols)
-    formula = f"y ~ 1{' + ' + exog_part if exog_part else ''} + [{endog_part} ~ {instr_part}]"
+    formula = (
+        f"{y_col} ~ 1{' + ' + exog_part if exog_part else ''} + "
+        f"[{endog_part} ~ {instr_part}]"
+    )
 
     lm_cov_type, debiased = _COV_TYPE_MAP[cov_type]
     cov_config: dict = {"debiased": debiased}

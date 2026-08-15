@@ -163,6 +163,16 @@ def test_cluster_without_col_raises(dataset):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
+def test_cluster_col_nonexistent_column_raises(dataset):
+    """`cluster_col`が実在しない列名を指すと`ValidationError`
+    （`column_extraction`の責務、既存の欠落を確認するテストが無かった、
+    `testing-completeness-reviewer`指摘、Issue #231フェーズ4）。
+    """
+    options = OLSOptions(cov_type="cluster", cluster_col="does_not_exist")
+    with pytest.raises(ValidationError):
+        OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+
 def test_missing_column_raises(dataset):
     with pytest.raises(ValidationError):
         OLS(dataset, y="y", x=["x1", "nonexistent"]).fit()

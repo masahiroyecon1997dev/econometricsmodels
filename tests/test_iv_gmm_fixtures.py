@@ -92,7 +92,9 @@ _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
 _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
 
 
-def _check_result(res, ref: dict, label: str) -> None:
+def _check_result(
+    res, ref: dict, label: str, *, check_overid: bool = True
+) -> None:
     _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
     _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
     _assert_dict_close(res.stats, ref["z_stats"], f"{label}/stats")
@@ -113,20 +115,33 @@ def _check_result(res, ref: dict, label: str) -> None:
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
 
-    if ref["hansen_j_statistic"] is None:
-        assert res.overid_statistic is None, f"{label}/overid_statistic"
-        assert res.overid_p_value is None, f"{label}/overid_p_value"
-    else:
-        _assert_close(
-            res.overid_statistic,
-            ref["hansen_j_statistic"],
-            f"{label}/overid_statistic",
-        )
-        _assert_close(
-            res.overid_p_value,
-            ref["hansen_j_p_value"],
-            f"{label}/overid_p_value",
-        )
+    # check_overid=False: gmm_iterations=1のHansen J（過剰識別検定）専用の抜け穴。
+    # weight_type="unadjusted"はSがZ'Zに固定され残差に依存しないため、係数・SEは
+    # gmm_iterations=1/2/3で完全に一致する（実測確認済み）。本実装のHansen Jも
+    # この不変性を保ち、gmm_iterations=1でもgmm_iterations>=2（2SLSのSarganと機械
+    # 精度一致）と同じ値を返す（`gmm.rs`のσ̂²·Z'Zスケーリング設計、モジュールdoc
+    # コメント「Hansen Jのgmm_iterations=1...のSは...」参照）。しかしlinearmodelsの
+    # `IVGMM.fit(iter_limit=1)`のj_statはこの不変性を持たず、iter_limit=2/3の値
+    # （2SLSのSarganと一致）とは異なる値を返す（実測: 0.30086708530935663 vs
+    # 0.32832429087644643）。linearmodels側のiter_limit=1固有の内部計算式の違いが
+    # 原因と考えられるが未特定のため（Issue #231フェーズ4、ユーザー確認済み）、
+    # gmm_iterations=1のときはoverid_statistic/overid_p_valueの比較のみ除外する
+    # （係数・SE等の他の統計量は引き続き比較する）。
+    if check_overid:
+        if ref["hansen_j_statistic"] is None:
+            assert res.overid_statistic is None, f"{label}/overid_statistic"
+            assert res.overid_p_value is None, f"{label}/overid_p_value"
+        else:
+            _assert_close(
+                res.overid_statistic,
+                ref["hansen_j_statistic"],
+                f"{label}/overid_statistic",
+            )
+            _assert_close(
+                res.overid_p_value,
+                ref["hansen_j_p_value"],
+                f"{label}/overid_p_value",
+            )
 
     assert res.wu_hausman_statistic is None, f"{label}/wu_hausman_statistic"
 
@@ -213,6 +228,86 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
     ref = fixtures["baseline"]["unadjusted"]["cluster_imbalanced"]
     _assert_dict_close(res.params, ref["coef"], "cluster_imbalanced/coef")
     _assert_dict_close(res.std_errors, ref["se"], "cluster_imbalanced/se")
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+def test_multi_endog_matches_linearmodels(fixtures, cov_type):
+    """複数内生変数（`x_endog=["endog1", "endog2"]`）の成功パス
+    （`weak_instrument_f_statistics`・`overid_statistic`（Hansen J、過剰識別）が
+    複数内生変数を同時に扱うことをGMMでも確認する。`test_iv_fixtures.py`の
+    同名テストと同じ理由、`testing-completeness-reviewer`指摘、
+    Issue #231フェーズ4）。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
+    options = IvOptions(
+        method="gmm", weight_type="unadjusted", cov_type=cov_type
+    )
+    res = IV(
+        df,
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1", "endog2"],
+        instruments=["z1", "z2", "z3"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["multi_endog"]["unadjusted"][cov_type],
+        f"multi_endog/unadjusted/{cov_type}",
+    )
+
+
+def test_kernel_hac_matches_linearmodels(fixtures):
+    """`weight_type="kernel"`×`cov_type="hac"`の組み合わせ（実務上最も典型的な
+    「HACカーネル重み＋HAC標準誤差」の組み合わせ経路が、他の`weight_type`×
+    `cov_type`の組み合わせと同様に独立して機能することを確認する。
+    `test_other_weight_types_match_linearmodels`はcov_type="classical"固定のため
+    この組み合わせを通らない（`testing-completeness-reviewer`指摘、
+    Issue #231フェーズ4）。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
+    options = IvOptions(method="gmm", weight_type="kernel", cov_type="hac")
+    res = IV(
+        df,
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        options=options,
+    ).fit()
+
+    _check_result(res, fixtures["kernel_hac"], "kernel_hac")
+
+
+@pytest.mark.parametrize("n_iter", [1, 3])
+def test_gmm_iterations_matches_linearmodels(fixtures, n_iter):
+    """`gmm_iterations`が既定値（2）以外（1: 1-step、3: iterated固定回数モード）
+    でも主リファレンスと一致することを確認する（`testing-completeness-reviewer`
+    指摘、Issue #231フェーズ4）。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
+    options = IvOptions(
+        method="gmm",
+        weight_type="unadjusted",
+        cov_type="classical",
+        gmm_iterations=n_iter,
+    )
+    res = IV(
+        df,
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["gmm_iterations"][str(n_iter)],
+        f"gmm_iterations/{n_iter}",
+        check_overid=(n_iter != 1),
+    )
 
 
 @pytest.mark.parametrize("weight_type", ["robust", "cluster", "kernel"])

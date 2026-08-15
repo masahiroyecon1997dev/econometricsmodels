@@ -243,3 +243,33 @@
   wage1/gpa2をstatsmodels側（`generate_ols_fixtures.py`）にも追加することを推奨する。
 - **気づいた経緯**: 2026-08-15、`generate_wls_fixtures.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 14. クラスターロバストSEのG<q境界を`ComputationError`ではなく`ValidationError`にすべきでは（設計判断候補、OLS/WLS/IVの再分類＋Logit/Probitへの新規検証追加）
+
+- **対象**: `engine/src/linear/`（OLS/WLS、`ComputationError`扱い済み）・`engine/src/iv/`
+  （IV、同様の扱いと推測、要確認）・`engine/src/nonlinear/`（Logit/Probit、現状この種の
+  検証自体が無い）
+- **内容**: ユーザー提案（2026-08-15）。クラスターロバストSEのG（クラスター数のユニーク数）と
+  q（傾き係数の数）の関係は、実際の行列計算を一切せずに入力データフレームと列指定だけから
+  即座に判定できる（`df[cluster_col].n_unique()`と説明変数の列数を数えるだけ）。これは
+  「実際に計算してみないと分からない」典型的な`ComputationError`（完全な多重共線性等）とは
+  性質が異なり、`ValidationError`（入力起因、事前チェック可能）に分類し直す方が筋が通る
+  という提案。
+  - 背景（`generate_logit_fixtures.py`解説時の議論）: OLSはG<qのときF検定の`q×q`部分行列
+    反転が構造的に特異になり`fit()`全体が`ComputationError`になる設計。Logitは overall
+    有意性検定がWald型F検定ではなく尤度比検定（LR検定）のため同種の強制失敗ステップが無く、
+    G=2でも係数・標準誤差が普通に返る。ただし「ソフトウェアとして正しく計算できる」ことと
+    「G=2でクラスターロバストSEを統計的に信頼してよいか」は別問題で、クラスターロバストSEの
+    漸近的正当化はG依存のため、この脆弱性自体はLogitにも同様に存在する（OLSはF検定の破綻という
+    形で表面化するが、Logitは表面化しないまま数値だけ返る）。
+- **Claudeの所感**: 提案の理屈（G/qが事前にトリビアルに判定できる）には妥当性があるが、
+  実施すると（1）OLS/WLS/IVの既存`ComputationError`前提テスト（`test_cluster_g2_with_
+  multiple_slopes_raises_computation_error`等）の更新、（2）Logit/Probitへの新規検証ロジック
+  追加（単なる再分類ではなく機能追加）、（3）`docs/spec/ols-spec.md`等の該当箇所更新が
+  必要になり、`refactor`スキルの範囲外（ロジックの挙動を変える変更）の規模になる。
+  **ただし、現在`0.x.x`のプレリリース期間中（CLAUDE.md 8章「0.x.xのプレリリース期間中は、
+  Yの変更でも破壊的変更を許容する」）のため、エラー分類の変更を含む破壊的変更を行う
+  ハードルは低い**。実施するならまずIssue化し、対象範囲（OLS/WLS/IVの再分類のみか、
+  Logit/Probitへの新規追加も含めるか）を確定させてから着手するのが良いと思われる。
+- **気づいた経緯**: 2026-08-15、`generate_logit_fixtures.py`解説後のユーザー提案。
+- **状態**: 未対応（Issue化を含め着手要否はユーザー判断待ち）

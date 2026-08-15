@@ -50,25 +50,21 @@
 //! （勾配ノルムのアンダーフロー、`nonlinear-implementation-notes.md`参照）よりも
 //! 緩い条件でこのNaN汚染に到達しうる。
 //!
-//! 対策として、`u`を`φ`/`Φ`評価前に`[-U_CLAMP, U_CLAMP]`にクランプする
-//! （`U_CLAMP`のdocコメント参照）。R言語`stats::binomial(link="probit")`の
-//! `linkinv`が線形予測子を`pnorm`評価前に同じ閾値でクランプする実装
-//! （`thresh <- -qnorm(.Machine$double.eps); eta <- pmin(pmax(eta, -thresh), thresh)`）
-//! を参考にした（ユーザー確認済み）。statsmodelsの`Probit`は`Φ`の**出力**を
-//! `np.clip(cdf, FLOAT_EPS, 1-FLOAT_EPS)`でクリップする方式だが、`score`/`loglike`
-//! にのみ適用され`hessian`には適用されていない（非対称）。今回は`u`（入力側）を
-//! クランプする方式を採用し、`cost`/`gradient`/`hessian`/`scores`すべてに同じ
-//! 関所（`clamped_pdf_cdf`）を経由させることでこの非対称性を避けている。
+//! 対策として、`u`を`φ`/`Φ`評価前にクランプする（`nonlinear/common.rs`の`clamped_pdf_cdf`・
+//! `U_CLAMP`のdocコメント参照。Tobitの打ち切り観測の尤度も同型の`λ=φ/Φ`（逆ミルズ比）を
+//! 含み同じリスクを共有するため、Tobit実装時に共通化した）。`cost`/`gradient`/`hessian`/
+//! `scores`すべてに同じ関所を経由させることで、statsmodelsの`Probit`実装に見られる
+//! 非対称性（`score`/`loglike`はクリップするが`hessian`はしない）を避けている。
 
 use crate::error::CommonError;
 use crate::inference;
 use crate::nonlinear::common::{
     CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
-    Method, MleError, SandwichVariant, cluster_cov_params, column_means, column_medians,
-    destandardize_cov_params, destandardize_params, goodness_of_fit, log_likelihood_null,
-    marginal_effects_from_w_s, observed_information_cov_params, opg_cov_params, pred_table,
-    predict_from_link, run_solver, sandwich_cov_params, standardize_columns,
-    validate_fit_preconditions,
+    Method, MleError, SandwichVariant, clamped_pdf_cdf, cluster_cov_params, column_means,
+    column_medians, destandardize_cov_params, destandardize_params, goodness_of_fit,
+    log_likelihood_null, marginal_effects_from_w_s, observed_information_cov_params,
+    opg_cov_params, pred_table, predict_from_link, run_solver, sandwich_cov_params,
+    standardize_columns, validate_fit_preconditions,
 };
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
@@ -194,26 +190,9 @@ impl ProbitInput {
     }
 }
 
-/// `φ(u)`・`Φ(u)`を評価する前に`u`をこの絶対値以下にクランプする閾値。`u`がこれより
-/// 極端になると`λ_i=φ(u)/Φ(u)`（一般化残差）が`0.0/0.0`のNaNになりうる
-/// （実測では`|u|≳39`から発生。本閾値`≈8.126`はそれよりずっと手前で安全に倒す、
-/// モジュール冒頭「数値安定化について」参照）。
-///
-/// R言語`stats::binomial(link="probit")$linkinv`の`thresh <- -qnorm(.Machine$double.eps)`
-/// と同じ値（`-Φ⁻¹(f64::EPSILON)`）。`Normal::inverse_cdf`は反復計算のためホットパスで
-/// 毎回呼ぶのを避け、コンパイル時定数としてハードコードしている（Rとscipyの両方で
-/// `8.125890664701908`と算出されることを確認済み）。
-const U_CLAMP: f64 = 8.125_890_664_701_908;
-
-/// `u`を`[-U_CLAMP, U_CLAMP]`にクランプしてから`(φ(u), Φ(u))`を評価する
-/// （`U_CLAMP`のdocコメント参照）。`log_likelihood`（`cost`はこれを符号反転して呼ぶ）・
-/// `linear_predictor_and_residual`（`gradient`/`hessian`/`scores`が経由する）の両方が
-/// 経由する共通の関所にすることで、`statsmodels`の`Probit`実装に見られる非対称性
-/// （`score`/`loglike`はクリップするが`hessian`はしない）を避ける。
-fn clamped_pdf_cdf(normal: &Normal, u: f64) -> (f64, f64) {
-    let u = u.clamp(-U_CLAMP, U_CLAMP);
-    (normal.pdf(u), normal.cdf(u))
-}
+// `clamped_pdf_cdf`（`φ(u)`・`Φ(u)`評価前のクランプ）は`nonlinear/common.rs`へ移設した
+// （Tobit実装時、打ち切り観測の尤度も同型の`λ=φ/Φ`を含むため共有。モジュール冒頭
+// 「数値安定化について」参照）。
 
 /// 対数尤度 `ℓ(θ) = Σᵢ log Φ(qᵢzᵢ)`（`zᵢ=xᵢ'θ`、`qᵢ=2yᵢ-1`、モジュール冒頭の数式参照）を
 /// `x`・`y`・`params`から直接計算する。`ProbitProblem::cost`（`-ℓ(θ)`、argminの

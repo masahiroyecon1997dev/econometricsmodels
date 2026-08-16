@@ -728,3 +728,35 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   変える必要がありトレードオフが大きい。現状維持が妥当と考える。
 - **気づいた経緯**: 2026-08-16、`run_ivreg_benchmark.R`解説後のユーザー質問。
 - **状態**: 対応不要と判断（構造的な制約のため、現状維持が妥当）
+
+### 39. `_normalize_names`の`if key in raw`存在チェックが、実際には常にTrueにしかならないデッドコード（IV版のみ直接アクセス）
+
+- **対象**: [benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py:146-164](../../../benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py#L146-L164)・
+  [benchmark/linear/fixtures/generate_wls_crosscheck_fixtures.py:121-137](../../../benchmark/linear/fixtures/generate_wls_crosscheck_fixtures.py#L121-L137)・
+  [benchmark/nonlinear/fixtures/generate_logit_crosscheck_fixtures.py:93-117](../../../benchmark/nonlinear/fixtures/generate_logit_crosscheck_fixtures.py#L93-L117)（Probit版も同型）
+  と対比した[benchmark/iv/fixtures/generate_iv_crosscheck_fixtures.py:109-130](../../../benchmark/iv/fixtures/generate_iv_crosscheck_fixtures.py#L109-L130)
+- **内容**: ユーザー指摘（2026-08-16）。IV版の`_normalize_names`は`raw[key]`で
+  全キーへ無条件に直接アクセスするが、OLS/WLS/Logit/Probit版は`if "t_stats" in
+  raw:`のような存在チェックを経てからコピーする。差の理由を確認するため
+  呼び出し元の`_run_r`・呼び出し先のRスクリプトを確認したところ、OLS/WLSが
+  呼ぶ`run_lm_crosscheck_benchmark.R`、Logit/Probitが呼ぶ
+  `run_glm_crosscheck_benchmark.R`はいずれも`cov_type`等の分岐に関わらず
+  `result <- list(...)`で**毎回全キーを無条件に構築**しており（`t_stats`/
+  `p_values`/`conf_int`/`aic`/`bic`/`f_statistic`等が欠ける分岐は存在しない）、
+  IV側が呼ぶ`run_ivreg_benchmark.R`も同様に毎回全キーを構築する（該当しない
+  値は欠落ではなく`NA_real_`で埋める設計、モジュールコメントに明記）。
+  つまり4ファイルとも「Rスクリプトは常に全キーを返す」という同じ前提が
+  成り立っており、OLS/WLS/Logit/Probit側の`if key in raw`は`_run_r`の呼び出し元を
+  `grep`で確認した限り単一のRスクリプトしか呼んでおらず、実行時に`False`へ
+  倒れることが無い（`_normalize_names`は`_run_r`からしか呼ばれていないことも確認済み）。
+- **Claudeの所感**: 存在チェックが要る状況（同じ`_normalize_names`を複数の
+  異なるRスクリプト・異なるキー集合の出力に対して使い回す等）には現状なって
+  いないため、実質的にデッドコードと考えられる。IV版の「直接アクセス＋
+  該当しない値は`NA_real_`で明示」という設計の方が、Rスクリプト側の
+  「毎回全キーを返す」という実際の契約を素直に反映しており、揃えるなら
+  IV版の書き方に統一する方向が妥当。ただし項目33・35（`_normalize_names`/
+  `_run_r`自体の共通化）に着手する際にまとめて解消するのが自然で、この項目
+  単体で先に着手する優先度は高くないと考える。
+- **気づいた経緯**: 2026-08-16、`generate_iv_crosscheck_fixtures.py`解説後、
+  `run_ivreg_benchmark.R`の設計との対比についてのユーザー指摘。
+- **状態**: 未対応（着手要否・項目33/35との統合方針はユーザー判断待ち）

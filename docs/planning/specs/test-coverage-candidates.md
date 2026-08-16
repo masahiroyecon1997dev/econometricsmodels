@@ -273,3 +273,19 @@
   Logit/Probitへの新規追加も含めるか）を確定させてから着手するのが良いと思われる。
 - **気づいた経緯**: 2026-08-15、`generate_logit_fixtures.py`解説後のユーザー提案。
 - **状態**: 未対応（Issue化を含め着手要否はユーザー判断待ち）
+
+### 15. IV: 複数内生変数対応後もCragg-Donald統計量をv1スコープ外のままにしてよいか（設計判断候補）
+
+- **対象**: `iv-api-design.md`6.4節（弱操作変数診断）・`engine/src/iv/two_sls.rs`の
+  `partial_f_statistic`（内生変数ごとの単変量部分F統計量のみ実装済み）
+- **内容**: ユーザー提案（2026-08-16）。`iv-api-design.md`6.4節は「複数内生変数の同時検定
+  （Cragg-Donald統計量等）も...v1スコープ外とし、各内生変数ごとの部分F統計量のみ返す」と
+  確定していたが、この判断がされた時点では複数内生変数（`k_endog>=2`）のシナリオ自体が
+  まだ実装されていなかった可能性がある。その後Issue #231フェーズ4で`multi_endog`シナリオ
+  （`benchmark/iv/fixtures/generate_iv_fixtures.py`）が実際に追加され、複数内生変数の
+  ケースが実運用でテストされるようになった。各内生変数ごとの部分F統計量だけでは、複数の
+  内生変数が絡む「操作変数群全体としての多変量的な弱さ」を検出できない場合がある。
+- **Claudeの所感**: 複数内生変数のサポートが実際に進んだ今、v1時点の判断を見直す価値が
+  あるかは再検討に値する。Issue化済み（[#247](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/247)）。
+- **気づいた経緯**: 2026-08-16、`run_linearmodels_benchmark.py`解説後のユーザー質問。
+- **状態**: 未対応（[#247](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/247)で再検討中）

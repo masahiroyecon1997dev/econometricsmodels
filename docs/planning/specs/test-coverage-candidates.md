@@ -307,3 +307,24 @@
   Issue化済み（[#249](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/249)）。
 - **気づいた経緯**: 2026-08-16、`generate_iv_gmm_fixtures.py`解説後のユーザー提案。
 - **状態**: 未対応（[#249](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/249)で検討中）
+
+### 17. OLS: `predict()`が主リファレンス（statsmodels）側で一度も検証されていない
+
+- **対象**: `benchmark/linear/run_statsmodels_benchmark.py`・
+  `benchmark/linear/fixtures/generate_ols_fixtures.py`・
+  `tests/test_ols_fixtures.py`（いずれも`predict`/`fitted`という単語が一切登場しない、
+  実測確認済み）
+- **内容**: ユーザー指摘（2026-08-16）。`predict()`を実際に検証しているのは
+  `tests/test_ols_crosscheck.py`（Rクロスチェック側、`test_predict_none_matches_r_
+  fitted_values`・`test_predict_new_data_matches_r`の2テスト）のみで、**主リファレンス
+  （statsmodels）側では一度も検証されていない**。`testing-policy.md`の設計思想
+  （statsmodelsを主リファレンス、Rは独立実装によるクロスチェック）に照らすと、
+  本来あるべき優先順位が逆転している。statsmodelsの`results.predict()`/
+  `results.fittedvalues`は同等の機能を持つため、`run_statsmodels_benchmark.py`側にも
+  追加できるはず。
+- **Claudeの所感**: 項目13（OLSの実データ検証がRクロスチェック側のみで主リファレンス側に
+  無い）と同種の「主リファレンス側の検証が手薄」パターン。`generate_ols_fixtures.py`の
+  `run()`呼び出しに`predict`/`fitted`のキーを追加し、`test_ols_fixtures.py`に対応する
+  テストを追加する形で対応できそう。
+- **気づいた経緯**: 2026-08-16、`run_lm_predict_crosscheck.R`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

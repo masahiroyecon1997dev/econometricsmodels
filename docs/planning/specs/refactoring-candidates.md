@@ -425,3 +425,21 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   なる）ため、効果とのバランスは要検討。
 - **気づいた経緯**: 2026-08-16、`run_lm_predict_crosscheck.R`解説中に発見。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 23. `run_lm_predict_crosscheck.R`を手法非依存の汎用スクリプトにできないか（設計判断候補）
+
+- **対象**: [benchmark/linear/run_lm_predict_crosscheck.R](../../../benchmark/linear/run_lm_predict_crosscheck.R)
+- **内容**: ユーザー提案（2026-08-16）。今後WLS（Issue #132）・Logit（#131）・Tobit（#222）
+  にも`predict()`のRクロスチェックが必要になる見込みだが、現状の`run_lm_predict_crosscheck.R`
+  は名前・置き場所（`benchmark/linear/`）ともにOLS専用に見える。`run_lm_crosscheck_benchmark.R`
+  （cov_type/cluster_col/hac_lag/weight_colという複数の位置引数）と単純結合すると引数パースが
+  複雑になる一方、`fitted()`/`predict(model, newdata=...)`というR関数自体は`lm`オブジェクトにも
+  `glm`オブジェクト（Logit/Probit用）にも共通して使える。
+- **Claudeの所感**: 「`run_lm_crosscheck_benchmark.R`に統合する」よりも、
+  `run_lm_predict_crosscheck.R`自体を手法非依存の汎用スクリプト（`benchmark/`直下等に移動し、
+  `weights`引数を追加すればWLSにもそのまま使える）にする方向の方が筋が良さそうだと考える。
+  ただしTobit（打ち切りモデル）は`predict()`の意味自体が変わりうる（打ち切り前の潜在変数か、
+  打ち切り後の観測値か）ため、そこだけ別途確認が必要。今すぐ決める話ではなく、Issue #131/
+  #132/#222着手時の設計判断になる。
+- **気づいた経緯**: 2026-08-16、`run_lm_predict_crosscheck.R`解説後のユーザー提案。
+- **状態**: 未対応（Issue #131/#132/#222着手時に判断）

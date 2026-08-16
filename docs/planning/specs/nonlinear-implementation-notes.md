@@ -187,7 +187,11 @@ Logitのfit()に観測情報行列SEを実装するテスト追加中、`Method:
 
 - `TobitProblem`の`params`は`(β, log σ)`という`k+1`次元ベクトルとして扱う。`σ`ではなく`log σ`を最適化変数にすることで正値制約を回避する（AER::tobitの`summary.tobit`が`Log(scale)`をそのまま報告しているのと同じ流儀）
 - 収束後、`σ = exp(log σ)`へ逆変換し、そのSEはデルタ法（`Var(σ) ≈ σ² · Var(log σ)`）で計算する
-- Olsen(1978)の`(δ=β/σ, γ=1/σ)`変換（大域凹性が数学的に保証される）は**採用しない**。ゼロベクトル初期値からのNewton収束はLogit/Probitで実績があり、`(β, log σ)`パラメータ化でもまず同様に運用し、収束性に問題が出た場合に再検討する
+- Olsen(1978)の`(δ=β/σ, γ=1/σ)`変換（大域凹性が数学的に保証される）は**採用しない**。当初は「ゼロベクトル初期値からのNewton収束はLogit/Probitで実績があり、`(β, log σ)`パラメータ化でもまず同様に運用し、収束性に問題が出た場合に再検討する」方針だったが、**Issue #215の実装時に実際に問題が発生**したため以下の2段階の対策を追加した（Olsen変換への回帰はせず、ユーザー確認済み）:
+  1. **初期値をゼロベクトルではなくOLS推定値にする**: 打ち切りを無視した単純なOLS（`β`とその残差の標本標準偏差）を初期値にする（`tobit.rs`の`ols_initial_params`）。R `survreg`/`censReg`等の標準的なTobit実装と同じ方針。ただしこれだけでは、実際に打ち切りが発生するデータで依然としてNewtonが`SingularHessian`で失敗するケースが残った（打ち切りが皆無・無視できるデータでは1.のみで十分）
+  2. **共有`FaerNewton`（`nonlinear/common.rs`、Logit/Probitと共有）にLevenberg-Marquardt型の減衰ステップを追加**: `(β, log σ)`パラメータ化のTobit尤度はHessianが不定符号になる領域を持ち、そこでは生のNewtonステップが降下方向ですらなくなることを実測で確認した。`H+λI`で`cost`が減少する候補が見つかるまで`λ`を段階的に増やす`regularized_newton_step`を追加。Logit/Probitのように尤度が大域凹な問題では`λ=0`の生のステップが常に最初の試行で受理されるため、既存の収束挙動と完全に一致する（既存テスト無変更で全通過を確認済み）
+
+  詳細な発見の経緯・数式は`engine/src/nonlinear/tobit.rs`のモジュールdocコメント「Newton法の初期値」「Newtonステップの正則化」節、`regularized_newton_step`のdocコメント参照。
 
 ### `standardize_columns`とσの扱い
 

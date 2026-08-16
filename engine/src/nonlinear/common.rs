@@ -72,6 +72,16 @@ pub enum MleError {
     #[error("the outer-product-of-gradients (OPG) matrix is singular and cannot be inverted")]
     SingularOpgMatrix,
 
+    /// Tobit専用: Newton法の初期値計算（打ち切りを無視した単純なOLS、`ols_initial_params`
+    /// 参照）に使う設計行列が特異（完全な多重共線性等）で最小二乗解が求まらない。
+    /// `SingularHessian`（最適化中・収束後のHessianの逆行列計算）とは、Newton法が
+    /// 一度も反復していない段階で発生しうる点・Hessianを一切評価していない点が異なるため
+    /// 区別する（`SingularOpgMatrix`を`SingularHessian`と区別しているのと同じ考え方）。
+    #[error(
+        "the design matrix used for the initial value estimate is singular and cannot be inverted"
+    )]
+    SingularDesignMatrix,
+
     /// Tobit専用: 打ち切り境界（下限/上限）の指定が不正（下限≧上限等）。
     #[error(
         "invalid censoring bounds: lower={lower:?}, upper={upper:?} \
@@ -176,19 +186,77 @@ pub fn validate_binary_y(y: &Mat<f64>) -> Result<(), MleError> {
     Ok(())
 }
 
+/// `max_iter`が0以下の場合にエラーを返す。
+pub fn validate_max_iter(max_iter: i64) -> Result<(), MleError> {
+    if max_iter <= 0 {
+        return Err(MleError::InvalidMaxIter { max_iter });
+    }
+    Ok(())
+}
+
+/// `tol`が0以下の場合にエラーを返す（[`MleError::InvalidTol`]のdocコメント参照）。
+pub fn validate_tol(tol: f64) -> Result<(), MleError> {
+    if tol <= 0.0 {
+        return Err(MleError::InvalidTol { tol });
+    }
+    Ok(())
+}
+
+/// `confidence_level`が`(0, 1)`の範囲外の場合にエラーを返す。`marginal_effects_from_w_s`
+/// でも同じ検証を行う（`fit()`とは独立した`confidence_level`を受け取るため）。
+pub fn validate_confidence_level(confidence_level: f64) -> Result<(), MleError> {
+    if !(confidence_level > 0.0 && confidence_level < 1.0) {
+        return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
+    }
+    Ok(())
+}
+
+/// `k==0`（`include_intercept=false`かつ説明変数も無い病的な入力）の場合にエラーを返す。
+/// Logit/Probit専用: この経路を通すと後段の`cov_params`計算（0×0行列に対する
+/// `ensure_well_conditioned_symmetric_matrix`）で`faer`がpanicすることが判明していたため、
+/// 明示的に弾く。`InsufficientObservations`（[`validate_sufficient_observations`]）と
+/// 分けている理由は[`CommonError::NoRegressors`]のdocコメント参照。
+///
+/// Tobitは`logσ`が常に最適化パラメータに含まれるため、対応する「パラメータ数0」の
+/// ケースが生じない（総パラメータ数は常に`k+1>=1`）。そのためTobitの`fit()`は
+/// この関数を呼ばない（Issue #212の結論、モジュール冒頭のdocコメント参照）。
+pub fn validate_has_regressors(n: usize, k: usize) -> Result<(), MleError> {
+    if k == 0 {
+        return Err(CommonError::NoRegressors { n }.into());
+    }
+    Ok(())
+}
+
+/// 観測数`n`がパラメータ数`k`以下の場合にエラーを返す。`k`の意味は呼び出し側に委ねる
+/// （Logit/Probitでは`input.k()`＝`β`の数（定数項含む）、Tobitでは`k+1`＝`β`の数+`logσ`、
+/// つまり総最適化パラメータ数を渡す。Issue #212の結論、モジュール冒頭のdocコメント参照）。
+pub fn validate_sufficient_observations(n: usize, k: usize) -> Result<(), MleError> {
+    if n <= k {
+        return Err(CommonError::InsufficientObservations { n, k }.into());
+    }
+    Ok(())
+}
+
+/// `cov_type=Cluster`のとき、グループキーが指定されておりクラスター数が十分であることを
+/// 検証する（`Cluster`以外は無検証）。
+pub fn validate_cluster_cov_type(cov_type: &CovType, n: usize) -> Result<(), MleError> {
+    if let CovType::Cluster { groups } = cov_type {
+        let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
+        validate_cluster_groups(groups, n)?;
+    }
+    Ok(())
+}
+
 /// `fit()`冒頭で行う共通の入力検証（Logit/Probit）。検証順序:
 /// `confidence_level`→`max_iter`→`tol`→`y`の二値性→`k==0`→`n<=k`→
 /// `cov_type=Cluster`のグループ列。元はLogit/Probitそれぞれの`fit()`に一字一句
 /// 同一のブロックとして重複していたため、こちらへ集約した。
 ///
-/// `k==0`（`include_intercept=false`かつ説明変数も無い病的な入力）は`n<=k`単体では
-/// 弾けない（実データでは`n>=1`のため）。この経路を通すと後段の`cov_params`計算
-/// （0×0行列に対する`ensure_well_conditioned_symmetric_matrix`）で`faer`がpanicする
-/// ことが判明していたため、ここで明示的に弾く。`InsufficientObservations`と
-/// `NoRegressors`を分けている理由は`CommonError::NoRegressors`のdocコメント参照。
-///
-/// Tobitは`y`が連続値のため`validate_binary_y`をそのまま適用できない。この関数を
-/// Tobitでどう扱うかは別issueで検討する（Issue #212）。
+/// Tobitの`fit()`（`confidence_level`/`cov_type`をまだ受け取らない、Issue #215時点）は
+/// この関数をそのまま呼べない（引数を揃えられない）ため、上記の各検証を個別の小関数
+/// （[`validate_max_iter`]等）に分割し、Tobitはそのうち必要な部分（`max_iter`/`tol`/
+/// [`validate_sufficient_observations`]）だけを個別に呼ぶ（Issue #212の結論）。
+/// この関数自体はLogit/Probit向けに元の挙動をそのまま保つラッパーとして残す。
 ///
 /// 引数は検証順序に揃えている。`n`（観測数）は`y`から自明に求まる（`y.nrows()`）ため
 /// 引数に取らない。`k`と型が同じ`usize`の引数を並べると呼び出し側で取り違えても
@@ -201,28 +269,15 @@ pub fn validate_fit_preconditions(
     k: usize,
     cov_type: &CovType,
 ) -> Result<(), MleError> {
-    if !(confidence_level > 0.0 && confidence_level < 1.0) {
-        return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
-    }
-    if max_iter <= 0 {
-        return Err(MleError::InvalidMaxIter { max_iter });
-    }
-    if tol <= 0.0 {
-        return Err(MleError::InvalidTol { tol });
-    }
+    validate_confidence_level(confidence_level)?;
+    validate_max_iter(max_iter)?;
+    validate_tol(tol)?;
     validate_binary_y(y)?;
 
     let n = y.nrows();
-    if k == 0 {
-        return Err(CommonError::NoRegressors { n }.into());
-    }
-    if n <= k {
-        return Err(CommonError::InsufficientObservations { n, k }.into());
-    }
-    if let CovType::Cluster { groups } = cov_type {
-        let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-        validate_cluster_groups(groups, n)?;
-    }
+    validate_has_regressors(n, k)?;
+    validate_sufficient_observations(n, k)?;
+    validate_cluster_cov_type(cov_type, n)?;
     Ok(())
 }
 
@@ -525,9 +580,7 @@ pub fn marginal_effects_from_w_s(
     s: &[f64],
     confidence_level: f64,
 ) -> Result<MarginalEffects, MleError> {
-    if !(confidence_level > 0.0 && confidence_level < 1.0) {
-        return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
-    }
+    validate_confidence_level(confidence_level)?;
     let FittedModelForMarginalEffects {
         param_names,
         has_intercept,
@@ -877,9 +930,26 @@ struct FaerNewton {
 
 type NewtonState = IterState<Vec<f64>, Vec<f64>, (), Vec<Vec<f64>>, (), f64>;
 
+/// [`regularized_newton_step`]がコスト減少の候補が見つからない場合に諦めるまでの
+/// 最大試行回数（`INITIAL_LM_LAMBDA`から`LM_LAMBDA_GROWTH`倍ずつ`λ`を増やしながら試す）。
+///
+/// 値の根拠: `λ`は`INITIAL_LM_LAMBDA * LM_LAMBDA_GROWTH^(n-1)`と幾何級数的に増加するため、
+/// `n=40`回目には`λ≈1e-3*4^39≈10^20`という天文学的な値に達する。十分大きな`λ`では
+/// ステップが最急降下方向`-g/λ`に漸近し、非零の勾配に対しては理論上必ず降下方向になる
+/// （`regularized_newton_step`のdocコメント参照）ため、実務的にはこれよりずっと少ない
+/// 回数（Tobitの打ち切りデータでの実測では1反復あたり最大9回程度）で受理される。
+/// `SEPARATION_PARAM_NORM_THRESHOLD`のように実測比較による厳密な根拠があるわけではなく、
+/// 「理論上十分すぎるほど大きい」という設計上の安全マージンとして選んだ値。
+const MAX_LM_ATTEMPTS: usize = 40;
+/// `λ=0`（生のNewtonステップ）がコストを減少させなかった場合の初期正則化係数。
+const INITIAL_LM_LAMBDA: f64 = 1e-3;
+/// 各試行で`λ`を増やす倍率。
+const LM_LAMBDA_GROWTH: f64 = 4.0;
+
 impl<O> Solver<O, NewtonState> for FaerNewton
 where
-    O: Gradient<Param = Vec<f64>, Gradient = Vec<f64>>
+    O: CostFunction<Param = Vec<f64>, Output = f64>
+        + Gradient<Param = Vec<f64>, Gradient = Vec<f64>>
         + Hessian<Param = Vec<f64>, Hessian = Vec<Vec<f64>>>,
 {
     /// `argmin::core::Solver`トレイトの必須メソッド（ロギング・エラーメッセージ表示等、
@@ -931,8 +1001,8 @@ where
             .take_gradient()
             .ok_or_else(|| OptimizerError::msg("FaerNewton: gradient in state not set"))?;
         let hessian = problem.hessian(&param)?;
-        let step = newton_step(&hessian, &grad)?;
-        let new_param: Vec<f64> = param.iter().zip(step.iter()).map(|(p, s)| p - s).collect();
+        let cost = problem.cost(&param)?;
+        let new_param = regularized_newton_step(problem, &param, &grad, &hessian, cost)?;
         // 収束判定（terminate）が「更新後のparamに対応する勾配」を見られるよう、
         // 更新前のgradを使い回さずnew_paramで改めて評価する。
         let new_grad = problem.gradient(&new_param)?;
@@ -948,6 +1018,84 @@ where
         }
         TerminationStatus::NotTerminated
     }
+}
+
+/// `Δθ = (H+λI)⁻¹g`（`λ=0`なら生のNewtonステップと同じ）で候補パラメータを求め、
+/// `cost(θ-Δθ) < cost(θ)`となるまで`λ`を`0→INITIAL_LM_LAMBDA→×LM_LAMBDA_GROWTH→…`と
+/// 段階的に増やす（Levenberg-Marquardt**型**のHessian修正、Nocedal & Wright
+/// *Numerical Optimization*の"Hessian modification"に相当）。Levenberg-Marquardt原法
+/// （非線形最小二乗のGauss-Newton近似Hessianに対する信頼領域法）とは目的関数の形が
+/// 異なる一般のMLE最適化への適用であり、名称はあくまで「`H+λI`による正則化」という
+/// 手法的な類似性を指す（rust-reviewer指摘）。
+///
+/// **導入経緯（Issue #215）**: Logit/Probitのように尤度が大域凹（Hessianが半正定値）な
+/// 問題では、収束点に向かう正常な軌道上は`λ=0`の生のNewtonステップが最初の試行で
+/// 受理されるため、収束の挙動（反復回数・収束点）は変わらない。ただし例外がある:
+/// 設計行列が構造的に特異な入力（完全な多重共線性等、`logit.rs`の
+/// `fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix`が使う
+/// ケース）では、Hessianが**すべての点で**特異なため、導入前は`newton_step`が初回から
+/// 即座に`SingularHessian`を返していたが、導入後は`λ>0`の正則化により一旦有限のステップが
+/// 得られてしまい、Newton自体は「収束」した扱いになる（最終的には収束後の
+/// `observed_information_cov_params`が同じ構造的特異Hessianを検出し、結局
+/// `SingularHessian`を返すため、`fit()`全体としてのエラーバリアント・最終的な
+/// ユーザー向け挙動は変わらない。既存テストが変化なくパスするのはこのため）。
+/// つまり保証されるのは「`fit()`が最終的に返す結果」の不変性であり、Newton内部の
+/// 反復過程・エラー発生箇所まで完全に不変というわけではない（rust-reviewer指摘、
+/// 独立シミュレーションで確認済み）。一方Tobitは`(β, logσ)`パラメータ化で大域凹性が保証されず
+/// （`docs/planning/specs/nonlinear-implementation-notes.md`「パラメータ化」参照。
+/// Olsen(1978)の`(β/σ, 1/σ)`変換は不採用）、Hessianが不定符号になる領域では
+/// **生のNewtonステップが降下方向ですらなくなる**ことが実測で判明した（OLS推定値を
+/// 初期値にしても、実際に打ち切りが発生するデータで一貫して再現。ステップをどれだけ
+/// 小さくスケールしても`cost`が改善しないケースを確認済み）。`λI`を加えて
+/// Hessianを正定値に近づけることで、十分大きな`λ`では最急降下方向（`-g/λ`、非零の
+/// 勾配に対して必ず降下方向）に漸近するため、有限回の試行で必ずコスト減少方向が
+/// 見つかる（ユーザー確認済み）。
+///
+/// `newton_step`が`MleError::SingularHessian`を返した場合（`λ`を加えても数値的に
+/// 特異なまま）は、そのまま次の`λ`を試す（即座にエラーを伝播しない）。
+/// `MAX_LM_ATTEMPTS`回すべて失敗した場合のみ`SingularHessian`を返す
+/// （既存のエラー型・意味を変えない）。
+fn regularized_newton_step<O>(
+    problem: &mut Problem<O>,
+    param: &[f64],
+    grad: &[f64],
+    hessian: &[Vec<f64>],
+    cost: f64,
+) -> Result<Vec<f64>, OptimizerError>
+where
+    O: CostFunction<Param = Vec<f64>, Output = f64>,
+{
+    let k = grad.len();
+    let mut lambda = 0.0_f64;
+    for _ in 0..MAX_LM_ATTEMPTS {
+        let regularized: Vec<Vec<f64>> = (0..k)
+            .map(|i| {
+                (0..k)
+                    .map(|j| hessian[i][j] + if i == j { lambda } else { 0.0 })
+                    .collect()
+            })
+            .collect();
+        if let Ok(step) = newton_step(&regularized, grad) {
+            let candidate: Vec<f64> = param.iter().zip(&step).map(|(p, s)| p - s).collect();
+            if let Ok(candidate_cost) = problem.cost(&candidate)
+                && candidate_cost.is_finite()
+                && candidate_cost < cost
+            {
+                return Ok(candidate);
+            }
+        }
+        lambda = if lambda == 0.0 {
+            INITIAL_LM_LAMBDA
+        } else {
+            lambda * LM_LAMBDA_GROWTH
+        };
+    }
+    // `MAX_LM_ATTEMPTS`回すべて失敗する経路は、既存のテストデータ（Tobitの打ち切り
+    // データ、Logit/Probitの完全な多重共線性データ含む）では一度も到達していない
+    // （`MAX_LM_ATTEMPTS`のdocコメントの通り、理論上は`λ`が十分大きくなれば必ず
+    // 降下方向が見つかるはずだが、これを「理論上到達不能」と断定できる証明は無い。
+    // rust-reviewer指摘。再現データが見つかった場合はテストを追加する）。
+    Err(MleError::SingularHessian.into())
 }
 
 /// Newtonステップ`Δθ = H⁻¹g`を求める。`H`は対称とは限らない（収束点から離れた場所では
@@ -1001,6 +1149,19 @@ impl ColumnScale {
     /// （テストが`fit()`と同じ標準化・逆標準化の手順を独立に再現するために必要）。
     pub fn stds(&self) -> &[f64] {
         &self.stds
+    }
+
+    /// `stds`の末尾に、スケーリング対象外（無変換）を表す`1.0`を`n`個追加した新しい
+    /// `ColumnScale`を返す。Tobitの`(β, logσ)`のように、`x`の列に対応しない追加
+    /// パラメータ（`logσ`）を`params`に含む場合に、既存の`zip`ベースの
+    /// `destandardize_params`/`destandardize_cov_params`をそのまま再利用するために使う
+    /// （`logσ`は`x`の列スケーリングとは無関係な量で、線形再パラメータ化`x_std=x/std`の
+    /// 下で不変。`docs/planning/specs/nonlinear-implementation-notes.md`
+    /// 「standardize_columnsとσの扱い」節、Issue #215で導入）。
+    pub fn extend_unscaled(&self, n: usize) -> Self {
+        let mut stds = self.stds.clone();
+        stds.extend(std::iter::repeat_n(1.0, n));
+        Self { stds }
     }
 }
 

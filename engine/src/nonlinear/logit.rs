@@ -1980,9 +1980,19 @@ mod tests {
     #[test]
     fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix() {
         // x2 = 2*x1（完全な多重共線性）。θ=0でのHessianは0.25*X'Xで、X'X自体が
-        // 構造的に特異（yの値に関わらず常に特異）なので、Newtonの初回ステップで
-        // 確実にnewton_stepの特異性検出に引っかかる（完全分離のような「収束の
-        // 挙動に依存する」ケースと異なり、決定的に再現できる）。
+        // 構造的に特異（yの値に関わらず、θの値に関わらず常に特異）なので、
+        // 収束後の観測情報行列計算（`observed_information_cov_params`）で確実に
+        // `SingularHessian`を検出する（完全分離のような「収束の挙動に依存する」
+        // ケースと異なり、決定的に再現できる）。
+        //
+        // Newton法自体の反復過程は、`regularized_newton_step`（Tobit実装時に
+        // `nonlinear/common.rs`へ追加、Issue #215）導入前は初回ステップで即座に
+        // `newton_step`が特異性を検出していたが、導入後はHessianが構造的に特異な
+        // このケースでもλ>0の正則化により有限のステップが得られ、Newton自体は
+        // 「収束」した扱いになる。最終的にこのテストが検証する`fit()`全体の
+        // 結果（`Err(MleError::SingularHessian)`）は変わらない（収束後の
+        // `observed_information_cov_params`が同じ構造的特異Hessianを検出するため）が、
+        // 内部の反復過程は変化している点に注意（rust-reviewer指摘）。
         let y = vec![0.0, 1.0, 0.0, 1.0];
         let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
         let input = LogitInput::from_columns(

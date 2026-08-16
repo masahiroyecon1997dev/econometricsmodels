@@ -2018,8 +2018,11 @@ mod tests {
     fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix() {
         // x2 = 2*x1（完全な多重共線性）。θ=0でのHessianはw*X'X（w=λ(λ+z)、z=0のとき
         // w=2/π）で、X'X自体が構造的に特異（yの値に関わらず常に特異）なので、
-        // Newtonの初回ステップで確実に特異性検出に引っかかる（Logitの対応するテストと
-        // 同じ理由、完全分離のような「収束の挙動に依存する」ケースと異なり決定的に再現できる）。
+        // 収束後の観測情報行列計算で確実に`SingularHessian`を検出する（Logitの
+        // 対応するテストと同じ理由、完全分離のような「収束の挙動に依存する」ケースと
+        // 異なり決定的に再現できる）。Newton法自体の反復過程における注意点は
+        // `logit.rs`の対応するテストのコメント参照（`regularized_newton_step`導入、
+        // Issue #215）。
         let y = vec![0.0, 1.0, 0.0, 1.0];
         let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
         let input = ProbitInput::from_columns(

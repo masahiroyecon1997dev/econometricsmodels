@@ -28,10 +28,12 @@ pub(crate) fn mle_error_to_pyerr(err: MleError) -> PyErr {
         MleError::InvalidMaxIter { .. }
         | MleError::InvalidTol { .. }
         | MleError::InvalidCensoringBounds { .. }
-        | MleError::InvalidBinaryY { .. } => ValidationError::new_err(err.to_string()),
+        | MleError::InvalidBinaryY { .. }
+        | MleError::YOutOfCensoringBounds { .. } => ValidationError::new_err(err.to_string()),
         MleError::NonConvergence { .. }
         | MleError::SingularHessian
         | MleError::SingularOpgMatrix
+        | MleError::SingularDesignMatrix
         | MleError::SeparationSuspected { .. } => ComputationError::new_err(err.to_string()),
     }
 }

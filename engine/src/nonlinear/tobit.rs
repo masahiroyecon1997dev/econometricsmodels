@@ -65,11 +65,56 @@
 //! 打ち切り観測の`λ(u)=φ(u)/Φ(u)`は、`Probit`の一般化残差と全く同じ`0.0/0.0`のNaN化
 //! リスクを持つ（`u`が極端に負のとき）。`nonlinear/common.rs`の`clamped_pdf_cdf`
 //! （Tobit実装時にProbit専用から共有ユーティリティへ移設）をそのまま再利用する。
+//!
+//! ## Newton法の初期値: OLS推定値を使う（ゼロベクトルではない、Logit/Probitとの違い）
+//!
+//! `docs/planning/specs/nonlinear-implementation-notes.md`の当初計画では、`(β, logσ)`
+//! パラメータ化でもLogit/Probitと同じくゼロベクトル初期値からのNewton収束をまず試す
+//! 方針だったが、Issue #215の実装時に**打ち切りが皆無のデータ（通常の正規回帰に退化する
+//! 単純なケース）でもゼロベクトル初期値からNewtonが発散する**ことが実測で判明した
+//! （切片`β→-∞`・`s=logσ→+∞`という非有界な方向へ発散し、最終的にHessianが0行列に
+//! なり`NaN`に到達。ユーザー確認済み）。
+//!
+//! 原因はLogit/Probitと異なり`(β, logσ)`パラメータ化のTobit尤度が大域凹であることを
+//! 保証されていない点（Olsen(1978)の`(β/σ, 1/σ)`変換を採用していないため、
+//! モジュール冒頭「数式」節参照）。初期値`σ=1`が真の値から大きく離れていると、
+//! Newtonの2次近似が悪条件な領域（Hessianが不定符号）を通過し、そこでの
+//! 局所線形近似が誤った方向への大きなステップを生む。
+//!
+//! 対策として、`ols_initial_params`で打ち切りを無視した単純なOLS（`β`とその残差の
+//! 標本標準偏差）を計算し、Newtonの初期値として使う（R `survreg`/`censReg`等の
+//! 標準的なTobit実装と同じ方針）。真の最尤推定値に近い出発点から始めることで、
+//! 上記の不安定な領域を通過するリスクを大きく下げる。
+//!
+//! ## Newtonステップの正則化（Levenberg-Marquardt型、OLS初期値だけでは不十分だった）
+//!
+//! OLS初期値の導入後も、**実際に打ち切りが発生するデータ**（左右どちらかの打ち切り率が
+//! 有意にあるデータ。打ち切りが皆無または無視できる場合は上記のOLS初期値のみで
+//! 十分だった）では、なおNewton法が`SingularHessian`で失敗することが判明した
+//! （n=8の小規模データ、n=30・打ち切り率40%の穏やかなデータの両方で再現。実測で
+//! 手動追跡した結果、Hessianが不定符号になる領域で**生のNewtonステップが降下方向で
+//! さえない**（ステップをどれだけ小さくスケールしても`cost`が改善しない）ことを確認した）。
+//!
+//! `nonlinear/common.rs`の`FaerNewton`（Logit/Probitと共有）に、Levenberg-Marquardt型の
+//! 減衰Newton法（`regularized_newton_step`）を追加して対応した。`H+λI`（`λ≥0`）で
+//! ステップを求め、`cost`が減少する候補が見つかるまで`λ`を段階的に増やす。
+//! Logit/Probitのように尤度が大域凹な問題では、収束点に向かう正常な軌道上は`λ=0`の
+//! 生のステップが最初の試行で受理されるため収束の挙動は変わらないが、設計行列が
+//! 構造的に特異な入力（完全な多重共線性等）では内部の反復過程が変化する
+//! （最終的に`fit()`が返すエラーバリアントは変わらない。詳細は
+//! `regularized_newton_step`のdocコメント参照、rust-reviewer指摘・独立シミュレーションで
+//! 確認済み）。Logit/Probitの既存テストが数値的に変化なく全通過することは確認済み。
+//! 詳細な導入経緯は
+//! `regularized_newton_step`のdocコメント参照（ユーザー確認済み）。
 
 use crate::error::CommonError;
-use crate::nonlinear::common::{MleError, clamped_pdf_cdf};
+use crate::nonlinear::common::{
+    Method, MleError, clamped_pdf_cdf, destandardize_params, run_solver, standardize_columns,
+    validate_max_iter, validate_sufficient_observations, validate_tol,
+};
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
+use faer::prelude::SolveLstsq;
 use statrs::distribution::Normal;
 
 /// Tobitの被説明変数・設計行列・打ち切り境界を保持する入力データ。
@@ -326,10 +371,8 @@ pub struct TobitProblem {
 impl TobitProblem {
     /// `input`の`x`・`y`・打ち切り境界をそのまま（未標準化のスケールで）複製して構築する。
     /// 閉じた形の解・OLSとの整合性と突き合わせる単体テスト専用（`LogitProblem::new`と
-    /// 同じ位置づけ）。標準化済み設計行列から構築するコンストラクタ（`LogitProblem::
-    /// from_standardized`相当）は`TobitEstimator::fit`実装時（Issue #215以降）に追加する
-    /// （本Issueのスコープ外、`fit()`が存在しない状態で追加すると未使用の`dead_code`に
-    /// なるため）。
+    /// 同じ位置づけ。`TobitEstimator::fit`は標準化後の設計行列を使うため、こちらではなく
+    /// `from_standardized`を使う）。
     #[cfg(test)]
     fn new(input: &TobitInput) -> Self {
         Self {
@@ -337,6 +380,24 @@ impl TobitProblem {
             y: input.y().clone(),
             lower: input.lower(),
             upper: input.upper(),
+        }
+    }
+
+    /// `standardize_columns`で標準化済みの設計行列`x_std`と`y`・打ち切り境界から構築する。
+    /// `TobitEstimator::fit`が最適化に使う経路（`LogitProblem::from_standardized`と
+    /// 同じ位置づけ）。打ち切り境界`lower`/`upper`は`y`のスケールで表現された値であり
+    /// `x`の列スケーリングとは無関係なため、標準化の影響を受けずそのまま渡す。
+    fn from_standardized(
+        x_std: Mat<f64>,
+        y: Mat<f64>,
+        lower: Option<f64>,
+        upper: Option<f64>,
+    ) -> Self {
+        Self {
+            x: x_std,
+            y,
+            lower,
+            upper,
         }
     }
 
@@ -465,6 +526,190 @@ impl Hessian for TobitProblem {
         let cross_terms: Vec<f64> = h.iter().take(k).map(|row| row[k]).collect();
         h[k][..k].copy_from_slice(&cross_terms);
         Ok(h)
+    }
+}
+
+/// 打ち切りを無視した単純なOLS（`X'Xβ=X'y`の最小二乗解）から、Newton法の初期値
+/// `(β, logσ)`を計算する（モジュール冒頭「Newton法の初期値」節参照）。`x`は
+/// `standardize_columns`で標準化済みの設計行列を渡す想定（`fit()`が最適化に使う空間と
+/// 一致させ、初期値をそのまま`run_solver`に渡せるようにするため）。`y`は打ち切りを
+/// 無視し、観測された値をそのまま連続値として扱う（あくまで初期値のヒューリスティックで
+/// あり、Tobitの推定値そのものではない）。
+///
+/// 特異性検出は`engine::linear::ols::OlsEstimator`の`ensure_full_rank`と同じ相対閾値
+/// パターン（列ピボットQRの`R`の対角成分、`.claude/rules/rust-style.md`「線形代数」
+/// 参照）を踏襲する。`OlsEstimator`側のprivate関数は再利用できないため同型のロジックを
+/// ここに複製している。
+///
+/// # Errors
+/// `x`が特異（完全な多重共線性等）な場合は`MleError::SingularDesignMatrix`を返す
+/// （`MleError::SingularDesignMatrix`のdocコメント参照。Newton法が一度も反復していない
+/// 段階で発生しうるため`SingularHessian`とは区別する）。
+fn ols_initial_params(x: &Mat<f64>, y: &Mat<f64>) -> Result<Vec<f64>, MleError> {
+    let n = x.nrows();
+    let k = x.ncols();
+
+    let qr = x.col_piv_qr();
+    let r = qr.thin_R();
+    let max_abs_diag = (0..k).map(|i| (*r.get(i, i)).abs()).fold(0.0_f64, f64::max);
+    let threshold = (k as f64) * f64::EPSILON * max_abs_diag;
+    for i in 0..k {
+        let diag = (*r.get(i, i)).abs();
+        if diag.is_nan() || diag <= threshold {
+            return Err(MleError::SingularDesignMatrix);
+        }
+    }
+
+    let beta_mat = qr.solve_lstsq(y);
+    let beta: Vec<f64> = (0..k).map(|i| *beta_mat.get(i, 0)).collect();
+
+    let residuals = y - x * &beta_mat;
+    let sse: f64 = (0..n).map(|i| (*residuals.get(i, 0)).powi(2)).sum();
+    // 完全な当てはまり（sse≈0、退化ケース）ではlog(0)=-infになり最適化が破綻するため、
+    // あくまで初期値のヒューリスティックとしてσ=1（s=0）にフォールバックする。
+    // `sse > 0.0`という厳密比較ではなく`y`のスケールに対する相対閾値を使う
+    // （`.claude/rules/rust-style.md`「線形代数」の相対閾値方針。QRによる最小二乗解の
+    // 浮動小数点丸め誤差により、数学的には完全な当てはまりでも`sse`がわずかに正の
+    // 微小値になりうるため、`> 0.0`だと退化ケースを見逃す）。
+    let candidate_sigma = (sse / n as f64).sqrt();
+    let y_scale = (0..n)
+        .map(|i| (*y.get(i, 0)).abs())
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+    let sigma = if candidate_sigma > 1e-8 * y_scale {
+        candidate_sigma
+    } else {
+        1.0
+    };
+
+    let mut params = beta;
+    params.push(sigma.ln());
+    Ok(params)
+}
+
+/// Tobitの推定結果。`fit`でのバリデーション・最適化を通過した状態を表す（Issue #215
+/// 時点のスコープ）。標準誤差・z値・p値・信頼区間・適合度統計量は`cov_type`/
+/// `confidence_level`を要するため後続issue（#217以降）で追加する
+/// （`LogitEstimator`/`ProbitEstimator`との違い）。
+///
+/// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
+#[derive(Debug)]
+pub struct TobitEstimator {
+    input: TobitInput,
+    /// 係数（元のスケール、`β`部分のみ）。`input.param_names()`と対応する
+    params: Vec<f64>,
+    /// 誤差項の標準偏差（元のスケール）。内部最適化パラメータ`logσ`を`σ=exp(logσ)`で
+    /// 逆変換したもの（`.claude/rules/rust-style.md`の`ColumnScale::extend_unscaled`
+    /// docコメント参照。`logσ`は`x`の列スケーリングとは無関係な量なので、逆変換は
+    /// この指数変換のみで完結する）
+    sigma: f64,
+    /// 収束したかどうか
+    converged: bool,
+    /// 実際の反復回数
+    n_iter: usize,
+}
+
+impl TobitEstimator {
+    /// `method`（Newton-Raphson/BFGS/L-BFGS）で負の対数尤度を最小化し、Tobitの係数`β`・
+    /// 誤差項の標準偏差`σ`を推定する。
+    ///
+    /// 内部最適化パラメータは`(β, s=logσ)`という`k+1`次元ベクトル（モジュール冒頭の
+    /// 数式参照）。`x`は`standardize_columns`で内部的に標準化してから最適化し
+    /// （`LogitEstimator::fit`と同じ理由。勾配ノルムに基づく収束判定`tol`が設計行列の
+    /// スケールに依存しないようにするため）、収束後に`destandardize_params`で元の
+    /// スケールへ逆変換する。`logσ`（`k+1`番目の要素）は`x`の列スケーリングとは無関係な
+    /// 量（線形再パラメータ化`x_std=x/std`の下で不変）なので、`ColumnScale::
+    /// extend_unscaled(1)`でスケール`1.0`（無変換）の要素を追加し、既存の`zip`ベースの
+    /// `destandardize_params`をそのまま`(k+1)`次元ベクトルに適用する
+    /// （`docs/planning/specs/nonlinear-implementation-notes.md`「standardize_columnsと
+    /// σの扱い」節）。打ち切り境界`lower`/`upper`はこの標準化の影響を受けない
+    /// （`y`のスケールで表現された値のため）。
+    ///
+    /// 初期値はゼロベクトルではなく`ols_initial_params`が計算するOLS推定値
+    /// （`LogitEstimator::fit`とは異なる。モジュール冒頭「Newton法の初期値」節参照）。
+    ///
+    /// `cov_type`・`confidence_level`は本Issue（#215、最適化のみがスコープ）では扱わない。
+    /// 観測数の十分性検証（`validate_sufficient_observations`）には`x`の列数`k`ではなく
+    /// 総最適化パラメータ数`k+1`を使う（Issue #212の結論、`validate_sufficient_
+    /// observations`のdocコメント参照）。Logit/Probitの`validate_has_regressors`
+    /// （`k==0`検証）はTobitでは呼ばない（`logσ`が常に存在するため対応するケースが
+    /// 生じない、同関数のdocコメント参照）。標準誤差・z値・p値・信頼区間・適合度統計量は
+    /// 後続issue（#217以降）で追加する。
+    ///
+    /// # Errors
+    /// - `max_iter`が0以下: `MleError::InvalidMaxIter`
+    /// - `tol`が0以下: `MleError::InvalidTol`
+    /// - 観測数`n`が総パラメータ数`k+1`以下: `CommonError::InsufficientObservations`
+    /// - OLS初期値計算時に`x`が特異（完全な多重共線性等）: `MleError::SingularDesignMatrix`
+    ///   （`ols_initial_params`参照）
+    /// - `raise_on_non_convergence=true`かつ`max_iter`回で未収束: `MleError::NonConvergence`
+    /// - 収束点（または`raise_on_non_convergence=false`時の打ち切り点）のHessianが特異:
+    ///   `MleError::SingularHessian`
+    pub fn fit(
+        input: TobitInput,
+        method: Method,
+        max_iter: i64,
+        tol: f64,
+        raise_on_non_convergence: bool,
+    ) -> Result<Self, MleError> {
+        validate_max_iter(max_iter)?;
+        validate_tol(tol)?;
+
+        let n = input.nobs();
+        let k = input.k();
+        validate_sufficient_observations(n, k + 1)?;
+
+        let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
+        let scale = scale.extend_unscaled(1);
+        let initial_params = ols_initial_params(&x_std, input.y())?;
+        let problem =
+            TobitProblem::from_standardized(x_std, input.y().clone(), input.lower(), input.upper());
+
+        let output = run_solver(
+            problem,
+            method,
+            initial_params,
+            max_iter as u64,
+            tol,
+            raise_on_non_convergence,
+        )?;
+
+        let params_full = destandardize_params(&output.params, &scale);
+        let sigma = params_full[k].exp();
+        let params = params_full[..k].to_vec();
+
+        Ok(Self {
+            input,
+            params,
+            sigma,
+            converged: output.converged,
+            n_iter: output.n_iter,
+        })
+    }
+
+    /// 推定に使った入力データ
+    pub fn input(&self) -> &TobitInput {
+        &self.input
+    }
+
+    /// 係数（元のスケール、`β`部分のみ）
+    pub fn params(&self) -> &[f64] {
+        &self.params
+    }
+
+    /// 誤差項の標準偏差（元のスケール）
+    pub fn sigma(&self) -> f64 {
+        self.sigma
+    }
+
+    /// 収束したかどうか
+    pub fn converged(&self) -> bool {
+        self.converged
+    }
+
+    /// 実際の反復回数
+    pub fn n_iter(&self) -> usize {
+        self.n_iter
     }
 }
 
@@ -1021,5 +1266,266 @@ mod tests {
         let scores = problem.scores(&params);
         assert!((*scores.get(0, 0) - lambda0).abs() < 1e-12);
         assert!((*scores.get(0, 1)).abs() < 1e-12);
+    }
+
+    /// 打ち切りが（実質的に）発生しないよう境界を極端に広く取ったデータ。
+    fn intercept_only_uncensored_input(y: &[f64]) -> TobitInput {
+        TobitInput::from_columns(
+            y,
+            &[],
+            vec![],
+            true,
+            "y".to_string(),
+            Some(-1000.0),
+            Some(1000.0),
+        )
+        .unwrap()
+    }
+
+    /// 切片のみ（説明変数なし）・打ち切りなしのTobitは、通常の正規分布の最尤推定
+    /// （`β̂=ȳ`・`σ̂²=Σ(y-ȳ)²/n`という閉じた形の解析解、OLSの不偏推定量`n-1`除算とは
+    /// 異なる`n`除算のML推定量）に一致するはず（Issue #215完了条件「打ち切りが極端に
+    /// 少ないデータで、Newton法がOLSの閉形式解に近い値に収束すること」の境界ケース）。
+    #[test]
+    fn fit_newton_converges_to_closed_form_solution_for_intercept_only_uncensored_data() {
+        let y = vec![1.0, 2.0, 3.0, 4.0, 10.0];
+        let input = intercept_only_uncensored_input(&y);
+
+        let n = y.len() as f64;
+        let y_bar: f64 = y.iter().sum::<f64>() / n;
+        let sse: f64 = y.iter().map(|v| (v - y_bar).powi(2)).sum();
+        let expected_sigma = (sse / n).sqrt();
+
+        let estimator = TobitEstimator::fit(input, Method::Newton, 100, 1e-8, true).unwrap();
+
+        assert!(estimator.converged());
+        assert_eq!(estimator.params().len(), 1);
+        assert!(
+            (estimator.params()[0] - y_bar).abs() < 1e-5,
+            "params={:?}, expected={}",
+            estimator.params(),
+            y_bar
+        );
+        assert!(
+            (estimator.sigma() - expected_sigma).abs() < 1e-5,
+            "sigma={}, expected={}",
+            estimator.sigma(),
+            expected_sigma
+        );
+    }
+
+    /// 説明変数ありのモデルでも、打ち切りが実質発生しないデータではNewton法がOLSの
+    /// 閉じた形の解（正規方程式）に近い値に収束するはず（Issue #215完了条件の本体、
+    /// `expected_*`はOLSの公式から本テスト内で独立に計算する）。
+    #[test]
+    fn fit_newton_converges_near_ols_closed_form_when_censoring_is_negligible() {
+        let x = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let y = vec![2.0, 4.1, 5.9, 8.2, 9.8];
+        let input = TobitInput::from_columns(
+            &y,
+            std::slice::from_ref(&x),
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            Some(-1000.0),
+            Some(1000.0),
+        )
+        .unwrap();
+
+        let n = y.len() as f64;
+        let x_bar: f64 = x.iter().sum::<f64>() / n;
+        let y_bar: f64 = y.iter().sum::<f64>() / n;
+        let sxy: f64 = x
+            .iter()
+            .zip(&y)
+            .map(|(xi, yi)| (xi - x_bar) * (yi - y_bar))
+            .sum();
+        let sxx: f64 = x.iter().map(|xi| (xi - x_bar).powi(2)).sum();
+        let expected_slope = sxy / sxx;
+        let expected_intercept = y_bar - expected_slope * x_bar;
+        let expected_sse: f64 = x
+            .iter()
+            .zip(&y)
+            .map(|(xi, yi)| (yi - (expected_intercept + expected_slope * xi)).powi(2))
+            .sum();
+        let expected_sigma = (expected_sse / n).sqrt();
+
+        let estimator = TobitEstimator::fit(input, Method::Newton, 100, 1e-8, true).unwrap();
+
+        assert!(estimator.converged());
+        assert!(
+            (estimator.params()[0] - expected_intercept).abs() < 1e-4,
+            "intercept={}, expected={}",
+            estimator.params()[0],
+            expected_intercept
+        );
+        assert!(
+            (estimator.params()[1] - expected_slope).abs() < 1e-4,
+            "slope={}, expected={}",
+            estimator.params()[1],
+            expected_slope
+        );
+        assert!(
+            (estimator.sigma() - expected_sigma).abs() < 1e-4,
+            "sigma={}, expected={}",
+            estimator.sigma(),
+            expected_sigma
+        );
+    }
+
+    #[test]
+    fn fit_returns_invalid_max_iter_error() {
+        let input = intercept_only_uncensored_input(&[1.0, 2.0, 3.0]);
+        let result = TobitEstimator::fit(input, Method::Newton, 0, 1e-8, true);
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::InvalidMaxIter { max_iter: 0 }
+        );
+    }
+
+    #[test]
+    fn fit_returns_invalid_tol_error() {
+        let input = intercept_only_uncensored_input(&[1.0, 2.0, 3.0]);
+        let result = TobitEstimator::fit(input, Method::Newton, 100, 0.0, true);
+        assert_eq!(result.unwrap_err(), MleError::InvalidTol { tol: 0.0 });
+    }
+
+    #[test]
+    fn fit_returns_insufficient_observations_error() {
+        // n=2, 総パラメータ数k+1=2(切片1+logσ1) → n<=k+1でエラー
+        // （`validate_sufficient_observations`にx列数ではなくk+1を渡す設計、
+        // Issue #212の結論）。
+        let input = intercept_only_uncensored_input(&[1.0, 2.0]);
+        let result = TobitEstimator::fit(input, Method::Newton, 100, 1e-8, true);
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::Common(CommonError::InsufficientObservations { n: 2, k: 2 })
+        );
+    }
+
+    #[test]
+    fn ols_initial_params_falls_back_to_sigma_one_for_perfect_fit() {
+        // 完全な当てはまり（残差ゼロ）ではsse=0となり、log(0)=-infを避けるため
+        // σ=1（s=0）にフォールバックする分岐を検証する（rust-reviewer指摘）。
+        let xs = [1.0, 2.0, 3.0, 4.0];
+        let x = Mat::from_fn(4, 2, |i, j| if j == 0 { 1.0 } else { xs[i] });
+        let y = Mat::from_fn(4, 1, |i, _| 2.0 * xs[i] + 1.0); // y=2x+1、完全に当てはまる
+
+        let params = ols_initial_params(&x, &y).unwrap();
+
+        assert_eq!(params.len(), 3);
+        assert!((params[0] - 1.0).abs() < 1e-9, "intercept={}", params[0]);
+        assert!((params[1] - 2.0).abs() < 1e-9, "slope={}", params[1]);
+        assert_eq!(params[2], 0.0, "s(=ln sigma)={}", params[2]);
+    }
+
+    #[test]
+    fn fit_returns_singular_design_matrix_error_for_perfectly_collinear_data() {
+        // x2=2*x1（完全な多重共線性）。ols_initial_paramsのQR分解が特異性を検出し、
+        // Newton法が一度も反復する前にエラーを返す（rust-reviewer指摘: SingularHessian
+        // とは区別される新設バリアント`SingularDesignMatrix`の検証）。
+        // n=6 > 総パラメータ数k+1=4（切片1+x1+x2+logσ1）で`InsufficientObservations`を
+        // 回避しつつ、x2=2*x1の構造的な多重共線性を検証する。
+        let y = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let x_columns = vec![
+            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0],
+        ];
+        let input = TobitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+            Some(-1000.0),
+            Some(1000.0),
+        )
+        .unwrap();
+
+        let result = TobitEstimator::fit(input, Method::Newton, 100, 1e-8, true);
+        assert!(
+            matches!(result, Err(MleError::SingularDesignMatrix)),
+            "{:?}",
+            result
+        );
+    }
+
+    /// 打ち切りが実際に発生するデータ（`x=1,2`が`lower=0`で左打ち切り、残りは非打ち切り、
+    /// 打ち切り率25%）。OLS（打ち切りを無視）は真のTobit MLEと一致しないため、
+    /// `fit()`の収束性を「打ち切りが皆無」の既存テストとは独立に検証できる
+    /// （rust-reviewer指摘: 実際に打ち切りが発生するケースでのNewton収束確認が
+    /// 無かったため追加）。
+    fn censored_regression_input() -> TobitInput {
+        let x = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        // 潜在変数 y* = -5 + 2x + noise（真の係数から意図的にわずかな残差を持たせる。
+        // ノイズが皆無だと非打ち切り観測の当てはまりが完全になりσ̂→0という退化した
+        // 境界ケースになり、いかなるソルバーでも不安定になることが判明したため
+        // （デバッグ時に発見。`ols_initial_params`のsse≈0フォールバックと同種の問題が
+        // 真のTobit尤度側でも起こりうる）。
+        let y = vec![0.0, 0.0, 1.15, 2.9, 5.2, 6.85, 9.1, 10.95];
+        TobitInput::from_columns(
+            &y,
+            &[x],
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            Some(0.0),
+            None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn fit_newton_converges_for_data_with_actual_censoring() {
+        let input = censored_regression_input();
+        let estimator = TobitEstimator::fit(input, Method::Newton, 100, 1e-8, true).unwrap();
+
+        assert!(estimator.converged());
+        assert_eq!(estimator.params().len(), 2);
+        assert!(estimator.sigma() > 0.0 && estimator.sigma().is_finite());
+        for &p in estimator.params() {
+            assert!(p.is_finite());
+        }
+    }
+
+    #[test]
+    fn fit_bfgs_and_lbfgs_converge_to_similar_solution_as_newton_for_censored_data() {
+        let newton =
+            TobitEstimator::fit(censored_regression_input(), Method::Newton, 100, 1e-8, true)
+                .unwrap();
+
+        for method in [Method::Bfgs, Method::Lbfgs] {
+            let estimator =
+                TobitEstimator::fit(censored_regression_input(), method, 200, 1e-8, true).unwrap();
+            assert!(estimator.converged(), "method={:?}", method);
+            for (a, b) in estimator.params().iter().zip(newton.params()) {
+                assert!((a - b).abs() < 1e-3, "method={:?}, a={a}, b={b}", method);
+            }
+            assert!(
+                (estimator.sigma() - newton.sigma()).abs() < 1e-3,
+                "method={:?}, sigma={}, newton_sigma={}",
+                method,
+                estimator.sigma(),
+                newton.sigma()
+            );
+        }
+    }
+
+    #[test]
+    fn fit_returns_non_convergence_error_when_max_iter_is_too_small_and_raise_is_true() {
+        let input = censored_regression_input();
+        let result = TobitEstimator::fit(input, Method::Newton, 1, 1e-12, true);
+        assert!(
+            matches!(result, Err(MleError::NonConvergence { .. })),
+            "{:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn fit_returns_unconverged_result_without_raising_when_raise_on_non_convergence_is_false() {
+        let input = censored_regression_input();
+        let estimator = TobitEstimator::fit(input, Method::Newton, 1, 1e-12, false).unwrap();
+        assert!(!estimator.converged());
     }
 }

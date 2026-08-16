@@ -361,3 +361,50 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-16、`generate_iv_gmm_fixtures.py`解説後のユーザー指摘。実際に
   11ファイル全ての`__main__`ブロックを比較し完全一致を確認済み。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 20. `NUMERIC_SCENARIOS`/`COV_TYPES`がmain/crosscheckフィクスチャファイルのペア間で重複
+
+- **対象**:
+  - [benchmark/linear/fixtures/generate_ols_fixtures.py:43-65](../../../benchmark/linear/fixtures/generate_ols_fixtures.py#L43-L65) ↔
+    `generate_ols_crosscheck_fixtures.py`（`NUMERIC_SCENARIOS`9要素完全一致、
+    `COV_TYPES`↔`R_COV_TYPES`も`["classical","hc0","hc1","hc2","hc3","hac"]`で完全一致）
+  - `generate_wls_fixtures.py` ↔ `generate_wls_crosscheck_fixtures.py`（同様に完全一致）
+  - `generate_logit_fixtures.py` ↔ `generate_logit_crosscheck_fixtures.py`（`NUMERIC_SCENARIOS`
+    6要素完全一致。`COV_TYPES`は`hc1`の有無だけ意図的に非対称——statsmodels側は
+    discrete modelでhc1が未実装のため含めず、R側はhc1を主リファレンスとして含める設計）
+  - `generate_probit_fixtures.py` ↔ `generate_probit_crosscheck_fixtures.py`（同様）
+- **内容**: ユーザー指摘（2026-08-16）。既存項目4（`generate_*_datasets.py`↔
+  `freeze_*_datasets.py`間の`SCENARIOS`重複）とは別の、`fixtures/generate_*_fixtures.py`↔
+  `fixtures/generate_*_crosscheck_fixtures.py`という**別ファイルペア**での重複を実測確認した。
+  4系統・8ファイルにわたって同種の重複が存在する。
+- **Claudeの所感**: 値が完全一致するペア（OLS/WLS）は`crosscheck`側で`main`側から
+  `import`し直せば単一定義元に統一できる。Logit/Probitの`COV_TYPES`の非対称性
+  （hc1の有無）は意味のある設計差のため、そのまま維持しつつ`NUMERIC_SCENARIOS`のみ
+  統一する形が妥当。
+- **気づいた経緯**: 2026-08-16、`generate_ols_crosscheck_fixtures.py`解説後のユーザー質問を
+  きっかけに4系統・8ファイルを横断比較し発見。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 21. `benchmark/_common.py`が用途の異なるヘルパーの寄せ集めになりつつある
+
+- **対象**: [benchmark/_common.py](../../../benchmark/_common.py)（`DATA_DIR`・
+  `imbalanced_cluster_groups`・`hac_auto_lag`・`load_frozen_dataset`・`freeze_scenarios`・
+  `run_freeze_cli`・`preview_dataset`の7項目が既に混在）
+- **内容**: ユーザー指摘（2026-08-16）。現状`_common.py`には「DGP系ヘルパー」
+  （`imbalanced_cluster_groups`/`hac_auto_lag`）・「データIO系ヘルパー」
+  （`DATA_DIR`/`load_frozen_dataset`/`freeze_scenarios`）・「CLI系ヘルパー」
+  （`run_freeze_cli`/`preview_dataset`）という異なる関心事が1ファイルに混在している。
+  加えて本セッションで新規提案した項目9（スケール倍率定数）・10（誤差項生成定数）・
+  18（`build_meta`）・19（`run_fixture_cli`）・`PREDICT_NEW_DATA`の共通化案（本セッションの
+  ユーザー指摘、Issue #131/#132/#222の実装後に必要になる見込み）は、いずれも
+  受け皿を素朴に`_common.py`と想定していたが、これらを全部積み増すと肥大化し見通しが
+  悪化する。
+- **Claudeの所感**: `benchmark/utils/`（ディレクトリ化）を作り、用途ごとに
+  `data_io.py`（`DATA_DIR`/`load_frozen_dataset`/`freeze_scenarios`）・
+  `cli.py`（`run_freeze_cli`/`run_fixture_cli`/`build_meta`）・
+  `dgp.py`（`imbalanced_cluster_groups`/`hac_auto_lag`/スケール・誤差項定数）・
+  `predict.py`（`PREDICT_NEW_DATA`系）のように分割する案は妥当だと考える。項目9・10・
+  18・19の「`_common.py`に切り出す」という所感は、この分割案が採用された場合は
+  それぞれ対応するファイルに置き換える形で読み替える。
+- **気づいた経緯**: 2026-08-16、`generate_ols_crosscheck_fixtures.py`解説後のユーザー提案。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目9・10・18・19と合わせて検討）

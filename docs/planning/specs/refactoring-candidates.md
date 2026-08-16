@@ -357,7 +357,12 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   ような関数を1つ用意すれば、各ファイルの`__main__`ブロック（8行程度）を
   `run_fixture_cli(build_fixtures, "../../../tests/fixtures/benchmarks/ols.json")`という
   1行にまで削減できる。項目18より効果が大きく、11ファイル分の見通し改善に直結する、
-  優先度の高い候補だと考える。
+  優先度の高い候補だと考える。**裏付け**（2026-08-16、`freeze_iv_datasets.py`再解説時に
+  確認）: `freeze_*.py`側では既に`_common.py`の`run_freeze_cli(freeze_fn,
+  default_output_dir, success_message, description=...)`という同種の共通化が
+  実現済みで、各`freeze_*.py`の`__main__`は`run_freeze_cli(freeze, ...)`という
+  1回の呼び出しに削減されている。`fixtures/generate_*_fixtures.py`側でも同じ
+  パターンが適用できる根拠になる。
 - **気づいた経緯**: 2026-08-16、`generate_iv_gmm_fixtures.py`解説後のユーザー指摘。実際に
   11ファイル全ての`__main__`ブロックを比較し完全一致を確認済み。
 - **状態**: 未対応（着手要否はユーザー判断待ち）

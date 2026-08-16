@@ -214,6 +214,8 @@ Logitのfit()に観測情報行列SEを実装するテスト追加中、`Method:
 - `observed_information_cov_params`/`opg_cov_params`/`sandwich_cov_params`/`cluster_cov_params`（`nonlinear/common.rs`）はモデル非依存のため、Tobitの`H`（負の対数尤度のHessian、`(k+1)×(k+1)`）・`scores`（n×(k+1)）を渡すだけでそのまま再利用できる
 - 不均一分散下でのMLE非一致性の限界（ロバストSEはこれを解決しない）はLogit/Probitと同じ既存の前提を踏襲し、Tobit固有の新たな設計判断は不要
 - Issue #212「fit()共通バリデーション関数のTobit対応拡張検討」の結論: `validate_fit_preconditions`の`validate_binary_y`呼び出しはTobitでは行わない（`y`は連続変数のため）。上記「打ち切り境界のバリデーション」の検証はTobit専用の追加ステップとして`validate_fit_preconditions`とは別に呼ぶ（具体的な関数分割は実装issue着手時に決定）
+- **Issue #218（OPG/HC0/HC1）着手時に判明**: `CovType`はLogit/Probit/Tobit共有の1つのenumで、Logitの#60（クラスターロバストSE）実装時に既に`Cluster`バリアントを含んでいる。そのため`TobitEstimator::fit`に`cov_type: CovType`引数を追加すると`match cov_type`を網羅的にする必要があり、#218（本来OPG/HC0/HC1のみ）単独では実装できない。Probitの前例（コミット`c868912`、Issue #75着手時に同じ状況に遭遇し#76＝クラスターも同時実装）を踏襲し、ユーザー確認の上で#218・#219（クラスターロバストSE）をまとめて実装した
+- **`cov_type=Opg`が特異になるテストケースの構築（Tobit固有の制約）**: Logit/Probitは`x`の完全な多重共線性（例: `x2=2*x1`）でOPG行列`Σsᵢsᵢ'`を特異にできる（`fit_returns_singular_opg_matrix_error_for_perfectly_collinear_design_matrix`）が、Tobitは`ols_initial_params`が最適化前に`x`のQRベースの階数検定を行うため、`x`が完全に多重共線だと最適化に入る前に`MleError::SingularDesignMatrix`になってしまい同じ手法が使えない。当初`x2=2*x1+摂動`（多重共線性から小さく崩す設計）で`SingularOpgMatrix`を再現するテストを書いたが、rust-reviewerのレビューで**多重共線性は無関係**と判明した（`x2`をxと無関係な値に変えても同じ現象が再現され、収束点でのOPG行列の最小固有値が機械精度オーダーまで落ちることを独立に確認）。実際の原因は観測数`n=6`が総パラメータ数`k+1=4`ぎりぎりで左打ち切り観測2件という小標本特有の収束点の数値配置に依存すると推測されるが、厳密な理論的必然性は未解明（`n=7`に増やすと再現しない）。テスト自体は実測ベースで正しく動作するため`fit_returns_singular_opg_matrix_error_for_small_sample_degenerate_case`という名前・docコメントに修正し、「多重共線性が原因」という誤った説明を残さないようにした
 
 ### テスト参照実装
 

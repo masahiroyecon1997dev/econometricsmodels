@@ -110,9 +110,11 @@
 use crate::error::CommonError;
 use crate::inference;
 use crate::nonlinear::common::{
-    Method, MleError, clamped_pdf_cdf, destandardize_cov_params, destandardize_params,
-    observed_information_cov_params, run_solver, standardize_columns, validate_confidence_level,
-    validate_max_iter, validate_sufficient_observations, validate_tol,
+    CovType, Method, MleError, SandwichVariant, clamped_pdf_cdf, cluster_cov_params,
+    destandardize_cov_params, destandardize_params, observed_information_cov_params,
+    opg_cov_params, run_solver, sandwich_cov_params, standardize_columns,
+    validate_cluster_cov_type, validate_confidence_level, validate_max_iter,
+    validate_sufficient_observations, validate_tol,
 };
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
@@ -589,11 +591,9 @@ fn ols_initial_params(x: &Mat<f64>, y: &Mat<f64>) -> Result<Vec<f64>, MleError> 
     Ok(params)
 }
 
-/// Tobitの推定結果。`fit`でのバリデーション・最適化・観測情報行列によるSE計算を
-/// 通過した状態を表す。`cov_type`（OPG/サンドイッチ/クラスター）・適合度統計量・
-/// 限界効果は後続issue（#218以降）で追加する（`LogitEstimator`/`ProbitEstimator`との違い。
-/// Logitも`cov_type`パラメータの追加は#59、観測情報行列によるSEは#58と段階的に実装した
-/// 経緯があり、同じ分割方針を踏襲している）。
+/// Tobitの推定結果。`fit`でのバリデーション・最適化・`cov_type`に応じたSE計算を
+/// 通過した状態を表す。適合度統計量・限界効果は後続issue（#220・#221）で追加する
+/// （`LogitEstimator`/`ProbitEstimator`との違い）。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
 #[derive(Debug)]
@@ -606,10 +606,11 @@ pub struct TobitEstimator {
     /// docコメント参照。`logσ`は`x`の列スケーリングとは無関係な量なので、逆変換は
     /// この指数変換のみで完結する）
     sigma: f64,
-    /// `(β, σ)`の分散共分散行列（元のスケール、`(k+1)×(k+1)`）。現時点では常に観測情報
-    /// 行列（`Σ = -H⁻¹`、`cov_type="classical"`/`"nonrobust"`相当）。最適化は内部
-    /// パラメータ化`(β, s=logσ)`空間のHessianで行われるため、`observed_information_
-    /// cov_params`・`destandardize_cov_params`で`(β, s)`空間の分散共分散行列を得た後、
+    /// `(β, σ)`の分散共分散行列（元のスケール、`(k+1)×(k+1)`）。`fit`に渡した`cov_type`に
+    /// 応じて観測情報行列（`Classical`）・OPG（`Opg`）・サンドイッチ型（`Hc0`/`Hc1`）・
+    /// クラスターロバスト（`Cluster`）のいずれかで計算される。最適化は内部
+    /// パラメータ化`(β, s=logσ)`空間のHessianで行われるため、`cov_type`に応じた行列演算・
+    /// `destandardize_cov_params`で`(β, s)`空間の分散共分散行列を得た後、
     /// デルタ法のヤコビアン`diag(1,...,1,σ)`（`s`から`σ=exp(s)`への変換、`dσ/ds=σ`）を
     /// 両側から適用して`(β, σ)`空間へ変換する（`k+1`行目・列目が`σ`に対応、
     /// `β`部分の`k×k`ブロックはヤコビアンが恒等写像のため無変換）。`β`-`σ`間の
@@ -654,42 +655,56 @@ impl TobitEstimator {
     /// 初期値はゼロベクトルではなく`ols_initial_params`が計算するOLS推定値
     /// （`LogitEstimator::fit`とは異なる。モジュール冒頭「Newton法の初期値」節参照）。
     ///
-    /// `cov_type`は本Issue（#217）では扱わない。常に観測情報行列（`Σ=-H⁻¹`、
-    /// `cov_type="classical"`/`"nonrobust"`相当）を使う（OPG/サンドイッチ/クラスターは
-    /// #218・#219で追加）。観測数の十分性検証（`validate_sufficient_observations`）には
-    /// `x`の列数`k`ではなく総最適化パラメータ数`k+1`を使う（Issue #212の結論、
-    /// `validate_sufficient_observations`のdocコメント参照）。Logit/Probitの
-    /// `validate_has_regressors`（`k==0`検証）はTobitでは呼ばない（`logσ`が常に存在する
-    /// ため対応するケースが生じない、同関数のdocコメント参照）。適合度統計量・限界効果は
-    /// 後続issue（#220・#221）で追加する。
+    /// `cov_type`は観測情報行列（`Classical`）・OPG（`Opg`）・サンドイッチ型
+    /// （`Hc0`/`Hc1`）・クラスターロバスト（`Cluster`）に対応する（Issue #218・#219、
+    /// Probitの前例＝コミット`c868912`と同じ理由でまとめて実装。`CovType`はLogit/Probit/
+    /// Tobit共有の1つのenumで既に`Cluster`バリアントを含んでおり、`match cov_type`を
+    /// 網羅的にする都合上、OPG/サンドイッチのみを先に実装してクラスターを未実装のまま
+    /// 残す設計は取れない。ユーザー確認済み）。`Opg`/`Hc0`/`Hc1`/`Cluster`は収束点での
+    /// 観測ごとのスコア（`TobitProblem::scores`）が必要なため、標準化空間の設計行列を
+    /// 保持したまま`TobitProblem`をクローンしておき（`Classical`のときは不要な複製を
+    /// 避けるため条件付きで行う、`LogitEstimator::fit`と同じ理由）、`run_solver`が返す
+    /// 収束点のパラメータで評価する。観測数の十分性検証（`validate_sufficient_
+    /// observations`）には`x`の列数`k`ではなく総最適化パラメータ数`k+1`を使う
+    /// （Issue #212の結論、`validate_sufficient_observations`のdocコメント参照）。
+    /// Logit/Probitの`validate_has_regressors`（`k==0`検証）はTobitでは呼ばない
+    /// （`logσ`が常に存在するため対応するケースが生じない、同関数のdocコメント参照）。
+    /// 適合度統計量・限界効果は後続issue（#220・#221）で追加する。
     ///
     /// ## `σ`のSE（デルタ法）
     ///
     /// `run_solver`が返すHessianは内部パラメータ化`(β, s=logσ)`空間で評価されたもの
     /// （`standardize_columns`で標準化済みの`x`に対応する標準化空間でもある）。
-    /// `observed_information_cov_params`・`destandardize_cov_params`で`x`の標準化のみを
-    /// 解いて`(β, s)`空間（元のスケール）の分散共分散行列を得た後、`s→σ=exp(s)`の
-    /// デルタ法変換（ヤコビアン`diag(1,...,1,σ)`、`dσ/ds=σ`）を分散共分散行列全体に
-    /// 適用して`(β, σ)`空間へ変換する（`cov_params`のdocコメント参照。対角成分のみ見ると
-    /// `Var(σ)≈σ²Var(logσ)`という`docs/planning/specs/nonlinear-implementation-notes.md`
-    /// 「パラメータ化」節に記載の式に一致する）。
+    /// `cov_type`に応じた行列演算（`observed_information_cov_params`/`opg_cov_params`/
+    /// `sandwich_cov_params`/`cluster_cov_params`）・`destandardize_cov_params`で`x`の
+    /// 標準化のみを解いて`(β, s)`空間（元のスケール）の分散共分散行列を得た後、
+    /// `s→σ=exp(s)`のデルタ法変換（ヤコビアン`diag(1,...,1,σ)`、`dσ/ds=σ`）を分散
+    /// 共分散行列全体に適用して`(β, σ)`空間へ変換する（`cov_params`のdocコメント参照。
+    /// 対角成分のみ見ると`Var(σ)≈σ²Var(logσ)`という`docs/planning/specs/
+    /// nonlinear-implementation-notes.md`「パラメータ化」節に記載の式に一致する。
+    /// この変換は`cov_type`の種類に依存せず、いずれの行列演算の結果にも同じヤコビアンを
+    /// 適用すればよい）。
     ///
     /// # Errors
     /// - `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
     /// - `max_iter`が0以下: `MleError::InvalidMaxIter`
     /// - `tol`が0以下: `MleError::InvalidTol`
     /// - 観測数`n`が総パラメータ数`k+1`以下: `CommonError::InsufficientObservations`
+    /// - `cov_type=Cluster`でグループキー未指定: `CommonError::MissingClusterColumn`
+    /// - `cov_type=Cluster`でクラスター数が2未満: `CommonError::InsufficientClusters`
     /// - OLS初期値計算時に`x`が特異（完全な多重共線性等）: `MleError::SingularDesignMatrix`
     ///   （`ols_initial_params`参照）
     /// - `raise_on_non_convergence=true`かつ`max_iter`回で未収束: `MleError::NonConvergence`
     /// - 収束点（または`raise_on_non_convergence=false`時の打ち切り点）のHessianが特異:
     ///   `MleError::SingularHessian`
+    /// - `cov_type=Opg`でOPG行列（`Σᵢ sᵢsᵢ'`）が特異: `MleError::SingularOpgMatrix`
     pub fn fit(
         input: TobitInput,
         method: Method,
         max_iter: i64,
         tol: f64,
         raise_on_non_convergence: bool,
+        cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, MleError> {
         validate_confidence_level(confidence_level)?;
@@ -699,12 +714,22 @@ impl TobitEstimator {
         let n = input.nobs();
         let k = input.k();
         validate_sufficient_observations(n, k + 1)?;
+        validate_cluster_cov_type(&cov_type, n)?;
 
         let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
         let scale = scale.extend_unscaled(1);
         let initial_params = ols_initial_params(&x_std, input.y())?;
         let problem =
             TobitProblem::from_standardized(x_std, input.y().clone(), input.lower(), input.upper());
+        // `cov_type`がOPG/サンドイッチ型/クラスターの場合、収束点でのスコア評価に元の
+        // `TobitProblem`（標準化空間の`x_std`）が必要になる。`run_solver`は`problem`の
+        // 所有権を取り込むため、事前にクローンしておく（`LogitEstimator::fit`と同じ理由）。
+        let problem_for_scores = match &cov_type {
+            CovType::Classical => None,
+            CovType::Opg | CovType::Hc0 | CovType::Hc1 | CovType::Cluster { .. } => {
+                Some(problem.clone())
+            }
+        };
 
         let output = run_solver(
             problem,
@@ -720,12 +745,64 @@ impl TobitEstimator {
         let params = params_full[..k].to_vec();
 
         let hessian_std = Mat::from_fn(k + 1, k + 1, |i, j| output.hessian[i][j]);
-        let cov_params_beta_s = destandardize_cov_params(
-            &observed_information_cov_params(&hessian_std, k + 1)?,
-            &scale,
-        );
+        // `problem_for_scores.as_ref().expect(...)`は各非`Classical`分岐でのみ呼ばれ、
+        // 直前の`match cov_type`により常に`Some`であることが保証されている内部契約
+        // （`LogitEstimator::fit`と同じ防御的な扱い）。
+        let cov_params_std = match &cov_type {
+            CovType::Classical => observed_information_cov_params(&hessian_std, k + 1)?,
+            CovType::Opg => {
+                let problem = problem_for_scores
+                    .as_ref()
+                    .expect("problem_for_scores must be Some for CovType::Opg");
+                opg_cov_params(&problem.scores(&output.params), k + 1)?
+            }
+            CovType::Hc0 => {
+                let problem = problem_for_scores
+                    .as_ref()
+                    .expect("problem_for_scores must be Some for CovType::Hc0");
+                sandwich_cov_params(
+                    &hessian_std,
+                    &problem.scores(&output.params),
+                    n,
+                    k + 1,
+                    SandwichVariant::Hc0,
+                )?
+            }
+            CovType::Hc1 => {
+                let problem = problem_for_scores
+                    .as_ref()
+                    .expect("problem_for_scores must be Some for CovType::Hc1");
+                sandwich_cov_params(
+                    &hessian_std,
+                    &problem.scores(&output.params),
+                    n,
+                    k + 1,
+                    SandwichVariant::Hc1,
+                )?
+            }
+            CovType::Cluster { groups } => {
+                let problem = problem_for_scores
+                    .as_ref()
+                    .expect("problem_for_scores must be Some for CovType::Cluster");
+                // `groups`のNone・クラスター数不足の検証はfit()冒頭の
+                // `validate_cluster_cov_type`で完了済み。ここでの`expect`はその契約を
+                // 明記する防御的な扱い（`LogitEstimator::fit`と同じ）。
+                let groups = groups
+                    .as_ref()
+                    .expect("groups is validated as Some at the top of fit()");
+                cluster_cov_params(
+                    &hessian_std,
+                    &problem.scores(&output.params),
+                    n,
+                    k + 1,
+                    groups,
+                )?
+            }
+        };
+        let cov_params_beta_s = destandardize_cov_params(&cov_params_std, &scale);
         // `s=logσ→σ=exp(s)`のデルタ法ヤコビアン。`β`部分は無変換（恒等写像）なので`1.0`、
-        // `k`番目（`s`/`σ`に対応する行・列）だけ`dσ/ds=σ`を掛ける。
+        // `k`番目（`s`/`σ`に対応する行・列）だけ`dσ/ds=σ`を掛ける。`cov_type`の種類に
+        // 依存しない共通の後処理（上記docコメント「σのSE」節参照）。
         let jacobian: Vec<f64> = (0..=k).map(|i| if i < k { 1.0 } else { sigma }).collect();
         let cov_params = Mat::from_fn(k + 1, k + 1, |i, j| {
             *cov_params_beta_s.get(i, j) * jacobian[i] * jacobian[j]
@@ -1406,7 +1483,16 @@ mod tests {
         let sse: f64 = y.iter().map(|v| (v - y_bar).powi(2)).sum();
         let expected_sigma = (sse / n).sqrt();
 
-        let estimator = TobitEstimator::fit(input, Method::Newton, 100, 1e-8, true, 0.95).unwrap();
+        let estimator = TobitEstimator::fit(
+            input,
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
 
         assert!(estimator.converged());
         assert_eq!(estimator.params().len(), 1);
@@ -1448,7 +1534,16 @@ mod tests {
         let expected_var_beta = sigma_hat.powi(2) / n;
         let expected_var_sigma = sigma_hat.powi(2) / (2.0 * n);
 
-        let estimator = TobitEstimator::fit(input, Method::Newton, 100, 1e-8, true, 0.95).unwrap();
+        let estimator = TobitEstimator::fit(
+            input,
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
 
         assert!((*estimator.cov_params().get(0, 0) - expected_var_beta).abs() < 1e-6);
         assert!((*estimator.cov_params().get(1, 1) - expected_var_sigma).abs() < 1e-6);
@@ -1510,6 +1605,7 @@ mod tests {
             100,
             1e-8,
             true,
+            CovType::Classical,
             0.95,
         )
         .unwrap();
@@ -1561,7 +1657,15 @@ mod tests {
     #[test]
     fn fit_returns_singular_hessian_error_when_cov_params_computation_fails_at_truncated_point() {
         let input = censored_regression_input();
-        let result = TobitEstimator::fit(input, Method::Newton, 1, 1e-12, false, 0.95);
+        let result = TobitEstimator::fit(
+            input,
+            Method::Newton,
+            1,
+            1e-12,
+            false,
+            CovType::Classical,
+            0.95,
+        );
         assert!(
             matches!(result, Err(MleError::SingularHessian)),
             "{result:?}"
@@ -1604,7 +1708,16 @@ mod tests {
             .sum();
         let expected_sigma = (expected_sse / n).sqrt();
 
-        let estimator = TobitEstimator::fit(input, Method::Newton, 100, 1e-8, true, 0.95).unwrap();
+        let estimator = TobitEstimator::fit(
+            input,
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
 
         assert!(estimator.converged());
         assert!(
@@ -1630,7 +1743,15 @@ mod tests {
     #[test]
     fn fit_returns_invalid_confidence_level_error_out_of_range() {
         let input = intercept_only_uncensored_input(&[1.0, 2.0, 3.0]);
-        let result = TobitEstimator::fit(input, Method::Newton, 100, 1e-8, true, 1.5);
+        let result = TobitEstimator::fit(
+            input,
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            1.5,
+        );
         assert_eq!(
             result.unwrap_err(),
             MleError::Common(CommonError::InvalidConfidenceLevel {
@@ -1642,7 +1763,15 @@ mod tests {
     #[test]
     fn fit_returns_invalid_max_iter_error() {
         let input = intercept_only_uncensored_input(&[1.0, 2.0, 3.0]);
-        let result = TobitEstimator::fit(input, Method::Newton, 0, 1e-8, true, 0.95);
+        let result = TobitEstimator::fit(
+            input,
+            Method::Newton,
+            0,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        );
         assert_eq!(
             result.unwrap_err(),
             MleError::InvalidMaxIter { max_iter: 0 }
@@ -1652,7 +1781,15 @@ mod tests {
     #[test]
     fn fit_returns_invalid_tol_error() {
         let input = intercept_only_uncensored_input(&[1.0, 2.0, 3.0]);
-        let result = TobitEstimator::fit(input, Method::Newton, 100, 0.0, true, 0.95);
+        let result = TobitEstimator::fit(
+            input,
+            Method::Newton,
+            100,
+            0.0,
+            true,
+            CovType::Classical,
+            0.95,
+        );
         assert_eq!(result.unwrap_err(), MleError::InvalidTol { tol: 0.0 });
     }
 
@@ -1662,7 +1799,15 @@ mod tests {
         // （`validate_sufficient_observations`にx列数ではなくk+1を渡す設計、
         // Issue #212の結論）。
         let input = intercept_only_uncensored_input(&[1.0, 2.0]);
-        let result = TobitEstimator::fit(input, Method::Newton, 100, 1e-8, true, 0.95);
+        let result = TobitEstimator::fit(
+            input,
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        );
         assert_eq!(
             result.unwrap_err(),
             MleError::Common(CommonError::InsufficientObservations { n: 2, k: 2 })
@@ -1708,7 +1853,15 @@ mod tests {
         )
         .unwrap();
 
-        let result = TobitEstimator::fit(input, Method::Newton, 100, 1e-8, true, 0.95);
+        let result = TobitEstimator::fit(
+            input,
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        );
         assert!(
             matches!(result, Err(MleError::SingularDesignMatrix)),
             "{:?}",
@@ -1744,7 +1897,16 @@ mod tests {
     #[test]
     fn fit_newton_converges_for_data_with_actual_censoring() {
         let input = censored_regression_input();
-        let estimator = TobitEstimator::fit(input, Method::Newton, 100, 1e-8, true, 0.95).unwrap();
+        let estimator = TobitEstimator::fit(
+            input,
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
 
         assert!(estimator.converged());
         assert_eq!(estimator.params().len(), 2);
@@ -1762,14 +1924,22 @@ mod tests {
             100,
             1e-8,
             true,
+            CovType::Classical,
             0.95,
         )
         .unwrap();
 
         for method in [Method::Bfgs, Method::Lbfgs] {
-            let estimator =
-                TobitEstimator::fit(censored_regression_input(), method, 200, 1e-8, true, 0.95)
-                    .unwrap();
+            let estimator = TobitEstimator::fit(
+                censored_regression_input(),
+                method,
+                200,
+                1e-8,
+                true,
+                CovType::Classical,
+                0.95,
+            )
+            .unwrap();
             assert!(estimator.converged(), "method={:?}", method);
             for (a, b) in estimator.params().iter().zip(newton.params()) {
                 assert!((a - b).abs() < 1e-3, "method={:?}, a={a}, b={b}", method);
@@ -1809,13 +1979,29 @@ mod tests {
             .unwrap()
         };
 
-        let newton =
-            TobitEstimator::fit(make_input(), Method::Newton, 100, 1e-8, true, 0.95).unwrap();
+        let newton = TobitEstimator::fit(
+            make_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
         assert!(newton.converged());
 
         for method in [Method::Bfgs, Method::Lbfgs] {
-            let estimator =
-                TobitEstimator::fit(make_input(), method, 200, 1e-8, true, 0.95).unwrap();
+            let estimator = TobitEstimator::fit(
+                make_input(),
+                method,
+                200,
+                1e-8,
+                true,
+                CovType::Classical,
+                0.95,
+            )
+            .unwrap();
             assert!(estimator.converged(), "method={:?}", method);
             for (a, b) in estimator.params().iter().zip(newton.params()) {
                 assert!((a - b).abs() < 1e-3, "method={:?}, a={a}, b={b}", method);
@@ -1833,7 +2019,15 @@ mod tests {
     #[test]
     fn fit_returns_non_convergence_error_when_max_iter_is_too_small_and_raise_is_true() {
         let input = censored_regression_input();
-        let result = TobitEstimator::fit(input, Method::Newton, 1, 1e-12, true, 0.95);
+        let result = TobitEstimator::fit(
+            input,
+            Method::Newton,
+            1,
+            1e-12,
+            true,
+            CovType::Classical,
+            0.95,
+        );
         assert!(
             matches!(result, Err(MleError::NonConvergence { .. })),
             "{:?}",
@@ -1851,7 +2045,376 @@ mod tests {
         // 計算が安定し`converged=false`が返るようになる。真の収束は`max_iter=11`）。
         // `max_iter=3`に変更し、「非収束だがcov_params計算は成功する」ケースを踏む。
         let input = censored_regression_input();
-        let estimator = TobitEstimator::fit(input, Method::Newton, 3, 1e-12, false, 0.95).unwrap();
+        let estimator = TobitEstimator::fit(
+            input,
+            Method::Newton,
+            3,
+            1e-12,
+            false,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
         assert!(!estimator.converged());
+    }
+
+    /// OPG/HC0/HC1/クラスターSEの独立再計算検証・組み合わせテストで共通に使う多変量
+    /// データセット（切片+説明変数2つ+`s`で`k+1=4`次元、実際の左打ち切りを含む）。
+    /// `censored_regression_input`（説明変数1つ）を拡張したもの。情報行列の等式が
+    /// 有限標本で厳密に成り立ってしまう切片のみ・単変量モデルでは`cov_type`の配線ミス
+    /// （例えば`Opg`の分岐で誤って`observed_information_cov_params`を呼んでいた場合等）を
+    /// 検出できないため、Logitの対応テスト（`fit_cov_type_opg_hc0_hc1_match_
+    /// independently_recomputed_values`のdocコメント）と同じ理由で多変量データセットが
+    /// 必須。
+    fn multivariate_censored_input() -> TobitInput {
+        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let x2 = vec![1.0, 0.0, 2.0, 1.0, 0.0, 2.0, 1.0, 0.0];
+        let y = vec![0.0, 0.0, 1.15, 2.9, 5.2, 6.85, 9.1, 10.95];
+        TobitInput::from_columns(
+            &y,
+            &[x1, x2],
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+            Some(0.0),
+            None,
+        )
+        .unwrap()
+    }
+
+    /// `fit()`と同じ手順（標準化→収束点でのscores/Hessian評価→`common.rs`の`cov_type`別の
+    /// 共通行列演算→`destandardize_cov_params`→`s→σ`のデルタ法ヤコビアン`diag(1,...,1,σ)`
+    /// 適用）をテスト側で独立に再現し、`cov_params_std_fn`が計算する`(β,s)`空間の分散
+    /// 共分散行列から最終的な`(β,σ)`空間の`cov_params`を得る。`Logit`の対応テストと同じ
+    /// 技法（`fit()`本体のロジックを再利用せず、独立に再現することで配線ミスを検出する）。
+    fn expected_cov_params(
+        input: &TobitInput,
+        classical: &TobitEstimator,
+        cov_params_std_fn: impl FnOnce(&Mat<f64>, &Mat<f64>) -> Mat<f64>,
+    ) -> Mat<f64> {
+        let k = input.k();
+        let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
+        let scale = scale.extend_unscaled(1);
+        let beta_std: Vec<f64> = classical
+            .params()
+            .iter()
+            .zip(scale.stds())
+            .map(|(p, s)| p * s)
+            .collect();
+        let mut params_std = beta_std;
+        params_std.push(classical.sigma().ln());
+
+        let problem_std =
+            TobitProblem::from_standardized(x_std, input.y().clone(), input.lower(), input.upper());
+        let scores_std = problem_std.scores(&params_std);
+        let cost_hessian_std = problem_std.hessian(&params_std).unwrap();
+        let hessian_std = Mat::from_fn(k + 1, k + 1, |i, j| -cost_hessian_std[i][j]);
+
+        let cov_params_beta_s =
+            destandardize_cov_params(&cov_params_std_fn(&hessian_std, &scores_std), &scale);
+        let sigma = classical.sigma();
+        let jacobian: Vec<f64> = (0..=k).map(|i| if i < k { 1.0 } else { sigma }).collect();
+        Mat::from_fn(k + 1, k + 1, |i, j| {
+            *cov_params_beta_s.get(i, j) * jacobian[i] * jacobian[j]
+        })
+    }
+
+    fn assert_cov_params_close(actual: &Mat<f64>, expected: &Mat<f64>, k_plus_1: usize, tol: f64) {
+        for i in 0..k_plus_1 {
+            for j in 0..k_plus_1 {
+                assert!(
+                    (*actual.get(i, j) - *expected.get(i, j)).abs() < tol,
+                    "({i},{j}): actual={}, expected={}",
+                    *actual.get(i, j),
+                    *expected.get(i, j)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fit_cov_type_opg_hc0_hc1_match_independently_recomputed_values() {
+        let k_plus_1 = 4;
+        let n = 8;
+
+        let classical = TobitEstimator::fit(
+            multivariate_censored_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        let expected_opg =
+            expected_cov_params(&multivariate_censored_input(), &classical, |_h, s| {
+                opg_cov_params(s, k_plus_1).unwrap()
+            });
+        let expected_hc0 =
+            expected_cov_params(&multivariate_censored_input(), &classical, |h, s| {
+                sandwich_cov_params(h, s, n, k_plus_1, SandwichVariant::Hc0).unwrap()
+            });
+        let expected_hc1 =
+            expected_cov_params(&multivariate_censored_input(), &classical, |h, s| {
+                sandwich_cov_params(h, s, n, k_plus_1, SandwichVariant::Hc1).unwrap()
+            });
+
+        let cases = [
+            (CovType::Opg, &expected_opg),
+            (CovType::Hc0, &expected_hc0),
+            (CovType::Hc1, &expected_hc1),
+        ];
+        for (cov_type, expected) in cases {
+            let estimator = TobitEstimator::fit(
+                multivariate_censored_input(),
+                Method::Newton,
+                100,
+                1e-8,
+                true,
+                cov_type,
+                0.95,
+            )
+            .unwrap();
+            assert_cov_params_close(estimator.cov_params(), expected, k_plus_1, 1e-6);
+        }
+    }
+
+    /// `method`（`bfgs`/`lbfgs`）と`cov_type`（`Opg`/`Hc0`/`Hc1`）の組み合わせが正しく
+    /// 機能することを確認する（Logitの`fit_non_classical_cov_types_work_with_bfgs_and_
+    /// lbfgs`と同じ理由。`scores_std`の評価は収束点のパラメータにのみ依存し最適化
+    /// アルゴリズムの種類に依存しない設計のため、`newton`で計算した`cov_params`
+    /// （上のテストで既に正しさを検証済み）と`bfgs`/`lbfgs`の結果が一致するはず）。
+    #[test]
+    fn fit_non_classical_cov_types_work_with_bfgs_and_lbfgs() {
+        let k_plus_1 = 4;
+        let groups = vec![
+            "a".to_string(),
+            "a".to_string(),
+            "a".to_string(),
+            "a".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+        ];
+
+        for cov_type in [
+            CovType::Opg,
+            CovType::Hc0,
+            CovType::Hc1,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+        ] {
+            let newton = TobitEstimator::fit(
+                multivariate_censored_input(),
+                Method::Newton,
+                100,
+                1e-8,
+                true,
+                cov_type.clone(),
+                0.95,
+            )
+            .unwrap();
+
+            for method in [Method::Bfgs, Method::Lbfgs] {
+                let estimator = TobitEstimator::fit(
+                    multivariate_censored_input(),
+                    method,
+                    300,
+                    1e-8,
+                    true,
+                    cov_type.clone(),
+                    0.95,
+                )
+                .unwrap();
+                assert!(estimator.converged(), "cov_type={cov_type:?}, {method:?}");
+                assert_cov_params_close(
+                    estimator.cov_params(),
+                    newton.cov_params(),
+                    k_plus_1,
+                    1e-4,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fit_cov_type_cluster_matches_independently_recomputed_values() {
+        let k_plus_1 = 4;
+        let n = 8;
+        let groups = vec![
+            "a".to_string(),
+            "a".to_string(),
+            "a".to_string(),
+            "a".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+        ];
+
+        let classical = TobitEstimator::fit(
+            multivariate_censored_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        let groups_for_expected = groups.clone();
+        let expected_cluster =
+            expected_cov_params(&multivariate_censored_input(), &classical, |h, s| {
+                cluster_cov_params(h, s, n, k_plus_1, &groups_for_expected).unwrap()
+            });
+
+        let estimator = TobitEstimator::fit(
+            multivariate_censored_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        )
+        .unwrap();
+        assert_cov_params_close(estimator.cov_params(), &expected_cluster, k_plus_1, 1e-6);
+    }
+
+    /// 上のテストは4:4の均等サイズのグループのみを検証しているが、
+    /// `testing-policy.md`が指摘する通り均等サイズのみのテストは実務で起こりやすい
+    /// 偏った分布のグループサイズを見逃しうる。5:3の不均衡なグループ（かつG=2の境界値、
+    /// Issue #219完了条件「不均衡クラスター、G=2境界値を含む」）でも同じ独立再計算の
+    /// 技法で検証する（`fit_cov_type_cluster_matches_independently_recomputed_values`と
+    /// 同じデータセット、グループ分割のみ変更）。
+    #[test]
+    fn fit_cov_type_cluster_matches_independently_recomputed_values_with_unbalanced_groups() {
+        let k_plus_1 = 4;
+        let n = 8;
+        let groups = vec![
+            "a".to_string(),
+            "a".to_string(),
+            "a".to_string(),
+            "a".to_string(),
+            "a".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+        ];
+
+        let classical = TobitEstimator::fit(
+            multivariate_censored_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        let groups_for_expected = groups.clone();
+        let expected_cluster =
+            expected_cov_params(&multivariate_censored_input(), &classical, |h, s| {
+                cluster_cov_params(h, s, n, k_plus_1, &groups_for_expected).unwrap()
+            });
+
+        let estimator = TobitEstimator::fit(
+            multivariate_censored_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        )
+        .unwrap();
+        assert_cov_params_close(estimator.cov_params(), &expected_cluster, k_plus_1, 1e-6);
+    }
+
+    #[test]
+    fn fit_returns_missing_cluster_column_error_when_groups_not_provided() {
+        let result = TobitEstimator::fit(
+            multivariate_censored_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Cluster { groups: None },
+            0.95,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::Common(CommonError::MissingClusterColumn)
+        );
+    }
+
+    #[test]
+    fn fit_returns_insufficient_clusters_error_when_only_one_group() {
+        let groups = vec!["a".to_string(); 8];
+        let result = TobitEstimator::fit(
+            multivariate_censored_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::Common(CommonError::InsufficientClusters { g: 1 })
+        );
+    }
+
+    /// Logit（`fit_returns_singular_opg_matrix_error_for_perfectly_collinear_
+    /// design_matrix`）はxの完全な多重共線性（x2=2*x1）でOPG行列`Σᵢsᵢsᵢ'`を特異にして
+    /// いるが、Tobitでは`ols_initial_params`が最適化前にxのQRベースの階数検定を行うため
+    /// （`fit_returns_singular_design_matrix_error_for_perfectly_collinear_data`参照）、
+    /// xが完全に多重共線だと最適化に入る前に`SingularDesignMatrix`になり同じ手法は使えない。
+    ///
+    /// このテストのデータ（x1・x2は互いに無関係、多重共線性なし）は実測で見つけた
+    /// 別の退化パターンで、`SingularOpgMatrix`の再現に多重共線性は必須ではないことが
+    /// 分かっている（レビュー時の独立検証で、x2をx1と無関係な値に変えても収束点での
+    /// OPG行列の最小固有値が機械精度オーダーまで落ちる同じ現象を確認済み）。原因は
+    /// 観測数`n=6`が総パラメータ数`k+1=4`に対して少なく（`validate_sufficient_
+    /// observations`の下限ぎりぎり）、かつ左打ち切り観測が2件という小標本特有の
+    /// 収束点の数値配置に依存すると推測されるが、厳密な理論的必然性までは未解明
+    /// （`n=7`など観測数を増やすと再現しなくなることを確認済み）。「なぜこの具体的な
+    /// データで起こるか」を将来の保守者が誤って多重共線性のせいだと読み違えないよう、
+    /// ここに正直に記録する。
+    #[test]
+    fn fit_returns_singular_opg_matrix_error_for_small_sample_degenerate_case() {
+        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let y = vec![0.0, 0.0, 1.15, 2.9, 5.2, 6.85];
+        let x2: Vec<f64> = vec![5.0, -3.0, 7.0, 1.0, -2.0, 9.0];
+        let input = TobitInput::from_columns(
+            &y,
+            &[x1, x2],
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+            Some(0.0),
+            None,
+        )
+        .unwrap();
+
+        let result =
+            TobitEstimator::fit(input, Method::Newton, 100, 1e-8, true, CovType::Opg, 0.95);
+        assert!(
+            matches!(result, Err(MleError::SingularOpgMatrix)),
+            "{result:?}"
+        );
     }
 }

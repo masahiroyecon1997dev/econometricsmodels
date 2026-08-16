@@ -328,3 +328,41 @@
   テストを追加する形で対応できそう。
 - **気づいた経緯**: 2026-08-16、`run_lm_predict_crosscheck.R`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 18. OLS: `gpa2`を`mroz`に置き換え、実データでの線形確率モデル（LPM）検証を追加する案
+
+- **対象**: `benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py`の
+  `build_wooldridge_fixtures()`（`wage1`/`gpa2`の2データセット）
+- **内容**: ユーザー提案（2026-08-16）。実際に確認したところ、`gpa2`には
+  クラスターケースが無く（`if name == "wage1": ...`のみ）、`wage1`との違いは
+  「別の連続値`y`の実データでもう一度係数・標準誤差が一致するか確認する」程度で
+  独自の検証価値が薄い。一方`mroz`（Logit側で既に使用中、`y=inlf`が0/1）を
+  OLSで使えば**線形確率モデル（LPM）の実データ版**という、`wage1`/`gpa2`の
+  どちらとも異なる新しい検証内容になる。項目2（合成データでのLPMシナリオ、
+  優先度低いと判断済み）とは異なり、既存データセット`mroz`を使い回せるため
+  対応コストが低い。
+- **Claudeの所感**: `gpa2`を`mroz`に置き換える（`wage1`は地域クラスターの検証役
+  として残す）方向は筋が通ると考える。
+- **気づいた経緯**: 2026-08-16、`generate_logit_crosscheck_fixtures.py`解説後の
+  ユーザー提案。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 19. OLS/WLS: HACの実データクロスチェックが存在しない
+
+- **対象**: `benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py`・
+  `generate_wls_crosscheck_fixtures.py`の`WOOLDRIDGE_COV_TYPES`/`hc_types`
+  （いずれも`hac`を含まない）
+- **内容**: ユーザー指摘（2026-08-16）。OLS/WLSの実データ（`wage1`/`gpa2`/
+  `401ksubs`）はいずれも横断面データ（時系列順が無い）のため、`hac`が意図的に
+  除外されている（コメント「HACは時系列順の無いクロスセクションデータのため
+  対象外」）。nonlinear（Logit/Probit）が構造的に`heteroskedastic`/
+  `autocorrelated`シナリオ自体を持たない（既存項目10、設計上の一貫した仕様）のとは
+  別の話で、**OLS/WLSはHAC自体をサポートしているのに実データでは一度も
+  検証されていない**、という純粋なギャップ。Wooldridgeパッケージに適した時系列
+  データ（例: `prminwge`等）を探す必要があり対応コストはやや高い。
+- **Claudeの所感**: 優先度は中程度。合成データの`autocorrelated`シナリオで
+  HAC自体は検証済みのため、実データでの検証が無くても致命的ではないが、
+  「実データでの一致確認」という観点では抜けている。
+- **気づいた経緯**: 2026-08-16、`generate_logit_crosscheck_fixtures.py`解説後の
+  ユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

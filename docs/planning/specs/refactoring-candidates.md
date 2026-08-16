@@ -592,3 +592,37 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   検討する規模の小さい改善。
 - **気づいた経緯**: 2026-08-16、`generate_logit_crosscheck_fixtures.py`解説中に発見。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 32. `<系統>_DIR`/`R_SCRIPT`のパス組み立てパターンが5つのcrosscheckフィクスチャファイルで重複
+
+- **対象**: `generate_ols_crosscheck_fixtures.py`（`LINEAR_DIR`/`R_SCRIPT`/
+  `PREDICT_R_SCRIPT`）・`generate_wls_crosscheck_fixtures.py`（`LINEAR_DIR`/
+  `R_SCRIPT`）・`generate_logit_crosscheck_fixtures.py`（`NONLINEAR_DIR`/
+  `R_SCRIPT`）・`generate_probit_crosscheck_fixtures.py`（同様、要確認）・
+  `generate_iv_crosscheck_fixtures.py`（`IV_DIR`/`R_SCRIPT`）
+- **内容**: ユーザー指摘（2026-08-16）。`<系統>_DIR = Path(__file__).resolve().parent.
+  parent` → `R_SCRIPT = <系統>_DIR / "<Rスクリプト名>"`という2行パターンが5ファイル
+  全てで同型（ディレクトリ変数名とRスクリプト名だけが違う）であることを`grep`で
+  確認済み。
+- **Claudeの所感**: `_common.py`に`resolve_sibling_r_script(caller_file, script_name)
+  -> Path`のような小さなヘルパーを切り出せる。効果は小さいが対象ファイル数は多い。
+- **気づいた経緯**: 2026-08-16、`generate_logit_crosscheck_fixtures.py`解説後の
+  ユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 33. `_normalize_names`の骨格（`fix()`クロージャ＋存在チェック付きキーコピー）は共通化できそうだが対象キーが手法ごとに異なる
+
+- **対象**: 項目24で列挙した5つのcrosscheckフィクスチャファイルの`_normalize_names`
+- **内容**: ユーザー提案（2026-08-16）。OLS版（`t_stats`/`p_values`/`conf_int`＋
+  `aic`/`bic`/`log_likelihood`/`f_statistic`/`f_p_value`/`r_squared`/
+  `r_squared_adj`）とLogit版（`z_stats`/`p_values`/`conf_int`は`conf_low`+
+  `conf_high`から組み立て＋`log_likelihood`/`log_likelihood_null`/`aic`/`bic`/
+  `lr_statistic`/`lr_p_value`/`pseudo_r_squared`＋`margeff`）を比較したところ、
+  関数の**骨格**（`fix()`クロージャ定義→存在チェック付きでキーをコピー）は完全に
+  同型だが、対象キーの集合自体はかなり異なる（`conf_int`の組み立て方も違う）。
+- **Claudeの所感**: 単純に1関数へ統合するのは難しく、`normalize_names(raw,
+  stat_key="t_stats"|"z_stats", extra_keys=[...])`のようなパラメータ化された
+  ヘルパーにする形が現実的。
+- **気づいた経緯**: 2026-08-16、`generate_logit_crosscheck_fixtures.py`解説後の
+  ユーザー提案。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目24と合わせて検討）

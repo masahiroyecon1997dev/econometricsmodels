@@ -408,3 +408,20 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   それぞれ対応するファイルに置き換える形で読み替える。
 - **気づいた経緯**: 2026-08-16、`generate_ols_crosscheck_fixtures.py`解説後のユーザー提案。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目9・10・18・19と合わせて検討）
+
+### 22. Rスクリプト冒頭の引数パースパターンが3ファイルで重複（`_common.R`は後処理側のみ共通化済み）
+
+- **対象**: [benchmark/linear/run_lm_crosscheck_benchmark.R:22-32](../../../benchmark/linear/run_lm_crosscheck_benchmark.R#L22-L32)・
+  [benchmark/linear/run_lm_predict_crosscheck.R:13-22](../../../benchmark/linear/run_lm_predict_crosscheck.R#L13-L22)・
+  [benchmark/iv/run_ivreg_benchmark.R:56-65](../../../benchmark/iv/run_ivreg_benchmark.R#L56-L65)
+- **内容**: `commandArgs(trailingOnly = TRUE)`→引数不足チェック（`stop(...)`）→
+  `data_path <- args[1]`→`formula_str <- args[2]`→
+  `read.csv(data_path, check.names = FALSE)`という冒頭5〜6行のパターンが3ファイルで
+  同型。`benchmark/_common.R`は`extract_coef_se`/`wald_f_test`という**後処理側**の
+  重複は既に解消済みだが、この**冒頭の引数パース**側は対象になっておらず残っている。
+- **Claudeの所感**: `_common.R`に`parse_common_args(args, min_required=2)`のような
+  関数を追加すれば解消できそうだが、Rには構造化された戻り値（複数の変数をまとめて
+  返す）の慣用的な書き方がPython程スッキリしない（リストで返して`$`で分解する形に
+  なる）ため、効果とのバランスは要検討。
+- **気づいた経緯**: 2026-08-16、`run_lm_predict_crosscheck.R`解説中に発見。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

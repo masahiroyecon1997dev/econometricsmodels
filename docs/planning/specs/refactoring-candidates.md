@@ -574,9 +574,11 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-16、`run_glm_crosscheck_benchmark.R`解説中に発見。
 - **状態**: 未対応（着手要否はユーザー判断待ち、優先度低）
 
-### 31. `generate_logit_crosscheck_fixtures.py`が`_write_csv`の命名規則に暗黙依存
+### 31. `generate_logit_crosscheck_fixtures.py`/`generate_probit_crosscheck_fixtures.py`が`_write_csv`の命名規則に暗黙依存
 
-- **対象**: [benchmark/nonlinear/fixtures/generate_logit_crosscheck_fixtures.py:143-147](../../../benchmark/nonlinear/fixtures/generate_logit_crosscheck_fixtures.py#L143-L147)
+- **対象**: [benchmark/nonlinear/fixtures/generate_logit_crosscheck_fixtures.py:143-147](../../../benchmark/nonlinear/fixtures/generate_logit_crosscheck_fixtures.py#L143-L147)・
+  [benchmark/nonlinear/fixtures/generate_probit_crosscheck_fixtures.py:149-153](../../../benchmark/nonlinear/fixtures/generate_probit_crosscheck_fixtures.py#L149-L153)
+  （完全に同型のコードが2ファイルに存在することを確認済み、2026-08-16）
 - **内容**: `build_synthetic_fixtures()`のメインループが終わった後、
   `baseline_csv = tmpdir / "baseline.csv"`という形で、ループ内で既に
   `_write_csv(df, tmpdir, "baseline")`により書き出し済みのファイルパスを
@@ -626,3 +628,18 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-16、`generate_logit_crosscheck_fixtures.py`解説後の
   ユーザー提案。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目24と合わせて検討）
+
+### 34. `_run_r()`の`link`引数の扱いがLogit/Probit crosscheckで不統一
+
+- **対象**: [benchmark/nonlinear/fixtures/generate_logit_crosscheck_fixtures.py:67-73](../../../benchmark/nonlinear/fixtures/generate_logit_crosscheck_fixtures.py#L67-L73)・
+  [benchmark/nonlinear/fixtures/generate_probit_crosscheck_fixtures.py:67-72](../../../benchmark/nonlinear/fixtures/generate_probit_crosscheck_fixtures.py#L67-L72)
+- **内容**: Logit版の`_run_r`は`link: str = "logit"`をデフォルト引数として持つが、
+  Probit版は引数を持たず`"probit"`という文字列を`cmd`リスト内に直接ハードコード
+  している。どちらのファイルも実際には`link`を呼び出し元から変えて渡すことは
+  一度も無い（Logit版は常に`"logit"`、Probit版は常に`"probit"`のまま）ため実害は
+  無いが、書き方が統一されていない。
+- **Claudeの所感**: 些細な差だが、Logit版の`link`引数は実質使われていない
+  デッドウェイトの可能性もある（両ファイルとも文字列直書きに統一するか、
+  両ファイルとも引数化するかのどちらかに揃えるのが妥当）。
+- **気づいた経緯**: 2026-08-16、`generate_probit_crosscheck_fixtures.py`解説中に発見。
+- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）

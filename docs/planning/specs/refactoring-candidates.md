@@ -452,12 +452,15 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **対象**: `generate_ols_crosscheck_fixtures.py`・`generate_wls_crosscheck_fixtures.py`・
   `generate_logit_crosscheck_fixtures.py`・`generate_probit_crosscheck_fixtures.py`・
   `generate_iv_crosscheck_fixtures.py`（5ファイル、`grep`で`_normalize_names`/
-  `_write_csv`/`_run_cluster_case`の定義箇所を確認済み）
+  `_write_csv`/`_run_cluster_case`の定義箇所を確認済み。**訂正**（2026-08-16）:
+  `generate_iv_crosscheck_fixtures.py`のみ`_write_csv`が存在せず、CSV書き出しは
+  `df.write_csv(...)`を直接呼ぶ形にとどまる。`_normalize_names`/`_run_cluster_case`の
+  2つは5ファイル全てに存在）
 - **内容**: 項目13・15（statsmodels側`generate_*_fixtures.py`の`_run_cluster_case`重複）
-  とは別に、**Rクロスチェック側**の5ファイルにも同型の3ヘルパー
-  （`_normalize_names`: 切片名を`"const"`に統一、`_write_csv`: 一時CSV書き出し、
-  `_run_cluster_case`: 疑似グループ付与→一時CSV→`_run_r`呼び出し）が重複していることを
-  発見した。
+  とは別に、**Rクロスチェック側**の5ファイルにも同型のヘルパー
+  （`_normalize_names`: 切片名を`"const"`に統一、`_write_csv`: 一時CSV書き出し（IV版のみ
+  未切り出し）、`_run_cluster_case`: 疑似グループ付与→一時CSV→`_run_r`呼び出し）が
+  重複していることを発見した。
 - **Claudeの所感**: `_write_csv`は特に単純（3行）で`_common.py`（または項目21の
   `utils/`分割案が採用されるなら適切なファイル）に切り出す価値が高い。
   `_normalize_names`は切片名の正規化ルールが全ファイル共通（`"(Intercept)"`/
@@ -667,9 +670,10 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **対象**: `generate_ols_crosscheck_fixtures.py`（194・241行目）・
   `generate_wls_crosscheck_fixtures.py`（151・191行目）・
   `generate_logit_crosscheck_fixtures.py`（131・143行目）・
-  `generate_probit_crosscheck_fixtures.py`（137・149行目）——4ファイル・8箇所で
-  `pl.read_csv(DATA_DIR / f"{method}_{scenario}.csv")`という同一ロジックを独自に
-  再実装
+  `generate_probit_crosscheck_fixtures.py`（137・149行目）・
+  `generate_iv_crosscheck_fixtures.py`（159・191・195・213・215・257行目、
+  2026-08-16追加確認）——5ファイル・14箇所で`pl.read_csv(DATA_DIR / f"{method}_
+  {scenario}.csv")`という同一ロジックを独自に再実装
 - **内容**: ユーザー指摘（2026-08-16）。`_common.py`には既に`load_frozen_dataset
   (prefix, scenario) -> tuple[pl.DataFrame, list[float] | None]`という、まさに
   このロジック（`true_beta`のJSON読み込みも含む）を持つ関数が存在し、

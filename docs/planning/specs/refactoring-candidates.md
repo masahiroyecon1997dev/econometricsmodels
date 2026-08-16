@@ -443,3 +443,25 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   #132/#222着手時の設計判断になる。
 - **気づいた経緯**: 2026-08-16、`run_lm_predict_crosscheck.R`解説後のユーザー提案。
 - **状態**: 未対応（Issue #131/#132/#222着手時に判断）
+
+### 24. `_normalize_names`/`_write_csv`/`_run_cluster_case`が5つのcrosscheckフィクスチャファイルで重複
+
+- **対象**: `generate_ols_crosscheck_fixtures.py`・`generate_wls_crosscheck_fixtures.py`・
+  `generate_logit_crosscheck_fixtures.py`・`generate_probit_crosscheck_fixtures.py`・
+  `generate_iv_crosscheck_fixtures.py`（5ファイル、`grep`で`_normalize_names`/
+  `_write_csv`/`_run_cluster_case`の定義箇所を確認済み）
+- **内容**: 項目13・15（statsmodels側`generate_*_fixtures.py`の`_run_cluster_case`重複）
+  とは別に、**Rクロスチェック側**の5ファイルにも同型の3ヘルパー
+  （`_normalize_names`: 切片名を`"const"`に統一、`_write_csv`: 一時CSV書き出し、
+  `_run_cluster_case`: 疑似グループ付与→一時CSV→`_run_r`呼び出し）が重複していることを
+  発見した。
+- **Claudeの所感**: `_write_csv`は特に単純（3行）で`_common.py`（または項目21の
+  `utils/`分割案が採用されるなら適切なファイル）に切り出す価値が高い。
+  `_normalize_names`は切片名の正規化ルールが全ファイル共通（`"(Intercept)"`/
+  `"Intercept"`→`"const"`）なので同様に共通化できそうだが、対象キー
+  （`t_stats`/`p_values`/`conf_int`等の有無チェック）がファイルごとに微妙に
+  違う可能性があり要確認。`_run_cluster_case`は項目13・15と同じ設計判断
+  （凍結時焼き込み案・`_common.py`集約案）を、`_run_r`ベース版としても
+  検討する余地がある。
+- **気づいた経緯**: 2026-08-16、`generate_wls_crosscheck_fixtures.py`解説中に発見。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目13・15と合わせて検討）

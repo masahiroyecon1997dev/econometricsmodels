@@ -239,11 +239,13 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   （`smf.probit`+`disp=0`版）にも同型の`_run_cluster_case`があることを確認済み
   （linear 2ファイル＋nonlinear 2ファイルの計4ファイル全てに存在、2026-08-15）。
   さらに`benchmark/iv/fixtures/generate_iv_fixtures.py`にも同型の`_run_cluster_case`
-  （加えて`_run_cluster_g2_case`というG=2境界専用のバリエーション）があることを確認済み
-  （linear 2＋nonlinear 2＋iv 1の計5ファイルで確認、2026-08-15）。IVは`x_exog`/`x_endog`/
-  `instruments`の3種の列グループを持つ分、他4ファイルより`run()`の引数がやや複雑だが、
-  「CSVを読み疑似グループ列を追加→一時CSV書き出し→`run()`呼び出し→`finally`で削除」という
-  骨格は完全に同型。
+  （加えて`_run_cluster_g2_case`というG=2境界専用のバリエーション）・
+  `benchmark/iv/fixtures/generate_iv_gmm_fixtures.py`にも同型の`_run_cluster_case`
+  （`weight_type`引数が追加されている点のみGMM固有）があることを確認済み
+  （linear 2＋nonlinear 2＋iv 2の計6ファイルで確認、2026-08-16）。IVは`x_exog`/`x_endog`/
+  `instruments`の3種の列グループを持つ分、他4ファイルより`run()`/`run_gmm()`の引数が
+  やや複雑だが、「CSVを読み疑似グループ列を追加→一時CSV書き出し→呼び出し→`finally`で
+  削除」という骨格は完全に同型。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目12と合わせて検討）
 
 ### 14. `COV_TYPES`への`cluster`混入がOLS/WLSとLogitで不統一、メインループ自体の共通化余地
@@ -256,18 +258,23 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   で完全に同じだが、Logit・Probitだけ`COV_TYPES`に`cluster`を含めた上で`continue`
   スキップしている。意味のある設計差ではなく単なる書き方のブレ。`cluster`を`COV_TYPES`
   から除けば`continue`も不要になりOLS/WLSと統一できる。IVの`generate_iv_fixtures.py`
-  （`COV_TYPES = ["classical", "hc0", "hc1", "hac", "cluster"]`）もLogit/Probit側
+  （2SLS、`COV_TYPES = ["classical", "hc0", "hc1", "hac", "cluster"]`）もLogit/Probit側
   （`cluster`を含めて`continue`でスキップ）と同じ書き方であることを確認済み
-  （2026-08-15）。
+  （2026-08-15）。一方`generate_iv_gmm_fixtures.py`（GMM）は`COV_TYPES = ["classical",
+  "hc0", "hc1", "hac"]`と`cluster`を含めずOLS/WLS側のスタイルを採っており、**同じIV系統
+  （2SLS/GMM）内でもスタイルが割れている**ことを確認済み（2026-08-16）。
 - **Claudeの所感**: 統一後、メインループ本体（`for scenario: for cov_type: run(...)`の
   二重ループ＋辞書構築）自体を`_common.py`に`build_numeric_fixtures(run_fn, scenarios,
   cov_types, **extra_kwargs)`のような共通ヘルパーとして切り出せる可能性がある
-  （`weight_col`/`model`等のオプション差分は`**extra_kwargs`で吸収）。OLS/WLS/Logit/Probit/IV
-  の5ファイル分の重複を解消できる見込みで、影響範囲は大きい。ただしIVは`x_exog`/
-  `x_endog`/`instruments`という3列グループ＋シナリオ別列構成（`X_EXOG_BY_SCENARIO`等）を
-  持つ分、他4ファイルより`**extra_kwargs`の吸収範囲が広くなる点は考慮が必要。
+  （`weight_col`/`model`等のオプション差分は`**extra_kwargs`で吸収）。OLS/WLS/Logit/Probit/
+  2SLS/GMMの6ファイル分の重複を解消できる見込みで、影響範囲は大きい。ただしIV（2SLS/GMM）は
+  `x_exog`/`x_endog`/`instruments`という3列グループ＋シナリオ別列構成
+  （`X_EXOG_BY_SCENARIO`等）を持つ分、他4ファイルより`**extra_kwargs`の吸収範囲が
+  広くなる点、GMMはさらに`weight_type`軸によるネスト（`fixtures[scenario][weight_type]
+  [cov_type]`）が加わる点は考慮が必要。
 - **気づいた経緯**: 2026-08-15、`generate_logit_fixtures.py`解説後のユーザー指摘。
-  `generate_iv_fixtures.py`解説時にIVも同型であることを確認済み。
+  `generate_iv_fixtures.py`・`generate_iv_gmm_fixtures.py`解説時にIV系統（2SLS/GMM）が
+  互いに異なるスタイルであることを確認済み。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 15. `_run_cluster_case`を`_common.py`へ一般化して集約する案（項目13の発展形）

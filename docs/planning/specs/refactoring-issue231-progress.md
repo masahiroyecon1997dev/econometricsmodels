@@ -6,6 +6,15 @@
 完了させてから次に進む。各フェーズの対象範囲・変更方針はユーザーが都度指示し、
 このドキュメントはその結果・未解決事項を記録する。
 
+**状態（2026-08-16更新）**: フェーズ1〜4完了時点で#231はクローズ済み。フェーズ5〜7
+（`python_package`/`engine_pybind`/`engine`の実リファクタリング）は、具体的な変更
+方針が未確定のまま残っていたことと、`refactoring-candidates.md`・
+`test-coverage-candidates.md`という#231専用ではない汎用の候補メモの仕組みが
+並行してできたことから、後継Issue
+[#248](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/248)
+に引き継いだ。本ドキュメントのフェーズ1〜4の記録は完了した実施内容の履歴として
+そのまま残す（フェーズ5〜7以降の進捗は#248側で新たに記録する）。
+
 ## 全体方針
 
 - フェーズは**順番に**進める（フェーズNの完了条件を満たしてから N+1 に着手）。
@@ -25,9 +34,9 @@
 | 3 | `tests/`ディレクトリの整理とリファクタリング | 完了 |
 | 3.5 | crosscheckテストの許容誤差計算式バグ修正（`refactor`スキル範囲外） | 完了 |
 | 4 | ロジック整理前のテスト拡充（OLS/WLS/Logit/Probitレビュー＋IV #232〜238） | 完了（linear系統〔OLS/WLS〕・nonlinear系統〔Logit/Probit〕・IV系統〔2SLS/GMM〕全て完了） |
-| 5 | `python_package/`のリファクタリング | 未着手 |
-| 6 | `engine_pybind/`のリファクタリング | 未着手 |
-| 7 | `engine/`のリファクタリング | 未着手 |
+| 5 | `python_package/`のリファクタリング | [#248](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/248)に引き継ぎ |
+| 6 | `engine_pybind/`のリファクタリング | [#248](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/248)に引き継ぎ |
+| 7 | `engine/`のリファクタリング | [#248](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/248)に引き継ぎ |
 
 ---
 
@@ -1007,9 +1016,9 @@ tests/api_tests/
 
 **想定範囲**: Issue番号への言及の削除が主。タスクとしては軽量な見込み。
 
-**状態**: 未着手
+**状態**: [#248](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/248)に引き継ぎ（未着手のまま#231をクローズ）
 
-**メモ**: (着手後に記載)
+**メモ**: (着手後に記載、以降は#248側で記録)
 
 ---
 
@@ -1021,9 +1030,9 @@ tests/api_tests/
 - `engine_pybind`側の`cov_type`パース等、既にA2（[#153](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/153)）で
   共通化済みの範囲との重複有無を再確認する
 
-**状態**: 未着手
+**状態**: [#248](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/248)に引き継ぎ（未着手のまま#231をクローズ）
 
-**メモ**: (着手後に記載)
+**メモ**: (着手後に記載、以降は#248側で記録)
 
 ---
 
@@ -1037,9 +1046,9 @@ tests/api_tests/
   あるが、共通化可能か（IV着手時のA章と同様、共通化が呼び出し箇所の性質上
   適さない場合は無理に統合しない）
 
-**状態**: 未着手
+**状態**: [#248](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/248)に引き継ぎ（未着手のまま#231をクローズ）
 
-**メモ**: (着手後に記載)
+**メモ**: (着手後に記載、以降は#248側で記録)
 
 ---
 

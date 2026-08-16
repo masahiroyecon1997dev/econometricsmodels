@@ -527,3 +527,31 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   効率的。値が同じなら共有定数化は低リスク。
 - **気づいた経緯**: 2026-08-16、`generate_wls_crosscheck_fixtures.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目26と合わせて検討）
+
+### 29. `_add_age_bin`の置き場所、および`_run_wage1_region_cluster_case`相当の切り出し方がOLS/WLSで非対称
+
+- **対象**: [benchmark/linear/fixtures/generate_wls_fixtures.py:263-275](../../../benchmark/linear/fixtures/generate_wls_fixtures.py#L263-L275)
+  （`_add_age_bin`定義）・[benchmark/linear/fixtures/generate_wls_crosscheck_fixtures.py:58](../../../benchmark/linear/fixtures/generate_wls_crosscheck_fixtures.py#L58)
+  （`from generate_wls_fixtures import _add_age_bin`）・
+  [benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py:312-330](../../../benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py#L312-L330)
+  （`_run_wage1_region_cluster_case`、独立関数）
+- **内容**: ユーザー指摘（2026-08-16）。当初「既存の`freeze_*.py`→`generate_*.py`の
+  import慣習と同じなので問題なし」と判断したが誤りだった。`freeze_*.py`→
+  `generate_*.py`は**階層的な関係**（freezeがgenerateをデータソースとして使う、
+  上流→下流の自然な一方向依存）だが、`generate_wls_fixtures.py`（statsmodels側）と
+  `generate_wls_crosscheck_fixtures.py`（R側）は**同格・並列の役割**（どちらも
+  凍結済みCSVを読んで異なるリファレンス実装を呼ぶ）であり、一方がもう一方の実装
+  詳細に依存する構造は性質が異なる。`_add_age_bin`のdocstring自体もstatsmodels
+  固有の理由を含まない（`testing-policy.md`の「実データでのグループ列も検証する」
+  という手法非依存の一般方針が理由）ため、`generate_wls_fixtures.py`という
+  「statsmodels側」のファイルに置かれていること自体が位置づけの誤り。
+  さらに、OLS側は同種の処理（`wage1`の地域ダミーからクラスター列を作る）を
+  `_run_wage1_region_cluster_case`という独立関数に切り出しているのに対し、
+  WLS側の同種処理（`age_bin`によるクラスター確認）は`build_401ksubs_fixture()`
+  内にインラインのままで、切り出し方が非対称。
+- **Claudeの所感**: `_add_age_bin`を`_common.py`（または項目21の`utils/`分割案
+  採用時は適切なファイル）に移し、OLS側と同じく独立関数として切り出す形に
+  揃えるのが妥当。
+- **気づいた経緯**: 2026-08-16、`generate_wls_crosscheck_fixtures.py`解説後の
+  ユーザー指摘で発覚（当初の判断を訂正）。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

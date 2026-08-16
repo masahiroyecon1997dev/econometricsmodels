@@ -109,6 +109,7 @@
 
 use crate::error::CommonError;
 use crate::inference;
+use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::nonlinear::common::{
     CovType, Method, MleError, SandwichVariant, clamped_pdf_cdf, cluster_cov_params,
     destandardize_cov_params, destandardize_params, observed_information_cov_params,
@@ -117,9 +118,9 @@ use crate::nonlinear::common::{
     validate_sufficient_observations, validate_tol,
 };
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
-use faer::Mat;
-use faer::prelude::SolveLstsq;
-use statrs::distribution::Normal;
+use faer::prelude::{Solve, SolveLstsq};
+use faer::{Mat, Side};
+use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
 
 /// Tobitの被説明変数・設計行列・打ち切り境界を保持する入力データ。
 ///
@@ -591,8 +592,89 @@ fn ols_initial_params(x: &Mat<f64>, y: &Mat<f64>) -> Result<Vec<f64>, MleError> 
     Ok(params)
 }
 
-/// Tobitの推定結果。`fit`でのバリデーション・最適化・`cov_type`に応じたSE計算を
-/// 通過した状態を表す。適合度統計量・限界効果は後続issue（#220・#221）で追加する
+/// 対数尤度 `ℓ(θ) = Σᵢ ℓᵢ(θ)`（モジュール冒頭の数式表参照）を`x`・`y`・打ち切り境界・
+/// `params`（`(β, s)`、`k+1`次元）から直接計算する。`TobitProblem::cost`（`-ℓ(θ)`、argminの
+/// `CostFunction`）と同じ`Contribution::log_lik`の総和を使うが、argminのトレイトが要求する
+/// `Result`型を経由する必要が無い内部専用の計算（適合度統計量向け、収束後に1回だけ評価する）
+/// のため、`LogitEstimator::log_likelihood`と同じ理由で独立した関数として切り出している。
+/// `TobitProblem::from_standardized`は名前に反して標準化済みかどうかを問わない
+/// （`x`・`params`のスケールが対応してさえいればよい）ため、ここでは元のスケールの`x`・
+/// `params`をそのまま渡す。
+fn log_likelihood(
+    x: &Mat<f64>,
+    y: &Mat<f64>,
+    lower: Option<f64>,
+    upper: Option<f64>,
+    params: &[f64],
+) -> f64 {
+    let problem = TobitProblem::from_standardized(x.clone(), y.clone(), lower, upper);
+    let normal = Normal::standard();
+    (0..x.nrows())
+        .map(|i| problem.contribution(i, params, &normal).log_lik)
+        .sum()
+}
+
+/// モデル全体の有意性検定（切片以外の係数`β`が同時にゼロという帰無仮説のWald検定）。
+/// `docs/planning/specs/nonlinear-api-design.md`5章「Tobitはこの共通コアから2点を意図的に
+/// 外す」の通り、Tobitは`llnull`（打ち切りがあると閉形式解を持たない）に基づく尤度比検定
+/// ではなく、`cov_params`から直接計算できるWald検定を使う（`AER::tobit`の`summary.tobit`と
+/// 同じ方式）。
+///
+/// `W = β_slopes' Σ_slopes⁻¹ β_slopes`（`β_slopes`は`params`の`k_constant`番目以降
+/// `df_model`個、`Σ_slopes`は`cov_params`（`(k+1)×(k+1)`、`β∪{σ}`空間）のうち対応する
+/// `df_model×df_model`の主小行列）。`σ`は`cov_params`の`k`番目の行・列にあるため、
+/// `df_model`個の範囲（`k_constant..k`）には含まれず、検定対象から自動的に除外される。
+/// OLSの`wald_f_test`と同型の構成（`ensure_well_conditioned_symmetric_matrix`による
+/// 悪条件検出→Cholesky分解）だが、検定分布はF分布ではなく標準正規分布に基づく
+/// カイ二乗分布（`nonlinear-api-design.md`5章「検定分布はz検定」、自由度で正規化する
+/// `F=W/df_model`の変換を行わない）。
+///
+/// `Logit`/`Probit`と異なりTobit専用（`llnull`を使わない検定方式のため`common.rs`には
+/// 置かない、`.claude/rules/rust-style.md`「系統内で共有するロジック」の対象は現時点で
+/// Tobitのみ）。
+///
+/// # Errors
+/// `Σ_slopes`が悪条件・特異な場合は`CommonError::ComputationFailed`
+/// （OLSの`wald_f_test`と同じ理由、理論上は正定値のはずだが浮動小数点演算の丸めによる
+/// 境界的な失敗に備えた防御的な扱い）。`ChiSquared::new`の失敗（`df_model<=0`）は
+/// 呼び出し元が`df_model>0`を事前に保証するため理論上到達不能。
+fn wald_chi2_test(
+    params: &[f64],
+    cov_params: &Mat<f64>,
+    k_constant: usize,
+    df_model: usize,
+) -> Result<(f64, f64), MleError> {
+    let beta_slopes = Mat::from_fn(df_model, 1, |i, _| params[i + k_constant]);
+    let v_slopes = Mat::from_fn(df_model, df_model, |i, j| {
+        *cov_params.get(i + k_constant, j + k_constant)
+    });
+
+    ensure_well_conditioned_symmetric_matrix(
+        &v_slopes,
+        df_model,
+        "coefficient covariance submatrix for the Wald test",
+    )?;
+
+    let llt = v_slopes.llt(Side::Lower).map_err(|_| {
+        CommonError::ComputationFailed(
+            "failed to invert coefficient covariance submatrix for the Wald test".to_string(),
+        )
+    })?;
+    let v_slopes_inv_beta = llt.solve(&beta_slopes);
+
+    let wald_statistic: f64 = (0..df_model)
+        .map(|i| (*beta_slopes.get(i, 0)) * (*v_slopes_inv_beta.get(i, 0)))
+        .sum();
+
+    let chi2 = ChiSquared::new(df_model as f64)
+        .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+    let wald_p_value = 1.0 - chi2.cdf(wald_statistic);
+
+    Ok((wald_statistic, wald_p_value))
+}
+
+/// Tobitの推定結果。`fit`でのバリデーション・最適化・`cov_type`に応じたSE計算・
+/// 適合度統計量・Wald検定を通過した状態を表す。限界効果は後続issue（#221）で追加する
 /// （`LogitEstimator`/`ProbitEstimator`との違い）。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
@@ -630,6 +712,24 @@ pub struct TobitEstimator {
     conf_lower: Vec<f64>,
     /// 信頼区間の上限（`k+1`）
     conf_upper: Vec<f64>,
+    /// 収束点での対数尤度 `ℓ(θ̂)`
+    log_likelihood: f64,
+    /// 赤池情報量規準 `-2ℓ(θ̂) + 2(k+1)`（総パラメータ数`k+1`は`σ`を含む）
+    aic: f64,
+    /// ベイズ情報量規準 `-2ℓ(θ̂) + ln(n)(k+1)`
+    bic: f64,
+    /// 観測数
+    n_obs: usize,
+    /// モデルの自由度（切片以外の`β`の数、Wald検定のカイ二乗分布の自由度でもある）
+    df_model: usize,
+    /// 残差自由度 `n-(k+1)`（`σ`を含む総パラメータ数を差し引く。AER::tobit/survregの
+    /// `df.residual`と同じ規約、`docs/planning/specs/nonlinear-implementation-notes.md`
+    /// 「`llnull`・GOF・有意性検定」節参照）
+    df_resid: usize,
+    /// Wald検定統計量（`wald_chi2_test`のdocコメント参照）。`df_model==0`のときNaN
+    wald_statistic: f64,
+    /// Wald検定のp値（自由度`df_model`のカイ二乗分布、上側確率）。`df_model==0`のときNaN
+    wald_p_value: f64,
     /// 収束したかどうか
     converged: bool,
     /// 実際の反復回数
@@ -698,6 +798,9 @@ impl TobitEstimator {
     /// - 収束点（または`raise_on_non_convergence=false`時の打ち切り点）のHessianが特異:
     ///   `MleError::SingularHessian`
     /// - `cov_type=Opg`でOPG行列（`Σᵢ sᵢsᵢ'`）が特異: `MleError::SingularOpgMatrix`
+    /// - Wald検定用の係数分散共分散部分行列が悪条件・特異: `CommonError::ComputationFailed`
+    ///   （`wald_chi2_test`参照。`df_model==0`（切片以外の`β`が無い）のときはこの検定自体を
+    ///   スキップし`wald_statistic`/`wald_p_value`はNaNになる）
     pub fn fit(
         input: TobitInput,
         method: Method,
@@ -829,6 +932,28 @@ impl TobitEstimator {
             conf_upper[j] = stat.conf_high;
         }
 
+        let llf = log_likelihood(
+            input.x(),
+            input.y(),
+            input.lower(),
+            input.upper(),
+            &params_full,
+        );
+        let aic = -2.0 * llf + 2.0 * ((k + 1) as f64);
+        let bic = -2.0 * llf + (n as f64).ln() * ((k + 1) as f64);
+        let df_resid = n - (k + 1);
+
+        let k_constant = usize::from(input.has_intercept());
+        let df_model = k - k_constant;
+        let (wald_statistic, wald_p_value) = if df_model == 0 {
+            // 検定対象の傾き係数が存在しない（切片のみ、または切片も無いモデル）。
+            // OLSの`f_p_value`・Logit/Probitの`lr_p_value`と同じ扱いでNaNを返す
+            // （0除算・自由度0のカイ二乗分布の構築を避ける）。
+            (f64::NAN, f64::NAN)
+        } else {
+            wald_chi2_test(&params, &cov_params, k_constant, df_model)?
+        };
+
         Ok(Self {
             input,
             params,
@@ -839,6 +964,14 @@ impl TobitEstimator {
             p_values,
             conf_lower,
             conf_upper,
+            log_likelihood: llf,
+            aic,
+            bic,
+            n_obs: n,
+            df_model,
+            df_resid,
+            wald_statistic,
+            wald_p_value,
             converged: output.converged,
             n_iter: output.n_iter,
         })
@@ -887,6 +1020,46 @@ impl TobitEstimator {
     /// 信頼区間の上限（`k+1`）
     pub fn conf_upper(&self) -> &[f64] {
         &self.conf_upper
+    }
+
+    /// 収束点での対数尤度
+    pub fn log_likelihood(&self) -> f64 {
+        self.log_likelihood
+    }
+
+    /// 赤池情報量規準
+    pub fn aic(&self) -> f64 {
+        self.aic
+    }
+
+    /// ベイズ情報量規準
+    pub fn bic(&self) -> f64 {
+        self.bic
+    }
+
+    /// 観測数
+    pub fn n_obs(&self) -> usize {
+        self.n_obs
+    }
+
+    /// モデルの自由度（切片以外の`β`の数）
+    pub fn df_model(&self) -> usize {
+        self.df_model
+    }
+
+    /// 残差自由度
+    pub fn df_resid(&self) -> usize {
+        self.df_resid
+    }
+
+    /// Wald検定統計量（`df_model==0`のときNaN）
+    pub fn wald_statistic(&self) -> f64 {
+        self.wald_statistic
+    }
+
+    /// Wald検定のp値（`df_model==0`のときNaN）
+    pub fn wald_p_value(&self) -> f64 {
+        self.wald_p_value
     }
 
     /// 収束したかどうか
@@ -1590,6 +1763,153 @@ mod tests {
         );
     }
 
+    /// 切片のみ・打ち切りなしのTobit（通常の正規分布のMLEに一致する）の対数尤度は
+    /// 閉じた形の解析解`ℓ=-(n/2)(ln(2π)+ln(σ̂²)+1)`を持つ（OLSの`log_likelihood`と同じ式。
+    /// `σ̂²=Σ(y-ȳ)²/n`はMLE推定量で、OLSの不偏推定量（`n-1`除算）とは異なる）。
+    /// `aic`/`bic`はこの`llf`と総パラメータ数`k+1=2`（切片1+`logσ`1）から直接計算できる。
+    /// 切片のみモデルは傾き係数が無い（`df_model=0`）ため、Wald検定がスキップされ
+    /// `wald_statistic`/`wald_p_value`がNaNになることも合わせて検証する。
+    #[test]
+    fn fit_computes_log_likelihood_aic_bic_matching_closed_form_for_intercept_only_uncensored_model()
+     {
+        let y = vec![1.0, 2.0, 3.0, 4.0, 10.0];
+        let input = intercept_only_uncensored_input(&y);
+
+        let n = y.len() as f64;
+        let y_bar: f64 = y.iter().sum::<f64>() / n;
+        let sse: f64 = y.iter().map(|v| (v - y_bar).powi(2)).sum();
+        let sigma_sq_hat = sse / n;
+        let expected_llf =
+            -(n / 2.0) * ((2.0 * std::f64::consts::PI).ln() + sigma_sq_hat.ln() + 1.0);
+        let expected_aic = -2.0 * expected_llf + 2.0 * 2.0;
+        let expected_bic = -2.0 * expected_llf + n.ln() * 2.0;
+
+        let estimator = TobitEstimator::fit(
+            input,
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        assert!((estimator.log_likelihood() - expected_llf).abs() < 1e-6);
+        assert!((estimator.aic() - expected_aic).abs() < 1e-6);
+        assert!((estimator.bic() - expected_bic).abs() < 1e-6);
+        assert_eq!(estimator.n_obs(), 5);
+        assert_eq!(estimator.df_model(), 0);
+        assert_eq!(estimator.df_resid(), 3);
+        assert!(estimator.wald_statistic().is_nan());
+        assert!(estimator.wald_p_value().is_nan());
+    }
+
+    /// Wald検定統計量・p値が独立再計算（2×2部分行列の手動逆行列計算、`Llt`分解を経由
+    /// しない）と一致することを検証する。`multivariate_censored_input`（切片+`x1`+`x2`、
+    /// `k=3`、傾き係数`q=2`）を使う。
+    #[test]
+    fn fit_wald_statistic_and_p_value_match_independently_recomputed_values() {
+        let estimator = TobitEstimator::fit(
+            multivariate_censored_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        // 傾き係数（切片を除く`params[1]`・`params[2]`）と、対応する`cov_params`の
+        // 2×2部分行列（`σ`次元は含まれない）を使い、2×2逆行列の公式で手動計算する。
+        let beta1 = estimator.params()[1];
+        let beta2 = estimator.params()[2];
+        let v = estimator.cov_params();
+        let (v11, v12, v21, v22) = (*v.get(1, 1), *v.get(1, 2), *v.get(2, 1), *v.get(2, 2));
+        let det = v11 * v22 - v12 * v21;
+        let (inv11, inv12, inv21, inv22) = (v22 / det, -v12 / det, -v21 / det, v11 / det);
+        let expected_wald =
+            beta1 * (inv11 * beta1 + inv12 * beta2) + beta2 * (inv21 * beta1 + inv22 * beta2);
+
+        let chi2 = ChiSquared::new(2.0).unwrap();
+        let expected_p = 1.0 - chi2.cdf(expected_wald);
+
+        assert_eq!(estimator.df_model(), 2);
+        assert!((estimator.wald_statistic() - expected_wald).abs() < 1e-6);
+        assert!((estimator.wald_p_value() - expected_p).abs() < 1e-9);
+    }
+
+    /// `df_model=1`（傾き係数が1個）のとき、`W=z²`（カイ二乗(1)統計量は標準正規のz値の
+    /// 2乗に一致するという代数的恒等式）が成り立つことを検証する。`fit_wald_statistic_
+    /// and_p_value_match_independently_recomputed_values`（`q=2`、手動2×2逆行列）とは
+    /// 別角度の検算（OLSの`wald_test_last_columns_matches_squared_t_statistic_for_
+    /// single_column`と同じ発想）。`censored_regression_input`（`q=1`）を使う。
+    #[test]
+    fn fit_wald_statistic_matches_squared_z_statistic_for_single_slope() {
+        let estimator = TobitEstimator::fit(
+            censored_regression_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        assert_eq!(estimator.df_model(), 1);
+        let z_slope = estimator.z_stats()[1];
+        assert!((estimator.wald_statistic() - z_slope.powi(2)).abs() < 1e-9);
+
+        let chi2 = ChiSquared::new(1.0).unwrap();
+        let expected_p = 1.0 - chi2.cdf(estimator.wald_statistic());
+        assert!((estimator.wald_p_value() - expected_p).abs() < 1e-9);
+    }
+
+    /// `fit()`はWald検定を`cov_type`の種類に関わらず常時実行する（`df_model==0`のときのみ
+    /// スキップ）ため、`cov_type=Cluster`のクラスターロバスト共分散`Ŝ=Σ_g S_gS_g'`が持つ
+    /// 構造的な制約（`rank(Ŝ)≤G`、`engine/src/linear/CLAUDE.md`「クラスター数`G`と傾き
+    /// 係数の数`q`の関係」参照）がWald検定の`q×q`部分行列にも及ぶ。`multivariate_
+    /// censored_input`（傾き係数`q=2`）に対し`G=2`（`G=q`ちょうど、境界そのもの）を
+    /// 組み合わせると、実測でこの部分行列が特異になり`fit()`全体が`ComputationFailed`に
+    /// なることを実際に踏んで検証する回帰テスト（`ensure_well_conditioned_symmetric_
+    /// matrix`の閾値等が将来変更された際の検知目的。`fit_cov_type_cluster_matches_
+    /// independently_recomputed_values`等、他のクラスターテストが`q<G`を保つよう
+    /// データセットを変更した経緯の裏付け）。
+    #[test]
+    fn fit_returns_computation_failed_when_wald_submatrix_is_singular_for_cluster_with_g_equals_q()
+    {
+        let groups = vec![
+            "a".to_string(),
+            "a".to_string(),
+            "a".to_string(),
+            "a".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+        ];
+        let result = TobitEstimator::fit(
+            multivariate_censored_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        );
+        assert!(
+            matches!(
+                result,
+                Err(MleError::Common(CommonError::ComputationFailed(_)))
+            ),
+            "{result:?}"
+        );
+    }
+
     /// 多変量（説明変数が1つ、切片込みで`k=2`・`s`を含め合計3パラメータ）の場合、
     /// 閉じた形の解析解は無いため、`cov_params`の対称性・各種統計量の内部整合性
     /// （z値・信頼区間の定義式通りの関係）を検証する回帰テスト。Logitの
@@ -2186,18 +2506,27 @@ mod tests {
     /// lbfgs`と同じ理由。`scores_std`の評価は収束点のパラメータにのみ依存し最適化
     /// アルゴリズムの種類に依存しない設計のため、`newton`で計算した`cov_params`
     /// （上のテストで既に正しさを検証済み）と`bfgs`/`lbfgs`の結果が一致するはず）。
+    ///
+    /// クラスターのグループ数は`G=4`（2件ずつ）にする。`multivariate_censored_input`は
+    /// 傾き係数`q=2`（`x1`・`x2`、切片を除く）を持ち、Issue #220でWald検定が`fit()`に
+    /// 常時組み込まれたことで、クラスターロバスト共分散`Ŝ=Σ_g S_gS_g'`の構造的な制約
+    /// （`rank(Ŝ)≤G`、`engine/src/linear/CLAUDE.md`「クラスター数`G`と傾き係数の数`q`の
+    /// 関係」参照）がWald検定の`q×q`部分行列にも及ぶことが判明した。`G=2`（`q`と同数）
+    /// では実測でこの部分行列が特異になり`fit()`全体が`ComputationFailed`になったため、
+    /// `G>q`を満たす`G=4`に変更した（OLSの既存ガイドライン「境界の成功パスのテストでは
+    /// `q`を`G`以下に保つ」をTobitでも踏襲）。
     #[test]
     fn fit_non_classical_cov_types_work_with_bfgs_and_lbfgs() {
         let k_plus_1 = 4;
         let groups = vec![
             "a".to_string(),
             "a".to_string(),
-            "a".to_string(),
-            "a".to_string(),
             "b".to_string(),
             "b".to_string(),
-            "b".to_string(),
-            "b".to_string(),
+            "c".to_string(),
+            "c".to_string(),
+            "d".to_string(),
+            "d".to_string(),
         ];
 
         for cov_type in [
@@ -2241,9 +2570,19 @@ mod tests {
         }
     }
 
+    /// `multivariate_censored_input`ではなく`censored_regression_input`（傾き係数
+    /// `q=1`、`x1`のみ）を使う。Issue #220でWald検定が`fit()`に常時組み込まれたことで、
+    /// クラスターロバスト共分散`Ŝ=Σ_g S_gS_g'`の構造的な制約（`rank(Ŝ)≤G`、
+    /// `engine/src/linear/CLAUDE.md`「クラスター数`G`と傾き係数の数`q`の関係」参照）が
+    /// Wald検定の`q×q`部分行列にも及ぶことが判明した。`multivariate_censored_input`
+    /// （`q=2`）に対し`G=2`（Issue #219完了条件「G=2境界値」）を組み合わせると`q`と
+    /// 同数になり、実測でこの部分行列が特異になり`fit()`全体が`ComputationFailed`に
+    /// なった。`q=1`のデータセットなら`G=2>q=1`を満たしたまま「G=2の境界値」を検証できる
+    /// ため、こちらに切り替えた（OLSの既存ガイドライン「境界の成功パスのテストでは`q`を
+    /// `G`以下に保つ」をTobitでも踏襲）。
     #[test]
     fn fit_cov_type_cluster_matches_independently_recomputed_values() {
-        let k_plus_1 = 4;
+        let k_plus_1 = 3;
         let n = 8;
         let groups = vec![
             "a".to_string(),
@@ -2257,7 +2596,7 @@ mod tests {
         ];
 
         let classical = TobitEstimator::fit(
-            multivariate_censored_input(),
+            censored_regression_input(),
             Method::Newton,
             100,
             1e-8,
@@ -2269,12 +2608,12 @@ mod tests {
 
         let groups_for_expected = groups.clone();
         let expected_cluster =
-            expected_cov_params(&multivariate_censored_input(), &classical, |h, s| {
+            expected_cov_params(&censored_regression_input(), &classical, |h, s| {
                 cluster_cov_params(h, s, n, k_plus_1, &groups_for_expected).unwrap()
             });
 
         let estimator = TobitEstimator::fit(
-            multivariate_censored_input(),
+            censored_regression_input(),
             Method::Newton,
             100,
             1e-8,
@@ -2290,13 +2629,13 @@ mod tests {
 
     /// 上のテストは4:4の均等サイズのグループのみを検証しているが、
     /// `testing-policy.md`が指摘する通り均等サイズのみのテストは実務で起こりやすい
-    /// 偏った分布のグループサイズを見逃しうる。5:3の不均衡なグループ（かつG=2の境界値、
+    /// 偏った分布のグループサイズを見逃しうる。5:3の不均衡なグループ（G=2の境界値、
     /// Issue #219完了条件「不均衡クラスター、G=2境界値を含む」）でも同じ独立再計算の
     /// 技法で検証する（`fit_cov_type_cluster_matches_independently_recomputed_values`と
-    /// 同じデータセット、グループ分割のみ変更）。
+    /// 同じデータセット・同じ理由でq=1のデータセットを使う、グループ分割のみ変更）。
     #[test]
     fn fit_cov_type_cluster_matches_independently_recomputed_values_with_unbalanced_groups() {
-        let k_plus_1 = 4;
+        let k_plus_1 = 3;
         let n = 8;
         let groups = vec![
             "a".to_string(),
@@ -2310,7 +2649,7 @@ mod tests {
         ];
 
         let classical = TobitEstimator::fit(
-            multivariate_censored_input(),
+            censored_regression_input(),
             Method::Newton,
             100,
             1e-8,
@@ -2322,12 +2661,12 @@ mod tests {
 
         let groups_for_expected = groups.clone();
         let expected_cluster =
-            expected_cov_params(&multivariate_censored_input(), &classical, |h, s| {
+            expected_cov_params(&censored_regression_input(), &classical, |h, s| {
                 cluster_cov_params(h, s, n, k_plus_1, &groups_for_expected).unwrap()
             });
 
         let estimator = TobitEstimator::fit(
-            multivariate_censored_input(),
+            censored_regression_input(),
             Method::Newton,
             100,
             1e-8,

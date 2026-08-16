@@ -413,10 +413,11 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 - **対象**: [benchmark/linear/run_lm_crosscheck_benchmark.R:22-32](../../../benchmark/linear/run_lm_crosscheck_benchmark.R#L22-L32)・
   [benchmark/linear/run_lm_predict_crosscheck.R:13-22](../../../benchmark/linear/run_lm_predict_crosscheck.R#L13-L22)・
-  [benchmark/iv/run_ivreg_benchmark.R:56-65](../../../benchmark/iv/run_ivreg_benchmark.R#L56-L65)
+  [benchmark/iv/run_ivreg_benchmark.R:56-65](../../../benchmark/iv/run_ivreg_benchmark.R#L56-L65)・
+  [benchmark/nonlinear/run_glm_crosscheck_benchmark.R:48-62](../../../benchmark/nonlinear/run_glm_crosscheck_benchmark.R#L48-L62)
 - **内容**: `commandArgs(trailingOnly = TRUE)`→引数不足チェック（`stop(...)`）→
   `data_path <- args[1]`→`formula_str <- args[2]`→
-  `read.csv(data_path, check.names = FALSE)`という冒頭5〜6行のパターンが3ファイルで
+  `read.csv(data_path, check.names = FALSE)`という冒頭5〜6行のパターンが4ファイルで
   同型。`benchmark/_common.R`は`extract_coef_se`/`wald_f_test`という**後処理側**の
   重複は既に解消済みだが、この**冒頭の引数パース**側は対象になっておらず残っている。
 - **Claudeの所感**: `_common.R`に`parse_common_args(args, min_required=2)`のような
@@ -424,6 +425,8 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   返す）の慣用的な書き方がPython程スッキリしない（リストで返して`$`で分解する形に
   なる）ため、効果とのバランスは要検討。
 - **気づいた経緯**: 2026-08-16、`run_lm_predict_crosscheck.R`解説中に発見。
+  `run_glm_crosscheck_benchmark.R`にも同型（`link`引数の追加分岐はあるが冒頭部分は
+  同じ）であることを確認済み。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 23. `run_lm_predict_crosscheck.R`を手法非依存の汎用スクリプトにできないか（設計判断候補）
@@ -555,3 +558,18 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-16、`generate_wls_crosscheck_fixtures.py`解説後の
   ユーザー指摘で発覚（当初の判断を訂正）。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 30. `run_glm_crosscheck_benchmark.R`内で列スケーリングによる反転ロジックが2回重複
+
+- **対象**: [benchmark/nonlinear/run_glm_crosscheck_benchmark.R:91-101](../../../benchmark/nonlinear/run_glm_crosscheck_benchmark.R#L91-L101)
+  （`observed_bread`）・[benchmark/nonlinear/run_glm_crosscheck_benchmark.R:134-138](../../../benchmark/nonlinear/run_glm_crosscheck_benchmark.R#L134-L138)
+  （`opg`分岐）
+- **内容**: `scale_variance`シナリオでの見かけ上の特異性を避けるため、「列を各々のノルムで
+  正規化→反転→`Σ=D⁻¹(D⁻¹MD⁻¹)⁻¹D⁻¹`の恒等式でスケールを戻す」という同じテクニックが
+  同一ファイル内で2回（`observed_bread`関数内、および`opg`分岐のインラインコード）
+  ほぼ同じ形で書かれている。
+- **Claudeの所感**: `scale_and_invert(M, X または scores) -> 行列`のような小さな
+  ヘルパー関数に切り出せそうだが、他ファイルとの重複ではなく同一ファイル内の
+  重複のため優先度は低め。
+- **気づいた経緯**: 2026-08-16、`run_glm_crosscheck_benchmark.R`解説中に発見。
+- **状態**: 未対応（着手要否はユーザー判断待ち、優先度低）

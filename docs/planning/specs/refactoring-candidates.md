@@ -297,3 +297,21 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   方向が、項目4（SCENARIOSリストの重複）と同じパターンで整合的。
 - **気づいた経緯**: 2026-08-15、`generate_logit_fixtures.py`解説後のユーザー質問をきっかけに発見。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 17. コメント中のIssue番号（`Issue #231`等）参照が10ファイルに散在
+
+- **対象**: `grep -rn "Issue #[0-9]\+" benchmark/`で確認した以下10ファイル（計30箇所超）
+  - [benchmark/_common.py:3](../../../benchmark/_common.py#L3)
+  - [benchmark/iv/run_linearmodels_benchmark.py:156,292](../../../benchmark/iv/run_linearmodels_benchmark.py#L156)
+  - [benchmark/iv/freeze_iv_datasets.py:55,60](../../../benchmark/iv/freeze_iv_datasets.py#L55)
+  - [benchmark/iv/run_ivreg_benchmark.R:25,54,148,175](../../../benchmark/iv/run_ivreg_benchmark.R#L25)
+  - [benchmark/iv/fixtures/generate_iv_fixtures.py:108,125,141,181,188,190](../../../benchmark/iv/fixtures/generate_iv_fixtures.py#L108)
+  - [benchmark/iv/fixtures/generate_iv_gmm_fixtures.py:79,136,151,164,202](../../../benchmark/iv/fixtures/generate_iv_gmm_fixtures.py#L79)
+  - [benchmark/iv/fixtures/generate_iv_crosscheck_fixtures.py:21,25,67,190,211,271,343,350,351,358,363](../../../benchmark/iv/fixtures/generate_iv_crosscheck_fixtures.py#L21)
+  - [benchmark/nonlinear/fixtures/generate_logit_fixtures.py:58,160](../../../benchmark/nonlinear/fixtures/generate_logit_fixtures.py#L58)
+  - [benchmark/nonlinear/fixtures/generate_probit_fixtures.py:63,170](../../../benchmark/nonlinear/fixtures/generate_probit_fixtures.py#L63)
+  - [benchmark/nonlinear/run_glm_crosscheck_benchmark.R:115](../../../benchmark/nonlinear/run_glm_crosscheck_benchmark.R#L115)
+- **内容**: ユーザー指摘（2026-08-15）。`generate_iv_datasets.py`解説時に「Issue番号は冗長なので削除したい」との指摘を受け該当1箇所を修正済み（本文はWHYを保持したままIssue番号のみ除去）だったが、同種の参照が上記の通り広範囲に残っている。Issue番号だけを見ても文脈が分からず、GitHub側の該当Issueが将来クローズ・番号体系変更等で参照として陳腐化するリスクがある一方、各コメント自体はWHY（なぜその実装・設計になっているか）を本文中に十分書けているため、Issue番号を削っても情報量は落ちない。
+- **Claudeの所感**: `generate_iv_datasets.py`で行ったのと同じ要領（Issue番号を削り、WHYの実質的な記述は残す）で機械的に対応できる規模だが、30箇所超と件数が多いため一括対応が妥当かは要検討（`refactor`スキルの対象として一括実施する候補）。
+- **気づいた経緯**: 2026-08-15、`run_linearmodels_benchmark.py`解説着手前のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

@@ -573,3 +573,22 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   重複のため優先度は低め。
 - **気づいた経緯**: 2026-08-16、`run_glm_crosscheck_benchmark.R`解説中に発見。
 - **状態**: 未対応（着手要否はユーザー判断待ち、優先度低）
+
+### 31. `generate_logit_crosscheck_fixtures.py`が`_write_csv`の命名規則に暗黙依存
+
+- **対象**: [benchmark/nonlinear/fixtures/generate_logit_crosscheck_fixtures.py:143-147](../../../benchmark/nonlinear/fixtures/generate_logit_crosscheck_fixtures.py#L143-L147)
+- **内容**: `build_synthetic_fixtures()`のメインループが終わった後、
+  `baseline_csv = tmpdir / "baseline.csv"`という形で、ループ内で既に
+  `_write_csv(df, tmpdir, "baseline")`により書き出し済みのファイルパスを
+  **文字列結合で再構築**している。`generate_ols_crosscheck_fixtures.py`は同種の
+  処理をループ**内側**（`if scenario == "baseline":`ブロック）に置き、ループ内の
+  `df`/`csv_path`変数をそのまま再利用する設計だった。動作上は問題ないが、
+  `_write_csv`の命名規則（`f"{name}.csv"`）が将来変わった場合にここだけ気づかれず
+  壊れる暗黙の結合になっている。`_run_cluster_case`のシグネチャも、OLS版が`df`と
+  `csv_path`の両方を受け取るのに対しLogit版は`csv_path`のみ受け取り内部で
+  `pl.read_csv`し直す、という違いがある。
+- **Claudeの所感**: OLS版と同じくループ内側で処理し、返り値の`Path`オブジェクトを
+  直接使い回す形に統一する方が頑健。項目24（crosscheck側ヘルパー重複）と合わせて
+  検討する規模の小さい改善。
+- **気づいた経緯**: 2026-08-16、`generate_logit_crosscheck_fixtures.py`解説中に発見。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

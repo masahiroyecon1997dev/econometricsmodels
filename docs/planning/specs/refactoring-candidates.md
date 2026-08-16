@@ -643,3 +643,47 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   両ファイルとも引数化するかのどちらかに揃えるのが妥当）。
 - **気づいた経緯**: 2026-08-16、`generate_probit_crosscheck_fixtures.py`解説中に発見。
 - **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
+
+### 35. `_run_r()`自体が5つのcrosscheckフィクスチャファイルで個別定義されている
+
+- **対象**: `generate_ols_crosscheck_fixtures.py`・`generate_wls_crosscheck_fixtures.py`・
+  `generate_logit_crosscheck_fixtures.py`・`generate_probit_crosscheck_fixtures.py`・
+  `generate_iv_crosscheck_fixtures.py`（`grep`で5ファイル全てに`def _run_r`が
+  存在することを確認済み）
+- **内容**: ユーザー指摘（2026-08-16）。項目24（`_run_cluster_case`等）は`_run_r`を
+  土台にした関数の重複を指摘していたが、`_run_r`**自体**は候補として明記していな
+  かった。シグネチャの違い（線形系は`weight_col`/`hac_lag`、非線形系は`link`、IVは
+  未確認）はあるが、「コマンドライン組み立て→`subprocess.run`→JSON parse→
+  `_normalize_names`呼び出し」という骨格は5ファイルで完全に共通。
+- **Claudeの所感**: 項目33（`_normalize_names`のパラメータ化）と合わせて、
+  `_run_r(r_script, csv_path, formula, cov_type, **extra_args)`のような
+  共通版を`_common.py`に切り出せる可能性がある。
+- **気づいた経緯**: 2026-08-16、`generate_probit_crosscheck_fixtures.py`解説後の
+  ユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目24・33と合わせて検討）
+
+### 36. crosscheckフィクスチャ側が既存の`load_frozen_dataset`ヘルパーを使わず`pl.read_csv`を再実装している
+
+- **対象**: `generate_ols_crosscheck_fixtures.py`（194・241行目）・
+  `generate_wls_crosscheck_fixtures.py`（151・191行目）・
+  `generate_logit_crosscheck_fixtures.py`（131・143行目）・
+  `generate_probit_crosscheck_fixtures.py`（137・149行目）——4ファイル・8箇所で
+  `pl.read_csv(DATA_DIR / f"{method}_{scenario}.csv")`という同一ロジックを独自に
+  再実装
+- **内容**: ユーザー指摘（2026-08-16）。`_common.py`には既に`load_frozen_dataset
+  (prefix, scenario) -> tuple[pl.DataFrame, list[float] | None]`という、まさに
+  このロジック（`true_beta`のJSON読み込みも含む）を持つ関数が存在し、
+  `run_statsmodels_benchmark.py`（statsmodels側）は実際にこれを
+  `_load_synthetic`としてimportして使っている。しかしcrosscheck側4ファイルは
+  この既存ヘルパーを使わず、同じロジックを個別に再実装していた。crosscheck側は
+  `true_beta`が不要（Rust実装とRの値を直接比較するのみ）なので、
+  `df, _ = load_frozen_dataset(prefix, scenario)`のように戻り値の片方を捨てれば
+  そのまま使えるはず。「新しい共通化」ではなく「既存の共通関数を単純に
+  使っていなかった」というより解決しやすい性質の重複。`n = pl.read_csv(DATA_DIR /
+  "probit_baseline.csv").height`のようなbaselineシナリオのハードコード読み込み
+  （項目31関連）も、`load_frozen_dataset`採用と同時に自動的に解消される。
+- **Claudeの所感**: 項目18・19・35と比べて最も低リスク・即効性のある改善候補
+  （既存関数への差し替えのみで新規設計判断が不要なため）。
+- **気づいた経緯**: 2026-08-16、`generate_probit_crosscheck_fixtures.py`解説後の
+  ユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

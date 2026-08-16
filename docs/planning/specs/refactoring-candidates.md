@@ -322,3 +322,39 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **Claudeの所感**: `generate_iv_datasets.py`で行ったのと同じ要領（Issue番号を削り、WHYの実質的な記述は残す）で機械的に対応できる規模だが、30箇所超と件数が多いため一括対応が妥当かは要検討（`refactor`スキルの対象として一括実施する候補）。
 - **気づいた経緯**: 2026-08-15、`run_linearmodels_benchmark.py`解説着手前のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 18. `fixtures["_meta"]`の構築パターンが11ファイルで共通の型を持つ
+
+- **対象**: `benchmark/*/fixtures/generate_*_fixtures.py`全11ファイル（`generate_ols_fixtures.py`
+  ・`generate_ols_crosscheck_fixtures.py`・`generate_wls_fixtures.py`・
+  `generate_wls_crosscheck_fixtures.py`・`generate_logit_fixtures.py`・
+  `generate_logit_crosscheck_fixtures.py`・`generate_probit_fixtures.py`・
+  `generate_probit_crosscheck_fixtures.py`・`generate_iv_fixtures.py`・
+  `generate_iv_crosscheck_fixtures.py`・`generate_iv_gmm_fixtures.py`）
+- **内容**: ユーザー指摘（2026-08-16）。全ファイルで
+  `fixtures["_meta"] = {"method": ..., "generated_at": datetime.now(UTC).isoformat(),
+  "primary_reference": ..., "<ライブラリ>_version": <ライブラリ>.__version__, "note": (...)}`
+  という共通の型を確認済み。`method`/`generated_at`/`primary_reference`/バージョン情報の
+  4項目は機械的なボイラープレートだが、`note`は各ファイルで意味のある個別の文章（数十行に
+  及ぶこともある）のため、`note`自体をテンプレート化する意味は無い。
+- **Claudeの所感**: `_common.py`に`build_meta(method, primary_reference, version_field,
+  version_value, note) -> dict`のような小さなヘルパーを切り出せば、ボイラープレート4項目の
+  重複だけを解消できる。効果は限定的（項目19の`__main__`共通化ほどインパクトは無い）。
+- **気づいた経緯**: 2026-08-16、`generate_iv_gmm_fixtures.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 19. `fixtures/generate_*_fixtures.py`全11ファイルの`__main__`ブロックが完全に重複
+
+- **対象**: 項目18と同じ11ファイル
+- **内容**: ユーザー指摘（2026-08-16）。11ファイル全ての`__main__`ブロック
+  （`argparse`で`--output`を受け取り→`build_fixtures()`→JSON書き出し→バイト数要約表示）を
+  比較したところ、**`--output`のデフォルトパス文字列以外、一字一句完全に同一**だった
+  （実測確認済み）。
+- **Claudeの所感**: `_common.py`に`run_fixture_cli(build_fixtures_fn, default_output)`の
+  ような関数を1つ用意すれば、各ファイルの`__main__`ブロック（8行程度）を
+  `run_fixture_cli(build_fixtures, "../../../tests/fixtures/benchmarks/ols.json")`という
+  1行にまで削減できる。項目18より効果が大きく、11ファイル分の見通し改善に直結する、
+  優先度の高い候補だと考える。
+- **気づいた経緯**: 2026-08-16、`generate_iv_gmm_fixtures.py`解説後のユーザー指摘。実際に
+  11ファイル全ての`__main__`ブロックを比較し完全一致を確認済み。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

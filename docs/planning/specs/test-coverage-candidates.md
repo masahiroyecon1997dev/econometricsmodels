@@ -289,3 +289,21 @@
   あるかは再検討に値する。Issue化済み（[#247](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/247)）。
 - **気づいた経緯**: 2026-08-16、`run_linearmodels_benchmark.py`解説後のユーザー質問。
 - **状態**: 未対応（[#247](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/247)で再検討中）
+
+### 16. GMM: C統計量（difference-in-Hansen統計量）による内生性検定が無い（新規機能候補）
+
+- **対象**: `engine/src/iv/gmm.rs`（Wu-Hausman相当の検定が未実装）・
+  `benchmark/iv/run_linearmodels_benchmark.py`の`run_gmm()`
+- **内容**: ユーザー提案（2026-08-16）。GMMには2SLSの`wu_hausman_statistic`に相当する
+  内生性検定が現状無い（`engine/src/iv/CLAUDE.md`「Wu-Hausman検定はGMMには存在しない」参照）。
+  GMMの枠組みで内生性を検定する標準的な手法として**C統計量**（difference-in-Hansen統計量、
+  疑わしい変数を内生扱い/外生扱いした2つのモデルのHansen J統計量の差を`χ²`検定する手法、
+  Stataの`ivreg2`で実装済み）がある。古典的なWu-Hausman検定は分散の差が半正定値という
+  前提が不均一分散・クラスター等のロバスト共分散の下で破綻しうるのに対し、C統計量は
+  GMMの重み行列を通じて自然にロバスト対応できるため、GMMではむしろこちらの方が理論的に
+  筋が良い。
+- **Claudeの所感**: 2つのGMM推定（内生扱い・外生扱い）の重み行列をどう揃えるか等の
+  設計判断が必要で、`gmm.rs`側の新規実装が要る（ベンチマークのみでは完結しない）。
+  Issue化済み（[#249](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/249)）。
+- **気づいた経緯**: 2026-08-16、`generate_iv_gmm_fixtures.py`解説後のユーザー提案。
+- **状態**: 未対応（[#249](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/249)で検討中）

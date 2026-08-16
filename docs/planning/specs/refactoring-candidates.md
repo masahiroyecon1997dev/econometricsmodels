@@ -465,3 +465,65 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   検討する余地がある。
 - **気づいた経緯**: 2026-08-16、`generate_wls_crosscheck_fixtures.py`解説中に発見。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目13・15と合わせて検討）
+
+### 25. `"weight"`列名がマジックストリングとして6箇所に散在
+
+- **対象**: [benchmark/linear/generate_linear_datasets.py:144](../../../benchmark/linear/generate_linear_datasets.py#L144)・
+  [benchmark/linear/fixtures/generate_ols_fixtures.py:147](../../../benchmark/linear/fixtures/generate_ols_fixtures.py#L147)・
+  `generate_wls_fixtures.py`（81・161・165行目）・
+  [benchmark/linear/run_statsmodels_benchmark.py:66](../../../benchmark/linear/run_statsmodels_benchmark.py#L66)・
+  [benchmark/linear/fixtures/generate_wls_crosscheck_fixtures.py:82](../../../benchmark/linear/fixtures/generate_wls_crosscheck_fixtures.py#L82)
+  （`WEIGHT_COL = "weight"`、ローカル定数）
+- **内容**: ユーザー指摘（2026-08-16）。合成データセットの重み列名`"weight"`が、DGP自体
+  （`generate_linear_datasets.py`が列を作る箇所）・statsmodels側フィクスチャ生成
+  （2ファイル）・Rクロスチェック側（`WEIGHT_COL`というローカル定数）の計6箇所に
+  マジックストリングとして独立に散らばっている（`WEIGHT_COL`は他5箇所と何の関連も
+  無い独立定義）。
+- **Claudeの所感**: `_common.py`（または項目21の`utils/`分割案採用時は適切なファイル）に
+  `WEIGHT_COLUMN_NAME = "weight"`のような共有定数を1つ置き、6箇所全てから参照する形に
+  統一できる。
+- **気づいた経緯**: 2026-08-16、`generate_wls_crosscheck_fixtures.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 26. `build_synthetic_fixtures()`をOLS/WLS crosscheck間で共通化できないか
+
+- **対象**: `generate_ols_crosscheck_fixtures.py`の`build_synthetic_fixtures()`・
+  `generate_wls_crosscheck_fixtures.py`の同名関数
+- **内容**: ユーザー提案（2026-08-16）。両者の違いは`weight_col`の有無（`_run_r`が既に
+  `weight_col: str | None = None`という省略可能な設計のため、OLS側は渡さなければ
+  そのまま流用できる）・`formula`・`NUMERIC_SCENARIOS`・`R_COV_TYPES`のみで、
+  ループの骨格自体は完全に同型。
+- **Claudeの所感**: OLS/WLSの2ファイルだけなら`formula`/`weight_col`/シナリオ/
+  cov_typeを引数化するだけで現実的に共通化できそう。Logit/Probitまで含めるなら
+  `COV_TYPES`の中身（`opg`の有無等）・シナリオの中身（`near_separation`/
+  `scale_variance`は別物）が異なるため、項目14で提案した`build_numeric_fixtures
+  (run_fn, scenarios, cov_types, **extra_kwargs)`と合わせた検討が必要。
+- **気づいた経緯**: 2026-08-16、`generate_wls_crosscheck_fixtures.py`解説後のユーザー提案。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目14と合わせて検討）
+
+### 27. `formula = "y ~ x1 + x2 + x3"`が6ファイルで重複
+
+- **対象**: `generate_ols_crosscheck_fixtures.py`・`generate_wls_crosscheck_fixtures.py`・
+  `generate_logit_fixtures.py`・`generate_logit_crosscheck_fixtures.py`（4箇所）・
+  `generate_probit_fixtures.py`・`generate_probit_crosscheck_fixtures.py`（4箇所）
+- **内容**: ユーザー指摘（2026-08-16）。合成データセット共通の回帰式`"y ~ x1 + x2 + x3"`が
+  同一の文字列リテラルとして6ファイルに独立して重複していることを`grep`で確認済み
+  （Logit/Probitのcrosscheck側は1ファイルにつき4回登場）。
+- **Claudeの所感**: `_common.py`に`SYNTHETIC_FORMULA = "y ~ x1 + x2 + x3"`のような
+  共有定数を置ける。項目16（`MROZ_FORMULA`の重複）と同じパターン。優先度は高くないが
+  影響ファイル数は多め。
+- **気づいた経緯**: 2026-08-16、`generate_wls_crosscheck_fixtures.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 28. `WOOLDRIDGE_COV_TYPES`相当のリストがOLS/WLS crosscheckで書き方だけ異なる
+
+- **対象**: `generate_ols_crosscheck_fixtures.py`の`datasets`辞書内`hc_types`
+  （`["classical", *hc_types]`で展開）・`generate_wls_crosscheck_fixtures.py`の
+  `WOOLDRIDGE_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]`（名前付き定数）
+- **内容**: ユーザー指摘（2026-08-16）。両者とも最終的に生成される値は
+  `["classical","hc0","hc1","hc2","hc3"]`で完全に同じだが、OLS側は
+  インライン展開、WLS側は名前付き定数と書き方が異なる。
+- **Claudeの所感**: 項目26（`build_synthetic_fixtures`共通化）と合わせて検討すると
+  効率的。値が同じなら共有定数化は低リスク。
+- **気づいた経緯**: 2026-08-16、`generate_wls_crosscheck_fixtures.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目26と合わせて検討）

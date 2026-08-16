@@ -366,3 +366,36 @@
 - **気づいた経緯**: 2026-08-16、`generate_logit_crosscheck_fixtures.py`解説後の
   ユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 20. IV: クラスター時のWu-Hausman検定p値ズレの「根本原因」説明が自動テストで裏付けられていない
+
+- **対象**: `tests/test_iv_crosscheck.py`（`check_wu_hausman_p_value=False`で
+  clusterのp値比較自体をスキップしている）・
+  [benchmark/iv/run_ivreg_benchmark.R:33-41](../../../benchmark/iv/run_ivreg_benchmark.R#L33-L41)
+  （コメントで「G-1で計算するとRのstatisticから本実装のp値が再現できることを
+  確認済み」と記載）
+- **内容**: ユーザー指摘（2026-08-16）。「統計量は一致するがp値は一致しない」
+  こと自体は`test_iv_crosscheck.py`が`check_wu_hausman_p_value=False`でp値比較を
+  スキップしつつ統計量は比較する形で自動テストされている。しかし「なぜズレるか」
+  （Rのivdiagが常に`n-k`をF分布の分母自由度に使うのに対し、本実装は`G-1`を使う
+  ため）という**根本原因の説明**自体は、コメントに「確認済み」とあるだけで、
+  それを裏付ける自動テストが無い（一度きりの手動確認が記録として残っているのみ）。
+- **Claudeの所感**: Rの`statistic`値を使い、`scipy.stats.f.cdf`等で`G-1`自由度の
+  p値を独立計算し、本実装のp値と一致することを確認する専用テストを追加すれば、
+  この根本原因の説明を将来にわたって保証できる。
+- **気づいた経緯**: 2026-08-16、`run_ivreg_benchmark.R`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 21. IV(GMM): RクロスチェックがivregのGMM非対応で省略されている件を再検討する
+
+- **対象**: `docs/planning/specs/iv-api-design.md`5.3節（「GMMのRクロスチェック
+  省略（例外規定）」）・`benchmark/iv/fixtures/generate_iv_gmm_fixtures.py`
+  （`linearmodels`との照合のみ、Rクロスチェックなし）
+- **内容**: ユーザー指摘（2026-08-16）。GMM（Hansen J検定含む）は`linearmodels`
+  との数値照合はされているが、独立実装によるRクロスチェックが無い（`ivreg`が
+  GMMに非対応なため）。`gmm`パッケージ（Pierre Chaussé作）等、`ivreg`以外に
+  GMMを実装しているRパッケージが無いか再調査する価値がある。
+  Issue化済み（[#256](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/256)）。
+- **気づいた経緯**: 2026-08-16、`run_ivreg_benchmark.R`解説後のユーザー指摘
+  （C統計量Issue #249と関連するが別の論点として指摘）。
+- **状態**: 未対応（[#256](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/256)で検討中）

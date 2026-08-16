@@ -687,3 +687,35 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-16、`generate_probit_crosscheck_fixtures.py`解説後の
   ユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 37. `suppressMessages`が`run_ivreg_benchmark.R`にしか無く、他3ファイルにJSON破損リスクが残る
+
+- **対象**: [benchmark/iv/run_ivreg_benchmark.R:67-72](../../../benchmark/iv/run_ivreg_benchmark.R#L67-L72)
+  （`suppressMessages({library(...)...})`）と、`run_lm_crosscheck_benchmark.R`・
+  `run_lm_predict_crosscheck.R`・`run_glm_crosscheck_benchmark.R`（いずれも素の
+  `library(...)`のまま）
+- **内容**: ユーザー指摘（2026-08-16）。`library()`実行時にRのバージョンや
+  パッケージの警告等でメッセージが標準出力に出力されると、`toJSON`の出力に
+  混ざってJSONパースが壊れる可能性がある。`run_ivreg_benchmark.R`のみこれを
+  `suppressMessages({...})`で防いでいるが、他3ファイルには同じ対策が無く、
+  単なるスタイルの不統一ではなく**潜在的な頑健性のギャップ**。
+- **Claudeの所感**: 他3ファイルにも`suppressMessages({...})`を追加するのが
+  低リスクな対策。
+- **気づいた経緯**: 2026-08-16、`run_ivreg_benchmark.R`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 38. `script_dir`特定→`_common.R`の`source()`ブロックは構造的に共通化しにくい
+
+- **対象**: [benchmark/linear/run_lm_crosscheck_benchmark.R:40-42](../../../benchmark/linear/run_lm_crosscheck_benchmark.R#L40-L42)・
+  [benchmark/iv/run_ivreg_benchmark.R:77-79](../../../benchmark/iv/run_ivreg_benchmark.R#L77-L79)
+  （`_common.R`の`extract_coef_se`/`wald_f_test`を使う2ファイルのみに存在）
+- **内容**: ユーザー質問（2026-08-16）。「自分自身の場所を特定して`_common.R`を
+  `source()`する」という3行ブロックが2ファイルで重複しているが、この処理自体を
+  `_common.R`側のヘルパー関数として切り出すと、その関数を呼ぶために先に
+  `_common.R`をsourceする必要があるという循環（鶏と卵の問題）が生じるため、
+  構造的に共通化しにくい。Rには`__file__`相当が無く、Pythonの`sys.path.insert`の
+  ような軽量な代替パスもない。
+- **Claudeの所感**: 環境変数でベースパスを渡す等の代替はあるが、実行方法自体を
+  変える必要がありトレードオフが大きい。現状維持が妥当と考える。
+- **気づいた経緯**: 2026-08-16、`run_ivreg_benchmark.R`解説後のユーザー質問。
+- **状態**: 対応不要と判断（構造的な制約のため、現状維持が妥当）

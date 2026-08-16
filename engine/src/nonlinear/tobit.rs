@@ -1511,6 +1511,50 @@ mod tests {
         }
     }
 
+    /// `censored_regression_input`の`x`（`1..8`）は`standardize_columns`が実質no-opになる
+    /// ほど自明なスケールではないが、`fit_bfgs_and_lbfgs_agree_with_newton_when_design_
+    /// matrix_has_nontrivial_scale`（`logit.rs`/`probit.rs`）と同じ観点で、桁が大きく離れた
+    /// スケール（`std`が1から大きく離れた値）でも標準化・逆標準化の往復が壊れないことを
+    /// 明示的に検証する。`x`を100倍しつつ係数を1/100にスケールして同じ潜在変数
+    /// `y*=-5+2x+noise`を再現しているため、期待される`β`・`σ`は`censored_regression_input`と
+    /// 同一だが、ここではLogit/Probitの当該テストと同じくNewtonの結果を参照値とする
+    /// クロスメソッド一致検証として書く（標準化空間での差異のみを見るのが目的のため）。
+    #[test]
+    fn fit_bfgs_and_lbfgs_agree_with_newton_when_design_matrix_has_nontrivial_scale() {
+        let x = vec![100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0];
+        let y = vec![0.0, 0.0, 1.15, 2.9, 5.2, 6.85, 9.1, 10.95];
+        let make_input = || {
+            TobitInput::from_columns(
+                &y,
+                std::slice::from_ref(&x),
+                vec!["x1".to_string()],
+                true,
+                "y".to_string(),
+                Some(0.0),
+                None,
+            )
+            .unwrap()
+        };
+
+        let newton = TobitEstimator::fit(make_input(), Method::Newton, 100, 1e-8, true).unwrap();
+        assert!(newton.converged());
+
+        for method in [Method::Bfgs, Method::Lbfgs] {
+            let estimator = TobitEstimator::fit(make_input(), method, 200, 1e-8, true).unwrap();
+            assert!(estimator.converged(), "method={:?}", method);
+            for (a, b) in estimator.params().iter().zip(newton.params()) {
+                assert!((a - b).abs() < 1e-3, "method={:?}, a={a}, b={b}", method);
+            }
+            assert!(
+                (estimator.sigma() - newton.sigma()).abs() < 1e-3,
+                "method={:?}, sigma={}, newton_sigma={}",
+                method,
+                estimator.sigma(),
+                newton.sigma()
+            );
+        }
+    }
+
     #[test]
     fn fit_returns_non_convergence_error_when_max_iter_is_too_small_and_raise_is_true() {
         let input = censored_regression_input();

@@ -18,14 +18,9 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 import numpy as np
 import polars as pl
-
-sys.path.insert(
-    0, str(Path(__file__).resolve().parent.parent)
-)  # benchmark/ を import path に追加（_dgp_constants）
 from _dgp_constants import (
     AUTOCORRELATED_RHO,
     HETEROSKEDASTIC_SIGMA_BASE,
@@ -164,7 +159,7 @@ def generate_linear_dataset(
 
 
 if __name__ == "__main__":
-    from _common import preview_dataset  # sys.pathはファイル冒頭で追加済み
+    from _common import preview_dataset
 
     scenario_arg = sys.argv[1] if len(sys.argv) > 1 else "baseline"
     preview_dataset(scenario_arg, generate_linear_dataset)

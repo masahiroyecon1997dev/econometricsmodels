@@ -60,14 +60,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
-
-sys.path.insert(
-    0, str(Path(__file__).resolve().parent.parent / "linear")
-)  # benchmark/linear/ を import path に追加（generate_linear_datasets）
-sys.path.insert(
-    0, str(Path(__file__).resolve().parent.parent)
-)  # benchmark/ を import path に追加（_common）
-
 from _common import hac_auto_lag
 from generate_linear_datasets import generate_linear_dataset
 

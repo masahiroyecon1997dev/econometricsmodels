@@ -64,7 +64,21 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   IDEの静的解析にだけ「このパスも見てよい」と教えられるため、定義ジャンプの不便さだけを
   低リスクで解消できる可能性がある。
 - **気づいた経緯**: 2026-08-15、`generate_linear_datasets.py`解説後の雑談から。
-- **状態**: 未対応（`.vscode/settings.json`追加の要否をユーザー判断待ち）
+- **状態**: 対応済み（2026-08-22、`refactor`スキルで対応）。ユーザー判断により、
+  上記2案（extraPathsのみ／フルパッケージ化）のどちらでもなく、**PYTHONPATH環境変数方式**
+  を採用した（「今後もbenchmark/へのファイル追加が続く前提なら、sys.path.insertの
+  記述自体をなくす方が長期的に低コスト」という指摘を踏まえた第3の折衷案）。
+  - [.devcontainer/devcontainer.json](../../../.devcontainer/devcontainer.json)の
+    `remoteEnv`に`PYTHONPATH`（`benchmark`/`benchmark/linear`/`benchmark/nonlinear`/
+    `benchmark/iv`/`benchmark/performance`）を追加。
+  - [.vscode/settings.json](../../../.vscode/settings.json)を新規作成し
+    `python.analysis.extraPaths`を同じパスで設定（IDE静的解析用）。
+  - `benchmark/`配下22ファイルから`sys.path.insert`ブロックを削除（`ruff check --fix`で
+    不要import・import順序も自動修正）。`python foo.py`の直接実行・IDEの実行ボタンは
+    従来通り使用可能（`-m`実行への変更は不要）。
+  - 実際のインタプリタでPYTHONPATHを設定し22ファイル全ての起動を確認、
+    全シナリオの生成値がリファクタリング前後で完全一致することも確認済み。
+  - **devcontainerの再ビルドが必要**（`remoteEnv`の変更はコンテナ再ビルド後に反映される）。
 
 ### 4. `generate_*_datasets.py`の`SCENARIOS`と`freeze_*_datasets.py`側リストが3系統とも完全重複
 

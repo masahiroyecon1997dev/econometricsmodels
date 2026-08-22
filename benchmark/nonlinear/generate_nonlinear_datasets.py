@@ -54,21 +54,16 @@ autocorrelated/high_variance）は2値DGPに直接転用できないため、Log
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 import numpy as np
 import polars as pl
-from scipy.stats import norm
-
-sys.path.insert(
-    0, str(Path(__file__).resolve().parent.parent)
-)  # benchmark/ を import path に追加（_dgp_constants）
 from _dgp_constants import (
     SCALE_VARIANCE_X1_SCALE as _SCALE_VARIANCE_X1_SCALE,
 )
 from _dgp_constants import (
     SCALE_VARIANCE_X2_SCALE as _SCALE_VARIANCE_X2_SCALE,
 )
+from scipy.stats import norm
 
 SCENARIOS = [
     "baseline",
@@ -217,7 +212,7 @@ def generate_probit_dataset(
 
 
 if __name__ == "__main__":
-    from _common import preview_dataset  # sys.pathはファイル冒頭で追加済み
+    from _common import preview_dataset
 
     link_arg = sys.argv[1] if len(sys.argv) > 1 else "logit"
     scenario_arg = sys.argv[2] if len(sys.argv) > 2 else "baseline"

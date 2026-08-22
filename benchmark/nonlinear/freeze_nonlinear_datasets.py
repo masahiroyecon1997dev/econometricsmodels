@@ -11,15 +11,7 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
-
-sys.path.insert(
-    0, str(Path(__file__).resolve().parent)
-)  # benchmark/nonlinear/ を import path に追加（generate_nonlinear_datasets）
-sys.path.insert(
-    0, str(Path(__file__).resolve().parent.parent)
-)  # benchmark/ を import path に追加（_common）
 
 from _common import freeze_scenarios, run_freeze_cli
 from generate_nonlinear_datasets import SCENARIOS as LOGIT_SCENARIOS

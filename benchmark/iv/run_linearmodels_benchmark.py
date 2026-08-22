@@ -80,16 +80,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from datetime import UTC, datetime
-from pathlib import Path
 
 import polars as pl
-
-sys.path.insert(
-    0, str(Path(__file__).resolve().parent.parent)
-)  # benchmark/ を import path に追加（_common）
-
 from _common import hac_auto_lag, load_frozen_dataset
 from load_wooldridge import load as _load_wooldridge
 

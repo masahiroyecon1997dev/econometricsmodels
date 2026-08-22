@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["econometrics", "statistics", "regression", "ols", "polars"]
 dependencies = [
-    "polars==1.42.1",
+    "polars==1.43.2",
 ]
 classifiers = [
     "Programming Language :: Rust",

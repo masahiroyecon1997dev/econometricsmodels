@@ -75,7 +75,22 @@ RUN apt update && apt install -y --no-install-recommends \
         r-base-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN Rscript -e 'install.packages(c("fixest", "plm", "ivreg", "jsonlite", "languageserver", "marginaleffects"), repos = "https://cloud.r-project.org")'
+# ベンチマーク（benchmark/）のリファレンス実装として使うパッケージはバージョンを明示的に
+# ピン留めする（Issue #239。install.packages()自体はバージョン指定に対応しないため
+# remotes::install_version()を使う）。ピン留め対象外のlanguageserverはIDE補完用でベンチ
+# マーク結果に影響しないため、最新版のままinstall.packages()で導入する。
+# 依存関係により後段のパッケージが前段のsandwich/lmtestを別バージョンで引き込むことがある
+# ため、他パッケージに依存されがちなsandwich/lmtestは最後にピン留めし直し、最終的な導入
+# バージョンを確定させる。
+RUN Rscript -e 'install.packages("remotes", repos = "https://cloud.r-project.org")' \
+    && Rscript -e 'remotes::install_version("fixest", version = "0.14.2", repos = "https://cloud.r-project.org")' \
+    && Rscript -e 'remotes::install_version("plm", version = "2.6.7", repos = "https://cloud.r-project.org")' \
+    && Rscript -e 'remotes::install_version("ivreg", version = "0.6.8", repos = "https://cloud.r-project.org")' \
+    && Rscript -e 'remotes::install_version("jsonlite", version = "2.0.0", repos = "https://cloud.r-project.org")' \
+    && Rscript -e 'remotes::install_version("marginaleffects", version = "0.32.0", repos = "https://cloud.r-project.org")' \
+    && Rscript -e 'remotes::install_version("sandwich", version = "3.1.3", repos = "https://cloud.r-project.org")' \
+    && Rscript -e 'remotes::install_version("lmtest", version = "0.9.40", repos = "https://cloud.r-project.org")' \
+    && Rscript -e 'install.packages("languageserver", repos = "https://cloud.r-project.org")'
 
 # 以降は一般ユーザーで実行
 USER ${USERNAME}

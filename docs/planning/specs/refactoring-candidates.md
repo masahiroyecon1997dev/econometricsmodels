@@ -747,6 +747,8 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `pytest tests`956件全件パス、`ruff check .`／`ruff format --check .`全件パス、
   `/code-review`（medium）でも指摘なしを確認済み。
 
+### 37. `suppressMessages`が`run_ivreg_benchmark.R`にしか無く、他3ファイルにJSON破損リスクが残る
+
 - **対象**: [benchmark/iv/run_ivreg_benchmark.R:67-72](../../../benchmark/iv/run_ivreg_benchmark.R#L67-L72)
   （`suppressMessages({library(...)...})`）と、`run_lm_crosscheck_benchmark.R`・
   `run_lm_predict_crosscheck.R`・`run_glm_crosscheck_benchmark.R`（いずれも素の

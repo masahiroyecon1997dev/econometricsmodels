@@ -437,3 +437,54 @@
   （`sys.path.insert`最小化の相談に付随して、CI側でWooldridgeテストが
   実行されない可能性を懸念）。
 - **状態**: 未対応（対応方針・優先度はユーザー判断待ち）
+
+### 23. `logit_crosscheck`/`probit_crosscheck`の基本`rtol`（2e-4）だけ、他の全エントリと違い実測根拠のコメントが無い
+
+- **対象**: [tests/_tolerances.py:87-89](../../../tests/_tolerances.py#L87-L89)
+  （`"logit_crosscheck": {"rtol": 2e-4, "atol": 1e-8, ...}`）・
+  [tests/_tolerances.py:100-102](../../../tests/_tolerances.py#L100-L102)
+  （`"probit_crosscheck": {"rtol": 2e-4, "atol": 1e-8, ...}`）
+- **内容**: ユーザー指摘（2026-08-22）を受けてファイル全体を確認したところ、
+  `TOLERANCES`辞書の他の全エントリ（`rtol_hac`・`atol_p_value`・
+  `rtol_margeff_se`・`rtol_near_separation_conf_int`・`rtol_mroz_cluster`等）は
+  いずれも「実測最大◯◯（具体的な数値）にマージンを載せた」という形の
+  コメントが付いているが、`logit_crosscheck`/`probit_crosscheck`の**基本**
+  `rtol=2e-4`・`atol=1e-8`にだけ、なぜこの値なのかを示す実測根拠のコメントが
+  無い（`ols_crosscheck`等の基本`rtol_strict`/`atol`はブロック先頭のコメントで
+  「機械精度一致（実測1e-14程度）」という根拠が示されているのと対照的）。
+- **Claudeの所感**: `testing-policy.md`「許容誤差」の方針
+  （「実測値（最大相対誤差）に基づいて具体的な数値を決める」）に沿うなら、
+  この基本値についても実測根拠が本来必要なはず。値自体は恐らく実装時に
+  実測した上で決めたと推測されるが、コメントとして残っていないため、
+  今の状態では「本当に実測に基づく値か」「たまたま通っている緩すぎる値では
+  ないか」を後から検証できない。一度実測し直し、コメントとして残すことを
+  推奨する。
+- **気づいた経緯**: 2026-08-22、`tests/_tolerances.py`解説後のユーザー指摘。
+- **状態**: 未対応（実測・コメント追記の要否はユーザー判断待ち）
+
+### 24. Logitのmrozクラスターcrosscheckテストだけ、Probitと違い専用の緩めた許容誤差を使っていない（数値ノイズの有無が未検証）
+
+- **対象**: [tests/test_logit_crosscheck.py:233-245](../../../tests/test_logit_crosscheck.py#L233-L245)
+  （`test_mroz_cluster_matches_r_glm`、`rtol`指定無しで基本値2e-4のまま）と
+  対比した[tests/test_probit_crosscheck.py:243-264](../../../tests/test_probit_crosscheck.py#L243-L264)
+  （同名テストで`RTOL_MROZ_CLUSTER = TOLERANCES["probit_crosscheck"]["rtol_mroz_cluster"]`
+  = 2e-3を明示的に使用）
+- **内容**: ユーザー依頼（2026-08-22）で確認。`tests/_tolerances.py`の
+  `probit_crosscheck`には「Wooldridge mrozのクラスターロバストSE
+  （cluster_col="city"、G=2）は合成データのクラスターケースより数値ノイズが
+  大きい（実測最大相対誤差~1.1e-3、const）」という専用エントリ
+  `rtol_mroz_cluster`があり、Probit側のテストはこれを明示的に使っている。
+  一方Logit側の同名テスト（`test_mroz_cluster_matches_r_glm`）は`_assert_dict_close`
+  を`rtol`指定無しで呼んでおり（Logit版の`_assert_dict_close`は`atol`しか
+  引数に取らず`rtol`は`_assert_close`のデフォルト値=基本の2e-4に固定される
+  実装になっている）、Probitと同じ現象（G=2という境界的なクラスタ数＋実データ
+  特有のノイズ）が起きているはずのケースで専用の緩和が無い。
+- **Claudeの所感**: 2つの可能性がある。(a) Logitでは実際にこの数値ノイズが
+  起きておらず基本の2e-4で余裕を持って通っている（Probit固有の現象、
+  リンク関数の違いによる数値的な性質の差）、(b) 誰もLogit側でこのケースの
+  実測乖離を測っておらず、たまたま2e-4以内に収まっているだけで検証されて
+  いない。項目23（基本rtolの実測根拠が無い）とも関連するため、実測して
+  どちらか確認するのが望ましい。
+- **気づいた経緯**: 2026-08-22、ユーザー依頼により`test_logit_crosscheck.py`/
+  `test_probit_crosscheck.py`を突き合わせて確認。
+- **状態**: 未対応（実測確認の要否はユーザー判断待ち）

@@ -171,8 +171,8 @@ $$
   `impl From<LeastSquaresError> for PyErr`は書けない（`LeastSquaresError`・`PyErr`ともこのクレート
   外定義の型でorphan ruleに抵触）。関数`least_squares_error_to_pyerr`として実装し
   `.map_err(...)?`で変換する。
-- バージョン固定: `pyo3=0.28.2` / `polars=0.54.4` / `pyo3-polars=0.27.0`（すべて`=`固定）。
-  `pyo3-polars=0.27.0`が`pyo3="^0.28"`を要求するための組み合わせ。互換性は数字ではなく
+- バージョン固定: `pyo3=0.29.2` / `polars=0.55.2` / `pyo3-polars=0.28.0`（すべて`=`固定、Issue #49で更新）。
+  `pyo3-polars=0.28.0`が`pyo3="^0.29"`・`polars="^0.55.1"`を要求するための組み合わせ。互換性は数字ではなく
   `pyo3-polars`が使う`polars_ffi::version_0`という安定版FFIプロトコルで担保される。
 
 ### 3.6 テスト

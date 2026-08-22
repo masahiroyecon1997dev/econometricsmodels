@@ -43,8 +43,6 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
 （`allow-list`＝無視してよいという判断ではなく、「上流待ちの既知課題でci_engine.ymlをブロックしない」
 ための措置。上流の対応バージョンが公開され次第、該当エントリを削除すること）。
 
-- **`pyo3`（RUSTSEC-2026-0176/0177）**: `pyo3-polars`最新公開版が`pyo3 = "^0.28"`を要求するため
-  `pyo3>=0.29.0`へ上げられない。対応する`pyo3-polars`の新版公開待ち。
 - **`quick-xml`（RUSTSEC-2026-0194/0195、severity 7.5 high）**: 経路は
   `polars → polars-error → object_store → quick-xml`。`polars`自体の新バージョン待ち。
   **実際にはビルドに含まれない**（`object_store`のクラウドストレージ機能はオプション依存で

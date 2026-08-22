@@ -785,3 +785,19 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-22、`compare_performance.py`解説（`build_report`
   まで）後のユーザー指摘。
 - **状態**: 未対応（次の手法の性能比較スクリプト実装時に着手判断）
+
+### 41. ピークRSSの小数点以下の桁数が`compare_performance.py`と`render_performance_summary.py`で不統一
+
+- **対象**: [benchmark/performance/compare_performance.py:274](../../../benchmark/performance/compare_performance.py#L274)
+  （`f"peak_rss={row['peak_rss_kb'] / 1024:.1f}MB"`、標準エラーの進捗ログ用）・
+  [benchmark/performance/render_performance_summary.py:27](../../../benchmark/performance/render_performance_summary.py#L27)
+  （`_format_rss`、`f"{peak_rss_kb / 1024:.0f}MB"`、Markdown表用）
+- **内容**: どちらも同じ「ピークRSS（KB）をMB表示に整形する」処理だが、
+  小数点以下の桁数が前者`.1f`・後者`.0f`で異なる。実行時間側（`_format_time`と
+  `_measure_point`の進捗ログ）はどちらも`.4f`で揃っているため、RSS側だけの
+  不統一に見える。
+- **Claudeの所感**: 実害はない（一方は人間向けの進捗ログ、他方はJob Summaryの
+  表という別用途で、桁数がずれていても実用上の支障はない）が、同じ量の表示
+  精度が揃っていない点は気になる。優先度は低い。
+- **気づいた経緯**: 2026-08-22、`render_performance_summary.py`解説後のユーザー指摘。
+- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）

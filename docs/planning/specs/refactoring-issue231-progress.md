@@ -40,6 +40,53 @@
 
 ---
 
+## `refactoring-candidates.md`駆動の随時対応ログ（フェーズ外、2026-08-22〜）
+
+上記フェーズはIssue #231としてスコープ確定済みの計画だが、それとは別に
+`docs/planning/specs/refactoring-candidates.md`に溜まった個別項目を`refactor`
+スキルでその都度つまみ食い的に対応する運用も並行して行っている。この節は
+その運用ルール・進捗をセッションをまたいで引き継ぐためのメモ（`refactoring-candidates.md`
+の各項目「状態」欄が一次情報、こちらは運用ルール＋スナップショット）。
+
+**運用ルール（2026-08-22のセッションでユーザーと確立）**:
+- `refactoring-candidates.md`の項目を**1件（または明示的に指定された小さいまとまり）ずつ**対応する。
+  まとめて全部やらない。
+- 実装 → 検証（構文・lintに加え、挙動を変えないリファクタリングでは可能な限り
+  「リファクタリング前後で出力が完全一致すること」を実測確認する） → `/code-review`
+  → `refactoring-candidates.md`の該当項目「状態」を更新、の順で1件を完了させる。
+- 1件完了したら**そこで一旦止まり、ユーザーにコミット前確認を取ってから**コミットする
+  （まとめて複数件コミットしない）。
+- 設計判断が分かれる点（例: 定数の置き場所、sys.path問題の解決方式）は着手前に
+  ユーザーに確認する（CLAUDE.md 14章）。
+
+**進捗スナップショット（2026-08-22時点、ブランチ`release/v0.6.0`）**:
+- 項目3（`sys.path.insert`とIDE静的解析）: 対応済み・コミット済み（`48727c9`）。
+  PYTHONPATH環境変数方式を採用（詳細は`refactoring-candidates.md`項目3参照）。
+  **devcontainer再ビルドが必要**（本セッション終了直後にユーザーが再ビルド予定）。
+  再ビルド後は`echo $PYTHONPATH`でbenchmark関連パスが設定されていること、
+  `python benchmark/linear/generate_linear_datasets.py baseline`等が
+  importエラー無く動くことを確認すること。
+- 項目4（`SCENARIOS`重複）: 対応済み・コミット済み（`d23d9b7`）。
+- 項目9・10（DGP用マジックナンバー集約、`benchmark/_dgp_constants.py`新設）:
+  対応済み・コミット済み（`7d51802`）。
+- 上記以外（項目1・2・5〜8・11〜43）は未着手。
+
+**並行作業についての注意**: 本セッションと並行して、別セッションが
+`refactoring-candidates.md`を対象にした別の作業（コード解説中の気づき記録等）を
+行っており、衝突を避けるため`docs/planning/specs/refactoring-candidates-2.md`
+という新規ファイルに項目44以降を追記する運用に切り替えている（コミット`a197ba5`）。
+次にこの随時対応を再開する際は、`refactoring-candidates.md`だけでなく
+`refactoring-candidates-2.md`側の新規項目も合わせて確認すること。
+
+**環境についての注意（2026-08-22判明）**: `~/.claude/`（Claude Codeのセッション
+履歴・メモリ）は`.devcontainer/docker-compose.yml`のvolumeマウント対象外
+（マウントされているのは`/workspaces/econometricsmodels`本体と`.cargo`関連のみ）
+のため、**devcontainerの再ビルドで消える**。セッションをまたいで残したい情報は
+Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイル（本ドキュメント等）に
+書くこと。
+
+---
+
 ## フェーズ1: リファクタリング用スキル
 
 **目的**: コード（Python/R/Rust）・コメント・ディレクトリ構造・ドキュメント

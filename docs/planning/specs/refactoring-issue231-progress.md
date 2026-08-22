@@ -87,6 +87,66 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
 
 ---
 
+## `/explain-code`による`benchmark/`・`tests/`解説ウォークスルーの進捗（フェーズ外、2026-08-16〜）
+
+上記の「`refactoring-candidates.md`駆動の随時対応」とは**別のセッション・別の目的**の
+継続作業。ユーザーが`benchmark/`・`tests/`配下をファイル単位で`/explain-code`スキルに
+沿って通読し、統計学的な意味・設計判断を確認しつつ、気づいた重複・設計上の疑問点を
+その都度`refactoring-candidates.md`（またはブロック中は`refactoring-candidates-2.md`）・
+`test-coverage-candidates.md`に記録し、必要に応じてGitHub Issueも作成する運用
+（2026-08-22時点、devcontainer再ビルド直前にセッション履歴保全のため記録）。
+
+**解説済み**:
+- `benchmark/iv/`: `fixtures/generate_iv_fixtures.py`・`run_linearmodels_benchmark.py`・
+  `fixtures/generate_iv_gmm_fixtures.py`・`run_ivreg_benchmark.R`・
+  `fixtures/generate_iv_crosscheck_fixtures.py`・`freeze_iv_datasets.py`
+- `benchmark/linear/`: `run_lm_crosscheck_benchmark.R`・
+  `fixtures/generate_ols_crosscheck_fixtures.py`・`run_lm_predict_crosscheck.R`・
+  `fixtures/generate_wls_crosscheck_fixtures.py`
+- `benchmark/nonlinear/`: `run_glm_crosscheck_benchmark.R`・
+  `fixtures/generate_logit_crosscheck_fixtures.py`・
+  `fixtures/generate_probit_crosscheck_fixtures.py`
+- `benchmark/_common.py`（`freeze_scenarios`/`run_freeze_cli`部分）・`benchmark/_common.R`
+- `benchmark/performance/`: `compare_performance.py`・`render_performance_summary.py`
+  （全区切り解説済み）
+- `tests/`: `_assertions.py`・`_helpers.py`・`_tolerances.py`（全区切り解説済み）
+
+**次に解説予定**: `tests/conftest.py`（未着手）。その後`tests/test_{ols,wls,logit,
+probit,iv,tobit}*.py`（17ファイル、いずれも未着手）が残っている。
+
+**このウォークスルー中に作成したGitHub Issue**: [#246](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/246)
+（検定分布・診断統計量の運用ノート`docs/spec/inference-conventions.md`化）・
+[#247](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/247)
+（Cragg-Donald統計量の再検討）・[#249](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/249)
+（GMMのC統計量実装）・[#256](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/256)
+（GMM/Hansen JのRクロスチェック再検討）・[#264](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/264)
+（Logit/Probitの最適化methodにFisher-scoring追加検討）。いずれもオープンのまま。
+
+**候補メモの状態（2026-08-22時点）**:
+- `refactoring-candidates.md`: 項目1〜43（このウォークスルー由来の最後の追記は項目43）。
+  上記「`refactoring-candidates.md`駆動の随時対応」セッションが並行して対応中のため、
+  このウォークスルーからの新規追記は`refactoring-candidates-2.md`（項目44〜49、
+  `rename`引数未使用・DGP乱数生成のnumpy不統一・定数関数混在・docstring経緯記述の
+  陳腐化・許容誤差直書き）に切り替えている。**両ファイルの統合は`refactoring-candidates.md`
+  側の随時対応が一区切りついた後にユーザー判断で行う**（現時点では統合しない）。
+- `test-coverage-candidates.md`: 項目1〜24（直近はlogit/probit_crosscheckの基本rtolの
+  実測根拠欠如・Logitのmrozクラスターテストの許容誤差非対称性）。こちらはブロックされて
+  いないため引き続き直接追記してよい。
+
+**再開時の確認事項**: 上記「並行作業についての注意」と同じく、`refactoring-candidates.md`
+側の対応が進んでいれば項目1〜43の「状態」欄が更新されているはずなので、再開前に
+`git log`・該当ファイルの差分を確認すること。
+
+**devcontainer再ビルド直前に発見した未コミットの変更（本ウォークスルーとは無関係、
+2026-08-22時点）**: `.devcontainer/Dockerfile`に未コミットの差分があり、
+`fixest`/`plm`/`ivreg`/`jsonlite`/`marginaleffects`/`sandwich`/`lmtest`のRパッケージを
+`remotes::install_version()`でバージョン固定するIssue #239対応と見られる変更が
+入っている。このウォークスルーのセッションが行った変更ではない（別セッション・
+別作業由来の可能性が高い）ため、内容の妥当性は未検証。再ビルド後、この変更が
+意図したものか、コミットすべきかをユーザーに確認すること。
+
+---
+
 ## フェーズ1: リファクタリング用スキル
 
 **目的**: コード（Python/R/Rust）・コメント・ディレクトリ構造・ドキュメント

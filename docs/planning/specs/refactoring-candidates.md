@@ -760,3 +760,28 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-16、`generate_iv_crosscheck_fixtures.py`解説後、
   `run_ivreg_benchmark.R`の設計との対比についてのユーザー指摘。
 - **状態**: 未対応（着手要否・項目33/35との統合方針はユーザー判断待ち）
+
+### 40. `compare_performance.py`が現状OLS専用に書かれており、他手法へ性能比較を拡張する際に共通化できる可能性が高い
+
+- **対象**: [benchmark/performance/compare_performance.py](../../../benchmark/performance/compare_performance.py)
+  全体（`_fit_once_engine`/`_fit_once_statsmodels`/`_fit_once_pyfixest`、
+  `_build_dataframe`、`run_n_sweep`/`run_k_sweep`/`build_report`の`_meta`構築、
+  `_worker`のディスパッチ構造等）
+- **内容**: ユーザー指摘（2026-08-22）。現状のスクリプトはOLSの`fit()`呼び出し
+  にほぼ全体が特化しており（`OLS`/`OLSOptions`のimport、`y ~ x1 + ...`という
+  線形の説明変数構成、`generate_linear_dataset`の呼び出し等）、Logit/Probit/IV等
+  他手法の性能比較を今後追加する際に、`_worker`のライブラリ分岐・
+  `_run_isolated`のサブプロセス起動・`run_n_sweep`/`run_k_sweep`のスイープ
+  構造・`build_report`の`_meta`組み立てパターンといった「OLS固有ではない
+  骨格部分」を共通化できる可能性が高い。また`_meta`に`statsmodels_version`/
+  `pyfixest_version`等のリファレンス実装バージョンが記録されていない点
+  （`testing-policy.md`の`_meta`要件と対照的）も、他手法へ拡張する際に
+  併せて見直す余地がある。
+- **Claudeの所感**: 現時点ではOLSしか性能比較の実装が無く、共通化すべき
+  「本当に変わらない部分」と「手法ごとに変わる部分」の境界が1サンプルからは
+  判断しづらい。ユーザー方針として、この項目以外の細かい共通化候補
+  （`_fit_once_*`のディスパッチ方式の統一等）は今回は深追いせず、実際に
+  次の手法の性能比較を実装するタイミングでまとめて判断する。
+- **気づいた経緯**: 2026-08-22、`compare_performance.py`解説（`build_report`
+  まで）後のユーザー指摘。
+- **状態**: 未対応（次の手法の性能比較スクリプト実装時に着手判断）

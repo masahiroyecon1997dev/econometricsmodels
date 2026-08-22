@@ -164,7 +164,7 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
 - [x] 収束判定の具体的な閾値 → `tol=1e-6`で確定（同上）
 - [x] Tobitの打ち切り境界API・GOF指標・predict/marginal_effects/pred_table方針 → 本ファイル5〜7章に確定事項として記載済み
 - [ ] モデル固有の尤度・勾配・Hessian導出（Tobit）: 標準的な打ち切り正規回帰の尤度で導出可能（左右打ち切りは分布関数、非打ち切りは密度関数）と方向性は確認済みだが、実際の閉形式の書き下し・実装は着手時に行う。内部最適化パラメータ化は`(β, log σ)`とする方針（Olsen(1978)の`(β/σ, 1/σ)`変換による大域凹性の保証までは採用しない。ゼロベクトル初期値からのNewton収束はLogit/Probitで実績があり、Tobitでも同様の運用でまず試す）
-- [ ] Tobitの分離相当の病理ケース（`SEPARATION_PARAM_NORM_THRESHOLD`に相当する閾値）: `y`が連続なため問題の性質がLogit/Probitと異なる可能性が高く、実装・テスト段階で経験的に較正する
+- [x] Tobitの分離相当の病理ケース → 2種類の異なる退化パターンが存在することが判明し、いずれも対応済み（Issue #223・#226、詳細は`nonlinear-implementation-notes.md`「Tobit固有の病理ケース」参照）。(1) 非打ち切り観測ゼロによる`σ→0`退化は既存の`SEPARATION_PARAM_NORM_THRESHOLD`（標準化パラメータノルム基準）では捕捉できないため`MleError::NoUncensoredObservations`という専用の入力バリデーションを新設（Issue #223）。(2) 極端な`β`による分離は`run_solver`共有の既存`SeparationSuspected`機構がLogit/Probitと同じ閾値でそのまま捕捉できることを実測確認済み（Issue #226、python_packageラッパーのAPI境界テストで再現）
 - [ ] Tobitのテスト許容誤差（`RTOL`）: `AER::tobit`（survreg、独立実装）との比較のため、Logit/Probitのstatsmodels比較（`RTOL=1e-8`）をそのまま踏襲できるかは未検証。実装・テスト作成段階で実測してから決定する
 - [ ] Tobitの将来拡張候補（v1では見送り、backlog）: 尤度比検定（LR statistic/p-value）の追加実装
 - [ ] 多項・順序モデルの参照カテゴリ等の詳細仕様（着手時に決定）

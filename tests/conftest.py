@@ -38,3 +38,12 @@ def binary_dataset(dataset: pl.DataFrame) -> pl.DataFrame:
     median = dataset["y"].median()
     y_binary = (dataset["y"] > median).cast(pl.Float64)
     return dataset.with_columns(y_binary.alias("y"))
+
+
+@pytest.fixture(scope="module")
+def censored_dataset(dataset: pl.DataFrame) -> pl.DataFrame:
+    """共有`dataset`フィクスチャの`y`を0で左打ち切りした、Tobit用データセット
+    （実測打ち切り率21%、`TobitOptions`の既定`lower=0.0`と一致させてある）。
+    """
+    y_censored = dataset["y"].clip(lower_bound=0.0)
+    return dataset.with_columns(y_censored.alias("y"))

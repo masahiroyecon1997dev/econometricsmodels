@@ -279,3 +279,19 @@ should-fix 2件も対応済み: `TobitOptions.include_intercept`/`cluster_col`�
 nice-to-have 2件も対応済み: `build_tobit_input_cov_type_is_case_insensitive`に`"Classical"`（先頭大文字）のケースとIssue #231の説明コメントを追加。`censoring_fit_category_to_result`/`censoring_fit_check_to_result`（フィールドの詰め替えロジック）の単体テストが無かった点は、`build_tobit_input`が返す`TobitInput`に対して`TobitEstimator::fit`をGIL無しで直接呼び出すテストを新設して対応した。
 
 修正後: engine_pybind全体で93件（Logit/Probit/OLS/WLS/IV等の既存分含む、Tobit分は21件）、clippy/fmt警告ゼロ。`maturin develop`での動作確認も再実施済み。
+
+## python_package実装（Issue #226、完了）
+
+`Tobit`/`TobitResults`（`python_package/econometricsmodels/nonlinear/tobit.py`）を`Logit`/`LogitResults`と同型の薄いラッパーとして実装した。`TobitOptions`は`_lib`からそのまま再輸出（独自クラス再定義しない、既存方針通り）。
+
+- `params`/`std_errors`/`z_stats`/`p_values`/`conf_int`は`_lib.TobitResult`の`(k+1)`長設計（`"sigma"`を含む）をそのまま反映し、`dict(zip(param_names, ...))`で自然に`"sigma"`エントリを含む。`coef_table()`も`"sigma"`の行を含む（R`summary.tobit`の`Log(scale)`行に相当）。`sigma: float`プロパティも追加。
+- `log_likelihood_null`/`lr_statistic`/`lr_p_value`/`pseudo_r_squared`は提供しない。`wald_statistic`/`wald_p_value`を提供。
+- `pred_table()`の代わりに`censoring_fit_check()`（`category`/`observed_rate`/`model_implied_rate`をキーに持つ行指向`list[dict]`、既存の`pred_table()`の行指向`list[dict]`慣習を踏襲）。
+- `predict()`/`marginal_effects()`に`target`引数を追加。`predict()`の返り値キーは対象非依存の`"predicted"`（3つの`target`で意味が変わるため、Logitの固定名`"probability"`のような単一の意味を持つ名前にできない）。
+- `tests/conftest.py`に`censored_dataset`フィクスチャ（共有`dataset`の`y`を`0.0`で左打ち切り、打ち切り率21%）を追加。`tests/test_tobit.py`（70→71件、`test_logit.py`の構造・API・エラーパススモークテストを移植し、打ち切り境界固有のエラー（`InvalidCensoringBounds`/`YOutOfCensoringBounds`/`NoUncensoredObservations`）・`"sigma"`列衝突・`target`引数のテストを追加）。
+
+**python-reviewerレビュー結果**: must-fixなし。should-fix 1件: `test_probit.py`にある`SeparationSuspected`（准完全分離）のAPI境界テストがTobit版に無く、`nonlinear-api-design.md`10章「Tobitの分離相当の病理ケース」が未確定のままだった点を指摘された。実測調査の結果、**2種類の異なる退化パターンが存在する**ことが判明した:
+- 非打ち切り観測ゼロによる`σ→0`退化（Issue #223で発見・`MleError::NoUncensoredObservations`で対応済み。標準化パラメータノルムは大きくならないため既存の`SeparationSuspected`機構では捕捉できない）
+- **極端な`β`による分離**（本Issueで新規発見）: Logitの`near_separation`DGPと同じ発想（`x1`の真の係数=100）を打ち切り正規回帰に適用したデータで、既存の`SeparationSuspected`機構（`run_solver`共有、標準化パラメータノルム基準）がLogit/Probitと**同じ閾値でそのまま**Tobitの分離も検出できることを、Python API境界のテストで実測確認した（`test_separation_suspected_raises_computation_error_for_near_separation_data`として追加）。Tobit専用の閾値較正は不要だった。`nonlinear-api-design.md`10章の該当項目を`[x]`に更新した。
+
+修正後: pytest全体で956件（Tobit分71件）、ruffエラーゼロ。

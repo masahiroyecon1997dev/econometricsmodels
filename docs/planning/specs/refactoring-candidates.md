@@ -86,7 +86,13 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   統一できる（値が完全一致のため挙動を変えないリファクタリングとして低リスク）。
 - **気づいた経緯**: 2026-08-15、`generate_linear_datasets.py`解説後の雑談（linear分）→
   `generate_nonlinear_datasets.py`解説時に3系統横断で実測確認。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
+- **状態**: 対応済み（2026-08-22、`refactor`スキルで対応）。3系統とも
+  `freeze_*_datasets.py`側のシナリオリスト（`SYNTHETIC_SCENARIOS`/`LOGIT_SCENARIOS`/
+  `IV_SCENARIOS`）を、リテラル定義から`generate_*_datasets.py`側の`SCENARIOS`を
+  `as`エイリアスでimportする形に変更（値は完全一致のため挙動は変わらない）。
+  変更ファイル: [benchmark/linear/freeze_linear_datasets.py](../../../benchmark/linear/freeze_linear_datasets.py)・
+  [benchmark/nonlinear/freeze_nonlinear_datasets.py](../../../benchmark/nonlinear/freeze_nonlinear_datasets.py)・
+  [benchmark/iv/freeze_iv_datasets.py](../../../benchmark/iv/freeze_iv_datasets.py)。
 
 ### 5. `unknown scenario`検証（`ValueError`）が3系統の`generate_*_dataset`関数で完全重複
 

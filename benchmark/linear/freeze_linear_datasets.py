@@ -22,23 +22,13 @@ sys.path.insert(
 )  # benchmark/ を import path に追加（_common）
 
 from _common import freeze_scenarios, run_freeze_cli
+from generate_linear_datasets import SCENARIOS as SYNTHETIC_SCENARIOS
 from generate_linear_datasets import generate_linear_dataset
 
-# generate_ols_fixtures.py / generate_wls_fixtures.py のNUMERIC_SCENARIOSに
-# perfect_multicollinearity・scale_variance（いずれもComputationErrorパスの
-# テストで使う、数値比較はしない）を加えた全シナリオ。
-SYNTHETIC_SCENARIOS = [
-    "baseline",
-    "small_n",
-    "high_variance",
-    "heteroskedastic",
-    "autocorrelated",
-    "moderate_multicollinearity",
-    "perfect_multicollinearity",
-    "scale_variance",
-    "scale_variance_mild",
-    "high_condition_number",
-]
+# generate_linear_datasets.pyのSCENARIOS（全シナリオ、generate_ols_fixtures.py /
+# generate_wls_fixtures.pyのNUMERIC_SCENARIOSにperfect_multicollinearity・
+# scale_variance（いずれもComputationErrorパスのテストで使う、数値比較はしない）を
+# 加えたもの）をそのまま使う。
 
 # cluster_g2ケース専用。k=1だとrng呼び出し順序が変わるため
 # baseline（既定k=3）とは別データになる。

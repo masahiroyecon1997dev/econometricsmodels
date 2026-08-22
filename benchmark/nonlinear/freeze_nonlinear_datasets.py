@@ -22,25 +22,15 @@ sys.path.insert(
 )  # benchmark/ を import path に追加（_common）
 
 from _common import freeze_scenarios, run_freeze_cli
+from generate_nonlinear_datasets import SCENARIOS as LOGIT_SCENARIOS
 from generate_nonlinear_datasets import (
     generate_logit_dataset,
     generate_probit_dataset,
 )
 
-# generate_logit_fixtures.pyのNUMERIC_SCENARIOSに、エラーパス確認用の
-# perfect_multicollinearityを加えた全シナリオ（generate_nonlinear_datasets.py参照）。
-LOGIT_SCENARIOS = [
-    "baseline",
-    "small_n",
-    "moderate_multicollinearity",
-    "high_condition_number",
-    "near_separation",
-    "perfect_multicollinearity",
-    "scale_variance",
-]
-
-# generate_probit_fixtures.pyのNUMERIC_SCENARIOSに、エラーパス確認用の
-# perfect_multicollinearityを加えた全シナリオ。LOGIT_SCENARIOSと同じシナリオ構成
+# generate_nonlinear_datasets.pyのSCENARIOS（全シナリオ、generate_logit_fixtures.py
+# のNUMERIC_SCENARIOSに、エラーパス確認用のperfect_multicollinearityを加えたもの）を
+# そのまま使う。PROBIT_SCENARIOSはLOGIT_SCENARIOSと同じシナリオ構成
 # （generate_nonlinear_datasets.py参照）。
 PROBIT_SCENARIOS = list(LOGIT_SCENARIOS)
 

@@ -22,24 +22,12 @@ sys.path.insert(
 )  # benchmark/ を import path に追加（_common）
 
 from _common import freeze_scenarios, run_freeze_cli
+from generate_iv_datasets import SCENARIOS as IV_SCENARIOS
 from generate_iv_datasets import generate_iv_dataset
 
-# generate_iv_datasets.pyのSCENARIOS全て（IV: 2SLS/GMM用）。
+# generate_iv_datasets.pyのSCENARIOS（IV: 2SLS/GMM用の全シナリオ）をそのまま使う。
 # moderate_multicollinearity/high_condition_number/scale_varianceはk_exog=2、
 # perfect_multicollinearityはk_exog=3が必要（generate_iv_datasets.pyのdocstring参照）。
-IV_SCENARIOS = [
-    "baseline",
-    "just_identified",
-    "weak_instruments",
-    "small_n",
-    "high_variance",
-    "heteroskedastic",
-    "autocorrelated",
-    "moderate_multicollinearity",
-    "high_condition_number",
-    "perfect_multicollinearity",
-    "scale_variance",
-]
 IV_K_EXOG_OVERRIDES = {
     "moderate_multicollinearity": 2,
     "high_condition_number": 2,

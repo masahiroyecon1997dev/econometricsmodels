@@ -69,7 +69,10 @@
 - 項目4（`SCENARIOS`重複）: 対応済み・コミット済み（`d23d9b7`）。
 - 項目9・10（DGP用マジックナンバー集約、`benchmark/_dgp_constants.py`新設）:
   対応済み・コミット済み（`7d51802`）。
-- 上記以外（項目1・2・5〜8・11〜43）は未着手。
+- 項目36（crosscheck側のpl.read_csv再実装をload_frozen_datasetに差し替え）:
+  対応済み・未コミット（本セッションで実装、コミット前確認待ち）。
+  詳細は`refactoring-candidates.md`項目36参照。
+- 上記以外（項目1・2・5〜35・37〜43、および`refactoring-candidates-2.md`項目44〜49）は未着手。
 
 **並行作業についての注意**: 本セッションと並行して、別セッションが
 `refactoring-candidates.md`を対象にした別の作業（コード解説中の気づき記録等）を

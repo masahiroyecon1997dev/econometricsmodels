@@ -52,6 +52,7 @@ from _common import (
     DATA_DIR,
     hac_auto_lag,
     imbalanced_cluster_groups,
+    load_frozen_dataset,
 )
 from load_wooldridge import load as load_wooldridge
 
@@ -152,7 +153,8 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         x_endog = ["endog1"]
         formula = _ivreg_formula(x_exog, x_endog, instruments)
         csv_path = DATA_DIR / f"iv_{scenario}.csv"
-        n = pl.read_csv(csv_path).height
+        df, _ = load_frozen_dataset("iv", scenario)
+        n = df.height
 
         fixtures[scenario] = {}
         for cov_type in COV_TYPES:
@@ -167,7 +169,6 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             fixtures[scenario][cov_type] = entry
 
         if scenario == "baseline":
-            df = pl.read_csv(csv_path)
             fixtures[scenario]["cluster"] = _run_cluster_case(
                 df, csv_path, formula, tmpdir
             )
@@ -187,7 +188,8 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
     multi_endog_formula = _ivreg_formula(
         ["x1"], ["endog1", "endog2"], ["z1", "z2", "z3"]
     )
-    multi_endog_n = pl.read_csv(multi_endog_csv).height
+    multi_endog_df, _ = load_frozen_dataset("iv", "baseline_multi_endog")
+    multi_endog_n = multi_endog_df.height
     fixtures["multi_endog"] = {}
     for cov_type in COV_TYPES:
         if cov_type == "cluster":
@@ -207,7 +209,8 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
     # あるため、他シナリオと同じくその値をそのまま使う。
     df1_csv = DATA_DIR / "iv_baseline_df1.csv"
     df1_formula = _ivreg_formula([], ["endog1"], ["z1"])
-    df1_n = pl.read_csv(df1_csv).height
+    df1_df, _ = load_frozen_dataset("iv", "baseline_df1")
+    df1_n = df1_df.height
     fixtures["df1"] = {}
     for cov_type in COV_TYPES:
         if cov_type == "cluster":
@@ -250,7 +253,7 @@ def _run_cluster_g2_case(tmpdir: Path) -> dict:
     「修正済み」参照）。
     """
     csv_path = DATA_DIR / "iv_baseline_g2.csv"
-    df = pl.read_csv(csv_path)
+    df, _ = load_frozen_dataset("iv", "baseline_g2")
     n = df.height
     formula = _ivreg_formula([], ["endog1"], ["z1"])
     grouped = df.with_columns(

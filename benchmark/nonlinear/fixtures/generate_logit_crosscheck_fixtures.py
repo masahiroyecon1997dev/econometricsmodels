@@ -33,7 +33,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
-from _common import DATA_DIR, imbalanced_cluster_groups
+from _common import imbalanced_cluster_groups, load_frozen_dataset
 from load_wooldridge import load as load_wooldridge
 
 NONLINEAR_DIR = Path(__file__).resolve().parent.parent
@@ -120,7 +120,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
     fixtures: dict = {}
 
     for scenario in NUMERIC_SCENARIOS:
-        df = pl.read_csv(DATA_DIR / f"logit_{scenario}.csv")
+        df, _ = load_frozen_dataset("logit", scenario)
         formula = "y ~ x1 + x2 + x3"
         csv_path = _write_csv(df, tmpdir, scenario)
 
@@ -132,7 +132,8 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
                 "r": _run_r(csv_path, formula, cov_type)
             }
 
-    n = pl.read_csv(DATA_DIR / "logit_baseline.csv").height
+    baseline_df, _ = load_frozen_dataset("logit", "baseline")
+    n = baseline_df.height
     baseline_csv = tmpdir / "baseline.csv"
     fixtures["baseline"]["cluster"] = _run_cluster_case(
         baseline_csv, formula="y ~ x1 + x2 + x3", tmpdir=tmpdir

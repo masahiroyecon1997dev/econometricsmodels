@@ -729,9 +729,23 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   （既存関数への差し替えのみで新規設計判断が不要なため）。
 - **気づいた経緯**: 2026-08-16、`generate_probit_crosscheck_fixtures.py`解説後の
   ユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
-
-### 37. `suppressMessages`が`run_ivreg_benchmark.R`にしか無く、他3ファイルにJSON破損リスクが残る
+- **状態**: 対応済み（2026-08-22、`refactor`スキルで対応）。5ファイル全て
+  （[benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py](../../../benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py)・
+  [generate_wls_crosscheck_fixtures.py](../../../benchmark/linear/fixtures/generate_wls_crosscheck_fixtures.py)・
+  [generate_logit_crosscheck_fixtures.py](../../../benchmark/nonlinear/fixtures/generate_logit_crosscheck_fixtures.py)・
+  [generate_probit_crosscheck_fixtures.py](../../../benchmark/nonlinear/fixtures/generate_probit_crosscheck_fixtures.py)・
+  [generate_iv_crosscheck_fixtures.py](../../../benchmark/iv/fixtures/generate_iv_crosscheck_fixtures.py)）で
+  `pl.read_csv(DATA_DIR / f"{prefix}_{scenario}.csv")`を`load_frozen_dataset(prefix,
+  scenario)`（`true_beta`側は`_`で破棄）に差し替えた。OLS/WLS/Logit/Probitの4ファイルは
+  置換後`DATA_DIR`が完全に未使用になったためimportから削除、IVのみ`_run_r()`に直接渡す
+  `csv_path`（`Path`）自体は引き続き必要なため`DATA_DIR`のimportを残した（他4ファイルは
+  `_write_csv()`で一時ディレクトリに書き出してから渡す設計のため`DATA_DIR`不要という
+  構造差、項目24で確認済みの非対称性と同根）。副次的に、IV版の`baseline`シナリオで
+  発生していた二重読み込み（`.height`用に1回→`baseline`時にもう一度`df`として再読込）も
+  ユーザー確認の上解消し、ループ先頭で読んだ`df`を再利用する形にした。5ファイル全てで
+  リファクタリング前後の生成JSON（`_meta.generated_at`除く）が完全一致することを実測確認、
+  `pytest tests`956件全件パス、`ruff check .`／`ruff format --check .`全件パス、
+  `/code-review`（medium）でも指摘なしを確認済み。
 
 - **対象**: [benchmark/iv/run_ivreg_benchmark.R:67-72](../../../benchmark/iv/run_ivreg_benchmark.R#L67-L72)
   （`suppressMessages({library(...)...})`）と、`run_lm_crosscheck_benchmark.R`・

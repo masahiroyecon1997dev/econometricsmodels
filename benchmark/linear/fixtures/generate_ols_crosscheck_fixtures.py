@@ -62,9 +62,9 @@ from pathlib import Path
 import polars as pl
 import statsmodels
 from _common import (
-    DATA_DIR,
     hac_auto_lag,
     imbalanced_cluster_groups,
+    load_frozen_dataset,
 )
 from load_wooldridge import load as load_wooldridge
 
@@ -183,7 +183,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
     fixtures: dict = {}
 
     for scenario in NUMERIC_SCENARIOS:
-        df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
+        df, _ = load_frozen_dataset("synthetic", scenario)
         formula = "y ~ x1 + x2 + x3"
         csv_path = _write_csv(df, tmpdir, scenario)
         n = df.height
@@ -230,7 +230,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             # ComputationErrorになる（成功パスではない。テスト側でエラー
             # パスとして確認、Rクロスチェックは対象外）。ここでの「G=2境界の
             # 成功パス」は説明変数1個（q=1）に絞ったデータで確認する。
-            df_g2 = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
+            df_g2, _ = load_frozen_dataset("synthetic", "baseline_k1")
             formula_g2 = "y ~ x1"
             csv_path_g2 = _write_csv(df_g2, tmpdir, f"{scenario}_g2")
             fixtures[scenario]["cluster_g2"] = _run_cluster_case(

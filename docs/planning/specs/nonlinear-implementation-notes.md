@@ -256,3 +256,26 @@ Logitのfit()に観測情報行列SEを実装するテスト追加中、`Method:
   - **厳密な非識別条件の精緻化（rust-reviewer指摘、`MleError::NoUncensoredObservations`のdocコメント参照）**: 「非打ち切り観測0件→識別不能」という記述は正確には十分条件であり必要条件ではない。厳密な非識別条件は「打ち切りカテゴリ（`y==lower` vs `y==upper`）が`x`の線形結合で完全分離可能」であること（Logit/Probitの完全分離と同型）で、非打ち切り観測0件はこの分離を妨げる要因が無いため必ず分離可能になる（十分条件）が、逆に0件でなくても分離不能な`x`の配置であれば理論上は有限のMLEが存在しうる。連続変数`x`でこの非分離配置が実務データに現れることは考えにくいため、分離可能性を厳密に判定する複雑なロジック（線形計画法的な実行可能性判定に相当）は導入せず、「0件なら一律エラー」という保守的な単純化を採用している（ユーザー確認済み、OLSが完全な多重共線性のみ弾き条件数が大きいだけの悪条件行列はそのまま数値計算に委ねるのと同じ設計哲学）
 
 - **rust-reviewerレビュー結果**: must-fixなし。should-fix 1件（`fit()`の`# Errors`docコメントに`NoUncensoredObservations`の記載漏れ、追加して対応）。計量経済学的妥当性の指摘（上記「厳密な非識別条件の精緻化」）に対応し、`MleError::NoUncensoredObservations`・`validate_has_uncensored_observations`双方のdocコメントを「十分条件であり必要条件ではない」ことが分かる表現に修正した。nice-to-have（片側打ち切り`upper`のみのケースの独立テスト追加、`validate_has_uncensored_observations`を`from_columns`ではなく`fit()`で検証する理由のdocコメント明記）にも対応。`nonlinear-implementation-notes.md`の「現時点で想定されるバリアント」テーブルの陳腐化、`tests/`配下のTobit用pytest未整備は本Issueのスコープ外（前者は過去のIssueから慢性的に陳腐化、後者は別Issue＝#226以降で対応予定）として見送った。
+
+## engine_pybind実装（Issue #224+#225、まとめて実装・完了）
+
+`build_tobit_input`（データ抽出・バリデーション）は`fit_tobit`（`TobitEstimator::fit`呼び出し・`TobitResult`構築・`lib.rs`登録）と1コミットで実装した。`build_tobit_input`/`parse_cov_type`/`parse_method`は`fit()`が無いと`#[cfg(test)]`以外から一度も呼ばれず、非testビルドの`cargo clippy -D warnings`がdead_code lintで失敗する（ユーザー確認済み、Issue #218+#219と同じ理由でのまとめ判断）。
+
+- `TobitOptions`はLogit/Probitの8フィールドに`lower: Option<f64>`（既定`Some(0.0)`）・`upper: Option<f64>`（既定`None`）を追加（`nonlinear-api-design.md`7章）。打ち切り境界自体のバリデーション（両方`None`・`lower>=upper`等）はここでは行わず`TobitInput::from_columns`（engine層）に委ねる（Issue #212の結論通り）。
+- **`TobitResult`のフィールド設計（ユーザー確認済み）**: `engine::nonlinear::tobit::TobitEstimator`は`params()`が`k`長（`β`のみ）である一方`std_errors()`等は`(k+1)`長（`σ`を含む）という非対称な設計（`cov_params`が`(β,σ)`空間の`(k+1)×(k+1)`行列であるため）。Python側ではこの非対称性を解消し、`params`/`param_names`/`std_errors`/`z_stats`/`p_values`/`conf_lower`/`conf_upper`を全て`(k+1)`長に統一した（`param_names`の末尾に`"sigma"`を追加、`params`に`sigma()`の値を追加）。これによりPython側で`zip(param_names, std_errors)`のような素朴な利用ができる。`sigma: f64`フィールド（`params[-1]`と同値）も利便のため追加。`log_likelihood_null`/`lr_statistic`/`lr_p_value`/`pseudo_r_squared`は提供しない（`nonlinear-api-design.md`5章の既存方針通り）。`cov_type`に加え`lower`/`upper`も`TobitOptions`からのエコーとして`TobitResult`に含めた（`cov_type`と同じ「実際に使われた設定値を結果から確認できるようにする」目的）。
+- **`predict()`/`marginal_effects()`の`target`引数（ユーザー確認済み）**: Rust側`MarginalEffectsTarget`（`ExpectedLatent`/`ExpectedObserved`/`ProbUncensored`）に対応するPython文字列を`"expected_latent"`/`"expected_observed"`/`"prob_uncensored"`（enum名のsnake_case版）とした。`at`（`"overall"`/`"mean"`/`"median"`）のような単語1つの慣習が無い（3つとも複数統計概念の組み合わせ名）ため、Rust enum名との対応が一目瞭然な形を優先した。パース関数`parse_marginal_effects_target`はTobit専用（Logit/Probitに無い概念のため`nonlinear/common.rs`ではなく`tobit.rs`に定義）。
+- `censoring_fit_check()`は`pred_table()`の代替として提供（`CensoringFitCategoryResult`/`CensoringFitCheckResult`という新規pyclassでラップ、`lower`/`upper`は該当方向の打ち切りが無ければ`None`）。
+- `mle_error_to_pyerr`（`nonlinear/common.rs`）は`InvalidCensoringBounds`/`YOutOfCensoringBounds`/`SingularDesignMatrix`/`NoUncensoredObservations`を含め既に網羅済みだった（`MleError`への追加時にRustコンパイラの網羅性チェックにより既存issue（#213/#217/#223）で自動的に配線済みのため、本Issueでの追加変更は不要だった）。
+- `parse_cov_type`/`parse_method`はLogit/Probitと同じロジックをファイルごとに複製する既存方針（`probit.rs`と同じ）を踏襲した。
+- `maturin develop`後、Python側から`fit_tobit`・`TobitOptions`・`predict()`/`marginal_effects()`/`censoring_fit_check()`・主要なエラーパス（`cov_type`不正・打ち切り境界不正・`target`不正・`confidence_level`範囲外・`NoUncensoredObservations`）を実際に呼び出して動作確認済み（`engine_pybind/src/nonlinear/CLAUDE.md`の既知の制約通り、`fit`本体は`PyDataFrame`引数のため`#[cfg(test)]`から直接呼べない）。
+- テスト: `build_tobit_input`系はLogitの対応テストを移植し、打ち切り境界（`lower`/`upper`カスタム値・右打ち切りのみ・両方`None`のエラー伝播）・`parse_marginal_effects_target`のテストを追加。
+
+**rust-reviewerレビュー結果**: must-fix 2件、いずれも対応済み。
+- **`"sigma"`列名衝突の未検証（バグ）**: `param_names`末尾に無条件で追加する合成パラメータ名`"sigma"`が、ユーザーの`x`に`"sigma"`という列があると重複し、`zip(param_names, params)`のような素朴な利用でエラーにならず静かに誤った対応になる（`"const"`列衝突と同型の問題）。`validate_no_const_collision`と同じパターンで`validate_no_sigma_collision`を追加し`build_tobit_input`で呼ぶ形で対応した。
+- **公開`#[pyclass]`のdocコメントへの日本語混入**（`.claude/rules/rust-style.md`「言語方針」違反）: `TobitResult`本体・`sigma`フィールド・`CensoringFitCategoryResult`・`CensoringFitCheckResult`の各docコメントを英語に書き直した。
+
+should-fix 2件も対応済み: `TobitOptions.include_intercept`/`cluster_col`のdocコメントにLogit/Probitにあった説明文を追加（Tobitは完全な多重共線性が`ols_initial_params`のQR検証で先に検出されるため「singular Hessian」ではなく「singular design matrix」に文言修正）。`TobitResult.lower`/`.upper`の取得元を`estimator.input()`経由から`options.lower`/`options.upper`直接参照に変更し、`cov_type`と同じ「エコー元は`options`」というパターンに揃えた。
+
+nice-to-have 2件も対応済み: `build_tobit_input_cov_type_is_case_insensitive`に`"Classical"`（先頭大文字）のケースとIssue #231の説明コメントを追加。`censoring_fit_category_to_result`/`censoring_fit_check_to_result`（フィールドの詰め替えロジック）の単体テストが無かった点は、`build_tobit_input`が返す`TobitInput`に対して`TobitEstimator::fit`をGIL無しで直接呼び出すテストを新設して対応した。
+
+修正後: engine_pybind全体で93件（Logit/Probit/OLS/WLS/IV等の既存分含む、Tobit分は21件）、clippy/fmt警告ゼロ。`maturin develop`での動作確認も再実施済み。

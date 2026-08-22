@@ -399,3 +399,41 @@
 - **気づいた経緯**: 2026-08-16、`run_ivreg_benchmark.R`解説後のユーザー指摘
   （C統計量Issue #249と関連するが別の論点として指摘）。
 - **状態**: 未対応（[#256](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/256)で検討中）
+
+### 22. Wooldridge実データを使う全テストが標準CI（`ci_python.yml`）で無条件にskipされ、skip自体が検出されない
+
+- **対象**: [pyproject.toml:67-73](../../../pyproject.toml#L67-L73)（`wooldridge==0.5.0`が
+  `benchmark`依存グループにあり`test`グループには無い）・
+  [.github/workflows/ci_python.yml:44-51](../../../.github/workflows/ci_python.yml#L44-L51)
+  （`uv sync --locked --group test`→`pytest tests`、`benchmark`グループは
+  インストールしない）・[tests/_helpers.py:89](../../../tests/_helpers.py#L89)
+  （`pytest.importorskip("wooldridge")`）
+- **内容**: ユーザー指摘（2026-08-22）。`wooldridge`パッケージは`test`依存
+  グループではなく`benchmark`依存グループにのみ含まれているため、標準CI
+  ワークフロー（`ci_python.yml`、push/PR時に毎回走る）は`wooldridge`を
+  インストールしない。このため`tests/_helpers.py`の`wooldridge_loader`/
+  `load_wooldridge_dataset`を使う全てのWooldridge実データテスト
+  （`test_ols_crosscheck.py`のwage1/gpa2、`test_wls_*.py`の401ksubs、
+  `test_logit_*.py`/`test_probit_*.py`のmroz、`test_iv_*.py`のcard等、多数）は、
+  `pytest.importorskip("wooldridge")`により**標準CIでは常にskipされる**。
+  `pyproject.toml`のコメントには「`wooldridge`パッケージ自体はMITライセンス
+  だが、同梱される実データの著作権は原典教科書側にある可能性があり、
+  再配布してよいか未確認のため都度ロードする」という意図的な設計判断が
+  書かれているが、その代償として実データクロスチェックが標準CIでは一度も
+  実行されないという副作用が生じている。
+  加えて`ci_python.yml`の`pytest`ステップは`-rs`（skip理由の一覧表示）や
+  skip数のしきい値チェックを設定しておらず、pytestのデフォルト出力
+  （サマリー行に`N skipped`と出るのみ）に頼っているため、Wooldridge関連の
+  skipが増減してもCIログを注意深く読まない限り気づけない。
+- **Claudeの所感**: 実データの再配布可否が未確認という制約自体は`benchmark/`
+  freeze対象外の判断（`testing-policy.md`）と整合しており妥当だが、
+  「CIで実行されないテストがある」という事実そのものが常時可視化されていない
+  点は改善の余地がある。対応案としては、(a) CIワークフローで`pytest`に
+  `-rs`を付けてskip理由を必ずログへ出す、(b) skip件数が既知の想定値
+  （Wooldridge関連テストの件数）と一致することを確認するステップを足す、
+  (c) 別途`wooldridge`込みの任意ジョブ（`workflow_dispatch`等）を用意し
+  定期的に実行する、等が考えられるが、いずれもユーザー判断が必要。
+- **気づいた経緯**: 2026-08-22、`tests/_helpers.py`解説後のユーザー指摘
+  （`sys.path.insert`最小化の相談に付随して、CI側でWooldridgeテストが
+  実行されない可能性を懸念）。
+- **状態**: 未対応（対応方針・優先度はユーザー判断待ち）

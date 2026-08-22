@@ -50,3 +50,55 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   確認依頼。
 - **状態**: 未対応（`rename`引数を削除するか、拡張ポイントとして維持するかは
   ユーザー判断待ち）
+
+### 45. `separation_suspected_dataset`だけ標準ライブラリ`random`/素朴な`for`ループで、他のDGPと生成方法が異なる
+
+- **対象**: [tests/_helpers.py:52-70](../../../tests/_helpers.py#L52-L70)
+  （`separation_suspected_dataset`、`random.seed`/`random.uniform`/
+  `math.exp`＋`for`ループ）
+- **内容**: ユーザー指摘（2026-08-22）。`benchmark/`側の全DGP
+  （`generate_*_datasets.py`）は`numpy`（`np.random.default_rng(seed)`）ベースの
+  ベクトル化演算で書かれており、`tests/_helpers.py`の`with_cluster_groups`も
+  polarsのベクトル演算だが、`separation_suspected_dataset`だけ標準ライブラリ
+  `random`モジュール＋`for`ループで1件ずつ`y`を生成している。
+- **Claudeの所感**: 実害はない（`n=200`程度の小規模データで、結果の正しさに
+  影響しない）が、リポジトリ全体の乱数生成の一貫性という観点では`numpy`に
+  揃える方が読み手の負担が減ると考える。優先度は低い。
+- **気づいた経緯**: 2026-08-22、`tests/_helpers.py`解説後のユーザー指摘。
+- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
+
+### 46. `_helpers.py`/`_assertions.py`に定数と関数が混在している
+
+- **対象**: [tests/_helpers.py:34](../../../tests/_helpers.py#L34)（`DATA_DIR`）・
+  [tests/_helpers.py:73](../../../tests/_helpers.py#L73)（`MROZ_X`）・
+  [tests/_assertions.py:19](../../../tests/_assertions.py#L19)（`MARGEFF_AT`）
+- **内容**: ユーザー指摘（2026-08-22）。`_helpers`/`_assertions`という
+  ファイル名は関数（ヘルパー・アサーション）を示唆するが、実際には
+  `DATA_DIR`・`MROZ_X`・`MARGEFF_AT`という定数も同居している。
+- **Claudeの所感**: ユーザー自身も「あまり問題になるものではない」とコメント
+  している通り実害は乏しい。定数を`_constants.py`のような別ファイルへ分離する
+  ほどの量ではなく、現状維持でも大きな支障は無いと考える。優先度は低い。
+- **気づいた経緯**: 2026-08-22、`tests/_helpers.py`解説後のユーザー指摘。
+- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
+
+### 47. `tests/_helpers.py`の`wooldridge_loader`が、`conftest.py`で既に済んでいる`sys.path.insert`を重複実行している
+
+- **対象**: [tests/_helpers.py:90-92](../../../tests/_helpers.py#L90-L92)
+  （`wooldridge_loader`内の`sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "benchmark"))`）
+  と対比した[tests/conftest.py:11](../../../tests/conftest.py#L11)
+  （同一パスを`sys.path.insert`）
+- **内容**: ユーザー指摘（2026-08-22）を受けて確認。`conftest.py`はpytest起動時に
+  必ず最初に読み込まれ、`benchmark/`ディレクトリを`sys.path`へ既に挿入済み。
+  一方`tests/_helpers.py`の`wooldridge_loader()`は、`from load_wooldridge import
+  load`の直前で全く同じパスをもう一度`sys.path.insert`している。
+  `load_wooldridge_dataset`/`wooldridge_loader`の全呼び出し元（`test_ols_crosscheck.py`・
+  `test_iv_fixtures.py`・`test_logit_fixtures.py`等）を`grep`で確認したところ、
+  いずれもテスト関数の実行時（`conftest.py`が確実に読み込まれた後）にしか
+  呼ばれていないため、`_helpers.py`側の`sys.path.insert`は削除しても動作に
+  影響しない、純粋な重複だと判断できる。
+- **Claudeの所感**: `sys.path.insert`の記述箇所をできる限り減らしたいという
+  ユーザー方針に対し、これは実害の無い重複を1箇所削減できる具体的な対象。
+  優先度は低いが対応コストも小さい。
+- **気づいた経緯**: 2026-08-22、`tests/_helpers.py`解説後、`sys.path.insert`
+  最小化についてのユーザー相談を受けて`conftest.py`と突き合わせて発見。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

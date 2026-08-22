@@ -29,7 +29,8 @@ pub(crate) fn mle_error_to_pyerr(err: MleError) -> PyErr {
         | MleError::InvalidTol { .. }
         | MleError::InvalidCensoringBounds { .. }
         | MleError::InvalidBinaryY { .. }
-        | MleError::YOutOfCensoringBounds { .. } => ValidationError::new_err(err.to_string()),
+        | MleError::YOutOfCensoringBounds { .. }
+        | MleError::NoUncensoredObservations { .. } => ValidationError::new_err(err.to_string()),
         MleError::NonConvergence { .. }
         | MleError::SingularHessian
         | MleError::SingularOpgMatrix

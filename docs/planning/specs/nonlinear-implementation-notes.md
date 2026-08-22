@@ -237,4 +237,22 @@ Logitのfit()に観測情報行列SEを実装するテスト追加中、`Method:
 
 - **Tobitの尤度・勾配・Hessianの閉形式の書き下し**: 標準的な打ち切り正規回帰の尤度（打ち切り観測はΦ、非打ち切り観測はφ）で導出可能という方向性のみ確認済み。実際の数式・実装は着手時に行う
 - **`YOutOfCensoringBounds`（暫定名）等、新規エラーバリアントの正式な命名・メッセージ文言**: 実装issue着手時に確定する
-- **Tobitの分離相当の病理ケースの検出閾値**: `y`が連続なため`SEPARATION_PARAM_NORM_THRESHOLD`をそのまま流用できるかは未検証。実装・テスト段階で経験的に較正する
+
+## engine単体テストのカバレッジ確認（Issue #223、完了）
+
+- `cargo llvm-cov -p engine`で計測。`nonlinear/tobit.rs`はRegion 97.97%・Line 98.22%・Function 98.70%（Logit 97.78%/98.83%/99.26%・Probit 97.89%/98.86%/100.00%と同水準）。未カバー箇所は全て既知の許容パターン（`--show-missing-lines`で機能単位に確認済み）:
+  - `wald_chi2_test`のCholesky分解失敗の防御的`map_err`分岐（`ensure_well_conditioned_symmetric_matrix`が事前に悪条件を検出するため理論上到達不能、OLSの`wald_f_test`と同じ扱い）
+  - `target_w_and_s`/`predicted_value`の`MarginalEffectsTarget::ExpectedLatent => unreachable!(...)`（関数冒頭の早期returnで既に処理済みの分岐、Issue #221で導入）
+  - テストファイル内の`assert!`/`panic!`引数の文字列補間式（アサーション失敗時のみ評価されるため、テストが全て通過する限り構造的にカバーされない。テストコード自体の欠落ではない）
+  - テストヘルパー（`expected_observed_closed_form`等）内の`(None, None) => unreachable!(...)`（`TobitInput::from_columns`が両方`None`を弾くため、テスト側でも構造的に到達不能）
+  - `n_iter()`ゲッターが未使用だったギャップは本Issueで発見・修正済み（`fit_newton_converges_for_data_with_actual_censoring`に`n_iter()`のアサーションを追加）
+  - `sandwich_cov_params`/`cluster_cov_params`経由の`SingularHessian`伝播（`Hc0`/`Hc1`/`Cluster`）が一度もテストされていなかったギャップも本Issueで発見・修正済み（Logit/Probitの同種ギャップ＝Issue #64/#80と同じパターン。`fit_returns_singular_hessian_error_when_cov_params_computation_fails_at_truncated_point_with_hc0_and_hc1`/`..._with_cluster`を追加）
+  - `nonlinear/common.rs`の残りの未カバー箇所（`run_solver`のargmin内部エラー変換等）はTobit導入前から存在する既存の防御的分岐で、Logit/Probitの過去のカバレッジissue（#64/#80）で既に確認済み。Tobit固有の新規ギャップではない
+
+- **Tobit固有の病理ケース: 全件打ち切り（非識別）データの検出（実測で発見、ユーザー確認済み）**: `y`が全て`lower`（または`lower`/`upper`のいずれか）に一致する非打ち切り観測ゼロのデータでは、既存の`SeparationSuspected`検出条件（標準化パラメータ空間のノルムが閾値超）では捕捉できないことが実測で判明した——Tobitのこの退化は`β`が発散するのではなく`σ`が0に収束する形で起こるため、標準化パラメータノルムは閾値を超えないまま`fit()`が`converged=true`のまま統計的に無意味な巨大SE（実測で標準誤差が100万倍オーダー）を返してしまう。参照実装`survival::survreg`（`AER::tobit`のエンジン）は同種のデータで初期反復に失敗しエラーを返すことをdevcontainer内で確認した。
+  - **対応（ユーザー確認済み、入力バリデーションを採用）**: `fit()`冒頭に`validate_has_uncensored_observations`を追加し、`y`が`lower`/`upper`いずれの境界にも一致しない観測（厳密に内部の観測）が1件も無い場合は`MleError::NoUncensoredObservations { lower, upper }`（`ValidationError`）を返す。事後検知（`SeparationSuspected`型のヒューリスティックを新設し閾値を経験的に較正する案）よりも、判定が決定的で閾値校正が不要な入力バリデーション方式を選んだ
+  - 打ち切り判定は`censoring_fit_check`と同じ`yᵢ==lower`/`yᵢ==upper`の完全一致比較（一貫した規約）
+  - **非全件打ち切りだが非常に高い打ち切り率**（実測: 8件中7件打ち切り）は本チェックの対象外（非打ち切り観測が1件でもあれば通過する）。この場合はNewtonが単に収束しない（`converged=false`）か、BFGSの`MoreThuenteLineSearch`が降下方向でないと判定し`ComputationFailed`を返すことを実測で確認済みで、いずれも既存のエラー経路で安全に失敗する（新規の検出機構は不要と判断）
+  - **厳密な非識別条件の精緻化（rust-reviewer指摘、`MleError::NoUncensoredObservations`のdocコメント参照）**: 「非打ち切り観測0件→識別不能」という記述は正確には十分条件であり必要条件ではない。厳密な非識別条件は「打ち切りカテゴリ（`y==lower` vs `y==upper`）が`x`の線形結合で完全分離可能」であること（Logit/Probitの完全分離と同型）で、非打ち切り観測0件はこの分離を妨げる要因が無いため必ず分離可能になる（十分条件）が、逆に0件でなくても分離不能な`x`の配置であれば理論上は有限のMLEが存在しうる。連続変数`x`でこの非分離配置が実務データに現れることは考えにくいため、分離可能性を厳密に判定する複雑なロジック（線形計画法的な実行可能性判定に相当）は導入せず、「0件なら一律エラー」という保守的な単純化を採用している（ユーザー確認済み、OLSが完全な多重共線性のみ弾き条件数が大きいだけの悪条件行列はそのまま数値計算に委ねるのと同じ設計哲学）
+
+- **rust-reviewerレビュー結果**: must-fixなし。should-fix 1件（`fit()`の`# Errors`docコメントに`NoUncensoredObservations`の記載漏れ、追加して対応）。計量経済学的妥当性の指摘（上記「厳密な非識別条件の精緻化」）に対応し、`MleError::NoUncensoredObservations`・`validate_has_uncensored_observations`双方のdocコメントを「十分条件であり必要条件ではない」ことが分かる表現に修正した。nice-to-have（片側打ち切り`upper`のみのケースの独立テスト追加、`validate_has_uncensored_observations`を`from_columns`ではなく`fit()`で検証する理由のdocコメント明記）にも対応。`nonlinear-implementation-notes.md`の「現時点で想定されるバリアント」テーブルの陳腐化、`tests/`配下のTobit用pytest未整備は本Issueのスコープ外（前者は過去のIssueから慢性的に陳腐化、後者は別Issue＝#226以降で対応予定）として見送った。

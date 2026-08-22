@@ -534,6 +534,42 @@ impl Hessian for TobitProblem {
     }
 }
 
+/// 非打ち切り観測（`y`が`lower`/`upper`いずれの境界にも一致しない観測）が1件も無い場合、
+/// Tobitモデルは典型的には識別不能になる（`MleError::NoUncensoredObservations`のdoc
+/// コメント参照。**厳密には十分条件であり必要条件ではない**——`x`による打ち切り
+/// カテゴリの完全分離が実際の退化条件——点に注意。rust-reviewer指摘、詳細は
+/// `MleError::NoUncensoredObservations`のdocコメント参照）。
+///
+/// `TobitInput::from_columns`（構造的妥当性: 境界指定自体の整合性・`y`と境界の整合性）
+/// ではなく`fit()`冒頭（推定可能性の前提条件、rust-reviewer指摘で明記）で検証する。
+/// `validate_sufficient_observations`と同じ位置づけ（Issue #223で追加）: 「データとして
+/// 構造的に妥当か」と「このデータで推定を試みる価値があるか」を分離し、後者を`fit()`側の
+/// 責務とする設計方針（`from_columns`はTobitInput単体で完結する検証のみを行い、
+/// 推定アルゴリズムの成否に関わる検証は持ち込まない）。
+///
+/// 打ち切り判定は`censoring_fit_check`と同じ、`yᵢ==lower`/`yᵢ==upper`という浮動小数点の
+/// 完全一致比較（`TobitInput::from_columns`が`y`を変換せず保持する設計と整合）。
+///
+/// # Errors
+/// 非打ち切り観測が1件も無い場合は`MleError::NoUncensoredObservations`を返す。
+fn validate_has_uncensored_observations(
+    y: &Mat<f64>,
+    lower: Option<f64>,
+    upper: Option<f64>,
+) -> Result<(), MleError> {
+    let has_uncensored = (0..y.nrows()).any(|i| {
+        let value = *y.get(i, 0);
+        let at_lower = lower.is_some_and(|l| value == l);
+        let at_upper = upper.is_some_and(|u| value == u);
+        !at_lower && !at_upper
+    });
+    if has_uncensored {
+        Ok(())
+    } else {
+        Err(MleError::NoUncensoredObservations { lower, upper })
+    }
+}
+
 /// 打ち切りを無視した単純なOLS（`X'Xβ=X'y`の最小二乗解）から、Newton法の初期値
 /// `(β, logσ)`を計算する（モジュール冒頭「Newton法の初期値」節参照）。`x`は
 /// `standardize_columns`で標準化済みの設計行列を渡す想定（`fit()`が最適化に使う空間と
@@ -1137,6 +1173,8 @@ impl TobitEstimator {
     /// - `max_iter`が0以下: `MleError::InvalidMaxIter`
     /// - `tol`が0以下: `MleError::InvalidTol`
     /// - 観測数`n`が総パラメータ数`k+1`以下: `CommonError::InsufficientObservations`
+    /// - 非打ち切り観測（`y`が`lower`/`upper`いずれの境界にも一致しない観測）が1件も無い:
+    ///   `MleError::NoUncensoredObservations`（`validate_has_uncensored_observations`参照）
     /// - `cov_type=Cluster`でグループキー未指定: `CommonError::MissingClusterColumn`
     /// - `cov_type=Cluster`でクラスター数が2未満: `CommonError::InsufficientClusters`
     /// - OLS初期値計算時に`x`が特異（完全な多重共線性等）: `MleError::SingularDesignMatrix`
@@ -1165,6 +1203,7 @@ impl TobitEstimator {
         let k = input.k();
         validate_sufficient_observations(n, k + 1)?;
         validate_cluster_cov_type(&cov_type, n)?;
+        validate_has_uncensored_observations(input.y(), input.lower(), input.upper())?;
 
         let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
         let scale = scale.extend_unscaled(1);
@@ -2513,6 +2552,64 @@ mod tests {
         );
     }
 
+    /// 上のテストは`cov_type=Classical`（`observed_information_cov_params`）のみで
+    /// `SingularHessian`エラー伝播を検証しているが、`sandwich_cov_params`（`Hc0`/`Hc1`）も
+    /// 内部で同じHessianの逆行列計算を行うため、同じ打ち切り点で同じエラーが伝播する
+    /// はず。Logit/Probitの`fit_returns_singular_hessian_error_for_perfectly_collinear_
+    /// design_matrix_with_hc0_and_hc1`と同じ懸念（Issue #64・#80で発覚したギャップ
+    /// パターン）をTobitでも確認する（Issue #223、`cargo llvm-cov`で発覚）。
+    #[test]
+    fn fit_returns_singular_hessian_error_when_cov_params_computation_fails_at_truncated_point_with_hc0_and_hc1()
+     {
+        for cov_type in [CovType::Hc0, CovType::Hc1] {
+            let result = TobitEstimator::fit(
+                censored_regression_input(),
+                Method::Newton,
+                1,
+                1e-12,
+                false,
+                cov_type.clone(),
+                0.95,
+            );
+            assert!(
+                matches!(result, Err(MleError::SingularHessian)),
+                "cov_type={cov_type:?}, result={result:?}"
+            );
+        }
+    }
+
+    /// `cluster_cov_params`（`Cluster`）も同じ理由で`SingularHessian`が伝播するはず
+    /// （上記テストのdocコメント参照）。
+    #[test]
+    fn fit_returns_singular_hessian_error_when_cov_params_computation_fails_at_truncated_point_with_cluster()
+     {
+        let groups = vec![
+            "a".to_string(),
+            "a".to_string(),
+            "a".to_string(),
+            "a".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+        ];
+        let result = TobitEstimator::fit(
+            censored_regression_input(),
+            Method::Newton,
+            1,
+            1e-12,
+            false,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        );
+        assert!(
+            matches!(result, Err(MleError::SingularHessian)),
+            "{result:?}"
+        );
+    }
+
     /// 説明変数ありのモデルでも、打ち切りが実質発生しないデータではNewton法がOLSの
     /// 閉じた形の解（正規方程式）に近い値に収束するはず（Issue #215完了条件の本体、
     /// `expected_*`はOLSの公式から本テスト内で独立に計算する）。
@@ -2755,6 +2852,9 @@ mod tests {
         for &p in estimator.params() {
             assert!(p.is_finite());
         }
+        // `n_iter()`が他のどのテストでも未使用だった（`cargo llvm-cov`で発覚、Issue #223）。
+        // 収束時は`0 < n_iter <= max_iter`のはず。
+        assert!(estimator.n_iter() > 0 && estimator.n_iter() <= 100);
     }
 
     #[test]
@@ -4297,5 +4397,151 @@ mod tests {
             .sum::<f64>()
             / (n as f64);
         assert!((lower_check.model_implied_rate() - expected_lower_rate).abs() < 1e-9);
+    }
+
+    /// 全件が下限（`lower`）で打ち切られている（非打ち切り観測が1件も無い）場合は
+    /// `MleError::NoUncensoredObservations`を返す。実測で確認済み: このバリデーションが
+    /// 無いと`fit()`は`converged=true`のまま統計的に無意味な巨大SE（100万倍オーダー）を
+    /// 返す退化収束を起こしていた（Issue #223、rust-reviewer指摘ではなく`cargo llvm-cov`
+    /// で病理ケースを調査中に発覚。参照実装`survival::survreg`は同種のデータで
+    /// エラーを返すことをdevcontainer内で実際に確認した上で対応方針をユーザーに確認済み）。
+    #[test]
+    fn fit_returns_no_uncensored_observations_error_when_all_observations_are_censored_at_lower() {
+        let x = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let y = vec![0.0; 8];
+        let input = TobitInput::from_columns(
+            &y,
+            &[x],
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            Some(0.0),
+            None,
+        )
+        .unwrap();
+
+        let result = TobitEstimator::fit(
+            input,
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::NoUncensoredObservations {
+                lower: Some(0.0),
+                upper: None
+            }
+        );
+    }
+
+    /// 上のテストは`lower`側のみの片側打ち切りを検証しているが、`at_lower`/`at_upper`の
+    /// 判定ロジックが対称的に実装されていることを、`upper`側のみの片側打ち切りでも
+    /// 独立に確認する（rust-reviewer指摘）。
+    #[test]
+    fn fit_returns_no_uncensored_observations_error_when_all_observations_are_censored_at_upper() {
+        let x = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let y = vec![6.0; 8];
+        let input = TobitInput::from_columns(
+            &y,
+            &[x],
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            None,
+            Some(6.0),
+        )
+        .unwrap();
+
+        let result = TobitEstimator::fit(
+            input,
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::NoUncensoredObservations {
+                lower: None,
+                upper: Some(6.0)
+            }
+        );
+    }
+
+    /// 両側打ち切りで、非打ち切り観測が1件も無い（全観測が`lower`または`upper`ちょうど）
+    /// 場合も同じエラーになることを確認する（`lower`側だけの判定に留まらないことの検証）。
+    #[test]
+    fn fit_returns_no_uncensored_observations_error_when_all_observations_are_censored_two_sided() {
+        let x = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let y = vec![0.0, 0.0, 0.0, 0.0, 6.0, 6.0, 6.0, 6.0];
+        let input = TobitInput::from_columns(
+            &y,
+            &[x],
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            Some(0.0),
+            Some(6.0),
+        )
+        .unwrap();
+
+        let result = TobitEstimator::fit(
+            input,
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::NoUncensoredObservations {
+                lower: Some(0.0),
+                upper: Some(6.0)
+            }
+        );
+    }
+
+    /// 非打ち切り観測がちょうど1件ある場合は`NoUncensoredObservations`を返さない
+    /// （「1件以上」という条件の境界値、`validate_sufficient_observations`と同じ
+    /// `>=`境界の考え方）。このデータは病理的に近い（実際にNewtonは収束しない）ため
+    /// `raise_on_non_convergence=false`で受け、`NonConvergence`ではなく
+    /// バリデーション自体は通過することだけを確認する。
+    #[test]
+    fn fit_does_not_return_no_uncensored_observations_error_when_exactly_one_observation_is_uncensored()
+     {
+        let x = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let y = vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10.95];
+        let input = TobitInput::from_columns(
+            &y,
+            &[x],
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            Some(0.0),
+            None,
+        )
+        .unwrap();
+
+        let result = TobitEstimator::fit(
+            input,
+            Method::Newton,
+            100,
+            1e-8,
+            false,
+            CovType::Classical,
+            0.95,
+        );
+        assert!(
+            !matches!(result, Err(MleError::NoUncensoredObservations { .. })),
+            "{result:?}"
+        );
     }
 }

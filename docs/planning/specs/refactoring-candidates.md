@@ -171,7 +171,13 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   統一するのが妥当。「同じであるべき」という意図が既にコード上に書いてある以上、
   低リスクな改善だと考える。
 - **気づいた経緯**: 2026-08-15、`generate_nonlinear_datasets.py`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
+- **状態**: 対応済み（2026-08-22、`refactor`スキルで項目10と合わせて対応）。
+  新規作成した[benchmark/_dgp_constants.py](../../../benchmark/_dgp_constants.py)に
+  `SCALE_VARIANCE_X1_SCALE`/`SCALE_VARIANCE_X2_SCALE`として集約し、3系統とも
+  そこから参照する形に統一した。`_common.py`に置かなかったのは、項目21で
+  指摘された「`_common.py`が用途の異なるヘルパーの寄せ集めになりつつある」
+  懸念にこれ以上加担しないため（ユーザー判断）。全シナリオで生成値が
+  リファクタリング前後で完全一致することを実測確認済み。
 
 ### 10. `heteroskedastic`/`autocorrelated`の誤差項生成式がlinear・IVの2系統でマジックナンバーとして重複
 
@@ -186,7 +192,11 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `HETEROSKEDASTIC_SIGMA_SLOPE = 2.0`・`AUTOCORRELATED_RHO = 0.7`のような
   名前付き定数として集約する余地がある。項目9と合わせて対応すると効率が良さそう。
 - **気づいた経緯**: 2026-08-15、`generate_iv_datasets.py`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
+- **状態**: 対応済み（2026-08-22、`refactor`スキルで項目9と合わせて対応）。
+  新規作成した[benchmark/_dgp_constants.py](../../../benchmark/_dgp_constants.py)に
+  `HETEROSKEDASTIC_SIGMA_BASE`/`HETEROSKEDASTIC_SIGMA_SLOPE`/`AUTOCORRELATED_RHO`
+  として集約し、linear・IVの2系統ともそこから参照する形に統一した。全シナリオで
+  生成値がリファクタリング前後で完全一致することを実測確認済み。
 
 ### 11. `_run_cluster_case`（generate_ols_fixtures.py）が`run_statsmodels_benchmark.py`の`coef`/`se`抽出ロジックと重複
 
@@ -418,7 +428,11 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   18・19の「`_common.py`に切り出す」という所感は、この分割案が採用された場合は
   それぞれ対応するファイルに置き換える形で読み替える。
 - **気づいた経緯**: 2026-08-16、`generate_ols_crosscheck_fixtures.py`解説後のユーザー提案。
-- **状態**: 未対応（着手要否はユーザー判断待ち、項目9・10・18・19と合わせて検討）
+- **状態**: 未対応（項目9・10は2026-08-22、`_common.py`ではなく専用の
+  [benchmark/_dgp_constants.py](../../../benchmark/_dgp_constants.py)を新設する形で
+  対応済み——本項目の「肥大化させたくない」という懸念自体を踏まえた判断。
+  項目18・19、および本項目自体〔`utils/`分割案〕は引き続き未対応、着手要否は
+  ユーザー判断待ち）
 
 ### 22. Rスクリプト冒頭の引数パースパターンが3ファイルで重複（`_common.R`は後処理側のみ共通化済み）
 

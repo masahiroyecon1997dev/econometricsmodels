@@ -53,9 +53,22 @@ autocorrelated/high_variance）は2値DGPに直接転用できないため、Log
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import numpy as np
 import polars as pl
 from scipy.stats import norm
+
+sys.path.insert(
+    0, str(Path(__file__).resolve().parent.parent)
+)  # benchmark/ を import path に追加（_dgp_constants）
+from _dgp_constants import (
+    SCALE_VARIANCE_X1_SCALE as _SCALE_VARIANCE_X1_SCALE,
+)
+from _dgp_constants import (
+    SCALE_VARIANCE_X2_SCALE as _SCALE_VARIANCE_X2_SCALE,
+)
 
 SCENARIOS = [
     "baseline",
@@ -73,9 +86,7 @@ SCENARIOS = [
 _NEAR_SEPARATION_BETA1 = {"logit": 20.0, "probit": 10.0}
 
 # scale_varianceで出力直前に列へ適用するスケール（OLSのgenerate_linear_datasets.py
-# と同じ倍率）。x1は1e6倍、x2は1e-3倍。
-_SCALE_VARIANCE_X1_SCALE = 1e6
-_SCALE_VARIANCE_X2_SCALE = 1e-3
+# と同じ倍率、実体はbenchmark/_dgp_constants.pyに集約済み）。x1は1e6倍、x2は1e-3倍。
 
 _LINK_CDF = {
     "logit": lambda z: 1.0 / (1.0 + np.exp(-z)),
@@ -206,13 +217,7 @@ def generate_probit_dataset(
 
 
 if __name__ == "__main__":
-    import sys
-    from pathlib import Path
-
-    sys.path.insert(
-        0, str(Path(__file__).resolve().parent.parent)
-    )  # benchmark/ を import path に追加（_common）
-    from _common import preview_dataset
+    from _common import preview_dataset  # sys.pathはファイル冒頭で追加済み
 
     link_arg = sys.argv[1] if len(sys.argv) > 1 else "logit"
     scenario_arg = sys.argv[2] if len(sys.argv) > 2 else "baseline"

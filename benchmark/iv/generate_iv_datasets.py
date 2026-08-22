@@ -35,8 +35,22 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import numpy as np
 import polars as pl
+
+sys.path.insert(
+    0, str(Path(__file__).resolve().parent.parent)
+)  # benchmark/ を import path に追加（_dgp_constants）
+from _dgp_constants import (
+    AUTOCORRELATED_RHO,
+    HETEROSKEDASTIC_SIGMA_BASE,
+    HETEROSKEDASTIC_SIGMA_SLOPE,
+    SCALE_VARIANCE_X1_SCALE,
+    SCALE_VARIANCE_X2_SCALE,
+)
 
 SCENARIOS = [
     "baseline",
@@ -175,7 +189,10 @@ def generate_iv_dataset(
     if scenario == "heteroskedastic":
         # 分散がx_exogの最初の列に依存（`generate_linear_datasets.py`の
         # heteroskedasticシナリオと同じ発想）。
-        sigma_i = 0.5 + 2.0 * np.abs(x_exog[:, 0])
+        sigma_i = (
+            HETEROSKEDASTIC_SIGMA_BASE
+            + HETEROSKEDASTIC_SIGMA_SLOPE * np.abs(x_exog[:, 0])
+        )
         uv = rng.multivariate_normal(mean=[0.0, 0.0], cov=cov_uv, size=n)
         u = uv[:, 0] * sigma_i
         v = uv[:, 1:2]  # (n, 1)
@@ -183,7 +200,7 @@ def generate_iv_dataset(
         # AR(1): u_t = rho_ar * u_{t-1} + innovation_t
         # （`generate_linear_datasets.py`のautocorrelatedシナリオと同じ発想。
         # vは自己相関させない: HAC/Kernelの検証対象は構造誤差uの時系列相関のため）。
-        rho_ar = 0.7
+        rho_ar = AUTOCORRELATED_RHO
         uv_innov = rng.multivariate_normal(mean=[0.0, 0.0], cov=cov_uv, size=n)
         u = np.zeros(n)
         u[0] = uv_innov[0, 0]
@@ -228,11 +245,11 @@ def generate_iv_dataset(
         # （`generate_nonlinear_datasets.py`のscale_varianceと同じ発想:
         # 真のDGPは未スケーリングのXで行い、出力直前にのみ列をスケーリングする）。
         x_exog = x_exog.copy()
-        x_exog[:, 0] *= 1e6
-        x_exog[:, 1] *= 1e-3
+        x_exog[:, 0] *= SCALE_VARIANCE_X1_SCALE
+        x_exog[:, 1] *= SCALE_VARIANCE_X2_SCALE
         beta_exog = beta_exog.copy()
-        beta_exog[0] /= 1e6
-        beta_exog[1] /= 1e-3
+        beta_exog[0] /= SCALE_VARIANCE_X1_SCALE
+        beta_exog[1] /= SCALE_VARIANCE_X2_SCALE
 
     y = beta0 + x_exog @ beta_exog + x_endog @ beta_endog + u
 
@@ -249,13 +266,7 @@ def generate_iv_dataset(
 
 
 if __name__ == "__main__":
-    import sys
-    from pathlib import Path
-
-    sys.path.insert(
-        0, str(Path(__file__).resolve().parent.parent)
-    )  # benchmark/ を import path に追加（_common）
-    from _common import preview_dataset
+    from _common import preview_dataset  # sys.pathはファイル冒頭で追加済み
 
     scenario_arg = sys.argv[1] if len(sys.argv) > 1 else "baseline"
     preview_dataset(scenario_arg, generate_iv_dataset)

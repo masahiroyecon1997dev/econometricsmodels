@@ -17,8 +17,22 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import numpy as np
 import polars as pl
+
+sys.path.insert(
+    0, str(Path(__file__).resolve().parent.parent)
+)  # benchmark/ を import path に追加（_dgp_constants）
+from _dgp_constants import (
+    AUTOCORRELATED_RHO,
+    HETEROSKEDASTIC_SIGMA_BASE,
+    HETEROSKEDASTIC_SIGMA_SLOPE,
+    SCALE_VARIANCE_X1_SCALE,
+    SCALE_VARIANCE_X2_SCALE,
+)
 
 SCENARIOS = [
     "baseline",
@@ -99,8 +113,8 @@ def generate_linear_dataset(
         # x2は10^-3オーダー）。傾き係数の同時共分散部分行列の条件数が
         # 倍精度の限界を超え、全cov_typeで数値的に特異になる
         # （ComputationErrorパス専用、数値比較の対象外）。
-        X[:, 0] *= 1e6
-        X[:, 1] *= 1e-3
+        X[:, 0] *= SCALE_VARIANCE_X1_SCALE
+        X[:, 1] *= SCALE_VARIANCE_X2_SCALE
 
     if scenario == "scale_variance_mild":
         if k < 2:
@@ -118,10 +132,13 @@ def generate_linear_dataset(
     if scenario == "high_variance":
         errors = rng.normal(0, 10.0, size=n)
     elif scenario == "heteroskedastic":
-        sigma_i = 0.5 + 2.0 * np.abs(X[:, 0])  # 分散がx1に依存
+        sigma_i = (
+            HETEROSKEDASTIC_SIGMA_BASE
+            + HETEROSKEDASTIC_SIGMA_SLOPE * np.abs(X[:, 0])
+        )  # 分散がx1に依存
         errors = rng.normal(0, 1, size=n) * sigma_i
     elif scenario == "autocorrelated":
-        rho = 0.7  # AR(1): e_t = rho * e_{t-1} + u_t
+        rho = AUTOCORRELATED_RHO  # AR(1): e_t = rho * e_{t-1} + u_t
         u = rng.normal(0, 1, size=n)
         errors = np.zeros(n)
         errors[0] = u[0]
@@ -147,13 +164,7 @@ def generate_linear_dataset(
 
 
 if __name__ == "__main__":
-    import sys
-    from pathlib import Path
-
-    sys.path.insert(
-        0, str(Path(__file__).resolve().parent.parent)
-    )  # benchmark/ を import path に追加（_common）
-    from _common import preview_dataset
+    from _common import preview_dataset  # sys.pathはファイル冒頭で追加済み
 
     scenario_arg = sys.argv[1] if len(sys.argv) > 1 else "baseline"
     preview_dataset(scenario_arg, generate_linear_dataset)

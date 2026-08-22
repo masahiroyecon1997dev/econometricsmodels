@@ -929,6 +929,99 @@ fn marginal_effects_from_tobit_w_s(
     ))
 }
 
+/// `predict`が返す予測量`target`の値を、線形予測子`mu=x'β`・`σ`・打ち切り境界から計算する
+/// （McDonald-Moffitt 1980）。`target_w_and_s`と同じ`boundary_terms`（`lower`/`upper`の
+/// `None`側を`Φ(∓∞)=0/1`・`φ(∓∞)=0`相当の定数として扱う統一的な扱い）を再利用するため、
+/// 左のみ・右のみ・両側打ち切りいずれでも同じ式で正しく計算できる（`target_w_and_s`の
+/// docコメント「数式」と同じ考え方。こちらは値そのもの、`target_w_and_s`はその微分）。
+///
+/// `E[y|x]`の閉形式は`Φ(za)*lower + (1-Φ(zb))*upper + (Φ(zb)-Φ(za))*mu - σ(φ(zb)-φ(za))`
+/// （両側打ち切りの一般形。`lower`/`upper`が`None`の側は`boundary_terms`の規約により
+/// 係数が0になるため、ダミー値`lower.unwrap_or(0.0)`/`upper.unwrap_or(0.0)`を掛けても
+/// 結果に影響しない）。`P(uncensored|x)`は`Φ(zb)-Φ(za)`そのもの。
+fn predicted_value(
+    target: MarginalEffectsTarget,
+    mu: f64,
+    sigma: f64,
+    lower: Option<f64>,
+    upper: Option<f64>,
+    normal: &Normal,
+) -> f64 {
+    if target == MarginalEffectsTarget::ExpectedLatent {
+        return mu;
+    }
+    let (_, phi_za, cdf_za) = boundary_terms(lower, mu, sigma, normal, true);
+    let (_, phi_zb, cdf_zb) = boundary_terms(upper, mu, sigma, normal, false);
+    match target {
+        MarginalEffectsTarget::ExpectedLatent => unreachable!("handled by early return above"),
+        MarginalEffectsTarget::ExpectedObserved => {
+            let lower_c = lower.unwrap_or(0.0);
+            let upper_c = upper.unwrap_or(0.0);
+            cdf_za * lower_c + (1.0 - cdf_zb) * upper_c + (cdf_zb - cdf_za) * mu
+                - sigma * (phi_zb - phi_za)
+        }
+        MarginalEffectsTarget::ProbUncensored => cdf_zb - cdf_za,
+    }
+}
+
+/// 1カテゴリ（下側打ち切り／非打ち切り／上側打ち切り）分の打ち切り適合度チェック結果
+/// （`CensoringFitCheck`のdocコメント参照）。
+///
+/// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CensoringFitCategory {
+    /// 実測の該当カテゴリの比率（`y`がちょうど境界値に一致する観測の割合。非打ち切り
+    /// カテゴリは`1 - 下側比率 - 上側比率`）
+    observed_rate: f64,
+    /// モデル含意の平均確率（各観測の`P(該当カテゴリ|xᵢ)`の平均。`target_w_and_s`の
+    /// `ProbUncensored`と同じ`Φ`の組み合わせ、`predicted_value`のdocコメント参照）
+    model_implied_rate: f64,
+}
+
+impl CensoringFitCategory {
+    /// 実測の該当カテゴリの比率
+    pub fn observed_rate(&self) -> f64 {
+        self.observed_rate
+    }
+
+    /// モデル含意の平均確率
+    pub fn model_implied_rate(&self) -> f64 {
+        self.model_implied_rate
+    }
+}
+
+/// 打ち切り予測の適合度チェック（`TobitEstimator::censoring_fit_check`のdocコメント参照。
+/// Logit/Probitの`pred_table`の代替、`nonlinear-api-design.md`6章「Tobitは
+/// predict()/marginal_effects()/pred_table()のいずれも独自の形になる」で確定済み）。
+///
+/// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CensoringFitCheck {
+    /// 下側打ち切り（`lower`が`None`のときは`None`）
+    lower: Option<CensoringFitCategory>,
+    /// 非打ち切り
+    uncensored: CensoringFitCategory,
+    /// 上側打ち切り（`upper`が`None`のときは`None`）
+    upper: Option<CensoringFitCategory>,
+}
+
+impl CensoringFitCheck {
+    /// 下側打ち切り（`lower`が`None`のときは`None`）
+    pub fn lower(&self) -> Option<CensoringFitCategory> {
+        self.lower
+    }
+
+    /// 非打ち切り
+    pub fn uncensored(&self) -> CensoringFitCategory {
+        self.uncensored
+    }
+
+    /// 上側打ち切り（`upper`が`None`のときは`None`）
+    pub fn upper(&self) -> Option<CensoringFitCategory> {
+        self.upper
+    }
+}
+
 /// Tobitの推定結果。`fit`でのバリデーション・最適化・`cov_type`に応じたSE計算・
 /// 適合度統計量・Wald検定・限界効果を通過した状態を表す。
 ///
@@ -1393,6 +1486,111 @@ impl TobitEstimator {
             s_sigma,
             confidence_level,
         )
+    }
+
+    /// 予測値（`predict`）。`target`で予測量を選ぶ（`MarginalEffectsTarget`を
+    /// `marginal_effects`と共有する。「限界効果の対象」と「予測値の対象」は同じ3種
+    /// （`E[y*|x]`・`E[y|x]`・`P(uncensored|x)`）を指すため、専用のenumを別途新設せず
+    /// 再利用する）。`fit()`に使った学習データ（`self.input.x()`）の各行について返す
+    /// （`predicted_value`のdocコメント「数式」参照。左のみ・右のみ・両側打ち切り
+    /// いずれでも同じ式で正しく計算できる）。
+    ///
+    /// **新規データでの予測（out-of-sample）は未対応**（Logit/Probitと同じ理由、
+    /// 別issueでトラッキング、ユーザー確認済み）。デフォルト（`target`省略時の
+    /// `E[y|x]`、`nonlinear-api-design.md`6章）はPython層（engine_pybind）の責務
+    /// （`Method`/`CovType`等と同じ設計、`.claude/rules/rust-style.md`参照）。
+    pub fn predict(&self, target: MarginalEffectsTarget) -> Vec<f64> {
+        let x = self.input.x();
+        let n = x.nrows();
+        let k = self.input.k();
+        let lower = self.input.lower();
+        let upper = self.input.upper();
+        let normal = Normal::standard();
+        (0..n)
+            .map(|i| {
+                let mu: f64 = (0..k).map(|j| *x.get(i, j) * self.params[j]).sum();
+                predicted_value(target, mu, self.sigma, lower, upper, &normal)
+            })
+            .collect()
+    }
+
+    /// 打ち切り予測の適合度チェック（Logit/Probitの`pred_table`の代替、`predict`とは独立
+    /// した別メソッド）。`lower`/`upper`それぞれが定義する方向（下側打ち切り・非打ち切り・
+    /// 上側打ち切り）ごとに、実測の比率（`y`がちょうど境界値に一致する観測の割合）と
+    /// モデル含意の平均確率（各観測の`P(該当カテゴリ|xᵢ)`の平均、`predicted_value`の
+    /// `ProbUncensored`と同じ`Φ`の組み合わせ）を突き合わせる（ユーザー確認済み、方向別
+    /// 内訳を採用。単一集約値ではなく、両側打ち切りでどちらの境界に不整合があるかを
+    /// 区別できる形にする）。`lower`/`upper`が`None`の方向は出力からも`None`になる。
+    ///
+    /// 3カテゴリの`model_implied_rate`は理論上必ず合計1になる
+    /// （`Φ(za) + (Φ(zb)-Φ(za)) + (1-Φ(zb)) = 1`）。`observed_rate`も同様
+    /// （定義上、3カテゴリで観測を排他的に分割するため）。
+    ///
+    /// **前提（rust-reviewer指摘）**: 打ち切り観測の判定は`yᵢ == lower`/`yᵢ == upper`という
+    /// 浮動小数点の完全一致比較で行う。Tobitの定義上「打ち切り観測の`y`はちょうど境界値」
+    /// という理論的性質自体は正しく、`TobitInput::from_columns`が`y`を変換せずそのまま
+    /// 保持する設計（クリッピング等を行わない）とも整合するが、これは呼び出し側
+    /// （`engine_pybind`、将来的にはPython層）が渡す`y`列の打ち切り観測の値と、`lower`/
+    /// `upper`として渡す値がビット単位で完全に一致することを前提とする。CSV/Parquet
+    /// 経由での読み込みや`Float32`→`Float64`変換等、この前提が崩れうる経路がある場合は
+    /// 呼び出し側で丸め誤差が生じないよう注意する必要がある（許容誤差付き比較は
+    /// 未導入。相対閾値が要る場合は`ensure_well_conditioned_symmetric_matrix`等と同じ
+    /// 発想で別途検討する）。
+    pub fn censoring_fit_check(&self) -> CensoringFitCheck {
+        let x = self.input.x();
+        let y = self.input.y();
+        let n = x.nrows();
+        let k = self.input.k();
+        let lower = self.input.lower();
+        let upper = self.input.upper();
+        let normal = Normal::standard();
+
+        let mut observed_lower = 0usize;
+        let mut observed_upper = 0usize;
+        let mut model_lower_sum = 0.0;
+        let mut model_upper_sum = 0.0;
+        let mut model_uncensored_sum = 0.0;
+
+        for i in 0..n {
+            let mu: f64 = (0..k).map(|j| *x.get(i, j) * self.params[j]).sum();
+            let (_, _, cdf_za) = boundary_terms(lower, mu, self.sigma, &normal, true);
+            let (_, _, cdf_zb) = boundary_terms(upper, mu, self.sigma, &normal, false);
+            model_lower_sum += cdf_za;
+            model_upper_sum += 1.0 - cdf_zb;
+            model_uncensored_sum += cdf_zb - cdf_za;
+
+            let y_i = *y.get(i, 0);
+            if let Some(l) = lower
+                && y_i == l
+            {
+                observed_lower += 1;
+            }
+            if let Some(u) = upper
+                && y_i == u
+            {
+                observed_upper += 1;
+            }
+        }
+
+        let n_f = n as f64;
+        let lower_check = lower.map(|_| CensoringFitCategory {
+            observed_rate: observed_lower as f64 / n_f,
+            model_implied_rate: model_lower_sum / n_f,
+        });
+        let upper_check = upper.map(|_| CensoringFitCategory {
+            observed_rate: observed_upper as f64 / n_f,
+            model_implied_rate: model_upper_sum / n_f,
+        });
+        let uncensored_observed = (n - observed_lower - observed_upper) as f64 / n_f;
+
+        CensoringFitCheck {
+            lower: lower_check,
+            uncensored: CensoringFitCategory {
+                observed_rate: uncensored_observed,
+                model_implied_rate: model_uncensored_sum / n_f,
+            },
+            upper: upper_check,
+        }
     }
 }
 
@@ -3704,5 +3902,400 @@ mod tests {
             "actual={}, expected={expected_dydx}",
             effects.dydx()[0]
         );
+    }
+
+    /// `predict(ExpectedLatent)`は`E[y*|x]=x'β`という自明な式（打ち切りに依存しない）
+    /// なので、`x.get(i,·)`から直接計算した線形予測子と厳密に一致するはず。
+    #[test]
+    fn fit_predict_expected_latent_equals_linear_predictor() {
+        let estimator = TobitEstimator::fit(
+            censored_regression_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        let x = estimator.input().x();
+        let n = x.nrows();
+        let k = 2;
+        let params = estimator.params();
+
+        let predicted = estimator.predict(MarginalEffectsTarget::ExpectedLatent);
+        assert_eq!(predicted.len(), n);
+        for (i, &predicted_i) in predicted.iter().enumerate() {
+            let expected: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
+            assert!((predicted_i - expected).abs() < 1e-12);
+        }
+    }
+
+    /// `predict(ExpectedObserved)`・`predict(ProbUncensored)`を、`marginal_effects`の
+    /// テストで使った閉形式（`expected_observed_closed_form`/`prob_uncensored_closed_form`、
+    /// `target_w_and_s`/`predicted_value`の実装コードとは独立の`(lower,upper)`ごとの
+    /// `match`分岐）と観測ごとに突き合わせる（左打ち切りのみ）。
+    #[test]
+    fn fit_predict_matches_independent_recomputation_for_left_only_censoring() {
+        let estimator = TobitEstimator::fit(
+            censored_regression_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        let x = estimator.input().x();
+        let n = x.nrows();
+        let k = 2;
+        let params = estimator.params();
+        let sigma = estimator.sigma();
+        let lower = estimator.input().lower();
+        let upper = estimator.input().upper();
+        assert_eq!(lower, Some(0.0));
+        assert_eq!(upper, None);
+
+        let predicted_observed = estimator.predict(MarginalEffectsTarget::ExpectedObserved);
+        let predicted_prob = estimator.predict(MarginalEffectsTarget::ProbUncensored);
+        for i in 0..n {
+            let mu: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
+            let expected_observed = expected_observed_closed_form(mu, sigma, lower, upper);
+            let expected_prob = prob_uncensored_closed_form(mu, sigma, lower, upper);
+            assert!(
+                (predicted_observed[i] - expected_observed).abs() < 1e-9,
+                "row={i}, actual={}, expected={expected_observed}",
+                predicted_observed[i]
+            );
+            assert!(
+                (predicted_prob[i] - expected_prob).abs() < 1e-9,
+                "row={i}, actual={}, expected={expected_prob}",
+                predicted_prob[i]
+            );
+        }
+    }
+
+    /// 右打ち切りのみのデータでも`predict(ExpectedObserved)`・`predict(ProbUncensored)`が
+    /// 独立再計算と一致することを確認する。
+    #[test]
+    fn fit_predict_matches_independent_recomputation_for_right_only_censoring() {
+        let estimator = TobitEstimator::fit(
+            right_censored_regression_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        let x = estimator.input().x();
+        let n = x.nrows();
+        let k = 2;
+        let params = estimator.params();
+        let sigma = estimator.sigma();
+        let lower = estimator.input().lower();
+        let upper = estimator.input().upper();
+        assert_eq!(lower, None);
+        assert_eq!(upper, Some(6.0));
+
+        let predicted_observed = estimator.predict(MarginalEffectsTarget::ExpectedObserved);
+        let predicted_prob = estimator.predict(MarginalEffectsTarget::ProbUncensored);
+        for i in 0..n {
+            let mu: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
+            let expected_observed = expected_observed_closed_form(mu, sigma, lower, upper);
+            let expected_prob = prob_uncensored_closed_form(mu, sigma, lower, upper);
+            assert!((predicted_observed[i] - expected_observed).abs() < 1e-9);
+            assert!((predicted_prob[i] - expected_prob).abs() < 1e-9);
+        }
+    }
+
+    /// 両側打ち切りのデータでも`predict(ExpectedObserved)`・`predict(ProbUncensored)`が
+    /// 独立再計算と一致することを確認する。
+    #[test]
+    fn fit_predict_matches_independent_recomputation_for_two_sided_censoring() {
+        let estimator = TobitEstimator::fit(
+            two_sided_censored_regression_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        let x = estimator.input().x();
+        let n = x.nrows();
+        let k = 2;
+        let params = estimator.params();
+        let sigma = estimator.sigma();
+        let lower = estimator.input().lower();
+        let upper = estimator.input().upper();
+        assert_eq!(lower, Some(0.0));
+        assert_eq!(upper, Some(6.0));
+
+        let predicted_observed = estimator.predict(MarginalEffectsTarget::ExpectedObserved);
+        let predicted_prob = estimator.predict(MarginalEffectsTarget::ProbUncensored);
+        for i in 0..n {
+            let mu: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
+            let expected_observed = expected_observed_closed_form(mu, sigma, lower, upper);
+            let expected_prob = prob_uncensored_closed_form(mu, sigma, lower, upper);
+            assert!((predicted_observed[i] - expected_observed).abs() < 1e-9);
+            assert!((predicted_prob[i] - expected_prob).abs() < 1e-9);
+        }
+    }
+
+    /// `censoring_fit_check`（左打ち切りのみ）: `lower`カテゴリが`Some`・`upper`カテゴリが
+    /// `None`であること、実測比率（`y==0.0`の観測数/n）・モデル含意の平均確率
+    /// （`Φ((lower-μᵢ)/σ)`の平均、`predicted_value`とは独立に`Normal::cdf`を直接呼んで
+    /// 計算）の両方を独立再計算と突き合わせる。3カテゴリの`model_implied_rate`が合計1に
+    /// なる恒等式も確認する。
+    #[test]
+    fn fit_censoring_fit_check_matches_independent_recomputation_for_left_only_censoring() {
+        let estimator = TobitEstimator::fit(
+            censored_regression_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        let x = estimator.input().x();
+        let n = x.nrows();
+        let k = 2;
+        let params = estimator.params();
+        let sigma = estimator.sigma();
+        let normal = Normal::new(0.0, 1.0).unwrap();
+
+        let check = estimator.censoring_fit_check();
+        assert!(check.upper().is_none());
+        let lower_check = check.lower().unwrap();
+
+        // censored_regression_input: y=[0,0,1.15,2.9,5.2,6.85,9.1,10.95]、lower=0.0で
+        // 打ち切られているのはx=1,2の2件（実測打ち切り率2/8=0.25）
+        assert!((lower_check.observed_rate() - 0.25).abs() < 1e-12);
+        assert!((check.uncensored().observed_rate() - 0.75).abs() < 1e-12);
+
+        let expected_lower_rate: f64 = (0..n)
+            .map(|i| {
+                let mu: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
+                normal.cdf((0.0 - mu) / sigma)
+            })
+            .sum::<f64>()
+            / (n as f64);
+        assert!((lower_check.model_implied_rate() - expected_lower_rate).abs() < 1e-9);
+
+        let expected_uncensored_rate: f64 = (0..n)
+            .map(|i| {
+                let mu: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
+                prob_uncensored_closed_form(mu, sigma, Some(0.0), None)
+            })
+            .sum::<f64>()
+            / (n as f64);
+        assert!((check.uncensored().model_implied_rate() - expected_uncensored_rate).abs() < 1e-9);
+
+        // model_implied_rateは合計1になるはず（lower + uncensored、upperはこのケースでは無い）
+        assert!(
+            (lower_check.model_implied_rate() + check.uncensored().model_implied_rate() - 1.0)
+                .abs()
+                < 1e-9
+        );
+    }
+
+    /// `censoring_fit_check`（右打ち切りのみ）: `lower`が`None`・`upper`が`Some`になること、
+    /// 実測比率・モデル含意の平均確率を独立再計算と突き合わせる。
+    #[test]
+    fn fit_censoring_fit_check_matches_independent_recomputation_for_right_only_censoring() {
+        let estimator = TobitEstimator::fit(
+            right_censored_regression_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        let x = estimator.input().x();
+        let n = x.nrows();
+        let k = 2;
+        let params = estimator.params();
+        let sigma = estimator.sigma();
+        let normal = Normal::new(0.0, 1.0).unwrap();
+
+        let check = estimator.censoring_fit_check();
+        assert!(check.lower().is_none());
+        let upper_check = check.upper().unwrap();
+
+        // right_censored_regression_input: y=[-2.85,-0.95,1.15,2.9,5.2,6.0,6.0,6.0]、
+        // upper=6.0で打ち切られているのはx=6,7,8の3件（実測打ち切り率3/8=0.375）
+        assert!((upper_check.observed_rate() - 0.375).abs() < 1e-12);
+        assert!((check.uncensored().observed_rate() - 0.625).abs() < 1e-12);
+
+        let expected_upper_rate: f64 = (0..n)
+            .map(|i| {
+                let mu: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
+                1.0 - normal.cdf((6.0 - mu) / sigma)
+            })
+            .sum::<f64>()
+            / (n as f64);
+        assert!((upper_check.model_implied_rate() - expected_upper_rate).abs() < 1e-9);
+    }
+
+    /// `censoring_fit_check`（両側打ち切り）: `lower`・`upper`双方が`Some`になり、
+    /// 3カテゴリの実測比率・モデル含意の平均確率いずれも独立再計算と一致し、かつ
+    /// それぞれ合計1になることを確認する。
+    #[test]
+    fn fit_censoring_fit_check_matches_independent_recomputation_for_two_sided_censoring() {
+        let estimator = TobitEstimator::fit(
+            two_sided_censored_regression_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        let x = estimator.input().x();
+        let n = x.nrows();
+        let k = 2;
+        let params = estimator.params();
+        let sigma = estimator.sigma();
+        let normal = Normal::new(0.0, 1.0).unwrap();
+
+        let check = estimator.censoring_fit_check();
+        let lower_check = check.lower().unwrap();
+        let upper_check = check.upper().unwrap();
+
+        // two_sided_censored_regression_input: y=[0,0,1.15,2.9,5.2,6.0,6.0,6.0]、
+        // lower=0.0でx=1,2（2件）・upper=6.0でx=6,7,8（3件）が打ち切り
+        assert!((lower_check.observed_rate() - 0.25).abs() < 1e-12);
+        assert!((upper_check.observed_rate() - 0.375).abs() < 1e-12);
+        assert!((check.uncensored().observed_rate() - 0.375).abs() < 1e-12);
+        assert!(
+            (lower_check.observed_rate()
+                + check.uncensored().observed_rate()
+                + upper_check.observed_rate()
+                - 1.0)
+                .abs()
+                < 1e-12
+        );
+
+        let expected_lower_rate: f64 = (0..n)
+            .map(|i| {
+                let mu: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
+                normal.cdf((0.0 - mu) / sigma)
+            })
+            .sum::<f64>()
+            / (n as f64);
+        let expected_upper_rate: f64 = (0..n)
+            .map(|i| {
+                let mu: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
+                1.0 - normal.cdf((6.0 - mu) / sigma)
+            })
+            .sum::<f64>()
+            / (n as f64);
+        let expected_uncensored_rate: f64 = (0..n)
+            .map(|i| {
+                let mu: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
+                prob_uncensored_closed_form(mu, sigma, Some(0.0), Some(6.0))
+            })
+            .sum::<f64>()
+            / (n as f64);
+        assert!((lower_check.model_implied_rate() - expected_lower_rate).abs() < 1e-9);
+        assert!((upper_check.model_implied_rate() - expected_upper_rate).abs() < 1e-9);
+        assert!((check.uncensored().model_implied_rate() - expected_uncensored_rate).abs() < 1e-9);
+        assert!(
+            (lower_check.model_implied_rate()
+                + check.uncensored().model_implied_rate()
+                + upper_check.model_implied_rate()
+                - 1.0)
+                .abs()
+                < 1e-9
+        );
+    }
+
+    /// 上記の`predict`テストは全て単一の傾き係数（`k=2`、切片+`x1`）のフィクスチャのみを
+    /// 使っており、`(0..k).map(|j| *x.get(i,j)*self.params[j])`という列インデックス計算の
+    /// 配線ミス（列の取り違え等）を構造的に検出できない（`multivariate_censored_input`の
+    /// docコメント「配線ミスは単一変数データでは検出できない」と同じ理由、
+    /// rust-reviewer指摘）。傾き係数2個（`x1`・`x2`）の多変量データセットで
+    /// `expected_observed_closed_form`/`prob_uncensored_closed_form`との独立再計算を検証する。
+    #[test]
+    fn fit_predict_matches_independent_recomputation_for_multivariate_design() {
+        let estimator = TobitEstimator::fit(
+            multivariate_censored_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        let x = estimator.input().x();
+        let n = x.nrows();
+        let k = 3;
+        let params = estimator.params();
+        let sigma = estimator.sigma();
+        let lower = estimator.input().lower();
+        let upper = estimator.input().upper();
+
+        let predicted_latent = estimator.predict(MarginalEffectsTarget::ExpectedLatent);
+        let predicted_observed = estimator.predict(MarginalEffectsTarget::ExpectedObserved);
+        let predicted_prob = estimator.predict(MarginalEffectsTarget::ProbUncensored);
+        for i in 0..n {
+            let mu: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
+            assert!((predicted_latent[i] - mu).abs() < 1e-12);
+            let expected_observed = expected_observed_closed_form(mu, sigma, lower, upper);
+            let expected_prob = prob_uncensored_closed_form(mu, sigma, lower, upper);
+            assert!((predicted_observed[i] - expected_observed).abs() < 1e-9);
+            assert!((predicted_prob[i] - expected_prob).abs() < 1e-9);
+        }
+    }
+
+    /// `censoring_fit_check`版の多変量配線ミス検出テスト（上記`fit_predict_matches_
+    /// independent_recomputation_for_multivariate_design`と同じ理由、rust-reviewer指摘）。
+    #[test]
+    fn fit_censoring_fit_check_matches_independent_recomputation_for_multivariate_design() {
+        let estimator = TobitEstimator::fit(
+            multivariate_censored_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        let x = estimator.input().x();
+        let n = x.nrows();
+        let k = 3;
+        let params = estimator.params();
+        let sigma = estimator.sigma();
+        let normal = Normal::new(0.0, 1.0).unwrap();
+
+        let check = estimator.censoring_fit_check();
+        assert!(check.upper().is_none());
+        let lower_check = check.lower().unwrap();
+
+        // multivariate_censored_input: y=[0,0,1.15,2.9,5.2,6.85,9.1,10.95]、lower=0.0で
+        // 打ち切られているのはx1=1,2の2件（実測打ち切り率2/8=0.25、censored_regression_
+        // inputと同じyだがx2列が追加された多変量設計行列）
+        assert!((lower_check.observed_rate() - 0.25).abs() < 1e-12);
+        assert!((check.uncensored().observed_rate() - 0.75).abs() < 1e-12);
+
+        let expected_lower_rate: f64 = (0..n)
+            .map(|i| {
+                let mu: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
+                normal.cdf((0.0 - mu) / sigma)
+            })
+            .sum::<f64>()
+            / (n as f64);
+        assert!((lower_check.model_implied_rate() - expected_lower_rate).abs() < 1e-9);
     }
 }

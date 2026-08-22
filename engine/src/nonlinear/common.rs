@@ -493,6 +493,63 @@ pub struct MarginalEffects {
 }
 
 impl MarginalEffects {
+    /// クレート内の他モジュールから`MarginalEffects`を組み立てるためのコンストラクタ。
+    /// フィールドはprivateのため（`.claude/rules/rust-style.md`「推定量構造体の設計」）、
+    /// `marginal_effects_from_w_s`を経由しないモデル（Tobit。Issue #211の結論により
+    /// `w`/`s`自体の計算式は独自実装だが、出力構造体の形は`coef_table`と同じ行指向で
+    /// Logit/Probitと共通、`nonlinear-api-design.md`6章）が、独自に計算したデルタ法の
+    /// 結果からこの構造体を構築するために必要。
+    pub(crate) fn from_parts(
+        param_names: Vec<String>,
+        dydx: Vec<f64>,
+        std_errors: Vec<f64>,
+        z_stats: Vec<f64>,
+        p_values: Vec<f64>,
+        conf_lower: Vec<f64>,
+        conf_upper: Vec<f64>,
+    ) -> Self {
+        // 呼び出し元（`tobit.rs`の`marginal_effects_from_tobit_w_s`）の内部契約であり、
+        // 実データに起因する`ValidationError`とは性質が異なるため`debug_assert_eq!`で
+        // 検証する（`TobitInput::from_columns`の`x_columns.len() == x_names.len()`と
+        // 同じ方針、rust-reviewer指摘）。
+        let n = param_names.len();
+        debug_assert_eq!(dydx.len(), n, "dydx length must match param_names length");
+        debug_assert_eq!(
+            std_errors.len(),
+            n,
+            "std_errors length must match param_names length"
+        );
+        debug_assert_eq!(
+            z_stats.len(),
+            n,
+            "z_stats length must match param_names length"
+        );
+        debug_assert_eq!(
+            p_values.len(),
+            n,
+            "p_values length must match param_names length"
+        );
+        debug_assert_eq!(
+            conf_lower.len(),
+            n,
+            "conf_lower length must match param_names length"
+        );
+        debug_assert_eq!(
+            conf_upper.len(),
+            n,
+            "conf_upper length must match param_names length"
+        );
+        Self {
+            param_names,
+            dydx,
+            std_errors,
+            z_stats,
+            p_values,
+            conf_lower,
+            conf_upper,
+        }
+    }
+
     /// 説明変数名（定数項を除く）
     pub fn param_names(&self) -> &[String] {
         &self.param_names

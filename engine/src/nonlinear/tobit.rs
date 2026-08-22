@@ -111,11 +111,11 @@ use crate::error::CommonError;
 use crate::inference;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::nonlinear::common::{
-    CovType, Method, MleError, SandwichVariant, clamped_pdf_cdf, cluster_cov_params,
-    destandardize_cov_params, destandardize_params, observed_information_cov_params,
-    opg_cov_params, run_solver, sandwich_cov_params, standardize_columns,
-    validate_cluster_cov_type, validate_confidence_level, validate_max_iter,
-    validate_sufficient_observations, validate_tol,
+    CovType, MarginalEffects, MarginalEffectsAt, Method, MleError, SandwichVariant,
+    clamped_pdf_cdf, cluster_cov_params, column_means, column_medians, destandardize_cov_params,
+    destandardize_params, observed_information_cov_params, opg_cov_params, run_solver,
+    sandwich_cov_params, standardize_columns, validate_cluster_cov_type, validate_confidence_level,
+    validate_max_iter, validate_sufficient_observations, validate_tol,
 };
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::prelude::{Solve, SolveLstsq};
@@ -673,9 +673,264 @@ fn wald_chi2_test(
     Ok((wald_statistic, wald_p_value))
 }
 
+/// `marginal_effects`が評価する対象（McDonald-Moffitt 1980）。Logit/Probitの
+/// `dydx_and_jacobian`型の共通化はしない（Issue #211の結論。対象ごとに式が異なり、
+/// 同型の`(w,s)`分解に無理に収める価値がないと判断した。
+/// `docs/planning/specs/nonlinear-api-design.md`6章参照）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarginalEffectsTarget {
+    /// 潜在変数の期待値 `E[y*|x] = x'β`
+    ExpectedLatent,
+    /// 打ち切りを考慮した観測値の期待値 `E[y|x]`（既定、実測`y`と直接比較できる量）
+    ExpectedObserved,
+    /// 非打ち切り確率 `P(uncensored|x)`
+    ProbUncensored,
+}
+
+/// 打ち切り境界`bound`を標準化した`z=(bound-μ)/σ`・`φ(z)`・`Φ(z)`を計算する。`None`は
+/// 「その方向は打ち切りなし」を意味し、`Φ(∓∞)=0/1`・`φ(∓∞)=0`に相当する値を返す
+/// （`z`自体はダミー値`0.0`を返すが、後続の計算では常に`φ=0.0`とセットでしか使わないため
+/// 結果に影響しない。`is_lower`で下限側（`Φ(-∞)=0`）か上限側（`Φ(+∞)=1`）かを切り替える）。
+fn boundary_terms(
+    bound: Option<f64>,
+    mu: f64,
+    sigma: f64,
+    normal: &Normal,
+    is_lower: bool,
+) -> (f64, f64, f64) {
+    match bound {
+        Some(c) => {
+            let z = (c - mu) / sigma;
+            let (phi, big_phi) = clamped_pdf_cdf(normal, z);
+            (z, phi, big_phi)
+        }
+        None => (0.0, 0.0, if is_lower { 0.0 } else { 1.0 }),
+    }
+}
+
+/// `target`ごとの限界効果`dydx_j=w*βⱼ`（`marginal_effects_from_tobit_w_s`のdocコメント
+/// 「数式」参照）における`w`とその勾配`(s_beta, s_sigma)`を、評価点`x_point`
+/// （`k`要素、`at="overall"`なら観測`i`の行、`at="mean"`/`"median"`なら代表点）で計算する。
+///
+/// ## 数式
+///
+/// `μ=x_point'β`とし、`za=(lower-μ)/σ`・`zb=(upper-μ)/σ`（`boundary_terms`、`None`の
+/// 方向は`φ=0`かつ`Φ`は0/1の定数として扱う）とすると、非打ち切り確率は
+/// `W(θ)=Φ(zb)-Φ(za)`（左のみ打ち切りなら`Φ(zb)=1`で`W=Φ(za)`相当、右のみなら
+/// `Φ(za)=0`で`W=Φ(zb)`相当、両側打ち切りなら両方が効く——単一の式で3ケースとも
+/// 表現できる）。
+///
+/// - `ExpectedLatent`（`E[y*|x]=x'β`）: `dydx_j=βⱼ`（`x_point`に依存しない自明な形。
+///   `w=1`・`s_beta=0`・`s_sigma=0`）
+/// - `ExpectedObserved`（`E[y|x]`）: `w=W(θ)`。`∂W/∂μ=(φ(za)-φ(zb))/σ`、
+///   `∂W/∂σ=(za·φ(za)-zb·φ(zb))/σ`（`s_beta_m=∂W/∂μ・x_point[m]`、連鎖律`∂μ/∂βₘ=x_point[m]`）
+/// - `ProbUncensored`（`P(uncensored|x)=W(θ)`自体）: `w=∂W/∂μ=(φ(za)-φ(zb))/σ`。
+///   その勾配は`∂²W/∂μ²=(za·φ(za)-zb·φ(zb))/σ²`・
+///   `∂(∂W/∂μ)/∂σ=(φ(za)(za²-1)-φ(zb)(zb²-1))/σ²`
+///
+/// いずれも境界項がある方向のみ`φ≠0`となるため（`boundary_terms`のNone時`φ=0`）、
+/// 左/右/両側打ち切りいずれでも同じ式で正しく計算できる（両側打ち切りは
+/// McDonald-Moffitt(1980)の一般形、片側打ち切りはその特殊ケースとして導出済み、
+/// `docs/planning/specs/nonlinear-implementation-notes.md`「限界効果」参照）。
+fn target_w_and_s(
+    target: MarginalEffectsTarget,
+    x_point: &[f64],
+    beta: &[f64],
+    sigma: f64,
+    lower: Option<f64>,
+    upper: Option<f64>,
+    normal: &Normal,
+) -> (f64, Vec<f64>, f64) {
+    let k = beta.len();
+    if target == MarginalEffectsTarget::ExpectedLatent {
+        return (1.0, vec![0.0; k], 0.0);
+    }
+
+    let mu: f64 = (0..k).map(|m| x_point[m] * beta[m]).sum();
+    let (za, phi_za, cdf_za) = boundary_terms(lower, mu, sigma, normal, true);
+    let (zb, phi_zb, cdf_zb) = boundary_terms(upper, mu, sigma, normal, false);
+
+    match target {
+        MarginalEffectsTarget::ExpectedLatent => unreachable!("handled by early return above"),
+        MarginalEffectsTarget::ExpectedObserved => {
+            let w = cdf_zb - cdf_za;
+            let dw_dmu = (phi_za - phi_zb) / sigma;
+            let s_beta: Vec<f64> = x_point.iter().map(|&x_m| dw_dmu * x_m).collect();
+            let s_sigma = (za * phi_za - zb * phi_zb) / sigma;
+            (w, s_beta, s_sigma)
+        }
+        MarginalEffectsTarget::ProbUncensored => {
+            let w = (phi_za - phi_zb) / sigma;
+            let dw_dmu = (za * phi_za - zb * phi_zb) / (sigma * sigma);
+            let s_beta: Vec<f64> = x_point.iter().map(|&x_m| dw_dmu * x_m).collect();
+            let s_sigma = (phi_za * (za * za - 1.0) - phi_zb * (zb * zb - 1.0)) / (sigma * sigma);
+            (w, s_beta, s_sigma)
+        }
+    }
+}
+
+/// `target_w_and_s`の`at="overall"`（AME）版。全観測を1回走査し、各観測の`(w,s_beta,
+/// s_sigma)`を平均する（`w`/`s`は`β`について線形に`dydx_j=w*βⱼ`へ寄与するため、平均を
+/// 先に取ってから`dydx_j`を計算しても、観測ごとに`dydx_j`を計算してから平均しても
+/// 同じ結果になる。Logitの`overall_w_and_s`と同じ考え方）。
+fn overall_target_w_and_s(
+    x: &Mat<f64>,
+    beta: &[f64],
+    sigma: f64,
+    lower: Option<f64>,
+    upper: Option<f64>,
+    target: MarginalEffectsTarget,
+    normal: &Normal,
+) -> (f64, Vec<f64>, f64) {
+    let n = x.nrows();
+    let k = x.ncols();
+    let mut w_sum = 0.0;
+    let mut s_beta_sum = vec![0.0; k];
+    let mut s_sigma_sum = 0.0;
+    // `x_row`はループの外で1回だけ確保し、観測ごとに上書きして使い回す
+    // （`target_w_and_s`が`&[f64]`を要求する都合上コピー自体は避けられないが、
+    // 観測数`n`回分のヒープ確保は不要、rust-reviewer指摘）。
+    let mut x_row = vec![0.0; k];
+    for i in 0..n {
+        for (j, v) in x_row.iter_mut().enumerate() {
+            *v = *x.get(i, j);
+        }
+        let (w, s_beta, s_sigma) =
+            target_w_and_s(target, &x_row, beta, sigma, lower, upper, normal);
+        w_sum += w;
+        for (m, s_m) in s_beta_sum.iter_mut().enumerate() {
+            *s_m += s_beta[m];
+        }
+        s_sigma_sum += s_sigma;
+    }
+    let n_f = n as f64;
+    for s_m in s_beta_sum.iter_mut() {
+        *s_m /= n_f;
+    }
+    (w_sum / n_f, s_beta_sum, s_sigma_sum / n_f)
+}
+
+/// `target_w_and_s`の`at="mean"`/`"median"`版。代表点`x_bar`（各説明変数の標本平均または
+/// 中央値）で1回だけ評価する（Logitの`at_point_w_and_s`と同じ考え方、`target_w_and_s`
+/// 自体がこの形なので薄いラッパー）。
+fn at_point_target_w_and_s(
+    x_bar: &[f64],
+    beta: &[f64],
+    sigma: f64,
+    lower: Option<f64>,
+    upper: Option<f64>,
+    target: MarginalEffectsTarget,
+    normal: &Normal,
+) -> (f64, Vec<f64>, f64) {
+    target_w_and_s(target, x_bar, beta, sigma, lower, upper, normal)
+}
+
+/// `marginal_effects_from_tobit_w_s`の呼び出しに必要な、フィット済みモデルの情報を束ねる
+/// （`clippy::too_many_arguments`を避けるため。`nonlinear/common.rs`の
+/// `FittedModelForMarginalEffects`と同じ理由・同じパターンだが、Tobitは`cov_params`が
+/// `(k+1)×(k+1)`（`σ`を含む）である点が異なるため独立の型として定義する）。
+struct TobitMarginalEffectsInputs<'a> {
+    /// 説明変数名（定数項を含む）
+    param_names: &'a [String],
+    /// 定数項を含むか
+    has_intercept: bool,
+    /// 説明変数の数（定数項を含む、`σ`は含まない）
+    k: usize,
+    /// 係数（元のスケール、`β`部分のみ）
+    beta: &'a [f64],
+    /// `(β,σ)`の分散共分散行列（元のスケール、`(k+1)×(k+1)`）
+    cov_params: &'a Mat<f64>,
+}
+
+/// `target_w_and_s`系が計算する`(w, s_beta, s_sigma)`から、限界効果`dydx_j=w*βⱼ`と
+/// そのヤコビアン（`β`の`k`列+`σ`の1列、計`k+1`列）を組み立て、デルタ法による標準誤差・
+/// z値・p値・信頼区間を計算し、定数項を除いた`MarginalEffects`を返す。
+///
+/// `nonlinear/common.rs`の`marginal_effects_from_w_s`と数式の骨格
+/// （`∂dydx_j/∂θₘ=βⱼ*s_m+[j==m]*w`）は同じだが、パラメータ次元が`k`ではなく`k+1`
+/// （`σ`を含む）である点が異なるため独立実装とする（Issue #211の結論）。
+///
+/// # Errors
+/// `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
+fn marginal_effects_from_tobit_w_s(
+    model: TobitMarginalEffectsInputs,
+    w: f64,
+    s_beta: &[f64],
+    s_sigma: f64,
+    confidence_level: f64,
+) -> Result<MarginalEffects, MleError> {
+    validate_confidence_level(confidence_level)?;
+    let TobitMarginalEffectsInputs {
+        param_names,
+        has_intercept,
+        k,
+        beta,
+        cov_params,
+    } = model;
+
+    let dydx: Vec<f64> = (0..k).map(|j| w * beta[j]).collect();
+    // ヤコビアンの各行は長さ`k+1`（`β`のk列 + `σ`の1列）
+    let jacobian: Vec<Vec<f64>> = (0..k)
+        .map(|j| {
+            let mut row: Vec<f64> = (0..k)
+                .map(|m| beta[j] * s_beta[m] + if j == m { w } else { 0.0 })
+                .collect();
+            row.push(beta[j] * s_sigma);
+            row
+        })
+        .collect();
+
+    // `Normal::new(0.0, 1.0)`は標準正規分布であり、標準偏差が正であることを要求する
+    // statrsの検証を常に満たすため、この`map_err`分岐は理論上到達不能
+    // （`.claude/rules/rust-style.md`「テスト」のカバレッジ方針参照、`marginal_effects_from_w_s`
+    // と同じ扱い）。
+    let normal =
+        Normal::new(0.0, 1.0).map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+    let z_crit = inference::critical_value(&normal, confidence_level);
+
+    let k_constant = usize::from(has_intercept);
+    let k_plus_1 = k + 1;
+    let mut out_param_names = Vec::with_capacity(k - k_constant);
+    let mut out_dydx = Vec::with_capacity(k - k_constant);
+    let mut std_errors = Vec::with_capacity(k - k_constant);
+    let mut z_stats = Vec::with_capacity(k - k_constant);
+    let mut p_values = Vec::with_capacity(k - k_constant);
+    let mut conf_lower = Vec::with_capacity(k - k_constant);
+    let mut conf_upper = Vec::with_capacity(k - k_constant);
+
+    for j in k_constant..k {
+        let jac_row = &jacobian[j];
+        let mut var_j = 0.0;
+        for a in 0..k_plus_1 {
+            for b in 0..k_plus_1 {
+                var_j += jac_row[a] * (*cov_params.get(a, b)) * jac_row[b];
+            }
+        }
+        let se = var_j.sqrt();
+        let stat = inference::compute_inference_stat(&normal, dydx[j], se, z_crit);
+
+        out_param_names.push(param_names[j].clone());
+        out_dydx.push(dydx[j]);
+        std_errors.push(se);
+        z_stats.push(stat.stat);
+        p_values.push(stat.p_value);
+        conf_lower.push(stat.conf_low);
+        conf_upper.push(stat.conf_high);
+    }
+
+    Ok(MarginalEffects::from_parts(
+        out_param_names,
+        out_dydx,
+        std_errors,
+        z_stats,
+        p_values,
+        conf_lower,
+        conf_upper,
+    ))
+}
+
 /// Tobitの推定結果。`fit`でのバリデーション・最適化・`cov_type`に応じたSE計算・
-/// 適合度統計量・Wald検定を通過した状態を表す。限界効果は後続issue（#221）で追加する
-/// （`LogitEstimator`/`ProbitEstimator`との違い）。
+/// 適合度統計量・Wald検定・限界効果を通過した状態を表す。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
 #[derive(Debug)]
@@ -769,7 +1024,6 @@ impl TobitEstimator {
     /// （Issue #212の結論、`validate_sufficient_observations`のdocコメント参照）。
     /// Logit/Probitの`validate_has_regressors`（`k==0`検証）はTobitでは呼ばない
     /// （`logσ`が常に存在するため対応するケースが生じない、同関数のdocコメント参照）。
-    /// 適合度統計量・限界効果は後続issue（#220・#221）で追加する。
     ///
     /// ## `σ`のSE（デルタ法）
     ///
@@ -1070,6 +1324,75 @@ impl TobitEstimator {
     /// 実際の反復回数
     pub fn n_iter(&self) -> usize {
         self.n_iter
+    }
+
+    /// 限界効果（`marginal_effects`）。`fit()`とは独立した別メソッド（`fit()`のReturn
+    /// 本体には含めない、`nonlinear-api-design.md`6章で確定済み）。`fit()`時の
+    /// `cov_params`（`(k+1)×(k+1)`、`β∪{σ}`空間）を再利用するため再最適化は不要
+    /// （`confidence_level`は`fit()`とは独立したパラメータとして受け取る、
+    /// `LogitEstimator::marginal_effects`と同じ設計）。
+    ///
+    /// `target`で評価対象を選ぶ（`MarginalEffectsTarget`のdocコメント参照）。
+    /// Logit/Probitの`overall_w_and_s`/`at_point_w_and_s`型の共通化はしない
+    /// （Issue #211の結論。計算式自体は`target_w_and_s`/`marginal_effects_from_tobit_w_s`
+    /// のdocコメント参照）。左打ち切りのみ・右打ち切りのみ・両側打ち切りいずれの
+    /// `TobitInput`でも同じ式で正しく計算できる（`target_w_and_s`のdocコメント「数式」参照、
+    /// ユーザー確認済み）。
+    ///
+    /// 定数項（切片）は出力から除外する（Logit/Probitと同じ方針）。離散変数（0/1ダミー）の
+    /// 自動判定は行わない（常に連続変数として扱う、Logit/Probitと同じ方針）。
+    ///
+    /// # Errors
+    /// `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
+    pub fn marginal_effects(
+        &self,
+        at: MarginalEffectsAt,
+        target: MarginalEffectsTarget,
+        confidence_level: f64,
+    ) -> Result<MarginalEffects, MleError> {
+        let x = self.input.x();
+        let k = self.input.k();
+        let lower = self.input.lower();
+        let upper = self.input.upper();
+        let normal = Normal::standard();
+
+        let (w, s_beta, s_sigma) = match at {
+            MarginalEffectsAt::Overall => {
+                overall_target_w_and_s(x, &self.params, self.sigma, lower, upper, target, &normal)
+            }
+            MarginalEffectsAt::Mean => at_point_target_w_and_s(
+                &column_means(x),
+                &self.params,
+                self.sigma,
+                lower,
+                upper,
+                target,
+                &normal,
+            ),
+            MarginalEffectsAt::Median => at_point_target_w_and_s(
+                &column_medians(x),
+                &self.params,
+                self.sigma,
+                lower,
+                upper,
+                target,
+                &normal,
+            ),
+        };
+
+        marginal_effects_from_tobit_w_s(
+            TobitMarginalEffectsInputs {
+                param_names: self.input.param_names(),
+                has_intercept: self.input.has_intercept(),
+                k,
+                beta: &self.params,
+                cov_params: &self.cov_params,
+            },
+            w,
+            &s_beta,
+            s_sigma,
+            confidence_level,
+        )
     }
 }
 
@@ -2754,6 +3077,632 @@ mod tests {
         assert!(
             matches!(result, Err(MleError::SingularOpgMatrix)),
             "{result:?}"
+        );
+    }
+
+    /// `censored_regression_input`（左打ち切りのみ、`lower=Some(0.0)`）の右打ち切り版。
+    /// 潜在変数`y* = -5 + 2x + noise`は同じだが、`upper=Some(6.0)`で上側を打ち切る
+    /// （x=6,7,8の潜在値6.85・9.1・10.95が6.0に打ち切られる、打ち切り率37.5%）。
+    /// `marginal_effects`が右打ち切りのみのケースでも正しく計算できることを検証する
+    /// データセット（`target_w_and_s`のdocコメント「数式」参照、ユーザー確認済み）。
+    fn right_censored_regression_input() -> TobitInput {
+        let x = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let y = vec![-2.85, -0.95, 1.15, 2.9, 5.2, 6.0, 6.0, 6.0];
+        TobitInput::from_columns(
+            &y,
+            &[x],
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            None,
+            Some(6.0),
+        )
+        .unwrap()
+    }
+
+    /// `censored_regression_input`の両側打ち切り版。同じ潜在変数`y* = -5 + 2x + noise`に
+    /// `lower=Some(0.0)`・`upper=Some(6.0)`の両方を適用する（x=1,2は下側、x=6,7,8は上側で
+    /// 打ち切り、非打ち切りはx=3,4,5のみ）。
+    fn two_sided_censored_regression_input() -> TobitInput {
+        let x = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let y = vec![0.0, 0.0, 1.15, 2.9, 5.2, 6.0, 6.0, 6.0];
+        TobitInput::from_columns(
+            &y,
+            &[x],
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            Some(0.0),
+            Some(6.0),
+        )
+        .unwrap()
+    }
+
+    /// `E[y|x]`の閉形式（McDonald-Moffitt 1980）。左打ち切りのみ・右打ち切りのみ・両側
+    /// 打ち切りをそれぞれ独立した分岐で書き下す（`target_w_and_s`の統一的な
+    /// `boundary_terms`実装とは別のコードパスで検算するため、`(lower,upper)`ごとの
+    /// 教科書通りの式をそのまま使う）。
+    fn expected_observed_closed_form(
+        mu: f64,
+        sigma: f64,
+        lower: Option<f64>,
+        upper: Option<f64>,
+    ) -> f64 {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        match (lower, upper) {
+            (Some(c), None) => {
+                let z = (mu - c) / sigma;
+                normal.cdf(z) * mu + sigma * normal.pdf(z) + (1.0 - normal.cdf(z)) * c
+            }
+            (None, Some(c)) => {
+                let z = (c - mu) / sigma;
+                normal.cdf(z) * mu - sigma * normal.pdf(z) + (1.0 - normal.cdf(z)) * c
+            }
+            (Some(c1), Some(c2)) => {
+                let za = (c1 - mu) / sigma;
+                let zb = (c2 - mu) / sigma;
+                normal.cdf(za) * c1
+                    + (1.0 - normal.cdf(zb)) * c2
+                    + (normal.cdf(zb) - normal.cdf(za)) * mu
+                    - sigma * (normal.pdf(zb) - normal.pdf(za))
+            }
+            (None, None) => unreachable!("TobitInput::from_columns rejects both-None bounds"),
+        }
+    }
+
+    /// `P(uncensored|x)`の閉形式。`expected_observed_closed_form`と同じ理由で
+    /// `(lower,upper)`ごとに独立した分岐で書く。
+    fn prob_uncensored_closed_form(
+        mu: f64,
+        sigma: f64,
+        lower: Option<f64>,
+        upper: Option<f64>,
+    ) -> f64 {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        match (lower, upper) {
+            (Some(c), None) => normal.cdf((mu - c) / sigma),
+            (None, Some(c)) => normal.cdf((c - mu) / sigma),
+            (Some(c1), Some(c2)) => normal.cdf((c2 - mu) / sigma) - normal.cdf((c1 - mu) / sigma),
+            (None, None) => unreachable!("TobitInput::from_columns rejects both-None bounds"),
+        }
+    }
+
+    /// `∂P(uncensored|x)/∂μ`の閉形式（`prob_uncensored_closed_form`を`mu`について解析的に
+    /// 微分した式。`target_w_and_s`の`ProbUncensored`分岐とは独立に書き下したコード）。
+    fn dprob_uncensored_dmu_closed_form(
+        mu: f64,
+        sigma: f64,
+        lower: Option<f64>,
+        upper: Option<f64>,
+    ) -> f64 {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        match (lower, upper) {
+            (Some(c), None) => normal.pdf((c - mu) / sigma) / sigma,
+            (None, Some(c)) => -normal.pdf((c - mu) / sigma) / sigma,
+            (Some(c1), Some(c2)) => {
+                (normal.pdf((c1 - mu) / sigma) - normal.pdf((c2 - mu) / sigma)) / sigma
+            }
+            (None, None) => unreachable!("TobitInput::from_columns rejects both-None bounds"),
+        }
+    }
+
+    /// 切片のみモデル（k=1）は限界効果の出力対象となる説明変数が存在しない
+    /// （定数項は出力から除外するため）。`marginal_effects`が空の結果を返す
+    /// （パニックしない）ことを確認する境界ケース（Logitの同名テストと同じ理由）。
+    #[test]
+    fn fit_marginal_effects_returns_empty_result_for_intercept_only_model() {
+        let estimator = TobitEstimator::fit(
+            intercept_only_uncensored_input(&[1.0, 2.0, 3.0, 4.0]),
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        let effects = estimator
+            .marginal_effects(
+                MarginalEffectsAt::Overall,
+                MarginalEffectsTarget::ExpectedObserved,
+                0.95,
+            )
+            .unwrap();
+        assert!(effects.param_names().is_empty());
+        assert!(effects.dydx().is_empty());
+    }
+
+    #[test]
+    fn fit_marginal_effects_returns_invalid_confidence_level_error_out_of_range() {
+        let estimator = TobitEstimator::fit(
+            censored_regression_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        let result = estimator.marginal_effects(
+            MarginalEffectsAt::Overall,
+            MarginalEffectsTarget::ExpectedObserved,
+            1.5,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::Common(CommonError::InvalidConfidenceLevel {
+                confidence_level: 1.5
+            })
+        );
+    }
+
+    /// `target="E[y*|x]"`（潜在変数の期待値）は`dydx_j=βⱼ`という自明な形（評価点`x`に
+    /// 依存しない）ため、`at`（overall/mean/median）に関わらず常に同じ値になり、
+    /// その標準誤差も`β`自体の標準誤差（`std_errors()`の対応する要素）と厳密に一致する
+    /// （ヤコビアンが`β`ブロックで恒等写像・`σ`列がゼロに退化するため、数値微分に頼らず
+    /// 厳密等式として検証できる）。
+    #[test]
+    fn fit_marginal_effects_expected_latent_equals_beta_and_matches_beta_std_error() {
+        let estimator = TobitEstimator::fit(
+            multivariate_censored_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        for at in [
+            MarginalEffectsAt::Overall,
+            MarginalEffectsAt::Mean,
+            MarginalEffectsAt::Median,
+        ] {
+            let effects = estimator
+                .marginal_effects(at, MarginalEffectsTarget::ExpectedLatent, 0.95)
+                .unwrap();
+            assert_eq!(effects.param_names(), ["x1".to_string(), "x2".to_string()]);
+            for (idx, j) in (1..3).enumerate() {
+                assert!((effects.dydx()[idx] - estimator.params()[j]).abs() < 1e-12);
+                assert!(
+                    (effects.std_errors()[idx] - estimator.std_errors()[j]).abs() < 1e-9,
+                    "at={at:?}, idx={idx}, actual={}, expected={}",
+                    effects.std_errors()[idx],
+                    estimator.std_errors()[j]
+                );
+            }
+        }
+    }
+
+    /// `target="E[y|x]"`（既定）の`at="overall"`（AME）を、実装内部（`target_w_and_s`）とは
+    /// 別に書いた閉形式`expected_observed_closed_form`を各観測で平均する方法で独立に
+    /// 再計算し、突き合わせる。標準誤差は、`dydx_j`を`prob_uncensored_closed_form`
+    /// （非打ち切り確率の閉形式）×`βⱼ`という独立な式で表し、fit済みパラメータの周りで
+    /// 数値微分したヤコビアンと`cov_params`の二次形式で計算した分散の平方根と突き合わせる
+    /// （Logitの`marginal_effects_overall_matches_independently_recomputed_dydx_and_delta_
+    /// method_se`と同じ検算パターン）。
+    #[test]
+    fn fit_marginal_effects_expected_observed_overall_matches_independently_recomputed_dydx_and_delta_method_se()
+     {
+        let estimator = TobitEstimator::fit(
+            censored_regression_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        let lower = estimator.input().lower();
+        let upper = estimator.input().upper();
+        let x = estimator.input().x();
+        let n = x.nrows();
+        let k = 2;
+
+        let effects = estimator
+            .marginal_effects(
+                MarginalEffectsAt::Overall,
+                MarginalEffectsTarget::ExpectedObserved,
+                0.95,
+            )
+            .unwrap();
+        assert_eq!(effects.param_names(), ["x1".to_string()]);
+
+        // dydxの独立再計算: 各観測でE[y|x]を数値微分してx1の限界効果を求め、平均する
+        // （`target_w_and_s`の`P(uncensored)*βⱼ`という閉形式は経由しない）。
+        let h = 1e-6;
+        let dydx_at_row = |params: &[f64], sigma: f64, i: usize| -> f64 {
+            let mu = |x1_val: f64| -> f64 { params[0] + params[1] * x1_val };
+            let x1 = *x.get(i, 1);
+            let plus = expected_observed_closed_form(mu(x1 + h), sigma, lower, upper);
+            let minus = expected_observed_closed_form(mu(x1 - h), sigma, lower, upper);
+            (plus - minus) / (2.0 * h)
+        };
+        let dydx_ame = |params: &[f64], sigma: f64| -> f64 {
+            (0..n).map(|i| dydx_at_row(params, sigma, i)).sum::<f64>() / (n as f64)
+        };
+        let params = estimator.params();
+        let sigma = estimator.sigma();
+        assert!(
+            (effects.dydx()[0] - dydx_ame(params, sigma)).abs() < 1e-6,
+            "actual={}, expected={}",
+            effects.dydx()[0],
+            dydx_ame(params, sigma)
+        );
+
+        // 数値微分とは別の、McDonald-Moffitt(1980)の厳密な恒等式
+        // `∂E[y|x]/∂xⱼ = P(uncensored|x)*βⱼ`（`target_w_and_s`のdocコメント「数式」参照）
+        // による検算。`prob_uncensored_closed_form`は数値微分を一切経由しない厳密な閉形式
+        // のため、数値誤差なしで一致するはず。
+        let expected_dydx_exact: f64 = (0..n)
+            .map(|i| {
+                let mu: f64 = params[0] + params[1] * (*x.get(i, 1));
+                prob_uncensored_closed_form(mu, sigma, lower, upper) * params[1]
+            })
+            .sum::<f64>()
+            / (n as f64);
+        assert!(
+            (effects.dydx()[0] - expected_dydx_exact).abs() < 1e-9,
+            "actual={}, expected={expected_dydx_exact}",
+            effects.dydx()[0]
+        );
+
+        // 標準誤差の独立検証: `dydx_ame`をfit済み`(β,σ)`の周りで数値微分してヤコビアン行を
+        // 求め、`cov_params`との二次形式で分散を計算する。
+        let h_param = 1e-5;
+        let mut jac_row = vec![0.0; k + 1];
+        for m in 0..k {
+            let mut plus_p = params.to_vec();
+            plus_p[m] += h_param;
+            let mut minus_p = params.to_vec();
+            minus_p[m] -= h_param;
+            jac_row[m] = (dydx_ame(&plus_p, sigma) - dydx_ame(&minus_p, sigma)) / (2.0 * h_param);
+        }
+        jac_row[k] = (dydx_ame(params, sigma + h_param) - dydx_ame(params, sigma - h_param))
+            / (2.0 * h_param);
+
+        let mut var = 0.0;
+        for a in 0..=k {
+            for b in 0..=k {
+                var += jac_row[a] * (*estimator.cov_params().get(a, b)) * jac_row[b];
+            }
+        }
+        let expected_se = var.sqrt();
+        assert!(
+            (effects.std_errors()[0] - expected_se).abs() < 1e-4,
+            "actual={}, expected={expected_se}",
+            effects.std_errors()[0]
+        );
+    }
+
+    /// `at="mean"`/`"median"`が`at="overall"`と異なる代表点で評価されるため、一般には
+    /// 異なる値になることを確認する（Logitの同名テストと同じ理由）。
+    #[test]
+    fn fit_marginal_effects_expected_observed_at_mean_and_median_differ_from_overall() {
+        let estimator = TobitEstimator::fit(
+            censored_regression_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        let overall = estimator
+            .marginal_effects(
+                MarginalEffectsAt::Overall,
+                MarginalEffectsTarget::ExpectedObserved,
+                0.95,
+            )
+            .unwrap();
+        let at_mean = estimator
+            .marginal_effects(
+                MarginalEffectsAt::Mean,
+                MarginalEffectsTarget::ExpectedObserved,
+                0.95,
+            )
+            .unwrap();
+        let at_median = estimator
+            .marginal_effects(
+                MarginalEffectsAt::Median,
+                MarginalEffectsTarget::ExpectedObserved,
+                0.95,
+            )
+            .unwrap();
+
+        assert!((overall.dydx()[0] - at_mean.dydx()[0]).abs() > 1e-9);
+        assert!((at_mean.dydx()[0] - at_median.dydx()[0]).abs() < 1e-12);
+
+        // x1の平均・中央値がともに4.5（[1..8]の対称なデータのため）であることを利用し、
+        // `expected_observed_closed_form`から独立に再計算したdydxと突き合わせる。
+        let params = estimator.params();
+        let sigma = estimator.sigma();
+        let lower = estimator.input().lower();
+        let upper = estimator.input().upper();
+        let mu = |x1_val: f64| -> f64 { params[0] + params[1] * x1_val };
+        let h = 1e-6;
+        let expected_dydx = (expected_observed_closed_form(mu(4.5 + h), sigma, lower, upper)
+            - expected_observed_closed_form(mu(4.5 - h), sigma, lower, upper))
+            / (2.0 * h);
+        assert!((at_mean.dydx()[0] - expected_dydx).abs() < 1e-6);
+    }
+
+    /// `target="E[y|x]"`が右打ち切りのみのデータでも正しく計算できることを、
+    /// `expected_observed_closed_form`（右打ち切り分岐）で独立に再計算した`dydx`と
+    /// 突き合わせて検証する。
+    #[test]
+    fn fit_marginal_effects_expected_observed_matches_independent_recomputation_for_right_only_censoring()
+     {
+        let estimator = TobitEstimator::fit(
+            right_censored_regression_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        let lower = estimator.input().lower();
+        let upper = estimator.input().upper();
+        assert_eq!(lower, None);
+        let x = estimator.input().x();
+        let n = x.nrows();
+        let params = estimator.params();
+        let sigma = estimator.sigma();
+
+        let effects = estimator
+            .marginal_effects(
+                MarginalEffectsAt::Overall,
+                MarginalEffectsTarget::ExpectedObserved,
+                0.95,
+            )
+            .unwrap();
+
+        let h = 1e-6;
+        let mu = |x1_val: f64| -> f64 { params[0] + params[1] * x1_val };
+        let expected_dydx: f64 = (0..n)
+            .map(|i| {
+                let x1 = *x.get(i, 1);
+                let plus = expected_observed_closed_form(mu(x1 + h), sigma, lower, upper);
+                let minus = expected_observed_closed_form(mu(x1 - h), sigma, lower, upper);
+                (plus - minus) / (2.0 * h)
+            })
+            .sum::<f64>()
+            / (n as f64);
+
+        assert!(
+            (effects.dydx()[0] - expected_dydx).abs() < 1e-6,
+            "actual={}, expected={expected_dydx}",
+            effects.dydx()[0]
+        );
+    }
+
+    /// `target="E[y|x]"`が両側打ち切りのデータでも正しく計算できることを、
+    /// `expected_observed_closed_form`（両側打ち切り分岐）で独立に再計算した`dydx`と
+    /// 突き合わせて検証する。
+    #[test]
+    fn fit_marginal_effects_expected_observed_matches_independent_recomputation_for_two_sided_censoring()
+     {
+        let estimator = TobitEstimator::fit(
+            two_sided_censored_regression_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        let lower = estimator.input().lower();
+        let upper = estimator.input().upper();
+        assert_eq!(lower, Some(0.0));
+        assert_eq!(upper, Some(6.0));
+        let x = estimator.input().x();
+        let n = x.nrows();
+        let params = estimator.params();
+        let sigma = estimator.sigma();
+
+        let effects = estimator
+            .marginal_effects(
+                MarginalEffectsAt::Overall,
+                MarginalEffectsTarget::ExpectedObserved,
+                0.95,
+            )
+            .unwrap();
+
+        let h = 1e-6;
+        let mu = |x1_val: f64| -> f64 { params[0] + params[1] * x1_val };
+        let expected_dydx: f64 = (0..n)
+            .map(|i| {
+                let x1 = *x.get(i, 1);
+                let plus = expected_observed_closed_form(mu(x1 + h), sigma, lower, upper);
+                let minus = expected_observed_closed_form(mu(x1 - h), sigma, lower, upper);
+                (plus - minus) / (2.0 * h)
+            })
+            .sum::<f64>()
+            / (n as f64);
+
+        assert!(
+            (effects.dydx()[0] - expected_dydx).abs() < 1e-6,
+            "actual={}, expected={expected_dydx}",
+            effects.dydx()[0]
+        );
+    }
+
+    /// `target="P(uncensored)"`（左打ち切りのみ）を、`prob_uncensored_closed_form`を
+    /// `mu`について数値微分した`dprob_uncensored_dmu_closed_form`×`βⱼ`という
+    /// （`target_w_and_s`の`ProbUncensored`分岐とは独立の）式で再計算し、dydx・標準誤差
+    /// 双方を突き合わせる。
+    #[test]
+    fn fit_marginal_effects_prob_uncensored_overall_matches_independently_recomputed_dydx_and_delta_method_se()
+     {
+        let estimator = TobitEstimator::fit(
+            censored_regression_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        let lower = estimator.input().lower();
+        let upper = estimator.input().upper();
+        let x = estimator.input().x();
+        let n = x.nrows();
+        let k = 2;
+
+        let effects = estimator
+            .marginal_effects(
+                MarginalEffectsAt::Overall,
+                MarginalEffectsTarget::ProbUncensored,
+                0.95,
+            )
+            .unwrap();
+
+        let dydx_ame = |params: &[f64], sigma: f64| -> f64 {
+            (0..n)
+                .map(|i| {
+                    let mu: f64 = params[0] + params[1] * (*x.get(i, 1));
+                    dprob_uncensored_dmu_closed_form(mu, sigma, lower, upper) * params[1]
+                })
+                .sum::<f64>()
+                / (n as f64)
+        };
+        let params = estimator.params();
+        let sigma = estimator.sigma();
+        assert!(
+            (effects.dydx()[0] - dydx_ame(params, sigma)).abs() < 1e-9,
+            "actual={}, expected={}",
+            effects.dydx()[0],
+            dydx_ame(params, sigma)
+        );
+
+        let h_param = 1e-5;
+        let mut jac_row = vec![0.0; k + 1];
+        for m in 0..k {
+            let mut plus_p = params.to_vec();
+            plus_p[m] += h_param;
+            let mut minus_p = params.to_vec();
+            minus_p[m] -= h_param;
+            jac_row[m] = (dydx_ame(&plus_p, sigma) - dydx_ame(&minus_p, sigma)) / (2.0 * h_param);
+        }
+        jac_row[k] = (dydx_ame(params, sigma + h_param) - dydx_ame(params, sigma - h_param))
+            / (2.0 * h_param);
+
+        let mut var = 0.0;
+        for a in 0..=k {
+            for b in 0..=k {
+                var += jac_row[a] * (*estimator.cov_params().get(a, b)) * jac_row[b];
+            }
+        }
+        let expected_se = var.sqrt();
+        assert!(
+            (effects.std_errors()[0] - expected_se).abs() < 1e-4,
+            "actual={}, expected={expected_se}",
+            effects.std_errors()[0]
+        );
+    }
+
+    /// `target="P(uncensored)"`は右打ち切りのみだと符号が反転する（`x`の増加が上側の
+    /// 打ち切り確率を高めるため非打ち切り確率は減少する。`target_w_and_s`のdocコメント
+    /// 「数式」参照）。この符号反転が正しく実装されていることを、右打ち切りのみの
+    /// データで独立再計算したdydxと突き合わせて確認する。
+    #[test]
+    fn fit_marginal_effects_prob_uncensored_matches_independent_recomputation_for_right_only_censoring()
+     {
+        let estimator = TobitEstimator::fit(
+            right_censored_regression_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        let lower = estimator.input().lower();
+        let upper = estimator.input().upper();
+        let x = estimator.input().x();
+        let n = x.nrows();
+        let params = estimator.params();
+        let sigma = estimator.sigma();
+
+        let effects = estimator
+            .marginal_effects(
+                MarginalEffectsAt::Overall,
+                MarginalEffectsTarget::ProbUncensored,
+                0.95,
+            )
+            .unwrap();
+
+        let expected_dydx: f64 = (0..n)
+            .map(|i| {
+                let mu: f64 = params[0] + params[1] * (*x.get(i, 1));
+                dprob_uncensored_dmu_closed_form(mu, sigma, lower, upper) * params[1]
+            })
+            .sum::<f64>()
+            / (n as f64);
+
+        assert!(
+            (effects.dydx()[0] - expected_dydx).abs() < 1e-9,
+            "actual={}, expected={expected_dydx}",
+            effects.dydx()[0]
+        );
+        // x1の真の係数は正（+2相当）なので、右打ち切りのみでは非打ち切り確率の限界効果は
+        // 負になるはず（xが増えるほど上側で打ち切られやすくなるため）。
+        assert!(effects.dydx()[0] < 0.0, "dydx={}", effects.dydx()[0]);
+    }
+
+    /// `target="P(uncensored)"`が両側打ち切りのデータでも正しく計算できることを検証する。
+    #[test]
+    fn fit_marginal_effects_prob_uncensored_matches_independent_recomputation_for_two_sided_censoring()
+     {
+        let estimator = TobitEstimator::fit(
+            two_sided_censored_regression_input(),
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        let lower = estimator.input().lower();
+        let upper = estimator.input().upper();
+        let x = estimator.input().x();
+        let n = x.nrows();
+        let params = estimator.params();
+        let sigma = estimator.sigma();
+
+        let effects = estimator
+            .marginal_effects(
+                MarginalEffectsAt::Overall,
+                MarginalEffectsTarget::ProbUncensored,
+                0.95,
+            )
+            .unwrap();
+
+        let expected_dydx: f64 = (0..n)
+            .map(|i| {
+                let mu: f64 = params[0] + params[1] * (*x.get(i, 1));
+                dprob_uncensored_dmu_closed_form(mu, sigma, lower, upper) * params[1]
+            })
+            .sum::<f64>()
+            / (n as f64);
+
+        assert!(
+            (effects.dydx()[0] - expected_dydx).abs() < 1e-9,
+            "actual={}, expected={expected_dydx}",
+            effects.dydx()[0]
         );
     }
 }

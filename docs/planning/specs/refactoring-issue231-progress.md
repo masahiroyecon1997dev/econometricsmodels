@@ -134,17 +134,19 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
 - `benchmark/performance/`: `compare_performance.py`・`render_performance_summary.py`
   （全区切り解説済み）
 - `tests/`: `_assertions.py`・`_helpers.py`・`_tolerances.py`・`conftest.py`・
-  `test_ols.py`（全区切り解説済み）
+  `test_ols.py`・`test_ols_fixtures.py`（全区切り解説済み）
 
-**次に解説予定**: `tests/test_{wls,logit,probit,iv,tobit}*.py`
-（16ファイル、いずれも未着手）。`test_ols.py`解説後のユーザーとの質疑で
-数値比較の役割・許容誤差の一貫性・オプションのfixturesカバレッジ等について
-多数の指摘を受け、`refactoring-candidates-2.md`項目51〜56・
-`test-coverage-candidates.md`項目25〜27に記録済み（詳細下記）。特に項目52
-（`test_ols.py`が構造テストと簡易数値比較を兼ねる非対称性）・項目27
-（`include_intercept=False`等がfixturesで未検証）は、次に`test_wls.py`等
-残り16ファイルを解説する際も同じ観点（このファイルは数値比較を兼ねていないか、
-fixtures側のオプション網羅は十分か）で確認するとよい。
+**次に解説予定**: `tests/test_ols_crosscheck.py`（ユーザー指示により、まず
+OLS関連ファイルを一通り見てから他手法に進む方針。残り15ファイルは
+`test_ols_crosscheck.py`の後）。`test_ols.py`/`test_ols_fixtures.py`解説後の
+ユーザーとの質疑で、数値比較の役割・許容誤差の一貫性・オプションのfixtures
+カバレッジ・クラスターのシナリオ横断検証漏れ等について多数の指摘を受け、
+`refactoring-candidates-2.md`項目51〜59・`test-coverage-candidates.md`項目
+25〜29に記録済み（詳細下記）。特に項目52（`test_ols.py`が構造テストと
+簡易数値比較を兼ねる非対称性）・項目27（`include_intercept=False`等が
+fixturesで未検証）・項目29（クラスターがbaselineシナリオでしか検証されて
+いない）は、`test_ols_crosscheck.py`や他手法のファイルを解説する際も
+同じ観点で確認するとよい。
 
 **このウォークスルー中に作成したGitHub Issue**: [#246](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/246)
 （検定分布・診断統計量の運用ノート`docs/spec/inference-conventions.md`化）・
@@ -155,23 +157,26 @@ fixtures側のオプション網羅は十分か）で確認するとよい。
 （Logit/Probitの最適化methodにFisher-scoring追加検討）・
 [#266](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/266)
 （polars以外のDataFrame（pandas等）を渡すと`ValidationError`ではなく
-`AttributeError`が漏れる、`test_ols.py`解説中の質問を受けて実際に検証し発覚）。
-いずれもオープンのまま。
+`AttributeError`が漏れる、`test_ols.py`解説中の質問を受けて実際に検証し発覚）・
+[#267](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/267)
+（Rとの計算慣習差〔HAC・AIC/BIC等〕に完全一致させる互換モードの要否、
+優先度低、`test_ols_fixtures.py`解説中の議論から）。いずれもオープンのまま。
 
-**候補メモの状態（2026-08-22時点）**:
+**候補メモの状態（2026-08-23時点）**:
 - `refactoring-candidates.md`: 項目1〜43（このウォークスルー由来の最後の追記は項目43）。
   上記「`refactoring-candidates.md`駆動の随時対応」セッションが並行して対応中のため、
-  このウォークスルーからの新規追記は`refactoring-candidates-2.md`（項目44〜56、
-  直近の追記は`test_ols.py`解説時のIssue番号コメント残存・構造/数値比較の役割非対称・
-  許容誤差の不一致・`perfect_multicollinearity`検証重複・`test_ols_fixtures.py`の
-  命名・数値比較の書き方混在）に切り替えている。**両ファイルの統合は
+  このウォークスルーからの新規追記は`refactoring-candidates-2.md`（項目44〜59、
+  直近の追記は`test_ols_fixtures.py`解説時の`HAC_LAG_IN_FIXTURE`相当の値の3箇所
+  重複・疑似クラスターラベル生成`[i % 10 for i in range(n)]`のbenchmark/11ファイル
+  重複・項目50〔PYTHONPATH未設定〕への追記で影響範囲が`tests/`数値照合系11ファイル
+  全体に及ぶことを確認）に切り替えている。**両ファイルの統合は
   `refactoring-candidates.md`側の随時対応が一区切りついた後にユーザー判断で行う**
   （現時点では統合しない）。
-- `test-coverage-candidates.md`: 項目1〜27（直近3件は`test_ols.py`解説時、
-  `dataset`フィクスチャの説明変数不足による列対応バグの検出力不足・
-  `ValidationError`のメッセージ内容検証の欠如・`include_intercept=False`等の
-  オプションがfixturesパイプラインで未検証）。こちらはブロックされていないため
-  引き続き直接追記してよい。
+- `test-coverage-candidates.md`: 項目1〜29（直近2件は`test_ols_fixtures.py`
+  解説時、クラスターロバストSEのt値・p値・信頼区間が主リファレンス
+  〔statsmodels〕側で未検証・クラスターがどの検証層でもbaselineシナリオ
+  でしか数値照合されていない）。こちらはブロックされていないため引き続き
+  直接追記してよい。
 
 **再開時の確認事項**: 上記「並行作業についての注意」と同じく、`refactoring-candidates.md`
 側の対応が進んでいれば項目1〜43の「状態」欄が更新されているはずなので、再開前に

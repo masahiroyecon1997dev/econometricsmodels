@@ -81,28 +81,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-22、`tests/_helpers.py`解説後のユーザー指摘。
 - **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
 
-### 47. `tests/_helpers.py`の`wooldridge_loader`が、`conftest.py`で既に済んでいる`sys.path.insert`を重複実行している
-
-- **対象**: [tests/_helpers.py:90-92](../../../tests/_helpers.py#L90-L92)
-  （`wooldridge_loader`内の`sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "benchmark"))`）
-  と対比した[tests/conftest.py:11](../../../tests/conftest.py#L11)
-  （同一パスを`sys.path.insert`）
-- **内容**: ユーザー指摘（2026-08-22）を受けて確認。`conftest.py`はpytest起動時に
-  必ず最初に読み込まれ、`benchmark/`ディレクトリを`sys.path`へ既に挿入済み。
-  一方`tests/_helpers.py`の`wooldridge_loader()`は、`from load_wooldridge import
-  load`の直前で全く同じパスをもう一度`sys.path.insert`している。
-  `load_wooldridge_dataset`/`wooldridge_loader`の全呼び出し元（`test_ols_crosscheck.py`・
-  `test_iv_fixtures.py`・`test_logit_fixtures.py`等）を`grep`で確認したところ、
-  いずれもテスト関数の実行時（`conftest.py`が確実に読み込まれた後）にしか
-  呼ばれていないため、`_helpers.py`側の`sys.path.insert`は削除しても動作に
-  影響しない、純粋な重複だと判断できる。
-- **Claudeの所感**: `sys.path.insert`の記述箇所をできる限り減らしたいという
-  ユーザー方針に対し、これは実害の無い重複を1箇所削減できる具体的な対象。
-  優先度は低いが対応コストも小さい。
-- **気づいた経緯**: 2026-08-22、`tests/_helpers.py`解説後、`sys.path.insert`
-  最小化についてのユーザー相談を受けて`conftest.py`と突き合わせて発見。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
-
 ### 48. `tests/_assertions.py`/`tests/_helpers.py`のdocstringに「何箇所重複していたか」「フェーズ3.5で修正予定」等、経緯だけを説明する冗長な記述が残っている
 
 - **対象**: [tests/_assertions.py:10](../../../tests/_assertions.py#L10)

@@ -80,7 +80,20 @@
   明記する再発防止も合わせて実施）。
 - 上記5項目は`refactoring-candidates.md`本体からは削除済み（2026-08-22運用ルール、
   同ファイル冒頭「完了項目の扱い」参照）。このスナップショットが唯一の記録。
-- 上記以外（項目1・2・5〜35・37〜43、および`refactoring-candidates-2.md`項目44〜49）は未着手。
+- 項目47（`refactoring-candidates-2.md`、`tests/_helpers.py`の`wooldridge_loader`が
+  `conftest.py`と同一パスへ`sys.path.insert`を重複実行していた）: 対応済み・未コミット
+  （本セッションで実装、コミット前確認待ち）。`wooldridge_loader`から
+  `sys.path.insert`呼び出しを削除（未使用になった`import sys`も削除）。
+  `pytest tests`956件全件パス、`ruff check`／`ruff format --check`パス確認済み。
+  `refactoring-candidates-2.md`本体からも同ポリシーで削除済み。
+  **注**: 同ファイルの項目50（別セッションが追記、未コミット）が「影響範囲」として
+  `tests/_helpers.py:90`・「項目47で指摘済みの重複分」に言及しているが、本対応で
+  該当コードが削除されたためこの1点の記述が古くなっている。項目50自体の本題
+  （CI環境`ci_python.yml`にPYTHONPATHが伝播しておらず`tests/`側の
+  `sys.path.insert`が今も必要という指摘）には影響しない。項目50を書いた
+  セッション側の判断で追って更新される想定のため、こちらからは修正しない。
+- 上記以外（項目1・2・5〜35・37〜43、および`refactoring-candidates-2.md`項目44〜46・
+  48〜50）は未着手。
 
 **並行作業についての注意**: 本セッションと並行して、別セッションが
 `refactoring-candidates.md`を対象にした別の作業（コード解説中の気づき記録等）を

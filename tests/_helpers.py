@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import math
 import random
-import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -87,9 +86,6 @@ def wooldridge_loader() -> Callable[[str], pl.DataFrame]:
     `load_wooldridge_dataset`を使う方が簡潔。
     """
     pytest.importorskip("wooldridge")
-    sys.path.insert(
-        0, str(Path(__file__).resolve().parent.parent / "benchmark")
-    )
     from load_wooldridge import load
 
     return load

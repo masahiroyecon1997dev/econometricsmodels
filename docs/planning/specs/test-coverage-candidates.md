@@ -630,3 +630,94 @@
   ユーザー指摘（「clusterに関してはシナリオごとで検証する必要はないのか、
   精度漏れの可能性が残ることは避けたい」）を受けて3層を確認。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 30. `time_col`が存在しない列名を指した場合の`ValidationError`テストが無い（`cluster_col`には対になるテストがある）
+
+- **対象**: [tests/test_ols.py:166-173](../../../tests/test_ols.py#L166-L173)
+  （`test_cluster_col_nonexistent_column_raises`、`cluster_col`が存在しない
+  列を指す場合の専用テスト）と対比した、`time_col`に対する同種テストの不在。
+  実装は[engine_pybind/src/linear/common.rs:99-107](../../../engine_pybind/src/linear/common.rs#L99-L107)
+  （`cov_type="hac"`のとき`time_col`を`extract_f64_column`で抽出）。
+- **内容**: ユーザー依頼（2026-08-23）を受けて確認。実装自体は正しく
+  動作する（実機確認済み: `OLSOptions(cov_type="hac", hac_lags=1,
+  time_col="does_not_exist")`で`ValidationError("column 'does_not_exist'
+  does not exist in the data")`が発生）。しかしこれを確認する
+  Pythonテストが`test_ols.py`に無い。`cluster_col`側には
+  `testing-completeness-reviewer指摘、Issue #231フェーズ4`という経緯で
+  追加された専用テストがあるのに、`time_col`には対になるテストが
+  追加されていない非対称な状態。
+- **Claudeの所感**: 実装は正しいため緊急度は低いが、`cluster_col`と
+  `time_col`は同じ「`cov_type`固有の追加列」という位置づけ
+  （`engine_pybind/src/linear/CLAUDE.md`「`cov_type`固有の追加列」参照）で
+  あり、片方だけテストがあるのは網羅性の観点で片手落ち。
+  `test_cluster_col_nonexistent_column_raises`と同じパターンで数行
+  追加すれば埋められる。
+- **気づいた経緯**: 2026-08-23、ユーザー依頼により`test_ols.py`の
+  バリデーション網羅性を確認中に発見。
+- **状態**: 未対応（着手要否はユーザー判断待ち、修正は保留）
+
+### 31. `fit()`本体（`y`/`x`列）でNaN・無限大を含む場合のテストが無い（`predict()`側にはある）
+
+- **対象**: [tests/test_ols.py:181-184](../../../tests/test_ols.py#L181-L184)
+  （`test_null_values_raise`、null値のみ）と対比した
+  [tests/test_ols.py:651-660](../../../tests/test_ols.py#L651-L660)
+  （`test_predict_null_or_non_finite_values_raise`、`predict()`の`new_data`は
+  nullと`float("inf")`の両方をテスト済み）。実装は
+  [engine_pybind/src/column_extraction.rs:65-72](../../../engine_pybind/src/column_extraction.rs#L65-L72)
+  （`extract_f64_column`、コメント「polarsの`null_count()`はNaN/無限大を
+  検出しない...別途スキャンする必要がある」の通り、null検証とNaN/Inf検証は
+  別ロジック）。
+- **内容**: ユーザー依頼（2026-08-23）を受けて`test_ols.py`のバリデーション
+  網羅性を確認中に発見。`fit()`が受け取る`y`/`x`列（学習データ本体）は
+  null値のテストのみで、NaN・無限大（`float("inf")`/`float("nan")`）を
+  含む場合のテストが無い。同じ`extract_f64_column`関数を使う`predict()`の
+  `new_data`側には両方のテストがあるのと非対称。
+- **Claudeの所感**: null検証とNaN/Inf検証は`extract_f64_column`内で
+  別々のスキャン（`null_count()`とその後の`is_finite()`ループ）のため、
+  片方だけ通っても他方が壊れていることに気づけない構造。`predict()`側に
+  ある`test_predict_null_or_non_finite_values_raise`と対になる
+  `fit()`側のテストを追加するのが妥当。
+- **気づいた経緯**: 2026-08-23、ユーザー依頼により`test_ols.py`の
+  バリデーション網羅性を確認中に発見。
+- **状態**: 未対応（着手要否はユーザー判断待ち、修正は保留）
+
+### 32. `y`列自体が存在しない場合・`cluster_col`にNull値を含む場合の専用テストが無い（低優先度、同一コードパスの既存テストで実質カバー済み）
+
+- **対象**: [tests/test_ols.py:176-178](../../../tests/test_ols.py#L176-L178)
+  （`test_missing_column_raises`、`x=["x1", "nonexistent"]`のみで`y`側の
+  欠落は未テスト）／`cluster_col`のNull値ケース（テスト無し）
+- **内容**: ユーザー依頼（2026-08-23）を受けたバリデーション網羅性確認の
+  副産物。(1) `y`が存在しない列名の場合の専用テストが無く、`x`が存在しない
+  ケースのみテストされている。(2) `cluster_col`がNull値を含む場合の専用
+  テストも無い。
+- **Claudeの所感**: いずれも`extract_f64_column`/`extract_group_key_column`
+  という共有関数の同じ分岐（「列が存在しない」「Nullを含む」）を通るため、
+  `x`側・「列が存在しない」ケースで既に間接的に検証されており、バグを
+  見逃すリスクは項目30・31より低いと判断する。優先度は低い。
+- **気づいた経緯**: 2026-08-23、ユーザー依頼により`test_ols.py`の
+  バリデーション網羅性を確認中に発見。
+- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち、修正は保留）
+
+### 33. Wooldridge実データでの検証が、主リファレンス（statsmodels）側では一度も行われていない（Rクロスチェック側にはある非対称）
+
+- **対象**: `tests/test_ols_fixtures.py`（`wooldridge_loader`/
+  `load_wooldridge_dataset`のimportが無い）と対比した
+  [tests/test_ols_crosscheck.py:284-344](../../../tests/test_ols_crosscheck.py#L284-L344)
+  （`WOOLDRIDGE_DATASETS`、`test_wooldridge_matches_r`・
+  `test_wooldridge_wage1_region_cluster_matches_r`の3テスト）
+- **内容**: ユーザー指摘（2026-08-23）を受けて確認。`test_ols_fixtures.py`は
+  合成データ（`SCENARIOS`）のみを対象にしており、Wooldridge実データでの
+  検証は`test_ols_crosscheck.py`（R）側にしか存在しない。項目28
+  （クラスターのt値・p値・信頼区間が主リファレンス側で未検証）・項目29
+  （クラスターが`baseline`シナリオでしか検証されていない）と同じ
+  「主リファレンスの方がクロスチェックより検証範囲が狭い」パターンの3例目。
+- **Claudeの所感**: `testing-policy.md`「テスト用データセット」2.
+  「実データセット: リファレンス実装との一致のみで検証する」はどの
+  リファレンスかを明記していないが、主リファレンスであるstatsmodelsが
+  実データで一度も検証されていないのは方針の趣旨（推定結果として公開する
+  統計量は独立実装だけでなく主リファレンスとも一致確認する）からすると
+  漏れだと考える。`generate_ols_fixtures.py`にWooldridgeデータ
+  （`wage1`/`gpa2`）でのstatsmodels照合を追加するのが妥当。
+- **気づいた経緯**: 2026-08-23、`tests/test_ols_crosscheck.py`解説中の
+  ユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

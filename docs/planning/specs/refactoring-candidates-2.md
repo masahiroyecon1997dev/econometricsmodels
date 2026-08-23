@@ -316,6 +316,16 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   シナリオ追加時にdocstringの更新が追従していなかったものと考えられる。
 - **気づいた経緯**: 2026-08-23、`tests/test_ols_fixtures.py`解説中に発見。
 - **状態**: 未対応（着手要否はユーザー判断待ち。(1)は項目52とまとめて検討）
+- **追記（2026-08-23、`tests/test_ols_crosscheck.py`解説中に発見）**: 役割分担の
+  矛盾が3つ目のファイルにも見つかった。[tests/test_ols_crosscheck.py:1-6](../../../tests/test_ols_crosscheck.py#L1-L6)
+  のモジュールdocstringは「主リファレンス（statsmodels）との厳密比較は
+  `test_ols.py`で行う」と明記しており、`test_ols_fixtures.py`自身の
+  「主リファレンスとの厳密な数値一致はこのファイル」という記述とも、
+  `test_ols.py`の実態（構造テストと数値比較を兼ねる）とも異なる、3つ目の
+  食い違った説明になっている。3ファイルとも「誰が主リファレンス比較を
+  担当するか」について異なる説明を持っている状態であり、`test_ols_fixtures.py`
+  新設前の古い認識が更新されずに`test_ols_crosscheck.py`側に残っている
+  可能性が高い。項目52の対応時にまとめて整理するのが妥当。
 
 ### 58. `HAC_LAG_IN_FIXTURE = 1`相当の値が3箇所に独立してハードコードされ、同期漏れリスクがある
 
@@ -370,3 +380,118 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   という質問への確認調査中に、対象は`imbalanced_cluster_groups`自体
   ではなく隣接する均等クラスタ生成ロジックだったと判明）。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 60. `_assert_close`という同じ名前が、`test_ols_fixtures.py`と`test_ols_crosscheck.py`で正反対の意味（スカラー版／辞書版）を持つ
+
+- **対象**: [tests/test_ols_fixtures.py:75](../../../tests/test_ols_fixtures.py#L75)
+  （`_assert_close = partial(assert_close, ...)`、スカラー版）と
+  [tests/test_ols_crosscheck.py:108](../../../tests/test_ols_crosscheck.py#L108)
+  （`_assert_close = partial(assert_dict_close, ...)`、辞書版）
+- **内容**: ユーザー指摘（2026-08-23）を受けて確認。`tests/_assertions.py`の
+  `assert_close`（スカラー用）/`assert_dict_close`（辞書用）を`partial`で
+  束縛する際の変数名の付け方が2ファイルで逆になっている。
+  `test_ols_fixtures.py`は`_assert_close`=スカラー・`_assert_dict_close`=辞書
+  （関数名にそのまま対応）だが、`test_ols_crosscheck.py`は`_assert_close`=辞書・
+  `_assert_scalar_close`=スカラーという逆の対応関係。
+- **Claudeの所感**: 呼び間違えると`.items()`等で即座に例外になるため
+  「静かに間違った結果になる」実害は無いが、同じ変数名`_assert_close`が
+  ファイルによって逆の意味を持つのは、両ファイルを行き来しながら読む際の
+  認知負荷になる。揃えるなら`_assertions.py`本体の関数名にそのまま対応する
+  `_assert_close`（スカラー）/`_assert_dict_close`（辞書）に統一するのが
+  自然（`test_ols_fixtures.py`側は既にこの命名）。
+- **気づいた経緯**: 2026-08-23、`tests/test_ols_crosscheck.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 61. `NON_HAC_COV_TYPES`が独立定義（`R_COV_TYPES`から`hac`を除くフィルタにできる）、`R_COV_TYPES`自体も`generate_ols_fixtures.py`の`COV_TYPES`と独立重複
+
+- **対象**: [tests/test_ols_crosscheck.py:154](../../../tests/test_ols_crosscheck.py#L154)
+  （`NON_HAC_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]`、独立定義）・
+  [benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py:102](../../../benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py#L102)
+  （`R_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]`）・
+  [benchmark/linear/fixtures/generate_ols_fixtures.py:53](../../../benchmark/linear/fixtures/generate_ols_fixtures.py#L53)
+  （`COV_TYPES`、同じ6項目）
+- **内容**: ユーザー指摘（2026-08-23）を受けて確認。3階層の重複になっている。
+  (1) `test_ols_crosscheck.py`の`NON_HAC_COV_TYPES`（5個、`hac`抜き）は
+  `generate_ols_crosscheck_fixtures.py`から`import`せず独立して書き下ろされている。
+  (2) その`generate_ols_crosscheck_fixtures.py`の`R_COV_TYPES`（6個）自体も、
+  `generate_ols_fixtures.py`の`COV_TYPES`（同じ6項目）とは別に独立定義されている
+  （フェーズ2の「単一定義元にする」パターンが生成スクリプト間には未適用）。
+- **Claudeの所感**: 最低限(1)は`from generate_ols_crosscheck_fixtures import
+  R_COV_TYPES`した上で`NON_HAC_COV_TYPES = [c for c in R_COV_TYPES if c !=
+  "hac"]`のようにフィルタで導出すれば解消できる。(2)は
+  `generate_ols_crosscheck_fixtures.py`が`generate_ols_fixtures.py`から
+  `COV_TYPES`を`import`する形にできるか検討の余地がある。
+- **気づいた経緯**: 2026-08-23、`tests/test_ols_crosscheck.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 62. `_check_result`（`test_ols_fixtures.py`）と`_assert_fit_stats_close`（`test_ols_crosscheck.py`）の命名不統一、`coef`/`se`の重複呼び出し
+
+- **対象**: [tests/test_ols_fixtures.py:79-102](../../../tests/test_ols_fixtures.py#L79-L102)
+  （`_check_result`、`coef`/`se`/`t_stats`/`p_values`/`conf_int`/適合度統計量/
+  `n_obs`を1回の呼び出しで全て検証）と
+  [tests/test_ols_crosscheck.py:112-151](../../../tests/test_ols_crosscheck.py#L112-L151)
+  （`_assert_fit_stats_close`、`coef`/`se`は含まず呼び出し元が個別に検証、
+  代わりに`rtol`を引数で受け取りHACの緩和に対応）
+- **内容**: ユーザー指摘（2026-08-23）を受けて確認。両者は役割はほぼ同じ
+  （1回の推定結果をリファレンス値と包括的に照合するヘルパー）だが命名が
+  異なり、`coef`/`se`の扱い（`_check_result`は内包、
+  `_assert_fit_stats_close`は呼び出し元が毎回`_assert_close(res.params,
+  ref["coef"], ...)`/`_assert_close(res.std_errors, ref["se"], ...)`の2行を
+  重複して書く）も異なる。
+- **Claudeの所感**: rtolの違いは既にコメントで説明されており関数名に
+  織り込む必要は薄い、というユーザー見解に同意。命名を揃えるだけでなく、
+  `_assert_fit_stats_close`も`coef`/`se`を引数の`rtol`で検証する形に拡張し
+  `_check_result`と同じ責務範囲に揃えれば、各呼び出し元での`coef`/`se`
+  2行の重複（`test_synthetic_matches_r`・`test_cluster_matches_r`等
+  複数箇所）も同時に削減できる。
+- **気づいた経緯**: 2026-08-23、`tests/test_ols_crosscheck.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 63. Intercept→const正規化のタイミングがR側（生成時）とstatsmodels側（テスト実行時）で不一致。生成時統一で項目44も解消できる
+
+- **対象**: [benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py:124-132](../../../benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py#L124-L132)
+  （`_normalize_names`相当、生成時に`"(Intercept)"`/`"Intercept"`を`"const"`へ
+  正規化してJSONに書き込む）と対比した
+  [benchmark/linear/run_statsmodels_benchmark.py:92](../../../benchmark/linear/run_statsmodels_benchmark.py#L92)
+  （`smf.ols(formula=...)`、patsy由来の生の`"Intercept"`をそのままJSONに
+  書き込む）・[tests/_assertions.py:22-24](../../../tests/_assertions.py#L22-L24)
+  （`rename_intercept`、テスト実行時に`_check_result`等が毎回呼ぶ変換）
+- **内容**: ユーザー指摘（2026-08-23、「Rとpythonも合わせたほうがいい」）を
+  受けて調査。Rクロスチェック側は生成スクリプトの時点で切片名を`"const"`に
+  正規化済みのため、`test_ols_crosscheck.py`は`_rename`不要。一方
+  statsmodels主リファレンス側（`run_statsmodels_benchmark.py`、OLS/WLS/
+  Logit/Probit共通で`smf.*`のformula APIを使用）はこの正規化をしておらず、
+  `test_ols_fixtures.py`/`test_wls_fixtures.py`/`test_logit_fixtures.py`/
+  `test_probit_fixtures.py`が毎回`_rename`で変換する構造になっている。
+- **Claudeの所感**: Rクロスチェック側が既に正しいやり方をしているため、
+  statsmodels主リファレンス側の生成スクリプトでも生成時に正規化する方向へ
+  揃えるのが筋が良い。これが実現すれば、`_rename`をテスト実行のたびに
+  呼ぶ必要がなくなるだけでなく、**項目44**（`assert_dict_close`/
+  `check_margeff`の`rename`引数が一度もデフォルト値以外で呼ばれていない、
+  YAGNI疑惑）が副産物として解消する（`rename`引数自体が不要になるため）。
+  単なる命名統一ではなく項目44を包含するより本質的な修正案と考える。
+- **気づいた経緯**: 2026-08-23、`tests/test_ols_crosscheck.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目44と関連）
+
+### 64. `predict()`の戻り値辞書のキーが`"fitted"`固定で、新規データ（out-of-sample）予測に対しても統計学的に不正確な用語になっている
+
+- **対象**: [python_package/econometricsmodels/linear/ols.py:243,251](../../../python_package/econometricsmodels/linear/ols.py#L243)
+  （`predict()`の戻り値、`[{"fitted": value} for value in raw]`）、
+  `docs/spec/ols-spec.md`「3.4 predict()」（メソッド統合の設計判断は
+  説明されているが、辞書キーが`"fitted"`である理由は明記無し）
+- **内容**: ユーザー指摘（2026-08-23）。統計学の慣習では「fitted values
+  （あてはめ値）」は学習データに対する予測値（statsmodelsの
+  `fittedvalues`属性と同義）を指す言葉で、新規データに対する予測
+  （out-of-sample）は通常「predicted values」と呼び分ける。本実装の
+  `predict(new_data=...)`は新規データを渡した場合も戻り値のキーが
+  `"fitted"`のままで、統計学用語としては不正確。
+- **Claudeの所感**: `docs/spec/ols-spec.md`の記述から、Logitの`predict()`
+  （学習データの予測確率のみを返す設計だった）に合わせた命名の名残りが、
+  `new_data`対応版のOLSにもそのまま引き継がれたと推測される。ただし
+  公開APIの命名変更のため影響範囲が大きい
+  （`python_package/econometricsmodels/linear/ols.py`・
+  `docs/spec/ols-spec.md`に加え、`row["fitted"]`という参照が`test_ols.py`・
+  `test_ols_fixtures.py`・`test_ols_crosscheck.py`他、WLS側にも多数波及する
+  見込み）。実施の要否・タイミングはユーザー判断が必要。
+- **気づいた経緯**: 2026-08-23、`tests/test_ols_crosscheck.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち、公開APIの破壊的変更を伴う）

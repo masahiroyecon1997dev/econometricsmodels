@@ -567,3 +567,66 @@
 - **気づいた経緯**: 2026-08-22、`tests/test_ols.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、`refactoring-candidates-2.md`
   項目52と関連）
+
+### 28. クラスターロバストSEのt値・p値・信頼区間が、主リファレンス（statsmodels）側では検証されていない（Rクロスチェック側にはある非対称）
+
+- **対象**: [benchmark/linear/fixtures/generate_ols_fixtures.py:114-150](../../../benchmark/linear/fixtures/generate_ols_fixtures.py#L114-L150)
+  （`_run_cluster_case`、返り値が`coef`/`se`のみ）と対比した
+  [tests/test_ols_crosscheck.py:112-150](../../../tests/test_ols_crosscheck.py#L112-L150)
+  （`_assert_fit_stats_close`、cluster系テストからも呼ばれ、t_stats/p_values/
+  conf_intまで含めてR側と数値照合している）
+- **内容**: ユーザー指摘（2026-08-23）を受けて確認。`test_ols_fixtures.py`の
+  クラスター系4テスト（`test_cluster_matches_statsmodels`・
+  `test_cluster_imbalanced_matches_statsmodels`・
+  `test_cluster_g2_matches_statsmodels`、いずれも`coef`/`se`のみ照合）は
+  statsmodelsとの数値照合が係数・標準誤差止まりで、t値・p値・信頼区間は
+  検証していない。一方`test_ols_crosscheck.py`の同名クラスター系テスト
+  （`test_cluster_matches_r`等）は`_assert_fit_stats_close`経由でt値・p値・
+  信頼区間までRと数値照合している。つまりクラスターのt値・p値・信頼区間は
+  「クロスチェック（R）とは照合されているが、主リファレンス（statsmodels）
+  とは照合されていない」という、優先順位が逆転した非対称な状態になっている。
+- **Claudeの所感**: `testing-policy.md`は主リファレンスを最も信頼する基準と
+  位置付けているため、主リファレンス側の検証範囲がクロスチェック側より
+  狭いのは本来のあるべき優先順位と逆だと考える。`_run_cluster_case`の
+  返り値にt値・p値・信頼区間を追加し、`test_ols_fixtures.py`側の
+  クラスター系テストも`_check_result`相当（または部分適用）まで
+  検証を広げるのが妥当。
+- **気づいた経緯**: 2026-08-23、`tests/test_ols_fixtures.py`解説中の
+  ユーザー指摘を受けて`test_ols_crosscheck.py`と突き合わせて確認。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 29. クラスターロバストSEが、どの検証層でも`baseline`シナリオでしか数値比較されていない（悪条件・境界シナリオとの組み合わせが未検証）
+
+- **対象**: [benchmark/linear/fixtures/generate_ols_fixtures.py:76-92](../../../benchmark/linear/fixtures/generate_ols_fixtures.py#L76-L92)
+  （`if scenario == "baseline":`ブロック内でのみクラスターケースを生成）、
+  `tests/test_ols_fixtures.py`のクラスター系4テスト（`scenario`の
+  `parametrize`無し、`synthetic_baseline.csv`/`synthetic_baseline_k1.csv`
+  固定）、`tests/test_ols_crosscheck.py`の同名クラスター系テスト（同じく
+  `scenario`の`parametrize`無し）、`engine/src/linear/ols.rs`のクラスター
+  単体テスト（`fit_computes_cluster_std_errors_...`等、リファレンス実装との
+  数値比較を伴わない純粋ロジック検証のみ）
+- **内容**: ユーザー指摘（2026-08-23）。「クラスターロバストSEは
+  シナリオ依存ではなくグルーピングの動作確認が目的」という設計コメント
+  （[generate_ols_fixtures.py:76](../../../benchmark/linear/fixtures/generate_ols_fixtures.py#L76)）
+  に基づき、クラスター系テストは`baseline`（良条件・標準的なn）以外の
+  シナリオでは一度も数値照合されていないことを、Python fixtures層・R
+  crosscheck層・Rust単体テスト層の3層全てで確認した。しかしクラスター
+  ロバスト共分散`Ŝ=(X'X)⁻¹(Σ_g X_g'e_ge_g'X_g)(X'X)⁻¹`は`(X'X)⁻¹`を
+  他のcov_type（classical/HC0-3/HAC）と共有しており、`high_condition_number`
+  （悪条件設計行列）や`baseline_df1`（自由度1境界）のような、他のcov_typeでは
+  全シナリオで検証している悪条件・境界ケースとクラスターの組み合わせでの
+  数値的挙動は未検証のまま。
+- **Claudeの所感**: 「クラスターSEの計算式自体はシナリオに依存しない」という
+  設計コメントの主張は、疑似グループの割り当て方（均等/不均衡/G境界）に
+  関しては正しいが、「シナリオ由来の設計行列の条件（悪条件・自由度境界等）が
+  クラスター計算の数値安定性に影響しないか」までは検証していない別の論点。
+  `engine/src/linear/CLAUDE.md`に記録されている「G=qちょうどの境界でも
+  データの配置次第では特異になりうる」という既知の罠（Tobit実装時に実測発覚）
+  を踏まえると、悪条件シナリオ×クラスターの組み合わせで同様の未知の
+  数値的落とし穴が無いとは言い切れない。最低限`high_condition_number`または
+  `moderate_multicollinearity`のいずれか1シナリオでクラスターケースを
+  追加し、数値照合できることを確認するのが妥当と考える。
+- **気づいた経緯**: 2026-08-23、`tests/test_ols_fixtures.py`解説中の
+  ユーザー指摘（「clusterに関してはシナリオごとで検証する必要はないのか、
+  精度漏れの可能性が残ることは避けたい」）を受けて3層を確認。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

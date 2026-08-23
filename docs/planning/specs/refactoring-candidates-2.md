@@ -158,6 +158,18 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **状態**: 未対応（着手要否はユーザー判断待ち。項目2「`dataset`とbenchmark
   生成データの使い分け」は現状維持、項目3「真の係数のマジックナンバー化」も
   現状維持で確定済み）
+- **追記（2026-08-23）**: `tests/test_ols_fixtures.py`解説中のユーザー質問
+  （`_common`のimportがクロスパッケージな設計になっている点への懸念）を
+  受けて再確認。`tests/`が`benchmark/_common.py`を`import`する構造自体は、
+  項目3で検討済みの意図的なトレードオフ（`benchmark/`を正式なPythonパッケージ
+  化すると`python foo.py`の直接実行が`python -m benchmark.linear.foo`に
+  変わってしまうため、パッケージ化を見送りPYTHONPATH/`sys.path`で繋ぐ方式を
+  採用）に基づくものであり、設計判断自体は妥当と考える。ただしこの
+  `_common`依存は`test_ols_fixtures.py`1ファイルに限らず`tests/`配下
+  `test_*_fixtures.py`・`test_*_crosscheck.py`11ファイル**全て**が持っており、
+  本項目（CI側のPYTHONPATH未設定）の影響範囲は当初記述より広い
+  （実質`tests/`の数値照合系ファイル全体）ことを確認した。着手する場合の
+  優先度を上げる材料として記録する。
 
 ### 51. `tests/test_ols.py`に「Issue #231フェーズ4で判明した抜け」という経緯コメントが3箇所残存
 
@@ -278,3 +290,83 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `pytest.approx`に対する生assertの利点も両立できる）。
 - **気づいた経緯**: 2026-08-22、`tests/test_ols.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目53とまとめて検討）
+
+### 57. `tests/test_ols_fixtures.py`のモジュールdocstringに2つの不整合（役割分担の矛盾・シナリオ数の誤り）
+
+- **対象**: [tests/test_ols_fixtures.py:1-11](../../../tests/test_ols_fixtures.py#L1-L11)
+  （モジュールdocstring）
+- **内容**: `/explain-code`での`test_ols_fixtures.py`解説中に発見。
+  (1) docstringの「役割分担」節は「構造・API・エラーパスの検証:
+  `test_ols.py`」「主リファレンス（statsmodels）との厳密な数値一致:
+  このファイル」と明記しているが、実際の`test_ols.py`は
+  `_sm_fit`/`_our_fit`によるstatsmodelsとの数値比較も行っており
+  （項目52で記録済み）、このdocstringが謳う役割分担と食い違っている。
+  (2) 「6つの合成データシナリオ」という記述も、実際の
+  [benchmark/linear/fixtures/generate_ols_fixtures.py:31-53](../../../benchmark/linear/fixtures/generate_ols_fixtures.py#L31-L53)
+  `NUMERIC_SCENARIOS`は`baseline`/`small_n`/`high_variance`/
+  `heteroskedastic`/`autocorrelated`/`moderate_multicollinearity`/
+  `high_condition_number`/`scale_variance_mild`/`baseline_df1`の**9個**であり
+  一致しない（`COV_TYPES`の6個の方は記述と一致）。
+- **Claudeの所感**: (1)は項目52（`test_ols.py`の役割の非対称性）を裏付ける
+  具体的な証拠として重要。役割分担を明記したdocstringが存在するのに
+  `test_ols.py`側がそれに従っていない状態であり、項目52の対応（`test_ols.py`
+  から数値比較を削るか、docstringの役割分担記述自体を実態に合わせて修正するか）
+  を検討する際の起点になる。(2)は項目48（`_assertions.py`/`_helpers.py`の
+  docstring経緯記述の陳腐化）と同種の「件数記述が実態と食い違う」パターンで、
+  シナリオ追加時にdocstringの更新が追従していなかったものと考えられる。
+- **気づいた経緯**: 2026-08-23、`tests/test_ols_fixtures.py`解説中に発見。
+- **状態**: 未対応（着手要否はユーザー判断待ち。(1)は項目52とまとめて検討）
+
+### 58. `HAC_LAG_IN_FIXTURE = 1`相当の値が3箇所に独立してハードコードされ、同期漏れリスクがある
+
+- **対象**: [benchmark/linear/run_statsmodels_benchmark.py:82-85](../../../benchmark/linear/run_statsmodels_benchmark.py#L82-L85)
+  （`"maxlags": 1`、コメント「ラグ選択方法は別途検討事項」）・
+  [tests/test_ols_fixtures.py:67](../../../tests/test_ols_fixtures.py#L67)
+  （`HAC_LAG_IN_FIXTURE = 1`）・
+  [tests/test_wls_fixtures.py:70](../../../tests/test_wls_fixtures.py#L70)
+  （同名の`HAC_LAG_IN_FIXTURE = 1`）
+- **内容**: ユーザー指摘（2026-08-23）を受けて確認。フィクスチャ生成時
+  （statsmodels側）にHACのラグ数を固定する値`1`が、消費側（テストコード）にも
+  独立した定数として複製されている。生成側でこの値を変更した場合、
+  テスト側の2箇所を手動で追従させる必要があり、片方だけ更新し忘れると
+  フィクスチャ生成時と異なるラグ数で比較してしまい、テストが無言で
+  無意味な比較になる（または偽陽性/偽陰性を起こす）リスクがある。
+- **Claudeの所感**: 各フィクスチャJSON（`ols.json`/`wls.json`）には既に
+  `_meta`フィールド（`generated_at`/`primary_reference`/
+  `statsmodels_version`/`note`）があるため、ここに`"hac_lag": 1`を追加し、
+  テスト側は`fixtures["_meta"]["hac_lag"]`を読む形にすれば、
+  「生成時に使った値そのものをテスト側が参照する」形になり値のズレが
+  原理的に起こらなくなる。`benchmark/`と`tests/`のライフサイクル分離
+  （`testing-policy.md`）を壊さずに単一の発生源にできる案だと考える。
+- **気づいた経緯**: 2026-08-23、`tests/test_ols_fixtures.py`解説中のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 59. `[i % 10 for i in range(n)]`という疑似クラスターラベル生成が`benchmark/`配下11ファイルに重複している（`imbalanced_cluster_groups`とは非対称）
+
+- **対象**: [benchmark/linear/fixtures/generate_ols_fixtures.py:136](../../../benchmark/linear/fixtures/generate_ols_fixtures.py#L136)・
+  [benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py:265](../../../benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py#L265)・
+  [benchmark/linear/fixtures/generate_wls_fixtures.py:150](../../../benchmark/linear/fixtures/generate_wls_fixtures.py#L150)・
+  [benchmark/linear/fixtures/generate_wls_crosscheck_fixtures.py:215](../../../benchmark/linear/fixtures/generate_wls_crosscheck_fixtures.py#L215)・
+  `benchmark/nonlinear/fixtures/generate_{logit,probit}_fixtures.py`・
+  `generate_{logit,probit}_crosscheck_fixtures.py`・
+  `benchmark/iv/fixtures/generate_iv_fixtures.py`・
+  `generate_iv_crosscheck_fixtures.py`・`generate_iv_gmm_fixtures.py`
+  （計11ファイル、いずれも`[i % 10 for i in range(n)]`という同一パターン）
+- **内容**: ユーザー指摘（2026-08-23）を受けて`grep`で確認。
+  `tests/_helpers.py`の`with_cluster_groups`（`row_index % n_groups`、
+  フェーズ3で22箇所を集約した共通ヘルパー）と数学的に同じロジックが、
+  `benchmark/`側のフィクスチャ生成スクリプト11ファイルにそれぞれ独立して
+  インラインで書き下ろされている。`imbalanced_cluster_groups`
+  （不均衡クラスタ版）は`benchmark/_common.py`に一元化済みで
+  `benchmark/`・`tests/`双方から`import`されているのに対し、
+  この均等クラスタ版だけ一元化されておらず非対称。
+- **Claudeの所感**: `imbalanced_cluster_groups`と同じ扱い（`benchmark/_common.py`
+  に`with_cluster_groups`相当の関数を追加し、`benchmark/`側11ファイル＋
+  `tests/_helpers.py`の`with_cluster_groups`本体の両方がそこから使う）に
+  できる、規模の大きい重複だと考える。`_hac_auto_lag`（5ファイル）・
+  `imbalanced_cluster_groups`（22箇所）の一元化と同種のパターン。
+- **気づいた経緯**: 2026-08-23、`tests/test_ols_fixtures.py`解説中の
+  ユーザー指摘（「`imbalanced_cluster_groups`もbenchmarkで作っていたはず」
+  という質問への確認調査中に、対象は`imbalanced_cluster_groups`自体
+  ではなく隣接する均等クラスタ生成ロジックだったと判明）。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

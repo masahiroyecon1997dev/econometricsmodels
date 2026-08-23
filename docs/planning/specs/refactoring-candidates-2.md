@@ -121,3 +121,160 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   「機械精度」等の**設計方針レベルで共通の値だけ**を定数化するのが妥当と考える。
 - **気づいた経緯**: 2026-08-22、`tests/_tolerances.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否・対象範囲の線引きはユーザー判断待ち）
+
+### 50. `benchmark/`配下の`sys.path.insert`除去（項目3のPYTHONPATH方式）がdevcontainer側にしか適用されず、CI・`tests/`側は据え置きのまま
+
+- **対象**: [.github/workflows/ci_python.yml](../../../.github/workflows/ci_python.yml)
+  （`PYTHONPATH`未設定）と対比した
+  [.devcontainer/devcontainer.json:40](../../../.devcontainer/devcontainer.json#L40)
+  （`remoteEnv.PYTHONPATH`に`benchmark`/`benchmark/linear`/`benchmark/nonlinear`/
+  `benchmark/iv`/`benchmark/performance`を設定済み）。
+  影響範囲: [tests/conftest.py:13](../../../tests/conftest.py#L13)
+  （`benchmark/`直下への`sys.path.insert`）、`tests/test_*_fixtures.py`・
+  `test_*_crosscheck.py`11ファイルの`benchmark/<系統>/fixtures`への個別挿入、
+  [tests/_helpers.py:90](../../../tests/_helpers.py#L90)（項目47で指摘済みの重複分）。
+- **内容**: ユーザー質問（2026-08-22、`tests/conftest.py`解説時）を受けて調査。
+  項目3（`sys.path.insert`のPYTHONPATH化）は`benchmark/`配下22ファイルのみに
+  適用され、`.devcontainer/devcontainer.json`の`remoteEnv`にPYTHONPATHを
+  設定する形で解決済みだった。しかし`remoteEnv`はdevcontainer（ローカル開発）
+  にのみ効き、GitHub Actions（`ci_python.yml`）には伝播しないため、
+  **CI環境では`PYTHONPATH`が未設定のまま**であることを確認した。そのため
+  `tests/conftest.py`・各テストファイルに残る`sys.path.insert`は、devcontainer内
+  では既にPYTHONPATHと重複した実質デッドコードだが、CIでは今も唯一の
+  importの通り道であり、迂闊に削除するとCIが壊れる状態になっている。
+- **Claudeの所感**: 項目3の「今後もbenchmark/へのファイル追加が続く前提なら
+  sys.path.insertの記述自体をなくす方が長期的に低コスト」という決定理由は
+  `tests/`側にも同様に当てはまる。`ci_python.yml`にも同じ`PYTHONPATH`
+  （`benchmark`・`benchmark/linear`・`benchmark/nonlinear`・`benchmark/iv`・
+  `benchmark/performance`、必要なら`benchmark/*/fixtures`も追加）を設定すれば、
+  `tests/conftest.py`本体・11ファイルの系統別挿入・`_helpers.py`の重複分
+  （項目47）を含む`tests/`配下の`sys.path.insert`を全て削除でき、
+  devcontainer・CIで一貫した単一の解決方式にできる。ただしCI環境変数の
+  追加はワークフローファイルの変更（`.github/workflows/`）であり、CI設定の
+  意図しない副作用が無いか確認してから着手すべき。
+- **気づいた経緯**: 2026-08-22、`tests/conftest.py`解説後のユーザー質問
+  （「sys.path.insertでbenchmarkを読み込んでいるが何が必要か、フォルダ構成を
+  変えたほうがよいか」）への回答調査中に発見。
+- **状態**: 未対応（着手要否はユーザー判断待ち。項目2「`dataset`とbenchmark
+  生成データの使い分け」は現状維持、項目3「真の係数のマジックナンバー化」も
+  現状維持で確定済み）
+
+### 51. `tests/test_ols.py`に「Issue #231フェーズ4で判明した抜け」という経緯コメントが3箇所残存
+
+- **対象**: [tests/test_ols.py:169](../../../tests/test_ols.py#L169)・
+  [tests/test_ols.py:317](../../../tests/test_ols.py#L317)・
+  [tests/test_ols.py:503](../../../tests/test_ols.py#L503)
+  （いずれも`testing-completeness-reviewer指摘、Issue #231フェーズ4`／
+  `テスト網羅性レビュー、Issue #231フェーズ4で判明した抜け`という同一パターン）
+- **内容**: `/explain-code`での`test_ols.py`解説中に発見。フェーズ3の
+  Issue番号コメント整理（`refactoring-issue231-progress.md`フェーズ3実施結果
+  項目8）は`#153`/`#171`/`#231`計11箇所を対象にしたが`test_ols.py`は
+  スコープに含まれていなかった。ここでの3箇所はその後のフェーズ4
+  （テスト拡充作業）で追加されたコメントのため、フェーズ3の整理を素通りして
+  残っている。
+- **Claudeの所感**: フェーズ3で確立済みの方針（番号のみ削除し、テストの意図の
+  説明は残す）をそのまま適用できる、小さいが典型的な候補。
+- **気づいた経緯**: 2026-08-22、`tests/test_ols.py`解説中に発見。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 52. `tests/test_ols.py`だけが「構造テスト」と「statsmodelsとの簡易数値比較」を兼ねており、`tests/`内の他ファイルと役割が非対称
+
+- **対象**: [tests/test_ols.py](../../../tests/test_ols.py)全体
+  （`_sm_design`/`_sm_fit`/`_sm_fit_cluster`によるその場でのstatsmodels比較）
+  と対比した`tests/test_wls.py`・`tests/test_logit.py`・`tests/test_probit.py`・
+  `tests/test_iv.py`・`tests/test_tobit.py`（いずれも`statsmodels`のimportが
+  0件、構造/エラーテスト専業）
+- **内容**: ユーザー指摘（2026-08-22）を受けて`grep`で確認。`test_ols.py`は
+  モジュールdocstring通り「statsmodelsとの数値比較」と「API構造検証」の
+  両方を担っているが、他の手法の構造テストファイルはAPI構造検証のみで、
+  数値照合は全て`test_*_fixtures.py`/`test_*_crosscheck.py`側に委ねている。
+  `test_ols.py`だけがこの二重の役割を持つのは`tests/`内で非対称。
+- **Claudeの所感**: `test_ols_fixtures.py`が既にほぼ同じ検証（係数・SE・
+  cov_type別）をより厳密な許容誤差・より多いシナリオでカバーしているため、
+  `test_ols.py`側の簡易数値比較は`test_ols_fixtures.py`と検証範囲が重なって
+  いる可能性が高い。役割を明確にするなら、`test_ols.py`から数値比較部分を
+  削除し構造/エラーテスト専業にする案（他ファイルと統一）が筋が良いと考えるが、
+  削除すると項目11・16・27（`test-coverage-candidates.md`）で指摘した
+  `include_intercept=False`等のfixtures側カバレッジ不足を先に埋める必要がある
+  （fixtures側に移してから削除、の順）。
+- **気づいた経緯**: 2026-08-22、`tests/test_ols.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否・実施順序はユーザー判断待ち）
+
+### 53. `tests/test_ols.py`の`ATOL_COEF`/`ATOL_SE`/`ATOL_STAT`が、`tests/_assertions.py`の許容誤差計算式・`tests/_tolerances.py`の値と揃っていない
+
+- **対象**: [tests/test_ols.py:22-25](../../../tests/test_ols.py#L22-L25)
+  （`abs(a-b) < ATOL_COEF`という絶対誤差のみの比較）と対比した
+  [tests/_assertions.py:27-34](../../../tests/_assertions.py#L27-L34)
+  （`assert_close`、`tol = max(rtol*abs(ref), atol)`という相対＋絶対誤差の式）・
+  [tests/_tolerances.py](../../../tests/_tolerances.py)の`"ols_fixtures":
+  {"rtol": 1e-8, "atol": 1e-10}`
+- **内容**: ユーザー指摘（2026-08-22）。`test_ols.py`は`_assertions.py`/
+  `_tolerances.py`を使わず、独自の絶対誤差のみの定数
+  （`ATOL_COEF=1e-8, ATOL_SE=1e-5, ATOL_STAT=1e-6`）で比較している。
+  計算式（絶対誤差のみ vs 相対＋絶対誤差）・値の両方が、`tests/`内の
+  数値比較コードの標準的な書き方（`_assertions.assert_close`）と異なる。
+- **Claudeの所感**: `dataset`の係数オーダーが固定（`1.5, 2.0, -0.5`程度）
+  のため現状は実害が出ていないが、読み手が「なぜここだけ違う式・違う値なのか」
+  を都度考えるコストがある。統一するなら`_assertions.assert_close`を使う形に
+  寄せるのが筋が良いと考える。項目52（`test_ols.py`の役割自体を見直すか）と
+  合わせて判断すべき。
+- **気づいた経緯**: 2026-08-22、`tests/test_ols.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 54. `test_ols.py`と`test_ols_fixtures.py`で「完全な多重共線性→`ComputationError`」のテストが重複
+
+- **対象**: [tests/test_ols.py:193-202](../../../tests/test_ols.py#L193-L202)
+  （`test_singular_matrix_raises_computation_error`、手作りの4行df、
+  `x2=2*x1`）と
+  [tests/test_ols_fixtures.py:183-192](../../../tests/test_ols_fixtures.py#L183-L192)
+  （`test_perfect_multicollinearity_raises_computation_error`、
+  `synthetic_perfect_multicollinearity.csv`、frozen data）
+- **内容**: ユーザー指摘（2026-08-22）を受けて確認。両者とも
+  `testing-policy.md`「完全な多重共線性...想定した例外（`ComputationError`）が
+  発生することのみを確認する」という同じ方針に基づく、意図が完全に同じ
+  テスト。データの作り方（即席の4行df vs frozen CSV）が違うだけで、
+  検証内容に差は無い。
+- **Claudeの所感**: 削除するなら`test_ols.py`側（即席dfの方、`tests/`内の
+  他の即席dfベースのバリデーションテスト群と一貫する書き方）を残し、
+  `test_ols_fixtures.py`側（frozen dataのシナリオ）に一本化するのが自然だと
+  考える。
+- **気づいた経緯**: 2026-08-22、`tests/test_ols.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 55. `test_ols_fixtures.py`というファイル名が、pytest用語の「fixtures」と紛らわしい
+
+- **対象**: [tests/test_ols_fixtures.py](../../../tests/test_ols_fixtures.py)
+  （他5系統の`test_*_fixtures.py`も同様）
+- **内容**: ユーザー指摘（2026-08-22）。`tests/test_ols.py`と並べて読むと
+  違和感がある。pytestの「fixtures」は通常`@pytest.fixture`（テストの前提条件を
+  整えるもの、`conftest.py`の`dataset`等）を指すが、このファイル名の
+  `fixtures`は`testing-policy.md`「ベンチマーク値のフィクスチャ化」
+  （statsmodels/Rの実行結果をJSONとして固定したもの）に由来しており、
+  実態は「主リファレンス（statsmodels）との数値照合テスト」を表す。
+- **Claudeの所感**: 命名としては`test_ols_primary.py`/`test_ols_reference.py`
+  のような「主リファレンスとの数値照合」を素直に表す名前の方が誤解が少ないと
+  考えるが、6系統×命名変更は多数の参照箇所（`_tolerances.py`のキー名、
+  `pyproject.toml`、CI設定、各種SKILL.md等）に影響する規模の変更のため、
+  実施するかどうか・タイミングは慎重に判断すべき。
+- **気づいた経緯**: 2026-08-22、`tests/test_ols.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち、影響範囲の洗い出しが必要）
+
+### 56. `test_ols.py`内で数値比較の書き方（生の`assert`+f-string／`pytest.approx`／`_assertions.assert_close`不使用）が混在
+
+- **対象**: [tests/test_ols.py](../../../tests/test_ols.py)全体。
+  例: [tests/test_ols.py:84-87](../../../tests/test_ols.py#L84-L87)
+  （`assert abs(...) < ATOL_COEF, f"..."`という生の比較＋手書きメッセージ）と
+  [tests/test_ols.py:540](../../../tests/test_ols.py#L540)
+  （`assert row["fitted"] == pytest.approx(expected, abs=ATOL_COEF)`）
+- **内容**: ユーザー指摘（2026-08-22）を受けて確認。同じファイル内で
+  「生の`assert`+手書きf-stringメッセージ」（係数・SE・R²・F統計量等の比較）と
+  「`pytest.approx`」（`predict()`の比較のみ）という2つの書き方が使い分けられて
+  いる。前者はループ内で「どのケースが落ちたか」を明示できる、後者は
+  pytestのアサーションリライトが自動で詳細なdiffメッセージを生成するという
+  それぞれの利点はあるが、使い分けの基準がコード上に明記されていない。
+- **Claudeの所感**: 実害は無いが一貫性の観点では気になる点。項目53
+  （`_assertions.assert_close`への統一）と合わせて整理する余地がある
+  （`assert_close`は`label`引数を取れるため、ループ内での識別性という
+  `pytest.approx`に対する生assertの利点も両立できる）。
+- **気づいた経緯**: 2026-08-22、`tests/test_ols.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目53とまとめて検討）

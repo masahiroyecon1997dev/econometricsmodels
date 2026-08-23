@@ -488,3 +488,82 @@
 - **気づいた経緯**: 2026-08-22、ユーザー依頼により`test_logit_crosscheck.py`/
   `test_probit_crosscheck.py`を突き合わせて確認。
 - **状態**: 未対応（実測確認の要否はユーザー判断待ち）
+
+### 25. `conftest.py`の`dataset`が説明変数2個・同分布のため、係数・標準誤差の列対応（順序）バグを検出しづらい
+
+- **対象**: [tests/conftest.py:16-30](../../../tests/conftest.py#L16-L30)
+  （`dataset`フィクスチャ、`x1`/`x2`とも`rng.normal(0.0, 1.0, n)`で同一分布）
+- **内容**: ユーザー指摘（2026-08-22）。`test_ols.py`等の構造テストは
+  `zip(["const", "x1", "x2"], sm_res.params)`のように名前と位置を対応付けて
+  比較しており、真の係数（`x1=2.0`, `x2=-0.5`）が異なるため現状の2変数・
+  このシードでは列の入れ替わりバグを検出できると考えられる。しかし
+  (1) 説明変数が2個しかないため「入れ替わり」パターンが1通りしかなく、
+  たまたま推定値が近くなる悪いseedを引くリスクをゼロにできない、
+  (2) `x3`が実は`x5`の列に入っていた、のような**より複雑な列対応バグ**
+  （3変数以上でしか起こりえないクラスのバグ）は原理的に検出できない、
+  という2つの構造的な穴がある。
+- **Claudeの所感**: 説明変数を7〜8個に増やし、かつ真の係数を意図的に
+  バラけさせる（隣接する値が偶然近くならないようにする）ことで検出力が
+  上がると考える。ただし`conftest.py`の`dataset`を直接拡張するか、
+  `refactoring-candidates-2.md`項目6（データ生成ライフサイクルを`benchmark/`に
+  揃えるか）とセットで`benchmark/`側に切り出すかは設計判断が要るため、
+  着手前にユーザー確認が必要。
+- **気づいた経緯**: 2026-08-22、`tests/test_ols.py`解説後のユーザー指摘。
+- **状態**: 未対応（設計判断待ち、`refactoring-candidates-2.md`項目6と関連）
+
+### 26. `ValidationError`の検証範囲: `y`が空文字列のケースが無い／例外メッセージ内容を検証するテストが無い
+
+- **対象**: [tests/test_ols.py](../../../tests/test_ols.py)のエラーハンドリング
+  ブロック（151〜277行目）。`tests/`配下全体で`pytest.raises(..., match=...)`が
+  0件（`grep`で確認）。
+- **内容**: ユーザー指摘（2026-08-22）を受けて確認。(1) `y=""`（空文字列の
+  列名）を渡すケースの専用テストが無い（`x`が空リストの`test_empty_x_raises`は
+  存在するが対称なテストが`y`側に無い）。(2) 例外の**型**（`ValidationError`/
+  `ComputationError`）を確認するテストはあるが、**メッセージの内容**を
+  確認するテストは`tests/`配下に1件も無い。一方Rust側
+  （[engine/src/linear/ols.rs:1180](../../../engine/src/linear/ols.rs#L1180)
+  `least_squares_error_messages_are_human_readable`）はメッセージ文字列を
+  `assert_eq!`で厳密検証しており、
+  [engine_pybind/src/errors.rs:45-46](../../../engine_pybind/src/errors.rs#L45-L46)
+  で`err.to_string()`がそのままPython例外メッセージになる実装のため、
+  「Rustで検証済みのメッセージが、Python境界まで壊れずに伝わるか」を
+  確認する層が丸ごと欠けている。
+- **Claudeの所感**: `y=""`は`test_missing_column_raises`（存在しない列名）の
+  亜種として暗黙にカバーされている可能性はあるが、意図的な検証ではないため
+  専用テストの追加が望ましい。メッセージ検証は全パターンに広げる必要はなく、
+  169・317・503行目周辺（`test_hac_time_col_reorders_rows_before_computing_lags`
+  等、既に「Rust単体テストと対になるPython API境界確認」という位置づけの
+  テストがある）と同じ考え方で、代表的な1〜2件に`match=`を追加すれば
+  「Rust→Python境界でメッセージが壊れない」ことの確認としては十分と考える。
+- **気づいた経緯**: 2026-08-22、`tests/test_ols.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 27. `include_intercept=False`・`confidence_level`オプションの効果が、frozen JSON数値照合（fixturesパイプライン）で検証されていない
+
+- **対象**: [benchmark/linear/generate_linear_datasets.py](../../../benchmark/linear/generate_linear_datasets.py)・
+  [benchmark/linear/fixtures/generate_ols_fixtures.py](../../../benchmark/linear/fixtures/generate_ols_fixtures.py)
+  （どちらにも`include_intercept`・`confidence_level`という文字列が0件）
+- **内容**: ユーザー指摘（2026-08-22）を受けて確認。`OLSOptions`の主要な
+  フィールドのうち、`include_intercept=False`（切片なし回帰）と
+  `confidence_level`（既定0.95以外の信頼水準）は、`tests/test_ols.py`内の
+  即席データによる簡易statsmodels比較でのみ検証されており、
+  `test_ols_fixtures.py`のfrozen JSON数値照合パイプラインには一度も
+  登場しない。なお`conf_int`自体（既定95%信頼区間の値）は
+  [tests/test_ols_fixtures.py:85-87](../../../tests/test_ols_fixtures.py#L85-L87)
+  で既に数値照合済み（冗長ではなく既存カバレッジ）だが、
+  `confidence_level`を変更したときの効果は
+  [tests/test_ols.py:353-374](../../../tests/test_ols.py#L353-L374)
+  `test_confidence_level_changes_interval_width`が相対比較
+  （狭くなる/広くなる）のみで、具体的な数値の正しさまでは見ていない。
+  `test_predict_new_data_without_intercept_matches_statsmodels`
+  （[tests/test_ols.py:570-588](../../../tests/test_ols.py#L570-L588)）も同様に
+  即席データのみでの検証。
+- **Claudeの所感**: `testing-policy.md`が要求する「全てのオプションの組み合わせで
+  リファレンス実装と統計量が一致することを確認する」の対象漏れだと考える。
+  `include_intercept=False`のシナリオを`generate_linear_datasets.py`に追加し、
+  `generate_ols_fixtures.py`側でcov_type全種と組み合わせて数値照合すれば、
+  `refactoring-candidates-2.md`項目52（`test_ols.py`の役割の非対称性）の
+  解消（`test_ols.py`から簡易数値比較を削る）の前提条件にもなる。
+- **気づいた経緯**: 2026-08-22、`tests/test_ols.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち、`refactoring-candidates-2.md`
+  項目52と関連）

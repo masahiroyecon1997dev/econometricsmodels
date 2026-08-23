@@ -19,6 +19,16 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: どの作業中に気づいたか（日付）
 - **状態**: 未対応 / 対応済み（対応したIssue・PR等） / 対応不要と判断（理由）
 
+**完了項目の扱い（2026-08-22運用ルール）**: 「対応済み」になった項目はこのファイルから
+削除する（コード自体とgit logが原本であり、詳細な対応済み記録を残す必要は無いと判断）。
+削除した記録は`refactoring-issue231-progress.md`の進捗スナップショットに要点（対応内容・
+コミットハッシュ）のみ残す。一方「対応不要と判断」の項目は、コード上に何も痕跡が
+残らない却下判断のため、同じ提案の調査をやり直さずに済むよう1行程度に圧縮して残す
+（項目38参照）。番号は削除後も詰め直さない（欠番があっても他項目からの「項目N」
+表記自体は維持できる）。ただし**番号を維持しても参照先の内容は消える**ため、
+削除対象の項目を他の項目が「項目N」で参照している場合は、削除前にその参照側へ
+必要な文脈（何の話か・結論）を埋め込み、削除後も参照側だけで自己完結するようにする。
+
 ---
 
 ## 一覧
@@ -47,67 +57,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-15、`generate_linear_datasets.py`のコード解説中に発見。
 - **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
 
-### 3. `sys.path.insert`によるimportが静的解析（IDEの定義ジャンプ）と相性が悪い
-
-- **対象**: `benchmark/`配下の各ファイル冒頭にある`sys.path.insert(0, str(Path(__file__)...))`
-  パターン全般（例: [benchmark/freeze_datasets.py:41-49](../../../benchmark/freeze_datasets.py#L41-L49)）
-- **内容**: ユーザー指摘（2026-08-15）。`Path(__file__).resolve()...`による動的なパス追加は
-  実行時にしか解決されないため、VSCode（Pylance等）の静的解析は`sys.path.insert`の中身を
-  実行せずに解析するので、`from generate_linear_datasets import ...`等の「定義へ移動」
-  （Go to Definition）が効かず不便。
-- **Claudeの所感**: `benchmark/`全体を正式なPythonパッケージ化する（`__init__.py`追加）と、
-  実行方法が`python freeze_linear_datasets.py`のような直接実行から
-  `python -m benchmark.linear.freeze_linear_datasets`等に変わってしまうトレードオフがある。
-  一方、**`.vscode/settings.json`（または`pyrightconfig.json`）に
-  `"python.analysis.extraPaths": ["benchmark", "benchmark/linear", "benchmark/nonlinear", "benchmark/iv"]`
-  を追加する**方法であれば、実行時のimportの仕組み（`sys.path.insert`）自体は変えずに、
-  IDEの静的解析にだけ「このパスも見てよい」と教えられるため、定義ジャンプの不便さだけを
-  低リスクで解消できる可能性がある。
-- **気づいた経緯**: 2026-08-15、`generate_linear_datasets.py`解説後の雑談から。
-- **状態**: 対応済み（2026-08-22、`refactor`スキルで対応）。ユーザー判断により、
-  上記2案（extraPathsのみ／フルパッケージ化）のどちらでもなく、**PYTHONPATH環境変数方式**
-  を採用した（「今後もbenchmark/へのファイル追加が続く前提なら、sys.path.insertの
-  記述自体をなくす方が長期的に低コスト」という指摘を踏まえた第3の折衷案）。
-  - [.devcontainer/devcontainer.json](../../../.devcontainer/devcontainer.json)の
-    `remoteEnv`に`PYTHONPATH`（`benchmark`/`benchmark/linear`/`benchmark/nonlinear`/
-    `benchmark/iv`/`benchmark/performance`）を追加。
-  - [.vscode/settings.json](../../../.vscode/settings.json)を新規作成し
-    `python.analysis.extraPaths`を同じパスで設定（IDE静的解析用）。
-  - `benchmark/`配下22ファイルから`sys.path.insert`ブロックを削除（`ruff check --fix`で
-    不要import・import順序も自動修正）。`python foo.py`の直接実行・IDEの実行ボタンは
-    従来通り使用可能（`-m`実行への変更は不要）。
-  - 実際のインタプリタでPYTHONPATHを設定し22ファイル全ての起動を確認、
-    全シナリオの生成値がリファクタリング前後で完全一致することも確認済み。
-  - **devcontainerの再ビルドが必要**（`remoteEnv`の変更はコンテナ再ビルド後に反映される）。
-
-### 4. `generate_*_datasets.py`の`SCENARIOS`と`freeze_*_datasets.py`側リストが3系統とも完全重複
-
-- **対象**:
-  - [benchmark/linear/generate_linear_datasets.py:23-34](../../../benchmark/linear/generate_linear_datasets.py#L23-L34) ↔
-    [benchmark/linear/freeze_linear_datasets.py:30-41](../../../benchmark/linear/freeze_linear_datasets.py#L30-L41)（`SCENARIOS`↔`SYNTHETIC_SCENARIOS`）
-  - [benchmark/nonlinear/generate_nonlinear_datasets.py:60-68](../../../benchmark/nonlinear/generate_nonlinear_datasets.py#L60-L68) ↔
-    [benchmark/nonlinear/freeze_nonlinear_datasets.py:32-40](../../../benchmark/nonlinear/freeze_nonlinear_datasets.py#L32-L40)（`SCENARIOS`↔`LOGIT_SCENARIOS`。`PROBIT_SCENARIOS`は`list(LOGIT_SCENARIOS)`で既に間接的に連動）
-  - [benchmark/iv/generate_iv_datasets.py:41-52](../../../benchmark/iv/generate_iv_datasets.py#L41-L52) ↔
-    [benchmark/iv/freeze_iv_datasets.py:30-41](../../../benchmark/iv/freeze_iv_datasets.py#L30-L41)（`SCENARIOS`↔`IV_SCENARIOS`）
-- **内容**: ユーザー指摘（2026-08-15、linear系統で発覚）を受けてnonlinear/iv系統も
-  Pythonスクリプトで機械的に比較したところ、**3系統とも**順序・要素完全一致だった
-  （実測確認済み）。Issue #231フェーズ2で対応済みの「`NUMERIC_SCENARIOS`/
-  `test_*_fixtures.py`側`SCENARIOS`の一元化」（`refactoring-issue231-progress.md`
-  フェーズ2ステップ2項目5）と同種の重複だが、この`generate_*_datasets.py`↔
-  `freeze_*_datasets.py`間のペアはその時の対応範囲に含まれていなかった模様。
-- **Claudeの所感**: 3系統とも`freeze_*_datasets.py`側で
-  `from generate_*_datasets import SCENARIOS as ...`の形にimportし直せば単一定義元に
-  統一できる（値が完全一致のため挙動を変えないリファクタリングとして低リスク）。
-- **気づいた経緯**: 2026-08-15、`generate_linear_datasets.py`解説後の雑談（linear分）→
-  `generate_nonlinear_datasets.py`解説時に3系統横断で実測確認。
-- **状態**: 対応済み（2026-08-22、`refactor`スキルで対応）。3系統とも
-  `freeze_*_datasets.py`側のシナリオリスト（`SYNTHETIC_SCENARIOS`/`LOGIT_SCENARIOS`/
-  `IV_SCENARIOS`）を、リテラル定義から`generate_*_datasets.py`側の`SCENARIOS`を
-  `as`エイリアスでimportする形に変更（値は完全一致のため挙動は変わらない）。
-  変更ファイル: [benchmark/linear/freeze_linear_datasets.py](../../../benchmark/linear/freeze_linear_datasets.py)・
-  [benchmark/nonlinear/freeze_nonlinear_datasets.py](../../../benchmark/nonlinear/freeze_nonlinear_datasets.py)・
-  [benchmark/iv/freeze_iv_datasets.py](../../../benchmark/iv/freeze_iv_datasets.py)。
-
 ### 5. `unknown scenario`検証（`ValueError`）が3系統の`generate_*_dataset`関数で完全重複
 
 - **対象**: [benchmark/linear/generate_linear_datasets.py:62-65](../../../benchmark/linear/generate_linear_datasets.py#L62-L65)・
@@ -115,7 +64,8 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   [benchmark/iv/generate_iv_datasets.py:106-109](../../../benchmark/iv/generate_iv_datasets.py#L106-L109)
 - **内容**: ユーザー指摘（2026-08-15）。`if scenario not in SCENARIOS: raise ValueError(f"unknown
   scenario: {scenario!r}. choose from {SCENARIOS}")`という同型の検証が3ファイルで重複している
-  （項目4の`SCENARIOS`重複と直接関連するが、こちらは検証ロジック自体の重複）。
+  （`generate_*_datasets.py`の`SCENARIOS`リスト自体の重複＝項目4は
+  2026-08-22対応済み・コミット済み`d23d9b7`だが、こちらは検証ロジック自体の重複）。
   nonlinear側にはさらに同型の`unknown link`検証（`generate_nonlinear_datasets.py:119-122`）が
   同じ関数内にもう1つある。当初のコード解説時に見落としていた項目。
 - **Claudeの所感**: `_common.py`に`validate_scenario(scenario, valid_scenarios)`のような
@@ -167,50 +117,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   完結しているため、削除は低リスクだと考える。
 - **気づいた経緯**: 2026-08-15、`generate_nonlinear_datasets.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
-
-### 9. `scale_variance`のスケール倍率（1e6/1e-3）が3系統ともマジックナンバーとして重複
-
-- **対象**: [benchmark/linear/generate_linear_datasets.py:102-103](../../../benchmark/linear/generate_linear_datasets.py#L102-L103)
-  （`X[:,0]*=1e6, X[:,1]*=1e-3`、直書き）・
-  [benchmark/nonlinear/generate_nonlinear_datasets.py:77-78](../../../benchmark/nonlinear/generate_nonlinear_datasets.py#L77-L78)
-  （`_SCALE_VARIANCE_X1_SCALE = 1e6`等、名前付き定数）・
-  [benchmark/iv/generate_iv_datasets.py:231-232](../../../benchmark/iv/generate_iv_datasets.py#L231-L232)
-  （`x_exog[:,0]*=1e6, x_exog[:,1]*=1e-3`、直書き）
-- **内容**: ユーザー指摘（2026-08-15）。3系統とも`1e6`/`1e-3`という同じ倍率を使っており、
-  nonlinear/iv側のコメントには「OLSと同じ倍率」と明記されている（意図的に値を揃えている）。
-  にもかかわらず値の実体は3ファイルに分散しており（うち2ファイルはマジックナンバー直書き）、
-  値を変えたくなった場合の追従漏れリスクがある。
-- **Claudeの所感**: `_common.py`に`SCALE_VARIANCE_X1_SCALE = 1e6`・
-  `SCALE_VARIANCE_X2_SCALE = 1e-3`として集約し、3ファイルともそこから参照する形に
-  統一するのが妥当。「同じであるべき」という意図が既にコード上に書いてある以上、
-  低リスクな改善だと考える。
-- **気づいた経緯**: 2026-08-15、`generate_nonlinear_datasets.py`解説後のユーザー指摘。
-- **状態**: 対応済み（2026-08-22、`refactor`スキルで項目10と合わせて対応）。
-  新規作成した[benchmark/_dgp_constants.py](../../../benchmark/_dgp_constants.py)に
-  `SCALE_VARIANCE_X1_SCALE`/`SCALE_VARIANCE_X2_SCALE`として集約し、3系統とも
-  そこから参照する形に統一した。`_common.py`に置かなかったのは、項目21で
-  指摘された「`_common.py`が用途の異なるヘルパーの寄せ集めになりつつある」
-  懸念にこれ以上加担しないため（ユーザー判断）。全シナリオで生成値が
-  リファクタリング前後で完全一致することを実測確認済み。
-
-### 10. `heteroskedastic`/`autocorrelated`の誤差項生成式がlinear・IVの2系統でマジックナンバーとして重複
-
-- **対象**: [benchmark/linear/generate_linear_datasets.py:121,124](../../../benchmark/linear/generate_linear_datasets.py#L121-L124)・
-  [benchmark/iv/generate_iv_datasets.py:178,186](../../../benchmark/iv/generate_iv_datasets.py#L178-L186)
-- **内容**: ユーザー指摘（2026-08-15）。`heteroskedastic`の分散式`sigma_i = 0.5 + 2.0 *
-  np.abs(X[:,0]/x_exog[:,0])`と、`autocorrelated`のAR(1)係数`rho(_ar) = 0.7`が、
-  linear・IVの2系統で全く同じ値のマジックナンバーとして直書きされている
-  （nonlinearはこの2シナリオ自体を持たないため対象外、モジュールdocstringで
-  理由明記済み）。項目9（`scale_variance`のスケール倍率重複）と同種の問題。
-- **Claudeの所感**: `_common.py`に`HETEROSKEDASTIC_SIGMA_BASE = 0.5`・
-  `HETEROSKEDASTIC_SIGMA_SLOPE = 2.0`・`AUTOCORRELATED_RHO = 0.7`のような
-  名前付き定数として集約する余地がある。項目9と合わせて対応すると効率が良さそう。
-- **気づいた経緯**: 2026-08-15、`generate_iv_datasets.py`解説後のユーザー指摘。
-- **状態**: 対応済み（2026-08-22、`refactor`スキルで項目9と合わせて対応）。
-  新規作成した[benchmark/_dgp_constants.py](../../../benchmark/_dgp_constants.py)に
-  `HETEROSKEDASTIC_SIGMA_BASE`/`HETEROSKEDASTIC_SIGMA_SLOPE`/`AUTOCORRELATED_RHO`
-  として集約し、linear・IVの2系統ともそこから参照する形に統一した。全シナリオで
-  生成値がリファクタリング前後で完全一致することを実測確認済み。
 
 ### 11. `_run_cluster_case`（generate_ols_fixtures.py）が`run_statsmodels_benchmark.py`の`coef`/`se`抽出ロジックと重複
 
@@ -331,7 +237,8 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   + age + kidslt6 + kidsge6"`）が4ファイルに独立して重複定義されていた。
 - **Claudeの所感**: 関数内へのローカル化は可読性向上の意図は理解できるが、逆に他ファイルからの
   import経路を断ってしまう。むしろ`_common.py`等に括り出し4ファイルともそこからimportする
-  方向が、項目4（SCENARIOSリストの重複）と同じパターンで整合的。
+  方向が、項目4（`SCENARIOS`リストの重複、2026-08-22対応済み・コミット済み
+  `d23d9b7`）と同じパターンで整合的。
 - **気づいた経緯**: 2026-08-15、`generate_logit_fixtures.py`解説後のユーザー質問をきっかけに発見。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
@@ -704,49 +611,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   ユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目24・33と合わせて検討）
 
-### 36. crosscheckフィクスチャ側が既存の`load_frozen_dataset`ヘルパーを使わず`pl.read_csv`を再実装している
-
-- **対象**: `generate_ols_crosscheck_fixtures.py`（194・241行目）・
-  `generate_wls_crosscheck_fixtures.py`（151・191行目）・
-  `generate_logit_crosscheck_fixtures.py`（131・143行目）・
-  `generate_probit_crosscheck_fixtures.py`（137・149行目）・
-  `generate_iv_crosscheck_fixtures.py`（159・191・195・213・215・257行目、
-  2026-08-16追加確認）——5ファイル・14箇所で`pl.read_csv(DATA_DIR / f"{method}_
-  {scenario}.csv")`という同一ロジックを独自に再実装
-- **内容**: ユーザー指摘（2026-08-16）。`_common.py`には既に`load_frozen_dataset
-  (prefix, scenario) -> tuple[pl.DataFrame, list[float] | None]`という、まさに
-  このロジック（`true_beta`のJSON読み込みも含む）を持つ関数が存在し、
-  `run_statsmodels_benchmark.py`（statsmodels側）は実際にこれを
-  `_load_synthetic`としてimportして使っている。しかしcrosscheck側4ファイルは
-  この既存ヘルパーを使わず、同じロジックを個別に再実装していた。crosscheck側は
-  `true_beta`が不要（Rust実装とRの値を直接比較するのみ）なので、
-  `df, _ = load_frozen_dataset(prefix, scenario)`のように戻り値の片方を捨てれば
-  そのまま使えるはず。「新しい共通化」ではなく「既存の共通関数を単純に
-  使っていなかった」というより解決しやすい性質の重複。`n = pl.read_csv(DATA_DIR /
-  "probit_baseline.csv").height`のようなbaselineシナリオのハードコード読み込み
-  （項目31関連）も、`load_frozen_dataset`採用と同時に自動的に解消される。
-- **Claudeの所感**: 項目18・19・35と比べて最も低リスク・即効性のある改善候補
-  （既存関数への差し替えのみで新規設計判断が不要なため）。
-- **気づいた経緯**: 2026-08-16、`generate_probit_crosscheck_fixtures.py`解説後の
-  ユーザー指摘。
-- **状態**: 対応済み（2026-08-22、`refactor`スキルで対応）。5ファイル全て
-  （[benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py](../../../benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py)・
-  [generate_wls_crosscheck_fixtures.py](../../../benchmark/linear/fixtures/generate_wls_crosscheck_fixtures.py)・
-  [generate_logit_crosscheck_fixtures.py](../../../benchmark/nonlinear/fixtures/generate_logit_crosscheck_fixtures.py)・
-  [generate_probit_crosscheck_fixtures.py](../../../benchmark/nonlinear/fixtures/generate_probit_crosscheck_fixtures.py)・
-  [generate_iv_crosscheck_fixtures.py](../../../benchmark/iv/fixtures/generate_iv_crosscheck_fixtures.py)）で
-  `pl.read_csv(DATA_DIR / f"{prefix}_{scenario}.csv")`を`load_frozen_dataset(prefix,
-  scenario)`（`true_beta`側は`_`で破棄）に差し替えた。OLS/WLS/Logit/Probitの4ファイルは
-  置換後`DATA_DIR`が完全に未使用になったためimportから削除、IVのみ`_run_r()`に直接渡す
-  `csv_path`（`Path`）自体は引き続き必要なため`DATA_DIR`のimportを残した（他4ファイルは
-  `_write_csv()`で一時ディレクトリに書き出してから渡す設計のため`DATA_DIR`不要という
-  構造差、項目24で確認済みの非対称性と同根）。副次的に、IV版の`baseline`シナリオで
-  発生していた二重読み込み（`.height`用に1回→`baseline`時にもう一度`df`として再読込）も
-  ユーザー確認の上解消し、ループ先頭で読んだ`df`を再利用する形にした。5ファイル全てで
-  リファクタリング前後の生成JSON（`_meta.generated_at`除く）が完全一致することを実測確認、
-  `pytest tests`956件全件パス、`ruff check .`／`ruff format --check .`全件パス、
-  `/code-review`（medium）でも指摘なしを確認済み。
-
 ### 37. `suppressMessages`が`run_ivreg_benchmark.R`にしか無く、他3ファイルにJSON破損リスクが残る
 
 - **対象**: [benchmark/iv/run_ivreg_benchmark.R:67-72](../../../benchmark/iv/run_ivreg_benchmark.R#L67-L72)
@@ -763,21 +627,13 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-16、`run_ivreg_benchmark.R`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
-### 38. `script_dir`特定→`_common.R`の`source()`ブロックは構造的に共通化しにくい
+### 38. `script_dir`特定→`_common.R`の`source()`ブロックは構造的に共通化しにくい（対応不要と判断）
 
-- **対象**: [benchmark/linear/run_lm_crosscheck_benchmark.R:40-42](../../../benchmark/linear/run_lm_crosscheck_benchmark.R#L40-L42)・
-  [benchmark/iv/run_ivreg_benchmark.R:77-79](../../../benchmark/iv/run_ivreg_benchmark.R#L77-L79)
-  （`_common.R`の`extract_coef_se`/`wald_f_test`を使う2ファイルのみに存在）
-- **内容**: ユーザー質問（2026-08-16）。「自分自身の場所を特定して`_common.R`を
-  `source()`する」という3行ブロックが2ファイルで重複しているが、この処理自体を
-  `_common.R`側のヘルパー関数として切り出すと、その関数を呼ぶために先に
-  `_common.R`をsourceする必要があるという循環（鶏と卵の問題）が生じるため、
-  構造的に共通化しにくい。Rには`__file__`相当が無く、Pythonの`sys.path.insert`の
-  ような軽量な代替パスもない。
-- **Claudeの所感**: 環境変数でベースパスを渡す等の代替はあるが、実行方法自体を
-  変える必要がありトレードオフが大きい。現状維持が妥当と考える。
-- **気づいた経緯**: 2026-08-16、`run_ivreg_benchmark.R`解説後のユーザー質問。
-- **状態**: 対応不要と判断（構造的な制約のため、現状維持が妥当）
+- **対応不要と判断**（2026-08-16）: `run_lm_crosscheck_benchmark.R`・`run_ivreg_benchmark.R`
+  にある「自分の場所を特定して`_common.R`を`source()`する」3行を`_common.R`側の
+  ヘルパーに切り出そうとすると、そのヘルパーを呼ぶために先に`_common.R`をsourceする
+  必要がある循環（鶏と卵）が生じ、構造的に共通化できない（Rに`__file__`相当が無いため）。
+  再提案しても同じ結論になる見込み。
 
 ### 39. `_normalize_names`の`if key in raw`存在チェックが、実際には常にTrueにしかならないデッドコード（IV版のみ直接アクセス）
 

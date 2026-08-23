@@ -45,8 +45,10 @@
 上記フェーズはIssue #231としてスコープ確定済みの計画だが、それとは別に
 `docs/planning/specs/refactoring-candidates.md`に溜まった個別項目を`refactor`
 スキルでその都度つまみ食い的に対応する運用も並行して行っている。この節は
-その運用ルール・進捗をセッションをまたいで引き継ぐためのメモ（`refactoring-candidates.md`
-の各項目「状態」欄が一次情報、こちらは運用ルール＋スナップショット）。
+その運用ルール・進捗をセッションをまたいで引き継ぐためのメモ。`refactoring-candidates.md`
+に項目がまだ残っている間は同ファイルの各項目「状態」欄が一次情報だが、2026-08-22の
+運用ルール（同ファイル冒頭「完了項目の扱い」参照）により「対応済み」項目は本体から
+削除されるため、削除後はこちらのスナップショットが当該項目の唯一の記録になる。
 
 **運用ルール（2026-08-22のセッションでユーザーと確立）**:
 - `refactoring-candidates.md`の項目を**1件（または明示的に指定された小さいまとまり）ずつ**対応する。
@@ -61,17 +63,23 @@
 
 **進捗スナップショット（2026-08-22時点、ブランチ`release/v0.6.0`）**:
 - 項目3（`sys.path.insert`とIDE静的解析）: 対応済み・コミット済み（`48727c9`）。
-  PYTHONPATH環境変数方式を採用（詳細は`refactoring-candidates.md`項目3参照）。
-  **devcontainer再ビルドが必要**（本セッション終了直後にユーザーが再ビルド予定）。
-  再ビルド後は`echo $PYTHONPATH`でbenchmark関連パスが設定されていること、
-  `python benchmark/linear/generate_linear_datasets.py baseline`等が
-  importエラー無く動くことを確認すること。
+  PYTHONPATH環境変数方式を採用（`.devcontainer/devcontainer.json`の`remoteEnv`に
+  `PYTHONPATH`を追加、`benchmark/`配下22ファイルから`sys.path.insert`を削除）。
+  devcontainer再ビルド後、`echo $PYTHONPATH`でbenchmark関連パスが設定されていること・
+  `python benchmark/linear/generate_linear_datasets.py baseline`等がimportエラー
+  無く動くことを確認済み（2026-08-22、別セッションで再ビルド後に確認。ただし
+  再ビルド直後は`test`/`benchmark`グループが`.venv`に未同期だったため
+  `uv sync --all-groups`が別途必要だった）。
 - 項目4（`SCENARIOS`重複）: 対応済み・コミット済み（`d23d9b7`）。
 - 項目9・10（DGP用マジックナンバー集約、`benchmark/_dgp_constants.py`新設）:
   対応済み・コミット済み（`7d51802`）。
 - 項目36（crosscheck側のpl.read_csv再実装をload_frozen_datasetに差し替え）:
-  対応済み・未コミット（本セッションで実装、コミット前確認待ち）。
-  詳細は`refactoring-candidates.md`項目36参照。
+  対応済み・コミット済み（`8f6f98e`）。ドキュメント編集時に項目37の見出しを
+  誤って削除する事故が発生し、コミット後の`/code-review`で検知・修正した
+  （`70bef2a`、`refactor`スキルに「変更した層に関わらず`/code-review`必須」を
+  明記する再発防止も合わせて実施）。
+- 上記5項目は`refactoring-candidates.md`本体からは削除済み（2026-08-22運用ルール、
+  同ファイル冒頭「完了項目の扱い」参照）。このスナップショットが唯一の記録。
 - 上記以外（項目1・2・5〜35・37〜43、および`refactoring-candidates-2.md`項目44〜49）は未着手。
 
 **並行作業についての注意**: 本セッションと並行して、別セッションが
@@ -112,10 +120,12 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
 - `benchmark/_common.py`（`freeze_scenarios`/`run_freeze_cli`部分）・`benchmark/_common.R`
 - `benchmark/performance/`: `compare_performance.py`・`render_performance_summary.py`
   （全区切り解説済み）
-- `tests/`: `_assertions.py`・`_helpers.py`・`_tolerances.py`（全区切り解説済み）
+- `tests/`: `_assertions.py`・`_helpers.py`・`_tolerances.py`・`conftest.py`
+  （全区切り解説済み）
 
-**次に解説予定**: `tests/conftest.py`（未着手）。その後`tests/test_{ols,wls,logit,
-probit,iv,tobit}*.py`（17ファイル、いずれも未着手）が残っている。
+**次に解説予定**: `tests/test_{ols,wls,logit,probit,iv,tobit}*.py`
+（17ファイル、いずれも未着手）。次回セッションでは`test_ols.py`から着手する
+想定（構造/APIテスト群の中で最も基本的なファイルのため）。
 
 **このウォークスルー中に作成したGitHub Issue**: [#246](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/246)
 （検定分布・診断統計量の運用ノート`docs/spec/inference-conventions.md`化）・
@@ -128,9 +138,10 @@ probit,iv,tobit}*.py`（17ファイル、いずれも未着手）が残ってい
 **候補メモの状態（2026-08-22時点）**:
 - `refactoring-candidates.md`: 項目1〜43（このウォークスルー由来の最後の追記は項目43）。
   上記「`refactoring-candidates.md`駆動の随時対応」セッションが並行して対応中のため、
-  このウォークスルーからの新規追記は`refactoring-candidates-2.md`（項目44〜49、
+  このウォークスルーからの新規追記は`refactoring-candidates-2.md`（項目44〜50、
   `rename`引数未使用・DGP乱数生成のnumpy不統一・定数関数混在・docstring経緯記述の
-  陳腐化・許容誤差直書き）に切り替えている。**両ファイルの統合は`refactoring-candidates.md`
+  陳腐化・許容誤差直書き・`benchmark/`のPYTHONPATH化がCI/`tests/`側に未適用）に
+  切り替えている。**両ファイルの統合は`refactoring-candidates.md`
   側の随時対応が一区切りついた後にユーザー判断で行う**（現時点では統合しない）。
 - `test-coverage-candidates.md`: 項目1〜24（直近はlogit/probit_crosscheckの基本rtolの
   実測根拠欠如・Logitのmrozクラスターテストの許容誤差非対称性）。こちらはブロックされて

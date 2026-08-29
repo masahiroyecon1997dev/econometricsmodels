@@ -247,7 +247,17 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `pyproject.toml`、CI設定、各種SKILL.md等）に影響する規模の変更のため、
   実施するかどうか・タイミングは慎重に判断すべき。
 - **気づいた経緯**: 2026-08-22、`tests/test_ols.py`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち、影響範囲の洗い出しが必要）
+- **追記（2026-08-23、`tests/test_wls_fixtures.py`解説時）**: ユーザーが
+  「OLSと同様、`test_wls_fixtures.py`の`fixtures`が適さないのでファイル名
+  変更」と改めて指摘。項目自体は元々「他5系統も同様」と対象範囲に含めて
+  記録済みのため新規項目は起こさず本項目への追記とする。Claudeの所感は
+  変わらず、6系統一括リネームは項目68（ファイル分割の方向性決定済み）と
+  時期を合わせて一度に行うのが良いと考える。ファイル分割自体でファイル名が
+  変わる（ディレクトリを切る、責務ごとに分ける等）予定のため、先に
+  `fixtures`部分だけ改名すると分割時に再度リネームが発生し二度手間になる
+  リスクがある。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目68とタイミングを
+  合わせて一括対応を推奨）
 
 ### 56. `test_ols.py`内で数値比較の書き方（生の`assert`+f-string／`pytest.approx`／`_assertions.assert_close`不使用）が混在
 
@@ -577,4 +587,54 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   合わせて手法間のテスト命名規則を統一するタイミングで一括対応するのが
   効率的だと考える。
 - **気づいた経緯**: 2026-08-23、`tests/test_wls.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 71. `test_include_intercept_false_matches_statsmodels`の配置ファイルがOLS/WLSで非対称（構造ファイル／数値比較ファイル）
+
+- **対象**: [tests/test_ols.py:327](../../../tests/test_ols.py#L327)
+  （`test_include_intercept_false_matches_statsmodels_robust_cov_types`、
+  構造・APIファイル側）と
+  [tests/test_wls_fixtures.py:272](../../../tests/test_wls_fixtures.py#L272)
+  （`test_include_intercept_false_matches_statsmodels`、数値比較ファイル側）
+- **内容**: `tests/test_wls_fixtures.py`解説時に発見。同じ観点
+  （`include_intercept=False`が全cov_typeでstatsmodelsと一致すること）の
+  テストが、OLSでは`test_ols.py`、WLSでは`test_wls_fixtures.py`という
+  異なる役割のファイルに置かれている。WLS版のdocstringに「テスト網羅性
+  レビュー、Issue #231フェーズ4で判明したWLS側の抜け」とある通り後から
+  追加されたテストで、追加時にどちらのファイルに置くか明確な基準が
+  無かったことが窺える。
+- **Claudeの所感**: 内容自体（フィクスチャJSON不使用でstatsmodelsを
+  その場で直接呼び出す一回限りの比較）は「数値比較」寄りにも「オプション
+  動作の構造確認」寄りにも解釈できるため、どちらが正しいと一概には
+  言えない。ただし同じ観点のテストが手法間で違うファイルに存在するのは
+  一貫性を欠く。項目57（役割分担docstringの矛盾）・項目68
+  （ファイル分割の方向性）と合わせて、ファイル分割設計時に配置基準を
+  明文化して解消するのが良いと考える。
+- **気づいた経緯**: 2026-08-23、`tests/test_wls_fixtures.py`解説後の
+  ユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目57・68と合わせて検討）
+
+### 72. `_check_result`という同名ヘルパーが`test_ols/wls/logit/probit/iv_fixtures.py`の5ファイルに独立定義され、うち前半（`coef`/`se`/主統計量/`p_values`/`conf_int`ループ）は完全に重複
+
+- **対象**: [tests/test_ols_fixtures.py:69-95](../../../tests/test_ols_fixtures.py#L69-L95)・
+  [tests/test_wls_fixtures.py:72-98](../../../tests/test_wls_fixtures.py#L72-L98)・
+  `tests/test_logit_fixtures.py:93-`・`tests/test_probit_fixtures.py:94-`・
+  `tests/test_iv_fixtures.py:100-`（いずれも`_check_result(res, ref, label)`）
+- **内容**: ユーザー指摘（2026-08-23、「共通使用関数定義の一貫性」）を
+  受けて5ファイルを比較。関数名`_check_result`とシグネチャは5ファイルで
+  完全に一致しており命名自体は既に統一されている。一方で本体は、
+  冒頭の`coef`/`se`/主統計量（OLS/WLS/IVは`t_stats`、Logit/Probitは
+  `z_stats`）/`p_values`/`conf_int`ループの5行分が5ファイルとも一字一句
+  同じロジックで、末尾（手法固有の適合度統計量：OLS/WLSはR²・F統計量、
+  Logit/Probitは対数尤度・LR検定・疑似R²、IVは操作変数の過剰識別検定等）
+  だけが手法ごとに異なる。
+- **Claudeの所感**: 名前が同じで安心しがちだが、実体は5ファイル独立コピー
+  であり、共通する冒頭部分（`_assertions.py`へ`_check_common_stats(res, ref,
+  label, stat_key="t_stats")`のような形で切り出せる）を変更する必要が
+  生じた場合（例: 信頼区間の比較方法を変える等）、5箇所を漏れなく直す
+  必要がある。項目62（`test_ols_fixtures.py`内の`_check_result`と
+  `test_ols_crosscheck.py`の`_assert_fit_stats_close`の命名不統一）とは
+  別軸の問題（こちらは手法間・同名関数の中身の重複）として記録する。
+- **気づいた経緯**: 2026-08-23、`tests/test_wls_fixtures.py`解説後の
+  ユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）

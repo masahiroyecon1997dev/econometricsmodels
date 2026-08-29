@@ -44,14 +44,14 @@ get_robustcov_results`は`HC1`指定時に`getattr(self, "cov_HC1", None)`でモ
 `cov_type="hc1"`をCOV_TYPESに含めない。`fixtures/generate_logit_crosscheck_fixtures.py`/
 `generate_probit_crosscheck_fixtures.py`（R側）が`hc1`の数値比較のfixtureを担う。
 
-使用例:
-    python run_statsmodels_benchmark_nonlinear.py --model logit \\
+使用例（リポジトリルートから）:
+    python -m benchmark.nonlinear.references.statsmodels_ref --model logit \\
         --dataset-source synthetic --dataset baseline --cov-type hc0
 
-    python run_statsmodels_benchmark_nonlinear.py --model probit \\
+    python -m benchmark.nonlinear.references.statsmodels_ref --model probit \\
         --dataset-source synthetic --dataset baseline --cov-type hc0
 
-    python run_statsmodels_benchmark_nonlinear.py --model logit \\
+    python -m benchmark.nonlinear.references.statsmodels_ref --model logit \\
         --dataset-source wooldridge --dataset mroz \\
         --formula "inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6" \\
         --cov-type cluster --cluster-col city

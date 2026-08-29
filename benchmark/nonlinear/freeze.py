@@ -1,11 +1,7 @@
 """nonlinear系統（Logit/Probit）の合成データセットをCSVとして固定（凍結）する。
 
 `benchmark/freeze_datasets.py`（系統横断のディスパッチャ）から呼ばれる。
-単体でも実行できる。
-
-使用例:
-    python freeze_nonlinear_datasets.py --output-dir \\
-        ../../tests/fixtures/benchmarks/data
+単体でも実行できる（リポジトリルートから `python -m benchmark.nonlinear.freeze`）。
 """
 
 from __future__ import annotations
@@ -14,17 +10,13 @@ import json
 from pathlib import Path
 
 from benchmark.common import freeze_scenarios, run_freeze_cli
-from benchmark.nonlinear.generate_nonlinear_datasets import (
-    SCENARIOS as LOGIT_SCENARIOS,
-)
-from benchmark.nonlinear.generate_nonlinear_datasets import (
-    generate_binary_choice_dataset,
-)
+from benchmark.nonlinear.datasets import SCENARIOS as LOGIT_SCENARIOS
+from benchmark.nonlinear.datasets import generate_binary_choice_dataset
 
-# generate_nonlinear_datasets.pyのSCENARIOS（全シナリオ、generate_logit_fixtures.py
+# datasets.pyのSCENARIOS（全シナリオ、generate_logit_fixtures.py
 # のNUMERIC_SCENARIOSに、エラーパス確認用のperfect_multicollinearityを加えたもの）を
 # そのまま使う。PROBIT_SCENARIOSはLOGIT_SCENARIOSと同じシナリオ構成
-# （generate_nonlinear_datasets.py参照）。
+# （datasets.py参照）。
 PROBIT_SCENARIOS = list(LOGIT_SCENARIOS)
 
 

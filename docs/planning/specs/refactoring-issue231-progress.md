@@ -414,12 +414,33 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
     （R含む）を再生成し、コミット済み・Step 3 ベースライン双方と `generated_at`／
     version 除外で完全一致。`pytest` 957件・`ruff check .`／`format --check .` パス。
     `/code-review`（fork実行）指摘ゼロ。
-  - 次: Step 5（Logit 移行）。`generate_logit_fixtures.py`／
-    `generate_logit_crosscheck_fixtures.py` を新構造へ。離散選択系は `stat_key="z_stats"`・
-    `link` 引数・限界効果（`margeff`）があり、`benchmark/linear/references/r.py` 相当の
-    `benchmark/nonlinear/references/r.py` を新設して `normalize_names` の
-    `stat_key`/`fix_margeff` 分岐を使う。`common/reference/r.py` の
-    `conf_from_low_high`/`fix_margeff` はこの回の消費者を想定済み。
+  - **Step 5a 完了（2026-08-29）— nonlinear 共有インフラ再配置（ロジック不変、3a と同型）**:
+    `generate_nonlinear_datasets.py`→`benchmark/nonlinear/datasets.py`、
+    `freeze_nonlinear_datasets.py`→`benchmark/nonlinear/freeze.py`、
+    `run_statsmodels_benchmark_nonlinear.py`→`benchmark/nonlinear/references/statsmodels_ref.py`、
+    `run_glm_crosscheck_benchmark.R`→`benchmark/nonlinear/references/run_glm_crosscheck.R`
+    （`.R` は `source()` 無しのため1階層深くしても影響なし）。`references/__init__.py` 新設。
+    importer 追随: `benchmark/freeze_datasets.py`、`benchmark/nonlinear/freeze.py`、
+    logit/probit の 4 fixture ジェネレータ（`statsmodels_ref` import と `R_SCRIPT` パス定数）。
+    移動した3 `.py` の docstring 使用例のみ `python -m ...` へ更新。第三者コメント・
+    `.R` 内コメント・`_meta` 文字列はステップ9の一括更新へ（3a と同じ方針）。
+    **不変性チェック**: stash で 5a 前コードと 5a 後コードで logit/probit/両 crosscheck
+    JSON を再生成 → 完全一致（`generated_at`／version 除外）。凍結 nonlinear CSV 再生成
+    も完全一致。`pytest` 957件・`ruff` パス。`/code-review`（fork）指摘ゼロ。
+    **既知の先行ドリフト（5a 起因ではない）**: コミット済み `logit/probit(_crosscheck).json`
+    の `_meta.note`／`_meta.purpose` は `run_statsmodels_benchmark.py` を参照しているが、
+    ソースの当該文字列リテラルは既に `run_statsmodels_benchmark_nonlinear.py`
+    （`run_statsmodels_benchmark.py`→`_nonlinear` リネーム時にソースのみ更新、JSON 未再凍結）。
+    OLS/WLS の `_meta` パス文字列を移行中は据え置いた 3b の方針と同じく、
+    ステップ9（`_meta` 文字列の棚卸し＋意図的な一括再凍結）で解消する。
+  - 次: Step 5b（Logit 配線）。`benchmark/linear/references/r.py` 相当の
+    `benchmark/nonlinear/references/r.py`（`run_glm_r`）を新設し、`normalize_names` の
+    `stat_key="z_stats"`／`conf_from_low_high=True`／`fix_margeff=True` を使う
+    （`run_glm_crosscheck.R` は全 cov_type で全キーを無条件出力するため guard 廃止は安全）。
+    `generate_logit_fixtures.py`／`generate_logit_crosscheck_fixtures.py` の `__main__` を
+    `run_fixture_cli` に、ローカル `_run_r`／`_normalize_names` を `run_glm_r` に、
+    `coef`/`se` 内包表記を `extract_coef_se` に、ローカル `MROZ_FORMULA` を
+    `benchmark.common.MROZ_FORMULA`（3b 新設・未消費）に置換。Step 6 で Probit 配線。
 
 ---
 

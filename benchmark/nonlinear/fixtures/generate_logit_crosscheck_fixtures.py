@@ -37,8 +37,8 @@ import polars as pl
 from benchmark.common import imbalanced_cluster_groups, load_frozen_dataset
 from benchmark.common.load_wooldridge import load as load_wooldridge
 
-NONLINEAR_DIR = Path(__file__).resolve().parent.parent
-R_SCRIPT = NONLINEAR_DIR / "run_glm_crosscheck_benchmark.R"
+REFERENCES_DIR = Path(__file__).resolve().parent.parent / "references"
+R_SCRIPT = REFERENCES_DIR / "run_glm_crosscheck.R"
 
 NUMERIC_SCENARIOS = [
     "baseline",

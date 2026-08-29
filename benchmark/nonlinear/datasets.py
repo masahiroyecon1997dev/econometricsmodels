@@ -44,7 +44,7 @@ autocorrelated/high_variance）は2値DGPに直接転用できないため、Log
 人為的に打ち切ることで行う（`tests/test_logit.py`/`test_probit.py`）。
 
 使用例:
-    from benchmark.nonlinear.generate_nonlinear_datasets import generate_binary_choice_dataset
+    from benchmark.nonlinear.datasets import generate_binary_choice_dataset
 
     df, true_beta = generate_binary_choice_dataset(
         "baseline", link="logit", n=500, seed=42

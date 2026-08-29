@@ -28,7 +28,7 @@ import polars as pl
 import statsmodels
 
 from benchmark.common import DATA_DIR, imbalanced_cluster_groups
-from benchmark.nonlinear.run_statsmodels_benchmark_nonlinear import run
+from benchmark.nonlinear.references.statsmodels_ref import run
 
 # perfect_multicollinearityは数値比較の対象外（ComputationErrorの発生確認のみ、
 # testing-policy.md「テストの3系統」）。

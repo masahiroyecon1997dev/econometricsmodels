@@ -231,13 +231,64 @@
   がimportされ、`cov_type`不正・`model`引数未知のエラーで落ちる
   （`pytest`経由の通常実行はフィクスチャJSONを直接読むため影響を受けず、
   これまで顕在化していなかった）。検証は一時的に`PYTHONPATH`を
-  `benchmark/nonlinear`優先に上書きして実施した。この問題自体は本項目の
-  スコープ外のため未修正、新規候補としてユーザーに報告予定。
+  `benchmark/nonlinear`優先に上書きして実施した。
   検証: `ruff check`パス、`pytest tests`957件全件パス（並行セッションが
   `tests/test_ols.py`に追加した1件を含む、自分の変更はコミット対象に含めない）。
   フィクスチャJSON（logit.json/probit.json/iv.json）を`_meta.generated_at`
   除外で比較し、変更前後で完全一致することを確認済み（`git worktree`で変更前
   コードを再現して比較）。`refactoring-candidates.md`から項目14を削除済み。
+  **この環境バグ自体は、ユーザー指示により本セッション内で直後に優先対応・
+  修正済み（項目71として下記に記録）**。
+- 項目71（`benchmark/linear`と`benchmark/nonlinear`の`run_statsmodels_benchmark.py`
+  が同名でPYTHONPATH経由のimportが衝突する）: 対応済み・コミット待ち
+  （本セッションで実装、コミット前確認待ち）。項目14の検証中に発見した環境バグ
+  （上記参照）。ユーザーの明示的指示（「PYTHONPATHの衝突バグを新しい候補として
+  追記してほしい。さらに優先してこのバグに対処してほしい」）により、候補メモへの
+  記録と優先対応の両方を行った。**候補メモへの記録は`refactoring-candidates-2.md`
+  に項目71として一旦追記したが、同じ会話ターン内で対応完了したため、
+  2026-08-22運用ルール（完了項目は削除しこちらのスナップショットへ一本化）に
+  従い候補メモ側は追記前の状態（`git checkout`）に戻し、詳細はこちらにのみ残す**
+  （候補メモに「追記→即削除」の無駄な差分を残さないため）。
+  **根本原因**: `benchmark/linear/run_statsmodels_benchmark.py`と
+  `benchmark/nonlinear/run_statsmodels_benchmark.py`が同名で、現在のPYTHONPATH
+  順序（`benchmark/linear`が`benchmark/nonlinear`より先）によりimportが衝突
+  していた。**対応**: 3ファイルを`git mv`でリネーム（一貫性のため、現時点で
+  衝突していなかったIVの`run_linearmodels_benchmark.py`も含める）。
+  - `benchmark/linear/run_statsmodels_benchmark.py` →
+    `run_statsmodels_benchmark_linear.py`
+  - `benchmark/nonlinear/run_statsmodels_benchmark.py` →
+    `run_statsmodels_benchmark_nonlinear.py`
+  - `benchmark/iv/run_linearmodels_benchmark.py` → `run_linearmodels_benchmark_iv.py`
+
+  リネーム方式（ファイル名にsystemサフィックスを付ける案）はAskUserQuestionで
+  提示し承認を得た（手法名ベースの案・sys.path個別回避案は不採用）。実際の
+  import文6箇所（`generate_ols_fixtures.py`・`generate_wls_fixtures.py`・
+  `generate_logit_fixtures.py`・`generate_probit_fixtures.py`・
+  `generate_iv_fixtures.py`・`generate_iv_gmm_fixtures.py`）を新ファイル名に
+  更新し、docstring・コメント中の旧ファイル名言及（`benchmark/`配下の
+  Python/Rファイル、`tests/`配下6ファイル、`.claude/skills/reference-benchmark/
+  SKILL.md`、`.claude/rules/testing-policy.md`、`docs/spec/inference-conventions.md`、
+  `docs/planning/specs/iv-api-design.md`、`engine/src/iv/CLAUDE.md`、
+  `refactoring-candidates.md`項目11）も生きた参照として追随させた。
+  **意図的に更新しなかった箇所**: `refactoring-candidates-2.md`・
+  `test-coverage-candidates.md`（別セッションの並行作業中ファイルのため
+  不干渉方針、旧ファイル名の言及が残るがそちらのセッション側で追って
+  更新される想定）、および`refactoring-issue231-progress.md`自身の過去の
+  日付入り履歴エントリ（フェーズ記録・「着手前スナップショット」等、当時の
+  記述をそのまま残す方針、273行目付近・433〜439行目付近・526〜540行目・
+  1067/1215/1275行目）。
+  **副次的に発見した別件の未修正バグ**（本項目とは無関係、対応していない）:
+  `generate_iv_gmm_fixtures.py`を直接実行すると`run_gmm()`が呼ぶ
+  `_load_iv_dataset(dataset)`が`scenario`引数不足の`TypeError`で落ちる
+  （`git stash`で変更前コードに戻しても再現するため本項目の変更が原因では
+  ないことを確認済み）。GMMフィクスチャ生成スクリプトを直接再実行する
+  運用が無いため`pytest`には影響しないが、`benchmark/iv/fixtures/
+  generate_iv_gmm_fixtures.py`側の別バグとして今後の候補に追加を検討。
+  検証: リネーム後は`PYTHONPATH`の上書きなしで`generate_logit_fixtures.py`/
+  `generate_probit_fixtures.py`/`generate_iv_fixtures.py`/`generate_ols_fixtures.py`/
+  `generate_wls_fixtures.py`が正しくimportできることを実機確認済み。
+  `ruff check`パス、`pytest tests`全件パス予定（本項目は項目14の続きとして
+  同一コミットに含める想定）。
 - 上記以外（`refactoring-candidates.md`項目11〜13・15〜35・37・39〜41・43）は
   未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は

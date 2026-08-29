@@ -1,12 +1,12 @@
 """Logitのテストフィクスチャ（tests/fixtures/benchmarks/logit.json）を
 生成するスクリプト。
 
-`benchmark/nonlinear/run_statsmodels_benchmark.py`（1回呼べば1ケース分の結果を返す
+`benchmark/nonlinear/run_statsmodels_benchmark_nonlinear.py`（1回呼べば1ケース分の結果を返す
 汎用ツール）を全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つのJSONに
 まとめて書き出す。`benchmark/linear/fixtures/generate_ols_fixtures.py`と同型の設計。
 
 **`cov_type="hc1"`はここに含めない**（statsmodelsのdiscrete modelがn/(n-k)小標本補正を
-実装しておらずHC0と同一値になるバグ的な欠落があるため。`run_statsmodels_benchmark.py`の
+実装しておらずHC0と同一値になるバグ的な欠落があるため。`run_statsmodels_benchmark_nonlinear.py`の
 docstring参照）。`hc1`は`generate_logit_crosscheck_fixtures.py`（R側、正しく補正を
 適用する`sandwich::vcovHC`）が主リファレンスの役割を担う（ユーザー確認済み）。
 
@@ -27,7 +27,7 @@ from pathlib import Path
 import polars as pl
 import statsmodels
 from _common import DATA_DIR, imbalanced_cluster_groups
-from run_statsmodels_benchmark import run
+from run_statsmodels_benchmark_nonlinear import run
 
 # perfect_multicollinearityは数値比較の対象外（ComputationErrorの発生確認のみ、
 # testing-policy.md「テストの3系統」）。
@@ -134,7 +134,7 @@ def build_fixtures() -> dict:
             "cov_type='hc1'はstatsmodelsのdiscrete modelで未実装（HC0と同一値を返す）"
             "ため含まない。logit_crosscheck.json（R側）が主リファレンスを担う。"
             "cov_type='opg'の限界効果（margeff）はstatsmodels側では算出できないため"
-            "nullになっている（run_statsmodels_benchmark.py参照）。"
+            "nullになっている（run_statsmodels_benchmark_nonlinear.py参照）。"
             "near_separationはlogit特有の病理（準完全分離）の境界値ケース。"
             "完全分離下でのNonConvergence検出には既知の限界があり、専用シナリオは"
             "採用していない（docs/spec/logit-spec.md参照）。"

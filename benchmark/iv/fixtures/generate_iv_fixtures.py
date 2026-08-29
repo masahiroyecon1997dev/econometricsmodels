@@ -1,10 +1,10 @@
 """IV（2SLS）のテストフィクスチャ（tests/fixtures/benchmarks/iv.json）を
 生成するスクリプト。
 
-`benchmark/iv/run_linearmodels_benchmark.py`（1回呼べば1ケース分の結果を返す汎用
+`benchmark/iv/run_linearmodels_benchmark_iv.py`（1回呼べば1ケース分の結果を返す汎用
 ツール）を全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つのJSONにまとめて
 書き出す。GMMは`method="gmm"`がまだPython側に配線されていないため対象外
-（`run_linearmodels_benchmark.py`のモジュールdocstring参照）。
+（`run_linearmodels_benchmark_iv.py`のモジュールdocstring参照）。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`iv.json`は
 `tests/fixtures/benchmarks/`に置く（両者を分ける理由は
@@ -27,7 +27,7 @@ from pathlib import Path
 import linearmodels
 import polars as pl
 from _common import DATA_DIR, imbalanced_cluster_groups
-from run_linearmodels_benchmark import run
+from run_linearmodels_benchmark_iv import run
 
 # 丁度識別・過剰識別を問わずx_exog=['x1'], x_endog=['endog1'], instruments=[...]の
 # 構造で数値比較できるシナリオ。perfect_multicollinearityはComputationErrorの発生
@@ -146,11 +146,11 @@ def build_fixtures() -> dict:
         "linearmodels_version": linearmodels.__version__,
         "note": (
             "hc2/hc3はlinearmodelsに対応する実装が無いため対象外（`iv-api-design.md`"
-            "3.1節、`run_linearmodels_benchmark.py`のモジュールdocstring参照）。"
+            "3.1節、`run_linearmodels_benchmark_iv.py`のモジュールdocstring参照）。"
             "GMMは`method='gmm'`がまだPython側に配線されていないため対象外。"
             "wu_hausman_statisticはclassical/hc0/hc1/clusterで`res.wooldridge_"
             "regression`をqで割った値を基準とし機械精度で一致する（実測確認済み、"
-            "`run_linearmodels_benchmark.py`のモジュールdocstring参照）。hacのみ"
+            "`run_linearmodels_benchmark_iv.py`のモジュールdocstring参照）。hacのみ"
             "wooldridge_regressionでも一致しないため`None`（原因未特定、"
             "R ivreg クロスチェック実装時に別途確認、ユーザー確認済み）。"
             "weak_instrument_f_linearmodels（linearmodelsのfirst_stage.diagnosticsの"
@@ -183,7 +183,7 @@ def build_fixtures() -> dict:
 
 
 def _run_cluster_case(dataset: str, groups: list | None = None) -> dict:
-    """クラスターロバストSE確認用に、疑似グループを付けて`run_linearmodels_benchmark`
+    """クラスターロバストSE確認用に、疑似グループを付けて`run_linearmodels_benchmark_iv`
     を呼ぶ（`generate_ols_fixtures.py`の`_run_cluster_case`と同じ発想）。
     """
     filename = f"iv_{dataset}.csv"

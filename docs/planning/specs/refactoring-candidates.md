@@ -33,10 +33,12 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ## 一覧
 
-### 11. `_run_cluster_case`（generate_ols_fixtures.py）が`run_statsmodels_benchmark.py`の`coef`/`se`抽出ロジックと重複
+### 11. `_run_cluster_case`（generate_ols_fixtures.py）が`run_statsmodels_benchmark_linear.py`の`coef`/`se`抽出ロジックと重複
 
 - **対象**: [benchmark/linear/fixtures/generate_ols_fixtures.py:154-158](../../../benchmark/linear/fixtures/generate_ols_fixtures.py#L154-L158)・
-  [benchmark/linear/run_statsmodels_benchmark.py:104-106](../../../benchmark/linear/run_statsmodels_benchmark.py#L104-L106)
+  [benchmark/linear/run_statsmodels_benchmark_linear.py:98](../../../benchmark/linear/run_statsmodels_benchmark_linear.py#L98)
+  （項目14の対応でファイル名を`run_statsmodels_benchmark_linear.py`にリネーム
+  済み〔PYTHONPATH衝突バグ修正〕、行番号もリネーム後の実際の位置に更新済み）
 - **内容**: `_run_cluster_case`は、CSVに無い疑似グループ列`_group`を動的に追加する必要が
   あるため`run()`を再利用できず、statsmodelsを独自に直接呼んでいる（正当な理由）。
   ただし`{str(name): float(v) for name, v in model.params.to_dict().items()}`という
@@ -76,7 +78,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **内容**: `generate_wls_fixtures.py`の`_run_cluster_case`は、`smf.ols`→`smf.wls`（+重み引数）・
   `_meta`に`weight_col`が1行増える以外、`generate_ols_fixtures.py`の同名関数と
   **ほぼ完全に同一のコード**（関数まるごとのコピーに近い）。`_run_401ksubs_case`も、
-  `run_statsmodels_benchmark.py`の`run()`が構築する結果辞書（`coef`/`se`/`t_stats`/
+  `run_statsmodels_benchmark_linear.py`の`run()`が構築する結果辞書（`coef`/`se`/`t_stats`/
   `p_values`/`conf_int`/`r_squared`等13キー）とほぼ同一のロジックを再実装している。
   いずれも`fsize==1`フィルタや`inv_inc`派生列・疑似グループ列といった`run()`が
   対応しない前処理が必要なため`run()`をバイパスしている、項目11・12と同根の問題。
@@ -132,7 +134,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 - **対象**: `grep -rn "Issue #[0-9]\+" benchmark/`で確認した以下10ファイル（計30箇所超）
   - [benchmark/_common.py:3](../../../benchmark/_common.py#L3)
-  - [benchmark/iv/run_linearmodels_benchmark.py:156,292](../../../benchmark/iv/run_linearmodels_benchmark.py#L156)
+  - [benchmark/iv/run_linearmodels_benchmark_iv.py:156,292](../../../benchmark/iv/run_linearmodels_benchmark_iv.py#L156)
   - [benchmark/iv/freeze_iv_datasets.py:55,60](../../../benchmark/iv/freeze_iv_datasets.py#L55)
   - [benchmark/iv/run_ivreg_benchmark.R:25,54,148,175](../../../benchmark/iv/run_ivreg_benchmark.R#L25)
   - [benchmark/iv/fixtures/generate_iv_fixtures.py:108,125,141,181,188,190](../../../benchmark/iv/fixtures/generate_iv_fixtures.py#L108)
@@ -143,7 +145,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   - [benchmark/nonlinear/run_glm_crosscheck_benchmark.R:115](../../../benchmark/nonlinear/run_glm_crosscheck_benchmark.R#L115)
 - **内容**: ユーザー指摘（2026-08-15）。`generate_iv_datasets.py`解説時に「Issue番号は冗長なので削除したい」との指摘を受け該当1箇所を修正済み（本文はWHYを保持したままIssue番号のみ除去）だったが、同種の参照が上記の通り広範囲に残っている。Issue番号だけを見ても文脈が分からず、GitHub側の該当Issueが将来クローズ・番号体系変更等で参照として陳腐化するリスクがある一方、各コメント自体はWHY（なぜその実装・設計になっているか）を本文中に十分書けているため、Issue番号を削っても情報量は落ちない。
 - **Claudeの所感**: `generate_iv_datasets.py`で行ったのと同じ要領（Issue番号を削り、WHYの実質的な記述は残す）で機械的に対応できる規模だが、30箇所超と件数が多いため一括対応が妥当かは要検討（`refactor`スキルの対象として一括実施する候補）。
-- **気づいた経緯**: 2026-08-15、`run_linearmodels_benchmark.py`解説着手前のユーザー指摘。
+- **気づいた経緯**: 2026-08-15、`run_linearmodels_benchmark_iv.py`解説着手前のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 18. `fixtures["_meta"]`の構築パターンが11ファイルで共通の型を持つ
@@ -309,7 +311,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **対象**: [benchmark/linear/generate_linear_datasets.py:144](../../../benchmark/linear/generate_linear_datasets.py#L144)・
   [benchmark/linear/fixtures/generate_ols_fixtures.py:147](../../../benchmark/linear/fixtures/generate_ols_fixtures.py#L147)・
   `generate_wls_fixtures.py`（81・161・165行目）・
-  [benchmark/linear/run_statsmodels_benchmark.py:66](../../../benchmark/linear/run_statsmodels_benchmark.py#L66)・
+  [benchmark/linear/run_statsmodels_benchmark_linear.py:66](../../../benchmark/linear/run_statsmodels_benchmark_linear.py#L66)・
   [benchmark/linear/fixtures/generate_wls_crosscheck_fixtures.py:82](../../../benchmark/linear/fixtures/generate_wls_crosscheck_fixtures.py#L82)
   （`WEIGHT_COL = "weight"`、ローカル定数）
 - **内容**: ユーザー指摘（2026-08-16）。合成データセットの重み列名`"weight"`が、DGP自体

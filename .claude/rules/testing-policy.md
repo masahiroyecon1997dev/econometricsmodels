@@ -17,7 +17,7 @@ paths:
 
 既存の検証済みパッケージとの数値比較で、パラメータ推定値の正しさを検証する。統計量ごとに主リファレンスを決め、独立実装によるクロスチェックも行う。
 
-- **statsmodels**（Python）: OLS系（classical/HC0-3/cluster/HAC、AIC/BIC/log-likelihood、ロバストWald検定まで一貫して対応）の**主リファレンス**。動作確認済み（`benchmark/<系統>/run_statsmodels_benchmark.py`）。
+- **statsmodels**（Python）: OLS系（classical/HC0-3/cluster/HAC、AIC/BIC/log-likelihood、ロバストWald検定まで一貫して対応）の**主リファレンス**。動作確認済み（`benchmark/<系統>/run_statsmodels_benchmark_<系統>.py`）。
 - **R（`lm` + `sandwich`/`lmtest`パッケージ）**: 独立実装によるクロスチェック用。statsmodelsと計算方法の慣習が異なる可能性がある（自由度補正の既定値等）ため、**新しい統計量・cov_typeを追加するたびに、まずstatsmodelsとRが一致することを確認してからフィクスチャを固定する**。両者が一致しない場合は、既定値の違いを疑って調査する。
   - **クロスチェックの対象は係数・標準誤差に限らない**。R²・調整済みR²・AIC・BIC・対数尤度・F統計量・F検定p値等、推定結果として公開する統計量は全て独立実装でもcrosscheckする。一部の統計量だけRクロスチェックを省略し主リファレンス（statsmodels）のみに頼ると、主リファレンス自体のバグやプロジェクト固有の実装差に気づけない。
   - 慣習差の実例: RのAIC()/BIC()標準関数は残差分散を推定パラメータ1個として追加でカウントする（k+1）が、statsmodels・本実装は回帰係数の数kのみを使う。この場合はR標準関数をそのまま使わず、本実装と同じ計算式（`-2*loglik + 2*k`等）で独立に計算した値と比較すること（Rの値をそのまま使うと定数分ずれた「見せかけの不一致」になる）。

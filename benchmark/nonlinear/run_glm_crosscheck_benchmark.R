@@ -5,16 +5,16 @@
 # （testing-policy.md「リファレンス実装」: 独立実装によるクロスチェック用）。
 # 元々Logit専用だったが、Probit追加にあたり第5引数`link`
 # （`logit`/`probit`、既定`logit`）で`glm(family=binomial(link=...))`を切り替える
-# よう一般化した（`run_statsmodels_benchmark.py`の`--model`と同じ発想。
+# よう一般化した（`run_statsmodels_benchmark_nonlinear.py`の`--model`と同じ発想。
 # 以下の各種回避策（opgの手計算・hc1の扱い・marginaleffectsの罠）はいずれも
 # `glm`のfamily/linkに依存しないロジックであることを実機確認済み）。
 #
 # `cov_type="opg"`はstatsmodelsのLogit.fit()/Probit.fit()がネイティブに受け付けない
-# ため（run_statsmodels_benchmark.pyのdocstring参照）、Rでも同様に
+# ため（run_statsmodels_benchmark_nonlinear.pyのdocstring参照）、Rでも同様に
 # `sandwich::estfun()`（スコア寄与）から`Σ = (Σᵢ sᵢsᵢ')⁻¹`を手計算する。
 #
 # `cov_type="hc1"`は、statsmodelsのdiscrete modelがn/(n-k)小標本補正を実装しておらず
-# HC0と同一値を返すバグ的な欠落が発覚したため（run_statsmodels_benchmark.pyの
+# HC0と同一値を返すバグ的な欠落が発覚したため（run_statsmodels_benchmark_nonlinear.pyの
 # docstring参照）、このスクリプト（`sandwich::vcovHC(type="HC1")`、補正を正しく
 # 適用）がhc1の主リファレンスを担う（ユーザー確認済み）。
 #

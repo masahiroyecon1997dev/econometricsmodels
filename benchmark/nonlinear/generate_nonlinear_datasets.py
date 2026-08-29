@@ -5,7 +5,7 @@
 にあたり、シナリオ・X生成ロジック（`moderate_multicollinearity`/
 `high_condition_number`/`perfect_multicollinearity`/`scale_variance`等）が
 リンク関数に一切依存せず完全に共有できることが分かったため、`link`引数
-（`"logit"`または`"probit"`）を追加して一般化した（`run_statsmodels_benchmark.py`が
+（`"logit"`または`"probit"`）を追加して一般化した（`run_statsmodels_benchmark_nonlinear.py`が
 `--weight-col`でOLS/WLSを共有している設計と同じ発想。ユーザー確認済み）。
 
 `generate_linear_datasets.py`（OLS/WLS用）と同型の設計だが、OLSの9シナリオの

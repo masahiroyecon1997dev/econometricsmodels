@@ -8,7 +8,7 @@ fixtures/generate_logit_crosscheck_fixtures.py`で生成）を読み込み、係
 Note:
     `cov_type="hc1"`はここが主リファレンスを担う（statsmodelsのdiscrete modelが
     n/(n-k)小標本補正を実装しておらずHC0と同一値になるバグ的な欠落があるため。
-    `benchmark/nonlinear/run_statsmodels_benchmark.py`のdocstring参照）。
+    `benchmark/nonlinear/run_statsmodels_benchmark_nonlinear.py`のdocstring参照）。
 
     許容誤差はOLSのRクロスチェック（classical/HC0-3/clusterで機械精度一致）より
     緩い。LogitはRのglm（IRLS/Fisher scoring）と本実装（Newton/BFGS/L-BFGS）が

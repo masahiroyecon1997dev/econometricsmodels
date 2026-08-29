@@ -22,7 +22,7 @@ Note:
       等、独立な素朴ループでの手計算とのクロスチェック）による検証に留める。
     - `wu_hausman_statistic`はcov_type="hac"のときlinearmodels側との対応式が
       不明なためフィクスチャ自体が`None`（原因未特定、次セッションで別途調査
-      予定、`run_linearmodels_benchmark.py`のモジュールdocコメント参照）。
+      予定、`run_linearmodels_benchmark_iv.py`のモジュールdocコメント参照）。
       本実装側は`hac`でも値を返す（`None`にはならない）ため、`ref`が`None`の
       ときは比較をスキップするだけで、本実装側の値が`None`であることは
       要求しない。df1（自由度1境界、Issue #235）は逆にaugmented regressionが
@@ -86,7 +86,7 @@ X_EXOG_BY_SCENARIO = {
 }
 
 # HACラグ: `IvOptions.hac_lags`未指定（自動計算）で、`engine::iv::two_sls::
-# resolve_hac_lags`と`run_linearmodels_benchmark.py`の`_hac_auto_lag`が
+# resolve_hac_lags`と`run_linearmodels_benchmark_iv.py`の`_hac_auto_lag`が
 # 同じ式（`floor(4*(n/100)**(2/9))`）を使うため、明示指定しなくても一致する
 # （OLSの`HAC_LAG_IN_FIXTURE`のような固定値の受け渡しが不要）。
 
@@ -299,7 +299,7 @@ def test_df1_matches_linearmodels(fixtures, cov_type):
     悪条件シナリオの一環（Issue #235、`testing-policy.md`「テスト用データセット」）。
     augmented regressionがsaturated（残差自由度0）になるため
     `wu_hausman_statistic`/`wu_hausman_p_value`は全cov_typeで`None`になる
-    （`_check_result`のref Noneスキップ、`run_linearmodels_benchmark.py`参照）。
+    （`_check_result`のref Noneスキップ、`run_linearmodels_benchmark_iv.py`参照）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_df1.csv")
     options = IvOptions(cov_type=cov_type)

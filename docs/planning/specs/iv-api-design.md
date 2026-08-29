@@ -107,7 +107,7 @@ Issue #171（`linearmodels`/`ivreg`とのベンチマーク作成）でリファ
   `cov_type`で変わる）。**GMMは`cov_type`（最終SEの計算方法）と`weight_type`（点推定に使う
   重み行列）を分離する**（詳細は6.2）。
 - **`hc2`/`hc3`（レバレッジ`h_ii`によるスケーリング）は引き続き外部の参照実装で検証できない**
-  （Issue #171で再確認、`benchmark/iv/run_linearmodels_benchmark.py`のモジュールdocstring
+  （Issue #171で再確認、`benchmark/iv/run_linearmodels_benchmark_iv.py`のモジュールdocstring
   参照）: `linearmodels.iv.covariance`は`Homoskedastic`/`Heteroskedastic`/`Kernel`/
   `Clustered`のみで、R `ivreg`も同様（`hatvalues.ivreg`の実装がソース上コメントアウトされて
   いる）。実装（`engine/src/iv/two_sls.rs`）はOLSのHC2/HC3を代数的に拡張した自作の拡張の
@@ -118,7 +118,7 @@ Issue #171（`linearmodels`/`ivreg`とのベンチマーク作成）でリファ
   `hc0`↔(`robust`, `debiased=False`)、`hc1`↔(`robust`, `debiased=True`)、
   `cluster`↔(`clustered`, `debiased=True`)、`hac`↔(`kernel`(bartlett), `debiased=False`)。
   いずれも`coef`/`se`が相対誤差1e-10以下（実質機械精度）で一致することを確認した
-  （詳細な対応表・検証根拠は`run_linearmodels_benchmark.py`のモジュールdocstring参照）。
+  （詳細な対応表・検証根拠は`run_linearmodels_benchmark_iv.py`のモジュールdocstring参照）。
 
 ### 3.2 検定分布
 
@@ -136,7 +136,7 @@ Issue #171（`linearmodels`/`ivreg`とのベンチマーク作成）でリファ
   という設計だが、`linearmodels`は`debiased`という別軸で切り替わるため、`hc0`/`hac`
   （`debiased=False`で`coef`/`se`が一致する組み合わせ）をベンチマークする際は
   `linearmodels`の`pvalues`/`tstats`/`f_statistic`をそのまま使わず、`coef`/`se`のみ借りて
-  t分布・F分布で独自に計算し直す必要があった（`run_linearmodels_benchmark.py`参照）。
+  t分布・F分布で独自に計算し直す必要があった（`run_linearmodels_benchmark_iv.py`参照）。
   GMMについては、`linearmodels`の既定（`debiased=False`→z分布）が本実装の設計
   （GMMは常にz分布）と一致することも合わせて確認できた。GMM自体のcov_type対応・SE計算は
   Issue #171の作業中に実装した（当初Issue #166でクローズ済みの完了条件だったが、実際には

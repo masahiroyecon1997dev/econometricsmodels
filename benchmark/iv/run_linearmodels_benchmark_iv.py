@@ -7,7 +7,7 @@ IVの主リファレンス（`docs/planning/specs/iv-api-design.md`5.1節参照�
 
 合成データは`generate_iv_datasets.py`を直接呼ばず、`tests/fixtures/
 benchmarks/data/`に固定済みのCSVを読む（`benchmark/freeze_datasets.py`参照。
-`run_statsmodels_benchmark.py`と同じ理由）。
+`run_statsmodels_benchmark_linear.py`と同じ理由）。
 
 ## `cov_type`/`debiased`の対応関係（実装時に実測して確定、`iv-api-design.md`3.1節の
 「未確定事項」に対応）
@@ -73,7 +73,7 @@ augmented regression自身の`df_resid`（= 主モデルの`df_resid - n_endog`�
 作成時に発覚・修正済み）。
 
 使用例:
-    python run_linearmodels_benchmark.py --dataset baseline --cov-type classical
+    python run_linearmodels_benchmark_iv.py --dataset baseline --cov-type classical
 """
 
 from __future__ import annotations
@@ -98,7 +98,7 @@ def _load_iv_dataset(
         return load_frozen_dataset("iv", scenario)
     if dataset_source == "wooldridge":
         # Wooldridgeデータはtrue_betaと比較できないため常に`None`
-        # （`run_statsmodels_benchmark.py`のwooldridge分岐と同じ扱い）。
+        # （`run_statsmodels_benchmark_linear.py`のwooldridge分岐と同じ扱い）。
         return _load_wooldridge(scenario), None
     raise ValueError(f"unknown dataset_source: {dataset_source!r}")
 

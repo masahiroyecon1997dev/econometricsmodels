@@ -64,7 +64,7 @@ ATOL = TOLERANCES["wls_fixtures"]["atol"]
 # SCENARIOS/COV_TYPESはgenerate_wls_fixtures.pyのNUMERIC_SCENARIOS/COV_TYPESと
 # 常に一致させる必要があるため、そちらをimportして単一の定義元にする。
 
-# generate_wls_fixtures.py（run_statsmodels_benchmark.py）はHACのラグを
+# generate_wls_fixtures.py（run_statsmodels_benchmark_linear.py）はHACのラグを
 # maxlags=1に固定している。同じラグを明示的に指定し、自動ラグ選択式の
 # 違いを比較対象から除外する（test_ols_fixtures.pyと同じ理由）。
 HAC_LAG_IN_FIXTURE = 1

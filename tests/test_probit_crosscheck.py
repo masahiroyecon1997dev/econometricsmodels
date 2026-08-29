@@ -9,7 +9,7 @@ fixtures/generate_probit_crosscheck_fixtures.py`で生成）を読み込み、�
 Note:
     `cov_type="hc1"`はここが主リファレンスを担う（statsmodelsのdiscrete modelが
     n/(n-k)小標本補正を実装しておらずHC0と同一値になるバグ的な欠落があるため、
-    Probitでも同じ欠落を実機確認済み。`benchmark/nonlinear/run_statsmodels_benchmark.py`
+    Probitでも同じ欠落を実機確認済み。`benchmark/nonlinear/run_statsmodels_benchmark_nonlinear.py`
     のdocstring参照）。
 
     **`classical`/`hc0`/`hc1`/`cluster`はRの`glm()`が既定で使う期待情報行列

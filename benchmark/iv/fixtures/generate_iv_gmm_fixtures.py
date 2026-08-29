@@ -1,7 +1,7 @@
 """GMM（`method="gmm"`）のテストフィクスチャ（tests/fixtures/benchmarks/
 iv_gmm.json）を生成するスクリプト。
 
-`benchmark/iv/run_linearmodels_benchmark.py`の`run_gmm()`（1回呼べば1ケース分の
+`benchmark/iv/run_linearmodels_benchmark_iv.py`の`run_gmm()`（1回呼べば1ケース分の
 結果を返す汎用ツール）を全シナリオ×cov_type、および代表的なweight_typeの組み合わせで
 呼び出し、結果を1つのJSONにまとめて書き出す。
 
@@ -41,7 +41,7 @@ from pathlib import Path
 import linearmodels
 import polars as pl
 from _common import DATA_DIR, imbalanced_cluster_groups
-from run_linearmodels_benchmark import run_gmm
+from run_linearmodels_benchmark_iv import run_gmm
 
 # `generate_iv_fixtures.py`のNUMERIC_SCENARIOSと同一（2SLSと同じ合成データセットを
 # 再利用する）。
@@ -177,7 +177,7 @@ def build_fixtures() -> dict:
             "weight_type='unadjusted'固定で全8シナリオ×cov_type"
             "（classical/hc0/hc1/hac、baselineのみ追加でcluster/"
             "cluster_imbalanced）を検証する。hc2/hc3は2SLSと同じ理由で対象外"
-            "（`run_linearmodels_benchmark.py`のモジュールdocコメント参照）。"
+            "（`run_linearmodels_benchmark_iv.py`のモジュールdocコメント参照）。"
             "他のweight_type（robust/cluster/kernel）はweight_typeとcov_typeが"
             "独立な軸であることの確認が目的のため、baselineシナリオ×"
             "cov_type=classicalのみで検証する（ユーザー確認済み）。"

@@ -7,7 +7,7 @@ logit_crosscheck.json）を生成するスクリプト。
 
 **`cov_type="hc1"`はここでは主リファレンスの役割を担う**（statsmodelsのdiscrete model
 がn/(n-k)小標本補正を実装しておらずHC0と同一値になるバグ的な欠落があるため。
-`run_statsmodels_benchmark.py`のdocstring参照。ユーザー確認済み）。他のcov_type
+`run_statsmodels_benchmark_nonlinear.py`のdocstring参照。ユーザー確認済み）。他のcov_type
 （classical/opg/hc0/cluster）は通常通りクロスチェック用（厳密比較の主体は
 `logit.json`側）。
 
@@ -228,7 +228,7 @@ def build_fixtures() -> dict:
             "z値・p値・信頼区間・対数尤度・AIC・BIC・LR統計量・LR検定p値・"
             "疑似決定係数・限界効果を含む。"
             "cov_type='hc1'はここが主リファレンス（statsmodelsのdiscrete modelが"
-            "n/(n-k)補正を未実装のため、run_statsmodels_benchmark.py参照）。"
+            "n/(n-k)補正を未実装のため、run_statsmodels_benchmark_nonlinear.py参照）。"
             "cov_type='opg'の限界効果もここのみが数値照合対象（statsmodels側は"
             "算出不可）。"
         ),

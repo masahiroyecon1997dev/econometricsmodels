@@ -2,7 +2,7 @@
 限界効果）を生成するスクリプト。
 
 Logit/Probitの主リファレンスとして使用する。`benchmark/linear/
-run_statsmodels_benchmark.py`（OLS/WLS用）と同型の設計。元々Logit専用だったが、
+run_statsmodels_benchmark_linear.py`（OLS/WLS用）と同型の設計。元々Logit専用だったが、
 Probit追加にあたり`--model logit`/`--model probit`で切り替えられる
 よう一般化した（`--weight-col`でOLS/WLSを切り替える`linear`系統の設計と同じ発想。
 `smf.logit`/`smf.probit`のAPI形状が完全に同じで、下記の各種既知の欠落・回避策も
@@ -45,13 +45,13 @@ get_robustcov_results`は`HC1`指定時に`getattr(self, "cov_HC1", None)`でモ
 `generate_probit_crosscheck_fixtures.py`（R側）が`hc1`の数値比較のfixtureを担う。
 
 使用例:
-    python run_statsmodels_benchmark.py --model logit \\
+    python run_statsmodels_benchmark_nonlinear.py --model logit \\
         --dataset-source synthetic --dataset baseline --cov-type hc0
 
-    python run_statsmodels_benchmark.py --model probit \\
+    python run_statsmodels_benchmark_nonlinear.py --model probit \\
         --dataset-source synthetic --dataset baseline --cov-type hc0
 
-    python run_statsmodels_benchmark.py --model logit \\
+    python run_statsmodels_benchmark_nonlinear.py --model logit \\
         --dataset-source wooldridge --dataset mroz \\
         --formula "inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6" \\
         --cov-type cluster --cluster-col city

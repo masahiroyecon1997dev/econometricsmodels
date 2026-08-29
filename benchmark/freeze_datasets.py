@@ -26,7 +26,7 @@ MITライセンスだが、同梱される実データの著作権はWooldridge�
 Econometrics』教科書側にある可能性があり、フィルタ後の部分集合であっても
 MITライセンスの本リポジトリにCSVとしてコミットして再配布してよいか未確認の
 ため。ユーザー確認済み）。Wooldridgeデータは引き続き`load_wooldridge.py`経由で
-都度ロードする（`run_statsmodels_benchmark.py`・各`generate_*_crosscheck_fixtures.py`・
+都度ロードする（各`run_statsmodels_benchmark_*.py`・各`generate_*_crosscheck_fixtures.py`・
 `tests/test_ols_crosscheck.py`参照）。
 
 使用例:

@@ -1,6 +1,6 @@
 """WLSのテストフィクスチャ（tests/fixtures/benchmarks/wls.json）を生成するスクリプト。
 
-`benchmark/linear/run_statsmodels_benchmark.py`（`--weight-col`指定でsmf.wlsを使う）を
+`benchmark/linear/run_statsmodels_benchmark_linear.py`（`--weight-col`指定でsmf.wlsを使う）を
 全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つのJSONにまとめて書き出す。
 構成は`generate_ols_fixtures.py`に合わせている（重み列`weight`を追加で渡す点のみ異なる）。
 
@@ -30,7 +30,7 @@ import polars as pl
 import statsmodels
 from _common import DATA_DIR, imbalanced_cluster_groups
 from load_wooldridge import load as load_wooldridge
-from run_statsmodels_benchmark import run
+from run_statsmodels_benchmark_linear import run
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md
 # 「テストの3系統」参照）。ComputationErrorが発生することのみをテスト

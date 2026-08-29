@@ -721,3 +721,48 @@
 - **気づいた経緯**: 2026-08-23、`tests/test_ols_crosscheck.py`解説中の
   ユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 34. `test_wls.py`にもOLSと同型のバリデーション抜けがある（`y`列自体の欠落・`fit()`本体のNaN/無限大・空文字列の列名）
+
+- **対象**: [tests/test_wls.py:218-225](../../../tests/test_wls.py#L218-L225)
+  （`test_missing_column_raises`、`x`側のみ`x=["x1", "nonexistent"]`、`y`側の
+  欠落は未テスト）・[tests/test_wls.py:228-236](../../../tests/test_wls.py#L228-L236)
+  （`test_null_values_raise`、null値のみ、NaN・無限大は未テスト。`weight`列は
+  `test_nan_weight_raises`/`test_null_weight_raises`で既に分割済みなのと
+  対照的）
+- **内容**: ユーザー依頼（2026-08-23）を受けて`test_wls.py`のバリデーション
+  網羅性を確認したところ、項目30〜32（`test_ols.py`）と同型の抜けが存在した。
+  (1) `y`が存在しない列名の場合の専用テストが無い。(2) `fit()`本体の`y`/`x`
+  列でNaN・無限大を含む場合のテストが無い（`weight`列は既に分割済みで
+  対照的）。(3) `y=""`/`weight=""`/`cluster_col=""`（空文字列）の専用テストが
+  無い（実機確認では`y=""`は`ValidationError("column '' does not exist in
+  the data")`として正しく動作しており、優先度は低い）。
+- **Claudeの所感**: (2)は`testing-completeness-reviewer`のレビュー観点に
+  追加した「列引数ごとのバリデーション3点セット」で今後拾えるはずだが、
+  既存分としては未対応のまま残っている。
+- **気づいた経緯**: 2026-08-23、`tests/test_wls.py`解説後のユーザー指摘を
+  受けた確認。
+- **状態**: 未対応（着手要否はユーザー判断待ち。(3)は優先度低）
+
+### 35. `test_cov_type_label`/`test_cov_type_is_case_insensitive`がOLS・WLSともHACを含んでいない（大文字小文字を区別しないことが未検証）
+
+- **対象**: [tests/test_ols.py:478-484](../../../tests/test_ols.py#L478-L484)・
+  [tests/test_wls.py:372-386](../../../tests/test_wls.py#L372-L386)
+  （`test_cov_type_label`、`["classical", "hc0", "hc1", "hc2", "hc3"]`＋
+  cluster別途、hac無し）、
+  [tests/test_ols.py:487-507](../../../tests/test_ols.py#L487-L507)・
+  [tests/test_wls.py:389-411](../../../tests/test_wls.py#L389-L411)
+  （`test_cov_type_is_case_insensitive`、`CLASSICAL`/`HC0`〜`hc3`/
+  `nonrobust`のみパラメータ化、`HAC`/`Hac`等は無し）
+- **内容**: ユーザー指摘（2026-08-23）を受けて確認。`res.cov_type == "hac"`
+  になること自体は別テスト（`test_hac_runs_and_returns_finite_std_errors`
+  等）で確認済みだが、**HACが大文字小文字を区別しないこと**
+  （`"HAC"`/`"Hac"`等）は`test_cov_type_is_case_insensitive`のパラメータ
+  リストに含まれておらず、OLS・WLSどちらでも未検証。
+- **Claudeの所感**: `parse_cov_type`（`engine_pybind/src/linear/common.rs`）は
+  `cov_type_lower.as_str()`で全cov_typeを同じロジックで判定しているため
+  実装上のリスクは低いと考えられるが、他のcov_type全てで大文字小文字
+  バリエーションをテストしているのにHACだけ抜けているのは網羅性として
+  片手落ち。`hac_lags`を明示する必要がある分岐の複雑さが、抜けの一因かもしれない。
+- **気づいた経緯**: 2026-08-23、`tests/test_wls.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

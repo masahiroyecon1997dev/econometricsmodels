@@ -27,15 +27,22 @@ CLAUDE.md（特に7章）と`.claude/rules/testing-policy.md`は通常自動的�
    - フィクスチャJSONに`_meta`（生成日時・リファレンス実装バージョン等）が含まれているか
    - 許容誤差の値とその根拠（実測値に基づくものか）がコードコメント・関連ドキュメントに明記されているか
 
+5. **列引数ごとのバリデーション3点セット**
+   - 対象手法が受け取る列名引数（`y`・`x`・`weight`・`cluster_col`・`time_col`等、必須/オプション問わず）それぞれについて、以下が個別にテストされているか。
+     - **存在確認**: 指定した列名がDataFrameに存在しない場合に`ValidationError`になること
+     - **欠損値（null）**: 列にnullを含む場合に`ValidationError`になること
+     - **NaN・無限大**: f64型の列（`extract_f64_column`経由のもの。`cluster_col`等の文字列/カテゴリカル列は対象外）にNaN・`inf`を含む場合に`ValidationError`になること。nullとNaN/Infは`column_extraction.rs`内で別ロジックのため、一方のテストで他方もカバーされていると誤解しないこと（`tests/test_wls.py`の`test_nan_weight_raises`/`test_null_weight_raises`が望ましい粒度の実例）
+   - `y`/`x`は`fit()`本体が受け取る列（学習データ）と、`predict(new_data)`が受け取る列の両方で、上記3点セットが揃っているか（`fit()`側だけ・`predict()`側だけ、という非対称が無いか）
+
 ## 手順
 
 1. レビュー対象の手法を確認する（明示的に指定されていればそれを、なければ直近の`git diff`から対象手法を推定する）。
-2. 対象手法の`tests/`配下のテストファイル、`tests/fixtures/benchmarks/`のフィクスチャ、`benchmark/fixtures/generate_*.py`を読み、上記4観点で`testing-policy.md`の要件と突き合わせる。
+2. 対象手法の`tests/`配下のテストファイル、`tests/fixtures/benchmarks/`のフィクスチャ、`benchmark/fixtures/generate_*.py`を読み、上記5観点で`testing-policy.md`の要件と突き合わせる。
 3. 抜けている項目をリストアップする。**既存テストが全て通っていることは網羅性がある証拠にしない**。カバレッジ率が高くても、検証していない統計量・シナリオ・オプション組み合わせがあれば指摘する。
 
 ## 出力形式
 
-- 4観点それぞれで「揃っている項目」「欠けている項目」を明示する。
+- 5観点それぞれで「揃っている項目」「欠けている項目」を明示する。
 - 欠けている項目には重要度（must fix / should fix / nice to have）を付ける。
 - 指摘のみを行い、コード自体は修正しない。対応が必要な場合は「`/test-new`・`/implement-python`・`/implement-rust`での対応を推奨」と伝える。
 

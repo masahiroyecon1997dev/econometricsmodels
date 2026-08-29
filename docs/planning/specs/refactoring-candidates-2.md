@@ -473,3 +473,108 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   見込み）。実施の要否・タイミングはユーザー判断が必要。
 - **気づいた経緯**: 2026-08-23、`tests/test_ols_crosscheck.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、公開APIの破壊的変更を伴う）
+
+### 65. `df = dataset.with_columns(pl.lit(1.0).alias("weight"))`が`test_wls.py`内に25回重複している
+
+- **対象**: [tests/test_wls.py](../../../tests/test_wls.py)全体（`grep -c`で25箇所確認）
+- **内容**: `/explain-code`での`test_wls.py`解説中に発見。`conftest.py`の`dataset`
+  フィクスチャは`weight`列を持たないため、WLSが必須とする`weight`引数
+  （`docs/spec/wls-spec.md`「`weight`は`y`/`x`と同格の必須のトップレベル引数」）
+  用に、ほぼ全てのテスト関数が同一の1行で`weight=1.0`固定の列を追加している。
+- **Claudeの所感**: `conftest.py`の`binary_dataset`/`censored_dataset`
+  （`dataset`から派生する`module`スコープのフィクスチャ）と同じパターンで、
+  `weight=1.0`固定の派生フィクスチャを新設すれば25箇所の重複を1箇所に
+  集約できる。
+- **気づいた経緯**: 2026-08-23、`tests/test_wls.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 66. `test_weight_one_matches_ols`/`test_residuals_are_original_scale_not_weighted`の許容誤差・マジックナンバーを、`test_ols.py`の`ATOL_COEF`等と同じくファイル冒頭の名前付き定数にする
+
+- **対象**: [tests/test_wls.py:72-78](../../../tests/test_wls.py#L72-L78)
+  （`abs(...) < 1e-9`が6箇所）、
+  [tests/test_wls.py:294-309](../../../tests/test_wls.py#L294-L309)
+  （`test_residuals_are_original_scale_not_weighted`、`weight = [100.0] * n`・
+  `abs(wls_r - ols_r) < 1e-6`）
+- **内容**: ユーザー指摘（2026-08-23）。`_tolerances.py`のスコープ外（本実装
+  同士の不変条件確認であり、リファレンス実装との数値照合ではないため）で
+  あることは合意済みだが、値自体が複数箇所に直書きされている。
+  `test_ols.py`が`ATOL_COEF`/`ATOL_SE`/`ATOL_STAT`をファイル冒頭の名前付き
+  定数にしているのと同じパターンに揃えれば、値を変更する際に一括で
+  追従できる。
+- **Claudeの所感**: `ATOL_INVARIANT = 1e-9`（OLS/WLS不変条件比較用）・
+  `LARGE_WEIGHT = 100.0`（重み付き残差と元スケール残差の差を検出するための
+  意図的に大きい重み）のような名前を`test_wls.py`冒頭に定義するのが妥当。
+- **気づいた経緯**: 2026-08-23、`tests/test_wls.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 67. `WLSOptions`新設の要否は、Logit/Probitの`method`/`max_iter`/`tol`/`raise_on_non_convergence`共通化と合わせてLogit/Probit実装確認時に再検討する
+
+- **対象**: [python_package/econometricsmodels/linear/wls.py:10-13](../../../python_package/econometricsmodels/linear/wls.py#L10-L13)
+  （`OLSOptions`を再利用する現行方針）、
+  [engine_pybind/src/nonlinear/logit.rs:60-98](../../../engine_pybind/src/nonlinear/logit.rs#L60-L98)
+  （`LogitOptions`、`method`/`max_iter`/`tol`/`raise_on_non_convergence`という
+  Logit固有の最適化フィールドを持つ）
+- **内容**: ユーザー判断（2026-08-23）。`WLSOptions`はユーザビリティ向上のため
+  新設する方向。ただしユーザーから「`LogitOptions`の`method`/`max_iter`/`tol`/
+  `raise_on_non_convergence`はProbitでも共通になるはず」という指摘があり、
+  Logit/Probit実装確認時に、単純に`WLSOptions`を独立新設するだけでなく、
+  MLE系（Logit/Probit、将来Tobit等）で共通する最適化オプションを
+  どう共有するか（共通の基底構造・trait等）も合わせて再検討する。
+- **Claudeの所感**: `WLSOptions`単体は`OLSOptions`のフィールドをそのまま
+  持つだけなので実装コストは低いが、Logit/Probit側の共通化方針が
+  固まってから着手した方が、後から設計をやり直すリスクを避けられる。
+- **気づいた経緯**: 2026-08-23、`tests/test_wls.py`解説後のユーザー判断。
+- **状態**: 方針決定済み（実施はLogit/Probit実装確認時、ユーザー判断待ち）
+
+### 68. `test_ols.py`/`test_wls.py`等を「バリデーション」「API構造」「数値誤差」で分割し、系統ごとのディレクトリ構成も見直す方向で検討中
+
+- **対象**: `tests/`配下の手法別テストファイル全般（現状は`test_<method>.py`
+  1ファイルに構造・API・エラーパスが同居）
+- **内容**: ユーザー判断（2026-08-23）。ファイルを関心事（バリデーション/
+  API構造/数値誤差）で分割する方向で検討中。「ディレクトリを切る変更
+  （系統別サブディレクトリ化）と合わせればファイル数の増加は問題ない」との
+  判断。
+- **Claudeの所感**: 影響範囲が大きい構造変更（17ファイル×分割、`conftest.py`・
+  `_helpers.py`・`_assertions.py`・`_tolerances.py`の参照経路、CI設定等）の
+  ため、具体的な分割方針・ディレクトリ構成は別途詳細設計が必要。
+  `refactoring-issue231-progress.md`のフェーズ5〜7（後継Issue #248）や
+  `refactor`スキルでの対応が候補になる。
+- **気づいた経緯**: 2026-08-23、`tests/test_wls.py`解説後のユーザー判断。
+- **状態**: 方向性決定済み（具体的な設計・実施タイミングはユーザー判断待ち）
+
+### 69. `test_hac_time_col_reorders_rows_before_computing_lags`の`ordered_df`/`shuffled_df`が手書きで重複、OLS/WLS間でも同一データが独立に書かれている
+
+- **対象**: [tests/test_ols.py:392-426](../../../tests/test_ols.py#L392-L426)・
+  [tests/test_wls.py:476-514](../../../tests/test_wls.py#L476-L514)
+  （両方とも同一の`y=[2,4,5,4,5], x1=[1..5]`を時系列順・シャッフル順の
+  2つのDataFrameとして独立に手書き）
+- **内容**: ユーザー指摘（2026-08-23）。`shuffled_df`は`ordered_df`を
+  `time=[3,1,5,2,4]`という順序で並べ替えただけのものだが、シャッフル後の
+  値を人間が計算して書き写しており、書き間違いのリスクがある。またOLS版・
+  WLS版で完全に同じデータ（WLS版は`weight=1.0`列が追加されるのみ）が
+  独立に書かれている。
+- **Claudeの所感**: `ordered_df.sample(fraction=1.0, shuffle=True, seed=...)`
+  のようなpolarsの機能で並べ替えを生成的に作れば、書き間違いリスクを
+  排除しつつ「単なる並べ替えである」ことがコード上からも明確になる。
+  `tests/_helpers.py`に「時系列順データと、その決定論的なシャッフル版を
+  返す」ヘルパーを追加すれば、OLS/WLS両方から共通で使える。
+- **気づいた経緯**: 2026-08-23、`tests/test_wls.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 70. `test_result_is_wls_results_type`に対応する`isinstance(res, OlsResults)`テストがOLS側に無い、`test_nobs_and_dep_var_name`（WLS）と`test_n_obs_and_dep_var_name`（OLS）の命名揺れ
+
+- **対象**: [tests/test_wls.py:312-316](../../../tests/test_wls.py#L312-L316)
+  （`test_result_is_wls_results_type`）に対応するテストが`test_ols.py`に
+  無い（`isinstance(res, OlsResults)`が0件）。命名揺れは
+  [tests/test_wls.py:362](../../../tests/test_wls.py#L362)
+  （`test_nobs_and_dep_var_name`）と
+  [tests/test_ols.py:472](../../../tests/test_ols.py#L472)
+  （`test_n_obs_and_dep_var_name`、アンダースコアの位置が異なる）
+- **内容**: ユーザー指摘（2026-08-23）を受けてOLS/WLSのテスト関数名を
+  突き合わせて確認。`isinstance`チェックはWLS側にしかなく、OLS側の
+  返り値型（`OlsResults`）が正しいことを確認するテストが無い。
+- **Claudeの所感**: どちらも小さい抜け・揺れだが、項目68（ファイル分割）と
+  合わせて手法間のテスト命名規則を統一するタイミングで一括対応するのが
+  効率的だと考える。
+- **気づいた経緯**: 2026-08-23、`tests/test_wls.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

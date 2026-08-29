@@ -184,6 +184,25 @@ def test_null_values_raise():
         OLS(df, y="y", x=["x1"]).fit()
 
 
+def test_non_finite_values_raise():
+    """`y`/`x`にNaN・無限大が含まれる場合`ValidationError`。
+
+    null（`test_null_values_raise`）とNaN/無限大は`column_extraction.rs`内で
+    別ロジックのため個別に確認する（テスト網羅性レビューで判明した抜け）。
+    """
+    df_nan = pl.DataFrame(
+        {"y": [1.0, float("nan"), 3.0], "x1": [1.0, 2.0, 3.0]}
+    )
+    with pytest.raises(ValidationError):
+        OLS(df_nan, y="y", x=["x1"]).fit()
+
+    df_inf = pl.DataFrame(
+        {"y": [1.0, float("inf"), 3.0], "x1": [1.0, 2.0, 3.0]}
+    )
+    with pytest.raises(ValidationError):
+        OLS(df_inf, y="y", x=["x1"]).fit()
+
+
 def test_non_numeric_dtype_raises():
     df = pl.DataFrame({"y": ["a", "b", "c"], "x1": [1.0, 2.0, 3.0]})
     with pytest.raises(ValidationError):

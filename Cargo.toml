@@ -26,7 +26,7 @@ faer = "=0.24.4"
 # pure Rustでsystem BLAS/LAPACK不要、faerの方針と一貫する。
 # default-features = false でnalgebra/rand機能を無効化し、CDF計算に必要な最小限の依存に絞る。
 # （メンバー側の[dependencies]でdefault-featuresを上書きできないため、ここで指定する）
-statrs = { version = "=0.19.0", default-features = false }
+statrs = { version = "=0.19.1", default-features = false }
 # argmin: 非線形モデル（Logit/Probit/Tobit）のMLE数値最適化。
 # argmin-mathのfaerバックエンドはfaer 0.23までしか対応しておらず、本プロジェクトのfaerピン
 # （=0.24.4）と噛み合わないため使わない（docs/planning/specs/nonlinear-implementation-notes.md

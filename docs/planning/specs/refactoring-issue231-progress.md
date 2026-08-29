@@ -383,8 +383,25 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
     importer を追随。検証: `ols/wls/ols_crosscheck/wls_crosscheck.json`（R含む）+
     凍結 synthetic CSV を再生成し、変更前ベースラインと `generated_at`・version 除外で
     完全一致。`pytest` 957件・`ruff` パス。コメント中の旧ファイル名参照はステップ9で一括更新。
-  - 次: Step 3b（`benchmark/common/` に `reference/{r,meta}.py`・`driver.py`・
-    `cluster_cases.py`・`constants.py` を新設し OLS を配線）。
+  - **Step 3b 完了（2026-08-29）— 共有ヘルパー新設 + OLS 配線（ロジック不変）**:
+    `benchmark/common/` に `driver.py`（`run_fixture_cli`＝11ファイル完全一致だった
+    `__main__`）・`constants.py`（`SYNTHETIC_FORMULA`/`WEIGHT_COLUMN_NAME`/`MROZ_FORMULA`）・
+    `reference/r.py`（`run_r`＋`normalize_names`、5コピーの忠実マージ。項目39 に従い
+    `if key in raw` guard 廃止）を新設、`datasets_io.py` に `BENCHMARKS_DIR` 追加。
+    `benchmark/linear/references/r.py`（`run_lm_r`＝OLS/WLS 共用の薄いラッパー）を新設。
+    `generate_ols_fixtures.py`／`generate_ols_crosscheck_fixtures.py` の `__main__` を
+    `run_fixture_cli` に、後者のローカル `_run_r`／`_normalize_names` を `run_lm_r` に置換。
+    `_meta` は各ファイルにインライン維持（キー順の byte 差分リスク回避、`build_meta` は延期）。
+    `cluster_cases.py` のフル統合・`MethodBenchmarkSpec`/`build_fixture_json` は
+    Step 4（WLS が2つめの消費者）へ延期。**`/code-review` 指摘対応**: アダプタを
+    `references/statsmodels.py` としていたのを **`statsmodels_ref.py`** にリネーム
+    （ライブラリ名と同名で `sys.path` 事故の再来リスク、項目71 と同種）。
+    検証: `ols/ols_crosscheck.json`（R含む）+ 凍結CSV 再生成でベースライン完全一致、
+    `pytest` 957件・`ruff` パス。
+  - 次: Step 4（WLS 移行）。`generate_wls_fixtures.py`／`generate_wls_crosscheck_fixtures.py`
+    を新構造へ。ここで OLS/WLS のループが共通なら `MethodBenchmarkSpec`/`build_fixture_json`
+    を抽出。`_run_cluster_case`（statsmodels側・R側）も 2 消費者が揃うので
+    `benchmark/common/cluster_cases.py` へ集約を検討。
 
 ---
 

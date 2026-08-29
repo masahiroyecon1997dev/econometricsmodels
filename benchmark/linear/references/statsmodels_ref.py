@@ -15,14 +15,14 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/freeze_datasets.py`
 `freeze_datasets.py`のdocstring参照）。
 
 使用例（リポジトリルートから）:
-    python -m benchmark.linear.references.statsmodels --dataset-source synthetic \\
+    python -m benchmark.linear.references.statsmodels_ref --dataset-source synthetic \\
         --dataset heteroskedastic --cov-type HC1
 
-    python -m benchmark.linear.references.statsmodels --dataset-source wooldridge \\
+    python -m benchmark.linear.references.statsmodels_ref --dataset-source wooldridge \\
         --dataset wage1 --formula "lwage ~ educ + exper + tenure" \\
         --cov-type cluster --cluster-col nearc4
 
-    python -m benchmark.linear.references.statsmodels --dataset-source synthetic \\
+    python -m benchmark.linear.references.statsmodels_ref --dataset-source synthetic \\
         --dataset baseline --cov-type classical --weight-col weight
 """
 

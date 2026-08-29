@@ -143,14 +143,14 @@
 │   │   ├── datasets.py                 # 旧 generate_linear_datasets.py + freeze_linear_datasets.py 統合
 │   │   ├── constants.py                # NUMERIC_SCENARIOS, COV_TYPES（main↔crosscheck 単一定義。項目20/28）
 │   │   ├── references/
-│   │   │   ├── statsmodels.py          # 旧 run_statsmodels_benchmark_linear.py（run() = アダプタ）
+│   │   │   ├── statsmodels_ref.py      # 旧 run_statsmodels_benchmark_linear.py（run() = アダプタ。ライブラリ名との衝突回避で _ref）
 │   │   │   ├── r.py                    # run_lm_crosscheck.R / run_lm_predict_crosscheck.R を呼ぶ薄い層
 │   │   │   ├── run_lm_crosscheck.R     # 旧 run_lm_crosscheck_benchmark.R
 │   │   │   └── run_lm_predict_crosscheck.R
 │   │   ├── ols.py                      # OLS の MethodBenchmarkSpec 定義（+ __main__ で run_fixture_cli）
 │   │   └── wls.py                      # WLS の Spec 定義
 │   │
-│   ├── nonlinear/  … logit.py / probit.py / references/{statsmodels.py,r.py,run_glm_crosscheck.R}
+│   ├── nonlinear/  … logit.py / probit.py / references/{statsmodels_ref.py,r.py,run_glm_crosscheck.R}
 │   ├── iv/         … iv.py / iv_gmm.py / references/{linearmodels.py,r.py,run_ivreg.R}
 │   └── panel/      … references/run_plm_benchmark.R（Phase4 で肉付け）
 │
@@ -173,7 +173,7 @@
 | `benchmark/freeze_datasets.py` | 廃止。`benchmark/regenerate_all.py`（薄い「全手法再生成」スクリプト）に置換（項目4） |
 | `benchmark/linear/generate_linear_datasets.py` | `benchmark/linear/datasets.py`（DGP 部分） |
 | `benchmark/linear/freeze_linear_datasets.py` | `benchmark/linear/datasets.py`（freeze 部分。同一ファイルに DGP と freeze を隣接） |
-| `benchmark/linear/run_statsmodels_benchmark_linear.py` | `benchmark/linear/references/statsmodels.py` |
+| `benchmark/linear/run_statsmodels_benchmark_linear.py` | `benchmark/linear/references/statsmodels_ref.py` |
 | `benchmark/linear/run_lm_crosscheck_benchmark.R` | `benchmark/linear/references/run_lm_crosscheck.R` |
 | `benchmark/linear/run_lm_predict_crosscheck.R` | `benchmark/linear/references/run_lm_predict_crosscheck.R` |
 | `benchmark/linear/fixtures/generate_ols_fixtures.py` | `benchmark/linear/ols.py`（Spec 定義のみ。ループ/CLI はドライバへ） |
@@ -203,7 +203,7 @@
 - **アダプタの契約**: `call(frozen_df, *, formula, cov_type, **extra) -> dict`。
   戻り値は手法が公開する統計量のフラットな dict（`coef` / `se` / `t_stats` / … /
   `_meta` は付けず、`_meta` はドライバが `build_meta` で組み立てる）。
-- `statsmodels.py` の `run()` は「1ケース = 1アダプタ呼び出し」に純化する
+- `statsmodels_ref.py` の `run()` は「1ケース = 1アダプタ呼び出し」に純化する
   （現状の `run()` はほぼこの形。`_meta` 組み立てをドライバに移すだけ）。
 - `r.py` は `common/reference/r.py::run_r(script_path, csv_path, formula, cov_type,
   **extra)` を呼ぶ薄い系統別ラッパー。`run_r` / `normalize_names` は共通化

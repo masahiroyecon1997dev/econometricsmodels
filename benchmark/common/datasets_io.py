@@ -21,13 +21,12 @@ import numpy as np
 import polars as pl
 
 # このファイルは benchmark/common/ 配下。parents[2] がリポジトリルート。
-DATA_DIR = (
-    Path(__file__).resolve().parents[2]
-    / "tests"
-    / "fixtures"
-    / "benchmarks"
-    / "data"
+# BENCHMARKS_DIR: リファレンス JSON（<手法>.json / <手法>_crosscheck.json）の置き場所。
+# DATA_DIR: 固定済み合成データセット CSV の置き場所（その下の data/）。
+BENCHMARKS_DIR = (
+    Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "benchmarks"
 )
+DATA_DIR = BENCHMARKS_DIR / "data"
 
 
 def load_frozen_dataset(

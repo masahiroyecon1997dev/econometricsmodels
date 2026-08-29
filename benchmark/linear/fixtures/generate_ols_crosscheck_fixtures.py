@@ -45,14 +45,12 @@ AIC/BICはRの`AIC()`/`BIC()`標準関数（残差分散を1パラメータと�
 経由で都度ロードする（データの再配布ライセンスが未確認のためCSVとして固定しない。
 `freeze_datasets.py`のdocstring参照）。
 
-使用例:
-    python generate_ols_crosscheck_fixtures.py \\
-        --output ../../../tests/fixtures/benchmarks/ols_crosscheck.json
+使用例（リポジトリルートから）:
+    python -m benchmark.linear.fixtures.generate_ols_crosscheck_fixtures
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import subprocess
 import tempfile
@@ -63,14 +61,16 @@ import polars as pl
 import statsmodels
 
 from benchmark.common import (
+    BENCHMARKS_DIR,
     hac_auto_lag,
     imbalanced_cluster_groups,
     load_frozen_dataset,
+    run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
+from benchmark.linear.references.r import run_lm_r
 
 REFERENCES_DIR = Path(__file__).resolve().parent.parent / "references"
-R_SCRIPT = REFERENCES_DIR / "run_lm_crosscheck.R"
 PREDICT_R_SCRIPT = REFERENCES_DIR / "run_lm_predict_crosscheck.R"
 
 # fitted_values/predict()のout-of-sample crosscheck用の新規データ
@@ -101,61 +101,6 @@ NUMERIC_SCENARIOS = [
 ]
 
 R_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
-
-
-def _run_r(
-    csv_path: Path,
-    formula: str,
-    cov_type: str,
-    cluster_col: str | None = None,
-    hac_lag: int | None = None,
-) -> dict:
-    cmd = ["Rscript", str(R_SCRIPT), str(csv_path), formula, cov_type]
-    if cov_type == "cluster":
-        cmd.append(cluster_col or "")
-    elif cov_type == "hac":
-        cmd.append(str(hac_lag))
-
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    raw = json.loads(proc.stdout)
-    return _normalize_names(raw)
-
-
-def _normalize_names(raw: dict) -> dict:
-    """パラメータ名を本実装のparam_names規則（切片="const"）に揃える。
-
-    R（lm/coeftest）は"(Intercept)"、statsmodels(formula API)は"Intercept"を
-    使うため、フィクスチャの利用側（テストコード）でソースごとに名前を
-    出し分けなくて済むよう、ここで統一する。
-    """
-
-    def fix(name: str) -> str:
-        return "const" if name in ("(Intercept)", "Intercept") else name
-
-    result = {
-        "coef": {fix(k): v for k, v in raw["coef"].items()},
-        "se": {fix(k): v for k, v in raw["se"].items()},
-    }
-    if "t_stats" in raw:
-        result["t_stats"] = {fix(k): v for k, v in raw["t_stats"].items()}
-    if "p_values" in raw:
-        result["p_values"] = {fix(k): v for k, v in raw["p_values"].items()}
-    if "conf_int" in raw:
-        result["conf_int"] = {fix(k): v for k, v in raw["conf_int"].items()}
-    # aic/bic/log_likelihood/f_statistic/f_p_value/r_squared/r_squared_adjは
-    # run_lm_crosscheck_benchmark.Rが返す（fixest等、他パッケージのスクリプトは対象外）。
-    for key in (
-        "aic",
-        "bic",
-        "log_likelihood",
-        "f_statistic",
-        "f_p_value",
-        "r_squared",
-        "r_squared_adj",
-    ):
-        if key in raw:
-            result[key] = raw[key]
-    return result
 
 
 def _write_csv(df, tmpdir: Path, name: str) -> Path:
@@ -194,10 +139,10 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             entry: dict = {}
             if cov_type == "hac":
                 lag = hac_auto_lag(n)
-                entry["r"] = _run_r(csv_path, formula, cov_type, hac_lag=lag)
+                entry["r"] = run_lm_r(csv_path, formula, cov_type, hac_lag=lag)
                 entry["hac_lag"] = lag
             else:
-                entry["r"] = _run_r(csv_path, formula, cov_type)
+                entry["r"] = run_lm_r(csv_path, formula, cov_type)
 
             fixtures[scenario][cov_type] = entry
 
@@ -269,7 +214,9 @@ def _run_cluster_case(
     tmp_path = csv_path.with_name(csv_path.stem + suffix + ".csv")
     grouped.write_csv(tmp_path)
     return {
-        "r": _run_r(tmp_path, formula, "cluster", cluster_col="cluster_group")
+        "r": run_lm_r(
+            tmp_path, formula, "cluster", cluster_col="cluster_group"
+        )
     }
 
 
@@ -292,7 +239,7 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
         fixtures[name] = {}
         for cov_type in ["classical", *hc_types]:
             fixtures[name][cov_type] = {
-                "r": _run_r(csv_path, formula, cov_type)
+                "r": run_lm_r(csv_path, formula, cov_type)
             }
 
         if name == "wage1":
@@ -320,7 +267,7 @@ def _run_wage1_region_cluster_case(df, csv_path: Path, formula: str) -> dict:
     grouped = df.with_columns(region)
     tmp_path = csv_path.with_name(csv_path.stem + "_region_cluster.csv")
     grouped.write_csv(tmp_path)
-    return {"r": _run_r(tmp_path, formula, "cluster", cluster_col="region")}
+    return {"r": run_lm_r(tmp_path, formula, "cluster", cluster_col="region")}
 
 
 def build_fixtures() -> dict:
@@ -372,22 +319,8 @@ def build_fixtures() -> dict:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output",
-        default=str(
-            Path(__file__).resolve().parents[3]
-            / "tests"
-            / "fixtures"
-            / "benchmarks"
-            / "ols_crosscheck.json"
-        ),
+    run_fixture_cli(
+        build_fixtures,
+        BENCHMARKS_DIR / "ols_crosscheck.json",
+        description=__doc__,
     )
-    args = parser.parse_args()
-
-    fixtures = build_fixtures()
-
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(fixtures, indent=2, ensure_ascii=False))
-    print(f"wrote {output_path} ({len(json.dumps(fixtures))} bytes)")

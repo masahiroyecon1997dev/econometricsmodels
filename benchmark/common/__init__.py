@@ -17,7 +17,13 @@ re-export する（サブモジュール構成が変わっても利用側の imp
 
 from __future__ import annotations
 
+from benchmark.common.constants import (
+    MROZ_FORMULA,
+    SYNTHETIC_FORMULA,
+    WEIGHT_COLUMN_NAME,
+)
 from benchmark.common.datasets_io import (
+    BENCHMARKS_DIR,
     DATA_DIR,
     freeze_scenarios,
     load_frozen_dataset,
@@ -32,10 +38,15 @@ from benchmark.common.dgp import (
     preview_dataset,
     validate_choice,
 )
+from benchmark.common.driver import run_fixture_cli
 from benchmark.common.reference.extract import extract_coef_se
 
 __all__ = [
+    "BENCHMARKS_DIR",
     "DATA_DIR",
+    "MROZ_FORMULA",
+    "SYNTHETIC_FORMULA",
+    "WEIGHT_COLUMN_NAME",
     "apply_perfect_multicollinearity",
     "correlated_design_matrix",
     "extract_coef_se",
@@ -45,6 +56,7 @@ __all__ = [
     "linear_predictor",
     "load_frozen_dataset",
     "preview_dataset",
+    "run_fixture_cli",
     "run_freeze_cli",
     "validate_choice",
 ]

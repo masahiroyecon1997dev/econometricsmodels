@@ -31,7 +31,7 @@ import statsmodels
 
 from benchmark.common import DATA_DIR, imbalanced_cluster_groups
 from benchmark.common.load_wooldridge import load as load_wooldridge
-from benchmark.linear.references.statsmodels import run
+from benchmark.linear.references.statsmodels_ref import run
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md
 # 「テストの3系統」参照）。ComputationErrorが発生することのみをテスト

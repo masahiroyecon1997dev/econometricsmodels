@@ -1,37 +1,35 @@
-"""OLSのテストフィクスチャ（tests/fixtures/ols.json）を生成するスクリプト。
+"""OLSのテストフィクスチャ（tests/fixtures/benchmarks/ols.json）を生成する。
 
-`benchmark/linear/run_statsmodels_benchmark_linear.py`（1回呼べば1ケース分の結果を返す汎用ツール）を
-全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つのJSONにまとめて書き出す。
+`benchmark/linear/references/statsmodels_ref.py`（1回呼べば1ケース分の結果を返す
+汎用アダプタ）を全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つの
+JSONにまとめて書き出す。
 
 このスクリプト自体は`benchmark/`側に置く（ベンチマーク生成ツールの一部）。
 生成される`ols.json`は`tests/fixtures/`に置く（テストが読むデータ）。
 両者を分けている理由は`.claude/skills/reference-benchmark/SKILL.md`参照。
 
 入力データは`tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
-（`benchmark/freeze_datasets.py`参照）。`imbalanced_cluster_groups`（純粋にnから
-決定論的にラベルを組み立てるだけで乱数を使わない）のみ、引き続き
-`generate_linear_datasets.py`を直接呼ぶ。
+（`benchmark/linear/freeze.py`参照）。
 
-使用例:
-    python generate_ols_fixtures.py --output ../../../tests/fixtures/benchmarks/ols.json
+使用例（リポジトリルートから）:
+    python -m benchmark.linear.fixtures.generate_ols_fixtures
 """
 
 from __future__ import annotations
 
-import argparse
-import json
 from datetime import UTC, datetime
-from pathlib import Path
 
 import polars as pl
 import statsmodels
 
 from benchmark.common import (
+    BENCHMARKS_DIR,
     DATA_DIR,
     extract_coef_se,
     imbalanced_cluster_groups,
+    run_fixture_cli,
 )
-from benchmark.linear.references.statsmodels import run
+from benchmark.linear.references.statsmodels_ref import run
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md「テストの3系統」参照）。
 # ComputationErrorが発生することのみをテストコード側で対応する。scale_varianceは
@@ -161,22 +159,6 @@ def _run_cluster_case(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output",
-        default=str(
-            Path(__file__).resolve().parents[3]
-            / "tests"
-            / "fixtures"
-            / "benchmarks"
-            / "ols.json"
-        ),
+    run_fixture_cli(
+        build_fixtures, BENCHMARKS_DIR / "ols.json", description=__doc__
     )
-    args = parser.parse_args()
-
-    fixtures = build_fixtures()
-
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(fixtures, indent=2, ensure_ascii=False))
-    print(f"wrote {output_path} ({len(json.dumps(fixtures))} bytes)")

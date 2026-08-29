@@ -32,7 +32,7 @@
   },
   "features": {
     "ghcr.io/devcontainers/features/github-cli:1.1.1": {},
-    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0.5": {}
   },
   "postCreateCommand": "[ -f pyproject.toml ] && uv sync || echo 'pyproject.toml が未作成のため uv sync をスキップしました'",
   "remoteEnv": {

@@ -28,7 +28,7 @@ import linearmodels
 import polars as pl
 
 from benchmark.common import DATA_DIR, imbalanced_cluster_groups
-from benchmark.iv.run_linearmodels_benchmark_iv import run
+from benchmark.iv.references.linearmodels_ref import run
 
 # 丁度識別・過剰識別を問わずx_exog=['x1'], x_endog=['endog1'], instruments=[...]の
 # 構造で数値比較できるシナリオ。perfect_multicollinearityはComputationErrorの発生

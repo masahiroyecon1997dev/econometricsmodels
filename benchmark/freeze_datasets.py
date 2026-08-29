@@ -18,7 +18,7 @@
 - `benchmark/linear/freeze.py`: 連続y（OLS/WLS用、`benchmark/linear/datasets.py`）
 - `benchmark/nonlinear/freeze.py`: 2値y（Logit/Probit用、真のlogit/probit DGP、
   `benchmark/nonlinear/datasets.py`）
-- `benchmark/iv/freeze_iv_datasets.py`: IV（2SLS/GMM用、`generate_iv_datasets.py`）
+- `benchmark/iv/freeze.py`: IV（2SLS/GMM用、`benchmark/iv/datasets.py`）
 
 **Wooldridgeデータセットはここでは固定しない**（`wooldridge`パッケージ自体は
 MITライセンスだが、同梱される実データの著作権はWooldridge『Introductory
@@ -37,7 +37,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from benchmark.common import run_freeze_cli
-from benchmark.iv.freeze_iv_datasets import freeze as _freeze_iv
+from benchmark.iv.freeze import freeze as _freeze_iv
 from benchmark.linear.freeze import freeze as _freeze_linear
 from benchmark.nonlinear.freeze import freeze as _freeze_nonlinear
 

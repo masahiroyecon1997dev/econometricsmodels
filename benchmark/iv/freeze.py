@@ -1,11 +1,7 @@
 """iv系統（2SLS/GMM）の合成データセットをCSVとして固定（凍結）する。
 
 `benchmark/freeze_datasets.py`（系統横断のディスパッチャ）から呼ばれる。
-単体でも実行できる。
-
-使用例:
-    python freeze_iv_datasets.py --output-dir \\
-        ../../tests/fixtures/benchmarks/data
+単体でも実行できる（リポジトリルートから `python -m benchmark.iv.freeze`）。
 """
 
 from __future__ import annotations
@@ -14,12 +10,12 @@ import json
 from pathlib import Path
 
 from benchmark.common import freeze_scenarios, run_freeze_cli
-from benchmark.iv.generate_iv_datasets import SCENARIOS as IV_SCENARIOS
-from benchmark.iv.generate_iv_datasets import generate_iv_dataset
+from benchmark.iv.datasets import SCENARIOS as IV_SCENARIOS
+from benchmark.iv.datasets import generate_iv_dataset
 
-# generate_iv_datasets.pyのSCENARIOS（IV: 2SLS/GMM用の全シナリオ）をそのまま使う。
+# datasets.pyのSCENARIOS（IV: 2SLS/GMM用の全シナリオ）をそのまま使う。
 # moderate_multicollinearity/high_condition_number/scale_varianceはk_exog=2、
-# perfect_multicollinearityはk_exog=3が必要（generate_iv_datasets.pyのdocstring参照）。
+# perfect_multicollinearityはk_exog=3が必要（datasets.pyのdocstring参照）。
 IV_K_EXOG_OVERRIDES = {
     "moderate_multicollinearity": 2,
     "high_condition_number": 2,

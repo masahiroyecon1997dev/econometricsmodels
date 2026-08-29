@@ -42,7 +42,7 @@ import linearmodels
 import polars as pl
 
 from benchmark.common import DATA_DIR, imbalanced_cluster_groups
-from benchmark.iv.run_linearmodels_benchmark_iv import run_gmm
+from benchmark.iv.references.linearmodels_ref import run_gmm
 
 # `generate_iv_fixtures.py`のNUMERIC_SCENARIOSと同一（2SLSと同じ合成データセットを
 # 再利用する）。

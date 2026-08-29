@@ -71,12 +71,12 @@ suppressMessages({
   library(jsonlite)
 })
 
-# coeftest()からの係数・標準誤差抽出とロバストWald F検定はrun_lm_crosscheck_benchmark.R
-# と共通のため、benchmark/common/_common.Rに抽出している（Rには__file__相当が無いため、
+# coeftest()からの係数・標準誤差抽出とロバストWald F検定はlinear系のRクロスチェックと
+# 共通のため、benchmark/common/_common.Rに抽出している（Rには__file__相当が無いため、
 # commandArgs()の--file=から自身のディレクトリを特定してsource()する）。
 script_args <- commandArgs(trailingOnly = FALSE)
 script_dir <- dirname(sub("^--file=", "", grep("^--file=", script_args, value = TRUE)))
-source(file.path(script_dir, "..", "common", "_common.R"))
+source(file.path(script_dir, "..", "..", "common", "_common.R"))
 
 model <- ivreg(as.formula(formula_str), data = df)
 df_inference <- df.residual(model)

@@ -57,8 +57,8 @@ from benchmark.common import (
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
 
-IV_DIR = Path(__file__).resolve().parent.parent
-R_SCRIPT = IV_DIR / "run_ivreg_benchmark.R"
+REFERENCES_DIR = Path(__file__).resolve().parent.parent / "references"
+R_SCRIPT = REFERENCES_DIR / "run_ivreg.R"
 
 # generate_iv_fixtures.pyのCARD_X_EXOGと同じ（Wooldridge card実データ、
 # Issue #231フェーズ4）。

@@ -458,14 +458,33 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
     スナップショットと完全一致（`generated_at`／version 除外）。コミット済みとの差は
     5a と同じ `_meta` 先行ドリフトのみ（ステップ9で解消）。`pytest` 957件・`ruff` パス。
     `/code-review`（fork）指摘ゼロ。**これで nonlinear 系統（Logit/Probit）の移行完了**。
-  - 次: Step 7（IV / IV-GMM 移行）。`benchmark/iv/` の
-    `generate_iv_datasets.py`→`datasets.py`、`freeze_iv_datasets.py`→`freeze.py`、
-    `run_linearmodels_benchmark.py`→`references/linearmodels_ref.py`、
-    `run_ivreg_benchmark.R`→`references/run_ivreg.R`（`source(".../common/_common.R")`
-    のパス追随に注意）へ再配置（5a 相当）＋配線（5b 相当）。IV crosscheck の
-    ローカル `_run_r`／`_normalize_names` は `conf_from_low_high` 等の分岐が linear/
-    nonlinear と異なる可能性があるため、`benchmark/iv/references/r.py` を新設する際に
-    `normalize_names` の既存引数で吸収できるか実装時に確認（設計ノート D の想定どおりか）。
+  - **先行 bug 修正（2026-08-29、`81f23a9`、Initiative A 対象外の `fix:`）**:
+    `run_gmm()` の `_load_iv_dataset(dataset)` が `a41dc38` の引数追加に追随漏れで
+    `generate_iv_gmm_fixtures.py` が直接実行で TypeError クラッシュしていた
+    （`a41dc38` のコミットメッセージにも別バグとして記録済み）。GMM は合成データのみ
+    使うため `_load_iv_dataset("synthetic", dataset)` に修正。数値不変（再生成 iv_gmm.json
+    がコミット済みと数値完全一致、差は `_meta` 先行ドリフトのみ）。ユーザー承認の上で
+    Step 7 の GMM 再生成検証を可能にするため先に実施。
+  - **Step 7a 完了（2026-08-29）— IV 共有インフラ再配置（ロジック不変、5a と同型）**:
+    `generate_iv_datasets.py`→`benchmark/iv/datasets.py`、
+    `freeze_iv_datasets.py`→`benchmark/iv/freeze.py`、
+    `run_linearmodels_benchmark_iv.py`→`benchmark/iv/references/linearmodels_ref.py`、
+    `run_ivreg_benchmark.R`→`benchmark/iv/references/run_ivreg.R`。`references/__init__.py`
+    新設。`run_ivreg.R` の `source()` を `../../common/_common.R` へ追随（`--file=` から
+    script_dir を特定する方式は不変、1階層深くなった分 `..` を1つ追加）。importer 追随:
+    `benchmark/freeze_datasets.py`、`benchmark/iv/freeze.py`、3 fixture ジェネレータ
+    （`linearmodels_ref` import と `R_SCRIPT` パス定数）。移動した .py の docstring 使用例
+    のみ更新。第三者コメント・`.R` 内コメント・`_meta` 文字列はステップ9へ。
+    **不変性チェック**: stash で 7a 前後のコードで `iv/iv_gmm/iv_crosscheck.json`
+    （R 実行含む）を再生成し3本とも完全一致（`generated_at`／version 除外）。凍結 iv CSV
+    も完全一致。`pytest` 957件・`ruff` パス。
+  - 次: Step 7b（2SLS/GMM 配線）。`benchmark/iv/references/r.py`（`run_ivreg_r`）を
+    新設し、IV crosscheck のローカル `_run_r`／`_normalize_names` を置換
+    （IV の `_normalize_names` は既に guard 無し・`conf_int` 直通し・margeff 無しのため
+    `normalize_names(stat_key="t_stats", scalar_keys=_IV_SCALAR_KEYS)` でそのまま吸収可、
+    `run_ivreg.R` も全キー無条件出力を確認済み）。3ジェネレータの `__main__` を
+    `run_fixture_cli` へ。`generate_iv_fixtures.py`／`generate_iv_gmm_fixtures.py` は
+    `run()`/`run_gmm()` 経由でローカル `_run_r` を持たないため `__main__`＋docstring のみ。
 
 ---
 

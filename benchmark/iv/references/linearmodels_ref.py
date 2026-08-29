@@ -72,8 +72,9 @@ augmented regression自身の`df_resid`（= 主モデルの`df_resid - n_endog`�
 一致するが、p値だけ最大0.2%程度乖離するバグが初版にあった。`test_iv_fixtures.py`
 作成時に発覚・修正済み）。
 
-使用例:
-    python run_linearmodels_benchmark_iv.py --dataset baseline --cov-type classical
+使用例（リポジトリルートから）:
+    python -m benchmark.iv.references.linearmodels_ref \\
+        --dataset baseline --cov-type classical
 """
 
 from __future__ import annotations

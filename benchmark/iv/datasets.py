@@ -27,7 +27,7 @@
 渡す必要がある（不足時は`ValueError`、OLSと同じ方針）。
 
 使用例:
-    from benchmark.iv.generate_iv_datasets import generate_iv_dataset
+    from benchmark.iv.datasets import generate_iv_dataset
 
     df, true_beta = generate_iv_dataset("baseline", n=500, seed=42)
     # df の列: y, x1..x{k_exog}, endog1..endog{k_endog}, z1..z{k_instruments}

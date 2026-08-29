@@ -638,3 +638,85 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-23、`tests/test_wls_fixtures.py`解説後の
   ユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 73. `DATA_DIR`が`tests/_helpers.py`と`benchmark/common/datasets_io.py`の2箇所で独立定義され、同じ物理パスを指す
+
+- **対象**: [tests/_helpers.py:33](../../../tests/_helpers.py#L33)
+  （`DATA_DIR = Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"`）と
+  [benchmark/common/datasets_io.py:26-29](../../../benchmark/common/datasets_io.py#L26-L29)
+  （`BENCHMARKS_DIR = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "benchmarks"`、
+  `DATA_DIR = BENCHMARKS_DIR / "data"`）
+- **内容**: `tests/test_wls_crosscheck.py`解説時に発見。`benchmark/`の
+  Initiative Aパッケージ化で`benchmark.common`が`DATA_DIR`を公開APIとして
+  export するようになったが、`tests/`側は従来通り`tests/_helpers.py`独自の
+  `DATA_DIR`を使い続けている。両者は`tests/fixtures/benchmarks/data/`という
+  同じディレクトリを指すが、算出方法（`parents[1]`相当／`parents[2]`）が
+  別ファイルで独立しているため、将来どちらかのディレクトリ構成が変わると
+  片方だけ追従漏れするリスクがある。
+- **Claudeの所感**: `tests/`側が`from benchmark.common import DATA_DIR`に
+  統一すれば1箇所に集約できる。ただし`benchmark/`は元々フィクスチャ
+  「生成」側、`tests/`は「消費」側という役割分担があるため、`tests/`が
+  `benchmark`パッケージに依存する向きが設計として適切かは要検討
+  （既存でも`from benchmark.common import imbalanced_cluster_groups`等
+  `tests/`から`benchmark`への依存は既に発生しているため、方向性自体は
+  既存パターンと矛盾しない）。Initiative Aの`benchmark/`再構成が進行中の
+  ため、その完了後にまとめて対応するのが良いと考える。
+- **気づいた経緯**: 2026-08-23、`tests/test_wls_crosscheck.py`解説後の
+  ユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち、`benchmark/`再構成完了後の
+  対応を推奨）
+
+### 74. WLSのHACクロスチェック許容誤差（実測乖離約4.3%）が「緩めた」だけで根本原因が未特定。R側`adjust=TRUE`の小標本補正だけでは説明できないことを確認
+
+- **対象**: [tests/_tolerances.py:48-56](../../../tests/_tolerances.py#L48-L56)
+  （`wls_crosscheck.rtol_hac = 5e-2`）、
+  [benchmark/linear/references/run_lm_crosscheck.R:93](../../../benchmark/linear/references/run_lm_crosscheck.R#L93)
+  （`NeweyWest(model, lag=lag, prewhite=FALSE, adjust=TRUE)`）
+- **内容**: ユーザー指摘（2026-08-23、「単純に誤差の緩め具合が妥当かどうか
+  曖昧化してしまう」）を受けて簡易検証。R側`NeweyWest(adjust=TRUE)`は
+  小標本補正係数`n/(n-k)`を掛ける。`autocorrelated`シナリオ（n=500, k=4）
+  ではこの係数は`500/496≈1.008`（約0.8%相当）で、OLS側の実測乖離
+  （約0.4%）ともWLS側の実測乖離（約4.3%）とも一致しない。特にOLS/WLSは
+  同一シナリオ（同じn・k）を使っているため、`adjust=TRUE`単独が原因なら
+  両者の乖離幅は同程度になるはずだが実際は10倍以上の差がある。したがって
+  **`adjust=TRUE`の小標本補正だけでは今回の乖離幅（特にWLSがOLSより
+  大きい理由）は説明できない**と判断した。
+- **Claudeの所感**: 真の原因（重み付き残差に対するラグ相関構造の計算方法の
+  違い等）の特定にはR`sandwich::NeweyWest`と本実装のNewey-West実装を
+  式レベルで突き合わせる追加調査が必要で、相応のコストがかかる。
+  Issue #267（Rとの計算慣習差に関する将来検討Issue、優先度低）と関連する
+  論点のため、深掘りする場合はそちらのスコープで行うのが良いと考える。
+  現時点では「単純な小標本補正の慣習差だけでは説明できないことを確認済み」
+  という事実を記録するに留める。
+- **気づいた経緯**: 2026-08-23、`tests/test_wls_crosscheck.py`解説後の
+  ユーザー指摘。
+- **状態**: 未対応（優先度低、深掘りする場合はIssue #267のスコープで検討）
+
+### 75. `_add_age_bin`が`generate_wls_fixtures.py`（statsmodels側）に定義され、並列関係にあるはずの`generate_wls_crosscheck_fixtures.py`（R側）がそこからimportしている
+
+- **対象**: [benchmark/linear/fixtures/generate_wls_fixtures.py:258-270](../../../benchmark/linear/fixtures/generate_wls_fixtures.py#L258-L270)
+  （定義元）、
+  [benchmark/linear/fixtures/generate_wls_crosscheck_fixtures.py:52](../../../benchmark/linear/fixtures/generate_wls_crosscheck_fixtures.py#L52)・
+  [tests/test_wls_fixtures.py:41](../../../tests/test_wls_fixtures.py#L41)・
+  [tests/test_wls_crosscheck.py:49](../../../tests/test_wls_crosscheck.py#L49)
+  （import元）
+- **内容**: ユーザー指摘（2026-08-23、「両ファイルは並列だと思うので」）。
+  `generate_wls_fixtures.py`（主リファレンスstatsmodels用）と
+  `generate_wls_crosscheck_fixtures.py`（独立実装Rクロスチェック用）は
+  本来、どちらも`generate_wls_*`という対等な立場のフィクスチャ生成
+  スクリプトのはずだが、`_add_age_bin`（401ksubs実データでの疑似クラスタ
+  列生成）が前者にのみ定義され、後者が前者の内部関数をimportする非対称な
+  依存になっている。
+- **Claudeの所感**: 実害（重複や不整合）は今のところ無いが、設計として
+  「並列であるべき2ファイル間の一方向依存」は歪であり、将来どちらかを
+  単独で変更・削除する際に見落としの元になりうる。置き場所としては
+  `benchmark/linear/fixtures/`直下に新規`_common.py`を切り、両
+  `generate_wls_*`スクリプトと`tests/`側の両方がそこからimportする形に
+  揃えるのが妥当と考える（現状401ksubs・linear系統専用の用途しかないため、
+  `benchmark/common/`への汎用化はYAGNIと判断し見送る）。`benchmark/`は
+  Initiative A再構成が進行中のため、新規ファイル追加はその完了後に行うのが
+  安全。
+- **気づいた経緯**: 2026-08-23、`tests/test_wls_crosscheck.py`解説後の
+  ユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち、`benchmark/`再構成完了後の
+  対応を推奨）

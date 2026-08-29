@@ -5,12 +5,8 @@
 個別に緩めてよい）通り、値は手法・比較対象（主リファレンス/クロスチェック）
 ごとに異なる。そのため単一のRTOL/ATOL定数への集約はせず、ファイルごとに
 使っていた値をこの1ファイルに辞書化して見落としを防ぐ（計算式自体は
-`tests/_assertions.py`の`assert_close`/`assert_dict_close`に統一済み。
-`ols_crosscheck`/`iv_crosscheck`はフェーズ3.5で計算式のバグ
-（`tol = rtol * max(|ref|, atol)`という誤った式を使っていた。正しくは
-`tol = max(rtol * |ref|, atol)`。`wls_crosscheck`のRクロスチェックテスト
-作成時に発覚し修正済みだったが、ols/iv側が追従していなかった）を修正し、
-他ファイルと同じ計算式・同じ`atol`命名に揃えた）。
+`tests/_assertions.py`の`assert_close`/`assert_dict_close`
+（`tol = max(rtol * |ref|, atol)`）に統一済み）。
 
 キーはテストファイル名の接頭辞（例: `test_ols_fixtures.py` → `"ols_fixtures"`）。
 """

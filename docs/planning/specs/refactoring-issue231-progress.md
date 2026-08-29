@@ -479,19 +479,34 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
   （全区切り解説済み）
 - `tests/`: `_assertions.py`・`_helpers.py`・`_tolerances.py`・`conftest.py`・
   `test_ols.py`・`test_ols_fixtures.py`・`test_ols_crosscheck.py`・
-  `test_wls.py`（全区切り解説済み）
+  `test_wls.py`・`test_wls_fixtures.py`・`test_wls_crosscheck.py`
+  （全区切り解説済み、WLS関連ファイルはこれで一通り完了）
 
-**次に解説予定**: `tests/test_wls_fixtures.py`（ユーザー指示によりOLSと同じ順で
-`test_wls_crosscheck.py`まで先にWLS関連ファイルを一通り見る想定）。その後
-Logit/Probit/IV/Tobitの残りファイル。`test_wls.py`解説後のユーザーとの質疑で
-多数の指摘を受け、`refactoring-candidates-2.md`項目65〜70・
-`test-coverage-candidates.md`項目34〜35に記録した他、2件は即時対応した
-（詳細下記）。項目67（`WLSOptions`新設、Logit/Probitのmethod/max_iter/tol/
-raise_on_non_convergence共通化と合わせて再検討）・項目68（テストファイルを
-バリデーション/API構造/数値誤差で分割し系統別ディレクトリ化する方向）は、
-Logit/Probit以降のファイルの解説・作業に影響する大きめの決定なので、
-着手前に思い出すこと。項目35（`test_cov_type_is_case_insensitive`等にHACが
-無い）は他手法のファイルでも同じ観点で確認するとよい。
+**注意（2026-08-23〜、`benchmark/`再構成「Initiative A」進行中）**: 上記
+「解説済み」リストの`benchmark/`側パス（`benchmark/_common.py`・
+`run_lm_crosscheck_benchmark.R`等）は、**別セッションが並行して進めている
+`benchmark/`パッケージ化リファクタリング（`docs/planning/specs/
+benchmark-restructure-design.md`）により既に移動・改名されている**
+（例: `benchmark/_common.py`→`benchmark/common/`配下に分割、
+`run_lm_crosscheck_benchmark.R`→`run_lm_crosscheck.R`、`sys.path.insert`
+方式のimportは`from benchmark.common import ...`等の絶対importに置換、
+`pyproject.toml`に`[tool.pytest.ini_options] pythonpath = ["."]`が追加され
+CI側のPYTHONPATH非対称〔`refactoring-candidates-2.md`項目50〕は実質解消）。
+このウォークスルー再開時・過去の記録を参照する際は、パスがずれていないか
+都度確認すること。項目50の状態欄自体は、リファクタリング側のセッションが
+後ほど更新する前提でこちらからは触っていない。
+
+**次に解説予定**: `tests/test_logit.py`（WLS関連ファイル完了、ユーザー確立の
+`test_<method>.py`→`test_<method>_fixtures.py`→`test_<method>_crosscheck.py`
+の順でLogitに進む）。`test_wls_fixtures.py`/`test_wls_crosscheck.py`解説後の
+ユーザーとの質疑で多数の指摘を受け、`refactoring-candidates-2.md`項目71〜75・
+`test-coverage-candidates.md`項目36に記録した（詳細下記）。項目67
+（`WLSOptions`新設、Logit/Probitのmethod/max_iter/tol/raise_on_non_convergence
+共通化と合わせて再検討）・項目68（テストファイルをバリデーション/API構造/
+数値誤差で分割し系統別ディレクトリ化する方向）は、Logit/Probit以降の
+ファイルの解説・作業に影響する大きめの決定なので、着手前に思い出すこと。
+項目35（`test_cov_type_is_case_insensitive`等にHACが無い）は他手法の
+ファイルでも同じ観点で確認するとよい。
 
 **即時対応した項目（2026-08-23）**:
 - `tests/test_ols.py`に`test_non_finite_values_raise`を追加
@@ -501,6 +516,12 @@ Logit/Probit以降のファイルの解説・作業に影響する大きめの�
 - `.claude/agents/testing-completeness-reviewer.md`に観点5
   「列引数ごとのバリデーション3点セット」（存在確認・null・NaN/無限大を
   個別に確認すること）を追加。
+- `tests/_tolerances.py`冒頭docstringの経緯コメント（フェーズ3.5の
+  計算式バグ修正history）をユーザー指摘により削除し、現状の計算式
+  （`tol = max(rtol*|ref|, atol)`）のみを記す形に整理（`test_wls_crosscheck.py`
+  解説時。過去の経緯はgit logに残る前提でドキュメント上は現状のみ記す方針、
+  項目51〔Issue番号コメント残置〕と同じ考え方）。`ruff check`／`ruff format`
+  パス確認済み。
 
 **このウォークスルー中に作成したGitHub Issue**: [#246](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/246)
 （検定分布・診断統計量の運用ノート`docs/spec/inference-conventions.md`化）・
@@ -534,20 +555,25 @@ Logit/Probit以降のファイルの解説・作業に影響する大きめの�
 **候補メモの状態（2026-08-23時点）**:
 - `refactoring-candidates.md`: 項目1〜43（このウォークスルー由来の最後の追記は項目43）。
   上記「`refactoring-candidates.md`駆動の随時対応」セッションが並行して対応中のため、
-  このウォークスルーからの新規追記は`refactoring-candidates-2.md`（項目44〜70、
-  直近の追記は`test_wls.py`解説時の`weight=1.0`列追加の25箇所重複・許容誤差の
-  ファイル冒頭定数化・`WLSOptions`新設方針〔Logit/Probit実装時に再検討〕・
-  テストファイル分割の方向性決定・HAC時系列並べ替えテストの重複・
-  `isinstance`/命名揺れ）に切り替えている。**両ファイルの統合は
+  このウォークスルーからの新規追記は`refactoring-candidates-2.md`（項目44〜75、
+  直近の追記は`test_wls_fixtures.py`/`test_wls_crosscheck.py`解説時、
+  `include_intercept=False`テストのOLS/WLS間ファイル配置非対称〔71〕・
+  `_check_result`ヘルパーが5ファイルに独立定義され前半が重複〔72〕・
+  `DATA_DIR`が`tests/_helpers.py`と`benchmark/common/datasets_io.py`の2箇所
+  独立定義〔73〕・WLSのHACクロスチェック許容誤差の根本原因調査（`adjust=TRUE`
+  だけでは説明不可なことを確認）〔74〕・`_add_age_bin`の並列ファイル間
+  非対称依存〔75〕）に切り替えている。**両ファイルの統合は
   `refactoring-candidates.md`側の随時対応が一区切りついた後にユーザー判断で行う**
   （現時点では統合しない）。
-- `test-coverage-candidates.md`: 項目1〜35（直近2件は`test_wls.py`解説時、
-  WLSにもOLSと同型のバリデーション抜け・`test_cov_type_is_case_insensitive`等に
-  HACが無い）。前の3件は`test_ols.py`/`test_ols_fixtures.py`/
-  `test_ols_crosscheck.py`解説時、`time_col`存在チェック・
-  `fit()`本体のNaN/無限大チェックのテスト欠如・Wooldridge実データが主リファレンス
-  〔statsmodels〕側で未検証）。こちらはブロックされていないため引き続き
-  直接追記してよい。
+- `test-coverage-candidates.md`: 項目1〜36（直近1件は`test_wls_crosscheck.py`
+  解説時、WLSのHACクロスチェックでstatsmodels側/R側が異なるラグ値を使い
+  同一設定が両実装から検証されていない点〔36〕）。前の2件は`test_wls.py`
+  解説時（WLSにもOLSと同型のバリデーション抜け・`test_cov_type_is_case_
+  insensitive`等にHACが無い）。さらに前の3件は`test_ols.py`/
+  `test_ols_fixtures.py`/`test_ols_crosscheck.py`解説時、`time_col`存在
+  チェック・`fit()`本体のNaN/無限大チェックのテスト欠如・Wooldridge実データが
+  主リファレンス〔statsmodels〕側で未検証）。こちらはブロックされていないため
+  引き続き直接追記してよい。
 
 **再開時の確認事項**: 上記「並行作業についての注意」と同じく、`refactoring-candidates.md`
 側の対応が進んでいれば項目1〜43の「状態」欄が更新されているはずなので、再開前に

@@ -99,35 +99,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   削除」という骨格は完全に同型。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目12と合わせて検討）
 
-### 14. `COV_TYPES`への`cluster`混入がOLS/WLSとLogitで不統一、メインループ自体の共通化余地
-
-- **対象**: [benchmark/nonlinear/fixtures/generate_logit_fixtures.py:55,73-75](../../../benchmark/nonlinear/fixtures/generate_logit_fixtures.py#L55-L75)
-  （`COV_TYPES = ["classical", "opg", "hc0", "cluster"]` + メインループ内`if cov_type ==
-  "cluster": continue`）と、OLS/WLSの`COV_TYPES`（`cluster`を含まない、`continue`不要）
-- **内容**: ユーザー指摘（2026-08-15）。実際の挙動（clusterはメインループで処理せず、
-  専用の複数パターンとして後段で個別処理する）はOLS/WLS/Logit/Probit（Probit側も確認済み）
-  で完全に同じだが、Logit・Probitだけ`COV_TYPES`に`cluster`を含めた上で`continue`
-  スキップしている。意味のある設計差ではなく単なる書き方のブレ。`cluster`を`COV_TYPES`
-  から除けば`continue`も不要になりOLS/WLSと統一できる。IVの`generate_iv_fixtures.py`
-  （2SLS、`COV_TYPES = ["classical", "hc0", "hc1", "hac", "cluster"]`）もLogit/Probit側
-  （`cluster`を含めて`continue`でスキップ）と同じ書き方であることを確認済み
-  （2026-08-15）。一方`generate_iv_gmm_fixtures.py`（GMM）は`COV_TYPES = ["classical",
-  "hc0", "hc1", "hac"]`と`cluster`を含めずOLS/WLS側のスタイルを採っており、**同じIV系統
-  （2SLS/GMM）内でもスタイルが割れている**ことを確認済み（2026-08-16）。
-- **Claudeの所感**: 統一後、メインループ本体（`for scenario: for cov_type: run(...)`の
-  二重ループ＋辞書構築）自体を`_common.py`に`build_numeric_fixtures(run_fn, scenarios,
-  cov_types, **extra_kwargs)`のような共通ヘルパーとして切り出せる可能性がある
-  （`weight_col`/`model`等のオプション差分は`**extra_kwargs`で吸収）。OLS/WLS/Logit/Probit/
-  2SLS/GMMの6ファイル分の重複を解消できる見込みで、影響範囲は大きい。ただしIV（2SLS/GMM）は
-  `x_exog`/`x_endog`/`instruments`という3列グループ＋シナリオ別列構成
-  （`X_EXOG_BY_SCENARIO`等）を持つ分、他4ファイルより`**extra_kwargs`の吸収範囲が
-  広くなる点、GMMはさらに`weight_type`軸によるネスト（`fixtures[scenario][weight_type]
-  [cov_type]`）が加わる点は考慮が必要。
-- **気づいた経緯**: 2026-08-15、`generate_logit_fixtures.py`解説後のユーザー指摘。
-  `generate_iv_fixtures.py`・`generate_iv_gmm_fixtures.py`解説時にIV系統（2SLS/GMM）が
-  互いに異なるスタイルであることを確認済み。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
-
 ### 15. `_run_cluster_case`を`_common.py`へ一般化して集約する案（項目13の発展形）
 
 - **対象**: 項目13で列挙した`_run_cluster_case`の重複箇所全て
@@ -363,10 +334,13 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **Claudeの所感**: OLS/WLSの2ファイルだけなら`formula`/`weight_col`/シナリオ/
   cov_typeを引数化するだけで現実的に共通化できそう。Logit/Probitまで含めるなら
   `COV_TYPES`の中身（`opg`の有無等）・シナリオの中身（`near_separation`/
-  `scale_variance`は別物）が異なるため、項目14で提案した`build_numeric_fixtures
-  (run_fn, scenarios, cov_types, **extra_kwargs)`と合わせた検討が必要。
+  `scale_variance`は別物）が異なるため、`_common.py`に`build_numeric_fixtures
+  (run_fn, scenarios, cov_types, **extra_kwargs)`のような共通ヘルパーを新設する案
+  （旧項目14の所感。項目14自体は`COV_TYPES`への`cluster`混入の書き方統一のみ対応済み
+  ・削除済み〔詳細は`refactoring-issue231-progress.md`参照〕、このメインループ
+  共通化案自体は未着手のまま残っている）と合わせた検討が必要。
 - **気づいた経緯**: 2026-08-16、`generate_wls_crosscheck_fixtures.py`解説後のユーザー提案。
-- **状態**: 未対応（着手要否はユーザー判断待ち、項目14と合わせて検討）
+- **状態**: 未対応（着手要否はユーザー判断待ち、メインループ共通化案と合わせて検討）
 
 ### 27. `formula = "y ~ x1 + x2 + x3"`が6ファイルで重複
 

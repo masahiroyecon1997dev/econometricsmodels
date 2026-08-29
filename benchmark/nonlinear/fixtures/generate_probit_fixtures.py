@@ -49,7 +49,9 @@ NUMERIC_SCENARIOS = [
 ]
 
 # hc1はstatsmodelsで未実装のためここには含めない（上記docstring参照）。
-COV_TYPES = ["classical", "opg", "hc0", "cluster"]
+# clusterはbaselineのみ、下のcluster専用ケース（_run_cluster_case）で個別に扱うため
+# ここには含めない（OLS/WLSと同じ書き方、項目14参照）。
+COV_TYPES = ["classical", "opg", "hc0"]
 
 # newton以外のmethod（bfgs/lbfgs）が主リファレンスに対しフルの統計量（std_errors含む）で
 # 一致することの確認用（Issue #231フェーズ4のtesting-completeness-reviewer指摘、
@@ -67,8 +69,6 @@ def build_fixtures() -> dict:
     for scenario in NUMERIC_SCENARIOS:
         fixtures[scenario] = {}
         for cov_type in COV_TYPES:
-            if cov_type == "cluster":
-                continue  # clusterはbaselineのみ、下のcluster専用ケースで扱う
             result = run(
                 dataset_source="synthetic",
                 dataset=scenario,
@@ -101,8 +101,6 @@ def build_fixtures() -> dict:
     # （probit_logitとも定番の比較対象、mrozはWooldridge教科書でも両方の例に使われる）。
     fixtures["mroz"] = {}
     for cov_type in COV_TYPES:
-        if cov_type == "cluster":
-            continue
         fixtures["mroz"][cov_type] = run(
             dataset_source="wooldridge",
             dataset="mroz",

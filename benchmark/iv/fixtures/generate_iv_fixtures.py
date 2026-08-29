@@ -55,7 +55,10 @@ X_EXOG_BY_SCENARIO = {
     "high_condition_number": ["x1", "x2"],
 }
 
-COV_TYPES = ["classical", "hc0", "hc1", "hac", "cluster"]
+# clusterはbaselineのみ、下のcluster専用ケース（_run_cluster_case/
+# _run_cluster_g2_case）で個別に扱うためここには含めない（OLS/WLSと同じ書き方、
+# 項目14参照）。multi_endog/card/df1がclusterを持たない理由は_metaのnote参照。
+COV_TYPES = ["classical", "hc0", "hc1", "hac"]
 
 # Wooldridge card（Card 1995の教育収益率推定、大学近接ダミーnearc2/nearc4を
 # 操作変数として教育年数educの内生性を補正する教科書的定番例）。
@@ -71,8 +74,6 @@ def build_fixtures() -> dict:
 
         fixtures[scenario] = {}
         for cov_type in COV_TYPES:
-            if cov_type == "cluster":
-                continue  # baselineのみ別途複数パターンで確認（下記）
             result = run(
                 dataset=scenario,
                 x_exog_cols=x_exog,
@@ -102,8 +103,6 @@ def build_fixtures() -> dict:
     # x_endog=['endog1', 'endog2']・instruments=['z1','z2','z3']（過剰識別）。
     fixtures["multi_endog"] = {}
     for cov_type in COV_TYPES:
-        if cov_type == "cluster":
-            continue
         fixtures["multi_endog"][cov_type] = run(
             dataset="baseline_multi_endog",
             x_exog_cols=["x1"],
@@ -118,8 +117,6 @@ def build_fixtures() -> dict:
     # testing-completeness-reviewer指摘のshould fix）。
     fixtures["card"] = {}
     for cov_type in COV_TYPES:
-        if cov_type == "cluster":
-            continue
         fixtures["card"][cov_type] = run(
             dataset="card",
             x_exog_cols=CARD_X_EXOG,
@@ -134,8 +131,6 @@ def build_fixtures() -> dict:
     # x_exog=[]・x_endog=['endog1']・instruments=['z1']（丁度識別、n=3）。
     fixtures["df1"] = {}
     for cov_type in COV_TYPES:
-        if cov_type == "cluster":
-            continue  # n=3では意味のあるクラスタ数を確保できないため対象外
         fixtures["df1"][cov_type] = run(
             dataset="baseline_df1",
             x_exog_cols=[],

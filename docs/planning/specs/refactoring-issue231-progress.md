@@ -185,8 +185,8 @@
   `pytest tests`956件全件パス、`ruff check`／`ruff format --check`パス
   確認済み。
 - 項目8（`generate_logit_dataset`/`generate_probit_dataset`の後方互換用
-  ラッパーが不要では）: 対応済み・コミット待ち（本セッションで実装、
-  コミット前確認待ち）。`grep`で実際の呼び出し箇所を確認した結果、
+  ラッパーが不要では）: 対応済み・コミット済み（`a48a2e5`）。
+  `grep`で実際の呼び出し箇所を確認した結果、
   `benchmark/nonlinear/freeze_nonlinear_datasets.py`と
   `generate_nonlinear_datasets.py`自身の`__main__`ブロック・モジュール
   docstringの使用例の2箇所のみと判明（項目記載通り）。両ラッパー関数を削除し、
@@ -207,7 +207,39 @@
   動作確認済み。`freeze_datasets.py`の出力（linear/nonlinear/iv全系統）が
   変更前後で完全一致することも確認済み。`refactoring-candidates.md`から
   項目8を削除済み。`pytest tests`956件全件パス、`ruff check`パス確認済み。
-- 上記以外（`refactoring-candidates.md`項目11〜35・37・39〜41・43）は未着手。
+- 項目14（`COV_TYPES`への`cluster`混入がOLS/WLSとLogit/Probit/IV(2SLS)で不統一）:
+  対応済み・コミット待ち（本セッションで実装、コミット前確認待ち）。**スコープを
+  絞った対応**: 項目11〜15は`_run_cluster_case`重複ファミリーとしてまとめて
+  検討すべき旨をユーザーに提示し、その中でも項目14はIssue化された設計判断
+  （項目12のfreeze時焼き込み方式等）を要さない独立した書き方統一のみのため
+  最初に着手する、という方針でユーザー承認を得た。具体的には
+  `generate_logit_fixtures.py`・`generate_probit_fixtures.py`・
+  `generate_iv_fixtures.py`（2SLS）の3ファイルで、`COV_TYPES`定義から`"cluster"`
+  を削除し、メインループ内の`if cov_type == "cluster": continue`（IVは
+  scenario/multi_endog/card/df1の計4箇所）も合わせて削除、OLS/WLS/GMM
+  （`generate_iv_gmm_fixtures.py`、元々cluster無しスタイルで変更不要）と
+  同じ書き方に統一した。**項目14の所感で言及されていたもう一段大きい話
+  （メインループ自体を`_common.py`の共通ヘルパーへ切り出す案）は今回のスコープ外
+  とし、対応していない**（項目26から参照されていたため、項目14削除にあわせて
+  項目26側にこのアイデア自体をインライン記載し直した）。
+  **検証時に判明した別件の環境バグ**（今回の変更が原因ではないことをスタッシュで
+  変更前コードに戻して再現し確認済み）: `benchmark/linear/`と
+  `benchmark/nonlinear/`の両方に同名の`run_statsmodels_benchmark.py`が存在し、
+  現在のPYTHONPATH設定（`benchmark/linear`が`benchmark/nonlinear`より先）では
+  `generate_logit_fixtures.py`/`generate_probit_fixtures.py`を直接実行すると
+  誤って`benchmark/linear`側の`run_statsmodels_benchmark.py`（`smf.ols`のみ対応）
+  がimportされ、`cov_type`不正・`model`引数未知のエラーで落ちる
+  （`pytest`経由の通常実行はフィクスチャJSONを直接読むため影響を受けず、
+  これまで顕在化していなかった）。検証は一時的に`PYTHONPATH`を
+  `benchmark/nonlinear`優先に上書きして実施した。この問題自体は本項目の
+  スコープ外のため未修正、新規候補としてユーザーに報告予定。
+  検証: `ruff check`パス、`pytest tests`957件全件パス（並行セッションが
+  `tests/test_ols.py`に追加した1件を含む、自分の変更はコミット対象に含めない）。
+  フィクスチャJSON（logit.json/probit.json/iv.json）を`_meta.generated_at`
+  除外で比較し、変更前後で完全一致することを確認済み（`git worktree`で変更前
+  コードを再現して比較）。`refactoring-candidates.md`から項目14を削除済み。
+- 上記以外（`refactoring-candidates.md`項目11〜13・15〜35・37・39〜41・43）は
+  未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は
   未着手。項目50以降は別セッションが並行して追記・コミットしているため、
   このスナップショットでは網羅しない（同ファイルを直接参照すること）。
@@ -251,23 +283,29 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
 - `benchmark/performance/`: `compare_performance.py`・`render_performance_summary.py`
   （全区切り解説済み）
 - `tests/`: `_assertions.py`・`_helpers.py`・`_tolerances.py`・`conftest.py`・
-  `test_ols.py`・`test_ols_fixtures.py`・`test_ols_crosscheck.py`
-  （全区切り解説済み。これでOLS関連ファイル一式が完了）
+  `test_ols.py`・`test_ols_fixtures.py`・`test_ols_crosscheck.py`・
+  `test_wls.py`（全区切り解説済み）
 
-**次に解説予定**: `tests/test_wls*.py`等、残り15ファイル
-（ユーザー指示によりOLS関連ファイルを一通り見終えたので次の手法に進む想定。
-系統・手法の順序は次回セッションでユーザーに確認）。OLS3ファイル解説後の
-ユーザーとの質疑で、数値比較の役割・許容誤差の一貫性・オプションのfixtures
-カバレッジ・クラスターのシナリオ横断検証漏れ・命名の不統一・Intercept→const
-正規化のタイミング不一致・Wooldridge実データ検証の非対称等について多数の
-指摘を受け、`refactoring-candidates-2.md`項目51〜64・
-`test-coverage-candidates.md`項目25〜33に記録済み（詳細下記）。特に
-項目52・57（`test_ols.py`/`test_ols_fixtures.py`/`test_ols_crosscheck.py`の
-3ファイルが互いに矛盾する役割分担の説明を持つ）・項目63（Intercept→const
-正規化を生成時に統一する案、項目44を包含）・項目27/28/29/33（主リファレンス
-statsmodels側がRクロスチェック側よりオプション・シナリオ・実データの
-検証範囲が狭いという同型のパターンが4例見つかっている）は、他手法の
-ファイルを解説する際も同じ観点で確認するとよい。
+**次に解説予定**: `tests/test_wls_fixtures.py`（ユーザー指示によりOLSと同じ順で
+`test_wls_crosscheck.py`まで先にWLS関連ファイルを一通り見る想定）。その後
+Logit/Probit/IV/Tobitの残りファイル。`test_wls.py`解説後のユーザーとの質疑で
+多数の指摘を受け、`refactoring-candidates-2.md`項目65〜70・
+`test-coverage-candidates.md`項目34〜35に記録した他、2件は即時対応した
+（詳細下記）。項目67（`WLSOptions`新設、Logit/Probitのmethod/max_iter/tol/
+raise_on_non_convergence共通化と合わせて再検討）・項目68（テストファイルを
+バリデーション/API構造/数値誤差で分割し系統別ディレクトリ化する方向）は、
+Logit/Probit以降のファイルの解説・作業に影響する大きめの決定なので、
+着手前に思い出すこと。項目35（`test_cov_type_is_case_insensitive`等にHACが
+無い）は他手法のファイルでも同じ観点で確認するとよい。
+
+**即時対応した項目（2026-08-23）**:
+- `tests/test_ols.py`に`test_non_finite_values_raise`を追加
+  （`fit()`本体の`y`/`x`でのNaN・無限大検証、`test-coverage-candidates.md`
+  項目31の一部に対応。`pytest tests/test_ols.py`72件全件パス、
+  `ruff check`／`ruff format`パス確認済み）。
+- `.claude/agents/testing-completeness-reviewer.md`に観点5
+  「列引数ごとのバリデーション3点セット」（存在確認・null・NaN/無限大を
+  個別に確認すること）を追加。
 
 **このウォークスルー中に作成したGitHub Issue**: [#246](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/246)
 （検定分布・診断統計量の運用ノート`docs/spec/inference-conventions.md`化）・

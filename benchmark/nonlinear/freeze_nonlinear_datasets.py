@@ -15,10 +15,7 @@ from pathlib import Path
 
 from _common import freeze_scenarios, run_freeze_cli
 from generate_nonlinear_datasets import SCENARIOS as LOGIT_SCENARIOS
-from generate_nonlinear_datasets import (
-    generate_logit_dataset,
-    generate_probit_dataset,
-)
+from generate_nonlinear_datasets import generate_binary_choice_dataset
 
 # generate_nonlinear_datasets.pyのSCENARIOS（全シナリオ、generate_logit_fixtures.py
 # のNUMERIC_SCENARIOSに、エラーパス確認用のperfect_multicollinearityを加えたもの）を
@@ -31,10 +28,11 @@ def freeze(output_dir: Path) -> None:
     logit_true_betas: dict[str, list[float]] = {}
     freeze_scenarios(
         output_dir,
-        generate_logit_dataset,
+        generate_binary_choice_dataset,
         LOGIT_SCENARIOS,
         "logit",
         logit_true_betas,
+        link="logit",
     )
     (output_dir / "logit_true_beta.json").write_text(
         json.dumps(logit_true_betas, indent=2)
@@ -43,10 +41,11 @@ def freeze(output_dir: Path) -> None:
     probit_true_betas: dict[str, list[float]] = {}
     freeze_scenarios(
         output_dir,
-        generate_probit_dataset,
+        generate_binary_choice_dataset,
         PROBIT_SCENARIOS,
         "probit",
         probit_true_betas,
+        link="probit",
     )
     (output_dir / "probit_true_beta.json").write_text(
         json.dumps(probit_true_betas, indent=2)

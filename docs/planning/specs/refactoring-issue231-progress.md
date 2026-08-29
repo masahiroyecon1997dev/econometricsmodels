@@ -166,8 +166,8 @@
   （linear/nonlinear/iv全系統）が変更前後で完全一致することを実測確認済み。
   `refactoring-candidates.md`から項目6を削除済み。`pytest tests`956件全件
   パス、`ruff check`／`ruff format --check`パス確認済み。
-- 項目7（説明変数X生成ロジックが3系統でほぼ同一）: 対応済み・コミット待ち
-  （本セッションで実装、コミット前確認待ち）。**実装前の調査で判明した
+- 項目7（説明変数X生成ロジックが3系統でほぼ同一）: 対応済み・コミット済み
+  （`35bcaa7`）。**実装前の調査で判明した
   重要な事実**: 当初の項目記載は`scale_variance`/`scale_variance_mild`も
   対象に含んでいたが、実際にはlinear（Xをその場でスケーリングしてから
   yの計算に使う）とnonlinear/IV（y・x_endogは未スケーリングのXで計算し、
@@ -184,7 +184,30 @@
   一致することも確認済み。`refactoring-candidates.md`から項目7を削除済み。
   `pytest tests`956件全件パス、`ruff check`／`ruff format --check`パス
   確認済み。
-- 上記以外（`refactoring-candidates.md`項目8〜35・37・39〜41・43）は未着手。
+- 項目8（`generate_logit_dataset`/`generate_probit_dataset`の後方互換用
+  ラッパーが不要では）: 対応済み・コミット待ち（本セッションで実装、
+  コミット前確認待ち）。`grep`で実際の呼び出し箇所を確認した結果、
+  `benchmark/nonlinear/freeze_nonlinear_datasets.py`と
+  `generate_nonlinear_datasets.py`自身の`__main__`ブロック・モジュール
+  docstringの使用例の2箇所のみと判明（項目記載通り）。両ラッパー関数を削除し、
+  呼び出し元を`generate_binary_choice_dataset(scenario, link="logit"/"probit",
+  ...)`の直接呼び出しに書き換えた。`freeze_nonlinear_datasets.py`は
+  `freeze_scenarios(..., **generator_kwargs)`が既に`link`等の追加kwargsを
+  素通しできる設計だったため`link="logit"`/`link="probit"`をキーワード引数で
+  渡すだけで済んだ。`__main__`ブロックは`functools.partial(
+  generate_binary_choice_dataset, link=link_arg)`で`preview_dataset`が期待する
+  `(scenario) -> (df, true_beta)`シグネチャに適合させた。
+  `.claude/skills/reference-benchmark/SKILL.md`のエイリアス言及箇所も
+  削除に合わせて更新した。`engine/src/nonlinear/logit.rs`のdocコメントが
+  `generate_logit_datasets.py`という（今回とは無関係に、Probit追加時の統合で
+  既に存在しなくなっていた）旧ファイル名を参照している点も見つけたが、
+  今回の削除対象（ラッパー関数）とは別の陳腐化であり本項目のスコープ外と
+  判断し、対応していない（別途候補として起票する余地あり）。
+  `python generate_nonlinear_datasets.py logit/probit baseline`で両リンクとも
+  動作確認済み。`freeze_datasets.py`の出力（linear/nonlinear/iv全系統）が
+  変更前後で完全一致することも確認済み。`refactoring-candidates.md`から
+  項目8を削除済み。`pytest tests`956件全件パス、`ruff check`パス確認済み。
+- 上記以外（`refactoring-candidates.md`項目11〜35・37・39〜41・43）は未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は
   未着手。項目50以降は別セッションが並行して追記・コミットしているため、
   このスナップショットでは網羅しない（同ファイルを直接参照すること）。

@@ -44,10 +44,14 @@ autocorrelated/high_variance）は2値DGPに直接転用できないため、Log
 人為的に打ち切ることで行う（`tests/test_logit.py`/`test_probit.py`）。
 
 使用例:
-    from generate_nonlinear_datasets import generate_logit_dataset, generate_probit_dataset
+    from generate_nonlinear_datasets import generate_binary_choice_dataset
 
-    df, true_beta = generate_logit_dataset("baseline", n=500, seed=42)
-    df, true_beta = generate_probit_dataset("baseline", n=500, seed=42)
+    df, true_beta = generate_binary_choice_dataset(
+        "baseline", link="logit", n=500, seed=42
+    )
+    df, true_beta = generate_binary_choice_dataset(
+        "baseline", link="probit", n=500, seed=42
+    )
     # df の列: y（0.0/1.0）, x1, x2, x3
 """
 
@@ -172,48 +176,16 @@ def generate_binary_choice_dataset(
     return pl.DataFrame(data), beta
 
 
-def generate_logit_dataset(
-    scenario: str,
-    n: int = 500,
-    k: int = 3,
-    seed: int = 42,
-    beta: np.ndarray | None = None,
-) -> tuple[pl.DataFrame, np.ndarray]:
-    """`generate_binary_choice_dataset(scenario, link="logit", ...)`のエイリアス。
-
-    既存の呼び出し元（`freeze_datasets.py`等）との互換のため名前付きで残している。
-    """
-    return generate_binary_choice_dataset(
-        scenario, "logit", n=n, k=k, seed=seed, beta=beta
-    )
-
-
-def generate_probit_dataset(
-    scenario: str,
-    n: int = 500,
-    k: int = 3,
-    seed: int = 42,
-    beta: np.ndarray | None = None,
-) -> tuple[pl.DataFrame, np.ndarray]:
-    """`generate_binary_choice_dataset(scenario, link="probit", ...)`のエイリアス。"""
-    return generate_binary_choice_dataset(
-        scenario, "probit", n=n, k=k, seed=seed, beta=beta
-    )
-
-
 if __name__ == "__main__":
+    from functools import partial
+
     from _common import preview_dataset
 
     link_arg = sys.argv[1] if len(sys.argv) > 1 else "logit"
     scenario_arg = sys.argv[2] if len(sys.argv) > 2 else "baseline"
-    generator = (
-        generate_logit_dataset
-        if link_arg == "logit"
-        else generate_probit_dataset
-    )
     preview_dataset(
         scenario_arg,
-        generator,
+        partial(generate_binary_choice_dataset, link=link_arg),
         extra_info_fn=lambda df: (
             f"link={link_arg}, y mean (class balance): {df['y'].mean():.3f}"
         ),

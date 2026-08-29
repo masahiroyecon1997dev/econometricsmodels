@@ -33,19 +33,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ## 一覧
 
-### 8. `generate_logit_dataset`/`generate_probit_dataset`の後方互換用ラッパーが不要では
-
-- **対象**: [benchmark/nonlinear/generate_nonlinear_datasets.py:179-206](../../../benchmark/nonlinear/generate_nonlinear_datasets.py#L179-L206)
-- **内容**: ユーザー指摘（2026-08-15）。docstringに「既存の呼び出し元との互換のため名前付きで
-  残している」とあるこの2つの薄いラッパー関数の実際の呼び出し箇所を`grep`で確認したところ、
-  `freeze_nonlinear_datasets.py`と本ファイル自身の`__main__`ブロックの2箇所のみだった。
-  後方互換性が不要なら、これらの呼び出し元を`generate_binary_choice_dataset(scenario,
-  link="logit"/"probit")`に直接書き換えることでラッパー自体を削除できる。
-- **Claudeの所感**: 呼び出し箇所が少なく（2箇所）、いずれも`benchmark/nonlinear/`内で
-  完結しているため、削除は低リスクだと考える。
-- **気づいた経緯**: 2026-08-15、`generate_nonlinear_datasets.py`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
-
 ### 11. `_run_cluster_case`（generate_ols_fixtures.py）が`run_statsmodels_benchmark.py`の`coef`/`se`抽出ロジックと重複
 
 - **対象**: [benchmark/linear/fixtures/generate_ols_fixtures.py:154-158](../../../benchmark/linear/fixtures/generate_ols_fixtures.py#L154-L158)・

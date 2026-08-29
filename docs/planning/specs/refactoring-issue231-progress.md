@@ -145,8 +145,8 @@
   項目2を削除済み。`pytest tests`956件全件パス、`ruff check`／
   `ruff format --check`パス確認済み。
 - 項目5（`unknown scenario`/`unknown link`検証の重複が3系統＋nonlinearの
-  link検証で計4箇所）: 対応済み・コミット待ち（本セッションで実装、
-  コミット前確認待ち）。`benchmark/_common.py`に`validate_choice(value,
+  link検証で計4箇所）: 対応済み・コミット済み（`8c71613`）。
+  `benchmark/_common.py`に`validate_choice(value,
   valid_choices, label)`ヘルパーを新設し、linear/nonlinear/ivの
   `generate_*_datasets.py`3ファイルの`scenario`検証、nonlinearの`link`検証を
   置き換えた（計4箇所）。エラーメッセージが変更前と完全に一致することを
@@ -154,7 +154,19 @@
   全系統）が変更前後で完全一致することも確認済み。`refactoring-candidates.md`
   から項目5を削除済み。`pytest tests`956件全件パス、`ruff check`／
   `ruff format --check`パス確認済み。
-- 上記以外（`refactoring-candidates.md`項目6〜35・37・39〜41・43）は未着手。
+- 項目6（線形予測子の組み立て方が`column_stack`版とスカラー切片版で
+  不統一）: 対応済み・コミット待ち（本セッションで実装、コミット前確認待ち）。
+  `benchmark/_common.py`に`linear_predictor(X, beta) -> beta[0] + X @
+  beta[1:]`ヘルパーを新設し、`generate_linear_datasets.py`（`y = beta[0] +
+  X @ beta[1:] + errors`）・`generate_nonlinear_datasets.py`（`x_const =
+  np.column_stack([np.ones(n), X]); p = _LINK_CDF[link](x_const @ beta)`）
+  の両方を置き換えた。IVは`x_exog`/`x_endog`の2種の説明変数を持つ構造式
+  （`beta0 + x_exog @ beta_exog + x_endog @ beta_endog + u`）で数学的に
+  異なるため対象外（項目自体のスコープ通り）。`freeze_datasets.py`の出力
+  （linear/nonlinear/iv全系統）が変更前後で完全一致することを実測確認済み。
+  `refactoring-candidates.md`から項目6を削除済み。`pytest tests`956件全件
+  パス、`ruff check`／`ruff format --check`パス確認済み。
+- 上記以外（`refactoring-candidates.md`項目7〜35・37・39〜41・43）は未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は
   未着手。項目50以降は別セッションが並行して追記・コミットしているため、
   このスナップショットでは網羅しない（同ファイルを直接参照すること）。

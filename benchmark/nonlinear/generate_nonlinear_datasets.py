@@ -57,7 +57,7 @@ import sys
 
 import numpy as np
 import polars as pl
-from _common import validate_choice
+from _common import linear_predictor, validate_choice
 from _dgp_constants import (
     SCALE_VARIANCE_X1_SCALE as _SCALE_VARIANCE_X1_SCALE,
 )
@@ -156,8 +156,7 @@ def generate_binary_choice_dataset(
     if scenario == "scale_variance" and k < 2:
         raise ValueError(f"{scenario} requires k >= 2")
 
-    x_const = np.column_stack([np.ones(n), X])
-    p = _LINK_CDF[link](x_const @ beta)
+    p = _LINK_CDF[link](linear_predictor(X, beta))
     y = rng.binomial(1, p).astype(np.float64)
 
     if scenario == "scale_variance":

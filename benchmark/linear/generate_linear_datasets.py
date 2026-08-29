@@ -21,7 +21,7 @@ import sys
 
 import numpy as np
 import polars as pl
-from _common import validate_choice
+from _common import linear_predictor, validate_choice
 from _dgp_constants import (
     AUTOCORRELATED_RHO,
     HETEROSKEDASTIC_SIGMA_BASE,
@@ -142,7 +142,7 @@ def generate_linear_dataset(
     else:
         errors = rng.normal(0, 1.0, size=n)
 
-    y = beta[0] + X @ beta[1:] + errors
+    y = linear_predictor(X, beta) + errors
 
     weight = (
         (1.0 / (sigma_i**2))

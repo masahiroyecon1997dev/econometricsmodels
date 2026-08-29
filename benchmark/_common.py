@@ -20,6 +20,8 @@ Issue #231（リファクタリング）で、複数の`benchmark/<系統>/`ス�
 - `validate_choice`: `generate_<系統>_datasets.py`3ファイル（＋nonlinear側の
   `link`検証）で重複していた「候補集合に含まれなければ`ValueError`」という
   入力検証パターン。
+- `linear_predictor`: 「切片＋線形結合」の計算（`generate_linear_datasets.py`と
+  `generate_nonlinear_datasets.py`で書き方が異なっていた）。
 """
 
 from __future__ import annotations
@@ -76,6 +78,23 @@ def imbalanced_cluster_groups(n: int) -> list[str]:
             labels.extend([f"g{group_idx}"] * size)
             group_idx += 1
     return labels
+
+
+def linear_predictor(X: np.ndarray, beta: np.ndarray) -> np.ndarray:
+    """切片＋線形結合`beta[0] + X @ beta[1:]`を計算する。
+
+    `beta`は切片を含む（`beta[0]`が切片、`beta[1:]`が`X`の各列に対応する
+    傾き係数）、`generate_linear_datasets.py`/`generate_nonlinear_datasets.py`
+    で共通の予測子の組み立て方。
+
+    Args:
+        X: 説明変数の行列（切片列は含まない、shape=(n, k)）。
+        beta: 真の係数ベクトル（切片含む、長さk+1）。
+
+    Returns:
+        長さnの予測子ベクトル。
+    """
+    return beta[0] + X @ beta[1:]
 
 
 def hac_auto_lag(n: int) -> int:

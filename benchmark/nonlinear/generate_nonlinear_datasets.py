@@ -57,7 +57,12 @@ import sys
 
 import numpy as np
 import polars as pl
-from _common import linear_predictor, validate_choice
+from _common import (
+    apply_perfect_multicollinearity,
+    correlated_design_matrix,
+    linear_predictor,
+    validate_choice,
+)
 from _dgp_constants import (
     SCALE_VARIANCE_X1_SCALE as _SCALE_VARIANCE_X1_SCALE,
 )
@@ -130,24 +135,15 @@ def generate_binary_choice_dataset(
     if beta is None:
         beta = rng.uniform(-1.0, 1.0, size=k + 1)  # beta[0] = intercept
 
-    if scenario in ("moderate_multicollinearity", "high_condition_number"):
-        if k < 2:
-            raise ValueError(f"{scenario} requires k >= 2")
-        # x1とx2の相関: moderate=0.8程度、high_condition_number=0.999
-        # （OLSのgenerate_linear_datasets.pyと同じ設計）
-        rho = 0.999 if scenario == "high_condition_number" else 0.8
-        cov = np.eye(k)
-        cov[0, 1] = cov[1, 0] = rho
-        X = rng.multivariate_normal(mean=np.zeros(k), cov=cov, size=n)
-    else:
-        X = rng.normal(loc=0.0, scale=1.0, size=(n, k))
+    multicollinear = ("moderate_multicollinearity", "high_condition_number")
+    if scenario in multicollinear and k < 2:
+        raise ValueError(f"{scenario} requires k >= 2")
+    X = correlated_design_matrix(rng, scenario, n, k)
 
     if scenario == "perfect_multicollinearity":
         if k < 3:
             raise ValueError(f"{scenario} requires k >= 3")
-        X[:, 2] = (
-            2 * X[:, 0] + 3 * X[:, 1]
-        )  # x3 = 2*x1 + 3*x2（完全な線形従属）
+        apply_perfect_multicollinearity(X)
 
     if scenario == "near_separation":
         beta = beta.copy()

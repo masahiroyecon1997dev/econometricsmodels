@@ -22,6 +22,10 @@ Issue #231（リファクタリング）で、複数の`benchmark/<系統>/`ス�
   入力検証パターン。
 - `linear_predictor`: 「切片＋線形結合」の計算（`generate_linear_datasets.py`と
   `generate_nonlinear_datasets.py`で書き方が異なっていた）。
+- `correlated_design_matrix`/`apply_perfect_multicollinearity`:
+  multicollinearity系シナリオの説明変数行列生成（3系統で完全に同一ロジックだった
+  部分のみ。`scale_variance`系はスケーリングのタイミングが系統ごとに意図的に
+  異なるため対象外）。
 """
 
 from __future__ import annotations
@@ -95,6 +99,46 @@ def linear_predictor(X: np.ndarray, beta: np.ndarray) -> np.ndarray:
         長さnの予測子ベクトル。
     """
     return beta[0] + X @ beta[1:]
+
+
+def correlated_design_matrix(
+    rng: np.random.Generator, scenario: str, n: int, k: int
+) -> np.ndarray:
+    """multicollinearity系シナリオに応じた説明変数行列を生成する。
+
+    `moderate_multicollinearity`/`high_condition_number`は列1・列2に相関を
+    持たせた`multivariate_normal`、それ以外は無相関の`normal`。
+    `generate_linear_datasets.py`/`generate_nonlinear_datasets.py`/
+    `generate_iv_datasets.py`で共通のロジック（呼び出し側の変数名は
+    `X`/`x_exog`と異なる）。
+
+    Args:
+        rng: 乱数生成器。
+        scenario: シナリオ名。
+        n: サンプルサイズ。
+        k: 説明変数の数。`moderate_multicollinearity`/`high_condition_number`
+            はk>=2が必要（呼び出し側で検証済みであること）。
+
+    Returns:
+        shape=(n, k)の説明変数行列。
+    """
+    if scenario in ("moderate_multicollinearity", "high_condition_number"):
+        # x1とx2の相関: moderate=0.8程度、high_condition_number=0.999
+        # （特異ではないが条件数が非常に大きい設計行列）
+        rho = 0.999 if scenario == "high_condition_number" else 0.8
+        cov = np.eye(k)
+        cov[0, 1] = cov[1, 0] = rho
+        return rng.multivariate_normal(mean=np.zeros(k), cov=cov, size=n)
+    return rng.normal(loc=0.0, scale=1.0, size=(n, k))
+
+
+def apply_perfect_multicollinearity(X: np.ndarray) -> None:
+    """`X`の3列目を`2*列1 + 3*列2`で上書きし、完全な線形従属を作る（in-place）。
+
+    `perfect_multicollinearity`シナリオ用。`X`はk>=3であること
+    （呼び出し側で検証済みであること）。
+    """
+    X[:, 2] = 2 * X[:, 0] + 3 * X[:, 1]
 
 
 def hac_auto_lag(n: int) -> int:

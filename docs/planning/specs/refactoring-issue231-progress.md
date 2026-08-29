@@ -155,7 +155,7 @@
   から項目5を削除済み。`pytest tests`956件全件パス、`ruff check`／
   `ruff format --check`パス確認済み。
 - 項目6（線形予測子の組み立て方が`column_stack`版とスカラー切片版で
-  不統一）: 対応済み・コミット待ち（本セッションで実装、コミット前確認待ち）。
+  不統一）: 対応済み・コミット済み（`871f59b`）。
   `benchmark/_common.py`に`linear_predictor(X, beta) -> beta[0] + X @
   beta[1:]`ヘルパーを新設し、`generate_linear_datasets.py`（`y = beta[0] +
   X @ beta[1:] + errors`）・`generate_nonlinear_datasets.py`（`x_const =
@@ -166,7 +166,25 @@
   （linear/nonlinear/iv全系統）が変更前後で完全一致することを実測確認済み。
   `refactoring-candidates.md`から項目6を削除済み。`pytest tests`956件全件
   パス、`ruff check`／`ruff format --check`パス確認済み。
-- 上記以外（`refactoring-candidates.md`項目7〜35・37・39〜41・43）は未着手。
+- 項目7（説明変数X生成ロジックが3系統でほぼ同一）: 対応済み・コミット待ち
+  （本セッションで実装、コミット前確認待ち）。**実装前の調査で判明した
+  重要な事実**: 当初の項目記載は`scale_variance`/`scale_variance_mild`も
+  対象に含んでいたが、実際にはlinear（Xをその場でスケーリングしてから
+  yの計算に使う）とnonlinear/IV（y・x_endogは未スケーリングのXで計算し、
+  出力直前にのみ列をスケーリングする、両ファイルのコメントに明記済み）で
+  タイミングが意図的に異なると判明したため、ユーザー確認の上
+  **`scale_variance`系は対象から除外**した。真に完全一致していた
+  `moderate_multicollinearity`/`high_condition_number`（相関付き設計行列
+  生成）・`perfect_multicollinearity`（3列目の上書き）の2ブロックのみを
+  `benchmark/_common.py`の`correlated_design_matrix(rng, scenario, n, k)`・
+  `apply_perfect_multicollinearity(X)`に集約した（linear/nonlinear/iv
+  3ファイル、`k`下限チェックは各ファイル既存のタイミング・メッセージのまま
+  変更していない）。エラーメッセージが変更前と完全一致することを実測確認済み。
+  `freeze_datasets.py`の出力（linear/nonlinear/iv全系統）が変更前後で完全
+  一致することも確認済み。`refactoring-candidates.md`から項目7を削除済み。
+  `pytest tests`956件全件パス、`ruff check`／`ruff format --check`パス
+  確認済み。
+- 上記以外（`refactoring-candidates.md`項目8〜35・37・39〜41・43）は未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は
   未着手。項目50以降は別セッションが並行して追記・コミットしているため、
   このスナップショットでは網羅しない（同ファイルを直接参照すること）。

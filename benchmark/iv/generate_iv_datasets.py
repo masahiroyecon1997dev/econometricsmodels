@@ -39,7 +39,11 @@ import sys
 
 import numpy as np
 import polars as pl
-from _common import validate_choice
+from _common import (
+    apply_perfect_multicollinearity,
+    correlated_design_matrix,
+    validate_choice,
+)
 from _dgp_constants import (
     AUTOCORRELATED_RHO,
     HETEROSKEDASTIC_SIGMA_BASE,
@@ -153,22 +157,10 @@ def generate_iv_dataset(
     beta0 = float(rng.uniform(-1.0, 1.0))
 
     # --- 外生説明変数 x_exog ---
-    if scenario in ("moderate_multicollinearity", "high_condition_number"):
-        # x1とx2の相関: moderate=0.8程度、high_condition_number=0.999
-        # （`generate_linear_datasets.py`と同じ設計）。
-        rho = 0.999 if scenario == "high_condition_number" else 0.8
-        cov = np.eye(k_exog)
-        cov[0, 1] = cov[1, 0] = rho
-        x_exog = rng.multivariate_normal(
-            mean=np.zeros(k_exog), cov=cov, size=n
-        )
-    else:
-        x_exog = rng.normal(0.0, 1.0, size=(n, k_exog))
+    x_exog = correlated_design_matrix(rng, scenario, n, k_exog)
 
     if scenario == "perfect_multicollinearity":
-        x_exog[:, 2] = (
-            2 * x_exog[:, 0] + 3 * x_exog[:, 1]
-        )  # x3 = 2*x1 + 3*x2（完全な線形従属）
+        apply_perfect_multicollinearity(x_exog)
 
     # --- 操作変数 instruments（構造誤差u・第一段階誤差vのいずれとも独立に生成、
     # 除外制約を満たすようにする） ---

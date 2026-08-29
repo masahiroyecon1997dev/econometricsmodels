@@ -33,22 +33,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ## 一覧
 
-### 7. 説明変数X生成ロジック（multicollinearity/high_condition_number/perfect_multicollinearity/scale_variance）が3系統でほぼ同一
-
-- **対象**: [benchmark/linear/generate_linear_datasets.py:76-114](../../../benchmark/linear/generate_linear_datasets.py#L76-L114)
-  （`X`）・[benchmark/nonlinear/generate_nonlinear_datasets.py:132-156](../../../benchmark/nonlinear/generate_nonlinear_datasets.py#L132-L156)
-  （`X`）・[benchmark/iv/generate_iv_datasets.py:141-156](../../../benchmark/iv/generate_iv_datasets.py#L141-L156)
-  （`x_exog`）
-- **内容**: ユーザー指摘（2026-08-15）。`rho=0.8/0.999`の相関構造を持つ`multivariate_normal`
-  生成、`X[:,2]=2*X[:,0]+3*X[:,1]`という完全多重共線性の作り方が3系統でほぼ同一ロジック
-  （IV側のdocstringにも「OLSと同じ発想をx_exogに適用」と明記済み）。
-- **Claudeの所感**: `_common.py`に`_correlated_design_matrix(rng, scenario, k)`のような
-  共通関数を切り出せる余地はあるが、変数名（`X` vs `x_exog`）・呼び出し文脈の違いもあり
-  設計にやや検討が要る規模。ユーザー自身も「無理にすることではない」とコメント済みで、
-  優先度は中程度・任意対応と位置づける。
-- **気づいた経緯**: 2026-08-15、`generate_nonlinear_datasets.py`解説後のユーザー指摘。
-- **状態**: 未対応（任意対応、着手要否はユーザー判断待ち）
-
 ### 8. `generate_logit_dataset`/`generate_probit_dataset`の後方互換用ラッパーが不要では
 
 - **対象**: [benchmark/nonlinear/generate_nonlinear_datasets.py:179-206](../../../benchmark/nonlinear/generate_nonlinear_datasets.py#L179-L206)

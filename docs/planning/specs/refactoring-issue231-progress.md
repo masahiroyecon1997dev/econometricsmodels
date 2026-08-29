@@ -448,10 +448,24 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
     **不変性チェック**: `logit/logit_crosscheck.json`（R含む）を再生成し、Step 5a
     スナップショットと完全一致（`generated_at`／version 除外）。コミット済みとの差は
     5a と同じ `_meta` 先行ドリフトのみ（ステップ9で解消）。`pytest` 957件・`ruff` パス。
-  - 次: Step 6（Probit 配線）。`generate_probit_fixtures.py`／
-    `generate_probit_crosscheck_fixtures.py` を 5b と同じ機械的置換で新構造へ
-    （crosscheck は `run_glm_r(..., link="probit")`）。Probit も同じ `run_glm_crosscheck.R`
-    ／`statsmodels_ref.run(model="probit")` を使うため差分は最小の想定。
+  - **Step 6 完了（2026-08-29）— Probit 配線（ロジック不変・機械的置換のみ、5b の完全ミラー）**:
+    `generate_probit_fixtures.py`／`generate_probit_crosscheck_fixtures.py` の `__main__` を
+    `run_fixture_cli` に、後者のローカル `_run_r`／`_normalize_names`（60行）を
+    `run_glm_r(..., link="probit")` に、`coef`/`se` 内包表記を `extract_coef_se` に、
+    両者のローカル `MROZ_FORMULA` を `benchmark.common.MROZ_FORMULA` に置換。docstring の
+    旧パス・使用例を新構造へ。`_write_csv`／`_run_cluster_case` はローカル据え置き。
+    **不変性チェック**: `probit/probit_crosscheck.json`（R含む）を再生成し Step 5a
+    スナップショットと完全一致（`generated_at`／version 除外）。コミット済みとの差は
+    5a と同じ `_meta` 先行ドリフトのみ（ステップ9で解消）。`pytest` 957件・`ruff` パス。
+    `/code-review`（fork）指摘ゼロ。**これで nonlinear 系統（Logit/Probit）の移行完了**。
+  - 次: Step 7（IV / IV-GMM 移行）。`benchmark/iv/` の
+    `generate_iv_datasets.py`→`datasets.py`、`freeze_iv_datasets.py`→`freeze.py`、
+    `run_linearmodels_benchmark.py`→`references/linearmodels_ref.py`、
+    `run_ivreg_benchmark.R`→`references/run_ivreg.R`（`source(".../common/_common.R")`
+    のパス追随に注意）へ再配置（5a 相当）＋配線（5b 相当）。IV crosscheck の
+    ローカル `_run_r`／`_normalize_names` は `conf_from_low_high` 等の分岐が linear/
+    nonlinear と異なる可能性があるため、`benchmark/iv/references/r.py` を新設する際に
+    `normalize_names` の既存引数で吸収できるか実装時に確認（設計ノート D の想定どおりか）。
 
 ---
 

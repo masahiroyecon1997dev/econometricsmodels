@@ -1,36 +1,40 @@
 """Probitのテストフィクスチャ（tests/fixtures/benchmarks/probit.json）を
 生成するスクリプト。
 
-`benchmark/nonlinear/run_statsmodels_benchmark_nonlinear.py`（`--model probit`、1回呼べば
-1ケース分の結果を返す汎用ツール）を全シナリオ×全cov_typeの組み合わせで呼び出し、
+`benchmark/nonlinear/references/statsmodels_ref.py`（`model="probit"`、1回呼べば
+1ケース分の結果を返す汎用アダプタ）を全シナリオ×全cov_typeの組み合わせで呼び出し、
 結果を1つのJSONにまとめて書き出す。`generate_logit_fixtures.py`と完全に同型の設計
-（シナリオ構成・cov_type構成もLogitと同一、`generate_nonlinear_datasets.py`
+（シナリオ構成・cov_type構成もLogitと同一、`benchmark/nonlinear/datasets.py`
 参照）。
 
 **`cov_type="hc1"`はここに含めない**（statsmodelsのdiscrete modelがn/(n-k)小標本補正を
 実装しておらずHC0と同一値になるバグ的な欠落があるため、Probitでも同じ欠落を実機確認
-済み。`run_statsmodels_benchmark_nonlinear.py`のdocstring参照）。`hc1`は
+済み。`statsmodels_ref.py`のdocstring参照）。`hc1`は
 `generate_probit_crosscheck_fixtures.py`（R側、正しく補正を適用する
 `sandwich::vcovHC`）が主リファレンスの役割を担う（ユーザー確認済み）。
 
 入力データは`tests/fixtures/benchmarks/data/`に固定済みのprobit_*.csvを読む
-（`benchmark/freeze_datasets.py`参照）。
+（`benchmark/nonlinear/freeze.py`参照）。
 
-使用例:
-    python generate_probit_fixtures.py --output ../../../tests/fixtures/benchmarks/probit.json
+使用例（リポジトリルートから）:
+    python -m benchmark.nonlinear.fixtures.generate_probit_fixtures
 """
 
 from __future__ import annotations
 
-import argparse
-import json
 from datetime import UTC, datetime
-from pathlib import Path
 
 import polars as pl
 import statsmodels
 
-from benchmark.common import DATA_DIR, imbalanced_cluster_groups
+from benchmark.common import (
+    BENCHMARKS_DIR,
+    DATA_DIR,
+    MROZ_FORMULA,
+    extract_coef_se,
+    imbalanced_cluster_groups,
+    run_fixture_cli,
+)
 from benchmark.nonlinear.references.statsmodels_ref import run
 
 # perfect_multicollinearityは数値比較の対象外（ComputationErrorの発生確認のみ、
@@ -58,10 +62,6 @@ COV_TYPES = ["classical", "opg", "hc0"]
 # 一致することの確認用（Issue #231フェーズ4のtesting-completeness-reviewer指摘、
 # generate_logit_fixtures.pyと同じ方針）。
 METHODS = ["bfgs", "lbfgs"]
-
-MROZ_FORMULA = (
-    "inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6"
-)
 
 
 def build_fixtures() -> dict:
@@ -185,10 +185,7 @@ def _run_cluster_case(
     )
 
     return {
-        "coef": {
-            str(name): float(v) for name, v in model.params.to_dict().items()
-        },
-        "se": {str(name): float(v) for name, v in model.bse.to_dict().items()},
+        **extract_coef_se(model),
         "_meta": {
             "reference": "statsmodels",
             "statsmodels_version": statsmodels.__version__,
@@ -200,22 +197,6 @@ def _run_cluster_case(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output",
-        default=str(
-            Path(__file__).resolve().parents[3]
-            / "tests"
-            / "fixtures"
-            / "benchmarks"
-            / "probit.json"
-        ),
+    run_fixture_cli(
+        build_fixtures, BENCHMARKS_DIR / "probit.json", description=__doc__
     )
-    args = parser.parse_args()
-
-    fixtures = build_fixtures()
-
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(fixtures, indent=2, ensure_ascii=False))
-    print(f"wrote {output_path} ({len(json.dumps(fixtures))} bytes)")

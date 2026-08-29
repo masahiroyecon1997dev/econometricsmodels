@@ -7,7 +7,7 @@ probit_crosscheck.json）を生成するスクリプト。
 
 **`cov_type="hc1"`はここでは主リファレンスの役割を担う**（statsmodelsのdiscrete model
 がn/(n-k)小標本補正を実装しておらずHC0と同一値になるバグ的な欠落があるため、Probitでも
-同じ欠落を実機確認済み。`run_statsmodels_benchmark_nonlinear.py`のdocstring参照。ユーザー確認済み）。
+同じ欠落を実機確認済み。`statsmodels_ref.py`のdocstring参照。ユーザー確認済み）。
 他のcov_type（classical/opg/hc0/cluster）は通常通りクロスチェック用（厳密比較の主体は
 `probit.json`側）。
 
@@ -18,15 +18,12 @@ probit_crosscheck.json）を生成するスクリプト。
 このスクリプト自体は`benchmark/`側に置く。生成される`probit_crosscheck.json`は
 `tests/fixtures/benchmarks/`に置く。
 
-使用例:
-    python generate_probit_crosscheck_fixtures.py \\
-        --output ../../../tests/fixtures/benchmarks/probit_crosscheck.json
+使用例（リポジトリルートから）:
+    python -m benchmark.nonlinear.fixtures.generate_probit_crosscheck_fixtures
 """
 
 from __future__ import annotations
 
-import argparse
-import json
 import subprocess
 import tempfile
 from datetime import UTC, datetime
@@ -34,11 +31,15 @@ from pathlib import Path
 
 import polars as pl
 
-from benchmark.common import imbalanced_cluster_groups, load_frozen_dataset
+from benchmark.common import (
+    BENCHMARKS_DIR,
+    MROZ_FORMULA,
+    imbalanced_cluster_groups,
+    load_frozen_dataset,
+    run_fixture_cli,
+)
 from benchmark.common.load_wooldridge import load as load_wooldridge
-
-REFERENCES_DIR = Path(__file__).resolve().parent.parent / "references"
-R_SCRIPT = REFERENCES_DIR / "run_glm_crosscheck.R"
+from benchmark.nonlinear.references.r import run_glm_r
 
 NUMERIC_SCENARIOS = [
     "baseline",
@@ -51,70 +52,6 @@ NUMERIC_SCENARIOS = [
 
 # hc1をここでは主リファレンスとして含める（他はクロスチェック用）。
 R_COV_TYPES = ["classical", "opg", "hc0", "hc1", "cluster"]
-
-MROZ_FORMULA = (
-    "inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6"
-)
-
-
-def _run_r(
-    csv_path: Path,
-    formula: str,
-    cov_type: str,
-    cluster_col: str | None = None,
-) -> dict:
-    cmd = [
-        "Rscript",
-        str(R_SCRIPT),
-        str(csv_path),
-        formula,
-        cov_type,
-        "probit",
-    ]
-    if cov_type == "cluster":
-        cmd.append(cluster_col or "")
-
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    raw = json.loads(proc.stdout)
-    return _normalize_names(raw)
-
-
-def _normalize_names(raw: dict) -> dict:
-    """パラメータ名を本実装のparam_names規則（切片="const"）に揃える。"""
-
-    def fix(name: str) -> str:
-        return "const" if name == "(Intercept)" else name
-
-    result = {
-        "coef": {fix(k): v for k, v in raw["coef"].items()},
-        "se": {fix(k): v for k, v in raw["se"].items()},
-    }
-    if "z_stats" in raw:
-        result["z_stats"] = {fix(k): v for k, v in raw["z_stats"].items()}
-    if "p_values" in raw:
-        result["p_values"] = {fix(k): v for k, v in raw["p_values"].items()}
-    if "conf_low" in raw and "conf_high" in raw:
-        result["conf_int"] = {
-            fix(k): [raw["conf_low"][k], raw["conf_high"][k]]
-            for k in raw["conf_low"]
-        }
-    for key in (
-        "log_likelihood",
-        "log_likelihood_null",
-        "aic",
-        "bic",
-        "lr_statistic",
-        "lr_p_value",
-        "pseudo_r_squared",
-    ):
-        if key in raw:
-            result[key] = raw[key]
-    if "margeff" in raw:
-        result["margeff"] = {
-            at: {fix(name): stats for name, stats in effects.items()}
-            for at, effects in raw["margeff"].items()
-        }
-    return result
 
 
 def _write_csv(df, tmpdir: Path, name: str) -> Path:
@@ -136,7 +73,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             if cov_type == "cluster":
                 continue
             fixtures[scenario][cov_type] = {
-                "r": _run_r(csv_path, formula, cov_type)
+                "r": run_glm_r(csv_path, formula, cov_type, link="probit")
             }
 
     baseline_df, _ = load_frozen_dataset("probit", "baseline")
@@ -179,7 +116,13 @@ def _run_cluster_case(
     tmp_path = csv_path.with_name(csv_path.stem + suffix + ".csv")
     grouped.write_csv(tmp_path)
     return {
-        "r": _run_r(tmp_path, formula, "cluster", cluster_col="cluster_group")
+        "r": run_glm_r(
+            tmp_path,
+            formula,
+            "cluster",
+            cluster_col="cluster_group",
+            link="probit",
+        )
     }
 
 
@@ -191,11 +134,19 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
     for cov_type in R_COV_TYPES:
         if cov_type == "cluster":
             continue
-        fixtures[cov_type] = {"r": _run_r(csv_path, MROZ_FORMULA, cov_type)}
+        fixtures[cov_type] = {
+            "r": run_glm_r(csv_path, MROZ_FORMULA, cov_type, link="probit")
+        }
     # 実データでのクラスターロバストSE（testing-policy.md「テスト用データセット」3.）。
     # mrozの`city`（都市部居住ダミー、484/269の2値）を実カテゴリ列として使う。
     fixtures["cluster"] = {
-        "r": _run_r(csv_path, MROZ_FORMULA, "cluster", cluster_col="city")
+        "r": run_glm_r(
+            csv_path,
+            MROZ_FORMULA,
+            "cluster",
+            cluster_col="city",
+            link="probit",
+        )
     }
     return fixtures
 
@@ -254,22 +205,8 @@ def build_fixtures() -> dict:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output",
-        default=str(
-            Path(__file__).resolve().parents[3]
-            / "tests"
-            / "fixtures"
-            / "benchmarks"
-            / "probit_crosscheck.json"
-        ),
+    run_fixture_cli(
+        build_fixtures,
+        BENCHMARKS_DIR / "probit_crosscheck.json",
+        description=__doc__,
     )
-    args = parser.parse_args()
-
-    fixtures = build_fixtures()
-
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(fixtures, indent=2, ensure_ascii=False))
-    print(f"wrote {output_path} ({len(json.dumps(fixtures))} bytes)")

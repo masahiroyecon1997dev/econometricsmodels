@@ -328,6 +328,28 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
 
 ---
 
+## Initiative A: `benchmark/`再設計（#231サブIssue、2026-08-29〜）
+
+`refactoring-candidates.md`の単発項目を1つずつ潰す「随時対応ログ」とは別の、
+`benchmark/`をパッケージとして構造化し(a)データセット/(b)リファレンスアダプタ/
+(c)フィクスチャドライバの3層に分離し、Spec+汎用ドライバで手法ごとの重複を
+集約する構造変更。
+
+- **設計ノート**: [`benchmark-restructure-design.md`](benchmark-restructure-design.md)（正本）。
+  ディレクトリ構造・レイヤ設計・移行手順（OLS先行）・吸収する候補項目一覧はそちら。
+- **決定済み（2026-08-29、AskUserQuestionで確認）**: トップレベル兄弟構成
+  （`tests/`配下への入れ子は却下）／`benchmark/`をパッケージ化し`pythonpath=["."]`で
+  `sys.path.insert`全廃／`performance/`をトップに昇格し対象外／(c)はSpec+汎用ドライバ
+  （深い継承は不採用）／疑似グループ列は当面`ExtraCase`で実行時付与（焼き込みは
+  移行後判断）／#231サブIssueとして起票。
+- **吸収する`refactoring-candidates.md`項目**: 12・13・15・16・18〜21・24〜29・
+  31〜35・39（構造的重複、約20項目）。項目11は`extract_coef_se`切り出しで対応済み
+  （`28186ed`）、移行時に`benchmark/common/reference/extract.py`へ再配置。
+  対象外: 40・41（performance）、43（tests/のディレクトリ構成）、38（対応不要判定済み）。
+- **進捗**: 設計ノート作成のみ。実装未着手（Issue起票 → ステップ1「足場」から）。
+
+---
+
 ## `/explain-code`による`benchmark/`・`tests/`解説ウォークスルーの進捗（フェーズ外、2026-08-16〜）
 
 上記の「`refactoring-candidates.md`駆動の随時対応」とは**別のセッション・別の目的**の

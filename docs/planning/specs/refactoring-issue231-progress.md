@@ -208,7 +208,7 @@
   変更前後で完全一致することも確認済み。`refactoring-candidates.md`から
   項目8を削除済み。`pytest tests`956件全件パス、`ruff check`パス確認済み。
 - 項目14（`COV_TYPES`への`cluster`混入がOLS/WLSとLogit/Probit/IV(2SLS)で不統一）:
-  対応済み・コミット待ち（本セッションで実装、コミット前確認待ち）。**スコープを
+  対応済み・コミット済み（`e99c13f`）。**スコープを
   絞った対応**: 項目11〜15は`_run_cluster_case`重複ファミリーとしてまとめて
   検討すべき旨をユーザーに提示し、その中でも項目14はIssue化された設計判断
   （項目12のfreeze時焼き込み方式等）を要さない独立した書き方統一のみのため
@@ -319,7 +319,11 @@ Logit/Probit以降のファイルの解説・作業に影響する大きめの�
 `AttributeError`が漏れる、`test_ols.py`解説中の質問を受けて実際に検証し発覚）・
 [#267](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/267)
 （Rとの計算慣習差〔HAC・AIC/BIC等〕に完全一致させる互換モードの要否、
-優先度低、`test_ols_fixtures.py`解説中の議論から）。いずれもオープンのまま。
+優先度低、`test_ols_fixtures.py`解説中の議論から）・
+[#277](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/277)
+（WLS: `weight`と同じ列を`x`に含めることを許容する、現状は禁止。
+`test_wls.py`解説中の議論からユーザー承認済み、実施は未着手）。
+いずれもオープンのまま。
 
 **`.claude/rules/testing-policy.md`への追記（2026-08-23）**: OLSクロスチェック
 用Rスクリプト（`run_lm_crosscheck_benchmark.R`等）解説からの派生議論として、
@@ -335,16 +339,17 @@ Logit/Probit以降のファイルの解説・作業に影響する大きめの�
 **候補メモの状態（2026-08-23時点）**:
 - `refactoring-candidates.md`: 項目1〜43（このウォークスルー由来の最後の追記は項目43）。
   上記「`refactoring-candidates.md`駆動の随時対応」セッションが並行して対応中のため、
-  このウォークスルーからの新規追記は`refactoring-candidates-2.md`（項目44〜64、
-  直近の追記は`test_ols_crosscheck.py`解説時の`_assert_close`命名衝突
-  〔スカラー/辞書で意味が逆〕・`NON_HAC_COV_TYPES`等cov_typeリストの3階層重複・
-  `_check_result`/`_assert_fit_stats_close`命名不統一・Intercept→const正規化の
-  タイミング不一致〔項目44を包含〕・`predict()`の`"fitted"`キー命名・項目57への
-  追記で3ファイル目の役割分担矛盾を確認）に切り替えている。**両ファイルの統合は
+  このウォークスルーからの新規追記は`refactoring-candidates-2.md`（項目44〜70、
+  直近の追記は`test_wls.py`解説時の`weight=1.0`列追加の25箇所重複・許容誤差の
+  ファイル冒頭定数化・`WLSOptions`新設方針〔Logit/Probit実装時に再検討〕・
+  テストファイル分割の方向性決定・HAC時系列並べ替えテストの重複・
+  `isinstance`/命名揺れ）に切り替えている。**両ファイルの統合は
   `refactoring-candidates.md`側の随時対応が一区切りついた後にユーザー判断で行う**
   （現時点では統合しない）。
-- `test-coverage-candidates.md`: 項目1〜33（直近3件は`test_ols.py`/
-  `test_ols_fixtures.py`/`test_ols_crosscheck.py`解説時、`time_col`存在チェック・
+- `test-coverage-candidates.md`: 項目1〜35（直近2件は`test_wls.py`解説時、
+  WLSにもOLSと同型のバリデーション抜け・`test_cov_type_is_case_insensitive`等に
+  HACが無い）。前の3件は`test_ols.py`/`test_ols_fixtures.py`/
+  `test_ols_crosscheck.py`解説時、`time_col`存在チェック・
   `fit()`本体のNaN/無限大チェックのテスト欠如・Wooldridge実データが主リファレンス
   〔statsmodels〕側で未検証）。こちらはブロックされていないため引き続き
   直接追記してよい。

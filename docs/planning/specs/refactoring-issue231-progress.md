@@ -363,7 +363,13 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
     後回し、`_common.R` 据え置き、PYTHONPATH は削除でなく縮小 等）は
     `benchmark-restructure-design.md` 8章1節に記録。今後スクリプトは
     `python -m benchmark.<...>`（リポジトリルートから）で実行。
-  - 次: ステップ2「ドライバ骨格」。
+  - **`common/helpers.py` 分割（2026-08-29、ステップ1の積み残し）**: `helpers.py` を
+    `benchmark/common/datasets_io.py`（IO・凍結CLI）・`dgp.py`（DGPヘルパー）・
+    `reference/extract.py`（`extract_coef_se`）へ分割、`helpers.py` 削除。`__init__.py`
+    の re-export で利用側は無変更。`dgp_constants.py` は据え置き。検証: `pytest` 957件・
+    `ruff`・`ols.json`/凍結CSV 不変性。
+  - 次: ステップ2「ドライバ骨格」（`driver.py` / `reference/{r,meta}.py` /
+    `cluster_cases.py` 新設、手法未接続）。
 
 ---
 

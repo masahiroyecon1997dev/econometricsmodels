@@ -123,10 +123,11 @@
 │   ├── __init__.py
 │   ├── common/                         # 旧 benchmark/_common.py / _dgp_constants.py / _common.R を分割
 │   │   ├── __init__.py
-│   │   ├── datasets_io.py              # DATA_DIR, load_frozen_dataset, freeze_scenarios
+│   │   ├── datasets_io.py              # DATA_DIR, load_frozen_dataset, freeze_scenarios, run_freeze_cli
 │   │   ├── dgp.py                      # imbalanced_cluster_groups, hac_auto_lag, linear_predictor,
 │   │   │                              #   correlated_design_matrix, apply_perfect_multicollinearity,
-│   │   │                              #   scale/誤差項定数（旧 _dgp_constants.py）
+│   │   │                              #   validate_choice, preview_dataset
+│   │   ├── dgp_constants.py            # scale/誤差項定数（旧 _dgp_constants.py。dgp.py へ統合せず据え置き）
 │   │   ├── cluster_cases.py            # run_cluster_case（6コピーを1本化。項目13/15/24/35）
 │   │   ├── reference/
 │   │   │   ├── extract.py              # extract_coef_se（項目11・実装済み）等の抽出ヘルパー
@@ -165,8 +166,8 @@
 
 | 旧 | 新 |
 |---|---|
-| `benchmark/_common.py` | `benchmark/common/{datasets_io,dgp,constants}.py` + `common/reference/*` + `common/driver.py` |
-| `benchmark/_dgp_constants.py` | `benchmark/common/dgp.py` に統合 |
+| `benchmark/_common.py` | `benchmark/common/{datasets_io,dgp}.py` + `common/reference/extract.py`（＋後続で `constants.py` / `reference/{r,meta}.py` / `driver.py`） |
+| `benchmark/_dgp_constants.py` | `benchmark/common/dgp_constants.py`（据え置き） |
 | `benchmark/_common.R` | `benchmark/common/_common.R` |
 | `benchmark/load_wooldridge.py` | `benchmark/common/load_wooldridge.py` |
 | `benchmark/freeze_datasets.py` | 廃止。`benchmark/regenerate_all.py`（薄い「全手法再生成」スクリプト）に置換（項目4） |
@@ -342,10 +343,15 @@ def run_fixture_cli(
    `ruff check .`／`ruff format --check .` パス、`ols.json`・凍結 synthetic CSV を
    再生成し `_meta.generated_at` 除外でコミット済みと完全一致。
    **ノートからの差分（実施時の判断）**:
-   - `_common.py` の細分化（`datasets_io.py` / `dgp.py` 等への分割）は**後回し**。
-     `helpers.py` 単一モジュール + `__init__.py` re-export とし、後続ステップで各
-     ヘルパーの行き先が固まってから分割（利用側 import は `from benchmark.common
-     import X` のままなので影響なし）。ユーザー確認済み。
+   - `_common.py` の細分化は Step 1 では後回しにし、**別コミットで実施済み
+     （2026-08-29）**: `benchmark/common/helpers.py` を `datasets_io.py`（`DATA_DIR` /
+     `load_frozen_dataset` / `freeze_scenarios` / `run_freeze_cli`）・`dgp.py`
+     （`imbalanced_cluster_groups` / `linear_predictor` / `correlated_design_matrix` /
+     `apply_perfect_multicollinearity` / `hac_auto_lag` / `validate_choice` /
+     `preview_dataset`）・`reference/extract.py`（`extract_coef_se`）へ分割し
+     `helpers.py` を削除。`__init__.py` の re-export で利用側 import は無変更。
+     `dgp_constants.py` は `dgp.py` へ統合せず据え置き。検証は Step 1 と同じ
+     （`pytest` 957件・`ruff`・`ols.json`/凍結CSV の不変性）。
    - `_common.R` は `benchmark/_common.R` に**据え置き**。`.R` 側の `source(".../_common.R")`
      と一体で動かす方が安全なため、ステップ3（`.R` を `references/` へ移す回）で
      一緒に移動する。

@@ -1,6 +1,6 @@
 name: Benchmark (OLS performance)
 
-# benchmark/performance/compare_performance.py（OLSのstatsmodels/pyfixestとの
+# performance/compare_performance.py（OLSのstatsmodels/pyfixestとの
 # 実行時間・メモリ比較）を統一環境で実行し、結果をjob summaryに出力する。
 #
 # トリガーはタグpush（v*）+ workflow_dispatchのみ（ユーザー確認済み）。n=1,000,000込みの
@@ -14,11 +14,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # compare_performance.pyは`benchmark/performance/`をcwdにスクリプト実行され、
-  # `import benchmark.linear...`（DGP）・`benchmark.common`（hac_auto_lag）を解決する
-  # 必要がある。自身をサブプロセス再実行（_run_isolated）する分も含めリポジトリ
-  # ルートをPYTHONPATHに載せる（Initiative A、`benchmark/`パッケージ化に伴う）。
-  PYTHONPATH: ${{ github.workspace }}
 
 permissions:
   contents: read
@@ -48,19 +43,19 @@ jobs:
       - name: maturin develop --release
         run: uv run --locked --group test --group benchmark --group dev maturin develop --release
 
+      # リポジトリルートから `-m` で実行する（Initiative A のパッケージ化に伴い、
+      # `benchmark.*`（DGP）・`performance.*` を PYTHONPATH 非依存で解決するため）。
       - name: compare_performance.py
-        working-directory: benchmark/performance
         run: |
           uv run --locked --group test --group benchmark --group dev \
-            python compare_performance.py --repeats 3 --output results.json
+            python -m performance.compare_performance --repeats 3 --output results.json
 
       - name: render job summary
-        working-directory: benchmark/performance
         run: |
           uv run --locked --group test --group benchmark --group dev \
-            python render_performance_summary.py results.json >> "$GITHUB_STEP_SUMMARY"
+            python -m performance.render_performance_summary results.json >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ols-performance-results
-          path: benchmark/performance/results.json
+          path: results.json

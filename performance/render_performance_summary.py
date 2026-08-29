@@ -4,9 +4,9 @@ GitHub ActionsのJob Summary（`$GITHUB_STEP_SUMMARY`）向け。
 `compare_performance.py`自体はJSON出力に専念し、表示形式への整形は
 責務を分けてこちらに置く。
 
-使用例:
-    python compare_performance.py --repeats 3 --output results.json
-    python render_performance_summary.py results.json \
+使用例（リポジトリルートから）:
+    python -m performance.compare_performance --repeats 3 --output results.json
+    python -m performance.render_performance_summary results.json \
         >> "$GITHUB_STEP_SUMMARY"
 """
 

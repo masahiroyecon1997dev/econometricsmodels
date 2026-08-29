@@ -3,7 +3,7 @@
 - `DATA_DIR`: 固定済み合成データセットCSVの置き場所。
 - `load_frozen_dataset`: `{prefix}_{scenario}.csv`＋`{prefix}_true_beta.json`を読む。
 - `freeze_scenarios`: シナリオでループしてCSV＋true_beta辞書を積み上げる。
-- `run_freeze_cli`: `freeze_datasets.py`／`freeze_<系統>_datasets.py`共通の`__main__`。
+- `run_freeze_cli`: 各系統の `benchmark/<系統>/freeze.py` 共通の `__main__`。
 
 旧 `benchmark/_common.py`（→ `benchmark/common/helpers.py`）から Initiative A で
 関心事ごとに分割した（`docs/planning/specs/benchmark-restructure-design.md` 4章）。

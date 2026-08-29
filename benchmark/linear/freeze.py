@@ -1,6 +1,6 @@
 """linear系統（OLS/WLS）の合成データセットをCSVとして固定（凍結）する。
 
-`benchmark/freeze_datasets.py`（系統横断のディスパッチャ）から呼ばれる。
+`benchmark/regenerate_all.py`（合成データ＋全フィクスチャの一括再生成）から呼ばれる。
 単体でも実行できる。
 
 使用例（リポジトリルートから）:

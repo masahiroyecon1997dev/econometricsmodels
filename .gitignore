@@ -25,10 +25,13 @@ python_package/econometricsmodels/*.pyd
 # （別issue）でビルドして公開する想定で、リポジトリにはコミットしない。
 /site/
 
-# benchmark/compare_performance.py等が生成する生のベンチマーク結果JSON（実行環境依存で
+# performance/compare_performance.py等が生成する生のベンチマーク結果JSON（実行環境依存で
 # 再現性が低く、サマリーはdocs/spec/配下のMarkdownに記録するためコミット不要。
 # Issue #28参照）。命名規則: 生成物は先頭アンダースコア（例: _ols_performance_results.json）。
 docs/spec/_*.json
+# benchmark_ols.ymlがリポジトリルートに書き出す一時結果（CIではartifactにアップロード
+# するのみ、ローカルで走らせた場合の取り込み事故防止）。
+/results.json
 
 # Claude Codeの個人ローカル設定（settings.jsonはコミット対象、settings.local.jsonは個人用）
 .claude/settings.local.json

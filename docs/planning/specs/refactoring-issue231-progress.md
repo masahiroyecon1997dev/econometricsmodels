@@ -492,13 +492,35 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
     （R 実行含む）を再生成し3本とも完全一致（`generated_at`／version 除外）。
     `pytest` 957件・`ruff` パス。`/code-review`（fork）指摘ゼロ。
     **これで4系統（OLS/WLS・Logit/Probit・2SLS/GMM）の手法移行が完了**。
-  - 次: Step 8（後片付け）。`benchmark/performance/` をトップレベルへ `git mv`、
-    `benchmark/freeze_datasets.py` → `regenerate_all.py`（役割の実態に合わせる）、
-    `.github/workflows/benchmark_ols.yml` の親プロセス起動を `python -m ...`＋
-    `working-directory` 撤去へ、旧 `PYTHONPATH` env の掃除。
-    その後 Step 9（`_meta` 文字列の一括棚卸し＋意図的な再凍結、CLAUDE.md §3/§10・
-    ネスト CLAUDE.md・`.claude/skills/reference-benchmark/SKILL.md`・`docs/spec/*` の
-    パス参照更新）。
+  - **Step 8 完了（2026-08-29）— 後片付け**:
+    - `benchmark/performance/` → トップレベル `performance/` へ `git mv`（設計ノート D5。
+      `benchmark/` の外の兄弟ディレクトリ）。`compare_performance.py` の
+      `THIS_FILE.parents[2]`→`parents[1]`、自己再実行の `-m benchmark.performance...`
+      →`-m performance...`。docstring の使用例を `python -m performance.<...>` へ。
+    - `.github/workflows/benchmark_ols.yml`: `working-directory: benchmark/performance`
+      を撤去し、`python compare_performance.py` → `python -m performance.compare_performance`
+      （render も同様）。step 1 で入れた `PYTHONPATH` env の stopgap を削除
+      （`-m` 実行でリポジトリルートが sys.path に載るため不要）。artifact path・
+      ヘッダコメントも追随。`.gitignore` に `/results.json`（ローカル実行時の取り込み事故防止）。
+    - **`benchmark/freeze_datasets.py` → `benchmark/regenerate_all.py`（実体化）**:
+      ユーザー判断で「薄いディスパッチャ」ではなく「合成CSV＋全フィクスチャJSONを
+      一括再生成」するオーケストレータに。`regenerate_datasets()`（3系統 `freeze()`）＋
+      `regenerate_fixtures()`（11 `generate_*_fixtures.py` を `python -m` サブプロセスで
+      順に実行、各自の既定出力先に書く＝パスの二重管理なし、crosscheck 5本は Rscript
+      必須で無ければそのステップのみ FAILED 継続）。`--datasets-only` / `--fixtures-only`。
+    - doc パス修正: `benchmark/README.md`（`performance/` 分離・`regenerate_all` の使い方・
+      新ディレクトリ構成）、`docs/spec/ols-performance-notes.md`（`cd benchmark/performance`
+      → `python -m performance...`）、`docs/spec/ci-cd-notes.md`、`benchmark/<系統>/freeze.py`
+      と `benchmark/common/datasets_io.py` の該当 docstring。
+    - **検証**: `python -m performance.compare_performance --help` smoke、
+      `python -m benchmark.regenerate_all --datasets-only` で凍結CSV完全一致、
+      `python -m benchmark.regenerate_all`（Rあり）で 11 JSON 全て `[ok]`・コミット済みと
+      `_meta` 先行ドリフト以外は完全一致。`pytest` 957件・`ruff` パス。
+    - 残る `freeze_datasets.py` / `benchmark.performance` の prose 参照（約20箇所、
+      `generate_*` docstring・`tests/test_*` docstring・SKILL.md 等）は Step 9 の一括更新へ。
+  - 次: Step 9（`_meta` 文字列の一括棚卸し＋意図的な再凍結、CLAUDE.md §3/§10・
+    ネスト CLAUDE.md・`.claude/skills/reference-benchmark/SKILL.md`・`docs/spec/*`・
+    `tests/test_*` docstring のパス参照一括更新）。
 
 ---
 

@@ -39,12 +39,14 @@ CLAUDE.md 1章「計算コアはRustで実装し高速化」の狙いを定量�
   内部で使うBLASのマルチスレッド化とfaerのスレッド数設定が異なりうる）。
   観測された差にはこの要因も混ざりうる。
 
-使用例:
+使用例（リポジトリルートから）:
     # 一括実行（n軸・k軸両方、結果をJSONに保存）
-    python compare_performance.py --output ../../docs/spec/_ols_performance_results.json
+    python -m performance.compare_performance \\
+        --output docs/spec/_ols_performance_results.json
 
     # 単体計測（デバッグ用）
-    python compare_performance.py --worker --library engine --cov-type hac --n 1000 --k 5
+    python -m performance.compare_performance \\
+        --worker --library engine --cov-type hac --n 1000 --k 5
 """
 
 from __future__ import annotations
@@ -217,16 +219,16 @@ def _run_isolated(
     library: str, cov_type: str, n: int, k: int, seed: int, repeats: int
 ) -> dict:
     """1計測点をサブプロセスで実行する（プロセスRSS隔離のため、モジュール docstring参照）。"""
-    # ワーカーは `-m` でリポジトリルートを cwd にして起動する。`benchmark/` が
-    # パッケージ化されたため（Initiative A）、ファイルパス直接起動だと
-    # `import benchmark.*` が解決できない。cwd=リポジトリルートなら `-m` が
+    # ワーカーは `-m` でリポジトリルートを cwd にして起動する。DGP 等を
+    # `import benchmark.*` で解決するため（Initiative A でパッケージ化）、
+    # ファイルパス直接起動だと解決できない。cwd=リポジトリルートなら `-m` が
     # ルートを sys.path に載せるため PYTHONPATH に依存しない。
-    repo_root = THIS_FILE.parents[2]
+    repo_root = THIS_FILE.parents[1]
     proc = subprocess.run(
         [
             sys.executable,
             "-m",
-            "benchmark.performance.compare_performance",
+            "performance.compare_performance",
             "--worker",
             "--library",
             library,

@@ -1,9 +1,14 @@
 # benchmark/
 
 `tests/fixtures/benchmarks/`に固定するベンチマーク値（統計量の期待値）を、
-リファレンス実装（statsmodels・R・pyfixest）を使って生成するための開発用ツール群です。
+リファレンス実装（statsmodels・R）を使って生成するための開発用ツール群です。
 `tests/`とはライフサイクルが異なる（Rランタイムに依存し、随時手動実行するツールである）
 ため、`tests/`とは分離しています。
+
+**性能比較ツール（旧 `benchmark/performance/`）はリポジトリ直下の
+[`performance/`](../performance/) に分離しました**（pyfixest 依存・
+`benchmark_ols.yml` 専用で、正確性検証用の本ディレクトリとは性質が違うため。
+`docs/planning/specs/benchmark-restructure-design.md` D5）。
 
 ディレクトリ構成・各スクリプトの役割分担・リファレンス実装の使い分けの詳細は
 [`.claude/skills/reference-benchmark/SKILL.md`](../.claude/skills/reference-benchmark/SKILL.md)
@@ -16,13 +21,15 @@
 `python foo.py` とは実行できません）。
 
 ```
-python -m benchmark.linear.freeze_linear_datasets
-python -m benchmark.linear.fixtures.generate_ols_fixtures        # --output 既定はリポジトリ相対
-python -m benchmark.freeze_datasets                              # 全系統まとめて凍結
+python -m benchmark.linear.freeze                     # linear系のCSVのみ凍結
+python -m benchmark.linear.fixtures.generate_ols_fixtures
+python -m benchmark.regenerate_all                    # 全系統CSV + 全JSONフィクスチャ
+python -m benchmark.regenerate_all --datasets-only    # 全系統CSVのみ（Rscript不要）
 ```
 
-系統をまたぐ共通ヘルパーは `benchmark/common/`（旧 `benchmark/_common.py` /
-`_dgp_constants.py` / `load_wooldridge.py`）に集約。再設計の全体像は
+各系統は `datasets.py`（DGP）／`freeze.py`（CSV凍結）／`references/`（リファレンス
+実装アダプタ・`.R`）／`fixtures/`（`generate_*_fixtures.py`）で構成。系統をまたぐ
+共通ヘルパーは `benchmark/common/` に集約。再設計の全体像は
 [`docs/planning/specs/benchmark-restructure-design.md`](../docs/planning/specs/benchmark-restructure-design.md)。
 
 ## ライセンスに関する注記

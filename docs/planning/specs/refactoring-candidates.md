@@ -708,36 +708,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-22、`render_performance_summary.py`解説後のユーザー指摘。
 - **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
 
-### 42. `tests/_assertions.py`のモジュールdocstringが現状と食い違っている（Logit/Probit crosscheckだけ未追従）
-
-- **対象**: [tests/_assertions.py:9-12](../../../tests/_assertions.py#L9-L12)（docstring）と
-  [tests/test_ols_crosscheck.py:63,108-109](../../../tests/test_ols_crosscheck.py#L63)・
-  [tests/test_wls_crosscheck.py:48](../../../tests/test_wls_crosscheck.py#L48)・
-  [tests/test_iv_crosscheck.py:68](../../../tests/test_iv_crosscheck.py#L68)
-  （いずれも`from _assertions import assert_close, assert_dict_close`）、
-  対して[tests/test_logit_crosscheck.py:91-119](../../../tests/test_logit_crosscheck.py#L91-L119)・
-  [tests/test_probit_crosscheck.py:105-119](../../../tests/test_probit_crosscheck.py#L105-L119)
-  （`_assertions`をimportせず`_assert_close`/`_assert_dict_close`を独自に再定義）
-- **内容**: `_assertions.py`のdocstringは「crosscheck系（`test_*_crosscheck.py`）は
-  許容誤差の計算式・シグネチャがファイルごとに異なるため、このモジュールには
-  含めず各ファイル側に残す」と説明しているが、実際には`grep`で確認した限り
-  OLS/WLS/IVのcrosscheckファイルは`functools.partial`で許容誤差を束縛する形
-  （`_assert_close = partial(assert_dict_close, rtol=RTOL_STRICT, atol=ATOL)`）
-  で`_assertions.py`の基本関数を再利用しており、Logit/Probitのcrosscheckだけが
-  独立実装のまま取り残されている。`docs/planning/specs/refactoring-issue231-progress.md`
-  によれば、この不一致（許容誤差計算式の違い）は「フェーズ3.5で別途調査・修正
-  予定」とされていたが、その後OLS/WLS/IV側は解消されたにもかかわらず
-  docstringの記述が更新されておらず、かつLogit/Probit側は追従していない
-  非対称な状態になっている。
-- **Claudeの所感**: docstringの記述更新自体は軽微だが、Logit/Probit crosscheckを
-  OLS/WLS/IVと同じ`partial`パターンに揃える作業（もし許容誤差の計算式自体が
-  今もLogit/Probitだけ異なるなら、それ自体を先に確認する必要がある）が
-  伴う可能性があり、単なるdocstring修正では済まないかもしれない。
-- **気づいた経緯**: 2026-08-22、`tests/_assertions.py`解説中に呼び出し元を
-  `grep`で確認して発見。
-- **状態**: 未対応（Logit/Probit側の許容誤差計算式が本当に他と異なるかの
-  確認から着手要否はユーザー判断待ち）
-
 ### 43. `tests/`が21ファイル（手法別3〜4×6手法＋共通4ファイル）フラット構造のまま、手法別ディレクトリ分割の要否
 
 - **対象**: `tests/`直下（`conftest.py`・`_assertions.py`・`_helpers.py`・

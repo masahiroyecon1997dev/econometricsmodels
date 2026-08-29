@@ -2,14 +2,14 @@
 
 複数のテストファイルに重複していた以下を集約する。
 
-- `with_cluster_groups`: 「行番号%N」の疑似クラスターラベル付与（22箇所で重複）。
+- `with_cluster_groups`: 「行番号%N」の疑似クラスターラベル付与。
   `benchmark/_common.py`の`imbalanced_cluster_groups`（不均衡クラスタ版）とは
   役割が近いが、これは均等サイズ版でテスト専用のロジックのため、`benchmark/`とは
   ライフサイクルが異なる`tests/`側に置く（`.claude/rules/testing-policy.md`
   「テストの分離」参照。ユーザー確認済み）。
 - `separation_suspected_dataset`: 準完全分離データのDGP（`test_logit.py`/
   `test_probit.py`で完全に同一実装だった）。
-- `MROZ_X`: Wooldridge mrozデータセットの説明変数リスト（4ファイルで重複）。
+- `MROZ_X`: Wooldridge mrozデータセットの説明変数リスト。
 - `load_wooldridge_dataset`: Wooldridgeデータセットのロード（`wooldridge`
   パッケージが無い環境ではskip）。`benchmark/load_wooldridge.py`の`load`を
   呼ぶだけの`wooldridge.data(name)`→`pl.from_pandas`実装が、複数ファイルに
@@ -17,7 +17,7 @@
 - `DATA_DIR`: 固定済み合成データセットCSV（`tests/fixtures/benchmarks/data/`）の
   置き場所。全テストファイルが`tests/`直下にあるため値は常に同じで、
   `Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"`という
-  同一の組み立て方が11ファイルに重複していた。
+  同一の組み立て方が複数ファイルに重複していた。
 """
 
 from __future__ import annotations

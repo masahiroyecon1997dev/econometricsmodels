@@ -6,10 +6,13 @@
 バイト単位同一だった`_assert_close`/`_assert_dict_close`/`_rename`と、
 Logit/Probitの`_check_margeff`（fixtures版）を集約する。
 
-crosscheck系（`test_*_crosscheck.py`）は許容誤差の計算式・シグネチャがファイルごとに
-異なり（一部は他と異なる計算式を使っている、フェーズ3.5で別途調査・修正予定）、
-`_check_result`は手法ごとに検証するフィールド自体が異なるため、このモジュールには含めず
-各ファイル側に残す。
+crosscheck系（`test_*_crosscheck.py`）は`test_ols_crosscheck.py`/
+`test_wls_crosscheck.py`/`test_iv_crosscheck.py`がこのモジュールの
+`assert_close`/`assert_dict_close`を`functools.partial`で許容誤差を束縛して
+再利用している。`test_logit_crosscheck.py`/`test_probit_crosscheck.py`のみ、
+シグネチャ（`assert_dict_close`が`rtol`引数を取らない等）の違いから独自実装の
+ままになっている。`_check_result`は手法ごとに検証するフィールド自体が異なるため、
+いずれもこのモジュールには含めない。
 """
 
 from __future__ import annotations

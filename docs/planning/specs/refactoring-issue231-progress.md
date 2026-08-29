@@ -81,19 +81,40 @@
 - 上記5項目は`refactoring-candidates.md`本体からは削除済み（2026-08-22運用ルール、
   同ファイル冒頭「完了項目の扱い」参照）。このスナップショットが唯一の記録。
 - 項目47（`refactoring-candidates-2.md`、`tests/_helpers.py`の`wooldridge_loader`が
-  `conftest.py`と同一パスへ`sys.path.insert`を重複実行していた）: 対応済み・未コミット
-  （本セッションで実装、コミット前確認待ち）。`wooldridge_loader`から
-  `sys.path.insert`呼び出しを削除（未使用になった`import sys`も削除）。
+  `conftest.py`と同一パスへ`sys.path.insert`を重複実行していた）: 対応済み・
+  コミット済み（`835da85`）。`wooldridge_loader`から`sys.path.insert`呼び出しを
+  削除（未使用になった`import sys`も削除）。`refactoring-candidates-2.md`本体からも
+  同ポリシーで削除済み。
+  **注**: 同ファイルの項目50（別セッションが追記、`1c70f63`までの間に
+  コミット済み）が「影響範囲」として`tests/_helpers.py:90`・「項目47で指摘済みの
+  重複分」に言及しているが、本対応で該当コードが削除されたためこの1点の記述が
+  古くなっている（2026-08-23時点でも未修正）。項目50自体の本題（CI環境
+  `ci_python.yml`にPYTHONPATHが伝播しておらず`tests/`側の`sys.path.insert`が
+  今も必要という指摘）には影響しない。項目50を書いたセッション側の判断で
+  追って更新される想定のため、こちらからは修正しない。
+- 項目42（`tests/_assertions.py`のdocstringが現状と食い違っていた、
+  「crosscheck系は計算式・シグネチャが異なるため対象外」という説明が
+  OLS/WLS/IV crosscheckには既に当てはまらなくなっていた）・項目48
+  （同docstringの「フェーズ3.5で修正予定」という古い記述、`tests/_helpers.py`の
+  「22箇所で重複」等の陳腐化した件数）: いずれも対応済み・コミット待ち
+  （本セッションで実装、コミット前確認待ち）。`grep`で実際の呼び出し元を
+  確認した結果、`test_ols_crosscheck.py`/`test_wls_crosscheck.py`/
+  `test_iv_crosscheck.py`は`functools.partial`で`_assertions.py`の
+  `assert_close`/`assert_dict_close`を再利用している一方、
+  `test_logit_crosscheck.py`/`test_probit_crosscheck.py`は`_assert_dict_close`が
+  `rtol`引数を取らない点でシグネチャが異なるだけで独立実装のまま
+  （計算式自体は`tol = max(rtol*|ref|, atol)`で既に同一）と判明。この事実に
+  合わせて`tests/_assertions.py`のdocstringを書き換え、`tests/_helpers.py`の
+  陳腐化した件数言及も削除した。`refactoring-candidates.md`から項目42、
+  `refactoring-candidates-2.md`から項目48を削除済み。**副次的な気づき**:
+  Logit/Probit crosscheckを`_assertions.py`の`partial`パターンへ統合する
+  コード変更自体（計算式は既に一致しているため統合の障害は無い見込み）は
+  未実施。着手する場合は新規候補として別途起票する。
   `pytest tests`956件全件パス、`ruff check`／`ruff format --check`パス確認済み。
-  `refactoring-candidates-2.md`本体からも同ポリシーで削除済み。
-  **注**: 同ファイルの項目50（別セッションが追記、未コミット）が「影響範囲」として
-  `tests/_helpers.py:90`・「項目47で指摘済みの重複分」に言及しているが、本対応で
-  該当コードが削除されたためこの1点の記述が古くなっている。項目50自体の本題
-  （CI環境`ci_python.yml`にPYTHONPATHが伝播しておらず`tests/`側の
-  `sys.path.insert`が今も必要という指摘）には影響しない。項目50を書いた
-  セッション側の判断で追って更新される想定のため、こちらからは修正しない。
-- 上記以外（項目1・2・5〜35・37〜43、および`refactoring-candidates-2.md`項目44〜46・
-  48〜50）は未着手。
+- 上記以外（`refactoring-candidates.md`項目1・2・5〜35・37・39〜41・43）は未着手。
+  `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は
+  未着手。項目50以降は別セッションが並行して追記・コミットしているため、
+  このスナップショットでは網羅しない（同ファイルを直接参照すること）。
 
 **並行作業についての注意**: 本セッションと並行して、別セッションが
 `refactoring-candidates.md`を対象にした別の作業（コード解説中の気づき記録等）を

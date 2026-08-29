@@ -67,7 +67,7 @@ test = [
 benchmark = [
     # polars.DataFrame.to_pandas()が内部で要求する（run_*_benchmark.py各スクリプトが
     # pandasに変換してリファレンス実装に渡すため）。pandas側は直接依存に含めない。
-    "pyarrow==25.0.0",
+    "pyarrow==25.0.1",
     "pyfixest==0.60.0",
     "wooldridge==0.5.0",
 ]

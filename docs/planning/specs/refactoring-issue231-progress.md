@@ -112,7 +112,7 @@
   未実施。着手する場合は新規候補として別途起票する。
   `pytest tests`956件全件パス、`ruff check`／`ruff format --check`パス確認済み。
 - 項目1（`benchmark/load_wooldridge.py`の`SUGGESTED_DATASETS`が未使用）:
-  対応済み・コミット待ち（本セッションで実装、コミット前確認待ち）。
+  対応済み・コミット済み（`c0b78bf`）。
   削除する方針で確定（ユーザー判断。呼び出し側の形〔手法カテゴリ→リスト〕が
   実際の利用ニーズ〔個別データセット名〕と合わず、Wooldridgeデータセット名は
   外部パッケージ側の固定識別子で一元化の恩恵が薄いという判断）。削除に伴い、
@@ -132,7 +132,19 @@
   - `refactoring-candidates.md`から項目1を削除済み。
   `pytest tests`956件全件パス、`ruff check`／`ruff format --check`パス確認済み、
   `python benchmark/load_wooldridge.py wage1`で動作確認済み。
-- 上記以外（`refactoring-candidates.md`項目2・5〜35・37・39〜41・43）は未着手。
+- 項目2（`generate_linear_datasets.py`の`k`下限チェックが4箇所で同型パターン重複）:
+  対応済み・コミット待ち（本セッションで実装、コミット前確認待ち）。
+  `_require_min_k(scenario, k, minimum)`ヘルパーを新設し、
+  `moderate_multicollinearity`/`high_condition_number`（k>=2）・
+  `perfect_multicollinearity`（k>=3）・`scale_variance`（k>=2）・
+  `scale_variance_mild`（k>=2）の4箇所を置き換えた（ファイル内ローカルの
+  重複のため`_common.py`等への切り出しはせず、同一ファイル内のプライベート
+  関数とした）。エラーメッセージの文言は変更前と完全に一致することを実測
+  確認済み。`freeze_linear_datasets.py`の出力（synthetic系10シナリオ）が
+  変更前後で完全一致することも確認済み。`refactoring-candidates.md`から
+  項目2を削除済み。`pytest tests`956件全件パス、`ruff check`／
+  `ruff format --check`パス確認済み。
+- 上記以外（`refactoring-candidates.md`項目5〜35・37・39〜41・43）は未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は
   未着手。項目50以降は別セッションが並行して追記・コミットしているため、
   このスナップショットでは網羅しない（同ファイルを直接参照すること）。

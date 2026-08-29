@@ -33,19 +33,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ## 一覧
 
-### 2. `generate_linear_datasets.py`の`k`下限チェックが4箇所で同型パターン重複
-
-- **対象**: [benchmark/linear/generate_linear_datasets.py:76-114](../../../benchmark/linear/generate_linear_datasets.py#L76-L114)
-- **内容**: `moderate_multicollinearity`/`high_condition_number`（k>=2）・
-  `perfect_multicollinearity`（k>=3）・`scale_variance`（k>=2）・
-  `scale_variance_mild`（k>=2）の4箇所で、いずれも
-  `if k < N: raise ValueError(f"{scenario} requires k >= N")`という
-  同型の2行パターンを繰り返している。`_require_min_k(scenario, k, minimum)`
-  のような小さなヘルパーに切り出せる余地はあるが、規模が小さく
-  優先度は低い（nice to have）と判断。
-- **気づいた経緯**: 2026-08-15、`generate_linear_datasets.py`のコード解説中に発見。
-- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
-
 ### 5. `unknown scenario`検証（`ValueError`）が3系統の`generate_*_dataset`関数で完全重複
 
 - **対象**: [benchmark/linear/generate_linear_datasets.py:62-65](../../../benchmark/linear/generate_linear_datasets.py#L62-L65)・

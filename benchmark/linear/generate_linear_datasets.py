@@ -43,6 +43,12 @@ SCENARIOS = [
 ]
 
 
+def _require_min_k(scenario: str, k: int, minimum: int) -> None:
+    """シナリオが要求する`k`（説明変数の数）の下限を満たさなければ`ValueError`。"""
+    if k < minimum:
+        raise ValueError(f"{scenario} requires k >= {minimum}")
+
+
 def generate_linear_dataset(
     scenario: str,
     n: int = 500,
@@ -83,8 +89,7 @@ def generate_linear_dataset(
 
     # --- 説明変数 ---
     if scenario in ("moderate_multicollinearity", "high_condition_number"):
-        if k < 2:
-            raise ValueError(f"{scenario} requires k >= 2")
+        _require_min_k(scenario, k, 2)
         # x1とx2の相関: moderate=0.8程度、high_condition_number=0.999
         # （特異ではないが条件数が非常に大きい設計行列）
         rho = 0.999 if scenario == "high_condition_number" else 0.8
@@ -95,15 +100,13 @@ def generate_linear_dataset(
         X = rng.normal(loc=0.0, scale=1.0, size=(n, k))
 
     if scenario == "perfect_multicollinearity":
-        if k < 3:
-            raise ValueError("perfect_multicollinearity requires k >= 3")
+        _require_min_k(scenario, k, 3)
         X[:, 2] = (
             2 * X[:, 0] + 3 * X[:, 1]
         )  # x3 = 2*x1 + 3*x2（完全な線形従属）
 
     if scenario == "scale_variance":
-        if k < 2:
-            raise ValueError("scale_variance requires k >= 2")
+        _require_min_k(scenario, k, 2)
         # 変数間のスケールが極端に異なるケース（x1は10^6オーダー、
         # x2は10^-3オーダー）。傾き係数の同時共分散部分行列の条件数が
         # 倍精度の限界を超え、全cov_typeで数値的に特異になる
@@ -112,8 +115,7 @@ def generate_linear_dataset(
         X[:, 1] *= SCALE_VARIANCE_X2_SCALE
 
     if scenario == "scale_variance_mild":
-        if k < 2:
-            raise ValueError("scale_variance_mild requires k >= 2")
+        _require_min_k(scenario, k, 2)
         # scale_varianceより緩いスケール差（x1は10^2オーダー、x2は10^-1
         # オーダー、スケール比1e3程度）。条件数は倍精度の限界より十分低く
         # 成功パスになるため、faer等の数値計算ライブラリ依存部分の将来の

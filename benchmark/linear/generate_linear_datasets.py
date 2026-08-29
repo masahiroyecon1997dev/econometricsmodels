@@ -21,6 +21,7 @@ import sys
 
 import numpy as np
 import polars as pl
+from _common import validate_choice
 from _dgp_constants import (
     AUTOCORRELATED_RHO,
     HETEROSKEDASTIC_SIGMA_BASE,
@@ -74,10 +75,7 @@ def generate_linear_dataset(
     Raises:
         ValueError: 未知のscenario、またはk不足の場合。
     """
-    if scenario not in SCENARIOS:
-        raise ValueError(
-            f"unknown scenario: {scenario!r}. choose from {SCENARIOS}"
-        )
+    validate_choice(scenario, SCENARIOS, "scenario")
 
     rng = np.random.default_rng(seed)
 

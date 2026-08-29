@@ -39,6 +39,7 @@ import sys
 
 import numpy as np
 import polars as pl
+from _common import validate_choice
 from _dgp_constants import (
     AUTOCORRELATED_RHO,
     HETEROSKEDASTIC_SIGMA_BASE,
@@ -117,10 +118,7 @@ def generate_iv_dataset(
         ValueError: 未知のscenario、k不足、または識別条件（k_instruments>=k_endog）
             を満たさない場合。
     """
-    if scenario not in SCENARIOS:
-        raise ValueError(
-            f"unknown scenario: {scenario!r}. choose from {SCENARIOS}"
-        )
+    validate_choice(scenario, SCENARIOS, "scenario")
 
     if scenario == "just_identified":
         k_instruments = k_endog

@@ -33,24 +33,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ## 一覧
 
-### 5. `unknown scenario`検証（`ValueError`）が3系統の`generate_*_dataset`関数で完全重複
-
-- **対象**: [benchmark/linear/generate_linear_datasets.py:62-65](../../../benchmark/linear/generate_linear_datasets.py#L62-L65)・
-  [benchmark/nonlinear/generate_nonlinear_datasets.py:106-109](../../../benchmark/nonlinear/generate_nonlinear_datasets.py#L106-L109)・
-  [benchmark/iv/generate_iv_datasets.py:106-109](../../../benchmark/iv/generate_iv_datasets.py#L106-L109)
-- **内容**: ユーザー指摘（2026-08-15）。`if scenario not in SCENARIOS: raise ValueError(f"unknown
-  scenario: {scenario!r}. choose from {SCENARIOS}")`という同型の検証が3ファイルで重複している
-  （`generate_*_datasets.py`の`SCENARIOS`リスト自体の重複＝項目4は
-  2026-08-22対応済み・コミット済み`d23d9b7`だが、こちらは検証ロジック自体の重複）。
-  nonlinear側にはさらに同型の`unknown link`検証（`generate_nonlinear_datasets.py:119-122`）が
-  同じ関数内にもう1つある。当初のコード解説時に見落としていた項目。
-- **Claudeの所感**: `_common.py`に`validate_scenario(scenario, valid_scenarios)`のような
-  小さなヘルパーを切り出せば3箇所（＋nonlinearのlink検証）を統合できる。ただし規模は小さく、
-  優先度は`nice to have`程度。
-- **気づいた経緯**: 2026-08-15、`generate_nonlinear_datasets.py`解説後のユーザー指摘で発覚
-  （当初の解説時は見落とし）。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
-
 ### 6. 線形予測子の組み立て方（`column_stack`版 vs `beta[0]+X@beta[1:]`版）の書き方の不統一
 
 - **対象**: [benchmark/linear/generate_linear_datasets.py:133](../../../benchmark/linear/generate_linear_datasets.py#L133)

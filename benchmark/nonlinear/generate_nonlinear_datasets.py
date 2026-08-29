@@ -57,6 +57,7 @@ import sys
 
 import numpy as np
 import polars as pl
+from _common import validate_choice
 from _dgp_constants import (
     SCALE_VARIANCE_X1_SCALE as _SCALE_VARIANCE_X1_SCALE,
 )
@@ -118,14 +119,8 @@ def generate_binary_choice_dataset(
     Raises:
         ValueError: 未知のscenario/link、またはk不足の場合。
     """
-    if scenario not in SCENARIOS:
-        raise ValueError(
-            f"unknown scenario: {scenario!r}. choose from {SCENARIOS}"
-        )
-    if link not in _LINK_CDF:
-        raise ValueError(
-            f"unknown link: {link!r}. choose from {list(_LINK_CDF)}"
-        )
+    validate_choice(scenario, SCENARIOS, "scenario")
+    validate_choice(link, list(_LINK_CDF), "link")
 
     rng = np.random.default_rng(seed)
 

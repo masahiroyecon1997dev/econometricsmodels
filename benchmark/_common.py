@@ -17,13 +17,16 @@ Issue #231（リファクタリング）で、複数の`benchmark/<系統>/`ス�
   freeze関数呼び出し・完了print）。
 - `preview_dataset`: `generate_<系統>_datasets.py`3ファイルで同型だった、単体実行時に
   シナリオ1件分をプレビュー表示する`__main__`ブロック。
+- `validate_choice`: `generate_<系統>_datasets.py`3ファイル（＋nonlinear側の
+  `link`検証）で重複していた「候補集合に含まれなければ`ValueError`」という
+  入力検証パターン。
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -82,6 +85,28 @@ def hac_auto_lag(n: int) -> int:
     自動ラグ選択式自体の実装差を比較対象から除外するために使う。
     """
     return int(4 * (n / 100) ** (2 / 9))
+
+
+def validate_choice(
+    value: str, valid_choices: Sequence[str], label: str
+) -> None:
+    """`value`が`valid_choices`に含まれなければ`ValueError`を送出する。
+
+    `generate_<系統>_datasets.py`の`scenario`/`link`引数の妥当性検証で使う。
+
+    Args:
+        value: 検証対象の値。
+        valid_choices: 許容される値の集合（エラーメッセージにそのまま表示される
+            ため、呼び出し側は表示したい形〔`list`等〕で渡す）。
+        label: エラーメッセージに使う値の種類名（例: `"scenario"`, `"link"`）。
+
+    Raises:
+        ValueError: `value`が`valid_choices`に含まれない場合。
+    """
+    if value not in valid_choices:
+        raise ValueError(
+            f"unknown {label}: {value!r}. choose from {valid_choices}"
+        )
 
 
 def load_frozen_dataset(

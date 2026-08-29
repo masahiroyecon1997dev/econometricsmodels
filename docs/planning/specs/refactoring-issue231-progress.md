@@ -133,7 +133,7 @@
   `pytest tests`956件全件パス、`ruff check`／`ruff format --check`パス確認済み、
   `python benchmark/load_wooldridge.py wage1`で動作確認済み。
 - 項目2（`generate_linear_datasets.py`の`k`下限チェックが4箇所で同型パターン重複）:
-  対応済み・コミット待ち（本セッションで実装、コミット前確認待ち）。
+  対応済み・コミット済み（`769eee8`）。
   `_require_min_k(scenario, k, minimum)`ヘルパーを新設し、
   `moderate_multicollinearity`/`high_condition_number`（k>=2）・
   `perfect_multicollinearity`（k>=3）・`scale_variance`（k>=2）・
@@ -144,7 +144,17 @@
   変更前後で完全一致することも確認済み。`refactoring-candidates.md`から
   項目2を削除済み。`pytest tests`956件全件パス、`ruff check`／
   `ruff format --check`パス確認済み。
-- 上記以外（`refactoring-candidates.md`項目5〜35・37・39〜41・43）は未着手。
+- 項目5（`unknown scenario`/`unknown link`検証の重複が3系統＋nonlinearの
+  link検証で計4箇所）: 対応済み・コミット待ち（本セッションで実装、
+  コミット前確認待ち）。`benchmark/_common.py`に`validate_choice(value,
+  valid_choices, label)`ヘルパーを新設し、linear/nonlinear/ivの
+  `generate_*_datasets.py`3ファイルの`scenario`検証、nonlinearの`link`検証を
+  置き換えた（計4箇所）。エラーメッセージが変更前と完全に一致することを
+  4パターンとも実測確認済み。`freeze_datasets.py`の出力（linear/nonlinear/iv
+  全系統）が変更前後で完全一致することも確認済み。`refactoring-candidates.md`
+  から項目5を削除済み。`pytest tests`956件全件パス、`ruff check`／
+  `ruff format --check`パス確認済み。
+- 上記以外（`refactoring-candidates.md`項目6〜35・37・39〜41・43）は未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は
   未着手。項目50以降は別セッションが並行して追記・コミットしているため、
   このスナップショットでは網羅しない（同ファイルを直接参照すること）。

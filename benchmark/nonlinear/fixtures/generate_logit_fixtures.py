@@ -1,33 +1,38 @@
 """Logitのテストフィクスチャ（tests/fixtures/benchmarks/logit.json）を
 生成するスクリプト。
 
-`benchmark/nonlinear/run_statsmodels_benchmark_nonlinear.py`（1回呼べば1ケース分の結果を返す
-汎用ツール）を全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つのJSONに
-まとめて書き出す。`benchmark/linear/fixtures/generate_ols_fixtures.py`と同型の設計。
+`benchmark/nonlinear/references/statsmodels_ref.py`（1回呼べば1ケース分の結果を
+返す汎用アダプタ）を全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つの
+JSONにまとめて書き出す。`benchmark/linear/fixtures/generate_ols_fixtures.py`と
+同型の設計。
 
 **`cov_type="hc1"`はここに含めない**（statsmodelsのdiscrete modelがn/(n-k)小標本補正を
-実装しておらずHC0と同一値になるバグ的な欠落があるため。`run_statsmodels_benchmark_nonlinear.py`の
+実装しておらずHC0と同一値になるバグ的な欠落があるため。`statsmodels_ref.py`の
 docstring参照）。`hc1`は`generate_logit_crosscheck_fixtures.py`（R側、正しく補正を
 適用する`sandwich::vcovHC`）が主リファレンスの役割を担う（ユーザー確認済み）。
 
 入力データは`tests/fixtures/benchmarks/data/`に固定済みのlogit_*.csvを読む
-（`benchmark/freeze_datasets.py`参照）。
+（`benchmark/nonlinear/freeze.py`参照）。
 
-使用例:
-    python generate_logit_fixtures.py --output ../../../tests/fixtures/benchmarks/logit.json
+使用例（リポジトリルートから）:
+    python -m benchmark.nonlinear.fixtures.generate_logit_fixtures
 """
 
 from __future__ import annotations
 
-import argparse
-import json
 from datetime import UTC, datetime
-from pathlib import Path
 
 import polars as pl
 import statsmodels
 
-from benchmark.common import DATA_DIR, imbalanced_cluster_groups
+from benchmark.common import (
+    BENCHMARKS_DIR,
+    DATA_DIR,
+    MROZ_FORMULA,
+    extract_coef_se,
+    imbalanced_cluster_groups,
+    run_fixture_cli,
+)
 from benchmark.nonlinear.references.statsmodels_ref import run
 
 # perfect_multicollinearityは数値比較の対象外（ComputationErrorの発生確認のみ、
@@ -54,10 +59,6 @@ COV_TYPES = ["classical", "opg", "hc0"]
 # baselineシナリオ・classical cov_typeの1ケースのみで十分（method自体の違いは
 # 収束後の最適化点の精度差であり、シナリオ×cov_typeを掛け合わせる必要はない）。
 METHODS = ["bfgs", "lbfgs"]
-
-MROZ_FORMULA = (
-    "inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6"
-)
 
 
 def build_fixtures() -> dict:
@@ -175,10 +176,7 @@ def _run_cluster_case(
     )
 
     return {
-        "coef": {
-            str(name): float(v) for name, v in model.params.to_dict().items()
-        },
-        "se": {str(name): float(v) for name, v in model.bse.to_dict().items()},
+        **extract_coef_se(model),
         "_meta": {
             "reference": "statsmodels",
             "statsmodels_version": statsmodels.__version__,
@@ -190,22 +188,6 @@ def _run_cluster_case(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output",
-        default=str(
-            Path(__file__).resolve().parents[3]
-            / "tests"
-            / "fixtures"
-            / "benchmarks"
-            / "logit.json"
-        ),
+    run_fixture_cli(
+        build_fixtures, BENCHMARKS_DIR / "logit.json", description=__doc__
     )
-    args = parser.parse_args()
-
-    fixtures = build_fixtures()
-
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(fixtures, indent=2, ensure_ascii=False))
-    print(f"wrote {output_path} ({len(json.dumps(fixtures))} bytes)")

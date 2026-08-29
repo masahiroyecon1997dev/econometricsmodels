@@ -433,14 +433,25 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
     （`run_statsmodels_benchmark.py`→`_nonlinear` リネーム時にソースのみ更新、JSON 未再凍結）。
     OLS/WLS の `_meta` パス文字列を移行中は据え置いた 3b の方針と同じく、
     ステップ9（`_meta` 文字列の棚卸し＋意図的な一括再凍結）で解消する。
-  - 次: Step 5b（Logit 配線）。`benchmark/linear/references/r.py` 相当の
-    `benchmark/nonlinear/references/r.py`（`run_glm_r`）を新設し、`normalize_names` の
-    `stat_key="z_stats"`／`conf_from_low_high=True`／`fix_margeff=True` を使う
-    （`run_glm_crosscheck.R` は全 cov_type で全キーを無条件出力するため guard 廃止は安全）。
+  - **Step 5b 完了（2026-08-29）— Logit 配線（ロジック不変・機械的置換のみ）**:
+    `benchmark/nonlinear/references/r.py`（`run_glm_r`＝Logit/Probit 共用の薄いラッパー、
+    `link` は arg4／`cluster_col` は cluster 時 arg5）を新設。`normalize_names` を
+    `stat_key="z_stats"`／`conf_from_low_high=True`／`fix_margeff=True` で呼ぶ
+    （`run_glm_crosscheck.R` は全 cov_type で `result <- list(...)` により全キーを
+    無条件出力するため、旧 `if key in raw` guard の廃止は安全＝項目39）。
     `generate_logit_fixtures.py`／`generate_logit_crosscheck_fixtures.py` の `__main__` を
-    `run_fixture_cli` に、ローカル `_run_r`／`_normalize_names` を `run_glm_r` に、
-    `coef`/`se` 内包表記を `extract_coef_se` に、ローカル `MROZ_FORMULA` を
-    `benchmark.common.MROZ_FORMULA`（3b 新設・未消費）に置換。Step 6 で Probit 配線。
+    `run_fixture_cli` に、後者のローカル `_run_r`／`_normalize_names` を `run_glm_r` に、
+    `coef`/`se` 内包表記を `extract_coef_se` に、両者のローカル `MROZ_FORMULA` を
+    `benchmark.common.MROZ_FORMULA`（3b 新設・初の消費者）に置換。docstring の
+    旧パス・使用例を新構造へ。`_write_csv`／`_run_cluster_case` はローカル据え置き
+    （OLS crosscheck と同じ、`cluster_cases.py` 集約は後続の独立ステップ）。
+    **不変性チェック**: `logit/logit_crosscheck.json`（R含む）を再生成し、Step 5a
+    スナップショットと完全一致（`generated_at`／version 除外）。コミット済みとの差は
+    5a と同じ `_meta` 先行ドリフトのみ（ステップ9で解消）。`pytest` 957件・`ruff` パス。
+  - 次: Step 6（Probit 配線）。`generate_probit_fixtures.py`／
+    `generate_probit_crosscheck_fixtures.py` を 5b と同じ機械的置換で新構造へ
+    （crosscheck は `run_glm_r(..., link="probit")`）。Probit も同じ `run_glm_crosscheck.R`
+    ／`statsmodels_ref.run(model="probit")` を使うため差分は最小の想定。
 
 ---
 

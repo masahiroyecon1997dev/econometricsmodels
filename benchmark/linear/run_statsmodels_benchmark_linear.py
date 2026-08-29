@@ -32,7 +32,7 @@ import json
 from datetime import UTC, datetime
 
 import polars as pl
-from _common import load_frozen_dataset
+from _common import extract_coef_se, load_frozen_dataset
 from load_wooldridge import load as _load_wooldridge
 
 
@@ -95,8 +95,7 @@ def run(
     ci = model.conf_int(alpha=alpha)
 
     result: dict = {
-        "coef": {str(k): float(v) for k, v in model.params.to_dict().items()},
-        "se": {str(k): float(v) for k, v in model.bse.to_dict().items()},
+        **extract_coef_se(model),
         "t_stats": {
             str(k): float(v) for k, v in model.tvalues.to_dict().items()
         },

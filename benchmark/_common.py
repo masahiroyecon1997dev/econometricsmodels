@@ -26,6 +26,9 @@ Issue #231（リファクタリング）で、複数の`benchmark/<系統>/`ス�
   multicollinearity系シナリオの説明変数行列生成（3系統で完全に同一ロジックだった
   部分のみ。`scale_variance`系はスケーリングのタイミングが系統ごとに意図的に
   異なるため対象外）。
+- `extract_coef_se`: statsmodelsのfit結果から`coef`/`se`のdictを取り出す
+  内包表記（`run_statsmodels_benchmark_linear.py`と`generate_ols_fixtures.py`で
+  同一のコードが重複していた）。
 """
 
 from __future__ import annotations
@@ -148,6 +151,27 @@ def hac_auto_lag(n: int) -> int:
     自動ラグ選択式自体の実装差を比較対象から除外するために使う。
     """
     return int(4 * (n / 100) ** (2 / 9))
+
+
+def extract_coef_se(model: Any) -> dict[str, dict[str, float]]:
+    """statsmodelsのfit結果から係数・標準誤差をプレーンなdictで取り出す。
+
+    `model.params`/`model.bse`（pandas Series）を`{パラメータ名: 値}`の
+    dictに変換する。フィクスチャ生成スクリプトの結果辞書組み立てで
+    `coef`/`se`の2キーとして`**`展開して使う。
+
+    Args:
+        model: statsmodelsのfit結果（`params`/`bse`属性を持つもの）。
+
+    Returns:
+        `{"coef": {名前: 係数}, "se": {名前: 標準誤差}}`。
+    """
+    return {
+        "coef": {
+            str(k): float(v) for k, v in model.params.to_dict().items()
+        },
+        "se": {str(k): float(v) for k, v in model.bse.to_dict().items()},
+    }
 
 
 def validate_choice(

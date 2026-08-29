@@ -25,7 +25,7 @@ from pathlib import Path
 
 import polars as pl
 import statsmodels
-from _common import DATA_DIR, imbalanced_cluster_groups
+from _common import DATA_DIR, extract_coef_se, imbalanced_cluster_groups
 from run_statsmodels_benchmark_linear import run
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md「テストの3系統」参照）。
@@ -144,10 +144,7 @@ def _run_cluster_case(
     )
 
     return {
-        "coef": {
-            str(name): float(v) for name, v in model.params.to_dict().items()
-        },
-        "se": {str(name): float(v) for name, v in model.bse.to_dict().items()},
+        **extract_coef_se(model),
         "_meta": {
             "reference": "statsmodels",
             "statsmodels_version": statsmodels.__version__,

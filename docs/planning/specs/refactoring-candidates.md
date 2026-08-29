@@ -33,34 +33,21 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ## 一覧
 
-### 11. `_run_cluster_case`（generate_ols_fixtures.py）が`run_statsmodels_benchmark_linear.py`の`coef`/`se`抽出ロジックと重複
-
-- **対象**: [benchmark/linear/fixtures/generate_ols_fixtures.py:154-158](../../../benchmark/linear/fixtures/generate_ols_fixtures.py#L154-L158)・
-  [benchmark/linear/run_statsmodels_benchmark_linear.py:98](../../../benchmark/linear/run_statsmodels_benchmark_linear.py#L98)
-  （項目14の対応でファイル名を`run_statsmodels_benchmark_linear.py`にリネーム
-  済み〔PYTHONPATH衝突バグ修正〕、行番号もリネーム後の実際の位置に更新済み）
-- **内容**: `_run_cluster_case`は、CSVに無い疑似グループ列`_group`を動的に追加する必要が
-  あるため`run()`を再利用できず、statsmodelsを独自に直接呼んでいる（正当な理由）。
-  ただし`{str(name): float(v) for name, v in model.params.to_dict().items()}`という
-  `coef`/`se`抽出の辞書内包表記は、`run()`内の同種のコードとほぼ同じパターンで重複している。
-- **Claudeの所感**: `_common.py`に`extract_coef_se(model) -> dict`のような小さな
-  ヘルパーを切り出せる余地はあるが、規模は小さく優先度は低い。項目12でより根本的な
-  代替案（`_run_cluster_case`自体の解消）を検討済み。
-- **気づいた経緯**: 2026-08-15、`generate_ols_fixtures.py`解説中に発見。
-- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
-
 ### 12. クラスター用の疑似グループ列をfreeze時にCSVへ焼き込み、`_run_cluster_case`を`run()`一律呼び出しに統合できないか
 
 - **対象**: [benchmark/linear/fixtures/generate_ols_fixtures.py:82-105,124-166](../../../benchmark/linear/fixtures/generate_ols_fixtures.py#L82-L166)・
   [benchmark/linear/freeze_linear_datasets.py](../../../benchmark/linear/freeze_linear_datasets.py)
 - **内容**: ユーザー提案（2026-08-15）。現状`_run_cluster_case`は、CSVに無い疑似グループ列
-  `_group`をpandas DataFrameに動的に追加してから独自にstatsmodelsを呼んでいる（項目11参照）。
+  `_group`をpandas DataFrameに動的に追加してから独自にstatsmodelsを呼んでいる
+  （`coef`/`se`抽出の辞書内包表記の重複は項目11で`_common.extract_coef_se`への
+  切り出し〔コミット待ち〕により解消済みだが、`_run_cluster_case`関数自体は残っている）。
   3パターンの疑似グループ（既定=行番号%10、不均衡=`imbalanced_cluster_groups(n)`、
   G=2境界=行番号%2）はいずれも`n`のみから決まる決定論的なラベルで`X`/`y`/`weight`の値に
   依存しないため、`freeze_linear_datasets.py`が凍結CSV書き出し時にこれらの列を
   あらかじめ焼き込んでおけば、`generate_ols_fixtures.py`のメインループ
   （`for cov_type in COV_TYPES: result = run(...)`）に`cluster_col`引数付きで
-  そのまま乗せられ、`_run_cluster_case`自体（および項目11のcoef/se抽出重複）を
+  そのまま乗せられ、`_run_cluster_case`自体（coef/se抽出は項目11で
+  `_common.extract_coef_se`に共通化済み、関数全体は未解消）を
   解消できる可能性がある。
 - **Claudeの所感**: 技術的には実現できそうだが、「`generate_linear_dataset()`自体に
   テスト用ラベル列を混在させるか、`freeze_linear_datasets.py`側で後付けするか」という
@@ -81,7 +68,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `run_statsmodels_benchmark_linear.py`の`run()`が構築する結果辞書（`coef`/`se`/`t_stats`/
   `p_values`/`conf_int`/`r_squared`等13キー）とほぼ同一のロジックを再実装している。
   いずれも`fsize==1`フィルタや`inv_inc`派生列・疑似グループ列といった`run()`が
-  対応しない前処理が必要なため`run()`をバイパスしている、項目11・12と同根の問題。
+  対応しない前処理が必要なため`run()`をバイパスしている、項目12と同根の問題。
 - **Claudeの所感**: 項目12の対応（`cluster_col`引数の拡張・列の事前焼き込み）に加えて、
   `run()`側に「読み込み後にDataFrameへ任意の前処理を挟めるフック」
   （例: `preprocess_fn: Callable[[pl.DataFrame], pl.DataFrame] | None`引数）を

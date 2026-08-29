@@ -240,8 +240,8 @@
   **この環境バグ自体は、ユーザー指示により本セッション内で直後に優先対応・
   修正済み（項目71として下記に記録）**。
 - 項目71（`benchmark/linear`と`benchmark/nonlinear`の`run_statsmodels_benchmark.py`
-  が同名でPYTHONPATH経由のimportが衝突する）: 対応済み・コミット待ち
-  （本セッションで実装、コミット前確認待ち）。項目14の検証中に発見した環境バグ
+  が同名でPYTHONPATH経由のimportが衝突する）: 対応済み・コミット済み
+  （`a41dc38`）。項目14の検証中に発見した環境バグ
   （上記参照）。ユーザーの明示的指示（「PYTHONPATHの衝突バグを新しい候補として
   追記してほしい。さらに優先してこのバグに対処してほしい」）により、候補メモへの
   記録と優先対応の両方を行った。**候補メモへの記録は`refactoring-candidates-2.md`
@@ -286,10 +286,27 @@
   generate_iv_gmm_fixtures.py`側の別バグとして今後の候補に追加を検討。
   検証: リネーム後は`PYTHONPATH`の上書きなしで`generate_logit_fixtures.py`/
   `generate_probit_fixtures.py`/`generate_iv_fixtures.py`/`generate_ols_fixtures.py`/
-  `generate_wls_fixtures.py`が正しくimportできることを実機確認済み。
-  `ruff check`パス、`pytest tests`全件パス予定（本項目は項目14の続きとして
-  同一コミットに含める想定）。
-- 上記以外（`refactoring-candidates.md`項目11〜13・15〜35・37・39〜41・43）は
+  `generate_wls_fixtures.py`が正しくimportできることを実機確認済み。フィクスチャ
+  JSON（logit/probit/ols/wls/iv、`_meta.generated_at`除外）・凍結CSV（全系統）が
+  変更前後で完全一致することも確認済み。`ruff check`／`ruff format --check`
+  パス、`pytest tests`957件全件パス、`/code-review`0件。項目14とは別コミット
+  （`a41dc38`）として独立に記録した。
+- 項目11（`_run_cluster_case`（`generate_ols_fixtures.py`）の`coef`/`se`抽出辞書
+  内包表記が`run_statsmodels_benchmark_linear.py`の`run()`内と重複）: 対応済み・
+  コミット待ち。`benchmark/_common.py`に`extract_coef_se(model) ->
+  {"coef": ..., "se": ...}`を新設し（R側の`_common.R`に既にある同名ヘルパーと
+  対称）、`run_statsmodels_benchmark_linear.py`の`run()`の結果辞書組み立てと
+  `generate_ols_fixtures.py`の`_run_cluster_case()`の返り値辞書の両方を
+  `**extract_coef_se(model)`展開に置き換えた。**スコープはOLSの2箇所のみ**
+  （AskUserQuestionで確認）。同型の重複がある`generate_wls_fixtures.py`・
+  `run_statsmodels_benchmark_nonlinear.py`・`generate_logit/probit_fixtures.py`は
+  項目13・15として別途検討する（新ヘルパーはそれらからも再利用可能な形で置いた）。
+  配置先は`_common.py`（項目21の肥大化懸念はあるが3行かつ系統非依存のため低リスク、
+  AskUserQuestionで確認）。検証: `ols.json`を再生成し`_meta.generated_at`除外で
+  変更前のコミット済みJSONと完全一致することを確認（コミット済みJSONは更新しない）、
+  `pytest tests -k ols`212件パス、`ruff check`パス。`refactoring-candidates.md`
+  から項目11を削除、項目12・13の「項目11参照」を自己完結する記述に置換済み。
+- 上記以外（`refactoring-candidates.md`項目12・13・15〜35・37・39〜41・43）は
   未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は
   未着手。項目50以降は別セッションが並行して追記・コミットしているため、

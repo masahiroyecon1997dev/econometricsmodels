@@ -69,9 +69,9 @@ from benchmark.common import (
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
 
-LINEAR_DIR = Path(__file__).resolve().parent.parent
-R_SCRIPT = LINEAR_DIR / "run_lm_crosscheck_benchmark.R"
-PREDICT_R_SCRIPT = LINEAR_DIR / "run_lm_predict_crosscheck.R"
+REFERENCES_DIR = Path(__file__).resolve().parent.parent / "references"
+R_SCRIPT = REFERENCES_DIR / "run_lm_crosscheck.R"
+PREDICT_R_SCRIPT = REFERENCES_DIR / "run_lm_predict_crosscheck.R"
 
 # fitted_values/predict()のout-of-sample crosscheck用の新規データ
 # （baselineシナリオのみ）。学習データの実現値とは無関係に、x1/x2/x3の値域内で

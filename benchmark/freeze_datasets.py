@@ -39,7 +39,7 @@ from pathlib import Path
 
 from benchmark.common import run_freeze_cli
 from benchmark.iv.freeze_iv_datasets import freeze as _freeze_iv
-from benchmark.linear.freeze_linear_datasets import freeze as _freeze_linear
+from benchmark.linear.freeze import freeze as _freeze_linear
 from benchmark.nonlinear.freeze_nonlinear_datasets import (
     freeze as _freeze_nonlinear,
 )

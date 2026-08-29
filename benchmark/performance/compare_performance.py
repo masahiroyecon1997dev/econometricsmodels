@@ -62,7 +62,7 @@ from pathlib import Path
 import polars as pl
 
 from benchmark.common import hac_auto_lag
-from benchmark.linear.generate_linear_datasets import generate_linear_dataset
+from benchmark.linear.datasets import generate_linear_dataset
 
 LIBRARIES = ["engine", "statsmodels", "pyfixest"]
 COV_TYPES = ["classical", "hc1", "cluster", "hac"]

@@ -5,10 +5,11 @@
 悪条件ケース）を持つデータを生成する。
 
 系統非依存のクラスターラベル生成（`imbalanced_cluster_groups`）は
-`benchmark/_common.py`へ分離した（他系統からも使われるため）。
+`benchmark/common/`へ分離した（他系統からも使われるため）。凍結（CSV固定）は
+`benchmark/linear/freeze.py`が担当する。
 
 使用例:
-    from benchmark.linear.generate_linear_datasets import generate_linear_dataset
+    from benchmark.linear.datasets import generate_linear_dataset
 
     df, true_beta = generate_linear_dataset("heteroskedastic", n=500, seed=42)
     # df の列: y, x1, x2, x3, weight

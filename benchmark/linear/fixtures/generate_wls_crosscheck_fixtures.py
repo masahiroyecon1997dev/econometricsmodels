@@ -51,8 +51,8 @@ from benchmark.common import (
 from benchmark.common.load_wooldridge import load as load_wooldridge
 from benchmark.linear.fixtures.generate_wls_fixtures import _add_age_bin
 
-LINEAR_DIR = Path(__file__).resolve().parent.parent
-R_SCRIPT = LINEAR_DIR / "run_lm_crosscheck_benchmark.R"
+REFERENCES_DIR = Path(__file__).resolve().parent.parent / "references"
+R_SCRIPT = REFERENCES_DIR / "run_lm_crosscheck.R"
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（generate_wls_fixtures.pyと
 # 同じ方針。scale_varianceは全cov_typeでComputationErrorになる）。

@@ -3,9 +3,8 @@
 `benchmark/freeze_datasets.py`（系統横断のディスパッチャ）から呼ばれる。
 単体でも実行できる。
 
-使用例:
-    python freeze_linear_datasets.py --output-dir \\
-        ../../tests/fixtures/benchmarks/data
+使用例（リポジトリルートから）:
+    python -m benchmark.linear.freeze
 """
 
 from __future__ import annotations
@@ -14,10 +13,10 @@ import json
 from pathlib import Path
 
 from benchmark.common import freeze_scenarios, run_freeze_cli
-from benchmark.linear.generate_linear_datasets import (
+from benchmark.linear.datasets import (
     SCENARIOS as SYNTHETIC_SCENARIOS,
 )
-from benchmark.linear.generate_linear_datasets import generate_linear_dataset
+from benchmark.linear.datasets import generate_linear_dataset
 
 # generate_linear_datasets.pyのSCENARIOS（全シナリオ、generate_ols_fixtures.py /
 # generate_wls_fixtures.pyのNUMERIC_SCENARIOSにperfect_multicollinearity・

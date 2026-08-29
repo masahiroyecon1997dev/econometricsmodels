@@ -8,20 +8,20 @@
 # 事前準備: install.packages(c("sandwich", "lmtest", "jsonlite"))
 #
 # 使用例:
-#   Rscript run_lm_crosscheck_benchmark.R data.csv "y ~ x1 + x2 + x3" classical
-#   Rscript run_lm_crosscheck_benchmark.R data.csv "y ~ x1 + x2 + x3" hc3
-#   Rscript run_lm_crosscheck_benchmark.R data.csv "y ~ x1 + x2 + x3" cluster cluster_col
-#   Rscript run_lm_crosscheck_benchmark.R data.csv "y ~ x1 + x2 + x3" hac 2   # hac_lag=2
+#   Rscript run_lm_crosscheck.R data.csv "y ~ x1 + x2 + x3" classical
+#   Rscript run_lm_crosscheck.R data.csv "y ~ x1 + x2 + x3" hc3
+#   Rscript run_lm_crosscheck.R data.csv "y ~ x1 + x2 + x3" cluster cluster_col
+#   Rscript run_lm_crosscheck.R data.csv "y ~ x1 + x2 + x3" hac 2   # hac_lag=2
 #
 #   # WLSの標準誤差クロスチェック（lm(weights=) + sandwich/lmtest）。
 #   # weight_colはcov_type固有の引数（cluster_col/hac_lag）の後ろに置く
 #   # （classical/hc0-3はarg4、cluster/hacはarg5）。省略時（引数なし or 空文字）はOLSと同じ。
-#   Rscript run_lm_crosscheck_benchmark.R data.csv "y ~ x1 + x2 + x3" classical weight
-#   Rscript run_lm_crosscheck_benchmark.R data.csv "y ~ x1 + x2 + x3" cluster cluster_col weight
+#   Rscript run_lm_crosscheck.R data.csv "y ~ x1 + x2 + x3" classical weight
+#   Rscript run_lm_crosscheck.R data.csv "y ~ x1 + x2 + x3" cluster cluster_col weight
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 2) {
-  stop("usage: Rscript run_lm_crosscheck_benchmark.R <data.csv> <formula> [cov_type=classical] [arg4] [arg5]")
+  stop("usage: Rscript run_lm_crosscheck.R <data.csv> <formula> [cov_type=classical] [arg4] [arg5]")
 }
 data_path <- args[1]
 formula_str <- args[2]
@@ -35,11 +35,11 @@ library(sandwich)
 library(lmtest)
 
 # coeftest()からの係数・標準誤差抽出とロバストWald F検定はrun_ivreg_benchmark.R
-# と共通のため、benchmark/_common.Rに抽出している（Rには__file__相当が無いため、
+# と共通のため、benchmark/common/_common.Rに抽出している（Rには__file__相当が無いため、
 # commandArgs()の--file=から自身のディレクトリを特定してsource()する）。
 script_args <- commandArgs(trailingOnly = FALSE)
 script_dir <- dirname(sub("^--file=", "", grep("^--file=", script_args, value = TRUE)))
-source(file.path(script_dir, "..", "_common.R"))
+source(file.path(script_dir, "..", "..", "common", "_common.R"))
 
 cov_type <- ifelse(length(args) >= 3, tolower(args[3]), "classical")
 

@@ -368,8 +368,23 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
     `reference/extract.py`（`extract_coef_se`）へ分割、`helpers.py` 削除。`__init__.py`
     の re-export で利用側は無変更。`dgp_constants.py` は据え置き。検証: `pytest` 957件・
     `ruff`・`ols.json`/凍結CSV 不変性。
-  - 次: ステップ2「ドライバ骨格」（`driver.py` / `reference/{r,meta}.py` /
-    `cluster_cases.py` 新設、手法未接続）。
+  - **ステップ2は独立で立てず Step 3（OLS移行）へ統合**する方針に変更（2026-08-29、
+    AskUserQuestion）。消費者ゼロで `MethodBenchmarkSpec`/`build_fixture_json` を
+    設計するのは投機的なため、OLS を最初の消費者として共通ヘルパーを切り出し、
+    Step 4（WLS）以降で一般化する（rule of three）。
+  - **Step 3a 完了（2026-08-29）— linear 共有インフラ再配置（ロジック不変）**:
+    `generate_linear_datasets.py`→`benchmark/linear/datasets.py`、
+    `freeze_linear_datasets.py`→`benchmark/linear/freeze.py`（`__main__` 衝突を避け
+    2ファイルのまま）、`run_statsmodels_benchmark_linear.py`→
+    `benchmark/linear/references/statsmodels.py`、`run_lm_crosscheck_benchmark.R`→
+    `benchmark/linear/references/run_lm_crosscheck.R`、`run_lm_predict_crosscheck.R`→
+    同 `references/`、`benchmark/_common.R`→`benchmark/common/_common.R`。R の
+    `source()` パス（`run_lm_crosscheck.R`・`iv/run_ivreg_benchmark.R`）と Python
+    importer を追随。検証: `ols/wls/ols_crosscheck/wls_crosscheck.json`（R含む）+
+    凍結 synthetic CSV を再生成し、変更前ベースラインと `generated_at`・version 除外で
+    完全一致。`pytest` 957件・`ruff` パス。コメント中の旧ファイル名参照はステップ9で一括更新。
+  - 次: Step 3b（`benchmark/common/` に `reference/{r,meta}.py`・`driver.py`・
+    `cluster_cases.py`・`constants.py` を新設し OLS を配線）。
 
 ---
 

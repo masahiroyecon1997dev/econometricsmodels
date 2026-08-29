@@ -31,7 +31,7 @@ from benchmark.common import (
     extract_coef_se,
     imbalanced_cluster_groups,
 )
-from benchmark.linear.run_statsmodels_benchmark_linear import run
+from benchmark.linear.references.statsmodels import run
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md「テストの3系統」参照）。
 # ComputationErrorが発生することのみをテストコード側で対応する。scale_varianceは

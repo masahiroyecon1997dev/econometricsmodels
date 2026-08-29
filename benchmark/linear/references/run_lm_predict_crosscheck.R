@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # 学習データに対する予測値（fitted）・新規データに対する予測値（predict）の
-# Rクロスチェック用スクリプト。run_lm_crosscheck_benchmark.R（標準誤差・適合度
+# Rクロスチェック用スクリプト。run_lm_crosscheck.R（標準誤差・適合度
 # 統計量のクロスチェック）とは別に、OLSのfitted_values/predict()
 # （docs/spec/ols-spec.md「predict()」）専用に用意する。
 #
@@ -17,7 +17,7 @@ if (length(args) < 2) {
 data_path <- args[1]
 formula_str <- args[2]
 
-# check.names=FALSE: run_lm_crosscheck_benchmark.Rと同じ理由
+# check.names=FALSE: run_lm_crosscheck.Rと同じ理由
 # （Python側で書き出した列名をmake.names()による書き換えなしでそのまま使う）。
 df <- read.csv(data_path, check.names = FALSE)
 model <- lm(as.formula(formula_str), data = df)

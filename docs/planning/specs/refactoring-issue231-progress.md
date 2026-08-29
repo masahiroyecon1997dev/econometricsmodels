@@ -398,10 +398,28 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
     （ライブラリ名と同名で `sys.path` 事故の再来リスク、項目71 と同種）。
     検証: `ols/ols_crosscheck.json`（R含む）+ 凍結CSV 再生成でベースライン完全一致、
     `pytest` 957件・`ruff` パス。
-  - 次: Step 4（WLS 移行）。`generate_wls_fixtures.py`／`generate_wls_crosscheck_fixtures.py`
-    を新構造へ。ここで OLS/WLS のループが共通なら `MethodBenchmarkSpec`/`build_fixture_json`
-    を抽出。`_run_cluster_case`（statsmodels側・R側）も 2 消費者が揃うので
-    `benchmark/common/cluster_cases.py` へ集約を検討。
+  - **Step 4 完了（2026-08-29）— WLS 移行（ロジック不変・機械的置換のみ）**:
+    `generate_wls_fixtures.py`／`generate_wls_crosscheck_fixtures.py` の `__main__` を
+    `run_fixture_cli` に、後者のローカル `_run_r`／`_normalize_names` を
+    `benchmark.linear.references.r.run_lm_r`（`weight_col` 経由）に、ローカルの
+    `coef`/`se` 内包表記を `extract_coef_se` に置換。`WEIGHT_COL="weight"` を
+    `benchmark.common` の `WEIGHT_COLUMN_NAME`（3b で新設・初の消費者）に。
+    docstring の旧パス（`run_statsmodels_benchmark_linear.py`／`freeze_datasets.py`／
+    `run_lm_crosscheck_benchmark.R`）と使用例を新構造へ更新。`_add_age_bin`／
+    `WOOLDRIDGE_COV_TYPES`（`tests/` が import）は `generate_wls_fixtures.py` に据え置き。
+    **`MethodBenchmarkSpec`/`build_fixture_json` の抽出と `_run_cluster_case`（OLS+WLS、
+    statsmodels側・R側）の `cluster_cases.py` 集約は見送り**：OLS を再度触ることになり、
+    離散選択系（Logit/Probit）・IV の実形を見てから一般化する方が安全なため、
+    Step 5〜6 後の独立ステップへ（rule of three）。検証: `wls/wls_crosscheck.json`
+    （R含む）を再生成し、コミット済み・Step 3 ベースライン双方と `generated_at`／
+    version 除外で完全一致。`pytest` 957件・`ruff check .`／`format --check .` パス。
+    `/code-review`（fork実行）指摘ゼロ。
+  - 次: Step 5（Logit 移行）。`generate_logit_fixtures.py`／
+    `generate_logit_crosscheck_fixtures.py` を新構造へ。離散選択系は `stat_key="z_stats"`・
+    `link` 引数・限界効果（`margeff`）があり、`benchmark/linear/references/r.py` 相当の
+    `benchmark/nonlinear/references/r.py` を新設して `normalize_names` の
+    `stat_key`/`fix_margeff` 分岐を使う。`common/reference/r.py` の
+    `conf_from_low_high`/`fix_margeff` はこの回の消費者を想定済み。
 
 ---
 

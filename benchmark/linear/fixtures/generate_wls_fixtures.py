@@ -1,8 +1,9 @@
 """WLSのテストフィクスチャ（tests/fixtures/benchmarks/wls.json）を生成するスクリプト。
 
-`benchmark/linear/run_statsmodels_benchmark_linear.py`（`--weight-col`指定でsmf.wlsを使う）を
-全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つのJSONにまとめて書き出す。
-構成は`generate_ols_fixtures.py`に合わせている（重み列`weight`を追加で渡す点のみ異なる）。
+`benchmark/linear/references/statsmodels_ref.py`（`weight_col`指定でsmf.wlsを使う
+汎用アダプタ）を全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つのJSONに
+まとめて書き出す。構成は`generate_ols_fixtures.py`に合わせている（重み列`weight`を
+追加で渡す点のみ異なる）。
 
 シナリオが持つ`weight`列は、OLS実装時から既に含まれている合成データ生成
 ロジックのもの（heteroskedasticシナリオは`1/sigma_i^2`、それ以外は`uniform(0.5, 1.5)`。
@@ -11,25 +12,28 @@
 このスクリプト自体は`benchmark/`側に置く。生成される`wls.json`は
 `tests/fixtures/benchmarks/`に置く（`.claude/rules/testing-policy.md`
 「ベンチマーク値のフィクスチャ化」参照）。合成データの入力は`tests/
-fixtures/benchmarks/data/`に固定済みのCSVを読む（`benchmark/freeze_datasets.py`
+fixtures/benchmarks/data/`に固定済みのCSVを読む（`benchmark/linear/freeze.py`
 参照）。401ksubs（Wooldridge）は`load_wooldridge.py`経由で都度ロードする
 （データの再配布ライセンスが未確認のためCSVとして固定しない）。
 
-使用例:
-    python generate_wls_fixtures.py --output ../../../tests/fixtures/benchmarks/wls.json
+使用例（リポジトリルートから）:
+    python -m benchmark.linear.fixtures.generate_wls_fixtures
 """
 
 from __future__ import annotations
 
-import argparse
-import json
 from datetime import UTC, datetime
-from pathlib import Path
 
 import polars as pl
 import statsmodels
 
-from benchmark.common import DATA_DIR, imbalanced_cluster_groups
+from benchmark.common import (
+    BENCHMARKS_DIR,
+    DATA_DIR,
+    extract_coef_se,
+    imbalanced_cluster_groups,
+    run_fixture_cli,
+)
 from benchmark.common.load_wooldridge import load as load_wooldridge
 from benchmark.linear.references.statsmodels_ref import run
 
@@ -159,8 +163,7 @@ def _run_cluster_case(
     ).fit(cov_type="cluster", cov_kwds={"groups": pandas_df["_group"]})
 
     return {
-        "coef": {str(k): float(v) for k, v in model.params.to_dict().items()},
-        "se": {str(k): float(v) for k, v in model.bse.to_dict().items()},
+        **extract_coef_se(model),
         "_meta": {
             "reference": "statsmodels",
             "statsmodels_version": statsmodels.__version__,
@@ -208,8 +211,7 @@ def _run_401ksubs_case(cov_type: str, cluster_col: str | None = None) -> dict:
 
     ci = model.conf_int(alpha=0.05)
     return {
-        "coef": {str(k): float(v) for k, v in model.params.to_dict().items()},
-        "se": {str(k): float(v) for k, v in model.bse.to_dict().items()},
+        **extract_coef_se(model),
         "t_stats": {
             str(k): float(v) for k, v in model.tvalues.to_dict().items()
         },
@@ -270,22 +272,6 @@ def _add_age_bin(df: pl.DataFrame, n_bins: int = 8) -> pl.DataFrame:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output",
-        default=str(
-            Path(__file__).resolve().parents[3]
-            / "tests"
-            / "fixtures"
-            / "benchmarks"
-            / "wls.json"
-        ),
+    run_fixture_cli(
+        build_fixtures, BENCHMARKS_DIR / "wls.json", description=__doc__
     )
-    args = parser.parse_args()
-
-    fixtures = build_fixtures()
-
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(fixtures, indent=2, ensure_ascii=False))
-    print(f"wrote {output_path} ({len(json.dumps(fixtures))} bytes)")

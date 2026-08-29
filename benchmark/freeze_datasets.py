@@ -37,10 +37,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from _common import run_freeze_cli
-from freeze_iv_datasets import freeze as _freeze_iv
-from freeze_linear_datasets import freeze as _freeze_linear
-from freeze_nonlinear_datasets import freeze as _freeze_nonlinear
+from benchmark.common import run_freeze_cli
+from benchmark.iv.freeze_iv_datasets import freeze as _freeze_iv
+from benchmark.linear.freeze_linear_datasets import freeze as _freeze_linear
+from benchmark.nonlinear.freeze_nonlinear_datasets import (
+    freeze as _freeze_nonlinear,
+)
 
 
 def freeze(output_dir: Path) -> None:
@@ -52,7 +54,13 @@ def freeze(output_dir: Path) -> None:
 if __name__ == "__main__":
     run_freeze_cli(
         freeze,
-        "../tests/fixtures/benchmarks/data",
+        str(
+            Path(__file__).resolve().parents[1]
+            / "tests"
+            / "fixtures"
+            / "benchmarks"
+            / "data"
+        ),
         "wrote frozen datasets",
         description=__doc__,
     )

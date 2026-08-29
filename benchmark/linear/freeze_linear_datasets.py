@@ -13,9 +13,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from _common import freeze_scenarios, run_freeze_cli
-from generate_linear_datasets import SCENARIOS as SYNTHETIC_SCENARIOS
-from generate_linear_datasets import generate_linear_dataset
+from benchmark.common import freeze_scenarios, run_freeze_cli
+from benchmark.linear.generate_linear_datasets import (
+    SCENARIOS as SYNTHETIC_SCENARIOS,
+)
+from benchmark.linear.generate_linear_datasets import generate_linear_dataset
 
 # generate_linear_datasets.pyのSCENARIOS（全シナリオ、generate_ols_fixtures.py /
 # generate_wls_fixtures.pyのNUMERIC_SCENARIOSにperfect_multicollinearity・
@@ -73,7 +75,13 @@ def freeze(output_dir: Path) -> None:
 if __name__ == "__main__":
     run_freeze_cli(
         freeze,
-        "../../tests/fixtures/benchmarks/data",
+        str(
+            Path(__file__).resolve().parents[2]
+            / "tests"
+            / "fixtures"
+            / "benchmarks"
+            / "data"
+        ),
         "wrote frozen linear datasets",
         description=__doc__,
     )

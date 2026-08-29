@@ -25,8 +25,13 @@ from pathlib import Path
 
 import polars as pl
 import statsmodels
-from _common import DATA_DIR, extract_coef_se, imbalanced_cluster_groups
-from run_statsmodels_benchmark_linear import run
+
+from benchmark.common import (
+    DATA_DIR,
+    extract_coef_se,
+    imbalanced_cluster_groups,
+)
+from benchmark.linear.run_statsmodels_benchmark_linear import run
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md「テストの3系統」参照）。
 # ComputationErrorが発生することのみをテストコード側で対応する。scale_varianceは
@@ -159,7 +164,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/fixtures/benchmarks/ols.json",
+        default=str(
+            Path(__file__).resolve().parents[3]
+            / "tests"
+            / "fixtures"
+            / "benchmarks"
+            / "ols.json"
+        ),
     )
     args = parser.parse_args()
 

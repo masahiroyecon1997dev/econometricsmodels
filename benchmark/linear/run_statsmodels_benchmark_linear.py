@@ -32,8 +32,9 @@ import json
 from datetime import UTC, datetime
 
 import polars as pl
-from _common import extract_coef_se, load_frozen_dataset
-from load_wooldridge import load as _load_wooldridge
+
+from benchmark.common import extract_coef_se, load_frozen_dataset
+from benchmark.common.load_wooldridge import load as _load_wooldridge
 
 
 def _load_synthetic(dataset: str) -> tuple[pl.DataFrame, list[float]]:

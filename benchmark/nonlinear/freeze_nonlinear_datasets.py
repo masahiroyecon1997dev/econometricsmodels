@@ -13,9 +13,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from _common import freeze_scenarios, run_freeze_cli
-from generate_nonlinear_datasets import SCENARIOS as LOGIT_SCENARIOS
-from generate_nonlinear_datasets import generate_binary_choice_dataset
+from benchmark.common import freeze_scenarios, run_freeze_cli
+from benchmark.nonlinear.generate_nonlinear_datasets import (
+    SCENARIOS as LOGIT_SCENARIOS,
+)
+from benchmark.nonlinear.generate_nonlinear_datasets import (
+    generate_binary_choice_dataset,
+)
 
 # generate_nonlinear_datasets.pyのSCENARIOS（全シナリオ、generate_logit_fixtures.py
 # のNUMERIC_SCENARIOSに、エラーパス確認用のperfect_multicollinearityを加えたもの）を
@@ -55,7 +59,13 @@ def freeze(output_dir: Path) -> None:
 if __name__ == "__main__":
     run_freeze_cli(
         freeze,
-        "../../tests/fixtures/benchmarks/data",
+        str(
+            Path(__file__).resolve().parents[2]
+            / "tests"
+            / "fixtures"
+            / "benchmarks"
+            / "data"
+        ),
         "wrote frozen nonlinear datasets",
         description=__doc__,
     )

@@ -217,34 +217,44 @@
 ```python
 @dataclass(frozen=True)
 class ReferenceAdapter:
-    name: str                                  # "statsmodels" | "r-lm" | "linearmodels" | ...
+    name: str  # "statsmodels" | "r-lm" | "linearmodels" | ...
     call: Callable[..., dict]
+
 
 @dataclass(frozen=True)
 class ExtraCase:
-    key: str                                   # "cluster" | "cluster_imbalanced" | "cluster_g2" | "wage1_region" | ...
-    run: Callable[["DriverContext"], dict]      # グリッドに乗らないケースを1エントリ分生成
+    key: str  # "cluster" | "cluster_imbalanced" | "cluster_g2" | "wage1_region" | ...
+    run: Callable[
+        ["DriverContext"], dict
+    ]  # グリッドに乗らないケースを1エントリ分生成
+
 
 @dataclass(frozen=True)
 class MethodBenchmarkSpec:
-    method: str                                # "ols"
-    family: str                                # "linear"
-    dataset_prefix: str                        # "synthetic"
+    method: str  # "ols"
+    family: str  # "linear"
+    dataset_prefix: str  # "synthetic"
     scenarios: list[str]
-    x_cols: list[str]                          # ["x1", "x2", "x3"]
+    x_cols: list[str]  # ["x1", "x2", "x3"]
     cov_types: list[str]
-    primary: ReferenceAdapter                  # statsmodels
-    crosscheck: ReferenceAdapter | None        # r-lm（None の手法もありうる）
+    primary: ReferenceAdapter  # statsmodels
+    crosscheck: ReferenceAdapter | None  # r-lm（None の手法もありうる）
     extra_cases: list[ExtraCase]
     hac_lag: int | None = None
     weight_col: str | None = None
     note_primary: str = ""
     note_crosscheck: str = ""
 
-def build_fixture_json(spec: MethodBenchmarkSpec, *, which: Literal["primary", "crosscheck"]) -> dict:
+
+def build_fixture_json(
+    spec: MethodBenchmarkSpec, *, which: Literal["primary", "crosscheck"]
+) -> dict:
     """scenarios × cov_types + extra_cases を回して 1 手法分の JSON を組み立てる。"""
 
-def run_fixture_cli(spec: MethodBenchmarkSpec, *, which: str, default_output: str) -> None:
+
+def run_fixture_cli(
+    spec: MethodBenchmarkSpec, *, which: str, default_output: str
+) -> None:
     """旧 generate_*_fixtures.py 11ファイルで一字一句同じだった __main__ を1関数に（項目19）。"""
 ```
 
@@ -320,11 +330,42 @@ def run_fixture_cli(spec: MethodBenchmarkSpec, *, which: str, default_output: st
 
 各ステップ後に `pytest tests -k <手法>` がグリーンであることを確認する。
 
-1. **足場（手法非依存・1コミット）**: `benchmark/__init__.py` 群、`benchmark/common/`
-   への `_common.py` / `_dgp_constants.py` / `_common.R` / `load_wooldridge.py` の
-   `git mv` + 分割、`pyproject.toml` に `pythonpath`、`tests/` の `sys.path.insert`
-   全廃 + ドット import 化。**この時点でフィクスチャ生成コードのロジックは変えない**
-   （純粋な移動と import 経路の付け替え）。`pytest tests` 全件パスで確認。
+1. **足場（手法非依存・1コミット）**: 【2026-08-29 実施済み】
+   `benchmark/__init__.py` 群（8ディレクトリ）、`benchmark/_common.py` →
+   `benchmark/common/helpers.py`・`_dgp_constants.py` → `benchmark/common/dgp_constants.py`・
+   `load_wooldridge.py` → `benchmark/common/load_wooldridge.py` の `git mv`、
+   `benchmark/common/__init__.py` で公開 API を re-export、`pyproject.toml` に
+   `[tool.pytest.ini_options] pythonpath = ["."]`、`benchmark/` 内 internal import と
+   `tests/`（conftest + 12ファイル）の `sys.path.insert` を全廃してドット表記
+   （`from benchmark.<...> import`）へ。**生成ロジックは不変**（純粋な移動と
+   import 経路付け替え）。検証: `PYTHONPATH=` を空にして `pytest tests` 957件パス、
+   `ruff check .`／`ruff format --check .` パス、`ols.json`・凍結 synthetic CSV を
+   再生成し `_meta.generated_at` 除外でコミット済みと完全一致。
+   **ノートからの差分（実施時の判断）**:
+   - `_common.py` の細分化（`datasets_io.py` / `dgp.py` 等への分割）は**後回し**。
+     `helpers.py` 単一モジュール + `__init__.py` re-export とし、後続ステップで各
+     ヘルパーの行き先が固まってから分割（利用側 import は `from benchmark.common
+     import X` のままなので影響なし）。ユーザー確認済み。
+   - `_common.R` は `benchmark/_common.R` に**据え置き**。`.R` 側の `source(".../_common.R")`
+     と一体で動かす方が安全なため、ステップ3（`.R` を `references/` へ移す回）で
+     一緒に移動する。
+   - `.devcontainer/devcontainer.json` の `PYTHONPATH` は**削除ではなく単一の
+     リポジトリルート**（`${containerWorkspaceFolder}`）へ縮小。5ディレクトリ
+     並記（bare import と同名衝突の温床）を廃し、`pyproject` の `pythonpath=["."]`
+     と対称にした。devcontainer 内で `python benchmark/.../foo.py` 直実行も維持できる。
+   - `compare_performance.py` の `_run_isolated`（自己サブプロセス再実行）を
+     ファイルパス直接起動から `python -m benchmark.performance.compare_performance`
+     （`cwd`=リポジトリルート）へ変更（パッケージ import を PYTHONPATH 非依存で
+     解決）。加えて `benchmark_ols.yml` に `env: PYTHONPATH: ${{ github.workspace }}`
+     を追加（親プロセスは現状 `working-directory: benchmark/performance` +
+     `python compare_performance.py` のままのため）。`performance/` のトップレベル
+     移動と `benchmark_ols.yml` の `-m` 化はノート通りステップ8。
+   - 11個の `generate_*_fixtures.py` の `--output` 既定値と 4個の `freeze_*` の
+     出力先既定値を、cwd 相対（`../../../tests/...`）から `Path(__file__).parents[N]`
+     アンカーへ修正（`python -m` 実行で既定値のまま正しい場所へ書けるように）。
+   - スクリプトは今後 **`python -m benchmark.<...>`（リポジトリルートから）**で実行する
+     （各ディレクトリへ `cd` して `python foo.py` は不可）。`benchmark/README.md` に明記。
+     SKILL.md・CLAUDE.md 等のパス参照更新はノート通りステップ9でまとめて行う。
 2. **ドライバ骨格（手法非依存・1コミット）**: `driver.py`（`MethodBenchmarkSpec` /
    `build_fixture_json` / `run_fixture_cli`）、`common/reference/{r,meta,extract}.py`、
    `common/cluster_cases.py` を新設。まだどの手法も接続しない。

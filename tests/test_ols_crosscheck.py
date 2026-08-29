@@ -44,31 +44,21 @@ Note:
 from __future__ import annotations
 
 import json
-import sys
 from functools import partial
 from pathlib import Path
 
 import polars as pl
 import pytest
-
-sys.path.insert(
-    0,
-    str(
-        Path(__file__).resolve().parents[1]
-        / "benchmark"
-        / "linear"
-        / "fixtures"
-    ),
-)
 from _assertions import assert_close, assert_dict_close
-from _common import imbalanced_cluster_groups
 from _helpers import DATA_DIR, with_cluster_groups, wooldridge_loader
 from _tolerances import TOLERANCES
 from econometricsmodels import OLS, OLSOptions
-from generate_ols_crosscheck_fixtures import (
+
+from benchmark.common import imbalanced_cluster_groups
+from benchmark.linear.fixtures.generate_ols_crosscheck_fixtures import (
     NUMERIC_SCENARIOS as SYNTHETIC_SCENARIOS,
 )
-from generate_ols_crosscheck_fixtures import (
+from benchmark.linear.fixtures.generate_ols_crosscheck_fixtures import (
     PREDICT_NEW_DATA,
 )
 

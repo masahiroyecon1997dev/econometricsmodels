@@ -44,7 +44,7 @@ autocorrelated/high_variance）は2値DGPに直接転用できないため、Log
 人為的に打ち切ることで行う（`tests/test_logit.py`/`test_probit.py`）。
 
 使用例:
-    from generate_nonlinear_datasets import generate_binary_choice_dataset
+    from benchmark.nonlinear.generate_nonlinear_datasets import generate_binary_choice_dataset
 
     df, true_beta = generate_binary_choice_dataset(
         "baseline", link="logit", n=500, seed=42
@@ -61,19 +61,20 @@ import sys
 
 import numpy as np
 import polars as pl
-from _common import (
+from scipy.stats import norm
+
+from benchmark.common import (
     apply_perfect_multicollinearity,
     correlated_design_matrix,
     linear_predictor,
     validate_choice,
 )
-from _dgp_constants import (
+from benchmark.common.dgp_constants import (
     SCALE_VARIANCE_X1_SCALE as _SCALE_VARIANCE_X1_SCALE,
 )
-from _dgp_constants import (
+from benchmark.common.dgp_constants import (
     SCALE_VARIANCE_X2_SCALE as _SCALE_VARIANCE_X2_SCALE,
 )
-from scipy.stats import norm
 
 SCENARIOS = [
     "baseline",
@@ -179,7 +180,7 @@ def generate_binary_choice_dataset(
 if __name__ == "__main__":
     from functools import partial
 
-    from _common import preview_dataset
+    from benchmark.common import preview_dataset
 
     link_arg = sys.argv[1] if len(sys.argv) > 1 else "logit"
     scenario_arg = sys.argv[2] if len(sys.argv) > 2 else "baseline"

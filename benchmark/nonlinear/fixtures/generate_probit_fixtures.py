@@ -29,8 +29,9 @@ from pathlib import Path
 
 import polars as pl
 import statsmodels
-from _common import DATA_DIR, imbalanced_cluster_groups
-from run_statsmodels_benchmark_nonlinear import run
+
+from benchmark.common import DATA_DIR, imbalanced_cluster_groups
+from benchmark.nonlinear.run_statsmodels_benchmark_nonlinear import run
 
 # perfect_multicollinearityは数値比較の対象外（ComputationErrorの発生確認のみ、
 # testing-policy.md「テストの3系統」）。generate_logit_fixtures.pyと同じシナリオ構成
@@ -202,7 +203,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/fixtures/benchmarks/probit.json",
+        default=str(
+            Path(__file__).resolve().parents[3]
+            / "tests"
+            / "fixtures"
+            / "benchmarks"
+            / "probit.json"
+        ),
     )
     args = parser.parse_args()
 

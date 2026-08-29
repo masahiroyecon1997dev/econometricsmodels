@@ -28,9 +28,10 @@ from pathlib import Path
 
 import polars as pl
 import statsmodels
-from _common import DATA_DIR, imbalanced_cluster_groups
-from load_wooldridge import load as load_wooldridge
-from run_statsmodels_benchmark_linear import run
+
+from benchmark.common import DATA_DIR, imbalanced_cluster_groups
+from benchmark.common.load_wooldridge import load as load_wooldridge
+from benchmark.linear.run_statsmodels_benchmark_linear import run
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md
 # 「テストの3系統」参照）。ComputationErrorが発生することのみをテスト
@@ -272,7 +273,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/fixtures/benchmarks/wls.json",
+        default=str(
+            Path(__file__).resolve().parents[3]
+            / "tests"
+            / "fixtures"
+            / "benchmarks"
+            / "wls.json"
+        ),
     )
     args = parser.parse_args()
 

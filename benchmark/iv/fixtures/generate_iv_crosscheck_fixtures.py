@@ -48,13 +48,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
-from _common import (
+
+from benchmark.common import (
     DATA_DIR,
     hac_auto_lag,
     imbalanced_cluster_groups,
     load_frozen_dataset,
 )
-from load_wooldridge import load as load_wooldridge
+from benchmark.common.load_wooldridge import load as load_wooldridge
 
 IV_DIR = Path(__file__).resolve().parent.parent
 R_SCRIPT = IV_DIR / "run_ivreg_benchmark.R"
@@ -373,7 +374,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/fixtures/benchmarks/iv_crosscheck.json",
+        default=str(
+            Path(__file__).resolve().parents[3]
+            / "tests"
+            / "fixtures"
+            / "benchmarks"
+            / "iv_crosscheck.json"
+        ),
     )
     args = parser.parse_args()
 

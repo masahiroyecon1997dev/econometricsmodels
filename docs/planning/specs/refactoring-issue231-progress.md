@@ -346,7 +346,24 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
   31〜35・39（構造的重複、約20項目）。項目11は`extract_coef_se`切り出しで対応済み
   （`28186ed`）、移行時に`benchmark/common/reference/extract.py`へ再配置。
   対象外: 40・41（performance）、43（tests/のディレクトリ構成）、38（対応不要判定済み）。
-- **進捗**: 設計ノート作成のみ。実装未着手（Issue起票 → ステップ1「足場」から）。
+- **進捗**:
+  - 設計ノート作成: コミット `ea27117`。
+  - **ステップ1「足場」完了（2026-08-29）**: `benchmark/` をパッケージ化
+    （`__init__.py` 8ディレクトリ）、`_common.py`→`benchmark/common/helpers.py`・
+    `_dgp_constants.py`・`load_wooldridge.py` を `benchmark/common/` へ `git mv`、
+    `benchmark/common/__init__.py` で re-export、`pyproject.toml` に
+    `[tool.pytest.ini_options] pythonpath=["."]`、`benchmark/` 内 internal import と
+    `tests/`（conftest + 12ファイル）の `sys.path.insert` を全廃してドット表記へ、
+    `.devcontainer/devcontainer.json` の `PYTHONPATH` を単一リポジトリルートへ縮小、
+    `benchmark_ols.yml` に `PYTHONPATH: ${{ github.workspace }}` 追加、`ci_python.yml`
+    トリガーに `benchmark/**` 追加、11 generator の `--output` 既定値と 4 freeze の
+    出力先既定値を `__file__` アンカーへ修正。生成ロジックは不変。検証: `PYTHONPATH=`
+    空で `pytest tests` 957件パス、`ruff` パス、`ols.json`・凍結 synthetic CSV 再生成
+    で `_meta.generated_at` 除外の完全一致を確認。ノートからの差分（`_common.py` 細分化
+    後回し、`_common.R` 据え置き、PYTHONPATH は削除でなく縮小 等）は
+    `benchmark-restructure-design.md` 8章1節に記録。今後スクリプトは
+    `python -m benchmark.<...>`（リポジトリルートから）で実行。
+  - 次: ステップ2「ドライバ骨格」。
 
 ---
 

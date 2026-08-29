@@ -25,25 +25,13 @@ Note:
 from __future__ import annotations
 
 import json
-import sys
 from functools import partial
 from pathlib import Path
 
 import polars as pl
 import pytest
-
-sys.path.insert(
-    0,
-    str(
-        Path(__file__).resolve().parents[1]
-        / "benchmark"
-        / "nonlinear"
-        / "fixtures"
-    ),
-)
 from _assertions import assert_close, assert_dict_close, check_margeff
 from _assertions import rename_intercept as _rename
-from _common import imbalanced_cluster_groups
 from _helpers import (
     DATA_DIR,
     MROZ_X,
@@ -56,7 +44,9 @@ from econometricsmodels import (
     Logit,
     LogitOptions,
 )
-from generate_logit_fixtures import (
+
+from benchmark.common import imbalanced_cluster_groups
+from benchmark.nonlinear.fixtures.generate_logit_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
 

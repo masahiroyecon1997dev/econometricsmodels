@@ -42,13 +42,14 @@ from pathlib import Path
 
 import polars as pl
 import statsmodels
-from _common import (
+
+from benchmark.common import (
     hac_auto_lag,
     imbalanced_cluster_groups,
     load_frozen_dataset,
 )
-from generate_wls_fixtures import _add_age_bin
-from load_wooldridge import load as load_wooldridge
+from benchmark.common.load_wooldridge import load as load_wooldridge
+from benchmark.linear.fixtures.generate_wls_fixtures import _add_age_bin
 
 LINEAR_DIR = Path(__file__).resolve().parent.parent
 R_SCRIPT = LINEAR_DIR / "run_lm_crosscheck_benchmark.R"
@@ -322,7 +323,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/fixtures/benchmarks/wls_crosscheck.json",
+        default=str(
+            Path(__file__).resolve().parents[3]
+            / "tests"
+            / "fixtures"
+            / "benchmarks"
+            / "wls_crosscheck.json"
+        ),
     )
     args = parser.parse_args()
 

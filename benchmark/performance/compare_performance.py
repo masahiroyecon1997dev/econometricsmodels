@@ -60,8 +60,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
-from _common import hac_auto_lag
-from generate_linear_datasets import generate_linear_dataset
+
+from benchmark.common import hac_auto_lag
+from benchmark.linear.generate_linear_datasets import generate_linear_dataset
 
 LIBRARIES = ["engine", "statsmodels", "pyfixest"]
 COV_TYPES = ["classical", "hc1", "cluster", "hac"]
@@ -216,10 +217,16 @@ def _run_isolated(
     library: str, cov_type: str, n: int, k: int, seed: int, repeats: int
 ) -> dict:
     """1計測点をサブプロセスで実行する（プロセスRSS隔離のため、モジュール docstring参照）。"""
+    # ワーカーは `-m` でリポジトリルートを cwd にして起動する。`benchmark/` が
+    # パッケージ化されたため（Initiative A）、ファイルパス直接起動だと
+    # `import benchmark.*` が解決できない。cwd=リポジトリルートなら `-m` が
+    # ルートを sys.path に載せるため PYTHONPATH に依存しない。
+    repo_root = THIS_FILE.parents[2]
     proc = subprocess.run(
         [
             sys.executable,
-            str(THIS_FILE),
+            "-m",
+            "benchmark.performance.compare_performance",
             "--worker",
             "--library",
             library,
@@ -237,7 +244,7 @@ def _run_isolated(
         capture_output=True,
         text=True,
         check=True,
-        cwd=str(THIS_FILE.parent),
+        cwd=str(repo_root),
     )
     return json.loads(proc.stdout)
 

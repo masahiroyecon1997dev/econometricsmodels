@@ -42,14 +42,14 @@ from typing import Any
 import numpy as np
 import polars as pl
 
+# このファイルは benchmark/common/ 配下。parents[2] がリポジトリルート。
 DATA_DIR = (
-    Path(__file__).resolve().parent
-    / ".."
+    Path(__file__).resolve().parents[2]
     / "tests"
     / "fixtures"
     / "benchmarks"
     / "data"
-).resolve()
+)
 
 # [2, 3, 5, 10, 30, 50]（合計100）を1タイルとして繰り返す不均衡なクラスタサイズ
 # パターン（testing-policy.md「テスト用データセット」3.参照）。
@@ -167,9 +167,7 @@ def extract_coef_se(model: Any) -> dict[str, dict[str, float]]:
         `{"coef": {名前: 係数}, "se": {名前: 標準誤差}}`。
     """
     return {
-        "coef": {
-            str(k): float(v) for k, v in model.params.to_dict().items()
-        },
+        "coef": {str(k): float(v) for k, v in model.params.to_dict().items()},
         "se": {str(k): float(v) for k, v in model.bse.to_dict().items()},
     }
 

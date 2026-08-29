@@ -14,6 +14,11 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # compare_performance.pyは`benchmark/performance/`をcwdにスクリプト実行され、
+  # `import benchmark.linear...`（DGP）・`benchmark.common`（hac_auto_lag）を解決する
+  # 必要がある。自身をサブプロセス再実行（_run_isolated）する分も含めリポジトリ
+  # ルートをPYTHONPATHに載せる（Initiative A、`benchmark/`パッケージ化に伴う）。
+  PYTHONPATH: ${{ github.workspace }}
 
 permissions:
   contents: read

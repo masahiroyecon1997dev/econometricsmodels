@@ -6,7 +6,7 @@ pandas DataFrameを返すため、ここでpolarsに変換する。
 本体のAPI（データ入力はpolars限定、CLAUDE.md 2章）とは無関係。
 
 使用例:
-    from load_wooldridge import load
+    from benchmark.common.load_wooldridge import load
 
     df = load("wage1")
     print(df.columns)

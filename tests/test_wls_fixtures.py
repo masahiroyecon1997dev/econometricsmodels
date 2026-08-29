@@ -23,34 +23,24 @@ Note:
 from __future__ import annotations
 
 import json
-import sys
 from functools import partial
 from pathlib import Path
 
 import polars as pl
 import pytest
-
-sys.path.insert(
-    0,
-    str(
-        Path(__file__).resolve().parents[1]
-        / "benchmark"
-        / "linear"
-        / "fixtures"
-    ),
-)
 from _assertions import assert_close, assert_dict_close
 from _assertions import rename_intercept as _rename
-from _common import imbalanced_cluster_groups
 from _helpers import DATA_DIR, load_wooldridge_dataset, with_cluster_groups
 from _tolerances import TOLERANCES
 from econometricsmodels import WLS, OLSOptions
-from generate_wls_fixtures import (
+
+from benchmark.common import imbalanced_cluster_groups
+from benchmark.linear.fixtures.generate_wls_fixtures import (
     COV_TYPES,
     WOOLDRIDGE_COV_TYPES,
     _add_age_bin,
 )
-from generate_wls_fixtures import (
+from benchmark.linear.fixtures.generate_wls_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
 

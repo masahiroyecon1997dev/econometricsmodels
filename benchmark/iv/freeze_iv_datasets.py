@@ -13,9 +13,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from _common import freeze_scenarios, run_freeze_cli
-from generate_iv_datasets import SCENARIOS as IV_SCENARIOS
-from generate_iv_datasets import generate_iv_dataset
+from benchmark.common import freeze_scenarios, run_freeze_cli
+from benchmark.iv.generate_iv_datasets import SCENARIOS as IV_SCENARIOS
+from benchmark.iv.generate_iv_datasets import generate_iv_dataset
 
 # generate_iv_datasets.pyのSCENARIOS（IV: 2SLS/GMM用の全シナリオ）をそのまま使う。
 # moderate_multicollinearity/high_condition_number/scale_varianceはk_exog=2、
@@ -104,7 +104,13 @@ def freeze(output_dir: Path) -> None:
 if __name__ == "__main__":
     run_freeze_cli(
         freeze,
-        "../../tests/fixtures/benchmarks/data",
+        str(
+            Path(__file__).resolve().parents[2]
+            / "tests"
+            / "fixtures"
+            / "benchmarks"
+            / "data"
+        ),
         "wrote frozen iv datasets",
         description=__doc__,
     )

@@ -8,7 +8,7 @@
 `benchmark/_common.py`へ分離した（他系統からも使われるため）。
 
 使用例:
-    from generate_linear_datasets import generate_linear_dataset
+    from benchmark.linear.generate_linear_datasets import generate_linear_dataset
 
     df, true_beta = generate_linear_dataset("heteroskedastic", n=500, seed=42)
     # df の列: y, x1, x2, x3, weight
@@ -21,13 +21,14 @@ import sys
 
 import numpy as np
 import polars as pl
-from _common import (
+
+from benchmark.common import (
     apply_perfect_multicollinearity,
     correlated_design_matrix,
     linear_predictor,
     validate_choice,
 )
-from _dgp_constants import (
+from benchmark.common.dgp_constants import (
     AUTOCORRELATED_RHO,
     HETEROSKEDASTIC_SIGMA_BASE,
     HETEROSKEDASTIC_SIGMA_SLOPE,
@@ -155,7 +156,7 @@ def generate_linear_dataset(
 
 
 if __name__ == "__main__":
-    from _common import preview_dataset
+    from benchmark.common import preview_dataset
 
     scenario_arg = sys.argv[1] if len(sys.argv) > 1 else "baseline"
     preview_dataset(scenario_arg, generate_linear_dataset)

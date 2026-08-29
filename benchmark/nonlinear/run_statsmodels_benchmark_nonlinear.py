@@ -64,8 +64,9 @@ import json
 from datetime import UTC, datetime
 
 import numpy as np
-from _common import load_frozen_dataset as _load_synthetic
-from load_wooldridge import load as _load_wooldridge
+
+from benchmark.common import load_frozen_dataset as _load_synthetic
+from benchmark.common.load_wooldridge import load as _load_wooldridge
 
 MARGEFF_AT = ["overall", "mean", "median"]
 

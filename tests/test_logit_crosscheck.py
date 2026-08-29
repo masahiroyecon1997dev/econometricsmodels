@@ -22,22 +22,10 @@ Note:
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import polars as pl
 import pytest
-
-sys.path.insert(
-    0,
-    str(
-        Path(__file__).resolve().parents[1]
-        / "benchmark"
-        / "nonlinear"
-        / "fixtures"
-    ),
-)
-from _common import imbalanced_cluster_groups
 from _helpers import (
     DATA_DIR,
     MROZ_X,
@@ -46,7 +34,9 @@ from _helpers import (
 )
 from _tolerances import TOLERANCES
 from econometricsmodels import Logit, LogitOptions
-from generate_logit_crosscheck_fixtures import (
+
+from benchmark.common import imbalanced_cluster_groups
+from benchmark.nonlinear.fixtures.generate_logit_crosscheck_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
 

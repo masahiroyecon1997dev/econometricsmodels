@@ -26,8 +26,9 @@ from pathlib import Path
 
 import linearmodels
 import polars as pl
-from _common import DATA_DIR, imbalanced_cluster_groups
-from run_linearmodels_benchmark_iv import run
+
+from benchmark.common import DATA_DIR, imbalanced_cluster_groups
+from benchmark.iv.run_linearmodels_benchmark_iv import run
 
 # 丁度識別・過剰識別を問わずx_exog=['x1'], x_endog=['endog1'], instruments=[...]の
 # 構造で数値比較できるシナリオ。perfect_multicollinearityはComputationErrorの発生
@@ -237,7 +238,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/fixtures/benchmarks/iv.json",
+        default=str(
+            Path(__file__).resolve().parents[3]
+            / "tests"
+            / "fixtures"
+            / "benchmarks"
+            / "iv.json"
+        ),
     )
     args = parser.parse_args()
 

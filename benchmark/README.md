@@ -9,6 +9,22 @@
 [`.claude/skills/reference-benchmark/SKILL.md`](../.claude/skills/reference-benchmark/SKILL.md)
 を参照してください。
 
+## 実行方法（Initiative A でパッケージ化）
+
+`benchmark/` は `__init__.py` を持つ Python パッケージです。スクリプトは
+**リポジトリルートから `-m` で**実行します（各ディレクトリへ `cd` して
+`python foo.py` とは実行できません）。
+
+```
+python -m benchmark.linear.freeze_linear_datasets
+python -m benchmark.linear.fixtures.generate_ols_fixtures        # --output 既定はリポジトリ相対
+python -m benchmark.freeze_datasets                              # 全系統まとめて凍結
+```
+
+系統をまたぐ共通ヘルパーは `benchmark/common/`（旧 `benchmark/_common.py` /
+`_dgp_constants.py` / `load_wooldridge.py`）に集約。再設計の全体像は
+[`docs/planning/specs/benchmark-restructure-design.md`](../docs/planning/specs/benchmark-restructure-design.md)。
+
 ## ライセンスに関する注記
 
 - 本リポジトリ本体（`engine` / `engine_pybind` / `python_package`。PyPIで配布される

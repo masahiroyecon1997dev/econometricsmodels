@@ -37,6 +37,6 @@
   "postCreateCommand": "[ -f pyproject.toml ] && uv sync || echo 'pyproject.toml が未作成のため uv sync をスキップしました'",
   "remoteEnv": {
     "GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}",
-    "PYTHONPATH": "${containerWorkspaceFolder}/benchmark:${containerWorkspaceFolder}/benchmark/linear:${containerWorkspaceFolder}/benchmark/nonlinear:${containerWorkspaceFolder}/benchmark/iv:${containerWorkspaceFolder}/benchmark/performance"
+    "PYTHONPATH": "${containerWorkspaceFolder}"
   }
 }

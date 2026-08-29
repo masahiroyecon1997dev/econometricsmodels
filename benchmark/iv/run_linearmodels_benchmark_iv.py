@@ -83,8 +83,9 @@ import json
 from datetime import UTC, datetime
 
 import polars as pl
-from _common import hac_auto_lag, load_frozen_dataset
-from load_wooldridge import load as _load_wooldridge
+
+from benchmark.common import hac_auto_lag, load_frozen_dataset
+from benchmark.common.load_wooldridge import load as _load_wooldridge
 
 
 def _load_iv_dataset(

@@ -1,16 +1,8 @@
 """共有フィクスチャ。n=100, seed=42, 10 クラスターのデータセットを提供する。"""
 
-import sys
-from pathlib import Path
-
 import numpy as np
 import polars as pl
 import pytest
-
-# 各テストファイルが個別に`sys.path.insert`していた`benchmark/`直下は、conftest.py
-# （pytest起動時に最初に読み込まれる）で一度だけ挿入する。系統別サブディレクトリ
-# （`benchmark/linear/fixtures`等）の挿入は手法ごとに異なるため各ファイルに残す。
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "benchmark"))
 
 
 @pytest.fixture(scope="session")

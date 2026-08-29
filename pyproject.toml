@@ -86,3 +86,10 @@ docs = [
 # （デフォルトのE/Fルールセットを使う）。
 [tool.ruff]
 line-length = 79
+
+# pytest実行時にリポジトリルートをsys.pathへ載せ、`import benchmark.<系統>....`を
+# 1経路で解決できるようにする（旧: 各テストファイルの`sys.path.insert`＋devcontainer
+# のPYTHONPATH。Initiative A で全廃、詳細は
+# docs/planning/specs/benchmark-restructure-design.md）。
+[tool.pytest.ini_options]
+pythonpath = ["."]

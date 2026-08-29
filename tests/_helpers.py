@@ -86,7 +86,7 @@ def wooldridge_loader() -> Callable[[str], pl.DataFrame]:
     `load_wooldridge_dataset`を使う方が簡潔。
     """
     pytest.importorskip("wooldridge")
-    from load_wooldridge import load
+    from benchmark.common.load_wooldridge import load
 
     return load
 

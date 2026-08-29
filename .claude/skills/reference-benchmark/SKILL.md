@@ -20,6 +20,14 @@ allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
 
 ## `benchmark/` ディレクトリの構成（動作確認済み）
 
+> **注意（Initiative A 移行中、2026-08-29〜）**: `benchmark/` は Python パッケージ化された。
+> 系統をまたぐ共通ヘルパーは `benchmark/_common.py` → **`benchmark/common/`**
+> （`helpers.py` / `dgp_constants.py` / `load_wooldridge.py`）へ集約済み。import は
+> すべてドット表記（`from benchmark.common import ...` 等）で、スクリプト実行は
+> **リポジトリルートから `python -m benchmark.<...>`**（各ディレクトリへ `cd` して
+> `python foo.py` は不可）。以下の構成説明のパス・ファイル名は移行完了までに順次
+> 更新する。全体設計は `docs/planning/specs/benchmark-restructure-design.md`。
+
 `engine`/`engine_pybind`と同じ系統（family）単位でディレクトリを分けている（`linear`=OLS/WLS/GLS、`panel`=FE/RE、`iv`=IV、`nonlinear`=Logit/Probit/Tobit等）。系統をまたいで使う汎用ツールのみ`benchmark/`直下に置く。
 
 - `benchmark/_common.py`（系統をまたぐ共通ヘルパー、root）: `imbalanced_cluster_groups`（クラスターロバストSE確認用の不均衡グループ生成、全系統で共通利用）・`hac_auto_lag`（HAC自動ラグ選択式）・`DATA_DIR`（固定CSVの置き場所）・`load_frozen_dataset`（`{prefix}_{scenario}.csv`＋`{prefix}_true_beta.json`読み込み）・`freeze_scenarios`（freezeスクリプトの共通ループ処理）・`run_freeze_cli`（`freeze_datasets.py`／`freeze_<系統>_datasets.py`の`__main__`共通処理）・`preview_dataset`（`generate_<系統>_datasets.py`の`__main__`共通処理、単体実行時のシナリオ1件プレビュー）を集約。`DATA_DIR`等は各利用箇所（`fixtures/generate_*.py`等）がここから直接importする（`run_*_benchmark.py`経由の再エクスポートには依存しない）。

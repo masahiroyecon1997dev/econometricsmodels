@@ -33,8 +33,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
-from _common import imbalanced_cluster_groups, load_frozen_dataset
-from load_wooldridge import load as load_wooldridge
+
+from benchmark.common import imbalanced_cluster_groups, load_frozen_dataset
+from benchmark.common.load_wooldridge import load as load_wooldridge
 
 NONLINEAR_DIR = Path(__file__).resolve().parent.parent
 R_SCRIPT = NONLINEAR_DIR / "run_glm_crosscheck_benchmark.R"
@@ -256,7 +257,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="../../../tests/fixtures/benchmarks/probit_crosscheck.json",
+        default=str(
+            Path(__file__).resolve().parents[3]
+            / "tests"
+            / "fixtures"
+            / "benchmarks"
+            / "probit_crosscheck.json"
+        ),
     )
     args = parser.parse_args()
 

@@ -478,13 +478,27 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
     **不変性チェック**: stash で 7a 前後のコードで `iv/iv_gmm/iv_crosscheck.json`
     （R 実行含む）を再生成し3本とも完全一致（`generated_at`／version 除外）。凍結 iv CSV
     も完全一致。`pytest` 957件・`ruff` パス。
-  - 次: Step 7b（2SLS/GMM 配線）。`benchmark/iv/references/r.py`（`run_ivreg_r`）を
-    新設し、IV crosscheck のローカル `_run_r`／`_normalize_names` を置換
-    （IV の `_normalize_names` は既に guard 無し・`conf_int` 直通し・margeff 無しのため
-    `normalize_names(stat_key="t_stats", scalar_keys=_IV_SCALAR_KEYS)` でそのまま吸収可、
-    `run_ivreg.R` も全キー無条件出力を確認済み）。3ジェネレータの `__main__` を
-    `run_fixture_cli` へ。`generate_iv_fixtures.py`／`generate_iv_gmm_fixtures.py` は
+  - **Step 7b 完了（2026-08-29）— 2SLS/GMM 配線（ロジック不変・機械的置換のみ）**:
+    `benchmark/iv/references/r.py`（`run_ivreg_r`）を新設。IV の `_normalize_names` は
+    既に guard 無し・`conf_int` 直通し・margeff 無しのため
+    `normalize_names(stat_key="t_stats", scalar_keys=_IV_SCALAR_KEYS)` でそのまま吸収
+    （`run_ivreg.R` も `result <- list(...)` で全16キー無条件出力＝項目39）。
+    `generate_iv_crosscheck_fixtures.py` のローカル `_run_r`／`_normalize_names`（約50行）を
+    `run_ivreg_r` に置換、3ジェネレータの `__main__` を `run_fixture_cli` へ、docstring の
+    旧パス・使用例を新構造へ。`generate_iv_fixtures.py`／`generate_iv_gmm_fixtures.py` は
     `run()`/`run_gmm()` 経由でローカル `_run_r` を持たないため `__main__`＋docstring のみ。
+    `_run_cluster_case`／`_run_cluster_g2_case`／`_ivreg_formula` はローカル据え置き。
+    **不変性チェック**: stash で 7b 前後のコードで `iv/iv_gmm/iv_crosscheck.json`
+    （R 実行含む）を再生成し3本とも完全一致（`generated_at`／version 除外）。
+    `pytest` 957件・`ruff` パス。`/code-review`（fork）指摘ゼロ。
+    **これで4系統（OLS/WLS・Logit/Probit・2SLS/GMM）の手法移行が完了**。
+  - 次: Step 8（後片付け）。`benchmark/performance/` をトップレベルへ `git mv`、
+    `benchmark/freeze_datasets.py` → `regenerate_all.py`（役割の実態に合わせる）、
+    `.github/workflows/benchmark_ols.yml` の親プロセス起動を `python -m ...`＋
+    `working-directory` 撤去へ、旧 `PYTHONPATH` env の掃除。
+    その後 Step 9（`_meta` 文字列の一括棚卸し＋意図的な再凍結、CLAUDE.md §3/§10・
+    ネスト CLAUDE.md・`.claude/skills/reference-benchmark/SKILL.md`・`docs/spec/*` の
+    パス参照更新）。
 
 ---
 

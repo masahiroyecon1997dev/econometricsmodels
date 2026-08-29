@@ -31,17 +31,14 @@ iv_crosscheck.json）を生成するスクリプト。
 フィクスチャ化」参照）。
 
 入力データは`tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
-（`benchmark/freeze_datasets.py`参照）。
+（`benchmark/iv/freeze.py`参照）。
 
-使用例:
-    python generate_iv_crosscheck_fixtures.py \\
-        --output ../../../tests/fixtures/benchmarks/iv_crosscheck.json
+使用例（リポジトリルートから）:
+    python -m benchmark.iv.fixtures.generate_iv_crosscheck_fixtures
 """
 
 from __future__ import annotations
 
-import argparse
-import json
 import subprocess
 import tempfile
 from datetime import UTC, datetime
@@ -50,15 +47,15 @@ from pathlib import Path
 import polars as pl
 
 from benchmark.common import (
+    BENCHMARKS_DIR,
     DATA_DIR,
     hac_auto_lag,
     imbalanced_cluster_groups,
     load_frozen_dataset,
+    run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
-
-REFERENCES_DIR = Path(__file__).resolve().parent.parent / "references"
-R_SCRIPT = REFERENCES_DIR / "run_ivreg.R"
+from benchmark.iv.references.r import run_ivreg_r
 
 # generate_iv_fixtures.pyのCARD_X_EXOGと同じ（Wooldridge card実データ、
 # Issue #231フェーズ4）。
@@ -95,56 +92,6 @@ def _ivreg_formula(
     return f"{y_col} ~ {lhs} | {instruments}"
 
 
-def _normalize_names(raw: dict) -> dict:
-    """パラメータ名を本実装のparam_names規則（切片="const"）に揃える
-    （`generate_ols_crosscheck_fixtures.py`の`_normalize_names`と同じ理由）。
-    """
-
-    def fix(name: str) -> str:
-        return "const" if name == "(Intercept)" else name
-
-    result = {
-        "coef": {fix(k): v for k, v in raw["coef"].items()},
-        "se": {fix(k): v for k, v in raw["se"].items()},
-        "t_stats": {fix(k): v for k, v in raw["t_stats"].items()},
-        "p_values": {fix(k): v for k, v in raw["p_values"].items()},
-        "conf_int": {fix(k): v for k, v in raw["conf_int"].items()},
-    }
-    for key in (
-        "nobs",
-        "df_resid",
-        "r_squared",
-        "r_squared_adj",
-        "f_statistic",
-        "f_p_value",
-        "weak_instrument_f",
-        "sargan_statistic",
-        "sargan_p_value",
-        "wu_hausman_statistic",
-        "wu_hausman_p_value",
-    ):
-        result[key] = raw[key]
-    return result
-
-
-def _run_r(
-    csv_path: Path,
-    formula: str,
-    cov_type: str,
-    cluster_col: str | None = None,
-    hac_lag: int | None = None,
-) -> dict:
-    cmd = ["Rscript", str(R_SCRIPT), str(csv_path), formula, cov_type]
-    if cov_type == "cluster":
-        cmd.append(cluster_col or "")
-    elif cov_type == "hac":
-        cmd.append(str(hac_lag))
-
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    raw = json.loads(proc.stdout)
-    return _normalize_names(raw)
-
-
 def build_synthetic_fixtures(tmpdir: Path) -> dict:
     fixtures: dict = {}
 
@@ -163,10 +110,10 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
                 continue  # baselineのみ別途複数パターンで確認（下記）
             if cov_type == "hac":
                 lag = hac_auto_lag(n)
-                entry = _run_r(csv_path, formula, cov_type, hac_lag=lag)
+                entry = run_ivreg_r(csv_path, formula, cov_type, hac_lag=lag)
                 entry["hac_lag"] = lag
             else:
-                entry = _run_r(csv_path, formula, cov_type)
+                entry = run_ivreg_r(csv_path, formula, cov_type)
             fixtures[scenario][cov_type] = entry
 
         if scenario == "baseline":
@@ -197,12 +144,12 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             continue
         if cov_type == "hac":
             lag = hac_auto_lag(multi_endog_n)
-            entry = _run_r(
+            entry = run_ivreg_r(
                 multi_endog_csv, multi_endog_formula, cov_type, hac_lag=lag
             )
             entry["hac_lag"] = lag
         else:
-            entry = _run_r(multi_endog_csv, multi_endog_formula, cov_type)
+            entry = run_ivreg_r(multi_endog_csv, multi_endog_formula, cov_type)
         fixtures["multi_endog"][cov_type] = entry
 
     # 自由度1境界（df_resid=1ちょうど）。generate_iv_fixtures.pyのdf1と同じ構成
@@ -218,10 +165,10 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             continue  # n=3では意味のあるクラスタ数を確保できないため対象外
         if cov_type == "hac":
             lag = hac_auto_lag(df1_n)
-            entry = _run_r(df1_csv, df1_formula, cov_type, hac_lag=lag)
+            entry = run_ivreg_r(df1_csv, df1_formula, cov_type, hac_lag=lag)
             entry["hac_lag"] = lag
         else:
-            entry = _run_r(df1_csv, df1_formula, cov_type)
+            entry = run_ivreg_r(df1_csv, df1_formula, cov_type)
         fixtures["df1"][cov_type] = entry
 
     return fixtures
@@ -245,7 +192,9 @@ def _run_cluster_case(
     grouped = df.with_columns(pl.Series("cluster_group", cluster_group))
     tmp_path = tmpdir / (csv_path.stem + suffix + ".csv")
     grouped.write_csv(tmp_path)
-    return _run_r(tmp_path, formula, "cluster", cluster_col="cluster_group")
+    return run_ivreg_r(
+        tmp_path, formula, "cluster", cluster_col="cluster_group"
+    )
 
 
 def _run_cluster_g2_case(tmpdir: Path) -> dict:
@@ -262,7 +211,9 @@ def _run_cluster_g2_case(tmpdir: Path) -> dict:
     )
     tmp_path = tmpdir / (csv_path.stem + "_cluster_g2.csv")
     grouped.write_csv(tmp_path)
-    return _run_r(tmp_path, formula, "cluster", cluster_col="cluster_group")
+    return run_ivreg_r(
+        tmp_path, formula, "cluster", cluster_col="cluster_group"
+    )
 
 
 def build_wooldridge_fixtures(tmpdir: Path) -> dict:
@@ -284,10 +235,10 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
             continue  # 対応する自然なカテゴリ列が無いため対象外（generate_iv_fixtures.py参照）。
         if cov_type == "hac":
             lag = hac_auto_lag(n)
-            entry = _run_r(csv_path, formula, cov_type, hac_lag=lag)
+            entry = run_ivreg_r(csv_path, formula, cov_type, hac_lag=lag)
             entry["hac_lag"] = lag
         else:
-            entry = _run_r(csv_path, formula, cov_type)
+            entry = run_ivreg_r(csv_path, formula, cov_type)
         fixtures[cov_type] = entry
     return fixtures
 
@@ -371,22 +322,8 @@ def build_fixtures() -> dict:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output",
-        default=str(
-            Path(__file__).resolve().parents[3]
-            / "tests"
-            / "fixtures"
-            / "benchmarks"
-            / "iv_crosscheck.json"
-        ),
+    run_fixture_cli(
+        build_fixtures,
+        BENCHMARKS_DIR / "iv_crosscheck.json",
+        description=__doc__,
     )
-    args = parser.parse_args()
-
-    fixtures = build_fixtures()
-
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(fixtures, indent=2, ensure_ascii=False))
-    print(f"wrote {output_path} ({len(json.dumps(fixtures))} bytes)")

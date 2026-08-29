@@ -1,33 +1,35 @@
 """IV（2SLS）のテストフィクスチャ（tests/fixtures/benchmarks/iv.json）を
 生成するスクリプト。
 
-`benchmark/iv/run_linearmodels_benchmark_iv.py`（1回呼べば1ケース分の結果を返す汎用
-ツール）を全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つのJSONにまとめて
-書き出す。GMMは`method="gmm"`がまだPython側に配線されていないため対象外
-（`run_linearmodels_benchmark_iv.py`のモジュールdocstring参照）。
+`benchmark/iv/references/linearmodels_ref.py`（1回呼べば1ケース分の結果を返す
+汎用アダプタ）を全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つのJSONに
+まとめて書き出す。GMMは`method="gmm"`がまだPython側に配線されていないため対象外
+（`linearmodels_ref.py`のモジュールdocstring参照）。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`iv.json`は
 `tests/fixtures/benchmarks/`に置く（両者を分ける理由は
 `.claude/skills/reference-benchmark/SKILL.md`参照）。
 
 入力データは`tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
-（`benchmark/freeze_datasets.py`参照）。
+（`benchmark/iv/freeze.py`参照）。
 
-使用例:
-    python generate_iv_fixtures.py --output ../../../tests/fixtures/benchmarks/iv.json
+使用例（リポジトリルートから）:
+    python -m benchmark.iv.fixtures.generate_iv_fixtures
 """
 
 from __future__ import annotations
 
-import argparse
-import json
 from datetime import UTC, datetime
-from pathlib import Path
 
 import linearmodels
 import polars as pl
 
-from benchmark.common import DATA_DIR, imbalanced_cluster_groups
+from benchmark.common import (
+    BENCHMARKS_DIR,
+    DATA_DIR,
+    imbalanced_cluster_groups,
+    run_fixture_cli,
+)
 from benchmark.iv.references.linearmodels_ref import run
 
 # 丁度識別・過剰識別を問わずx_exog=['x1'], x_endog=['endog1'], instruments=[...]の
@@ -235,22 +237,6 @@ def _run_cluster_g2_case() -> dict:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output",
-        default=str(
-            Path(__file__).resolve().parents[3]
-            / "tests"
-            / "fixtures"
-            / "benchmarks"
-            / "iv.json"
-        ),
+    run_fixture_cli(
+        build_fixtures, BENCHMARKS_DIR / "iv.json", description=__doc__
     )
-    args = parser.parse_args()
-
-    fixtures = build_fixtures()
-
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(fixtures, indent=2, ensure_ascii=False))
-    print(f"wrote {output_path} ({len(json.dumps(fixtures))} bytes)")

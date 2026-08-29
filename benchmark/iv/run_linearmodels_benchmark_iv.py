@@ -443,7 +443,9 @@ def run_gmm(
     from linearmodels.iv import IVGMM
     from scipy import stats as scipy_stats
 
-    df, true_beta = _load_iv_dataset(dataset)
+    # GMMのフィクスチャは合成データセットのみ（`generate_iv_gmm_fixtures.py`参照。
+    # 2SLSの`run()`と違いWooldridge実データケースは持たない）。
+    df, true_beta = _load_iv_dataset("synthetic", dataset)
     pdf = df.to_pandas()
     n = len(pdf)
 

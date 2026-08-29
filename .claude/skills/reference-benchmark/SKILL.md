@@ -45,13 +45,12 @@ allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
 3. 新しい統計量・cov_typeを初めて使う場合は、Rの`lm`+`sandwich`/`lmtest`（`benchmark/<系統>/run_lm_crosscheck_benchmark.R`）でも同じ組み合わせを計算し、statsmodelsと一致することを確認する。一致しない場合は既定値（自由度補正等）の違いを疑って調査する。fixest/pyfixestは実装系統がfixestと同一のため、独立実装によるクロスチェックとしては使わない（補助的な確認に留める）。
    - AIC/BICはR標準の`AIC()`/`BIC()`関数をそのまま使わない。残差分散を1パラメータとして追加でカウントする慣習（k+1）のため、本実装・statsmodels（回帰係数の数kのみ使用）とはAICがちょうど2、BICが`log(n)`だけ系統的にずれる。本実装と同じ式（`-2*loglik + 2*k`等）で手計算した値と比較する（`run_lm_crosscheck_benchmark.R`が実装例）。
 4. `benchmark/linear/generate_linear_datasets.py`の7シナリオ（固定済みCSV経由）で対象手法を実行する。ただし完全な多重共線性シナリオは数値比較の対象外（想定エラーの発生確認のみ、`testing-policy.md`「テストの3系統」参照）。境界値・悪条件（`n=k+1`、極端なスケール差、高条件数）やクラスター系の不均衡・境界値ケースも対象手法に応じて検討する（`testing-policy.md`「テスト用データセット」参照）。
-5. Wooldridge等の実データセットでも同様に確認する（`load_wooldridge.py`の`SUGGESTED_DATASETS`は候補であり、実際に使うデータセットは手法実装時に個別に確認する）。
+5. Wooldridge等の実データセットでも同様に確認する（実際に使うデータセットは手法実装時に個別に検討し、選定理由・変数構成を`docs/spec/<手法名>-spec.md`「テスト」節に明記する）。
 6. 生成した結果を`tests/fixtures/benchmarks/`にJSONとして保存する（`_meta`フィールドにリファレンス実装・バージョン・生成コマンドが含まれることを確認する）。
 7. テストコード自体の作成・実行は `/test-new` `/test-run` に引き継ぐ。このスキルはベンチマーク値の生成・フィクスチャ化に留める。pytest側は合成データについては`tests/fixtures/benchmarks/data/`の固定CSVを直接読む（ジェネレータを呼ばない）ため`wooldridge`パッケージは不要だが、Wooldridge実データのクロスチェックテストは`pytest.importorskip("wooldridge")`で任意扱いにする（下記参照）。
 
 ## 既知の未確定事項
 
-- `load_wooldridge.py`の`SUGGESTED_DATASETS`は候補に過ぎない。手法ごとに実際に使うデータセットは個別に相談して確定する。
 - **Wooldridgeデータセットは`freeze_datasets.py`での固定化対象外**（`wooldridge`パッケージ自体はMITライセンスだが、同梱データの著作権が原典の教科書側にある可能性があり、フィルタ後の部分集合であってもリポジトリにCSVとして再配布してよいか未確認のため。ユーザー確認済み）。合成データセットとは異なり、Wooldridgeデータは`load_wooldridge.py`経由で都度ロードし続ける。ライセンスが明確になれば固定化を再検討する。
 - `run_plm_benchmark.R`/`run_ivreg_benchmark.R`は引き続き未検証。特に`plm`のindex指定（individual/time列）は手法・データセットごとに調整が必要。
 - フィクスチャJSONの正式なディレクトリ構成・命名規則は、実際に`tests/`を作る際に確定する。

@@ -217,6 +217,15 @@ GMMは`ivreg`が対応していないため、**Python（`linearmodels`）のみ
 `panel-api-design.md`5.4と同じ（既存方針の相対誤差1e-8を基本、GMM等で乖離が大きい場合は
 実測値に基づき個別に緩和を検討）。
 
+### 5.5 実データセット
+
+Wooldridge`card`（Card 1995、大学近接操作変数`nearc2`/`nearc4`による教育の収益率推定
+`lwage ~ CARD_X_EXOG + educ`）を使い、`test_iv_fixtures.py`（linearmodels主リファレンス）・
+`test_iv_crosscheck.py`（ivreg）の両方で全cov_typeをクロスチェックする
+（`testing-policy.md`「テスト用データセット」2.が要求する実データ検証、Issue #231
+フェーズ4で追加）。GMMは5.3節の方針によりRクロスチェック省略のため実データセットでの
+Rクロスチェックも対象外。
+
 ## 6. IV固有論点（確定）
 
 `linearmodels`（`linearmodels/iv/model.py`・`results.py`）のソースコードを確認しながら

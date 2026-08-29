@@ -33,17 +33,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ## 一覧
 
-### 1. `benchmark/load_wooldridge.py`の`SUGGESTED_DATASETS`が未使用
-
-- **対象**: [benchmark/load_wooldridge.py:21-26](../../../benchmark/load_wooldridge.py#L21-L26)
-- **内容**: 手法ごとの候補データセット名を持つ辞書`SUGGESTED_DATASETS`が、
-  定義箇所以外どこからもimport・参照されていない（`grep`で確認済み）。
-  コメントも「要検討・要確定」のまま更新されておらず、実際に採用された
-  データセット（`mroz`, `401ksubs`等）は各`generate_*.py`側に個別に
-  ハードコードされている。実質的にデッドコードの疑い。
-- **気づいた経緯**: 2026-08-14、`load_wooldridge.py`のコード解説中に発見。
-- **状態**: 未対応（残す/削除するかの方針をユーザーに確認待ち）
-
 ### 2. `generate_linear_datasets.py`の`k`下限チェックが4箇所で同型パターン重複
 
 - **対象**: [benchmark/linear/generate_linear_datasets.py:76-114](../../../benchmark/linear/generate_linear_datasets.py#L76-L114)

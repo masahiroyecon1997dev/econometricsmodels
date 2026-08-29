@@ -184,6 +184,11 @@ $$
   役割分担する。一般的なテスト方針は`.claude/rules/testing-policy.md`を参照。
 - pyfixestはOLSの正確性検証には使わない（HC2/HC3にHC1用の小標本補正を誤って適用する既知の
   実装バグがあるため）。性能比較専用（[`ols-performance-notes.md`](./ols-performance-notes.md)）。
+- 実データセット（`test_ols_crosscheck.py`）: `wage1`（`lwage ~ educ + exper + tenure`）・
+  `gpa2`（`colgpa ~ sat + hsperc + tothrs`）のWooldridgeデータセット2つ、
+  classical/HC0-3でRクロスチェック。`wage1`はさらに地域ダミー（northcen/south/west、
+  基準northeast）から合成したregion列でのクラスターロバストSE（実データでのグループ列、
+  4グループ・不均衡サイズ）も検証する。
 - `engine`側は上記の固定シナリオ単体テストに加え、property-basedテスト（`proptest`、
   `engine/src/linear/ols.rs`の`mod proptests`）で不変条件を検証する（詳細な方針は
   `testing-policy.md`「property-basedテスト」参照）。対象プロパティ: 定数項ありなら残差和は常に0、

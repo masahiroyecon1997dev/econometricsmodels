@@ -16,15 +16,6 @@ from __future__ import annotations
 
 import polars as pl
 
-# 手法ごとに適切なデータセットの候補（要検討・要確定）。
-# 実際に採用するデータセットはモデル実装時に個別に確認する。
-SUGGESTED_DATASETS: dict[str, list[str]] = {
-    "ols": ["wage1", "gpa2"],
-    "wls": ["401ksubs"],
-    "iv": ["mroz", "card"],
-    "probit_logit": ["mroz"],
-}
-
 
 def load(dataset_name: str) -> pl.DataFrame:
     """Wooldridgeデータセットをpolars DataFrameとして読み込む。

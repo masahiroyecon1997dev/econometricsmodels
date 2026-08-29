@@ -96,8 +96,8 @@
   「crosscheck系は計算式・シグネチャが異なるため対象外」という説明が
   OLS/WLS/IV crosscheckには既に当てはまらなくなっていた）・項目48
   （同docstringの「フェーズ3.5で修正予定」という古い記述、`tests/_helpers.py`の
-  「22箇所で重複」等の陳腐化した件数）: いずれも対応済み・コミット待ち
-  （本セッションで実装、コミット前確認待ち）。`grep`で実際の呼び出し元を
+  「22箇所で重複」等の陳腐化した件数）: いずれも対応済み・コミット済み
+  （`10ef78e`）。`grep`で実際の呼び出し元を
   確認した結果、`test_ols_crosscheck.py`/`test_wls_crosscheck.py`/
   `test_iv_crosscheck.py`は`functools.partial`で`_assertions.py`の
   `assert_close`/`assert_dict_close`を再利用している一方、
@@ -111,7 +111,28 @@
   コード変更自体（計算式は既に一致しているため統合の障害は無い見込み）は
   未実施。着手する場合は新規候補として別途起票する。
   `pytest tests`956件全件パス、`ruff check`／`ruff format --check`パス確認済み。
-- 上記以外（`refactoring-candidates.md`項目1・2・5〜35・37・39〜41・43）は未着手。
+- 項目1（`benchmark/load_wooldridge.py`の`SUGGESTED_DATASETS`が未使用）:
+  対応済み・コミット待ち（本セッションで実装、コミット前確認待ち）。
+  削除する方針で確定（ユーザー判断。呼び出し側の形〔手法カテゴリ→リスト〕が
+  実際の利用ニーズ〔個別データセット名〕と合わず、Wooldridgeデータセット名は
+  外部パッケージ側の固定識別子で一元化の恩恵が薄いという判断）。削除に伴い、
+  「仕様書に明記されていること」を代替の記録場所とする方針とし、記載が
+  無かった2箇所を追加で埋めた。
+  - `docs/spec/ols-spec.md`「3.6 テスト」に実データセット（`wage1`/`gpa2`、
+    classical/HC0-3、`wage1`は地域クラスターも検証）の記載を追加
+    （従来は完全に未記載だった）。
+  - `docs/planning/specs/iv-api-design.md`に新規「5.5 実データセット」節を追加
+    （`card`、全cov_typeで`linearmodels`/`ivreg`双方をクロスチェック）。
+    **副次的な発見**: `SUGGESTED_DATASETS`の`"iv": ["mroz", "card"]`は
+    不正確だった（`mroz`は実際にはIVで使われておらず、コメント中の一例と
+    しての言及のみ。実際にIVが使う実データは`card`のみ）。
+  - `.claude/skills/reference-benchmark/SKILL.md`の`SUGGESTED_DATASETS`言及
+    2箇所も、「選定理由・変数構成を`docs/spec/<手法名>-spec.md`に明記する」
+    という新しい運用に合わせて更新。
+  - `refactoring-candidates.md`から項目1を削除済み。
+  `pytest tests`956件全件パス、`ruff check`／`ruff format --check`パス確認済み、
+  `python benchmark/load_wooldridge.py wage1`で動作確認済み。
+- 上記以外（`refactoring-candidates.md`項目2・5〜35・37・39〜41・43）は未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は
   未着手。項目50以降は別セッションが並行して追記・コミットしているため、
   このスナップショットでは網羅しない（同ファイルを直接参照すること）。

@@ -24,8 +24,12 @@ def _format_time(seconds: float) -> str:
 
 
 def _format_rss(peak_rss_kb: float) -> str:
-    """ピークRSS（KB）をMB表示の文字列に整形する。"""
-    return f"{peak_rss_kb / 1024:.0f}MB"
+    """ピークRSS（KB）をMB表示の文字列に整形する。
+
+    小数第1位まで表示する（`_perf_harness._measure_point` の進捗ログと桁を
+    揃える。実行時間側が両所とも `.4f` で揃っているのと同じ整理）。
+    """
+    return f"{peak_rss_kb / 1024:.1f}MB"
 
 
 def _pivot_table(

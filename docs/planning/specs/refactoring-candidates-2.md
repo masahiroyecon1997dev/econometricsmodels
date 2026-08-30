@@ -1237,3 +1237,34 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-24、`tests/test_probit.py`解説後のユーザー指摘。
 - **状態**: 未対応（方向性: 共通関数切り出し＋ファイルは分離維持。着手
   タイミングはユーザー判断待ち、項目68と合わせて検討）
+
+### 96. 項目85〜90が`tests/test_probit_fixtures.py`にも同様に該当する（一括注記）
+
+- **対象**: [tests/test_probit_fixtures.py](../../../tests/test_probit_fixtures.py)
+  全体
+- **内容**: `tests/test_probit_fixtures.py`解説時、`sed`によるクラス名
+  置換＋`diff`で`test_logit_fixtures.py`とコード部分が完全に同一
+  （項目95と同じ現象）であることを確認した。個別に項目を複製すると
+  項目数が倍増し見通しが悪くなるため、該当箇所を1項目にまとめて記録する。
+  - **項目85**（`check_margeff`が項目72の参考実装）: このファイルも
+    `_assertions.py`の`check_margeff`を正しく利用しており該当。
+  - **項目86**（`hc1`がR`sandwich`単独で三角測量が効かない、リスクは
+    相対的に低い）: `COV_TYPES`に`hc1`が含まれず、docstringにも
+    「Probitでも同じ欠落を実機確認済み」と明記されており該当。
+  - **項目87**（OPG標準誤差の手計算が`benchmark/`の参照実装と重複）:
+    `test_include_intercept_false_matches_statsmodels`内に同一の
+    `score_obs`手計算コードが存在し該当。
+  - **項目88**（`_rename`使用、項目63と同じ論点）: `_check_result`内で
+    同じ用法があり該当。
+  - **項目89**（`if ref["margeff"] is not None:`の消極的チェック）:
+    `_check_result`内に同一コードがあり該当。
+  - **項目90**（少数クラスタのクラスターロバストSE信頼性、ドキュメント
+    対応が適切）: `test_cluster_g2_matches_statsmodels`のdocstringが
+    「Logitのcluster_cov_paramsと同じく」とLogit側を参照しており該当。
+- **Claudeの所感**: 対応する場合はLogit/Probit両方をまとめて一度に
+  修正するのが効率的（項目95の共通関数切り出しと合わせて対応すれば、
+  切り出した共通関数を直すだけで両手法に反映される）。
+- **気づいた経緯**: 2026-08-24、`tests/test_probit_fixtures.py`解説時に
+  確認。
+- **状態**: 未対応（項目85〜90への追記の代わりにこの1項目に集約、
+  着手要否はユーザー判断待ち）

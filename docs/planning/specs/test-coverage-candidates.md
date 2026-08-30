@@ -921,39 +921,70 @@
   ユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目91と合わせて対応可能）
 
-### 43. クラスターロバストSE系テスト全般（synthetic疑似クラスタ・mroz実データの両方、`test_logit_fixtures.py`/`test_logit_crosscheck.py`双方）が`coef`/`se`のみ検証しており、フィクスチャに既に存在する`z_stats`/`p_values`/`conf_int`/適合度統計量/`margeff`を検証していない
+### 43. `mroz`実データのクラスターロバストSEテスト（`test_logit_fixtures.py`/`test_logit_crosscheck.py`双方）が`coef`/`se`のみ検証しており、フィクスチャに既に存在する`z_stats`/`p_values`/`conf_int`/適合度統計量/`margeff`を検証していない（synthetic疑似クラスタ側は生成物と一致しており対象外）
 
-- **対象**: [tests/test_logit_fixtures.py:155-194](../../../tests/test_logit_fixtures.py#L155-L194)
-  ・[tests/test_logit_fixtures.py:287-299](../../../tests/test_logit_fixtures.py#L287-L299)
-  （`test_cluster_matches_statsmodels`等4件、いずれも`_assert_dict_close
-  (res.params, ...)`・`_assert_dict_close(res.std_errors, ...)`の2行のみ）、
-  [tests/test_logit_crosscheck.py:179-235](../../../tests/test_logit_crosscheck.py#L179-L235)
-  （同型4件、`test_mroz_cluster_matches_r_glm`含む）
+- **対象**: [tests/test_logit_fixtures.py:287-299](../../../tests/test_logit_fixtures.py#L287-L299)
+  （`test_mroz_cluster_matches_statsmodels`）、
+  [tests/test_logit_crosscheck.py:223-235](../../../tests/test_logit_crosscheck.py#L223-L235)
+  （`test_mroz_cluster_matches_r_glm`）。いずれも`_assert_dict_close
+  (res.params, ...)`・`_assert_dict_close(res.std_errors, ...)`の2行のみ。
+  Probit側の対応するテスト（`test_probit_fixtures.py::test_mroz_cluster_
+  matches_statsmodels`）にも同型の抜けがある。
 - **内容**: ユーザー指摘（2026-08-23、「`test_mroz_cluster_matches_r_glm`
-  でz値やp値、他のパラメータの検証が抜けていないか」）を受けて
-  フィクスチャJSONの実際の中身を確認したところ、**mroz実データの
-  クラスターケースだけでなく、synthetic疑似クラスタのケース
-  （`baseline`/`cluster_imbalanced`/`cluster_g2`）も含め、全てのクラスタ
-  フィクスチャエントリに`coef`/`se`以外の`z_stats`/`p_values`/`conf_int`/
-  `log_likelihood`/`aic`/`bic`/`lr_statistic`/`lr_p_value`/
-  `pseudo_r_squared`/`margeff`が既に生成・記録済み**（`_check_result`が
-  使う完全なフィールドセットと同一）であることを確認した。にもかかわらず
-  8件のクラスター系テスト（`test_logit_fixtures.py`4件・
-  `test_logit_crosscheck.py`4件）全てが`coef`/`se`の2項目しか検証して
-  いない。synthetic疑似クラスタについては元々「統計的な意味は無く実装の
-  動作確認用」という理由で`coef`/`se`のみに絞る設計判断が明記されている
-  （`test_wls_fixtures.py`解説時に確認済みの既存方針）が、**mroz実データの
-  `city`クラスターは正当な実カテゴリ変数であり、この「統計的意味が無い」
-  という理由付けはそのまま当てはまらない**。
-- **Claudeの所感**: 少なくとも`test_mroz_cluster_matches_statsmodels`/
-  `test_mroz_cluster_matches_r_glm`（実データ版）は`_check_result`ベースの
-  完全な検証に切り替える価値が高いと考える（データは既に存在するため
-  フィクスチャ再生成も不要、テストコード側の変更のみで対応可能）。
-  synthetic疑似クラスタ版は「動作確認用」という既存方針を尊重するなら
-  `coef`/`se`のみのままでも一貫性はあるが、こちらもフィクスチャに
-  既にデータがあるため`_check_result`化するコストは低く、対応するなら
-  合わせて統一するのが良いと考える。
+  でz値やp値、他のパラメータの検証が抜けていないか」）を受けてフィクスチャ
+  JSONの実際の中身を確認。**mroz実データのクラスターエントリ
+  （`logit.json`の`mroz.cluster`・`logit_crosscheck.json`の
+  `wooldridge.mroz.cluster.r`）にはstatsmodels側・R側どちらも
+  `coef`/`se`以外の`z_stats`/`p_values`/`conf_int`/`log_likelihood`/`aic`/
+  `bic`/`lr_statistic`/`lr_p_value`/`pseudo_r_squared`/`margeff`が
+  既に生成・記録済み**（`_check_result`が使う完全なフィールドセットと
+  同一）であることを確認した。にもかかわらずテストは`coef`/`se`の
+  2項目しか検証していない。`city`は正当な実カテゴリ変数であり、
+  synthetic疑似グループのような「統計的意味が無いので動作確認だけで
+  十分」という理由付けは当てはまらない。
+- **追記（2026-08-24、`test_probit_fixtures.py`解説時の再確認で判明・
+  当初の記載を訂正）**: 当初はsynthetic疑似クラスタ（`baseline`/
+  `cluster_imbalanced`/`cluster_g2`）のフィクスチャエントリにも同様に
+  フルの統計量が存在すると記載していたが、**statsmodels側フィクスチャ
+  （`logit.json`/`probit.json`）を実際に確認したところ、synthetic疑似
+  クラスタのエントリは`coef`/`se`/`_meta`のみで、フルの統計量は
+  生成されていなかった**（`test_wls_fixtures.py`解説時に確認した
+  「疑似グループは動作確認用に留める」という既存方針とテストが実際に
+  一致している）。一方**Rクロスチェック側フィクスチャ
+  （`logit_crosscheck.json`/`probit_crosscheck.json`）はsynthetic疑似
+  クラスタでもフルの統計量を生成していた**ため、生成スクリプト間で
+  「疑似クラスタでどこまで統計量を生成するか」の方針が食い違っている
+  （Rクロスチェック側の生成スクリプトが、後から`_check_result`と
+  同じ関数を疑似クラスタ用にも流用した結果と推測される）。この
+  生成スクリプト間の不統一自体は実害が無い（無駄に多く生成している
+  だけで欠落ではない）ため、この項目のタイトル・対象からは
+  synthetic疑似クラスタ関連の指摘を除外し、**mroz実データのクラスター
+  ケースのみ**に絞った。
+- **Claudeの所感**: `test_mroz_cluster_matches_statsmodels`/
+  `test_mroz_cluster_matches_r_glm`（Logit・Probit計4テスト）は
+  `_check_result`ベースの完全な検証に切り替える価値が高い。データは
+  既に存在するためフィクスチャ再生成は不要で、テストコード側の変更
+  のみで対応可能。synthetic疑似クラスタ側は現状のフィクスチャ生成物と
+  テストの検証範囲が一致しているため対応不要と判断する。
 - **気づいた経緯**: 2026-08-24、`tests/test_logit_crosscheck.py`解説後の
-  ユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち、mroz実データ版は優先度
-  やや高、synthetic疑似クラスタ版は既存方針との整合性を要確認）
+  ユーザー指摘、`tests/test_probit_fixtures.py`解説時にフィクスチャの
+  実際の中身を再確認し記載を訂正。
+- **状態**: 未対応（着手要否はユーザー判断待ち、mroz実データ版4テスト
+  〔Logit fixtures/crosscheck・Probit fixtures/crosscheck〕が対象）
+
+### 44. 項目41が`tests/test_probit_fixtures.py`にも同様に該当する（一括注記）
+
+- **対象**: [tests/test_probit_fixtures.py](../../../tests/test_probit_fixtures.py)
+  全体（`test_matches_statsmodels`はmethod既定固定・`test_method_matches_
+  statsmodels`はcov_type="classical"固定という同じ構造）
+- **内容**: `tests/test_probit_fixtures.py`解説時、コード部分が
+  `test_logit_fixtures.py`と完全に同一（項目95・96参照）であることを
+  確認したため、項目41（`method`〔bfgs/lbfgs〕と`cov_type`・シナリオ・
+  クラスターの組み合わせが未検証）がそのまま該当する。
+- **Claudeの所感**: 対応する場合は項目41と同じ方針（全組み合わせでは
+  なく代表的な組み合わせに絞って追加）をLogit/Probit両方にまとめて
+  適用するのが効率的。
+- **気づいた経緯**: 2026-08-24、`tests/test_probit_fixtures.py`解説時に
+  確認。
+- **状態**: 未対応（項目41への追記の代わりにこの1項目に集約、着手要否は
+  ユーザー判断待ち）

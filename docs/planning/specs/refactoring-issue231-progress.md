@@ -343,7 +343,7 @@
     各呼び出し側がこの文字列を渡す。
   - 正味削減は多くて全4ファイル合計〜5行、代わりに間接層とファイル跨ぎのジャンプが増える。
   - なお `library()` の `suppressMessages` 統一（`run_ivreg.R` のみ実施済み）は別枠の
-    項目37で、そちらは素直な改善余地あり。
+    項目37（後述、調査の上「現状リスクは限定的」として記録・削除）。
 - 項目23（`run_lm_predict_crosscheck.R` を手法非依存の汎用スクリプトにできないか、
   設計判断候補）: **先回りの一般化はしないと判断**（2026-08-30、ユーザー確認済み）。
   `refactoring-candidates.md`からは削除。判断の根拠:
@@ -360,6 +360,37 @@
     Tobit は `predict()` の意味自体（打ち切り前の潜在変数か観測値か）が未確定。
   - よって「今すぐ決める話ではない」という項目本文の結論を追認し、実際の判断は
     #131/#132/#222 着手時に行う（そのとき `run_lm_predict_crosscheck.R` を触る）。
+- 項目30（`run_glm_crosscheck.R` 内で列スケーリング反転ロジックが2回重複）:
+  対応済み・コミット待ち（2026-08-30、ユーザー確認済み）。`observed_bread()`
+  （w=Hessian重み）と `opg` 分岐（w=1）で繰り返していた「列L2ノルムで正規化 →
+  `solve()` → `Σ=D⁻¹(D⁻¹MD⁻¹)⁻¹D⁻¹` の恒等式で列スケールを戻す」を、同ファイル内の
+  ローカル関数 `scaled_gram_inverse(mat, w = 1)` に集約（`_common.R` へは出さない
+  ——lm/ivreg は使わないため）。`observed_bread` は3行、`opg` 分岐は1行に縮小、
+  微妙な un-scale 恒等式を1回だけ記述する形に。純粋な機械的抽出で数値不変
+  （`logit/probit_crosscheck.json` を再生成し top-level `generated_at` 以外
+  byte 一致を確認、フィクスチャ自体は更新しない）。`run_glm_crosscheck.R` は
+  正味 −13行。
+- 項目37（`suppressMessages` が `run_ivreg.R` にしか無く他3 R ファイルに JSON 破損
+  リスク）: **調査の上、現状リスクは限定的と判断し記録して削除**（2026-08-30、
+  ユーザー確認済み）。判断の根拠:
+  - `run_r()`（`benchmark/common/reference/r.py`）は
+    `subprocess.run(cmd, capture_output=True, ...)` で **stdout と stderr を別々に
+    捕捉**し、`json.loads(proc.stdout)` で **stdout のみ**をパースする。
+  - R の `library()` 起動メッセージ・マスキング警告は `message()` 経由で **stderr**
+    に出るため `proc.stderr` に入り、JSON パースには影響しない。
+  - 使用パッケージ（`sandwich`/`lmtest`/`jsonlite`/`ivreg`/`marginaleffects`）は
+    `library()` 時に **stdout へバナーを書かない**。`_common.R` に `library()` 呼び出し
+    自体が無い。
+  - したがって項目が想定する「`library()` メッセージが `toJSON` 出力に混ざって
+    JSON パースが壊れる」経路は現在のコードでは事実上塞がっている。`run_ivreg.R` の
+    `suppressMessages` は現状バグを直しているのではなく防御的・整合性目的。
+  - 他3ファイルへの追加は「安価な整合性ハードニング」ではあるが必須ではなく、
+    やるなら `run_r()` がストリームをマージする実装に変えたとき等に合わせて行えばよい。
+- 項目38（`script_dir` 特定 → `_common.R` の `source()` ブロックは構造的に共通化
+  しにくい）: 「対応不要」判定済み（2026-08-16）につき `refactoring-candidates.md`
+  から削除（2026-08-30、ユーザー確認済み）。理由: 3行を `_common.R` 側のヘルパーに
+  切り出すには、そのヘルパーを呼ぶ前に `_common.R` を source する必要がある循環
+  （鶏と卵）が生じる（R に `__file__` 相当が無いため）。再提案しても同じ結論。
 - 上記以外（`refactoring-candidates.md`項目12・13・15〜35・37・39〜41・43）は
   未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は

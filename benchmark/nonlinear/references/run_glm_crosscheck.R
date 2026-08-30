@@ -84,20 +84,26 @@ observed_hessian_weights <- function(model, link) {
   }
 }
 
+# mat の各列をL2ノルムで正規化してから M = t(mat_s) %*% (mat_s * w) を反転し、
+# Σ = D⁻¹(D⁻¹MD⁻¹)⁻¹D⁻¹ の恒等式で元の列スケールに戻す（本実装の
+# standardize_columns/destandardize_paramsと同じ発想）。scale_varianceシナリオ
+# では説明変数間のスケール差（例: x1が1e6倍、x2が1e-3倍）がそのまま mat の列
+# スケール差になり、素のsolve()だと見かけの条件数が極端に大きくなって
+# "computationally singular"エラーになるため（真の悪条件ではなく、スケーリング後は
+# 条件数が1桁程度まで下がる。numpyの素の反転と結果が完全一致することを確認済み）。
+# observed_bread（w=Hessian重み）とopgブランチ（w=1）で共有する。
+scaled_gram_inverse <- function(mat, w = 1) {
+  d <- sqrt(colSums(mat^2))
+  mat_s <- sweep(mat, 2, d, "/")
+  inv_scaled <- solve(t(mat_s) %*% (mat_s * w))
+  sweep(sweep(inv_scaled, 1, d, "/"), 2, d, "/")
+}
+
 # sandwich::bread()と同じ規約（n * (X'WX)^-1 = n * (-H)^-1）で返す。
-# opgブランチと同じ理由（scale_varianceシナリオでの見かけ上の特異性回避）で、
-# 列を各々のノルムで正規化してから反転し、Σ=D⁻¹(D⁻¹MD⁻¹)⁻¹D⁻¹の恒等式で
-# 元のスケールに戻す（本実装のstandardize_columns/destandardize_paramsと同じ発想）。
 observed_bread <- function(model, link) {
   X <- model.matrix(model)
-  n <- nrow(X)
   w <- observed_hessian_weights(model, link)
-  d <- sqrt(colSums(X^2))
-  x_scaled <- sweep(X, 2, d, "/")
-  m_scaled <- t(x_scaled) %*% (x_scaled * w)
-  inv_scaled <- solve(m_scaled)
-  m_inv <- sweep(sweep(inv_scaled, 1, d, "/"), 2, d, "/")
-  n * m_inv
+  nrow(X) * scaled_gram_inverse(X, w)
 }
 
 bread_obs <- observed_bread(model, link)
@@ -122,20 +128,10 @@ if (link == "logit") {
 if (cov_type == "classical") {
   vc <- bread_obs / nrow(model.matrix(model))
 } else if (cov_type == "opg") {
-  # 列スケーリング後に反転する（scale_varianceシナリオ対応）: t(scores)%*%scoresは
-  # 説明変数間のスケール差（例: x1が1e6倍、x2が1e-3倍）がそのままスコア行列の列スケール
-  # 差になるため、素のsolve()だと見かけ上の条件数が極端に大きくなり
-  # "computationally singular"エラーになる（実機確認済み、真の悪条件ではなく
-  # スケール差が原因。スケーリング後の条件数は1桁程度まで下がる）。列を各々の
-  # ノルムで正規化してから反転し、Σ=D⁻¹(D⁻¹M D⁻¹)⁻¹D⁻¹の恒等式で元のスケールに
-  # 戻す（本実装のstandardize_columns/destandardize_paramsと同じ発想）。
-  # numpy（素の反転、スケーリングなし）と結果が完全一致することを確認済み
-  # （scale_varianceは見かけの条件数が大きいだけで真に悪条件ではないため）。
-  scores <- estfun(model)
-  s <- sqrt(colSums(scores^2))
-  scores_scaled <- sweep(scores, 2, s, "/")
-  inv_scaled <- solve(t(scores_scaled) %*% scores_scaled)
-  vc <- sweep(sweep(inv_scaled, 1, s, "/"), 2, s, "/")
+  # OPG（外積勾配）分散: Σ = (Σᵢ sᵢsᵢ')⁻¹。scale_varianceシナリオでの
+  # 見かけ上の特異性を避けるため scaled_gram_inverse で反転する（同関数の
+  # docコメント参照）。
+  vc <- scaled_gram_inverse(estfun(model))
 } else if (cov_type %in% c("hc0", "hc1")) {
   meat <- meatHC(model, type = toupper(cov_type))
   vc <- sandwich(model, bread. = bread_obs, meat. = meat)

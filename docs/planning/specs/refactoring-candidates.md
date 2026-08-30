@@ -19,60 +19,21 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: どの作業中に気づいたか（日付）
 - **状態**: 未対応 / 対応済み（対応したIssue・PR等） / 対応不要と判断（理由）
 
-**完了項目の扱い（2026-08-22運用ルール）**: 「対応済み」になった項目はこのファイルから
-削除する（コード自体とgit logが原本であり、詳細な対応済み記録を残す必要は無いと判断）。
-削除した記録は`refactoring-issue231-progress.md`の進捗スナップショットに要点（対応内容・
-コミットハッシュ）のみ残す。一方「対応不要と判断」の項目は、コード上に何も痕跡が
-残らない却下判断のため、同じ提案の調査をやり直さずに済むよう1行程度に圧縮して残す
-（項目38参照）。番号は削除後も詰め直さない（欠番があっても他項目からの「項目N」
-表記自体は維持できる）。ただし**番号を維持しても参照先の内容は消える**ため、
-削除対象の項目を他の項目が「項目N」で参照している場合は、削除前にその参照側へ
-必要な文脈（何の話か・結論）を埋め込み、削除後も参照側だけで自己完結するようにする。
+**完了項目の扱い（2026-08-22運用ルール、2026-08-30更新）**: 「対応済み」「対応不要と
+判断」「調査の上やらないと判断」のいずれになった項目もこのファイルから削除する
+（コード自体とgit logが原本）。削除した記録は`refactoring-issue231-progress.md`の
+「随時対応ログ」に残す——「対応済み」は要点（対応内容・コミットハッシュ）のみ、
+却下・見送り判断は同じ提案の調査をやり直さずに済むよう根拠も含めて残す。番号は
+削除後も詰め直さない（欠番があっても他項目からの「項目N」表記自体は維持できる）。
+ただし**番号を維持しても参照先の内容は消える**ため、削除対象の項目を他の項目が
+「項目N」で参照している場合は、削除前にその参照側へ必要な文脈（何の話か・結論）を
+埋め込み、削除後も参照側だけで自己完結するようにする。
 
 ---
 
 ## 一覧
 
 ※ 項目12・13・15・16・18〜21・24〜29・31〜35・39 は、`benchmark/` の構造変更（Initiative A、`benchmark-restructure-design.md`）が上位計画として吸収したため削除した（吸収項目の一覧は同ノート10章、対応の進捗は`refactoring-issue231-progress.md`）。番号は詰め直さない（記録フォーマット節参照）。
-
-### 30. `benchmark/nonlinear/references/run_glm_crosscheck.R`内で列スケーリングによる反転ロジックが2回重複
-
-- **対象**: [benchmark/nonlinear/references/run_glm_crosscheck.R:91-101](../../../benchmark/nonlinear/references/run_glm_crosscheck.R#L91-L101)
-  （`observed_bread`）・[benchmark/nonlinear/references/run_glm_crosscheck.R:134-138](../../../benchmark/nonlinear/references/run_glm_crosscheck.R#L134-L138)
-  （`opg`分岐）
-- **内容**: `scale_variance`シナリオでの見かけ上の特異性を避けるため、「列を各々のノルムで
-  正規化→反転→`Σ=D⁻¹(D⁻¹MD⁻¹)⁻¹D⁻¹`の恒等式でスケールを戻す」という同じテクニックが
-  同一ファイル内で2回（`observed_bread`関数内、および`opg`分岐のインラインコード）
-  ほぼ同じ形で書かれている。
-- **Claudeの所感**: `scale_and_invert(M, X または scores) -> 行列`のような小さな
-  ヘルパー関数に切り出せそうだが、他ファイルとの重複ではなく同一ファイル内の
-  重複のため優先度は低め。
-- **気づいた経緯**: 2026-08-16、`benchmark/nonlinear/references/run_glm_crosscheck.R`解説中に発見。
-- **状態**: 未対応（着手要否はユーザー判断待ち、優先度低）
-
-### 37. `suppressMessages`が`benchmark/iv/references/run_ivreg.R`にしか無く、他3ファイルにJSON破損リスクが残る
-
-- **対象**: [benchmark/iv/references/run_ivreg.R:67-72](../../../benchmark/iv/references/run_ivreg.R#L67-L72)
-  （`suppressMessages({library(...)...})`）と、`benchmark/linear/references/run_lm_crosscheck.R`・
-  `benchmark/linear/references/run_lm_predict_crosscheck.R`・`benchmark/nonlinear/references/run_glm_crosscheck.R`（いずれも素の
-  `library(...)`のまま）
-- **内容**: ユーザー指摘（2026-08-16）。`library()`実行時にRのバージョンや
-  パッケージの警告等でメッセージが標準出力に出力されると、`toJSON`の出力に
-  混ざってJSONパースが壊れる可能性がある。`benchmark/iv/references/run_ivreg.R`のみこれを
-  `suppressMessages({...})`で防いでいるが、他3ファイルには同じ対策が無く、
-  単なるスタイルの不統一ではなく**潜在的な頑健性のギャップ**。
-- **Claudeの所感**: 他3ファイルにも`suppressMessages({...})`を追加するのが
-  低リスクな対策。
-- **気づいた経緯**: 2026-08-16、`benchmark/iv/references/run_ivreg.R`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
-
-### 38. `script_dir`特定→`_common.R`の`source()`ブロックは構造的に共通化しにくい（対応不要と判断）
-
-- **対応不要と判断**（2026-08-16）: `benchmark/linear/references/run_lm_crosscheck.R`・`benchmark/iv/references/run_ivreg.R`
-  にある「自分の場所を特定して`_common.R`を`source()`する」3行を`_common.R`側の
-  ヘルパーに切り出そうとすると、そのヘルパーを呼ぶために先に`_common.R`をsourceする
-  必要がある循環（鶏と卵）が生じ、構造的に共通化できない（Rに`__file__`相当が無いため）。
-  再提案しても同じ結論になる見込み。
 
 ### 40. `compare_performance.py`が現状OLS専用に書かれており、他手法へ性能比較を拡張する際に共通化できる可能性が高い
 

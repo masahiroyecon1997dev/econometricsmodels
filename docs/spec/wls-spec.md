@@ -126,4 +126,3 @@ $$
 ## 4. 未実装・未対応
 
 - `predict()`（Issue #132。OLSの`predict(new_data=None)`と同じ設計を適用予定）
-- WLS専用のパフォーマンス比較（`ols-performance-notes.md`はOLS単体の計測で、WLS版は未作成）

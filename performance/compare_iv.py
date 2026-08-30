@@ -23,7 +23,7 @@ n/k スイープは既定 method の **2SLS** で回す。GMM は **method 軸**
 1つ（cov_type=classical, k=5, n=1,000,000）でのみ計測する。GMM × hac は
 linearmodels 側の `IVGMM` + kernel が病的に遅く（n=100,000 で約40秒、engine の
 600倍以上）大規模計測が非現実的なため対象外とする（engine 側の問題ではない。
-`docs/spec/iv-performance-notes.md`「既知の限界」）。正確性検証
+`docs/performance/iv.md`「既知の限界」）。正確性検証
 （`test_iv_fixtures.py`）も 2SLS 主軸・GMM は代表シナリオのみ、という絞り方に
 合わせる。
 
@@ -32,8 +32,8 @@ linearmodels 側の `IVGMM` + kernel が病的に遅く（n=100,000 で約40秒�
 `.claude/rules/testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」に
 従い、代表2点のみ計測する: 最も軽い `classical` と、最も計算コストの重い `hac`
 （Newey-West、bartlett kernel）。IV で classical/hc1/cluster/hac を n=100,000 で
-軽く実測し、OLS/WLS と同じく HAC が最重であることを確認した（`docs/spec/
-iv-performance-notes.md`「計測方法」）。`hc2`/`hc3` は linearmodels 側に対応実装が
+軽く実測し、OLS/WLS と同じく HAC が最重であることを確認した
+（`docs/performance/iv.md`「計測方法」）。`hc2`/`hc3` は linearmodels 側に対応実装が
 無いため（`linearmodels_ref.py` docstring 参照）、性能比較でも扱わない。
 
 ## 計測範囲の対称性（Issue #98）
@@ -50,7 +50,7 @@ GMM は `j_stat`）へ明示アクセスし、engine と同じ処理範囲で計
 
 使用例（リポジトリルートから）:
     python -m performance.compare_iv \\
-        --output docs/spec/_iv_performance_results.json
+        --output docs/performance/results/iv.json
 
     # 単体計測（デバッグ用）。一括実行と条件を揃えるにはスレッド数を1に固定する。
     RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \\

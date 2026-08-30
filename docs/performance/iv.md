@@ -2,13 +2,13 @@
 
 `IV(...).fit()`（Rust engine + PyO3）とPython製リファレンス実装 linearmodels の実行時間・メモリ使用量比較の記録。CLAUDE.md 1章「計算コアはRustで実装し高速化」の狙いを定量的に裏付けることが目的。
 
-再実行可能なスクリプトは`performance/compare_iv.py`（手法非依存の計測ハーネス`performance/_perf_harness.py` ＋ IV固有アダプタ、コミット対象）。生の計測結果JSONはコミットしない（`.gitignore`の`docs/spec/_*.json`参照）。
+再実行可能なスクリプトは`performance/compare_iv.py`（手法非依存の計測ハーネス`performance/_perf_harness.py` ＋ IV固有アダプタ、コミット対象）。生の計測結果JSONはコミットしない（`.gitignore`の`docs/performance/results/*.json`参照）。
 
 比較対象は linearmodels 単体（README「Verification accuracy」表の primary reference。`benchmark/iv/references/linearmodels_ref.py`と同じ主リファレンス）。2SLSは`linearmodels.iv.IV2SLS`、GMMは`linearmodels.iv.IVGMM`に対応させる。
 
 ## 計測方法
 
-`docs/spec/ols-performance-notes.md`「最重要の教訓」「計測方法」と共通（releaseビルド必須・`tracemalloc`不採用・サブプロセス隔離・スレッド数を1に固定・polars→pandas変換は計測区間外・ウォームアップ1回＋`repeats`回の中央値・HACのラグ数を`hac_auto_lag(n)`で両ライブラリに揃える）。IV固有の点は以下。
+`docs/performance/ols.md`「最重要の教訓」「計測方法」と共通（releaseビルド必須・`tracemalloc`不採用・サブプロセス隔離・スレッド数を1に固定・polars→pandas変換は計測区間外・ウォームアップ1回＋`repeats`回の中央値・HACのラグ数を`hac_auto_lag(n)`で両ライブラリに揃える）。IV固有の点は以下。
 
 - **DGP**: `generate_iv_dataset("baseline", k_endog=1, k_instruments=2)`。過剰識別（`k_instruments > k_endog`）で回し、engine が常に計算する過剰識別検定（Sargan / Hansen J）を計測範囲に確実に含める。n/k スイープの`k`は外生説明変数`x_exog`の本数（列は `y, x1..xk, endog1, z1, z2`）。
 - **method（2sls / gmm）**: n/k スイープは既定 method の **2SLS**。**GMM は method 軸**として代表点1つ（cov_type=classical, k=5, n=1,000,000）でのみ計測する。正確性検証（`test_iv_fixtures.py`）も 2SLS 主軸・GMM は代表シナリオのみ、という絞り方に合わせる。GMM × hac は対象外（下記「既知の限界」）。
@@ -66,16 +66,16 @@
 
 - **linearmodels の GMM + kernel（hac）が病的に遅い**: `IVGMM` を `weight_type="kernel"` で回すと n=100,000, k=5 で約**40秒**（engine の同条件 0.063s の600倍以上）。n=1,000,000 では数百秒規模になり計測が非現実的なため、**GMM × hac は性能比較の対象から外している**。engine 側の問題ではなく linearmodels の `IVGMM` + kernel weight の実装特性。GMM は classical の代表点のみ計測する。
 - **`first_stage.diagnostics` の再fitを計測範囲に含めている**: 上記「計測方法」「考察」のとおり、これは engine が常に計算する弱操作変数診断と処理範囲を揃えるための対称化（Issue #98）であり、linearmodels に不利な非対称計測を避けるための措置。再fitを除いた linearmodels コアでも engine が約3倍速いことは「考察」に併記した。
-- その他は `ols-performance-notes.md`「既知の限界」と共通。特に **engineのマルチスレッド線形代数が多コア機・負荷下で不安定になる問題**（`docs/planning/specs/refactoring-candidates.md`項目44）のため、本計測はengine・linearmodelsとも1スレッドに固定しており、数値は「シングルスレッドでの計算コア効率」である。計測は開発コンテナ上の1回のスイープ（`repeats=3`の中央値）で、環境ノイズを排除しきれていない。
+- その他は `ols.md`「既知の限界」と共通。特に **engineのマルチスレッド線形代数が多コア機・負荷下で不安定になる問題**（`docs/planning/specs/refactoring-candidates.md`項目44）のため、本計測はengine・linearmodelsとも1スレッドに固定しており、数値は「シングルスレッドでの計算コア効率」である。計測は開発コンテナ上の1回のスイープ（`repeats=3`の中央値）で、環境ノイズを排除しきれていない。
 
 ## 再現方法
 
 ```bash
 uv run maturin develop --release
 uv run python -m performance.compare_iv --repeats 3 \
-    --output docs/spec/_iv_performance_results.json
+    --output docs/performance/results/iv.json
 uv run python -m performance.render_performance_summary \
-    docs/spec/_iv_performance_results.json
+    docs/performance/results/iv.json
 ```
 
 ## 今後の検討事項

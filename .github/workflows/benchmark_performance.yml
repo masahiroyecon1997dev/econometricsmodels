@@ -46,7 +46,7 @@ jobs:
 
       # 【最重要】必ずreleaseビルドで計測する。デフォルトの`maturin develop`（debugビルド）
       # のままだと最大140倍遅い誤った結果になることを実測済み
-      # （docs/spec/ols-performance-notes.md「最重要の教訓」参照）。
+      # （docs/performance/ols.md「最重要の教訓」参照）。
       - name: maturin develop --release
         run: uv run --locked --group test --group benchmark --group dev maturin develop --release
 

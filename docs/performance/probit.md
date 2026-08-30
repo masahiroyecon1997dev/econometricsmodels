@@ -2,11 +2,11 @@
 
 `Probit(...).fit()`（Rust engine + PyO3）とリファレンス実装 statsmodels（`smf.probit`）の実行時間・メモリ使用量比較の記録。CLAUDE.md 1章「計算コアはRustで実装し高速化」の狙いを定量的に裏付けることが目的。
 
-再実行可能なスクリプトは`performance/compare_probit.py`（手法非依存の計測ハーネス`performance/_perf_harness.py` ＋ Probit固有アダプタ、コミット対象）。生の計測結果JSONはコミットしない（`.gitignore`の`docs/spec/_*.json`参照）。
+再実行可能なスクリプトは`performance/compare_probit.py`（手法非依存の計測ハーネス`performance/_perf_harness.py` ＋ Probit固有アダプタ、コミット対象）。生の計測結果JSONはコミットしない（`.gitignore`の`docs/performance/results/*.json`参照）。
 
 ## 計測方法
 
-`docs/spec/ols-performance-notes.md`「最重要の教訓」「計測方法」・`logit-performance-notes.md`と共通（releaseビルド必須・`tracemalloc`不採用・サブプロセス隔離・スレッド数を1に固定・polars→pandas変換は計測区間外・ウォームアップ1回＋`repeats`回の中央値）。Probit固有の点は以下。
+`docs/performance/ols.md`「最重要の教訓」「計測方法」・`logit.md`と共通（releaseビルド必須・`tracemalloc`不採用・サブプロセス隔離・スレッド数を1に固定・polars→pandas変換は計測区間外・ウォームアップ1回＋`repeats`回の中央値）。Probit固有の点は以下。
 
 - **計測範囲の対称性（Issue #98）**: engine は係数・標準誤差と同じ呼び出しで、対数尤度・**切片のみモデルの対数尤度**・尤度比統計量・そのp値・McFadden擬似R²・AIC・BIC まで常に一括計算する。statsmodels の `ProbitResults` はこれらを遅延評価にしており、特に `llnull` はアクセス時に**切片のみ Probit を別途フィットする**。`_fit_once_statsmodels` は `.fit()` 直後に `llf`/`llnull`/`llr`/`llr_pvalue`/`prsquared`/`aic`/`bic` へ明示アクセスし、engine と同じ処理範囲で計測する。
 - **cov_type**: classical と cluster の代表2点。classical/hc0/cluster を n=100,000, k=5 で軽く実測したところ、Logit と同じく cluster が最重だった。cluster の疑似グループ数は 50 固定。`opg` は statsmodels の discrete model がネイティブ非対応（`score_obs` からの手計算になる）で対称計測できないため対象外。
@@ -62,16 +62,16 @@
 ## 既知の限界
 
 - **n軸が 100,000 まで**: 上記「計測方法」のとおり、baseline DGP・k=5 では n≥500,000 で engine の Probit fit が Hessian 特異エラーになる（`refactoring-candidates.md` 項目45、engine 側の頑健性の課題として要調査）。このため大規模 n（1,000,000）での Probit の計測値は本ドキュメントに無い。他手法（OLS/WLS/Logit）は n=1,000,000 まで計測している。
-- その他は `ols-performance-notes.md`「既知の限界」と共通。特に **engineのマルチスレッド線形代数が多コア機・負荷下で不安定になる問題**（`refactoring-candidates.md` 項目44）のため、本計測はengine・statsmodelsとも1スレッドに固定しており、数値は「シングルスレッドでの計算コア効率」である。
+- その他は `ols.md`「既知の限界」と共通。特に **engineのマルチスレッド線形代数が多コア機・負荷下で不安定になる問題**（`refactoring-candidates.md` 項目44）のため、本計測はengine・statsmodelsとも1スレッドに固定しており、数値は「シングルスレッドでの計算コア効率」である。
 
 ## 再現方法
 
 ```bash
 uv run maturin develop --release
 uv run python -m performance.compare_probit --repeats 3 \
-    --output docs/spec/_probit_performance_results.json
+    --output docs/performance/results/probit.json
 uv run python -m performance.render_performance_summary \
-    docs/spec/_probit_performance_results.json
+    docs/performance/results/probit.json
 ```
 
 ## 今後の検討事項

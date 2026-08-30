@@ -2,7 +2,7 @@
 
 `OLS(...).fit()`（Rust engine + PyO3）とPython製リファレンス実装 statsmodels の実行時間・メモリ使用量比較の記録。CLAUDE.md 1章「計算コアはRustで実装し高速化」の狙いを定量的に裏付けることが目的。
 
-再実行可能なスクリプトは`performance/compare_ols.py`（手法非依存の計測ハーネス`performance/_perf_harness.py` ＋ OLS固有アダプタ、コミット対象）。生の計測結果JSONはコミットしない（`.gitignore`の`docs/spec/_*.json`参照。実行環境依存で再現性が低いため）。
+再実行可能なスクリプトは`performance/compare_ols.py`（手法非依存の計測ハーネス`performance/_perf_harness.py` ＋ OLS固有アダプタ、コミット対象）。生の計測結果JSONはコミットしない（`.gitignore`の`docs/performance/results/*.json`参照。実行環境依存で再現性が低いため）。
 
 比較対象を statsmodels 単体に絞っている（README「Verification accuracy」表の primary reference を性能比較でも踏襲、Issue #250）。以前は pyfixest とも比較していたが、正確性検証に使わない実装を性能比較のためだけに依存させる意味が薄いため廃止した（過去の pyfixest 込みの数値は git 履歴の本ファイル旧版を参照）。
 
@@ -77,11 +77,11 @@ uv run maturin develop --release
 
 # 2. フルスイープを実行（リポジトリルートから。スレッド数固定はハーネスが自動で行う）
 uv run python -m performance.compare_ols --repeats 3 \
-    --output docs/spec/_ols_performance_results.json
+    --output docs/performance/results/ols.json
 
 # 3. Markdown整形（任意）
 uv run python -m performance.render_performance_summary \
-    docs/spec/_ols_performance_results.json
+    docs/performance/results/ols.json
 ```
 
 ## 今後の検討事項

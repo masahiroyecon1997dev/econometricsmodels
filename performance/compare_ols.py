@@ -26,7 +26,7 @@ engine と同じ「フルセットの適合度統計量込み」で計測する�
 使用例（リポジトリルートから）:
     # 一括実行（n軸・k軸両方、結果をJSONに保存）
     python -m performance.compare_ols \\
-        --output docs/spec/_ols_performance_results.json
+        --output docs/performance/results/ols.json
 
     # 単体計測（デバッグ用）。一括実行と条件を揃えるにはスレッド数を1に固定する
     # （一括実行では `_perf_harness._run_isolated` が自動で設定する）。

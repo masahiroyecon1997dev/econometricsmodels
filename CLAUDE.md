@@ -66,7 +66,9 @@ econometricsmodels/
 │
 ├── docs/                          # MkDocs（GitHub Pages公開）
 │   ├── mkdocs.yml
-│   └── planning/                  # plan.md・仕様書（詳細は9章）
+│   ├── spec/                      # 実装済み手法の数式・API仕様の正本（詳細は13章）
+│   ├── performance/               # 手法別の性能比較記録（performance/compare_<method>.pyの実測。<method>.md＋results/にJSON）
+│   └── planning/                  # plan.md・実装途中の設計ノート（詳細は9章）
 │
 └── .github/workflows/
     ├── ci_engine.yml               # cargo test / clippy / fmt（engine/配下トリガー）
@@ -138,6 +140,8 @@ econometricsmodels/
   ここに置く、例: `ci-cd-notes.md`）、`docs/planning/specs/`（実装途中の手法の設計ノート・実装ノート）。
   ある手法の実装が完了したら、その手法の仕様書は`docs/planning/specs/`から`docs/spec/`へ集約する
   （経緯は削除し理由のみ簡潔に記載、1ファイルにまとめる）。
+- 性能比較記録: `docs/performance/<method>.md`（`performance/compare_<method>.py`の実測サマリー。数式・API仕様ではなく
+  実行環境依存の実測値のため`docs/spec/`とは分ける）。生成JSONは`docs/performance/results/`（`.gitignore`対象）。
 
 ## 14. 実装・テスト・ベンチマーク作成・仕様検討時の確認方針
 

@@ -24,8 +24,8 @@ AIC・BIC までを**常に一括計算**する。一方 statsmodels の `Probit
 `.claude/rules/testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」に
 従い、代表2点のみ計測する: 最も軽い `classical` と、最も計算コストの重い
 `cluster`。Logit/Probit は OLS/WLS と違い HAC を持たない。classical/hc0/cluster を
-n=100,000 で軽く実測したところ、Logit と同じく cluster が最重だった（`docs/spec/
-probit-performance-notes.md`「計測方法」）。
+n=100,000 で軽く実測したところ、Logit と同じく cluster が最重だった
+（`docs/performance/probit.md`「計測方法」）。
 
 **`opg` は計測対象外**: statsmodels の discrete model（`Probit.fit`）は `opg` を
 `cov_type` 引数としてネイティブに受け付けず、`score_obs` からの手計算
@@ -43,7 +43,7 @@ k=5・n=100,000）で計測する（`PerfAdapter.extra_methods`）。正確性�
 使用例（リポジトリルートから）:
     # 一括実行（n軸・k軸両方、結果をJSONに保存）
     python -m performance.compare_probit \\
-        --output docs/spec/_probit_performance_results.json
+        --output docs/performance/results/probit.json
 
     # 単体計測（デバッグ用）。一括実行と条件を揃えるにはスレッド数を1に固定する
     # （一括実行では `_perf_harness._run_isolated` が自動で設定する）。

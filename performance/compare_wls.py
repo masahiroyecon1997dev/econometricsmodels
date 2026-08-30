@@ -30,13 +30,13 @@ engine と同じ「フルセットの適合度統計量込み」で計測する�
 `.claude/rules/testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」に
 従い、代表2点のみ計測する: 最も軽い `classical` と、最も計算コストの重い `hac`
 （Newey-West、三重ループ）。WLS で classical/hc1/cluster/hac を n=100,000 で軽く
-実測し、OLS と同じく HAC が最重であることを確認した（`docs/spec/
-wls-performance-notes.md`「計測方法」）。
+実測し、OLS と同じく HAC が最重であることを確認した
+（`docs/performance/wls.md`「計測方法」）。
 
 使用例（リポジトリルートから）:
     # 一括実行（n軸・k軸両方、結果をJSONに保存）
     python -m performance.compare_wls \\
-        --output docs/spec/_wls_performance_results.json
+        --output docs/performance/results/wls.json
 
     # 単体計測（デバッグ用）。一括実行と条件を揃えるにはスレッド数を1に固定する
     # （一括実行では `_perf_harness._run_isolated` が自動で設定する）。

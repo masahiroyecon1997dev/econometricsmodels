@@ -38,6 +38,8 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
   結果整形は `performance/render_performance_summary.py`として分離し、
   `>> "$GITHUB_STEP_SUMMARY"`でjob summaryに出力する。リポジトリルートから
   `python -m performance.<...>`で実行する（Initiative A のパッケージ化に伴う）。
+  手動でのローカル実測サマリーは `docs/performance/<method>.md`に記録する
+  （生成JSONは`docs/performance/results/`、`.gitignore`対象）。
 - 全ワークフローでアクションをコミットSHAで固定する（サプライチェーン攻撃対策）。
 
 ## セキュリティ（既知の脆弱性・非メンテナンス依存）

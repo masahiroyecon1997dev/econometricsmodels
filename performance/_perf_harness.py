@@ -6,7 +6,7 @@
 
 - **`engine` は必ずreleaseビルドで計測する**: `uv run maturin develop`（デフォルト、
   debugビルド）と `--release` とで実行時間が最大140倍変わることを実測で確認済み
-  （`docs/spec/ols-performance-notes.md`「最重要の教訓」）。debugビルドのままだと
+  （`docs/performance/ols.md`「最重要の教訓」）。debugビルドのままだと
   「engineがリファレンス実装より大幅に遅い」という誤った結論に至る。実行前に必ず
   `uv run maturin develop --release` を実行すること。`_worker()` 内で `.so` ファイル
   サイズによる簡易チェックを行い、debugビルドの疑いがある場合は警告を出す。
@@ -38,7 +38,7 @@
   （`_SINGLE_THREAD_ENV`）。多コア機で線形代数バックエンドのスレッドプールが負荷下で
   競合し、engine の classical n=1,000,000 の実行時間が単一スレッド時の20倍以上
   （約0.15秒→3〜4秒）に膨れ上がり計測が不安定になる現象を実測で確認したため
-  （`docs/spec/ols-performance-notes.md`「既知の限界」）。単一スレッドに揃えることで
+  （`docs/performance/ols.md`「既知の限界」）。単一スレッドに揃えることで
   「Rustコアの計算効率 vs Python+BLAS」という比較の主目的を、スレッドプール挙動の
   環境差から切り離す。
 
@@ -137,7 +137,7 @@ class PerfAdapter:
 
     Attributes:
         method: 手法名（"ols" 等）。レポートのタイトル・`_meta`・
-            `docs/spec/<method>-performance-notes.md` のパス生成に使う。
+            `docs/performance/<method>.md` のパス生成に使う。
         module: このアダプタを所有するスクリプトのドット付きモジュールパス
             （"performance.compare_ols"）。1計測点をサブプロセスで再実行する際の
             `python -m <module> --worker ...` の呼び出し先。

@@ -2,7 +2,7 @@
 
 OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`engine_pybind/src/linear/ols.rs`・
 `python_package/econometricsmodels/linear/ols.py`として実装済み。パフォーマンス比較の詳細は
-[`ols-performance-notes.md`](./ols-performance-notes.md)、CI/CD・セキュリティはmethod非依存のため
+[`../performance/ols.md`](../performance/ols.md)、CI/CD・セキュリティはmethod非依存のため
 [`ci-cd-notes.md`](./ci-cd-notes.md)を参照。
 
 ## 1. API引数
@@ -183,7 +183,7 @@ $$
   `ols.json`）/ `test_ols_crosscheck.py`（R独立実装、`ols_crosscheck.json`）の3ファイルで
   役割分担する。一般的なテスト方針は`.claude/rules/testing-policy.md`を参照。
 - pyfixestはOLSの正確性検証には使わない（HC2/HC3にHC1用の小標本補正を誤って適用する既知の
-  実装バグがあるため）。性能比較専用（[`ols-performance-notes.md`](./ols-performance-notes.md)）。
+  実装バグがあるため）。性能比較専用（[`../performance/ols.md`](../performance/ols.md)）。
 - 実データセット（`test_ols_crosscheck.py`）: `wage1`（`lwage ~ educ + exper + tenure`）・
   `gpa2`（`colgpa ~ sat + hsperc + tothrs`）のWooldridgeデータセット2つ、
   classical/HC0-3でRクロスチェック。`wage1`はさらに地域ダミー（northcen/south/west、
@@ -200,7 +200,7 @@ $$
 
 releaseビルド（`maturin develop --release`）必須（debugビルドは最大140倍遅い）。
 classical/HC1/clusterはstatsmodels/pyfixest以上に高速、HACも大規模データではほぼ互角。
-メモリはengineが一貫して最小。詳細な実測データは[`ols-performance-notes.md`](./ols-performance-notes.md)参照。
+メモリはengineが一貫して最小。詳細な実測データは[`../performance/ols.md`](../performance/ols.md)参照。
 
 ## 4. 未実装・未対応
 

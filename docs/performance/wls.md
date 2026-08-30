@@ -2,11 +2,11 @@
 
 `WLS(...).fit()`（Rust engine + PyO3）とリファレンス実装 statsmodels（`smf.wls`）の実行時間・メモリ使用量比較の記録。CLAUDE.md 1章「計算コアはRustで実装し高速化」の狙いを定量的に裏付けることが目的。
 
-再実行可能なスクリプトは`performance/compare_wls.py`（手法非依存の計測ハーネス`performance/_perf_harness.py` ＋ WLS固有アダプタ、コミット対象）。生の計測結果JSONはコミットしない（`.gitignore`の`docs/spec/_*.json`参照）。
+再実行可能なスクリプトは`performance/compare_wls.py`（手法非依存の計測ハーネス`performance/_perf_harness.py` ＋ WLS固有アダプタ、コミット対象）。生の計測結果JSONはコミットしない（`.gitignore`の`docs/performance/results/*.json`参照）。
 
 ## 計測方法
 
-`docs/spec/ols-performance-notes.md`「最重要の教訓」「計測方法」と共通（releaseビルド必須・`tracemalloc`不採用・サブプロセス隔離・スレッド数を1に固定・polars→pandas変換は計測区間外・ウォームアップ1回＋`repeats`回の中央値）。WLS固有の点は以下。
+`docs/performance/ols.md`「最重要の教訓」「計測方法」と共通（releaseビルド必須・`tracemalloc`不採用・サブプロセス隔離・スレッド数を1に固定・polars→pandas変換は計測区間外・ウォームアップ1回＋`repeats`回の中央値）。WLS固有の点は以下。
 
 - **重みの渡し方**: engine は `WLS(..., weight="weight")`、statsmodels は `smf.wls(..., weights=pandas_df["weight"])`。どちらも analytic weight（分散の逆数に比例、正規化不要）として扱うため、`generate_linear_dataset("baseline")` が返す `weight` 列（0.5〜1.5の一様乱数）をそのまま両方に渡している。
 - **計測範囲の対称性（Issue #98）**: engine は係数・標準誤差と同じ呼び出しで R²・調整済みR²・対数尤度・AIC・BIC・F統計量・F検定のp値まで常に一括計算する。statsmodels はこれらを遅延評価（`cached_value`）にしているため、`.fit()`直後に該当プロパティへ明示アクセスして計測範囲を揃えている。
@@ -49,20 +49,20 @@
 - **HAC**: engineが全nで一貫して速く、大きいnほど差が開く（n=1,000,000で約4.1倍、0.293s vs 1.195s）。
 - **メモリはengineが一貫して軽い**: 全cov_type・全nでengineのピークRSSが小さい（n=1,000,000でengine 401〜455MB、statsmodels 563〜630MB）。
 - **kスケーリング**: k=5→20で、classicalはengine約3.4倍 / statsmodels約2.5倍、HACはengine約3.7倍 / statsmodels約3.6倍。OLSではHACのkスケーリングでengineの伸び（約7.7倍）がリファレンス（約3.3倍）より急という点が残っていたが、WLSではHACでも両者ほぼ同等で、その乖離は見られない。
-- **WLS vs OLS**: 同条件のOLS（`ols-performance-notes.md`）と比べ、engineのclassical n=1,000,000は0.139s→0.155sと重み付けの分だけ僅かに重い程度で、全体傾向はOLSと変わらない。
+- **WLS vs OLS**: 同条件のOLS（`ols.md`）と比べ、engineのclassical n=1,000,000は0.139s→0.155sと重み付けの分だけ僅かに重い程度で、全体傾向はOLSと変わらない。
 
 ## 既知の限界
 
-`ols-performance-notes.md`「既知の限界」と共通。特に **engineのマルチスレッド線形代数が多コア機・負荷下で不安定になる問題**（`docs/planning/specs/refactoring-candidates.md`項目44）のため、本計測はengine・statsmodelsとも1スレッドに固定しており、数値は「シングルスレッドでの計算コア効率」である。計測は開発コンテナ上の1回のスイープ（`repeats=3`の中央値）で、環境ノイズを排除しきれていない。
+`ols.md`「既知の限界」と共通。特に **engineのマルチスレッド線形代数が多コア機・負荷下で不安定になる問題**（`docs/planning/specs/refactoring-candidates.md`項目44）のため、本計測はengine・statsmodelsとも1スレッドに固定しており、数値は「シングルスレッドでの計算コア効率」である。計測は開発コンテナ上の1回のスイープ（`repeats=3`の中央値）で、環境ノイズを排除しきれていない。
 
 ## 再現方法
 
 ```bash
 uv run maturin develop --release
 uv run python -m performance.compare_wls --repeats 3 \
-    --output docs/spec/_wls_performance_results.json
+    --output docs/performance/results/wls.json
 uv run python -m performance.render_performance_summary \
-    docs/spec/_wls_performance_results.json
+    docs/performance/results/wls.json
 ```
 
 ## 今後の検討事項

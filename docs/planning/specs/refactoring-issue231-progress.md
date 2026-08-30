@@ -761,6 +761,22 @@ design_matrix_raises_computation_error`（OLS版含む）はfixturesファイル
 重複していない（OLSの同種テストも`test_ols.py`側のみに存在する現状の
 パターンと一致しており、IV側は非対称ではない）。
 
+**ユーザー決定（2026-08-30、同日中）**: 上記の質疑を受けて、以下が
+別セッションでの対応事項として決定した。
+- 項目7（`const`名衝突バリデーションの抜け）: 別セッションで対応する
+  （`refactoring-candidates-3.md`の状態を更新済み）。
+- 項目9・10（`x_endog`/`instruments`が空の場合の扱い）: `iv-api-design.md`
+  の記述通り、空の場合は`ValidationError`で弾く方向に決定。別セッションで
+  実装する（同ファイルの状態を更新済み）。
+- `test-coverage-candidates.md`項目47（オプション型不一致の`TypeError`）:
+  対応不要と判断（現状のまま）。
+- 同項目52（`test_insufficient_instruments_raises`の境界ケース）:
+  項目9・10の実装後は現状の`x_endog=1`・`instruments=0`の組み合わせでは
+  「空リスト」バリデーションが先に発火し順序条件の検証にならなくなるため、
+  `x_endog`2個・`instruments`1個へのテスト修正が**項目9・10と同時に必須**
+  になる旨を追記し、対応必須に格上げした（状態更新済み）。
+以上はコミット`a429849`で反映済み。
+
 `test_logit.py`解説後のユーザーとの質疑で
 20件の指摘を受け、`refactoring-candidates-2.md`項目76〜84・
 `test-coverage-candidates.md`項目37〜40に記録した。続く

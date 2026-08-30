@@ -35,54 +35,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ※ 項目12・13・15・16・18〜21・24〜29・31〜35・39 は、`benchmark/` の構造変更（Initiative A、`benchmark-restructure-design.md`）が上位計画として吸収したため削除した（吸収項目の一覧は同ノート10章、対応の進捗は`refactoring-issue231-progress.md`）。番号は詰め直さない（記録フォーマット節参照）。
 
-### 40. `compare_performance.py`が現状OLS専用に書かれており、他手法へ性能比較を拡張する際に共通化できる可能性が高い
-
-- **対象**: [performance/compare_ols.py](../../../performance/compare_ols.py)・
-  [performance/_perf_harness.py](../../../performance/_perf_harness.py)
-  （旧`performance/compare_performance.py`。当時はハーネスとOLSアダプタが1ファイルに
-  同居していた。`_fit_once_engine`/`_fit_once_statsmodels`/`_fit_once_pyfixest`、
-  `_build_dataframe`、`run_n_sweep`/`run_k_sweep`/`build_report`の`_meta`構築、
-  `_worker`のディスパッチ構造等）
-- **内容**: ユーザー指摘（2026-08-22）。現状のスクリプトはOLSの`fit()`呼び出し
-  にほぼ全体が特化しており（`OLS`/`OLSOptions`のimport、`y ~ x1 + ...`という
-  線形の説明変数構成、`generate_linear_dataset`の呼び出し等）、Logit/Probit/IV等
-  他手法の性能比較を今後追加する際に、`_worker`のライブラリ分岐・
-  `_run_isolated`のサブプロセス起動・`run_n_sweep`/`run_k_sweep`のスイープ
-  構造・`build_report`の`_meta`組み立てパターンといった「OLS固有ではない
-  骨格部分」を共通化できる可能性が高い。また`_meta`に`statsmodels_version`/
-  `pyfixest_version`等のリファレンス実装バージョンが記録されていない点
-  （`testing-policy.md`の`_meta`要件と対照的）も、他手法へ拡張する際に
-  併せて見直す余地がある。
-- **Claudeの所感**: 現時点ではOLSしか性能比較の実装が無く、共通化すべき
-  「本当に変わらない部分」と「手法ごとに変わる部分」の境界が1サンプルからは
-  判断しづらい。ユーザー方針として、この項目以外の細かい共通化候補
-  （`_fit_once_*`のディスパッチ方式の統一等）は今回は深追いせず、実際に
-  次の手法の性能比較を実装するタイミングでまとめて判断する。
-- **気づいた経緯**: 2026-08-22、`compare_performance.py`解説（`build_report`
-  まで）後のユーザー指摘。
-- **状態**: 一部対応済み。#250（`de0b4a7`）で手法非依存の骨格を
-  `_perf_harness.py`（`PerfAdapter`/`FitContext`・`_worker`/`_run_isolated`・
-  スイープ・`build_report`）へ切り出し、`_meta`にリファレンス実装バージョンも
-  記録するようにした。pyfixest比較は廃止。残りは #251〜254 で各手法アダプタ
-  （`compare_wls.py`等）を追加しながら随時。**全手法（WLS/Logit/Probit/IV）の
-  組み込み完了後にこの項目を削除する**（ユーザー指示、2026-08-30）。
-
-### 41. ピークRSSの小数点以下の桁数が`compare_performance.py`と`render_performance_summary.py`で不統一
-
-- **対象**: [performance/compare_performance.py:274](../../../performance/compare_performance.py#L274)
-  （`f"peak_rss={row['peak_rss_kb'] / 1024:.1f}MB"`、標準エラーの進捗ログ用）・
-  [performance/render_performance_summary.py:27](../../../performance/render_performance_summary.py#L27)
-  （`_format_rss`、`f"{peak_rss_kb / 1024:.0f}MB"`、Markdown表用）
-- **内容**: どちらも同じ「ピークRSS（KB）をMB表示に整形する」処理だが、
-  小数点以下の桁数が前者`.1f`・後者`.0f`で異なる。実行時間側（`_format_time`と
-  `_measure_point`の進捗ログ）はどちらも`.4f`で揃っているため、RSS側だけの
-  不統一に見える。
-- **Claudeの所感**: 実害はない（一方は人間向けの進捗ログ、他方はJob Summaryの
-  表という別用途で、桁数がずれていても実用上の支障はない）が、同じ量の表示
-  精度が揃っていない点は気になる。優先度は低い。
-- **気づいた経緯**: 2026-08-22、`render_performance_summary.py`解説後のユーザー指摘。
-- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
-
 ### 43. `tests/`が21ファイル（手法別3〜4×6手法＋共通4ファイル）フラット構造のまま、手法別ディレクトリ分割の要否
 
 - **対象**: `tests/`直下（`conftest.py`・`_assertions.py`・`_helpers.py`・

@@ -391,7 +391,23 @@
   から削除（2026-08-30、ユーザー確認済み）。理由: 3行を `_common.R` 側のヘルパーに
   切り出すには、そのヘルパーを呼ぶ前に `_common.R` を source する必要がある循環
   （鶏と卵）が生じる（R に `__file__` 相当が無いため）。再提案しても同じ結論。
-- 上記以外（`refactoring-candidates.md`項目12・13・15〜35・37・39〜41・43）は
+- 項目40（`compare_performance.py` が OLS 専用で他手法へ拡張時に共通化余地）:
+  対応済みにつき `refactoring-candidates.md` から削除（2026-08-30、ユーザー確認済み）。
+  Issue #250〜#254 で `performance/_perf_harness.py`（`PerfAdapter`/`FitContext` ＋
+  サブプロセス隔離・n/k/method スイープ・`build_report`）へ手法非依存の骨格を切り出し、
+  手法別アダプタ `performance/compare_<method>.py`（ols/wls/logit/probit/iv）へ再編。
+  比較対象は README「Verification accuracy」の primary reference 単体に絞り（pyfixest
+  依存を撤去）、`_meta` にリファレンス実装バージョンを記録。commits: `de0b4a7`（骨格
+  切り出し ＋ #98 対称化）・`82ee530`（スレッド固定）・`9a0e19a`/`accb58d`（WLS ＋
+  workflow を `benchmark_performance.yml` へ改名し method matrix 化）・`4bb2aed`/`550466c`
+  （Logit ＋ method 軸）・`2c482fb`（Probit）・`4883387`（IV）。notes は
+  `docs/performance/<method>.md`（`c035d8c` で `docs/spec/` から分離）。
+- 項目41（ピークRSS表示桁が `_measure_point` の進捗ログ `.1f` と `render_performance
+  _summary._format_rss` `.0f` で不統一）: 対応済みにつき削除（2026-08-30、ユーザー
+  確認済み）。`_format_rss` を `.0f`→`.1f` にして進捗ログと桁を統一。commit: `74bb453`。
+- `benchmark-restructure-design.md` の項目40・41への参照2箇所（12行目・D5）は、
+  同ノートの整理時に併せて解消する（内容は上記のとおり完了済み）。
+- 上記以外（`refactoring-candidates.md`項目12・13・15〜35・37・39・43）は
   未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は
   未着手。項目50以降は別セッションが並行して追記・コミットしているため、

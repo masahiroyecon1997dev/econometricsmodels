@@ -321,6 +321,29 @@
   `pytest` 957件・`ruff` パス、`/code-review`（fork）指摘1件（除去で101字になった
   コメント行）を再wrapで対応し再レビュー指摘ゼロ。`refactoring-candidates.md`から
   項目17を削除。
+- 項目22（Rスクリプト冒頭の引数パースパターンが4ファイルで重複、`_common.R`への
+  切り出し候補）: **調査の上、実行しないと判断**（2026-08-30、ユーザー確認済み）。
+  `refactoring-candidates.md`からは削除（検討済みのため）。判断の根拠:
+  - 4ファイル（`run_lm_crosscheck.R`・`run_lm_predict_crosscheck.R`・`run_ivreg.R`・
+    `run_glm_crosscheck.R`）で真に一致するのは
+    `args <- commandArgs(trailingOnly=TRUE)` → `length(args) < 2` チェック →
+    `data_path <- args[1]` / `formula_str <- args[2]` の4行のみ。`read.csv(...,
+    check.names=FALSE)` も共通だが位置がバラバラ（`formula_str`直後 / `cov_type`後 /
+    `link`検証後）、`cov_type <- ifelse(...)` は3/4ファイル・位置不定、`link` 行は
+    `run_glm_crosscheck.R` 固有。
+  - `_common.R` に `parse_io_args(usage)` を置く案は、ヘルパー呼び出しの前提となる
+    `source(_common.R)` ブートストラップ（3行）を現状持たない2ファイル
+    （`run_lm_predict_crosscheck.R`・`run_glm_crosscheck.R`）に追加が必要になり、
+    削減分と相殺。項目38の「ブートストラップは各ファイルに残す」既決とも整合しない。
+  - R にタプル分解が無く、呼び出し側は `data_path <- args[1]; formula_str <- args[2]`
+    （2行）を `io <- parse_io_args(usage); formula_str <- io$formula_str; df <- io$df`
+    （3行＋`$`間接参照）に置き換える形になり行数がむしろ増える。
+  - `stop("usage: Rscript <name> <data.csv> <formula> ...")` はインラインの方が
+    各スクリプトの引数シグネチャの自己文書として機能する。中央化しても結局
+    各呼び出し側がこの文字列を渡す。
+  - 正味削減は多くて全4ファイル合計〜5行、代わりに間接層とファイル跨ぎのジャンプが増える。
+  - なお `library()` の `suppressMessages` 統一（`run_ivreg.R` のみ実施済み）は別枠の
+    項目37で、そちらは素直な改善余地あり。
 - 上記以外（`refactoring-candidates.md`項目12・13・15〜35・37・39〜41・43）は
   未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は

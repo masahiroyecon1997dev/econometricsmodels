@@ -35,26 +35,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ※ 項目12・13・15・16・18〜21・24〜29・31〜35・39 は、`benchmark/` の構造変更（Initiative A、`benchmark-restructure-design.md`）が上位計画として吸収したため削除した（吸収項目の一覧は同ノート10章、対応の進捗は`refactoring-issue231-progress.md`）。番号は詰め直さない（記録フォーマット節参照）。
 
-### 22. Rスクリプト冒頭の引数パースパターンが3ファイルで重複（`_common.R`は後処理側のみ共通化済み）
-
-- **対象**: [benchmark/linear/references/run_lm_crosscheck.R:22-32](../../../benchmark/linear/references/run_lm_crosscheck.R#L22-L32)・
-  [benchmark/linear/references/run_lm_predict_crosscheck.R:13-22](../../../benchmark/linear/references/run_lm_predict_crosscheck.R#L13-L22)・
-  [benchmark/iv/references/run_ivreg.R:56-65](../../../benchmark/iv/references/run_ivreg.R#L56-L65)・
-  [benchmark/nonlinear/references/run_glm_crosscheck.R:48-62](../../../benchmark/nonlinear/references/run_glm_crosscheck.R#L48-L62)
-- **内容**: `commandArgs(trailingOnly = TRUE)`→引数不足チェック（`stop(...)`）→
-  `data_path <- args[1]`→`formula_str <- args[2]`→
-  `read.csv(data_path, check.names = FALSE)`という冒頭5〜6行のパターンが4ファイルで
-  同型。`benchmark/common/_common.R`は`extract_coef_se`/`wald_f_test`という**後処理側**の
-  重複は既に解消済みだが、この**冒頭の引数パース**側は対象になっておらず残っている。
-- **Claudeの所感**: `_common.R`に`parse_common_args(args, min_required=2)`のような
-  関数を追加すれば解消できそうだが、Rには構造化された戻り値（複数の変数をまとめて
-  返す）の慣用的な書き方がPython程スッキリしない（リストで返して`$`で分解する形に
-  なる）ため、効果とのバランスは要検討。
-- **気づいた経緯**: 2026-08-16、`benchmark/linear/references/run_lm_predict_crosscheck.R`解説中に発見。
-  `benchmark/nonlinear/references/run_glm_crosscheck.R`にも同型（`link`引数の追加分岐はあるが冒頭部分は
-  同じ）であることを確認済み。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
-
 ### 23. `benchmark/linear/references/run_lm_predict_crosscheck.R`を手法非依存の汎用スクリプトにできないか（設計判断候補）
 
 - **対象**: [benchmark/linear/references/run_lm_predict_crosscheck.R](../../../benchmark/linear/references/run_lm_predict_crosscheck.R)

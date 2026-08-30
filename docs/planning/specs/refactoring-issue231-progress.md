@@ -662,9 +662,9 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
 - `tests/`: `_assertions.py`・`_helpers.py`・`_tolerances.py`・`conftest.py`・
   `test_ols.py`・`test_ols_fixtures.py`・`test_ols_crosscheck.py`・
   `test_wls.py`・`test_wls_fixtures.py`・`test_wls_crosscheck.py`・
-  `test_logit.py`・`test_logit_fixtures.py`・`test_logit_crosscheck.py`
-  （全区切り解説済み、WLS関連ファイルは一通り完了、Logit関連ファイルも
-  これで一通り完了）
+  `test_logit.py`・`test_logit_fixtures.py`・`test_logit_crosscheck.py`・
+  `test_probit.py`（全区切り解説済み、WLS関連ファイルは一通り完了、
+  Logit関連ファイルも一通り完了、Probit関連ファイルに着手）
 
 **注意（2026-08-23〜、`benchmark/`再構成「Initiative A」進行中）**: 上記
 「解説済み」リストの`benchmark/`側パス（`benchmark/_common.py`・
@@ -680,26 +680,44 @@ CI側のPYTHONPATH非対称〔`refactoring-candidates-2.md`項目50〕は実質�
 都度確認すること。項目50の状態欄自体は、リファクタリング側のセッションが
 後ほど更新する前提でこちらからは触っていない。
 
-**次に解説予定**: `tests/test_probit.py`（Logit関連3ファイル
-〔`test_logit.py`/`test_logit_fixtures.py`/`test_logit_crosscheck.py`〕
-解説完了、ユーザー確立の順でProbitへ進む）。`test_logit.py`解説後の
+**次に解説予定**: `tests/test_probit_fixtures.py`（`test_probit.py`解説
+完了、ユーザー確立の`test_<method>.py`→`test_<method>_fixtures.py`→
+`test_<method>_crosscheck.py`の順で継続）。`test_logit.py`解説後の
 ユーザーとの質疑で20件の指摘を受け、`refactoring-candidates-2.md`
 項目76〜84・`test-coverage-candidates.md`項目37〜40に記録した。続く
 `test_logit_fixtures.py`解説後の質疑で7件、`test_logit_crosscheck.py`
-解説後の質疑で2件の指摘を受け、項目85〜94・`test-coverage-candidates.md`
-項目41〜43に記録した（詳細下記）。特に項目77（`test_method_option_
-converges_to_same_params`が`test_logit_fixtures.py::test_method_matches_
-statsmodels`と観点重複）・項目78（`LogitResult`に実際の収束`method`が
-含まれず確認手段が無い、項目67と合わせて検討）・項目79（Issue #231
-フェーズ4コメント残置が11箇所、項目51より規模大）・項目87
+解説後の質疑で2件、`test_probit.py`解説後の質疑で2件の指摘を受け、
+項目85〜95・`test-coverage-candidates.md`項目41〜43に記録した
+（詳細下記）。特に項目77（`test_method_option_converges_to_same_params`
+が`test_logit_fixtures.py::test_method_matches_statsmodels`と観点重複）・
+項目78（`LogitResult`に実際の収束`method`が含まれず確認手段が無い、
+項目67と合わせて検討）・項目79（Issue #231フェーズ4コメント残置が
+Logit/Probitとも11箇所ずつ、項目51より規模大）・項目87
 （`test_include_intercept_false_matches_statsmodels`が`benchmark/`の
 参照実装層と同じOPG計算式を`tests/`側で重複実装、層分離違反）・
+**項目95（`test_logit.py`と`test_probit.py`のコードが完全に同一、
+`test_logit_fixtures.py`/`test_probit_fixtures.py`も同様。共通関数
+切り出し＋ファイル分離維持の方向でユーザー承認済み）**・
 coverage項目42・43（`_check_margeff`／クラスター系テスト全般が、
 フィクスチャに既に存在するz_stats/p_values/conf_int/適合度統計量を
-検証していない、実データ`mroz`クラスターにも該当）は要注意。項目35
-（HAC非対応）と同様、Logit/Probitはそもそも HACを持たないため該当しない
-（クロスセクション手法のため）ことを確認済み。項目67・68は引き続き
-Probit以降の作業に影響するため着手前に思い出すこと。
+検証していない、実データ`mroz`クラスターにも該当）は要注意。
+
+**Probit関連ファイル解説時の注記（項目95に基づく、2026-08-24）**:
+`test_probit.py`・`test_probit_fixtures.py`は`test_logit.py`・
+`test_logit_fixtures.py`とコード部分が完全に同一（docstringの言い回しのみ
+異なる）ことを確認済み。したがって`test_probit_fixtures.py`解説時は、
+項目76〜94・coverage項目37〜43の**大半がそのまま適用される**見込みだが、
+**全てが1対1で当てはまるとは限らない**ことに注意する。実際に
+`test_probit_crosscheck.py`は`test_logit_crosscheck.py`と比べてコード
+自体にもProbit固有の実質的な差分があった（Rの`glm()`既定の期待情報行列
+〔Fisher scoring〕とProbit特有の観測情報行列の乖離〔非正準リンクのため
+最大8%、Logitは正準リンクのため無関係〕への対応、実データクラスター
+専用の`RTOL_MROZ_CLUSTER`等）。`test_probit_fixtures.py`/
+`test_probit_crosscheck.py`解説時は、Logit側の指摘をなぞるだけでなく
+Probit固有の差分の有無を都度`diff`で確認すること。項目35（HAC非対応）と
+同様、Logit/Probitはそもそも HACを持たないため該当しない（クロス
+セクション手法のため）ことを確認済み。項目67・68は引き続きProbit以降の
+作業に影響するため着手前に思い出すこと。
 
 **共有作業ツリーでのブランチ混線インシデント（2026-08-24、発生・解消済み）**:
 `test_logit_fixtures.py`解説の記録コミット直後、並行して動く別セッションが
@@ -760,12 +778,14 @@ Probit以降の作業に影響するため着手前に思い出すこと。
 **候補メモの状態（2026-08-23時点）**:
 - `refactoring-candidates.md`: 項目1〜43（このウォークスルー由来の最後の追記は項目43）。
   上記「`refactoring-candidates.md`駆動の随時対応」セッションが並行して対応中のため、
-  このウォークスルーからの新規追記は`refactoring-candidates-2.md`（項目44〜94、
-  直近の追記は`test_logit_crosscheck.py`解説時、`_assertions.py`を使わず
-  `_assert_close`等を独自再実装〔91〕・適合度統計量の検証方法の書き方
-  不統一〔92〕・`margeff`存在確認の書き方不統一（項目89に統合）〔93〕・
-  フィクスチャJSONのトップレベル階層規則の不統一〔94〕）に切り替えている。
-  1つ前の追記は`test_logit_fixtures.py`解説時、`check_margeff`が項目72の
+  このウォークスルーからの新規追記は`refactoring-candidates-2.md`（項目44〜95、
+  直近の追記は`test_probit.py`解説時、`test_logit.py`/`test_probit.py`の
+  コード完全一致・共通関数切り出し方針〔95〕・項目79へProbitも該当する
+  旨の追記）に切り替えている。1つ前の追記は`test_logit_crosscheck.py`
+  解説時、`_assertions.py`を使わず`_assert_close`等を独自再実装〔91〕・
+  適合度統計量の検証方法の書き方不統一〔92〕・`margeff`存在確認の書き方
+  不統一（項目89に統合）〔93〕・フィクスチャJSONのトップレベル階層規則の
+  不統一〔94〕。さらに前の追記は`test_logit_fixtures.py`解説時、`check_margeff`が項目72の
   参考実装〔85〕・Logitの`hc1`がR`sandwich`単独で三角測量が効かない
   （リスクは相対的に低いと判断、後日statsmodels代替経路の実機検証も
   追記）〔86〕・OPG標準誤差の手計算が`benchmark/`の参照実装層と重複、

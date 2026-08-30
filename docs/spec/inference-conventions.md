@@ -20,7 +20,7 @@
 ## 2. 他の統計ソフトウェアの既定値との違い
 
 - **statsmodels**: `cov_type`が`"nonrobust"`（classical相当）以外だと既定で`use_t=False`（正規分布）を使う。本プロジェクトは全`cov_type`でt分布に統一しているため、ベンチマーク照合時は`use_t=True`を明示指定する必要がある（`ols-spec.md`70-72行目）。
-- **linearmodels**: `debiased`という別軸の引数でt/F分布とz/カイ二乗分布が切り替わる（`fit(debiased=False)`が既定でz/カイ二乗、`True`でt/F）。本プロジェクトの2SLSは`cov_type`によらず常にt/F、GMMは常にz/カイ二乗という一貫した設計のため、ベンチマーク生成時は`coef`/`se`のみ`linearmodels`から借り、検定統計量（`t_stats`/`p_values`/`conf_int`/`f_statistic`）は自前でt分布・F分布を使って計算し直している（`run_linearmodels_benchmark_iv.py`参照）。
+- **linearmodels**: `debiased`という別軸の引数でt/F分布とz/カイ二乗分布が切り替わる（`fit(debiased=False)`が既定でz/カイ二乗、`True`でt/F）。本プロジェクトの2SLSは`cov_type`によらず常にt/F、GMMは常にz/カイ二乗という一貫した設計のため、ベンチマーク生成時は`coef`/`se`のみ`linearmodels`から借り、検定統計量（`t_stats`/`p_values`/`conf_int`/`f_statistic`）は自前でt分布・F分布を使って計算し直している（`benchmark/iv/references/linearmodels_ref.py`参照）。
 - **R**（`sandwich`/`lmtest`、`glm`）: 個別の許容誤差・既定値の違いは各手法のspec（`ols-spec.md`のクラスター小標本補正等）を参照。
 
 ## 3. Stock-Yogoの弱操作変数F統計量

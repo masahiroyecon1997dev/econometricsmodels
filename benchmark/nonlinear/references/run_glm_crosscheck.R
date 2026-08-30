@@ -1,20 +1,20 @@
 #!/usr/bin/env Rscript
 # base R glm + sandwich/lmtest/marginaleffectsによるLogit/Probitの標準誤差・
 # 適合度統計量・限界効果のクロスチェック用スクリプト。
-# `benchmark/linear/run_lm_crosscheck_benchmark.R`（OLS/WLS用）と同じ役割分担
+# `benchmark/linear/references/run_lm_crosscheck.R`（OLS/WLS用）と同じ役割分担
 # （testing-policy.md「リファレンス実装」: 独立実装によるクロスチェック用）。
 # 元々Logit専用だったが、Probit追加にあたり第5引数`link`
 # （`logit`/`probit`、既定`logit`）で`glm(family=binomial(link=...))`を切り替える
-# よう一般化した（`run_statsmodels_benchmark_nonlinear.py`の`--model`と同じ発想。
+# よう一般化した（`benchmark/nonlinear/references/statsmodels_ref.py`の`--model`と同じ発想。
 # 以下の各種回避策（opgの手計算・hc1の扱い・marginaleffectsの罠）はいずれも
 # `glm`のfamily/linkに依存しないロジックであることを実機確認済み）。
 #
 # `cov_type="opg"`はstatsmodelsのLogit.fit()/Probit.fit()がネイティブに受け付けない
-# ため（run_statsmodels_benchmark_nonlinear.pyのdocstring参照）、Rでも同様に
+# ため（benchmark/nonlinear/references/statsmodels_ref.pyのdocstring参照）、Rでも同様に
 # `sandwich::estfun()`（スコア寄与）から`Σ = (Σᵢ sᵢsᵢ')⁻¹`を手計算する。
 #
 # `cov_type="hc1"`は、statsmodelsのdiscrete modelがn/(n-k)小標本補正を実装しておらず
-# HC0と同一値を返すバグ的な欠落が発覚したため（run_statsmodels_benchmark_nonlinear.pyの
+# HC0と同一値を返すバグ的な欠落が発覚したため（benchmark/nonlinear/references/statsmodels_ref.pyの
 # docstring参照）、このスクリプト（`sandwich::vcovHC(type="HC1")`、補正を正しく
 # 適用）がhc1の主リファレンスを担う（ユーザー確認済み）。
 #
@@ -40,14 +40,14 @@
 # 事前準備: install.packages(c("sandwich", "lmtest", "jsonlite", "marginaleffects"))
 #
 # 使用例:
-#   Rscript run_glm_crosscheck_benchmark.R data.csv "y ~ x1 + x2 + x3" classical logit
-#   Rscript run_glm_crosscheck_benchmark.R data.csv "y ~ x1 + x2 + x3" opg probit
-#   Rscript run_glm_crosscheck_benchmark.R data.csv "y ~ x1 + x2 + x3" hc0 logit
-#   Rscript run_glm_crosscheck_benchmark.R data.csv "y ~ x1 + x2 + x3" cluster logit cluster_col
+#   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" classical logit
+#   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" opg probit
+#   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" hc0 logit
+#   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" cluster logit cluster_col
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 2) {
-  stop("usage: Rscript run_glm_crosscheck_benchmark.R <data.csv> <formula> [cov_type=classical] [link=logit] [cluster_col]")
+  stop("usage: Rscript run_glm_crosscheck.R <data.csv> <formula> [cov_type=classical] [link=logit] [cluster_col]")
 }
 data_path <- args[1]
 formula_str <- args[2]
@@ -57,7 +57,7 @@ if (!(link %in% c("logit", "probit"))) {
   stop(paste("unknown link:", link))
 }
 
-# check.names=FALSE: run_lm_crosscheck_benchmark.Rと同じ理由
+# check.names=FALSE: ../../linear/references/run_lm_crosscheck.Rと同じ理由
 # （Python側で書き出した列名をmake.names()による書き換えなしでそのまま使う）。
 df <- read.csv(data_path, check.names = FALSE)
 
@@ -144,7 +144,7 @@ if (cov_type == "classical") {
     stop("cluster requires <cluster_col> as arg5")
   }
   cluster_col <- args[5]
-  # cadjust=TRUE: G/(G-1)の小標本補正（run_lm_crosscheck_benchmark.Rと同じ方針）。
+  # cadjust=TRUE: G/(G-1)の小標本補正（linear/references/run_lm_crosscheck.Rと同じ方針）。
   meat <- meatCL(model, cluster = df[[cluster_col]], type = "HC1", cadjust = TRUE)
   vc <- sandwich(model, bread. = bread_obs, meat. = meat)
 } else {

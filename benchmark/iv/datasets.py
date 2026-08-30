@@ -2,8 +2,8 @@
 内生説明変数x_endog、構造誤差u・第一段階誤差vの相関）で合成データセットを
 生成するスクリプト。
 
-`generate_linear_datasets.py`（OLS/WLS用）・
-`nonlinear/generate_nonlinear_datasets.py`（Logit/Probit用）と同型の設計
+`benchmark/linear/datasets.py`（OLS/WLS用）・
+`benchmark/nonlinear/datasets.py`（Logit/Probit用）と同型の設計
 （`SCENARIOS`+`generate_*_dataset(scenario, ...)`関数）だが、IVはOLS/Logit/Probit
 と異なり「操作変数が内生変数と相関し（関連性）、かつ構造誤差とは無相関
 （除外制約）」という識別のための構造をDGP自体に組み込む必要があるため、
@@ -70,7 +70,7 @@ SCENARIOS = [
 # 内生性の強さ: 構造誤差uと第一段階誤差vの相関（シナリオ間で共通の固定値）。
 _RHO_ENDOG = 0.6
 
-# high_varianceシナリオでの構造誤差uの分散（`generate_linear_datasets.py`の
+# high_varianceシナリオでの構造誤差uの分散（`benchmark/linear/datasets.py`の
 # high_variance、errors ~ N(0, 10.0)と同じ標準偏差10）。既定は分散1。
 _U_VAR_HIGH_VARIANCE = 100.0
 
@@ -173,7 +173,7 @@ def generate_iv_dataset(
     # 独立な第一段階誤差v_jに一般化する（下記参照）。
     cov_uv = np.array([[1.0, _RHO_ENDOG], [_RHO_ENDOG, 1.0]])
     if scenario == "heteroskedastic":
-        # 分散がx_exogの最初の列に依存（`generate_linear_datasets.py`の
+        # 分散がx_exogの最初の列に依存（`benchmark/linear/datasets.py`の
         # heteroskedasticシナリオと同じ発想）。
         sigma_i = (
             HETEROSKEDASTIC_SIGMA_BASE
@@ -184,7 +184,7 @@ def generate_iv_dataset(
         v = uv[:, 1:2]  # (n, 1)
     elif scenario == "autocorrelated":
         # AR(1): u_t = rho_ar * u_{t-1} + innovation_t
-        # （`generate_linear_datasets.py`のautocorrelatedシナリオと同じ発想。
+        # （`benchmark/linear/datasets.py`のautocorrelatedシナリオと同じ発想。
         # vは自己相関させない: HAC/Kernelの検証対象は構造誤差uの時系列相関のため）。
         rho_ar = AUTOCORRELATED_RHO
         uv_innov = rng.multivariate_normal(mean=[0.0, 0.0], cov=cov_uv, size=n)
@@ -228,7 +228,7 @@ def generate_iv_dataset(
         # 変数間のスケールが極端に異なるケース（x1は10^6オーダー、x2は10^-3
         # オーダー）。x_endogは既にスケーリング前のx_exogから計算済みのため、
         # yへの影響はスケーリング後のbeta_exogを逆スケーリングして相殺する
-        # （`generate_nonlinear_datasets.py`のscale_varianceと同じ発想:
+        # （`benchmark/nonlinear/datasets.py`のscale_varianceと同じ発想:
         # 真のDGPは未スケーリングのXで行い、出力直前にのみ列をスケーリングする）。
         x_exog = x_exog.copy()
         x_exog[:, 0] *= SCALE_VARIANCE_X1_SCALE

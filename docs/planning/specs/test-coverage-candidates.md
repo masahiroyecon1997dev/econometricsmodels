@@ -24,19 +24,19 @@
 
 ### 1. nonlinear系統（Logit/Probit）に自由度1境界ケースの凍結データが無い
 
-- **対象**: [benchmark/nonlinear/freeze_nonlinear_datasets.py](../../../benchmark/nonlinear/freeze_nonlinear_datasets.py)
-- **内容**: linear系統（`freeze_linear_datasets.py`）には`SYNTHETIC_BOUNDARY_DF1_SCENARIOS`
+- **対象**: [benchmark/nonlinear/freeze.py](../../../benchmark/nonlinear/freeze.py)
+- **内容**: linear系統（`benchmark/linear/freeze.py`）には`SYNTHETIC_BOUNDARY_DF1_SCENARIOS`
   （`n = k+1`、残差自由度がちょうど1になる境界ケースの成功パス）が用意されているが、
   nonlinear系統には対応する凍結データが見当たらない。`testing-policy.md`の
   「境界値・悪条件」項目（自由度1ちょうどでの成功パス）がLogit/Probitにも
   必要かどうかは未確認。
-- **気づいた経緯**: 2026-08-15、`freeze_nonlinear_datasets.py`のコード解説中に発見。
+- **気づいた経緯**: 2026-08-15、`benchmark/nonlinear/freeze.py`のコード解説中に発見。
 - **状態**: 未対応（要否を`/review-testing`等で確認待ち）
 
 ### 2. 高次元（説明変数多数）シナリオ・線形確率モデル（LPM）シナリオの追加要否
 
-- **対象**: `benchmark/linear/generate_linear_datasets.py`・
-  `benchmark/nonlinear/generate_nonlinear_datasets.py`（合成データセット生成全般）
+- **対象**: `benchmark/linear/datasets.py`・
+  `benchmark/nonlinear/datasets.py`（合成データセット生成全般）
 - **内容**: ユーザーからの指摘（2026-08-15）。現状の合成データセットは
   ほぼ全シナリオで説明変数数`k=3`固定（一部シナリオのみ`k>=2`/`k>=3`要求）。
   以下2点の追加要否を検討中。
@@ -46,7 +46,7 @@
   2. **線形確率モデル（LPM）シナリオ**: 2値`y`をOLS/WLSで推定するケース
      （教科書的に不均一分散の代表例とされる）を、OLS/WLS側のシナリオとして
      追加する案。
-- **気づいた経緯**: 2026-08-15、`freeze_nonlinear_datasets.py`のコード解説中の
+- **気づいた経緯**: 2026-08-15、`benchmark/nonlinear/freeze.py`のコード解説中の
   雑談から。
 - **状態**: 未対応（下記メモの通りClaudeの初期所感を記録済み、方針は未決定）
 
@@ -178,7 +178,7 @@
 
 ### 11. IV系統: `scale_variance`に成功パス（`scale_variance_mild`相当）が無い
 
-- **対象**: [benchmark/iv/generate_iv_datasets.py](../../../benchmark/iv/generate_iv_datasets.py)・
+- **対象**: [benchmark/iv/datasets.py](../../../benchmark/iv/datasets.py)・
   [benchmark/iv/fixtures/generate_iv_fixtures.py](../../../benchmark/iv/fixtures/generate_iv_fixtures.py)
 - **内容**: ユーザー指摘（2026-08-15）。実測確認したところ、`scale_variance`シナリオの
   扱いが系統ごとに異なっていた。
@@ -199,13 +199,13 @@
 - **Claudeの所感**: IV側はlinear（OLS/WLS）がフェーズ4で修正したのと同じ抜けが
   残っている可能性が高い。IV用の`scale_variance_mild`（例: x1×1e2, x2×1e-1）を
   追加し成功パスとして数値比較する価値があると考える。
-- **気づいた経緯**: 2026-08-15、`generate_iv_datasets.py`解説後のユーザー指摘・
+- **気づいた経緯**: 2026-08-15、`benchmark/iv/datasets.py`解説後のユーザー指摘・
   Claudeによる3系統横断の実測確認。
 - **状態**: 未対応（要否・優先度はユーザー判断待ち）
 
 ### 12. クラスターロバストSEのDGPに実際のクラスター内相関が無い
 
-- **対象**: `benchmark/linear/generate_linear_datasets.py`・
+- **対象**: `benchmark/linear/datasets.py`・
   [benchmark/linear/fixtures/generate_ols_fixtures.py](../../../benchmark/linear/fixtures/generate_ols_fixtures.py)
   （クラスターロバストSEを持つ他手法にも同様の構造が当てはまる可能性）
 - **内容**: ユーザー指摘（2026-08-15）。クラスターロバストSEのテスト用データは、
@@ -287,13 +287,13 @@
   内生変数が絡む「操作変数群全体としての多変量的な弱さ」を検出できない場合がある。
 - **Claudeの所感**: 複数内生変数のサポートが実際に進んだ今、v1時点の判断を見直す価値が
   あるかは再検討に値する。Issue化済み（[#247](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/247)）。
-- **気づいた経緯**: 2026-08-16、`run_linearmodels_benchmark.py`解説後のユーザー質問。
+- **気づいた経緯**: 2026-08-16、`benchmark/iv/references/linearmodels_ref.py`解説後のユーザー質問。
 - **状態**: 未対応（[#247](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/247)で再検討中）
 
 ### 16. GMM: C統計量（difference-in-Hansen統計量）による内生性検定が無い（新規機能候補）
 
 - **対象**: `engine/src/iv/gmm.rs`（Wu-Hausman相当の検定が未実装）・
-  `benchmark/iv/run_linearmodels_benchmark.py`の`run_gmm()`
+  `benchmark/iv/references/linearmodels_ref.py`の`run_gmm()`
 - **内容**: ユーザー提案（2026-08-16）。GMMには2SLSの`wu_hausman_statistic`に相当する
   内生性検定が現状無い（`engine/src/iv/CLAUDE.md`「Wu-Hausman検定はGMMには存在しない」参照）。
   GMMの枠組みで内生性を検定する標準的な手法として**C統計量**（difference-in-Hansen統計量、
@@ -310,7 +310,7 @@
 
 ### 17. OLS: `predict()`が主リファレンス（statsmodels）側で一度も検証されていない
 
-- **対象**: `benchmark/linear/run_statsmodels_benchmark.py`・
+- **対象**: `benchmark/linear/references/statsmodels_ref.py`・
   `benchmark/linear/fixtures/generate_ols_fixtures.py`・
   `tests/test_ols_fixtures.py`（いずれも`predict`/`fitted`という単語が一切登場しない、
   実測確認済み）
@@ -320,13 +320,13 @@
   （statsmodels）側では一度も検証されていない**。`testing-policy.md`の設計思想
   （statsmodelsを主リファレンス、Rは独立実装によるクロスチェック）に照らすと、
   本来あるべき優先順位が逆転している。statsmodelsの`results.predict()`/
-  `results.fittedvalues`は同等の機能を持つため、`run_statsmodels_benchmark.py`側にも
+  `results.fittedvalues`は同等の機能を持つため、`benchmark/linear/references/statsmodels_ref.py`側にも
   追加できるはず。
 - **Claudeの所感**: 項目13（OLSの実データ検証がRクロスチェック側のみで主リファレンス側に
   無い）と同種の「主リファレンス側の検証が手薄」パターン。`generate_ols_fixtures.py`の
   `run()`呼び出しに`predict`/`fitted`のキーを追加し、`test_ols_fixtures.py`に対応する
   テストを追加する形で対応できそう。
-- **気づいた経緯**: 2026-08-16、`run_lm_predict_crosscheck.R`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-16、`benchmark/linear/references/run_lm_predict_crosscheck.R`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 18. OLS: `gpa2`を`mroz`に置き換え、実データでの線形確率モデル（LPM）検証を追加する案
@@ -371,7 +371,7 @@
 
 - **対象**: `tests/test_iv_crosscheck.py`（`check_wu_hausman_p_value=False`で
   clusterのp値比較自体をスキップしている）・
-  [benchmark/iv/run_ivreg_benchmark.R:33-41](../../../benchmark/iv/run_ivreg_benchmark.R#L33-L41)
+  [benchmark/iv/references/run_ivreg.R:33-41](../../../benchmark/iv/references/run_ivreg.R#L33-L41)
   （コメントで「G-1で計算するとRのstatisticから本実装のp値が再現できることを
   確認済み」と記載）
 - **内容**: ユーザー指摘（2026-08-16）。「統計量は一致するがp値は一致しない」
@@ -383,7 +383,7 @@
 - **Claudeの所感**: Rの`statistic`値を使い、`scipy.stats.f.cdf`等で`G-1`自由度の
   p値を独立計算し、本実装のp値と一致することを確認する専用テストを追加すれば、
   この根本原因の説明を将来にわたって保証できる。
-- **気づいた経緯**: 2026-08-16、`run_ivreg_benchmark.R`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-16、`benchmark/iv/references/run_ivreg.R`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 21. IV(GMM): RクロスチェックがivregのGMM非対応で省略されている件を再検討する
@@ -396,7 +396,7 @@
   GMMに非対応なため）。`gmm`パッケージ（Pierre Chaussé作）等、`ivreg`以外に
   GMMを実装しているRパッケージが無いか再調査する価値がある。
   Issue化済み（[#256](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/256)）。
-- **気づいた経緯**: 2026-08-16、`run_ivreg_benchmark.R`解説後のユーザー指摘
+- **気づいた経緯**: 2026-08-16、`benchmark/iv/references/run_ivreg.R`解説後のユーザー指摘
   （C統計量Issue #249と関連するが別の論点として指摘）。
 - **状態**: 未対応（[#256](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/256)で検討中）
 
@@ -540,7 +540,7 @@
 
 ### 27. `include_intercept=False`・`confidence_level`オプションの効果が、frozen JSON数値照合（fixturesパイプライン）で検証されていない
 
-- **対象**: [benchmark/linear/generate_linear_datasets.py](../../../benchmark/linear/generate_linear_datasets.py)・
+- **対象**: [benchmark/linear/datasets.py](../../../benchmark/linear/datasets.py)・
   [benchmark/linear/fixtures/generate_ols_fixtures.py](../../../benchmark/linear/fixtures/generate_ols_fixtures.py)
   （どちらにも`include_intercept`・`confidence_level`という文字列が0件）
 - **内容**: ユーザー指摘（2026-08-22）を受けて確認。`OLSOptions`の主要な
@@ -560,7 +560,7 @@
   即席データのみでの検証。
 - **Claudeの所感**: `testing-policy.md`が要求する「全てのオプションの組み合わせで
   リファレンス実装と統計量が一致することを確認する」の対象漏れだと考える。
-  `include_intercept=False`のシナリオを`generate_linear_datasets.py`に追加し、
+  `include_intercept=False`のシナリオを`benchmark/linear/datasets.py`に追加し、
   `generate_ols_fixtures.py`側でcov_type全種と組み合わせて数値照合すれば、
   `refactoring-candidates-2.md`項目52（`test_ols.py`の役割の非対称性）の
   解消（`test_ols.py`から簡易数値比較を削る）の前提条件にもなる。

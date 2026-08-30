@@ -34,11 +34,11 @@ Note:
       （`iv-api-design.md`3.1節）。
     - `weak_instrument_f`・`sargan_statistic`/`sargan_p_value`はivregの
       `summary(diagnostics=TRUE)`が常にclassical vcovで計算する仕様のため、
-      全cov_typeで同じ値になる（`run_ivreg_benchmark.R`参照）。
+      全cov_typeで同じ値になる（`benchmark/iv/references/run_ivreg.R`参照）。
     - `wu_hausman_statistic`/`wu_hausman_p_value`は全cov_typeでフィクスチャに
       実測値がある（Issue #233。`summary(diagnostics=TRUE, vcov.=<関数>)`で
       cov_type別のロバスト共分散を診断表に反映できることが判明、
-      `run_ivreg_benchmark.R`のモジュールコメント参照）。ただしcluster
+      `benchmark/iv/references/run_ivreg.R`のモジュールコメント参照）。ただしcluster
       cov_typeのみ、ivreg側のWald検定がF分布の分母自由度にクラスター数を
       反映しない既知の制約によりp値が一致しないため、`_check_result`の
       `check_wu_hausman_p_value=False`で統計量のみ比較する（ユーザー確認済み）。
@@ -48,7 +48,7 @@ Note:
       `test_iv_fixtures.py`と同じ理由）。
 
     フィクスチャ生成時と同じ入力データを、`tests/fixtures/benchmarks/data/`
-    に固定済みのCSV（`benchmark/freeze_datasets.py`参照）から読む。
+    に固定済みのCSV（`benchmark/iv/freeze.py`参照）から読む。
 """
 
 from __future__ import annotations

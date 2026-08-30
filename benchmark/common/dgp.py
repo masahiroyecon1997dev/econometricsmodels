@@ -6,11 +6,11 @@
   multicollinearity系シナリオの説明変数行列生成。
 - `hac_auto_lag`: HACの自動ラグ選択式（engineの`resolve_hac_lags`と同じ）。
 - `validate_choice`: 候補集合に含まれなければ`ValueError`（`scenario`/`link`検証）。
-- `preview_dataset`: `generate_<系統>_datasets.py`共通の単体実行プレビュー。
+- `preview_dataset`: `benchmark/<系統>/datasets.py`共通の単体実行プレビュー。
 
 数値の定数（誤差項・スケール倍率）は `benchmark.common.dgp_constants` に分けている。
-旧 `benchmark/_common.py`（→ `benchmark/common/helpers.py`）から Initiative A で
-関心事ごとに分割した（`docs/planning/specs/benchmark-restructure-design.md` 4章）。
+旧 `benchmark/_common.py` から Initiative A で関心事ごとに分割した
+（`docs/planning/specs/benchmark-restructure-design.md` 4章）。
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ def linear_predictor(X: np.ndarray, beta: np.ndarray) -> np.ndarray:
     """切片＋線形結合`beta[0] + X @ beta[1:]`を計算する。
 
     `beta`は切片を含む（`beta[0]`が切片、`beta[1:]`が`X`の各列に対応する
-    傾き係数）、`generate_linear_datasets.py`/`generate_nonlinear_datasets.py`
+    傾き係数）、`benchmark/linear/datasets.py`/`benchmark/nonlinear/datasets.py`
     で共通の予測子の組み立て方。
 
     Args:
@@ -80,8 +80,8 @@ def correlated_design_matrix(
 
     `moderate_multicollinearity`/`high_condition_number`は列1・列2に相関を
     持たせた`multivariate_normal`、それ以外は無相関の`normal`。
-    `generate_linear_datasets.py`/`generate_nonlinear_datasets.py`/
-    `generate_iv_datasets.py`で共通のロジック（呼び出し側の変数名は
+    `benchmark/linear/datasets.py`/`benchmark/nonlinear/datasets.py`/
+    `benchmark/iv/datasets.py`で共通のロジック（呼び出し側の変数名は
     `X`/`x_exog`と異なる）。
 
     Args:

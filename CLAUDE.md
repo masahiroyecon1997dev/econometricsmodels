@@ -57,8 +57,12 @@ econometricsmodels/
 │
 ├── tests/                          # pytest（pyfixest / R実装との答え合わせ）
 │
-├── benchmark/                     # テスト用データセット生成・リファレンス実装（pyfixest/R）でのベンチマーク値生成スクリプト
-│                                   # tests/とは別ライフサイクル（Rランタイム依存、随時実行するツール）。詳細は.claude/skills/reference-benchmark/
+├── benchmark/                     # テスト用フィクスチャ生成ツール（Pythonパッケージ。pytestが収集時にimportする）
+│   ├── common/                    # 系統横断の共通ヘルパー（DGP・データIO・リファレンス呼び出し・CLI）
+│   ├── linear/ nonlinear/ iv/ panel/  # 系統ごと: datasets.py（DGP＋凍結）・references/（リファレンス実装アダプタ＋.R）・fixtures/（generate_*_fixtures.py）
+│   └── regenerate_all.py          # 合成データCSV＋全フィクスチャJSONの一括再生成。詳細は.claude/skills/reference-benchmark/
+│
+├── performance/                   # リファレンス実装との性能比較（benchmark_ols.ymlから実行。pytestとは無関係、Rランタイム/pyfixest依存）
 │
 ├── docs/                          # MkDocs（GitHub Pages公開）
 │   ├── mkdocs.yml

@@ -33,7 +33,7 @@ Note:
       （`test_iv_fixtures.py`と同じ理由）。
 
     フィクスチャ生成時と同じ入力データを、`tests/fixtures/benchmarks/data/`
-    に固定済みのCSV（`benchmark/freeze_datasets.py`参照）から読む。
+    に固定済みのCSV（`benchmark/iv/freeze.py`参照）から読む。
 """
 
 from __future__ import annotations

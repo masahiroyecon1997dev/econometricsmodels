@@ -15,7 +15,7 @@ Wooldridge実データ（mroz）で、係数・標準誤差・検定統計量・
 Note:
     `cov_type="hc1"`はここに含めない（statsmodelsのdiscrete modelがn/(n-k)
     小標本補正を実装しておらずHC0と同一値になるバグ的な欠落があるため。
-    `benchmark/nonlinear/run_statsmodels_benchmark_nonlinear.py`のdocstring参照）。
+    `benchmark/nonlinear/references/statsmodels_ref.py`のdocstring参照）。
     `hc1`の数値比較は`test_logit_crosscheck.py`（R側が主リファレンス）で行う。
 
     `cov_type="opg"`の限界効果はstatsmodels側では算出できない（同docstring参照）
@@ -227,7 +227,7 @@ def test_include_intercept_false_matches_statsmodels(cov_type):
     確認する（`test_wls_fixtures.py::test_include_intercept_false_matches_
     statsmodels`と同じ方針）。
 
-    `run_statsmodels_benchmark_nonlinear.run()`はformula API（`patsy`経由でpandasを
+    `statsmodels_ref.run()`はformula API（`patsy`経由でpandasを
     要求する）を使うため、ここでは使わない。OLS側と同じ配列API
     （`sm.Logit(y, x)`）で直接比較する（`tests/`はpyarrow等のformula API
     依存パッケージをdev依存に持たない方針、`.claude/rules/testing-policy.md`

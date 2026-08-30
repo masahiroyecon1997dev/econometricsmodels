@@ -14,7 +14,7 @@ classical/HC0-3/HAC + クラスター(baselineのみ) + 実データ（401ksubs�
 
 Note:
     合成データはフィクスチャ生成時と同じ入力データを、`tests/
-    fixtures/benchmarks/data/`に固定済みのCSV（`benchmark/freeze_datasets.py`
+    fixtures/benchmarks/data/`に固定済みのCSV（`benchmark/linear/freeze.py`
     参照）から読む（重み列`weight`も同じCSVに含まれる）。401ksubs
     （Wooldridge）は`load_wooldridge.py`経由で都度ロードする（データの
     再配布ライセンスが未確認のためCSVとして固定しない）。
@@ -54,7 +54,7 @@ ATOL = TOLERANCES["wls_fixtures"]["atol"]
 # SCENARIOS/COV_TYPESはgenerate_wls_fixtures.pyのNUMERIC_SCENARIOS/COV_TYPESと
 # 常に一致させる必要があるため、そちらをimportして単一の定義元にする。
 
-# generate_wls_fixtures.py（run_statsmodels_benchmark_linear.py）はHACのラグを
+# generate_wls_fixtures.py（benchmark/linear/references/statsmodels_ref.py）はHACのラグを
 # maxlags=1に固定している。同じラグを明示的に指定し、自動ラグ選択式の
 # 違いを比較対象から除外する（test_ols_fixtures.pyと同じ理由）。
 HAC_LAG_IN_FIXTURE = 1

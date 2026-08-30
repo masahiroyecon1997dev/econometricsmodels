@@ -39,14 +39,14 @@ from benchmark.nonlinear.references.statsmodels_ref import run
 
 # perfect_multicollinearityは数値比較の対象外（ComputationErrorの発生確認のみ、
 # testing-policy.md「テストの3系統」）。generate_logit_fixtures.pyと同じシナリオ構成
-# （generate_nonlinear_datasets.py参照）。
+# （benchmark/nonlinear/datasets.py参照）。
 NUMERIC_SCENARIOS = [
     "baseline",
     "small_n",
     "moderate_multicollinearity",
     "high_condition_number",
     # probit特有の病理（準完全分離）。収束するが標準誤差が大きく膨らむ境界値ケース。
-    # 較正値はlogit（beta1=20）と異なりbeta1=10（generate_nonlinear_datasets.py参照）。
+    # 較正値はlogit（beta1=20）と異なりbeta1=10（benchmark/nonlinear/datasets.py参照）。
     "near_separation",
     # 変数間のスケールが極端に異なるケース（真のDGPは未スケーリングのXで計算済みの
     # ため成功パス）。

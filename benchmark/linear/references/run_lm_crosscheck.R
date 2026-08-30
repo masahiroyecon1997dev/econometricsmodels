@@ -34,7 +34,7 @@ df <- read.csv(data_path, check.names = FALSE)
 library(sandwich)
 library(lmtest)
 
-# coeftest()からの係数・標準誤差抽出とロバストWald F検定はrun_ivreg_benchmark.R
+# coeftest()からの係数・標準誤差抽出とロバストWald F検定はiv/references/run_ivreg.R
 # と共通のため、benchmark/common/_common.Rに抽出している（Rには__file__相当が無いため、
 # commandArgs()の--file=から自身のディレクトリを特定してsource()する）。
 script_args <- commandArgs(trailingOnly = FALSE)

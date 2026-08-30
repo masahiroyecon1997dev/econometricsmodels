@@ -518,9 +518,37 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
       `_meta` 先行ドリフト以外は完全一致。`pytest` 957件・`ruff` パス。
     - 残る `freeze_datasets.py` / `benchmark.performance` の prose 参照（約20箇所、
       `generate_*` docstring・`tests/test_*` docstring・SKILL.md 等）は Step 9 の一括更新へ。
-  - 次: Step 9（`_meta` 文字列の一括棚卸し＋意図的な再凍結、CLAUDE.md §3/§10・
-    ネスト CLAUDE.md・`.claude/skills/reference-benchmark/SKILL.md`・`docs/spec/*`・
-    `tests/test_*` docstring のパス参照一括更新）。
+  - **Step 9 完了（2026-08-30）— `_meta` 棚卸し＋文書一括更新（2コミット）**:
+    - **9-1（`f27d1c8`）**: 8つの `generate_*_fixtures.py` の `_meta.note`/`_meta.purpose`
+      文字列リテラルに残っていた旧ファイル名参照（`run_statsmodels_benchmark_nonlinear.py`・
+      `run_linearmodels_benchmark_iv.py`・`run_ivreg_benchmark.R`・
+      `run_lm_crosscheck_benchmark.R`・`generate_{nonlinear,iv}_datasets.py`）を新パスへ更新し、
+      対応する8本のフィクスチャJSON（`ols`・`logit`・`probit`・`iv`・`iv_gmm` ＋
+      `logit`・`probit`・`iv` の各 `_crosscheck`）を再凍結。`cmp9.py` で全11本が
+      「volatile ＋ `_meta` note/purpose 除外で完全一致」を確認＝**数値・`*_version` 不変**、
+      変化は `_meta` 文字列と per-case `generated_at` のみ。`wls`・`wls_crosscheck`・
+      `ols_crosscheck` は `_meta` 内容変化ゼロ（タイムスタンプのみ）のため revert し対象外。
+      これで 5a〜7 で記録した「`_meta` 先行ドリフト」を解消。
+    - **9-2（prose/パス参照の一括更新、ドキュメント・コメントのみ）**: 約40ファイル。
+      `CLAUDE.md` §3 構成図（`benchmark/` パッケージ内訳＋`performance/` 新設）、
+      `engine/src/iv/CLAUDE.md`（3箇所）、`.claude/skills/reference-benchmark/SKILL.md`
+      構成節を実際に作られた構造（パッケージレイアウト＋共有ヘルパー `run_fixture_cli`/
+      `run_*_r`/`extract_coef_se`。未実装の Spec/ドライバには触れない）へ改訂、
+      `.claude/skills/cicd/SKILL.md`、`.claude/rules/testing-policy.md`、
+      `docs/spec/{wls,logit,inference-conventions}.md`、
+      `docs/planning/specs/{iv-api-design,panel-iv-issue-breakdown}.md`、
+      `tests/test_*.py`（10ファイル）＋`tests/_helpers.py` の docstring・コメント、
+      `benchmark/**` の残存 docstring・コメント（`common/{datasets_io,dgp,dgp_constants,_common.R}`・
+      各 `references/*`・各 `datasets.py`・`fixtures/generate_*` のコメント）。
+      **`docs/planning/specs/refactoring-candidates.md`**: 設計ノート §10 に従い Initiative A が
+      吸収した項目12・13・15・16・18〜21・24〜29・31〜35・39 を削除（番号は詰め直さず、
+      `## 一覧` 冒頭に欠番の理由を1文追記）、残った項目17・22・23・30・37・40・41 の
+      壊れたパス参照・リンクを新構造へ修正。**`docs/planning/specs/test-coverage-candidates.md`**
+      （並行セッション所有）は壊れたリンク・パスのみ新構造へ修正（内容は非改変）。
+      検証: `pytest` 957件・`ruff check .`／`format --check .` パス、`/code-review`（fork）
+      指摘ゼロ（数値フィクスチャ変化ゼロ・stale 実行参照ゼロを独立確認）。
+  - **これで Initiative A（`benchmark/` パッケージ再設計）完了**。設計ノート
+    `benchmark-restructure-design.md` の移行手順 §8 step 1〜9 すべて実施済み。
 
 ---
 

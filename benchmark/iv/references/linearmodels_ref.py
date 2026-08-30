@@ -5,9 +5,9 @@ IVの主リファレンス（`docs/planning/specs/iv-api-design.md`5.1節参照�
 2SLSは`run()`、GMMは`run_gmm()`（`method="gmm"`のPython配線完了後に追加、
 `run_gmm()`のモジュールdocコメント参照）。
 
-合成データは`generate_iv_datasets.py`を直接呼ばず、`tests/fixtures/
-benchmarks/data/`に固定済みのCSVを読む（`benchmark/freeze_datasets.py`参照。
-`run_statsmodels_benchmark_linear.py`と同じ理由）。
+合成データは`benchmark/iv/datasets.py`を直接呼ばず、`tests/fixtures/
+benchmarks/data/`に固定済みのCSVを読む（`benchmark/iv/freeze.py`参照。
+`benchmark/linear/references/statsmodels_ref.py`と同じ理由）。
 
 ## `cov_type`/`debiased`の対応関係（実装時に実測して確定、`iv-api-design.md`3.1節の
 「未確定事項」に対応）
@@ -100,7 +100,8 @@ def _load_iv_dataset(
         return load_frozen_dataset("iv", scenario)
     if dataset_source == "wooldridge":
         # Wooldridgeデータはtrue_betaと比較できないため常に`None`
-        # （`run_statsmodels_benchmark_linear.py`のwooldridge分岐と同じ扱い）。
+        # （`benchmark/linear/references/statsmodels_ref.py`のwooldridge分岐と
+        # 同じ扱い）。
         return _load_wooldridge(scenario), None
     raise ValueError(f"unknown dataset_source: {dataset_source!r}")
 

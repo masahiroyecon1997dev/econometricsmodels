@@ -30,7 +30,7 @@ F統計量・F検定p値もRクロスチェック対象に含める（`testing-p
 （`coefs ± qt(0.975, df_inference) * ses`）。R²・調整済みR²はAIC/BIC等と同じく
 cov_typeに依存しない（`summary(model)`の値をそのまま使う）。
 AIC/BICはRの`AIC()`/`BIC()`標準関数（残差分散を1パラメータとして追加でカウントするk+1慣習）
-ではなく、`run_lm_crosscheck_benchmark.R`側で本実装・statsmodelsと同じ式（`-2*loglik + 2*k`等、kは
+ではなく、`benchmark/linear/references/run_lm_crosscheck.R`側で本実装・statsmodelsと同じ式（`-2*loglik + 2*k`等、kは
 回帰係数の数のみ）で手計算した値を使う（実測でRの標準関数はAICがちょうど2、BICがlog(n)だけ
 系統的にずれることを確認済み）。F統計量・F検定p値は本実装の`wald_f_test`と同じロバストWald検定
 （`β_slopes' Σ⁻¹ β_slopes / q`）をcov_typeごとの共分散行列で計算しており、cov_typeに依存する。
@@ -39,11 +39,11 @@ AIC/BICはRの`AIC()`/`BIC()`標準関数（残差分散を1パラメータと�
 `tests/fixtures/`に置く（`testing-policy.md`「ベンチマーク値のフィクスチャ化」参照）。
 
 合成データの入力は`tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
-（`benchmark/freeze_datasets.py`参照）。`imbalanced_cluster_groups`（純粋にnから
+（`benchmark/linear/freeze.py`参照）。`imbalanced_cluster_groups`（純粋にnから
 決定論的にラベルを組み立てるだけで乱数を使わない）のみ、引き続き
-`generate_linear_datasets.py`を直接呼ぶ。Wooldridgeデータは`load_wooldridge.py`
+`benchmark/linear/datasets.py`を直接呼ぶ。Wooldridgeデータは`load_wooldridge.py`
 経由で都度ロードする（データの再配布ライセンスが未確認のためCSVとして固定しない。
-`freeze_datasets.py`のdocstring参照）。
+`benchmark/linear/freeze.py`のdocstring参照）。
 
 使用例（リポジトリルートから）:
     python -m benchmark.linear.fixtures.generate_ols_crosscheck_fixtures

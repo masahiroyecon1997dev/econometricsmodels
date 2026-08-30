@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # ivreg（R）による2SLSクロスチェック用スクリプト（IV系統、engine::iv::two_sls）。
 #
-# OLS/WLSクロスチェック（../linear/run_lm_crosscheck_benchmark.R）と同じ役割分担
+# OLS/WLSクロスチェック（../../linear/references/run_lm_crosscheck.R）と同じ役割分担
 # （testing-policy.md「リファレンス実装」章）で、linearmodels（Python主リファレンス）
 # とは独立の実装によるクロスチェックとしてivregを使う（iv-api-design.md 5.2節）。
 #
@@ -43,10 +43,10 @@
 # 事前準備: install.packages(c("ivreg", "sandwich", "lmtest", "jsonlite"))
 #
 # 使用例:
-#   Rscript run_ivreg_benchmark.R data.csv "y ~ x1 + endog1 | x1 + z1 + z2" classical
-#   Rscript run_ivreg_benchmark.R data.csv "y ~ x1 + endog1 | x1 + z1 + z2" hc0
-#   Rscript run_ivreg_benchmark.R data.csv "y ~ x1 + endog1 | x1 + z1 + z2" cluster cluster_col
-#   Rscript run_ivreg_benchmark.R data.csv "y ~ x1 + endog1 | x1 + z1 + z2" hac 2   # hac_lag=2
+#   Rscript run_ivreg.R data.csv "y ~ x1 + endog1 | x1 + z1 + z2" classical
+#   Rscript run_ivreg.R data.csv "y ~ x1 + endog1 | x1 + z1 + z2" hc0
+#   Rscript run_ivreg.R data.csv "y ~ x1 + endog1 | x1 + z1 + z2" cluster cluster_col
+#   Rscript run_ivreg.R data.csv "y ~ x1 + endog1 | x1 + z1 + z2" hac 2   # hac_lag=2
 #
 # 注: 弱操作変数F統計量は内生変数名をキーにしたdictとして返す（本実装の
 # weak_instrument_f_statisticsと同じ形。内生変数が1本のときは診断表の行名が
@@ -55,7 +55,7 @@
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 2) {
-  stop("usage: Rscript run_ivreg_benchmark.R <data.csv> <formula> [cov_type=classical] [cluster_col|hac_lag]")
+  stop("usage: Rscript run_ivreg.R <data.csv> <formula> [cov_type=classical] [cluster_col|hac_lag]")
 }
 data_path <- args[1]
 formula_str <- args[2]
@@ -114,7 +114,7 @@ ses <- coef_se$ses
 t_stats <- coef_se$t_stats
 p_values <- coef_se$p_values
 
-# 信頼区間（既定confidence_level=0.95固定、run_lm_crosscheck_benchmark.Rと同じ
+# 信頼区間（既定confidence_level=0.95固定、../../linear/references/run_lm_crosscheck.Rと同じ
 # 手計算方式。baseのconfint(model)はclassicalのvcovしか使わないため使えない）。
 crit <- qt(0.975, df_inference)
 conf_lower <- coefs - crit * ses

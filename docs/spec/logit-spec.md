@@ -174,7 +174,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 - R側の限界効果リファレンスは`margins`ではなく`marginaleffects`パッケージを採用（メンテナンス状況、
   tidyな出力形式）。`datagrid()`/`slopes(newdata=...)`の`"mean"`/`"median"`ショートカット文字列は
   整数列を丸めてしまうため使わず、`FUN_numeric=mean, FUN_integer=mean`を明示する。
-- 合成データセット（`benchmark/nonlinear/generate_nonlinear_datasets.py`）はOLSの9シナリオを
+- 合成データセット（`benchmark/nonlinear/datasets.py`）はOLSの9シナリオを
   ベースに、誤差項構造に依存するもの（不均一分散・自己相関等）を除外し、Logit特有の病理シナリオ
   `near_separation`（準完全分離、係数を大きくしてp≈0/1が支配的になる状況）を追加した7シナリオ。
   実データは`mroz`（Wooldridge、労働参加モデル）。

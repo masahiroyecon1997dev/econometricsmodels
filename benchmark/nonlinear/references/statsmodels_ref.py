@@ -1,8 +1,8 @@
 """statsmodelsでLogit/Probitのベンチマーク値（係数・標準誤差・適合度統計量・
 限界効果）を生成するスクリプト。
 
-Logit/Probitの主リファレンスとして使用する。`benchmark/linear/
-run_statsmodels_benchmark_linear.py`（OLS/WLS用）と同型の設計。元々Logit専用だったが、
+Logit/Probitの主リファレンスとして使用する。`benchmark/linear/references/
+statsmodels_ref.py`（OLS/WLS用）と同型の設計。元々Logit専用だったが、
 Probit追加にあたり`--model logit`/`--model probit`で切り替えられる
 よう一般化した（`--weight-col`でOLS/WLSを切り替える`linear`系統の設計と同じ発想。
 `smf.logit`/`smf.probit`のAPI形状が完全に同じで、下記の各種既知の欠落・回避策も
@@ -26,8 +26,8 @@ Probit追加にあたり`--model logit`/`--model probit`で切り替えられる
 内部のキャッシュ機構の詳細に依存し、正しく反映させるには`DiscreteMargins`の
 内部関数を個別に呼び出す必要があり、統合予定のR側`marginaleffects`パッケージ
 （`vcov=`引数でカスタム共分散行列を直接渡せる）の方が確実で保守しやすいため、
-`opg`の限界効果クロスチェックは`run_glm_crosscheck_benchmark.R`（`marginaleffects`）
-側を正とする。`generate_logit_fixtures.py`/`generate_probit_fixtures.py`の
+`opg`の限界効果クロスチェックは`benchmark/nonlinear/references/run_glm_crosscheck.R`
+（`marginaleffects`）側を正とする。`generate_logit_fixtures.py`/`generate_probit_fixtures.py`の
 `_meta`にもこの分担を明記する。
 
 **`cov_type="hc1"`はstatsmodelsのdiscrete modelでは実質的に未実装**（ベンチマーク

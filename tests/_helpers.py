@@ -3,7 +3,7 @@
 複数のテストファイルに重複していた以下を集約する。
 
 - `with_cluster_groups`: 「行番号%N」の疑似クラスターラベル付与。
-  `benchmark/_common.py`の`imbalanced_cluster_groups`（不均衡クラスタ版）とは
+  `benchmark/common/dgp.py`の`imbalanced_cluster_groups`（不均衡クラスタ版）とは
   役割が近いが、これは均等サイズ版でテスト専用のロジックのため、`benchmark/`とは
   ライフサイクルが異なる`tests/`側に置く（`.claude/rules/testing-policy.md`
   「テストの分離」参照。ユーザー確認済み）。
@@ -78,7 +78,7 @@ def wooldridge_loader() -> Callable[[str], pl.DataFrame]:
     tests本体はtest依存グループのみで完結させる方針（testing-policy.md、
     CLAUDE.md 3章「benchmark/はtests/とは別ライフサイクル」）のため、実データ
     クロスチェックのみ任意扱いにする。Wooldridgeデータはデータの再配布ライセンスが
-    未確認のためCSVとして固定せず（`benchmark/freeze_datasets.py`のdocstring
+    未確認のためCSVとして固定せず（`benchmark/linear/freeze.py`のdocstring
     参照）、都度ロードする。
 
     複数のデータセット名を扱うテスト（`pytest.mark.parametrize`でデータセット名を

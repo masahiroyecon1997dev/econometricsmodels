@@ -7,12 +7,12 @@ Phase4以降で中心的に使う想定（`docs/spec/ols-spec.md`「テスト」
 参照。分散共分散行列の計算式自体はOLSと共通でありstatsmodels側も同じ実装のため、
 このスクリプト自体はOLS/WLSで分岐せず共通で使う）。
 
-合成データは`generate_linear_datasets.py`を直接呼ばず、`tests/fixtures/
-benchmarks/data/`に固定済みのCSVを読む（`benchmark/freeze_datasets.py`参照。
+合成データは`benchmark/linear/datasets.py`を直接呼ばず、`tests/fixtures/
+benchmarks/data/`に固定済みのCSVを読む（`benchmark/linear/freeze.py`参照。
 ジェネレータ側のコードが将来変わっても既存フィクスチャの期待値と無言で
 不整合にならないようにするため）。Wooldridgeデータは`load_wooldridge.py`経由で
 都度ロードする（データの再配布ライセンスが未確認のためCSVとして固定しない。
-`freeze_datasets.py`のdocstring参照）。
+`benchmark/linear/freeze.py`のdocstring参照）。
 
 使用例（リポジトリルートから）:
     python -m benchmark.linear.references.statsmodels_ref --dataset-source synthetic \\

@@ -50,7 +50,7 @@ NUMERIC_SCENARIOS = [
     "scale_variance_mild",
     # n=k+1（自由度1ちょうど）の成功パス。baselineをn=5,k=3で
     # オーバーライドした専用データ（engine側の`k`は定数項込みでk=4になる
-    # ため、df_resid=1にはn=5が必要。freeze_datasets.py参照）。同じx1..x3の
+    # ため、df_resid=1にはn=5が必要。benchmark/linear/freeze.py参照）。同じx1..x3の
     # 列構成のため、他シナリオと同じ自動フォーミュラ生成に乗る。
     "baseline_df1",
 ]

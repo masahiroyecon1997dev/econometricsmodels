@@ -1,12 +1,12 @@
 """複数系統（linear/nonlinear/iv）のDGPで共通して使う定数。
 
-`generate_*_datasets.py`3系統で意図的に同じ値を使っているにもかかわらず、
+`benchmark/<系統>/datasets.py`3系統で意図的に同じ値を使っているにもかかわらず、
 値の実体がファイルごとに分散していた（うち一部はマジックナンバー直書き）ため、
-`docs/planning/specs/refactoring-candidates.md`の項目9・10で1箇所に集約した。
+1箇所に集約した。
 
-`_common.py`に置かず専用ファイルに分離しているのは、`_common.py`が既に
-用途の異なるヘルパー（DGP系・データIO系・CLI系）の寄せ集めになりつつあり
-（同メモ項目21）、これ以上の定数追加で肥大化させないため。
+`benchmark/common/dgp.py`に混ぜず専用ファイルに分離しているのは、`dgp.py`が
+用途の異なるヘルパー（DGP系・データIO系・CLI系）の寄せ集めになりがちで、
+これ以上の定数追加で肥大化させないため。
 """
 
 from __future__ import annotations

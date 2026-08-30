@@ -1,5 +1,5 @@
-# run_lm_crosscheck_benchmark.R（OLS/WLS）とrun_ivreg_benchmark.R（IV/2SLS）で
-# 完全に同一だった後処理を集約する共通ヘルパー。source()で読み込んで使う。
+# linear/references/run_lm_crosscheck.R（OLS/WLS）とiv/references/run_ivreg.R
+# （IV/2SLS）で完全に同一だった後処理を集約する共通ヘルパー。source()で読み込んで使う。
 #
 # cov_type→vcov分岐自体（lmはHC0-3・weight対応、ivregはHC0-1のみ対応、等の
 # 実質的な差分がある）は共通化しない。coeftest()からの係数・標準誤差抽出と、

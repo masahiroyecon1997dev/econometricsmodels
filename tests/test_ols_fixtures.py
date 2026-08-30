@@ -12,11 +12,11 @@
 
 Note:
     フィクスチャ生成時と同じ入力データを、`tests/fixtures/benchmarks/data/`
-    に固定済みのCSV（`benchmark/freeze_datasets.py`参照）から読む。ジェネレータ
-    （`generate_linear_datasets.py`）を直接呼ばないことで、ジェネレータ側の
+    に固定済みのCSV（`benchmark/linear/freeze.py`参照）から読む。ジェネレータ
+    （`benchmark/linear/datasets.py`）を直接呼ばないことで、ジェネレータ側の
     コードが将来変わっても既存フィクスチャの期待値と無言で不整合にならない。
     `imbalanced_cluster_groups`（純粋にnから決定論的にラベルを組み立てるだけで
-    乱数を使わない）のみ、引き続き`generate_linear_datasets.py`を直接呼ぶ。
+    乱数を使わない）のみ、引き続き`benchmark/linear/datasets.py`を直接呼ぶ。
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ ATOL = TOLERANCES["ols_fixtures"]["atol"]
 # SCENARIOS/COV_TYPESはgenerate_ols_fixtures.pyのNUMERIC_SCENARIOS/COV_TYPESと
 # 常に一致させる必要があるため、そちらをimportして単一の定義元にする。
 
-# generate_ols_fixtures.py（run_statsmodels_benchmark_linear.py）はHACのラグを
+# generate_ols_fixtures.py（benchmark/linear/references/statsmodels_ref.py）はHACのラグを
 # maxlags=1に固定している。同じラグを明示的に指定し、自動ラグ選択式の
 # 違いを比較対象から除外する。
 HAC_LAG_IN_FIXTURE = 1

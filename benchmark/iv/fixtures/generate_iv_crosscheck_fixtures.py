@@ -19,7 +19,7 @@ iv_crosscheck.json）を生成するスクリプト。
 - **wu_hausman**: 本実装がcov_typeに追従する設計のため、`summary(diagnostics=TRUE)`の
   `vcov.`引数に各cov_typeの共分散計算式を関数化して渡し、全cov_typeでクロスチェック
   する（Issue #233。`vcov.`は行列ではなく関数として渡す必要があることが判明、
-  `run_ivreg_benchmark.R`のモジュールコメント参照）。ただしcluster cov_typeのみ、
+  `benchmark/iv/references/run_ivreg.R`のモジュールコメント参照）。ただしcluster cov_typeのみ、
   ivreg側のWald検定がF分布の分母自由度にクラスター数を反映しない既知の制約により
   p値が一致しないため、統計量のみ比較しp値は対象外にする（ユーザー確認済み）。
 - **t_stats/p_values/conf_int**（Issue #232）・**nobs/df_resid**（Issue #237）:

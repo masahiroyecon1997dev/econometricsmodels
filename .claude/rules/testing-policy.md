@@ -17,14 +17,14 @@ paths:
 
 既存の検証済みパッケージとの数値比較で、パラメータ推定値の正しさを検証する。統計量ごとに主リファレンスを決め、独立実装によるクロスチェックも行う。
 
-- **statsmodels**（Python）: OLS系（classical/HC0-3/cluster/HAC、AIC/BIC/log-likelihood、ロバストWald検定まで一貫して対応）の**主リファレンス**。動作確認済み（`benchmark/<系統>/run_statsmodels_benchmark_<系統>.py`）。
+- **statsmodels**（Python）: OLS系（classical/HC0-3/cluster/HAC、AIC/BIC/log-likelihood、ロバストWald検定まで一貫して対応）の**主リファレンス**。動作確認済み（`benchmark/<系統>/references/statsmodels_ref.py`）。
 - **R（`lm` + `sandwich`/`lmtest`パッケージ）**: 独立実装によるクロスチェック用。statsmodelsと計算方法の慣習が異なる可能性がある（自由度補正の既定値等）ため、**新しい統計量・cov_typeを追加するたびに、まずstatsmodelsとRが一致することを確認してからフィクスチャを固定する**。両者が一致しない場合は、既定値の違いを疑って調査する。
   - **クロスチェックの対象は係数・標準誤差に限らない**。R²・調整済みR²・AIC・BIC・対数尤度・F統計量・F検定p値等、推定結果として公開する統計量は全て独立実装でもcrosscheckする。一部の統計量だけRクロスチェックを省略し主リファレンス（statsmodels）のみに頼ると、主リファレンス自体のバグやプロジェクト固有の実装差に気づけない。
   - 慣習差の実例: RのAIC()/BIC()標準関数は残差分散を推定パラメータ1個として追加でカウントする（k+1）が、statsmodels・本実装は回帰係数の数kのみを使う。この場合はR標準関数をそのまま使わず、本実装と同じ計算式（`-2*loglik + 2*k`等）で独立に計算した値と比較すること（Rの値をそのまま使うと定数分ずれた「見せかけの不一致」になる）。
   - **クロスチェックスクリプト内で「本実装と同じ計算式」を手計算する箇所は、独立検証としての効力が薄れることに注意する**（本実装とクロスチェックスクリプトを同じ開発者が書くため、共通の誤解があれば両方に同じ形で紛れ込みうる）。参照実装のパッケージが対象の統計量をネイティブに計算しない、または慣習が異なり素の値をそのまま使えない場合（上記AIC/BIC、ロバストWald検定、非正準リンクでの観測情報行列Hessian等）に限り手計算はやむを得ないが、その場合は以下の優先順位で独立性を確保すること。
     1. **他の独立したパッケージ**（既存の主リファレンス・クロスチェック用パッケージに限らない）がその統計量をネイティブに計算していないか確認し、あれば手計算より優先してそちらを使う。
     2. 独立実装が見つからず手計算が避けられない場合は、その数式自体を**formula非依存の手段**（`numDeriv::hessian()`/`numDeriv::grad()`等の数値微分）で別途検証する（実例:
-       `benchmark/nonlinear/run_glm_crosscheck_benchmark.R`の`observed_bread()`が
+       `benchmark/nonlinear/references/run_glm_crosscheck.R`の`observed_bread()`が
        Probitの観測情報行列Hessianを本実装と同じ解析式で手計算しているが、
        `numDeriv::hessian()`による数値微分Hessianとの一致を別途確認済み）。
     3. 1・2のどちらも現実的でない場合は、その旨と理由をクロスチェックスクリプトのコメントに明記し、独立性が限定的であることを認識した上で使う。
@@ -35,7 +35,7 @@ paths:
 
 各推定手法は、以下の観点で網羅的にテストする。**全てのオプションの組み合わせで、リファレンス実装と統計量が一致することを確認する**。
 
-1. **合成データセット**（`benchmark/<系統>/generate_*_datasets.py`（linearなら`generate_linear_datasets.py`）で生成し、`benchmark/freeze_datasets.py`で`tests/fixtures/benchmarks/data/`にCSVとして固定したものを使用。フィクスチャ生成・pytest実行時ともにこのCSVを読み、ジェネレータを直接呼ばない）。以下のバリエーションを持たせる。
+1. **合成データセット**（`benchmark/<系統>/datasets.py`で生成し、`benchmark/<系統>/freeze.py`（または全系統まとめて`benchmark/regenerate_all.py`）で`tests/fixtures/benchmarks/data/`にCSVとして固定したものを使用。フィクスチャ生成・pytest実行時ともにこのCSVを読み、ジェネレータを直接呼ばない）。以下のバリエーションを持たせる。
    - サンプル数が少ない
    - 分散が大きい
    - 不均一分散（heteroskedasticity）
@@ -70,7 +70,7 @@ paths:
 - 理由: CIを軽く保つため（Rパッケージのインストールはビルドが重い）。またリファレンス実装側のバージョンアップで数値が変わり、意図せずテストが壊れることを防ぐため。
 - フィクスチャの命名: 手法・シナリオ・cov_type等が分かる形にする（例: `ols.json`に、シナリオ×cov_typeをネストして持たせる。実例は`tests/fixtures/benchmarks/ols.json`参照）。
 - **フィクスチャを生成するスクリプトと、生成されたJSON自体は別の場所に置く**。生成スクリプトは`benchmark/<系統>/fixtures/generate_<手法名>_fixtures.py`（コード、`benchmark/`側で管理。系統ディレクトリ構成は`.claude/skills/reference-benchmark/SKILL.md`参照）、生成物は`tests/fixtures/benchmarks/<手法名>.json`（データ、テスト側で管理）。
-- **合成データセット自体も同様にCSVとしてtests側（`tests/fixtures/benchmarks/data/`）に固定する**（`benchmark/freeze_datasets.py`で生成）。理由: ジェネレータ側のコードが将来変わっても、既に固定したフィクスチャJSONの期待値と無言で不整合にならないようにするため。
+- **合成データセット自体も同様にCSVとしてtests側（`tests/fixtures/benchmarks/data/`）に固定する**（`benchmark/<系統>/freeze.py`で生成）。理由: ジェネレータ側のコードが将来変わっても、既に固定したフィクスチャJSONの期待値と無言で不整合にならないようにするため。
   - **Wooldridgeデータセットはこの固定化の対象外**とする（`wooldridge`パッケージ自体はMITライセンスだが、同梱される実データの著作権は原典の教科書側にある可能性があり、フィルタ後の部分集合であってもMITライセンスの本リポジトリにCSVとして再配布してよいか未確認のため。ユーザー確認済み）。Wooldridgeデータは引き続き`load_wooldridge.py`経由で都度ロードし、`pytest.importorskip("wooldridge")`で任意扱いにする。
 - 各フィクスチャJSONには`_meta`フィールドを含め、少なくとも以下を記録する。
   - `generated_at`: 生成日時（ISO 8601）

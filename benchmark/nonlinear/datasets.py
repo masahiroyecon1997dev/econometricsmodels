@@ -5,10 +5,10 @@
 にあたり、シナリオ・X生成ロジック（`moderate_multicollinearity`/
 `high_condition_number`/`perfect_multicollinearity`/`scale_variance`等）が
 リンク関数に一切依存せず完全に共有できることが分かったため、`link`引数
-（`"logit"`または`"probit"`）を追加して一般化した（`run_statsmodels_benchmark_nonlinear.py`が
+（`"logit"`または`"probit"`）を追加して一般化した（`benchmark/nonlinear/references/statsmodels_ref.py`が
 `--weight-col`でOLS/WLSを共有している設計と同じ発想。ユーザー確認済み）。
 
-`generate_linear_datasets.py`（OLS/WLS用）と同型の設計だが、OLSの9シナリオの
+`benchmark/linear/datasets.py`（OLS/WLS用）と同型の設計だが、OLSの9シナリオの
 うち誤差項の分散構造（不均一分散・自己相関）に依存するもの（heteroskedastic/
 autocorrelated/high_variance）は2値DGPに直接転用できないため、Logit/Probit向けに
 再設計している（`docs/spec/logit-spec.md`参照）。
@@ -91,8 +91,8 @@ SCENARIOS = [
 # 大きく膨らむ（成功パス、数値比較対象）。
 _NEAR_SEPARATION_BETA1 = {"logit": 20.0, "probit": 10.0}
 
-# scale_varianceで出力直前に列へ適用するスケール（OLSのgenerate_linear_datasets.py
-# と同じ倍率、実体はbenchmark/_dgp_constants.pyに集約済み）。x1は1e6倍、x2は1e-3倍。
+# scale_varianceで出力直前に列へ適用するスケール（OLSのbenchmark/linear/datasets.py
+# と同じ倍率、実体はbenchmark/common/dgp_constants.pyに集約済み）。x1は1e6倍、x2は1e-3倍。
 
 _LINK_CDF = {
     "logit": lambda z: 1.0 / (1.0 + np.exp(-z)),

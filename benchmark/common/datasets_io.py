@@ -5,8 +5,8 @@
 - `freeze_scenarios`: シナリオでループしてCSV＋true_beta辞書を積み上げる。
 - `run_freeze_cli`: 各系統の `benchmark/<系統>/freeze.py` 共通の `__main__`。
 
-旧 `benchmark/_common.py`（→ `benchmark/common/helpers.py`）から Initiative A で
-関心事ごとに分割した（`docs/planning/specs/benchmark-restructure-design.md` 4章）。
+旧 `benchmark/_common.py` から Initiative A で関心事ごとに分割した
+（`docs/planning/specs/benchmark-restructure-design.md` 4章）。
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ def load_frozen_dataset(
 ) -> tuple[pl.DataFrame, list[float] | None]:
     """固定済みの合成データセットCSV＋true_beta JSONを読む。
 
-    `freeze_datasets.py`が書き出した`{prefix}_{scenario}.csv`と
+    各系統の `benchmark/<系統>/freeze.py` が書き出した`{prefix}_{scenario}.csv`と
     `{prefix}_true_beta.json`を`DATA_DIR`から読む。
 
     Args:
@@ -66,7 +66,8 @@ def freeze_scenarios(
 ) -> None:
     """シナリオでループしてCSVを書き出し、true_beta辞書に積み上げる。
 
-    `freeze_datasets.py`（旧・単一ファイル）の各系統ブロックが繰り返していた
+    各系統の `benchmark/<系統>/freeze.py`（旧・単一 `freeze_datasets.py` の
+    各系統ブロック）が繰り返していた
     「シナリオ生成→CSV書き出し→true_beta収集」パターンの共通部分。
     書き出したtrue_betas辞書のJSON化・書き出しは呼び出し側が行う
     （系統によって1系統内で複数回に分けて書き出すケースがあるため）。
@@ -94,7 +95,7 @@ def run_freeze_cli(
     *,
     description: str | None = None,
 ) -> None:
-    """`freeze_datasets.py`・`freeze_<系統>_datasets.py`共通の`__main__`処理。
+    """各系統の `benchmark/<系統>/freeze.py` 共通の`__main__`処理。
 
     引数パース→出力先ディレクトリ作成→`freeze_fn`呼び出し→完了printまでを
     まとめる。`freeze_fn`自体はディレクトリ作成・printを行わない前提

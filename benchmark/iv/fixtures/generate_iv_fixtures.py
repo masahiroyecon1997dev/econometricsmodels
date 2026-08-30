@@ -48,11 +48,11 @@ NUMERIC_SCENARIOS = [
 ]
 
 # just_identifiedのみinstruments=['z1']（k_instruments == k_endogに強制される、
-# generate_iv_datasets.pyのdocstring参照）。他は全シナリオ共通でinstruments=2本。
+# benchmark/iv/datasets.pyのdocstring参照）。他は全シナリオ共通でinstruments=2本。
 INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
 
 # moderate_multicollinearity/high_condition_numberはk_exog=2（x1, x2）で固定済み
-# （freeze_datasets.pyのIV_K_EXOG_OVERRIDES参照）。
+# （benchmark/iv/freeze.pyのIV_K_EXOG_OVERRIDES参照）。
 X_EXOG_BY_SCENARIO = {
     "moderate_multicollinearity": ["x1", "x2"],
     "high_condition_number": ["x1", "x2"],
@@ -188,8 +188,9 @@ def build_fixtures() -> dict:
 
 
 def _run_cluster_case(dataset: str, groups: list | None = None) -> dict:
-    """クラスターロバストSE確認用に、疑似グループを付けて`run_linearmodels_benchmark_iv`
-    を呼ぶ（`generate_ols_fixtures.py`の`_run_cluster_case`と同じ発想）。
+    """クラスターロバストSE確認用に、疑似グループを付けて
+    `benchmark/iv/references/linearmodels_ref.py` を呼ぶ
+    （`generate_ols_fixtures.py`の`_run_cluster_case`と同じ発想）。
     """
     filename = f"iv_{dataset}.csv"
     df = pl.read_csv(DATA_DIR / filename)

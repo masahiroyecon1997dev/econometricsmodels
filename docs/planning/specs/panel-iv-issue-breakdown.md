@@ -104,7 +104,7 @@ Issue化済み（2026-08-02）:
     `engine/src/iv/CLAUDE.md`参照。
     2SLSの`ivreg`（R）クロスチェック（`tests/api_tests/test_iv_crosscheck.py`、
     `benchmark/iv/fixtures/generate_iv_crosscheck_fixtures.py`、
-    `benchmark/iv/run_ivreg_benchmark.R`）も完了。devcontainerのR更新
+    `benchmark/iv/references/run_ivreg.R`）も完了。devcontainerのR更新
     （Debian bookworm標準4.2.2→CRAN APTリポジトリ経由で4.6.1系、`.devcontainer/Dockerfile`
     修正済み）後にコンテナ再構築・`ivreg`導入確認（R 4.5.3、`ivreg`利用可能）を行い、
     シナリオ・cov_type構成はlinearmodelsクロスチェック（`generate_iv_fixtures.py`）と揃えた。

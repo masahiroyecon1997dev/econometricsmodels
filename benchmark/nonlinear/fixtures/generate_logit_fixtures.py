@@ -44,7 +44,7 @@ NUMERIC_SCENARIOS = [
     "high_condition_number",
     # logit特有の病理（準完全分離）。収束するが標準誤差が大きく膨らむ境界値ケース。
     "near_separation",
-    # 変数間のスケールが極端に異なるケース（generate_nonlinear_datasets.py参照。
+    # 変数間のスケールが極端に異なるケース（benchmark/nonlinear/datasets.py参照。
     # 真のDGPは未スケーリングのXで計算済みのため成功パス）。
     "scale_variance",
 ]

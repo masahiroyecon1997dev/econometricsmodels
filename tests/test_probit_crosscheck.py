@@ -9,17 +9,17 @@ fixtures/generate_probit_crosscheck_fixtures.py`で生成）を読み込み、�
 Note:
     `cov_type="hc1"`はここが主リファレンスを担う（statsmodelsのdiscrete modelが
     n/(n-k)小標本補正を実装しておらずHC0と同一値になるバグ的な欠落があるため、
-    Probitでも同じ欠落を実機確認済み。`benchmark/nonlinear/run_statsmodels_benchmark_nonlinear.py`
+    Probitでも同じ欠落を実機確認済み。`benchmark/nonlinear/references/statsmodels_ref.py`
     のdocstring参照）。
 
     **`classical`/`hc0`/`hc1`/`cluster`はRの`glm()`が既定で使う期待情報行列
-    （IRLS/Fisher scoringの作業重み）ではなく、`run_glm_crosscheck_benchmark.R`が
+    （IRLS/Fisher scoringの作業重み）ではなく、`benchmark/nonlinear/references/run_glm_crosscheck.R`が
     手計算する観測情報行列ベースの共分散を参照値とする**（Probitは二項分布族の
     非正準リンクのため期待情報行列と観測情報行列が一致せず、ベンチマーク作成時に
     最大約8%という無視できない乖離として発覚した。本実装・statsmodelsはどちらも
     観測情報行列を使うため、Rの`glm()`の既定`vcov()`をそのまま使うと不適切な
     比較になる。Logit（正準リンク）はこの2つの情報行列が理論上一致するため
-    影響を受けない。詳細は`run_glm_crosscheck_benchmark.R`のコメント・
+    影響を受けない。詳細は`benchmark/nonlinear/references/run_glm_crosscheck.R`のコメント・
     `docs/spec/probit-spec.md`参照）。
 
     許容誤差はOLSのRクロスチェック（classical/HC0-3/clusterで機械精度一致）より

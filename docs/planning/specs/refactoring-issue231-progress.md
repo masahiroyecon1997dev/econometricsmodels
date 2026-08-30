@@ -344,6 +344,22 @@
   - 正味削減は多くて全4ファイル合計〜5行、代わりに間接層とファイル跨ぎのジャンプが増える。
   - なお `library()` の `suppressMessages` 統一（`run_ivreg.R` のみ実施済み）は別枠の
     項目37で、そちらは素直な改善余地あり。
+- 項目23（`run_lm_predict_crosscheck.R` を手法非依存の汎用スクリプトにできないか、
+  設計判断候補）: **先回りの一般化はしないと判断**（2026-08-30、ユーザー確認済み）。
+  `refactoring-candidates.md`からは削除。判断の根拠:
+  - 現在の唯一の利用者は OLS（`generate_ols_crosscheck_fixtures.py` /
+    `test_ols_crosscheck.py`）のみ。WLS/Logit/Probit/Tobit の predict クロスチェックは
+    未実装で、第2の利用者が存在しないため今リファクタできる重複は無い（YAGNI）。
+  - Initiative A の設計ノート（`benchmark-restructure-design.md`）10章が既に暫定判断を
+    記録済み: 新構造では `linear/references/` に置くが汎用化はしない、Issue
+    #131/#132/#222 着手時の判断のまま。
+  - 一般化の中身自体が消費側の実装時に決まる設計判断: WLS は `weights=` 追加だけで
+    `lm` にそのまま乗る（容易）が、Logit/Probit は `glm(family=binomial(link=))` +
+    `predict()` のリンク尺度 vs 応答尺度の選択を SE クロスチェック側
+    （`run_glm_crosscheck.R` の `--model`/`link` 分岐）と整合させる必要があり、
+    Tobit は `predict()` の意味自体（打ち切り前の潜在変数か観測値か）が未確定。
+  - よって「今すぐ決める話ではない」という項目本文の結論を追認し、実際の判断は
+    #131/#132/#222 着手時に行う（そのとき `run_lm_predict_crosscheck.R` を触る）。
 - 上記以外（`refactoring-candidates.md`項目12・13・15〜35・37・39〜41・43）は
   未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は

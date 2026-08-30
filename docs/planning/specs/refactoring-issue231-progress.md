@@ -696,9 +696,9 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
   `test_ols.py`・`test_ols_fixtures.py`・`test_ols_crosscheck.py`・
   `test_wls.py`・`test_wls_fixtures.py`・`test_wls_crosscheck.py`・
   `test_logit.py`・`test_logit_fixtures.py`・`test_logit_crosscheck.py`・
-  `test_probit.py`・`test_probit_fixtures.py`（全区切り解説済み、WLS関連
-  ファイルは一通り完了、Logit関連ファイルも一通り完了、Probit関連
-  ファイルに着手）
+  `test_probit.py`・`test_probit_fixtures.py`・`test_probit_crosscheck.py`
+  （全区切り解説済み、WLS関連ファイルは一通り完了、Logit関連ファイルも
+  一通り完了、Probit関連ファイルもこれで一通り完了）
 
 **注意（2026-08-23〜、`benchmark/`再構成「Initiative A」進行中）**: 上記
 「解説済み」リストの`benchmark/`側パス（`benchmark/_common.py`・
@@ -714,16 +714,18 @@ CI側のPYTHONPATH非対称〔`refactoring-candidates-2.md`項目50〕は実質�
 都度確認すること。項目50の状態欄自体は、リファクタリング側のセッションが
 後ほど更新する前提でこちらからは触っていない。
 
-**次に解説予定**: `tests/test_probit_crosscheck.py`（`test_probit.py`/
-`test_probit_fixtures.py`解説完了、ユーザー確立の順で継続）。
-`test_logit.py`解説後のユーザーとの質疑で20件の指摘を受け、
-`refactoring-candidates-2.md`項目76〜84・`test-coverage-candidates.md`
-項目37〜40に記録した。続く`test_logit_fixtures.py`解説後の質疑で7件、
-`test_logit_crosscheck.py`解説後の質疑で2件、`test_probit.py`解説後の
-質疑で2件、`test_probit_fixtures.py`解説後の質疑で1件（一括注記の形で）
-指摘を受け、項目85〜96・`test-coverage-candidates.md`項目41〜44に記録した
-（詳細下記）。特に項目77（`test_method_option_converges_to_same_params`
-が`test_logit_fixtures.py::test_method_matches_statsmodels`と観点重複）・
+**次に解説予定**: 未定（Logit/Probit関連ファイルが全て完了。ユーザー
+確立の順では次は`IV`または`Tobit`系統だが、着手前にどちらから進めるか
+ユーザーに確認すること）。`test_logit.py`解説後のユーザーとの質疑で
+20件の指摘を受け、`refactoring-candidates-2.md`項目76〜84・
+`test-coverage-candidates.md`項目37〜40に記録した。続く
+`test_logit_fixtures.py`解説後の質疑で7件、`test_logit_crosscheck.py`
+解説後の質疑で2件、`test_probit.py`解説後の質疑で2件、
+`test_probit_fixtures.py`解説後の質疑で1件（一括注記の形で）、
+`test_probit_crosscheck.py`解説後の質疑で2件の指摘を受け、項目85〜96・
+`test-coverage-candidates.md`項目41〜45に記録した（詳細下記）。特に
+項目77（`test_method_option_converges_to_same_params`が
+`test_logit_fixtures.py::test_method_matches_statsmodels`と観点重複）・
 項目78（`LogitResult`に実際の収束`method`が含まれず確認手段が無い、
 項目67と合わせて検討）・項目79（Issue #231フェーズ4コメント残置が
 Logit/Probitとも11箇所ずつ、項目51より規模大）・項目87
@@ -731,15 +733,21 @@ Logit/Probitとも11箇所ずつ、項目51より規模大）・項目87
 参照実装層と同じOPG計算式を`tests/`側で重複実装、層分離違反）・
 **項目95・96（`test_logit.py`/`test_probit.py`・`test_logit_fixtures.py`/
 `test_probit_fixtures.py`のコードが完全に同一。共通関数切り出し＋
-ファイル分離維持の方向でユーザー承認済み）**・coverage項目43
-（**当初synthetic疑似クラスタも対象と記載していたが、
+ファイル分離維持の方向でユーザー承認済み）**・**coverage項目45
+（実データクラスターロバストSEテストを`mroz`のcity〔G=2〕に加え、
+`apple`データセット〔state、G=49〕でも行うことがユーザー決定済み。
+Wooldridgeデータはtests/`benchmark/`両方でCSV固定できないため、派生列
+`ecolbs > 0`はテスト実行時にその場で作る設計になる見込み、WLSの
+`_add_age_bin`と同型）**は要注意（実装は未着手、記録のみ）。coverage
+項目43（**当初synthetic疑似クラスタも対象と記載していたが、
 `test_probit_fixtures.py`解説時にフィクスチャの実際の中身を再確認して
 訂正**——synthetic側はフィクスチャ生成物とテストの検証範囲が一致して
-おり対象外、mroz実データのクラスターケースのみが実質的な抜け）は
-要注意。`test_probit_fixtures.py`のようにフィクスチャJSONの中身を
-実際に確認して記載を訂正する場面が今後も起こりうるため、`_check_result`
-が使うフィールドセットとフィクスチャの実際のキーを都度突き合わせる
-習慣を続けること。
+おり対象外、mroz実データのクラスターケースのみが実質的な抜け。さらに
+「se依存の統計量のみ追加検証すべき」という基準を追記済み）も要注意。
+`test_probit_fixtures.py`のようにフィクスチャJSONの中身を実際に確認して
+記載を訂正する場面が今後も起こりうるため、`_check_result`が使う
+フィールドセットとフィクスチャの実際のキーを都度突き合わせる習慣を
+続けること。
 
 **Probit関連ファイル解説時の注記（項目95に基づく、2026-08-24）**:
 `test_probit.py`・`test_probit_fixtures.py`は`test_logit.py`・
@@ -818,9 +826,11 @@ Probit固有の差分の有無を都度`diff`で確認すること。項目35（
 - `refactoring-candidates.md`: 項目1〜43（このウォークスルー由来の最後の追記は項目43）。
   上記「`refactoring-candidates.md`駆動の随時対応」セッションが並行して対応中のため、
   このウォークスルーからの新規追記は`refactoring-candidates-2.md`（項目44〜96、
-  直近の追記は`test_probit_fixtures.py`解説時、項目85〜90が同ファイルにも
-  該当する旨の一括注記〔96〕）に切り替えている。1つ前の追記は
-  `test_probit.py`解説時、`test_logit.py`/`test_probit.py`のコード完全
+  直近の追記は`test_probit_crosscheck.py`解説時、項目91に
+  `_assert_dict_close`の`rtol`引数対応がLogit/Probit間で非対称という
+  追記）に切り替えている。1つ前の追記は`test_probit_fixtures.py`解説時、
+  項目85〜90が同ファイルにも該当する旨の一括注記〔96〕。さらに前の
+  追記は`test_probit.py`解説時、`test_logit.py`/`test_probit.py`のコード完全
   一致・共通関数切り出し方針〔95〕・項目79へProbitも該当する旨の追記。
   さらに前の追記は`test_logit_crosscheck.py`解説時、`_assertions.py`を使わず`_assert_close`等を独自再実装〔91〕・
   適合度統計量の検証方法の書き方不統一〔92〕・`margeff`存在確認の書き方
@@ -843,9 +853,11 @@ Probit固有の差分の有無を都度`diff`で確認すること。項目35（
   for_classical`と`test_cov_type_is_case_insensitive`の統合余地〔84〕。
   **両ファイルの統合は`refactoring-candidates.md`側の随時対応が一区切り
   ついた後にユーザー判断で行う**（現時点では統合しない）。
-- `test-coverage-candidates.md`: 項目1〜44（直近1件は`test_probit_
-  fixtures.py`解説時、項目41が同ファイルにも該当する旨の一括注記
-  〔44〕）。前の2件は`test_logit_crosscheck.py`解説時、`_check_margeff`が
+- `test-coverage-candidates.md`: 項目1〜45（直近1件は`test_probit_
+  crosscheck.py`解説時、実データクラスターロバストSEテストに`apple`
+  データセット〔state、G=49〕を追加することがユーザー決定〔45〕）。前の
+  1件は`test_probit_fixtures.py`解説時、項目41が同ファイルにも該当する
+  旨の一括注記〔44〕。さらに前の2件は`test_logit_crosscheck.py`解説時、`_check_margeff`が
   z/p_value/conf_low/conf_highを検証していない〔42〕・mroz実データの
   クラスターロバストSEテストがフィクスチャに既に存在する統計量の大半を
   未検証〔43、当初synthetic疑似クラスタも対象としていたが

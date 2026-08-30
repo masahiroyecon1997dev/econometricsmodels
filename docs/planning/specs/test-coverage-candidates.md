@@ -1012,3 +1012,41 @@
   確認。
 - **状態**: 未対応（項目41への追記の代わりにこの1項目に集約、着手要否は
   ユーザー判断待ち）
+
+### 45. Logit/Probitの実データクラスターロバストSEテストが`mroz`の`city`（G=2）のみで、より現実的な多数クラスタ（数十件規模）での実データ検証が無い——`apple`データセット（`state`、G=49）の採用が決定済み
+
+- **対象**: [tests/test_logit_fixtures.py:287-299](../../../tests/test_logit_fixtures.py#L287-L299)・
+  [tests/test_probit_fixtures.py:276-288](../../../tests/test_probit_fixtures.py#L276-L288)・
+  両crosscheckファイルの`test_mroz_cluster_matches_*`（`cluster_col="city"`、
+  G=2）
+- **内容**: ユーザー指摘（2026-08-24、「mrozデータのcity変数ってクラスター
+  の実データ検証としてはあまりよくないかもしれない（2値なため）」）。
+  `city`はG=2ちょうどのため、統計的には既存の合成データ境界値テスト
+  （`test_cluster_g2_matches_statsmodels`等）を実データでなぞっているに
+  過ぎず、「実データで多数の小〜中規模グループが自然に存在する」という
+  `testing-policy.md`「実データでのグループ列も検証する」の趣旨を
+  十分満たさない。`wooldridge`パッケージ内を調査し、`apple`データセット
+  （n=660、`state`＝居住州で49州、グループサイズ1〜66・平均13.5の不均衡な
+  分布）を候補として提示し、**ユーザーが採用を決定**（2026-08-24）。
+  `y`は既存列ではなく`ecolbs > 0`（エコラベル付きりんごを購入したか）
+  という派生変数が必要（`ecolbs`という購入量列からの二値化。Wooldridge
+  教科書に載っている定番の二値変数ではないが、経済学的には自然な
+  「購入するか否か」の意思決定モデル）。
+- **Claudeの所感（ユーザー追加コメント含む）**: 実装上の制約として、
+  `testing-policy.md`「フィクスチャ化」の方針でWooldridgeデータセットは
+  CSV固定の対象外（再配布ライセンス未確認のため`load_wooldridge_dataset`
+  経由で都度ロードする方針）のため、`ecolbs > 0`という派生列を
+  `benchmark/`側であらかじめCSVに焼き込むことができない。**列追加は
+  テスト実行時（`tests/`側の`load_wooldridge_dataset("apple")`呼び出し後、
+  `.with_columns()`等でその場で派生列を作る）で行う必要がある**
+  （WLSの401ksubsで年齢分位ビンを`_add_age_bin`により都度生成していた
+  パターン、`benchmark/linear/fixtures/generate_wls_fixtures.py`参照、と
+  同じ設計になる見込み）。フィクスチャ生成スクリプト
+  （`generate_logit_fixtures.py`等）側でも同様にその場で派生列を作って
+  from `run()`に渡す必要がある。
+- **気づいた経緯**: 2026-08-24、`tests/test_probit_crosscheck.py`解説後の
+  ユーザー指摘・データセット調査・ユーザーによる採用決定。
+- **状態**: 採用決定・実装は未着手（この場では記録のみ。実施時は
+  Logit/Probit両方の`test_<method>_fixtures.py`/
+  `test_<method>_crosscheck.py`・対応する`generate_*_fixtures.py`/
+  `generate_*_crosscheck_fixtures.py`が対象になる見込み）

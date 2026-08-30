@@ -1138,8 +1138,19 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   無いが、一貫性を欠く。項目72・85（`_check_result`/`check_margeff`の
   共通化方針）に統合する際、このファイルも`_assertions.py`を使う形に
   揃えるのが良い。
+- **追記（2026-08-24、`tests/test_probit_crosscheck.py`解説時）**: この
+  ローカル`_assert_dict_close`の再実装自体にも、Logit/Probit間で非対称が
+  ある。[tests/test_probit_crosscheck.py:109-119](../../../tests/test_probit_crosscheck.py#L109-L119)
+  は`rtol`をキーワード引数として受け取れる（`test_mroz_cluster_matches_
+  r_glm`で`RTOL_MROZ_CLUSTER`を渡すために必要）のに対し、
+  [tests/test_logit_crosscheck.py:95-102](../../../tests/test_logit_crosscheck.py#L95-L102)
+  の同名関数は`atol`のみで`rtol`を受け取れない。同じ目的のローカル
+  再実装が2つあるだけでなく、その2つの間でも機能に差がある、という
+  二重の不統一。`_assertions.py`へ統合する際はProbit側の`rtol`対応版を
+  基準にするのが良い。
 - **気づいた経緯**: 2026-08-24、`tests/test_logit_crosscheck.py`解説時に
-  発見。
+  発見。2026-08-24、`tests/test_probit_crosscheck.py`解説時に
+  `_assert_dict_close`の非対称を追記。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目72・85と統合して検討）
 
 ### 92. `_check_result`の適合度統計量の検証方法が`test_logit_fixtures.py`と`test_logit_crosscheck.py`で異なる（`getattr`ループ vs 個別列挙）

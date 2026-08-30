@@ -662,8 +662,9 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
 - `tests/`: `_assertions.py`・`_helpers.py`・`_tolerances.py`・`conftest.py`・
   `test_ols.py`・`test_ols_fixtures.py`・`test_ols_crosscheck.py`・
   `test_wls.py`・`test_wls_fixtures.py`・`test_wls_crosscheck.py`・
-  `test_logit.py`・`test_logit_fixtures.py`（全区切り解説済み、WLS関連
-  ファイルは一通り完了、Logit関連ファイルに着手）
+  `test_logit.py`・`test_logit_fixtures.py`・`test_logit_crosscheck.py`
+  （全区切り解説済み、WLS関連ファイルは一通り完了、Logit関連ファイルも
+  これで一通り完了）
 
 **注意（2026-08-23〜、`benchmark/`再構成「Initiative A」進行中）**: 上記
 「解説済み」リストの`benchmark/`側パス（`benchmark/_common.py`・
@@ -679,23 +680,38 @@ CI側のPYTHONPATH非対称〔`refactoring-candidates-2.md`項目50〕は実質�
 都度確認すること。項目50の状態欄自体は、リファクタリング側のセッションが
 後ほど更新する前提でこちらからは触っていない。
 
-**次に解説予定**: `tests/test_logit_crosscheck.py`（`test_logit.py`/
-`test_logit_fixtures.py`解説完了、ユーザー確立の
-`test_<method>.py`→`test_<method>_fixtures.py`→`test_<method>_crosscheck.py`
-の順で継続）。`test_logit.py`解説後のユーザーとの質疑で20件の指摘を受け、
-`refactoring-candidates-2.md`項目76〜84・`test-coverage-candidates.md`
-項目37〜40に記録した。続く`test_logit_fixtures.py`解説後の質疑でも7件の
-指摘を受け、項目85〜90・`test-coverage-candidates.md`項目41に記録した
-（詳細下記）。特に項目77（`test_method_option_converges_to_same_params`が
-`test_logit_fixtures.py::test_method_matches_statsmodels`と観点重複）・
-項目78（`LogitResult`に実際の収束`method`が含まれず確認手段が無い、項目67と
-合わせて検討）・項目79（Issue #231フェーズ4コメント残置が11箇所、項目51
-より規模大）・項目87（`test_include_intercept_false_matches_statsmodels`が
-`benchmark/`の参照実装層と同じOPG計算式を`tests/`側で重複実装、層分離
-違反）は要注意。項目35（HAC非対応）と同様、Logit/Probitはそもそも
-HACを持たないため該当しない（クロスセクション手法のため）ことを確認済み。
-項目67・68は引き続きLogit/Probit以降の作業に影響するため着手前に思い出す
-こと。
+**次に解説予定**: `tests/test_probit.py`（Logit関連3ファイル
+〔`test_logit.py`/`test_logit_fixtures.py`/`test_logit_crosscheck.py`〕
+解説完了、ユーザー確立の順でProbitへ進む）。`test_logit.py`解説後の
+ユーザーとの質疑で20件の指摘を受け、`refactoring-candidates-2.md`
+項目76〜84・`test-coverage-candidates.md`項目37〜40に記録した。続く
+`test_logit_fixtures.py`解説後の質疑で7件、`test_logit_crosscheck.py`
+解説後の質疑で2件の指摘を受け、項目85〜94・`test-coverage-candidates.md`
+項目41〜43に記録した（詳細下記）。特に項目77（`test_method_option_
+converges_to_same_params`が`test_logit_fixtures.py::test_method_matches_
+statsmodels`と観点重複）・項目78（`LogitResult`に実際の収束`method`が
+含まれず確認手段が無い、項目67と合わせて検討）・項目79（Issue #231
+フェーズ4コメント残置が11箇所、項目51より規模大）・項目87
+（`test_include_intercept_false_matches_statsmodels`が`benchmark/`の
+参照実装層と同じOPG計算式を`tests/`側で重複実装、層分離違反）・
+coverage項目42・43（`_check_margeff`／クラスター系テスト全般が、
+フィクスチャに既に存在するz_stats/p_values/conf_int/適合度統計量を
+検証していない、実データ`mroz`クラスターにも該当）は要注意。項目35
+（HAC非対応）と同様、Logit/Probitはそもそも HACを持たないため該当しない
+（クロスセクション手法のため）ことを確認済み。項目67・68は引き続き
+Probit以降の作業に影響するため着手前に思い出すこと。
+
+**共有作業ツリーでのブランチ混線インシデント（2026-08-24、発生・解消済み）**:
+`test_logit_fixtures.py`解説の記録コミット直後、並行して動く別セッションが
+共有の作業ツリーで`release/v0.6.0`から`perf-harness-ols`へ無言でチェック
+アウトし、そちらに独自のコミットを積んでいたことに気づかず、本セッションの
+次のドキュメント記録コミット（`3bdac78`）がそのまま`perf-harness-ols`の
+上に乗ってしまった。隔離した一時worktreeで`release/v0.6.0`へ
+`cherry-pick`し直し安全に復旧（`60fc78f`）した後、ユーザー側で
+`perf-harness-ols`を`release/v0.6.0`へマージ（`cc85b43`）し、最終的に
+両者は矛盾なく統合された。**教訓**: 共有作業ツリーではブランチ自体も
+他セッションに無言で切り替えられうるため、コミット前に`git branch
+--show-current`で現在のブランチを都度確認する。
 
 **即時対応した項目（2026-08-23）**:
 - `tests/test_ols.py`に`test_non_finite_values_raise`を追加
@@ -744,30 +760,38 @@ HACを持たないため該当しない（クロスセクション手法のた�
 **候補メモの状態（2026-08-23時点）**:
 - `refactoring-candidates.md`: 項目1〜43（このウォークスルー由来の最後の追記は項目43）。
   上記「`refactoring-candidates.md`駆動の随時対応」セッションが並行して対応中のため、
-  このウォークスルーからの新規追記は`refactoring-candidates-2.md`（項目44〜90、
-  直近の追記は`test_logit_fixtures.py`解説時、`check_margeff`が項目72の
+  このウォークスルーからの新規追記は`refactoring-candidates-2.md`（項目44〜94、
+  直近の追記は`test_logit_crosscheck.py`解説時、`_assertions.py`を使わず
+  `_assert_close`等を独自再実装〔91〕・適合度統計量の検証方法の書き方
+  不統一〔92〕・`margeff`存在確認の書き方不統一（項目89に統合）〔93〕・
+  フィクスチャJSONのトップレベル階層規則の不統一〔94〕）に切り替えている。
+  1つ前の追記は`test_logit_fixtures.py`解説時、`check_margeff`が項目72の
   参考実装〔85〕・Logitの`hc1`がR`sandwich`単独で三角測量が効かない
-  （リスクは相対的に低いと判断）〔86〕・OPG標準誤差の手計算が`benchmark/`の
-  参照実装層と重複、層分離違反〔87〕・`_rename`使用は項目63に統合〔88〕・
-  `margeff is not None`の消極的チェックが不正な`None`混入を見逃す〔89〕・
-  少数クラスタでのクラスターロバストSE信頼性はドキュメント対応が適切
-  〔90〕）に切り替えている。1つ前の追記は`test_logit.py`解説時、テスト
-  ファイルのセクション見出し・順序不統一〔76〕・`test_method_option_
-  converges_to_same_params`と`test_logit_fixtures.py::test_method_matches_
-  statsmodels`の観点重複〔77〕・`LogitResult`に収束`method`が含まれない
-  〔78〕・Issue #231フェーズ4コメント残置がLogitに11箇所〔79〕・
-  `predict()`の意味がOLSとLogit/Probitで異なることのドキュメント不足
-  〔80〕・`const`衝突/クラスターテストデータの手法間共通化余地〔81〕・
-  `x2=2*x1`直書き〔82〕・`test_cov_type_label`のcov_type直書き〔83〕・
-  `test_nonrobust_is_alias_for_classical`と`test_cov_type_is_case_
-  insensitive`の統合余地〔84〕。**両ファイルの統合は
-  `refactoring-candidates.md`側の随時対応が一区切りついた後にユーザー判断で行う**
-  （現時点では統合しない）。
-- `test-coverage-candidates.md`: 項目1〜41（直近1件は`test_logit_fixtures.py`
-  解説時、`method`〔bfgs/lbfgs〕と`cov_type`・シナリオ・クラスターの組み合わせ
-  未検証〔41〕）。前の4件は`test_logit.py`解説時、`marginal_effects()`関連の
-  部分集合チェック・大文字小文字非依存性の検証範囲不足・`confidence_level`
-  境界値未検証〔37〜39〕・Logitにも項目32と同型の`y`列欠落テスト不足〔40〕）。
+  （リスクは相対的に低いと判断、後日statsmodels代替経路の実機検証も
+  追記）〔86〕・OPG標準誤差の手計算が`benchmark/`の参照実装層と重複、
+  層分離違反〔87〕・`_rename`使用は項目63に統合〔88〕・`margeff is not
+  None`の消極的チェックが不正な`None`混入を見逃す〔89〕・少数クラスタでの
+  クラスターロバストSE信頼性はドキュメント対応が適切〔90〕。さらに前の
+  追記は`test_logit.py`解説時、テストファイルのセクション見出し・順序
+  不統一〔76〕・`test_method_option_converges_to_same_params`と
+  `test_logit_fixtures.py::test_method_matches_statsmodels`の観点重複
+  〔77〕・`LogitResult`に収束`method`が含まれない〔78〕・Issue #231
+  フェーズ4コメント残置がLogitに11箇所〔79〕・`predict()`の意味がOLSと
+  Logit/Probitで異なることのドキュメント不足〔80〕・`const`衝突/
+  クラスターテストデータの手法間共通化余地〔81〕・`x2=2*x1`直書き〔82〕・
+  `test_cov_type_label`のcov_type直書き〔83〕・`test_nonrobust_is_alias_
+  for_classical`と`test_cov_type_is_case_insensitive`の統合余地〔84〕。
+  **両ファイルの統合は`refactoring-candidates.md`側の随時対応が一区切り
+  ついた後にユーザー判断で行う**（現時点では統合しない）。
+- `test-coverage-candidates.md`: 項目1〜43（直近2件は`test_logit_
+  crosscheck.py`解説時、`_check_margeff`がz/p_value/conf_low/conf_highを
+  検証していない〔42〕・クラスター系テスト全般がフィクスチャに既に存在する
+  統計量の大半を未検証、mroz実データクラスターにも該当〔43〕）。前の1件は
+  `test_logit_fixtures.py`解説時、`method`〔bfgs/lbfgs〕と`cov_type`・
+  シナリオ・クラスターの組み合わせ未検証〔41〕。さらに前の4件は
+  `test_logit.py`解説時、`marginal_effects()`関連の部分集合チェック・
+  大文字小文字非依存性の検証範囲不足・`confidence_level`境界値未検証
+  〔37〜39〕・Logitにも項目32と同型の`y`列欠落テスト不足〔40〕）。
   さらに前の1件は`test_wls_crosscheck.py`
   解説時（WLSのHACクロスチェックでstatsmodels側/R側が異なるラグ値を使い
   同一設定が両実装から検証されていない点〔36〕）。前の2件は`test_wls.py`

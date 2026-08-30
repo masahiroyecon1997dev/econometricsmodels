@@ -891,3 +891,69 @@
 - **気づいた経緯**: 2026-08-23、`tests/test_logit_fixtures.py`解説後の
   ユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 42. `test_logit_crosscheck.py`の`_check_margeff`が`z`/`p_value`/`conf_low`/`conf_high`を検証していない（フィクスチャには既に存在するデータ）
+
+- **対象**: [tests/test_logit_crosscheck.py:105-118](../../../tests/test_logit_crosscheck.py#L105-L118)
+  （ローカル`_check_margeff`、`dydx`/`std_err`のみ検証）と対比した
+  [tests/_assertions.py:59-113](../../../tests/_assertions.py#L59-L113)
+  （共通`check_margeff`、`dydx`/`std_err`/`z`/`p_value`/`conf_low`/
+  `conf_high`の6項目を検証）
+- **内容**: ユーザー指摘（2026-08-23、「`_check_result`にて`_check_margeff`
+  がrefになければ漏れるのでこれも危険な気がする」という質問を受けて
+  `_check_margeff`の中身自体を精査）。`tests/fixtures/benchmarks/
+  logit_crosscheck.json`を実際に確認したところ、`margeff`エントリには
+  `dydx`/`se`だけでなく`z`/`p_value`/`conf_low`/`conf_high`も全て
+  含まれていた（R`marginaleffects`パッケージの出力をそのまま記録済み）。
+  つまり**データは既に存在するのに、このテストは6項目中2項目
+  （`dydx`/`std_err`）しか検証しておらず、`z`/`p_value`/`conf_low`/
+  `conf_high`はRとの一致を一度も確認していない**。同じ`marginal_effects()`
+  の限界効果検証でも、statsmodels側（`test_logit_fixtures.py`、
+  `_assertions.py`の`check_margeff`経由）は6項目全て検証しているため、
+  RクロスチェックだけがStatsmodels比較より検証範囲が狭いという非対称が
+  ある。
+- **Claudeの所感**: `testing-policy.md`レビュー観点1（クロスチェックの
+  対象は係数・標準誤差に限らず公開する統計量は全て検証する）に反する
+  明確な抜け。フィクスチャデータは既に揃っているため、`_assertions.py`の
+  `check_margeff`をこのファイルでも使う形に統一すれば（項目91と合わせて
+  対応）、コードを増やさずにこの抜けも同時に解消できる。
+- **気づいた経緯**: 2026-08-24、`tests/test_logit_crosscheck.py`解説後の
+  ユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目91と合わせて対応可能）
+
+### 43. クラスターロバストSE系テスト全般（synthetic疑似クラスタ・mroz実データの両方、`test_logit_fixtures.py`/`test_logit_crosscheck.py`双方）が`coef`/`se`のみ検証しており、フィクスチャに既に存在する`z_stats`/`p_values`/`conf_int`/適合度統計量/`margeff`を検証していない
+
+- **対象**: [tests/test_logit_fixtures.py:155-194](../../../tests/test_logit_fixtures.py#L155-L194)
+  ・[tests/test_logit_fixtures.py:287-299](../../../tests/test_logit_fixtures.py#L287-L299)
+  （`test_cluster_matches_statsmodels`等4件、いずれも`_assert_dict_close
+  (res.params, ...)`・`_assert_dict_close(res.std_errors, ...)`の2行のみ）、
+  [tests/test_logit_crosscheck.py:179-235](../../../tests/test_logit_crosscheck.py#L179-L235)
+  （同型4件、`test_mroz_cluster_matches_r_glm`含む）
+- **内容**: ユーザー指摘（2026-08-23、「`test_mroz_cluster_matches_r_glm`
+  でz値やp値、他のパラメータの検証が抜けていないか」）を受けて
+  フィクスチャJSONの実際の中身を確認したところ、**mroz実データの
+  クラスターケースだけでなく、synthetic疑似クラスタのケース
+  （`baseline`/`cluster_imbalanced`/`cluster_g2`）も含め、全てのクラスタ
+  フィクスチャエントリに`coef`/`se`以外の`z_stats`/`p_values`/`conf_int`/
+  `log_likelihood`/`aic`/`bic`/`lr_statistic`/`lr_p_value`/
+  `pseudo_r_squared`/`margeff`が既に生成・記録済み**（`_check_result`が
+  使う完全なフィールドセットと同一）であることを確認した。にもかかわらず
+  8件のクラスター系テスト（`test_logit_fixtures.py`4件・
+  `test_logit_crosscheck.py`4件）全てが`coef`/`se`の2項目しか検証して
+  いない。synthetic疑似クラスタについては元々「統計的な意味は無く実装の
+  動作確認用」という理由で`coef`/`se`のみに絞る設計判断が明記されている
+  （`test_wls_fixtures.py`解説時に確認済みの既存方針）が、**mroz実データの
+  `city`クラスターは正当な実カテゴリ変数であり、この「統計的意味が無い」
+  という理由付けはそのまま当てはまらない**。
+- **Claudeの所感**: 少なくとも`test_mroz_cluster_matches_statsmodels`/
+  `test_mroz_cluster_matches_r_glm`（実データ版）は`_check_result`ベースの
+  完全な検証に切り替える価値が高いと考える（データは既に存在するため
+  フィクスチャ再生成も不要、テストコード側の変更のみで対応可能）。
+  synthetic疑似クラスタ版は「動作確認用」という既存方針を尊重するなら
+  `coef`/`se`のみのままでも一貫性はあるが、こちらもフィクスチャに
+  既にデータがあるため`_check_result`化するコストは低く、対応するなら
+  合わせて統一するのが良いと考える。
+- **気づいた経緯**: 2026-08-24、`tests/test_logit_crosscheck.py`解説後の
+  ユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち、mroz実データ版は優先度
+  やや高、synthetic疑似クラスタ版は既存方針との整合性を要確認）

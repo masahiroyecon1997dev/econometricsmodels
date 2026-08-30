@@ -1069,9 +1069,16 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   None; _check_margeff(...)`のように、期待値を明示的にホワイトリスト化
   すれば、意図しない`None`混入を検出できるようになる。実施しやすい
   部類の改善だと考える。
+- **追記（2026-08-24、`tests/test_logit_crosscheck.py`解説時）**: 同種の
+  消極的チェックが`test_logit_crosscheck.py`の`_check_result`
+  （`if "margeff" in ref: _check_margeff(...)`、`None`判定ではなく
+  キー存在判定だが同じ「無ければ黙ってスキップする」構造）にも存在する
+  ことをユーザー指摘で確認。対応する場合は両ファイルまとめて
+  ホワイトリスト化するのが良い。
 - **気づいた経緯**: 2026-08-23、`tests/test_logit_fixtures.py`解説後の
-  ユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
+  ユーザー指摘。2026-08-24、`tests/test_logit_crosscheck.py`解説時に
+  適用範囲を追記。
+- **状態**: 未対応（着手要否はユーザー判断待ち、両ファイルまとめて対応）
 
 ### 90. クラスターロバストSEの小標本（少数クラスタ）信頼性についての設計上の懸念が、既存の「G<q特異性」議論とは別軸で未整理
 
@@ -1108,3 +1115,78 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   ユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、対応するならドキュメント側
   ・手法横断で検討）
+
+### 91. `test_logit_crosscheck.py`が`_assertions.py`を使わず`_assert_close`/`_assert_dict_close`/`_check_margeff`を独自に再実装している
+
+- **対象**: [tests/test_logit_crosscheck.py:81-118](../../../tests/test_logit_crosscheck.py#L81-L118)
+  （`_assert_close`/`_assert_dict_close`/`_check_margeff`のローカル定義。
+  `test_wls_crosscheck.py`・`test_ols_crosscheck.py`にある
+  `from _assertions import assert_close, assert_dict_close, check_margeff`
+  という行がこのファイルには存在しない）
+- **内容**: `tests/test_logit_crosscheck.py`解説時に発見。`_assert_close`の
+  計算式（`tol = max(rtol*|ref|, atol)`）自体は`_assertions.py`と完全に
+  同一だが、コードとしては別に定義されており、`_assertions.py`を使う
+  OLS/WLSのクロスチェックファイルとは異なる方針になっている。
+- **Claudeの所感**: 実害（計算式自体は同一なので数値的な不整合は無い）は
+  無いが、一貫性を欠く。項目72・85（`_check_result`/`check_margeff`の
+  共通化方針）に統合する際、このファイルも`_assertions.py`を使う形に
+  揃えるのが良い。
+- **気づいた経緯**: 2026-08-24、`tests/test_logit_crosscheck.py`解説時に
+  発見。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目72・85と統合して検討）
+
+### 92. `_check_result`の適合度統計量の検証方法が`test_logit_fixtures.py`と`test_logit_crosscheck.py`で異なる（`getattr`ループ vs 個別列挙）
+
+- **対象**: [tests/test_logit_crosscheck.py:144-153](../../../tests/test_logit_crosscheck.py#L144-L153)
+  （`for field in ("log_likelihood", ..., "pseudo_r_squared"):
+  _assert_close(getattr(res, field), ref[field], ...)`）と
+  [tests/test_logit_fixtures.py:105-121](../../../tests/test_logit_fixtures.py#L105-L121)
+  （`_assert_close(res.log_likelihood, ref["log_likelihood"], ...)`を
+  1つずつ個別に列挙）
+- **内容**: `tests/test_logit_crosscheck.py`解説時に発見。同じ目的
+  （適合度統計量7個の検証）のコードが2つの異なるスタイルで書かれている。
+  `getattr`ループの方が短いが、フィールド名の文字列と`ref`辞書のキー名が
+  常に一致するという前提に依存し、IDEの補完・型チェックが効きにくい。
+- **Claudeの所感**: 実害は無い小さな不統一。項目72・85の共通化時に
+  どちらか一方のスタイルに統一するのが良いと考える。
+- **気づいた経緯**: 2026-08-24、`tests/test_logit_crosscheck.py`解説時に
+  発見。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目72・85と統合して検討）
+
+### 93. `margeff`の存在確認の書き方が`test_logit_fixtures.py`（`is not None`）と`test_logit_crosscheck.py`（`"margeff" in ref`）で異なる
+
+- **対象**: [tests/test_logit_crosscheck.py:154-155](../../../tests/test_logit_crosscheck.py#L154-L155)
+  （`if "margeff" in ref:`）と
+  [tests/test_logit_fixtures.py:138-139](../../../tests/test_logit_fixtures.py#L138-L139)
+  （`if ref["margeff"] is not None:`）
+- **内容**: `tests/test_logit_crosscheck.py`解説時に発見。同じ「margeffが
+  存在する場合のみ検証する」という意図のコードが、キーの存在確認
+  （`in`）と値のNone判定（`is not None`）という異なる方法で書かれている。
+  いずれも項目89（消極的チェックがバグを見逃すリスク）に該当するため、
+  検出リスクの観点では項目89に既に統合済み。
+- **Claudeの所感**: 項目89の対応時（`cov_type`による明示的なホワイト
+  リスト化）に合わせて書き方も統一されるはずなので、独立した対応は
+  不要。記録のみ。
+- **気づいた経緯**: 2026-08-24、`tests/test_logit_crosscheck.py`解説時に
+  発見。
+- **状態**: 未対応（項目89に統合済み、独立対応は不要）
+
+### 94. フィクスチャJSONのトップレベル階層規則が`test_logit_fixtures.py`（`fixtures["mroz"]`）と`test_logit_crosscheck.py`（`fixtures["wooldridge"]["mroz"]`）で不統一
+
+- **対象**: [tests/test_logit_fixtures.py:278-284](../../../tests/test_logit_fixtures.py#L278-L284)
+  （`fixtures["mroz"][cov_type]`）と
+  [tests/test_logit_crosscheck.py:213-220](../../../tests/test_logit_crosscheck.py#L213-L220)
+  （`fixtures["wooldridge"]["mroz"][cov_type]["r"]`、`wooldridge`という
+  階層が1段余分にある）
+- **内容**: `tests/test_logit_crosscheck.py`解説時に発見。同じ実データ
+  （mroz）を指すフィクスチャJSONのキー構造が、statsmodels側とRクロス
+  チェック側で階層の深さが異なる。統計的な意味への影響は無いが、両JSONを
+  横断的に読む際に紛らわしい。
+- **Claudeの所感**: 実害は無いが命名規則の一貫性の観点で気になる点。
+  優先度は低く、フィクスチャJSONの構造変更は既存の固定済みフィクスチャの
+  再生成を伴うため、単独では対応せず、他の大きめのフィクスチャ構造
+  変更（項目87のinclude_intercept対応等）と合わせるタイミングで検討する
+  のが良い。
+- **気づいた経緯**: 2026-08-24、`tests/test_logit_crosscheck.py`解説時に
+  発見。
+- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）

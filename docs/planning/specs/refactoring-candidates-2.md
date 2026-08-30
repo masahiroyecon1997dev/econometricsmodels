@@ -974,10 +974,30 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `sandwich`以外での確認を追加する余地はある。優先度は低いと考えるが、
   Issue #267（Rとの計算慣習差の将来検討）と関連する論点のため、
   そちらのスコープでまとめて検討するのが良い。
+- **追記（2026-08-24、ユーザー提案「statsmodelsの結果を用いて手計算で
+  比較を作れないか」を受けて実機検証）**: 2点確認した。(1)
+  `sm.GLM(y, x, family=Binomial()).fit(cov_type="HC1")`（`Logit`と数学的に
+  同じモデルを別のstatsmodelsモデルクラス経由で書く案）も試したが、
+  **同じ理由（`HC1`用の`cov_HC1`属性が線形回帰の`RegressionResults`にしか
+  無い）で同様にHC0にフォールバックすることを実機確認した**
+  （`glm_hc1.bse == logit_hc0.bse`が成立）。`statsmodels.stats.
+  sandwich_covariance.cov_hc1()`という汎用関数も存在するが、内部で
+  `results.model.pinv_wexog`（OLSの擬似逆行列）と`results.resid`
+  （生の残差）を前提にしたOLS専用実装のため、Logitに使うと数学的に
+  誤った値を返す。statsmodels側にhc1を正しく計算する経路は無いことを
+  確認した。(2) 「statsmodelsのhc0 × √(n/(n-k))」を手計算する案は、
+  本実装のRust側hc1も同じ式（hc0×√(n/(n-k))）で計算しているため、
+  `testing-policy.md`が明示的に警告する「クロスチェックスクリプト内で
+  本実装と同じ計算式を手計算すると独立性が薄れる」に該当し、この
+  補正式自体に誤りがあった場合に本実装とテストの手計算が同じ間違いを
+  共有して一致してしまい検出できない。OPGの手計算
+  （`score_obs`というstatsmodels自身が検証済みの汎用プリミティブを使う）
+  とは性質が異なる。結論として、hc1は既に独立パッケージ（R`sandwich`）が
+  正しく計算する最良の状態にあり、statsmodels側での補強は不要と判断した。
 - **気づいた経緯**: 2026-08-23、`tests/test_logit_fixtures.py`解説後の
-  ユーザー指摘。
-- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち、Issue #267と
-  関連付けて検討）
+  ユーザー指摘。2026-08-24、ユーザー提案の実機検証を追記。
+- **状態**: 対応不要と判断（statsmodels側に正しい代替経路が無く、
+  手計算は独立性を損なうため。Issue #267との関連付けのみ残す）
 
 ### 87. `test_include_intercept_false_matches_statsmodels`がOPG標準誤差をテストファイル内で手計算しており、`benchmark/nonlinear/references/statsmodels_ref.py`の同じ計算とロジックが重複
 

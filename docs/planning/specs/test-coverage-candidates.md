@@ -966,11 +966,35 @@
   既に存在するためフィクスチャ再生成は不要で、テストコード側の変更
   のみで対応可能。synthetic疑似クラスタ側は現状のフィクスチャ生成物と
   テストの検証範囲が一致しているため対応不要と判断する。
+- **追記（2026-08-24、ユーザー提案「synthetic疑似クラスタもlogit.json/
+  probit.json側に全統計量を追加し、他cov_typeと同様に検証すべきでは」を
+  受けて実機検証）**: `cov_type`を`classical`→`cluster`に変えて実際に
+  比較したところ、`params`・`log_likelihood`・`aic`は完全に同じ値のまま
+  だった（`se`・`z_stats`等のみ変化）。これは統計的に当然の性質で、
+  `cov_type`は「係数をどう推定するか」ではなく「推定済みの係数の標準誤差を
+  どう計算するか」のみを決めるオプションのため、**`se`に依存しない
+  統計量（`params`本体・`log_likelihood`/`aic`/`bic`/`lr_statistic`/
+  `lr_p_value`/`pseudo_r_squared`/`pred_table`/限界効果の`dydx`）は
+  cov_typeによらず不変**（他cov_typeで既に検証済みの値と同じものを
+  再確認するだけで新しいバグ検出力はほぼ無い）。一方**`se`に依存する
+  統計量（`z_stats`/`p_values`/`conf_int`・限界効果の`std_err`/`z`/
+  `p_value`/`conf_low`/`conf_high`）はcov_type固有の値になるため、
+  synthetic疑似クラスタであっても追加検証する価値がある**（`se`から
+  検定統計量への変換にcov_type固有のバグがあるケースを拾える）。
+  よってsynthetic疑似クラスタについては、フィクスチャ自体は既存の`run()`
+  関数で全統計量を一括生成しつつ（`se`非依存分だけ絞り込む特別扱いは
+  実装コストに見合わない）、**テスト側は`z_stats`/`p_values`/`conf_int`
+  （＋限界効果）に絞って検証を追加する**のが効率的だと判断する。
 - **気づいた経緯**: 2026-08-24、`tests/test_logit_crosscheck.py`解説後の
   ユーザー指摘、`tests/test_probit_fixtures.py`解説時にフィクスチャの
-  実際の中身を再確認し記載を訂正。
-- **状態**: 未対応（着手要否はユーザー判断待ち、mroz実データ版4テスト
-  〔Logit fixtures/crosscheck・Probit fixtures/crosscheck〕が対象）
+  実際の中身を再確認し記載を訂正、さらにユーザー提案を受けた実機検証で
+  「`se`非依存の統計量は再検証不要・`se`依存の統計量のみ追加検証すべき」
+  という基準を追記。
+- **状態**: 未対応（着手要否はユーザー判断待ち。対象は(1)mroz実データ版
+  4テスト〔Logit fixtures/crosscheck・Probit fixtures/crosscheck〕は
+  `_check_result`ベースの完全な検証に、(2)synthetic疑似クラスタ版
+  （8テスト）は`z_stats`/`p_values`/`conf_int`〔＋限界効果〕のみの
+  追加検証に、それぞれ切り替える）
 
 ### 44. 項目41が`tests/test_probit_fixtures.py`にも同様に該当する（一括注記）
 

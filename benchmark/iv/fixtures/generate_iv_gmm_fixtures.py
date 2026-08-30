@@ -71,7 +71,7 @@ COV_TYPES = ["classical", "hc0", "hc1", "hac"]
 # `weight_type`と`cov_type`が独立な軸であることの確認用（baselineのみ）。
 OTHER_WEIGHT_TYPES = ["robust", "cluster", "kernel"]
 # 1-step（gmm_iterations=1）・iterated GMM（3以上、固定回数モード）の成功パス確認用
-# （既定値2以外、Issue #231フェーズ4）。
+# （既定値2以外）。
 GMM_ITERATIONS_SCENARIOS = [1, 3]
 
 
@@ -128,9 +128,8 @@ def build_fixtures() -> dict:
                         )
                     }
 
-    # 複数内生変数（k_endog>=2）。2SLSのiv.jsonと同じ構成（Issue #231フェーズ4、
-    # testing-completeness-reviewer指摘のmust fix）。weight_type='unadjusted'固定で
-    # cov_typeのみ変える（上記と同じ検証範囲の絞り方）。
+    # 複数内生変数（k_endog>=2）。2SLSのiv.jsonと同じ構成。weight_type=
+    # 'unadjusted'固定でcov_typeのみ変える（上記と同じ検証範囲の絞り方）。
     fixtures["multi_endog"] = {"unadjusted": {}}
     for cov_type in COV_TYPES:
         fixtures["multi_endog"]["unadjusted"][cov_type] = run_gmm(
@@ -143,8 +142,7 @@ def build_fixtures() -> dict:
         )
 
     # weight_type='kernel' × cov_type='hac'の組み合わせ（実務上最も典型的な
-    # 「HACカーネル重み＋HAC標準誤差」の組み合わせ経路、Issue #231フェーズ4、
-    # testing-completeness-reviewer指摘のshould fix。上記OTHER_WEIGHT_TYPESループは
+    # 「HACカーネル重み＋HAC標準誤差」の組み合わせ経路。上記OTHER_WEIGHT_TYPESループは
     # cov_type='classical'固定のためこの組み合わせを通らない）。
     fixtures["kernel_hac"] = run_gmm(
         dataset="baseline",
@@ -155,8 +153,7 @@ def build_fixtures() -> dict:
         cov_type="hac",
     )
 
-    # gmm_iterations: 1（1-step）・3以上（iterated、固定回数モード）の成功パス
-    # （Issue #231フェーズ4、testing-completeness-reviewer指摘のshould fix）。
+    # gmm_iterations: 1（1-step）・3以上（iterated、固定回数モード）の成功パス。
     # baselineシナリオ・weight_type='unadjusted'・cov_type='classical'固定。
     fixtures["gmm_iterations"] = {
         n_iter: run_gmm(
@@ -195,10 +192,10 @@ def build_fixtures() -> dict:
             "「修正済み」参照）。"
             "multi_endog（複数内生変数、x_endog=['endog1','endog2']）は"
             "benchmark/iv/datasets.pyの第一段階誤差vが内生変数ごとに独立になる"
-            "よう修正した後のデータで生成（Issue #231フェーズ4、"
+            "よう修正した後のデータで生成（"
             "generate_iv_fixtures.pyの同名注記参照）。"
             "kernel_hac（weight_type='kernel'×cov_type='hac'）・gmm_iterations"
-            "（1/3、既定値2以外の成功パス）も同フェーズで追加。"
+            "（1/3、既定値2以外の成功パス）も追加。"
         ),
     }
     return fixtures

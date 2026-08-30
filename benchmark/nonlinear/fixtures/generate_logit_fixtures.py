@@ -55,7 +55,7 @@ NUMERIC_SCENARIOS = [
 COV_TYPES = ["classical", "opg", "hc0"]
 
 # newton以外のmethod（bfgs/lbfgs）が主リファレンスに対しフルの統計量（std_errors含む）で
-# 一致することの確認用（Issue #231フェーズ4のtesting-completeness-reviewer指摘）。
+# 一致することの確認用。
 # baselineシナリオ・classical cov_typeの1ケースのみで十分（method自体の違いは
 # 収束後の最適化点の精度差であり、シナリオ×cov_typeを掛け合わせる必要はない）。
 METHODS = ["bfgs", "lbfgs"]
@@ -151,7 +151,7 @@ def build_fixtures() -> dict:
             "SE確認用。"
             "methodはbfgs/lbfgsがnewtonと同じ最尤解・標準誤差に収束することを主"
             "リファレンスに対して確認するためのfixture（baselineシナリオ・classical"
-            "cov_typeの1ケースのみ、Issue #231フェーズ4で追加）。"
+            "cov_typeの1ケースのみ）。"
         ),
     }
     return fixtures

@@ -28,12 +28,11 @@ IV_K_EXOG_OVERRIDES = {
 # （baseline既定のx_exog=['x1']込みだとq=2になりG=2で必然的に特異になるため）。
 IV_G2_BOUNDARY_SCENARIOS = ["baseline"]
 
-# 複数内生変数（k_endog>=2）の成功パス確認専用（Issue #231フェーズ4、
-# testing-completeness-reviewer指摘のmust fix）。k_instruments=3・k_endog=2で
+# 複数内生変数（k_endog>=2）の成功パス確認専用。k_instruments=3・k_endog=2で
 # 過剰識別（Sargan/Hansen Jが非nullになる）にする。
 IV_MULTI_ENDOG_SCENARIOS = ["baseline"]
 
-# 自由度1境界（df_resid=1ちょうど）の成功パス確認専用（Issue #235）。IVは
+# 自由度1境界（df_resid=1ちょうど）の成功パス確認専用。IVは
 # OLSと異なり内生変数1本・操作変数1本が最低限必要なため、x_exog=0・k_endog=1・
 # k_instruments=1（丁度識別）の最小構成にする。df_resid = n - (k_exog + k_endog + 1) = 1
 # を満たすにはn = 0 + 1 + 1 + 1 = 3が必要。

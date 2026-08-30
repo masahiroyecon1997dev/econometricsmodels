@@ -22,7 +22,7 @@
 # 全cov_typeでクロスチェックする。`ivreg:::ivdiag`のソースを確認したところ
 # `vcov.`は**関数**として渡せば診断表（Wu-Hausman行含む）に正しく反映される
 # （行列を渡すと上記の通りNULLにフォールバックするため、これまで見落とされていた。
-# Issue #233、`iv-api-design.md`3.2節・6.6節の「原因未特定」記載は本スクリプトの
+# `iv-api-design.md`3.2節・6.6節の「原因未特定」記載は本スクリプトの
 # 誤用が原因だったことが判明）。このため`vcov.`に、上で計算した`vc`と同じ計算式を
 # 関数化した`vcov_fn`を渡した専用の`summary()`呼び出し（`diag_table_wu`）を別途行い、
 # Wu-Hausman行のみそちらから抽出する（weak_instrument_f/Sarganは`ivdiag`内で
@@ -51,7 +51,7 @@
 # 注: 弱操作変数F統計量は内生変数名をキーにしたdictとして返す（本実装の
 # weak_instrument_f_statisticsと同じ形。内生変数が1本のときは診断表の行名が
 # "Weak instruments"、2本以上のときは"Weak instruments (<列名>)"に分かれる、
-# 実機確認済み。Issue #231フェーズ4で複数内生変数シナリオ対応時に一般化）。
+# 実機確認済み。複数内生変数シナリオ対応時に一般化）。
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 2) {
@@ -145,8 +145,8 @@ f_p_value_val <- f_test$f_p_value
 diag_table <- summary(model, diagnostics = TRUE)$diagnostics
 # 内生変数名ごとのdict（本実装のweak_instrument_f_statisticsと同じ形）で返す。
 # ivregの診断表の行名は、内生変数が1本のときは"Weak instruments"だが、2本以上の
-# ときは"Weak instruments (<列名>)"に分かれる（実機確認済み、Issue #231
-# フェーズ4で複数内生変数シナリオ追加時に対応）。
+# ときは"Weak instruments (<列名>)"に分かれる（実機確認済み、
+# 複数内生変数シナリオ追加時に対応）。
 endog_names <- names(model$endogenous)
 weak_instrument_f_val <- list()
 for (col in endog_names) {
@@ -172,7 +172,7 @@ sargan_p_value_val <- unname(sargan_row["p-value"])
 # saturated（残差自由度0）になり、HC0等のロバストvcovが厳密に特異になって
 # solve()がエラーを投げる（本実装が同じ状況でwu_hausman_statistic/
 # wu_hausman_p_valueをNoneにする設計、engine/src/iv/CLAUDE.md参照）。tryCatchで
-# 捕捉しNAにして揃える（Issue #235で発覚）。
+# 捕捉しNAにして揃える。
 diag_table_wu <- tryCatch(
   summary(model, diagnostics = TRUE, vcov. = vcov_fn)$diagnostics,
   error = function(e) NULL

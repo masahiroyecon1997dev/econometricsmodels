@@ -306,6 +306,21 @@
   変更前のコミット済みJSONと完全一致することを確認（コミット済みJSONは更新しない）、
   `pytest tests -k ols`212件パス、`ruff check`パス。`refactoring-candidates.md`
   から項目11を削除、項目12・13の「項目11参照」を自己完結する記述に置換済み。
+- 項目17（コメント中の`Issue #NNN`参照が`benchmark/`配下に散在）: 対応済み・
+  コミット待ち（2026-08-30）。`benchmark/iv/`・`benchmark/nonlinear/`の9スクリプト
+  （`generate_iv{,_gmm,_crosscheck}_fixtures.py`・`generate_{logit,probit}_fixtures.py`・
+  `iv/freeze.py`・`iv/references/{linearmodels_ref.py,run_ivreg.R}`・
+  `nonlinear/references/run_glm_crosscheck.R`）のコメント・docstring・`_meta.note`
+  文字列から`Issue #231/#232/#233/#235/#237`参照を除去。ユーザー指示により
+  Issue番号に随伴する冗長な経緯記述（`testing-completeness-reviewer指摘のmust/should fix`・
+  `〜で発覚・調査済み`等）も同時に除去し、WHY（何を確認するケースか・なぜその式か）と
+  `iv-api-design.md`章番号等の生きたポインタは保持。除去で1文になった箇所は再wrap。
+  `_meta.note`を含む5フィクスチャ（`iv`/`iv_crosscheck`/`iv_gmm`/`logit`/`probit`.json）は
+  step 9-1と同じ手順で再凍結し、`cmp` で数値・`*_version`不変（変化は`note`文字列＋
+  per-case `generated_at`のみ）を確認。`_meta`変化ゼロの6フィクスチャは revert。
+  `pytest` 957件・`ruff` パス、`/code-review`（fork）指摘1件（除去で101字になった
+  コメント行）を再wrapで対応し再レビュー指摘ゼロ。`refactoring-candidates.md`から
+  項目17を削除。
 - 上記以外（`refactoring-candidates.md`項目12・13・15〜35・37・39〜41・43）は
   未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は

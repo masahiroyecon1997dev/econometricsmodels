@@ -101,8 +101,7 @@ def build_fixtures() -> dict:
             # `k_constant`取り違え）は判明・修正済み（`engine/src/iv/CLAUDE.md`
             # 「修正済み」参照）。修正後にフィクスチャ化した。
 
-    # 複数内生変数（k_endog>=2）の成功パス確認（Issue #231フェーズ4、
-    # testing-completeness-reviewer指摘のmust fix）。x_exog=['x1']・
+    # 複数内生変数（k_endog>=2）の成功パス確認。x_exog=['x1']・
     # x_endog=['endog1', 'endog2']・instruments=['z1','z2','z3']（過剰識別）。
     fixtures["multi_endog"] = {}
     for cov_type in COV_TYPES:
@@ -116,8 +115,7 @@ def build_fixtures() -> dict:
 
     # 実データセット（Wooldridge card、Card 1995の大学近接操作変数による教育の
     # 収益率推定）。testing-policy.md「テスト用データセット」2.（実データセット）の
-    # 要求に対しIV系統は未対応だった（Issue #231フェーズ4、
-    # testing-completeness-reviewer指摘のshould fix）。
+    # 要求に対しIV系統は未対応だった。
     fixtures["card"] = {}
     for cov_type in COV_TYPES:
         fixtures["card"][cov_type] = run(
@@ -130,7 +128,7 @@ def build_fixtures() -> dict:
             y_col="lwage",
         )
 
-    # 自由度1境界（df_resid=1ちょうど）の成功パス確認（Issue #235）。
+    # 自由度1境界（df_resid=1ちょうど）の成功パス確認。
     # x_exog=[]・x_endog=['endog1']・instruments=['z1']（丁度識別、n=3）。
     fixtures["df1"] = {}
     for cov_type in COV_TYPES:
@@ -170,17 +168,17 @@ def build_fixtures() -> dict:
             "した。"
             "multi_endog（複数内生変数、x_endog=['endog1','endog2']）は、"
             "benchmark/iv/datasets.pyの第一段階誤差vが内生変数ごとに独立になる"
-            "よう修正した後のデータで生成（Issue #231フェーズ4。修正前はv"
+            "よう修正した後のデータで生成（修正前はv"
             "が全内生変数で単一列のため第一段階回帰残差が事実上完全共線になり、"
             "Wu-Hausman検定の拡張回帰が推定不能だった）。"
             "cardはWooldridge実データ（Card 1995、大学近接ダミーnearc2/nearc4を"
             "操作変数として教育年数educの内生性を補正する教科書的定番例）。"
             "他の実データセット（mroz等）と異なりtrue_betaと比較できないため"
             "`true_beta`キーは持たない。cluster cov_typeは対応する自然な"
-            "カテゴリ列が無いため対象外（Issue #231フェーズ4）。"
+            "カテゴリ列が無いため対象外。"
             "df1（自由度1境界、n=3・x_exog=[]・x_endog=['endog1']・"
-            "instruments=['z1']）は境界値・悪条件シナリオの一環（Issue #235、"
-            "testing-policy.md「テスト用データセット」）。cluster cov_typeは"
+            "instruments=['z1']）は境界値・悪条件シナリオの一環"
+            "（testing-policy.md「テスト用データセット」）。cluster cov_typeは"
             "n=3では意味のあるクラスタ数を確保できないため対象外。"
         ),
     }

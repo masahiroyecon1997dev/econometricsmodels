@@ -149,8 +149,8 @@ def _nested_f_test(
         # モデルは「切片のみ」（回帰変数0個ではない）。SSR_rは中心化した
         # 二乗和を使う必要がある（`engine::iv::two_sls::partial_f_statistic`の
         # 「x_exog=[]かつinclude_intercept=falseの退化ケース」注記が示す通り、
-        # 非中心化二乗和は切片も無い場合専用。df1境界シナリオ追加（Issue #235）で
-        # 発覚: 非中心化版は本実装（classical weak_instrument_f_statistics）と
+        # 非中心化二乗和は切片も無い場合専用。df1境界シナリオ追加で判明:
+        # 非中心化版は本実装（classical weak_instrument_f_statistics）と
         # 一致しなかった（実測11.607 vs 本実装2.696、中心化版は2.696で一致）。
         ssr_r = float(((y - y.mean()) ** 2).sum())
 
@@ -285,7 +285,7 @@ def run(
     # 同じ状況で`InsufficientObservations`を検出しwu_hausman_statistic/
     # wu_hausman_p_valueをNoneにする設計（`engine/src/iv/CLAUDE.md`
     # 「Wu-Hausmanの拡張回帰が想定内の理由で失敗した場合」参照）のため、
-    # ここでも同じくNoneにして揃える（Issue #235で発覚）。
+    # ここでも同じくNoneにして揃える。
     n_endog = len(x_endog_cols)
     wu_hausman_df_resid_candidate = df_resid - n_endog
     if (

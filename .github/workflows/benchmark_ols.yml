@@ -1,7 +1,7 @@
 name: Benchmark (OLS performance)
 
-# performance/compare_performance.py（OLSのstatsmodels/pyfixestとの
-# 実行時間・メモリ比較）を統一環境で実行し、結果をjob summaryに出力する。
+# performance/compare_ols.py（OLSのstatsmodelsとの実行時間・メモリ比較）を
+# 統一環境で実行し、結果をjob summaryに出力する。
 #
 # トリガーはタグpush（v*）+ workflow_dispatchのみ（ユーザー確認済み）。n=1,000,000込みの
 # フルスイープは数分かかり重いため、cd_release.ymlと同じくPR/push毎には回さない。
@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   benchmark:
-    name: compare_performance.py (OLS)
+    name: compare_ols.py (OLS)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -31,9 +31,9 @@ jobs:
         with:
           python-version: "3.12"
 
-      # test（statsmodels）+ benchmark（pyfixest, pyarrow）+ dev（maturin）の3グループが必要。
-      # ci_python.ymlのtestグループのみとは異なり、compare_performance.pyがpyfixestとの
-      # 比較も行うため。
+      # test（statsmodels）+ benchmark（pyarrow: polars.DataFrame.to_pandas()が
+      # statsmodelsへ渡す前に必要）+ dev（maturin）の3グループが必要。
+      # ci_python.ymlのtestグループのみとは異なる。
       - name: uv sync (test + benchmark + dev groups)
         run: uv sync --locked --group test --group benchmark --group dev
 
@@ -45,10 +45,10 @@ jobs:
 
       # リポジトリルートから `-m` で実行する（Initiative A のパッケージ化に伴い、
       # `benchmark.*`（DGP）・`performance.*` を PYTHONPATH 非依存で解決するため）。
-      - name: compare_performance.py
+      - name: compare_ols.py
         run: |
           uv run --locked --group test --group benchmark --group dev \
-            python -m performance.compare_performance --repeats 3 --output results.json
+            python -m performance.compare_ols --repeats 3 --output results.json
 
       - name: render job summary
         run: |

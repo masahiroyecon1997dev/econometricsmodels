@@ -136,3 +136,26 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   別途Issue化して調査する。性能比較ハーネス側は`_SINGLE_THREAD_ENV`で
   スレッド数を1に固定し、この現象を計測から切り離す対応を実施済み＝
   `de0b4a7`の後続コミット）
+
+### 45. engineのProbitが、statsmodelsが収束できる大標本条件でHessian特異エラーを出す
+
+- **対象**: `engine/src/nonlinear/`のProbitのHessian（観測情報行列）構築・
+  Newtonソルバ（`nonlinear/common.rs`の`run_solver`共有部分を含む）。
+- **内容**: 2026-08-30、Probitの性能比較（#253）実装中に発覚。
+  `generate_binary_choice_dataset("baseline", link="probit", n=1_000_000,
+  k=5, seed=42)`を`Probit(...).fit()`すると
+  `ComputationError: the Hessian is singular and cannot be inverted`。
+  **同じデータで statsmodels の `smf.probit(...).fit()` は収束し Hessian も
+  反転できる（1.87秒、engineは即エラー）**。n=100,000では engine も通り、
+  k=3なら n=1,000,000 でも engine が通る。Φはロジスティック分布のΛより裾が
+  薄く、n・kが大きいとXβの分散増大でΦ(Xβ)が0/1に飽和する観測が増え、
+  Probitの観測情報行列の重み`φ(xβ)²/[Φ(xβ)(1−Φ(xβ))]`がアンダーフローして
+  Hessianが数値的に特異化するのが原因と推測。Logit（Λ）では
+  n=1,000,000, k=5 でも問題は起きない。
+- **ユーザー指摘（2026-08-30）**: statsmodelsが同条件を捌けている以上、
+  engine側に不具合の可能性がある。飽和に強い実装（重みのクリッピング・
+  対数空間でのΦ(1−Φ)計算・Newtonのdamping/line search・step halving等、
+  statsmodelsが持つ頑健化）の余地がないか調査する価値がある。
+- **状態**: 未対応（engineのロジック挙動に関わるためリファクタリングの範囲外。
+  別途Issue化して調査する。性能比較側はProbitのn軸上限を100,000に制限して
+  回避＝`compare_probit.py`の`PROBIT_ADAPTER.n_sweep`、#253のコミット）

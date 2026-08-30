@@ -28,7 +28,7 @@ jobs:
       # 1手法が失敗しても他手法の計測は続行する（手法ごとに独立した記録のため）。
       fail-fast: false
       matrix:
-        method: [ols, wls]
+        method: [ols, wls, logit]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

@@ -37,8 +37,10 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ### 40. `compare_performance.py`が現状OLS専用に書かれており、他手法へ性能比較を拡張する際に共通化できる可能性が高い
 
-- **対象**: [performance/compare_performance.py](../../../performance/compare_performance.py)
-  全体（`_fit_once_engine`/`_fit_once_statsmodels`/`_fit_once_pyfixest`、
+- **対象**: [performance/compare_ols.py](../../../performance/compare_ols.py)・
+  [performance/_perf_harness.py](../../../performance/_perf_harness.py)
+  （旧`performance/compare_performance.py`。当時はハーネスとOLSアダプタが1ファイルに
+  同居していた。`_fit_once_engine`/`_fit_once_statsmodels`/`_fit_once_pyfixest`、
   `_build_dataframe`、`run_n_sweep`/`run_k_sweep`/`build_report`の`_meta`構築、
   `_worker`のディスパッチ構造等）
 - **内容**: ユーザー指摘（2026-08-22）。現状のスクリプトはOLSの`fit()`呼び出し
@@ -58,7 +60,12 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   次の手法の性能比較を実装するタイミングでまとめて判断する。
 - **気づいた経緯**: 2026-08-22、`compare_performance.py`解説（`build_report`
   まで）後のユーザー指摘。
-- **状態**: 未対応（次の手法の性能比較スクリプト実装時に着手判断）
+- **状態**: 一部対応済み。#250（`de0b4a7`）で手法非依存の骨格を
+  `_perf_harness.py`（`PerfAdapter`/`FitContext`・`_worker`/`_run_isolated`・
+  スイープ・`build_report`）へ切り出し、`_meta`にリファレンス実装バージョンも
+  記録するようにした。pyfixest比較は廃止。残りは #251〜254 で各手法アダプタ
+  （`compare_wls.py`等）を追加しながら随時。**全手法（WLS/Logit/Probit/IV）の
+  組み込み完了後にこの項目を削除する**（ユーザー指示、2026-08-30）。
 
 ### 41. ピークRSSの小数点以下の桁数が`compare_performance.py`と`render_performance_summary.py`で不統一
 
@@ -100,3 +107,32 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   を決めておく価値はある。
 - **気づいた経緯**: 2026-08-22、`tests/`配下の解説着手前のユーザー質問。
 - **状態**: 未対応（現時点では静観が妥当、着手基準の設定自体もユーザー判断待ち）
+
+### 44. engine（faer/rayon）のマルチスレッド線形代数が、多コア機・負荷下でシングルスレッド時の20倍以上遅くなり不安定になる
+
+- **対象**: `engine/src/linear/ols.rs`の`OlsEstimator::fit`（faer経由の
+  QR分解・Gram行列構築）。他の線形代数を伴う手法（WLS/IV/GMM等）も同傾向の
+  可能性。
+- **内容**: 2026-08-30、Issue #250/#98のOLS性能比較の再計測中に発覚。
+  12論理コアのdevcontainer（WSL2）上で`OLS(...).fit()`（classical, n=1,000,000,
+  k=5）を計測すると、スレッド数無制限では実行時間が3〜4秒かつ試行ごとに
+  0.6〜4.5秒と大きくばらつく。同じ条件で`RAYON_NUM_THREADS=1`等を設定して
+  シングルスレッドに固定すると**0.14〜0.18秒で安定**し、statsmodels
+  （0.33〜0.49秒）より2〜3倍速いという期待どおりの結果になる。
+  faerは0.24.4のまま・`ols.rs`は2026-08-09以降変更なしのため、コード
+  リグレッションではなく、スレッドプールが負荷下で競合する挙動の問題。
+  比較対象のstatsmodels（numpy/OpenBLAS）は同条件でも安定して劣化しなかった。
+- **ユーザーの懸念（2026-08-30）**: ベンチマークは`OLS(...).fit()`をそのまま
+  呼んでおり、これは実利用と同じ経路。多コア機のユーザーが大規模データで
+  `fit()`すると同じ現象が起きうる（ベンチマークで先に見つかったのは幸い）。
+- **想定される調査の方向**: OLSの設計行列はtall-skinny（n大・k小）で、skinny
+  行列のQR/Gram構築を多スレッドに分割してもスレッドプールのオーバーヘッドと
+  メモリ帯域競合が支配的になりやすい。問題サイズに応じてシングルスレッドに
+  留める閾値、あるいは明示的なスレッド数上限の導入を検討する。WSL2固有の
+  スケジューラ挙動か、ネイティブの多コアLinuxでも再現するかの切り分けも要る。
+  `.claude/rules/rust-style.md`「パフォーマンス」節のrayon採用は「実測してから
+  決める」方針であり、本件はその実測データ点。
+- **状態**: 未対応（engineのロジック挙動に関わるためリファクタリングの範囲外。
+  別途Issue化して調査する。性能比較ハーネス側は`_SINGLE_THREAD_ENV`で
+  スレッド数を1に固定し、この現象を計測から切り離す対応を実施済み＝
+  `de0b4a7`の後続コミット）

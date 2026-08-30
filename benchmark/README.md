@@ -6,9 +6,9 @@
 ため、`tests/`とは分離しています。
 
 **性能比較ツール（旧 `benchmark/performance/`）はリポジトリ直下の
-[`performance/`](../performance/) に分離しました**（pyfixest 依存・
-`benchmark_ols.yml` 専用で、正確性検証用の本ディレクトリとは性質が違うため。
-`docs/planning/specs/benchmark-restructure-design.md` D5）。
+[`performance/`](../performance/) に分離しました**（`benchmark_performance.yml`
+専用で、pytest とは無関係な随時実行ツールであり、正確性検証用の本ディレクトリとは
+性質が違うため。`docs/planning/specs/benchmark-restructure-design.md` D5）。
 
 ディレクトリ構成・各スクリプトの役割分担・リファレンス実装の使い分けの詳細は
 [`.claude/skills/reference-benchmark/SKILL.md`](../.claude/skills/reference-benchmark/SKILL.md)

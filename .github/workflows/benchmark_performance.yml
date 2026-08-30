@@ -1,7 +1,9 @@
-name: Benchmark (OLS performance)
+name: Benchmark (performance)
 
-# performance/compare_performance.py（OLSのstatsmodels/pyfixestとの
-# 実行時間・メモリ比較）を統一環境で実行し、結果をjob summaryに出力する。
+# performance/compare_<method>.py（各手法の推定を、共通ハーネス
+# performance/_perf_harness.py 経由で statsmodels / linearmodels と実行時間・
+# メモリ比較）を統一環境で実行し、結果をjob summaryに出力する。手法ごとに
+# 独立ジョブ（matrix。ジョブ単位で個別リラン可）。
 #
 # トリガーはタグpush（v*）+ workflow_dispatchのみ（ユーザー確認済み）。n=1,000,000込みの
 # フルスイープは数分かかり重いため、cd_release.ymlと同じくPR/push毎には回さない。
@@ -20,8 +22,13 @@ permissions:
 
 jobs:
   benchmark:
-    name: compare_performance.py (OLS)
+    name: compare_${{ matrix.method }}.py
     runs-on: ubuntu-latest
+    strategy:
+      # 1手法が失敗しても他手法の計測は続行する（手法ごとに独立した記録のため）。
+      fail-fast: false
+      matrix:
+        method: [ols, wls]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -31,9 +38,9 @@ jobs:
         with:
           python-version: "3.12"
 
-      # test（statsmodels）+ benchmark（pyfixest, pyarrow）+ dev（maturin）の3グループが必要。
-      # ci_python.ymlのtestグループのみとは異なり、compare_performance.pyがpyfixestとの
-      # 比較も行うため。
+      # test（statsmodels / linearmodels）+ benchmark（pyarrow:
+      # polars.DataFrame.to_pandas()がリファレンス実装へ渡す前に必要）+
+      # dev（maturin）の3グループが必要。ci_python.ymlのtestグループのみとは異なる。
       - name: uv sync (test + benchmark + dev groups)
         run: uv sync --locked --group test --group benchmark --group dev
 
@@ -45,10 +52,10 @@ jobs:
 
       # リポジトリルートから `-m` で実行する（Initiative A のパッケージ化に伴い、
       # `benchmark.*`（DGP）・`performance.*` を PYTHONPATH 非依存で解決するため）。
-      - name: compare_performance.py
+      - name: compare_${{ matrix.method }}.py
         run: |
           uv run --locked --group test --group benchmark --group dev \
-            python -m performance.compare_performance --repeats 3 --output results.json
+            python -m performance.compare_${{ matrix.method }} --repeats 3 --output results.json
 
       - name: render job summary
         run: |
@@ -57,5 +64,5 @@ jobs:
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ols-performance-results
+          name: ${{ matrix.method }}-performance-results
           path: results.json

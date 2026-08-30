@@ -62,7 +62,7 @@ econometricsmodels/
 │   ├── linear/ nonlinear/ iv/ panel/  # 系統ごと: datasets.py（DGP＋凍結）・references/（リファレンス実装アダプタ＋.R）・fixtures/（generate_*_fixtures.py）
 │   └── regenerate_all.py          # 合成データCSV＋全フィクスチャJSONの一括再生成。詳細は.claude/skills/reference-benchmark/
 │
-├── performance/                   # リファレンス実装との性能比較（benchmark_ols.ymlから実行。pytestとは無関係、Rランタイム/pyfixest依存）
+├── performance/                   # リファレンス実装との性能比較（benchmark_performance.ymlから実行。pytestとは無関係、statsmodels/linearmodels依存）
 │
 ├── docs/                          # MkDocs（GitHub Pages公開）
 │   ├── mkdocs.yml

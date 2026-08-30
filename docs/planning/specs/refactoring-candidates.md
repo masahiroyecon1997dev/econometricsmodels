@@ -37,8 +37,10 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ### 40. `compare_performance.py`が現状OLS専用に書かれており、他手法へ性能比較を拡張する際に共通化できる可能性が高い
 
-- **対象**: [performance/compare_performance.py](../../../performance/compare_performance.py)
-  全体（`_fit_once_engine`/`_fit_once_statsmodels`/`_fit_once_pyfixest`、
+- **対象**: [performance/compare_ols.py](../../../performance/compare_ols.py)・
+  [performance/_perf_harness.py](../../../performance/_perf_harness.py)
+  （旧`performance/compare_performance.py`。当時はハーネスとOLSアダプタが1ファイルに
+  同居していた。`_fit_once_engine`/`_fit_once_statsmodels`/`_fit_once_pyfixest`、
   `_build_dataframe`、`run_n_sweep`/`run_k_sweep`/`build_report`の`_meta`構築、
   `_worker`のディスパッチ構造等）
 - **内容**: ユーザー指摘（2026-08-22）。現状のスクリプトはOLSの`fit()`呼び出し
@@ -58,7 +60,12 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   次の手法の性能比較を実装するタイミングでまとめて判断する。
 - **気づいた経緯**: 2026-08-22、`compare_performance.py`解説（`build_report`
   まで）後のユーザー指摘。
-- **状態**: 未対応（次の手法の性能比較スクリプト実装時に着手判断）
+- **状態**: 一部対応済み。#250（`de0b4a7`）で手法非依存の骨格を
+  `_perf_harness.py`（`PerfAdapter`/`FitContext`・`_worker`/`_run_isolated`・
+  スイープ・`build_report`）へ切り出し、`_meta`にリファレンス実装バージョンも
+  記録するようにした。pyfixest比較は廃止。残りは #251〜254 で各手法アダプタ
+  （`compare_wls.py`等）を追加しながら随時。**全手法（WLS/Logit/Probit/IV）の
+  組み込み完了後にこの項目を削除する**（ユーザー指示、2026-08-30）。
 
 ### 41. ピークRSSの小数点以下の桁数が`compare_performance.py`と`render_performance_summary.py`で不統一
 

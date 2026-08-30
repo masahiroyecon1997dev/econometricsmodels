@@ -106,6 +106,8 @@ class FitContext:
         hac_lags: `hac_auto_lag(n)` の値。cov_type が HAC 以外なら無視してよい。
         cluster_col: クラスターロバスト用のグループ列名。使わない手法・
             cov_type では `None`。
+        weight_col: WLS の重み列名。重みを使わない手法（OLS/Logit 等）では
+            `None`。
     """
 
     library: str
@@ -116,6 +118,7 @@ class FitContext:
     cov_type: str
     hac_lags: int
     cluster_col: str | None
+    weight_col: str | None
 
 
 @dataclass(frozen=True)
@@ -153,6 +156,8 @@ class PerfAdapter:
         k_sweep / k_sweep_fixed_n: k 軸スイープの k の刻みと、その際固定する n。
         cluster_col: `FitContext.cluster_col` に渡す列名。cluster を計測しない
             手法では `None` のまま。
+        weight_col: `FitContext.weight_col` に渡す列名。WLS のみ設定する
+            （`build_dataframe` がその列を含む DataFrame を返す前提）。
         default_repeats / default_seed: CLI 引数のデフォルト。
     """
 
@@ -169,6 +174,7 @@ class PerfAdapter:
     k_sweep: Sequence[int] = (5, 20)
     k_sweep_fixed_n: int = 10_000
     cluster_col: str | None = None
+    weight_col: str | None = None
     default_repeats: int = 3
     default_seed: int = 42
 
@@ -215,6 +221,7 @@ def _worker(
         cov_type=cov_type,
         hac_lags=hac_auto_lag(n),
         cluster_col=adapter.cluster_col,
+        weight_col=adapter.weight_col,
     )
 
     if library == "engine":

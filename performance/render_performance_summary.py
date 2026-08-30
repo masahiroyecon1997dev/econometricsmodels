@@ -102,22 +102,24 @@ def _render_axis_section(
 def _render_method_section(
     method_results: list[dict], libraries: list[str], meta: dict
 ) -> list[str]:
-    """method軸（bfgs/lbfgs を代表点で計測）のセクションを組み立てる。
+    """method軸（bfgs/lbfgs、gmm 等を代表点で計測）のセクションを組み立てる。
 
     行=method、列=library の1表のみ（cov_type=classical・n/k 固定）。既定の
-    newton は n軸の同条件（cov_type=classical, n=method_sweep_n）を参照する。
+    method（`default_method`）は n軸の同条件（cov_type=classical,
+    n=method_sweep_n）を参照する。
     """
     if not method_results:
         return []
     n = meta.get("method_sweep_n")
     n_label = f"{n:,}" if isinstance(n, int) else str(n)
+    default_method = meta.get("default_method", "newton")
     lines = [
         (
             f"## method軸（cov_type=classical, k={meta['n_sweep_fixed_k']}, "
             f"n={n_label}固定）"
         ),
         "",
-        "実行時間（秒、中央値）。newton は n軸の同条件を参照。",
+        f"実行時間（秒、中央値）。{default_method} は n軸の同条件を参照。",
         "",
     ]
     methods = sorted({r["method"] for r in method_results})

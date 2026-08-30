@@ -108,8 +108,10 @@ class FitContext:
             cov_type では `None`。
         weight_col: WLS の重み列名。重みを使わない手法（OLS/Logit 等）では
             `None`。
-        method: 最適化 method（Logit/Probit の "newton"/"bfgs"/"lbfgs" 等）。
-            method 軸を持たない手法では常に `"newton"`（`fit_once` 側で無視）。
+        method: 推定 method。Logit/Probit の "newton"/"bfgs"/"lbfgs"、IV の
+            "2sls"/"gmm" 等。n/k スイープでは `PerfAdapter.default_method`、
+            method 軸では `PerfAdapter.extra_methods` の各値が入る。method 軸を
+            持たない手法では常に `default_method`（`fit_once` 側で無視してよい）。
     """
 
     library: str
@@ -161,9 +163,12 @@ class PerfAdapter:
             手法では `None` のまま。
         weight_col: `FitContext.weight_col` に渡す列名。WLS のみ設定する
             （`build_dataframe` がその列を含む DataFrame を返す前提）。
-        extra_methods: method 軸で追加計測する最適化 method（Logit/Probit の
-            `("bfgs", "lbfgs")` 等）。既定 method（"newton"）は n/k スイープに
-            含まれるため列挙しない。空なら method 軸なし。method 軸は
+        default_method: n/k スイープで使う既定 method（`FitContext.method` に
+            入る）。Logit/Probit は "newton"、IV は "2sls"。method 軸を持たない
+            手法でも `fit_once` がこの値を無視すれば影響はない。
+        extra_methods: method 軸で追加計測する method（Logit/Probit の
+            `("bfgs", "lbfgs")`、IV の `("gmm",)` 等）。`default_method` は n/k
+            スイープに含まれるため列挙しない。空なら method 軸なし。method 軸は
             cov_type=cov_types[0]・k=n_sweep_fixed_k・n=n_sweep[-1] の1点でのみ
             回す（testing-policy.md「方法論」＝代表点で足りる）。
         default_repeats / default_seed: CLI 引数のデフォルト。
@@ -183,6 +188,7 @@ class PerfAdapter:
     k_sweep_fixed_n: int = 10_000
     cluster_col: str | None = None
     weight_col: str | None = None
+    default_method: str = "newton"
     extra_methods: Sequence[str] = ()
     default_repeats: int = 3
     default_seed: int = 42
@@ -346,6 +352,7 @@ def run_n_sweep(adapter: PerfAdapter, repeats: int, seed: int) -> list[dict]:
                         library,
                         repeats,
                         seed,
+                        adapter.default_method,
                     )
                 )
     return results
@@ -367,6 +374,7 @@ def run_k_sweep(adapter: PerfAdapter, repeats: int, seed: int) -> list[dict]:
                         library,
                         repeats,
                         seed,
+                        adapter.default_method,
                     )
                 )
     return results
@@ -378,7 +386,7 @@ def run_method_sweep(
     """method 軸（`adapter.extra_methods` を代表点1つで計測）。
 
     cov_type=cov_types[0]・k=n_sweep_fixed_k・n=n_sweep[-1] の1点で、
-    追加 method（bfgs/lbfgs 等）× ライブラリを回す。既定 method（"newton"）は
+    追加 method（bfgs/lbfgs、gmm 等）× ライブラリを回す。`default_method` は
     n/k スイープに含まれるため対象外。`extra_methods` が空なら何もしない。
     """
     if not adapter.extra_methods:
@@ -424,6 +432,7 @@ def build_report(adapter: PerfAdapter, repeats: int, seed: int) -> dict:
             "k_sweep_fixed_n": adapter.k_sweep_fixed_n,
             "cov_types": list(adapter.cov_types),
             "libraries": list(adapter.libraries),
+            "default_method": adapter.default_method,
             "extra_methods": list(adapter.extra_methods),
             "method_sweep_n": (
                 adapter.n_sweep[-1] if adapter.extra_methods else None
@@ -460,8 +469,8 @@ def run_cli(
     parser.add_argument("--repeats", type=int, default=adapter.default_repeats)
     parser.add_argument(
         "--method",
-        default="newton",
-        choices=["newton", *adapter.extra_methods],
+        default=adapter.default_method,
+        choices=[adapter.default_method, *adapter.extra_methods],
     )
     parser.add_argument(
         "--output",

@@ -174,7 +174,8 @@ def build_fixtures() -> dict:
             "z値・p値・信頼区間・対数尤度・AIC・BIC・LR統計量・LR検定p値・"
             "疑似決定係数・限界効果を含む。"
             "cov_type='hc1'はここが主リファレンス（statsmodelsのdiscrete modelが"
-            "n/(n-k)補正を未実装のため、run_statsmodels_benchmark_nonlinear.py参照）。"
+            "n/(n-k)補正を未実装のため、"
+            "benchmark/nonlinear/references/statsmodels_ref.py参照）。"
             "cov_type='opg'の限界効果もここのみが数値照合対象（statsmodels側は"
             "算出不可）。"
         ),

@@ -4916,8 +4916,8 @@
   "_meta": {
     "method": "logit",
     "primary_reference": "r-glm-sandwich-marginaleffects",
-    "purpose": "statsmodels主リファレンス（logit.json）とは独立した実装（R: glm + sandwich + marginaleffects）によるクロスチェック用。係数・標準誤差・z値・p値・信頼区間・対数尤度・AIC・BIC・LR統計量・LR検定p値・疑似決定係数・限界効果を含む。cov_type='hc1'はここが主リファレンス（statsmodelsのdiscrete modelがn/(n-k)補正を未実装のため、run_statsmodels_benchmark.py参照）。cov_type='opg'の限界効果もここのみが数値照合対象（statsmodels側は算出不可）。",
-    "generated_at": "2026-08-15T01:57:53.294810+00:00",
+    "purpose": "statsmodels主リファレンス（logit.json）とは独立した実装（R: glm + sandwich + marginaleffects）によるクロスチェック用。係数・標準誤差・z値・p値・信頼区間・対数尤度・AIC・BIC・LR統計量・LR検定p値・疑似決定係数・限界効果を含む。cov_type='hc1'はここが主リファレンス（statsmodelsのdiscrete modelがn/(n-k)補正を未実装のため、benchmark/nonlinear/references/statsmodels_ref.py参照）。cov_type='opg'の限界効果もここのみが数値照合対象（statsmodels側は算出不可）。",
+    "generated_at": "2026-08-29T23:55:24.145540+00:00",
     "r_version": "4.5.3",
     "marginaleffects_version": "0.32.0",
     "note": "perfect_multicollinearityシナリオはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。clusterは合成データ（baselineシナリオ、均等疑似グループ・不均衡グループ・G=2境界）とWooldridge実データ（mroz、city列＝都市部居住ダミー）の両方を含む。パラメータ名は全ソースで切片を'const'に正規化済み。"

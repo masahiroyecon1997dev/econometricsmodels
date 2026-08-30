@@ -110,7 +110,7 @@ def build_fixtures() -> dict:
             "scale_varianceは傾き係数の同時共分散部分行列の条件数が倍精度の"
             "限界を超えるため全cov_typeでComputationErrorになる）。"
             "クロスチェック用のRベンチマークは別途 "
-            "benchmark/linear/run_lm_crosscheck_benchmark.R で生成する。"
+            "benchmark/linear/references/run_lm_crosscheck.R で生成する。"
         ),
     }
     return fixtures

@@ -154,7 +154,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.500992+00:00",
+        "generated_at": "2026-08-29T23:54:12.837976+00:00",
         "model": "probit",
         "cov_type_requested": "classical",
         "method_requested": "newton",
@@ -237,7 +237,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.514733+00:00",
+        "generated_at": "2026-08-29T23:54:12.851355+00:00",
         "model": "probit",
         "cov_type_requested": "opg",
         "method_requested": "newton",
@@ -399,7 +399,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.533322+00:00",
+        "generated_at": "2026-08-29T23:54:12.868827+00:00",
         "model": "probit",
         "cov_type_requested": "hc0",
         "method_requested": "newton",
@@ -423,7 +423,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.696291+00:00",
+        "generated_at": "2026-08-29T23:54:13.084256+00:00",
         "note": "決め打ちの疑似グループ（行番号%10）。統計的な意味はなく、実装の動作確認用。",
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -444,7 +444,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.703301+00:00",
+        "generated_at": "2026-08-29T23:54:13.094173+00:00",
         "note": "不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。",
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -465,7 +465,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.709944+00:00",
+        "generated_at": "2026-08-29T23:54:13.104499+00:00",
         "note": "クラスタ数境界（G=2ちょうど）の成功パス確認用。Probitのcluster_cov_paramsはLogitと同じくOLSのwald_f_testのようなq×q部分行列の反転を要求しないため、説明変数を1個に絞る必要はない（k=3のままG=2で正常に計算できることを実機確認済み）。",
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -626,7 +626,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.543301+00:00",
+        "generated_at": "2026-08-29T23:54:12.882145+00:00",
         "model": "probit",
         "cov_type_requested": "classical",
         "method_requested": "newton",
@@ -709,7 +709,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.550772+00:00",
+        "generated_at": "2026-08-29T23:54:12.892464+00:00",
         "model": "probit",
         "cov_type_requested": "opg",
         "method_requested": "newton",
@@ -871,7 +871,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.561505+00:00",
+        "generated_at": "2026-08-29T23:54:12.905897+00:00",
         "model": "probit",
         "cov_type_requested": "hc0",
         "method_requested": "newton",
@@ -1035,7 +1035,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.573555+00:00",
+        "generated_at": "2026-08-29T23:54:12.920235+00:00",
         "model": "probit",
         "cov_type_requested": "classical",
         "method_requested": "newton",
@@ -1118,7 +1118,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.582679+00:00",
+        "generated_at": "2026-08-29T23:54:12.931688+00:00",
         "model": "probit",
         "cov_type_requested": "opg",
         "method_requested": "newton",
@@ -1280,7 +1280,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.594635+00:00",
+        "generated_at": "2026-08-29T23:54:12.946991+00:00",
         "model": "probit",
         "cov_type_requested": "hc0",
         "method_requested": "newton",
@@ -1444,7 +1444,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.605628+00:00",
+        "generated_at": "2026-08-29T23:54:12.961694+00:00",
         "model": "probit",
         "cov_type_requested": "classical",
         "method_requested": "newton",
@@ -1527,7 +1527,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.615659+00:00",
+        "generated_at": "2026-08-29T23:54:12.974637+00:00",
         "model": "probit",
         "cov_type_requested": "opg",
         "method_requested": "newton",
@@ -1689,7 +1689,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.626336+00:00",
+        "generated_at": "2026-08-29T23:54:12.991612+00:00",
         "model": "probit",
         "cov_type_requested": "hc0",
         "method_requested": "newton",
@@ -1853,7 +1853,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.637343+00:00",
+        "generated_at": "2026-08-29T23:54:13.005548+00:00",
         "model": "probit",
         "cov_type_requested": "classical",
         "method_requested": "newton",
@@ -1936,7 +1936,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.646683+00:00",
+        "generated_at": "2026-08-29T23:54:13.017168+00:00",
         "model": "probit",
         "cov_type_requested": "opg",
         "method_requested": "newton",
@@ -2098,7 +2098,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.657269+00:00",
+        "generated_at": "2026-08-29T23:54:13.031762+00:00",
         "model": "probit",
         "cov_type_requested": "hc0",
         "method_requested": "newton",
@@ -2262,7 +2262,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.667958+00:00",
+        "generated_at": "2026-08-29T23:54:13.045326+00:00",
         "model": "probit",
         "cov_type_requested": "classical",
         "method_requested": "newton",
@@ -2345,7 +2345,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.677248+00:00",
+        "generated_at": "2026-08-29T23:54:13.057178+00:00",
         "model": "probit",
         "cov_type_requested": "opg",
         "method_requested": "newton",
@@ -2507,7 +2507,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.688404+00:00",
+        "generated_at": "2026-08-29T23:54:13.073372+00:00",
         "model": "probit",
         "cov_type_requested": "hc0",
         "method_requested": "newton",
@@ -2793,7 +2793,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.772267+00:00",
+        "generated_at": "2026-08-29T23:54:13.195202+00:00",
         "model": "probit",
         "cov_type_requested": "classical",
         "method_requested": "newton",
@@ -2902,7 +2902,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.810494+00:00",
+        "generated_at": "2026-08-29T23:54:13.251013+00:00",
         "model": "probit",
         "cov_type_requested": "opg",
         "method_requested": "newton",
@@ -3186,7 +3186,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.863405+00:00",
+        "generated_at": "2026-08-29T23:54:13.305343+00:00",
         "model": "probit",
         "cov_type_requested": "hc0",
         "method_requested": "newton",
@@ -3470,7 +3470,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.907755+00:00",
+        "generated_at": "2026-08-29T23:54:13.368854+00:00",
         "model": "probit",
         "cov_type_requested": "cluster",
         "method_requested": "newton",
@@ -3634,7 +3634,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.933759+00:00",
+        "generated_at": "2026-08-29T23:54:13.413859+00:00",
         "model": "probit",
         "cov_type_requested": "classical",
         "method_requested": "bfgs",
@@ -3796,7 +3796,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.14.6",
-        "generated_at": "2026-08-15T02:22:09.967737+00:00",
+        "generated_at": "2026-08-29T23:54:13.460592+00:00",
         "model": "probit",
         "cov_type_requested": "classical",
         "method_requested": "lbfgs",
@@ -3807,9 +3807,9 @@
   },
   "_meta": {
     "method": "probit",
-    "generated_at": "2026-08-15T02:22:09.967837+00:00",
+    "generated_at": "2026-08-29T23:54:13.460824+00:00",
     "primary_reference": "statsmodels",
     "statsmodels_version": "0.14.6",
-    "note": "perfect_multicollinearityシナリオはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。cov_type='hc1'はstatsmodelsのdiscrete modelで未実装（HC0と同一値を返す）ため含まない。probit_crosscheck.json（R側）が主リファレンスを担う。cov_type='opg'の限界効果（margeff）はstatsmodels側では算出できないためnullになっている（run_statsmodels_benchmark.py参照）。near_separationはprobit特有の病理（準完全分離）の境界値ケース（較正値はlogitと異なりbeta1=10、generate_nonlinear_datasets.py参照）。完全分離下でのNonConvergence検出には既知の限界（logitと同じ、nonlinear/common.rsのrun_solverを共有するため）があり、専用シナリオは採用していない。scale_varianceは真のDGPを未スケーリングのXで計算した後に列のみをスケーリングする設計のため成功パス。n=k+1（自由度1ちょうど）の境界値ケースはLogitと同じ理由で非採用（n<=kではMLEが構造的にほぼ確実に完全分離を起こすため）。mrozのcluster（city列、都市部居住ダミー）は実データでのクラスターロバストSE確認用。methodはbfgs/lbfgsがnewtonと同じ最尤解・標準誤差に収束することを主リファレンスに対して確認するためのfixture（baselineシナリオ・classicalcov_typeの1ケースのみ、Issue #231フェーズ4で追加）。"
+    "note": "perfect_multicollinearityシナリオはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。cov_type='hc1'はstatsmodelsのdiscrete modelで未実装（HC0と同一値を返す）ため含まない。probit_crosscheck.json（R側）が主リファレンスを担う。cov_type='opg'の限界効果（margeff）はstatsmodels側では算出できないためnullになっている（benchmark/nonlinear/references/statsmodels_ref.py参照）。near_separationはprobit特有の病理（準完全分離）の境界値ケース（較正値はlogitと異なりbeta1=10、benchmark/nonlinear/datasets.py参照）。完全分離下でのNonConvergence検出には既知の限界（logitと同じ、nonlinear/common.rsのrun_solverを共有するため）があり、専用シナリオは採用していない。scale_varianceは真のDGPを未スケーリングのXで計算した後に列のみをスケーリングする設計のため成功パス。n=k+1（自由度1ちょうど）の境界値ケースはLogitと同じ理由で非採用（n<=kではMLEが構造的にほぼ確実に完全分離を起こすため）。mrozのcluster（city列、都市部居住ダミー）は実データでのクラスターロバストSE確認用。methodはbfgs/lbfgsがnewtonと同じ最尤解・標準誤差に収束することを主リファレンスに対して確認するためのfixture（baselineシナリオ・classicalcov_typeの1ケースのみ、Issue #231フェーズ4で追加）。"
   }
 }

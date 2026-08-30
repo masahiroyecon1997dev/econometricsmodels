@@ -32,6 +32,14 @@ logit-performance-notes.md`「計測方法」）。
 ネイティブ OPG との比較は「計測対象の処理範囲を対称に揃える」方針に反するため
 除外する。
 
+## method（オプティマイザ）の範囲
+
+engine・statsmodels とも既定は Newton-Raphson で、n/k スイープは newton で回す。
+加えて `bfgs`/`lbfgs` を **method 軸**として代表点1つ（cov_type=classical・
+k=5・n=1,000,000）で計測する（`PerfAdapter.extra_methods`）。正確性検証
+（`test_logit_fixtures.py`）も newton を主軸に bfgs/lbfgs は代表ケースのみ、
+という絞り方に合わせている。
+
 使用例（リポジトリルートから）:
     # 一括実行（n軸・k軸両方、結果をJSONに保存）
     python -m performance.compare_logit \\
@@ -70,9 +78,13 @@ def _fit_once_engine(ctx: FitContext):
     from econometricsmodels import Logit, LogitOptions
 
     if ctx.cov_type == "classical":
-        options = LogitOptions(cov_type="classical")
+        options = LogitOptions(cov_type="classical", method=ctx.method)
     elif ctx.cov_type == "cluster":
-        options = LogitOptions(cov_type="cluster", cluster_col=ctx.cluster_col)
+        options = LogitOptions(
+            cov_type="cluster",
+            cluster_col=ctx.cluster_col,
+            method=ctx.method,
+        )
     else:
         raise ValueError(f"unknown cov_type: {ctx.cov_type!r}")
     return Logit(ctx.df, y=ctx.y_col, x=ctx.x_cols, options=options).fit()
@@ -84,7 +96,7 @@ def _fit_once_statsmodels(ctx: FitContext):
     formula = f"{ctx.y_col} ~ " + " + ".join(ctx.x_cols)
     fit_kwargs: dict = {
         "disp": 0,
-        "method": "newton",
+        "method": ctx.method,
         "cov_type": "nonrobust" if ctx.cov_type == "classical" else "cluster",
     }
     if ctx.cov_type == "cluster":
@@ -123,6 +135,9 @@ LOGIT_ADAPTER = PerfAdapter(
     build_dataframe=_build_dataframe,
     fit_once=_fit_once,
     cluster_col="cluster_group",
+    # method 軸: bfgs/lbfgs を代表点（classical・k=5・n=1,000,000）で計測する。
+    # 既定の newton は n/k スイープに含まれる。
+    extra_methods=("bfgs", "lbfgs"),
 )
 
 

@@ -108,6 +108,8 @@ class FitContext:
             cov_type では `None`。
         weight_col: WLS の重み列名。重みを使わない手法（OLS/Logit 等）では
             `None`。
+        method: 最適化 method（Logit/Probit の "newton"/"bfgs"/"lbfgs" 等）。
+            method 軸を持たない手法では常に `"newton"`（`fit_once` 側で無視）。
     """
 
     library: str
@@ -119,6 +121,7 @@ class FitContext:
     hac_lags: int
     cluster_col: str | None
     weight_col: str | None
+    method: str
 
 
 @dataclass(frozen=True)
@@ -158,6 +161,11 @@ class PerfAdapter:
             手法では `None` のまま。
         weight_col: `FitContext.weight_col` に渡す列名。WLS のみ設定する
             （`build_dataframe` がその列を含む DataFrame を返す前提）。
+        extra_methods: method 軸で追加計測する最適化 method（Logit/Probit の
+            `("bfgs", "lbfgs")` 等）。既定 method（"newton"）は n/k スイープに
+            含まれるため列挙しない。空なら method 軸なし。method 軸は
+            cov_type=cov_types[0]・k=n_sweep_fixed_k・n=n_sweep[-1] の1点でのみ
+            回す（testing-policy.md「方法論」＝代表点で足りる）。
         default_repeats / default_seed: CLI 引数のデフォルト。
     """
 
@@ -175,6 +183,7 @@ class PerfAdapter:
     k_sweep_fixed_n: int = 10_000
     cluster_col: str | None = None
     weight_col: str | None = None
+    extra_methods: Sequence[str] = ()
     default_repeats: int = 3
     default_seed: int = 42
 
@@ -208,6 +217,7 @@ def _worker(
     k: int,
     seed: int,
     repeats: int,
+    method: str = "newton",
 ) -> dict:
     df = adapter.build_dataframe(n, k, seed)
     x_cols = [f"x{j + 1}" for j in range(k)]
@@ -222,6 +232,7 @@ def _worker(
         hac_lags=hac_auto_lag(n),
         cluster_col=adapter.cluster_col,
         weight_col=adapter.weight_col,
+        method=method,
     )
 
     if library == "engine":
@@ -250,6 +261,7 @@ def _run_isolated(
     k: int,
     seed: int,
     repeats: int,
+    method: str = "newton",
 ) -> dict:
     """1計測点をサブプロセスで実行する（プロセスRSS隔離のため、モジュール docstring参照）。"""
     # ワーカーは `-m` でリポジトリルートを cwd にして起動する。DGP 等を
@@ -274,6 +286,8 @@ def _run_isolated(
             str(seed),
             "--repeats",
             str(repeats),
+            "--method",
+            method,
         ],
         capture_output=True,
         text=True,
@@ -293,19 +307,23 @@ def _measure_point(
     library: str,
     repeats: int,
     seed: int,
+    method: str = "newton",
 ) -> dict:
-    measured = _run_isolated(adapter, library, cov_type, n, k, seed, repeats)
+    measured = _run_isolated(
+        adapter, library, cov_type, n, k, seed, repeats, method
+    )
     row = {
         "axis": axis,
         "n": n,
         "k": k,
         "cov_type": cov_type,
+        "method": method,
         "library": library,
         **measured,
     }
     print(
-        f"[{axis}-sweep] n={n} k={k} cov_type={cov_type} library={library}: "
-        f"time_median={row['time_median_s']:.4f}s "
+        f"[{axis}-sweep] n={n} k={k} cov_type={cov_type} method={method} "
+        f"library={library}: time_median={row['time_median_s']:.4f}s "
         f"peak_rss={row['peak_rss_kb'] / 1024:.1f}MB",
         file=sys.stderr,
     )
@@ -354,9 +372,43 @@ def run_k_sweep(adapter: PerfAdapter, repeats: int, seed: int) -> list[dict]:
     return results
 
 
+def run_method_sweep(
+    adapter: PerfAdapter, repeats: int, seed: int
+) -> list[dict]:
+    """method 軸（`adapter.extra_methods` を代表点1つで計測）。
+
+    cov_type=cov_types[0]・k=n_sweep_fixed_k・n=n_sweep[-1] の1点で、
+    追加 method（bfgs/lbfgs 等）× ライブラリを回す。既定 method（"newton"）は
+    n/k スイープに含まれるため対象外。`extra_methods` が空なら何もしない。
+    """
+    if not adapter.extra_methods:
+        return []
+    cov_type = adapter.cov_types[0]
+    n = adapter.n_sweep[-1]
+    k = adapter.n_sweep_fixed_k
+    results = []
+    for method in adapter.extra_methods:
+        for library in adapter.libraries:
+            results.append(
+                _measure_point(
+                    adapter,
+                    "method",
+                    n,
+                    k,
+                    cov_type,
+                    library,
+                    repeats,
+                    seed,
+                    method,
+                )
+            )
+    return results
+
+
 def build_report(adapter: PerfAdapter, repeats: int, seed: int) -> dict:
     n_results = run_n_sweep(adapter, repeats, seed)
     k_results = run_k_sweep(adapter, repeats, seed)
+    method_results = run_method_sweep(adapter, repeats, seed)
     return {
         "_meta": {
             "method": adapter.method,
@@ -372,10 +424,14 @@ def build_report(adapter: PerfAdapter, repeats: int, seed: int) -> dict:
             "k_sweep_fixed_n": adapter.k_sweep_fixed_n,
             "cov_types": list(adapter.cov_types),
             "libraries": list(adapter.libraries),
+            "extra_methods": list(adapter.extra_methods),
+            "method_sweep_n": (
+                adapter.n_sweep[-1] if adapter.extra_methods else None
+            ),
             "repeats": repeats,
             "seed": seed,
         },
-        "results": n_results + k_results,
+        "results": n_results + k_results + method_results,
     }
 
 
@@ -403,6 +459,11 @@ def run_cli(
     parser.add_argument("--seed", type=int, default=adapter.default_seed)
     parser.add_argument("--repeats", type=int, default=adapter.default_repeats)
     parser.add_argument(
+        "--method",
+        default="newton",
+        choices=["newton", *adapter.extra_methods],
+    )
+    parser.add_argument(
         "--output",
         default=None,
         help="結果JSONの出力先。省略時は標準出力のみ",
@@ -418,6 +479,7 @@ def run_cli(
             args.k,
             args.seed,
             args.repeats,
+            args.method,
         )
         print(json.dumps(output))
         return

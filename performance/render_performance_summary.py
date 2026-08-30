@@ -99,6 +99,49 @@ def _render_axis_section(
     return lines
 
 
+def _render_method_section(
+    method_results: list[dict], libraries: list[str], meta: dict
+) -> list[str]:
+    """method軸（bfgs/lbfgs を代表点で計測）のセクションを組み立てる。
+
+    行=method、列=library の1表のみ（cov_type=classical・n/k 固定）。既定の
+    newton は n軸の同条件（cov_type=classical, n=method_sweep_n）を参照する。
+    """
+    if not method_results:
+        return []
+    n = meta.get("method_sweep_n")
+    n_label = f"{n:,}" if isinstance(n, int) else str(n)
+    lines = [
+        (
+            f"## method軸（cov_type=classical, k={meta['n_sweep_fixed_k']}, "
+            f"n={n_label}固定）"
+        ),
+        "",
+        "実行時間（秒、中央値）。newton は n軸の同条件を参照。",
+        "",
+    ]
+    methods = sorted({r["method"] for r in method_results})
+    lines.append("| method | " + " | ".join(libraries) + " |")
+    lines.append("|---" * (len(libraries) + 1) + "|")
+    for m in methods:
+        cells = []
+        for library in libraries:
+            match = next(
+                (
+                    r
+                    for r in method_results
+                    if r["method"] == m and r["library"] == library
+                ),
+                None,
+            )
+            cells.append(
+                _format_time(match["time_median_s"]) if match else "-"
+            )
+        lines.append(f"| {m} | " + " | ".join(cells) + " |")
+    lines.append("")
+    return lines
+
+
 def render(report: dict) -> str:
     """`_perf_harness.build_report()`のレポート辞書からMarkdown全文を組み立てる。
 
@@ -150,6 +193,9 @@ def render(report: dict) -> str:
         cov_types=cov_types,
         libraries=libraries,
         include_rss=False,
+    )
+    lines += _render_method_section(
+        [r for r in results if r["axis"] == "method"], libraries, meta
     )
 
     return "\n".join(lines)

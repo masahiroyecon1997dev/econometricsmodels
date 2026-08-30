@@ -33,6 +33,13 @@ probit-performance-notes.md`「計測方法」）。
 ネイティブ OPG との比較は「計測対象の処理範囲を対称に揃える」方針に反するため
 除外する。
 
+## method（オプティマイザ）の範囲
+
+engine・statsmodels とも既定は Newton-Raphson で、n/k スイープは newton で回す。
+加えて `bfgs`/`lbfgs` を **method 軸**として代表点1つ（cov_type=classical・
+k=5・n=100,000）で計測する（`PerfAdapter.extra_methods`）。正確性検証も newton を
+主軸に bfgs/lbfgs は代表ケースのみ、という絞り方に合わせている。
+
 使用例（リポジトリルートから）:
     # 一括実行（n軸・k軸両方、結果をJSONに保存）
     python -m performance.compare_probit \\
@@ -71,10 +78,12 @@ def _fit_once_engine(ctx: FitContext):
     from econometricsmodels import Probit, ProbitOptions
 
     if ctx.cov_type == "classical":
-        options = ProbitOptions(cov_type="classical")
+        options = ProbitOptions(cov_type="classical", method=ctx.method)
     elif ctx.cov_type == "cluster":
         options = ProbitOptions(
-            cov_type="cluster", cluster_col=ctx.cluster_col
+            cov_type="cluster",
+            cluster_col=ctx.cluster_col,
+            method=ctx.method,
         )
     else:
         raise ValueError(f"unknown cov_type: {ctx.cov_type!r}")
@@ -87,7 +96,7 @@ def _fit_once_statsmodels(ctx: FitContext):
     formula = f"{ctx.y_col} ~ " + " + ".join(ctx.x_cols)
     fit_kwargs: dict = {
         "disp": 0,
-        "method": "newton",
+        "method": ctx.method,
         "cov_type": "nonrobust" if ctx.cov_type == "classical" else "cluster",
     }
     if ctx.cov_type == "cluster":
@@ -131,6 +140,8 @@ PROBIT_ADAPTER = PerfAdapter(
     # `docs/planning/specs/refactoring-candidates.md` 項目45）。n 軸は 100,000
     # までに制限する（k 軸は n=10,000 固定なので影響なし）。
     n_sweep=(1_000, 10_000, 100_000),
+    # method 軸: bfgs/lbfgs を代表点（classical・k=5・n=100,000）で計測する。
+    extra_methods=("bfgs", "lbfgs"),
 )
 
 

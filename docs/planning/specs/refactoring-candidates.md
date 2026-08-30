@@ -159,3 +159,31 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **状態**: 未対応（engineのロジック挙動に関わるためリファクタリングの範囲外。
   別途Issue化して調査する。性能比較側はProbitのn軸上限を100,000に制限して
   回避＝`compare_probit.py`の`PROBIT_ADAPTER.n_sweep`、#253のコミット）
+
+### 46. engineのLogit/ProbitのBFGS/L-BFGSがNewton・statsmodelsの同methodより桁違いに遅い
+
+- **対象**: `engine/src/nonlinear/`のLogit/Probitの最適化ソルバのうち
+  `method="bfgs"`/`"lbfgs"`の経路（`nonlinear/common.rs`の`run_solver`の
+  quasi-Newton分岐）。
+- **内容**: 2026-08-30、Logit/Probitの性能比較にmethod軸（#252/#253の追補）を
+  足したところ発覚。classical・k=5・代表nで newton と bfgs/lbfgs を実測した
+  結果（シングルスレッド、`repeats=3`中央値）:
+  - **Logit（n=1,000,000）**: newton engine 0.65秒 / bfgs engine **11.21秒** /
+    lbfgs engine **23.91秒**。同じ method の statsmodels は bfgs 1.47秒・
+    lbfgs 1.44秒で newton（1.37秒）とほぼ同じ。engine の bfgs は newton 比
+    約17倍、lbfgs は約37倍、statsmodels 比でも bfgs 約7.6倍・lbfgs 約16.6倍遅い。
+  - **Probit（n=100,000）**: newton engine 0.12秒 / bfgs engine **0.91秒** /
+    lbfgs engine **0.82秒**。statsmodels は bfgs 0.18秒・lbfgs 0.16秒。
+    engine の quasi-Newton は newton 比 約7倍、statsmodels 比 約5倍遅い。
+- **推測される原因**: quasi-Newton は1反復あたり勾配のみ（O(nk)）で Newton の
+  Hessian 構築（O(nk²)）より軽いはずなので、(a) 収束が極端に遅く反復回数が
+  膨れている、(b) line search（ステップ幅探索）が非効率で1反復あたり多数の
+  関数評価をしている、(c) 逆Hessian近似の更新や保持がナイーブ、のいずれか。
+  statsmodels（scipy の `fmin_bfgs`/`fmin_l_bfgs_b`）は大標本でも数回反復で
+  収束しており、engine 側のステップ制御・収束判定・近似更新の実装に
+  改善余地がある。
+- **状態**: 未対応（engineの最適化ロジックに関わるためリファクタリングの
+  範囲外。別途Issue化して調査する。性能比較側は method 軸を代表点1つで
+  計測して現状を記録する（`compare_logit.py`/`compare_probit.py`の
+  `extra_methods`、#252/#253追補コミット）。既定の newton は実用上十分速い
+  ため、当面の実害は「newton 以外を選ぶと遅い」という選択上の注意に留まる）

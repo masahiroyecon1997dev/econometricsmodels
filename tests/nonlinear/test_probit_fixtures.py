@@ -52,7 +52,10 @@ from benchmark.nonlinear.fixtures.generate_probit_fixtures import (
 )
 
 FIXTURE_PATH = (
-    Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "probit.json"
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "benchmarks"
+    / "probit.json"
 )
 
 RTOL = TOLERANCES["probit_fixtures"]["rtol"]

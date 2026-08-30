@@ -81,7 +81,7 @@
 
 ### 4. nonlinear系統: `raise_on_non_convergence=False`がclassical cov_typeでしか検証されていない
 
-- **対象**: `tests/test_logit.py`・`tests/test_probit.py`
+- **対象**: `tests/nonlinear/test_logit.py`・`tests/nonlinear/test_probit.py`
 - **内容**: 非収束時に例外を出さず打ち切りパラメータを返す`raise_on_non_convergence=False`
   オプションが、`cov_type="classical"`との組み合わせでしかテストされていない。
   打ち切り点（収束未満のパラメータ）でのHessian評価はcov_typeの分岐によって
@@ -95,7 +95,7 @@
 
 ### 5. nonlinear系統: `cov_type="cluster"`×`cluster_col`未指定（`MissingClusterColumn`）がPython API境界で未検証
 
-- **対象**: `tests/test_logit.py`・`tests/test_probit.py`（OLS/WLS側も同様）
+- **対象**: `tests/nonlinear/test_logit.py`・`tests/nonlinear/test_probit.py`（OLS/WLS側も同様）
 - **内容**: `cov_type="cluster"`を指定しつつ`cluster_col`を渡さない場合の
   `MissingClusterColumn`エラーは`engine`レベル（`Err(CommonError::MissingClusterColumn.into())`）
   ではテスト済みだが、Python API境界（`fit()`呼び出し）を通した確認が無い。
@@ -312,10 +312,10 @@
 
 - **対象**: `benchmark/linear/references/statsmodels_ref.py`・
   `benchmark/linear/fixtures/generate_ols_fixtures.py`・
-  `tests/test_ols_fixtures.py`（いずれも`predict`/`fitted`という単語が一切登場しない、
+  `tests/linear/test_ols_fixtures.py`（いずれも`predict`/`fitted`という単語が一切登場しない、
   実測確認済み）
 - **内容**: ユーザー指摘（2026-08-16）。`predict()`を実際に検証しているのは
-  `tests/test_ols_crosscheck.py`（Rクロスチェック側、`test_predict_none_matches_r_
+  `tests/linear/test_ols_crosscheck.py`（Rクロスチェック側、`test_predict_none_matches_r_
   fitted_values`・`test_predict_new_data_matches_r`の2テスト）のみで、**主リファレンス
   （statsmodels）側では一度も検証されていない**。`testing-policy.md`の設計思想
   （statsmodelsを主リファレンス、Rは独立実装によるクロスチェック）に照らすと、
@@ -369,7 +369,7 @@
 
 ### 20. IV: クラスター時のWu-Hausman検定p値ズレの「根本原因」説明が自動テストで裏付けられていない
 
-- **対象**: `tests/test_iv_crosscheck.py`（`check_wu_hausman_p_value=False`で
+- **対象**: `tests/iv/test_iv_crosscheck.py`（`check_wu_hausman_p_value=False`で
   clusterのp値比較自体をスキップしている）・
   [benchmark/iv/references/run_ivreg.R:33-41](../../../benchmark/iv/references/run_ivreg.R#L33-L41)
   （コメントで「G-1で計算するとRのstatisticから本実装のp値が再現できることを
@@ -464,9 +464,9 @@
 
 ### 24. Logitのmrozクラスターcrosscheckテストだけ、Probitと違い専用の緩めた許容誤差を使っていない（数値ノイズの有無が未検証）
 
-- **対象**: [tests/test_logit_crosscheck.py:233-245](../../../tests/test_logit_crosscheck.py#L233-L245)
+- **対象**: [tests/nonlinear/test_logit_crosscheck.py:233-245](../../../tests/nonlinear/test_logit_crosscheck.py#L233-L245)
   （`test_mroz_cluster_matches_r_glm`、`rtol`指定無しで基本値2e-4のまま）と
-  対比した[tests/test_probit_crosscheck.py:243-264](../../../tests/test_probit_crosscheck.py#L243-L264)
+  対比した[tests/nonlinear/test_probit_crosscheck.py:243-264](../../../tests/nonlinear/test_probit_crosscheck.py#L243-L264)
   （同名テストで`RTOL_MROZ_CLUSTER = TOLERANCES["probit_crosscheck"]["rtol_mroz_cluster"]`
   = 2e-3を明示的に使用）
 - **内容**: ユーザー依頼（2026-08-22）で確認。`tests/_tolerances.py`の
@@ -508,12 +508,12 @@
   `refactoring-candidates-2.md`項目6（データ生成ライフサイクルを`benchmark/`に
   揃えるか）とセットで`benchmark/`側に切り出すかは設計判断が要るため、
   着手前にユーザー確認が必要。
-- **気づいた経緯**: 2026-08-22、`tests/test_ols.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-22、`tests/linear/test_ols.py`解説後のユーザー指摘。
 - **状態**: 未対応（設計判断待ち、`refactoring-candidates-2.md`項目6と関連）
 
 ### 26. `ValidationError`の検証範囲: `y`が空文字列のケースが無い／例外メッセージ内容を検証するテストが無い
 
-- **対象**: [tests/test_ols.py](../../../tests/test_ols.py)のエラーハンドリング
+- **対象**: [tests/linear/test_ols.py](../../../tests/linear/test_ols.py)のエラーハンドリング
   ブロック（151〜277行目）。`tests/`配下全体で`pytest.raises(..., match=...)`が
   0件（`grep`で確認）。
 - **内容**: ユーザー指摘（2026-08-22）を受けて確認。(1) `y=""`（空文字列の
@@ -535,7 +535,7 @@
   等、既に「Rust単体テストと対になるPython API境界確認」という位置づけの
   テストがある）と同じ考え方で、代表的な1〜2件に`match=`を追加すれば
   「Rust→Python境界でメッセージが壊れない」ことの確認としては十分と考える。
-- **気づいた経緯**: 2026-08-22、`tests/test_ols.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-22、`tests/linear/test_ols.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 27. `include_intercept=False`・`confidence_level`オプションの効果が、frozen JSON数値照合（fixturesパイプライン）で検証されていない
@@ -545,18 +545,18 @@
   （どちらにも`include_intercept`・`confidence_level`という文字列が0件）
 - **内容**: ユーザー指摘（2026-08-22）を受けて確認。`OLSOptions`の主要な
   フィールドのうち、`include_intercept=False`（切片なし回帰）と
-  `confidence_level`（既定0.95以外の信頼水準）は、`tests/test_ols.py`内の
+  `confidence_level`（既定0.95以外の信頼水準）は、`tests/linear/test_ols.py`内の
   即席データによる簡易statsmodels比較でのみ検証されており、
   `test_ols_fixtures.py`のfrozen JSON数値照合パイプラインには一度も
   登場しない。なお`conf_int`自体（既定95%信頼区間の値）は
-  [tests/test_ols_fixtures.py:85-87](../../../tests/test_ols_fixtures.py#L85-L87)
+  [tests/linear/test_ols_fixtures.py:85-87](../../../tests/linear/test_ols_fixtures.py#L85-L87)
   で既に数値照合済み（冗長ではなく既存カバレッジ）だが、
   `confidence_level`を変更したときの効果は
-  [tests/test_ols.py:353-374](../../../tests/test_ols.py#L353-L374)
+  [tests/linear/test_ols.py:353-374](../../../tests/linear/test_ols.py#L353-L374)
   `test_confidence_level_changes_interval_width`が相対比較
   （狭くなる/広くなる）のみで、具体的な数値の正しさまでは見ていない。
   `test_predict_new_data_without_intercept_matches_statsmodels`
-  （[tests/test_ols.py:570-588](../../../tests/test_ols.py#L570-L588)）も同様に
+  （[tests/linear/test_ols.py:570-588](../../../tests/linear/test_ols.py#L570-L588)）も同様に
   即席データのみでの検証。
 - **Claudeの所感**: `testing-policy.md`が要求する「全てのオプションの組み合わせで
   リファレンス実装と統計量が一致することを確認する」の対象漏れだと考える。
@@ -564,7 +564,7 @@
   `generate_ols_fixtures.py`側でcov_type全種と組み合わせて数値照合すれば、
   `refactoring-candidates-2.md`項目52（`test_ols.py`の役割の非対称性）の
   解消（`test_ols.py`から簡易数値比較を削る）の前提条件にもなる。
-- **気づいた経緯**: 2026-08-22、`tests/test_ols.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-22、`tests/linear/test_ols.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、`refactoring-candidates-2.md`
   項目52と関連）
 
@@ -572,7 +572,7 @@
 
 - **対象**: [benchmark/linear/fixtures/generate_ols_fixtures.py:114-150](../../../benchmark/linear/fixtures/generate_ols_fixtures.py#L114-L150)
   （`_run_cluster_case`、返り値が`coef`/`se`のみ）と対比した
-  [tests/test_ols_crosscheck.py:112-150](../../../tests/test_ols_crosscheck.py#L112-L150)
+  [tests/linear/test_ols_crosscheck.py:112-150](../../../tests/linear/test_ols_crosscheck.py#L112-L150)
   （`_assert_fit_stats_close`、cluster系テストからも呼ばれ、t_stats/p_values/
   conf_intまで含めてR側と数値照合している）
 - **内容**: ユーザー指摘（2026-08-23）を受けて確認。`test_ols_fixtures.py`の
@@ -591,7 +591,7 @@
   返り値にt値・p値・信頼区間を追加し、`test_ols_fixtures.py`側の
   クラスター系テストも`_check_result`相当（または部分適用）まで
   検証を広げるのが妥当。
-- **気づいた経緯**: 2026-08-23、`tests/test_ols_fixtures.py`解説中の
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_fixtures.py`解説中の
   ユーザー指摘を受けて`test_ols_crosscheck.py`と突き合わせて確認。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
@@ -599,9 +599,9 @@
 
 - **対象**: [benchmark/linear/fixtures/generate_ols_fixtures.py:76-92](../../../benchmark/linear/fixtures/generate_ols_fixtures.py#L76-L92)
   （`if scenario == "baseline":`ブロック内でのみクラスターケースを生成）、
-  `tests/test_ols_fixtures.py`のクラスター系4テスト（`scenario`の
+  `tests/linear/test_ols_fixtures.py`のクラスター系4テスト（`scenario`の
   `parametrize`無し、`synthetic_baseline.csv`/`synthetic_baseline_k1.csv`
-  固定）、`tests/test_ols_crosscheck.py`の同名クラスター系テスト（同じく
+  固定）、`tests/linear/test_ols_crosscheck.py`の同名クラスター系テスト（同じく
   `scenario`の`parametrize`無し）、`engine/src/linear/ols.rs`のクラスター
   単体テスト（`fit_computes_cluster_std_errors_...`等、リファレンス実装との
   数値比較を伴わない純粋ロジック検証のみ）
@@ -626,14 +626,14 @@
   数値的落とし穴が無いとは言い切れない。最低限`high_condition_number`または
   `moderate_multicollinearity`のいずれか1シナリオでクラスターケースを
   追加し、数値照合できることを確認するのが妥当と考える。
-- **気づいた経緯**: 2026-08-23、`tests/test_ols_fixtures.py`解説中の
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_fixtures.py`解説中の
   ユーザー指摘（「clusterに関してはシナリオごとで検証する必要はないのか、
   精度漏れの可能性が残ることは避けたい」）を受けて3層を確認。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 30. `time_col`が存在しない列名を指した場合の`ValidationError`テストが無い（`cluster_col`には対になるテストがある）
 
-- **対象**: [tests/test_ols.py:166-173](../../../tests/test_ols.py#L166-L173)
+- **対象**: [tests/linear/test_ols.py:166-173](../../../tests/linear/test_ols.py#L166-L173)
   （`test_cluster_col_nonexistent_column_raises`、`cluster_col`が存在しない
   列を指す場合の専用テスト）と対比した、`time_col`に対する同種テストの不在。
   実装は[engine_pybind/src/linear/common.rs:99-107](../../../engine_pybind/src/linear/common.rs#L99-L107)
@@ -658,9 +658,9 @@
 
 ### 31. `fit()`本体（`y`/`x`列）でNaN・無限大を含む場合のテストが無い（`predict()`側にはある）
 
-- **対象**: [tests/test_ols.py:181-184](../../../tests/test_ols.py#L181-L184)
+- **対象**: [tests/linear/test_ols.py:181-184](../../../tests/linear/test_ols.py#L181-L184)
   （`test_null_values_raise`、null値のみ）と対比した
-  [tests/test_ols.py:651-660](../../../tests/test_ols.py#L651-L660)
+  [tests/linear/test_ols.py:651-660](../../../tests/linear/test_ols.py#L651-L660)
   （`test_predict_null_or_non_finite_values_raise`、`predict()`の`new_data`は
   nullと`float("inf")`の両方をテスト済み）。実装は
   [engine_pybind/src/column_extraction.rs:65-72](../../../engine_pybind/src/column_extraction.rs#L65-L72)
@@ -683,7 +683,7 @@
 
 ### 32. `y`列自体が存在しない場合・`cluster_col`にNull値を含む場合の専用テストが無い（低優先度、同一コードパスの既存テストで実質カバー済み）
 
-- **対象**: [tests/test_ols.py:176-178](../../../tests/test_ols.py#L176-L178)
+- **対象**: [tests/linear/test_ols.py:176-178](../../../tests/linear/test_ols.py#L176-L178)
   （`test_missing_column_raises`、`x=["x1", "nonexistent"]`のみで`y`側の
   欠落は未テスト）／`cluster_col`のNull値ケース（テスト無し）
 - **内容**: ユーザー依頼（2026-08-23）を受けたバリデーション網羅性確認の
@@ -700,9 +700,9 @@
 
 ### 33. Wooldridge実データでの検証が、主リファレンス（statsmodels）側では一度も行われていない（Rクロスチェック側にはある非対称）
 
-- **対象**: `tests/test_ols_fixtures.py`（`wooldridge_loader`/
+- **対象**: `tests/linear/test_ols_fixtures.py`（`wooldridge_loader`/
   `load_wooldridge_dataset`のimportが無い）と対比した
-  [tests/test_ols_crosscheck.py:284-344](../../../tests/test_ols_crosscheck.py#L284-L344)
+  [tests/linear/test_ols_crosscheck.py:284-344](../../../tests/linear/test_ols_crosscheck.py#L284-L344)
   （`WOOLDRIDGE_DATASETS`、`test_wooldridge_matches_r`・
   `test_wooldridge_wage1_region_cluster_matches_r`の3テスト）
 - **内容**: ユーザー指摘（2026-08-23）を受けて確認。`test_ols_fixtures.py`は
@@ -718,15 +718,15 @@
   統計量は独立実装だけでなく主リファレンスとも一致確認する）からすると
   漏れだと考える。`generate_ols_fixtures.py`にWooldridgeデータ
   （`wage1`/`gpa2`）でのstatsmodels照合を追加するのが妥当。
-- **気づいた経緯**: 2026-08-23、`tests/test_ols_crosscheck.py`解説中の
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_crosscheck.py`解説中の
   ユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 34. `test_wls.py`にもOLSと同型のバリデーション抜けがある（`y`列自体の欠落・`fit()`本体のNaN/無限大・空文字列の列名）
 
-- **対象**: [tests/test_wls.py:218-225](../../../tests/test_wls.py#L218-L225)
+- **対象**: [tests/linear/test_wls.py:218-225](../../../tests/linear/test_wls.py#L218-L225)
   （`test_missing_column_raises`、`x`側のみ`x=["x1", "nonexistent"]`、`y`側の
-  欠落は未テスト）・[tests/test_wls.py:228-236](../../../tests/test_wls.py#L228-L236)
+  欠落は未テスト）・[tests/linear/test_wls.py:228-236](../../../tests/linear/test_wls.py#L228-L236)
   （`test_null_values_raise`、null値のみ、NaN・無限大は未テスト。`weight`列は
   `test_nan_weight_raises`/`test_null_weight_raises`で既に分割済みなのと
   対照的）
@@ -740,18 +740,18 @@
 - **Claudeの所感**: (2)は`testing-completeness-reviewer`のレビュー観点に
   追加した「列引数ごとのバリデーション3点セット」で今後拾えるはずだが、
   既存分としては未対応のまま残っている。
-- **気づいた経緯**: 2026-08-23、`tests/test_wls.py`解説後のユーザー指摘を
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_wls.py`解説後のユーザー指摘を
   受けた確認。
 - **状態**: 未対応（着手要否はユーザー判断待ち。(3)は優先度低）
 
 ### 35. `test_cov_type_label`/`test_cov_type_is_case_insensitive`がOLS・WLSともHACを含んでいない（大文字小文字を区別しないことが未検証）
 
-- **対象**: [tests/test_ols.py:478-484](../../../tests/test_ols.py#L478-L484)・
-  [tests/test_wls.py:372-386](../../../tests/test_wls.py#L372-L386)
+- **対象**: [tests/linear/test_ols.py:478-484](../../../tests/linear/test_ols.py#L478-L484)・
+  [tests/linear/test_wls.py:372-386](../../../tests/linear/test_wls.py#L372-L386)
   （`test_cov_type_label`、`["classical", "hc0", "hc1", "hc2", "hc3"]`＋
   cluster別途、hac無し）、
-  [tests/test_ols.py:487-507](../../../tests/test_ols.py#L487-L507)・
-  [tests/test_wls.py:389-411](../../../tests/test_wls.py#L389-L411)
+  [tests/linear/test_ols.py:487-507](../../../tests/linear/test_ols.py#L487-L507)・
+  [tests/linear/test_wls.py:389-411](../../../tests/linear/test_wls.py#L389-L411)
   （`test_cov_type_is_case_insensitive`、`CLASSICAL`/`HC0`〜`hc3`/
   `nonrobust`のみパラメータ化、`HAC`/`Hac`等は無し）
 - **内容**: ユーザー指摘（2026-08-23）を受けて確認。`res.cov_type == "hac"`
@@ -764,14 +764,14 @@
   実装上のリスクは低いと考えられるが、他のcov_type全てで大文字小文字
   バリエーションをテストしているのにHACだけ抜けているのは網羅性として
   片手落ち。`hac_lags`を明示する必要がある分岐の複雑さが、抜けの一因かもしれない。
-- **気づいた経緯**: 2026-08-23、`tests/test_wls.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_wls.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 36. WLSのHACクロスチェックで、statsmodels側とR側が異なるラグ値でNewey-West公式を検証しており、同一設定が両方の独立実装から検証されていない
 
-- **対象**: [tests/test_wls_fixtures.py:70](../../../tests/test_wls_fixtures.py#L70)
+- **対象**: [tests/linear/test_wls_fixtures.py:70](../../../tests/linear/test_wls_fixtures.py#L70)
   （`HAC_LAG_IN_FIXTURE = 1`という固定値、statsmodels側）と
-  [tests/test_wls_crosscheck.py:205-206](../../../tests/test_wls_crosscheck.py#L205-L206)
+  [tests/linear/test_wls_crosscheck.py:205-206](../../../tests/linear/test_wls_crosscheck.py#L205-L206)
   （`entry["hac_lag"]`という本実装の自動選択ラグ、R側）
 - **内容**: ユーザー指摘（2026-08-23、「Newey-West公式の実装自体が正しいか
   確認するなら、statsmodels側でも同様のことを行い、Rクロスチェックと
@@ -790,13 +790,13 @@
   対応するなら「statsmodels側でも自動選択ラグを使う」または「R側にも
   固定ラグ=1のケースを追加する」のどちらかで同一設定を両実装から検証する
   形に揃えられる。
-- **気づいた経緯**: 2026-08-23、`tests/test_wls_crosscheck.py`解説後の
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_wls_crosscheck.py`解説後の
   ユーザー指摘。
 - **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
 
 ### 37. `test_marginal_effects_default_excludes_intercept`が部分集合チェック（`<=`）で、余分なキーが混入しても検出できない
 
-- **対象**: [tests/test_logit.py:170-185](../../../tests/test_logit.py#L170-L185)
+- **対象**: [tests/nonlinear/test_logit.py:170-185](../../../tests/nonlinear/test_logit.py#L170-L185)
   （`assert expected_keys <= set(row.keys())`）
 - **内容**: ユーザー指摘（2026-08-23）を受けて確認。`marginal_effects()`が
   返す行の実際のキー数（Rust側`MarginalEffectsResult`のフィールド数）は
@@ -804,12 +804,12 @@
   `==`（完全一致）の方が厳密で、かつ現状の実装と矛盾しない。
 - **Claudeの所感**: `==`に変えるだけの小さい修正で、将来意図しないキーが
   追加された場合の検出力が上がる。実施しやすい部類。
-- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 38. `test_marginal_effects_at_is_case_insensitive`が`"overall"`のみ検証しており`"mean"`/`"median"`の大文字小文字非依存性は未検証
 
-- **対象**: [tests/test_logit.py:200-204](../../../tests/test_logit.py#L200-L204)
+- **対象**: [tests/nonlinear/test_logit.py:200-204](../../../tests/nonlinear/test_logit.py#L200-L204)
   （`at="OVERALL"`と`at="overall"`の比較のみ、`pytest.mark.parametrize`化
   されていない）
 - **内容**: ユーザー指摘（2026-08-23）を受けて確認。`at`は`"overall"`/
@@ -817,14 +817,14 @@
   確認は`"overall"`のみで、`"mean"`/`"median"`側は未検証。
 - **Claudeの所感**: `@pytest.mark.parametrize("at", ["mean", "median",
   "overall"])`化すれば3値とも同じテストでカバーできる。実施しやすい。
-- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 39. `test_marginal_effects_confidence_level_out_of_range_raises`が`1.5`のみ検証しており、`fit()`本体側のような境界値（`0.0`・負値）が未検証
 
-- **対象**: [tests/test_logit.py:213-218](../../../tests/test_logit.py#L213-L218)
+- **対象**: [tests/nonlinear/test_logit.py:213-218](../../../tests/nonlinear/test_logit.py#L213-L218)
   （`confidence_level=1.5`のみ）と、対比した
-  [tests/test_logit.py:291-303](../../../tests/test_logit.py#L291-L303)
+  [tests/nonlinear/test_logit.py:291-303](../../../tests/nonlinear/test_logit.py#L291-L303)
   （`test_invalid_confidence_level_raises`、`fit()`側は`[1.5, 0.0, -0.1]`を
   `pytest.mark.parametrize`で検証済み）
 - **内容**: ユーザー指摘（2026-08-23、「こういう系統は-1とかでも検証して
@@ -835,12 +835,12 @@
   ある。
 - **Claudeの所感**: `fit()`側と同じ`[1.5, 0.0, -0.1]`にparametrize化すれば
   対称になる。実施しやすい部類。
-- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 40. Logitにも項目32（`y`列自体が存在しない場合の専用テストが無い）と同型の抜けがある
 
-- **対象**: [tests/test_logit.py:247-249](../../../tests/test_logit.py#L247-L249)
+- **対象**: [tests/nonlinear/test_logit.py:247-249](../../../tests/nonlinear/test_logit.py#L247-L249)
   （`test_missing_column_raises`、`x=["does_not_exist"]`のみで`y`側の
   欠落は未テスト。OLSの項目32と同じ非対称）
 - **内容**: ユーザー指摘（2026-08-23、「yのdoes_not_exist列検証がない。
@@ -860,15 +860,15 @@
 - **Claudeの所感**: `y`側の`test_missing_column_raises`相当のテストを
   追加する程度の小さい対応で足りる。優先度は項目32と同程度（低）で
   良いと考える。
-- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
 - **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
 
 ### 41. `method`（bfgs/lbfgs）と`cov_type`・シナリオ・クラスターの組み合わせが検証されていない
 
-- **対象**: [tests/test_logit_fixtures.py:142-152](../../../tests/test_logit_fixtures.py#L142-L152)
+- **対象**: [tests/nonlinear/test_logit_fixtures.py:142-152](../../../tests/nonlinear/test_logit_fixtures.py#L142-L152)
   （`test_matches_statsmodels`、`method`は既定〔newton〕固定で
   `cov_type`×シナリオを網羅）と
-  [tests/test_logit_fixtures.py:197-216](../../../tests/test_logit_fixtures.py#L197-L216)
+  [tests/nonlinear/test_logit_fixtures.py:197-216](../../../tests/nonlinear/test_logit_fixtures.py#L197-L216)
   （`test_method_matches_statsmodels`、`method`はbfgs/lbfgsを網羅するが
   `cov_type="classical"`・`scenario="baseline"`に固定）
 - **内容**: ユーザー指摘（2026-08-23、「`test_matches_statsmodels`に
@@ -888,13 +888,13 @@
   `test_matches_statsmodels`に`method`を第3の`parametrize`として
   丸ごと含める案は組み合わせ数が9倍（3method×3cov_type×6scenario）に
   膨らみCI時間が増えるため、代表ケースのみの追加が良いと考える。
-- **気づいた経緯**: 2026-08-23、`tests/test_logit_fixtures.py`解説後の
+- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit_fixtures.py`解説後の
   ユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 42. `test_logit_crosscheck.py`の`_check_margeff`が`z`/`p_value`/`conf_low`/`conf_high`を検証していない（フィクスチャには既に存在するデータ）
 
-- **対象**: [tests/test_logit_crosscheck.py:105-118](../../../tests/test_logit_crosscheck.py#L105-L118)
+- **対象**: [tests/nonlinear/test_logit_crosscheck.py:105-118](../../../tests/nonlinear/test_logit_crosscheck.py#L105-L118)
   （ローカル`_check_margeff`、`dydx`/`std_err`のみ検証）と対比した
   [tests/_assertions.py:59-113](../../../tests/_assertions.py#L59-L113)
   （共通`check_margeff`、`dydx`/`std_err`/`z`/`p_value`/`conf_low`/
@@ -917,15 +917,15 @@
   明確な抜け。フィクスチャデータは既に揃っているため、`_assertions.py`の
   `check_margeff`をこのファイルでも使う形に統一すれば（項目91と合わせて
   対応）、コードを増やさずにこの抜けも同時に解消できる。
-- **気づいた経緯**: 2026-08-24、`tests/test_logit_crosscheck.py`解説後の
+- **気づいた経緯**: 2026-08-24、`tests/nonlinear/test_logit_crosscheck.py`解説後の
   ユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目91と合わせて対応可能）
 
 ### 43. `mroz`実データのクラスターロバストSEテスト（`test_logit_fixtures.py`/`test_logit_crosscheck.py`双方）が`coef`/`se`のみ検証しており、フィクスチャに既に存在する`z_stats`/`p_values`/`conf_int`/適合度統計量/`margeff`を検証していない（synthetic疑似クラスタ側は生成物と一致しており対象外）
 
-- **対象**: [tests/test_logit_fixtures.py:287-299](../../../tests/test_logit_fixtures.py#L287-L299)
+- **対象**: [tests/nonlinear/test_logit_fixtures.py:287-299](../../../tests/nonlinear/test_logit_fixtures.py#L287-L299)
   （`test_mroz_cluster_matches_statsmodels`）、
-  [tests/test_logit_crosscheck.py:223-235](../../../tests/test_logit_crosscheck.py#L223-L235)
+  [tests/nonlinear/test_logit_crosscheck.py:223-235](../../../tests/nonlinear/test_logit_crosscheck.py#L223-L235)
   （`test_mroz_cluster_matches_r_glm`）。いずれも`_assert_dict_close
   (res.params, ...)`・`_assert_dict_close(res.std_errors, ...)`の2行のみ。
   Probit側の対応するテスト（`test_probit_fixtures.py::test_mroz_cluster_
@@ -985,8 +985,8 @@
   関数で全統計量を一括生成しつつ（`se`非依存分だけ絞り込む特別扱いは
   実装コストに見合わない）、**テスト側は`z_stats`/`p_values`/`conf_int`
   （＋限界効果）に絞って検証を追加する**のが効率的だと判断する。
-- **気づいた経緯**: 2026-08-24、`tests/test_logit_crosscheck.py`解説後の
-  ユーザー指摘、`tests/test_probit_fixtures.py`解説時にフィクスチャの
+- **気づいた経緯**: 2026-08-24、`tests/nonlinear/test_logit_crosscheck.py`解説後の
+  ユーザー指摘、`tests/nonlinear/test_probit_fixtures.py`解説時にフィクスチャの
   実際の中身を再確認し記載を訂正、さらにユーザー提案を受けた実機検証で
   「`se`非依存の統計量は再検証不要・`se`依存の統計量のみ追加検証すべき」
   という基準を追記。
@@ -996,27 +996,27 @@
   （8テスト）は`z_stats`/`p_values`/`conf_int`〔＋限界効果〕のみの
   追加検証に、それぞれ切り替える）
 
-### 44. 項目41が`tests/test_probit_fixtures.py`にも同様に該当する（一括注記）
+### 44. 項目41が`tests/nonlinear/test_probit_fixtures.py`にも同様に該当する（一括注記）
 
-- **対象**: [tests/test_probit_fixtures.py](../../../tests/test_probit_fixtures.py)
+- **対象**: [tests/nonlinear/test_probit_fixtures.py](../../../tests/nonlinear/test_probit_fixtures.py)
   全体（`test_matches_statsmodels`はmethod既定固定・`test_method_matches_
   statsmodels`はcov_type="classical"固定という同じ構造）
-- **内容**: `tests/test_probit_fixtures.py`解説時、コード部分が
+- **内容**: `tests/nonlinear/test_probit_fixtures.py`解説時、コード部分が
   `test_logit_fixtures.py`と完全に同一（項目95・96参照）であることを
   確認したため、項目41（`method`〔bfgs/lbfgs〕と`cov_type`・シナリオ・
   クラスターの組み合わせが未検証）がそのまま該当する。
 - **Claudeの所感**: 対応する場合は項目41と同じ方針（全組み合わせでは
   なく代表的な組み合わせに絞って追加）をLogit/Probit両方にまとめて
   適用するのが効率的。
-- **気づいた経緯**: 2026-08-24、`tests/test_probit_fixtures.py`解説時に
+- **気づいた経緯**: 2026-08-24、`tests/nonlinear/test_probit_fixtures.py`解説時に
   確認。
 - **状態**: 未対応（項目41への追記の代わりにこの1項目に集約、着手要否は
   ユーザー判断待ち）
 
 ### 45. Logit/Probitの実データクラスターロバストSEテストが`mroz`の`city`（G=2）のみで、より現実的な多数クラスタ（数十件規模）での実データ検証が無い——`apple`データセット（`state`、G=49）の採用が決定済み
 
-- **対象**: [tests/test_logit_fixtures.py:287-299](../../../tests/test_logit_fixtures.py#L287-L299)・
-  [tests/test_probit_fixtures.py:276-288](../../../tests/test_probit_fixtures.py#L276-L288)・
+- **対象**: [tests/nonlinear/test_logit_fixtures.py:287-299](../../../tests/nonlinear/test_logit_fixtures.py#L287-L299)・
+  [tests/nonlinear/test_probit_fixtures.py:276-288](../../../tests/nonlinear/test_probit_fixtures.py#L276-L288)・
   両crosscheckファイルの`test_mroz_cluster_matches_*`（`cluster_col="city"`、
   G=2）
 - **内容**: ユーザー指摘（2026-08-24、「mrozデータのcity変数ってクラスター
@@ -1044,7 +1044,7 @@
   同じ設計になる見込み）。フィクスチャ生成スクリプト
   （`generate_logit_fixtures.py`等）側でも同様にその場で派生列を作って
   from `run()`に渡す必要がある。
-- **気づいた経緯**: 2026-08-24、`tests/test_probit_crosscheck.py`解説後の
+- **気づいた経緯**: 2026-08-24、`tests/nonlinear/test_probit_crosscheck.py`解説後の
   ユーザー指摘・データセット調査・ユーザーによる採用決定。
 - **状態**: 採用決定・実装は未着手（この場では記録のみ。実施時は
   Logit/Probit両方の`test_<method>_fixtures.py`/

@@ -45,7 +45,10 @@ from benchmark.linear.fixtures.generate_wls_fixtures import (
 )
 
 FIXTURE_PATH = (
-    Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "wls.json"
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "benchmarks"
+    / "wls.json"
 )
 
 RTOL = TOLERANCES["wls_fixtures"]["rtol"]

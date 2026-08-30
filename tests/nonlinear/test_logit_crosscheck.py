@@ -41,7 +41,7 @@ from benchmark.nonlinear.fixtures.generate_logit_crosscheck_fixtures import (
 )
 
 FIXTURE_PATH = (
-    Path(__file__).resolve().parent
+    Path(__file__).resolve().parents[1]
     / "fixtures"
     / "benchmarks"
     / "logit_crosscheck.json"

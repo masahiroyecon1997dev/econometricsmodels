@@ -49,7 +49,7 @@ from benchmark.linear.fixtures.generate_wls_crosscheck_fixtures import (
 from benchmark.linear.fixtures.generate_wls_fixtures import _add_age_bin
 
 FIXTURE_PATH = (
-    Path(__file__).resolve().parent
+    Path(__file__).resolve().parents[1]
     / "fixtures"
     / "benchmarks"
     / "wls_crosscheck.json"

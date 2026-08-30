@@ -24,7 +24,11 @@ $ARGUMENTS
    - 使用したデータセット・コード・バージョン情報を記録し、再現可能な形で残す。
 
 3. **テストコードの作成**
-   - `tests/` 配下にpytestのテストコードを作成する。
+   - `tests/<系統>/`（`linear`/`nonlinear`/`iv`。`benchmark/` と同じ grain）に
+     `test_<手法>*.py` を作成する。共有物（`conftest.py`・`_assertions.py`・
+     `_helpers.py`・`_tolerances.py`）は `tests/` 直下（裸importは
+     `pyproject.toml` の `pythonpath = [".", "tests"]` で解決）。既存系統に当て
+     はまらない新系統は、`benchmark/` 側のディレクトリ名に合わせて新設する。
    - 許容誤差は **相対誤差1e-8を基本方針** とする。ただし、計算方法自体がリファレンス実装と異なる手法（例: FEにおけるHausman検定など）は、その旨をコメントで明記した上で個別の許容誤差を設定する。
 
 4. **engine単体テストの確認**

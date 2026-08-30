@@ -55,7 +55,11 @@ econometricsmodels/
 │   ├── __init__.py               # engine_pybindからのインポート、Polarsラッパー
 │   └── py.typed
 │
-├── tests/                          # pytest（pyfixest / R実装との答え合わせ）
+├── tests/                          # pytest（statsmodels/linearmodels / R実装との答え合わせ）
+│   ├── conftest.py _assertions.py _helpers.py _tolerances.py  # 共有（系統によらず全テストが使う）
+│   ├── linear/ nonlinear/ iv/      # 系統別サブディレクトリ（benchmark/ と同じ grain）。test_<手法>*.py
+│   ├── test_tobit.py               # 系統ディレクトリ未確定のため当面ルート据え置き
+│   └── fixtures/benchmarks/        # 固定CSV＋リファレンスJSON（コミット済み成果物）
 │
 ├── benchmark/                     # テスト用フィクスチャ生成ツール（Pythonパッケージ。pytestが収集時にimportする）
 │   ├── common/                    # 系統横断の共通ヘルパー（DGP・データIO・リファレンス呼び出し・CLI）

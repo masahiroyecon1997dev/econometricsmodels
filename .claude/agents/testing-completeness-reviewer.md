@@ -31,7 +31,7 @@ CLAUDE.md（特に7章）と`.claude/rules/testing-policy.md`は通常自動的�
    - 対象手法が受け取る列名引数（`y`・`x`・`weight`・`cluster_col`・`time_col`等、必須/オプション問わず）それぞれについて、以下が個別にテストされているか。
      - **存在確認**: 指定した列名がDataFrameに存在しない場合に`ValidationError`になること
      - **欠損値（null）**: 列にnullを含む場合に`ValidationError`になること
-     - **NaN・無限大**: f64型の列（`extract_f64_column`経由のもの。`cluster_col`等の文字列/カテゴリカル列は対象外）にNaN・`inf`を含む場合に`ValidationError`になること。nullとNaN/Infは`column_extraction.rs`内で別ロジックのため、一方のテストで他方もカバーされていると誤解しないこと（`tests/test_wls.py`の`test_nan_weight_raises`/`test_null_weight_raises`が望ましい粒度の実例）
+     - **NaN・無限大**: f64型の列（`extract_f64_column`経由のもの。`cluster_col`等の文字列/カテゴリカル列は対象外）にNaN・`inf`を含む場合に`ValidationError`になること。nullとNaN/Infは`column_extraction.rs`内で別ロジックのため、一方のテストで他方もカバーされていると誤解しないこと（`tests/linear/test_wls.py`の`test_nan_weight_raises`/`test_null_weight_raises`が望ましい粒度の実例）
    - `y`/`x`は`fit()`本体が受け取る列（学習データ）と、`predict(new_data)`が受け取る列の両方で、上記3点セットが揃っているか（`fit()`側だけ・`predict()`側だけ、という非対称が無いか）
 
 ## 手順

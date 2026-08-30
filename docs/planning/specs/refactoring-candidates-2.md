@@ -136,7 +136,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **状態**: 未対応（着手要否はユーザー判断待ち。項目2「`dataset`とbenchmark
   生成データの使い分け」は現状維持、項目3「真の係数のマジックナンバー化」も
   現状維持で確定済み）
-- **追記（2026-08-23）**: `tests/test_ols_fixtures.py`解説中のユーザー質問
+- **追記（2026-08-23）**: `tests/linear/test_ols_fixtures.py`解説中のユーザー質問
   （`_common`のimportがクロスパッケージな設計になっている点への懸念）を
   受けて再確認。`tests/`が`benchmark/_common.py`を`import`する構造自体は、
   項目3で検討済みの意図的なトレードオフ（`benchmark/`を正式なPythonパッケージ
@@ -149,11 +149,11 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   （実質`tests/`の数値照合系ファイル全体）ことを確認した。着手する場合の
   優先度を上げる材料として記録する。
 
-### 51. `tests/test_ols.py`に「Issue #231フェーズ4で判明した抜け」という経緯コメントが3箇所残存
+### 51. `tests/linear/test_ols.py`に「Issue #231フェーズ4で判明した抜け」という経緯コメントが3箇所残存
 
-- **対象**: [tests/test_ols.py:169](../../../tests/test_ols.py#L169)・
-  [tests/test_ols.py:317](../../../tests/test_ols.py#L317)・
-  [tests/test_ols.py:503](../../../tests/test_ols.py#L503)
+- **対象**: [tests/linear/test_ols.py:169](../../../tests/linear/test_ols.py#L169)・
+  [tests/linear/test_ols.py:317](../../../tests/linear/test_ols.py#L317)・
+  [tests/linear/test_ols.py:503](../../../tests/linear/test_ols.py#L503)
   （いずれも`testing-completeness-reviewer指摘、Issue #231フェーズ4`／
   `テスト網羅性レビュー、Issue #231フェーズ4で判明した抜け`という同一パターン）
 - **内容**: `/explain-code`での`test_ols.py`解説中に発見。フェーズ3の
@@ -164,15 +164,15 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   残っている。
 - **Claudeの所感**: フェーズ3で確立済みの方針（番号のみ削除し、テストの意図の
   説明は残す）をそのまま適用できる、小さいが典型的な候補。
-- **気づいた経緯**: 2026-08-22、`tests/test_ols.py`解説中に発見。
+- **気づいた経緯**: 2026-08-22、`tests/linear/test_ols.py`解説中に発見。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
-### 52. `tests/test_ols.py`だけが「構造テスト」と「statsmodelsとの簡易数値比較」を兼ねており、`tests/`内の他ファイルと役割が非対称
+### 52. `tests/linear/test_ols.py`だけが「構造テスト」と「statsmodelsとの簡易数値比較」を兼ねており、`tests/`内の他ファイルと役割が非対称
 
-- **対象**: [tests/test_ols.py](../../../tests/test_ols.py)全体
+- **対象**: [tests/linear/test_ols.py](../../../tests/linear/test_ols.py)全体
   （`_sm_design`/`_sm_fit`/`_sm_fit_cluster`によるその場でのstatsmodels比較）
-  と対比した`tests/test_wls.py`・`tests/test_logit.py`・`tests/test_probit.py`・
-  `tests/test_iv.py`・`tests/test_tobit.py`（いずれも`statsmodels`のimportが
+  と対比した`tests/linear/test_wls.py`・`tests/nonlinear/test_logit.py`・`tests/nonlinear/test_probit.py`・
+  `tests/iv/test_iv.py`・`tests/test_tobit.py`（いずれも`statsmodels`のimportが
   0件、構造/エラーテスト専業）
 - **内容**: ユーザー指摘（2026-08-22）を受けて`grep`で確認。`test_ols.py`は
   モジュールdocstring通り「statsmodelsとの数値比較」と「API構造検証」の
@@ -187,12 +187,12 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   削除すると項目11・16・27（`test-coverage-candidates.md`）で指摘した
   `include_intercept=False`等のfixtures側カバレッジ不足を先に埋める必要がある
   （fixtures側に移してから削除、の順）。
-- **気づいた経緯**: 2026-08-22、`tests/test_ols.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-22、`tests/linear/test_ols.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否・実施順序はユーザー判断待ち）
 
-### 53. `tests/test_ols.py`の`ATOL_COEF`/`ATOL_SE`/`ATOL_STAT`が、`tests/_assertions.py`の許容誤差計算式・`tests/_tolerances.py`の値と揃っていない
+### 53. `tests/linear/test_ols.py`の`ATOL_COEF`/`ATOL_SE`/`ATOL_STAT`が、`tests/_assertions.py`の許容誤差計算式・`tests/_tolerances.py`の値と揃っていない
 
-- **対象**: [tests/test_ols.py:22-25](../../../tests/test_ols.py#L22-L25)
+- **対象**: [tests/linear/test_ols.py:22-25](../../../tests/linear/test_ols.py#L22-L25)
   （`abs(a-b) < ATOL_COEF`という絶対誤差のみの比較）と対比した
   [tests/_assertions.py:27-34](../../../tests/_assertions.py#L27-L34)
   （`assert_close`、`tol = max(rtol*abs(ref), atol)`という相対＋絶対誤差の式）・
@@ -208,15 +208,15 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   を都度考えるコストがある。統一するなら`_assertions.assert_close`を使う形に
   寄せるのが筋が良いと考える。項目52（`test_ols.py`の役割自体を見直すか）と
   合わせて判断すべき。
-- **気づいた経緯**: 2026-08-22、`tests/test_ols.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-22、`tests/linear/test_ols.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 54. `test_ols.py`と`test_ols_fixtures.py`で「完全な多重共線性→`ComputationError`」のテストが重複
 
-- **対象**: [tests/test_ols.py:193-202](../../../tests/test_ols.py#L193-L202)
+- **対象**: [tests/linear/test_ols.py:193-202](../../../tests/linear/test_ols.py#L193-L202)
   （`test_singular_matrix_raises_computation_error`、手作りの4行df、
   `x2=2*x1`）と
-  [tests/test_ols_fixtures.py:183-192](../../../tests/test_ols_fixtures.py#L183-L192)
+  [tests/linear/test_ols_fixtures.py:183-192](../../../tests/linear/test_ols_fixtures.py#L183-L192)
   （`test_perfect_multicollinearity_raises_computation_error`、
   `synthetic_perfect_multicollinearity.csv`、frozen data）
 - **内容**: ユーザー指摘（2026-08-22）を受けて確認。両者とも
@@ -228,14 +228,14 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   他の即席dfベースのバリデーションテスト群と一貫する書き方）を残し、
   `test_ols_fixtures.py`側（frozen dataのシナリオ）に一本化するのが自然だと
   考える。
-- **気づいた経緯**: 2026-08-22、`tests/test_ols.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-22、`tests/linear/test_ols.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 55. `test_ols_fixtures.py`というファイル名が、pytest用語の「fixtures」と紛らわしい
 
-- **対象**: [tests/test_ols_fixtures.py](../../../tests/test_ols_fixtures.py)
+- **対象**: [tests/linear/test_ols_fixtures.py](../../../tests/linear/test_ols_fixtures.py)
   （他5系統の`test_*_fixtures.py`も同様）
-- **内容**: ユーザー指摘（2026-08-22）。`tests/test_ols.py`と並べて読むと
+- **内容**: ユーザー指摘（2026-08-22）。`tests/linear/test_ols.py`と並べて読むと
   違和感がある。pytestの「fixtures」は通常`@pytest.fixture`（テストの前提条件を
   整えるもの、`conftest.py`の`dataset`等）を指すが、このファイル名の
   `fixtures`は`testing-policy.md`「ベンチマーク値のフィクスチャ化」
@@ -246,8 +246,8 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   考えるが、6系統×命名変更は多数の参照箇所（`_tolerances.py`のキー名、
   `pyproject.toml`、CI設定、各種SKILL.md等）に影響する規模の変更のため、
   実施するかどうか・タイミングは慎重に判断すべき。
-- **気づいた経緯**: 2026-08-22、`tests/test_ols.py`解説後のユーザー指摘。
-- **追記（2026-08-23、`tests/test_wls_fixtures.py`解説時）**: ユーザーが
+- **気づいた経緯**: 2026-08-22、`tests/linear/test_ols.py`解説後のユーザー指摘。
+- **追記（2026-08-23、`tests/linear/test_wls_fixtures.py`解説時）**: ユーザーが
   「OLSと同様、`test_wls_fixtures.py`の`fixtures`が適さないのでファイル名
   変更」と改めて指摘。項目自体は元々「他5系統も同様」と対象範囲に含めて
   記録済みのため新規項目は起こさず本項目への追記とする。Claudeの所感は
@@ -256,15 +256,17 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   変わる（ディレクトリを切る、責務ごとに分ける等）予定のため、先に
   `fixtures`部分だけ改名すると分割時に再度リネームが発生し二度手間になる
   リスクがある。
-- **状態**: 未対応（着手要否はユーザー判断待ち、項目68とタイミングを
-  合わせて一括対応を推奨）
+- **状態**: 未対応。項目68 の設計決定（2026-08-30）で `test_<手法>_fixtures.py`
+  → `test_<手法>_reference.py` を **Phase 2（関心事分割）と同時に実施**すると
+  確定済み。それに伴い `_tolerances.py` のキー（`"ols_fixtures"` 等）も
+  `"ols_reference"` 等へ追随する。
 
 ### 56. `test_ols.py`内で数値比較の書き方（生の`assert`+f-string／`pytest.approx`／`_assertions.assert_close`不使用）が混在
 
-- **対象**: [tests/test_ols.py](../../../tests/test_ols.py)全体。
-  例: [tests/test_ols.py:84-87](../../../tests/test_ols.py#L84-L87)
+- **対象**: [tests/linear/test_ols.py](../../../tests/linear/test_ols.py)全体。
+  例: [tests/linear/test_ols.py:84-87](../../../tests/linear/test_ols.py#L84-L87)
   （`assert abs(...) < ATOL_COEF, f"..."`という生の比較＋手書きメッセージ）と
-  [tests/test_ols.py:540](../../../tests/test_ols.py#L540)
+  [tests/linear/test_ols.py:540](../../../tests/linear/test_ols.py#L540)
   （`assert row["fitted"] == pytest.approx(expected, abs=ATOL_COEF)`）
 - **内容**: ユーザー指摘（2026-08-22）を受けて確認。同じファイル内で
   「生の`assert`+手書きf-stringメッセージ」（係数・SE・R²・F統計量等の比較）と
@@ -276,12 +278,12 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   （`_assertions.assert_close`への統一）と合わせて整理する余地がある
   （`assert_close`は`label`引数を取れるため、ループ内での識別性という
   `pytest.approx`に対する生assertの利点も両立できる）。
-- **気づいた経緯**: 2026-08-22、`tests/test_ols.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-22、`tests/linear/test_ols.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目53とまとめて検討）
 
-### 57. `tests/test_ols_fixtures.py`のモジュールdocstringに2つの不整合（役割分担の矛盾・シナリオ数の誤り）
+### 57. `tests/linear/test_ols_fixtures.py`のモジュールdocstringに2つの不整合（役割分担の矛盾・シナリオ数の誤り）
 
-- **対象**: [tests/test_ols_fixtures.py:1-11](../../../tests/test_ols_fixtures.py#L1-L11)
+- **対象**: [tests/linear/test_ols_fixtures.py:1-11](../../../tests/linear/test_ols_fixtures.py#L1-L11)
   （モジュールdocstring）
 - **内容**: `/explain-code`での`test_ols_fixtures.py`解説中に発見。
   (1) docstringの「役割分担」節は「構造・API・エラーパスの検証:
@@ -302,10 +304,10 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   を検討する際の起点になる。(2)は項目48（`_assertions.py`/`_helpers.py`の
   docstring経緯記述の陳腐化）と同種の「件数記述が実態と食い違う」パターンで、
   シナリオ追加時にdocstringの更新が追従していなかったものと考えられる。
-- **気づいた経緯**: 2026-08-23、`tests/test_ols_fixtures.py`解説中に発見。
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_fixtures.py`解説中に発見。
 - **状態**: 未対応（着手要否はユーザー判断待ち。(1)は項目52とまとめて検討）
-- **追記（2026-08-23、`tests/test_ols_crosscheck.py`解説中に発見）**: 役割分担の
-  矛盾が3つ目のファイルにも見つかった。[tests/test_ols_crosscheck.py:1-6](../../../tests/test_ols_crosscheck.py#L1-L6)
+- **追記（2026-08-23、`tests/linear/test_ols_crosscheck.py`解説中に発見）**: 役割分担の
+  矛盾が3つ目のファイルにも見つかった。[tests/linear/test_ols_crosscheck.py:1-6](../../../tests/linear/test_ols_crosscheck.py#L1-L6)
   のモジュールdocstringは「主リファレンス（statsmodels）との厳密比較は
   `test_ols.py`で行う」と明記しており、`test_ols_fixtures.py`自身の
   「主リファレンスとの厳密な数値一致はこのファイル」という記述とも、
@@ -319,9 +321,9 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 - **対象**: [benchmark/linear/run_statsmodels_benchmark.py:82-85](../../../benchmark/linear/run_statsmodels_benchmark.py#L82-L85)
   （`"maxlags": 1`、コメント「ラグ選択方法は別途検討事項」）・
-  [tests/test_ols_fixtures.py:67](../../../tests/test_ols_fixtures.py#L67)
+  [tests/linear/test_ols_fixtures.py:67](../../../tests/linear/test_ols_fixtures.py#L67)
   （`HAC_LAG_IN_FIXTURE = 1`）・
-  [tests/test_wls_fixtures.py:70](../../../tests/test_wls_fixtures.py#L70)
+  [tests/linear/test_wls_fixtures.py:70](../../../tests/linear/test_wls_fixtures.py#L70)
   （同名の`HAC_LAG_IN_FIXTURE = 1`）
 - **内容**: ユーザー指摘（2026-08-23）を受けて確認。フィクスチャ生成時
   （statsmodels側）にHACのラグ数を固定する値`1`が、消費側（テストコード）にも
@@ -336,7 +338,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   「生成時に使った値そのものをテスト側が参照する」形になり値のズレが
   原理的に起こらなくなる。`benchmark/`と`tests/`のライフサイクル分離
   （`testing-policy.md`）を壊さずに単一の発生源にできる案だと考える。
-- **気づいた経緯**: 2026-08-23、`tests/test_ols_fixtures.py`解説中のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_fixtures.py`解説中のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 59. `[i % 10 for i in range(n)]`という疑似クラスターラベル生成が`benchmark/`配下11ファイルに重複している（`imbalanced_cluster_groups`とは非対称）
@@ -363,7 +365,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `tests/_helpers.py`の`with_cluster_groups`本体の両方がそこから使う）に
   できる、規模の大きい重複だと考える。`_hac_auto_lag`（5ファイル）・
   `imbalanced_cluster_groups`（22箇所）の一元化と同種のパターン。
-- **気づいた経緯**: 2026-08-23、`tests/test_ols_fixtures.py`解説中の
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_fixtures.py`解説中の
   ユーザー指摘（「`imbalanced_cluster_groups`もbenchmarkで作っていたはず」
   という質問への確認調査中に、対象は`imbalanced_cluster_groups`自体
   ではなく隣接する均等クラスタ生成ロジックだったと判明）。
@@ -371,9 +373,9 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ### 60. `_assert_close`という同じ名前が、`test_ols_fixtures.py`と`test_ols_crosscheck.py`で正反対の意味（スカラー版／辞書版）を持つ
 
-- **対象**: [tests/test_ols_fixtures.py:75](../../../tests/test_ols_fixtures.py#L75)
+- **対象**: [tests/linear/test_ols_fixtures.py:75](../../../tests/linear/test_ols_fixtures.py#L75)
   （`_assert_close = partial(assert_close, ...)`、スカラー版）と
-  [tests/test_ols_crosscheck.py:108](../../../tests/test_ols_crosscheck.py#L108)
+  [tests/linear/test_ols_crosscheck.py:108](../../../tests/linear/test_ols_crosscheck.py#L108)
   （`_assert_close = partial(assert_dict_close, ...)`、辞書版）
 - **内容**: ユーザー指摘（2026-08-23）を受けて確認。`tests/_assertions.py`の
   `assert_close`（スカラー用）/`assert_dict_close`（辞書用）を`partial`で
@@ -387,12 +389,12 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   認知負荷になる。揃えるなら`_assertions.py`本体の関数名にそのまま対応する
   `_assert_close`（スカラー）/`_assert_dict_close`（辞書）に統一するのが
   自然（`test_ols_fixtures.py`側は既にこの命名）。
-- **気づいた経緯**: 2026-08-23、`tests/test_ols_crosscheck.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_crosscheck.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 61. `NON_HAC_COV_TYPES`が独立定義（`R_COV_TYPES`から`hac`を除くフィルタにできる）、`R_COV_TYPES`自体も`generate_ols_fixtures.py`の`COV_TYPES`と独立重複
 
-- **対象**: [tests/test_ols_crosscheck.py:154](../../../tests/test_ols_crosscheck.py#L154)
+- **対象**: [tests/linear/test_ols_crosscheck.py:154](../../../tests/linear/test_ols_crosscheck.py#L154)
   （`NON_HAC_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]`、独立定義）・
   [benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py:102](../../../benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py#L102)
   （`R_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]`）・
@@ -409,15 +411,15 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   "hac"]`のようにフィルタで導出すれば解消できる。(2)は
   `generate_ols_crosscheck_fixtures.py`が`generate_ols_fixtures.py`から
   `COV_TYPES`を`import`する形にできるか検討の余地がある。
-- **気づいた経緯**: 2026-08-23、`tests/test_ols_crosscheck.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_crosscheck.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 62. `_check_result`（`test_ols_fixtures.py`）と`_assert_fit_stats_close`（`test_ols_crosscheck.py`）の命名不統一、`coef`/`se`の重複呼び出し
 
-- **対象**: [tests/test_ols_fixtures.py:79-102](../../../tests/test_ols_fixtures.py#L79-L102)
+- **対象**: [tests/linear/test_ols_fixtures.py:79-102](../../../tests/linear/test_ols_fixtures.py#L79-L102)
   （`_check_result`、`coef`/`se`/`t_stats`/`p_values`/`conf_int`/適合度統計量/
   `n_obs`を1回の呼び出しで全て検証）と
-  [tests/test_ols_crosscheck.py:112-151](../../../tests/test_ols_crosscheck.py#L112-L151)
+  [tests/linear/test_ols_crosscheck.py:112-151](../../../tests/linear/test_ols_crosscheck.py#L112-L151)
   （`_assert_fit_stats_close`、`coef`/`se`は含まず呼び出し元が個別に検証、
   代わりに`rtol`を引数で受け取りHACの緩和に対応）
 - **内容**: ユーザー指摘（2026-08-23）を受けて確認。両者は役割はほぼ同じ
@@ -432,7 +434,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `_check_result`と同じ責務範囲に揃えれば、各呼び出し元での`coef`/`se`
   2行の重複（`test_synthetic_matches_r`・`test_cluster_matches_r`等
   複数箇所）も同時に削減できる。
-- **気づいた経緯**: 2026-08-23、`tests/test_ols_crosscheck.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_crosscheck.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 63. Intercept→const正規化のタイミングがR側（生成時）とstatsmodels側（テスト実行時）で不一致。生成時統一で項目44も解消できる
@@ -458,7 +460,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `check_margeff`の`rename`引数が一度もデフォルト値以外で呼ばれていない、
   YAGNI疑惑）が副産物として解消する（`rename`引数自体が不要になるため）。
   単なる命名統一ではなく項目44を包含するより本質的な修正案と考える。
-- **気づいた経緯**: 2026-08-23、`tests/test_ols_crosscheck.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_crosscheck.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目44と関連）
 
 ### 64. `predict()`の戻り値辞書のキーが`"fitted"`固定で、新規データ（out-of-sample）予測に対しても統計学的に不正確な用語になっている
@@ -481,12 +483,12 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `docs/spec/ols-spec.md`に加え、`row["fitted"]`という参照が`test_ols.py`・
   `test_ols_fixtures.py`・`test_ols_crosscheck.py`他、WLS側にも多数波及する
   見込み）。実施の要否・タイミングはユーザー判断が必要。
-- **気づいた経緯**: 2026-08-23、`tests/test_ols_crosscheck.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_crosscheck.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、公開APIの破壊的変更を伴う）
 
 ### 65. `df = dataset.with_columns(pl.lit(1.0).alias("weight"))`が`test_wls.py`内に25回重複している
 
-- **対象**: [tests/test_wls.py](../../../tests/test_wls.py)全体（`grep -c`で25箇所確認）
+- **対象**: [tests/linear/test_wls.py](../../../tests/linear/test_wls.py)全体（`grep -c`で25箇所確認）
 - **内容**: `/explain-code`での`test_wls.py`解説中に発見。`conftest.py`の`dataset`
   フィクスチャは`weight`列を持たないため、WLSが必須とする`weight`引数
   （`docs/spec/wls-spec.md`「`weight`は`y`/`x`と同格の必須のトップレベル引数」）
@@ -495,14 +497,14 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   （`dataset`から派生する`module`スコープのフィクスチャ）と同じパターンで、
   `weight=1.0`固定の派生フィクスチャを新設すれば25箇所の重複を1箇所に
   集約できる。
-- **気づいた経緯**: 2026-08-23、`tests/test_wls.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_wls.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 66. `test_weight_one_matches_ols`/`test_residuals_are_original_scale_not_weighted`の許容誤差・マジックナンバーを、`test_ols.py`の`ATOL_COEF`等と同じくファイル冒頭の名前付き定数にする
 
-- **対象**: [tests/test_wls.py:72-78](../../../tests/test_wls.py#L72-L78)
+- **対象**: [tests/linear/test_wls.py:72-78](../../../tests/linear/test_wls.py#L72-L78)
   （`abs(...) < 1e-9`が6箇所）、
-  [tests/test_wls.py:294-309](../../../tests/test_wls.py#L294-L309)
+  [tests/linear/test_wls.py:294-309](../../../tests/linear/test_wls.py#L294-L309)
   （`test_residuals_are_original_scale_not_weighted`、`weight = [100.0] * n`・
   `abs(wls_r - ols_r) < 1e-6`）
 - **内容**: ユーザー指摘（2026-08-23）。`_tolerances.py`のスコープ外（本実装
@@ -514,7 +516,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **Claudeの所感**: `ATOL_INVARIANT = 1e-9`（OLS/WLS不変条件比較用）・
   `LARGE_WEIGHT = 100.0`（重み付き残差と元スケール残差の差を検出するための
   意図的に大きい重み）のような名前を`test_wls.py`冒頭に定義するのが妥当。
-- **気づいた経緯**: 2026-08-23、`tests/test_wls.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_wls.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 67. `WLSOptions`新設の要否は、Logit/Probitの`method`/`max_iter`/`tol`/`raise_on_non_convergence`共通化と合わせてLogit/Probit実装確認時に再検討する
@@ -533,7 +535,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **Claudeの所感**: `WLSOptions`単体は`OLSOptions`のフィールドをそのまま
   持つだけなので実装コストは低いが、Logit/Probit側の共通化方針が
   固まってから着手した方が、後から設計をやり直すリスクを避けられる。
-- **気づいた経緯**: 2026-08-23、`tests/test_wls.py`解説後のユーザー判断。
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_wls.py`解説後のユーザー判断。
 - **状態**: 方針決定済み（実施はLogit/Probit実装確認時、ユーザー判断待ち）
 
 ### 68. `test_ols.py`/`test_wls.py`等を「バリデーション」「API構造」「数値誤差」で分割し、系統ごとのディレクトリ構成も見直す方向で検討中
@@ -549,13 +551,40 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   ため、具体的な分割方針・ディレクトリ構成は別途詳細設計が必要。
   `refactoring-issue231-progress.md`のフェーズ5〜7（後継Issue #248）や
   `refactor`スキルでの対応が候補になる。
-- **気づいた経緯**: 2026-08-23、`tests/test_wls.py`解説後のユーザー判断。
-- **状態**: 方向性決定済み（具体的な設計・実施タイミングはユーザー判断待ち）
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_wls.py`解説後のユーザー判断。
+- **設計決定（2026-08-30、`refactor`スキル、AskUserQuestion）**:
+  - ディレクトリ粒度は**系統別**（`tests/linear/`・`tests/nonlinear/`・`tests/iv/`。
+    `benchmark/` と同じ grain。手法別 `tests/ols/` 等は細かすぎるとして却下）。
+    共有物（`conftest.py`・`_assertions.py`・`_helpers.py`・`_tolerances.py`）は
+    `tests/` 直下。`tests/test_tobit.py` は系統未確定のため当面ルート据え置き。
+  - 関心事分割の軸は**4分割**: `test_<手法>_validation.py`（`ValidationError`/
+    `ComputationError` パス）／`test_<手法>_api.py`（API構造・オプション反映・
+    `predict()`）／`test_<手法>_reference.py`（旧 `_fixtures.py`＝主リファレンス
+    数値照合。**項目55のリネームをここで実施**）／`test_<手法>_crosscheck.py`
+    （R、内容据え置き）。`test_<手法>.py` 内の主リファレンス数値照合部分は
+    `_reference.py` へ寄せる（項目52）。分割と同時にセクション見出しを統一する
+    （**項目76**）。
+  - 裸import（`from _helpers import ...`）はサブディレクトリからでも通るよう
+    `pyproject.toml` を `pythonpath = [".", "tests"]` にする。
+- **進捗**:
+  - **Phase 1 完了（2026-08-30）— ディレクトリ移動のみ（内容不変）**: 16ファイルを
+    `git mv` で `tests/{linear,nonlinear,iv}/` へ。`pyproject.toml`
+    `pythonpath = [".", "tests"]`。各 `*_fixtures.py`/`*_crosscheck.py` の
+    `FIXTURE_PATH` アンカーを `Path(__file__).resolve().parent` →
+    `.parents[1]`（＝`tests/`）に追随（`tests/fixtures/benchmarks/` は不動）。
+    リポジトリ全体の `tests/test_<手法>` パス参照を `tests/<系統>/test_<手法>`
+    へ一括置換（`refactoring-candidates-3.md` は並行タスク編集中のため除外、
+    stale 参照4件が残る）。`CLAUDE.md` §3・`testing-policy.md`・`test-new`
+    SKILL.md も更新。検証: `pytest tests` 957件パス（不変）、`ruff` パス。
+  - **Phase 2 未着手 — 関心事分割・`_reference.py` リネーム・見出し統一**: 系統ごと
+    （linear→nonlinear→iv）に1つずつ。各系統で `pytest tests/<系統>` を確認。
+- **状態**: Phase 1 実施済み。Phase 2（関心事分割＋項目55リネーム＋項目76見出し
+  統一）は未着手（着手タイミングはユーザー判断待ち）。
 
 ### 69. `test_hac_time_col_reorders_rows_before_computing_lags`の`ordered_df`/`shuffled_df`が手書きで重複、OLS/WLS間でも同一データが独立に書かれている
 
-- **対象**: [tests/test_ols.py:392-426](../../../tests/test_ols.py#L392-L426)・
-  [tests/test_wls.py:476-514](../../../tests/test_wls.py#L476-L514)
+- **対象**: [tests/linear/test_ols.py:392-426](../../../tests/linear/test_ols.py#L392-L426)・
+  [tests/linear/test_wls.py:476-514](../../../tests/linear/test_wls.py#L476-L514)
   （両方とも同一の`y=[2,4,5,4,5], x1=[1..5]`を時系列順・シャッフル順の
   2つのDataFrameとして独立に手書き）
 - **内容**: ユーザー指摘（2026-08-23）。`shuffled_df`は`ordered_df`を
@@ -568,17 +597,17 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   排除しつつ「単なる並べ替えである」ことがコード上からも明確になる。
   `tests/_helpers.py`に「時系列順データと、その決定論的なシャッフル版を
   返す」ヘルパーを追加すれば、OLS/WLS両方から共通で使える。
-- **気づいた経緯**: 2026-08-23、`tests/test_wls.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_wls.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 70. `test_result_is_wls_results_type`に対応する`isinstance(res, OlsResults)`テストがOLS側に無い、`test_nobs_and_dep_var_name`（WLS）と`test_n_obs_and_dep_var_name`（OLS）の命名揺れ
 
-- **対象**: [tests/test_wls.py:312-316](../../../tests/test_wls.py#L312-L316)
+- **対象**: [tests/linear/test_wls.py:312-316](../../../tests/linear/test_wls.py#L312-L316)
   （`test_result_is_wls_results_type`）に対応するテストが`test_ols.py`に
   無い（`isinstance(res, OlsResults)`が0件）。命名揺れは
-  [tests/test_wls.py:362](../../../tests/test_wls.py#L362)
+  [tests/linear/test_wls.py:362](../../../tests/linear/test_wls.py#L362)
   （`test_nobs_and_dep_var_name`）と
-  [tests/test_ols.py:472](../../../tests/test_ols.py#L472)
+  [tests/linear/test_ols.py:472](../../../tests/linear/test_ols.py#L472)
   （`test_n_obs_and_dep_var_name`、アンダースコアの位置が異なる）
 - **内容**: ユーザー指摘（2026-08-23）を受けてOLS/WLSのテスト関数名を
   突き合わせて確認。`isinstance`チェックはWLS側にしかなく、OLS側の
@@ -586,17 +615,17 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **Claudeの所感**: どちらも小さい抜け・揺れだが、項目68（ファイル分割）と
   合わせて手法間のテスト命名規則を統一するタイミングで一括対応するのが
   効率的だと考える。
-- **気づいた経緯**: 2026-08-23、`tests/test_wls.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_wls.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 71. `test_include_intercept_false_matches_statsmodels`の配置ファイルがOLS/WLSで非対称（構造ファイル／数値比較ファイル）
 
-- **対象**: [tests/test_ols.py:327](../../../tests/test_ols.py#L327)
+- **対象**: [tests/linear/test_ols.py:327](../../../tests/linear/test_ols.py#L327)
   （`test_include_intercept_false_matches_statsmodels_robust_cov_types`、
   構造・APIファイル側）と
-  [tests/test_wls_fixtures.py:272](../../../tests/test_wls_fixtures.py#L272)
+  [tests/linear/test_wls_fixtures.py:272](../../../tests/linear/test_wls_fixtures.py#L272)
   （`test_include_intercept_false_matches_statsmodels`、数値比較ファイル側）
-- **内容**: `tests/test_wls_fixtures.py`解説時に発見。同じ観点
+- **内容**: `tests/linear/test_wls_fixtures.py`解説時に発見。同じ観点
   （`include_intercept=False`が全cov_typeでstatsmodelsと一致すること）の
   テストが、OLSでは`test_ols.py`、WLSでは`test_wls_fixtures.py`という
   異なる役割のファイルに置かれている。WLS版のdocstringに「テスト網羅性
@@ -610,16 +639,16 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   一貫性を欠く。項目57（役割分担docstringの矛盾）・項目68
   （ファイル分割の方向性）と合わせて、ファイル分割設計時に配置基準を
   明文化して解消するのが良いと考える。
-- **気づいた経緯**: 2026-08-23、`tests/test_wls_fixtures.py`解説後の
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_wls_fixtures.py`解説後の
   ユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目57・68と合わせて検討）
 
 ### 72. `_check_result`という同名ヘルパーが`test_ols/wls/logit/probit/iv_fixtures.py`の5ファイルに独立定義され、うち前半（`coef`/`se`/主統計量/`p_values`/`conf_int`ループ）は完全に重複
 
-- **対象**: [tests/test_ols_fixtures.py:69-95](../../../tests/test_ols_fixtures.py#L69-L95)・
-  [tests/test_wls_fixtures.py:72-98](../../../tests/test_wls_fixtures.py#L72-L98)・
-  `tests/test_logit_fixtures.py:93-`・`tests/test_probit_fixtures.py:94-`・
-  `tests/test_iv_fixtures.py:100-`（いずれも`_check_result(res, ref, label)`）
+- **対象**: [tests/linear/test_ols_fixtures.py:69-95](../../../tests/linear/test_ols_fixtures.py#L69-L95)・
+  [tests/linear/test_wls_fixtures.py:72-98](../../../tests/linear/test_wls_fixtures.py#L72-L98)・
+  `tests/nonlinear/test_logit_fixtures.py:93-`・`tests/nonlinear/test_probit_fixtures.py:94-`・
+  `tests/iv/test_iv_fixtures.py:100-`（いずれも`_check_result(res, ref, label)`）
 - **内容**: ユーザー指摘（2026-08-23、「共通使用関数定義の一貫性」）を
   受けて5ファイルを比較。関数名`_check_result`とシグネチャは5ファイルで
   完全に一致しており命名自体は既に統一されている。一方で本体は、
@@ -635,7 +664,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   必要がある。項目62（`test_ols_fixtures.py`内の`_check_result`と
   `test_ols_crosscheck.py`の`_assert_fit_stats_close`の命名不統一）とは
   別軸の問題（こちらは手法間・同名関数の中身の重複）として記録する。
-- **気づいた経緯**: 2026-08-23、`tests/test_wls_fixtures.py`解説後の
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_wls_fixtures.py`解説後の
   ユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
@@ -646,7 +675,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   [benchmark/common/datasets_io.py:26-29](../../../benchmark/common/datasets_io.py#L26-L29)
   （`BENCHMARKS_DIR = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "benchmarks"`、
   `DATA_DIR = BENCHMARKS_DIR / "data"`）
-- **内容**: `tests/test_wls_crosscheck.py`解説時に発見。`benchmark/`の
+- **内容**: `tests/linear/test_wls_crosscheck.py`解説時に発見。`benchmark/`の
   Initiative Aパッケージ化で`benchmark.common`が`DATA_DIR`を公開APIとして
   export するようになったが、`tests/`側は従来通り`tests/_helpers.py`独自の
   `DATA_DIR`を使い続けている。両者は`tests/fixtures/benchmarks/data/`という
@@ -661,7 +690,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `tests/`から`benchmark`への依存は既に発生しているため、方向性自体は
   既存パターンと矛盾しない）。Initiative Aの`benchmark/`再構成が進行中の
   ため、その完了後にまとめて対応するのが良いと考える。
-- **気づいた経緯**: 2026-08-23、`tests/test_wls_crosscheck.py`解説後の
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_wls_crosscheck.py`解説後の
   ユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、`benchmark/`再構成完了後の
   対応を推奨）
@@ -688,7 +717,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   論点のため、深掘りする場合はそちらのスコープで行うのが良いと考える。
   現時点では「単純な小標本補正の慣習差だけでは説明できないことを確認済み」
   という事実を記録するに留める。
-- **気づいた経緯**: 2026-08-23、`tests/test_wls_crosscheck.py`解説後の
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_wls_crosscheck.py`解説後の
   ユーザー指摘。
 - **状態**: 未対応（優先度低、深掘りする場合はIssue #267のスコープで検討）
 
@@ -697,8 +726,8 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **対象**: [benchmark/linear/fixtures/generate_wls_fixtures.py:258-270](../../../benchmark/linear/fixtures/generate_wls_fixtures.py#L258-L270)
   （定義元）、
   [benchmark/linear/fixtures/generate_wls_crosscheck_fixtures.py:52](../../../benchmark/linear/fixtures/generate_wls_crosscheck_fixtures.py#L52)・
-  [tests/test_wls_fixtures.py:41](../../../tests/test_wls_fixtures.py#L41)・
-  [tests/test_wls_crosscheck.py:49](../../../tests/test_wls_crosscheck.py#L49)
+  [tests/linear/test_wls_fixtures.py:41](../../../tests/linear/test_wls_fixtures.py#L41)・
+  [tests/linear/test_wls_crosscheck.py:49](../../../tests/linear/test_wls_crosscheck.py#L49)
   （import元）
 - **内容**: ユーザー指摘（2026-08-23、「両ファイルは並列だと思うので」）。
   `generate_wls_fixtures.py`（主リファレンスstatsmodels用）と
@@ -716,20 +745,20 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `benchmark/common/`への汎用化はYAGNIと判断し見送る）。`benchmark/`は
   Initiative A再構成が進行中のため、新規ファイル追加はその完了後に行うのが
   安全。
-- **気づいた経緯**: 2026-08-23、`tests/test_wls_crosscheck.py`解説後の
+- **気づいた経緯**: 2026-08-23、`tests/linear/test_wls_crosscheck.py`解説後の
   ユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、`benchmark/`再構成完了後の
   対応を推奨）
 
 ### 76. テストファイル内のセクション見出し・順序がOLS/WLS/Logitで統一されていない
 
-- **対象**: [tests/test_ols.py:28,73,125,151,299,448,547](../../../tests/test_ols.py)
+- **対象**: [tests/linear/test_ols.py:28,73,125,151,299,448,547](../../../tests/linear/test_ols.py)
   （`statsmodelsラッパー`/`係数・標準誤差の一致`/`適合度統計量の一致`/
   `エラーハンドリング`/`オプションの反映確認`/`API構造`/`predict()`の順）、
-  [tests/test_wls.py:25,98,284,369](../../../tests/test_wls.py)
+  [tests/linear/test_wls.py:25,98,284,369](../../../tests/linear/test_wls.py)
   （`OLSとの不変条件回帰テスト`/`エラーハンドリング（重み固有）`/`API構造`/
   `オプションの反映確認`の順）、
-  [tests/test_logit.py:26,129,167,221](../../../tests/test_logit.py)
+  [tests/nonlinear/test_logit.py:26,129,167,221](../../../tests/nonlinear/test_logit.py)
   （`成功パス・API構造`/`predict() / pred_table()`/`marginal_effects()`/
   `エラーハンドリング`の順、以降221〜556行目まで見出し無しで`cov_type`系まで
   全て「エラーハンドリング」に含まれる）
@@ -751,15 +780,16 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   自然に解消される可能性が高い。見出し単体の統一を先に行うより、
   項目68のファイル分割設計に統合して一度に解決するのが手戻りが少ないと
   考える。
-- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち、項目68と統合して検討）
+- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
+- **状態**: 未対応。項目68 の設計決定（2026-08-30）で「関心事分割（Phase 2）と
+  同時にセクション見出しを統一する」と確定済み。
 
 ### 77. `test_method_option_converges_to_same_params`（`test_logit.py`）が`test_method_matches_statsmodels`（`test_logit_fixtures.py`）と観点が重複し、`rel=1e-4`が直書き
 
-- **対象**: [tests/test_logit.py:40-60](../../../tests/test_logit.py#L40-L60)
+- **対象**: [tests/nonlinear/test_logit.py:40-60](../../../tests/nonlinear/test_logit.py#L40-L60)
   （`test_method_option_converges_to_same_params`、`method`3種を自身の
   `newton`結果と`rel=1e-4`直書きでparamsのみ比較）と
-  [tests/test_logit_fixtures.py:197-216](../../../tests/test_logit_fixtures.py#L197-L216)
+  [tests/nonlinear/test_logit_fixtures.py:197-216](../../../tests/nonlinear/test_logit_fixtures.py#L197-L216)
   （`test_method_matches_statsmodels`、`method`2種を主リファレンス
   statsmodelsと`RTOL_METHOD`（`_tolerances.py`の`logit_fixtures.rtol_method
   = 1e-3`）でparams・std_errors・convergedまで比較。docstringに「
@@ -782,7 +812,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `assert res.converged`のみに絞る、または`rel`を`_tolerances.py`の値
   （用途は違うが同じ`logit_fixtures.rtol_method`を流用するか、`test_logit.py`
   専用のキーを新設）に統一するのが良いと考える。
-- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 78. `LogitResult`に実際に収束した`method`が含まれておらず、検証する手段が無い
@@ -804,12 +834,12 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   Python API境界テストが書けるようになる、という2つの利点がある。
   `WLSOptions`新設検討（項目67）と合わせて、Logit/Probit実装確認時に
   設計変更として検討するのが良いと考える。
-- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目67と合わせて検討）
 
 ### 79. 項目51（Issue #231フェーズ4コメント残置）が`test_logit.py`にも該当し、件数がOLSより大幅に多い（11箇所）
 
-- **対象**: [tests/test_logit.py](../../../tests/test_logit.py)全体
+- **対象**: [tests/nonlinear/test_logit.py](../../../tests/nonlinear/test_logit.py)全体
   （`grep -c`で11箇所、`test_ols.py`の3箇所〔項目51〕より多い）
 - **内容**: ユーザー指摘（2026-08-23、「Issue #231のコミット番号と指摘が
   コメントに付記されている。削除してほしい」）を受けて確認。項目51と
@@ -822,14 +852,14 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   なら`test_logit.py`用に1項目として独立させて対応するのが良いと考える
   （項目51とまとめて一括対応も可）。`test_probit.py`等、未解説の他ファイルにも
   同じパターンが残っている可能性が高い。
-- **追記（2026-08-24、`tests/test_probit.py`解説時）**: 実際に確認した
+- **追記（2026-08-24、`tests/nonlinear/test_probit.py`解説時）**: 実際に確認した
   ところ`test_probit.py`にも同じ**11箇所**（`test_logit.py`と全く同数）が
   存在した。`test_probit.py`は`test_logit.py`のコードをほぼ丸ごと転用して
   作られている（項目95参照）ため、コメント残置も1対1で複製されている。
   対応する場合は`test_logit.py`・`test_probit.py`をまとめて一括対応するのが
   効率的。
-- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
-  2026-08-24、`tests/test_probit.py`解説時に適用範囲を確認・追記。
+- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
+  2026-08-24、`tests/nonlinear/test_probit.py`解説時に適用範囲を確認・追記。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目51・95と統合可）
 
 ### 80. `predict()`の意味がOLS（予測値）とLogit/Probit（確率）で異なり、利用者が混同するリスクがある
@@ -851,17 +881,17 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   誘導が無いと、OLSからの類推で誤解するユーザーが出うる**という点は
   ドキュメント改善の余地として記録する価値があると考える。テスト自体の
   変更は不要。
-- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、対応するならドキュメント側）
 
 ### 81. `test_const_collision_with_include_intercept_raises`・`test_cluster_cov_type_requires_at_least_two_groups`のテストデータがOLS/WLS/Logitで似た内容を個別に手書きしている
 
-- **対象**: [tests/test_ols.py:269-276](../../../tests/test_ols.py#L269-L276)・
-  [tests/test_wls.py:161-169](../../../tests/test_wls.py#L161-L169)・
-  [tests/test_logit.py:234-239](../../../tests/test_logit.py#L234-L239)
+- **対象**: [tests/linear/test_ols.py:269-276](../../../tests/linear/test_ols.py#L269-L276)・
+  [tests/linear/test_wls.py:161-169](../../../tests/linear/test_wls.py#L161-L169)・
+  [tests/nonlinear/test_logit.py:234-239](../../../tests/nonlinear/test_logit.py#L234-L239)
   （`test_const_collision_with_include_intercept_raises`、`y`の値域
   〔OLS/WLS:連続値、Logit:0/1〕以外はほぼ同じ`const`列衝突データ）、
-  [tests/test_logit.py:531-546](../../../tests/test_logit.py#L531-L546)
+  [tests/nonlinear/test_logit.py:531-546](../../../tests/nonlinear/test_logit.py#L531-L546)
   （`test_cluster_cov_type_requires_at_least_two_groups`）
 - **内容**: ユーザー指摘（2026-08-23、「OLS、WLSとdfを共有できそう」）。
   `y`の値域（連続値か0/1か）が手法により異なるため完全に同一のDataFrameは
@@ -873,12 +903,12 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   （`ordered_df`/`shuffled_df`の生成ヘルパー化）と合わせて、`_helpers.py`
   への「手法共通の小さいテストデータビルダー」追加をまとめて検討する
   タイミングで対応するのが効率的と考える。
-- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
 - **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
 
 ### 82. `test_singular_hessian_raises_computation_error`の`x2`列が`2 * x1`の値を直書きしている
 
-- **対象**: [tests/test_logit.py:350-356](../../../tests/test_logit.py#L350-L356)
+- **対象**: [tests/nonlinear/test_logit.py:350-356](../../../tests/nonlinear/test_logit.py#L350-L356)
   （`"x2": [2.0, 4.0, 6.0, 8.0, 10.0], # x2 = 2 * x1`とコメントで関係を
   説明しつつ値自体は手計算で直書き）
 - **内容**: ユーザー指摘（2026-08-23、「配列で2を掛けたほうがミスが
@@ -889,12 +919,12 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **Claudeの所感**: 賛成。`x1 = [1.0, 2.0, 3.0, 4.0, 5.0]`から
   `x2 = [v * 2 for v in x1]`のように生成すれば関係が自明になり
   書き間違いリスクも無くなる。小さい修正で実施しやすい部類だと考える。
-- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 83. `test_cov_type_label`の`cov_type`候補リストが直書き（項目61パターンの再登場）
 
-- **対象**: [tests/test_logit.py:464](../../../tests/test_logit.py#L464)
+- **対象**: [tests/nonlinear/test_logit.py:464](../../../tests/nonlinear/test_logit.py#L464)
   （`for cov_type in ["classical", "opg", "hc0", "hc1"]:`という直書きリスト）
 - **内容**: ユーザー指摘（2026-08-23、「cov_typeが直書き」）を受けて確認。
   なお同じ指摘に含まれていた「OPGが候補にない」という点は実際には
@@ -909,12 +939,12 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   項目61と統合して、手法ごとに「有効なcov_type全体」を1箇所で定義し
   各ファイルがそこから必要な部分集合を選ぶ設計に整理するのが良いと
   考える。
-- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目61と統合して検討）
 
 ### 84. `test_nonrobust_is_alias_for_classical`と`test_cov_type_is_case_insensitive`の検証内容が重複、全`cov_type`でstd_errors一致を確認する形へ統合する余地（OLSにも同様の余地）
 
-- **対象**: [tests/test_logit.py:496-528](../../../tests/test_logit.py#L496-L528)
+- **対象**: [tests/nonlinear/test_logit.py:496-528](../../../tests/nonlinear/test_logit.py#L496-L528)
   （`test_cov_type_is_case_insensitive`は`res.cov_type`のラベルのみ確認、
   `test_nonrobust_is_alias_for_classical`は`nonrobust`/`classical`間の
   `std_errors`一致のみ確認）
@@ -933,7 +963,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   方が可読性を保てると考える。OLS側にも同種の余地があるとのことなので、
   対応する場合は手法をまたいだ共通パターンとして一括で設計するのが
   良い。
-- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 85. `check_margeff`（`tests/_assertions.py`）は共通化済みで、項目72（`_check_result`の5ファイル独立定義）解決の参考実装になる
@@ -942,7 +972,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   （`check_margeff`、`test_logit_fixtures.py`・`test_probit_fixtures.py`
   双方から共通利用）と対比した項目72（`_check_result`が5ファイルに
   独立定義され前半が重複）
-- **内容**: `tests/test_logit_fixtures.py`解説時にユーザー指摘（「項目72の
+- **内容**: `tests/nonlinear/test_logit_fixtures.py`解説時にユーザー指摘（「項目72の
   解決方針の参考実装」として記録するよう依頼）。限界効果の比較ロジック
   （`MARGEFF_AT`の3値をループし`dydx`/`std_err`/`z`/`p_value`/`conf_low`/
   `conf_high`を比較）は、`_check_result`のような手法ごとの重複が起きて
@@ -953,13 +983,13 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   共通関数として配置し、手法固有の`rename`関数等はオプション引数で
   差し替え可能にする）で切り出せば良い、という設計のたたき台になる。
   項目72の対応時にこのファイルを参照実装として使うことを推奨する。
-- **気づいた経緯**: 2026-08-23、`tests/test_logit_fixtures.py`解説後の
+- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit_fixtures.py`解説後の
   ユーザー指摘。
 - **状態**: 未対応（項目72対応時の参考実装として記録）
 
 ### 86. Logitの`cov_type="hc1"`が独立実装（R `sandwich`）1つのみで検証されており、statsmodels側の三角測量が効かない
 
-- **対象**: [tests/test_logit_fixtures.py:15-19](../../../tests/test_logit_fixtures.py#L15-L19)
+- **対象**: [tests/nonlinear/test_logit_fixtures.py:15-19](../../../tests/nonlinear/test_logit_fixtures.py#L15-L19)
   （`hc1`はこのファイルに含めない旨のNote）、
   [benchmark/nonlinear/references/statsmodels_ref.py:33-45](../../../benchmark/nonlinear/references/statsmodels_ref.py#L33-L45)
   （statsmodelsのdiscrete modelが`hc1`を実質未実装〔`HC0`にフォールバック〕
@@ -1001,14 +1031,14 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   （`score_obs`というstatsmodels自身が検証済みの汎用プリミティブを使う）
   とは性質が異なる。結論として、hc1は既に独立パッケージ（R`sandwich`）が
   正しく計算する最良の状態にあり、statsmodels側での補強は不要と判断した。
-- **気づいた経緯**: 2026-08-23、`tests/test_logit_fixtures.py`解説後の
+- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit_fixtures.py`解説後の
   ユーザー指摘。2026-08-24、ユーザー提案の実機検証を追記。
 - **状態**: 対応不要と判断（statsmodels側に正しい代替経路が無く、
   手計算は独立性を損なうため。Issue #267との関連付けのみ残す）
 
 ### 87. `test_include_intercept_false_matches_statsmodels`がOPG標準誤差をテストファイル内で手計算しており、`benchmark/nonlinear/references/statsmodels_ref.py`の同じ計算とロジックが重複
 
-- **対象**: [tests/test_logit_fixtures.py:244-248](../../../tests/test_logit_fixtures.py#L244-L248)
+- **対象**: [tests/nonlinear/test_logit_fixtures.py:244-248](../../../tests/nonlinear/test_logit_fixtures.py#L244-L248)
   （`scores = base.model.score_obs(base.params); opg_cov = np.linalg.inv(
   scores.T @ scores); sm_se = np.sqrt(np.diag(opg_cov))`）と、
   [benchmark/nonlinear/references/statsmodels_ref.py:127-135](../../../benchmark/nonlinear/references/statsmodels_ref.py#L127-L135)
@@ -1016,7 +1046,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   計算式）
 - **内容**: ユーザー指摘（2026-08-23、「OPGの標準誤差はstatsmodelsの
   内部スコア関数`model.score_obs(params)`を使って本ファイル内で手計算
-  しているが、これは`tests/test_logit_fixtures.py`ではなく`benchmark`で
+  しているが、これは`tests/nonlinear/test_logit_fixtures.py`ではなく`benchmark`で
   行うべきでは」）を受けて`statsmodels_ref.py`を確認したところ、**全く
   同じ計算式が既に`benchmark/`側の参照実装層に存在する**ことが判明した。
   `testing-policy.md`「ベンチマーク値のフィクスチャ化」が定める
@@ -1037,13 +1067,13 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `_check_result`ベースの薄い比較に統一するのが筋が良いと考える。
   WLS側（項目71と同種の`test_wls_fixtures.py`のケース）も同じ根本原因を
   共有しているため、対応する場合は両手法まとめて設計するのが良い。
-- **気づいた経緯**: 2026-08-23、`tests/test_logit_fixtures.py`解説後の
+- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit_fixtures.py`解説後の
   ユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目71と統合して検討）
 
 ### 88. `_check_result`内の`_rename`（Intercept→const変換）使用が、OLSで指摘した項目63（正規化タイミングの不一致）と同じ論点
 
-- **対象**: [tests/test_logit_fixtures.py:100](../../../tests/test_logit_fixtures.py#L100)
+- **対象**: [tests/nonlinear/test_logit_fixtures.py:100](../../../tests/nonlinear/test_logit_fixtures.py#L100)
   （`_check_result`内、`conf_int`のループで`_rename(name)`を呼ぶ）
 - **内容**: ユーザー指摘（2026-08-23）を受けて確認。項目63
   （Intercept→const正規化のタイミングがR側〔生成時〕とstatsmodels側
@@ -1054,14 +1084,14 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   ことの確認。項目63の対応時（フィクスチャ生成時の正規化統一）に
   合わせてこのファイルの`_rename`呼び出しも不要になる見込みのため、
   独立した項目としては追加せず項目63への参照のみ記録する。
-- **気づいた経緯**: 2026-08-23、`tests/test_logit_fixtures.py`解説後の
+- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit_fixtures.py`解説後の
   ユーザー指摘。
-- **状態**: 未対応（項目63と統合、`tests/test_logit_fixtures.py`にも
+- **状態**: 未対応（項目63と統合、`tests/nonlinear/test_logit_fixtures.py`にも
   適用範囲が及ぶことを追記）
 
 ### 89. `_check_result`の`if ref["margeff"] is not None:`が、opg以外で`margeff`が誤って`None`になった場合も気づかずすり抜ける
 
-- **対象**: [tests/test_logit_fixtures.py:138-139](../../../tests/test_logit_fixtures.py#L138-L139)
+- **対象**: [tests/nonlinear/test_logit_fixtures.py:138-139](../../../tests/nonlinear/test_logit_fixtures.py#L138-L139)
   （`if ref["margeff"] is not None: _check_margeff(res, ref["margeff"],
   label)`、`cov_type`を条件に使わず`None`かどうかだけで判定）
 - **内容**: ユーザー指摘（2026-08-23、「ちょっと怖い。もし、OPG以外でも
@@ -1076,20 +1106,20 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   None; _check_margeff(...)`のように、期待値を明示的にホワイトリスト化
   すれば、意図しない`None`混入を検出できるようになる。実施しやすい
   部類の改善だと考える。
-- **追記（2026-08-24、`tests/test_logit_crosscheck.py`解説時）**: 同種の
+- **追記（2026-08-24、`tests/nonlinear/test_logit_crosscheck.py`解説時）**: 同種の
   消極的チェックが`test_logit_crosscheck.py`の`_check_result`
   （`if "margeff" in ref: _check_margeff(...)`、`None`判定ではなく
   キー存在判定だが同じ「無ければ黙ってスキップする」構造）にも存在する
   ことをユーザー指摘で確認。対応する場合は両ファイルまとめて
   ホワイトリスト化するのが良い。
-- **気づいた経緯**: 2026-08-23、`tests/test_logit_fixtures.py`解説後の
-  ユーザー指摘。2026-08-24、`tests/test_logit_crosscheck.py`解説時に
+- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit_fixtures.py`解説後の
+  ユーザー指摘。2026-08-24、`tests/nonlinear/test_logit_crosscheck.py`解説時に
   適用範囲を追記。
 - **状態**: 未対応（着手要否はユーザー判断待ち、両ファイルまとめて対応）
 
 ### 90. クラスターロバストSEの小標本（少数クラスタ）信頼性についての設計上の懸念が、既存の「G<q特異性」議論とは別軸で未整理
 
-- **対象**: [tests/test_logit_fixtures.py:180-194](../../../tests/test_logit_fixtures.py#L180-L194)
+- **対象**: [tests/nonlinear/test_logit_fixtures.py:180-194](../../../tests/nonlinear/test_logit_fixtures.py#L180-L194)
   （`test_cluster_g2_matches_statsmodels`、LogitはF検定を持たないため
   G=2×q=3でも特異にならず成功パスになる旨のdocstring）、
   `docs/planning/specs/nonlinear-implementation-notes.md`「Wald検定と
@@ -1118,19 +1148,19 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   仕様書）に「クラスタ数が少ない場合はクラスターロバストSEの信頼性が
   低下する、wild bootstrap等の代替手法を検討する」という趣旨の注記を
   追加する、ドキュメント上の対応が適切だと考える。
-- **気づいた経緯**: 2026-08-23、`tests/test_logit_fixtures.py`解説後の
+- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit_fixtures.py`解説後の
   ユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、対応するならドキュメント側
   ・手法横断で検討）
 
 ### 91. `test_logit_crosscheck.py`が`_assertions.py`を使わず`_assert_close`/`_assert_dict_close`/`_check_margeff`を独自に再実装している
 
-- **対象**: [tests/test_logit_crosscheck.py:81-118](../../../tests/test_logit_crosscheck.py#L81-L118)
+- **対象**: [tests/nonlinear/test_logit_crosscheck.py:81-118](../../../tests/nonlinear/test_logit_crosscheck.py#L81-L118)
   （`_assert_close`/`_assert_dict_close`/`_check_margeff`のローカル定義。
   `test_wls_crosscheck.py`・`test_ols_crosscheck.py`にある
   `from _assertions import assert_close, assert_dict_close, check_margeff`
   という行がこのファイルには存在しない）
-- **内容**: `tests/test_logit_crosscheck.py`解説時に発見。`_assert_close`の
+- **内容**: `tests/nonlinear/test_logit_crosscheck.py`解説時に発見。`_assert_close`の
   計算式（`tol = max(rtol*|ref|, atol)`）自体は`_assertions.py`と完全に
   同一だが、コードとしては別に定義されており、`_assertions.py`を使う
   OLS/WLSのクロスチェックファイルとは異なる方針になっている。
@@ -1138,46 +1168,46 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   無いが、一貫性を欠く。項目72・85（`_check_result`/`check_margeff`の
   共通化方針）に統合する際、このファイルも`_assertions.py`を使う形に
   揃えるのが良い。
-- **追記（2026-08-24、`tests/test_probit_crosscheck.py`解説時）**: この
+- **追記（2026-08-24、`tests/nonlinear/test_probit_crosscheck.py`解説時）**: この
   ローカル`_assert_dict_close`の再実装自体にも、Logit/Probit間で非対称が
-  ある。[tests/test_probit_crosscheck.py:109-119](../../../tests/test_probit_crosscheck.py#L109-L119)
+  ある。[tests/nonlinear/test_probit_crosscheck.py:109-119](../../../tests/nonlinear/test_probit_crosscheck.py#L109-L119)
   は`rtol`をキーワード引数として受け取れる（`test_mroz_cluster_matches_
   r_glm`で`RTOL_MROZ_CLUSTER`を渡すために必要）のに対し、
-  [tests/test_logit_crosscheck.py:95-102](../../../tests/test_logit_crosscheck.py#L95-L102)
+  [tests/nonlinear/test_logit_crosscheck.py:95-102](../../../tests/nonlinear/test_logit_crosscheck.py#L95-L102)
   の同名関数は`atol`のみで`rtol`を受け取れない。同じ目的のローカル
   再実装が2つあるだけでなく、その2つの間でも機能に差がある、という
   二重の不統一。`_assertions.py`へ統合する際はProbit側の`rtol`対応版を
   基準にするのが良い。
-- **気づいた経緯**: 2026-08-24、`tests/test_logit_crosscheck.py`解説時に
-  発見。2026-08-24、`tests/test_probit_crosscheck.py`解説時に
+- **気づいた経緯**: 2026-08-24、`tests/nonlinear/test_logit_crosscheck.py`解説時に
+  発見。2026-08-24、`tests/nonlinear/test_probit_crosscheck.py`解説時に
   `_assert_dict_close`の非対称を追記。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目72・85と統合して検討）
 
 ### 92. `_check_result`の適合度統計量の検証方法が`test_logit_fixtures.py`と`test_logit_crosscheck.py`で異なる（`getattr`ループ vs 個別列挙）
 
-- **対象**: [tests/test_logit_crosscheck.py:144-153](../../../tests/test_logit_crosscheck.py#L144-L153)
+- **対象**: [tests/nonlinear/test_logit_crosscheck.py:144-153](../../../tests/nonlinear/test_logit_crosscheck.py#L144-L153)
   （`for field in ("log_likelihood", ..., "pseudo_r_squared"):
   _assert_close(getattr(res, field), ref[field], ...)`）と
-  [tests/test_logit_fixtures.py:105-121](../../../tests/test_logit_fixtures.py#L105-L121)
+  [tests/nonlinear/test_logit_fixtures.py:105-121](../../../tests/nonlinear/test_logit_fixtures.py#L105-L121)
   （`_assert_close(res.log_likelihood, ref["log_likelihood"], ...)`を
   1つずつ個別に列挙）
-- **内容**: `tests/test_logit_crosscheck.py`解説時に発見。同じ目的
+- **内容**: `tests/nonlinear/test_logit_crosscheck.py`解説時に発見。同じ目的
   （適合度統計量7個の検証）のコードが2つの異なるスタイルで書かれている。
   `getattr`ループの方が短いが、フィールド名の文字列と`ref`辞書のキー名が
   常に一致するという前提に依存し、IDEの補完・型チェックが効きにくい。
 - **Claudeの所感**: 実害は無い小さな不統一。項目72・85の共通化時に
   どちらか一方のスタイルに統一するのが良いと考える。
-- **気づいた経緯**: 2026-08-24、`tests/test_logit_crosscheck.py`解説時に
+- **気づいた経緯**: 2026-08-24、`tests/nonlinear/test_logit_crosscheck.py`解説時に
   発見。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目72・85と統合して検討）
 
 ### 93. `margeff`の存在確認の書き方が`test_logit_fixtures.py`（`is not None`）と`test_logit_crosscheck.py`（`"margeff" in ref`）で異なる
 
-- **対象**: [tests/test_logit_crosscheck.py:154-155](../../../tests/test_logit_crosscheck.py#L154-L155)
+- **対象**: [tests/nonlinear/test_logit_crosscheck.py:154-155](../../../tests/nonlinear/test_logit_crosscheck.py#L154-L155)
   （`if "margeff" in ref:`）と
-  [tests/test_logit_fixtures.py:138-139](../../../tests/test_logit_fixtures.py#L138-L139)
+  [tests/nonlinear/test_logit_fixtures.py:138-139](../../../tests/nonlinear/test_logit_fixtures.py#L138-L139)
   （`if ref["margeff"] is not None:`）
-- **内容**: `tests/test_logit_crosscheck.py`解説時に発見。同じ「margeffが
+- **内容**: `tests/nonlinear/test_logit_crosscheck.py`解説時に発見。同じ「margeffが
   存在する場合のみ検証する」という意図のコードが、キーの存在確認
   （`in`）と値のNone判定（`is not None`）という異なる方法で書かれている。
   いずれも項目89（消極的チェックがバグを見逃すリスク）に該当するため、
@@ -1185,18 +1215,18 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **Claudeの所感**: 項目89の対応時（`cov_type`による明示的なホワイト
   リスト化）に合わせて書き方も統一されるはずなので、独立した対応は
   不要。記録のみ。
-- **気づいた経緯**: 2026-08-24、`tests/test_logit_crosscheck.py`解説時に
+- **気づいた経緯**: 2026-08-24、`tests/nonlinear/test_logit_crosscheck.py`解説時に
   発見。
 - **状態**: 未対応（項目89に統合済み、独立対応は不要）
 
 ### 94. フィクスチャJSONのトップレベル階層規則が`test_logit_fixtures.py`（`fixtures["mroz"]`）と`test_logit_crosscheck.py`（`fixtures["wooldridge"]["mroz"]`）で不統一
 
-- **対象**: [tests/test_logit_fixtures.py:278-284](../../../tests/test_logit_fixtures.py#L278-L284)
+- **対象**: [tests/nonlinear/test_logit_fixtures.py:278-284](../../../tests/nonlinear/test_logit_fixtures.py#L278-L284)
   （`fixtures["mroz"][cov_type]`）と
-  [tests/test_logit_crosscheck.py:213-220](../../../tests/test_logit_crosscheck.py#L213-L220)
+  [tests/nonlinear/test_logit_crosscheck.py:213-220](../../../tests/nonlinear/test_logit_crosscheck.py#L213-L220)
   （`fixtures["wooldridge"]["mroz"][cov_type]["r"]`、`wooldridge`という
   階層が1段余分にある）
-- **内容**: `tests/test_logit_crosscheck.py`解説時に発見。同じ実データ
+- **内容**: `tests/nonlinear/test_logit_crosscheck.py`解説時に発見。同じ実データ
   （mroz）を指すフィクスチャJSONのキー構造が、statsmodels側とRクロス
   チェック側で階層の深さが異なる。統計的な意味への影響は無いが、両JSONを
   横断的に読む際に紛らわしい。
@@ -1205,14 +1235,14 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   再生成を伴うため、単独では対応せず、他の大きめのフィクスチャ構造
   変更（項目87のinclude_intercept対応等）と合わせるタイミングで検討する
   のが良い。
-- **気づいた経緯**: 2026-08-24、`tests/test_logit_crosscheck.py`解説時に
+- **気づいた経緯**: 2026-08-24、`tests/nonlinear/test_logit_crosscheck.py`解説時に
   発見。
 - **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
 
-### 95. `tests/test_logit.py`と`tests/test_probit.py`のコードが完全に同一（docstringの言い回し以外の差分ゼロ）——共通関数への切り出しを検討する余地
+### 95. `tests/nonlinear/test_logit.py`と`tests/nonlinear/test_probit.py`のコードが完全に同一（docstringの言い回し以外の差分ゼロ）——共通関数への切り出しを検討する余地
 
-- **対象**: [tests/test_logit.py](../../../tests/test_logit.py)（555行）・
-  [tests/test_probit.py](../../../tests/test_probit.py)（521行）。
+- **対象**: [tests/nonlinear/test_logit.py](../../../tests/nonlinear/test_logit.py)（555行）・
+  [tests/nonlinear/test_probit.py](../../../tests/nonlinear/test_probit.py)（521行）。
   `sed 's/Logit/Probit/g; s/logit/probit/g'`で`test_logit.py`を変換して
   `test_probit.py`と`diff`した結果、**コード部分の差分はゼロ**
   （docstringの文言のみ、`test_probit.py`側は「`test_logit.py`と同じ理由」
@@ -1222,7 +1252,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `test_logit_crosscheck.py`と`test_probit_crosscheck.py`は**コード自体にも
   Probit固有の実質的な差分がある**（後述）ため、この項目は`test_<method>.py`/
   `test_<method>_fixtures.py`の2ファイルに限定する。
-- **内容**: `tests/test_probit.py`解説時にユーザー指摘（「共有化に関しては
+- **内容**: `tests/nonlinear/test_probit.py`解説時にユーザー指摘（「共有化に関しては
   1つファイルを削れるが、共有化してしまうと手法ごとのテストファイルという
   意味が薄れないか懸念がある。ドメインが違うものを1つにするという
   アーキテクチャ的な観点でも注意が必要」）。`Logit`/`Probit`の
@@ -1245,15 +1275,15 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   全テストが一覧できる（ファイルが空の呼び出し列挙だけになる場合を
   除く）という現状の利点を維持しつつ、テスト本体のコード重複は解消できる。
   項目68（ファイル分割の方向性）と合わせて設計するのが良い。
-- **気づいた経緯**: 2026-08-24、`tests/test_probit.py`解説後のユーザー指摘。
+- **気づいた経緯**: 2026-08-24、`tests/nonlinear/test_probit.py`解説後のユーザー指摘。
 - **状態**: 未対応（方向性: 共通関数切り出し＋ファイルは分離維持。着手
   タイミングはユーザー判断待ち、項目68と合わせて検討）
 
-### 96. 項目85〜90が`tests/test_probit_fixtures.py`にも同様に該当する（一括注記）
+### 96. 項目85〜90が`tests/nonlinear/test_probit_fixtures.py`にも同様に該当する（一括注記）
 
-- **対象**: [tests/test_probit_fixtures.py](../../../tests/test_probit_fixtures.py)
+- **対象**: [tests/nonlinear/test_probit_fixtures.py](../../../tests/nonlinear/test_probit_fixtures.py)
   全体
-- **内容**: `tests/test_probit_fixtures.py`解説時、`sed`によるクラス名
+- **内容**: `tests/nonlinear/test_probit_fixtures.py`解説時、`sed`によるクラス名
   置換＋`diff`で`test_logit_fixtures.py`とコード部分が完全に同一
   （項目95と同じ現象）であることを確認した。個別に項目を複製すると
   項目数が倍増し見通しが悪くなるため、該当箇所を1項目にまとめて記録する。
@@ -1275,7 +1305,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **Claudeの所感**: 対応する場合はLogit/Probit両方をまとめて一度に
   修正するのが効率的（項目95の共通関数切り出しと合わせて対応すれば、
   切り出した共通関数を直すだけで両手法に反映される）。
-- **気づいた経緯**: 2026-08-24、`tests/test_probit_fixtures.py`解説時に
+- **気づいた経緯**: 2026-08-24、`tests/nonlinear/test_probit_fixtures.py`解説時に
   確認。
 - **状態**: 未対応（項目85〜90への追記の代わりにこの1項目に集約、
   着手要否はユーザー判断待ち）

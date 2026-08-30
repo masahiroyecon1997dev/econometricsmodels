@@ -59,7 +59,10 @@ from benchmark.iv.fixtures.generate_iv_gmm_fixtures import (
 )
 
 FIXTURE_PATH = (
-    Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "iv_gmm.json"
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "benchmarks"
+    / "iv_gmm.json"
 )
 
 RTOL = TOLERANCES["iv_gmm_fixtures"]["rtol"]

@@ -87,9 +87,12 @@ docs = [
 [tool.ruff]
 line-length = 79
 
-# pytest実行時にリポジトリルートをsys.pathへ載せ、`import benchmark.<系統>....`を
-# 1経路で解決できるようにする（旧: 各テストファイルの`sys.path.insert`＋devcontainer
-# のPYTHONPATH。Initiative A で全廃、経緯は
-# docs/planning/specs/refactoring-issue231-progress.md「Initiative A」節）。
+# pytest実行時にsys.pathへ載せるパス。
+# - "."   : `import benchmark.<系統>....` を1経路で解決（旧: 各テストファイルの
+#           `sys.path.insert`＋devcontainerのPYTHONPATH。Initiative A で全廃、経緯は
+#           docs/planning/specs/refactoring-issue231-progress.md「Initiative A」節）。
+# - "tests": `tests/` を系統別サブディレクトリ（linear/ nonlinear/ iv/）に分けた際、
+#           各テストが `from _helpers import ...` 等の裸import で共有ヘルパー
+#           （tests/_helpers.py 等）を解決できるようにする（サブディレクトリからでも1経路）。
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = [".", "tests"]

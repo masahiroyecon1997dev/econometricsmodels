@@ -63,7 +63,7 @@ from benchmark.iv.fixtures.generate_iv_fixtures import (
 )
 
 FIXTURE_PATH = (
-    Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "iv.json"
+    Path(__file__).resolve().parents[1] / "fixtures" / "benchmarks" / "iv.json"
 )
 
 RTOL = TOLERANCES["iv_fixtures"]["rtol"]

@@ -51,7 +51,10 @@ from benchmark.nonlinear.fixtures.generate_logit_fixtures import (
 )
 
 FIXTURE_PATH = (
-    Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "logit.json"
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "benchmarks"
+    / "logit.json"
 )
 
 RTOL = TOLERANCES["logit_fixtures"]["rtol"]

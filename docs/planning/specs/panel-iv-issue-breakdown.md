@@ -96,13 +96,13 @@ Issue化済み（2026-08-02）:
 - [x] **B16. tests/api_tests: linearmodels/ivregとの数値照合ベンチマーク作成** → [#171](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/171)
   GMMはPython（linearmodels）単独検証（Rクロスチェック省略、`iv-api-design.md`5.3節）。
   - 依存: B15（#161）
-  - **完了済み**: 2SLSのlinearmodelsクロスチェック（`tests/api_tests/test_iv_fixtures.py`、
-    コミット`8d84a18`）、GMMのlinearmodelsクロスチェック（`tests/api_tests/test_iv_gmm_fixtures.py`、
-    コミット`01aff46`）、ValidationError系のAPI/構造テスト（`tests/api_tests/test_iv.py`、
+  - **完了済み**: 2SLSのlinearmodelsクロスチェック（`tests/api_tests/iv/test_iv_fixtures.py`、
+    コミット`8d84a18`）、GMMのlinearmodelsクロスチェック（`tests/api_tests/iv/test_iv_gmm_fixtures.py`、
+    コミット`01aff46`）、ValidationError系のAPI/構造テスト（`tests/api_tests/iv/test_iv.py`、
     コミット`5e38f2f`）。副次的に発見・修正したバグ2件（G=2クラスター境界での
     `has_intercept`混同バグ、GMM `cov_type=Classical`のσ̂²非中心化バグ）は
     `engine/src/iv/CLAUDE.md`参照。
-    2SLSの`ivreg`（R）クロスチェック（`tests/api_tests/test_iv_crosscheck.py`、
+    2SLSの`ivreg`（R）クロスチェック（`tests/api_tests/iv/test_iv_crosscheck.py`、
     `benchmark/iv/fixtures/generate_iv_crosscheck_fixtures.py`、
     `benchmark/iv/references/run_ivreg.R`）も完了。devcontainerのR更新
     （Debian bookworm標準4.2.2→CRAN APTリポジトリ経由で4.6.1系、`.devcontainer/Dockerfile`

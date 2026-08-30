@@ -15,7 +15,7 @@ pyfixestのHC2/HC3はfixestの仕様ではなく**pyfixest自身の実装バグ*
 `docs/spec/ols-spec.md`「テスト」参照。
 
 classical/HC0-3/clusterはRとほぼ機械精度で一致するため厳密比較、HACのみ小標本補正の
-慣習差により緩い許容誤差で比較する（`tests/test_ols_crosscheck.py`参照）。
+慣習差により緩い許容誤差で比較する（`tests/linear/test_ols_crosscheck.py`参照）。
 
 `predict()`（`docs/spec/ols-spec.md`「predict()」）も対象に含める。
 `run_lm_predict_crosscheck.R`を使い、全シナリオで学習データに対する予測値（fitted）を、

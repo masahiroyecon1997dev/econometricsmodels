@@ -233,7 +233,7 @@
   これまで顕在化していなかった）。検証は一時的に`PYTHONPATH`を
   `benchmark/nonlinear`優先に上書きして実施した。
   検証: `ruff check`パス、`pytest tests`957件全件パス（並行セッションが
-  `tests/test_ols.py`に追加した1件を含む、自分の変更はコミット対象に含めない）。
+  `tests/linear/test_ols.py`に追加した1件を含む、自分の変更はコミット対象に含めない）。
   フィクスチャJSON（logit.json/probit.json/iv.json）を`_meta.generated_at`
   除外で比較し、変更前後で完全一致することを確認済み（`git worktree`で変更前
   コードを再現して比較）。`refactoring-candidates.md`から項目14を削除済み。
@@ -407,7 +407,14 @@
   確認済み）。`_format_rss` を `.0f`→`.1f` にして進捗ログと桁を統一。commit: `74bb453`。
 - `benchmark-restructure-design.md` にあった項目40・41への参照2箇所は、同ノートの
   削除（2026-08-30、下記「Initiative A」節）で解消済み。
-- 上記以外（`refactoring-candidates.md`項目12・13・15〜35・37・39・43）は
+- 項目43（`tests/` フラット構造 → 手法別ディレクトリ分割の要否）: `refactoring-candidates.md`
+  から削除（2026-08-30、ユーザー確認済み）。`refactoring-candidates-2.md` 項目68
+  （テストファイルを関心事で分割 ＋ 系統別ディレクトリ化）が同じ論点をより具体的に
+  カバーしており実質重複のため、追跡は項目68 に一本化。項目68 に設計決定
+  （系統別ディレクトリ・4分割・`_reference.py` リネーム）と Phase 1（ディレクトリ移動、
+  `pytest` 957件不変）の実施記録を追記済み。項目55（`_fixtures.py` 命名）・項目76
+  （見出し不統一）も項目68 の Phase 2 に統合。
+- 上記以外（`refactoring-candidates.md`項目12・13・15〜35・37・39）は
   未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は
   未着手。項目50以降は別セッションが並行して追記・コミットしているため、
@@ -779,9 +786,9 @@ Probit固有の差分の有無を都度`diff`で確認すること。項目35（
 --show-current`で現在のブランチを都度確認する。
 
 **即時対応した項目（2026-08-23）**:
-- `tests/test_ols.py`に`test_non_finite_values_raise`を追加
+- `tests/linear/test_ols.py`に`test_non_finite_values_raise`を追加
   （`fit()`本体の`y`/`x`でのNaN・無限大検証、`test-coverage-candidates.md`
-  項目31の一部に対応。`pytest tests/test_ols.py`72件全件パス、
+  項目31の一部に対応。`pytest tests/linear/test_ols.py`72件全件パス、
   `ruff check`／`ruff format`パス確認済み）。
 - `.claude/agents/testing-completeness-reviewer.md`に観点5
   「列引数ごとのバリデーション3点セット」（存在確認・null・NaN/無限大を
@@ -1435,8 +1442,8 @@ tests/api_tests/
 - **ステップ1（`review-testing`スキルでのレビュー、linear系統分）**:
   `testing-completeness-reviewer`に`engine/src/linear/`・
   `engine_pybind/src/linear/`（`mod tests`が0件だった）・
-  `python_package/econometricsmodels/linear/`・`tests/test_ols*.py`・
-  `tests/test_wls*.py`・`benchmark/linear/`のレビューを依頼し、
+  `python_package/econometricsmodels/linear/`・`tests/linear/test_ols*.py`・
+  `tests/linear/test_wls*.py`・`benchmark/linear/`のレビューを依頼し、
   must fix 1件・should fix 7件・nice to have 4件、計12件の指摘を得た。
   ユーザー確認の上、全12件をこのフェーズで対応する方針とした（未対応の
   指摘は無し）。
@@ -1581,7 +1588,7 @@ tests/api_tests/
 - **ステップ1（`review-testing`スキルでのレビュー、nonlinear系統分）**:
   `testing-completeness-reviewer`に`engine/src/nonlinear/`・
   `engine_pybind/src/nonlinear/`・`python_package/econometricsmodels/nonlinear/`・
-  `tests/test_logit*.py`・`tests/test_probit*.py`・`benchmark/nonlinear/`の
+  `tests/nonlinear/test_logit*.py`・`tests/nonlinear/test_probit*.py`・`benchmark/nonlinear/`の
   レビューを依頼し、must fix 0件・should fix 5件・nice to have 8件、計13件の
   指摘を得た。ユーザー確認の上、should fix全5件は対応、nice to haveは
   8件中4件を選んで対応（残り4件は`docs/planning/specs/test-coverage-candidates.md`
@@ -1682,7 +1689,7 @@ tests/api_tests/
   完全一致を確認。
 - **ステップ1（`review-testing`スキルでのレビュー、IV系統分）**:
   `testing-completeness-reviewer`に`engine/src/iv/`・`engine_pybind/src/iv/`・
-  `python_package/econometricsmodels/iv/`・`tests/test_iv*.py`・
+  `python_package/econometricsmodels/iv/`・`tests/iv/test_iv*.py`・
   `benchmark/iv/`のレビューを依頼し、must fix 1件・should fix 5件・
   nice to have 3件、計9件の指摘を得た。ユーザー確認の上、must fix・should fix
   全6件、nice to have全3件を対応した（未対応の指摘は無し）。

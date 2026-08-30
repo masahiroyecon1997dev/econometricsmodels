@@ -63,7 +63,7 @@ from benchmark.linear.fixtures.generate_ols_crosscheck_fixtures import (
 )
 
 FIXTURE_PATH = (
-    Path(__file__).resolve().parent
+    Path(__file__).resolve().parents[1]
     / "fixtures"
     / "benchmarks"
     / "ols_crosscheck.json"

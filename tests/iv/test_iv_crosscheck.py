@@ -71,7 +71,7 @@ from benchmark.iv.fixtures.generate_iv_crosscheck_fixtures import (
 )
 
 FIXTURE_PATH = (
-    Path(__file__).resolve().parent
+    Path(__file__).resolve().parents[1]
     / "fixtures"
     / "benchmarks"
     / "iv_crosscheck.json"

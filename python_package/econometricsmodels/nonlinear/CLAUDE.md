@@ -34,6 +34,6 @@
 
 ## テスト
 
-`tests/test_logit.py`/`test_probit.py`は構造・API・エラーパスのスモークテストのみ（`test_probit.py`は`test_logit.py`と同型）。statsmodels/R glmとの厳密な数値比較は`test_logit_fixtures.py`/`test_logit_crosscheck.py`、Probit側は`test_probit_fixtures.py`/`test_probit_crosscheck.py`で行う（OLSの`test_ols_fixtures.py`/`test_ols_crosscheck.py`と同じ役割分担）。
+`tests/nonlinear/test_logit.py`/`test_probit.py`は構造・API・エラーパスのスモークテストのみ（`test_probit.py`は`test_logit.py`と同型）。statsmodels/R glmとの厳密な数値比較は`test_logit_fixtures.py`/`test_logit_crosscheck.py`、Probit側は`test_probit_fixtures.py`/`test_probit_crosscheck.py`で行う（OLSの`test_ols_fixtures.py`/`test_ols_crosscheck.py`と同じ役割分担）。
 
 `tests/test_tobit.py`（Issue #226）も同じ位置づけ（構造・API・エラーパスのスモークテストのみ）。`tests/conftest.py`の共有`dataset`フィクスチャを`y=0.0`で左打ち切りした`censored_dataset`フィクスチャ（打ち切り率21%、`TobitOptions`の既定`lower=0.0`と一致）を使う。R`survival::survreg`/`AER::tobit`との数値比較は`test_tobit_fixtures.py`/`test_tobit_crosscheck.py`（Issue #227）で行う。

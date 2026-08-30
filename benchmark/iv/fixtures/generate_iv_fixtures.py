@@ -213,7 +213,7 @@ def _run_cluster_case(dataset: str, groups: list | None = None) -> dict:
 
 
 def _run_cluster_g2_case() -> dict:
-    """G=2境界の成功パス確認用（`tests/test_iv.py::test_cluster_g2_boundary_
+    """G=2境界の成功パス確認用（`tests/iv/test_iv.py::test_cluster_g2_boundary_
     succeeds_when_x_exog_is_empty`と同じ再現条件: `x_exog=[]`・`instruments`1本
     ・行番号%2の疑似グループ、`engine/src/iv/CLAUDE.md`「修正済み」参照）。
     """

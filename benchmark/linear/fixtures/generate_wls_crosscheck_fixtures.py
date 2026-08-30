@@ -11,7 +11,7 @@
 - pyfixestは正確性検証には使わない（性能比較専用）。
 
 classical/HC0-3/clusterはRとほぼ機械精度で一致するため厳密比較、HACのみ小標本補正の
-慣習差により緩い許容誤差で比較する（`tests/test_wls_crosscheck.py`参照）。
+慣習差により緩い許容誤差で比較する（`tests/linear/test_wls_crosscheck.py`参照）。
 
 係数・標準誤差に加え、t値・p値・信頼区間・R²・調整済みR²・AIC/BIC/対数尤度・
 F統計量・F検定p値もRクロスチェック対象に含める（`testing-policy.md`

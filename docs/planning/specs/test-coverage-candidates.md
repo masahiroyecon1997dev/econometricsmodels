@@ -1050,3 +1050,209 @@
   Logit/Probit両方の`test_<method>_fixtures.py`/
   `test_<method>_crosscheck.py`・対応する`generate_*_fixtures.py`/
   `generate_*_crosscheck_fixtures.py`が対象になる見込み）
+
+### 46. `method`/`cov_type`/`weight_type`の空文字列入力に対する専用テストが無い（IV/Logit/Probit/OLS/WLS共通）
+
+- **対象**: [tests/test_iv.py:504-519](../../../tests/test_iv.py#L504-L519)
+  （`test_unknown_method_raises`等、`"invalid"`のみ）。`grep`で確認した
+  ところ、`method=""`/`cov_type=""`/`weight_type=""`という空文字列を
+  明示的に試すテストはIV/Logit/Probit/OLS/WLSいずれにも存在しない。
+- **内容**: ユーザー指摘（2026-08-30、「methodが空文字みたいなテストは
+  logit/probit含めてない？」）を受けて確認。実機で`IvOptions(method="")`・
+  `IvOptions(cov_type="")`・`IvOptions(method="gmm", weight_type="")`を
+  試したところ、いずれも`"invalid"`と同じ`ValidationError`（分かりやすい
+  メッセージ付き）になることを確認した——**バグではない**が、空文字列は
+  「文字列が来ることは来るが値が無い」という`"invalid"`とは性質の異なる
+  境界値であり（例えば実装が`.is_empty()`を先に特別扱いしていた場合、
+  その分岐だけ`match`の網羅から漏れて別の挙動になるリスクがある）、
+  ロックインする専用テストが無いのはリポジトリ全体の共通の抜けと言える。
+- **Claudeの所感**: 実害は確認されなかったが、`@pytest.mark.parametrize`
+  の値リストに`""`を1つ追加するだけで済む安価な対応。IVで気づいた点だが
+  対象は全手法に及ぶため、着手する場合は一括対応が効率的。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘、
+  実機検証で確認。
+- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
+
+### 47. `IvOptions`等の数値・真偽値フィールドに型の異なる値を渡した場合の`TypeError`テストが無い（リポジトリ全体）
+
+- **対象**: `IvOptions.gmm_iterations`/`gmm_convergence`/
+  `raise_on_non_convergence`（[tests/test_iv.py:817-828](../../../tests/test_iv.py#L817-L828)
+  周辺、値の範囲外〔`ValidationError`〕は検証されているが型違いは無い）。
+  `grep -rn "TypeError" tests/`は0件で、他手法の同種オプション
+  （`max_iter`/`tol`等）も同様に未検証。
+- **内容**: ユーザー指摘（2026-08-30、「gmm_convergence, gmm_iterations,
+  raise_on_non_convergenceの指定された値の型が想定と不一致だった時の
+  テストはある？」）を受けて実機確認した。`IvOptions(gmm_iterations="abc")`
+  →`TypeError: 'str' object cannot be interpreted as an integer`、
+  `IvOptions(gmm_convergence="abc")`→`TypeError: must be real number, not
+  str`、`IvOptions(raise_on_non_convergence="not_a_bool")`→
+  `TypeError: 'str' object is not an instance of 'bool'`、
+  `IvOptions(gmm_iterations=1.5)`→`TypeError: 'float' object cannot be
+  interpreted as an integer`と、いずれもPyO3の型変換層が送出する
+  `TypeError`（`ValidationError`ではない）になることを確認した。これは
+  想定通りの挙動と考えられるが、**この「`ValidationError`ではなく
+  `TypeError`になる」という境界をロックインするテストが1つも存在しない**
+  （リポジトリ全体で`TypeError`という語自体が`tests/`に出現しない）。
+- **Claudeの所感**: 型違いの入力は本来Pythonの型ヒント・静的型検査
+  （mypy等）で防ぐべき領域であり、実行時テストで全フィールド×全誤った型を
+  網羅する必要は無いと考えるが、「`ValidationError`ではなく`TypeError`に
+  なる」という利用者から見て重要な仕様は、代表的な1〜2ケースだけでも
+  ロックインしておく価値がある。IVで気づいたが対象は全手法の全オプション
+  フィールドに及ぶため、着手するなら方針を1箇所（`testing-policy.md`等）
+  に明記した上で各手法1ケース程度に絞るのが効率的と考える。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘、
+  実機検証で確認。
+- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
+
+### 48. `test_missing_column_raises`が`x_exog`のみを検証しており、`y`/`x_endog`/`instruments`側の存在しない列名が未検証
+
+- **対象**: [tests/test_iv.py:639-647](../../../tests/test_iv.py#L639-L647)
+  （`x_exog=["nonexistent"]`のみ）。対比として
+  [tests/test_iv.py:650-667](../../../tests/test_iv.py#L650-L667)の
+  `test_null_values_raise`/`test_non_numeric_dtype_raises`は
+  `@pytest.mark.parametrize("bad_col", ["y", "x1", "endog1", "z1"])`で
+  4つの役割すべてを網羅済み。
+- **内容**: ユーザー指摘（2026-08-30、「x_exogが対象だが、y, x_endog,
+  instrumentsでの存在しない列のチェックがない気がする」）を受けて実機
+  確認した。`y`/`x_endog`/`instruments`いずれに存在しない列名を渡しても
+  `ValidationError: column 'does_not_exist' does not exist in the data`
+  になることを確認済み（実装側は正しく動作している、純粋なテスト
+  カバレッジの抜け）。`test_null_values_raise`等は既に4役割を
+  parametrizeしているのに対し、`test_missing_column_raises`だけ
+  `x_exog`単独のままという非対称。
+- **Claudeの所感**: `test_null_values_raise`と同じ
+  `@pytest.mark.parametrize("bad_col", ["y", "x1", "endog1", "z1"])`の
+  形に揃えれば解消できる、実施しやすい部類。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘、
+  実機検証で確認。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 49. `overid_statistic`/`wu_hausman_statistic`系のテストが「`None`でないこと」の確認のみで、値の妥当性（正であること等）を確認していない
+
+- **対象**: [tests/test_iv.py:288-333](../../../tests/test_iv.py#L288-L333)
+  （`test_overid_statistic_present_when_over_identified`・
+  `test_overid_statistic_present_for_gmm_hansen_j`・
+  `test_wu_hausman_is_not_none_for_2sls`等、すべて`is not None`のみ）
+- **内容**: ユーザー指摘（2026-08-30、「`test_overid_statistic_present_
+  for_gmm_hansen_j`だが、他の検証では`!=0`や`>0`を使っているので統一した
+  ほうが良いか？」）を受けて確認。`test_weak_instrument_f_statistics_
+  keyed_by_endog_name`は`> 0.0`、`test_cluster_g2_boundary_succeeds_
+  when_x_exog_is_empty`は`!= 0.0`を使うのに対し、過剰識別検定・
+  Wu-Hausman検定系は一貫して`is not None`のみで、統計量自体が退化値
+  （厳密に`0.0`）になっていないかは確認していない。Sargan/Hansen J・
+  Wu-Hausman統計量はいずれもカイ二乗/F分布に従うワルド型検定統計量で
+  理論上`0`以上、実務的にはほぼ確実に`>0`になるはずの値であり、
+  `engine/src/iv/CLAUDE.md`に記録されている過去の実バグ（Hansen J統計量を
+  誤って`/n`していたバグ）のように「統計量が異常に小さい値になる」
+  という失敗モードは`is not None`だけでは検出できない。
+- **Claudeの所感**: `> 0.0`程度の軽い妥当性チェックを追加する価値はある
+  （数値の正確性自体は`test_iv_fixtures.py`/`test_iv_gmm_fixtures.py`の
+  役割だが、「退化した0近傍の値でないこと」という安価なサニティチェックは
+  構造テスト側で足しても役割分担を壊さないと考える）。p値についても
+  `(0, 1)`の範囲チェックを追加できる。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 50. `include_intercept=False`の数値照合（linearmodelsとの一致確認）がIVにだけ存在しない
+
+- **対象**: `tests/test_iv_fixtures.py`・`tests/test_iv_gmm_fixtures.py`・
+  `tests/test_iv_crosscheck.py`全体（`grep`で`include_intercept`が
+  1件もヒットしない）。対比として`tests/test_ols.py`
+  （`test_include_intercept_false_matches_statsmodels`・
+  `test_include_intercept_false_matches_statsmodels_robust_cov_types`）、
+  `tests/test_wls_fixtures.py`・`tests/test_logit_fixtures.py`・
+  `tests/test_probit_fixtures.py`（いずれも同名の
+  `test_include_intercept_false_matches_statsmodels`が存在）。
+- **内容**: ユーザー指摘（2026-08-30、「OLS, WLS, Logit, Probitで
+  intercept=falseの数値一致のテストはなかった気がする」）を受けて
+  `grep`で確認したところ、**ユーザーの記憶とは逆に、OLS/WLS/Logit/Probit
+  にはすべて`include_intercept=False`の数値照合テストが既に存在した**
+  （この点はユーザーの記憶違いだったため訂正する）。一方、**IVは
+  `tests/test_iv.py`（構造テスト）に`test_include_intercept_false_omits_
+  const`があるのみで、`test_iv_fixtures.py`/`test_iv_gmm_fixtures.py`
+  （linearmodelsとの数値照合）/`test_iv_crosscheck.py`のいずれにも
+  `include_intercept=False`のケースが1つも存在しない**——2SLS・GMM
+  どちらの`method`についても、`include_intercept=False`が実際に
+  linearmodelsと一致した値を返すことは一度も検証されていない。
+- **Claudeの所感**: これは他手法とIVの間の実在する非対称であり、
+  IVが唯一の抜けなので優先度は他項目より高いと考える。特に
+  `first_stage()`が絡む分`include_intercept`の伝播経路がOLS単体より
+  複雑（項目51参照）なため、数値照合による裏付けの価値は高い。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘、
+  `grep`で確認。
+- **状態**: 未対応（着手要否はユーザー判断待ち、優先度は本ファイル中で
+  比較的高い）
+
+### 51. `include_intercept=False`時に`first_stage()`側にも切片が正しく伝播しているかが未検証
+
+- **対象**: [tests/test_iv.py:406-412](../../../tests/test_iv.py#L406-L412)
+  （`test_include_intercept_false_omits_const`、トップレベルの
+  `res.param_names`のみ確認、`res.first_stage()`は未確認）
+- **内容**: ユーザー指摘（2026-08-30、「`first_stage`からは`const`が
+  抜かれていないことや...第一段階回帰の`has_intercept=false`のままでは
+  なく、`has_intercept=true`になっているかを確認したほうがよいかも
+  しれない（実際はIVのオプションで`intercept=false`にしたら
+  `first_stage`はどっちになる）」）を受けて実機確認した。
+  `IvOptions(include_intercept=False)`でfitした結果、`first_stage()
+  ["endog1"].param_names`は`['x1', 'z1', 'z2']`（`const`を含まない）、
+  `r_squared`は`OLS(y="endog1", x=["x1","z1","z2"],
+  options=OLSOptions(include_intercept=False))`の直接fitと**完全一致**
+  （`0.2748969914858259`）した——つまり**`first_stage()`は正しく
+  `include_intercept=False`を継承している**ことを確認した
+  （`engine/src/iv/CLAUDE.md`に記録されているG=2バグ修正
+  〔`without_baked_in_intercept`が`input.has_intercept()`をそのまま
+  第一段階に渡す設計〕が効いている、実装は正しい）。
+- **Claudeの所感**: 実装は正しく動作していたが、これをロックインする
+  テストは存在しない——過去に類似の`has_intercept`取り違えバグが
+  実際に発生した箇所（G=2境界バグ、`refactoring-candidates.md`ではなく
+  `engine/src/iv/CLAUDE.md`参照）だけに、リグレッション防止の価値が
+  高いと考える。項目50（linearmodels数値照合の欠落）とあわせて、
+  `include_intercept=False`×`first_stage()`の組み合わせをテストに
+  追加する価値がある。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘、
+  実機検証で確認（現状は正しく動作していることを確認済み）。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目50と合わせて検討）
+
+### 52. `test_insufficient_instruments_raises`の境界ケースが常に`instruments=0`本のみで、より一般的な「1本不足」パターンが無い
+
+- **対象**: [tests/test_iv.py:762-773](../../../tests/test_iv.py#L762-L773)
+  （`x_endog=["endog1"]`〔1個〕・`instruments=[]`〔0個〕の組み合わせのみ）
+- **内容**: ユーザー指摘（2026-08-30、「満たさない例なら内生変数2個,
+  操作変数1個のほうが良いと思う」）。`engine/src/iv/two_sls.rs:160-165`の
+  実装を確認したところ、識別条件の判定は`input.k_instruments() <
+  input.k_endog()`という一般的な大小比較であり、`instruments`が
+  空リストであることを特別扱いする分岐は無い（`0 < 1`も`1 < 2`も同じ
+  比較式を通る）。そのため現状のテストが検出漏れを起こしているわけでは
+  ないが、`instruments=[]`という極端な境界値だけに頼っており、
+  「1本だけ不足している」という、より一般的で実務上遭遇しやすい
+  パターンでの確認が無い。
+- **Claudeの所感**: 現在のデータセット（`iv_baseline.csv`）は`x_endog`
+  候補列が`endog1`の1つしか無いため、`x_endog`を2個にするには
+  `x_endog=["endog1", "x1"]`のように既存の外生変数を内生変数として
+  転用するダミー的な指定が必要になる（新規データ列は不要）。
+  実施すること自体は容易だが、実装側の判定ロジックは既に一般的な
+  比較式であることを確認済みのため、優先度は低いと考える。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘、
+  `engine/src/iv/two_sls.rs`で実装確認。
+- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
+
+### 53. `cov_type="cluster"`の大文字小文字非依存性（`"CLUSTER"`等）がリポジトリ全体で未検証
+
+- **対象**: `tests/test_iv.py`の`test_cov_type_is_case_insensitive`
+  （`grep`で`"CLUSTER"`/`"Cluster"`が0件）。`tests/test_ols.py`等、
+  他手法の同名テストも同様に`cluster`の大文字小文字バリエーションを
+  含まない。
+- **内容**: `tests/test_iv.py`解説時（項目4、`refactoring-candidates-3.md`）
+  の調査中に発見。`cov_type`の大文字小文字非依存性テストは`classical`/
+  `hc0`〜`hc3`/`hac`/`nonrobust`は網羅しているが、`cluster`だけは
+  常に小文字の`"cluster"`のみで使われており、`"CLUSTER"`のような表記が
+  正しく`"cluster"`に正規化されることは一度も検証されていない。
+  `cluster_col`付きデータセットが必要という事情（`refactoring-
+  candidates-3.md`項目4参照）から、他のcov_typeと同じ
+  parametrize済みテストに単純に含められなかったための漏れと推測される。
+- **Claudeの所感**: 実装のパース関数が他のcov_typeと同じ正規化経路を
+  通っているなら実害は低いと考えられるが、`cluster`は`cluster_col`の
+  存在確認等の追加分岐があるため、他のcov_typeと全く同じコードパスとは
+  限らない。専用の1テストを足す程度の軽い対応で埋められる。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時の調査中に発見。
+- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）

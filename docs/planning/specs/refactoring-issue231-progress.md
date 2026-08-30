@@ -703,9 +703,19 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
   `test_ols.py`・`test_ols_fixtures.py`・`test_ols_crosscheck.py`・
   `test_wls.py`・`test_wls_fixtures.py`・`test_wls_crosscheck.py`・
   `test_logit.py`・`test_logit_fixtures.py`・`test_logit_crosscheck.py`・
-  `test_probit.py`・`test_probit_fixtures.py`・`test_probit_crosscheck.py`
+  `test_probit.py`・`test_probit_fixtures.py`・`test_probit_crosscheck.py`・
+  `test_iv.py`
   （全区切り解説済み、WLS関連ファイルは一通り完了、Logit関連ファイルも
-  一通り完了、Probit関連ファイルもこれで一通り完了）
+  一通り完了、Probit関連ファイルもこれで一通り完了。IVは`test_iv.py`のみ
+  完了、`test_iv_fixtures.py`/`test_iv_gmm_fixtures.py`/
+  `test_iv_crosscheck.py`は未着手）
+
+**注意（2026-08-30〜、`tests/`のディレクトリ分割）**: 別セッションが
+`tests/`を系統別サブディレクトリ（`tests/linear/`・`tests/nonlinear/`・
+`tests/iv/`）へ分割済み（candidates-2項目68関連、コミット`7e93052`）。
+上記「解説済み」リストのファイル名は分割後も`tests/<系統>/<ファイル名>`に
+そのまま対応する（例: `test_iv.py`→`tests/iv/test_iv.py`）ため、参照時は
+パスにサブディレクトリを補うこと。
 
 **注意（2026-08-23〜、`benchmark/`再構成「Initiative A」進行中）**: 上記
 「解説済み」リストの`benchmark/`側パス（`benchmark/_common.py`・
@@ -721,9 +731,37 @@ CI側のPYTHONPATH非対称〔`refactoring-candidates-2.md`項目50〕は実質�
 都度確認すること。項目50の状態欄自体は、リファクタリング側のセッションが
 後ほど更新する前提でこちらからは触っていない。
 
-**次に解説予定**: 未定（Logit/Probit関連ファイルが全て完了。ユーザー
-確立の順では次は`IV`または`Tobit`系統だが、着手前にどちらから進めるか
-ユーザーに確認すること）。`test_logit.py`解説後のユーザーとの質疑で
+**次に解説予定**: `test_iv_fixtures.py`（ユーザーが2026-08-30にIVから
+進めることを決定済み。IV関連ファイルは`test_iv.py`→`test_iv_fixtures.py`
+→`test_iv_gmm_fixtures.py`→`test_iv_crosscheck.py`の順で進める見込み）。
+
+**候補メモファイルの追加（2026-08-30）**: `refactoring-candidates-2.md`に
+対して並行タスクがリファクタリング作業に着手したため、以後このウォーク
+スルーからの新規追記は`docs/planning/specs/refactoring-candidates-3.md`
+（新規作成、番号は1から独立採番）に切り替えている。`test-coverage-
+candidates.md`は従来通り番号を継続（項目46〜53追加、詳細下記）。
+
+`test_iv.py`解説後のユーザーとの質疑で21件の指摘を受け、
+`refactoring-candidates-3.md`項目3〜10・`test-coverage-candidates.md`
+項目46〜53に記録した。特に**項目7（`refactoring-candidates-3.md`）は
+単なるテストカバレッジの抜けではなく実装側の潜在バグの疑い**——`const`
+名衝突バリデーションが`x_exog`にしか実装されておらず、`instruments`/
+`x_endog`に`"const"`という名前の列（リテラルな定数列である必要はない）を
+含めると、`first_stage()`や構造方程式本体の`params`辞書から真の切片の
+係数が実機検証でサイレントに失われる/上書きされることを確認した
+（`x_endog`側の症状がより深刻）。また**項目9は`iv-api-design.md`の
+「`x_endog`/`instruments`は最低1要素を要求する見込み」という記述と、
+実装が両方空リストを許容している実態との食い違い**（ドキュメント不整合、
+要ユーザー判断）。項目50（`include_intercept=False`のlinearmodels数値
+照合がIVにだけ存在しない）は他手法との非対称が実在するため優先度を
+やや高めに記録した。一方、ユーザーの記憶違いを訂正した点が2つある:
+(1) OLS/WLS/Logit/Probitに`include_intercept=False`の数値照合テストは
+**既に存在する**（IVだけが例外）、(2) `test_singular_first_stage_
+design_matrix_raises_computation_error`（OLS版含む）はfixturesファイルに
+重複していない（OLSの同種テストも`test_ols.py`側のみに存在する現状の
+パターンと一致しており、IV側は非対称ではない）。
+
+`test_logit.py`解説後のユーザーとの質疑で
 20件の指摘を受け、`refactoring-candidates-2.md`項目76〜84・
 `test-coverage-candidates.md`項目37〜40に記録した。続く
 `test_logit_fixtures.py`解説後の質疑で7件、`test_logit_crosscheck.py`
@@ -829,7 +867,20 @@ Probit固有の差分の有無を都度`diff`で確認すること。項目35（
 にも関連コメントとして追記済み。Tobit実装時（主リファレンスがR単独で
 第三者実装による三角測量が効かない）はこのルールが特に重要になる。
 
-**候補メモの状態（2026-08-23時点）**:
+**候補メモの状態（2026-08-30時点、最新）**:
+- `refactoring-candidates.md`: 項目1〜43（凍結、既存の並行セッションが対応中）。
+- `refactoring-candidates-2.md`: 項目44〜96（凍結、2026-08-30時点で別の並行タスクが
+  リファクタリング作業に着手したため、このウォークスルーからの新規追記先ではなく
+  なった）。
+- `refactoring-candidates-3.md`: **新規作成（2026-08-30）**、項目1〜10
+  （独立採番、1から開始）。`test_iv.py`解説後の質疑を記録（項目7の
+  `const`名衝突バグ疑い・項目9のドキュメント不整合が特に重要、詳細は
+  上記「次に解説予定」欄参照）。以後このウォークスルーからの新規追記は
+  このファイルに行う。
+- `test-coverage-candidates.md`: 項目1〜53（番号は継続、`test_iv.py`解説時に
+  項目46〜53を追加）。
+
+**候補メモの状態（2026-08-23時点、過去の履歴）**:
 - `refactoring-candidates.md`: 項目1〜43（このウォークスルー由来の最後の追記は項目43）。
   上記「`refactoring-candidates.md`駆動の随時対応」セッションが並行して対応中のため、
   このウォークスルーからの新規追記は`refactoring-candidates-2.md`（項目44〜96、

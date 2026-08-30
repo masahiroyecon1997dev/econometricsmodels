@@ -661,8 +661,9 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
   （全区切り解説済み）
 - `tests/`: `_assertions.py`・`_helpers.py`・`_tolerances.py`・`conftest.py`・
   `test_ols.py`・`test_ols_fixtures.py`・`test_ols_crosscheck.py`・
-  `test_wls.py`・`test_wls_fixtures.py`・`test_wls_crosscheck.py`
-  （全区切り解説済み、WLS関連ファイルはこれで一通り完了）
+  `test_wls.py`・`test_wls_fixtures.py`・`test_wls_crosscheck.py`・
+  `test_logit.py`（全区切り解説済み、WLS関連ファイルは一通り完了、
+  Logit関連ファイルに着手）
 
 **注意（2026-08-23〜、`benchmark/`再構成「Initiative A」進行中）**: 上記
 「解説済み」リストの`benchmark/`側パス（`benchmark/_common.py`・
@@ -678,17 +679,19 @@ CI側のPYTHONPATH非対称〔`refactoring-candidates-2.md`項目50〕は実質�
 都度確認すること。項目50の状態欄自体は、リファクタリング側のセッションが
 後ほど更新する前提でこちらからは触っていない。
 
-**次に解説予定**: `tests/test_logit.py`（WLS関連ファイル完了、ユーザー確立の
-`test_<method>.py`→`test_<method>_fixtures.py`→`test_<method>_crosscheck.py`
-の順でLogitに進む）。`test_wls_fixtures.py`/`test_wls_crosscheck.py`解説後の
-ユーザーとの質疑で多数の指摘を受け、`refactoring-candidates-2.md`項目71〜75・
-`test-coverage-candidates.md`項目36に記録した（詳細下記）。項目67
-（`WLSOptions`新設、Logit/Probitのmethod/max_iter/tol/raise_on_non_convergence
-共通化と合わせて再検討）・項目68（テストファイルをバリデーション/API構造/
-数値誤差で分割し系統別ディレクトリ化する方向）は、Logit/Probit以降の
-ファイルの解説・作業に影響する大きめの決定なので、着手前に思い出すこと。
-項目35（`test_cov_type_is_case_insensitive`等にHACが無い）は他手法の
-ファイルでも同じ観点で確認するとよい。
+**次に解説予定**: `tests/test_logit_fixtures.py`（`test_logit.py`解説完了、
+ユーザー確立の`test_<method>.py`→`test_<method>_fixtures.py`→
+`test_<method>_crosscheck.py`の順で継続）。`test_logit.py`解説後のユーザー
+との質疑で20件の指摘を受け、`refactoring-candidates-2.md`項目76〜84・
+`test-coverage-candidates.md`項目37〜40に記録した（詳細下記）。特に
+項目77（`test_method_option_converges_to_same_params`が`test_logit_
+fixtures.py::test_method_matches_statsmodels`と観点重複）・項目78
+（`LogitResult`に実際の収束`method`が含まれず確認手段が無い、項目67と
+合わせて検討）・項目79（Issue #231フェーズ4コメント残置が11箇所、項目51
+より規模大）は要注意。項目35（HAC非対応）と同様、Logit/Probitは
+そもそもHACを持たないため該当しない（クロスセクション手法のため）ことを
+確認済み。項目67・68は引き続きLogit/Probit以降の作業に影響するため
+着手前に思い出すこと。
 
 **即時対応した項目（2026-08-23）**:
 - `tests/test_ols.py`に`test_non_finite_values_raise`を追加
@@ -737,18 +740,23 @@ CI側のPYTHONPATH非対称〔`refactoring-candidates-2.md`項目50〕は実質�
 **候補メモの状態（2026-08-23時点）**:
 - `refactoring-candidates.md`: 項目1〜43（このウォークスルー由来の最後の追記は項目43）。
   上記「`refactoring-candidates.md`駆動の随時対応」セッションが並行して対応中のため、
-  このウォークスルーからの新規追記は`refactoring-candidates-2.md`（項目44〜75、
-  直近の追記は`test_wls_fixtures.py`/`test_wls_crosscheck.py`解説時、
-  `include_intercept=False`テストのOLS/WLS間ファイル配置非対称〔71〕・
-  `_check_result`ヘルパーが5ファイルに独立定義され前半が重複〔72〕・
-  `DATA_DIR`が`tests/_helpers.py`と`benchmark/common/datasets_io.py`の2箇所
-  独立定義〔73〕・WLSのHACクロスチェック許容誤差の根本原因調査（`adjust=TRUE`
-  だけでは説明不可なことを確認）〔74〕・`_add_age_bin`の並列ファイル間
-  非対称依存〔75〕）に切り替えている。**両ファイルの統合は
+  このウォークスルーからの新規追記は`refactoring-candidates-2.md`（項目44〜84、
+  直近の追記は`test_logit.py`解説時、テストファイルのセクション見出し・順序
+  不統一〔76〕・`test_method_option_converges_to_same_params`と
+  `test_logit_fixtures.py::test_method_matches_statsmodels`の観点重複〔77〕・
+  `LogitResult`に収束`method`が含まれない〔78〕・Issue #231フェーズ4コメント
+  残置がLogitに11箇所〔79〕・`predict()`の意味がOLSとLogit/Probitで異なる
+  ことのドキュメント不足〔80〕・`const`衝突/クラスターテストデータの手法間
+  共通化余地〔81〕・`x2=2*x1`直書き〔82〕・`test_cov_type_label`のcov_type
+  直書き〔83〕・`test_nonrobust_is_alias_for_classical`と`test_cov_type_is_
+  case_insensitive`の統合余地〔84〕）に切り替えている。**両ファイルの統合は
   `refactoring-candidates.md`側の随時対応が一区切りついた後にユーザー判断で行う**
   （現時点では統合しない）。
-- `test-coverage-candidates.md`: 項目1〜36（直近1件は`test_wls_crosscheck.py`
-  解説時、WLSのHACクロスチェックでstatsmodels側/R側が異なるラグ値を使い
+- `test-coverage-candidates.md`: 項目1〜40（直近4件は`test_logit.py`解説時、
+  `marginal_effects()`関連の部分集合チェック・大文字小文字非依存性の
+  検証範囲不足・`confidence_level`境界値未検証〔37〜39〕・Logitにも項目32と
+  同型の`y`列欠落テスト不足〔40〕）。さらに前の1件は`test_wls_crosscheck.py`
+  解説時（WLSのHACクロスチェックでstatsmodels側/R側が異なるラグ値を使い
   同一設定が両実装から検証されていない点〔36〕）。前の2件は`test_wls.py`
   解説時（WLSにもOLSと同型のバリデーション抜け・`test_cov_type_is_case_
   insensitive`等にHACが無い）。さらに前の3件は`test_ols.py`/

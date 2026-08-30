@@ -720,3 +720,211 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   ユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、`benchmark/`再構成完了後の
   対応を推奨）
+
+### 76. テストファイル内のセクション見出し・順序がOLS/WLS/Logitで統一されていない
+
+- **対象**: [tests/test_ols.py:28,73,125,151,299,448,547](../../../tests/test_ols.py)
+  （`statsmodelsラッパー`/`係数・標準誤差の一致`/`適合度統計量の一致`/
+  `エラーハンドリング`/`オプションの反映確認`/`API構造`/`predict()`の順）、
+  [tests/test_wls.py:25,98,284,369](../../../tests/test_wls.py)
+  （`OLSとの不変条件回帰テスト`/`エラーハンドリング（重み固有）`/`API構造`/
+  `オプションの反映確認`の順）、
+  [tests/test_logit.py:26,129,167,221](../../../tests/test_logit.py)
+  （`成功パス・API構造`/`predict() / pred_table()`/`marginal_effects()`/
+  `エラーハンドリング`の順、以降221〜556行目まで見出し無しで`cov_type`系まで
+  全て「エラーハンドリング」に含まれる）
+- **内容**: ユーザー指摘（2026-08-23、「以前よりの課題」）。3ファイルとも
+  見出しラベル・粒度・出現順序がバラバラで、統一的な規則が無い。特に
+  `test_logit.py`は「エラーハンドリング」という1見出しの下に、基本的な列
+  バリデーション・最適化パラメータバリデーション・`cov_type`バリデーション・
+  クラスターバリデーションという性質の異なる4種類がまとめて入っており、
+  他の見出し（`成功パス・API構造`等）と比べて粒度が粗い。また
+  `test_marginal_effects_unknown_at_raises`・`test_marginal_effects_
+  confidence_level_out_of_range_raises`（いずれも`ValidationError`パス）が
+  「エラーハンドリング」見出しより前の「`marginal_effects()`」見出し配下に
+  置かれており、機能単位のグルーピングと成功/エラーパス単位のグルーピングが
+  1ファイル内で混在している。
+- **Claudeの所感**: 「以前よりの課題」とある通り既知の論点。項目68
+  （テストファイルをバリデーション/API構造/数値誤差で分割する方向性）が
+  実施されれば、ファイルレベルで成功パス・`ValidationError`パス・
+  `ComputationError`パスが分離されるため、この見出し不統一問題は
+  自然に解消される可能性が高い。見出し単体の統一を先に行うより、
+  項目68のファイル分割設計に統合して一度に解決するのが手戻りが少ないと
+  考える。
+- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目68と統合して検討）
+
+### 77. `test_method_option_converges_to_same_params`（`test_logit.py`）が`test_method_matches_statsmodels`（`test_logit_fixtures.py`）と観点が重複し、`rel=1e-4`が直書き
+
+- **対象**: [tests/test_logit.py:40-60](../../../tests/test_logit.py#L40-L60)
+  （`test_method_option_converges_to_same_params`、`method`3種を自身の
+  `newton`結果と`rel=1e-4`直書きでparamsのみ比較）と
+  [tests/test_logit_fixtures.py:197-216](../../../tests/test_logit_fixtures.py#L197-L216)
+  （`test_method_matches_statsmodels`、`method`2種を主リファレンス
+  statsmodelsと`RTOL_METHOD`（`_tolerances.py`の`logit_fixtures.rtol_method
+  = 1e-3`）でparams・std_errors・convergedまで比較。docstringに「
+  `test_logit.py`側は自身のnewton結果とparamsのみ緩い許容誤差(rel=1e-4)で
+  比較していたが、主リファレンスに対するフルの統計量照合が無かったため
+  追加した」と明記）
+- **内容**: ユーザー指摘（2026-08-23、「1e-4は正当か」「実測値で決めている
+  と思われるがstatsmodels等で実測した誤差を使ったほうが良いのでは」）を
+  受けて確認。実際に**`test_logit_fixtures.py`側が後から同じ観点をより
+  厳密な形（statsmodelsという外部の独立した基準・std_errors込み）で
+  追加していた**ことが判明した。`test_logit.py`側の`rel=1e-4`は
+  `_tolerances.py`を経由しない直書き値で、この値の妥当性の根拠
+  （実測値か勘か）はコード上に残っていない。
+- **Claudeの所感**: `test_logit.py`側のテストは「自分自身のnewton結果との
+  比較」であり外部リファレンスを使わないため、`test_logit_fixtures.py`側の
+  テストに対して真に付加価値があるのはmethodがbfgs/lbfgsで**確かに収束
+  すること**（`assert res.converged`）の確認のみで、数値一致の検証自体は
+  `test_logit_fixtures.py`側で外部リファレンス込みのより厳密な形で
+  カバーされている。`test_logit.py`側のparams比較部分は削除し
+  `assert res.converged`のみに絞る、または`rel`を`_tolerances.py`の値
+  （用途は違うが同じ`logit_fixtures.rtol_method`を流用するか、`test_logit.py`
+  専用のキーを新設）に統一するのが良いと考える。
+- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 78. `LogitResult`に実際に収束した`method`が含まれておらず、検証する手段が無い
+
+- **対象**: [engine_pybind/src/nonlinear/logit.rs:176-222](../../../engine_pybind/src/nonlinear/logit.rs#L176-L222)
+  （`LogitResult`構造体、`converged`・`n_iter`・`cov_type`はあるが`method`
+  フィールドが無い）
+- **内容**: ユーザー指摘（2026-08-23、`test_method_option_converges_to_same_
+  params`を見て「どのmethodで収束させたかは`LogitResults`に含まれている
+  か」）を受けて確認。含まれていない。`LogitOptions.method`（入力）は
+  ユーザーが指定した文字列だが、`res`（出力）側にそれが正規化された形
+  （例: 大文字小文字を揃えた後の値）で反映されているかを確認する手段が
+  存在しない。`cov_type`は`res.cov_type`で入力の正規化後の値を確認できる
+  設計（`test_cov_type_label`等で検証済み）になっているのに対し、`method`
+  だけこの対称性が無い。
+- **Claudeの所感**: ユーザー見解に同意。`cov_type`と同じパターンで
+  `res.method`を追加すれば、(1) 利用者が実際どの最適化手法で推定されたか
+  結果から確認できる、(2) `method`の大文字小文字正規化・エイリアスの
+  Python API境界テストが書けるようになる、という2つの利点がある。
+  `WLSOptions`新設検討（項目67）と合わせて、Logit/Probit実装確認時に
+  設計変更として検討するのが良いと考える。
+- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目67と合わせて検討）
+
+### 79. 項目51（Issue #231フェーズ4コメント残置）が`test_logit.py`にも該当し、件数がOLSより大幅に多い（11箇所）
+
+- **対象**: [tests/test_logit.py](../../../tests/test_logit.py)全体
+  （`grep -c`で11箇所、`test_ols.py`の3箇所〔項目51〕より多い）
+- **内容**: ユーザー指摘（2026-08-23、「Issue #231のコミット番号と指摘が
+  コメントに付記されている。削除してほしい」）を受けて確認。項目51と
+  同一パターン（`testing-completeness-reviewer指摘、Issue #231フェーズ4`／
+  `Issue #231フェーズ4`という経緯コメントの残置）だが、`test_logit.py`は
+  ファイル全体がフェーズ4のテスト拡充作業で書かれたためか、OLSよりずっと
+  多い11箇所に及ぶ。
+- **Claudeの所感**: 項目51で確立済みの方針（番号のみ削除しテストの意図の
+  説明は残す）をそのまま適用できる。件数が多いファイルなので、対応する
+  なら`test_logit.py`用に1項目として独立させて対応するのが良いと考える
+  （項目51とまとめて一括対応も可）。`test_probit.py`等、未解説の他ファイルにも
+  同じパターンが残っている可能性が高い。
+- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目51と統合可）
+
+### 80. `predict()`の意味がOLS（予測値）とLogit/Probit（確率）で異なり、利用者が混同するリスクがある
+
+- **対象**: [python_package/econometricsmodels/nonlinear/logit.py](../../../python_package/econometricsmodels/nonlinear/logit.py)
+  の`predict()`（`{"probability": ...}`を返す）と、OLSの`predict()`
+  （`{"fitted": ...}`、項目64で既出）
+- **内容**: ユーザー指摘（2026-08-23、「LogitのpredictはOLSと違って0/1の
+  予測値ではなく確率を返す、というユーザー目線での乖離が生まれないか」）。
+  OLSユーザーが「`predict()`＝モデルの目的変数の予測値」という理解のまま
+  Logit/Probitに移ると、`predict()`が0/1ではなく連続値の確率を返すことに
+  戸惑う可能性がある。ただし統計学的にはLogit/Probitの`predict()`が確率を
+  返すのは標準的な慣習（statsmodelsの`predict()`も同様に確率を返す）であり、
+  0/1の分類結果が欲しい場合は別途しきい値を適用する（本実装では
+  `pred_table()`がその役割を担う）。
+- **Claudeの所感**: 実装自体は統計学の標準的な慣習に沿っており変更は
+  不要と考えるが、**ドキュメント（docstring・`docs/spec/logit-spec.md`等）に
+  「確率を返す、0/1が欲しい場合は`pred_table()`のthresholdを使う」という
+  誘導が無いと、OLSからの類推で誤解するユーザーが出うる**という点は
+  ドキュメント改善の余地として記録する価値があると考える。テスト自体の
+  変更は不要。
+- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち、対応するならドキュメント側）
+
+### 81. `test_const_collision_with_include_intercept_raises`・`test_cluster_cov_type_requires_at_least_two_groups`のテストデータがOLS/WLS/Logitで似た内容を個別に手書きしている
+
+- **対象**: [tests/test_ols.py:269-276](../../../tests/test_ols.py#L269-L276)・
+  [tests/test_wls.py:161-169](../../../tests/test_wls.py#L161-L169)・
+  [tests/test_logit.py:234-239](../../../tests/test_logit.py#L234-L239)
+  （`test_const_collision_with_include_intercept_raises`、`y`の値域
+  〔OLS/WLS:連続値、Logit:0/1〕以外はほぼ同じ`const`列衝突データ）、
+  [tests/test_logit.py:531-546](../../../tests/test_logit.py#L531-L546)
+  （`test_cluster_cov_type_requires_at_least_two_groups`）
+- **内容**: ユーザー指摘（2026-08-23、「OLS、WLSとdfを共有できそう」）。
+  `y`の値域（連続値か0/1か）が手法により異なるため完全に同一のDataFrameは
+  共有できないが、`_helpers.py`に「`const`列衝突用のDataFrameを`y`の値
+  リストを引数に取って組み立てるヘルパー」を追加すれば、手書きの重複を
+  減らせる。
+- **Claudeの所感**: 賛成。ただし優先度は低い（各ファイル4〜6行程度の
+  小さい重複で、実害も小さい）。項目68（ファイル分割）や項目69
+  （`ordered_df`/`shuffled_df`の生成ヘルパー化）と合わせて、`_helpers.py`
+  への「手法共通の小さいテストデータビルダー」追加をまとめて検討する
+  タイミングで対応するのが効率的と考える。
+- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
+
+### 82. `test_singular_hessian_raises_computation_error`の`x2`列が`2 * x1`の値を直書きしている
+
+- **対象**: [tests/test_logit.py:350-356](../../../tests/test_logit.py#L350-L356)
+  （`"x2": [2.0, 4.0, 6.0, 8.0, 10.0], # x2 = 2 * x1`とコメントで関係を
+  説明しつつ値自体は手計算で直書き）
+- **内容**: ユーザー指摘（2026-08-23、「配列で2を掛けたほうがミスが
+  ないのでは」）。完全な多重共線性を作るための`x2 = 2*x1`という関係が
+  コメントで説明されているが、値自体は手計算した結果を直書きしており、
+  `x1`を変更した際に`x2`側の書き換えを忘れる、または計算ミスをする
+  リスクがある。
+- **Claudeの所感**: 賛成。`x1 = [1.0, 2.0, 3.0, 4.0, 5.0]`から
+  `x2 = [v * 2 for v in x1]`のように生成すれば関係が自明になり
+  書き間違いリスクも無くなる。小さい修正で実施しやすい部類だと考える。
+- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 83. `test_cov_type_label`の`cov_type`候補リストが直書き（項目61パターンの再登場）
+
+- **対象**: [tests/test_logit.py:464](../../../tests/test_logit.py#L464)
+  （`for cov_type in ["classical", "opg", "hc0", "hc1"]:`という直書きリスト）
+- **内容**: ユーザー指摘（2026-08-23、「cov_typeが直書き」）を受けて確認。
+  なお同じ指摘に含まれていた「OPGが候補にない」という点は実際には
+  `test_cov_type_label`にも`test_cov_type_is_case_insensitive`にも
+  `"opg"`/`"OPG"`/`"Opg"`が含まれており該当しなかった（確認済み、誤検知）。
+  一方「直書き」自体は事実で、項目61（`NON_HAC_COV_TYPES`等の3層重複）と
+  同種のパターンがLogitにも存在する。
+- **Claudeの所感**: `generate_logit_fixtures.py`の`COV_TYPES = ["classical",
+  "opg", "hc0"]`（`hc1`を含まない）ともズレがあり、Logit全体で見ると
+  「有効なcov_type全体」「フィクスチャで検証する範囲」「このテストで
+  確認する範囲」の3つがそれぞれ微妙に異なるリストとして存在する状態。
+  項目61と統合して、手法ごとに「有効なcov_type全体」を1箇所で定義し
+  各ファイルがそこから必要な部分集合を選ぶ設計に整理するのが良いと
+  考える。
+- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目61と統合して検討）
+
+### 84. `test_nonrobust_is_alias_for_classical`と`test_cov_type_is_case_insensitive`の検証内容が重複、全`cov_type`でstd_errors一致を確認する形へ統合する余地（OLSにも同様の余地）
+
+- **対象**: [tests/test_logit.py:496-528](../../../tests/test_logit.py#L496-L528)
+  （`test_cov_type_is_case_insensitive`は`res.cov_type`のラベルのみ確認、
+  `test_nonrobust_is_alias_for_classical`は`nonrobust`/`classical`間の
+  `std_errors`一致のみ確認）
+- **内容**: ユーザー指摘（2026-08-23、「parametrizeで回してすべての
+  cov_typeでstd_errorsの一致を見たほうが確実。OLSでも同様」）。現状は
+  「ラベルが正しいか」と「nonrobustエイリアスの数値的な等価性」を別々の
+  小さいテストで確認しているが、後者の考え方（大文字小文字違いでも
+  数値的に同じ結果になること）を`classical`/`opg`/`hc0`/`hc1`/`cluster`
+  全体に広げてparametrize化すれば、ラベル確認と数値等価性確認を1つの
+  テストで兼ねられる。
+- **Claudeの所感**: 賛成。ただし全面統合するとテストの意図（「ラベルの
+  確認」と「エイリアスの数値等価性」）が1つの大きいテストに混ざり、
+  失敗時にどちらが壊れたか読み取りにくくなる可能性もあるため、
+  「ラベル確認は現状維持、大文字小文字違いでも数値が変わらないことの
+  確認を別途全cov_typeにparametrizeして追加する」という増分的な対応の
+  方が可読性を保てると考える。OLS側にも同種の余地があるとのことなので、
+  対応する場合は手法をまたいだ共通パターンとして一括で設計するのが
+  良い。
+- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

@@ -793,3 +793,72 @@
 - **気づいた経緯**: 2026-08-23、`tests/test_wls_crosscheck.py`解説後の
   ユーザー指摘。
 - **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
+
+### 37. `test_marginal_effects_default_excludes_intercept`が部分集合チェック（`<=`）で、余分なキーが混入しても検出できない
+
+- **対象**: [tests/test_logit.py:170-185](../../../tests/test_logit.py#L170-L185)
+  （`assert expected_keys <= set(row.keys())`）
+- **内容**: ユーザー指摘（2026-08-23）を受けて確認。`marginal_effects()`が
+  返す行の実際のキー数（Rust側`MarginalEffectsResult`のフィールド数）は
+  `expected_keys`と完全に一致しており（7個ずつ）、`<=`（部分集合）より
+  `==`（完全一致）の方が厳密で、かつ現状の実装と矛盾しない。
+- **Claudeの所感**: `==`に変えるだけの小さい修正で、将来意図しないキーが
+  追加された場合の検出力が上がる。実施しやすい部類。
+- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 38. `test_marginal_effects_at_is_case_insensitive`が`"overall"`のみ検証しており`"mean"`/`"median"`の大文字小文字非依存性は未検証
+
+- **対象**: [tests/test_logit.py:200-204](../../../tests/test_logit.py#L200-L204)
+  （`at="OVERALL"`と`at="overall"`の比較のみ、`pytest.mark.parametrize`化
+  されていない）
+- **内容**: ユーザー指摘（2026-08-23）を受けて確認。`at`は`"overall"`/
+  `"mean"`/`"median"`の3値を取るオプションだが、大文字小文字非依存性の
+  確認は`"overall"`のみで、`"mean"`/`"median"`側は未検証。
+- **Claudeの所感**: `@pytest.mark.parametrize("at", ["mean", "median",
+  "overall"])`化すれば3値とも同じテストでカバーできる。実施しやすい。
+- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 39. `test_marginal_effects_confidence_level_out_of_range_raises`が`1.5`のみ検証しており、`fit()`本体側のような境界値（`0.0`・負値）が未検証
+
+- **対象**: [tests/test_logit.py:213-218](../../../tests/test_logit.py#L213-L218)
+  （`confidence_level=1.5`のみ）と、対比した
+  [tests/test_logit.py:291-303](../../../tests/test_logit.py#L291-L303)
+  （`test_invalid_confidence_level_raises`、`fit()`側は`[1.5, 0.0, -0.1]`を
+  `pytest.mark.parametrize`で検証済み）
+- **内容**: ユーザー指摘（2026-08-23、「こういう系統は-1とかでも検証して
+  いなかった？」）を受けて確認。同じ「`confidence_level`が(0,1)範囲外」
+  という検証観点が`fit()`側（`LogitOptions.confidence_level`）では境界値
+  `0.0`・負値`-0.1`まで含めてparametrize済みだが、`marginal_effects()`側
+  は`1.5`（上限超過）のみで下限側（`0.0`・負値）が未検証という非対称が
+  ある。
+- **Claudeの所感**: `fit()`側と同じ`[1.5, 0.0, -0.1]`にparametrize化すれば
+  対称になる。実施しやすい部類。
+- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 40. Logitにも項目32（`y`列自体が存在しない場合の専用テストが無い）と同型の抜けがある
+
+- **対象**: [tests/test_logit.py:247-249](../../../tests/test_logit.py#L247-L249)
+  （`test_missing_column_raises`、`x=["does_not_exist"]`のみで`y`側の
+  欠落は未テスト。OLSの項目32と同じ非対称）
+- **内容**: ユーザー指摘（2026-08-23、「yのdoes_not_exist列検証がない。
+  同様にテストの抜けがないか確認してほしい」）を受けて確認。OLSの項目32
+  と全く同じパターンがLogitにもそのまま存在する。あわせて確認した結果、
+  以下は新規の抜けとしては該当しなかった（項目32と同じ理由＝共有関数の
+  同じ分岐が`x`側で間接的に検証済み、または元々方針上意図的に未実施）。
+  - `x`列単体でのnull値専用テストは無い（`test_null_values_raise`は`y`側
+    のみnullにしている）が、`x`/`y`とも`extract_f64_column`の同じ分岐を
+    通るため項目32と同じ理由でリスクは低いと判断。
+  - NaN/無限大の専用テストが無いのは、既存分（OLS/Logit/Probit）は
+    そのままにする、というユーザー既定方針（2026-08-23、`test_wls.py`
+    解説時点）通りの想定内の状態であり新規の抜けではない。
+  - エラーメッセージの内容検証が無い点は、`tests/`全体に共通する既知の
+    抜け（項目26、`test_ols.py`解説時に発見済み）がLogitでも同様に
+    再現しているのみで、Logit固有の新規項目ではない。
+- **Claudeの所感**: `y`側の`test_missing_column_raises`相当のテストを
+  追加する程度の小さい対応で足りる。優先度は項目32と同程度（低）で
+  良いと考える。
+- **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
+- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）

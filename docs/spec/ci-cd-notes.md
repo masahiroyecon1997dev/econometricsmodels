@@ -31,10 +31,11 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
   **`"uv"`エコシステム**を採用（uv専用の`package-ecosystem`。`test`/`benchmark`/`dev`/`docs`
   全依存グループが更新対象になる）。`cargo audit`/`pip-audit`（CI実行時点のロックファイル検証）と
   Dependabot（レジストリの継続監視・PR自動生成）は補完関係で、統合・置き換えはしない。
-- **`benchmark_ols.yml`**: `performance/compare_ols.py`（手法非依存の計測ハーネス
-  `performance/_perf_harness.py`＋OLS固有アダプタ）の定期実行（タグpush +
-  手動実行のみ、フルスイープが数分かかるため毎PR/週次は見送り）。結果整形は
-  `performance/render_performance_summary.py`として分離し、
+- **`benchmark_performance.yml`**: `performance/compare_<method>.py`（手法非依存の
+  計測ハーネス `performance/_perf_harness.py`＋手法固有アダプタ）を手法ごとの
+  matrixジョブ（`method: [ols, wls, ...]`、`fail-fast: false`）で定期実行
+  （タグpush + 手動実行のみ、フルスイープが数分かかるため毎PR/週次は見送り）。
+  結果整形は `performance/render_performance_summary.py`として分離し、
   `>> "$GITHUB_STEP_SUMMARY"`でjob summaryに出力する。リポジトリルートから
   `python -m performance.<...>`で実行する（Initiative A のパッケージ化に伴う）。
 - 全ワークフローでアクションをコミットSHAで固定する（サプライチェーン攻撃対策）。

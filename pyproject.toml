@@ -47,7 +47,7 @@ include = ["THIRD-PARTY-LICENSES.html", "LICENSE"]
 
 [dependency-groups]
 # CI（ci_python.yml）が使う: pytest tests / ruff check . / ruff format --check .
-# benchmark_ols.ymlもstatsmodels目的でこのグループを使う。
+# benchmark_performance.ymlもstatsmodels目的でこのグループを使う。
 # statsmodelsはtests/fixtures/benchmarks/のフィクスチャ生成に使った主リファレンス実装のため、
 # `==`で厳密固定する（.claude/rules/testing-policy.md「ベンチマーク値のフィクスチャ化」参照）。
 # バージョンを上げる場合はフィクスチャの再生成とセットで行うこと。
@@ -62,7 +62,7 @@ test = [
 ]
 # benchmark/ 配下のベンチマーク値生成・性能比較スクリプト専用（CLAUDE.md 3章
 # 「benchmark/はtests/とは別ライフサイクル」参照）。ci_python.ymlは使わない
-# （随時実行するツール）が、benchmark_ols.yml（compare_ols.py実行用）
+# （随時実行するツール）が、benchmark_performance.yml（compare_<method>.py実行用）
 # はタグpush/workflow_dispatch時にこのグループを使う。
 benchmark = [
     # polars.DataFrame.to_pandas()が内部で要求する（各リファレンス実装アダプタ・

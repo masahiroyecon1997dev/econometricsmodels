@@ -928,3 +928,163 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   良い。
 - **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 85. `check_margeff`（`tests/_assertions.py`）は共通化済みで、項目72（`_check_result`の5ファイル独立定義）解決の参考実装になる
+
+- **対象**: [tests/_assertions.py:59-90](../../../tests/_assertions.py#L59-L90)
+  （`check_margeff`、`test_logit_fixtures.py`・`test_probit_fixtures.py`
+  双方から共通利用）と対比した項目72（`_check_result`が5ファイルに
+  独立定義され前半が重複）
+- **内容**: `tests/test_logit_fixtures.py`解説時にユーザー指摘（「項目72の
+  解決方針の参考実装」として記録するよう依頼）。限界効果の比較ロジック
+  （`MARGEFF_AT`の3値をループし`dydx`/`std_err`/`z`/`p_value`/`conf_low`/
+  `conf_high`を比較）は、`_check_result`のような手法ごとの重複が起きて
+  おらず、最初から`_assertions.py`に共通関数として実装されている。
+- **Claudeの所感**: `_check_result`を分割する際、`params`/`std_errors`/
+  `<主統計量>`/`p_values`/`conf_int`という共通の前半部分を`check_margeff`
+  と同じ形（`_assertions.py`に`rtol`/`atol`をキーワード引数で受け取る
+  共通関数として配置し、手法固有の`rename`関数等はオプション引数で
+  差し替え可能にする）で切り出せば良い、という設計のたたき台になる。
+  項目72の対応時にこのファイルを参照実装として使うことを推奨する。
+- **気づいた経緯**: 2026-08-23、`tests/test_logit_fixtures.py`解説後の
+  ユーザー指摘。
+- **状態**: 未対応（項目72対応時の参考実装として記録）
+
+### 86. Logitの`cov_type="hc1"`が独立実装（R `sandwich`）1つのみで検証されており、statsmodels側の三角測量が効かない
+
+- **対象**: [tests/test_logit_fixtures.py:15-19](../../../tests/test_logit_fixtures.py#L15-L19)
+  （`hc1`はこのファイルに含めない旨のNote）、
+  [benchmark/nonlinear/references/statsmodels_ref.py:33-45](../../../benchmark/nonlinear/references/statsmodels_ref.py#L33-L45)
+  （statsmodelsのdiscrete modelが`hc1`を実質未実装〔`HC0`にフォールバック〕
+  のため、Rの`sandwich::vcovHC(type="HC1")`を主リファレンスとして採用した
+  経緯）
+- **内容**: ユーザー指摘（2026-08-23、「sandwichが主リファレンスになって
+  いるが、クロスチェック用のレファレンスを何かで補ったほうが良いか」）。
+  `testing-policy.md`「リファレンス実装」が重視する「独立した第三者実装
+  による三角測量」が、Logitの`hc1`単体では効いていない（Rの`sandwich`
+  1つのみが真実の源）。
+- **Claudeの所感**: 懸念自体は妥当だが、`hc1`は`hc0`に小標本補正の
+  スカラー係数`√(n/(n-k))`を掛けるだけの単純な変換であり、`hc0`自体は
+  statsmodelsとの三角測量が効いている（このファイルの`COV_TYPES`に
+  `"hc0"`が含まれる）。つまり「新しい統計量を丸ごと1実装だけで検証する」
+  リスクの高いケース（例: Tobitの主リファレンス）とは異なり、**検証されて
+  いない部分は既知の単純なスカラー補正のみ**という点でリスクは相対的に
+  低いと考える。それでも厳密を期すなら、Stata（`, robust`オプションの
+  小標本補正）やRの別パッケージ（`car::hccm(type="hc1")`）等、
+  `sandwich`以外での確認を追加する余地はある。優先度は低いと考えるが、
+  Issue #267（Rとの計算慣習差の将来検討）と関連する論点のため、
+  そちらのスコープでまとめて検討するのが良い。
+- **気づいた経緯**: 2026-08-23、`tests/test_logit_fixtures.py`解説後の
+  ユーザー指摘。
+- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち、Issue #267と
+  関連付けて検討）
+
+### 87. `test_include_intercept_false_matches_statsmodels`がOPG標準誤差をテストファイル内で手計算しており、`benchmark/nonlinear/references/statsmodels_ref.py`の同じ計算とロジックが重複
+
+- **対象**: [tests/test_logit_fixtures.py:244-248](../../../tests/test_logit_fixtures.py#L244-L248)
+  （`scores = base.model.score_obs(base.params); opg_cov = np.linalg.inv(
+  scores.T @ scores); sm_se = np.sqrt(np.diag(opg_cov))`）と、
+  [benchmark/nonlinear/references/statsmodels_ref.py:127-135](../../../benchmark/nonlinear/references/statsmodels_ref.py#L127-L135)
+  （`run()`内の`if cov_type.lower() == "opg":`ブロック、一字一句同じ
+  計算式）
+- **内容**: ユーザー指摘（2026-08-23、「OPGの標準誤差はstatsmodelsの
+  内部スコア関数`model.score_obs(params)`を使って本ファイル内で手計算
+  しているが、これは`tests/test_logit_fixtures.py`ではなく`benchmark`で
+  行うべきでは」）を受けて`statsmodels_ref.py`を確認したところ、**全く
+  同じ計算式が既に`benchmark/`側の参照実装層に存在する**ことが判明した。
+  `testing-policy.md`「ベンチマーク値のフィクスチャ化」が定める
+  「フィクスチャを生成するスクリプトは`benchmark/`側、`tests/`は
+  それを消費するだけ」という層分離の原則に反し、`tests/`側がリファレンス
+  値の計算ロジックを独自に再実装している状態。
+- **Claudeの所感**: ユーザー見解に完全に同意する重大な発見。理由は
+  (1) 同じOPG共分散の計算式が2箇所に存在し、片方だけ修正されるバグ
+  混入リスクがある、(2) `test_include_intercept_false_matches_
+  statsmodels`はopg以外のcov_typeについても`sm.Logit(y, x).fit(...)`を
+  直接呼んでおり（`test_wls_fixtures.py`の同名テストと同型、項目71で
+  既出のパターン）、`include_intercept=False`のケースが`generate_logit_
+  fixtures.py`のフィクスチャ生成対象に含まれていないために、テスト側で
+  都度その場でstatsmodelsを呼ぶ「代替策」になっている、という根本原因が
+  ある。本来は`generate_logit_fixtures.py`/`statsmodels_ref.py`の`run()`
+  に`include_intercept`引数を追加し、`logit.json`に`include_intercept_
+  false`のフィクスチャを追加した上で、このテストも他のテストと同じ
+  `_check_result`ベースの薄い比較に統一するのが筋が良いと考える。
+  WLS側（項目71と同種の`test_wls_fixtures.py`のケース）も同じ根本原因を
+  共有しているため、対応する場合は両手法まとめて設計するのが良い。
+- **気づいた経緯**: 2026-08-23、`tests/test_logit_fixtures.py`解説後の
+  ユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目71と統合して検討）
+
+### 88. `_check_result`内の`_rename`（Intercept→const変換）使用が、OLSで指摘した項目63（正規化タイミングの不一致）と同じ論点
+
+- **対象**: [tests/test_logit_fixtures.py:100](../../../tests/test_logit_fixtures.py#L100)
+  （`_check_result`内、`conf_int`のループで`_rename(name)`を呼ぶ）
+- **内容**: ユーザー指摘（2026-08-23）を受けて確認。項目63
+  （Intercept→const正規化のタイミングがR側〔生成時〕とstatsmodels側
+  〔テスト実行時〕で不一致、フィクスチャ生成時に統一すればテスト側の
+  変換ロジック自体が不要になる、という指摘）と全く同じパターンが
+  Logitのstatsmodels比較（このファイル）にも存在する。
+- **Claudeの所感**: 新規の問題ではなく項目63のスコープがLogitにも及ぶ
+  ことの確認。項目63の対応時（フィクスチャ生成時の正規化統一）に
+  合わせてこのファイルの`_rename`呼び出しも不要になる見込みのため、
+  独立した項目としては追加せず項目63への参照のみ記録する。
+- **気づいた経緯**: 2026-08-23、`tests/test_logit_fixtures.py`解説後の
+  ユーザー指摘。
+- **状態**: 未対応（項目63と統合、`tests/test_logit_fixtures.py`にも
+  適用範囲が及ぶことを追記）
+
+### 89. `_check_result`の`if ref["margeff"] is not None:`が、opg以外で`margeff`が誤って`None`になった場合も気づかずすり抜ける
+
+- **対象**: [tests/test_logit_fixtures.py:138-139](../../../tests/test_logit_fixtures.py#L138-L139)
+  （`if ref["margeff"] is not None: _check_margeff(res, ref["margeff"],
+  label)`、`cov_type`を条件に使わず`None`かどうかだけで判定）
+- **内容**: ユーザー指摘（2026-08-23、「ちょっと怖い。もし、OPG以外でも
+  抜けがあったらすり抜ける」）。現状`margeff`が`None`になるのは意図的に
+  opgケースのみだが、このチェックは「`None`なら検証をスキップする」
+  という消極的な実装のため、`generate_logit_fixtures.py`側にバグがあり
+  `classical`/`hc0`等で誤って`margeff`が`None`のまま出力されても、この
+  テストは何も検出せず素通りする。
+- **Claudeの所感**: ユーザー見解に同意。`cov_type`を引数に取り
+  `if cov_type == "opg": assert ref["margeff"] is None, "opgは
+  margeffフィクスチャが無い想定"`、`else: assert ref["margeff"] is not
+  None; _check_margeff(...)`のように、期待値を明示的にホワイトリスト化
+  すれば、意図しない`None`混入を検出できるようになる。実施しやすい
+  部類の改善だと考える。
+- **気づいた経緯**: 2026-08-23、`tests/test_logit_fixtures.py`解説後の
+  ユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 90. クラスターロバストSEの小標本（少数クラスタ）信頼性についての設計上の懸念が、既存の「G<q特異性」議論とは別軸で未整理
+
+- **対象**: [tests/test_logit_fixtures.py:180-194](../../../tests/test_logit_fixtures.py#L180-L194)
+  （`test_cluster_g2_matches_statsmodels`、LogitはF検定を持たないため
+  G=2×q=3でも特異にならず成功パスになる旨のdocstring）、
+  `docs/planning/specs/nonlinear-implementation-notes.md`「Wald検定と
+  クラスターロバストSEの構造的な相互作用」（既存の`G<q`特異性議論、
+  Tobit/OLSのF検定・Wald検定の部分行列が特異になる話）
+- **内容**: ユーザー指摘（2026-08-23、「クラスタ標準誤差のG<qで特異に
+  なるが発生しないことについて、ただ、推定上問題があると思うので
+  バリデーションチェックするかどうか検討するのはリファクタリング項目
+  かどこかに入っているか」）を受けて既存ドキュメントを確認したが、
+  該当する議論は見つからなかった。既存の`G<q`議論はいずれも「Wald検定・
+  F検定に使うq×q部分行列が構造的に特異になり計算自体が失敗する」という
+  **計算エラーの話**であり、ユーザーが指摘しているのは別軸の**統計的な
+  信頼性の話**（クラスターロバスト共分散行列自体はG個のランク1行列の和
+  のため、Gが小さいと個々の標準誤差の推定量としての信頼性が低下する、
+  という計量経済学で広く知られる「少数クラスタ問題」。Cameron & Miller
+  (2015)等）だと考えられる。
+- **Claudeの所感**: 統計的には、G=2のような極端に少ないクラスタ数での
+  クラスターロバストSEは、計算自体は成功しても推定値の分布が理論上の
+  漸近正規性から乖離しやすく、実務では過小推定（実際より狭い信頼区間）
+  になりやすいことが知られている。これは「計算が失敗する・数値的に
+  おかしい」という`ComputationError`向けの問題ではなく、「統計的推論の
+  質が低下する」という利用者への注意喚起の問題なので、`ValidationError`
+  を追加してブロックするのは過剰（Gがいくつ以上なら安全か明確な閾値が
+  無く、正当な少数クラスタでの分析を不当に拒否するリスクがある）と考える。
+  対応するなら`docs/spec/logit-spec.md`（および同種のOLS/WLS/IV等の
+  仕様書）に「クラスタ数が少ない場合はクラスターロバストSEの信頼性が
+  低下する、wild bootstrap等の代替手法を検討する」という趣旨の注記を
+  追加する、ドキュメント上の対応が適切だと考える。
+- **気づいた経緯**: 2026-08-23、`tests/test_logit_fixtures.py`解説後の
+  ユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち、対応するならドキュメント側
+  ・手法横断で検討）

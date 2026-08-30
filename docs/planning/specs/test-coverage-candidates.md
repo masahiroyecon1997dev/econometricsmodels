@@ -862,3 +862,32 @@
   良いと考える。
 - **気づいた経緯**: 2026-08-23、`tests/test_logit.py`解説後のユーザー指摘。
 - **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
+
+### 41. `method`（bfgs/lbfgs）と`cov_type`・シナリオ・クラスターの組み合わせが検証されていない
+
+- **対象**: [tests/test_logit_fixtures.py:142-152](../../../tests/test_logit_fixtures.py#L142-L152)
+  （`test_matches_statsmodels`、`method`は既定〔newton〕固定で
+  `cov_type`×シナリオを網羅）と
+  [tests/test_logit_fixtures.py:197-216](../../../tests/test_logit_fixtures.py#L197-L216)
+  （`test_method_matches_statsmodels`、`method`はbfgs/lbfgsを網羅するが
+  `cov_type="classical"`・`scenario="baseline"`に固定）
+- **内容**: ユーザー指摘（2026-08-23、「`test_matches_statsmodels`に
+  `test_method_matches_statsmodels`のメソッド照合を含めたほうがいいので
+  は？モデルごとのcov_type、シナリオ検証が漏れていると思う。加えて
+  methodごとのクラスタ検証も漏れていない？」）を受けて確認。`method`は
+  `classical`×`baseline`の1点でしか他のcov_type・シナリオ・クラスター
+  ケースと掛け合わされておらず、「`method=bfgs`×`cov_type=hc0`」
+  「`method=lbfgs`×`scenario=near_separation`」「`method=bfgs`×
+  クラスターロバストSE」等の組み合わせは`tests/`のどこにも存在しない。
+  `testing-policy.md`「テストの3系統」・レビュー観点3（オプションの
+  組み合わせで未検証の組が無いか）に該当する抜け。
+- **Claudeの所感**: 全組み合わせ（6シナリオ×3cov_type×3method×クラスター
+  3種）を網羅すると組み合わせ爆発になるため、代表的な組み合わせ
+  （例: 最も難しいシナリオ`near_separation`×bfgs/lbfgs、クラスター×
+  bfgs/lbfgsを1ケースずつ）に絞って追加するのが現実的と考える。
+  `test_matches_statsmodels`に`method`を第3の`parametrize`として
+  丸ごと含める案は組み合わせ数が9倍（3method×3cov_type×6scenario）に
+  膨らみCI時間が増えるため、代表ケースのみの追加が良いと考える。
+- **気づいた経緯**: 2026-08-23、`tests/test_logit_fixtures.py`解説後の
+  ユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

@@ -28,8 +28,10 @@ engine と同じ「フルセットの適合度統計量込み」で計測する�
     python -m performance.compare_ols \\
         --output docs/spec/_ols_performance_results.json
 
-    # 単体計測（デバッグ用）
-    python -m performance.compare_ols \\
+    # 単体計測（デバッグ用）。一括実行と条件を揃えるにはスレッド数を1に固定する
+    # （一括実行では `_perf_harness._run_isolated` が自動で設定する）。
+    RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \\
+        python -m performance.compare_ols \\
         --worker --library engine --cov-type hac --n 1000 --k 5
 """
 

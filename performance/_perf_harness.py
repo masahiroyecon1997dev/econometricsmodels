@@ -33,18 +33,28 @@
   `benchmark.common.hac_auto_lag(n)`（engineの自動選択式と同じ）で計算した同一の
   ラグ数を `FitContext.hac_lags` で渡す。ラグ選択方式自体の違いではなく、
   Newey-West計算そのものの性能差を見るため。
+- **スレッド数を1に固定する**: `_run_isolated()` がワーカーサブプロセスの環境変数で
+  engine（faer/rayon）・リファレンス実装（numpy/BLAS）とも1スレッドに固定する
+  （`_SINGLE_THREAD_ENV`）。多コア機で線形代数バックエンドのスレッドプールが負荷下で
+  競合し、engine の classical n=1,000,000 の実行時間が単一スレッド時の20倍以上
+  （約0.15秒→3〜4秒）に膨れ上がり計測が不安定になる現象を実測で確認したため
+  （`docs/spec/ols-performance-notes.md`「既知の限界」）。単一スレッドに揃えることで
+  「Rustコアの計算効率 vs Python+BLAS」という比較の主目的を、スレッドプール挙動の
+  環境差から切り離す。
 
 ## 既知の限界
 
-- BLAS/線形代数バックエンドのスレッド数は制御していない（numpy/statsmodelsが内部で
-  使うBLASのマルチスレッド化とfaerのスレッド数設定が異なりうる）。観測された差には
-  この要因も混ざりうる。
+- 単一スレッド固定のため、線形代数バックエンドのマルチスレッド化による高速化は
+  この比較には現れない（多コアでの実利用の性能特性とは別軸）。engine 側の
+  マルチスレッド時の不安定性そのものは別途エンジン側で調査する
+  （`docs/planning/specs/refactoring-candidates.md`）。
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import resource
 import statistics
 import subprocess
@@ -65,6 +75,19 @@ REPO_ROOT = THIS_FILE.parents[1]
 # debugビルドの `_lib*.so` は約900MB、releaseビルドは約33MBだった（実測）。
 # 大きな余裕を持ってこの間の閾値でdebugビルドの疑いを警告する。
 _DEBUG_BUILD_SO_SIZE_THRESHOLD_BYTES = 200 * 1024 * 1024
+
+# ワーカーサブプロセスに渡す、線形代数バックエンドのスレッド数を1に固定する
+# 環境変数（モジュール docstring「スレッド数を1に固定する」参照）。numpy が MKL /
+# OpenBLAS / Accelerate のどれとリンクされていても効くよう主要な変数を網羅する。
+_SINGLE_THREAD_ENV = {
+    "RAYON_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
+    "VECLIB_MAXIMUM_THREADS": "1",
+    "POLARS_MAX_THREADS": "1",
+}
 
 
 @dataclass(frozen=True)
@@ -249,6 +272,7 @@ def _run_isolated(
         text=True,
         check=True,
         cwd=str(REPO_ROOT),
+        env={**os.environ, **_SINGLE_THREAD_ENV},
     )
     return json.loads(proc.stdout)
 

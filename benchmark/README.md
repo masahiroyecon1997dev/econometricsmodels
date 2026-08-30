@@ -8,7 +8,7 @@
 **性能比較ツール（旧 `benchmark/performance/`）はリポジトリ直下の
 [`performance/`](../performance/) に分離しました**（`benchmark_performance.yml`
 専用で、pytest とは無関係な随時実行ツールであり、正確性検証用の本ディレクトリとは
-性質が違うため。`docs/planning/specs/benchmark-restructure-design.md` D5）。
+性質が違うため）。
 
 ディレクトリ構成・各スクリプトの役割分担・リファレンス実装の使い分けの詳細は
 [`.claude/skills/reference-benchmark/SKILL.md`](../.claude/skills/reference-benchmark/SKILL.md)
@@ -29,8 +29,8 @@ python -m benchmark.regenerate_all --datasets-only    # 全系統CSVのみ（Rsc
 
 各系統は `datasets.py`（DGP）／`freeze.py`（CSV凍結）／`references/`（リファレンス
 実装アダプタ・`.R`）／`fixtures/`（`generate_*_fixtures.py`）で構成。系統をまたぐ
-共通ヘルパーは `benchmark/common/` に集約。再設計の全体像は
-[`docs/planning/specs/benchmark-restructure-design.md`](../docs/planning/specs/benchmark-restructure-design.md)。
+共通ヘルパーは `benchmark/common/` に集約。パッケージ化（Initiative A）の経緯は
+[`docs/planning/specs/refactoring-issue231-progress.md`](../docs/planning/specs/refactoring-issue231-progress.md)「Initiative A」節。
 
 ## ライセンスに関する注記
 

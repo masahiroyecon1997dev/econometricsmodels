@@ -20,7 +20,7 @@ allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
 
 ## `benchmark/` ディレクトリの構成（動作確認済み）
 
-`benchmark/` は `__init__.py` を持つ Python パッケージ（Initiative A、`docs/planning/specs/benchmark-restructure-design.md`）。import はすべてドット表記（`from benchmark.common import ...` 等）、スクリプト実行は**リポジトリルートから `python -m benchmark.<...>`**（各ディレクトリへ `cd` して `python foo.py` は不可）。
+`benchmark/` は `__init__.py` を持つ Python パッケージ（Initiative A、経緯は `docs/planning/specs/refactoring-issue231-progress.md`「Initiative A」節）。import はすべてドット表記（`from benchmark.common import ...` 等）、スクリプト実行は**リポジトリルートから `python -m benchmark.<...>`**（各ディレクトリへ `cd` して `python foo.py` は不可）。
 
 `engine`/`engine_pybind`と同じ系統（family）単位でディレクトリを分けている（`linear`=OLS/WLS/GLS、`panel`=FE/RE、`iv`=IV、`nonlinear`=Logit/Probit/Tobit等）。系統をまたいで使う汎用ヘルパーは`benchmark/common/`に集約。1手法は(a)データセット層＝`datasets.py`、(b)リファレンスアダプタ層＝`references/`、(c)フィクスチャドライバ層＝`fixtures/generate_*_fixtures.py`の3つに分ける。
 
@@ -37,7 +37,7 @@ allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
 - `benchmark/<系統>/datasets.py`（(a) データセット層）: 合成データセットのDGP（`generate_*` 関数・`SCENARIOS`）とCSV凍結（`freeze.py`から呼ばれる）。`linear`は7シナリオ（baseline, small_n, high_variance, heteroskedastic, autocorrelated, moderate_multicollinearity, perfect_multicollinearity）、`nonlinear`は`generate_binary_choice_dataset(scenario, link="logit"|"probit", ...)`（`link`引数でLogit/Probit共用）、`iv`は識別構造（操作変数×内生変数×構造誤差）を組み込んだ専用シナリオ。
 - `benchmark/<系統>/freeze.py`: 各系統の合成データセットを`tests/fixtures/benchmarks/data/`にCSVとして**固定**する。フィクスチャ生成・pytest実行時はこのCSVを読むだけ（ジェネレータを直接呼ばない）。理由: ジェネレータ側のコードが将来変わっても、固定済みフィクスチャJSONの期待値と無言で不整合にならないようにするため。
 - `benchmark/regenerate_all.py`（root）: 合成データCSV＋全フィクスチャJSONの一括再生成オーケストレータ（3系統の`freeze.py`＋11個の`generate_*_fixtures.py`を`python -m`で順に実行）。`--datasets-only`（CSVのみ、Rscript不要）／`--fixtures-only`。新しいシナリオ・データセットを追加した場合のみ再実行する（自動追従はしない）。
-- `performance/`（リポジトリ直下、`benchmark/`の外）: リファレンス実装との**性能比較**（正確性検証とは別軸、`testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」参照）。pytest無関係で性質が違うため分離している（`benchmark-restructure-design.md` D5）。
+- `performance/`（リポジトリ直下、`benchmark/`の外）: リファレンス実装との**性能比較**（正確性検証とは別軸、`testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」参照）。pytest無関係で性質が違うため分離している（Initiative A で分離）。
   - `_perf_harness.py`: 手法非依存の計測ハーネス（サブプロセス隔離・ウォームアップ＋中央値・ピークRSS・releaseビルド検知・n/kスイープ・レポート組み立て・CLI）。手法固有の「変わる部分」は`PerfAdapter`（データ生成・ライブラリ別`fit_once`・cov_type・軸の刻み・リファレンス実装バージョン）にまとめて`run_cli()`に渡す。
   - `compare_<method>.py`: 手法ごとの薄いアダプタ＋`__main__`。`compare_ols.py`・`compare_wls.py`・`compare_logit.py`・`compare_probit.py`・`compare_iv.py`（`.github/workflows/benchmark_performance.yml`の`method`matrixから定期実行）が実装例。比較対象はREADME「Verification accuracy」表のprimary reference単体（OLS/WLS/Logit/Probit: statsmodels、IV: linearmodels。pyfixestは使わない）。cov_typeは代表2点（最軽classical＋最重、実装時に軽く実測して選定）のみ。リファレンス実装がネイティブ非対応の条件（Logit/ProbitのOPG、IVのGMM×hac等）は対称計測できない・病的に遅いため性能比較の対象から外す。`default_method`（IVの2sls等）と`extra_methods`（method軸で代表点のみ計測、Logit/Probitのbfgs/lbfgs・IVのgmm）で method 別計測を表現する。
   - `render_performance_summary.py`: 結果JSON→job summary用Markdown整形（手法名・cov_type・ライブラリは`_meta`から読むため手法非依存）。

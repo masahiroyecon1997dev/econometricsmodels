@@ -405,8 +405,8 @@
 - 項目41（ピークRSS表示桁が `_measure_point` の進捗ログ `.1f` と `render_performance
   _summary._format_rss` `.0f` で不統一）: 対応済みにつき削除（2026-08-30、ユーザー
   確認済み）。`_format_rss` を `.0f`→`.1f` にして進捗ログと桁を統一。commit: `74bb453`。
-- `benchmark-restructure-design.md` の項目40・41への参照2箇所（12行目・D5）は、
-  同ノートの整理時に併せて解消する（内容は上記のとおり完了済み）。
+- `benchmark-restructure-design.md` にあった項目40・41への参照2箇所は、同ノートの
+  削除（2026-08-30、下記「Initiative A」節）で解消済み。
 - 上記以外（`refactoring-candidates.md`項目12・13・15〜35・37・39・43）は
   未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は
@@ -433,11 +433,15 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
 
 `refactoring-candidates.md`の単発項目を1つずつ潰す「随時対応ログ」とは別の、
 `benchmark/`をパッケージとして構造化し(a)データセット/(b)リファレンスアダプタ/
-(c)フィクスチャドライバの3層に分離し、Spec+汎用ドライバで手法ごとの重複を
-集約する構造変更。
+(c)フィクスチャドライバの3層に分離し、手法ごとの重複を共有ヘルパーへ集約する
+構造変更。
 
-- **設計ノート**: [`benchmark-restructure-design.md`](benchmark-restructure-design.md)（正本）。
-  ディレクトリ構造・レイヤ設計・移行手順（OLS先行）・吸収する候補項目一覧はそちら。
+- **設計ノート**: `benchmark-restructure-design.md` は Initiative A 完了後に削除した
+  （2026-08-30、ユーザー確認済み）。内容は本節に集約済み——ディレクトリ構造は
+  実コード（`benchmark/` 以下）と `benchmark/README.md`、決定事項・移行の実施記録は
+  下記「決定済み」「進捗」、吸収した候補項目は下記「吸収する`refactoring-candidates.md`
+  項目」、当初構想し**不採用**とした Spec/汎用ドライバ層（`MethodBenchmarkSpec` /
+  `build_fixture_json`）は下記「進捗」末尾。
 - **決定済み（2026-08-29、AskUserQuestionで確認）**: トップレベル兄弟構成
   （`tests/`配下への入れ子は却下）／`benchmark/`をパッケージ化し`pythonpath=["."]`で
   `sys.path.insert`全廃／`performance/`をトップに昇格し対象外／(c)はSpec+汎用ドライバ
@@ -648,8 +652,21 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
       （並行セッション所有）は壊れたリンク・パスのみ新構造へ修正（内容は非改変）。
       検証: `pytest` 957件・`ruff check .`／`format --check .` パス、`/code-review`（fork）
       指摘ゼロ（数値フィクスチャ変化ゼロ・stale 実行参照ゼロを独立確認）。
-  - **これで Initiative A（`benchmark/` パッケージ再設計）完了**。設計ノート
+  - **これで Initiative A（`benchmark/` パッケージ再設計）完了**。当初の設計ノート
     `benchmark-restructure-design.md` の移行手順 §8 step 1〜9 すべて実施済み。
+  - **不採用: Spec/汎用ドライバ層（`MethodBenchmarkSpec` / `build_fixture_json`）**
+    （2026-08-30、`benchmark-restructure-design.md` 削除時に記録）。設計ノート §5.3 で
+    「(c) フィクスチャドライバを dataclass Spec ＋ データ駆動ループにする」構想が
+    あったが、Step 4（WLS）以降で毎回「rule of three 未達」として見送り、最終的に
+    OLS/WLS/Logit/Probit/IV/IV-GMM の6手法すべてを軽量な共有ヘルパーだけで移行
+    完了した：`benchmark/common/driver.py::run_fixture_cli`（11ファイルで完全一致
+    だった `__main__`）・`benchmark/common/reference/r.py`（`run_r` ＋
+    `normalize_names`、Rアダプタ5コピーの忠実マージ）・`benchmark/linear/references
+    /r.py::run_lm_r`（OLS/WLS 共用の薄いラッパー）・`benchmark/common/reference
+    /extract.py::extract_coef_se`。`MethodBenchmarkSpec` の dataclass 層・
+    `cluster_cases.py` へのクラスターケース完全統合・`build_meta` は入れていない
+    （`_meta` は各 `generate_*_fixtures.py` にインライン維持）。将来 panel/時系列など
+    3個目以降の異なる形が出て共通化余地が再燃したら、その時点で設計し直す。
 
 ---
 

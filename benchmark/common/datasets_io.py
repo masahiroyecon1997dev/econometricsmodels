@@ -6,7 +6,7 @@
 - `run_freeze_cli`: 各系統の `benchmark/<系統>/freeze.py` 共通の `__main__`。
 
 旧 `benchmark/_common.py` から Initiative A で関心事ごとに分割した
-（`docs/planning/specs/benchmark-restructure-design.md` 4章）。
+（経緯は `docs/planning/specs/refactoring-issue231-progress.md`「Initiative A」節）。
 """
 
 from __future__ import annotations

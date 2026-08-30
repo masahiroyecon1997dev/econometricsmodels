@@ -1,10 +1,13 @@
 """フィクスチャ生成スクリプトの共通ドライバ。
 
 現時点では `run_fixture_cli`（`generate_*_fixtures.py` 11ファイルで一字一句同じ
-だった `__main__` ブロック。`docs/planning/specs/refactoring-candidates.md` 項目19）
-のみ。`MethodBenchmarkSpec` / `build_fixture_json`（メインループのデータ駆動化）は、
-OLS/WLS を最初の消費者として形が固まってから追加する
-（`docs/planning/specs/benchmark-restructure-design.md` 8章、rule of three）。
+だった `__main__` ブロックを1関数に集約したもの）のみ。当初構想していた
+`MethodBenchmarkSpec` / `build_fixture_json`（メインループのデータ駆動化）は
+見送った——OLS〜IV/IV-GMM の6手法すべて軽量な共有ヘルパー（本関数・
+`benchmark.linear.references.r.run_lm_r`・`benchmark.common.reference.r` の
+`run_r`/`normalize_names`・`extract_coef_se`）で移行でき、dataclass Spec 層を
+足す必要が生じなかったため（rule of three 未達）。経緯は
+`docs/planning/specs/refactoring-issue231-progress.md`「Initiative A」節。
 """
 
 from __future__ import annotations

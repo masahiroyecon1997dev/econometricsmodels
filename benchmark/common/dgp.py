@@ -10,7 +10,7 @@
 
 数値の定数（誤差項・スケール倍率）は `benchmark.common.dgp_constants` に分けている。
 旧 `benchmark/_common.py` から Initiative A で関心事ごとに分割した
-（`docs/planning/specs/benchmark-restructure-design.md` 4章）。
+（経緯は `docs/planning/specs/refactoring-issue231-progress.md`「Initiative A」節）。
 """
 
 from __future__ import annotations

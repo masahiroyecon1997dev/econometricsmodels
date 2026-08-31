@@ -1264,3 +1264,169 @@
   限らない。専用の1テストを足す程度の軽い対応で埋められる。
 - **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時の調査中に発見。
 - **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
+
+### 54. 過剰識別検定（Sargan/Hansen J）が実際に棄却される（p値が小さい）シナリオが1つも存在しない
+
+- **対象**: `tests/fixtures/benchmarks/iv.json`・`tests/fixtures/benchmarks/
+  iv_gmm.json`全体（`sargan_p_value`/`hansen_j_p_value`の最小値を
+  実機で確認したところ、2SLS側は`card`実データの`0.103`が最小、GMM側も
+  同水準で、5%はおろか10%水準でも棄却されるケースが1つも無い）
+- **内容**: ユーザー指摘（2026-08-30、「シナリオとして過剰識別検定に
+  引っかかるシナリオってあるか？ないなら作ったほうが良いか？」）を受けて
+  全フィクスチャの`sargan_p_value`/`hansen_j_p_value`を機械的に走査し
+  確認した。ユーザーの見立て通り、現在の9つの合成データシナリオ・実データ
+  （`card`）のいずれも「操作変数が妥当」という帰無仮説を棄却しない
+  （p値が小さくとも0.10程度）。これは各シナリオのDGP
+  （`benchmark/iv/datasets.py`）が「操作変数は真に外生」という前提で
+  設計されているため当然の結果ではあるが、**「過剰識別検定という機能
+  自体が、実際に統計的有意な結果を返せることは一度も確認されていない」**
+  という意味でのカバレッジの穴ではある。
+- **Claudeの所感**: 妥当な指摘だと考える。操作変数の1本を意図的に構造
+  誤差項と相関させた「無効な操作変数を含む」DGPシナリオを追加すれば、
+  Sargan/Hansen J検定が実際に小さいp値を返すことを確認でき、検定の
+  実装（`two_sls.rs`/`gmm.rs`）が「棄却すべき場面で正しく棄却する」側の
+  挙動まで検証できる。ただし新規シナリオの追加は`benchmark/iv/
+  datasets.py`・`generate_iv_fixtures.py`・`generate_iv_gmm_fixtures.py`・
+  `generate_iv_crosscheck_fixtures.py`全てのフィクスチャ再生成を伴う
+  ため、着手時期はユーザー判断が必要。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv_fixtures.py`解説時の
+  ユーザー指摘、フィクスチャJSONの実機走査で確認。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 55. `first_stage()`が返す数値が、統計モデル・R・engine単体テストのいずれとも一度も照合されていない——過去に実際に発生したバグの実例を踏まえると優先度は高いと考える
+
+- **対象**: `tests/test_iv.py`・`tests/test_iv_fixtures.py`・
+  `tests/test_iv_gmm_fixtures.py`・`tests/test_iv_crosscheck.py`全体
+  （`grep -n "first_stage"`でヒットする箇所は全て構造確認
+  〔`test_iv.py::test_first_stage_structure`、`param_names`の集合一致の
+  みで数値は見ない〕か、「OLSのテストで検証済みだから省略する」という
+  docstring上の説明のみ）
+- **内容**: ユーザー指摘（2026-08-30、「第一段階の結果の検証がされて
+  いないのでは？」）を受けて確認したところ、指摘の通り**`first_stage()`
+  が返す`OlsResults`の実際の数値（`params`/`r_squared`/`std_errors`等）を
+  外部リファレンス（statsmodels/linearmodels/R）と照合するテストは
+  1つも存在しない**ことを確認した。`test_iv_fixtures.py`のモジュール
+  docstringは「`first_stage()`は通常のOLS回帰の結果をそのまま返すだけ
+  で、`test_ols_fixtures.py`が既にOLSの数値一致を検証済みのため」と
+  省略理由を説明しているが、この理屈には**穴がある**。`test_ols_
+  fixtures.py`が検証しているのは`OlsEstimator::fit`という計算ロジック
+  自体の正しさであり、**`first_stage()`がその計算ロジックに正しい
+  設計行列（`x_exog ++ instruments`、正しい`include_intercept`）を
+  渡しているか**という**IV固有の配線（グルー）コードの正しさ**は
+  別問題である。実際、`engine/src/iv/CLAUDE.md`に記録されている
+  過去のバグ（`compute_first_stage`が`has_intercept`を常に`false`で
+  呼んでいたことによる`k_constant`取り違え）は、まさにこの配線コードの
+  バグであり、**`first_stage().r_squared`が実際に静かに間違った値
+  （フィクスチャ作成中の手動比較で発覚: `0.430`ではなく正しくは
+  `0.338`）を返していた**という実例がある。このバグは自動テストでは
+  なくベンチマーク作成中の手動比較で偶然発見されたものであり、もし
+  同種のバグが再発しても、現状のテストスイートには検知する手段が
+  無い。
+- **Claudeの所感**: ユーザー指摘に強く同意する。過去に実際に発生した
+  バグの実例がある箇所だけに、他の項目より優先度を高く設定すべきと
+  考える。対応案としては、`test_iv_fixtures.py`または`test_iv_
+  crosscheck.py`に「`first_stage()['endog1']`の`params`/`r_squared`等が、
+  同じデータで直接`OLS(y=x_endog名, x=x_exog+instruments)`をfitした
+  結果と一致する」という比較テストを追加する（新規フィクスチャ生成は
+  不要、既存の`OlsResults`同士の比較で足りる）のが最も手軽。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv_fixtures.py`解説時の
+  ユーザー指摘、`grep`で確認。
+- **状態**: 未対応（**優先度高**、着手要否はユーザー判断待ち）
+
+### 56. `test_multi_endog_matches_linearmodels`が`cov_type`のみをparametrizeしており、DGPシナリオ軸（弱操作変数・不均一分散等）との組み合わせが無い
+
+- **対象**: [tests/test_iv_fixtures.py:247-268](../../../tests/test_iv_fixtures.py#L247-L268)
+  （`x_endog=["endog1", "endog2"]`固定で`iv_baseline_multi_endog.csv`
+  1つのみ、`cov_type`のみparametrize）、
+  [tests/test_iv_gmm_fixtures.py:231-256](../../../tests/test_iv_gmm_fixtures.py#L231-L256)
+  （GMM版も同様に`cov_type`のみ）
+  対比: [tests/test_iv_fixtures.py:158-174](../../../tests/test_iv_fixtures.py#L158-L174)
+  （`test_matches_linearmodels`、単一内生変数側は`scenario`×`cov_type`の
+  直積で9シナリオを網羅）
+- **内容**: ユーザー指摘（2026-08-30、「`test_multi_endog_matches_
+  linearmodels`は`cov_type`だけでなく、シナリオの組み合わせも検証した
+  ほうが良いと思うがどうか？」）を受けて確認した。単一内生変数の
+  `test_matches_linearmodels`は9シナリオ（弱操作変数・小標本・
+  不均一分散・自己相関・多重共線性等）×`cov_type`を網羅しているのに
+  対し、複数内生変数（`x_endog`が2つ）のケースは`iv_baseline_multi_
+  endog.csv`という単一の「素直な」データセットでしか検証されておらず、
+  「複数内生変数」と「弱操作変数」・「不均一分散」等の**組み合わせ**は
+  一度も検証されていない。特に弱操作変数×複数内生変数は、
+  `weak_instrument_f_statistics`が内生変数ごとの辞書であることを踏まえると
+  実務上重要な組み合わせだと考えられる。
+- **Claudeの所感**: 妥当な指摘だが、実施コストは相応に大きい。単一
+  内生変数の9シナリオと同じ密度で複数内生変数版を用意すると、DGP・
+  固定CSV・フィクスチャ生成の全てを9パターン分新たに用意する必要が
+  あり、規模が大きい。全シナリオではなく「弱操作変数」「不均一分散」
+  等、複数内生変数との相互作用が特に懸念される2〜3シナリオに絞って
+  追加するのが費用対効果が良いと考える。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv_fixtures.py`解説時の
+  ユーザー指摘。
+- **状態**: 未対応（着手要否・対象シナリオの絞り込みはユーザー判断待ち）
+
+### 57. 多重共線性のテストが`x_exog`内部のみで、`instruments`間・`instruments`×`x_exog`・`x_endog`×`x_exog`（第二段階）の組み合わせが未検証
+
+- **対象**: [benchmark/iv/datasets.py:23-27](../../../benchmark/iv/datasets.py#L23-L27)
+  （「`moderate_multicollinearity`/`high_condition_number`/
+  `perfect_multicollinearity`/`scale_variance`は`x_exog`側の列間
+  relationshipを操作する設計...instrumentsやx_endogには適用しない」、
+  設計上明記された制限）
+- **内容**: ユーザー指摘（2026-08-30、「多重共線性に関してx_exogと
+  x_endog, instrumentsとx_exog, instrumentsとx_endogのすべての組み合わせ
+  を考える必要があるのでは？」）を受けて確認した。現在の多重共線性系
+  シナリオは設計文書に明記されている通り一貫して`x_exog`列間のみを
+  操作しており、これは意図的な制限（OLSの`generate_linear_dataset`と
+  同じ発想の流用）であって見落としではない。ただし統計的には、IVは
+  `x_exog`だけでなく2段階の設計行列を持つため、多重共線性が問題になる
+  経路は少なくとも2種類ある。
+  1. **第一段階の設計行列（`x_exog ++ instruments`）の特異性**:
+     `instruments`同士が強く相関している、または`instruments`が
+     `x_exog`と強く相関しているケース。現状`test_iv.py`の
+     `test_singular_first_stage_design_matrix_raises_computation_error`
+     は`x_exog`内部の完全共線性のみで再現しており、`instruments`側の
+     共線性は未検証（ただし第一段階の設計行列としては同じ
+     `x_exog ++ instruments`の列空間に属するため、実装上のコードパスは
+     `x_exog`内部の共線性と共通の可能性が高い）。
+  2. **第二段階の設計行列（`x_exog` + `X̂`〔内生変数の予測値〕）の
+     特異性**: `x_exog`自体は健全でも、内生変数の予測値`X̂`がたまたま
+     `x_exog`と強い共線性を持つケース。これは第一段階とは異なる
+     コードパス（`second_stage_input`、`engine/src/iv/CLAUDE.md`
+     参照）であり、現状は完全に未検証。
+- **Claudeの所感**: (1)は実装上のコードパスがおそらく共通のため優先度は
+  低いが、(2)は第一段階とは独立した失敗経路であり、`engine/src/iv/
+  CLAUDE.md`に記録されている過去のバグ修正がこの`second_stage_input`
+  周りだったことを踏まえると、検証する価値がある。ただし「内生変数の
+  予測値がたまたま`x_exog`と共線的になる」DGPを意図的に構築するのは、
+  単純な列操作（`x2 = 2*x1`のような）より設計が難しい（第一段階の
+  係数を逆算する必要がある）。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv_fixtures.py`解説時の
+  ユーザー指摘。
+- **状態**: 未対応（優先度は(2)のみ中、(1)は低。着手要否はユーザー
+  判断待ち）
+
+### 58. クラスターロバストSEのテスト群（`test_cluster_matches_linearmodels`等）が`coef`/`se`のみの検証で、他の統計量への影響が未確認
+
+- **対象**: [tests/test_iv_fixtures.py:177-244](../../../tests/test_iv_fixtures.py#L177-L244)
+  （`test_cluster_matches_linearmodels`・
+  `test_cluster_imbalanced_matches_linearmodels`・
+  `test_cluster_g2_matches_linearmodels`、いずれも`coef`/`se`のみ
+  `_assert_dict_close`で検証、`_check_result`は使わない）
+- **内容**: ユーザー指摘（2026-08-30、「`test_cluster_matches_
+  linearmodels`はフィクスチャ自体に他の統計量も載せてすべて検証する
+  （t値とp値も影響を受ける＆その他の統計量も一致をみることで保守的に
+  したい）。imbalanced/g2も同様」）。Logit/Probitの解説で見た
+  coverage項目43・45と同種の論点がIVにもそのまま当てはまる。`se`が
+  変われば`t_stats`/`p_values`/`conf_int`も連動して変わるはずだが、
+  現状はそれらを検証していない。
+- **Claudeの所感**: 妥当な指摘。ただしLogit/Probitの項目43で整理した
+  通り、`se`に依存しない統計量（`r_squared`・`f_statistic`本体等、
+  クラスター化によって値が変わらないもの）まで一律に追加するのは
+  冗長なので、`se`から連動して変わる統計量（`t_stats`/`p_values`/
+  `conf_int`、必要なら`f_p_value`）に絞って`_check_result`相当の
+  検証に寄せるのが効率的だと考える。フィクスチャ生成
+  （`generate_iv_fixtures.py`）側で`coef`/`se`しか記録していない
+  ため、対応にはフィクスチャの再生成が必要。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv_fixtures.py`解説時の
+  ユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち、フィクスチャ再生成を
+  伴う）

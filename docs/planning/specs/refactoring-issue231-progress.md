@@ -704,10 +704,10 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
   `test_wls.py`・`test_wls_fixtures.py`・`test_wls_crosscheck.py`・
   `test_logit.py`・`test_logit_fixtures.py`・`test_logit_crosscheck.py`・
   `test_probit.py`・`test_probit_fixtures.py`・`test_probit_crosscheck.py`・
-  `test_iv.py`
+  `test_iv.py`・`test_iv_fixtures.py`
   （全区切り解説済み、WLS関連ファイルは一通り完了、Logit関連ファイルも
-  一通り完了、Probit関連ファイルもこれで一通り完了。IVは`test_iv.py`のみ
-  完了、`test_iv_fixtures.py`/`test_iv_gmm_fixtures.py`/
+  一通り完了、Probit関連ファイルもこれで一通り完了。IVは`test_iv.py`/
+  `test_iv_fixtures.py`が完了、`test_iv_gmm_fixtures.py`/
   `test_iv_crosscheck.py`は未着手）
 
 **注意（2026-08-30〜、`tests/`のディレクトリ分割）**: 別セッションが
@@ -731,9 +731,34 @@ CI側のPYTHONPATH非対称〔`refactoring-candidates-2.md`項目50〕は実質�
 都度確認すること。項目50の状態欄自体は、リファクタリング側のセッションが
 後ほど更新する前提でこちらからは触っていない。
 
-**次に解説予定**: `test_iv_fixtures.py`（ユーザーが2026-08-30にIVから
-進めることを決定済み。IV関連ファイルは`test_iv.py`→`test_iv_fixtures.py`
-→`test_iv_gmm_fixtures.py`→`test_iv_crosscheck.py`の順で進める見込み）。
+**次に解説予定**: `test_iv_gmm_fixtures.py`（IV関連ファイルは
+`test_iv.py`→`test_iv_fixtures.py`→`test_iv_gmm_fixtures.py`→
+`test_iv_crosscheck.py`の順で進行中、残り2ファイル）。
+
+`test_iv_fixtures.py`解説後のユーザーとの質疑で13件の指摘を受け、
+`refactoring-candidates-3.md`項目11〜17・`test-coverage-candidates.md`
+項目54〜58に記録した（2026-08-30〜31）。特に**項目12
+（`refactoring-candidates-3.md`）はドキュメント上の技術的前提が現状の
+ツールチェーンでは誤りだったという重要な発見**——`iv-api-design.md`・
+`test_iv_fixtures.py`・`test_iv_crosscheck.py`・`two_sls.rs`が揃って
+「IVのHC2/HC3はR `ivreg`にも確立した参照実装が無い（`hatvalues.ivreg`が
+ソース上コメントアウトされている）」としていたが、devcontainerに導入済み
+のR `ivreg`（0.6.8）で実機検証したところ`hatvalues.ivreg`は正常に動作する
+関数であり、`sandwich::vcovHC(type="HC2"/"HC3")`が本実装の値と6桁以上の
+精度で一致することを確認した。CLAUDE.md 10章に記録されている`ivreg`の
+サイレントインストール失敗の経緯（Issue #171）の時期に行われた古い調査が
+そのまま残っていた可能性が高い。項目55（`first_stage()`の数値が一度も
+外部照合されていない）も、過去に実際に発生した`k_constant`取り違え
+バグ（`first_stage().r_squared`が静かに間違った値を返していた実例）を
+踏まえ優先度高で記録した。また、**前回セッション（`test_iv.py`解説時）の
+自分の回答に誤りがあったことが判明し、項目17で訂正した**——
+「`test_singular_first_stage_design_matrix_raises_computation_error`が
+`test_ols_fixtures.py`に重複していないか」という調査で`grep -n
+"singular|Singular"`のみを使い「ヒット無し」を根拠に「非対称ではない」と
+回答したが、実際には`test_ols_fixtures.py`に`test_perfect_
+multicollinearity_raises_computation_error`という別名の同種テストが
+存在しており、OLSもIVと同じ「手書き最小構成＋固定CSV」の2段構えを
+一貫して持っていた（検索語の見落としが原因）。
 
 **候補メモファイルの追加（2026-08-30）**: `refactoring-candidates-2.md`に
 対して並行タスクがリファクタリング作業に着手したため、以後このウォーク
@@ -888,13 +913,13 @@ Probit固有の差分の有無を都度`diff`で確認すること。項目35（
 - `refactoring-candidates-2.md`: 項目44〜96（凍結、2026-08-30時点で別の並行タスクが
   リファクタリング作業に着手したため、このウォークスルーからの新規追記先ではなく
   なった）。
-- `refactoring-candidates-3.md`: **新規作成（2026-08-30）**、項目1〜10
-  （独立採番、1から開始）。`test_iv.py`解説後の質疑を記録（項目7の
-  `const`名衝突バグ疑い・項目9のドキュメント不整合が特に重要、詳細は
-  上記「次に解説予定」欄参照）。以後このウォークスルーからの新規追記は
-  このファイルに行う。
-- `test-coverage-candidates.md`: 項目1〜53（番号は継続、`test_iv.py`解説時に
-  項目46〜53を追加）。
+- `refactoring-candidates-3.md`: 項目1〜17（独立採番、`test_iv.py`解説時に
+  項目1〜10、`test_iv_fixtures.py`解説時に項目11〜17を追加。項目7の
+  `const`名衝突バグ疑い・項目9のドキュメント不整合・項目12のIV HC2/HC3
+  参照実装発見が特に重要、詳細は上記「次に解説予定」欄参照）。以後この
+  ウォークスルーからの新規追記はこのファイルに行う。
+- `test-coverage-candidates.md`: 項目1〜58（番号は継続、`test_iv.py`解説時に
+  項目46〜53、`test_iv_fixtures.py`解説時に項目54〜58を追加）。
 
 **候補メモの状態（2026-08-23時点、過去の履歴）**:
 - `refactoring-candidates.md`: 項目1〜43（このウォークスルー由来の最後の追記は項目43）。

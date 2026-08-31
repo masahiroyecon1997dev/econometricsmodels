@@ -302,3 +302,268 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **状態**: 決定済み（ユーザー決定2026-08-30、項目9参照）。「誤用を防ぐ」
   側を採用し、`x_endog`/`instruments`が空の場合は`ValidationError`で
   弾く方向で実装する（別セッション）。
+
+### 11. `test_iv_fixtures.py`と`test_iv_gmm_fixtures.py`の統合可否を検討した結果、完全統合は非推奨・部分的な共通化に留めるべき
+
+- **対象**: [tests/test_iv_fixtures.py:100-155](../../../tests/test_iv_fixtures.py#L100-L155)
+  （`_check_result`）と
+  [tests/test_iv_gmm_fixtures.py:93-150](../../../tests/test_iv_gmm_fixtures.py#L93-L150)
+  （同名の`_check_result`）
+- **内容**: ユーザー指摘（2026-08-30、「可能ならtest_iv_gmm_fixtures.pyと
+  test_iv_fixtures.pyを統合したい（logit/probitのmethod同様）。ただし
+  データセットの性質が異なるなどで統合が難しい場合は無理に統合しない」）
+  を受けて両ファイルを比較した。Logit/Probitのケース（コード完全一致、
+  項目95）とは異なり、**この2ファイルはコード上も検証範囲上も相当に
+  違う**ことを確認した。
+  - `_check_result`の骨格（`params`/`std_errors`/`stats`/`p_values`/
+    `conf_int`/`r_squared`/`r_squared_adj`/`f_statistic`/`f_p_value`/
+    `n_obs`/`df_resid`/`weak_instrument_f_statistics`の検証）はほぼ同型
+    だが、キー名が異なる（`ref["t_stats"]` vs `ref["z_stats"]`、
+    `sargan_statistic` vs `hansen_j_statistic`）。
+  - GMM版は`weight_type`という2SLSに存在しない軸を持ち、フィクスチャの
+    ネスト構造自体が異なる（`fixtures[scenario][cov_type]` vs
+    `fixtures[scenario]["unadjusted"][cov_type]`）。
+  - GMM版だけに存在する専用テスト: `test_kernel_hac_matches_linearmodels`
+    （`weight_type="kernel"`×`cov_type="hac"`の組み合わせ）・
+    `test_gmm_iterations_matches_linearmodels`（`gmm_iterations`の
+    非既定値）・`test_other_weight_types_match_linearmodels`
+    （`weight_type`の残り3値）。
+  - 2SLS版だけに存在する専用テスト: `test_cluster_g2_matches_linearmodels`
+    （G=2境界バグの再現）・`test_card_matches_linearmodels`（実データ）・
+    `test_df1_matches_linearmodels`（自由度1境界）・
+    `test_perfect_multicollinearity_raises_computation_error`/
+    `test_scale_variance_raises_computation_error`（`ComputationError`
+    パス）。GMM版にこれらの対応物は無い。
+  - `_check_result`自体も、GMM版は`check_overid`という2SLSに無い
+    引数（`gmm_iterations=1`時のHansen J不一致という既知の未解明差異を
+    避けるための抜け穴）を持つ。
+- **Claudeの所感**: ユーザーの想定通り、無理に1ファイルへ統合するのは
+  避けるべきと考える。`weight_type`という2SLSに存在しない軸、GMM固有の
+  検定（Hansen J vs Sargan）、双方に存在しない専用テスト群があるため、
+  Logit/Probitのような「コード完全一致→共通関数抽出」パターンは
+  当てはまらない。ただし**`_check_result`の共通部分
+  （`params`/`std_errors`/`conf_int`/適合度統計量/`weak_instrument_f_
+  statistics`）だけを、キー名（t_stats/z_stats、sargan/hansen_j）を
+  引数化した共通ヘルパーとして`_assertions.py`または専用モジュールに
+  切り出す余地はある**。ただし現状の重複はコメント込みでも各50行程度と
+  小さく、優先度は低いと考える。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv_fixtures.py`解説時の
+  ユーザー指摘、両ファイルの比較調査で確認。
+- **状態**: 未対応（優先度低。完全統合は非推奨、`_check_result`共通部分の
+  部分的なヘルパー化のみ検討の余地あり）
+
+### 12.【重要な発見】IVのHC2/HC3がR `ivreg`+`sandwich`で実際に検証可能なことを実機確認した——「参照実装が無い」というドキュメント記述は現在のivregバージョンでは事実と異なる
+
+- **対象**: [docs/planning/specs/iv-api-design.md:110-116](../../../docs/planning/specs/iv-api-design.md#L110-L116)
+  （「`hc2`/`hc3`は引き続き外部の参照実装で検証できない...R `ivreg`も同様
+  （`hatvalues.ivreg`の実装がソース上コメントアウトされている）」）、
+  [tests/test_iv_fixtures.py:19-22](../../../tests/test_iv_fixtures.py#L19-L22)、
+  [tests/test_iv_crosscheck.py:33-34](../../../tests/test_iv_crosscheck.py#L33-L34)、
+  [engine/src/iv/two_sls.rs:1584-1590](../../../engine/src/iv/two_sls.rs#L1584-L1590)
+  （いずれも同じ「参照実装が無い」という前提を踏襲している）
+- **内容**: ユーザー指摘（2026-08-30、「HC2/HC3はR側かpythonならpyfixest
+  などで検証できそう？Rust側だとパッケージ後の結合テストが未完のまま」）
+  を受けて、devcontainerに導入済みのR（`ivreg` 0.6.8、CLAUDE.md 10章参照）
+  で直接実機検証した。
+  - `Rscript -e 'print(ivreg:::hatvalues.ivreg)'`で実際の関数定義を確認
+    したところ、**コメントアウトされておらず、`type="stage2"`
+    （既定）で第二段階OLS回帰（`lm(y ~ X̂)`、`X̂`は第一段階の予測値）の
+    `hatvalues()`をそのまま返す、正常に動作する実装**だった（`ivreg`の
+    `NEWS`ファイルにVersion 0.6-4で`hatvalues.ivreg()`のバグ修正記録が
+    あり、少なくとも0.6-4時点で既に存在する関数）。
+  - `sandwich::vcovHC(ivreg_fit, type="HC2")`/`type="HC3"`が実際に
+    エラーなく計算できることを確認した。
+  - **本実装（`X̂`から計算するレバレッジ、`two_sls.rs`の
+    `hc_cov_params`）と同じ合成データ（`y ~ x1 + endog1 | x1 + z1 + z2`、
+    n=200）で数値を突き合わせたところ、HC2/HC3とも6桁以上の精度で一致**
+    した（実測: HC2の`endog1`のSE、本実装`0.13356919386622892`、R
+    `0.1335692`。HC3も同様）。R側の`hatvalues.ivreg(type="stage2")`が
+    第二段階回帰（`X̂`を設計行列とする`lm`）のレバレッジをそのまま使う
+    実装であることをソースで確認しており、本実装が「`X̂`のみから
+    レバレッジを計算する」（`two_sls.rs`のdocコメント）としている定義と
+    完全に一致する。
+  - **原因の推測**: `iv-api-design.md`の記述はIssue #166/#171時点の
+    調査に基づくが、CLAUDE.md 10章に記録されている通り`ivreg`は当初
+    Debian標準のr-baseでは依存関係を満たせず**インストール自体が
+    サイレントに失敗していた**（CRAN APTリポジトリ追加で解消）経緯が
+    ある。この調査がその失敗期間中、または古いivregバージョンに基づいて
+    行われた可能性が高い。
+- **Claudeの所感**: これは単なるテストカバレッジの話ではなく、
+  **ドキュメント上の技術的前提そのものが現状のツールチェーンでは
+  誤りになっている**、重要度の高い発見だと考える。現状のRust単体
+  テスト（`fit_computes_hc2_std_errors_matching_manual_sandwich_
+  formula`）は同じ開発者が書いた「手計算オラクル」と本実装を突き合わせる
+  だけの**自己参照的な検証**（`testing-policy.md`が警告する「独立性が
+  限定的」なパターン）に留まっていたが、今回の発見により**真に独立した
+  R `ivreg`実装との数値一致**が確認でき、この懸念を解消できる。
+  対応するなら: (1) `test_iv_crosscheck.py`に`hc2`/`hc3`のクロスチェック
+  テストを追加する（`benchmark/iv/references/run_ivreg.R`に
+  `vcovHC(type="HC2"/"HC3")`を追加）、(2) `iv-api-design.md`3.1節・
+  関連するdocstring群（本項目「対象」に列挙した4箇所）の「参照実装が
+  無い」という記述を訂正する、の2段階が必要になる。ユーザー指示により
+  本セッションでは記録のみ。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv_fixtures.py`解説時の
+  ユーザー指摘、R実機検証で確認（`ivreg`/`sandwich`とも devcontainerに
+  導入済みのものをそのまま使用）。
+- **状態**: 未対応（優先度: 高。次にIV関連のリファクタリング・
+  クロスチェック拡充に着手する際は、まず本項目の実機検証結果を
+  再現・拡張してから着手することを推奨）
+
+### 13. `wu_hausman_statistic`の`cov_type="hac"`時のNone原因調査について、R側では既に独立検証済み（Issue #233）という事実が`test_iv_fixtures.py`側のドキュメントに反映されていない
+
+- **対象**: [tests/test_iv_fixtures.py:23-31](../../../tests/test_iv_fixtures.py#L23-L31)
+  （「原因未特定、次セッションで別途調査予定」）と対比した
+  [tests/test_iv_crosscheck.py:38-44](../../../tests/test_iv_crosscheck.py#L38-L44)
+  （「wu_hausman_statistic/wu_hausman_p_valueは全cov_typeでフィクスチャに
+  実測値がある（Issue #233。summary(diagnostics=TRUE, vcov.=<関数>)で
+  cov_type別のロバスト共分散を診断表に反映できることが判明）」）
+- **内容**: ユーザー指摘（2026-08-30、「wu_hausman_statisticの`cov_type=
+  "hac"`原因調査をリファクタリング時に行うことを明記＆必要なら別
+  パッケージ等での検証をする」）を受けて`test_iv_crosscheck.py`（本セッ
+  ションではまだ解説していないファイル）を先読みしたところ、**「別
+  パッケージでの検証」は既にIssue #233でR `ivreg`側から実現済み**
+  だったことが分かった。`linearmodels`の`wooldridge_regression`が
+  `hac`（kernel）のときだけ本実装と一致しない、という原因はまだ未特定の
+  ままだが、Rの`ivreg`は`hac`を含む全`cov_type`でWu-Hausman統計量を
+  正しく計算でき、本実装の値と（クラスターのp値を除き）一致することが
+  既に確認されている。つまり「値そのものが正しいか」という統計的な
+  懸念は既に別ルートで解消済みで、残っているのは「なぜ`linearmodels`
+  という特定の1パッケージだけ再現できないか」という限定的な原因調査
+  のみである。
+- **Claudeの所感**: `test_iv_fixtures.py`のモジュールdocstring（「次
+  セッションで別途調査予定」）が、既に`test_iv_crosscheck.py`側で
+  部分的に解決済みという事実を反映しておらず、今読むと誤解を招く
+  （「まだ何も検証されていない」ように読める）。ドキュメントを更新し、
+  「Rクロスチェック側で独立検証済み（Issue #233）、`linearmodels`固有の
+  原因のみ未解明」という現状に揃えるべきと考える。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv_fixtures.py`解説時の
+  ユーザー指摘、`test_iv_crosscheck.py`の先読みで確認。
+- **状態**: 未対応（ドキュメント更新のみで対応可能、優先度中）
+
+### 14. OLS（およびWLS）のHAC自動ラグ選択が、statsmodels側で`maxlags=1`固定のまま「別途検討事項」として放置されている——IVの`hac_auto_lag()`方式に揃えられる可能性がある
+
+- **対象**: [benchmark/linear/references/statsmodels_ref.py:84-87](../../../benchmark/linear/references/statsmodels_ref.py#L84-L87)
+  （`fit_kwargs["cov_kwds"] = {"maxlags": 1}  # ラグ選択方法は別途検討
+  事項（issue参照）`）、[tests/linear/test_ols_fixtures.py:60](../../../tests/linear/test_ols_fixtures.py#L60)
+  （`HAC_LAG_IN_FIXTURE = 1`、テスト側も同じ固定値を明示的に渡す）と
+  対比した[benchmark/common/dgp.py:116-122](../../../benchmark/common/dgp.py#L116-L122)
+  （`hac_auto_lag(n)`、IVが使っている「本実装と同じ経験則
+  `floor(4*(n/100)**(2/9))`をPython側で独立に計算し明示的に渡す」
+  ヘルパー）
+- **内容**: ユーザー指摘（2026-08-30、「HACのラグ数自動計算式が本実装と
+  リファレンス実装側の両方で揃えられているためテスト側で明示的にラグ数を
+  渡す必要が無いなら、OLSでも同様の修正を行えばテスト側で明示的にラグ数を
+  渡さなくてもいい？」）を受けて調査した。`statsmodels_ref.py`の
+  HAC分岐は`maxlags: 1`という**リテラルな固定値**で、`hac_auto_lag(n)`を
+  計算して渡してはいない（コメント「ラグ選択方法は別途検討事項」が示す
+  通り、意図的に先送りされたまま）。一方IV（`benchmark/iv/references/
+  linearmodels_ref.py`）は`hac_auto_lag(n)`で本実装と同じ式を明示的に
+  計算しリファレンス側に渡しており、この式の一致により`tests/
+  test_iv_fixtures.py`はテスト実行時に`hac_lags`を渡さなくても
+  （`None`＝自動計算）フィクスチャと一致する、という設計になっている
+  （前回の解説で説明した通り）。
+- **Claudeの所感**: ユーザーの見立て通り、OLS/WLSも`statsmodels_ref.py`
+  のHAC分岐を`hac_auto_lag(n)`を使う形に変更すれば、`HAC_LAG_IN_
+  FIXTURE`という固定値をテスト側で明示的に渡す仕組み自体が不要になる
+  可能性が高い。ただしこれは**フィクスチャの再生成を伴う変更**
+  （`maxlags=1`から`hac_auto_lag(n)`に変えると、`n`によっては異なる
+  ラグ数になり、フィクスチャ内のHAC関連の数値が変わりうる）ため、
+  実施する場合は`benchmark/regenerate_all.py`の再実行とコミットが
+  必要になる。Logit/Probitは`cov_type="hac"`に対応していないため対象外
+  （`grep`で確認済み）。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv_fixtures.py`解説時の
+  ユーザー指摘、`statsmodels_ref.py`で確認。
+- **状態**: 未対応（フィクスチャ再生成を伴うため優先度中、着手要否は
+  ユーザー判断待ち）
+
+### 15. `_rename`使用に関する前提の訂正——IVは既に項目63が提案する「生成時に正規化する」設計を先取りしており、`test_iv_fixtures.py`の`_rename`はむしろ不要な残骸
+
+- **対象**: [tests/test_iv_fixtures.py:107](../../../tests/test_iv_fixtures.py#L107)
+  （`_check_result`内の`our_name = _rename(name)`）、
+  [benchmark/iv/references/linearmodels_ref.py:236,492](../../../benchmark/iv/references/linearmodels_ref.py#L236)
+  （`return "const" if name == "Intercept" else name`、生成時に既に
+  正規化している）
+- **内容**: ユーザー指摘（2026-08-30、「`_check_result`で`_rename`が
+  使われているのでIVも改修できそう（OLSと同じ問題）」）を受けて調査した
+  結果、**前提が実際とは逆だった**ことが分かった。`refactoring-
+  candidates-2.md`項目63は「statsmodels主リファレンス側の生成スクリプト
+  （`run_statsmodels_benchmark.py`）が`Intercept`→`const`正規化を
+  **していない**ため、`test_ols_fixtures.py`等が実行時に毎回`_rename`を
+  呼ぶ必要がある」という問題だったが、IVの主リファレンス生成スクリプト
+  （`linearmodels_ref.py`）は**既に生成時点で`"const"`に正規化済み**
+  であることを`tests/fixtures/benchmarks/iv.json`の実際のキー名
+  （`["const", "x1", "endog1"]`、`"Intercept"`ではない）で確認した。
+  つまり`test_iv_fixtures.py`の`_rename`呼び出しは、既に`"const"`に
+  正規化済みの値に対して`rename_intercept("const")`（＝恒等関数として
+  素通り）を呼んでいるだけの**実質的な無駄働き（無害だが不要な処理）**
+  であり、項目63が指摘する「OLSと同じ問題」がIVにあるわけではない。
+  むしろ**IVは項目63が理想としている設計（生成時点での正規化）を
+  既に達成している**、逆の立ち位置だった。
+- **Claudeの所感**: ユーザーへの訂正が必要な点。項目63の対応
+  （`run_statsmodels_benchmark.py`側を生成時正規化に変更）を実施する
+  際は、`linearmodels_ref.py`を実装の参考にするとよい。また項目63の
+  対応が完了した暁には、`test_ols_fixtures.py`等の`_rename`呼び出しが
+  IVと同じく無駄働きになるため、そのタイミングで一括除去を検討する
+  価値がある（優先度は低い、実害が無いため）。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv_fixtures.py`解説時の
+  ユーザー指摘、`iv.json`のキー名で確認。
+- **状態**: 未対応（優先度低。項目63の対応と合わせて`_rename`の
+  一括除去を検討）
+
+### 16. `IvResults`に`AIC`/`BIC`/`log_likelihood`が無いのは意図的な設計判断であり、実装の欠落ではない
+
+- **対象**: [docs/planning/specs/iv-api-design.md:72-73](../../../docs/planning/specs/iv-api-design.md#L72-L73)
+  （「`log_likelihood`/`aic`/`bic`は**除外する**。2SLS/GMMは尤度ベースの
+  推定法ではなく...Stataの`ivregress`もデフォルトでは出力しない」）
+- **内容**: ユーザー指摘（2026-08-30、「`_check_result`にAICとBICの
+  チェックがないがIVにフィールドってない？」）を受けて確認したところ、
+  `IvResults`（`python_package/econometricsmodels/iv/iv.py`）には
+  そもそも`aic`/`bic`/`log_likelihood`フィールドが存在せず、これは
+  `iv-api-design.md`で明記された**意図的な設計判断**（2SLS/GMMは
+  尤度ベースの推定法ではないため、正規性を仮定した疑似尤度を計算する
+  ことの統計的な正当性が薄い、Stataの`ivregress`も既定で出力しない）
+  だった。
+- **Claudeの所感**: コード上の欠落ではなくドキュメント化された設計方針
+  のため、対応不要と判断する。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv_fixtures.py`解説時の
+  ユーザー指摘、`iv-api-design.md`で確認。
+- **状態**: 対応不要と判断（意図的な設計、`iv-api-design.md`72-73行目に
+  明記済み）
+
+### 17.【自己訂正】`test_perfect_multicollinearity_raises_computation_error`が`test_iv.py`と重複しているように見える件——前回セッションでの回答（「OLSも同じ非対称」）が誤りだった
+
+- **対象**: [tests/test_iv_fixtures.py:315-327](../../../tests/test_iv_fixtures.py#L315-L327)
+  （`test_perfect_multicollinearity_raises_computation_error`、固定済み
+  CSVを使用）と[tests/test_iv.py:690-719](../../../tests/test_iv.py#L690-L719)
+  （`test_singular_first_stage_design_matrix_raises_computation_error`、
+  手書きDataFrame）、[tests/test_ols_fixtures.py:176-194](../../../tests/test_ols_fixtures.py#L176-L194)
+  （`test_perfect_multicollinearity_raises_computation_error`、固定済み
+  CSV`synthetic_perfect_multicollinearity.csv`を使用）
+- **内容**: ユーザー指摘（2026-08-30、「`test_perfect_multicollinearity_
+  raises_computation_error`は`tests/iv/test_iv.py`にも似たテストが
+  あったのでは？冗長な検証になっていない？」）を受けて再調査した結果、
+  **前回セッション（`tests/test_iv.py`解説時）に私が回答した内容が
+  誤りだった**ことが判明した。前回「`test_singular_first_stage_
+  design_matrix_raises_computation_error`が`test_iv_fixtures.py`に
+  重複していないか」という質問に対し、`grep -n "singular|Singular"`
+  という検索語だけで`test_ols_fixtures.py`を確認し「ヒット無し＝OLSも
+  `test_ols.py`側のみで非対称ではない」と回答したが、実際には
+  `test_ols_fixtures.py`に`test_perfect_multicollinearity_raises_
+  computation_error`という**別名の**同種テストが存在していた
+  （検索語に"multicollinearity"を含めていなかったための見落とし）。
+  正しくは、**OLSもIVと同じく「手書きの小さいDataFrameでAPIレベルの
+  エラーパスを確認するテスト（`test_<method>.py`）」と「固定済みの
+  ベンチマーク用CSVでも同じエラーパスが起きることを確認するテスト
+  （`test_<method>_fixtures.py`）」の2段構えを一貫して持っている**。
+- **Claudeの所感**: これは冗長な重複ではなく意図的な二段階チェックだと
+  考える。前者は「APIとして正しく例外を投げるか」という最小構成での
+  構造確認、後者は「他の数値照合テストが使っている実際のベンチマーク
+  データセット自体も、ドキュメント通りにエラーになることの確認」で
+  あり、目的が異なる。ユーザー提案の「実際のベンチマーク用データセットを
+  使っているものだけ通しておけばよいのでは」という統合案も一理あるが、
+  手書きの最小データの方が「何が起きているか」を読み手が把握しやすい
+  という利点もあり、両方残すのは妥当な設計だと考える。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv_fixtures.py`解説時の
+  ユーザー指摘、前回セッションでの誤った回答の訂正として再調査。
+- **状態**: 対応不要と判断（意図的な二段階チェックであり、OLSとIVで
+  一貫している。前回の誤った回答はこの記録により訂正）

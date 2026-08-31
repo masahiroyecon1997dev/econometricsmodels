@@ -1381,8 +1381,10 @@
   経路は少なくとも2種類ある。
   1. **第一段階の設計行列（`x_exog ++ instruments`）の特異性**:
      `instruments`同士が強く相関している、または`instruments`が
-     `x_exog`と強く相関しているケース。現状`test_iv.py`の
-     `test_singular_first_stage_design_matrix_raises_computation_error`
+     `x_exog`と強く相関しているケース。現状`tests/iv/test_iv_validation.py`の
+     `test_perfect_multicollinearity_raises_computation_error`
+     （旧 `test_singular_first_stage_design_matrix_raises_computation_error`。
+     `refactoring-candidates-2.md` 項目54 で固定 CSV 版へ一本化）
      は`x_exog`内部の完全共線性のみで再現しており、`instruments`側の
      共線性は未検証（ただし第一段階の設計行列としては同じ
      `x_exog ++ instruments`の列空間に属するため、実装上のコードパスは

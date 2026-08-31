@@ -475,6 +475,22 @@
     リファレンス比較ではなく自己整合の不変条件チェックのため対象外）。
     変更: `tests/linear/_ols_helpers.py`・`test_ols_api.py`・`test_ols_reference.py`。
     `ruff` パス。
+  - **項目54 実施（2026-08-31）**: 「完全な多重共線性 → `ComputationError`」の
+    手書き極小 df 版と固定 CSV 版の二重テストを整理。Phase 2 で両者が
+    `test_<手法>_validation.py` の `## ComputationError` 節に同居し、
+    candidates-3 項目17 の「別ファイル・別目的の二段構え」根拠が消えたため、
+    **OLS・IV とも手書き版を削除して CSV 版へ一本化**（OLS:
+    `test_singular_matrix_raises_computation_error`、IV:
+    `test_singular_first_stage_design_matrix_raises_computation_error`。ユーザー
+    判断で candidates-2 項目54 の所感〔手書き版を残す〕とは逆に CSV 側を採用）。
+    CSV 側 `test_perfect_multicollinearity_raises_computation_error` の docstring に
+    経緯を追記、IV の GMM クラスター重み行列テストの相互参照も張り替え。
+    WLS は手書き版が元々無く現状維持。Logit/Probit は手書き版が `method`×3
+    parametrize（過去の bfgs 検出漏れバグの回帰）で追加検証価値があるため今回は
+    両方維持し、candidates-3 項目35（Tobit 方式の method 共通 QR 検証を Logit/
+    Probit に適用）を別 Issue 化して完了後に一本化する。candidates-3 項目1
+    （IV `x2=2*x1` 直書き）はテスト削除で自然に解消、項目17 の状態も更新。
+    `pytest tests` 957→**955**（削除2件、いずれも非 parametrize）、`ruff` パス。
 - 上記以外（`refactoring-candidates.md`項目12・13・15〜35・37・39）は
   未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は

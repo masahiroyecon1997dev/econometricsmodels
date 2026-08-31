@@ -45,7 +45,12 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   すれば「2倍」という関係が値の一致で保証される。実害は小さいが直す場合は
   項目82とまとめて一括対応するのが効率的。
 - **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時。
-- **状態**: 未対応
+- **状態**: 解消済み（2026-08-31、`refactor` スキル、`refactoring-candidates-2.md`
+  項目54対応）。対象の `test_singular_first_stage_design_matrix_raises_computation_
+  error` 自体を削除し、固定 CSV を使う
+  `test_perfect_multicollinearity_raises_computation_error` へ一本化したため、
+  `x2 = 2*x1` の手書き直書きも消えた。Logit 側の同型（`refactoring-candidates-2.md`
+  項目82）は Logit/Probit のテストを今回維持したため未解消のまま。
 
 ### 2. IVの変数集合重複チェック（`y`/`x_exog`/`x_endog`/`instruments`）が個別関数の羅列で組み合わせ数が多い
 
@@ -565,8 +570,17 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   という利点もあり、両方残すのは妥当な設計だと考える。
 - **気づいた経緯**: 2026-08-30、`tests/test_iv_fixtures.py`解説時の
   ユーザー指摘、前回セッションでの誤った回答の訂正として再調査。
-- **状態**: 対応不要と判断（意図的な二段階チェックであり、OLSとIVで
-  一貫している。前回の誤った回答はこの記録により訂正）
+- **状態**: 前提が変わり CSV 一本化で対応済み（2026-08-31、`refactor` スキル、
+  `refactoring-candidates-2.md` 項目54）。上記「対応不要（二段構え）」判断は
+  **2テストが別ファイル・別目的だったことに依拠**していたが、Phase 2
+  （項目68）で手書き版も CSV 版も `test_<手法>_validation.py` の
+  `## ComputationError` 節に同居し、どちらも `with pytest.raises(ComputationError)`
+  だけの内容になったため、「目的が異なる」根拠が消えた。ユーザー判断で
+  OLS・IV とも手書き版（`test_singular_matrix_*` /
+  `test_singular_first_stage_design_matrix_*`）を削除し、固定 CSV を使う
+  `test_perfect_multicollinearity_raises_computation_error` へ一本化。
+  Logit/Probit は手書き版が `method`×3 parametrize（過去の bfgs 検出漏れバグの
+  回帰）で追加検証価値があるため今回は両方維持し、項目35 完了後に一本化する。
 
 ### 18. `COV_TYPES`の定義元が`test_iv_fixtures.py`（自前定義）と`test_iv_gmm_fixtures.py`（生成スクリプトからimport）で非対称
 

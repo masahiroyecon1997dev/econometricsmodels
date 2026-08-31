@@ -302,42 +302,17 @@ def test_invalid_gmm_convergence_raises(iv_dataset, gmm_convergence):
 # ── ComputationError ──────────────────────────────────────────────
 
 
-def test_singular_first_stage_design_matrix_raises_computation_error():
+def test_perfect_multicollinearity_raises_computation_error():
     """`x_exog`が完全な多重共線性を持つ場合、第一段階回帰
     （`x_endog[j] ~ x_exog + instruments`）の設計行列が特異になり
-    `ComputationError`（`IvError::FirstStageFailed`、`test_ols_validation.py`の
-    `test_singular_matrix_raises_computation_error`と同じ原理）。
-    """
-    df = pl.DataFrame(
-        {
-            "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-            "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-            "x2": [
-                2.0,
-                4.0,
-                6.0,
-                8.0,
-                10.0,
-                12.0,
-            ],  # x2 = 2 * x1（完全な多重共線性）
-            "endog1": [2.0, 1.0, 4.0, 3.0, 2.5, 3.5],
-            "z1": [1.0, 3.0, 2.0, 4.0, 1.5, 2.5],
-        }
-    )
-    with pytest.raises(ComputationError):
-        IV(
-            df,
-            y="y",
-            x_exog=["x1", "x2"],
-            x_endog=["endog1"],
-            instruments=["z1"],
-        ).fit()
+    `ComputationError`（`IvError::FirstStageFailed`）。完全な多重共線性は数値比較の
+    対象外（`testing-policy.md`「テストの3系統」）で、想定エラーの送出のみ確認する。
 
-
-def test_perfect_multicollinearity_raises_computation_error():
-    """完全な多重共線性（合成データセット）は数値比較の対象外
-    （`testing-policy.md`「テストの3系統」）。想定エラー（`ComputationError`）が
-    発生することのみを確認する（`_reference.py` から移設）。
+    以前は手書きの極小 df（`x2 = 2*x1`）による
+    `test_singular_first_stage_design_matrix_raises_computation_error` も
+    併存していたが、同じ経路の確認で追加検証が無かったため、固定済みベンチマーク
+    CSV を使うこのテストへ一本化した（`refactoring-candidates-2.md` 項目54、
+    OLS の同名テストと同じ整理）。
     """
     df = pl.read_csv(DATA_DIR / "iv_perfect_multicollinearity.csv")
     with pytest.raises(ComputationError):
@@ -356,8 +331,9 @@ def test_scale_variance_raises_computation_error(cov_type):
     第一段階回帰の傾き係数の同時共分散部分行列がスケール比の2乗相当の
     条件数を持ち倍精度浮動小数点の限界を超えて数値的に特異になり、
     第一段階の`ComputationError`（`IvError::FirstStageFailed`）になる
-    （実測確認済み、OLSの同名テストと同じ原理）。perfect_multicollinearityと
-    同様、数値比較はせずエラーパスのみ確認する（`_reference.py` から移設）。
+    （実測確認済み、OLSの同名テストと同じ原理）。
+    `test_perfect_multicollinearity_raises_computation_error`と同様、数値比較は
+    せずエラーパスのみ確認する（`_reference.py` から移設）。
     """
     df = pl.read_csv(DATA_DIR / "iv_scale_variance.csv")
     options = IvOptions(cov_type=cov_type)
@@ -381,7 +357,7 @@ def test_gmm_cluster_weight_type_raises_computation_error_when_cluster_count_is_
     `G=2 < l=3`（`x_exog=[]`・`instruments=["z1","z2"]`で`l=const+z1+z2=3`）だと
     `S`が構造的に特異になり`ComputationError`（`gmm.rs`の第一段階とは別の、GMM
     自体の重み行列反転経路。2SLS/GMM共通の第一段階回帰の特異性
-    （`test_singular_first_stage_design_matrix_raises_computation_error`）とは
+    （`test_perfect_multicollinearity_raises_computation_error`）とは
     別のGMM固有の失敗パス）。
     """
     n = iv_dataset.height

@@ -186,18 +186,6 @@ def test_predict_null_or_non_finite_values_raise(dataset):
 # ── ComputationError ──────────────────────────────────────────────
 
 
-def test_singular_matrix_raises_computation_error():
-    df = pl.DataFrame(
-        {
-            "y": [1.0, 2.0, 3.0, 4.0],
-            "x1": [1.0, 2.0, 3.0, 4.0],
-            "x2": [2.0, 4.0, 6.0, 8.0],  # x2 = 2 * x1（完全な多重共線性）
-        }
-    )
-    with pytest.raises(ComputationError):
-        OLS(df, y="y", x=["x1", "x2"]).fit()
-
-
 def test_cluster_g2_with_multiple_slopes_raises_computation_error():
     """G=2×説明変数3個（傾き係数q=3）は、ロバストWald検定の共分散部分行列
     （3x3）のランクがクラスタ数G=2以下になり必然的に特異になるため、
@@ -213,8 +201,14 @@ def test_cluster_g2_with_multiple_slopes_raises_computation_error():
 
 
 def test_perfect_multicollinearity_raises_computation_error():
-    """完全な多重共線性は数値比較の対象外（`testing-policy.md`「テストの3系統」）。
-    想定エラー（`ComputationError`）が発生することのみを確認する。
+    """完全な多重共線性（設計行列が特異）は数値比較の対象外
+    （`testing-policy.md`「テストの3系統」）。想定エラー（`ComputationError`）が
+    発生することのみを確認する。
+
+    以前は手書きの極小 df（`x2 = 2*x1`）による `test_singular_matrix_raises_
+    computation_error` も併存していたが、同じ経路の確認で追加検証が無かったため、
+    固定済みベンチマーク CSV を使うこのテストへ一本化した
+    （`refactoring-candidates-2.md` 項目54）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_perfect_multicollinearity.csv")
     with pytest.raises(ComputationError):

@@ -4,13 +4,19 @@
 generate_probit_fixtures.py`で生成）を読み込み、真のprobit DGPによる合成データ
 シナリオ×classical/opg/hc0 + クラスター(baseline・mrozの実データ両方) +
 Wooldridge実データ（mroz）で、係数・標準誤差・検定統計量・適合度統計量・
-限界効果を相対誤差1e-8で厳密比較する（`test_logit_fixtures.py`と完全に同型。
+限界効果を相対誤差1e-8で厳密比較する（`test_logit_reference.py`と完全に同型。
 `.claude/rules/testing-policy.md`「許容誤差」の基本方針）。
 
-役割分担:
-    - 構造・API・エラーパスの検証: `test_probit.py`
+役割分担（OLS/WLS の `test_<手法>_*.py` と同じ4分割、
+`refactoring-candidates-2.md` 項目68）:
+    - 成功パスの構造・API・オプション反映・predict 等: `test_probit_api.py`
+    - `ValidationError`/`ComputationError` パス: `test_probit_validation.py`
     - 主リファレンス（statsmodels）との厳密な数値一致: このファイル
     - 独立実装（R）とのクロスチェック: `test_probit_crosscheck.py`
+
+このファイルは凍結フィクスチャ（`probit.json`）との厳密比較を主軸としつつ、
+凍結フィクスチャが対象にしない `include_intercept=False` はライブ statsmodels
+との直接照合で確認する（`test_ols_reference.py` と同じ構成）。
 
 Note:
     `cov_type="hc1"`はここに含めない（statsmodelsのdiscrete modelがn/(n-k)
@@ -40,11 +46,7 @@ from _helpers import (
     with_cluster_groups,
 )
 from _tolerances import TOLERANCES
-from econometricsmodels import (
-    ComputationError,
-    Probit,
-    ProbitOptions,
-)
+from econometricsmodels import Probit, ProbitOptions
 
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.nonlinear.fixtures.generate_probit_fixtures import (
@@ -58,11 +60,11 @@ FIXTURE_PATH = (
     / "probit.json"
 )
 
-RTOL = TOLERANCES["probit_fixtures"]["rtol"]
+RTOL = TOLERANCES["probit_reference"]["rtol"]
 # OLS（閉形式解）のATOL=1e-10より緩い。Probitは反復最適化（Newton/BFGS/L-BFGS）の
 # ため、ゼロ近傍の値（信頼区間の境界等）で閉形式解より1桁大きい浮動小数点誤差が
-# 乗ることを実測確認した（Logitと同じ理由、`test_logit_fixtures.py`参照）。
-ATOL = TOLERANCES["probit_fixtures"]["atol"]
+# 乗ることを実測確認した（Logitと同じ理由、`test_logit_reference.py`参照）。
+ATOL = TOLERANCES["probit_reference"]["atol"]
 
 # near_separation（probit特有の準完全分離境界ケース）は、既定のtol=1e-6（勾配ノルム
 # 基準）だとstatsmodelsとの数値一致がRTOL=1e-8を満たさない（実測diff~4.4e-8相対、
@@ -87,8 +89,8 @@ _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
 _check_margeff = partial(check_margeff, rtol=RTOL, atol=ATOL)
 
 # method="bfgs"/"lbfgs"はnewtonと異なる最適化経路で収束するため、既定のRTOLより
-# 緩めた許容誤差を使う（tests/_tolerances.py参照、test_logit_fixtures.pyと同じ方針）。
-RTOL_METHOD = TOLERANCES["probit_fixtures"]["rtol_method"]
+# 緩めた許容誤差を使う（tests/_tolerances.py参照、test_logit_reference.pyと同じ方針）。
+RTOL_METHOD = TOLERANCES["probit_reference"]["rtol_method"]
 _assert_dict_close_method = partial(
     assert_dict_close, rtol=RTOL_METHOD, atol=ATOL
 )
@@ -141,6 +143,9 @@ def _check_result(res, ref: dict, label: str) -> None:
 
     if ref["margeff"] is not None:
         _check_margeff(res, ref["margeff"], label)
+
+
+# ── 凍結フィクスチャとの数値照合 ───────────────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
@@ -201,7 +206,7 @@ def test_cluster_g2_matches_statsmodels(fixtures):
 @pytest.mark.parametrize("method", ["bfgs", "lbfgs"])
 def test_method_matches_statsmodels(fixtures, method):
     """`method="bfgs"/"lbfgs"`が主リファレンス（statsmodelsの同じmethod）と
-    フルの統計量（std_errors含む）で一致すること（`test_logit_fixtures.py`と
+    フルの統計量（std_errors含む）で一致すること（`test_logit_reference.py`と
     同じ方針、Issue #231フェーズ4）。
     """
     df = pl.read_csv(DATA_DIR / "probit_baseline.csv")
@@ -216,13 +221,41 @@ def test_method_matches_statsmodels(fixtures, method):
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
+def test_mroz_matches_statsmodels(fixtures, cov_type):
+    """Wooldridge実データ（mroz、労働参加モデル）とのクロスチェック。"""
+    df = load_wooldridge_dataset("mroz")
+    options = ProbitOptions(cov_type=cov_type)
+    res = Probit(df, y="inlf", x=MROZ_X, options=options).fit()
+
+    _check_result(res, fixtures["mroz"][cov_type], f"mroz/{cov_type}")
+
+
+def test_mroz_cluster_matches_statsmodels(fixtures):
+    """実データでのクラスターロバストSE（`city`＝都市部居住ダミー、484/269の2値）。
+
+    `testing-policy.md`「テスト用データセット」3.の「実データでのグループ列も
+    検証する」を満たす（Logitのmrozクラスターと同じ趣旨）。
+    """
+    df = load_wooldridge_dataset("mroz")
+    options = ProbitOptions(cov_type="cluster", cluster_col="city")
+    res = Probit(df, y="inlf", x=MROZ_X, options=options).fit()
+
+    ref = fixtures["mroz"]["cluster"]
+    _assert_dict_close(res.params, ref["coef"], "mroz/cluster/coef")
+    _assert_dict_close(res.std_errors, ref["se"], "mroz/cluster/se")
+
+
+# ── ライブ statsmodels との照合（凍結フィクスチャ対象外の分岐） ─────
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
 def test_include_intercept_false_matches_statsmodels(cov_type):
     """`include_intercept=False`の成功パスが検証されていなかった
-    （`test_logit_fixtures.py`と同じ理由、Issue #231フェーズ4）。
+    （`test_logit_reference.py`と同じ理由、Issue #231フェーズ4）。
 
     `statsmodels_ref.run()`はformula API（`patsy`経由でpandasを
     要求する）を使うため、ここでは使わない。OLS側と同じ配列API
-    （`sm.Probit(y, x)`）で直接比較する（`test_logit_fixtures.py`の
+    （`sm.Probit(y, x)`）で直接比較する（`test_logit_reference.py`の
     同名テストと同じ理由、`.claude/rules/testing-policy.md`参照）。
     """
     import numpy as np
@@ -257,35 +290,3 @@ def test_include_intercept_false_matches_statsmodels(cov_type):
         f"{label}/converged"
     )
     assert res.df_model == fitted.df_model, f"{label}/df_model"
-
-
-def test_perfect_multicollinearity_raises_computation_error():
-    """完全な多重共線性は数値比較の対象外（`testing-policy.md`「テストの3系統」）。"""
-    df = pl.read_csv(DATA_DIR / "probit_perfect_multicollinearity.csv")
-    with pytest.raises(ComputationError):
-        Probit(df, y="y", x=["x1", "x2", "x3"]).fit()
-
-
-@pytest.mark.parametrize("cov_type", COV_TYPES)
-def test_mroz_matches_statsmodels(fixtures, cov_type):
-    """Wooldridge実データ（mroz、労働参加モデル）とのクロスチェック。"""
-    df = load_wooldridge_dataset("mroz")
-    options = ProbitOptions(cov_type=cov_type)
-    res = Probit(df, y="inlf", x=MROZ_X, options=options).fit()
-
-    _check_result(res, fixtures["mroz"][cov_type], f"mroz/{cov_type}")
-
-
-def test_mroz_cluster_matches_statsmodels(fixtures):
-    """実データでのクラスターロバストSE（`city`＝都市部居住ダミー、484/269の2値）。
-
-    `testing-policy.md`「テスト用データセット」3.の「実データでのグループ列も
-    検証する」を満たす（Logitのmrozクラスターと同じ趣旨）。
-    """
-    df = load_wooldridge_dataset("mroz")
-    options = ProbitOptions(cov_type="cluster", cluster_col="city")
-    res = Probit(df, y="inlf", x=MROZ_X, options=options).fit()
-
-    ref = fixtures["mroz"]["cluster"]
-    _assert_dict_close(res.params, ref["coef"], "mroz/cluster/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "mroz/cluster/se")

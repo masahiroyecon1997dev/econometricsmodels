@@ -2,7 +2,7 @@
 
 `tests/fixtures/benchmarks/logit_crosscheck.json`（`benchmark/nonlinear/
 fixtures/generate_logit_crosscheck_fixtures.py`で生成）を読み込み、係数・標準誤差・
-適合度統計量・限界効果をRとクロスチェックする。役割分担は`test_logit_fixtures.py`
+適合度統計量・限界効果をRとクロスチェックする。役割分担は`test_logit_reference.py`
 と同じ（`.claude/rules/testing-policy.md`「リファレンス実装」参照）。
 
 Note:
@@ -69,7 +69,7 @@ COV_TYPES = ["classical", "opg", "hc0", "hc1"]
 MARGEFF_AT = ["overall", "mean", "median"]
 
 # near_separationは既定tol=1e-6だとstatsmodels/Rとの一致精度が下がる境界ケース
-# （test_logit_fixtures.py参照）。ここでも同じ理由でtol=1e-8を明示指定する。
+# （test_logit_reference.py参照）。ここでも同じ理由でtol=1e-8を明示指定する。
 _NEAR_SEPARATION_TOL = 1e-8
 
 

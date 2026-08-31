@@ -7,8 +7,8 @@
   役割が近いが、これは均等サイズ版でテスト専用のロジックのため、`benchmark/`とは
   ライフサイクルが異なる`tests/`側に置く（`.claude/rules/testing-policy.md`
   「テストの分離」参照。ユーザー確認済み）。
-- `separation_suspected_dataset`: 準完全分離データのDGP（`test_logit.py`/
-  `test_probit.py`で完全に同一実装だった）。
+- `separation_suspected_dataset`: 準完全分離データのDGP
+  （`test_logit_validation.py`/`test_probit_validation.py`で完全に同一実装だった）。
 - `MROZ_X`: Wooldridge mrozデータセットの説明変数リスト。
 - `load_wooldridge_dataset`: Wooldridgeデータセットのロード（`wooldridge`
   パッケージが無い環境ではskip）。`benchmark/load_wooldridge.py`の`load`を
@@ -53,8 +53,9 @@ def separation_suspected_dataset() -> pl.DataFrame:
     完全に分類できるようにしたDGP）を生成する。
 
     `Logit`/`Probit`いずれのComputationError（`SeparationSuspected`）テストにも
-    使う（Probit側もsigmoidベースのDGPをそのまま流用する。`test_logit.py`の
-    Logit版のProbit版という位置づけ、DGP自体の正確なProbitリンクである必要はない）。
+    使う（Probit側もsigmoidベースのDGPをそのまま流用する。
+    `test_logit_validation.py`のLogit版のProbit版という位置づけ、DGP自体の
+    正確なProbitリンクである必要はない）。
     """
     random.seed(42)
     n = 200

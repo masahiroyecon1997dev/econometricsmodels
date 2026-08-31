@@ -7,10 +7,16 @@ Wooldridge実データ（mroz）で、係数・標準誤差・検定統計量・
 限界効果を相対誤差1e-8で厳密比較する
 （`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。
 
-役割分担:
-    - 構造・API・エラーパスの検証: `test_logit.py`
+役割分担（OLS/WLS の `test_<手法>_*.py` と同じ4分割、
+`refactoring-candidates-2.md` 項目68）:
+    - 成功パスの構造・API・オプション反映・predict 等: `test_logit_api.py`
+    - `ValidationError`/`ComputationError` パス: `test_logit_validation.py`
     - 主リファレンス（statsmodels）との厳密な数値一致: このファイル
     - 独立実装（R）とのクロスチェック: `test_logit_crosscheck.py`
+
+このファイルは2種類の照合を行う。凍結フィクスチャ（`logit.json`）との厳密比較を
+主軸としつつ、凍結フィクスチャが対象にしない `include_intercept=False` は
+ライブ statsmodels との直接照合で確認する（`test_ols_reference.py` と同じ構成）。
 
 Note:
     `cov_type="hc1"`はここに含めない（statsmodelsのdiscrete modelがn/(n-k)
@@ -39,11 +45,7 @@ from _helpers import (
     with_cluster_groups,
 )
 from _tolerances import TOLERANCES
-from econometricsmodels import (
-    ComputationError,
-    Logit,
-    LogitOptions,
-)
+from econometricsmodels import Logit, LogitOptions
 
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.nonlinear.fixtures.generate_logit_fixtures import (
@@ -57,11 +59,11 @@ FIXTURE_PATH = (
     / "logit.json"
 )
 
-RTOL = TOLERANCES["logit_fixtures"]["rtol"]
+RTOL = TOLERANCES["logit_reference"]["rtol"]
 # OLS（閉形式解）のATOL=1e-10より緩い。Logitは反復最適化（Newton/BFGS/L-BFGS）の
 # ため、ゼロ近傍の値（信頼区間の境界等）で閉形式解より1桁大きい浮動小数点誤差が
 # 乗ることを実測確認した（ベンチマーク作成時、diff~2.6e-10のケース）。
-ATOL = TOLERANCES["logit_fixtures"]["atol"]
+ATOL = TOLERANCES["logit_reference"]["atol"]
 
 # near_separation（logit特有の準完全分離境界ケース）は、既定のtol=1e-6（勾配ノルム
 # 基準）だとstatsmodelsとの数値一致がRTOL=1e-8を満たさない（実測diff~7e-8相対）。
@@ -87,7 +89,7 @@ _check_margeff = partial(check_margeff, rtol=RTOL, atol=ATOL)
 
 # method="bfgs"/"lbfgs"はnewtonと異なる最適化経路で収束するため、既定のRTOLより
 # 緩めた許容誤差を使う（tests/_tolerances.py参照）。
-RTOL_METHOD = TOLERANCES["logit_fixtures"]["rtol_method"]
+RTOL_METHOD = TOLERANCES["logit_reference"]["rtol_method"]
 _assert_dict_close_method = partial(
     assert_dict_close, rtol=RTOL_METHOD, atol=ATOL
 )
@@ -140,6 +142,9 @@ def _check_result(res, ref: dict, label: str) -> None:
 
     if ref["margeff"] is not None:
         _check_margeff(res, ref["margeff"], label)
+
+
+# ── 凍結フィクスチャとの数値照合 ───────────────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
@@ -203,7 +208,7 @@ def test_method_matches_statsmodels(fixtures, method):
     フルの統計量（std_errors含む）で一致すること。
 
     既定の`method="newton"`のみ全シナリオ×cov_typeで数値照合しており、bfgs/lbfgsは
-    `test_logit.py::test_method_option_converges_to_same_params`で自身のnewton結果
+    `test_logit_api.py::test_method_option_converges_to_same_params`で自身のnewton結果
     とparamsのみ緩い許容誤差(rel=1e-4)で比較していたが、主リファレンスに対する
     フルの統計量照合が無かった（`testing-completeness-reviewer`指摘、
     Issue #231フェーズ4）。
@@ -217,6 +222,34 @@ def test_method_matches_statsmodels(fixtures, method):
     _assert_dict_close_method(res.params, ref["coef"], f"{label}/coef")
     _assert_dict_close_method(res.std_errors, ref["se"], f"{label}/se")
     assert res.converged == ref["converged"], f"{label}/converged"
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+def test_mroz_matches_statsmodels(fixtures, cov_type):
+    """Wooldridge実データ（mroz、労働参加モデル）とのクロスチェック。"""
+    df = load_wooldridge_dataset("mroz")
+    options = LogitOptions(cov_type=cov_type)
+    res = Logit(df, y="inlf", x=MROZ_X, options=options).fit()
+
+    _check_result(res, fixtures["mroz"][cov_type], f"mroz/{cov_type}")
+
+
+def test_mroz_cluster_matches_statsmodels(fixtures):
+    """実データでのクラスターロバストSE（`city`＝都市部居住ダミー、484/269の2値）。
+
+    `testing-policy.md`「テスト用データセット」3.の「実データでのグループ列も
+    検証する」を満たす（OLSのwage1/regionクラスターと同じ趣旨）。
+    """
+    df = load_wooldridge_dataset("mroz")
+    options = LogitOptions(cov_type="cluster", cluster_col="city")
+    res = Logit(df, y="inlf", x=MROZ_X, options=options).fit()
+
+    ref = fixtures["mroz"]["cluster"]
+    _assert_dict_close(res.params, ref["coef"], "mroz/cluster/coef")
+    _assert_dict_close(res.std_errors, ref["se"], "mroz/cluster/se")
+
+
+# ── ライブ statsmodels との照合（凍結フィクスチャ対象外の分岐） ─────
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
@@ -268,35 +301,3 @@ def test_include_intercept_false_matches_statsmodels(cov_type):
         f"{label}/converged"
     )
     assert res.df_model == fitted.df_model, f"{label}/df_model"
-
-
-def test_perfect_multicollinearity_raises_computation_error():
-    """完全な多重共線性は数値比較の対象外（`testing-policy.md`「テストの3系統」）。"""
-    df = pl.read_csv(DATA_DIR / "logit_perfect_multicollinearity.csv")
-    with pytest.raises(ComputationError):
-        Logit(df, y="y", x=["x1", "x2", "x3"]).fit()
-
-
-@pytest.mark.parametrize("cov_type", COV_TYPES)
-def test_mroz_matches_statsmodels(fixtures, cov_type):
-    """Wooldridge実データ（mroz、労働参加モデル）とのクロスチェック。"""
-    df = load_wooldridge_dataset("mroz")
-    options = LogitOptions(cov_type=cov_type)
-    res = Logit(df, y="inlf", x=MROZ_X, options=options).fit()
-
-    _check_result(res, fixtures["mroz"][cov_type], f"mroz/{cov_type}")
-
-
-def test_mroz_cluster_matches_statsmodels(fixtures):
-    """実データでのクラスターロバストSE（`city`＝都市部居住ダミー、484/269の2値）。
-
-    `testing-policy.md`「テスト用データセット」3.の「実データでのグループ列も
-    検証する」を満たす（OLSのwage1/regionクラスターと同じ趣旨）。
-    """
-    df = load_wooldridge_dataset("mroz")
-    options = LogitOptions(cov_type="cluster", cluster_col="city")
-    res = Logit(df, y="inlf", x=MROZ_X, options=options).fit()
-
-    ref = fixtures["mroz"]["cluster"]
-    _assert_dict_close(res.params, ref["coef"], "mroz/cluster/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "mroz/cluster/se")

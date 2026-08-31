@@ -37,7 +37,7 @@ n=100,000 で軽く実測したところ cluster が最重だった
 engine・statsmodels とも既定は Newton-Raphson で、n/k スイープは newton で回す。
 加えて `bfgs`/`lbfgs` を **method 軸**として代表点1つ（cov_type=classical・
 k=5・n=1,000,000）で計測する（`PerfAdapter.extra_methods`）。正確性検証
-（`test_logit_fixtures.py`）も newton を主軸に bfgs/lbfgs は代表ケースのみ、
+（`test_logit_reference.py`）も newton を主軸に bfgs/lbfgs は代表ケースのみ、
 という絞り方に合わせている。
 
 使用例（リポジトリルートから）:

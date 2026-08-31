@@ -160,14 +160,14 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 ### 3.8 テスト
 
-- 許容誤差: statsmodels主リファレンス（`test_logit_fixtures.py`）は`RTOL=1e-8`。Rクロスチェック
+- 許容誤差: statsmodels主リファレンス（`test_logit_reference.py`）は`RTOL=1e-8`。Rクロスチェック
   （`test_logit_crosscheck.py`、反復最適化同士の比較のため機械精度一致は期待できない）は
   `RTOL=2e-4`を基本としつつ、限界効果の`std_err`（デルタ法のヤコビアン経由でノイズが1桁大きい、
   `RTOL=5e-3`）・p値（標準正規分布CDFの裾での増幅、`ATOL=3e-5`）・`near_separation`シナリオの
   信頼区間（`RTOL=6e-4`）を実測に基づき個別に緩めている。
 - **statsmodelsのdiscrete modelにおける既知の欠落**: `cov_type="hc1"`は`LogitResults`に
   `cov_HC1`が未定義のためstatsmodelsが暗黙に`hc0`と同じ値を返す（Rの`n/(n-k)`補正版とは一致しない）。
-  このためRを主リファレンスとし、`test_logit_fixtures.py`は`hc1`を検証対象から除外する。
+  このためRを主リファレンスとし、`test_logit_reference.py`は`hc1`を検証対象から除外する。
   `cov_type="opg"`もstatsmodelsのdiscrete modelはネイティブ非対応（`model.score_obs(params)`から
   手計算する必要がある）。限界効果の`opg`はさらにstatsmodels内部のキャッシュ機構によりRのみが
   参照値になる。

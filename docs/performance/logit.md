@@ -11,7 +11,7 @@
 - **計測範囲の対称性（Issue #98）**: engine は係数・標準誤差と同じ呼び出しで、対数尤度・**切片のみモデルの対数尤度**・尤度比統計量・そのp値・McFadden擬似R²・AIC・BIC まで常に一括計算する。statsmodels はこれらを遅延評価（`cached_value`）にしており、特に `llnull`（切片のみモデルの対数尤度、`llr`/`prsquared` が依存）はアクセス時に**切片のみ Logit を別途フィットする**。`_fit_once_statsmodels` は `.fit()` 直後に `llf`/`llnull`/`llr`/`llr_pvalue`/`prsquared`/`aic`/`bic` へ明示アクセスし、engine と同じ処理範囲で計測する（この対称化により statsmodels 側の計測時間は遅延評価アクセスなしの約2〜3倍になる）。
 - **cov_type**: classical と cluster の代表2点。Logit/Probit は OLS/WLS と違い HAC を持たない。classical/hc0/cluster を n=100,000, k=5 で軽く実測したところ cluster が最重だった。cluster の疑似グループ数は 50 固定。
 - **`opg` は計測対象外**: statsmodels の discrete model（`Logit.fit`）は `opg` を `cov_type` 引数としてネイティブに受け付けず、`score_obs` からの numpy 手計算になる（`benchmark/nonlinear/references/statsmodels_ref.py`）。engine のネイティブ OPG との比較は「計測対象の処理範囲を対称に揃える」方針に反するため除外する。
-- **method（オプティマイザ）**: engine・statsmodels とも Newton-Raphson（`method="newton"`）で n/k スイープを回す。加えて `bfgs`/`lbfgs` を **method 軸**として代表点1つ（cov_type=classical, k=5, n=1,000,000）で計測する（正確性検証〈`test_logit_fixtures.py`〉も newton 主軸、bfgs/lbfgs は代表のみ、という絞り方に合わせる）。
+- **method（オプティマイザ）**: engine・statsmodels とも Newton-Raphson（`method="newton"`）で n/k スイープを回す。加えて `bfgs`/`lbfgs` を **method 軸**として代表点1つ（cov_type=classical, k=5, n=1,000,000）で計測する（正確性検証〈`test_logit_reference.py`〉も newton 主軸、bfgs/lbfgs は代表のみ、という絞り方に合わせる）。
 - **スイープ軸**: n軸（k=5固定、n=1,000〜1,000,000）、k軸（n=10,000固定、k=5・20）、method軸（下記）。
 
 ## 結果: n軸（k=5固定）

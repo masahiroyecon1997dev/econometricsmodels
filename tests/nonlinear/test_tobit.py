@@ -1,10 +1,11 @@
 """Tobit python_packageラッパーの構造・API・エラーパスのスモークテスト。
 
 主リファレンス（R survival::survreg / AER::tobit）との厳密な数値比較は別途
-実施する（`test_logit_fixtures.py`/`test_logit_crosscheck.py`と同じ役割分担、
+実施する（`test_logit_reference.py`/`test_logit_crosscheck.py`と同じ役割分担、
 Issue #227）。ここでは`fit()`の成功パス・`coef_table()`/`predict()`/
 `censoring_fit_check()`/`marginal_effects()`の構造・`ValidationError`/
-`ComputationError`パスのみを検証する（`test_logit.py`のTobit版）。
+`ComputationError`パスのみを検証する（`test_logit_api.py`/
+`test_logit_validation.py`のTobit版）。
 """
 
 from __future__ import annotations

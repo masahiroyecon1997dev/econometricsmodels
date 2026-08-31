@@ -191,7 +191,10 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **状態**: linear は項目68 Phase 2 linear で解消（2026-08-30）。`test_ols.py` は
   廃止し、簡易数値比較は `test_ols_reference.py` の「ライブ statsmodels との照合」
   セクションへ移動（削除ではなく移設したためカバレッジ減はゼロ。fixtures 側との
-  重複整理は項目54 に残る）。nonlinear/iv は各系統の Phase 2 で。
+  重複整理は項目54 に残る）。nonlinear（Logit/Probit）は Phase 2 nonlinear で確認
+  したが、旧 `test_logit.py`/`test_probit.py` は元々 statsmodels ライブ照合を
+  持たず（構造/エラー専業で既に他ファイルと対称）、移設は不要だった（2026-08-31）。
+  iv は Phase 2 iv で。
 
 ### 53. `tests/linear/test_ols.py`の`ATOL_COEF`/`ATOL_SE`/`ATOL_STAT`が、`tests/_assertions.py`の許容誤差計算式・`tests/_tolerances.py`の値と揃っていない
 
@@ -261,8 +264,10 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   リスクがある。
 - **状態**: linear（`test_ols_fixtures.py`/`test_wls_fixtures.py` →
   `*_reference.py`、`_tolerances.py` キーも追随）は項目68 Phase 2 linear で
-  対応済み（2026-08-30）。nonlinear（logit/probit）・iv（iv/iv_gmm）は各系統の
-  Phase 2 で実施。
+  対応済み（2026-08-30）。nonlinear（`test_logit_fixtures.py`/
+  `test_probit_fixtures.py` → `*_reference.py`、`_tolerances.py` キー
+  `logit_fixtures`/`probit_fixtures` → `*_reference` も追随）は Phase 2 nonlinear
+  で対応済み（2026-08-31）。iv（iv/iv_gmm）は Phase 2 iv で実施。
 
 ### 56. `test_ols.py`内で数値比較の書き方（生の`assert`+f-string／`pytest.approx`／`_assertions.assert_close`不使用）が混在
 
@@ -601,12 +606,39 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
     `## ライブ statsmodels との照合`）を統一（**項目76**）。`docs/spec/{ols,wls}-spec.md`
     §テスト・`tests/_assertions.py`・関連コメントも更新。検証: `pytest tests`
     **957件パス（不変、テスト消失ゼロ）**、`ruff check`/`format` パス。
-  - **Phase 2 nonlinear / iv 未着手**: linear と同じ型で。iv は 2sls/gmm ＋
-    `test_iv_gmm_fixtures.py` → `test_iv_gmm_reference.py` の分もある。各系統で
-    `pytest tests/<系統>` を確認。`_tolerances.py` の `iv_*`/`logit_*`/`probit_*`
-    キーはその系統の Phase 2 で `*_reference` に追随。
-- **状態**: Phase 1 ＋ Phase 2 linear（OLS/WLS）実施済み。Phase 2 nonlinear
-  （logit/probit）・iv は未着手（着手タイミングはユーザー判断待ち）。
+  - **Phase 2 nonlinear 完了（2026-08-31）— Logit/Probit を関心事で4分割**:
+    `test_logit.py` → `test_logit_api.py`（成功パス構造・API・オプション反映・
+    `predict()`/`pred_table()`/`marginal_effects()` の構造）＋
+    `test_logit_validation.py`（`ValidationError`/`ComputationError` パス。
+    `marginal_effects()` のエラーパス・`_fixtures.py` にあった
+    `test_perfect_multicollinearity_raises_computation_error` もここへ集約）。
+    `test_logit_fixtures.py` → `test_logit_reference.py`（**項目55**）で、
+    凍結フィクスチャ照合と `include_intercept=False` のライブ statsmodels 照合を
+    セクション分け。Probit も同型。OLS と違い Logit/Probit の旧構造ファイルは
+    ライブ statsmodels 照合を持たない（`test_logit.py` は純粋に構造/エラーのみ）
+    ため、共通ヘルパーモジュール（`_ols_helpers.py` 相当）は不要だった。
+    `_tolerances.py` のキー `"logit_fixtures"`/`"probit_fixtures"` →
+    `"logit_reference"`/`"probit_reference"`。セクション見出しは linear と同じ
+    ものに加え nonlinear 固有の `## pred_table()` / `## marginal_effects()` /
+    `## ValidationError（marginal_effects()）` / `## ライブ statsmodels との照合`
+    を統一（**項目76**）。`python_package/econometricsmodels/nonlinear/CLAUDE.md`・
+    `docs/spec/logit-spec.md`・`tests/_assertions.py`・`tests/_helpers.py`・
+    `benchmark/nonlinear/datasets.py`・`performance/compare_logit.py`・
+    `docs/performance/logit.md` の参照も更新。検証: `pytest tests`
+    **957件パス（不変、テスト消失ゼロ）**、`ruff check`/`format` パス。
+    - **項目77 の状態**: `test_method_option_converges_to_same_params`
+      （`test_logit_api.py` へ移動）と `test_method_matches_statsmodels`
+      （`test_logit_reference.py`）の観点重複・`rel=1e-4` 直書きは**未解消**
+      （分割はファイル移動のみ、テスト内容は不変の方針）。項目77 で引き続き追跡。
+    - **項目95・96 の状態**: `test_logit_*.py` と `test_probit_*.py` のコード
+      ほぼ完全同一という重複は4分割後も残る（各4ファイルで並行）。共通関数
+      切り出しは項目95・96 で引き続き追跡。
+  - **Phase 2 iv 未着手**: linear/nonlinear と同じ型で。iv は 2sls/gmm ＋
+    `test_iv_gmm_fixtures.py` → `test_iv_gmm_reference.py` の分もある。
+    `pytest tests/iv` を確認。`_tolerances.py` の `iv_*` キーは Phase 2 iv で
+    `*_reference` に追随。
+- **状態**: Phase 1 ＋ Phase 2 linear（OLS/WLS）＋ Phase 2 nonlinear
+  （Logit/Probit）実施済み。Phase 2 iv は未着手（着手タイミングはユーザー判断待ち）。
 
 ### 69. `test_hac_time_col_reorders_rows_before_computing_lags`の`ordered_df`/`shuffled_df`が手書きで重複、OLS/WLS間でも同一データが独立に書かれている
 
@@ -811,8 +843,10 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **状態**: linear（OLS/WLS）は項目68 Phase 2 linear で見出しを統一済み
   （`## 成功パス・結果型` / `## API構造` / `## オプションの反映` / `## predict()` /
   `## ValidationError（…）` / `## ComputationError` / `## 凍結フィクスチャとの数値照合` /
-  `## ライブ statsmodels との照合`、2026-08-30）。Logit（`marginal_effects()` 等の
-  手法固有見出しを含む）・Probit は nonlinear の Phase 2 で同じ規約を適用する。
+  `## ライブ statsmodels との照合`、2026-08-30）。Logit/Probit も Phase 2 nonlinear
+  で同じ規約＋手法固有見出し（`## pred_table()` / `## marginal_effects()` /
+  `## ValidationError（marginal_effects()）`）を適用済み（2026-08-31）。iv のみ
+  Phase 2 iv で追随。
 
 ### 77. `test_method_option_converges_to_same_params`（`test_logit.py`）が`test_method_matches_statsmodels`（`test_logit_fixtures.py`）と観点が重複し、`rel=1e-4`が直書き
 
@@ -843,7 +877,11 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   （用途は違うが同じ`logit_fixtures.rtol_method`を流用するか、`test_logit.py`
   専用のキーを新設）に統一するのが良いと考える。
 - **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
+- **状態**: 未対応（着手要否はユーザー判断待ち）。Phase 2 nonlinear（2026-08-31）で
+  `test_method_option_converges_to_same_params` は `test_logit_api.py`（オプション
+  反映セクション）へ、`test_method_matches_statsmodels` は `test_logit_reference.py`
+  （凍結フィクスチャ照合セクション）へ分かれたが、テスト内容・`rel=1e-4` 直書きは
+  不変（分割はファイル移動のみの方針）。Probit も同様。
 
 ### 78. `LogitResult`に実際に収束した`method`が含まれておらず、検証する手段が無い
 
@@ -1306,8 +1344,11 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   除く）という現状の利点を維持しつつ、テスト本体のコード重複は解消できる。
   項目68（ファイル分割の方向性）と合わせて設計するのが良い。
 - **気づいた経緯**: 2026-08-24、`tests/nonlinear/test_probit.py`解説後のユーザー指摘。
-- **状態**: 未対応（方向性: 共通関数切り出し＋ファイルは分離維持。着手
-  タイミングはユーザー判断待ち、項目68と合わせて検討）
+- **状態**: 未対応（方向性: 共通関数切り出し＋ファイルは分離維持）。項目68
+  Phase 2 nonlinear（2026-08-31）で `test_logit*.py`/`test_probit*.py` は
+  それぞれ `_api.py`/`_validation.py`/`_reference.py` の3ファイルへ分割されたが、
+  Logit 版と Probit 版のコードほぼ完全同一という重複は各ファイル対で残ったまま
+  （分割はファイル移動のみ、共通化は未実施）。切り出しは引き続きこの項目で追跡。
 
 ### 96. 項目85〜90が`tests/nonlinear/test_probit_fixtures.py`にも同様に該当する（一括注記）
 
@@ -1338,4 +1379,8 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-24、`tests/nonlinear/test_probit_fixtures.py`解説時に
   確認。
 - **状態**: 未対応（項目85〜90への追記の代わりにこの1項目に集約、
-  着手要否はユーザー判断待ち）
+  着手要否はユーザー判断待ち）。項目68 Phase 2 nonlinear（2026-08-31）で
+  `test_probit_fixtures.py` は `test_probit_reference.py` にリネームされたが、
+  項目85〜90の該当内容（`check_margeff` 利用・`hc1` 除外・OPG手計算・`_rename`・
+  消極的 `margeff` チェック・G=2 docstring）はそのまま `_reference.py` へ移動した
+  だけで未解消。

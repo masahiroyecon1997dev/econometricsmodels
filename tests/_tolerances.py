@@ -18,7 +18,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # 下限フロー。
     # 関心事分割（refactoring-candidates-2.md 項目68）で test_<手法>_fixtures.py を
     # test_<手法>_reference.py にリネームした系統からキー名も *_reference にする。
-    # linear（ols/wls）は移行済み、iv/logit/probit は各系統の Phase 2 で追随。
+    # linear（ols/wls）・nonlinear（logit/probit）は移行済み、iv は Phase 2 iv で追随。
     "ols_reference": {"rtol": 1e-8, "atol": 1e-10},
     "wls_reference": {"rtol": 1e-8, "atol": 1e-10},
     "iv_fixtures": {"rtol": 1e-8, "atol": 1e-10},
@@ -29,8 +29,8 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # rtol_method: method="bfgs"/"lbfgs"がnewtonと異なる最適化経路で収束するため、
     # 収束後の係数・標準誤差が既定のRTOLより1桁以上大きくばらつく（実測最大相対誤差
     # ~7.7e-5、Issue #231フェーズ4）。実測値に対し約13倍のマージンを持たせた。
-    "logit_fixtures": {"rtol": 1e-8, "atol": 1e-9, "rtol_method": 1e-3},
-    "probit_fixtures": {"rtol": 1e-8, "atol": 1e-9, "rtol_method": 1e-3},
+    "logit_reference": {"rtol": 1e-8, "atol": 1e-9, "rtol_method": 1e-3},
+    "probit_reference": {"rtol": 1e-8, "atol": 1e-9, "rtol_method": 1e-3},
     # --- 独立実装（R）とのクロスチェック ---
     # classical/HC0-3/clusterは機械精度一致（実測1e-14程度）のためRTOL_STRICTを
     # 適用、HACのみ小標本補正の慣習差により緩める。ATOLは絶対誤差フロア

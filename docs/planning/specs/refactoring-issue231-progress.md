@@ -426,6 +426,24 @@
     集約先・多重共線性テストの重複・数値比較の書き方の混在）は本分割では未解消で
     項目として残す。`refactoring-candidates-3.md`（並行編集中）の `test_ols.py`/
     `test_wls.py` 行アンカー参照は据え置き。
+  - **Phase 2 nonlinear 実施（2026-08-31）**: Logit/Probit を同じ4分割に
+    （`test_logit_api.py` / `_validation.py` / `_reference.py`〔＝旧 `_fixtures.py`、
+    項目55〕 / `_crosscheck.py`、Probit も同型）。旧 `test_logit.py`/`test_probit.py`
+    は元々 statsmodels ライブ照合を持たない構造/エラー専業のため、linear の
+    `_ols_helpers.py` に相当する共通ヘルパーモジュールは不要だった（項目52 は
+    nonlinear では移設不要）。`test_<手法>_fixtures.py` にあった
+    `test_perfect_multicollinearity_raises_computation_error` と
+    `marginal_effects()` のエラーパスは `_validation.py` へ集約。`_tolerances.py`
+    の `logit_fixtures`/`probit_fixtures` キー → `*_reference`。セクション見出しは
+    linear と同じもの＋ nonlinear 固有（`## pred_table()` / `## marginal_effects()` /
+    `## ValidationError（marginal_effects()）` / `## ライブ statsmodels との照合`）で
+    統一（項目76）。`python_package/econometricsmodels/nonlinear/CLAUDE.md`・
+    `docs/spec/logit-spec.md`・`tests/_assertions.py`・`tests/_helpers.py`・
+    `benchmark/nonlinear/datasets.py`・`performance/compare_logit.py`・
+    `docs/performance/logit.md` の参照も更新。`pytest tests` 957件パス（不変、
+    消失ゼロ）、`ruff` パス。項目55/76 は nonlinear 分について解消。項目77
+    （method テストの観点重複・`rel=1e-4` 直書き）・項目95/96（Logit/Probit の
+    コード重複）は分割後も残り、各項目で引き続き追跡。iv は Phase 2 iv 待ち。
 - 上記以外（`refactoring-candidates.md`項目12・13・15〜35・37・39）は
   未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は

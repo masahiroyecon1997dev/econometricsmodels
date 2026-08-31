@@ -1,7 +1,7 @@
 """IV python_packageラッパーの構造・API・エラーパスのスモークテスト。
 
 主リファレンス（linearmodels）との厳密な数値比較は別途`test_iv_fixtures.py`で
-実施する（`test_logit.py`/`test_probit.py`と同じ役割分担）。ここでは`fit()`の
+実施する（`test_logit_api.py`/`test_logit_validation.py`と同じ役割分担）。ここでは`fit()`の
 成功パス・`coef_table()`/`first_stage()`の構造・オプションの反映確認・
 `ValidationError`/`ComputationError`パスのみを検証する。
 """

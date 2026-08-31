@@ -1430,3 +1430,38 @@
   ユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、フィクスチャ再生成を
   伴う）
+
+### 59. `weight_type`×`cov_type`の「両方とも非デフォルトで異なる種類」という組み合わせが`kernel`×`hac`以外に無い
+
+- **対象**: [tests/test_iv_gmm_fixtures.py:259-278](../../../tests/test_iv_gmm_fixtures.py#L259-L278)
+  （`test_kernel_hac_matches_linearmodels`が唯一の該当例）
+- **内容**: ユーザー指摘（2026-08-30、「問題が起きやすい組み合わせだけ
+  別途やっておくと検出力が上がりそうなのだが」）を受けて確認。詳細な
+  調査経緯・実装の設計上のリスク評価は`refactoring-candidates-3.md`
+  項目23参照（実装は`weight_type`/`cov_type`が一致する場合・しない場合を
+  分岐させない一般形サンドイッチのため構造的リスクは低いと判断したが、
+  それを裏付けるテストが`kernel`×`hac`1点のみというのは心もとない）。
+- **Claudeの所感**: `weight_type="cluster"`×`cov_type="hac"`
+  （またはその逆の`weight_type="kernel"`×`cov_type="cluster"`）を
+  もう1〜2パターン`baseline`シナリオで追加するのが、全組み合わせ
+  網羅（24通り）よりも費用対効果が良いと考える。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv_gmm_fixtures.py`解説時の
+  ユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 60. GMMで`include_intercept=False`の数値照合（linearmodels）・`first_stage()`への伝播確認が無い（2SLS版項目50・51と同種、GMMも同じ配線コードを共有するため同程度に重要）
+
+- **対象**: `tests/test_iv_gmm_fixtures.py`全体（`grep`で
+  `include_intercept`が0件）
+- **内容**: ユーザー指摘（2026-08-30、「GMMのconstがfalseの場合が無い。
+  GMMにfirst_stageの概念がないから問題にならない？」）を受けて実機
+  確認したところ、GMMも2SLSと同じ`compute_first_stage`配線コードを
+  共有しており`first_stage()`を持つ（`include_intercept=False`でも
+  正しく動作することは確認済み、詳細は`refactoring-candidates-3.md`
+  項目24参照）。項目50・51の2SLS版と同じ理由でGMM側にも数値照合
+  テストが無い。
+- **Claudeの所感**: 項目50・51と同時に対応するのが効率的。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv_gmm_fixtures.py`解説時の
+  ユーザー指摘、実機検証で確認。
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目50・51と合わせて
+  検討）

@@ -704,11 +704,11 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
   `test_wls.py`・`test_wls_fixtures.py`・`test_wls_crosscheck.py`・
   `test_logit.py`・`test_logit_fixtures.py`・`test_logit_crosscheck.py`・
   `test_probit.py`・`test_probit_fixtures.py`・`test_probit_crosscheck.py`・
-  `test_iv.py`・`test_iv_fixtures.py`
+  `test_iv.py`・`test_iv_fixtures.py`・`test_iv_gmm_fixtures.py`
   （全区切り解説済み、WLS関連ファイルは一通り完了、Logit関連ファイルも
   一通り完了、Probit関連ファイルもこれで一通り完了。IVは`test_iv.py`/
-  `test_iv_fixtures.py`が完了、`test_iv_gmm_fixtures.py`/
-  `test_iv_crosscheck.py`は未着手）
+  `test_iv_fixtures.py`/`test_iv_gmm_fixtures.py`が完了、
+  `test_iv_crosscheck.py`のみ未着手）
 
 **注意（2026-08-30〜、`tests/`のディレクトリ分割）**: 別セッションが
 `tests/`を系統別サブディレクトリ（`tests/linear/`・`tests/nonlinear/`・
@@ -731,9 +731,24 @@ CI側のPYTHONPATH非対称〔`refactoring-candidates-2.md`項目50〕は実質�
 都度確認すること。項目50の状態欄自体は、リファクタリング側のセッションが
 後ほど更新する前提でこちらからは触っていない。
 
-**次に解説予定**: `test_iv_gmm_fixtures.py`（IV関連ファイルは
-`test_iv.py`→`test_iv_fixtures.py`→`test_iv_gmm_fixtures.py`→
-`test_iv_crosscheck.py`の順で進行中、残り2ファイル）。
+**次に解説予定**: `test_iv_crosscheck.py`（IV関連ファイルの最後の1つ。
+これが終わればIV系統が完了し、次はTobitに進む見込み）。
+
+`test_iv_gmm_fixtures.py`解説後のユーザーとの質疑で6件の指摘を受け、
+`refactoring-candidates-3.md`項目18〜24・`test-coverage-candidates.md`
+項目59〜60に記録した（2026-08-31）。特に**項目21（`refactoring-
+candidates-3.md`）は前回セッションで「原因未特定」としていた
+`gmm_iterations=1`のHansen J不一致の原因を、`linearmodels`本体の
+ソース（`.venv`に導入済みのバージョン7.0）を直接調査して特定した**——
+`IVGMM.fit(iter_limit=1)`はループが1度も実行されず重み行列が
+`(Z'Z/n)⁻¹`という生の初期値のまま使われる（残差由来の情報を一切
+含まない）のに対し、本実装は`gmm_iterations=1`でも意図的に`σ̂²`
+スケーリング済みの重みをHansen J計算に使う設計のため、原理的に
+一致しえない差異だったと判明した（バグではなく規約の違い）。
+また項目24では、ユーザーの「GMMにfirst_stageの概念が無いから
+`include_intercept=False`は問題にならないのでは」という予想を実機で
+検証し、**予想に反してGMMも2SLSと同じ第一段階回帰の配線コードを
+共有しており、同程度に検証が重要**という結論を記録した。
 
 `test_iv_fixtures.py`解説後のユーザーとの質疑で13件の指摘を受け、
 `refactoring-candidates-3.md`項目11〜17・`test-coverage-candidates.md`
@@ -908,18 +923,20 @@ Probit固有の差分の有無を都度`diff`で確認すること。項目35（
 にも関連コメントとして追記済み。Tobit実装時（主リファレンスがR単独で
 第三者実装による三角測量が効かない）はこのルールが特に重要になる。
 
-**候補メモの状態（2026-08-30時点、最新）**:
+**候補メモの状態（2026-08-31時点、最新）**:
 - `refactoring-candidates.md`: 項目1〜43（凍結、既存の並行セッションが対応中）。
 - `refactoring-candidates-2.md`: 項目44〜96（凍結、2026-08-30時点で別の並行タスクが
   リファクタリング作業に着手したため、このウォークスルーからの新規追記先ではなく
   なった）。
-- `refactoring-candidates-3.md`: 項目1〜17（独立採番、`test_iv.py`解説時に
-  項目1〜10、`test_iv_fixtures.py`解説時に項目11〜17を追加。項目7の
-  `const`名衝突バグ疑い・項目9のドキュメント不整合・項目12のIV HC2/HC3
-  参照実装発見が特に重要、詳細は上記「次に解説予定」欄参照）。以後この
-  ウォークスルーからの新規追記はこのファイルに行う。
-- `test-coverage-candidates.md`: 項目1〜58（番号は継続、`test_iv.py`解説時に
-  項目46〜53、`test_iv_fixtures.py`解説時に項目54〜58を追加）。
+- `refactoring-candidates-3.md`: 項目1〜24（独立採番、`test_iv.py`解説時に
+  項目1〜10、`test_iv_fixtures.py`解説時に項目11〜17、`test_iv_gmm_
+  fixtures.py`解説時に項目18〜24を追加。項目7の`const`名衝突バグ疑い・
+  項目9のドキュメント不整合・項目12のIV HC2/HC3参照実装発見・項目21の
+  Hansen J不一致原因判明が特に重要）。以後このウォークスルーからの新規
+  追記はこのファイルに行う。
+- `test-coverage-candidates.md`: 項目1〜60（番号は継続、`test_iv.py`解説時に
+  項目46〜53、`test_iv_fixtures.py`解説時に項目54〜58、`test_iv_gmm_
+  fixtures.py`解説時に項目59〜60を追加）。
 
 **候補メモの状態（2026-08-23時点、過去の履歴）**:
 - `refactoring-candidates.md`: 項目1〜43（このウォークスルー由来の最後の追記は項目43）。

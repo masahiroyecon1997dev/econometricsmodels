@@ -567,3 +567,233 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   ユーザー指摘、前回セッションでの誤った回答の訂正として再調査。
 - **状態**: 対応不要と判断（意図的な二段階チェックであり、OLSとIVで
   一貫している。前回の誤った回答はこの記録により訂正）
+
+### 18. `COV_TYPES`の定義元が`test_iv_fixtures.py`（自前定義）と`test_iv_gmm_fixtures.py`（生成スクリプトからimport）で非対称
+
+- **対象**: [tests/test_iv_fixtures.py:75](../../../tests/test_iv_fixtures.py#L75)
+  （`COV_TYPES = ["classical", "hc0", "hc1", "hac"]`、このファイル自身で
+  リテラル定義）と
+  [tests/test_iv_gmm_fixtures.py:54-56](../../../tests/test_iv_gmm_fixtures.py#L54-L56)
+  （`from benchmark.iv.fixtures.generate_iv_gmm_fixtures import COV_TYPES`、
+  生成スクリプト側からimport）
+- **内容**: ユーザー指摘（2026-08-30、「2SLS版ではCOV_TYPESをこのファイル
+  自身で定義していましたが、GMM版は生成スクリプト側からCOV_TYPESもimport
+  しています」も記録しておいてほしい、リファクタリング候補になりうる）。
+  両ファイルとも`SCENARIOS`は生成スクリプトからimportして単一の定義元に
+  しているが、`COV_TYPES`は2SLS側だけこの原則から外れてリテラルで
+  再定義している。
+- **Claudeの所感**: `benchmark/iv/fixtures/generate_iv_fixtures.py`側にも
+  同名の`COV_TYPES`定義があるはずで（HC2/HC3を除く4値）、GMM版と同じ
+  ように`test_iv_fixtures.py`もそちらからimportする形に揃えれば、
+  「生成スクリプトでcov_typeの対象範囲を変更した際にテスト側の書き換えを
+  忘れる」というリスクを塞げる。軽微な修正で済む部類。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv_gmm_fixtures.py`解説時の
+  ユーザー指摘。
+- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
+
+### 19.【検討事項】GMMの推論統計量がz/カイ二乗分布固定であること・過剰棄却問題への対処（CUE/bootstrap/Windmeijer 2005補正）は未検討
+
+- **対象**: [docs/planning/specs/iv-api-design.md:120-128](../../../docs/planning/specs/iv-api-design.md#L120-L128)
+  （GMMは常にz分布・カイ二乗分布、`debiased`のような小標本切り替え
+  オプションは無い）
+- **内容**: ユーザー指摘（2026-08-30）。Stata `ivreg2`は既定でlarge-sample
+  統計量（z・カイ二乗）を報告し、`small`オプションで従来型の小標本統計量
+  （t分布・F分布、伝統的な自由度調整込み）に切り替えられる仕様がある
+  （`linearmodels`も`debiased`という同種の切り替えを持つ、前回解説の
+  `iv-api-design.md`3.2節参照）。本実装の`IvOptions`にはこの切り替え
+  オプションが無く、GMMは常にz/カイ二乗分布固定であることを確認した。
+  ユーザーはさらに、この「小標本補正+t分布」自体よりも、GMM推定量の
+  **過剰棄却問題**（Hansen, Heaton and Yaron 1996等で指摘された、
+  2-step GMMの標準的な検定統計量が小〜中標本で棄却しすぎる傾向がある
+  という既知の問題）への対処のほうが理論的に重要かもしれないとして、
+  continuously-updated GMM（CUE）・ブートストラップによる標準誤差/検定・
+  Windmeijer (2005)型の補正分散を検討候補に挙げている。`grep`で確認した
+  ところ、**CUEは実装されていない**（`CUE`/`continuously_updated`等で
+  ヒット無し）。
+- **Claudeの所感**: 統計的に正当な問題提起だと思う。2-step efficient GMM
+  （本実装の既定）はまさにHansen-Heaton-Yaronが過剰棄却を指摘した対象
+  そのものであり、小標本での推論の信頼性という観点では、単純な
+  t分布切り替えよりCUE・ブートストラップ・Windmeijer補正の方が理論的な
+  改善効果が大きいというユーザーの見立てに同意する。ただしこれらは
+  いずれも実装コストが軽くない（CUEは点推定自体の最適化方法が変わる、
+  ブートストラップは計算コストが重い、Windmeijer補正は2-step特有の
+  補正項の追加実装が必要）ため、既存の`docs/planning/specs/iv-api-
+  design.md`や`CLAUDE.md`12章「今後の検討事項」のような場所に、実装
+  着手前の検討候補として記録しておく価値はあると考える。優先度・
+  着手判断はユーザー次第。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv_gmm_fixtures.py`解説時の
+  ユーザー指摘、`grep`でCUE未実装を確認。
+- **状態**: 未対応（検討事項として記録のみ、着手要否はユーザー判断待ち）
+
+### 20. `INSTRUMENTS_BY_SCENARIO`/`X_EXOG_BY_SCENARIO`が`test_iv_fixtures.py`と`test_iv_gmm_fixtures.py`に同一内容で重複定義されている
+
+- **対象**: [tests/test_iv_fixtures.py:77-83](../../../tests/test_iv_fixtures.py#L77-L83)
+  と[tests/test_iv_gmm_fixtures.py:74-78](../../../tests/test_iv_gmm_fixtures.py#L74-L78)
+  （両方とも`INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}`・
+  `X_EXOG_BY_SCENARIO = {"moderate_multicollinearity": [...],
+  "high_condition_number": [...]}`という同一内容）
+- **内容**: ユーザー指摘（2026-08-30、「まとめてもよいかもしれないので
+  記録しておいて」）。この2つの辞書は各シナリオのDGPが「`x_exog`が
+  何列か」「`instruments`が何本か」というデータ生成側の性質そのものを
+  表しており、テストコード固有のロジックではない。
+- **Claudeの所感**: 妥当な指摘。`benchmark/iv/datasets.py`（またはその
+  近くの共通モジュール）側に単一の定義を置き、`SCENARIOS`と同じように
+  両テストファイルからimportする形に揃えるのが筋が良い。実質的に
+  `SCENARIOS`のimportパターンをこの2つの辞書にも広げるだけの、
+  リスクの低いリファクタリングだと考える。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv_gmm_fixtures.py`解説時の
+  ユーザー指摘。
+- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
+
+### 21.【原因判明】`gmm_iterations=1`のHansen J不一致——`linearmodels`の`IVGMM.fit(iter_limit=1)`が重み行列を残差から一切更新しないことが原因
+
+- **対象**: `tests/test_iv_gmm_fixtures.py`の`_check_result`内コメント
+  （前回解説の引用箇所、「原因未特定」としていた記述）。
+  `linearmodels`本体のソース（`.venv/lib/python3.14/site-packages/
+  linearmodels/iv/model.py`の`IVGMM.fit`・`_gmm_post_estimation`）を
+  実機で確認した。
+- **内容**: ユーザー指摘（2026-08-30、「原因を特定するようリファクタ
+  リング記録に残しておいて」）を受けて、`linearmodels`（バージョン
+  7.0、本プロジェクトの`.venv`に導入済み）のソースを`inspect.getsource`
+  で直接確認した。
+  - `IVGMM.fit`は`wmat = inv(wz.T @ wz / nobs)`（＝`(Z'Z/n)⁻¹`、`σ̂²`
+    スケーリング無しの生の初期重み行列）で第0段階の点推定を行った後、
+    `while iters < iter_limit and norm > tol:`ループの中で初めて
+    「残差`eps`から`weight_matrix(wx, wz, eps)`（`cov_type`に応じた
+    実際のモーメント分散、`σ̂²`相当の情報を含む）で`wmat`を再構築する」
+    という処理を行う。
+  - `iter_limit=1`のとき、ループ条件`iters < iter_limit`は`1 < 1`で
+    最初から`False`となり、**ループが1度も実行されない**——つまり
+    `wmat`は最後まで`(Z'Z/n)⁻¹`という生の初期値のまま。
+  - `_gmm_post_estimation`の`j_stat = self._j_statistic(params,
+    weight_mat)`は、この`weight_mat`（＝`wmat`）をそのままJ統計量の
+    計算に使う。したがって`iter_limit=1`のときのJ統計量は
+    **`σ̂²`スケーリングを一切含まない`(Z'Z/n)⁻¹`ベースの値**になる。
+  - 一方、本実装（`gmm.rs`）は`weight_type=Unadjusted`のHansen J計算に
+    `S = σ̂²₀・Z'Z`という**`σ̂²`スケーリング込みの重み**を`gmm_
+    iterations=1`でも意図的に使う設計（`gmm.rs`のモジュールdocコメント
+    「`weight_type=Unadjusted`はHansen Jのためだけに`σ̂²`スケーリングが
+    必要」、ユーザー確認済み）になっている。
+  - **結論**: `linearmodels`側の`iter_limit=1`のJ統計量は「本当に一度も
+    残差を見ない、字義通りの1-step」であるのに対し、本実装の
+    `gmm_iterations=1`のHansen Jは「点推定こそ1-stepだが、Hansen J
+    統計量の計算にだけは`σ̂²`（残差由来の情報）を後付けで使う」という、
+    **意図的に異なる規約**を採用している。どちらの実装にもバグは無く、
+    「1-step GMMのHansen J統計量をどう定義するか」という規約の違いに
+    起因する、原理的に一致しえない差異だったと結論づけられる。
+- **Claudeの所感**: これは「未特定の原因」ではなく「意図的な規約の
+  違い」だったことが判明した、という結果になる。本実装側の設計
+  （`σ̂²`スケーリングを`gmm_iterations=1`でも使う）自体は既に
+  「ユーザー確認済み」と明記されている通り正当な判断だと考えられる
+  ため、実装を変更する必要は無いと考える。対応としては、
+  `test_iv_gmm_fixtures.py`の該当コメント（「原因と考えられるが
+  未特定のため」）を、この記録に基づいて「原因判明・意図的な規約の
+  違いのため対応不要」という形に更新するのが良い。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv_gmm_fixtures.py`解説時の
+  ユーザー指摘、`linearmodels`ソースの実機調査で判明。
+- **状態**: 原因判明・対応不要と判断（意図的な規約の違い。ドキュメント
+  コメントの更新のみ推奨、着手要否はユーザー判断待ち）
+
+### 22. `test_iv_fixtures.py`解説時に指摘した項目のうち複数が`test_iv_gmm_fixtures.py`にも同様に該当する（一括注記）
+
+- **対象**: [tests/test_iv_gmm_fixtures.py](../../../tests/test_iv_gmm_fixtures.py)
+  全体
+- **内容**: ユーザー指摘（2026-08-30、「実装に関しては`test_iv_fixtures.
+  py`と同じ実装をしている個所の指摘はそのまま`test_iv_gmm_fixtures.py`
+  にも適用できることを記録してほしい」）。個別に項目を複製すると項目数が
+  倍増するため、該当箇所を1項目にまとめて記録する。
+  - **項目14**（OLSのHAC自動ラグが`maxlags=1`固定のまま放置）: GMM版も
+    `IvOptions.hac_lags`未指定（自動計算）でフィクスチャと一致する設計
+    （`test_iv_gmm_fixtures.py:80-81`のコメント）であり、IV側
+    （2SLS/GMM共通）は既にこの問題を回避できている、という文脈でOLS/WLS
+    側の改善余地の参考になる点は同じ。
+  - **項目15**（`_rename`が既に無用の残骸）: GMM版の`_check_result`
+    （[tests/test_iv_gmm_fixtures.py:102](../../../tests/test_iv_gmm_fixtures.py#L102)）
+    も`our_name = _rename(name)`を使っており、`iv_gmm.json`のキーが
+    既に`"const"`に正規化済み（生成元の`linearmodels_ref.py`の
+    `_normalize`が2SLS/GMM共通関数のため）なら同じく無用の残骸である
+    可能性が高い。
+- **Claudeの所感**: 対応する場合は2SLS/GMM両方をまとめて一度に確認・
+  修正するのが効率的（同じ`linearmodels_ref.py`・`benchmark/common`の
+  ヘルパーを共有しているため）。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv_gmm_fixtures.py`解説時の
+  ユーザー指摘。
+- **状態**: 未対応（項目14・15への追記の代わりにこの1項目に集約、
+  着手要否はユーザー判断待ち）
+
+### 23. `weight_type`×`cov_type`の「両方とも非デフォルトで異なる種類」という組み合わせ（例: `cluster`×`hac`、`kernel`×`cluster`）が`kernel`×`hac`以外は未検証——ただし実装は特殊ケース分岐を持たない一般形サンドイッチのため構造的リスクは低いと判断
+
+- **対象**: `engine/src/iv/gmm.rs:119-124`
+  （「点推定に実際に使った重み`W`と`cov_type`が指定する`Ω̂`は一般に
+  一致しない。そのため...特殊ケースを分岐させず、常に一般形の
+  サンドイッチを使う（ユーザー確認済み）」）、
+  [tests/test_iv_gmm_fixtures.py:259-278](../../../tests/test_iv_gmm_fixtures.py#L259-L278)
+  （`test_kernel_hac_matches_linearmodels`、`kernel`×`hac`のみ専用テスト
+  あり）
+- **内容**: ユーザー指摘（2026-08-30、「`weight_type`と`cov_type`、
+  `weight_type`とシナリオでどれかの組み合わせをやらない影響はない
+  か？...問題が起きやすい組み合わせだけ別途やっておくと検出力が
+  上がりそうなのだが」）を受けて`gmm.rs`のモジュールdocコメントを
+  確認した。実装は「`weight_type=cov_type`相当（効率的GMM）のときに
+  `Avar(β̂)=(X'ZΩ̂⁻¹Z'X)⁻¹`へ潰せる特殊ケースを分岐させず、常に一般形の
+  サンドイッチ`Avar(β̂) = B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`を使う」という設計
+  （`weight_type`と`cov_type`が一致する場合・しない場合を同じコード
+  パスで扱う）になっており、「一致するケースだけ動作確認して、
+  一致しないケースだけ特別に壊れている」という種類のバグが起きにくい
+  構造だと判断できる。とはいえ、現状のテストは実質的に以下の2群しか
+  無い。
+  1. `weight_type=unadjusted`固定×`cov_type`を4値スイープ
+     （`test_matches_linearmodels`）
+  2. `weight_type`を3値スイープ×`cov_type=classical`固定
+     （`test_other_weight_types_match_linearmodels`）
+  3. `weight_type=kernel`×`cov_type=hac`のみの単発テスト
+     （`test_kernel_hac_matches_linearmodels`、「両方とも非自明な
+     HAC/カーネル系」という組み合わせの唯一の例）
+  「`weight_type=cluster`×`cov_type=hac`」「`weight_type=kernel`×
+  `cov_type=cluster`」のような、**両方とも非自明かつ互いに異なる種類**
+  の組み合わせは、`kernel`×`hac`以外は1つも検証されていない。
+- **Claudeの所感**: 一般形サンドイッチという設計自体は良い判断であり
+  過度に心配する必要は無いと思うが、ユーザーの懸念にも一理ある——
+  「一般形だから安全」という主張自体を裏付けるテストが`kernel`×`hac`
+  1点のみというのは心もとない。全組み合わせ（4`weight_type`×6`cov_type`
+  ≈24通り）は過剰だが、`cluster`×`hac`のような、実務上もありうる
+  もう1〜2パターンを追加すれば費用対効果良く検出力を上げられると考える。
+  `weight_type`とシナリオ（DGP）の組み合わせについては、`weight_type`は
+  純粋に点推定側の重み選択でありDGPのシナリオ性質（不均一分散・自己相関
+  等）との相互作用は`cov_type`ほど強くないと考えられるため、そちらは
+  優先度を下げてよいと考える。既定`weight_type="unadjusted"`を主軸に
+  シナリオを広くスイープする現状の設計（`IvOptions().weight_type`の
+  実際の既定値と一致）は妥当で、`robust`に差し替える積極的な理由は薄い。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv_gmm_fixtures.py`解説時の
+  ユーザー指摘、`gmm.rs`のモジュールdocコメントで設計を確認。
+- **状態**: 未対応（`test-coverage-candidates.md`項目59に具体案を記録、
+  着手要否はユーザー判断待ち）
+
+### 24. GMMで`include_intercept=False`にした場合も`first_stage()`が影響を受けることを実機確認——ユーザーの「GMMにfirst_stageの概念が無いから問題にならない？」という予想は誤りで、2SLSと同じ懸念が当てはまる
+
+- **対象**: `python_package/econometricsmodels/iv/iv.py`の`first_stage()`
+  （2SLS/GMM共通の`compute_first_stage`経由）
+- **内容**: ユーザー指摘（2026-08-30、「GMMのconstがfalseの場合の
+  テストが無い。GMMにfirst_stageの概念がないから問題にならない？」）を
+  受けて実機確認した。**予想に反し、GMMも`first_stage()`を持ち、
+  `include_intercept=False`の影響を受ける**ことを確認した。
+  `IV(..., options=IvOptions(method="gmm", include_intercept=False))
+  .fit().first_stage()`は正常に動作し、`param_names`から`const`が
+  正しく除外されていた。`engine/src/iv/CLAUDE.md`にも「（過去の
+  `k_constant`取り違えバグの）影響を受けていたのは`first_stage()`が
+  返す`OlsResults`...`method`によらず、`fit()`が常に`compute_first_
+  stage`経由で構築するため2SLS/GMM両方に及んでいた」と明記されており、
+  GMMも2SLSと全く同じ第一段階回帰の配線コードを共有している。
+  つまり本項目は`test-coverage-candidates.md`項目50・51（2SLSの
+  `include_intercept=False`数値照合・`first_stage()`への伝播が未検証）
+  と**全く同種の懸念がGMM側にも当てはまる**、という追加確認である。
+- **Claudeの所感**: ユーザーの初期の予想（「GMMには影響しないのでは」）
+  は妥当な直感だったと思う（GMMは第一段階の解釈がやや異なるため）が、
+  実装上は2SLSと全く同じ配線コードを共有しているため、実際には同程度に
+  重要な確認事項だと考える。対応する場合は項目50・51の対応と同時に、
+  GMM版（`test_iv_gmm_fixtures.py`）にも同種のテストを追加するのが
+  効率的。
+- **気づいた経緯**: 2026-08-30、`tests/test_iv_gmm_fixtures.py`解説時の
+  ユーザー指摘、実機検証で確認。
+- **状態**: 未対応（`test-coverage-candidates.md`項目60参照、着手要否は
+  ユーザー判断待ち）

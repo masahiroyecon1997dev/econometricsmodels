@@ -850,6 +850,17 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   view`で確認した限りTobitの性能比較ベンチマークに関する内容で、
   本項目のGMM拡張との直接的な関連は本文からは確認できなかった
   （番号の記憶違いの可能性がある旨、念のため申し添える）。
+- **追記（2026-08-31、ユーザー訂正）**: 上記の「Issue #255」は
+  ユーザーの記憶違いで、正しくは**Issue #249**（「IV(GMM): C統計量
+  （difference-in-Hansen統計量）による内生性検定の追加を検討する」）
+  だった。`gh issue view`で本文を確認したところ、GMMには現状
+  2SLSの`wu_hausman_statistic`に相当する内生性検定が無いという課題
+  意識から、C統計量（疑わしい変数を内生・外生それぞれとして扱った
+  場合のHansen J統計量の差を取る手法、Eichenbaum-Hansen-Singleton
+  1988が起源、Stata`ivreg2`の`C statistic`）の追加が検討されている
+  ことを確認した。これは本項目（GMMのRクロスチェック拡張）と直接
+  関連する将来拡張であり、C統計量が実装される際は当然その数値検証
+  （linearmodels主リファレンス・Rクロスチェックの両方）も必要になる。
 - **Claudeの所感**: v1時点の判断自体は妥当だったと考えるが、GMMの
   スコープが今後拡張される計画がある以上、**Rクロスチェックの省略も
   永続的な決定ではなく「v1時点のスコープに対する暫定的な例外」**と
@@ -907,3 +918,281 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時に確認。
 - **状態**: 未対応（項目25・51・79とまとめて対応するのが効率的、
   着手タイミングはユーザー判断待ち）
+
+### 29. `rel=1e-4`という許容誤差がLogit/Probit/Tobitの`test_method_option_converges_to_same_params`に同一値で直書きされている（リポジトリ全体）
+
+- **対象**: [tests/nonlinear/test_logit.py:59](../../../tests/nonlinear/test_logit.py#L59)・
+  [tests/nonlinear/test_probit.py:59](../../../tests/nonlinear/test_probit.py#L59)・
+  [tests/test_tobit.py:64](../../../tests/test_tobit.py#L64)
+- **内容**: ユーザー指摘（2026-08-31、「`rel=1e-4`と閾値が直書きされて
+  いる。可能なら`nonlinear`で統一したほうが良い」）を受けて`grep`で確認
+  したところ、3ファイルとも全く同じ`rel=1e-4`が直書きされていた
+  （Tobit固有の問題ではなくLogit/Probit解説時から既に存在していた
+  リポジトリ全体のパターン）。
+- **Claudeの所感**: `tests/_tolerances.py`（各ファイルの`RTOL`/`ATOL`
+  定数の一元管理に使われている既存の仕組み）に`method_convergence_rtol`
+  のような1つの定数を追加し、3ファイルから参照する形に揃えるのが
+  筋が良い。実施コストは低い部類。
+- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
+  指摘、`grep`でLogit/Probitにも同じ値があることを確認。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 30. TobitのAIC/BICが`k+1`（`σ`を含む）でペナルティを掛ける一方`df_model`は`σ`を含まない——バグではなく統計的に正しい設計だが、ドキュメント・テストが無い
+
+- **対象**: [engine/src/nonlinear/tobit.rs:1328-1333](../../../engine/src/nonlinear/tobit.rs#L1328-L1333)
+  （`let aic = -2.0 * llf + 2.0 * ((k + 1) as f64);`・
+  `let df_model = k - k_constant;`、`k+1`は`β`（`k`個、切片込み）＋`σ`、
+  `df_model`は`k`から`k_constant`（0か1）を引いた「傾き係数の数」のみ）
+- **内容**: ユーザー指摘（2026-08-31、「`df_model`の個数に`sigma`は
+  含めていないが、AIC, BICの計算には係数+1（sigma分）して計算している
+  のか？」）を受けて`engine/src/nonlinear/tobit.rs`を確認した。
+  ご指摘の通り、`aic`/`bic`は`k+1`（`σ`を含む、実際に最尤推定で
+  推定されたパラメータの総数）でペナルティを計算する一方、`df_model`
+  は`k - k_constant`（`σ`を含まない、Wald検定で同時に検定する傾き
+  係数の数）で、**この2つは異なる目的のために異なる数を使っている**。
+  これはバグではなく統計的に正しい: AIC/BICは「実際に推定した
+  パラメータの数」でモデルの複雑さを罰するのに対し、`df_model`は
+  「Wald検定で同時仮説検定する係数の数」であり、`σ`は検定対象の
+  係数（`β`）ではないため含まれない。`testing-policy.md`が触れている
+  「RのAIC()/BIC()標準関数は残差分散を推定パラメータ1個として追加で
+  カウントする（k+1）が、statsmodels・本実装は回帰係数の数`k`のみを
+  使う」というOLSの慣習差の話（Rが`k+1`、本実装が`k`）とは**別の
+  文脈**であることに注意——OLSの`σ²`は最尤推定/最小二乗の対象になって
+  いない事後計算量だが、Tobitの`σ`は最尤推定で`β`と同時に最適化される
+  真のパラメータであるため、`k+1`でカウントするのが元々正しい
+  （Rの慣習に合わせたわけではない）。
+- **Claudeの所感**: 実装は正しいと判断するが、(1) この`k+1` vs
+  `df_model`の使い分けを説明するコメント・ドキュメントが無い、
+  (2) `test_tobit.py`に`aic`/`bic`の検証テストが1つも無い、という
+  2点は気になる。前者はコメントを1行追加する程度で解消できる。
+  後者は数値照合フィクスチャ（`test_tobit_fixtures.py`、Issue #227で
+  今後実施予定）が整備されればそちらでカバーされる見込みだが、
+  構造確認レベル（`res.aic`/`res.bic`が有限の値を返す、`k`が変われば
+  値も変わる、程度）のテストは`test_tobit.py`側にあってもよいと考える。
+- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
+  指摘、`engine/src/nonlinear/tobit.rs`で確認。
+- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
+
+### 31.【確認】`x=[]`のバリデーションはOLS/Logit/Probit/Tobit全てで一貫して`ValidationError`になっている（対応不要）——ただし`df_model==0`分岐は現状のPython API経由では到達不能
+
+- **対象**: [tests/test_tobit.py:290-292](../../../tests/test_tobit.py#L290-L292)
+  （`test_empty_x_raises`）、[tests/linear/test_ols.py:279-282](../../../tests/linear/test_ols.py#L279-L282)・
+  [tests/nonlinear/test_logit.py:242-244](../../../tests/nonlinear/test_logit.py#L242-L244)・
+  [tests/nonlinear/test_probit.py:238-240](../../../tests/nonlinear/test_probit.py#L238-L240)
+  （いずれも同名の`test_empty_x_raises`が既に存在）
+- **内容**: ユーザー指摘（2026-08-31、「`test_wald_statistic_and_p_
+  value_are_present`の説明で`x`が空の場合について言及されているが、
+  `x`が空だった場合はバリデーションでエラーにしたほうがいい？」→
+  ユーザー自身が直後に「前段で`x`が空だった場合は`test_empty_x_raises`
+  でエラーになるよう」と訂正済み）。実機・`grep`で確認したところ、
+  OLS・Logit・Probit・Tobitいずれも`x=[]`は既に`ValidationError`で
+  一貫して弾かれている（実機確認: `Tobit(df, y="y", x=[]).fit()`→
+  `ValidationError: x must contain at least one column name`）。
+  ユーザーが提案した「実務では使われないのでバリデーションチェック
+  してしまってよい」という方針は、**既に全手法で実現済み**だった。
+  この結果、`wald_chi2_test`（`engine/src/nonlinear/tobit.rs`）が
+  持つ「`df_model==0`のとき`NaN`を返す」という分岐は、現状の
+  Python API経由では`x=[]`が事前に弾かれるため**到達不能**
+  （`include_intercept=False`と組み合わせても`x`に最低1列は必要な
+  ため`df_model`は必ず1以上になる）と考えられる。
+- **Claudeの所感**: 対応不要と判断する。`testing-policy.md`「engine
+  （Rust）のカバレッジ方針」が言う「事前に検証済みの不変条件により
+  理論上到達不能な防御的エラーパス」に該当する典型例のため、コード側
+  のdocコメントで到達不能である理由を説明した上で未カバーのまま
+  受け入れる、という既存方針に沿った扱いで問題ないと考える。
+- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
+  指摘・自己訂正、実機検証・`grep`で確認。
+- **状態**: 対応不要と判断（`x=[]`検証は既に全手法で一貫。`df_model==0`
+  分岐は理論上到達不能な防御的コードとして許容）
+
+### 32. `refactoring-candidates-2.md`項目76（テストファイル内のセクション見出し・順序の不統一）が`test_tobit.py`にも同様に該当する
+
+- **対象**: [tests/test_tobit.py](../../../tests/test_tobit.py)全体
+  （見出しは`成功パス・API構造`/`predict() / censoring_fit_check()`/
+  `marginal_effects()`/`エラーハンドリング`の4つのみ）
+- **内容**: ユーザー指摘（2026-08-31、「`test_marginal_effects_
+  unknown_at_raises`と`test_marginal_effects_confidence_level_out_
+  of_range_raises`はエラーハンドリングセクションだと思う」・
+  「`test_cov_type_label`等はAPI構造セクションにあったほうがいい」）
+  を受けて確認した。`marginal_effects()`関連の`ValidationError`テスト
+  （`test_marginal_effects_unknown_at_raises`・`test_marginal_effects_
+  unknown_target_raises`・`test_marginal_effects_confidence_level_
+  out_of_range_raises`）が「`marginal_effects()`」見出し配下（＝
+  「エラーハンドリング」見出しより前）に置かれている点、`cov_type`
+  関連テスト（`test_cov_type_label`等）が「エラーハンドリング」見出し
+  配下に置かれている点は、**`refactoring-candidates-2.md`項目76が
+  `test_logit.py`について既に指摘していたのと全く同じパターン**
+  だった（`grep`で確認したところLogit/Probitも同一構造）。
+- **Claudeの所感**: Tobit固有の問題ではなく、項目76で確立済みの
+  「機能単位の見出し配下に、その機能に関する成功パス・エラーパス両方の
+  テストをまとめる」という設計（意図的か否かは項目76時点で結論が
+  出ていない）が、Tobitにもそのまま引き継がれている。項目76の対応
+  方針が決まった際に、Tobitも合わせて統一するのが良い。
+- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
+  指摘、`grep`でLogit/Probitとの一致を確認。
+- **状態**: 未対応（項目76〔`refactoring-candidates-2.md`〕と統合して
+  対応するのが効率的、着手タイミングはユーザー判断待ち）
+
+### 33.【確認・訂正】`test_non_positive_tol_raises`はLogit/Probitに既に同種のテストが存在する
+
+- **対象**: [tests/test_tobit.py:339-347](../../../tests/test_tobit.py#L339-L347)、
+  [tests/nonlinear/test_logit.py:305-316](../../../tests/nonlinear/test_logit.py#L305-L316)・
+  [tests/nonlinear/test_probit.py:295-306](../../../tests/nonlinear/test_probit.py#L295-L306)
+  （いずれも同名`test_non_positive_tol_raises`、`@pytest.mark.
+  parametrize("tol", [0.0, -1.0])`まで完全に同一）
+- **内容**: ユーザー指摘（2026-08-31、「`test_non_positive_tol_raises`
+  ってlogit/probitに同種のものがある？ないなら入れたほうがいいと
+  思うが」）を受けて`grep`で確認した。**既に存在していた**——Tobitの
+  実装が独自に追加したものではなく、Logit/Probitと完全に同一の
+  テスト（パラメータ化された値まで一致）が既にある。
+- **Claudeの所感**: 対応不要。ユーザーの記憶通りの懸念は無く、良好な
+  状態だった。
+- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
+  指摘、`grep`で確認。
+- **状態**: 対応不要と判断（既にLogit/Probitに同種テストが存在）
+
+### 34.【確認・訂正】`method`が不正な値の場合のテストは`test_tobit.py`に既に存在する（`test_unknown_method_raises`）
+
+- **対象**: [tests/test_tobit.py:322-329](../../../tests/test_tobit.py#L322-L329)
+  （`test_unknown_method_raises`、`TobitOptions(method="bogus")`）
+- **内容**: ユーザー指摘（2026-08-31、「methodが不正だった場合の検証が
+  ない」）を受けて確認したところ、**既に存在していた**（`test_
+  unknown_cov_type_raises`の直後、312〜329行目）。おそらくファイルの
+  分量が多く見落とされたものと思われる。
+- **Claudeの所感**: 対応不要。念のための確認記録として残す。
+- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
+  指摘、ファイル内で確認。
+- **状態**: 対応不要と判断（既存）
+
+### 35.【重要な設計提案】Tobitの「`method`によらず常にOLSベースの初期値・QR検証を実行する」設計は、Logit/Probitの過去の実バグ（`bfgs`の特異性検出漏れ）を構造的に解消できる可能性がある
+
+- **対象**: [tests/test_tobit.py:415-421](../../../tests/test_tobit.py#L415-L421)
+  （`test_singular_design_matrix_raises_computation_error`、`method`を
+  parametrizeする必要が無い理由の説明）と対比した
+  [tests/nonlinear/test_logit.py:336-359](../../../tests/nonlinear/test_logit.py#L336-L359)
+  （`test_singular_hessian_raises_computation_error`、`method`を
+  `["newton", "bfgs", "lbfgs"]`でparametrizeする必要がある理由として
+  「過去に`bfgs`だけ検出漏れし桁違いに巨大な標準誤差を含む`Ok`が
+  返る実バグがあった」と明記）
+- **内容**: ユーザー指摘（2026-08-31、「反復最適化の初期値をOLSベース
+  にするというのがlogit/probitに適用できない？Tobitの実装がいい
+  アイディアだと思った」）を受けて両ファイルを比較した。
+  - Tobitは`method`（newton/bfgs/lbfgs）に関わらず、`ols_initial_
+    params`のQR検証が**常に最初に実行される**設計のため、完全な
+    多重共線性は`method`を問わず同じ経路（QR分解）で確実に検出
+    できる。そのため`test_singular_design_matrix_raises_computation_
+    error`は`method`をparametrizeする必要が無い。
+  - 一方Logit/Probitは`start_params`の既定が**ゼロベクトル**
+    （`nonlinear-api-design.md`7章、statsmodels方式）であり、多重
+    共線性の検出は`method`ごとに異なる経路（`newton`は`newton_step`
+    内のピボット付きQR分解、`bfgs`/`lbfgs`は準ニュートン法のため
+    収束後の`observed_information_cov_params`呼び出しが唯一の検出
+    経路）に依存する。この構造的な違いにより、**過去に実際に
+    `bfgs`だけが検出漏れし、桁違いに巨大な標準誤差を含む`Ok`
+    （エラーにならず、統計的に無意味な結果が静かに返る）という
+    実バグがあった**ことが`test_logit.py`のdocコメントに明記されて
+    いる。
+- **Claudeの所感**: ユーザーの着眼点に強く同意する。Tobitの設計
+  （`method`共通のOLSベース初期値・QR検証を最初に必ず通す）を
+  Logit/Probitにも適用すれば、(1) 最適化の収束が速くなりうる
+  （実務的によく使われる高速化手法でもある）という利点に加え、
+  (2) **多重共線性検出が`method`によらず単一の経路に統一され、
+  過去に実際に発生したような`method`依存の検出漏れバグのクラス
+  自体を構造的に排除できる**、という利点がある。(2)の方が実務上
+  重要だと考える——「`method`ごとに異なる検出経路を持つ」という
+  設計自体が、将来また同種のバグを生みうる構造的リスクだと言える。
+  ただし変更する場合は、(a) ゼロベクトル初期値からOLSベース初期値へ
+  変更することが既存のRクロスチェック・statsmodelsクロスチェックの
+  数値（収束先は同じでも収束過程・収束判定の境界ケースでの挙動が
+  変わりうる）に影響しないか、(b) OLSベースの初期値計算自体の
+  コスト（QR分解）が既存のゼロベクトル開始と比べて有意に重くならないか、
+  の2点を実装時に確認する必要がある。
+- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
+  指摘、`test_logit.py`との比較調査で確認。
+- **状態**: 未対応（**設計提案として記録**、着手要否・実施タイミングは
+  ユーザー判断待ち。Logit/Probit双方への影響範囲が大きいため、
+  着手する場合は個別Issue化を推奨）
+
+### 36. `test_separation_suspected_raises_computation_error_for_near_separation_data`のDGPがインライン生成で、Logit/Probitの`separation_suspected_dataset`共有ヘルパーを使っていない
+
+- **対象**: [tests/test_tobit.py:460-471](../../../tests/test_tobit.py#L460-L471)
+  （`random.Random(42)`でその場にDGPを生成）と対比した
+  [tests/_helpers.py](../../../tests/_helpers.py)の`separation_
+  suspected_dataset`（Logit/Probit共有のヘルパー関数、
+  [tests/nonlinear/test_logit.py:14,396](../../../tests/nonlinear/test_logit.py#L14)・
+  [tests/nonlinear/test_probit.py:14,368](../../../tests/nonlinear/test_probit.py#L14)
+  で使用）
+- **内容**: ユーザー指摘（2026-08-31、「先にbenchmarkでテストデータを
+  作っておくのがいいと思うがどうか」）を受けて確認した。Tobitの
+  分離疑いテストは`x1`の係数を100という極端な値にした準完全分離データを
+  `random.Random(42)`（Python標準ライブラリの`random`モジュール、他の
+  DGPで一般的な`numpy`ベースの乱数生成とも異なる）でその場で生成して
+  いる。Logit/Probitは同種の目的のデータを`_helpers.py`の共有関数
+  `separation_suspected_dataset`から取得している。ただしTobit版は
+  `y_star`を`max(0.0, y_star)`で打ち切る処理が追加で必要なため、
+  Logit/Probit版とDGP自体が完全に同一というわけではない。
+- **Claudeの所感**: `testing-policy.md`「テスト用データセット」が
+  求める`benchmark/`側でのDGP定義＋CSV固定は、この種の
+  `ComputationError`パス専用データ（数値比較をしないデータ）には
+  必須ではない（`test_singular_hessian_raises_computation_error`等の
+  既存の小さい手書きDataFrameも同様に固定CSV化されていない）ため、
+  `benchmark/`フル対応は過剰だと考える。ただし`_helpers.py`に
+  Tobit版の「打ち切り付き分離疑いデータセット」ヘルパーとして切り出し、
+  `random`ではなく他のDGPと統一感のある`numpy`ベースの乱数生成に
+  揃えるのは、再利用性・一貫性の両面で価値があると考える（実施コストは
+  低い）。
+- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
+  指摘。
+- **状態**: 未対応（`_helpers.py`への切り出しを推奨、`benchmark/`側の
+  フル対応は不要と判断。着手要否はユーザー判断待ち）
+
+### 37. `test_cov_type_is_case_insensitive`と`test_nonrobust_is_alias_for_classical`の統合可能性（IV版項目4と同型の論点）
+
+- **対象**: [tests/test_tobit.py:526-564](../../../tests/test_tobit.py#L526-L564)
+- **内容**: ユーザー指摘（2026-08-31、「`test_cov_type_is_case_
+  insensitive`と`test_nonrobust_is_alias_for_classical`は組み合わせの
+  問題だと思うが、同じテストにまとめられそう（`NonRobust`〔大文字
+  小文字が混じる〕を他の`cov_type`でもやったほうがいいのでは？）」）。
+  本ファイル項目4（IVの同名テストに関する同種の指摘）と全く同じ論点
+  がTobitにも当てはまる。
+- **Claudeの所感**: 項目4と同じ所感——`test_cov_type_is_case_
+  insensitive`は「ラベルの変換」、`test_nonrobust_is_alias_for_
+  classical`は「計算結果（標準誤差）の一致」を見ており検証対象が
+  異なるため完全な統合は難しいが、「大文字小文字が混じった表記
+  （`NonRobust`のような）を`nonrobust`以外の`cov_type`（`HC0`の
+  代わりに`Hc0`のような）でも一貫してテストする」という観点の拡充は
+  価値があると考える。
+- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
+  指摘。
+- **状態**: 未対応（本ファイル項目4と合わせて検討、着手要否はユーザー
+  判断待ち）
+
+### 38.【検討事項】`marginal_effects()`/`predict()`に4つ目のtarget候補`E[y|y>0,x]`（打ち切られていないサブサンプルへの条件付き期待値）を追加すべきか
+
+- **対象**: [docs/planning/specs/nonlinear-api-design.md:112](../../../docs/planning/specs/nonlinear-api-design.md#L112)
+  （McDonald-Moffitt 1980を根拠に`E[y*|x]`/`E[y|x]`/`P(uncensored|x)`の
+  3種類のみを提供すると確定済み）
+- **内容**: ユーザー指摘（2026-08-31、「"expected_latent",
+  "expected_observed", "prob_uncensored"が現状限界効果の候補にあるが、
+  ゼロを超えるサブサンプル（条件付き）への限界効果
+  （`expected_conditional`）も候補に加えたほうがいいか？」）を受けて
+  `nonlinear-api-design.md`を確認した。McDonald-Moffitt (1980)の
+  古典的な分解は実際には`E[y|x] = P(y>0|x) · E[y|y>0,x]`という関係
+  （観測される期待値＝非打ち切り確率×打ち切られなかった場合の条件付き
+  期待値）を含むが、設計ドキュメントは前2者（`E[y*|x]`・`E[y|x]`）と
+  `P(uncensored|x)`の3種類のみを採用しており、**`E[y|y>0,x]`
+  （切断回帰・truncated regressionの条件付き期待値に相当）自体は
+  設計時に検討・却下された形跡が無く、単純に候補に挙がらなかった
+  可能性が高い**。
+- **Claudeの所感**: 統計的に正当な追加候補だと考える。`E[y|y>0,x]`は
+  「打ち切りを受けなかった集団に限定した場合の効果」という、実務上
+  意味のある解釈を持つ（例: 「支出額がプラスだった世帯に限定すると、
+  平均支出額はどう変わるか」）。既存3種と合わせて4種類目として提供
+  すれば、McDonald-Moffittの分解を完全にカバーできる。ただし実装
+  コスト（デルタ法での標準誤差計算式を新たに導出する必要がある）は
+  既存3種と同程度かかると見込まれ、v1スコープに含めるかは既存の
+  `nonlinear-api-design.md`6章の確定事項を覆す変更になるため、
+  ユーザー判断が必要。
+- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
+  指摘、`nonlinear-api-design.md`で確認。
+- **状態**: 未対応（**検討事項として記録**、着手要否はユーザー判断待ち）

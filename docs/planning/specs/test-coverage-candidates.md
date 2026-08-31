@@ -1503,3 +1503,60 @@
 - **状態**: 未対応（**要ユーザー判断**: 意図的な省略だったか確認した
   上で、追加するならフィクスチャ生成〔`generate_iv_gmm_fixtures.py`〕を
   伴う）
+
+### 62. `censoring_fit_check()`の上側打ち切り（`"upper"`カテゴリ）が一度も検証されていない
+
+- **対象**: [tests/test_tobit.py:168-186](../../../tests/test_tobit.py#L168-L186)
+  （`test_censoring_fit_check_structure`・`test_censoring_fit_check_
+  omits_upper_when_upper_is_none`、いずれも既定〔左打ち切りのみ〕の
+  `censored_dataset`しか使わない）と対比した
+  [tests/test_tobit.py:398-412](../../../tests/test_tobit.py#L398-L412)
+  （`test_supports_right_censoring_only`、`upper=5.0`のデータはあるが
+  `censoring_fit_check()`を呼んでいない）
+- **内容**: ユーザー指摘（2026-08-31、「`test_censoring_fit_check_
+  structure`で上側打ち切りがチェックできていないのが気になる」）を
+  受けて確認した。指摘の通り、`censoring_fit_check()`が返しうる
+  3カテゴリ（`"lower"`/`"uncensored"`/`"upper"`）のうち`"upper"`は
+  一度もテストされていない。右打ち切りのみのデータ（`upper=5.0`）は
+  `test_supports_right_censoring_only`で既に用意されているが、
+  そちらは`res.lower`/`res.upper`の構造確認のみで`censoring_fit_
+  check()`自体を呼んでいない。
+- **Claudeの所感**: `test_supports_right_censoring_only`のデータで
+  `censoring_fit_check()`を呼び、`{"upper", "uncensored"}`が返る
+  ことを確認するテストを追加すれば埋められる、実施しやすい部類。
+  理想的には両側打ち切り（`lower`/`upper`両方指定）のケースで
+  3カテゴリ全てが返ることを確認するテストもあるとさらに良い。
+- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
+  指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 63. 項目32・39・40がTobitにも同様に該当する（一括注記）
+
+- **対象**: [tests/test_tobit.py](../../../tests/test_tobit.py)全体
+- **内容**: ユーザー指摘（2026-08-31、「yの列が存在しない場合の検証が
+  されていない」・「`test_null_values_raise`でyは検証されているが
+  xの場合がない」・「`test_non_numeric_dtype_raises`もxの場合がない」・
+  「`test_marginal_effects_confidence_level_out_of_range_raises`は
+  `1.5`のみを検証している」）を受けて確認した。個別に項目を複製すると
+  項目数が倍増するため、該当箇所を1項目にまとめて記録する。
+  - **項目32**（OLSの`y`列欠落専用テストが無い）: Tobitの`test_
+    missing_column_raises`も`x=["does_not_exist"]`のみで、`y="does_
+    not_exist"`のテストは無く該当する。
+  - **項目32の追記**（`x`側のnull値専用テストが無いのはリスク低い
+    という判断）: Tobitの`test_null_values_raise`も`y`列のみ`None`に
+    しており`x`側は未検証だが、`y`/`x`とも`extract_f64_column`の
+    同じ分岐を通ると考えられるため、項目32・40と同じ理由でリスクは
+    低いと判断する。`test_non_numeric_dtype_raises`（`x`側非検証）
+    も同じ理由が当てはまると考える。
+  - **項目39**（`marginal_effects`の`confidence_level`境界値検証が
+    `1.5`のみ）: Tobitの`test_marginal_effects_confidence_level_out_
+    of_range_raises`も`1.5`のみで、`fit()`側の`test_invalid_
+    confidence_level_raises`（`[1.5, 0.0, -0.1]`をparametrize済み）
+    との非対称が同様に存在する。
+- **Claudeの所感**: 対応する場合は、Logit/Probit/Tobit3手法をまとめて
+  一度に対応するのが効率的（同じ`ValidationError`パス・同じ検証観点
+  のため）。
+- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
+  指摘。
+- **状態**: 未対応（項目32・39・40と統合して対応するのが効率的、
+  着手要否はユーザー判断待ち）

@@ -745,6 +745,24 @@ nonlinear/tobit.py`）が既に`nonlinear`配下にある、という2点を踏�
 記録した。また項目28でモジュールdocstringの「Issue #227」経緯コメント
 残置（項目25・51・79と同一パターン）も記録した。
 
+`test_tobit.py`解説後のユーザーとの質疑で17件の指摘を受け、
+`refactoring-candidates-3.md`項目29〜38・`test-coverage-candidates.md`
+項目62〜63に記録した（2026-08-31）。特に**項目35（`refactoring-
+candidates-3.md`）はユーザーの着眼点が優れていた設計提案**——Tobitが
+`method`（newton/bfgs/lbfgs）に関わらず常にOLSベースの初期値・QR検証を
+実行する設計を、Logit/Probitにも適用できないかという提案を受けて
+`test_logit.py`と比較調査したところ、Logit/Probitはゼロベクトル初期値
+（statsmodels方式）のため多重共線性の検出経路が`method`ごとに異なり、
+**過去に実際に`bfgs`だけ検出漏れし桁違いに巨大な標準誤差を含む`Ok`が
+返る実バグがあった**ことを`test_logit.py`のdocコメントから確認した。
+Tobit方式を適用すれば、この種の`method`依存の検出漏れバグのクラス
+自体を構造的に排除できる可能性がある。また項目26に、ユーザーの
+Issue番号訂正（#255ではなく**#249**、C統計量＝difference-in-Hansen
+統計量によるGMM内生性検定）を`gh issue view`で確認の上追記した。
+一方、ユーザーの複数の懸念（項目31: `x=[]`検証、項目33: `tol`検証、
+項目34: `method`不正値検証）は調査の結果**既に対応済み・実装済み**
+だったことを確認し、対応不要と判断・記録した。
+
 `test_iv_crosscheck.py`解説後のユーザーとの質疑で4件の指摘を受け、
 `refactoring-candidates-3.md`項目25〜26・`test-coverage-candidates.md`
 項目61に記録した（2026-08-31）。項目25はIV関連4ファイル全体で
@@ -956,17 +974,18 @@ Probit固有の差分の有無を都度`diff`で確認すること。項目35（
 - `refactoring-candidates-2.md`: 項目44〜96（凍結、2026-08-30時点で別の並行タスクが
   リファクタリング作業に着手したため、このウォークスルーからの新規追記先ではなく
   なった）。
-- `refactoring-candidates-3.md`: 項目1〜28（独立採番、`test_iv.py`解説時に
+- `refactoring-candidates-3.md`: 項目1〜38（独立採番、`test_iv.py`解説時に
   項目1〜10、`test_iv_fixtures.py`解説時に項目11〜17、`test_iv_gmm_
   fixtures.py`解説時に項目18〜24、`test_iv_crosscheck.py`解説時に
-  項目25〜26、`test_tobit.py`解説時に項目27〜28を追加。項目7の`const`
+  項目25〜26、`test_tobit.py`解説時に項目27〜38を追加。項目7の`const`
   名衝突バグ疑い・項目9のドキュメント不整合・項目12のIV HC2/HC3参照
-  実装発見・項目21のHansen J不一致原因判明が特に重要）。以後この
-  ウォークスルーからの新規追記はこのファイルに行う。
-- `test-coverage-candidates.md`: 項目1〜61（番号は継続、`test_iv.py`解説時に
+  実装発見・項目21のHansen J不一致原因判明・項目35のTobit方式の
+  Logit/Probitへの適用提案が特に重要）。以後このウォークスルーからの
+  新規追記はこのファイルに行う。
+- `test-coverage-candidates.md`: 項目1〜63（番号は継続、`test_iv.py`解説時に
   項目46〜53、`test_iv_fixtures.py`解説時に項目54〜58、`test_iv_gmm_
   fixtures.py`解説時に項目59〜60、`test_iv_crosscheck.py`解説時に
-  項目61を追加）。
+  項目61、`test_tobit.py`解説時に項目62〜63を追加）。
 
 **候補メモの状態（2026-08-23時点、過去の履歴）**:
 - `refactoring-candidates.md`: 項目1〜43（このウォークスルー由来の最後の追記は項目43）。

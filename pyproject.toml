@@ -58,7 +58,7 @@ test = [
     # IV（2SLS/GMM）のフィクスチャ生成に使った主リファレンス実装（Issue #171、
     # `docs/planning/specs/iv-api-design.md`5.1節）。statsmodelsと同じ理由で`==`厳密固定。
     "linearmodels==7.0",
-    "ruff==0.16.3",
+    "ruff==0.16.4",
 ]
 # benchmark/ 配下のベンチマーク値生成・性能比較スクリプト専用（CLAUDE.md 3章
 # 「benchmark/はtests/とは別ライフサイクル」参照）。ci_python.ymlは使わない

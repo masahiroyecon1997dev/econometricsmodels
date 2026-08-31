@@ -487,8 +487,8 @@
     経緯を追記、IV の GMM クラスター重み行列テストの相互参照も張り替え。
     WLS は手書き版が元々無く現状維持。Logit/Probit は手書き版が `method`×3
     parametrize（過去の bfgs 検出漏れバグの回帰）で追加検証価値があるため今回は
-    両方維持し、candidates-3 項目35（Tobit 方式の method 共通 QR 検証を Logit/
-    Probit に適用）を別 Issue 化して完了後に一本化する。candidates-3 項目1
+    両方維持し、**Issue #279**（Tobit 方式の method 共通 QR 検証を Logit/
+    Probit に適用、candidates-3 項目35）完了後に一本化する。candidates-3 項目1
     （IV `x2=2*x1` 直書き）はテスト削除で自然に解消、項目17 の状態も更新。
     `pytest tests` 957→**955**（削除2件、いずれも非 parametrize）、`ruff` パス。
 - 上記以外（`refactoring-candidates.md`項目12・13・15〜35・37・39）は

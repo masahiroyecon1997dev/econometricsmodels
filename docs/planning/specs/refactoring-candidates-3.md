@@ -1123,9 +1123,12 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   の2点を実装時に確認する必要がある。
 - **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
   指摘、`test_logit.py`との比較調査で確認。
-- **状態**: 未対応（**設計提案として記録**、着手要否・実施タイミングは
-  ユーザー判断待ち。Logit/Probit双方への影響範囲が大きいため、
-  着手する場合は個別Issue化を推奨）
+- **状態**: Issue 化済み（2026-08-31、**#279**）。`refactoring-candidates-2.md`
+  項目54（多重共線性テストの CSV 一本化）を OLS/IV について実施した際、
+  Logit/Probit は `test_singular_hessian_raises_computation_error` の `method`×3
+  parametrize が本項目の検出漏れバグの回帰テストとして機能しているため一本化を
+  見送り、本設計変更を前提とする残タスクとして #279 に集約した（完了後に
+  Logit/Probit も CSV 一本化、項目82・本ファイル項目1 も解消）。
 
 ### 36. `test_separation_suspected_raises_computation_error_for_near_separation_data`のDGPがインライン生成で、Logit/Probitの`separation_suspected_dataset`共有ヘルパーを使っていない
 

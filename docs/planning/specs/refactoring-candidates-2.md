@@ -254,9 +254,10 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   （`test_singular_first_stage_design_matrix_raises_computation_error` を削除、
   candidates-3 項目1・17 も参照）。WLS はもともと手書き版が無く現状維持。
   Logit/Probit は手書き版が `method`×3 parametrize（過去の bfgs 検出漏れバグの
-  回帰テスト）で追加検証価値があるため今回は両方維持し、candidates-3 項目35
-  （Tobit 方式の method 共通 QR 検証を Logit/Probit に適用）完了後に同じ一本化を
-  行う。`pytest tests` 957→955（削除2件、いずれも非 parametrize）。
+  回帰テスト）で追加検証価値があるため今回は両方維持し、**Issue #279**
+  （Tobit 方式の method 共通 QR 検証を Logit/Probit に適用、candidates-3 項目35）
+  完了後に同じ一本化を行う。`pytest tests` 957→955（削除2件、いずれも非
+  parametrize）。
 
 ### 55. `test_ols_fixtures.py`というファイル名が、pytest用語の「fixtures」と紛らわしい
 

@@ -1196,3 +1196,19 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
   指摘、`nonlinear-api-design.md`で確認。
 - **状態**: 未対応（**検討事項として記録**、着手要否はユーザー判断待ち）
+
+### 39. `fit_iv`のdoc commentがGMM実装状況について古い記述のまま
+
+- **対象**: [engine_pybind/src/lib.rs:156-157](../../../engine_pybind/src/lib.rs#L156-L157)
+- **内容**: `fit_iv`関数のdoc commentに「`options.method`は`"2sls"`
+  （現状唯一の実装）か`"gmm"`（未実装、`ValidationError`を送出）を
+  選ぶ」と書かれているが、GMMは`tests/iv/test_iv_gmm_fixtures.py`で
+  `linearmodels`とのクロスチェックが通っている通り既に実装済み。
+  PyO3の`///`docコメントはそのままPython側の`__doc__`（`help()`や
+  IDE補完）に反映されるため、ユーザーに見える形で古い情報が残っている。
+- **Claudeの所感**: 実装が先行しdoc commentの更新が漏れた典型的な
+  ケース。実害は小さいが、ユーザー向けAPIドキュメントの正確性の
+  問題として修正対象になりうる。
+- **気づいた経緯**: 2026-08-31、`engine_pybind/src/lib.rs`解説時に
+  コード全体を確認して発見。
+- **状態**: 未対応

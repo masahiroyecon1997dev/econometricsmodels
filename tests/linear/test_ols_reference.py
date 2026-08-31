@@ -41,9 +41,6 @@ from _assertions import assert_close, assert_dict_close
 from _assertions import rename_intercept as _rename
 from _helpers import DATA_DIR, with_cluster_groups
 from _ols_helpers import (
-    ATOL_COEF,
-    ATOL_SE,
-    ATOL_STAT,
     our_fit,
     our_fit_cluster,
     sm_fit,
@@ -189,10 +186,8 @@ def test_params_match_statsmodels(dataset, cov_type):
     our_res = our_fit(dataset, cov_type)
 
     for name, sm_val in zip(["const", "x1", "x2"], sm_res.params):
-        our_val = our_res.params[name]
-        assert abs(our_val - sm_val) < ATOL_COEF, (
-            f"[{cov_type}] params[{name}]: "
-            f"ours={our_val:.10f}, sm={sm_val:.10f}"
+        _assert_close(
+            our_res.params[name], sm_val, f"[{cov_type}] params/{name}"
         )
 
 
@@ -203,9 +198,8 @@ def test_std_errors_match_statsmodels(dataset, cov_type):
     our_res = our_fit(dataset, cov_type)
 
     for name, sm_val in zip(["const", "x1", "x2"], sm_res.bse):
-        our_val = our_res.std_errors[name]
-        assert abs(our_val - sm_val) < ATOL_SE, (
-            f"[{cov_type}] SE[{name}]: ours={our_val:.8f}, sm={sm_val:.8f}"
+        _assert_close(
+            our_res.std_errors[name], sm_val, f"[{cov_type}] se/{name}"
         )
 
 
@@ -215,10 +209,7 @@ def test_cluster_se_match_statsmodels(dataset):
     our_res = our_fit_cluster(dataset)
 
     for name, sm_val in zip(["const", "x1", "x2"], sm_res.bse):
-        our_val = our_res.std_errors[name]
-        assert abs(our_val - sm_val) < ATOL_SE, (
-            f"Cluster SE[{name}]: ours={our_val:.8f}, sm={sm_val:.8f}"
-        )
+        _assert_close(our_res.std_errors[name], sm_val, f"cluster_se/{name}")
 
 
 def test_r_squared_match_statsmodels(dataset):
@@ -226,8 +217,8 @@ def test_r_squared_match_statsmodels(dataset):
     sm_res = sm_fit(dataset)
     our_res = our_fit(dataset)
 
-    assert abs(our_res.r_squared - sm_res.rsquared) < ATOL_STAT
-    assert abs(our_res.r_squared_adj - sm_res.rsquared_adj) < ATOL_STAT
+    _assert_close(our_res.r_squared, sm_res.rsquared, "r_squared")
+    _assert_close(our_res.r_squared_adj, sm_res.rsquared_adj, "r_squared_adj")
 
 
 def test_f_statistic_match_statsmodels(dataset):
@@ -235,7 +226,7 @@ def test_f_statistic_match_statsmodels(dataset):
     sm_res = sm_fit(dataset)
     our_res = our_fit(dataset)
 
-    assert abs(our_res.f_statistic - sm_res.fvalue) < 1e-4
+    _assert_close(our_res.f_statistic, sm_res.fvalue, "f_statistic")
 
 
 def test_include_intercept_false_matches_statsmodels():
@@ -251,9 +242,9 @@ def test_include_intercept_false_matches_statsmodels():
     our_res = OLS(df, y="y", x=["x1"], options=options).fit()
 
     assert our_res.param_names == ["x1"]
-    assert abs(our_res.params["x1"] - sm_res.params[0]) < ATOL_COEF
-    assert abs(our_res.std_errors["x1"] - sm_res.bse[0]) < ATOL_SE
-    assert abs(our_res.r_squared - sm_res.rsquared) < ATOL_STAT
+    _assert_close(our_res.params["x1"], sm_res.params[0], "params/x1")
+    _assert_close(our_res.std_errors["x1"], sm_res.bse[0], "se/x1")
+    _assert_close(our_res.r_squared, sm_res.rsquared, "r_squared")
 
 
 @pytest.mark.parametrize(
@@ -295,10 +286,16 @@ def test_include_intercept_false_matches_statsmodels_robust_cov_types(
 
     assert our_res.param_names == ["x1", "x2"]
     for i, name in enumerate(["x1", "x2"]):
-        assert abs(our_res.params[name] - sm_res.params[i]) < ATOL_COEF, (
-            f"[{cov_type}] params[{name}]"
+        _assert_close(
+            our_res.params[name],
+            sm_res.params[i],
+            f"[{cov_type}] params/{name}",
         )
-        assert abs(our_res.std_errors[name] - sm_res.bse[i]) < ATOL_SE, (
-            f"[{cov_type}] std_errors[{name}]"
+        _assert_close(
+            our_res.std_errors[name],
+            sm_res.bse[i],
+            f"[{cov_type}] se/{name}",
         )
-    assert abs(our_res.r_squared - sm_res.rsquared) < ATOL_STAT
+    _assert_close(
+        our_res.r_squared, sm_res.rsquared, f"[{cov_type}] r_squared"
+    )

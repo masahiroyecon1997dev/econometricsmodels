@@ -216,7 +216,16 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   寄せるのが筋が良いと考える。項目52（`test_ols.py`の役割自体を見直すか）と
   合わせて判断すべき。
 - **気づいた経緯**: 2026-08-22、`tests/linear/test_ols.py`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
+- **状態**: 解消済み（2026-08-31、`refactor` スキル）。Phase 2 linear で
+  `ATOL_COEF`/`ATOL_SE`/`ATOL_STAT` は `tests/linear/_ols_helpers.py` へ移っていたが、
+  今回それらと直書き `< 1e-4`（F統計量）を**全廃**し、`test_ols_reference.py` の
+  「ライブ statsmodels との照合」セクションと `test_ols_api.py` の `predict()`
+  statsmodels 照合を、いずれも `_assertions.assert_close`/`assert_dict_close`
+  ＋ `_tolerances.py` の `"ols_reference"`（rtol 1e-8 / atol 1e-10、凍結フィクスチャ
+  照合と同一）に統一。旧定数は実測に基づく緩和ではなく歴史的スラックだったことを
+  実機で確認（tight tol で `pytest tests` 957件パス、緩和キーの追加は不要だった）。
+  `_tolerances.py` に新規定数は追加していない（集約先は既存の `"ols_reference"`
+  キー）。項目56（数値比較の書き方の混在）もこの範囲で大半が解消。
 
 ### 54. `test_ols.py`と`test_ols_fixtures.py`で「完全な多重共線性→`ComputationError`」のテストが重複
 

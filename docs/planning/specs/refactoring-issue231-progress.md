@@ -464,6 +464,17 @@
     validation 44 − 移設 5）、`ruff` パス。GMM の R クロスチェックは元々無い
     （candidates 項目26 で将来対応）。**項目68 は全系統で完了**。派生の未解消:
     項目53/54/56（linear）・77/95/96（nonlinear）。
+  - **項目53 実施（2026-08-31）**: `test_ols_reference.py` の「ライブ statsmodels
+    との照合」＋ `test_ols_api.py` の `predict()` statsmodels 照合が使っていた
+    独自の絶対誤差定数 `ATOL_COEF`/`ATOL_SE`/`ATOL_STAT`（＋ F統計量の直書き
+    `< 1e-4`）を全廃し、`_assertions.assert_close`/`assert_dict_close` ＋
+    `_tolerances.py` の `"ols_reference"`（rtol 1e-8 / atol 1e-10、凍結フィクスチャ
+    照合と同一）に統一。旧定数は歴史的スラックで、tight tol でも `pytest tests`
+    957件パス（緩和キー追加は不要）。`_tolerances.py` に新規定数は足さず、集約先は
+    既存キー。項目56 の大半もこの範囲で解消（残る `abs(...) < 1e-9` 等は
+    リファレンス比較ではなく自己整合の不変条件チェックのため対象外）。
+    変更: `tests/linear/_ols_helpers.py`・`test_ols_api.py`・`test_ols_reference.py`。
+    `ruff` パス。
 - 上記以外（`refactoring-candidates.md`項目12・13・15〜35・37・39）は
   未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は

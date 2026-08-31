@@ -1,5 +1,4 @@
-"""`test_ols_*.py` 共通の小さなヘルパー（statsmodels ラッパー・engine ラッパー・
-係数/SE の許容絶対誤差定数）。
+"""`test_ols_*.py` 共通の小さなヘルパー（statsmodels ラッパー・engine ラッパー）。
 
 pytest が各テストファイルのディレクトリ（`tests/linear/`）を `sys.path` に載せる
 ため、`from _ols_helpers import ...` の裸importで解決できる（`tests/_helpers.py`
@@ -7,6 +6,10 @@ pytest が各テストファイルのディレクトリ（`tests/linear/`）を 
 項目68）で `test_ols.py` を validation/api/reference に分けた際、ライブ statsmodels
 照合（reference）と predict() の statsmodels 照合（api）の双方が同じラッパーを
 使うため、重複を避けてここへ集約した。
+
+許容誤差は独自の絶対誤差定数を持たず、`_tolerances.py` の `"ols_reference"`
+（`_assertions.assert_close` 経由、`tol = max(rtol*|ref|, atol)`）で統一する
+（`refactoring-candidates-2.md` 項目53/56）。
 """
 
 from __future__ import annotations
@@ -15,11 +18,6 @@ import numpy as np
 import polars as pl
 import statsmodels.api as sm
 from econometricsmodels import OLS, OLSOptions, OlsResults
-
-# 係数・SEの許容絶対誤差（float64の丸め誤差を考慮）
-ATOL_COEF = 1e-8
-ATOL_SE = 1e-5
-ATOL_STAT = 1e-6
 
 
 def sm_design(df: pl.DataFrame) -> np.ndarray:

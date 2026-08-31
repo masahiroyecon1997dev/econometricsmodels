@@ -14,12 +14,26 @@ predict の `ValidationError` パスのみ `test_ols_validation.py`。
 
 from __future__ import annotations
 
+from functools import partial
+
 import numpy as np
 import polars as pl
 import pytest
 import statsmodels.api as sm
-from _ols_helpers import ATOL_COEF, our_fit, our_fit_cluster, sm_fit
+from _assertions import assert_close
+from _ols_helpers import our_fit, our_fit_cluster, sm_fit
+from _tolerances import TOLERANCES
 from econometricsmodels import OLS, OLSOptions
+
+# predict() の statsmodels 照合も凍結フィクスチャ照合と同じ許容誤差
+# （`_tolerances.py` の "ols_reference"）で行う。`_assertions.assert_close`
+# （`tol = max(rtol*|ref|, atol)`）に統一し、独自の絶対誤差定数は持たない
+# （`refactoring-candidates-2.md` 項目53/56）。
+_assert_close = partial(
+    assert_close,
+    rtol=TOLERANCES["ols_reference"]["rtol"],
+    atol=TOLERANCES["ols_reference"]["atol"],
+)
 
 # ── 成功パス・結果型 ──────────────────────────────────────────────
 
@@ -233,8 +247,8 @@ def test_predict_none_matches_statsmodels_fitted_values(dataset):
     predicted = res.predict()
 
     assert len(predicted) == len(dataset)
-    for row, expected in zip(predicted, sm_res.fittedvalues):
-        assert row["fitted"] == pytest.approx(expected, abs=ATOL_COEF)
+    for i, (row, expected) in enumerate(zip(predicted, sm_res.fittedvalues)):
+        _assert_close(row["fitted"], expected, f"fitted/{i}")
 
 
 def test_predict_new_data_matches_statsmodels(dataset):
@@ -260,8 +274,8 @@ def test_predict_new_data_matches_statsmodels(dataset):
     expected = sm_res.predict(sm_new_x)
 
     assert len(predicted) == 3
-    for row, exp in zip(predicted, expected):
-        assert row["fitted"] == pytest.approx(exp, abs=ATOL_COEF)
+    for i, (row, exp) in enumerate(zip(predicted, expected)):
+        _assert_close(row["fitted"], exp, f"fitted/{i}")
 
 
 def test_predict_new_data_without_intercept_matches_statsmodels():
@@ -281,8 +295,8 @@ def test_predict_new_data_without_intercept_matches_statsmodels():
     predicted = res.predict(new_data)
     expected = sm_res.predict(new_x1.reshape(-1, 1))
 
-    for row, exp in zip(predicted, expected):
-        assert row["fitted"] == pytest.approx(exp, abs=ATOL_COEF)
+    for i, (row, exp) in enumerate(zip(predicted, expected)):
+        _assert_close(row["fitted"], exp, f"fitted/{i}")
 
 
 def test_predict_with_include_intercept_false_and_x_named_const():
@@ -311,9 +325,11 @@ def test_predict_with_include_intercept_false_and_x_named_const():
 
     coef_const = res.params["const"]
     coef_x2 = res.params["x2"]
-    for row, (c, x2) in zip(predicted, [(100.0, 10.0), (200.0, 20.0)]):
+    for i, (row, (c, x2)) in enumerate(
+        zip(predicted, [(100.0, 10.0), (200.0, 20.0)])
+    ):
         expected = coef_const * c + coef_x2 * x2
-        assert row["fitted"] == pytest.approx(expected, abs=ATOL_COEF)
+        _assert_close(row["fitted"], expected, f"fitted/{i}")
 
 
 def test_predict_new_data_structure(dataset):

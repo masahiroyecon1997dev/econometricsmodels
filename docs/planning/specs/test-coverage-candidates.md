@@ -1465,3 +1465,41 @@
   ユーザー指摘、実機検証で確認。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目50・51と合わせて
   検討）
+
+### 61. `test_iv_gmm_fixtures.py`（GMMのlinearmodels主リファレンス照合）に実データセット（Wooldridge `card`）での検証が無い——ドキュメント上も明示的に決定された事項ではない
+
+- **対象**: `tests/test_iv_gmm_fixtures.py`全体（`grep`で`card`/
+  `wooldridge`が0件）。対比: [docs/planning/specs/iv-api-design.md:220-227](../../../docs/planning/specs/iv-api-design.md#L220-L227)
+  （「5.5 実データセット」節、`test_iv_fixtures.py`〔linearmodels〕・
+  `test_iv_crosscheck.py`〔ivreg〕の両方でCard実データをクロスチェック
+  すると明記されているが、GMMについては「5.3節の方針によりRクロス
+  チェック省略のため実データセットでの**Rクロスチェック**も対象外」
+  としか書かれておらず、`linearmodels`側〔Python、`test_iv_gmm_
+  fixtures.py`〕でのGMM実データ検証を省略してよいかどうかは明記
+  されていない）
+- **内容**: ユーザー指摘（2026-08-31、「`test_iv_gmm_fixtures.py`では
+  実データでの検証が抜けているのでは？」）を受けて確認したところ、
+  指摘の通り`test_iv_gmm_fixtures.py`には実データ検証が1つも無い。
+  重要なのは、これが`refactoring-candidates-3.md`項目26（`test_iv_
+  crosscheck.py`のGMM省略）とは**性質が異なる**という点——項目26は
+  「Rクロスチェックの省略」という明確に文書化された決定だが、本項目は
+  「`linearmodels`主リファレンスでのGMM実データ検証」の話であり、
+  `iv-api-design.md`5.5節の文言（「Rクロスチェックも対象外」）を素直に
+  読むと、Rクロスチェックの省略についてのみ言及しており、`linearmodels`
+  側（Python）の実データ検証を省略してよいという決定までは読み取れない。
+  `testing-policy.md`「テスト用データセット」2.は「実データセットでの
+  検証」を各推定手法に一律に求めており、GMMも例外という明記はない。
+- **Claudeの所感**: CLAUDE.md 14章が求める「既存ドキュメント・issueの
+  記述と、実装時に判明した事実が食い違う」に近いケースだと考える。
+  意図的に省略したのか、単に`ivreg`がGMM非対応という制約から連想して
+  Python側の実データ検証まで芋づる式に見送られてしまったのかが、
+  ドキュメントからは判別できない。`GmmEstimator`はWu-Hausman検定を
+  実装しない・`first_stage()`は共有、という制約はあるが、`params`/
+  `std_errors`/`weak_instrument_f_statistics`/`overid_statistic`
+  （Hansen J）等、GMMでも実データで検証する価値のある統計量は多い
+  ため、追加する方向を推奨する。
+- **気づいた経緯**: 2026-08-31、`tests/test_iv_crosscheck.py`解説時の
+  ユーザー指摘、`iv-api-design.md`5.5節の文言を精査して確認。
+- **状態**: 未対応（**要ユーザー判断**: 意図的な省略だったか確認した
+  上で、追加するならフィクスチャ生成〔`generate_iv_gmm_fixtures.py`〕を
+  伴う）

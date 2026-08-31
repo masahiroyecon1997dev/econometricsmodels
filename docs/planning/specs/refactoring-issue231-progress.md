@@ -704,11 +704,11 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
   `test_wls.py`・`test_wls_fixtures.py`・`test_wls_crosscheck.py`・
   `test_logit.py`・`test_logit_fixtures.py`・`test_logit_crosscheck.py`・
   `test_probit.py`・`test_probit_fixtures.py`・`test_probit_crosscheck.py`・
-  `test_iv.py`・`test_iv_fixtures.py`・`test_iv_gmm_fixtures.py`
+  `test_iv.py`・`test_iv_fixtures.py`・`test_iv_gmm_fixtures.py`・
+  `test_iv_crosscheck.py`
   （全区切り解説済み、WLS関連ファイルは一通り完了、Logit関連ファイルも
-  一通り完了、Probit関連ファイルもこれで一通り完了。IVは`test_iv.py`/
-  `test_iv_fixtures.py`/`test_iv_gmm_fixtures.py`が完了、
-  `test_iv_crosscheck.py`のみ未着手）
+  一通り完了、Probit関連ファイルもこれで一通り完了。**IV系統4ファイル
+  全て完了**）
 
 **注意（2026-08-30〜、`tests/`のディレクトリ分割）**: 別セッションが
 `tests/`を系統別サブディレクトリ（`tests/linear/`・`tests/nonlinear/`・
@@ -731,8 +731,25 @@ CI側のPYTHONPATH非対称〔`refactoring-candidates-2.md`項目50〕は実質�
 都度確認すること。項目50の状態欄自体は、リファクタリング側のセッションが
 後ほど更新する前提でこちらからは触っていない。
 
-**次に解説予定**: `test_iv_crosscheck.py`（IV関連ファイルの最後の1つ。
-これが終わればIV系統が完了し、次はTobitに進む見込み）。
+**次に解説予定**: 未定（IV系統4ファイル全て完了。ユーザー確立の順では
+次はTobit系統だが、着手前にユーザーに確認すること）。
+
+`test_iv_crosscheck.py`解説後のユーザーとの質疑で4件の指摘を受け、
+`refactoring-candidates-3.md`項目25〜26・`test-coverage-candidates.md`
+項目61に記録した（2026-08-31）。項目25はIV関連4ファイル全体で
+Issue #231フェーズ4の経緯コメント残置が計18箇所見つかった件
+（`refactoring-candidates-2.md`項目51・79と同一パターン、統合対応を
+推奨）。項目26は`test_iv_crosscheck.py`にGMMのRクロスチェックが
+無い点がユーザーの想定と異なり`iv-api-design.md`5.3節に明記済みの
+意図的な例外規定（`ivreg`のGMM非対応が根拠）だったことの確認。
+一方coverage項目61では、`test_iv_gmm_fixtures.py`に実データ
+（Wooldridge `card`）検証が無い点は、5.3節の文言が「Rクロスチェック」
+の省略についてのみ言及しており`linearmodels`側（Python）の実データ
+検証省略までは明記されていないという**ドキュメントの曖昧さ**を発見し、
+CLAUDE.md 14章の「既存ドキュメントと実装の食い違い」に近いケースとして
+要ユーザー判断で記録した。第一段階（`first_stage()`）の数値未照合の
+懸念は既に項目55（`test-coverage-candidates.md`）が4ファイル全てを
+対象に含めていたため、新規記録は不要と判断した。
 
 `test_iv_gmm_fixtures.py`解説後のユーザーとの質疑で6件の指摘を受け、
 `refactoring-candidates-3.md`項目18〜24・`test-coverage-candidates.md`
@@ -928,15 +945,17 @@ Probit固有の差分の有無を都度`diff`で確認すること。項目35（
 - `refactoring-candidates-2.md`: 項目44〜96（凍結、2026-08-30時点で別の並行タスクが
   リファクタリング作業に着手したため、このウォークスルーからの新規追記先ではなく
   なった）。
-- `refactoring-candidates-3.md`: 項目1〜24（独立採番、`test_iv.py`解説時に
+- `refactoring-candidates-3.md`: 項目1〜26（独立採番、`test_iv.py`解説時に
   項目1〜10、`test_iv_fixtures.py`解説時に項目11〜17、`test_iv_gmm_
-  fixtures.py`解説時に項目18〜24を追加。項目7の`const`名衝突バグ疑い・
-  項目9のドキュメント不整合・項目12のIV HC2/HC3参照実装発見・項目21の
-  Hansen J不一致原因判明が特に重要）。以後このウォークスルーからの新規
+  fixtures.py`解説時に項目18〜24、`test_iv_crosscheck.py`解説時に
+  項目25〜26を追加。項目7の`const`名衝突バグ疑い・項目9のドキュメント
+  不整合・項目12のIV HC2/HC3参照実装発見・項目21のHansen J不一致原因
+  判明が特に重要）。以後このウォークスルーからの新規
   追記はこのファイルに行う。
-- `test-coverage-candidates.md`: 項目1〜60（番号は継続、`test_iv.py`解説時に
+- `test-coverage-candidates.md`: 項目1〜61（番号は継続、`test_iv.py`解説時に
   項目46〜53、`test_iv_fixtures.py`解説時に項目54〜58、`test_iv_gmm_
-  fixtures.py`解説時に項目59〜60を追加）。
+  fixtures.py`解説時に項目59〜60、`test_iv_crosscheck.py`解説時に
+  項目61を追加）。
 
 **候補メモの状態（2026-08-23時点、過去の履歴）**:
 - `refactoring-candidates.md`: 項目1〜43（このウォークスルー由来の最後の追記は項目43）。

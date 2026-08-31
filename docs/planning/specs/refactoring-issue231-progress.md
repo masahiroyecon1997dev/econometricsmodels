@@ -444,6 +444,26 @@
     消失ゼロ）、`ruff` パス。項目55/76 は nonlinear 分について解消。項目77
     （method テストの観点重複・`rel=1e-4` 直書き）・項目95/96（Logit/Probit の
     コード重複）は分割後も残り、各項目で引き続き追跡。iv は Phase 2 iv 待ち。
+  - **Phase 2 iv 実施（2026-08-31）— 項目68 完了**: IV(2SLS/GMM) を同じ4分割に
+    （`test_iv_api.py` / `test_iv_validation.py` / `test_iv_reference.py`〔＝旧
+    `test_iv_fixtures.py`〕 / `test_iv_gmm_reference.py`〔＝旧 `test_iv_gmm_fixtures.py`〕
+    / `test_iv_crosscheck.py`）。IV は主リファレンス数値照合のみ 2SLS/GMM で
+    ファイルが分かれ、api/validation は 2SLS/GMM 共通。`test_iv.py` 内の
+    `_our_fit` は `tests/iv/_iv_helpers.py`（`our_fit`）へ、`iv_dataset`/
+    `clustered_dataset` フィクスチャは新設 `tests/iv/conftest.py` へ移設。
+    `_fixtures.py` の `test_perfect_multicollinearity_raises_computation_error`・
+    `test_scale_variance_raises_computation_error` は `_validation.py` へ集約。
+    `_tolerances.py` の `iv_fixtures`/`iv_gmm_fixtures` キー →
+    `iv_reference`/`iv_gmm_reference`（これで全6系統が `*_reference` に統一、
+    項目55 完了）。セクション見出しも統一（項目76 完了）。`engine/src/iv/CLAUDE.md`・
+    `docs/planning/specs/iv-api-design.md`・`tests/_assertions.py`・
+    `benchmark/iv/fixtures/generate_iv_fixtures.py`・
+    `benchmark/iv/references/linearmodels_ref.py`・`performance/compare_iv.py`・
+    `docs/performance/iv.md`・`test_iv_crosscheck.py` の参照も更新。
+    `pytest tests` 957件パス（不変、消失ゼロ。旧 test_iv.py 93件 = 新 api 54 +
+    validation 44 − 移設 5）、`ruff` パス。GMM の R クロスチェックは元々無い
+    （candidates 項目26 で将来対応）。**項目68 は全系統で完了**。派生の未解消:
+    項目53/54/56（linear）・77/95/96（nonlinear）。
 - 上記以外（`refactoring-candidates.md`項目12・13・15〜35・37・39）は
   未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は

@@ -11,7 +11,7 @@
 `docs/performance/ols.md`「最重要の教訓」「計測方法」と共通（releaseビルド必須・`tracemalloc`不採用・サブプロセス隔離・スレッド数を1に固定・polars→pandas変換は計測区間外・ウォームアップ1回＋`repeats`回の中央値・HACのラグ数を`hac_auto_lag(n)`で両ライブラリに揃える）。IV固有の点は以下。
 
 - **DGP**: `generate_iv_dataset("baseline", k_endog=1, k_instruments=2)`。過剰識別（`k_instruments > k_endog`）で回し、engine が常に計算する過剰識別検定（Sargan / Hansen J）を計測範囲に確実に含める。n/k スイープの`k`は外生説明変数`x_exog`の本数（列は `y, x1..xk, endog1, z1, z2`）。
-- **method（2sls / gmm）**: n/k スイープは既定 method の **2SLS**。**GMM は method 軸**として代表点1つ（cov_type=classical, k=5, n=1,000,000）でのみ計測する。正確性検証（`test_iv_fixtures.py`）も 2SLS 主軸・GMM は代表シナリオのみ、という絞り方に合わせる。GMM × hac は対象外（下記「既知の限界」）。
+- **method（2sls / gmm）**: n/k スイープは既定 method の **2SLS**。**GMM は method 軸**として代表点1つ（cov_type=classical, k=5, n=1,000,000）でのみ計測する。正確性検証（`test_iv_reference.py`）も 2SLS 主軸・GMM は代表シナリオのみ、という絞り方に合わせる。GMM × hac は対象外（下記「既知の限界」）。
 - **cov_type**: classical と hac（Newey-West、bartlett kernel）の代表2点。classical/hc1/cluster/hac を n=100,000, k=5 で軽く実測し、OLS/WLS と同じく hac が最重だった（engine 0.129s / linearmodels 0.223s）。engine cov_type ↔ linearmodels `cov_type`/`debiased` の対応は `linearmodels_ref.py` の `_COV_TYPE_MAP` と同じ。`hc2`/`hc3` は linearmodels 側に対応実装が無いため性能比較でも扱わない。
 - **計測範囲の対称性（Issue #98）**: engine は係数・標準誤差と同じ `.fit()` の中で R²・調整済みR²・F統計量・過剰識別検定・弱操作変数F統計量・Wu-Hausman検定・第一段階回帰まで**常に一括計算**する。linearmodels の `IVResults` はこれらを遅延評価にしており、特に `first_stage.diagnostics` は**第一段階回帰をフル再fitする**（OLS の `rsquared`、Logit の `llnull` と同じ位置づけ）。`_fit_once_linearmodels` は `.fit()` 直後に `params`/`std_errors`/`tstats`/`pvalues`/`rsquared`/`rsquared_adj`/`f_statistic`/`first_stage.diagnostics`（2SLS は加えて `sargan`・`wu_hausman()`、GMM は `j_stat`）へ明示アクセスし、engine と同じ処理範囲で計測する。
 - **スイープ軸**: n軸（k=5固定、n=1,000〜1,000,000）、k軸（n=10,000固定、k=5・20）、method軸（下記）。

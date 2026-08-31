@@ -194,7 +194,8 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   重複整理は項目54 に残る）。nonlinear（Logit/Probit）は Phase 2 nonlinear で確認
   したが、旧 `test_logit.py`/`test_probit.py` は元々 statsmodels ライブ照合を
   持たず（構造/エラー専業で既に他ファイルと対称）、移設は不要だった（2026-08-31）。
-  iv は Phase 2 iv で。
+  iv も同様（旧 `test_iv.py` は linearmodels ライブ照合を持たない）ため移設不要、
+  Phase 2 iv で確認済み（2026-08-31）。**本項目は全系統で解消**。
 
 ### 53. `tests/linear/test_ols.py`の`ATOL_COEF`/`ATOL_SE`/`ATOL_STAT`が、`tests/_assertions.py`の許容誤差計算式・`tests/_tolerances.py`の値と揃っていない
 
@@ -267,7 +268,10 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   対応済み（2026-08-30）。nonlinear（`test_logit_fixtures.py`/
   `test_probit_fixtures.py` → `*_reference.py`、`_tolerances.py` キー
   `logit_fixtures`/`probit_fixtures` → `*_reference` も追随）は Phase 2 nonlinear
-  で対応済み（2026-08-31）。iv（iv/iv_gmm）は Phase 2 iv で実施。
+  で対応済み（2026-08-31）。iv（`test_iv_fixtures.py`/`test_iv_gmm_fixtures.py` →
+  `test_iv_reference.py`/`test_iv_gmm_reference.py`、`_tolerances.py` キー
+  `iv_fixtures`/`iv_gmm_fixtures` → `iv_reference`/`iv_gmm_reference`）も Phase 2 iv
+  で対応済み（2026-08-31）。**6系統すべて `*_reference` に統一。本項目は完了**。
 
 ### 56. `test_ols.py`内で数値比較の書き方（生の`assert`+f-string／`pytest.approx`／`_assertions.assert_close`不使用）が混在
 
@@ -633,12 +637,33 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
     - **項目95・96 の状態**: `test_logit_*.py` と `test_probit_*.py` のコード
       ほぼ完全同一という重複は4分割後も残る（各4ファイルで並行）。共通関数
       切り出しは項目95・96 で引き続き追跡。
-  - **Phase 2 iv 未着手**: linear/nonlinear と同じ型で。iv は 2sls/gmm ＋
-    `test_iv_gmm_fixtures.py` → `test_iv_gmm_reference.py` の分もある。
-    `pytest tests/iv` を確認。`_tolerances.py` の `iv_*` キーは Phase 2 iv で
-    `*_reference` に追随。
-- **状態**: Phase 1 ＋ Phase 2 linear（OLS/WLS）＋ Phase 2 nonlinear
-  （Logit/Probit）実施済み。Phase 2 iv は未着手（着手タイミングはユーザー判断待ち）。
+  - **Phase 2 iv 完了（2026-08-31）— IV(2SLS/GMM) を関心事で4分割**:
+    `test_iv.py` → `test_iv_api.py`（成功パス構造・API・オプション反映。2SLS/GMM
+    共通のスモークテストを1ファイルに集約）＋ `test_iv_validation.py`
+    （`ValidationError`/`ComputationError` パス。`_fixtures.py` にあった
+    `test_perfect_multicollinearity_raises_computation_error`・
+    `test_scale_variance_raises_computation_error` もここへ集約）。主リファレンス
+    数値照合のみ 2SLS/GMM でファイルが分かれる: `test_iv_fixtures.py` →
+    `test_iv_reference.py`（2SLS、**項目55**）、`test_iv_gmm_fixtures.py` →
+    `test_iv_gmm_reference.py`（GMM、**項目55**）。共通の `_our_fit` ヘルパーは
+    `tests/iv/_iv_helpers.py`（`our_fit`）へ、`iv_dataset`/`clustered_dataset`
+    フィクスチャは `tests/iv/conftest.py`（系統ローカル conftest を新設）へ移設。
+    `_tolerances.py` のキー `"iv_fixtures"`/`"iv_gmm_fixtures"` →
+    `"iv_reference"`/`"iv_gmm_reference"`（これで全系統が `*_reference` に統一）。
+    セクション見出しは `## 成功パス・結果型` / `## API構造` / `## オプションの反映` /
+    `## ValidationError（入力データ・変数指定）` / `## ValidationError（オプション）` /
+    `## ComputationError` / `## 凍結フィクスチャとの数値照合` で統一（**項目76**）。
+    `engine/src/iv/CLAUDE.md`・`docs/planning/specs/iv-api-design.md`・
+    `tests/_assertions.py`・`tests/iv/test_iv_crosscheck.py`・
+    `benchmark/iv/fixtures/generate_iv_fixtures.py`・
+    `benchmark/iv/references/linearmodels_ref.py`・`performance/compare_iv.py`・
+    `docs/performance/iv.md` の参照も更新。検証: `pytest tests`
+    **957件パス（不変、テスト消失ゼロ）**、`ruff check`/`format` パス。
+    GMM の R クロスチェックは元々存在しない（candidates 項目26 で将来対応、
+    `test_iv_gmm_reference.py` に crosscheck 対はない）。
+- **状態**: Phase 1 ＋ Phase 2 全系統（linear/nonlinear/iv）実施済み。**項目68
+  完了**。派生の未解消項目: 項目53/54/56（linear）・項目77/95/96（nonlinear）は
+  各項目で引き続き追跡。
 
 ### 69. `test_hac_time_col_reorders_rows_before_computing_lags`の`ordered_df`/`shuffled_df`が手書きで重複、OLS/WLS間でも同一データが独立に書かれている
 
@@ -845,8 +870,11 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `## ValidationError（…）` / `## ComputationError` / `## 凍結フィクスチャとの数値照合` /
   `## ライブ statsmodels との照合`、2026-08-30）。Logit/Probit も Phase 2 nonlinear
   で同じ規約＋手法固有見出し（`## pred_table()` / `## marginal_effects()` /
-  `## ValidationError（marginal_effects()）`）を適用済み（2026-08-31）。iv のみ
-  Phase 2 iv で追随。
+  `## ValidationError（marginal_effects()）`）を適用済み（2026-08-31）。iv も
+  Phase 2 iv で `## 成功パス・結果型` / `## API構造` / `## オプションの反映` /
+  `## ValidationError（入力データ・変数指定）` / `## ValidationError（オプション）` /
+  `## ComputationError` / `## 凍結フィクスチャとの数値照合` に統一済み
+  （2026-08-31）。**全系統で見出し統一完了、本項目は完了**。
 
 ### 77. `test_method_option_converges_to_same_params`（`test_logit.py`）が`test_method_matches_statsmodels`（`test_logit_fixtures.py`）と観点が重複し、`rel=1e-4`が直書き
 

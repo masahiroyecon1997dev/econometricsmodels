@@ -69,7 +69,7 @@ asymptotically equivalentな別定式化のため、classicalでも相対誤差1
 augmented regression自身の`df_resid`（= 主モデルの`df_resid - n_endog`、
 第一段階残差をn_endog列追加した分だけ小さい）を使う必要がある（`run()`本体の
 該当コメント参照。統計量自体は主モデルのdfに依存しないため機械精度で
-一致するが、p値だけ最大0.2%程度乖離するバグが初版にあった。`test_iv_fixtures.py`
+一致するが、p値だけ最大0.2%程度乖離するバグが初版にあった。`test_iv_reference.py`
 作成時に発覚・修正済み）。
 
 使用例（リポジトリルートから）:
@@ -277,7 +277,7 @@ def run(
     # 必要がある（本実装の`wald_test_last_columns`はaugmented regression側の
     # `OlsEstimator`が持つ`df_inference`をそのまま使うため）。初版は主モデルの
     # `df_resid`をそのまま流用しており、F統計量自体は機械精度で一致するのに
-    # p値だけ最大0.2%程度乖離するバグがあった（`test_iv_fixtures.py`作成時に
+    # p値だけ最大0.2%程度乖離するバグがあった（`test_iv_reference.py`作成時に
     # small_nシナリオ等で発覚・修正済み）。
     # augmented regression（第一段階残差をn_endog列追加した拡張回帰）の
     # 残差自由度が0以下（境界的なサンプルサイズ、df=1境界シナリオ等）だと

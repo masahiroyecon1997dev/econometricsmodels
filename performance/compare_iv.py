@@ -24,7 +24,7 @@ n/k スイープは既定 method の **2SLS** で回す。GMM は **method 軸**
 linearmodels 側の `IVGMM` + kernel が病的に遅く（n=100,000 で約40秒、engine の
 600倍以上）大規模計測が非現実的なため対象外とする（engine 側の問題ではない。
 `docs/performance/iv.md`「既知の限界」）。正確性検証
-（`test_iv_fixtures.py`）も 2SLS 主軸・GMM は代表シナリオのみ、という絞り方に
+（`test_iv_reference.py`）も 2SLS 主軸・GMM は代表シナリオのみ、という絞り方に
 合わせる。
 
 ## cov_type の範囲

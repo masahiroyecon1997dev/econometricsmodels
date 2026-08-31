@@ -9,7 +9,7 @@
 （`tol = max(rtol * |ref|, atol)`）に統一済み）。
 
 キーはテストファイル名の接頭辞（例: `test_ols_reference.py` → `"ols_reference"`、
-`test_iv_fixtures.py` → `"iv_fixtures"`）。
+`test_iv_gmm_reference.py` → `"iv_gmm_reference"`）。
 """
 
 TOLERANCES: dict[str, dict[str, float]] = {
@@ -17,12 +17,12 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # 相対誤差1e-8が基本方針。ATOLは0近傍の値（p値のアンダーフロー等）向けの
     # 下限フロー。
     # 関心事分割（refactoring-candidates-2.md 項目68）で test_<手法>_fixtures.py を
-    # test_<手法>_reference.py にリネームした系統からキー名も *_reference にする。
-    # linear（ols/wls）・nonlinear（logit/probit）は移行済み、iv は Phase 2 iv で追随。
+    # test_<手法>_reference.py にリネームし、キー名も *_reference に統一した
+    # （linear/nonlinear/iv とも移行済み）。
     "ols_reference": {"rtol": 1e-8, "atol": 1e-10},
     "wls_reference": {"rtol": 1e-8, "atol": 1e-10},
-    "iv_fixtures": {"rtol": 1e-8, "atol": 1e-10},
-    "iv_gmm_fixtures": {"rtol": 1e-8, "atol": 1e-10},
+    "iv_reference": {"rtol": 1e-8, "atol": 1e-10},
+    "iv_gmm_reference": {"rtol": 1e-8, "atol": 1e-10},
     # Logit/Probitは反復最適化（Newton/BFGS/L-BFGS）のため、ゼロ近傍の値
     # （信頼区間の境界等）で閉形式解（OLS/WLS）より1桁大きい浮動小数点誤差が
     # 乗ることを実測確認済み（ATOLのみ1e-9、RTOLは同じ1e-8）。

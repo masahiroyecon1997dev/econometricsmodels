@@ -1,12 +1,12 @@
 """IV(2SLS)の独立実装（R: ivreg + sandwich/lmtest）とのクロスチェックテスト。
 
-主リファレンス（linearmodels）との厳密比較は`test_iv_fixtures.py`で行う。ここでは
+主リファレンス（linearmodels）との厳密比較は`test_iv_reference.py`で行う。ここでは
 `tests/fixtures/benchmarks/iv_crosscheck.json`
 （`benchmark/iv/fixtures/generate_iv_crosscheck_fixtures.py`で生成）を用いて、
 linearmodelsとは独立した実装（R `ivreg`）との一致を確認する
 （`docs/planning/specs/iv-api-design.md`5.2節）。
 
-シナリオ・cov_type・クラスタケースの構成は`test_iv_fixtures.py`と揃える。
+シナリオ・cov_type・クラスタケースの構成は`test_iv_reference.py`と揃える。
 
 classical/hc0/hc1/clusterはRとほぼ機械精度で一致する（OLSクロスチェックと同じ実測
 傾向）ため`RTOL_STRICT`で厳密比較する。HACのみ小標本補正の慣習差により`RTOL_HAC`
@@ -45,7 +45,7 @@ Note:
     - GMMはivregが対応していないため対象外（5.3節、Rクロスチェック省略の例外規定）。
     - 第一段階回帰の結果（`first_stage()`）自体はここでは比較しない
       （`test_ols_crosscheck.py`が既にOLSの数値一致を検証済みのため、
-      `test_iv_fixtures.py`と同じ理由）。
+      `test_iv_reference.py`と同じ理由）。
 
     フィクスチャ生成時と同じ入力データを、`tests/fixtures/benchmarks/data/`
     に固定済みのCSV（`benchmark/iv/freeze.py`参照）から読む。
@@ -320,7 +320,7 @@ def test_cluster_matches_r(crosscheck):
 
 
 def test_cluster_g2_matches_r(crosscheck):
-    """クラスタ数境界（G=2ちょうど）の成功パス（`test_iv_fixtures.py`の同名テスト
+    """クラスタ数境界（G=2ちょうど）の成功パス（`test_iv_reference.py`の同名テスト
     と同じ再現条件、Issue #231フェーズ4）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_g2.csv")
@@ -348,7 +348,7 @@ def test_cluster_g2_matches_r(crosscheck):
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 def test_multi_endog_matches_r(crosscheck, cov_type):
     """複数内生変数（`x_endog=["endog1", "endog2"]`）の成功パス
-    （`test_iv_fixtures.py`の同名テストと同じ理由、Issue #231フェーズ4）。
+    （`test_iv_reference.py`の同名テストと同じ理由、Issue #231フェーズ4）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
     options = IvOptions(cov_type=cov_type)
@@ -374,7 +374,7 @@ DF1_COV_TYPES = [ct for ct in COV_TYPES if ct != "hac"]
 
 @pytest.mark.parametrize("cov_type", DF1_COV_TYPES)
 def test_df1_matches_r(crosscheck, cov_type):
-    """自由度1境界（df_resid=1ちょうど）の成功パス（`test_iv_fixtures.py`の
+    """自由度1境界（df_resid=1ちょうど）の成功パス（`test_iv_reference.py`の
     同名テストと同じ再現条件、Issue #235）。x_exog=[]・x_endog=['endog1']・
     instruments=['z1']（丁度識別、n=3）。augmented regressionがsaturated
     （残差自由度0）になるため、wu_hausman_statistic/wu_hausman_p_valueは
@@ -399,7 +399,7 @@ def test_df1_matches_r(crosscheck, cov_type):
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 def test_card_matches_r(crosscheck_wooldridge, cov_type):
-    """実データセット（Wooldridge card）。`test_iv_fixtures.py`の同名テストと
+    """実データセット（Wooldridge card）。`test_iv_reference.py`の同名テストと
     同じ理由、Issue #231フェーズ4）。
     """
     df = load_wooldridge_dataset("card")

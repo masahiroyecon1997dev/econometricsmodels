@@ -9,11 +9,14 @@ classical/HC0/HC1/HAC（+クラスター、baselineのみ）を`weight_type="una
 `weight_type`×`cov_type`の全組み合わせ（8シナリオ×4weight_type×6cov_type）は
 規模が大きすぎるため）。
 
-役割分担:
+役割分担（OLS/WLS/Logit/Probit の `test_<手法>_*.py` と同じ4分割、
+`refactoring-candidates-2.md` 項目68。IV は主リファレンス数値照合のみ 2SLS/GMM で
+ファイルが分かれ、api/validation は 2SLS と共通）:
     - 主リファレンス（linearmodels `IVGMM`）との厳密な数値一致: このファイル
-    - `method="2sls"`の同種テスト: `test_iv_fixtures.py`
-    - GMM固有の構造・API・エラーパス（`weight_type`×`cov_type`の独立性の構造
-      確認、収束/非収束等）: `test_iv.py`
+    - `method="2sls"`の同種テスト: `test_iv_reference.py`
+    - GMM固有の構造・API・オプション反映（`weight_type`×`cov_type`の独立性の構造
+      確認、収束等）: `test_iv_api.py`
+    - `ValidationError`/`ComputationError` パス（GMM 固有含む）: `test_iv_validation.py`
 
 Note:
     - `hc2`/`hc3`はlinearmodelsに対応する実装が無いため対象外
@@ -26,11 +29,11 @@ Note:
       2SLSのSargan検定に対応し、丁度識別のときは`None`。
     - `wu_hausman_statistic`相当のキーはフィクスチャに存在しない
       （`GmmEstimator`はWu-Hausman検定を実装しないため、`IvResults.
-      wu_hausman_statistic`は`method="gmm"`で常に`None`。`test_iv.py`の
+      wu_hausman_statistic`は`method="gmm"`で常に`None`。`test_iv_api.py`の
       `test_wu_hausman_is_none_for_gmm`で構造確認済み）。
     - `weak_instrument_f_statistics`は本実装が`method`によらず常にclassicalで
       計算する設計のため、フィクスチャの`weak_instrument_f_independent`と比較する
-      （`test_iv_fixtures.py`と同じ理由）。
+      （`test_iv_reference.py`と同じ理由）。
 
     フィクスチャ生成時と同じ入力データを、`tests/fixtures/benchmarks/data/`
     に固定済みのCSV（`benchmark/iv/freeze.py`参照）から読む。
@@ -65,8 +68,8 @@ FIXTURE_PATH = (
     / "iv_gmm.json"
 )
 
-RTOL = TOLERANCES["iv_gmm_fixtures"]["rtol"]
-ATOL = TOLERANCES["iv_gmm_fixtures"]["atol"]
+RTOL = TOLERANCES["iv_gmm_reference"]["rtol"]
+ATOL = TOLERANCES["iv_gmm_reference"]["atol"]
 
 # SCENARIOS/COV_TYPESはgenerate_iv_gmm_fixtures.pyのNUMERIC_SCENARIOS/COV_TYPESと
 # 常に一致させる必要があるため、そちらをimportして単一の定義元にする。
@@ -78,7 +81,7 @@ X_EXOG_BY_SCENARIO = {
 }
 
 # HACラグはIvOptions.hac_lags未指定（自動計算）で、engineとlinearmodelsが
-# 同じ式を使うため明示指定不要（`test_iv_fixtures.py`と同じ理由）。
+# 同じ式を使うため明示指定不要（`test_iv_reference.py`と同じ理由）。
 
 
 @pytest.fixture(scope="module")
@@ -148,6 +151,9 @@ def _check_result(
         ref["weak_instrument_f_independent"],
         f"{label}/weak_instrument_f_statistics",
     )
+
+
+# ── 凍結フィクスチャとの数値照合 ───────────────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
@@ -232,7 +238,7 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
 def test_multi_endog_matches_linearmodels(fixtures, cov_type):
     """複数内生変数（`x_endog=["endog1", "endog2"]`）の成功パス
     （`weak_instrument_f_statistics`・`overid_statistic`（Hansen J、過剰識別）が
-    複数内生変数を同時に扱うことをGMMでも確認する。`test_iv_fixtures.py`の
+    複数内生変数を同時に扱うことをGMMでも確認する。`test_iv_reference.py`の
     同名テストと同じ理由、`testing-completeness-reviewer`指摘、
     Issue #231フェーズ4）。
     """

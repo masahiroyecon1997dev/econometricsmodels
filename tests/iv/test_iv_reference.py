@@ -6,8 +6,12 @@ classical/HC0/HC1/HAC（+クラスター、baselineのみ）で、係数・標�
 検定統計量・適合度統計量・診断統計量を相対誤差1e-8で厳密比較する
 （`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。
 
-役割分担:
-    - 主リファレンス（linearmodels）との厳密な数値一致: このファイル
+役割分担（OLS/WLS/Logit/Probit の `test_<手法>_*.py` と同じ4分割、
+`refactoring-candidates-2.md` 項目68）:
+    - 成功パスの構造・API・オプション反映: `test_iv_api.py`
+    - `ValidationError`/`ComputationError` パス: `test_iv_validation.py`
+    - 主リファレンス（linearmodels）との厳密な数値一致: このファイル（2SLS）
+    - GMM の同種テスト: `test_iv_gmm_reference.py`
     - 独立実装（R `ivreg`）とのクロスチェック: `test_iv_crosscheck.py`
 
 Note:
@@ -54,7 +58,7 @@ from _assertions import assert_close, assert_dict_close
 from _assertions import rename_intercept as _rename
 from _helpers import DATA_DIR, load_wooldridge_dataset, with_cluster_groups
 from _tolerances import TOLERANCES
-from econometricsmodels import IV, ComputationError, IvOptions
+from econometricsmodels import IV, IvOptions
 
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.iv.fixtures.generate_iv_fixtures import CARD_X_EXOG
@@ -66,8 +70,8 @@ FIXTURE_PATH = (
     Path(__file__).resolve().parents[1] / "fixtures" / "benchmarks" / "iv.json"
 )
 
-RTOL = TOLERANCES["iv_fixtures"]["rtol"]
-ATOL = TOLERANCES["iv_fixtures"]["atol"]
+RTOL = TOLERANCES["iv_reference"]["rtol"]
+ATOL = TOLERANCES["iv_reference"]["atol"]
 
 # SCENARIOSはgenerate_iv_fixtures.pyのNUMERIC_SCENARIOSと常に一致させる必要が
 # あるため、そちらをimportして単一の定義元にする。
@@ -155,6 +159,9 @@ def _check_result(res, ref: dict, label: str) -> None:
     )
 
 
+# ── 凍結フィクスチャとの数値照合 ───────────────────────────────────
+
+
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_matches_linearmodels(fixtures, scenario, cov_type):
@@ -224,7 +231,7 @@ def test_cluster_g2_matches_linearmodels(fixtures):
     """クラスタ数境界（G=2ちょうど）の成功パス。`x_exog=[]`・`instruments`1本・
     行番号%2の疑似グループ（`engine/src/iv/CLAUDE.md`「修正済み」の再現条件と
     同じ、Issue #231フェーズ4でフィクスチャ化。以前は構造確認
-    （`test_iv.py::test_cluster_g2_boundary_succeeds_when_x_exog_is_empty`）
+    （`test_iv_api.py::test_cluster_g2_boundary_succeeds_when_x_exog_is_empty`）
     のみでリファレンス実装との数値照合が無かった）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_g2.csv")
@@ -312,38 +319,5 @@ def test_df1_matches_linearmodels(fixtures, cov_type):
     _check_result(res, fixtures["df1"][cov_type], f"df1/{cov_type}")
 
 
-def test_perfect_multicollinearity_raises_computation_error():
-    """完全な多重共線性は数値比較の対象外（`testing-policy.md`「テストの3系統」）。
-    想定エラー（`ComputationError`）が発生することのみを確認する。
-    """
-    df = pl.read_csv(DATA_DIR / "iv_perfect_multicollinearity.csv")
-    with pytest.raises(ComputationError):
-        IV(
-            df,
-            y="y",
-            x_exog=["x1", "x2", "x3"],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-        ).fit()
-
-
-@pytest.mark.parametrize("cov_type", COV_TYPES)
-def test_scale_variance_raises_computation_error(cov_type):
-    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
-    第一段階回帰の傾き係数の同時共分散部分行列がスケール比の2乗相当の
-    条件数を持ち倍精度浮動小数点の限界を超えて数値的に特異になり、
-    第一段階の`ComputationError`（`IvError::FirstStageFailed`）になる
-    （実測確認済み、OLSの同名テストと同じ原理）。perfect_multicollinearityと
-    同様、数値比較はせずエラーパスのみ確認する。
-    """
-    df = pl.read_csv(DATA_DIR / "iv_scale_variance.csv")
-    options = IvOptions(cov_type=cov_type)
-    with pytest.raises(ComputationError):
-        IV(
-            df,
-            y="y",
-            x_exog=["x1", "x2"],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-            options=options,
-        ).fit()
+# 完全な多重共線性・極端なスケール差（`ComputationError` パス）は
+# `test_iv_validation.py` へ移設（4分割、項目68）。

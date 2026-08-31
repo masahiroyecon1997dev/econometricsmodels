@@ -357,7 +357,7 @@ def test_hac_auto_lags_runs_and_returns_finite_std_errors(iv_dataset):
 
 def test_hac_time_col_reorders_rows_before_computing_lags():
     """`time_col`を指定すると、DataFrameの行順に関わらず時系列順で
-    ラグ付き自己共分散を計算すること（`test_ols.py`の同名テストと同じ発想を
+    ラグ付き自己共分散を計算すること（`test_ols_api.py`の同名テストと同じ発想を
     IVに適用、engine_pybindの`time_col`列抽出経路をAPI境界から検証する）。
     """
     ordered_df = pl.DataFrame(
@@ -690,7 +690,7 @@ def test_non_numeric_dtype_raises(bad_col):
 def test_singular_first_stage_design_matrix_raises_computation_error():
     """`x_exog`が完全な多重共線性を持つ場合、第一段階回帰
     （`x_endog[j] ~ x_exog + instruments`）の設計行列が特異になり
-    `ComputationError`（`IvError::FirstStageFailed`、`test_ols.py`の
+    `ComputationError`（`IvError::FirstStageFailed`、`test_ols_validation.py`の
     `test_singular_matrix_raises_computation_error`と同じ原理）。
     """
     df = pl.DataFrame(

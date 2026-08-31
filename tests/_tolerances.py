@@ -8,15 +8,19 @@
 `tests/_assertions.py`の`assert_close`/`assert_dict_close`
 （`tol = max(rtol * |ref|, atol)`）に統一済み）。
 
-キーはテストファイル名の接頭辞（例: `test_ols_fixtures.py` → `"ols_fixtures"`）。
+キーはテストファイル名の接頭辞（例: `test_ols_reference.py` → `"ols_reference"`、
+`test_iv_fixtures.py` → `"iv_fixtures"`）。
 """
 
 TOLERANCES: dict[str, dict[str, float]] = {
     # --- 主リファレンス（statsmodels/linearmodels）との数値比較 ---
     # 相対誤差1e-8が基本方針。ATOLは0近傍の値（p値のアンダーフロー等）向けの
     # 下限フロー。
-    "ols_fixtures": {"rtol": 1e-8, "atol": 1e-10},
-    "wls_fixtures": {"rtol": 1e-8, "atol": 1e-10},
+    # 関心事分割（refactoring-candidates-2.md 項目68）で test_<手法>_fixtures.py を
+    # test_<手法>_reference.py にリネームした系統からキー名も *_reference にする。
+    # linear（ols/wls）は移行済み、iv/logit/probit は各系統の Phase 2 で追随。
+    "ols_reference": {"rtol": 1e-8, "atol": 1e-10},
+    "wls_reference": {"rtol": 1e-8, "atol": 1e-10},
     "iv_fixtures": {"rtol": 1e-8, "atol": 1e-10},
     "iv_gmm_fixtures": {"rtol": 1e-8, "atol": 1e-10},
     # Logit/Probitは反復最適化（Newton/BFGS/L-BFGS）のため、ゼロ近傍の値

@@ -172,7 +172,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **対象**: [tests/linear/test_ols.py](../../../tests/linear/test_ols.py)全体
   （`_sm_design`/`_sm_fit`/`_sm_fit_cluster`によるその場でのstatsmodels比較）
   と対比した`tests/linear/test_wls.py`・`tests/nonlinear/test_logit.py`・`tests/nonlinear/test_probit.py`・
-  `tests/iv/test_iv.py`・`tests/test_tobit.py`（いずれも`statsmodels`のimportが
+  `tests/iv/test_iv.py`・`tests/nonlinear/test_tobit.py`（いずれも`statsmodels`のimportが
   0件、構造/エラーテスト専業）
 - **内容**: ユーザー指摘（2026-08-22）を受けて`grep`で確認。`test_ols.py`は
   モジュールdocstring通り「statsmodelsとの数値比較」と「API構造検証」の
@@ -188,7 +188,10 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `include_intercept=False`等のfixtures側カバレッジ不足を先に埋める必要がある
   （fixtures側に移してから削除、の順）。
 - **気づいた経緯**: 2026-08-22、`tests/linear/test_ols.py`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否・実施順序はユーザー判断待ち）
+- **状態**: linear は項目68 Phase 2 linear で解消（2026-08-30）。`test_ols.py` は
+  廃止し、簡易数値比較は `test_ols_reference.py` の「ライブ statsmodels との照合」
+  セクションへ移動（削除ではなく移設したためカバレッジ減はゼロ。fixtures 側との
+  重複整理は項目54 に残る）。nonlinear/iv は各系統の Phase 2 で。
 
 ### 53. `tests/linear/test_ols.py`の`ATOL_COEF`/`ATOL_SE`/`ATOL_STAT`が、`tests/_assertions.py`の許容誤差計算式・`tests/_tolerances.py`の値と揃っていない
 
@@ -256,10 +259,10 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   変わる（ディレクトリを切る、責務ごとに分ける等）予定のため、先に
   `fixtures`部分だけ改名すると分割時に再度リネームが発生し二度手間になる
   リスクがある。
-- **状態**: 未対応。項目68 の設計決定（2026-08-30）で `test_<手法>_fixtures.py`
-  → `test_<手法>_reference.py` を **Phase 2（関心事分割）と同時に実施**すると
-  確定済み。それに伴い `_tolerances.py` のキー（`"ols_fixtures"` 等）も
-  `"ols_reference"` 等へ追随する。
+- **状態**: linear（`test_ols_fixtures.py`/`test_wls_fixtures.py` →
+  `*_reference.py`、`_tolerances.py` キーも追随）は項目68 Phase 2 linear で
+  対応済み（2026-08-30）。nonlinear（logit/probit）・iv（iv/iv_gmm）は各系統の
+  Phase 2 で実施。
 
 ### 56. `test_ols.py`内で数値比較の書き方（生の`assert`+f-string／`pytest.approx`／`_assertions.assert_close`不使用）が混在
 
@@ -556,7 +559,10 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   - ディレクトリ粒度は**系統別**（`tests/linear/`・`tests/nonlinear/`・`tests/iv/`。
     `benchmark/` と同じ grain。手法別 `tests/ols/` 等は細かすぎるとして却下）。
     共有物（`conftest.py`・`_assertions.py`・`_helpers.py`・`_tolerances.py`）は
-    `tests/` 直下。`tests/test_tobit.py` は系統未確定のため当面ルート据え置き。
+    `tests/` 直下。`test_tobit.py` は Phase 1 時点ではルート据え置きにしたが、
+    実装（`python_package/econometricsmodels/nonlinear/tobit.py`）が nonlinear
+    配下にあるため `tests/nonlinear/test_tobit.py` へ移動した（candidates-3 項目27、
+    2026-08-31）。
   - 関心事分割の軸は**4分割**: `test_<手法>_validation.py`（`ValidationError`/
     `ComputationError` パス）／`test_<手法>_api.py`（API構造・オプション反映・
     `predict()`）／`test_<手法>_reference.py`（旧 `_fixtures.py`＝主リファレンス
@@ -576,10 +582,31 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
     へ一括置換（`refactoring-candidates-3.md` は並行タスク編集中のため除外、
     stale 参照4件が残る）。`CLAUDE.md` §3・`testing-policy.md`・`test-new`
     SKILL.md も更新。検証: `pytest tests` 957件パス（不変）、`ruff` パス。
-  - **Phase 2 未着手 — 関心事分割・`_reference.py` リネーム・見出し統一**: 系統ごと
-    （linear→nonlinear→iv）に1つずつ。各系統で `pytest tests/<系統>` を確認。
-- **状態**: Phase 1 実施済み。Phase 2（関心事分割＋項目55リネーム＋項目76見出し
-  統一）は未着手（着手タイミングはユーザー判断待ち）。
+  - **Phase 2 linear 完了（2026-08-30）— OLS/WLS を関心事で4分割**:
+    `test_ols.py` → `test_ols_api.py`（成功パス構造・API・オプション反映・
+    `predict()`。predict の statsmodels 照合も含む＝項目68 Q1）＋
+    `test_ols_validation.py`（`ValidationError`/`ComputationError` パス。
+    `_fixtures.py` にあった `*_raises_computation_error` もここへ集約）。
+    `test_ols_fixtures.py` → `test_ols_reference.py`（**項目55**）で、`test_ols.py`
+    のライブ statsmodels 照合（`test_params_match_statsmodels` 等）を
+    「ライブ statsmodels との照合」セクションとして吸収（項目52）。WLS も同型
+    （`test_wls.py` は statsmodels ライブ照合を持たないため `_reference.py` は
+    凍結フィクスチャ＋既存の `include_intercept=False` ライブ比較のみ）。
+    共通ヘルパー（`sm_fit`/`our_fit` 等・`ATOL_*`）は `tests/linear/_ols_helpers.py`
+    に集約（reference と api の双方が使うため。WLS は不要）。`_tolerances.py` の
+    キー `"ols_fixtures"`/`"wls_fixtures"` → `"ols_reference"`/`"wls_reference"`。
+    各ファイルにセクション見出し（`## 成功パス・結果型` / `## API構造` /
+    `## オプションの反映` / `## predict()` / `## ValidationError（…）` /
+    `## ComputationError` / `## 凍結フィクスチャとの数値照合` /
+    `## ライブ statsmodels との照合`）を統一（**項目76**）。`docs/spec/{ols,wls}-spec.md`
+    §テスト・`tests/_assertions.py`・関連コメントも更新。検証: `pytest tests`
+    **957件パス（不変、テスト消失ゼロ）**、`ruff check`/`format` パス。
+  - **Phase 2 nonlinear / iv 未着手**: linear と同じ型で。iv は 2sls/gmm ＋
+    `test_iv_gmm_fixtures.py` → `test_iv_gmm_reference.py` の分もある。各系統で
+    `pytest tests/<系統>` を確認。`_tolerances.py` の `iv_*`/`logit_*`/`probit_*`
+    キーはその系統の Phase 2 で `*_reference` に追随。
+- **状態**: Phase 1 ＋ Phase 2 linear（OLS/WLS）実施済み。Phase 2 nonlinear
+  （logit/probit）・iv は未着手（着手タイミングはユーザー判断待ち）。
 
 ### 69. `test_hac_time_col_reorders_rows_before_computing_lags`の`ordered_df`/`shuffled_df`が手書きで重複、OLS/WLS間でも同一データが独立に書かれている
 
@@ -781,8 +808,11 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   項目68のファイル分割設計に統合して一度に解決するのが手戻りが少ないと
   考える。
 - **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
-- **状態**: 未対応。項目68 の設計決定（2026-08-30）で「関心事分割（Phase 2）と
-  同時にセクション見出しを統一する」と確定済み。
+- **状態**: linear（OLS/WLS）は項目68 Phase 2 linear で見出しを統一済み
+  （`## 成功パス・結果型` / `## API構造` / `## オプションの反映` / `## predict()` /
+  `## ValidationError（…）` / `## ComputationError` / `## 凍結フィクスチャとの数値照合` /
+  `## ライブ statsmodels との照合`、2026-08-30）。Logit（`marginal_effects()` 等の
+  手法固有見出しを含む）・Probit は nonlinear の Phase 2 で同じ規約を適用する。
 
 ### 77. `test_method_option_converges_to_same_params`（`test_logit.py`）が`test_method_matches_statsmodels`（`test_logit_fixtures.py`）と観点が重複し、`rel=1e-4`が直書き
 

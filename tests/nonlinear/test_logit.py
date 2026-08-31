@@ -1,7 +1,7 @@
 """Logit python_packageラッパーの構造・API・エラーパスのスモークテスト。
 
 主リファレンス（statsmodels）との厳密な数値比較は別途実施する
-（`test_ols_fixtures.py`/`test_wls_fixtures.py`と同じ役割分担）。ここでは
+（`test_ols_reference.py`/`test_wls_reference.py`と同じ役割分担）。ここでは
 `fit()`の成功パス・`coef_table()`/`predict()`/`pred_table()`/
 `marginal_effects()`の構造・`ValidationError`/`ComputationError`パスのみを
 検証する。

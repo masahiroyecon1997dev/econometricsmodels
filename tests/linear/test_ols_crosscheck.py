@@ -1,6 +1,6 @@
 """OLSの独立実装（R: lm + sandwich/lmtest）とのクロスチェックテスト。
 
-主リファレンス（statsmodels）との厳密比較は`test_ols.py`で行う。ここでは
+主リファレンス（statsmodels）との厳密比較は`test_ols_reference.py`で行う。ここでは
 `tests/fixtures/benchmarks/ols_crosscheck.json`
 （`benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py`で生成）
 を用いて、statsmodelsとは独立した実装（R）との一致を確認する。
@@ -238,7 +238,7 @@ def test_cluster_g2_matches_r(crosscheck):
     説明変数1個（q=1）に絞っている。baseline既定の3個のままG=2にすると、
     ロバストWald検定の共分散部分行列（3x3）のランクがG=2以下となり必然的に
     特異になりComputationErrorになる（成功パスにならない。
-    `test_ols_fixtures.py::test_cluster_g2_with_multiple_slopes_raises_computation_error`
+    `test_ols_validation.py::test_cluster_g2_with_multiple_slopes_raises_computation_error`
     参照。実装中に判明した境界条件）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")

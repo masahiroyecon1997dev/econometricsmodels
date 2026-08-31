@@ -179,9 +179,12 @@ $$
 
 - 許容誤差: classical/HC0-3/cluster/係数はRとの実測で相対誤差1e-14程度のため`RTOL_STRICT=1e-8`。
   HACはRとの`prewhite`/`adjust`慣習差により実測0.4%程度のため`RTOL_HAC=1e-2`。
-- `test_ols.py`（構造・API・エラーパス）/ `test_ols_fixtures.py`（statsmodels主リファレンス、
-  `ols.json`）/ `test_ols_crosscheck.py`（R独立実装、`ols_crosscheck.json`）の3ファイルで
-  役割分担する。一般的なテスト方針は`.claude/rules/testing-policy.md`を参照。
+- `tests/linear/` に4ファイルで役割分担する（`refactoring-candidates-2.md`項目68）:
+  `test_ols_api.py`（成功パスの構造・API・オプション反映・`predict()`）/
+  `test_ols_validation.py`（`ValidationError`/`ComputationError`パス）/
+  `test_ols_reference.py`（statsmodels主リファレンスとの数値照合、`ols.json`＋ライブ照合）/
+  `test_ols_crosscheck.py`（R独立実装、`ols_crosscheck.json`）。一般的なテスト方針は
+  `.claude/rules/testing-policy.md`を参照。
 - pyfixestはOLSの正確性検証には使わない（HC2/HC3にHC1用の小標本補正を誤って適用する既知の
   実装バグがあるため）。性能比較専用（[`../performance/ols.md`](../performance/ols.md)）。
 - 実データセット（`test_ols_crosscheck.py`）: `wage1`（`lwage ~ educ + exper + tenure`）・

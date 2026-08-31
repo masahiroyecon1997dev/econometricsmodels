@@ -414,6 +414,18 @@
   （系統別ディレクトリ・4分割・`_reference.py` リネーム）と Phase 1（ディレクトリ移動、
   `pytest` 957件不変）の実施記録を追記済み。項目55（`_fixtures.py` 命名）・項目76
   （見出し不統一）も項目68 の Phase 2 に統合。
+  - **Phase 2 linear 実施（2026-08-30）**: OLS/WLS を関心事で4分割
+    （`test_<手法>_api.py` / `_validation.py` / `_reference.py`〔＝旧 `_fixtures.py`、
+    項目55〕 / `_crosscheck.py`）。`test_ols.py` のライブ statsmodels 数値照合は
+    `test_ols_reference.py` へ移設（削除ではないためカバレッジ減ゼロ、項目52）。
+    共通ヘルパーは `tests/linear/_ols_helpers.py` に新設。`_tolerances.py` の
+    `ols/wls_fixtures` キー → `*_reference`。セクション見出しを統一（項目76）。
+    `docs/spec/{ols,wls}-spec.md` §テスト・`tests/_assertions.py` 等の参照も更新。
+    `pytest tests` 957件パス（不変、消失ゼロ）、`ruff` パス。項目55/76/52 は linear
+    分について解消（nonlinear/iv は各系統の Phase 2）。項目53/54/56（ATOL 定数の
+    集約先・多重共線性テストの重複・数値比較の書き方の混在）は本分割では未解消で
+    項目として残す。`refactoring-candidates-3.md`（並行編集中）の `test_ols.py`/
+    `test_wls.py` 行アンカー参照は据え置き。
 - 上記以外（`refactoring-candidates.md`項目12・13・15〜35・37・39）は
   未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は

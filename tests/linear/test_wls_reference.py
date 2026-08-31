@@ -1,15 +1,17 @@
-"""WLSの主リファレンス（statsmodels）による数値比較テスト。
+"""WLSの主リファレンス（statsmodels）との数値照合テスト。
 
 `tests/fixtures/benchmarks/wls.json`（`benchmark/linear/fixtures/
 generate_wls_fixtures.py`で生成）を読み込み、6つの合成データシナリオ×
 classical/HC0-3/HAC + クラスター(baselineのみ) + 実データ（401ksubs）で、
 係数・標準誤差・検定統計量・適合度統計量を相対誤差1e-8で厳密比較する
-（`.claude/rules/testing-policy.md`「許容誤差」の基本方針。`test_ols_fixtures.py`
-と同じ方針）。
+（`.claude/rules/testing-policy.md`「許容誤差」の基本方針。`test_ols_reference.py`
+と同じ方針）。加えて `include_intercept=False` は凍結フィクスチャではなく
+ライブ statsmodels（`sm.WLS`）との直接比較で確認する。
 
 役割分担:
-    - 構造・API・エラーパスの検証、OLSとの不変条件回帰テスト: `test_wls.py`
-    - 主リファレンス（statsmodels）との厳密な数値一致: このファイル
+    - 構造・API・OLSとの不変条件回帰テスト: `test_wls_api.py`
+    - `ValidationError`/`ComputationError` パス: `test_wls_validation.py`
+    - 主リファレンス（statsmodels）との数値照合: このファイル
     - 独立実装（R）とのクロスチェック: `test_wls_crosscheck.py`
 
 Note:
@@ -51,8 +53,8 @@ FIXTURE_PATH = (
     / "wls.json"
 )
 
-RTOL = TOLERANCES["wls_fixtures"]["rtol"]
-ATOL = TOLERANCES["wls_fixtures"]["atol"]
+RTOL = TOLERANCES["wls_reference"]["rtol"]
+ATOL = TOLERANCES["wls_reference"]["atol"]
 
 # SCENARIOS/COV_TYPESはgenerate_wls_fixtures.pyのNUMERIC_SCENARIOS/COV_TYPESと
 # 常に一致させる必要があるため、そちらをimportして単一の定義元にする。
@@ -163,53 +165,6 @@ def test_cluster_g2_matches_statsmodels(fixtures):
     ref = fixtures["baseline"]["cluster_g2"]
     _assert_dict_close(res.params, ref["coef"], "cluster_g2/coef")
     _assert_dict_close(res.std_errors, ref["se"], "cluster_g2/se")
-
-
-def test_cluster_g2_with_multiple_slopes_raises_computation_error():
-    """G=2×説明変数3個（傾き係数q=3）は、ロバストWald検定の共分散部分行列
-    （3x3）のランクがクラスタ数G=2以下になり必然的に特異になるため、
-    fit()全体がComputationErrorになる（OLSと同じ挙動）。
-    """
-    from econometricsmodels import ComputationError
-
-    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    df = with_cluster_groups(df, 2)
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
-    with pytest.raises(ComputationError):
-        WLS(
-            df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
-        ).fit()
-
-
-def test_perfect_multicollinearity_raises_computation_error():
-    """完全な多重共線性は数値比較の対象外（`testing-policy.md`「テストの3系統」）。
-    想定エラー（`ComputationError`）が発生することのみを確認する
-    （OLS・Logitと同じ凍結CSVパターンに統一）。
-    """
-    from econometricsmodels import ComputationError
-
-    df = pl.read_csv(DATA_DIR / "synthetic_perfect_multicollinearity.csv")
-    with pytest.raises(ComputationError):
-        WLS(df, y="y", x=["x1", "x2", "x3"], weight="weight").fit()
-
-
-@pytest.mark.parametrize("cov_type", COV_TYPES)
-def test_scale_variance_raises_computation_error(cov_type):
-    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
-    傾き係数の同時共分散部分行列がスケール比の2乗（≈1e18）相当の条件数を持ち
-    倍精度浮動小数点の限界を超えて数値的に特異になる（OLSと同じ理由、
-    `test_ols_fixtures.py`参照。WLSでも実測確認済み）。
-    数値比較はせずエラーパスのみ確認する。
-    """
-    from econometricsmodels import ComputationError
-
-    df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
-    kwargs = {"hac_lags": HAC_LAG_IN_FIXTURE} if cov_type == "hac" else {}
-    options = OLSOptions(cov_type=cov_type, **kwargs)
-    with pytest.raises(ComputationError):
-        WLS(
-            df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
-        ).fit()
 
 
 @pytest.mark.parametrize("cov_type", WOOLDRIDGE_COV_TYPES)

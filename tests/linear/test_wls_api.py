@@ -1,13 +1,10 @@
-"""WLS python_packageラッパーの統合テスト。
+"""WLS の成功パスの構造・API・オプション反映、および **OLS との不変条件
+回帰テスト** の検証。
 
-構造・API・エラーパスの検証、および**OLSとの不変条件回帰テスト**
-を行う。主リファレンス（statsmodels）・独立実装（R）との
-数値比較は`test_wls_fixtures.py`・`test_wls_crosscheck.py`で行う。
-
-役割分担はOLSの`test_ols.py`と同じ3分割:
-    - 構造・API・エラーパスの検証、OLSとの不変条件回帰テスト: このファイル
-    - 主リファレンス（statsmodels）との厳密な数値一致: `test_wls_fixtures.py`
-    - 独立実装（R）とのクロスチェック: `test_wls_crosscheck.py`
+「共通化・パフォーマンス改善で実装の中身が変わっても結果が変わらない」ことを
+public API 経由で保証する。`ValidationError` パスは `test_wls_validation.py`、
+主リファレンス（statsmodels）との数値照合は `test_wls_reference.py`、
+R クロスチェックは `test_wls_crosscheck.py`。
 """
 
 from __future__ import annotations
@@ -18,15 +15,13 @@ from econometricsmodels import (
     OLS,
     WLS,
     OLSOptions,
-    ValidationError,
     WlsResults,
 )
 
 # ── OLSとの不変条件回帰テスト ───────────────────────────────────────
 #
-# 「共通化・パフォーマンス改善で実装の中身が変わっても結果が変わらない」ことを
-# 保証する目的のテスト。内部実装（sqrt(w)変換方式か将来別方式に変わるか等）が
-# 変わっても壊れないよう、public API経由でのみ比較する。
+# 内部実装（sqrt(w)変換方式か将来別方式に変わるか等）が変わっても壊れないよう、
+# public API経由でのみ比較する。
 
 
 @pytest.mark.parametrize(
@@ -95,193 +90,7 @@ def test_weight_one_matches_ols_coef_table(dataset):
         assert wls_row["std_err"] == ols_row["std_err"]
 
 
-# ── エラーハンドリング（重み固有） ──────────────────────────────────
-
-
-def test_missing_weight_column_raises(dataset):
-    with pytest.raises(ValidationError):
-        WLS(dataset, y="y", x=["x1", "x2"], weight="nonexistent").fit()
-
-
-def test_weight_equals_y_raises(dataset):
-    """`weight`に`y`と同じ列名を指定した場合`ValidationError`。"""
-    with pytest.raises(ValidationError):
-        WLS(dataset, y="y", x=["x1", "x2"], weight="y").fit()
-
-
-def test_weight_in_x_raises(dataset):
-    """`weight`が`x`にも含まれる場合`ValidationError`。"""
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    with pytest.raises(ValidationError):
-        WLS(df, y="y", x=["x1", "x2", "weight"], weight="weight").fit()
-
-
-@pytest.mark.parametrize("bad_weight", [0.0, -1.0])
-def test_non_positive_weight_raises(dataset, bad_weight):
-    """重みに0以下の値が含まれる場合`ValidationError`（analytic weightとして不正）。"""
-    n = dataset.height
-    weight = [1.0] * (n - 1) + [bad_weight]
-    df = dataset.with_columns(pl.Series("weight", weight))
-    with pytest.raises(ValidationError):
-        WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
-
-
-def test_nan_weight_raises(dataset):
-    """重みにNaNが含まれる場合`ValidationError`。"""
-    n = dataset.height
-    weight = [1.0] * (n - 1) + [float("nan")]
-    df = dataset.with_columns(pl.Series("weight", weight))
-    with pytest.raises(ValidationError):
-        WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
-
-
-def test_null_weight_raises(dataset):
-    """重みに欠損値（null）が含まれる場合`ValidationError`。"""
-    n = dataset.height
-    weight: list[float | None] = [1.0] * (n - 1) + [None]
-    df = dataset.with_columns(pl.Series("weight", weight))
-    with pytest.raises(ValidationError):
-        WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
-
-
-def test_y_in_x_raises(dataset):
-    """`y`と同じ列名が`x`にも含まれる場合`ValidationError`（OLSと同じ検証）。"""
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    with pytest.raises(ValidationError):
-        WLS(df, y="y", x=["y", "x1"], weight="weight").fit()
-
-
-def test_duplicate_x_column_raises(dataset):
-    """`x`に同じ列名が重複して含まれる場合`ValidationError`（OLSと同じ検証）。"""
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    with pytest.raises(ValidationError):
-        WLS(df, y="y", x=["x1", "x1"], weight="weight").fit()
-
-
-def test_const_collision_with_include_intercept_raises():
-    """`include_intercept=True`のとき`x`に`"const"`を含めると`ValidationError`。"""
-    df = pl.DataFrame(
-        {
-            "y": [1.0, 2.0, 3.0],
-            "const": [1.0, 2.0, 3.5],
-            "weight": [1.0, 1.0, 1.0],
-        }
-    )
-    with pytest.raises(ValidationError):
-        WLS(df, y="y", x=["const"], weight="weight").fit()
-
-
-def test_empty_x_raises(dataset):
-    """`x`が空リストの場合`ValidationError`（OLSと同じ検証）。"""
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    with pytest.raises(ValidationError):
-        WLS(df, y="y", x=[], weight="weight").fit()
-
-
-def test_insufficient_observations_raises(dataset):
-    """観測数nが説明変数の数k（定数項込み）以下の場合`ValidationError`。"""
-    df = dataset.with_columns(pl.lit(1.0).alias("weight")).head(2)
-    with pytest.raises(ValidationError):
-        WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
-
-
-def test_invalid_cov_type_raises(dataset):
-    """`cov_type`が未知の文字列の場合`ValidationError`
-    （OLSと同じ検証、共通化された経路）。
-    """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = OLSOptions(cov_type="invalid")
-    with pytest.raises(ValidationError):
-        WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
-
-
-def test_cluster_without_col_raises(dataset):
-    """`cov_type="cluster"`なのに`cluster_col`未指定の場合`ValidationError`
-    （OLSと同じ検証、共通化された経路）。
-    """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = OLSOptions(cov_type="cluster")
-    with pytest.raises(ValidationError):
-        WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
-
-
-def test_cluster_col_nonexistent_column_raises(dataset):
-    """`cluster_col`が実在しない列名を指すと`ValidationError`
-    （`test_ols.py`と同じ理由、Issue #231フェーズ4）。
-    """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = OLSOptions(cov_type="cluster", cluster_col="does_not_exist")
-    with pytest.raises(ValidationError):
-        WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
-
-
-def test_missing_column_raises(dataset):
-    """`y`/`x`に存在しない列名を指定した場合`ValidationError`
-    （`weight`列自体の検証は`test_missing_weight_column_raises`が対象、
-    OLSと同じ検証）。
-    """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    with pytest.raises(ValidationError):
-        WLS(df, y="y", x=["x1", "nonexistent"], weight="weight").fit()
-
-
-def test_null_values_raise():
-    """`y`/`x`に欠損値が含まれる場合`ValidationError`（OLSと同じ検証、
-    `weight`列自体の欠損値検証は`test_null_weight_raises`が対象）。
-    """
-    df = pl.DataFrame(
-        {"y": [1.0, None, 3.0], "x1": [1.0, 2.0, 3.0], "weight": [1.0] * 3}
-    )
-    with pytest.raises(ValidationError):
-        WLS(df, y="y", x=["x1"], weight="weight").fit()
-
-
-def test_non_numeric_dtype_raises():
-    """`y`が非数値型の場合`ValidationError`（OLSと同じ検証）。"""
-    df = pl.DataFrame(
-        {"y": ["a", "b", "c"], "x1": [1.0, 2.0, 3.0], "weight": [1.0] * 3}
-    )
-    with pytest.raises(ValidationError):
-        WLS(df, y="y", x=["x1"], weight="weight").fit()
-
-
-def test_insufficient_clusters_raises(dataset):
-    """クラスターが1種類しかない場合`ValidationError`（OLSと同じ検証、
-    共通化された経路）。
-    """
-    df = dataset.with_columns(
-        pl.lit(1.0).alias("weight"), pl.lit(0).alias("single_cluster")
-    )
-    options = OLSOptions(cov_type="cluster", cluster_col="single_cluster")
-    with pytest.raises(ValidationError):
-        WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
-
-
-@pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])
-def test_invalid_confidence_level_raises(dataset, confidence_level):
-    """`confidence_level`が(0, 1)の範囲外（境界値0.0を含む）の場合
-    `ValidationError`（OLSと同じ検証、共通化された経路）。
-    """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = OLSOptions(confidence_level=confidence_level)
-    with pytest.raises(ValidationError):
-        WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
-
-
-@pytest.mark.parametrize(
-    "hac_lags", [-1, 100]
-)  # 100 == dataset の n_obs（上限側境界）
-def test_invalid_hac_lags_raises(dataset, hac_lags):
-    """`hac_lags`が`[0, n)`の範囲外の場合`ValidationError`（OLSと同じ検証、
-    共通化された経路）。
-    """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = OLSOptions(cov_type="hac", hac_lags=hac_lags)
-    with pytest.raises(ValidationError):
-        WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
-
-
-# ── API構造 ─────────────────────────────────────────────────────────
+# ── 成功パス・結果型 ──────────────────────────────────────────────
 
 
 def test_default_options_use_classical(dataset):
@@ -314,6 +123,9 @@ def test_result_is_wls_results_type(dataset):
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
     assert isinstance(res, WlsResults)
+
+
+# ── API構造 ──────────────────────────────────────────────────────
 
 
 def test_coef_table_structure(dataset):
@@ -366,7 +178,7 @@ def test_nobs_and_dep_var_name(dataset):
     assert res.dep_var_name == "y"
 
 
-# ── オプションの反映確認（OLSと同じ観点、共通化された経路の検証） ──────
+# ── オプションの反映（OLSと同じ観点、共通化された経路の検証） ──────
 
 
 def test_cov_type_label(dataset):
@@ -400,7 +212,7 @@ def test_cov_type_label(dataset):
     ],
 )
 def test_cov_type_is_case_insensitive(dataset, cov_type, expected_label):
-    """`cov_type`が大文字小文字を区別しないこと（OLSの`test_ols.py::
+    """`cov_type`が大文字小文字を区別しないこと（OLSの`test_ols_api.py::
     test_cov_type_is_case_insensitive`と同じ観点、共通化された経路の検証）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))

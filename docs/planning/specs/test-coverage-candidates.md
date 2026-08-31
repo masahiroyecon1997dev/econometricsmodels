@@ -1506,11 +1506,11 @@
 
 ### 62. `censoring_fit_check()`の上側打ち切り（`"upper"`カテゴリ）が一度も検証されていない
 
-- **対象**: [tests/test_tobit.py:168-186](../../../tests/test_tobit.py#L168-L186)
+- **対象**: [tests/nonlinear/test_tobit.py:168-186](../../../tests/nonlinear/test_tobit.py#L168-L186)
   （`test_censoring_fit_check_structure`・`test_censoring_fit_check_
   omits_upper_when_upper_is_none`、いずれも既定〔左打ち切りのみ〕の
   `censored_dataset`しか使わない）と対比した
-  [tests/test_tobit.py:398-412](../../../tests/test_tobit.py#L398-L412)
+  [tests/nonlinear/test_tobit.py:398-412](../../../tests/nonlinear/test_tobit.py#L398-L412)
   （`test_supports_right_censoring_only`、`upper=5.0`のデータはあるが
   `censoring_fit_check()`を呼んでいない）
 - **内容**: ユーザー指摘（2026-08-31、「`test_censoring_fit_check_
@@ -1526,13 +1526,13 @@
   ことを確認するテストを追加すれば埋められる、実施しやすい部類。
   理想的には両側打ち切り（`lower`/`upper`両方指定）のケースで
   3カテゴリ全てが返ることを確認するテストもあるとさらに良い。
-- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
+- **気づいた経緯**: 2026-08-31、`tests/nonlinear/test_tobit.py`解説時のユーザー
   指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 63. 項目32・39・40がTobitにも同様に該当する（一括注記）
 
-- **対象**: [tests/test_tobit.py](../../../tests/test_tobit.py)全体
+- **対象**: [tests/nonlinear/test_tobit.py](../../../tests/nonlinear/test_tobit.py)全体
 - **内容**: ユーザー指摘（2026-08-31、「yの列が存在しない場合の検証が
   されていない」・「`test_null_values_raise`でyは検証されているが
   xの場合がない」・「`test_non_numeric_dtype_raises`もxの場合がない」・
@@ -1556,7 +1556,7 @@
 - **Claudeの所感**: 対応する場合は、Logit/Probit/Tobit3手法をまとめて
   一度に対応するのが効率的（同じ`ValidationError`パス・同じ検証観点
   のため）。
-- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
+- **気づいた経緯**: 2026-08-31、`tests/nonlinear/test_tobit.py`解説時のユーザー
   指摘。
 - **状態**: 未対応（項目32・39・40と統合して対応するのが効率的、
   着手要否はユーザー判断待ち）

@@ -1,6 +1,6 @@
 """WLSの独立実装（R: lm(weights=) + sandwich/lmtest）とのクロスチェックテスト。
 
-主リファレンス（statsmodels）との厳密比較は`test_wls_fixtures.py`で行う。ここでは
+主リファレンス（statsmodels）との厳密比較は`test_wls_reference.py`で行う。ここでは
 `tests/fixtures/benchmarks/wls_crosscheck.json`
 （`benchmark/linear/fixtures/generate_wls_crosscheck_fixtures.py`で生成）
 を用いて、statsmodelsとは独立した実装（R）との一致を確認する。役割分担・
@@ -182,7 +182,7 @@ def test_cluster_g2_matches_r(crosscheck):
     説明変数1個（q=1）に絞っている。baseline既定の3個のままG=2にすると、
     ロバストWald検定の共分散部分行列（3x3）のランクがG=2以下となり必然的に
     特異になりComputationErrorになる（成功パスにならない。
-    `test_wls_fixtures.py::test_cluster_g2_with_multiple_slopes_raises_computation_error`
+    `test_wls_validation.py::test_cluster_g2_with_multiple_slopes_raises_computation_error`
     参照）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
@@ -217,7 +217,7 @@ def test_hac_matches_r(crosscheck):
 @pytest.mark.parametrize("cov_type", WOOLDRIDGE_COV_TYPES)
 def test_401ksubs_matches_r(crosscheck, cov_type):
     """実データ（401ksubs、fsize==1）でのWLSクロスチェック。回帰式・重み定義は
-    `test_wls_fixtures.py::test_401ksubs_matches_statsmodels`と揃える。
+    `test_wls_reference.py::test_401ksubs_matches_statsmodels`と揃える。
     HACは時系列順の無いクロスセクションデータのため対象外
     （`generate_wls_crosscheck_fixtures.py`のWOOLDRIDGE_COV_TYPESと同じ方針）。
     """
@@ -243,7 +243,7 @@ def test_401ksubs_matches_r(crosscheck, cov_type):
 def test_401ksubs_cluster_matches_r(crosscheck):
     """実データ（401ksubs、fsize==1）でのクラスターロバストSE。地域等の実
     カテゴリ列が無いため、ageの分位ビン（8分位、`_add_age_bin`）を疑似的な
-    クラスター列として使う（`test_wls_fixtures.py`
+    クラスター列として使う（`test_wls_reference.py`
     ::test_401ksubs_cluster_matches_statsmodelsと同じグループ構成）。
     """
     df = load_wooldridge_dataset("401ksubs").filter(pl.col("fsize") == 1)

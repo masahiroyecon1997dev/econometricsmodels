@@ -87,7 +87,7 @@ def build_fixtures() -> dict:
             )
             # G=2×説明変数3個（既定のbaseline）はロバストWald検定の共分散
             # 部分行列（3x3）のランクがG=2以下になり必然的に特異になるため
-            # ComputationError（成功パスではない、test_ols_fixtures.py
+            # ComputationError（成功パスではない、test_ols_reference.py
             # 側でエラーパスとして確認）。ここでの「G=2境界の成功パス」は
             # 説明変数1個（q=1、Wald検定の部分行列が1x1）に絞って確認する。
             n_g2 = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv").height

@@ -36,7 +36,7 @@ Note:
       フィクスチャ生成時に確認済み、`iv.json`の`_meta.note`参照）。
     - 第一段階回帰の結果（`first_stage()`）自体はここでは比較しない
       （`first_stage()`は通常のOLS回帰の結果をそのまま返すだけで、
-      `test_ols_fixtures.py`が既にOLSの数値一致を検証済みのため）。
+      `test_ols_reference.py`が既にOLSの数値一致を検証済みのため）。
 
     フィクスチャ生成時と同じ入力データを、`tests/fixtures/benchmarks/data/`
     に固定済みのCSV（`benchmark/iv/freeze.py`参照）から読む。

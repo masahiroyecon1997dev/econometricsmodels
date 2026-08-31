@@ -288,7 +288,7 @@ nice-to-have 2件も対応済み: `build_tobit_input_cov_type_is_case_insensitiv
 - `log_likelihood_null`/`lr_statistic`/`lr_p_value`/`pseudo_r_squared`は提供しない。`wald_statistic`/`wald_p_value`を提供。
 - `pred_table()`の代わりに`censoring_fit_check()`（`category`/`observed_rate`/`model_implied_rate`をキーに持つ行指向`list[dict]`、既存の`pred_table()`の行指向`list[dict]`慣習を踏襲）。
 - `predict()`/`marginal_effects()`に`target`引数を追加。`predict()`の返り値キーは対象非依存の`"predicted"`（3つの`target`で意味が変わるため、Logitの固定名`"probability"`のような単一の意味を持つ名前にできない）。
-- `tests/conftest.py`に`censored_dataset`フィクスチャ（共有`dataset`の`y`を`0.0`で左打ち切り、打ち切り率21%）を追加。`tests/test_tobit.py`（70→71件、`test_logit.py`の構造・API・エラーパススモークテストを移植し、打ち切り境界固有のエラー（`InvalidCensoringBounds`/`YOutOfCensoringBounds`/`NoUncensoredObservations`）・`"sigma"`列衝突・`target`引数のテストを追加）。
+- `tests/conftest.py`に`censored_dataset`フィクスチャ（共有`dataset`の`y`を`0.0`で左打ち切り、打ち切り率21%）を追加。`tests/nonlinear/test_tobit.py`（70→71件、`test_logit.py`の構造・API・エラーパススモークテストを移植し、打ち切り境界固有のエラー（`InvalidCensoringBounds`/`YOutOfCensoringBounds`/`NoUncensoredObservations`）・`"sigma"`列衝突・`target`引数のテストを追加）。
 
 **python-reviewerレビュー結果**: must-fixなし。should-fix 1件: `test_probit.py`にある`SeparationSuspected`（准完全分離）のAPI境界テストがTobit版に無く、`nonlinear-api-design.md`10章「Tobitの分離相当の病理ケース」が未確定のままだった点を指摘された。実測調査の結果、**2種類の異なる退化パターンが存在する**ことが判明した:
 - 非打ち切り観測ゼロによる`σ→0`退化（Issue #223で発見・`MleError::NoUncensoredObservations`で対応済み。標準化パラメータノルムは大きくならないため既存の`SeparationSuspected`機構では捕捉できない）

@@ -120,8 +120,9 @@ $$
 - 合成データセット（`benchmark/linear/datasets.py`の7シナリオ）はOLS実装時から
   `weight`列（heteroskedasticシナリオは`1/sigma_i^2`、他は`uniform(0.5, 1.5)`）を含むため、
   WLS用の追加実装は不要だった。
-- `test_wls_fixtures.py`（statsmodels主リファレンス）/ `test_wls_crosscheck.py`（Rクロスチェック）
-  の役割分担はOLSと同じ。
+- `tests/linear/` の4ファイル分担（`test_wls_api.py`／`test_wls_validation.py`／
+  `test_wls_reference.py`〔statsmodels主リファレンス〕／`test_wls_crosscheck.py`〔Rクロスチェック〕）
+  は OLS と同じ（`refactoring-candidates-2.md`項目68）。
 
 ## 4. 未実装・未対応
 

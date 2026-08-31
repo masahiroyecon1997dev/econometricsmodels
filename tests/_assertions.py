@@ -1,7 +1,7 @@
 """数値比較アサーションの共通ヘルパー。
 
 主リファレンス（statsmodels/linearmodels）との数値比較テスト6ファイル
-（`test_ols_fixtures.py`/`test_wls_fixtures.py`/`test_logit_fixtures.py`/
+（`test_ols_reference.py`/`test_wls_reference.py`/`test_logit_fixtures.py`/
 `test_probit_fixtures.py`/`test_iv_fixtures.py`/`test_iv_gmm_fixtures.py`）で
 バイト単位同一だった`_assert_close`/`_assert_dict_close`/`_rename`と、
 Logit/Probitの`_check_margeff`（fixtures版）を集約する。

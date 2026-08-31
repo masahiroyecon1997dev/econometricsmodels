@@ -227,7 +227,7 @@ def test_include_intercept_false_matches_statsmodels(cov_type):
     `include_intercept=False`時は`lr_statistic`が負値になりうる、という特殊挙動が
     `engine`側の単体テストのみで数値照合が無かった。`testing-completeness-reviewer`
     指摘、Issue #231フェーズ4）。frozen fixtureではなくstatsmodelsとの直接比較で
-    確認する（`test_wls_fixtures.py::test_include_intercept_false_matches_
+    確認する（`test_wls_reference.py::test_include_intercept_false_matches_
     statsmodels`と同じ方針）。
 
     `statsmodels_ref.run()`はformula API（`patsy`経由でpandasを

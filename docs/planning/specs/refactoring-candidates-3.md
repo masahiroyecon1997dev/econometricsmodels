@@ -861,3 +861,49 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **状態**: 要対応（将来のGMM拡張〔C統計量・FEIV等、Issue #247・#276他〕
   実装時に、Rクロスチェックの追加を合わせて検討する。現時点では
   記録のみ・実装着手はしない）
+
+### 27. `tests/test_tobit.py`が`tests/nonlinear/`ではなく`tests/`直下に残っている——CLAUDE.mdの「系統ディレクトリ未確定」という注記が、サブディレクトリ確定後も更新されていない
+
+- **対象**: [tests/test_tobit.py](../../../tests/test_tobit.py)（配置場所）、
+  [CLAUDE.md](../../../CLAUDE.md)3章のリポジトリ構成表（「`test_tobit.py`
+  # 系統ディレクトリ未確定のため当面ルート据え置き」という注記）
+- **内容**: ユーザー指摘（2026-08-31、解説前指摘として「ディレクトリ
+  `tests/nonlinear`に入れるべきではないか」）を受けて確認した。CLAUDE.md
+  の注記自体は意図的な暫定措置として記録されていたが、これは
+  `tests/linear/`・`tests/nonlinear/`・`tests/iv/`という系統別
+  サブディレクトリ自体がまだ無かった時点（あるいはその過渡期）に書かれた
+  可能性が高い。既に以下の2点が確定している。
+  1. `tests/`側のディレクトリ分割自体は完了済み（コミット`7e93052`、
+     `refactoring-candidates-2.md`項目68関連）。
+  2. 実装側（`python_package/econometricsmodels/nonlinear/tobit.py`）は
+     既に`nonlinear`配下に置かれており、Tobitを`nonlinear`系統として
+     扱うこと自体は実装レベルで既に確定している。
+  この2点を踏まえると、CLAUDE.mdの「系統ディレクトリ未確定」という
+  理由づけは現状と整合しておらず、`tests/test_tobit.py`を
+  `tests/nonlinear/test_tobit.py`へ移動する障害は無いように見える。
+- **Claudeの所感**: ユーザー指摘に同意する。CLAUDE.mdの注記を更新した
+  上で、`test_tobit.py`を`tests/nonlinear/`へ移動するのが筋が良いと
+  考える。ただし`tests/`のディレクトリ分割自体を進めている並行タスク
+  （`refactoring-candidates-2.md`項目68関連）が存在するため、二重作業・
+  競合を避けるためこのタスクとの調整（着手タイミング・担当）が必要。
+- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説前のユーザー指摘。
+- **状態**: 未対応（着手要否・タイミングはユーザー判断待ち、`tests/`
+  ディレクトリ分割の並行タスクとの調整が必要）
+
+### 28. `tests/test_tobit.py`のモジュールdocstringに「Issue #227」という経緯コメントが残っている
+
+- **対象**: [tests/test_tobit.py:4](../../../tests/test_tobit.py#L4)
+  （「主リファレンス...との厳密な数値比較は別途実施する
+  （`test_logit_fixtures.py`/`test_logit_crosscheck.py`と同じ役割分担、
+  Issue #227）」）
+- **内容**: `refactoring-candidates-2.md`項目51・79・本ファイル項目25
+  （Issue #231フェーズ4のコメント残置、OLS/Logit/IV関連ファイルで
+  確認済み）と同一パターンが`test_tobit.py`にも存在する（Issue番号は
+  #231ではなく#227だが、性質は同じ「経緯コメントの残置」）。
+- **Claudeの所感**: 項目25・51・79とまとめて一括対応するのが効率的。
+  番号のみ削除し、役割分担の説明自体（「`test_logit_fixtures.py`/
+  `test_logit_crosscheck.py`と同じ役割分担」）は有用な情報のため残す
+  という、既存の方針をそのまま適用できる。
+- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時に確認。
+- **状態**: 未対応（項目25・51・79とまとめて対応するのが効率的、
+  着手タイミングはユーザー判断待ち）

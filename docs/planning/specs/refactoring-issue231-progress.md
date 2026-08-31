@@ -705,10 +705,11 @@ Claude Codeのメモリ機能に頼らず、必ずリポジトリ内のファイ
   `test_logit.py`・`test_logit_fixtures.py`・`test_logit_crosscheck.py`・
   `test_probit.py`・`test_probit_fixtures.py`・`test_probit_crosscheck.py`・
   `test_iv.py`・`test_iv_fixtures.py`・`test_iv_gmm_fixtures.py`・
-  `test_iv_crosscheck.py`
+  `test_iv_crosscheck.py`・`test_tobit.py`
   （全区切り解説済み、WLS関連ファイルは一通り完了、Logit関連ファイルも
-  一通り完了、Probit関連ファイルもこれで一通り完了。**IV系統4ファイル
-  全て完了**）
+  一通り完了、Probit関連ファイルもこれで一通り完了。IV系統4ファイル
+  全て完了。**Tobit（`test_tobit.py`のみ、系統ディレクトリ未確定）も
+  完了**）
 
 **注意（2026-08-30〜、`tests/`のディレクトリ分割）**: 別セッションが
 `tests/`を系統別サブディレクトリ（`tests/linear/`・`tests/nonlinear/`・
@@ -731,8 +732,18 @@ CI側のPYTHONPATH非対称〔`refactoring-candidates-2.md`項目50〕は実質�
 都度確認すること。項目50の状態欄自体は、リファクタリング側のセッションが
 後ほど更新する前提でこちらからは触っていない。
 
-**次に解説予定**: 未定（IV系統4ファイル全て完了。ユーザー確立の順では
-次はTobit系統だが、着手前にユーザーに確認すること）。
+**次に解説予定**: 未定（IV系統・Tobit（`test_tobit.py`）ともに完了。
+既存の全推定手法の`tests/`ウォークスルーが一巡した状態。次の対象は
+ユーザーに確認すること）。
+
+`test_tobit.py`解説時、解説前指摘として「`tests/nonlinear/`に入れる
+べきではないか」を受け、CLAUDE.md 3章の「系統ディレクトリ未確定のため
+当面ルート据え置き」という注記が、`tests/`のサブディレクトリ分割完了
+（コミット`7e93052`）・実装側（`python_package/econometricsmodels/
+nonlinear/tobit.py`）が既に`nonlinear`配下にある、という2点を踏まえると
+現状と整合していないことを確認し、`refactoring-candidates-3.md`項目27に
+記録した。また項目28でモジュールdocstringの「Issue #227」経緯コメント
+残置（項目25・51・79と同一パターン）も記録した。
 
 `test_iv_crosscheck.py`解説後のユーザーとの質疑で4件の指摘を受け、
 `refactoring-candidates-3.md`項目25〜26・`test-coverage-candidates.md`
@@ -945,13 +956,13 @@ Probit固有の差分の有無を都度`diff`で確認すること。項目35（
 - `refactoring-candidates-2.md`: 項目44〜96（凍結、2026-08-30時点で別の並行タスクが
   リファクタリング作業に着手したため、このウォークスルーからの新規追記先ではなく
   なった）。
-- `refactoring-candidates-3.md`: 項目1〜26（独立採番、`test_iv.py`解説時に
+- `refactoring-candidates-3.md`: 項目1〜28（独立採番、`test_iv.py`解説時に
   項目1〜10、`test_iv_fixtures.py`解説時に項目11〜17、`test_iv_gmm_
   fixtures.py`解説時に項目18〜24、`test_iv_crosscheck.py`解説時に
-  項目25〜26を追加。項目7の`const`名衝突バグ疑い・項目9のドキュメント
-  不整合・項目12のIV HC2/HC3参照実装発見・項目21のHansen J不一致原因
-  判明が特に重要）。以後このウォークスルーからの新規
-  追記はこのファイルに行う。
+  項目25〜26、`test_tobit.py`解説時に項目27〜28を追加。項目7の`const`
+  名衝突バグ疑い・項目9のドキュメント不整合・項目12のIV HC2/HC3参照
+  実装発見・項目21のHansen J不一致原因判明が特に重要）。以後この
+  ウォークスルーからの新規追記はこのファイルに行う。
 - `test-coverage-candidates.md`: 項目1〜61（番号は継続、`test_iv.py`解説時に
   項目46〜53、`test_iv_fixtures.py`解説時に項目54〜58、`test_iv_gmm_
   fixtures.py`解説時に項目59〜60、`test_iv_crosscheck.py`解説時に

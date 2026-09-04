@@ -124,8 +124,14 @@ def _check_result(
     # コメント「Hansen Jのgmm_iterations=1...のSは...」参照）。しかしlinearmodelsの
     # `IVGMM.fit(iter_limit=1)`のj_statはこの不変性を持たず、iter_limit=2/3の値
     # （2SLSのSarganと一致）とは異なる値を返す（実測: 0.30086708530935663 vs
-    # 0.32832429087644643）。linearmodels側のiter_limit=1固有の内部計算式の違いが
-    # 原因と考えられるが未特定のため（Issue #231フェーズ4、ユーザー確認済み）、
+    # 0.32832429087644643）。原因判明済み（`linearmodels`ソース実機調査、
+    # `refactoring-candidates-3.md`旧項目21）: `IVGMM.fit`は`iters < iter_limit`
+    # ループの中で初めて残差から重み行列`wmat`を再構築するため、`iter_limit=1`
+    # では一度もループが実行されず`wmat`が`(Z'Z/n)⁻¹`という生の初期値のまま
+    # J統計量に使われる（σ̂²スケーリング無し）。一方、本実装は
+    # `weight_type=Unadjusted`のHansen Jに常にσ̂²スケーリング込みの重みを
+    # 使う設計（ユーザー確認済み）のため、`iter_limit=1`固有の規約の違いに
+    # よる原理的に一致しえない差異と判明した（バグではない）。
     # gmm_iterations=1のときはoverid_statistic/overid_p_valueの比較のみ除外する
     # （係数・SE等の他の統計量は引き続き比較する）。
     if check_overid:

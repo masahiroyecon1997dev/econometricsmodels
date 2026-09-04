@@ -56,6 +56,7 @@ from benchmark.linear.fixtures.generate_ols_fixtures import (
 from benchmark.linear.fixtures.generate_ols_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
+from benchmark.linear.references.statsmodels_ref import HAC_MAXLAGS
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[1]
@@ -70,10 +71,10 @@ ATOL = TOLERANCES["ols_reference"]["atol"]
 # SCENARIOS/COV_TYPESはgenerate_ols_fixtures.pyのNUMERIC_SCENARIOS/COV_TYPESと
 # 常に一致させる必要があるため、そちらをimportして単一の定義元にする。
 
-# generate_ols_fixtures.py（benchmark/linear/references/statsmodels_ref.py）はHACのラグを
-# maxlags=1に固定している。同じラグを明示的に指定し、自動ラグ選択式の
-# 違いを比較対象から除外する。
-HAC_LAG_IN_FIXTURE = 1
+# フィクスチャ生成側（benchmark/linear/references/statsmodels_ref.py）と同じ
+# HAC_MAXLAGSを明示的に指定し、自動ラグ選択式の違いを比較対象から除外する
+# （直書きの複製だと同期漏れリスクがあるため、単一の定義元をimportする。
+# `refactoring-candidates-2.md`項目58）。
 
 
 @pytest.fixture(scope="module")
@@ -118,7 +119,7 @@ def _check_result(res, ref: dict, label: str) -> None:
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_matches_statsmodels(fixtures, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
-    kwargs = {"hac_lags": HAC_LAG_IN_FIXTURE} if cov_type == "hac" else {}
+    kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
     options = OLSOptions(cov_type=cov_type, **kwargs)
     res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 

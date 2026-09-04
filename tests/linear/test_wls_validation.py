@@ -21,11 +21,7 @@ from econometricsmodels import (
 )
 
 from benchmark.linear.fixtures.generate_wls_fixtures import COV_TYPES
-
-# `benchmark/linear/references/statsmodels_ref.py` は HAC のラグを maxlags=1 に
-# 固定している（`test_wls_reference.py` の HAC_LAG_IN_FIXTURE と同値）。
-HAC_LAG_IN_FIXTURE = 1
-
+from benchmark.linear.references.statsmodels_ref import HAC_MAXLAGS
 
 # ── ValidationError（重み列固有） ─────────────────────────────────
 
@@ -255,7 +251,7 @@ def test_scale_variance_raises_computation_error(cov_type):
     数値比較はせずエラーパスのみ確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
-    kwargs = {"hac_lags": HAC_LAG_IN_FIXTURE} if cov_type == "hac" else {}
+    kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
     options = OLSOptions(cov_type=cov_type, **kwargs)
     with pytest.raises(ComputationError):
         WLS(

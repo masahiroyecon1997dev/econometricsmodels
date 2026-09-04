@@ -89,7 +89,7 @@ X_EXOG_BY_SCENARIO = {
 # HACラグ: `IvOptions.hac_lags`未指定（自動計算）で、`engine::iv::two_sls::
 # resolve_hac_lags`と`benchmark/iv/references/linearmodels_ref.py`の`_hac_auto_lag`が
 # 同じ式（`floor(4*(n/100)**(2/9))`）を使うため、明示指定しなくても一致する
-# （OLSの`HAC_LAG_IN_FIXTURE`のような固定値の受け渡しが不要）。
+# （OLSの`HAC_MAXLAGS`のような固定値の受け渡しが不要）。
 
 
 @pytest.fixture(scope="module")

@@ -31,27 +31,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ## 一覧
 
-### 1. `x2 = 2 * x1`が計算でなく直書き（IV版）
-
-- **対象**: [tests/test_iv.py:700-707](../../../tests/test_iv.py#L700-L707)
-  （`test_singular_first_stage_design_matrix_raises_computation_error`内の
-  `x2`リスト）
-- **内容**: 完全な多重共線性を作るための`x2 = [2.0, 4.0, 6.0, 8.0, 10.0, 12.0]`
-  が、`x1 = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]`の2倍を手で書き下したもの
-  （コメント`# x2 = 2 * x1（完全な多重共線性）`で意図は明記されている）。
-  `refactoring-candidates-2.md`項目82（`test_logit.py`の同型ケース）と
-  全く同じ論点がIV側にも存在する。
-- **Claudeの所感**: 項目82と同じく、`x2 = [v * 2 for v in x1]`等の計算式に
-  すれば「2倍」という関係が値の一致で保証される。実害は小さいが直す場合は
-  項目82とまとめて一括対応するのが効率的。
-- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時。
-- **状態**: 解消済み（2026-08-31、`refactor` スキル、`refactoring-candidates-2.md`
-  項目54対応）。対象の `test_singular_first_stage_design_matrix_raises_computation_
-  error` 自体を削除し、固定 CSV を使う
-  `test_perfect_multicollinearity_raises_computation_error` へ一本化したため、
-  `x2 = 2*x1` の手書き直書きも消えた。Logit 側の同型（`refactoring-candidates-2.md`
-  項目82）は Logit/Probit のテストを今回維持したため未解消のまま。
-
 ### 2. IVの変数集合重複チェック（`y`/`x_exog`/`x_endog`/`instruments`）が個別関数の羅列で組み合わせ数が多い
 
 - **対象**: [tests/test_iv.py:522-618](../../../tests/test_iv.py#L522-L618)
@@ -515,73 +494,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **状態**: 未対応（優先度低。項目63の対応と合わせて`_rename`の
   一括除去を検討）
 
-### 16. `IvResults`に`AIC`/`BIC`/`log_likelihood`が無いのは意図的な設計判断であり、実装の欠落ではない
-
-- **対象**: [docs/planning/specs/iv-api-design.md:72-73](../../../docs/planning/specs/iv-api-design.md#L72-L73)
-  （「`log_likelihood`/`aic`/`bic`は**除外する**。2SLS/GMMは尤度ベースの
-  推定法ではなく...Stataの`ivregress`もデフォルトでは出力しない」）
-- **内容**: ユーザー指摘（2026-08-30、「`_check_result`にAICとBICの
-  チェックがないがIVにフィールドってない？」）を受けて確認したところ、
-  `IvResults`（`python_package/econometricsmodels/iv/iv.py`）には
-  そもそも`aic`/`bic`/`log_likelihood`フィールドが存在せず、これは
-  `iv-api-design.md`で明記された**意図的な設計判断**（2SLS/GMMは
-  尤度ベースの推定法ではないため、正規性を仮定した疑似尤度を計算する
-  ことの統計的な正当性が薄い、Stataの`ivregress`も既定で出力しない）
-  だった。
-- **Claudeの所感**: コード上の欠落ではなくドキュメント化された設計方針
-  のため、対応不要と判断する。
-- **気づいた経緯**: 2026-08-30、`tests/test_iv_fixtures.py`解説時の
-  ユーザー指摘、`iv-api-design.md`で確認。
-- **状態**: 対応不要と判断（意図的な設計、`iv-api-design.md`72-73行目に
-  明記済み）
-
-### 17.【自己訂正】`test_perfect_multicollinearity_raises_computation_error`が`test_iv.py`と重複しているように見える件——前回セッションでの回答（「OLSも同じ非対称」）が誤りだった
-
-- **対象**: [tests/test_iv_fixtures.py:315-327](../../../tests/test_iv_fixtures.py#L315-L327)
-  （`test_perfect_multicollinearity_raises_computation_error`、固定済み
-  CSVを使用）と[tests/test_iv.py:690-719](../../../tests/test_iv.py#L690-L719)
-  （`test_singular_first_stage_design_matrix_raises_computation_error`、
-  手書きDataFrame）、[tests/test_ols_fixtures.py:176-194](../../../tests/test_ols_fixtures.py#L176-L194)
-  （`test_perfect_multicollinearity_raises_computation_error`、固定済み
-  CSV`synthetic_perfect_multicollinearity.csv`を使用）
-- **内容**: ユーザー指摘（2026-08-30、「`test_perfect_multicollinearity_
-  raises_computation_error`は`tests/iv/test_iv.py`にも似たテストが
-  あったのでは？冗長な検証になっていない？」）を受けて再調査した結果、
-  **前回セッション（`tests/test_iv.py`解説時）に私が回答した内容が
-  誤りだった**ことが判明した。前回「`test_singular_first_stage_
-  design_matrix_raises_computation_error`が`test_iv_fixtures.py`に
-  重複していないか」という質問に対し、`grep -n "singular|Singular"`
-  という検索語だけで`test_ols_fixtures.py`を確認し「ヒット無し＝OLSも
-  `test_ols.py`側のみで非対称ではない」と回答したが、実際には
-  `test_ols_fixtures.py`に`test_perfect_multicollinearity_raises_
-  computation_error`という**別名の**同種テストが存在していた
-  （検索語に"multicollinearity"を含めていなかったための見落とし）。
-  正しくは、**OLSもIVと同じく「手書きの小さいDataFrameでAPIレベルの
-  エラーパスを確認するテスト（`test_<method>.py`）」と「固定済みの
-  ベンチマーク用CSVでも同じエラーパスが起きることを確認するテスト
-  （`test_<method>_fixtures.py`）」の2段構えを一貫して持っている**。
-- **Claudeの所感**: これは冗長な重複ではなく意図的な二段階チェックだと
-  考える。前者は「APIとして正しく例外を投げるか」という最小構成での
-  構造確認、後者は「他の数値照合テストが使っている実際のベンチマーク
-  データセット自体も、ドキュメント通りにエラーになることの確認」で
-  あり、目的が異なる。ユーザー提案の「実際のベンチマーク用データセットを
-  使っているものだけ通しておけばよいのでは」という統合案も一理あるが、
-  手書きの最小データの方が「何が起きているか」を読み手が把握しやすい
-  という利点もあり、両方残すのは妥当な設計だと考える。
-- **気づいた経緯**: 2026-08-30、`tests/test_iv_fixtures.py`解説時の
-  ユーザー指摘、前回セッションでの誤った回答の訂正として再調査。
-- **状態**: 前提が変わり CSV 一本化で対応済み（2026-08-31、`refactor` スキル、
-  `refactoring-candidates-2.md` 項目54）。上記「対応不要（二段構え）」判断は
-  **2テストが別ファイル・別目的だったことに依拠**していたが、Phase 2
-  （項目68）で手書き版も CSV 版も `test_<手法>_validation.py` の
-  `## ComputationError` 節に同居し、どちらも `with pytest.raises(ComputationError)`
-  だけの内容になったため、「目的が異なる」根拠が消えた。ユーザー判断で
-  OLS・IV とも手書き版（`test_singular_matrix_*` /
-  `test_singular_first_stage_design_matrix_*`）を削除し、固定 CSV を使う
-  `test_perfect_multicollinearity_raises_computation_error` へ一本化。
-  Logit/Probit は手書き版が `method`×3 parametrize（過去の bfgs 検出漏れバグの
-  回帰）で追加検証価値があるため今回は両方維持し、項目35 完了後に一本化する。
-
 ### 18. `COV_TYPES`の定義元が`test_iv_fixtures.py`（自前定義）と`test_iv_gmm_fixtures.py`（生成スクリプトからimport）で非対称
 
 - **対象**: [tests/test_iv_fixtures.py:75](../../../tests/test_iv_fixtures.py#L75)
@@ -658,55 +570,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-30、`tests/test_iv_gmm_fixtures.py`解説時の
   ユーザー指摘。
 - **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
-
-### 21.【原因判明】`gmm_iterations=1`のHansen J不一致——`linearmodels`の`IVGMM.fit(iter_limit=1)`が重み行列を残差から一切更新しないことが原因
-
-- **対象**: `tests/test_iv_gmm_fixtures.py`の`_check_result`内コメント
-  （前回解説の引用箇所、「原因未特定」としていた記述）。
-  `linearmodels`本体のソース（`.venv/lib/python3.14/site-packages/
-  linearmodels/iv/model.py`の`IVGMM.fit`・`_gmm_post_estimation`）を
-  実機で確認した。
-- **内容**: ユーザー指摘（2026-08-30、「原因を特定するようリファクタ
-  リング記録に残しておいて」）を受けて、`linearmodels`（バージョン
-  7.0、本プロジェクトの`.venv`に導入済み）のソースを`inspect.getsource`
-  で直接確認した。
-  - `IVGMM.fit`は`wmat = inv(wz.T @ wz / nobs)`（＝`(Z'Z/n)⁻¹`、`σ̂²`
-    スケーリング無しの生の初期重み行列）で第0段階の点推定を行った後、
-    `while iters < iter_limit and norm > tol:`ループの中で初めて
-    「残差`eps`から`weight_matrix(wx, wz, eps)`（`cov_type`に応じた
-    実際のモーメント分散、`σ̂²`相当の情報を含む）で`wmat`を再構築する」
-    という処理を行う。
-  - `iter_limit=1`のとき、ループ条件`iters < iter_limit`は`1 < 1`で
-    最初から`False`となり、**ループが1度も実行されない**——つまり
-    `wmat`は最後まで`(Z'Z/n)⁻¹`という生の初期値のまま。
-  - `_gmm_post_estimation`の`j_stat = self._j_statistic(params,
-    weight_mat)`は、この`weight_mat`（＝`wmat`）をそのままJ統計量の
-    計算に使う。したがって`iter_limit=1`のときのJ統計量は
-    **`σ̂²`スケーリングを一切含まない`(Z'Z/n)⁻¹`ベースの値**になる。
-  - 一方、本実装（`gmm.rs`）は`weight_type=Unadjusted`のHansen J計算に
-    `S = σ̂²₀・Z'Z`という**`σ̂²`スケーリング込みの重み**を`gmm_
-    iterations=1`でも意図的に使う設計（`gmm.rs`のモジュールdocコメント
-    「`weight_type=Unadjusted`はHansen Jのためだけに`σ̂²`スケーリングが
-    必要」、ユーザー確認済み）になっている。
-  - **結論**: `linearmodels`側の`iter_limit=1`のJ統計量は「本当に一度も
-    残差を見ない、字義通りの1-step」であるのに対し、本実装の
-    `gmm_iterations=1`のHansen Jは「点推定こそ1-stepだが、Hansen J
-    統計量の計算にだけは`σ̂²`（残差由来の情報）を後付けで使う」という、
-    **意図的に異なる規約**を採用している。どちらの実装にもバグは無く、
-    「1-step GMMのHansen J統計量をどう定義するか」という規約の違いに
-    起因する、原理的に一致しえない差異だったと結論づけられる。
-- **Claudeの所感**: これは「未特定の原因」ではなく「意図的な規約の
-  違い」だったことが判明した、という結果になる。本実装側の設計
-  （`σ̂²`スケーリングを`gmm_iterations=1`でも使う）自体は既に
-  「ユーザー確認済み」と明記されている通り正当な判断だと考えられる
-  ため、実装を変更する必要は無いと考える。対応としては、
-  `test_iv_gmm_fixtures.py`の該当コメント（「原因と考えられるが
-  未特定のため」）を、この記録に基づいて「原因判明・意図的な規約の
-  違いのため対応不要」という形に更新するのが良い。
-- **気づいた経緯**: 2026-08-30、`tests/test_iv_gmm_fixtures.py`解説時の
-  ユーザー指摘、`linearmodels`ソースの実機調査で判明。
-- **状態**: 原因判明・対応不要と判断（意図的な規約の違い。ドキュメント
-  コメントの更新のみ推奨、着手要否はユーザー判断待ち）
 
 ### 22. `test_iv_fixtures.py`解説時に指摘した項目のうち複数が`test_iv_gmm_fixtures.py`にも同様に該当する（一括注記）
 
@@ -987,38 +850,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   指摘、`engine/src/nonlinear/tobit.rs`で確認。
 - **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
 
-### 31.【確認】`x=[]`のバリデーションはOLS/Logit/Probit/Tobit全てで一貫して`ValidationError`になっている（対応不要）——ただし`df_model==0`分岐は現状のPython API経由では到達不能
-
-- **対象**: [tests/test_tobit.py:290-292](../../../tests/test_tobit.py#L290-L292)
-  （`test_empty_x_raises`）、[tests/linear/test_ols.py:279-282](../../../tests/linear/test_ols.py#L279-L282)・
-  [tests/nonlinear/test_logit.py:242-244](../../../tests/nonlinear/test_logit.py#L242-L244)・
-  [tests/nonlinear/test_probit.py:238-240](../../../tests/nonlinear/test_probit.py#L238-L240)
-  （いずれも同名の`test_empty_x_raises`が既に存在）
-- **内容**: ユーザー指摘（2026-08-31、「`test_wald_statistic_and_p_
-  value_are_present`の説明で`x`が空の場合について言及されているが、
-  `x`が空だった場合はバリデーションでエラーにしたほうがいい？」→
-  ユーザー自身が直後に「前段で`x`が空だった場合は`test_empty_x_raises`
-  でエラーになるよう」と訂正済み）。実機・`grep`で確認したところ、
-  OLS・Logit・Probit・Tobitいずれも`x=[]`は既に`ValidationError`で
-  一貫して弾かれている（実機確認: `Tobit(df, y="y", x=[]).fit()`→
-  `ValidationError: x must contain at least one column name`）。
-  ユーザーが提案した「実務では使われないのでバリデーションチェック
-  してしまってよい」という方針は、**既に全手法で実現済み**だった。
-  この結果、`wald_chi2_test`（`engine/src/nonlinear/tobit.rs`）が
-  持つ「`df_model==0`のとき`NaN`を返す」という分岐は、現状の
-  Python API経由では`x=[]`が事前に弾かれるため**到達不能**
-  （`include_intercept=False`と組み合わせても`x`に最低1列は必要な
-  ため`df_model`は必ず1以上になる）と考えられる。
-- **Claudeの所感**: 対応不要と判断する。`testing-policy.md`「engine
-  （Rust）のカバレッジ方針」が言う「事前に検証済みの不変条件により
-  理論上到達不能な防御的エラーパス」に該当する典型例のため、コード側
-  のdocコメントで到達不能である理由を説明した上で未カバーのまま
-  受け入れる、という既存方針に沿った扱いで問題ないと考える。
-- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
-  指摘・自己訂正、実機検証・`grep`で確認。
-- **状態**: 対応不要と判断（`x=[]`検証は既に全手法で一貫。`df_model==0`
-  分岐は理論上到達不能な防御的コードとして許容）
-
 ### 32. `refactoring-candidates-2.md`項目76（テストファイル内のセクション見出し・順序の不統一）が`test_tobit.py`にも同様に該当する
 
 - **対象**: [tests/test_tobit.py](../../../tests/test_tobit.py)全体
@@ -1046,37 +877,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   指摘、`grep`でLogit/Probitとの一致を確認。
 - **状態**: 未対応（項目76〔`refactoring-candidates-2.md`〕と統合して
   対応するのが効率的、着手タイミングはユーザー判断待ち）
-
-### 33.【確認・訂正】`test_non_positive_tol_raises`はLogit/Probitに既に同種のテストが存在する
-
-- **対象**: [tests/test_tobit.py:339-347](../../../tests/test_tobit.py#L339-L347)、
-  [tests/nonlinear/test_logit.py:305-316](../../../tests/nonlinear/test_logit.py#L305-L316)・
-  [tests/nonlinear/test_probit.py:295-306](../../../tests/nonlinear/test_probit.py#L295-L306)
-  （いずれも同名`test_non_positive_tol_raises`、`@pytest.mark.
-  parametrize("tol", [0.0, -1.0])`まで完全に同一）
-- **内容**: ユーザー指摘（2026-08-31、「`test_non_positive_tol_raises`
-  ってlogit/probitに同種のものがある？ないなら入れたほうがいいと
-  思うが」）を受けて`grep`で確認した。**既に存在していた**——Tobitの
-  実装が独自に追加したものではなく、Logit/Probitと完全に同一の
-  テスト（パラメータ化された値まで一致）が既にある。
-- **Claudeの所感**: 対応不要。ユーザーの記憶通りの懸念は無く、良好な
-  状態だった。
-- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
-  指摘、`grep`で確認。
-- **状態**: 対応不要と判断（既にLogit/Probitに同種テストが存在）
-
-### 34.【確認・訂正】`method`が不正な値の場合のテストは`test_tobit.py`に既に存在する（`test_unknown_method_raises`）
-
-- **対象**: [tests/test_tobit.py:322-329](../../../tests/test_tobit.py#L322-L329)
-  （`test_unknown_method_raises`、`TobitOptions(method="bogus")`）
-- **内容**: ユーザー指摘（2026-08-31、「methodが不正だった場合の検証が
-  ない」）を受けて確認したところ、**既に存在していた**（`test_
-  unknown_cov_type_raises`の直後、312〜329行目）。おそらくファイルの
-  分量が多く見落とされたものと思われる。
-- **Claudeの所感**: 対応不要。念のための確認記録として残す。
-- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
-  指摘、ファイル内で確認。
-- **状態**: 対応不要と判断（既存）
 
 ### 35.【重要な設計提案】Tobitの「`method`によらず常にOLSベースの初期値・QR検証を実行する」設計は、Logit/Probitの過去の実バグ（`bfgs`の特異性検出漏れ）を構造的に解消できる可能性がある
 

@@ -29,7 +29,7 @@ from benchmark.common import (
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
-from benchmark.linear.references.statsmodels_ref import run
+from benchmark.linear.references.statsmodels_ref import HAC_MAXLAGS, run
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md「テストの3系統」参照）。
 # ComputationErrorが発生することのみをテストコード側で対応する。scale_varianceは
@@ -104,6 +104,7 @@ def build_fixtures() -> dict:
         "generated_at": datetime.now(UTC).isoformat(),
         "primary_reference": "statsmodels",
         "statsmodels_version": statsmodels.__version__,
+        "hac_maxlags": HAC_MAXLAGS,
         "note": (
             "perfect_multicollinearity・scale_varianceシナリオはここに含まない"
             "（いずれもComputationErrorの発生確認のみ、テストコード側で対応。"

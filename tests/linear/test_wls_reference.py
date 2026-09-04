@@ -45,6 +45,7 @@ from benchmark.linear.fixtures.generate_wls_fixtures import (
 from benchmark.linear.fixtures.generate_wls_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
+from benchmark.linear.references.statsmodels_ref import HAC_MAXLAGS
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[1]
@@ -59,10 +60,9 @@ ATOL = TOLERANCES["wls_reference"]["atol"]
 # SCENARIOS/COV_TYPESはgenerate_wls_fixtures.pyのNUMERIC_SCENARIOS/COV_TYPESと
 # 常に一致させる必要があるため、そちらをimportして単一の定義元にする。
 
-# generate_wls_fixtures.py（benchmark/linear/references/statsmodels_ref.py）はHACのラグを
-# maxlags=1に固定している。同じラグを明示的に指定し、自動ラグ選択式の
-# 違いを比較対象から除外する（test_ols_fixtures.pyと同じ理由）。
-HAC_LAG_IN_FIXTURE = 1
+# フィクスチャ生成側（benchmark/linear/references/statsmodels_ref.py）と同じ
+# HAC_MAXLAGSを明示的に指定し、自動ラグ選択式の違いを比較対象から除外する
+# （test_ols_reference.pyと同じ理由、`refactoring-candidates-2.md`項目58）。
 
 
 @pytest.fixture(scope="module")
@@ -104,7 +104,7 @@ def _check_result(res, ref: dict, label: str) -> None:
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_matches_statsmodels(fixtures, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
-    kwargs = {"hac_lags": HAC_LAG_IN_FIXTURE} if cov_type == "hac" else {}
+    kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
     options = OLSOptions(cov_type=cov_type, **kwargs)
     res = WLS(
         df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
@@ -249,7 +249,7 @@ def test_include_intercept_false_matches_statsmodels(cov_type):
         fit_kwargs["cov_kwds"] = {"groups": df["cluster_group"].to_numpy()}
     elif cov_type == "hac":
         fit_kwargs["cov_type"] = "HAC"
-        fit_kwargs["cov_kwds"] = {"maxlags": HAC_LAG_IN_FIXTURE}
+        fit_kwargs["cov_kwds"] = {"maxlags": HAC_MAXLAGS}
     elif cov_type != "classical":
         fit_kwargs["cov_type"] = cov_type.upper()
 
@@ -259,7 +259,7 @@ def test_include_intercept_false_matches_statsmodels(cov_type):
         include_intercept=False,
         cov_type=cov_type,
         cluster_col="cluster_group" if cov_type == "cluster" else None,
-        hac_lags=HAC_LAG_IN_FIXTURE if cov_type == "hac" else None,
+        hac_lags=HAC_MAXLAGS if cov_type == "hac" else None,
     )
     our_res = WLS(
         df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options

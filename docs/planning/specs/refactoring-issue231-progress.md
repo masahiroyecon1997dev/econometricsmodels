@@ -491,6 +491,43 @@
     Probit に適用、candidates-3 項目35）完了後に一本化する。candidates-3 項目1
     （IV `x2=2*x1` 直書き）はテスト削除で自然に解消、項目17 の状態も更新。
     `pytest tests` 957→**955**（削除2件、いずれも非 parametrize）、`ruff` パス。
+  - **項目58 実施（2026-08-31）**: HAC のラグ数固定値（`maxlags=1`）が
+    生成側（`benchmark/linear/references/statsmodels_ref.py`の`fit_kwargs`
+    直書き）と消費側4ファイル（`test_ols_reference.py`・
+    `test_ols_validation.py`・`test_wls_reference.py`・
+    `test_wls_validation.py`の`HAC_LAG_IN_FIXTURE = 1`）に独立複製されて
+    いた（項目自体の記載は2箇所だったが、Phase 2 の4分割で実際には4箇所に
+    増えていた）。`statsmodels_ref.py`に単一の定義元 `HAC_MAXLAGS = 1`
+    を新設し、生成側はそこから使用、`generate_{ols,wls}_fixtures.py`は
+    それを`_meta.hac_maxlags`にも記録（人が JSON を見ても分かるように）、
+    テスト4ファイルは`HAC_LAG_IN_FIXTURE`のローカル直書きを廃止して
+    `from benchmark.linear.references.statsmodels_ref import HAC_MAXLAGS`
+    に統一（元の所感が提案した「フィクスチャ `_meta` をテストが読む」形は
+    見送り、既存の`COV_TYPES`/`NUMERIC_SCENARIOS`と同じ「生成元モジュールを
+    直接import」パターンに揃えた方が一貫性が高いと判断）。IV は元々
+    `hac_lags`未指定で engine 側の自動計算式と一致させる設計のため対象外
+    （コメント内の名前参照のみ更新）。`pytest tests` 955件パス（不変、
+    数値ロジック変更なし）、`ruff` パス。既存の `tests/fixtures/benchmarks/
+    {ols,wls}.json` は次回フィクスチャ再生成時に`_meta.hac_maxlags`が
+    追加される（数値には影響しないため今回は再生成しない）。
+  - **完了項目の削除（2026-08-31、ユーザー指示）**: `refactoring-candidates-2.md`/
+    `refactoring-candidates-3.md`から、実装・調査が完了し何も残作業が無い項目を
+    削除した（本ドキュメントに記録済みの履歴・GitHub Issueは削除せず残る。
+    `refactoring-candidates.md`は対象項目なし）。
+    - candidates-2: 項目52・53・54・55・58・68・76（いずれも本セッションで
+      「解消済み」「完了」と記録した実装済み項目）・86（対応不要と判断、
+      Issue #267との関連付けのみで残作業なし）
+    - candidates-3: 項目1・16・17（いずれも項目54対応で解消）・21（原因判明・
+      対応不要と判断。唯一残っていた任意の追記提案〔`test_iv_gmm_reference.py`
+      のコメント更新〕は削除前に実施済み）・31・33・34（いずれも「確認した
+      ところ既に存在/対応不要」という調査結果のみで実装作業が無い）
+    - 削除しなかった例: 「対応予定」「決定済み」だが未実装（候補3項目7・9・10）、
+      Issue化されたが未実装（候補2項目67・candidates-3項目35〔Issue #279〕）、
+      他の未解決項目とまとめて検討中の項目（「項目◯◯に統合」で統合先が
+      未解決の項目、例: candidates-2項目93〔項目89待ち〕）
+    - 削除した項目への内部参照（残存項目の本文中の「項目68と合わせて」等）は
+      履歴的な説明として残置（`refactoring-candidates-3.md`項目27・32等の
+      precedentと同じ扱い、都度書き換えない）
 - 上記以外（`refactoring-candidates.md`項目12・13・15〜35・37・39）は
   未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は

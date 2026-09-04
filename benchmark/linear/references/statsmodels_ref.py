@@ -37,6 +37,13 @@ import polars as pl
 from benchmark.common import extract_coef_se, load_frozen_dataset
 from benchmark.common.load_wooldridge import load as _load_wooldridge
 
+# HACのラグ数（ラグ選択方法自体は別途検討事項、issue参照）。フィクスチャ生成
+# （このモジュール）と消費側（テストコード、engineに明示的に同じ値を渡して
+# 自動ラグ選択式の違いを比較対象から除外する）の両方がこの1箇所を参照する
+# ことで、値のズレが原理的に起こらないようにする
+# （`refactoring-candidates-2.md`項目58）。
+HAC_MAXLAGS = 1
+
 
 def _load_synthetic(dataset: str) -> tuple[pl.DataFrame, list[float]]:
     return load_frozen_dataset("synthetic", dataset)
@@ -82,9 +89,7 @@ def run(
     if sm_cov_type == "cluster":
         fit_kwargs["cov_kwds"] = {"groups": pandas_df[cluster_col]}
     elif sm_cov_type == "hac":
-        fit_kwargs["cov_kwds"] = {
-            "maxlags": 1
-        }  # ラグ選択方法は別途検討事項（issue参照）
+        fit_kwargs["cov_kwds"] = {"maxlags": HAC_MAXLAGS}
 
     if weight_col is not None:
         model = smf.wls(

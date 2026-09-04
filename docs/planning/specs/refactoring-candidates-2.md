@@ -1076,3 +1076,29 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   項目85〜90の該当内容（`check_margeff` 利用・`hc1` 除外・OPG手計算・`_rename`・
   消極的 `margeff` チェック・G=2 docstring）はそのまま `_reference.py` へ移動した
   だけで未解消。
+
+### 97. `COV_TYPES`/`NUMERIC_SCENARIOS`が`HAC_MAXLAGS`と同じ「生成スクリプト側定義をテストがimportする」パターンのまま、定数専用ファイルへの集約が半端
+
+- **対象**: [benchmark/linear/fixtures/generate_ols_fixtures.py](../../../benchmark/linear/fixtures/generate_ols_fixtures.py)・
+  [benchmark/linear/fixtures/generate_wls_fixtures.py](../../../benchmark/linear/fixtures/generate_wls_fixtures.py)
+  内の`COV_TYPES`/`NUMERIC_SCENARIOS`定義、および
+  [tests/linear/test_ols_reference.py](../../../tests/linear/test_ols_reference.py)・
+  `test_ols_validation.py`・`test_wls_reference.py`・`test_wls_validation.py`の
+  対応するimport箇所
+- **内容**: 項目58（`HAC_MAXLAGS`の`benchmark/linear/constants.py`への集約、
+  完了・削除済み）の`/code-review`時の指摘。`HAC_MAXLAGS`は「参照値生成
+  スクリプトを将来編集する際に、テスト側が依存する定数を意図せず壊す
+  リスクを避ける」という理由で専用の定数ファイルへ切り出したが、
+  `COV_TYPES`/`NUMERIC_SCENARIOS`は同じリスクパターン（生成スクリプト側で
+  定義→4テストファイルがimportして依存）を持ちながら、対策されないまま
+  `generate_ols_fixtures.py`/`generate_wls_fixtures.py`側に残っている。
+  さらにこの2定数は`COV_TYPES = [...]`がOLS/WLSそれぞれの生成スクリプトに
+  独立複製されている（`HAC_MAXLAGS`のような単一定義元化もされていない）。
+- **Claudeの所感**: `HAC_MAXLAGS`と同じ理由が当てはまるなら、
+  `benchmark/linear/constants.py`（項目58で新設済み）に集約するのが
+  一貫性がある。ただし`COV_TYPES`はOLS/WLSで独立に複製されている点が
+  `HAC_MAXLAGS`（元々単一箇所）と異なり、統合の際に両者の値が本当に
+  常に同一であるべきかの確認が別途必要（対応要否・範囲はユーザー判断）。
+- **気づいた経緯**: 2026-09-04、項目58の追加対応（`_meta.hac_maxlags`の
+  削除撤回・`constants.py`移設）の`/code-review`時に指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）。

@@ -29,7 +29,8 @@ from benchmark.common import (
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
-from benchmark.linear.references.statsmodels_ref import HAC_MAXLAGS, run
+from benchmark.linear.constants import HAC_MAXLAGS
+from benchmark.linear.references.statsmodels_ref import run
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md「テストの3系統」参照）。
 # ComputationErrorが発生することのみをテストコード側で対応する。scale_varianceは

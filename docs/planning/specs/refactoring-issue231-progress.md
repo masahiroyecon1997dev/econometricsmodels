@@ -528,6 +528,33 @@
     - 削除した項目への内部参照（残存項目の本文中の「項目68と合わせて」等）は
       履歴的な説明として残置（`refactoring-candidates-3.md`項目27・32等の
       precedentと同じ扱い、都度書き換えない）
+  - **項目58 追加対応（2026-09-04）**: `_meta.hac_maxlags`は「消費側コードから
+    一度も読まれない」ことを理由に前回デッドコード扱いで削除したが、ユーザー
+    指摘により(a) IV側（`generate_iv_fixtures.py`等）が同種の値を`_meta.
+    hac_lag`として記録済みで前例と平仄が合わないこと、(b) 当初この行を
+    追加した動機が「人がJSONを見ても分かるように」という人間可読性目的
+    （コードから読まれない前提のwrite-only記録）だったことが判明し、削除を
+    撤回して復元した。合わせて`HAC_MAXLAGS`の定義元を`references/
+    statsmodels_ref.py`（参照値生成スクリプト）から新設の`benchmark/linear/
+    constants.py`へ再移設（生成スクリプトを将来編集する際に、テスト側が
+    依存する定数を意図せず壊すリスクを避けるため）、`generate_{ols,wls}_
+    fixtures.py`と4テストファイルのimport元もそちらへ統一。移設時に
+    `constants.py`のコメントが引用していた`refactoring-candidates-2.md`
+    項目58・`refactoring-candidates.md`項目16/25/27は直前のセッションで
+    項目58が削除済み・後者は番号が実際とずれていたため、本ドキュメントの
+    参照とHACラグ選択方法の検討事項（Issue #267）への参照に置き換えた。
+    `{ols,wls}.json`を再生成し`_meta.hac_maxlags`が実際に追加されたことを
+    確認（diffは`generated_at`と`hac_maxlags`追加のみ、他の数値・キーに
+    変化なし）。`/code-review`実施、`test_ols_reference.py`・
+    `test_wls_reference.py`側に残っていた「定義元は`statsmodels_ref.py`・
+    `refactoring-candidates-2.md`項目58参照」という同種の陳腐化コメント
+    （`constants.py`移設時に一緒に直し忘れていた）を追加で修正。
+    `pytest tests`955件パス（不変）、`ruff`パス。
+    - **見送った指摘（別途検討）**: 同じレビューで、`COV_TYPES`/
+      `NUMERIC_SCENARIOS`も`HAC_MAXLAGS`と同じ「生成スクリプト側定義を
+      テストがimportする」形のまま残っており、同種の非対称性があるとの
+      指摘があった。今回のスコープ外（ユーザー指示は`HAC_MAXLAGS`のみ）
+      のため対応せず、必要なら別途候補メモに起こす。
 - 上記以外（`refactoring-candidates.md`項目12・13・15〜35・37・39）は
   未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は

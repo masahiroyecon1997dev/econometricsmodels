@@ -36,13 +36,7 @@ import polars as pl
 
 from benchmark.common import extract_coef_se, load_frozen_dataset
 from benchmark.common.load_wooldridge import load as _load_wooldridge
-
-# HACのラグ数（ラグ選択方法自体は別途検討事項、issue参照）。フィクスチャ生成
-# （このモジュール）と消費側（テストコード、engineに明示的に同じ値を渡して
-# 自動ラグ選択式の違いを比較対象から除外する）の両方がこの1箇所を参照する
-# ことで、値のズレが原理的に起こらないようにする
-# （`refactoring-candidates-2.md`項目58）。
-HAC_MAXLAGS = 1
+from benchmark.linear.constants import HAC_MAXLAGS
 
 
 def _load_synthetic(dataset: str) -> tuple[pl.DataFrame, list[float]]:

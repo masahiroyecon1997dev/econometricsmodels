@@ -37,6 +37,7 @@ from _tolerances import TOLERANCES
 from econometricsmodels import WLS, OLSOptions
 
 from benchmark.common import imbalanced_cluster_groups
+from benchmark.linear.constants import HAC_MAXLAGS
 from benchmark.linear.fixtures.generate_wls_fixtures import (
     COV_TYPES,
     WOOLDRIDGE_COV_TYPES,
@@ -45,7 +46,6 @@ from benchmark.linear.fixtures.generate_wls_fixtures import (
 from benchmark.linear.fixtures.generate_wls_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
-from benchmark.linear.references.statsmodels_ref import HAC_MAXLAGS
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[1]
@@ -62,7 +62,8 @@ ATOL = TOLERANCES["wls_reference"]["atol"]
 
 # フィクスチャ生成側（benchmark/linear/references/statsmodels_ref.py）と同じ
 # HAC_MAXLAGSを明示的に指定し、自動ラグ選択式の違いを比較対象から除外する
-# （test_ols_reference.pyと同じ理由、`refactoring-candidates-2.md`項目58）。
+# （test_ols_reference.pyと同じ理由、単一の定義元
+# `benchmark/linear/constants.py`をimportする）。
 
 
 @pytest.fixture(scope="module")

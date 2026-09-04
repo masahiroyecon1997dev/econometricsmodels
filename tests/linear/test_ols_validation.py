@@ -20,8 +20,8 @@ from econometricsmodels import (
     ValidationError,
 )
 
+from benchmark.linear.constants import HAC_MAXLAGS
 from benchmark.linear.fixtures.generate_ols_fixtures import COV_TYPES
-from benchmark.linear.references.statsmodels_ref import HAC_MAXLAGS
 
 # ── ValidationError（入力データ） ───────────────────────────────────
 

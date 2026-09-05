@@ -26,28 +26,23 @@ Note:
 
     `cov_type="opg"`の限界効果はstatsmodels側では算出できない（同docstring参照）
     ため、opgのmarginal_effects()数値比較は`test_logit_crosscheck.py`のみで行う。
+
+テスト本体は `Logit`/`Probit` で完全に重複するため
+`_binary_choice_checks.py` に集約し（`refactoring-candidates-2.md` 項目95）、
+このファイルは手法ごとの設定（`BinaryChoiceReferenceConfig`）を組み立てて
+渡す薄いラッパーに保つ。
 """
 
 from __future__ import annotations
 
-import json
-from functools import partial
 from pathlib import Path
 
-import polars as pl
+import _binary_choice_checks as _checks
 import pytest
-from _assertions import assert_close, assert_dict_close, check_margeff
-from _assertions import rename_intercept as _rename
-from _helpers import (
-    DATA_DIR,
-    MROZ_X,
-    load_wooldridge_dataset,
-    with_cluster_groups,
-)
+import statsmodels.api as sm
 from _tolerances import TOLERANCES
 from econometricsmodels import Logit, LogitOptions
 
-from benchmark.common import imbalanced_cluster_groups
 from benchmark.nonlinear.fixtures.generate_logit_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
@@ -59,245 +54,77 @@ FIXTURE_PATH = (
     / "logit.json"
 )
 
-RTOL = TOLERANCES["logit_reference"]["rtol"]
 # OLS（閉形式解）のATOL=1e-10より緩い。Logitは反復最適化（Newton/BFGS/L-BFGS）の
 # ため、ゼロ近傍の値（信頼区間の境界等）で閉形式解より1桁大きい浮動小数点誤差が
 # 乗ることを実測確認した（ベンチマーク作成時、diff~2.6e-10のケース）。
-ATOL = TOLERANCES["logit_reference"]["atol"]
-
+#
 # near_separation（logit特有の準完全分離境界ケース）は、既定のtol=1e-6（勾配ノルム
 # 基準）だとstatsmodelsとの数値一致がRTOL=1e-8を満たさない（実測diff~7e-8相対）。
 # tol=1e-8まで締めると一致することを確認済みだが、既定値自体は変更しない
 # （BFGSがmax_iter=35のうち34回を要するようになり、他の難しいデータで
-# NonConvergenceリスクが上がるため。ユーザー確認済み）。
-# このシナリオの数値比較テストに限り、明示的にtol=1e-8を指定する。
-_NEAR_SEPARATION_TOL = 1e-8
-
-COV_TYPES = ["classical", "opg", "hc0"]
-
-MARGEFF_AT = ["overall", "mean", "median"]
+# NonConvergenceリスクが上がるため。ユーザー確認済み）。このシナリオの数値比較
+# テストに限り、明示的にtol=1e-8を指定する。
+CONFIG = _checks.BinaryChoiceReferenceConfig(
+    estimator_cls=Logit,
+    options_cls=LogitOptions,
+    dataset_prefix="logit",
+    fixture_path=FIXTURE_PATH,
+    scenarios=SCENARIOS,
+    cov_types=["classical", "opg", "hc0"],
+    rtol=TOLERANCES["logit_reference"]["rtol"],
+    atol=TOLERANCES["logit_reference"]["atol"],
+    # method="bfgs"/"lbfgs"はnewtonと異なる最適化経路で収束するため、既定の
+    # RTOLより緩めた許容誤差を使う（tests/_tolerances.py参照）。
+    rtol_method=TOLERANCES["logit_reference"]["rtol_method"],
+    near_separation_tol=1e-8,
+)
 
 
 @pytest.fixture(scope="module")
 def fixtures() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())
-
-
-_assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
-_assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
-_check_margeff = partial(check_margeff, rtol=RTOL, atol=ATOL)
-
-# method="bfgs"/"lbfgs"はnewtonと異なる最適化経路で収束するため、既定のRTOLより
-# 緩めた許容誤差を使う（tests/_tolerances.py参照）。
-RTOL_METHOD = TOLERANCES["logit_reference"]["rtol_method"]
-_assert_dict_close_method = partial(
-    assert_dict_close, rtol=RTOL_METHOD, atol=ATOL
-)
-
-
-def _check_result(res, ref: dict, label: str) -> None:
-    _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
-    _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
-    _assert_dict_close(res.z_stats, ref["z_stats"], f"{label}/z_stats")
-    _assert_dict_close(res.p_values, ref["p_values"], f"{label}/p_values")
-
-    for name, (ref_lower, ref_upper) in ref["conf_int"].items():
-        our_name = _rename(name)
-        our_lower, our_upper = res.conf_int[our_name]
-        _assert_close(our_lower, ref_lower, f"{label}/conf_lower/{name}")
-        _assert_close(our_upper, ref_upper, f"{label}/conf_upper/{name}")
-
-    _assert_close(
-        res.log_likelihood, ref["log_likelihood"], f"{label}/log_likelihood"
-    )
-    _assert_close(
-        res.log_likelihood_null,
-        ref["log_likelihood_null"],
-        f"{label}/log_likelihood_null",
-    )
-    _assert_close(
-        res.lr_statistic, ref["lr_statistic"], f"{label}/lr_statistic"
-    )
-    _assert_close(res.lr_p_value, ref["lr_p_value"], f"{label}/lr_p_value")
-    _assert_close(
-        res.pseudo_r_squared,
-        ref["pseudo_r_squared"],
-        f"{label}/pseudo_r_squared",
-    )
-    _assert_close(res.aic, ref["aic"], f"{label}/aic")
-    _assert_close(res.bic, ref["bic"], f"{label}/bic")
-    assert res.n_obs == ref["nobs"], f"{label}/n_obs"
-    assert res.df_model == ref["df_model"], f"{label}/df_model"
-    assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
-    assert res.converged == ref["converged"], f"{label}/converged"
-
-    ours_pred_table = {
-        row["actual"]: (row["predicted_0"], row["predicted_1"])
-        for row in res.pred_table()
-    }
-    for i, row in enumerate(ref["pred_table"]):
-        assert ours_pred_table[i] == (row[0], row[1]), (
-            f"{label}/pred_table/{i}"
-        )
-
-    if ref["margeff"] is not None:
-        _check_margeff(res, ref["margeff"], label)
+    return CONFIG.load_fixtures()
 
 
 # ── 凍結フィクスチャとの数値照合 ───────────────────────────────────
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
-@pytest.mark.parametrize("scenario", SCENARIOS)
+@pytest.mark.parametrize("cov_type", CONFIG.cov_types)
+@pytest.mark.parametrize("scenario", CONFIG.scenarios)
 def test_matches_statsmodels(fixtures, scenario, cov_type):
-    df = pl.read_csv(DATA_DIR / f"logit_{scenario}.csv")
-    kwargs = (
-        {"tol": _NEAR_SEPARATION_TOL} if scenario == "near_separation" else {}
-    )
-    options = LogitOptions(cov_type=cov_type, **kwargs)
-    res = Logit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
-
-    _check_result(res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}")
+    _checks.check_matches_statsmodels(CONFIG, fixtures, scenario, cov_type)
 
 
 def test_cluster_matches_statsmodels(fixtures):
-    """クラスターロバストSE（baselineシナリオ、行番号%10の疑似グループ）。"""
-    df = pl.read_csv(DATA_DIR / "logit_baseline.csv")
-    df = with_cluster_groups(df, 10)
-    options = LogitOptions(cov_type="cluster", cluster_col="cluster_group")
-    res = Logit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
-
-    ref = fixtures["baseline"]["cluster"]
-    _assert_dict_close(res.params, ref["coef"], "cluster/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster/se")
+    _checks.check_cluster_matches_statsmodels(CONFIG, fixtures)
 
 
 def test_cluster_imbalanced_matches_statsmodels(fixtures):
-    """不均衡クラスタ（サイズ[2, 3, 5, 10, 30, 50]のタイル）。"""
-    df = pl.read_csv(DATA_DIR / "logit_baseline.csv")
-    groups = imbalanced_cluster_groups(df.height)
-    df = df.with_columns(pl.Series("cluster_group", groups))
-    options = LogitOptions(cov_type="cluster", cluster_col="cluster_group")
-    res = Logit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
-
-    ref = fixtures["baseline"]["cluster_imbalanced"]
-    _assert_dict_close(res.params, ref["coef"], "cluster_imbalanced/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster_imbalanced/se")
+    _checks.check_cluster_imbalanced_matches_statsmodels(CONFIG, fixtures)
 
 
 def test_cluster_g2_matches_statsmodels(fixtures):
-    """クラスタ数境界（G=2ちょうど）の成功パス。
-
-    OLSのwald_f_testと異なりLogitのcluster_cov_paramsはq×q部分行列の反転を
-    要求しないため、説明変数を1個に絞る必要はない（k=3のままG=2で正常に
-    計算できることを実機確認済み、generate_logit_fixtures.py参照）。
-    """
-    df = pl.read_csv(DATA_DIR / "logit_baseline.csv")
-    df = with_cluster_groups(df, 2)
-    options = LogitOptions(cov_type="cluster", cluster_col="cluster_group")
-    res = Logit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
-
-    ref = fixtures["baseline"]["cluster_g2"]
-    _assert_dict_close(res.params, ref["coef"], "cluster_g2/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster_g2/se")
+    _checks.check_cluster_g2_matches_statsmodels(CONFIG, fixtures)
 
 
 @pytest.mark.parametrize("method", ["bfgs", "lbfgs"])
 def test_method_matches_statsmodels(fixtures, method):
-    """`method="bfgs"/"lbfgs"`が主リファレンス（statsmodelsの同じmethod）と
-    フルの統計量（std_errors含む）で一致すること。
-
-    既定の`method="newton"`のみ全シナリオ×cov_typeで数値照合しており、bfgs/lbfgsは
-    `test_logit_api.py::test_method_option_converges_to_same_params`で自身のnewton結果
-    とparamsのみ緩い許容誤差(rel=1e-4)で比較していたが、主リファレンスに対する
-    フルの統計量照合が無かった（`testing-completeness-reviewer`指摘、
-    Issue #231フェーズ4）。
-    """
-    df = pl.read_csv(DATA_DIR / "logit_baseline.csv")
-    options = LogitOptions(cov_type="classical", method=method)
-    res = Logit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
-
-    ref = fixtures["method"][method]
-    label = f"method/{method}"
-    _assert_dict_close_method(res.params, ref["coef"], f"{label}/coef")
-    _assert_dict_close_method(res.std_errors, ref["se"], f"{label}/se")
-    assert res.converged == ref["converged"], f"{label}/converged"
+    _checks.check_method_matches_statsmodels(CONFIG, fixtures, method)
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", CONFIG.cov_types)
 def test_mroz_matches_statsmodels(fixtures, cov_type):
-    """Wooldridge実データ（mroz、労働参加モデル）とのクロスチェック。"""
-    df = load_wooldridge_dataset("mroz")
-    options = LogitOptions(cov_type=cov_type)
-    res = Logit(df, y="inlf", x=MROZ_X, options=options).fit()
-
-    _check_result(res, fixtures["mroz"][cov_type], f"mroz/{cov_type}")
+    _checks.check_mroz_matches_statsmodels(CONFIG, fixtures, cov_type)
 
 
 def test_mroz_cluster_matches_statsmodels(fixtures):
-    """実データでのクラスターロバストSE（`city`＝都市部居住ダミー、484/269の2値）。
-
-    `testing-policy.md`「テスト用データセット」3.の「実データでのグループ列も
-    検証する」を満たす（OLSのwage1/regionクラスターと同じ趣旨）。
-    """
-    df = load_wooldridge_dataset("mroz")
-    options = LogitOptions(cov_type="cluster", cluster_col="city")
-    res = Logit(df, y="inlf", x=MROZ_X, options=options).fit()
-
-    ref = fixtures["mroz"]["cluster"]
-    _assert_dict_close(res.params, ref["coef"], "mroz/cluster/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "mroz/cluster/se")
+    _checks.check_mroz_cluster_matches_statsmodels(CONFIG, fixtures)
 
 
 # ── ライブ statsmodels との照合（凍結フィクスチャ対象外の分岐） ─────
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", CONFIG.cov_types)
 def test_include_intercept_false_matches_statsmodels(cov_type):
-    """`include_intercept=False`の成功パスが構造テスト・数値照合テストとも
-    一切検証されていなかった（`df_model`は`include_intercept`の値に関わらず
-    常に`k-1`、`log_likelihood_null`は常に「切片のみ」モデルを参照するため
-    `include_intercept=False`時は`lr_statistic`が負値になりうる、という特殊挙動が
-    `engine`側の単体テストのみで数値照合が無かった。`testing-completeness-reviewer`
-    指摘、Issue #231フェーズ4）。frozen fixtureではなくstatsmodelsとの直接比較で
-    確認する（`test_wls_reference.py::test_include_intercept_false_matches_
-    statsmodels`と同じ方針）。
-
-    `statsmodels_ref.run()`はformula API（`patsy`経由でpandasを
-    要求する）を使うため、ここでは使わない。OLS側と同じ配列API
-    （`sm.Logit(y, x)`）で直接比較する（`tests/`はpyarrow等のformula API
-    依存パッケージをdev依存に持たない方針、`.claude/rules/testing-policy.md`
-    参照）。
-    """
-    import numpy as np
-    import statsmodels.api as sm
-
-    df = pl.read_csv(DATA_DIR / "logit_baseline.csv")
-    y = df["y"].to_numpy()
-    x_cols = ["x1", "x2", "x3"]
-    x = np.column_stack([df[c].to_numpy() for c in x_cols])
-
-    if cov_type == "opg":
-        base = sm.Logit(y, x).fit(disp=0)
-        scores = base.model.score_obs(base.params)
-        opg_cov = np.linalg.inv(scores.T @ scores)
-        sm_se = np.sqrt(np.diag(opg_cov))
-        sm_params = base.params
-        fitted = base
-    else:
-        sm_cov_type = {"classical": "nonrobust"}.get(cov_type, cov_type)
-        fitted = sm.Logit(y, x).fit(disp=0, cov_type=sm_cov_type)
-        sm_params = fitted.params
-        sm_se = fitted.bse
-
-    options = LogitOptions(cov_type=cov_type, include_intercept=False)
-    res = Logit(df, y="y", x=x_cols, options=options).fit()
-
-    label = f"include_intercept_false/{cov_type}"
-    for i, name in enumerate(x_cols):
-        _assert_close(res.params[name], sm_params[i], f"{label}/coef/{name}")
-        _assert_close(res.std_errors[name], sm_se[i], f"{label}/se/{name}")
-    assert res.converged == bool(fitted.mle_retvals["converged"]), (
-        f"{label}/converged"
+    _checks.check_include_intercept_false_matches_statsmodels(
+        CONFIG, sm.Logit, cov_type
     )
-    assert res.df_model == fitted.df_model, f"{label}/df_model"

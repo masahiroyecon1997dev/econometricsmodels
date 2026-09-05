@@ -551,12 +551,20 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **追記（2026-08-24、`tests/nonlinear/test_probit.py`解説時）**: 実際に確認した
   ところ`test_probit.py`にも同じ**11箇所**（`test_logit.py`と全く同数）が
   存在した。`test_probit.py`は`test_logit.py`のコードをほぼ丸ごと転用して
-  作られている（項目95参照）ため、コメント残置も1対1で複製されている。
-  対応する場合は`test_logit.py`・`test_probit.py`をまとめて一括対応するのが
-  効率的。
+  作られている（項目95、実装完了・削除済み、参照）ため、コメント残置も
+  1対1で複製されている。対応する場合は`test_logit.py`・`test_probit.py`を
+  まとめて一括対応するのが効率的。
+- **追記（2026-09-05、項目95実装時）**: 項目95の共通モジュール化
+  （`tests/nonlinear/_binary_choice_checks.py`）により、この「Issue #231
+  フェーズ4」コメント残置はLogit/Probit間の重複が解消され1箇所（13件）に
+  集約された（旧`test_logit.py`/`test_probit.py`系列で22件相当あったものが
+  半減）。ただし項目51の方針（番号のみ削除しテストの意図の説明は残す）
+  自体はまだ適用していないため、コメント内容自体の整理は未対応のまま。
 - **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
   2026-08-24、`tests/nonlinear/test_probit.py`解説時に適用範囲を確認・追記。
-- **状態**: 未対応（着手要否はユーザー判断待ち、項目51・95と統合可）
+- **状態**: 未対応（着手要否はユーザー判断待ち、項目51と統合可。項目95実装で
+  対応箇所が`_binary_choice_checks.py`1ファイルに集約されたため、対応時の
+  作業量は縮小済み）
 
 ### 80. `predict()`の意味がOLS（予測値）とLogit/Probit（確率）で異なり、利用者が混同するリスクがある
 
@@ -886,56 +894,14 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   発見。
 - **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
 
-### 95. `tests/nonlinear/test_logit.py`と`tests/nonlinear/test_probit.py`のコードが完全に同一（docstringの言い回し以外の差分ゼロ）——共通関数への切り出しを検討する余地
-
-- **対象**: [tests/nonlinear/test_logit.py](../../../tests/nonlinear/test_logit.py)（555行）・
-  [tests/nonlinear/test_probit.py](../../../tests/nonlinear/test_probit.py)（521行）。
-  `sed 's/Logit/Probit/g; s/logit/probit/g'`で`test_logit.py`を変換して
-  `test_probit.py`と`diff`した結果、**コード部分の差分はゼロ**
-  （docstringの文言のみ、`test_probit.py`側は「`test_logit.py`と同じ理由」
-  という参照で短縮している）。同様に`test_logit_fixtures.py`と
-  `test_probit_fixtures.py`も同じ手法で比較したところ、コード部分の
-  差分はやはりゼロだった（docstringのみ異なる）。ただし
-  `test_logit_crosscheck.py`と`test_probit_crosscheck.py`は**コード自体にも
-  Probit固有の実質的な差分がある**（後述）ため、この項目は`test_<method>.py`/
-  `test_<method>_fixtures.py`の2ファイルに限定する。
-- **内容**: `tests/nonlinear/test_probit.py`解説時にユーザー指摘（「共有化に関しては
-  1つファイルを削れるが、共有化してしまうと手法ごとのテストファイルという
-  意味が薄れないか懸念がある。ドメインが違うものを1つにするという
-  アーキテクチャ的な観点でも注意が必要」）。`Logit`/`Probit`の
-  `python_package`側APIが完全に対称（`fit()`の引数・`Options`のフィールド
-  構成・`Results`のプロパティが同じ形）に設計されている結果、テスト
-  コードも1000行超が実質的に重複している。
-- **Claudeの所感**: ユーザーの懸念に同意する。`@pytest.mark.parametrize`で
-  `Estimator`/`Options`/`Results`クラス自体をパラメータ化して1ファイルに
-  統合する案も考えられるが、(1) 将来LogitとProbitの構造的な違いが生まれた
-  際に片方だけ特殊化しにくくなる、(2) テスト失敗時に「どのテストが
-  落ちたか」がパラメータ名越しになり追いにくくなる、(3)
-  ユーザー指摘の通り「手法ごとに独立したテストファイル」という
-  ドメイン分離の意味が薄れる、という3つのデメリットがあり、ファイル
-  統合は避けるべきと考える。代わりに**共通のテスト本体を`_helpers.py`
-  （または新規`_shared_estimator_tests.py`のような専用モジュール）に
-  関数として切り出し、`test_logit.py`/`test_probit.py`はそれぞれ
-  `Logit`/`LogitOptions`/`LogitResults`（または`Probit`側）を渡して
-  呼び出す薄いラッパーに保つ**、という設計が良いと考える。これなら
-  ファイル自体は手法ごとに残り、各ファイルを開けばそのファイルの
-  全テストが一覧できる（ファイルが空の呼び出し列挙だけになる場合を
-  除く）という現状の利点を維持しつつ、テスト本体のコード重複は解消できる。
-  項目68（ファイル分割の方向性）と合わせて設計するのが良い。
-- **気づいた経緯**: 2026-08-24、`tests/nonlinear/test_probit.py`解説後のユーザー指摘。
-- **状態**: 未対応（方向性: 共通関数切り出し＋ファイルは分離維持）。項目68
-  Phase 2 nonlinear（2026-08-31）で `test_logit*.py`/`test_probit*.py` は
-  それぞれ `_api.py`/`_validation.py`/`_reference.py` の3ファイルへ分割されたが、
-  Logit 版と Probit 版のコードほぼ完全同一という重複は各ファイル対で残ったまま
-  （分割はファイル移動のみ、共通化は未実施）。切り出しは引き続きこの項目で追跡。
-
 ### 96. 項目85〜90が`tests/nonlinear/test_probit_fixtures.py`にも同様に該当する（一括注記）
 
 - **対象**: [tests/nonlinear/test_probit_fixtures.py](../../../tests/nonlinear/test_probit_fixtures.py)
   全体
 - **内容**: `tests/nonlinear/test_probit_fixtures.py`解説時、`sed`によるクラス名
   置換＋`diff`で`test_logit_fixtures.py`とコード部分が完全に同一
-  （項目95と同じ現象）であることを確認した。個別に項目を複製すると
+  （項目95、実装完了・削除済み、と同じ現象）であることを確認した。
+  個別に項目を複製すると
   項目数が倍増し見通しが悪くなるため、該当箇所を1項目にまとめて記録する。
   - **項目85**（`check_margeff`が項目72の参考実装）: このファイルも
     `_assertions.py`の`check_margeff`を正しく利用しており該当。
@@ -953,8 +919,9 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
     対応が適切）: `test_cluster_g2_matches_statsmodels`のdocstringが
     「Logitのcluster_cov_paramsと同じく」とLogit側を参照しており該当。
 - **Claudeの所感**: 対応する場合はLogit/Probit両方をまとめて一度に
-  修正するのが効率的（項目95の共通関数切り出しと合わせて対応すれば、
-  切り出した共通関数を直すだけで両手法に反映される）。
+  修正するのが効率的（項目95、実装完了・削除済み、の共通関数切り出しと
+  合わせて対応すれば、切り出した共通関数を直すだけで両手法に反映される
+  ——実際に2026-09-05の項目95実装でこの通りに解消した、下記参照）。
 - **気づいた経緯**: 2026-08-24、`tests/nonlinear/test_probit_fixtures.py`解説時に
   確認。
 - **状態**: 未対応（項目85〜90への追記の代わりにこの1項目に集約、
@@ -963,6 +930,14 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   項目85〜90の該当内容（`check_margeff` 利用・`hc1` 除外・OPG手計算・`_rename`・
   消極的 `margeff` チェック・G=2 docstring）はそのまま `_reference.py` へ移動した
   だけで未解消。
+  - **2026-09-05、項目95（実装完了・削除済み）の実装により解消**: `_check_result`・
+    `include_intercept_false`のOPG手計算・G=2クラスタのdocstring等が
+    `tests/nonlinear/_binary_choice_checks.py`の共通関数に集約されたため、
+    ここに列挙した項目85〜90の重複はLogit/Probit間で単一実装になった
+    （`hc1`除外は`test_probit_reference.py`側の`CONFIG.cov_types`リテラルに
+    残るが、Logit側と同じ値をそれぞれ独立定義している点は項目97の
+    `COV_TYPES`重複と同種の論点であり、本項目の対象だった「テスト本体の
+    重複」は解消済み）。
 
 ### 97. `COV_TYPES`/`NUMERIC_SCENARIOS`が`HAC_MAXLAGS`と同じ「生成スクリプト側定義をテストがimportする」パターンのまま、定数専用ファイルへの集約が半端
 

@@ -12,7 +12,9 @@ crosscheck系（`test_*_crosscheck.py`）は`test_ols_crosscheck.py`/
 再利用している。`test_logit_crosscheck.py`/`test_probit_crosscheck.py`のみ、
 シグネチャ（`assert_dict_close`が`rtol`引数を取らない等）の違いから独自実装の
 ままになっている。`_check_result`は手法ごとに検証するフィールド自体が異なるため、
-いずれもこのモジュールには含めない。
+いずれもこのモジュールには含めない（Logit/Probit間では検証フィールドが同一
+だったため、両者の`_check_result`は`tests/nonlinear/_binary_choice_checks.py`
+の`check_result`に集約済み、`refactoring-candidates-2.md`項目95）。
 """
 
 from __future__ import annotations

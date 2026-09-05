@@ -22,11 +22,10 @@
 
 from __future__ import annotations
 
-import math
-import random
 from collections.abc import Callable
 from pathlib import Path
 
+import numpy as np
 import polars as pl
 import pytest
 
@@ -56,17 +55,20 @@ def separation_suspected_dataset() -> pl.DataFrame:
     使う（Probit側もsigmoidベースのDGPをそのまま流用する。
     `test_logit_validation.py`のLogit版のProbit版という位置づけ、DGP自体の
     正確なProbitリンクである必要はない）。
+
+    `benchmark/`側のDGP（`benchmark/nonlinear/datasets.py`等）と同じ
+    `numpy`（`np.random.default_rng`）ベースのベクトル化演算で書く
+    （`refactoring-candidates-2.md`項目45、以前は標準ライブラリ`random`＋
+    素朴な`for`ループだった）。
     """
-    random.seed(42)
+    rng = np.random.default_rng(42)
     n = 200
     beta = (0.0, 100.0, 0.5)
-    x1 = [random.uniform(-2.0, 2.0) for _ in range(n)]
-    x2 = [random.uniform(-1.0, 1.0) for _ in range(n)]
-    y = []
-    for i in range(n):
-        z = beta[0] + beta[1] * x1[i] + beta[2] * x2[i]
-        p = 1.0 / (1.0 + math.exp(-z))
-        y.append(1.0 if random.random() < p else 0.0)
+    x1 = rng.uniform(-2.0, 2.0, size=n)
+    x2 = rng.uniform(-1.0, 1.0, size=n)
+    z = beta[0] + beta[1] * x1 + beta[2] * x2
+    p = 1.0 / (1.0 + np.exp(-z))
+    y = rng.binomial(1, p).astype(np.float64)
     return pl.DataFrame({"y": y, "x1": x1, "x2": x2})
 
 

@@ -29,22 +29,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ## 一覧
 
-### 45. `separation_suspected_dataset`だけ標準ライブラリ`random`/素朴な`for`ループで、他のDGPと生成方法が異なる
-
-- **対象**: [tests/_helpers.py:52-70](../../../tests/_helpers.py#L52-L70)
-  （`separation_suspected_dataset`、`random.seed`/`random.uniform`/
-  `math.exp`＋`for`ループ）
-- **内容**: ユーザー指摘（2026-08-22）。`benchmark/`側の全DGP
-  （`generate_*_datasets.py`）は`numpy`（`np.random.default_rng(seed)`）ベースの
-  ベクトル化演算で書かれており、`tests/_helpers.py`の`with_cluster_groups`も
-  polarsのベクトル演算だが、`separation_suspected_dataset`だけ標準ライブラリ
-  `random`モジュール＋`for`ループで1件ずつ`y`を生成している。
-- **Claudeの所感**: 実害はない（`n=200`程度の小規模データで、結果の正しさに
-  影響しない）が、リポジトリ全体の乱数生成の一貫性という観点では`numpy`に
-  揃える方が読み手の負担が減ると考える。優先度は低い。
-- **気づいた経緯**: 2026-08-22、`tests/_helpers.py`解説後のユーザー指摘。
-- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
-
 ### 46. `_helpers.py`/`_assertions.py`に定数と関数が混在している
 
 - **対象**: [tests/_helpers.py:34](../../../tests/_helpers.py#L34)（`DATA_DIR`）・

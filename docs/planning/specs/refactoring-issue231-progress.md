@@ -603,12 +603,28 @@
     tests`955件パス（`rename_intercept("const")`が恒等関数として働くため
     既存の比較ロジックは無変更で動作、不変）、`ruff`パス。
     `refactoring-candidates-2.md`から項目44・63を削除。
+  - **項目45 実施（2026-09-05）**: `tests/_helpers.py`の`separation_
+    suspected_dataset`が標準ライブラリ`random`＋素朴な`for`ループだった点を、
+    `benchmark/nonlinear/datasets.py`と同じ`numpy`（`np.random.default_rng`）
+    ベースのベクトル化演算に書き換えた。`rng.uniform(low, high, size=n)`で
+    `x1`/`x2`を一括生成し、`y`は`rng.binomial(1, p).astype(np.float64)`
+    （`benchmark/nonlinear/datasets.py:162`と同じ書き方）で生成。乱数
+    アルゴリズム自体が変わるため`x1`/`x2`/`y`の具体的な値は変わるが、
+    このデータセットは`pytest.raises(ComputationError)`のみを確認する
+    テスト（数値比較なし）でしか使われていないため問題ない
+    （`beta=(0.0, 100.0, 0.5)`という`x1`に極端に大きい係数を与える設計
+    自体が乱数のシードによらず准完全分離を作る、という前提は変更前後で
+    同じ）。`test_logit_validation.py`/`test_probit_validation.py`の
+    `test_separation_suspected_raises_computation_error_for_near_
+    separation_data`が引き続き`ComputationError`を送出することを確認、
+    `pytest tests`955件パス、`ruff`パス。`refactoring-candidates-2.md`
+    から項目45を削除。
 - 上記以外（`refactoring-candidates.md`項目12・13・15〜35・37・39）は
   未着手。
-  `refactoring-candidates-2.md`は項目44・47・48・50・63が対応済み（上記）、
-  項目45・46・49は未着手。項目51以降は別セッションが並行して追記・
-  コミットしているため、このスナップショットでは網羅しない（同ファイルを
-  直接参照すること）。
+  `refactoring-candidates-2.md`は項目44・45・47・48・50・63が対応済み
+  （上記）、項目46・49は未着手。項目51以降は別セッションが並行して
+  追記・コミットしているため、このスナップショットでは網羅しない
+  （同ファイルを直接参照すること）。
 
 **並行作業についての注意**: 本セッションと並行して、別セッションが
 `refactoring-candidates.md`を対象にした別の作業（コード解説中の気づき記録等）を

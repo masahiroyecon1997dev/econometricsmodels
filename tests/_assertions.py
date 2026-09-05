@@ -15,13 +15,16 @@ crosscheck系（`test_*_crosscheck.py`）は`test_ols_crosscheck.py`/
 いずれもこのモジュールには含めない（Logit/Probit間では検証フィールドが同一
 だったため、両者の`_check_result`は`tests/nonlinear/_binary_choice_checks.py`
 の`check_result`に集約済み、`refactoring-candidates-2.md`項目95）。
+
+`MARGEFF_AT`定数は`_constants.py`に分離済み（項目46、ファイル名が関数
+〔アサーション〕を示唆するのに定数も同居していたための整理）。
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 
-MARGEFF_AT = ["overall", "mean", "median"]
+from _constants import MARGEFF_AT
 
 
 def rename_intercept(name: str) -> str:

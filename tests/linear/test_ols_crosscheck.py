@@ -50,7 +50,8 @@ from pathlib import Path
 import polars as pl
 import pytest
 from _assertions import assert_close, assert_dict_close
-from _helpers import DATA_DIR, with_cluster_groups, wooldridge_loader
+from _constants import DATA_DIR
+from _helpers import with_cluster_groups, wooldridge_loader
 from _tolerances import TOLERANCES
 from econometricsmodels import OLS, OLSOptions
 

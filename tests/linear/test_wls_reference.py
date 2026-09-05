@@ -32,7 +32,8 @@ import polars as pl
 import pytest
 from _assertions import assert_close, assert_dict_close
 from _assertions import rename_intercept as _rename
-from _helpers import DATA_DIR, load_wooldridge_dataset, with_cluster_groups
+from _constants import DATA_DIR
+from _helpers import load_wooldridge_dataset, with_cluster_groups
 from _tolerances import TOLERANCES
 from econometricsmodels import WLS, OLSOptions
 

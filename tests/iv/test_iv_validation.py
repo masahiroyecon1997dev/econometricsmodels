@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import polars as pl
 import pytest
-from _helpers import DATA_DIR
+from _constants import DATA_DIR
 from _iv_helpers import our_fit
 from econometricsmodels import (
     IV,

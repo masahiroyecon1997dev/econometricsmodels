@@ -39,12 +39,8 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from _helpers import (
-    DATA_DIR,
-    MROZ_X,
-    load_wooldridge_dataset,
-    with_cluster_groups,
-)
+from _constants import DATA_DIR, MROZ_X
+from _helpers import load_wooldridge_dataset, with_cluster_groups
 from _tolerances import TOLERANCES
 from econometricsmodels import Probit, ProbitOptions
 

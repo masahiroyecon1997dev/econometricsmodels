@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import polars as pl
 import pytest
-from _helpers import DATA_DIR, with_cluster_groups
+from _constants import DATA_DIR
+from _helpers import with_cluster_groups
 from _ols_helpers import our_fit
 from econometricsmodels import (
     OLS,

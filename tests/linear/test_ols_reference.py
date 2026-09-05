@@ -39,7 +39,8 @@ import pytest
 import statsmodels.api as sm
 from _assertions import assert_close, assert_dict_close
 from _assertions import rename_intercept as _rename
-from _helpers import DATA_DIR, with_cluster_groups
+from _constants import DATA_DIR
+from _helpers import with_cluster_groups
 from _ols_helpers import (
     our_fit,
     our_fit_cluster,

@@ -31,9 +31,8 @@ import polars as pl
 import pytest
 from _assertions import assert_close, assert_dict_close, check_margeff
 from _assertions import rename_intercept as _rename
+from _constants import DATA_DIR, MROZ_X
 from _helpers import (
-    DATA_DIR,
-    MROZ_X,
     load_wooldridge_dataset,
     separation_suspected_dataset,
     with_cluster_groups,

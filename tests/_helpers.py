@@ -9,27 +9,23 @@
   「テストの分離」参照。ユーザー確認済み）。
 - `separation_suspected_dataset`: 準完全分離データのDGP
   （`test_logit_validation.py`/`test_probit_validation.py`で完全に同一実装だった）。
-- `MROZ_X`: Wooldridge mrozデータセットの説明変数リスト。
 - `load_wooldridge_dataset`: Wooldridgeデータセットのロード（`wooldridge`
   パッケージが無い環境ではskip）。`benchmark/load_wooldridge.py`の`load`を
   呼ぶだけの`wooldridge.data(name)`→`pl.from_pandas`実装が、複数ファイルに
   微妙に異なる書き方（直接呼び出し／`load_wooldridge.py`経由）で重複していた。
-- `DATA_DIR`: 固定済み合成データセットCSV（`tests/fixtures/benchmarks/data/`）の
-  置き場所。全テストファイルが`tests/`直下にあるため値は常に同じで、
-  `Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"`という
-  同一の組み立て方が複数ファイルに重複していた。
+
+定数（`DATA_DIR`・`MROZ_X`）は`_constants.py`に分離済み
+（`refactoring-candidates-2.md`項目46、ファイル名が関数を示唆するのに
+定数も同居していたための整理）。
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
 
 import numpy as np
 import polars as pl
 import pytest
-
-DATA_DIR = Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"
 
 
 def with_cluster_groups(
@@ -70,9 +66,6 @@ def separation_suspected_dataset() -> pl.DataFrame:
     p = 1.0 / (1.0 + np.exp(-z))
     y = rng.binomial(1, p).astype(np.float64)
     return pl.DataFrame({"y": y, "x1": x1, "x2": x2})
-
-
-MROZ_X = ["nwifeinc", "educ", "exper", "expersq", "age", "kidslt6", "kidsge6"]
 
 
 def wooldridge_loader() -> Callable[[str], pl.DataFrame]:

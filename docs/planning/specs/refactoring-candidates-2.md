@@ -29,20 +29,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ## 一覧
 
-### 46. `_helpers.py`/`_assertions.py`に定数と関数が混在している
-
-- **対象**: [tests/_helpers.py:34](../../../tests/_helpers.py#L34)（`DATA_DIR`）・
-  [tests/_helpers.py:73](../../../tests/_helpers.py#L73)（`MROZ_X`）・
-  [tests/_assertions.py:19](../../../tests/_assertions.py#L19)（`MARGEFF_AT`）
-- **内容**: ユーザー指摘（2026-08-22）。`_helpers`/`_assertions`という
-  ファイル名は関数（ヘルパー・アサーション）を示唆するが、実際には
-  `DATA_DIR`・`MROZ_X`・`MARGEFF_AT`という定数も同居している。
-- **Claudeの所感**: ユーザー自身も「あまり問題になるものではない」とコメント
-  している通り実害は乏しい。定数を`_constants.py`のような別ファイルへ分離する
-  ほどの量ではなく、現状維持でも大きな支障は無いと考える。優先度は低い。
-- **気づいた経緯**: 2026-08-22、`tests/_helpers.py`解説後のユーザー指摘。
-- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
-
 ### 49. `tests/_tolerances.py`の許容誤差が全て直書きで、共通する値（機械精度ベース等）が定数化されていない
 
 - **対象**: [tests/_tolerances.py:18-113](../../../tests/_tolerances.py#L18-L113)

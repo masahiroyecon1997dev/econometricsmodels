@@ -8,8 +8,8 @@
 参照値生成スクリプト（`references/statsmodels_ref.py`等）はこのファイルの
 定数を消費する側であり、値の定義そのものは置かない。生成スクリプトを
 将来編集する際に、テスト側が依存する定数を意図せず壊すリスクを避けるため
-（経緯は`docs/planning/specs/refactoring-issue231-progress.md`「項目58
-追加対応」参照）。
+（経緯は`docs/planning/specs/refactoring-issue231-progress.md`「項目58」
+参照）。
 """
 
 from __future__ import annotations

@@ -23,7 +23,16 @@ MARGEFF_AT = ["overall", "mean", "median"]
 
 
 def rename_intercept(name: str) -> str:
-    """statsmodels/linearmodels(formula API)の切片名"Intercept"を本実装の"const"に揃える。"""
+    """statsmodels/linearmodels(formula API)の切片名"Intercept"を本実装の"const"に揃える。
+
+    OLS/WLS/Logit/Probitの主リファレンス（statsmodels）は生成時点で
+    `benchmark/common/reference/normalize.py`により`"const"`へ正規化済み
+    （`docs/planning/specs/refactoring-issue231-progress.md`項目63）なため、
+    現状このデフォルト値がそのまま使われる呼び出しでは実質no-opになる。
+    `rename`引数自体は、`normalize.py`の`intercept_aliases`引数と同じ理由
+    （将来切片名の命名規則が異なるリファレンス実装が加わった場合の拡張
+    ポイント、コストの低いデフォルト引数のため維持）で残している。
+    """
     return "const" if name == "Intercept" else name
 
 

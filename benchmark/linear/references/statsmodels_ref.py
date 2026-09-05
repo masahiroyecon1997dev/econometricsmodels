@@ -36,6 +36,7 @@ import polars as pl
 
 from benchmark.common import extract_coef_se, load_frozen_dataset
 from benchmark.common.load_wooldridge import load as _load_wooldridge
+from benchmark.common.reference.normalize import normalize_names
 from benchmark.linear.constants import HAC_MAXLAGS
 
 
@@ -95,7 +96,7 @@ def run(
     alpha = 1.0 - confidence_level
     ci = model.conf_int(alpha=alpha)
 
-    result: dict = {
+    raw: dict = {
         **extract_coef_se(model),
         "t_stats": {
             str(k): float(v) for k, v in model.tvalues.to_dict().items()
@@ -107,16 +108,21 @@ def run(
             str(idx): [float(row[0]), float(row[1])]
             for idx, row in ci.iterrows()
         },
-        "r_squared": float(model.rsquared),
-        "r_squared_adj": float(model.rsquared_adj),
-        "f_statistic": float(model.fvalue),
-        "f_p_value": float(model.f_pvalue),
-        "aic": float(model.aic),
-        "bic": float(model.bic),
-        "log_likelihood": float(model.llf),
-        "nobs": int(model.nobs),
-        "df_resid": int(model.df_resid),
     }
+    # patsy（formula API）由来の生の切片名"Intercept"を、生成時点で本実装の
+    # "const"へ正規化する（Rクロスチェック側`normalize_names`と同じ処理を
+    # 生成時に揃える。`docs/planning/specs/refactoring-issue231-progress.md`
+    # 項目63参照）。
+    result = normalize_names(raw, stat_key="t_stats")
+    result["r_squared"] = float(model.rsquared)
+    result["r_squared_adj"] = float(model.rsquared_adj)
+    result["f_statistic"] = float(model.fvalue)
+    result["f_p_value"] = float(model.f_pvalue)
+    result["aic"] = float(model.aic)
+    result["bic"] = float(model.bic)
+    result["log_likelihood"] = float(model.llf)
+    result["nobs"] = int(model.nobs)
+    result["df_resid"] = int(model.df_resid)
     if true_beta is not None:
         result["true_beta"] = true_beta
 

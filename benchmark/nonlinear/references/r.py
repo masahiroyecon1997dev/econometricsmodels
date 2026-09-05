@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from benchmark.common.reference.r import normalize_names, run_r
+from benchmark.common.reference.normalize import normalize_names
+from benchmark.common.reference.r import run_r
 
 _R_SCRIPT = Path(__file__).resolve().parent / "run_glm_crosscheck.R"
 

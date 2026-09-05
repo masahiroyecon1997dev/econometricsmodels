@@ -29,28 +29,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ## 一覧
 
-### 44. `assert_dict_close`/`check_margeff`の`rename`引数が、非デフォルト値で呼ばれている箇所が無い
-
-- **対象**: [tests/_assertions.py:37-53](../../../tests/_assertions.py#L37-L53)
-  （`assert_dict_close`の`rename: Callable[[str], str] = rename_intercept`）・
-  [tests/_assertions.py:56-64](../../../tests/_assertions.py#L56-L64)
-  （`check_margeff`の同じく`rename`引数）
-- **内容**: ユーザー指摘（2026-08-22）。`grep`で全呼び出し元
-  （`test_ols_fixtures.py`・`test_wls_fixtures.py`・`test_logit_fixtures.py`・
-  `test_probit_fixtures.py`・`test_iv_fixtures.py`・`test_iv_gmm_fixtures.py`、
-  いずれも`functools.partial`で`rtol`/`atol`のみ束縛してから呼んでいる）を
-  確認したところ、`rename=`を明示的に渡している箇所は1件も無かった。全呼び出しが
-  デフォルト値の`rename_intercept`をそのまま使っている。
-- **Claudeの所感**: 現状は「将来、切片名の変換ルールが異なるリファレンス実装が
-  出てきた場合に備えた拡張ポイント」という位置づけだが、実際に使われたことが
-  一度も無い。YAGNI（You Aren't Gonna Need It）の観点では引数自体を削除して
-  `rename_intercept`を関数内に固定してしまう方が単純だが、拡張ポイントとして
-  意図的に残しているだけの可能性もあり、削除するかどうかはユーザー判断に委ねる。
-- **気づいた経緯**: 2026-08-22、`tests/_assertions.py`解説後のユーザー指摘・
-  確認依頼。
-- **状態**: 未対応（`rename`引数を削除するか、拡張ポイントとして維持するかは
-  ユーザー判断待ち）
-
 ### 45. `separation_suspected_dataset`だけ標準ライブラリ`random`/素朴な`for`ループで、他のDGPと生成方法が異なる
 
 - **対象**: [tests/_helpers.py:52-70](../../../tests/_helpers.py#L52-L70)
@@ -269,32 +247,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   複数箇所）も同時に削減できる。
 - **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_crosscheck.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
-
-### 63. Intercept→const正規化のタイミングがR側（生成時）とstatsmodels側（テスト実行時）で不一致。生成時統一で項目44も解消できる
-
-- **対象**: [benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py:124-132](../../../benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py#L124-L132)
-  （`_normalize_names`相当、生成時に`"(Intercept)"`/`"Intercept"`を`"const"`へ
-  正規化してJSONに書き込む）と対比した
-  [benchmark/linear/run_statsmodels_benchmark.py:92](../../../benchmark/linear/run_statsmodels_benchmark.py#L92)
-  （`smf.ols(formula=...)`、patsy由来の生の`"Intercept"`をそのままJSONに
-  書き込む）・[tests/_assertions.py:22-24](../../../tests/_assertions.py#L22-L24)
-  （`rename_intercept`、テスト実行時に`_check_result`等が毎回呼ぶ変換）
-- **内容**: ユーザー指摘（2026-08-23、「Rとpythonも合わせたほうがいい」）を
-  受けて調査。Rクロスチェック側は生成スクリプトの時点で切片名を`"const"`に
-  正規化済みのため、`test_ols_crosscheck.py`は`_rename`不要。一方
-  statsmodels主リファレンス側（`run_statsmodels_benchmark.py`、OLS/WLS/
-  Logit/Probit共通で`smf.*`のformula APIを使用）はこの正規化をしておらず、
-  `test_ols_fixtures.py`/`test_wls_fixtures.py`/`test_logit_fixtures.py`/
-  `test_probit_fixtures.py`が毎回`_rename`で変換する構造になっている。
-- **Claudeの所感**: Rクロスチェック側が既に正しいやり方をしているため、
-  statsmodels主リファレンス側の生成スクリプトでも生成時に正規化する方向へ
-  揃えるのが筋が良い。これが実現すれば、`_rename`をテスト実行のたびに
-  呼ぶ必要がなくなるだけでなく、**項目44**（`assert_dict_close`/
-  `check_margeff`の`rename`引数が一度もデフォルト値以外で呼ばれていない、
-  YAGNI疑惑）が副産物として解消する（`rename`引数自体が不要になるため）。
-  単なる命名統一ではなく項目44を包含するより本質的な修正案と考える。
-- **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_crosscheck.py`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち、項目44と関連）
 
 ### 64. `predict()`の戻り値辞書のキーが`"fitted"`固定で、新規データ（out-of-sample）予測に対しても統計学的に不正確な用語になっている
 

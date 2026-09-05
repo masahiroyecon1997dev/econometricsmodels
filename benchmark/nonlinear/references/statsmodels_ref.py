@@ -67,6 +67,7 @@ import numpy as np
 
 from benchmark.common import load_frozen_dataset as _load_synthetic
 from benchmark.common.load_wooldridge import load as _load_wooldridge
+from benchmark.common.reference.normalize import normalize_names
 
 MARGEFF_AT = ["overall", "mean", "median"]
 
@@ -142,7 +143,7 @@ def run(
         conf_low = params - z_crit * se
         conf_high = params + z_crit * se
 
-        result: dict = {
+        raw: dict = {
             "coef": dict(zip(param_names, params.tolist())),
             "se": dict(zip(param_names, se.tolist())),
             "z_stats": dict(zip(param_names, z.tolist())),
@@ -151,8 +152,11 @@ def run(
                 name: [float(lo), float(hi)]
                 for name, lo, hi in zip(param_names, conf_low, conf_high)
             },
-            "margeff": None,  # opgの限界効果はRクロスチェック（marginaleffects）側を正とする
         }
+        # opgの限界効果はRクロスチェック（marginaleffects）側を正とするため
+        # margeffはNoneのまま（fix_margeff=Falseで正規化対象から外す）。
+        result = normalize_names(raw, stat_key="z_stats")
+        result["margeff"] = None
         model_for_stats = base
     else:
         sm_cov_type = {"classical": "nonrobust"}.get(
@@ -166,7 +170,7 @@ def run(
         fitted = sm_model.fit(disp=0, **fit_kwargs)
 
         ci = fitted.conf_int(alpha=alpha)
-        result = {
+        raw = {
             "coef": {
                 str(k): float(v) for k, v in fitted.params.to_dict().items()
             },
@@ -183,6 +187,12 @@ def run(
             },
             "margeff": {at: _margeff_frame(fitted, at) for at in MARGEFF_AT},
         }
+        # patsy（formula API）由来の生の切片名"Intercept"を、生成時点で
+        # 本実装の"const"へ正規化する（Rクロスチェック側`normalize_names`と
+        # 同じ処理を生成時に揃える。`docs/planning/specs/
+        # refactoring-issue231-progress.md`項目63参照）。margeffの内側の
+        # パラメータ名も同時に畳む（fix_margeff=True）。
+        result = normalize_names(raw, stat_key="z_stats", fix_margeff=True)
         model_for_stats = fitted
 
     result["log_likelihood"] = float(model_for_stats.llf)

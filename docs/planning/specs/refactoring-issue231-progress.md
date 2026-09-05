@@ -577,11 +577,38 @@
     performance.compare_...`という`-m`形式でPYTHONPATH非依存に解決して
     いる（同ファイルのコメントに明記済み）。以上より項目50は解消済みと
     判断し`refactoring-candidates-2.md`から削除。コード変更は無し。
+  - **項目44・63 実施（2026-09-05）**: ユーザー方針確認（「基本、
+    benchmarkに寄せる。他のrenameに使用できるようにデフォルト値は残す」）
+    に基づき実装。項目63（Intercept→const正規化のタイミングがRクロス
+    チェック側は生成時・statsmodels主リファレンス側はテスト実行時で
+    不一致）を解消するため、Rクロスチェック専用だった`benchmark/common/
+    reference/r.py`の`normalize_names`を、系統横断で使える新設の
+    `benchmark/common/reference/normalize.py`へ移設（`run_r`はRスクリプト
+    呼び出し専用として`r.py`に残置）。`benchmark/linear/references/
+    statsmodels_ref.py`（OLS/WLS）・`benchmark/nonlinear/references/
+    statsmodels_ref.py`（Logit/Probit、`opg`分岐含む）の`run()`が、生成した
+    `raw`辞書（`coef`/`se`/`t_stats`or`z_stats`/`p_values`/`conf_int`、
+    Logit/Probitは`margeff`も）をこの`normalize_names`に通してから返す形に
+    変更（patsy由来の生の`"Intercept"`を生成時点で`"const"`へ正規化）。
+    IV側（`linearmodels_ref.py`）は元々生成時に独自の`"const"`変換を
+    持っていたため対象外。項目44（`tests/_assertions.py`の`assert_dict_
+    close`/`check_margeff`の`rename`引数が一度も非デフォルト値で呼ばれて
+    いない）は、ユーザー方針通り引数自体は削除せず、`normalize.py`の
+    `intercept_aliases`引数と同じ理由（コストの低いデフォルト引数の
+    拡張ポイント、将来別命名規則のリファレンス実装が加わった場合に備える）
+    で維持する形に決着。`rename_intercept`のdocstringにその旨を追記。
+    フィクスチャ再生成: `ols.json`/`wls.json`/`logit.json`/`probit.json`を
+    再生成し、diffが全て`"Intercept"`→`"const"`のキー名変更のみ（値は完全に
+    同一）であることを確認（`generated_at`除く差分をgrepで検証）。`pytest
+    tests`955件パス（`rename_intercept("const")`が恒等関数として働くため
+    既存の比較ロジックは無変更で動作、不変）、`ruff`パス。
+    `refactoring-candidates-2.md`から項目44・63を削除。
 - 上記以外（`refactoring-candidates.md`項目12・13・15〜35・37・39）は
   未着手。
-  `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は
-  未着手。項目50以降は別セッションが並行して追記・コミットしているため、
-  このスナップショットでは網羅しない（同ファイルを直接参照すること）。
+  `refactoring-candidates-2.md`は項目44・47・48・50・63が対応済み（上記）、
+  項目45・46・49は未着手。項目51以降は別セッションが並行して追記・
+  コミットしているため、このスナップショットでは網羅しない（同ファイルを
+  直接参照すること）。
 
 **並行作業についての注意**: 本セッションと並行して、別セッションが
 `refactoring-candidates.md`を対象にした別の作業（コード解説中の気づき記録等）を

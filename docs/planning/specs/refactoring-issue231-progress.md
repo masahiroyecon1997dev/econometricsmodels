@@ -555,6 +555,28 @@
       テストがimportする」形のまま残っており、同種の非対称性があるとの
       指摘があった。今回のスコープ外（ユーザー指示は`HAC_MAXLAGS`のみ）
       のため対応せず、必要なら別途候補メモに起こす。
+  - **項目50 確認（2026-09-05）**: `sys.path.insert`（devcontainerのみ
+    PYTHONPATH化済みでCI・`tests/`は据え置き）という項目自体の前提が、
+    既に解消済みであることを確認した。項目が挙げていた
+    `tests/conftest.py`の`sys.path.insert`・11個の`test_*_fixtures.py`/
+    `test_*_crosscheck.py`個別挿入・`_helpers.py`の重複分は、いずれも
+    現存しない（`sys.path.insert`はリポジトリ全体でgrep 0件）。解決経路は
+    項目50自身の所感（`ci_python.yml`にPYTHONPATHを追加）とは異なり、
+    `pyproject.toml`の`[tool.pytest.ini_options] pythonpath = [".",
+    "tests"]`（Initiative Aで導入、同ファイルのコメントに経緯明記）が
+    pytest実行時に一律`sys.path`へ追加する形で解決していた。これは
+    devcontainer/CI問わずpytestが動く場所で一律に効くため、OS環境変数の
+    PYTHONPATHには依存しない（`env -u PYTHONPATH`で明示的に外しても
+    `pytest tests`が全件パスすることで確認済み）。`ci_python.yml`は
+    `pytest`のみ実行するため未設定のままで問題無い。devcontainer側の
+    `remoteEnv.PYTHONPATH`も項目50が言及していた細かいリスト指定では
+    なく`${containerWorkspaceFolder}`1つに簡略化済みで、これは`tests/`
+    ではなく`performance/`スクリプトの直接パス実行（`python
+    performance/compare_ols.py`等）向けの利便設定であり、CI側の性能比較
+    ワークフロー（`benchmark_performance.yml`）は`python -m
+    performance.compare_...`という`-m`形式でPYTHONPATH非依存に解決して
+    いる（同ファイルのコメントに明記済み）。以上より項目50は解消済みと
+    判断し`refactoring-candidates-2.md`から削除。コード変更は無し。
 - 上記以外（`refactoring-candidates.md`項目12・13・15〜35・37・39）は
   未着手。
   `refactoring-candidates-2.md`は項目47・48が対応済み（上記）、項目44〜46・49は

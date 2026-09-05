@@ -37,7 +37,8 @@ from benchmark.nonlinear.freeze import freeze as _freeze_nonlinear
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # 各手法のフィクスチャ生成モジュール（`python -m` で実行する。出力先は各モジュール
-# の既定＝`tests/fixtures/benchmarks/<name>.json`）。末尾5本は `Rscript` 必須。
+# の既定＝`tests/fixtures/benchmarks/<name>.json`）。generate_tobit_fixtures 以降は
+# `Rscript` 必須（Tobit は主・交差検証とも R、以降の *_crosscheck も R）。
 _FIXTURE_MODULES = [
     "benchmark.linear.fixtures.generate_ols_fixtures",
     "benchmark.linear.fixtures.generate_wls_fixtures",
@@ -45,10 +46,14 @@ _FIXTURE_MODULES = [
     "benchmark.nonlinear.fixtures.generate_probit_fixtures",
     "benchmark.iv.fixtures.generate_iv_fixtures",
     "benchmark.iv.fixtures.generate_iv_gmm_fixtures",
+    # Tobit は主リファレンス（AER::tobit）も交差検証（censReg）も R 実装のため
+    # 両方 Rscript 必須。
+    "benchmark.nonlinear.fixtures.generate_tobit_fixtures",
     "benchmark.linear.fixtures.generate_ols_crosscheck_fixtures",
     "benchmark.linear.fixtures.generate_wls_crosscheck_fixtures",
     "benchmark.nonlinear.fixtures.generate_logit_crosscheck_fixtures",
     "benchmark.nonlinear.fixtures.generate_probit_crosscheck_fixtures",
+    "benchmark.nonlinear.fixtures.generate_tobit_crosscheck_fixtures",
     "benchmark.iv.fixtures.generate_iv_crosscheck_fixtures",
 ]
 

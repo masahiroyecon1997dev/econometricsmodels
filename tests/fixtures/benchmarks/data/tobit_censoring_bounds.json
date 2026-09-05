@@ -1,0 +1,46 @@
+{
+  "light_censoring": [
+    -1.227156,
+    null
+  ],
+  "moderate_censoring": [
+    0.057699,
+    null
+  ],
+  "heavy_censoring": [
+    1.385524,
+    null
+  ],
+  "right_censoring": [
+    null,
+    1.698272
+  ],
+  "interval_censoring": [
+    -0.801806,
+    2.596116
+  ],
+  "small_n": [
+    -0.071368,
+    null
+  ],
+  "moderate_multicollinearity": [
+    -0.084716,
+    null
+  ],
+  "high_condition_number": [
+    -0.00893,
+    null
+  ],
+  "scale_variance_mild": [
+    -0.190578,
+    null
+  ],
+  "scale_variance": [
+    -0.190578,
+    null
+  ],
+  "perfect_multicollinearity": [
+    -1.212196,
+    null
+  ]
+}

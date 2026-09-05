@@ -82,12 +82,19 @@ RUN apt update && apt install -y --no-install-recommends \
 # 依存関係により後段のパッケージが前段のsandwich/lmtestを別バージョンで引き込むことがある
 # ため、他パッケージに依存されがちなsandwich/lmtestは最後にピン留めし直し、最終的な導入
 # バージョンを確定させる。
+# AER（tobit＝survival::survreg薄ラッパー、Tobit主リファレンス）とcensReg（maxLikエンジン、
+# Tobit交差検証）はIssue #227で追加。両者はsandwich等を引き込むため、最終ピン留めの前に
+# upgrade="never"で導入する。numDeriv はTobit限界効果のデルタ法SEをformula非依存に検証する
+# （testing-policy.md「リファレンス実装」）ために追加。
 RUN Rscript -e 'install.packages("remotes", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'remotes::install_version("fixest", version = "0.14.2", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'remotes::install_version("plm", version = "2.6.7", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'remotes::install_version("ivreg", version = "0.6.8", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'remotes::install_version("jsonlite", version = "2.0.0", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'remotes::install_version("marginaleffects", version = "0.32.0", repos = "https://cloud.r-project.org")' \
+    && Rscript -e 'remotes::install_version("numDeriv", version = "2016.8-1.1", repos = "https://cloud.r-project.org")' \
+    && Rscript -e 'remotes::install_version("AER", version = "1.2-15", upgrade = "never", repos = "https://cloud.r-project.org")' \
+    && Rscript -e 'remotes::install_version("censReg", version = "0.5-38", upgrade = "never", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'remotes::install_version("sandwich", version = "3.1.3", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'remotes::install_version("lmtest", version = "0.9.40", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'install.packages("languageserver", repos = "https://cloud.r-project.org")'

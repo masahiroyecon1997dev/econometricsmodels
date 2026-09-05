@@ -38,8 +38,12 @@ python -m benchmark.regenerate_all --datasets-only    # 全系統CSVのみ（Rsc
   wheel/sdistの中身）は[MITライセンス](../LICENSE)です。
 - `benchmark/`配下のRスクリプト（`*.R`）は、独立実装によるクロスチェック用に以下の
   Rパッケージを使用します。
-  - `fixest` / `plm` / `ivreg` / `sandwich` / `lmtest`: GPL-2 / GPL-3（パッケージにより異なる）
+  - `fixest` / `plm` / `ivreg` / `sandwich` / `lmtest` / `AER` / `censReg` /
+    `maxLik` / `survival` / `numDeriv`: GPL-2 / GPL-3（パッケージにより異なる）
   - `jsonlite`: MIT
+  - `AER`（`tobit`＝`survival::survreg` の薄ラッパー）は Tobit の主リファレンス、
+    `censReg`（`maxLik` エンジン）は Tobit の交差検証、`numDeriv` は Tobit 限界効果の
+    デルタ法 SE を formula 非依存に検証するために使用します。
 - これらのRパッケージはPyPI配布物には一切含まれません。Pythonスクリプトから
   `subprocess`経由で別プロセスの`Rscript`を呼び出しているだけで、リンク・
   同梱・配布のいずれも行っていないため、本リポジトリのMITライセンスに対する

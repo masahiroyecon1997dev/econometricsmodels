@@ -1562,3 +1562,51 @@
   指摘。
 - **状態**: 未対応（項目32・39・40と統合して対応するのが効率的、
   着手要否はユーザー判断待ち）
+
+### 64. HACの自動ラグ選択式（`L = floor(4*(n/100)^(2/9))`）がRust実装とPython実装（`benchmark/common/dgp.py`の`hac_auto_lag`）で一致することを直接検証するテストが無い（IV 2SLS/GMMは特に、Rust内の自己整合性チェックのみ）
+
+- **対象**: [engine/src/linear/ols.rs:1601](../../../engine/src/linear/ols.rs#L1601)
+  （`fit_computes_hac_std_errors_with_auto_lags`）・
+  [engine/src/iv/two_sls.rs:1733](../../../engine/src/iv/two_sls.rs#L1733)
+  （`fit_computes_hac_std_errors_with_auto_lags_matching_explicit_lags`）・
+  [engine/src/iv/gmm.rs:2255](../../../engine/src/iv/gmm.rs#L2255)
+  （`fit_with_kernel_weight_type_and_auto_lags_matches_explicit_lags_two`）、
+  および`tests/linear/test_ols_api.py`・`test_wls_api.py`・`tests/iv/test_iv_api.py`の
+  各`test_hac_auto_lags_runs_and_returns_finite_std_errors`
+- **内容**: HAC自動ラグ選択式（`hac_lags=None`時に`L = floor(4*(n/100)^(2/9))`で
+  自動計算）は、Rust側（`ols.rs`/`two_sls.rs`/`gmm.rs`各所の`resolve_hac_lags`、
+  独立実装3箇所）とPython側（`benchmark/common/dgp.py`の`hac_auto_lag`、
+  ベンチマーク・性能比較・R/linearmodelsクロスチェックのフィクスチャ生成が
+  この1関数を単一の定義元として使う）の両方に存在するが、**この2つの独立実装が
+  同じ値を返すことを直接比較する自動テストが無い**。
+  - OLS側の`fit_computes_hac_std_errors_with_auto_lags`（`n=5`→`L=2`）は
+    唯一、期待値がstatsmodelsに`maxlags=2`を明示指定して独立に計算・検算した
+    値だとコメントに明記されており、実質的にクロス言語で直接検証された
+    唯一の例（ただし`n=5`の1点のみ）。
+  - IV 2SLS/GMM側の該当テストは、`lags=None`と`lags=Some(2)`という
+    **Rust内の2つのパスの自己整合性**を確認しているだけで、
+    Python側`hac_auto_lag(8)`の値と突き合わせてはいない。
+  - `tests/iv/test_iv_reference.py`等の大規模フィクスチャ照合テスト
+    （`cov_type="hac"`を含めて`rtol=1e-8`で一律検証、緩和分岐なしを確認済み）が
+    実質的に間接検証として機能してはいる（`n=500`・`n=3`・実データ`card`の
+    複数`n`で通過）。HACのSEはラグ数が変われば通常は明確に数値が変わるため、
+    式が食い違ったまま複数の異なる`n`で偶然一致し続ける可能性は低いと考えられるが、
+    **確率的な傍証であり証明ではない**。
+  - `OLSResult`/`IvResult`（`engine_pybind/src/linear/ols.rs:136-160`等）は
+    `cov_type`文字列のみをエコーバックし、実際に解決されたラグ数自体は
+    結果オブジェクトのどこにも露出していないため、外部から直接確認する
+    手段が現状無い（`refactoring-candidates.md`系ではなくAPI追加の話のため、
+    別途Issue化を検討、`.claude/skills/refactor/SKILL.md`「観点5」参照）。
+- **Claudeの所感**: 各手法の`test_hac_auto_lags_runs_and_returns_finite_std_errors`
+  （OLS/WLS/IV 2SLS/IV GMMの4箇所）に、`benchmark.common.hac_auto_lag(n)`を
+  明示的に`hac_lags`へ渡した結果と、`hac_lags=None`（自動）の結果を同一
+  データセットで比較し、標準誤差が厳密一致することを確認するテストを追記すれば、
+  結果にラグ数を露出させなくても直接検証できる（IV 2SLS/GMMのRust内蔵
+  テストと同じ発想をPython側で行い、実際にPython⇔Rustの式一致を検証する形に
+  拡張する）。
+- **気づいた経緯**: 2026-09-05、`HAC_MAXLAGS`（`benchmark/linear/constants.py`）の
+  設計を巡るユーザーとの議論中に、IV側の自動ラグ選択式の一致がどこまで
+  検証されているかを確認した過程で判明。
+- **状態**: 未対応（記録のみ、着手要否はユーザー判断待ち）。ラグ数を結果に
+  含める案は別途**Issue #282**として発行済み（これが実現すれば、本項目の
+  直接クロス言語検証テストも結果を介して書けるようになる）。

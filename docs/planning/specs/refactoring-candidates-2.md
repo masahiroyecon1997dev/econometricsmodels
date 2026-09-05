@@ -29,25 +29,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ## 一覧
 
-### 49. `tests/_tolerances.py`の許容誤差が全て直書きで、共通する値（機械精度ベース等）が定数化されていない
-
-- **対象**: [tests/_tolerances.py:18-113](../../../tests/_tolerances.py#L18-L113)
-  （`TOLERANCES`辞書全体）
-- **内容**: ユーザー指摘（2026-08-22）。`1e-8`（機械精度に近い基準、
-  `ols_fixtures`/`wls_fixtures`/`iv_fixtures`/`iv_gmm_fixtures`/
-  `logit_fixtures`/`probit_fixtures`の`rtol`、`ols_crosscheck`/`wls_crosscheck`/
-  `iv_crosscheck`の`rtol_strict`で共通）や`1e-8`（`atol`、複数エントリで共通）
-  のような、複数箇所で同じ値・同じ理由（機械精度、CLAUDE.mdの設計方針として
-  リポジトリ全体で共通のはずの基準）が直書きで繰り返されている。
-- **Claudeの所感**: `MACHINE_PRECISION_RTOL = 1e-8`のような名前付き定数に
-  すれば、「なぜこの値なのか」が値そのものより名前で伝わり、複数箇所を
-  同時に変更する際の一貫性も保ちやすくなる。ただし`rtol_hac`のように
-  実測値に基づいて個別に決めた値まで無理に共通定数化する必要はなく
-  （`testing-policy.md`「一律に緩めると本来検出できるはずのバグを見逃す」）、
-  「機械精度」等の**設計方針レベルで共通の値だけ**を定数化するのが妥当と考える。
-- **気づいた経緯**: 2026-08-22、`tests/_tolerances.py`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否・対象範囲の線引きはユーザー判断待ち）
-
 ### 51. `tests/linear/test_ols.py`に「Issue #231フェーズ4で判明した抜け」という経緯コメントが3箇所残存
 
 - **対象**: [tests/linear/test_ols.py:169](../../../tests/linear/test_ols.py#L169)・

@@ -136,6 +136,7 @@ dependencies = [
 
 [package.dev-dependencies]
 benchmark = [
+    { name = "py4etrics" },
     { name = "pyarrow" },
     { name = "wooldridge" },
 ]
@@ -160,6 +161,7 @@ requires-dist = [{ name = "polars", specifier = "==1.43.2" }]
 
 [package.metadata.requires-dev]
 benchmark = [
+    { name = "py4etrics", specifier = "==0.1.9" },
     { name = "pyarrow", specifier = "==25.0.1" },
     { name = "wooldridge", specifier = "==0.5.0" },
 ]
@@ -737,6 +739,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/b6/5a/2deb8eac70e9a2ac26d88a66ae7cf52612865026f4f4a5e7ab11ad9d52bf/polars_runtime_32-1.43.2-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:452b400e59e7f56e4c6437f435e796903272a9388feee12de2bea049ae87025e", size = 55204471, upload-time = "2026-08-01T06:27:33.886Z" },
     { url = "https://files.pythonhosted.org/packages/29/9e/647401ae8a607bc0cc40ed7b8592d5b1be90ded0dc9b9d6d3aeb03f9524b/polars_runtime_32-1.43.2-cp310-abi3-win_amd64.whl", hash = "sha256:00e33c28e321410c8d66e814a90043101e3bdd9ed2c6dabda07565aa8adbbdf1", size = 52572176, upload-time = "2026-08-01T06:27:37.048Z" },
     { url = "https://files.pythonhosted.org/packages/96/8d/60a50c3f36c85218a7ffcb48c6fe2ce1f7bec799152d68b8658ebed2179c/polars_runtime_32-1.43.2-cp310-abi3-win_arm64.whl", hash = "sha256:350a4868cae85bf8b3f81b33ba47927c15256bd9264dfc8c0753f1b927eac9d3", size = 46582513, upload-time = "2026-08-01T06:27:40.025Z" },
+]
+
+[[package]]
+name = "py4etrics"
+version = "0.1.9"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c2/cf/505867ad47f789c18985e75f23f16863f4747c59eff989f2dd8f4c28a126/py4etrics-0.1.9.tar.gz", hash = "sha256:162bbc10ab9bd127edcb07391ca31128fc8979a3b350f49b1aa5f5a7035cc730", size = 17738, upload-time = "2024-01-06T11:57:58.398Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2d/18/eafc633759ffcd2cdb6dd076ae4b87ad8c68eb3869f569a9ef45154ddb67/py4etrics-0.1.9-py2.py3-none-any.whl", hash = "sha256:df35d806b3e0053c975fe87fd98fad2758c22907ec2bf2611aadc77fa9b34c0d", size = 19653, upload-time = "2024-01-06T11:57:56.941Z" },
 ]
 
 [[package]]

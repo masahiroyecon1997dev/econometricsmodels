@@ -86,7 +86,17 @@ def _render_axis_section(
     libraries: list[str],
     include_rss: bool,
 ) -> list[str]:
-    """n軸・k軸それぞれのセクション（見出し＋cov_typeごとの表）を組み立てる。"""
+    """n軸・k軸それぞれのセクション（見出し＋cov_typeごとの表）を組み立てる。
+
+    その軸で実際に計測されたライブラリのみを列にする（`PerfAdapter.
+    k_sweep_libraries` で軸ごとにライブラリを絞る手法があるため。絞られた側を
+    "-" で埋めた列を出さない）。
+    """
+    present = [
+        lib
+        for lib in libraries
+        if any(r["library"] == lib for r in axis_results)
+    ]
     lines = [title, "", subtitle, ""]
     for cov_type in cov_types:
         rows = [r for r in axis_results if r["cov_type"] == cov_type]
@@ -94,7 +104,7 @@ def _render_axis_section(
             continue
         lines.append(f"### {cov_type}")
         lines.append("")
-        lines.append(_pivot_table(rows, axis_key, libraries, include_rss))
+        lines.append(_pivot_table(rows, axis_key, present, include_rss))
         lines.append("")
     return lines
 
@@ -122,12 +132,19 @@ def _render_method_section(
         f"実行時間（秒、中央値）。{default_method} は n軸の同条件を参照。",
         "",
     ]
+    # method 軸で実際に計測されたライブラリのみを列にする（n/k 軸の
+    # `_render_axis_section` と同じ扱い）。
+    present = [
+        lib
+        for lib in libraries
+        if any(r["library"] == lib for r in method_results)
+    ]
     methods = sorted({r["method"] for r in method_results})
-    lines.append("| method | " + " | ".join(libraries) + " |")
-    lines.append("|---" * (len(libraries) + 1) + "|")
+    lines.append("| method | " + " | ".join(present) + " |")
+    lines.append("|---" * (len(present) + 1) + "|")
     for m in methods:
         cells = []
-        for library in libraries:
+        for library in present:
             match = next(
                 (
                     r
@@ -177,6 +194,14 @@ def render(report: dict) -> str:
         ),
         "",
     ]
+
+    # PerfAdapter.check_report が返した警告（比率ベースのデグレ・パフォーマンス
+    # 悪化検知。`_perf_harness.PerfAdapter` docstring 参照）。
+    warnings: list[str] = meta.get("warnings") or []
+    if warnings:
+        lines.append("> [!WARNING]")
+        lines += [f"> {w}" for w in warnings]
+        lines.append("")
 
     lines += _render_axis_section(
         title=f"## n軸（k={meta['n_sweep_fixed_k']}固定）",

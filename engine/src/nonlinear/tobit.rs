@@ -112,10 +112,10 @@ use crate::inference;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::nonlinear::common::{
     CovType, MarginalEffects, MarginalEffectsAt, Method, MleError, SandwichVariant,
-    clamped_pdf_cdf, cluster_cov_params, column_means, column_medians, destandardize_cov_params,
-    destandardize_params, observed_information_cov_params, opg_cov_params, run_solver,
-    sandwich_cov_params, standardize_columns, validate_cluster_cov_type, validate_confidence_level,
-    validate_max_iter, validate_sufficient_observations, validate_tol,
+    clamped_pdf_cdf, cluster_cov_params, column_means, column_medians,
+    observed_information_cov_params, opg_cov_params, run_solver, sandwich_cov_params,
+    validate_cluster_cov_type, validate_confidence_level, validate_max_iter,
+    validate_sufficient_observations, validate_tol,
 };
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::prelude::{Solve, SolveLstsq};
@@ -136,7 +136,7 @@ pub struct TobitInput {
     param_names: Vec<String>,
     /// 被説明変数名
     dep_var_name: String,
-    /// 定数項を含むか。`nonlinear/common.rs`の`standardize_columns`等で必要
+    /// 定数項を含むか。`fit()`の`TobitScaling`（列のセンタリング可否）等で必要
     has_intercept: bool,
     /// 打ち切りの下限。`None`は「左側は打ち切りなし」を意味する
     lower: Option<f64>,
@@ -388,10 +388,11 @@ impl TobitProblem {
         }
     }
 
-    /// `standardize_columns`で標準化済みの設計行列`x_std`と`y`・打ち切り境界から構築する。
+    /// `TobitScaling`で標準化済みの設計行列`x_std`・`y`（`fit()`では`y`もスケーリング
+    /// 済み）・打ち切り境界（`y`と同じ`y_scale`でスケーリング済み）から構築する。
     /// `TobitEstimator::fit`が最適化に使う経路（`LogitProblem::from_standardized`と
-    /// 同じ位置づけ）。打ち切り境界`lower`/`upper`は`y`のスケールで表現された値であり
-    /// `x`の列スケーリングとは無関係なため、標準化の影響を受けずそのまま渡す。
+    /// 同じ位置づけ）。名前に反して標準化済みかどうかは問わない（`x`・`y`・境界・
+    /// `params`のスケールが対応してさえいればよい。単体テストは生スケールでも呼ぶ）。
     fn from_standardized(
         x_std: Mat<f64>,
         y: Mat<f64>,
@@ -570,11 +571,168 @@ fn validate_has_uncensored_observations(
     }
 }
 
+/// 列（または`y`）の母集団標準偏差（`ddof=0`）。標準偏差が0（定数列）の場合は`1.0`を
+/// 返す（0除算回避）。
+fn population_std(values: impl Iterator<Item = f64> + Clone, n: usize) -> f64 {
+    let mean: f64 = values.clone().sum::<f64>() / n as f64;
+    let var: f64 = values.map(|v| (v - mean).powi(2)).sum::<f64>() / n as f64;
+    let sd = var.sqrt();
+    if sd > 0.0 { sd } else { 1.0 }
+}
+
+/// `TobitEstimator::fit`が最適化に使う、設計行列`x`・被説明変数`y`の標準化スケール
+/// （Tobit局所、Issue #286）。`nonlinear/common.rs`の`standardize_columns`/`ColumnScale`/
+/// `destandardize_params`を使わず、Tobit内で完結させる。
+///
+/// **`standardize_columns`と分けた理由**:
+/// 1. **`y`のスケーリング**: `separation_suspected`（`nonlinear/common.rs`、標準化
+///    パラメータ空間のL2ノルムが`SEPARATION_PARAM_NORM_THRESHOLD`超で(準)分離と判定）は
+///    Logit/Probit（`y∈{0,1}`）で較正されている。Tobitは`y`が連続でスケールが任意の
+///    ため、`y`のスケールが大きいだけで健全なMLE解でもノルムが閾値を超え誤発火する
+///    （Wooldridge mroz `hours`の生スケールTobitで発覚）。`x`の列標準化と同じ発想
+///    （R `survival::survreg`は設計行列を標準化する）を`y`にも適用してスケール不変にする。
+///    **`y_scale`は`y`の母集団標準偏差を「2の冪に丸めた」値**（`2^round(log2(sd))`）。
+///    2の冪で割る操作は倍精度浮動小数点で指数部のシフトのみ（仮数部は不変）＝厳密なため、
+///    `y`が既に程よいスケール（`sd ∈ [1/√2, √2)`）なら`y_scale=1`で完全な恒等変換になり、
+///    そうでなくてもNewtonの反復軌道が「スケーリング前と厳密に相似」に保たれる。生の
+///    標準偏差（例: `0.949`）で割ると、その丸め誤差（~1e-16）だけでも打ち切り率が高く
+///    Hessianが際どい悪条件のデータ（合成`heavy_censoring`、左打ち切り60%）で正則化
+///    NewtonがSingularHessianに倒れることが実測で判明したため、丸めて厳密化する。
+/// 2. **`x`列の平均センタリング（切片ありのときのみ）**: `standardize_columns`は
+///    スケーリングのみで平均を引かない（`include_intercept=false`で逆変換が壊れるため、
+///    同関数のdocコメント参照）。しかし`exper`(0〜45)と`expersq`(0〜2025)のように
+///    強く共線な列を含むと、スケーリングだけでは標準化後のHessianが悪条件のままで、
+///    正則化Newton（`regularized_newton_step`）が回復不能な不定符号領域に落ちる
+///    （mroz `hours`で実測、`ols_initial_params`の丸め誤差~1e-14で結果が変わるほど際どい）。
+///    切片ありモデルでは列を平均センタリングすると`survreg`同様Newtonが安定して収束する。
+///    切片なしモデルではセンタリングせず（吸収先の切片が無く逆変換が壊れるため）、
+///    スケーリングのみ行う。
+///
+/// 標準化空間の内部パラメータ`(β̃, s̃=logσ̃)`と元のスケール`(β, s=logσ)`の対応
+/// （`c = y_scale`、`x̄ⱼ`・`stdⱼ`は`x`列`j`の平均・母集団標準偏差、切片列は`x̄₀=0`・`std₀=1`）:
+///
+/// - 切片あり: `βⱼ = c·β̃ⱼ/stdⱼ`（`j≥1`）、`β₀ = c·β̃₀ - Σ_{j≥1} x̄ⱼ·βⱼ`、`s = s̃ + ln c`
+/// - 切片なし: `βⱼ = c·β̃ⱼ/stdⱼ`（全`j`）、`s = s̃ + ln c`
+struct TobitScaling {
+    /// `x`各列の平均（切片列は0.0。切片なしモデルでは全列0.0＝センタリングしない）
+    x_means: Vec<f64>,
+    /// `x`各列の母集団標準偏差（切片列・定数列は1.0）
+    x_stds: Vec<f64>,
+    /// `y`（と打ち切り境界）のスケール = `y`の母集団標準偏差を2の冪に丸めた値
+    /// （`2^round(log2(sd))`、必ず`> 0`。構造体docコメント参照）
+    y_scale: f64,
+    /// 切片列（列0）を持つか
+    has_intercept: bool,
+}
+
+impl TobitScaling {
+    /// `x`・`y`から標準化スケールを求める。
+    fn fit(x: &Mat<f64>, y: &Mat<f64>, has_intercept: bool) -> Self {
+        let n = x.nrows();
+        let k = x.ncols();
+        let start = usize::from(has_intercept);
+        let mut x_means = vec![0.0; k];
+        let mut x_stds = vec![1.0; k];
+        for j in start..k {
+            let col = || (0..n).map(|i| *x.get(i, j));
+            if has_intercept {
+                x_means[j] = col().sum::<f64>() / n as f64;
+            }
+            x_stds[j] = population_std(col(), n);
+        }
+        // `y`の母集団標準偏差を2の冪に丸める（構造体docコメント「`y`のスケーリング」参照。
+        // 2の冪での除算は仮数部を変えないため、`y`が程よいスケールなら恒等変換になる）。
+        // 指数は倍精度の正規化数の範囲に収める（極端な`y`はengine_pybind側の非有限値
+        // チェックで既に弾かれているため、この`clamp`は防御的）。
+        let y_exp = (population_std((0..n).map(|i| *y.get(i, 0)), n)
+            .log2()
+            .round() as i32)
+            .clamp(-1000, 1000);
+        let y_scale = 2.0_f64.powi(y_exp);
+        Self {
+            x_means,
+            x_stds,
+            y_scale,
+            has_intercept,
+        }
+    }
+
+    /// 設計行列を標準化する: 切片ありは`x̃ⱼ = (xⱼ - x̄ⱼ)/stdⱼ`、切片なしは`x̃ⱼ = xⱼ/stdⱼ`
+    /// （切片列は無変換）。
+    fn standardize_x(&self, x: &Mat<f64>) -> Mat<f64> {
+        Mat::from_fn(x.nrows(), x.ncols(), |i, j| {
+            (*x.get(i, j) - self.x_means[j]) / self.x_stds[j]
+        })
+    }
+
+    /// `y`を`y_scale`でスケーリングする（平均は引かない）。
+    fn standardize_y(&self, y: &Mat<f64>) -> Mat<f64> {
+        Mat::from_fn(y.nrows(), 1, |i, _| *y.get(i, 0) / self.y_scale)
+    }
+
+    /// 打ち切り境界を`y_scale`でスケーリングする（`y`のスケーリングと整合）。
+    fn standardize_bound(&self, bound: Option<f64>) -> Option<f64> {
+        bound.map(|v| v / self.y_scale)
+    }
+
+    /// 標準化空間の内部パラメータ`(β̃, s̃)`（`k+1`次元）を元のスケールの`(β, logσ)`へ
+    /// 逆変換する（構造体docコメントの式）。
+    fn destandardize_params(&self, params_std: &[f64]) -> Vec<f64> {
+        let k = self.x_stds.len();
+        let c = self.y_scale;
+        let start = usize::from(self.has_intercept);
+        let mut out = vec![0.0; k + 1];
+        // 傾き係数（切片ありのとき列0を除く全列）: `βⱼ = c·β̃ⱼ/stdⱼ`
+        for (j, out_j) in out.iter_mut().enumerate().take(k).skip(start) {
+            *out_j = c * params_std[j] / self.x_stds[j];
+        }
+        // 切片: `β₀ = c·β̃₀ - Σ_{j≥1} x̄ⱼ·βⱼ`（既に確定した傾き係数を使う）
+        if self.has_intercept {
+            out[0] = c * params_std[0] - (1..k).map(|j| self.x_means[j] * out[j]).sum::<f64>();
+        }
+        out[k] = params_std[k] + c.ln();
+        out
+    }
+
+    /// `(β̃, s̃)`空間から`(β, σ)`空間（元のスケール）への変換のヤコビアン`(k+1)×(k+1)`。
+    /// `Cov(β, σ) = J · Cov(β̃, s̃) · Jᵀ`で使う（`destandardize_params`の線形部分の
+    /// 微分に、`s̃→σ=c·exp(s̃)`のデルタ法`∂σ/∂s̃=σ`を末尾行に折り込んだもの）。`sigma`は
+    /// 逆変換済みの`σ`。
+    fn param_jacobian(&self, sigma: f64) -> Mat<f64> {
+        let k = self.x_stds.len();
+        let c = self.y_scale;
+        Mat::from_fn(k + 1, k + 1, |i, m| {
+            if i == k {
+                if m == k { sigma } else { 0.0 }
+            } else if self.has_intercept && i == 0 {
+                if m == 0 {
+                    c
+                } else if m < k {
+                    -c * self.x_means[m] / self.x_stds[m]
+                } else {
+                    0.0
+                }
+            } else if m == i {
+                c / self.x_stds[i]
+            } else {
+                0.0
+            }
+        })
+    }
+
+    /// `Cov(β, σ) = J · cov_std · Jᵀ`（`param_jacobian`のJを両側から適用）。
+    fn destandardize_cov_params(&self, cov_std: &Mat<f64>, sigma: f64) -> Mat<f64> {
+        let j = self.param_jacobian(sigma);
+        &j * cov_std * j.transpose()
+    }
+}
+
 /// 打ち切りを無視した単純なOLS（`X'Xβ=X'y`の最小二乗解）から、Newton法の初期値
 /// `(β, logσ)`を計算する（モジュール冒頭「Newton法の初期値」節参照）。`x`は
-/// `standardize_columns`で標準化済みの設計行列を渡す想定（`fit()`が最適化に使う空間と
-/// 一致させ、初期値をそのまま`run_solver`に渡せるようにするため）。`y`は打ち切りを
-/// 無視し、観測された値をそのまま連続値として扱う（あくまで初期値のヒューリスティックで
+/// `TobitScaling::standardize_x`で標準化済みの設計行列を渡す想定（`fit()`が最適化に使う
+/// 空間と一致させ、初期値をそのまま`run_solver`に渡せるようにするため）。`y`も
+/// `TobitScaling::standardize_y`でスケーリング済みの値を渡す。`y`は打ち切りを無視し、
+/// 観測された値をそのまま連続値として扱う（あくまで初期値のヒューリスティックで
 /// あり、Tobitの推定値そのものではない）。
 ///
 /// 特異性検出は`engine::linear::ols::OlsEstimator`の`ensure_full_rank`と同じ相対閾値
@@ -1067,20 +1225,22 @@ pub struct TobitEstimator {
     input: TobitInput,
     /// 係数（元のスケール、`β`部分のみ）。`input.param_names()`と対応する
     params: Vec<f64>,
-    /// 誤差項の標準偏差（元のスケール）。内部最適化パラメータ`logσ`を`σ=exp(logσ)`で
-    /// 逆変換したもの（`.claude/rules/rust-style.md`の`ColumnScale::extend_unscaled`
-    /// docコメント参照。`logσ`は`x`の列スケーリングとは無関係な量なので、逆変換は
-    /// この指数変換のみで完結する）
+    /// 誤差項の標準偏差（元のスケール）。内部最適化パラメータ`s̃=logσ̃`（`x`のセンタリング・
+    /// スケーリング・`y`のスケーリング`c=y_scale`後の空間、`fit`のdocコメント「標準化空間」
+    /// 節・`TobitScaling`参照）を`logσ = s̃ + ln c`で元のスケールへ戻し、`σ = exp(logσ)`で
+    /// 逆変換したもの（Issue #286）。`logσ`は`x`の変換とは無関係だが`y`のスケーリングには
+    /// 比例する（`σ̃ = σ/c`）。
     sigma: f64,
     /// `(β, σ)`の分散共分散行列（元のスケール、`(k+1)×(k+1)`）。`fit`に渡した`cov_type`に
     /// 応じて観測情報行列（`Classical`）・OPG（`Opg`）・サンドイッチ型（`Hc0`/`Hc1`）・
-    /// クラスターロバスト（`Cluster`）のいずれかで計算される。最適化は内部
-    /// パラメータ化`(β, s=logσ)`空間のHessianで行われるため、`cov_type`に応じた行列演算・
-    /// `destandardize_cov_params`で`(β, s)`空間の分散共分散行列を得た後、
-    /// デルタ法のヤコビアン`diag(1,...,1,σ)`（`s`から`σ=exp(s)`への変換、`dσ/ds=σ`）を
-    /// 両側から適用して`(β, σ)`空間へ変換する（`k+1`行目・列目が`σ`に対応、
-    /// `β`部分の`k×k`ブロックはヤコビアンが恒等写像のため無変換）。`β`-`σ`間の
-    /// 共分散も含めて変換するため、対角成分だけでなく行列全体が一貫した値になる
+    /// クラスターロバスト（`Cluster`）のいずれかで計算される。最適化は`x`のセンタリング・
+    /// スケーリング・`y`のスケーリング後の内部パラメータ化`(β̃, s̃=logσ̃)`空間のHessianで
+    /// 行われるため、`cov_type`に応じた行列演算で標準化空間の分散共分散行列を得た後、
+    /// `Cov(β,σ) = J·Cov(β̃,s̃)·Jᵀ`（`J`は`TobitScaling::param_jacobian`。`x`の
+    /// センタリング・スケーリングの解除と`s̃→σ=c·exp(s̃)`のデルタ法`∂σ/∂s̃=σ`を1本に
+    /// 合成したヤコビアン）で`(β, σ)`空間へ変換する（`k+1`行目・列目が`σ`に対応）。
+    /// 切片ありモデルでは`J`の切片行が全傾き係数に依存する非対角要素を持つため、
+    /// `β`-`σ`間だけでなく`β₀`-`βⱼ`間の共分散も正しく変換され、行列全体が一貫した値になる
     /// （`fit`のdocコメント「`σ`のSE」節参照。ユーザー確認済み、単なる対角成分の
     /// `Var(σ)≈σ²Var(logσ)`だけでなく将来の限界効果等での再利用を見据えてフル行列を
     /// 変換する設計を採用）。
@@ -1125,16 +1285,13 @@ impl TobitEstimator {
     /// 誤差項の標準偏差`σ`を推定する。
     ///
     /// 内部最適化パラメータは`(β, s=logσ)`という`k+1`次元ベクトル（モジュール冒頭の
-    /// 数式参照）。`x`は`standardize_columns`で内部的に標準化してから最適化し
-    /// （`LogitEstimator::fit`と同じ理由。勾配ノルムに基づく収束判定`tol`が設計行列の
-    /// スケールに依存しないようにするため）、収束後に`destandardize_params`で元の
-    /// スケールへ逆変換する。`logσ`（`k+1`番目の要素）は`x`の列スケーリングとは無関係な
-    /// 量（線形再パラメータ化`x_std=x/std`の下で不変）なので、`ColumnScale::
-    /// extend_unscaled(1)`でスケール`1.0`（無変換）の要素を追加し、既存の`zip`ベースの
-    /// `destandardize_params`をそのまま`(k+1)`次元ベクトルに適用する
-    /// （`docs/planning/specs/nonlinear-implementation-notes.md`「standardize_columnsと
-    /// σの扱い」節）。打ち切り境界`lower`/`upper`はこの標準化の影響を受けない
-    /// （`y`のスケールで表現された値のため）。
+    /// 数式参照）。最適化前に`TobitScaling`で設計行列と`y`を標準化する（Issue #286、
+    /// 詳細は`TobitScaling`のdocコメント）: `x`は切片ありなら列を平均センタリング＋
+    /// スケーリング・切片なしならスケーリングのみ、`y`（と打ち切り境界`lower`/`upper`）は
+    /// `y`の母集団標準偏差を2の冪に丸めた`c`で一律スケーリングする。標準化空間`(β̃, s̃=logσ̃)`で
+    /// 最適化し、`TobitScaling::destandardize_params`で元のスケール`(β, s=logσ)`へ
+    /// 逆変換する（`x'β/c = x̃'β̃`・`σ̃ = σ/c`を満たす線形＋定数シフトの写像。
+    /// 切片ありのとき`β₀`は全傾き係数に依存する）。
     ///
     /// 初期値はゼロベクトルではなく`ols_initial_params`が計算するOLS推定値
     /// （`LogitEstimator::fit`とは異なる。モジュール冒頭「Newton法の初期値」節参照）。
@@ -1156,17 +1313,17 @@ impl TobitEstimator {
     ///
     /// ## `σ`のSE（デルタ法）
     ///
-    /// `run_solver`が返すHessianは内部パラメータ化`(β, s=logσ)`空間で評価されたもの
-    /// （`standardize_columns`で標準化済みの`x`に対応する標準化空間でもある）。
+    /// `run_solver`が返すHessianは内部パラメータ化`(β̃, s̃=logσ̃)`空間で評価されたもの
+    /// （`TobitScaling`で標準化した`x`・`y`に対応する空間、上記「標準化空間」節参照）。
     /// `cov_type`に応じた行列演算（`observed_information_cov_params`/`opg_cov_params`/
-    /// `sandwich_cov_params`/`cluster_cov_params`）・`destandardize_cov_params`で`x`の
-    /// 標準化のみを解いて`(β, s)`空間（元のスケール）の分散共分散行列を得た後、
-    /// `s→σ=exp(s)`のデルタ法変換（ヤコビアン`diag(1,...,1,σ)`、`dσ/ds=σ`）を分散
-    /// 共分散行列全体に適用して`(β, σ)`空間へ変換する（`cov_params`のdocコメント参照。
-    /// 対角成分のみ見ると`Var(σ)≈σ²Var(logσ)`という`docs/planning/specs/
-    /// nonlinear-implementation-notes.md`「パラメータ化」節に記載の式に一致する。
-    /// この変換は`cov_type`の種類に依存せず、いずれの行列演算の結果にも同じヤコビアンを
-    /// 適用すればよい）。
+    /// `sandwich_cov_params`/`cluster_cov_params`）で標準化空間の分散共分散行列を得た後、
+    /// `TobitScaling::destandardize_cov_params`が`Cov(β,σ) = J·Cov(β̃,s̃)·Jᵀ`
+    /// （`J = TobitScaling::param_jacobian`。`x`のセンタリング・スケーリングの解除と
+    /// `s̃→σ=c·exp(s̃)`のデルタ法`∂σ/∂s̃=σ`を1本に合成したヤコビアン）で`(β, σ)`空間へ
+    /// 変換する（`cov_params`のdocコメント参照。`σ`の対角成分のみ見ると
+    /// `Var(σ)≈σ²Var(logσ)`という`docs/planning/specs/nonlinear-implementation-notes.md`
+    /// 「パラメータ化」節に記載の式に一致する。この変換は`cov_type`の種類に依存せず、
+    /// いずれの行列演算の結果にも同じ`J`を適用すればよい）。
     ///
     /// # Errors
     /// - `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
@@ -1205,14 +1362,20 @@ impl TobitEstimator {
         validate_cluster_cov_type(&cov_type, n)?;
         validate_has_uncensored_observations(input.y(), input.lower(), input.upper())?;
 
-        let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
-        let scale = scale.extend_unscaled(1);
-        let initial_params = ols_initial_params(&x_std, input.y())?;
-        let problem =
-            TobitProblem::from_standardized(x_std, input.y().clone(), input.lower(), input.upper());
-        // `cov_type`がOPG/サンドイッチ型/クラスターの場合、収束点でのスコア評価に元の
-        // `TobitProblem`（標準化空間の`x_std`）が必要になる。`run_solver`は`problem`の
-        // 所有権を取り込むため、事前にクローンしておく（`LogitEstimator::fit`と同じ理由）。
+        // `x`（切片ありなら列を平均センタリング＋スケーリング、切片なしはスケーリング
+        // のみ）と`y`（と打ち切り境界、`y`の母集団標準偏差を2の冪に丸めた値で一律
+        // スケーリング）を標準化してから最適化する（`TobitScaling`のdocコメント・
+        // `fit`のdocコメント「標準化空間」節参照、Issue #286）。
+        let scaling = TobitScaling::fit(input.x(), input.y(), input.has_intercept());
+        let x_std = scaling.standardize_x(input.x());
+        let y_std = scaling.standardize_y(input.y());
+        let lower_std = scaling.standardize_bound(input.lower());
+        let upper_std = scaling.standardize_bound(input.upper());
+        let initial_params = ols_initial_params(&x_std, &y_std)?;
+        let problem = TobitProblem::from_standardized(x_std, y_std, lower_std, upper_std);
+        // `cov_type`がOPG/サンドイッチ型/クラスターの場合、収束点でのスコア評価に
+        // 標準化空間の`TobitProblem`が必要になる。`run_solver`は`problem`の所有権を
+        // 取り込むため、事前にクローンしておく（`LogitEstimator::fit`と同じ理由）。
         let problem_for_scores = match &cov_type {
             CovType::Classical => None,
             CovType::Opg | CovType::Hc0 | CovType::Hc1 | CovType::Cluster { .. } => {
@@ -1229,7 +1392,9 @@ impl TobitEstimator {
             raise_on_non_convergence,
         )?;
 
-        let params_full = destandardize_params(&output.params, &scale);
+        // 標準化空間の内部パラメータ`(β̃, s̃)`を元のスケールの`(β, logσ)`へ逆変換する
+        // （`TobitScaling`のdocコメントの式）。
+        let params_full = scaling.destandardize_params(&output.params);
         let sigma = params_full[k].exp();
         let params = params_full[..k].to_vec();
 
@@ -1288,14 +1453,12 @@ impl TobitEstimator {
                 )?
             }
         };
-        let cov_params_beta_s = destandardize_cov_params(&cov_params_std, &scale);
-        // `s=logσ→σ=exp(s)`のデルタ法ヤコビアン。`β`部分は無変換（恒等写像）なので`1.0`、
-        // `k`番目（`s`/`σ`に対応する行・列）だけ`dσ/ds=σ`を掛ける。`cov_type`の種類に
-        // 依存しない共通の後処理（上記docコメント「σのSE」節参照）。
-        let jacobian: Vec<f64> = (0..=k).map(|i| if i < k { 1.0 } else { sigma }).collect();
-        let cov_params = Mat::from_fn(k + 1, k + 1, |i, j| {
-            *cov_params_beta_s.get(i, j) * jacobian[i] * jacobian[j]
-        });
+        // 標準化空間`(β̃, s̃)`の分散共分散行列を、元のスケール`(β, σ)`空間へ
+        // `Cov(β,σ) = J·Cov(β̃,s̃)·Jᵀ`で変換する（`J`は`TobitScaling::param_jacobian`。
+        // `x`の列標準化・センタリングの解除と、`s̃→σ=c·exp(s̃)`のデルタ法`∂σ/∂s̃=σ`を
+        // 1本のヤコビアンに合成済み。`cov_type`の種類に依存しない共通の後処理、
+        // 上記docコメント「標準化空間」「σのSE」節参照）。
+        let cov_params = scaling.destandardize_cov_params(&cov_params_std, sigma);
 
         let normal = Normal::standard();
         let z_crit = inference::critical_value(&normal, confidence_level);
@@ -2474,9 +2637,9 @@ mod tests {
     /// 閉じた形の解析解は無いため、`cov_params`の対称性・各種統計量の内部整合性
     /// （z値・信頼区間の定義式通りの関係）を検証する回帰テスト。Logitの
     /// `fit_cov_params_is_symmetric_and_stats_are_internally_consistent`と同じ設計。
-    /// 特に`destandardize_cov_params`・デルタ法ヤコビアン`diag(1,...,1,σ)`の適用が
-    /// 非対角成分も含めて正しく機能しているかを確認する（対角成分だけでは
-    /// 転置ミス等の一部のバグを検出できない）。
+    /// 特に`TobitScaling::destandardize_cov_params`（`J·Cov·Jᵀ`）の適用が非対角成分も
+    /// 含めて正しく機能しているかを確認する（対角成分だけでは転置ミス等の一部のバグを
+    /// 検出できない）。
     #[test]
     fn fit_cov_params_is_symmetric_and_stats_are_internally_consistent() {
         let estimator = TobitEstimator::fit(
@@ -2531,7 +2694,7 @@ mod tests {
     /// 由来の`SingularDesignMatrix`（設計行列`X`自体の特異性、最適化前に発生）とは
     /// 異なるエラー経路であることに注意）。`censored_regression_input`で`max_iter=1`
     /// にすると、Newton初回ステップ後の打ち切り点で実際にこれが発生することを実測で
-    /// 確認済み（`max_iter=3`以降は`cov_params`計算が安定する。真の収束は`max_iter=11`、
+    /// 確認済み（`max_iter=2`以降は`cov_params`計算が安定する。真の収束は`max_iter=11`、
     /// `fit_returns_unconverged_result_without_raising_when_raise_on_non_convergence_is_false`
     /// のコメント参照）。
     #[test]
@@ -2895,8 +3058,8 @@ mod tests {
         }
     }
 
-    /// `censored_regression_input`の`x`（`1..8`）は`standardize_columns`が実質no-opになる
-    /// ほど自明なスケールではないが、`fit_bfgs_and_lbfgs_agree_with_newton_when_design_
+    /// `censored_regression_input`の`x`（`1..8`）は`TobitScaling`の列標準化が実質no-opに
+    /// なるほど自明なスケールではないが、`fit_bfgs_and_lbfgs_agree_with_newton_when_design_
     /// matrix_has_nontrivial_scale`（`logit.rs`/`probit.rs`）と同じ観点で、桁が大きく離れた
     /// スケール（`std`が1から大きく離れた値）でも標準化・逆標準化の往復が壊れないことを
     /// 明示的に検証する。`x`を100倍しつつ係数を1/100にスケールして同じ潜在変数
@@ -2958,6 +3121,266 @@ mod tests {
     }
 
     #[test]
+    fn population_std_returns_population_std_and_falls_back_to_one_for_constant() {
+        // 母集団分散 = ((1.5)² + (0.5)² + (0.5)² + (1.5)²)/4 = 1.25 → std = √1.25
+        let v = [1.0, 2.0, 3.0, 4.0];
+        assert!((population_std(v.iter().copied(), 4) - 1.25_f64.sqrt()).abs() < 1e-12);
+
+        // 定数（std=0）のときは0除算回避のため`1.0`にフォールバックする。
+        assert_eq!(population_std([7.0, 7.0, 7.0].iter().copied(), 3), 1.0);
+    }
+
+    /// `TobitScaling`の逆変換（`destandardize_params`）が、標準化した設計行列・`y`で
+    /// 評価した線形予測子`x̃'β̃`を元のスケールの`x'β/c`に戻すことを、切片あり・切片なし
+    /// 両方で確認する（往復変換の一貫性、`ColumnScale`の往復テストのTobit版）。
+    #[test]
+    fn tobit_scaling_destandardize_params_inverts_the_linear_predictor() {
+        for has_intercept in [true, false] {
+            // 切片あり: 列0が定数1.0。切片なし: 定数列なし。
+            let (cols, k): (Vec<Vec<f64>>, usize) = if has_intercept {
+                (
+                    vec![
+                        vec![1.0; 5],
+                        vec![10.0, 12.0, 9.0, 15.0, 11.0],
+                        vec![100.0, 400.0, 900.0, 1600.0, 2500.0],
+                    ],
+                    3,
+                )
+            } else {
+                (
+                    vec![
+                        vec![2.0, 4.0, 6.0, 8.0, 10.0],
+                        vec![1.0, 3.0, 2.0, 5.0, 4.0],
+                    ],
+                    2,
+                )
+            };
+            let x = Mat::from_fn(5, k, |i, j| cols[j][i]);
+            let y = Mat::from_fn(5, 1, |i, _| [3.0, 7.0, 5.0, 11.0, 9.0][i] * 50.0);
+            let scaling = TobitScaling::fit(&x, &y, has_intercept);
+            let x_std = scaling.standardize_x(&x);
+
+            // 標準化空間の任意のパラメータ`(β̃, s̃)`。
+            let params_std: Vec<f64> = (0..=k).map(|j| 0.3 + 0.2 * j as f64).collect();
+            let params_orig = scaling.destandardize_params(&params_std);
+
+            // 各観測で `x̃ᵢ'β̃ == xᵢ'β / c` が成り立つはず。
+            for i in 0..5 {
+                let lhs: f64 = (0..k).map(|j| *x_std.get(i, j) * params_std[j]).sum();
+                let rhs: f64 =
+                    (0..k).map(|j| *x.get(i, j) * params_orig[j]).sum::<f64>() / scaling.y_scale;
+                assert!(
+                    (lhs - rhs).abs() < 1e-9,
+                    "has_intercept={has_intercept}, i={i}"
+                );
+            }
+            // `s̃ = logσ - ln c`
+            assert!((params_orig[k] - (params_std[k] + scaling.y_scale.ln())).abs() < 1e-12);
+        }
+    }
+
+    /// `TobitScaling::param_jacobian`（`destandardize_cov_params`が両側から掛ける`J`）が、
+    /// `(β̃, s̃) → (β, σ)`の写像の解析ヤコビアンと一致することを、中心差分で独立に検証する
+    /// （`expected_cov_params`ヘルパーは最終段で`destandardize_cov_params`を本体と共用して
+    /// おり`param_jacobian`のバグを検出できないため、rust-reviewer指摘で追加）。特に
+    /// 切片行の非対角項`∂β₀/∂β̃ⱼ = -c·x̄ⱼ/stdⱼ`と末尾行`∂σ/∂s̃ = σ`（`σ = c·exp(s̃)`）を
+    /// カバーする。写像は`g(p)ⱼ = destandardize_params(p)ⱼ`（`j<k`）・
+    /// `g(p)_k = exp(destandardize_params(p)_k)`。
+    #[test]
+    fn param_jacobian_matches_finite_difference_of_the_destandardization_map() {
+        for has_intercept in [true, false] {
+            let (cols, k): (Vec<Vec<f64>>, usize) = if has_intercept {
+                (
+                    vec![
+                        vec![1.0; 6],
+                        vec![10.0, 12.0, 9.0, 15.0, 11.0, 13.0],
+                        // 切片と強く相関する（平均が大きい）列。センタリング項を効かせる。
+                        vec![100.0, 121.0, 81.0, 225.0, 121.0, 169.0],
+                    ],
+                    3,
+                )
+            } else {
+                (
+                    vec![
+                        vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0],
+                        vec![1.0, 3.0, 2.0, 5.0, 4.0, 6.0],
+                    ],
+                    2,
+                )
+            };
+            let x = Mat::from_fn(6, k, |i, j| cols[j][i]);
+            let y = Mat::from_fn(6, 1, |i, _| [3.0, 7.0, 5.0, 11.0, 9.0, 8.0][i] * 30.0);
+            let scaling = TobitScaling::fit(&x, &y, has_intercept);
+
+            let params_std: Vec<f64> = (0..=k).map(|j| 0.2 + 0.15 * j as f64).collect();
+            let g = |p: &[f64]| -> Vec<f64> {
+                let orig = scaling.destandardize_params(p);
+                (0..=k)
+                    .map(|i| if i < k { orig[i] } else { orig[k].exp() })
+                    .collect()
+            };
+            let sigma = g(&params_std)[k];
+            let analytic = scaling.param_jacobian(sigma);
+
+            let h = 1e-6;
+            for m in 0..=k {
+                let mut plus = params_std.clone();
+                let mut minus = params_std.clone();
+                plus[m] += h;
+                minus[m] -= h;
+                let gp = g(&plus);
+                let gm = g(&minus);
+                for i in 0..=k {
+                    let numeric = (gp[i] - gm[i]) / (2.0 * h);
+                    let a = *analytic.get(i, m);
+                    assert!(
+                        (a - numeric).abs() <= 1e-5 * a.abs().max(1.0),
+                        "has_intercept={has_intercept} ({i},{m}): analytic={a}, numeric={numeric}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// `y`（および打ち切り境界）を大きなスケールに引き伸ばしても、`fit()`が生スケールの
+    /// データと数学的に同値な推定値に収束することを確認する回帰テスト（Issue #286）。
+    ///
+    /// `y`を標準化せず最適化していた頃は、`y`のスケールが大きいと健全なMLE解でも
+    /// 標準化パラメータ空間のL2ノルムが`SEPARATION_PARAM_NORM_THRESHOLD`を超え、
+    /// (準)分離ヒューリスティック（`nonlinear/common.rs`の`separation_suspected`）が
+    /// 誤発火して`MleError::SeparationSuspected`を返していた（Wooldridge mroz `hours`の
+    /// 生スケールTobitで発覚）。`TobitScaling`が`y`を2の冪に丸めたスケールで
+    /// スケーリングしてから最適化し収束後に逆変換することで解消した。
+    ///
+    /// `y' = c·y`・`lower' = c·lower`（`c`は2の冪）とすると`β' = c·β`・`σ' = c·σ`・
+    /// `SE' = c·SE`が厳密に成り立ち（`TobitScaling`が`y_scale`も`c`倍の2の冪に丸めるため、
+    /// 両者は完全に同一の標準化問題を解く）、z統計量・p値・Wald統計量はスケール不変。
+    #[test]
+    fn fit_converges_for_large_response_scale_without_false_separation() {
+        let c = 1024.0;
+        let x = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let y_base = vec![0.0, 0.0, 1.15, 2.9, 5.2, 6.85, 9.1, 10.95];
+        let y_scaled: Vec<f64> = y_base.iter().map(|v| v * c).collect();
+
+        let make = |y: &[f64], lower: f64| {
+            TobitInput::from_columns(
+                y,
+                std::slice::from_ref(&x),
+                vec!["x1".to_string()],
+                true,
+                "y".to_string(),
+                Some(lower),
+                None,
+            )
+            .unwrap()
+        };
+        let fit = |y: &[f64], lower: f64| {
+            TobitEstimator::fit(
+                make(y, lower),
+                Method::Newton,
+                100,
+                1e-8,
+                true,
+                CovType::Classical,
+                0.95,
+            )
+            .unwrap()
+        };
+
+        let base = fit(&y_base, 0.0);
+        let scaled = fit(&y_scaled, 0.0);
+
+        assert!(scaled.converged());
+
+        let rtol = |a: f64, b: f64| (a - b).abs() <= 1e-8 * b.abs().max(1.0);
+        for (b, s) in base.params().iter().zip(scaled.params()) {
+            assert!(rtol(s / c, *b), "beta: base={b}, scaled/c={}", s / c);
+        }
+        assert!(
+            rtol(scaled.sigma() / c, base.sigma()),
+            "sigma: base={}, scaled/c={}",
+            base.sigma(),
+            scaled.sigma() / c
+        );
+        for (b, s) in base.std_errors().iter().zip(scaled.std_errors()) {
+            assert!(rtol(s / c, *b), "se: base={b}, scaled/c={}", s / c);
+        }
+        for (b, s) in base.z_stats().iter().zip(scaled.z_stats()) {
+            assert!(rtol(*s, *b), "z: base={b}, scaled={s}");
+        }
+        assert!(
+            rtol(scaled.wald_statistic(), base.wald_statistic()),
+            "wald: base={}, scaled={}",
+            base.wald_statistic(),
+            scaled.wald_statistic()
+        );
+        // 対数尤度は変数変換のヤコビアン分ずれる（非打ち切り観測ごとに `-ln c`）。
+        let n_uncensored = y_base.iter().filter(|&&v| v != 0.0).count() as f64;
+        assert!(
+            rtol(
+                scaled.log_likelihood() + n_uncensored * c.ln(),
+                base.log_likelihood()
+            ),
+            "llf: base={}, scaled+adj={}",
+            base.log_likelihood(),
+            scaled.log_likelihood() + n_uncensored * c.ln()
+        );
+    }
+
+    /// 上のテストは切片あり・`c`が2の冪（＝標準化問題が両者で完全一致）だが、こちらは
+    /// (a) **切片なし**モデル、(b) **`y`の標準偏差が2の冪ちょうどではない**大スケール、で
+    /// `fit()`が既定Newtonで収束し真の傾き（生成係数）を回復することを確認する
+    /// （`TobitScaling`の切片なし経路の end-to-end カバレッジと、`y_scale`が恒等変換で
+    /// ない一般ケースの分離ヒューリスティック誤発火回避のリグレッションガード、
+    /// rust-reviewer指摘で追加）。
+    #[test]
+    fn fit_converges_for_large_non_power_of_two_response_scale_without_intercept() {
+        // 潜在変数 y* = 40·x（切片なし）、生成 σ ≈ 300 → y の std は数百オーダーで
+        // 2の冪（256 / 512）ちょうどにはならない。左打ち切り 0。
+        let x: Vec<f64> = (1..=40).map(|i| i as f64).collect();
+        let mut rng_state = 0x1234_5678_u64;
+        let mut next = || {
+            // 決定的な xorshift でノイズを作る（テストの再現性、外部 rng 非依存）。
+            rng_state ^= rng_state << 13;
+            rng_state ^= rng_state >> 7;
+            rng_state ^= rng_state << 17;
+            ((rng_state >> 11) as f64 / (1u64 << 53) as f64 - 0.5) * 600.0
+        };
+        let y: Vec<f64> = x.iter().map(|&xi| (40.0 * xi + next()).max(0.0)).collect();
+        let input = TobitInput::from_columns(
+            &y,
+            std::slice::from_ref(&x),
+            vec!["x1".to_string()],
+            false,
+            "y".to_string(),
+            Some(0.0),
+            None,
+        )
+        .unwrap();
+
+        let est = TobitEstimator::fit(
+            input,
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        assert!(est.converged());
+        // 傾きは真値 40 の近傍（打ち切り＋ノイズがあるため緩め）。分離誤発火なら
+        // そもそも `Err(SeparationSuspected)` で `.unwrap()` が panic する。
+        assert!(
+            (est.params()[0] - 40.0).abs() < 5.0,
+            "slope={}, expected≈40",
+            est.params()[0]
+        );
+        assert!(est.sigma() > 0.0 && est.sigma().is_finite());
+    }
+
+    #[test]
     fn fit_returns_non_convergence_error_when_max_iter_is_too_small_and_raise_is_true() {
         let input = censored_regression_input();
         let result = TobitEstimator::fit(
@@ -2982,9 +3405,10 @@ mod tests {
         // 打ち切り点（Newtonの初回ステップ、まだ真の最尤推定点から遠い）でHessianが
         // 不定符号になり、`fit`が非収束時でも`cov_params`を計算するようになった
         // （Issue #217）ことで`SingularHessian`が先に発生してしまう（実測で確認、
-        // `max_iter=1,2`はいずれも`SingularHessian`、`max_iter=3`以降で`cov_params`
-        // 計算が安定し`converged=false`が返るようになる。真の収束は`max_iter=11`）。
-        // `max_iter=3`に変更し、「非収束だがcov_params計算は成功する」ケースを踏む。
+        // `max_iter=1`は`SingularHessian`、`max_iter=2`以降で`cov_params`計算が
+        // 安定し`converged=false`が返るようになる。真の収束は`max_iter=11`）。
+        // `max_iter=3`のまま（`max_iter=2`でも通るが余裕を持たせる）、「非収束だが
+        // cov_params計算は成功する」ケースを踏む。
         let input = censored_regression_input();
         let estimator = TobitEstimator::fit(
             input,
@@ -3023,41 +3447,51 @@ mod tests {
         .unwrap()
     }
 
-    /// `fit()`と同じ手順（標準化→収束点でのscores/Hessian評価→`common.rs`の`cov_type`別の
-    /// 共通行列演算→`destandardize_cov_params`→`s→σ`のデルタ法ヤコビアン`diag(1,...,1,σ)`
-    /// 適用）をテスト側で独立に再現し、`cov_params_std_fn`が計算する`(β,s)`空間の分散
-    /// 共分散行列から最終的な`(β,σ)`空間の`cov_params`を得る。`Logit`の対応テストと同じ
-    /// 技法（`fit()`本体のロジックを再利用せず、独立に再現することで配線ミスを検出する）。
+    /// `fit()`と同じ手順（`TobitScaling`による`x`のセンタリング＋スケーリングと`y`の
+    /// スケーリング→収束点でのscores/Hessian評価→`common.rs`の`cov_type`別の共通行列
+    /// 演算→`TobitScaling::destandardize_cov_params`）をテスト側で独立に再現し、
+    /// `cov_params_std_fn`が計算する標準化空間の分散共分散行列から最終的な`(β,σ)`空間の
+    /// `cov_params`を得る。`Logit`の対応テストと同じ技法（`fit()`本体のロジックを
+    /// 再利用せず、独立に再現することで配線ミスを検出する。`TobitScaling`の各メソッドは
+    /// 元々の`standardize_columns`/`destandardize_cov_params`と同じく共有ヘルパー扱い）。
     fn expected_cov_params(
         input: &TobitInput,
         classical: &TobitEstimator,
         cov_params_std_fn: impl FnOnce(&Mat<f64>, &Mat<f64>) -> Mat<f64>,
     ) -> Mat<f64> {
         let k = input.k();
-        let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
-        let scale = scale.extend_unscaled(1);
-        let beta_std: Vec<f64> = classical
-            .params()
-            .iter()
-            .zip(scale.stds())
-            .map(|(p, s)| p * s)
-            .collect();
-        let mut params_std = beta_std;
-        params_std.push(classical.sigma().ln());
+        let scaling = TobitScaling::fit(input.x(), input.y(), input.has_intercept());
+        let x_std = scaling.standardize_x(input.x());
+        let y_std = scaling.standardize_y(input.y());
+        let lower_std = scaling.standardize_bound(input.lower());
+        let upper_std = scaling.standardize_bound(input.upper());
 
-        let problem_std =
-            TobitProblem::from_standardized(x_std, input.y().clone(), input.lower(), input.upper());
+        // 元のスケールの`(β, σ)`から標準化空間の内部パラメータ`(β̃, s̃=logσ̃)`を再構成する
+        // （`destandardize_params`の逆写像。`TobitScaling`のdocコメントの式を反転）。
+        let c = scaling.y_scale;
+        let start = usize::from(scaling.has_intercept);
+        let mut params_std = vec![0.0; k + 1];
+        for (j, p) in params_std.iter_mut().enumerate().take(k).skip(start) {
+            *p = classical.params()[j] * scaling.x_stds[j] / c;
+        }
+        if scaling.has_intercept {
+            params_std[0] = (classical.params()[0]
+                + (1..k)
+                    .map(|j| scaling.x_means[j] * classical.params()[j])
+                    .sum::<f64>())
+                / c;
+        }
+        params_std[k] = classical.sigma().ln() - c.ln();
+
+        let problem_std = TobitProblem::from_standardized(x_std, y_std, lower_std, upper_std);
         let scores_std = problem_std.scores(&params_std);
         let cost_hessian_std = problem_std.hessian(&params_std).unwrap();
         let hessian_std = Mat::from_fn(k + 1, k + 1, |i, j| -cost_hessian_std[i][j]);
 
-        let cov_params_beta_s =
-            destandardize_cov_params(&cov_params_std_fn(&hessian_std, &scores_std), &scale);
-        let sigma = classical.sigma();
-        let jacobian: Vec<f64> = (0..=k).map(|i| if i < k { 1.0 } else { sigma }).collect();
-        Mat::from_fn(k + 1, k + 1, |i, j| {
-            *cov_params_beta_s.get(i, j) * jacobian[i] * jacobian[j]
-        })
+        scaling.destandardize_cov_params(
+            &cov_params_std_fn(&hessian_std, &scores_std),
+            classical.sigma(),
+        )
     }
 
     fn assert_cov_params_close(actual: &Mat<f64>, expected: &Mat<f64>, k_plus_1: usize, tol: f64) {

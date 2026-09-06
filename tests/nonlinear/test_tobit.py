@@ -444,19 +444,27 @@ def test_non_convergence_raises_computation_error_with_tiny_max_iter(
         ).fit()
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Issue #288: Issue #286（yのスケール由来の分離ヒューリスティック誤発火）を"
+        "修正した結果、このDGP（β1=100＋N(0,1)ノイズ）は実は正しく識別可能で、"
+        "Newton/BFGS/LBFGSとも x1≈99.98・σ≈1.02（真値回復）で収束するようになった"
+        "（旧来のComputationErrorは#286のスケール由来の偽陽性だった）。テストの"
+        "再設計（大係数の収束回帰テストへの転用＋真の分離テストの別途追加）は"
+        "Issue #288で行う。"
+    ),
+)
 def test_separation_suspected_raises_computation_error_for_near_separation_data():
     """極端に大きい真の係数（`x1`の係数=100）のDGPは`ComputationError`
     （engine側の`SeparationSuspected`、`run_solver`でLogit/Probit/Tobit共有の
     検出機構）。
 
-    `nonlinear-api-design.md`10章では「Tobitはyが連続なため、非打ち切り観測が
-    無いケース等、Logit/Probitとは異なる退化パターンがあり得る」という懸念から
-    このケースの検出要否が未確定だった。実際には2種類の異なる退化が存在する
-    ことが判明した: 非打ち切り観測ゼロによる`σ→0`退化（`MleError::
-    NoUncensoredObservations`、`test_no_uncensored_observations_raises`
-    参照、Issue #223）と、本テストが検証する極端な`β`による分離（既存の
-    `SeparationSuspected`機構がLogit/Probitと同じ標準化パラメータノルム基準で
-    そのまま捕捉できることを本テストで実測確認、Issue #226）。
+    **Issue #288で再設計予定**（現在xfail）: #286修正後、このDGPは正しく識別可能で
+    収束する。Tobitの真の分離は`σ→0`（`MleError::NoUncensoredObservations`、
+    `test_no_uncensored_observations_raises`参照、Issue #223）または`NonConvergence`
+    として現れ、標準化パラメータノルム基準の`SeparationSuspected`はTobitでは実質
+    発火しない（Logit/Probitでは`y∈{0,1}`で係数が発散するため引き続き有効）。
     """
     rng = random.Random(42)
     n = 200

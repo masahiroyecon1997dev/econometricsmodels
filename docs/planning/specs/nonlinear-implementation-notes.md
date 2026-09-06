@@ -198,6 +198,20 @@ Logitのfit()に観測情報行列SEを実装するテスト追加中、`Method:
 - 既存の`standardize_columns`/`destandardize_params`/`transform_cov_params_to_original_scale`（`nonlinear/common.rs`）は`params.len() == x.ncols() == ColumnScale.stds.len()`の1:1対応（`zip`ベース）が前提。Tobitは`params`がk+1次元（`β`のk個+`log σ`）になるため、そのままでは対応が崩れる
 - `log σ`（`k+1`番目の要素）はXの列スケーリングと無関係な量（yのスケールに定義される）なので、**標準化対象に含めない**。実装は`ColumnScale.stds`にσ用の`1.0`（スケーリングなし）を末尾に追加する形にし、既存の`zip`ベースのロジックをそのまま再利用する
 
+### Issue #286: 標準化を`nonlinear/common.rs`共有から`tobit.rs`局所（`TobitScaling`）へ切り出し
+
+**背景**: `run_solver`共有の(準)分離ヒューリスティック`separation_suspected`（標準化パラメータ空間のL2ノルムが`SEPARATION_PARAM_NORM_THRESHOLD=100`超で分離と判定、Logit/Probitの`y∈{0,1}`で較正）が、Wooldridge mroz `hours`（生スケール、σ≈1122）のTobitで**誤発火**していた。`common.rs`の`standardize_columns`は`x`列を分散1へスケーリングするだけで、(1) `y`をスケーリングしない・(2) 平均センタリングしない（切片なしモデルで逆変換が壊れるため意図的）ため、`y`のスケールが大きいと健全なMLE解でも標準化係数（切片≈965、`exper`項≈1061）のノルムが閾値を超えていた（実測ノルム≈1652）。
+
+**対応（ユーザー確認済み、方針B3）**: `common.rs`・Logit/Probitは無変更で、Tobitの`fit()`だけが使う`TobitScaling`（`tobit.rs`局所）を新設した。
+
+- **`y`のスケーリング**: `y_scale = 2^round(log2(母集団std(y)))`（**2の冪に丸める**）で`y`・打ち切り境界を一律スケーリング。2の冪での除算は倍精度で仮数部不変＝厳密なので、程よいスケールの`y`（`std ∈ [1/√2, √2)`）では`y_scale=1`の完全恒等変換になり、Newtonの反復軌道が「スケーリング前と厳密に相似」に保たれる。**生の標準偏差（例: 0.949）で割ると、その丸め誤差~1e-16だけでも打ち切り率が高くHessianが際どい悪条件のデータ（合成`heavy_censoring`、左打ち切り60%）で正則化NewtonがSingularHessianに倒れる**ことを実測で確認したため、丸めて厳密化する。
+- **`x`列の平均センタリング（切片ありモデルのときのみ）**: `y`のスケーリングだけでは`exper`(0〜45)/`expersq`(0〜2025)型の強い共線列を含むmroz `hours`でNewtonが不定符号領域に落ちる（`ols_initial_params`の丸め誤差~1e-14で結果が変わるほど際どい）。切片ありのとき列を`(x-x̄)/std`とセンタリングすると`survreg`同様Newtonが安定収束する。切片なしでは`(x)/std`のみ（吸収先の切片が無く逆変換が壊れるため）。
+- **逆変換**: `(β̃, s̃=logσ̃)` → `(β, logσ)` は `βⱼ = c·β̃ⱼ/stdⱼ`（`j≥1`）、`β₀ = c·β̃₀ - Σ_{j≥1} x̄ⱼ·βⱼ`（切片は全傾き係数に依存）、`s = s̃ + ln c`。`cov_params`は`Cov(β,σ) = J·Cov(β̃,s̃)·Jᵀ`（`J`は上記線形部分の微分に`s̃→σ=c·exp(s̃)`のデルタ法`∂σ/∂s̃=σ`を末尾行へ折り込んだもの、`TobitScaling::param_jacobian`）。`common.rs`の`standardize_columns`/`destandardize_params`/`destandardize_cov_params`はTobitから未使用になった（Logit/Probitは引き続き使用）。
+- **結果**: 生スケール mroz `hours` の classical/opg/hc0/hc1 が既定Newtonで収束し、R primary（`survreg`）と相対誤差 ≤3e-9 で一致。合成フィクスチャ11シナリオは`y_scale`が2の冪に丸まる（多くは1.0）ため既存の収束挙動・数値と不変（実測relerr ≤6e-10、変更前と同値）。
+- **派生Issue**:
+  - **#287**: 生スケール mroz `hours` の `cov_type=cluster`（`city`列、G=2）は、Wald検定の傾き係数`q×q=7×7`部分行列が`rank(Ŝ)≤G=2`で特異になり`fit()`全体が`ComputationError`（上記「Wald検定とクラスターロバストSEの構造的な相互作用」がmroz収束で顕在化。R参照も`wald_statistic: NA`）。#286スコープ外。
+  - **#288**: `test_separation_suspected_raises_computation_error_for_near_separation_data`（β1=100 DGP）は#286修正後は正しく識別可能で収束（真値回復）することが判明——旧来のエラーは#286のスケール由来偽陽性だった。**標準化ノルム基準の`SeparationSuspected`はTobitでは実質発火しなくなる**（Tobitの真の分離は`σ→0`＝`NoUncensoredObservations`または`NonConvergence`として現れる。Logit/Probitでは係数が±∞へ発散するため引き続き有効）。当該pytestは`@pytest.mark.xfail(strict=True)`で暫定対応、テスト再設計とdoc（本ファイル・`nonlinear-api-design.md`10章）修正は#288で実施。
+
 ### `llnull`・GOF・有意性検定
 
 - `log_likelihood_null`・`pseudo_r_squared`は実装しない（`nonlinear-api-design.md`5章で確定。理由: 閉形式が存在せず、主リファレンスのAER::tobitもpseudo R2を実装していないため）

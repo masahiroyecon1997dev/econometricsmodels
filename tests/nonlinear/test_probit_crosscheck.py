@@ -68,13 +68,6 @@ RTOL_MARGEFF_SE = TOLERANCES["probit_crosscheck"]["rtol_margeff_se"]
 # より緩いATOLが必要（実測最大絶対誤差~2.9e-5、mroz）。
 ATOL_P_VALUE = TOLERANCES["probit_crosscheck"]["atol_p_value"]
 
-# Wooldridge mrozのクラスターロバストSE（cluster_col="city"、G=2）は、合成データの
-# クラスターケース（G=2/G=10いずれも~5e-5水準）より数値ノイズが大きいことを実測
-# 確認した（相対誤差最大~1.1e-3、const）。実データ・クラスタ数境界（G=2）・
-# 相関の強い説明変数（exper/expersqなど）が重なる境界的なケースのため、この
-# テストに限り緩いRTOLを使う。
-RTOL_MROZ_CLUSTER = TOLERANCES["probit_crosscheck"]["rtol_mroz_cluster"]
-
 COV_TYPES = ["classical", "opg", "hc0", "hc1"]
 MARGEFF_AT = ["overall", "mean", "median"]
 
@@ -205,17 +198,6 @@ def test_cluster_imbalanced_matches_r_glm(fixtures):
     _assert_dict_close(res.std_errors, ref["se"], "cluster_imbalanced/se")
 
 
-def test_cluster_g2_matches_r_glm(fixtures):
-    df = pl.read_csv(DATA_DIR / "probit_baseline.csv")
-    df = with_cluster_groups(df, 2)
-    options = ProbitOptions(cov_type="cluster", cluster_col="cluster_group")
-    res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
-
-    ref = fixtures["synthetic"]["baseline"]["cluster_g2"]["r"]
-    _assert_dict_close(res.params, ref["coef"], "cluster_g2/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster_g2/se")
-
-
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 def test_mroz_matches_r_glm(fixtures, cov_type):
     df = load_wooldridge_dataset("mroz")
@@ -224,28 +206,3 @@ def test_mroz_matches_r_glm(fixtures, cov_type):
 
     ref = fixtures["wooldridge"]["mroz"][cov_type]["r"]
     _check_result(res, ref, f"mroz/{cov_type}")
-
-
-def test_mroz_cluster_matches_r_glm(fixtures):
-    """実データでのクラスターロバストSE（`city`＝都市部居住ダミー、484/269の2値）。
-
-    `testing-policy.md`「テスト用データセット」3.の「実データでのグループ列も
-    検証する」を満たす（Logitのmrozクラスターと同じ趣旨）。クラスタ数境界（G=2）・
-    実データ特有の説明変数間の強い相関（exper/expersq等）が重なり、合成データの
-    クラスターケースより数値ノイズが大きいため`RTOL_MROZ_CLUSTER`を使う
-    （モジュールdocstring参照）。
-    """
-    df = load_wooldridge_dataset("mroz")
-    options = ProbitOptions(cov_type="cluster", cluster_col="city")
-    res = Probit(df, y="inlf", x=MROZ_X, options=options).fit()
-
-    ref = fixtures["wooldridge"]["mroz"]["cluster"]["r"]
-    _assert_dict_close(
-        res.params, ref["coef"], "mroz/cluster/coef", rtol=RTOL_MROZ_CLUSTER
-    )
-    _assert_dict_close(
-        res.std_errors,
-        ref["se"],
-        "mroz/cluster/se",
-        rtol=RTOL_MROZ_CLUSTER,
-    )

@@ -104,10 +104,6 @@ def test_cluster_imbalanced_matches_statsmodels(fixtures):
     _checks.check_cluster_imbalanced_matches_statsmodels(CONFIG, fixtures)
 
 
-def test_cluster_g2_matches_statsmodels(fixtures):
-    _checks.check_cluster_g2_matches_statsmodels(CONFIG, fixtures)
-
-
 @pytest.mark.parametrize("method", ["bfgs", "lbfgs"])
 def test_method_matches_statsmodels(fixtures, method):
     _checks.check_method_matches_statsmodels(CONFIG, fixtures, method)
@@ -116,10 +112,6 @@ def test_method_matches_statsmodels(fixtures, method):
 @pytest.mark.parametrize("cov_type", CONFIG.cov_types)
 def test_mroz_matches_statsmodels(fixtures, cov_type):
     _checks.check_mroz_matches_statsmodels(CONFIG, fixtures, cov_type)
-
-
-def test_mroz_cluster_matches_statsmodels(fixtures):
-    _checks.check_mroz_cluster_matches_statsmodels(CONFIG, fixtures)
 
 
 # ── ライブ statsmodels との照合（凍結フィクスチャ対象外の分岐） ─────

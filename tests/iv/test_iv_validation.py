@@ -267,6 +267,31 @@ def test_insufficient_clusters_raises(iv_dataset):
         our_fit(df, options=options)
 
 
+@pytest.mark.parametrize("method", ["2sls", "gmm"])
+def test_cluster_count_at_most_slopes_raises_validation_error(
+    iv_dataset, method
+):
+    """`cov_type="cluster"`でクラスター数G≤構造方程式の傾き係数の数q
+    （`our_fit`既定は`x_exog=["x1"]`・`x_endog=["endog1"]`で`q=2`、ここで
+    `G=2 == q=2`）は`ValidationError`
+    （`CommonError::InsufficientClustersForInference`、Issue #289）。
+
+    `rank(Ŝ)≤G-1`のためG≤qでロバストWald/F（χ²）検定のq×q部分行列が構造的に
+    特異になる。2SLS/GMMともに`fit()`冒頭で構造方程式のqを使って弾く
+    （第一段階回帰の`FirstStageFailed`ラップより前）。`weight_type="cluster"`の
+    重み行列`S`（l×l）が`G<l`で特異になる別軸の問題（Issue #290）とは区別する。
+    """
+    cluster = pl.Series(
+        "cluster_group", [i % 2 for i in range(iv_dataset.height)]
+    )
+    df = iv_dataset.with_columns(cluster)
+    options = IvOptions(
+        method=method, cov_type="cluster", cluster_col="cluster_group"
+    )
+    with pytest.raises(ValidationError):
+        our_fit(df, options=options)
+
+
 @pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])
 def test_invalid_confidence_level_raises(iv_dataset, confidence_level):
     """`confidence_level`が(0, 1)の範囲外（境界値0.0を含む）の場合

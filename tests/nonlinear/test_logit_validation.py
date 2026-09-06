@@ -97,6 +97,18 @@ def test_cluster_cov_type_requires_at_least_two_groups():
     )
 
 
+def test_cluster_count_at_most_slopes_raises_validation_error(binary_dataset):
+    _checks.check_cluster_count_at_most_slopes_raises_validation_error(
+        binary_dataset, Logit, LogitOptions
+    )
+
+
+def test_mroz_cluster_cov_type_raises_validation_error():
+    _checks.check_mroz_cluster_cov_type_raises_validation_error(
+        Logit, LogitOptions
+    )
+
+
 def test_cluster_col_nonexistent_column_raises(binary_dataset):
     _checks.check_cluster_col_nonexistent_column_raises(
         binary_dataset, Logit, LogitOptions

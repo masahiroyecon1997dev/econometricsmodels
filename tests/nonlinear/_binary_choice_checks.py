@@ -44,7 +44,9 @@ from benchmark.common import imbalanced_cluster_groups
 # ── test_<method>_api.py: 成功パス・結果型 ──────────────────────────
 
 
-def check_fit_succeeds_and_returns_results(dataset, estimator_cls, results_cls):
+def check_fit_succeeds_and_returns_results(
+    dataset, estimator_cls, results_cls
+):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
     assert isinstance(res, results_cls)
 
@@ -448,9 +450,7 @@ def check_invalid_confidence_level_raises(
     """
     options = options_cls(confidence_level=confidence_level)
     with pytest.raises(ValidationError):
-        estimator_cls(
-            dataset, y="y", x=["x1", "x2"], options=options
-        ).fit()
+        estimator_cls(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
 def check_non_positive_tol_raises(dataset, estimator_cls, options_cls, tol):
@@ -504,6 +504,25 @@ def check_cluster_cov_type_requires_at_least_two_groups(
             x=["x1"],
             options=options_cls(cov_type="cluster", cluster_col="cluster"),
         ).fit()
+
+
+def check_cluster_count_at_most_slopes_raises_validation_error(
+    binary_dataset, estimator_cls, options_cls
+):
+    """クラスター数G≤傾き係数の数q（`k - k_constant`）は`ValidationError`
+    （engine側の`CommonError::InsufficientClustersForInference`、Issue #289）。
+
+    クラスターロバスト共分散はクラスター寄与スコアの総和がゼロ（MLEの一次条件
+    `Σ_i s_i = 0`）で`rank(Ŝ)≤G-1`のため、G≤qだと退化する。Logit/Probitは
+    overall検定がLRのため`q×q`反転こそ通らないが、縮退した共分散から読んだSEを
+    無警告で返すのは実質バグのため、`fit()`冒頭のバリデーションで弾く
+    （Logit/Probitでは新規制約）。`x=["x1", "x2"]`で`q=2`、疑似グループを2個に
+    潰して`G=2 == q=2`を作る。
+    """
+    df = with_cluster_groups(binary_dataset, 2)
+    options = options_cls(cov_type="cluster", cluster_col="cluster_group")
+    with pytest.raises(ValidationError):
+        estimator_cls(df, y="y", x=["x1", "x2"], options=options).fit()
 
 
 def check_cluster_col_nonexistent_column_raises(
@@ -635,7 +654,9 @@ def check_separation_suspected_raises_computation_error_for_near_separation_data
 class BinaryChoiceReferenceConfig:
     estimator_cls: type
     options_cls: type
-    dataset_prefix: str  # "logit" / "probit"（CSVファイル名・statsmodels比較の識別用）
+    dataset_prefix: (
+        str  # "logit" / "probit"（CSVファイル名・statsmodels比較の識別用）
+    )
     fixture_path: Path
     scenarios: Sequence[str]
     cov_types: Sequence[str]
@@ -782,30 +803,27 @@ def check_cluster_imbalanced_matches_statsmodels(
     config.assert_dict_close(
         res.params, ref["coef"], "cluster_imbalanced/coef"
     )
-    config.assert_dict_close(res.std_errors, ref["se"], "cluster_imbalanced/se")
-
-
-def check_cluster_g2_matches_statsmodels(
-    config: BinaryChoiceReferenceConfig, fixtures
-) -> None:
-    """クラスタ数境界（G=2ちょうど）の成功パス。
-
-    OLSのwald_f_testと異なりLogit/Probitのcluster_cov_paramsはq×q部分行列の
-    反転を要求しないため、説明変数を1個に絞る必要はない（k=3のままG=2で正常に
-    計算できることを実機確認済み、`generate_<method>_fixtures.py`参照）。
-    """
-    df = pl.read_csv(config.dataset_path("baseline"))
-    df = with_cluster_groups(df, 2)
-    options = config.options_cls(
-        cov_type="cluster", cluster_col="cluster_group"
+    config.assert_dict_close(
+        res.std_errors, ref["se"], "cluster_imbalanced/se"
     )
-    res = config.estimator_cls(
-        df, y="y", x=["x1", "x2", "x3"], options=options
-    ).fit()
 
-    ref = fixtures["baseline"]["cluster_g2"]
-    config.assert_dict_close(res.params, ref["coef"], "cluster_g2/coef")
-    config.assert_dict_close(res.std_errors, ref["se"], "cluster_g2/se")
+
+def check_mroz_cluster_cov_type_raises_validation_error(
+    estimator_cls, options_cls
+) -> None:
+    """実データでのクラスターロバストSEの`G <= q`境界（Issue #289 / #287）。
+
+    mrozの`city`（都市部居住ダミー、484/269の2値）はG=2、`MROZ_X`は7変数なので
+    `G=2 <= q=7`。`rank(Ŝ) <= G-1`のためクラスターロバスト共分散が退化するため、
+    `fit()`冒頭のバリデーションが`ValidationError`
+    （`CommonError::InsufficientClustersForInference`）で弾く。従来はLogit/Probitが
+    この縮退した共分散から読んだSEを無警告で返していた（silent-pass、実質バグ。
+    数値照合フィクスチャ`mroz/cluster`を持っていたが、本Issueで削除）。
+    """
+    df = load_wooldridge_dataset("mroz")
+    options = options_cls(cov_type="cluster", cluster_col="city")
+    with pytest.raises(ValidationError):
+        estimator_cls(df, y="inlf", x=MROZ_X, options=options).fit()
 
 
 def check_method_matches_statsmodels(
@@ -842,23 +860,6 @@ def check_mroz_matches_statsmodels(
     res = config.estimator_cls(df, y="inlf", x=MROZ_X, options=options).fit()
 
     check_result(config, res, fixtures["mroz"][cov_type], f"mroz/{cov_type}")
-
-
-def check_mroz_cluster_matches_statsmodels(
-    config: BinaryChoiceReferenceConfig, fixtures
-) -> None:
-    """実データでのクラスターロバストSE（`city`＝都市部居住ダミー、484/269の2値）。
-
-    `testing-policy.md`「テスト用データセット」3.の「実データでのグループ列も
-    検証する」を満たす（OLS/WLS・Logit/Probit間で同じ趣旨）。
-    """
-    df = load_wooldridge_dataset("mroz")
-    options = config.options_cls(cov_type="cluster", cluster_col="city")
-    res = config.estimator_cls(df, y="inlf", x=MROZ_X, options=options).fit()
-
-    ref = fixtures["mroz"]["cluster"]
-    config.assert_dict_close(res.params, ref["coef"], "mroz/cluster/coef")
-    config.assert_dict_close(res.std_errors, ref["se"], "mroz/cluster/se")
 
 
 # ── test_<method>_reference.py: ライブ statsmodels との照合 ──────────

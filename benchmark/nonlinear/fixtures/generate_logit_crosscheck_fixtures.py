@@ -89,13 +89,9 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         groups=imbalanced_cluster_groups(n),
         suffix="_cluster_imbalanced",
     )
-    fixtures["baseline"]["cluster_g2"] = _run_cluster_case(
-        baseline_csv,
-        formula="y ~ x1 + x2 + x3",
-        tmpdir=tmpdir,
-        groups=[str(i % 2) for i in range(n)],
-        suffix="_cluster_g2",
-    )
+    # NOTE: cluster_g2（G=2×説明変数3個）の成功パスフィクスチャは Issue #289 で
+    # 削除した。`rank(Ŝ)<=G-1`のため`G<=q`ではクラスターロバスト共分散が退化し、
+    # `fit()`冒頭のバリデーションが ValidationError で弾く。
 
     return fixtures
 
@@ -131,11 +127,8 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
         if cov_type == "cluster":
             continue
         fixtures[cov_type] = {"r": run_glm_r(csv_path, MROZ_FORMULA, cov_type)}
-    # 実データでのクラスターロバストSE（testing-policy.md「テスト用データセット」3.）。
-    # mrozの`city`（都市部居住ダミー、484/269の2値）を実カテゴリ列として使う。
-    fixtures["cluster"] = {
-        "r": run_glm_r(csv_path, MROZ_FORMULA, "cluster", cluster_col="city")
-    }
+    # NOTE: mrozの`city`（G=2）クラスターロバストSEの成功パスフィクスチャは
+    # Issue #289 で削除した（MROZ_X は7変数で`G=2 <= q=7`のため ValidationError）。
     return fixtures
 
 
@@ -186,8 +179,9 @@ def build_fixtures() -> dict:
             "perfect_multicollinearityシナリオはここに含まない"
             "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
             "clusterは合成データ（baselineシナリオ、均等疑似グループ・不均衡"
-            "グループ・G=2境界）とWooldridge実データ（mroz、city列＝都市部居住"
-            "ダミー）の両方を含む。パラメータ名は全ソースで切片を'const'に正規化済み。"
+            "グループ）を含む。G<=q（傾き係数の数）のケース（旧cluster_g2・mroz/city）は"
+            "ValidationErrorになるため成功パスフィクスチャを持たない（Issue #289）。"
+            "パラメータ名は全ソースで切片を'const'に正規化済み。"
         ),
     }
     return fixtures

@@ -70,9 +70,7 @@ def test_unknown_cov_type_raises(binary_dataset):
 
 
 def test_unknown_method_raises(binary_dataset):
-    _checks.check_unknown_method_raises(
-        binary_dataset, Probit, ProbitOptions
-    )
+    _checks.check_unknown_method_raises(binary_dataset, Probit, ProbitOptions)
 
 
 @pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])
@@ -98,6 +96,18 @@ def test_non_positive_max_iter_raises(binary_dataset, max_iter):
 
 def test_cluster_cov_type_requires_at_least_two_groups():
     _checks.check_cluster_cov_type_requires_at_least_two_groups(
+        Probit, ProbitOptions
+    )
+
+
+def test_cluster_count_at_most_slopes_raises_validation_error(binary_dataset):
+    _checks.check_cluster_count_at_most_slopes_raises_validation_error(
+        binary_dataset, Probit, ProbitOptions
+    )
+
+
+def test_mroz_cluster_cov_type_raises_validation_error():
+    _checks.check_mroz_cluster_cov_type_raises_validation_error(
         Probit, ProbitOptions
     )
 

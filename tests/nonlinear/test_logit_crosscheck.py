@@ -195,17 +195,6 @@ def test_cluster_imbalanced_matches_r_glm(fixtures):
     _assert_dict_close(res.std_errors, ref["se"], "cluster_imbalanced/se")
 
 
-def test_cluster_g2_matches_r_glm(fixtures):
-    df = pl.read_csv(DATA_DIR / "logit_baseline.csv")
-    df = with_cluster_groups(df, 2)
-    options = LogitOptions(cov_type="cluster", cluster_col="cluster_group")
-    res = Logit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
-
-    ref = fixtures["synthetic"]["baseline"]["cluster_g2"]["r"]
-    _assert_dict_close(res.params, ref["coef"], "cluster_g2/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster_g2/se")
-
-
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 def test_mroz_matches_r_glm(fixtures, cov_type):
     df = load_wooldridge_dataset("mroz")
@@ -214,18 +203,3 @@ def test_mroz_matches_r_glm(fixtures, cov_type):
 
     ref = fixtures["wooldridge"]["mroz"][cov_type]["r"]
     _check_result(res, ref, f"mroz/{cov_type}")
-
-
-def test_mroz_cluster_matches_r_glm(fixtures):
-    """実データでのクラスターロバストSE（`city`＝都市部居住ダミー、484/269の2値）。
-
-    `testing-policy.md`「テスト用データセット」3.の「実データでのグループ列も
-    検証する」を満たす（OLSのwage1/regionクラスターと同じ趣旨）。
-    """
-    df = load_wooldridge_dataset("mroz")
-    options = LogitOptions(cov_type="cluster", cluster_col="city")
-    res = Logit(df, y="inlf", x=MROZ_X, options=options).fit()
-
-    ref = fixtures["wooldridge"]["mroz"]["cluster"]["r"]
-    _assert_dict_close(res.params, ref["coef"], "mroz/cluster/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "mroz/cluster/se")

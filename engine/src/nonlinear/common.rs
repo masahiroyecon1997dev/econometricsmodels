@@ -31,7 +31,7 @@ use thiserror::Error;
 use crate::error::CommonError;
 use crate::inference;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
-use crate::validation::validate_cluster_groups;
+use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
 /// Logit/Probit/Tobitの計算過程で発生しうるエラー。
 ///
@@ -272,36 +272,54 @@ pub fn validate_sufficient_observations(n: usize, k: usize) -> Result<(), MleErr
     Ok(())
 }
 
-/// `cov_type=Cluster`のとき、グループキーが指定されておりクラスター数が十分であることを
-/// 検証する（`Cluster`以外は無検証）。
-pub fn validate_cluster_cov_type(cov_type: &CovType, n: usize) -> Result<(), MleError> {
+/// `cov_type=Cluster`のとき、グループキーが指定されており、クラスター数が
+/// (1) 2以上であること（`validate_cluster_groups`）、(2) 全体Wald検定の傾き係数の数
+/// `n_slopes`（= `k - k_constant`）より多いこと（`validate_cluster_count_covers_slopes`、
+/// `rank(Ŝ) ≤ g - 1`のため`g <= n_slopes`だと`n_slopes×n_slopes`部分行列が構造的に
+/// 特異、Issue #289）を検証する（`Cluster`以外は無検証）。`n`と型が同じ`usize`の
+/// `n_slopes`を並べているが、`n`は`validate_cluster_groups`内の`debug_assert_eq!
+/// (groups.len(), n)`で、`n_slopes`は`g <= n_slopes`の比較結果で、取り違えれば
+/// いずれもテスト/デバッグビルドで早期に露見する（`validate_fit_preconditions`が
+/// 多数の同型引数を持つため`has_intercept: bool`を受け取るのとは対照的に、こちらは
+/// 引数が3つで`cov_type`が異なる型のため`usize`のまま受け取る）。
+pub fn validate_cluster_cov_type(
+    cov_type: &CovType,
+    n: usize,
+    n_slopes: usize,
+) -> Result<(), MleError> {
     if let CovType::Cluster { groups } = cov_type {
         let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-        validate_cluster_groups(groups, n)?;
+        let g = validate_cluster_groups(groups, n)?;
+        validate_cluster_count_covers_slopes(g, n_slopes)?;
     }
     Ok(())
 }
 
 /// `fit()`冒頭で行う共通の入力検証（Logit/Probit）。検証順序:
 /// `confidence_level`→`max_iter`→`tol`→`y`の二値性→`k==0`→`n<=k`→
-/// `cov_type=Cluster`のグループ列。元はLogit/Probitそれぞれの`fit()`に一字一句
+/// `cov_type=Cluster`のグループ列（グループキー未指定・クラスター数2未満・
+/// クラスター数`g <= 傾き係数の数`）。元はLogit/Probitそれぞれの`fit()`に一字一句
 /// 同一のブロックとして重複していたため、こちらへ集約した。
 ///
 /// Tobitの`fit()`（`confidence_level`/`cov_type`をまだ受け取らない、Issue #215時点）は
 /// この関数をそのまま呼べない（引数を揃えられない）ため、上記の各検証を個別の小関数
 /// （[`validate_max_iter`]等）に分割し、Tobitはそのうち必要な部分（`max_iter`/`tol`/
-/// [`validate_sufficient_observations`]）だけを個別に呼ぶ（Issue #212の結論）。
-/// この関数自体はLogit/Probit向けに元の挙動をそのまま保つラッパーとして残す。
+/// [`validate_sufficient_observations`]/[`validate_cluster_cov_type`]）だけを個別に
+/// 呼ぶ（Issue #212の結論）。この関数自体はLogit/Probit向けに元の挙動をそのまま保つ
+/// ラッパーとして残す。
 ///
 /// 引数は検証順序に揃えている。`n`（観測数）は`y`から自明に求まる（`y.nrows()`）ため
 /// 引数に取らない。`k`と型が同じ`usize`の引数を並べると呼び出し側で取り違えても
-/// コンパイルが通ってしまうため（レビュー指摘）、そのリスクをそもそも作らない設計。
+/// コンパイルが通ってしまうため（レビュー指摘）、傾き係数の数は`usize`ではなく
+/// `has_intercept: bool`で受け取り、この関数内で`k - usize::from(has_intercept)`と
+/// して算出する（`k`との取り違えを型で防ぐ）。
 pub fn validate_fit_preconditions(
     confidence_level: f64,
     max_iter: i64,
     tol: f64,
     y: &Mat<f64>,
     k: usize,
+    has_intercept: bool,
     cov_type: &CovType,
 ) -> Result<(), MleError> {
     validate_confidence_level(confidence_level)?;
@@ -312,7 +330,7 @@ pub fn validate_fit_preconditions(
     let n = y.nrows();
     validate_has_regressors(n, k)?;
     validate_sufficient_observations(n, k)?;
-    validate_cluster_cov_type(cov_type, n)?;
+    validate_cluster_cov_type(cov_type, n, k - usize::from(has_intercept))?;
     Ok(())
 }
 
@@ -2190,7 +2208,7 @@ mod tests {
     fn validate_fit_preconditions_ok_for_valid_inputs() {
         let y = Mat::from_fn(4, 1, |i, _| [0.0, 1.0, 0.0, 1.0][i]);
         assert_eq!(
-            validate_fit_preconditions(0.95, 100, 1e-8, &y, 2, &CovType::Classical),
+            validate_fit_preconditions(0.95, 100, 1e-8, &y, 2, true, &CovType::Classical),
             Ok(())
         );
     }
@@ -2201,7 +2219,7 @@ mod tests {
         // 検証順序通り`InvalidConfidenceLevel`が先に返ることを確認する。
         let y = Mat::from_fn(2, 1, |i, _| [0.0, 2.0][i]);
         assert_eq!(
-            validate_fit_preconditions(1.5, 100, 1e-8, &y, 2, &CovType::Classical),
+            validate_fit_preconditions(1.5, 100, 1e-8, &y, 2, true, &CovType::Classical),
             Err(CommonError::InvalidConfidenceLevel {
                 confidence_level: 1.5
             }
@@ -2213,7 +2231,7 @@ mod tests {
     fn validate_fit_preconditions_returns_no_regressors_when_k_is_zero() {
         let y = Mat::from_fn(3, 1, |i, _| [0.0, 1.0, 0.0][i]);
         assert_eq!(
-            validate_fit_preconditions(0.95, 100, 1e-8, &y, 0, &CovType::Classical),
+            validate_fit_preconditions(0.95, 100, 1e-8, &y, 0, false, &CovType::Classical),
             Err(CommonError::NoRegressors { n: 3 }.into())
         );
     }
@@ -2222,7 +2240,7 @@ mod tests {
     fn validate_fit_preconditions_returns_insufficient_observations_when_n_less_equal_k() {
         let y = Mat::from_fn(2, 1, |i, _| [0.0, 1.0][i]);
         assert_eq!(
-            validate_fit_preconditions(0.95, 100, 1e-8, &y, 2, &CovType::Classical),
+            validate_fit_preconditions(0.95, 100, 1e-8, &y, 2, true, &CovType::Classical),
             Err(CommonError::InsufficientObservations { n: 2, k: 2 }.into())
         );
     }
@@ -2231,8 +2249,41 @@ mod tests {
     fn validate_fit_preconditions_returns_missing_cluster_column_when_groups_is_none() {
         let y = Mat::from_fn(4, 1, |i, _| [0.0, 1.0, 0.0, 1.0][i]);
         assert_eq!(
-            validate_fit_preconditions(0.95, 100, 1e-8, &y, 2, &CovType::Cluster { groups: None }),
+            validate_fit_preconditions(
+                0.95,
+                100,
+                1e-8,
+                &y,
+                2,
+                true,
+                &CovType::Cluster { groups: None }
+            ),
             Err(CommonError::MissingClusterColumn.into())
+        );
+    }
+
+    #[test]
+    fn validate_fit_preconditions_returns_insufficient_clusters_for_inference_when_g_at_most_slopes()
+     {
+        // k=3・has_intercept=true → n_slopes=2。g=2（`g == q`）で
+        // `InsufficientClustersForInference`。グループ列は`y`と同じ長さ6。
+        let y = Mat::from_fn(6, 1, |i, _| [0.0, 1.0, 0.0, 1.0, 1.0, 0.0][i]);
+        let groups: Vec<String> = (0..6)
+            .map(|i| if i < 3 { "a" } else { "b" }.to_string())
+            .collect();
+        assert_eq!(
+            validate_fit_preconditions(
+                0.95,
+                100,
+                1e-8,
+                &y,
+                3,
+                true,
+                &CovType::Cluster {
+                    groups: Some(groups)
+                }
+            ),
+            Err(CommonError::InsufficientClustersForInference { g: 2, q: 2 }.into())
         );
     }
 

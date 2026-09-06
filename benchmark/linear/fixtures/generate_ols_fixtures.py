@@ -86,17 +86,17 @@ def build_fixtures() -> dict:
                 groups=imbalanced_cluster_groups(n),
                 note="不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。",
             )
-            # G=2×説明変数3個（既定のbaseline）はロバストWald検定の共分散
-            # 部分行列（3x3）のランクがG=2以下になり必然的に特異になるため
-            # ComputationError（成功パスではない、test_ols_reference.py
-            # 側でエラーパスとして確認）。ここでの「G=2境界の成功パス」は
-            # 説明変数1個（q=1、Wald検定の部分行列が1x1）に絞って確認する。
+            # G=2×説明変数3個（既定のbaseline）はG<=q（q=3）で、rank(Ŝ)<=G-1の
+            # ためロバストWald検定のq×q部分行列が構造的に特異になり、fit()冒頭の
+            # バリデーションがValidationErrorで弾く（成功パスではない、Issue #289。
+            # test_ols_validation.py側でエラーパスとして確認）。ここでの
+            # 「G=2境界の成功パス」は説明変数1個（q=1、G=2>q=1）に絞って確認する。
             n_g2 = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv").height
             fixtures[scenario]["cluster_g2"] = _run_cluster_case(
                 groups=[str(i % 2) for i in range(n_g2)],
-                note="クラスタ数境界（G=2ちょうど）の成功パス確認用。"
+                note="クラスタ数境界（G=2、q=1でG>q）の成功パス確認用。"
                 "説明変数1個（q=1）に絞っている（"
-                "3個だとロバストWald検定の共分散行列が特異になりComputationError）。",
+                "3個だとG<=qでロバストWald検定の共分散行列が特異になりValidationError）。",
                 k1=True,
             )
 

@@ -57,7 +57,8 @@ Probit固有の差分のみを記載する。
 ### 3.3 標準誤差
 
 `CovType`（`Classical`/`Opg`/`Hc0`/`Hc1`/`Cluster`）・計算式・エラー型（`SingularHessian`/
-`SingularOpgMatrix`/`MissingClusterColumn`/`InsufficientClusters`）は[`logit-spec.md`](./logit-spec.md)
+`SingularOpgMatrix`/`MissingClusterColumn`/`InsufficientClusters`/`InsufficientClustersForInference`
+＝クラスター数`G <= 傾き係数の数q`、Issue #289）は[`logit-spec.md`](./logit-spec.md)
 3.3節と共通（`opg_cov_params`/`sandwich_cov_params`/`cluster_cov_params`を共有インフラとしてそのまま
 再利用、Probit固有の新規計算は無い）。
 

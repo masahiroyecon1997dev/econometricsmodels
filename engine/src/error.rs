@@ -60,6 +60,22 @@ pub enum CommonError {
     #[error("cov_type='cluster' requires at least 2 clusters, got {g}")]
     InsufficientClusters { g: usize },
 
+    /// `cov_type="cluster"`で、クラスター数`g`が全体Wald/F検定の対象となる傾き係数の
+    /// 数`q`（= `k - k_constant`）以下。クラスターロバスト共分散`Ŝ = Σ_g S_g S_g'`は、
+    /// クラスター寄与スコアの総和がゼロ（OLSの正規方程式`X'e = 0`、MLEの一次条件
+    /// `Σ_i s_i = 0`）になるため`rank(Ŝ) ≤ g - 1`であり、`g <= q`だと検定の`q×q`
+    /// 部分行列が構造的に特異になる。`g`（クラスター列のユニーク数）も`q`（説明変数の
+    /// 列数）も入力だけから判定できるため、行列計算を待たず`fit()`冒頭で弾く
+    /// （Issue #289）。`InsufficientClusters`（`g < 2`）とはメッセージが異なるため
+    /// 別バリアントに分ける。
+    #[error(
+        "cov_type='cluster' requires more clusters than slope coefficients for joint \
+         inference: got g={g} clusters for q={q} slope coefficient(s), but the \
+         cluster-robust covariance has rank at most g-1, so the q×q Wald/F submatrix \
+         is singular when g <= q"
+    )]
+    InsufficientClustersForInference { g: usize, q: usize },
+
     /// 上記以外の計算過程での失敗（分布のCDF計算等）。
     #[error("computation failed: {0}")]
     ComputationFailed(String),
@@ -105,6 +121,13 @@ mod tests {
             "cov_type='cluster' requires at least 2 clusters, got 1"
         );
         assert_eq!(
+            CommonError::InsufficientClustersForInference { g: 2, q: 3 }.to_string(),
+            "cov_type='cluster' requires more clusters than slope coefficients for joint \
+             inference: got g=2 clusters for q=3 slope coefficient(s), but the \
+             cluster-robust covariance has rank at most g-1, so the q×q Wald/F submatrix \
+             is singular when g <= q"
+        );
+        assert_eq!(
             CommonError::ComputationFailed("t-distribution CDF did not converge".to_string())
                 .to_string(),
             "computation failed: t-distribution CDF did not converge"
@@ -140,6 +163,14 @@ mod tests {
         assert_ne!(
             CommonError::InsufficientClusters { g: 1 },
             CommonError::InsufficientClusters { g: 0 }
+        );
+        assert_eq!(
+            CommonError::InsufficientClustersForInference { g: 2, q: 2 },
+            CommonError::InsufficientClustersForInference { g: 2, q: 2 }
+        );
+        assert_ne!(
+            CommonError::InsufficientClustersForInference { g: 2, q: 2 },
+            CommonError::InsufficientClustersForInference { g: 2, q: 3 }
         );
     }
 }

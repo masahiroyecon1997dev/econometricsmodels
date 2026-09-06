@@ -73,6 +73,7 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
 
 - HC2/HC3は対象外（レバレッジ・hat行列に依存した補正で線形回帰特有の概念のため）
 - HACも対象外（今回のスコープ外の時系列拡張として保留）
+- **`"cluster"`のクラスター数`G`は傾き係数の数`q`（`k - k_constant`）より多くなければならない**（`G <= q`は`ValidationError`＝`InsufficientClustersForInference`、Issue #289）。クラスターロバスト共分散`Ŝ`はクラスター寄与スコアの総和がゼロ（一次条件`Σ_i s_i = 0`）のため`rank(Ŝ) ≤ G - 1`で、`G <= q`だと退化する。Logit/Probitは全体検定がLR（`lr_statistic`）のため`q×q`部分行列の反転こそ通らないが、退化した共分散から読んだSEを黙って返すのは識別失敗の隠蔽（fail-fast方針・多重共線性をエラーで止めるのと整合）のため、`fit()`冒頭で弾く。少数クラスタ一般の漸近正当化（`G=5, q=2`等、計算は通るが信頼性が怪しいケース）は別軸で、`ValidationError`では弾かず wild bootstrap 等の代替を推奨する注記に留める（`refactoring-candidates-2.md`項目90）
 - `"classical"` / `"nonrobust"`のエイリアス化はOLSの既存実装（[`engine_pybind/src/linear/ols.rs:102`](https://github.com/masahiroyecon1997dev/econometricsmodels/blob/main/engine_pybind/src/linear/ols.rs#L102)）に倣った
 
 ---

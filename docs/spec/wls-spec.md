@@ -75,6 +75,9 @@ statsmodelsの`WLS`も内部的に同じ変換方式`wexog=sqrt(weights)*exog`�
   のように、重みが2乗で効く（残差と設計行列の両方に$\sqrt{w_i}$がかかるため）。
 - クラスターのグループ分け自体（`cluster_col`によるグルーピング）は重み変換の影響を受けない
   （グループ内で合計する対象が変換後の値になるだけ）。小標本補正・自由度の扱いもOLSと同じ。
+  クラスター数`G <= 傾き係数の数q`は`InsufficientClustersForInference`（`ValidationError`、
+  Issue #289）——`WlsEstimator::fit`は変換後データで`OlsEstimator::fit`に委譲するため、
+  この検証もOLS実装（`ols-spec.md`「`G ≤ q`の境界」）をそのまま継承する。
 - HAC・cluster・時間順序（`time_col`）を含め、ラグ選択式・小標本補正・自由度切替はすべて
   観測数`n`・クラスター数`G`のみに依存し重みには依存しないため、OLSと同じ式・同じオプションを
   そのまま使う。

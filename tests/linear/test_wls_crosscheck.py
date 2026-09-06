@@ -178,13 +178,13 @@ def test_cluster_imbalanced_matches_r(crosscheck):
 
 
 def test_cluster_g2_matches_r(crosscheck):
-    """クラスタ数境界（G=2ちょうど）の成功パス（OLSの同種ケース相当）。
+    """クラスタ数境界（G=2、q=1でG>q）の成功パス（OLSの同種ケース相当）。
 
-    説明変数1個（q=1）に絞っている。baseline既定の3個のままG=2にすると、
-    ロバストWald検定の共分散部分行列（3x3）のランクがG=2以下となり必然的に
-    特異になりComputationErrorになる（成功パスにならない。
-    `test_wls_validation.py::test_cluster_g2_with_multiple_slopes_raises_computation_error`
-    参照）。
+    説明変数1個（q=1）に絞っている。baseline既定の3個（q=3）のままG=2にすると、
+    `rank(Ŝ)≤G-1`のためロバストWald検定のq×q部分行列が構造的に特異になり、
+    `fit()`冒頭のバリデーションが`ValidationError`で弾く（成功パスにならない。
+    `test_wls_validation.py::test_cluster_count_at_most_slopes_raises_validation_error`
+    参照、Issue #289）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
     df = with_cluster_groups(df, 2)

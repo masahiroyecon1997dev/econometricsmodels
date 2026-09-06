@@ -272,7 +272,16 @@
   ハードルは低い**。実施するならまずIssue化し、対象範囲（OLS/WLS/IVの再分類のみか、
   Logit/Probitへの新規追加も含めるか）を確定させてから着手するのが良いと思われる。
 - **気づいた経緯**: 2026-08-15、`generate_logit_fixtures.py`解説後のユーザー提案。
-- **状態**: 未対応（Issue化を含め着手要否はユーザー判断待ち）
+- **状態**: **対応済み（クローズ、2026-09-06）**。Issue #289（アンブレラ）＋サブタスク#287で
+  実装。閾値は当初提案の`G < q`ではなく**`G <= q`**を採用した——OLS/MLEの一次条件
+  （`X'e = 0` / `Σ_i s_i = 0`）によりクラスター寄与スコアの総和が厳密にゼロになるため
+  `rank(Ŝ) ≤ G - 1`であり、`G = q`ちょうども数学的に常に特異（`ensure_well_conditioned_
+  symmetric_matrix`の相対閾値が検出できるかがデータ依存だっただけ）。新エラー
+  `CommonError::InsufficientClustersForInference { g, q }`（`ValidationError`）を
+  OLS/WLS/Tobit/Logit/Probit/IV(2SLS,GMM)横断で`fit()`冒頭に追加。`G > q`かつ悪条件の
+  残余は従来どおり`ComputationError`がbackstop。GMMの`weight_type=Cluster`（重み行列`S`が
+  `G<l`で特異）は別軸として#290に分離。少数クラスタ一般の信頼性は`refactoring-
+  candidates-2.md`項目90（doc注記のみ・別軸）として残置。
 
 ### 15. IV: 複数内生変数対応後もCragg-Donald統計量をv1スコープ外のままにしてよいか（設計判断候補）
 

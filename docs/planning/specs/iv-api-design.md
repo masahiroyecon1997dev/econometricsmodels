@@ -80,7 +80,15 @@ Issue #171（`linearmodels`/`ivreg`とのベンチマーク作成）でリファ
   切り替える既存挙動（`ols-api-design.md`6章）を、GMMにも一貫適用する。GMMは3章で
   z分布と決定済みで古典的F検定の正当化が無いため、フィールド名はそのまま流用しつつ常に
   Wald版にする（新規フィールドは追加しない）。2SLSはOLSと同じ切り替えロジック（classical時は
-  F検定、HC/cluster/hac時はロバストWald検定）。 |
+  F検定、HC/cluster/hac時はロバストWald検定）。**`cov_type="cluster"`はクラスター数`G`が
+  構造方程式の傾き係数の数`q`（`k - k_constant`）より多くなければならない**（`G <= q`は
+  `CommonError::InsufficientClustersForInference`＝`ValidationError`。`rank(Ŝ) ≤ G-1`のため
+  ロバストWald/F（χ²）検定の`q×q`部分行列が構造的に特異、Issue #289。OLS/WLS/nonlinearと横断で
+  統一。`fit()`冒頭で構造方程式の`q`を使って弾き、第一段階回帰の`FirstStageFailed`ラップより
+  前に返す。Wu-Hausman拡張回帰は`q_aug = q + k_endog`で`G <= q_aug`になりうるが、実際に使う
+  末尾`k_endog`列の部分行列は`rank(Ŝ) ≤ G-1 ≥ k_endog`なら計算可能なので`wu_hausman_*`を
+  `None`へdegradeする）。**GMMの`weight_type="cluster"`の重み行列`S`（l×l）が`G<l`で特異に
+  なる別軸の問題はIssue #290（未着手、`ComputationError`）。** |
 
 ### 2.2 モデル固有の追加結果の配置
 

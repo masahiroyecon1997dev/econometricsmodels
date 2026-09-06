@@ -216,21 +216,22 @@ def test_invalid_hac_lags_raises(dataset, hac_lags):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 
 
-# ── ComputationError ──────────────────────────────────────────────
-
-
-def test_cluster_g2_with_multiple_slopes_raises_computation_error():
-    """G=2×説明変数3個（傾き係数q=3）は、ロバストWald検定の共分散部分行列
-    （3x3）のランクがクラスタ数G=2以下になり必然的に特異になるため、
-    fit()全体がComputationErrorになる（OLSと同じ挙動）。
+@pytest.mark.parametrize("n_groups", [2, 3])
+def test_cluster_count_at_most_slopes_raises_validation_error(n_groups):
+    """クラスター数G≤傾き係数の数q（ここでq=3）は`ValidationError`（Issue #289、
+    OLSと同じ挙動・同じ理由。`rank(Ŝ)≤G-1`のためG≤qでロバストWald/F検定の
+    q×q部分行列が構造的に特異）。G=2（G<q）とG=3（G==q）の両方を確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    df = with_cluster_groups(df, 2)
+    df = with_cluster_groups(df, n_groups)
     options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
-    with pytest.raises(ComputationError):
+    with pytest.raises(ValidationError):
         WLS(
             df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
         ).fit()
+
+
+# ── ComputationError ──────────────────────────────────────────────
 
 
 def test_perfect_multicollinearity_raises_computation_error():

@@ -67,7 +67,7 @@ use crate::iv::common::{
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
-use crate::validation::validate_cluster_groups;
+use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 use faer::linalg::matmul::matmul;
 use faer::prelude::Solve;
 use faer::{Accum, Mat, Par, Side};
@@ -148,6 +148,11 @@ impl TwoSlsEstimator {
     /// - `cov_type=Cluster`でグループキー未指定・クラスター数不足:
     ///   `IvError::Common(CommonError::MissingClusterColumn` /
     ///   `CommonError::InsufficientClusters)`
+    /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
+    ///   `IvError::Common(CommonError::InsufficientClustersForInference)`（`rank(Ŝ) ≤ g-1`
+    ///   のためロバストWald/F検定の`q×q`部分行列が構造的に特異、Issue #289。`g > q`でも
+    ///   悪条件で数値的にほぼ特異なら従来どおり`CommonError::ComputationFailed`が
+    ///   backstop）
     ///
     /// Wu-Hausman検定（`wu_hausman_statistic()`/`wu_hausman_p_value()`、Issue #164）の
     /// 拡張回帰が想定内の理由（設計行列の特異性・観測数不足・Wald検定側の数値的な
@@ -163,6 +168,24 @@ impl TwoSlsEstimator {
                 n_instruments: input.k_instruments(),
                 n_endog: input.k_endog(),
             });
+        }
+
+        // `cov_type=Cluster`でクラスター数`g`が構造方程式の傾き係数の数`q`
+        // （`k - k_constant`）以下だと、ロバストWald/F検定の`q×q`部分行列が構造的に
+        // 特異になる（`rank(Ŝ) ≤ g - 1`、Issue #289。`ols.rs`の同型チェックを参照）。
+        // 第一段階・第二段階回帰の`OlsEstimator::fit`内でも同じ検証が走るが、そちらは
+        // 第一段階固有の傾き係数の数で判定され`FirstStageFailed`にラップされて`q`の値も
+        // 構造方程式のものと食い違うため、`fit()`冒頭で構造方程式の`q`を使って明示的に
+        // 弾き、`IvError::Common`として一貫させる（`compute_first_stage`より前）。
+        if let CovType::Cluster {
+            groups: Some(groups),
+        } = &cov_type
+        {
+            let g = validate_cluster_groups(groups, input.nobs())?;
+            validate_cluster_count_covers_slopes(
+                g,
+                input.k_exog() + input.k_endog() - usize::from(input.has_intercept()),
+            )?;
         }
 
         // `x_exog`は`second_stage_columns`（第二段階）・`structural_columns`
@@ -277,6 +300,8 @@ impl TwoSlsEstimator {
             }
             CovType::Cluster { groups } => {
                 let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
+                // クラスター数 `g <= q`（構造方程式の傾き係数の数）は`fit()`冒頭で
+                // 既に`InsufficientClustersForInference`として弾いている（Issue #289）。
                 let n_groups = validate_cluster_groups(groups, n)?;
                 let cov = cluster_cov_params(x_hat, &residuals, &xtx_inv, n, k, groups);
                 (cov, n_groups - 1)
@@ -341,6 +366,13 @@ impl TwoSlsEstimator {
         // 第一段階残差の分散がゼロ（操作変数が内生変数を完全予測する退化ケース等）だと
         // 拡張回帰の設計行列に分散ゼロの列が混入し特異（`SingularMatrix`）、変数間の
         // スケール差等では`wald_test_last_columns`側が`ComputationFailed`になりうる。
+        // さらに`cov_type=Cluster`では、構造式の傾き係数の数`q`が`fit()`冒頭のチェックを
+        // 通っていても、拡張回帰は残差列の分だけ`q`が増える（`q_aug = q + k_endog`）ため
+        // `g <= q_aug`となり拡張回帰の`OlsEstimator::fit`が`InsufficientClustersForInference`
+        // を返しうる（Wu-Hausmanが実際に使うのは末尾`k_endog`列の`k_endog×k_endog`部分
+        // 行列——`rank(Ŝ) ≤ g - 1 ≥ k_endog`なら計算可能——だが、`OlsEstimator::fit`の
+        // overall F検定がその手前で弾く）。これも下記の他の理由と同じく診断統計量だけの
+        // 問題なので`None`へdegradeする。
         // これらはWu-Hausman検定固有の問題であり、`params`/`std_errors`等の主要な推定
         // 結果とは無関係に正しく計算できるため、`fit()`全体を失敗させず
         // `wu_hausman_statistic`/`wu_hausman_p_value`だけ`None`にする（ユーザー確認済み。
@@ -388,6 +420,9 @@ impl TwoSlsEstimator {
                 Ok((stat, p_value)) => (Some(stat), Some(p_value)),
                 Err(LeastSquaresError::SingularMatrix)
                 | Err(LeastSquaresError::Common(CommonError::InsufficientObservations {
+                    ..
+                }))
+                | Err(LeastSquaresError::Common(CommonError::InsufficientClustersForInference {
                     ..
                 }))
                 | Err(LeastSquaresError::Common(CommonError::ComputationFailed(_))) => (None, None),
@@ -1886,6 +1921,65 @@ mod tests {
             result.unwrap_err(),
             IvError::Common(CommonError::InsufficientClusters { g: 1 })
         );
+    }
+
+    /// `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`以下だと、クラスター寄与
+    /// スコアの総和がゼロ（正規方程式`X'e = 0`）で`rank(Ŝ) ≤ g - 1`のため全体Wald/F
+    /// 検定の`q×q`部分行列が構造的に特異になる。`g`・`q`は入力だけから判定できるため
+    /// `fit()`冒頭のバリデーションが`CommonError::InsufficientClustersForInference`で
+    /// 弾く（Issue #289、OLSと同型）。`cluster_test_input_and_groups`の設計行列は
+    /// `[const, x1, endog1]`（`k=3`・`k_constant=1`・`q=2`）なので、`g=2`（`g == q`）と
+    /// 組み合わせる。
+    #[test]
+    fn fit_returns_validation_error_when_cluster_count_at_most_slopes() {
+        let (input, _) = cluster_test_input_and_groups();
+        let groups = vec![
+            "a".to_string(),
+            "a".to_string(),
+            "a".to_string(),
+            "a".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+        ];
+        let result = TwoSlsEstimator::fit(
+            input,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::Common(CommonError::InsufficientClustersForInference { g: 2, q: 2 })
+        );
+    }
+
+    /// 構造方程式は`g > q`で`fit()`冒頭のチェックを通過するが、Wu-Hausman拡張回帰は
+    /// 第一段階残差列の分だけ傾き係数が増える（`q_aug = q + k_endog`）ため
+    /// `g <= q_aug`となり、拡張回帰の`OlsEstimator::fit`が`InsufficientClustersForInference`
+    /// を返す。Wu-Hausmanが実際に使うのは末尾`k_endog`列の部分行列（`rank(Ŝ) ≤ g-1 ≥
+    /// k_endog`なら計算可能）だが、`OlsEstimator::fit`のoverall F検定がその手前で弾くため、
+    /// 他のdegrade理由（`SingularMatrix`/`InsufficientObservations`/`ComputationFailed`）と
+    /// 同じく`wu_hausman_*`を`None`へdegradeする（`fit()`全体は成功、Issue #289）。
+    /// `cluster_test_input_and_groups`は`[const, x1, endog1]`（`q=2`・`k_endog=1`・
+    /// `q_aug=3`）なので`g=3`（`q=2 < g=3 <= q_aug=3`）と組み合わせる。
+    #[test]
+    fn fit_degrades_wu_hausman_to_none_when_cluster_count_at_most_augmented_slopes() {
+        let (input, _) = cluster_test_input_and_groups();
+        let groups: Vec<String> = (0..8).map(|i| format!("g{}", i % 3)).collect();
+        let estimator = TwoSlsEstimator::fit(
+            input,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        )
+        .unwrap();
+
+        assert!(estimator.wu_hausman_statistic().is_none());
+        assert!(estimator.wu_hausman_p_value().is_none());
     }
 
     /// `G=2`クラスター・`x_exog=[]`・丁度識別（`instruments`1本）という、Issue #171の

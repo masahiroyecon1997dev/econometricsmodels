@@ -87,15 +87,10 @@ def build_fixtures() -> dict:
         groups=imbalanced_cluster_groups(n),
         note="不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。",
     )
-    fixtures["baseline"]["cluster_g2"] = _run_cluster_case(
-        groups=[str(i % 2) for i in range(n)],
-        note=(
-            "クラスタ数境界（G=2ちょうど）の成功パス確認用。Probitのcluster_cov_params"
-            "はLogitと同じくOLSのwald_f_testのようなq×q部分行列の反転を要求しないため、"
-            "説明変数を1個に絞る必要はない（k=3のままG=2で正常に計算できることを"
-            "実機確認済み）。"
-        ),
-    )
+    # NOTE: G=2×説明変数3個（cluster_g2）の成功パスフィクスチャは Issue #289 で
+    # 削除した（Logitと同じ理由。`rank(Ŝ)<=G-1`のため`G<=q`でクラスターロバスト
+    # 共分散が退化し ValidationError になる）。エラーパスは
+    # test_probit_validation.py 側で確認する。
 
     # 実データセット（Wooldridge mroz、労働参加モデル）。Logitと同じformula・データ
     # （probit_logitとも定番の比較対象、mrozはWooldridge教科書でも両方の例に使われる）。
@@ -108,17 +103,10 @@ def build_fixtures() -> dict:
             cov_type=cov_type,
             model="probit",
         )
-    # 実データでのクラスターロバストSE（testing-policy.md「テスト用データセット」3.
-    # 「実データでのグループ列も検証する」）。mrozの`city`（都市部居住ダミー、
-    # 484/269の2値）を実カテゴリ列として使う（Logitと同じ趣旨）。
-    fixtures["mroz"]["cluster"] = run(
-        dataset_source="wooldridge",
-        dataset="mroz",
-        formula=MROZ_FORMULA,
-        cov_type="cluster",
-        cluster_col="city",
-        model="probit",
-    )
+    # NOTE: mrozの`city`（G=2）クラスターロバストSEの成功パスフィクスチャは
+    # Issue #289 で削除した（`G=2 <= q=7`で ValidationError。Logitと同じ）。
+    # エラーパスは
+    # test_probit_validation.py::test_mroz_cluster_cov_type_raises_validation_error。
 
     fixtures["method"] = {
         method: run(
@@ -155,8 +143,8 @@ def build_fixtures() -> dict:
             "スケーリングする設計のため成功パス。"
             "n=k+1（自由度1ちょうど）の境界値ケースはLogitと同じ理由で非採用"
             "（n<=kではMLEが構造的にほぼ確実に完全分離を起こすため）。"
-            "mrozのcluster（city列、都市部居住ダミー）は実データでのクラスターロバスト"
-            "SE確認用。"
+            "G<=q（傾き係数の数）でのクラスターロバストSE（cluster_g2・mroz/city）は"
+            "ValidationErrorになるため成功パスフィクスチャを持たない（Issue #289）。"
             "methodはbfgs/lbfgsがnewtonと同じ最尤解・標準誤差に収束することを主"
             "リファレンスに対して確認するためのfixture（baselineシナリオ・classical"
             "cov_typeの1ケースのみ）。"

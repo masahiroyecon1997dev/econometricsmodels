@@ -508,6 +508,10 @@ impl ProbitEstimator {
     /// - `cov_type=Opg`でOPG行列（`Σᵢ sᵢsᵢ'`）が特異: `MleError::SingularOpgMatrix`
     /// - `cov_type=Cluster`でグループキー未指定: `CommonError::MissingClusterColumn`
     /// - `cov_type=Cluster`でクラスター数が2未満: `CommonError::InsufficientClusters`
+    /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
+    ///   `CommonError::InsufficientClustersForInference`（`rank(Ŝ) ≤ g - 1`のため
+    ///   クラスターロバスト共分散が退化する識別失敗、Issue #289。Logit/Probitでは
+    ///   新規制約）
     pub fn fit(
         input: ProbitInput,
         method: Method,
@@ -519,7 +523,15 @@ impl ProbitEstimator {
     ) -> Result<Self, MleError> {
         let n = input.nobs();
         let k = input.k();
-        validate_fit_preconditions(confidence_level, max_iter, tol, input.y(), k, &cov_type)?;
+        validate_fit_preconditions(
+            confidence_level,
+            max_iter,
+            tol,
+            input.y(),
+            k,
+            input.has_intercept(),
+            &cov_type,
+        )?;
 
         let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
         let problem = ProbitProblem::from_standardized(x_std, input.y().clone());
@@ -1487,7 +1499,8 @@ mod tests {
     /// 再現した値と突き合わせる（上の`fit_cov_type_opg_hc0_hc1_match_independently_
     /// recomputed_values`と同じ技法・同じ多変量データセット。情報行列の等式が
     /// 厳密に成り立つ切片のみモデルでは配線ミスを検出できないため。Logitの
-    /// 対応するテストと同じ構成）。
+    /// 対応するテストと同じ構成）。`G=3 > q=2`（`G <= q`は
+    /// `InsufficientClustersForInference`で弾かれる、Issue #289）ため`G=3`（2:1:1）。
     #[test]
     fn fit_cov_type_cluster_matches_independently_recomputed_values() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
@@ -1508,7 +1521,7 @@ mod tests {
             "a".to_string(),
             "a".to_string(),
             "b".to_string(),
-            "b".to_string(),
+            "c".to_string(),
         ];
 
         let classical = ProbitEstimator::fit(
@@ -1568,10 +1581,10 @@ mod tests {
         }
     }
 
-    /// 上のテストは2:2の均等サイズのグループのみを検証しているが、`testing-policy.md`が
+    /// 上のテストは均等サイズのグループのみを検証しているが、`testing-policy.md`が
     /// 指摘する通り均等サイズのみのテストは実務で起こりやすい偏った分布のグループサイズ
-    /// を見逃しうる。OLS/Logit側の対応するテストに倣い、3:2の不均衡なグループでも
-    /// 同じ独立再計算の技法で検証する。
+    /// を見逃しうる。OLS/Logit側の対応するテストに倣い、3:1:1の不均衡なグループでも
+    /// 同じ独立再計算の技法で検証する（`G=3 > q=2`、Issue #289）。
     #[test]
     fn fit_cov_type_cluster_matches_independently_recomputed_values_with_unbalanced_groups() {
         let y = vec![0.0, 1.0, 0.0, 1.0, 1.0];
@@ -1596,7 +1609,7 @@ mod tests {
             "a".to_string(),
             "a".to_string(),
             "b".to_string(),
-            "b".to_string(),
+            "c".to_string(),
         ];
 
         let classical = ProbitEstimator::fit(
@@ -1717,6 +1730,49 @@ mod tests {
         );
     }
 
+    /// `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下だと、
+    /// クラスターロバスト共分散`Ŝ`はクラスター寄与スコアの総和がゼロ（MLEの一次条件
+    /// `Σ_i s_i = 0`）で`rank(Ŝ) ≤ g - 1`となり退化する。`fit()`冒頭（Newton反復の前）の
+    /// バリデーションで`CommonError::InsufficientClustersForInference`として弾く
+    /// （Issue #289。Logitの同名テストと対、Logit/Probitでは新規制約）。説明変数2個
+    /// （`q = 3 - 1 = 2`）に対し`g = 2`。
+    #[test]
+    fn fit_returns_validation_error_when_cluster_count_at_most_slopes() {
+        let y = vec![0.0, 1.0, 0.0, 1.0, 1.0, 0.0];
+        let x_columns = vec![
+            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0],
+        ];
+        let input = ProbitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let groups: Vec<String> = (0..6)
+            .map(|i| if i < 3 { "a" } else { "b" }.to_string())
+            .collect();
+
+        let result = ProbitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::Common(CommonError::InsufficientClustersForInference { g: 2, q: 2 })
+        );
+    }
+
     /// `method`（`bfgs`/`lbfgs`）と`cov_type`（`Opg`/`Hc0`/`Hc1`/`Cluster`）の組み合わせが
     /// 正しく機能することを確認する（Logitの対応するテストと同じ理由: `method`横断が
     /// `CovType::Classical`のみ、`cov_type`横断が`Method::Newton`のみのテストでは、
@@ -1739,11 +1795,12 @@ mod tests {
             .unwrap()
         };
         let k = 3;
+        // `G=3 > q=2`（`G <= q`は`InsufficientClustersForInference`で弾かれる、Issue #289）。
         let groups = vec![
             "a".to_string(),
             "a".to_string(),
             "b".to_string(),
-            "b".to_string(),
+            "c".to_string(),
         ];
 
         for cov_type in [
@@ -2148,7 +2205,9 @@ mod tests {
 
     /// `cov_type=Cluster`のエラー伝播（`cluster_cov_params`も内部で`neg_hessian_inverse`を
     /// 呼ぶため`SingularHessian`）も、Hc0/Hc1と同じ完全な多重共線性データセットで検証する
-    /// （`LogitEstimator`の対応するテストと同じ理由）。
+    /// （`LogitEstimator`の対応するテストと同じ理由）。`G=3 > q=2`にして`fit()`冒頭の
+    /// `InsufficientClustersForInference`より先にNewton反復のHessian特異へ到達させる
+    /// （Issue #289）。
     #[test]
     fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_cluster() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
@@ -2157,7 +2216,7 @@ mod tests {
             "g1".to_string(),
             "g1".to_string(),
             "g2".to_string(),
-            "g2".to_string(),
+            "g3".to_string(),
         ];
         let input = ProbitInput::from_columns(
             &y,

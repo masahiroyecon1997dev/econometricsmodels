@@ -180,21 +180,26 @@ def test_predict_null_or_non_finite_values_raise(dataset):
         res.predict(new_data_inf)
 
 
-# ── ComputationError ──────────────────────────────────────────────
+@pytest.mark.parametrize("n_groups", [2, 3])
+def test_cluster_count_at_most_slopes_raises_validation_error(n_groups):
+    """クラスター数G≤傾き係数の数q（ここでq=3）は`ValidationError`（Issue #289）。
 
-
-def test_cluster_g2_with_multiple_slopes_raises_computation_error():
-    """G=2×説明変数3個（傾き係数q=3）は、ロバストWald検定の共分散部分行列
-    （3x3）のランクがクラスタ数G=2以下になり必然的に特異になるため、
-    fit()全体がComputationErrorになる（係数・標準誤差自体は計算可能だが、
-    F検定の失敗でfit()全体が失敗する仕様。実装中に判明、
-    数値比較はしない想定）。
+    クラスターロバスト共分散はクラスター寄与スコアの総和がゼロ（正規方程式
+    `X'e=0`）で`rank(Ŝ)≤G-1`のため、G≤qだとロバストWald/F検定のq×q部分行列が
+    構造的に特異になる。GもqもデータからR行列計算なしで即座に判定できるため、
+    `fit()`冒頭で`ValidationError`（`CommonError::InsufficientClustersForInference`）。
+    G=2（G<q）とG=3（G==q、`rank(Ŝ)≤2<3`で依然特異）の両方を確認する。
+    G>qでも悪条件で数値的にほぼ特異なケースは従来どおり`ComputationError`が
+    backstop（`test_scale_variance_raises_computation_error`）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    df = with_cluster_groups(df, 2)
+    df = with_cluster_groups(df, n_groups)
     options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
-    with pytest.raises(ComputationError):
+    with pytest.raises(ValidationError):
         OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+
+# ── ComputationError ──────────────────────────────────────────────
 
 
 def test_perfect_multicollinearity_raises_computation_error():

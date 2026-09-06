@@ -590,6 +590,50 @@ def test_cluster_cov_type_requires_at_least_two_groups():
         ).fit()
 
 
+def test_cluster_count_at_most_slopes_raises_validation_error(
+    censored_dataset,
+):
+    """クラスター数G≤傾き係数の数q（ここで`G=2 == q=2`、x1/x2）は`ValidationError`
+    （engine側の`CommonError::InsufficientClustersForInference`、Issue #289 / #287）。
+
+    `rank(Ŝ)≤G-1`のため全体Wald検定のq×q部分行列がG≤qで構造的に特異になる。
+    従来は`wald_chi2_test`内の`ComputationError`だったが、GもqもR行列計算なしで
+    即座に判定できるため`fit()`冒頭の`ValidationError`へ前倒しした（#287のmroz
+    `hours`クラスターケースがこの経路。`G<q`側はOLSの同名テストで確認）。
+    """
+    cluster = pl.Series(
+        "cluster", [i % 2 for i in range(censored_dataset.height)]
+    )
+    df = censored_dataset.with_columns(cluster)
+    with pytest.raises(ValidationError):
+        Tobit(
+            df,
+            y="y",
+            x=["x1", "x2"],
+            options=TobitOptions(cov_type="cluster", cluster_col="cluster"),
+        ).fit()
+
+
+def test_mroz_hours_cluster_cov_type_raises_validation_error():
+    """実データでの`G <= q`境界（#287の顕在化ケース、Issue #289で解決）。
+
+    Wooldridge mroz `hours` Tobit（Wooldridge Example 17.2、RHS 7変数 → q=7）を
+    `cluster_col="city"`（都市部居住ダミー、G=2）で推定すると`G=2 <= q=7`。
+    `rank(Ŝ) <= G-1 = 1`のため全体Wald検定の`7×7`部分行列が構造的に特異になり、
+    `fit()`冒頭のバリデーションが`ValidationError`
+    （`CommonError::InsufficientClustersForInference`）で弾く。従来は
+    `wald_chi2_test`内の`ComputationError`で`fit()`全体が失敗していた
+    （参照実装Rの`linearHypothesis`相当も同データで計算不能）。
+    """
+    from _constants import MROZ_X
+    from _helpers import load_wooldridge_dataset
+
+    mroz = load_wooldridge_dataset("mroz")
+    options = TobitOptions(cov_type="cluster", cluster_col="city", lower=0.0)
+    with pytest.raises(ValidationError):
+        Tobit(mroz, y="hours", x=MROZ_X, options=options).fit()
+
+
 def test_cluster_col_nonexistent_column_raises(censored_dataset):
     options = TobitOptions(cov_type="cluster", cluster_col="does_not_exist")
     with pytest.raises(ValidationError):

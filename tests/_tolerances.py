@@ -151,9 +151,5 @@ TOLERANCES: dict[str, dict[str, float]] = {
         "rtol_margeff_se": 1e-3,
         # p値の裾での増幅（実測最大絶対誤差~2.9e-5、mroz）。logitの3e-5と近い値。
         "atol_p_value": 5e-5,
-        # Wooldridge mrozのクラスターロバストSE（cluster_col="city"、G=2）は
-        # 合成データのクラスターケースより数値ノイズが大きい
-        # （実測最大相対誤差~1.1e-3、const）。probit固有（logitには無い）。
-        "rtol_mroz_cluster": 2e-3,
     },
 }

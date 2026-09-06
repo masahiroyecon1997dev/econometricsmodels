@@ -116,10 +116,11 @@ def _cluster_case(
     """baseline 相当シナリオに疑似グループ列を付けて cluster cov_type で実行する。
 
     `cluster_g2`（クラスタ数 G=2 の境界ケース）は、本実装の全体 Wald 検定が使う
-    傾き部分行列（q×q）がクラスターロバスト分散のランク（≤ G）で特異にならないよう
-    `formula` を `y ~ x1`（q=1 ≤ G=2）に絞る（testing-policy.md「テスト用データセット」
-    3.、OLS の cluster_g2 と同じ理由。q=3 のままでは本実装も `fit()` 全体が
-    ComputationError になる）。
+    傾き部分行列（q×q）がクラスターロバスト分散のランク（`rank(Ŝ) ≤ G-1`）で
+    特異にならないよう `formula` を `y ~ x1`（`q=1 < G=2`）に絞る
+    （testing-policy.md「テスト用データセット」3.、OLS の cluster_g2 と同じ理由。
+    `q=3` のままでは `G <= q` で `fit()` 冒頭のバリデーションが `ValidationError`
+    ＝`InsufficientClustersForInference` になる、Issue #289）。
     """
     n = base_df.height
     cluster_group = (
@@ -225,17 +226,12 @@ def build(engine: str) -> dict:
                 lower=0.0,
                 upper=None,
             )
-        # 実データでのクラスターロバスト SE（mroz の city＝都市部居住ダミーを実カテゴリ
-        # 列として使う。Logit の mroz/city クラスターと同じ趣旨）。
-        fixtures["mroz"]["cluster"] = _run(
-            mroz_csv,
-            TOBIT_MROZ_FORMULA,
-            "cluster",
-            engine=engine,
-            lower=0.0,
-            upper=None,
-            cluster_col="city",
-        )
+        # NOTE: mroz の `city`（G=2）クラスターロバスト SE の成功パスフィクスチャは
+        # Issue #289 / #287 で削除した。`TOBIT_MROZ_FORMULA` は RHS 7 変数で
+        # `G=2 <= q=7` のため、`rank(Ŝ) <= G-1` で全体 Wald 検定の `7×7` 部分行列が
+        # 構造的に特異になり、`fit()` 冒頭のバリデーションが `ValidationError`
+        # （`InsufficientClustersForInference`）で弾く。エラーパスは
+        # test_tobit.py::test_mroz_hours_cluster_cov_type_raises_validation_error。
 
     is_primary = engine == "survreg"
     fixtures["_meta"] = {
@@ -270,9 +266,11 @@ def build(engine: str) -> dict:
             "（ComputationError の発生確認のみ、テストコード側で対応）。"
             "scale_variance_mild（スケール比 1e3）が数値リグレッション検知用の"
             "成功パス。cluster は合成データ（moderate_censoring、均等疑似グループ・"
-            "不均衡グループ・G=2 境界）と Wooldridge 実データ（mroz、city 列）の"
-            "両方を含む。method（bfgs/lbfgs）はリファレンスが method 非依存のため"
-            "baseline 相当・classical の値を共有する。mroz（hours 生スケール）は"
+            "不均衡グループ・G=2 境界）を含む。`G <= q`（傾き係数の数）のケース"
+            "（旧 mroz/city、G=2・q=7）は ValidationError になるため成功パス"
+            "フィクスチャを持たない（Issue #289 / #287）。method（bfgs/lbfgs）は"
+            "リファレンスが method 非依存のため baseline 相当・classical の値を共有する。"
+            "mroz（hours 生スケール）の非クラスターケースは"
             "engine の分離ヒューリスティック誤発火（Issue #286）により現状 engine で"
             "フィットできず、テストコード側で xfail 相当の扱いになる（リファレンス値"
             "自体は survreg/censReg で問題なく生成できるため固定する）。"

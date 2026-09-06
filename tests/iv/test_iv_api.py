@@ -216,6 +216,31 @@ def test_wu_hausman_is_not_none_for_2sls(iv_dataset):
     assert res.wu_hausman_p_value is not None
 
 
+def test_wu_hausman_degrades_to_none_when_cluster_count_at_most_augmented_slopes(
+    iv_dataset,
+):
+    """`cov_type="cluster"`で構造方程式は`G > q`（`fit()`冒頭のチェックを通過）だが、
+    Wu-Hausman拡張回帰は第一段階残差列の分だけ傾き係数が増える
+    （`q_aug = q + k_endog`）ため`G <= q_aug`になり、拡張回帰が
+    `InsufficientClustersForInference`を返す → `wu_hausman_*`が`None`にdegradeする
+    （`fit()`全体は成功、Issue #289。既存の`x_endog=[]`・完全予測退化ケースの
+    degradeと同じ意味論）。`x_exog=["x1"]`+`x_endog=["endog1"]`+丁度識別
+    （`instruments=["z1"]`、第一段階`q_fs=2`なので`G=3`で第一段階は成功）で
+    構造方程式`q=2`・`k_endog=1`・`q_aug=3`、`G=3`（`q=2 < G=3 <= q_aug=3`）。
+    """
+    cluster = pl.Series(
+        "cluster_group", [i % 3 for i in range(iv_dataset.height)]
+    )
+    df = iv_dataset.with_columns(cluster)
+    options = IvOptions(cov_type="cluster", cluster_col="cluster_group")
+    res = our_fit(df, instruments=["z1"], options=options)
+
+    assert res.wu_hausman_statistic is None
+    assert res.wu_hausman_p_value is None
+    # 主要な推定結果は正常に返る。
+    assert res.params["endog1"] is not None
+
+
 # ── オプションの反映 ──────────────────────────────────────────────
 
 

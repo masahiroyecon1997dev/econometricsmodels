@@ -111,10 +111,17 @@ $$
 - t検定・信頼区間・F検定の自由度は`cov_type="cluster"`のときのみ`n-k`ではなく**`G-1`**に切り替える
   （statsmodelsの既定`df_correction=True`、計量経済学の標準的慣行）。`df_resid`自体（σ̂²・調整済み
   R²・AIC/BIC）は常に`n-k`のまま。
-- **G≤qの境界**: $\hat S$はG個のランク1行列の和のため`rank(Ŝ) ≤ G`。F検定が使う`q×q`
-  （`q`=傾き係数の数）部分行列はG<qのとき構造的に特異になり`fit()`全体が`ComputationError`
-  になる（係数・標準誤差自体はG≥2なら計算できる）。「クラスタ数境界の成功パス」のテストは
-  qをG以下に保つ必要がある。他のクラスターロバストSEを持つ手法（IV等）にも同様に当てはまる。
+- **`G ≤ q`の境界（`ValidationError`、Issue #289）**: $\hat S = \sum_g S_g S_g'$は、クラスター
+  寄与スコアの総和がゼロ（正規方程式$X'e = 0$）になるため`rank(Ŝ) ≤ G - 1`。F検定が使う`q×q`
+  （`q = k - k_constant` = 傾き係数の数）部分行列は`G ≤ q`のとき構造的に特異になる（`G = q`
+  ちょうども数学的には常に特異。`rank(Ŝ) ≤ G`という緩い上限で考えると`G = q`は「境界」に見えるが、
+  実際の上限は`G - 1`）。`G`（クラスター列のユニーク数）も`q`（説明変数の列数）も入力だけから
+  判定できるため、行列計算を待たず`fit()`冒頭で`InsufficientClustersForInference`
+  （`ValidationError`）として弾く。「クラスタ数境界の成功パス」のテストは`G > q`（厳密不等号）を
+  保つ必要がある。OLS/WLS/Tobit/Logit/Probit/IV(2SLS,GMM)横断で統一。
+  - `G > q`でも傾き係数間の悪条件（極端なスケール差・準多重共線性等）で`q×q`部分行列が数値的に
+    ほぼ特異になるケースは事前判定できないため、`ensure_well_conditioned_symmetric_matrix`による
+    `ComputationError`（次節）がbackstopとして残る。
 - `G < 2`は`InsufficientClusters`で検証（0除算によるNaN伝播・パニックを防ぐため）。
 
 ### 3.3 適合度統計量
@@ -163,7 +170,7 @@ $$
 
   | `LeastSquaresError` | Python例外 |
   |---|---|
-  | `Common(DimensionMismatch \| InsufficientObservations \| MissingClusterColumn \| InvalidConfidenceLevel \| InsufficientClusters)` | `ValidationError` |
+  | `Common(DimensionMismatch \| InsufficientObservations \| MissingClusterColumn \| InvalidConfidenceLevel \| InsufficientClusters \| InsufficientClustersForInference)` | `ValidationError` |
   | `InvalidHacLags` | `ValidationError` |
   | `SingularMatrix` | `ComputationError` |
   | `Common(ComputationFailed)` | `ComputationError` |

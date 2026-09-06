@@ -772,8 +772,14 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   追加する、ドキュメント上の対応が適切だと考える。
 - **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit_fixtures.py`解説後の
   ユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち、対応するならドキュメント側
-  ・手法横断で検討）
+- **状態**: **doc注記のみ・別軸として残置（2026-09-06）**。Issue #289で「計算エラー
+  としての`G <= q`特異性」は`ValidationError`に統一・解決したが、本項目は
+  それとは**明確に別軸**（`G=5, q=2`のように計算は通るが漸近正当化が怪しい
+  ケース）。明確な安全閾値が無く`ValidationError`で弾くと正当な少数クラスタ
+  分析を不当に拒否するため、#289では対象外とした。対応方針は変わらず
+  「`docs/spec/`の該当手法に wild bootstrap 等の代替を推奨する注記を追加する」
+  ドキュメント上の対応。参照していた`test_cluster_g2_matches_statsmodels`は
+  #289で削除された（`G=2 <= q=3`が`ValidationError`になったため）。
 
 ### 91. `test_logit_crosscheck.py`が`_assertions.py`を使わず`_assert_close`/`_assert_dict_close`/`_check_margeff`を独自に再実装している
 

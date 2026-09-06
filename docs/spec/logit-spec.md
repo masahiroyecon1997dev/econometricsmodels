@@ -113,8 +113,17 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 検定分布は**標準正規分布**（z検定、statrs `Normal`）。
 
 - クラスターのグループキー未指定は`MissingClusterColumn`、クラスター数`<2`は`InsufficientClusters`
-  （検証ロジックはOLSの`validate_cluster_groups`と共有、`engine::validation`）。反復最適化のため、
-  この検証は`fit()`冒頭・最適化実行前に行う（OLSは閉形式解のため事後検証で足りるのと対照的）。
+  （検証ロジックはOLSの`validate_cluster_groups`と共有、`engine::validation`）。反復最適化・多段
+  推定の無駄を避けるため、この検証は全手法で`fit()`冒頭・最適化実行前に行う（Issue #289 で
+  OLS/WLS も他手法に揃えた。OLSは閉形式解のため事後検証でもコストは変わらないが、位置を統一）。
+- クラスター数`G <= 傾き係数の数q`（`k - k_constant`）は`InsufficientClustersForInference`
+  （`ValidationError`、Issue #289）。クラスターロバスト共分散`Ŝ`はクラスター寄与スコアの総和が
+  ゼロ（MLEの一次条件`Σᵢsᵢ = 0`）のため`rank(Ŝ) ≤ G - 1`で、`G <= q`だと退化する。Logit/Probitは
+  全体検定がLR（`lr_statistic`）のため`q×q`部分行列の反転こそ通らないが、退化した共分散から
+  読んだSEを黙って返すのは識別失敗の隠蔽（fail-fast方針・多重共線性をエラーで止めるのと整合）
+  のため、`fit()`冒頭で弾く（従来はsilent-passだった、実質バグ。OLS/WLS/Tobit/IVと横断で統一）。
+  少数クラスタ一般の漸近的信頼性（`G=5, q=2`等、計算は通るケース）は別軸で、これは弾かない
+  （`docs/planning/specs/refactoring-candidates-2.md`項目90）。
 - Hessianが特異な場合は`SingularHessian`、OPG行列（`Σᵢsᵢsᵢ'`）が特異な場合は`SingularOpgMatrix`
   （原因が異なるため区別）。`method=newton`はステップ求解中の別経路（ピボット付きQR）で先に
   特異性を検出してしまうため、`cov_type`側の特異性検出パスを実際に通すテストには`bfgs`/`lbfgs`が
@@ -154,7 +163,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 | `MleError` | Python例外 |
 |---|---|
-| `Common(InsufficientObservations \| InvalidConfidenceLevel \| MissingClusterColumn \| InsufficientClusters \| NoRegressors)` | `ValidationError` |
+| `Common(InsufficientObservations \| InvalidConfidenceLevel \| MissingClusterColumn \| InsufficientClusters \| InsufficientClustersForInference \| NoRegressors)` | `ValidationError` |
 | `InvalidMaxIter` / `InvalidTol` / `InvalidBinaryY` | `ValidationError` |
 | `NonConvergence` / `SingularHessian` / `SingularOpgMatrix` / `SeparationSuspected` | `ComputationError` |
 

@@ -1334,14 +1334,19 @@ impl TobitEstimator {
     ///   `MleError::NoUncensoredObservations`（`validate_has_uncensored_observations`参照）
     /// - `cov_type=Cluster`でグループキー未指定: `CommonError::MissingClusterColumn`
     /// - `cov_type=Cluster`でクラスター数が2未満: `CommonError::InsufficientClusters`
+    /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
+    ///   `CommonError::InsufficientClustersForInference`（`rank(Ŝ) ≤ g - 1`のため全体
+    ///   Wald検定の`q×q`部分行列が構造的に特異、Issue #289。従来は`wald_chi2_test`内の
+    ///   `ComputationFailed`だったものを`fit()`冒頭のバリデーションへ前倒し、#287）
     /// - OLS初期値計算時に`x`が特異（完全な多重共線性等）: `MleError::SingularDesignMatrix`
     ///   （`ols_initial_params`参照）
     /// - `raise_on_non_convergence=true`かつ`max_iter`回で未収束: `MleError::NonConvergence`
     /// - 収束点（または`raise_on_non_convergence=false`時の打ち切り点）のHessianが特異:
     ///   `MleError::SingularHessian`
     /// - `cov_type=Opg`でOPG行列（`Σᵢ sᵢsᵢ'`）が特異: `MleError::SingularOpgMatrix`
-    /// - Wald検定用の係数分散共分散部分行列が悪条件・特異: `CommonError::ComputationFailed`
-    ///   （`wald_chi2_test`参照。`df_model==0`（切片以外の`β`が無い）のときはこの検定自体を
+    /// - 傾き係数間の悪条件（極端なスケール差等）でWald検定用の係数分散共分散部分行列が
+    ///   数値的にほぼ特異: `CommonError::ComputationFailed`（`wald_chi2_test`参照。`g > q`
+    ///   でも起こりうるbackstop。`df_model==0`（切片以外の`β`が無い）のときはこの検定自体を
     ///   スキップし`wald_statistic`/`wald_p_value`はNaNになる）
     pub fn fit(
         input: TobitInput,
@@ -1359,7 +1364,7 @@ impl TobitEstimator {
         let n = input.nobs();
         let k = input.k();
         validate_sufficient_observations(n, k + 1)?;
-        validate_cluster_cov_type(&cov_type, n)?;
+        validate_cluster_cov_type(&cov_type, n, k - usize::from(input.has_intercept()))?;
         validate_has_uncensored_observations(input.y(), input.lower(), input.upper())?;
 
         // `x`（切片ありなら列を平均センタリング＋スケーリング、切片なしはスケーリング
@@ -2590,19 +2595,22 @@ mod tests {
         assert!((estimator.wald_p_value() - expected_p).abs() < 1e-9);
     }
 
-    /// `fit()`はWald検定を`cov_type`の種類に関わらず常時実行する（`df_model==0`のときのみ
-    /// スキップ）ため、`cov_type=Cluster`のクラスターロバスト共分散`Ŝ=Σ_g S_gS_g'`が持つ
-    /// 構造的な制約（`rank(Ŝ)≤G`、`engine/src/linear/CLAUDE.md`「クラスター数`G`と傾き
-    /// 係数の数`q`の関係」参照）がWald検定の`q×q`部分行列にも及ぶ。`multivariate_
-    /// censored_input`（傾き係数`q=2`）に対し`G=2`（`G=q`ちょうど、境界そのもの）を
-    /// 組み合わせると、実測でこの部分行列が特異になり`fit()`全体が`ComputationFailed`に
-    /// なることを実際に踏んで検証する回帰テスト（`ensure_well_conditioned_symmetric_
-    /// matrix`の閾値等が将来変更された際の検知目的。`fit_cov_type_cluster_matches_
-    /// independently_recomputed_values`等、他のクラスターテストが`q<G`を保つよう
-    /// データセットを変更した経緯の裏付け）。
+    /// `cov_type=Cluster`のクラスターロバスト共分散`Ŝ=Σ_g S_gS_g'`は、クラスター寄与
+    /// スコアの総和がゼロ（MLEの一次条件`Σ_i s_i = 0`）になるため`rank(Ŝ) ≤ G - 1`。
+    /// `multivariate_censored_input`（傾き係数`q=2`）に対し`G=2`（`G=q`ちょうど）を
+    /// 組み合わせると`q×q`部分行列は`rank ≤ 1 < 2`で構造的に特異になる。`G`・`q`は
+    /// 入力だけから判定できるため、`fit()`冒頭のバリデーション
+    /// （`validate_cluster_cov_type` → `validate_cluster_count_covers_slopes`）が
+    /// `CommonError::InsufficientClustersForInference`で弾く（Issue #289 / #287。
+    /// 従来は`wald_chi2_test`内の`ComputationFailed`だった）。`wald_chi2_test`の
+    /// `ensure_well_conditioned_symmetric_matrix`側のbackstop（`g > q`だが悪条件で
+    /// 数値的にほぼ特異なケース）は、`wald_f_test`と共有する純粋な線形代数
+    /// ユーティリティであり`linear_algebra.rs`の単体テスト・OLSの
+    /// `fit_returns_computation_failed_for_extreme_scale_difference_in_f_test`で担保する
+    /// （Tobitは`TobitScaling`が`x`を内部で列標準化するため、極端なスケール差による
+    /// 悪条件をTobitの`fit()`経由で再現するのが困難で、Tobit固有テストは設けない）。
     #[test]
-    fn fit_returns_computation_failed_when_wald_submatrix_is_singular_for_cluster_with_g_equals_q()
-    {
+    fn fit_returns_validation_error_when_cluster_count_equals_slopes() {
         let groups = vec![
             "a".to_string(),
             "a".to_string(),
@@ -2624,12 +2632,9 @@ mod tests {
             },
             0.95,
         );
-        assert!(
-            matches!(
-                result,
-                Err(MleError::Common(CommonError::ComputationFailed(_)))
-            ),
-            "{result:?}"
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::Common(CommonError::InsufficientClustersForInference { g: 2, q: 2 })
         );
     }
 

@@ -35,6 +35,35 @@ pub fn validate_cluster_groups(groups: &[String], n: usize) -> Result<usize, Com
     Ok(g)
 }
 
+/// `cov_type="cluster"`のとき、クラスター数`g`が全体Wald/F検定の対象となる傾き係数の
+/// 数`q`より多いことを検証する（`validate_cluster_groups`が返した`g`を渡す）。
+///
+/// クラスターロバスト共分散`Ŝ = Σ_g S_g S_g'`は、クラスター寄与スコアの総和がゼロ
+/// （OLS/WLS/2SLSの正規方程式`X'e = 0`、MLE（Logit/Probit/Tobit）の一次条件
+/// `Σ_i s_i = 0`）になるため`rank(Ŝ) ≤ g - 1`。全体検定が使う`q×q`部分行列
+/// （`q = k - k_constant`）は`g <= q`だと構造的に特異になる。`g`（クラスター列の
+/// ユニーク数）も`q`（説明変数の列数）も入力だけから判定できるため、行列計算を
+/// 待たず`fit()`冒頭のバリデーションで弾く（Issue #289。`g < 2`の
+/// `InsufficientClusters`と同じカテゴリの閾値違い）。
+///
+/// `q == 0`（切片のみモデル、全体検定自体がスキップされる）のときは`g >= 2 > 0 = q`
+/// により常に`Ok`を返す（Wald検定が走らないため弾く必要がない）。
+///
+/// `g > q`でも、傾き係数間の悪条件（極端なスケール差・準多重共線性等）で`q×q`部分
+/// 行列が数値的にほぼ特異になるケースは事前判定できないため、従来どおり各手法の
+/// Wald検定内の`ensure_well_conditioned_symmetric_matrix`（`CommonError::
+/// ComputationFailed`）がbackstopとして残る。
+pub fn validate_cluster_count_covers_slopes(g: usize, q: usize) -> Result<(), CommonError> {
+    debug_assert!(
+        g >= 2,
+        "validate_cluster_groups must run first (expected g >= 2, got {g})"
+    );
+    if g <= q {
+        return Err(CommonError::InsufficientClustersForInference { g, q });
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -57,5 +86,32 @@ mod tests {
             validate_cluster_groups(&groups, 3),
             Err(CommonError::InsufficientClusters { g: 1 })
         );
+    }
+
+    #[test]
+    fn validate_cluster_count_covers_slopes_accepts_when_g_exceeds_q() {
+        assert_eq!(validate_cluster_count_covers_slopes(3, 2), Ok(()));
+    }
+
+    #[test]
+    fn validate_cluster_count_covers_slopes_rejects_when_g_equals_q() {
+        assert_eq!(
+            validate_cluster_count_covers_slopes(2, 2),
+            Err(CommonError::InsufficientClustersForInference { g: 2, q: 2 })
+        );
+    }
+
+    #[test]
+    fn validate_cluster_count_covers_slopes_rejects_when_g_below_q() {
+        assert_eq!(
+            validate_cluster_count_covers_slopes(2, 3),
+            Err(CommonError::InsufficientClustersForInference { g: 2, q: 3 })
+        );
+    }
+
+    #[test]
+    fn validate_cluster_count_covers_slopes_accepts_intercept_only_model() {
+        // q == 0（切片のみ、全体検定はスキップ）は g >= 2 により常に Ok。
+        assert_eq!(validate_cluster_count_covers_slopes(2, 0), Ok(()));
     }
 }

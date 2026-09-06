@@ -89,7 +89,10 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   でのL2ノルムが閾値`SEPARATION_PARAM_NORM_THRESHOLD=100.0`を超える場合は収束判定を取り消し、
   `MleError::SeparationSuspected { n_iter }`を返す（`raise_on_non_convergence=false`なら
   `converged=false`のまま結果を返す）。閾値はn=200・k=3の単一データセットでの実測較正値であり、
-  パラメータ数`k`が大きい多変量モデルでの誤検知リスクは未検証（4章参照）。
+  パラメータ数`k`が大きい多変量モデルでの誤検知リスクは未検証（4章参照）。この事後チェックは
+  `run_solver`の`separation_norm_check: SeparationNormCheck`引数で切り替え、`y∈{0,1}`で係数が
+  ±∞へ発散するLogit/Probitのみ`Enabled`にする。Tobitは`Disabled`（分離が`σ→0`退化として現れ
+  標準化パラメータノルムが閾値を超えないため。[`tobit-spec.md`](./tobit-spec.md)3.2節参照）。
 - 収束判定`tol`の既定値`1e-6`は、通常データでは高精度（statsmodelsとの相対誤差最大1e-7程度）に
   一致するが、準完全分離の境界ケースではやや不足する（相対誤差最大7e-8）。`tol=1e-8`まで締めると
   改善するが、`bfgs`が`max_iter`を使い切りやすくなるリスクが上がるため、既定値は`1e-6`のまま維持し、
@@ -113,8 +116,17 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 検定分布は**標準正規分布**（z検定、statrs `Normal`）。
 
 - クラスターのグループキー未指定は`MissingClusterColumn`、クラスター数`<2`は`InsufficientClusters`
-  （検証ロジックはOLSの`validate_cluster_groups`と共有、`engine::validation`）。反復最適化のため、
-  この検証は`fit()`冒頭・最適化実行前に行う（OLSは閉形式解のため事後検証で足りるのと対照的）。
+  （検証ロジックはOLSの`validate_cluster_groups`と共有、`engine::validation`）。反復最適化・多段
+  推定の無駄を避けるため、この検証は全手法で`fit()`冒頭・最適化実行前に行う（Issue #289 で
+  OLS/WLS も他手法に揃えた。OLSは閉形式解のため事後検証でもコストは変わらないが、位置を統一）。
+- クラスター数`G <= 傾き係数の数q`（`k - k_constant`）は`InsufficientClustersForInference`
+  （`ValidationError`、Issue #289）。クラスターロバスト共分散`Ŝ`はクラスター寄与スコアの総和が
+  ゼロ（MLEの一次条件`Σᵢsᵢ = 0`）のため`rank(Ŝ) ≤ G - 1`で、`G <= q`だと退化する。Logit/Probitは
+  全体検定がLR（`lr_statistic`）のため`q×q`部分行列の反転こそ通らないが、退化した共分散から
+  読んだSEを黙って返すのは識別失敗の隠蔽（fail-fast方針・多重共線性をエラーで止めるのと整合）
+  のため、`fit()`冒頭で弾く（従来はsilent-passだった、実質バグ。OLS/WLS/Tobit/IVと横断で統一）。
+  少数クラスタ一般の漸近的信頼性（`G=5, q=2`等、計算は通るケース）は別軸で、これは弾かない
+  （`docs/planning/specs/refactoring-candidates-2.md`項目90）。
 - Hessianが特異な場合は`SingularHessian`、OPG行列（`Σᵢsᵢsᵢ'`）が特異な場合は`SingularOpgMatrix`
   （原因が異なるため区別）。`method=newton`はステップ求解中の別経路（ピボット付きQR）で先に
   特異性を検出してしまうため、`cov_type`側の特異性検出パスを実際に通すテストには`bfgs`/`lbfgs`が
@@ -154,27 +166,27 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 | `MleError` | Python例外 |
 |---|---|
-| `Common(InsufficientObservations \| InvalidConfidenceLevel \| MissingClusterColumn \| InsufficientClusters \| NoRegressors)` | `ValidationError` |
+| `Common(InsufficientObservations \| InvalidConfidenceLevel \| MissingClusterColumn \| InsufficientClusters \| InsufficientClustersForInference \| NoRegressors)` | `ValidationError` |
 | `InvalidMaxIter` / `InvalidTol` / `InvalidBinaryY` | `ValidationError` |
 | `NonConvergence` / `SingularHessian` / `SingularOpgMatrix` / `SeparationSuspected` | `ComputationError` |
 
 ### 3.8 テスト
 
-- 許容誤差: statsmodels主リファレンス（`test_logit_fixtures.py`）は`RTOL=1e-8`。Rクロスチェック
+- 許容誤差: statsmodels主リファレンス（`test_logit_reference.py`）は`RTOL=1e-8`。Rクロスチェック
   （`test_logit_crosscheck.py`、反復最適化同士の比較のため機械精度一致は期待できない）は
   `RTOL=2e-4`を基本としつつ、限界効果の`std_err`（デルタ法のヤコビアン経由でノイズが1桁大きい、
   `RTOL=5e-3`）・p値（標準正規分布CDFの裾での増幅、`ATOL=3e-5`）・`near_separation`シナリオの
   信頼区間（`RTOL=6e-4`）を実測に基づき個別に緩めている。
 - **statsmodelsのdiscrete modelにおける既知の欠落**: `cov_type="hc1"`は`LogitResults`に
   `cov_HC1`が未定義のためstatsmodelsが暗黙に`hc0`と同じ値を返す（Rの`n/(n-k)`補正版とは一致しない）。
-  このためRを主リファレンスとし、`test_logit_fixtures.py`は`hc1`を検証対象から除外する。
+  このためRを主リファレンスとし、`test_logit_reference.py`は`hc1`を検証対象から除外する。
   `cov_type="opg"`もstatsmodelsのdiscrete modelはネイティブ非対応（`model.score_obs(params)`から
   手計算する必要がある）。限界効果の`opg`はさらにstatsmodels内部のキャッシュ機構によりRのみが
   参照値になる。
 - R側の限界効果リファレンスは`margins`ではなく`marginaleffects`パッケージを採用（メンテナンス状況、
   tidyな出力形式）。`datagrid()`/`slopes(newdata=...)`の`"mean"`/`"median"`ショートカット文字列は
   整数列を丸めてしまうため使わず、`FUN_numeric=mean, FUN_integer=mean`を明示する。
-- 合成データセット（`benchmark/nonlinear/generate_nonlinear_datasets.py`）はOLSの9シナリオを
+- 合成データセット（`benchmark/nonlinear/datasets.py`）はOLSの9シナリオを
   ベースに、誤差項構造に依存するもの（不均一分散・自己相関等）を除外し、Logit特有の病理シナリオ
   `near_separation`（準完全分離、係数を大きくしてp≈0/1が支配的になる状況）を追加した7シナリオ。
   実データは`mroz`（Wooldridge、労働参加モデル）。

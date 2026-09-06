@@ -1,55 +1,52 @@
 """Probitのテストフィクスチャ（tests/fixtures/benchmarks/probit.json）を
 生成するスクリプト。
 
-`benchmark/nonlinear/run_statsmodels_benchmark.py`（`--model probit`、1回呼べば
-1ケース分の結果を返す汎用ツール）を全シナリオ×全cov_typeの組み合わせで呼び出し、
+`benchmark/nonlinear/references/statsmodels_ref.py`（`model="probit"`、1回呼べば
+1ケース分の結果を返す汎用アダプタ）を全シナリオ×全cov_typeの組み合わせで呼び出し、
 結果を1つのJSONにまとめて書き出す。`generate_logit_fixtures.py`と完全に同型の設計
-（シナリオ構成・cov_type構成もLogitと同一、`generate_nonlinear_datasets.py`
+（シナリオ構成・cov_type構成もLogitと同一、`benchmark/nonlinear/datasets.py`
 参照）。
 
 **`cov_type="hc1"`はここに含めない**（statsmodelsのdiscrete modelがn/(n-k)小標本補正を
 実装しておらずHC0と同一値になるバグ的な欠落があるため、Probitでも同じ欠落を実機確認
-済み。`run_statsmodels_benchmark.py`のdocstring参照）。`hc1`は
+済み。`statsmodels_ref.py`のdocstring参照）。`hc1`は
 `generate_probit_crosscheck_fixtures.py`（R側、正しく補正を適用する
 `sandwich::vcovHC`）が主リファレンスの役割を担う（ユーザー確認済み）。
 
 入力データは`tests/fixtures/benchmarks/data/`に固定済みのprobit_*.csvを読む
-（`benchmark/freeze_datasets.py`参照）。
+（`benchmark/nonlinear/freeze.py`参照）。
 
-使用例:
-    python generate_probit_fixtures.py --output ../../../tests/fixtures/benchmarks/probit.json
+使用例（リポジトリルートから）:
+    python -m benchmark.nonlinear.fixtures.generate_probit_fixtures
 """
 
 from __future__ import annotations
 
-import argparse
-import json
-import sys
 from datetime import UTC, datetime
-from pathlib import Path
-
-sys.path.insert(
-    0, str(Path(__file__).resolve().parent.parent)
-)  # benchmark/nonlinear/ を import path に追加（run_statsmodels_benchmark）
-sys.path.insert(
-    0, str(Path(__file__).resolve().parents[2])
-)  # benchmark/ を import path に追加（_common）
 
 import polars as pl
 import statsmodels
-from _common import DATA_DIR, imbalanced_cluster_groups
-from run_statsmodels_benchmark import run
+
+from benchmark.common import (
+    BENCHMARKS_DIR,
+    DATA_DIR,
+    MROZ_FORMULA,
+    extract_coef_se,
+    imbalanced_cluster_groups,
+    run_fixture_cli,
+)
+from benchmark.nonlinear.references.statsmodels_ref import run
 
 # perfect_multicollinearityは数値比較の対象外（ComputationErrorの発生確認のみ、
 # testing-policy.md「テストの3系統」）。generate_logit_fixtures.pyと同じシナリオ構成
-# （generate_nonlinear_datasets.py参照）。
+# （benchmark/nonlinear/datasets.py参照）。
 NUMERIC_SCENARIOS = [
     "baseline",
     "small_n",
     "moderate_multicollinearity",
     "high_condition_number",
     # probit特有の病理（準完全分離）。収束するが標準誤差が大きく膨らむ境界値ケース。
-    # 較正値はlogit（beta1=20）と異なりbeta1=10（generate_nonlinear_datasets.py参照）。
+    # 較正値はlogit（beta1=20）と異なりbeta1=10（benchmark/nonlinear/datasets.py参照）。
     "near_separation",
     # 変数間のスケールが極端に異なるケース（真のDGPは未スケーリングのXで計算済みの
     # ため成功パス）。
@@ -57,16 +54,13 @@ NUMERIC_SCENARIOS = [
 ]
 
 # hc1はstatsmodelsで未実装のためここには含めない（上記docstring参照）。
-COV_TYPES = ["classical", "opg", "hc0", "cluster"]
+# clusterはbaselineのみ、下のcluster専用ケース（_run_cluster_case）で個別に扱うため
+# ここには含めない（OLS/WLSと同じ書き方、項目14参照）。
+COV_TYPES = ["classical", "opg", "hc0"]
 
 # newton以外のmethod（bfgs/lbfgs）が主リファレンスに対しフルの統計量（std_errors含む）で
-# 一致することの確認用（Issue #231フェーズ4のtesting-completeness-reviewer指摘、
-# generate_logit_fixtures.pyと同じ方針）。
+# 一致することの確認用（generate_logit_fixtures.pyと同じ方針）。
 METHODS = ["bfgs", "lbfgs"]
-
-MROZ_FORMULA = (
-    "inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6"
-)
 
 
 def build_fixtures() -> dict:
@@ -75,8 +69,6 @@ def build_fixtures() -> dict:
     for scenario in NUMERIC_SCENARIOS:
         fixtures[scenario] = {}
         for cov_type in COV_TYPES:
-            if cov_type == "cluster":
-                continue  # clusterはbaselineのみ、下のcluster専用ケースで扱う
             result = run(
                 dataset_source="synthetic",
                 dataset=scenario,
@@ -95,22 +87,15 @@ def build_fixtures() -> dict:
         groups=imbalanced_cluster_groups(n),
         note="不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。",
     )
-    fixtures["baseline"]["cluster_g2"] = _run_cluster_case(
-        groups=[str(i % 2) for i in range(n)],
-        note=(
-            "クラスタ数境界（G=2ちょうど）の成功パス確認用。Probitのcluster_cov_params"
-            "はLogitと同じくOLSのwald_f_testのようなq×q部分行列の反転を要求しないため、"
-            "説明変数を1個に絞る必要はない（k=3のままG=2で正常に計算できることを"
-            "実機確認済み）。"
-        ),
-    )
+    # NOTE: G=2×説明変数3個（cluster_g2）の成功パスフィクスチャは Issue #289 で
+    # 削除した（Logitと同じ理由。`rank(Ŝ)<=G-1`のため`G<=q`でクラスターロバスト
+    # 共分散が退化し ValidationError になる）。エラーパスは
+    # test_probit_validation.py 側で確認する。
 
     # 実データセット（Wooldridge mroz、労働参加モデル）。Logitと同じformula・データ
     # （probit_logitとも定番の比較対象、mrozはWooldridge教科書でも両方の例に使われる）。
     fixtures["mroz"] = {}
     for cov_type in COV_TYPES:
-        if cov_type == "cluster":
-            continue
         fixtures["mroz"][cov_type] = run(
             dataset_source="wooldridge",
             dataset="mroz",
@@ -118,17 +103,10 @@ def build_fixtures() -> dict:
             cov_type=cov_type,
             model="probit",
         )
-    # 実データでのクラスターロバストSE（testing-policy.md「テスト用データセット」3.
-    # 「実データでのグループ列も検証する」）。mrozの`city`（都市部居住ダミー、
-    # 484/269の2値）を実カテゴリ列として使う（Logitと同じ趣旨）。
-    fixtures["mroz"]["cluster"] = run(
-        dataset_source="wooldridge",
-        dataset="mroz",
-        formula=MROZ_FORMULA,
-        cov_type="cluster",
-        cluster_col="city",
-        model="probit",
-    )
+    # NOTE: mrozの`city`（G=2）クラスターロバストSEの成功パスフィクスチャは
+    # Issue #289 で削除した（`G=2 <= q=7`で ValidationError。Logitと同じ）。
+    # エラーパスは
+    # test_probit_validation.py::test_mroz_cluster_cov_type_raises_validation_error。
 
     fixtures["method"] = {
         method: run(
@@ -153,9 +131,11 @@ def build_fixtures() -> dict:
             "cov_type='hc1'はstatsmodelsのdiscrete modelで未実装（HC0と同一値を返す）"
             "ため含まない。probit_crosscheck.json（R側）が主リファレンスを担う。"
             "cov_type='opg'の限界効果（margeff）はstatsmodels側では算出できないため"
-            "nullになっている（run_statsmodels_benchmark.py参照）。"
+            "nullになっている"
+            "（benchmark/nonlinear/references/statsmodels_ref.py参照）。"
             "near_separationはprobit特有の病理（準完全分離）の境界値ケース"
-            "（較正値はlogitと異なりbeta1=10、generate_nonlinear_datasets.py参照）。"
+            "（較正値はlogitと異なりbeta1=10、"
+            "benchmark/nonlinear/datasets.py参照）。"
             "完全分離下でのNonConvergence検出には既知の限界（logitと同じ、"
             "nonlinear/common.rsのrun_solverを共有するため）があり、専用シナリオは"
             "採用していない。"
@@ -163,11 +143,11 @@ def build_fixtures() -> dict:
             "スケーリングする設計のため成功パス。"
             "n=k+1（自由度1ちょうど）の境界値ケースはLogitと同じ理由で非採用"
             "（n<=kではMLEが構造的にほぼ確実に完全分離を起こすため）。"
-            "mrozのcluster（city列、都市部居住ダミー）は実データでのクラスターロバスト"
-            "SE確認用。"
+            "G<=q（傾き係数の数）でのクラスターロバストSE（cluster_g2・mroz/city）は"
+            "ValidationErrorになるため成功パスフィクスチャを持たない（Issue #289）。"
             "methodはbfgs/lbfgsがnewtonと同じ最尤解・標準誤差に収束することを主"
             "リファレンスに対して確認するためのfixture（baselineシナリオ・classical"
-            "cov_typeの1ケースのみ、Issue #231フェーズ4で追加）。"
+            "cov_typeの1ケースのみ）。"
         ),
     }
     return fixtures
@@ -194,10 +174,7 @@ def _run_cluster_case(
     )
 
     return {
-        "coef": {
-            str(name): float(v) for name, v in model.params.to_dict().items()
-        },
-        "se": {str(name): float(v) for name, v in model.bse.to_dict().items()},
+        **extract_coef_se(model),
         "_meta": {
             "reference": "statsmodels",
             "statsmodels_version": statsmodels.__version__,
@@ -209,16 +186,6 @@ def _run_cluster_case(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output",
-        default="../../../tests/fixtures/benchmarks/probit.json",
+    run_fixture_cli(
+        build_fixtures, BENCHMARKS_DIR / "probit.json", description=__doc__
     )
-    args = parser.parse_args()
-
-    fixtures = build_fixtures()
-
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(fixtures, indent=2, ensure_ascii=False))
-    print(f"wrote {output_path} ({len(json.dumps(fixtures))} bytes)")

@@ -1,0 +1,9 @@
+{
+  "python.analysis.extraPaths": [
+    "benchmark",
+    "benchmark/linear",
+    "benchmark/nonlinear",
+    "benchmark/iv",
+    "benchmark/performance"
+  ]
+}

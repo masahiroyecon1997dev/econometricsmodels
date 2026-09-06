@@ -212,7 +212,7 @@ use crate::inference;
 use crate::iv::common::{IvError, IvInput, mat_to_columns};
 use crate::linear::ols::CovType;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
-use crate::validation::validate_cluster_groups;
+use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
 /// GMMの点推定に使う重み行列の種別（`iv-api-design.md`6.2節）。
 ///
@@ -309,6 +309,11 @@ impl GmmEstimator {
     /// - `cov_type=Cluster`でグループキー未指定・クラスター数不足:
     ///   `IvError::Common(CommonError::MissingClusterColumn` /
     ///   `CommonError::InsufficientClusters)`
+    /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
+    ///   `IvError::Common(CommonError::InsufficientClustersForInference)`（`rank(Ŝ) ≤ g-1`
+    ///   のためロバストWald（χ²）検定の`q×q`部分行列が構造的に特異、Issue #289。
+    ///   `weight_type=Cluster`の重み行列`S`（l×l）が`G<l`で特異になる別軸の問題は
+    ///   Issue #290、そちらは従来どおり`ComputationFailed`）
     /// - `cov_type=Hac`の`lags`が不正: `IvError::InvalidHacLags`
     #[allow(clippy::too_many_arguments)]
     pub fn fit(
@@ -356,6 +361,20 @@ impl GmmEstimator {
         let k = input.k_exog() + input.k_endog();
         if n <= k {
             return Err(CommonError::InsufficientObservations { n, k }.into());
+        }
+
+        // `cov_type=Cluster`でクラスター数`g`が構造方程式の傾き係数の数`q`
+        // （`k - k_constant`）以下だと、ロバストWald（χ²）検定の`q×q`部分行列が構造的に
+        // 特異になる（`rank(Ŝ) ≤ g - 1`、Issue #289。`two_sls.rs`/`ols.rs`と同型）。
+        // `g`・`q`は入力だけから判定できるため、点推定・SE計算より前に弾く。
+        // `weight_type=Cluster`の重み行列`S`（l×l）が`G<l`で特異になる別軸の問題
+        // （Issue #290）はここでは対象外——`validate_weight_type`側は変更しない。
+        if let CovType::Cluster {
+            groups: Some(groups),
+        } = &cov_type
+        {
+            let g = validate_cluster_groups(groups, n)?;
+            validate_cluster_count_covers_slopes(g, k - usize::from(input.has_intercept()))?;
         }
 
         // weight_type自体の妥当性は、gmm_iterations=1（点推定にweight_typeが影響しない
@@ -563,6 +582,8 @@ impl GmmEstimator {
             }
             CovType::Cluster { groups } => {
                 let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
+                // クラスター数 `g <= df_model`（構造方程式の傾き係数の数）は`fit()`冒頭で
+                // 既に`InsufficientClustersForInference`として弾いている（Issue #289）。
                 validate_cluster_groups(groups, n)?;
                 gmm_cluster_omega(&z, &residuals, n, k, l, groups)
             }
@@ -3413,6 +3434,51 @@ mod tests {
             result.unwrap_err(),
             IvError::Common(CommonError::InsufficientClusters { .. })
         ));
+    }
+
+    /// `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下だと、
+    /// クラスター寄与スコアの総和がゼロ（一次条件）で`rank(Ŝ) ≤ g - 1`のため、ロバスト
+    /// Wald（χ²）検定の`q×q`部分行列が構造的に特異になる。`fit()`冒頭
+    /// （反復推定・`validate_weight_type`より前）で構造方程式の`q`を使って
+    /// `CommonError::InsufficientClustersForInference`を返す（Issue #289、2SLSと同型。
+    /// `gmm_convergence`非収束等が先に起きないよう最適化前に弾く）。`x_exog=[z1]`・
+    /// `x_endog=[endog1]`・切片ありで`q = k - k_constant = 3 - 1 = 2`、`g=2`（`g == q`）。
+    /// `weight_type=Cluster`の重み行列`S`（l×l）が`G<l`で特異になる別軸の問題
+    /// （Issue #290）とは区別する。
+    #[test]
+    fn fit_returns_validation_error_when_cov_type_cluster_count_at_most_slopes() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let groups: Vec<String> = (0..y.len())
+            .map(|i| if i < 8 { "a" } else { "b" }.to_string())
+            .collect();
+        let input = IvInput::from_columns(
+            &y,
+            std::slice::from_ref(&z1),
+            vec!["z1".to_string()],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            std::slice::from_ref(&z2),
+            vec!["z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = GmmEstimator::fit(
+            input,
+            WeightType::Robust,
+            2,
+            None,
+            true,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::Common(CommonError::InsufficientClustersForInference { g: 2, q: 2 })
+        );
     }
 
     /// `cov_type=Hac`の`lags`が範囲外（負・n以上）なら`InvalidHacLags`

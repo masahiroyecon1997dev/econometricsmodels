@@ -31,10 +31,15 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
   **`"uv"`エコシステム**を採用（uv専用の`package-ecosystem`。`test`/`benchmark`/`dev`/`docs`
   全依存グループが更新対象になる）。`cargo audit`/`pip-audit`（CI実行時点のロックファイル検証）と
   Dependabot（レジストリの継続監視・PR自動生成）は補完関係で、統合・置き換えはしない。
-- **`benchmark_ols.yml`**: `benchmark/performance/compare_performance.py`の定期実行（タグpush +
-  手動実行のみ、フルスイープが数分かかるため毎PR/週次は見送り）。結果整形は
-  `benchmark/performance/render_performance_summary.py`として分離し、
-  `>> "$GITHUB_STEP_SUMMARY"`でjob summaryに出力する。
+- **`benchmark_performance.yml`**: `performance/compare_<method>.py`（手法非依存の
+  計測ハーネス `performance/_perf_harness.py`＋手法固有アダプタ）を手法ごとの
+  matrixジョブ（`method: [ols, wls, ...]`、`fail-fast: false`）で定期実行
+  （タグpush + 手動実行のみ、フルスイープが数分かかるため毎PR/週次は見送り）。
+  結果整形は `performance/render_performance_summary.py`として分離し、
+  `>> "$GITHUB_STEP_SUMMARY"`でjob summaryに出力する。リポジトリルートから
+  `python -m performance.<...>`で実行する（Initiative A のパッケージ化に伴う）。
+  手動でのローカル実測サマリーは `docs/performance/<method>.md`に記録する
+  （生成JSONは`docs/performance/results/`、`.gitignore`対象）。
 - 全ワークフローでアクションをコミットSHAで固定する（サプライチェーン攻撃対策）。
 
 ## セキュリティ（既知の脆弱性・非メンテナンス依存）
@@ -43,8 +48,6 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
 （`allow-list`＝無視してよいという判断ではなく、「上流待ちの既知課題でci_engine.ymlをブロックしない」
 ための措置。上流の対応バージョンが公開され次第、該当エントリを削除すること）。
 
-- **`pyo3`（RUSTSEC-2026-0176/0177）**: `pyo3-polars`最新公開版が`pyo3 = "^0.28"`を要求するため
-  `pyo3>=0.29.0`へ上げられない。対応する`pyo3-polars`の新版公開待ち。
 - **`quick-xml`（RUSTSEC-2026-0194/0195、severity 7.5 high）**: 経路は
   `polars → polars-error → object_store → quick-xml`。`polars`自体の新バージョン待ち。
   **実際にはビルドに含まれない**（`object_store`のクラウドストレージ機能はオプション依存で

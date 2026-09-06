@@ -16,7 +16,7 @@ use super::common::LeastSquaresError;
 use crate::error::CommonError;
 use crate::inference;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
-use crate::validation::validate_cluster_groups;
+use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
 /// 標準誤差の種別。文字列パース（Python文字列 → この型への変換）は`engine_pybind`側の
 /// 責務（PyO3境界の関心事のため）。ここでは`OlsEstimator::fit`が計算方法を分岐するための
@@ -335,6 +335,14 @@ impl OlsEstimator {
     /// - `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
     /// - 観測数`n`が`k`（定数項を含む説明変数の数）以下: `CommonError::InsufficientObservations`
     /// - 設計行列が特異（完全な多重共線性等）: `LeastSquaresError::SingularMatrix`
+    /// - `cov_type=Cluster`でグループキー未指定: `CommonError::MissingClusterColumn`
+    /// - `cov_type=Cluster`でクラスター数が2未満: `CommonError::InsufficientClusters`
+    /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
+    ///   `CommonError::InsufficientClustersForInference`（`rank(Ŝ) ≤ g - 1`のため
+    ///   ロバストWald/F検定の`q×q`部分行列が構造的に特異、Issue #289）
+    /// - 傾き係数間の悪条件（極端なスケール差等）でロバストWald/F検定の`q×q`部分行列が
+    ///   数値的にほぼ特異: `CommonError::ComputationFailed`（`g > q`でも起こりうる
+    ///   backstop、`wald_f_test`参照）
     pub fn fit(
         input: OlsInput,
         cov_type: CovType,
@@ -349,6 +357,20 @@ impl OlsEstimator {
 
         if n <= k {
             return Err(CommonError::InsufficientObservations { n, k }.into());
+        }
+
+        // `cov_type=Cluster`のクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下だと、
+        // クラスター寄与スコアの総和がゼロ（正規方程式`X'e = 0`）で`rank(Ŝ) ≤ g - 1`の
+        // ため、ロバストWald/F検定の`q×q`部分行列が構造的に特異になる（Issue #289）。
+        // `g`・`q`は入力だけから判定できるため、QR分解・残差計算より前に弾く
+        // （nonlinear/IVと同じく`fit()`冒頭で検証する方針に揃える）。`groups=None`は
+        // 下の`CovType::Cluster`アームで`MissingClusterColumn`として扱う。
+        if let CovType::Cluster {
+            groups: Some(groups),
+        } = &cov_type
+        {
+            let g = validate_cluster_groups(groups, n)?;
+            validate_cluster_count_covers_slopes(g, k - usize::from(input.has_intercept()))?;
         }
 
         let qr = input.x().col_piv_qr();
@@ -397,6 +419,9 @@ impl OlsEstimator {
             }
             CovType::Cluster { groups } => {
                 let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
+                // クラスター数`g >= 2`・`g > q`（傾き係数の数）は`fit()`冒頭で検証済み
+                // （Issue #289）。ここでは`n_groups - 1`（検定の自由度）に再利用するため
+                // 再度ユニーク数を数えるだけ。
                 let n_groups = validate_cluster_groups(groups, n)?;
                 let cov = cluster_cov_params(input.x(), &residuals, &xtx_inv, n, k, groups);
                 (cov, n_groups - 1)
@@ -919,25 +944,24 @@ fn ensure_full_rank(
 /// `Σ`の逆行列はCholesky分解（`Llt`）で求める。classical/HC0-3/HACでは`Σ`は
 /// （`cov_params`全体の）正定値行列の主小行列であり理論上必ず正定値のため、`xtx_inverse`と
 /// 同様、浮動小数点演算の丸めによる境界的な失敗に備えて`ComputationFailed`に変換している。
-/// **`CovType::Cluster`は例外**: クラスターロバスト共分散`Ŝ = Σ_g S_g S_g'`はG個の
-/// ランク1行列の和のため`rank(Ŝ) ≤ G`（クラスター数）であり、傾き係数の数`q`がGを超える
-/// と`Σ`は構造的に（丸め誤差ではなく）特異になる。
 ///
-/// `Σ`が数値的にほぼ特異（上記のクラスターの構造的特異性に加え、変数間のスケールが
-/// 極端に異なる設計行列等で、傾き係数の同時共分散部分行列の条件数が倍精度の限界を
-/// 超える場合を含む）だと、Cholesky分解自体は（非ピボットのため）失敗せずに数値的に
-/// 無意味なF統計量（桁違いに巨大な値等）を黙って返してしまうことがある。
-/// そのため`Llt`分解の**前**に`ensure_well_conditioned_symmetric_matrix`（`crate::
-/// linear_algebra`、固有値分解ベースの相対閾値判定。系統をまたいで共有する純粋な
-/// 線形代数ユーティリティ、`.claude/rules/rust-style.md`「全手法で共有するロジック」
-/// 参照。nonlinear系統の`observed_information_cov_params`等でも同じ理由で使われている）
-/// を呼び、`ComputationFailed`で止める。
+/// **`CovType::Cluster`の構造的特異性（`g <= q`）は、この関数に到達する前に
+/// `fit()`冒頭のバリデーション（`validate_cluster_count_covers_slopes`、`CommonError::
+/// InsufficientClustersForInference`）で弾かれる**（Issue #289）。クラスターロバスト
+/// 共分散`Ŝ = Σ_g S_g S_g'`はクラスター寄与スコアの総和がゼロ（正規方程式`X'e = 0`）に
+/// なるため`rank(Ŝ) ≤ g - 1`であり、傾き係数の数`q ≥ g`なら`Σ`が構造的に特異になる。
+/// `g`・`q`は入力だけから判定できるため、行列計算を待たず事前検証する方針にした。
 ///
-/// この事前チェックにより、**`CovType::Cluster`のG<qによる構造的特異性も、実際には
-/// 下の`Llt`分解に到達する前に`ensure_well_conditioned_symmetric_matrix`側で先に検出
-/// される**（`cargo llvm-cov`で確認: `Llt`失敗の`map_err`分岐は0ヒット）。`Llt`分解自体の
-/// `map_err`は、両方のチェックをすり抜けるごく僅かな境界ケースに備えた防御的な
-/// フォールバックとして残している。
+/// この関数の`ensure_well_conditioned_symmetric_matrix`（`crate::linear_algebra`、
+/// 固有値分解ベースの相対閾値判定。系統をまたいで共有する純粋な線形代数ユーティリティ、
+/// `.claude/rules/rust-style.md`「全手法で共有するロジック」参照）は、事前検証をすり抜ける
+/// ケース——`g > q`だが傾き係数間の悪条件（極端なスケール差・準多重共線性等）で
+/// `q×q`部分行列の条件数が倍精度の限界を超える場合——の**backstop**として残る
+/// （`fit_returns_computation_failed_for_extreme_scale_difference_in_f_test`で固定）。
+/// Cholesky分解（非ピボット）は数値的にほぼ特異な行列でも失敗せず桁違いに巨大な
+/// F統計量を黙って返しうるため、`Llt`分解の**前**にこのチェックを置き
+/// `ComputationFailed`で止める。`Llt`分解自体の`map_err`は、両方のチェックを
+/// すり抜けるごく僅かな境界ケースに備えた防御的なフォールバック。
 fn wald_f_test(
     params: &Mat<f64>,
     cov_params: &Mat<f64>,
@@ -2035,6 +2059,93 @@ mod tests {
             result.unwrap_err(),
             LeastSquaresError::Common(CommonError::InsufficientClusters { g: 1 })
         );
+    }
+
+    /// `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`以下だと、クラスター寄与
+    /// スコアの総和がゼロ（正規方程式`X'e = 0`）で`rank(Ŝ) ≤ g - 1`のため、ロバスト
+    /// Wald/F検定の`q×q`部分行列が構造的に特異になる。`g`・`q`は入力だけから判定
+    /// できるため`fit()`のバリデーションが`CommonError::InsufficientClustersForInference`
+    /// で弾く（Issue #289）。切片＋説明変数3個（`q = 4 - 1 = 3`）に対し`g = 2`
+    /// （`g < q`）と`g = 3`（`g == q`、`rank(Ŝ) ≤ 2 < 3`で依然特異）の両方を確認する。
+    /// backstop（`g > q`だが悪条件で数値的にほぼ特異）は
+    /// `fit_returns_computation_failed_for_cluster_when_slope_submatrix_is_ill_conditioned`。
+    #[test]
+    fn fit_returns_validation_error_when_cluster_count_at_most_slopes() {
+        let n = 12;
+        let y: Vec<f64> = (0..n).map(|i| 1.0 + 0.5 * i as f64).collect();
+        let x_columns = vec![
+            (0..n).map(|i| i as f64).collect::<Vec<f64>>(),
+            (0..n).map(|i| (i * i) as f64).collect::<Vec<f64>>(),
+            (0..n).map(|i| ((i % 4) + 1) as f64).collect::<Vec<f64>>(),
+        ];
+        for g in [2_usize, 3_usize] {
+            let groups: Vec<String> = (0..n).map(|i| format!("g{}", i % g)).collect();
+            let input = OlsInput::from_columns(
+                &y,
+                &x_columns,
+                vec!["x1".to_string(), "x2".to_string(), "x3".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
+            let result = OlsEstimator::fit(
+                input,
+                CovType::Cluster {
+                    groups: Some(groups),
+                },
+                0.95,
+            );
+            assert_eq!(
+                result.unwrap_err(),
+                LeastSquaresError::Common(CommonError::InsufficientClustersForInference {
+                    g,
+                    q: 3
+                }),
+                "g={g}"
+            );
+        }
+    }
+
+    /// `cov_type=Cluster`かつ`g > q`（`fit()`冒頭のバリデーションを通過）でも、傾き係数
+    /// 間のスケールが極端に異なると、ロバストWald/F検定の`q×q`部分行列の条件数が倍精度の
+    /// 限界を超え`ensure_well_conditioned_symmetric_matrix`が`ComputationFailed`で止める
+    /// （`fit_returns_computation_failed_for_extreme_scale_difference_in_f_test`のcluster版。
+    /// `cov_type`によらず傾き部分行列の条件数は同じだが、cluster経路でもこのbackstopが
+    /// 生きていることを明示的に固定する）。`x1`は1e6・`x2`は1e-3オーダー、`g=4 > q=3`。
+    #[test]
+    fn fit_returns_computation_failed_for_cluster_when_slope_submatrix_is_ill_conditioned() {
+        let n = 12;
+        let x1: Vec<f64> = (1..=n).map(|i| 1e6 * (i as f64)).collect();
+        let x2: Vec<f64> = (1..=n).map(|i| 1e-3 * (i as f64).powi(2)).collect();
+        let x3: Vec<f64> = (0..n).map(|i| (i % 3) as f64).collect();
+        let y: Vec<f64> = (0..n)
+            .map(|i| {
+                let noise = if i % 2 == 0 { 0.1 } else { -0.1 };
+                1.0 + 2.0 * x1[i] + 3.0 * x2[i] + 0.5 * x3[i] + noise
+            })
+            .collect();
+        let groups: Vec<String> = (0..n).map(|i| format!("g{}", i % 4)).collect();
+        let input = OlsInput::from_columns(
+            &y,
+            &[x1, x2, x3],
+            vec!["x1".to_string(), "x2".to_string(), "x3".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = OlsEstimator::fit(
+            input,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        );
+
+        assert!(matches!(
+            result.unwrap_err(),
+            LeastSquaresError::Common(CommonError::ComputationFailed(_))
+        ));
     }
 
     /// 説明変数が定数項のみ（傾き係数が無い）モデル。F検定は検定対象が存在しないため、

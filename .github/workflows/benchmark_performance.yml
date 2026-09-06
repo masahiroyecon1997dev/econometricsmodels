@@ -1,0 +1,68 @@
+name: Benchmark (performance)
+
+# performance/compare_<method>.py（各手法の推定を、共通ハーネス
+# performance/_perf_harness.py 経由で statsmodels / linearmodels と実行時間・
+# メモリ比較）を統一環境で実行し、結果をjob summaryに出力する。手法ごとに
+# 独立ジョブ（matrix。ジョブ単位で個別リラン可）。
+#
+# トリガーはタグpush（v*）+ workflow_dispatchのみ（ユーザー確認済み）。n=1,000,000込みの
+# フルスイープは数分かかり重いため、cd_release.ymlと同じくPR/push毎には回さない。
+# ソロ開発でコード変更頻度が低いこと、リリース単位で性能を記録できれば十分という判断。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: compare_${{ matrix.method }}.py
+    runs-on: ubuntu-latest
+    strategy:
+      # 1手法が失敗しても他手法の計測は続行する（手法ごとに独立した記録のため）。
+      fail-fast: false
+      matrix:
+        method: [ols, wls, logit, probit, iv, tobit]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.12"
+
+      # test（statsmodels / linearmodels）+ benchmark（pyarrow:
+      # polars.DataFrame.to_pandas()がリファレンス実装へ渡す前に必要）+
+      # dev（maturin）の3グループが必要。ci_python.ymlのtestグループのみとは異なる。
+      - name: uv sync (test + benchmark + dev groups)
+        run: uv sync --locked --group test --group benchmark --group dev
+
+      # 【最重要】必ずreleaseビルドで計測する。デフォルトの`maturin develop`（debugビルド）
+      # のままだと最大140倍遅い誤った結果になることを実測済み
+      # （docs/performance/ols.md「最重要の教訓」参照）。
+      - name: maturin develop --release
+        run: uv run --locked --group test --group benchmark --group dev maturin develop --release
+
+      # リポジトリルートから `-m` で実行する（Initiative A のパッケージ化に伴い、
+      # `benchmark.*`（DGP）・`performance.*` を PYTHONPATH 非依存で解決するため）。
+      - name: compare_${{ matrix.method }}.py
+        run: |
+          uv run --locked --group test --group benchmark --group dev \
+            python -m performance.compare_${{ matrix.method }} --repeats 3 --output results.json
+
+      - name: render job summary
+        run: |
+          uv run --locked --group test --group benchmark --group dev \
+            python -m performance.render_performance_summary results.json >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.method }}-performance-results
+          path: results.json

@@ -25,13 +25,13 @@ use argmin::solver::linesearch::MoreThuenteLineSearch;
 use argmin::solver::quasinewton::{BFGS, LBFGS};
 use faer::prelude::{Solve, SolveLstsq};
 use faer::{Mat, Side};
-use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
+use statrs::distribution::{ChiSquared, Continuous, ContinuousCDF, Normal};
 use thiserror::Error;
 
 use crate::error::CommonError;
 use crate::inference;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
-use crate::validation::validate_cluster_groups;
+use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
 /// Logit/Probit/Tobitの計算過程で発生しうるエラー。
 ///
@@ -72,6 +72,16 @@ pub enum MleError {
     #[error("the outer-product-of-gradients (OPG) matrix is singular and cannot be inverted")]
     SingularOpgMatrix,
 
+    /// Tobit専用: Newton法の初期値計算（打ち切りを無視した単純なOLS、`ols_initial_params`
+    /// 参照）に使う設計行列が特異（完全な多重共線性等）で最小二乗解が求まらない。
+    /// `SingularHessian`（最適化中・収束後のHessianの逆行列計算）とは、Newton法が
+    /// 一度も反復していない段階で発生しうる点・Hessianを一切評価していない点が異なるため
+    /// 区別する（`SingularOpgMatrix`を`SingularHessian`と区別しているのと同じ考え方）。
+    #[error(
+        "the design matrix used for the initial value estimate is singular and cannot be inverted"
+    )]
+    SingularDesignMatrix,
+
     /// Tobit専用: 打ち切り境界（下限/上限）の指定が不正（下限≧上限等）。
     #[error(
         "invalid censoring bounds: lower={lower:?}, upper={upper:?} \
@@ -94,6 +104,57 @@ pub enum MleError {
     #[error("y at row {row} must be coded as 0.0 or 1.0 (binary outcome), got {value}")]
     InvalidBinaryY { row: usize, value: f64 },
 
+    /// Tobit専用: `y`の実測値が、指定された打ち切り境界の範囲外にある行を含む。
+    ///
+    /// `InvalidCensoringBounds`（境界の指定自体が不正）とは異なり、境界の指定自体は
+    /// 妥当だが実測`y`との整合性が取れないケース（`lower`指定時に`y < lower`の行がある、
+    /// または`upper`指定時に`y > upper`の行がある）。`InvalidBinaryY`と同型の
+    /// 「行番号+値」パターンで、`TobitInput::from_columns`が構築する
+    /// （`engine/src/nonlinear/tobit.rs`参照）。
+    #[error(
+        "y at row {row} is out of the censoring bounds (lower={lower:?}, upper={upper:?}): got {value}"
+    )]
+    YOutOfCensoringBounds {
+        row: usize,
+        value: f64,
+        lower: Option<f64>,
+        upper: Option<f64>,
+    },
+
+    /// Tobit専用: 非打ち切り観測（`y`が`lower`/`upper`いずれの境界にも一致しない、
+    /// 厳密に内部の観測）が1件も無い。
+    ///
+    /// **厳密な非識別条件は「打ち切りカテゴリ（`y==lower` vs `y==upper`）が`x`の線形結合で
+    /// 完全分離可能」であること**（Logit/Probitの完全分離と同型の現象。分離可能な`β`の
+    /// 方向に沿って`σ→0`とすると、各観測の対数尤度が`log Φ(±∞)=0`に近づき、尤度の上限
+    /// （有限値）には到達するが真に最大化する有限の`(β,σ)`が存在しない）。「非打ち切り
+    /// 観測が0件」はこの分離が**必ず**成立する（分離を妨げる内部観測が存在しないため）
+    /// 十分条件だが、逆に「0件でなければ常に識別可能」という必要条件ではない——理論上は
+    /// 非打ち切り観測が0件でも、打ち切りカテゴリが`x`で分離不能な配置（例: 同一の`x`が
+    /// 異なるカテゴリに属する）であれば有限のMLEが存在しうる（rust-reviewer指摘）。
+    /// 連続変数`x`でこの非分離配置が実務データに現れることは考えにくいため、実装は
+    /// 「0件なら一律エラー」という保守的な単純化を採用している（分離可能性を厳密に
+    /// 判定するロジック——線形計画法的な実行可能性判定に相当——は複雑さに見合わないと
+    /// 判断、ユーザー確認済み）。
+    ///
+    /// `SeparationSuspected`（Logit/Probitの準/完全分離）と同様の「有限のMLEが
+    /// 存在しない」病理だが、Tobitでは標準化パラメータ空間のノルムが必ずしも
+    /// 大きくならない（`σ`が小さくなる形で退化するため）ため`SeparationSuspected`の
+    /// 検出条件では捕捉できない。実測で確認済み: 全件打ち切りデータ（`x`が単調増加で
+    /// 完全分離が成立するケース）で`fit()`が`converged=true`のまま統計的に無意味な
+    /// 巨大SE（標準誤差が実測で100万倍オーダー）を返す退化収束を起こす。参照実装
+    /// `survival::survreg`（`AER::tobit`のエンジン）は同種のデータで初期反復に失敗し
+    /// エラーを返す（"initial iteration failed"）。`fit()`冒頭でのバリデーションとして
+    /// 早期に検出する（`docs/spec/tobit-spec.md`1章「非識別データの検出」参照）。
+    #[error(
+        "no uncensored observations: at least one y value strictly between lower={lower:?} and \
+         upper={upper:?} is required to identify the model"
+    )]
+    NoUncensoredObservations {
+        lower: Option<f64>,
+        upper: Option<f64>,
+    },
+
     /// 勾配ノルム基準（`‖∇ℓ(θ)‖ < tol`）は満たしたが、標準化パラメータ空間でのノルムが
     /// 異常に大きい。(準)完全分離（quasi-/complete separation）では、係数が発散していく
     /// 過程でロジスティックのスコア項`p(1-p)`が浮動小数点アンダーフローによりほぼ0.0に
@@ -112,6 +173,15 @@ pub enum MleError {
     /// 実測（既存の`near_separation`シナリオ=境界ケース vs 発見時の病的データ）で
     /// 標準化パラメータノルムに40倍以上の差があることを確認済み
     /// （`SEPARATION_PARAM_NORM_THRESHOLD`のdocコメント参照）。
+    ///
+    /// **Logit/Probit専用**（`run_solver`に[`SeparationNormCheck`]を渡して切り替え、
+    /// Logit/Probitは`Enabled`・Tobitは`Disabled`）。Tobitでは発火しない: (準)完全分離が
+    /// 起きても係数は±∞へ発散せず`σ→0`退化として現れるため標準化パラメータノルムは
+    /// 閾値を超えない。Tobitの分離は全件打ち切りなら`NoUncensoredObservations`
+    /// （`fit()`冒頭のバリデーション）、部分的な準完全分離なら`NonConvergence`
+    /// （`max_iter`到達）として捕捉される。加えて#286以降のTobitは`standardize_columns`
+    /// ではなく`tobit.rs`局所の`TobitScaling`で標準化しており、`y∈{0,1}`で較正した
+    /// この閾値はTobitのパラメータ空間には適用できない（Issue #288）。
     #[error(
         "convergence could not be verified after {n_iter} iterations: the gradient norm \
          dropped below tol, but the (standardized) parameter norm is implausibly large. This \
@@ -130,7 +200,31 @@ pub enum MleError {
 /// 合成データ、既存の合格テストが使う）は標準化パラメータノルムが約31。一方、発見時の
 /// 病的データ（`beta1=100`）は約1282。両者の間には40倍以上の開きがあり、`100`はこの
 /// ギャップの中間（正常な境界ケース側に3倍強のマージンを残す）に位置する。
+///
+/// **Logit/Probitの`y∈{0,1}`で較正した値**であり、`run_solver`に
+/// [`SeparationNormCheck::Enabled`]を渡したとき（Logit/Probit）のみ使われる。Tobitでは
+/// 適用しない（Issue #288、[`MleError::SeparationSuspected`]参照）。
 const SEPARATION_PARAM_NORM_THRESHOLD: f64 = 100.0;
+
+/// `run_solver`の(準)完全分離事後チェック（標準化パラメータノルムが
+/// [`SEPARATION_PARAM_NORM_THRESHOLD`]を超えたら収束判定を取り消す、
+/// [`MleError::SeparationSuspected`]参照）を有効にするか。隣接する`raise_on_non_convergence`
+/// と同型の生`bool`を並べると取り違えても型で気づけないため、bool引数ではなく専用enumで
+/// 呼び出し側を自己記述的にする（rust-reviewer指摘、Issue #288）。
+///
+/// - [`Enabled`](SeparationNormCheck::Enabled): Logit/Probit。`y∈{0,1}`で係数が±∞へ
+///   発散するため、この検出が意味を持つ。
+/// - [`Disabled`](SeparationNormCheck::Disabled): Tobit。真の分離は`σ→0`退化として現れ
+///   標準化パラメータノルムは閾値を超えず、実質発火しない。かつ#286以降のTobitは
+///   `standardize_columns`ではなく`tobit.rs`局所の`TobitScaling`で標準化しており、この
+///   閾値はそもそもTobitのパラメータ空間には未較正。Tobitの分離は
+///   `NoUncensoredObservations`（全件打ち切り）または`NonConvergence`（部分的準分離）で
+///   捕捉される。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeparationNormCheck {
+    Enabled,
+    Disabled,
+}
 
 /// 標準化パラメータ空間でのノルムが[`SEPARATION_PARAM_NORM_THRESHOLD`]を超えるか
 /// （[`MleError::SeparationSuspected`]の判定条件そのもの）。`run_solver`本体から
@@ -145,7 +239,7 @@ fn separation_suspected(params: &[f64]) -> bool {
 /// `y`が`{0.0, 1.0}`の2値でない値を含む場合にエラーを返す（Logit/Probit専用、
 /// `MleError::InvalidBinaryY`のdocコメント参照）。statsmodelsは`Logit`のコンストラクタ
 /// 時点でこの検証を行うが、本実装では`fit()`冒頭（`LogitInput::from_columns`の
-/// 次元検証とは別、`nonlinear-implementation-notes.md`参照）で行う。O(n)の単純走査
+/// 次元検証とは別、`docs/spec/tobit-spec.md`1章参照）で行う。O(n)の単純走査
 /// （既にengine_pybind側で行っているNaN/無限大チェックと同オーダー）で、
 /// 反復最適化本体（O(n·k²)を`max_iter`回）に対して計算コストは無視できる
 /// （実測: n=1,000,000で`fit()`全体の約0.16%）。
@@ -159,53 +253,116 @@ pub fn validate_binary_y(y: &Mat<f64>) -> Result<(), MleError> {
     Ok(())
 }
 
+/// `max_iter`が0以下の場合にエラーを返す。
+pub fn validate_max_iter(max_iter: i64) -> Result<(), MleError> {
+    if max_iter <= 0 {
+        return Err(MleError::InvalidMaxIter { max_iter });
+    }
+    Ok(())
+}
+
+/// `tol`が0以下の場合にエラーを返す（[`MleError::InvalidTol`]のdocコメント参照）。
+pub fn validate_tol(tol: f64) -> Result<(), MleError> {
+    if tol <= 0.0 {
+        return Err(MleError::InvalidTol { tol });
+    }
+    Ok(())
+}
+
+/// `confidence_level`が`(0, 1)`の範囲外の場合にエラーを返す。`marginal_effects_from_w_s`
+/// でも同じ検証を行う（`fit()`とは独立した`confidence_level`を受け取るため）。
+pub fn validate_confidence_level(confidence_level: f64) -> Result<(), MleError> {
+    if !(confidence_level > 0.0 && confidence_level < 1.0) {
+        return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
+    }
+    Ok(())
+}
+
+/// `k==0`（`include_intercept=false`かつ説明変数も無い病的な入力）の場合にエラーを返す。
+/// Logit/Probit専用: この経路を通すと後段の`cov_params`計算（0×0行列に対する
+/// `ensure_well_conditioned_symmetric_matrix`）で`faer`がpanicすることが判明していたため、
+/// 明示的に弾く。`InsufficientObservations`（[`validate_sufficient_observations`]）と
+/// 分けている理由は[`CommonError::NoRegressors`]のdocコメント参照。
+///
+/// Tobitは`logσ`が常に最適化パラメータに含まれるため、対応する「パラメータ数0」の
+/// ケースが生じない（総パラメータ数は常に`k+1>=1`）。そのためTobitの`fit()`は
+/// この関数を呼ばない（Issue #212の結論、モジュール冒頭のdocコメント参照）。
+pub fn validate_has_regressors(n: usize, k: usize) -> Result<(), MleError> {
+    if k == 0 {
+        return Err(CommonError::NoRegressors { n }.into());
+    }
+    Ok(())
+}
+
+/// 観測数`n`がパラメータ数`k`以下の場合にエラーを返す。`k`の意味は呼び出し側に委ねる
+/// （Logit/Probitでは`input.k()`＝`β`の数（定数項含む）、Tobitでは`k+1`＝`β`の数+`logσ`、
+/// つまり総最適化パラメータ数を渡す。Issue #212の結論、モジュール冒頭のdocコメント参照）。
+pub fn validate_sufficient_observations(n: usize, k: usize) -> Result<(), MleError> {
+    if n <= k {
+        return Err(CommonError::InsufficientObservations { n, k }.into());
+    }
+    Ok(())
+}
+
+/// `cov_type=Cluster`のとき、グループキーが指定されており、クラスター数が
+/// (1) 2以上であること（`validate_cluster_groups`）、(2) 全体Wald検定の傾き係数の数
+/// `n_slopes`（= `k - k_constant`）より多いこと（`validate_cluster_count_covers_slopes`、
+/// `rank(Ŝ) ≤ g - 1`のため`g <= n_slopes`だと`n_slopes×n_slopes`部分行列が構造的に
+/// 特異、Issue #289）を検証する（`Cluster`以外は無検証）。`n`と型が同じ`usize`の
+/// `n_slopes`を並べているが、`n`は`validate_cluster_groups`内の`debug_assert_eq!
+/// (groups.len(), n)`で、`n_slopes`は`g <= n_slopes`の比較結果で、取り違えれば
+/// いずれもテスト/デバッグビルドで早期に露見する（`validate_fit_preconditions`が
+/// 多数の同型引数を持つため`has_intercept: bool`を受け取るのとは対照的に、こちらは
+/// 引数が3つで`cov_type`が異なる型のため`usize`のまま受け取る）。
+pub fn validate_cluster_cov_type(
+    cov_type: &CovType,
+    n: usize,
+    n_slopes: usize,
+) -> Result<(), MleError> {
+    if let CovType::Cluster { groups } = cov_type {
+        let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
+        let g = validate_cluster_groups(groups, n)?;
+        validate_cluster_count_covers_slopes(g, n_slopes)?;
+    }
+    Ok(())
+}
+
 /// `fit()`冒頭で行う共通の入力検証（Logit/Probit）。検証順序:
 /// `confidence_level`→`max_iter`→`tol`→`y`の二値性→`k==0`→`n<=k`→
-/// `cov_type=Cluster`のグループ列。元はLogit/Probitそれぞれの`fit()`に一字一句
+/// `cov_type=Cluster`のグループ列（グループキー未指定・クラスター数2未満・
+/// クラスター数`g <= 傾き係数の数`）。元はLogit/Probitそれぞれの`fit()`に一字一句
 /// 同一のブロックとして重複していたため、こちらへ集約した。
 ///
-/// `k==0`（`include_intercept=false`かつ説明変数も無い病的な入力）は`n<=k`単体では
-/// 弾けない（実データでは`n>=1`のため）。この経路を通すと後段の`cov_params`計算
-/// （0×0行列に対する`ensure_well_conditioned_symmetric_matrix`）で`faer`がpanicする
-/// ことが判明していたため、ここで明示的に弾く。`InsufficientObservations`と
-/// `NoRegressors`を分けている理由は`CommonError::NoRegressors`のdocコメント参照。
-///
-/// Tobitは`y`が連続値のため`validate_binary_y`をそのまま適用できない。この関数を
-/// Tobitでどう扱うかは別issueで検討する（Issue #212）。
+/// Tobitの`fit()`（`confidence_level`/`cov_type`をまだ受け取らない、Issue #215時点）は
+/// この関数をそのまま呼べない（引数を揃えられない）ため、上記の各検証を個別の小関数
+/// （[`validate_max_iter`]等）に分割し、Tobitはそのうち必要な部分（`max_iter`/`tol`/
+/// [`validate_sufficient_observations`]/[`validate_cluster_cov_type`]）だけを個別に
+/// 呼ぶ（Issue #212の結論）。この関数自体はLogit/Probit向けに元の挙動をそのまま保つ
+/// ラッパーとして残す。
 ///
 /// 引数は検証順序に揃えている。`n`（観測数）は`y`から自明に求まる（`y.nrows()`）ため
 /// 引数に取らない。`k`と型が同じ`usize`の引数を並べると呼び出し側で取り違えても
-/// コンパイルが通ってしまうため（レビュー指摘）、そのリスクをそもそも作らない設計。
+/// コンパイルが通ってしまうため（レビュー指摘）、傾き係数の数は`usize`ではなく
+/// `has_intercept: bool`で受け取り、この関数内で`k - usize::from(has_intercept)`と
+/// して算出する（`k`との取り違えを型で防ぐ）。
 pub fn validate_fit_preconditions(
     confidence_level: f64,
     max_iter: i64,
     tol: f64,
     y: &Mat<f64>,
     k: usize,
+    has_intercept: bool,
     cov_type: &CovType,
 ) -> Result<(), MleError> {
-    if !(confidence_level > 0.0 && confidence_level < 1.0) {
-        return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
-    }
-    if max_iter <= 0 {
-        return Err(MleError::InvalidMaxIter { max_iter });
-    }
-    if tol <= 0.0 {
-        return Err(MleError::InvalidTol { tol });
-    }
+    validate_confidence_level(confidence_level)?;
+    validate_max_iter(max_iter)?;
+    validate_tol(tol)?;
     validate_binary_y(y)?;
 
     let n = y.nrows();
-    if k == 0 {
-        return Err(CommonError::NoRegressors { n }.into());
-    }
-    if n <= k {
-        return Err(CommonError::InsufficientObservations { n, k }.into());
-    }
-    if let CovType::Cluster { groups } = cov_type {
-        let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-        validate_cluster_groups(groups, n)?;
-    }
+    validate_has_regressors(n, k)?;
+    validate_sufficient_observations(n, k)?;
+    validate_cluster_cov_type(cov_type, n, k - usize::from(has_intercept))?;
     Ok(())
 }
 
@@ -421,6 +578,63 @@ pub struct MarginalEffects {
 }
 
 impl MarginalEffects {
+    /// クレート内の他モジュールから`MarginalEffects`を組み立てるためのコンストラクタ。
+    /// フィールドはprivateのため（`.claude/rules/rust-style.md`「推定量構造体の設計」）、
+    /// `marginal_effects_from_w_s`を経由しないモデル（Tobit。Issue #211の結論により
+    /// `w`/`s`自体の計算式は独自実装だが、出力構造体の形は`coef_table`と同じ行指向で
+    /// Logit/Probitと共通、`nonlinear-api-design.md`6章）が、独自に計算したデルタ法の
+    /// 結果からこの構造体を構築するために必要。
+    pub(crate) fn from_parts(
+        param_names: Vec<String>,
+        dydx: Vec<f64>,
+        std_errors: Vec<f64>,
+        z_stats: Vec<f64>,
+        p_values: Vec<f64>,
+        conf_lower: Vec<f64>,
+        conf_upper: Vec<f64>,
+    ) -> Self {
+        // 呼び出し元（`tobit.rs`の`marginal_effects_from_tobit_w_s`）の内部契約であり、
+        // 実データに起因する`ValidationError`とは性質が異なるため`debug_assert_eq!`で
+        // 検証する（`TobitInput::from_columns`の`x_columns.len() == x_names.len()`と
+        // 同じ方針、rust-reviewer指摘）。
+        let n = param_names.len();
+        debug_assert_eq!(dydx.len(), n, "dydx length must match param_names length");
+        debug_assert_eq!(
+            std_errors.len(),
+            n,
+            "std_errors length must match param_names length"
+        );
+        debug_assert_eq!(
+            z_stats.len(),
+            n,
+            "z_stats length must match param_names length"
+        );
+        debug_assert_eq!(
+            p_values.len(),
+            n,
+            "p_values length must match param_names length"
+        );
+        debug_assert_eq!(
+            conf_lower.len(),
+            n,
+            "conf_lower length must match param_names length"
+        );
+        debug_assert_eq!(
+            conf_upper.len(),
+            n,
+            "conf_upper length must match param_names length"
+        );
+        Self {
+            param_names,
+            dydx,
+            std_errors,
+            z_stats,
+            p_values,
+            conf_lower,
+            conf_upper,
+        }
+    }
+
     /// 説明変数名（定数項を除く）
     pub fn param_names(&self) -> &[String] {
         &self.param_names
@@ -508,9 +722,7 @@ pub fn marginal_effects_from_w_s(
     s: &[f64],
     confidence_level: f64,
 ) -> Result<MarginalEffects, MleError> {
-    if !(confidence_level > 0.0 && confidence_level < 1.0) {
-        return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
-    }
+    validate_confidence_level(confidence_level)?;
     let FittedModelForMarginalEffects {
         param_names,
         has_intercept,
@@ -625,6 +837,30 @@ pub fn predict_from_link(x: &Mat<f64>, params: &[f64], link: impl Fn(f64) -> f64
         .collect()
 }
 
+/// `φ(u)`・`Φ(u)`を評価する前に`u`をこの絶対値以下にクランプする閾値。`u`がこれより
+/// 極端になると`λ=φ(u)/Φ(u)`（逆ミルズ比、一般化残差）が`0.0/0.0`のNaNになりうる
+/// （実測では`|u|≳39`から発生。本閾値`≈8.126`はそれよりずっと手前で安全に倒す）。
+///
+/// 元はProbit専用（`ProbitProblem::linear_predictor_and_residual`の一般化残差
+/// `λ_i=q_iφ(q_iz_i)/Φ(q_iz_i)`向け）だったが、Tobitの打ち切り観測の尤度
+/// （`logΦ(z)`・`log(1-Φ(z))`型）も同型の`λ=φ/Φ`を含み同じリスクを共有するため、
+/// Tobit実装時にここへ移設して共有した。
+///
+/// R言語`stats::binomial(link="probit")$linkinv`の`thresh <- -qnorm(.Machine$double.eps)`
+/// と同じ値（`-Φ⁻¹(f64::EPSILON)`）。`Normal::inverse_cdf`は反復計算のためホットパスで
+/// 毎回呼ぶのを避け、コンパイル時定数としてハードコードしている（Rとscipyの両方で
+/// `8.125890664701908`と算出されることを確認済み）。
+pub const U_CLAMP: f64 = 8.125_890_664_701_908;
+
+/// `u`を`[-U_CLAMP, U_CLAMP]`にクランプしてから`(φ(u), Φ(u))`を評価する
+/// （`U_CLAMP`のdocコメント参照）。呼び出し側（`cost`/`gradient`/`hessian`/`scores`）が
+/// すべて同じ関所を経由することで、`statsmodels`の`Probit`実装に見られる非対称性
+/// （`score`/`loglike`はクリップするが`hessian`はしない）を避ける。
+pub fn clamped_pdf_cdf(normal: &Normal, u: f64) -> (f64, f64) {
+    let u = u.clamp(-U_CLAMP, U_CLAMP);
+    (normal.pdf(u), normal.cdf(u))
+}
+
 /// `run_solver`の出力。
 #[derive(Debug, Clone)]
 pub struct SolverOutput {
@@ -657,9 +893,16 @@ pub struct SolverOutput {
 /// `SolverOutput.hessian`（対数尤度そのもののHessian、符号が逆）への変換はこの関数が
 /// 内部で1回だけ行う（呼び出し側・各モデルの実装は意識しなくてよい）。
 ///
+/// `separation_norm_check`（[`SeparationNormCheck`]）は(準)完全分離の事後チェック
+/// （標準化パラメータ空間のノルムが[`SEPARATION_PARAM_NORM_THRESHOLD`]を超えたら収束
+/// 判定を取り消す、[`MleError::SeparationSuspected`]参照）を有効にするか。Logit/Probitは
+/// `Enabled`、Tobitは`Disabled`（理由は[`SeparationNormCheck`]のdocコメント参照、Issue #288）。
+///
 /// # Errors
 /// - 収束点のHessianが特異（`SingularHessian`）
 /// - `raise_on_non_convergence=true`かつ`max_iter`回で収束しなかった（`NonConvergence`）
+/// - `separation_norm_check=Enabled`かつ`raise_on_non_convergence=true`で、勾配ノルム基準は
+///   満たしたが標準化パラメータノルムが過大（`SeparationSuspected`）
 /// - その他ソルバー内部でのエラー（`ComputationFailed`）
 pub fn run_solver<O>(
     problem: O,
@@ -668,6 +911,7 @@ pub fn run_solver<O>(
     max_iter: u64,
     tol: f64,
     raise_on_non_convergence: bool,
+    separation_norm_check: SeparationNormCheck,
 ) -> Result<SolverOutput, MleError>
 where
     O: CostFunction<Param = Vec<f64>, Output = f64>
@@ -718,8 +962,12 @@ where
     // 大きい場合（准/完全分離の兆候、`MleError::SeparationSuspected`のdocコメント参照）は、
     // 収束の判定を取り消す。`raise_on_non_convergence`の扱いは通常の`NonConvergence`と
     // 揃える（`true`なら専用エラーで即座に返す、`false`なら`converged=false`のまま
-    // 後続処理を継続する）。
-    if converged && separation_suspected(&params) {
+    // 後続処理を継続する）。この事後チェックはLogit/Probit（`Enabled`）のみ通り、Tobitは
+    // `Disabled`で素通しする（`SeparationNormCheck`のdocコメント・Issue #288参照）。
+    if matches!(separation_norm_check, SeparationNormCheck::Enabled)
+        && converged
+        && separation_suspected(&params)
+    {
         converged = false;
         if raise_on_non_convergence {
             return Err(MleError::SeparationSuspected { n_iter });
@@ -836,9 +1084,26 @@ struct FaerNewton {
 
 type NewtonState = IterState<Vec<f64>, Vec<f64>, (), Vec<Vec<f64>>, (), f64>;
 
+/// [`regularized_newton_step`]がコスト減少の候補が見つからない場合に諦めるまでの
+/// 最大試行回数（`INITIAL_LM_LAMBDA`から`LM_LAMBDA_GROWTH`倍ずつ`λ`を増やしながら試す）。
+///
+/// 値の根拠: `λ`は`INITIAL_LM_LAMBDA * LM_LAMBDA_GROWTH^(n-1)`と幾何級数的に増加するため、
+/// `n=40`回目には`λ≈1e-3*4^39≈10^20`という天文学的な値に達する。十分大きな`λ`では
+/// ステップが最急降下方向`-g/λ`に漸近し、非零の勾配に対しては理論上必ず降下方向になる
+/// （`regularized_newton_step`のdocコメント参照）ため、実務的にはこれよりずっと少ない
+/// 回数（Tobitの打ち切りデータでの実測では1反復あたり最大9回程度）で受理される。
+/// `SEPARATION_PARAM_NORM_THRESHOLD`のように実測比較による厳密な根拠があるわけではなく、
+/// 「理論上十分すぎるほど大きい」という設計上の安全マージンとして選んだ値。
+const MAX_LM_ATTEMPTS: usize = 40;
+/// `λ=0`（生のNewtonステップ）がコストを減少させなかった場合の初期正則化係数。
+const INITIAL_LM_LAMBDA: f64 = 1e-3;
+/// 各試行で`λ`を増やす倍率。
+const LM_LAMBDA_GROWTH: f64 = 4.0;
+
 impl<O> Solver<O, NewtonState> for FaerNewton
 where
-    O: Gradient<Param = Vec<f64>, Gradient = Vec<f64>>
+    O: CostFunction<Param = Vec<f64>, Output = f64>
+        + Gradient<Param = Vec<f64>, Gradient = Vec<f64>>
         + Hessian<Param = Vec<f64>, Hessian = Vec<Vec<f64>>>,
 {
     /// `argmin::core::Solver`トレイトの必須メソッド（ロギング・エラーメッセージ表示等、
@@ -890,8 +1155,8 @@ where
             .take_gradient()
             .ok_or_else(|| OptimizerError::msg("FaerNewton: gradient in state not set"))?;
         let hessian = problem.hessian(&param)?;
-        let step = newton_step(&hessian, &grad)?;
-        let new_param: Vec<f64> = param.iter().zip(step.iter()).map(|(p, s)| p - s).collect();
+        let cost = problem.cost(&param)?;
+        let new_param = regularized_newton_step(problem, &param, &grad, &hessian, cost)?;
         // 収束判定（terminate）が「更新後のparamに対応する勾配」を見られるよう、
         // 更新前のgradを使い回さずnew_paramで改めて評価する。
         let new_grad = problem.gradient(&new_param)?;
@@ -907,6 +1172,84 @@ where
         }
         TerminationStatus::NotTerminated
     }
+}
+
+/// `Δθ = (H+λI)⁻¹g`（`λ=0`なら生のNewtonステップと同じ）で候補パラメータを求め、
+/// `cost(θ-Δθ) < cost(θ)`となるまで`λ`を`0→INITIAL_LM_LAMBDA→×LM_LAMBDA_GROWTH→…`と
+/// 段階的に増やす（Levenberg-Marquardt**型**のHessian修正、Nocedal & Wright
+/// *Numerical Optimization*の"Hessian modification"に相当）。Levenberg-Marquardt原法
+/// （非線形最小二乗のGauss-Newton近似Hessianに対する信頼領域法）とは目的関数の形が
+/// 異なる一般のMLE最適化への適用であり、名称はあくまで「`H+λI`による正則化」という
+/// 手法的な類似性を指す（rust-reviewer指摘）。
+///
+/// **導入経緯（Issue #215）**: Logit/Probitのように尤度が大域凹（Hessianが半正定値）な
+/// 問題では、収束点に向かう正常な軌道上は`λ=0`の生のNewtonステップが最初の試行で
+/// 受理されるため、収束の挙動（反復回数・収束点）は変わらない。ただし例外がある:
+/// 設計行列が構造的に特異な入力（完全な多重共線性等、`logit.rs`の
+/// `fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix`が使う
+/// ケース）では、Hessianが**すべての点で**特異なため、導入前は`newton_step`が初回から
+/// 即座に`SingularHessian`を返していたが、導入後は`λ>0`の正則化により一旦有限のステップが
+/// 得られてしまい、Newton自体は「収束」した扱いになる（最終的には収束後の
+/// `observed_information_cov_params`が同じ構造的特異Hessianを検出し、結局
+/// `SingularHessian`を返すため、`fit()`全体としてのエラーバリアント・最終的な
+/// ユーザー向け挙動は変わらない。既存テストが変化なくパスするのはこのため）。
+/// つまり保証されるのは「`fit()`が最終的に返す結果」の不変性であり、Newton内部の
+/// 反復過程・エラー発生箇所まで完全に不変というわけではない（rust-reviewer指摘、
+/// 独立シミュレーションで確認済み）。一方Tobitは`(β, logσ)`パラメータ化で大域凹性が保証されず
+/// （`docs/spec/tobit-spec.md`3.1節参照。Olsen(1978)の`(β/σ, 1/σ)`変換は不採用）、
+/// Hessianが不定符号になる領域では
+/// **生のNewtonステップが降下方向ですらなくなる**ことが実測で判明した（OLS推定値を
+/// 初期値にしても、実際に打ち切りが発生するデータで一貫して再現。ステップをどれだけ
+/// 小さくスケールしても`cost`が改善しないケースを確認済み）。`λI`を加えて
+/// Hessianを正定値に近づけることで、十分大きな`λ`では最急降下方向（`-g/λ`、非零の
+/// 勾配に対して必ず降下方向）に漸近するため、有限回の試行で必ずコスト減少方向が
+/// 見つかる（ユーザー確認済み）。
+///
+/// `newton_step`が`MleError::SingularHessian`を返した場合（`λ`を加えても数値的に
+/// 特異なまま）は、そのまま次の`λ`を試す（即座にエラーを伝播しない）。
+/// `MAX_LM_ATTEMPTS`回すべて失敗した場合のみ`SingularHessian`を返す
+/// （既存のエラー型・意味を変えない）。
+fn regularized_newton_step<O>(
+    problem: &mut Problem<O>,
+    param: &[f64],
+    grad: &[f64],
+    hessian: &[Vec<f64>],
+    cost: f64,
+) -> Result<Vec<f64>, OptimizerError>
+where
+    O: CostFunction<Param = Vec<f64>, Output = f64>,
+{
+    let k = grad.len();
+    let mut lambda = 0.0_f64;
+    for _ in 0..MAX_LM_ATTEMPTS {
+        let regularized: Vec<Vec<f64>> = (0..k)
+            .map(|i| {
+                (0..k)
+                    .map(|j| hessian[i][j] + if i == j { lambda } else { 0.0 })
+                    .collect()
+            })
+            .collect();
+        if let Ok(step) = newton_step(&regularized, grad) {
+            let candidate: Vec<f64> = param.iter().zip(&step).map(|(p, s)| p - s).collect();
+            if let Ok(candidate_cost) = problem.cost(&candidate)
+                && candidate_cost.is_finite()
+                && candidate_cost < cost
+            {
+                return Ok(candidate);
+            }
+        }
+        lambda = if lambda == 0.0 {
+            INITIAL_LM_LAMBDA
+        } else {
+            lambda * LM_LAMBDA_GROWTH
+        };
+    }
+    // `MAX_LM_ATTEMPTS`回すべて失敗する経路は、既存のテストデータ（Tobitの打ち切り
+    // データ、Logit/Probitの完全な多重共線性データ含む）では一度も到達していない
+    // （`MAX_LM_ATTEMPTS`のdocコメントの通り、理論上は`λ`が十分大きくなれば必ず
+    // 降下方向が見つかるはずだが、これを「理論上到達不能」と断定できる証明は無い。
+    // rust-reviewer指摘。再現データが見つかった場合はテストを追加する）。
+    Err(MleError::SingularHessian.into())
 }
 
 /// Newtonステップ`Δθ = H⁻¹g`を求める。`H`は対称とは限らない（収束点から離れた場所では
@@ -960,6 +1303,18 @@ impl ColumnScale {
     /// （テストが`fit()`と同じ標準化・逆標準化の手順を独立に再現するために必要）。
     pub fn stds(&self) -> &[f64] {
         &self.stds
+    }
+
+    /// `stds`の末尾に、スケーリング対象外（無変換）を表す`1.0`を`n`個追加した新しい
+    /// `ColumnScale`を返す。Tobitの`(β, logσ)`のように、`x`の列に対応しない追加
+    /// パラメータ（`logσ`）を`params`に含む場合に、既存の`zip`ベースの
+    /// `destandardize_params`/`destandardize_cov_params`をそのまま再利用するために使う
+    /// （`logσ`は`x`の列スケーリングとは無関係な量で、線形再パラメータ化`x_std=x/std`の
+    /// 下で不変。`docs/spec/tobit-spec.md`3.2節「TobitScaling」参照）。
+    pub fn extend_unscaled(&self, n: usize) -> Self {
+        let mut stds = self.stds.clone();
+        stds.extend(std::iter::repeat_n(1.0, n));
+        Self { stds }
     }
 }
 
@@ -1251,6 +1606,7 @@ mod tests {
             35,
             1e-6,
             true,
+            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -1279,6 +1635,7 @@ mod tests {
             100,
             1e-6,
             true,
+            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -1300,6 +1657,7 @@ mod tests {
             100,
             1e-6,
             true,
+            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -1321,6 +1679,7 @@ mod tests {
             1,
             1e-12,
             true,
+            SeparationNormCheck::Enabled,
         );
 
         assert!(matches!(result, Err(MleError::NonConvergence { .. })));
@@ -1335,6 +1694,7 @@ mod tests {
             1,
             1e-12,
             false,
+            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -1350,6 +1710,7 @@ mod tests {
             0,
             1e-12,
             true,
+            SeparationNormCheck::Enabled,
         );
 
         assert!(matches!(result, Err(MleError::NonConvergence { .. })));
@@ -1364,6 +1725,7 @@ mod tests {
             0,
             1e-12,
             false,
+            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -1413,6 +1775,7 @@ mod tests {
             35,
             1e-6,
             true,
+            SeparationNormCheck::Enabled,
         );
 
         assert!(
@@ -1479,6 +1842,7 @@ mod tests {
             10,
             1e-6,
             false,
+            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -1896,7 +2260,7 @@ mod tests {
     fn validate_fit_preconditions_ok_for_valid_inputs() {
         let y = Mat::from_fn(4, 1, |i, _| [0.0, 1.0, 0.0, 1.0][i]);
         assert_eq!(
-            validate_fit_preconditions(0.95, 100, 1e-8, &y, 2, &CovType::Classical),
+            validate_fit_preconditions(0.95, 100, 1e-8, &y, 2, true, &CovType::Classical),
             Ok(())
         );
     }
@@ -1907,7 +2271,7 @@ mod tests {
         // 検証順序通り`InvalidConfidenceLevel`が先に返ることを確認する。
         let y = Mat::from_fn(2, 1, |i, _| [0.0, 2.0][i]);
         assert_eq!(
-            validate_fit_preconditions(1.5, 100, 1e-8, &y, 2, &CovType::Classical),
+            validate_fit_preconditions(1.5, 100, 1e-8, &y, 2, true, &CovType::Classical),
             Err(CommonError::InvalidConfidenceLevel {
                 confidence_level: 1.5
             }
@@ -1919,7 +2283,7 @@ mod tests {
     fn validate_fit_preconditions_returns_no_regressors_when_k_is_zero() {
         let y = Mat::from_fn(3, 1, |i, _| [0.0, 1.0, 0.0][i]);
         assert_eq!(
-            validate_fit_preconditions(0.95, 100, 1e-8, &y, 0, &CovType::Classical),
+            validate_fit_preconditions(0.95, 100, 1e-8, &y, 0, false, &CovType::Classical),
             Err(CommonError::NoRegressors { n: 3 }.into())
         );
     }
@@ -1928,7 +2292,7 @@ mod tests {
     fn validate_fit_preconditions_returns_insufficient_observations_when_n_less_equal_k() {
         let y = Mat::from_fn(2, 1, |i, _| [0.0, 1.0][i]);
         assert_eq!(
-            validate_fit_preconditions(0.95, 100, 1e-8, &y, 2, &CovType::Classical),
+            validate_fit_preconditions(0.95, 100, 1e-8, &y, 2, true, &CovType::Classical),
             Err(CommonError::InsufficientObservations { n: 2, k: 2 }.into())
         );
     }
@@ -1937,8 +2301,41 @@ mod tests {
     fn validate_fit_preconditions_returns_missing_cluster_column_when_groups_is_none() {
         let y = Mat::from_fn(4, 1, |i, _| [0.0, 1.0, 0.0, 1.0][i]);
         assert_eq!(
-            validate_fit_preconditions(0.95, 100, 1e-8, &y, 2, &CovType::Cluster { groups: None }),
+            validate_fit_preconditions(
+                0.95,
+                100,
+                1e-8,
+                &y,
+                2,
+                true,
+                &CovType::Cluster { groups: None }
+            ),
             Err(CommonError::MissingClusterColumn.into())
+        );
+    }
+
+    #[test]
+    fn validate_fit_preconditions_returns_insufficient_clusters_for_inference_when_g_at_most_slopes()
+     {
+        // k=3・has_intercept=true → n_slopes=2。g=2（`g == q`）で
+        // `InsufficientClustersForInference`。グループ列は`y`と同じ長さ6。
+        let y = Mat::from_fn(6, 1, |i, _| [0.0, 1.0, 0.0, 1.0, 1.0, 0.0][i]);
+        let groups: Vec<String> = (0..6)
+            .map(|i| if i < 3 { "a" } else { "b" }.to_string())
+            .collect();
+        assert_eq!(
+            validate_fit_preconditions(
+                0.95,
+                100,
+                1e-8,
+                &y,
+                3,
+                true,
+                &CovType::Cluster {
+                    groups: Some(groups)
+                }
+            ),
+            Err(CommonError::InsufficientClustersForInference { g: 2, q: 2 }.into())
         );
     }
 
@@ -1967,6 +2364,89 @@ mod tests {
             SEPARATION_PARAM_NORM_THRESHOLD + 0.1,
             0.0
         ]));
+    }
+
+    /// 最小点のノルムが[`SEPARATION_PARAM_NORM_THRESHOLD`]を超える2次問題。`diag_a`が
+    /// 全て`1.0`なのでコスト関数のHessianは単位行列（非特異）、`run_solver`は`target`へ
+    /// 素直に収束する。`target`のノルムは`200 > 100`。
+    fn large_norm_minimum_problem() -> QuadraticProblem {
+        QuadraticProblem {
+            target: vec![200.0, 0.0],
+            diag_a: vec![1.0, 1.0],
+        }
+    }
+
+    /// `SeparationNormCheck::Enabled`（Logit/Probit相当）: 勾配ノルム基準では収束するが
+    /// 標準化パラメータノルムが過大なので`raise_on_non_convergence=true`で
+    /// `SeparationSuspected`を返す。
+    #[test]
+    fn run_solver_returns_separation_suspected_when_check_is_enabled() {
+        let result = run_solver(
+            large_norm_minimum_problem(),
+            Method::Newton,
+            vec![0.0, 0.0],
+            35,
+            1e-6,
+            true,
+            SeparationNormCheck::Enabled,
+        );
+
+        assert!(
+            matches!(result, Err(MleError::SeparationSuspected { .. })),
+            "{result:?}"
+        );
+    }
+
+    /// `SeparationNormCheck::Enabled`かつ`raise_on_non_convergence=false`: エラーは返さず
+    /// `converged=false`へ格下げする（通常の`NonConvergence`と揃えた挙動）。格下げは
+    /// `converged`フラグだけを落とし、`params`/`n_iter`/`hessian`等の結果本体は通常通り
+    /// 埋めて返す（rust-reviewer指摘、downgradeの契約を明示）。
+    #[test]
+    fn run_solver_downgrades_to_unconverged_on_separation_norm_when_raise_is_false() {
+        let output = run_solver(
+            large_norm_minimum_problem(),
+            Method::Newton,
+            vec![0.0, 0.0],
+            35,
+            1e-6,
+            false,
+            SeparationNormCheck::Enabled,
+        )
+        .unwrap();
+
+        assert!(!output.converged);
+        // 結果本体は素通し: `target=[200,0]`近傍のパラメータがそのまま返る。
+        assert!(
+            (output.params[0] - 200.0).abs() < 1e-6,
+            "{:?}",
+            output.params
+        );
+        assert!(output.params[1].abs() < 1e-6, "{:?}", output.params);
+        assert!(output.n_iter > 0);
+    }
+
+    /// `SeparationNormCheck::Disabled`（Tobit相当）: 同じ大ノルム収束点でも事後チェックを
+    /// 通らず、`converged=true`で`target`へ収束した結果をそのまま返す（Issue #288）。
+    #[test]
+    fn run_solver_ignores_separation_norm_when_check_is_disabled() {
+        let output = run_solver(
+            large_norm_minimum_problem(),
+            Method::Newton,
+            vec![0.0, 0.0],
+            35,
+            1e-6,
+            true,
+            SeparationNormCheck::Disabled,
+        )
+        .unwrap();
+
+        assert!(output.converged);
+        assert!(
+            (output.params[0] - 200.0).abs() < 1e-6,
+            "{:?}",
+            output.params
+        );
+        assert!(output.params[1].abs() < 1e-6, "{:?}", output.params);
     }
 
     /// `log_likelihood_null`は`n1`（y=1の観測数）または`n0`（y=0の観測数）が0の

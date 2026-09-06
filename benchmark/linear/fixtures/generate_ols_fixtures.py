@@ -1,40 +1,36 @@
-"""OLSのテストフィクスチャ（tests/fixtures/ols.json）を生成するスクリプト。
+"""OLSのテストフィクスチャ（tests/fixtures/benchmarks/ols.json）を生成する。
 
-`benchmark/linear/run_statsmodels_benchmark.py`（1回呼べば1ケース分の結果を返す汎用ツール）を
-全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つのJSONにまとめて書き出す。
+`benchmark/linear/references/statsmodels_ref.py`（1回呼べば1ケース分の結果を返す
+汎用アダプタ）を全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つの
+JSONにまとめて書き出す。
 
 このスクリプト自体は`benchmark/`側に置く（ベンチマーク生成ツールの一部）。
 生成される`ols.json`は`tests/fixtures/`に置く（テストが読むデータ）。
 両者を分けている理由は`.claude/skills/reference-benchmark/SKILL.md`参照。
 
 入力データは`tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
-（`benchmark/freeze_datasets.py`参照）。`imbalanced_cluster_groups`（純粋にnから
-決定論的にラベルを組み立てるだけで乱数を使わない）のみ、引き続き
-`generate_linear_datasets.py`を直接呼ぶ。
+（`benchmark/linear/freeze.py`参照）。
 
-使用例:
-    python generate_ols_fixtures.py --output ../../../tests/fixtures/benchmarks/ols.json
+使用例（リポジトリルートから）:
+    python -m benchmark.linear.fixtures.generate_ols_fixtures
 """
 
 from __future__ import annotations
 
-import argparse
-import json
-import sys
 from datetime import UTC, datetime
-from pathlib import Path
-
-sys.path.insert(
-    0, str(Path(__file__).resolve().parent.parent)
-)  # benchmark/linear/ を import path に追加（run_statsmodels_benchmark）
-sys.path.insert(
-    0, str(Path(__file__).resolve().parents[2])
-)  # benchmark/ を import path に追加（_common）
 
 import polars as pl
 import statsmodels
-from _common import DATA_DIR, imbalanced_cluster_groups
-from run_statsmodels_benchmark import run
+
+from benchmark.common import (
+    BENCHMARKS_DIR,
+    DATA_DIR,
+    extract_coef_se,
+    imbalanced_cluster_groups,
+    run_fixture_cli,
+)
+from benchmark.linear.constants import HAC_MAXLAGS
+from benchmark.linear.references.statsmodels_ref import run
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md「テストの3系統」参照）。
 # ComputationErrorが発生することのみをテストコード側で対応する。scale_varianceは
@@ -55,7 +51,7 @@ NUMERIC_SCENARIOS = [
     "scale_variance_mild",
     # n=k+1（自由度1ちょうど）の成功パス。baselineをn=5,k=3で
     # オーバーライドした専用データ（engine側の`k`は定数項込みでk=4になる
-    # ため、df_resid=1にはn=5が必要。freeze_datasets.py参照）。同じx1..x3の
+    # ため、df_resid=1にはn=5が必要。benchmark/linear/freeze.py参照）。同じx1..x3の
     # 列構成のため、他シナリオと同じ自動フォーミュラ生成に乗る。
     "baseline_df1",
 ]
@@ -90,17 +86,17 @@ def build_fixtures() -> dict:
                 groups=imbalanced_cluster_groups(n),
                 note="不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。",
             )
-            # G=2×説明変数3個（既定のbaseline）はロバストWald検定の共分散
-            # 部分行列（3x3）のランクがG=2以下になり必然的に特異になるため
-            # ComputationError（成功パスではない、test_ols_fixtures.py
-            # 側でエラーパスとして確認）。ここでの「G=2境界の成功パス」は
-            # 説明変数1個（q=1、Wald検定の部分行列が1x1）に絞って確認する。
+            # G=2×説明変数3個（既定のbaseline）はG<=q（q=3）で、rank(Ŝ)<=G-1の
+            # ためロバストWald検定のq×q部分行列が構造的に特異になり、fit()冒頭の
+            # バリデーションがValidationErrorで弾く（成功パスではない、Issue #289。
+            # test_ols_validation.py側でエラーパスとして確認）。ここでの
+            # 「G=2境界の成功パス」は説明変数1個（q=1、G=2>q=1）に絞って確認する。
             n_g2 = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv").height
             fixtures[scenario]["cluster_g2"] = _run_cluster_case(
                 groups=[str(i % 2) for i in range(n_g2)],
-                note="クラスタ数境界（G=2ちょうど）の成功パス確認用。"
+                note="クラスタ数境界（G=2、q=1でG>q）の成功パス確認用。"
                 "説明変数1個（q=1）に絞っている（"
-                "3個だとロバストWald検定の共分散行列が特異になりComputationError）。",
+                "3個だとG<=qでロバストWald検定の共分散行列が特異になりValidationError）。",
                 k1=True,
             )
 
@@ -109,13 +105,14 @@ def build_fixtures() -> dict:
         "generated_at": datetime.now(UTC).isoformat(),
         "primary_reference": "statsmodels",
         "statsmodels_version": statsmodels.__version__,
+        "hac_maxlags": HAC_MAXLAGS,
         "note": (
             "perfect_multicollinearity・scale_varianceシナリオはここに含まない"
             "（いずれもComputationErrorの発生確認のみ、テストコード側で対応。"
             "scale_varianceは傾き係数の同時共分散部分行列の条件数が倍精度の"
             "限界を超えるため全cov_typeでComputationErrorになる）。"
             "クロスチェック用のRベンチマークは別途 "
-            "benchmark/linear/run_lm_crosscheck_benchmark.R で生成する。"
+            "benchmark/linear/references/run_lm_crosscheck.R で生成する。"
         ),
     }
     return fixtures
@@ -152,10 +149,7 @@ def _run_cluster_case(
     )
 
     return {
-        "coef": {
-            str(name): float(v) for name, v in model.params.to_dict().items()
-        },
-        "se": {str(name): float(v) for name, v in model.bse.to_dict().items()},
+        **extract_coef_se(model),
         "_meta": {
             "reference": "statsmodels",
             "statsmodels_version": statsmodels.__version__,
@@ -167,16 +161,6 @@ def _run_cluster_case(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output",
-        default="../../../tests/fixtures/benchmarks/ols.json",
+    run_fixture_cli(
+        build_fixtures, BENCHMARKS_DIR / "ols.json", description=__doc__
     )
-    args = parser.parse_args()
-
-    fixtures = build_fixtures()
-
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(fixtures, indent=2, ensure_ascii=False))
-    print(f"wrote {output_path} ({len(json.dumps(fixtures))} bytes)")

@@ -5,40 +5,128 @@
 個別に緩めてよい）通り、値は手法・比較対象（主リファレンス/クロスチェック）
 ごとに異なる。そのため単一のRTOL/ATOL定数への集約はせず、ファイルごとに
 使っていた値をこの1ファイルに辞書化して見落としを防ぐ（計算式自体は
-`tests/_assertions.py`の`assert_close`/`assert_dict_close`に統一済み。
-`ols_crosscheck`/`iv_crosscheck`はフェーズ3.5で計算式のバグ
-（`tol = rtol * max(|ref|, atol)`という誤った式を使っていた。正しくは
-`tol = max(rtol * |ref|, atol)`。`wls_crosscheck`のRクロスチェックテスト
-作成時に発覚し修正済みだったが、ols/iv側が追従していなかった）を修正し、
-他ファイルと同じ計算式・同じ`atol`命名に揃えた）。
+`tests/_assertions.py`の`assert_close`/`assert_dict_close`
+（`tol = max(rtol * |ref|, atol)`）に統一済み）。
 
-キーはテストファイル名の接頭辞（例: `test_ols_fixtures.py` → `"ols_fixtures"`）。
+キーはテストファイル名の接頭辞（例: `test_ols_reference.py` → `"ols_reference"`、
+`test_iv_gmm_reference.py` → `"iv_gmm_reference"`）。
+
+`RTOL_MACHINE_PRECISION`/`ATOL_REFERENCE_FLOOR`/`ATOL_CROSSCHECK_FLOOR`の
+3つは、testing-policy.md「相対誤差1e-8程度（厳密）を基本方針とする」に
+直接対応する**設計方針レベルで複数箇所に共通する値**のみを名前付き定数化した
+ものであり、下記辞書内で使う（`refactoring-candidates-2.md`項目49）。
+`rtol_hac`・`atol_p_value`のように実測値に基づき個別に決めた値は、現在
+たまたま複数エントリで同じ値でも共通定数化しない（`testing-policy.md`
+「一律に緩めると本来検出できるはずのバグを見逃す」、将来の再実測で値が
+乖離しうるため）。
 """
+
+RTOL_MACHINE_PRECISION = 1e-8
+"""相対誤差の基本方針（testing-policy.md「許容誤差」）。主リファレンスとの
+厳密比較（`rtol`）、および独立実装クロスチェックの機械精度一致区分
+（`rtol_strict`）の両方で使う。
+"""
+
+ATOL_REFERENCE_FLOOR = 1e-10
+"""主リファレンスとの数値比較のうち、閉形式解（OLS/WLS/IV/IV-GMM）向けの
+絶対誤差フロア（0近傍の値でRTOLベースの比較が意味を持たなくなるのを防ぐ）。
+Logit/Probitは反復最適化由来の数値ノイズが1桁大きいため対象外
+（`logit_reference`/`probit_reference`の`atol`は個別値のまま）。
+"""
+
+ATOL_CROSSCHECK_FLOOR = 1e-8
+"""独立実装（R）とのクロスチェック全手法（OLS/WLS/IV/Logit/Probit）共通の
+絶対誤差フロア。"""
 
 TOLERANCES: dict[str, dict[str, float]] = {
     # --- 主リファレンス（statsmodels/linearmodels）との数値比較 ---
     # 相対誤差1e-8が基本方針。ATOLは0近傍の値（p値のアンダーフロー等）向けの
     # 下限フロー。
-    "ols_fixtures": {"rtol": 1e-8, "atol": 1e-10},
-    "wls_fixtures": {"rtol": 1e-8, "atol": 1e-10},
-    "iv_fixtures": {"rtol": 1e-8, "atol": 1e-10},
-    "iv_gmm_fixtures": {"rtol": 1e-8, "atol": 1e-10},
+    # 関心事分割（refactoring-candidates-2.md 項目68）で test_<手法>_fixtures.py を
+    # test_<手法>_reference.py にリネームし、キー名も *_reference に統一した
+    # （linear/nonlinear/iv とも移行済み）。
+    "ols_reference": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+    },
+    "wls_reference": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+    },
+    "iv_reference": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+    },
+    "iv_gmm_reference": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+    },
     # Logit/Probitは反復最適化（Newton/BFGS/L-BFGS）のため、ゼロ近傍の値
     # （信頼区間の境界等）で閉形式解（OLS/WLS）より1桁大きい浮動小数点誤差が
     # 乗ることを実測確認済み（ATOLのみ1e-9、RTOLは同じ1e-8）。
     # rtol_method: method="bfgs"/"lbfgs"がnewtonと異なる最適化経路で収束するため、
     # 収束後の係数・標準誤差が既定のRTOLより1桁以上大きくばらつく（実測最大相対誤差
     # ~7.7e-5、Issue #231フェーズ4）。実測値に対し約13倍のマージンを持たせた。
-    "logit_fixtures": {"rtol": 1e-8, "atol": 1e-9, "rtol_method": 1e-3},
-    "probit_fixtures": {"rtol": 1e-8, "atol": 1e-9, "rtol_method": 1e-3},
+    "logit_reference": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": 1e-9,
+        "rtol_method": 1e-3,
+    },
+    "probit_reference": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": 1e-9,
+        "rtol_method": 1e-3,
+    },
+    # Tobit の主リファレンスは R `AER::tobit`（`survival::survreg` エンジン）。
+    # survreg は (β, log σ) を独自の Newton-Raphson で最適化するが、本実装との
+    # 一致は実測で係数 ~3e-9・標準誤差 ~1e-9・対数尤度 ~1e-12（Issue #227）と
+    # RTOL_MACHINE_PRECISION を満たす。ATOL は Logit/Probit と同じ 1e-9
+    # （反復最適化由来の 0 近傍ノイズが閉形式解より1桁大きい）。
+    "tobit_reference": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": 1e-9,
+        # mroz（hours 生スケール、Example 17.2）は説明変数のスケール差が大きく
+        # （expersq が 0〜2400 オーダー）、信頼区間の端点が 0 近傍になる係数で
+        # 相対誤差が増幅する（実測最大 ~1.4e-8、構成要素の係数・SE は ~3e-10）。
+        # 合成シナリオの conf_int は 1e-8（実測 ≤1e-9）を維持し、mroz のみ緩める。
+        "rtol_mroz_conf_int": 3e-8,
+        # method="bfgs"/"lbfgs" は newton と異なる最適化経路で、リファレンス
+        # （survreg、method 非依存）から僅かにずれた点に収束する（実測: 予測値
+        # `E[y*|x]=x'β` で最大 ~2.2e-8、係数・SE・限界効果は ~4e-9）。Logit の
+        # `rtol_method`（1e-3）と同じ位置づけだが Tobit は最適化がよく条件付けられて
+        # おり桁違いに小さい。method ケースの全フィールドに適用する。
+        "rtol_method": 1e-7,
+    },
+    # Tobit の交差検証は R `censReg`（`maxLik` エンジン）。survreg とは最適化実装が
+    # 完全に独立（`nonlinear-api-design.md` 9章）。censReg 側の maxLik 収束を
+    # reltol=1e-14 まで詰めた上で、合成シナリオは点推定・SE・限界効果とも
+    # 相対 ~2e-9 で一致するため RTOL_MACHINE_PRECISION を適用する。
+    "tobit_crosscheck": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_CROSSCHECK_FLOOR,
+        # high_condition_number（x1,x2 相関 0.999）の hc0/hc1 で、SE・z・信頼区間・
+        # 限界効果 SE の相対誤差が実測 ~1.9e-8（点推定は ~1e-9 で一致）。悪条件下で
+        # 2つの独立最適化器の解のごく僅かな差が分散系で増幅されるため。
+        "rtol_high_condition_number": 5e-8,
+        # mroz（hours 生スケール）は censReg の maxLik が survreg ほど収束が詰まらず、
+        # SE・z・Wald 統計量・信頼区間・限界効果の SE/z/信頼区間が実測 ~1e-7〜3e-5
+        # 乖離する（限界効果の信頼区間端点が 0 近傍の係数で相対誤差が最も増幅し hc0 で
+        # ~3e-5）。係数・σ・対数尤度・限界効果 dydx・予測値・打ち切り適合度は ~3e-9 で
+        # 一致。engine と主リファレンス survreg は同データで ~3e-10 一致するため、これは
+        # censReg 側の収束限界であって本実装の問題ではない（mroz の厳密照合は
+        # `test_tobit_reference.py` が担う）。
+        "rtol_mroz": 1e-4,
+        # method="bfgs"/"lbfgs" ケース（`tobit_reference` の同名エントリ参照）。
+        "rtol_method": 1e-7,
+    },
     # --- 独立実装（R）とのクロスチェック ---
     # classical/HC0-3/clusterは機械精度一致（実測1e-14程度）のためRTOL_STRICTを
     # 適用、HACのみ小標本補正の慣習差により緩める。ATOLは絶対誤差フロア
     # （ref値が0近傍のとき、相対誤差比較が意味を持たなくなるのを防ぐ）。
     "ols_crosscheck": {
-        "rtol_strict": 1e-8,
+        "rtol_strict": RTOL_MACHINE_PRECISION,
         "rtol_hac": 1e-2,
-        "atol": 1e-8,
+        "atol": ATOL_CROSSCHECK_FLOOR,
         # p_valuesのみ絶対誤差フロアで比較する（HAC/autocorrelatedシナリオで
         # 裾確率がゼロ近傍に潰れ、相対誤差比較が意味を持たなくなるため。
         # 実測最大絶対乖離~1.69e-7にマージン。IV/Logit/Probitクロスチェックの
@@ -46,16 +134,16 @@ TOLERANCES: dict[str, dict[str, float]] = {
         "atol_p_value": 1e-6,
     },
     "wls_crosscheck": {
-        "rtol_strict": 1e-8,
+        "rtol_strict": RTOL_MACHINE_PRECISION,
         # HACの実測最大相対誤差が約4.3%（OLSの10倍程度）のためOLSより緩い。
         "rtol_hac": 5e-2,
-        "atol": 1e-8,
+        "atol": ATOL_CROSSCHECK_FLOOR,
         # ols_crosscheckと同じ理由（HAC/autocorrelatedで裾確率がゼロ近傍に
         # 潰れるため）。値もOLSと同じ実測オーダーのため揃える。
         "atol_p_value": 1e-6,
     },
     "iv_crosscheck": {
-        "rtol_strict": 1e-8,
+        "rtol_strict": RTOL_MACHINE_PRECISION,
         "rtol_hac": 1e-2,
         # small_nシナリオ（n=40, hac_lag=3）のみ実測乖離がrtol_hacを超える
         # （SE最大3.8%）ため専用に緩めた値。
@@ -63,7 +151,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # f_p_valueは絶対誤差フロア（実測最大乖離1.523e-6にマージン）を使う。
         "atol_f_pvalue": 1e-5,
         # ols_crosscheckと同じ絶対誤差フロア（f_p_value以外の統計量向け）。
-        "atol": 1e-8,
+        "atol": ATOL_CROSSCHECK_FLOOR,
         # p_values/wu_hausman_p_value（Issue #232/#233で追加）はhacケースで
         # t分布/F分布の裾の確率がわずかな統計量の差を増幅する（f_p_valueと同じ
         # 理由）。実測最大乖離0.00157（multi_endog/hac/p_values/const）に
@@ -86,7 +174,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
     },
     "logit_crosscheck": {
         "rtol": 2e-4,
-        "atol": 1e-8,
+        "atol": ATOL_CROSSCHECK_FLOOR,
         # marginal_effects()のstd_err（デルタ法）は係数・SE本体より数値ノイズが
         # 1桁大きい（実測最大相対誤差~1.8e-3、mroz/opg/median/age）。
         "rtol_margeff_se": 5e-3,
@@ -99,15 +187,11 @@ TOLERANCES: dict[str, dict[str, float]] = {
     },
     "probit_crosscheck": {
         "rtol": 2e-4,
-        "atol": 1e-8,
+        "atol": ATOL_CROSSCHECK_FLOOR,
         # marginal_effects()のstd_errの数値ノイズ（実測最大相対誤差~7e-4、
         # mroz/hc1/median付近）。logitの5e-3より小さい。
         "rtol_margeff_se": 1e-3,
         # p値の裾での増幅（実測最大絶対誤差~2.9e-5、mroz）。logitの3e-5と近い値。
         "atol_p_value": 5e-5,
-        # Wooldridge mrozのクラスターロバストSE（cluster_col="city"、G=2）は
-        # 合成データのクラスターケースより数値ノイズが大きい
-        # （実測最大相対誤差~1.1e-3、const）。probit固有（logitには無い）。
-        "rtol_mroz_cluster": 2e-3,
     },
 }

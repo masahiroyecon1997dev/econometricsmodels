@@ -15,6 +15,9 @@ use linear::wls::WLSResult;
 use nonlinear::common::MarginalEffectsResult;
 use nonlinear::logit::{LogitOptions, LogitResult};
 use nonlinear::probit::{ProbitOptions, ProbitResult};
+use nonlinear::tobit::{
+    CensoringFitCategoryResult, CensoringFitCheckResult, TobitOptions, TobitResult,
+};
 
 /// Entry point for OLS estimation.
 ///
@@ -111,6 +114,29 @@ fn fit_probit(
     nonlinear::probit::fit(data, y, x, &options)
 }
 
+/// Entry point for Tobit estimation.
+///
+/// Parameters
+/// ----------
+/// data : polars.DataFrame
+///     The input data. Must contain the `y`, `x`, and (if specified) cluster columns.
+/// y : str
+///     Column name of the dependent variable. May be censored at `options.lower`/
+///     `options.upper` (values outside those bounds raise `ValidationError`).
+/// x : list[str]
+///     Column names of the independent variables.
+/// options : TobitOptions
+///     Estimation options.
+#[pyfunction]
+fn fit_tobit(
+    data: PyDataFrame,
+    y: String,
+    x: Vec<String>,
+    options: TobitOptions,
+) -> PyResult<TobitResult> {
+    nonlinear::tobit::fit(data, y, x, &options)
+}
+
 /// Entry point for IV estimation (2SLS/GMM).
 ///
 /// Parameters
@@ -155,6 +181,11 @@ fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fit_probit, m)?)?;
     m.add_class::<ProbitOptions>()?;
     m.add_class::<ProbitResult>()?;
+    m.add_function(wrap_pyfunction!(fit_tobit, m)?)?;
+    m.add_class::<TobitOptions>()?;
+    m.add_class::<TobitResult>()?;
+    m.add_class::<CensoringFitCategoryResult>()?;
+    m.add_class::<CensoringFitCheckResult>()?;
     m.add_function(wrap_pyfunction!(fit_iv, m)?)?;
     m.add_class::<IvOptions>()?;
     m.add_class::<IvResult>()?;

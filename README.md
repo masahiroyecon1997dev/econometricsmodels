@@ -5,7 +5,7 @@
 [![Docs](https://github.com/masahiroyecon1997dev/econometricsmodels/actions/workflows/cd_docs.yml/badge.svg)](https://masahiroyecon1997dev.github.io/econometricsmodels/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A Python API providing statistical and econometric analysis methods. It is primarily intended for use as the analysis engine for [economicon](https://github.com/masahiroyecon1997dev/economicon), a GUI application for data analysis, and its design prioritizes ease of embedding from scripts and programs (type completion, validation, dynamic construction).
+A Python API providing statistical and econometric analysis methods.[^origin] Its design prioritizes ease of embedding from scripts and programs (type completion, validation, dynamic construction).
 
 - The computational core is implemented in **Rust** and thinly bound to Python via **PyO3**.
 - Data input is restricted to **polars** DataFrames only, passed to the Rust side via **Arrow zero-copy**.
@@ -98,9 +98,23 @@ For more details — including how to switch to heteroskedasticity-robust standa
 
 ## Implementation status
 
-Implemented: **OLS** (Ordinary Least Squares), **WLS** (Weighted Least Squares), **Logit**, **Probit**, **IV** (2SLS/GMM).
+Implemented: **OLS** (Ordinary Least Squares), **WLS** (Weighted Least Squares), **Logit**, **Probit**, **IV** (2SLS/GMM), **Tobit**.
 
-Planned next, in this order: **Tobit → FE (Fixed Effects) → RE (Random Effects) → GLS**.
+Planned next, in this order (full roadmap: [#276](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/276)):
+
+1. **FE** (Fixed Effects)
+2. **RE** (Random Effects)
+3. **Fixed-Effects IV**
+4. **GLS** (Generalized Least Squares)
+5. **DID & event study** (basic two-period / two-way fixed-effects form)
+6. **Multinomial Logit**
+7. **Ordered Logit**
+8. **Ordered Probit**
+9. **BLP** (Random Coefficient Logit)
+10. **PPML** (Poisson Pseudo-Maximum-Likelihood)
+11. **Heckman** (two-step / Heckit)
+
+**Quantile Regression** is also a confirmed target, though its position in the sequence is not yet fixed.
 
 During the `0.x.x` pre-release period, breaking changes may occur even in minor version bumps.
 
@@ -137,7 +151,7 @@ The computational core is written in Rust, so the aim is that calling `fit()` is
 | Tobit&nbsp;<sup>2</sup> | 0.0011 | 0.014 | 0.15 | —&nbsp;<sup>1</sup> |
 
 <sup>1</sup> Probit and Tobit currently stop at n = 100,000 — see [Known performance issues](#known-performance-issues).
-<sup>2</sup> Tobit is landing in the current pre-release; see [Implementation status](#implementation-status).
+<sup>2</sup> Tobit is newly implemented; its large-n behavior is still being hardened (see [Known performance issues](#known-performance-issues)).
 
 Peak resident memory is roughly 160–260 MB at n ≤ 100,000 for every method, growing with n (about 400 MB for OLS/WLS and 1.1 GB for IV at n = 1,000,000).
 
@@ -155,3 +169,5 @@ All of the following are engine-side and under investigation.
 ## License
 
 [MIT License](LICENSE)
+
+[^origin]: econometricsmodels began as the analysis engine for [economicon](https://github.com/masahiroyecon1997dev/economicon), a GUI application for data analysis. That project's development is currently paused while the author's focus is on this package.

@@ -18,11 +18,11 @@ iv_crosscheck.json）を生成するスクリプト。
   という本実装の設計と一致）。
 - **wu_hausman**: 本実装がcov_typeに追従する設計のため、`summary(diagnostics=TRUE)`の
   `vcov.`引数に各cov_typeの共分散計算式を関数化して渡し、全cov_typeでクロスチェック
-  する（Issue #233。`vcov.`は行列ではなく関数として渡す必要があることが判明、
-  `run_ivreg_benchmark.R`のモジュールコメント参照）。ただしcluster cov_typeのみ、
+  する（`vcov.`は行列ではなく関数として渡す必要があることが判明、
+  `benchmark/iv/references/run_ivreg.R`のモジュールコメント参照）。ただしcluster cov_typeのみ、
   ivreg側のWald検定がF分布の分母自由度にクラスター数を反映しない既知の制約により
   p値が一致しないため、統計量のみ比較しp値は対象外にする（ユーザー確認済み）。
-- **t_stats/p_values/conf_int**（Issue #232）・**nobs/df_resid**（Issue #237）:
+- **t_stats/p_values/conf_int**・**nobs/df_resid**:
   `coeftest()`/手計算の信頼区間・`nrow(df)`/`df_inference`から抽出し、全cov_type
   エントリに含める。
 
@@ -31,40 +31,33 @@ iv_crosscheck.json）を生成するスクリプト。
 フィクスチャ化」参照）。
 
 入力データは`tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
-（`benchmark/freeze_datasets.py`参照）。
+（`benchmark/iv/freeze.py`参照）。
 
-使用例:
-    python generate_iv_crosscheck_fixtures.py \\
-        --output ../../../tests/fixtures/benchmarks/iv_crosscheck.json
+使用例（リポジトリルートから）:
+    python -m benchmark.iv.fixtures.generate_iv_crosscheck_fixtures
 """
 
 from __future__ import annotations
 
-import argparse
-import json
 import subprocess
-import sys
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-sys.path.insert(
-    0, str(Path(__file__).resolve().parents[2])
-)  # benchmark/ を import path に追加（_common）
-
 import polars as pl
-from _common import (
+
+from benchmark.common import (
+    BENCHMARKS_DIR,
     DATA_DIR,
     hac_auto_lag,
     imbalanced_cluster_groups,
+    load_frozen_dataset,
+    run_fixture_cli,
 )
-from load_wooldridge import load as load_wooldridge
+from benchmark.common.load_wooldridge import load as load_wooldridge
+from benchmark.iv.references.r import run_ivreg_r
 
-IV_DIR = Path(__file__).resolve().parent.parent
-R_SCRIPT = IV_DIR / "run_ivreg_benchmark.R"
-
-# generate_iv_fixtures.pyのCARD_X_EXOGと同じ（Wooldridge card実データ、
-# Issue #231フェーズ4）。
+# generate_iv_fixtures.pyのCARD_X_EXOGと同じ（Wooldridge card実データ）。
 CARD_X_EXOG = ["exper", "expersq", "black", "smsa", "south"]
 
 # generate_iv_fixtures.pyと同じシナリオ・構成（ユーザー確認済み）。
@@ -98,56 +91,6 @@ def _ivreg_formula(
     return f"{y_col} ~ {lhs} | {instruments}"
 
 
-def _normalize_names(raw: dict) -> dict:
-    """パラメータ名を本実装のparam_names規則（切片="const"）に揃える
-    （`generate_ols_crosscheck_fixtures.py`の`_normalize_names`と同じ理由）。
-    """
-
-    def fix(name: str) -> str:
-        return "const" if name == "(Intercept)" else name
-
-    result = {
-        "coef": {fix(k): v for k, v in raw["coef"].items()},
-        "se": {fix(k): v for k, v in raw["se"].items()},
-        "t_stats": {fix(k): v for k, v in raw["t_stats"].items()},
-        "p_values": {fix(k): v for k, v in raw["p_values"].items()},
-        "conf_int": {fix(k): v for k, v in raw["conf_int"].items()},
-    }
-    for key in (
-        "nobs",
-        "df_resid",
-        "r_squared",
-        "r_squared_adj",
-        "f_statistic",
-        "f_p_value",
-        "weak_instrument_f",
-        "sargan_statistic",
-        "sargan_p_value",
-        "wu_hausman_statistic",
-        "wu_hausman_p_value",
-    ):
-        result[key] = raw[key]
-    return result
-
-
-def _run_r(
-    csv_path: Path,
-    formula: str,
-    cov_type: str,
-    cluster_col: str | None = None,
-    hac_lag: int | None = None,
-) -> dict:
-    cmd = ["Rscript", str(R_SCRIPT), str(csv_path), formula, cov_type]
-    if cov_type == "cluster":
-        cmd.append(cluster_col or "")
-    elif cov_type == "hac":
-        cmd.append(str(hac_lag))
-
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    raw = json.loads(proc.stdout)
-    return _normalize_names(raw)
-
-
 def build_synthetic_fixtures(tmpdir: Path) -> dict:
     fixtures: dict = {}
 
@@ -157,7 +100,8 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         x_endog = ["endog1"]
         formula = _ivreg_formula(x_exog, x_endog, instruments)
         csv_path = DATA_DIR / f"iv_{scenario}.csv"
-        n = pl.read_csv(csv_path).height
+        df, _ = load_frozen_dataset("iv", scenario)
+        n = df.height
 
         fixtures[scenario] = {}
         for cov_type in COV_TYPES:
@@ -165,14 +109,13 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
                 continue  # baselineのみ別途複数パターンで確認（下記）
             if cov_type == "hac":
                 lag = hac_auto_lag(n)
-                entry = _run_r(csv_path, formula, cov_type, hac_lag=lag)
+                entry = run_ivreg_r(csv_path, formula, cov_type, hac_lag=lag)
                 entry["hac_lag"] = lag
             else:
-                entry = _run_r(csv_path, formula, cov_type)
+                entry = run_ivreg_r(csv_path, formula, cov_type)
             fixtures[scenario][cov_type] = entry
 
         if scenario == "baseline":
-            df = pl.read_csv(csv_path)
             fixtures[scenario]["cluster"] = _run_cluster_case(
                 df, csv_path, formula, tmpdir
             )
@@ -186,43 +129,45 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             )
             fixtures[scenario]["cluster_g2"] = _run_cluster_g2_case(tmpdir)
 
-    # 複数内生変数（k_endog>=2）。generate_iv_fixtures.pyのmulti_endogと同じ構成
-    # （Issue #231フェーズ4、testing-completeness-reviewer指摘のmust fix）。
+    # 複数内生変数（k_endog>=2）。generate_iv_fixtures.pyのmulti_endogと
+    # 同じ構成。
     multi_endog_csv = DATA_DIR / "iv_baseline_multi_endog.csv"
     multi_endog_formula = _ivreg_formula(
         ["x1"], ["endog1", "endog2"], ["z1", "z2", "z3"]
     )
-    multi_endog_n = pl.read_csv(multi_endog_csv).height
+    multi_endog_df, _ = load_frozen_dataset("iv", "baseline_multi_endog")
+    multi_endog_n = multi_endog_df.height
     fixtures["multi_endog"] = {}
     for cov_type in COV_TYPES:
         if cov_type == "cluster":
             continue
         if cov_type == "hac":
             lag = hac_auto_lag(multi_endog_n)
-            entry = _run_r(
+            entry = run_ivreg_r(
                 multi_endog_csv, multi_endog_formula, cov_type, hac_lag=lag
             )
             entry["hac_lag"] = lag
         else:
-            entry = _run_r(multi_endog_csv, multi_endog_formula, cov_type)
+            entry = run_ivreg_r(multi_endog_csv, multi_endog_formula, cov_type)
         fixtures["multi_endog"][cov_type] = entry
 
-    # 自由度1境界（df_resid=1ちょうど）。generate_iv_fixtures.pyのdf1と同じ構成
-    # （Issue #235）。n=3ではHACの自動ラグ選択式（hac_auto_lag）が0を返す可能性が
+    # 自由度1境界（df_resid=1ちょうど）。generate_iv_fixtures.pyのdf1と
+    # 同じ構成。n=3ではHACの自動ラグ選択式（hac_auto_lag）が0を返す可能性が
     # あるため、他シナリオと同じくその値をそのまま使う。
     df1_csv = DATA_DIR / "iv_baseline_df1.csv"
     df1_formula = _ivreg_formula([], ["endog1"], ["z1"])
-    df1_n = pl.read_csv(df1_csv).height
+    df1_df, _ = load_frozen_dataset("iv", "baseline_df1")
+    df1_n = df1_df.height
     fixtures["df1"] = {}
     for cov_type in COV_TYPES:
         if cov_type == "cluster":
             continue  # n=3では意味のあるクラスタ数を確保できないため対象外
         if cov_type == "hac":
             lag = hac_auto_lag(df1_n)
-            entry = _run_r(df1_csv, df1_formula, cov_type, hac_lag=lag)
+            entry = run_ivreg_r(df1_csv, df1_formula, cov_type, hac_lag=lag)
             entry["hac_lag"] = lag
         else:
-            entry = _run_r(df1_csv, df1_formula, cov_type)
+            entry = run_ivreg_r(df1_csv, df1_formula, cov_type)
         fixtures["df1"][cov_type] = entry
 
     return fixtures
@@ -246,7 +191,9 @@ def _run_cluster_case(
     grouped = df.with_columns(pl.Series("cluster_group", cluster_group))
     tmp_path = tmpdir / (csv_path.stem + suffix + ".csv")
     grouped.write_csv(tmp_path)
-    return _run_r(tmp_path, formula, "cluster", cluster_col="cluster_group")
+    return run_ivreg_r(
+        tmp_path, formula, "cluster", cluster_col="cluster_group"
+    )
 
 
 def _run_cluster_g2_case(tmpdir: Path) -> dict:
@@ -255,7 +202,7 @@ def _run_cluster_g2_case(tmpdir: Path) -> dict:
     「修正済み」参照）。
     """
     csv_path = DATA_DIR / "iv_baseline_g2.csv"
-    df = pl.read_csv(csv_path)
+    df, _ = load_frozen_dataset("iv", "baseline_g2")
     n = df.height
     formula = _ivreg_formula([], ["endog1"], ["z1"])
     grouped = df.with_columns(
@@ -263,13 +210,14 @@ def _run_cluster_g2_case(tmpdir: Path) -> dict:
     )
     tmp_path = tmpdir / (csv_path.stem + "_cluster_g2.csv")
     grouped.write_csv(tmp_path)
-    return _run_r(tmp_path, formula, "cluster", cluster_col="cluster_group")
+    return run_ivreg_r(
+        tmp_path, formula, "cluster", cluster_col="cluster_group"
+    )
 
 
 def build_wooldridge_fixtures(tmpdir: Path) -> dict:
     """実データセット（card、`generate_iv_fixtures.py`のCARD_X_EXOGと同じ構成）の
-    Rクロスチェック（Issue #231フェーズ4、testing-completeness-reviewer指摘の
-    should fix）。
+    Rクロスチェック。
     """
     df = load_wooldridge("card")
     csv_path = tmpdir / "card.csv"
@@ -285,10 +233,10 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
             continue  # 対応する自然なカテゴリ列が無いため対象外（generate_iv_fixtures.py参照）。
         if cov_type == "hac":
             lag = hac_auto_lag(n)
-            entry = _run_r(csv_path, formula, cov_type, hac_lag=lag)
+            entry = run_ivreg_r(csv_path, formula, cov_type, hac_lag=lag)
             entry["hac_lag"] = lag
         else:
-            entry = _run_r(csv_path, formula, cov_type)
+            entry = run_ivreg_r(csv_path, formula, cov_type)
         fixtures[cov_type] = entry
     return fixtures
 
@@ -340,27 +288,27 @@ def build_fixtures() -> dict:
             "全cov_typeエントリで同じ値になる（実測確認済み）。just_identified"
             "シナリオはsargan_statistic/sargan_p_valueがnull（丁度識別）。"
             "wu_hausman_statistic/wu_hausman_p_valueは全cov_typeで実測値を持つ"
-            "（Issue #233。`summary(diagnostics=TRUE, vcov.=<関数>)`で本実装と同じ"
+            "（`summary(diagnostics=TRUE, vcov.=<関数>)`で本実装と同じ"
             "cov_type別のロバスト共分散を診断表に反映できることが判明、"
-            "run_ivreg_benchmark.Rのモジュールコメント参照）。ただしcluster"
+            "benchmark/iv/references/run_ivreg.Rのモジュールコメント参照）。"
+            "ただしcluster"
             "cov_typeのみ、ivreg側のWald検定がF分布の分母自由度にクラスター数を"
             "反映しない既知の制約により、wu_hausman_p_valueがnull（statisticのみ"
             "実測値、ユーザー確認済み）。"
-            "t_stats/p_values/conf_intはcoeftest()・手計算信頼区間から抽出"
-            "（Issue #232）。nobs/df_residはnrow(df)・df_inferenceから抽出"
-            "（Issue #237）。"
+            "t_stats/p_values/conf_intはcoeftest()・手計算信頼区間から、"
+            "nobs/df_residはnrow(df)・df_inferenceから抽出する。"
             "perfect_multicollinearityはここに含まない（ComputationErrorの"
             "発生確認のみ、テストコード側で対応）。cluster_g2（G=2境界の成功"
             "パス）は`engine/src/iv/CLAUDE.md`「修正済み」に記録の`k_constant`"
             "取り違えバグの修正後にフィクスチャ化した。"
             "multi_endog（複数内生変数、x_endog=['endog1','endog2']）は"
-            "generate_iv_datasets.pyの第一段階誤差vが内生変数ごとに独立になる"
-            "よう修正した後のデータで生成（Issue #231フェーズ4、"
+            "benchmark/iv/datasets.pyの第一段階誤差vが内生変数ごとに独立になる"
+            "よう修正した後のデータで生成（"
             "generate_iv_fixtures.pyの同名注記参照）。weak_instrument_fは"
             "内生変数名をキーにしたdict（本実装のweak_instrument_f_statistics"
-            "と同じ形、run_ivreg_benchmark.R参照）。"
+            "と同じ形、benchmark/iv/references/run_ivreg.R参照）。"
             "df1（自由度1境界、n=3・x_exog=[]・x_endog=['endog1']・"
-            "instruments=['z1']）は境界値・悪条件シナリオの一環（Issue #235）。"
+            "instruments=['z1']）は境界値・悪条件シナリオの一環。"
             "cluster cov_typeはn=3では意味のあるクラスタ数を確保できないため"
             "対象外。"
             "wooldridge.card（Wooldridge実データ、Card 1995、`generate_iv_fixtures.py`"
@@ -372,16 +320,8 @@ def build_fixtures() -> dict:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output",
-        default="../../../tests/fixtures/benchmarks/iv_crosscheck.json",
+    run_fixture_cli(
+        build_fixtures,
+        BENCHMARKS_DIR / "iv_crosscheck.json",
+        description=__doc__,
     )
-    args = parser.parse_args()
-
-    fixtures = build_fixtures()
-
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(fixtures, indent=2, ensure_ascii=False))
-    print(f"wrote {output_path} ({len(json.dumps(fixtures))} bytes)")

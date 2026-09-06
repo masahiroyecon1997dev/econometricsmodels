@@ -55,14 +55,23 @@ econometricsmodels/
 │   ├── __init__.py               # engine_pybindからのインポート、Polarsラッパー
 │   └── py.typed
 │
-├── tests/                          # pytest（pyfixest / R実装との答え合わせ）
+├── tests/                          # pytest（statsmodels/linearmodels / R実装との答え合わせ）
+│   ├── conftest.py _assertions.py _helpers.py _tolerances.py  # 共有（系統によらず全テストが使う）
+│   ├── linear/ nonlinear/ iv/      # 系統別サブディレクトリ（benchmark/ と同じ grain）。test_<手法>*.py（Tobitはnonlinear/）
+│   └── fixtures/benchmarks/        # 固定CSV＋リファレンスJSON（コミット済み成果物）
 │
-├── benchmark/                     # テスト用データセット生成・リファレンス実装（pyfixest/R）でのベンチマーク値生成スクリプト
-│                                   # tests/とは別ライフサイクル（Rランタイム依存、随時実行するツール）。詳細は.claude/skills/reference-benchmark/
+├── benchmark/                     # テスト用フィクスチャ生成ツール（Pythonパッケージ。pytestが収集時にimportする）
+│   ├── common/                    # 系統横断の共通ヘルパー（DGP・データIO・リファレンス呼び出し・CLI）
+│   ├── linear/ nonlinear/ iv/ panel/  # 系統ごと: datasets.py（DGP＋凍結）・references/（リファレンス実装アダプタ＋.R）・fixtures/（generate_*_fixtures.py）
+│   └── regenerate_all.py          # 合成データCSV＋全フィクスチャJSONの一括再生成。詳細は.claude/skills/reference-benchmark/
+│
+├── performance/                   # リファレンス実装との性能比較（benchmark_performance.ymlから実行。pytestとは無関係、statsmodels/linearmodels依存）
 │
 ├── docs/                          # MkDocs（GitHub Pages公開）
 │   ├── mkdocs.yml
-│   └── planning/                  # plan.md・仕様書（詳細は9章）
+│   ├── spec/                      # 実装済み手法の数式・API仕様の正本（詳細は13章）
+│   ├── performance/               # 手法別の性能比較記録（performance/compare_<method>.pyの実測。<method>.md＋results/にJSON）
+│   └── planning/                  # plan.md・実装途中の設計ノート（詳細は9章）
 │
 └── .github/workflows/
     ├── ci_engine.yml               # cargo test / clippy / fmt（engine/配下トリガー）
@@ -134,6 +143,8 @@ econometricsmodels/
   ここに置く、例: `ci-cd-notes.md`）、`docs/planning/specs/`（実装途中の手法の設計ノート・実装ノート）。
   ある手法の実装が完了したら、その手法の仕様書は`docs/planning/specs/`から`docs/spec/`へ集約する
   （経緯は削除し理由のみ簡潔に記載、1ファイルにまとめる）。
+- 性能比較記録: `docs/performance/<method>.md`（`performance/compare_<method>.py`の実測サマリー。数式・API仕様ではなく
+  実行環境依存の実測値のため`docs/spec/`とは分ける）。生成JSONは`docs/performance/results/`（`.gitignore`対象）。
 
 ## 14. 実装・テスト・ベンチマーク作成・仕様検討時の確認方針
 

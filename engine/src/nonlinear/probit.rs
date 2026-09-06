@@ -50,25 +50,21 @@
 //! （勾配ノルムのアンダーフロー、`nonlinear-implementation-notes.md`参照）よりも
 //! 緩い条件でこのNaN汚染に到達しうる。
 //!
-//! 対策として、`u`を`φ`/`Φ`評価前に`[-U_CLAMP, U_CLAMP]`にクランプする
-//! （`U_CLAMP`のdocコメント参照）。R言語`stats::binomial(link="probit")`の
-//! `linkinv`が線形予測子を`pnorm`評価前に同じ閾値でクランプする実装
-//! （`thresh <- -qnorm(.Machine$double.eps); eta <- pmin(pmax(eta, -thresh), thresh)`）
-//! を参考にした（ユーザー確認済み）。statsmodelsの`Probit`は`Φ`の**出力**を
-//! `np.clip(cdf, FLOAT_EPS, 1-FLOAT_EPS)`でクリップする方式だが、`score`/`loglike`
-//! にのみ適用され`hessian`には適用されていない（非対称）。今回は`u`（入力側）を
-//! クランプする方式を採用し、`cost`/`gradient`/`hessian`/`scores`すべてに同じ
-//! 関所（`clamped_pdf_cdf`）を経由させることでこの非対称性を避けている。
+//! 対策として、`u`を`φ`/`Φ`評価前にクランプする（`nonlinear/common.rs`の`clamped_pdf_cdf`・
+//! `U_CLAMP`のdocコメント参照。Tobitの打ち切り観測の尤度も同型の`λ=φ/Φ`（逆ミルズ比）を
+//! 含み同じリスクを共有するため、Tobit実装時に共通化した）。`cost`/`gradient`/`hessian`/
+//! `scores`すべてに同じ関所を経由させることで、statsmodelsの`Probit`実装に見られる
+//! 非対称性（`score`/`loglike`はクリップするが`hessian`はしない）を避けている。
 
 use crate::error::CommonError;
 use crate::inference;
 use crate::nonlinear::common::{
     CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
-    Method, MleError, SandwichVariant, cluster_cov_params, column_means, column_medians,
-    destandardize_cov_params, destandardize_params, goodness_of_fit, log_likelihood_null,
-    marginal_effects_from_w_s, observed_information_cov_params, opg_cov_params, pred_table,
-    predict_from_link, run_solver, sandwich_cov_params, standardize_columns,
-    validate_fit_preconditions,
+    Method, MleError, SandwichVariant, SeparationNormCheck, clamped_pdf_cdf, cluster_cov_params,
+    column_means, column_medians, destandardize_cov_params, destandardize_params, goodness_of_fit,
+    log_likelihood_null, marginal_effects_from_w_s, observed_information_cov_params,
+    opg_cov_params, pred_table, predict_from_link, run_solver, sandwich_cov_params,
+    standardize_columns, validate_fit_preconditions,
 };
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
@@ -194,26 +190,9 @@ impl ProbitInput {
     }
 }
 
-/// `φ(u)`・`Φ(u)`を評価する前に`u`をこの絶対値以下にクランプする閾値。`u`がこれより
-/// 極端になると`λ_i=φ(u)/Φ(u)`（一般化残差）が`0.0/0.0`のNaNになりうる
-/// （実測では`|u|≳39`から発生。本閾値`≈8.126`はそれよりずっと手前で安全に倒す、
-/// モジュール冒頭「数値安定化について」参照）。
-///
-/// R言語`stats::binomial(link="probit")$linkinv`の`thresh <- -qnorm(.Machine$double.eps)`
-/// と同じ値（`-Φ⁻¹(f64::EPSILON)`）。`Normal::inverse_cdf`は反復計算のためホットパスで
-/// 毎回呼ぶのを避け、コンパイル時定数としてハードコードしている（Rとscipyの両方で
-/// `8.125890664701908`と算出されることを確認済み）。
-const U_CLAMP: f64 = 8.125_890_664_701_908;
-
-/// `u`を`[-U_CLAMP, U_CLAMP]`にクランプしてから`(φ(u), Φ(u))`を評価する
-/// （`U_CLAMP`のdocコメント参照）。`log_likelihood`（`cost`はこれを符号反転して呼ぶ）・
-/// `linear_predictor_and_residual`（`gradient`/`hessian`/`scores`が経由する）の両方が
-/// 経由する共通の関所にすることで、`statsmodels`の`Probit`実装に見られる非対称性
-/// （`score`/`loglike`はクリップするが`hessian`はしない）を避ける。
-fn clamped_pdf_cdf(normal: &Normal, u: f64) -> (f64, f64) {
-    let u = u.clamp(-U_CLAMP, U_CLAMP);
-    (normal.pdf(u), normal.cdf(u))
-}
+// `clamped_pdf_cdf`（`φ(u)`・`Φ(u)`評価前のクランプ）は`nonlinear/common.rs`へ移設した
+// （Tobit実装時、打ち切り観測の尤度も同型の`λ=φ/Φ`を含むため共有。モジュール冒頭
+// 「数値安定化について」参照）。
 
 /// 対数尤度 `ℓ(θ) = Σᵢ log Φ(qᵢzᵢ)`（`zᵢ=xᵢ'θ`、`qᵢ=2yᵢ-1`、モジュール冒頭の数式参照）を
 /// `x`・`y`・`params`から直接計算する。`ProbitProblem::cost`（`-ℓ(θ)`、argminの
@@ -529,6 +508,10 @@ impl ProbitEstimator {
     /// - `cov_type=Opg`でOPG行列（`Σᵢ sᵢsᵢ'`）が特異: `MleError::SingularOpgMatrix`
     /// - `cov_type=Cluster`でグループキー未指定: `CommonError::MissingClusterColumn`
     /// - `cov_type=Cluster`でクラスター数が2未満: `CommonError::InsufficientClusters`
+    /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
+    ///   `CommonError::InsufficientClustersForInference`（`rank(Ŝ) ≤ g - 1`のため
+    ///   クラスターロバスト共分散が退化する識別失敗、Issue #289。Logit/Probitでは
+    ///   新規制約）
     pub fn fit(
         input: ProbitInput,
         method: Method,
@@ -540,7 +523,15 @@ impl ProbitEstimator {
     ) -> Result<Self, MleError> {
         let n = input.nobs();
         let k = input.k();
-        validate_fit_preconditions(confidence_level, max_iter, tol, input.y(), k, &cov_type)?;
+        validate_fit_preconditions(
+            confidence_level,
+            max_iter,
+            tol,
+            input.y(),
+            k,
+            input.has_intercept(),
+            &cov_type,
+        )?;
 
         let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
         let problem = ProbitProblem::from_standardized(x_std, input.y().clone());
@@ -565,6 +556,9 @@ impl ProbitEstimator {
             max_iter as u64,
             tol,
             raise_on_non_convergence,
+            // Probitは`y∈{0,1}`で係数が±∞へ発散するため(準)完全分離の
+            // 標準化パラメータノルム事後チェックを有効にする（Issue #288）。
+            SeparationNormCheck::Enabled,
         )?;
 
         let params = destandardize_params(&output.params, &scale);
@@ -1508,7 +1502,8 @@ mod tests {
     /// 再現した値と突き合わせる（上の`fit_cov_type_opg_hc0_hc1_match_independently_
     /// recomputed_values`と同じ技法・同じ多変量データセット。情報行列の等式が
     /// 厳密に成り立つ切片のみモデルでは配線ミスを検出できないため。Logitの
-    /// 対応するテストと同じ構成）。
+    /// 対応するテストと同じ構成）。`G=3 > q=2`（`G <= q`は
+    /// `InsufficientClustersForInference`で弾かれる、Issue #289）ため`G=3`（2:1:1）。
     #[test]
     fn fit_cov_type_cluster_matches_independently_recomputed_values() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
@@ -1529,7 +1524,7 @@ mod tests {
             "a".to_string(),
             "a".to_string(),
             "b".to_string(),
-            "b".to_string(),
+            "c".to_string(),
         ];
 
         let classical = ProbitEstimator::fit(
@@ -1589,10 +1584,10 @@ mod tests {
         }
     }
 
-    /// 上のテストは2:2の均等サイズのグループのみを検証しているが、`testing-policy.md`が
+    /// 上のテストは均等サイズのグループのみを検証しているが、`testing-policy.md`が
     /// 指摘する通り均等サイズのみのテストは実務で起こりやすい偏った分布のグループサイズ
-    /// を見逃しうる。OLS/Logit側の対応するテストに倣い、3:2の不均衡なグループでも
-    /// 同じ独立再計算の技法で検証する。
+    /// を見逃しうる。OLS/Logit側の対応するテストに倣い、3:1:1の不均衡なグループでも
+    /// 同じ独立再計算の技法で検証する（`G=3 > q=2`、Issue #289）。
     #[test]
     fn fit_cov_type_cluster_matches_independently_recomputed_values_with_unbalanced_groups() {
         let y = vec![0.0, 1.0, 0.0, 1.0, 1.0];
@@ -1617,7 +1612,7 @@ mod tests {
             "a".to_string(),
             "a".to_string(),
             "b".to_string(),
-            "b".to_string(),
+            "c".to_string(),
         ];
 
         let classical = ProbitEstimator::fit(
@@ -1738,6 +1733,49 @@ mod tests {
         );
     }
 
+    /// `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下だと、
+    /// クラスターロバスト共分散`Ŝ`はクラスター寄与スコアの総和がゼロ（MLEの一次条件
+    /// `Σ_i s_i = 0`）で`rank(Ŝ) ≤ g - 1`となり退化する。`fit()`冒頭（Newton反復の前）の
+    /// バリデーションで`CommonError::InsufficientClustersForInference`として弾く
+    /// （Issue #289。Logitの同名テストと対、Logit/Probitでは新規制約）。説明変数2個
+    /// （`q = 3 - 1 = 2`）に対し`g = 2`。
+    #[test]
+    fn fit_returns_validation_error_when_cluster_count_at_most_slopes() {
+        let y = vec![0.0, 1.0, 0.0, 1.0, 1.0, 0.0];
+        let x_columns = vec![
+            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0],
+        ];
+        let input = ProbitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let groups: Vec<String> = (0..6)
+            .map(|i| if i < 3 { "a" } else { "b" }.to_string())
+            .collect();
+
+        let result = ProbitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::Common(CommonError::InsufficientClustersForInference { g: 2, q: 2 })
+        );
+    }
+
     /// `method`（`bfgs`/`lbfgs`）と`cov_type`（`Opg`/`Hc0`/`Hc1`/`Cluster`）の組み合わせが
     /// 正しく機能することを確認する（Logitの対応するテストと同じ理由: `method`横断が
     /// `CovType::Classical`のみ、`cov_type`横断が`Method::Newton`のみのテストでは、
@@ -1760,11 +1798,12 @@ mod tests {
             .unwrap()
         };
         let k = 3;
+        // `G=3 > q=2`（`G <= q`は`InsufficientClustersForInference`で弾かれる、Issue #289）。
         let groups = vec![
             "a".to_string(),
             "a".to_string(),
             "b".to_string(),
-            "b".to_string(),
+            "c".to_string(),
         ];
 
         for cov_type in [
@@ -2039,8 +2078,11 @@ mod tests {
     fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix() {
         // x2 = 2*x1（完全な多重共線性）。θ=0でのHessianはw*X'X（w=λ(λ+z)、z=0のとき
         // w=2/π）で、X'X自体が構造的に特異（yの値に関わらず常に特異）なので、
-        // Newtonの初回ステップで確実に特異性検出に引っかかる（Logitの対応するテストと
-        // 同じ理由、完全分離のような「収束の挙動に依存する」ケースと異なり決定的に再現できる）。
+        // 収束後の観測情報行列計算で確実に`SingularHessian`を検出する（Logitの
+        // 対応するテストと同じ理由、完全分離のような「収束の挙動に依存する」ケースと
+        // 異なり決定的に再現できる）。Newton法自体の反復過程における注意点は
+        // `logit.rs`の対応するテストのコメント参照（`regularized_newton_step`導入、
+        // Issue #215）。
         let y = vec![0.0, 1.0, 0.0, 1.0];
         let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
         let input = ProbitInput::from_columns(
@@ -2166,7 +2208,9 @@ mod tests {
 
     /// `cov_type=Cluster`のエラー伝播（`cluster_cov_params`も内部で`neg_hessian_inverse`を
     /// 呼ぶため`SingularHessian`）も、Hc0/Hc1と同じ完全な多重共線性データセットで検証する
-    /// （`LogitEstimator`の対応するテストと同じ理由）。
+    /// （`LogitEstimator`の対応するテストと同じ理由）。`G=3 > q=2`にして`fit()`冒頭の
+    /// `InsufficientClustersForInference`より先にNewton反復のHessian特異へ到達させる
+    /// （Issue #289）。
     #[test]
     fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_cluster() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
@@ -2175,7 +2219,7 @@ mod tests {
             "g1".to_string(),
             "g1".to_string(),
             "g2".to_string(),
-            "g2".to_string(),
+            "g3".to_string(),
         ];
         let input = ProbitInput::from_columns(
             &y,

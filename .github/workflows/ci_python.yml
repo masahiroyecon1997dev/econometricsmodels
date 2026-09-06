@@ -9,6 +9,9 @@ on:
       - "pyproject.toml"
       - "uv.lock"
       - "tests/**"
+      # benchmark/配下のフィクスチャ生成モジュールは pytest が import 時に読み込む
+      # （定数・ヘルパーの単一定義元）。壊れると pytest も落ちるため CI をトリガーする。
+      - "benchmark/**"
       - ".github/workflows/ci_python.yml"
   # pull_requestにはpathsフィルタを付けない（ci_engine.ymlと同じ理由、
   # 「必須ステータスチェック」参照）。

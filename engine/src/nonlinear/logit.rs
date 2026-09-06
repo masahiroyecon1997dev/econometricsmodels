@@ -34,11 +34,11 @@ use crate::error::CommonError;
 use crate::inference;
 use crate::nonlinear::common::{
     CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
-    Method, MleError, SandwichVariant, cluster_cov_params, column_means, column_medians,
-    destandardize_cov_params, destandardize_params, goodness_of_fit, log_likelihood_null,
-    marginal_effects_from_w_s, observed_information_cov_params, opg_cov_params, pred_table,
-    predict_from_link, run_solver, sandwich_cov_params, standardize_columns,
-    validate_fit_preconditions,
+    Method, MleError, SandwichVariant, SeparationNormCheck, cluster_cov_params, column_means,
+    column_medians, destandardize_cov_params, destandardize_params, goodness_of_fit,
+    log_likelihood_null, marginal_effects_from_w_s, observed_information_cov_params,
+    opg_cov_params, pred_table, predict_from_link, run_solver, sandwich_cov_params,
+    standardize_columns, validate_fit_preconditions,
 };
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
@@ -469,6 +469,11 @@ impl LogitEstimator {
     /// - `cov_type=Opg`でOPG行列（`Σᵢ sᵢsᵢ'`）が特異: `MleError::SingularOpgMatrix`
     /// - `cov_type=Cluster`でグループキー未指定: `CommonError::MissingClusterColumn`
     /// - `cov_type=Cluster`でクラスター数が2未満: `CommonError::InsufficientClusters`
+    /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
+    ///   `CommonError::InsufficientClustersForInference`（`rank(Ŝ) ≤ g - 1`のため
+    ///   ロバストWald検定（LRではなくクラスターロバスト共分散側）で退化する識別失敗、
+    ///   Issue #289。Logit/Probitでは新規制約——従来は縮退した共分散から読んだSEを
+    ///   無警告で返していた）
     pub fn fit(
         input: LogitInput,
         method: Method,
@@ -480,7 +485,15 @@ impl LogitEstimator {
     ) -> Result<Self, MleError> {
         let n = input.nobs();
         let k = input.k();
-        validate_fit_preconditions(confidence_level, max_iter, tol, input.y(), k, &cov_type)?;
+        validate_fit_preconditions(
+            confidence_level,
+            max_iter,
+            tol,
+            input.y(),
+            k,
+            input.has_intercept(),
+            &cov_type,
+        )?;
 
         let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
         let problem = LogitProblem::from_standardized(x_std, input.y().clone());
@@ -505,6 +518,9 @@ impl LogitEstimator {
             max_iter as u64,
             tol,
             raise_on_non_convergence,
+            // Logitは`y∈{0,1}`で係数が±∞へ発散するため(準)完全分離の
+            // 標準化パラメータノルム事後チェックを有効にする（Issue #288）。
+            SeparationNormCheck::Enabled,
         )?;
 
         let params = destandardize_params(&output.params, &scale);
@@ -1422,6 +1438,8 @@ mod tests {
     /// 再現した値と突き合わせる（上の`fit_cov_type_opg_hc0_hc1_match_independently_
     /// recomputed_values`と同じ技法・同じ多変量データセット。情報行列の等式が
     /// 厳密に成り立つ切片のみモデルでは配線ミスを検出できないため）。
+    /// クラスター数`G`は傾き係数の数`q=2`より多くする必要がある（`G <= q`は
+    /// `InsufficientClustersForInference`で弾かれる、Issue #289）ため`G=3`（2:1:1）。
     #[test]
     fn fit_cov_type_cluster_matches_independently_recomputed_values() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
@@ -1442,7 +1460,7 @@ mod tests {
             "a".to_string(),
             "a".to_string(),
             "b".to_string(),
-            "b".to_string(),
+            "c".to_string(),
         ];
 
         let classical = LogitEstimator::fit(
@@ -1502,12 +1520,12 @@ mod tests {
         }
     }
 
-    /// 上のテストは2:2の均等サイズのグループのみを検証しているが、
+    /// 上のテストは均等サイズのグループのみを検証しているが、
     /// `testing-policy.md`が指摘する通り均等サイズのみのテストは実務で起こりやすい
     /// 偏った分布のグループサイズ（クラスター内の観測数がクラスターごとに異なる場合）
     /// を見逃しうる。OLS側の対応するテスト（`fit_computes_cluster_std_errors_t_stats_
-    /// p_values_conf_int_and_f_test`、2:3の不均衡）に倣い、3:2の不均衡なグループでも
-    /// 同じ独立再計算の技法で検証する。
+    /// p_values_conf_int_and_f_test`、2:3の不均衡）に倣い、3:1:1の不均衡なグループでも
+    /// 同じ独立再計算の技法で検証する（`G=3 > q=2`、Issue #289）。
     #[test]
     fn fit_cov_type_cluster_matches_independently_recomputed_values_with_unbalanced_groups() {
         let y = vec![0.0, 1.0, 0.0, 1.0, 1.0];
@@ -1532,7 +1550,7 @@ mod tests {
             "a".to_string(),
             "a".to_string(),
             "b".to_string(),
-            "b".to_string(),
+            "c".to_string(),
         ];
 
         let classical = LogitEstimator::fit(
@@ -1653,6 +1671,50 @@ mod tests {
         );
     }
 
+    /// `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下だと、
+    /// クラスターロバスト共分散`Ŝ`はクラスター寄与スコアの総和がゼロ（MLEの一次条件
+    /// `Σ_i s_i = 0`）で`rank(Ŝ) ≤ g - 1`となり退化する。Logit/Probitは全体検定がLR
+    /// のため`q×q`反転こそ通らないが、縮退した共分散から読んだSEを無警告で返すのは
+    /// 実質バグのため、`fit()`冒頭（Newton反復の前）のバリデーションで
+    /// `CommonError::InsufficientClustersForInference`として弾く（Issue #289。
+    /// Logit/Probitでは新規制約）。説明変数2個（`q = 3 - 1 = 2`）に対し`g = 2`。
+    #[test]
+    fn fit_returns_validation_error_when_cluster_count_at_most_slopes() {
+        let y = vec![0.0, 1.0, 0.0, 1.0, 1.0, 0.0];
+        let x_columns = vec![
+            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0],
+        ];
+        let input = LogitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let groups: Vec<String> = (0..6)
+            .map(|i| if i < 3 { "a" } else { "b" }.to_string())
+            .collect();
+
+        let result = LogitEstimator::fit(
+            input,
+            Method::Newton,
+            35,
+            1e-8,
+            true,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::Common(CommonError::InsufficientClustersForInference { g: 2, q: 2 })
+        );
+    }
+
     /// `method`（`bfgs`/`lbfgs`）と`cov_type`（`Opg`/`Hc0`/`Hc1`/`Cluster`）の組み合わせが
     /// 正しく機能することを確認する（rust-reviewer指摘: 既存テストは`method`横断が
     /// `CovType::Classical`のみ、`cov_type`横断が`Method::Newton`のみで、両方を
@@ -1675,11 +1737,12 @@ mod tests {
             .unwrap()
         };
         let k = 3;
+        // `G=3 > q=2`（`G <= q`は`InsufficientClustersForInference`で弾かれる、Issue #289）。
         let groups = vec![
             "a".to_string(),
             "a".to_string(),
             "b".to_string(),
-            "b".to_string(),
+            "c".to_string(),
         ];
 
         for cov_type in [
@@ -1980,9 +2043,19 @@ mod tests {
     #[test]
     fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix() {
         // x2 = 2*x1（完全な多重共線性）。θ=0でのHessianは0.25*X'Xで、X'X自体が
-        // 構造的に特異（yの値に関わらず常に特異）なので、Newtonの初回ステップで
-        // 確実にnewton_stepの特異性検出に引っかかる（完全分離のような「収束の
-        // 挙動に依存する」ケースと異なり、決定的に再現できる）。
+        // 構造的に特異（yの値に関わらず、θの値に関わらず常に特異）なので、
+        // 収束後の観測情報行列計算（`observed_information_cov_params`）で確実に
+        // `SingularHessian`を検出する（完全分離のような「収束の挙動に依存する」
+        // ケースと異なり、決定的に再現できる）。
+        //
+        // Newton法自体の反復過程は、`regularized_newton_step`（Tobit実装時に
+        // `nonlinear/common.rs`へ追加、Issue #215）導入前は初回ステップで即座に
+        // `newton_step`が特異性を検出していたが、導入後はHessianが構造的に特異な
+        // このケースでもλ>0の正則化により有限のステップが得られ、Newton自体は
+        // 「収束」した扱いになる。最終的にこのテストが検証する`fit()`全体の
+        // 結果（`Err(MleError::SingularHessian)`）は変わらない（収束後の
+        // `observed_information_cov_params`が同じ構造的特異Hessianを検出するため）が、
+        // 内部の反復過程は変化している点に注意（rust-reviewer指摘）。
         let y = vec![0.0, 1.0, 0.0, 1.0];
         let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
         let input = LogitInput::from_columns(
@@ -2118,7 +2191,9 @@ mod tests {
 
     /// `cov_type=Cluster`のエラー伝播（`cluster_cov_params`も内部で`neg_hessian_inverse`を
     /// 呼ぶため`SingularHessian`）も、Hc0/Hc1と同じ完全な多重共線性データセットで検証する
-    /// （rust-reviewerの指摘、上記2テストと同じ経緯）。
+    /// （rust-reviewerの指摘、上記2テストと同じ経緯）。`G=3 > q=2`にして`fit()`冒頭の
+    /// `InsufficientClustersForInference`より先にNewton反復のHessian特異へ到達させる
+    /// （Issue #289。`q`は共線性で実質1次元だが列数としては2）。
     #[test]
     fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_cluster() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
@@ -2127,7 +2202,7 @@ mod tests {
             "g1".to_string(),
             "g1".to_string(),
             "g2".to_string(),
-            "g2".to_string(),
+            "g3".to_string(),
         ];
         let input = LogitInput::from_columns(
             &y,

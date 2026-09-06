@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "econometricsmodels"
-version = "0.5.0"
+version = "0.6.0"
 description = "A Python API providing statistical and econometric analysis methods"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -47,7 +47,7 @@ include = ["THIRD-PARTY-LICENSES.html", "LICENSE"]
 
 [dependency-groups]
 # CI（ci_python.yml）が使う: pytest tests / ruff check . / ruff format --check .
-# benchmark_ols.ymlもstatsmodels目的でこのグループを使う。
+# benchmark_performance.ymlもstatsmodels目的でこのグループを使う。
 # statsmodelsはtests/fixtures/benchmarks/のフィクスチャ生成に使った主リファレンス実装のため、
 # `==`で厳密固定する（.claude/rules/testing-policy.md「ベンチマーク値のフィクスチャ化」参照）。
 # バージョンを上げる場合はフィクスチャの再生成とセットで行うこと。
@@ -62,14 +62,22 @@ test = [
 ]
 # benchmark/ 配下のベンチマーク値生成・性能比較スクリプト専用（CLAUDE.md 3章
 # 「benchmark/はtests/とは別ライフサイクル」参照）。ci_python.ymlは使わない
-# （随時実行するツール）が、benchmark_ols.yml（compare_performance.py実行用）
+# （随時実行するツール）が、benchmark_performance.yml（compare_<method>.py実行用）
 # はタグpush/workflow_dispatch時にこのグループを使う。
 benchmark = [
-    # polars.DataFrame.to_pandas()が内部で要求する（run_*_benchmark.py各スクリプトが
-    # pandasに変換してリファレンス実装に渡すため）。pandas側は直接依存に含めない。
+    # polars.DataFrame.to_pandas()が内部で要求する（各リファレンス実装アダプタ・
+    # performance/compare_*.pyがpandasに変換してリファレンス実装に渡すため）。
+    # pandas側は直接依存に含めない。
     "pyarrow==25.0.1",
-    "pyfixest==0.60.0",
     "wooldridge==0.5.0",
+    # Tobit の性能比較（performance/compare_tobit.py）専用のリファレンス実装。
+    # statsmodels.GenericLikelihoodModel ベースの Tobit。statsmodels にネイティブ
+    # Tobit が無く、R `AER::tobit` は共通ハーネスのインプロセス計測に乗らないため
+    # 採用（詳細は compare_tobit.py の docstring）。py4etrics 0.1.9 は依存ピンを
+    # 持たず、実効的な数値は statsmodels 側（test グループで ==0.14.6 固定）に従う。
+    # 実質メンテ停止（最終リリース 2024-01）だが性能比較専用・タグ push 限定実行の
+    # ため受容。statsmodels を上げる際は py4etrics の動作確認とセットで行う。
+    "py4etrics==0.1.9",
 ]
 dev = [
     "maturin==1.14.1",
@@ -86,3 +94,13 @@ docs = [
 # （デフォルトのE/Fルールセットを使う）。
 [tool.ruff]
 line-length = 79
+
+# pytest実行時にsys.pathへ載せるパス。
+# - "."   : `import benchmark.<系統>....` を1経路で解決（旧: 各テストファイルの
+#           `sys.path.insert`＋devcontainerのPYTHONPATH。Initiative A で全廃、経緯は
+#           docs/planning/specs/refactoring-issue231-progress.md「Initiative A」節）。
+# - "tests": `tests/` を系統別サブディレクトリ（linear/ nonlinear/ iv/）に分けた際、
+#           各テストが `from _helpers import ...` 等の裸import で共有ヘルパー
+#           （tests/_helpers.py 等）を解決できるようにする（サブディレクトリからでも1経路）。
+[tool.pytest.ini_options]
+pythonpath = [".", "tests"]

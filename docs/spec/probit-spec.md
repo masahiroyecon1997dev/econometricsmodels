@@ -57,7 +57,8 @@ Probit固有の差分のみを記載する。
 ### 3.3 標準誤差
 
 `CovType`（`Classical`/`Opg`/`Hc0`/`Hc1`/`Cluster`）・計算式・エラー型（`SingularHessian`/
-`SingularOpgMatrix`/`MissingClusterColumn`/`InsufficientClusters`）は[`logit-spec.md`](./logit-spec.md)
+`SingularOpgMatrix`/`MissingClusterColumn`/`InsufficientClusters`/`InsufficientClustersForInference`
+＝クラスター数`G <= 傾き係数の数q`、Issue #289）は[`logit-spec.md`](./logit-spec.md)
 3.3節と共通（`opg_cov_params`/`sandwich_cov_params`/`cluster_cov_params`を共有インフラとしてそのまま
 再利用、Probit固有の新規計算は無い）。
 
@@ -130,4 +131,6 @@ MLEが`Φ(θ̂)=ȳ`を満たすため、この計算がリンク関数に依存�
   line searchが受理可能なステップを見つけられない、または不適切なステップを受理する可能性は
   理論上あるが未検証。
 - `SEPARATION_PARAM_NORM_THRESHOLD=100.0`（Logitの実測に基づく較正値）がProbitのリンク関数
-  （テイルの減衰特性が異なる）でも同程度に適切かは未較正
+  （テイルの減衰特性が異なる）でも同程度に適切かは未較正。この事後チェック（`run_solver`の
+  `separation_norm_check: SeparationNormCheck`）は`y∈{0,1}`のLogit/Probitのみ`Enabled`で、
+  Tobitは`Disabled`（Issue #288）

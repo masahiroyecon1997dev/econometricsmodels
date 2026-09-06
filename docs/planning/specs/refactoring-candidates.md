@@ -1100,3 +1100,34 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-31、`python_package/econometricsmodels/
   linear/ols.py`解説時に、他の結果クラスと`grep`で突き合わせて確認。
 - **状態**: 未対応
+
+### 43. `ols.py`等のモジュールdocstringと`linear/CLAUDE.md`「実装パターン」節が同じ設計方針を2箇所に重複記述
+
+- **対象**: [python_package/econometricsmodels/linear/ols.py:1-8](../../../python_package/econometricsmodels/linear/ols.py#L1-L8)
+  と[python_package/econometricsmodels/linear/CLAUDE.md](../../../python_package/econometricsmodels/linear/CLAUDE.md)
+  「実装パターン」節（`OLS`/`WLS`クラスはコンストラクタでは検証せず
+  `fit()`呼び出し時に初めて`_lib.fit_ols`/`_lib.fit_wls`を呼ぶ、という
+  記述）
+- **内容**: `ols.py`のモジュールdocstringは「Validation and estimation
+  logic live entirely on the Rust side; this module only provides the
+  Python-facing API shape」と説明しており、`linear/CLAUDE.md`の
+  「実装パターン」節も同じ設計方針（コンストラクタでは検証しない、
+  `fit()`時に初めてRust側を呼ぶ）を別の言葉で改めて説明している。
+  同じ設計方針が2箇所（docstring・ネストCLAUDE.md）に独立して
+  記述されており、どちらかを更新した際にもう片方が古いままになる
+  リスクがある。なお、同型のdocstring文言（"A thin wrapper
+  around...Validation and estimation logic live entirely on the
+  Rust side..."）自体は`wls.py`/`logit.py`/`probit.py`/`tobit.py`/
+  `iv.py`の6ファイル全てにほぼ同一の形で存在するが、`linear/CLAUDE.md`
+  が明示的に同じ内容を繰り返しているのはOLS/WLSの2ファイルのみ
+  （`nonlinear/CLAUDE.md`はTobit固有差分の説明に特化しており、
+  この一般論は繰り返していない）。
+- **Claudeの所感**: 実害の大きいバグではないが、CLAUDE.mdの目的が
+  「実装ノウハウ・設計判断の理由の集約」である以上、docstringに
+  既にある内容をネストCLAUDE.mdでも全文近く繰り返す必要は薄いと
+  考える。ネストCLAUDE.md側は「なぜそうしたか」の背景・経緯に
+  絞り、「何をしているか」はdocstring（またはコード自体）を参照する
+  形にする方が重複を減らせる。
+- **気づいた経緯**: 2026-08-31、`python_package/econometricsmodels/
+  linear/ols.py`解説時のユーザー指摘。
+- **状態**: 未対応

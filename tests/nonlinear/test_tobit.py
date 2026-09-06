@@ -457,8 +457,7 @@ def test_perfect_multicollinearity_raises_computation_error():
 
     Logit とは異なり、Tobit は `ols_initial_params` の QR 検証が `method` に
     関わらず常に最初に実行されるため、完全な多重共線性は常にこの経路で検出される
-    （`method` を parametrize する必要が無い、`docs/planning/specs/
-    nonlinear-implementation-notes.md` 参照）。
+    （`method` を parametrize する必要が無い、`docs/spec/tobit-spec.md` 3.2節参照）。
     """
     df = pl.read_csv(DATA_DIR / "tobit_perfect_multicollinearity.csv")
     lower, upper = _TOBIT_CENSORING_BOUNDS["perfect_multicollinearity"]

@@ -744,9 +744,9 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **対象**: [tests/nonlinear/test_logit_fixtures.py:180-194](../../../tests/nonlinear/test_logit_fixtures.py#L180-L194)
   （`test_cluster_g2_matches_statsmodels`、LogitはF検定を持たないため
   G=2×q=3でも特異にならず成功パスになる旨のdocstring）、
-  `docs/planning/specs/nonlinear-implementation-notes.md`「Wald検定と
-  クラスターロバストSEの構造的な相互作用」（既存の`G<q`特異性議論、
-  Tobit/OLSのF検定・Wald検定の部分行列が特異になる話）
+  `docs/spec/tobit-spec.md`3.4節「Wald検定とクラスターロバストSEの構造的な
+  相互作用」（既存の`G<q`特異性議論、Tobit/OLSのF検定・Wald検定の部分行列が
+  特異になる話）
 - **内容**: ユーザー指摘（2026-08-23、「クラスタ標準誤差のG<qで特異に
   なるが発生しないことについて、ただ、推定上問題があると思うので
   バリデーションチェックするかどうか検討するのはリファクタリング項目

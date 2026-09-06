@@ -43,9 +43,8 @@ use crate::validation::{
 
 /// Estimation options for Tobit.
 ///
-/// See `docs/planning/specs/nonlinear-api-design.md` and
-/// `docs/planning/specs/nonlinear-implementation-notes.md` for the rationale behind
-/// each field's meaning and default value.
+/// See `docs/spec/tobit-spec.md` for the rationale behind each field's meaning
+/// and default value.
 // `LogitOptions`と同じ理由（pyo3 0.28以降のFromPyObject自動導出の仕様変更、
 // mkdocstringsのalias解決対応）で`from_py_object` + `module`を明示する。
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]

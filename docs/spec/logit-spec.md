@@ -92,7 +92,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   パラメータ数`k`が大きい多変量モデルでの誤検知リスクは未検証（4章参照）。この事後チェックは
   `run_solver`の`separation_norm_check: SeparationNormCheck`引数で切り替え、`y∈{0,1}`で係数が
   ±∞へ発散するLogit/Probitのみ`Enabled`にする。Tobitは`Disabled`（分離が`σ→0`退化として現れ
-  標準化パラメータノルムが閾値を超えないため。Issue #288、`nonlinear-implementation-notes.md`参照）。
+  標準化パラメータノルムが閾値を超えないため。[`tobit-spec.md`](./tobit-spec.md)3.2節参照）。
 - 収束判定`tol`の既定値`1e-6`は、通常データでは高精度（statsmodelsとの相対誤差最大1e-7程度）に
   一致するが、準完全分離の境界ケースではやや不足する（相対誤差最大7e-8）。`tol=1e-8`まで締めると
   改善するが、`bfgs`が`max_iter`を使い切りやすくなるリスクが上がるため、既定値は`1e-6`のまま維持し、

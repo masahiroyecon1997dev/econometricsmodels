@@ -158,6 +158,52 @@ print(result.pseudo_r_squared)
 
 `ProbitOptions` supports the same `cov_type` and `method` choices as `LogitOptions`; see the [API Reference](api/probit.md) for the full list of options. `ProbitResults.predict()`, `pred_table()`, and `marginal_effects()` work exactly like their [Logit](#predicted-values-and-classification-table) counterparts (substitute `Probit`/`ProbitOptions` for `Logit`/`LogitOptions` in the examples above).
 
+## Tobit (censored regression)
+
+`Tobit` estimates a censored normal regression model by maximum likelihood. The observed `y` is a continuous latent regression censored at a lower bound, an upper bound, or both. `TobitOptions.lower` (default `0.0`) and `upper` (default `None`) set the bounds; `None` means that side is not censored.
+
+```python
+import polars as pl
+from econometricsmodels import Tobit, TobitOptions
+
+df = pl.DataFrame(
+    {
+        "y": [0.0, 0.0, 1.2, 2.5, 3.1, 4.8, 6.0],
+        "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+    }
+)
+
+result = Tobit(df, y="y", x=["x1"]).fit()  # left-censored at 0 by default
+
+print(result.params)  # {"const": ..., "x1": ..., "sigma": ...}
+print(result.sigma)
+print(result.wald_statistic, result.wald_p_value)
+```
+
+`param_names` ends with `"sigma"` — the error standard deviation is reported as an estimated parameter with its own standard error. Instead of a likelihood-ratio test, `TobitResults` exposes `wald_statistic` / `wald_p_value` for the joint hypothesis that all slopes are zero.
+
+### Predictions and marginal effects
+
+`predict()` and `marginal_effects()` take a `target`: `"expected_latent"` (`E[y*|x] = x'β`), `"expected_observed"` (the default, the censoring-adjusted mean `E[y|x]`), or `"prob_uncensored"`. `marginal_effects()` also takes `at` (`"overall"`, `"mean"`, `"median"`) and excludes the constant term.
+
+```python
+for row in result.marginal_effects(target="expected_observed"):
+    print(row["param"], row["dydx"], row["std_err"])
+
+fitted = result.predict(target="expected_observed")  # [{"predicted": ...}, ...]
+```
+
+### Censoring fit check
+
+`censoring_fit_check()` compares the observed censoring rate against the model-implied rate for each censored direction (`"lower"` / `"uncensored"` / `"upper"`):
+
+```python
+for row in result.censoring_fit_check():
+    print(row["category"], row["observed_rate"], row["model_implied_rate"])
+```
+
+See the [API Reference](api/tobit.md) for the full list of options.
+
 ## IV (instrumental variables: 2SLS/GMM)
 
 `IV` estimates a linear model with endogenous regressors. Independent variables are split into `x_exog` (exogenous) and `x_endog` (endogenous), plus `instruments` (excluded instruments — at least one per endogenous variable for identification).

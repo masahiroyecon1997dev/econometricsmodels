@@ -145,8 +145,7 @@ pub enum MleError {
     /// 巨大SE（標準誤差が実測で100万倍オーダー）を返す退化収束を起こす。参照実装
     /// `survival::survreg`（`AER::tobit`のエンジン）は同種のデータで初期反復に失敗し
     /// エラーを返す（"initial iteration failed"）。`fit()`冒頭でのバリデーションとして
-    /// 早期に検出する（ユーザー確認済み、`nonlinear-implementation-notes.md`「Tobit固有の
-    /// 病理ケース」参照）。
+    /// 早期に検出する（`docs/spec/tobit-spec.md`1章「非識別データの検出」参照）。
     #[error(
         "no uncensored observations: at least one y value strictly between lower={lower:?} and \
          upper={upper:?} is required to identify the model"
@@ -240,7 +239,7 @@ fn separation_suspected(params: &[f64]) -> bool {
 /// `y`が`{0.0, 1.0}`の2値でない値を含む場合にエラーを返す（Logit/Probit専用、
 /// `MleError::InvalidBinaryY`のdocコメント参照）。statsmodelsは`Logit`のコンストラクタ
 /// 時点でこの検証を行うが、本実装では`fit()`冒頭（`LogitInput::from_columns`の
-/// 次元検証とは別、`nonlinear-implementation-notes.md`参照）で行う。O(n)の単純走査
+/// 次元検証とは別、`docs/spec/tobit-spec.md`1章参照）で行う。O(n)の単純走査
 /// （既にengine_pybind側で行っているNaN/無限大チェックと同オーダー）で、
 /// 反復最適化本体（O(n·k²)を`max_iter`回）に対して計算コストは無視できる
 /// （実測: n=1,000,000で`fit()`全体の約0.16%）。
@@ -1197,8 +1196,8 @@ where
 /// つまり保証されるのは「`fit()`が最終的に返す結果」の不変性であり、Newton内部の
 /// 反復過程・エラー発生箇所まで完全に不変というわけではない（rust-reviewer指摘、
 /// 独立シミュレーションで確認済み）。一方Tobitは`(β, logσ)`パラメータ化で大域凹性が保証されず
-/// （`docs/planning/specs/nonlinear-implementation-notes.md`「パラメータ化」参照。
-/// Olsen(1978)の`(β/σ, 1/σ)`変換は不採用）、Hessianが不定符号になる領域では
+/// （`docs/spec/tobit-spec.md`3.1節参照。Olsen(1978)の`(β/σ, 1/σ)`変換は不採用）、
+/// Hessianが不定符号になる領域では
 /// **生のNewtonステップが降下方向ですらなくなる**ことが実測で判明した（OLS推定値を
 /// 初期値にしても、実際に打ち切りが発生するデータで一貫して再現。ステップをどれだけ
 /// 小さくスケールしても`cost`が改善しないケースを確認済み）。`λI`を加えて
@@ -1311,8 +1310,7 @@ impl ColumnScale {
     /// パラメータ（`logσ`）を`params`に含む場合に、既存の`zip`ベースの
     /// `destandardize_params`/`destandardize_cov_params`をそのまま再利用するために使う
     /// （`logσ`は`x`の列スケーリングとは無関係な量で、線形再パラメータ化`x_std=x/std`の
-    /// 下で不変。`docs/planning/specs/nonlinear-implementation-notes.md`
-    /// 「standardize_columnsとσの扱い」節、Issue #215で導入）。
+    /// 下で不変。`docs/spec/tobit-spec.md`3.2節「TobitScaling」参照）。
     pub fn extend_unscaled(&self, n: usize) -> Self {
         let mut stds = self.stds.clone();
         stds.extend(std::iter::repeat_n(1.0, n));

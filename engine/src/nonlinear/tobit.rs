@@ -18,8 +18,8 @@
 //! ## 数式（打ち切り正規回帰）
 //!
 //! 内部最適化パラメータは`(β, s)`という`k+1`次元ベクトル（`s = log σ`、`σ>0`の制約を
-//! 回避するための変数変換。`docs/planning/specs/nonlinear-implementation-notes.md`
-//! 「パラメータ化（内部最適化変数）」参照。Olsen(1978)の`(β/σ, 1/σ)`変換は不採用）。
+//! 回避するための変数変換。`docs/spec/tobit-spec.md`3.1節参照。Olsen(1978)の
+//! `(β/σ, 1/σ)`変換は不採用）。
 //!
 //! `TobitInput::from_columns`が保証する通り、各観測は`lower`/`upper`との比較で
 //! 3種類に分類される（`lower`/`upper`いずれかが`None`ならその側の分類は発生しない）:
@@ -68,9 +68,8 @@
 //!
 //! ## Newton法の初期値: OLS推定値を使う（ゼロベクトルではない、Logit/Probitとの違い）
 //!
-//! `docs/planning/specs/nonlinear-implementation-notes.md`の当初計画では、`(β, logσ)`
-//! パラメータ化でもLogit/Probitと同じくゼロベクトル初期値からのNewton収束をまず試す
-//! 方針だったが、Issue #215の実装時に**打ち切りが皆無のデータ（通常の正規回帰に退化する
+//! 当初計画（`(β, logσ)`パラメータ化でもLogit/Probitと同じくゼロベクトル初期値から
+//! Newton収束をまず試す）では、**打ち切りが皆無のデータ（通常の正規回帰に退化する
 //! 単純なケース）でもゼロベクトル初期値からNewtonが発散する**ことが実測で判明した
 //! （切片`β→-∞`・`s=logσ→+∞`という非有界な方向へ発散し、最終的にHessianが0行列に
 //! なり`NaN`に到達。ユーザー確認済み）。
@@ -925,7 +924,7 @@ fn boundary_terms(
 /// いずれも境界項がある方向のみ`φ≠0`となるため（`boundary_terms`のNone時`φ=0`）、
 /// 左/右/両側打ち切りいずれでも同じ式で正しく計算できる（両側打ち切りは
 /// McDonald-Moffitt(1980)の一般形、片側打ち切りはその特殊ケースとして導出済み、
-/// `docs/planning/specs/nonlinear-implementation-notes.md`「限界効果」参照）。
+/// `docs/spec/tobit-spec.md`3.5節参照）。
 fn target_w_and_s(
     target: MarginalEffectsTarget,
     x_point: &[f64],
@@ -1267,8 +1266,7 @@ pub struct TobitEstimator {
     /// モデルの自由度（切片以外の`β`の数、Wald検定のカイ二乗分布の自由度でもある）
     df_model: usize,
     /// 残差自由度 `n-(k+1)`（`σ`を含む総パラメータ数を差し引く。AER::tobit/survregの
-    /// `df.residual`と同じ規約、`docs/planning/specs/nonlinear-implementation-notes.md`
-    /// 「`llnull`・GOF・有意性検定」節参照）
+    /// `df.residual`と同じ規約、`docs/spec/tobit-spec.md`2章参照）
     df_resid: usize,
     /// Wald検定統計量（`wald_chi2_test`のdocコメント参照）。`df_model==0`のときNaN
     wald_statistic: f64,
@@ -1321,8 +1319,8 @@ impl TobitEstimator {
     /// （`J = TobitScaling::param_jacobian`。`x`のセンタリング・スケーリングの解除と
     /// `s̃→σ=c·exp(s̃)`のデルタ法`∂σ/∂s̃=σ`を1本に合成したヤコビアン）で`(β, σ)`空間へ
     /// 変換する（`cov_params`のdocコメント参照。`σ`の対角成分のみ見ると
-    /// `Var(σ)≈σ²Var(logσ)`という`docs/planning/specs/nonlinear-implementation-notes.md`
-    /// 「パラメータ化」節に記載の式に一致する。この変換は`cov_type`の種類に依存せず、
+    /// `Var(σ)≈σ²Var(logσ)`という`docs/spec/tobit-spec.md`3.3節に記載の式に一致する。
+    /// この変換は`cov_type`の種類に依存せず、
     /// いずれの行列演算の結果にも同じ`J`を適用すればよい）。
     ///
     /// # Errors
@@ -2420,8 +2418,8 @@ mod tests {
     /// 切片のみ・打ち切りなしのTobit（`(β,s=logσ)`空間の対数尤度が通常の正規分布の
     /// 対数尤度に一致する）は、観測情報行列も閉じた形で書ける: `∂²ℓ/∂β²=-n/σ²`・
     /// `∂²ℓ/∂s²=-2n`・`∂²ℓ/∂β∂s=0`（MLE点で`Σ(yᵢ-β̂)=0`となるため）という対角行列になり、
-    /// `Var(β̂)=σ̂²/n`・`Var(ŝ)=1/(2n)`・`Cov(β̂,ŝ)=0`が導ける（`docs/planning/specs/
-    /// nonlinear-implementation-notes.md`「パラメータ化」節の一般形の特殊ケース）。
+    /// `Var(β̂)=σ̂²/n`・`Var(ŝ)=1/(2n)`・`Cov(β̂,ŝ)=0`が導ける（`docs/spec/tobit-spec.md`
+    /// 3.1〜3.3節の一般形の特殊ケース）。
     /// `σ`のデルタ法変換（ヤコビアン`diag(1,σ)`）を適用すると、この対角性はそのまま
     /// 保たれ`Var(σ̂)≈σ̂²Var(ŝ)=σ̂²/(2n)`・`Cov(β̂,σ̂)≈σ̂Cov(β̂,ŝ)=0`になる。
     /// Logitの`fit_computes_std_errors_z_stats_p_values_and_ci_matching_closed_form_for_

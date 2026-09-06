@@ -1072,3 +1072,31 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   __init__.py`解説時に`pyproject.toml`・`Cargo.toml`と突き合わせて
   確認。
 - **状態**: 未対応
+
+### 42. `param_names`と他配列を`zip`して`dict`化するパターンが全6手法・多数箇所で重複
+
+- **対象**: [python_package/econometricsmodels/linear/ols.py:104-131](../../../python_package/econometricsmodels/linear/ols.py#L104-L131)
+  （`params`/`std_errors`/`t_stats`/`p_values`/`conf_int`の各
+  プロパティ、および`coef_table()`）。同型のコードが
+  `linear/wls.py`・`nonlinear/logit.py`・`nonlinear/probit.py`・
+  `nonlinear/tobit.py`・`iv/iv.py`にも存在する
+  （`dict(zip(self._raw.param_names, self._raw.xxx))`という形の
+  記述だけで`grep`上24箇所、`coef_table()`相当の複数配列`zip`も
+  含めるとさらに多い）。
+- **内容**: `_lib`側の結果オブジェクトが係数名配列（`param_names`）
+  と各統計量配列（`params`/`std_errors`等）を別々に持つ設計
+  （PyO3の`#[pyclass(get_all)]`でRust構造体フィールドをそのまま
+  公開する都合）のため、Python側の全ラッパークラスが同じ
+  「`param_names`と対応する配列を`zip`して`dict`化する」処理を
+  個別に書いている。共通ヘルパー関数（例:
+  `_zip_to_dict(names, values)`）を`python_package/econometricsmodels`
+  直下の共通モジュールに切り出せば重複を削減できる。
+- **Claudeの所感**: 実装済みの6手法全てに渡って全く同一のパターンが
+  重複しているため、リファクタリングの費用対効果は高いと考える。
+  加えて、この実装パターン自体が、以前記録したIVの「`const`名衝突に
+  よる`dict`キー上書きバグ」が発生する箇所そのものでもある
+  （ヘルパーに一元化しておけば、将来的な修正が1箇所で全手法に
+  波及するという副次的なメリットもある）。
+- **気づいた経緯**: 2026-08-31、`python_package/econometricsmodels/
+  linear/ols.py`解説時に、他の結果クラスと`grep`で突き合わせて確認。
+- **状態**: 未対応

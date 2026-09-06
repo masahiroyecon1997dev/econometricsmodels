@@ -15,7 +15,7 @@ pyfixestのHC2/HC3はfixestの仕様ではなく**pyfixest自身の実装バグ*
 `docs/spec/ols-spec.md`「テスト」参照。
 
 classical/HC0-3/clusterはRとほぼ機械精度で一致するため厳密比較、HACのみ小標本補正の
-慣習差により緩い許容誤差で比較する（`tests/test_ols_crosscheck.py`参照）。
+慣習差により緩い許容誤差で比較する（`tests/linear/test_ols_crosscheck.py`参照）。
 
 `predict()`（`docs/spec/ols-spec.md`「predict()」）も対象に含める。
 `run_lm_predict_crosscheck.R`を使い、全シナリオで学習データに対する予測値（fitted）を、
@@ -30,7 +30,7 @@ F統計量・F検定p値もRクロスチェック対象に含める（`testing-p
 （`coefs ± qt(0.975, df_inference) * ses`）。R²・調整済みR²はAIC/BIC等と同じく
 cov_typeに依存しない（`summary(model)`の値をそのまま使う）。
 AIC/BICはRの`AIC()`/`BIC()`標準関数（残差分散を1パラメータとして追加でカウントするk+1慣習）
-ではなく、`run_lm_crosscheck_benchmark.R`側で本実装・statsmodelsと同じ式（`-2*loglik + 2*k`等、kは
+ではなく、`benchmark/linear/references/run_lm_crosscheck.R`側で本実装・statsmodelsと同じ式（`-2*loglik + 2*k`等、kは
 回帰係数の数のみ）で手計算した値を使う（実測でRの標準関数はAICがちょうど2、BICがlog(n)だけ
 系統的にずれることを確認済み）。F統計量・F検定p値は本実装の`wald_f_test`と同じロバストWald検定
 （`β_slopes' Σ⁻¹ β_slopes / q`）をcov_typeごとの共分散行列で計算しており、cov_typeに依存する。
@@ -39,46 +39,39 @@ AIC/BICはRの`AIC()`/`BIC()`標準関数（残差分散を1パラメータと�
 `tests/fixtures/`に置く（`testing-policy.md`「ベンチマーク値のフィクスチャ化」参照）。
 
 合成データの入力は`tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
-（`benchmark/freeze_datasets.py`参照）。`imbalanced_cluster_groups`（純粋にnから
+（`benchmark/linear/freeze.py`参照）。`imbalanced_cluster_groups`（純粋にnから
 決定論的にラベルを組み立てるだけで乱数を使わない）のみ、引き続き
-`generate_linear_datasets.py`を直接呼ぶ。Wooldridgeデータは`load_wooldridge.py`
+`benchmark/linear/datasets.py`を直接呼ぶ。Wooldridgeデータは`load_wooldridge.py`
 経由で都度ロードする（データの再配布ライセンスが未確認のためCSVとして固定しない。
-`freeze_datasets.py`のdocstring参照）。
+`benchmark/linear/freeze.py`のdocstring参照）。
 
-使用例:
-    python generate_ols_crosscheck_fixtures.py \\
-        --output ../../../tests/fixtures/benchmarks/ols_crosscheck.json
+使用例（リポジトリルートから）:
+    python -m benchmark.linear.fixtures.generate_ols_crosscheck_fixtures
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import subprocess
-import sys
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-sys.path.insert(
-    0, str(Path(__file__).resolve().parent.parent)
-)  # benchmark/linear/ を import path に追加（run_statsmodels_benchmark）
-sys.path.insert(
-    0, str(Path(__file__).resolve().parents[2])
-)  # benchmark/ を import path に追加（_common）
-
 import polars as pl
 import statsmodels
-from _common import (
-    DATA_DIR,
+
+from benchmark.common import (
+    BENCHMARKS_DIR,
     hac_auto_lag,
     imbalanced_cluster_groups,
+    load_frozen_dataset,
+    run_fixture_cli,
 )
-from load_wooldridge import load as load_wooldridge
+from benchmark.common.load_wooldridge import load as load_wooldridge
+from benchmark.linear.references.r import run_lm_r
 
-LINEAR_DIR = Path(__file__).resolve().parent.parent
-R_SCRIPT = LINEAR_DIR / "run_lm_crosscheck_benchmark.R"
-PREDICT_R_SCRIPT = LINEAR_DIR / "run_lm_predict_crosscheck.R"
+REFERENCES_DIR = Path(__file__).resolve().parent.parent / "references"
+PREDICT_R_SCRIPT = REFERENCES_DIR / "run_lm_predict_crosscheck.R"
 
 # fitted_values/predict()のout-of-sample crosscheck用の新規データ
 # （baselineシナリオのみ）。学習データの実現値とは無関係に、x1/x2/x3の値域内で
@@ -110,61 +103,6 @@ NUMERIC_SCENARIOS = [
 R_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
 
 
-def _run_r(
-    csv_path: Path,
-    formula: str,
-    cov_type: str,
-    cluster_col: str | None = None,
-    hac_lag: int | None = None,
-) -> dict:
-    cmd = ["Rscript", str(R_SCRIPT), str(csv_path), formula, cov_type]
-    if cov_type == "cluster":
-        cmd.append(cluster_col or "")
-    elif cov_type == "hac":
-        cmd.append(str(hac_lag))
-
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    raw = json.loads(proc.stdout)
-    return _normalize_names(raw)
-
-
-def _normalize_names(raw: dict) -> dict:
-    """パラメータ名を本実装のparam_names規則（切片="const"）に揃える。
-
-    R（lm/coeftest）は"(Intercept)"、statsmodels(formula API)は"Intercept"を
-    使うため、フィクスチャの利用側（テストコード）でソースごとに名前を
-    出し分けなくて済むよう、ここで統一する。
-    """
-
-    def fix(name: str) -> str:
-        return "const" if name in ("(Intercept)", "Intercept") else name
-
-    result = {
-        "coef": {fix(k): v for k, v in raw["coef"].items()},
-        "se": {fix(k): v for k, v in raw["se"].items()},
-    }
-    if "t_stats" in raw:
-        result["t_stats"] = {fix(k): v for k, v in raw["t_stats"].items()}
-    if "p_values" in raw:
-        result["p_values"] = {fix(k): v for k, v in raw["p_values"].items()}
-    if "conf_int" in raw:
-        result["conf_int"] = {fix(k): v for k, v in raw["conf_int"].items()}
-    # aic/bic/log_likelihood/f_statistic/f_p_value/r_squared/r_squared_adjは
-    # run_lm_crosscheck_benchmark.Rが返す（fixest等、他パッケージのスクリプトは対象外）。
-    for key in (
-        "aic",
-        "bic",
-        "log_likelihood",
-        "f_statistic",
-        "f_p_value",
-        "r_squared",
-        "r_squared_adj",
-    ):
-        if key in raw:
-            result[key] = raw[key]
-    return result
-
-
 def _write_csv(df, tmpdir: Path, name: str) -> Path:
     path = tmpdir / f"{name}.csv"
     df.write_csv(path)
@@ -191,7 +129,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
     fixtures: dict = {}
 
     for scenario in NUMERIC_SCENARIOS:
-        df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
+        df, _ = load_frozen_dataset("synthetic", scenario)
         formula = "y ~ x1 + x2 + x3"
         csv_path = _write_csv(df, tmpdir, scenario)
         n = df.height
@@ -201,10 +139,10 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             entry: dict = {}
             if cov_type == "hac":
                 lag = hac_auto_lag(n)
-                entry["r"] = _run_r(csv_path, formula, cov_type, hac_lag=lag)
+                entry["r"] = run_lm_r(csv_path, formula, cov_type, hac_lag=lag)
                 entry["hac_lag"] = lag
             else:
-                entry["r"] = _run_r(csv_path, formula, cov_type)
+                entry["r"] = run_lm_r(csv_path, formula, cov_type)
 
             fixtures[scenario][cov_type] = entry
 
@@ -238,7 +176,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             # ComputationErrorになる（成功パスではない。テスト側でエラー
             # パスとして確認、Rクロスチェックは対象外）。ここでの「G=2境界の
             # 成功パス」は説明変数1個（q=1）に絞ったデータで確認する。
-            df_g2 = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
+            df_g2, _ = load_frozen_dataset("synthetic", "baseline_k1")
             formula_g2 = "y ~ x1"
             csv_path_g2 = _write_csv(df_g2, tmpdir, f"{scenario}_g2")
             fixtures[scenario]["cluster_g2"] = _run_cluster_case(
@@ -276,7 +214,9 @@ def _run_cluster_case(
     tmp_path = csv_path.with_name(csv_path.stem + suffix + ".csv")
     grouped.write_csv(tmp_path)
     return {
-        "r": _run_r(tmp_path, formula, "cluster", cluster_col="cluster_group")
+        "r": run_lm_r(
+            tmp_path, formula, "cluster", cluster_col="cluster_group"
+        )
     }
 
 
@@ -299,7 +239,7 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
         fixtures[name] = {}
         for cov_type in ["classical", *hc_types]:
             fixtures[name][cov_type] = {
-                "r": _run_r(csv_path, formula, cov_type)
+                "r": run_lm_r(csv_path, formula, cov_type)
             }
 
         if name == "wage1":
@@ -327,7 +267,7 @@ def _run_wage1_region_cluster_case(df, csv_path: Path, formula: str) -> dict:
     grouped = df.with_columns(region)
     tmp_path = csv_path.with_name(csv_path.stem + "_region_cluster.csv")
     grouped.write_csv(tmp_path)
-    return {"r": _run_r(tmp_path, formula, "cluster", cluster_col="region")}
+    return {"r": run_lm_r(tmp_path, formula, "cluster", cluster_col="region")}
 
 
 def build_fixtures() -> dict:
@@ -379,16 +319,8 @@ def build_fixtures() -> dict:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output",
-        default="../../../tests/fixtures/benchmarks/ols_crosscheck.json",
+    run_fixture_cli(
+        build_fixtures,
+        BENCHMARKS_DIR / "ols_crosscheck.json",
+        description=__doc__,
     )
-    args = parser.parse_args()
-
-    fixtures = build_fixtures()
-
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(fixtures, indent=2, ensure_ascii=False))
-    print(f"wrote {output_path} ({len(json.dumps(fixtures))} bytes)")

@@ -27,19 +27,17 @@ crate-type = ["cdylib", "rlib"]
 # `pyproject.toml`の`[tool.maturin] features = ["pyo3/extension-module"]`が
 # `maturin build`/`maturin develop`実行時にこのフィーチャを外部から有効化するため、
 # 配布物には引き続き反映される（`cargo`単体のビルド・テストとは別経路）。
-pyo3 = { version = "=0.28.3" }
+pyo3 = { version = "=0.29.2" }
 # polars（Rustクレート）とpyo3-polars: バージョンはPython側pyproject.tomlのpolars==1.42.1と
 # 数字を合わせるものではない（Rustクレートpolarsは0.5x系、Python側は1.x系で既に別の
 # バージョン体系に分離済み）。pyo3-polarsが使うpolars_ffi::version_0という安定版FFI
 # プロトコル（Arrow C Data Interfaceに近い、バージョン非依存のインターフェース）経由で
 # 互換性が担保される。
-# crates.io公開版pyo3-polarsの最新（0.27.0）はpyo3="^0.28"を要求する
-# （polarsモノレポのmainブランチは内部で既にpyo3=0.29へ上げているが、対応する
-# pyo3-polarsの新版はまだcrates.ioに未公開。既知のバージョンズレリスク、
-# rust-style.md「既知のリスク」参照）。そのため、当初pyo3=0.29.0で揃えようとしたが
-# pyo3=0.28.2（yankedされた0.28.0/0.28.1を除く最初の安定版）に統一した。
-# 詳細はdocs/spec/ols-spec.md参照。
-polars = "=0.54.4"
-pyo3-polars = "=0.27.0"
+# crates.io公開版pyo3-polars 0.28.0（2026-08-04公開）がpyo3="^0.29"・polars="^0.55.1"を
+# 要求するようになったため、Issue #49の再開条件を満たしたとして三者同時に上げた
+# （旧版はpyo3-polars 0.27.0がpyo3="^0.28"のままだったため、pyo3=0.28.3/polars=0.54.4に
+# 固定していた。詳細はIssue #49参照）。
+polars = "=0.55.2"
+pyo3-polars = "=0.28.0"
 faer = { workspace = true }
 engine = { path = "../engine" }

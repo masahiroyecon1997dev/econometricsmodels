@@ -1,9 +1,9 @@
 """GMM（`method="gmm"`）のテストフィクスチャ（tests/fixtures/benchmarks/
 iv_gmm.json）を生成するスクリプト。
 
-`benchmark/iv/run_linearmodels_benchmark.py`の`run_gmm()`（1回呼べば1ケース分の
-結果を返す汎用ツール）を全シナリオ×cov_type、および代表的なweight_typeの組み合わせで
-呼び出し、結果を1つのJSONにまとめて書き出す。
+`benchmark/iv/references/linearmodels_ref.py`の`run_gmm()`（1回呼べば1ケース分の
+結果を返す汎用アダプタ）を全シナリオ×cov_type、および代表的なweight_typeの
+組み合わせで呼び出し、結果を1つのJSONにまとめて書き出す。
 
 2SLS用の`iv.json`/`generate_iv_fixtures.py`とは別ファイル・別スクリプトにしている
 理由: `IV`/`IvOptions`は`method="2sls"`/`"gmm"`を単一クラスで切り替える設計だが、
@@ -25,31 +25,26 @@ GMM固有の`weight_type`軸（`cov_type`とは独立、`iv-api-design.md`6.2節
 `.claude/skills/reference-benchmark/SKILL.md`参照）。
 
 入力データは`tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
-（`benchmark/freeze_datasets.py`参照）。
+（`benchmark/iv/freeze.py`参照）。
 
-使用例:
-    python generate_iv_gmm_fixtures.py --output ../../../tests/fixtures/benchmarks/iv_gmm.json
+使用例（リポジトリルートから）:
+    python -m benchmark.iv.fixtures.generate_iv_gmm_fixtures
 """
 
 from __future__ import annotations
 
-import argparse
-import json
-import sys
 from datetime import UTC, datetime
-from pathlib import Path
-
-sys.path.insert(
-    0, str(Path(__file__).resolve().parent.parent)
-)  # benchmark/iv/ を import path に追加（run_linearmodels_benchmark）
-sys.path.insert(
-    0, str(Path(__file__).resolve().parents[2])
-)  # benchmark/ を import path に追加（_common）
 
 import linearmodels
 import polars as pl
-from _common import DATA_DIR, imbalanced_cluster_groups
-from run_linearmodels_benchmark import run_gmm
+
+from benchmark.common import (
+    BENCHMARKS_DIR,
+    DATA_DIR,
+    imbalanced_cluster_groups,
+    run_fixture_cli,
+)
+from benchmark.iv.references.linearmodels_ref import run_gmm
 
 # `generate_iv_fixtures.py`のNUMERIC_SCENARIOSと同一（2SLSと同じ合成データセットを
 # 再利用する）。
@@ -76,7 +71,7 @@ COV_TYPES = ["classical", "hc0", "hc1", "hac"]
 # `weight_type`と`cov_type`が独立な軸であることの確認用（baselineのみ）。
 OTHER_WEIGHT_TYPES = ["robust", "cluster", "kernel"]
 # 1-step（gmm_iterations=1）・iterated GMM（3以上、固定回数モード）の成功パス確認用
-# （既定値2以外、Issue #231フェーズ4）。
+# （既定値2以外）。
 GMM_ITERATIONS_SCENARIOS = [1, 3]
 
 
@@ -133,9 +128,8 @@ def build_fixtures() -> dict:
                         )
                     }
 
-    # 複数内生変数（k_endog>=2）。2SLSのiv.jsonと同じ構成（Issue #231フェーズ4、
-    # testing-completeness-reviewer指摘のmust fix）。weight_type='unadjusted'固定で
-    # cov_typeのみ変える（上記と同じ検証範囲の絞り方）。
+    # 複数内生変数（k_endog>=2）。2SLSのiv.jsonと同じ構成。weight_type=
+    # 'unadjusted'固定でcov_typeのみ変える（上記と同じ検証範囲の絞り方）。
     fixtures["multi_endog"] = {"unadjusted": {}}
     for cov_type in COV_TYPES:
         fixtures["multi_endog"]["unadjusted"][cov_type] = run_gmm(
@@ -148,8 +142,7 @@ def build_fixtures() -> dict:
         )
 
     # weight_type='kernel' × cov_type='hac'の組み合わせ（実務上最も典型的な
-    # 「HACカーネル重み＋HAC標準誤差」の組み合わせ経路、Issue #231フェーズ4、
-    # testing-completeness-reviewer指摘のshould fix。上記OTHER_WEIGHT_TYPESループは
+    # 「HACカーネル重み＋HAC標準誤差」の組み合わせ経路。上記OTHER_WEIGHT_TYPESループは
     # cov_type='classical'固定のためこの組み合わせを通らない）。
     fixtures["kernel_hac"] = run_gmm(
         dataset="baseline",
@@ -160,8 +153,7 @@ def build_fixtures() -> dict:
         cov_type="hac",
     )
 
-    # gmm_iterations: 1（1-step）・3以上（iterated、固定回数モード）の成功パス
-    # （Issue #231フェーズ4、testing-completeness-reviewer指摘のshould fix）。
+    # gmm_iterations: 1（1-step）・3以上（iterated、固定回数モード）の成功パス。
     # baselineシナリオ・weight_type='unadjusted'・cov_type='classical'固定。
     fixtures["gmm_iterations"] = {
         n_iter: run_gmm(
@@ -185,7 +177,8 @@ def build_fixtures() -> dict:
             "weight_type='unadjusted'固定で全8シナリオ×cov_type"
             "（classical/hc0/hc1/hac、baselineのみ追加でcluster/"
             "cluster_imbalanced）を検証する。hc2/hc3は2SLSと同じ理由で対象外"
-            "（`run_linearmodels_benchmark.py`のモジュールdocコメント参照）。"
+            "（`benchmark/iv/references/linearmodels_ref.py`のモジュールdoc"
+            "コメント参照）。"
             "他のweight_type（robust/cluster/kernel）はweight_typeとcov_typeが"
             "独立な軸であることの確認が目的のため、baselineシナリオ×"
             "cov_type=classicalのみで検証する（ユーザー確認済み）。"
@@ -198,11 +191,11 @@ def build_fixtures() -> dict:
             "（2SLSの`iv.json`と同じ理由、G=2境界は`engine/src/iv/CLAUDE.md`"
             "「修正済み」参照）。"
             "multi_endog（複数内生変数、x_endog=['endog1','endog2']）は"
-            "generate_iv_datasets.pyの第一段階誤差vが内生変数ごとに独立になる"
-            "よう修正した後のデータで生成（Issue #231フェーズ4、"
+            "benchmark/iv/datasets.pyの第一段階誤差vが内生変数ごとに独立になる"
+            "よう修正した後のデータで生成（"
             "generate_iv_fixtures.pyの同名注記参照）。"
             "kernel_hac（weight_type='kernel'×cov_type='hac'）・gmm_iterations"
-            "（1/3、既定値2以外の成功パス）も同フェーズで追加。"
+            "（1/3、既定値2以外の成功パス）も追加。"
         ),
     }
     return fixtures
@@ -241,16 +234,6 @@ def _run_cluster_case(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output",
-        default="../../../tests/fixtures/benchmarks/iv_gmm.json",
+    run_fixture_cli(
+        build_fixtures, BENCHMARKS_DIR / "iv_gmm.json", description=__doc__
     )
-    args = parser.parse_args()
-
-    fixtures = build_fixtures()
-
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(fixtures, indent=2, ensure_ascii=False))
-    print(f"wrote {output_path} ({len(json.dumps(fixtures))} bytes)")

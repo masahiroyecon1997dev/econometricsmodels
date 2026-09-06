@@ -7,7 +7,7 @@ logit_crosscheck.json）を生成するスクリプト。
 
 **`cov_type="hc1"`はここでは主リファレンスの役割を担う**（statsmodelsのdiscrete model
 がn/(n-k)小標本補正を実装しておらずHC0と同一値になるバグ的な欠落があるため。
-`run_statsmodels_benchmark.py`のdocstring参照。ユーザー確認済み）。他のcov_type
+`statsmodels_ref.py`のdocstring参照。ユーザー確認済み）。他のcov_type
 （classical/opg/hc0/cluster）は通常通りクロスチェック用（厳密比較の主体は
 `logit.json`側）。
 
@@ -18,34 +18,28 @@ logit_crosscheck.json）を生成するスクリプト。
 このスクリプト自体は`benchmark/`側に置く。生成される`logit_crosscheck.json`は
 `tests/fixtures/benchmarks/`に置く。
 
-使用例:
-    python generate_logit_crosscheck_fixtures.py \\
-        --output ../../../tests/fixtures/benchmarks/logit_crosscheck.json
+使用例（リポジトリルートから）:
+    python -m benchmark.nonlinear.fixtures.generate_logit_crosscheck_fixtures
 """
 
 from __future__ import annotations
 
-import argparse
-import json
 import subprocess
-import sys
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-sys.path.insert(
-    0, str(Path(__file__).resolve().parent.parent)
-)  # benchmark/nonlinear/ を import path に追加（run_statsmodels_benchmark）
-sys.path.insert(
-    0, str(Path(__file__).resolve().parents[2])
-)  # benchmark/ を import path に追加（load_wooldridge, _common）
-
 import polars as pl
-from _common import DATA_DIR, imbalanced_cluster_groups
-from load_wooldridge import load as load_wooldridge
 
-NONLINEAR_DIR = Path(__file__).resolve().parent.parent
-R_SCRIPT = NONLINEAR_DIR / "run_glm_crosscheck_benchmark.R"
+from benchmark.common import (
+    BENCHMARKS_DIR,
+    MROZ_FORMULA,
+    imbalanced_cluster_groups,
+    load_frozen_dataset,
+    run_fixture_cli,
+)
+from benchmark.common.load_wooldridge import load as load_wooldridge
+from benchmark.nonlinear.references.r import run_glm_r
 
 NUMERIC_SCENARIOS = [
     "baseline",
@@ -59,64 +53,6 @@ NUMERIC_SCENARIOS = [
 # hc1をここでは主リファレンスとして含める（他はクロスチェック用）。
 R_COV_TYPES = ["classical", "opg", "hc0", "hc1", "cluster"]
 
-MROZ_FORMULA = (
-    "inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6"
-)
-
-
-def _run_r(
-    csv_path: Path,
-    formula: str,
-    cov_type: str,
-    cluster_col: str | None = None,
-    link: str = "logit",
-) -> dict:
-    cmd = ["Rscript", str(R_SCRIPT), str(csv_path), formula, cov_type, link]
-    if cov_type == "cluster":
-        cmd.append(cluster_col or "")
-
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    raw = json.loads(proc.stdout)
-    return _normalize_names(raw)
-
-
-def _normalize_names(raw: dict) -> dict:
-    """パラメータ名を本実装のparam_names規則（切片="const"）に揃える。"""
-
-    def fix(name: str) -> str:
-        return "const" if name == "(Intercept)" else name
-
-    result = {
-        "coef": {fix(k): v for k, v in raw["coef"].items()},
-        "se": {fix(k): v for k, v in raw["se"].items()},
-    }
-    if "z_stats" in raw:
-        result["z_stats"] = {fix(k): v for k, v in raw["z_stats"].items()}
-    if "p_values" in raw:
-        result["p_values"] = {fix(k): v for k, v in raw["p_values"].items()}
-    if "conf_low" in raw and "conf_high" in raw:
-        result["conf_int"] = {
-            fix(k): [raw["conf_low"][k], raw["conf_high"][k]]
-            for k in raw["conf_low"]
-        }
-    for key in (
-        "log_likelihood",
-        "log_likelihood_null",
-        "aic",
-        "bic",
-        "lr_statistic",
-        "lr_p_value",
-        "pseudo_r_squared",
-    ):
-        if key in raw:
-            result[key] = raw[key]
-    if "margeff" in raw:
-        result["margeff"] = {
-            at: {fix(name): stats for name, stats in effects.items()}
-            for at, effects in raw["margeff"].items()
-        }
-    return result
-
 
 def _write_csv(df, tmpdir: Path, name: str) -> Path:
     path = tmpdir / f"{name}.csv"
@@ -128,7 +64,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
     fixtures: dict = {}
 
     for scenario in NUMERIC_SCENARIOS:
-        df = pl.read_csv(DATA_DIR / f"logit_{scenario}.csv")
+        df, _ = load_frozen_dataset("logit", scenario)
         formula = "y ~ x1 + x2 + x3"
         csv_path = _write_csv(df, tmpdir, scenario)
 
@@ -137,10 +73,11 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             if cov_type == "cluster":
                 continue
             fixtures[scenario][cov_type] = {
-                "r": _run_r(csv_path, formula, cov_type)
+                "r": run_glm_r(csv_path, formula, cov_type)
             }
 
-    n = pl.read_csv(DATA_DIR / "logit_baseline.csv").height
+    baseline_df, _ = load_frozen_dataset("logit", "baseline")
+    n = baseline_df.height
     baseline_csv = tmpdir / "baseline.csv"
     fixtures["baseline"]["cluster"] = _run_cluster_case(
         baseline_csv, formula="y ~ x1 + x2 + x3", tmpdir=tmpdir
@@ -152,13 +89,9 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         groups=imbalanced_cluster_groups(n),
         suffix="_cluster_imbalanced",
     )
-    fixtures["baseline"]["cluster_g2"] = _run_cluster_case(
-        baseline_csv,
-        formula="y ~ x1 + x2 + x3",
-        tmpdir=tmpdir,
-        groups=[str(i % 2) for i in range(n)],
-        suffix="_cluster_g2",
-    )
+    # NOTE: cluster_g2（G=2×説明変数3個）の成功パスフィクスチャは Issue #289 で
+    # 削除した。`rank(Ŝ)<=G-1`のため`G<=q`ではクラスターロバスト共分散が退化し、
+    # `fit()`冒頭のバリデーションが ValidationError で弾く。
 
     return fixtures
 
@@ -179,7 +112,9 @@ def _run_cluster_case(
     tmp_path = csv_path.with_name(csv_path.stem + suffix + ".csv")
     grouped.write_csv(tmp_path)
     return {
-        "r": _run_r(tmp_path, formula, "cluster", cluster_col="cluster_group")
+        "r": run_glm_r(
+            tmp_path, formula, "cluster", cluster_col="cluster_group"
+        )
     }
 
 
@@ -191,12 +126,9 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
     for cov_type in R_COV_TYPES:
         if cov_type == "cluster":
             continue
-        fixtures[cov_type] = {"r": _run_r(csv_path, MROZ_FORMULA, cov_type)}
-    # 実データでのクラスターロバストSE（testing-policy.md「テスト用データセット」3.）。
-    # mrozの`city`（都市部居住ダミー、484/269の2値）を実カテゴリ列として使う。
-    fixtures["cluster"] = {
-        "r": _run_r(csv_path, MROZ_FORMULA, "cluster", cluster_col="city")
-    }
+        fixtures[cov_type] = {"r": run_glm_r(csv_path, MROZ_FORMULA, cov_type)}
+    # NOTE: mrozの`city`（G=2）クラスターロバストSEの成功パスフィクスチャは
+    # Issue #289 で削除した（MROZ_X は7変数で`G=2 <= q=7`のため ValidationError）。
     return fixtures
 
 
@@ -235,7 +167,8 @@ def build_fixtures() -> dict:
             "z値・p値・信頼区間・対数尤度・AIC・BIC・LR統計量・LR検定p値・"
             "疑似決定係数・限界効果を含む。"
             "cov_type='hc1'はここが主リファレンス（statsmodelsのdiscrete modelが"
-            "n/(n-k)補正を未実装のため、run_statsmodels_benchmark.py参照）。"
+            "n/(n-k)補正を未実装のため、"
+            "benchmark/nonlinear/references/statsmodels_ref.py参照）。"
             "cov_type='opg'の限界効果もここのみが数値照合対象（statsmodels側は"
             "算出不可）。"
         ),
@@ -246,24 +179,17 @@ def build_fixtures() -> dict:
             "perfect_multicollinearityシナリオはここに含まない"
             "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
             "clusterは合成データ（baselineシナリオ、均等疑似グループ・不均衡"
-            "グループ・G=2境界）とWooldridge実データ（mroz、city列＝都市部居住"
-            "ダミー）の両方を含む。パラメータ名は全ソースで切片を'const'に正規化済み。"
+            "グループ）を含む。G<=q（傾き係数の数）のケース（旧cluster_g2・mroz/city）は"
+            "ValidationErrorになるため成功パスフィクスチャを持たない（Issue #289）。"
+            "パラメータ名は全ソースで切片を'const'に正規化済み。"
         ),
     }
     return fixtures
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output",
-        default="../../../tests/fixtures/benchmarks/logit_crosscheck.json",
+    run_fixture_cli(
+        build_fixtures,
+        BENCHMARKS_DIR / "logit_crosscheck.json",
+        description=__doc__,
     )
-    args = parser.parse_args()
-
-    fixtures = build_fixtures()
-
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(fixtures, indent=2, ensure_ascii=False))
-    print(f"wrote {output_path} ({len(json.dumps(fixtures))} bytes)")

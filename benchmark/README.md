@@ -1,13 +1,36 @@
 # benchmark/
 
 `tests/fixtures/benchmarks/`に固定するベンチマーク値（統計量の期待値）を、
-リファレンス実装（statsmodels・R・pyfixest）を使って生成するための開発用ツール群です。
+リファレンス実装（statsmodels・R）を使って生成するための開発用ツール群です。
 `tests/`とはライフサイクルが異なる（Rランタイムに依存し、随時手動実行するツールである）
 ため、`tests/`とは分離しています。
+
+**性能比較ツール（旧 `benchmark/performance/`）はリポジトリ直下の
+[`performance/`](../performance/) に分離しました**（`benchmark_performance.yml`
+専用で、pytest とは無関係な随時実行ツールであり、正確性検証用の本ディレクトリとは
+性質が違うため）。
 
 ディレクトリ構成・各スクリプトの役割分担・リファレンス実装の使い分けの詳細は
 [`.claude/skills/reference-benchmark/SKILL.md`](../.claude/skills/reference-benchmark/SKILL.md)
 を参照してください。
+
+## 実行方法（Initiative A でパッケージ化）
+
+`benchmark/` は `__init__.py` を持つ Python パッケージです。スクリプトは
+**リポジトリルートから `-m` で**実行します（各ディレクトリへ `cd` して
+`python foo.py` とは実行できません）。
+
+```
+python -m benchmark.linear.freeze                     # linear系のCSVのみ凍結
+python -m benchmark.linear.fixtures.generate_ols_fixtures
+python -m benchmark.regenerate_all                    # 全系統CSV + 全JSONフィクスチャ
+python -m benchmark.regenerate_all --datasets-only    # 全系統CSVのみ（Rscript不要）
+```
+
+各系統は `datasets.py`（DGP）／`freeze.py`（CSV凍結）／`references/`（リファレンス
+実装アダプタ・`.R`）／`fixtures/`（`generate_*_fixtures.py`）で構成。系統をまたぐ
+共通ヘルパーは `benchmark/common/` に集約。パッケージ化（Initiative A）の経緯は
+[`docs/planning/specs/refactoring-issue231-progress.md`](../docs/planning/specs/refactoring-issue231-progress.md)「Initiative A」節。
 
 ## ライセンスに関する注記
 
@@ -15,8 +38,12 @@
   wheel/sdistの中身）は[MITライセンス](../LICENSE)です。
 - `benchmark/`配下のRスクリプト（`*.R`）は、独立実装によるクロスチェック用に以下の
   Rパッケージを使用します。
-  - `fixest` / `plm` / `ivreg` / `sandwich` / `lmtest`: GPL-2 / GPL-3（パッケージにより異なる）
+  - `fixest` / `plm` / `ivreg` / `sandwich` / `lmtest` / `AER` / `censReg` /
+    `maxLik` / `survival` / `numDeriv`: GPL-2 / GPL-3（パッケージにより異なる）
   - `jsonlite`: MIT
+  - `AER`（`tobit`＝`survival::survreg` の薄ラッパー）は Tobit の主リファレンス、
+    `censReg`（`maxLik` エンジン）は Tobit の交差検証、`numDeriv` は Tobit 限界効果の
+    デルタ法 SE を formula 非依存に検証するために使用します。
 - これらのRパッケージはPyPI配布物には一切含まれません。Pythonスクリプトから
   `subprocess`経由で別プロセスの`Rscript`を呼び出しているだけで、リンク・
   同梱・配布のいずれも行っていないため、本リポジトリのMITライセンスに対する

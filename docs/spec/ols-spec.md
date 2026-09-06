@@ -2,7 +2,7 @@
 
 OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`engine_pybind/src/linear/ols.rs`・
 `python_package/econometricsmodels/linear/ols.py`として実装済み。パフォーマンス比較の詳細は
-[`ols-performance-notes.md`](./ols-performance-notes.md)、CI/CD・セキュリティはmethod非依存のため
+[`../performance/ols.md`](../performance/ols.md)、CI/CD・セキュリティはmethod非依存のため
 [`ci-cd-notes.md`](./ci-cd-notes.md)を参照。
 
 ## 1. API引数
@@ -111,10 +111,17 @@ $$
 - t検定・信頼区間・F検定の自由度は`cov_type="cluster"`のときのみ`n-k`ではなく**`G-1`**に切り替える
   （statsmodelsの既定`df_correction=True`、計量経済学の標準的慣行）。`df_resid`自体（σ̂²・調整済み
   R²・AIC/BIC）は常に`n-k`のまま。
-- **G≤qの境界**: $\hat S$はG個のランク1行列の和のため`rank(Ŝ) ≤ G`。F検定が使う`q×q`
-  （`q`=傾き係数の数）部分行列はG<qのとき構造的に特異になり`fit()`全体が`ComputationError`
-  になる（係数・標準誤差自体はG≥2なら計算できる）。「クラスタ数境界の成功パス」のテストは
-  qをG以下に保つ必要がある。他のクラスターロバストSEを持つ手法（IV等）にも同様に当てはまる。
+- **`G ≤ q`の境界（`ValidationError`、Issue #289）**: $\hat S = \sum_g S_g S_g'$は、クラスター
+  寄与スコアの総和がゼロ（正規方程式$X'e = 0$）になるため`rank(Ŝ) ≤ G - 1`。F検定が使う`q×q`
+  （`q = k - k_constant` = 傾き係数の数）部分行列は`G ≤ q`のとき構造的に特異になる（`G = q`
+  ちょうども数学的には常に特異。`rank(Ŝ) ≤ G`という緩い上限で考えると`G = q`は「境界」に見えるが、
+  実際の上限は`G - 1`）。`G`（クラスター列のユニーク数）も`q`（説明変数の列数）も入力だけから
+  判定できるため、行列計算を待たず`fit()`冒頭で`InsufficientClustersForInference`
+  （`ValidationError`）として弾く。「クラスタ数境界の成功パス」のテストは`G > q`（厳密不等号）を
+  保つ必要がある。OLS/WLS/Tobit/Logit/Probit/IV(2SLS,GMM)横断で統一。
+  - `G > q`でも傾き係数間の悪条件（極端なスケール差・準多重共線性等）で`q×q`部分行列が数値的に
+    ほぼ特異になるケースは事前判定できないため、`ensure_well_conditioned_symmetric_matrix`による
+    `ComputationError`（次節）がbackstopとして残る。
 - `G < 2`は`InsufficientClusters`で検証（0除算によるNaN伝播・パニックを防ぐため）。
 
 ### 3.3 適合度統計量
@@ -163,7 +170,7 @@ $$
 
   | `LeastSquaresError` | Python例外 |
   |---|---|
-  | `Common(DimensionMismatch \| InsufficientObservations \| MissingClusterColumn \| InvalidConfidenceLevel \| InsufficientClusters)` | `ValidationError` |
+  | `Common(DimensionMismatch \| InsufficientObservations \| MissingClusterColumn \| InvalidConfidenceLevel \| InsufficientClusters \| InsufficientClustersForInference)` | `ValidationError` |
   | `InvalidHacLags` | `ValidationError` |
   | `SingularMatrix` | `ComputationError` |
   | `Common(ComputationFailed)` | `ComputationError` |
@@ -171,19 +178,27 @@ $$
   `impl From<LeastSquaresError> for PyErr`は書けない（`LeastSquaresError`・`PyErr`ともこのクレート
   外定義の型でorphan ruleに抵触）。関数`least_squares_error_to_pyerr`として実装し
   `.map_err(...)?`で変換する。
-- バージョン固定: `pyo3=0.28.2` / `polars=0.54.4` / `pyo3-polars=0.27.0`（すべて`=`固定）。
-  `pyo3-polars=0.27.0`が`pyo3="^0.28"`を要求するための組み合わせ。互換性は数字ではなく
+- バージョン固定: `pyo3=0.29.2` / `polars=0.55.2` / `pyo3-polars=0.28.0`（すべて`=`固定、Issue #49で更新）。
+  `pyo3-polars=0.28.0`が`pyo3="^0.29"`・`polars="^0.55.1"`を要求するための組み合わせ。互換性は数字ではなく
   `pyo3-polars`が使う`polars_ffi::version_0`という安定版FFIプロトコルで担保される。
 
 ### 3.6 テスト
 
 - 許容誤差: classical/HC0-3/cluster/係数はRとの実測で相対誤差1e-14程度のため`RTOL_STRICT=1e-8`。
   HACはRとの`prewhite`/`adjust`慣習差により実測0.4%程度のため`RTOL_HAC=1e-2`。
-- `test_ols.py`（構造・API・エラーパス）/ `test_ols_fixtures.py`（statsmodels主リファレンス、
-  `ols.json`）/ `test_ols_crosscheck.py`（R独立実装、`ols_crosscheck.json`）の3ファイルで
-  役割分担する。一般的なテスト方針は`.claude/rules/testing-policy.md`を参照。
+- `tests/linear/` に4ファイルで役割分担する（`refactoring-candidates-2.md`項目68）:
+  `test_ols_api.py`（成功パスの構造・API・オプション反映・`predict()`）/
+  `test_ols_validation.py`（`ValidationError`/`ComputationError`パス）/
+  `test_ols_reference.py`（statsmodels主リファレンスとの数値照合、`ols.json`＋ライブ照合）/
+  `test_ols_crosscheck.py`（R独立実装、`ols_crosscheck.json`）。一般的なテスト方針は
+  `.claude/rules/testing-policy.md`を参照。
 - pyfixestはOLSの正確性検証には使わない（HC2/HC3にHC1用の小標本補正を誤って適用する既知の
-  実装バグがあるため）。性能比較専用（[`ols-performance-notes.md`](./ols-performance-notes.md)）。
+  実装バグがあるため）。性能比較専用（[`../performance/ols.md`](../performance/ols.md)）。
+- 実データセット（`test_ols_crosscheck.py`）: `wage1`（`lwage ~ educ + exper + tenure`）・
+  `gpa2`（`colgpa ~ sat + hsperc + tothrs`）のWooldridgeデータセット2つ、
+  classical/HC0-3でRクロスチェック。`wage1`はさらに地域ダミー（northcen/south/west、
+  基準northeast）から合成したregion列でのクラスターロバストSE（実データでのグループ列、
+  4グループ・不均衡サイズ）も検証する。
 - `engine`側は上記の固定シナリオ単体テストに加え、property-basedテスト（`proptest`、
   `engine/src/linear/ols.rs`の`mod proptests`）で不変条件を検証する（詳細な方針は
   `testing-policy.md`「property-basedテスト」参照）。対象プロパティ: 定数項ありなら残差和は常に0、
@@ -195,7 +210,7 @@ $$
 
 releaseビルド（`maturin develop --release`）必須（debugビルドは最大140倍遅い）。
 classical/HC1/clusterはstatsmodels/pyfixest以上に高速、HACも大規模データではほぼ互角。
-メモリはengineが一貫して最小。詳細な実測データは[`ols-performance-notes.md`](./ols-performance-notes.md)参照。
+メモリはengineが一貫して最小。詳細な実測データは[`../performance/ols.md`](../performance/ols.md)参照。
 
 ## 4. 未実装・未対応
 

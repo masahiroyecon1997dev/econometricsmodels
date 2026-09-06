@@ -75,6 +75,9 @@ statsmodelsの`WLS`も内部的に同じ変換方式`wexog=sqrt(weights)*exog`�
   のように、重みが2乗で効く（残差と設計行列の両方に$\sqrt{w_i}$がかかるため）。
 - クラスターのグループ分け自体（`cluster_col`によるグルーピング）は重み変換の影響を受けない
   （グループ内で合計する対象が変換後の値になるだけ）。小標本補正・自由度の扱いもOLSと同じ。
+  クラスター数`G <= 傾き係数の数q`は`InsufficientClustersForInference`（`ValidationError`、
+  Issue #289）——`WlsEstimator::fit`は変換後データで`OlsEstimator::fit`に委譲するため、
+  この検証もOLS実装（`ols-spec.md`「`G ≤ q`の境界」）をそのまま継承する。
 - HAC・cluster・時間順序（`time_col`）を含め、ラグ選択式・小標本補正・自由度切替はすべて
   観測数`n`・クラスター数`G`のみに依存し重みには依存しないため、OLSと同じ式・同じオプションを
   そのまま使う。
@@ -117,13 +120,13 @@ $$
   8.5・8.6と同じ変数構成`nettfa ~ inc + incsq + age + agesq + male + e401k`、重みは`1/inc`
   （`inv_inc`列）。Example 8.6のfeasible GLS（分散モデル自体の推定）は本実装のスコープ外のため
   不採用、既知の重み列を渡す設計に合わせた。
-- 合成データセット（`benchmark/linear/generate_linear_datasets.py`の7シナリオ）はOLS実装時から
+- 合成データセット（`benchmark/linear/datasets.py`の7シナリオ）はOLS実装時から
   `weight`列（heteroskedasticシナリオは`1/sigma_i^2`、他は`uniform(0.5, 1.5)`）を含むため、
   WLS用の追加実装は不要だった。
-- `test_wls_fixtures.py`（statsmodels主リファレンス）/ `test_wls_crosscheck.py`（Rクロスチェック）
-  の役割分担はOLSと同じ。
+- `tests/linear/` の4ファイル分担（`test_wls_api.py`／`test_wls_validation.py`／
+  `test_wls_reference.py`〔statsmodels主リファレンス〕／`test_wls_crosscheck.py`〔Rクロスチェック〕）
+  は OLS と同じ（`refactoring-candidates-2.md`項目68）。
 
 ## 4. 未実装・未対応
 
 - `predict()`（Issue #132。OLSの`predict(new_data=None)`と同じ設計を適用予定）
-- WLS専用のパフォーマンス比較（`ols-performance-notes.md`はOLS単体の計測で、WLS版は未作成）

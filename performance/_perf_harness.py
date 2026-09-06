@@ -171,6 +171,18 @@ class PerfAdapter:
             スイープに含まれるため列挙しない。空なら method 軸なし。method 軸は
             cov_type=cov_types[0]・k=n_sweep_fixed_k・n=n_sweep[-1] の1点でのみ
             回す（testing-policy.md「方法論」＝代表点で足りる）。
+        k_sweep_libraries: k 軸スイープでのみ使うライブラリの部分集合。`None`
+            なら `libraries` をそのまま使う。リファレンス実装が特定の軸で計測
+            不能なとき（例: Tobit の py4etrics は k を増やすと数値微分ヘッシアン
+            のコストが爆発し k>=8 で事実上フリーズする）、その軸だけ engine 単独
+            に絞るために使う。n 軸・method 軸には影響しない。
+        check_report: `report dict -> list[str]`。全スイープ完了後に呼ばれ、
+            返した文字列は `_meta["warnings"]` に格納されて job summary に
+            `> [!WARNING]` として表示される（`render_performance_summary`）。
+            実時間の絶対値ではなく**同一ジョブ内の比**（例: engine の
+            lbfgs/newton）を見て、共有 CI ランナーの速度ばらつきに影響されずに
+            デグレ・パフォーマンス悪化を早期検知するためのソフトチェック
+            （CI failure にはしない）。`None` ならチェックなし。
         default_repeats / default_seed: CLI 引数のデフォルト。
     """
 
@@ -186,10 +198,12 @@ class PerfAdapter:
     n_sweep_fixed_k: int = 5
     k_sweep: Sequence[int] = (5, 20)
     k_sweep_fixed_n: int = 10_000
+    k_sweep_libraries: Sequence[str] | None = None
     cluster_col: str | None = None
     weight_col: str | None = None
     default_method: str = "newton"
     extra_methods: Sequence[str] = ()
+    check_report: Callable[[dict], list[str]] | None = None
     default_repeats: int = 3
     default_seed: int = 42
 
@@ -359,11 +373,16 @@ def run_n_sweep(adapter: PerfAdapter, repeats: int, seed: int) -> list[dict]:
 
 
 def run_k_sweep(adapter: PerfAdapter, repeats: int, seed: int) -> list[dict]:
-    """k 軸のスイープ（n は `adapter.k_sweep_fixed_n` 固定）。"""
+    """k 軸のスイープ（n は `adapter.k_sweep_fixed_n` 固定）。
+
+    `adapter.k_sweep_libraries` が設定されていればそのライブラリのみを回す
+    （リファレンス実装が k 軸で計測不能な手法向け。`PerfAdapter` docstring 参照）。
+    """
+    libraries = adapter.k_sweep_libraries or adapter.libraries
     results = []
     for k in adapter.k_sweep:
         for cov_type in adapter.cov_types:
-            for library in adapter.libraries:
+            for library in libraries:
                 results.append(
                     _measure_point(
                         adapter,
@@ -417,7 +436,7 @@ def build_report(adapter: PerfAdapter, repeats: int, seed: int) -> dict:
     n_results = run_n_sweep(adapter, repeats, seed)
     k_results = run_k_sweep(adapter, repeats, seed)
     method_results = run_method_sweep(adapter, repeats, seed)
-    return {
+    report = {
         "_meta": {
             "method": adapter.method,
             "purpose": (
@@ -442,6 +461,12 @@ def build_report(adapter: PerfAdapter, repeats: int, seed: int) -> dict:
         },
         "results": n_results + k_results + method_results,
     }
+    if adapter.check_report is not None:
+        report_warnings = adapter.check_report(report)
+        report["_meta"]["warnings"] = report_warnings
+        for warning in report_warnings:
+            print(f"WARNING: {warning}", file=sys.stderr)
+    return report
 
 
 def run_cli(

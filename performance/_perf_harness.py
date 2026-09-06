@@ -142,8 +142,11 @@ class PerfAdapter:
             （"performance.compare_ols"）。1計測点をサブプロセスで再実行する際の
             `python -m <module> --worker ...` の呼び出し先。
         libraries: 計測対象ライブラリ。先頭は必ず "engine"。以降は
-            README「Verification accuracy」表の primary reference のみ
+            README「Verification accuracy」表の primary reference
             （OLS/WLS/Logit/Probit: "statsmodels"、IV: "linearmodels"）。
+            primary reference が共通ハーネスのインプロセス計測に乗らない手法は
+            性能比較専用の代替でよい（Tob: 主リファレンスは R `AER::tobit` だが
+            性能比較は "py4etrics"＝statsmodels GenericLikelihoodModel ベース）。
         cov_types: 計測する cov_type。`.claude/rules/testing-policy.md`
             「パフォーマンス比較（ベンチマーク）の方法論」に従い、代表2点
             （最も軽い classical と、最も計算コストの重いもの）で足りる。

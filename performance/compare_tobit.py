@@ -190,10 +190,14 @@ def _fit_once_py4etrics(ctx: FitContext):
     else:
         raise ValueError(f"unknown cov_type: {ctx.cov_type!r}")
 
+    # `right` は cens==1（右打ち切り）の観測にのみ使われる。`_SCENARIO` は左打ち切り
+    # のみで cens ∈ {-1, 0} のため右打ち切り境界は尤度に寄与せず、ダミー値でよい。
     res = pt.Tobit(y, exog, cens=cens, left=lower, right=0.0).fit(**fit_kwargs)
     # engine と計測範囲を揃えるため、遅延評価の統計量を明示的に確定させる
-    # （モジュール docstring「計測範囲の対称性」参照）。
-    _ = (res.llf, res.aic, res.bic)
+    # （モジュール docstring「計測範囲の対称性」参照）。engine は係数と同じ呼び出しで
+    # 標準誤差まで常に算出するため、`bse`（statsmodels の cached_value。cluster では
+    # サンドイッチ共分散の sqrt(diag)）も明示アクセスして処理範囲を揃える。
+    _ = (res.bse, res.llf, res.aic, res.bic)
     return res
 
 
@@ -206,8 +210,9 @@ def _fit_once(ctx: FitContext):
 
 
 # engine の quasi-Newton（lbfgs）が newton のこの倍数より遅ければ警告する。
-# 実測（n=100,000, k=5, classical）は lbfgs/newton ~3.3x なので、劣化して
-# 初めて発火する余裕を持たせた値（module docstring「method の範囲」参照）。
+# 実測（n=100,000, k=5, classical）は lbfgs/newton ~3x（run 間で 3.2〜3.6x）
+# なので、劣化して初めて発火する余裕を持たせた値（module docstring「method の
+# 範囲」参照）。
 _QUASI_NEWTON_RATIO_LIMIT = 5.0
 
 
@@ -222,6 +227,7 @@ def _check_method_ratios(report: dict) -> list[str]:
     n = meta.get("method_sweep_n")
     if n is None:
         return []
+    default_method = meta.get("default_method", "newton")
     rows = report["results"]
     newton = next(
         (
@@ -231,7 +237,7 @@ def _check_method_ratios(report: dict) -> list[str]:
             and r["library"] == "engine"
             and r["cov_type"] == "classical"
             and r["n"] == n
-            and r["method"] == meta["default_method"]
+            and r["method"] == default_method
         ),
         None,
     )

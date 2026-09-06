@@ -40,7 +40,15 @@ CLAUDE.md（特に1章・7章）、`.claude/rules/python-style.md`、`.claude/ru
 
 `_run_isolated` は `subprocess.run(..., check=True)` のため、**1つの計測点でも例外を投げると benchmark ジョブ全体が落ちる**。設定した `(library × cov_type × n/k × method)` の全組み合わせについて、代表点を単点実行して成功を確認する。
 
-- 実行は必ず**単点 `--worker` 呼び出し**に限る（`uv run --no-sync python -m performance.compare_<method> --worker --library <lib> --cov-type <ct> --n <n> --k <k> --method <m> --repeats 1`）。フルスイープ（`--output` 付き実行）は重いので回さない。
+- 実行は必ず**単点 `--worker` 呼び出し**に限る。フルスイープ（`--output` 付き実行）は重いので回さない。
+- **スレッド数を1に固定して実行すること**（`--worker` を直接呼ぶとハーネスの `_SINGLE_THREAD_ENV` が効かず、faer/rayon がマルチスレッドで動いて #283 の不安定性を踏み、実行時間が数倍〜数十倍ぶれる）。必ず環境変数を前置する:
+  ```
+  RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 POLARS_MAX_THREADS=1 \
+    uv run --no-sync python -m performance.compare_<method> --worker \
+    --library <lib> --cov-type <ct> --n <n> --k <k> --method <m> --repeats 5
+  ```
+  `--repeats 1` は timed 1回で外れ値に振られるため、`--repeats 3`〜`5` にして `time_all_s` のばらつきも見る。**複数点を並行実行しない**（マシン負荷で相互に汚染する）。
+- 実測値を `docs/performance/<method>.md` の表と突き合わせる際は、上記の1スレッド固定を必ず守る。守らずに得た数値で「doc の値が再現しない」と指摘しないこと（環境差ではなくスレッド設定差になる）。
 - 最重の点（`n_sweep[-1]`・最重 cov_type・各 `extra_methods`）と、リファレンス実装が苦手そうな点（大 k 等）を優先的に確認する。
 - 失敗を見つけたら、それが「engine 側のバグ（Issue 化して method/範囲から除外すべき）」か「スクリプトの誤り」かを切り分けて指摘する。
 

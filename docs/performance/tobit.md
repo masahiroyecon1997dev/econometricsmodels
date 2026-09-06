@@ -28,17 +28,17 @@
 
 | n | engine | py4etrics | 比 |
 |---|---|---|---|
-| 1,000 | 0.0013s / 204MB | 0.2518s / 232MB | ~194x |
-| 10,000 | 0.0124s / 207MB | 1.1399s / 236MB | ~92x |
-| 100,000 | 0.1389s / 238MB | 12.0650s / 263MB | ~87x |
+| 1,000 | 0.0011s / 204MB | 0.2143s / 232MB | ~195x |
+| 10,000 | 0.0136s / 207MB | 1.1099s / 236MB | ~82x |
+| 100,000 | 0.1538s / 244MB | 12.0527s / 263MB | ~78x |
 
 ### cluster
 
 | n | engine | py4etrics | 比 |
 |---|---|---|---|
-| 1,000 | 0.0014s / 205MB | 0.2978s / 232MB | ~213x |
-| 10,000 | 0.0165s / 208MB | 1.5211s / 237MB | ~92x |
-| 100,000 | 0.1637s / 259MB | 13.0118s / 269MB | ~79x |
+| 1,000 | 0.0017s / 205MB | 0.3027s / 232MB | ~178x |
+| 10,000 | 0.0160s / 208MB | 1.5054s / 237MB | ~94x |
+| 100,000 | 0.1635s / 260MB | 13.8665s / 269MB | ~85x |
 
 ## 結果: k軸（n=10,000固定、engine のみ）
 
@@ -46,8 +46,8 @@
 
 | k | engine classical | engine cluster |
 |---|---|---|
-| 5 | 0.0120s | 0.0144s |
-| 20 | 0.0507s | 0.0569s |
+| 5 | 0.0177s | 0.0153s |
+| 20 | 0.0536s | 0.0592s |
 
 ## 結果: method軸（cov_type=classical, k=5, n=100,000固定）
 
@@ -55,19 +55,21 @@
 
 | method | engine | py4etrics |
 |---|---|---|
-| newton | 0.1389s | 12.0650s |
-| lbfgs | 0.4641s | 2.3663s |
+| newton | 0.1538s | 12.0527s |
+| lbfgs | 0.4935s | 2.5189s |
 
-engine の `lbfgs/newton` 比は約 3.3x で、`_check_method_ratios` の想定上限 5x 以内のため WARNING は出ていない。
+engine の `lbfgs/newton` 比は約 3.2x で、`_check_method_ratios` の想定上限 5x 以内のため WARNING は出ていない。
 
 ## 考察
 
-- **classical（newton）**: 全 n で engine が py4etrics より圧倒的に速い（n=100,000 で **約87倍**、0.139s vs 12.07s）。比が n とともに ~194x → ~87x に縮むのは engine が劣化しているのではなく、**py4etrics 側の固定オーバーヘッド**（statsmodels モデル構築で ~0.2秒）が n とともに相対的に薄まるため。engine 自体の n スケーリングは概ね線形（1,000→10,000 で ~9.5x、10,000→100,000 で ~11.2x、いずれも 10倍のデータに対し概ね線形）。
-- **cluster（newton）**: 同傾向（n=100,000 で約79倍）。engine の cluster は 10,000→100,000 で ~9.9x で classical（~11.2x）とほぼ同じ伸び。ピーク RSS は engine 259MB vs py4etrics 269MB で同等。
-- **解析的微分 vs 数値微分の寄与**: この ~80〜210倍差の主因は Rust 化だけでなく、engine が Tobit 対数尤度のスコア・ヘッシアンを**解析式**で持つのに対し、py4etrics（`GenericLikelihoodModel`）が**有限差分**で近似すること。k を増やすと py4etrics の数値ヘッシアンは O(k²) 回の対数尤度評価を要し、k=5→8 で約1.5秒→150秒超に崖状に悪化する（k 軸を engine 単独にした理由）。
-- **k スケーリング（engine, newton）**: classical k=5→20（k 4倍）で 0.0120s→0.0507s（~4.2x）、cluster も 0.0144s→0.0569s（~4.0x）。k 方向は概ね線形〜やや緩く、健全。
-- **method軸**: engine の lbfgs（0.464s）は newton（0.139s）の **約3.3倍**。probit の #285（newton 比 ~7倍）ほど極端ではないが同系統の遅さで、quasi-Newton 実装に改善余地がある。py4etrics の lbfgs（2.37s）は自身の newton（12.07s）より速い（数値ヘッシアンが不要なため）。**bfgs は engine が n>=10,000 で発散する（#292）ため計測対象外**。
-- **改善余地**: engine の絶対性能は n=100,000 で 0.14〜0.16秒と実用上問題ないが、(a) quasi-Newton（lbfgs 3.3x・bfgs 発散 #292）、(b) newton の大標本での Hessian 特異（#291）が engine 側の Tobit MLE の継続課題。cluster 経路は classical とほぼ同じ伸びで、現時点で特段の懸念はない。
+数値は 0.01〜0.02 秒台の点で 10〜30% の run 間ばらつきがあり、以下の倍率は概数。傾向（engine が ~80〜200 倍速い・スケーリングは概ね線形）は run をまたいで安定している。
+
+- **classical（newton）**: 全 n で engine が py4etrics より圧倒的に速い（n=100,000 で **約78倍**、0.154s vs 12.05s）。比が n とともに ~195x → ~78x に縮むのは engine が劣化しているのではなく、**py4etrics 側の固定オーバーヘッド**（statsmodels モデル構築で ~0.2秒）が n とともに相対的に薄まるため。engine 自体の n スケーリングは概ね線形（10倍のデータに対し 1,000→10,000 / 10,000→100,000 とも ~11〜12x）。
+- **cluster（newton）**: 同傾向（n=100,000 で約85倍）。engine の cluster は 10,000→100,000 で ~10x で classical とほぼ同じ伸び。ピーク RSS は engine 260MB vs py4etrics 269MB で同等。
+- **解析的微分 vs 数値微分の寄与**: この ~80〜200倍差の主因は Rust 化だけでなく、engine が Tobit 対数尤度のスコア・ヘッシアンを**解析式**で持つのに対し、py4etrics（`GenericLikelihoodModel`）が**有限差分**で近似すること。k を増やすと py4etrics の数値ヘッシアンは O(k²) 回の対数尤度評価を要し、k=5→8 で約1.5秒→150秒超に崖状に悪化する（k 軸を engine 単独にした理由）。
+- **k スケーリング（engine, newton）**: classical k=5→20（k 4倍）で 0.0177s→0.0536s（~3.0x）、cluster も 0.0153s→0.0592s（~3.9x）。k 方向は 4倍のパラメータ増に対し 3〜4倍で、概ね線形。
+- **method軸**: engine の lbfgs（0.494s）は newton（0.154s）の **約3.2倍**。probit の #285（newton 比 ~7倍）ほど極端ではないが同系統の遅さで、quasi-Newton 実装に改善余地がある。py4etrics の lbfgs（2.52s）は自身の newton（12.05s）より速い（数値ヘッシアンが不要なため）。**bfgs は engine が n>=10,000 で発散する（#292）ため計測対象外**。
+- **改善余地**: engine の絶対性能は n=100,000 で 0.15〜0.16秒と実用上問題ないが、(a) quasi-Newton（lbfgs ~3.2x・bfgs 発散 #292）、(b) newton の大標本での Hessian 特異（#291）が engine 側の Tobit MLE の継続課題。cluster 経路は classical とほぼ同じ伸びで、現時点で特段の懸念はない。
 
 ## 既知の限界
 
@@ -92,7 +94,7 @@ uv run python -m performance.render_performance_summary \
 
 - **engineのTobitのHessian特異化**（#291）: py4etrics/statsmodels が捌ける大標本条件で engine が失敗する（seed 依存）。解析的ヘッシアン構築・Newton ソルバの頑健化の余地を調査する。解消後に n=1,000,000 を n軸に追加して再計測する。
 - **engineのTobit BFGSが発散する**（#292）: n>=10,000 で `MoreThuenteLineSearch: NaN or Inf`。解消後に method軸へ bfgs を戻す。
-- **engineのquasi-Newton（L-BFGS）が遅い**（#285）: Logit/Probit と共通。Tobit では lbfgs/newton ~3.3x（probit の ~7x よりは軽い）。`_check_method_ratios` が 5x 超で job summary に警告する。
+- **engineのquasi-Newton（L-BFGS）が遅い**（#285）: Logit/Probit と共通。Tobit では lbfgs/newton ~3x（probit の ~7x よりは軽い）。`_check_method_ratios` が 5x 超で job summary に警告する。
 - **engineのマルチスレッド線形代数の不安定性**（#283）: OLSと共通。
 - **releaseビルドでの再計測が前提**: 改善見込みの見積もりは、debugビルドの数値（誤り）ではなく本ドキュメントのreleaseビルド数値を基準にすること。
 - **py4etrics の保守状況**: 最終リリース 2024-01、依存ピン無し。`statsmodels==0.14.6` 固定なので現状問題ないが、statsmodels を上げる際は py4etrics の動作確認とセットで行う（`pyproject.toml` の `benchmark` グループのコメント参照）。

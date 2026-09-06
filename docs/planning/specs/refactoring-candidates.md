@@ -1033,3 +1033,42 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-31、`engine_pybind/src/lib.rs`解説時に
   コード全体を確認して発見。
 - **状態**: 未対応
+
+### 40. 結果クラスの命名が頭字語の大文字小文字で不統一（`OlsResults`/`WlsResults`/`IvResults` vs `OLS`/`WLS`/`IV`）
+
+- **対象**: [python_package/econometricsmodels/__init__.py:11-13](../../../python_package/econometricsmodels/__init__.py#L11-L13)
+  （`IV`/`IvOptions`/`IvResults`、`OLS`/`OLSOptions`/`OlsResults`、
+  `WLS`/`WlsResults`の再エクスポート箇所）
+- **内容**: 推定量本体のクラス名は`OLS`/`WLS`/`IV`と頭字語をそのまま
+  大文字表記しているのに対し、対応する結果クラスは`OlsResults`/
+  `WlsResults`/`IvResults`と頭字語部分だけ「単語として扱った
+  PascalCase」（`Ols`/`Wls`/`Iv`）になっている。`Logit`/`Probit`/
+  `Tobit`は頭字語ではないためこの不統一自体が発生しない
+  （`LogitResults`等は自然に一貫している）。
+- **Claudeの所感**: 実害は無いが、命名規則としては`OLSResults`/
+  `WLSResults`/`IVResults`の方が推定量本体のクラス名と一貫する。
+  既存コード・ドキュメント・テスト全体に`OlsResults`等の名前が
+  広く使われているため、直すなら破壊的変更（リネーム）になる点に
+  注意が必要。
+- **気づいた経緯**: 2026-08-31、`python_package/econometricsmodels/
+  __init__.py`解説時に`__all__`の一覧を確認して発見。
+- **状態**: 未対応
+
+### 41. `__version__`がバージョン文字列の3つ目の手書きソースになっている
+
+- **対象**: [python_package/econometricsmodels/__init__.py:40](../../../python_package/econometricsmodels/__init__.py#L40)
+- **内容**: `__version__ = "0.5.0"`は`pyproject.toml`の`version`・
+  `Cargo.toml`の`version`と同じ値を独立に手書きしている（確認時点で
+  3箇所とも`"0.5.0"`で一致）。`maturin`は`pyproject.toml`の`version`
+  を使ってwheelバージョンを決めるため、この`__init__.py`の値は
+  自動的には追従しない。バージョンアップ時にどれか1箇所を更新し
+  忘れるとズレるリスクがある。
+- **Claudeの所感**: 実害はまだ顕在化していない（現状3箇所とも一致）
+  が、`X.Y.Z`をSemVerで手動管理する運用（CLAUDE.md 8章）である以上、
+  更新手順書・チェックリスト化、または`importlib.metadata.version()`
+  等で`pyproject.toml`の値を実行時に参照する方式への変更を検討する
+  余地がある。
+- **気づいた経緯**: 2026-08-31、`python_package/econometricsmodels/
+  __init__.py`解説時に`pyproject.toml`・`Cargo.toml`と突き合わせて
+  確認。
+- **状態**: 未対応

@@ -119,6 +119,39 @@ Estimates for each implemented method (coefficients, standard errors, confidence
 | IV (2SLS / GMM) | HC2/HC3 | Verified against a manually-derived sandwich formula only (no cross-implementation reference: linearmodels has no HC2/HC3 for IV, and `ivreg` has no established leverage formula for it) | — |
 | IV (GMM) | classical / HC0-HC1 / cluster / HAC | linearmodels `IVGMM` (relative tolerance 1e-8) | — (`ivreg` does not support GMM) |
 
+## Performance
+
+The computational core is written in Rust, so the aim is that calling `fit()` is never the bottleneck. The figures below are end-to-end `Model(...).fit()` wall-clock times — including the polars → Arrow zero-copy handoff, the PyO3 boundary, and the full set of fit statistics each method computes — not just the linear-algebra kernel.
+
+**Measurement setup.** Development container (`.devcontainer/`, Python 3.14), release build (`maturin develop --release`), linear-algebra backend **pinned to a single thread** (see [Known performance issues](#known-performance-issues) below), one warm-up run discarded, median of 3 repeats. This is a single local sweep on one machine — treat the numbers as indicative, not as a rigorous benchmark. The same scripts run in CI on tag pushes (`.github/workflows/benchmark_performance.yml`, shared runners) where the numbers vary more. Measured 2026-09-06 on the `release/v0.6.0` branch.
+
+**Median `fit()` time in seconds** — `cov_type="classical"`, 5 regressors, default optimizer:
+
+| Method | n = 1,000 | n = 10,000 | n = 100,000 | n = 1,000,000 |
+|---|---|---|---|---|
+| OLS | 0.0001 | 0.0011 | 0.012 | 0.14 |
+| WLS | 0.0001 | 0.0012 | 0.014 | 0.16 |
+| Logit | 0.0005 | 0.0050 | 0.051 | 0.65 |
+| Probit | 0.0018 | 0.011 | 0.12 | —&nbsp;<sup>1</sup> |
+| IV (2SLS) | 0.0009 | 0.0079 | 0.083 | 1.5 |
+| Tobit&nbsp;<sup>2</sup> | 0.0011 | 0.014 | 0.15 | —&nbsp;<sup>1</sup> |
+
+<sup>1</sup> Probit and Tobit currently stop at n = 100,000 — see [Known performance issues](#known-performance-issues).
+<sup>2</sup> Tobit is landing in the current pre-release; see [Implementation status](#implementation-status).
+
+Peak resident memory is roughly 160–260 MB at n ≤ 100,000 for every method, growing with n (about 400 MB for OLS/WLS and 1.1 GB for IV at n = 1,000,000).
+
+Per-method detail — n- and k-axis sweeps, every `cov_type`, the non-default optimizers, and a side-by-side comparison against statsmodels / linearmodels / py4etrics — is in [`docs/performance/`](docs/performance/). Reproduce with `python -m performance.compare_<method> --repeats 3`.
+
+### Known performance issues
+
+All of the following are engine-side and under investigation.
+
+- **Multi-threaded linear algebra is unstable under load** ([#283](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/283)). Under contention on a many-core machine the pure-Rust linear-algebra backend can slow down by 20x or more, so every measurement above pins it to a single thread; multi-core speedup is not reflected here.
+- **Non-default optimizers are slow for Logit / Probit / Tobit** ([#285](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/285)). The default Newton–Raphson is fine; selecting `method="bfgs"` or `"lbfgs"` is currently several times to ~40x slower.
+- **Tobit `method="bfgs"` diverges at n ≥ 10,000** ([#292](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/292)) with a line-search NaN/Inf error. Use the default Newton, or L-BFGS.
+- **Probit / Tobit Newton Hessian goes singular at large n** ([#284](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/284) Probit, [#291](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/291) Tobit) for some datasets — this is why the table above stops at n = 100,000 for those two. The statsmodels / R reference implementations converge on the same data.
+
 ## License
 
 [MIT License](LICENSE)

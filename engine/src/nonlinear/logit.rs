@@ -34,11 +34,11 @@ use crate::error::CommonError;
 use crate::inference;
 use crate::nonlinear::common::{
     CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
-    Method, MleError, SandwichVariant, cluster_cov_params, column_means, column_medians,
-    destandardize_cov_params, destandardize_params, goodness_of_fit, log_likelihood_null,
-    marginal_effects_from_w_s, observed_information_cov_params, opg_cov_params, pred_table,
-    predict_from_link, run_solver, sandwich_cov_params, standardize_columns,
-    validate_fit_preconditions,
+    Method, MleError, SandwichVariant, SeparationNormCheck, cluster_cov_params, column_means,
+    column_medians, destandardize_cov_params, destandardize_params, goodness_of_fit,
+    log_likelihood_null, marginal_effects_from_w_s, observed_information_cov_params,
+    opg_cov_params, pred_table, predict_from_link, run_solver, sandwich_cov_params,
+    standardize_columns, validate_fit_preconditions,
 };
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
@@ -518,6 +518,9 @@ impl LogitEstimator {
             max_iter as u64,
             tol,
             raise_on_non_convergence,
+            // Logitは`y∈{0,1}`で係数が±∞へ発散するため(準)完全分離の
+            // 標準化パラメータノルム事後チェックを有効にする（Issue #288）。
+            SeparationNormCheck::Enabled,
         )?;
 
         let params = destandardize_params(&output.params, &scale);

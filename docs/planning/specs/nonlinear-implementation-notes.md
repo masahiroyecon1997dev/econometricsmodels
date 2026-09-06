@@ -211,7 +211,7 @@ Logitのfit()に観測情報行列SEを実装するテスト追加中、`Method:
 - **結果**: 生スケール mroz `hours` の classical/opg/hc0/hc1 が既定Newtonで収束し、R primary（`survreg`）と相対誤差 ≤3e-9 で一致。合成フィクスチャ11シナリオは`y_scale`が2の冪に丸まる（多くは1.0）ため既存の収束挙動・数値と不変（実測relerr ≤6e-10、変更前と同値）。
 - **派生Issue**:
   - **#287（Issue #289の一部として解決済み）**: 生スケール mroz `hours` の `cov_type=cluster`（`city`列、G=2）は、Wald検定の傾き係数`q×q=7×7`部分行列が`rank(Ŝ)≤G-1=1`で特異になる（`G=2 <= q=7`）。従来は`wald_chi2_test`内の`ComputationError`だったが、`G`・`q`は入力だけから判定できるため`fit()`冒頭の`InsufficientClustersForInference`（`ValidationError`）へ前倒しした（下記「Wald検定とクラスターロバストSEの構造的な相互作用」参照）。#286スコープ外。
-  - **#288**: `test_separation_suspected_raises_computation_error_for_near_separation_data`（β1=100 DGP）は#286修正後は正しく識別可能で収束（真値回復）することが判明——旧来のエラーは#286のスケール由来偽陽性だった。**標準化ノルム基準の`SeparationSuspected`はTobitでは実質発火しなくなる**（Tobitの真の分離は`σ→0`＝`NoUncensoredObservations`または`NonConvergence`として現れる。Logit/Probitでは係数が±∞へ発散するため引き続き有効）。当該pytestは`@pytest.mark.xfail(strict=True)`で暫定対応、テスト再設計とdoc（本ファイル・`nonlinear-api-design.md`10章）修正は#288で実施。
+  - **#288（解決済み）**: `test_separation_suspected_raises_computation_error_for_near_separation_data`（β1=100 DGP）は#286修正後は正しく識別可能で収束（真値回復）することが判明——旧来のエラーは#286のスケール由来偽陽性だった。**標準化ノルム基準の`SeparationSuspected`はTobitでは実質発火しない**ため、`run_solver`に`separation_norm_check: SeparationNormCheck`を追加し**Logit/Probitは`Enabled`・Tobitは`Disabled`**でこの事後チェック自体を通らないようにした（Tobitの真の分離は`σ→0`＝`NoUncensoredObservations`または`NonConvergence`として現れる。Logit/Probitでは係数が±∞へ発散するため引き続き有効）。当該pytestは#286回帰テスト（`test_large_true_coefficient_dgp_converges_and_recovers_truth`）へ転用し、真の分離（ノイズ除去DGP→`ComputationError`）の`test_true_separation_noise_free_dgp_raises_computation_error`を別途追加。詳細は下記「Tobit固有の病理ケース: (準)完全分離の再評価（Issue #288）」参照。
 
 ### `llnull`・GOF・有意性検定
 
@@ -272,6 +272,26 @@ Logitのfit()に観測情報行列SEを実装するテスト追加中、`Method:
 
 - **rust-reviewerレビュー結果**: must-fixなし。should-fix 1件（`fit()`の`# Errors`docコメントに`NoUncensoredObservations`の記載漏れ、追加して対応）。計量経済学的妥当性の指摘（上記「厳密な非識別条件の精緻化」）に対応し、`MleError::NoUncensoredObservations`・`validate_has_uncensored_observations`双方のdocコメントを「十分条件であり必要条件ではない」ことが分かる表現に修正した。nice-to-have（片側打ち切り`upper`のみのケースの独立テスト追加、`validate_has_uncensored_observations`を`from_columns`ではなく`fit()`で検証する理由のdocコメント明記）にも対応。`nonlinear-implementation-notes.md`の「現時点で想定されるバリアント」テーブルの陳腐化、`tests/`配下のTobit用pytest未整備は本Issueのスコープ外（前者は過去のIssueから慢性的に陳腐化、後者は別Issue＝#226以降で対応予定）として見送った。
 
+### Tobit固有の病理ケース: (準)完全分離の再評価（Issue #288、完了）
+
+Issue #226の実装時（上記 python_package実装の節）、「極端な`β`による分離は`run_solver`共有の`SeparationSuspected`機構がLogit/Probitと同じ閾値でそのままTobitでも捕捉できる」と理解し、`test_separation_suspected_raises_computation_error_for_near_separation_data`（`y* = 100·x1 + 0.5·x2 + N(0,1)`、n=200、左打ち切り約51%）を追加した。**Issue #286の修正（`TobitScaling`導入）でこの理解が誤りだったことが判明した**。
+
+- **このDGPは実は正しく識別可能**。#286修正後はNewton/BFGS/L-BFGSのいずれでも`x1 ≈ 99.98`・`σ ≈ 1.02`（真値`β1=100`, `σ=1`を回復）で収束する。旧来この`fit()`が`SeparationSuspected`（`ComputationError`）を返していたのは、`y`の標準偏差が約65あり標準化パラメータノルムが`SEPARATION_PARAM_NORM_THRESHOLD=100`を超えていた——**#286のスケール由来の偽陽性**——だった。
+- **Tobitの「真の」分離の現れ方**（Logit/Probitの「係数が±∞へ発散」とは異なる）:
+  - 非打ち切り観測ゼロ（`σ→0`退化）→ `fit()`冒頭の`validate_has_uncensored_observations`が`MleError::NoUncensoredObservations`（`ValidationError`）で先に弾く（上記の全件打ち切りの節）。
+  - 部分的な準完全分離 → `MleError::NonConvergence`（`max_iter`到達）。実測: ノイズを除いた完全分離DGP（`y* = 100·x1 + 0.5·x2`、n=200、左打ち切り約51%）はNewtonが`NonConvergence`（`raise_on_non_convergence=false`で見ると`converged=false`・`σ→0`、`max_iter`を35→2000に増やしても不変）、BFGS/L-BFGSも`ComputationError`。軽度の準分離＋ごく小さいノイズ（sd≈1e-3）では**真値自体は回復する**が（`x1≈100`, `x2≈0.5`, `const≈0`, `σ≈sd`）収束判定は満たさず、`raise_on_non_convergence=false`なら`converged=false`が返る（「巨大な誤った`β̂`で収束扱いになる」病理ではない）。
+  - なぜ`SeparationSuspected`（標準化パラメータノルム > 100）が発火しないか: **`σ→0`退化ではオプティマイザが`s̃ = log σ̃`を単調に−∞へ進めるのではなく、ステップ棄却／line search失敗で停滞し、`|s̃|`が100に遠く及ばないまま`max_iter`に達する**（根拠は上記の実測。max_iterをいくら増やしても`NonConvergence`のまま＝ノルムが閾値へ向かって増え続けてはいない）。「`σ̃`が`e⁻¹⁰⁰`まで小さくなる前に浮動小数点がアンダーフローする」という限界の議論は正しくない（f64の最小正規化数≈2.2e-308、`s̃`のノルム換算で≈745付近まではアンダーフローしない）ため根拠にしない。
+- **対応（ユーザー確認済み）**: `run_solver`に`separation_norm_check: SeparationNormCheck`引数を追加し、**Logit/Probitは`Enabled`・Tobitは`Disabled`**を渡す。Tobitはこの事後チェック自体を通らなくなる（隣接する`raise_on_non_convergence`と同型の生`bool`を並べる取り違えを避けるため専用enum、rust-reviewer指摘）。理由:
+  - Tobitでは実質発火しない（上記）。
+  - #286以降のTobitは`common.rs`の`standardize_columns`ではなく`tobit.rs`局所の`TobitScaling`（`y`のスケーリング＋切片ありなら`x`の平均センタリング）で標準化しており、Logit/Probitの`y∈{0,1}`で較正した閾値100は**そもそもTobitのパラメータ空間には適用できない**（未較正の閾値を別空間に適用している状態だった）。残しておくと、多数の説明変数を持つモデル等で`√k`オーダーにノルムが増えて#286型の偽陽性が再発する潜在リスクもある。
+- **未検証・backlog**:
+  - 上記「`σ→0`退化では`s̃`が停滞する」の裏付けは noise-free と sd≈1e-3 の実測からの一般化であり、中間の準分離レジーム全域を独立検証したものではない。`raise_on_non_convergence=false`で使うユーザーは、旧実装なら（偽陽性で）`converged=false`を受け取れていた一部の境界ケースで`converged=true`を受け取りうるが、その`β̂`は（実測の範囲では）真値近傍であり誤りではない。
+  - `SeparationSuspected`を無効化したことで、「有限だが統計的に無意味なほど巨大な`β̂`」を将来どう検知するか（Hessianの条件数、SEの発散、`σ̂/σ_y`比の下限等、標準化ノルムとは別の指標）は未着手。実データで問題が顕在化した時点で再検討する。
+- **テストの再設計**:
+  - `test_separation_suspected_raises_computation_error_for_near_separation_data` → `test_large_true_coefficient_dgp_converges_and_recovers_truth`（#286回帰テスト。Newton/BFGS/L-BFGSをparametrizeし、`converged`・`x1≈100`・`x2≈0.5`・`const≈0`・`0.5<σ<2.0`をassert。許容幅の根拠はテスト内コメント）へ転用。
+  - `test_true_separation_noise_free_dgp_raises_computation_error`（ノイズ除去DGP→`ComputationError`、Newton/BFGS/L-BFGS parametrize）、`test_quasi_separation_tiny_noise_reports_unconverged_without_raising`（中間レジーム＋`raise_on_non_convergence=false`で`converged=false`＋真値回復＋`σ<0.1`）、`test_many_regressors_no_false_separation`（k=15の健全DGPで偽陽性なく収束）、`test_mroz_hours_raw_scale_converges_without_false_separation`（実データ回帰、`educ`係数≈80）を新規追加。全件打ち切り＝`NoUncensoredObservations`（`ValidationError`、`test_no_uncensored_observations_raises`）との棲み分けをdocstringに明記。
+  - engine側: `run_solver`レベルの単体テスト3本（`SeparationNormCheck`の`Enabled`/`Disabled`×`raise_on_non_convergence`。downgrade時に結果本体が素通しで返る契約も検証）を`nonlinear/common.rs`に、`fit_returns_non_convergence_not_separation_suspected_for_noise_free_separation`（Tobitの分離が`NonConvergence`として現れることの正本）を`tobit.rs`に追加。`fit_converges_for_large_response_scale_without_false_separation`等のdocコメントを、Tobitがこの事後チェックを通らなくなった旨に更新。
+
 ## engine_pybind実装（Issue #224+#225、まとめて実装・完了）
 
 `build_tobit_input`（データ抽出・バリデーション）は`fit_tobit`（`TobitEstimator::fit`呼び出し・`TobitResult`構築・`lib.rs`登録）と1コミットで実装した。`build_tobit_input`/`parse_cov_type`/`parse_method`は`fit()`が無いと`#[cfg(test)]`以外から一度も呼ばれず、非testビルドの`cargo clippy -D warnings`がdead_code lintで失敗する（ユーザー確認済み、Issue #218+#219と同じ理由でのまとめ判断）。
@@ -307,6 +327,6 @@ nice-to-have 2件も対応済み: `build_tobit_input_cov_type_is_case_insensitiv
 
 **python-reviewerレビュー結果**: must-fixなし。should-fix 1件: `test_probit.py`にある`SeparationSuspected`（准完全分離）のAPI境界テストがTobit版に無く、`nonlinear-api-design.md`10章「Tobitの分離相当の病理ケース」が未確定のままだった点を指摘された。実測調査の結果、**2種類の異なる退化パターンが存在する**ことが判明した:
 - 非打ち切り観測ゼロによる`σ→0`退化（Issue #223で発見・`MleError::NoUncensoredObservations`で対応済み。標準化パラメータノルムは大きくならないため既存の`SeparationSuspected`機構では捕捉できない）
-- **極端な`β`による分離**（本Issueで新規発見）: Logitの`near_separation`DGPと同じ発想（`x1`の真の係数=100）を打ち切り正規回帰に適用したデータで、既存の`SeparationSuspected`機構（`run_solver`共有、標準化パラメータノルム基準）がLogit/Probitと**同じ閾値でそのまま**Tobitの分離も検出できることを、Python API境界のテストで実測確認した（`test_separation_suspected_raises_computation_error_for_near_separation_data`として追加）。Tobit専用の閾値較正は不要だった。`nonlinear-api-design.md`10章の該当項目を`[x]`に更新した。
+- **極端な`β`による分離**（本Issueで新規発見、**ただし#286・#288でこの理解は誤りと判明**）: Logitの`near_separation`DGPと同じ発想（`x1`の真の係数=100）を打ち切り正規回帰に適用したデータで、既存の`SeparationSuspected`機構がTobitの分離も検出できると当初理解した（`test_separation_suspected_raises_computation_error_for_near_separation_data`として追加）。しかしこのDGP（β1=100＋N(0,1)ノイズ）は**実は正しく識別可能**で、`ComputationError`になっていたのは`y`の標準偏差が大きく標準化パラメータノルムが閾値を超えていた——#286のスケール由来偽陽性——だった。#286（`TobitScaling`）で収束するようになり、#288で`run_solver`に`SeparationNormCheck::Disabled`を渡すことでTobitはこの事後チェックを無効化した（下記「Tobit固有の病理ケース: (準)完全分離の再評価（Issue #288）」参照）。
 
 修正後: pytest全体で956件（Tobit分71件）、ruffエラーゼロ。

@@ -131,4 +131,6 @@ MLEが`Φ(θ̂)=ȳ`を満たすため、この計算がリンク関数に依存�
   line searchが受理可能なステップを見つけられない、または不適切なステップを受理する可能性は
   理論上あるが未検証。
 - `SEPARATION_PARAM_NORM_THRESHOLD=100.0`（Logitの実測に基づく較正値）がProbitのリンク関数
-  （テイルの減衰特性が異なる）でも同程度に適切かは未較正
+  （テイルの減衰特性が異なる）でも同程度に適切かは未較正。この事後チェック（`run_solver`の
+  `separation_norm_check: SeparationNormCheck`）は`y∈{0,1}`のLogit/Probitのみ`Enabled`で、
+  Tobitは`Disabled`（Issue #288）

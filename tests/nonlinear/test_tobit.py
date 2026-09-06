@@ -444,27 +444,22 @@ def test_non_convergence_raises_computation_error_with_tiny_max_iter(
         ).fit()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Issue #288: Issue #286（yのスケール由来の分離ヒューリスティック誤発火）を"
-        "修正した結果、このDGP（β1=100＋N(0,1)ノイズ）は実は正しく識別可能で、"
-        "Newton/BFGS/LBFGSとも x1≈99.98・σ≈1.02（真値回復）で収束するようになった"
-        "（旧来のComputationErrorは#286のスケール由来の偽陽性だった）。テストの"
-        "再設計（大係数の収束回帰テストへの転用＋真の分離テストの別途追加）は"
-        "Issue #288で行う。"
-    ),
-)
-def test_separation_suspected_raises_computation_error_for_near_separation_data():
-    """極端に大きい真の係数（`x1`の係数=100）のDGPは`ComputationError`
-    （engine側の`SeparationSuspected`、`run_solver`でLogit/Probit/Tobit共有の
-    検出機構）。
+@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
+def test_large_true_coefficient_dgp_converges_and_recovers_truth(method):
+    """大きい真の係数（`x1`の係数=100）でもノイズがあれば識別可能で、真値を回復する
+    （Issue #286の回帰テスト）。
 
-    **Issue #288で再設計予定**（現在xfail）: #286修正後、このDGPは正しく識別可能で
-    収束する。Tobitの真の分離は`σ→0`（`MleError::NoUncensoredObservations`、
-    `test_no_uncensored_observations_raises`参照、Issue #223）または`NonConvergence`
-    として現れ、標準化パラメータノルム基準の`SeparationSuspected`はTobitでは実質
-    発火しない（Logit/Probitでは`y∈{0,1}`で係数が発散するため引き続き有効）。
+    Issue #286（`y`のスケール由来の分離ヒューリスティック誤発火）の修正前は、この
+    DGP（`y* = 100·x1 + 0.5·x2 + N(0,1)`、n=200、左打ち切り約51%）が`run_solver`
+    共有の`SeparationSuspected`（標準化パラメータノルム基準、Logit/Probitの
+    `y∈{0,1}`で較正）に誤って引っかかり`ComputationError`になっていた。`y`の
+    標準偏差が約65あり標準化パラメータノルムが閾値100を超えていたのが原因で、
+    真の分離ではなかった。#286（`TobitScaling`導入）と#288（Tobitでは
+    `SeparationNormCheck.Disabled`）を経て、Newton/BFGS/LBFGSのいずれでも
+    `x1≈100`・`σ≈1`（真値`β1=100`, `σ=1`）で収束する。
+
+    真の（準完全）分離が`ComputationError`になることは
+    `test_true_separation_noise_free_dgp_raises_computation_error`で検証する。
     """
     rng = random.Random(42)
     n = 200
@@ -476,8 +471,146 @@ def test_separation_suspected_raises_computation_error_for_near_separation_data(
         y.append(max(0.0, y_star))
     df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
 
+    res = Tobit(
+        df, y="y", x=["x1", "x2"], options=TobitOptions(method=method)
+    ).fit()
+
+    # これはリファレンス数値照合ではなく#286の回帰テスト。許容幅は「真値を回復し、
+    # かつσ→0退化に倒れていない」ことだけを担保する緩いバンド。実測は3メソッドとも
+    # x1≈99.98・x2≈0.5・const≈0・σ≈1.02（相互のズレは1e-3未満）だが、将来の
+    # ソルバー変更でのメソッド間変動を吸収するためマージンを広く取る。σの下限0.5は
+    # 「(準)分離で σ→0 へ退化していない」ことの実質的なガード。
+    assert res.converged
+    assert abs(res.params["x1"] - 100.0) < 2.0
+    assert abs(res.params["x2"] - 0.5) < 0.5
+    assert abs(res.params["const"]) < 5.0
+    assert 0.5 < res.sigma < 2.0
+
+
+@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
+def test_true_separation_noise_free_dgp_raises_computation_error(method):
+    """ノイズを除いた完全分離DGP（`y* = 100·x1 + 0.5·x2`）は`ComputationError`。
+
+    Tobitの「真の」分離は、Logit/Probitのように係数が±∞へ発散するのではなく
+    `σ→0`退化として現れる。実測ではNewtonは`NonConvergence`（`max_iter`到達）、
+    BFGS/L-BFGSも`ComputationError`になる（変種は問わない）。`max_iter`を
+    35→2000に増やしてもNewton/BFGSは`NonConvergence`のまま。標準化パラメータ
+    ノルム基準の`SeparationSuspected`はTobitでは無効
+    （Issue #288、`run_solver`に`SeparationNormCheck.Disabled`）。
+
+    **全件打ち切りとの棲み分け**: 非打ち切り観測が1件も無い（全観測が境界値
+    ちょうど）ケースは`fit()`冒頭の`validate_has_uncensored_observations`が
+    `ValidationError`（`NoUncensoredObservations`）で先に弾く
+    （`test_no_uncensored_observations_raises`、Issue #223）。本ケースは
+    非打ち切り観測が存在するため、そのバリデーションは通過し、最適化の
+    非収束＝`ComputationError`（`ValueError`系ではない）として現れる。
+    """
+    rng = random.Random(42)
+    n = 200
+    x1 = [rng.uniform(-2.0, 2.0) for _ in range(n)]
+    x2 = [rng.uniform(-1.0, 1.0) for _ in range(n)]
+    y = [max(0.0, 100.0 * x1[i] + 0.5 * x2[i]) for i in range(n)]
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+
+    with pytest.raises(ComputationError):
+        Tobit(
+            df, y="y", x=["x1", "x2"], options=TobitOptions(method=method)
+        ).fit()
+
+
+def test_quasi_separation_tiny_noise_reports_unconverged_without_raising():
+    """境界レジーム（軽度の準完全分離＋ごく小さいノイズ）で
+    `raise_on_non_convergence=False`のとき、旧実装と同様に`converged=False`を
+    返す（無言で`converged=True`を返さない）ことを固定する（Issue #288、
+    rust-reviewer指摘の「中間レジーム」）。
+
+    `y* = 100·x1 + 0.5·x2 + N(0, 0.001)`。ノイズがあるため理屈上は識別可能だが、
+    数値的には(準)分離的で`σ→0`方向へ退化し、Newtonは`max_iter`まで収束しない。
+    実測では**真値自体は回復する**（`x1≈100`, `x2≈0.5`, `const≈0`, `σ≈ノイズsd`）
+    ——「有限だが巨大な誤った`β̂`で収束扱いになる」病理ではなく、
+    「正しい`β̂`だが収束判定は満たさない」状態。`raise_on_non_convergence=True`
+    （既定）なら`ComputationError`（`NonConvergence`）になる。
+    """
+    rng = random.Random(7)
+    n = 200
+    x1 = [rng.uniform(-2.0, 2.0) for _ in range(n)]
+    x2 = [rng.uniform(-1.0, 1.0) for _ in range(n)]
+    y = [
+        max(0.0, 100.0 * x1[i] + 0.5 * x2[i] + rng.gauss(0.0, 0.001))
+        for i in range(n)
+    ]
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+
+    res = Tobit(
+        df,
+        y="y",
+        x=["x1", "x2"],
+        options=TobitOptions(raise_on_non_convergence=False),
+    ).fit()
+
+    assert res.converged is False
+    # 退化しているのは σ のみ。傾きは真値近傍（巨大な誤った β̂ ではない）。
+    assert abs(res.params["x1"] - 100.0) < 1.0
+    assert abs(res.params["x2"] - 0.5) < 0.5
+    assert 0.0 < res.sigma < 0.1
+
     with pytest.raises(ComputationError):
         Tobit(df, y="y", x=["x1", "x2"]).fit()
+
+
+def test_many_regressors_no_false_separation():
+    """説明変数を15本に増やしても、健全なDGPで偽の`SeparationSuspected`無しに
+    収束する（Issue #288）。
+
+    `SeparationNormCheck.Disabled`採用の根拠の一つが「多変量モデルでは
+    標準化パラメータノルムが`√k`オーダーで増え、#286型の偽陽性が再発しうる」
+    （Tobitでは係数由来でもノルムが増える）。Tobitは検出自体を通らないため
+    ここで`ComputationError`になってはいけない。`TobitScaling`が設計行列を
+    列標準化・平均センタリングしてノルムを抑える回帰ガードでもある。
+    """
+    rng = random.Random(3)
+    n = 400
+    k = 15
+    cols = {f"x{j}": [rng.gauss(0.0, 1.0) for _ in range(n)] for j in range(k)}
+    betas = [1.0 if j % 2 == 0 else -0.7 for j in range(k)]
+    y = []
+    for i in range(n):
+        lin = 2.0 + sum(betas[j] * cols[f"x{j}"][i] for j in range(k))
+        y.append(max(0.0, lin + rng.gauss(0.0, 1.5)))
+    df = pl.DataFrame({"y": y, **cols})
+
+    res = Tobit(df, y="y", x=[f"x{j}" for j in range(k)]).fit()
+
+    assert res.converged
+    # 代表的な係数が真値近傍（厳密照合はIssue #227の数値テストの領分）。
+    assert abs(res.params["x0"] - 1.0) < 0.5
+    assert abs(res.params["x1"] - (-0.7)) < 0.5
+    assert 1.0 < res.sigma < 2.0
+
+
+def test_mroz_hours_raw_scale_converges_without_false_separation():
+    """実データ（Wooldridge mroz `hours`、生スケール）で偽の`SeparationSuspected`
+    無しに収束する（Issue #286の実データ回帰、#288で無効化を確定）。
+
+    `hours`（0〜4950、左打ち切り約43%）を Example 17.2 の RHS 7変数で推定する。
+    `y`の標準偏差が大きく（σ̂≈1122）、#286修正前は標準化パラメータノルムが
+    閾値100を超え`ComputationError`になっていた。R `AER::tobit`（survreg）との
+    厳密な数値照合はIssue #227の別テストの領分。ここでは「生スケールでも
+    収束し、教科書的な係数（`educ`≈80）を返す」ことのみ確認する。
+    """
+    from _constants import MROZ_X
+    from _helpers import load_wooldridge_dataset
+
+    mroz = load_wooldridge_dataset("mroz")
+    res = Tobit(
+        mroz, y="hours", x=MROZ_X, options=TobitOptions(lower=0.0)
+    ).fit()
+
+    assert res.converged
+    assert res.n_obs == 753
+    # Wooldridge Example 17.2 の水準（educ の係数 ≈ 80.6）。
+    assert abs(res.params["educ"] - 80.6) < 5.0
+    assert 1000.0 < res.sigma < 1250.0
 
 
 def test_raise_on_non_convergence_false_returns_result_without_raising(

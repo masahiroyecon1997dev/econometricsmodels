@@ -112,7 +112,7 @@ use crate::inference;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::nonlinear::common::{
     CovType, MarginalEffects, MarginalEffectsAt, Method, MleError, SandwichVariant,
-    clamped_pdf_cdf, cluster_cov_params, column_means, column_medians,
+    SeparationNormCheck, clamped_pdf_cdf, cluster_cov_params, column_means, column_medians,
     observed_information_cov_params, opg_cov_params, run_solver, sandwich_cov_params,
     validate_cluster_cov_type, validate_confidence_level, validate_max_iter,
     validate_sufficient_observations, validate_tol,
@@ -1395,6 +1395,12 @@ impl TobitEstimator {
             max_iter as u64,
             tol,
             raise_on_non_convergence,
+            // Tobitの真の分離は係数発散ではなく`σ→0`退化として現れるため、標準化
+            // パラメータノルムによる(準)完全分離の事後チェックは無効にする。全件打ち切りは
+            // `validate_has_uncensored_observations`（`NoUncensoredObservations`）、
+            // 部分的な準完全分離は`NonConvergence`で捕捉される（Issue #288、
+            // `SeparationNormCheck`のdocコメント参照）。
+            SeparationNormCheck::Disabled,
         )?;
 
         // 標準化空間の内部パラメータ`(β̃, s̃)`を元のスケールの`(β, logσ)`へ逆変換する
@@ -3255,7 +3261,10 @@ mod tests {
     /// (準)分離ヒューリスティック（`nonlinear/common.rs`の`separation_suspected`）が
     /// 誤発火して`MleError::SeparationSuspected`を返していた（Wooldridge mroz `hours`の
     /// 生スケールTobitで発覚）。`TobitScaling`が`y`を2の冪に丸めたスケールで
-    /// スケーリングしてから最適化し収束後に逆変換することで解消した。
+    /// スケーリングしてから最適化し収束後に逆変換することで解消した。なおIssue #288で
+    /// `run_solver`に`SeparationNormCheck::Disabled`を渡すようになりTobitはこの事後
+    /// チェック自体を通らなくなったため、現在は二重に発火し得ない（本テストは
+    /// `TobitScaling`によるスケール同値性の回帰テストとして維持する）。
     ///
     /// `y' = c·y`・`lower' = c·lower`（`c`は2の冪）とすると`β' = c·β`・`σ' = c·σ`・
     /// `SE' = c·SE`が厳密に成り立ち（`TobitScaling`が`y_scale`も`c`倍の2の冪に丸めるため、
@@ -3375,8 +3384,9 @@ mod tests {
         .unwrap();
 
         assert!(est.converged());
-        // 傾きは真値 40 の近傍（打ち切り＋ノイズがあるため緩め）。分離誤発火なら
-        // そもそも `Err(SeparationSuspected)` で `.unwrap()` が panic する。
+        // 傾きは真値 40 の近傍（打ち切り＋ノイズがあるため緩め）。#286以前は`y`の
+        // 大スケールで`SeparationSuspected`が誤発火し`.unwrap()`がpanicしていた
+        // （現在はTobitがこの事後チェックを通らない、Issue #288）。
         assert!(
             (est.params()[0] - 40.0).abs() < 5.0,
             "slope={}, expected≈40",
@@ -3401,6 +3411,61 @@ mod tests {
             matches!(result, Err(MleError::NonConvergence { .. })),
             "{:?}",
             result
+        );
+    }
+
+    /// Tobitの(準)完全分離は`MleError::SeparationSuspected`ではなく
+    /// `MleError::NonConvergence`として現れることを固定する（Issue #288）。
+    ///
+    /// `fit()`は`run_solver`に`SeparationNormCheck::Disabled`を渡すため、標準化
+    /// パラメータノルム基準の(準)完全分離事後チェックを通らない。これを
+    /// `SeparationNormCheck::Enabled`へ戻す回帰が入っても、#286以降の`TobitScaling`が
+    /// 標準化ノルムを閾値以下に保つため`SeparationSuspected`は発火せず——この失敗モードが
+    /// `NonConvergence`であること自体を、Tobitの分離の現れ方の正本として固定する
+    /// （`SeparationSuspected`と`NonConvergence`はどちらも`ComputationError`にマップ
+    /// されるため、Python API境界のテストでは区別できない）。`run_solver`ゲートの
+    /// 両方向の直接検証は`nonlinear/common.rs`の`run_solver_*_separation_*`テスト。
+    ///
+    /// DGP: `y* = 100·x1 + 0.5·x2`（ノイズ皆無）を`lower=0`で左打ち切り。非打ち切り
+    /// 観測は存在する（`NoUncensoredObservations`は通過する）が、分離方向に沿って
+    /// `σ→0`へ退化し、Newtonは`max_iter`まで収束しない。
+    #[test]
+    fn fit_returns_non_convergence_not_separation_suspected_for_noise_free_separation() {
+        let n = 120;
+        let x1: Vec<f64> = (0..n)
+            .map(|i| -2.0 + 4.0 * (i as f64) / ((n - 1) as f64))
+            .collect();
+        let x2: Vec<f64> = (0..n).map(|i| (0.7 * i as f64).sin()).collect();
+        let y: Vec<f64> = (0..n)
+            .map(|i| (100.0 * x1[i] + 0.5 * x2[i]).max(0.0))
+            .collect();
+        // 非打ち切り観測が1件以上あることを前提とする（無ければ
+        // `NoUncensoredObservations`が先に返り、このテストの意図がずれる）。
+        assert!(y.iter().any(|&v| v > 0.0));
+
+        let input = TobitInput::from_columns(
+            &y,
+            &[x1, x2],
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+            Some(0.0),
+            None,
+        )
+        .unwrap();
+
+        let result = TobitEstimator::fit(
+            input,
+            Method::Newton,
+            100,
+            1e-8,
+            true,
+            CovType::Classical,
+            0.95,
+        );
+        assert!(
+            matches!(result, Err(MleError::NonConvergence { .. })),
+            "expected NonConvergence, got {result:?}"
         );
     }
 

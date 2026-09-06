@@ -190,7 +190,8 @@ print(result.wald_statistic, result.wald_p_value)
 for row in result.marginal_effects(target="expected_observed"):
     print(row["param"], row["dydx"], row["std_err"])
 
-fitted = result.predict(target="expected_observed")  # [{"predicted": ...}, ...]
+# predict() returns a list of {"predicted": ...} dicts
+fitted = result.predict(target="expected_observed")
 ```
 
 ### Censoring fit check

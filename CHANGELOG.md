@@ -5,6 +5,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-06
+
+Added Tobit (censored regression) to Phase 2 (generalized and discrete choice models).
+
+### Added
+
+- Tobit estimation (`Tobit` / `TobitOptions` / `TobitResults`), estimated by maximum likelihood
+- Censoring bounds set via `TobitOptions.lower` (default 0.0) and `upper`; either may be `None`, giving left-, right-, or two-sided censoring
+- Solver options: Newton-Raphson (default), BFGS, L-BFGS (`method`)
+- Standard error options: classical (observed information), OPG (BHHH), HC0, HC1, cluster-robust
+- The error scale `sigma` is reported as an estimated parameter alongside the regression coefficients (in `params`, `std_errors`, `coef_table()`, etc.)
+- Goodness-of-fit statistics: log-likelihood, Wald test for overall significance (the Tobit analogue of OLS's F-test and Logit/Probit's likelihood-ratio test), AIC, BIC
+- `predict()` with selectable target: `"expected_latent"` (`x'β`), `"expected_observed"` (censoring-adjusted `E[y|x]`), or `"prob_uncensored"`
+- `marginal_effects()` (average, and at-mean / at-median), per target, with delta-method standard errors
+- `censoring_fit_check()`: observed vs model-implied rates at each censoring boundary (Tobit's counterpart to Logit/Probit's `pred_table()`)
+- Tobit API reference and usage examples in mkdocs
+
+### Changed
+
+- `cov_type="cluster"`: when the number of clusters does not exceed the number of parameters, all methods (OLS/WLS, Logit/Probit, IV) now raise `ValidationError` consistently (previously the behaviour differed across methods)
+
 ## [0.5.0] - 2026-08-15
 
 Added IV (instrumental variables) to Phase 3 (2SLS/GMM).
@@ -95,7 +116,8 @@ Initial release. Only OLS (Ordinary Least Squares) from Phase 1 (basic regressio
 - Python API taking a polars DataFrame as input (`OLS` / `OLSOptions` / `OlsResults`)
 - Rust computational core (`engine`) and PyO3 bindings (`engine_pybind`)
 
-[Unreleased]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.2.0...v0.3.0

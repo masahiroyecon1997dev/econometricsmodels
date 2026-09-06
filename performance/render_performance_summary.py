@@ -132,12 +132,19 @@ def _render_method_section(
         f"実行時間（秒、中央値）。{default_method} は n軸の同条件を参照。",
         "",
     ]
+    # method 軸で実際に計測されたライブラリのみを列にする（n/k 軸の
+    # `_render_axis_section` と同じ扱い）。
+    present = [
+        lib
+        for lib in libraries
+        if any(r["library"] == lib for r in method_results)
+    ]
     methods = sorted({r["method"] for r in method_results})
-    lines.append("| method | " + " | ".join(libraries) + " |")
-    lines.append("|---" * (len(libraries) + 1) + "|")
+    lines.append("| method | " + " | ".join(present) + " |")
+    lines.append("|---" * (len(present) + 1) + "|")
     for m in methods:
         cells = []
-        for library in libraries:
+        for library in present:
             match = next(
                 (
                     r

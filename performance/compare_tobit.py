@@ -38,8 +38,10 @@ Tobit は無い。**py4etrics（`statsmodels.GenericLikelihoodModel` ベース�
 
 `.claude/rules/testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」に
 従い、代表2点のみ計測する: 最も軽い `classical` と、最も計算コストの重い
-`cluster`。`opg`/`hc0`/`hc1` は省略する（Logit/Probit と同じ絞り方）。cluster の
-疑似グループ数は 50 固定。
+`cluster`。n=100,000・k=5 で全 cov_type を実測して確認済み（classical 0.138s <
+opg 0.148s < hc1 0.150s < hc0 0.154s < cluster 0.162s、engine・newton）。省略する
+`opg`/`hc0`/`hc1` は classical と cluster の間に収まる。cluster の疑似グループ数は
+50 固定。
 
 ## k 軸は engine 単独で回す（`k_sweep_libraries=("engine",)`）
 
@@ -141,26 +143,50 @@ def _fit_once_engine(ctx: FitContext):
     return Tobit(ctx.df, y=ctx.y_col, x=ctx.x_cols, options=options).fit()
 
 
-def _fit_once_py4etrics(ctx: FitContext):
+# py4etrics 用の整形済み入力 `(y, exog, cens, lower, groups)` を DataFrame 単位で
+# キャッシュする。1ワーカーサブプロセス＝1データセットで、warmup＋repeats の全 fit
+# が同じ `ctx.pandas_df` を使うため、`id()` キーで十分。整形（numpy 化・const 列
+# 付与・cens/groups ベクトル生成）を計測ループの外に出し、engine（Arrow ゼロコピー）
+# との変換コストの非対称を避ける（`.claude/rules/testing-policy.md`「入力形式の
+# 変換コストは計測区間の外に置く」）。
+_PY4ETRICS_INPUTS: dict[int, tuple] = {}
+
+
+def _py4etrics_inputs(
+    pdf, y_col: str, x_cols: list[str], cluster_col: str | None
+) -> tuple:
     import numpy as np
     import pandas as pd
+
+    cached = _PY4ETRICS_INPUTS.get(id(pdf))
+    if cached is None:
+        y = pdf[y_col].to_numpy()
+        lower = float(y.min())
+        # py4etrics は切片列を自動追加しないため exog に const を明示的に加える。
+        exog = pd.DataFrame({"const": 1.0, **{c: pdf[c] for c in x_cols}})
+        # cens: -1 左打ち切り / 0 非打ち切り / 1 右打ち切り。左打ち切りは閾値へ
+        # 厳密にセットされているため `<= lower` でちょうど拾える。
+        cens = np.where(y <= lower, -1, 0)
+        groups = (
+            pdf[cluster_col].to_numpy() if cluster_col is not None else None
+        )
+        cached = _PY4ETRICS_INPUTS[id(pdf)] = (y, exog, cens, lower, groups)
+    return cached
+
+
+def _fit_once_py4etrics(ctx: FitContext):
     import py4etrics.tobit as pt
 
-    pdf = ctx.pandas_df
-    y = pdf[ctx.y_col].to_numpy()
-    lower = float(y.min())
-    # py4etrics は切片列を自動追加しないため exog に const を明示的に加える。
-    exog = pd.DataFrame({"const": 1.0, **{c: pdf[c] for c in ctx.x_cols}})
-    # cens: -1 左打ち切り / 0 非打ち切り / 1 右打ち切り。左打ち切りは閾値へ厳密に
-    # セットされているため `<= lower` でちょうど拾える。
-    cens = np.where(y <= lower, -1, 0)
+    y, exog, cens, lower, groups = _py4etrics_inputs(
+        ctx.pandas_df, ctx.y_col, ctx.x_cols, ctx.cluster_col
+    )
 
     fit_kwargs: dict = {"method": ctx.method, "disp": 0}
     if ctx.cov_type == "classical":
         fit_kwargs["cov_type"] = "nonrobust"
     elif ctx.cov_type == "cluster":
         fit_kwargs["cov_type"] = "cluster"
-        fit_kwargs["cov_kwds"] = {"groups": pdf[ctx.cluster_col]}
+        fit_kwargs["cov_kwds"] = {"groups": groups}
     else:
         raise ValueError(f"unknown cov_type: {ctx.cov_type!r}")
 
@@ -180,7 +206,7 @@ def _fit_once(ctx: FitContext):
 
 
 # engine の quasi-Newton（lbfgs）が newton のこの倍数より遅ければ警告する。
-# 実測（n=100,000, k=5, classical）は lbfgs/newton ~3.6x なので、劣化して
+# 実測（n=100,000, k=5, classical）は lbfgs/newton ~3.3x なので、劣化して
 # 初めて発火する余裕を持たせた値（module docstring「method の範囲」参照）。
 _QUASI_NEWTON_RATIO_LIMIT = 5.0
 

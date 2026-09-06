@@ -6,9 +6,16 @@
 #   - 交差検証       : R `censReg`（`maxLik` エンジン）
 # `survreg` と `maxLik` は最適化実装が完全に独立しているため交差検証として
 # 組み合わせる価値が高い（同章）。Logit/Probit と違い statsmodels のような
-# 独立系統の主リファレンスが無く、両者とも R 実装のため、限界効果等の手計算箇所は
-# `numDeriv` による数値微分で別途検証する（`.claude/rules/testing-policy.md`
-# 「リファレンス実装」2.）。
+# 独立系統の主リファレンスが無く、両者とも R 実装のため、手計算箇所は以下で
+# formula 非依存に裏を取る（`.claude/rules/testing-policy.md`「リファレンス実装」2.、
+# `run_glm_crosscheck.R` の `observed_bread` と同じ役割）:
+#   - AIC / BIC : R の `AIC()` / `BIC()` ジェネリック（survreg・censReg いずれも
+#     logLik の df に scale を含めるため k+1 で計算する）と手計算式を `stopifnot` で照合。
+#   - 全体 Wald（classical・survreg）: `AER:::summary.tobit(fit)$wald` と照合。
+#   - スコア（estfun）・McDonald-Moffitt の限界効果閉形式（`target_w_and_s`）・
+#     予測値（`predicted_value`）・打ち切り適合度（`censoring_fit_check`）:
+#     `numDeriv::grad` による数値微分、および閉形式間の相互整合を `stopifnot` で検証
+#     （末尾の「手計算箇所の formula 非依存検証」ブロック）。
 #
 # `AER::tobit` は `survreg(..., dist="gaussian")` に `Surv()` 応答の組み立てと
 # `summary`/`waldtest` を足しただけの薄いラッパーで、係数・スケール・vcov・logLik は
@@ -27,6 +34,13 @@
 #   - cluster   : sandwich::vcovCL(type="HC1", cadjust=TRUE)
 #
 # 事前準備: install.packages(c("AER", "censReg", "sandwich", "jsonlite", "numDeriv"))
+#
+# 独立性の限界（testing-policy.md「リファレンス実装」2.3）: ロバスト共分散の
+# meat（`sandwich::estfun` の外積・クラスター和）と bread（`sandwich::bread`）は
+# `sandwich` パッケージ由来で本実装から独立だが、(β, log σ)→(β, σ) のヤコビアン変換
+# （`to_beta_sigma`）と hc1 の小標本補正は本スクリプトの手書きで、cluster の
+# `clubSandwich` 等による別実装との三角測量は行っていない。estfun 自体は下の numDeriv
+# 検証でスコアの正しさを裏取りしているため、共有の手書き部分は変換のみに限定される。
 #
 # 使用例（リポジトリルートから）:
 #   Rscript benchmark/nonlinear/references/run_tobit_crosscheck.R \
@@ -142,6 +156,13 @@ ll <- as.numeric(logLik(fit))
 aic <- -2 * ll + 2 * p
 bic <- -2 * ll + log(n) * p
 
+# 独立チェック: R の AIC()/BIC() ジェネリックと手計算式の一致（testing-policy.md の
+# AIC/BIC 慣習差の実例）。survreg・censReg いずれも logLik の df に scale を含める
+# ため R 標準関数も k+1 で計算し、本実装と同じ p = k+1 の手計算式に一致する。
+# censReg（maxLik）の AIC() は logLik クラスのオブジェクトを返すため as.numeric() で剥がす。
+stopifnot(isTRUE(all.equal(aic, as.numeric(AIC(fit)))))
+stopifnot(isTRUE(all.equal(bic, as.numeric(BIC(fit)))))
+
 # 全体の Wald 検定（傾き係数が同時にゼロ）。本実装 `wald_statistic` は **fit 済みの
 # cov_params（= 要求した cov_type のロバスト分散）をそのまま使う**（cov_type 依存、
 # classical のときのみ `AER:::summary.tobit` の `wald` と一致）。そのため上で cov_type
@@ -171,6 +192,16 @@ if (df_model > 0) {
 } else {
   wald_statistic <- NA
   wald_p_value <- NA
+}
+
+# 独立チェック（classical・survreg のみ）: `AER:::summary.tobit` は非切片係数が
+# 同時にゼロという帰無仮説の Wald 統計量をモデルベース vcov で計算する（本実装の
+# classical wald_statistic と同じ量）。手計算値がこれと一致することを確認する
+# （opg/hc0/hc1/cluster では AER に対応物が無いため手計算のまま）。
+if (engine == "survreg" && cov_type == "classical" &&
+  df_model > 0 && !is.na(wald_statistic)) {
+  aer_wald <- as.numeric(summary(fit)$wald)
+  stopifnot(isTRUE(all.equal(wald_statistic, aer_wald, tolerance = 1e-6)))
 }
 
 # ── 限界効果 / 予測値 / 打ち切り適合度（本実装の閉形式を R で再現）──────
@@ -320,6 +351,120 @@ if (is.finite(upper)) {
     model_implied_rate = mean(1 - cdf_zb_all)
   )
 }
+
+# ── 手計算箇所の formula 非依存検証（numDeriv）──────────────────────────
+# 主・交差リファレンスがどちらも R 実装のため、スコア（estfun）と McDonald-Moffitt の
+# 閉形式（`target_w_and_s` / `predicted_value` / デルタ法ヤコビアン）が本実装と同じ
+# 「解析式の手書き」になりうる。ここで (a) 数値微分（`numDeriv::grad`）との一致と
+# (b) 別途独立に書き下した閉形式（`pred_mu` / `w_mu`、`boundary_terms` を使わない
+# 素の実装）との相互整合を確認する。tolerance は数値微分の丸め誤差に対する緩め
+# （実測は 1e-9 以下）。失敗すればフィクスチャ生成を止める。
+suppressMessages(library(numDeriv))
+
+# (1) スコア: per-obs 対数尤度（(β, log σ) 空間）の numDeriv 勾配が estfun と一致するか。
+tobit_loglik_i <- function(theta, i) {
+  b <- theta[seq_len(k)]
+  s <- exp(theta[k + 1])
+  mu_i <- sum(mm[i, ] * b)
+  yi <- y_obs[i]
+  if (is.finite(lower) && yi <= lower) {
+    pnorm((lower - mu_i) / s, log.p = TRUE)
+  } else if (is.finite(upper) && yi >= upper) {
+    pnorm((upper - mu_i) / s, lower.tail = FALSE, log.p = TRUE)
+  } else {
+    -log(s) + dnorm((yi - mu_i) / s, log = TRUE)
+  }
+}
+theta_hat <- c(beta, log(sigma))
+num_scores <- t(vapply(
+  seq_len(n),
+  function(i) numDeriv::grad(function(th) tobit_loglik_i(th, i), theta_hat),
+  numeric(k + 1)
+))
+stopifnot(isTRUE(all.equal(
+  unname(num_scores), unname(as.matrix(scores)),
+  tolerance = 1e-6
+)))
+
+# (2) 限界効果の閉形式。`boundary_terms` を使わない独立な E[y|x] / P(uncensored) と
+# その重み関数を書き下す（μ・σ を明示引数に取る）。
+tobit_pred_mu <- function(target, mu, s) {
+  if (target == "expected_latent") {
+    return(mu)
+  }
+  fa <- if (is.infinite(lower)) 0 else pnorm((lower - mu) / s)
+  fb <- if (is.infinite(upper)) 1 else pnorm((upper - mu) / s)
+  da <- if (is.infinite(lower)) 0 else dnorm((lower - mu) / s)
+  db <- if (is.infinite(upper)) 0 else dnorm((upper - mu) / s)
+  if (target == "prob_uncensored") {
+    return(fb - fa)
+  }
+  lc <- if (is.infinite(lower)) 0 else lower
+  uc <- if (is.infinite(upper)) 0 else upper
+  fa * lc + (1 - fb) * uc + (fb - fa) * mu - s * (db - da)
+}
+tobit_w_mu <- function(target, mu, s) {
+  if (target == "expected_latent") {
+    return(1)
+  }
+  fa <- if (is.infinite(lower)) 0 else pnorm((lower - mu) / s)
+  fb <- if (is.infinite(upper)) 1 else pnorm((upper - mu) / s)
+  da <- if (is.infinite(lower)) 0 else dnorm((lower - mu) / s)
+  db <- if (is.infinite(upper)) 0 else dnorm((upper - mu) / s)
+  if (target == "expected_observed") fb - fa else (da - db) / s
+}
+
+for (mt in margeff_targets) {
+  for (at in c("mean", "median")) {
+    xp <- if (at == "mean") colMeans(mm) else apply(mm, 2, median)
+    mu_p <- sum(xp * beta)
+    ws <- target_w_and_s(mt, xp) # 検証対象（`boundary_terms` 経由）
+
+    # (2a) 重み w = d E[target|x] / dμ が数値微分・独立閉形式と一致するか。
+    d_pred_num <- numDeriv::grad(function(m) tobit_pred_mu(mt, m, sigma), mu_p)
+    stopifnot(isTRUE(all.equal(ws$w, d_pred_num, tolerance = 1e-6)))
+    stopifnot(isTRUE(all.equal(ws$w, tobit_w_mu(mt, mu_p, sigma))))
+
+    # (2b) デルタ法ヤコビアン（s_beta / s_sigma を含む）を、独立閉形式 `tobit_w_mu`
+    # から組んだ dydx_j = w(θ)·β_j の numDeriv 勾配と照合する。
+    for (j in setdiff(seq_len(k), intercept_col)) {
+      jac_ana <- numeric(k + 1)
+      for (m in seq_len(k)) {
+        jac_ana[m] <- beta[j] * ws$s_beta[m] + if (j == m) ws$w else 0
+      }
+      jac_ana[k + 1] <- beta[j] * ws$s_sigma
+      jac_num <- numDeriv::grad(
+        function(th) {
+          b <- th[seq_len(k)]
+          tobit_w_mu(mt, sum(xp * b), th[k + 1]) * b[j]
+        },
+        c(beta, sigma)
+      )
+      stopifnot(isTRUE(all.equal(jac_ana, jac_num, tolerance = 1e-6)))
+    }
+  }
+}
+
+# (3) 予測値と打ち切り適合度の相互整合。
+for (pt in margeff_targets) {
+  indep_pred <- vapply(
+    mu_all[head_idx], function(mu) tobit_pred_mu(pt, mu, sigma), numeric(1)
+  )
+  stopifnot(isTRUE(all.equal(
+    as.numeric(predict_head[[pt]]), indep_pred
+  )))
+}
+cfc_cat <- vapply(cfc_rows, function(r) r$category, character(1))
+cfc_mir <- vapply(cfc_rows, function(r) r$model_implied_rate, numeric(1))
+# model_implied_rate は全カテゴリの和が 1（確率分解）。
+stopifnot(isTRUE(all.equal(sum(cfc_mir), 1)))
+# uncensored の model_implied_rate は P(uncensored|x) 予測の全標本平均に一致する。
+pu_all <- vapply(
+  mu_all, function(mu) tobit_pred_mu("prob_uncensored", mu, sigma), numeric(1)
+)
+stopifnot(isTRUE(all.equal(
+  cfc_mir[cfc_cat == "uncensored"], mean(pu_all)
+)))
 
 result <- list(
   coef = as.list(est),

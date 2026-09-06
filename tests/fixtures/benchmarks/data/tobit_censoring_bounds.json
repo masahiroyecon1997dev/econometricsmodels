@@ -19,6 +19,14 @@
     -0.801806,
     2.596116
   ],
+  "high_variance": [
+    -5.773987,
+    null
+  ],
+  "heteroskedastic": [
+    -0.282571,
+    null
+  ],
   "small_n": [
     -0.071368,
     null

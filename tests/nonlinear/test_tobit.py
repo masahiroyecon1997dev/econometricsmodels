@@ -10,16 +10,22 @@ Issue #227）。ここでは`fit()`の成功パス・`coef_table()`/`predict()`/
 
 from __future__ import annotations
 
+import json
 import random
 
 import polars as pl
 import pytest
+from _constants import DATA_DIR
 from econometricsmodels import (
     ComputationError,
     Tobit,
     TobitOptions,
     TobitResults,
     ValidationError,
+)
+
+_TOBIT_CENSORING_BOUNDS = json.loads(
+    (DATA_DIR / "tobit_censoring_bounds.json").read_text()
 )
 
 # censored_datasetフィクスチャ（`dataset`のyを0.0で左打ち切り、打ち切り率21%）は
@@ -304,6 +310,35 @@ def test_null_values_raise():
         Tobit(df, y="y", x=["x1"]).fit()
 
 
+def test_null_values_in_x_raise():
+    """`x` 列に null が含まれる場合も `ValidationError`（`y` だけでなく `x` も
+    欠損チェックの対象、テスト網羅性レビュー 観点5）。"""
+    df = pl.DataFrame({"y": [0.0, 1.0, 2.0, 3.0], "x1": [1.0, None, 3.0, 4.0]})
+    with pytest.raises(ValidationError):
+        Tobit(df, y="y", x=["x1"]).fit()
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+def test_non_finite_values_raise(bad):
+    """`y`/`x` に NaN・無限大が含まれる場合 `ValidationError`。
+
+    null（`test_null_values_raise` / `test_null_values_in_x_raise`）と NaN/無限大は
+    `column_extraction.rs` 内で別ロジックのため個別に確認する（OLS の
+    `test_non_finite_values_raise` と同じ、テスト網羅性レビュー 観点5）。
+    """
+    df_y = pl.DataFrame(
+        {"y": [0.0, bad, 1.0, 2.0], "x1": [1.0, 2.0, 3.0, 4.0]}
+    )
+    with pytest.raises(ValidationError):
+        Tobit(df_y, y="y", x=["x1"]).fit()
+
+    df_x = pl.DataFrame(
+        {"y": [0.0, 1.0, 2.0, 3.0], "x1": [1.0, bad, 3.0, 4.0]}
+    )
+    with pytest.raises(ValidationError):
+        Tobit(df_x, y="y", x=["x1"]).fit()
+
+
 def test_non_numeric_dtype_raises():
     df = pl.DataFrame({"y": ["a", "b", "c"], "x1": [1.0, 2.0, 3.0]})
     with pytest.raises(ValidationError):
@@ -413,23 +448,47 @@ def test_supports_right_censoring_only():
     assert res.upper == 5.0
 
 
-def test_singular_design_matrix_raises_computation_error():
-    """完全な多重共線性は`ComputationError`（engine側の`SingularDesignMatrix`）。
+def test_perfect_multicollinearity_raises_computation_error():
+    """完全な多重共線性は数値比較の対象外（`testing-policy.md`「テストの3系統」）。
+    想定エラー（`ComputationError`、engine 側の `SingularDesignMatrix`）が発生する
+    ことのみを確認する。OLS/WLS/Logit と同じく凍結 CSV
+    （`tobit_perfect_multicollinearity.csv`、`x3 = 2·x1 + 3·x2`）を使う
+    （テスト網羅性レビュー 観点3。旧テストは inline n=5 データだった）。
 
-    Logitとは異なり、Tobitは`ols_initial_params`のQR検証が`method`に関わらず
-    常に最初に実行されるため、完全な多重共線性は常にこの経路で検出される
-    （`method`をparametrizeする必要が無い、`docs/planning/specs/
-    nonlinear-implementation-notes.md`参照）。
+    Logit とは異なり、Tobit は `ols_initial_params` の QR 検証が `method` に
+    関わらず常に最初に実行されるため、完全な多重共線性は常にこの経路で検出される
+    （`method` を parametrize する必要が無い、`docs/planning/specs/
+    nonlinear-implementation-notes.md` 参照）。
     """
-    df = pl.DataFrame(
-        {
-            "y": [0.0, 1.0, 2.0, 3.0, 4.0],
-            "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
-            "x2": [2.0, 4.0, 6.0, 8.0, 10.0],  # x2 = 2 * x1
-        }
-    )
+    df = pl.read_csv(DATA_DIR / "tobit_perfect_multicollinearity.csv")
+    lower, upper = _TOBIT_CENSORING_BOUNDS["perfect_multicollinearity"]
     with pytest.raises(ComputationError):
-        Tobit(df, y="y", x=["x1", "x2"]).fit()
+        Tobit(
+            df,
+            y="y",
+            x=["x1", "x2", "x3"],
+            options=TobitOptions(lower=lower, upper=upper),
+        ).fit()
+
+
+@pytest.mark.parametrize("cov_type", ["classical", "opg", "hc0", "hc1"])
+def test_scale_variance_raises_computation_error(cov_type):
+    """変数間のスケールが極端に異なる設計行列（x1 を `*1e6`、x2 を `*1e-3`）は、
+    傾き係数の同時共分散部分行列がスケール比の 2 乗（≈1e18）相当の条件数を持ち
+    倍精度浮動小数点の限界を超えて数値的に特異になる（OLS/WLS と同じ理由・同じ
+    凍結 CSV パターン、`test_ols_validation.py` 参照）。
+
+    Tobit の全体 Wald 検定が OLS の F 検定と同型でこの部分行列の反転を要求するため、
+    classical を含む全 cov_type で `ComputationError` になる。`scale_variance_mild`
+    （スケール比 1e3）が数値リグレッション検知用の成功パス
+    （`test_tobit_reference.py`）。数値比較はせずエラーパスのみ確認する
+    （テスト網羅性レビュー 観点3、`TOBIT_ERROR_PATH_SCENARIOS`）。
+    """
+    df = pl.read_csv(DATA_DIR / "tobit_scale_variance.csv")
+    lower, upper = _TOBIT_CENSORING_BOUNDS["scale_variance"]
+    options = TobitOptions(cov_type=cov_type, lower=lower, upper=upper)
+    with pytest.raises(ComputationError):
+        Tobit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
 
 def test_non_convergence_raises_computation_error_with_tiny_max_iter(
@@ -771,3 +830,14 @@ def test_cluster_col_nonexistent_column_raises(censored_dataset):
     options = TobitOptions(cov_type="cluster", cluster_col="does_not_exist")
     with pytest.raises(ValidationError):
         Tobit(censored_dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+
+def test_cluster_col_with_null_raises(censored_dataset):
+    """`cluster_col` に null（欠損）が含まれる場合 `ValidationError`
+    （`extract_group_key_column` の null チェック、テスト網羅性レビュー 観点5）。"""
+    n = censored_dataset.height
+    groups = [None] + [str(i % 5) for i in range(n - 1)]
+    df = censored_dataset.with_columns(pl.Series("grp", groups, dtype=pl.Utf8))
+    options = TobitOptions(cov_type="cluster", cluster_col="grp")
+    with pytest.raises(ValidationError):
+        Tobit(df, y="y", x=["x1", "x2"], options=options).fit()

@@ -85,12 +85,19 @@ def _run(
     lower: float | None,
     upper: float | None,
     cluster_col: str | None = None,
+    include_intercept: bool = True,
 ) -> dict:
-    """`run_tobit_r` を呼び、テスト側が `TobitOptions` を復元できるよう
-    `censoring_bounds` を結果に付加する。"""
+    """`run_tobit_r` を呼び、テスト側が `TobitOptions` を復元できる情報
+    （`censoring_bounds`・`x_cols`・`include_intercept`）を結果に付加する。
+
+    `include_intercept=False` のときは R 側の回帰式に ``- 1`` を足して切片を落とす
+    （`x_cols` は切片を含まない説明変数リストで、テスト側が `x=` にそのまま渡せる）。
+    """
+    x_cols = [c.strip() for c in formula.split("~", 1)[1].split("+")]
+    r_formula = formula if include_intercept else f"{formula} - 1"
     result = run_tobit_r(
         csv_path,
-        formula,
+        r_formula,
         cov_type,
         engine=engine,
         lower=lower,
@@ -98,7 +105,8 @@ def _run(
         cluster_col=cluster_col,
     )
     result["censoring_bounds"] = [lower, upper]
-    result["formula"] = formula
+    result["x_cols"] = x_cols
+    result["include_intercept"] = include_intercept
     return result
 
 
@@ -212,6 +220,21 @@ def build(engine: str) -> dict:
         )
         fixtures["method"] = {method: method_ref for method in METHODS}
 
+        # include_intercept=False（切片なし）。baseline 相当シナリオで per-scenario と
+        # 同じ 4 cov_type を回す（切片なし経路がロバスト共分散でも一致することの確認、
+        # テスト網羅性レビュー 観点3）。
+        fixtures["no_intercept"] = {}
+        for cov_type in PER_SCENARIO_COV_TYPES:
+            fixtures["no_intercept"][cov_type] = _run(
+                tmpdir / f"{BASELINE_SCENARIO}.csv",
+                SYNTHETIC_FORMULA,
+                cov_type,
+                engine=engine,
+                lower=base_lower,
+                upper=base_upper,
+                include_intercept=False,
+            )
+
         # 実データ（Wooldridge mroz、Example 17.2 の労働時間 Tobit）。hours は生スケール。
         mroz_df = load_wooldridge("mroz")
         mroz_csv = tmpdir / "mroz.csv"
@@ -261,19 +284,33 @@ def build(engine: str) -> dict:
         "censReg_version": _r_package_version("censReg"),
         "maxLik_version": _r_package_version("maxLik"),
         "sandwich_version": _r_package_version("sandwich"),
+        # run_tobit_crosscheck.R が手計算箇所の formula 非依存検証に使う。
+        "numDeriv_version": _r_package_version("numDeriv"),
         "note": (
+            "合成シナリオは打ち切り比率（light/moderate/heavy）・打ち切り方向"
+            "（right/interval）・誤差構造（high_variance/heteroskedastic）・悪条件"
+            "（small_n/moderate_multicollinearity/high_condition_number/"
+            "scale_variance_mild）を含む。heteroskedastic は Tobit MLE の等分散仮定に"
+            "対する誤設定で opg/hc0/hc1 と classical が乖離する（点推定は擬似真値に一致）。"
             "perfect_multicollinearity / scale_variance シナリオは含まない"
-            "（ComputationError の発生確認のみ、テストコード側で対応）。"
-            "scale_variance_mild（スケール比 1e3）が数値リグレッション検知用の"
-            "成功パス。cluster は合成データ（moderate_censoring、均等疑似グループ・"
-            "不均衡グループ・G=2 境界）を含む。`G <= q`（傾き係数の数）のケース"
-            "（旧 mroz/city、G=2・q=7）は ValidationError になるため成功パス"
-            "フィクスチャを持たない（Issue #289 / #287）。method（bfgs/lbfgs）は"
-            "リファレンスが method 非依存のため baseline 相当・classical の値を共有する。"
-            "mroz（hours 生スケール）の非クラスターケースは"
-            "engine の分離ヒューリスティック誤発火（Issue #286）により現状 engine で"
-            "フィットできず、テストコード側で xfail 相当の扱いになる（リファレンス値"
-            "自体は survreg/censReg で問題なく生成できるため固定する）。"
+            "（ComputationError の発生確認のみ、test_tobit.py で凍結 CSV に対して確認）。"
+            "cluster は合成データ（moderate_censoring、均等疑似グループ・不均衡グループ・"
+            "G=2 境界）を含む。`G <= q`（傾き係数の数）のケース（旧 mroz/city、"
+            "G=2・q=7）は ValidationError になるため成功パスフィクスチャを持たない"
+            "（Issue #289 / #287）。method（bfgs/lbfgs）はリファレンスが method 非依存の"
+            "ため baseline 相当・classical の値を共有する。no_intercept"
+            "（include_intercept=False）は baseline 相当・4 cov_type の切片なしフィット。"
+            "mroz（hours 生スケール、Example 17.2）は Issue #286 修正後 engine で"
+            "フィットでき、非クラスターの4 cov_type で数値照合する（G<=q のため"
+            "クラスターケースは持たない、上記）。censReg 交差検証は生スケール mroz で "
+            "maxLik の収束が survreg ほど詰まらず標準誤差系で相対 ~1e-7 乖離するため、"
+            "テスト側で mroz 専用に許容誤差を緩める（tests/_tolerances.py）。"
+            "AIC/BIC は R の AIC()/BIC() ジェネリック、classical の全体 Wald は "
+            "AER:::summary.tobit$wald、スコア・限界効果/予測の閉形式は numDeriv 数値微分と "
+            "run_tobit_crosscheck.R 内で一致確認済み（formula 非依存の独立検証、"
+            "testing-policy.md「リファレンス実装」2.）。意図的にフィクスチャ化しない"
+            "組み合わせ: confidence_level 非既定（幅の単調性のみ test_tobit.py で確認）、"
+            "method×非classical、cluster×右/区間打ち切り、実データ×cluster 成功パス。"
             "パラメータ名は切片を 'const' に正規化済み。"
         ),
     }

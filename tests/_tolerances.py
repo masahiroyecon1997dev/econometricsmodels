@@ -77,6 +77,48 @@ TOLERANCES: dict[str, dict[str, float]] = {
         "atol": 1e-9,
         "rtol_method": 1e-3,
     },
+    # Tobit の主リファレンスは R `AER::tobit`（`survival::survreg` エンジン）。
+    # survreg は (β, log σ) を独自の Newton-Raphson で最適化するが、本実装との
+    # 一致は実測で係数 ~3e-9・標準誤差 ~1e-9・対数尤度 ~1e-12（Issue #227）と
+    # RTOL_MACHINE_PRECISION を満たす。ATOL は Logit/Probit と同じ 1e-9
+    # （反復最適化由来の 0 近傍ノイズが閉形式解より1桁大きい）。
+    "tobit_reference": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": 1e-9,
+        # mroz（hours 生スケール、Example 17.2）は説明変数のスケール差が大きく
+        # （expersq が 0〜2400 オーダー）、信頼区間の端点が 0 近傍になる係数で
+        # 相対誤差が増幅する（実測最大 ~1.4e-8、構成要素の係数・SE は ~3e-10）。
+        # 合成シナリオの conf_int は 1e-8（実測 ≤1e-9）を維持し、mroz のみ緩める。
+        "rtol_mroz_conf_int": 3e-8,
+        # method="bfgs"/"lbfgs" は newton と異なる最適化経路で、リファレンス
+        # （survreg、method 非依存）から僅かにずれた点に収束する（実測: 予測値
+        # `E[y*|x]=x'β` で最大 ~2.2e-8、係数・SE・限界効果は ~4e-9）。Logit の
+        # `rtol_method`（1e-3）と同じ位置づけだが Tobit は最適化がよく条件付けられて
+        # おり桁違いに小さい。method ケースの全フィールドに適用する。
+        "rtol_method": 1e-7,
+    },
+    # Tobit の交差検証は R `censReg`（`maxLik` エンジン）。survreg とは最適化実装が
+    # 完全に独立（`nonlinear-api-design.md` 9章）。censReg 側の maxLik 収束を
+    # reltol=1e-14 まで詰めた上で、合成シナリオは点推定・SE・限界効果とも
+    # 相対 ~2e-9 で一致するため RTOL_MACHINE_PRECISION を適用する。
+    "tobit_crosscheck": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_CROSSCHECK_FLOOR,
+        # high_condition_number（x1,x2 相関 0.999）の hc0/hc1 で、SE・z・信頼区間・
+        # 限界効果 SE の相対誤差が実測 ~1.9e-8（点推定は ~1e-9 で一致）。悪条件下で
+        # 2つの独立最適化器の解のごく僅かな差が分散系で増幅されるため。
+        "rtol_high_condition_number": 5e-8,
+        # mroz（hours 生スケール）は censReg の maxLik が survreg ほど収束が詰まらず、
+        # SE・z・Wald 統計量・信頼区間・限界効果の SE/z/信頼区間が実測 ~1e-7〜3e-5
+        # 乖離する（限界効果の信頼区間端点が 0 近傍の係数で相対誤差が最も増幅し hc0 で
+        # ~3e-5）。係数・σ・対数尤度・限界効果 dydx・予測値・打ち切り適合度は ~3e-9 で
+        # 一致。engine と主リファレンス survreg は同データで ~3e-10 一致するため、これは
+        # censReg 側の収束限界であって本実装の問題ではない（mroz の厳密照合は
+        # `test_tobit_reference.py` が担う）。
+        "rtol_mroz": 1e-4,
+        # method="bfgs"/"lbfgs" ケース（`tobit_reference` の同名エントリ参照）。
+        "rtol_method": 1e-7,
+    },
     # --- 独立実装（R）とのクロスチェック ---
     # classical/HC0-3/clusterは機械精度一致（実測1e-14程度）のためRTOL_STRICTを
     # 適用、HACのみ小標本補正の慣習差により緩める。ATOLは絶対誤差フロア

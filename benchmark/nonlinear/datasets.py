@@ -4,7 +4,8 @@
   乱数）で2値yを持つデータ（Logit/Probit）。
 - `generate_censored_regression_dataset`: 潜在回帰 `y* = Xβ + ε` を左/右/両側に
   打ち切った連続yを持つデータ（Tobit、Issue #227）。打ち切り比率を変えた複数シナリオ
-  ＋構造的な悪条件シナリオを持つ。詳細は同関数のdocstring参照。
+  ＋誤差項構造（高分散・不均一分散）＋構造的な悪条件シナリオを持つ。詳細は同関数の
+  docstring参照。
 
 以下のモジュールdocstringは`generate_binary_choice_dataset`（Logit/Probit）の設計経緯。
 
@@ -18,7 +19,12 @@
 `benchmark/linear/datasets.py`（OLS/WLS用）と同型の設計だが、OLSの9シナリオの
 うち誤差項の分散構造（不均一分散・自己相関）に依存するもの（heteroskedastic/
 autocorrelated/high_variance）は2値DGPに直接転用できないため、Logit/Probit向けに
-再設計している（`docs/spec/logit-spec.md`参照）。
+再設計している（`docs/spec/logit-spec.md`参照）。**Tobitは潜在変数 `y*` が連続の
+線形回帰なのでこの制約が無く**、`generate_censored_regression_dataset` は
+`high_variance` / `heteroskedastic` を OLS と同じ発想で持つ（不均一分散は Tobit MLE
+の等分散仮定に対する誤設定になるため、ロバスト共分散 opg/hc0/hc1 の検証価値が上がる。
+点推定は3実装とも同じ擬似真値へ収束する）。自己相関は Tobit に HAC cov_type が
+無いためシナリオ化しない。
 
 `scale_variance`（変数間のスケールが極端に異なるケース）は誤差項構造とは無関係
 （設計行列のスケールの問題）なため、上記3つとは扱いを分けている。素直にOLSの
@@ -197,6 +203,11 @@ TOBIT_SCENARIOS = [
     # 打ち切り方向のバリエーション（engineは lower/upper 両対応）。
     "right_censoring",
     "interval_censoring",
+    # 誤差項構造のバリエーション（左打ち切り30%固定、設計行列は無相関）。high_variance は
+    # 誤差 SD を大きくした成功パス、heteroskedastic は σ_i が x1 に依存する誤設定ケース
+    # （ロバスト共分散の検証用）。OLS（benchmark/linear/datasets.py）と同じ発想。
+    "high_variance",
+    "heteroskedastic",
     # 構造的な悪条件シナリオ（generate_binary_choice_datasetと同じ設計行列生成を流用。
     # 左打ち切り30%を一律に課す）。
     "small_n",
@@ -231,6 +242,12 @@ _TOBIT_SCENARIO_CONFIG: dict[str, dict[str, object]] = {
         "frac_lower": 0.20,
         "frac_upper": 0.20,
     },
+    "high_variance": {"kind": "left", "frac": 0.30, "err": "high_variance"},
+    "heteroskedastic": {
+        "kind": "left",
+        "frac": 0.30,
+        "err": "heteroskedastic",
+    },
     "small_n": {"kind": "left", "frac": 0.30},
     "moderate_multicollinearity": {"kind": "left", "frac": 0.30},
     "high_condition_number": {"kind": "left", "frac": 0.30},
@@ -250,6 +267,13 @@ _TOBIT_SCENARIO_CONFIG: dict[str, dict[str, object]] = {
 # 潜在回帰 y* = Xβ + ε の誤差項の標準偏差（＝真の sigma）。Tobit の主要な推定量の
 # 一つなので、丸い値に固定して真値との突き合わせを容易にする。
 _TOBIT_ERROR_SD = 1.0
+
+# high_variance シナリオの誤差 SD（OLS の high_variance と同じ 10.0）。
+_TOBIT_HIGH_VARIANCE_SD = 10.0
+
+# heteroskedastic シナリオの乗法的不均一分散 σ_i = _TOBIT_ERROR_SD · exp(SLOPE · x1)
+# の対数線形スロープ。x1 ~ N(0,1) に対し σ_i がおよそ 0.2〜5 倍に広がる。
+_TOBIT_HETEROSKEDASTIC_LOG_SLOPE = 0.5
 
 
 def _apply_censoring(
@@ -286,12 +310,16 @@ def generate_censored_regression_dataset(
 ) -> tuple[pl.DataFrame, np.ndarray, tuple[float | None, float | None]]:
     """指定シナリオに沿った、打ち切り従属変数 y を持つ合成データセットを生成する。
 
-    潜在回帰 ``y* = β0 + Σ βⱼ xⱼ + ε``（``ε ~ N(0, _TOBIT_ERROR_SD²)``）を作り、
+    潜在回帰 ``y* = β0 + Σ βⱼ xⱼ + ε``（既定は ``ε ~ N(0, _TOBIT_ERROR_SD²)``）を作り、
     シナリオごとの方向（左/右/両側）に ``y*`` の経験分位点で打ち切って観測値 y を得る。
+    誤差項構造のバリエーション（``high_variance`` は ``ε ~ N(0, 10²)``、
+    ``heteroskedastic`` は ``ε_i ~ N(0, (exp(0.5·x_{i1}))²)`` の乗法的不均一分散）と、
     構造的な悪条件シナリオ（``small_n`` / ``moderate_multicollinearity`` /
     ``high_condition_number`` / ``scale_variance`` / ``perfect_multicollinearity``）は
     ``generate_binary_choice_dataset`` と同じ設計行列生成ロジックを流用し、左打ち切り
-    30% を一律に課す（打ち切り比率そのものではなく設計行列の病理を検証するシナリオ）。
+    30% を一律に課す（打ち切り比率そのものではなく誤差構造・設計行列の病理を検証する
+    シナリオ）。``heteroskedastic`` は Tobit MLE の等分散仮定に対する誤設定で、点推定は
+    擬似真値へ収束しつつロバスト共分散（opg/hc0/hc1）と classical が乖離する。
 
     Args:
         scenario: ``TOBIT_SCENARIOS`` のいずれか。
@@ -336,9 +364,20 @@ def generate_censored_regression_dataset(
     if col_scale is not None and k < 2:
         raise ValueError(f"{scenario} requires k >= 2")
 
-    y_star = linear_predictor(X, beta) + rng.normal(
-        0.0, _TOBIT_ERROR_SD, size=n
-    )
+    err_kind = config.get("err")
+    if err_kind == "high_variance":
+        eps = rng.normal(0.0, _TOBIT_HIGH_VARIANCE_SD, size=n)
+    elif err_kind == "heteroskedastic":
+        # σ_i は未スケーリングの x1 に依存させる（col_scale シナリオと排他なので
+        # ここで X[:, 0] を直接使ってよい）。
+        sigma_i = _TOBIT_ERROR_SD * np.exp(
+            _TOBIT_HETEROSKEDASTIC_LOG_SLOPE * X[:, 0]
+        )
+        eps = rng.normal(0.0, 1.0, size=n) * sigma_i
+    else:
+        eps = rng.normal(0.0, _TOBIT_ERROR_SD, size=n)
+
+    y_star = linear_predictor(X, beta) + eps
 
     lower, upper, y = _apply_censoring(y_star, config)
 

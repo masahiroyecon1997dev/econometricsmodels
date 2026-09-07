@@ -922,7 +922,10 @@ where
 
     let (params, mut converged, n_iter, model) = match method {
         Method::Newton => {
-            let solver = FaerNewton { tol };
+            let solver = FaerNewton {
+                tol,
+                stalled_at_optimum: false,
+            };
             let result = Executor::new(problem, solver)
                 .configure(|state| state.param(initial_params).max_iters(max_iter))
                 .run()
@@ -1080,6 +1083,16 @@ fn l2_norm(g: &[f64]) -> f64 {
 /// 特異性検出パターン）で行う（`docs/planning/specs/nonlinear-implementation-notes.md`参照）。
 struct FaerNewton {
     tol: f64,
+    /// `regularized_newton_step`が[`RegularizedStep::NoProgress`]を返し、かつ`next_iter`が
+    /// 勾配の停滞を確認したことを`terminate`へ伝えるフラグ（Issue #291）。
+    ///
+    /// 主たる収束判定（`terminate`の`l2_norm(gradient) < tol`）は**総和勾配に対する絶対
+    /// 閾値**であり観測数`n`でスケールしない。大標本では収束点近傍で勾配の丸め誤差の床が
+    /// `tol`（既定`1e-6`）を上回り、コスト関数が浮動小数点の底に達しても勾配基準が
+    /// 永久に発火しないことがある（Issue #291。`n=200_000`で床≈`1·tol`、`n=1_000_000`で
+    /// 床≈`36·tol`を実測）。その状態でも`H⁻¹g`が実質ゼロなら最適点に到達しているため、
+    /// このフラグ経由で収束として扱う。`next_iter`が毎反復書き換える。
+    stalled_at_optimum: bool,
 }
 
 type NewtonState = IterState<Vec<f64>, Vec<f64>, (), Vec<Vec<f64>>, (), f64>;
@@ -1099,6 +1112,22 @@ const MAX_LM_ATTEMPTS: usize = 40;
 const INITIAL_LM_LAMBDA: f64 = 1e-3;
 /// 各試行で`λ`を増やす倍率。
 const LM_LAMBDA_GROWTH: f64 = 4.0;
+
+/// [`RegularizedStep::NoProgress`]（LMラダーがコスト減少ステップを見つけられなかったが
+/// `λ=0`のHessianは可逆）を「最適点で停滞」と解釈するための条件その1（Issue #291）:
+/// 勾配ノルムがこの反復で「実質的に減っていない」とみなす比。
+/// `‖g_new‖ ≥ NEWTON_STALL_GRAD_RATIO · ‖g_prev‖`のとき停滞とみなす。健全な二次収束では
+/// 勾配が反復ごとに桁で減る（Issue #291の実測でも停滞前は比≈0.01）ため、この条件は
+/// 停滞後（実測で連続する勾配ノルムの比≈0.93〜1.0）でしか満たされない。値`0.9`は
+/// その2つの領域の間で、停滞側に十分な余裕を持たせた閾値。
+const NEWTON_STALL_GRAD_RATIO: f64 = 0.9;
+/// `NoProgress`を「最適点で停滞」と解釈するための条件その2（Issue #291）:
+/// 収束点の勾配ノルムが収束目標`tol`のこの倍数未満であること。最適点から遠い場所での
+/// 停滞・発散（勾配ノルムが桁違いに大きい）を収束と誤判定しないためのガード。
+/// Issue #291の膠着点の勾配ノルムは`n=200_000`で約`1·tol`、`n=1_000_000`で約`36·tol`
+/// であり、`1e4`の余裕があればおよそ`n≲3e7`までカバーできる一方、最適化初期の
+/// 勾配ノルム（実測で`1e2`〜`1e6`オーダー）は確実に除外できる。
+const NEWTON_STALL_GRAD_FACTOR: f64 = 1e4;
 
 impl<O> Solver<O, NewtonState> for FaerNewton
 where
@@ -1156,15 +1185,43 @@ where
             .ok_or_else(|| OptimizerError::msg("FaerNewton: gradient in state not set"))?;
         let hessian = problem.hessian(&param)?;
         let cost = problem.cost(&param)?;
-        let new_param = regularized_newton_step(problem, &param, &grad, &hessian, cost)?;
         // 収束判定（terminate）が「更新後のparamに対応する勾配」を見られるよう、
         // 更新前のgradを使い回さずnew_paramで改めて評価する。
-        let new_grad = problem.gradient(&new_param)?;
+        let (new_param, new_grad) =
+            match regularized_newton_step(problem, &param, &grad, &hessian, cost)? {
+                RegularizedStep::Accepted(next) => {
+                    let next_grad = problem.gradient(&next)?;
+                    (next, next_grad)
+                }
+                RegularizedStep::NoProgress(next) => {
+                    // LMラダーがコストを減少させるステップを1つも見つけられなかった
+                    // （＝コスト関数が浮動小数点の底に到達、Issue #291）。ただし`λ=0`の
+                    // Hessianは可逆なので、真に特異な問題（`SingularHessian`）ではない。
+                    // 勾配ノルムが (1) この反復で実質的に減っておらず、かつ (2) 収束目標
+                    // `tol`の近傍にある なら、最適点に到達しこれ以上進めないとみなして
+                    // 収束を通知する（`terminate`のフォールバック）。真の停滞（最適点から
+                    // 遠い場所で勾配が大きいまま）は (2) で除外される。
+                    let next_grad = problem.gradient(&next)?;
+                    let next_grad_norm = l2_norm(&next_grad);
+                    if next_grad_norm >= NEWTON_STALL_GRAD_RATIO * l2_norm(&grad)
+                        && next_grad_norm < NEWTON_STALL_GRAD_FACTOR * self.tol
+                    {
+                        self.stalled_at_optimum = true;
+                    }
+                    (next, next_grad)
+                }
+            };
         let state = state.param(new_param).gradient(new_grad);
         Ok((state, None))
     }
 
     fn terminate(&mut self, state: &NewtonState) -> TerminationStatus {
+        // 勾配ノルム基準が発火しないまま最適点で停滞したケース（Issue #291、
+        // `FaerNewton::stalled_at_optimum`のdocコメント参照）。`next_iter`が直前に
+        // 判定済みで、通常の勾配基準より先に確認する。
+        if self.stalled_at_optimum {
+            return TerminationStatus::Terminated(TerminationReason::SolverConverged);
+        }
         if let Some(g) = state.get_gradient()
             && l2_norm(g) < self.tol
         {
@@ -1202,41 +1259,87 @@ where
 /// 初期値にしても、実際に打ち切りが発生するデータで一貫して再現。ステップをどれだけ
 /// 小さくスケールしても`cost`が改善しないケースを確認済み）。`λI`を加えて
 /// Hessianを正定値に近づけることで、十分大きな`λ`では最急降下方向（`-g/λ`、非零の
-/// 勾配に対して必ず降下方向）に漸近するため、有限回の試行で必ずコスト減少方向が
-/// 見つかる（ユーザー確認済み）。
+/// 勾配に対して必ず降下方向）に漸近するため、通常は有限回の試行でコスト減少方向が
+/// 見つかる（ユーザー確認済み）。**例外は`cost`が浮動小数点の底に達した収束点近傍**で、
+/// この場合どの`λ`でも`cost`を狭義に減少させられず、以前は誤って`SingularHessian`を
+/// 返していた（Issue #291）。現在は`λ=0`のHessianが可逆かどうかで
+/// [`RegularizedStep::NoProgress`]（収束扱い）と`SingularHessian`（真に特異）を分ける
+/// （下記参照）。
 ///
 /// `newton_step`が`MleError::SingularHessian`を返した場合（`λ`を加えても数値的に
 /// 特異なまま）は、そのまま次の`λ`を試す（即座にエラーを伝播しない）。
-/// `MAX_LM_ATTEMPTS`回すべて失敗した場合のみ`SingularHessian`を返す
-/// （既存のエラー型・意味を変えない）。
+///
+/// **`MAX_LM_ATTEMPTS`回すべて失敗した場合の分岐（Issue #291）**: `λ=0`（正則化前）の
+/// `newton_step`が成功していた（Hessianが数値的に可逆）かどうかで結果を分ける。
+/// - 可逆だった場合 → [`RegularizedStep::NoProgress`]。これは「Hessianは正常だが、
+///   コスト関数が浮動小数点の底に達しており`λ`をどれだけ増やしてもコストを狭義に
+///   減少させられない」状態で、大標本で収束点近傍に到達したときに起こる（Issue #291。
+///   総和勾配の丸め誤差の床が`tol`を上回り`terminate`の勾配基準が発火しないケース）。
+///   呼び出し元（`FaerNewton::next_iter`）が勾配の停滞を追加確認した上で収束として扱う。
+/// - `λ=0`で`newton_step`が特異だった場合 → `SingularHessian`（完全な多重共線性等、
+///   `run_solver_newton_returns_singular_hessian_error`のケース。既存のエラー型・意味を
+///   変えない）。
+enum RegularizedStep {
+    /// コストを狭義に減少させる有限のステップが見つかった。中身は更新後のパラメータ
+    /// `θ - Δθ`。
+    Accepted(Vec<f64>),
+    /// `MAX_LM_ATTEMPTS`回試してもコストを減少させるステップが無かったが、`λ=0`の
+    /// Hessianは可逆だった（＝真に特異ではなく、コスト関数が浮動小数点の底に到達した
+    /// 状態、Issue #291）。中身は`λ=0`の生のNewtonステップを適用したパラメータ
+    /// （最適点との差は丸め誤差オーダー）。
+    NoProgress(Vec<f64>),
+}
+
 fn regularized_newton_step<O>(
     problem: &mut Problem<O>,
     param: &[f64],
     grad: &[f64],
     hessian: &[Vec<f64>],
     cost: f64,
-) -> Result<Vec<f64>, OptimizerError>
+) -> Result<RegularizedStep, OptimizerError>
 where
     O: CostFunction<Param = Vec<f64>, Output = f64>,
 {
     let k = grad.len();
+    // `λ=0`（正則化前）のNewtonステップが可逆だったかを、`MAX_LM_ATTEMPTS`回すべて
+    // 失敗したときの分岐（`NoProgress` vs `SingularHessian`、Issue #291）のために覚えておく。
+    // 可逆なら適用後のパラメータ`θ - H⁻¹g`も控える（`NoProgress`で返す候補。生の局所
+    // 2次モデルの最良推定で、最適点との差は丸め誤差オーダー）。ループ初回（`λ=0`）は
+    // この値を使い回し、`newton_step`の二重計算を避ける。
+    let raw_newton_candidate = newton_step(hessian, grad).ok().map(|step| {
+        param
+            .iter()
+            .zip(&step)
+            .map(|(p, s)| p - s)
+            .collect::<Vec<f64>>()
+    });
+
     let mut lambda = 0.0_f64;
-    for _ in 0..MAX_LM_ATTEMPTS {
-        let regularized: Vec<Vec<f64>> = (0..k)
-            .map(|i| {
-                (0..k)
-                    .map(|j| hessian[i][j] + if i == j { lambda } else { 0.0 })
-                    .collect()
+    for attempt in 0..MAX_LM_ATTEMPTS {
+        let candidate = if attempt == 0 {
+            raw_newton_candidate.clone()
+        } else {
+            let regularized: Vec<Vec<f64>> = (0..k)
+                .map(|i| {
+                    (0..k)
+                        .map(|j| hessian[i][j] + if i == j { lambda } else { 0.0 })
+                        .collect()
+                })
+                .collect();
+            newton_step(&regularized, grad).ok().map(|step| {
+                param
+                    .iter()
+                    .zip(&step)
+                    .map(|(p, s)| p - s)
+                    .collect::<Vec<f64>>()
             })
-            .collect();
-        if let Ok(step) = newton_step(&regularized, grad) {
-            let candidate: Vec<f64> = param.iter().zip(&step).map(|(p, s)| p - s).collect();
-            if let Ok(candidate_cost) = problem.cost(&candidate)
-                && candidate_cost.is_finite()
-                && candidate_cost < cost
-            {
-                return Ok(candidate);
-            }
+        };
+        if let Some(candidate) = candidate
+            && let Ok(candidate_cost) = problem.cost(&candidate)
+            && candidate_cost.is_finite()
+            && candidate_cost < cost
+        {
+            return Ok(RegularizedStep::Accepted(candidate));
         }
         lambda = if lambda == 0.0 {
             INITIAL_LM_LAMBDA
@@ -1244,12 +1347,15 @@ where
             lambda * LM_LAMBDA_GROWTH
         };
     }
-    // `MAX_LM_ATTEMPTS`回すべて失敗する経路は、既存のテストデータ（Tobitの打ち切り
-    // データ、Logit/Probitの完全な多重共線性データ含む）では一度も到達していない
-    // （`MAX_LM_ATTEMPTS`のdocコメントの通り、理論上は`λ`が十分大きくなれば必ず
-    // 降下方向が見つかるはずだが、これを「理論上到達不能」と断定できる証明は無い。
-    // rust-reviewer指摘。再現データが見つかった場合はテストを追加する）。
-    Err(MleError::SingularHessian.into())
+    // コストを減少させるステップが1つも見つからなかった。`λ=0`のHessianが可逆だったなら
+    // 真に特異な問題ではなく、コスト関数が浮動小数点の底に達した状態（Issue #291。
+    // `n=200_000, seed=1` / `n=1_000_000, seed=42`の`moderate_censoring`Tobitで実測）。
+    // `λ=0`でも特異だった場合は従来どおり`SingularHessian`
+    // （完全な多重共線性等、`SingularHessianProblem`）。
+    match raw_newton_candidate {
+        Some(candidate) => Ok(RegularizedStep::NoProgress(candidate)),
+        None => Err(MleError::SingularHessian.into()),
+    }
 }
 
 /// Newtonステップ`Δθ = H⁻¹g`を求める。`H`は対称とは限らない（収束点から離れた場所では
@@ -1853,6 +1959,170 @@ mod tests {
             "converged=true was reported but the actual gradient at the returned params {:?} is {:?}",
             output.params,
             actual_grad
+        );
+    }
+
+    /// Issue #291の状況を模した問題。コスト関数は`θ = target`で最小になる素直な2次関数
+    /// だが、(1) 大きな定数オフセットによりコストのULPが粗く（`≈1.5e-11`）、`target`
+    /// 近傍ではコストがそれ以上減少しない浮動小数点の底に達する。(2) 勾配は`target`
+    /// 近傍でも`grad_floor`（`> tol`）で下げ止まる（大標本で総和勾配の丸め誤差の床が
+    /// `tol`を上回る状況の模擬）。Hessianは常に正定値（`H_DIAG`）で、生のNewtonステップ
+    /// `grad_floor / H_DIAG`はパラメータのスケールに対して無視できる。
+    #[derive(Clone)]
+    struct FloatingPointFloorProblem {
+        target: f64,
+        /// 勾配の下げ止まり値（`gradient`が返す絶対値の下限）。
+        grad_floor: f64,
+    }
+
+    impl FloatingPointFloorProblem {
+        const COST_OFFSET: f64 = 1.0e5;
+        const H_DIAG: f64 = 1.0e6;
+    }
+
+    impl CostFunction for FloatingPointFloorProblem {
+        type Param = Vec<f64>;
+        type Output = f64;
+
+        fn cost(&self, param: &Self::Param) -> Result<Self::Output, OptimizerError> {
+            let d = param[0] - self.target;
+            Ok(Self::COST_OFFSET + 0.5 * Self::H_DIAG * d * d)
+        }
+    }
+
+    impl Gradient for FloatingPointFloorProblem {
+        type Param = Vec<f64>;
+        type Gradient = Vec<f64>;
+
+        fn gradient(&self, param: &Self::Param) -> Result<Self::Gradient, OptimizerError> {
+            let raw = Self::H_DIAG * (param[0] - self.target);
+            let floored = if raw.abs() < self.grad_floor {
+                self.grad_floor.copysign(if raw == 0.0 { 1.0 } else { raw })
+            } else {
+                raw
+            };
+            Ok(vec![floored])
+        }
+    }
+
+    impl Hessian for FloatingPointFloorProblem {
+        type Param = Vec<f64>;
+        type Hessian = Vec<Vec<f64>>;
+
+        fn hessian(&self, _param: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
+            Ok(vec![vec![Self::H_DIAG]])
+        }
+    }
+
+    /// Issue #291の回帰テスト: 勾配ノルムが`tol`の床（`grad_floor > tol`）で下げ止まり、
+    /// かつコスト関数が浮動小数点の底に達する問題で、`FaerNewton`が`SingularHessian`にも
+    /// `NonConvergence`にもならず**収束**する（`regularized_newton_step`が
+    /// `RegularizedStep::NoProgress`を返し、`next_iter`が勾配の停滞を確認して
+    /// `stalled_at_optimum`を立てる経路）。修正前は`regularized_newton_step`が
+    /// `MAX_LM_ATTEMPTS`回すべて失敗して`Err(MleError::SingularHessian)`を返していた。
+    #[test]
+    fn run_solver_newton_converges_when_cost_hits_floating_point_floor_above_gradient_tol() {
+        let output = run_solver(
+            FloatingPointFloorProblem {
+                target: 2.0,
+                grad_floor: 5.0e-5,
+            },
+            Method::Newton,
+            vec![0.0],
+            50,
+            1e-6,
+            true,
+            SeparationNormCheck::Disabled,
+        )
+        .unwrap();
+
+        assert!(output.converged, "{output:?}");
+        assert!(
+            (output.params[0] - 2.0).abs() < 1e-6,
+            "params={:?}",
+            output.params
+        );
+        // `stalled_at_optimum`経由の収束は最適点近傍に到達してから数反復以内に起きる。
+        assert!(output.n_iter <= 5, "n_iter={}", output.n_iter);
+    }
+
+    /// `raise_on_non_convergence=false`でも、`stalled_at_optimum`経由の収束は
+    /// `converged=true`（`SolverConverged`）として返る（`NonConvergence`の
+    /// `converged=false`降格ではない）。
+    #[test]
+    fn run_solver_newton_stalled_at_optimum_reports_converged_even_without_raising() {
+        let output = run_solver(
+            FloatingPointFloorProblem {
+                target: -1.5,
+                grad_floor: 5.0e-5,
+            },
+            Method::Newton,
+            vec![10.0],
+            50,
+            1e-6,
+            false,
+            SeparationNormCheck::Disabled,
+        )
+        .unwrap();
+
+        assert!(output.converged, "{output:?}");
+        assert!(
+            (output.params[0] - (-1.5)).abs() < 1e-6,
+            "params={:?}",
+            output.params
+        );
+    }
+
+    /// コスト関数が平坦（どのステップでも減少しない）だが勾配ノルムが大きい問題。
+    /// `λ=0`のHessianは可逆なので`regularized_newton_step`は`RegularizedStep::NoProgress`
+    /// を返すが、勾配ノルムが`NEWTON_STALL_GRAD_FACTOR * tol`を大きく超えるため
+    /// `next_iter`は`stalled_at_optimum`を立てない（Issue #291のガード条件その2:
+    /// 最適点から遠い場所での停滞を収束と誤判定しない）。結果は`NonConvergence`。
+    #[derive(Clone)]
+    struct FlatCostLargeGradientProblem;
+
+    impl CostFunction for FlatCostLargeGradientProblem {
+        type Param = Vec<f64>;
+        type Output = f64;
+
+        fn cost(&self, _param: &Self::Param) -> Result<Self::Output, OptimizerError> {
+            Ok(0.0)
+        }
+    }
+
+    impl Gradient for FlatCostLargeGradientProblem {
+        type Param = Vec<f64>;
+        type Gradient = Vec<f64>;
+
+        fn gradient(&self, _param: &Self::Param) -> Result<Self::Gradient, OptimizerError> {
+            Ok(vec![1.0])
+        }
+    }
+
+    impl Hessian for FlatCostLargeGradientProblem {
+        type Param = Vec<f64>;
+        type Hessian = Vec<Vec<f64>>;
+
+        fn hessian(&self, _param: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
+            Ok(vec![vec![1.0]])
+        }
+    }
+
+    #[test]
+    fn run_solver_newton_does_not_treat_flat_cost_with_large_gradient_as_converged() {
+        let result = run_solver(
+            FlatCostLargeGradientProblem,
+            Method::Newton,
+            vec![0.0],
+            20,
+            1e-6,
+            true,
+            SeparationNormCheck::Disabled,
+        );
+
+        assert!(
+            matches!(result, Err(MleError::NonConvergence { .. })),
+            "{result:?}"
         );
     }
 

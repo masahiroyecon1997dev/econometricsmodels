@@ -128,6 +128,18 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     末尾行へ折り込んだもの、`TobitScaling::param_jacobian`）。
 - **収束判定`tol`の既定値`1e-6`**はLogit/Probitと同じ結論（通常データでは高精度一致、境界ケース
   のみ`tol`を明示的に締める運用）。
+  - **大標本での`tol`スケール問題と副次的な収束判定（Issue #291）**: `terminate`の主判定
+    `l2_norm(gradient) < tol`は**総和勾配に対する絶対閾値**で観測数`n`でスケールしない。大 `n`
+    （実測で `n≳2·10⁵`、`β`の引き次第）では収束点近傍で勾配の丸め誤差の床が`tol`を上回り、
+    コスト関数が浮動小数点の底に達しても主判定が発火しないことがある。この状態で
+    `regularized_newton_step`が`MAX_LM_ATTEMPTS`回すべてコスト減少に失敗し、以前は誤って
+    `SingularHessian`（`ComputationError`）を返していた（`moderate_censoring, n=10⁶, seed=42` /
+    `n=2·10⁵, seed=1`で再現）。現在は`common.rs`共有の`FaerNewton`が、`λ=0`のHessianが可逆
+    （＝真に特異ではない）かつ勾配ノルムがこの反復で減っておらず（`≥0.9·前反復`）
+    収束目標の近傍にある（`<10⁴·tol`）ことを確認して**収束扱い**にする
+    （`FaerNewton::stalled_at_optimum`、`RegularizedStep::NoProgress`）。Logit/Probitの
+    大域凹な尤度ではこの経路（LMラダーの全失敗）に入らないため挙動は不変。真の特異性
+    （完全な多重共線性等、`λ=0`のHessianが可逆でない）は従来どおり`SingularHessian`。
 - **Tobitの「真の」分離は`σ→0`退化として現れる**（Logit/Probitの「係数が±∞へ発散」とは異なる）。
   そのため`run_solver`共有の`SeparationSuspected`（標準化パラメータノルム基準、`y∈{0,1}`で較正）は
   `run_solver`の`separation_norm_check: SeparationNormCheck`引数で**Tobitは`Disabled`**にし、この

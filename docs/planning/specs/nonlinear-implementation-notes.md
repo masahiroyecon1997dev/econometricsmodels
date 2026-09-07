@@ -83,6 +83,7 @@ argminの`CostFunction`/`Gradient`/`Hessian`トレイト実装と、`nonlinear`�
 
 - 対処: Newton法は独自の`Solver`実装（`FaerNewton`構造体、`argmin::core::Solver`トレイトを直接実装）とした。argminの`Solver`トレイトは`next_iter`/`terminate`が拡張ポイントとして用意されており、これ自体はargminの正規の使い方。Newtonステップの求解（`H·Δθ = g`）はfaerの列ピボットQR（`col_piv_qr`）で行う。OLSの`ensure_full_rank`と同じ相対閾値での特異性検出を行い、特異なら`MleError::SingularHessian`を返す
 - argmin組み込みの`Newton`ソルバーは収束判定を一切行わず（`max_iters`に達するまで無条件に反復する）、`terminate()`をオーバーライドしていない。`FaerNewton`は`terminate()`を実装し、`next_iter`で計算した勾配を`state.gradient(...)`で状態に保存した上で、その勾配のノルムが`tol`未満なら`TerminationReason::SolverConverged`で早期終了する
+  - **Issue #291（大標本での副次収束判定、実装済み）**: `tol`は総和勾配に対する絶対閾値で`n`スケールせず、大標本ではコスト関数が浮動小数点の底に達しても勾配ノルム基準が発火しないことがある。`regularized_newton_step`が`MAX_LM_ATTEMPTS`回すべて失敗し、かつ`λ=0`のHessianが可逆（真に特異ではない）な場合は`RegularizedStep::NoProgress`を返し、`next_iter`が勾配の停滞（前反復比`≥NEWTON_STALL_GRAD_RATIO`）＋収束目標近傍（`<NEWTON_STALL_GRAD_FACTOR·tol`）を確認して`stalled_at_optimum`を立て、`terminate()`が`SolverConverged`を返す。詳細は`docs/spec/tobit-spec.md`3.2節・`engine/src/nonlinear/CLAUDE.md`。
 - BFGS/L-BFGSは組み込みソルバーの`.with_tolerance_grad(tol)`（勾配のL2ノルムがこの値未満で収束と判定、`ArgminL2Norm`トレイト）をそのまま使う。線形探索は`MoreThuenteLineSearch`
 
 **収束点のHessian評価**: `Method`の3分岐で`Executor::run()`実行後、`OptimizationResult.problem.take_problem()`でモデル（`O`）を取り出し、最終パラメータで`.hessian()`を1回呼び直す（Newtonの最後のイテレーションで計算済みのHessianを使い回すのではなく、常に独立して再評価する。3手法で同じコードパスにできて実装がシンプルになるため）。

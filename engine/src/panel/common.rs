@@ -35,8 +35,8 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
-use faer::prelude::SolveLstsq;
 use faer::Mat;
+use faer::prelude::SolveLstsq;
 use statrs::distribution::{ChiSquared, ContinuousCDF};
 use thiserror::Error;
 

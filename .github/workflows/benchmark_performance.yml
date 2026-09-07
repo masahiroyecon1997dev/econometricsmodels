@@ -5,13 +5,24 @@ name: Benchmark (performance)
 # メモリ比較）を統一環境で実行し、結果をjob summaryに出力する。手法ごとに
 # 独立ジョブ（matrix。ジョブ単位で個別リラン可）。
 #
-# トリガーはタグpush（v*）+ workflow_dispatchのみ（ユーザー確認済み）。n=1,000,000込みの
-# フルスイープは数分かかり重いため、cd_release.ymlと同じくPR/push毎には回さない。
-# ソロ開発でコード変更頻度が低いこと、リリース単位で性能を記録できれば十分という判断。
+# トリガー:
+#  - タグpush（v*）: リリースごとに性能を記録する（従来どおり）。
+#  - main を base とするPR（＝dev⇒mainのリリースPR）: リリース作業時に、
+#    #291クラスの回帰（大標本で推定量が例外を投げる等）をタグを切る前に検知する。
+#    Tobitは compare_tobit.py の n_sweep_engine_only=(200_000, 1_000_000) を回し、
+#    _run_isolated が check=True のため .fit() が例外を投げるとジョブが失敗する。
+#    実効的なゲートにするには main のブランチ保護で
+#    「Benchmark (performance) / compare_*.py」を required status check に設定すること。
+#  - workflow_dispatch: 任意実行。
+#  通常のPR/push毎には回さない（フルスイープは数分かかり重い。ソロ開発でコード
+#  変更頻度が低く、リリース単位で足りるという判断）。
 on:
   push:
     tags:
       - "v*"
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 env:

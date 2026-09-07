@@ -179,6 +179,13 @@ class PerfAdapter:
             不能なとき（例: Tobit の py4etrics は k を増やすと数値微分ヘッシアン
             のコストが爆発し k>=8 で事実上フリーズする）、その軸だけ engine 単独
             に絞るために使う。n 軸・method 軸には影響しない。
+        n_sweep_engine_only: n 軸に追加する engine 単独計測点の n の刻み。
+            リファレンス実装が大 n で計測不能だが、engine 側の大標本での健全性
+            （収束すること・実行時間）を回帰検知したい場合に使う。cov_type は
+            `cov_types[0]`（最も軽いもの）のみ・method は `default_method` のみ。
+            `_run_isolated` は `check=True` なので、engine の `.fit()` が例外を
+            投げれば benchmark ジョブが失敗する（例: Tobit で Issue #291 の大標本
+            Hessian 特異エラーが再発した場合）。空なら追加なし。
         check_report: `report dict -> list[str]`。全スイープ完了後に呼ばれ、
             返した文字列は `_meta["warnings"]` に格納されて job summary に
             `> [!WARNING]` として表示される（`render_performance_summary`）。
@@ -199,6 +206,7 @@ class PerfAdapter:
 
     n_sweep: Sequence[int] = (1_000, 10_000, 100_000, 1_000_000)
     n_sweep_fixed_k: int = 5
+    n_sweep_engine_only: Sequence[int] = ()
     k_sweep: Sequence[int] = (5, 20)
     k_sweep_fixed_n: int = 10_000
     k_sweep_libraries: Sequence[str] | None = None
@@ -354,7 +362,12 @@ def _measure_point(
 
 
 def run_n_sweep(adapter: PerfAdapter, repeats: int, seed: int) -> list[dict]:
-    """n 軸のスイープ（k は `adapter.n_sweep_fixed_k` 固定）。"""
+    """n 軸のスイープ（k は `adapter.n_sweep_fixed_k` 固定）。
+
+    `adapter.n_sweep_engine_only` が設定されていれば、その n では engine 単独・
+    `cov_types[0]` のみ追加で計測する（リファレンス実装が大 n で計測不能な手法の
+    大標本回帰検知。`PerfAdapter` docstring 参照）。
+    """
     results = []
     for cov_type in adapter.cov_types:
         for n in adapter.n_sweep:
@@ -372,6 +385,20 @@ def run_n_sweep(adapter: PerfAdapter, repeats: int, seed: int) -> list[dict]:
                         adapter.default_method,
                     )
                 )
+    for n in adapter.n_sweep_engine_only:
+        results.append(
+            _measure_point(
+                adapter,
+                "n",
+                n,
+                adapter.n_sweep_fixed_k,
+                adapter.cov_types[0],
+                "engine",
+                repeats,
+                seed,
+                adapter.default_method,
+            )
+        )
     return results
 
 
@@ -450,6 +477,7 @@ def build_report(adapter: PerfAdapter, repeats: int, seed: int) -> dict:
             **adapter.reference_versions(),
             "n_sweep": list(adapter.n_sweep),
             "n_sweep_fixed_k": adapter.n_sweep_fixed_k,
+            "n_sweep_engine_only": list(adapter.n_sweep_engine_only),
             "k_sweep": list(adapter.k_sweep),
             "k_sweep_fixed_n": adapter.k_sweep_fixed_n,
             "cov_types": list(adapter.cov_types),

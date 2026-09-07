@@ -65,14 +65,38 @@ quasi-Newton のパフォーマンス劣化の早期検知として、`check_rep
 絶対値ではなく同一ジョブ内の比を見るため、共有ランナーの速度差に影響されない。
 #285 と同系統の劣化のガード）。
 
-## n 軸を 100,000 までに制限する理由
+## n 軸: 比較は 100,000 まで、engine 単独で 200,000 / 1,000,000 も回す
 
-- py4etrics は数値微分ゆえ大 n で極端に遅い（newton・n=100,000・k=5 で約13秒。
-  engine は約0.14秒）。n=1,000,000 は分オーダーで、両者の比較として非現実的。
-- engine 側も乱数 β の `moderate_censoring` DGP で大 n・特定 seed の際に
-  `ComputationError: the Hessian is singular and cannot be inverted` になる
-  （seed 依存。seed=42 は n=500,000 まで成功・n=1,000,000 で失敗。Issue #291。
-  Probit の #284 と同系統の engine 側頑健性の課題）。
+- **比較（engine vs py4etrics）は n=100,000 まで**。py4etrics は数値微分ゆえ大 n で
+  極端に遅く（newton・n=100,000・k=5 で約13秒。engine は約0.14秒）、n=1,000,000 は
+  分オーダーで比較として非現実的。
+- **engine 単独で n=200,000 / 1,000,000 を追加計測する**（`n_sweep_engine_only`、
+  cov_type=classical・newton・seed は `default_seed=42` のみ）。位置づけは2点で異なる:
+  - **n=1,000,000（seed=42）が Issue #291 の再現点**。#291 は乱数 β の
+    `moderate_censoring` DGP で engine が
+    `ComputationError: the Hessian is singular and cannot be inverted` になっていた
+    バグで、seed=42 では n=1,000,000 で失敗（n=500,000 までは成功）。Probit #284 と
+    同系統。修正は `d797f9b` / `5b79ffe`（`FaerNewton` の停滞収束判定）。
+    `_perf_harness._run_isolated` は `check=True` なので、**再発すれば engine の
+    `.fit()` が例外を投げて benchmark ジョブが失敗する**。
+  - **n=200,000 は n スケーリングのデータ点＋安価な早期警告**。#291 は seed 依存で、
+    seed=1 は n=200,000 で既に破綻していたが、この guard が回す seed=42 では
+    n=200,000 は #291 を再現しない。
+- **このガードの限界**（深いカバレッジは docstring 末尾「今後」および
+  `docs/performance/tobit.md`「今後の検討事項」の凍結フィクスチャ + `AER::tobit` に委ねる）:
+  - **単一 seed**（42）。#291 が示した seed 感度（seed=1 は n=200,000 で破綻）は
+    `run_cli` の `--seed` がレポート全体で1つのため、この仕組みでは検査できない。
+  - **捕捉できるのは再発時の「例外」のみ**。#291 の修正が持ち込みうる新しい失敗様式
+    （非最適点で収束宣言＝silently-wrong な収束）は、finite な結果さえ返れば
+    `check=True` を通ってしまうため、この性能スクリプトでは構造上検知できない。
+  - **発火はリリース単位**。`benchmark_performance.yml` はタグ push（`v*`）+
+    `workflow_dispatch` のみで、per-PR では回らない。solver 回帰が
+    リリースブランチにマージされても次のタグまで捕捉されない。
+- 単体テスト（`engine/src/nonlinear/common.rs` の
+  `run_solver_newton_converges_when_cost_hits_floating_point_floor_above_gradient_tol`
+  ほか）は停滞判定ロジックの模擬。実 Tobit 経路を大標本で通す自動チェックはこの
+  guard が唯一（上記の限界つき）。実行時間も `docs/performance/tobit.md` に記録され、
+  停滞検出器の誤作動による反復数増（速度劣化）は可視化される。
 
 使用例（リポジトリルートから）:
     # 一括実行（n軸・k軸両方、結果をJSONに保存）
@@ -270,9 +294,14 @@ TOBIT_ADAPTER = PerfAdapter(
     build_dataframe=_build_dataframe,
     fit_once=_fit_once,
     cluster_col="cluster_group",
-    # n 軸は 100,000 までに制限する（モジュール docstring「n 軸を 100,000 までに
-    # 制限する理由」＝ py4etrics の数値微分コストと Issue #291）。
+    # 比較（engine vs py4etrics）は n=100,000 まで（py4etrics の数値微分コスト。
+    # モジュール docstring「n 軸」参照）。
     n_sweep=(1_000, 10_000, 100_000),
+    # engine 単独の大標本計測点。n=1,000,000（seed=42）が Issue #291（大標本 Hessian
+    # 特異エラー）の再現点で、修正（d797f9b / 5b79ffe）の回帰検知を担う。n=200,000 は
+    # n スケーリングのデータ点＋早期警告（seed=42 では #291 を再現しない）。詳細・限界
+    # （単一 seed / 例外のみ捕捉 / リリース単位で発火）は docstring「## n 軸」参照。
+    n_sweep_engine_only=(200_000, 1_000_000),
     # k 軸は engine 単独（py4etrics は k>=8 で数値微分ヘッシアンが破綻する。
     # module docstring「k 軸は engine 単独で回す」参照）。
     k_sweep_libraries=("engine",),

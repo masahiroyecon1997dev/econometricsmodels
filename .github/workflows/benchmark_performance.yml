@@ -12,7 +12,9 @@ name: Benchmark (performance)
 #    Tobitは compare_tobit.py の n_sweep_engine_only=(200_000, 1_000_000) を回し、
 #    _run_isolated が check=True のため .fit() が例外を投げるとジョブが失敗する。
 #    実効的なゲートにするには main のブランチ保護で
-#    「Benchmark (performance) / compare_*.py」を required status check に設定すること。
+#    「Benchmark (performance) / benchmark gate」1個だけを required status check に
+#    設定すること（下記 benchmark-gate 集約ジョブ。matrix に手法を足しても登録の
+#    追加は不要）。
 #  - workflow_dispatch: 任意実行。
 #  通常のPR/push毎には回さない（フルスイープは数分かかり重い。ソロ開発でコード
 #  変更頻度が低く、リリース単位で足りるという判断）。
@@ -77,3 +79,25 @@ jobs:
         with:
           name: ${{ matrix.method }}-performance-results
           path: results.json
+
+  # 集約ジョブ。matrix の全 leg が success のときだけ success になる。
+  # main のブランチ保護では「このジョブ1個」を required status check にすればよく、
+  # 手法を benchmark の matrix に足しても登録の追加は不要。
+  # `if: always()` が無いと benchmark が1つでも失敗した時にこのジョブが skip され、
+  # GitHub は skip された required check を「合格」扱いにするためゲートが機能しない。
+  # always() で必ず走らせ、needs.benchmark.result（matrix の集約結果。全 leg 成功時
+  # のみ 'success'）を明示的に判定して exit 1 する。
+  benchmark-gate:
+    name: benchmark gate
+    needs: [benchmark]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all benchmark matrix jobs succeeded
+        run: |
+          result='${{ needs.benchmark.result }}'
+          echo "benchmark matrix aggregate result: $result"
+          if [ "$result" != "success" ]; then
+            echo "::error::one or more compare_<method>.py jobs did not succeed ($result)"
+            exit 1
+          fi

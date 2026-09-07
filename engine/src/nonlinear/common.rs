@@ -1084,14 +1084,22 @@ fn l2_norm(g: &[f64]) -> f64 {
 struct FaerNewton {
     tol: f64,
     /// `regularized_newton_step`が[`RegularizedStep::NoProgress`]を返し、かつ`next_iter`が
-    /// 勾配の停滞を確認したことを`terminate`へ伝えるフラグ（Issue #291）。
+    /// 「最適点に到達しこれ以上進めない」と判定したことを`terminate`へ伝えるフラグ
+    /// （Issue #291）。
     ///
     /// 主たる収束判定（`terminate`の`l2_norm(gradient) < tol`）は**総和勾配に対する絶対
     /// 閾値**であり観測数`n`でスケールしない。大標本では収束点近傍で勾配の丸め誤差の床が
     /// `tol`（既定`1e-6`）を上回り、コスト関数が浮動小数点の底に達しても勾配基準が
     /// 永久に発火しないことがある（Issue #291。`n=200_000`で床≈`1·tol`、`n=1_000_000`で
-    /// 床≈`36·tol`を実測）。その状態でも`H⁻¹g`が実質ゼロなら最適点に到達しているため、
-    /// このフラグ経由で収束として扱う。`next_iter`が毎反復書き換える。
+    /// 床≈`36·tol`を実測）。その状態で勾配の停滞・目標近傍・コストHessianの正定値性
+    /// （`next_iter`の3条件）がそろえば内点最大に到達しているため、このフラグ経由で
+    /// 収束として扱う。
+    ///
+    /// `next_iter`が毎反復書き換え、`terminate`が読む。argminの`Executor`が各反復で
+    /// `next_iter`→`terminate`の順に呼ぶ契約に依存している（`terminate`が`next_iter`で
+    /// 立てたフラグを同じ反復内で見られる前提。argminバージョン更新時はこの順序を要確認）。
+    /// `FaerNewton`は`run_solver`内で`method`ごとに毎回新規構築されるため、`run_solver`
+    /// 呼び出しをまたぐフラグの持ち越しは無い。
     stalled_at_optimum: bool,
 }
 
@@ -1127,6 +1135,13 @@ const NEWTON_STALL_GRAD_RATIO: f64 = 0.9;
 /// Issue #291の膠着点の勾配ノルムは`n=200_000`で約`1·tol`、`n=1_000_000`で約`36·tol`
 /// であり、`1e4`の余裕があればおよそ`n≲3e7`までカバーできる一方、最適化初期の
 /// 勾配ノルム（実測で`1e2`〜`1e6`オーダー）は確実に除外できる。
+///
+/// この「初期の勾配ノルムは`1e2`〜`1e6`」という前提は、`run_solver`の呼び出し元
+/// （Logit/Probitの`standardize_columns`、Tobitの`TobitScaling`）が**設計行列を標準化した
+/// 空間で最適化する**ことに依存している。非標準化スケール（`x`が極端に大きい等）で
+/// `run_solver`を呼ぶ手法を将来追加する場合、この定数の妥当性は再検証が必要
+/// （rust-reviewer指摘。より根本的にはNewton減少量`√(gᵀH⁻¹g)`のようなスケール不変な
+/// 停止基準への置き換えが望ましい。`docs/planning/specs/nonlinear-implementation-notes.md`）。
 const NEWTON_STALL_GRAD_FACTOR: f64 = 1e4;
 
 impl<O> Solver<O, NewtonState> for FaerNewton
@@ -1193,22 +1208,38 @@ where
                     let next_grad = problem.gradient(&next)?;
                     (next, next_grad)
                 }
-                RegularizedStep::NoProgress(next) => {
+                RegularizedStep::NoProgress(raw_candidate) => {
                     // LMラダーがコストを減少させるステップを1つも見つけられなかった
                     // （＝コスト関数が浮動小数点の底に到達、Issue #291）。ただし`λ=0`の
                     // Hessianは可逆なので、真に特異な問題（`SingularHessian`）ではない。
-                    // 勾配ノルムが (1) この反復で実質的に減っておらず、かつ (2) 収束目標
-                    // `tol`の近傍にある なら、最適点に到達しこれ以上進めないとみなして
-                    // 収束を通知する（`terminate`のフォールバック）。真の停滞（最適点から
-                    // 遠い場所で勾配が大きいまま）は (2) で除外される。
-                    let next_grad = problem.gradient(&next)?;
-                    let next_grad_norm = l2_norm(&next_grad);
-                    if next_grad_norm >= NEWTON_STALL_GRAD_RATIO * l2_norm(&grad)
-                        && next_grad_norm < NEWTON_STALL_GRAD_FACTOR * self.tol
-                    {
+                    // 次の3条件がそろったとき「最適点に到達しこれ以上進めない」とみなして
+                    // 収束を通知する（`terminate`のフォールバック）:
+                    //   (1) 生のNewtonステップを1回進めても勾配ノルムが実質的に減らない
+                    //       （＝これ以上詰められない）。
+                    //   (2) 勾配ノルムが収束目標`tol`の近傍にある（`NEWTON_STALL_GRAD_FACTOR`
+                    //       倍未満）。最適点から遠い場所での停滞は (2) で除外される。
+                    //   (3) コスト関数（負の対数尤度）のHessianが正定値
+                    //       （＝内点最大の2階条件）。`newton_step`の可逆性判定だけでは
+                    //       鞍点（可逆だが不定符号）を弾けないため（Tobitの`(β, logσ)`
+                    //       尤度は大域凹ではない、`docs/spec/tobit-spec.md`3.1節）、
+                    //       ここで`llt`により明示的に確認する（rust-reviewer指摘）。
+                    let raw_grad = problem.gradient(&raw_candidate)?;
+                    let raw_grad_norm = l2_norm(&raw_grad);
+                    let stalled = raw_grad_norm >= NEWTON_STALL_GRAD_RATIO * l2_norm(&grad)
+                        && raw_grad_norm < NEWTON_STALL_GRAD_FACTOR * self.tol
+                        && cost_hessian_is_positive_definite(&hessian);
+                    if stalled {
+                        // 最適点に到達しており、これ以上動かさない（現在点をそのまま返す。
+                        // 生のNewtonステップは丸め誤差オーダーでコストを狭義には減少
+                        // させないため適用しない）。
                         self.stalled_at_optimum = true;
+                        (param, grad)
+                    } else {
+                        // まだ収束と断定できない（鞍点、または勾配がまだ目標から遠い等）。
+                        // 生のNewtonステップを適用して次反復へ進む。降下方向が最後まで
+                        // 見つからなければ`max_iter`到達で`NonConvergence`になる。
+                        (raw_candidate, raw_grad)
                     }
-                    (next, next_grad)
                 }
             };
         let state = state.param(new_param).gradient(new_grad);
@@ -1271,11 +1302,13 @@ where
 ///
 /// **`MAX_LM_ATTEMPTS`回すべて失敗した場合の分岐（Issue #291）**: `λ=0`（正則化前）の
 /// `newton_step`が成功していた（Hessianが数値的に可逆）かどうかで結果を分ける。
-/// - 可逆だった場合 → [`RegularizedStep::NoProgress`]。これは「Hessianは正常だが、
-///   コスト関数が浮動小数点の底に達しており`λ`をどれだけ増やしてもコストを狭義に
-///   減少させられない」状態で、大標本で収束点近傍に到達したときに起こる（Issue #291。
-///   総和勾配の丸め誤差の床が`tol`を上回り`terminate`の勾配基準が発火しないケース）。
-///   呼び出し元（`FaerNewton::next_iter`）が勾配の停滞を追加確認した上で収束として扱う。
+/// - 可逆だった場合 → [`RegularizedStep::NoProgress`]。これは「Hessianは可逆だが、
+///   `λ`をどれだけ増やしてもコストを狭義に減少させられない」状態。典型的には大標本で
+///   収束点近傍に到達し、コスト関数が浮動小数点の底に達したケース（Issue #291。総和
+///   勾配の丸め誤差の床が`tol`を上回り`terminate`の勾配基準が発火しない）。呼び出し元
+///   （`FaerNewton::next_iter`）が勾配の停滞・目標近傍・コストHessianの正定値性を
+///   追加確認し、そろえば収束、そうでなければ（鞍点等）生ステップを適用して反復を続け、
+///   最終的に`NonConvergence`になる。
 /// - `λ=0`で`newton_step`が特異だった場合 → `SingularHessian`（完全な多重共線性等、
 ///   `run_solver_newton_returns_singular_hessian_error`のケース。既存のエラー型・意味を
 ///   変えない）。
@@ -1284,9 +1317,10 @@ enum RegularizedStep {
     /// `θ - Δθ`。
     Accepted(Vec<f64>),
     /// `MAX_LM_ATTEMPTS`回試してもコストを減少させるステップが無かったが、`λ=0`の
-    /// Hessianは可逆だった（＝真に特異ではなく、コスト関数が浮動小数点の底に到達した
-    /// 状態、Issue #291）。中身は`λ=0`の生のNewtonステップを適用したパラメータ
-    /// （最適点との差は丸め誤差オーダー）。
+    /// Hessianは可逆だった（＝真に特異ではない、Issue #291）。中身は`λ=0`の生の
+    /// Newtonステップを適用した候補パラメータ`θ - H⁻¹g`（最適点近傍なら差は丸め誤差
+    /// オーダー）。`FaerNewton::next_iter`がこの候補で停滞条件を判定し、収束と判断した
+    /// 場合は候補を適用せず現在点`θ`にとどまる。
     NoProgress(Vec<f64>),
 }
 
@@ -1301,18 +1335,18 @@ where
     O: CostFunction<Param = Vec<f64>, Output = f64>,
 {
     let k = grad.len();
+    // ステップ`Δθ`を現在のパラメータに適用して候補`θ - Δθ`を作る。
+    let apply_step =
+        |step: &[f64]| -> Vec<f64> { param.iter().zip(step).map(|(p, s)| p - s).collect() };
+
     // `λ=0`（正則化前）のNewtonステップが可逆だったかを、`MAX_LM_ATTEMPTS`回すべて
     // 失敗したときの分岐（`NoProgress` vs `SingularHessian`、Issue #291）のために覚えておく。
     // 可逆なら適用後のパラメータ`θ - H⁻¹g`も控える（`NoProgress`で返す候補。生の局所
     // 2次モデルの最良推定で、最適点との差は丸め誤差オーダー）。ループ初回（`λ=0`）は
     // この値を使い回し、`newton_step`の二重計算を避ける。
-    let raw_newton_candidate = newton_step(hessian, grad).ok().map(|step| {
-        param
-            .iter()
-            .zip(&step)
-            .map(|(p, s)| p - s)
-            .collect::<Vec<f64>>()
-    });
+    let raw_newton_candidate = newton_step(hessian, grad)
+        .ok()
+        .map(|step| apply_step(&step));
 
     let mut lambda = 0.0_f64;
     for attempt in 0..MAX_LM_ATTEMPTS {
@@ -1326,13 +1360,9 @@ where
                         .collect()
                 })
                 .collect();
-            newton_step(&regularized, grad).ok().map(|step| {
-                param
-                    .iter()
-                    .zip(&step)
-                    .map(|(p, s)| p - s)
-                    .collect::<Vec<f64>>()
-            })
+            newton_step(&regularized, grad)
+                .ok()
+                .map(|step| apply_step(&step))
         };
         if let Some(candidate) = candidate
             && let Ok(candidate_cost) = problem.cost(&candidate)
@@ -1356,6 +1386,22 @@ where
         Some(candidate) => Ok(RegularizedStep::NoProgress(candidate)),
         None => Err(MleError::SingularHessian.into()),
     }
+}
+
+/// コスト関数（負の対数尤度`-ℓ`）のHessianが正定値か（Cholesky分解`llt`が成功するか）。
+/// 真のMLE最大点＝`-ℓ`の最小点ではこれが正定値になる（内点最大の2階十分条件）。
+///
+/// `FaerNewton::next_iter`が`RegularizedStep::NoProgress`を`stalled_at_optimum`（収束扱い）
+/// に昇格させる前の最終確認に使う（Issue #291、rust-reviewer指摘）。`newton_step`の
+/// 列ピボットQRは可逆性（フルランク）しか見ないため、鞍点（可逆だが不定符号）でも
+/// `NoProgress`が返りうる。Tobitの`(β, logσ)`尤度は大域凹性が保証されない
+/// （`docs/spec/tobit-spec.md`3.1節）ため、勾配ノルムの小ささだけを根拠に収束と
+/// 判定すると、鞍点で`cov_type="opg"`（`-H`を使わない）が誤った推定値を黙って返す
+/// リスクがある。ここで正定値性を明示的に確認して内点最大でのみ収束扱いにする。
+fn cost_hessian_is_positive_definite(hessian: &[Vec<f64>]) -> bool {
+    let k = hessian.len();
+    let h = Mat::from_fn(k, k, |i, j| hessian[i][j]);
+    h.llt(Side::Lower).is_ok()
 }
 
 /// Newtonステップ`Δθ = H⁻¹g`を求める。`H`は対称とは限らない（収束点から離れた場所では
@@ -2114,6 +2160,63 @@ mod tests {
             FlatCostLargeGradientProblem,
             Method::Newton,
             vec![0.0],
+            20,
+            1e-6,
+            true,
+            SeparationNormCheck::Disabled,
+        );
+
+        assert!(
+            matches!(result, Err(MleError::NonConvergence { .. })),
+            "{result:?}"
+        );
+    }
+
+    /// `λ=0`のHessianは可逆だが**不定符号**（鞍点）で、勾配ノルムは小さく（条件(1)(2)は
+    /// 満たす）コスト関数は平坦。`regularized_newton_step`は`RegularizedStep::NoProgress`を
+    /// 返すが、`next_iter`のコストHessian正定値チェック（条件(3)、`cost_hessian_is_
+    /// positive_definite`）が偽になるため`stalled_at_optimum`を立てない（Issue #291の
+    /// 2階条件ガード、rust-reviewer指摘）。結果は`NonConvergence`——鞍点を「収束」として
+    /// 黙って推定値を返さない。
+    #[derive(Clone)]
+    struct IndefiniteHessianStallProblem;
+
+    impl CostFunction for IndefiniteHessianStallProblem {
+        type Param = Vec<f64>;
+        type Output = f64;
+
+        fn cost(&self, _param: &Self::Param) -> Result<Self::Output, OptimizerError> {
+            Ok(0.0)
+        }
+    }
+
+    impl Gradient for IndefiniteHessianStallProblem {
+        type Param = Vec<f64>;
+        type Gradient = Vec<f64>;
+
+        fn gradient(&self, _param: &Self::Param) -> Result<Self::Gradient, OptimizerError> {
+            // `tol=1e-6 < 5e-5 < NEWTON_STALL_GRAD_FACTOR·tol = 1e-2`（条件(2)を満たす）。
+            Ok(vec![5.0e-5, 0.0])
+        }
+    }
+
+    impl Hessian for IndefiniteHessianStallProblem {
+        type Param = Vec<f64>;
+        type Hessian = Vec<Vec<f64>>;
+
+        fn hessian(&self, _param: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
+            // 可逆（`det = -1`）だが不定符号（固有値 `+1`, `-1`）。`col_piv_qr`は可逆と
+            // 判定するが`llt`（Cholesky）は失敗する。
+            Ok(vec![vec![1.0, 0.0], vec![0.0, -1.0]])
+        }
+    }
+
+    #[test]
+    fn run_solver_newton_does_not_treat_indefinite_hessian_stall_as_converged() {
+        let result = run_solver(
+            IndefiniteHessianStallProblem,
+            Method::Newton,
+            vec![0.0, 0.0],
             20,
             1e-6,
             true,

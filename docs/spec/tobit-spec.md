@@ -135,11 +135,15 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     `regularized_newton_step`が`MAX_LM_ATTEMPTS`回すべてコスト減少に失敗し、以前は誤って
     `SingularHessian`（`ComputationError`）を返していた（`moderate_censoring, n=10⁶, seed=42` /
     `n=2·10⁵, seed=1`で再現）。現在は`common.rs`共有の`FaerNewton`が、`λ=0`のHessianが可逆
-    （＝真に特異ではない）かつ勾配ノルムがこの反復で減っておらず（`≥0.9·前反復`）
-    収束目標の近傍にある（`<10⁴·tol`）ことを確認して**収束扱い**にする
-    （`FaerNewton::stalled_at_optimum`、`RegularizedStep::NoProgress`）。Logit/Probitの
-    大域凹な尤度ではこの経路（LMラダーの全失敗）に入らないため挙動は不変。真の特異性
-    （完全な多重共線性等、`λ=0`のHessianが可逆でない）は従来どおり`SingularHessian`。
+    （＝真に特異ではない）かつ次の3条件——(1) 生Newtonステップを1回進めても勾配ノルムが
+    減らない（`≥0.9·前反復`）、(2) 勾配ノルムが収束目標近傍（`<10⁴·tol`）、(3) **コスト関数
+    （負の対数尤度）のHessianが正定値**（`llt`成功＝内点最大の2階条件。`(β, logσ)`尤度は
+    大域凹でなく鞍点で `NoProgress` が返りうるため必須）——を確認して**収束扱い**にする
+    （`FaerNewton::stalled_at_optimum`、`RegularizedStep::NoProgress`。現在点をそのまま返し
+    生ステップは適用しない）。3条件が揃わなければ生ステップを適用して反復継続し、
+    `max_iter`到達で`NonConvergence`。Logit/Probitの大域凹な尤度ではこの経路（LMラダーの
+    全失敗）に入らないため挙動は不変。真の特異性（完全な多重共線性等、`λ=0`のHessianが
+    可逆でない）は従来どおり`SingularHessian`。
 - **Tobitの「真の」分離は`σ→0`退化として現れる**（Logit/Probitの「係数が±∞へ発散」とは異なる）。
   そのため`run_solver`共有の`SeparationSuspected`（標準化パラメータノルム基準、`y∈{0,1}`で較正）は
   `run_solver`の`separation_norm_check: SeparationNormCheck`引数で**Tobitは`Disabled`**にし、この

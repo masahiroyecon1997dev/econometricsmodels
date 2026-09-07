@@ -325,6 +325,9 @@ impl GmmEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, IvError> {
+        // faer のグローバル並列度を Par::Seq に固定する（Issue #283、`crate::parallelism`）。
+        crate::parallelism::ensure_serial();
+
         if !(confidence_level > 0.0 && confidence_level < 1.0) {
             return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
         }

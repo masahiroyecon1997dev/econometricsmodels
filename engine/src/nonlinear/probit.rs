@@ -521,6 +521,9 @@ impl ProbitEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, MleError> {
+        // faer のグローバル並列度を Par::Seq に固定する（Issue #283、`crate::parallelism`）。
+        crate::parallelism::ensure_serial();
+
         let n = input.nobs();
         let k = input.k();
         validate_fit_preconditions(

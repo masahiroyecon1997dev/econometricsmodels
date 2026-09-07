@@ -348,6 +348,9 @@ impl OlsEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, LeastSquaresError> {
+        // faer のグローバル並列度を Par::Seq に固定する（Issue #283、`crate::parallelism`）。
+        crate::parallelism::ensure_serial();
+
         if !(confidence_level > 0.0 && confidence_level < 1.0) {
             return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
         }
@@ -1375,6 +1378,26 @@ mod tests {
             result.unwrap_err(),
             LeastSquaresError::Common(CommonError::ComputationFailed(_))
         ));
+    }
+
+    #[test]
+    fn fit_pins_faer_global_parallelism_to_seq() {
+        // Issue #283: `fit()` 冒頭の `crate::parallelism::ensure_serial()` が faer の
+        // グローバル並列度を `Par::Seq` へ引き戻すことの回帰ガード（linear 系統代表）。
+        // 別テストが既に `Seq` にしている可能性があるため、まず `Rayon` に戻してから
+        // `fit()` を通す。ここで扱う設計行列は極小なので、この一時的な `Rayon` 設定が
+        // #283 の病理（大標本 tall-skinny での不安定化）を招くことはない。
+        faer::set_global_parallelism(faer::Par::rayon(0));
+
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0, 7.0, 6.0];
+        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
+        let input =
+            OlsInput::from_columns(&y, &[x1], vec!["x1".to_string()], true, "y".to_string())
+                .unwrap();
+
+        let _ = OlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
+
+        assert!(matches!(faer::get_global_parallelism(), faer::Par::Seq));
     }
 
     /// `wald_test_last_columns`が「切片を除く全傾き係数」（`q = df_model`）を対象に呼ばれた

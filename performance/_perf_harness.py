@@ -34,20 +34,22 @@
   ラグ数を `FitContext.hac_lags` で渡す。ラグ選択方式自体の違いではなく、
   Newey-West計算そのものの性能差を見るため。
 - **スレッド数を1に固定する**: `_run_isolated()` がワーカーサブプロセスの環境変数で
-  engine（faer/rayon）・リファレンス実装（numpy/BLAS）とも1スレッドに固定する
-  （`_SINGLE_THREAD_ENV`）。多コア機で線形代数バックエンドのスレッドプールが負荷下で
-  競合し、engine の classical n=1,000,000 の実行時間が単一スレッド時の20倍以上
-  （約0.15秒→3〜4秒）に膨れ上がり計測が不安定になる現象を実測で確認したため
-  （`docs/performance/ols.md`「既知の限界」）。単一スレッドに揃えることで
-  「Rustコアの計算効率 vs Python+BLAS」という比較の主目的を、スレッドプール挙動の
-  環境差から切り離す。
+  engine・リファレンス実装（numpy/BLAS）とも1スレッドに固定する
+  （`_SINGLE_THREAD_ENV`）。engine 側は Issue #283 対応で faer のグローバル並列度を
+  常時 `Par::Seq` にした（`engine::parallelism::ensure_serial`）ため
+  `RAYON_NUM_THREADS` は実質効かないが、リファレンス実装と対称（両者とも逐次）に
+  するため環境変数の設定は維持している。#283 以前は engine の classical
+  n=1,000,000 が全コア並列＋負荷下で中央値24.9秒（単一スレッド比 約190倍）に
+  膨れ上がる現象があった（`docs/performance/ols.md`「既知の限界」）。単一スレッドに
+  揃えることで「Rustコアの計算効率 vs Python+BLAS」という比較の主目的を、
+  スレッドプール挙動の環境差から切り離す。
 
 ## 既知の限界
 
 - 単一スレッド固定のため、線形代数バックエンドのマルチスレッド化による高速化は
-  この比較には現れない（多コアでの実利用の性能特性とは別軸）。engine 側の
-  マルチスレッド時の不安定性そのものは別途エンジン側で調査する
-  （`docs/planning/specs/refactoring-candidates.md`）。
+  この比較には現れない（多コアでの実利用の性能特性とは別軸）。ただし engine の
+  設計行列は tall-skinny 中心で faer の暗黙並列化はそもそも高速化せず逆効果だった
+  ため、グローバル並列度を `Par::Seq` に固定済み（Issue #283、対応済み）。
 """
 
 from __future__ import annotations

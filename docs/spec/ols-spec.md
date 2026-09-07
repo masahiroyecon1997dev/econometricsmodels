@@ -211,6 +211,9 @@ $$
 releaseビルド（`maturin develop --release`）必須（debugビルドは最大140倍遅い）。
 classical/HC1/clusterはstatsmodels/pyfixest以上に高速、HACも大規模データではほぼ互角。
 メモリはengineが一貫して最小。詳細な実測データは[`../performance/ols.md`](../performance/ols.md)参照。
+faerのグローバル並列度は`engine::parallelism::ensure_serial()`で常時`Par::Seq`に固定
+している（tall-skinnyな設計行列では暗黙の全コア並列化が高速化せず、多コア機・負荷下で
+不安定になったため。Issue #283、`engine/src/linear/CLAUDE.md`「faerのグローバル並列度」）。
 
 ## 4. 未実装・未対応
 

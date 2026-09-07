@@ -7,6 +7,10 @@
 - `common.rs`: `PanelError`（FE/RE共有エラー型、Issue #172）＋ `PanelDimension` enum ＋ `quasi_demean_column`（θパラメータ化した準偏差変換、Issue #173）＋ `hausman_statistic`（古典的ハウスマン検定の統計量、Issue #174）。
 - `fe.rs` / `re.rs` は未着手。いずれも呼び出し側は未実装で、`quasi_demean_column`/`hausman_statistic` は `#[cfg(test)] mod tests` からのみ呼ばれる（`pub fn` なので `dead_code` にはならない）。
 
+## faerのグローバル並列度（Issue #283）
+
+- FE/RE の `fit()` エントリを実装するときは、**冒頭で `crate::parallelism::ensure_serial()` を呼ぶこと**（faer のグローバル並列度を `Par::Seq` に固定。OLS/WLS/Logit/Probit/Tobit/2SLS/GMM の各 `fit()` と同じ）。理由・背景は `engine/src/linear/CLAUDE.md`「faerのグローバル並列度」と `.claude/rules/rust-style.md`「パフォーマンス」節を参照。FE は within 変換後に `OlsEstimator::fit` へ委譲するため OLS 側の呼び出しでも一応担保されるが、`cargo test -p engine` で `PanelEstimator::fit` を直接叩く経路との統一のため各 `fit()` からも呼ぶ。回帰ガード（`fit_pins_faer_global_parallelism_to_seq`）も他系統に倣って1本入れる。
+
 ## 設計上の決定（再発見コスト削減）
 
 - **`engine` はpolars非依存。`panel-api-design.md` 6.1節の「polarsの`group_by`で実装」は`engine_pybind`層／抽出後配列の話**。`engine`側のグループ集約は、クラスター列と同じく `entity: &[String]`（長さ`n`、行はパネル観測順）を受け取る。

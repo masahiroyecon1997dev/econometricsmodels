@@ -61,6 +61,9 @@ impl WlsEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, LeastSquaresError> {
+        // faer のグローバル並列度を Par::Seq に固定する（Issue #283、`crate::parallelism`）。
+        crate::parallelism::ensure_serial();
+
         let input = OlsInput::from_columns_weighted(
             y,
             x_columns,

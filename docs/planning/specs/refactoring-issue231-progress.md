@@ -142,7 +142,8 @@
 **Issue化した項目**（バグ調査に近く候補メモの範囲外と判断し、個別Issueへ切り出し）:
 
 - 項目44: engine（faer/rayon）のマルチスレッド線形代数が多コア機・負荷下で
-  シングルスレッド比20倍以上遅くなり不安定になる件 → Issue #283。
+  シングルスレッド比20倍以上遅くなり不安定になる件 → Issue #283（対応済み:
+  faerのグローバル並列度を`Par::Seq`固定。`engine::parallelism::ensure_serial`）。
 - 項目45: engineのProbitが、statsmodelsが収束できる大標本条件でHessian
   特異エラーを出す件 → Issue #284。
 - 項目46: engineのLogit/ProbitのBFGS/L-BFGSがNewton・statsmodelsの同method

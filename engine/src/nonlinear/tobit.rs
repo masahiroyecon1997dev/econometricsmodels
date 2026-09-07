@@ -1355,6 +1355,9 @@ impl TobitEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, MleError> {
+        // faer のグローバル並列度を Par::Seq に固定する（Issue #283、`crate::parallelism`）。
+        crate::parallelism::ensure_serial();
+
         validate_confidence_level(confidence_level)?;
         validate_max_iter(max_iter)?;
         validate_tol(tol)?;

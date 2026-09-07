@@ -483,6 +483,9 @@ impl LogitEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, MleError> {
+        // faer のグローバル並列度を Par::Seq に固定する（Issue #283、`crate::parallelism`）。
+        crate::parallelism::ensure_serial();
+
         let n = input.nobs();
         let k = input.k();
         validate_fit_preconditions(
@@ -1081,6 +1084,28 @@ mod tests {
         );
         // 切片のみの1次元凹関数のNewton法は数回で収束するはず
         assert!(estimator.n_iter() <= 10, "n_iter={}", estimator.n_iter());
+    }
+
+    #[test]
+    fn fit_pins_faer_global_parallelism_to_seq() {
+        // Issue #283: `fit()` 冒頭の `crate::parallelism::ensure_serial()` が faer の
+        // グローバル並列度を `Par::Seq` へ引き戻すことの回帰ガード（nonlinear 系統代表）。
+        // 別テストが `Seq` にしている可能性があるため、まず `Rayon` に戻してから通す。
+        // 設計行列は極小なので一時的な `Rayon` 設定は #283 の病理を招かない。
+        faer::set_global_parallelism(faer::Par::rayon(0));
+
+        let _ = LogitEstimator::fit(
+            small_input(),
+            Method::Newton,
+            35,
+            1e-6,
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        assert!(matches!(faer::get_global_parallelism(), faer::Par::Seq));
     }
 
     /// 切片のみモデルは観測情報行列も閉じた形で書ける: 全観測で`p_i=ȳ`（closed form）

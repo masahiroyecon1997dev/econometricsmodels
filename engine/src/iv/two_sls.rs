@@ -163,6 +163,9 @@ impl TwoSlsEstimator {
     /// 識別可能性の検証をここで行う理由は`IvInput`の構造体docコメント参照
     /// （`OlsEstimator::fit`が`n<=k`を検証するのと同じ層分け、ユーザー確認済み）。
     pub fn fit(input: IvInput, cov_type: CovType, confidence_level: f64) -> Result<Self, IvError> {
+        // faer のグローバル並列度を Par::Seq に固定する（Issue #283、`crate::parallelism`）。
+        crate::parallelism::ensure_serial();
+
         if input.k_instruments() < input.k_endog() {
             return Err(IvError::InsufficientInstruments {
                 n_instruments: input.k_instruments(),
@@ -908,6 +911,33 @@ mod tests {
         assert_eq!(estimator.param_names(), ["const", "x_endog"]);
         assert!((*estimator.params().get(0, 0) - 1.0).abs() < 1e-8);
         assert!((*estimator.params().get(1, 0) - 2.0).abs() < 1e-8);
+    }
+
+    #[test]
+    fn fit_pins_faer_global_parallelism_to_seq() {
+        // Issue #283: `fit()` 冒頭の `crate::parallelism::ensure_serial()` が faer の
+        // グローバル並列度を `Par::Seq` へ引き戻すことの回帰ガード（iv 系統代表）。
+        // 別テストが `Seq` にしている可能性があるため、まず `Rayon` に戻してから通す。
+        // 設計行列は極小なので一時的な `Rayon` 設定は #283 の病理を招かない。
+        faer::set_global_parallelism(faer::Par::rayon(0));
+
+        let (y, x_endog, z) = perfectly_predicted_endog_data();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            &[x_endog],
+            vec!["x_endog".to_string()],
+            &[z],
+            vec!["z".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let _ = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
+
+        assert!(matches!(faer::get_global_parallelism(), faer::Par::Seq));
     }
 
     #[test]

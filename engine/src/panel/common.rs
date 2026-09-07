@@ -32,7 +32,7 @@
 //! そのまま返す**（R `plm::phtest`と同じ挙動、7.3節。差行列が数値的に特異なときだけ
 //! `CommonError::ComputationFailed`）。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 use faer::prelude::SolveLstsq;
@@ -243,12 +243,13 @@ pub fn quasi_demean_column(
         "entity length must match column length (engine_pybind contract)"
     );
 
-    // エンティティごとに (合計, 件数) を集約する。集約は`BTreeMap`で行う
-    // （`engine/src/linear/CLAUDE.md`「クラスターのグループ化は`BTreeMap`」——
-    // グループ単位の反復順序が浮動小数点加算の非結合性で結果に効く箇所の統一方針。
-    // 本関数は各エンティティの和を観測順に積むため厳密には反復順序非依存だが、
-    // パネル系のグループ集約はこの方針で揃える）。
-    let mut sums: BTreeMap<&str, (f64, usize)> = BTreeMap::new();
+    // エンティティごとに (合計, 件数) を集約する。ここは`HashMap`でよい（`cluster_cov_params`
+    // の`BTreeMap`必須とは事情が異なる）: あるエンティティの和は観測順（＝入力行の固定順）に
+    // 積まれ、各行の変換結果もそのエンティティの和だけに依存する。エンティティ「間」を
+    // またぐ加算（`Σ_g S_g S_g'`のようにグループ順序が浮動小数点丸めに効く演算）は無いため、
+    // 反復順序に関わらずビット単位で決定的。`HashMap`にすることで集約・引き当てが
+    // O(n log G) → O(n)（G = エンティティ数）になる（rust-reviewer指摘）。
+    let mut sums: HashMap<&str, (f64, usize)> = HashMap::new();
     for (value, id) in col.iter().zip(entity.iter()) {
         let entry = sums.entry(id.as_str()).or_insert((0.0, 0));
         entry.0 += *value;
@@ -256,7 +257,7 @@ pub fn quasi_demean_column(
     }
 
     // エンティティ単位で `θ_i · ȳ_i.`（各行から引く量）を先に求めておく。
-    let shift_by_entity: BTreeMap<&str, f64> = sums
+    let shift_by_entity: HashMap<&str, f64> = sums
         .iter()
         .map(|(id, (sum, count))| {
             let mean = sum / *count as f64;
@@ -292,13 +293,21 @@ pub fn quasi_demean_column(
 ///   渡す（このalignは7.3節の通り呼び出し側の責務）。
 ///
 /// # 戻り値
-/// `(stat, df, p_value)`。`df == beta_fe.len()`、`p_value = 1 - χ²_df.cdf(stat)`。
+/// `(stat, df, p_value)`。`df == beta_fe.len()`、`p_value` は自由度 `df` のカイ二乗分布の
+/// 上側確率 `χ²_df.sf(stat)`（＝ `1 - cdf`。`stat` が大きく H0 を強く棄却する場合に
+/// `1.0 - cdf(stat)` だと生じる桁落ちを避けるため、`statrs` の `sf`——正則化上側不完全
+/// ガンマの直接計算——を使う。`iv/gmm.rs` 等の既存箇所は `1.0 - cdf` のままで、一括移行は
+/// 別issue）。
 ///
 /// **`Var(β_FE) - Var(β_RE)`は理論上は半正定値だが、有限標本では非正定値になり`stat`が
-/// 負になりうる**。その場合も`stat`をそのまま返す（`p_value`は`stat <= 0`で`1.0`）。
-/// 参照実装 R `plm::phtest`と同じ挙動で、「classical HausmanのPSD仮定が有限標本で
-/// 崩れている」ことを示す情報として呼び出し側に委ねる（`panel-api-design.md` 7.3節、
-/// Issue #174）。
+/// 負になりうる**。その場合も`stat`をそのまま返す（`sf` は `stat <= 0` で `1.0` を返すため
+/// `p_value == 1.0`）。参照実装 R `plm::phtest`と同じ挙動で、「classical HausmanのPSD仮定が
+/// 有限標本で崩れている」ことを示す情報として呼び出し側に委ねる（`panel-api-design.md`
+/// 7.3節、Issue #174）。
+///
+/// `df` には常に `k`（渡された係数の数）を使う。`Var(β_FE) - Var(β_RE)` が閾値は通過するが
+/// 実効ランクが `k` 未満のとき、`stat` と `df` に不整合が生じうる（R `plm::phtest` も同じ
+/// 制約）。
 ///
 /// # Errors
 /// `Var(β_FE) - Var(β_RE)`が数値的に特異（`col_piv_qr`のR対角成分が相対閾値以下、
@@ -360,7 +369,10 @@ pub fn hausman_statistic(
 
     let chi2 =
         ChiSquared::new(k as f64).map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
-    let p_value = 1.0 - chi2.cdf(stat);
+    // `1.0 - chi2.cdf(stat)` ではなく `sf`（正則化上側不完全ガンマの直接計算）を使う。
+    // 大きい `stat` で `cdf ≈ 1` になり小さいp値の相対精度が失われるのを避けるため。
+    // `stat <= 0` では `sf` も `1.0` を返すので、統計量が負のときの挙動は変わらない。
+    let p_value = chi2.sf(stat);
 
     Ok((stat, k, p_value))
 }
@@ -641,6 +653,37 @@ mod tests {
         let _ = quasi_demean_column(&col, &entity, &theta);
     }
 
+    #[test]
+    fn quasi_demean_column_single_group_with_theta_one_is_all_zero() {
+        // 全行が同一エンティティ（グループが1つだけ）＋ θ=1 → 全行がグループ平均に
+        // 一致するため出力は全ゼロ（この列だけでは within 変換後に情報が残らない。
+        // 6.7節の分散ゼロ検証・6.5節のsingleton検証は消費側 fe.rs の責務）。
+        let entity = entities(&["a", "a", "a", "a"]);
+        let col = [3.0, 5.0, 7.0, 9.0]; // mean = 6.0
+        let theta = theta_map(&[("a", 1.0)]);
+
+        let out = quasi_demean_column(&col, &entity, &theta);
+
+        assert_eq!(out, vec![-3.0, -1.0, 1.0, 3.0]);
+        assert!(out.iter().map(|v| v.abs()).sum::<f64>() > 0.0); // 各行は非ゼロ
+        assert!(out.iter().sum::<f64>().abs() < 1e-12); // 和はゼロ
+    }
+
+    #[test]
+    fn quasi_demean_column_applies_theta_outside_unit_interval_verbatim() {
+        // この関数は θ の値域（RE では [0, 1)）を検証しない。負・>1 でも式どおり
+        // `col[i] - θ_i · ȳ_i.` を適用する（値域の担保は θ を計算する RE 側の責務）。
+        // a: mean = 10、θ_a = -0.5 → 引く量 -5   → col[i] + 5
+        // b: mean = 20、θ_b =  2.0 → 引く量 40   → col[i] - 40
+        let entity = entities(&["a", "a", "b", "b"]);
+        let col = [8.0, 12.0, 15.0, 25.0];
+        let theta = theta_map(&[("a", -0.5), ("b", 2.0)]);
+
+        let out = quasi_demean_column(&col, &entity, &theta);
+
+        assert_eq!(out, vec![13.0, 17.0, -25.0, -15.0]);
+    }
+
     // ── hausman_statistic ─────────────────────────────────────────────────
 
     #[test]
@@ -661,7 +704,10 @@ mod tests {
     #[test]
     fn hausman_statistic_rejects_h0_for_large_divergent_estimates() {
         // d = [1, -1]、cov_diff = diag(0.1, 0.1) → inv = diag(10, 10)。
-        // H = 10·1² + 10·(-1)² = 20。df = 2。χ²_2 の cdf(20) ≈ 1 - e^-10 → p ≈ 4.54e-5。
+        // H = 10·1² + 10·(-1)² = 20。df = 2。
+        // χ²_2 の上側確率は閉形式 sf(x) = exp(-x/2) なので p = exp(-10) ≈ 4.5400e-5。
+        // `sf` を使うことでこの小さいp値が相対精度を保って得られる（`1 - cdf` だと
+        // cdf ≈ 1 で桁落ちする）。
         let beta_fe = [2.0, -1.0];
         let beta_re = [1.0, 0.0];
         let cov_fe = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
@@ -671,7 +717,14 @@ mod tests {
 
         assert!((stat - 20.0).abs() < 1e-10, "stat = {stat}");
         assert_eq!(df, 2);
-        assert!(p_value > 0.0 && p_value < 1e-4, "p_value = {p_value}");
+        // `sf` を直接使っていること（`1 - cdf` へ退行していないこと）: 返された `stat` に
+        // 対する χ²_2 の `sf` とビット単位で一致する（`1.0 - cdf(stat)` なら一致しない）。
+        assert_eq!(p_value, ChiSquared::new(2.0).unwrap().sf(stat));
+        // 数値の正しさ: χ²_2 の上側確率は閉形式 exp(-x/2) なので p ≈ exp(-10) ≈ 4.54e-5。
+        assert!(
+            (p_value - (-10.0_f64).exp()).abs() < 1e-12,
+            "p_value = {p_value}"
+        );
     }
 
     #[test]
@@ -740,6 +793,36 @@ mod tests {
             &[vec![1.0, 0.0], vec![0.0, 1.0]],
             &[1.0],
             &[vec![1.0]],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "at least one compared coefficient")]
+    fn hausman_statistic_panics_on_empty_beta() {
+        let _ = hausman_statistic(&[], &[], &[], &[]);
+    }
+
+    #[test]
+    #[should_panic(expected = "cov_fe must be a k x k matrix")]
+    fn hausman_statistic_panics_when_cov_fe_is_not_k_by_k() {
+        // k = 2 だが cov_fe が 1x1。
+        let _ = hausman_statistic(
+            &[1.0, 2.0],
+            &[vec![1.0]],
+            &[0.5, 1.0],
+            &[vec![1.0, 0.0], vec![0.0, 1.0]],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "cov_re must be a k x k matrix")]
+    fn hausman_statistic_panics_when_cov_re_row_length_is_wrong() {
+        // k = 2、cov_re の行数は 2 だが 1 行の長さが 1。
+        let _ = hausman_statistic(
+            &[1.0, 2.0],
+            &[vec![1.0, 0.0], vec![0.0, 1.0]],
+            &[0.5, 1.0],
+            &[vec![1.0, 0.0], vec![0.0]],
         );
     }
 }

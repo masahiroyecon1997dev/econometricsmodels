@@ -9,7 +9,8 @@
 
 ## 設計上の決定（再発見コスト削減）
 
-- **`engine` はpolars非依存。`panel-api-design.md` 6.1節の「polarsの`group_by`で実装」は`engine_pybind`層／抽出後配列の話**。`engine`側のグループ集約は、クラスター列と同じく `entity: &[String]`（長さ`n`、行はパネル観測順）を受け取り、`BTreeMap` で集約する（`engine/src/linear/CLAUDE.md`「クラスターのグループ化は`BTreeMap`」——パネル系のグループ集約もこの方針で揃える）。
+- **`engine` はpolars非依存。`panel-api-design.md` 6.1節の「polarsの`group_by`で実装」は`engine_pybind`層／抽出後配列の話**。`engine`側のグループ集約は、クラスター列と同じく `entity: &[String]`（長さ`n`、行はパネル観測順）を受け取る。
+- **`quasi_demean_column` の内部集約は `HashMap` でよい（`cluster_cov_params` の `BTreeMap` 必須とは別）**。あるエンティティの和は観測順（入力行の固定順）に積まれ、各行の出力はそのエンティティの和だけに依存する。エンティティ「間」をまたぐ加算（`Σ_g S_g S_g'` のようにグループ順序が浮動小数点丸めに効く演算）が無いため反復順序非依存でビット単位決定的。`HashMap` で集約・引き当てが O(n log G) → O(n)。**クラスターロバスト分散等、グループ間加算があるパネル系の実装を今後書くときは `engine/src/linear/CLAUDE.md` の `BTreeMap` 方針に戻ること**。
 - **`quasi_demean_column` は列単位の関数**（`y`/`x`をまとめて受けない）。呼び出し側（FE/REの`fit()`）が `y` と `x` の各列にループ適用し、変換後の列を `OlsEstimator::fit` に渡す（WLSがsqrt(w)変換データをOLSへ委譲するのと同型、4.3節・7.4節）。列ごとに独立な変換のため単体テストが単純になる。
 - **θの渡し方は `&BTreeMap<String, f64>`（エンティティID→θ_i）**。観測単位の`&[f64]`や「エンティティ順の`&[f64]`」にしない（順序規約をFE/REと共有する必要が生じ、ミスの余地が残るため）。**FEはこの関数の `θ_i = 1.0`（全エンティティ）の特殊ケース**として扱う（`panel-api-design.md` 7.4節）。REは `θ_i = 1 - sqrt(σ_ε² / (T_i·σ_u² + σ_ε²))`（7.2節）。
 - **`quasi_demean_column` はグループ平均（`ȳ_i.`）を返さない**（Issue #173スコープ外）。`fixed_effects()` の `α_i = ȳ_i - x̄_i'β̂` 復元（6.6節）・σ_ε²再利用（7.4節）で平均の保持が必要になったら、そのFE/RE実装issueでこの関数を拡張する。
@@ -19,7 +20,9 @@
   - 入力は `beta_*: &[f64]` / `cov_*: &[Vec<f64>]`（`newton_step` と同じ形。RE呼び出し側が `Mat` から一度変換）。戻り値 `Result<(stat, df, p_value), CommonError>`。
   - **比較対象のalign（重なるスロープ係数のみ、REの切片・時間不変変数を除外）は呼び出し側（RE実装）の責務**。この関数は渡された `k` 個をそのまま使う。
   - 差行列 `Var(β_FE) - Var(β_RE)` は対称だが有限標本で非正定値になりうるため、Choleskyではなく `col_piv_qr` + `solve_lstsq`（`newton_step` と同じ相対閾値・NaN明示チェックの特異性検出）。
-  - **統計量が負でもそのまま返す**（`plm::phtest` と同じ。`p_value` は `1 - χ²_df.cdf(stat)` で `stat<=0` なら `1.0`）。差行列が数値的に特異なときだけ `CommonError::ComputationFailed`。
+  - **統計量が負でもそのまま返す**（`plm::phtest` と同じ。`stat<=0` なら `p_value == 1.0`）。差行列が数値的に特異なときだけ `CommonError::ComputationFailed`。
+  - **p値は `chi2.sf(stat)`（`1.0 - chi2.cdf(stat)` ではない）**。大きい `stat` で `cdf ≈ 1` になり小さいp値の相対精度が失われるのを避けるため（`sf` は正則化上側不完全ガンマを直接計算。`stat<=0` でも `1.0` を返すので負統計量の挙動は不変）。**`iv/gmm.rs` の Hansen J・Wald系は今も `1.0 - chi2.cdf` のまま**——一括で `sf` へ移行するかは別issue（このズレは意図的な暫定）。
+  - `df` には常に `k` を使う。差行列の実効ランクが `k` 未満のとき `stat` と `df` に不整合が生じうる（`plm::phtest` も同じ制約）。
   - v1は classical Hausman のみ（`cov_type` 非依存）。robust版は将来issue。
 
 ## PanelError（Issue #172で確定済みの方針、変更時は要確認）

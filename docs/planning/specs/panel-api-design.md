@@ -321,10 +321,19 @@ v1では扱わない。
 - 2章の決定通り、**`RE.fit()`内で自動計算し`ReResult`にのみ含める**（`FeResult`には
   追加しない）。
 - **計算部分（カイ二乗統計量そのもの）は共通関数化する**: `engine/src/panel/common.rs`に
-  `hausman_statistic(beta_fe, cov_fe, beta_re, cov_re) -> (stat, df, p_value)`を実装し、
-  RE側からのみ呼ぶ。
+  `hausman_statistic`を実装し、RE側からのみ呼ぶ（Issue #174で実装済み）。
+  - 実装シグネチャは
+    `hausman_statistic(beta_fe: &[f64], cov_fe: &[Vec<f64>], beta_re: &[f64], cov_re: &[Vec<f64>]) -> Result<(f64, usize, f64), CommonError>`。
+    当初案の `-> (stat, df, p_value)` に対し、`Var(β_FE) - Var(β_RE)` が数値的に特異で
+    逆行列が計算できない場合を `CommonError::ComputationFailed` として返せるよう `Result` 化した
+    （`col_piv_qr` のR対角成分を相対閾値で判定、`nonlinear::common::newton_step` と同じ方式）。
+  - 差行列は理論上は半正定値だが有限標本では非正定値になり `stat` が負になりうる。その場合も
+    `stat` をそのまま返す（p値は上側確率 `χ²_df.sf(stat)` なので `stat<=0` で `1.0`）。
+    参照実装 R `plm::phtest` と同じ挙動。`df` には常に `k`（渡された係数の数）を使う。
 - **比較対象はFE/RE間で重なりのあるスロープ係数のみ**（REの切片は比較から除外する。FEには
-  切片が存在しないため、次元を揃える必要がある）。
+  切片が存在しないため、次元を揃える必要がある）。この係数のalign（除外・順序合わせ）と、
+  `cov_fe`/`cov_re` を推定器内部の行列から `&[Vec<f64>]` の `k×k` 部分行列として切り出すのは
+  **呼び出し側（RE実装）の責務**。`hausman_statistic` は渡された `k` 個をそのまま使う。
 - REが時間不変変数を含む場合、内部FE推定は6章の分散ゼロ検証
   （[6.7](#67-within変換後に分散ゼロになる説明変数の検出)）で失敗する。この場合は2章で
   決めた「FE推定失敗時はハウスマン関連フィールドを`None`にする」フォールバックがそのまま
@@ -335,10 +344,22 @@ v1では扱わない。
 
 ### 7.4 FEとの内部設計共有範囲
 
-- **θでパラメータ化した共通の準偏差変換関数を実装する**:
-  `quasi_demean(data, entity, theta: &[f64]) -> transformed_data`。FEは全エンティティに
-  `θ_i = 1.0`を渡すことでこの関数の特殊ケースとして扱える（6章の`OlsEstimator`委譲
-  方針とあわせ、FE/RE双方がこの関数の出力を`OlsEstimator::fit`に渡す設計にできる）。
+- **θでパラメータ化した共通の準偏差変換関数を実装する**（Issue #173で実装済み）。FEは
+  全エンティティに `θ_i = 1.0` を渡すことでこの関数の特殊ケース（within変換）として扱える
+  （6章の`OlsEstimator`委譲方針とあわせ、FE/RE双方がこの関数の出力を`OlsEstimator::fit`に
+  渡す設計にできる）。
+  - 実装シグネチャは
+    `quasi_demean_column(col: &[f64], entity: &[String], theta: &BTreeMap<String, f64>) -> Vec<f64>`。
+    当初案の `quasi_demean(data, entity, theta: &[f64]) -> transformed_data` から次の点で変えた:
+    - **列単位**（`col` を1列ずつ受ける）。`engine` はpolars非依存のため `data` 全体ではなく
+      抽出済み配列を受け取る設計であり、`y`/`x` の各列に呼び出し側がループ適用する
+      （WLSが sqrt(w) 変換データを `OlsEstimator::fit` に委譲するのと同型。列ごとに独立な
+      変換のため単体テストも単純になる）。
+    - **`theta` は `&BTreeMap<String, f64>`（エンティティID → θ_i）**。`&[f64]` だと「観測順か
+      エンティティ順か」の順序規約をFE/REと共有する必要が生じミスの余地が残るため、
+      IDキーの写像で渡す。
+    - `col[i] - θ_{e(i)}·ȳ_{e(i)}.` を適用するだけで、グループ平均 `ȳ_i.` は返さない
+      （`fixed_effects()` の `α_i` 復元・σ_ε²再利用で必要になったら別issueで拡張）。
 - **σ_ε²の推定（7.1）はFEのwithin回帰の残差分散をそのまま利用する**。`RE.fit()`は内部で
   FE推定を呼び出し、その残差分散を再利用する（RE → FE → `OlsEstimator`という委譲チェーンとして
   整理する）。

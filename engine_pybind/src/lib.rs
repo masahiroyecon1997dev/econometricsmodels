@@ -3,6 +3,7 @@ mod errors;
 mod iv;
 mod linear;
 mod nonlinear;
+mod panel;
 mod validation;
 
 use pyo3::prelude::*;

@@ -9,4 +9,5 @@ pub mod iv;
 pub mod linear;
 pub mod linear_algebra;
 pub mod nonlinear;
+pub mod panel;
 pub mod validation;

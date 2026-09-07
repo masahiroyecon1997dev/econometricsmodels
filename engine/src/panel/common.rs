@@ -25,13 +25,19 @@
 //! - between回帰（エンティティ平均に対するOLS、σ_u²推定）の自由度不足。分母は
 //!   `n_entities - k`（7.1節）で、`InsufficientDegreesOfFreedom`（within側／パネル調整後
 //!   残差自由度）とは別軸のため専用バリアントになる見込み。
-//! - classical Hausman統計量（7.3節）で`cov_fe - cov_re`が非正定値になり統計量が負に
-//!   なるケースの扱い（エラーにするか`None`にするか未確定。2.4節の「FE推定失敗時は
-//!   `None`」とは別軸）。
+//!
+//! ハウスマン統計量（`hausman_statistic`、Issue #174）は`CommonError`を返す
+//! （`ensure_well_conditioned_symmetric_matrix`等の共通ヘルパーに揃える）。
+//! `cov_fe - cov_re`が有限標本で非正定値になり統計量が負になるケースは**エラーにせず
+//! そのまま返す**（R `plm::phtest`と同じ挙動、7.3節。差行列が数値的に特異なときだけ
+//! `CommonError::ComputationFailed`）。
 
 use std::collections::BTreeMap;
 use std::fmt;
 
+use faer::prelude::SolveLstsq;
+use faer::Mat;
+use statrs::distribution::{ChiSquared, ContinuousCDF};
 use thiserror::Error;
 
 use crate::error::CommonError;
@@ -265,6 +271,98 @@ pub fn quasi_demean_column(
         .zip(entity.iter())
         .map(|(value, id)| value - shift_by_entity[id.as_str()])
         .collect()
+}
+
+/// 古典的ハウスマン検定の統計量・自由度・p値を計算する。
+///
+/// ```text
+/// H = (β_FE - β_RE)' [Var(β_FE) - Var(β_RE)]⁻¹ (β_FE - β_RE)
+/// ```
+///
+/// 帰無仮説 H0: 個体効果と説明変数が無相関（＝REが一致推定量）。棄却されればFEを使う。
+/// `H` は自由度 `k`（比較する係数の数）のカイ二乗分布に漸近的に従う。
+///
+/// `docs/planning/specs/panel-api-design.md` 7.3節:
+/// - **v1は classical Hausman のみ**（`cov_type`に依存せず、常にclassical SE前提で計算）。
+///   呼び出し側（RE実装）は`cov_type="cluster"`等でfitした場合でも、この関数には
+///   classical前提の`cov_fe`/`cov_re`を渡す。
+/// - **比較対象はFE/RE間で重なりのあるスロープ係数のみ**。FEには切片が無いため、
+///   RE側の切片・時間不変変数の係数は呼び出し側で除外し、対応する順序に揃えた
+///   `beta_fe`/`beta_re`（同じ長さ`k`）と、その`k×k`部分共分散行列`cov_fe`/`cov_re`を
+///   渡す（このalignは7.3節の通り呼び出し側の責務）。
+///
+/// # 戻り値
+/// `(stat, df, p_value)`。`df == beta_fe.len()`、`p_value = 1 - χ²_df.cdf(stat)`。
+///
+/// **`Var(β_FE) - Var(β_RE)`は理論上は半正定値だが、有限標本では非正定値になり`stat`が
+/// 負になりうる**。その場合も`stat`をそのまま返す（`p_value`は`stat <= 0`で`1.0`）。
+/// 参照実装 R `plm::phtest`と同じ挙動で、「classical HausmanのPSD仮定が有限標本で
+/// 崩れている」ことを示す情報として呼び出し側に委ねる（`panel-api-design.md` 7.3節、
+/// Issue #174）。
+///
+/// # Errors
+/// `Var(β_FE) - Var(β_RE)`が数値的に特異（`col_piv_qr`のR対角成分が相対閾値以下、
+/// またはNaN）で逆行列が計算できない場合に`CommonError::ComputationFailed`。
+/// `ChiSquared::new`の失敗（`df`が非正、`k >= 1`のため理論上到達不能）も同じ。
+///
+/// # Panics
+/// 呼び出し側の契約違反時（`engine`内部でのみ使用、`validate_cluster_groups`と同じ扱い）:
+/// - `beta_fe.len() != beta_re.len()`、または長さが0
+/// - `cov_fe`/`cov_re`が`k×k`でない
+pub fn hausman_statistic(
+    beta_fe: &[f64],
+    cov_fe: &[Vec<f64>],
+    beta_re: &[f64],
+    cov_re: &[Vec<f64>],
+) -> Result<(f64, usize, f64), CommonError> {
+    let k = beta_fe.len();
+    assert_eq!(
+        k,
+        beta_re.len(),
+        "beta_fe and beta_re must have the same length (caller aligns overlapping slopes)"
+    );
+    assert!(
+        k >= 1,
+        "hausman_statistic requires at least one compared coefficient"
+    );
+    assert!(
+        cov_fe.len() == k && cov_fe.iter().all(|row| row.len() == k),
+        "cov_fe must be a k x k matrix matching beta_fe"
+    );
+    assert!(
+        cov_re.len() == k && cov_re.iter().all(|row| row.len() == k),
+        "cov_re must be a k x k matrix matching beta_re"
+    );
+
+    let d = Mat::from_fn(k, 1, |i, _| beta_fe[i] - beta_re[i]);
+    let cov_diff = Mat::from_fn(k, k, |i, j| cov_fe[i][j] - cov_re[i][j]);
+
+    // `cov_diff`は対称だが（有限標本では）正定値とは限らないため、Choleskyではなく
+    // 列ピボットQRで解く（`nonlinear::common::newton_step`と同じ方針・同じ相対閾値での
+    // 特異性検出。NaNは`diag <= threshold`をすり抜けるため明示的にチェックする）。
+    let qr = cov_diff.col_piv_qr();
+    let r = qr.thin_R();
+    let max_abs_diag = (0..k).map(|i| (*r.get(i, i)).abs()).fold(0.0_f64, f64::max);
+    let threshold = (k as f64) * f64::EPSILON * max_abs_diag;
+    for i in 0..k {
+        let diag = (*r.get(i, i)).abs();
+        if diag.is_nan() || diag <= threshold {
+            return Err(CommonError::ComputationFailed(
+                "the Hausman variance difference Var(beta_FE) - Var(beta_RE) is singular \
+                 and cannot be inverted"
+                    .to_string(),
+            ));
+        }
+    }
+
+    let z = qr.solve_lstsq(&d);
+    let stat: f64 = (0..k).map(|i| (*d.get(i, 0)) * (*z.get(i, 0))).sum();
+
+    let chi2 =
+        ChiSquared::new(k as f64).map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+    let p_value = 1.0 - chi2.cdf(stat);
+
+    Ok((stat, k, p_value))
 }
 
 #[cfg(test)]
@@ -541,5 +639,107 @@ mod tests {
         let col = [1.0, 2.0, 3.0];
         let theta = theta_map(&[("a", 1.0)]); // "b" が欠けている
         let _ = quasi_demean_column(&col, &entity, &theta);
+    }
+
+    // ── hausman_statistic ─────────────────────────────────────────────────
+
+    #[test]
+    fn hausman_statistic_is_zero_when_estimates_coincide() {
+        // β_FE == β_RE → d = 0 → H = 0、df = k、p_value = 1.0（H0を棄却しない）。
+        let beta_fe = [1.0, 2.0];
+        let beta_re = [1.0, 2.0];
+        let cov_fe = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        let cov_re = vec![vec![0.5, 0.0], vec![0.0, 0.5]];
+
+        let (stat, df, p_value) = hausman_statistic(&beta_fe, &cov_fe, &beta_re, &cov_re).unwrap();
+
+        assert_eq!(stat, 0.0);
+        assert_eq!(df, 2);
+        assert_eq!(p_value, 1.0);
+    }
+
+    #[test]
+    fn hausman_statistic_rejects_h0_for_large_divergent_estimates() {
+        // d = [1, -1]、cov_diff = diag(0.1, 0.1) → inv = diag(10, 10)。
+        // H = 10·1² + 10·(-1)² = 20。df = 2。χ²_2 の cdf(20) ≈ 1 - e^-10 → p ≈ 4.54e-5。
+        let beta_fe = [2.0, -1.0];
+        let beta_re = [1.0, 0.0];
+        let cov_fe = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        let cov_re = vec![vec![0.9, 0.0], vec![0.0, 0.9]];
+
+        let (stat, df, p_value) = hausman_statistic(&beta_fe, &cov_fe, &beta_re, &cov_re).unwrap();
+
+        assert!((stat - 20.0).abs() < 1e-10, "stat = {stat}");
+        assert_eq!(df, 2);
+        assert!(p_value > 0.0 && p_value < 1e-4, "p_value = {p_value}");
+    }
+
+    #[test]
+    fn hausman_statistic_full_quadratic_form_with_off_diagonal_covariance() {
+        // cov_diff = [[1.0, 0.5], [0.5, 1.0]] → inv = (4/3)·[[1, -0.5], [-0.5, 1]]。
+        // d = [1, 1] なので H = inv の全要素和 = 4/3。
+        let beta_fe = [3.0, 4.0];
+        let beta_re = [2.0, 3.0];
+        let cov_fe = vec![vec![2.0, 0.5], vec![0.5, 2.0]];
+        let cov_re = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+
+        let (stat, df, _p_value) = hausman_statistic(&beta_fe, &cov_fe, &beta_re, &cov_re).unwrap();
+
+        assert!((stat - 4.0 / 3.0).abs() < 1e-10, "stat = {stat}");
+        assert_eq!(df, 2);
+    }
+
+    #[test]
+    fn hausman_statistic_single_coefficient() {
+        // k = 1: d = 2、cov_diff = [[1.0]] → H = 2·1·2 = 4。df = 1。χ²_1 の p ≈ 0.0455。
+        let (stat, df, p_value) =
+            hausman_statistic(&[3.0], &[vec![2.0]], &[1.0], &[vec![1.0]]).unwrap();
+
+        assert!((stat - 4.0).abs() < 1e-10, "stat = {stat}");
+        assert_eq!(df, 1);
+        assert!(
+            (p_value - 0.045_500_263_9).abs() < 1e-6,
+            "p_value = {p_value}"
+        );
+    }
+
+    #[test]
+    fn hausman_statistic_returns_negative_stat_when_variance_diff_is_indefinite() {
+        // cov_diff = [[-1.0, 0.0], [0.0, 0.5]]（非正定値だが可逆）→ inv = [[-1, 0], [0, 2]]。
+        // d = [1, 0] → H = -1·1² = -1。有限標本でのPSD仮定崩れ。plm::phtest と同じく
+        // そのまま返し、p_value は 1.0 になる（エラーにしない）。
+        let beta_fe = [2.0, 5.0];
+        let beta_re = [1.0, 5.0];
+        let cov_fe = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        let cov_re = vec![vec![2.0, 0.0], vec![0.0, 0.5]];
+
+        let (stat, df, p_value) = hausman_statistic(&beta_fe, &cov_fe, &beta_re, &cov_re).unwrap();
+
+        assert!((stat - (-1.0)).abs() < 1e-10, "stat = {stat}");
+        assert_eq!(df, 2);
+        assert_eq!(p_value, 1.0);
+    }
+
+    #[test]
+    fn hausman_statistic_errors_when_variance_diff_is_singular() {
+        // cov_fe == cov_re → cov_diff = 0 → 特異で逆行列が計算できない。
+        let beta_fe = [2.0, 1.0];
+        let beta_re = [1.0, 0.0];
+        let cov = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+
+        let result = hausman_statistic(&beta_fe, &cov, &beta_re, &cov);
+
+        assert!(matches!(result, Err(CommonError::ComputationFailed(_))));
+    }
+
+    #[test]
+    #[should_panic(expected = "same length")]
+    fn hausman_statistic_panics_on_beta_length_mismatch() {
+        let _ = hausman_statistic(
+            &[1.0, 2.0],
+            &[vec![1.0, 0.0], vec![0.0, 1.0]],
+            &[1.0],
+            &[vec![1.0]],
+        );
     }
 }

@@ -29,6 +29,7 @@
 //!   なるケースの扱い（エラーにするか`None`にするか未確定。2.4節の「FE推定失敗時は
 //!   `None`」とは別軸）。
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use thiserror::Error;
@@ -178,6 +179,92 @@ pub enum PanelError {
         #[source]
         source: LeastSquaresError,
     },
+}
+
+/// θでパラメータ化した準偏差変換を、設計行列の1つの列（`y`または`x`の1列）に適用し、
+/// 変換後の新しい`Vec<f64>`を返す。
+///
+/// 各行`i`を次のように変換する:
+///
+/// ```text
+/// col_transformed[i] = col[i] - θ_{e(i)} · mean_{e(i)}(col)
+/// ```
+///
+/// ここで`e(i)`は行`i`が属するエンティティ、`mean_{e}(col)`はエンティティ`e`に属する
+/// 行の`col`の単純平均（`ȳ_i.`）。
+///
+/// - **FE（within変換）**: 全エンティティに`θ_i = 1.0`を渡す → `col[i] - ȳ_i.`
+///   （`docs/planning/specs/panel-api-design.md`7.4節: FEはこの関数の`θ_i = 1`の特殊ケース）。
+/// - **RE（準偏差変換）**: `θ_i = 1 - sqrt(σ_ε² / (T_i·σ_u² + σ_ε²))`（同7.2節）を渡す。
+///
+/// FE/REの`fit()`は`y`と`x`の各列にこの関数をループ適用し、変換後の列を
+/// `OlsEstimator::fit`へ渡す（WLSがsqrt(w)変換したデータをOLSへ委譲するのと同型の
+/// パターン、同4.3節・7.4節）。列ごとに独立な変換のため、列単位の関数として実装し
+/// 呼び出し側でループする（`y`/`x`をまとめて受けるより単体テストが単純）。
+///
+/// # 引数
+/// - `col`: 変換対象の列（長さ`n`、行はパネルの観測順）。
+/// - `entity`: 各行のエンティティID（長さ`n`）。「グループの同一性だけが意味を持つ列」の
+///   ため文字列で扱う（`.claude/rules/rust-style.md`「Python境界でのデータ受け渡し」）。
+/// - `theta`: エンティティID → `θ_i`の対応。`entity`に現れる全IDをキーに持つこと。
+///
+/// # 前提（呼び出し側の契約、`engine`内部でのみ使用）
+/// - `entity.len() == col.len()`。`engine_pybind`の列抽出が保証する
+///   （`validate_cluster_groups`の`groups.len() == n`契約と同じ位置づけ）。
+/// - `theta`は`entity`の全ユニークIDをキーに持つ。RE/FEの`fit()`は同じ`entity`列から
+///   `theta`を組み立てるため、欠けは内部実装バグでしか起こり得ない。
+/// - `col`は欠損値・非有限値を含まない（`engine`は常にクリーンな値を受け取る前提）。
+///
+/// 契約違反時は`assert!`/`expect`でpanicする（`Result`は返さない）。ユーザー入力起因の
+/// エラーではなく`engine_pybind`〜`engine`間の内部契約違反のため、`validate_cluster_groups`
+/// と同じ扱い。
+///
+/// グループ平均（`ȳ_i.`）は返さない。`fixed_effects()`（6.6節）の`α_i`復元や
+/// σ_ε²再利用（7.4節）で平均の保持が必要になった場合は、そのFE/RE実装issueで
+/// この関数を拡張する（現時点ではスコープ外）。
+///
+/// # Panics
+/// - `entity.len() != col.len()`
+/// - `theta`に`entity`内のいずれかのIDが無い
+pub fn quasi_demean_column(
+    col: &[f64],
+    entity: &[String],
+    theta: &BTreeMap<String, f64>,
+) -> Vec<f64> {
+    assert_eq!(
+        entity.len(),
+        col.len(),
+        "entity length must match column length (engine_pybind contract)"
+    );
+
+    // エンティティごとに (合計, 件数) を集約する。集約は`BTreeMap`で行う
+    // （`engine/src/linear/CLAUDE.md`「クラスターのグループ化は`BTreeMap`」——
+    // グループ単位の反復順序が浮動小数点加算の非結合性で結果に効く箇所の統一方針。
+    // 本関数は各エンティティの和を観測順に積むため厳密には反復順序非依存だが、
+    // パネル系のグループ集約はこの方針で揃える）。
+    let mut sums: BTreeMap<&str, (f64, usize)> = BTreeMap::new();
+    for (value, id) in col.iter().zip(entity.iter()) {
+        let entry = sums.entry(id.as_str()).or_insert((0.0, 0));
+        entry.0 += *value;
+        entry.1 += 1;
+    }
+
+    // エンティティ単位で `θ_i · ȳ_i.`（各行から引く量）を先に求めておく。
+    let shift_by_entity: BTreeMap<&str, f64> = sums
+        .iter()
+        .map(|(id, (sum, count))| {
+            let mean = sum / *count as f64;
+            let theta_i = *theta
+                .get(*id)
+                .expect("theta must contain every entity id present in `entity`");
+            (*id, theta_i * mean)
+        })
+        .collect();
+
+    col.iter()
+        .zip(entity.iter())
+        .map(|(value, id)| value - shift_by_entity[id.as_str()])
+        .collect()
 }
 
 #[cfg(test)]
@@ -354,5 +441,105 @@ mod tests {
                 }),
             }
         );
+    }
+
+    // ── quasi_demean_column ────────────────────────────────────────────────
+
+    /// `["a", "a", "b", "b", "b"]`のエンティティ列を作るヘルパ。
+    fn entities(ids: &[&str]) -> Vec<String> {
+        ids.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn theta_map(pairs: &[(&str, f64)]) -> BTreeMap<String, f64> {
+        pairs.iter().map(|(k, v)| (k.to_string(), *v)).collect()
+    }
+
+    #[test]
+    fn quasi_demean_column_with_theta_one_is_the_within_transformation() {
+        // FE相当: θ_i = 1.0。col[i] - ȳ_i. になる。
+        // a: mean = (10 + 20) / 2 = 15、b: mean = (3 + 6 + 9) / 3 = 6。
+        let entity = entities(&["a", "a", "b", "b", "b"]);
+        let col = [10.0, 20.0, 3.0, 6.0, 9.0];
+        let theta = theta_map(&[("a", 1.0), ("b", 1.0)]);
+
+        let out = quasi_demean_column(&col, &entity, &theta);
+
+        assert_eq!(out, vec![-5.0, 5.0, -3.0, 0.0, 3.0]);
+        // within変換後は各エンティティ内で和がゼロ。
+        assert!((out[0] + out[1]).abs() < 1e-12);
+        assert!((out[2] + out[3] + out[4]).abs() < 1e-12);
+    }
+
+    #[test]
+    fn quasi_demean_column_with_theta_zero_is_identity() {
+        // θ_i = 0.0 なら何も引かない（プーリングOLS相当）。
+        let entity = entities(&["a", "a", "b", "b"]);
+        let col = [1.5, -2.0, 7.0, 0.25];
+        let theta = theta_map(&[("a", 0.0), ("b", 0.0)]);
+
+        let out = quasi_demean_column(&col, &entity, &theta);
+
+        assert_eq!(out, col.to_vec());
+    }
+
+    #[test]
+    fn quasi_demean_column_with_arbitrary_per_entity_theta() {
+        // RE相当: エンティティごとに異なる θ_i。
+        // a: mean = 15、θ_a = 0.5 → 引く量 7.5
+        // b: mean = 6、 θ_b = 1.0 → 引く量 6.0
+        let entity = entities(&["a", "a", "b", "b", "b"]);
+        let col = [10.0, 20.0, 3.0, 6.0, 9.0];
+        let theta = theta_map(&[("a", 0.5), ("b", 1.0)]);
+
+        let out = quasi_demean_column(&col, &entity, &theta);
+
+        assert_eq!(out, vec![2.5, 12.5, -3.0, 0.0, 3.0]);
+    }
+
+    #[test]
+    fn quasi_demean_column_handles_unbalanced_panel() {
+        // 不均衡パネル（T_a = 1, T_b = 3）でも1-wayは各エンティティ平均を引くだけで
+        // 正確に成立する（`panel-api-design.md`6.4節）。
+        // a: mean = 4.0（単一観測）→ θ_a = 1.0 で 0.0 になる。
+        // b: mean = (2 + 4 + 6) / 3 = 4.0。
+        let entity = entities(&["a", "b", "b", "b"]);
+        let col = [4.0, 2.0, 4.0, 6.0];
+        let theta = theta_map(&[("a", 1.0), ("b", 1.0)]);
+
+        let out = quasi_demean_column(&col, &entity, &theta);
+
+        assert_eq!(out, vec![0.0, -2.0, 0.0, 2.0]);
+    }
+
+    #[test]
+    fn quasi_demean_column_preserves_length_and_row_order() {
+        // エンティティがブロックにまとまっていない（インターリーブした）配置でも、
+        // 行ごとに所属エンティティの平均を引く。出力長・行順は入力どおり。
+        let entity = entities(&["x", "y", "x", "y", "x"]);
+        let col = [1.0, 100.0, 2.0, 200.0, 3.0];
+        let theta = theta_map(&[("x", 1.0), ("y", 1.0)]);
+
+        let out = quasi_demean_column(&col, &entity, &theta);
+
+        // x: mean = 2.0、y: mean = 150.0
+        assert_eq!(out, vec![-1.0, -50.0, 0.0, 50.0, 1.0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "entity length must match column length")]
+    fn quasi_demean_column_panics_on_length_mismatch() {
+        let entity = entities(&["a", "b"]);
+        let col = [1.0, 2.0, 3.0];
+        let theta = theta_map(&[("a", 1.0), ("b", 1.0)]);
+        let _ = quasi_demean_column(&col, &entity, &theta);
+    }
+
+    #[test]
+    #[should_panic(expected = "theta must contain every entity id")]
+    fn quasi_demean_column_panics_when_theta_missing_an_entity() {
+        let entity = entities(&["a", "a", "b"]);
+        let col = [1.0, 2.0, 3.0];
+        let theta = theta_map(&[("a", 1.0)]); // "b" が欠けている
+        let _ = quasi_demean_column(&col, &entity, &theta);
     }
 }

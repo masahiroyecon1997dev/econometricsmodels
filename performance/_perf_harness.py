@@ -152,9 +152,12 @@ class PerfAdapter:
         libraries: 計測対象ライブラリ。先頭は必ず "engine"。以降は
             README「Verification accuracy」表の primary reference
             （OLS/WLS/Logit/Probit: "statsmodels"、IV: "linearmodels"）。
-            primary reference が共通ハーネスのインプロセス計測に乗らない手法は
-            性能比較専用の代替でよい（Tob: 主リファレンスは R `AER::tobit` だが
-            性能比較は "py4etrics"＝statsmodels GenericLikelihoodModel ベース）。
+            インプロセス計測できるリファレンス実装が無い手法は `("engine",)` の
+            単独指定でよい（Tobit: 主リファレンスの R `AER::tobit` は共通ハーネス
+            のインプロセス計測に乗らず、代替の py4etrics も撤去したため engine 単独。
+            `performance/compare_tobit.py` docstring 参照）。engine 単独の場合は
+            n/k/method の全軸が engine のみで回り、レポートは相対比較ではなく
+            engine の絶対値・スケーリングの推移になる。
         cov_types: 計測する cov_type。`.claude/rules/testing-policy.md`
             「パフォーマンス比較（ベンチマーク）の方法論」に従い、代表2点
             （最も軽い classical と、最も計算コストの重いもの）で足りる。
@@ -183,17 +186,17 @@ class PerfAdapter:
             cov_type=cov_types[0]・k=n_sweep_fixed_k・n=n_sweep[-1] の1点でのみ
             回す（testing-policy.md「方法論」＝代表点で足りる）。
         k_sweep_libraries: k 軸スイープでのみ使うライブラリの部分集合。`None`
-            なら `libraries` をそのまま使う。リファレンス実装が特定の軸で計測
-            不能なとき（例: Tobit の py4etrics は k を増やすと数値微分ヘッシアン
-            のコストが爆発し k>=8 で事実上フリーズする）、その軸だけ engine 単独
-            に絞るために使う。n 軸・method 軸には影響しない。
-        n_sweep_engine_only: n 軸に追加する engine 単独計測点の n の刻み。
-            リファレンス実装が大 n で計測不能だが、engine 側の大標本での健全性
-            （収束すること・実行時間）を回帰検知したい場合に使う。cov_type は
-            `cov_types[0]`（最も軽いもの）のみ・method は `default_method` のみ。
-            `_run_isolated` は `check=True` なので、engine の `.fit()` が例外を
-            投げれば benchmark ジョブが失敗する（例: Tobit で Issue #291 の大標本
-            Hessian 特異エラーが再発した場合）。空なら追加なし。
+            なら `libraries` をそのまま使う。リファレンス実装が k を増やすと
+            計測不能になる手法で、k 軸だけ engine 単独に絞るために使う。n 軸・
+            method 軸には影響しない。`libraries=("engine",)` の手法では指定不要。
+        n_sweep_engine_only: n 軸に追加する engine 単独計測点の n の刻み。大 n を
+            全 cov_type で回すと高コスト（またはリファレンス実装が大 n で計測不能）
+            だが、engine の大標本での健全性（収束すること・実行時間）は回帰検知
+            したい場合に使う。cov_type は `cov_types[0]`（最も軽いもの）のみ・
+            method は `default_method` のみ・library は engine のみ。`_run_isolated`
+            は `check=True` なので、engine の `.fit()` が例外を投げれば benchmark
+            ジョブが失敗する（例: Tobit で Issue #291 の大標本 Hessian 特異エラーが
+            再発した場合）。空なら追加なし。
         check_report: `report dict -> list[str]`。全スイープ完了後に呼ばれ、
             返した文字列は `_meta["warnings"]` に格納されて job summary に
             `> [!WARNING]` として表示される（`render_performance_summary`）。
@@ -373,8 +376,9 @@ def run_n_sweep(adapter: PerfAdapter, repeats: int, seed: int) -> list[dict]:
     """n 軸のスイープ（k は `adapter.n_sweep_fixed_k` 固定）。
 
     `adapter.n_sweep_engine_only` が設定されていれば、その n では engine 単独・
-    `cov_types[0]` のみ追加で計測する（リファレンス実装が大 n で計測不能な手法の
-    大標本回帰検知。`PerfAdapter` docstring 参照）。
+    `cov_types[0]` のみ追加で計測する（大 n を全 cov_type で回すと高コストな手法、
+    またはリファレンス実装が大 n で計測不能な手法の大標本回帰検知。`PerfAdapter`
+    docstring 参照）。
     """
     results = []
     for cov_type in adapter.cov_types:
@@ -474,13 +478,21 @@ def build_report(adapter: PerfAdapter, repeats: int, seed: int) -> dict:
     n_results = run_n_sweep(adapter, repeats, seed)
     k_results = run_k_sweep(adapter, repeats, seed)
     method_results = run_method_sweep(adapter, repeats, seed)
+    # リファレンス実装（`libraries` の "engine" 以降）が無い手法（Tobit）では
+    # 相対比較ではなく engine 単独の推移を記録する。
+    reference_libs = "/".join(adapter.libraries[1:])
+    purpose = (
+        f"{adapter.method}の推定のエンドツーエンド実行時間・ピークRSSを"
+        + (
+            f"{reference_libs}と比較する"
+            if reference_libs
+            else "engine 単独で計測する"
+        )
+    )
     report = {
         "_meta": {
             "method": adapter.method,
-            "purpose": (
-                f"{adapter.method}の推定のエンドツーエンド実行時間・ピークRSSを"
-                f"{'/'.join(adapter.libraries[1:])}と比較する"
-            ),
+            "purpose": purpose,
             "generated_at": datetime.now(UTC).isoformat(),
             **adapter.reference_versions(),
             "n_sweep": list(adapter.n_sweep),

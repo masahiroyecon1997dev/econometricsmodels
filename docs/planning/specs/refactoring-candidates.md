@@ -948,7 +948,8 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   ため、ゼロ初期値より曲率の異なる warm start 地点からだと line search の関数評価が増えるためと
   考えられる。非既定かつ元々「newton 比で大幅に遅い・改善余地あり」の quasi-Newton パスのため、
   #279 では warm start を method 共通のまま受容し、`docs/performance/logit.md` の method軸 節に
-  追記した（ユーザー確認済み。quasi-Newton × warm start の相互作用の是正は別途 Issue 化を検討）。
+  追記した（ユーザー確認済み。quasi-Newton × warm start の相互作用の是正は **Issue #304** で追跡。
+  #304 で項目44/45/46 の欠落整理もあわせて行う）。
 - **未解決（stale 参照）**: 本項目・Issue #279 本文が参照する `refactoring-candidates-2.md` 項目54
   と `refactoring-candidates-3.md` は現行ファイルに存在しない。`docs/performance/{logit,probit}.md`
   が参照する項目44/45/46（マルチスレッド不安定・Probit Hessian 飽和・BFGS/L-BFGS 遅い）も

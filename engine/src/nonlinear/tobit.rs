@@ -2721,9 +2721,10 @@ mod tests {
     /// 上のテストは`cov_type=Classical`（`observed_information_cov_params`）のみで
     /// `SingularHessian`エラー伝播を検証しているが、`sandwich_cov_params`（`Hc0`/`Hc1`）も
     /// 内部で同じHessianの逆行列計算を行うため、同じ打ち切り点で同じエラーが伝播する
-    /// はず。Logit/Probitの`fit_returns_singular_hessian_error_for_perfectly_collinear_
-    /// design_matrix_with_hc0_and_hc1`と同じ懸念（Issue #64・#80で発覚したギャップ
-    /// パターン）をTobitでも確認する（Issue #223、`cargo llvm-cov`で発覚）。
+    /// はず。Logit/Probitの`fit_returns_singular_design_matrix_error_for_perfectly_
+    /// collinear_design_matrix`（#279で`method`×`cov_type`を1テストに集約）と同じ
+    /// 「cov_type分岐ごとのエラー伝播`?`」のギャップパターン（Issue #64・#80で発覚）を
+    /// Tobitでも確認する（Issue #223、`cargo llvm-cov`で発覚）。
     #[test]
     fn fit_returns_singular_hessian_error_when_cov_params_computation_fails_at_truncated_point_with_hc0_and_hc1()
      {

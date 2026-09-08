@@ -2099,6 +2099,17 @@ mod tests {
     /// matrix_error_...` / `..._with_cluster`）を本1テストへ集約した。`x2`は`x1`から
     /// 生成し関係を自明にする（`refactoring-candidates-2.md`項目82）。
     ///
+    /// 旧5テストが検証していた「`fit()`の各`cov_type`分岐で`SingularHessian`/
+    /// `SingularOpgMatrix`が`?`で伝播する」経路は、本入力では前段QRで先に弾かれるため
+    /// もう通らない。この伝播経路のカバレッジは (1) `common.rs`の関数レベルテスト
+    /// （`observed_information_cov_params_returns_singular_hessian_error_*` /
+    /// `opg_cov_params_*` / `sandwich_cov_params_*` / `cluster_cov_params_*`）と、
+    /// (2) 共有インフラを`fit()`レベルで踏む`tobit.rs`の
+    /// `fit_returns_singular_hessian_error_when_cov_params_computation_fails_at_
+    /// truncated_point_with_hc0_and_hc1` / `..._with_cluster` が担う（`cov_params`計算は
+    /// Logit/Probit/Tobitで同一コード）。`?`自体は分岐ロジックを持たないため
+    /// `testing-policy.md`のカバレッジ方針上これで足りる（#279レビューで確認）。
+    ///
     /// `Cluster`は`G=3 > q=2`（`q = k - k_constant`）にして`fit()`冒頭の
     /// `InsufficientClustersForInference`（`G <= q`）より手前を通す（Issue #289）。
     #[test]
@@ -2117,6 +2128,7 @@ mod tests {
             for cov_type in [
                 CovType::Classical,
                 CovType::Hc0,
+                CovType::Hc1,
                 CovType::Opg,
                 CovType::Cluster {
                     groups: Some(groups.clone()),
@@ -2144,9 +2156,18 @@ mod tests {
     // `max_iter`打ち切りのテストは`intercept_only_input()`を使わない: Issue #279の
     // warm start（`ols_based_initial_params`）は切片のみモデルでは初期値がそのまま
     // 厳密なMLE（`η₀=ln(ȳ/(1-ȳ))`）になり1反復以内で収束してしまうため。代わりに
-    // 多変量かつ収束に多反復を要する`near_separation_input_with_beta1(20.0)`
-    // （`beta1=20`は`SeparationSuspected`を誤検知しない境界ケースで、正常に収束はするが
-    // 1反復では到底届かない）を使う。
+    // 多変量かつ収束に多反復を要する`near_separation_input_with_beta1(20.0)`を使う。
+    // `beta1=20`への暗黙の依存が2つある:
+    //   1. 収束の遅さ: `beta1`が大きいほど収束に多反復かかる。`20`は
+    //      `fit_converges_normally_for_mild_near_separation_data_across_all_methods`
+    //      （`max_iter=35`で3手法とも収束）で正常収束が保証されており、かつ warm start
+    //      からでも1反復では`tol=1e-12`に到底届かない。
+    //   2. `SeparationNormCheck::Enabled`との相互作用: `run_solver`の事後チェックは
+    //      「収束扱い かつ 標準化パラメータノルム>閾値」でのみ`SeparationSuspected`を
+    //      返す。`max_iter=1`では未収束のため事後チェックは素通りし、必ず
+    //      `NonConvergence`（`raise=true`）／`converged=false`（`raise=false`）になる。
+    //      `beta1=100`（`fit_returns_separation_suspected_error_for_near_separation_data`）
+    //      だと収束判定が絡んで話が変わるため、境界側の`20`である必要がある。
     #[test]
     fn fit_returns_non_convergence_error_when_max_iter_is_too_small_and_raise_is_true() {
         let result = LogitEstimator::fit(

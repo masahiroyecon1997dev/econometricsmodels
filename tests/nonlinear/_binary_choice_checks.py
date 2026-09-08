@@ -557,20 +557,23 @@ def check_marginal_effects_confidence_level_out_of_range_raises(
 
 
 def check_perfect_multicollinearity_raises_computation_error(
-    estimator_cls, dataset_prefix
+    estimator_cls, dataset_prefix, options_cls, method
 ):
     """完全な多重共線性（合成データセット）は数値比較の対象外
     （`testing-policy.md`「テストの3系統」）。想定エラー（`ComputationError`）が
-    発生することのみを確認する。
+    発生することのみを確認する。`method`（newton/bfgs/lbfgs）でparametrizeする。
 
-    Issue #279以前は、これに加えて`check_singular_hessian_raises_computation_error`
-    （インラインの極小データを`method`×3でparametrize）があった。`newton`は
+    #279以前は、この`method`網羅を`check_singular_hessian_raises_computation_error`
+    （インラインの極小データ、`x2=2*x1`直書き）が担っていた。`newton`は
     `newton_step`内のQR、`bfgs`/`lbfgs`は収束後の`observed_information_cov_params`と
     いう`method`依存の別経路で特異性を検出しており、過去に`bfgs`だけ検出漏れした
-    実バグの回帰ガードだった。#279で`fit()`冒頭の列ピボットQRランクチェック
-    （`method`非依存の単一経路）に一本化されたため、`method`網羅が不要になり
-    本CSVフィクスチャ版へ統合した（OLS/IVは`refactoring-candidates-2.md`項目54で
-    先行実施済み。`engine`側の`method`×`cov_type`網羅は
+    実バグの回帰ガードだった。#279で`engine`内の検出経路は`fit()`冒頭の列ピボットQR
+    ランクチェック（`method`非依存の単一経路、`SingularDesignMatrix`）に一本化された
+    が、**`engine_pybind`側のmethod文字列パース（`"bfgs"`/`"lbfgs"` → `EngineMethod`）
+    と配線はmethod固有のまま**なので、「非既定methodの文字列 × 特異入力 ×
+    `ComputationError`」を踏むAPI境界テストは引き続き必要（testing-completeness-
+    reviewer指摘、#279レビュー）。インラインの極小データはCSVフィクスチャ版へ統合した
+    （`engine`側の`method`×`cov_type`網羅は
     `fit_returns_singular_design_matrix_error_for_perfectly_collinear_design_matrix`
     1本に集約）。
     """
@@ -578,7 +581,12 @@ def check_perfect_multicollinearity_raises_computation_error(
         DATA_DIR / f"{dataset_prefix}_perfect_multicollinearity.csv"
     )
     with pytest.raises(ComputationError):
-        estimator_cls(df, y="y", x=["x1", "x2", "x3"]).fit()
+        estimator_cls(
+            df,
+            y="y",
+            x=["x1", "x2", "x3"],
+            options=options_cls(method=method),
+        ).fit()
 
 
 def check_non_convergence_raises_computation_error_with_tiny_max_iter(

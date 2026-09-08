@@ -136,9 +136,10 @@ def test_marginal_effects_confidence_level_out_of_range_raises(
 # ── ComputationError ──────────────────────────────────────────────
 
 
-def test_perfect_multicollinearity_raises_computation_error():
+@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
+def test_perfect_multicollinearity_raises_computation_error(method):
     _checks.check_perfect_multicollinearity_raises_computation_error(
-        Probit, "probit"
+        Probit, "probit", ProbitOptions, method
     )
 
 

@@ -2110,8 +2110,15 @@ mod tests {
     /// `method`×`cov_type`を網羅していた旧5テスト（`..._with_bfgs_and_lbfgs` /
     /// `..._with_hc0_and_hc1` / `fit_returns_singular_opg_matrix_error_...` /
     /// `..._with_cluster`）を本1テストへ集約した。`x2`は`x1`から生成する
-    /// （`refactoring-candidates-2.md`項目82）。`Cluster`は`G=3 > q=2`にして`fit()`冒頭の
-    /// `InsufficientClustersForInference`（`G <= q`）より手前を通す（Issue #289）。
+    /// （`refactoring-candidates-2.md`項目82）。
+    ///
+    /// 旧5テストが検証していた「`fit()`の各`cov_type`分岐での`SingularHessian`/
+    /// `SingularOpgMatrix`の`?`伝播」経路のカバレッジは、`common.rs`の関数レベルテストと
+    /// `tobit.rs`の`fit()`レベルテスト（`cov_params`計算は3手法で同一コード）が担う
+    /// （`LogitEstimator`の対応するテストのdocコメント参照、#279レビューで確認）。
+    ///
+    /// `Cluster`は`G=3 > q=2`にして`fit()`冒頭の`InsufficientClustersForInference`
+    /// （`G <= q`）より手前を通す（Issue #289）。
     #[test]
     fn fit_returns_singular_design_matrix_error_for_perfectly_collinear_design_matrix() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
@@ -2128,6 +2135,7 @@ mod tests {
             for cov_type in [
                 CovType::Classical,
                 CovType::Hc0,
+                CovType::Hc1,
                 CovType::Opg,
                 CovType::Cluster {
                     groups: Some(groups.clone()),
@@ -2155,9 +2163,10 @@ mod tests {
     // `max_iter`打ち切りのテストは`intercept_only_input()`を使わない: Issue #279の
     // warm start（`ols_based_initial_params`）は切片のみモデルでは初期値がそのまま
     // 厳密なMLE（`η₀=Φ⁻¹(ȳ)`）になり1反復以内で収束してしまうため。代わりに多変量
-    // （n=4, k=3）データで、warm startからNewtonが1反復では`tol=1e-12`に届かない
-    // ことを利用する（この設計行列は`fit_cov_params_is_symmetric_...`等が
-    // `max_iter=35`で正常収束させているのと同じもの）。
+    // （n=4, k=3、`y=[0,1,0,1]`）データで、warm startからNewtonが1反復では`tol=1e-12`に
+    // 届かないことを利用する。この設計行列（`x1=[10,20,30,40]`・`x2=[-5,2,8,-1]`）は
+    // 線形分離不能（有限MLEが存在）で、`fit_cov_params_is_symmetric_and_stats_are_
+    // internally_consistent`が`max_iter=35`で正常収束させているのと同じもの。
     #[test]
     fn fit_returns_non_convergence_error_when_max_iter_is_too_small_and_raise_is_true() {
         let y = vec![0.0, 1.0, 0.0, 1.0];

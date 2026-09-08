@@ -1272,18 +1272,18 @@ where
 ///
 /// **導入経緯（Issue #215）**: Logit/Probitのように尤度が大域凹（Hessianが半正定値）な
 /// 問題では、収束点に向かう正常な軌道上は`λ=0`の生のNewtonステップが最初の試行で
-/// 受理されるため、収束の挙動（反復回数・収束点）は変わらない。ただし例外がある:
-/// 設計行列が構造的に特異な入力（完全な多重共線性等、`logit.rs`の
-/// `fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix`が使う
-/// ケース）では、Hessianが**すべての点で**特異なため、導入前は`newton_step`が初回から
-/// 即座に`SingularHessian`を返していたが、導入後は`λ>0`の正則化により一旦有限のステップが
-/// 得られてしまい、Newton自体は「収束」した扱いになる（最終的には収束後の
-/// `observed_information_cov_params`が同じ構造的特異Hessianを検出し、結局
-/// `SingularHessian`を返すため、`fit()`全体としてのエラーバリアント・最終的な
-/// ユーザー向け挙動は変わらない。既存テストが変化なくパスするのはこのため）。
-/// つまり保証されるのは「`fit()`が最終的に返す結果」の不変性であり、Newton内部の
-/// 反復過程・エラー発生箇所まで完全に不変というわけではない（rust-reviewer指摘、
-/// 独立シミュレーションで確認済み）。一方Tobitは`(β, logσ)`パラメータ化で大域凹性が保証されず
+/// 受理されるため、収束の挙動（反復回数・収束点）は変わらない。
+///
+/// **設計行列が構造的に特異な入力（完全な多重共線性等）について（Issue #279で経路変更）**:
+/// Logit/Probit/Tobitの`fit()`は`run_solver`を呼ぶ前に`checked_design_matrix_qr`で
+/// 設計行列を列ピボットQR分解し、ランク落ちを`SingularDesignMatrix`として弾くように
+/// なった。このためLogit/Probitのこの種の入力は`regularized_newton_step`にそもそも
+/// 到達しない。`newton_step`が`SingularHessian`を返す経路自体は残しており
+/// （収束点近傍で丸め誤差により不定符号Hessianになる等）、その回帰ガードは合成問題
+/// `SingularHessianProblem`（実データではなく`hessian()`が常にゼロ行列を返すモデル）を
+/// 使う`run_solver_newton_returns_singular_hessian_error`が担う。
+///
+/// 一方Tobitは`(β, logσ)`パラメータ化で大域凹性が保証されず
 /// （`docs/spec/tobit-spec.md`3.1節参照。Olsen(1978)の`(β/σ, 1/σ)`変換は不採用）、
 /// Hessianが不定符号になる領域では
 /// **生のNewtonステップが降下方向ですらなくなる**ことが実測で判明した（OLS推定値を
@@ -1430,15 +1430,17 @@ fn newton_step(hessian: &[Vec<f64>], grad: &[f64]) -> Result<Vec<f64>, MleError>
     Ok((0..k).map(|i| *step.get(i, 0)).collect())
 }
 
-/// 標準化済み設計行列`x_std`を列ピボットQR分解し、ランク落ちが無ければQR分解を
-/// そのまま返す（呼び出し側が`solve_lstsq`で最小二乗解＝反復最適化の初期値を、
-/// 再分解せずに取り出せるようにするため）。
+/// 設計行列`x`を列ピボットQR分解し、ランク落ちが無ければQR分解をそのまま返す
+/// （呼び出し側が`solve_lstsq`で最小二乗解＝反復最適化の初期値を、再分解せずに
+/// 取り出せるようにするため）。
 ///
-/// 特異性判定は`R`の対角成分に対する相対閾値`k·ε·max|R_ii|`（`.claude/rules/rust-style.md`
-/// 「線形代数」、`linear::ols`の`ensure_full_rank`・`newton_step`と同一式）。全ゼロ列を
-/// 含む設計行列では`col_piv_qr`が`R`の対角にNaNを生成しうるため、NaNも明示的に弾く
-/// （`newton_step`と同じ罠、`engine/src/linear/CLAUDE.md`「相対閾値との比較だけではNaNを
-/// すり抜ける」参照）。
+/// `x`は標準化済み（Logit/Probitの`ols_based_initial_params`）でも生スケール
+/// （`tobit::ols_initial_params`）でもよい。特異性判定は`R`の対角成分に対する相対閾値
+/// `k·ε·max|R_ii|`（`.claude/rules/rust-style.md`「線形代数」、`linear::ols`の
+/// `ensure_full_rank`・`newton_step`と同一式）で、列ごとの一様スケーリングに対して
+/// 不変なため、標準化の有無で判定結果は変わらない。全ゼロ列を含む設計行列では
+/// `col_piv_qr`が`R`の対角にNaNを生成しうるため、NaNも明示的に弾く（`newton_step`と
+/// 同じ罠、`engine/src/linear/CLAUDE.md`「相対閾値との比較だけではNaNをすり抜ける」参照）。
 ///
 /// Logit/Probit（`ols_based_initial_params`）とTobit（`tobit::ols_initial_params`）が
 /// `fit()`冒頭で共有する。Newton法が一度も反復していない段階での検出のため、エラーは
@@ -1447,12 +1449,12 @@ fn newton_step(hessian: &[Vec<f64>], grad: &[f64]) -> Result<Vec<f64>, MleError>
 /// 多重共線性を検出するのが本関数を共有する目的）。
 ///
 /// # Errors
-/// `x_std`がランク落ち（完全な多重共線性等）: `MleError::SingularDesignMatrix`
+/// `x`がランク落ち（完全な多重共線性等）: `MleError::SingularDesignMatrix`
 pub fn checked_design_matrix_qr(
-    x_std: &Mat<f64>,
+    x: &Mat<f64>,
 ) -> Result<faer::linalg::solvers::ColPivQr<f64>, MleError> {
-    let k = x_std.ncols();
-    let qr = x_std.col_piv_qr();
+    let k = x.ncols();
+    let qr = x.col_piv_qr();
     let r = qr.thin_R();
     let max_abs_diag = (0..k).map(|i| (*r.get(i, i)).abs()).fold(0.0_f64, f64::max);
     let threshold = (k as f64) * f64::EPSILON * max_abs_diag;

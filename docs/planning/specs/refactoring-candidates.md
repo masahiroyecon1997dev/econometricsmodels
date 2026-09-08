@@ -882,79 +882,26 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **状態**: 未対応（項目76〔`refactoring-candidates-2.md`〕と統合して
   対応するのが効率的、着手タイミングはユーザー判断待ち）
 
-### 35.【重要な設計提案】Tobitの「`method`によらず常にOLSベースの初期値・QR検証を実行する」設計は、Logit/Probitの過去の実バグ（`bfgs`の特異性検出漏れ）を構造的に解消できる可能性がある
+### 35.【完了】Logit/Probitの初期値・特異性検出をTobit方式（`method`共通のQRランクチェック＋OLSベース初期値）に統一 → Issue #279（2026-09-08 実施）
 
-- **対象**: [tests/test_tobit.py:415-421](../../../tests/test_tobit.py#L415-L421)
-  （`test_singular_design_matrix_raises_computation_error`、`method`を
-  parametrizeする必要が無い理由の説明）と対比した
-  [tests/nonlinear/test_logit.py:336-359](../../../tests/nonlinear/test_logit.py#L336-L359)
-  （`test_singular_hessian_raises_computation_error`、`method`を
-  `["newton", "bfgs", "lbfgs"]`でparametrizeする必要がある理由として
-  「過去に`bfgs`だけ検出漏れし桁違いに巨大な標準誤差を含む`Ok`が
-  返る実バグがあった」と明記）
-- **内容**: ユーザー指摘（2026-08-31、「反復最適化の初期値をOLSベース
-  にするというのがlogit/probitに適用できない？Tobitの実装がいい
-  アイディアだと思った」）を受けて両ファイルを比較した。
-  - Tobitは`method`（newton/bfgs/lbfgs）に関わらず、`ols_initial_
-    params`のQR検証が**常に最初に実行される**設計のため、完全な
-    多重共線性は`method`を問わず同じ経路（QR分解）で確実に検出
-    できる。そのため`test_singular_design_matrix_raises_computation_
-    error`は`method`をparametrizeする必要が無い。
-  - 一方Logit/Probitは`start_params`の既定が**ゼロベクトル**
-    （`nonlinear-api-design.md`7章、statsmodels方式）であり、多重
-    共線性の検出は`method`ごとに異なる経路（`newton`は`newton_step`
-    内のピボット付きQR分解、`bfgs`/`lbfgs`は準ニュートン法のため
-    収束後の`observed_information_cov_params`呼び出しが唯一の検出
-    経路）に依存する。この構造的な違いにより、**過去に実際に
-    `bfgs`だけが検出漏れし、桁違いに巨大な標準誤差を含む`Ok`
-    （エラーにならず、統計的に無意味な結果が静かに返る）という
-    実バグがあった**ことが`test_logit.py`のdocコメントに明記されて
-    いる。
-- **Claudeの所感**: ユーザーの着眼点に強く同意する。Tobitの設計
-  （`method`共通のOLSベース初期値・QR検証を最初に必ず通す）を
-  Logit/Probitにも適用すれば、(1) 最適化の収束が速くなりうる
-  （実務的によく使われる高速化手法でもある）という利点に加え、
-  (2) **多重共線性検出が`method`によらず単一の経路に統一され、
-  過去に実際に発生したような`method`依存の検出漏れバグのクラス
-  自体を構造的に排除できる**、という利点がある。(2)の方が実務上
-  重要だと考える——「`method`ごとに異なる検出経路を持つ」という
-  設計自体が、将来また同種のバグを生みうる構造的リスクだと言える。
-  ただし変更する場合は、(a) ゼロベクトル初期値からOLSベース初期値へ
-  変更することが既存のRクロスチェック・statsmodelsクロスチェックの
-  数値（収束先は同じでも収束過程・収束判定の境界ケースでの挙動が
-  変わりうる）に影響しないか、(b) OLSベースの初期値計算自体の
-  コスト（QR分解）が既存のゼロベクトル開始と比べて有意に重くならないか、
-  の2点を実装時に確認する必要がある。
-- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
-  指摘、`test_logit.py`との比較調査で確認。
-- **状態**: **実施済み**（2026-09-08、#279）。論点A（サブセット案 vs Tobit 完全移植）は
-  ユーザー判断で「Tobit 完全移植（OLS ベース warm start まで）」、論点B（共通ヘルパー配置）は
-  「`nonlinear::common.rs` へ切り出し（Tobit もリファクタ）」を採用。`checked_design_matrix_qr`
-  （列ピボットQR＋相対閾値ランクチェック、logit/probit/tobit 共有）と `ols_based_initial_params`
-  （LPM の IRLS 1ステップ相当スケール補正、logit/probit 共有）を `nonlinear/common.rs` に新設。
-  Logit/Probit の `fit()` はゼロベクトル初期値 → この warm start に変更し、多重共線性検出が
-  `method` 非依存の単一経路（前段QR → `SingularDesignMatrix`）に統一。`test_singular_hessian_
-  raises_computation_error`（`method`×3）は削除し `test_perfect_multicollinearity_raises_
-  computation_error`（CSV フィクスチャ）へ一本化、engine 側5テストは
-  `fit_returns_singular_design_matrix_error_for_perfectly_collinear_design_matrix` 1本へ集約。
-  `refactoring-candidates-2.md` 項目82 も同時解消（項目54・`refactoring-candidates-3.md` は
-  現行ファイルに該当項目が見当たらず＝Issue 本文の参照が stale。下記「未解決」参照）。収束先・
-  クロスチェック数値・フィクスチャは不変（MLE が一意のため。engine 446 / nonlinear pytest 441
-  / full pytest 1082 パス）。
-- **パフォーマンス実測（`git stash` A/B、cov_type=classical・k=5・`repeats=3`）**: 既定の
-  `method="newton"` は中立〜高速化（大標本 logit で −10〜14%、warm start が反復数を削減）。
-  probit newton も ±0〜−7%。ただし **`method="bfgs"` の n=1,000,000 は 9.81s → 13.09s（+33%）と
-  悪化**（lbfgs は spot-check では速くなる方向）。BFGS は恒等行列で逆Hessian近似を初期化する
-  ため、ゼロ初期値より曲率の異なる warm start 地点からだと line search の関数評価が増えるためと
-  考えられる。非既定かつ元々「newton 比で大幅に遅い・改善余地あり」の quasi-Newton パスのため、
-  #279 では warm start を method 共通のまま受容し、`docs/performance/logit.md` の method軸 節に
-  追記した（ユーザー確認済み。quasi-Newton × warm start の相互作用の是正は **Issue #304** で追跡。
-  #304 で項目44/45/46 の欠落整理もあわせて行う）。
-- **未解決（stale 参照）**: 本項目・Issue #279 本文が参照する `refactoring-candidates-2.md` 項目54
-  と `refactoring-candidates-3.md` は現行ファイルに存在しない。`docs/performance/{logit,probit}.md`
-  が参照する項目44/45/46（マルチスレッド不安定・Probit Hessian 飽和・BFGS/L-BFGS 遅い）も
-  現行 `refactoring-candidates*.md`（項目43 まで）に無い。番号ずれ or 過去の整理で欠落した
-  可能性があり、要確認（#279 のスコープ外）。
+- **完了内容**: `nonlinear::common::checked_design_matrix_qr`（列ピボットQR＋相対閾値ランク
+  チェック、logit/probit/tobit 共有）と `ols_based_initial_params`（標準化LPM解 + IRLS 1
+  ステップ相当のスケール補正、logit/probit 共有）を新設。Logit/Probit の `fit()` を
+  ゼロベクトル初期値 → この warm start に変更し、多重共線性検出を `method` 非依存の単一経路
+  （前段QR → `MleError::SingularDesignMatrix`）に統一。過去に `bfgs` だけ検出漏れした
+  バグクラスを構造的に排除。テストは Python `test_perfect_multicollinearity_raises_
+  computation_error`（`method`×3 parametrize、CSVフィクスチャ）＋ engine
+  `fit_returns_singular_design_matrix_error_for_perfectly_collinear_design_matrix`
+  （`method`×`cov_type` ループ）へ集約。設計背景・数式は
+  `docs/spec/logit-spec.md` 3.2・`docs/planning/specs/nonlinear-implementation-notes.md`
+  「Issue #279」段落が正本。`refactoring-candidates-2.md` 項目82 も同時解消。
+- **フォローアップ（未完・別Issue）**:
+  - **#304**: warm start 導入で `method="bfgs"` 大標本が ~33% 悪化（既定 newton は逆に高速化）。
+    quasi-Newton × warm start の相互作用の是正。あわせて下記の項目番号欠落を整理する。
+  - **stale 参照（要調査）**: Issue #279 本文が参照する `refactoring-candidates-2.md` 項目54・
+    `refactoring-candidates-3.md`、`docs/performance/{logit,probit}.md` が参照する項目44/45/46
+    （マルチスレッド不安定・Probit Hessian 飽和・BFGS/L-BFGS 遅い）が、現行
+    `refactoring-candidates*.md`（項目43 まで）に存在しない。番号ずれ or 過去の整理での欠落。
 
 ### 36. `test_separation_suspected_raises_computation_error_for_near_separation_data`のDGPがインライン生成で、Logit/Probitの`separation_suspected_dataset`共有ヘルパーを使っていない
 
@@ -977,9 +924,9 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **Claudeの所感**: `testing-policy.md`「テスト用データセット」が
   求める`benchmark/`側でのDGP定義＋CSV固定は、この種の
   `ComputationError`パス専用データ（数値比較をしないデータ）には
-  必須ではない（`test_singular_hessian_raises_computation_error`等の
-  既存の小さい手書きDataFrameも同様に固定CSV化されていない）ため、
-  `benchmark/`フル対応は過剰だと考える。ただし`_helpers.py`に
+  必須ではない（`engine`側の`fit_returns_singular_design_matrix_error_
+  for_perfectly_collinear_design_matrix`等の小さい手書きデータも
+  同様に固定CSV化されていない）ため、`benchmark/`フル対応は過剰だと考える。ただし`_helpers.py`に
   Tobit版の「打ち切り付き分離疑いデータセット」ヘルパーとして切り出し、
   `random`ではなく他のDGPと統一感のある`numpy`ベースの乱数生成に
   揃えるのは、再利用性・一貫性の両面で価値があると考える（実施コストは

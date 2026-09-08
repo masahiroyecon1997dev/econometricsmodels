@@ -556,43 +556,23 @@ def check_marginal_effects_confidence_level_out_of_range_raises(
 # ── test_<method>_validation.py: ComputationError ───────────────────
 
 
-def check_singular_hessian_raises_computation_error(
-    estimator_cls, options_cls, method
-):
-    """完全な多重共線性は`ComputationError`。
-
-    `method`をparametrizeしているのは、`newton`は`newton_step`内の
-    ピボット付きQR分解経由でたまたま特異性を検出できていたが、`bfgs`/
-    `lbfgs`は準ニュートン法のため`newton_step`を経由せず、収束後の
-    `observed_information_cov_params`呼び出しが唯一の検出経路になるという
-    構造的な違いがあるため（`docs/planning/specs/nonlinear-implementation-notes.md`
-    「`cov_type`共通行列演算の特異性検出」参照。過去に`bfgs`だけ検出漏れし
-    桁違いに巨大な標準誤差を含む`Ok`が返る実バグがあり、`engine`側には
-    専用の回帰テストがあるが、`method`の文字列パース〜`engine_pybind`配線を
-    経由するAPI境界での確認が無かった。`testing-completeness-reviewer`指摘、
-    Issue #231フェーズ4）。
-    """
-    df = pl.DataFrame(
-        {
-            "y": [0.0, 1.0, 0.0, 1.0, 1.0],
-            "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
-            "x2": [2.0, 4.0, 6.0, 8.0, 10.0],  # x2 = 2 * x1
-        }
-    )
-    with pytest.raises(ComputationError):
-        estimator_cls(
-            df, y="y", x=["x1", "x2"], options=options_cls(method=method)
-        ).fit()
-
-
 def check_perfect_multicollinearity_raises_computation_error(
     estimator_cls, dataset_prefix
 ):
     """完全な多重共線性（合成データセット）は数値比較の対象外
     （`testing-policy.md`「テストの3系統」）。想定エラー（`ComputationError`）が
-    発生することのみを確認する
-    （`check_singular_hessian_raises_computation_error`はインラインの
-    極小データ、こちらは`benchmark`のCSVフィクスチャ）。
+    発生することのみを確認する。
+
+    Issue #279以前は、これに加えて`check_singular_hessian_raises_computation_error`
+    （インラインの極小データを`method`×3でparametrize）があった。`newton`は
+    `newton_step`内のQR、`bfgs`/`lbfgs`は収束後の`observed_information_cov_params`と
+    いう`method`依存の別経路で特異性を検出しており、過去に`bfgs`だけ検出漏れした
+    実バグの回帰ガードだった。#279で`fit()`冒頭の列ピボットQRランクチェック
+    （`method`非依存の単一経路）に一本化されたため、`method`網羅が不要になり
+    本CSVフィクスチャ版へ統合した（OLS/IVは`refactoring-candidates-2.md`項目54で
+    先行実施済み。`engine`側の`method`×`cov_type`網羅は
+    `fit_returns_singular_design_matrix_error_for_perfectly_collinear_design_matrix`
+    1本に集約）。
     """
     df = pl.read_csv(
         DATA_DIR / f"{dataset_prefix}_perfect_multicollinearity.csv"

@@ -113,7 +113,7 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
 
 | モデル | オプション | 状態 |
 |---|---|---|
-| Probit / Logit | `start_params: Option<Vec<f64>>`（初期値。`None`ならゼロベクトル、statsmodels方式） | 確定 |
+| Probit / Logit | `start_params: Option<Vec<f64>>`（ユーザー指定初期値） | 未実装（対応Issue無し、見送り）。`None`時の内部初期値は当初「ゼロベクトル」だったが、Issue #279でLPMのIRLS 1ステップ相当のwarm start（＋前段の列ピボットQRランクチェック）に変更、Tobit方式に統一 |
 | Tobit | 打ち切り方向（左/右/両側）・下限/上限値 | 確定（詳細下記） |
 | Tobit | `dist`（誤差分布。`survival::survreg`はgaussian/logistic/extreme value等を選べる） | **Gaussian固定**。他分布はv1では対象外、将来拡張として保留 |
 | 多項ロジット | 参照カテゴリ（`base_category`等） | 着手時に決定 |

@@ -37,8 +37,8 @@ use crate::nonlinear::common::{
     Method, MleError, SandwichVariant, SeparationNormCheck, cluster_cov_params, column_means,
     column_medians, destandardize_cov_params, destandardize_params, goodness_of_fit,
     log_likelihood_null, marginal_effects_from_w_s, observed_information_cov_params,
-    opg_cov_params, pred_table, predict_from_link, run_solver, sandwich_cov_params,
-    standardize_columns, validate_fit_preconditions,
+    ols_based_initial_params, opg_cov_params, pred_table, predict_from_link, run_solver,
+    sandwich_cov_params, standardize_columns, validate_fit_preconditions,
 };
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
@@ -420,9 +420,13 @@ impl LogitEstimator {
     /// 「engine内のtrait設計」参照）。BFGS/L-BFGSが最適化中に内部で保持する近似Hessianは
     /// 使い回さない。
     ///
-    /// 初期値は常にゼロベクトル（`start_params`によるユーザー指定は未対応。
-    /// `nonlinear-api-design.md`7章では確定オプションだが、対応するIssueが存在しないため
-    /// 本Issueのスコープ外とし、ユーザー確認の上で見送った）。
+    /// 初期値（warm start）は標準化空間でのLPM（線形確率モデル）最小二乗解に、logitの
+    /// IRLS 1ステップ相当のスケール補正（`p̄=ȳ`での `1/(p̄(1-p̄))` 倍＋切片補正）を施した
+    /// もの（`ols_based_initial_params`、Issue #279。従来のゼロベクトルから変更）。前段で
+    /// `standardize_columns`後の設計行列を列ピボットQRしランク落ちを検出する
+    /// （`checked_design_matrix_qr`、`method`によらず単一経路で`SingularDesignMatrix`）。
+    /// `start_params`によるユーザー指定初期値は引き続き未対応（`nonlinear-api-design.md`
+    /// 7章では確定オプションだが対応Issueが無く、ユーザー確認の上で見送り）。
     ///
     /// 設計行列は`standardize_columns`で内部的に標準化してから最適化し（勾配ノルムに
     /// 基づく収束判定`tol`が設計行列のスケールに依存しないようにするため、
@@ -463,9 +467,12 @@ impl LogitEstimator {
     /// - `y`が`{0.0, 1.0}`以外の値を含む: `MleError::InvalidBinaryY`
     /// - `k`（定数項を含む説明変数の数）が0（定数項も説明変数も無い）: `CommonError::NoRegressors`
     /// - 観測数`n`が`k`以下: `CommonError::InsufficientObservations`
+    /// - 設計行列がランク落ち（完全な多重共線性等）: `MleError::SingularDesignMatrix`
+    ///   （最適化前の列ピボットQRランクチェックで`method`によらず検出、Issue #279）
     /// - `raise_on_non_convergence=true`かつ`max_iter`回で未収束: `MleError::NonConvergence`
-    /// - 収束点（または`raise_on_non_convergence=false`時の打ち切り点）のHessianが特異
-    ///   （設計行列の完全な多重共線性等）: `MleError::SingularHessian`
+    /// - 収束点（または`raise_on_non_convergence=false`時の打ち切り点）のHessianが特異:
+    ///   `MleError::SingularHessian`（ランク落ちは前段で`SingularDesignMatrix`として弾くため、
+    ///   ここに至るのは丸め誤差境界での不定符号Hessian等）
     /// - `cov_type=Opg`でOPG行列（`Σᵢ sᵢsᵢ'`）が特異: `MleError::SingularOpgMatrix`
     /// - `cov_type=Cluster`でグループキー未指定: `CommonError::MissingClusterColumn`
     /// - `cov_type=Cluster`でクラスター数が2未満: `CommonError::InsufficientClusters`
@@ -499,6 +506,19 @@ impl LogitEstimator {
         )?;
 
         let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
+        // `method`に関わらず、標準化空間でLPMのIRLS 1ステップ相当を初期値（warm start）に
+        // する（`ols_based_initial_params`）。前段の列ピボットQRランクチェックにより、
+        // 完全な多重共線性は`method`によらず単一経路で`SingularDesignMatrix`として検出される
+        // （Issue #279。従来はゼロベクトル初期値で、`newton`は`newton_step`内のQR、
+        // `bfgs`/`lbfgs`は収束後の`observed_information_cov_params`という`method`依存の
+        // 別経路に分かれていた）。
+        let initial_params = ols_based_initial_params(
+            &x_std,
+            input.y(),
+            input.has_intercept(),
+            // logit: IRLS重み `w = p̄(1-p̄)`、リンク値 `η₀ = ln(p̄/(1-p̄))`。
+            |p_bar| (p_bar * (1.0 - p_bar), (p_bar / (1.0 - p_bar)).ln()),
+        )?;
         let problem = LogitProblem::from_standardized(x_std, input.y().clone());
         // `cov_type`がOPG/サンドイッチ型の場合、収束点でのスコア評価に元の
         // `LogitProblem`（標準化空間のx_std）が必要になる。`run_solver`は`problem`の
@@ -517,7 +537,7 @@ impl LogitEstimator {
         let output = run_solver(
             problem,
             method,
-            vec![0.0; k],
+            initial_params,
             max_iter as u64,
             tol,
             raise_on_non_convergence,
@@ -2065,201 +2085,72 @@ mod tests {
         }
     }
 
-    #[test]
-    fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix() {
-        // x2 = 2*x1（完全な多重共線性）。θ=0でのHessianは0.25*X'Xで、X'X自体が
-        // 構造的に特異（yの値に関わらず、θの値に関わらず常に特異）なので、
-        // 収束後の観測情報行列計算（`observed_information_cov_params`）で確実に
-        // `SingularHessian`を検出する（完全分離のような「収束の挙動に依存する」
-        // ケースと異なり、決定的に再現できる）。
-        //
-        // Newton法自体の反復過程は、`regularized_newton_step`（Tobit実装時に
-        // `nonlinear/common.rs`へ追加、Issue #215）導入前は初回ステップで即座に
-        // `newton_step`が特異性を検出していたが、導入後はHessianが構造的に特異な
-        // このケースでもλ>0の正則化により有限のステップが得られ、Newton自体は
-        // 「収束」した扱いになる。最終的にこのテストが検証する`fit()`全体の
-        // 結果（`Err(MleError::SingularHessian)`）は変わらない（収束後の
-        // `observed_information_cov_params`が同じ構造的特異Hessianを検出するため）が、
-        // 内部の反復過程は変化している点に注意（rust-reviewer指摘）。
-        let y = vec![0.0, 1.0, 0.0, 1.0];
-        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
-        let input = LogitInput::from_columns(
-            &y,
-            &x_columns,
-            vec!["x1".to_string(), "x2".to_string()],
-            true,
-            "y".to_string(),
-        )
-        .unwrap();
-
-        let result = LogitEstimator::fit(
-            input,
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
-        );
-        assert!(
-            matches!(result, Err(MleError::SingularHessian)),
-            "{:?}",
-            result
-        );
-    }
-
-    /// 同じ完全な多重共線性のデータセットを`bfgs`/`lbfgs`で最適化した場合の
-    /// `SingularHessian`伝播経路: `newton`は`newton_step`内の特異性検出
-    /// （最適化のステップ計算中）で検出するが、`bfgs`/`lbfgs`は`newton_step`を
-    /// 一切経由しない（準ニュートン法は内部の近似逆Hessianで降下方向を決めるため、
-    /// モデルの解析的Hessianの特異性に依存しない）。この場合、収束後に
-    /// `observed_information_cov_params`（`neg_hessian_inverse`）が呼ぶ
-    /// `ensure_well_conditioned_symmetric_matrix`（固有値ベースの悪条件検出）が、
-    /// `bfgs`/`lbfgs`にとって唯一の特異性検出経路になる。修正前（発覚時点）
-    /// はこのテストは失敗していた（非ピボットCholeskyが特異性を検出できず、
-    /// 桁違いに巨大な値を含む`Ok`が返っていた）。両方のソルバーで同じコードパスを
-    /// 通ることをそれぞれ独立に確認する。
-    #[test]
-    fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_bfgs_and_lbfgs()
-     {
-        let y = vec![0.0, 1.0, 0.0, 1.0];
-        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
-
-        for method in [Method::Bfgs, Method::Lbfgs] {
-            let input = LogitInput::from_columns(
-                &y,
-                &x_columns,
-                vec!["x1".to_string(), "x2".to_string()],
-                true,
-                "y".to_string(),
-            )
-            .unwrap();
-
-            let result =
-                LogitEstimator::fit(input, method, 100, 1e-6, true, CovType::Classical, 0.95);
-            assert!(
-                matches!(result, Err(MleError::SingularHessian)),
-                "method={:?}, result={:?}",
-                method,
-                result
-            );
-        }
-    }
-
-    /// `sandwich_cov_params`（`cov_type=Hc0`/`Hc1`）も内部で`neg_hessian_inverse`を
-    /// 呼ぶため、`Classical`と同じ完全な多重共線性のデータセットで`SingularHessian`に
-    /// なるはずだが、カバレッジ確認時点ではこの伝播経路
-    /// （`fit()`の`CovType::Hc0`/`Hc1`分岐の`?`）を通るテストが無かった
-    /// （`cargo-llvm-cov`で判明）。`Opg`/`Cluster`分岐は既存の`fit_cov_type_*`系
-    /// テストが特異でないデータセットでの成功パスのみ検証しているのと対照的に、
-    /// ここでは特異データセットでのエラー伝播を検証する。
+    /// 完全な多重共線性（`x2 = 2·x1`）の設計行列は、`fit()`冒頭の列ピボットQR
+    /// ランクチェック（`nonlinear::common::checked_design_matrix_qr`）で`method`・
+    /// `cov_type`に関わらず単一経路で`SingularDesignMatrix`として弾かれる（Issue #279）。
     ///
-    /// `method=Newton`は使わない: `newton_step`内の特異性検出（ピボット付きQR）が
-    /// `cov_type`の分岐に到達する前（最適化中）に`SingularHessian`を返してしまうため
-    /// （`fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_
-    /// with_bfgs_and_lbfgs`のdocコメントと同じ理由。当初`Method::Newton`で書いていて
-    /// この経路を実際には通れていなかったことが`cargo-llvm-cov`の再計測で発覚し、
-    /// `Method::Bfgs`に修正した）。
+    /// 従来はゼロベクトル初期値で、`newton`は`newton_step`内の列ピボットQR、`bfgs`/`lbfgs`は
+    /// 収束後の`observed_information_cov_params`（`cov_type=Opg`なら`opg_cov_params`）と
+    /// いう`method`/`cov_type`依存の別経路で検出しており、過去に`bfgs`だけ検出漏れして
+    /// 桁違いに巨大なSEを含む`Ok`が返る実バグがあった（`tests/nonlinear/
+    /// test_logit_validation.py`の履歴参照）。前段QRへの一本化でそのバグクラスを
+    /// 構造的に排除したため、`method`×`cov_type`を網羅していた旧5テスト
+    /// （`..._with_bfgs_and_lbfgs` / `..._with_hc0_and_hc1` / `fit_returns_singular_opg_
+    /// matrix_error_...` / `..._with_cluster`）を本1テストへ集約した。`x2`は`x1`から
+    /// 生成し関係を自明にする（`refactoring-candidates-2.md`項目82）。
+    ///
+    /// `Cluster`は`G=3 > q=2`（`q = k - k_constant`）にして`fit()`冒頭の
+    /// `InsufficientClustersForInference`（`G <= q`）より手前を通す（Issue #289）。
     #[test]
-    fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_hc0_and_hc1() {
+    fn fit_returns_singular_design_matrix_error_for_perfectly_collinear_design_matrix() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
-        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
-
-        for cov_type in [CovType::Hc0, CovType::Hc1] {
-            let input = LogitInput::from_columns(
-                &y,
-                &x_columns,
-                vec!["x1".to_string(), "x2".to_string()],
-                true,
-                "y".to_string(),
-            )
-            .unwrap();
-
-            let result =
-                LogitEstimator::fit(input, Method::Bfgs, 100, 1e-6, true, cov_type.clone(), 0.95);
-            assert!(
-                matches!(result, Err(MleError::SingularHessian)),
-                "cov_type={:?}, result={:?}",
-                cov_type,
-                result
-            );
-        }
-    }
-
-    /// `cov_type=Opg`のエラー伝播（`opg_cov_params`が返す`SingularOpgMatrix`。
-    /// `SingularHessian`とは別のエラー型、`common.rs`「OPG行列特異時のエラー型を分離」
-    /// 参照）も、Hc0/Hc1と同じ完全な多重共線性データセットで検証する。
-    /// `scores_i=(y_i-p_i)x_i`かつ`x2=2*x1`のため、スコア行列も`x1`と同じ構造的な
-    /// 多重共線性を持ち（列2=2×列1）、OPG行列`Σsᵢsᵢ'`も特異になる。rust-reviewerの
-    /// 指摘（Hc0/Hc1の修正時、同種のギャップがOpg/Clusterにも残っていることが
-    /// `cargo-llvm-cov`のHTMLレポートで判明）を受けて追加。
-    #[test]
-    fn fit_returns_singular_opg_matrix_error_for_perfectly_collinear_design_matrix() {
-        let y = vec![0.0, 1.0, 0.0, 1.0];
-        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
-        let input = LogitInput::from_columns(
-            &y,
-            &x_columns,
-            vec!["x1".to_string(), "x2".to_string()],
-            true,
-            "y".to_string(),
-        )
-        .unwrap();
-
-        let result = LogitEstimator::fit(input, Method::Bfgs, 100, 1e-6, true, CovType::Opg, 0.95);
-        assert!(
-            matches!(result, Err(MleError::SingularOpgMatrix)),
-            "{:?}",
-            result
-        );
-    }
-
-    /// `cov_type=Cluster`のエラー伝播（`cluster_cov_params`も内部で`neg_hessian_inverse`を
-    /// 呼ぶため`SingularHessian`）も、Hc0/Hc1と同じ完全な多重共線性データセットで検証する
-    /// （rust-reviewerの指摘、上記2テストと同じ経緯）。`G=3 > q=2`にして`fit()`冒頭の
-    /// `InsufficientClustersForInference`より先にNewton反復のHessian特異へ到達させる
-    /// （Issue #289。`q`は共線性で実質1次元だが列数としては2）。
-    #[test]
-    fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_cluster() {
-        let y = vec![0.0, 1.0, 0.0, 1.0];
-        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
+        let x1 = vec![1.0, 2.0, 3.0, 4.0];
+        let x2: Vec<f64> = x1.iter().map(|v| v * 2.0).collect();
         let groups = vec![
             "g1".to_string(),
             "g1".to_string(),
             "g2".to_string(),
             "g3".to_string(),
         ];
-        let input = LogitInput::from_columns(
-            &y,
-            &x_columns,
-            vec!["x1".to_string(), "x2".to_string()],
-            true,
-            "y".to_string(),
-        )
-        .unwrap();
 
-        let result = LogitEstimator::fit(
-            input,
-            Method::Bfgs,
-            100,
-            1e-6,
-            true,
-            CovType::Cluster {
-                groups: Some(groups),
-            },
-            0.95,
-        );
-        assert!(
-            matches!(result, Err(MleError::SingularHessian)),
-            "{:?}",
-            result
-        );
+        for method in [Method::Newton, Method::Bfgs, Method::Lbfgs] {
+            for cov_type in [
+                CovType::Classical,
+                CovType::Hc0,
+                CovType::Opg,
+                CovType::Cluster {
+                    groups: Some(groups.clone()),
+                },
+            ] {
+                let input = LogitInput::from_columns(
+                    &y,
+                    &[x1.clone(), x2.clone()],
+                    vec!["x1".to_string(), "x2".to_string()],
+                    true,
+                    "y".to_string(),
+                )
+                .unwrap();
+
+                let result =
+                    LogitEstimator::fit(input, method, 100, 1e-6, true, cov_type.clone(), 0.95);
+                assert!(
+                    matches!(result, Err(MleError::SingularDesignMatrix)),
+                    "method={method:?}, cov_type={cov_type:?}, result={result:?}"
+                );
+            }
+        }
     }
 
+    // `max_iter`打ち切りのテストは`intercept_only_input()`を使わない: Issue #279の
+    // warm start（`ols_based_initial_params`）は切片のみモデルでは初期値がそのまま
+    // 厳密なMLE（`η₀=ln(ȳ/(1-ȳ))`）になり1反復以内で収束してしまうため。代わりに
+    // 多変量かつ収束に多反復を要する`near_separation_input_with_beta1(20.0)`
+    // （`beta1=20`は`SeparationSuspected`を誤検知しない境界ケースで、正常に収束はするが
+    // 1反復では到底届かない）を使う。
     #[test]
     fn fit_returns_non_convergence_error_when_max_iter_is_too_small_and_raise_is_true() {
         let result = LogitEstimator::fit(
-            intercept_only_input(),
+            near_separation_input_with_beta1(20.0),
             Method::Newton,
             1,
             1e-12,
@@ -2277,7 +2168,7 @@ mod tests {
     #[test]
     fn fit_returns_unconverged_result_without_raising_when_raise_on_non_convergence_is_false() {
         let estimator = LogitEstimator::fit(
-            intercept_only_input(),
+            near_separation_input_with_beta1(20.0),
             Method::Newton,
             1,
             1e-12,

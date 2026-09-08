@@ -111,9 +111,9 @@ use crate::inference;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::nonlinear::common::{
     CovType, MarginalEffects, MarginalEffectsAt, Method, MleError, SandwichVariant,
-    SeparationNormCheck, clamped_pdf_cdf, cluster_cov_params, column_means, column_medians,
-    observed_information_cov_params, opg_cov_params, run_solver, sandwich_cov_params,
-    validate_cluster_cov_type, validate_confidence_level, validate_max_iter,
+    SeparationNormCheck, checked_design_matrix_qr, clamped_pdf_cdf, cluster_cov_params,
+    column_means, column_medians, observed_information_cov_params, opg_cov_params, run_solver,
+    sandwich_cov_params, validate_cluster_cov_type, validate_confidence_level, validate_max_iter,
     validate_sufficient_observations, validate_tol,
 };
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
@@ -734,10 +734,11 @@ impl TobitScaling {
 /// 観測された値をそのまま連続値として扱う（あくまで初期値のヒューリスティックで
 /// あり、Tobitの推定値そのものではない）。
 ///
-/// 特異性検出は`engine::linear::ols::OlsEstimator`の`ensure_full_rank`と同じ相対閾値
-/// パターン（列ピボットQRの`R`の対角成分、`.claude/rules/rust-style.md`「線形代数」
-/// 参照）を踏襲する。`OlsEstimator`側のprivate関数は再利用できないため同型のロジックを
-/// ここに複製している。
+/// 特異性検出（列ピボットQRの`R`対角成分の相対閾値、`.claude/rules/rust-style.md`
+/// 「線形代数」）は`nonlinear::common::checked_design_matrix_qr`に委譲する（Issue #279で
+/// Logit/Probitの`ols_based_initial_params`とランクチェックを共通化した。Logit/Probitは
+/// 同じ関数のQR解に加えてリンクのスケール補正を施すが、Tobitの`β`はOLSと同一スケールの
+/// ため補正は不要で、QR解をそのまま`β`初期値に使い、`σ`初期値だけ残差から別途求める）。
 ///
 /// # Errors
 /// `x`が特異（完全な多重共線性等）な場合は`MleError::SingularDesignMatrix`を返す
@@ -747,17 +748,7 @@ fn ols_initial_params(x: &Mat<f64>, y: &Mat<f64>) -> Result<Vec<f64>, MleError> 
     let n = x.nrows();
     let k = x.ncols();
 
-    let qr = x.col_piv_qr();
-    let r = qr.thin_R();
-    let max_abs_diag = (0..k).map(|i| (*r.get(i, i)).abs()).fold(0.0_f64, f64::max);
-    let threshold = (k as f64) * f64::EPSILON * max_abs_diag;
-    for i in 0..k {
-        let diag = (*r.get(i, i)).abs();
-        if diag.is_nan() || diag <= threshold {
-            return Err(MleError::SingularDesignMatrix);
-        }
-    }
-
+    let qr = checked_design_matrix_qr(x)?;
     let beta_mat = qr.solve_lstsq(y);
     let beta: Vec<f64> = (0..k).map(|i| *beta_mat.get(i, 0)).collect();
 

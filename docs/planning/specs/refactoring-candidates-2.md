@@ -591,7 +591,12 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `x2 = [v * 2 for v in x1]`のように生成すれば関係が自明になり
   書き間違いリスクも無くなる。小さい修正で実施しやすい部類だと考える。
 - **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
+- **状態**: **解消済み**（2026-09-08、#279）。`test_singular_hessian_raises_computation_error`
+  自体を削除し（多重共線性検出が`method`非依存の単一経路に統一されたため`method`×3 parametrizeが
+  不要になり、CSVフィクスチャ版`test_perfect_multicollinearity_raises_computation_error`へ一本化）、
+  `x2 = 2*x1`の直書きも消えた。engine側の集約先テスト
+  `fit_returns_singular_design_matrix_error_for_perfectly_collinear_design_matrix`は
+  `x2: Vec<f64> = x1.iter().map(|v| v * 2.0).collect()`で生成している。
 
 ### 83. `test_cov_type_label`の`cov_type`候補リストが直書き（項目61パターンの再登場）
 

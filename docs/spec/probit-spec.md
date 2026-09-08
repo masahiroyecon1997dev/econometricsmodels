@@ -49,6 +49,12 @@ Probit固有の差分のみを記載する。
 評価、`SeparationSuspected`による完全分離下のアンダーフロー対策を共有）。近似解析解
 （切片のみモデル、`Φ(θ̂)=ȳ`すなわち`θ̂=Φ⁻¹(ȳ)`）で検証している。
 
+初期値（warm start）・設計行列のランクチェックもLogitと共通（[`logit-spec.md`](./logit-spec.md)
+3.2節、Issue #279）。`method`に依らず最適化前に標準化空間の設計行列を列ピボットQRしてランク落ちを
+`SingularDesignMatrix`で弾き、そのLPM最小二乗解にprobitのIRLS 1ステップ相当のスケール補正を施す
+（`w = φ(Φ⁻¹(p̄))`、`η₀ = Φ⁻¹(p̄)`）。切片のみモデルではこの初期値がそのまま厳密な近似解析解
+`Φ⁻¹(ȳ)`になる。従来のゼロベクトル初期値から変更（収束先・クロスチェック数値は不変）。
+
 収束判定`tol`の既定値`1e-6`は、Logitと同じ結論（通常データでは高精度に一致、`near_separation`
 境界ケースのみ`tol=1e-6`だと相対誤差最大4.4e-8とわずかに超過し`tol=1e-8`で解消。既定値は変更しない）
 に至った。`near_separation`の較正値はリンク関数ごとに異なる（`Φ`は`Λ`より裾が薄く同じベータ値でも
@@ -56,9 +62,10 @@ Probit固有の差分のみを記載する。
 
 ### 3.3 標準誤差
 
-`CovType`（`Classical`/`Opg`/`Hc0`/`Hc1`/`Cluster`）・計算式・エラー型（`SingularHessian`/
-`SingularOpgMatrix`/`MissingClusterColumn`/`InsufficientClusters`/`InsufficientClustersForInference`
-＝クラスター数`G <= 傾き係数の数q`、Issue #289）は[`logit-spec.md`](./logit-spec.md)
+`CovType`（`Classical`/`Opg`/`Hc0`/`Hc1`/`Cluster`）・計算式・エラー型（`SingularDesignMatrix`
+＝最適化前のランクチェック／`SingularHessian`/`SingularOpgMatrix`/`MissingClusterColumn`/
+`InsufficientClusters`/`InsufficientClustersForInference`＝クラスター数`G <= 傾き係数の数q`、
+Issue #289）は[`logit-spec.md`](./logit-spec.md)
 3.3節と共通（`opg_cov_params`/`sandwich_cov_params`/`cluster_cov_params`を共有インフラとしてそのまま
 再利用、Probit固有の新規計算は無い）。
 

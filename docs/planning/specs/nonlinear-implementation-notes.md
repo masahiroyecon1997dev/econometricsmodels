@@ -23,6 +23,7 @@
 | `MissingClusterColumn` | `ValidationError` | `cov_type="cluster"`なのにクラスターキー未指定。OLSと同型 |
 | `InsufficientClusters { g: usize }` | `ValidationError` | OLSと同型 |
 | `InsufficientClustersForInference { g: usize, q: usize }` | `ValidationError` | `cov_type="cluster"`でクラスター数`g <= 傾き係数の数q`（`k - k_constant`）。`rank(Ŝ) <= g-1`のため全体Wald検定の`q×q`部分行列が構造的に特異。OLSと同型（Issue #289）。Logit/Probitでは新規制約（従来はsilent-pass） |
+| `SingularDesignMatrix` | `ComputationError` | 最適化前の列ピボットQRランクチェック（`checked_design_matrix_qr`）で設計行列のランク落ち（完全な多重共線性等）を検出。`method`非依存の単一経路（Issue #279、Tobitと共有） |
 | `SingularHessian` | `ComputationError` | 収束点のHessianが特異で、観測情報行列（`cov_type="classical"`既定）の逆行列が計算できない |
 | `ComputationFailed(String)` | `ComputationError` | 正規分布のCDF計算失敗等、OLSの`ComputationFailed`と同型 |
 | `InvalidCensoringBounds { lower: Option<f64>, upper: Option<f64> }`（Tobit専用） | `ValidationError` | 下限≧上限等の不正な指定 |
@@ -148,6 +149,8 @@ Logitのfit()に観測情報行列SEを実装するテスト追加中、`Method:
 `neg_hessian_inverse`・`opg_cov_params`はそれぞれCholesky分解の**前**にこの関数を呼び、エラー時は既存の`MleError::SingularHessian`/`MleError::SingularOpgMatrix`にマップする（`ensure_well_conditioned_symmetric_matrix`自体は特異性の種類を区別しない汎用関数のため、どちらのバリアントにするかは呼び出し側の`map_err`で決める）。`sandwich_cov_params`・`cluster_cov_params`は内部で`neg_hessian_inverse`を呼ぶため、修正を意識せず自動的に恩恵を受ける。
 
 **テスト**: `fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_bfgs_and_lbfgs`（Logit、`bfgs`/`lbfgs`両方での特異性検出を確認。`newton_step`を経由しないという主張通り両ソルバーで同じコードパスを通ることを個別に確認するため）・`opg_cov_params_returns_singular_opg_matrix_error_for_extreme_scale_difference`（`opg_cov_params`が構造的なゼロ行列だけでなく極端なスケール差による悪条件も検出できることを確認）・`linear_algebra`モジュール自体の単体テスト（良条件行列・完全特異行列・極端なスケール差行列の3ケース）を追加。`ensure_well_conditioned_symmetric_matrix`には`v`が`k×k`であるという呼び出し元の内部契約を検証する`debug_assert_eq!`も追加した（rust-reviewer指摘）。OLS側は挙動・受け入れ条件を変えない移設のため、既存テストがそのままリグレッションガードになる。
+
+**Issue #279（初期値・特異性検出のTobit方式への統一、実装済み）**: 上記の「`method`依存の検出経路」という構造自体を解消した。Logit/Probitの`fit()`は`method`に関わらず、最適化を開始する前に標準化空間の設計行列を列ピボットQR分解し（`nonlinear::common::checked_design_matrix_qr`、Tobitの`ols_initial_params`と共有）、ランク落ちを`MleError::SingularDesignMatrix`（`ComputationError`）で弾く。従来のゼロベクトル初期値は、この共有QR解＝標準化空間のLPM最小二乗解に、nullモデル`p≡p̄`起点のIRLS 1反復目に相当するスケール補正（全成分`1/w`倍＋切片成分に`η₀ - p̄/w`を加算。`w`/`η₀`はリンクのIRLS重み/リンク値）を施したwarm startに置き換えた（`ols_based_initial_params`）。これにより多重共線性の検出が`method`非依存の単一経路（前段QR）に一本化され、`bfgs`/`lbfgs`のみ収束後の`observed_information_cov_params`に依存していた構造的リスクが解消。`method`×`cov_type`を網羅していたRust側5テスト（`..._with_bfgs_and_lbfgs`等）は`fit_returns_singular_design_matrix_error_for_perfectly_collinear_design_matrix`1本へ、Python側の`check_singular_hessian_raises_computation_error`（`method`×3 parametrize）はCSVフィクスチャ版`test_perfect_multicollinearity_raises_computation_error`へ集約した。収束先の推定値・既存フィクスチャは不変（尤度が大域凹・無制約でMLEは一意。フィクスチャ再生成不要、`engine` 446テスト・nonlinear pytest 441テストが非リグレッションでパス）。`start_params`（ユーザー指定初期値）は引き続き未対応。
 
 ### Logitのデータ構造（実装済み）
 

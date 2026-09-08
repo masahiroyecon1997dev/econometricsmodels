@@ -927,12 +927,33 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   の2点を実装時に確認する必要がある。
 - **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
   指摘、`test_logit.py`との比較調査で確認。
-- **状態**: Issue 化済み（2026-08-31、**#279**）。`refactoring-candidates-2.md`
-  項目54（多重共線性テストの CSV 一本化）を OLS/IV について実施した際、
-  Logit/Probit は `test_singular_hessian_raises_computation_error` の `method`×3
-  parametrize が本項目の検出漏れバグの回帰テストとして機能しているため一本化を
-  見送り、本設計変更を前提とする残タスクとして #279 に集約した（完了後に
-  Logit/Probit も CSV 一本化、項目82・本ファイル項目1 も解消）。
+- **状態**: **実施済み**（2026-09-08、#279）。論点A（サブセット案 vs Tobit 完全移植）は
+  ユーザー判断で「Tobit 完全移植（OLS ベース warm start まで）」、論点B（共通ヘルパー配置）は
+  「`nonlinear::common.rs` へ切り出し（Tobit もリファクタ）」を採用。`checked_design_matrix_qr`
+  （列ピボットQR＋相対閾値ランクチェック、logit/probit/tobit 共有）と `ols_based_initial_params`
+  （LPM の IRLS 1ステップ相当スケール補正、logit/probit 共有）を `nonlinear/common.rs` に新設。
+  Logit/Probit の `fit()` はゼロベクトル初期値 → この warm start に変更し、多重共線性検出が
+  `method` 非依存の単一経路（前段QR → `SingularDesignMatrix`）に統一。`test_singular_hessian_
+  raises_computation_error`（`method`×3）は削除し `test_perfect_multicollinearity_raises_
+  computation_error`（CSV フィクスチャ）へ一本化、engine 側5テストは
+  `fit_returns_singular_design_matrix_error_for_perfectly_collinear_design_matrix` 1本へ集約。
+  `refactoring-candidates-2.md` 項目82 も同時解消（項目54・`refactoring-candidates-3.md` は
+  現行ファイルに該当項目が見当たらず＝Issue 本文の参照が stale。下記「未解決」参照）。収束先・
+  クロスチェック数値・フィクスチャは不変（MLE が一意のため。engine 446 / nonlinear pytest 441
+  / full pytest 1082 パス）。
+- **パフォーマンス実測（`git stash` A/B、cov_type=classical・k=5・`repeats=3`）**: 既定の
+  `method="newton"` は中立〜高速化（大標本 logit で −10〜14%、warm start が反復数を削減）。
+  probit newton も ±0〜−7%。ただし **`method="bfgs"` の n=1,000,000 は 9.81s → 13.09s（+33%）と
+  悪化**（lbfgs は spot-check では速くなる方向）。BFGS は恒等行列で逆Hessian近似を初期化する
+  ため、ゼロ初期値より曲率の異なる warm start 地点からだと line search の関数評価が増えるためと
+  考えられる。非既定かつ元々「newton 比で大幅に遅い・改善余地あり」の quasi-Newton パスのため、
+  #279 では warm start を method 共通のまま受容し、`docs/performance/logit.md` の method軸 節に
+  追記した（ユーザー確認済み。quasi-Newton × warm start の相互作用の是正は別途 Issue 化を検討）。
+- **未解決（stale 参照）**: 本項目・Issue #279 本文が参照する `refactoring-candidates-2.md` 項目54
+  と `refactoring-candidates-3.md` は現行ファイルに存在しない。`docs/performance/{logit,probit}.md`
+  が参照する項目44/45/46（マルチスレッド不安定・Probit Hessian 飽和・BFGS/L-BFGS 遅い）も
+  現行 `refactoring-candidates*.md`（項目43 まで）に無い。番号ずれ or 過去の整理で欠落した
+  可能性があり、要確認（#279 のスコープ外）。
 
 ### 36. `test_separation_suspected_raises_computation_error_for_near_separation_data`のDGPがインライン生成で、Logit/Probitの`separation_suspected_dataset`共有ヘルパーを使っていない
 

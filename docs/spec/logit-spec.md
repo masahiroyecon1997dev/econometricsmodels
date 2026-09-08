@@ -30,8 +30,9 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   | `tol` | `float` | `1e-6` | 勾配ノルム収束判定の閾値、以下は`InvalidTol` |
   | `raise_on_non_convergence` | `bool` | `True` | `False`なら未収束時も`converged=False`の結果を返す |
 
-- `start_params`（ユーザー指定初期値）は提供しない。初期値は常にゼロベクトル固定（標準化空間への
-  変換ロジックが逆方向にも必要になる点を含め、需要が顕在化してから対応する）。
+- `start_params`（ユーザー指定初期値）は提供しない。反復最適化の初期値（warm start）は、標準化空間の
+  設計行列に対する線形確率モデル（LPM）最小二乗解に、logitのIRLS 1ステップ相当のスケール補正を
+  施したものを内部で自動生成する（3.2節、`method`に依らず共通、Issue #279）。
 - `n<=k`は`InsufficientObservations`（OLSと同じ閾値だが根拠は異なる: OLSは残差自由度がゼロ以下という
   数学的必要条件、Logitは`n<=k`がほぼ確実に完全分離を引き起こすという経験則的な安全側の判断）。
   `k==0`（`include_intercept=false`かつ`x`が空、`n<=k`チェックをすり抜けうる病的な入力）は別途
@@ -83,6 +84,19 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 `destandardize_params`で元のスケールへ逆変換する。`method`（`newton`/`bfgs`/`lbfgs`）に関わらず、
 収束点でのHessian評価（SE計算用）は常に解析的に行う。
 
+- **初期値（warm start）と設計行列のランクチェック**: `method`に関わらず、最適化を開始する前に
+  標準化空間の設計行列を列ピボットQR分解する（`nonlinear::common::checked_design_matrix_qr`）。
+  `R`の対角成分の相対閾値`k·ε·max|R_ii|`（`linear::ols`の`ensure_full_rank`と同一式）でランク落ちを
+  検出し、完全な多重共線性等は`MleError::SingularDesignMatrix`（`ComputationError`）で弾く。この
+  QR解＝標準化空間のLPM最小二乗解 `b_lpm` に、nullモデル `p≡p̄`（`p̄=ȳ`）を起点にしたIRLSの
+  1反復目に相当するスケール補正を施したものを初期値にする: 全成分を `1/w` 倍し（`w`はlogitの
+  IRLS重み `p̄(1-p̄)`）、切片成分にのみ `η₀ - p̄/w`（`η₀ = ln(p̄/(1-p̄))`）を加える
+  （`β⁽¹⁾ = b_lpm/w + (η₀ - p̄/w)·e₀`）。`p̄`が0/1の近傍（全観測で`y`が同一）では補正が発散する
+  ため素の`b_lpm`にフォールバックする。従来のゼロベクトル初期値から変更（Issue #279）。この変更で
+  多重共線性の検出経路が`method`非依存の単一経路（前段QR）に統一され、従来`bfgs`/`lbfgs`のみ
+  検出が収束後の`observed_information_cov_params`に依存していた構造的な差が解消された。収束先の
+  推定値・既存のクロスチェック数値は不変（尤度が大域凹で無制約のためMLEは一意）。
+
 - **完全分離下でのアンダーフロー対策**: 完全分離に近いデータでは、係数が発散する過程でスコア項
   `p(1-p)`が浮動小数点アンダーフローし、勾配ノルム基準が`tol`の値によらず「収束済み」と誤判定しうる
   （`tol`の調整では解決しない構造的な限界）。対策として、`run_solver`の後処理で標準化パラメータ空間
@@ -132,10 +146,10 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   のため、`fit()`冒頭で弾く（従来はsilent-passだった、実質バグ。OLS/WLS/Tobit/IVと横断で統一）。
   少数クラスタ一般の漸近的信頼性（`G=5, q=2`等、計算は通るケース）は別軸で、これは弾かない
   （`docs/planning/specs/refactoring-candidates-2.md`項目90）。
-- Hessianが特異な場合は`SingularHessian`、OPG行列（`Σᵢsᵢsᵢ'`）が特異な場合は`SingularOpgMatrix`
-  （原因が異なるため区別）。`method=newton`はステップ求解中の別経路（ピボット付きQR）で先に
-  特異性を検出してしまうため、`cov_type`側の特異性検出パスを実際に通すテストには`bfgs`/`lbfgs`が
-  必要になる。
+- 完全な多重共線性等の設計行列のランク落ちは、`method`に依らず最適化前の列ピボットQR
+  （`checked_design_matrix_qr`、3.2節）で`SingularDesignMatrix`として弾く。前段で弾かれた後に
+  なお発生しうるHessianのランクエラーはHessian自体が特異な場合は`SingularHessian`、OPG行列
+  （`Σᵢsᵢsᵢ'`）が特異な場合は`SingularOpgMatrix`（原因が異なるため区別）。
 
 ### 3.4 適合度統計量
 
@@ -173,7 +187,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 |---|---|
 | `Common(InsufficientObservations \| InvalidConfidenceLevel \| MissingClusterColumn \| InsufficientClusters \| InsufficientClustersForInference \| NoRegressors)` | `ValidationError` |
 | `InvalidMaxIter` / `InvalidTol` / `InvalidBinaryY` | `ValidationError` |
-| `NonConvergence` / `SingularHessian` / `SingularOpgMatrix` / `SeparationSuspected` | `ComputationError` |
+| `NonConvergence` / `SingularDesignMatrix` / `SingularHessian` / `SingularOpgMatrix` / `SeparationSuspected` | `ComputationError` |
 
 ### 3.8 テスト
 

@@ -208,8 +208,8 @@ def render(report: dict) -> str:
     if engine_only_n:
         joined = "/".join(f"{n:,}" for n in engine_only_n)
         n_subtitle += (
-            f"（n={joined} はリファレンス実装との比較が非現実的なため engine 単独・"
-            f"cov_type={cov_types[0]} のみ。大標本での回帰検知用）"
+            f"（n={joined} は大標本での engine の回帰検知用で "
+            f"cov_type={cov_types[0]} のみ。全 cov_type / 全ライブラリでは回さない）"
         )
     lines += _render_axis_section(
         title=f"## n軸（k={meta['n_sweep_fixed_k']}固定）",

@@ -1,38 +1,35 @@
-"""Tobitの実行時間・メモリ使用量を py4etrics と比較するベンチマークスクリプト。
+"""Tobit の実行時間・ピークRSS を計測するベンチマークスクリプト（engine 単独）。
 
 CLAUDE.md 1章「計算コアはRustで実装し高速化」の狙いを定量的に裏付けるため、
-`Tobit(...).fit()` 全体（Python API呼び出し、Arrow変換・PyO3オーバーヘッド込みの
+`Tobit(...).fit()` 全体（Python API 呼び出し、Arrow 変換・PyO3 オーバーヘッド込みの
 エンドツーエンド）を計測する。
 
-計測ハーネス（サブプロセス隔離・ウォームアップ＋中央値・ピークRSS・releaseビルド
+計測ハーネス（サブプロセス隔離・ウォームアップ＋中央値・ピークRSS・release ビルド
 検知・スレッド数の固定）は `performance/_perf_harness.py` に共通化してある。本
-ファイルは Tobit 固有のアダプタのみを定義する。`compare_logit.py` /
-`compare_probit.py` と同型。
+ファイルは Tobit 固有のアダプタのみを定義する。
 
-## リファレンス実装が py4etrics である理由
+## engine 単独で計測する（インプロセス計測できるリファレンス実装が無い）
 
-Tobit の正確性検証の主リファレンスは R（`AER::tobit` ＝ `survreg`）だが、R は
-共通ハーネスのインプロセス計測モデル（`fit_once(ctx)` を計測ループ内で呼ぶ）に
-乗らず、`benchmark_performance.yml` への R 導入も要る。statsmodels にネイティブ
-Tobit は無い。**py4etrics（`statsmodels.GenericLikelihoodModel` ベースの Tobit）**
-は pure Python でインプロセス計測でき、係数・σ・対数尤度が engine と ~1e-9 で
-一致することを実機確認済み（`docs/performance/tobit.md`「計測方法」）。正式な
-数値照合は従来どおり R ベースの `tests/nonlinear/test_tobit_*.py` が担い、ここでは
-性能の相対傾向のみを見る（`.claude/rules/testing-policy.md`「パフォーマンス比較
-（ベンチマーク）の方法論」＝代表ケースで足りる）。
+OLS/WLS/Logit/Probit は statsmodels、IV は linearmodels をリファレンスに並べて
+相対比較するが、Tobit にはインプロセス計測できるリファレンス実装を置かない。
 
-## 計測範囲の対称性（重要）
+- 正確性検証の主リファレンスは R `AER::tobit`（＝ `survreg`）だが、R は共通ハーネス
+  のインプロセス計測モデル（`fit_once(ctx)` を計測ループ内で呼ぶ）に乗らない。
+- statsmodels にネイティブ Tobit は無い。
+- 以前は py4etrics（`statsmodels.GenericLikelihoodModel` ベースの Tobit）を
+  リファレンスに使っていたが、(1) 実質メンテ停止（最終リリース 2024-01、依存ピン
+  無し）で statsmodels 0.15.0 更新時に import 不能になった、(2) 数値微分ヘッシアン
+  のため k>=8 で事実上フリーズし k 軸は元々 engine 単独だった、(3) 「engine の
+  解析的スコア／ヘッシアン vs statsmodels の有限差分」という交絡を含み Rust 化
+  そのものの寄与を単独では取り出せない、という理由で 2026-09（statsmodels 0.15.0
+  更新に合わせて）撤去した。撤去前の最終クロス比較スナップショットは
+  `docs/performance/tobit.md`「[アーカイブ]」節に凍結してある。
 
-- **engine は解析的スコア／ヘッシアン、py4etrics は数値微分**（statsmodels の
-  `GenericLikelihoodModel` が有限差分でスコア・ヘッシアンを近似する）。比が大きく
-  出る主因は Rust 化だけでなくこの微分方式の差であり、`docs/performance/tobit.md`
-  の考察で明示する。
-- engine は係数・標準誤差と同じ呼び出しの中で対数尤度・AIC・BIC・全体 Wald 統計量
-  まで**常に一括計算**する。py4etrics（statsmodels）の結果統計量は遅延評価
-  （`llf` はアクセス時に `loglike` を再計算、`aic`/`bic` はプロパティ）なので、
-  `_fit_once_py4etrics` では `.fit()` 直後に `llf`/`aic`/`bic` へ明示アクセスして
-  engine と処理範囲を揃える。全体 Wald 検定・限界効果は py4etrics 側が自動計算
-  しないため対称化の対象外（Logit/Probit の `llnull` と同じ整理）。
+したがって本スクリプトは engine の Tobit が軸ごとに「時間がかかりすぎていないか」を
+観察する（他手法ページのような相対比較ではなく、engine 単独の絶対値とスケーリング
+の推移）。正式な数値照合は従来どおり R ベースの
+`tests/nonlinear/test_tobit_reference.py`（`AER::tobit`）・`test_tobit_crosscheck.py`
+（`censReg`）が担う。
 
 ## cov_type の範囲
 
@@ -43,45 +40,27 @@ opg 0.148s < hc1 0.150s < hc0 0.154s < cluster 0.162s、engine・newton）。省
 `opg`/`hc0`/`hc1` は classical と cluster の間に収まる。cluster の疑似グループ数は
 50 固定。
 
-## k 軸は engine 単独で回す（`k_sweep_libraries=("engine",)`）
+## スイープ軸
 
-py4etrics（statsmodels `GenericLikelihoodModel`）は数値微分ヘッシアンのコストが
-k に対して急激に悪化し、k=5 は約1.5秒だが k>=8 で事実上フリーズする（n=10,000
-でも実機確認）。k 軸のスケーリング比較にはならないため、k 軸は engine 単独に絞る
-（n 軸・method 軸では py4etrics を比較対象に使う）。
+- **n 軸**（k=5 固定、newton）: classical / cluster とも n=1,000〜100,000。加えて
+  **classical のみ n=200,000 / 1,000,000**（`n_sweep_engine_only`、seed は
+  `default_seed=42` のみ。全 cov_type で大 n を回すと CI 時間がかさむため classical
+  に絞る。下記「## n 軸の大標本点」参照）。
+- **k 軸**（n=10,000 固定、newton）: k=5・20、classical / cluster。
+- **method 軸**: 下記「## method（オプティマイザ）の範囲」参照。
 
-## method（オプティマイザ）の範囲
+## n 軸の大標本点（classical のみ n=200,000 / 1,000,000）
 
-engine・py4etrics とも既定は Newton-Raphson で、n/k スイープは newton で回す。
-加えて `lbfgs` を **method 軸**として代表点1つ（cov_type=classical・k=5・
-n=100,000）で計測する。**`bfgs` は現状 method 軸から除外している**: engine の Tobit
-BFGS 経路は n>=10,000 で `MoreThuenteLineSearch: NaN or Inf` により発散する
-（Issue #292。`_perf_harness._run_isolated` は `check=True` なので、そのまま入れると
-benchmark ジョブごと失敗する）。#292 解消後に `extra_methods` へ戻す。
-
-quasi-Newton のパフォーマンス劣化の早期検知として、`check_report`
-（`_check_method_ratios`）で engine の `lbfgs/newton` 実行時間比を計算し、5x を
-超えたら job summary に `> [!WARNING]` を出す（CI failure にはしない。実時間の
-絶対値ではなく同一ジョブ内の比を見るため、共有ランナーの速度差に影響されない。
-#285 と同系統の劣化のガード）。
-
-## n 軸: 比較は 100,000 まで、engine 単独で 200,000 / 1,000,000 も回す
-
-- **比較（engine vs py4etrics）は n=100,000 まで**。py4etrics は数値微分ゆえ大 n で
-  極端に遅く（newton・n=100,000・k=5 で約13秒。engine は約0.14秒）、n=1,000,000 は
-  分オーダーで比較として非現実的。
-- **engine 単独で n=200,000 / 1,000,000 を追加計測する**（`n_sweep_engine_only`、
-  cov_type=classical・newton・seed は `default_seed=42` のみ）。位置づけは2点で異なる:
-  - **n=1,000,000（seed=42）が Issue #291 の再現点**。#291 は乱数 β の
-    `moderate_censoring` DGP で engine が
-    `ComputationError: the Hessian is singular and cannot be inverted` になっていた
-    バグで、seed=42 では n=1,000,000 で失敗（n=500,000 までは成功）。Probit #284 と
-    同系統。修正は `d797f9b` / `5b79ffe`（`FaerNewton` の停滞収束判定）。
-    `_perf_harness._run_isolated` は `check=True` なので、**再発すれば engine の
-    `.fit()` が例外を投げて benchmark ジョブが失敗する**。
-  - **n=200,000 は n スケーリングのデータ点＋安価な早期警告**。#291 は seed 依存で、
-    seed=1 は n=200,000 で既に破綻していたが、この guard が回す seed=42 では
-    n=200,000 は #291 を再現しない。
+- **n=1,000,000（seed=42）が Issue #291 の再現点**。#291 は乱数 β の
+  `moderate_censoring` DGP で engine が
+  `ComputationError: the Hessian is singular and cannot be inverted` になっていた
+  バグで、seed=42 では n=1,000,000 で失敗（n=500,000 までは成功）。Probit #284 と
+  同系統。修正は `d797f9b` / `5b79ffe`（`FaerNewton` の停滞収束判定）。
+  `_perf_harness._run_isolated` は `check=True` なので、**再発すれば engine の
+  `.fit()` が例外を投げて benchmark ジョブが失敗する**。
+- **n=200,000 は n スケーリングのデータ点＋安価な早期警告**。#291 は seed 依存で、
+  seed=1 は n=200,000 で既に破綻していたが、この guard が回す seed=42 では
+  n=200,000 は #291 を再現しない。
 - **このガードの限界**（深いカバレッジは docstring 末尾「今後」および
   `docs/performance/tobit.md`「今後の検討事項」の凍結フィクスチャ + `AER::tobit` に委ねる）:
   - **単一 seed**（42）。#291 が示した seed 感度（seed=1 は n=200,000 で破綻）は
@@ -98,6 +77,21 @@ quasi-Newton のパフォーマンス劣化の早期検知として、`check_rep
   guard が唯一（上記の限界つき）。実行時間も `docs/performance/tobit.md` に記録され、
   停滞検出器の誤作動による反復数増（速度劣化）は可視化される。
 
+## method（オプティマイザ）の範囲
+
+既定は Newton-Raphson で、n/k スイープは newton で回す。加えて `lbfgs` を
+**method 軸**として代表点1つ（cov_type=classical・k=5・n=100,000）で計測する。
+**`bfgs` は現状 method 軸から除外している**: engine の Tobit BFGS 経路は n>=10,000
+で `MoreThuenteLineSearch: NaN or Inf` により発散する（Issue #292。
+`_perf_harness._run_isolated` は `check=True` なので、そのまま入れると benchmark
+ジョブごと失敗する）。#292 解消後に `extra_methods` へ戻す。
+
+quasi-Newton のパフォーマンス劣化の早期検知として、`check_report`
+（`_check_method_ratios`）で engine の `lbfgs/newton` 実行時間比を計算し、5x を
+超えたら job summary に `> [!WARNING]` を出す（CI failure にはしない。実時間の
+絶対値ではなく同一ジョブ内の比を見るため、共有ランナーの速度差に影響されない。
+#285 と同系統の劣化のガード）。
+
 使用例（リポジトリルートから）:
     # 一括実行（n軸・k軸両方、結果をJSONに保存）
     python -m performance.compare_tobit \\
@@ -112,10 +106,7 @@ quasi-Newton のパフォーマンス劣化の早期検知として、`check_rep
 
 from __future__ import annotations
 
-import importlib.metadata as _md
-
 import polars as pl
-import statsmodels
 
 from benchmark.nonlinear.datasets import generate_censored_regression_dataset
 from performance._perf_harness import FitContext, PerfAdapter, run_cli
@@ -141,8 +132,8 @@ def _build_dataframe(n: int, k: int, seed: int):
 
 def _lower_bound(y: pl.Series) -> float:
     """左打ち切り閾値。`_SCENARIO` は左打ち切りで、打ち切られた観測は閾値へ厳密に
-    セットされ、非打ち切り観測は閾値より真に大きいため、標本最小値が閾値と一致する
-    （engine / py4etrics の対数尤度が ~1e-9 で一致することを実機確認済み）。"""
+    セットされ、非打ち切り観測は閾値より真に大きいため、標本最小値が閾値と一致する。
+    """
     return float(y.min())
 
 
@@ -165,72 +156,6 @@ def _fit_once_engine(ctx: FitContext):
     else:
         raise ValueError(f"unknown cov_type: {ctx.cov_type!r}")
     return Tobit(ctx.df, y=ctx.y_col, x=ctx.x_cols, options=options).fit()
-
-
-# py4etrics 用の整形済み入力 `(y, exog, cens, lower, groups)` を DataFrame 単位で
-# キャッシュする。1ワーカーサブプロセス＝1データセットで、warmup＋repeats の全 fit
-# が同じ `ctx.pandas_df` を使うため、`id()` キーで十分。整形（numpy 化・const 列
-# 付与・cens/groups ベクトル生成）を計測ループの外に出し、engine（Arrow ゼロコピー）
-# との変換コストの非対称を避ける（`.claude/rules/testing-policy.md`「入力形式の
-# 変換コストは計測区間の外に置く」）。
-_PY4ETRICS_INPUTS: dict[int, tuple] = {}
-
-
-def _py4etrics_inputs(
-    pdf, y_col: str, x_cols: list[str], cluster_col: str | None
-) -> tuple:
-    import numpy as np
-    import pandas as pd
-
-    cached = _PY4ETRICS_INPUTS.get(id(pdf))
-    if cached is None:
-        y = pdf[y_col].to_numpy()
-        lower = float(y.min())
-        # py4etrics は切片列を自動追加しないため exog に const を明示的に加える。
-        exog = pd.DataFrame({"const": 1.0, **{c: pdf[c] for c in x_cols}})
-        # cens: -1 左打ち切り / 0 非打ち切り / 1 右打ち切り。左打ち切りは閾値へ
-        # 厳密にセットされているため `<= lower` でちょうど拾える。
-        cens = np.where(y <= lower, -1, 0)
-        groups = (
-            pdf[cluster_col].to_numpy() if cluster_col is not None else None
-        )
-        cached = _PY4ETRICS_INPUTS[id(pdf)] = (y, exog, cens, lower, groups)
-    return cached
-
-
-def _fit_once_py4etrics(ctx: FitContext):
-    import py4etrics.tobit as pt
-
-    y, exog, cens, lower, groups = _py4etrics_inputs(
-        ctx.pandas_df, ctx.y_col, ctx.x_cols, ctx.cluster_col
-    )
-
-    fit_kwargs: dict = {"method": ctx.method, "disp": 0}
-    if ctx.cov_type == "classical":
-        fit_kwargs["cov_type"] = "nonrobust"
-    elif ctx.cov_type == "cluster":
-        fit_kwargs["cov_type"] = "cluster"
-        fit_kwargs["cov_kwds"] = {"groups": groups}
-    else:
-        raise ValueError(f"unknown cov_type: {ctx.cov_type!r}")
-
-    # `right` は cens==1（右打ち切り）の観測にのみ使われる。`_SCENARIO` は左打ち切り
-    # のみで cens ∈ {-1, 0} のため右打ち切り境界は尤度に寄与せず、ダミー値でよい。
-    res = pt.Tobit(y, exog, cens=cens, left=lower, right=0.0).fit(**fit_kwargs)
-    # engine と計測範囲を揃えるため、遅延評価の統計量を明示的に確定させる
-    # （モジュール docstring「計測範囲の対称性」参照）。engine は係数と同じ呼び出しで
-    # 標準誤差まで常に算出するため、`bse`（statsmodels の cached_value。cluster では
-    # サンドイッチ共分散の sqrt(diag)）も明示アクセスして処理範囲を揃える。
-    _ = (res.bse, res.llf, res.aic, res.bic)
-    return res
-
-
-def _fit_once(ctx: FitContext):
-    if ctx.library == "engine":
-        return _fit_once_engine(ctx)
-    if ctx.library == "py4etrics":
-        return _fit_once_py4etrics(ctx)
-    raise ValueError(f"unknown library: {ctx.library!r}")
 
 
 # engine の quasi-Newton（lbfgs）が newton のこの倍数より遅ければ警告する。
@@ -285,26 +210,24 @@ def _check_method_ratios(report: dict) -> list[str]:
 TOBIT_ADAPTER = PerfAdapter(
     method="tobit",
     module="performance.compare_tobit",
-    libraries=("engine", "py4etrics"),
+    # インプロセス計測できるリファレンス実装が無いため engine 単独
+    # （module docstring「engine 単独で計測する」参照）。
+    libraries=("engine",),
     cov_types=("classical", "cluster"),
-    reference_versions=lambda: {
-        "py4etrics_version": _md.version("py4etrics"),
-        "statsmodels_version": statsmodels.__version__,
-    },
+    # engine は git ハッシュで足りるため記録するリファレンス版は無い。
+    reference_versions=dict,
     build_dataframe=_build_dataframe,
-    fit_once=_fit_once,
+    fit_once=_fit_once_engine,
     cluster_col="cluster_group",
-    # 比較（engine vs py4etrics）は n=100,000 まで（py4etrics の数値微分コスト。
-    # モジュール docstring「n 軸」参照）。
+    # classical / cluster とも n=1,000〜100,000。
     n_sweep=(1_000, 10_000, 100_000),
-    # engine 単独の大標本計測点。n=1,000,000（seed=42）が Issue #291（大標本 Hessian
-    # 特異エラー）の再現点で、修正（d797f9b / 5b79ffe）の回帰検知を担う。n=200,000 は
-    # n スケーリングのデータ点＋早期警告（seed=42 では #291 を再現しない）。詳細・限界
-    # （単一 seed / 例外のみ捕捉 / リリース単位で発火）は docstring「## n 軸」参照。
+    # classical のみ追加する大標本点。n=1,000,000（seed=42）が Issue #291（大標本
+    # Hessian 特異エラー）の再現点で、修正（d797f9b / 5b79ffe）の回帰検知を担う。
+    # n=200,000 は n スケーリングのデータ点＋早期警告（seed=42 では #291 を再現
+    # しない）。全 cov_type で回すと CI 時間がかさむため classical に絞る。詳細・
+    # 限界（単一 seed / 例外のみ捕捉 / リリース単位で発火）は docstring
+    # 「## n 軸の大標本点」参照。
     n_sweep_engine_only=(200_000, 1_000_000),
-    # k 軸は engine 単独（py4etrics は k>=8 で数値微分ヘッシアンが破綻する。
-    # module docstring「k 軸は engine 単独で回す」参照）。
-    k_sweep_libraries=("engine",),
     # method 軸: lbfgs のみ（bfgs は #292 で発散するため除外）。代表点は
     # classical・k=5・n=100,000。既定の newton は n/k スイープに含まれる。
     extra_methods=("lbfgs",),

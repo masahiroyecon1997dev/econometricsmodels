@@ -54,7 +54,7 @@ include = ["THIRD-PARTY-LICENSES.html", "LICENSE"]
 test = [
     "pytest==9.1.1",
     "numpy==2.5.2",
-    "statsmodels==0.14.6",
+    "statsmodels==0.15.0",
     # IV（2SLS/GMM）のフィクスチャ生成に使った主リファレンス実装（Issue #171、
     # `docs/planning/specs/iv-api-design.md`5.1節）。statsmodelsと同じ理由で`==`厳密固定。
     "linearmodels==7.0",
@@ -70,14 +70,6 @@ benchmark = [
     # pandas側は直接依存に含めない。
     "pyarrow==25.0.1",
     "wooldridge==0.5.0",
-    # Tobit の性能比較（performance/compare_tobit.py）専用のリファレンス実装。
-    # statsmodels.GenericLikelihoodModel ベースの Tobit。statsmodels にネイティブ
-    # Tobit が無く、R `AER::tobit` は共通ハーネスのインプロセス計測に乗らないため
-    # 採用（詳細は compare_tobit.py の docstring）。py4etrics 0.1.9 は依存ピンを
-    # 持たず、実効的な数値は statsmodels 側（test グループで ==0.14.6 固定）に従う。
-    # 実質メンテ停止（最終リリース 2024-01）だが性能比較専用・タグ push 限定実行の
-    # ため受容。statsmodels を上げる際は py4etrics の動作確認とセットで行う。
-    "py4etrics==0.1.9",
 ]
 dev = [
     "maturin==1.15.0",

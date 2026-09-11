@@ -46,7 +46,8 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 （**z検定**、t検定ではない） / `p_values` / `conf_lower` / `conf_upper` / `param_names` /
 `log_likelihood` / `log_likelihood_null` / `lr_statistic` / `lr_p_value` / `pseudo_r_squared`
 （McFadden） / `aic` / `bic` / `n_obs` / `df_model` / `df_resid` / `converged` / `n_iter` /
-`cov_type`（実際に使われた種別の小文字文字列）。
+`cov_type`（実際に使われた種別の小文字文字列） / `method`（実際に使われたソルバーの小文字文字列、
+Issue #307）。
 
 - `k×kの分散共分散行列（cov_params）はPython側に公開しない`が、`predict()`/`pred_table()`/
   `marginal_effects()`用に非公開フィールド`estimator: LogitEstimator`として結果オブジェクト内部に

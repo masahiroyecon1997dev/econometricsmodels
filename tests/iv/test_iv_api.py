@@ -439,6 +439,97 @@ def test_gmm_cov_type_options_run_independently_of_weight_type(
     assert res.converged
 
 
+@pytest.mark.parametrize("method", ["2sls", "gmm"])
+def test_method_label(iv_dataset, method):
+    """`res.method`が指定した`method`（正規化済み小文字）を反映すること
+    （`test_cov_type_label`と同型、Issue #307）。
+    """
+    res = our_fit(iv_dataset, options=IvOptions(method=method))
+    assert res.method == method
+
+
+@pytest.mark.parametrize(
+    "weight_type", ["unadjusted", "robust", "cluster", "kernel"]
+)
+def test_weight_type_label(iv_dataset, clustered_dataset, weight_type):
+    """`res.weight_type`が`method="gmm"`のとき指定した`weight_type`
+    （正規化済み小文字）を反映すること（Issue #307）。
+    """
+    df = clustered_dataset if weight_type == "cluster" else iv_dataset
+    kwargs = (
+        {"cluster_col": "cluster_group"} if weight_type == "cluster" else {}
+    )
+    options = IvOptions(method="gmm", weight_type=weight_type, **kwargs)
+    res = our_fit(df, options=options)
+    assert res.weight_type == weight_type
+
+
+@pytest.mark.parametrize(
+    "method, expected_label",
+    [
+        ("2SLS", "2sls"),
+        ("2Sls", "2sls"),
+        ("GMM", "gmm"),
+        ("Gmm", "gmm"),
+    ],
+)
+def test_method_is_case_insensitive(iv_dataset, method, expected_label):
+    """`method`が大文字小文字を区別しないこと（`test_cov_type_is_case_insensitive`
+    と同型、Issue #307）。
+    """
+    res = our_fit(iv_dataset, options=IvOptions(method=method))
+    assert res.method == expected_label
+
+
+@pytest.mark.parametrize(
+    "weight_type, expected_label",
+    [
+        ("UNADJUSTED", "unadjusted"),
+        ("Unadjusted", "unadjusted"),
+        ("ROBUST", "robust"),
+        ("Robust", "robust"),
+        ("CLUSTER", "cluster"),
+        ("KERNEL", "kernel"),
+        # エイリアス入力は`cov_type`の`"nonrobust"`と同じく正準名へは変換されず、
+        # 小文字化されたそのままの文字列がエコーされる（`IvResult.weight_type`の
+        # docコメント参照、Issue #307）。
+        ("homoskedastic", "homoskedastic"),
+        ("HOMOSKEDASTIC", "homoskedastic"),
+        ("heteroskedastic", "heteroskedastic"),
+    ],
+)
+def test_weight_type_is_case_insensitive(
+    iv_dataset, clustered_dataset, weight_type, expected_label
+):
+    df = clustered_dataset if weight_type.lower() == "cluster" else iv_dataset
+    kwargs = (
+        {"cluster_col": "cluster_group"}
+        if weight_type.lower() == "cluster"
+        else {}
+    )
+    options = IvOptions(method="gmm", weight_type=weight_type, **kwargs)
+    res = our_fit(df, options=options)
+    assert res.weight_type == expected_label
+
+
+def test_weight_type_is_none_for_2sls(iv_dataset):
+    """`weight_type`はGMM専用の概念のため、`method="2sls"`では常に`None`
+    であること（Issue #307）。
+    """
+    res = our_fit(iv_dataset, options=IvOptions(method="2sls"))
+    assert res.weight_type is None
+
+
+def test_weight_type_is_none_for_2sls_even_when_explicitly_set(iv_dataset):
+    """`method="2sls"`では`weight_type`を明示的に既定値以外にしても無視され、
+    `res.weight_type`は常に`None`であること（Issue #307）。
+    """
+    res = our_fit(
+        iv_dataset, options=IvOptions(method="2sls", weight_type="cluster")
+    )
+    assert res.weight_type is None
+
+
 def test_gmm_convergence_stops_before_max_iterations(iv_dataset):
     """現実的な`gmm_convergence`を指定すると、`gmm_iterations`の上限に達する
     前に収束判定を満たして反復を打ち切ること（`IvOptions.gmm_convergence`の

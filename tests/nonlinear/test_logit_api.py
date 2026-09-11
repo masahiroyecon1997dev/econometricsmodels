@@ -106,6 +106,27 @@ def test_cov_type_label(binary_dataset):
     _checks.check_cov_type_label(binary_dataset, Logit, LogitOptions)
 
 
+def test_method_label(binary_dataset):
+    _checks.check_method_label(binary_dataset, Logit, LogitOptions)
+
+
+@pytest.mark.parametrize(
+    "method, expected_label",
+    [
+        ("NEWTON", "newton"),
+        ("Newton", "newton"),
+        ("BFGS", "bfgs"),
+        ("Bfgs", "bfgs"),
+        ("LBFGS", "lbfgs"),
+        ("Lbfgs", "lbfgs"),
+    ],
+)
+def test_method_is_case_insensitive(binary_dataset, method, expected_label):
+    _checks.check_method_is_case_insensitive(
+        binary_dataset, Logit, LogitOptions, method, expected_label
+    )
+
+
 @pytest.mark.parametrize(
     "cov_type, expected_label",
     [

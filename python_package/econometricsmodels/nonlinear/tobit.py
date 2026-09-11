@@ -237,6 +237,11 @@ class TobitResults:
         return self._raw.cov_type
 
     @property
+    def method(self) -> str:
+        """Optimization solver actually used (normalized to lowercase)."""
+        return self._raw.method
+
+    @property
     def lower(self) -> float | None:
         """Lower censoring bound actually used (echoes
         `TobitOptions.lower`). `None` means no censoring from below."""

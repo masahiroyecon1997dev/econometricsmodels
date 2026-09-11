@@ -214,6 +214,10 @@ pub struct ProbitResult {
     /// to lowercase; e.g. `"classical"`, `"opg"`, `"hc1"`, `"cluster"`).
     #[pyo3(get)]
     pub cov_type: String,
+    /// Optimization solver actually used (echoes `ProbitOptions.method`, normalized
+    /// to lowercase; one of `"newton"`, `"bfgs"`, `"lbfgs"`).
+    #[pyo3(get)]
+    pub method: String,
     /// Not exposed to Python; only `predict`/`pred_table`/`marginal_effects` read it
     /// (`LogitResult`の`estimator`と同じ位置づけ、コメント参照)。
     estimator: ProbitEstimator,
@@ -424,6 +428,7 @@ pub(crate) fn fit(
         converged: estimator.converged(),
         n_iter: estimator.n_iter(),
         cov_type: options.cov_type.to_lowercase(),
+        method: options.method.to_lowercase(),
         estimator,
     })
 }

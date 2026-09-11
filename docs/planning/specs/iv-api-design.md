@@ -68,6 +68,8 @@ Issue #171（`linearmodels`/`ivreg`とのベンチマーク作成）でリファ
 | フィールド | FE/REとの違い |
 |---|---|
 | `params` / `std_errors` / `stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` / `residuals` / `dep_var_name` / `n_obs` / `df_resid` / `df_model` / `cov_type` / `f_statistic` / `f_p_value` | `t_stats`ではなく**`stats`**という分布非依存の名前にする（Issue #159で確定）。1つの`IvResult`型を2SLS（t分布）・GMM（z分布、3章参照）の両方が共有するため、`OLSResult.t_stats`/`LogitResult.z_stats`のような分布固定の名前は使えない。`engine::inference::InferenceStat`が同じ理由で`stat`という分布非依存の名前を使っている前例に倣った。それ以外は共通（そのまま踏襲） |
+| `method` | **追加**（Issue #307）。`IvOptions.method`を正規化した小文字文字列（`"2sls"`/`"gmm"`）。`cov_type`と同じく常に反映される |
+| `weight_type` | **追加**（Issue #307）。`IvOptions.weight_type`を正規化した小文字文字列だが、型は`Option<String>`。GMMの点推定にのみ意味を持つ概念のため、`method="gmm"`のときだけ`Some`、`method="2sls"`では常に`None`（`overid_statistic`/`wu_hausman_statistic`が`method`依存で`None`を使う既存パターンに揃えた） |
 | `n_entities` | **含めない**（IVはパネル構造を前提としない） |
 | `log_likelihood` / `aic` / `bic` | **除外する**。2SLS/GMMは尤度ベースの推定法ではなく
   （Stataの`ivregress`もデフォルトでは出力しない）、正規性を仮定した疑似尤度を計算して
@@ -256,6 +258,10 @@ Rクロスチェックも対象外。
   - `weight_type`の取りうる値: `unadjusted`/`homoskedastic`、`robust`/`heteroskedastic`、
     `cluster`、`kernel`（Driscoll-Kraayではなく通常のHAC、IVはパネル構造を前提としないため
     3.1と同じ理由）。
+  - **`IvResult.weight_type`（結果側、Issue #307）もこの`method`依存性をそのまま反映する**:
+    `method="gmm"`のときは`IvOptions.weight_type`を正規化した`Some(String)`、
+    `method="2sls"`のときは概念自体が存在しないため常に`None`（`overid_statistic`/
+    `wu_hausman_statistic`が`method`によって`None`になる既存パターンと同じ扱い）。
 - **GMMのstep数（1-step/2-step efficient/iterated）を選択可能にする**。`IvOptions`に
   `gmm_iterations: int`（デフォルト`2`＝efficient two-step、`1`で1-step GMM）を追加する。
   `linearmodels.IVGMM.fit(iter_limit=2, ...)`と同じ考え方。当初は1・2の2値のみ許容していた

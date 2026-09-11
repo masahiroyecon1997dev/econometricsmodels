@@ -230,6 +230,31 @@ def check_cov_type_label(dataset, estimator_cls, options_cls):
     assert res.cov_type == "cluster"
 
 
+def check_method_label(dataset, estimator_cls, options_cls):
+    """`res.method`が指定した`method`（正規化済み小文字）を反映すること
+    （`check_cov_type_label`と同型、Issue #307）。
+    """
+    for method in ["newton", "bfgs", "lbfgs"]:
+        res = estimator_cls(
+            dataset,
+            y="y",
+            x=["x1", "x2"],
+            options=options_cls(method=method),
+        ).fit()
+        assert res.method == method
+
+
+def check_method_is_case_insensitive(
+    dataset, estimator_cls, options_cls, method, expected_label
+):
+    """`method`が大文字小文字を区別しないこと（`check_cov_type_is_case_insensitive`
+    と同型、Issue #307）。
+    """
+    options = options_cls(method=method)
+    res = estimator_cls(dataset, y="y", x=["x1", "x2"], options=options).fit()
+    assert res.method == expected_label
+
+
 def check_cov_type_is_case_insensitive(
     dataset, estimator_cls, options_cls, cov_type, expected_label
 ):

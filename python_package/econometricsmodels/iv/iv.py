@@ -229,6 +229,19 @@ class IvResults:
         return self._raw.cov_type
 
     @property
+    def method(self) -> str:
+        """Estimation method actually used (normalized to lowercase):
+        `"2sls"` or `"gmm"`."""
+        return self._raw.method
+
+    @property
+    def weight_type(self) -> str | None:
+        """Weight matrix actually used for GMM point estimation
+        (normalized to lowercase). Only meaningful for `method="gmm"`;
+        always `None` for `method="2sls"`, which has no such concept."""
+        return self._raw.weight_type
+
+    @property
     def r_squared(self) -> float:
         """Coefficient of determination (R²)."""
         return self._raw.r_squared

@@ -212,6 +212,11 @@ class LogitResults:
         """Standard error type actually used (normalized to lowercase)."""
         return self._raw.cov_type
 
+    @property
+    def method(self) -> str:
+        """Optimization solver actually used (normalized to lowercase)."""
+        return self._raw.method
+
     def coef_table(self) -> list[dict[str, float | str]]:
         """Row-oriented summary table of the coefficients.
 

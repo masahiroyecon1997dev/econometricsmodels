@@ -17,7 +17,7 @@ Probit固有の差分のみを記載する。
 
 ## 2. 結果構造体
 
-`ProbitResult`はフィールド構成が`LogitResult`と同一（`params`/`std_errors`/`z_stats`/.../`cov_type`）。
+`ProbitResult`はフィールド構成が`LogitResult`と同一（`params`/`std_errors`/`z_stats`/.../`cov_type`/`method`）。
 `df_model=k-1`固定・`log_likelihood_null`の非入れ子性等、[`logit-spec.md`](./logit-spec.md)2章の設計
 判断をそのまま踏襲する。
 

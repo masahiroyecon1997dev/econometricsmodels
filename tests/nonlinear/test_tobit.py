@@ -75,6 +75,44 @@ def test_method_option_converges_to_same_params(censored_dataset, method):
         )
 
 
+@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
+def test_method_label(censored_dataset, method):
+    """`res.method`が指定した`method`（正規化済み小文字）を反映すること
+    （Logit/Probitの`check_method_label`と同型、Issue #307）。
+    """
+    res = Tobit(
+        censored_dataset,
+        y="y",
+        x=["x1", "x2"],
+        options=TobitOptions(method=method),
+    ).fit()
+    assert res.method == method
+
+
+@pytest.mark.parametrize(
+    "method, expected_label",
+    [
+        ("NEWTON", "newton"),
+        ("Newton", "newton"),
+        ("BFGS", "bfgs"),
+        ("Bfgs", "bfgs"),
+        ("LBFGS", "lbfgs"),
+        ("Lbfgs", "lbfgs"),
+    ],
+)
+def test_method_is_case_insensitive(censored_dataset, method, expected_label):
+    """`method`が大文字小文字を区別しないこと（Logit/Probitの
+    `check_method_is_case_insensitive`と同型、Issue #307）。
+    """
+    res = Tobit(
+        censored_dataset,
+        y="y",
+        x=["x1", "x2"],
+        options=TobitOptions(method=method),
+    ).fit()
+    assert res.method == expected_label
+
+
 def test_param_names_include_const_first_and_sigma_last(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     assert res.param_names == ["const", "x1", "x2", "sigma"]

@@ -342,6 +342,20 @@ pub struct IvResult {
     /// lowercase; e.g. `"classical"`, `"hc1"`, `"hac"`, `"cluster"`).
     #[pyo3(get)]
     pub cov_type: String,
+    /// Estimation method actually used (echoes `IvOptions.method`, normalized to
+    /// lowercase): `"2sls"` or `"gmm"`.
+    #[pyo3(get)]
+    pub method: String,
+    /// Weight matrix actually used for GMM point estimation (echoes
+    /// `IvOptions.weight_type`, normalized to lowercase; e.g. `"unadjusted"`,
+    /// `"robust"`, `"cluster"`, `"kernel"`). Like `cov_type`'s `"nonrobust"` alias,
+    /// an alias input (`"homoskedastic"`/`"heteroskedastic"`) is echoed as-is rather
+    /// than canonicalized to its primary name (`parse_weight_type` accepts both but
+    /// does not rewrite the string). `Some` only for `method="gmm"` (mirrors
+    /// `overid_statistic`/`wu_hausman_statistic`'s use of `None` for "not applicable to
+    /// this method"); always `None` for `method="2sls"`, which has no such concept.
+    #[pyo3(get)]
+    pub weight_type: Option<String>,
     #[pyo3(get)]
     pub f_statistic: f64,
     #[pyo3(get)]
@@ -481,22 +495,26 @@ fn parse_iv_cov_type(df: &DataFrame, options: &IvOptions) -> PyResult<(EngineCov
 /// `cluster_col`/`hac_lags`/`time_col`は`cov_type`と共用する（モジュールdocコメント
 /// 「GMMのweight_type」参照、`IvOptions`に別フィールドを増やさない設計）。
 ///
+/// 戻り値に正規化済み小文字文字列を含めるのは`parse_iv_cov_type`と同じ理由
+/// （`IvResult.weight_type`の構築時に`options.weight_type.to_lowercase()`を
+/// 再計算せずに済ませるため、Issue #307）。
+///
 /// # Errors
 /// `weight_type`の文字列が既知の値のいずれでもない場合は`ValidationError`。それ以外
 /// （列の抽出時に発覚する問題等）は`column_extraction`の責務で`ValidationError`。
-fn parse_weight_type(df: &DataFrame, options: &IvOptions) -> PyResult<WeightType> {
+fn parse_weight_type(df: &DataFrame, options: &IvOptions) -> PyResult<(WeightType, String)> {
     let weight_type_lower = options.weight_type.to_lowercase();
 
-    match weight_type_lower.as_str() {
-        "unadjusted" | "homoskedastic" => Ok(WeightType::Unadjusted),
-        "robust" | "heteroskedastic" => Ok(WeightType::Robust),
+    let weight_type = match weight_type_lower.as_str() {
+        "unadjusted" | "homoskedastic" => WeightType::Unadjusted,
+        "robust" | "heteroskedastic" => WeightType::Robust,
         "cluster" => {
             let groups = options
                 .cluster_col
                 .as_ref()
                 .map(|col_name| extract_group_key_column(df, col_name))
                 .transpose()?;
-            Ok(WeightType::Cluster { groups })
+            WeightType::Cluster { groups }
         }
         "kernel" => {
             let time_order = options
@@ -504,16 +522,20 @@ fn parse_weight_type(df: &DataFrame, options: &IvOptions) -> PyResult<WeightType
                 .as_ref()
                 .map(|col_name| extract_f64_column(df, col_name))
                 .transpose()?;
-            Ok(WeightType::Kernel {
+            WeightType::Kernel {
                 lags: options.hac_lags,
                 time_order,
-            })
+            }
         }
-        other => Err(ValidationError::new_err(format!(
-            "unknown weight_type: '{other}'. Expected one of 'unadjusted' ('homoskedastic'), \
-             'robust' ('heteroskedastic'), 'cluster', or 'kernel'"
-        ))),
-    }
+        other => {
+            return Err(ValidationError::new_err(format!(
+                "unknown weight_type: '{other}'. Expected one of 'unadjusted' \
+                 ('homoskedastic'), 'robust' ('heteroskedastic'), 'cluster', or 'kernel'"
+            )));
+        }
+    };
+
+    Ok((weight_type, weight_type_lower))
 }
 
 /// Pythonから渡された `data` / `y` / `x_exog` / `x_endog` / `instruments` / `options` を
@@ -662,7 +684,7 @@ pub(crate) fn fit(
             .map_err(iv_error_to_pyerr)?;
 
     if method_lower == "gmm" {
-        let weight_type = parse_weight_type(&df, options)?;
+        let (weight_type, weight_type_lower) = parse_weight_type(&df, options)?;
         let estimator = GmmEstimator::fit(
             input,
             weight_type,
@@ -690,6 +712,8 @@ pub(crate) fn fit(
             converged: estimator.converged(),
             n_iterations: estimator.n_iterations(),
             cov_type: cov_type_lower,
+            method: method_lower,
+            weight_type: Some(weight_type_lower),
             f_statistic: estimator.f_statistic(),
             f_p_value: estimator.f_p_value(),
             r_squared: estimator.r_squared(),
@@ -724,6 +748,10 @@ pub(crate) fn fit(
         converged: true,
         n_iterations: 1,
         cov_type: cov_type_lower,
+        method: method_lower,
+        // `weight_type`はGMM専用の概念のため`method="2sls"`では常に`None`
+        // （`IvResult.weight_type`のdocコメント参照）。
+        weight_type: None,
         f_statistic: estimator.f_statistic(),
         f_p_value: estimator.f_p_value(),
         r_squared: estimator.r_squared(),

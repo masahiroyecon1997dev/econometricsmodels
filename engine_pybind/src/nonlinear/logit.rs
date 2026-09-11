@@ -216,6 +216,10 @@ pub struct LogitResult {
     /// to lowercase; e.g. `"classical"`, `"opg"`, `"hc1"`, `"cluster"`).
     #[pyo3(get)]
     pub cov_type: String,
+    /// Optimization solver actually used (echoes `LogitOptions.method`, normalized
+    /// to lowercase; one of `"newton"`, `"bfgs"`, `"lbfgs"`).
+    #[pyo3(get)]
+    pub method: String,
     /// Not exposed to Python; only `predict`/`pred_table`/`marginal_effects` read it
     /// (`OLSResult`の`fitted_values`/`has_intercept`と同じ位置づけ、コメント参照)。
     estimator: LogitEstimator,
@@ -425,6 +429,7 @@ pub(crate) fn fit(
         converged: estimator.converged(),
         n_iter: estimator.n_iter(),
         cov_type: options.cov_type.to_lowercase(),
+        method: options.method.to_lowercase(),
         estimator,
     })
 }

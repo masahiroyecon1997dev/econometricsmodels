@@ -918,3 +918,39 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-31、`python_package/econometricsmodels/
   linear/ols.py`解説時のユーザー指摘。
 - **状態**: 未対応
+
+### 44. `tests/nonlinear/test_tobit.py`の一部テストが`_binary_choice_checks.py`（Logit/Probit共有）と重複しており、部分的な共通化の余地がある
+
+- **対象**: [tests/nonlinear/test_tobit.py](../../../tests/nonlinear/test_tobit.py)
+  と[tests/nonlinear/_binary_choice_checks.py](../../../tests/nonlinear/_binary_choice_checks.py)
+- **内容**: ユーザー指摘（2026-09-11、Issue #307対応でTobitに`test_method_label`を
+  新規で書き下ろした際、「`test_tobit.py`の内容は`_binary_choice_checks.py`と
+  同様な気がする、共通化したほうが良いか検討してほしい」）を受けて全件突き合わせた。
+  - **完全に同じ挙動でそのまま流用できるもの（4件）**: `test_fit_succeeds_and_returns_tobit_results`
+    ⇔`check_fit_succeeds_and_returns_results`、`test_method_option_converges_to_same_params`
+    ⇔`check_method_option_converges_to_same_params`、`test_n_obs_matches_dataset_size`
+    ⇔`check_n_obs_matches_dataset_size`、今回追加した`test_method_label`
+    ⇔`check_method_label`。いずれも`res.converged`/`res.param_names`/`res.n_obs`/
+    `res.method`など、Tobit固有の`"sigma"`追加パラメータの有無に依存しないフィールドしか
+    見ておらず、コード変更なしでそのまま呼べる（Issue #307で`test_method_label`を
+    独自に書き下ろしたのは、この既存の重複ヘルパーに気づかず車輪の再発明をした形になる）。
+  - **一見似ているが実質的に異なるもの（大半、10件以上）**: `test_params_std_errors_z_stats_p_values_share_keys`/
+    `test_conf_int_structure`/`test_coef_table_structure`/
+    `test_param_names_include_const_first_and_sigma_last`/
+    `test_include_intercept_false_omits_const_and_converges`は、いずれも`"sigma"`が
+    末尾に追加される分だけ期待値（キー集合・件数・`df_model`の値）が異なり、単純な
+    パラメータ化では吸収しきれない（`python_package/econometricsmodels/nonlinear/CLAUDE.md`
+    「Tobit固有の設計」節が明記する設計差）。`predict()`/`marginal_effects()`の
+    `target`引数・`censoring_fit_check()`（`pred_table()`と無関係な形状）・打ち切り境界
+    関連のバリデーションはLogit/Probitに対応物が無いTobit固有機能。
+- **Claudeの所感**: `refactoring-candidates.md`項目11（IV 2SLS/GMMの`_check_result`
+  統合可否）と同じ構図で、全面統合は不適切（Tobit側の固有機能・フィールドが多く、
+  無理に共通化すると可読性が落ちる）だが、上記4件の完全重複だけを共通化する価値は
+  あると考える。対応する場合は`test_tobit.py`の該当4関数を削除し`_binary_choice_checks`
+  をimportして呼ぶ薄いラッパーに置き換えることになるが、その場合`_binary_choice_checks.py`
+  のモジュールdocstring（現在「Logit/Probitの重複を集約」とだけ記載）もTobitを含む
+  形に更新する必要がある。
+- **気づいた経緯**: 2026-09-11、Issue #307（Logit/Probit/Tobit/IVの結果オブジェクトに
+  `method`フィールドを追加）対応中のユーザー指摘。
+- **状態**: 未対応（ユーザー判断によりIssue化はせず本メモへの記録のみ。engineの修正を
+  伴わないテストのみの変更のため）

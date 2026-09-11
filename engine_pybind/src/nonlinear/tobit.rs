@@ -234,6 +234,10 @@ pub struct TobitResult {
     /// to lowercase).
     #[pyo3(get)]
     pub cov_type: String,
+    /// Optimization solver actually used (echoes `TobitOptions.method`, normalized
+    /// to lowercase; one of `"newton"`, `"bfgs"`, `"lbfgs"`).
+    #[pyo3(get)]
+    pub method: String,
     /// Lower censoring bound actually used (echoes `TobitOptions.lower`).
     #[pyo3(get)]
     pub lower: Option<f64>,
@@ -572,6 +576,7 @@ pub(crate) fn fit(
         converged: estimator.converged(),
         n_iter: estimator.n_iter(),
         cov_type: options.cov_type.to_lowercase(),
+        method: options.method.to_lowercase(),
         lower: options.lower,
         upper: options.upper,
         estimator,

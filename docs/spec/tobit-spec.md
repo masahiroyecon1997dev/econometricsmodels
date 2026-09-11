@@ -56,7 +56,8 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 `TobitResult`（`#[pyclass]`）が公開する配列＋名前リスト: `params` / `std_errors` / `z_stats`
 （**z検定**） / `p_values` / `conf_lower` / `conf_upper` / `param_names` / `sigma` /
 `log_likelihood` / `aic` / `bic` / `wald_statistic` / `wald_p_value` / `n_obs` / `df_model` /
-`df_resid` / `converged` / `n_iter` / `cov_type` / `lower` / `upper`。
+`df_resid` / `converged` / `n_iter` / `cov_type` / `method`（実際に使われたソルバーの小文字文字列、
+Issue #307） / `lower` / `upper`。
 
 - **`σ`を含めた`k+1`長への統一**: engine層の`TobitEstimator`は`params()`が`k`長（`β`のみ）だが
   `std_errors()`等は`(k+1)`長（末尾が`σ`）という非対称設計（`cov_params`が`(β,σ)`空間の

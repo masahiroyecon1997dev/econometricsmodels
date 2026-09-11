@@ -58,28 +58,11 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時。
 - **状態**: 未対応
 
-### 3. `IvResults`に`method`だけでなく`weight_type`も含まれておらず、正規化値を検証する手段が無い
+### 3.【Issue化】`IvResults`に`method`だけでなく`weight_type`も含まれておらず、正規化値を検証する手段が無い
 
-- **対象**: [python_package/econometricsmodels/iv/iv.py:113-373](../../../python_package/econometricsmodels/iv/iv.py#L113-L373)
-  （`IvResults`、`cov_type`プロパティはあるが`method`/`weight_type`が無い）
-- **内容**: ユーザー指摘（2026-08-30）。`refactoring-candidates-2.md`項目78
-  （`LogitResult`に`method`フィールドが無い）と同型の論点がIVにも存在する。
-  IVはLogit/Probitと異なり`method`（`"2sls"`/`"gmm"`）に加えて`weight_type`
-  （GMMの点推定重み行列の種類、`"unadjusted"`/`"robust"`/`"cluster"`/
-  `"kernel"`、`"homoskedastic"`/`"heteroskedastic"`のエイリアスも受け付ける）
-  という**もう1軸の入力オプションを持つが、こちらも結果に反映されない**。
-  そのため`test_weight_type_is_case_insensitive_and_aliased`
-  （[tests/test_iv.py:208-222](../../../tests/test_iv.py#L208-L222)）は
-  `cov_type`の`test_cov_type_is_case_insensitive`のように「正規化後の
-  ラベルを直接読んで検証する」のではなく、「点推定`params`が2つの呼び方で
-  一致すること」という間接的な検証にとどまっている。
-- **Claudeの所感**: ユーザー見解に同意。`res.method`・`res.weight_type`を
-  追加すれば、(1) 実際にどちらのmethodで推定されたかが結果から確認できる、
-  (2) `weight_type`についても`cov_type`と同様の「ラベル直接検証」テストが
-  書けるようになる。項目78・67（`WLSOptions`検討）と合わせて設計変更として
-  検討するのが良い。
-- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち、項目78と合わせて検討）
+→ Issue #307として切り出し済み（2026-09-11）。`refactoring-candidates-2.md`
+項目78（`LogitResult`/`ProbitResult`の`method`欠落）と合わせて1つのIssueに
+統合した。詳細はIssueを参照。
 
 ### 4. `test_cov_type_label`/`test_cluster_cov_type_label`/`test_nonrobust_is_alias_for_classical`が`test_cov_type_is_case_insensitive`と部分的に重複している
 
@@ -163,53 +146,10 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘。
 - **状態**: 未対応（優先度低）
 
-### 7.【要注意・バグ疑い】`const`名衝突チェックが`x_exog`のみに存在し、`instruments`/`x_endog`に含まれる場合は検証されず`first_stage()`・`params`辞書がサイレントに破損しうる
+### 7.【Issue化】`const`名衝突チェックが`x_exog`のみに存在し、`instruments`/`x_endog`に含まれる場合は検証されず`first_stage()`・`params`辞書がサイレントに破損しうる
 
-- **対象**: [tests/test_iv.py:621-636](../../../tests/test_iv.py#L621-L636)
-  （`test_const_collision_with_include_intercept_raises`、`x_exog`のみ検証）、
-  実装側は`engine`/`engine_pybind`のconst名衝突バリデーション箇所（未特定、
-  `x_exog`側のみ実装されている可能性が高い）
-- **内容**: ユーザー指摘（2026-08-30、「操作変数にconstが入っていたらと
-  内生変数に入っていたらも検証したほうがいい（内生変数は2段階目のときに
-  問題になるはず）」）を受けて、実際に構築済みパッケージで動作確認した。
-  - **`instruments`に`"const"`という名前の列（実際の値は定数ではない）を
-    含めた場合**、`fit()`自体はエラーにならず成功するが、
-    `first_stage()[endog名].param_names`が`['const', 'x1', 'const', 'z1']`
-    のように**`"const"`が2回出現**する。`OlsResults.params`は
-    `dict(zip(param_names, params))`で辞書化するため、後から出てくる
-    `"const"`（ユーザーの操作変数の係数値）が先の`"const"`（実際の
-    切片の係数値）を**サイレントに上書き**する。実測で確認した具体例
-    （`tests/fixtures/benchmarks/data/iv_baseline.csv`の`z2`列を
-    `"const"`に改名し`instruments=["const", "z1"]`とした場合）:
-    `fs.params["const"]`が真の切片係数`0.5193043061061868`ではなく
-    `0.555951305782325`（本来`z2`＝改名後`"const"`の係数）を返す。
-  - **`x_endog`に`"const"`という名前の列を含めた場合はさらに深刻**で、
-    **構造方程式本体の`res.params`辞書からも真の切片の値が消える**。
-    実測例（`endog1`列を`"const"`に改名し`x_endog=["const"]`とした場合）:
-    `res.param_names`は`['const', 'x1', 'const']`（3要素）だが
-    `res.params`辞書は`{'const': -0.1259924352302418, 'x1': ...}`の
-    **2キーしか持たない**——真の切片の係数（本来`0.7602470494600461`）が
-    完全に失われ、代わりに内生変数`endog1`（改名後`"const"`）の係数で
-    上書きされている。
-  - 一方、`instruments`に`"const"`という名前の**リテラルに定数な**列
-    （全行同じ値）を含めた場合は、二重の定数列による完全な多重共線性で
-    `ComputationError`（設計行列が特異）になり実害は無い（が、メッセージが
-    `x_exog`側の衝突チェックのような明確な`ValidationError`ではなく
-    分かりにくい`ComputationError`になる）。
-- **Claudeの所感**: これは単なるテストカバレッジの抜けではなく、
-  **`x_exog`側だけに実装されているconst名衝突バリデーションを
-  `instruments`/`x_endog`にも拡張すべき、実装側の潜在バグ**だと考える
-  （`x_endog`側の症状——構造方程式の主要な推定結果が説明もなく静かに
-  消える/上書きされる——は特に深刻）。統計的には「たまたま説明変数の
-  1つが`"const"`という列名を持っていた」という現実的にあり得る入力
-  （ユーザーがデータの列名を制御できない場面、例えば外部データの
-  結合等）で発生しうる。ユーザー指示により本セッションでは記録のみに
-  留めるが、対応の優先度は本ファイル中では最も高いと考える。
-- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘・
-  実機検証で確認。
-- **状態**: 対応予定（ユーザー決定2026-08-30、別セッションで実装する。
-  `x_exog`と同じ`ValidationError`を`instruments`/`x_endog`の`"const"`
-  衝突にも拡張する方向）
+→ Issue #305として切り出し済み（2026-09-11）。実測での再現例等の詳細はIssue
+本文に転記済み。
 
 ### 8. `test_const_collision_with_include_intercept_raises`のデータが手書きで、`refactoring-candidates-2.md`項目81（OLS/WLS/Logitのconst衝突データ共有）にIVも該当しうる
 
@@ -231,65 +171,15 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **状態**: 未対応（優先度低、項目81〔`refactoring-candidates-2.md`〕と
   合わせて検討）
 
-### 9.【ドキュメント不整合】`iv-api-design.md`の「`x_endog`/`instruments`は最低1要素を要求する見込み」という記述が実装と食い違っている
+### 9.【Issue化】`iv-api-design.md`の「`x_endog`/`instruments`は最低1要素を要求する見込み」という記述が実装と食い違っている
 
-- **対象**: [docs/planning/specs/iv-api-design.md:26-28](../../../docs/planning/specs/iv-api-design.md#L26-L28)
-  と、[tests/test_iv.py:277-285](../../../tests/test_iv.py#L277-L285)
-  （`test_weak_instrument_f_statistics_empty_when_no_endog`、
-  `x_endog=[]`かつ`instruments=[]`が実際に成功パスとして存在する）
-- **内容**: `tests/test_iv.py`解説時にユーザーから挙がった論点
-  （項目10）の調査中に発見。設計ドキュメントは「`x_endog`/`instruments`は
-  最低1要素を要求する**見込み**」（＝設計当時の予定、確定ではない書き方）
-  としているが、実際に構築済みパッケージで確認したところ、
-  `x_endog=[]`かつ`instruments=[]`は`ValidationError`にならず**成功する**
-  （実質OLSとして完走する）。CLAUDE.md 14章「既存ドキュメント・issueの
-  記述と、実装時に判明した事実が食い違う」に該当する典型例。
-- **Claudeの所感**: ドキュメントが「見込み」という未確定表現のまま
-  更新されずに残っていた可能性が高い。実装が意図的にこの制約を
-  設けなかった（`x_endog=[]`を許容する設計にした）のであれば
-  ドキュメント側を実態に合わせて修正すべきだし、逆に本来は制約を
-  入れるはずだったのが実装時に漏れたのであれば実装側の検討が必要——
-  どちらが正しい経緯かはこのセッションでは分からないため、著者
-  （ユーザー）に確認したい。
-- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘
-  （項目10「`x_endog=[]`のケースはバリデーションエラーにすべきか」）の
-  調査中に発見。
-- **状態**: 対応予定（ユーザー決定2026-08-30、別セッションで実装する。
-  `x_endog`/`instruments`が空の場合は`ValidationError`で弾く方向——
-  ドキュメント記述通りの制約を実装側に追加する。項目10もこれで解消）。
-  **付随する影響**: `test-coverage-candidates.md`項目52
-  （`test_insufficient_instruments_raises`の境界ケース）が、この対応後は
-  `x_endog=1`・`instruments=0`という現状の組み合わせでは「空リスト」
-  バリデーションが先に発火してしまい、本来確認したい識別の順序条件
-  （`len(instruments) < len(x_endog)`、両方とも1要素以上だが数が
-  足りない場合）を検証できなくなる。そのため対応時は
-  `x_endog=["endog1", "x1"]`・`instruments=["z1"]`（2個に対し1個、
-  ユーザー指摘の組み合わせ）へのテスト修正が必須になる。
+→ Issue #306として切り出し済み（2026-09-11）。項目10（`x_endog=[]`の
+許容可否）と統合して1つのIssueにまとめた。詳細はIssueを参照。
 
-### 10. `x_endog=[]`（内生変数ゼロ、実質OLSへの意図的な縮退）を許容し続けるべきかは設計判断が必要
+### 10.【Issue化】`x_endog=[]`（内生変数ゼロ、実質OLSへの意図的な縮退）を許容し続けるべきかは設計判断が必要
 
-- **対象**: [tests/test_iv.py:277-285](../../../tests/test_iv.py#L277-L285)
-  （`test_weak_instrument_f_statistics_empty_when_no_endog`）
-- **内容**: ユーザー指摘（2026-08-30、「このケースはそもそもバリデーション
-  チェックでエラーにしたほうがよいのか？確かにOLSに帰着するが、そもそも
-  IVを使用することが誤りであるケースになる」）。現状は`x_endog=[]`は
-  正常に受理され、`weak_instrument_f_statistics`/`overid_statistic`/
-  `wu_hausman_statistic`が意味を持たないため`{}`/`None`になる、という
-  設計（項目9のドキュメント不整合とも関連）。
-- **Claudeの所感**: 一理あると思う一方、「`IV`クラスにわざわざ
-  `x_endog=[]`を渡す」というのは、プログラムから動的に変数リストを
-  組み立てる場面（CLAUDE.md 2章の設計方針が重視する使い方）では
-  `x_endog`が実行時に空になりうるケースを`OLS`への切り替えなしに
-  そのまま`IV`に渡せる、という実務上の利便性にもなりうる。
-  「誤用を防ぐ」（`ValidationError`にする）か「柔軟性を許容する」
-  （現状維持）かはトレードオフであり、`.claude/rules`にも明確な
-  指針が無いためユーザー判断が必要と考える。項目9のドキュメント
-  不整合の解消と合わせて、まず「意図的な設計か実装漏れか」を
-  確認してから、必要なら本項目の要否を判断するのが良い。
-- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘。
-- **状態**: 決定済み（ユーザー決定2026-08-30、項目9参照）。「誤用を防ぐ」
-  側を採用し、`x_endog`/`instruments`が空の場合は`ValidationError`で
-  弾く方向で実装する（別セッション）。
+→ Issue #306として切り出し済み（2026-09-11）。項目9と統合済み。詳細はIssueを
+参照。
 
 ### 11. `test_iv_fixtures.py`と`test_iv_gmm_fixtures.py`の統合可否を検討した結果、完全統合は非推奨・部分的な共通化に留めるべき
 
@@ -521,39 +411,9 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   ユーザー指摘。
 - **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
 
-### 19.【検討事項】GMMの推論統計量がz/カイ二乗分布固定であること・過剰棄却問題への対処（CUE/bootstrap/Windmeijer 2005補正）は未検討
+### 19.【Issue化】GMMの推論統計量がz/カイ二乗分布固定であること・過剰棄却問題への対処（CUE/bootstrap/Windmeijer 2005補正）は未検討
 
-- **対象**: [docs/planning/specs/iv-api-design.md:120-128](../../../docs/planning/specs/iv-api-design.md#L120-L128)
-  （GMMは常にz分布・カイ二乗分布、`debiased`のような小標本切り替え
-  オプションは無い）
-- **内容**: ユーザー指摘（2026-08-30）。Stata `ivreg2`は既定でlarge-sample
-  統計量（z・カイ二乗）を報告し、`small`オプションで従来型の小標本統計量
-  （t分布・F分布、伝統的な自由度調整込み）に切り替えられる仕様がある
-  （`linearmodels`も`debiased`という同種の切り替えを持つ、前回解説の
-  `iv-api-design.md`3.2節参照）。本実装の`IvOptions`にはこの切り替え
-  オプションが無く、GMMは常にz/カイ二乗分布固定であることを確認した。
-  ユーザーはさらに、この「小標本補正+t分布」自体よりも、GMM推定量の
-  **過剰棄却問題**（Hansen, Heaton and Yaron 1996等で指摘された、
-  2-step GMMの標準的な検定統計量が小〜中標本で棄却しすぎる傾向がある
-  という既知の問題）への対処のほうが理論的に重要かもしれないとして、
-  continuously-updated GMM（CUE）・ブートストラップによる標準誤差/検定・
-  Windmeijer (2005)型の補正分散を検討候補に挙げている。`grep`で確認した
-  ところ、**CUEは実装されていない**（`CUE`/`continuously_updated`等で
-  ヒット無し）。
-- **Claudeの所感**: 統計的に正当な問題提起だと思う。2-step efficient GMM
-  （本実装の既定）はまさにHansen-Heaton-Yaronが過剰棄却を指摘した対象
-  そのものであり、小標本での推論の信頼性という観点では、単純な
-  t分布切り替えよりCUE・ブートストラップ・Windmeijer補正の方が理論的な
-  改善効果が大きいというユーザーの見立てに同意する。ただしこれらは
-  いずれも実装コストが軽くない（CUEは点推定自体の最適化方法が変わる、
-  ブートストラップは計算コストが重い、Windmeijer補正は2-step特有の
-  補正項の追加実装が必要）ため、既存の`docs/planning/specs/iv-api-
-  design.md`や`CLAUDE.md`12章「今後の検討事項」のような場所に、実装
-  着手前の検討候補として記録しておく価値はあると考える。優先度・
-  着手判断はユーザー次第。
-- **気づいた経緯**: 2026-08-30、`tests/test_iv_gmm_fixtures.py`解説時の
-  ユーザー指摘、`grep`でCUE未実装を確認。
-- **状態**: 未対応（検討事項として記録のみ、着手要否はユーザー判断待ち）
+→ Issue #312として切り出し済み（2026-09-11）。詳細はIssueを参照。
 
 ### 20. `INSTRUMENTS_BY_SCENARIO`/`X_EXOG_BY_SCENARIO`が`test_iv_fixtures.py`と`test_iv_gmm_fixtures.py`に同一内容で重複定義されている
 
@@ -957,35 +817,9 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **状態**: 未対応（本ファイル項目4と合わせて検討、着手要否はユーザー
   判断待ち）
 
-### 38.【検討事項】`marginal_effects()`/`predict()`に4つ目のtarget候補`E[y|y>0,x]`（打ち切られていないサブサンプルへの条件付き期待値）を追加すべきか
+### 38.【Issue化】`marginal_effects()`/`predict()`に4つ目のtarget候補`E[y|y>0,x]`（打ち切られていないサブサンプルへの条件付き期待値）を追加すべきか
 
-- **対象**: [docs/planning/specs/nonlinear-api-design.md:112](../../../docs/planning/specs/nonlinear-api-design.md#L112)
-  （McDonald-Moffitt 1980を根拠に`E[y*|x]`/`E[y|x]`/`P(uncensored|x)`の
-  3種類のみを提供すると確定済み）
-- **内容**: ユーザー指摘（2026-08-31、「"expected_latent",
-  "expected_observed", "prob_uncensored"が現状限界効果の候補にあるが、
-  ゼロを超えるサブサンプル（条件付き）への限界効果
-  （`expected_conditional`）も候補に加えたほうがいいか？」）を受けて
-  `nonlinear-api-design.md`を確認した。McDonald-Moffitt (1980)の
-  古典的な分解は実際には`E[y|x] = P(y>0|x) · E[y|y>0,x]`という関係
-  （観測される期待値＝非打ち切り確率×打ち切られなかった場合の条件付き
-  期待値）を含むが、設計ドキュメントは前2者（`E[y*|x]`・`E[y|x]`）と
-  `P(uncensored|x)`の3種類のみを採用しており、**`E[y|y>0,x]`
-  （切断回帰・truncated regressionの条件付き期待値に相当）自体は
-  設計時に検討・却下された形跡が無く、単純に候補に挙がらなかった
-  可能性が高い**。
-- **Claudeの所感**: 統計的に正当な追加候補だと考える。`E[y|y>0,x]`は
-  「打ち切りを受けなかった集団に限定した場合の効果」という、実務上
-  意味のある解釈を持つ（例: 「支出額がプラスだった世帯に限定すると、
-  平均支出額はどう変わるか」）。既存3種と合わせて4種類目として提供
-  すれば、McDonald-Moffittの分解を完全にカバーできる。ただし実装
-  コスト（デルタ法での標準誤差計算式を新たに導出する必要がある）は
-  既存3種と同程度かかると見込まれ、v1スコープに含めるかは既存の
-  `nonlinear-api-design.md`6章の確定事項を覆す変更になるため、
-  ユーザー判断が必要。
-- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
-  指摘、`nonlinear-api-design.md`で確認。
-- **状態**: 未対応（**検討事項として記録**、着手要否はユーザー判断待ち）
+→ Issue #311として切り出し済み（2026-09-11）。詳細はIssueを参照。
 
 ### 39. `fit_iv`のdoc commentがGMM実装状況について古い記述のまま
 
@@ -1003,25 +837,9 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   コード全体を確認して発見。
 - **状態**: 未対応
 
-### 40. 結果クラスの命名が頭字語の大文字小文字で不統一（`OlsResults`/`WlsResults`/`IvResults` vs `OLS`/`WLS`/`IV`）
+### 40.【Issue化】結果クラスの命名が頭字語の大文字小文字で不統一（`OlsResults`/`WlsResults`/`IvResults` vs `OLS`/`WLS`/`IV`）
 
-- **対象**: [python_package/econometricsmodels/__init__.py:11-13](../../../python_package/econometricsmodels/__init__.py#L11-L13)
-  （`IV`/`IvOptions`/`IvResults`、`OLS`/`OLSOptions`/`OlsResults`、
-  `WLS`/`WlsResults`の再エクスポート箇所）
-- **内容**: 推定量本体のクラス名は`OLS`/`WLS`/`IV`と頭字語をそのまま
-  大文字表記しているのに対し、対応する結果クラスは`OlsResults`/
-  `WlsResults`/`IvResults`と頭字語部分だけ「単語として扱った
-  PascalCase」（`Ols`/`Wls`/`Iv`）になっている。`Logit`/`Probit`/
-  `Tobit`は頭字語ではないためこの不統一自体が発生しない
-  （`LogitResults`等は自然に一貫している）。
-- **Claudeの所感**: 実害は無いが、命名規則としては`OLSResults`/
-  `WLSResults`/`IVResults`の方が推定量本体のクラス名と一貫する。
-  既存コード・ドキュメント・テスト全体に`OlsResults`等の名前が
-  広く使われているため、直すなら破壊的変更（リネーム）になる点に
-  注意が必要。
-- **気づいた経緯**: 2026-08-31、`python_package/econometricsmodels/
-  __init__.py`解説時に`__all__`の一覧を確認して発見。
-- **状態**: 未対応
+→ Issue #310として切り出し済み（2026-09-11）。詳細はIssueを参照。
 
 ### 41. `__version__`がバージョン文字列の3つ目の手書きソースになっている
 

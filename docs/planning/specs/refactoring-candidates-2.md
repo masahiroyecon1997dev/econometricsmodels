@@ -199,28 +199,9 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_crosscheck.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
-### 64. `predict()`の戻り値辞書のキーが`"fitted"`固定で、新規データ（out-of-sample）予測に対しても統計学的に不正確な用語になっている
+### 64.【Issue化】`predict()`の戻り値辞書のキーが`"fitted"`固定で、新規データ（out-of-sample）予測に対しても統計学的に不正確な用語になっている
 
-- **対象**: [python_package/econometricsmodels/linear/ols.py:243,251](../../../python_package/econometricsmodels/linear/ols.py#L243)
-  （`predict()`の戻り値、`[{"fitted": value} for value in raw]`）、
-  `docs/spec/ols-spec.md`「3.4 predict()」（メソッド統合の設計判断は
-  説明されているが、辞書キーが`"fitted"`である理由は明記無し）
-- **内容**: ユーザー指摘（2026-08-23）。統計学の慣習では「fitted values
-  （あてはめ値）」は学習データに対する予測値（statsmodelsの
-  `fittedvalues`属性と同義）を指す言葉で、新規データに対する予測
-  （out-of-sample）は通常「predicted values」と呼び分ける。本実装の
-  `predict(new_data=...)`は新規データを渡した場合も戻り値のキーが
-  `"fitted"`のままで、統計学用語としては不正確。
-- **Claudeの所感**: `docs/spec/ols-spec.md`の記述から、Logitの`predict()`
-  （学習データの予測確率のみを返す設計だった）に合わせた命名の名残りが、
-  `new_data`対応版のOLSにもそのまま引き継がれたと推測される。ただし
-  公開APIの命名変更のため影響範囲が大きい
-  （`python_package/econometricsmodels/linear/ols.py`・
-  `docs/spec/ols-spec.md`に加え、`row["fitted"]`という参照が`test_ols.py`・
-  `test_ols_fixtures.py`・`test_ols_crosscheck.py`他、WLS側にも多数波及する
-  見込み）。実施の要否・タイミングはユーザー判断が必要。
-- **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_crosscheck.py`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち、公開APIの破壊的変更を伴う）
+→ Issue #309として切り出し済み（2026-09-11）。詳細はIssueを参照。
 
 ### 65. `df = dataset.with_columns(pl.lit(1.0).alias("weight"))`が`test_wls.py`内に25回重複している
 
@@ -255,24 +236,9 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-23、`tests/linear/test_wls.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
-### 67. `WLSOptions`新設の要否は、Logit/Probitの`method`/`max_iter`/`tol`/`raise_on_non_convergence`共通化と合わせてLogit/Probit実装確認時に再検討する
+### 67.【Issue化】`WLSOptions`新設の要否は、Logit/Probitの`method`/`max_iter`/`tol`/`raise_on_non_convergence`共通化と合わせてLogit/Probit実装確認時に再検討する
 
-- **対象**: [python_package/econometricsmodels/linear/wls.py:10-13](../../../python_package/econometricsmodels/linear/wls.py#L10-L13)
-  （`OLSOptions`を再利用する現行方針）、
-  [engine_pybind/src/nonlinear/logit.rs:60-98](../../../engine_pybind/src/nonlinear/logit.rs#L60-L98)
-  （`LogitOptions`、`method`/`max_iter`/`tol`/`raise_on_non_convergence`という
-  Logit固有の最適化フィールドを持つ）
-- **内容**: ユーザー判断（2026-08-23）。`WLSOptions`はユーザビリティ向上のため
-  新設する方向。ただしユーザーから「`LogitOptions`の`method`/`max_iter`/`tol`/
-  `raise_on_non_convergence`はProbitでも共通になるはず」という指摘があり、
-  Logit/Probit実装確認時に、単純に`WLSOptions`を独立新設するだけでなく、
-  MLE系（Logit/Probit、将来Tobit等）で共通する最適化オプションを
-  どう共有するか（共通の基底構造・trait等）も合わせて再検討する。
-- **Claudeの所感**: `WLSOptions`単体は`OLSOptions`のフィールドをそのまま
-  持つだけなので実装コストは低いが、Logit/Probit側の共通化方針が
-  固まってから着手した方が、後から設計をやり直すリスクを避けられる。
-- **気づいた経緯**: 2026-08-23、`tests/linear/test_wls.py`解説後のユーザー判断。
-- **状態**: 方針決定済み（実施はLogit/Probit実装確認時、ユーザー判断待ち）
+→ Issue #308として切り出し済み（2026-09-11）。詳細はIssueを参照。
 
 ### 69. `test_hac_time_col_reorders_rows_before_computing_lags`の`ordered_df`/`shuffled_df`が手書きで重複、OLS/WLS間でも同一データが独立に書かれている
 
@@ -478,27 +444,11 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   （凍結フィクスチャ照合セクション）へ分かれたが、テスト内容・`rel=1e-4` 直書きは
   不変（分割はファイル移動のみの方針）。Probit も同様。
 
-### 78. `LogitResult`に実際に収束した`method`が含まれておらず、検証する手段が無い
+### 78.【Issue化】`LogitResult`に実際に収束した`method`が含まれておらず、検証する手段が無い
 
-- **対象**: [engine_pybind/src/nonlinear/logit.rs:176-222](../../../engine_pybind/src/nonlinear/logit.rs#L176-L222)
-  （`LogitResult`構造体、`converged`・`n_iter`・`cov_type`はあるが`method`
-  フィールドが無い）
-- **内容**: ユーザー指摘（2026-08-23、`test_method_option_converges_to_same_
-  params`を見て「どのmethodで収束させたかは`LogitResults`に含まれている
-  か」）を受けて確認。含まれていない。`LogitOptions.method`（入力）は
-  ユーザーが指定した文字列だが、`res`（出力）側にそれが正規化された形
-  （例: 大文字小文字を揃えた後の値）で反映されているかを確認する手段が
-  存在しない。`cov_type`は`res.cov_type`で入力の正規化後の値を確認できる
-  設計（`test_cov_type_label`等で検証済み）になっているのに対し、`method`
-  だけこの対称性が無い。
-- **Claudeの所感**: ユーザー見解に同意。`cov_type`と同じパターンで
-  `res.method`を追加すれば、(1) 利用者が実際どの最適化手法で推定されたか
-  結果から確認できる、(2) `method`の大文字小文字正規化・エイリアスの
-  Python API境界テストが書けるようになる、という2つの利点がある。
-  `WLSOptions`新設検討（項目67）と合わせて、Logit/Probit実装確認時に
-  設計変更として検討するのが良いと考える。
-- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち、項目67と合わせて検討）
+→ Issue #307として切り出し済み（2026-09-11）。`refactoring-candidates.md`
+項目3（`IvResults`の`method`/`weight_type`欠落）と統合して1つのIssueに
+まとめた。詳細はIssueを参照。
 
 ### 79. 項目51（Issue #231フェーズ4コメント残置）が`test_logit.py`にも該当し、件数がOLSより大幅に多い（11箇所）
 

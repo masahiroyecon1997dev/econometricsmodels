@@ -11,11 +11,14 @@ Issue #227）。ここでは`fit()`の成功パス・`coef_table()`/`predict()`/
 from __future__ import annotations
 
 import json
+import math
 import random
 
+import _error_messages as msgs
 import polars as pl
 import pytest
 from _constants import DATA_DIR
+from _error_messages import escaped
 from econometricsmodels import (
     ComputationError,
     Tobit,
@@ -168,7 +171,10 @@ def test_predict_prob_uncensored_is_a_probability(censored_dataset):
 
 def test_predict_unknown_target_raises(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_MARGINAL_EFFECTS_TARGET, other="bogus"),
+    ):
         res.predict(target="bogus")
 
 
@@ -243,13 +249,19 @@ def test_marginal_effects_at_is_case_insensitive(censored_dataset):
 
 def test_marginal_effects_unknown_at_raises(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_MARGINAL_EFFECTS_AT, other="bogus"),
+    ):
         res.marginal_effects(at="bogus")
 
 
 def test_marginal_effects_unknown_target_raises(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_MARGINAL_EFFECTS_TARGET, other="bogus"),
+    ):
         res.marginal_effects(target="bogus")
 
 
@@ -257,7 +269,13 @@ def test_marginal_effects_confidence_level_out_of_range_raises(
     censored_dataset,
 ):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INVALID_CONFIDENCE_LEVEL,
+            confidence_level=msgs.rust_f64(1.5),
+        ),
+    ):
         res.marginal_effects(confidence_level=1.5)
 
 
@@ -265,12 +283,33 @@ def test_marginal_effects_confidence_level_out_of_range_raises(
 
 
 def test_y_in_x_raises(censored_dataset):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
+            col="y",
+            single_role="y",
+            multi_role="x",
+        ),
+    ):
         Tobit(censored_dataset, y="y", x=["y", "x1"]).fit()
 
 
+def test_y_empty_string_raises(censored_dataset):
+    """`y`に空文字列を渡した場合`ValidationError`
+    （`test_ols_validation.py::test_y_empty_string_raises`参照）。
+    """
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="")
+    ):
+        Tobit(censored_dataset, y="", x=["x1", "x2"]).fit()
+
+
 def test_duplicate_x_column_raises(censored_dataset):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.DUPLICATE_WITHIN_ROLE, name="x1", role="x"),
+    ):
         Tobit(censored_dataset, y="y", x=["x1", "x1"]).fit()
 
 
@@ -278,7 +317,7 @@ def test_const_collision_with_include_intercept_raises():
     df = pl.DataFrame(
         {"y": [0.0, 1.0, 0.0, 1.0], "const": [1.0, 2.0, 3.0, 3.5]}
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match=escaped(msgs.CONST_COLLISION)):
         Tobit(df, y="y", x=["const"]).fit()
 
 
@@ -290,23 +329,29 @@ def test_sigma_collision_raises():
     df = pl.DataFrame(
         {"y": [0.0, 1.0, 0.0, 1.0], "sigma": [1.0, 2.0, 3.0, 3.5]}
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match=escaped(msgs.SIGMA_COLLISION)):
         Tobit(df, y="y", x=["sigma"]).fit()
 
 
 def test_empty_x_raises(censored_dataset):
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY)):
         Tobit(censored_dataset, y="y", x=[]).fit()
 
 
 def test_missing_column_raises(censored_dataset):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    ):
         Tobit(censored_dataset, y="y", x=["does_not_exist"]).fit()
 
 
 def test_null_values_raise():
     df = pl.DataFrame({"y": [0.0, None, 1.0], "x1": [1.0, 2.0, 3.0]})
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=1),
+    ):
         Tobit(df, y="y", x=["x1"]).fit()
 
 
@@ -314,7 +359,10 @@ def test_null_values_in_x_raise():
     """`x` 列に null が含まれる場合も `ValidationError`（`y` だけでなく `x` も
     欠損チェックの対象、テスト網羅性レビュー 観点5）。"""
     df = pl.DataFrame({"y": [0.0, 1.0, 2.0, 3.0], "x1": [1.0, None, 3.0, 4.0]})
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    ):
         Tobit(df, y="y", x=["x1"]).fit()
 
 
@@ -326,27 +374,47 @@ def test_non_finite_values_raise(bad):
     `column_extraction.rs` 内で別ロジックのため個別に確認する（OLS の
     `test_non_finite_values_raise` と同じ、テスト網羅性レビュー 観点5）。
     """
+    bad_repr = "NaN" if math.isnan(bad) else "inf"
     df_y = pl.DataFrame(
         {"y": [0.0, bad, 1.0, 2.0], "x1": [1.0, 2.0, 3.0, 4.0]}
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="y", value=bad_repr, row=1
+        ),
+    ):
         Tobit(df_y, y="y", x=["x1"]).fit()
 
     df_x = pl.DataFrame(
         {"y": [0.0, 1.0, 2.0, 3.0], "x1": [1.0, bad, 3.0, 4.0]}
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value=bad_repr, row=1
+        ),
+    ):
         Tobit(df_x, y="y", x=["x1"]).fit()
 
 
 def test_non_numeric_dtype_raises():
+    """文字列を数値キャストするとnullになるため`COLUMN_HAS_MISSING_VALUES`経路
+    になる（`test_ols_validation.py::test_non_numeric_dtype_raises`参照）。
+    """
     df = pl.DataFrame({"y": ["a", "b", "c"], "x1": [1.0, 2.0, 3.0]})
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=3),
+    ):
         Tobit(df, y="y", x=["x1"]).fit()
 
 
 def test_unknown_cov_type_raises(censored_dataset):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_COV_TYPE_NONLINEAR, other="bogus"),
+    ):
         Tobit(
             censored_dataset,
             y="y",
@@ -356,7 +424,10 @@ def test_unknown_cov_type_raises(censored_dataset):
 
 
 def test_unknown_method_raises(censored_dataset):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_METHOD_NONLINEAR, other="bogus"),
+    ):
         Tobit(
             censored_dataset,
             y="y",
@@ -368,13 +439,22 @@ def test_unknown_method_raises(censored_dataset):
 @pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])
 def test_invalid_confidence_level_raises(censored_dataset, confidence_level):
     options = TobitOptions(confidence_level=confidence_level)
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INVALID_CONFIDENCE_LEVEL,
+            confidence_level=msgs.rust_f64(confidence_level),
+        ),
+    ):
         Tobit(censored_dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
 @pytest.mark.parametrize("tol", [0.0, -1.0])
 def test_non_positive_tol_raises(censored_dataset, tol):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INVALID_TOL, tol=msgs.rust_f64(tol)),
+    ):
         Tobit(
             censored_dataset,
             y="y",
@@ -385,7 +465,10 @@ def test_non_positive_tol_raises(censored_dataset, tol):
 
 @pytest.mark.parametrize("max_iter", [0, -1])
 def test_non_positive_max_iter_raises(censored_dataset, max_iter):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INVALID_MAX_ITER, max_iter=max_iter),
+    ):
         Tobit(
             censored_dataset,
             y="y",
@@ -395,8 +478,17 @@ def test_non_positive_max_iter_raises(censored_dataset, max_iter):
 
 
 def test_insufficient_observations_raises(censored_dataset):
+    """観測数nが説明変数の数k（定数項込み）以下の場合`ValidationError`。
+
+    Tobitは`sigma`（誤差項の標準偏差）もMLEパラメータとして数えるため
+    `k=4`（const, x1, x2, sigma）。Logit/Probitの同名テスト（`k=3`）とは
+    ここが異なる（実測確認済み）。
+    """
     df = censored_dataset.head(2)
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INSUFFICIENT_OBSERVATIONS, n=2, k=4),
+    ):
         Tobit(df, y="y", x=["x1", "x2"]).fit()
 
 
@@ -404,7 +496,14 @@ def test_invalid_censoring_bounds_raises(censored_dataset):
     """`lower`/`upper`が両方`None`は`ValidationError`（engine側の
     `InvalidCensoringBounds`）。
     """
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INVALID_CENSORING_BOUNDS,
+            lower=msgs.rust_option_f64_debug(None),
+            upper=msgs.rust_option_f64_debug(None),
+        ),
+    ):
         Tobit(
             censored_dataset,
             y="y",
@@ -418,7 +517,16 @@ def test_y_out_of_censoring_bounds_raises():
     （engine側の`YOutOfCensoringBounds`）。
     """
     df = pl.DataFrame({"y": [-1.0, 0.0, 1.0, 2.0], "x1": [1.0, 2.0, 3.0, 4.0]})
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.Y_OUT_OF_CENSORING_BOUNDS,
+            row=0,
+            value=msgs.rust_f64(-1.0),
+            lower=msgs.rust_option_f64_debug(0.0),
+            upper=msgs.rust_option_f64_debug(None),
+        ),
+    ):
         Tobit(df, y="y", x=["x1"], options=TobitOptions(lower=0.0)).fit()
 
 
@@ -427,7 +535,14 @@ def test_no_uncensored_observations_raises():
     （engine側の`NoUncensoredObservations`、Issue #223）。
     """
     df = pl.DataFrame({"y": [0.0, 0.0, 0.0, 0.0], "x1": [1.0, 2.0, 3.0, 4.0]})
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NO_UNCENSORED_OBSERVATIONS,
+            lower=msgs.rust_option_f64_debug(0.0),
+            upper=msgs.rust_option_f64_debug(None),
+        ),
+    ):
         Tobit(df, y="y", x=["x1"]).fit()
 
 
@@ -772,7 +887,9 @@ def test_cluster_cov_type_requires_at_least_two_groups():
             "cluster": ["a", "a", "a", "a"],
         }
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
+    ):
         Tobit(
             df,
             y="y",
@@ -796,7 +913,10 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
         "cluster", [i % 2 for i in range(censored_dataset.height)]
     )
     df = censored_dataset.with_columns(cluster)
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=2),
+    ):
         Tobit(
             df,
             y="y",
@@ -821,13 +941,21 @@ def test_mroz_hours_cluster_cov_type_raises_validation_error():
 
     mroz = load_wooldridge_dataset("mroz")
     options = TobitOptions(cov_type="cluster", cluster_col="city", lower=0.0)
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=len(MROZ_X)
+        ),
+    ):
         Tobit(mroz, y="hours", x=MROZ_X, options=options).fit()
 
 
 def test_cluster_col_nonexistent_column_raises(censored_dataset):
     options = TobitOptions(cov_type="cluster", cluster_col="does_not_exist")
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    ):
         Tobit(censored_dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
@@ -838,5 +966,8 @@ def test_cluster_col_with_null_raises(censored_dataset):
     groups = [None] + [str(i % 5) for i in range(n - 1)]
     df = censored_dataset.with_columns(pl.Series("grp", groups, dtype=pl.Utf8))
     options = TobitOptions(cov_type="cluster", cluster_col="grp")
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name="grp"),
+    ):
         Tobit(df, y="y", x=["x1", "x2"], options=options).fit()

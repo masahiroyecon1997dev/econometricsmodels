@@ -27,6 +27,10 @@ def test_y_in_x_raises(binary_dataset):
     _checks.check_y_in_x_raises(binary_dataset, Probit)
 
 
+def test_y_empty_string_raises(binary_dataset):
+    _checks.check_y_empty_string_raises(binary_dataset, Probit)
+
+
 def test_duplicate_x_column_raises(binary_dataset):
     _checks.check_duplicate_x_column_raises(binary_dataset, Probit)
 

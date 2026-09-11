@@ -9,9 +9,11 @@ R クロスチェックは `test_ols_crosscheck.py`。
 
 from __future__ import annotations
 
+import _error_messages as msgs
 import polars as pl
 import pytest
 from _constants import DATA_DIR
+from _error_messages import escaped
 from _helpers import with_cluster_groups
 from _ols_helpers import our_fit
 from econometricsmodels import (
@@ -28,13 +30,30 @@ from benchmark.linear.fixtures.generate_ols_fixtures import COV_TYPES
 
 
 def test_missing_column_raises(dataset):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
+    ):
         OLS(dataset, y="y", x=["x1", "nonexistent"]).fit()
+
+
+def test_y_empty_string_raises(dataset):
+    """`y`に空文字列を渡した場合`ValidationError`（`x`側の`test_empty_x_raises`と
+    対称。空文字列は存在しない列名の一種のため、`test_missing_column_raises`と
+    同じ`column_extraction`の「列が存在しない」経路を通る）。
+    """
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="")
+    ):
+        OLS(dataset, y="", x=["x1", "x2"]).fit()
 
 
 def test_null_values_raise():
     df = pl.DataFrame({"y": [1.0, None, 3.0], "x1": [1.0, 2.0, 3.0]})
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=1),
+    ):
         OLS(df, y="y", x=["x1"]).fit()
 
 
@@ -47,31 +66,62 @@ def test_non_finite_values_raise():
     df_nan = pl.DataFrame(
         {"y": [1.0, float("nan"), 3.0], "x1": [1.0, 2.0, 3.0]}
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="y", value="NaN", row=1
+        ),
+    ):
         OLS(df_nan, y="y", x=["x1"]).fit()
 
     df_inf = pl.DataFrame(
         {"y": [1.0, float("inf"), 3.0], "x1": [1.0, 2.0, 3.0]}
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="y", value="inf", row=1
+        ),
+    ):
         OLS(df_inf, y="y", x=["x1"]).fit()
 
 
 def test_non_numeric_dtype_raises():
+    """数値にキャストできない文字列は`ValidationError`。
+
+    polarsの`cast(Float64)`は数値として解釈できない文字列を（キャスト自体の
+    エラーではなく）nullに変換するため、`COLUMN_NOT_CASTABLE_TO_NUMERIC`
+    ではなく後続の欠損値チェック（`COLUMN_HAS_MISSING_VALUES`）の経路を通る
+    （実測確認済み）。
+    """
     df = pl.DataFrame({"y": ["a", "b", "c"], "x1": [1.0, 2.0, 3.0]})
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=3),
+    ):
         OLS(df, y="y", x=["x1"]).fit()
 
 
 def test_y_in_x_raises(dataset):
     """`y`と同じ列名が`x`にも含まれる場合`ValidationError`。"""
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
+            col="y",
+            single_role="y",
+            multi_role="x",
+        ),
+    ):
         OLS(dataset, y="y", x=["y", "x1"]).fit()
 
 
 def test_duplicate_x_column_raises(dataset):
     """`x`に同じ列名が重複して含まれる場合`ValidationError`。"""
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.DUPLICATE_WITHIN_ROLE, name="x1", role="x"),
+    ):
         OLS(dataset, y="y", x=["x1", "x1"]).fit()
 
 
@@ -81,20 +131,23 @@ def test_const_collision_with_include_intercept_raises():
     自動追加される定数項と衝突し`ValidationError`になること。
     """
     df = pl.DataFrame({"y": [1.0, 2.0, 3.0], "const": [1.0, 2.0, 3.5]})
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match=escaped(msgs.CONST_COLLISION)):
         OLS(df, y="y", x=["const"]).fit()
 
 
 def test_empty_x_raises(dataset):
     """`x`が空リストの場合`ValidationError`。"""
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY)):
         OLS(dataset, y="y", x=[]).fit()
 
 
 def test_insufficient_observations_raises(dataset):
     """観測数nが説明変数の数k（定数項込み）以下の場合`ValidationError`。"""
     df = dataset.head(2)  # n=2、include_intercept=trueでk=3（const, x1, x2）
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INSUFFICIENT_OBSERVATIONS, n=2, k=3),
+    ):
         OLS(df, y="y", x=["x1", "x2"]).fit()
 
 
@@ -103,13 +156,18 @@ def test_insufficient_observations_raises(dataset):
 
 def test_invalid_cov_type_raises(dataset):
     options = OLSOptions(cov_type="invalid")
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_COV_TYPE_LINEAR, other="invalid"),
+    ):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
 def test_cluster_without_col_raises(dataset):
     options = OLSOptions(cov_type="cluster")
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.MISSING_CLUSTER_COLUMN)
+    ):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
@@ -119,7 +177,10 @@ def test_cluster_col_nonexistent_column_raises(dataset):
     `testing-completeness-reviewer`指摘、Issue #231フェーズ4）。
     """
     options = OLSOptions(cov_type="cluster", cluster_col="does_not_exist")
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    ):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
@@ -127,7 +188,9 @@ def test_insufficient_clusters_raises(dataset):
     """クラスターが1種類しかない場合`ValidationError`。"""
     df = dataset.with_columns(pl.lit(0).alias("single_cluster"))
     options = OLSOptions(cov_type="cluster", cluster_col="single_cluster")
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
+    ):
         OLS(df, y="y", x=["x1", "x2"], options=options).fit()
 
 
@@ -135,7 +198,13 @@ def test_insufficient_clusters_raises(dataset):
 def test_invalid_confidence_level_raises(dataset, confidence_level):
     """`confidence_level`が(0, 1)の範囲外（境界値0.0を含む）の場合`ValidationError`。"""
     options = OLSOptions(confidence_level=confidence_level)
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INVALID_CONFIDENCE_LEVEL,
+            confidence_level=msgs.rust_f64(confidence_level),
+        ),
+    ):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
@@ -145,7 +214,10 @@ def test_invalid_confidence_level_raises(dataset, confidence_level):
 def test_invalid_hac_lags_raises(dataset, hac_lags):
     """`hac_lags`が`[0, n)`の範囲外の場合`ValidationError`。"""
     options = OLSOptions(cov_type="hac", hac_lags=hac_lags)
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INVALID_HAC_LAGS, hac_lags=hac_lags, n=100),
+    ):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
@@ -156,15 +228,23 @@ def test_predict_missing_column_raises(dataset):
     res = our_fit(dataset)
     new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    ):
         res.predict(new_data)
 
 
 def test_predict_non_numeric_dtype_raises(dataset):
+    """`test_non_numeric_dtype_raises`と同じ理由でnull経由の
+    `COLUMN_HAS_MISSING_VALUES`になる。
+    """
     res = our_fit(dataset)
     new_data = pl.DataFrame({"x1": ["a", "b"], "x2": [1.0, 2.0]})
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=2),
+    ):
         res.predict(new_data)
 
 
@@ -172,11 +252,19 @@ def test_predict_null_or_non_finite_values_raise(dataset):
     res = our_fit(dataset)
 
     new_data_null = pl.DataFrame({"x1": [1.0, None], "x2": [1.0, 2.0]})
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    ):
         res.predict(new_data_null)
 
     new_data_inf = pl.DataFrame({"x1": [1.0, float("inf")], "x2": [1.0, 2.0]})
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="inf", row=1
+        ),
+    ):
         res.predict(new_data_inf)
 
 
@@ -195,7 +283,12 @@ def test_cluster_count_at_most_slopes_raises_validation_error(n_groups):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, n_groups)
     options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=n_groups, q=3
+        ),
+    ):
         OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
 

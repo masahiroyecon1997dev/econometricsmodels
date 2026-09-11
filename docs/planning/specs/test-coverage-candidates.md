@@ -545,7 +545,35 @@
   テストがある）と同じ考え方で、代表的な1〜2件に`match=`を追加すれば
   「Rust→Python境界でメッセージが壊れない」ことの確認としては十分と考える。
 - **気づいた経緯**: 2026-08-22、`tests/linear/test_ols.py`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
+- **状態**: **対応済み（2026-09-11）**。`y=""`テストと例外メッセージ内容の検証を
+  OLS/WLS/Logit/Probit/Tobit/IV全系統に横展開した。メッセージ文字列は
+  `tests/_error_messages.py`（新規、`_constants.py`/`_tolerances.py`と同じ並びの
+  共有ファイル）にRust側（`engine/src/error.rs`のCommonError・
+  `engine_pybind/src/column_extraction.rs`・`engine_pybind/src/validation.rs`・
+  各系統の`cov_type`/`method`文字列パース）のメッセージをテンプレート文字列として
+  集約し、`pytest.raises(ValidationError, match=escaped(TEMPLATE, ...))`
+  （`escaped()`は`str.format`後に`re.escape`するヘルパー）で各テストから参照する
+  形にした。系統間で文言が完全一致するメッセージ（CommonError・column_extraction
+  由来）はそのまま共有定数を使い回せるため、直書きの重複を避けられた。
+  実装過程で以下の事実確認上の発見があった（メッセージを実測するまで気づけな
+  かった類のもの）。
+  - `test_non_numeric_dtype_raises`系（全系統）: polarsの`cast(Float64)`は
+    数値として解釈できない文字列を「キャストエラー」ではなく**null**に変換する
+    ため、想定した`COLUMN_NOT_CASTABLE_TO_NUMERIC`ではなく
+    `COLUMN_HAS_MISSING_VALUES`経路を通ることが判明（該当分岐は現状どのテストも
+    踏んでいない）。
+  - IV系統: `IvError::FirstStageFailed`絡みで、Issue #289が
+    `TwoSlsEstimator::fit`/`GmmEstimator::fit`冒頭に追加した「構造方程式のqを
+    使ったG<=qの事前チェック」が、Python API（`engine_pybind::fit()`）からは
+    **実質到達不能**であることが判明（`engine_pybind::fit()`が弱操作変数診断用に
+    `compute_first_stage`を無条件で先に呼ぶため、第一段階回帰自身の同種チェック
+    ——識別条件上`q`が構造方程式以上になる——が常に先に`FirstStageFailed`として
+    発火する）。ドキュメント（`engine/src/iv/CLAUDE.md`）・既存テストの
+    docstringはこの事前チェックが直接発火する前提で書かれていたが、実際に
+    観測される例外は常にラップされた第一段階側のメッセージだった。ユーザー判断
+    により今回は記録のみ（項目65参照、修正は別Issueで検討）。
+  - Tobitの`test_insufficient_observations_raises`: `k`はLogit/Probitの`k=3`
+    ではなく`k=4`（`sigma`もMLEパラメータとして数えるため）。
 
 ### 27. `include_intercept=False`・`confidence_level`オプションの効果が、frozen JSON数値照合（fixturesパイプライン）で検証されていない
 
@@ -1619,3 +1647,61 @@
 - **状態**: 未対応（記録のみ、着手要否はユーザー判断待ち）。ラグ数を結果に
   含める案は別途**Issue #282**として発行済み（これが実現すれば、本項目の
   直接クロス言語検証テストも結果を介して書けるようになる）。
+
+### 65. IV: クラスター数`G<=q`の構造方程式向け事前チェック（Issue #289）が、Python APIからは実質到達不能
+
+- **対象**: [engine/src/iv/two_sls.rs:176-192](../../../engine/src/iv/two_sls.rs#L176-L192)
+  （`TwoSlsEstimator::fit`冒頭、`compute_first_stage`呼び出しより前に構造方程式の
+  `q`で`validate_cluster_count_covers_slopes`を呼ぶ設計。`gmm.rs`も同型）・
+  [engine_pybind/src/iv/common.rs:635-707](../../../engine_pybind/src/iv/common.rs#L635-L707)
+  （`fit`関数、`TwoSlsEstimator::fit`/`GmmEstimator::fit`を呼ぶより**前**に、弱操作
+  変数診断（`weak_instrument_f_statistics`）のため`compute_first_stage`を
+  `method`によらず無条件で呼んでいる）
+- **内容**: 項目26（`ValidationError`メッセージ内容の検証）の実装中に、
+  `test_iv_validation.py::test_cluster_count_at_most_slopes_raises_validation_error`
+  へ`match=`を追加する過程で発覚。`engine/src/iv/CLAUDE.md`・
+  `two_sls.rs`のdocコメント・当該テストのdocstringは、いずれも「クラスター数
+  `G`が構造方程式の傾き係数の数`q`以下の場合、`fit()`冒頭で構造方程式の`q`を
+  使った`CommonError::InsufficientClustersForInference`を**第一段階回帰の
+  `FirstStageFailed`ラップより前に**返す」という設計・実装意図を記載しており、
+  対応する`engine`側のRust単体テスト
+  （`fit_returns_validation_error_when_cluster_count_at_most_slopes`）もこの
+  前提で書かれ、実際に（`TwoSlsEstimator::fit`を直接呼べば）その通りに動く。
+  しかし**Python API（`IV(...).fit()`）経由では、この事前チェックに到達する前に
+  必ず`engine_pybind::fit()`が呼ぶ`compute_first_stage`（弱操作変数診断専用）が
+  先に失敗する**。第一段階回帰自身も内部で同型の`G<=q`チェックを持つが、
+  識別条件（`len(instruments) >= len(x_endog)`）上、第一段階の`q`
+  （`x_exog`+`instruments`の傾き数）は常に構造方程式の`q`
+  （`x_exog`+`x_endog`の傾き数）以上になるため、**構造方程式側の条件
+  `G<=q_structural`が成立する場面では、第一段階側の条件`G<=q_firststage`
+  （`q_firststage>=q_structural`）も必ず同時に成立し、先に発火する**
+  （`compute_first_stage`が`TwoSlsEstimator::fit`/`GmmEstimator::fit`より前に
+  呼ばれるため）。この2つのチェックはロジックとしては同値の状況を検出できて
+  いる（型は正しく`ValidationError`のまま）ため実害は限定的だが、以下の
+  ズレがある。
+  1. **メッセージの`g`・`q`が構造方程式のものと食い違う**（第一段階回帰の
+     `x_exog`/`instruments`基準の`q`になる。過剰識別の場合ほど構造方程式の
+     `q`より大きくなる）。
+  2. **`FirstStageFailed`にラップされる**ため、「構造方程式そのものが弾かれた」
+     という直接的なメッセージにならず、「診断計算（第一段階回帰）が失敗した」
+     という体裁になる。
+  3. 理論上、構造方程式は`G>q_structural`で安全なのに、過剰識別度が高く
+     第一段階の`q_firststage`が`G`を上回るケースでは、実際には安全な構造推定
+     まで拒否される可能性がある（今回の調査では逆方向——構造方程式側が
+     弾かれるはずの状況が必ず先に発火する側——のみ実測確認し、この逆方向
+     ケースは理論的な指摘に留まる。実測は別途要）。
+  4. `engine`側の`TwoSlsEstimator::fit`/`GmmEstimator::fit`冒頭の事前チェック
+     （Issue #289で追加）は、Python APIからは事実上デッドコード。
+- **Claudeの所感**: `engine_pybind::fit()`に、`InsufficientInstruments`
+  （識別の順序条件、`compute_first_stage`より前に既にチェック済み、
+  `engine_pybind/src/iv/common.rs:647-656`）と同じパターンで、構造方程式の`q`を
+  使った`G<=q`チェックを`compute_first_stage`呼び出しより前に複製すれば
+  解消できると考える（`engine`側の値をそのまま再利用できるかは要確認）。
+  スコープはOLS/WLS等より小さいが、`engine_pybind`側のロジック追加になるため
+  `refactor`スキルの範囲外。
+- **気づいた経緯**: 2026-09-11、項目26（`ValidationError`メッセージ内容の
+  検証追加）の実装中に、`test_cluster_count_at_most_slopes_raises_validation_error`
+  の期待メッセージが実測と食い違うことから発覚。
+- **状態**: 未対応（ユーザー判断により記録のみ、修正は別Issue・別セッションで
+  検討）。今回追加したテスト自体は実際の挙動（`FirstStageFailed`ラップ・
+  第一段階の`q`）に合わせて`match=`を設定済み（`tests/iv/test_iv_validation.py`）。

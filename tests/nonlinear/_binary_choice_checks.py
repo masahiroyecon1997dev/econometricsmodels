@@ -27,11 +27,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+import _error_messages as msgs
 import polars as pl
 import pytest
 from _assertions import assert_close, assert_dict_close, check_margeff
 from _assertions import rename_intercept as _rename
 from _constants import DATA_DIR, MROZ_X
+from _error_messages import escaped
 from _helpers import (
     load_wooldridge_dataset,
     separation_suspected_dataset,
@@ -352,12 +354,33 @@ def check_marginal_effects_at_is_case_insensitive(dataset, estimator_cls):
 
 
 def check_y_in_x_raises(dataset, estimator_cls):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
+            col="y",
+            single_role="y",
+            multi_role="x",
+        ),
+    ):
         estimator_cls(dataset, y="y", x=["y", "x1"]).fit()
 
 
+def check_y_empty_string_raises(dataset, estimator_cls):
+    """`y`に空文字列を渡した場合`ValidationError`（`x`側の`check_empty_x_raises`と
+    対称。`test_ols_validation.py::test_y_empty_string_raises`参照）。
+    """
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="")
+    ):
+        estimator_cls(dataset, y="", x=["x1", "x2"]).fit()
+
+
 def check_duplicate_x_column_raises(dataset, estimator_cls):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.DUPLICATE_WITHIN_ROLE, name="x1", role="x"),
+    ):
         estimator_cls(dataset, y="y", x=["x1", "x1"]).fit()
 
 
@@ -365,17 +388,20 @@ def check_const_collision_with_include_intercept_raises(estimator_cls):
     df = pl.DataFrame(
         {"y": [0.0, 1.0, 0.0, 1.0], "const": [1.0, 2.0, 3.0, 3.5]}
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match=escaped(msgs.CONST_COLLISION)):
         estimator_cls(df, y="y", x=["const"]).fit()
 
 
 def check_empty_x_raises(dataset, estimator_cls):
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY)):
         estimator_cls(dataset, y="y", x=[]).fit()
 
 
 def check_missing_column_raises(dataset, estimator_cls):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    ):
         estimator_cls(dataset, y="y", x=["does_not_exist"]).fit()
 
 
@@ -385,16 +411,24 @@ def check_null_values_raise(estimator_cls):
     Issue #231フェーズ4）。
     """
     df = pl.DataFrame({"y": [0.0, None, 1.0], "x1": [1.0, 2.0, 3.0]})
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=1),
+    ):
         estimator_cls(df, y="y", x=["x1"]).fit()
 
 
 def check_non_numeric_dtype_raises(estimator_cls):
     """数値/文字列型にキャストできない列は`ValidationError`（OLSの
-    `test_non_numeric_dtype_raises`と同型、Issue #231フェーズ4）。
+    `test_non_numeric_dtype_raises`と同型、Issue #231フェーズ4）。文字列を
+    数値キャストするとnullになるため`COLUMN_HAS_MISSING_VALUES`経路になる
+    （`test_ols_validation.py::test_non_numeric_dtype_raises`参照）。
     """
     df = pl.DataFrame({"y": ["a", "b", "c"], "x1": [1.0, 2.0, 3.0]})
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=3),
+    ):
         estimator_cls(df, y="y", x=["x1"]).fit()
 
 
@@ -403,13 +437,21 @@ def check_non_binary_y_raises(dataset, estimator_cls, bad_value):
     （engine側の`MleError::InvalidBinaryY`）。
     """
     df = dataset.with_columns(dataset["y"].scatter(0, bad_value))
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INVALID_BINARY_Y, row=0, value=msgs.rust_f64(bad_value)
+        ),
+    ):
         estimator_cls(df, y="y", x=["x1", "x2"]).fit()
 
 
 def check_insufficient_observations_raises(dataset, estimator_cls):
     df = dataset.head(2)
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INSUFFICIENT_OBSERVATIONS, n=2, k=3),
+    ):
         estimator_cls(df, y="y", x=["x1", "x2"]).fit()
 
 
@@ -417,7 +459,10 @@ def check_insufficient_observations_raises(dataset, estimator_cls):
 
 
 def check_unknown_cov_type_raises(dataset, estimator_cls, options_cls):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_COV_TYPE_NONLINEAR, other="bogus"),
+    ):
         estimator_cls(
             dataset,
             y="y",
@@ -427,7 +472,10 @@ def check_unknown_cov_type_raises(dataset, estimator_cls, options_cls):
 
 
 def check_unknown_method_raises(dataset, estimator_cls, options_cls):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_METHOD_NONLINEAR, other="bogus"),
+    ):
         estimator_cls(
             dataset,
             y="y",
@@ -449,7 +497,13 @@ def check_invalid_confidence_level_raises(
     `test_invalid_confidence_level_raises`との非対称、Issue #231フェーズ4）。
     """
     options = options_cls(confidence_level=confidence_level)
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INVALID_CONFIDENCE_LEVEL,
+            confidence_level=msgs.rust_f64(confidence_level),
+        ),
+    ):
         estimator_cls(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
@@ -457,7 +511,10 @@ def check_non_positive_tol_raises(dataset, estimator_cls, options_cls, tol):
     """`tol<=0`は勾配ノルム基準の収束条件が理論上満たされないため
     `ValidationError`（engine側の`MleError::InvalidTol`）。
     """
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INVALID_TOL, tol=msgs.rust_f64(tol)),
+    ):
         estimator_cls(
             dataset,
             y="y",
@@ -475,7 +532,10 @@ def check_non_positive_max_iter_raises(
     `max_iter`側のPython API境界のテストが無かった
     （`testing-completeness-reviewer`指摘、Issue #231フェーズ4）。
     """
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INVALID_MAX_ITER, max_iter=max_iter),
+    ):
         estimator_cls(
             dataset,
             y="y",
@@ -497,7 +557,9 @@ def check_cluster_cov_type_requires_at_least_two_groups(
             "cluster": ["a", "a", "a", "a"],
         }
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
+    ):
         estimator_cls(
             df,
             y="y",
@@ -521,7 +583,10 @@ def check_cluster_count_at_most_slopes_raises_validation_error(
     """
     df = with_cluster_groups(binary_dataset, 2)
     options = options_cls(cov_type="cluster", cluster_col="cluster_group")
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=2),
+    ):
         estimator_cls(df, y="y", x=["x1", "x2"], options=options).fit()
 
 
@@ -532,7 +597,10 @@ def check_cluster_col_nonexistent_column_raises(
     Issue #231フェーズ4）。
     """
     options = options_cls(cov_type="cluster", cluster_col="does_not_exist")
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    ):
         estimator_cls(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
@@ -541,7 +609,10 @@ def check_cluster_col_nonexistent_column_raises(
 
 def check_marginal_effects_unknown_at_raises(dataset, estimator_cls):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_MARGINAL_EFFECTS_AT, other="bogus"),
+    ):
         res.marginal_effects(at="bogus")
 
 
@@ -549,7 +620,13 @@ def check_marginal_effects_confidence_level_out_of_range_raises(
     dataset, estimator_cls
 ):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INVALID_CONFIDENCE_LEVEL,
+            confidence_level=msgs.rust_f64(1.5),
+        ),
+    ):
         res.marginal_effects(confidence_level=1.5)
 
 
@@ -810,7 +887,12 @@ def check_mroz_cluster_cov_type_raises_validation_error(
     """
     df = load_wooldridge_dataset("mroz")
     options = options_cls(cov_type="cluster", cluster_col="city")
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=len(MROZ_X)
+        ),
+    ):
         estimator_cls(df, y="inlf", x=MROZ_X, options=options).fit()
 
 

@@ -2,13 +2,21 @@
 
 このファイルは `engine_pybind/src/panel/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景は `docs/planning/specs/panel-api-design.md` が正本。ここは差分の索引のみ。
 
-## 実装フェーズの分割方針（IV・Logitと同じ2段階、`engine_pybind/src/iv/CLAUDE.md`参照）
+## 実装フェーズの分割方針（IV・Logitと同じ3段階、`engine_pybind/src/iv/CLAUDE.md`参照）
 
 FEはIVの`#159`（データ抽出・pyclass定義）→`#169`（engine呼び出し）→`#170`（`first_stage()`）と同じ3段階に分けた。
 
-1. **データ抽出・pyclass定義issue（FEでは#186）**: `FeOptions`/`FeResult`のpyclass定義、列抽出・バリデーション・`engine::panel::fe::FeInput`構築までを行う`build_fe_input`を`panel/fe.rs`に実装した。この時点では`#[pymodule]`への登録・実際の`FeEstimator::fit`呼び出しは行わない。
-2. **engine呼び出し・エラー変換issue（FEでは#187、未着手）**: `build_fe_input`を実際に呼び出す`fit`関数を追加し、`lib.rs`に`#[pyfunction] fit_fe`を新設して`#[pymodule]`に登録する。
+1. **データ抽出・pyclass定義issue（FEでは#186、完了）**: `FeOptions`/`FeResult`のpyclass定義、列抽出・バリデーション・`engine::panel::fe::FeInput`構築までを行う`build_fe_input`を`panel/fe.rs`に実装した。この時点では`#[pymodule]`への登録・実際の`FeEstimator::fit`呼び出しは行わなかった。
+2. **engine呼び出し・エラー変換issue（FEでは#187、完了）**: `build_fe_input`を実際に呼び出す`fit`関数（`panel/fe.rs`）を追加し、`lib.rs`に`#[pyfunction] fit_fe`を新設して`#[pymodule]`に登録した。`build_fe_input`/`parse_fe_cov_type`/`panel_error_to_pyerr`の`#[allow(dead_code)]`属性はこの時点で全て削除した（本番経路（`fit_fe`）から実際に呼ばれるようになったため、IVの#169と同じ）。`maturin develop --release`でビルドし、fixestリファレンスフィクスチャ（`engine::panel::fe`の`fixest_reference_input`と同じデータ）を使ってPythonから直接`_lib.fit_fe`を呼び出し、engine単体テストの期待値と完全一致することを確認済み（k=0・`cov_type="hc0"`拒否・`time_col`経由のHACも動作確認済み）。
 3. **`fixed_effects()`メソッドissue（FEでは#188、未着手）**: IVの`first_stage()`と同じ「追加結果は別メソッド」方針（`panel-api-design.md`6.6節）。`FeResult`に`FeEstimator`本体を保持する非公開フィールドを追加する見込み（`IvResult.first_stage`が#159ではなく#170で追加されたのと同じ段階分割）。
+
+## `fit`の実装（Issue #187）
+
+`iv::common::fit`と同じ構成: `build_fe_input`で`FeInput`/`FeEffects`/`FeCovType`/`cov_type`（小文字正規化済み文字列）を得たあと、`FeEstimator::fit`を呼び、`FeResult`を組み立てて返す。
+
+- **`n_entities`はengine側にgetterが無い**ため（`FeEstimator`内部のprivateな`count_unique`を使うのみ、`FeResult`のスコープ節参照）、`FeInput::entity()`（`build_fe_input`が返す`input`から取得可能。`FeEstimator::fit`に`input`を所有権ごと渡す前に計算する必要がある）を`HashSet`に集めてユニーク数を数える形で`fit`内で独立に計算する。
+- **`FeEstimator::estimator()`（内部委譲した`OlsEstimator`）と`FeEstimator`自身のgetterを使い分ける**: `params`/`param_names`/`residuals`/`dep_var_name`/`n_obs`/`log_likelihood`は`estimator()`（`OlsEstimator::input()`経由で`param_names`/`dep_var_name`/`nobs`を取得）から、`std_errors`/`t_stats`/`p_values`/`conf_lower`/`conf_upper`/`df_model`/`df_resid`/`f_statistic`/`f_p_value`/`aic`/`bic`/`r_squared_*`は`FeEstimator`自身から取得する。後者はFEが`cov_type`・パネル自由度調整を反映して計算し直した値のため（`estimator()`側は常に`CovType::Classical`で委譲した内部OLSの生の値、`engine/src/panel/fe.rs`モジュールdoc「`OlsEstimator`への委譲」参照）、取り違えるとcov_type非対応の値を返してしまう。
+- **`fit`自体は`#[cfg(test)] mod tests`から直接呼べない**（`PyDataFrame`引数がGILを要求するため、`engine_pybind/src/nonlinear/CLAUDE.md`「テストの制約」に記録済みの既知の制約と同じ）。検証は`maturin develop`後のPythonからの数値照合で行った（IVの`iv/common.rs::fit`も同様、専用のRustユニットテストは追加していない）。
 
 `FeOptions`/`FeResult`/`build_fe_input`は`panel/fe.rs`に置く（`panel/common.rs`はFE/RE間で共有するエラー変換専用、`panel/mod.rs`のコメント参照）。
 

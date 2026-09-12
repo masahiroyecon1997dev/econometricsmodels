@@ -1,7 +1,7 @@
 //! FEの推定オプション・結果、およびPython（polars DataFrame + 列名 + オプション）から
 //! `engine::panel::fe`（within変換・パネル自由度調整・`cov_type`対応・パネル固有R²）を
-//! 呼び出す準備（列抽出・バリデーション・`FeInput`構築）を行うところまでの一連の処理
-//! （Issue #186）。
+//! 呼び出すところまでの一連の処理（Issue #186でデータ抽出・pyclass定義、Issue #187で
+//! `FeEstimator::fit`への実際の配線・`#[pymodule]`登録）。
 //!
 //! 【責務分離】`.claude/rules/rust-style.md`「Python境界でのデータ受け渡し」参照。
 //! polars DataFrameから列ごとの`Vec<f64>`/`Vec<String>`への抽出はここ（`column_extraction`
@@ -12,16 +12,17 @@
 //! 公開API（`FeOptions`/`FeResult`）のdocコメントと、`ValidationError`のメッセージ文字列は
 //! 英語。それ以外（このファイルの説明・非公開関数のdocコメント等）は日本語のまま。
 //!
-//! ## 実装フェーズの分割方針（IV・Logitと同じ2段階、`engine_pybind/src/iv/CLAUDE.md`参照）
+//! ## 実装フェーズの分割方針（IV・Logitと同じ3段階、`engine_pybind/src/iv/CLAUDE.md`参照）
 //!
-//! 1. **本Issue（#186）**: `FeOptions`/`FeResult`のpyclass定義、列抽出・バリデーション・
-//!    `engine::panel::fe::FeInput`構築までを行う`build_fe_input`を実装する。この時点では
-//!    `#[pymodule]`への登録・実際の`FeEstimator::fit`呼び出しは行わない
-//!    （`build_fe_input`は`#[cfg(test)] mod tests`からのみ呼ばれるため`#[allow(dead_code)]`
-//!    が必要、`engine_pybind/src/iv/CLAUDE.md`「踏んだ罠」参照）。
-//! 2. **後続issue（#187）**: `build_fe_input`を実際に呼び出す`fit`関数を追加し、`lib.rs`に
-//!    `#[pyfunction] fit_fe`を新設して`#[pymodule]`に登録する。
-//! 3. **さらに後続issue（#188）**: `fixed_effects()`メソッド（IVの`first_stage()`と同じ
+//! 1. **データ抽出・pyclass定義issue（#186、完了）**: `FeOptions`/`FeResult`のpyclass定義、
+//!    列抽出・バリデーション・`engine::panel::fe::FeInput`構築までを行う`build_fe_input`を
+//!    実装した。
+//! 2. **本Issue（#187）**: `build_fe_input`を実際に呼び出す`fit`関数を追加し、`lib.rs`に
+//!    `#[pyfunction] fit_fe`を新設して`#[pymodule]`に登録する。`build_fe_input`/
+//!    `parse_fe_cov_type`/`panel_error_to_pyerr`はこの時点で本番経路（`fit_fe`）から
+//!    実際に呼ばれるようになるため、`#[allow(dead_code)]`はすべて削除する
+//!    （`engine_pybind/src/iv/CLAUDE.md`「実装フェーズの分割方針」の#169と同じ）。
+//! 3. **後続issue（#188）**: `fixed_effects()`メソッド（IVの`first_stage()`と同じ
 //!    「追加結果は別メソッド」方針、`panel-api-design.md`6.6節）を追加する。本Issueの
 //!    `FeResult`にはまだこのためのフィールド（`FeEstimator`本体等）を持たせない
 //!    （IVの`IvResult.first_stage`フィールドが#159ではなく#170で追加されたのと同じ
@@ -47,13 +48,17 @@
 //! parse_cov_type`を流用せず独立実装する（`iv::common::parse_iv_cov_type`と同じ
 //! 「無理に共通化しない」方針）。
 
-use engine::panel::fe::{FeCovType, FeEffects, FeInput};
+use std::collections::HashSet;
+
+use engine::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
+use pyo3_polars::PyDataFrame;
 
 use super::common::panel_error_to_pyerr;
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
 use crate::errors::ValidationError;
+use crate::linear::common::mat_to_vec;
 use crate::validation::{
     RoleValue, validate_no_duplicate_roles, validate_no_duplicate_within_role,
 };
@@ -225,10 +230,6 @@ pub struct FeResult {
 /// `cov_type`の文字列が既知の値のいずれでもない場合は`ValidationError`（`hc0`は非対応の
 /// 専用メッセージ、それ以外の未知の値は一般的な「unknown cov_type」メッセージ）。それ以外
 /// （列の抽出時に発覚する問題等）は`column_extraction`の責務で`ValidationError`。
-#[allow(
-    dead_code,
-    reason = "接続issue（#187、fit_feのpymodule登録）まで未使用"
-)]
 fn parse_fe_cov_type(df: &DataFrame, options: &FeOptions) -> PyResult<(FeCovType, String)> {
     let cov_type_lower = options.cov_type.to_lowercase();
 
@@ -279,7 +280,7 @@ fn parse_fe_cov_type(df: &DataFrame, options: &FeOptions) -> PyResult<(FeCovType
 
 /// Pythonから渡された `data` / `y` / `x` / `entity` / `options` を検証し、
 /// `engine::panel::fe::FeInput::from_columns`を呼び出すところまでを行う。
-/// `FeEstimator::fit`の呼び出し・`FeResult`の構築は後続issue（#187）の`fit`が行う。
+/// `FeEstimator::fit`の呼び出し・`FeResult`の構築は`fit`（本ファイル）が行う。
 ///
 /// `FeOptions.time`の有無で1-way/2-wayを切り替える（`options.time`が`Some`なら
 /// `FeEffects::TwoWay`、`None`なら`FeEffects::OneWay`。モジュールdoc参照）。
@@ -294,10 +295,6 @@ fn parse_fe_cov_type(df: &DataFrame, options: &FeOptions) -> PyResult<(FeCovType
 /// - `cov_type`の文字列が不正な場合は`ValidationError`（`parse_fe_cov_type`参照）
 /// - それ以外（`y`/`entity`/`time`間の行数不一致等）は`engine::panel::common::PanelError`
 ///   から`panel_error_to_pyerr`で変換
-#[allow(
-    dead_code,
-    reason = "接続issue（#187、fit_feのpymodule登録）まで未使用"
-)]
 pub(crate) fn build_fe_input(
     df: &DataFrame,
     y: String,
@@ -355,6 +352,69 @@ pub(crate) fn build_fe_input(
     .map_err(panel_error_to_pyerr)?;
 
     Ok((input, effects, cov_type, cov_type_lower))
+}
+
+/// Pythonから渡された `data` / `y` / `x` / `entity` / `options` を検証し、
+/// `build_fe_input`で構築した`FeInput`に対して`engine::panel::fe::FeEstimator::fit`を
+/// 呼び出し、`FeResult`として返す。
+///
+/// `n_entities`はengine側に対応するpublicなgetterが無いため（`FeEstimator`内部の
+/// privateな`count_unique`を使うのみ）、`FeInput::entity()`（`build_fe_input`が返す
+/// `input`から取得可能）から独立に計算する（`engine_pybind/src/panel/CLAUDE.md`
+/// 「`FeResult`のスコープ」参照）。
+///
+/// `params`/`param_names`/`residuals`/`dep_var_name`/`n_obs`/`log_likelihood`は
+/// `FeEstimator::estimator()`（内部で委譲した`OlsEstimator`）から取得する
+/// （`std_errors`/`t_stats`/`p_values`/`conf_lower`/`conf_upper`はFE自身が`cov_type`・
+/// 自由度調整を反映して計算し直した値のため、`FeEstimator`自身のgetterを使う——
+/// `engine/src/panel/fe.rs`モジュールdoc「`OlsEstimator`への委譲」参照）。
+///
+/// # Errors
+/// - `build_fe_input`が返すエラー（列抽出・y/x/entity/timeの重複・`cov_type`文字列の
+///   検証等）は`ValidationError`
+/// - `FeEstimator::fit`が返す`engine::panel::common::PanelError`（singleton検出・
+///   自由度不足・分散ゼロ・委譲先`OlsEstimator::fit`の失敗・FE自身のF検定の失敗等）は
+///   `panel_error_to_pyerr`で変換
+pub(crate) fn fit(
+    data: PyDataFrame,
+    y: String,
+    x: Vec<String>,
+    entity: String,
+    options: &FeOptions,
+) -> PyResult<FeResult> {
+    let df: DataFrame = data.into();
+    let (input, effects, cov_type, cov_type_lower) = build_fe_input(&df, y, x, entity, options)?;
+
+    let n_entities = input.entity().iter().collect::<HashSet<_>>().len();
+
+    let estimator = FeEstimator::fit(input, effects, cov_type, options.confidence_level)
+        .map_err(panel_error_to_pyerr)?;
+    let ols = estimator.estimator();
+
+    Ok(FeResult {
+        params: mat_to_vec(ols.params()),
+        std_errors: mat_to_vec(estimator.std_errors()),
+        t_stats: mat_to_vec(estimator.t_stats()),
+        p_values: mat_to_vec(estimator.p_values()),
+        conf_lower: mat_to_vec(estimator.conf_lower()),
+        conf_upper: mat_to_vec(estimator.conf_upper()),
+        param_names: ols.input().param_names().to_vec(),
+        residuals: mat_to_vec(ols.residuals()),
+        dep_var_name: ols.input().dep_var_name().to_string(),
+        n_obs: ols.input().nobs(),
+        df_resid: estimator.df_resid(),
+        df_model: estimator.df_model(),
+        n_entities,
+        cov_type: cov_type_lower,
+        f_statistic: estimator.f_statistic(),
+        f_p_value: estimator.f_p_value(),
+        log_likelihood: ols.log_likelihood(),
+        aic: estimator.aic(),
+        bic: estimator.bic(),
+        r_squared_within: estimator.r_squared_within(),
+        r_squared_between: estimator.r_squared_between(),
+        r_squared_overall: estimator.r_squared_overall(),
+    })
 }
 
 #[cfg(test)]

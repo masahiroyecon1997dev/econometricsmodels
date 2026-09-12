@@ -31,18 +31,15 @@ use crate::linear::common::least_squares_error_is_computation_error;
 ///   `PanelError`自身の`to_string()`（「within変換後の推定で失敗した」という文脈を含む）を
 ///   使うため、`least_squares_error_to_pyerr`自体は呼ばない。
 ///
-/// Issue #172時点ではFE/REの`fit()`本体が未実装のため、この関数は`#[cfg(test)] mod tests`
-/// からしか呼び出されない。当初は`#[expect(dead_code, ...)]`（`cargo build`では未到達で
+/// Issue #172時点ではFE/REの`fit()`本体が未実装で、この関数は`#[cfg(test)] mod tests`
+/// からしか呼び出されなかった。当初は`#[expect(dead_code, ...)]`（`cargo build`では未到達で
 /// 発火するが`cargo test`/`clippy --all-targets`ではテストから到達可能になり発火しない、
 /// という非対称性を前提にした属性）を使っていたが、Issue #186で`panel::fe::build_fe_input`
 /// （同じく`#[cfg(test)] mod tests`からのみ呼ばれる）がこの関数を呼ぶようになったことで
-/// `unfulfilled_lint_expectations`（`-D warnings`下でエラー）が発火した。これは
-/// `engine_pybind/src/iv/CLAUDE.md`「踏んだ罠」に記録済みの罠そのもの——「テストからも
-/// 含めてどこからも一切呼ばれていない」関数にのみ`#[expect]`が適格で、テストから実際に
-/// 呼ばれる「本番未接続」関数（`build_iv_input`等と同じ）には`#[allow(dead_code)]`
-/// （無条件抑制）を使う。`fit_fe`が`#[pymodule]`に登録される接続issue（#187）で
-/// 実際に呼び出されるようになったら、この属性ごと削除すること。
-#[allow(dead_code)]
+/// `unfulfilled_lint_expectations`（`-D warnings`下でエラー）が発火し、`#[allow(dead_code)]`
+/// （無条件抑制）に変更した経緯がある（`engine_pybind/src/iv/CLAUDE.md`「踏んだ罠」に
+/// 記録済みの罠そのもの）。Issue #187で`panel::fe::fit`（`fit_fe`が`#[pymodule]`経由で
+/// 呼ぶ本番経路）がこの関数を呼ぶようになったため、`#[allow(dead_code)]`は不要になった。
 pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
     let message = err.to_string();
     match err {

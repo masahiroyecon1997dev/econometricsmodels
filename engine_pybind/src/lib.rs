@@ -19,6 +19,7 @@ use nonlinear::probit::{ProbitOptions, ProbitResult};
 use nonlinear::tobit::{
     CensoringFitCategoryResult, CensoringFitCheckResult, TobitOptions, TobitResult,
 };
+use panel::fe::{FeOptions, FeResult};
 
 /// Entry point for OLS estimation.
 ///
@@ -167,6 +168,33 @@ fn fit_iv(
     iv::common::fit(data, y, x_exog, x_endog, instruments, &options)
 }
 
+/// Entry point for FE (fixed effects panel regression) estimation.
+///
+/// Parameters
+/// ----------
+/// data : polars.DataFrame
+///     The input data. Must contain the `y`, `x`, `entity`, and (if specified)
+///     time/cluster/HAC time columns.
+/// y : str
+///     Column name of the dependent variable.
+/// x : list[str]
+///     Column names of the independent variables. May be empty (a fixed-effects-only
+///     model).
+/// entity : str
+///     Column name of the entity (individual/panel unit) identifier.
+/// options : FeOptions
+///     Estimation options.
+#[pyfunction]
+fn fit_fe(
+    data: PyDataFrame,
+    y: String,
+    x: Vec<String>,
+    entity: String,
+    options: FeOptions,
+) -> PyResult<FeResult> {
+    panel::fe::fit(data, y, x, entity, &options)
+}
+
 #[pymodule]
 fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // `import econometricsmodels` の時点で faer のグローバル並列度を Par::Seq に
@@ -196,6 +224,9 @@ fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fit_iv, m)?)?;
     m.add_class::<IvOptions>()?;
     m.add_class::<IvResult>()?;
+    m.add_function(wrap_pyfunction!(fit_fe, m)?)?;
+    m.add_class::<FeOptions>()?;
+    m.add_class::<FeResult>()?;
     m.add("ValidationError", m.py().get_type::<ValidationError>())?;
     m.add("ComputationError", m.py().get_type::<ComputationError>())?;
     Ok(())

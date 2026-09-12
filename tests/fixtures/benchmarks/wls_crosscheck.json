@@ -462,6 +462,67 @@
           "r_squared": 0.119922789319636,
           "r_squared_adj": 0.118155566005017
         }
+      },
+      "weight_in_x": {
+        "r": {
+          "coef": {
+            "const": 1.52927111745985,
+            "x1": -0.341584349004816,
+            "x2": 2.09155231724827,
+            "x3": 1.1708478236371,
+            "weight": -0.0412300342563758
+          },
+          "se": {
+            "const": 0.176302587492956,
+            "x1": 0.046183465476731,
+            "x2": 0.0467178757715494,
+            "x3": 0.0431526043832981,
+            "weight": 0.158775658657115
+          },
+          "t_stats": {
+            "const": 8.67412747144708,
+            "x1": -7.39624767173263,
+            "x2": 44.769850570175,
+            "x3": 27.1327267582086,
+            "weight": -0.25967478015893
+          },
+          "p_values": {
+            "const": 6.01270845504654e-17,
+            "x1": 6.03510807669751e-13,
+            "x2": 3.5905860836718e-176,
+            "x3": 5.31225529352108e-100,
+            "weight": 0.79522261380775
+          },
+          "conf_int": {
+            "const": [
+              1.18287743664722,
+              1.87566479827247
+            ],
+            "x1": [
+              -0.432324143733052,
+              -0.25084455427658
+            ],
+            "x2": [
+              1.99976253027818,
+              2.18334210421835
+            ],
+            "x3": [
+              1.08606296777344,
+              1.25563267950077
+            ],
+            "weight": [
+              -0.353187366294313,
+              0.270727297781561
+            ]
+          },
+          "aic": 1441.68251944547,
+          "bic": 1462.75555993758,
+          "log_likelihood": -715.841259722735,
+          "f_statistic": 771.310927424169,
+          "f_p_value": 0,
+          "r_squared": 0.86174125558566,
+          "r_squared_adj": 0.860624013206555
+        }
       }
     },
     "small_n": {
@@ -3500,9 +3561,9 @@
   "_meta": {
     "method": "wls",
     "purpose": "statsmodels主リファレンス（wls.json）とは独立した実装（R: lm(weights=) + sandwich/lmtest）によるクロスチェック用。係数・標準誤差・t値・p値・信頼区間・R²・調整済みR²・AIC・BIC・対数尤度・F統計量・F検定p値を含む（信頼区間はconfidence_level=0.95固定で計算）。classical/HC0-3/clusterは厳密比較、HACのみ緩い許容誤差での比較を想定する（testing-policy.md参照）",
-    "generated_at": "2026-08-14T23:15:48.579228+00:00",
+    "generated_at": "2026-09-12T00:23:51.768798+00:00",
     "r_version": "4.5.3",
-    "statsmodels_version": "0.14.6",
-    "note": "perfect_multicollinearity・scale_varianceシナリオはここに含まない（いずれもComputationErrorの発生確認のみ、テストコード側で対応。scale_varianceはOLSと同じ理由でロバストWald検定の共分散部分行列が全cov_typeで数値的にほぼ特異になる、WLSでも実測確認済み）。HACはR側のみ（explicit lagを本実装の自動ラグ式に合わせて指定）。clusterはbaselineシナリオのみ、疑似グループ（行番号%10）に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2（cluster_g2）をR側のみ確認（OLSの同種ケース相当）。high_condition_number/baseline_df1は境界値・悪条件ケース（OLSの同種ケース相当）。パラメータ名は全ソースで切片を'const'に正規化済み。重みは合成データセットの'weight'列。401ksubsはinv_inc（1/inc）。401ksubsはclassical/HC0-3（HACは時系列順が無いため対象外）に加え、ageの分位ビン（8分位、generate_wls_fixtures._add_age_bin）を疑似的なクラスター列としたクラスターロバストSEも含む。pyfixestとの比較は正確性検証から除外（性能比較専用）。"
+    "statsmodels_version": "0.15.0",
+    "note": "perfect_multicollinearity・scale_varianceシナリオはここに含まない（いずれもComputationErrorの発生確認のみ、テストコード側で対応。scale_varianceはOLSと同じ理由でロバストWald検定の共分散部分行列が全cov_typeで数値的にほぼ特異になる、WLSでも実測確認済み）。HACはR側のみ（explicit lagを本実装の自動ラグ式に合わせて指定）。clusterはbaselineシナリオのみ、疑似グループ（行番号%10）に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2（cluster_g2）をR側のみ確認（OLSの同種ケース相当）。high_condition_number/baseline_df1は境界値・悪条件ケース（OLSの同種ケース相当）。baseline.weight_in_xは、weightと同じ列をxにも含める成功パス（Issue #277）。classicalのみ（cov_type間の挙動差の検証が目的ではないため）。パラメータ名は全ソースで切片を'const'に正規化済み。重みは合成データセットの'weight'列。401ksubsはinv_inc（1/inc）。401ksubsはclassical/HC0-3（HACは時系列順が無いため対象外）に加え、ageの分位ビン（8分位、generate_wls_fixtures._add_age_bin）を疑似的なクラスター列としたクラスターロバストSEも含む。pyfixestとの比較は正確性検証から除外（性能比較専用）。"
   }
 }

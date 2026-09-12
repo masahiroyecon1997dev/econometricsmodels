@@ -51,19 +51,19 @@ def test_weight_equals_y_raises(dataset):
         WLS(dataset, y="y", x=["x1", "x2"], weight="y").fit()
 
 
-def test_weight_in_x_raises(dataset):
-    """`weight`が`x`にも含まれる場合`ValidationError`。"""
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
-            col="weight",
-            single_role="weight",
-            multi_role="x",
-        ),
-    ):
-        WLS(df, y="y", x=["x1", "x2", "weight"], weight="weight").fit()
+def test_weight_in_x_succeeds(dataset):
+    """`weight`と同じ列を`x`にも含めても成功する（Issue #277で許容に変更）。
+
+    重みに使った列を説明変数としても含める実務上の利用例（例: 人口規模で
+    重み付けしつつ人口規模自体を説明変数として含める）を許容するための緩和。
+    定数の重みだと`include_intercept=True`の既定の切片列と衝突し完全な
+    多重共線性になるため、分散のある列を重みに使う。数値の妥当性は
+    `test_wls_reference.py::test_weight_in_x_matches_statsmodels`で確認し、
+    ここでは`ValidationError`にならないことのみを確認する。
+    """
+    df = dataset.with_columns((pl.col("x1").abs() + 1.0).alias("weight"))
+    res = WLS(df, y="y", x=["x1", "x2", "weight"], weight="weight").fit()
+    assert "weight" in res.param_names
 
 
 @pytest.mark.parametrize("bad_weight", [0.0, -1.0])

@@ -169,6 +169,28 @@ def test_cluster_g2_matches_statsmodels(fixtures):
     _assert_dict_close(res.std_errors, ref["se"], "cluster_g2/se")
 
 
+def test_weight_in_x_matches_statsmodels(fixtures):
+    """`weight`と同じ列を`x`にも含める成功パス（Issue #277）。
+
+    列名の重複が許容されることの数値的な確認が目的で、cov_type間の
+    挙動差を検証する趣旨ではないためclassicalのみ
+    （`generate_wls_fixtures.py`と同じ方針）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    options = OLSOptions(cov_type="classical")
+    res = WLS(
+        df,
+        y="y",
+        x=["x1", "x2", "x3", "weight"],
+        weight="weight",
+        options=options,
+    ).fit()
+
+    _check_result(
+        res, fixtures["baseline"]["weight_in_x"], "baseline/weight_in_x"
+    )
+
+
 @pytest.mark.parametrize("cov_type", WOOLDRIDGE_COV_TYPES)
 def test_401ksubs_matches_statsmodels(fixtures, cov_type):
     """実データ（401ksubs、fsize==1）でのWLSベンチマーク。

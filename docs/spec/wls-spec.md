@@ -24,8 +24,11 @@ WLS（Weighted Least Squares）の確定済み仕様。`engine/src/linear/wls.rs
   「API引数」）。NaN/Infは既存の`column_extraction::extract_f64_column`が`weight`列にも適用される
   ことで検出されるため、追加実装が必要なのは0以下の値の検証のみ。ゼロ重みの許容（観測除外の手段
   としての活用）は将来の別issue。
-- `weight`は`y`/`x`と重複してはならない（`weight == y`、`x.contains(weight)`はエラー）。
-  `include_intercept=True`時の`"const"`列衝突チェック等、OLSの検証はそのまま踏襲する。
+- `weight`は`y`と重複してはならない（`weight == y`はエラー）。`y`を独立変数としても使うのと
+  同型の致命的な問題のため。一方`x.contains(weight)`は許容する（重みに使った列を説明変数
+  としても含める実務上の利用例があるため、例: 人口規模で重み付けしつつ人口規模自体を
+  説明変数として含める。Issue #277）。`include_intercept=True`時の`"const"`列衝突チェック等、
+  OLSの検証はそのまま踏襲する。
 
 ## 2. 結果構造体
 

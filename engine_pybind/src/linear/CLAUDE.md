@@ -16,7 +16,8 @@
 
 `engine`は列名を知らないため検知できず、`engine_pybind`側で`ValidationError`として弾く項目（OLS/WLS/Logit共通）:
 
-- `y`と`x`に同じ列名が含まれる場合（WLSは`weight`も）／`x`内の重複列名
+- `y`と`x`に同じ列名が含まれる場合（WLSは`weight`と`y`の重複も。`weight`と`x`の重複は
+  Issue #277により許容、`docs/spec/wls-spec.md`「API引数」参照）／`x`内の重複列名
 - `include_intercept=true`のとき`x`に`"const"`という列名がある場合（自動追加する定数項名と衝突）
 - `x`が空リストの場合
 

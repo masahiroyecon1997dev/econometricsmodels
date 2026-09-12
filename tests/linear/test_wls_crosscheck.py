@@ -197,6 +197,29 @@ def test_cluster_g2_matches_r(crosscheck):
     _assert_fit_stats_close(res, ref, "cluster_g2/R", rtol=RTOL_STRICT)
 
 
+def test_weight_in_x_matches_r(crosscheck):
+    """`weight`と同じ列を`x`にも含める成功パス（Issue #277）。
+
+    列名の重複が許容されることの数値的な確認が目的で、cov_type間の
+    挙動差を検証する趣旨ではないためclassicalのみ
+    （`generate_wls_crosscheck_fixtures.py`と同じ方針）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    options = OLSOptions(cov_type="classical")
+    res = WLS(
+        df,
+        y="y",
+        x=["x1", "x2", "x3", "weight"],
+        weight="weight",
+        options=options,
+    ).fit()
+
+    ref = crosscheck["synthetic"]["baseline"]["weight_in_x"]["r"]
+    _assert_close(res.params, ref["coef"], "weight_in_x/R coef")
+    _assert_close(res.std_errors, ref["se"], "weight_in_x/R se")
+    _assert_fit_stats_close(res, ref, "weight_in_x/R", rtol=RTOL_STRICT)
+
+
 def test_hac_matches_r(crosscheck):
     """HAC標準誤差。フィクスチャ生成時に本実装の自動ラグ式で計算した
     ラグ（`hac_lag`）をそのまま使い、ラグ選択方式自体の違いを比較対象から

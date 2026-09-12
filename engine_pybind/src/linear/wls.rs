@@ -60,7 +60,8 @@ pub struct WLSResult {
 /// # Errors
 /// - 列の抽出時に発覚する問題（列が存在しない、数値/文字列型にキャストできない、
 ///   欠損値・NaN・無限大を含む等）は`column_extraction`の責務で`ValidationError`
-/// - `y`・`x`・`weight`の重複、`include_intercept=true`のときの`"const"`列との衝突は
+/// - `y`と`x`の重複、`weight`と`y`の重複（`weight`と`x`の重複はIssue #277により許容、
+///   下記コメント参照）、`include_intercept=true`のときの`"const"`列との衝突は
 ///   ここ（受け口）の責務で`ValidationError`（OLSの`fit`と同じパターン）
 /// - `cov_type`の文字列が不正な場合は`ValidationError`
 /// - それ以外（観測数不足・信頼水準の範囲外・特異行列・クラスター数不足・
@@ -76,12 +77,14 @@ pub fn fit(
     let df: DataFrame = data.into();
 
     // 誤って同じ列を複数の役割に指定するミスを、分かりやすいエラーで早期に防ぐ
-    // （`docs/spec/wls-spec.md`「API引数」参照）。
+    // （`docs/spec/wls-spec.md`「API引数」参照）。`weight`と`x`の重複は禁止しない
+    // （Issue #277: 重みに使った列を説明変数としても含める実務上の利用例があるため。
+    // `weight == y`は`y`を独立変数としても使うのと同型の致命的な問題のため引き続き禁止）。
     validate_x_non_empty(&x)?;
+    validate_no_duplicate_roles(&[("y", RoleValue::Single(&y)), ("x", RoleValue::Multi(&x))])?;
     validate_no_duplicate_roles(&[
         ("y", RoleValue::Single(&y)),
         ("weight", RoleValue::Single(&weight)),
-        ("x", RoleValue::Multi(&x)),
     ])?;
     validate_no_duplicate_within_role("x", &x)?;
     validate_no_const_collision(&x, options.include_intercept)?;

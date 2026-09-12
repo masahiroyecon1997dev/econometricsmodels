@@ -930,18 +930,29 @@ pub struct SolverOutput {
 /// 判定を取り消す、[`MleError::SeparationSuspected`]参照）を有効にするか。Logit/Probitは
 /// `Enabled`、Tobitは`Disabled`（理由は[`SeparationNormCheck`]のdocコメント参照、Issue #288）。
 ///
+/// **`tol`の意味論はmethodにより異なる（Issue #285）**: `Newton`は総和勾配に対する
+/// 絶対閾値`‖∇ℓ(θ)‖ < tol`のまま（2次収束のため`n`依存性の影響をほとんど受けない、
+/// `docs/spec/logit-spec.md`3.2節参照）。`Bfgs`/`Lbfgs`は`n_obs`（観測数）で正規化した
+/// 「観測あたり平均勾配」基準`‖∇ℓ(θ)‖ / n_obs < tol`を使う（実装上は`tol * n_obs`を
+/// 実効的な絶対閾値としてソルバーへ渡す形。statsmodels（scipy）が対数尤度・スコア・
+/// Hessianを`nobs`で割ってから最適化する設計に倣い、大標本での`bfgs`/`lbfgs`の
+/// 実行時間がNewtonから桁違いに遅れる問題を解消する）。`n_obs`は各モデルの`fit()`が
+/// 観測数（`y.nrows()`）をそのまま渡す。
+///
 /// # Errors
 /// - 収束点のHessianが特異（`SingularHessian`）
 /// - `raise_on_non_convergence=true`かつ`max_iter`回で収束しなかった（`NonConvergence`）
 /// - `separation_norm_check=Enabled`かつ`raise_on_non_convergence=true`で、勾配ノルム基準は
 ///   満たしたが標準化パラメータノルムが過大（`SeparationSuspected`）
 /// - その他ソルバー内部でのエラー（`ComputationFailed`）
+#[allow(clippy::too_many_arguments)]
 pub fn run_solver<O>(
     problem: O,
     method: Method,
     initial_params: Vec<f64>,
     max_iter: u64,
     tol: f64,
+    n_obs: usize,
     raise_on_non_convergence: bool,
     separation_norm_check: SeparationNormCheck,
 ) -> Result<SolverOutput, MleError>
@@ -963,9 +974,12 @@ where
             extract_outcome(result.state, result.problem)?
         }
         Method::Bfgs => {
+            // `n_obs`で正規化した「観測あたり平均勾配」基準（run_solverのdocコメント
+            // 「tolの意味論はmethodにより異なる」参照）。`FaerBfgs`自体は正規化を知らず、
+            // 実効的な絶対閾値を受け取るだけでよい。
             let solver = FaerBfgs {
                 linesearch: MoreThuenteLineSearch::new(),
-                tol,
+                tol: tol * n_obs as f64,
             };
             let result = Executor::new(problem, solver)
                 .configure(|state| state.param(initial_params).max_iters(max_iter))
@@ -974,9 +988,12 @@ where
             extract_outcome(result.state, result.problem)?
         }
         Method::Lbfgs => {
+            // Bfgsと同じ正規化（`n_obs`で正規化した「観測あたり平均勾配」基準）。argmin
+            // 組み込みのLBFGSは正規化を知らないため、実効的な絶対閾値を`with_tolerance_grad`
+            // に渡す。
             let linesearch = MoreThuenteLineSearch::new();
             let solver = LBFGS::new(linesearch, 7)
-                .with_tolerance_grad(tol)
+                .with_tolerance_grad(tol * n_obs as f64)
                 .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
             let result = Executor::new(problem, solver)
                 .configure(|state| state.param(initial_params).max_iters(max_iter))
@@ -2165,6 +2182,7 @@ mod tests {
             vec![0.0, 0.0],
             35,
             1e-6,
+            1,
             true,
             SeparationNormCheck::Enabled,
         )
@@ -2194,6 +2212,7 @@ mod tests {
             vec![0.0, 0.0],
             100,
             1e-6,
+            1,
             true,
             SeparationNormCheck::Enabled,
         )
@@ -2206,6 +2225,103 @@ mod tests {
             "{:?}",
             output.params
         );
+    }
+
+    /// `Method::Bfgs`は`tol * n_obs`を実効的な絶対閾値として使うはず（Issue #285、
+    /// `run_solver`のdocコメント「tolの意味論はmethodにより異なる」参照）。`n_obs`と`tol`を
+    /// 別々に振っても積が同じなら同じ収束点・反復回数になることを直接検証する
+    /// （既存のBFGS/LBFGSテストは全て`n_obs=1`で呼んでおり、この正規化ロジック自体は
+    /// 未検証だった、rust-reviewer指摘）。
+    #[test]
+    fn run_solver_bfgs_scales_effective_tol_by_n_obs() {
+        let via_n_obs = run_solver(
+            quadratic_problem(),
+            Method::Bfgs,
+            vec![0.0, 0.0],
+            100,
+            1e-9,
+            1000,
+            true,
+            SeparationNormCheck::Enabled,
+        )
+        .unwrap();
+        let via_tol = run_solver(
+            quadratic_problem(),
+            Method::Bfgs,
+            vec![0.0, 0.0],
+            100,
+            1e-6,
+            1,
+            true,
+            SeparationNormCheck::Enabled,
+        )
+        .unwrap();
+
+        assert_eq!(via_n_obs.n_iter, via_tol.n_iter);
+        assert!((via_n_obs.params[0] - via_tol.params[0]).abs() < 1e-12);
+        assert!((via_n_obs.params[1] - via_tol.params[1]).abs() < 1e-12);
+    }
+
+    /// `Method::Lbfgs`も`Bfgs`と同じ正規化を使うはず（同じ理由）。
+    #[test]
+    fn run_solver_lbfgs_scales_effective_tol_by_n_obs() {
+        let via_n_obs = run_solver(
+            quadratic_problem(),
+            Method::Lbfgs,
+            vec![0.0, 0.0],
+            100,
+            1e-9,
+            1000,
+            true,
+            SeparationNormCheck::Enabled,
+        )
+        .unwrap();
+        let via_tol = run_solver(
+            quadratic_problem(),
+            Method::Lbfgs,
+            vec![0.0, 0.0],
+            100,
+            1e-6,
+            1,
+            true,
+            SeparationNormCheck::Enabled,
+        )
+        .unwrap();
+
+        assert_eq!(via_n_obs.n_iter, via_tol.n_iter);
+        assert!((via_n_obs.params[0] - via_tol.params[0]).abs() < 1e-12);
+        assert!((via_n_obs.params[1] - via_tol.params[1]).abs() < 1e-12);
+    }
+
+    /// `Method::Newton`は`n_obs`を無視し、`tol`をそのまま絶対閾値として使うはず
+    /// （`newton`は正規化の対象外、`docs/spec/logit-spec.md`3.2節参照）。
+    #[test]
+    fn run_solver_newton_ignores_n_obs() {
+        let small_n_obs = run_solver(
+            quadratic_problem(),
+            Method::Newton,
+            vec![0.0, 0.0],
+            35,
+            1e-6,
+            1,
+            true,
+            SeparationNormCheck::Enabled,
+        )
+        .unwrap();
+        let large_n_obs = run_solver(
+            quadratic_problem(),
+            Method::Newton,
+            vec![0.0, 0.0],
+            35,
+            1e-6,
+            1_000_000,
+            true,
+            SeparationNormCheck::Enabled,
+        )
+        .unwrap();
+
+        assert_eq!(small_n_obs.n_iter, large_n_obs.n_iter);
+        assert_eq!(small_n_obs.params, large_n_obs.params);
     }
 
     #[test]
@@ -2304,6 +2420,7 @@ mod tests {
             vec![0.0, 0.0],
             100,
             1e-6,
+            1,
             true,
             SeparationNormCheck::Enabled,
         )
@@ -2326,6 +2443,7 @@ mod tests {
             vec![1000.0, -1000.0],
             1,
             1e-12,
+            1,
             true,
             SeparationNormCheck::Enabled,
         );
@@ -2341,6 +2459,7 @@ mod tests {
             vec![1000.0, -1000.0],
             1,
             1e-12,
+            1,
             false,
             SeparationNormCheck::Enabled,
         )
@@ -2357,6 +2476,7 @@ mod tests {
             vec![1000.0, -1000.0],
             0,
             1e-12,
+            1,
             true,
             SeparationNormCheck::Enabled,
         );
@@ -2372,6 +2492,7 @@ mod tests {
             vec![1000.0, -1000.0],
             0,
             1e-12,
+            1,
             false,
             SeparationNormCheck::Enabled,
         )
@@ -2422,6 +2543,7 @@ mod tests {
             vec![0.0],
             35,
             1e-6,
+            1,
             true,
             SeparationNormCheck::Enabled,
         );
@@ -2489,6 +2611,7 @@ mod tests {
             vec![0.5],
             10,
             1e-6,
+            1,
             false,
             SeparationNormCheck::Enabled,
         )
@@ -2573,6 +2696,7 @@ mod tests {
             vec![0.0],
             50,
             1e-6,
+            1,
             true,
             SeparationNormCheck::Disabled,
         )
@@ -2602,6 +2726,7 @@ mod tests {
             vec![10.0],
             50,
             1e-6,
+            1,
             false,
             SeparationNormCheck::Disabled,
         )
@@ -2658,6 +2783,7 @@ mod tests {
             vec![0.0],
             20,
             1e-6,
+            1,
             true,
             SeparationNormCheck::Disabled,
         );
@@ -2715,6 +2841,7 @@ mod tests {
             vec![0.0, 0.0],
             20,
             1e-6,
+            1,
             true,
             SeparationNormCheck::Disabled,
         );
@@ -3369,6 +3496,7 @@ mod tests {
             vec![0.0, 0.0],
             35,
             1e-6,
+            1,
             true,
             SeparationNormCheck::Enabled,
         );
@@ -3391,6 +3519,7 @@ mod tests {
             vec![0.0, 0.0],
             35,
             1e-6,
+            1,
             false,
             SeparationNormCheck::Enabled,
         )
@@ -3417,6 +3546,7 @@ mod tests {
             vec![0.0, 0.0],
             35,
             1e-6,
+            1,
             true,
             SeparationNormCheck::Disabled,
         )

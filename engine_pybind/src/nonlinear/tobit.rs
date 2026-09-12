@@ -86,7 +86,19 @@ pub struct TobitOptions {
     #[pyo3(get, set)]
     pub max_iter: i64,
 
-    /// Gradient-norm convergence tolerance.
+    /// Convergence tolerance. For `method="newton"`, an absolute threshold on
+    /// the total gradient norm (default `1e-6`). For `method="bfgs"`/`"lbfgs"`,
+    /// a per-observation-average gradient threshold (the total gradient norm
+    /// divided by the number of observations must fall below `tol`, default
+    /// `1e-8`), matching how statsmodels/scipy normalize convergence checks
+    /// by `nobs`. The two defaults are not interchangeable: Newton's absolute
+    /// semantics with a `1e-8` threshold (or bfgs/lbfgs's normalized
+    /// semantics with a `1e-6` threshold) measurably degrades either speed or
+    /// precision (Issue #285). Passing `tol` explicitly always uses the
+    /// semantics of the chosen `method`. Note: the method-dependent default is
+    /// resolved once, at construction time. Changing `method` afterwards via
+    /// the setter does not re-resolve `tol` — set both together (or set `tol`
+    /// explicitly) if you change `method` after construction.
     #[pyo3(get, set)]
     pub tol: f64,
 
@@ -117,7 +129,7 @@ impl TobitOptions {
         cluster_col = None,
         method = "newton".to_string(),
         max_iter = 35,
-        tol = 1e-6,
+        tol = None,
         raise_on_non_convergence = true,
         lower = Some(0.0),
         upper = None,
@@ -130,11 +142,18 @@ impl TobitOptions {
         cluster_col: Option<String>,
         method: String,
         max_iter: i64,
-        tol: f64,
+        tol: Option<f64>,
         raise_on_non_convergence: bool,
         lower: Option<f64>,
         upper: Option<f64>,
     ) -> Self {
+        // `tol`の既定値のmethod依存分岐は`LogitOptions::new`と同じ理由
+        // （`tol`フィールドのdocコメント参照、Issue #285）。
+        let tol = tol.unwrap_or(if method.eq_ignore_ascii_case("newton") {
+            1e-6
+        } else {
+            1e-8
+        });
         Self {
             cov_type,
             include_intercept,
@@ -557,11 +576,59 @@ mod tests {
             None,
             "newton".to_string(),
             35,
-            1e-6,
+            Some(1e-6),
             true,
             Some(0.0),
             None,
         )
+    }
+
+    /// `tol=None`のとき、`method`に応じた既定値（`newton`は絶対閾値`1e-6`、
+    /// `bfgs`/`lbfgs`は観測数正規化基準`1e-8`）が解決されるはず（Issue #285、
+    /// `LogitOptions`と同じロジック）。
+    #[test]
+    fn new_resolves_tol_default_based_on_method_when_tol_is_none() {
+        let newton = TobitOptions::new(
+            "classical".to_string(),
+            true,
+            0.95,
+            None,
+            "newton".to_string(),
+            35,
+            None,
+            true,
+            Some(0.0),
+            None,
+        );
+        assert_eq!(newton.tol, 1e-6);
+
+        let bfgs = TobitOptions::new(
+            "classical".to_string(),
+            true,
+            0.95,
+            None,
+            "bfgs".to_string(),
+            35,
+            None,
+            true,
+            Some(0.0),
+            None,
+        );
+        assert_eq!(bfgs.tol, 1e-8);
+
+        let lbfgs = TobitOptions::new(
+            "classical".to_string(),
+            true,
+            0.95,
+            None,
+            "lbfgs".to_string(),
+            35,
+            None,
+            true,
+            Some(0.0),
+            None,
+        );
+        assert_eq!(lbfgs.tol, 1e-8);
     }
 
     /// `y`は`lower=0.0`（既定の境界）以上の値のみで構成する（`TobitInput::from_columns`の

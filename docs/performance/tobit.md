@@ -131,6 +131,7 @@ engine の `lbfgs/newton` 比は約 3.2x で、`_check_method_ratios` の想定�
 - **解析的微分 vs 数値微分の寄与**: この ~80〜200倍差の主因は Rust 化だけでなく、engine が Tobit 対数尤度のスコア・ヘッシアンを**解析式**で持つのに対し、py4etrics（`GenericLikelihoodModel`）が**有限差分**で近似すること。k を増やすと py4etrics の数値ヘッシアンは O(k²) 回の対数尤度評価を要し、k=5→8 で約1.5秒→150秒超に崖状に悪化する（k 軸を engine 単独にした理由）。
 - **k スケーリング（engine, newton）**: classical k=5→20（k 4倍）で 0.0177s→0.0536s（~3.0x）、cluster も 0.0153s→0.0592s（~3.9x）。k 方向は 4倍のパラメータ増に対し 3〜4倍で、概ね線形。
 - **method軸**: engine の lbfgs（0.494s）は newton（0.154s）の **約3.2倍**。probit の #285（newton 比 ~7倍）ほど極端ではないが同系統の遅さで、quasi-Newton 実装に改善余地がある。py4etrics の lbfgs（2.52s）は自身の newton（12.05s）より速い（数値ヘッシアンが不要なため）。**bfgs は engine が n>=10,000 で発散する（#292）ため計測対象外**。
+  - **Issue #285（`tol`の観測数`n`正規化、2026-09-12）の続報（このbullet自体は当時のpy4etrics比較の凍結記録だが、engine単独の数値は現行値として読み替える）**: `bfgs`/`lbfgs`の`tol`を観測数`n`で正規化する変更（詳細は[`logit.md`](./logit.md)「考察」参照）はTobitにも共通で適用される。単体ワーカーでのスポット計測（`performance.compare_tobit --worker`、cov_type=classical・k=5・n=100,000、`repeats=3`の中央値）: **lbfgs 0.17s**（旧0.49sから約2.9倍改善、newton 0.15sとほぼ同オーダーまで縮小）。**bfgs は引き続き#292未解決のため計測対象外**。
 - **改善余地**: engine の絶対性能は n=100,000 で 0.15〜0.16秒と実用上問題ない。newton の大標本での Hessian 特異（#291）は `d797f9b` / `5b79ffe`（`FaerNewton` の停滞収束判定）で解消済みで、engine 単独 n=1,000,000（seed=42）の行がその回帰ガード（下記「既知の限界」に限界つき）。継続課題は quasi-Newton（lbfgs ~3.2x・bfgs 発散 #292）のみ。cluster 経路は classical とほぼ同じ伸びで、現時点で特段の懸念はない。
 
 ### 既知の限界（当時）

@@ -145,12 +145,11 @@ Issue #307） / `lower` / `upper`。
     `max_iter`到達で`NonConvergence`。Logit/Probitの大域凹な尤度ではこの経路（LMラダーの
     全失敗）に入らないため挙動は不変。真の特異性（完全な多重共線性等、`λ=0`のHessianが
     可逆でない）は従来どおり`SingularHessian`。
-  - **同じ`tol`のn非スケール性は、大標本での`bfgs`/`lbfgs`の実行時間にも影響する（Issue #285）**:
-    `newton`は2次収束のためこの影響をほぼ無償で吸収するが（Tobitでも反復回数は`n`によらずほぼ
-    一定）、`bfgs`/`lbfgs`は超1次収束のため同じ絶対勾配閾値を満たすのに`n`が大きいほど反復・
-    関数評価が増える。statsmodelsは`n`で正規化してから最適化するためこの影響を受けない。
-    実測・小標本での精度検証テストへの影響・運用上の推奨（大標本では`tol`を`n`にほぼ比例させる）
-    は[`logit-spec.md`](./logit-spec.md)3.2節参照（既定値・実装は変更していない）。
+  - **`bfgs`/`lbfgs`は`tol`を観測数`n`で正規化した基準を使う（Issue #285、実装済み）**:
+    `newton`は絶対閾値のまま（既定`tol=1e-6`、Tobitでも反復回数は`n`によらずほぼ一定でこの
+    影響をほぼ無償で吸収する）だが、`bfgs`/`lbfgs`は観測あたり平均勾配基準（既定`tol=1e-8`）を
+    使う。statsmodelsが`n`で正規化してから最適化するのに倣ったもの。詳細・実測値・小標本での
+    精度検証テストへの影響は[`logit-spec.md`](./logit-spec.md)3.2節参照。
 - **Tobitの「真の」分離は`σ→0`退化として現れる**（Logit/Probitの「係数が±∞へ発散」とは異なる）。
   そのため`run_solver`共有の`SeparationSuspected`（標準化パラメータノルム基準、`y∈{0,1}`で較正）は
   `run_solver`の`separation_norm_check: SeparationNormCheck`引数で**Tobitは`Disabled`**にし、この

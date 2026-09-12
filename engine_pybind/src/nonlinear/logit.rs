@@ -87,7 +87,19 @@ pub struct LogitOptions {
     #[pyo3(get, set)]
     pub max_iter: i64,
 
-    /// Gradient-norm convergence tolerance.
+    /// Convergence tolerance. For `method="newton"`, an absolute threshold on
+    /// the total gradient norm (default `1e-6`). For `method="bfgs"`/`"lbfgs"`,
+    /// a per-observation-average gradient threshold (the total gradient norm
+    /// divided by the number of observations must fall below `tol`, default
+    /// `1e-8`), matching how statsmodels/scipy normalize convergence checks
+    /// by `nobs`. The two defaults are not interchangeable: Newton's absolute
+    /// semantics with a `1e-8` threshold (or bfgs/lbfgs's normalized
+    /// semantics with a `1e-6` threshold) measurably degrades either speed or
+    /// precision (Issue #285). Passing `tol` explicitly always uses the
+    /// semantics of the chosen `method`. Note: the method-dependent default is
+    /// resolved once, at construction time. Changing `method` afterwards via
+    /// the setter does not re-resolve `tol` — set both together (or set `tol`
+    /// explicitly) if you change `method` after construction.
     #[pyo3(get, set)]
     pub tol: f64,
 
@@ -108,7 +120,7 @@ impl LogitOptions {
         cluster_col = None,
         method = "newton".to_string(),
         max_iter = 35,
-        tol = 1e-6,
+        tol = None,
         raise_on_non_convergence = true,
     ))]
     #[allow(clippy::too_many_arguments)]
@@ -119,9 +131,19 @@ impl LogitOptions {
         cluster_col: Option<String>,
         method: String,
         max_iter: i64,
-        tol: f64,
+        tol: Option<f64>,
         raise_on_non_convergence: bool,
     ) -> Self {
+        // `tol`の既定値は`method`依存（`tol`フィールドのdocコメント参照）。`newton`は
+        // 絶対閾値`1e-6`、`bfgs`/`lbfgs`は観測数正規化後の`1e-8`。共有の単一既定値
+        // では、Newtonの既定値を締めると大標本で無視できない速度低下（実測: Issue #285、
+        // n=1,000,000で0.98s→3.15s）が起きる一方、bfgs/lbfgsの既定値を緩めると小標本の
+        // 精度検証テスト（RTOL=1e-8）を壊すため、method別に分岐する（ユーザー確認済み）。
+        let tol = tol.unwrap_or(if method.eq_ignore_ascii_case("newton") {
+            1e-6
+        } else {
+            1e-8
+        });
         Self {
             cov_type,
             include_intercept,
@@ -401,7 +423,7 @@ mod tests {
             None,
             "newton".to_string(),
             35,
-            1e-6,
+            Some(1e-6),
             true,
         )
     }
@@ -413,6 +435,80 @@ mod tests {
             "x2" => [-5.0, 2.0, 8.0, -1.0],
         )
         .unwrap()
+    }
+
+    /// `tol=None`のとき、`method`に応じた既定値（`newton`は絶対閾値`1e-6`、
+    /// `bfgs`/`lbfgs`は観測数正規化基準`1e-8`）が解決されるはず（Issue #285）。
+    #[test]
+    fn new_resolves_tol_default_based_on_method_when_tol_is_none() {
+        let newton = LogitOptions::new(
+            "classical".to_string(),
+            true,
+            0.95,
+            None,
+            "newton".to_string(),
+            35,
+            None,
+            true,
+        );
+        assert_eq!(newton.tol, 1e-6);
+
+        let bfgs = LogitOptions::new(
+            "classical".to_string(),
+            true,
+            0.95,
+            None,
+            "bfgs".to_string(),
+            35,
+            None,
+            true,
+        );
+        assert_eq!(bfgs.tol, 1e-8);
+
+        let lbfgs = LogitOptions::new(
+            "classical".to_string(),
+            true,
+            0.95,
+            None,
+            "lbfgs".to_string(),
+            35,
+            None,
+            true,
+        );
+        assert_eq!(lbfgs.tol, 1e-8);
+    }
+
+    /// `method`の大文字小文字判定は`fit()`側の`parse_method`と同じく区別しないはず。
+    #[test]
+    fn new_resolves_newton_tol_default_case_insensitively() {
+        let opts = LogitOptions::new(
+            "classical".to_string(),
+            true,
+            0.95,
+            None,
+            "NEWTON".to_string(),
+            35,
+            None,
+            true,
+        );
+        assert_eq!(opts.tol, 1e-6);
+    }
+
+    /// `tol`を明示的に渡した場合は`method`に関わらずその値がそのまま使われるはず
+    /// （既定値解決ロジックを経由しない）。
+    #[test]
+    fn new_keeps_explicit_tol_regardless_of_method() {
+        let opts = LogitOptions::new(
+            "classical".to_string(),
+            true,
+            0.95,
+            None,
+            "newton".to_string(),
+            35,
+            Some(1e-3),
+            true,
+        );
+        assert_eq!(opts.tol, 1e-3);
     }
 
     #[test]

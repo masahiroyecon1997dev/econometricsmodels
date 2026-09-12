@@ -53,6 +53,15 @@
 | bfgs | 11.2148 | 1.4660 |
 | lbfgs | 23.9116 | 1.4373 |
 
+**2026-09-12（Issue #285、`tol`の観測数`n`正規化後）の再計測**（同条件、`repeats=3`）:
+
+| method | engine | statsmodels |
+|---|---|---|
+| bfgs | 0.7281 | 1.8975 |
+| lbfgs | 19.7285 | 1.7371 |
+
+上表（正規化前）は当時の記録として残す。
+
 ## 考察
 
 - **classical（newton）**: 全nでengineがstatsmodelsより高速（n=1,000,000で約2.1倍、0.65s vs 1.37s、n=100,000で約2.0倍）。engine は Newton-Raphson の各反復で `k×k` Hessian を構築するため OLS の直接法より計算は重いが、statsmodels 側の Python/patsy/最適化ループのオーバーヘッドの方が大きい。
@@ -61,6 +70,7 @@
 - **method軸: engine の BFGS/L-BFGS が極端に遅い**: newton（engine 0.65s）に対し bfgs は **11.21s**（約17倍）、lbfgs は **23.91s**（約37倍）。同じ method の statsmodels（scipy）は bfgs 1.47s・lbfgs 1.44s で newton とほぼ同じ。engine の quasi-Newton 実装（ステップ制御・収束判定・逆Hessian近似の更新）に改善余地があり、`refactoring-candidates.md` 項目46 として記録した。**既定の newton は十分速いため実用上の実害は「newton 以外を選ぶと遅い」という選択上の注意に留まる**。
   - **Issue #279（LPMベース warm start への変更、2026-09-08）の影響**: ゼロベクトル初期値から warm start（`ols_based_initial_params`）へ変更した際の before/after 実測（`git stash` A/B、cov_type=classical・k=5・n=1,000,000・`repeats=3` のスポット計測）で、**newton は −10〜14% 高速化**した一方、**bfgs は 9.81s → 13.09s（+33%）と悪化**した（lbfgs は spot-check では速くなる方向）。BFGS は恒等行列で逆Hessian近似を初期化するため、ゼロ初期値より曲率の異なる warm start 地点からだと line search の関数評価が増えるためと考えられる。既定の newton は改善、bfgs/lbfgs は元々「改善余地あり」の非既定パスのため、#279 では warm start を method 共通のまま受容した（上表の 11.21/23.91 は #279 前のフルスイープ値。#279 後の bfgs は概ね +33% で読み替える）。quasi-Newton と warm start の相互作用の是正は **Issue #304** で追跡する。
   - **Issue #285（`FaerBfgs`自前実装への置き換え、2026-09-12）の影響**: `argmin`組み込みBFGS（`argmin::solver::quasinewton::BFGS`）を、Nocedal & Wright *Numerical Optimization* 6.1節のself-scaling初期化（1回目の反復でline searchが実際に受理したステップから`γ=(y₀ᵀs₀)/(y₀ᵀy₀)`を計算し初期逆Hessianをスケーリングする、`argmin`自身にはコメントアウトされ機能していない形でしか存在しない）と、1回目の反復専用のline search初期ステップ幅調整（`min(1,1/‖g₀‖)`）を組み込んだ自前実装`FaerBfgs`に置き換えた。公式ハーネス（`performance.compare_logit --worker`、cov_type=classical・k=5・n=1,000,000・`repeats=3`の中央値、devcontainer・1スレッド固定）での再計測: **bfgs 14.97s**（反復回数22→17に減少）・参考として**newton 0.74s**・**lbfgs 18.23s**（`Method::Lbfgs`は今回変更していないため#279後の実測値の再確認に相当）。`argmin`組み込みBFGS（#279後、本Issue着手前の状態）はアドホック計測で約16.0s（`repeats=5`の中央値）だったため、**bfgs は本Issueの対応で約6〜7%の改善**にとどまり、newton・statsmodels（bfgs 1.47s）とは依然として1桁以上の差が残る。**LBFGSは対象外**: `argmin`のLBFGS実装は`s`/`y`履歴・初期`γ`を外部から注入する公開APIが無く、同じ手法を適用できないため今回は見送った（`engine/src/nonlinear/CLAUDE.md`参照）。
+  - **Issue #285（`tol`の観測数`n`正規化、2026-09-12）の続報**: 上記`FaerBfgs`自前実装後もbfgsが遅い根本原因は、`tol`の意味論そのもの（総和勾配に対する絶対閾値で`n`スケールしない、#291と同根）にあると判明。`bfgs`/`lbfgs`のみ`tol`を観測数`n`で正規化した「観測あたり平均勾配」基準に変更し（`newton`は絶対閾値のまま）、既定値も`method`依存にした（`newton=1e-6`・`bfgs`/`lbfgs`=`1e-8`、詳細は`docs/spec/logit-spec.md`3.2節）。公式ハーネスでの再計測（同条件）: **bfgs 0.73s**（14.97sから約20倍改善、statsmodels（1.90s）より高速化）。**lbfgs 19.73s**（18.23sからほぼ不変）——同じ正規化後の実効閾値でも`bfgs`（6反復）と`lbfgs`（17反復）で収束に必要な反復数が大きく異なるため、`bfgs`に効いた既定値の正規化だけでは`lbfgs`は速くならない。`newton`にも同じ正規化を適用する案は検証したが、`near_separation`等の`RTOL=1e-8`精度検証テストが28件失敗したため不採用（`newton`は非正規化のまま維持）。`lbfgs`固有のより緩い既定値の検討は別Issueとする。
 - **kスケーリング（newton）**: classical k=5→20 で engine 約4.3倍 / statsmodels 約2.2倍。engine の k 方向の伸びがやや急（Newton 各反復の Hessian 構築が `k²` 依存）。絶対値は小さく（k=20 でも 0.03s 台）実用上の問題はないが、傾向として記録する。
 - **メモリ**: newton では engine が全点で軽いか同等（n=1,000,000でengine 419〜510MB、statsmodels 486〜526MB）。
 
@@ -80,6 +90,6 @@ uv run python -m performance.render_performance_summary \
 
 ## 今後の検討事項
 
-- **engineのBFGS/L-BFGSが遅い**（`refactoring-candidates.md` 項目46）: newton・statsmodels の同 method 比で桁違いに遅い。Issue #285でBFGSを自前実装`FaerBfgs`に置き換え約6〜7%改善したが、newton・statsmodels比では依然1桁以上遅いままで、完全な解決には至っていない。L-BFGSは`argmin`組み込みのまま未対応（Issue #285参照）。
+- **engineのL-BFGSが遅い**（`refactoring-candidates.md` 項目46）: Issue #285で`bfgs`は自前実装`FaerBfgs`＋`tol`の観測数`n`正規化により newton・statsmodels と同オーダー（約20倍改善、statsmodelsより高速）まで解決したが、`lbfgs`は同じ正規化を適用してもほぼ改善しない（同じ実効閾値でも収束に必要な反復数が`bfgs`よりずっと多いため）。`lbfgs`固有により緩い既定値が必要かどうかは未検討で別Issueとする。
 - **engineのマルチスレッド線形代数の不安定性**（`refactoring-candidates.md`項目44）: OLSと共通。
 - **releaseビルドでの再計測が前提**: 改善見込みの見積もりは、debugビルドの数値（誤り）ではなく本ドキュメントのreleaseビルド数値を基準にすること。

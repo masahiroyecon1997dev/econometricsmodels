@@ -57,6 +57,7 @@
 - **Probit は Logit より重い**: 同条件（classical, n=100,000, newton）で Probit engine 0.119s に対し Logit engine 0.051s。標準正規分布の CDF/PDF（Φ/φ）評価がロジスティック（初等関数）より高コスト。statsmodels 側も同傾向（Probit 0.207s vs Logit 0.104s）。
 - **Issue #98 の対称化が効く**: Logit と同じく、statsmodels の `llnull`（切片のみモデル）へのアクセスを計測範囲に含めると切片のみ Probit の再フィットが走り、statsmodels の実行時間が増える。engine はこれを常に一括計算しているので、揃えて初めて公平な比較になる。
 - **method軸: engine の BFGS/L-BFGS が遅い**: newton（engine 0.12s）に対し bfgs は **0.91s**（約7.6倍）、lbfgs は **0.82s**（約6.9倍）。同じ method の statsmodels（scipy）は bfgs 0.18s・lbfgs 0.16s で newton とほぼ同じ。Logit ほど極端ではないが同傾向で、engine の quasi-Newton 実装に改善余地がある（`refactoring-candidates.md` 項目46）。既定の newton は十分速いため実用上の実害は「newton 以外を選ぶと遅い」という選択上の注意に留まる。
+  - **Issue #285（`tol`の観測数`n`正規化、2026-09-12）の影響**: `bfgs`/`lbfgs`の`tol`を`n`で正規化する変更（詳細は[`logit.md`](./logit.md)「考察」参照）はProbitにも共通で適用される。単体ワーカーでのスポット計測（`performance.compare_probit --worker`、cov_type=classical・k=5・n=100,000、`repeats=3`の中央値）: **bfgs 0.24s**（旧0.91sから約3.8倍改善）・**lbfgs 0.27s**（旧0.82sから約3.0倍改善）・参考として**newton 0.17s**（既定`tol`は`newton`のみ変更なしのため実質不変）。この`n`（100,000）ではlogit（n=1,000,000）と異なりlbfgsにも改善が見られた——lbfgsの改善幅が`n`に依存する理由は未調査（別Issue）。上表（旧`FaerBfgs`自前実装のみの状態、正規化前）は当時の記録として残す。
 - **kスケーリング（newton）**: classical k=5→20 で engine 約3.0倍 / statsmodels 約2.2倍。Logit ほどではないが engine の伸びがやや急。
 
 ## 既知の限界

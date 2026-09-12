@@ -584,6 +584,7 @@ impl ProbitEstimator {
             initial_params,
             max_iter as u64,
             tol,
+            input.y().nrows(),
             raise_on_non_convergence,
             // Probitは`y∈{0,1}`で係数が±∞へ発散するため(準)完全分離の
             // 標準化パラメータノルム事後チェックを有効にする（Issue #288）。

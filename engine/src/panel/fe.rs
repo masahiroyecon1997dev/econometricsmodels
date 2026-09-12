@@ -66,12 +66,10 @@
 //! 分散ゼロ検出→`OlsEstimator::fit`」の順にパイプラインを実行する。
 //!
 //! **`FeEstimator::fit`はwithin推定量`β̂`の委譲に加えて、自由度調整（Issue #180、6.3節）・
-//! `cov_type`対応（Issue #181、3.1節・3.2節）まで実装している**。within変換後のOLS推定量
-//! `β̂`はwithin推定量として数学的に正しい値になる（自由度・`cov_type`に依存しない）ため、
-//! 委譲だけで正しく求まる。一方、以下はFE固有の再計算・補正が必要で**別issueで対応する**
-//! （4.3節。WLSがR²等を素のOLS計算のままでは使わなかったのと同じ教訓）:
-//! - パネル固有R²（within/between/overall、2章・Issue #183。`r_squared_adj`とは別物、
-//!   下記参照）
+//! `cov_type`対応（Issue #181、3.1節・3.2節）・パネル固有R²（Issue #183、2.3節）まで
+//! 実装している**。within変換後のOLS推定量`β̂`はwithin推定量として数学的に正しい値になる
+//! （自由度・`cov_type`に依存しない）ため、委譲だけで正しく求まる（4.3節。WLSがR²等を
+//! 素のOLS計算のままでは使わなかったのと同じ教訓が、以下の再計算箇所に表れている）。
 //!
 //! `FeEstimator::fit`は`OlsInput::from_columns`を`include_intercept=false`で呼ぶ
 //! （within変換で全体平均も含めて差し引かれているため、変換後データに切片は不要——
@@ -102,12 +100,6 @@
 //!   計算し直す（下記「cov_type対応」節参照）。t値・p値・信頼区間の計算自体は
 //!   t分布（自由度は`cov_type`によらず常に`df_resid`、3.3節）で`crate::inference`の
 //!   共有ヘルパーを使う（OLS自身と同じロジック）。
-//! - **調整済みR²**: `OlsEstimator::r_squared()`（within R²、変換後の`y`の
-//!   uncentered TSSベース）ではなく、**変換前の元の`y`の中心化TSSに基づく overall R²**
-//!   を使う——`r_squared_adj = 1 - (1 - overall_R²) * (n-1) / df_resid`。`estimator()`の
-//!   `r_squared()`は依然として妥当な値（within R²）だが、`r_squared_adj`とは別の
-//!   概念であることに注意（within R²を`(n-1)/df_resid`で素朴に調整しても正しい
-//!   調整済みR²にはならない）。
 //! - **AIC/BIC**: `log_likelihood`自体は`SSR/n`のみに依存し`df_resid`非依存の式
 //!   （`OlsEstimator::log_likelihood()`のformulaと同一）のためそのまま再利用できるが、
 //!   ペナルティ項の乗数は`k`ではなく`df_model`（固定効果の実効パラメータ数を含む）を使う:
@@ -116,12 +108,59 @@
 //!   限定しているため、v1のスコープ外。`estimator().f_statistic()`/`f_p_value()`は
 //!   `df_resid_ols`ベースのまま、FE用に補正されていない）。
 //!
-//! **検証の例外**: Python主リファレンスの`linearmodels`（`PanelOLS`）は`rsquared_adj`・
-//! `aic`・`bic`を一切提供しない（`rsquared_within`/`between`/`overall`/`inclusive`・
-//! `loglik`のみ）。そのためこれら3つの検証はRクロスチェック（`fixest`）のみで行う
-//! （通常の「Python主リファレンス＋Rクロスチェックの2系統検証」の例外、ハウスマン検定
-//! （5.3節）と同型の判断）。上記の式は`fixest::feols`の`AIC()`/`BIC()`/`summary()`の
-//! `Adj. R2`と数値的に一致することをRで実地検証済み（ユーザー承認済み、2026-09-12）。
+//! **検証の例外**: Python主リファレンスの`linearmodels`（`PanelOLS`）は`aic`・`bic`を
+//! 一切提供しない（`rsquared_within`/`between`/`overall`/`inclusive`・`loglik`のみ）。
+//! そのためこの2つの検証はRクロスチェック（`fixest`）のみで行う（通常の「Python主
+//! リファレンス＋Rクロスチェックの2系統検証」の例外、ハウスマン検定（5.3節）と同型の
+//! 判断）。上記の式は`fixest::feols`の`AIC()`/`BIC()`と数値的に一致することをRで実地
+//! 検証済み（ユーザー承認済み、2026-09-12）。
+//!
+//! ## パネル固有R²（Issue #183、2.3節）
+//!
+//! `r_squared_within`/`r_squared_between`/`r_squared_overall`の3フィールドを実装する。
+//! **bareの`r_squared_adj`は廃止**（2.3節が明示的に要求。修正済み版の3種展開もスコープ外）。
+//! 素朴に「実際に使ったFE構造でdemeanしたR²」を3種とも定義すると考えがちだが、
+//! `linearmodels`のソース確認・実地数値検証で以下が判明している
+//! （ユーザーとの相談で決定、2026-09-12。`linearmodels==7.0`で確認）。
+//!
+//! **2.3節の「OLSの`r_squared`をそのまま流用しない」の解釈**: この一文は「単一の曖昧な
+//! フィールドを残さず明示的な3フィールドのみにする」というフィールド構成についての
+//! 要求であり、`r_squared_within`の**値**として`OlsEstimator::r_squared()`をそのまま
+//! 採用すること自体は妨げない（後述の通りこの値は数学的に「within R²」の定義そのもの
+//! と一致するため、独立に再計算する意味が無い）。
+//!
+//! - **`r_squared_within`は「実際に使ったFE構造でdemeanした残差」を採用**（1-wayは
+//!   entityのみ、2-wayはentity+timeの両方）——`estimator().r_squared()`をそのまま使う
+//!   （`OlsInput::from_columns`が`include_intercept=false`で呼ばれるため`OlsEstimator`
+//!   自身が非中心化TSSを使う分岐を通り、within変換後の`y`の平均が厳密にゼロになる性質
+//!   （`Σ_i(y_i - ȳ_{e(i)}.) = 0`が任意の不均衡パネルで成り立つ）と合わせて、この値が
+//!   まさに「within R²」の定義と一致する）。**`linearmodels`自身の`rsquared_within`は
+//!   常にentityのみのdemeanで固定**（2-wayモデルでも時間効果を含めない）という別定義
+//!   のため、2-wayでは意図的に数値が食い違う。2-wayの検証は`linearmodels`ではなく
+//!   `fixest`の`fitstat(model, "wr2")`（"Within R2"）を使う（実地検証で`fixest`の`wr2`が
+//!   「実際に使ったFE構造でdemeanしたR²」と1-way・2-way双方で数値一致することを確認済み。
+//!   通常の「Python主リファレンス＋Rクロスチェック」の2系統検証の例外、AIC/BICと同型）。
+//! - **`r_squared_between`/`r_squared_overall`は`linearmodels`の`_rsquared`と完全一致**
+//!   させる（`panel/model.py`の`PanelOLS._rsquared`）。FEのxには定数列を含められない
+//!   （含めれば`validate_no_zero_variance_regressors`が弾く）ため、`linearmodels`の
+//!   `has_constant=False`分岐（非中心化TSS、切片による中心化を行わない）が常に適用される:
+//!   - `r_squared_overall`: 固定効果の切片項を一切含めない——**元の`y`・`x`に、推定した
+//!     傾き係数`β̂`だけを当てはめた残差**で計算する（`SSR = Σ_i(y_i - x_i'β̂)²`、
+//!     `TSS = Σ_i y_i²`）。within推定の残差（`estimator().residuals()`、FWL定理により
+//!     固定効果込みの残差と一致）とは別物であることに注意（固定効果の説明力を無視した、
+//!     意図的に「弱い」R²）。
+//!   - `r_squared_between`: エンティティ平均`ȳ_i.`・`x̄_i.`に同じ`β̂`を当てはめた残差
+//!     （`SSR = Σ_i(ȳ_i. - x̄_i.'β̂)²`、`TSS = Σ_i ȳ_i.²`、**重み付けなし**）。
+//!     `linearmodels`の`_prepare_between`自体は不均衡パネル用の重み
+//!     `w_i = T_i / mean(T)`を計算するが、サンプルウェイト（`weights`引数）が
+//!     全て`1.0`（＝未指定）なら`_rsquared`がこの重みを無条件に`1.0`へ上書きする。
+//!     **FEは`weights`引数をサポートしない**（CLAUDE.md 1.3節）ためこの重み付けは
+//!     常に無効——不均衡パネルで一度`T_i`ベースの重み付き版を実装し`linearmodels`と
+//!     数値が食い違うことを実地検証で発見して修正した経緯がある（`fe_r_squared_between`
+//!     関数doc参照、2026-09-12）。
+//!   - どちらも`TSS <= 0`なら`0.0`を返す（`linearmodels`と同じガード）。
+//! - 新規ヘルパー（`fe.rs`内private）: `fe_r_squared_between`・`fe_r_squared_overall`
+//!   （`group_indices_by_key`をentity集計に再利用）。
 //!
 //! ## `cov_type`対応（`FeCovType`、Issue #181、3.1節・3.2節）
 //!
@@ -419,7 +458,15 @@ pub struct FeEstimator {
     p_values: Mat<f64>,
     conf_lower: Mat<f64>,
     conf_upper: Mat<f64>,
-    r_squared_adj: f64,
+    /// 実際に使ったFE構造でdemeanしたR²（1-wayはentityのみ、2-wayはentity+time）。
+    /// `estimator().r_squared()`と同じ値（モジュールdoc「パネル固有R²」参照）。
+    r_squared_within: f64,
+    /// エンティティ平均ベースのR²（linearmodelsの`rsquared_between`と完全一致、
+    /// モジュールdoc参照）。
+    r_squared_between: f64,
+    /// 固定効果の切片項を含めないR²（linearmodelsの`rsquared_overall`と完全一致、
+    /// モジュールdoc参照）。
+    r_squared_overall: f64,
     aic: f64,
     bic: f64,
 }
@@ -427,8 +474,9 @@ pub struct FeEstimator {
 impl FeEstimator {
     /// `input`を`effects`が指定する方向でwithin変換した上で`OlsEstimator::fit`に委譲し、
     /// FEを推定する。パネル自由度調整（Issue #180、6.3節）・`cov_type`対応
-    /// （Issue #181、3.1節・3.2節）を反映した標準誤差・t値・p値・信頼区間・調整済みR²・
-    /// AIC/BICを計算し直す（モジュールdoc「自由度調整」「`cov_type`対応」参照）。
+    /// （Issue #181、3.1節・3.2節）を反映した標準誤差・t値・p値・信頼区間・AIC/BIC、
+    /// パネル固有R²（Issue #183、2.3節）を計算し直す（モジュールdoc「自由度調整」
+    /// 「`cov_type`対応」「パネル固有R²」参照）。
     ///
     /// パイプライン: singleton検出
     /// （`validate_no_singleton_groups_one_way`/`validate_no_singleton_groups_two_way`、
@@ -621,14 +669,15 @@ impl FeEstimator {
             *conf_upper.get_mut(j, 0) = stat.conf_high;
         }
 
-        // 調整済みR²は変換前の元の`y`の中心化TSSに基づく overall R²から計算する
-        // （`estimator().r_squared()`はwithin R²であり別概念、モジュールdoc参照）。
-        // 残差はFWL定理により変換後・変換前どちらの尺度でも同じ値になるため
-        // （上で組み立てた`residuals`をそのまま使える）、SSRの再計算は不要。
-        let y_mean: f64 = input.y().iter().sum::<f64>() / n as f64;
-        let tss_overall: f64 = input.y().iter().map(|v| (v - y_mean).powi(2)).sum();
-        let r_squared_overall = 1.0 - ssr / tss_overall;
-        let r_squared_adj = 1.0 - (1.0 - r_squared_overall) * ((n - 1) as f64 / df_resid as f64);
+        // パネル固有R²（Issue #183、モジュールdoc「パネル固有R²」参照）。within R²は
+        // 実際に使ったFE構造でdemeanした残差ベースで、`OlsInput::from_columns`が
+        // `include_intercept=false`で呼ばれているため`estimator().r_squared()`が既に
+        // この定義と一致する（再計算不要）。between/overallはlinearmodelsの`_rsquared`と
+        // 完全一致させるため、変換前の元の`y`/`x`から独立に計算し直す。
+        let r_squared_within = estimator.r_squared();
+        let r_squared_between =
+            fe_r_squared_between(input.y(), input.x(), estimator.params(), input.entity());
+        let r_squared_overall = fe_r_squared_overall(input.y(), input.x(), estimator.params());
 
         // `log_likelihood`自体は`SSR/n`のみに依存しdf非依存の式のためそのまま再利用できる
         // （モジュールdoc参照）。ペナルティ項の乗数だけ`k`から`df_model`に差し替える。
@@ -648,7 +697,9 @@ impl FeEstimator {
             p_values,
             conf_lower,
             conf_upper,
-            r_squared_adj,
+            r_squared_within,
+            r_squared_between,
+            r_squared_overall,
             aic,
             bic,
         })
@@ -671,10 +722,11 @@ impl FeEstimator {
 
     /// within変換済みデータに対する`OlsEstimator`本体。
     ///
-    /// **係数（`params()`）・残差（`residuals()`）・within R²（`r_squared()`）は正しい値**
-    /// だが、**標準誤差・t値・p値・信頼区間・調整済みR²・AIC/BICは`cov_type=Classical`・
-    /// パネル自由度調整前の値のままで誤り**（`FeEstimator`自身の同名メソッド
-    /// （`std_errors()`等）を使うこと、モジュールdoc「自由度調整」「`cov_type`対応」参照）。
+    /// **係数（`params()`）・残差（`residuals()`）・within R²（`r_squared()`、
+    /// `FeEstimator::r_squared_within()`と同値）は正しい値**だが、**標準誤差・t値・p値・
+    /// 信頼区間・調整済みR²・AIC/BICは`cov_type=Classical`・パネル自由度調整前の値の
+    /// ままで誤り**（`FeEstimator`自身の同名メソッド（`std_errors()`等）を使うこと、
+    /// モジュールdoc「自由度調整」「`cov_type`対応」「パネル固有R²」参照）。
     /// **F統計量はこの時点では未対応**（`estimator().f_statistic()`/`f_p_value()`は
     /// `df_resid_ols`・`CovType::Classical`ベースのまま）。
     pub fn estimator(&self) -> &OlsEstimator {
@@ -716,9 +768,21 @@ impl FeEstimator {
         &self.conf_upper
     }
 
-    /// パネル自由度調整済み決定係数（overall R²ベース、モジュールdoc参照）。
-    pub fn r_squared_adj(&self) -> f64 {
-        self.r_squared_adj
+    /// 実際に使ったFE構造でdemeanしたR²（Issue #183、モジュールdoc「パネル固有R²」参照）。
+    pub fn r_squared_within(&self) -> f64 {
+        self.r_squared_within
+    }
+
+    /// エンティティ平均ベースのR²（linearmodelsの`rsquared_between`と完全一致、
+    /// モジュールdoc参照）。
+    pub fn r_squared_between(&self) -> f64 {
+        self.r_squared_between
+    }
+
+    /// 固定効果の切片項を含めないR²（linearmodelsの`rsquared_overall`と完全一致、
+    /// モジュールdoc参照）。
+    pub fn r_squared_overall(&self) -> f64 {
+        self.r_squared_overall
     }
 
     /// パネル自由度調整済みAIC（`df_model`をペナルティ項に使う、モジュールdoc参照）。
@@ -1019,6 +1083,71 @@ fn fe_driscoll_kraay_cov_params(
     let scale = n as f64 / df_resid as f64;
     let cov_uncorrected = xtx_inv * &s_hat * xtx_inv;
     Mat::from_fn(k, k, |i, j| scale * (*cov_uncorrected.get(i, j)))
+}
+
+/// エンティティ平均ベースのbetween R²（Issue #183、2.3節）。`linearmodels`の
+/// `PanelOLS._rsquared`のbetween式と完全一致させる（モジュールdoc「パネル固有R²」参照）。
+///
+/// `y`/`x`は**within変換前の元の列**（`FeInput::y`/`x`）を渡すこと。`params`は
+/// within推定の`β̂`（切片を含まない、FEは常に`include_intercept=false`）。
+///
+/// **エンティティ観測数`T_i`による重み付けは行わない**（`w_i=1`で全エンティティ均等）。
+/// `linearmodels`の`_prepare_between`自体は`w_i = T_i / mean(T)`を計算するが、`_rsquared`
+/// 側で`self.weights.values2d`（サンプルウェイト、`PanelOLS`の`weights`引数）が全て`1.0`
+/// （＝ユーザーが明示的な重みを指定していない）なら`w`を無条件に全要素`1.0`へ上書きする
+/// （`if np.all(self.weights.values2d == 1.0): w = np.ones_like(w)`）。**FEは`weights`引数を
+/// サポートしない**（CLAUDE.md 1.3節「見送り」）ため、この分岐が常に成立し
+/// `T_i`ベースの重みは実質的に到達不能——不均衡パネルで一度この重み付き版を実装し
+/// `linearmodels`と数値が食い違うことを発見して修正した経緯がある（実地検証、
+/// 2026-09-12）。`group_indices_by_key`でエンティティを集計する（`fe_cluster_cov_params`
+/// と同じ理由でグループ間加算の順序を固定する、モジュールdoc参照）。
+///
+/// `TSS <= 0`（全エンティティ平均がゼロ等）なら`linearmodels`と同じく`0.0`を返す。
+fn fe_r_squared_between(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>, entity: &[String]) -> f64 {
+    let k = x.len();
+    let entity_indices = group_indices_by_key(entity);
+
+    let mut ssr = 0.0;
+    let mut tss = 0.0;
+    for indices in entity_indices.values() {
+        let t_i = indices.len();
+        let y_bar: f64 = indices.iter().map(|&i| y[i]).sum::<f64>() / t_i as f64;
+        let fitted: f64 = (0..k)
+            .map(|j| {
+                let x_bar_j: f64 = indices.iter().map(|&i| x[j][i]).sum::<f64>() / t_i as f64;
+                x_bar_j * (*params.get(j, 0))
+            })
+            .sum();
+        let resid = y_bar - fitted;
+        ssr += resid * resid;
+        tss += y_bar * y_bar;
+    }
+
+    if tss > 0.0 { 1.0 - ssr / tss } else { 0.0 }
+}
+
+/// 固定効果の切片項を含めないoverall R²（Issue #183、2.3節）。`linearmodels`の
+/// `PanelOLS._rsquared`のoverall式と完全一致させる（モジュールdoc「パネル固有R²」参照）。
+///
+/// `y`/`x`は**within変換前の元の列**を渡すこと。within推定の残差
+/// （`estimator().residuals()`、FWL定理により固定効果込みの残差と一致）とは異なり、
+/// ここでは`β̂`だけを元の`y`/`x`に当てはめた残差（固定効果の切片項を含めない）を使う。
+///
+/// `TSS <= 0`なら`linearmodels`と同じく`0.0`を返す。
+fn fe_r_squared_overall(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>) -> f64 {
+    let n = y.len();
+    let k = x.len();
+
+    let mut ssr = 0.0;
+    let mut tss = 0.0;
+    for i in 0..n {
+        let fitted: f64 = (0..k).map(|j| x[j][i] * (*params.get(j, 0))).sum();
+        let resid = y[i] - fitted;
+        ssr += resid * resid;
+        tss += y[i] * y[i];
+    }
+
+    if tss > 0.0 { 1.0 - ssr / tss } else { 0.0 }
 }
 
 /// `ids`のユニークID数を数える（`n_entities`/`n_periods`のカウント）。純粋な
@@ -2170,7 +2299,12 @@ mod tests {
         assert!((*fe.conf_upper().get(0, 0) - 2.425_711_481_900_49).abs() < 1e-6);
         assert!((fe.aic() - 55.612_545_928_611_7).abs() < 1e-6);
         assert!((fe.bic() - 58.037_079_177_551_7).abs() < 1e-6);
-        assert!((fe.r_squared_adj() - 0.661_606_689_860_115).abs() < 1e-9);
+        // パネル固有R²（Issue #183）: 1-wayではwithinは`linearmodels`の`rsquared_within`と
+        // `fixest`の`fitstat(m, "wr2")`が一致する（モジュールdoc「パネル固有R²」参照）。
+        // between/overallは`linearmodels`の値（Pythonで独立に計算・検算済み、2026-09-12）。
+        assert!((fe.r_squared_within() - 0.600_341_337_099_812).abs() < 1e-9);
+        assert!((fe.r_squared_between() - 0.748_302_743_867_978).abs() < 1e-9);
+        assert!((fe.r_squared_overall() - 0.732_444_936_421_435).abs() < 1e-9);
     }
 
     #[test]
@@ -2199,7 +2333,61 @@ mod tests {
         assert!((*fe.conf_upper().get(0, 0) - 1.406_567_113_006_74).abs() < 1e-6);
         assert!((fe.aic() - 36.559_692_739_993_7).abs() < 1e-6);
         assert!((fe.bic() - 39.954_039_288_509_7).abs() < 1e-6);
-        assert!((fe.r_squared_adj() - 0.930_619_212_222_08).abs() < 1e-9);
+        // パネル固有R²（Issue #183）: 2-wayのwithinは`linearmodels`の`rsquared_within`
+        // （常にentityのみdemean）とは意図的に食い違うため、`fixest`の
+        // `fitstat(m, "wr2")`（0.723738317757009、`options(digits=15)`でR実地検証済み）を
+        // 参照値にする（モジュールdoc「パネル固有R²」参照）。between/overallは
+        // `linearmodels`の値。
+        assert!((fe.r_squared_within() - 0.723_738_317_757_009).abs() < 1e-9);
+        assert!((fe.r_squared_between() - 0.513_009_039_069_012).abs() < 1e-9);
+        assert!((fe.r_squared_overall() - 0.511_356_250_429_877).abs() < 1e-9);
+    }
+
+    // ── パネル固有R²（Issue #183） ───────────────────────────────────────
+
+    #[test]
+    fn fe_estimator_fit_one_way_r_squared_between_matches_linearmodels_on_unbalanced_panel() {
+        // `fe_r_squared_between`のエンティティ観測数による重み付け（`w_i = T_i/mean(T)`）
+        // は、上の2本の`fixest_reference_input`テストがバランスパネル（全エンティティ
+        // `T_i=3`）のため`w_i=1`に退化し一度も検証されていない（rust-reviewerがIssue #182で
+        // 指摘した「ループ本体が複数分岐で一度も実行されない」落とし穴と同型、モジュールdoc
+        // 「パネル固有R²」参照）。T_a=2, T_b=4, T_c=3の不均衡パネルで`linearmodels`と
+        // 数値比較する（期待値はPythonで独立に計算・検算済み、2026-09-12）。
+        let entity = strings(&["a", "a", "b", "b", "b", "b", "c", "c", "c"]);
+        let x = vec![1.0, 3.0, 2.0, 5.0, 4.0, 6.0, 1.0, 4.0, 2.0];
+        let y = [2.0, 6.0, 5.0, 9.0, 8.0, 11.0, 3.0, 7.0, 4.0];
+        let input =
+            FeInput::from_columns(&y, &[x], vec!["x".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let fe = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95).unwrap();
+
+        assert!((*fe.estimator().params().get(0, 0) - 1.497_297_297_297_297_5).abs() < 1e-9);
+        assert!((fe.r_squared_within() - 0.975_885_532_591_415).abs() < 1e-9);
+        assert!((fe.r_squared_between() - 0.943_825_384_692_178_9).abs() < 1e-9);
+        assert!((fe.r_squared_overall() - 0.947_558_874_189_504_9).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fe_estimator_fit_one_way_r_squared_between_returns_zero_when_entity_means_are_zero() {
+        // `fe_r_squared_between`の`TSS <= 0`ガード（`linearmodels`と同じく`0.0`を返す）が
+        // これまでのテストでは一度も通っていなかった（rust-reviewer指摘）。各エンティティの
+        // `y`平均がちょうどゼロ（`TSS_between = Σȳ_i.² = 0`）になるデータで検証する。
+        // within/overallは退化しない（`y`自体の分散はあるため）ことも合わせて確認し、
+        // `linearmodels`の実測値と数値比較する（Pythonで独立に計算・検算済み、2026-09-12）。
+        let entity = strings(&["a", "a", "b", "b", "c", "c"]);
+        let x = vec![1.0, 3.0, 2.0, 6.0, 1.0, 4.0];
+        let y = [1.0, -1.0, 2.0, -2.0, 3.0, -3.0];
+        let input =
+            FeInput::from_columns(&y, &[x], vec!["x".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let fe = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95).unwrap();
+
+        assert!((*fe.estimator().params().get(0, 0) - (-1.310_344_827_586_206_9)).abs() < 1e-9);
+        assert!((fe.r_squared_within() - 0.889_162_561_576_354_6).abs() < 1e-9);
+        assert_eq!(fe.r_squared_between(), 0.0);
+        assert!((fe.r_squared_overall() - (-2.330_219_126_889_757_4)).abs() < 1e-9);
     }
 
     // ── cov_type対応（Issue #181） ───────────────────────────────────────
@@ -2770,7 +2958,7 @@ mod tests {
         // k=0（回帰変数なし、固定効果のみのモデル）でも`fit()`本体がエンドツーエンドに
         // 動くことを確認する境界ケース（`from_columns_with_no_regressors_succeeds`は
         // `FeInput`構築のみの検証で、`fit()`のdf調整（`df_model=neffects`のみになる）・
-        // `r_squared_adj`/`aic`/`bic`計算までは通していなかった、rust-reviewer指摘）。
+        // パネル固有R²/`aic`/`bic`計算までは通していなかった、rust-reviewer指摘）。
         // n=6・n_entities=3・k=0でdf_model=neffects=3・df_resid=3。
         let entity = strings(&["a", "a", "b", "b", "c", "c"]);
         let y = [1.0, 3.0, 5.0, 7.0, 2.0, 4.0];
@@ -2784,7 +2972,9 @@ mod tests {
         assert_eq!(fe.std_errors().nrows(), 0);
         assert!(fe.aic().is_finite());
         assert!(fe.bic().is_finite());
-        assert!(fe.r_squared_adj().is_finite());
+        assert!(fe.r_squared_within().is_finite());
+        assert!(fe.r_squared_between().is_finite());
+        assert!(fe.r_squared_overall().is_finite());
     }
 
     #[test]

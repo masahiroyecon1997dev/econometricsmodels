@@ -714,6 +714,12 @@ impl FeEstimator {
         // nested時は0）とは別軸の値であることに注意——`extra_df=0`のケースでも、
         // 標準誤差のスケールは`n-k`ベースだがt検定の自由度は`df_resid`（`n-k-neffects`）の
         // ままで、両者は意図的に異なる分母を使う。
+        //
+        // `StudentsT::new`は自由度が正でない場合に失敗するが、ここでは`n <= df_model`の
+        // 検証（関数冒頭）で`df_resid = n - df_model >= 1`が既に保証されているため
+        // 理論上到達不能（Issue #185のカバレッジ監査で判明、`xtx_inverse`と同じ
+        // 「保証済みの不変条件に対する防御的`Result`化」、`.claude/rules/rust-style.md`
+        // 「テスト」参照）。それでも`unwrap`はせず`Result`を返す契約を守る。
         let t_dist = StudentsT::new(0.0, 1.0, df_resid as f64)
             .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
         let t_crit = inference::critical_value(&t_dist, confidence_level);
@@ -2131,6 +2137,30 @@ mod tests {
         for r in fe.estimator().residuals().col(0).iter() {
             assert!(r.abs() < 1e-9);
         }
+    }
+
+    #[test]
+    fn fe_estimator_fit_exposes_input_and_cov_type_via_getters() {
+        // `input()`/`cov_type()`（Issue #185、カバレッジ監査で判明した未検証の単純
+        // getter）。`ols::fit_exposes_input_cov_type_and_residuals_via_getters`と同型。
+        let entity = strings(&["a", "a", "b", "b"]);
+        let x1 = vec![1.0, 2.0, 3.0, 4.0];
+        let y = [7.0, 9.0, 11.0, 13.0];
+        let input =
+            FeInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let fe = FeEstimator::fit(
+            input,
+            FeEffects::OneWay,
+            FeCovType::Cluster { groups: None },
+            0.95,
+        )
+        .unwrap();
+
+        assert_eq!(fe.input().nobs(), 4);
+        assert_eq!(fe.input().dep_var_name(), "y");
+        assert_eq!(fe.cov_type(), &FeCovType::Cluster { groups: None });
     }
 
     #[test]

@@ -10,8 +10,9 @@ iv_crosscheck.json）を生成するスクリプト。
 
 ## 対象範囲
 
-- **cov_type**: classical/hc0/hc1/cluster/hac。hc2/hc3は対象外
-  （`iv-api-design.md`3.1節、ivreg側にレバレッジ算出の確立した参照実装が無いため）。
+- **cov_type**: classical/hc0〜hc3/cluster/hac。hc2/hc3は`vcovHC(type="HC2"/"HC3")`
+  で計算でき本実装と数値一致することを実機確認済みのため対象に含む
+  （`iv-api-design.md`3.1節、`benchmark/iv/references/run_ivreg.R`参照）。
 - **weak_instrument_f・sargan（過剰識別検定）**: ivregの`summary(diagnostics=TRUE)`が
   常にclassical（iid）vcovで計算する仕様のため、cov_typeによらず同じ値を全cov_type
   エントリに含める（`weak_instrument_f_statistics`/`overid_statistic`が常にclassical
@@ -77,7 +78,7 @@ X_EXOG_BY_SCENARIO = {
     "moderate_multicollinearity": ["x1", "x2"],
     "high_condition_number": ["x1", "x2"],
 }
-COV_TYPES = ["classical", "hc0", "hc1", "hac", "cluster"]
+COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster"]
 
 
 def _ivreg_formula(
@@ -280,9 +281,9 @@ def build_fixtures() -> dict:
         "r_version": r_version,
         "ivreg_version": ivreg_version,
         "note": (
-            "hc2/hc3はここに含まない（ivreg側にレバレッジ算出の確立した参照実装が"
-            "無いため、iv-api-design.md 3.1節）。GMMはivregが対応していないため"
-            "対象外（5.3節、Rクロスチェック省略の例外規定）。"
+            "hc2/hc3も`vcovHC(type=\"HC2\"/\"HC3\")`で計算し含める（本実装と数値"
+            "一致することを実機確認済み、iv-api-design.md 3.1節）。GMMはivregが"
+            "対応していないため対象外（5.3節、Rクロスチェック省略の例外規定）。"
             "weak_instrument_f・sargan_statistic/sargan_p_valueはivregの"
             "summary(diagnostics=TRUE)が常にclassical vcovで計算する仕様のため、"
             "全cov_typeエントリで同じ値になる（実測確認済み）。just_identified"

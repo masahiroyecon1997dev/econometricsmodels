@@ -148,8 +148,11 @@
 //!   GMMクロスチェック実装中に発覚・修正。`linearmodels`の`HomoskedasticWeightMatrix`
 //!   が常に中心化する設計と実測突き合わせて判明）。
 //! - `hc0`〜`hc3`: `two_sls.rs`の`hc_cov_params`と同型（`X̂`→`Z`）。HC2/HC3のレバレッジは
-//!   `Z`から計算する自己拡張で、**外部参照実装での検証は不可能**（2SLS自身のHC2/HC3が
-//!   既にこの位置づけ、`iv-api-design.md`3.1節参照。ユーザー確認済み）。**HC1の小標本補正
+//!   `Z`から計算する自己拡張で、**GMM自体の外部参照実装での検証は不可能**（R `ivreg`が
+//!   GMMに対応していないため、`iv-api-design.md`5.3節。2SLSのHC2/HC3はR `ivreg`+
+//!   `sandwich::vcovHC`で検証可能なことを実機確認済み——`iv-api-design.md`3.1節、
+//!   `refactoring-candidates.md`項目12——だが、GMMはivreg非対応という別軸の制約が
+//!   残るため対象外のまま。ユーザー確認済み）。**HC1の小標本補正
 //!   `n/(n-k)`・クラスターの補正`(G/(G-1))((n-1)/(n-k))`はどちらも`l`（全操作変数の数）
 //!   ではなく`k`（構造方程式の係数の数）を使う**（rust-reviewerの指摘で修正）:
 //!   補正対象の残差`êᵢ = yᵢ - xᵢ'β̂`は常に`k`個のパラメータで推定された構造残差であり、
@@ -1010,9 +1013,12 @@ fn invert_spd(mat: &Mat<f64>, dim: usize, context: &str) -> Result<Mat<f64>, IvE
 
 /// HC0〜HC3ロバストなモーメント条件の分散共分散行列（cov_type用）: `Σᵢ scaleᵢ² zᵢzᵢ'`
 /// （l×l）。`two_sls.rs`の`hc_cov_params`と同型の自己拡張（`X̂`→`Z`）で、レバレッジは
-/// `Z`（点推定用の`ztz`をそのまま流用）から計算する——**外部参照実装での検証は不可能**
-/// （2SLS自身のHC2/HC3と同じ位置づけ、`iv-api-design.md`3.1節）。モジュール冒頭の
-/// docコメント「標準誤差・検定統計量（cov_type対応）」参照。
+/// `Z`（点推定用の`ztz`をそのまま流用）から計算する——**GMM自体の外部参照実装での検証は
+/// 不可能**（R `ivreg`が2SLSのみ対応でGMMには対応していないため、`iv-api-design.md`
+/// 5.3節）。2SLSのHC2/HC3は逆にR `ivreg`+`sandwich::vcovHC`で検証可能なことを実機確認
+/// 済み（`iv-api-design.md`3.1節、`refactoring-candidates.md`項目12）だが、GMMは
+/// ivreg非対応という別軸の制約のため対象外のまま。モジュール冒頭のdocコメント
+/// 「標準誤差・検定統計量（cov_type対応）」参照。
 ///
 /// **HC1の小標本補正`n/(n-k)`は`l`（全操作変数の数）ではなく`k`（構造方程式の係数の数）を
 /// 使う**（rust-reviewerの指摘で修正）: 補正対象の残差`êᵢ = yᵢ - xᵢ'β̂`は常にk個の

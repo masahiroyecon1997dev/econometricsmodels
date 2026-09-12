@@ -260,9 +260,16 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-30、`tests/test_iv_fixtures.py`解説時の
   ユーザー指摘、R実機検証で確認（`ivreg`/`sandwich`とも devcontainerに
   導入済みのものをそのまま使用）。
-- **状態**: 未対応（優先度: 高。次にIV関連のリファクタリング・
-  クロスチェック拡充に着手する際は、まず本項目の実機検証結果を
-  再現・拡張してから着手することを推奨）
+- **状態**: 対応済み（2026-09-12）。`benchmark/iv/references/run_ivreg.R`に
+  hc2/hc3の`vcovHC(type="HC2"/"HC3")`分岐を追加し、
+  `generate_iv_crosscheck_fixtures.py`のCOV_TYPESに追加して
+  `iv_crosscheck.json`を再生成、`tests/iv/test_iv_crosscheck.py`に
+  hc2/hc3をCOV_TYPESとして追加（既存のRTOL_STRICT=1e-8でdf1境界
+  シナリオ含め全て通過、実測で許容誤差の追加緩和は不要だった）。
+  `iv-api-design.md`3.1節・5.2節・冒頭未決着事項、`test_iv_reference.py`・
+  `test_iv_crosscheck.py`のdocstring、`engine/src/iv/two_sls.rs`・
+  `gmm.rs`のdocコメントの「参照実装が無い」という誤った記述も訂正した
+  （GMM側はivreg非対応という結論は維持し根拠のみ訂正、ユーザー承認済み）。
 
 ### 13. `wu_hausman_statistic`の`cov_type="hac"`時のNone原因調査について、R側では既に独立検証済み（Issue #233）という事実が`test_iv_fixtures.py`側のドキュメントに反映されていない
 

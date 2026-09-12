@@ -20,10 +20,15 @@ Note:
       `benchmark/iv/fixtures/generate_iv_fixtures.py`のモジュールdoc
       コメント参照）。GMMのlinearmodels（`IVGMM`）クロスチェックは
       別途フィクスチャ生成からやり直す必要がある。
-    - `hc2`/`hc3`はlinearmodelsに対応する実装が無いため対象外（`iv.json`の
-      `_meta.note`参照）。`engine`側のRust単体テスト
+    - `hc2`/`hc3`は`linearmodels`固有の制約により対象外（`linearmodels.iv.covariance`が
+      hc2/hc3相当の実装を持たないため、`iv.json`の`_meta.note`参照）。ただし
+      「参照実装が無い」わけではない——R `ivreg`+`sandwich::vcovHC`では検証可能なことを
+      実機確認済みで、`test_iv_crosscheck.py`が独立にクロスチェックする
+      （`iv-api-design.md`3.1節、`refactoring-candidates.md`項目12）。`engine`側の
+      Rust単体テスト
       （`two_sls.rs`の`fit_computes_hc2_std_errors_matching_manual_sandwich_formula`
-      等、独立な素朴ループでの手計算とのクロスチェック）による検証に留める。
+      等、独立な素朴ループでの手計算とのクロスチェック）は数式レベルの細粒度回帰確認と
+      して引き続き有効。
     - `wu_hausman_statistic`はcov_type="hac"のときlinearmodels側との対応式が
       不明なためフィクスチャ自体が`None`（原因未特定、次セッションで別途調査
       予定、`benchmark/iv/references/linearmodels_ref.py`のモジュールdocコメント参照）。

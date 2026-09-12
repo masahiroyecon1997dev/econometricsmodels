@@ -5,12 +5,15 @@ FE/RE共通の設計は[`panel-api-design.md`](./panel-api-design.md)を参照�
 
 **ステータス**: 確定（1章: 引数設計／2章: 結果設計／3章: 標準誤差・検定／
 4章: 内部実装・共通化／5章: リファレンス実装・テスト方針／
-6章: IV固有論点）。IV側の論点はすべて確定。ただし以下2点の細部は、
+6章: IV固有論点）。IV側の論点はすべて確定。ただし以下1点の細部は、
 Issue #171（`linearmodels`/`ivreg`とのベンチマーク作成）でリファレンス実装を確認して
 から最終判断する未決着事項として残っている。
 - 3.2節のGMMの検定分布（z分布のまま確定とするか、実務慣行に合わせてt分布・
   切り替えオプションにすべきか。Issue #159時点で追記）
-- 3.1節のIV版HC2/HC3（レバレッジ算出式に確立した参照実装が無い。Issue #166時点で追記）
+
+3.1節のIV版HC2/HC3（レバレッジ算出式の外部検証）は解消済み: R `ivreg`+
+`sandwich::vcovHC`で検証可能なことを実機確認した（`linearmodels`は引き続き非対応、
+詳細は3.1節）。
 
 ## 1. 引数設計（確定）
 
@@ -116,13 +119,20 @@ Issue #171（`linearmodels`/`ivreg`とのベンチマーク作成）でリファ
 - 2SLSの分散はサンドイッチ型（`(X'PzX)^-1 X'Pz Ω Pz X (X'PzX)^-1`、`Ω`の推定方法が
   `cov_type`で変わる）。**GMMは`cov_type`（最終SEの計算方法）と`weight_type`（点推定に使う
   重み行列）を分離する**（詳細は6.2）。
-- **`hc2`/`hc3`（レバレッジ`h_ii`によるスケーリング）は引き続き外部の参照実装で検証できない**
-  （Issue #171で再確認、`benchmark/iv/references/linearmodels_ref.py`のモジュールdocstring
-  参照）: `linearmodels.iv.covariance`は`Homoskedastic`/`Heteroskedastic`/`Kernel`/
-  `Clustered`のみで、R `ivreg`も同様（`hatvalues.ivreg`の実装がソース上コメントアウトされて
-  いる）。実装（`engine/src/iv/two_sls.rs`）はOLSのHC2/HC3を代数的に拡張した自作の拡張の
-  ままで、外部パッケージとの数値照合はできない（`engine`のRust単体テストによる独立な
-  手計算クロスチェックのみで検証を継続する）。
+- **`hc2`/`hc3`（レバレッジ`h_ii`によるスケーリング）は`linearmodels`では引き続き検証できないが、
+  R `ivreg`+`sandwich`では検証可能**（`refactoring-candidates.md`項目12で実機確認、
+  2026-09-11）。`linearmodels.iv.covariance`は`Homoskedastic`/`Heteroskedastic`/`Kernel`/
+  `Clustered`のみで、hc2/hc3相当が無い（Issue #171で確認、
+  `benchmark/iv/references/linearmodels_ref.py`のモジュールdocstring参照）。一方R `ivreg`は
+  `hatvalues.ivreg`（`type="stage2"`既定、第二段階OLSのレバレッジをそのまま返す）が実際に
+  動作する実装であり、`sandwich::vcovHC(fit, type="HC2"/"HC3")`が計算でき、実装
+  （`engine/src/iv/two_sls.rs`の`hc_cov_params`、`X̂`ベースのレバレッジ）と数値一致することを
+  実機確認した（`benchmark/iv/references/run_ivreg.R`・`tests/iv/test_iv_crosscheck.py`で
+  クロスチェック済み）。**旧記述（「ivregもhatvalues.ivregがコメントアウトされており対象外」）は
+  誤りだった**——`ivreg`がdevcontainerにインストールできずサイレントに失敗していた時期
+  （Issue #166/#171、CLAUDE.md 10章）の調査に基づく可能性が高い。`engine`のRust単体テスト
+  （手計算オラクルとの自己参照的な突き合わせ）は数式レベルの細粒度回帰確認として引き続き
+  有効だが、真に独立した検証は`test_iv_crosscheck.py`のR比較で行う。
 - **`classical`/`hc0`〜`hc1`/`cluster`/`hac`は`linearmodels`の`cov_type`/`debiased`との対応が
   実測で確定した**（Issue #171）: `classical`↔(`unadjusted`, `debiased=True`)、
   `hc0`↔(`robust`, `debiased=False`)、`hc1`↔(`robust`, `debiased=True`)、
@@ -197,10 +207,9 @@ Python（`linearmodels`）側のみで2SLS/GMMともに検証し、2SLS/GMMと�
 `benchmark/iv/fixtures/generate_iv_crosscheck_fixtures.py`・
 `tests/iv/test_iv_crosscheck.py`）。
 
-`ivreg`はclassical/hc0/hc1/cluster/hacの`vcov`（`vcov()`/`sandwich::vcovHC`/`vcovCL`/
+`ivreg`はclassical/hc0〜hc3/cluster/hacの`vcov`（`vcov()`/`sandwich::vcovHC`/`vcovCL`/
 `NeweyWest`）を`coeftest()`経由でそのまま使える（`lm`と同じ`sandwich`基盤）。
-`hc2`/`hc3`は既存方針通り対象外（3.1節、ivreg側にレバレッジ算出の確立した参照実装が
-無いため）。`summary(model, diagnostics=TRUE)`は弱操作変数F統計量・Wu-Hausman・
+`hc2`/`hc3`も対応済み（3.1節）。`summary(model, diagnostics=TRUE)`は弱操作変数F統計量・Wu-Hausman・
 Sarganを一括で返すが、`vcov.`に行列を渡すと警告付きでNULL（classical）にフォールバック
 する仕様のため、**常にclassical（iid）vcovで計算される**（実測確認済み）。これは
 本実装の`weak_instrument_f_statistics`/`overid_statistic`が常にclassicalという設計

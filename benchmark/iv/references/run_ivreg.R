@@ -6,8 +6,13 @@
 # とは独立の実装によるクロスチェックとしてivregを使う（iv-api-design.md 5.2節）。
 #
 # 係数・標準誤差・R²・ロバストWald検定（f_statistic/f_p_value）は要求されたcov_type
-# （classical/hc0/hc1/cluster/hac）ごとにvcov/sandwichで計算する。hc2/hc3は対象外
-# （iv-api-design.md 3.1節、ivreg側にレバレッジ算出の確立した参照実装が無いため）。
+# （classical/hc0〜hc3/cluster/hac）ごとにvcov/sandwichで計算する。hc2/hc3は
+# `vcovHC(model, type="HC2"/"HC3")`（`ivreg:::hatvalues.ivreg`のtype="stage2"、
+# 第二段階OLSのレバレッジをそのまま使う実装）で計算でき、本実装
+# （engine/src/iv/two_sls.rsのhc_cov_params、X̂ベースのレバレッジ）と数値一致することを
+# 実機確認済み（iv-api-design.md 3.1節。旧記述「ivreg側に確立した参照実装が無い」は
+# `ivreg`がdevcontainerにインストールできなかった時期（CLAUDE.md 10章）の調査に
+# 基づく誤りだった）。
 #
 # 弱操作変数F統計量・Sargan（過剰識別検定）はivregのsummary(diagnostics=TRUE)が
 # 常にclassical（iid）vcovで計算する仕様のため（`vcov.`に行列を渡すと警告付きで
@@ -85,7 +90,7 @@ df_inference <- df.residual(model)
 # 適用できる関数として持つ（Wu-Hausman診断のvcov.引数に渡すため、後述）。
 if (cov_type == "classical") {
   vcov_fn <- function(m) vcov(m)
-} else if (cov_type %in% c("hc0", "hc1")) {
+} else if (cov_type %in% c("hc0", "hc1", "hc2", "hc3")) {
   vcov_fn <- function(m) vcovHC(m, type = toupper(cov_type))
 } else if (cov_type == "cluster") {
   if (length(args) < 4) {

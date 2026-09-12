@@ -30,8 +30,13 @@ Newey-West小標本補正の慣習差がより強く出るためと考えられ�
 `RTOL_HAC`を超えることがあるため、同じ`ATOL_F_PVALUE`を使う。
 
 Note:
-    - `hc2`/`hc3`はivreg側にレバレッジ算出の確立した参照実装が無いため対象外
-      （`iv-api-design.md`3.1節）。
+    - `hc2`/`hc3`は`vcovHC(model, type="HC2"/"HC3")`（`ivreg:::hatvalues.ivreg`の
+      type="stage2"、第二段階OLSのレバレッジをそのまま使う実装）で計算でき、本実装
+      （`engine/src/iv/two_sls.rs`の`hc_cov_params`）と数値一致することを実機確認済み
+      のため対象に含む（`iv-api-design.md`3.1節。旧記述「ivreg側に確立した参照実装が
+      無い」は`ivreg`がdevcontainerにインストールできなかった時期の調査に基づく
+      誤りだった）。`linearmodels`（`test_iv_reference.py`）は引き続き対応していない
+      ため、hc2/hc3の主リファレンス比較はこのファイルのみで行う。
     - `weak_instrument_f`・`sargan_statistic`/`sargan_p_value`はivregの
       `summary(diagnostics=TRUE)`が常にclassical vcovで計算する仕様のため、
       全cov_typeで同じ値になる（`benchmark/iv/references/run_ivreg.R`参照）。
@@ -108,7 +113,7 @@ RTOL_HAC_WU_HAUSMAN_SMALL_N = TOLERANCES["iv_crosscheck"][
     "rtol_hac_wu_hausman_small_n"
 ]
 
-COV_TYPES = ["classical", "hc0", "hc1", "hac"]
+COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
 
 INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
 X_EXOG_BY_SCENARIO = {

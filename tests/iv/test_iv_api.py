@@ -157,17 +157,6 @@ def test_weak_instrument_f_statistics_keyed_by_endog_name(iv_dataset):
     assert res.weak_instrument_f_statistics["endog1"] > 0.0
 
 
-def test_weak_instrument_f_statistics_empty_when_no_endog(iv_dataset):
-    res = IV(
-        iv_dataset, y="y", x_exog=["x1"], x_endog=[], instruments=[]
-    ).fit()
-    assert res.weak_instrument_f_statistics == {}
-    # x_endog=[]のとき、overid/wu_hausmanも意味を持たないためNone
-    # （`iv.py`のdocstring参照）。
-    assert res.overid_statistic is None
-    assert res.wu_hausman_statistic is None
-
-
 def test_overid_statistic_present_when_over_identified(iv_dataset):
     """`instruments`が2本、`x_endog`が1本（過剰識別）なので`overid_statistic`
     はNoneにならない（2SLSのSargan検定）。

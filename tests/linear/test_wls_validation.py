@@ -156,7 +156,7 @@ def test_const_collision_with_include_intercept_raises():
 def test_empty_x_raises(dataset):
     """`x`が空リストの場合`ValidationError`（OLSと同じ検証）。"""
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY)):
+    with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY, role="x")):
         WLS(df, y="y", x=[], weight="weight").fit()
 
 

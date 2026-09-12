@@ -137,7 +137,7 @@ def test_const_collision_with_include_intercept_raises():
 
 def test_empty_x_raises(dataset):
     """`x`が空リストの場合`ValidationError`。"""
-    with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY)):
+    with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY, role="x")):
         OLS(dataset, y="y", x=[]).fit()
 
 

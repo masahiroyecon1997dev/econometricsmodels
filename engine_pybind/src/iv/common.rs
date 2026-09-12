@@ -68,7 +68,7 @@ use crate::linear::common::{least_squares_error_is_computation_error, mat_to_vec
 use crate::linear::ols::{OLSResult, ols_estimator_to_result};
 use crate::validation::{
     RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
-    validate_no_duplicate_within_role,
+    validate_no_duplicate_within_role, validate_x_non_empty,
 };
 
 /// `engine::iv::common::IvError`をPython例外に変換する。
@@ -554,7 +554,8 @@ fn parse_weight_type(df: &DataFrame, options: &IvOptions) -> PyResult<(WeightTyp
 /// - 列の抽出時に発覚する問題（列が存在しない、数値/文字列型にキャストできない、
 ///   欠損値・NaN・無限大を含む等）は`column_extraction`の責務で`ValidationError`
 /// - `y`/`x_exog`/`x_endog`/`instruments`間の重複、各ロール内部の重複、
-///   `include_intercept=true`のときの`x_exog`と`"const"`列との衝突は
+///   `include_intercept=true`のときの`x_exog`と`"const"`列との衝突、
+///   `x_endog`/`instruments`が空リストの場合（Issue #306、`x_exog`は対象外）は
 ///   ここ（受け口）の責務で`ValidationError`
 /// - `method`の文字列が`"2sls"`/`"gmm"`のいずれでもない場合は`ValidationError`
 /// - `cov_type`の文字列が不正な場合は`ValidationError`（`parse_iv_cov_type`参照）
@@ -593,9 +594,19 @@ pub(crate) fn build_iv_input(
     validate_no_duplicate_within_role("instruments", &instruments)?;
     validate_no_const_collision(&x_exog, options.include_intercept)?;
 
-    // `x_exog`/`x_endog`/`instruments`はいずれも空リストを許容する
-    // （`iv-api-design.md`1.1節、`IvInput`の構造体docコメント参照。識別可能性の検証は
-    // 2SLS/GMM推定器側の責務）ため、`validate_x_non_empty`は呼ばない。
+    // `x_exog`は空リストを許容する（内生変数のみのモデルも成立するため、
+    // `iv-api-design.md`1.1節）が、`x_endog`/`instruments`はいずれも最低1要素を要求する
+    // （Issue #306、2026-08-30ユーザー決定）。`x_endog=[]`は実質OLSと等価な退化ケースで
+    // あり「そもそもIVを使用すること自体が誤り」と判断し、`OLS`への切り替えなしにそのまま
+    // `IV`に渡せる利便性よりも誤用防止を優先した。`x_endog`/`instruments`を独立に検証する
+    // ため、`instruments=[]`だが`x_endog`が非空という順序条件違反（`InsufficientInstruments`、
+    // `fit`関数参照）とは別に、`x_endog=[]`だが`instruments`が非空という「操作変数はあるが
+    // 対応する内生変数が無い」誤用も検出できる。`engine::iv::common::IvInput`自体は
+    // このビジネスルールを持たず、引き続き空リストを許容する薄い構造体のまま
+    // （識別可能性を含む業務ルールの検証はPython API境界である`engine_pybind`側の責務、
+    // `IvInput`の構造体docコメント参照）。
+    validate_x_non_empty("x_endog", &x_endog)?;
+    validate_x_non_empty("instruments", &instruments)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
     let y_slice = extract_f64_column(df, &y)?;
@@ -669,7 +680,11 @@ pub(crate) fn fit(
     // 識別の順序条件（`TwoSlsEstimator::fit`/`GmmEstimator::fit`のいずれも冒頭で検証する
     // のと同じチェック）を`compute_first_stage`より先に行う。過小識別な入力で無駄な
     // 第一段階回帰を走らせないため（rust-reviewerの指摘、`compute_first_stage`自体は
-    // この条件を検証しないため呼び出し元の責務）。
+    // この条件を検証しないため呼び出し元の責務）。この時点で`build_iv_input`の
+    // `validate_x_non_empty("x_endog"/"instruments", ...)`（Issue #306）を既に通過して
+    // いるため`k_endog`/`k_instruments`はともに1以上であり、ここでの`<`判定は「両方
+    // 指定されているが数が足りない」過小識別ケースのみを扱う（「そもそも変数が
+    // 指定されていない」退化ケースとは排他的、rust-reviewerの指摘で明記）。
     if input.k_instruments() < input.k_endog() {
         return Err(iv_error_to_pyerr(IvError::InsufficientInstruments {
             n_instruments: input.k_instruments(),
@@ -842,22 +857,56 @@ mod tests {
     }
 
     #[test]
-    fn build_iv_input_allows_empty_x_endog_and_instruments() {
+    fn build_iv_input_returns_error_when_x_endog_and_instruments_are_both_empty() {
+        // Issue #306: `x_endog=[]`かつ`instruments=[]`（実質OLSと等価な退化ケース）を
+        // 誤用として`ValidationError`で弾く（旧仕様では成功していた、
+        // `docs/planning/specs/iv-api-design.md`1.1節）。
         let df = well_formed_df();
         let options = default_options();
 
-        let (input, ..) = build_iv_input(
+        let result = build_iv_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
             vec![],
             vec![],
             &options,
-        )
-        .unwrap();
+        );
+        assert!(result.is_err());
+    }
 
-        assert_eq!(input.k_endog(), 0);
-        assert_eq!(input.k_instruments(), 0);
+    #[test]
+    fn build_iv_input_returns_error_when_x_endog_is_empty_but_instruments_is_not() {
+        // `x_endog`/`instruments`は独立に最低1要素を要求する（Issue #306）ため、
+        // 対応する内生変数の無い操作変数だけを指定する誤用も検出する。
+        let df = well_formed_df();
+        let options = default_options();
+
+        let result = build_iv_input(
+            &df,
+            "y".to_string(),
+            vec!["x1".to_string()],
+            vec![],
+            vec!["z1".to_string()],
+            &options,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_iv_input_returns_error_when_instruments_is_empty_but_x_endog_is_not() {
+        let df = well_formed_df();
+        let options = default_options();
+
+        let result = build_iv_input(
+            &df,
+            "y".to_string(),
+            vec!["x1".to_string()],
+            vec!["endog1".to_string()],
+            vec![],
+            &options,
+        );
+        assert!(result.is_err());
     }
 
     #[test]

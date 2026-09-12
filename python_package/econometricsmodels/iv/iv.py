@@ -90,11 +90,11 @@ class IV:
             ValidationError: The input or options are invalid (a
                 column is missing, contains missing values or
                 NaN/infinity, `y`/`x_exog`/`x_endog`/`instruments`
-                overlap, insufficient observations,
-                `confidence_level` out of range, an unknown `cov_type`
-                or (`method="gmm"` only) `weight_type` string, or too
-                few instruments for identification). A subclass of
-                `ValueError`.
+                overlap, `x_endog` or `instruments` is empty,
+                insufficient observations, `confidence_level` out of
+                range, an unknown `cov_type` or (`method="gmm"` only)
+                `weight_type` string, or too few instruments for
+                identification). A subclass of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. a singular first- or second-stage
                 design matrix). A subclass of `RuntimeError`.
@@ -272,9 +272,9 @@ class IvResults:
         (homoskedastic) formula regardless of `cov_type`. Not the
         same as the plain F-statistic of the corresponding regression
         in `first_stage()`, which includes `x_exog`'s contribution
-        too. Empty when `x_endog=[]`. Computed the same way for both
-        `method="2sls"` and `method="gmm"`; see
-        `docs/planning/specs/iv-api-design.md` section 6.4.
+        too. Computed the same way for both `method="2sls"` and
+        `method="gmm"`; see `docs/planning/specs/iv-api-design.md`
+        section 6.4.
         """
         return self._raw.weak_instrument_f_statistics
 
@@ -308,12 +308,11 @@ class IvResults:
         `weak_instrument_f_statistics`, this is always computed under
         the same `cov_type` passed to `fit()`.
 
-        `None` when there are no endogenous variables to test
-        (`x_endog=[]`), or when the augmented regression cannot be
-        estimated (e.g. the first-stage residual has zero variance,
-        such as when an instrument perfectly predicts its endogenous
+        `None` when the augmented regression cannot be estimated
+        (e.g. the first-stage residual has zero variance, such as
+        when an instrument perfectly predicts its endogenous
         variable, or there are too few observations for the extra
-        residual columns) — neither case affects the validity of
+        residual columns) — this does not affect the validity of
         the other results. **Always `None` for `method="gmm"`**
         (not implemented for GMM). See
         `docs/planning/specs/iv-api-design.md` section 6.6.

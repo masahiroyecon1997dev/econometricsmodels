@@ -418,7 +418,7 @@ def check_const_collision_with_include_intercept_raises(estimator_cls):
 
 
 def check_empty_x_raises(dataset, estimator_cls):
-    with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY)):
+    with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY, role="x")):
         estimator_cls(dataset, y="y", x=[]).fit()
 
 

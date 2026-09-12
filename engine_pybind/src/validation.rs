@@ -29,12 +29,18 @@ pub enum RoleValue<'a> {
     Multi(&'a [String]),
 }
 
-/// `x`が空リストでないことを検証する。
-pub fn validate_x_non_empty(x: &[String]) -> PyResult<()> {
+/// 複数列ロール（`x`/`x_endog`/`instruments`等）が空リストでないことを検証する。
+/// `role_name`はエラーメッセージに使う。
+///
+/// 元は`x`専用の関数だったが、IVの`x_endog`/`instruments`（Issue #306、`x_exog`とは
+/// 異なり空リストを許容しない）でも同じ検証が必要になったため`validate_no_duplicate_
+/// within_role`と同じ形で汎用化した。既存の呼び出し元（OLS/WLS/Logit/Probit/Tobit）は
+/// `role_name="x"`で呼ぶため、メッセージ文言は変わらない。
+pub fn validate_x_non_empty(role_name: &str, x: &[String]) -> PyResult<()> {
     if x.is_empty() {
-        return Err(ValidationError::new_err(
-            "x must contain at least one column name",
-        ));
+        return Err(ValidationError::new_err(format!(
+            "{role_name} must contain at least one column name"
+        )));
     }
     Ok(())
 }
@@ -174,12 +180,21 @@ mod tests {
 
     #[test]
     fn validate_x_non_empty_ok_for_non_empty() {
-        assert!(validate_x_non_empty(&["x1".to_string()]).is_ok());
+        assert!(validate_x_non_empty("x", &["x1".to_string()]).is_ok());
     }
 
     #[test]
     fn validate_x_non_empty_returns_error_for_empty() {
-        assert!(validate_x_non_empty(&[]).is_err());
+        assert!(validate_x_non_empty("x", &[]).is_err());
+    }
+
+    #[test]
+    fn validate_x_non_empty_returns_error_using_custom_role_name() {
+        // `role_name`がメッセージにそのまま使われることの直接確認は`PyErr::to_string()`が
+        // GILを要求するためできない（`nonlinear/CLAUDE.md`「テストの制約」参照）。ここでは
+        // `role_name`が異なっても（`x`専用だった旧実装から汎用化した後も）挙動そのもの
+        // （空リスト検出）が変わらないことのみ確認する。
+        assert!(validate_x_non_empty("x_endog", &[]).is_err());
     }
 
     #[test]

@@ -442,7 +442,7 @@ pub(crate) fn build_tobit_input(
     let cov_type_lower = options.cov_type.to_lowercase();
     let method_lower = options.method.to_lowercase();
 
-    validate_x_non_empty(&x)?;
+    validate_x_non_empty("x", &x)?;
     validate_no_duplicate_roles(&[("y", RoleValue::Single(&y)), ("x", RoleValue::Multi(&x))])?;
     validate_no_duplicate_within_role("x", &x)?;
     validate_no_const_collision(&x, options.include_intercept)?;

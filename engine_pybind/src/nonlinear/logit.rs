@@ -304,7 +304,7 @@ pub(crate) fn build_logit_input(
 
     // 完全な多重共線性を早期に、分かりやすいエラーで防ぐ（`validation.rs`に集約、
     // OLS/WLSと共通、`.claude/rules/rust-style.md`参照）。
-    validate_x_non_empty(&x)?;
+    validate_x_non_empty("x", &x)?;
     validate_no_duplicate_roles(&[("y", RoleValue::Single(&y)), ("x", RoleValue::Multi(&x))])?;
     validate_no_duplicate_within_role("x", &x)?;
     validate_no_const_collision(&x, options.include_intercept)?;

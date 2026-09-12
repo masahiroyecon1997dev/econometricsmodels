@@ -27,8 +27,10 @@ Issue #171（`linearmodels`/`ivreg`とのベンチマーク作成）でリファ
   不可）であり、`OLSOptions.cluster_col`のような「機能をopt-inするための任意列」とは性質が
   異なるため。`panel-api-design.md`の`entity`（FE/REで必須→独立引数）と同じ原則。
 - `x_exog`は空リストを許容する（内生変数のみのモデルも成立するため）。`x_endog`/
-  `instruments`は最低1要素を要求する見込み（丁度識別・過剰識別の判定を含む具体的な
-  バリデーションルールは確定）。
+  `instruments`はいずれも独立に最低1要素を要求し、空リストの場合は`ValidationError`
+  にする（Issue #306、2026-08-30ユーザー決定）。`x_endog=[]`は実質OLSと等価な退化
+  ケースであり「そもそもIVを使用すること自体が誤り」と判断し、`OLS`への切り替え
+  なしにそのまま`IV`に渡せる利便性よりも誤用防止を優先した。
 - **命名規則**: bareネーミング（`_col`サフィックスなし）。`panel-api-design.md`の`entity`/
   `time`と同じ考え方（モデルを構成する中核的な変数）。
 

@@ -372,7 +372,7 @@ def test_sigma_collision_raises():
 
 
 def test_empty_x_raises(censored_dataset):
-    with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY)):
+    with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY, role="x")):
         Tobit(censored_dataset, y="y", x=[]).fit()
 
 

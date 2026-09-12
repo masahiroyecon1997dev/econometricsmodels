@@ -270,12 +270,61 @@ def test_insufficient_observations_raises(iv_dataset):
 def test_insufficient_instruments_raises(iv_dataset):
     """識別の順序条件`len(instruments) >= len(x_endog)`を満たさない場合
     `ValidationError`（`IvError::InsufficientInstruments`）。
+
+    `x_endog`・`instruments`のどちらも1要素以上（Issue #306の空リスト検証には
+    引っかからない）だが、`instruments`の数が`x_endog`に足りない組み合わせにする
+    必要がある（`test-coverage-candidates.md`項目52、Issue #306対応時に必須の修正）。
     """
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.INSUFFICIENT_INSTRUMENTS, n_instruments=0, n_endog=1
+            msgs.INSUFFICIENT_INSTRUMENTS, n_instruments=1, n_endog=2
         ),
+    ):
+        IV(
+            iv_dataset,
+            y="y",
+            x_exog=["x1"],
+            x_endog=["endog1", "z2"],
+            instruments=["z1"],
+        ).fit()
+
+
+@pytest.mark.parametrize(
+    "x_endog, instruments",
+    [
+        pytest.param([], [], id="both_empty"),
+        pytest.param([], ["z1"], id="x_endog_empty_only"),
+    ],
+)
+def test_x_endog_empty_raises(iv_dataset, x_endog, instruments):
+    """`x_endog`が空リストの場合`ValidationError`（Issue #306）。
+
+    旧仕様では`x_endog=[]`・`instruments=[]`は実質OLSとして成功していたが、
+    「そもそもIVを使用すること自体が誤り」と判断し弾く方向にした
+    （2026-08-30ユーザー決定）。`x_endog=[]`・`instruments`非空（対応する内生変数の
+    無い操作変数だけを指定する誤用）も同様に弾く。
+    """
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.X_EMPTY, role="x_endog")
+    ):
+        IV(
+            iv_dataset,
+            y="y",
+            x_exog=["x1"],
+            x_endog=x_endog,
+            instruments=instruments,
+        ).fit()
+
+
+def test_instruments_empty_raises(iv_dataset):
+    """`instruments`が空リストの場合`ValidationError`（Issue #306）。
+
+    `x_endog`は非空にする（空だと`test_x_endog_empty_raises`の`x_endog`側の
+    バリデーションが先に発火してしまうため）。
+    """
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.X_EMPTY, role="instruments")
     ):
         IV(
             iv_dataset,

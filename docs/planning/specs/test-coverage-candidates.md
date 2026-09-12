@@ -1272,14 +1272,12 @@
   比較式であることを確認済みのため、優先度は低いと考える。
 - **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘、
   `engine/src/iv/two_sls.rs`で実装確認。
-- **状態**: 対応必須に格上げ（ユーザー決定2026-08-30）。
-  `refactoring-candidates-3.md`項目9・10（`x_endog`/`instruments`が
-  空の場合を`ValidationError`で弾く実装、別セッションで対応予定）が
-  入ると、現状の`x_endog=1`・`instruments=0`という組み合わせでは
-  「空リスト」バリデーションが先に発火し、本来確認したい識別の順序条件
-  （両方とも1要素以上だが数が足りない場合）を検証できなくなる。そのため
-  項目9・10の実装と**同時に**`x_endog=["endog1", "x1"]`・
-  `instruments=["z1"]`（2個に対し1個）へのテスト修正が必須になる。
+- **状態**: 対応済み（Issue #306、2026-09-12）。`x_endog`/`instruments`が
+  空リストの場合を`ValidationError`で弾く実装（`refactoring-candidates.md`
+  項目9・10）と同時に、`test_insufficient_instruments_raises`
+  （`tests/iv/test_iv_validation.py`）を`x_exog=["x1"]`・
+  `x_endog=["endog1", "z2"]`・`instruments=["z1"]`（2個に対し1個、
+  `x1`は既に`x_exog`にあるため`x_endog`への転用は`z2`で行った）へ修正した。
 
 ### 53. `cov_type="cluster"`の大文字小文字非依存性（`"CLUSTER"`等）がリポジトリ全体で未検証
 

@@ -148,15 +148,16 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **状態**: 未対応（優先度低、項目81〔`refactoring-candidates-2.md`〕と
   合わせて検討）
 
-### 9.【Issue化】`iv-api-design.md`の「`x_endog`/`instruments`は最低1要素を要求する見込み」という記述が実装と食い違っている
+### 9.【解消済み】`iv-api-design.md`の「`x_endog`/`instruments`は最低1要素を要求する見込み」という記述が実装と食い違っている
 
-→ Issue #306として切り出し済み（2026-09-11）。項目10（`x_endog=[]`の
-許容可否）と統合して1つのIssueにまとめた。詳細はIssueを参照。
+→ Issue #306で対応済み（2026-09-12）。`x_endog`/`instruments`が空リストの場合を
+`ValidationError`で弾くよう実装し、`iv-api-design.md`の記述も確定表現に更新した。
 
-### 10.【Issue化】`x_endog=[]`（内生変数ゼロ、実質OLSへの意図的な縮退）を許容し続けるべきかは設計判断が必要
+### 10.【解消済み】`x_endog=[]`（内生変数ゼロ、実質OLSへの意図的な縮退）を許容し続けるべきかは設計判断が必要
 
-→ Issue #306として切り出し済み（2026-09-11）。項目9と統合済み。詳細はIssueを
-参照。
+→ Issue #306で対応済み（2026-09-12）。「誤用を防ぐ」側を採用し、`x_endog=[]`
+（`instruments=[]`も同様）は`ValidationError`にする方針で確定・実装した。項目9と
+同一の対応。
 
 ### 11. `test_iv_fixtures.py`と`test_iv_gmm_fixtures.py`の統合可否を検討した結果、完全統合は非推奨・部分的な共通化に留めるべき
 

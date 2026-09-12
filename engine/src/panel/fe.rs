@@ -42,8 +42,23 @@
 //! （`within_transform_one_way`/`within_transform_two_way`のどちらの出力にも適用できる、
 //! `column_is_zero_variance`関数doc参照）。時間不変変数（1-way）だけでなく、2-wayで
 //! time FEと完全共線な「エンティティ間で変動しない列」も同じチェックで検出できる。
+//!
+//! ## singleton検出（`validate_no_singleton_groups_one_way`/`validate_no_singleton_groups_two_way`、
+//! Issue #179）
+//!
+//! 観測数1のグループ（singleton）を明示的に検出し`PanelError::SingletonGroup`を返す
+//! （6.5節）。自動除外はしない。**下流の特異行列エラーとして偶発的に検出される形には
+//! しない**——singletonのエンティティ/時点はwithin変換後にその行が全列ゼロになり
+//! `OlsEstimator::fit`側で特異行列として（間接的に、かつ原因の分かりにくいエラー
+//! メッセージで）検出されうるが、6.5節はこれを避け、within変換の**前**に生の
+//! `entity`/`time`列から直接カウントして専用のバリデーションエラーにすることを要求する。
+//! - **1-way**: entityのみ検出（`validate_no_singleton_groups_one_way`）。
+//! - **2-way**: entity・time双方を対称に検出する（`validate_no_singleton_groups_two_way`。
+//!   `within_transform_two_way`と同様、`time`が`None`なら`PanelError::TwoWayRequiresTime`）。
+//! - 複数のsingletonグループが存在する場合は、観測順で最初に現れるグループのみを
+//!   報告する（`validate_no_zero_variance_regressors`の「最初の1件を報告」方針と統一）。
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::error::CommonError;
 use crate::panel::common::{PanelDimension, PanelError, quasi_demean_column};
@@ -240,6 +255,61 @@ pub fn within_transform_two_way(input: &FeInput) -> Result<(Vec<f64>, Vec<Vec<f6
         .collect();
 
     Ok((y, x))
+}
+
+/// 1-way FE向けのsingleton検出（6.5節）。`entity`に観測数1のグループがあれば
+/// `PanelError::SingletonGroup`を返す。
+///
+/// # Errors
+/// entityに観測数1のグループが見つかった場合は`PanelError::SingletonGroup`
+/// （`dimension: PanelDimension::Entity`）。
+pub fn validate_no_singleton_groups_one_way(input: &FeInput) -> Result<(), PanelError> {
+    reject_singleton_group(PanelDimension::Entity, input.entity())
+}
+
+/// 2-way FE向けのsingleton検出（6.5節）。entity・time双方を対称に検出する
+/// （`within_transform_two_way`と同じく`time`必須）。
+///
+/// **`time`の存在チェックを最初に行う**（`within_transform_two_way`と同じ順序に揃える。
+/// `fit()`側が複数のバリデーションを組み合わせて呼ぶ際、同じ前提条件——2-way FEには
+/// `time`が要る——のチェックタイミングが関数ごとにばらつかないようにするため）。
+/// その後、entityを先にチェックしてからtimeをチェックする（両方に該当するsingletonが
+/// あった場合はentity側を先に報告する。`FeInput`のフィールド順（entity→time）に合わせた
+/// 恣意的な優先順位）。
+///
+/// # Errors
+/// - `input.time()`が`None`の場合は`PanelError::TwoWayRequiresTime`
+/// - entityまたはtimeに観測数1のグループが見つかった場合は`PanelError::SingletonGroup`
+///   （該当する`dimension`を含む）
+pub fn validate_no_singleton_groups_two_way(input: &FeInput) -> Result<(), PanelError> {
+    let time = input.time().ok_or(PanelError::TwoWayRequiresTime)?;
+    reject_singleton_group(PanelDimension::Entity, input.entity())?;
+    reject_singleton_group(PanelDimension::Time, time)
+}
+
+/// `ids`（`entity`または`time`の列）に観測数1のグループがあれば
+/// `PanelError::SingletonGroup`を返す。
+///
+/// 複数のsingletonグループが存在する場合は、観測順で最初に現れるグループのみを報告する
+/// （`validate_no_zero_variance_regressors`の「最初の1件を報告」方針と統一）。グループの
+/// 出現回数を数える集計自体はカーディナリティのみが目的で、グループ「間」の浮動小数点
+/// 加算順序に依存しないため`HashMap`でよい（`engine/src/panel/CLAUDE.md`「`quasi_demean_
+/// column`の内部集約は`HashMap`でよい」と同じ理由）。
+fn reject_singleton_group(dimension: PanelDimension, ids: &[String]) -> Result<(), PanelError> {
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for id in ids {
+        *counts.entry(id.as_str()).or_insert(0) += 1;
+    }
+
+    for id in ids {
+        if counts[id.as_str()] == 1 {
+            return Err(PanelError::SingletonGroup {
+                dimension,
+                group_id: id.clone(),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// within変換後の説明変数の各列に分散ゼロの列がないことを検証する（6.7節）。1-way/2-way
@@ -642,6 +712,144 @@ mod tests {
                 expected: 4,
             }
         );
+    }
+
+    // ── validate_no_singleton_groups_one_way / _two_way ─────────────────────
+
+    #[test]
+    fn validate_no_singleton_groups_one_way_detects_entity_singleton() {
+        // entity "c"は観測数1（singleton）。
+        let y = [1.0, 2.0, 3.0];
+        let entity = strings(&["a", "a", "c"]);
+        let input = FeInput::from_columns(&y, &[], vec![], &entity, None, "y".into()).unwrap();
+
+        let result = validate_no_singleton_groups_one_way(&input);
+
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::SingletonGroup {
+                dimension: PanelDimension::Entity,
+                group_id: "c".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn validate_no_singleton_groups_one_way_accepts_no_singleton() {
+        let y = [1.0, 2.0, 3.0, 4.0];
+        let entity = strings(&["a", "a", "b", "b"]);
+        let input = FeInput::from_columns(&y, &[], vec![], &entity, None, "y".into()).unwrap();
+
+        assert_eq!(validate_no_singleton_groups_one_way(&input), Ok(()));
+    }
+
+    #[test]
+    fn validate_no_singleton_groups_two_way_detects_entity_singleton() {
+        // entity "c"は時点"1"のみの1観測（singleton）。time側は各時点2観測ずつで
+        // singletonではない。
+        let y = [1.0, 2.0, 3.0, 4.0, 5.0];
+        let entity = strings(&["a", "a", "b", "b", "c"]);
+        let time = strings(&["1", "2", "1", "2", "1"]);
+        let input =
+            FeInput::from_columns(&y, &[], vec![], &entity, Some(&time), "y".into()).unwrap();
+
+        let result = validate_no_singleton_groups_two_way(&input);
+
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::SingletonGroup {
+                dimension: PanelDimension::Entity,
+                group_id: "c".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn validate_no_singleton_groups_two_way_detects_time_singleton() {
+        // time "3"はentity "a"のみの1観測（singleton）。entity側はどちらも2観測ずつで
+        // singletonではない。
+        let y = [1.0, 2.0, 3.0, 4.0, 5.0];
+        let entity = strings(&["a", "a", "a", "b", "b"]);
+        let time = strings(&["1", "2", "3", "1", "2"]);
+        let input =
+            FeInput::from_columns(&y, &[], vec![], &entity, Some(&time), "y".into()).unwrap();
+
+        let result = validate_no_singleton_groups_two_way(&input);
+
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::SingletonGroup {
+                dimension: PanelDimension::Time,
+                group_id: "3".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn validate_no_singleton_groups_two_way_reports_entity_before_time_when_both_present() {
+        // entity "c"（1観測）とtime "3"（1観測、entity "c"自身の行）が両方singleton。
+        // entityを先にチェックする方針（関数doc参照）により、entity側が報告される。
+        let y = [1.0, 2.0, 3.0, 4.0, 5.0];
+        let entity = strings(&["a", "a", "b", "b", "c"]);
+        let time = strings(&["1", "2", "1", "2", "3"]);
+        let input =
+            FeInput::from_columns(&y, &[], vec![], &entity, Some(&time), "y".into()).unwrap();
+
+        let result = validate_no_singleton_groups_two_way(&input);
+
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::SingletonGroup {
+                dimension: PanelDimension::Entity,
+                group_id: "c".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn validate_no_singleton_groups_two_way_requires_time() {
+        // entity側はsingletonではない（"a"が2観測）ため、`time`未指定の
+        // `PanelError::TwoWayRequiresTime`が先に検出されることを確認する。
+        let y = [1.0, 2.0];
+        let entity = strings(&["a", "a"]);
+        let input = FeInput::from_columns(&y, &[], vec![], &entity, None, "y".into()).unwrap();
+
+        let result = validate_no_singleton_groups_two_way(&input);
+
+        assert_eq!(result.unwrap_err(), PanelError::TwoWayRequiresTime);
+    }
+
+    #[test]
+    fn validate_no_singleton_groups_two_way_reports_missing_time_even_with_entity_singleton() {
+        // entity "c"はsingletonだが`time`も未指定。`time`の存在チェックを先に行う方針
+        // （関数doc、`within_transform_two_way`と同じ順序）により`TwoWayRequiresTime`が
+        // 優先される。
+        let y = [1.0, 2.0, 3.0];
+        let entity = strings(&["a", "a", "c"]);
+        let input = FeInput::from_columns(&y, &[], vec![], &entity, None, "y".into()).unwrap();
+
+        let result = validate_no_singleton_groups_two_way(&input);
+
+        assert_eq!(result.unwrap_err(), PanelError::TwoWayRequiresTime);
+    }
+
+    #[test]
+    fn reject_singleton_group_with_no_observations_succeeds() {
+        // n=0境界（`validate_no_zero_variance_regressors_with_zero_observations_and_a_
+        // regressor_succeeds`と同様の境界値テストの慣習に合わせる）。空配列にはsingleton
+        // となりうる要素自体が存在しないため`Ok(())`になる。
+        assert_eq!(reject_singleton_group(PanelDimension::Entity, &[]), Ok(()));
+    }
+
+    #[test]
+    fn validate_no_singleton_groups_two_way_accepts_no_singleton() {
+        let y = [1.0, 2.0, 3.0, 4.0];
+        let entity = strings(&["a", "a", "b", "b"]);
+        let time = strings(&["1", "2", "1", "2"]);
+        let input =
+            FeInput::from_columns(&y, &[], vec![], &entity, Some(&time), "y".into()).unwrap();
+
+        assert_eq!(validate_no_singleton_groups_two_way(&input), Ok(()));
     }
 
     // ── validate_no_zero_variance_regressors ────────────────────────────────

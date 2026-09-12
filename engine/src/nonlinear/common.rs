@@ -1702,19 +1702,27 @@ fn bfgs_rank2_update(h: &[Vec<f64>], s: &[f64], y: &[f64], rho: f64) -> Vec<Vec<
 /// 安全策を単体テストで直接検証できるようにしている（`mod tests`の
 /// `bfgs_updated_inv_hessian_*`参照）。
 ///
-/// secant条件`yᵀs`が（`s`・`y`のスケールに対して相対的に）十分正でない場合は
-/// rank-2更新を行わず、`inv_hessian`をそのまま返す（更新すると正定値性が壊れうる
-/// ため。標準的なBFGSの安全策）。閾値を絶対値ではなく`‖s‖‖y‖`に対する相対値にして
-/// いるのは、`.claude/rules/rust-style.md`「線形代数」節の特異性判定の方針
-/// （データのスケールに依存しない相対閾値を使う）と同じ理由。
+/// secant条件`yᵀs>0`を満たさない場合はrank-2更新を行わず、`inv_hessian`をそのまま
+/// 返す（更新すると正定値性が壊れうるため。標準的なBFGSの安全策）。
+///
+/// **閾値は絶対値`f64::EPSILON`のまま（`‖s‖‖y‖`に対する相対値は不採用、rust-reviewer
+/// 指摘を検証した結果）**: 当初はrust-style.md「線形代数」節の特異性判定の方針
+/// （データのスケールに依存しない相対閾値を使う）に倣い`yksk <= f64::EPSILON *
+/// l2_norm(sk) * l2_norm(yk)`を試したが、`generate_binary_choice_dataset("baseline",
+/// link="logit", n=1_000_000, k=5, seed=42)`で実測したところ、絶対閾値では反復
+/// 6回目以降のrank-2更新が正常に適用され続けるのに対し、相対閾値では途中の反復で
+/// 更新がスキップされる頻度が増え、収束までの反復回数・実行時間がかえって悪化した
+/// （n_iter 17→23、実行時間 15.0s→20.7s）。secant条件は「行列の特異性判定」ではなく
+/// 「BFGS更新の正定値性を保つための降下方向チェック」であり、既存の特異性判定
+/// （QR分解のR対角成分等）とは性質が異なるため、この方針をそのまま転用するのは
+/// 適切でなかったと判断し、絶対閾値に戻した。
 ///
 /// `is_first_iter`が`true`の場合のみ、Nocedal & Wright *Numerical Optimization*
 /// 6.1節のself-scaling初期化（`γ=(yᵀs)/(yᵀy)`で単位行列の代わりに`γI`を
 /// 「更新前の逆Hessian」としてrank-2更新に使う）を行う（`FaerBfgs`のdocコメント
 /// 参照）。`yᵀy`が実質ゼロ（縮退、勾配がほとんど変化しなかった）の場合は
 /// `inv_hessian`をそのまま「更新前の逆Hessian」として使う（スケーリングを諦める
-/// フォールバック。`ykyk`は「ゼロ除算を避ける」ためだけの絶対閾値ガードであり、
-/// secant条件のような特異性判定ではないため、相対閾値にはしない）。
+/// フォールバック。ゼロ除算を避けるためだけの絶対閾値ガード）。
 fn bfgs_updated_inv_hessian(
     inv_hessian: Vec<Vec<f64>>,
     sk: &[f64],
@@ -1722,7 +1730,7 @@ fn bfgs_updated_inv_hessian(
     is_first_iter: bool,
 ) -> Vec<Vec<f64>> {
     let yksk = dot(yk, sk);
-    if yksk <= f64::EPSILON * l2_norm(sk) * l2_norm(yk) {
+    if yksk <= f64::EPSILON {
         return inv_hessian;
     }
     let rho = 1.0 / yksk;
@@ -2275,8 +2283,8 @@ mod tests {
     #[test]
     fn bfgs_updated_inv_hessian_first_iteration_uses_prior_when_y_norm_is_too_small_to_scale() {
         // yᵀy=1e-20はf64::EPSILON以下（self-scalingのゼロ除算ガードが発火する）が、
-        // yᵀs=1e-10は`‖s‖‖y‖`に対する相対閾値は上回る（rank-2更新自体はスキップ
-        // されない）。この場合`inv_hessian`をスケーリングせずそのまま
+        // yᵀs=1e-10はsecant条件の絶対閾値`f64::EPSILON`は上回る（rank-2更新自体は
+        // スキップされない）。この場合`inv_hessian`をスケーリングせずそのまま
         // 「更新前の逆Hessian」として使うはず。
         let inv_hessian = vec![vec![9.0, 0.0], vec![0.0, 9.0]];
         let s = vec![1.0, 0.0];

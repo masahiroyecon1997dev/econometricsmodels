@@ -36,164 +36,117 @@ COV_TYPES = ["classical", "hc0", "hc1", "hac"]
 # ── ValidationError（入力データ・変数指定） ───────────────────────
 
 
-def test_y_in_x_exog_raises(iv_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
-            col="y",
-            single_role="y",
-            multi_role="x_exog",
+_DEFAULT_ROLE_KWARGS = {
+    "y": "y",
+    "x_exog": ["x1"],
+    "x_endog": ["endog1"],
+    "instruments": ["z1", "z2"],
+}
+
+
+@pytest.mark.parametrize(
+    "field, value, match",
+    [
+        (
+            "x_exog",
+            ["y", "x1"],
+            escaped(
+                msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
+                col="y",
+                single_role="y",
+                multi_role="x_exog",
+            ),
         ),
-    ):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["y", "x1"],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-        ).fit()
-
-
-def test_y_in_x_endog_raises(iv_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
-            col="y",
-            single_role="y",
-            multi_role="x_endog",
+        (
+            "x_endog",
+            ["y"],
+            escaped(
+                msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
+                col="y",
+                single_role="y",
+                multi_role="x_endog",
+            ),
         ),
-    ):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["y"],
-            instruments=["z1", "z2"],
-        ).fit()
-
-
-def test_y_in_instruments_raises(iv_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
-            col="y",
-            single_role="y",
-            multi_role="instruments",
+        (
+            "instruments",
+            ["y", "z1"],
+            escaped(
+                msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
+                col="y",
+                single_role="y",
+                multi_role="instruments",
+            ),
         ),
-    ):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1"],
-            instruments=["y", "z1"],
-        ).fit()
-
-
-def test_x_exog_overlaps_x_endog_raises(iv_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_MULTI_VS_MULTI,
-            col="endog1",
-            later_role="x_endog",
-            earlier_role="x_exog",
+        (
+            "x_exog",
+            ["x1", "endog1"],
+            escaped(
+                msgs.ROLE_OVERLAP_MULTI_VS_MULTI,
+                col="endog1",
+                later_role="x_endog",
+                earlier_role="x_exog",
+            ),
         ),
-    ):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1", "endog1"],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-        ).fit()
-
-
-def test_instruments_overlaps_x_exog_raises(iv_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_MULTI_VS_MULTI,
-            col="x1",
-            later_role="instruments",
-            earlier_role="x_exog",
+        (
+            "instruments",
+            ["x1", "z2"],
+            escaped(
+                msgs.ROLE_OVERLAP_MULTI_VS_MULTI,
+                col="x1",
+                later_role="instruments",
+                earlier_role="x_exog",
+            ),
         ),
-    ):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1"],
-            instruments=["x1", "z2"],
-        ).fit()
-
-
-def test_x_endog_overlaps_instruments_raises(iv_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_MULTI_VS_MULTI,
-            col="endog1",
-            later_role="instruments",
-            earlier_role="x_endog",
+        (
+            "instruments",
+            ["endog1", "z2"],
+            escaped(
+                msgs.ROLE_OVERLAP_MULTI_VS_MULTI,
+                col="endog1",
+                later_role="instruments",
+                earlier_role="x_endog",
+            ),
         ),
-    ):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1"],
-            instruments=["endog1", "z2"],
-        ).fit()
+    ],
+    ids=[
+        "y_in_x_exog",
+        "y_in_x_endog",
+        "y_in_instruments",
+        "x_exog_overlaps_x_endog",
+        "instruments_overlaps_x_exog",
+        "x_endog_overlaps_instruments",
+    ],
+)
+def test_variable_role_overlap_raises(iv_dataset, field, value, match):
+    """同じ列名が2つの異なるロール（`y`/`x_exog`/`x_endog`/`instruments`）に
+    渡された場合、`ValidationError`になること。
+    """
+    with pytest.raises(ValidationError, match=match):
+        IV(iv_dataset, **{**_DEFAULT_ROLE_KWARGS, field: value}).fit()
 
 
-def test_duplicate_instruments_column_raises(iv_dataset):
+@pytest.mark.parametrize(
+    "field, value, name, role",
+    [
+        ("instruments", ["z1", "z1"], "z1", "instruments"),
+        ("x_exog", ["x1", "x1"], "x1", "x_exog"),
+        ("x_endog", ["endog1", "endog1"], "endog1", "x_endog"),
+    ],
+    ids=[
+        "duplicate_instruments_column",
+        "duplicate_x_exog_column",
+        "duplicate_x_endog_column",
+    ],
+)
+def test_duplicate_column_within_role_raises(
+    iv_dataset, field, value, name, role
+):
+    """同じロール内で同じ列名を2回渡した場合、`ValidationError`になること。"""
     with pytest.raises(
         ValidationError,
-        match=escaped(
-            msgs.DUPLICATE_WITHIN_ROLE, name="z1", role="instruments"
-        ),
+        match=escaped(msgs.DUPLICATE_WITHIN_ROLE, name=name, role=role),
     ):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1"],
-            instruments=["z1", "z1"],
-        ).fit()
-
-
-def test_duplicate_x_exog_column_raises(iv_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.DUPLICATE_WITHIN_ROLE, name="x1", role="x_exog"),
-    ):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1", "x1"],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-        ).fit()
-
-
-def test_duplicate_x_endog_column_raises(iv_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.DUPLICATE_WITHIN_ROLE, name="endog1", role="x_endog"
-        ),
-    ):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1", "endog1"],
-            instruments=["z1", "z2"],
-        ).fit()
+        IV(iv_dataset, **{**_DEFAULT_ROLE_KWARGS, field: value}).fit()
 
 
 def test_const_collision_with_include_intercept_raises():

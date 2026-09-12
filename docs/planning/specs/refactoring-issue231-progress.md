@@ -138,6 +138,19 @@
   `random`から`benchmark/`側DGPと同じ`numpy`（`np.random.default_rng`）ベースの
   ベクトル化演算に統一（数値比較をしないテスト専用データセットのため乱数値の
   変化は無害）。
+- `refactoring-candidates.md`項目2（2026-09-12）: IVの変数集合重複チェック
+  （`y`/`x_exog`/`x_endog`/`instruments`）の個別テスト9関数を、
+  `tests/iv/test_iv_validation.py`で`(field, value, match)`の
+  parametrizeによる`test_variable_role_overlap_raises`（ロール間重複、
+  y-in-multi/multi-vs-multiの計6ケース）・`test_duplicate_column_within_
+  role_raises`（ロール内重複、計3ケース）の2関数に統合。各ケースはデフォルト
+  の`y`/`x_exog`/`x_endog`/`instruments`から1引数のみを書き換える形で、
+  当初の所感が懸念していた「kwargsの組み立てが複雑になる」問題は実際には
+  発生しなかった（9件とも複数引数の同時書き換えが無かったため）。9関数・
+  約158行→2関数・約90行に削減。`testing-completeness-reviewer`のレビューで
+  「`match`文字列がそのままparametrize idになりnode idが読みにくい」との
+  指摘を受け、`ids=`で旧関数名相当のラベル（`y_in_x_exog`等）を明示し解消。
+  既存9テストケースは1件も欠落なく、46件全てパスを確認済み。
 
 **Issue化した項目**（バグ調査に近く候補メモの範囲外と判断し、個別Issueへ切り出し）:
 

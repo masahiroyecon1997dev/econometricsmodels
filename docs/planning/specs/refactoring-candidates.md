@@ -35,29 +35,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ## 一覧
 
-### 2. IVの変数集合重複チェック（`y`/`x_exog`/`x_endog`/`instruments`）が個別関数の羅列で組み合わせ数が多い
-
-- **対象**: [tests/test_iv.py:522-618](../../../tests/test_iv.py#L522-L618)
-  （`test_y_in_x_exog_raises`から`test_duplicate_x_endog_column_raises`までの
-  9関数）
-- **内容**: IVは`y`・`x_exog`・`x_endog`・`instruments`という4つの変数集合を
-  持つため、「yが他集合に含まれる」（3パターン）・「集合間の重複」
-  （3パターン、$\binom{4}{2}$のうちyを除く3組）・「集合内の重複」
-  （3パターン、instruments/x_exog/x_endogそれぞれ）を計9個の独立関数として
-  1つずつ書いている。各関数はほぼ同じ形（`IV(...).fit()`を`pytest.raises
-  (ValidationError)`で包むだけ）で、変えているのは引数の組み立て方のみ。
-- **Claudeの所感**: 網羅性自体は高く良い点だが、
-  `@pytest.mark.parametrize`で「どの引数にどの重複を仕込むか」を
-  タプルのリストとして渡し1関数に統合する余地がある（例:
-  `[("x_exog", ["y", "x1"]), ("x_endog", ["y"]), ...]`のような形）。
-  ただしOLS/Logit/Probitの`test_cov_type_is_case_insensitive`等、既存の
-  parametrize済みテストと違い、ここは「どの引数キーワードに値を渡すか」
-  自体が変数のため、素直な`parametrize`よりは`**kwargs`の組み立てが
-  やや複雑になる可能性がある。実施するかはコード量と可読性のトレードオフ
-  次第でユーザー判断が必要。
-- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時。
-- **状態**: 未対応
-
 ### 3.【Issue化】`IvResults`に`method`だけでなく`weight_type`も含まれておらず、正規化値を検証する手段が無い
 
 → Issue #307として切り出し済み（2026-09-11）。`refactoring-candidates-2.md`

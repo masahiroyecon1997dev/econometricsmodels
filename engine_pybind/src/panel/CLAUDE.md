@@ -8,7 +8,7 @@ FEはIVの`#159`（データ抽出・pyclass定義）→`#169`（engine呼び出
 
 1. **データ抽出・pyclass定義issue（FEでは#186、完了）**: `FeOptions`/`FeResult`のpyclass定義、列抽出・バリデーション・`engine::panel::fe::FeInput`構築までを行う`build_fe_input`を`panel/fe.rs`に実装した。この時点では`#[pymodule]`への登録・実際の`FeEstimator::fit`呼び出しは行わなかった。
 2. **engine呼び出し・エラー変換issue（FEでは#187、完了）**: `build_fe_input`を実際に呼び出す`fit`関数（`panel/fe.rs`）を追加し、`lib.rs`に`#[pyfunction] fit_fe`を新設して`#[pymodule]`に登録した。`build_fe_input`/`parse_fe_cov_type`/`panel_error_to_pyerr`の`#[allow(dead_code)]`属性はこの時点で全て削除した（本番経路（`fit_fe`）から実際に呼ばれるようになったため、IVの#169と同じ）。`maturin develop --release`でビルドし、fixestリファレンスフィクスチャ（`engine::panel::fe`の`fixest_reference_input`と同じデータ）を使ってPythonから直接`_lib.fit_fe`を呼び出し、engine単体テストの期待値と完全一致することを確認済み（k=0・`cov_type="hc0"`拒否・`time_col`経由のHACも動作確認済み）。
-3. **`fixed_effects()`メソッドissue（FEでは#188、未着手）**: IVの`first_stage()`と同じ「追加結果は別メソッド」方針（`panel-api-design.md`6.6節）。`FeResult`に`FeEstimator`本体を保持する非公開フィールドを追加する見込み（`IvResult.first_stage`が#159ではなく#170で追加されたのと同じ段階分割）。
+3. **`fixed_effects()`メソッドissue（FEでは#188、完了）**: IVの`first_stage()`と同じ「追加結果は別メソッド」方針（`panel-api-design.md`6.6節）。`FeResult`に`FeEstimator`本体を保持する非公開フィールド`estimator`を追加し（`IvResult.first_stage`が#159ではなく#170で追加されたのと同じ段階分割）、`fixed_effects()`pymethodがそこから`FeEstimator::fixed_effects()`をオンデマンドに呼ぶ。詳細は下記「`fixed_effects()`の実装（Issue #188）」参照。
 
 ## `fit`の実装（Issue #187）
 
@@ -19,6 +19,14 @@ FEはIVの`#159`（データ抽出・pyclass定義）→`#169`（engine呼び出
 - **`fit`自体は`#[cfg(test)] mod tests`から直接呼べない**（`PyDataFrame`引数がGILを要求するため、`engine_pybind/src/nonlinear/CLAUDE.md`「テストの制約」に記録済みの既知の制約と同じ）。検証は`maturin develop`後のPythonからの数値照合で行った（IVの`iv/common.rs::fit`も同様、専用のRustユニットテストは追加していない）。
 
 `FeOptions`/`FeResult`/`build_fe_input`は`panel/fe.rs`に置く（`panel/common.rs`はFE/RE間で共有するエラー変換専用、`panel/mod.rs`のコメント参照）。
+
+## `fixed_effects()`の実装（Issue #188）
+
+`FeResult`に非公開フィールド`estimator: FeEstimator`を追加した（`LogitResult`/`ProbitResult`の`estimator`フィールドと同じ「メソッド用に推定量本体を保持する」パターン）。`FeEstimator`（内部の`OlsEstimator`も）は`Clone`未実装のため、`FeResult`の`#[derive(Debug, Clone)]`から`Clone`を削除した（`IvResult`が`first_stage: Vec<(String, OlsEstimator)>`を持つ理由で`Clone`を派生していないのと同じ）。`fit`関数の末尾で`FeEstimator::fit`が返した値をそのまま`estimator`フィールドへムーブする（それより前に`let ols = estimator.estimator();`等の借用で他フィールドを計算し終えているため、借用が先に終わってからのムーブになりコンパイルが通る）。
+
+`fixed_effects()`本体は`self.estimator.fixed_effects()`（`engine::panel::fe::FeEstimator::fixed_effects`、Issue #184で実装済み・今回変更なし）が返す`FixedEffects`（`OneWay(BTreeMap<String,f64>)`/`TwoWay{entity, time}`）を`match`し、Pythonの`dict`に変換して返す。pyo3 0.29.2は`BTreeMap<K,V>`/`HashMap<K,V,H>`に対し`IntoPyObject`（`Target = PyDict`）を標準で実装しているため、`effects.into_pyobject(py)?.unbind()`で`Py<PyDict>`に変換できる。2-wayは`HashMap<&str, BTreeMap<String,f64>>`（キー`"entity"`/`"time"`）を組み立てて同様に変換する——両分岐とも`Target`が`PyDict`で揃うため、メソッドの戻り値型を`PyResult<Py<PyDict>>`という単一の型にできる（1-way/2-wayでPython側の形状が違う——`dict[str,float]` vs `dict[str,dict[str,float]]`——ことと、Rust側の戻り値型が単一固定なこととは矛盾しない、`PyDict`という同じRust型の中身が違うだけ）。
+
+`fixed_effects()`自体は`fit`と同じ理由（`PyDataFrame`を経由する`fit`が構築した`FeResult`のメソッドであり、独立に`#[cfg(test)]`から呼べるテスト用コンストラクタが無い）でRustユニットテストを追加していない。検証は`maturin develop`後のPythonからの数値照合で行った（fixestリファレンスフィクスチャで1-way/2-way双方がengine単体テスト`fe_estimator_fit_one_way_fixed_effects_matches_fixest_reference`/`fe_estimator_fit_two_way_fixed_effects_matches_fixest_reference`の期待値と完全一致することを確認済み）。
 
 ## 踏んだ罠: `#[expect(dead_code)]`は「テストからも呼ばれる新規関数」の追加で壊れる
 
@@ -42,8 +50,8 @@ FEはIVの`#159`（データ抽出・pyclass定義）→`#169`（engine呼び出
 
 `FeOptions.time_col`（HAC専用の時系列順序を`time`とは独立に指定したい）を受けるため、`engine::panel::fe::FeCovType::Hac`を`{ bandwidth: Option<i64> }`から`{ bandwidth: Option<i64>, time: Option<Vec<String>> }`に拡張した（`FeInput`自体は変更していない）。`time`が`Some`なら`input.time()`より優先してDK計算に使う。詳細な設計判断・導出は`engine/src/panel/fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」・`engine/src/panel/CLAUDE.md`参照。
 
-## `FeResult`のスコープ（Issue #186時点）
+## `FeResult`のスコープ（Issue #188時点で完結）
 
-`panel-api-design.md`2章のフィールドをすべて含む（`f_statistic`/`f_p_value`を含む——これはIssue #186のフィールド設計時にengine側が未対応と判明し前倒しで実装した、`engine/src/panel/CLAUDE.md`参照）。`fixed_effects()`用のフィールド・メソッドはまだ持たない（Issue #188のスコープ）。
+`panel-api-design.md`2章のフィールドをすべて含む（`f_statistic`/`f_p_value`を含む——これはIssue #186のフィールド設計時にengine側が未対応と判明し前倒しで実装した、`engine/src/panel/CLAUDE.md`参照）。`fixed_effects()`メソッド（Issue #188、上記「`fixed_effects()`の実装」参照）も実装済みで、IV/Logit/Probitと同じ3段階の実装フェーズはこれで完結した。
 
 `n_entities`はengine側に対応するpublicなgetterが無いため（`FeEstimator`内部のprivateな`count_unique`を使うのみ）、`fit()`実装時（#187）に`engine_pybind`側で`entity`列から独立に計算する想定（`HashSet`でユニーク数を数えるだけの単純な処理のため、engine側にgetterを追加するほどではないと判断——ただし#187着手時に再検討してもよい）。

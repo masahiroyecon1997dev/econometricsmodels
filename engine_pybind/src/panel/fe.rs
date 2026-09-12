@@ -1,7 +1,8 @@
 //! FEの推定オプション・結果、およびPython（polars DataFrame + 列名 + オプション）から
 //! `engine::panel::fe`（within変換・パネル自由度調整・`cov_type`対応・パネル固有R²）を
 //! 呼び出すところまでの一連の処理（Issue #186でデータ抽出・pyclass定義、Issue #187で
-//! `FeEstimator::fit`への実際の配線・`#[pymodule]`登録）。
+//! `FeEstimator::fit`への実際の配線・`#[pymodule]`登録、Issue #188で`fixed_effects()`
+//! メソッド）。
 //!
 //! 【責務分離】`.claude/rules/rust-style.md`「Python境界でのデータ受け渡し」参照。
 //! polars DataFrameから列ごとの`Vec<f64>`/`Vec<String>`への抽出はここ（`column_extraction`
@@ -22,11 +23,12 @@
 //!    `parse_fe_cov_type`/`panel_error_to_pyerr`はこの時点で本番経路（`fit_fe`）から
 //!    実際に呼ばれるようになるため、`#[allow(dead_code)]`はすべて削除する
 //!    （`engine_pybind/src/iv/CLAUDE.md`「実装フェーズの分割方針」の#169と同じ）。
-//! 3. **後続issue（#188）**: `fixed_effects()`メソッド（IVの`first_stage()`と同じ
-//!    「追加結果は別メソッド」方針、`panel-api-design.md`6.6節）を追加する。本Issueの
-//!    `FeResult`にはまだこのためのフィールド（`FeEstimator`本体等）を持たせない
-//!    （IVの`IvResult.first_stage`フィールドが#159ではなく#170で追加されたのと同じ
-//!    段階分割）。
+//! 3. **本Issue（#188）**: `fixed_effects()`メソッド（IVの`first_stage()`と同じ
+//!    「追加結果は別メソッド」方針、`panel-api-design.md`6.6節）を追加する。`FeResult`に
+//!    非公開フィールド`estimator: FeEstimator`（内部で`OlsEstimator`まで保持する）を
+//!    追加し、`fixed_effects()`はそこから`FeEstimator::fixed_effects()`をオンデマンドに
+//!    呼ぶだけ（IVの`IvResult.first_stage`フィールドが#159ではなく#170で追加されたのと
+//!    同じ段階分割）。
 //!
 //! ## `FeOptions.time`と`FeOptions.time_col`は別物（`panel-api-design.md`1.1節）
 //!
@@ -48,11 +50,12 @@
 //! parse_cov_type`を流用せず独立実装する（`iv::common::parse_iv_cov_type`と同じ
 //! 「無理に共通化しない」方針）。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use engine::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput};
+use engine::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput, FixedEffects};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use pyo3_polars::PyDataFrame;
 
 use super::common::panel_error_to_pyerr;
@@ -163,12 +166,16 @@ impl FeOptions {
 /// `fixed_effects()` (recovering the fixed effects themselves, `α_i`/`γ_t`) is
 /// intentionally not included as a field here. It is exposed as a separate method
 /// instead (see `panel-api-design.md` section 6.6 — the same pattern as IV's
-/// `first_stage()`). The implementation, including a private field holding the
-/// underlying `FeEstimator`, is deferred to Issue #188.
+/// `first_stage()`).
 // `FeResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`OLSResult`と同じ理由）。
+//
+// `Clone`を派生しない: `estimator`フィールドの`FeEstimator`（内部の`OlsEstimator`も）が
+// `Clone`を実装していないため（`LogitResult`/`ProbitResult`と同じ理由、
+// `.claude/rules/rust-style.md`「推定量構造体の設計」の通りprivateフィールドのみで、
+// `Clone`を要求する既存の呼び出し元も無い）。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct FeResult {
     #[pyo3(get)]
     pub params: Vec<f64>,
@@ -218,6 +225,41 @@ pub struct FeResult {
     pub r_squared_between: f64,
     #[pyo3(get)]
     pub r_squared_overall: f64,
+    /// `fixed_effects()`が読む。Python側には公開しない（`OLSResult`の`fitted_values`/
+    /// `has_intercept`、`LogitResult`/`ProbitResult`の`estimator`と同じ位置づけ）。
+    estimator: FeEstimator,
+}
+
+#[pymethods]
+impl FeResult {
+    /// The fixed effects themselves (`α_i` for entity, `γ_t` for time), recovered
+    /// post-hoc from the fitted coefficients (`α_i = ȳ_i - x̄_i'β̂`; see
+    /// `docs/planning/specs/panel-api-design.md` section 6.6 and
+    /// `engine::panel::fe::FeEstimator::fixed_effects`'s doc comment for the exact
+    /// formula, including the two-way normalization convention).
+    ///
+    /// One-way: `dict[str, float]` keyed by entity id. Two-way: `dict[str, dict[str,
+    /// float]]` with top-level keys `"entity"`/`"time"`.
+    ///
+    /// Two-way normalization: `α_i`/`γ_t` are not individually identified (adding a
+    /// constant to one and subtracting it from the other leaves `α_i + γ_t`, and
+    /// therefore the fitted values, unchanged). This implementation fixes the
+    /// reference time period to `γ_{t_ref} = 0`, where `t_ref` is the lexicographically
+    /// smallest value of the time identifier — a deterministic convention independent
+    /// of row order. `fixest::fixef()` instead uses the time value that appears first
+    /// in observation order, so numerical agreement with `fixest` for two-way effects
+    /// only holds when those two choices of `t_ref` coincide for the given data.
+    fn fixed_effects(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        match self.estimator.fixed_effects() {
+            FixedEffects::OneWay(effects) => Ok(effects.into_pyobject(py)?.unbind()),
+            FixedEffects::TwoWay { entity, time } => {
+                let mut outer = HashMap::with_capacity(2);
+                outer.insert("entity", entity);
+                outer.insert("time", time);
+                Ok(outer.into_pyobject(py)?.unbind())
+            }
+        }
+    }
 }
 
 /// `FeOptions.cov_type`をパースし、該当する`cov_type`のときのみ`cluster_col`/`time_col`を
@@ -414,6 +456,7 @@ pub(crate) fn fit(
         r_squared_within: estimator.r_squared_within(),
         r_squared_between: estimator.r_squared_between(),
         r_squared_overall: estimator.r_squared_overall(),
+        estimator,
     })
 }
 

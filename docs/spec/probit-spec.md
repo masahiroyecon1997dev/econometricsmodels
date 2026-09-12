@@ -60,6 +60,11 @@ Probit固有の差分のみを記載する。
 に至った。`near_separation`の較正値はリンク関数ごとに異なる（`Φ`は`Λ`より裾が薄く同じベータ値でも
 速く飽和するため、Logitの`beta1=20`ではなく`beta1=10`を採用）。
 
+`tol`が総和勾配に対する絶対閾値で観測数`n`でスケールしないこと（Issue #291）、および大標本での
+`bfgs`/`lbfgs`の実行時間への影響（Issue #285、statsmodelsは`n`で正規化してから最適化するためこの
+影響を受けない）は`run_solver`共通の性質で、Probitも同様に該当する。詳細・実測値・小標本での
+精度検証テストへの影響は[`logit-spec.md`](./logit-spec.md)3.2節を参照（既定値・実装は変更していない）。
+
 ### 3.3 標準誤差
 
 `CovType`（`Classical`/`Opg`/`Hc0`/`Hc1`/`Cluster`）・計算式・エラー型（`SingularDesignMatrix`

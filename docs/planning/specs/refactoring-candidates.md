@@ -931,3 +931,30 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `method`フィールドを追加）対応中のユーザー指摘。
 - **状態**: 未対応（ユーザー判断によりIssue化はせず本メモへの記録のみ。engineの修正を
   伴わないテストのみの変更のため）
+
+### 45. `python_package/econometricsmodels/nonlinear/logit.py`と`probit.py`が実質1文字しか違わない（本体コード340行の重複）
+
+- **対象**: [python_package/econometricsmodels/nonlinear/logit.py](../../../python_package/econometricsmodels/nonlinear/logit.py)
+  と[python_package/econometricsmodels/nonlinear/probit.py](../../../python_package/econometricsmodels/nonlinear/probit.py)
+- **内容**: `diff`を取ったところ、全340行中、`Logit`→`Probit`という名前の
+  機械的な置換（クラス名・型名・docstring中の言及）を除いて実質的な差分は
+  `predict()`のdocstring1箇所のみ（`p_i = Λ(x_i'β̂)` vs `p_i = Φ(x_i'β̂)`、
+  リンク関数がロジスティック分布CDFか標準正規分布CDFかの違いを示すのみで、
+  コードとしての差分ではない）だった。`nonlinear/CLAUDE.md`にも「`probit.py`
+  は`logit.py`と完全に同型のパターン」と明記されている、既知・意図的な
+  重複ではあるが、テスト側（`test_logit_*.py`/`test_probit_*.py`の共通化、
+  項目95で対応済み）とは異なり、**この本体コード（`logit.py`/`probit.py`）
+  自体の重複は未検討**だった。
+- **Claudeの所感**: `_lib.fit_logit`/`_lib.fit_probit`という呼び出し先関数名、
+  `LogitOptions`/`ProbitOptions`という型、`Λ`/`Φ`というdocstring中の記号の
+  3点だけが実際の相違点であり、共有基底クラス（例:
+  `_BinaryChoiceEstimator`/`_BinaryChoiceResults`）にこれらをパラメータ化
+  して切り出せば、340行×2ファイルを実質1ファイル+数十行の差分に圧縮できる
+  可能性がある。ただし、テスト側の項目11・44で「無理な統合は避けるべき」
+  という判断が繰り返されている通り、コードの完全一致度が高くても
+  **将来Tobitのように固有機能が増えた際に基底クラスの抽象化が破綻する
+  リスク**（Tobit方式の初期値統一を`nonlinear-api-design.md`が既に検討して
+  いる、項目35参照）もあるため、着手前にユーザー判断が必要と考える。
+- **気づいた経緯**: 2026-08-31、`nonlinear/probit.py`解説時に`logit.py`と
+  `diff`で突き合わせて確認。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

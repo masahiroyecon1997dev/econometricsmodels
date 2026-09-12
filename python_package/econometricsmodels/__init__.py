@@ -14,12 +14,16 @@ from .linear.wls import WLS, WLSOptions, WlsResults
 from .nonlinear.logit import Logit, LogitOptions, LogitResults
 from .nonlinear.probit import Probit, ProbitOptions, ProbitResults
 from .nonlinear.tobit import Tobit, TobitOptions, TobitResults
+from .panel.fe import FE, FeOptions, FeResults
 
 __all__ = [
+    "FE",
     "IV",
     "OLS",
     "WLS",
     "ComputationError",
+    "FeOptions",
+    "FeResults",
     "IvOptions",
     "IvResults",
     "Logit",

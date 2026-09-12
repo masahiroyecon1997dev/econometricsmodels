@@ -4,8 +4,9 @@
 
 ## 実装済み（現状）
 
-- `common.rs`: `PanelError`（FE/RE共有エラー型、Issue #172）＋ `PanelDimension` enum ＋ `quasi_demean_column`（θパラメータ化した準偏差変換、Issue #173）＋ `hausman_statistic`（古典的ハウスマン検定の統計量、Issue #174）。
-- `fe.rs` / `re.rs` は未着手。いずれも呼び出し側は未実装で、`quasi_demean_column`/`hausman_statistic` は `#[cfg(test)] mod tests` からのみ呼ばれる（`pub fn` なので `dead_code` にはならない）。
+- `common.rs`: `PanelError`（FE/RE共有エラー型、Issue #172。`entity`/`time`の長さ不一致用`IdentifierDimensionMismatch`をIssue #175で追加）＋ `PanelDimension` enum ＋ `quasi_demean_column`（θパラメータ化した準偏差変換、Issue #173）＋ `hausman_statistic`（古典的ハウスマン検定の統計量、Issue #174）。
+- `fe.rs`: `FeInput`（入力データ型、Issue #175）。`y: Vec<f64>` / `x: Vec<Vec<f64>>` / `entity: Vec<String>` / `time: Option<Vec<String>>`等を保持する薄い入れ物で、`OlsInput`/`IvInput`と異なり`faer::Mat`は組み立てない（`quasi_demean_column`が列単位・`&[f64]`で動く設計のため、`fit()`実装（Issue #178）が生の列をそのまま渡せる。詳細は`fe.rs`モジュールdoc）。`from_columns`は次元検証（`y`↔各`x`列・`y`↔`entity`・`y`↔`time`）のみ行い、within変換・singleton検出（#179）・分散ゼロ検証（#177）・バランスパネル検証・自由度調整（#180）・`OlsEstimator`への委譲（#178）はいずれも後続issueで`fe.rs`に追加する。
+- `re.rs` は未着手。`fit()`本体（FE/RE共通）が未実装のため、`quasi_demean_column`/`hausman_statistic` は現時点でも `#[cfg(test)] mod tests` からのみ呼ばれる（`pub fn` なので `dead_code` にはならない）。
 
 ## faerのグローバル並列度（Issue #283）
 

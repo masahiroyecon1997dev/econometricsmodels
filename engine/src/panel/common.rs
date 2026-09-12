@@ -11,6 +11,7 @@
 //! FE/RE固有バリアントは、`panel-api-design.md`6章（FE固有論点）・7章（RE固有論点）で
 //! 仕様が確定しているバリデーション条件をカバーする:
 //!
+//! - `IdentifierDimensionMismatch`: `y`と`entity`/`time`の長さ不一致（1章、Issue #175）
 //! - `InsufficientDegreesOfFreedom`: パネル自由度調整（6.3節）
 //! - `SingletonGroup`: 観測数1のグループ（6.5節）
 //! - `UnbalancedPanelForTwoWay`: 2-way FEのバランスパネル必須（6.4節）
@@ -87,6 +88,21 @@ pub enum PanelError {
     /// 系統をまたいで共通のバリデーション・計算エラー（`CommonError`参照）。
     #[error(transparent)]
     Common(#[from] CommonError),
+
+    /// `y`と`entity`または`time`の長さが一致しない（`FeInput::from_columns`、
+    /// `docs/planning/specs/panel-api-design.md`1章、Issue #175）。
+    ///
+    /// `y`と`x`列の不一致は`CommonError::DimensionMismatch`が既にカバーしている
+    /// （対象列が異なるため専用バリアントにする）。`entity`/`time`のどちらの不一致かは
+    /// `PanelDimension`で表す（`SingletonGroup`と同じ使い方）。`engine_pybind`が同じ
+    /// polars DataFrameから列抽出する限り実際には起こり得ない（OLSの`y`/`x`長さ不一致
+    /// チェックと同じ、`engine_pybind`〜`engine`間の契約に対する防御的な`Result`化）。
+    #[error("dimension mismatch: y has {y_rows} rows but {dimension} has {other_rows} rows")]
+    IdentifierDimensionMismatch {
+        dimension: PanelDimension,
+        y_rows: usize,
+        other_rows: usize,
+    },
 
     /// パネル自由度調整後の残差自由度が正にならない。
     ///
@@ -389,6 +405,24 @@ mod tests {
 
     #[test]
     fn panel_error_messages_are_human_readable() {
+        assert_eq!(
+            PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Entity,
+                y_rows: 10,
+                other_rows: 8,
+            }
+            .to_string(),
+            "dimension mismatch: y has 10 rows but entity has 8 rows"
+        );
+        assert_eq!(
+            PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Time,
+                y_rows: 10,
+                other_rows: 8,
+            }
+            .to_string(),
+            "dimension mismatch: y has 10 rows but time has 8 rows"
+        );
         assert_eq!(
             PanelError::InsufficientDegreesOfFreedom {
                 n_obs: 10,

@@ -21,9 +21,10 @@ use crate::linear::common::least_squares_error_is_computation_error;
 ///
 /// バリアントの分類方針:
 /// - `Common`: `common_error_to_pyerr`へ委譲。
-/// - FE/RE固有のバリデーションエラー（`InsufficientDegreesOfFreedom`・`SingletonGroup`・
-///   `UnbalancedPanelForTwoWay`・`ZeroVarianceAfterDemeaning`・`TwoWayRequiresTime`）は
-///   いずれも入力・オプションの不正なので`ValidationError`。
+/// - FE/RE固有のバリデーションエラー（`IdentifierDimensionMismatch`・
+///   `InsufficientDegreesOfFreedom`・`SingletonGroup`・`UnbalancedPanelForTwoWay`・
+///   `ZeroVarianceAfterDemeaning`・`TwoWayRequiresTime`）はいずれも入力・オプションの
+///   不正なので`ValidationError`。
 /// - `WithinRegressionFailed`: 委譲先の`LeastSquaresError`の分類基準
 ///   （`least_squares_error_is_computation_error`）にそのまま従う。`IvError::
 ///   SecondStageFailed`と同じ扱い。Pythonに渡すメッセージは`source.to_string()`ではなく
@@ -41,7 +42,8 @@ pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
     let message = err.to_string();
     match err {
         PanelError::Common(common) => common_error_to_pyerr(common),
-        PanelError::InsufficientDegreesOfFreedom { .. }
+        PanelError::IdentifierDimensionMismatch { .. }
+        | PanelError::InsufficientDegreesOfFreedom { .. }
         | PanelError::SingletonGroup { .. }
         | PanelError::UnbalancedPanelForTwoWay { .. }
         | PanelError::ZeroVarianceAfterDemeaning { .. }

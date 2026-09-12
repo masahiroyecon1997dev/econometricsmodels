@@ -260,6 +260,53 @@
 //! - `Cluster`と異なり`extra_df`の条件分岐（`entity_nested_within_cluster`）は無い——
 //!   DKは常に`extra_df=neffects`（linearmodelsが`cov_type="kernel"`でこの分岐を
 //!   一切行わないため、上記スケールの導出参照）。
+//!
+//! ## 固定効果自体（α_i）の復元（`fixed_effects()`、Issue #184、6.6節）
+//!
+//! 6.6節どおり別メソッド（`fit()`の戻り値本体には含めない、IVの`first_stage()`と同じ
+//! 「追加結果は別メソッド」方針）。`FeEstimator`は`fit()`時点で`input`（変換前の元の
+//! `y`/`x`/`entity`/`time`）と`estimator().params()`（β̂）を既に保持しているため、
+//! `fixed_effects()`は追加のフィールドを持たず呼び出し時に計算し直す（IVの`first_stage`
+//! と異なり、固定効果自体の値は主推定`β̂`の計算に必要ないため、常に計算しておく理由が無い）。
+//!
+//! - **1-wayは一意に決まる**: `α_i = ȳ_i. - x̄_i.'β̂`（6.6節の式そのまま）。モデル
+//!   `y_it = α_i + x_it'β + ε_it`では切片が全てentityに吸収される設計のため
+//!   （`OlsInput::from_columns`が`include_intercept=false`で呼ばれる、FEの基本設計）
+//!   正規化の任意性は無い。
+//! - **2-wayには正規化の任意性がある**（着手時に発見、ユーザー承認済み、2026-09-12）:
+//!   モデル`y_it = α_i + γ_t + x_it'β̂ + ε̂_it`は`α_i`に定数`c`を足し`γ_t`から`c`を引いても
+//!   同じ予測値になるため一意に決まらない。6.6節の式をそのままentity/timeに当てはめる
+//!   （`α_i = ȳ_i. - x̄_i.'β̂`、`γ_t = ȳ_.t - x̄_.t'β̂`）と、大域平均`ȳ.. - x̄..'β̂`が
+//!   両方に二重計上されるバグになる（`α_i + γ_t`が正しい合成効果より大域平均ぶん
+//!   大きくなる）。**採用した正規化: 基準時点を`γ_{t_ref} = 0`に固定し、`α_i`に大域的な
+//!   水準を吸収させる方式**（`fixest::fixef()`と同型の「片方のFEダミーの参照水準を0にする」
+//!   考え方）。`t_ref`には`time`の辞書順で最初の値を使う（DKの時系列順序規約、モジュールdoc
+//!   「Driscoll-Kraay型パネルHAC対応」と同じ規約——入力の観測順に依存しない決定的な選び方）:
+//!   - `E_i = ȳ_i. - x̄_i.'β̂`（entityの残差平均）、`E_t = ȳ_.t - x̄_.t'β̂`（timeの残差平均）、
+//!     `E = ȳ.. - x̄..'β̂`（全体の残差平均）とすると、`α_i = E_i - E + E_{t_ref}`、
+//!     `γ_t = E_t - E_{t_ref}`。導出: バランスパネルの2-way ANOVA恒等式
+//!     `E_i + E_t - E = α_i + γ_t`（正規化前、`c`不定）に`γ_{t_ref}=0`の制約を課すと
+//!     `c = E - E_{t_ref}`が定まり、`α_i = E_i - c`、`γ_t = E_t - E + c`から上式が出る。
+//!   - **`fixest::fixef()`との数値一致は`t_ref`の選び方が一致する入力でのみ成立する**
+//!     （着手時に発見、ユーザー承認済み、2026-09-12）: `fixest`自身の基準時点選択は
+//!     `time`列の辞書順ではなく**観測順で最初に現れた値**に見える（実地検証: 同じ
+//!     `{entity, time}`ペア集合でも行の並び順を変えると`fixef()`が選ぶ基準時点が変わる
+//!     ことを確認）。2-wayの正規化はどの`t_ref`を選んでも数学的に等価（`α_i`・`γ_t`の
+//!     分解が変わるだけで`α_i+γ_t+x_it'β̂`自体は不変）なため、**本実装は`fixest`の
+//!     観測順依存の挙動を再現せず、`time`の辞書順という決定的な規約を優先する**
+//!     （ユーザーとの相談で決定）。テストで使う`fixest_reference_input`は観測順の最初の
+//!     時点と辞書順で最小の時点が一致する構成のため、その入力に限り`fixest::feols(y ~ x |
+//!     entity + time)`の`fixef()`と数値完全一致する
+//!     （`fe_estimator_fit_two_way_fixed_effects_matches_fixest_reference`）。
+//!   - 代替案（`α_i`・`γ_t`をともに大域平均からの偏差にする対称正規化）は、6.6節のAPI
+//!     形状（entity/timeの2キーのみ）に大域平均を格納する場所が無いため不採用
+//!     （ユーザーとの相談で決定）。
+//! - 新規ヘルパー（`fe.rs`内private）: `slope_only_residual`（`fe_r_squared_overall`と共有、
+//!   「元の`y`/`x`に`β̂`だけを当てはめた残差」の定義を一箇所に集約。`fe_r_squared_between`は
+//!   エンティティ平均に集約してから当てはめるため行の単位が異なり共有しない、関数doc参照）・
+//!   `group_residual_means`（`group_indices_by_key`を再利用し、グループごとの
+//!   `slope_only_residual`平均を求める）・`overall_residual_mean`（全観測平均、2-way正規化の
+//!   大域平均`E`に使う）。
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -411,6 +458,25 @@ pub enum FeEffects {
     OneWay,
     /// entity + time（`within_transform_two_way`、6.2節。バランスパネル必須、6.4節）。
     TwoWay,
+}
+
+/// 固定効果自体（α_i、2-wayはγ_tも）の復元結果（`FeEstimator::fixed_effects`、Issue #184、
+/// 6.6節）。モジュールdoc「固定効果自体（α_i）の復元」参照。
+///
+/// `BTreeMap<String, f64>`（ID→効果）を使う理由: 6.6節のPython API形状
+/// （1-wayは`dict[str, float]`、2-wayは`dict[str, dict[str, float]]`）にそのまま対応でき、
+/// かつ`group_indices_by_key`と同じくキー順序が決定的になる（`HashMap`だとプロセスごとの
+/// ハッシュシードで反復順序が変わりうる、他のグループ集約と同じ理由）。
+#[derive(Debug, Clone, PartialEq)]
+pub enum FixedEffects {
+    /// エンティティID → α_i。
+    OneWay(BTreeMap<String, f64>),
+    /// entity効果・time効果それぞれのID→効果（6.6節のPython API形状のトップレベルキー
+    /// `"entity"`/`"time"`に対応）。
+    TwoWay {
+        entity: BTreeMap<String, f64>,
+        time: BTreeMap<String, f64>,
+    },
 }
 
 /// FEが対応する`cov_type`（Issue #181・#182、3.1節・3.2節）。`OlsEstimator`の`CovType`を
@@ -794,6 +860,51 @@ impl FeEstimator {
     pub fn bic(&self) -> f64 {
         self.bic
     }
+
+    /// 固定効果自体（α_i、2-wayはγ_tも）を事後的に復元する（6.6節、Issue #184）。
+    ///
+    /// `fit()`の戻り値本体には含めない別メソッド（IVの`first_stage()`と同じ方針、
+    /// モジュールdoc「固定効果自体（α_i）の復元」参照）。2-wayは正規化に任意性があるため
+    /// `time`の辞書順で最初の時点を基準に`γ_{t_ref}=0`とする規約を採用している（同モジュール
+    /// doc参照。`fixest::fixef()`とは基準時点の選び方の前提が異なるため、数値一致は
+    /// 観測順の最初の時点と辞書順で最小の時点が一致する入力に限られる）。
+    pub fn fixed_effects(&self) -> FixedEffects {
+        let y = self.input.y();
+        let x = self.input.x();
+        let params = self.estimator.params();
+
+        match self.effects {
+            FeEffects::OneWay => {
+                FixedEffects::OneWay(group_residual_means(y, x, params, self.input.entity()))
+            }
+            FeEffects::TwoWay => {
+                let time = self.input.time().expect(
+                    "2-way already validated `time` is present \
+                     (validate_no_singleton_groups_two_way/within_transform_two_way)",
+                );
+                let entity_means = group_residual_means(y, x, params, self.input.entity());
+                let time_means = group_residual_means(y, x, params, time);
+                let overall_mean = overall_residual_mean(y, x, params);
+                // `time_means`は`BTreeMap`（辞書順）のため`first_key_value()`が辞書順で
+                // 最初の時点（DKの時系列順序規約と同じ、モジュールdoc参照）。2-way FEは
+                // `n>=1`が`InsufficientDegreesOfFreedom`検証で既に保証されているため、
+                // `time_means`は必ず1件以上のキーを持つ。
+                let (_, &reference_value) = time_means
+                    .first_key_value()
+                    .expect("2-way FE guarantees at least one time period (df_resid check)");
+
+                let entity = entity_means
+                    .into_iter()
+                    .map(|(id, mean)| (id, mean - overall_mean + reference_value))
+                    .collect();
+                let time = time_means
+                    .into_iter()
+                    .map(|(id, mean)| (id, mean - reference_value))
+                    .collect();
+                FixedEffects::TwoWay { entity, time }
+            }
+        }
+    }
 }
 
 /// within変換後の列（`Vec<Vec<f64>>`、列ごとに長さ`n`）から`faer::Mat`を組み立てる。
@@ -1085,6 +1196,18 @@ fn fe_driscoll_kraay_cov_params(
     Mat::from_fn(k, k, |i, j| scale * (*cov_uncorrected.get(i, j)))
 }
 
+/// 固定効果の切片項を一切含めない残差`y_i - x_i'β̂`の1行分（Issue #183・#184）。
+/// `fe_r_squared_overall`・`group_residual_means`/`overall_residual_mean`
+/// （`fixed_effects`、Issue #184）で共有する「元の`y`/`x`に`β̂`だけを当てはめた残差」の定義
+/// （モジュールdoc「パネル固有R²」「固定効果自体（α_i）の復元」参照。`fe_r_squared_between`
+/// はエンティティ平均`ȳ_i.`/`x̄_i.`に集約してから当てはめるため、この関数とは行の単位が
+/// 異なり共有しない）。
+fn slope_only_residual(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>, i: usize) -> f64 {
+    let k = x.len();
+    let fitted: f64 = (0..k).map(|j| x[j][i] * (*params.get(j, 0))).sum();
+    y[i] - fitted
+}
+
 /// エンティティ平均ベースのbetween R²（Issue #183、2.3節）。`linearmodels`の
 /// `PanelOLS._rsquared`のbetween式と完全一致させる（モジュールdoc「パネル固有R²」参照）。
 ///
@@ -1136,18 +1259,47 @@ fn fe_r_squared_between(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>, entity: &[
 /// `TSS <= 0`なら`linearmodels`と同じく`0.0`を返す。
 fn fe_r_squared_overall(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>) -> f64 {
     let n = y.len();
-    let k = x.len();
 
     let mut ssr = 0.0;
     let mut tss = 0.0;
     for i in 0..n {
-        let fitted: f64 = (0..k).map(|j| x[j][i] * (*params.get(j, 0))).sum();
-        let resid = y[i] - fitted;
+        let resid = slope_only_residual(y, x, params, i);
         ssr += resid * resid;
         tss += y[i] * y[i];
     }
 
     if tss > 0.0 { 1.0 - ssr / tss } else { 0.0 }
+}
+
+/// `ids`でグループ化した`slope_only_residual`の平均（`E_i`/`E_t`、Issue #184）。
+/// `group_indices_by_key`でグループを集計する（キー順序＝辞書順が決定的、他の
+/// グループ集約と同じ理由）。`fixed_effects`が1-way・2-wayのentity/time双方で使う。
+fn group_residual_means(
+    y: &[f64],
+    x: &[Vec<f64>],
+    params: &Mat<f64>,
+    ids: &[String],
+) -> BTreeMap<String, f64> {
+    group_indices_by_key(ids)
+        .into_iter()
+        .map(|(id, indices)| {
+            let mean = indices
+                .iter()
+                .map(|&i| slope_only_residual(y, x, params, i))
+                .sum::<f64>()
+                / indices.len() as f64;
+            (id.to_string(), mean)
+        })
+        .collect()
+}
+
+/// 全観測にわたる`slope_only_residual`の平均（`E`、Issue #184の2-way正規化で使う大域平均）。
+fn overall_residual_mean(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>) -> f64 {
+    let n = y.len();
+    (0..n)
+        .map(|i| slope_only_residual(y, x, params, i))
+        .sum::<f64>()
+        / n as f64
 }
 
 /// `ids`のユニークID数を数える（`n_entities`/`n_periods`のカウント）。純粋な
@@ -2388,6 +2540,181 @@ mod tests {
         assert!((fe.r_squared_within() - 0.889_162_561_576_354_6).abs() < 1e-9);
         assert_eq!(fe.r_squared_between(), 0.0);
         assert!((fe.r_squared_overall() - (-2.330_219_126_889_757_4)).abs() < 1e-9);
+    }
+
+    // ── 固定効果自体（α_i）の復元（Issue #184） ─────────────────────────
+
+    #[test]
+    fn fe_estimator_fit_one_way_fixed_effects_matches_fixest_reference() {
+        // `fixest::feols(y ~ x | entity)`の`fixef()`と数値比較する（1-wayは正規化の任意性が
+        // 無いため無条件に一致する、モジュールdoc「固定効果自体（α_i）の復元」参照）。
+        // 期待値はRで独立に計算・検算済み（`options(digits=15)`、2026-09-12）。
+        let (entity, _time, x, y) = fixest_reference_input();
+        let input =
+            FeInput::from_columns(&y, &[x], vec!["x".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let fe = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95).unwrap();
+
+        let FixedEffects::OneWay(effects) = fe.fixed_effects() else {
+            panic!("1-way FE must return FixedEffects::OneWay");
+        };
+        assert!((effects["a"] - 4.527_777_777_777_777).abs() < 1e-9);
+        assert!((effects["b"] - 1.523_148_148_148_147).abs() < 1e-9);
+        assert!((effects["c"] - 5.657_407_407_407_407).abs() < 1e-9);
+        assert!((effects["d"] - 0.393_518_518_518_517).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fe_estimator_fit_two_way_fixed_effects_matches_fixest_reference() {
+        // `fixest::feols(y ~ x | entity + time)`の`fixef()`と数値比較する。
+        // `fixest_reference_input`は観測順で最初に現れる時点（"1"）と辞書順で最小の時点
+        // （"1"）が一致する構成のため、この入力に限り`fixest`と数値完全一致する
+        // （モジュールdoc「固定効果自体（α_i）の復元」参照。期待値はRで独立に計算・
+        // 検算済み、2026-09-12）。
+        let (entity, time, x, y) = fixest_reference_input();
+        let input = FeInput::from_columns(
+            &y,
+            &[x],
+            vec!["x".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
+
+        let fe = FeEstimator::fit(input, FeEffects::TwoWay, FeCovType::Classical, 0.95).unwrap();
+
+        let FixedEffects::TwoWay { entity, time } = fe.fixed_effects() else {
+            panic!("2-way FE must return FixedEffects::TwoWay");
+        };
+        assert!((entity["a"] - 3.373_831_775_700_935).abs() < 1e-9);
+        assert!((entity["b"] - 1.336_448_598_130_841).abs() < 1e-9);
+        assert!((entity["c"] - 5.277_258_566_978_194).abs() < 1e-9);
+        assert!((entity["d"] - (-0.566_978_193_146_417)).abs() < 1e-9);
+
+        assert_eq!(time["1"], 0.0); // 辞書順で最初の時点が基準（γ_{t_ref}=0）
+        assert!((time["2"] - 2.883_177_570_093_46).abs() < 1e-9);
+        assert!((time["3"] - 4.060_747_663_551_40).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fe_estimator_fit_two_way_fixed_effects_reproduces_fitted_values() {
+        // 正規化の選び方に関わらず`x_it'β̂ + α_i + γ_t`は元の`y_it`から within残差
+        // `ε̂_it`を引いた値に一致する（モデルの恒等式そのもの）ことを回帰ガードする
+        // （`fixest`の具体的な基準時点選択に依存しない、正規化非依存の不変条件）。
+        let (entity, time, x, y) = fixest_reference_input();
+        let input = FeInput::from_columns(
+            &y,
+            std::slice::from_ref(&x),
+            vec!["x".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
+
+        let fe = FeEstimator::fit(input, FeEffects::TwoWay, FeCovType::Classical, 0.95).unwrap();
+        let beta = *fe.estimator().params().get(0, 0);
+        let residuals = fe.estimator().residuals();
+
+        let FixedEffects::TwoWay {
+            entity: entity_effects,
+            time: time_effects,
+        } = fe.fixed_effects()
+        else {
+            panic!("2-way FE must return FixedEffects::TwoWay");
+        };
+
+        for i in 0..y.len() {
+            let predicted = beta * x[i]
+                + entity_effects[&entity[i]]
+                + time_effects[&time[i]]
+                + *residuals.get(i, 0);
+            assert!(
+                (predicted - y[i]).abs() < 1e-9,
+                "row {i}: predicted={predicted}, y={}",
+                y[i]
+            );
+        }
+    }
+
+    #[test]
+    fn fe_estimator_fit_one_way_fixed_effects_with_no_regressors_equals_group_means() {
+        // k=0（回帰変数なし）では`α_i`は単に`ȳ_i.`そのものになる境界ケース
+        // （`slope_only_residual`の`fitted=0`分岐、`fe_estimator_fit_with_no_regressors_
+        // estimates_fixed_effects_only_model`と同じ入力）。
+        let entity = strings(&["a", "a", "b", "b", "c", "c"]);
+        let y = [1.0, 3.0, 5.0, 7.0, 2.0, 4.0];
+        let input = FeInput::from_columns(&y, &[], vec![], &entity, None, "y".into()).unwrap();
+
+        let fe = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95).unwrap();
+
+        let FixedEffects::OneWay(effects) = fe.fixed_effects() else {
+            panic!("1-way FE must return FixedEffects::OneWay");
+        };
+        assert!((effects["a"] - 2.0).abs() < 1e-12);
+        assert!((effects["b"] - 6.0).abs() < 1e-12);
+        assert!((effects["c"] - 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn fe_estimator_fit_one_way_fixed_effects_on_unbalanced_panel() {
+        // 1-wayの`α_i = ȳ_i. - x̄_i.'β̂`は正規化の任意性が無く、不均衡パネル
+        // （T_a=2, T_b=4, T_c=3）でも単純にそのまま成立することを確認する（`fe_r_squared_
+        // between`が一度バランスパネルのみのテストで重み付けバグを見逃した教訓——
+        // rust-reviewer指摘——を踏まえ、`fixed_effects()`も不均衡ケースを回帰ガードする）。
+        // 入力は`fe_estimator_fit_one_way_r_squared_between_matches_linearmodels_on_
+        // unbalanced_panel`と同じ（期待値はPythonで独立に計算・検算済み、2026-09-12）。
+        let entity = strings(&["a", "a", "b", "b", "b", "b", "c", "c", "c"]);
+        let x = vec![1.0, 3.0, 2.0, 5.0, 4.0, 6.0, 1.0, 4.0, 2.0];
+        let y = [2.0, 6.0, 5.0, 9.0, 8.0, 11.0, 3.0, 7.0, 4.0];
+        let input =
+            FeInput::from_columns(&y, &[x], vec!["x".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let fe = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95).unwrap();
+
+        let FixedEffects::OneWay(effects) = fe.fixed_effects() else {
+            panic!("1-way FE must return FixedEffects::OneWay");
+        };
+        assert!((effects["a"] - 1.005_405_405_405_405).abs() < 1e-9);
+        assert!((effects["b"] - 1.886_486_486_486_485_4).abs() < 1e-9);
+        assert!((effects["c"] - 1.172_972_972_972_972_5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fe_estimator_fit_two_way_fixed_effects_with_no_regressors() {
+        // 2-way・k=0（回帰変数なし）の組み合わせ境界ケース。`slope_only_residual`の
+        // `fitted=0`分岐と2-way正規化ロジック（`t_ref`選択・大域平均吸収）の組み合わせを
+        // 検証する（1-wayのk=0境界（上のテスト）はあるが2-wayには無かった、
+        // rust-reviewer指摘）。time="9"/"10"はDKの辞書順規約が数値順と食い違う
+        // ケース（辞書順では"10" < "9"）でも規約通り"10"が基準になることを合わせて
+        // 確認する（期待値はPythonで独立に計算・検算済み、2026-09-12）。
+        let entity = strings(&["e1", "e1", "e2", "e2"]);
+        let time = strings(&["9", "10", "9", "10"]);
+        let y = [1.0, 3.0, 5.0, 9.0];
+        let input =
+            FeInput::from_columns(&y, &[], vec![], &entity, Some(&time), "y".into()).unwrap();
+
+        let fe = FeEstimator::fit(input, FeEffects::TwoWay, FeCovType::Classical, 0.95).unwrap();
+
+        let FixedEffects::TwoWay { entity, time } = fe.fixed_effects() else {
+            panic!("2-way FE must return FixedEffects::TwoWay");
+        };
+        assert_eq!(time["10"], 0.0); // 辞書順で"10" < "9"のため基準はこちら
+        assert!((time["9"] - (-3.0)).abs() < 1e-12);
+        assert!((entity["e1"] - 3.5).abs() < 1e-12);
+        assert!((entity["e2"] - 8.5).abs() < 1e-12);
+
+        // 不変条件: k=0でも `α_i + γ_t + ε̂_it = y_it`（正規化の選び方に依存しない）。
+        let residuals = fe.estimator().residuals();
+        let entity_ids = ["e1", "e1", "e2", "e2"];
+        let time_ids = ["9", "10", "9", "10"];
+        for i in 0..y.len() {
+            let predicted = entity[entity_ids[i]] + time[time_ids[i]] + *residuals.get(i, 0);
+            assert!((predicted - y[i]).abs() < 1e-9);
+        }
     }
 
     // ── cov_type対応（Issue #181） ───────────────────────────────────────

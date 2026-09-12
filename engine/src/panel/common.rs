@@ -267,9 +267,10 @@ pub enum PanelError {
 /// エラーではなく`engine_pybind`〜`engine`間の内部契約違反のため、`validate_cluster_groups`
 /// と同じ扱い。
 ///
-/// グループ平均（`ȳ_i.`）は返さない。`fixed_effects()`（6.6節）の`α_i`復元や
-/// σ_ε²再利用（7.4節）で平均の保持が必要になった場合は、そのFE/RE実装issueで
-/// この関数を拡張する（現時点ではスコープ外）。
+/// グループ平均（`ȳ_i.`）は返さない。`fixed_effects()`（6.6節、Issue #184）の`α_i`復元は
+/// この関数を拡張せず`fe.rs`側で`FeInput`の元データから独立に再計算する形で実装済み
+/// （`engine/src/panel/CLAUDE.md`参照）。σ_ε²再利用（7.4節、RE実装）で平均の保持が
+/// 必要になった場合は、その時点で改めて検討する。
 ///
 /// # Panics
 /// - `entity.len() != col.len()`

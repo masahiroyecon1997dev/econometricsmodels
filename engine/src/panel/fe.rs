@@ -34,6 +34,14 @@
 //!     不均衡パネルではこの等式が成り立たない（`(1/N)Σ_i ȳ_i. ≠ ȳ..`となりうる）ため、
 //!     2-wayを不均衡パネルに適用してはならない（6.4節がバランスパネルを必須にする
 //!     所以）。
+//!
+//! ## 分散ゼロ説明変数の検出（`validate_no_zero_variance_regressors`、Issue #177）
+//!
+//! within変換後の設計行列の各列の分散を確認し、ゼロの列があれば
+//! `PanelError::ZeroVarianceAfterDemeaning`を返す（6.7節）。1-way/2-way共通ロジック
+//! （`within_transform_one_way`/`within_transform_two_way`のどちらの出力にも適用できる、
+//! `column_is_zero_variance`関数doc参照）。時間不変変数（1-way）だけでなく、2-wayで
+//! time FEと完全共線な「エンティティ間で変動しない列」も同じチェックで検出できる。
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -232,6 +240,86 @@ pub fn within_transform_two_way(input: &FeInput) -> Result<(Vec<f64>, Vec<Vec<f6
         .collect();
 
     Ok((y, x))
+}
+
+/// within変換後の説明変数の各列に分散ゼロの列がないことを検証する（6.7節）。1-way/2-way
+/// 共通ロジック（`within_transform_one_way`/`within_transform_two_way`のどちらの出力も
+/// 引数に渡せる）。
+///
+/// 時間不変変数（1-way）だけでなく、2-wayでtime FEと完全共線な「エンティティ間で変動しない
+/// 列」も同じチェックで検出できる（6.7節）。`x_transformed`は呼び出し側が`within_transform_*`
+/// の戻り値をそのまま渡す想定で、`input.x()`（変換前の生の列）と同じ列順・同じ列数・列ごとに
+/// 同じ長さを持つことを前提とする（`engine`内の内部契約であり、ユーザー入力起因ではない。
+/// `quasi_demean_column`の呼び出し元契約と同じ扱いで`assert_eq!`で守る。`debug_assert_eq!`
+/// だとリリースビルドで無効化され、列数不一致時に`zip`が黙って短い方へ切り詰め検証漏れの
+/// 列が発生しうるため不可）。
+///
+/// # Errors
+/// 分散ゼロの列が見つかった場合は`PanelError::ZeroVarianceAfterDemeaning`（該当列名を含む）。
+/// 複数列が該当する場合は`x_names`の順で最初に見つかった列のみを報告する（OLSの特異性
+/// 検出等、他のバリデーションも「最初の1件を報告」で統一している）。
+pub fn validate_no_zero_variance_regressors(
+    input: &FeInput,
+    x_transformed: &[Vec<f64>],
+) -> Result<(), PanelError> {
+    assert_eq!(
+        input.x().len(),
+        x_transformed.len(),
+        "x_transformed must have the same number of columns as input.x()"
+    );
+
+    for ((name, original), transformed) in input.x_names().iter().zip(input.x()).zip(x_transformed)
+    {
+        assert_eq!(
+            original.len(),
+            transformed.len(),
+            "x_transformed column '{name}' must have the same length as the original column"
+        );
+        if column_is_zero_variance(original, transformed) {
+            return Err(PanelError::ZeroVarianceAfterDemeaning {
+                column: name.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// `transformed`（within変換後の1列）の分散が、`original`（変換前の同じ列）のスケールに
+/// 対して無視できるほど小さいかを判定する。
+///
+/// **絶対閾値ではなく相対閾値を使う**（`.claude/rules/rust-style.md`「線形代数」の特異性
+/// 判定の方針と同じ。データのスケールに依存しないようにするため）。`original`の最大絶対値を
+/// スケールの目安にする理由: 真に分散ゼロの列（時間不変・完全共線）は、within変換後の値が
+/// 数学的には厳密に0だが浮動小数点演算では丸め誤差の残差（`original`のスケールに比例する
+/// 大きさ）が残る。`transformed`自身の最大絶対値をスケールに使うと、この残差自身を基準に
+/// 残差を判定する自己参照になり閾値が機能しないため、変換前の値を基準にする。
+///
+/// 閾値の乗数`n`（観測数）は、`ols::xtx_inverse`の特異性判定
+/// （`(k as f64) * f64::EPSILON * max_abs_diag`、分解に関わる次元数を乗数にする）と同じ
+/// 発想: グループ平均の集約（`quasi_demean_column`、観測数`n`項の和）→差分の丸め誤差の
+/// 蓄積が観測数に比例しうることを踏まえた選択。2-wayは「entityでdemean→timeでdemean」の
+/// 2段階適用（モジュールdoc参照）で丸め誤差が2回蓄積しうるが、閾値はこの2段階分を明示的に
+/// 倍にはしていない（実測上、時間不変・完全共線変数の残差は乗数`2`の差では閾値を跨がない
+/// 桁数——原点`scale`比`~1e-16`——であることを想定した割り切り。将来1-wayと2-wayで
+/// 誤検出/見逃しの傾向差が実際に問題になったら、2-way用の乗数を分けることを検討する）。
+fn column_is_zero_variance(original: &[f64], transformed: &[f64]) -> bool {
+    let n = transformed.len();
+    if n == 0 {
+        // n=0は`FeInput::from_columns`が許容する境界ケース（`from_columns_with_zero_
+        // observations_succeeds`）。分散の定義自体が意味を持たないため、ゼロ分散とは
+        // 判定しない（呼び出し側の`fit()`は別途`InsufficientDegreesOfFreedom`等で
+        // n=0を弾く想定、6.7節はあくまで「デミーニング後の分散」の検証に限定する）。
+        return false;
+    }
+
+    let mean: f64 = transformed.iter().sum::<f64>() / n as f64;
+    let variance: f64 = transformed.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n as f64;
+    let std_dev = variance.sqrt();
+
+    let scale = original.iter().fold(0.0_f64, |acc, v| acc.max(v.abs()));
+    let threshold = n as f64 * f64::EPSILON * scale;
+
+    std_dev <= threshold
 }
 
 /// 2-way FEがバランスパネル（`entity` × `time`の全組合せが過不足なく1回ずつ存在する）
@@ -553,6 +641,141 @@ mod tests {
                 n_periods: 2,
                 expected: 4,
             }
+        );
+    }
+
+    // ── validate_no_zero_variance_regressors ────────────────────────────────
+
+    #[test]
+    fn validate_no_zero_variance_regressors_detects_time_invariant_variable_in_one_way_fe() {
+        // "female"は各エンティティ内で一定（時間不変）のため、1-way within変換後は
+        // 浮動小数点誤差の範囲でゼロになる（6.7節のユースケースそのもの）。
+        let entity = strings(&["a", "a", "b", "b"]);
+        let y = [1.0, 2.0, 3.0, 5.0];
+        let x_varying = vec![10.0, 20.0, 5.0, 15.0];
+        let female = vec![0.0, 0.0, 1.0, 1.0];
+        let input = FeInput::from_columns(
+            &y,
+            &[x_varying, female],
+            vec!["x_varying".to_string(), "female".to_string()],
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+
+        let (_, x_out) = within_transform_one_way(&input);
+        let result = validate_no_zero_variance_regressors(&input, &x_out);
+
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::ZeroVarianceAfterDemeaning {
+                column: "female".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn validate_no_zero_variance_regressors_accepts_all_varying_columns() {
+        let entity = strings(&["a", "a", "b", "b", "b"]);
+        let y = [10.0, 20.0, 3.0, 6.0, 9.0];
+        let x1 = vec![100.0, 200.0, 30.0, 60.0, 90.0];
+        let input =
+            FeInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let (_, x_out) = within_transform_one_way(&input);
+
+        assert_eq!(validate_no_zero_variance_regressors(&input, &x_out), Ok(()));
+    }
+
+    #[test]
+    fn validate_no_zero_variance_regressors_detects_entity_invariant_variable_in_two_way_fe() {
+        // "year_dummy"はエンティティ間で変動しない（time FEと完全共線）ため、2-way
+        // within変換後はゼロ分散になる（6.7節「time FEと完全共線な列も同じチェックで
+        // 検出できる」の具体例）。
+        let entity = strings(&["a", "a", "b", "b"]);
+        let time = strings(&["1", "2", "1", "2"]);
+        let y = [1.0, 3.0, 5.0, 9.0];
+        let x_varying = vec![2.0, 6.0, 10.0, 18.0];
+        let year_dummy = vec![0.0, 1.0, 0.0, 1.0];
+        let input = FeInput::from_columns(
+            &y,
+            &[x_varying, year_dummy],
+            vec!["x_varying".to_string(), "year_dummy".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
+
+        let (_, x_out) = within_transform_two_way(&input).unwrap();
+        let result = validate_no_zero_variance_regressors(&input, &x_out);
+
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::ZeroVarianceAfterDemeaning {
+                column: "year_dummy".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn validate_no_zero_variance_regressors_reports_first_offending_column_in_name_order() {
+        // 2列とも時間不変。`x_names`の順で最初（"const_a"）のみを報告する
+        // （関数docコメントの方針）。
+        let entity = strings(&["a", "a", "b", "b"]);
+        let y = [1.0, 2.0, 3.0, 4.0];
+        let const_a = vec![1.0, 1.0, 2.0, 2.0];
+        let const_b = vec![9.0, 9.0, 8.0, 8.0];
+        let input = FeInput::from_columns(
+            &y,
+            &[const_a, const_b],
+            vec!["const_a".to_string(), "const_b".to_string()],
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+
+        let (_, x_out) = within_transform_one_way(&input);
+        let result = validate_no_zero_variance_regressors(&input, &x_out);
+
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::ZeroVarianceAfterDemeaning {
+                column: "const_a".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn validate_no_zero_variance_regressors_with_no_regressors_succeeds() {
+        let y = [1.0, 2.0];
+        let entity = strings(&["a", "b"]);
+        let input = FeInput::from_columns(&y, &[], vec![], &entity, None, "y".into()).unwrap();
+
+        assert_eq!(validate_no_zero_variance_regressors(&input, &[]), Ok(()));
+    }
+
+    #[test]
+    fn validate_no_zero_variance_regressors_with_zero_observations_and_a_regressor_succeeds() {
+        // n=0（`column_is_zero_variance`のn=0分岐、モジュールdoc参照）は「回帰変数0列」
+        // （上のテスト）とは別に、「観測数0だが回帰変数自体は1列存在する」ケースでも
+        // 明示的に確認する（列は空`Vec`になるが、列は存在する点が上と異なる）。
+        let input = FeInput::from_columns(
+            &[],
+            &[vec![]],
+            vec!["x1".to_string()],
+            &[],
+            None,
+            "y".into(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            validate_no_zero_variance_regressors(&input, &[vec![]]),
+            Ok(())
         );
     }
 

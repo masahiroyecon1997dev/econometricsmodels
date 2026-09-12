@@ -65,18 +65,18 @@
 //! `FeEstimator::fit`は「singleton検出→within変換（2-wayはバランスパネル検証も内包）→
 //! 分散ゼロ検出→`OlsEstimator::fit`」の順にパイプラインを実行する。
 //!
-//! **この時点では係数推定（`β̂`）の委譲のみをスコープとする**。within変換後のOLS推定量
-//! `β̂`はwithin推定量として数学的に正しい値になる（自由度・`cov_type`に依存しない）ため、
-//! 委譲だけで正しく求まる。一方、以下はFE固有の再計算・補正が必要で**別issueで対応する**
-//! （4.3節。WLSがR²等を素のOLS計算のまま使わなかったのと同じ教訓）:
-//! - 自由度（`n - n_entities - k`、単純な`n-k`ではない、6.3節・Issue #180）→
-//!   標準誤差・t値・p値・信頼区間・F統計量・調整済みR²・AIC/BICすべてに波及
+//! **`FeEstimator::fit`はwithin推定量`β̂`の委譲に加えて、自由度調整（Issue #180、6.3節）
+//! まで実装している**。within変換後のOLS推定量`β̂`はwithin推定量として数学的に正しい値に
+//! なる（自由度・`cov_type`に依存しない）ため、委譲だけで正しく求まる。一方、以下は
+//! FE固有の再計算・補正が必要で**別issueで対応する**（4.3節。WLSがR²等を素のOLS計算の
+//! ままでは使わなかったのと同じ教訓）:
 //! - `cov_type`デフォルトのentity単位cluster化・Driscoll-Kraay型HAC（3章・6.8節・Issue #181）
-//! - パネル固有R²（within/between/overall、2章・Issue #183）
+//! - パネル固有R²（within/between/overall、2章・Issue #183。`r_squared_adj`とは別物、
+//!   下記参照）
 //!
 //! そのため`FeEstimator::fit`は`OlsEstimator::fit`を`CovType::Classical`固定で呼ぶ
-//! （上記の自由度・`cov_type`補正が入るまでの暫定値。`estimator().std_errors()`等は
-//! この時点では正しくない前提で扱うこと）。`OlsInput::from_columns`は
+//! （`cov_type`補正が入るまでの暫定値。`estimator().std_errors()`等の**t検定・F検定関連
+//! フィールドは`cov_type=Classical`前提でのみ正しい**）。`OlsInput::from_columns`は
 //! `include_intercept=false`で呼ぶ（within変換で全体平均も含めて差し引かれているため、
 //! 変換後データに切片は不要——`OlsEstimator::fit`が変換後の残差平均をゼロと仮定する
 //! 通常のOLSと同じ考え方）。
@@ -88,10 +88,50 @@
 //! （Issue #186）が導入されたら、その一部（またはそのままのフィールド型）として
 //! 統合する想定の暫定的なパラメータ（1-way/2-wayの区別自体は`panel-api-design.md`で
 //! 確定済みの設計だが、`FeOptions`自体は未着手のため）。
+//!
+//! ## 自由度調整（Issue #180、6.3節）
+//!
+//! `df_model = k + neffects`（`neffects`は1-wayなら`n_entities`、2-wayなら
+//! `n_entities + n_periods - 1`。entityダミー・timeダミー間の定数項ぶんの重複を`+1`で
+//! 補正する、6.3節）。`df_resid = n - df_model`。`n <= df_model`なら
+//! `PanelError::InsufficientDegreesOfFreedom`。
+//!
+//! **`OlsEstimator`自身のt検定・調整済みR²・AIC/BICは`df_resid_ols = n - k`（`k`のみ、
+//! `neffects`を知らない）を前提に計算されているため誤り**（WLSの教訓と同型）。
+//! `FeEstimator::fit`は以下を委譲後に再計算し、上書きする:
+//! - **標準誤差・t値・p値・信頼区間**: `σ̂²`（残差分散）の分母が`df_resid_ols`から
+//!   `df_resid`に変わるだけなので、`OlsEstimator`が計算済みの標準誤差を
+//!   `sqrt(df_resid_ols / df_resid)`倍にスケールし直し（`cov_params`の再構築が不要）、
+//!   t分布（自由度`df_resid`）でt値・p値・信頼区間を計算し直す（`crate::inference`の
+//!   共有ヘルパーを使う、OLS自身と同じロジック）。
+//! - **調整済みR²**: `OlsEstimator::r_squared()`（within R²、変換後の`y`の
+//!   uncentered TSSベース）ではなく、**変換前の元の`y`の中心化TSSに基づく overall R²**
+//!   を使う——`r_squared_adj = 1 - (1 - overall_R²) * (n-1) / df_resid`。`estimator()`の
+//!   `r_squared()`は依然として妥当な値（within R²）だが、`r_squared_adj`とは別の
+//!   概念であることに注意（within R²を`(n-1)/df_resid`で素朴に調整しても正しい
+//!   調整済みR²にはならない）。
+//! - **AIC/BIC**: `log_likelihood`自体は`SSR/n`のみに依存し`df_resid`非依存の式
+//!   （`OlsEstimator::log_likelihood()`のformulaと同一）のためそのまま再利用できるが、
+//!   ペナルティ項の乗数は`k`ではなく`df_model`（固定効果の実効パラメータ数を含む）を使う:
+//!   `aic = -2*log_likelihood + 2*df_model`、`bic = -2*log_likelihood + ln(n)*df_model`。
+//! - **F統計量はこの時点では未対応**（issue本文が明示的に「検定統計量（t検定）」と
+//!   限定しているため、v1のスコープ外。`estimator().f_statistic()`/`f_p_value()`は
+//!   `df_resid_ols`ベースのまま、FE用に補正されていない）。
+//!
+//! **検証の例外**: Python主リファレンスの`linearmodels`（`PanelOLS`）は`rsquared_adj`・
+//! `aic`・`bic`を一切提供しない（`rsquared_within`/`between`/`overall`/`inclusive`・
+//! `loglik`のみ）。そのためこれら3つの検証はRクロスチェック（`fixest`）のみで行う
+//! （通常の「Python主リファレンス＋Rクロスチェックの2系統検証」の例外、ハウスマン検定
+//! （5.3節）と同型の判断）。上記の式は`fixest::feols`の`AIC()`/`BIC()`/`summary()`の
+//! `Adj. R2`と数値的に一致することをRで実地検証済み（ユーザー承認済み、2026-09-12）。
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use faer::Mat;
+use statrs::distribution::StudentsT;
+
 use crate::error::CommonError;
+use crate::inference;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::panel::common::{PanelDimension, PanelError, quasi_demean_column};
 
@@ -245,24 +285,39 @@ pub struct FeEstimator {
     input: FeInput,
     effects: FeEffects,
     estimator: OlsEstimator,
+    /// パネル自由度調整後のモデル自由度（`k + neffects`、6.3節）。
+    df_model: usize,
+    /// パネル自由度調整後の残差自由度（`n - df_model`、6.3節）。
+    df_resid: usize,
+    std_errors: Mat<f64>,
+    t_stats: Mat<f64>,
+    p_values: Mat<f64>,
+    conf_lower: Mat<f64>,
+    conf_upper: Mat<f64>,
+    r_squared_adj: f64,
+    aic: f64,
+    bic: f64,
 }
 
 impl FeEstimator {
     /// `input`を`effects`が指定する方向でwithin変換した上で`OlsEstimator::fit`に委譲し、
-    /// FEを推定する。
+    /// FEを推定する。パネル自由度調整（Issue #180、6.3節）を反映した標準誤差・t値・p値・
+    /// 信頼区間・調整済みR²・AIC/BICを計算し直す（モジュールdoc「自由度調整」参照）。
     ///
     /// パイプライン: singleton検出
     /// （`validate_no_singleton_groups_one_way`/`validate_no_singleton_groups_two_way`、
     /// Issue #179）→ within変換（`within_transform_one_way`/`within_transform_two_way`、
-    /// 2-wayはバランスパネル検証を内包、Issue #176）→ 分散ゼロ検出
+    /// 2-wayはバランスパネル検証を内包、Issue #176）→ 自由度検証 → 分散ゼロ検出
     /// （`validate_no_zero_variance_regressors`、Issue #177）→ `OlsEstimator::fit`への委譲
     /// （`include_intercept=false`・`cov_type=CovType::Classical`固定。理由はモジュールdoc
-    /// 参照）。
+    /// 参照）→ 自由度調整後の統計量の再計算。
     ///
     /// # Errors
     /// - `effects=TwoWay`で`input.time()`が`None`の場合は`PanelError::TwoWayRequiresTime`
     /// - singletonグループが見つかった場合は`PanelError::SingletonGroup`
     /// - `effects=TwoWay`でバランスパネルでない場合は`PanelError::UnbalancedPanelForTwoWay`
+    /// - パネル自由度調整後の残差自由度（`df_resid`）が正にならない場合は
+    ///   `PanelError::InsufficientDegreesOfFreedom`
     /// - within変換後に分散ゼロの説明変数がある場合は`PanelError::ZeroVarianceAfterDemeaning`
     /// - 委譲先の`OlsEstimator::fit`が失敗した場合（観測数不足・特異行列等）は
     ///   `PanelError::WithinRegressionFailed`
@@ -288,6 +343,33 @@ impl FeEstimator {
             }
         };
 
+        let n = input.nobs();
+        let n_entities = count_unique(input.entity());
+        let n_periods = match effects {
+            FeEffects::OneWay => None,
+            FeEffects::TwoWay => Some(count_unique(input.time().expect(
+                "2-way already validated `time` is present \
+                 (validate_no_singleton_groups_two_way/within_transform_two_way)",
+            ))),
+        };
+        let k = input.x_names().len();
+        // `neffects`: entityダミー・timeダミーの実効パラメータ数（6.3節）。2-wayは両者の
+        // 間に定数項ぶんの重複が1つ生じるため`+1`補正（`n_entities + n_periods - 1`）。
+        let neffects = match n_periods {
+            None => n_entities,
+            Some(n_periods) => n_entities + n_periods - 1,
+        };
+        let df_model = k + neffects;
+        if n <= df_model {
+            return Err(PanelError::InsufficientDegreesOfFreedom {
+                n_obs: n,
+                n_entities,
+                n_periods,
+                k,
+            });
+        }
+        let df_resid = n - df_model;
+
         validate_no_zero_variance_regressors(&input, &x)?;
 
         // `OlsInput::from_columns`が返しうる`LeastSquaresError::Common(DimensionMismatch)`は
@@ -308,10 +390,67 @@ impl FeEstimator {
         let estimator = OlsEstimator::fit(ols_input, CovType::Classical, confidence_level)
             .map_err(|source| PanelError::WithinRegressionFailed { source })?;
 
+        // `OlsEstimator`自身は`df_resid_ols = n - k`（`neffects`を知らない）を前提に
+        // 標準誤差を計算済み（`σ̂²_ols = SSR/df_resid_ols`）。`σ̂²_fe = SSR/df_resid`との
+        // 比は`df_resid_ols/df_resid`なので、標準誤差を`sqrt(df_resid_ols/df_resid)`倍に
+        // スケールし直すだけで済む（`cov_params`の再構築は不要、モジュールdoc参照）。
+        let df_resid_ols = n - k;
+        let scale = (df_resid_ols as f64 / df_resid as f64).sqrt();
+
+        let t_dist = StudentsT::new(0.0, 1.0, df_resid as f64)
+            .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+        let t_crit = inference::critical_value(&t_dist, confidence_level);
+
+        let k_dim = estimator.params().nrows();
+        let mut std_errors = Mat::zeros(k_dim, 1);
+        let mut t_stats = Mat::zeros(k_dim, 1);
+        let mut p_values = Mat::zeros(k_dim, 1);
+        let mut conf_lower = Mat::zeros(k_dim, 1);
+        let mut conf_upper = Mat::zeros(k_dim, 1);
+        for j in 0..k_dim {
+            let coef = *estimator.params().get(j, 0);
+            let se = *estimator.std_errors().get(j, 0) * scale;
+            let stat = inference::compute_inference_stat(&t_dist, coef, se, t_crit);
+
+            *std_errors.get_mut(j, 0) = se;
+            *t_stats.get_mut(j, 0) = stat.stat;
+            *p_values.get_mut(j, 0) = stat.p_value;
+            *conf_lower.get_mut(j, 0) = stat.conf_low;
+            *conf_upper.get_mut(j, 0) = stat.conf_high;
+        }
+
+        // 調整済みR²は変換前の元の`y`の中心化TSSに基づく overall R²から計算する
+        // （`estimator().r_squared()`はwithin R²であり別概念、モジュールdoc参照）。
+        // 残差はFWL定理により変換後・変換前どちらの尺度でも同じ値になるため
+        // （`estimator.residuals()`をそのまま使える）、SSRの再計算は不要。
+        let ssr: f64 = (0..n)
+            .map(|i| (*estimator.residuals().get(i, 0)).powi(2))
+            .sum();
+        let y_mean: f64 = input.y().iter().sum::<f64>() / n as f64;
+        let tss_overall: f64 = input.y().iter().map(|v| (v - y_mean).powi(2)).sum();
+        let r_squared_overall = 1.0 - ssr / tss_overall;
+        let r_squared_adj = 1.0 - (1.0 - r_squared_overall) * ((n - 1) as f64 / df_resid as f64);
+
+        // `log_likelihood`自体は`SSR/n`のみに依存しdf非依存の式のためそのまま再利用できる
+        // （モジュールdoc参照）。ペナルティ項の乗数だけ`k`から`df_model`に差し替える。
+        let log_likelihood = estimator.log_likelihood();
+        let aic = -2.0 * log_likelihood + 2.0 * (df_model as f64);
+        let bic = -2.0 * log_likelihood + (n as f64).ln() * (df_model as f64);
+
         Ok(Self {
             input,
             effects,
             estimator,
+            df_model,
+            df_resid,
+            std_errors,
+            t_stats,
+            p_values,
+            conf_lower,
+            conf_upper,
+            r_squared_adj,
+            aic,
+            bic,
         })
     }
 
@@ -327,12 +466,71 @@ impl FeEstimator {
 
     /// within変換済みデータに対する`OlsEstimator`本体。
     ///
-    /// **係数（`params()`）は正しいwithin推定量だが、標準誤差・t値・p値・信頼区間・
-    /// F統計量・調整済みR²・AIC/BICはこの時点では正しくない**（モジュールdoc参照。
-    /// FE固有の自由度・`cov_type`補正が別issueで入るまでの暫定値）。
+    /// **係数（`params()`）・残差（`residuals()`）・within R²（`r_squared()`）は正しい値**
+    /// だが、**標準誤差・t値・p値・信頼区間・調整済みR²・AIC/BICはパネル自由度調整前の
+    /// 値のままで誤り**（`FeEstimator`自身の同名メソッド（`std_errors()`等）を使うこと、
+    /// モジュールdoc「自由度調整」参照）。**F統計量はこの時点では未対応**
+    /// （`estimator().f_statistic()`/`f_p_value()`は`df_resid_ols`ベースのまま）。
+    /// `cov_type`はentity単位cluster化等の補正が入るまで`Classical`固定（Issue #181）。
     pub fn estimator(&self) -> &OlsEstimator {
         &self.estimator
     }
+
+    /// パネル自由度調整後のモデル自由度（`k + neffects`、6.3節）。
+    pub fn df_model(&self) -> usize {
+        self.df_model
+    }
+
+    /// パネル自由度調整後の残差自由度（`n - df_model`、6.3節）。
+    pub fn df_resid(&self) -> usize {
+        self.df_resid
+    }
+
+    /// パネル自由度調整後の標準誤差（`(k, 1)`、`estimator().params()`と対応）。
+    pub fn std_errors(&self) -> &Mat<f64> {
+        &self.std_errors
+    }
+
+    /// パネル自由度調整後のt統計量（`(k, 1)`）。
+    pub fn t_stats(&self) -> &Mat<f64> {
+        &self.t_stats
+    }
+
+    /// パネル自由度調整後の両側p値（`(k, 1)`）。
+    pub fn p_values(&self) -> &Mat<f64> {
+        &self.p_values
+    }
+
+    /// パネル自由度調整後の信頼区間の下限（`(k, 1)`）。
+    pub fn conf_lower(&self) -> &Mat<f64> {
+        &self.conf_lower
+    }
+
+    /// パネル自由度調整後の信頼区間の上限（`(k, 1)`）。
+    pub fn conf_upper(&self) -> &Mat<f64> {
+        &self.conf_upper
+    }
+
+    /// パネル自由度調整済み決定係数（overall R²ベース、モジュールdoc参照）。
+    pub fn r_squared_adj(&self) -> f64 {
+        self.r_squared_adj
+    }
+
+    /// パネル自由度調整済みAIC（`df_model`をペナルティ項に使う、モジュールdoc参照）。
+    pub fn aic(&self) -> f64 {
+        self.aic
+    }
+
+    /// パネル自由度調整済みBIC。
+    pub fn bic(&self) -> f64 {
+        self.bic
+    }
+}
+
+/// `ids`のユニークID数を数える（`n_entities`/`n_periods`のカウント）。純粋な
+/// カーディナリティ集計のため`HashSet`でよい（`validate_balanced_panel`等と同じ理由）。
+fn count_unique(ids: &[String]) -> usize {
+    ids.iter().collect::<HashSet<_>>().len()
 }
 
 /// `ids`に現れる全ユニークIDに`θ=1.0`を割り当てた`BTreeMap`を作る。
@@ -1162,17 +1360,43 @@ mod tests {
 
     #[test]
     fn fe_estimator_fit_two_way_recovers_known_slope() {
-        // `within_transform_two_way_matches_closed_form_double_demeaning`と同じデータ
-        // （x1はyのちょうど2倍）。2-way within変換後、x1_out = 2 * y_out が厳密に成り立つ
-        // ため、切片なしOLSのスロープは0.5に厳密に一致するはず。
-        let y = [1.0, 3.0, 5.0, 9.0];
-        let x1 = vec![2.0, 6.0, 10.0, 18.0];
-        let input = balanced_two_way_input(y, &[x1]);
+        // `within_transform_two_way_matches_closed_form_double_demeaning`と同じ関係
+        // （x1はyのちょうど2倍。この関係は線形変換の下で任意のN・Tで恒等的に保たれるため
+        // 具体的な値は問わない）だが、3エンティティ×3時点（n=9）のバランスパネルに
+        // 拡張する：df_model=k(1)+neffects(n_entities+n_periods-1=3+3-1=5)=6、n=9>6で
+        // Issue #180の自由度検証（`n<=df_model`）を通過できる規模にする必要があるため
+        // （N=2,T=2のn=4だとdf_model=1+3=4となりn<=df_modelで弾かれてしまう）。
+        // 2-way within変換後、x1_out ≈ 2 * y_out がほぼ成り立つため、切片なしOLSの
+        // スロープは0.5にほぼ一致するはず。x1はy*2からごくわずかに擾乱を入れる
+        // （厳密にx1=2*yだと残差が全行ゼロになり、`OlsEstimator::fit`のF検定
+        // （`wald_f_test`）が分散ゼロによる特異行列で`ComputationFailed`を返してしまう
+        // 退化ケースを踏むため。既存の`WlsEstimator`のテストコメント
+        // `fit_without_intercept_uses_uncentered_r_squared_and_omits_const`と同じ理由）。
+        let entity = strings(&["a", "a", "a", "b", "b", "b", "c", "c", "c"]);
+        let time = strings(&["1", "2", "3", "1", "2", "3", "1", "2", "3"]);
+        let y = [1.0, 3.0, 5.0, 2.0, 4.0, 9.0, 6.0, 1.0, 8.0];
+        let noise = [0.01, -0.02, 0.015, -0.01, 0.02, -0.015, 0.01, -0.01, 0.02];
+        let x1: Vec<f64> = y.iter().zip(&noise).map(|(v, n)| 2.0 * v + n).collect();
+        let input = FeInput::from_columns(
+            &y,
+            &[x1],
+            vec!["x1".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
 
         let fe = FeEstimator::fit(input, FeEffects::TwoWay, 0.95).unwrap();
 
-        assert!((*fe.estimator().params().get(0, 0) - 0.5).abs() < 1e-9);
+        // 許容誤差0.01は`testing-policy.md`の相対誤差1e-8方針の対象外（リファレンス実装
+        // との数値比較ではなく、本テスト自身が注入した擾乱ノイズに対する内部整合性の
+        // 確認のため）。ノイズの大きさ（最大0.02、xスケール比で見ると相対誤差1〜2%程度）
+        // に対してスロープ推定への影響がこの範囲に収まることを確認する目的の閾値。
+        assert!((*fe.estimator().params().get(0, 0) - 0.5).abs() < 0.01);
         assert_eq!(fe.effects(), FeEffects::TwoWay);
+        assert_eq!(fe.df_model(), 6);
+        assert_eq!(fe.df_resid(), 3);
     }
 
     #[test]
@@ -1197,11 +1421,14 @@ mod tests {
 
     #[test]
     fn fe_estimator_fit_propagates_zero_variance_error() {
-        // "female"は各エンティティ内で一定（時間不変）。
-        let entity = strings(&["a", "a", "b", "b"]);
-        let y = [1.0, 2.0, 3.0, 5.0];
-        let x_varying = vec![10.0, 20.0, 5.0, 15.0];
-        let female = vec![0.0, 0.0, 1.0, 1.0];
+        // "female"は各エンティティ内で一定（時間不変）。n=6・n_entities=2・k=2で
+        // df_model=4・n>df_modelとなるよう、各エンティティ3観測に拡張する
+        // （n=4だとdf_model=2+2=4でn<=df_modelとなりInsufficientDegreesOfFreedomが
+        // 先に発火してしまうため、Issue #180の自由度検証を踏まえたサイズにする）。
+        let entity = strings(&["a", "a", "a", "b", "b", "b"]);
+        let y = [1.0, 2.0, 3.0, 5.0, 6.0, 8.0];
+        let x_varying = vec![10.0, 20.0, 15.0, 5.0, 10.0, 20.0];
+        let female = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
         let input = FeInput::from_columns(
             &y,
             &[x_varying, female],
@@ -1294,11 +1521,17 @@ mod tests {
     fn fe_estimator_fit_two_way_propagates_zero_variance_error() {
         // "year_dummy"はエンティティ間で変動しない（time FEと完全共線）。`fit()`が
         // within変換後に`validate_no_zero_variance_regressors`を呼んでいることの配線確認。
-        let entity = strings(&["a", "a", "b", "b"]);
-        let time = strings(&["1", "2", "1", "2"]);
-        let y = [1.0, 3.0, 5.0, 9.0];
-        let x_varying = vec![2.0, 6.0, 10.0, 18.0];
-        let year_dummy = vec![0.0, 1.0, 0.0, 1.0];
+        // n=9（3エンティティ×3時点、n_entities=3・n_periods=3）に拡張し、
+        // df_model=k(2)+neffects(3+3-1=5)=7・n>df_modelとなるサイズにする
+        // （Issue #180の自由度検証を先に通過させるため）。"x_varying"は
+        // entity×timeの交互作用項（entity_idx*time_idx）にして、加法分離可能な
+        // 主効果のみの列（2-way demeanで機械的にゼロになる）にならないようにする
+        // （Pythonで2-way demeanした結果、分散0.444...とゼロでないことを確認済み）。
+        let entity = strings(&["a", "a", "a", "b", "b", "b", "c", "c", "c"]);
+        let time = strings(&["1", "2", "3", "1", "2", "3", "1", "2", "3"]);
+        let y = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
+        let x_varying = vec![1.0, 2.0, 3.0, 2.0, 4.0, 6.0, 3.0, 6.0, 9.0];
+        let year_dummy = vec![0.0, 1.0, 2.0, 0.0, 1.0, 2.0, 0.0, 1.0, 2.0];
         let input = FeInput::from_columns(
             &y,
             &[x_varying, year_dummy],
@@ -1345,25 +1578,23 @@ mod tests {
 
     #[test]
     fn fe_estimator_fit_wraps_ols_failure_as_within_regression_failed() {
-        // n=4（entity a/b各2観測、singletonではない）・x列4本（切片なし、within変換は
-        // 行数を減らさないためk=4のまま）で`n <= k`となり、`OlsEstimator::fit`が
-        // `CommonError::InsufficientObservations`を返す。各x列はエンティティ内で変動する
-        // 値にして（`validate_no_zero_variance_regressors`より先にこのエラーを踏ませる）。
-        let entity = strings(&["a", "a", "b", "b"]);
-        let y = [1.0, 2.0, 3.0, 4.0];
-        let x1 = vec![1.0, 3.0, 2.0, 6.0];
-        let x2 = vec![2.0, 5.0, 1.0, 9.0];
-        let x3 = vec![10.0, 1.0, 4.0, 0.0];
-        let x4 = vec![0.0, 2.0, 5.0, 1.0];
+        // Issue #180の自由度検証（`n <= df_model`）が`OlsEstimator::fit`自身の`n <= k`
+        // チェックより常に厳しい（`df_model = k + neffects > k`）ため、`OlsEstimator::fit`
+        // 側の観測数不足はこの経路では発生しえなくなった（`fe_estimator_fit_propagates_
+        // insufficient_degrees_of_freedom_error`が先に弾く）。そのため、ここでは
+        // `OlsEstimator::fit`固有の別の失敗——完全な多重共線性（`LeastSquaresError::
+        // SingularMatrix`）——を踏ませる: x2はx1のちょうど2倍で、within変換
+        // （線形変換）後も比例関係`x2_demeaned = 2 * x1_demeaned`が保たれ完全共線になる。
+        // n=6（3エンティティ、singletonではない）・k=2でdf_model=2+3=5、n=6>5と
+        // 自由度検証は通過するようにする。
+        let entity = strings(&["a", "a", "b", "b", "c", "c"]);
+        let y = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let x1 = vec![1.0, 3.0, 2.0, 6.0, 4.0, 10.0];
+        let x2: Vec<f64> = x1.iter().map(|v| 2.0 * v).collect();
         let input = FeInput::from_columns(
             &y,
-            &[x1, x2, x3, x4],
-            vec![
-                "x1".to_string(),
-                "x2".to_string(),
-                "x3".to_string(),
-                "x4".to_string(),
-            ],
+            &[x1, x2],
+            vec!["x1".to_string(), "x2".to_string()],
             &entity,
             None,
             "y".into(),
@@ -1376,6 +1607,127 @@ mod tests {
             result.unwrap_err(),
             PanelError::WithinRegressionFailed { .. }
         ));
+    }
+
+    #[test]
+    fn fe_estimator_fit_propagates_insufficient_degrees_of_freedom_error() {
+        // n=4・n_entities=2・k=2でdf_model=k+n_entities=4となり、n<=df_modelのため
+        // `OlsEstimator::fit`へ委譲する前に`PanelError::InsufficientDegreesOfFreedom`で
+        // 弾かれることを確認する（Issue #180）。
+        let entity = strings(&["a", "a", "b", "b"]);
+        let y = [1.0, 2.0, 3.0, 4.0];
+        let x1 = vec![1.0, 3.0, 2.0, 6.0];
+        let x2 = vec![2.0, 5.0, 1.0, 9.0];
+        let input = FeInput::from_columns(
+            &y,
+            &[x1, x2],
+            vec!["x1".to_string(), "x2".to_string()],
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+
+        let result = FeEstimator::fit(input, FeEffects::OneWay, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::InsufficientDegreesOfFreedom {
+                n_obs: 4,
+                n_entities: 2,
+                n_periods: None,
+                k: 2,
+            }
+        );
+    }
+
+    /// N=4（id: a,b,c,d）×T=3（t: 1,2,3）のバランスパネル。`fe_estimator_fit_one_way_
+    /// matches_fixest_reference`/`fe_estimator_fit_two_way_matches_fixest_reference`の
+    /// 両方で共有する（1-way/2-wayを同じデータで比較できるようにするため）。
+    fn fixest_reference_input() -> (Vec<String>, Vec<String>, Vec<f64>, Vec<f64>) {
+        let entity = strings(&["a", "a", "a", "b", "b", "b", "c", "c", "c", "d", "d", "d"]);
+        let time = strings(&["1", "2", "3", "1", "2", "3", "1", "2", "3", "1", "2", "3"]);
+        let x = vec![1.0, 2.0, 3.0, 2.0, 4.0, 5.0, 1.0, 3.0, 6.0, 4.0, 2.0, 1.0];
+        let y = vec![
+            5.0, 7.0, 10.0, 3.0, 8.0, 9.0, 6.0, 10.0, 15.0, 2.0, 5.0, 4.0,
+        ];
+        (entity, time, x, y)
+    }
+
+    #[test]
+    fn fe_estimator_fit_one_way_matches_fixest_reference() {
+        // Rの`fixest::feols(y ~ x | id)`（`id`: a/b/c/d各3観測）の実測値と数値比較する
+        // （5.2節・fixestがFEのRクロスチェック参照実装）。期待値はRで独立に計算・検算済み
+        // （`options(digits=15)`でフルの浮動小数点精度を取得、2026-09-12）。
+        let (entity, _time, x, y) = fixest_reference_input();
+        let input =
+            FeInput::from_columns(&y, &[x], vec!["x".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let fe = FeEstimator::fit(input, FeEffects::OneWay, 0.95).unwrap();
+
+        assert_eq!(fe.df_model(), 5); // k(1) + n_entities(4)
+        assert_eq!(fe.df_resid(), 7); // n(12) - df_model(5)
+        assert!((*fe.estimator().params().get(0, 0) - 1.402_777_777_777_78).abs() < 1e-9);
+        assert!((*fe.std_errors().get(0, 0) - 0.432_598_838_244_034).abs() < 1e-6);
+        assert!((*fe.t_stats().get(0, 0) - 3.242_675_785_889_31).abs() < 1e-6);
+        assert!((*fe.p_values().get(0, 0) - 0.014_200_386_789_949_8).abs() < 1e-6);
+        assert!((*fe.conf_lower().get(0, 0) - 0.379_844_073_655_07).abs() < 1e-6);
+        assert!((*fe.conf_upper().get(0, 0) - 2.425_711_481_900_49).abs() < 1e-6);
+        assert!((fe.aic() - 55.612_545_928_611_7).abs() < 1e-6);
+        assert!((fe.bic() - 58.037_079_177_551_7).abs() < 1e-6);
+        assert!((fe.r_squared_adj() - 0.661_606_689_860_115).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fe_estimator_fit_two_way_matches_fixest_reference() {
+        // 同じデータでの`fixest::feols(y ~ x | id + t)`（2-way）の実測値と数値比較する。
+        let (entity, time, x, y) = fixest_reference_input();
+        let input = FeInput::from_columns(
+            &y,
+            &[x],
+            vec!["x".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
+
+        let fe = FeEstimator::fit(input, FeEffects::TwoWay, 0.95).unwrap();
+
+        assert_eq!(fe.df_model(), 7); // k(1) + neffects(n_entities(4)+n_periods(3)-1=6)
+        assert_eq!(fe.df_resid(), 5); // n(12) - df_model(7)
+        assert!((*fe.estimator().params().get(0, 0) - 0.822_429_906_542_056).abs() < 1e-9);
+        assert!((*fe.std_errors().get(0, 0) - 0.227_239_295_931_651).abs() < 1e-6);
+        assert!((*fe.t_stats().get(0, 0) - 3.619_223_969_033_19).abs() < 1e-6);
+        assert!((*fe.p_values().get(0, 0) - 0.015_231_948_369_008_1).abs() < 1e-6);
+        assert!((*fe.conf_lower().get(0, 0) - 0.238_292_700_077_37).abs() < 1e-6);
+        assert!((*fe.conf_upper().get(0, 0) - 1.406_567_113_006_74).abs() < 1e-6);
+        assert!((fe.aic() - 36.559_692_739_993_7).abs() < 1e-6);
+        assert!((fe.bic() - 39.954_039_288_509_7).abs() < 1e-6);
+        assert!((fe.r_squared_adj() - 0.930_619_212_222_08).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fe_estimator_fit_with_no_regressors_estimates_fixed_effects_only_model() {
+        // k=0（回帰変数なし、固定効果のみのモデル）でも`fit()`本体がエンドツーエンドに
+        // 動くことを確認する境界ケース（`from_columns_with_no_regressors_succeeds`は
+        // `FeInput`構築のみの検証で、`fit()`のdf調整（`df_model=neffects`のみになる）・
+        // `r_squared_adj`/`aic`/`bic`計算までは通していなかった、rust-reviewer指摘）。
+        // n=6・n_entities=3・k=0でdf_model=neffects=3・df_resid=3。
+        let entity = strings(&["a", "a", "b", "b", "c", "c"]);
+        let y = [1.0, 3.0, 5.0, 7.0, 2.0, 4.0];
+        let input = FeInput::from_columns(&y, &[], vec![], &entity, None, "y".into()).unwrap();
+
+        let fe = FeEstimator::fit(input, FeEffects::OneWay, 0.95).unwrap();
+
+        assert_eq!(fe.df_model(), 3);
+        assert_eq!(fe.df_resid(), 3);
+        assert_eq!(fe.estimator().params().nrows(), 0);
+        assert_eq!(fe.std_errors().nrows(), 0);
+        assert!(fe.aic().is_finite());
+        assert!(fe.bic().is_finite());
+        assert!(fe.r_squared_adj().is_finite());
     }
 
     #[test]

@@ -2320,12 +2320,22 @@ mod tests {
 
     #[test]
     fn fit_returns_separation_suspected_error_for_near_separation_data() {
-        for method in [Method::Newton, Method::Bfgs, Method::Lbfgs] {
+        // 実測で確認済みの最小反復回数（`SeparationSuspected`が発火するまでの
+        // `n_iter`）: newton=22・bfgs=36（自前実装`FaerBfgs`、Issue #285）・
+        // lbfgs=29。手法ごとに実測値+数回分の余裕を持たせた`max_iter`にすることで、
+        // 将来いずれかの手法だけ反復回数が増加する回帰が起きても検出できるように
+        // する（3手法で同じ`max_iter`を共有すると、他手法に合わせて緩めた分だけ
+        // 検出力が落ちるため）。
+        for (method, max_iter) in [
+            (Method::Newton, 25),
+            (Method::Bfgs, 40),
+            (Method::Lbfgs, 32),
+        ] {
             let result = LogitEstimator::fit(
                 near_separation_input(),
                 MleFitOptions {
                     method,
-                    max_iter: 35,
+                    max_iter,
                     tol: 1e-6,
                     raise_on_non_convergence: true,
                     cov_type: CovType::Classical,

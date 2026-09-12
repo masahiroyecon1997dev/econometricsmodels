@@ -18,11 +18,11 @@
 
 use argmin::core::TerminationStatus;
 use argmin::core::{
-    CostFunction, Error as OptimizerError, Executor, Gradient, Hessian, IterState, KV, Problem,
-    Solver, State, TerminationReason,
+    CostFunction, Error as OptimizerError, Executor, Gradient, Hessian, IterState, KV, LineSearch,
+    Problem, Solver, State, TerminationReason,
 };
 use argmin::solver::linesearch::MoreThuenteLineSearch;
-use argmin::solver::quasinewton::{BFGS, LBFGS};
+use argmin::solver::quasinewton::LBFGS;
 use faer::prelude::{Solve, SolveLstsq};
 use faer::{Mat, Side};
 use statrs::distribution::{ChiSquared, Continuous, ContinuousCDF, Normal};
@@ -950,8 +950,6 @@ where
         + Gradient<Param = Vec<f64>, Gradient = Vec<f64>>
         + Hessian<Param = Vec<f64>, Hessian = Vec<Vec<f64>>>,
 {
-    let k = initial_params.len();
-
     let (params, mut converged, n_iter, model) = match method {
         Method::Newton => {
             let solver = FaerNewton {
@@ -965,17 +963,12 @@ where
             extract_outcome(result.state, result.problem)?
         }
         Method::Bfgs => {
-            let linesearch = MoreThuenteLineSearch::new();
-            let solver = BFGS::new(linesearch)
-                .with_tolerance_grad(tol)
-                .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+            let solver = FaerBfgs {
+                linesearch: MoreThuenteLineSearch::new(),
+                tol,
+            };
             let result = Executor::new(problem, solver)
-                .configure(|state| {
-                    state
-                        .param(initial_params)
-                        .inv_hessian(identity_matrix(k))
-                        .max_iters(max_iter)
-                })
+                .configure(|state| state.param(initial_params).max_iters(max_iter))
                 .run()
                 .map_err(convert_optimizer_error)?;
             extract_outcome(result.state, result.problem)?
@@ -1462,6 +1455,290 @@ fn newton_step(hessian: &[Vec<f64>], grad: &[f64]) -> Result<Vec<f64>, MleError>
     Ok((0..k).map(|i| *step.get(i, 0)).collect())
 }
 
+/// argmin組み込みのBFGS（`argmin::solver::quasinewton::BFGS`）は、外側反復をまたぐ
+/// line searchの初期ステップ幅・逆Hessianの初期スケールを実行中に調整する手段を
+/// 公開していない（`linesearch`フィールドはprivateで、`initial_step_length`は
+/// 一度設定すると全反復で同じ固定値が使われ続ける）。単位行列を初期逆Hessianにすると、
+/// Logit/Probit等の尤度Hessianのスケール（観測数`n`個のスコアの和で`O(n)`）との乖離が
+/// `n`が大きいほど桁違いに開き、最初の探索方向`d=-Ig`が暴走してline searchが1反復
+/// あたり多数の関数評価を消費する（Issue #285で実測: n=100,000→1,000,000でNewtonの
+/// 反復回数は4のまま一定なのに対し、BFGSは15→22と増加）。
+///
+/// 標準的な対策（Nocedal & Wright *Numerical Optimization* 6.1節のself-scaling初期化）
+/// は、「1回目の反復でline searchが実際に受理したステップ」から秘密方程式ペア
+/// `(s₀,y₀)`を作り、`γ=(y₀ᵀs₀)/(y₀ᵀy₀)`で初期逆Hessianをスケーリングしてから通常の
+/// BFGS rank-2更新を適用する、というもの。これはargmin自身の`BFGS::next_iter`に
+/// コメントアウトされた形で存在する（`self.inv_hessian`という現存しないフィールドを
+/// 参照しており、リファクタリングの過程で壊れたまま放置されている）。この手法を
+/// 使うには「1回目の反復の終わり（rank-2更新の直前）」というタイミングにフックする
+/// 必要があり、argminの公開APIには存在しないため、`FaerNewton`と同じ理由（組み込み
+/// ソルバーが必要な制御点を公開していない）で自前実装する（Issue #285）。
+///
+/// あわせて、1回目の反復専用のline search初期ステップ幅も`min(1, 1/‖g₀‖)`に調整する
+/// （単位行列の逆Hessianによる探索方向`-g₀`は`n`が大きいほど大きくなるため、
+/// `alpha=1`から始めて大きくバックトラックする代わりに、あらかじめ妥当な大きさへ
+/// 抑える）。2回目以降の反復は、既にrank-2更新でスケールが補正された逆Hessianにより
+/// 探索方向自体が適切な大きさになっているはずなので、標準の`alpha=1.0`に戻す
+/// （固定値のまま反復間で使い回すと、スケール補正済みの反復まで不必要に小さい
+/// ステップから始めることになり逆効果になりうるため）。
+///
+/// `Method::Lbfgs`は対象外: argmin 0.11.0のLBFGS実装は`s`/`y`履歴・初期`γ`を外部から
+/// 注入する公開APIが無く（privateフィールド、対応するビルダーメソッド無し）、同じ
+/// 手法を適用できない。line searchの初期ステップ幅で代用しようとしても全反復共通の
+/// 固定値になり、2回目以降の反復（LBFGS内部の動的`γ`で既に正しくスケールされている
+/// 反復）を悪化させるリスクがあるため見送った（Issue #285、ユーザー確認済み）。
+struct FaerBfgs {
+    /// line search。`self`が所有し反復間で使い回す（`initial_step_length`で1回目の
+    /// 反復だけ特別なステップ幅を設定し、2回目以降は標準値に戻す、という制御を行う
+    /// ため。built-inのBFGSは`self.linesearch.clone()`を反復ごとに使い捨てるだけで、
+    /// `self.linesearch`自体を反復間で更新する経路が無い）。
+    linesearch: MoreThuenteLineSearch<Vec<f64>, Vec<f64>, f64>,
+    tol: f64,
+}
+
+type BfgsState = IterState<Vec<f64>, Vec<f64>, (), Vec<Vec<f64>>, (), f64>;
+
+impl<O> Solver<O, BfgsState> for FaerBfgs
+where
+    O: CostFunction<Param = Vec<f64>, Output = f64>
+        + Gradient<Param = Vec<f64>, Gradient = Vec<f64>>,
+{
+    /// `argmin::core::Solver`トレイトの必須メソッド（`FaerNewton::name`と同じ理由で
+    /// 未カバーでも振る舞いの正しさに影響しない）。
+    fn name(&self) -> &str {
+        "BFGS (faer-backed)"
+    }
+
+    fn init(
+        &mut self,
+        problem: &mut Problem<O>,
+        mut state: BfgsState,
+    ) -> Result<(BfgsState, Option<KV>), OptimizerError> {
+        let param = state.take_param().ok_or_else(|| {
+            OptimizerError::msg(
+                "FaerBfgs requires an initial parameter vector via Executor's configure method",
+            )
+        })?;
+        let grad = problem.gradient(&param)?;
+
+        // 1回目の反復専用のline search初期ステップ幅（`FaerBfgs`のdocコメント参照）。
+        // `g0_norm`が実質ゼロ（既に停留点付近）なら`1.0/g0_norm`は`f64::INFINITY`に
+        // なり`min(1.0)`で1.0（＝標準値）に収まるため、この場合は特別扱い不要で
+        // 自然に既定動作へ落ちる。
+        let alpha0 = (1.0 / l2_norm(&grad)).min(1.0);
+        if alpha0.is_finite() && alpha0 > 0.0 {
+            self.linesearch.initial_step_length(alpha0)?;
+        }
+
+        let k = param.len();
+        let state = state
+            .param(param)
+            .gradient(grad)
+            .inv_hessian(identity_matrix(k));
+        Ok((state, None))
+    }
+
+    fn next_iter(
+        &mut self,
+        problem: &mut Problem<O>,
+        mut state: BfgsState,
+    ) -> Result<(BfgsState, Option<KV>), OptimizerError> {
+        let param = state
+            .take_param()
+            .ok_or_else(|| OptimizerError::msg("FaerBfgs: parameter vector in state not set"))?;
+        let cur_cost = state.get_cost();
+        let prev_grad = state
+            .take_gradient()
+            .ok_or_else(|| OptimizerError::msg("FaerBfgs: gradient in state not set"))?;
+        let inv_hessian = state
+            .take_inv_hessian()
+            .ok_or_else(|| OptimizerError::msg("FaerBfgs: inverse Hessian in state not set"))?;
+        // `terminate`が「1回目の反復だけの特別扱い」を後段で正しく戻せるよう、
+        // rank-2更新前に判定しておく（`next_iter`本体の途中でstateの反復カウントが
+        // 変わることはない）。
+        let is_first_iter = state.get_iter() == 0;
+
+        let direction: Vec<f64> = mat_vec(&inv_hessian, &prev_grad)
+            .into_iter()
+            .map(|d| -d)
+            .collect();
+        self.linesearch.search_direction(direction);
+
+        // `take_problem()`が`None`になるのは既に一度取り出した後に再度取り出した場合
+        // のみだが、`next_iter`はこの箇所でしか呼ばない（`FaerNewton`と同様、argmin
+        // 組み込みソルバー自体も同じ契約に依存して`.unwrap()`している）。
+        let inner_problem = problem.take_problem().ok_or_else(|| {
+            OptimizerError::msg("FaerBfgs: failed to recover the optimization problem")
+        })?;
+        let result = Executor::new(inner_problem, self.linesearch.clone())
+            .configure(|config| {
+                config
+                    .param(param.clone())
+                    .gradient(prev_grad.clone())
+                    .cost(cur_cost)
+            })
+            .ctrlc(false)
+            .run()?;
+        let mut sub_state = result.state;
+        let line_problem = result.problem;
+
+        let xk1 = sub_state.take_param().ok_or_else(|| {
+            OptimizerError::msg("FaerBfgs: no parameters returned by line search")
+        })?;
+        let next_cost = sub_state.get_cost();
+        problem.consume_problem(line_problem);
+
+        let grad = problem.gradient(&xk1)?;
+
+        // 1回目の反復専用のline search初期ステップ幅（`init`で設定）は、2回目以降は
+        // 標準の1.0に戻す（`FaerBfgs`のdocコメント参照）。
+        if is_first_iter {
+            self.linesearch.initial_step_length(1.0)?;
+        }
+
+        let sk: Vec<f64> = xk1.iter().zip(param.iter()).map(|(a, b)| a - b).collect();
+        let yk: Vec<f64> = grad
+            .iter()
+            .zip(prev_grad.iter())
+            .map(|(a, b)| a - b)
+            .collect();
+
+        let updated_inv_hessian = bfgs_updated_inv_hessian(inv_hessian, &sk, &yk, is_first_iter);
+
+        Ok((
+            state
+                .param(xk1)
+                .cost(next_cost)
+                .gradient(grad)
+                .inv_hessian(updated_inv_hessian),
+            None,
+        ))
+    }
+
+    fn terminate(&mut self, state: &BfgsState) -> TerminationStatus {
+        if let Some(g) = state.get_gradient()
+            && l2_norm(g) < self.tol
+        {
+            return TerminationStatus::Terminated(TerminationReason::SolverConverged);
+        }
+        // コストが（ほぼ）変化しなくなった場合も収束扱いにする。built-inのBFGS
+        // （`argmin::solver::quasinewton::BFGS`）が持つ副次的な収束判定
+        // （既定`tol_cost=f64::EPSILON`）と同じ基準。通常のデータでは勾配ノルム基準
+        // より先に発火することは無いが、near-separation等の退化した尤度面では
+        // line searchがこれ以上進めずコストが完全に変化しなくなる一方、勾配ノルムが
+        // まだ`tol`を下回らないことがある（実測: この基準を落とすとnear-separation
+        // ・Tobitの一部データで`NonConvergence`になる回帰を確認したため、built-inと
+        // 同じ基準を明示的に踏襲する）。
+        if (state.get_prev_cost() - state.get_cost()).abs() < f64::EPSILON {
+            return TerminationStatus::Terminated(TerminationReason::SolverConverged);
+        }
+        TerminationStatus::NotTerminated
+    }
+}
+
+/// 対角成分が`scale`の`k×k`対角行列。`identity_matrix`の一般化（`scale=1.0`で
+/// 一致する）だが、`FaerBfgs`のself-scaling初期化専用に使うため、意味が伝わる
+/// 別名の関数として分離する。
+fn scaled_identity(scale: f64, k: usize) -> Vec<Vec<f64>> {
+    (0..k)
+        .map(|i| (0..k).map(|j| if i == j { scale } else { 0.0 }).collect())
+        .collect()
+}
+
+fn dot(a: &[f64], b: &[f64]) -> f64 {
+    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+}
+
+fn mat_vec(mat: &[Vec<f64>], v: &[f64]) -> Vec<f64> {
+    mat.iter().map(|row| dot(row, v)).collect()
+}
+
+fn mat_mat(a: &[Vec<f64>], b: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    let n = a.len();
+    let m = b.len();
+    let p = b[0].len();
+    (0..n)
+        .map(|i| {
+            (0..p)
+                .map(|j| (0..m).map(|t| a[i][t] * b[t][j]).sum())
+                .collect()
+        })
+        .collect()
+}
+
+fn transpose(a: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    let n = a.len();
+    let m = a[0].len();
+    (0..m).map(|j| (0..n).map(|i| a[i][j]).collect()).collect()
+}
+
+/// BFGSの逆Hessian近似のrank-2更新: `H₊ = (I-ρsyᵀ)H(I-ρysᵀ)+ρssᵀ`
+/// （`ρ=1/(yᵀs)`は呼び出し側が渡す）。`k`は小さい（Logit/Probit/Tobitのパラメータ数、
+/// 実務的には数〜数十）ため、faerを介さず素朴な行列積で十分（`O(k³)`は無視できる
+/// コスト）。
+fn bfgs_rank2_update(h: &[Vec<f64>], s: &[f64], y: &[f64], rho: f64) -> Vec<Vec<f64>> {
+    let k = s.len();
+    let v: Vec<Vec<f64>> = (0..k)
+        .map(|i| {
+            (0..k)
+                .map(|m| (if i == m { 1.0 } else { 0.0 }) - rho * s[i] * y[m])
+                .collect()
+        })
+        .collect();
+    let vh = mat_mat(&v, h);
+    let vt = transpose(&v);
+    let mut result = mat_mat(&vh, &vt);
+    for (i, row) in result.iter_mut().enumerate() {
+        for (j, cell) in row.iter_mut().enumerate() {
+            *cell += rho * s[i] * s[j];
+        }
+    }
+    result
+}
+
+/// `FaerBfgs::next_iter`が1回の反復の終わりに呼ぶ、逆Hessian近似の更新ロジック本体。
+/// `next_iter`のargmin`Solver`実装（`Problem`/`IterState`の出し入れ、line searchの
+/// 実行）から分離した純粋関数にすることで、rank-2更新・self-scaling・secant条件の
+/// 安全策を単体テストで直接検証できるようにしている（`mod tests`の
+/// `bfgs_updated_inv_hessian_*`参照）。
+///
+/// secant条件`yᵀs`が（`s`・`y`のスケールに対して相対的に）十分正でない場合は
+/// rank-2更新を行わず、`inv_hessian`をそのまま返す（更新すると正定値性が壊れうる
+/// ため。標準的なBFGSの安全策）。閾値を絶対値ではなく`‖s‖‖y‖`に対する相対値にして
+/// いるのは、`.claude/rules/rust-style.md`「線形代数」節の特異性判定の方針
+/// （データのスケールに依存しない相対閾値を使う）と同じ理由。
+///
+/// `is_first_iter`が`true`の場合のみ、Nocedal & Wright *Numerical Optimization*
+/// 6.1節のself-scaling初期化（`γ=(yᵀs)/(yᵀy)`で単位行列の代わりに`γI`を
+/// 「更新前の逆Hessian」としてrank-2更新に使う）を行う（`FaerBfgs`のdocコメント
+/// 参照）。`yᵀy`が実質ゼロ（縮退、勾配がほとんど変化しなかった）の場合は
+/// `inv_hessian`をそのまま「更新前の逆Hessian」として使う（スケーリングを諦める
+/// フォールバック。`ykyk`は「ゼロ除算を避ける」ためだけの絶対閾値ガードであり、
+/// secant条件のような特異性判定ではないため、相対閾値にはしない）。
+fn bfgs_updated_inv_hessian(
+    inv_hessian: Vec<Vec<f64>>,
+    sk: &[f64],
+    yk: &[f64],
+    is_first_iter: bool,
+) -> Vec<Vec<f64>> {
+    let yksk = dot(yk, sk);
+    if yksk <= f64::EPSILON * l2_norm(sk) * l2_norm(yk) {
+        return inv_hessian;
+    }
+    let rho = 1.0 / yksk;
+    let prior_h = if is_first_iter {
+        let ykyk = dot(yk, yk);
+        if ykyk > f64::EPSILON {
+            scaled_identity(yksk / ykyk, sk.len())
+        } else {
+            inv_hessian
+        }
+    } else {
+        inv_hessian
+    };
+    bfgs_rank2_update(&prior_h, sk, yk, rho)
+}
+
 /// 設計行列`x`を列ピボットQR分解し、ランク落ちが無ければQR分解をそのまま返す
 /// （呼び出し側が`solve_lstsq`で最小二乗解＝反復最適化の初期値を、再分解せずに
 /// 取り出せるようにするため）。
@@ -1921,6 +2198,94 @@ mod tests {
             "{:?}",
             output.params
         );
+    }
+
+    #[test]
+    fn bfgs_rank2_update_matches_hand_computed_values_for_non_diagonal_case() {
+        // H=[[2,1],[1,3]]（対称正定値・非対角）、s=[1,0]、y=[1,1]、rho=1/(y・s)=1。
+        // V=I-rho*s*y^T=[[0,-1],[0,1]]、V*H=[[-1,-3],[1,3]]、V*H*V^T=[[3,-3],[-3,3]]、
+        // +rho*s*s^T=[[1,0],[0,0]] で H+=[[4,-3],[-3,3]]（手計算で検証済み）。
+        let h = vec![vec![2.0, 1.0], vec![1.0, 3.0]];
+        let s = vec![1.0, 0.0];
+        let y = vec![1.0, 1.0];
+        let rho = 1.0 / dot(&y, &s);
+
+        let updated = bfgs_rank2_update(&h, &s, &y, rho);
+        let expected = vec![vec![4.0, -3.0], vec![-3.0, 3.0]];
+        for i in 0..2 {
+            for j in 0..2 {
+                assert!(
+                    (updated[i][j] - expected[i][j]).abs() < 1e-10,
+                    "updated={updated:?}, expected={expected:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn scaled_identity_returns_diagonal_matrix_with_given_scale() {
+        let m = scaled_identity(2.5, 3);
+        for i in 0..3 {
+            for j in 0..3 {
+                let expected = if i == j { 2.5 } else { 0.0 };
+                assert_eq!(m[i][j], expected, "i={i}, j={j}, m={m:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn bfgs_updated_inv_hessian_skips_update_when_secant_condition_violated() {
+        let inv_hessian = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        // yᵀs = -1 < 0（secant条件`yᵀs>0`を満たさない）ため、rank-2更新をせず
+        // `inv_hessian`をそのまま返すはず。
+        let s = vec![1.0, 0.0];
+        let y = vec![-1.0, 0.0];
+
+        let updated = bfgs_updated_inv_hessian(inv_hessian.clone(), &s, &y, false);
+        assert_eq!(updated, inv_hessian);
+    }
+
+    #[test]
+    fn bfgs_updated_inv_hessian_applies_self_scaling_gamma_on_first_iteration() {
+        // yᵀs=1・yᵀy=2 → γ=0.5。1回目の反復では`inv_hessian`（ここでは意図的に
+        // γIとは異なる値にしている）を使わず、`scaled_identity(0.5, 2)`を
+        // 「更新前の逆Hessian」としてrank-2更新するはず。
+        let inv_hessian = vec![vec![7.0, 0.0], vec![0.0, 7.0]];
+        let s = vec![1.0, 0.0];
+        let y = vec![1.0, 1.0];
+
+        let updated = bfgs_updated_inv_hessian(inv_hessian, &s, &y, true);
+        let expected = bfgs_rank2_update(&scaled_identity(0.5, 2), &s, &y, 1.0);
+        assert_eq!(updated, expected);
+    }
+
+    #[test]
+    fn bfgs_updated_inv_hessian_does_not_apply_self_scaling_after_first_iteration() {
+        // 同じ`(s,y)`でも`is_first_iter=false`なら、γIではなく渡された`inv_hessian`
+        // をそのまま「更新前の逆Hessian」として使うはず。
+        let inv_hessian = vec![vec![7.0, 0.0], vec![0.0, 7.0]];
+        let s = vec![1.0, 0.0];
+        let y = vec![1.0, 1.0];
+
+        let updated = bfgs_updated_inv_hessian(inv_hessian.clone(), &s, &y, false);
+        let expected = bfgs_rank2_update(&inv_hessian, &s, &y, 1.0 / dot(&y, &s));
+        assert_eq!(updated, expected);
+    }
+
+    #[test]
+    fn bfgs_updated_inv_hessian_first_iteration_uses_prior_when_y_norm_is_too_small_to_scale() {
+        // yᵀy=1e-20はf64::EPSILON以下（self-scalingのゼロ除算ガードが発火する）が、
+        // yᵀs=1e-10は`‖s‖‖y‖`に対する相対閾値は上回る（rank-2更新自体はスキップ
+        // されない）。この場合`inv_hessian`をスケーリングせずそのまま
+        // 「更新前の逆Hessian」として使うはず。
+        let inv_hessian = vec![vec![9.0, 0.0], vec![0.0, 9.0]];
+        let s = vec![1.0, 0.0];
+        let y = vec![1e-10, 0.0];
+
+        let updated = bfgs_updated_inv_hessian(inv_hessian.clone(), &s, &y, true);
+        let yksk = dot(&y, &s);
+        let expected = bfgs_rank2_update(&inv_hessian, &s, &y, 1.0 / yksk);
+        assert_eq!(updated, expected);
     }
 
     #[test]

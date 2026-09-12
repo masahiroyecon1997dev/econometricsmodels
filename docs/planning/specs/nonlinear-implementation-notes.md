@@ -86,7 +86,8 @@ argminの`CostFunction`/`Gradient`/`Hessian`トレイト実装と、`nonlinear`�
 - argmin組み込みの`Newton`ソルバーは収束判定を一切行わず（`max_iters`に達するまで無条件に反復する）、`terminate()`をオーバーライドしていない。`FaerNewton`は`terminate()`を実装し、`next_iter`で計算した勾配を`state.gradient(...)`で状態に保存した上で、その勾配のノルムが`tol`未満なら`TerminationReason::SolverConverged`で早期終了する
   - **Issue #291（大標本での副次収束判定、実装済み）**: `tol`は総和勾配に対する絶対閾値で`n`スケールせず、大標本ではコスト関数が浮動小数点の底に達しても勾配ノルム基準が発火しないことがある。`regularized_newton_step`が`MAX_LM_ATTEMPTS`回すべて失敗し、かつ`λ=0`のHessianが可逆（真に特異ではない）な場合は`RegularizedStep::NoProgress`を返し、`next_iter`が (1) 勾配の停滞（前反復比`≥NEWTON_STALL_GRAD_RATIO`）＋ (2) 収束目標近傍（`<NEWTON_STALL_GRAD_FACTOR·tol`）＋ (3) コストHessianの正定値性（`cost_hessian_is_positive_definite`、鞍点除外）を確認して`stalled_at_optimum`を立て、`terminate()`が`SolverConverged`を返す（現在点をそのまま返す）。詳細は`docs/spec/tobit-spec.md`3.2節・`engine/src/nonlinear/CLAUDE.md`。
     - **将来の改善候補（rust-reviewer指摘、スコープ超で保留）**: `NEWTON_STALL_GRAD_FACTOR·tol`という絶対閾値は、`run_solver`の呼び出し元が設計行列を標準化した空間で最適化していること（勾配スケールが有界）に暗黙依存している。既に計算済みの`H⁻¹g`を使ってNewton減少量`√(gᵀH⁻¹g)`（Boyd & Vandenberghe の標準停止基準、局所2次モデルが予測する目的関数の減少量）を評価すれば、ほぼ追加コストなしでスケール不変な判定になり、この暗黙の`n≲3e7`上限を解消できる。
-- BFGS/L-BFGSは組み込みソルバーの`.with_tolerance_grad(tol)`（勾配のL2ノルムがこの値未満で収束と判定、`ArgminL2Norm`トレイト）をそのまま使う。線形探索は`MoreThuenteLineSearch`
+- L-BFGSは組み込みソルバーの`.with_tolerance_grad(tol)`（勾配のL2ノルムがこの値未満で収束と判定、`ArgminL2Norm`トレイト）をそのまま使う。線形探索は`MoreThuenteLineSearch`。
+- **BFGSは自前実装`FaerBfgs`に置き換え済み（Issue #285）**: 当初は組み込み`BFGS`（`argmin::solver::quasinewton::BFGS`）をそのまま使っていたが、初期逆Hessian（単位行列）と実際の尤度Hessianのスケール（`O(n)`）の乖離が`n`が大きいほど桁違いに開き、line searchが1反復あたり多数の関数評価を消費する性能問題が発覚した（newton・statsmodelsの同methodと比べ桁違いに遅い、実測: n=1,000,000でnewton 0.65s・bfgs 11.21s）。組み込みBFGSは、この問題への標準的対策（Nocedal & Wright 6.1節のself-scaling初期化、line searchの初期ステップ幅の反復間調整）を行うための制御点を公開しておらず（`linesearch`フィールドがprivate、`initial_step_length`は一度設定すると全反復で同じ固定値が使われ続ける）、`FaerNewton`と同じ理由（組み込みソルバーが必要な制御点を公開していない）で自前実装した。詳細・実測結果は`engine/src/nonlinear/CLAUDE.md`「踏んだ罠」・`docs/performance/logit.md`「結果: method軸」参照。**L-BFGSは同じ理由（`s`/`y`履歴・初期`γ`を注入する公開APIが無い）で対象外のまま**、組み込みソルバーを使い続けている（今後の課題）。
 
 **収束点のHessian評価**: `Method`の3分岐で`Executor::run()`実行後、`OptimizationResult.problem.take_problem()`でモデル（`O`）を取り出し、最終パラメータで`.hessian()`を1回呼び直す（Newtonの最後のイテレーションで計算済みのHessianを使い回すのではなく、常に独立して再評価する。3手法で同じコードパスにできて実装がシンプルになるため）。
 
@@ -110,7 +111,7 @@ argminの`CostFunction`/`Gradient`/`Hessian`トレイト実装と、`nonlinear`�
 
 ### 収束判定の`tol`（実装済み、妥当性はLogit・Probitで検証済み）
 
-- **判定基準**: 勾配ノルム（L2ノルム、`‖∇ℓ(θ)‖ < tol`）。`newton`/`bfgs`/`lbfgs`の3手法すべてで同じ基準を使う（Newtonは独自実装、BFGS/L-BFGSは組み込みの`with_tolerance_grad`）。
+- **判定基準**: 勾配ノルム（L2ノルム、`‖∇ℓ(θ)‖ < tol`）。`newton`/`bfgs`/`lbfgs`の3手法すべてで同じ基準を使う（Newton・BFGSは独自実装`FaerNewton`/`FaerBfgs`、L-BFGSは組み込みの`with_tolerance_grad`。Issue #285でBFGSを自前実装に置き換えた際、副次的なコスト変化ベースの収束判定〈`|prev_cost-cost|<f64::EPSILON`〉も組み込みBFGSと同じ基準で明示的に踏襲している）。
 - **デフォルト値**: `tol = 1e-6`で確定・維持（Logit実装・statsmodels/R glmとの数値照合で妥当性を検証済み。結論・根拠は`docs/spec/logit-spec.md`「最適化・収束判定」参照。要点: 通常データでは高精度に一致するが、準完全分離の境界ケースでは`1e-8`程度が必要。ただし`1e-8`に締めると`bfgs`が`max_iter`を使い切りやすくなるリスクがあるため、既定値は`1e-6`を維持し、境界ケースの数値比較テストのみ`tol`を明示的に締める運用とした）。**Probit実装時に同じ結論であることを実測確認済み**（通常シナリオはRTOL=1e-8で一致、near_separation境界ケースのみtol=1e-6だと相対誤差~4.4e-8とわずかに超過しtol=1e-8で解消、既定値は据え置き。詳細は`docs/spec/probit-spec.md`参照）。Tobit実装時も同じ結論を踏襲する想定(モデル固有の事情があれば個別に再検証する)。
 - **既知の限界とその対処**: 完全分離に近いデータでは、係数発散の過程でスコア項が浮動小数点アンダーフローし、`tol`の値によらず「収束済み」と誤判定しうる。`tol`の調整では解決しない構造的な限界のため、`run_solver`の後処理として標準化パラメータ空間でのノルムを事後チェックし、異常に大きい場合は収束判定を取り消して`MleError::SeparationSuspected`を返す対処を追加した（勾配ノルム基準自体は`tol`のまま維持し、別の判定軸を追加する形。詳細は`docs/spec/logit-spec.md`「最適化・収束判定」参照）。
 - **Options化**: `max_iter`と同じ扱いで`tol: f64 = 1e-6`をOptionsに追加する（`run_solver`関数の引数として実装済み。engine_pybind側の配線はLogitで実装済み）。

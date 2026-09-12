@@ -965,7 +965,14 @@ fn ensure_full_rank(
 /// F統計量を黙って返しうるため、`Llt`分解の**前**にこのチェックを置き
 /// `ComputationFailed`で止める。`Llt`分解自体の`map_err`は、両方のチェックを
 /// すり抜けるごく僅かな境界ケースに備えた防御的なフォールバック。
-fn wald_f_test(
+///
+/// `pub(crate)`: `panel::fe::FeEstimator::fit`（Issue #186）がFE独自に計算し直した
+/// `cov_params`・`df_resid`（パネル自由度調整済み）でF検定するために再利用する
+/// （`wald_test_last_columns`と同じ「サンドイッチ計算を複製しない」方針。FEは
+/// `OlsEstimator`インスタンス自身の`cov_params`/`df_inference`とは異なる値を使うため
+/// `wald_test_last_columns`メソッドは使えず、この下位の自由関数を直接呼ぶ、
+/// `engine/src/panel/CLAUDE.md`参照）。
+pub(crate) fn wald_f_test(
     params: &Mat<f64>,
     cov_params: &Mat<f64>,
     k_constant: usize,

@@ -1,7 +1,6 @@
 mod common;
+pub mod fe;
 
-// FE実装時に追加:
-// pub mod fe;
 // RE実装時に追加:
 // pub mod re;
 //

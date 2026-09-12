@@ -24,6 +24,12 @@
 //!   （`t`はユニークな時点数、Issue #182。`LeastSquaresError::InvalidHacLags`と同型だが
 //!   上限が観測数`n`ではなく時点数`t`）
 //! - `WithinRegressionFailed`: within変換済みデータの最小二乗推定委譲の失敗（4.3節）
+//! - `FTestFailed`: F統計量（Issue #186、`fe.rs`モジュールdoc「自由度調整」のF統計量節）の
+//!   Wald検定（`crate::linear::ols::wald_f_test`）が失敗した場合。`WithinRegressionFailed`と
+//!   意味が異なる（`OlsEstimator::fit`自体は既に成功した後の、F検定固有の共分散部分行列の
+//!   ほぼ特異性というbackstopのみ、`ols.rs`の`wald_f_test`docコメント参照）ため別バリアントに
+//!   分離した（`IvError::FirstStageFailed`が`WithinRegressionFailed`と同じ`LeastSquaresError`
+//!   ラップでも変換箇所ごとに専用バリアントにする判断と同じ）。
 //!
 //! RE固有（7章）で追加のバリアントが必要になった場合は、FE/RE実装issueで実際に計算
 //! コードを書く過程で随時追加する（`LeastSquaresError`・`IvError`のdocコメントと同じ
@@ -224,6 +230,20 @@ pub enum PanelError {
     /// （`IvError::FirstStageFailed`が`#[from]`を使わない判断と同じ）。
     #[error("within-transformed least-squares estimation failed: {source}")]
     WithinRegressionFailed {
+        #[source]
+        source: LeastSquaresError,
+    },
+
+    /// F統計量（Issue #186）のWald検定（`crate::linear::ols::wald_f_test`への委譲）が
+    /// 失敗した。`WithinRegressionFailed`とは別バリアント（理由はモジュールdoc参照）。
+    ///
+    /// 実際に発生しうるのは`LeastSquaresError::Common(CommonError::ComputationFailed)`
+    /// のみ（`wald_f_test`のdocコメント「backstop」参照。傾き係数間の極端なスケール差等で
+    /// 共分散部分行列が数値的にほぼ特異な場合）。それでも型は`WithinRegressionFailed`と
+    /// 同じ`LeastSquaresError`のまま保持する（`wald_f_test`のエラー型を独自に絞り込む
+    /// メリットが無いため）。
+    #[error("F-test for joint significance of the slope coefficients failed: {source}")]
+    FTestFailed {
         #[source]
         source: LeastSquaresError,
     },

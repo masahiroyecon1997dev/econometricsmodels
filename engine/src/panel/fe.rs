@@ -104,9 +104,44 @@
 //!   （`OlsEstimator::log_likelihood()`のformulaと同一）のためそのまま再利用できるが、
 //!   ペナルティ項の乗数は`k`ではなく`df_model`（固定効果の実効パラメータ数を含む）を使う:
 //!   `aic = -2*log_likelihood + 2*df_model`、`bic = -2*log_likelihood + ln(n)*df_model`。
-//! - **F統計量はこの時点では未対応**（issue本文が明示的に「検定統計量（t検定）」と
-//!   限定しているため、v1のスコープ外。`estimator().f_statistic()`/`f_p_value()`は
-//!   `df_resid_ols`ベースのまま、FE用に補正されていない）。
+//! - **F統計量**（`f_statistic`/`f_p_value`）: 当初Issue #180のスコープ外だったが
+//!   （issue本文が明示的に「検定統計量（t検定）」と限定していたため）、Issue #186
+//!   （`FeOptions`/`FeResult`のフィールド設計、`panel-api-design.md`2.1節がOLS同様
+//!   `f_statistic`/`f_p_value`を含める前提だった）の実装時に、engine側に対応する
+//!   panel自由度調整版が存在しないことが判明し、ユーザー確認の上で本節に前倒しで
+//!   実装した。**`OlsEstimator`自身の`estimator().f_statistic()`/`f_p_value()`は
+//!   引き続き`df_resid_ols = n - k`・`CovType::Classical`ベースのままで誤り**
+//!   （`FeEstimator`自身の`f_statistic()`/`f_p_value()`を使うこと、`estimator()`の
+//!   docコメント参照）。
+//!   - **定義**: 「切片を除く全傾き係数が同時にゼロ」というOLSの`f_statistic`と同じ
+//!     帰無仮説を、FEの傾き係数`k`個（FEは`within`変換で切片が消えているため
+//!     `k_constant=0`、`OlsInput::from_columns`を`include_intercept=false`で呼ぶのと
+//!     同じ理由）に対して行う。固定効果自体（entity/timeダミー）は検定対象に含めない
+//!     （`linearmodels.PanelOLS`の`f_statistic`「H0: All parameters ex. constant are
+//!     zero」と同じ定義・同じ扱い。fixestの`fitstat(m, "f")`は逆にFEダミーも含めた
+//!     モデル全体のF検定であり定義が異なるため、クロスチェックには使わない——後述
+//!     「検証」参照）。
+//!   - **実装**: `cov_type`別に計算し直した`cov_params`（`std_errors`等と同じ、この節の
+//!     直前で計算済み）と`estimator.params()`を使い、`crate::linear::ols::wald_f_test`
+//!     （OLS本体の`fit()`・`wald_test_last_columns`が使う既存のWald F検定を`pub(crate)`化
+//!     して再利用、サンドイッチ計算を複製しない。`.claude/rules/rust-style.md`
+//!     「全手法で共有するロジック」・`engine/src/linear/CLAUDE.md`の`wald_test_last_columns`
+//!     再利用方針と同じ判断）で`(k_constant=0, df_model=k, df_inference=df_resid)`を渡す。
+//!     分母自由度は`cov_type`によらず常にFEの`df_resid`
+//!     （OLS自身のCluster特有の`n_groups-1`切替はFEでは行わない、3.3節・上記「t値・p値・
+//!     信頼区間」と同じ方針）。`k=0`（説明変数無し）はOLSと同じくNaNを返す。
+//!   - **エラー**: `wald_f_test`の失敗（共分散部分行列が数値的にほぼ特異）は
+//!     `PanelError::FTestFailed { source }`として伝播する（`WithinRegressionFailed`とは
+//!     意味が異なる——`OlsEstimator::fit`自体は既に成功した後の、F検定固有の計算失敗
+//!     のため別バリアントにする、`common.rs`のdocコメント参照）。
+//!   - **検証**: 主リファレンス`linearmodels`の`PanelOLS.fit().f_statistic`
+//!     （`cov_type="unadjusted"`）と数値比較する。`k=1`（`fixest_reference_input`を使う
+//!     既存テスト）では「1自由度のF検定は両側t検定と代数的に等価」
+//!     （`OlsEstimator`の同名の性質、`ols.rs`の
+//!     `wald_test_last_columns_matches_squared_t_statistic_for_single_column`参照）が
+//!     成り立つため、既に検証済みの`t_stats`/`p_values`から`f_statistic = t_stat²`・
+//!     `f_p_value = p_value`という追加の恒等式チェックで足りる。`k=2`の真の同時検定
+//!     （`f_test_reference_input`、新規フィクスチャ）は`linearmodels`の値と直接比較する。
 //!
 //! **検証の例外**: Python主リファレンスの`linearmodels`（`PanelOLS`）は`aic`・`bic`を
 //! 一切提供しない（`rsquared_within`/`between`/`overall`/`inclusive`・`loglik`のみ）。
@@ -235,7 +270,7 @@
 //! - **カーネル**: v1はBartlett（Newey-West）限定（`w_l = 1 - l/(bw+1)`）。OLSの
 //!   `CovType::Hac`もBartlett限定（`docs/spec/ols-spec.md`）であることと平仄を合わせる、
 //!   ユーザーとの相談で決定。Parzen・Quadratic-Spectralへの拡張はIssue #313（未着手）。
-//! - **バンド幅**: `FeCovType::Hac { bandwidth: Option<i64> }`。`Some(bw)`なら
+//! - **バンド幅**: `FeCovType::Hac { bandwidth: Option<i64>, .. }`。`Some(bw)`なら
 //!   `0 <= bw < t`（`t`=ユニークな時点数）を検証してそのまま使う
 //!   （`PanelError::InvalidHacBandwidth`）。`None`なら`floor(4*(t/100)^(2/9))`で自動計算
 //!   する（`resolve_dk_bandwidth`）——`linearmodels`の`DriscollKraay`のデフォルト
@@ -260,6 +295,16 @@
 //! - `Cluster`と異なり`extra_df`の条件分岐（`entity_nested_within_cluster`）は無い——
 //!   DKは常に`extra_df=neffects`（linearmodelsが`cov_type="kernel"`でこの分岐を
 //!   一切行わないため、上記スケールの導出参照）。
+//! - **`FeCovType::Hac.time`による明示的な時系列順序の上書き（Issue #186）**: 元々は
+//!   `bandwidth`のみを持つバリアントだったが、`engine_pybind`のFeOptions設計
+//!   （Issue #186）で「2-way FEの`time`（固定効果構造）とDK HACの時系列順序を別の列に
+//!   したい」というユースケースが判明し（ユーザー承認済み、2026-09-12）、
+//!   `Hac { bandwidth, time: Option<Vec<String>> }`に拡張した。`time`が`Some`なら
+//!   `input.time()`より優先してこちらをDK計算に使う（1-way FEで`time`列を一切
+//!   指定していなくても、この`time`だけでDK HACが成立する）。`None`なら従来通り
+//!   `input.time()`にフォールバックする。`FeInput`自体は変更していない（`time`は
+//!   あくまで`FeCovType::Hac`が持つcov_type固有のオプションであり、パネル構造
+//!   （2-wayの有無）とは独立に指定できる設計）。
 //!
 //! ## 固定効果自体（α_i）の復元（`fixed_effects()`、Issue #184、6.6節）
 //!
@@ -316,7 +361,7 @@ use statrs::distribution::StudentsT;
 
 use crate::error::CommonError;
 use crate::inference;
-use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
+use crate::linear::ols::{CovType, OlsEstimator, OlsInput, wald_f_test};
 use crate::panel::common::{PanelDimension, PanelError, quasi_demean_column};
 use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
@@ -499,9 +544,18 @@ pub enum FeCovType {
     Cluster { groups: Option<Vec<String>> },
     /// Driscoll-Kraay型パネルHAC（3.1節、Issue #182）。`bandwidth`が`None`なら
     /// `floor(4*(t/100)^(2/9))`（`t`はユニークな時点数）で自動計算する（モジュールdoc
-    /// 「Driscoll-Kraay型パネルHAC対応」参照）。`input.time()`が必須
-    /// （`None`なら`PanelError::HacRequiresTime`）。
-    Hac { bandwidth: Option<i64> },
+    /// 「Driscoll-Kraay型パネルHAC対応」参照）。
+    ///
+    /// `time`（Issue #186で追加）: `Some`なら、DK計算の時系列順序として`input.time()`より
+    /// 優先してこちらを使う（2-way FEでも、`input.time()`とは別の時間粒度でDKカーネルを
+    /// 適用したいケースに対応、ユーザー承認済み・`engine_pybind`の`FeOptions.time_col`が
+    /// この経路に配線される想定）。`None`なら従来通り`input.time()`にフォールバックし、
+    /// それも`None`なら`PanelError::HacRequiresTime`（1-way FEで`time`列を一切指定しない
+    /// 場合）。
+    Hac {
+        bandwidth: Option<i64>,
+        time: Option<Vec<String>>,
+    },
 }
 
 /// FEの推定結果。`within`変換したデータを`OlsEstimator::fit`に委譲し、`cov_type`
@@ -535,6 +589,11 @@ pub struct FeEstimator {
     r_squared_overall: f64,
     aic: f64,
     bic: f64,
+    /// 傾き係数`k`個の同時Wald F検定（`estimator().f_statistic()`とは異なりFE用に
+    /// panel自由度調整済み・`cov_type`反映済み、モジュールdoc「自由度調整」のF統計量節
+    /// 参照）。`k=0`ならNaN。
+    f_statistic: f64,
+    f_p_value: f64,
 }
 
 impl FeEstimator {
@@ -698,8 +757,16 @@ impl FeEstimator {
                     extra_df,
                 )
             }
-            FeCovType::Hac { bandwidth } => {
-                let time = input.time().ok_or(PanelError::HacRequiresTime)?;
+            FeCovType::Hac {
+                bandwidth,
+                time: hac_time,
+            } => {
+                // `hac_time`（`FeOptions.time_col`経由の明示指定）があれば`input.time()`
+                // より優先する（モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
+                let time: &[String] = match hac_time {
+                    Some(t) => t,
+                    None => input.time().ok_or(PanelError::HacRequiresTime)?,
+                };
                 let t_periods = count_unique(time);
                 let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
                 fe_driscoll_kraay_cov_params(
@@ -757,6 +824,19 @@ impl FeEstimator {
         let aic = -2.0 * log_likelihood + 2.0 * (df_model as f64);
         let bic = -2.0 * log_likelihood + (n as f64).ln() * (df_model as f64);
 
+        // F統計量（モジュールdoc「自由度調整」のF統計量節、Issue #186）: 傾き係数`k`個の
+        // 同時Wald検定。FEの`cov_params`（`cov_type`別、上で計算済み）・`df_resid`
+        // （panel自由度調整済み）を使う。`k_constant=0`（FEに切片は無い、上記
+        // `OlsInput::from_columns`呼び出しと同じ理由）。
+        let (f_statistic, f_p_value) = if k == 0 {
+            // 説明変数が無いモデル。検定対象が存在しないため`OlsEstimator::fit`同様NaN
+            // （0除算を避ける）。
+            (f64::NAN, f64::NAN)
+        } else {
+            wald_f_test(estimator.params(), &cov_params, 0, k, df_resid)
+                .map_err(|source| PanelError::FTestFailed { source })?
+        };
+
         Ok(Self {
             input,
             effects,
@@ -774,6 +854,8 @@ impl FeEstimator {
             r_squared_overall,
             aic,
             bic,
+            f_statistic,
+            f_p_value,
         })
     }
 
@@ -799,8 +881,10 @@ impl FeEstimator {
     /// 信頼区間・調整済みR²・AIC/BICは`cov_type=Classical`・パネル自由度調整前の値の
     /// ままで誤り**（`FeEstimator`自身の同名メソッド（`std_errors()`等）を使うこと、
     /// モジュールdoc「自由度調整」「`cov_type`対応」「パネル固有R²」参照）。
-    /// **F統計量はこの時点では未対応**（`estimator().f_statistic()`/`f_p_value()`は
-    /// `df_resid_ols`・`CovType::Classical`ベースのまま）。
+    /// **F統計量も同様に誤り**——`estimator().f_statistic()`/`f_p_value()`は
+    /// `df_resid_ols = n - k`・`CovType::Classical`ベースのまま（`FeEstimator`自身の
+    /// `f_statistic()`/`f_p_value()`を使うこと、モジュールdoc「自由度調整」のF統計量節
+    /// 参照）。
     pub fn estimator(&self) -> &OlsEstimator {
         &self.estimator
     }
@@ -865,6 +949,17 @@ impl FeEstimator {
     /// パネル自由度調整済みBIC。
     pub fn bic(&self) -> f64 {
         self.bic
+    }
+
+    /// 傾き係数`k`個が同時にゼロという帰無仮説のWald F検定統計量（Issue #186、
+    /// モジュールdoc「自由度調整」のF統計量節参照）。`k=0`ならNaN。
+    pub fn f_statistic(&self) -> f64 {
+        self.f_statistic
+    }
+
+    /// `f_statistic()`のp値。
+    pub fn f_p_value(&self) -> f64 {
+        self.f_p_value
     }
 
     /// 固定効果自体（α_i、2-wayはγ_tも）を事後的に復元する（6.6節、Issue #184）。
@@ -2487,6 +2582,10 @@ mod tests {
         assert!((fe.r_squared_within() - 0.600_341_337_099_812).abs() < 1e-9);
         assert!((fe.r_squared_between() - 0.748_302_743_867_978).abs() < 1e-9);
         assert!((fe.r_squared_overall() - 0.732_444_936_421_435).abs() < 1e-9);
+        // F統計量（Issue #186）: k=1のため「1自由度のF検定は両側t検定と代数的に等価」
+        // （モジュールdoc「自由度調整」のF統計量節参照）。
+        assert!((fe.f_statistic() - fe.t_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
@@ -2523,7 +2622,91 @@ mod tests {
         assert!((fe.r_squared_within() - 0.723_738_317_757_009).abs() < 1e-9);
         assert!((fe.r_squared_between() - 0.513_009_039_069_012).abs() < 1e-9);
         assert!((fe.r_squared_overall() - 0.511_356_250_429_877).abs() < 1e-9);
+        // F統計量（Issue #186）: k=1のため「1自由度のF検定は両側t検定と代数的に等価」
+        // （モジュールdoc「自由度調整」のF統計量節参照）。
+        assert!((fe.f_statistic() - fe.t_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
+
+    // ── F統計量（Issue #186） ─────────────────────────────────────────────
+
+    /// N=4（id: a,b,c,d）×T=3（t: 1,2,3）のバランスパネル、k=2（`fixest_reference_input`の
+    /// 単回帰では真の同時検定（複数の傾き係数）を検証できないため、2変数版として別に用意
+    /// する）。`fitstat(m, "f")`はFEダミーも含めたモデル全体のF検定でありここでの定義
+    /// （FEダミーを除く傾き係数のみの同時検定、`linearmodels.PanelOLS.f_statistic`と同じ、
+    /// モジュールdoc「自由度調整」のF統計量節参照）と異なるため、fixestではなく
+    /// `linearmodels`（`cov_type="unadjusted"`）の値と直接比較する（期待値はPythonで
+    /// 独立に計算・検算済み、2026-09-12）。
+    #[allow(clippy::type_complexity)]
+    fn f_test_reference_input() -> (Vec<String>, Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>) {
+        let entity = strings(&["a", "a", "a", "b", "b", "b", "c", "c", "c", "d", "d", "d"]);
+        let time = strings(&["1", "2", "3", "1", "2", "3", "1", "2", "3", "1", "2", "3"]);
+        let x1 = vec![1.0, 2.0, 3.0, 2.0, 4.0, 5.0, 1.0, 3.0, 6.0, 4.0, 2.0, 1.0];
+        let x2 = vec![2.0, 1.0, 4.0, 3.0, 2.0, 6.0, 5.0, 3.0, 1.0, 4.0, 2.0, 5.0];
+        let y = vec![
+            5.0, 7.0, 10.0, 3.0, 8.0, 9.0, 6.0, 10.0, 15.0, 2.0, 5.0, 4.0,
+        ];
+        (entity, time, x1, x2, y)
+    }
+
+    #[test]
+    fn fe_estimator_fit_one_way_f_statistic_matches_linearmodels() {
+        let (entity, _time, x1, x2, y) = f_test_reference_input();
+        let input = FeInput::from_columns(
+            &y,
+            &[x1, x2],
+            vec!["x1".to_string(), "x2".to_string()],
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+
+        let fe = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95).unwrap();
+
+        assert_eq!(fe.df_resid(), 6); // n(12) - df_model(k(2)+n_entities(4))
+        // `PanelOLS(y, [x1, x2], entity_effects=True).fit(cov_type="unadjusted",
+        // debiased=True).f_statistic`: F(2,6)。
+        assert!((fe.f_statistic() - 4.544_331_119_544_591).abs() < 1e-9);
+        assert!((fe.f_p_value() - 0.062_878_408_429_192_23).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fe_estimator_fit_two_way_f_statistic_matches_linearmodels() {
+        let (entity, time, x1, x2, y) = f_test_reference_input();
+        let input = FeInput::from_columns(
+            &y,
+            &[x1, x2],
+            vec!["x1".to_string(), "x2".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
+
+        let fe = FeEstimator::fit(input, FeEffects::TwoWay, FeCovType::Classical, 0.95).unwrap();
+
+        assert_eq!(fe.df_resid(), 4); // n(12) - df_model(k(2)+neffects(4+3-1=6))
+        // `PanelOLS(y, [x1, x2], entity_effects=True, time_effects=True).fit(
+        // cov_type="unadjusted", debiased=True).f_statistic`: F(2,4)。
+        assert!((fe.f_statistic() - 9.574_202_321_891_761).abs() < 1e-9);
+        assert!((fe.f_p_value() - 0.029_859_178_280_428_5).abs() < 1e-9);
+    }
+
+    // `PanelError::FTestFailed`（`wald_f_test`の`ensure_well_conditioned_symmetric_matrix`
+    // backstopがFE独自の`cov_params`に対して発火する経路）は、意図的にテストを追加して
+    // いない。OLSの`fit_returns_computation_failed_for_extreme_scale_difference_in_f_test`
+    // と同型の「説明変数間の極端なスケール差」構成を試したが、`FeEstimator::fit`が委譲する
+    // `OlsEstimator::fit`自身が（`CovType::Classical`で）同じ設計行列に対する同種の
+    // F検定を内部で無条件に計算しており、そちらが先に`WithinRegressionFailed`として
+    // 失敗してしまい`FTestFailed`（FEが`cov_type`別に計算し直した後段の`wald_f_test`
+    // 呼び出し）まで到達しなかった（実地確認済み）。`cov_type=Classical`である限り
+    // 両者はほぼ同じ行列を検定するため構造的に避けられない。`FTestFailed`を単独で
+    // 再現するには、委譲先の内部検定は素通りしつつFE独自の頑健共分散（HC/Cluster/HAC）
+    // だけがほぼ特異になる病的なデータが要るが、確実な構成方法が見つからなかったため、
+    // このbackstop自体は`wald_f_test`側のOLSテストで既に検証済み（同じ関数を再利用して
+    // いるため実装自体の正しさはそちらで担保される）という理由で、この一分岐（FE経由の
+    // 到達）だけのテストは見送る。
 
     // ── パネル固有R²（Issue #183） ───────────────────────────────────────
 
@@ -2686,6 +2869,9 @@ mod tests {
         assert!((effects["a"] - 2.0).abs() < 1e-12);
         assert!((effects["b"] - 6.0).abs() < 1e-12);
         assert!((effects["c"] - 3.0).abs() < 1e-12);
+        // F統計量（Issue #186）: k=0（検定対象の傾き係数が無い）はOlsEstimatorと同じくNaN。
+        assert!(fe.f_statistic().is_nan());
+        assert!(fe.f_p_value().is_nan());
     }
 
     #[test]
@@ -2736,6 +2922,9 @@ mod tests {
         assert!((time["9"] - (-3.0)).abs() < 1e-12);
         assert!((entity["e1"] - 3.5).abs() < 1e-12);
         assert!((entity["e2"] - 8.5).abs() < 1e-12);
+        // F統計量（Issue #186）: k=0（検定対象の傾き係数が無い）はOlsEstimatorと同じくNaN。
+        assert!(fe.f_statistic().is_nan());
+        assert!(fe.f_p_value().is_nan());
 
         // 不変条件: k=0でも `α_i + γ_t + ε̂_it = y_it`（正規化の選び方に依存しない）。
         let residuals = fe.estimator().residuals();
@@ -2763,6 +2952,12 @@ mod tests {
         assert!((*hc1.std_errors().get(0, 0) - 0.467_996_773_819_759).abs() < 1e-9);
         assert!((*hc1.t_stats().get(0, 0) - 2.997_409_076_837).abs() < 1e-6);
         assert!((*hc1.p_values().get(0, 0) - 0.020_015_356_643_180_1).abs() < 1e-6);
+        // F統計量（Issue #186）: k=1のため「1自由度のF検定は両側t検定と代数的に等価」
+        // （モジュールdoc「自由度調整」のF統計量節参照）。HC1のcov_paramsが正しく
+        // wald_f_testに渡っていることの回帰ガード（classical以外のcov_typeでの唯一の
+        // F統計量検証、rust-reviewer指摘）。
+        assert!((hc1.f_statistic() - hc1.t_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((hc1.f_p_value() - *hc1.p_values().get(0, 0)).abs() < 1e-9);
 
         let (entity, _time, x, y) = fixest_reference_input();
         let input =
@@ -2772,6 +2967,8 @@ mod tests {
         assert!((*hc2.std_errors().get(0, 0) - 0.492_939_313_874_837).abs() < 1e-9);
         assert!((*hc2.t_stats().get(0, 0) - 2.845_741_328_178_91).abs() < 1e-6);
         assert!((*hc2.p_values().get(0, 0) - 0.024_839_464_368_821_2).abs() < 1e-6);
+        assert!((hc2.f_statistic() - hc2.t_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((hc2.f_p_value() - *hc2.p_values().get(0, 0)).abs() < 1e-9);
 
         let (entity, _time, x, y) = fixest_reference_input();
         let input =
@@ -2781,6 +2978,8 @@ mod tests {
         assert!((*hc3.std_errors().get(0, 0) - 0.687_184_240_890_824).abs() < 1e-9);
         assert!((*hc3.t_stats().get(0, 0) - 2.041_341_599_975_14).abs() < 1e-6);
         assert!((*hc3.p_values().get(0, 0) - 0.080_553_228_223_064_4).abs() < 1e-6);
+        assert!((hc3.f_statistic() - hc3.t_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((hc3.f_p_value() - *hc3.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
@@ -2799,6 +2998,8 @@ mod tests {
         .unwrap();
         let hc1 = FeEstimator::fit(input, FeEffects::TwoWay, FeCovType::Hc1, 0.95).unwrap();
         assert!((*hc1.std_errors().get(0, 0) - 0.205_876_715_757_555).abs() < 1e-9);
+        assert!((hc1.f_statistic() - hc1.t_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((hc1.f_p_value() - *hc1.p_values().get(0, 0)).abs() < 1e-9);
 
         let (entity, time, x, y) = fixest_reference_input();
         let input = FeInput::from_columns(
@@ -2812,6 +3013,8 @@ mod tests {
         .unwrap();
         let hc2 = FeEstimator::fit(input, FeEffects::TwoWay, FeCovType::Hc2, 0.95).unwrap();
         assert!((*hc2.std_errors().get(0, 0) - 0.304_984_723_480_691).abs() < 1e-9);
+        assert!((hc2.f_statistic() - hc2.t_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((hc2.f_p_value() - *hc2.p_values().get(0, 0)).abs() < 1e-9);
 
         let (entity, time, x, y) = fixest_reference_input();
         let input = FeInput::from_columns(
@@ -2825,6 +3028,8 @@ mod tests {
         .unwrap();
         let hc3 = FeEstimator::fit(input, FeEffects::TwoWay, FeCovType::Hc3, 0.95).unwrap();
         assert!((*hc3.std_errors().get(0, 0) - 0.737_275_671_443_649).abs() < 1e-9);
+        assert!((hc3.f_statistic() - hc3.t_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((hc3.f_p_value() - *hc3.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
@@ -2849,6 +3054,8 @@ mod tests {
         assert!((*fe.std_errors().get(0, 0) - 0.520_141_23).abs() < 1e-6);
         assert!((*fe.t_stats().get(0, 0) - 2.696_917_08).abs() < 1e-6);
         assert!((*fe.p_values().get(0, 0) - 0.030_776_03).abs() < 1e-6);
+        assert!((fe.f_statistic() - fe.t_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
@@ -2877,6 +3084,8 @@ mod tests {
         assert!((*fe.std_errors().get(0, 0) - 0.181_639_74).abs() < 1e-6);
         assert!((*fe.t_stats().get(0, 0) - 4.527_808_13).abs() < 1e-6);
         assert!((*fe.p_values().get(0, 0) - 0.006_238_02).abs() < 1e-6);
+        assert!((fe.f_statistic() - fe.t_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
@@ -2898,6 +3107,8 @@ mod tests {
         .unwrap();
 
         assert!((*fe.std_errors().get(0, 0) - 0.098_124_15).abs() < 1e-6);
+        assert!((fe.f_statistic() - fe.t_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
@@ -3012,7 +3223,10 @@ mod tests {
         let fe = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Hac { bandwidth: None },
+            FeCovType::Hac {
+                bandwidth: None,
+                time: None,
+            },
             0.95,
         )
         .unwrap();
@@ -3023,6 +3237,70 @@ mod tests {
         assert!((*fe.p_values().get(0, 0) - 1.700_643_472_490_881_4e-6).abs() < 1e-9);
         assert!((*fe.conf_lower().get(0, 0) - 1.175_353_812_028_944_4).abs() < 1e-6);
         assert!((*fe.conf_upper().get(0, 0) - 1.630_201_743_526_611_8).abs() < 1e-6);
+        assert!((fe.f_statistic() - fe.t_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fe_estimator_fit_one_way_hac_uses_explicit_time_override_without_fe_input_time() {
+        // Issue #186: `FeCovType::Hac.time`（明示指定）は`FeInput.time()`を経由せずに
+        // DK HACを成立させられる（`engine_pybind`の`FeOptions.time_col`が1-way FE + DK HAC
+        // の組み合わせをこの経路で配線する想定）。`FeInput::from_columns`には`time=None`を
+        // 渡し、`fe_estimator_fit_one_way_hac_matches_linearmodels_default_bandwidth`と
+        // 同じ結果になることを確認する（同じ`time`列を使っているため数値は完全一致する）。
+        let (entity, time, x, y) = fixest_reference_input();
+        let input =
+            FeInput::from_columns(&y, &[x], vec!["x".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let fe = FeEstimator::fit(
+            input,
+            FeEffects::OneWay,
+            FeCovType::Hac {
+                bandwidth: None,
+                time: Some(time),
+            },
+            0.95,
+        )
+        .unwrap();
+
+        assert!((*fe.estimator().params().get(0, 0) - 1.402_777_777_777_78).abs() < 1e-9);
+        assert!((*fe.std_errors().get(0, 0) - 0.096_177_633_971_081_66).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fe_estimator_fit_one_way_hac_time_override_takes_priority_over_fe_input_time() {
+        // `FeInput.time()`にも`time`があるが、`FeCovType::Hac.time`の明示指定がある場合は
+        // そちらが優先されることを確認する（モジュールdoc「Driscoll-Kraay型パネルHAC対応」
+        // 参照）。`FeInput.time()`にわざと辞書順が異なる別のダミー時点列を渡し、それが
+        // 無視されて`FeCovType::Hac.time`の方の結果と一致することを確認する。
+        let (entity, time, x, y) = fixest_reference_input();
+        let dummy_time = strings(&["z", "z", "z", "z", "z", "z", "z", "z", "z", "z", "z", "z"]);
+        let input = FeInput::from_columns(
+            &y,
+            &[x],
+            vec!["x".to_string()],
+            &entity,
+            Some(&dummy_time),
+            "y".into(),
+        )
+        .unwrap();
+
+        let fe = FeEstimator::fit(
+            input,
+            FeEffects::OneWay,
+            FeCovType::Hac {
+                bandwidth: None,
+                time: Some(time),
+            },
+            0.95,
+        )
+        .unwrap();
+
+        // `dummy_time`（全観測が同一時点）をそのまま使っていたら`t_periods=1`となり
+        // バンド幅・DK計算が全く異なる値になる。優先されている`time`（`t_periods=3`）を
+        // 使った場合の既知の値と一致することで、優先順位を確認する。
+        assert!((*fe.std_errors().get(0, 0) - 0.096_177_633_971_081_66).abs() < 1e-9);
     }
 
     #[test]
@@ -3044,7 +3322,10 @@ mod tests {
         let fe = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Hac { bandwidth: Some(1) },
+            FeCovType::Hac {
+                bandwidth: Some(1),
+                time: None,
+            },
             0.95,
         )
         .unwrap();
@@ -3073,7 +3354,10 @@ mod tests {
         let fe = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Hac { bandwidth: Some(2) },
+            FeCovType::Hac {
+                bandwidth: Some(2),
+                time: None,
+            },
             0.95,
         )
         .unwrap();
@@ -3102,7 +3386,10 @@ mod tests {
         let fe = FeEstimator::fit(
             input,
             FeEffects::TwoWay,
-            FeCovType::Hac { bandwidth: None },
+            FeCovType::Hac {
+                bandwidth: None,
+                time: None,
+            },
             0.95,
         )
         .unwrap();
@@ -3113,6 +3400,8 @@ mod tests {
         assert!((*fe.p_values().get(0, 0) - 0.013_539_553_831_729_556).abs() < 1e-9);
         assert!((*fe.conf_lower().get(0, 0) - 0.255_981_614_240_134_77).abs() < 1e-6);
         assert!((*fe.conf_upper().get(0, 0) - 1.388_878_198_843_977_3).abs() < 1e-6);
+        assert!((fe.f_statistic() - fe.t_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
@@ -3133,7 +3422,10 @@ mod tests {
         let fe = FeEstimator::fit(
             input,
             FeEffects::TwoWay,
-            FeCovType::Hac { bandwidth: Some(2) },
+            FeCovType::Hac {
+                bandwidth: Some(2),
+                time: None,
+            },
             0.95,
         )
         .unwrap();
@@ -3168,7 +3460,10 @@ mod tests {
         let hac = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Hac { bandwidth: Some(0) },
+            FeCovType::Hac {
+                bandwidth: Some(0),
+                time: None,
+            },
             0.95,
         )
         .unwrap();
@@ -3223,7 +3518,10 @@ mod tests {
         let fe = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Hac { bandwidth: None },
+            FeCovType::Hac {
+                bandwidth: None,
+                time: None,
+            },
             0.95,
         )
         .unwrap();
@@ -3244,7 +3542,10 @@ mod tests {
         let result = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Hac { bandwidth: None },
+            FeCovType::Hac {
+                bandwidth: None,
+                time: None,
+            },
             0.95,
         );
 
@@ -3269,7 +3570,10 @@ mod tests {
         let result = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Hac { bandwidth: Some(3) },
+            FeCovType::Hac {
+                bandwidth: Some(3),
+                time: None,
+            },
             0.95,
         );
 
@@ -3297,6 +3601,7 @@ mod tests {
             FeEffects::OneWay,
             FeCovType::Hac {
                 bandwidth: Some(-1),
+                time: None,
             },
             0.95,
         );

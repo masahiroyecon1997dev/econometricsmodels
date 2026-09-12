@@ -22,6 +22,20 @@ IV固有論点は`iv-api-design.md`参照。
     `OLSOptions.cluster_col`が`cov_type="cluster"`のときのみ必須になるのと同じ「条件付き必須」
     パターンであり、`Options`に置くという判断自体は変えない。未指定時のバリデーションエラーで
     担保する。
+  - **`FeOptions.time`と`FeOptions.time_col`は別物（Issue #186で確定）**: `time`は2-way FE
+    （固定効果構造）を指定するbareフィールドで、`Some`なら常に2-way・`None`なら1-way。
+    Driscoll-Kraay型HAC（`cov_type="hac"`）専用の時系列順序は別フィールド`time_col`
+    （`str | None`、`OLSOptions.cluster_col`/`time_col`と同じ「補助列」命名規則）で指定する。
+    1-way FE + DK HAC（`time`未指定だが時系列順序だけ要る）という組み合わせを表現するために
+    導入した——`time`の有無だけで1-way/2-wayを決める設計（ブールフラグ等の追加無し、
+    ユーザーの意向）にすると、時系列順序と2-way構造を1つの`time`フィールドに詰め込めなくなる
+    ため分離が必要になった。**`time_col`は2-way（`time`指定あり）でも常に優先される**——
+    「2-way FEの固定効果構造に使う時点粒度」と「DK HACカーネルに使う時系列粒度」が異なる
+    ケースにも対応するための設計（ユーザー確認済み）。`time_col`未指定なら`time`
+    （2-way）にフォールバックし、どちらも`None`なら（1-way FEで`cov_type="hac"`のとき）
+    `PanelError::HacRequiresTime`。engine側は`FeCovType::Hac { bandwidth, time:
+    Option<Vec<String>> }`（`time`が優先の上書き値）として実装（`engine/src/panel/fe.rs`
+    モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
 - **命名規則**: `entity`/`time`は**bareネーミング**（`_col`サフィックスなし）を採用する。
   `y`/`x`/`weight`（WLS、`engine_pybind/src/linear/wls.rs`）と同じく、モデルを構成する中核的な
   変数という位置づけのため。既存`OLSOptions.cluster_col`/`time_col`
@@ -62,7 +76,7 @@ OLS（`OLSResult`, `engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
   `n - n_entities - k`という非自明な式になるため明示的に返す価値が高い |
 | `n_entities` | **新規追加**（FE/RE限定） | パネルユニット数。pyfixest/plmの前例に倣う |
 | `cov_type` | OLS共通 | サポート対象は#121で確定 |
-| `f_statistic` / `f_p_value` | OLS共通 | そのまま踏襲 |
+| `f_statistic` / `f_p_value` | OLS共通 | そのまま踏襲（ただしengine側の実装はOLSの単純な流用ではない。傾き係数`k`個の同時Wald検定をFE独自の`cov_type`別`cov_params`・パネル自由度調整済み`df_resid`で行う必要があり、実装当初Issue #180のスコープ外だったが、Issue #186のフィールド設計時にこのギャップが判明し前倒しで実装した。詳細は`engine/src/panel/fe.rs`モジュールdoc「自由度調整」のF統計量節参照） |
 | `log_likelihood` / `aic` / `bic` | OLS共通 | FE/REは最小二乗族で正規性下の尤度が定義できるため含める |
 | `r_squared_within` / `r_squared_between` / `r_squared_overall` | **新規追加**（OLSの`r_squared`/`r_squared_adj`を置き換え） | 詳細は2.3 |
 
@@ -103,7 +117,11 @@ OLS（`OLSResult`, `engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
 
 ### 3.1 `cov_type`のサポート対象
 
-`classical` / `hc0`〜`hc3` / `cluster` / `hac`をすべて実装する。ただし**`hac`はOLSの実装を
+`classical` / `hc0`〜`hc3` / `cluster` / `hac`をすべて実装する予定だったが、**`hc0`は実装時
+（Issue #181）にスコープ外とすることが判明した**（linearmodels・fixestともにパネル/FE向けの
+`hc0`オプションが存在しないため、`FeCovType` enumは`Hc1`/`Hc2`/`Hc3`のみを持つ。詳細・数式は
+`engine/src/panel/fe.rs`モジュールdoc「`cov_type`対応」参照）。以下`hc0`を除く
+`classical`/`hc1`〜`hc3`/`cluster`/`hac`が実装対象。ただし**`hac`はOLSの実装を
 そのまま流用しない**。OLSの`hac`はグローバルな時系列順序（`time_col`）に対する単純な
 Newey-West型HACだが、これをパネルにそのまま適用すると異なるエンティティの観測を単一の
 時系列カーネルに混ぜてしまい、経済学的に不正確になる。パネル用に

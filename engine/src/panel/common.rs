@@ -17,6 +17,12 @@
 //! - `UnbalancedPanelForTwoWay`: 2-way FEのバランスパネル必須（6.4節）
 //! - `ZeroVarianceAfterDemeaning`: within変換後に分散ゼロの説明変数（6.7節）
 //! - `TwoWayRequiresTime`: 2-way FE指定時の`time`必須（1.1節）
+//! - `HacRequiresTime`: Driscoll-Kraay型パネルHAC（`FeCovType::Hac`）指定時の`time`必須
+//!   （3.1節、Issue #182。2-way FEは`TwoWayRequiresTime`で既に必須化されているため、
+//!   1-way FEでのみ発生しうる）
+//! - `InvalidHacBandwidth`: `FeCovType::Hac`の明示的な`bandwidth`が`[0, t)`の範囲外
+//!   （`t`はユニークな時点数、Issue #182。`LeastSquaresError::InvalidHacLags`と同型だが
+//!   上限が観測数`n`ではなく時点数`t`）
 //! - `WithinRegressionFailed`: within変換済みデータの最小二乗推定委譲の失敗（4.3節）
 //!
 //! RE固有（7章）で追加のバリアントが必要になった場合は、FE/RE実装issueで実際に計算
@@ -186,6 +192,26 @@ pub enum PanelError {
     /// エラーとしてここで担保する。
     #[error("two-way fixed effects requires the `time` option to be set")]
     TwoWayRequiresTime,
+
+    /// Driscoll-Kraay型パネルHAC（`FeCovType::Hac`、Issue #182、3.1節）を指定したのに
+    /// `time`列が指定されていない。
+    ///
+    /// DKは時点ごとにクロスセクション和を取ってからHACカーネルを適用するため`time`が
+    /// 必須（`TwoWayRequiresTime`と同型の「条件付き必須」パターン）。2-way FEは
+    /// `within_transform_two_way`/`validate_no_singleton_groups_two_way`の時点で既に
+    /// `TwoWayRequiresTime`により`time`必須が担保されているため、このエラーは1-way FEで
+    /// `FeCovType::Hac`を指定した場合にのみ発生しうる。
+    #[error("Driscoll-Kraay panel HAC requires the `time` option to be set")]
+    HacRequiresTime,
+
+    /// `FeCovType::Hac`の明示的な`bandwidth`が`[0, t)`の範囲外（`t`はユニークな時点数）。
+    ///
+    /// `LeastSquaresError::InvalidHacLags`と同型のバリデーションだが、上限が観測数`n`
+    /// ではなく時点数`t`になる点が異なる（DKのバンド幅は「時点のラグ」であり「観測の
+    /// ラグ」ではないため、`engine/src/panel/CLAUDE.md`「Driscoll-Kraay型パネルHAC対応」
+    /// 参照）。
+    #[error("bandwidth must be in the range [0, t): got {bandwidth}, t={t}")]
+    InvalidHacBandwidth { bandwidth: i64, t: usize },
 
     /// within変換済みデータに対する最小二乗推定（`OlsEstimator::fit`への委譲、
     /// `panel-api-design.md`4.3節。WLSがOLSへ委譲するのと同型のパターン）が失敗した。

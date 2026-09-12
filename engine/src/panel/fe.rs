@@ -70,9 +70,6 @@
 //! `β̂`はwithin推定量として数学的に正しい値になる（自由度・`cov_type`に依存しない）ため、
 //! 委譲だけで正しく求まる。一方、以下はFE固有の再計算・補正が必要で**別issueで対応する**
 //! （4.3節。WLSがR²等を素のOLS計算のままでは使わなかったのと同じ教訓）:
-//! - Driscoll-Kraay型パネルHAC（3.1節・Issue #182。OLSの`hac`をそのまま流用すると
-//!   エンティティをまたいで時系列カーネルを適用してしまい経済学的に不正確になるため、
-//!   別アルゴリズムが必要）
 //! - パネル固有R²（within/between/overall、2章・Issue #183。`r_squared_adj`とは別物、
 //!   下記参照）
 //!
@@ -178,6 +175,52 @@
 //! （`FeOptions`、Issue #186以降）の責務。`FeEstimator::fit`自体はデフォルトを
 //! 持たず、呼び出し側が`FeCovType`を明示的に渡す（`cluster_col`省略時のentity自動
 //! 使用——`FeCovType::Cluster { groups: None }`——のみこのモジュールの責務）。
+//!
+//! ## Driscoll-Kraay型パネルHAC対応（`FeCovType::Hac`、Issue #182、3.1節）
+//!
+//! OLSの`CovType::Hac`（グローバルな時系列順序に対する単純なNewey-West型）をそのまま
+//! 流用すると異なるエンティティの観測を単一の時系列カーネルに混ぜてしまい経済学的に
+//! 不正確になるため、別アルゴリズムとして実装する（3.1節）。以下は着手時に
+//! `linearmodels.panel.covariance.DriscollKraay`のソースコードを実地確認し、ユーザー
+//! 承認済みの設計（2026-09-12）:
+//!
+//! - **式**: `Cov(β̂) = (n/df_resid) × (X̃'X̃)⁻¹ Ŝ (X̃'X̃)⁻¹`。
+//!   `Ŝ = Σ_t ξ_t ξ_t' + Σ_{l=1}^{bw} w_l (ξ_t ξ_{t-l}' + ξ_{t-l} ξ_t')`、
+//!   `ξ_t = Σ_{i: time_i=t} x̃_i ε̂_i`（時点`t`でのクロスセクション和、`k`次元ベクトル）。
+//!   `x̃`はwithin変換後の設計行列（他のcov_type同様、LSDV展開はしない）。
+//!   スケール`n/df_resid`は、linearmodelsが`cov_type="kernel"`（`extra_df=neffects`が
+//!   常に適用される——`_determine_df_adjustment`は`cov_type != "clustered"`なら常に
+//!   `True`を返す——かつデフォルト`debiased=True`）のとき`nobs/(nobs-extra_df-k)`と
+//!   定義しているのを`n_obs - neffects - k = df_resid`（本モジュールの自由度調整と
+//!   同一）に整理したもの。HC1の`n/df_resid`補正と同根（`cov_type`対応節参照）。
+//! - **カーネル**: v1はBartlett（Newey-West）限定（`w_l = 1 - l/(bw+1)`）。OLSの
+//!   `CovType::Hac`もBartlett限定（`docs/spec/ols-spec.md`）であることと平仄を合わせる、
+//!   ユーザーとの相談で決定。Parzen・Quadratic-Spectralへの拡張はIssue #313（未着手）。
+//! - **バンド幅**: `FeCovType::Hac { bandwidth: Option<i64> }`。`Some(bw)`なら
+//!   `0 <= bw < t`（`t`=ユニークな時点数）を検証してそのまま使う
+//!   （`PanelError::InvalidHacBandwidth`）。`None`なら`floor(4*(t/100)^(2/9))`で自動計算
+//!   する（`resolve_dk_bandwidth`）——`linearmodels`の`DriscollKraay`のデフォルト
+//!   ルールと同一の式だが、**OLSの`hac_lags`が観測数`n`ベースなのに対しDKは時点数`t`
+//!   ベース**である点に注意（`linearmodels`もこのデフォルトルールでは`kernel_optimal_
+//!   bandwidth`——データ依存の自動選択——を使わず、決定的な式のみを使う）。
+//! - **時系列順序**: `time: Vec<String>`は同一性だけが意味を持つグルーピングキー
+//!   （entityと同じ設計、`.claude/rules/rust-style.md`「Python境界でのデータ受け渡し」）
+//!   で時系列順序の情報を持たないが、DKのカーネル集計はξ_tを時系列順に並べてラグを
+//!   取る必要がある。**`time`の辞書順（`String`の`Ord`）を時系列順とみなす**
+//!   （ユーザーとの相談で決定。ISO 8601日付・ゼロ埋め年度等、辞書順=時系列順になる
+//!   形式で`time`を渡すことが呼び出し側の契約——ゼロ埋めなしの数値文字列
+//!   （`"9"`より`"10"`が辞書順で先に来る等）は契約違反になるが、`engine`側でこれを
+//!   検出するバリデーションは現時点で未実装、`engine_pybind`層の検討課題）。
+//!   `fe_driscoll_kraay_cov_params`は`BTreeMap`で`time`をキーに集計する
+//!   （`fe_cluster_cov_params`と同じ「グループ間加算の順序依存を避ける」理由に加え、
+//!   `BTreeMap`のキー順序＝辞書順がそのまま時系列順になる一石二鳥の実装）。
+//! - **1-way/2-wayとも対応**（ユーザーとの相談で決定）。2-way FEは`within_transform_
+//!   two_way`が既に`time`必須を担保しているが、**1-way FEで`FeCovType::Hac`を指定した
+//!   のに`time`が`None`の場合は`PanelError::HacRequiresTime`**を返す（他のcov_typeは
+//!   1-way FEで`time`を要求しない）。
+//! - `Cluster`と異なり`extra_df`の条件分岐（`entity_nested_within_cluster`）は無い——
+//!   DKは常に`extra_df=neffects`（linearmodelsが`cov_type="kernel"`でこの分岐を
+//!   一切行わないため、上記スケールの導出参照）。
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -331,10 +374,11 @@ pub enum FeEffects {
     TwoWay,
 }
 
-/// FEが対応する`cov_type`（Issue #181、3.1節・3.2節）。`OlsEstimator`の`CovType`を
-/// そのまま再利用しない理由はモジュールdoc「`cov_type`対応」参照——HC0・Driscoll-Kraay型
-/// HAC（Issue #182で別途追加予定）を含まない、FE専用の閉じた選択肢にすることで、
-/// 「無効な組み合わせを型で表現不可能にする」設計にしている（IVの`WeightType`と同じ判断）。
+/// FEが対応する`cov_type`（Issue #181・#182、3.1節・3.2節）。`OlsEstimator`の`CovType`を
+/// そのまま再利用しない理由はモジュールdoc「`cov_type`対応」参照——HC0を含まない、
+/// FE専用の閉じた選択肢にすることで「無効な組み合わせを型で表現不可能にする」設計に
+/// している（IVの`WeightType`と同じ判断）。`Hac`はOLSの`CovType::Hac`と異なるアルゴリズム
+/// （Driscoll-Kraay型パネルHAC、モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FeCovType {
     /// 等分散前提（`σ̂²_fe (X̃'X̃)⁻¹`、`σ̂²_fe = SSR/df_resid`）。
@@ -348,6 +392,11 @@ pub enum FeCovType {
     /// クラスターロバスト。`groups`が`None`なら`entity`引数の列を自動的に使う
     /// （3.2節、`cluster_col`省略時のデフォルト挙動）。
     Cluster { groups: Option<Vec<String>> },
+    /// Driscoll-Kraay型パネルHAC（3.1節、Issue #182）。`bandwidth`が`None`なら
+    /// `floor(4*(t/100)^(2/9))`（`t`はユニークな時点数）で自動計算する（モジュールdoc
+    /// 「Driscoll-Kraay型パネルHAC対応」参照）。`input.time()`が必須
+    /// （`None`なら`PanelError::HacRequiresTime`）。
+    Hac { bandwidth: Option<i64> },
 }
 
 /// FEの推定結果。`within`変換したデータを`OlsEstimator::fit`に委譲し、`cov_type`
@@ -533,6 +582,14 @@ impl FeEstimator {
                     k,
                     resolved_groups,
                     extra_df,
+                )
+            }
+            FeCovType::Hac { bandwidth } => {
+                let time = input.time().ok_or(PanelError::HacRequiresTime)?;
+                let t_periods = count_unique(time);
+                let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
+                fe_driscoll_kraay_cov_params(
+                    &x_mat, &residuals, &xtx_inv, time, df_resid, bw, t_periods,
                 )
             }
         };
@@ -822,6 +879,23 @@ fn entity_nested_within_cluster(entity: &[String], cluster: &[String]) -> bool {
     true
 }
 
+/// `ids`の値ごとに観測インデックスをまとめる（`BTreeMap`のキー＝`ids`の辞書順）。
+///
+/// `fe_cluster_cov_params`（クラスター）・`fe_driscoll_kraay_cov_params`（DKの時点集計）
+/// の両方が使う共通ロジック（元々は独立に重複実装していたが、rust-reviewer指摘で
+/// 切り出した）。`BTreeMap`を使う理由: `HashMap`だと反復順序がプロセスごとのハッシュ
+/// シードに依存し、グループ間加算（`Σ_g S_g S_g'`等）の順序・延いては浮動小数点丸め
+/// 誤差が実行のたびに変わりうる。DK側ではこれに加え、キー順序（`String`の辞書順）が
+/// そのまま時系列順序とみなす規約（モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）
+/// と一致するという二重の意味を持つ。
+fn group_indices_by_key(ids: &[String]) -> BTreeMap<&str, Vec<usize>> {
+    let mut indices: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+    for (i, id) in ids.iter().enumerate() {
+        indices.entry(id.as_str()).or_default().push(i);
+    }
+    indices
+}
+
 /// FE版のクラスターロバスト係数分散共分散行列（k×k）。`ols::cluster_cov_params`と
 /// 同型の構造だが、**Stata流の`(G/(G-1))×((n-1)/(n-k))`小標本補正を適用しない**
 /// （linearmodelsとの数値一致のため、モジュールdoc「`cov_type`対応」参照）。
@@ -836,13 +910,7 @@ fn fe_cluster_cov_params(
     groups: &[String],
     extra_df: usize,
 ) -> Mat<f64> {
-    // クラスター名の辞書順で集計する（`ols::cluster_cov_params`と同じ理由:
-    // `HashMap`だと反復順序がプロセスごとのハッシュシードに依存し、`Σ_g S_g S_g'`の
-    // 加算順序・延いては浮動小数点丸め誤差が実行のたびに変わりうる）。
-    let mut group_indices: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
-    for (i, g) in groups.iter().enumerate() {
-        group_indices.entry(g.as_str()).or_default().push(i);
-    }
+    let group_indices = group_indices_by_key(groups);
 
     let mut s_hat = Mat::<f64>::zeros(k, k);
     for indices in group_indices.values() {
@@ -864,6 +932,93 @@ fn fe_cluster_cov_params(
     let correction = n as f64 / df_resid_for_scale as f64;
     let cov_uncorrected = xtx_inv * &s_hat * xtx_inv;
     Mat::from_fn(k, k, |i, j| correction * (*cov_uncorrected.get(i, j)))
+}
+
+/// `FeCovType::Hac`の`bandwidth`（`Option<i64>`）を実際に使うバンド幅（`usize`）に解決する。
+///
+/// `Some(bw)`の場合は`0 <= bw < t`を検証してそのまま使う（`t`はユニークな時点数）。`None`の
+/// 場合は`linearmodels`の`DriscollKraay`と同じ経験則`floor(4*(t/100)^(2/9))`で自動計算する
+/// （モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照。OLSの`resolve_hac_lags`と式の形は
+/// 同じだが、観測数`n`ではなく時点数`t`が引数になる点が異なる）。
+fn resolve_dk_bandwidth(bandwidth: Option<i64>, t: usize) -> Result<usize, PanelError> {
+    match bandwidth {
+        Some(bw) => {
+            if bw < 0 || (bw as usize) >= t {
+                return Err(PanelError::InvalidHacBandwidth { bandwidth: bw, t });
+            }
+            Ok(bw as usize)
+        }
+        None => Ok((4.0 * (t as f64 / 100.0).powf(2.0 / 9.0)).floor() as usize),
+    }
+}
+
+/// FE版のDriscoll-Kraay型パネルHAC共分散行列（k×k、Issue #182）。
+///
+/// `Ŝ = Σ_t ξ_t ξ_t' + Σ_{l=1}^{bandwidth} w_l (ξ_t ξ_{t-l}' + ξ_{t-l} ξ_t')`
+/// （Bartlett重み`w_l = 1 - l/(bandwidth+1)`、モジュールdoc参照）をまず求め、最後に
+/// `(n/df_resid) × (X̃'X̃)⁻¹ Ŝ (X̃'X̃)⁻¹`にスケールする。`t_periods`（ユニークな時点数）は
+/// `resolve_dk_bandwidth`の呼び出しで既に計算済みの値を呼び出し元からそのまま受け取る
+/// （`time_indices.len()`で二重計算しない）。
+///
+/// `time`を`group_indices_by_key`で集計して`ξ_t`（時点`t`でのクロスセクション和）を求める。
+/// キー順序（`String`の辞書順）がそのまま時系列順序とみなす規約（モジュールdoc参照）と
+/// 一致することを利用している。
+///
+/// **`bandwidth <= t_periods`（狭義の`<`ではない）が呼び出し元の`resolve_dk_bandwidth`から
+/// 保証される**: `Some(bw)`分岐は`bw < t_periods`を検証するが、`None`分岐（既定バンド幅
+/// `floor(4*(t/100)^(2/9))`）はこの上限を検証していない。`t_periods=1`のとき既定値が
+/// ちょうど`1`（`=t_periods`）になるのが唯一のケース（`t_periods>=2`では常に`<t_periods`）。
+/// `l=bandwidth=t_periods`のとき`xi.subrows(l, t_periods - l)`は`(t_periods, 0)`——
+/// 範囲外にはならず0行のスライスになり、その項の寄与は数学的にも自然にゼロになる
+/// （空スライス同士の行列積は零行列）ため安全（`fe_estimator_fit_one_way_hac_with_
+/// single_time_period_yields_zero_variance`が退化ケースを回帰ガードしている）。
+///
+/// ラグごとの`k×k`行列積（`xi_top.transpose() * xi_bot`等）は`FeEstimator::fit`冒頭の
+/// `ensure_serial()`が固定したグローバル`Par::Seq`に依存している（OLSの`hac_cov_params`が
+/// `matmul(..., Par::Seq)`を明示するのと異なり、本関数は演算子オーバーロードを使うため
+/// グローバル設定頼み。`fe_hc_cov_params`/`fe_cluster_cov_params`と同じ流儀。`fit()`を
+/// 経由しない新しい呼び出し経路を将来追加する場合は要再検討）。
+fn fe_driscoll_kraay_cov_params(
+    x: &Mat<f64>,
+    residuals: &[f64],
+    xtx_inv: &Mat<f64>,
+    time: &[String],
+    df_resid: usize,
+    bandwidth: usize,
+    t_periods: usize,
+) -> Mat<f64> {
+    let n = x.nrows();
+    let k = x.ncols();
+    let time_indices = group_indices_by_key(time);
+
+    let mut xi = Mat::<f64>::zeros(t_periods, k);
+    for (row, indices) in time_indices.values().enumerate() {
+        for &i in indices {
+            let e = residuals[i];
+            for col in 0..k {
+                *xi.get_mut(row, col) += e * (*x.get(i, col));
+            }
+        }
+    }
+
+    // l=0項: Ŝ₀ = ξ'ξ（クラスターロバストのΨ̂と同形、時点をグループとみなした版）
+    let mut s_hat = xi.transpose() * &xi;
+    // l=1..=bandwidth項: w_l * (Ŝ_l + Ŝ_l')
+    for l in 1..=bandwidth {
+        let weight = 1.0 - (l as f64) / ((bandwidth + 1) as f64);
+        let xi_top = xi.as_ref().subrows(l, t_periods - l);
+        let xi_bot = xi.as_ref().subrows(0, t_periods - l);
+        let s_l = xi_top.transpose() * xi_bot;
+        for a in 0..k {
+            for b in 0..k {
+                *s_hat.get_mut(a, b) += weight * (*s_l.get(a, b) + *s_l.get(b, a));
+            }
+        }
+    }
+
+    let scale = n as f64 / df_resid as f64;
+    let cov_uncorrected = xtx_inv * &s_hat * xtx_inv;
+    Mat::from_fn(k, k, |i, j| scale * (*cov_uncorrected.get(i, j)))
 }
 
 /// `ids`のユニークID数を数える（`n_entities`/`n_periods`のカウント）。純粋な
@@ -2286,6 +2441,327 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             PanelError::Common(CommonError::InsufficientClustersForInference { g: 2, q: 2 })
+        );
+    }
+
+    // ── Driscoll-Kraay型パネルHAC対応（Issue #182） ─────────────────────────
+
+    #[test]
+    fn fe_estimator_fit_one_way_hac_matches_linearmodels_default_bandwidth() {
+        // linearmodelsの`PanelOLS(y, x, entity_effects=True).fit(cov_type="kernel",
+        // kernel="bartlett", bandwidth=None, debiased=True)`と数値比較する
+        // （5.1節、DKの主リファレンス）。n_periods=3のため既定バンド幅は
+        // `floor(4*(3/100)^(2/9))=1`（`resolve_dk_bandwidth`）。期待値はPythonで独立に
+        // 計算・検算済み（2026-09-12）。
+        let (entity, time, x, y) = fixest_reference_input();
+        let input = FeInput::from_columns(
+            &y,
+            &[x],
+            vec!["x".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
+
+        let fe = FeEstimator::fit(
+            input,
+            FeEffects::OneWay,
+            FeCovType::Hac { bandwidth: None },
+            0.95,
+        )
+        .unwrap();
+
+        assert!((*fe.estimator().params().get(0, 0) - 1.402_777_777_777_78).abs() < 1e-9);
+        assert!((*fe.std_errors().get(0, 0) - 0.096_177_633_971_081_66).abs() < 1e-9);
+        assert!((*fe.t_stats().get(0, 0) - 14.585_280_588_203_7).abs() < 1e-6);
+        assert!((*fe.p_values().get(0, 0) - 1.700_643_472_490_881_4e-6).abs() < 1e-9);
+        assert!((*fe.conf_lower().get(0, 0) - 1.175_353_812_028_944_4).abs() < 1e-6);
+        assert!((*fe.conf_upper().get(0, 0) - 1.630_201_743_526_611_8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn fe_estimator_fit_one_way_hac_with_explicit_bandwidth_matches_default() {
+        // 既定バンド幅（n_periods=3 → 1）と明示的に`bandwidth=Some(1)`を指定した場合が
+        // 一致することを確認する（`resolve_dk_bandwidth`のNone分岐とSome分岐が同じ値に
+        // 解決されることの回帰ガード）。
+        let (entity, time, x, y) = fixest_reference_input();
+        let input = FeInput::from_columns(
+            &y,
+            &[x],
+            vec!["x".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
+
+        let fe = FeEstimator::fit(
+            input,
+            FeEffects::OneWay,
+            FeCovType::Hac { bandwidth: Some(1) },
+            0.95,
+        )
+        .unwrap();
+
+        assert!((*fe.std_errors().get(0, 0) - 0.096_177_633_971_081_66).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fe_estimator_fit_one_way_hac_with_bandwidth_two_matches_linearmodels() {
+        // `bandwidth=Some(2)`（n_periods=3のため許容範囲`[0,3)`の上限）でラグ項ループ
+        // （`for l in 1..=bandwidth`）が複数回（l=1,2）実行されるケースを検証する
+        // （既定・`Some(1)`のテストはl=1の1回しか通らないため、rust-reviewer指摘。
+        // `testing-policy.md`が警告する「ループ本体がテストで一度も複数回実行されない」
+        // 落とし穴、Issue #168と同型）。linearmodelsの`bandwidth=2`と数値比較する。
+        let (entity, time, x, y) = fixest_reference_input();
+        let input = FeInput::from_columns(
+            &y,
+            &[x],
+            vec!["x".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
+
+        let fe = FeEstimator::fit(
+            input,
+            FeEffects::OneWay,
+            FeCovType::Hac { bandwidth: Some(2) },
+            0.95,
+        )
+        .unwrap();
+
+        assert!((*fe.std_errors().get(0, 0) - 0.078_528_709_299_106_49).abs() < 1e-9);
+        assert!((*fe.t_stats().get(0, 0) - 17.863_247_598_209_78).abs() < 1e-6);
+        assert!((*fe.p_values().get(0, 0) - 4.253_303_196_311_009e-7).abs() < 1e-9);
+        assert!((*fe.conf_lower().get(0, 0) - 1.217_086_887_322_831).abs() < 1e-6);
+        assert!((*fe.conf_upper().get(0, 0) - 1.588_468_668_232_725_1).abs() < 1e-6);
+    }
+
+    #[test]
+    fn fe_estimator_fit_two_way_hac_matches_linearmodels_default_bandwidth() {
+        // 同じデータでの2-way FE版（`entity_effects=True, time_effects=True`）。
+        let (entity, time, x, y) = fixest_reference_input();
+        let input = FeInput::from_columns(
+            &y,
+            &[x],
+            vec!["x".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
+
+        let fe = FeEstimator::fit(
+            input,
+            FeEffects::TwoWay,
+            FeCovType::Hac { bandwidth: None },
+            0.95,
+        )
+        .unwrap();
+
+        assert!((*fe.estimator().params().get(0, 0) - 0.822_429_906_542_056).abs() < 1e-9);
+        assert!((*fe.std_errors().get(0, 0) - 0.220_358_007_844_439_7).abs() < 1e-9);
+        assert!((*fe.t_stats().get(0, 0) - 3.732_244_244_659_559).abs() < 1e-6);
+        assert!((*fe.p_values().get(0, 0) - 0.013_539_553_831_729_556).abs() < 1e-9);
+        assert!((*fe.conf_lower().get(0, 0) - 0.255_981_614_240_134_77).abs() < 1e-6);
+        assert!((*fe.conf_upper().get(0, 0) - 1.388_878_198_843_977_3).abs() < 1e-6);
+    }
+
+    #[test]
+    fn fe_estimator_fit_two_way_hac_with_bandwidth_two_matches_linearmodels() {
+        // 1-way版と同様、2-way FEでもラグ項ループが複数回（l=1,2）実行されるケースを
+        // 検証する（rust-reviewer指摘）。
+        let (entity, time, x, y) = fixest_reference_input();
+        let input = FeInput::from_columns(
+            &y,
+            &[x],
+            vec!["x".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
+
+        let fe = FeEstimator::fit(
+            input,
+            FeEffects::TwoWay,
+            FeCovType::Hac { bandwidth: Some(2) },
+            0.95,
+        )
+        .unwrap();
+
+        assert!((*fe.std_errors().get(0, 0) - 0.179_921_559_985_030_04).abs() < 1e-9);
+        assert!((*fe.t_stats().get(0, 0) - 4.571_046_997_427_571).abs() < 1e-6);
+        assert!((*fe.p_values().get(0, 0) - 0.005_996_174_969_207_235).abs() < 1e-9);
+        assert!((*fe.conf_lower().get(0, 0) - 0.359_926_812_605_188_3).abs() < 1e-6);
+        assert!((*fe.conf_upper().get(0, 0) - 1.284_933_000_478_924).abs() < 1e-6);
+    }
+
+    #[test]
+    fn fe_estimator_fit_one_way_hac_with_zero_bandwidth_matches_cluster_on_non_nested_time() {
+        // `bandwidth=Some(0)`はラグ項なし（`Ŝ = Ŝ₀`）に退化し、これは`time`でクラスター
+        // した場合（`fe_estimator_fit_one_way_cluster_on_non_nested_variable_matches_
+        // linearmodels_with_rescale`と同じ`entity`/`time`）の`Ŝ`と数式的に同一になる
+        // （どちらも`Σ_t (Σ_{i:time_i=t} x̃_i ε̂_i)(...)'`で、`extra_df=neffects`のスケールも
+        // 一致する。モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。2つの独立した
+        // 実装（`fe_cluster_cov_params`と`fe_driscoll_kraay_cov_params`）が同じ値に収束する
+        // ことを確認する回帰ガード（OLSの`fit_hac_with_zero_lags_matches_hc0`と同型）。
+        let (entity, time, x, y) = fixest_reference_input();
+        let input = FeInput::from_columns(
+            &y,
+            &[x],
+            vec!["x".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
+
+        let hac = FeEstimator::fit(
+            input,
+            FeEffects::OneWay,
+            FeCovType::Hac { bandwidth: Some(0) },
+            0.95,
+        )
+        .unwrap();
+
+        let (entity, time, x, y) = fixest_reference_input();
+        let input =
+            FeInput::from_columns(&y, &[x], vec!["x".to_string()], &entity, None, "y".into())
+                .unwrap();
+        let cluster = FeEstimator::fit(
+            input,
+            FeEffects::OneWay,
+            FeCovType::Cluster { groups: Some(time) },
+            0.95,
+        )
+        .unwrap();
+
+        assert!(
+            (*hac.std_errors().get(0, 0) - *cluster.std_errors().get(0, 0)).abs() < 1e-9,
+            "hac(bandwidth=0)={}, cluster(time)={}",
+            *hac.std_errors().get(0, 0),
+            *cluster.std_errors().get(0, 0)
+        );
+    }
+
+    #[test]
+    fn fe_estimator_fit_one_way_hac_with_single_time_period_yields_zero_variance() {
+        // `t_periods=1`（全観測が同一の`time`ラベル）という退化した境界ケース
+        // （rust-reviewer指摘、`resolve_dk_bandwidth`のNone分岐が`bandwidth=t_periods`を
+        // 返しうる唯一のケース、`fe_driscoll_kraay_cov_params`関数doc参照）。
+        //
+        // このとき`ξ_t`は1個しかなく（`t=1`）、その値は全観測にわたる
+        // `Σ_i x̃_i ε̂_i = X̃'ε̂`——委譲先`OlsEstimator::fit`の正規方程式により厳密に
+        // ゼロベクトル——になるため、`Ŝ = ξ_1 ξ_1' = 0`、延いて標準誤差も厳密にゼロになる
+        // ことが線形代数から導出できる（外部リファレンス不要、`engine`内で完結する
+        // 数学的事実）。`l=bandwidth=t_periods`の空スライス処理
+        // （`xi.subrows(l, t_periods - l)` = `(t_periods, 0)`）がpanicしないことも
+        // 合わせて確認する。
+        let entity = strings(&["a", "a", "b", "b", "c", "c"]);
+        let time = strings(&["1", "1", "1", "1", "1", "1"]);
+        let y = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let x = vec![1.0, 3.0, 2.0, 6.0, 4.0, 10.0];
+        let input = FeInput::from_columns(
+            &y,
+            &[x],
+            vec!["x".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
+
+        let fe = FeEstimator::fit(
+            input,
+            FeEffects::OneWay,
+            FeCovType::Hac { bandwidth: None },
+            0.95,
+        )
+        .unwrap();
+
+        assert!((*fe.std_errors().get(0, 0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fe_estimator_fit_hac_one_way_requires_time() {
+        // 1-way FEで`time`未指定のまま`FeCovType::Hac`を指定すると
+        // `PanelError::HacRequiresTime`（2-way FEは`TwoWayRequiresTime`が既に必須化して
+        // いるため、このエラーは1-way FE限定）。
+        let (entity, _time, x, y) = fixest_reference_input();
+        let input =
+            FeInput::from_columns(&y, &[x], vec!["x".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let result = FeEstimator::fit(
+            input,
+            FeEffects::OneWay,
+            FeCovType::Hac { bandwidth: None },
+            0.95,
+        );
+
+        assert_eq!(result.unwrap_err(), PanelError::HacRequiresTime);
+    }
+
+    #[test]
+    fn fe_estimator_fit_hac_rejects_bandwidth_out_of_range() {
+        // n_periods=3のため`bandwidth`の許容範囲は`[0, 3)`。`bandwidth=3`（`t`自体）は
+        // 範囲外（OLSの`hac_lags`と同型の`[0, n)`境界、`t`版）。
+        let (entity, time, x, y) = fixest_reference_input();
+        let input = FeInput::from_columns(
+            &y,
+            &[x],
+            vec!["x".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
+
+        let result = FeEstimator::fit(
+            input,
+            FeEffects::OneWay,
+            FeCovType::Hac { bandwidth: Some(3) },
+            0.95,
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::InvalidHacBandwidth { bandwidth: 3, t: 3 }
+        );
+    }
+
+    #[test]
+    fn fe_estimator_fit_hac_rejects_negative_bandwidth() {
+        let (entity, time, x, y) = fixest_reference_input();
+        let input = FeInput::from_columns(
+            &y,
+            &[x],
+            vec!["x".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
+
+        let result = FeEstimator::fit(
+            input,
+            FeEffects::OneWay,
+            FeCovType::Hac {
+                bandwidth: Some(-1),
+            },
+            0.95,
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::InvalidHacBandwidth {
+                bandwidth: -1,
+                t: 3
+            }
         );
     }
 

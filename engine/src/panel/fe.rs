@@ -57,10 +57,42 @@
 //!   `within_transform_two_way`と同様、`time`が`None`なら`PanelError::TwoWayRequiresTime`）。
 //! - 複数のsingletonグループが存在する場合は、観測順で最初に現れるグループのみを
 //!   報告する（`validate_no_zero_variance_regressors`の「最初の1件を報告」方針と統一）。
+//!
+//! ## `OlsEstimator`への委譲（`FeEstimator`、Issue #178、4.3節）
+//!
+//! FEは**まず`OlsEstimator`への委譲を試す**（within変換したデータを`OlsEstimator::fit`に
+//! 渡す、`WlsEstimator`と同型のパターン。`docs/planning/specs/panel-api-design.md`4.3節）。
+//! `FeEstimator::fit`は「singleton検出→within変換（2-wayはバランスパネル検証も内包）→
+//! 分散ゼロ検出→`OlsEstimator::fit`」の順にパイプラインを実行する。
+//!
+//! **この時点では係数推定（`β̂`）の委譲のみをスコープとする**。within変換後のOLS推定量
+//! `β̂`はwithin推定量として数学的に正しい値になる（自由度・`cov_type`に依存しない）ため、
+//! 委譲だけで正しく求まる。一方、以下はFE固有の再計算・補正が必要で**別issueで対応する**
+//! （4.3節。WLSがR²等を素のOLS計算のまま使わなかったのと同じ教訓）:
+//! - 自由度（`n - n_entities - k`、単純な`n-k`ではない、6.3節・Issue #180）→
+//!   標準誤差・t値・p値・信頼区間・F統計量・調整済みR²・AIC/BICすべてに波及
+//! - `cov_type`デフォルトのentity単位cluster化・Driscoll-Kraay型HAC（3章・6.8節・Issue #181）
+//! - パネル固有R²（within/between/overall、2章・Issue #183）
+//!
+//! そのため`FeEstimator::fit`は`OlsEstimator::fit`を`CovType::Classical`固定で呼ぶ
+//! （上記の自由度・`cov_type`補正が入るまでの暫定値。`estimator().std_errors()`等は
+//! この時点では正しくない前提で扱うこと）。`OlsInput::from_columns`は
+//! `include_intercept=false`で呼ぶ（within変換で全体平均も含めて差し引かれているため、
+//! 変換後データに切片は不要——`OlsEstimator::fit`が変換後の残差平均をゼロと仮定する
+//! 通常のOLSと同じ考え方）。
+//!
+//! `OlsInput::from_columns`/`OlsEstimator::fit`が返す`LeastSquaresError`は
+//! `PanelError::WithinRegressionFailed { source }`に包む（`common.rs`のdocコメント参照）。
+//!
+//! `FeEffects`（`OneWay`/`TwoWay`）で1-way/2-wayを切り替える。将来`FeOptions`
+//! （Issue #186）が導入されたら、その一部（またはそのままのフィールド型）として
+//! 統合する想定の暫定的なパラメータ（1-way/2-wayの区別自体は`panel-api-design.md`で
+//! 確定済みの設計だが、`FeOptions`自体は未着手のため）。
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::error::CommonError;
+use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::panel::common::{PanelDimension, PanelError, quasi_demean_column};
 
 /// FEの被説明変数・説明変数・パネル識別子を保持する入力データ。
@@ -189,6 +221,117 @@ impl FeInput {
     /// 観測数 n
     pub fn nobs(&self) -> usize {
         self.y.len()
+    }
+}
+
+/// FEの固定効果の方向（1-way/2-way）を指定する。`FeEstimator::fit`が受け取る
+/// （モジュールdoc「`OlsEstimator`への委譲」参照。将来`FeOptions`（Issue #186）に
+/// 統合される想定の暫定的なパラメータ）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeEffects {
+    /// entityのみ（`within_transform_one_way`、6.1節）。
+    OneWay,
+    /// entity + time（`within_transform_two_way`、6.2節。バランスパネル必須、6.4節）。
+    TwoWay,
+}
+
+/// FEの推定結果。`within`変換したデータを`OlsEstimator::fit`に委譲する
+/// （モジュールdoc「`OlsEstimator`への委譲」参照。**係数推定のみがこの時点でのスコープ**——
+/// 標準誤差等の統計量はFE固有の自由度・`cov_type`補正が入るまで正しくない）。
+///
+/// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」）。
+#[derive(Debug)]
+pub struct FeEstimator {
+    input: FeInput,
+    effects: FeEffects,
+    estimator: OlsEstimator,
+}
+
+impl FeEstimator {
+    /// `input`を`effects`が指定する方向でwithin変換した上で`OlsEstimator::fit`に委譲し、
+    /// FEを推定する。
+    ///
+    /// パイプライン: singleton検出
+    /// （`validate_no_singleton_groups_one_way`/`validate_no_singleton_groups_two_way`、
+    /// Issue #179）→ within変換（`within_transform_one_way`/`within_transform_two_way`、
+    /// 2-wayはバランスパネル検証を内包、Issue #176）→ 分散ゼロ検出
+    /// （`validate_no_zero_variance_regressors`、Issue #177）→ `OlsEstimator::fit`への委譲
+    /// （`include_intercept=false`・`cov_type=CovType::Classical`固定。理由はモジュールdoc
+    /// 参照）。
+    ///
+    /// # Errors
+    /// - `effects=TwoWay`で`input.time()`が`None`の場合は`PanelError::TwoWayRequiresTime`
+    /// - singletonグループが見つかった場合は`PanelError::SingletonGroup`
+    /// - `effects=TwoWay`でバランスパネルでない場合は`PanelError::UnbalancedPanelForTwoWay`
+    /// - within変換後に分散ゼロの説明変数がある場合は`PanelError::ZeroVarianceAfterDemeaning`
+    /// - 委譲先の`OlsEstimator::fit`が失敗した場合（観測数不足・特異行列等）は
+    ///   `PanelError::WithinRegressionFailed`
+    pub fn fit(
+        input: FeInput,
+        effects: FeEffects,
+        confidence_level: f64,
+    ) -> Result<Self, PanelError> {
+        // faerのグローバル並列度をPar::Seqに固定する（Issue #283、`crate::parallelism`。
+        // 委譲先のOlsEstimator::fit自身も呼ぶが、`cargo test -p engine`でFeEstimator::fitを
+        // 直接叩く経路との統一のためここでも呼ぶ、`engine/src/panel/CLAUDE.md`「faerの
+        // グローバル並列度」参照）。
+        crate::parallelism::ensure_serial();
+
+        let (y, x) = match effects {
+            FeEffects::OneWay => {
+                validate_no_singleton_groups_one_way(&input)?;
+                within_transform_one_way(&input)
+            }
+            FeEffects::TwoWay => {
+                validate_no_singleton_groups_two_way(&input)?;
+                within_transform_two_way(&input)?
+            }
+        };
+
+        validate_no_zero_variance_regressors(&input, &x)?;
+
+        // `OlsInput::from_columns`が返しうる`LeastSquaresError::Common(DimensionMismatch)`は
+        // ここでは理論上到達不能: `y`/`x`はどちらも`within_transform_*`が`input.y()`/
+        // `input.x()`（`FeInput::from_columns`が既に同じ長さであることを検証済み）から
+        // 1対1で生成した同じ長さの列であり、この関数内で長さがずれる操作をしていない。
+        // それでも`Result`を返す契約（`from_columns`のシグネチャ）をそのまま守り、
+        // `unwrap`はしない（`ols::xtx_inverse`等の「理論上到達不能でも`Result`化する」方針
+        // に揃える、`.claude/rules/rust-style.md`「テスト」参照）。
+        let ols_input = OlsInput::from_columns(
+            &y,
+            &x,
+            input.x_names().to_vec(),
+            false,
+            input.dep_var_name().to_string(),
+        )
+        .map_err(|source| PanelError::WithinRegressionFailed { source })?;
+        let estimator = OlsEstimator::fit(ols_input, CovType::Classical, confidence_level)
+            .map_err(|source| PanelError::WithinRegressionFailed { source })?;
+
+        Ok(Self {
+            input,
+            effects,
+            estimator,
+        })
+    }
+
+    /// within変換前の入力データ。
+    pub fn input(&self) -> &FeInput {
+        &self.input
+    }
+
+    /// 推定に使った固定効果の方向。
+    pub fn effects(&self) -> FeEffects {
+        self.effects
+    }
+
+    /// within変換済みデータに対する`OlsEstimator`本体。
+    ///
+    /// **係数（`params()`）は正しいwithin推定量だが、標準誤差・t値・p値・信頼区間・
+    /// F統計量・調整済みR²・AIC/BICはこの時点では正しくない**（モジュールdoc参照。
+    /// FE固有の自由度・`cov_type`補正が別issueで入るまでの暫定値）。
+    pub fn estimator(&self) -> &OlsEstimator {
+        &self.estimator
     }
 }
 
@@ -431,6 +574,7 @@ fn validate_balanced_panel(entity: &[String], time: &[String]) -> Result<(), Pan
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::linear::common::LeastSquaresError;
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|s| s.to_string()).collect()
@@ -985,6 +1129,272 @@ mod tests {
             validate_no_zero_variance_regressors(&input, &[vec![]]),
             Ok(())
         );
+    }
+
+    // ── FeEstimator::fit ─────────────────────────────────────────────────
+
+    #[test]
+    fn fe_estimator_fit_one_way_recovers_known_slope() {
+        // entity a: x=[1,2,3], y=2x+5（fixed effect=5）→ y=[7,9,11]
+        // entity b: x=[4,5,6], y=2x+10（fixed effect=10）→ y=[18,20,22]
+        // ノイズなしのため、within変換後のOLS（切片なし）は真のスロープ2.0を厳密に
+        // 復元するはず（fixed effectはwithin変換で消去される）。
+        let entity = strings(&["a", "a", "a", "b", "b", "b"]);
+        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let y: Vec<f64> = x1
+            .iter()
+            .zip(&entity)
+            .map(|(x, e)| 2.0 * x + if e == "a" { 5.0 } else { 10.0 })
+            .collect();
+        let input =
+            FeInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let fe = FeEstimator::fit(input, FeEffects::OneWay, 0.95).unwrap();
+
+        assert!((*fe.estimator().params().get(0, 0) - 2.0).abs() < 1e-9);
+        assert_eq!(fe.effects(), FeEffects::OneWay);
+        assert!(!fe.estimator().input().has_intercept());
+        for r in fe.estimator().residuals().col(0).iter() {
+            assert!(r.abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn fe_estimator_fit_two_way_recovers_known_slope() {
+        // `within_transform_two_way_matches_closed_form_double_demeaning`と同じデータ
+        // （x1はyのちょうど2倍）。2-way within変換後、x1_out = 2 * y_out が厳密に成り立つ
+        // ため、切片なしOLSのスロープは0.5に厳密に一致するはず。
+        let y = [1.0, 3.0, 5.0, 9.0];
+        let x1 = vec![2.0, 6.0, 10.0, 18.0];
+        let input = balanced_two_way_input(y, &[x1]);
+
+        let fe = FeEstimator::fit(input, FeEffects::TwoWay, 0.95).unwrap();
+
+        assert!((*fe.estimator().params().get(0, 0) - 0.5).abs() < 1e-9);
+        assert_eq!(fe.effects(), FeEffects::TwoWay);
+    }
+
+    #[test]
+    fn fe_estimator_fit_propagates_singleton_error() {
+        let entity = strings(&["a", "a", "c"]);
+        let y = [1.0, 2.0, 3.0];
+        let x1 = vec![1.0, 2.0, 3.0];
+        let input =
+            FeInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let result = FeEstimator::fit(input, FeEffects::OneWay, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::SingletonGroup {
+                dimension: PanelDimension::Entity,
+                group_id: "c".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn fe_estimator_fit_propagates_zero_variance_error() {
+        // "female"は各エンティティ内で一定（時間不変）。
+        let entity = strings(&["a", "a", "b", "b"]);
+        let y = [1.0, 2.0, 3.0, 5.0];
+        let x_varying = vec![10.0, 20.0, 5.0, 15.0];
+        let female = vec![0.0, 0.0, 1.0, 1.0];
+        let input = FeInput::from_columns(
+            &y,
+            &[x_varying, female],
+            vec!["x_varying".to_string(), "female".to_string()],
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+
+        let result = FeEstimator::fit(input, FeEffects::OneWay, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::ZeroVarianceAfterDemeaning {
+                column: "female".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn fe_estimator_fit_two_way_requires_time() {
+        let entity = strings(&["a", "a", "b", "b"]);
+        let y = [1.0, 2.0, 3.0, 4.0];
+        let x1 = vec![1.0, 2.0, 3.0, 4.0];
+        let input =
+            FeInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let result = FeEstimator::fit(input, FeEffects::TwoWay, 0.95);
+
+        assert_eq!(result.unwrap_err(), PanelError::TwoWayRequiresTime);
+    }
+
+    #[test]
+    fn fe_estimator_fit_two_way_propagates_singleton_error() {
+        // entity "c"は時点"1"のみの1観測（singleton）。`fit()`が
+        // `validate_no_singleton_groups_two_way`（entity/time双方を対称にチェックする方）を
+        // 正しく呼んでいることの配線確認（1-way用の検証関数を誤って呼んでいないか）。
+        let entity = strings(&["a", "a", "b", "b", "c"]);
+        let time = strings(&["1", "2", "1", "2", "1"]);
+        let y = [1.0, 2.0, 3.0, 4.0, 5.0];
+        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let input = FeInput::from_columns(
+            &y,
+            &[x1],
+            vec!["x1".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
+
+        let result = FeEstimator::fit(input, FeEffects::TwoWay, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::SingletonGroup {
+                dimension: PanelDimension::Entity,
+                group_id: "c".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn fe_estimator_fit_two_way_propagates_unbalanced_panel_error() {
+        // entity=[a,a,b,b], time=[1,1,2,2]: (a,1)が重複、(a,2)と(b,1)が欠落。
+        // singletonではない（各entity/time値とも観測数2）ため、`fit()`が
+        // `within_transform_two_way`のバランスパネル検証まで到達していることの配線確認。
+        let entity = strings(&["a", "a", "b", "b"]);
+        let time = strings(&["1", "1", "2", "2"]);
+        let y = [1.0, 2.0, 3.0, 4.0];
+        let input =
+            FeInput::from_columns(&y, &[], vec![], &entity, Some(&time), "y".into()).unwrap();
+
+        let result = FeEstimator::fit(input, FeEffects::TwoWay, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::UnbalancedPanelForTwoWay {
+                n_obs: 4,
+                n_entities: 2,
+                n_periods: 2,
+                expected: 4,
+            }
+        );
+    }
+
+    #[test]
+    fn fe_estimator_fit_two_way_propagates_zero_variance_error() {
+        // "year_dummy"はエンティティ間で変動しない（time FEと完全共線）。`fit()`が
+        // within変換後に`validate_no_zero_variance_regressors`を呼んでいることの配線確認。
+        let entity = strings(&["a", "a", "b", "b"]);
+        let time = strings(&["1", "2", "1", "2"]);
+        let y = [1.0, 3.0, 5.0, 9.0];
+        let x_varying = vec![2.0, 6.0, 10.0, 18.0];
+        let year_dummy = vec![0.0, 1.0, 0.0, 1.0];
+        let input = FeInput::from_columns(
+            &y,
+            &[x_varying, year_dummy],
+            vec!["x_varying".to_string(), "year_dummy".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
+
+        let result = FeEstimator::fit(input, FeEffects::TwoWay, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::ZeroVarianceAfterDemeaning {
+                column: "year_dummy".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn fe_estimator_fit_propagates_invalid_confidence_level_error() {
+        // 委譲先の`OlsEstimator::fit`が検証する`confidence_level`の範囲チェック
+        // （`(0, 1)`の範囲外）が、`PanelError::WithinRegressionFailed`として正しく
+        // 伝播することを確認する（`iv::two_sls`の同型テストに倣う）。
+        let entity = strings(&["a", "a", "b", "b"]);
+        let y = [1.0, 2.0, 3.0, 4.0];
+        let x1 = vec![1.0, 2.0, 3.0, 4.0];
+        let input =
+            FeInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let result = FeEstimator::fit(input, FeEffects::OneWay, 1.5);
+
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::WithinRegressionFailed {
+                source: LeastSquaresError::Common(CommonError::InvalidConfidenceLevel {
+                    confidence_level: 1.5,
+                }),
+            }
+        );
+    }
+
+    #[test]
+    fn fe_estimator_fit_wraps_ols_failure_as_within_regression_failed() {
+        // n=4（entity a/b各2観測、singletonではない）・x列4本（切片なし、within変換は
+        // 行数を減らさないためk=4のまま）で`n <= k`となり、`OlsEstimator::fit`が
+        // `CommonError::InsufficientObservations`を返す。各x列はエンティティ内で変動する
+        // 値にして（`validate_no_zero_variance_regressors`より先にこのエラーを踏ませる）。
+        let entity = strings(&["a", "a", "b", "b"]);
+        let y = [1.0, 2.0, 3.0, 4.0];
+        let x1 = vec![1.0, 3.0, 2.0, 6.0];
+        let x2 = vec![2.0, 5.0, 1.0, 9.0];
+        let x3 = vec![10.0, 1.0, 4.0, 0.0];
+        let x4 = vec![0.0, 2.0, 5.0, 1.0];
+        let input = FeInput::from_columns(
+            &y,
+            &[x1, x2, x3, x4],
+            vec![
+                "x1".to_string(),
+                "x2".to_string(),
+                "x3".to_string(),
+                "x4".to_string(),
+            ],
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+
+        let result = FeEstimator::fit(input, FeEffects::OneWay, 0.95);
+
+        assert!(matches!(
+            result.unwrap_err(),
+            PanelError::WithinRegressionFailed { .. }
+        ));
+    }
+
+    #[test]
+    fn fe_estimator_fit_pins_faer_global_parallelism_to_seq() {
+        // Issue #283: `fit()`冒頭の`crate::parallelism::ensure_serial()`がfaerのグローバル
+        // 並列度を`Par::Seq`へ引き戻すことの回帰ガード（panel系統代表、
+        // `engine/src/panel/CLAUDE.md`「faerのグローバル並列度」参照）。
+        faer::set_global_parallelism(faer::Par::rayon(0));
+
+        let entity = strings(&["a", "a", "b", "b"]);
+        let y = [1.0, 2.0, 3.0, 4.0];
+        let x1 = vec![1.0, 2.0, 3.0, 4.0];
+        let input =
+            FeInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let _ = FeEstimator::fit(input, FeEffects::OneWay, 0.95).unwrap();
+
+        assert!(matches!(faer::get_global_parallelism(), faer::Par::Seq));
     }
 
     /// property-basedテスト。固定シナリオ

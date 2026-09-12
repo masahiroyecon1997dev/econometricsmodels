@@ -1,12 +1,19 @@
-//! WLSの推定結果、およびPython（polars DataFrame + `y`/`x`/`weight`列名 + オプション）から
-//! `engine::linear::wls::WlsEstimator`を呼び出し、結果をPython側に返すところまでの一連の処理。
+//! WLSの推定オプション・結果、およびPython（polars DataFrame + `y`/`x`/`weight`列名 +
+//! オプション）から`engine::linear::wls::WlsEstimator`を呼び出し、結果をPython側に返す
+//! ところまでの一連の処理。
 //!
-//! `weight`は`y`と同じく`data`内の列名を指すトップレベル引数として扱う（`WLSOptions`という
-//! 専用のOptions型は新設せず`OLSOptions`をそのまま再利用する。
-//! `docs/spec/wls-spec.md`「API引数」参照）。エラー変換（`least_squares_error_to_pyerr`）・
-//! `Mat<f64>`→`Vec<f64>`変換（`mat_to_vec`）は`super::common`のものをそのまま再利用する
-//! （`LeastSquaresError`がOLS・WLS共通のエラー型のため。`.claude/rules/rust-style.md`
-//! 「系統内で共有するロジックはcommon.rsに置く」）。
+//! `weight`は`y`と同じく`data`内の列名を指すトップレベル引数として扱う
+//! （`docs/spec/wls-spec.md`「API引数」参照）。`WLSOptions`は`OLSOptions`と
+//! フィールド構成が完全に同一の独立したpyclassである（Issue #308、下記
+//! `WLSOptions`のdocコメント参照）。エラー変換（`least_squares_error_to_pyerr`）・
+//! `Mat<f64>`→`Vec<f64>`変換（`mat_to_vec`）・`cov_type`のパース（`parse_cov_type`）は
+//! `super::common`のものをそのまま再利用する（`LeastSquaresError`がOLS・WLS共通の
+//! エラー型のため。`.claude/rules/rust-style.md`「系統内で共有するロジックは
+//! common.rsに置く」）。
+//!
+//! 【言語方針】`.claude/rules/rust-style.md`「言語方針」参照。
+//! 公開API（`WLSOptions`/`WLSResult`）のdocコメントは英語。それ以外（このファイルの
+//! 説明・非公開関数のdocコメント等）は日本語のまま。
 
 use engine::linear::wls::WlsEstimator;
 use polars::prelude::DataFrame;
@@ -14,12 +21,126 @@ use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
 use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
-use super::ols::OLSOptions;
 use crate::column_extraction::extract_f64_column;
 use crate::validation::{
     RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
     validate_no_duplicate_within_role, validate_x_non_empty,
 };
+
+/// Estimation options for WLS.
+///
+/// See `docs/spec/wls-spec.md` ("API引数") for the rationale behind each
+/// field's meaning and default value.
+///
+/// Field-for-field identical to `OLSOptions` today (`cov_type`/`include_intercept`/
+/// `confidence_level`/`cluster_col`/`hac_lags`/`time_col`, same defaults and semantics
+/// — `docs/spec/wls-spec.md` "API引数" confirms `hac_lags`/`time_col` mean exactly the
+/// same thing for WLS as for OLS). Kept as an independent pyclass rather than reusing
+/// `OLSOptions` (the pre-Issue #308 design) so that a future WLS-specific option can be
+/// added without affecting `OLSOptions`/OLS users — the same reasoning `WLSResult`
+/// already uses relative to `OLSResult`.
+///
+/// This field-for-field duplication with `OLSOptions` (and, in the `nonlinear` system,
+/// `LogitOptions`/`ProbitOptions`/`TobitOptions`'s duplicated `method`/`max_iter`/`tol`/
+/// `raise_on_non_convergence`) is intentional and will not be collapsed into a shared
+/// base struct/trait here: PyO3's `#[pyclass]`/`#[pymethods]` constructor is inherently a
+/// flat keyword-argument surface, so a shared base type would either leak into the
+/// Python-facing API shape (composition: `WLSOptions(cov_type=..., mle=MleOptions(...))`)
+/// or add indirection without reducing the Python surface. `IvOptions`
+/// (`engine_pybind/src/iv/common.rs`) already re-declares this same field group
+/// independently from `OLSOptions`, so this duplication is consistent with the existing
+/// precedent in this codebase (Issue #308 decision, 2026-09-12). Mechanical
+/// deduplication of the Rust-side boilerplate itself (field declarations/constructor/
+/// `__repr__`) via `macro_rules!` is tracked separately in Issue #315.
+// `fit`がPython側から`WLSOptions`インスタンスを引数として受け取るため、
+// `FromPyObject`実装を明示的に維持する（`OLSOptions`と同じ理由、pyo3 0.28以降、Cloneを
+// 実装する#[pyclass]のFromPyObject自動導出はopt-inに変更されたため）。
+// module: PyO3の#[pyclass]はデフォルトで__module__="builtins"になり、
+// mkdocstrings（griffe）がPythonでの再エクスポートのalias解決に失敗する原因になる。
+// 実際のインポート元(`econometricsmodels._lib`)を明示する。
+#[pyclass(from_py_object, module = "econometricsmodels._lib")]
+#[derive(Debug, Clone)]
+pub struct WLSOptions {
+    /// Standard error type: one of "classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster".
+    /// Case-insensitive.
+    #[pyo3(get, set)]
+    pub cov_type: String,
+
+    /// Whether the engine should automatically add an intercept column.
+    /// When true, a column of all 1.0 is prepended to the design matrix.
+    /// If the user's `x` already contains a constant column while this is true,
+    /// the resulting perfect collinearity raises `ComputationError` (singular matrix).
+    #[pyo3(get, set)]
+    pub include_intercept: bool,
+
+    /// Confidence level for confidence intervals, in the range (0, 1).
+    /// Defaults to 0.95 (a 95% confidence interval). Named `confidence_level` rather
+    /// than `alpha` to avoid confusion with the significance level (the 0.05 side).
+    #[pyo3(get, set)]
+    pub confidence_level: f64,
+
+    /// Column name to use as the cluster group key when `cov_type="cluster"`.
+    /// Refers to a column in `data` rather than being passed as a separate array.
+    /// Ignored when `cov_type` is not "cluster".
+    #[pyo3(get, set)]
+    pub cluster_col: Option<String>,
+
+    /// Number of lags (bandwidth) for HAC (Newey-West) when `cov_type="hac"`.
+    /// When `None`, computed automatically via `L = floor(4*(n/100)^(2/9))`.
+    /// Ignored when `cov_type` is not "hac".
+    #[pyo3(get, set)]
+    pub hac_lags: Option<i64>,
+
+    /// Column name giving the time order for HAC when `cov_type="hac"`.
+    /// When `None`, the row order of `data` is treated as the time order.
+    /// Ignored when `cov_type` is not "hac".
+    #[pyo3(get, set)]
+    pub time_col: Option<String>,
+}
+
+#[pymethods]
+impl WLSOptions {
+    #[new]
+    #[pyo3(signature = (
+        cov_type = "classical".to_string(),
+        include_intercept = true,
+        confidence_level = 0.95,
+        cluster_col = None,
+        hac_lags = None,
+        time_col = None,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        cov_type: String,
+        include_intercept: bool,
+        confidence_level: f64,
+        cluster_col: Option<String>,
+        hac_lags: Option<i64>,
+        time_col: Option<String>,
+    ) -> Self {
+        Self {
+            cov_type,
+            include_intercept,
+            confidence_level,
+            cluster_col,
+            hac_lags,
+            time_col,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "WLSOptions(cov_type={:?}, include_intercept={}, confidence_level={}, \
+             cluster_col={:?}, hac_lags={:?}, time_col={:?})",
+            self.cov_type,
+            self.include_intercept,
+            self.confidence_level,
+            self.cluster_col,
+            self.hac_lags,
+            self.time_col
+        )
+    }
+}
 
 /// Estimation results for WLS.
 ///
@@ -72,7 +193,7 @@ pub fn fit(
     y: String,
     x: Vec<String>,
     weight: String,
-    options: &OLSOptions,
+    options: &WLSOptions,
 ) -> PyResult<WLSResult> {
     let df: DataFrame = data.into();
 
@@ -105,7 +226,13 @@ pub fn fit(
     let weight_slice = extract_f64_column(&df, &weight)?;
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ、OLSと同じ）─────
-    let (cov_type, cov_type_lower) = parse_cov_type(&df, options)?;
+    let (cov_type, cov_type_lower) = parse_cov_type(
+        &df,
+        &options.cov_type,
+        options.cluster_col.as_deref(),
+        options.hac_lags,
+        options.time_col.as_deref(),
+    )?;
 
     let wls_estimator = WlsEstimator::fit(
         &y_slice,

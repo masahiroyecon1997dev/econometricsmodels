@@ -19,17 +19,17 @@
 //! これに委譲する）が`PyDataFrame`を受け取り、`.into()`で`DataFrame`に変換して
 //! から`build_probit_input`を呼ぶ（`logit.rs`の`fit`関数と同じ変換パターン）。
 
-use engine::nonlinear::common::{CovType as EngineCovType, Method as EngineMethod};
+use engine::nonlinear::common::{CovType as EngineCovType, Method as EngineMethod, MleFitOptions};
 use engine::nonlinear::probit::{ProbitEstimator, ProbitInput};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
 use super::common::{
-    MarginalEffectsResult, mat_to_nested_vec, mle_error_to_pyerr, parse_marginal_effects_at,
+    MarginalEffectsResult, mat_to_nested_vec, mle_error_to_pyerr, parse_cov_type,
+    parse_marginal_effects_at, parse_method,
 };
-use crate::column_extraction::{extract_f64_column, extract_group_key_column};
-use crate::errors::ValidationError;
+use crate::column_extraction::extract_f64_column;
 use crate::validation::{
     RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
     validate_no_duplicate_within_role, validate_x_non_empty,
@@ -279,57 +279,6 @@ impl ProbitResult {
     }
 }
 
-/// `cov_type`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::CovType`に
-/// パースする。`cov_type="cluster"`のときのみ`cluster_col`で指定された列を
-/// `extract_group_key_column`で抽出する（他のcov_typeでは無視する、`build_logit_input`の
-/// `parse_cov_type`と同じ方針）。
-///
-/// # Errors
-/// - `cov_type`が既知の値のいずれでもない: `ValidationError`
-///
-/// `cluster_col`未指定自体はここでは`ValidationError`にせず、`groups=None`のまま
-/// `engine`側の`CommonError::MissingClusterColumn`検証に委ねる（`build_logit_input`と
-/// 同じ役割分担）。
-fn parse_cov_type(
-    df: &DataFrame,
-    cov_type_lower: &str,
-    cluster_col: &Option<String>,
-) -> PyResult<EngineCovType> {
-    match cov_type_lower {
-        "classical" | "nonrobust" => Ok(EngineCovType::Classical),
-        "opg" => Ok(EngineCovType::Opg),
-        "hc0" => Ok(EngineCovType::Hc0),
-        "hc1" => Ok(EngineCovType::Hc1),
-        "cluster" => {
-            let groups = cluster_col
-                .as_ref()
-                .map(|col_name| extract_group_key_column(df, col_name))
-                .transpose()?;
-            Ok(EngineCovType::Cluster { groups })
-        }
-        other => Err(ValidationError::new_err(format!(
-            "unknown cov_type: '{other}'. Expected one of 'classical' (or 'nonrobust'), \
-             'opg', 'hc0', 'hc1', or 'cluster'"
-        ))),
-    }
-}
-
-/// `method`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::Method`に
-/// パースする。
-///
-/// # Errors
-/// `method`が既知の値のいずれでもない: `ValidationError`
-fn parse_method(method_lower: &str) -> PyResult<EngineMethod> {
-    match method_lower {
-        "newton" => Ok(EngineMethod::Newton),
-        "bfgs" => Ok(EngineMethod::Bfgs),
-        "lbfgs" => Ok(EngineMethod::Lbfgs),
-        other => Err(ValidationError::new_err(format!(
-            "unknown method: '{other}'. Expected one of 'newton', 'bfgs', or 'lbfgs'"
-        ))),
-    }
-}
-
 /// Pythonから渡された `data` / `y` / `x` / `options` を検証し、
 /// `engine::nonlinear::probit::ProbitInput::from_columns`を呼び出すところまでを行う。
 /// `ProbitEstimator::fit`の呼び出し・`ProbitResult`の構築は`fit`（本ファイル）が行う。
@@ -398,12 +347,14 @@ pub(crate) fn fit(
 
     let estimator = ProbitEstimator::fit(
         input,
-        method,
-        options.max_iter,
-        options.tol,
-        options.raise_on_non_convergence,
-        cov_type,
-        options.confidence_level,
+        MleFitOptions {
+            method,
+            max_iter: options.max_iter,
+            tol: options.tol,
+            raise_on_non_convergence: options.raise_on_non_convergence,
+            cov_type,
+            confidence_level: options.confidence_level,
+        },
     )
     .map_err(mle_error_to_pyerr)?;
 

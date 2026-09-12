@@ -1,6 +1,6 @@
 # WLS
 
-`WLS` is implemented by applying `OLS`'s solver directly to `sqrt(weight)`-transformed data, so the normal-equations solver, the general form of standard errors (HC0-3 / cluster / HAC), and the estimation options (`OLSOptions`) are shared with [OLS](ols.md). This page only covers the semantics of weights (analytic weights) and the API specific to WLS.
+`WLS` is implemented by applying `OLS`'s solver directly to `sqrt(weight)`-transformed data, so the normal-equations solver and the general form of standard errors (HC0-3 / cluster / HAC) are shared with [OLS](ols.md). `WLSOptions` has the same fields as `OLSOptions` but is a separate class (see below). This page only covers the semantics of weights (analytic weights) and the API specific to WLS.
 
 ## Weights (analytic weight)
 
@@ -11,5 +11,7 @@ The `weight` argument specifies the column name of the weight column in `data`. 
       members:
         - __init__
         - fit
+
+::: econometricsmodels.WLSOptions
 
 ::: econometricsmodels.WlsResults

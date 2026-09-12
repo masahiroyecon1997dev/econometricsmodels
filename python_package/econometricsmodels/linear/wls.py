@@ -9,9 +9,14 @@ for `x`, an options object for estimation settings (CLAUDE.md section 2,
 
 `weight`, like `y`, is a top-level argument referring to a column name
 in `data` (see `docs/spec/wls-spec.md`, "API引数").
-Since the estimation options WLS needs are identical to OLS's, no
-separate options class is introduced; WLS reuses `OLSOptions` as-is
-(see section 3).
+`WLSOptions` is re-exported as-is from `_lib` (not redefined as a
+Python class), matching `OLSOptions`'s pattern (see
+`python_package/econometricsmodels/linear/CLAUDE.md`). Its fields are
+field-for-field identical to `OLSOptions` today, but it is a separate
+class (`WlsResults` was already independent from `OlsResults` from the
+start, so keeping `WLSOptions` tied to `OLSOptions` would have been
+the odd one out): WLS-specific options may be added later without
+affecting `OLSOptions`/OLS users.
 """
 
 from __future__ import annotations
@@ -19,9 +24,9 @@ from __future__ import annotations
 import polars as pl
 
 from .. import _lib
-from .._lib import OLSOptions
+from .._lib import WLSOptions
 
-__all__ = ["WLS", "WlsResults"]
+__all__ = ["WLS", "WLSOptions", "WlsResults"]
 
 
 class WLS:
@@ -36,9 +41,9 @@ class WLS:
             analytic weight (proportional to the inverse of the
             variance; no normalization required). Non-positive values
             raise `ValidationError`.
-        options: Estimation options. Uses the same `OLSOptions` as
-            `OLS`. Defaults to `OLSOptions()` (classical, with
-            intercept, confidence_level=0.95) when omitted.
+        options: Estimation options. Defaults to `WLSOptions()`
+            (classical, with intercept, confidence_level=0.95) when
+            omitted.
 
     Examples:
         >>> import polars as pl
@@ -56,13 +61,13 @@ class WLS:
         y: str,
         x: list[str],
         weight: str,
-        options: OLSOptions | None = None,
+        options: WLSOptions | None = None,
     ) -> None:
         self._data = data
         self._y = y
         self._x = x
         self._weight = weight
-        self._options = options if options is not None else OLSOptions()
+        self._options = options if options is not None else WLSOptions()
 
     def fit(self) -> WlsResults:
         """Estimate the WLS model.

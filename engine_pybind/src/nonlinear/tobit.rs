@@ -25,7 +25,7 @@
 //! `build_tobit_input`が`PyDataFrame`ではなく`polars::DataFrame`を受け取る設計にしている
 //! 理由も`logit.rs`と同じ（GILなしで`cargo test`から直接ユニットテストできるようにするため）。
 
-use engine::nonlinear::common::{CovType as EngineCovType, Method as EngineMethod};
+use engine::nonlinear::common::{CovType as EngineCovType, Method as EngineMethod, MleFitOptions};
 use engine::nonlinear::tobit::{
     CensoringFitCategory, CensoringFitCheck, MarginalEffectsTarget, TobitEstimator, TobitInput,
 };
@@ -33,8 +33,11 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
-use super::common::{MarginalEffectsResult, mle_error_to_pyerr, parse_marginal_effects_at};
-use crate::column_extraction::{extract_f64_column, extract_group_key_column};
+use super::common::{
+    MarginalEffectsResult, mle_error_to_pyerr, parse_cov_type, parse_marginal_effects_at,
+    parse_method,
+};
+use crate::column_extraction::extract_f64_column;
 use crate::errors::ValidationError;
 use crate::validation::{
     RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
@@ -371,53 +374,6 @@ fn censoring_fit_check_to_result(check: CensoringFitCheck) -> CensoringFitCheckR
     }
 }
 
-/// `cov_type`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::CovType`に
-/// パースする。`logit.rs`の`parse_cov_type`と同じロジック（`CovType`はLogit/Probit/Tobit
-/// 共有の型のため）だが、モデルファイルごとに独立して定義する既存方針を踏襲する
-/// （`probit.rs`も同様に複製している）。
-///
-/// # Errors
-/// `cov_type`が既知の値のいずれでもない: `ValidationError`
-fn parse_cov_type(
-    df: &DataFrame,
-    cov_type_lower: &str,
-    cluster_col: &Option<String>,
-) -> PyResult<EngineCovType> {
-    match cov_type_lower {
-        "classical" | "nonrobust" => Ok(EngineCovType::Classical),
-        "opg" => Ok(EngineCovType::Opg),
-        "hc0" => Ok(EngineCovType::Hc0),
-        "hc1" => Ok(EngineCovType::Hc1),
-        "cluster" => {
-            let groups = cluster_col
-                .as_ref()
-                .map(|col_name| extract_group_key_column(df, col_name))
-                .transpose()?;
-            Ok(EngineCovType::Cluster { groups })
-        }
-        other => Err(ValidationError::new_err(format!(
-            "unknown cov_type: '{other}'. Expected one of 'classical' (or 'nonrobust'), \
-             'opg', 'hc0', 'hc1', or 'cluster'"
-        ))),
-    }
-}
-
-/// `method`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::Method`に
-/// パースする（`logit.rs`と同じロジック、`parse_cov_type`と同じ理由で複製）。
-///
-/// # Errors
-/// `method`が既知の値のいずれでもない: `ValidationError`
-fn parse_method(method_lower: &str) -> PyResult<EngineMethod> {
-    match method_lower {
-        "newton" => Ok(EngineMethod::Newton),
-        "bfgs" => Ok(EngineMethod::Bfgs),
-        "lbfgs" => Ok(EngineMethod::Lbfgs),
-        other => Err(ValidationError::new_err(format!(
-            "unknown method: '{other}'. Expected one of 'newton', 'bfgs', or 'lbfgs'"
-        ))),
-    }
-}
-
 /// `target`文字列（大文字小文字を区別しない）を`engine::nonlinear::tobit::
 /// MarginalEffectsTarget`にパースする。`predict`/`marginal_effects`共通
 /// （Tobit専用、`parse_marginal_effects_at`とは異なりLogit/Probitには無い概念のため
@@ -540,12 +496,14 @@ pub(crate) fn fit(
 
     let estimator = TobitEstimator::fit(
         input,
-        method,
-        options.max_iter,
-        options.tol,
-        options.raise_on_non_convergence,
-        cov_type,
-        options.confidence_level,
+        MleFitOptions {
+            method,
+            max_iter: options.max_iter,
+            tol: options.tol,
+            raise_on_non_convergence: options.raise_on_non_convergence,
+            cov_type,
+            confidence_level: options.confidence_level,
+        },
     )
     .map_err(mle_error_to_pyerr)?;
 
@@ -975,12 +933,14 @@ mod tests {
                 .expect("expected Ok");
         let estimator = TobitEstimator::fit(
             input,
-            method,
-            options.max_iter,
-            options.tol,
-            options.raise_on_non_convergence,
-            cov_type,
-            options.confidence_level,
+            MleFitOptions {
+                method,
+                max_iter: options.max_iter,
+                tol: options.tol,
+                raise_on_non_convergence: options.raise_on_non_convergence,
+                cov_type,
+                confidence_level: options.confidence_level,
+            },
         )
         .expect("expected converged fit");
 

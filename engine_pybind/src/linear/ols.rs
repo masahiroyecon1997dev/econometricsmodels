@@ -270,7 +270,13 @@ pub fn fit(
     }
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
-    let (cov_type, cov_type_lower) = parse_cov_type(&df, options)?;
+    let (cov_type, cov_type_lower) = parse_cov_type(
+        &df,
+        &options.cov_type,
+        options.cluster_col.as_deref(),
+        options.hac_lags,
+        options.time_col.as_deref(),
+    )?;
 
     let input = OlsInput::from_columns(&y_slice, &x_slices, x, options.include_intercept, y)
         .map_err(least_squares_error_to_pyerr)?;

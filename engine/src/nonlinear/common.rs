@@ -495,6 +495,38 @@ pub enum CovType {
     },
 }
 
+/// `LogitEstimator::fit`/`ProbitEstimator::fit`/`TobitEstimator::fit`が共通で受け取る
+/// 最適化・推論オプション（`method`/`max_iter`/`tol`/`raise_on_non_convergence`/
+/// `cov_type`/`confidence_level`）をまとめた構造体。
+///
+/// 元は3つの`fit()`がこの6引数を個別の位置引数として独立に持っており、シグネチャが
+/// 完全に重複していた（Issue #308で集約）。`engine_pybind`側の`LogitOptions`/
+/// `ProbitOptions`/`TobitOptions`（pyclass、Python公開APIのフラットなkwargsコンストラクタ
+/// が前提）とは異なるレイヤーの問題で、こちらは`engine`内部の純粋Rust関数のシグネチャ
+/// のため、フィールドをまとめても呼び出し側（Python）への影響はない。フィールドは
+/// `fit()`冒頭で個別の変数へ分解して使う（本体ロジックの変更を避けるため）。
+///
+/// バリデーション（`confidence_level`の範囲・`max_iter`/`tol`の符号等）はこの構造体
+/// 自体では行わず、従来通り`validate_fit_preconditions`が担う（このフィールド群は
+/// 単なる引数バンドルであり、`LogitInput`等のように構築時点で不変条件を保証する
+/// 設計ではない）。
+#[derive(Debug, Clone)]
+pub struct MleFitOptions {
+    /// 数値最適化ソルバーの種類。
+    pub method: Method,
+    /// 最大反復回数。
+    pub max_iter: i64,
+    /// 勾配ノルムの収束判定閾値。
+    pub tol: f64,
+    /// `true`（既定）なら`max_iter`回で未収束のとき`MleError::NonConvergence`を返す。
+    /// `false`なら打ち切り点の結果をそのまま返す（`converged=false`）。
+    pub raise_on_non_convergence: bool,
+    /// 標準誤差（係数分散共分散行列）の種別。
+    pub cov_type: CovType,
+    /// 信頼区間の信頼水準、`(0, 1)`の範囲。
+    pub confidence_level: f64,
+}
+
 /// 限界効果（`marginal_effects`）をどの代表点で評価するか。文字列パース（Python文字列 →
 /// この型への変換）は`engine_pybind`側の責務（`Method`/`CovType`と同じ設計。
 /// `.claude/rules/rust-style.md`参照）。

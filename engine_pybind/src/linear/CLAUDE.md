@@ -34,3 +34,9 @@
 ## `cov_type`固有の追加列
 
 `cluster_col`/`time_col`の抽出は該当する`cov_type`のときのみ行う。無関係な列を誤って要求してエラーにしないこと。
+
+## `WLSOptions`（Issue #308で新設、`OLSOptions`とは独立したpyclass）
+
+`WLS`は当初専用の`WLSOptions`を持たず`OLSOptions`をそのまま再利用していたが（`WLSResult`は元から独立型だったのと非対称だった）、Issue #308でユーザビリティ向上のため`WLSOptions`を新設した。フィールド構成は`OLSOptions`と完全に同一（`cov_type`/`include_intercept`/`confidence_level`/`cluster_col`/`hac_lags`/`time_col`、既定値・意味論とも同じ、`docs/spec/wls-spec.md`「API引数」参照）。このフィールド重複は意図的で共通base構造体には切り出さない（`engine_pybind/src/nonlinear/CLAUDE.md`「`LogitOptions`/`ProbitOptions`/`TobitOptions`のフィールド重複は意図的」節と同じ理由。`IvOptions`が`OLSOptions`と同種のフィールドを独立再定義している既存precedentとの一貫性、PyO3のpyclassコンストラクタがフラットなkwargs surface前提であること）。
+
+`parse_cov_type`（`linear/common.rs`）はこの新設に伴い、`&OLSOptions`ではなく`cov_type: &str, cluster_col: Option<&str>, hac_lags: Option<i64>, time_col: Option<&str>`という個々のフィールド値を引数に取る形に一般化した（`nonlinear::common::parse_cov_type`が最初から個々の値を取っているのと同じ設計）。`OLSOptions`/`WLSOptions`どちらの`fit`関数も、呼び出し側で`&options.cov_type`等を展開して渡す。

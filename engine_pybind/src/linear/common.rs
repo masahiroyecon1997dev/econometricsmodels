@@ -18,7 +18,6 @@ use engine::linear::ols::CovType as EngineCovType;
 use polars::prelude::DataFrame;
 use pyo3::{PyErr, PyResult};
 
-use super::ols::OLSOptions;
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
 use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
 
@@ -62,7 +61,7 @@ pub(crate) fn mat_to_vec(mat: &faer::Mat<f64>) -> Vec<f64> {
     (0..mat.nrows()).map(|i| *mat.get(i, 0)).collect()
 }
 
-/// `OLSOptions.cov_type`をパースし、該当する`cov_type`のときのみ`cluster_col`/`time_col`を
+/// `cov_type`文字列をパースし、該当する`cov_type`のときのみ`cluster_col`/`time_col`を
 /// 抽出したうえで`engine::linear::ols::CovType`を組み立てる（OLS/WLS共通、
 /// `docs/spec/ols-spec.md`「標準誤差」参照）。
 ///
@@ -70,26 +69,26 @@ pub(crate) fn mat_to_vec(mat: &faer::Mat<f64>) -> Vec<f64> {
 /// 戻り値の2つ目は`*Result.cov_type`にそのまま格納する小文字化済み文字列
 /// （呼び出し側で二重に`to_lowercase()`しないよう、ここでまとめて返す）。
 ///
-/// `common.rs`が`super::ols::OLSOptions`という特定モジュールの型に依存する点は、
-/// `mat_to_vec`等の汎用型のみを扱うヘルパーとは毛色が異なる。これは`WLSOptions`という
-/// 専用型を新設せずWLSが`OLSOptions`をそのまま再利用する既存方針（`docs/spec/wls-spec.md`
-/// 「API引数」）を踏まえた判断で、`OLSOptions`は実質的に`linear`系統共通のオプション型
-/// という位置づけのため許容する。将来GLS等で`cov_type`の型が分岐する場合は、この関数を
-/// 無理に拡張せず素直に系統・手法ごとの実装に切り替えること。
+/// `OLSOptions`インスタンスそのものではなく個々のフィールド値を引数で受け取る設計に
+/// しているのは、`WLSOptions`新設（Issue #308）により`OLSOptions`/`WLSOptions`という
+/// 独立した2つの型がこの関数を共有する必要が生じたため（`nonlinear::common::
+/// parse_cov_type`が最初から個々の値を引数に取っているのと同じ設計。以前は`WLSOptions`が
+/// 無く`OLSOptions`をそのまま再利用していたため、`&OLSOptions`を直接受け取っていた）。
 ///
 /// # Errors
 /// `cov_type`の文字列が既知の値のいずれでもない場合は`ValidationError`。それ以外
 /// （列の抽出時に発覚する問題等）は`column_extraction`の責務で`ValidationError`。
 pub(crate) fn parse_cov_type(
     df: &DataFrame,
-    options: &OLSOptions,
+    cov_type: &str,
+    cluster_col: Option<&str>,
+    hac_lags: Option<i64>,
+    time_col: Option<&str>,
 ) -> PyResult<(EngineCovType, String)> {
-    let cov_type_lower = options.cov_type.to_lowercase();
+    let cov_type_lower = cov_type.to_lowercase();
 
     let cluster_groups = if cov_type_lower == "cluster" {
-        options
-            .cluster_col
-            .as_ref()
+        cluster_col
             .map(|col_name| extract_group_key_column(df, col_name))
             .transpose()?
     } else {
@@ -97,9 +96,7 @@ pub(crate) fn parse_cov_type(
     };
 
     let time_order = if cov_type_lower == "hac" {
-        options
-            .time_col
-            .as_ref()
+        time_col
             .map(|col_name| extract_f64_column(df, col_name))
             .transpose()?
     } else {
@@ -113,7 +110,7 @@ pub(crate) fn parse_cov_type(
         "hc2" => EngineCovType::Hc2,
         "hc3" => EngineCovType::Hc3,
         "hac" => EngineCovType::Hac {
-            lags: options.hac_lags,
+            lags: hac_lags,
             time_order,
         },
         "cluster" => EngineCovType::Cluster {
@@ -133,19 +130,6 @@ pub(crate) fn parse_cov_type(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// `cov_type`以外はデフォルト値の`OLSOptions`を返す。cluster/hac以外のケースでは
-    /// `cluster_col`/`time_col`が抽出されないため、`df`は空でよい。
-    fn options(cov_type: &str) -> OLSOptions {
-        OLSOptions {
-            cov_type: cov_type.to_string(),
-            include_intercept: true,
-            confidence_level: 0.95,
-            cluster_col: None,
-            hac_lags: None,
-            time_col: None,
-        }
-    }
 
     /// `unwrap()`/`expect()`は使わない：`PyErr`の`Debug`実装（`unwrap()`失敗時の
     /// panicメッセージ生成に使われる）はGIL取得を要求し、GIL未初期化のこのテスト
@@ -167,7 +151,7 @@ mod tests {
             ("CLUSTER", "cluster"),
             ("Hac", "hac"),
         ] {
-            let Ok((_, normalized)) = parse_cov_type(&df, &options(input)) else {
+            let Ok((_, normalized)) = parse_cov_type(&df, input, None, None, None) else {
                 panic!("expected Ok for input={input}");
             };
             assert_eq!(normalized, expected, "input={input}");
@@ -178,7 +162,7 @@ mod tests {
     fn parse_cov_type_accepts_nonrobust_as_classical_alias() {
         let df = DataFrame::empty();
         for input in ["nonrobust", "NONROBUST", "NonRobust"] {
-            let Ok((cov_type, normalized)) = parse_cov_type(&df, &options(input)) else {
+            let Ok((cov_type, normalized)) = parse_cov_type(&df, input, None, None, None) else {
                 panic!("expected Ok for input={input}");
             };
             assert!(
@@ -195,6 +179,6 @@ mod tests {
     #[test]
     fn parse_cov_type_returns_validation_error_for_unknown_value() {
         let df = DataFrame::empty();
-        assert!(parse_cov_type(&df, &options("bogus")).is_err());
+        assert!(parse_cov_type(&df, "bogus", None, None, None).is_err());
     }
 }

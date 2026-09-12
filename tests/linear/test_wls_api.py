@@ -15,6 +15,7 @@ from econometricsmodels import (
     OLS,
     WLS,
     OLSOptions,
+    WLSOptions,
     WlsResults,
 )
 
@@ -25,15 +26,15 @@ from econometricsmodels import (
 
 
 @pytest.mark.parametrize(
-    "options",
+    "option_kwargs",
     [
-        OLSOptions(),
-        OLSOptions(cov_type="hc3"),
-        OLSOptions(cov_type="cluster", cluster_col="cluster"),
-        OLSOptions(include_intercept=False),
+        {},
+        {"cov_type": "hc3"},
+        {"cov_type": "cluster", "cluster_col": "cluster"},
+        {"include_intercept": False},
     ],
 )
-def test_weight_one_matches_ols(dataset, options):
+def test_weight_one_matches_ols(dataset, option_kwargs):
     """重み=1のときWLSの結果がOLSの結果と完全一致すること。
 
     coef/se/t/p/CI/F統計量/n_obsは、WLSがOLSソルバーを`sqrt(weight)`変換した
@@ -42,12 +43,21 @@ def test_weight_one_matches_ols(dataset, options):
     WLS側で元スケールのy・weightsから独立に計算し直す実装のため、加算順序
     等に由来する浮動小数点誤差レベルの差が生じうる（`engine/src/linear/wls.rs`
     の対応するRust単体テストで確認済みの挙動）。
+
+    `OLSOptions`/`WLSOptions`はフィールド構成が同一の独立クラス（Issue #308）
+    のため、同じ`option_kwargs`からそれぞれ構築して`OLS`/`WLS`に渡す。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
 
-    ols_res = OLS(df, y="y", x=["x1", "x2"], options=options).fit()
+    ols_res = OLS(
+        df, y="y", x=["x1", "x2"], options=OLSOptions(**option_kwargs)
+    ).fit()
     wls_res = WLS(
-        df, y="y", x=["x1", "x2"], weight="weight", options=options
+        df,
+        y="y",
+        x=["x1", "x2"],
+        weight="weight",
+        options=WLSOptions(**option_kwargs),
     ).fit()
 
     assert wls_res.param_names == ols_res.param_names
@@ -94,7 +104,7 @@ def test_weight_one_matches_ols_coef_table(dataset):
 
 
 def test_default_options_use_classical(dataset):
-    """`options`省略時は`OLSOptions()`の既定値（classical）が使われること。"""
+    """`options`省略時は`WLSOptions()`の既定値（classical）が使われること。"""
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
     assert res.cov_type == "classical"
@@ -185,13 +195,13 @@ def test_cov_type_label(dataset):
     """全cov_typeで`res.cov_type`が指定通り反映されること（OLSと同じ検証）。"""
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
     for cov_type in ["classical", "hc0", "hc1", "hc2", "hc3"]:
-        options = OLSOptions(cov_type=cov_type)
+        options = WLSOptions(cov_type=cov_type)
         res = WLS(
             df, y="y", x=["x1", "x2"], weight="weight", options=options
         ).fit()
         assert res.cov_type == cov_type
 
-    cluster_options = OLSOptions(cov_type="cluster", cluster_col="cluster")
+    cluster_options = WLSOptions(cov_type="cluster", cluster_col="cluster")
     cluster_res = WLS(
         df, y="y", x=["x1", "x2"], weight="weight", options=cluster_options
     ).fit()
@@ -216,7 +226,7 @@ def test_cov_type_is_case_insensitive(dataset, cov_type, expected_label):
     test_cov_type_is_case_insensitive`と同じ観点、共通化された経路の検証）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = OLSOptions(cov_type=cov_type)
+    options = WLSOptions(cov_type=cov_type)
     res = WLS(
         df, y="y", x=["x1", "x2"], weight="weight", options=options
     ).fit()
@@ -229,12 +239,12 @@ def test_nonrobust_is_alias_for_classical(dataset, cov_type):
     エイリアスであること（OLSと同じ検証）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = OLSOptions(cov_type=cov_type)
+    options = WLSOptions(cov_type=cov_type)
     res = WLS(
         df, y="y", x=["x1", "x2"], weight="weight", options=options
     ).fit()
 
-    classical_options = OLSOptions(cov_type="classical")
+    classical_options = WLSOptions(cov_type="classical")
     classical_res = WLS(
         df, y="y", x=["x1", "x2"], weight="weight", options=classical_options
     ).fit()
@@ -252,14 +262,14 @@ def test_confidence_level_changes_interval_width(dataset):
         y="y",
         x=["x1", "x2"],
         weight="weight",
-        options=OLSOptions(confidence_level=0.99),
+        options=WLSOptions(confidence_level=0.99),
     ).fit()
     narrow = WLS(
         df,
         y="y",
         x=["x1", "x2"],
         weight="weight",
-        options=OLSOptions(confidence_level=0.80),
+        options=WLSOptions(confidence_level=0.80),
     ).fit()
 
     for name in ["const", "x1", "x2"]:
@@ -275,7 +285,7 @@ def test_hac_auto_lags_runs_and_returns_finite_std_errors(dataset):
     無かった）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = OLSOptions(cov_type="hac")  # hac_lags省略 = 自動計算
+    options = WLSOptions(cov_type="hac")  # hac_lags省略 = 自動計算
     res = WLS(
         df, y="y", x=["x1", "x2"], weight="weight", options=options
     ).fit()
@@ -297,7 +307,7 @@ def test_hac_time_col_reorders_rows_before_computing_lags():
             "weight": [1.0] * 5,
         }
     )
-    ordered_options = OLSOptions(cov_type="hac", hac_lags=1)
+    ordered_options = WLSOptions(cov_type="hac", hac_lags=1)
     ordered_res = WLS(
         ordered_df, y="y", x=["x1"], weight="weight", options=ordered_options
     ).fit()
@@ -310,7 +320,7 @@ def test_hac_time_col_reorders_rows_before_computing_lags():
             "weight": [1.0] * 5,
         }
     )
-    shuffled_options = OLSOptions(cov_type="hac", hac_lags=1, time_col="time")
+    shuffled_options = WLSOptions(cov_type="hac", hac_lags=1, time_col="time")
     shuffled_res = WLS(
         shuffled_df,
         y="y",

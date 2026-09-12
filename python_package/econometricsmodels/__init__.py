@@ -10,7 +10,7 @@ from __future__ import annotations
 from ._lib import ComputationError, ValidationError
 from .iv.iv import IV, IvOptions, IvResults
 from .linear.ols import OLS, OLSOptions, OlsResults
-from .linear.wls import WLS, WlsResults
+from .linear.wls import WLS, WLSOptions, WlsResults
 from .nonlinear.logit import Logit, LogitOptions, LogitResults
 from .nonlinear.probit import Probit, ProbitOptions, ProbitResults
 from .nonlinear.tobit import Tobit, TobitOptions, TobitResults
@@ -34,6 +34,7 @@ __all__ = [
     "TobitOptions",
     "TobitResults",
     "ValidationError",
+    "WLSOptions",
     "WlsResults",
 ]
 

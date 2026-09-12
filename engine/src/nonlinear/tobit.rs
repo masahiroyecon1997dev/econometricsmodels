@@ -110,7 +110,7 @@ use crate::error::CommonError;
 use crate::inference;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::nonlinear::common::{
-    CovType, MarginalEffects, MarginalEffectsAt, Method, MleError, SandwichVariant,
+    CovType, MarginalEffects, MarginalEffectsAt, MleError, MleFitOptions, SandwichVariant,
     SeparationNormCheck, checked_design_matrix_qr, clamped_pdf_cdf, cluster_cov_params,
     column_means, column_medians, observed_information_cov_params, opg_cov_params, run_solver,
     sandwich_cov_params, validate_cluster_cov_type, validate_confidence_level, validate_max_iter,
@@ -1337,15 +1337,16 @@ impl TobitEstimator {
     ///   数値的にほぼ特異: `CommonError::ComputationFailed`（`wald_chi2_test`参照。`g > q`
     ///   でも起こりうるbackstop。`df_model==0`（切片以外の`β`が無い）のときはこの検定自体を
     ///   スキップし`wald_statistic`/`wald_p_value`はNaNになる）
-    pub fn fit(
-        input: TobitInput,
-        method: Method,
-        max_iter: i64,
-        tol: f64,
-        raise_on_non_convergence: bool,
-        cov_type: CovType,
-        confidence_level: f64,
-    ) -> Result<Self, MleError> {
+    pub fn fit(input: TobitInput, options: MleFitOptions) -> Result<Self, MleError> {
+        let MleFitOptions {
+            method,
+            max_iter,
+            tol,
+            raise_on_non_convergence,
+            cov_type,
+            confidence_level,
+        } = options;
+
         // faer のグローバル並列度を Par::Seq に固定する（Issue #283、`crate::parallelism`）。
         crate::parallelism::ensure_serial();
 
@@ -1802,6 +1803,7 @@ impl TobitEstimator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nonlinear::common::Method;
     use statrs::distribution::{Continuous, ContinuousCDF};
 
     #[test]
@@ -2384,12 +2386,14 @@ mod tests {
 
         let estimator = TobitEstimator::fit(
             input,
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2435,12 +2439,14 @@ mod tests {
 
         let estimator = TobitEstimator::fit(
             input,
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2512,12 +2518,14 @@ mod tests {
 
         let estimator = TobitEstimator::fit(
             input,
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2538,12 +2546,14 @@ mod tests {
     fn fit_wald_statistic_and_p_value_match_independently_recomputed_values() {
         let estimator = TobitEstimator::fit(
             multivariate_censored_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2575,12 +2585,14 @@ mod tests {
     fn fit_wald_statistic_matches_squared_z_statistic_for_single_slope() {
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2621,14 +2633,16 @@ mod tests {
         ];
         let result = TobitEstimator::fit(
             multivariate_censored_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Cluster {
-                groups: Some(groups),
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Cluster {
+                    groups: Some(groups),
+                },
+                confidence_level: 0.95,
             },
-            0.95,
         );
         assert_eq!(
             result.unwrap_err(),
@@ -2647,12 +2661,14 @@ mod tests {
     fn fit_cov_params_is_symmetric_and_stats_are_internally_consistent() {
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2705,12 +2721,14 @@ mod tests {
         let input = censored_regression_input();
         let result = TobitEstimator::fit(
             input,
-            Method::Newton,
-            1,
-            1e-12,
-            false,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 1,
+                tol: 1e-12,
+                raise_on_non_convergence: false,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         );
         assert!(
             matches!(result, Err(MleError::SingularHessian)),
@@ -2731,12 +2749,14 @@ mod tests {
         for cov_type in [CovType::Hc0, CovType::Hc1] {
             let result = TobitEstimator::fit(
                 censored_regression_input(),
-                Method::Newton,
-                1,
-                1e-12,
-                false,
-                cov_type.clone(),
-                0.95,
+                MleFitOptions {
+                    method: Method::Newton,
+                    max_iter: 1,
+                    tol: 1e-12,
+                    raise_on_non_convergence: false,
+                    cov_type: cov_type.clone(),
+                    confidence_level: 0.95,
+                },
             );
             assert!(
                 matches!(result, Err(MleError::SingularHessian)),
@@ -2762,14 +2782,16 @@ mod tests {
         ];
         let result = TobitEstimator::fit(
             censored_regression_input(),
-            Method::Newton,
-            1,
-            1e-12,
-            false,
-            CovType::Cluster {
-                groups: Some(groups),
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 1,
+                tol: 1e-12,
+                raise_on_non_convergence: false,
+                cov_type: CovType::Cluster {
+                    groups: Some(groups),
+                },
+                confidence_level: 0.95,
             },
-            0.95,
         );
         assert!(
             matches!(result, Err(MleError::SingularHessian)),
@@ -2815,12 +2837,14 @@ mod tests {
 
         let estimator = TobitEstimator::fit(
             input,
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2850,12 +2874,14 @@ mod tests {
         let input = intercept_only_uncensored_input(&[1.0, 2.0, 3.0]);
         let result = TobitEstimator::fit(
             input,
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            1.5,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 1.5,
+            },
         );
         assert_eq!(
             result.unwrap_err(),
@@ -2870,12 +2896,14 @@ mod tests {
         let input = intercept_only_uncensored_input(&[1.0, 2.0, 3.0]);
         let result = TobitEstimator::fit(
             input,
-            Method::Newton,
-            0,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 0,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         );
         assert_eq!(
             result.unwrap_err(),
@@ -2888,12 +2916,14 @@ mod tests {
         let input = intercept_only_uncensored_input(&[1.0, 2.0, 3.0]);
         let result = TobitEstimator::fit(
             input,
-            Method::Newton,
-            100,
-            0.0,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 0.0,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         );
         assert_eq!(result.unwrap_err(), MleError::InvalidTol { tol: 0.0 });
     }
@@ -2906,12 +2936,14 @@ mod tests {
         let input = intercept_only_uncensored_input(&[1.0, 2.0]);
         let result = TobitEstimator::fit(
             input,
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         );
         assert_eq!(
             result.unwrap_err(),
@@ -2960,12 +2992,14 @@ mod tests {
 
         let result = TobitEstimator::fit(
             input,
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         );
         assert!(
             matches!(result, Err(MleError::SingularDesignMatrix)),
@@ -3004,12 +3038,14 @@ mod tests {
         let input = censored_regression_input();
         let estimator = TobitEstimator::fit(
             input,
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -3028,24 +3064,28 @@ mod tests {
     fn fit_bfgs_and_lbfgs_converge_to_similar_solution_as_newton_for_censored_data() {
         let newton = TobitEstimator::fit(
             censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
         for method in [Method::Bfgs, Method::Lbfgs] {
             let estimator = TobitEstimator::fit(
                 censored_regression_input(),
-                method,
-                200,
-                1e-8,
-                true,
-                CovType::Classical,
-                0.95,
+                MleFitOptions {
+                    method,
+                    max_iter: 200,
+                    tol: 1e-8,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
             )
             .unwrap();
             assert!(estimator.converged(), "method={:?}", method);
@@ -3089,12 +3129,14 @@ mod tests {
 
         let newton = TobitEstimator::fit(
             make_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         assert!(newton.converged());
@@ -3102,12 +3144,14 @@ mod tests {
         for method in [Method::Bfgs, Method::Lbfgs] {
             let estimator = TobitEstimator::fit(
                 make_input(),
-                method,
-                200,
-                1e-8,
-                true,
-                CovType::Classical,
-                0.95,
+                MleFitOptions {
+                    method,
+                    max_iter: 200,
+                    tol: 1e-8,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
             )
             .unwrap();
             assert!(estimator.converged(), "method={:?}", method);
@@ -3284,12 +3328,14 @@ mod tests {
         let fit = |y: &[f64], lower: f64| {
             TobitEstimator::fit(
                 make(y, lower),
-                Method::Newton,
-                100,
-                1e-8,
-                true,
-                CovType::Classical,
-                0.95,
+                MleFitOptions {
+                    method: Method::Newton,
+                    max_iter: 100,
+                    tol: 1e-8,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
             )
             .unwrap()
         };
@@ -3367,12 +3413,14 @@ mod tests {
 
         let est = TobitEstimator::fit(
             input,
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -3393,12 +3441,14 @@ mod tests {
         let input = censored_regression_input();
         let result = TobitEstimator::fit(
             input,
-            Method::Newton,
-            1,
-            1e-12,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 1,
+                tol: 1e-12,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         );
         assert!(
             matches!(result, Err(MleError::NonConvergence { .. })),
@@ -3449,12 +3499,14 @@ mod tests {
 
         let result = TobitEstimator::fit(
             input,
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         );
         assert!(
             matches!(result, Err(MleError::NonConvergence { .. })),
@@ -3475,12 +3527,14 @@ mod tests {
         let input = censored_regression_input();
         let estimator = TobitEstimator::fit(
             input,
-            Method::Newton,
-            3,
-            1e-12,
-            false,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 3,
+                tol: 1e-12,
+                raise_on_non_convergence: false,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         assert!(!estimator.converged());
@@ -3577,12 +3631,14 @@ mod tests {
 
         let classical = TobitEstimator::fit(
             multivariate_censored_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -3607,12 +3663,14 @@ mod tests {
         for (cov_type, expected) in cases {
             let estimator = TobitEstimator::fit(
                 multivariate_censored_input(),
-                Method::Newton,
-                100,
-                1e-8,
-                true,
-                cov_type,
-                0.95,
+                MleFitOptions {
+                    method: Method::Newton,
+                    max_iter: 100,
+                    tol: 1e-8,
+                    raise_on_non_convergence: true,
+                    cov_type,
+                    confidence_level: 0.95,
+                },
             )
             .unwrap();
             assert_cov_params_close(estimator.cov_params(), expected, k_plus_1, 1e-6);
@@ -3657,24 +3715,28 @@ mod tests {
         ] {
             let newton = TobitEstimator::fit(
                 multivariate_censored_input(),
-                Method::Newton,
-                100,
-                1e-8,
-                true,
-                cov_type.clone(),
-                0.95,
+                MleFitOptions {
+                    method: Method::Newton,
+                    max_iter: 100,
+                    tol: 1e-8,
+                    raise_on_non_convergence: true,
+                    cov_type: cov_type.clone(),
+                    confidence_level: 0.95,
+                },
             )
             .unwrap();
 
             for method in [Method::Bfgs, Method::Lbfgs] {
                 let estimator = TobitEstimator::fit(
                     multivariate_censored_input(),
-                    method,
-                    300,
-                    1e-8,
-                    true,
-                    cov_type.clone(),
-                    0.95,
+                    MleFitOptions {
+                        method,
+                        max_iter: 300,
+                        tol: 1e-8,
+                        raise_on_non_convergence: true,
+                        cov_type: cov_type.clone(),
+                        confidence_level: 0.95,
+                    },
                 )
                 .unwrap();
                 assert!(estimator.converged(), "cov_type={cov_type:?}, {method:?}");
@@ -3715,12 +3777,14 @@ mod tests {
 
         let classical = TobitEstimator::fit(
             censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -3732,14 +3796,16 @@ mod tests {
 
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Cluster {
-                groups: Some(groups),
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Cluster {
+                    groups: Some(groups),
+                },
+                confidence_level: 0.95,
             },
-            0.95,
         )
         .unwrap();
         assert_cov_params_close(estimator.cov_params(), &expected_cluster, k_plus_1, 1e-6);
@@ -3768,12 +3834,14 @@ mod tests {
 
         let classical = TobitEstimator::fit(
             censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -3785,14 +3853,16 @@ mod tests {
 
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Cluster {
-                groups: Some(groups),
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Cluster {
+                    groups: Some(groups),
+                },
+                confidence_level: 0.95,
             },
-            0.95,
         )
         .unwrap();
         assert_cov_params_close(estimator.cov_params(), &expected_cluster, k_plus_1, 1e-6);
@@ -3802,12 +3872,14 @@ mod tests {
     fn fit_returns_missing_cluster_column_error_when_groups_not_provided() {
         let result = TobitEstimator::fit(
             multivariate_censored_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Cluster { groups: None },
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Cluster { groups: None },
+                confidence_level: 0.95,
+            },
         );
         assert_eq!(
             result.unwrap_err(),
@@ -3820,14 +3892,16 @@ mod tests {
         let groups = vec!["a".to_string(); 8];
         let result = TobitEstimator::fit(
             multivariate_censored_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Cluster {
-                groups: Some(groups),
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Cluster {
+                    groups: Some(groups),
+                },
+                confidence_level: 0.95,
             },
-            0.95,
         );
         assert_eq!(
             result.unwrap_err(),
@@ -3867,8 +3941,17 @@ mod tests {
         )
         .unwrap();
 
-        let result =
-            TobitEstimator::fit(input, Method::Newton, 100, 1e-8, true, CovType::Opg, 0.95);
+        let result = TobitEstimator::fit(
+            input,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Opg,
+                confidence_level: 0.95,
+            },
+        );
         assert!(
             matches!(result, Err(MleError::SingularOpgMatrix)),
             "{result:?}"
@@ -3988,12 +4071,14 @@ mod tests {
     fn fit_marginal_effects_returns_empty_result_for_intercept_only_model() {
         let estimator = TobitEstimator::fit(
             intercept_only_uncensored_input(&[1.0, 2.0, 3.0, 4.0]),
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -4012,12 +4097,14 @@ mod tests {
     fn fit_marginal_effects_returns_invalid_confidence_level_error_out_of_range() {
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -4043,12 +4130,14 @@ mod tests {
     fn fit_marginal_effects_expected_latent_equals_beta_and_matches_beta_std_error() {
         let estimator = TobitEstimator::fit(
             multivariate_censored_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -4085,12 +4174,14 @@ mod tests {
      {
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         let lower = estimator.input().lower();
@@ -4181,12 +4272,14 @@ mod tests {
     fn fit_marginal_effects_expected_observed_at_mean_and_median_differ_from_overall() {
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -4237,12 +4330,14 @@ mod tests {
      {
         let estimator = TobitEstimator::fit(
             right_censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         let lower = estimator.input().lower();
@@ -4288,12 +4383,14 @@ mod tests {
      {
         let estimator = TobitEstimator::fit(
             two_sided_censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         let lower = estimator.input().lower();
@@ -4341,12 +4438,14 @@ mod tests {
      {
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         let lower = estimator.input().lower();
@@ -4416,12 +4515,14 @@ mod tests {
      {
         let estimator = TobitEstimator::fit(
             right_censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         let lower = estimator.input().lower();
@@ -4463,12 +4564,14 @@ mod tests {
      {
         let estimator = TobitEstimator::fit(
             two_sided_censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         let lower = estimator.input().lower();
@@ -4507,12 +4610,14 @@ mod tests {
     fn fit_predict_expected_latent_equals_linear_predictor() {
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         let x = estimator.input().x();
@@ -4536,12 +4641,14 @@ mod tests {
     fn fit_predict_matches_independent_recomputation_for_left_only_censoring() {
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         let x = estimator.input().x();
@@ -4579,12 +4686,14 @@ mod tests {
     fn fit_predict_matches_independent_recomputation_for_right_only_censoring() {
         let estimator = TobitEstimator::fit(
             right_censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         let x = estimator.input().x();
@@ -4614,12 +4723,14 @@ mod tests {
     fn fit_predict_matches_independent_recomputation_for_two_sided_censoring() {
         let estimator = TobitEstimator::fit(
             two_sided_censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         let x = estimator.input().x();
@@ -4652,12 +4763,14 @@ mod tests {
     fn fit_censoring_fit_check_matches_independent_recomputation_for_left_only_censoring() {
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         let x = estimator.input().x();
@@ -4708,12 +4821,14 @@ mod tests {
     fn fit_censoring_fit_check_matches_independent_recomputation_for_right_only_censoring() {
         let estimator = TobitEstimator::fit(
             right_censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         let x = estimator.input().x();
@@ -4749,12 +4864,14 @@ mod tests {
     fn fit_censoring_fit_check_matches_independent_recomputation_for_two_sided_censoring() {
         let estimator = TobitEstimator::fit(
             two_sided_censored_regression_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         let x = estimator.input().x();
@@ -4826,12 +4943,14 @@ mod tests {
     fn fit_predict_matches_independent_recomputation_for_multivariate_design() {
         let estimator = TobitEstimator::fit(
             multivariate_censored_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         let x = estimator.input().x();
@@ -4861,12 +4980,14 @@ mod tests {
     fn fit_censoring_fit_check_matches_independent_recomputation_for_multivariate_design() {
         let estimator = TobitEstimator::fit(
             multivariate_censored_input(),
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         let x = estimator.input().x();
@@ -4919,12 +5040,14 @@ mod tests {
 
         let result = TobitEstimator::fit(
             input,
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         );
         assert_eq!(
             result.unwrap_err(),
@@ -4955,12 +5078,14 @@ mod tests {
 
         let result = TobitEstimator::fit(
             input,
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         );
         assert_eq!(
             result.unwrap_err(),
@@ -4990,12 +5115,14 @@ mod tests {
 
         let result = TobitEstimator::fit(
             input,
-            Method::Newton,
-            100,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         );
         assert_eq!(
             result.unwrap_err(),
@@ -5029,12 +5156,14 @@ mod tests {
 
         let result = TobitEstimator::fit(
             input,
-            Method::Newton,
-            100,
-            1e-8,
-            false,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: false,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         );
         assert!(
             !matches!(result, Err(MleError::NoUncensoredObservations { .. })),

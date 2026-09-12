@@ -7,9 +7,11 @@
 //! `LeastSquaresError`と共有する6種のバリデーションエラー）は`crate::errors::
 //! common_error_to_pyerr`に委譲する（系統ごとに同じ判定ロジックを重複させない）。
 
-use engine::nonlinear::common::{MarginalEffectsAt, MleError};
+use engine::nonlinear::common::{CovType, MarginalEffectsAt, Method, MleError};
+use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
+use crate::column_extraction::extract_group_key_column;
 use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
 
 /// `engine::nonlinear::common::MleError`をPython例外に変換する。
@@ -72,6 +74,61 @@ pub struct MarginalEffectsResult {
     pub conf_lower: Vec<f64>,
     #[pyo3(get)]
     pub conf_upper: Vec<f64>,
+}
+
+/// `cov_type`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::CovType`に
+/// パースする。`cov_type="cluster"`のときのみ`cluster_col`で指定された列を
+/// `extract_group_key_column`で抽出する（他のcov_typeでは無視する、OLSの
+/// `cluster_col`/`time_col`の扱いと同じ方針）。
+///
+/// Logit/Probit/Tobit共通（Issue #308で対応: 元は`logit.rs`/`probit.rs`/`tobit.rs`に
+/// バイト単位で完全一致するコードとして独立複製されていたが、`CovType`自体が
+/// 元々3手法共有の型であるのに合わせてここに集約した）。
+///
+/// # Errors
+/// - `cov_type`が既知の値のいずれでもない: `ValidationError`
+///
+/// `cluster_col`未指定自体はここでは`ValidationError`にせず、`groups=None`のまま
+/// `engine`側の`CommonError::MissingClusterColumn`検証に委ねる（OLSの`fit()`と同じ役割分担）。
+pub(crate) fn parse_cov_type(
+    df: &DataFrame,
+    cov_type_lower: &str,
+    cluster_col: &Option<String>,
+) -> PyResult<CovType> {
+    match cov_type_lower {
+        "classical" | "nonrobust" => Ok(CovType::Classical),
+        "opg" => Ok(CovType::Opg),
+        "hc0" => Ok(CovType::Hc0),
+        "hc1" => Ok(CovType::Hc1),
+        "cluster" => {
+            let groups = cluster_col
+                .as_ref()
+                .map(|col_name| extract_group_key_column(df, col_name))
+                .transpose()?;
+            Ok(CovType::Cluster { groups })
+        }
+        other => Err(ValidationError::new_err(format!(
+            "unknown cov_type: '{other}'. Expected one of 'classical' (or 'nonrobust'), \
+             'opg', 'hc0', 'hc1', or 'cluster'"
+        ))),
+    }
+}
+
+/// `method`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::Method`に
+/// パースする。Logit/Probit/Tobit共通（`parse_cov_type`と同じ理由・同じIssue #308で
+/// ここに集約）。
+///
+/// # Errors
+/// `method`が既知の値のいずれでもない: `ValidationError`
+pub(crate) fn parse_method(method_lower: &str) -> PyResult<Method> {
+    match method_lower {
+        "newton" => Ok(Method::Newton),
+        "bfgs" => Ok(Method::Bfgs),
+        "lbfgs" => Ok(Method::Lbfgs),
+        other => Err(ValidationError::new_err(format!(
+            "unknown method: '{other}'. Expected one of 'newton', 'bfgs', or 'lbfgs'"
+        ))),
+    }
 }
 
 /// `at`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::MarginalEffectsAt`に

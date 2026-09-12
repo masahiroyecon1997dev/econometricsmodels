@@ -83,7 +83,7 @@ print(result.params)
 print(result.std_errors)
 ```
 
-Estimation options (`cov_type`, etc.) use the same `OLSOptions` as OLS. See "Switching the type of standard error" above for how to switch standard error types, and the [API Reference](api/wls.md) for details on the `weight` argument.
+Estimation options are configured via `WLSOptions`, which has the same fields as `OLSOptions` (`cov_type`, etc.). See "Switching the type of standard error" above for how to switch standard error types, and the [API Reference](api/wls.md) for details on the `weight` argument.
 
 ## Logit (binary logistic regression)
 

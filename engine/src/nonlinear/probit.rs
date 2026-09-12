@@ -60,11 +60,12 @@ use crate::error::CommonError;
 use crate::inference;
 use crate::nonlinear::common::{
     CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
-    Method, MleError, SandwichVariant, SeparationNormCheck, clamped_pdf_cdf, cluster_cov_params,
-    column_means, column_medians, destandardize_cov_params, destandardize_params, goodness_of_fit,
-    log_likelihood_null, marginal_effects_from_w_s, observed_information_cov_params,
-    ols_based_initial_params, opg_cov_params, pred_table, predict_from_link, run_solver,
-    sandwich_cov_params, standardize_columns, validate_fit_preconditions,
+    MleError, MleFitOptions, SandwichVariant, SeparationNormCheck, clamped_pdf_cdf,
+    cluster_cov_params, column_means, column_medians, destandardize_cov_params,
+    destandardize_params, goodness_of_fit, log_likelihood_null, marginal_effects_from_w_s,
+    observed_information_cov_params, ols_based_initial_params, opg_cov_params, pred_table,
+    predict_from_link, run_solver, sandwich_cov_params, standardize_columns,
+    validate_fit_preconditions,
 };
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
@@ -519,15 +520,16 @@ impl ProbitEstimator {
     ///   `CommonError::InsufficientClustersForInference`（`rank(Ŝ) ≤ g - 1`のため
     ///   クラスターロバスト共分散が退化する識別失敗、Issue #289。Logit/Probitでは
     ///   新規制約）
-    pub fn fit(
-        input: ProbitInput,
-        method: Method,
-        max_iter: i64,
-        tol: f64,
-        raise_on_non_convergence: bool,
-        cov_type: CovType,
-        confidence_level: f64,
-    ) -> Result<Self, MleError> {
+    pub fn fit(input: ProbitInput, options: MleFitOptions) -> Result<Self, MleError> {
+        let MleFitOptions {
+            method,
+            max_iter,
+            tol,
+            raise_on_non_convergence,
+            cov_type,
+            confidence_level,
+        } = options;
+
         // faer のグローバル並列度を Par::Seq に固定する（Issue #283、`crate::parallelism`）。
         crate::parallelism::ensure_serial();
 
@@ -891,7 +893,7 @@ impl ProbitEstimator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nonlinear::common::dydx_and_jacobian;
+    use crate::nonlinear::common::{Method, dydx_and_jacobian};
     use statrs::distribution::ChiSquared;
 
     #[test]
@@ -1145,12 +1147,14 @@ mod tests {
         let input = intercept_only_input();
         let estimator = ProbitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -1181,12 +1185,14 @@ mod tests {
      {
         let estimator = ProbitEstimator::fit(
             intercept_only_input(),
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -1239,12 +1245,14 @@ mod tests {
 
         let estimator = ProbitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         let k = 3;
@@ -1284,12 +1292,14 @@ mod tests {
     fn fit_computes_goodness_of_fit_statistics_for_intercept_only_model() {
         let estimator = ProbitEstimator::fit(
             intercept_only_input(),
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -1333,12 +1343,14 @@ mod tests {
 
         let estimator = ProbitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -1402,12 +1414,14 @@ mod tests {
 
         let estimator = ProbitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -1453,12 +1467,14 @@ mod tests {
 
         let classical = ProbitEstimator::fit(
             make_input(),
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -1503,12 +1519,14 @@ mod tests {
         for (cov_type, expected) in cases {
             let estimator = ProbitEstimator::fit(
                 make_input(),
-                Method::Newton,
-                35,
-                1e-8,
-                true,
-                cov_type.clone(),
-                0.95,
+                MleFitOptions {
+                    method: Method::Newton,
+                    max_iter: 35,
+                    tol: 1e-8,
+                    raise_on_non_convergence: true,
+                    cov_type: cov_type.clone(),
+                    confidence_level: 0.95,
+                },
             )
             .unwrap();
             for i in 0..k {
@@ -1556,12 +1574,14 @@ mod tests {
 
         let classical = ProbitEstimator::fit(
             make_input(),
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -1589,14 +1609,16 @@ mod tests {
 
         let estimator = ProbitEstimator::fit(
             make_input(),
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Cluster {
-                groups: Some(groups),
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Cluster {
+                    groups: Some(groups),
+                },
+                confidence_level: 0.95,
             },
-            0.95,
         )
         .unwrap();
         for i in 0..k {
@@ -1644,12 +1666,14 @@ mod tests {
 
         let classical = ProbitEstimator::fit(
             make_input(),
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -1677,14 +1701,16 @@ mod tests {
 
         let estimator = ProbitEstimator::fit(
             make_input(),
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Cluster {
-                groups: Some(groups),
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Cluster {
+                    groups: Some(groups),
+                },
+                confidence_level: 0.95,
             },
-            0.95,
         )
         .unwrap();
         for i in 0..k {
@@ -1714,12 +1740,14 @@ mod tests {
 
         let result = ProbitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Cluster { groups: None },
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Cluster { groups: None },
+                confidence_level: 0.95,
+            },
         );
 
         assert_eq!(
@@ -1744,14 +1772,16 @@ mod tests {
 
         let result = ProbitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Cluster {
-                groups: Some(groups),
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Cluster {
+                    groups: Some(groups),
+                },
+                confidence_level: 0.95,
             },
-            0.95,
         );
 
         assert_eq!(
@@ -1787,14 +1817,16 @@ mod tests {
 
         let result = ProbitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Cluster {
-                groups: Some(groups),
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Cluster {
+                    groups: Some(groups),
+                },
+                confidence_level: 0.95,
             },
-            0.95,
         );
 
         assert_eq!(
@@ -1843,24 +1875,28 @@ mod tests {
         ] {
             let newton = ProbitEstimator::fit(
                 make_input(),
-                Method::Newton,
-                35,
-                1e-8,
-                true,
-                cov_type.clone(),
-                0.95,
+                MleFitOptions {
+                    method: Method::Newton,
+                    max_iter: 35,
+                    tol: 1e-8,
+                    raise_on_non_convergence: true,
+                    cov_type: cov_type.clone(),
+                    confidence_level: 0.95,
+                },
             )
             .unwrap();
 
             for method in [Method::Bfgs, Method::Lbfgs] {
                 let estimator = ProbitEstimator::fit(
                     make_input(),
-                    method,
-                    200,
-                    1e-8,
-                    true,
-                    cov_type.clone(),
-                    0.95,
+                    MleFitOptions {
+                        method,
+                        max_iter: 200,
+                        tol: 1e-8,
+                        raise_on_non_convergence: true,
+                        cov_type: cov_type.clone(),
+                        confidence_level: 0.95,
+                    },
                 )
                 .unwrap();
 
@@ -1898,12 +1934,14 @@ mod tests {
         for method in [Method::Bfgs, Method::Lbfgs] {
             let estimator = ProbitEstimator::fit(
                 intercept_only_input(),
-                method,
-                100,
-                1e-6,
-                true,
-                CovType::Classical,
-                0.95,
+                MleFitOptions {
+                    method,
+                    max_iter: 100,
+                    tol: 1e-6,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
             )
             .unwrap();
 
@@ -1942,12 +1980,14 @@ mod tests {
 
         let newton = ProbitEstimator::fit(
             make_input(),
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         assert!(newton.converged());
@@ -1955,12 +1995,14 @@ mod tests {
         for method in [Method::Bfgs, Method::Lbfgs] {
             let estimator = ProbitEstimator::fit(
                 make_input(),
-                method,
-                200,
-                1e-8,
-                true,
-                CovType::Classical,
-                0.95,
+                MleFitOptions {
+                    method,
+                    max_iter: 200,
+                    tol: 1e-8,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
             )
             .unwrap();
 
@@ -1981,12 +2023,14 @@ mod tests {
     fn fit_returns_invalid_confidence_level_error_out_of_range() {
         let result = ProbitEstimator::fit(
             intercept_only_input(),
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            1.5,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 1.5,
+            },
         );
         assert_eq!(
             result.unwrap_err(),
@@ -2000,12 +2044,14 @@ mod tests {
     fn fit_returns_invalid_max_iter_error_for_non_positive_max_iter() {
         let result = ProbitEstimator::fit(
             intercept_only_input(),
-            Method::Newton,
-            0,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 0,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         );
         assert_eq!(
             result.unwrap_err(),
@@ -2018,12 +2064,14 @@ mod tests {
         for tol in [0.0, -1.0] {
             let result = ProbitEstimator::fit(
                 intercept_only_input(),
-                Method::Newton,
-                35,
-                tol,
-                true,
-                CovType::Classical,
-                0.95,
+                MleFitOptions {
+                    method: Method::Newton,
+                    max_iter: 35,
+                    tol,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
             );
             assert_eq!(result.unwrap_err(), MleError::InvalidTol { tol });
         }
@@ -2035,12 +2083,14 @@ mod tests {
         let input = ProbitInput::from_columns(&y, &[], vec![], true, "y".to_string()).unwrap();
         let result = ProbitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         );
         assert_eq!(
             result.unwrap_err(),
@@ -2060,12 +2110,14 @@ mod tests {
 
         let result = ProbitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         );
         assert_eq!(
             result.unwrap_err(),
@@ -2088,12 +2140,14 @@ mod tests {
 
         let result = ProbitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         );
         assert_eq!(
             result.unwrap_err(),
@@ -2150,8 +2204,17 @@ mod tests {
                 )
                 .unwrap();
 
-                let result =
-                    ProbitEstimator::fit(input, method, 100, 1e-6, true, cov_type.clone(), 0.95);
+                let result = ProbitEstimator::fit(
+                    input,
+                    MleFitOptions {
+                        method,
+                        max_iter: 100,
+                        tol: 1e-6,
+                        raise_on_non_convergence: true,
+                        cov_type: cov_type.clone(),
+                        confidence_level: 0.95,
+                    },
+                );
                 assert!(
                     matches!(result, Err(MleError::SingularDesignMatrix)),
                     "method={method:?}, cov_type={cov_type:?}, result={result:?}"
@@ -2182,12 +2245,14 @@ mod tests {
 
         let result = ProbitEstimator::fit(
             input,
-            Method::Newton,
-            1,
-            1e-12,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 1,
+                tol: 1e-12,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         );
         assert!(
             matches!(result, Err(MleError::NonConvergence { .. })),
@@ -2211,12 +2276,14 @@ mod tests {
 
         let estimator = ProbitEstimator::fit(
             input,
-            Method::Newton,
-            1,
-            1e-12,
-            false,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 1,
+                tol: 1e-12,
+                raise_on_non_convergence: false,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         assert!(!estimator.converged());
@@ -2299,12 +2366,14 @@ mod tests {
     fn marginal_effects_returns_empty_result_for_intercept_only_model() {
         let estimator = ProbitEstimator::fit(
             intercept_only_input(),
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2335,12 +2404,14 @@ mod tests {
 
         let estimator = ProbitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         let k = 3;
@@ -2427,12 +2498,14 @@ mod tests {
 
         let estimator = ProbitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2478,12 +2551,14 @@ mod tests {
 
         let estimator = ProbitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2514,12 +2589,14 @@ mod tests {
     fn marginal_effects_returns_invalid_confidence_level_error_out_of_range() {
         let estimator = ProbitEstimator::fit(
             intercept_only_input(),
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2539,12 +2616,14 @@ mod tests {
     fn predict_matches_closed_form_for_intercept_only_model() {
         let estimator = ProbitEstimator::fit(
             intercept_only_input(),
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2574,12 +2653,14 @@ mod tests {
 
         let estimator = ProbitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2603,12 +2684,14 @@ mod tests {
     fn pred_table_matches_hand_computed_counts_for_intercept_only_model() {
         let estimator = ProbitEstimator::fit(
             intercept_only_input(),
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2646,12 +2729,14 @@ mod tests {
 
         let estimator = ProbitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2700,12 +2785,14 @@ mod tests {
 
         let estimator = ProbitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 

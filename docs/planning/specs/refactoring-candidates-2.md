@@ -236,9 +236,9 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-23、`tests/linear/test_wls.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
-### 67.【Issue化】`WLSOptions`新設の要否は、Logit/Probitの`method`/`max_iter`/`tol`/`raise_on_non_convergence`共通化と合わせてLogit/Probit実装確認時に再検討する
+### 67.【完了】`WLSOptions`新設の要否は、Logit/Probitの`method`/`max_iter`/`tol`/`raise_on_non_convergence`共通化と合わせてLogit/Probit実装確認時に再検討する
 
-→ Issue #308として切り出し済み（2026-09-11）。詳細はIssueを参照。
+→ Issue #308として切り出し済み（2026-09-11）、2026-09-12に対応完了。`WLSOptions`を`OLSOptions`と同一フィールド構成の独立pyclassとして新設し、`engine_pybind/src/nonlinear/{logit,probit,tobit}.rs`に完全複製されていた`parse_method`/`parse_cov_type`を`nonlinear/common.rs`に集約、`engine`層の`LogitEstimator::fit`/`ProbitEstimator::fit`/`TobitEstimator::fit`のシグネチャ重複（`method`/`max_iter`/`tol`/`raise_on_non_convergence`/`cov_type`/`confidence_level`の6引数）は`engine::nonlinear::common::MleFitOptions`構造体に集約した。一方、pyclass自体（`LogitOptions`/`ProbitOptions`/`TobitOptions`/`WLSOptions`）のフィールド宣言・コンストラクタの重複は、PyO3のフラットなkwargsコンストラクタという制約・`IvOptions`の既存precedentとの一貫性から意図的に現状維持とし、`macro_rules!`等での機械的な共通化の検討はIssue #315として別途切り出した。
 
 ### 69. `test_hac_time_col_reorders_rows_before_computing_lags`の`ordered_df`/`shuffled_df`が手書きで重複、OLS/WLS間でも同一データが独立に書かれている
 

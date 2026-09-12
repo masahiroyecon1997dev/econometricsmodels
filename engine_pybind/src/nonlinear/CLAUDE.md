@@ -14,7 +14,13 @@ Probit対応は当初「python_packageラッパー実装のみ」というスコ
 
 ## バリデーションの責務分担
 
-`x`が空・yやweight等ロール間の重複・x内重複・`include_intercept=true`時の`"const"`列衝突は`engine_pybind/src/validation.rs`に集約済み（`engine_pybind/src/linear/CLAUDE.md`参照。新しい手法でも独自実装せずこれを使う）。抽出した列同士の行数不一致チェックは理論上到達不能と判明し削除済み（同ファイル参照）。Logit/Probit固有の追加バリデーションは`cov_type`/`method`（各系統のファイルの`parse_cov_type`/`parse_method`）・`at`（`marginal_effects`用、`nonlinear/common.rs`の`parse_marginal_effects_at`、Logit/Probit共有）の文字列パースのみ（いずれも`ValidationError`）。
+`x`が空・yやweight等ロール間の重複・x内重複・`include_intercept=true`時の`"const"`列衝突は`engine_pybind/src/validation.rs`に集約済み（`engine_pybind/src/linear/CLAUDE.md`参照。新しい手法でも独自実装せずこれを使う）。抽出した列同士の行数不一致チェックは理論上到達不能と判明し削除済み（同ファイル参照）。Logit/Probit/Tobit固有の追加バリデーションは`cov_type`/`method`（`nonlinear/common.rs`の`parse_cov_type`/`parse_method`、Issue #308でLogit/Probit/Tobit 3ファイルへのバイト単位の完全複製をここに集約した）・`at`（`marginal_effects`用、同ファイルの`parse_marginal_effects_at`）の文字列パースのみ（いずれも`ValidationError`）。
+
+## `LogitOptions`/`ProbitOptions`/`TobitOptions`のフィールド重複は意図的（Issue #308）
+
+`method`/`max_iter`/`tol`/`raise_on_non_convergence`（＋`cov_type`/`include_intercept`/`confidence_level`/`cluster_col`）は3つのpyclassに独立してフィールド宣言・コンストラクタ・`__repr__`が重複している。これは意図的な設計判断であり、共通base struct/traitへの切り出しは行わない: PyO3の`#[pyclass]`/`#[pymethods]`コンストラクタはフラットなkwargs surfaceが前提のため、共有structを導入すると`LogitOptions(mle=MleOptions(...), cov_type=...)`のようなcomposition構造がPython公開APIに漏れ出すか、Pythonの表面積を減らさないまま間接参照が増えるだけになる。`engine_pybind/src/iv/common.rs`の`IvOptions`が`OLSOptions`と同種のフィールド群（`cov_type`/`include_intercept`/`confidence_level`/`cluster_col`/`hac_lags`/`time_col`）を既に独立再定義しており、この重複は既存precedentと一貫している（`engine_pybind/src/linear/CLAUDE.md`の`WLSOptions`の節も参照）。`macro_rules!`等でRust側の記述量（フィールド宣言/コンストラクタ/`__repr__`のボイラープレート）だけを機械的に削減できるかは、Python公開APIには影響しない別軸の検討としてIssue #315で扱う。
+
+一方、`engine`層（`LogitEstimator::fit`/`ProbitEstimator::fit`/`TobitEstimator::fit`）の同じ6フィールド分のシグネチャ重複は、Python非公開の内部実装のためこの制約を受けない。`engine::nonlinear::common::MleFitOptions`という共有構造体に集約済み（Issue #308）。`engine_pybind`側の`fit`関数は、pyclassの個別フィールドから`MleFitOptions`を組み立てて渡す（`logit.rs`/`probit.rs`/`tobit.rs`の`fit`関数末尾を参照）。
 
 ## エラー変換
 

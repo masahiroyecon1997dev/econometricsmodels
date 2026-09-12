@@ -12,7 +12,7 @@ use pyo3_polars::PyDataFrame;
 use errors::{ComputationError, ValidationError};
 use iv::common::{IvOptions, IvResult};
 use linear::ols::{OLSOptions, OLSResult};
-use linear::wls::WLSResult;
+use linear::wls::{WLSOptions, WLSResult};
 use nonlinear::common::MarginalEffectsResult;
 use nonlinear::logit::{LogitOptions, LogitResult};
 use nonlinear::probit::{ProbitOptions, ProbitResult};
@@ -55,16 +55,15 @@ fn fit_ols(
 ///     Column names of the independent variables.
 /// weight : str
 ///     Column name of the analytic weight (must be positive; not a frequency weight).
-/// options : OLSOptions
-///     Estimation options. `WLS` reuses `OLSOptions` rather than defining a separate
-///     options type (`docs/spec/wls-spec.md`, "API引数").
+/// options : WLSOptions
+///     Estimation options.
 #[pyfunction]
 fn fit_wls(
     data: PyDataFrame,
     y: String,
     x: Vec<String>,
     weight: String,
-    options: OLSOptions,
+    options: WLSOptions,
 ) -> PyResult<WLSResult> {
     linear::wls::fit(data, y, x, weight, &options)
 }
@@ -180,6 +179,7 @@ fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<OLSOptions>()?;
     m.add_class::<OLSResult>()?;
     m.add_function(wrap_pyfunction!(fit_wls, m)?)?;
+    m.add_class::<WLSOptions>()?;
     m.add_class::<WLSResult>()?;
     m.add_function(wrap_pyfunction!(fit_logit, m)?)?;
     m.add_class::<LogitOptions>()?;

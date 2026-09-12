@@ -19,8 +19,8 @@ from _helpers import with_cluster_groups
 from econometricsmodels import (
     WLS,
     ComputationError,
-    OLSOptions,
     ValidationError,
+    WLSOptions,
 )
 
 from benchmark.linear.constants import HAC_MAXLAGS
@@ -231,7 +231,7 @@ def test_invalid_cov_type_raises(dataset):
     （OLSと同じ検証、共通化された経路）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = OLSOptions(cov_type="invalid")
+    options = WLSOptions(cov_type="invalid")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.UNKNOWN_COV_TYPE_LINEAR, other="invalid"),
@@ -244,7 +244,7 @@ def test_cluster_without_col_raises(dataset):
     （OLSと同じ検証、共通化された経路）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = OLSOptions(cov_type="cluster")
+    options = WLSOptions(cov_type="cluster")
     with pytest.raises(
         ValidationError, match=escaped(msgs.MISSING_CLUSTER_COLUMN)
     ):
@@ -256,7 +256,7 @@ def test_cluster_col_nonexistent_column_raises(dataset):
     （`test_ols_validation.py`と同じ理由、Issue #231フェーズ4）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = OLSOptions(cov_type="cluster", cluster_col="does_not_exist")
+    options = WLSOptions(cov_type="cluster", cluster_col="does_not_exist")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
@@ -271,7 +271,7 @@ def test_insufficient_clusters_raises(dataset):
     df = dataset.with_columns(
         pl.lit(1.0).alias("weight"), pl.lit(0).alias("single_cluster")
     )
-    options = OLSOptions(cov_type="cluster", cluster_col="single_cluster")
+    options = WLSOptions(cov_type="cluster", cluster_col="single_cluster")
     with pytest.raises(
         ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
     ):
@@ -284,7 +284,7 @@ def test_invalid_confidence_level_raises(dataset, confidence_level):
     `ValidationError`（OLSと同じ検証、共通化された経路）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = OLSOptions(confidence_level=confidence_level)
+    options = WLSOptions(confidence_level=confidence_level)
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -303,7 +303,7 @@ def test_invalid_hac_lags_raises(dataset, hac_lags):
     共通化された経路）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = OLSOptions(cov_type="hac", hac_lags=hac_lags)
+    options = WLSOptions(cov_type="hac", hac_lags=hac_lags)
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.INVALID_HAC_LAGS, hac_lags=hac_lags, n=100),
@@ -319,7 +319,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error(n_groups):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, n_groups)
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -354,7 +354,7 @@ def test_scale_variance_raises_computation_error(cov_type):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
     kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
-    options = OLSOptions(cov_type=cov_type, **kwargs)
+    options = WLSOptions(cov_type=cov_type, **kwargs)
     with pytest.raises(ComputationError):
         WLS(
             df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options

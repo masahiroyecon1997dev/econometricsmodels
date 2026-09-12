@@ -11,12 +11,19 @@ WLS（Weighted Least Squares）の確定済み仕様。`engine/src/linear/wls.rs
 `fit_wls(data, y, x, weight, options) -> WLSResult`（engine_pybind）→
 `OlsInput::from_columns_weighted` + 既存`OlsEstimator::fit`（engine、無変更で再利用）。
 
-- `weight: str`は`y`/`x`と同格の**必須のトップレベル引数**（`OLSOptions`側には置かない）。
+- `weight: str`は`y`/`x`と同格の**必須のトップレベル引数**（`WLSOptions`側には置かない）。
   理由: `cluster_col`/`time_col`は`cov_type`に応じた条件付き・デフォルトありの「推定方法の設定」
   だが、`weight`はモデルそのものを規定する必須データであり、性質が異なる。この分類はFE
   （`entity_id`）・IV（`instruments`）等、今後の必須データ列にも適用する。
-- 専用の`WLSOptions`型は新設せず、`OLSOptions`をそのまま使う（`cov_type`/`include_intercept`/
-  `confidence_level`/`cluster_col`/`hac_lags`/`time_col`の意味論はOLSと完全に同じ）。
+- 専用の`WLSOptions`型を新設し（Issue #308、2026-09-12）、`OLSOptions`と完全に同一のフィールド
+  構成（`cov_type`/`include_intercept`/`confidence_level`/`cluster_col`/`hac_lags`/`time_col`、
+  意味論もOLSと完全に同じ）を持つ独立したpyclassとして実装する。当初は専用型を新設せず
+  `OLSOptions`をそのまま再利用していたが、`WLSResult`が元から独立型だったのと非対称だった
+  ことと、将来WLS固有のオプションが必要になった際に`OLSOptions`/OLS利用者へ影響を与えずに
+  拡張できるようにするため、独立型に変更した。このフィールド重複自体は意図的に共通base
+  構造体へ切り出さない（PyO3の`#[pyclass]`コンストラクタがフラットなkwargs surface前提の
+  ため。`IvOptions`が`OLSOptions`と同種のフィールドを独立再定義している既存precedentとも
+  一貫している。`engine_pybind/src/linear/CLAUDE.md`参照）。
 - 重みはanalytic weight（分散の逆数に比例、正規化不要）。frequency weight/probability weightは
   対象外。
 - **重みの検証**: 0以下（0を含む）・NaN・無限大は常にエラー（`ValidationError`）とし、該当観測を

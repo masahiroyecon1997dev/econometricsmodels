@@ -33,6 +33,34 @@ n=100,000 で軽く実測したところ、Logit と同じく cluster が最重�
 ネイティブ OPG との比較は「計測対象の処理範囲を対称に揃える」方針に反するため
 除外する。
 
+## n 軸の大標本点（classical・engine 単独のみ n=200,000 / 1,000,000）
+
+- **n=1,000,000（seed=42）が Issue #284 の再現点**。baseline DGP・k=5 では
+  Φ(Xβ) の飽和により engine の Probit Hessian が数値的に特異化し
+  `ComputationError: the Hessian is singular and cannot be inverted` になって
+  いたバグ（statsmodels は同条件を捌ける）。Tobit #291 と同系統
+  （`compare_tobit.py`「## n 軸の大標本点」参照）で、Logit/Probit の初期値を
+  ゼロベクトルから OLS ベースの warm start に統一した Issue #279（`7ca26b2`）と、
+  `FaerNewton` の停滞収束判定を追加した Issue #291（`d797f9b`/`5b79ffe`、
+  `nonlinear/common.rs`の`run_solver`を Logit/Probit/Tobit で共有）のいずれか、
+  または両方の組み合わせにより解消済みであることを実測で確認した（2026-09-12、
+  `generate_binary_choice_dataset("baseline", link="probit", n=1_000_000, k=5,
+  seed=42)` で engine が10反復で収束し、statsmodels と対数尤度・係数とも
+  相対誤差1e-11で一致）。以前は `n_sweep` を100,000までに制限して回避していたが、
+  この点を回帰ガードとして追加する。
+- **n=200,000 は n スケーリングのデータ点＋安価な早期警告**（Tobit #291 の guard
+  と同じ位置づけ）。
+- このガードの限界（単一 seed=42・例外のみ捕捉・リリース単位で発火）は
+  `compare_tobit.py`「## n 軸の大標本点」と同じ（詳細はそちらを参照）。
+- **未解決の別論点（Issue #316）**: `ProbitProblem::hessian`の
+  重み`w=λᵢ(λᵢ+zᵢ)`は`U_CLAMP`でクランプした`λᵢ`とクランプしていない生の`zᵢ`を
+  掛け合わせており、`|z|>U_CLAMP`の反復点では理論上`w`が負になりうる（Probit
+  尤度の大域凹性の根拠`λᵢ(λᵢ+zᵢ)>0`が数値的に破れる）。今回のwarm start
+  （#279）は最適化軌道を`|z|`の小さい領域に留めるためこの経路を踏まないが、
+  より悪条件なデータ・seed・BFGS/L-BFGS経路では理論上まだ踏みうる別バグ。
+  `docs/spec/probit-spec.md`4章の既存の注記（未検証リスクとして記載済み）を
+  参照。本 guard はこの経路を作らないため検知できない。
+
 ## method（オプティマイザ）の範囲
 
 engine・statsmodels とも既定は Newton-Raphson で、n/k スイープは newton で回す。
@@ -135,11 +163,14 @@ PROBIT_ADAPTER = PerfAdapter(
     build_dataframe=_build_dataframe,
     fit_once=_fit_once,
     cluster_col="cluster_group",
-    # baseline DGP・k=5 では n>=500,000 で Φ(Xβ) の飽和により engine の Probit
-    # Hessian が数値的に特異化して fit が失敗する（statsmodels は同条件を捌ける。
-    # `docs/planning/specs/refactoring-candidates.md` 項目45）。n 軸は 100,000
-    # までに制限する（k 軸は n=10,000 固定なので影響なし）。
+    # classical / cluster とも n=1,000〜100,000。
     n_sweep=(1_000, 10_000, 100_000),
+    # classical・engine単独のみ追加する大標本点。n=1,000,000（seed=42）が
+    # Issue #284（大標本 Hessian 特異エラー）の再現点で、修正（#279/#291）の
+    # 回帰検知を担う。n=200,000 は n スケーリングのデータ点＋早期警告。全
+    # library・cov_type で回すと CI 時間がかさむため classical・engine に絞る。
+    # 詳細・限界は docstring「## n 軸の大標本点」参照。
+    n_sweep_engine_only=(200_000, 1_000_000),
     # method 軸: bfgs/lbfgs を代表点（classical・k=5・n=100,000）で計測する。
     extra_methods=("bfgs", "lbfgs"),
 )

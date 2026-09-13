@@ -121,7 +121,27 @@ $$
 `weighted_fit_statistics`関数を`WlsEstimator`に持たせている（`residuals`と同じ「WLS固有の後処理を
 `WlsEstimator`層に置く」パターン）。
 
-### 3.5 テスト
+### 3.5 `predict()`（Issue #132）
+
+`WlsResults.predict(new_data: pl.DataFrame | None = None) -> list[dict[str, float]]`。
+OLSの`predict()`（`ols-spec.md`「predict()」）と完全に同じ設計・シグネチャを適用する。
+
+- **重みは予測値の計算に一切関与しない**。「学習データに対する重み付き予測値」という概念自体が
+  存在しない: 予測値は常に$\hat y_i = x_i'\hat\beta$（元スケール）であり、これは`residuals`
+  （`ε_i = y_i - x_i'\hat\beta$、上記「結果構造体」参照）と対をなす値そのもの。`new_data=None`
+  （学習データ）でも`new_data`指定時（新規データ、out-of-sample）でも同じ式を使うため、
+  Issue #132が挙げていた「学習データに対する予測値は変換後（重み付き）データではなく元スケールを
+  返すべきか」という論点は、実装してみると「そもそも重み付きの版という選択肢が存在しない」
+  ことが分かり解消した。
+- **実装**: `WlsEstimator`に`fitted_values`フィールド（`residuals`と同じ`fit()`時点で計算する
+  元スケールの`ŷ_i`）を追加し、`engine_pybind`側の`WLSResult::predict()`は`new_data=None`なら
+  これを返す。`new_data`指定時は`engine::linear::ols::predict_new_data`（OLS用に実装済みの
+  純粋関数、係数と設計行列だけから予測値を計算し重みの概念を持たない）をそのまま再利用する
+  （`WlsEstimator`が内部で`OlsEstimator`をラップする設計のため、この関数はWLS/OLSのどちらで
+  推定した係数にも同じように使える）。
+- 戻り値のキー名は`"predicted"`（OLSと統一、Issue #309）。
+
+### 3.6 テスト
 
 - 許容誤差: classical/HC0-3/clusterはOLSと同じ`RTOL_STRICT=1e-8`（Rとの実測でほぼ機械精度）。
   **HACのみOLSより緩い`RTOL_HAC=5e-2`**（OLSは1e-2。実測最大相対誤差約4.3%、重み付けによる
@@ -136,7 +156,3 @@ $$
 - `tests/linear/` の4ファイル分担（`test_wls_api.py`／`test_wls_validation.py`／
   `test_wls_reference.py`〔statsmodels主リファレンス〕／`test_wls_crosscheck.py`〔Rクロスチェック〕）
   は OLS と同じ（`refactoring-candidates-2.md`項目68）。
-
-## 4. 未実装・未対応
-
-- `predict()`（Issue #132。OLSの`predict(new_data=None)`と同じ設計を適用予定）

@@ -5,18 +5,36 @@
 public API 経由で保証する。`ValidationError` パスは `test_wls_validation.py`、
 主リファレンス（statsmodels）との数値照合は `test_wls_reference.py`、
 R クロスチェックは `test_wls_crosscheck.py`。
+
+`predict()` のテストは（statsmodels との照合も含め）このファイルに集約する
+（`test_ols_api.py`と同じ方針。predict は独立した API 面で、その statsmodels
+照合はスモーク級）。predict の `ValidationError` パスのみ
+`test_wls_validation.py`。
 """
 
 from __future__ import annotations
 
+from functools import partial
+
 import polars as pl
 import pytest
+from _assertions import assert_close
+from _tolerances import TOLERANCES
 from econometricsmodels import (
     OLS,
     WLS,
     OLSOptions,
     WLSOptions,
     WlsResults,
+)
+
+# predict()のstatsmodels照合は主リファレンス照合と同じ許容誤差
+# （`_tolerances.py`の"wls_reference"）で行う（`test_ols_api.py`と同じ方針、
+# `refactoring-candidates-2.md`項目53/56「独自の絶対誤差定数は持たない」）。
+_assert_close = partial(
+    assert_close,
+    rtol=TOLERANCES["wls_reference"]["rtol"],
+    atol=TOLERANCES["wls_reference"]["atol"],
 )
 
 # ── OLSとの不変条件回帰テスト ───────────────────────────────────────
@@ -98,6 +116,33 @@ def test_weight_one_matches_ols_coef_table(dataset):
     for wls_row, ols_row in zip(wls_table, ols_table):
         assert wls_row["coef"] == ols_row["coef"]
         assert wls_row["std_err"] == ols_row["std_err"]
+
+
+def test_weight_one_matches_ols_predict(dataset):
+    """重み=1のとき、`predict()`（学習データ・新規データいずれも）が
+    OLSの`predict()`と一致すること（Issue #132: 予測値は重みに関与しない、
+    という設計の帰結を確認する）。
+
+    学習データ（`new_data=None`）の計算経路自体はwls.rs（手動ループ、
+    `original_scale_fitted_and_residuals`）とols.rs（faerの行列演算、
+    `OlsEstimator::fitted_values`）で異なるため、丸め誤差レベルでの一致を
+    確認する（`test_residuals_are_original_scale_not_weighted`と同じ理由）。
+    一方、新規データに対する予測は両者とも同じ純粋関数
+    `engine::linear::ols::predict_new_data`を呼ぶため、厳密な`==`で一致する。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+
+    ols_res = OLS(df, y="y", x=["x1", "x2"]).fit()
+    wls_res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+
+    for wls_row, ols_row in zip(wls_res.predict(), ols_res.predict()):
+        assert abs(wls_row["predicted"] - ols_row["predicted"]) < 1e-9
+
+    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
+    for wls_row, ols_row in zip(
+        wls_res.predict(new_data), ols_res.predict(new_data)
+    ):
+        assert wls_row["predicted"] == ols_row["predicted"]
 
 
 # ── 成功パス・結果型 ──────────────────────────────────────────────
@@ -334,3 +379,82 @@ def test_hac_time_col_reorders_rows_before_computing_lags():
             abs(shuffled_res.std_errors[name] - ordered_res.std_errors[name])
             < 1e-9
         ), name
+
+
+# ── predict() ────────────────────────────────────────────────────
+#
+# 重み=1でのOLSとの一致は「OLSとの不変条件回帰テスト」節
+# （test_weight_one_matches_ols_predict）で確認済み。ここでは重みが
+# 予測値の計算に関与しないこと自体を、非自明な（1でない）重みを使った
+# statsmodelsとの直接比較で確認する。
+
+
+def _wls_weighted_dataset(dataset: pl.DataFrame) -> pl.DataFrame:
+    """`dataset`に非自明な（1でない）重み列を付加する。"""
+    weight = 1.0 / (1.0 + dataset["x1"].abs())
+    return dataset.with_columns(weight.alias("weight"))
+
+
+def test_predict_none_matches_statsmodels_fitted_values(dataset):
+    """`predict(new_data=None)`が学習データに対するstatsmodels `sm.WLS`の
+    fittedvaluesと一致すること（重みは1ではない）。
+    """
+    import numpy as np
+    import statsmodels.api as sm
+
+    df = _wls_weighted_dataset(dataset)
+    x = sm.add_constant(
+        np.column_stack([df["x1"].to_numpy(), df["x2"].to_numpy()])
+    )
+    sm_res = sm.WLS(
+        df["y"].to_numpy(), x, weights=df["weight"].to_numpy()
+    ).fit(use_t=True)
+
+    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+    predicted = res.predict()
+
+    assert len(predicted) == len(df)
+    for i, (row, expected) in enumerate(zip(predicted, sm_res.fittedvalues)):
+        _assert_close(row["predicted"], expected, f"predicted/{i}")
+
+
+def test_predict_new_data_matches_statsmodels(dataset):
+    """新規データに対する`predict()`がstatsmodelsの`.predict()`と一致すること
+    （重みは1ではない。列順を学習時と入れ替えて渡し、列名マッチングも
+    合わせて確認する）。
+    """
+    import numpy as np
+    import statsmodels.api as sm
+
+    df = _wls_weighted_dataset(dataset)
+    x = sm.add_constant(
+        np.column_stack([df["x1"].to_numpy(), df["x2"].to_numpy()])
+    )
+    sm_res = sm.WLS(
+        df["y"].to_numpy(), x, weights=df["weight"].to_numpy()
+    ).fit(use_t=True)
+
+    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+    new_data = pl.DataFrame({"x2": [0.5, -1.0, 2.0], "x1": [1.0, 2.0, -0.5]})
+    predicted = res.predict(new_data)
+
+    sm_new_x = sm.add_constant(
+        np.column_stack([new_data["x1"].to_numpy(), new_data["x2"].to_numpy()])
+    )
+    expected = sm_res.predict(sm_new_x)
+
+    assert len(predicted) == 3
+    for i, (row, exp) in enumerate(zip(predicted, expected)):
+        _assert_close(row["predicted"], exp, f"predicted/{i}")
+
+
+def test_predict_returns_predicted_key_only(dataset):
+    """`predict()`の各行が`"predicted"`という1つのキーのみを持つこと
+    （Issue #309: `"fitted"`固定は統計学的に不正確なため`"predicted"`に統一）。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+
+    for row in res.predict():
+        assert set(row.keys()) == {"predicted"}
+        assert isinstance(row["predicted"], float)

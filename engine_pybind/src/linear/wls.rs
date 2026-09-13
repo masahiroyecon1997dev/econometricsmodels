@@ -147,32 +147,106 @@ impl WLSOptions {
 /// Field-for-field identical to `OLSResult` today, but kept as a separate type: WLS-specific
 /// fields (e.g. weighted residuals) may be added later without affecting `OLSResult`
 /// (`docs/spec/wls-spec.md`, "結果構造体").
-#[pyclass(get_all, skip_from_py_object, module = "econometricsmodels._lib")]
+// `get_all`ではなく個別`#[pyo3(get)]`にしている理由は`OLSResult`と同じ
+// （`fitted_values`/`has_intercept`をPython側に公開しないため、Issue #132）。
+#[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct WLSResult {
+    #[pyo3(get)]
     pub params: Vec<f64>,
+    #[pyo3(get)]
     pub std_errors: Vec<f64>,
+    #[pyo3(get)]
     pub t_stats: Vec<f64>,
+    #[pyo3(get)]
     pub p_values: Vec<f64>,
+    #[pyo3(get)]
     pub conf_lower: Vec<f64>,
+    #[pyo3(get)]
     pub conf_upper: Vec<f64>,
+    #[pyo3(get)]
     pub param_names: Vec<String>,
     /// Original-scale (unweighted) residuals `y_i - x_i'β̂`. Not the weighted residuals
     /// used internally for the standard error calculations
     /// (`docs/spec/wls-spec.md`, "結果構造体").
+    #[pyo3(get)]
     pub residuals: Vec<f64>,
+    #[pyo3(get)]
     pub dep_var_name: String,
+    #[pyo3(get)]
     pub n_obs: usize,
     /// Standard error type actually used (echoes `OLSOptions.cov_type`, normalized to
     /// lowercase; e.g. `"classical"`, `"hc1"`, `"hac"`, `"cluster"`).
+    #[pyo3(get)]
     pub cov_type: String,
+    #[pyo3(get)]
     pub r_squared: f64,
+    #[pyo3(get)]
     pub r_squared_adj: f64,
+    #[pyo3(get)]
     pub f_statistic: f64,
+    #[pyo3(get)]
     pub f_p_value: f64,
+    #[pyo3(get)]
     pub log_likelihood: f64,
+    #[pyo3(get)]
     pub aic: f64,
+    #[pyo3(get)]
     pub bic: f64,
+    /// Original-scale (unweighted) fitted values for the training data (`ŷ = Xβ̂`),
+    /// cached at fit time. Not exposed to Python directly; only `predict(new_data=None)`
+    /// reads it (same design as `OLSResult`, Issue #132).
+    fitted_values: Vec<f64>,
+    /// Whether `fit()` was called with `include_intercept=True`. Not exposed to
+    /// Python; only `predict()` reads it to decide whether to auto-prepend a
+    /// constant column for out-of-sample data (same reasoning as `OLSResult`).
+    has_intercept: bool,
+}
+
+#[pymethods]
+impl WLSResult {
+    /// Predicted values.
+    ///
+    /// With `new_data=None` (default), returns the fitted values for the training
+    /// data used in `fit()`, on the original (unweighted) scale — `ŷ = Xβ̂`, the same
+    /// scale as `residuals` (`docs/spec/wls-spec.md`, "結果構造体"). With `new_data`
+    /// given, computes out-of-sample predictions for a new polars DataFrame: it must
+    /// contain columns with the same names as the `x` columns passed at fit time
+    /// (matched by name; column order does not matter). Weights play no role in
+    /// either case — the predicted value is `x_i'β̂` regardless of `new_data`, and
+    /// out-of-sample observations have no weight to apply. If `include_intercept=True`
+    /// was used at fit time, the constant column is added automatically and must not
+    /// be included in `new_data`.
+    ///
+    /// # Errors
+    /// - A required `x` column is missing from `new_data`, cannot be cast to a
+    ///   numeric type, or contains missing/NaN/infinite values: `ValidationError`
+    ///   (same validation as `fit()`'s column extraction, via `extract_f64_column`).
+    #[pyo3(signature = (new_data=None))]
+    fn predict(&self, new_data: Option<PyDataFrame>) -> PyResult<Vec<f64>> {
+        let Some(new_data) = new_data else {
+            return Ok(self.fitted_values.clone());
+        };
+
+        let df: DataFrame = new_data.into();
+        let has_intercept = self.has_intercept;
+        let x_names: &[String] = if has_intercept {
+            &self.param_names[1..]
+        } else {
+            &self.param_names[..]
+        };
+
+        let mut x_columns: Vec<Vec<f64>> = Vec::with_capacity(x_names.len());
+        for name in x_names {
+            x_columns.push(extract_f64_column(&df, name)?);
+        }
+
+        Ok(engine::linear::ols::predict_new_data(
+            &self.params,
+            has_intercept,
+            &x_columns,
+        ))
+    }
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `weight` / `options` を検証し、
@@ -271,5 +345,7 @@ pub fn fit(
         log_likelihood: wls_estimator.log_likelihood(),
         aic: wls_estimator.aic(),
         bic: wls_estimator.bic(),
+        fitted_values: wls_estimator.fitted_values().to_vec(),
+        has_intercept: estimator.input().has_intercept(),
     })
 }

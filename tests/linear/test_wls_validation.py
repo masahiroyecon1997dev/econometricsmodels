@@ -223,6 +223,61 @@ def test_non_numeric_dtype_raises():
         WLS(df, y="y", x=["x1"], weight="weight").fit()
 
 
+# ── ValidationError（predict()、OLSと共通の検証） ─────────────────
+
+
+def test_predict_missing_column_raises(dataset):
+    """`predict()`に`x`列が欠けた`new_data`を渡すと`ValidationError`
+    （`test_ols_validation.py::test_predict_missing_column_raises`と同じ検証。
+    `WLSResult::predict()`もOLSと同じ`extract_f64_column`経路を通ることの
+    確認、Issue #132）。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
+
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    ):
+        res.predict(new_data)
+
+
+def test_predict_non_numeric_dtype_raises(dataset):
+    """`test_ols_validation.py::test_predict_non_numeric_dtype_raises`と
+    同じ理由でnull経由の`COLUMN_HAS_MISSING_VALUES`になる。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+    new_data = pl.DataFrame({"x1": ["a", "b"], "x2": [1.0, 2.0]})
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=2),
+    ):
+        res.predict(new_data)
+
+
+def test_predict_null_or_non_finite_values_raise(dataset):
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+
+    new_data_null = pl.DataFrame({"x1": [1.0, None], "x2": [1.0, 2.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    ):
+        res.predict(new_data_null)
+
+    new_data_inf = pl.DataFrame({"x1": [1.0, float("inf")], "x2": [1.0, 2.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="inf", row=1
+        ),
+    ):
+        res.predict(new_data_inf)
+
+
 # ── ValidationError（オプション、OLSと共通化された経路） ─────────
 
 

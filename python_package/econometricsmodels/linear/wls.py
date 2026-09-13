@@ -242,3 +242,37 @@ class WlsResults:
                 self._raw.conf_upper,
             )
         ]
+
+    def predict(
+        self, new_data: pl.DataFrame | None = None
+    ) -> list[dict[str, float]]:
+        """Predicted values.
+
+        Same design as `OlsResults.predict()`: unified into a single
+        method rather than a separate `fitted_values` property.
+        Weights play no role in either case: the predicted value is
+        `x_i'β̂` on the original (unweighted) scale regardless of
+        `new_data`, and out-of-sample observations have no weight to
+        apply (see `docs/spec/wls-spec.md`, "predict()").
+
+        Args:
+            new_data: New data to predict on. Must contain columns with
+                the same names as the `x` columns passed at fit time
+                (matched by name; column order does not matter). If
+                `include_intercept=True` was used at fit time, the
+                constant column is added automatically and must not be
+                included here. If `None` (default), returns the fitted
+                values for the training data used in `fit()`, on the
+                same original (unweighted) scale as `residuals`.
+
+        Returns:
+            Row-oriented predictions, one dict per observation. Each
+            dict currently has a single key, `"predicted"`.
+
+        Raises:
+            ValidationError: `new_data` is missing a required `x`
+                column, or a column contains missing/NaN/infinite
+                values.
+        """
+        raw = self._raw.predict(new_data)
+        return [{"predicted": value} for value in raw]

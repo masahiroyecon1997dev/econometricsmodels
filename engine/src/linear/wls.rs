@@ -33,6 +33,8 @@ use super::ols::{CovType, OlsEstimator, OlsInput};
 #[derive(Debug)]
 pub struct WlsEstimator {
     estimator: OlsEstimator,
+    /// 元スケール（unweighted）の予測値 `ŷ_i = x_i'β̂`（`predict(new_data=None)`が返す値）
+    fitted_values: Vec<f64>,
     /// 元スケール（unweighted）の残差 `y_i - x_i'β̂`
     residuals: Vec<f64>,
     r_squared: f64,
@@ -73,12 +75,14 @@ impl WlsEstimator {
             weights,
         )?;
         let estimator = OlsEstimator::fit(input, cov_type, confidence_level)?;
-        let residuals = original_scale_residuals(y, x_columns, include_intercept, &estimator);
+        let (fitted_values, residuals) =
+            original_scale_fitted_and_residuals(y, x_columns, include_intercept, &estimator);
         let (r_squared, r_squared_adj, log_likelihood, aic, bic) =
             weighted_fit_statistics(y, weights, &residuals, &estimator);
 
         Ok(Self {
             estimator,
+            fitted_values,
             residuals,
             r_squared,
             r_squared_adj,
@@ -94,6 +98,11 @@ impl WlsEstimator {
     /// `WlsEstimator`自身のメソッドを使うこと（型ドキュメント参照）。
     pub fn estimator(&self) -> &OlsEstimator {
         &self.estimator
+    }
+
+    /// 元スケール（unweighted）の予測値 `ŷ_i = x_i'β̂`（学習データに対する`predict()`が返す値）。
+    pub fn fitted_values(&self) -> &[f64] {
+        &self.fitted_values
     }
 
     /// 元スケール（unweighted）の残差 `y_i - x_i'β̂`。
@@ -133,7 +142,7 @@ impl WlsEstimator {
 /// 統計量ごとの理由はモジュール冒頭のdocコメント参照。SSR自体は重み付き残差の二乗和
 /// （`Σ w_i (y_i - ŷ_i)²`）で、`estimator`が変換後データに対して計算したSSRと数学的に
 /// 同一の値になる（`sqrt(w_i)(y_i-ŷ_i)`の二乗が`w_i(y_i-ŷ_i)²`のため）ため、
-/// `original_scale_residuals`と`weights`から計算し直しても内部で二重計算にはならない。
+/// `original_scale_fitted_and_residuals`と`weights`から計算し直しても内部で二重計算にはならない。
 fn weighted_fit_statistics(
     y: &[f64],
     weights: &[f64],
@@ -174,15 +183,15 @@ fn weighted_fit_statistics(
     (r_squared, r_squared_adj, log_likelihood, aic, bic)
 }
 
-/// 元の（重み変換前の）`y`・`x_columns`と推定済みの係数から、元スケールの残差
-/// `y_i - x_i'β̂`を計算する。`estimator.residuals()`（重み付き残差）をそのまま使わない理由は
-/// `WlsEstimator`のdocコメントを参照。
-fn original_scale_residuals(
+/// 元の（重み変換前の）`y`・`x_columns`と推定済みの係数から、元スケールの予測値
+/// `ŷ_i = x_i'β̂`と残差`y_i - ŷ_i`を計算する。`estimator.residuals()`（重み付き残差）を
+/// そのまま使わない理由は`WlsEstimator`のdocコメントを参照。
+fn original_scale_fitted_and_residuals(
     y: &[f64],
     x_columns: &[Vec<f64>],
     include_intercept: bool,
     estimator: &OlsEstimator,
-) -> Vec<f64> {
+) -> (Vec<f64>, Vec<f64>) {
     let params = estimator.params();
     (0..y.len())
         .map(|i| {
@@ -195,9 +204,9 @@ fn original_scale_residuals(
             for (j, x_col) in x_columns.iter().enumerate() {
                 fitted += x_col[i] * *params.get(col + j, 0);
             }
-            y[i] - fitted
+            (fitted, y[i] - fitted)
         })
-        .collect()
+        .unzip()
 }
 
 #[cfg(test)]
@@ -263,6 +272,33 @@ mod tests {
         // 丸め誤差レベルでの一致を確認する（構造的な完全一致の保証対象はestimator()側）。
         for i in 0..5 {
             assert!((wls.residuals()[i] - *ols.residuals().get(i, 0)).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn fitted_values_equals_y_minus_residuals() {
+        // `ols.rs`の同名テスト（`fitted_values_equals_y_minus_residuals`）と同じ不変条件
+        // （`fitted_values()`と`residuals()`が同じ`original_scale_fitted_and_residuals`
+        // 呼び出しから一貫して導かれていることの確認、Issue #132）。
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+        let weights = vec![1.0, 4.0, 0.25, 9.0, 2.0];
+
+        let wls = WlsEstimator::fit(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            &weights,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        for (i, &y_i) in y.iter().enumerate() {
+            let expected = y_i - wls.residuals()[i];
+            assert!((wls.fitted_values()[i] - expected).abs() < 1e-9);
         }
     }
 
@@ -457,7 +493,7 @@ mod tests {
     #[test]
     fn fit_without_intercept_uses_uncentered_r_squared_and_omits_const() {
         // include_intercept=falseのとき、WLSがOLS側のuncentered TSS分岐
-        // （has_intercept()=falseのときのr_squared計算）と、original_scale_residualsの
+        // （has_intercept()=falseのときのr_squared計算）と、original_scale_fitted_and_residualsの
         // 「切片項を足さない」分岐を正しく通ることを確認する。
         //
         // y = 2*x1に対する厳密解（ノイズなし）は使わない: k=1（切片なし・x1のみ）で
@@ -493,7 +529,7 @@ mod tests {
         assert!((wls.r_squared() - wls.estimator().r_squared()).abs() < 1e-12);
 
         // 内部整合性: residuals()は「元スケールのy - 推定された係数による予測値」であるはず
-        // （original_scale_residualsの定義そのものの確認。真の係数2.0とは比較しない）。
+        // （original_scale_fitted_and_residualsの定義そのものの確認。真の係数2.0とは比較しない）。
         for (i, &r) in wls.residuals().iter().enumerate() {
             let expected = y[i] - beta_hat * x1[i];
             assert!(
@@ -505,7 +541,7 @@ mod tests {
 
     #[test]
     fn fit_with_multiple_x_columns_recovers_known_coefficients() {
-        // original_scale_residualsのx_columnsループ（複数列）が正しく計算できることを確認する
+        // original_scale_fitted_and_residualsのx_columnsループ（複数列）が正しく計算できることを確認する
         // （これまでのテストはx列1本のみだった）。
         let y = vec![9.0, 8.0, 19.0, 18.0, 29.0, 28.0]; // 1 + 2*x1 + 3*x2
         let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
@@ -538,7 +574,7 @@ mod tests {
     /// プロパティの有効性検証（バグ注入→検出確認→元に戻す）は、新規プロパティ
     /// `weights_all_one_matches_ols`（`weighted_fit_statistics`のAIC計算式にk+1の
     /// バグを注入）・`weighted_residuals_sum_to_zero_when_intercept_included`
-    /// （`original_scale_residuals`の切片寄与を半分にするバグを注入）・
+    /// （`original_scale_fitted_and_residuals`の切片寄与を半分にするバグを注入）・
     /// `coefficients_scale_linearly_with_y`（`OlsInput::from_columns_impl`の
     /// y変換に定数オフセットのバグを注入）の3件で実施済み。残り2件
     /// （`coefficients_and_se_are_invariant_to_column_order`・

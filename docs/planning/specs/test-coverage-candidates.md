@@ -49,18 +49,6 @@
   標準化パラメータノルム≈580、閾値100の約5.8倍）。Issue #317（小標本境界
   での検出漏れ、閾値が緩すぎる方向）とは逆方向の問題。
 
-### 10. Probit: `SEPARATION_PARAM_NORM_THRESHOLD=100.0`がProbitのリンク関数でも適切か未較正
-
-- **対象**: [engine/src/nonlinear/probit.rs](../../../engine/src/nonlinear/probit.rs)、
-  [docs/spec/probit-spec.md](../../spec/probit-spec.md)4章
-- **内容**: `SEPARATION_PARAM_NORM_THRESHOLD=100.0`はLogitの実測に基づく較正値
-  だが、Probitはテイルの減衰特性が異なるリンク関数のため、同じ閾値がProbitでも
-  同程度に適切かは未較正。
-- **気づいた経緯**: 実装時（`docs/spec/probit-spec.md`4章に記載済み）。
-  2026-08-15、Issue #231フェーズ4のテスト拡充作業に伴い本メモへ転記・集約。
-- **状態**: 未対応（実装当時からの既知の未検証事項、ユーザー確認済み・
-  意図的にスコープ外）
-
 ### 11. IV系統: `scale_variance`に成功パス（`scale_variance_mild`相当）が無い
 
 - **対象**: [benchmark/iv/datasets.py](../../../benchmark/iv/datasets.py)・
@@ -1729,3 +1717,29 @@
 - **気づいた経緯**: 2026-09-13、旧項目2のクローズ内容を確認する過程で
   IVが対象外だったことに気づいた。
 - **状態**: 未対応。
+
+### 70. Logit/Probit: `SeparationSuspected`の近傍分離テストが両極端（明確に発火／明確に安全）のみで、閾値に近い境界ケースがピン留めされていない
+
+- **対象**: [engine/src/nonlinear/logit.rs](../../../engine/src/nonlinear/logit.rs)・
+  [engine/src/nonlinear/probit.rs](../../../engine/src/nonlinear/probit.rs)の
+  `fit_returns_separation_suspected_error_for_near_separation_data`・
+  `fit_converges_normally_for_mild_near_separation_data_across_all_methods`
+- **内容**: rust-reviewerの指摘（項目10のProbit回帰テスト追加時のレビュー、
+  2026-09-13）。両手法とも、近傍分離データの回帰テストは「明確に`SeparationSuspected`が
+  発火するケース」（logit: `beta1=100`・probit: `beta1=50`、標準化パラメータノルムが
+  閾値100を大きく上回る）と「明確に正常収束するケース」（両手法とも`beta1=20`、ノルムが
+  閾値に対して大きな余裕を持つ）の両極端のみを固定しており、閾値100に対して数%程度の
+  マージンしかない境界付近（項目10の調査で実測したprobit `norm≈93.3`・logit
+  `norm≈89.0`相当）は回帰テストとしてピン留めされていない。将来、最適化経路や依存
+  クレートの変更でこの安全マージンがじわじわ縮む・広がるような回帰が起きても、現状の
+  テストでは検知できない可能性がある。Logit側にも同型の構造的なギャップが元々あり、
+  今回のProbit側追加に固有の劣化ではない。
+- **Claudeの所感**: 境界に近い`beta1`（ノルムが90台になる値）を追加でピン留めする
+  価値はあると考えるが、`beta1`とノルムの対応は実測で較正し直す必要があり、かつ
+  「境界に近い」こと自体がテストの意図であるため、将来の実装変更でこのテストが
+  falseになった場合に「意図的な閾値調整」なのか「望まない回帰」なのかの切り分けが
+  難しくなる可能性がある。着手前にこの点をどう扱うか（許容範囲を持たせる、コメントで
+  明記する等）をユーザーに確認したい。
+- **気づいた経緯**: 2026-09-13、項目10（Probitの`SEPARATION_PARAM_NORM_THRESHOLD`較正
+  検証）のrust-reviewerレビュー中。
+- **状態**: 未対応（要否・優先度はユーザー判断待ち）

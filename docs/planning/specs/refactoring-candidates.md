@@ -1097,3 +1097,64 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   ファイルへの集約は、型安全性と系統別ファイル構成の既存方針に反するため不採用）。
 - **気づいた経緯**: 2026-09-13、`column_extraction.rs`解説中のユーザー指摘。
 - **状態**:【Issue化】Issue #325として切り出し済み（2026-09-13）
+
+### 52.【Issue化】engine/engine_pybindのコードコメントからIssue番号への言及を削除する方針を導入する → Issue #330として切り出し済み（2026-09-13）
+
+- **対象**: [engine_pybind/src/validation.rs](../../../engine_pybind/src/validation.rs)
+  （具体例）、`engine`/`engine_pybind`全体のコード内コメント
+- **内容**: `validation.rs`だけでも「Issue #154」「Issue #159」「Issue #306」
+  「Issue #295」という過去の由来説明が埋め込まれている。CLAUDE.md 13章の
+  「経緯は削除し理由のみ簡潔に記載」という既存方針をコードコメントにも適用し、
+  Issue番号は削除して理由の文章のみ残す（`git log`/`git blame`で常に追跡可能な
+  情報のため）。ただし`docs/planning/specs/iv-api-design.md`1.1.1節のような
+  設計ドキュメントの節番号への参照は「生きた契約」のため削除対象外。
+- **気づいた経緯**: 2026-09-13、`validation.rs`解説中のユーザー指摘。
+- **状態**:【Issue化】Issue #330として切り出し済み（2026-09-13）
+
+### 53.【Issue化】engine/engine_pybindの肥大化したファイルをモジュール分割する（テストは同一ファイル内に維持） → Issue #331として切り出し済み（2026-09-13）
+
+- **対象**: `engine`/`engine_pybind`全体（具体例:
+  [engine/src/nonlinear/tobit.rs](../../../engine/src/nonlinear/tobit.rs) 5592行、
+  [engine/src/nonlinear/common.rs](../../../engine/src/nonlinear/common.rs) 3904行、
+  [engine/src/iv/gmm.rs](../../../engine/src/iv/gmm.rs) 3824行、
+  [engine/src/panel/fe.rs](../../../engine/src/panel/fe.rs) 3752行ほか）
+- **内容**: `.claude/rules/rust-style.md`の「ファイルが肥大化したら`ols/`ディレクトリに
+  昇格し`mod.rs`+`data.rs`+`options.rs`等に分割する」という既存方針が、実際には
+  1000行を大きく超えるファイルが多数あるにも関わらずまだ一つも適用されていない。
+  既存方針に沿ってディレクトリ昇格・分割することを提案する。テストは分割後も
+  各実装ファイル末尾に維持する（`rust-style.md`「テスト」節の「同じファイルにある
+  ことでリファクタリング時の追従漏れを防げる」という既存理由を維持する判断、
+  ユーザー確認済み）。
+- **気づいた経緯**: 2026-09-13、`validation.rs`解説中のユーザー指摘。
+- **状態**:【Issue化】Issue #331として切り出し済み（2026-09-13）
+
+### 54. Tobitの`validate_no_sigma_collision`と`validate_no_const_collision`の統合について検討・対応不要と判断
+
+- **対象**: [engine_pybind/src/nonlinear/tobit.rs](../../../engine_pybind/src/nonlinear/tobit.rs)
+  の`validate_no_sigma_collision`、[engine_pybind/src/validation.rs](../../../engine_pybind/src/validation.rs)
+  の`validate_no_const_collision`
+- **内容**: 両者は構造上似ている（禁止列名との衝突検出）が、`const`衝突は
+  `include_intercept`という条件フラグを持ち全手法共有なのに対し、`sigma`衝突は
+  条件無し・Tobit専用（誤差項の標準偏差という合成パラメータ）という違いがある。
+  共通化すると関数の引数が増え可読性が下がる、かつ`validation.rs`は「全手法で
+  共有する」検証専用という位置づけのため、Tobit専用の`sigma`衝突検証を
+  持ち込むのはモジュールの責務からもずれる。統合しない方が良いと判断した
+  （`.claude/rules/rust-style.md`エラーハンドリング節の「系統固有の追加バリアントは
+  各系統のエラー型に直接定義してよい」と同じ精神）。
+- **気づいた経緯**: 2026-09-13、`validation.rs`解説中のユーザー指摘。
+- **状態**: 検討の結果、対応不要と判断（ユーザー確認済み、2026-09-13）
+
+### 55.【Issue化】validation.rs: `duplicate_role_message`の4分岐match実装をヘルパー関数で簡潔化する（出力文言は維持） → Issue #332として切り出し済み（2026-09-13）
+
+- **対象**: [engine_pybind/src/validation.rs](../../../engine_pybind/src/validation.rs)
+  の`duplicate_role_message`
+- **内容**: 4本のmatchアームのうち3本がほぼ同じ`format!`テンプレートの使い回しに
+  なっている。実際のルールは「主語の言い回しは常に`specified as`固定・目的語の
+  言い回しだけがSingle/Multiで`specified as`/`included in`と変わる、主語には
+  単一列ロールを優先する」というものであり、ロールごとの言い回しを返す小さな
+  ヘルパー関数＋主語選択の1回の判定に整理できる。出力される文言自体（単一列
+  ロールを優先して主語にする現在の規則）は可読性上の合理性があるため変更しない
+  （ユーザー確認済み、プレリリース期間中で後方互換性の制約は無いが、文言自体は
+  現状維持が妥当と判断）。
+- **気づいた経緯**: 2026-09-13、`validation.rs`解説中のユーザー指摘。
+- **状態**:【Issue化】Issue #332として切り出し済み（2026-09-13）

@@ -10,6 +10,12 @@ R クロスチェックは `test_ols_crosscheck.py`。
 集約する（predict/augment は独立した API 面で、その statsmodels 照合は
 スモーク級。手法間の predict の意味の違い〔OLS=予測値／Logit=確率〕を1ファイルで
 対比できる）。両者の `ValidationError` パスのみ `test_ols_validation.py`。
+
+上記4分類のいずれにも当てはまらない例外として、末尾に「クラスターロバストSEの
+健全性チェック」を1本含む。これはリファレンス実装との数値照合ではなく、
+真のクラスター内相関があるDGPでクラスターロバストSEが古典的SEより意図通り
+大きくなることを確認する、本実装内で完結した統計的健全性の検証
+（詳細は当該テストのdocstring参照）。
 """
 
 from __future__ import annotations
@@ -423,3 +429,66 @@ def test_augment_without_intercept_matches_predict():
     augmented_new = res.augment(new_data)
     expected_new = [row["predicted"] for row in res.predict(new_data)]
     assert augmented_new["predicted"].to_list() == expected_new
+
+
+# ── クラスターロバストSEの健全性チェック（真のクラスター内相関） ──────
+#
+# 上記のクラスター系テスト・test_ols_reference.py/test_ols_crosscheck.pyの
+# クラスター系テストは、いずれも誤差i.i.d.なデータに疑似グループラベルを
+# 後付けしたものであり、リファレンス実装（statsmodels/R）との数値一致を
+# 検証する目的には十分だが、「クラスターロバストSEが真のクラスター内相関が
+# ある状況で意図通り機能するか（通常のSEより適切に大きくなるか）」という
+# 別種の健全性は検証していなかった（旧test-coverage-candidates.md項目12、
+# 対応済みのため同ファイルからは削除済み、ユーザー確認済み）。以下はその
+# 健全性のみを確認する専用テストであり、他のテストと異なりリファレンス
+# 実装との数値比較は行わない。
+
+
+def test_cluster_std_error_exceeds_classical_under_true_intra_cluster_correlation():
+    """説明変数・誤差の両方にクラスター内相関を持たせたMoulton型DGPで、
+    クラスターロバストSEが古典的SEより明確に大きくなることを確認する。
+
+    説明変数x1がクラスターレベルの成分を持たない（個体ごとに独立な）DGPでは、
+    誤差だけにクラスター内相関を持たせても、クラスターSEが古典的SEより
+    小さくなることさえあることを実測確認済み。クラスターロバストSEの効果を
+    検出するには説明変数自体もクラスター内相関を持つ必要がある（古典的な
+    Moulton問題の構造）。
+    seed=42固定でratio≈3.48（30シードでの実測範囲2.09〜4.49に対し、
+    十分なマージンを持たせた閾値1.5を使う）。
+
+    有効性検証について: `testing-policy.md`「property-basedテスト」節の
+    本格的なバグ注入要件は`proptest`（engineクレート内）専用のため本テストには
+    形式上適用されないが、参考として「assert文の機構自体が正しく機能するか」
+    （classical同士の比較でratio=1.0を作りassertが落ちることを確認）のみ
+    実施済み。`engine::linear::ols::cluster_cov_params`への実際のバグ注入に
+    よる検出力の実証（他手法のproptestが満たす基準）は行っていない。
+    """
+    rng = np.random.default_rng(42)
+    n_groups = 30
+    group_size = 20
+    n = n_groups * group_size
+    group = np.repeat(np.arange(n_groups), group_size)
+
+    # 説明変数x1: クラスターレベルの成分 + 個体ごとの誤差。
+    x1_group = rng.normal(scale=1.0, size=n_groups)
+    x1 = x1_group[group] + rng.normal(scale=0.5, size=n)
+
+    # 誤差: クラスターレベルのランダム効果 + 個体ごとの誤差。
+    u_g = rng.normal(0.0, 2.0, size=n_groups)
+    e = u_g[group] + rng.normal(0.0, 1.0, size=n)
+
+    y = 1.0 + 2.0 * x1 + e
+    df = pl.DataFrame({"y": y, "x1": x1, "cluster": [str(g) for g in group]})
+
+    classical = OLS(
+        df, y="y", x=["x1"], options=OLSOptions(cov_type="classical")
+    ).fit()
+    cluster = OLS(
+        df,
+        y="y",
+        x=["x1"],
+        options=OLSOptions(cov_type="cluster", cluster_col="cluster"),
+    ).fit()
+
+    ratio = cluster.std_errors["x1"] / classical.std_errors["x1"]
+    assert ratio > 1.5, f"ratio={ratio}"

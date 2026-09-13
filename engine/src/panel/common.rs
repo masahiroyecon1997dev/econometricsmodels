@@ -35,6 +35,11 @@
 //!   失敗した場合（エンティティ数が説明変数の数以下等）。`WithinRegressionFailed`と同じ
 //!   `LeastSquaresError`ラップだが、対象がFEのwithin回帰ではなくREのbetween回帰のため
 //!   別バリアントにする（`FTestFailed`と同じ判断）。
+//! - `QuasiDemeanedRegressionFailed`: RE（`ReEstimator::fit`、7.4節、Issue #195）の
+//!   準偏差変換済みデータ（`quasi_demean_transform`の出力に、同じθで変換した定数列を
+//!   加えたもの）への`OlsEstimator::fit(include_intercept=false)`委譲が失敗した場合。
+//!   `WithinRegressionFailed`（FEのwithin変換済みデータ）・`BetweenRegressionFailed`
+//!   （REのbetween回帰）とは対象が異なるため別バリアントにする（同じ判断の3件目）。
 //!
 //! RE固有（7章）で追加のバリアントが必要になった場合は、FE/RE実装issueで実際に計算
 //! コードを書く過程で随時追加する（`LeastSquaresError`・`IvError`のdocコメントと同じ
@@ -257,6 +262,18 @@ pub enum PanelError {
     /// （`CommonError::InsufficientObservations`）。
     #[error("between-regression least-squares estimation for variance component failed: {source}")]
     BetweenRegressionFailed {
+        #[source]
+        source: LeastSquaresError,
+    },
+
+    /// RE（`ReEstimator::fit`、7.4節、Issue #195）の準偏差変換済みデータへの
+    /// `OlsEstimator::fit(include_intercept=false)`委譲が失敗した。
+    ///
+    /// `WithinRegressionFailed`（FEのwithin変換済みデータ）・`BetweenRegressionFailed`
+    /// （REのbetween回帰）とは対象が異なるため別バリアントにする（同じ判断の3件目、
+    /// モジュールdoc参照）。
+    #[error("quasi-demeaned least-squares estimation for random effects failed: {source}")]
+    QuasiDemeanedRegressionFailed {
         #[source]
         source: LeastSquaresError,
     },
@@ -695,6 +712,24 @@ mod tests {
                     n: 2,
                     k: 3,
                 }),
+            }
+        );
+    }
+
+    #[test]
+    fn quasi_demeaned_regression_failed_message_and_equality() {
+        let err = PanelError::QuasiDemeanedRegressionFailed {
+            source: LeastSquaresError::SingularMatrix,
+        };
+        assert_eq!(
+            err.to_string(),
+            "quasi-demeaned least-squares estimation for random effects failed: design matrix \
+             is singular (perfect multicollinearity detected)"
+        );
+        assert_eq!(
+            err,
+            PanelError::QuasiDemeanedRegressionFailed {
+                source: LeastSquaresError::SingularMatrix,
             }
         );
     }

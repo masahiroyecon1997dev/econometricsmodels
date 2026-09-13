@@ -41,6 +41,29 @@
 //! 不要（7.2節）。`sigma2_eps`/`sigma2_u`は`swamy_arora_variance_components`の戻り値を
 //! そのまま渡す想定だが、この関数自体はその依存を持たない（テストで独立に検証できる
 //! ようにするため。`quasi_demean_column`が`θ`の値域を検証しないのと同じ設計）。
+//!
+//! ## `OlsEstimator`への委譲（`ReEstimator`、Issue #195、7.4節）
+//!
+//! `ReEstimator::fit`は「Swamy-Arora分散成分推定（`swamy_arora_variance_components`、
+//! Issue #193）→θ計算・準偏差変換（`quasi_demean_transform`、Issue #194）→
+//! `OlsEstimator::fit`への委譲」の順にパイプラインを実行する（`FeEstimator::fit`と
+//! 同型のパターン）。
+//!
+//! **REはFEと異なり切片を持つ**（モデル`y_it = β0 + x_it'β + u_i + ε_it`、2.1節）ため、
+//! 委譲前に切片項の復元が必要になる。単純に`OlsInput::from_columns`の
+//! `include_intercept=true`は使えない——それだと自動追加される定数列が
+//! 変換されない生の`1.0`のままになってしまう。正しくは、**すべて`1.0`の列を`y`・`x`と
+//! 同じ`theta`で`quasi_demean_column`した列**（`(1 - θ_i)`、エンティティごとに異なる）を
+//! 明示的に組み立て、それを設計行列の先頭に加えた上で`include_intercept=false`で
+//! `OlsEstimator::fit`に渡す（`linearmodels.RandomEffects.fit()`のソースで、`exog`に
+//! 含まれる定数列自体も他の説明変数と同じ`quasi_demean`処理を受けていることを確認
+//! 済み。手動データでの数値完全一致で検証済み、詳細は`ReEstimator::fit`関数doc参照）。
+//! `param_names`は`OlsInput::from_columns_impl`の自動`"const"`命名と同じ並び
+//! （`["const", x_names...]`）に揃える。
+//!
+//! `swamy_arora_variance_components`・`compute_theta`・`quasi_demean_transform`は
+//! これで非テストコードからの呼び出しが生まれたため、`pub`から`pub(crate)`に格下げした
+//! （Issue #194の実装ノート・rust-reviewer指摘の通り）。
 
 use std::collections::BTreeMap;
 
@@ -237,11 +260,7 @@ fn entity_means(
 /// - between回帰が失敗した場合（エンティティ数が説明変数の数以下等）は
 ///   `PanelError::BetweenRegressionFailed`。
 ///
-/// **可視性について**: 本来はRE内部専用（`ReEstimator::fit`、Issue #195）の実装詳細で
-/// `pub(crate)`が適切だが、Issue #195着手前の現時点では非テストコードからの呼び出しが
-/// 無く`pub(crate)`だと`dead_code`警告になる。`quasi_demean_column`・`hausman_statistic`
-/// （`common.rs`、Issue #173・#174）も同じ理由で`pub`にした前例に倣う。
-pub fn swamy_arora_variance_components(
+pub(crate) fn swamy_arora_variance_components(
     input: &ReInput,
     confidence_level: f64,
 ) -> Result<(f64, f64), PanelError> {
@@ -339,7 +358,7 @@ fn compute_theta(entity: &[String], sigma2_eps: f64, sigma2_u: f64) -> BTreeMap<
 /// 定数列（すべて1.0）にも同じ`theta`で`quasi_demean_column`を適用する必要があり
 /// （REは切片を持つためFEと異なりこの復元が要る、7.4節）、`theta`の再計算を避けるため
 /// 呼び出し側に渡しておく。
-pub fn quasi_demean_transform(
+pub(crate) fn quasi_demean_transform(
     input: &ReInput,
     sigma2_eps: f64,
     sigma2_u: f64,
@@ -352,6 +371,103 @@ pub fn quasi_demean_transform(
         .map(|col| quasi_demean_column(col, input.entity(), &theta))
         .collect();
     (theta, y, x)
+}
+
+/// REの推定結果。Swamy-Arora分散成分推定（Issue #193）→θ計算・準偏差変換
+/// （Issue #194）→`OlsEstimator::fit`への委譲（Issue #195）というパイプラインで
+/// `θ変換済み`データの係数推定（`β̂`）のみをスコープとする（モジュールdoc
+/// 「`OlsEstimator`への委譲」参照。`FeEstimator`が#178時点で係数推定のみを
+/// スコープにしたのと同型——標準誤差等のFE/RE固有の再計算は別issue）。
+///
+/// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」）。
+#[derive(Debug)]
+pub struct ReEstimator {
+    input: ReInput,
+    estimator: OlsEstimator,
+}
+
+impl ReEstimator {
+    /// `input`からSwamy-Arora分散成分（σ_ε²・σ_u²）を推定し、θ計算・準偏差変換した
+    /// `y`・`x`（切片復元用に同じθで変換した定数列を含む）を`OlsEstimator::fit`に
+    /// 委譲してREを推定する。
+    ///
+    /// パイプライン: `swamy_arora_variance_components`（Issue #193）→
+    /// `quasi_demean_transform`（Issue #194）→ 定数列の準偏差変換・設計行列への追加
+    /// （モジュールdoc参照）→ `OlsEstimator::fit`への委譲（`include_intercept=false`固定。
+    /// 変換済みデータに既に切片相当の列を含めているため、FE同様これ以上の自動追加は
+    /// 不要）。
+    ///
+    /// `OlsEstimator::fit`自体は`CovType::Classical`固定で呼ぶ（`cov_type`対応は
+    /// 別issue、`FeEstimator::fit`が委譲先を常に`Classical`で呼ぶのと同じ理由——
+    /// `β̂`・残差の取得のみが目的で、`cov_type`ごとの標準誤差は将来REが独自に
+    /// 計算し直す設計になる見込みのため）。
+    ///
+    /// # Errors
+    /// - Swamy-Arora分散成分推定が失敗した場合（内部FE推定のsingleton検出・分散ゼロ・
+    ///   自由度不足、またはbetween回帰の失敗）は、その`PanelError`をそのまま伝播する。
+    /// - 準偏差変換済みデータへの委譲が失敗した場合（観測数不足・特異行列等）は
+    ///   `PanelError::QuasiDemeanedRegressionFailed`。
+    pub fn fit(input: ReInput, confidence_level: f64) -> Result<Self, PanelError> {
+        // faerのグローバル並列度をPar::Seqに固定する（Issue #283、`crate::parallelism`。
+        // 委譲先の`FeEstimator::fit`/`OlsEstimator::fit`自身も呼ぶが、`cargo test -p engine`
+        // で`ReEstimator::fit`を直接叩く経路との統一のためここでも呼ぶ、
+        // `engine/src/panel/CLAUDE.md`「faerのグローバル並列度」参照）。
+        crate::parallelism::ensure_serial();
+
+        let (sigma2_eps, sigma2_u) = swamy_arora_variance_components(&input, confidence_level)?;
+        let (theta, y, x) = quasi_demean_transform(&input, sigma2_eps, sigma2_u);
+
+        // 切片復元用の定数列（すべて1.0）を、y/xと同じthetaで準偏差変換する
+        // （モジュールdoc「`OlsEstimator`への委譲」参照。`OlsInput::from_columns`の
+        // `include_intercept=true`は使えない——それだと変換されない生の`1.0`列に
+        // なってしまう）。
+        let const_column = vec![1.0; input.nobs()];
+        let const_transformed = quasi_demean_column(&const_column, input.entity(), &theta);
+
+        let mut x_all = Vec::with_capacity(x.len() + 1);
+        x_all.push(const_transformed);
+        x_all.extend(x);
+
+        let mut param_names = Vec::with_capacity(input.x_names().len() + 1);
+        param_names.push("const".to_string());
+        param_names.extend(input.x_names().iter().cloned());
+
+        // `OlsInput::from_columns`が返しうる`LeastSquaresError::Common(DimensionMismatch)`は
+        // ここでは理論上到達不能: `y`/`x_all`はどちらも`quasi_demean_column`が
+        // `input.y()`/`input.x()`（`ReInput::from_columns`が既に同じ長さであることを
+        // 検証済み）と`const_column`（`input.nobs()`で長さを揃えている）から1対1で
+        // 生成した同じ長さの列であり、この関数内で長さがずれる操作をしていない
+        // （`FeEstimator::fit`の同種のコメントと同じ判断）。
+        let ols_input = OlsInput::from_columns(
+            &y,
+            &x_all,
+            param_names,
+            false,
+            input.dep_var_name().to_string(),
+        )
+        .map_err(|source| PanelError::QuasiDemeanedRegressionFailed { source })?;
+        let estimator = OlsEstimator::fit(ols_input, CovType::Classical, confidence_level)
+            .map_err(|source| PanelError::QuasiDemeanedRegressionFailed { source })?;
+
+        Ok(Self { input, estimator })
+    }
+
+    /// 準偏差変換前の入力データ。
+    pub fn input(&self) -> &ReInput {
+        &self.input
+    }
+
+    /// 準偏差変換済みデータに対する`OlsEstimator`本体。`params()`の先頭が切片
+    /// （`param_names()[0] == "const"`）、以降が`input().x_names()`と同じ並びの
+    /// 傾き係数。
+    ///
+    /// **係数（`params()`）は正しいRE推定量だが、標準誤差・t値・p値・信頼区間・
+    /// F統計量・調整済みR²・AIC/BICはこの時点では正しくない**（モジュールdoc参照。
+    /// RE固有の自由度・`cov_type`補正が別issueで入るまでの暫定値、`FeEstimator`の
+    /// #178時点と同じ扱い）。
+    pub fn estimator(&self) -> &OlsEstimator {
+        &self.estimator
+    }
 }
 
 #[cfg(test)]
@@ -711,5 +827,115 @@ mod tests {
         assert_eq!(theta.len(), 3);
         assert_eq!(y_t.len(), 6);
         assert_eq!(x_t[0].len(), 6);
+    }
+
+    // ── ReEstimator::fit ─────────────────────────────────────────────────
+
+    #[test]
+    fn re_estimator_fit_matches_linearmodels_reference() {
+        // `swamy_arora_variance_components_matches_linearmodels_reference`と同じ
+        // データ（entity a: T=3, b: T=2, c: T=2）。`linearmodels.RandomEffects`
+        // （Python、`exog=[const, x1]`）で実地検証済みの`params`・`resids`と比較する。
+        let entity = strings(&["a", "a", "a", "b", "b", "c", "c"]);
+        let x1 = vec![1.0, 2.0, 4.0, 2.0, 3.0, 5.0, 6.0];
+        let y = [3.0, 4.0, 7.0, 8.0, 9.0, 6.0, 10.0];
+        let input =
+            ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let re = ReEstimator::fit(input, 0.95).unwrap();
+
+        assert_eq!(
+            re.estimator().input().param_names(),
+            &["const".to_string(), "x1".to_string()]
+        );
+        assert!((*re.estimator().params().get(0, 0) - 2.224_977_596_254_189_6).abs() < 1e-9);
+        assert!((*re.estimator().params().get(1, 0) - 1.400_245_546_585_47).abs() < 1e-9);
+
+        let expected_resids = [
+            0.007_456_619_017_130_906,
+            -0.392_788_927_568_339_16,
+            -0.193_280_020_739_278_4,
+            0.983_357_826_800_407_3,
+            0.583_112_280_214_937_3,
+            -1.843_693_205_551_097,
+            0.756_061_247_863_432_8,
+        ];
+        for (i, expected) in expected_resids.iter().enumerate() {
+            let actual = *re.estimator().residuals().get(i, 0);
+            assert!((actual - expected).abs() < 1e-9, "{actual} vs {expected}");
+        }
+    }
+
+    #[test]
+    fn re_estimator_fit_propagates_fe_singleton_error_from_variance_components() {
+        // entity "c"は1観測のみ（singleton）。`swamy_arora_variance_components`内部の
+        // FE推定が`PanelError::SingletonGroup`を返し、そのまま伝播することを確認する
+        // （`swamy_arora_variance_components_propagates_fe_singleton_error`と同じ配線）。
+        let entity = strings(&["a", "a", "c"]);
+        let x1 = vec![1.0, 2.0, 3.0];
+        let y = [1.0, 2.0, 3.0];
+        let input =
+            ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let result = ReEstimator::fit(input, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::SingletonGroup {
+                dimension: PanelDimension::Entity,
+                group_id: "c".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn re_estimator_fit_propagates_between_regression_failed_error() {
+        // `swamy_arora_variance_components_returns_between_regression_failed_when_
+        // entities_are_insufficient`と同じデータ（n_entities=2, k=1で between回帰が
+        // 特異になる）。`ReEstimator::fit`が分散成分推定の失敗をそのまま伝播することを
+        // 確認する。
+        let entity = strings(&["a", "a", "b", "b"]);
+        let x1 = vec![1.0, 2.0, 3.0, 4.0];
+        let y = [1.0, 2.0, 3.0, 5.0];
+        let input =
+            ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let result = ReEstimator::fit(input, 0.95);
+
+        assert!(matches!(
+            result,
+            Err(PanelError::BetweenRegressionFailed { .. })
+        ));
+    }
+
+    #[test]
+    fn re_estimator_fit_propagates_invalid_confidence_level_error() {
+        // `confidence_level`の範囲チェック（`(0, 1)`の範囲外）は、
+        // `swamy_arora_variance_components`内部の最初の委譲（`FeEstimator::fit`）が
+        // 真っ先に検証するため、`QuasiDemeanedRegressionFailed`ではなく
+        // `WithinRegressionFailed`として伝播する（`FeEstimator::fit`自身の
+        // `fe_estimator_fit_propagates_invalid_confidence_level_error`と同型）。
+        let entity = strings(&["a", "a", "a", "b", "b", "c", "c"]);
+        let x1 = vec![1.0, 2.0, 4.0, 2.0, 3.0, 5.0, 6.0];
+        let y = [3.0, 4.0, 7.0, 8.0, 9.0, 6.0, 10.0];
+        let input =
+            ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let result = ReEstimator::fit(input, 1.5);
+
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::WithinRegressionFailed {
+                source: crate::linear::common::LeastSquaresError::Common(
+                    CommonError::InvalidConfidenceLevel {
+                        confidence_level: 1.5,
+                    }
+                ),
+            }
+        );
     }
 }

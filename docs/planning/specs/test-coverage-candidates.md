@@ -892,7 +892,29 @@
   膨らみCI時間が増えるため、代表ケースのみの追加が良いと考える。
 - **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit_fixtures.py`解説後の
   ユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
+- **状態**: 未対応（着手要否はユーザー判断待ち）。
+  - **2026-09-13追記（項目4クローズ時の派生調査で判明した具体例）**: Tobitで
+    `method`が`raise_on_non_convergence=False`の挙動に実際に大きく影響する
+    ケースを実測で確認した。`x1~Uniform(-2,2), x2~Uniform(-1,1),
+    y*=-1.0+0.3·x1+0.2·x2+N(0,1)`を左打ち切り（打ち切り率84.5%、n=200,
+    seed=7）で`max_iter=1, raise_on_non_convergence=False`にすると:
+    - `method="newton"`/`"bfgs"`: 全cov_type（classical/opg/hc0/hc1/cluster）
+      で例外なく成功（`sigma`はそれぞれ0.372/0.640で1.7倍程度の差）。
+    - `method="lbfgs"`: `cov_type="opg"`のみ成功（`sigma=1.53`）、
+      `classical`/`hc0`/`hc1`/`cluster`は`MleError::SingularHessian`
+      （`ComputationError`）を送出。
+    - これは**バグではなく仕様通り**（`TobitEstimator::fit`のdocコメントに
+      「収束点（または`raise_on_non_convergence=false`時の打ち切り点）の
+      Hessianが特異なら`SingularHessian`」と明記済み。`raise_on_non_
+      convergence`が抑制するのは`NonConvergence`のみで、打ち切り点の
+      Hessian特異性チェックとは独立した別のエラー経路のため）。
+    - 軽度な打ち切りのbaselineシナリオ（項目4のクローズ時に実測）では
+      newton/bfgs/lbfgs間で`sigma`・標準誤差ともほぼ一致しており、
+      method依存の挙動差は「打ち切りが重い等の悪条件シナリオ」で
+      顕在化しやすいと考えられる。
+    - Logit/Probitでは同じ実測（baselineシナリオ）でmethod間の差は
+      ほぼ無く、Tobitの`(β, logσ)`尤度が大域凹でない構造
+      （`engine/src/nonlinear/CLAUDE.md`参照）に起因する可能性が高い。
 
 ### 42. `test_logit_crosscheck.py`の`_check_margeff`が`z`/`p_value`/`conf_low`/`conf_high`を検証していない（フィクスチャには既に存在するデータ）
 

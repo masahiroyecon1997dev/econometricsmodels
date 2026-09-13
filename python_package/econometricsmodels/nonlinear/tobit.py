@@ -326,6 +326,46 @@ class TobitResults:
         raw = self._raw.predict(target, new_data)
         return [{"predicted": p} for p in raw]
 
+    def augment(
+        self,
+        target: str = "expected_observed",
+        new_data: pl.DataFrame | None = None,
+    ) -> pl.DataFrame:
+        """Source data with the predicted values appended as a column.
+
+        Same `target`/`new_data` semantics as `predict()`, but returns
+        a polars DataFrame (the training data, or `new_data` when
+        given, plus a new predicted-value column) instead of a
+        row-oriented list. See `OlsResults.augment()` for the
+        project's general policy on this DataFrame-returning
+        exception.
+
+        Unlike Logit/Probit's fixed `"probability"` column, the
+        appended column here is named `"predicted_{target}"`, using
+        the lowercased `target` (e.g. `target="expected_observed"` or
+        `target="Expected_Observed"` both produce
+        `"predicted_expected_observed"`), since `predict()`'s meaning
+        depends on `target`. This also lets `augment()` be called once
+        per `target` on the same DataFrame without a name collision.
+
+        Args:
+            target: Same as `predict()`.
+            new_data: Same as `predict()`. If `None` (default), returns
+                the training data used in `fit()` with the predicted
+                values appended.
+
+        Returns:
+            A polars DataFrame: the source data's columns plus
+            `"predicted_{target}"`, in the same row order as the
+            source.
+
+        Raises:
+            ValidationError: Same as `predict()`, or the source data
+                already has a column named `"predicted_{target}"`
+                (which would otherwise be silently overwritten).
+        """
+        return self._raw.augment(target, new_data)
+
     def marginal_effects(
         self,
         at: str = "overall",

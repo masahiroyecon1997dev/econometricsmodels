@@ -135,6 +135,13 @@ for row in table:
     print(row["actual"], row["predicted_0"], row["predicted_1"])
 ```
 
+`LogitResults.augment()` takes the same `new_data` argument as `predict()`, but returns a polars DataFrame (the source data plus a new `"probability"` column) instead of a row-oriented list, mirroring `OlsResults.augment()`.
+
+```python
+augmented = result.augment(new_data)
+print(augmented)  # original `new_data` columns, plus a "probability" column
+```
+
 ### Marginal effects
 
 `LogitResults.marginal_effects()` returns `dy/dx` for each explanatory variable (the constant term is excluded), with delta-method standard errors. Use `at` to choose the representative point: `"overall"` (default, average marginal effects), `"mean"`, or `"median"`.
@@ -169,7 +176,7 @@ print(result.std_errors)  # {"const": ..., "x1": ...}
 print(result.pseudo_r_squared)
 ```
 
-`ProbitOptions` supports the same `cov_type` and `method` choices as `LogitOptions`; see the [API Reference](api/probit.md) for the full list of options. `ProbitResults.predict()`, `pred_table()`, and `marginal_effects()` work exactly like their [Logit](#predicted-values-and-classification-table) counterparts (substitute `Probit`/`ProbitOptions` for `Logit`/`LogitOptions` in the examples above).
+`ProbitOptions` supports the same `cov_type` and `method` choices as `LogitOptions`; see the [API Reference](api/probit.md) for the full list of options. `ProbitResults.predict()`, `augment()`, `pred_table()`, and `marginal_effects()` work exactly like their [Logit](#predicted-values-and-classification-table) counterparts (substitute `Probit`/`ProbitOptions` for `Logit`/`LogitOptions` in the examples above).
 
 ## Tobit (censored regression)
 
@@ -209,6 +216,16 @@ fitted = result.predict(target="expected_observed")
 # new_data (out-of-sample) works the same way as OLS/Logit/Probit
 new_data = pl.DataFrame({"x1": [1.0, 2.0]})
 predicted = result.predict(target="expected_observed", new_data=new_data)
+```
+
+`augment()` takes the same `target`/`new_data` arguments as `predict()`, but returns a polars DataFrame instead of a row-oriented list. Unlike Logit/Probit's fixed `"probability"` column, the appended column is named `"predicted_{target}"` (e.g. `"predicted_expected_observed"`), since `predict()`'s meaning depends on `target` — this also lets you call `augment()` once per `target` on the same DataFrame without a column name collision.
+
+```python
+augmented = result.augment(target="expected_observed")
+print(augmented)  # original columns, plus "predicted_expected_observed"
+
+# Stack a second target onto the same DataFrame without a name collision
+augmented = result.augment(target="prob_uncensored", new_data=augmented)
 ```
 
 ### Censoring fit check

@@ -226,16 +226,23 @@ Tobit固有の差分:
   `fit()`時の`cov_params`をそのまま再利用し再最適化しない。
 - 定数項は出力から除外する。
 
-### 3.6 predict() / censoring_fit_check()
+### 3.6 predict() / augment() / censoring_fit_check()
 
 - `predict(target, new_data=None)`は`marginal_effects`と同じ`MarginalEffectsTarget`を再利用し、
   `E[y*|x]=x'β`・`E[y|x]`（既定）・`P(uncensored|x)`の3種を返す。値の計算は`predicted_value`
   （`target_w_and_s`と同じ`boundary_terms`を再利用、左/右/両側いずれでも単一の式）。`new_data`が
   `None`（既定）なら学習データ、指定すれば新規データ（out-of-sample）に対する予測値を返す
   （`x`列名マッチング・`include_intercept`時の定数項自動付加はOLS/Logit/Probitの`predict(new_data)`
-  と同じ規約、Issue #131）。engine側の`predict_new_data`は`nonlinear::common::predict_new_data`に
+  と同じ規約、Issue #326）。engine側の`predict_new_data`は`nonlinear::common::predict_new_data`に
   `predicted_value`（`target`・`sigma`・打ち切り境界を閉じ込めたクロージャ）を`link`として渡す
   だけの薄いラッパー。`censoring_fit_check()`のout-of-sample対応は引き続き未対応（4章）。
+- **`augment(target="expected_observed", new_data=None)`は`predict()`と同じ`target`/`new_data`
+  意味論**で、ソースデータに予測値の列を1列付加したpolars DataFrameを返す（Issue #322項目4）。
+  **列名はLogit/Probitの固定名`"probability"`とは異なり`"predicted_{target}"`**（例:
+  `"predicted_expected_observed"`）にした。理由: Tobitは`target`によって`predict()`の意味が
+  変わるため、固定名だと同じDataFrameに複数の`target`を積み上げようとした2回目の`augment()`が
+  列名衝突で失敗する（`target`ごとに別の列名にすればこれを避けられる、ユーザー確認済み・提案）。
+  `TobitResult`も`LogitResult`と同じく`training_data: DataFrame`を保持する。
 - **`pred_table()`は廃止し`censoring_fit_check()`に置き換える**。単一集約値ではなく`lower` /
   `uncensored` / `upper`の**方向別内訳**（`CensoringFitCheck`、該当方向の打ち切りが無ければその
   カテゴリは出力されない）。各カテゴリは`observed_rate`（`y`がちょうど境界値に一致する観測の割合）と
@@ -302,7 +309,7 @@ Tobit固有の差分:
 - **フィクスチャ**（`tobit.json` / `tobit_crosscheck.json`）は`run_tobit_crosscheck.R`の`engine`
   引数（`survreg` / `censReg`）違いで構造が完全に同一のため、pytest本体は`_tobit_checks.py`に
   集約している。
-- **新規データ（out-of-sample）予測値の数値照合（Issue #131）**: `run_tobit_crosscheck.R`が学習
+- **新規データ（out-of-sample）予測値の数値照合（Issue #326）**: `run_tobit_crosscheck.R`が学習
   データの各スロープ列の「平均±1標準偏差」を新規x値とする2行を組み立て（切片列は`model.matrix`の
   規約通り常に1.0）、`predicted_value`（上記のformula非依存検証で既に正しさを確認済みの閉形式）で
   target3種を計算した`predict_new_data`と、その新規x値自体（`new_x`）をフィクスチャに含める。
@@ -313,8 +320,9 @@ Tobit固有の差分:
 
 ## 4. 未実装・未対応
 
-- `predict()`のout-of-sample対応は実装済み（Issue #131、3.6参照）。`censoring_fit_check()`の
+- `predict()`のout-of-sample対応は実装済み（Issue #326、3.6参照）。`censoring_fit_check()`の
   out-of-sample対応は引き続き未実装。
+- `augment()`は実装済み（Issue #322項目4、3.6参照）。
 - `start_params`（ユーザー指定初期値）。
 - **尤度比検定（LR statistic/p-value）**: v1では`llnull`のためのintercept-only再最適化を避けて
   Wald検定を採用した。実装コストは`TobitInput`を`k=1`（切片のみ）で構築し既存のNewton/BFGS/L-BFGS

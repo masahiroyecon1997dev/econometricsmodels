@@ -177,6 +177,31 @@ def test_predict_with_include_intercept_false_and_x_named_const():
     )
 
 
+# ── augment() ────────────────────────────────────────────────────
+
+
+def test_augment_none_returns_training_data_with_probability_column(
+    binary_dataset,
+):
+    _checks.check_augment_none_returns_training_data_with_probability_column(
+        binary_dataset, Probit
+    )
+
+
+def test_augment_new_data_returns_new_data_with_probability_column(
+    binary_dataset,
+):
+    _checks.check_augment_new_data_returns_new_data_with_probability_column(
+        binary_dataset, Probit
+    )
+
+
+def test_augment_without_intercept_matches_predict():
+    _checks.check_augment_without_intercept_matches_predict(
+        Probit, ProbitOptions
+    )
+
+
 # ── pred_table() ─────────────────────────────────────────────────
 
 

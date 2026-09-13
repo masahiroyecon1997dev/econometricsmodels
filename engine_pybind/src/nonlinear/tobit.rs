@@ -29,7 +29,7 @@ use engine::nonlinear::common::{CovType as EngineCovType, Method as EngineMethod
 use engine::nonlinear::tobit::{
     CensoringFitCategory, CensoringFitCheck, MarginalEffectsTarget, TobitEstimator, TobitInput,
 };
-use polars::prelude::DataFrame;
+use polars::prelude::{Column, DataFrame};
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
@@ -41,7 +41,7 @@ use crate::column_extraction::extract_f64_column;
 use crate::errors::ValidationError;
 use crate::validation::{
     RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
-    validate_no_duplicate_within_role, validate_x_non_empty,
+    validate_no_duplicate_within_role, validate_no_existing_column, validate_x_non_empty,
 };
 
 /// Estimation options for Tobit.
@@ -269,6 +269,10 @@ pub struct TobitResult {
     /// Not exposed to Python; only `predict`/`marginal_effects`/`censoring_fit_check`
     /// read it (`LogitResult`の`estimator`と同じ位置づけ)。
     estimator: TobitEstimator,
+    /// The original polars DataFrame passed to `fit()`, cached for
+    /// `augment(new_data=None)` (Issue #322項目4、`LogitResult`の`training_data`と同じ
+    /// 位置づけ)。
+    training_data: DataFrame,
 }
 
 #[pymethods]
@@ -312,6 +316,63 @@ impl TobitResult {
         }
 
         Ok(self.estimator.predict_new_data(target, &x_columns))
+    }
+
+    /// The source data (training data, or `new_data` when given) with the predicted
+    /// values appended as a new column named `"predicted_{target}"`, using the
+    /// lowercased `target` (e.g. `"predicted_expected_observed"` for the default
+    /// `target`).
+    ///
+    /// Same `target`/`new_data`/`include_intercept` semantics as `predict()`, but
+    /// returns a polars DataFrame (original columns plus the predicted column, row
+    /// order preserved) instead of a bare list of floats (same design as
+    /// `LogitResult::augment()`, Issue #322). The column name is `target`-dependent
+    /// (unlike Logit/Probit's fixed `"probability"`) so that `augment()` can be
+    /// called once per `target` on the same DataFrame without a name collision.
+    ///
+    /// # Errors
+    /// - Same as `predict()`: `target` unknown, or a required `x` column missing
+    ///   from `new_data`, non-numeric, or containing missing/NaN/infinite values:
+    ///   `ValidationError`.
+    /// - The source data already has a column named `"predicted_{target}"`:
+    ///   `ValidationError` (would otherwise silently overwrite it).
+    #[pyo3(signature = (target="expected_observed".to_string(), new_data=None))]
+    fn augment(&self, target: String, new_data: Option<PyDataFrame>) -> PyResult<PyDataFrame> {
+        let target_lower = target.to_lowercase();
+        let target_enum = parse_marginal_effects_target(&target_lower)?;
+        let has_intercept = self.estimator.input().has_intercept();
+        let len = self.param_names.len();
+        let x_names: &[String] = if has_intercept {
+            &self.param_names[1..len - 1]
+        } else {
+            &self.param_names[..len - 1]
+        };
+
+        let (mut source, predicted) = match new_data {
+            Some(new_data) => {
+                let df: DataFrame = new_data.into();
+                let mut x_columns: Vec<Vec<f64>> = Vec::with_capacity(x_names.len());
+                for name in x_names {
+                    x_columns.push(extract_f64_column(&df, name)?);
+                }
+                let predicted = self.estimator.predict_new_data(target_enum, &x_columns);
+                (df, predicted)
+            }
+            None => (
+                self.training_data.clone(),
+                self.estimator.predict(target_enum),
+            ),
+        };
+
+        let column_name = format!("predicted_{target_lower}");
+        validate_no_existing_column(&source, &column_name)?;
+
+        // `with_column`の唯一の失敗条件（`ShapeMismatch`）はここでは理論上到達不能
+        // （`LogitResult::augment()`と同じ理由）。
+        source
+            .with_column(Column::new(column_name.into(), predicted))
+            .expect("predicted.len() matches source.height() by construction");
+        Ok(PyDataFrame(source))
     }
 
     /// Marginal effects (`dy/dx`) with delta-method standard errors.
@@ -580,6 +641,7 @@ pub(crate) fn fit(
         lower: options.lower,
         upper: options.upper,
         estimator,
+        training_data: df,
     })
 }
 

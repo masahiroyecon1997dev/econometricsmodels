@@ -337,6 +337,77 @@ def check_predict_new_data_returns_row_oriented_probabilities(
         assert 0.0 <= row["probability"] <= 1.0
 
 
+# ── test_<method>_api.py: augment() ─────────────────────────────────
+
+
+def check_augment_none_returns_training_data_with_probability_column(
+    dataset, estimator_cls
+):
+    """`augment(new_data=None)`が、学習データの全列＋`"probability"`列を
+    持つDataFrameを、`predict()`と同じ予測確率・元データと同じ行順で
+    返すこと（Issue #322項目4）。
+    """
+    res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
+
+    augmented = res.augment()
+
+    assert isinstance(augmented, pl.DataFrame)
+    assert augmented.height == dataset.height
+    assert augmented.columns == [*dataset.columns, "probability"]
+    for col in dataset.columns:
+        assert augmented[col].to_list() == dataset[col].to_list()
+
+    expected = [row["probability"] for row in res.predict()]
+    assert augmented["probability"].to_list() == expected
+
+
+def check_augment_new_data_returns_new_data_with_probability_column(
+    dataset, estimator_cls
+):
+    """`augment(new_data)`が、`new_data`の全列＋`"probability"`列を持つ
+    DataFrameを、`predict(new_data)`と同じ予測確率で返すこと。
+    """
+    res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
+
+    augmented = res.augment(new_data)
+
+    assert isinstance(augmented, pl.DataFrame)
+    assert augmented.height == 2
+    assert augmented.columns == ["x1", "x2", "probability"]
+
+    expected = [row["probability"] for row in res.predict(new_data)]
+    assert augmented["probability"].to_list() == expected
+
+
+def check_augment_without_intercept_matches_predict(
+    estimator_cls, options_cls
+) -> None:
+    """`include_intercept=False`でfitした場合も`augment()`が`predict()`と
+    同じ予測確率を返すこと（`augment()`はRust側で`predict()`とは別に
+    `has_intercept`分岐を実装しているため、個別に確認する。OLSの
+    `test_augment_without_intercept_matches_predict`と同型、Issue #322項目4、
+    python-reviewer指摘）。
+    """
+    df = pl.DataFrame(
+        {
+            "y": [0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0],
+            "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        }
+    )
+    options = options_cls(include_intercept=False)
+    res = estimator_cls(df, y="y", x=["x1"], options=options).fit()
+
+    augmented_none = res.augment()
+    expected_none = [row["probability"] for row in res.predict()]
+    assert augmented_none["probability"].to_list() == expected_none
+
+    new_data = pl.DataFrame({"x1": [10.0, 20.0]})
+    augmented_new = res.augment(new_data)
+    expected_new = [row["probability"] for row in res.predict(new_data)]
+    assert augmented_new["probability"].to_list() == expected_new
+
+
 # ── test_<method>_api.py: pred_table() ──────────────────────────────
 
 
@@ -559,6 +630,44 @@ def check_predict_null_or_non_finite_values_raise(dataset, estimator_cls):
         ),
     ):
         res.predict(new_data_inf)
+
+
+def check_augment_column_collision_raises(dataset, estimator_cls):
+    """元データ（`new_data=None`）・`new_data`のいずれかに既に`"probability"`
+    列がある場合`ValidationError`（黙って上書きしない、Issue #322項目4、
+    OLSの`test_augment_column_collision_raises`と同型）。
+    """
+    df_with_probability = dataset.with_columns(
+        pl.lit(0.0).alias("probability")
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.EXISTING_COLUMN_COLLISION, name="probability"),
+    ):
+        estimator_cls(
+            df_with_probability, y="y", x=["x1", "x2"]
+        ).fit().augment()
+
+    res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": [1.0], "x2": [0.5], "probability": [0.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.EXISTING_COLUMN_COLLISION, name="probability"),
+    ):
+        res.augment(new_data)
+
+
+def check_augment_missing_column_raises(dataset, estimator_cls):
+    """`augment()`も`predict()`と同じ`extract_f64_column`経路を通るため、
+    `new_data`に`x`列が欠けていると`ValidationError`。
+    """
+    res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
+
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    ):
+        res.augment(new_data)
 
 
 # ── test_<method>_validation.py: ValidationError（オプション） ─────

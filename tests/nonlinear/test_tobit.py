@@ -279,6 +279,143 @@ def test_predict_null_or_non_finite_values_raise(censored_dataset):
         res.predict(new_data=new_data_inf)
 
 
+# ── augment() ──────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "target", ["expected_latent", "expected_observed", "prob_uncensored"]
+)
+def test_augment_none_returns_training_data_with_predicted_column(
+    censored_dataset, target
+):
+    """`augment(new_data=None)`が、学習データの全列＋`"predicted_{target}"`
+    列を持つDataFrameを、`predict()`と同じ予測値・元データと同じ行順で
+    返すこと（Issue #322項目4）。
+    """
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+
+    augmented = res.augment(target=target)
+    column_name = f"predicted_{target}"
+
+    assert isinstance(augmented, pl.DataFrame)
+    assert augmented.height == censored_dataset.height
+    assert augmented.columns == [*censored_dataset.columns, column_name]
+    for col in censored_dataset.columns:
+        assert augmented[col].to_list() == censored_dataset[col].to_list()
+
+    expected = [row["predicted"] for row in res.predict(target=target)]
+    assert augmented[column_name].to_list() == expected
+
+
+def test_augment_new_data_returns_new_data_with_predicted_column(
+    censored_dataset,
+):
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
+
+    augmented = res.augment(target="expected_observed", new_data=new_data)
+
+    assert isinstance(augmented, pl.DataFrame)
+    assert augmented.height == 2
+    assert augmented.columns == ["x1", "x2", "predicted_expected_observed"]
+
+    expected = [
+        row["predicted"]
+        for row in res.predict(target="expected_observed", new_data=new_data)
+    ]
+    assert augmented["predicted_expected_observed"].to_list() == expected
+
+
+def test_augment_without_intercept_matches_predict(censored_dataset):
+    """`include_intercept=False`でfitした場合も`augment()`が`predict()`と
+    同じ予測値を返すこと（`augment()`はRust側で`predict()`とは別に
+    `has_intercept`分岐を実装しているため、個別に確認する。OLSの
+    `test_augment_without_intercept_matches_predict`と同型、Issue #322項目4、
+    python-reviewer指摘）。
+    """
+    options = TobitOptions(include_intercept=False)
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+    augmented_none = res.augment()
+    expected_none = [row["predicted"] for row in res.predict()]
+    assert (
+        augmented_none["predicted_expected_observed"].to_list()
+        == expected_none
+    )
+
+    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
+    augmented_new = res.augment(new_data=new_data)
+    expected_new = [row["predicted"] for row in res.predict(new_data=new_data)]
+    assert (
+        augmented_new["predicted_expected_observed"].to_list() == expected_new
+    )
+
+
+def test_augment_different_targets_do_not_collide_on_same_dataframe(
+    censored_dataset,
+):
+    """`predicted_{target}`という列名にした狙い（ユーザー確認済み）:
+    Logit/Probitのような固定名`"probability"`だと、複数の`target`を
+    同じDataFrameに積み上げようとした2回目の`augment()`呼び出しが列名衝突で
+    失敗する。`target`依存の列名ならこれが起きない。
+    """
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+
+    once = res.augment(target="expected_observed")
+    twice = res.augment(target="prob_uncensored", new_data=once)
+
+    assert "predicted_expected_observed" in twice.columns
+    assert "predicted_prob_uncensored" in twice.columns
+
+
+def test_augment_unknown_target_raises(censored_dataset):
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_MARGINAL_EFFECTS_TARGET, other="bogus"),
+    ):
+        res.augment(target="bogus")
+
+
+def test_augment_column_collision_raises(censored_dataset):
+    """元データ（`new_data=None`）・`new_data`のいずれかに既に
+    `"predicted_expected_observed"`列がある場合`ValidationError`
+    （黙って上書きしない、Issue #322項目4）。
+    """
+    df_with_predicted = censored_dataset.with_columns(
+        pl.lit(0.0).alias("predicted_expected_observed")
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.EXISTING_COLUMN_COLLISION, name="predicted_expected_observed"
+        ),
+    ):
+        Tobit(df_with_predicted, y="y", x=["x1", "x2"]).fit().augment()
+
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame(
+        {"x1": [1.0], "x2": [0.5], "predicted_expected_observed": [0.0]}
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.EXISTING_COLUMN_COLLISION, name="predicted_expected_observed"
+        ),
+    ):
+        res.augment(new_data=new_data)
+
+
+def test_augment_missing_column_raises(censored_dataset):
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
+
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    ):
+        res.augment(new_data=new_data)
+
+
 def test_censoring_fit_check_structure(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     check = res.censoring_fit_check()

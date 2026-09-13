@@ -284,6 +284,32 @@ class ProbitResults:
         """
         return [{"probability": p} for p in self._raw.predict(new_data)]
 
+    def augment(self, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
+        """Source data with the predicted probabilities appended as a
+        column.
+
+        Same `new_data` semantics as `predict()`, but returns a polars
+        DataFrame (the training data, or `new_data` when given, plus a
+        new `"probability"` column) instead of a row-oriented list.
+        See `OlsResults.augment()` for the project's general policy on
+        this DataFrame-returning exception.
+
+        Args:
+            new_data: Same as `predict()`. If `None` (default), returns
+                the training data used in `fit()` with the predicted
+                probabilities appended.
+
+        Returns:
+            A polars DataFrame: the source data's columns plus
+            `"probability"`, in the same row order as the source.
+
+        Raises:
+            ValidationError: Same as `predict()`, or the source data
+                already has a column named `"probability"` (which
+                would otherwise be silently overwritten).
+        """
+        return self._raw.augment(new_data)
+
     def pred_table(self, threshold: float = 0.5) -> list[dict[str, float]]:
         """Classification (confusion) table.
 

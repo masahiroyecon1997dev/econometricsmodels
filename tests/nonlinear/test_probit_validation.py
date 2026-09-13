@@ -81,6 +81,17 @@ def test_predict_null_or_non_finite_values_raise(binary_dataset):
     )
 
 
+# ── ValidationError（augment()） ────────────────────────────────────
+
+
+def test_augment_column_collision_raises(binary_dataset):
+    _checks.check_augment_column_collision_raises(binary_dataset, Probit)
+
+
+def test_augment_missing_column_raises(binary_dataset):
+    _checks.check_augment_missing_column_raises(binary_dataset, Probit)
+
+
 # ── ValidationError（オプション） ──────────────────────────────────
 
 

@@ -208,7 +208,7 @@ Issue #307）。
 （`dydx_and_jacobian`/`marginal_effects_from_w_s`）はリンク関数に依存しないためProbitと共有する
 （`nonlinear/common.rs`）。
 
-### 3.6 predict() / pred_table()
+### 3.6 predict() / augment() / pred_table()
 
 `predict(new_data=None)`は`p_i=Λ(x_i'θ)`を返す。`new_data`が`None`（既定）なら学習データ
 （`fit()`に使ったデータ）に対する予測確率、指定すれば新規データ（out-of-sample）に対する予測確率を
@@ -231,6 +231,13 @@ Issue #307）。
   欲しい場合は`predict()`の出力に自前でしきい値を適用するか、学習データに限り`pred_table()`を使う。
   これはstatsmodelsの`predict()`と同じ標準的な慣習であり、キー名を`"predicted"`に統一する変更は
   行わない（`docs/planning/specs/refactoring-candidates-2.md`項目80、Issue #322項目3で結論）。
+- **`augment(new_data=None)`は`predict()`と同じ`new_data`意味論**で、ソースデータ（学習データまたは
+  `new_data`）に予測確率の列（`"probability"`）を1列付加したpolars DataFrameを返す（OLSの
+  `augment()`と同型、Issue #295/#322項目4）。列名衝突（ソースデータに既に`"probability"`列が
+  ある場合）は`ValidationError`（`engine_pybind::validation::validate_no_existing_column`）。
+  `LogitResult`は`fit()`時の元DataFrameを非公開`training_data: DataFrame`として保持する
+  （`IvResult.first_stage()`のような単一DataFrameを持たない構築経路が無いため、OLSと異なり
+  `Option`にせず常に`DataFrame`、`WLSResult`と同じ設計）。
 
 ### 3.7 engine_pybind: エラー変換
 
@@ -269,6 +276,7 @@ Issue #307）。
 
 - `predict()`のout-of-sample対応（`new_data`引数）は実装済み（Issue #131、3.6参照）。
   `pred_table()`のout-of-sample対応は引き続き未実装（別issueでトラッキング）。
+- `augment()`は実装済み（Issue #322項目4、3.6参照）。
 - `start_params`（ユーザー指定初期値）
 - `SEPARATION_PARAM_NORM_THRESHOLD`の誤検知リスク（Issue #321）: 当初「k大で穏やかな係数が
   積み重なる」ケースを懸念していたが、2026-09-13の実測で真のメカニズムは**強い多重共線性**と

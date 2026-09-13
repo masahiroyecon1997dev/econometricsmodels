@@ -21,7 +21,7 @@
 
 use engine::nonlinear::common::{CovType as EngineCovType, Method as EngineMethod, MleFitOptions};
 use engine::nonlinear::logit::{LogitEstimator, LogitInput};
-use polars::prelude::DataFrame;
+use polars::prelude::{Column, DataFrame};
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
@@ -32,7 +32,7 @@ use super::common::{
 use crate::column_extraction::extract_f64_column;
 use crate::validation::{
     RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
-    validate_no_duplicate_within_role, validate_x_non_empty,
+    validate_no_duplicate_within_role, validate_no_existing_column, validate_x_non_empty,
 };
 
 /// Estimation options for Logit.
@@ -245,6 +245,12 @@ pub struct LogitResult {
     /// Not exposed to Python; only `predict`/`pred_table`/`marginal_effects` read it
     /// (`OLSResult`の`fitted_values`/`has_intercept`と同じ位置づけ、コメント参照)。
     estimator: LogitEstimator,
+    /// The original polars DataFrame passed to `fit()`, cached for
+    /// `augment(new_data=None)` (Issue #322項目4). A cheap clone (polars columns are
+    /// internally reference-counted). `LogitResult` is only ever built from this
+    /// file's `fit()` (unlike `OLSResult`, shared with `IvResult.first_stage()`), so
+    /// this is never absent (`WLSResult`と同じ理由、`DataFrame`のまま`Option`にしない)。
+    training_data: DataFrame,
 }
 
 #[pymethods]
@@ -276,6 +282,53 @@ impl LogitResult {
         }
 
         Ok(self.estimator.predict_new_data(&x_columns))
+    }
+
+    /// The source data (training data, or `new_data` when given) with the predicted
+    /// probabilities appended as a new `"probability"` column.
+    ///
+    /// Same `new_data`/`include_intercept` semantics as `predict()`, but returns a
+    /// polars DataFrame (original columns plus `"probability"`, row order preserved)
+    /// instead of a bare list of floats (same design as `OLSResult::augment()`,
+    /// Issue #295/#322).
+    ///
+    /// # Errors
+    /// - Same as `predict()`: a required `x` column missing from `new_data`,
+    ///   non-numeric, or containing missing/NaN/infinite values: `ValidationError`.
+    /// - The source data already has a column named `"probability"`:
+    ///   `ValidationError` (would otherwise silently overwrite it).
+    #[pyo3(signature = (new_data=None))]
+    fn augment(&self, new_data: Option<PyDataFrame>) -> PyResult<PyDataFrame> {
+        let has_intercept = self.estimator.input().has_intercept();
+        let x_names: &[String] = if has_intercept {
+            &self.param_names[1..]
+        } else {
+            &self.param_names[..]
+        };
+
+        let (mut source, probability) = match new_data {
+            Some(new_data) => {
+                let df: DataFrame = new_data.into();
+                let mut x_columns: Vec<Vec<f64>> = Vec::with_capacity(x_names.len());
+                for name in x_names {
+                    x_columns.push(extract_f64_column(&df, name)?);
+                }
+                let probability = self.estimator.predict_new_data(&x_columns);
+                (df, probability)
+            }
+            None => (self.training_data.clone(), self.estimator.predict()),
+        };
+
+        validate_no_existing_column(&source, "probability")?;
+
+        // `with_column`の唯一の失敗条件（`ShapeMismatch`）はここでは理論上到達不能
+        // （`OLSResult::augment()`と同じ理由: `new_data`指定時は`source`自身から
+        // 抽出した列と同じ観測数から`probability`を計算し、`None`時は`predict()`と
+        // `training_data`が同じ`fit()`呼び出しの同じ`n`に由来するペアのため）。
+        source
+            .with_column(Column::new("probability".into(), probability))
+            .expect("probability.len() matches source.height() by construction");
+        Ok(PyDataFrame(source))
     }
 
     /// 2x2 classification table as `[[row0], [row1]]`, where row/column index 0 is the
@@ -426,6 +479,7 @@ pub(crate) fn fit(
         cov_type: options.cov_type.to_lowercase(),
         method: options.method.to_lowercase(),
         estimator,
+        training_data: df,
     })
 }
 

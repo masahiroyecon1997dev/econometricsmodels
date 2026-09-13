@@ -72,11 +72,16 @@ NUMERIC_SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "high_condition_number",
+    # scale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）より
+    # 緩いスケール差（x1*1e2, x2*1e-1）の成功パス（test-coverage-candidates.md
+    # 項目11、generate_iv_fixtures.pyと同じ構成、ユーザー確認済み）。
+    "scale_variance_mild",
 ]
 INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
 X_EXOG_BY_SCENARIO = {
     "moderate_multicollinearity": ["x1", "x2"],
     "high_condition_number": ["x1", "x2"],
+    "scale_variance_mild": ["x1", "x2"],
 }
 COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster"]
 
@@ -298,6 +303,10 @@ def build_fixtures() -> dict:
             "実測値、ユーザー確認済み）。"
             "t_stats/p_values/conf_intはcoeftest()・手計算信頼区間から、"
             "nobs/df_residはnrow(df)・df_inferenceから抽出する。"
+            "scale_variance_mildはscale_variance（x1*1e6, x2*1e-3、全cov_typeで"
+            "ComputationError）より緩いスケール差（x1*1e2, x2*1e-1）の成功パス"
+            "（test-coverage-candidates.md項目11、generate_iv_fixtures.pyと"
+            "同じ構成）。"
             "perfect_multicollinearityはここに含まない（ComputationErrorの"
             "発生確認のみ、テストコード側で対応）。cluster_g2（G=2境界の成功"
             "パス）は`engine/src/iv/CLAUDE.md`「修正済み」に記録の`k_constant`"

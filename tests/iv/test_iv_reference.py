@@ -1,7 +1,7 @@
 """IV(2SLS)の主リファレンス（linearmodels）による数値比較テスト。
 
 `tests/fixtures/benchmarks/iv.json`（`benchmark/iv/fixtures/
-generate_iv_fixtures.py`で生成）を読み込み、8つの合成データシナリオ×
+generate_iv_fixtures.py`で生成）を読み込み、10個の合成データシナリオ×
 classical/HC0/HC1/HAC（+クラスター、baselineのみ）で、係数・標準誤差・
 検定統計量・適合度統計量・診断統計量を相対誤差1e-8で厳密比較する
 （`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。
@@ -90,6 +90,7 @@ INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
 X_EXOG_BY_SCENARIO = {
     "moderate_multicollinearity": ["x1", "x2"],
     "high_condition_number": ["x1", "x2"],
+    "scale_variance_mild": ["x1", "x2"],
 }
 
 # HACラグ: `IvOptions.hac_lags`未指定（自動計算）で、`engine::iv::two_sls::

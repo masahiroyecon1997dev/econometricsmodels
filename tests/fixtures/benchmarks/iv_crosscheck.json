@@ -2908,6 +2908,351 @@
         "hac_lag": 5
       }
     },
+    "scale_variance_mild": {
+      "classical": {
+        "coef": {
+          "const": 0.340046083368352,
+          "x1": 0.010540145404244,
+          "x2": -2.27810785900189,
+          "endog1": 1.42968265049113
+        },
+        "se": {
+          "const": 0.058799555716942,
+          "x1": 0.000474146234815437,
+          "x2": 0.479486016903975,
+          "endog1": 0.0613079897906075
+        },
+        "t_stats": {
+          "const": 5.7831403523747,
+          "x1": 22.2297355336941,
+          "x2": -4.75114555730229,
+          "endog1": 23.3196791376473
+        },
+        "p_values": {
+          "const": 1.29890927483079e-08,
+          "x1": 1.77184539601256e-76,
+          "x2": 2.65276005428258e-06,
+          "endog1": 9.31267346482954e-82
+        },
+        "conf_int": {
+          "const": [
+            0.224519169222833,
+            0.45557299751387
+          ],
+          "x1": [
+            0.0096085626619247,
+            0.0114717281465632
+          ],
+          "x2": [
+            -3.2201819824103,
+            -1.33603373559348
+          ],
+          "endog1": [
+            1.30922726972142,
+            1.55013803126083
+          ]
+        },
+        "nobs": 500,
+        "df_resid": 496,
+        "r_squared": 0.848441734928431,
+        "r_squared_adj": 0.847525051873562,
+        "f_statistic": 339.889468131282,
+        "f_p_value": 0,
+        "weak_instrument_f": {
+          "endog1": 143.000116914637
+        },
+        "sargan_statistic": 1.48241697106155,
+        "sargan_p_value": 0.223396747329449,
+        "wu_hausman_statistic": 100.378739580274,
+        "wu_hausman_p_value": 1.23090850097139e-21
+      },
+      "hc0": {
+        "coef": {
+          "const": 0.340046083368352,
+          "x1": 0.010540145404244,
+          "x2": -2.27810785900189,
+          "endog1": 1.42968265049113
+        },
+        "se": {
+          "const": 0.0591444491029692,
+          "x1": 0.000489304280329022,
+          "x2": 0.472642443757547,
+          "endog1": 0.0609634252557356
+        },
+        "t_stats": {
+          "const": 5.74941669972002,
+          "x1": 21.5410856352135,
+          "x2": -4.81993923544137,
+          "endog1": 23.4514816792814
+        },
+        "p_values": {
+          "const": 1.56665334781796e-08,
+          "x1": 3.84639807656625e-73,
+          "x2": 1.9121283660635e-06,
+          "endog1": 2.14421816574512e-82
+        },
+        "conf_int": {
+          "const": [
+            0.223841537085803,
+            0.456250629650901
+          ],
+          "x1": [
+            0.00957878076644419,
+            0.0115015100420437
+          ],
+          "x2": [
+            -3.20673601538392,
+            -1.34947970261986
+          ],
+          "endog1": [
+            1.30990425574542,
+            1.54946104523683
+          ]
+        },
+        "nobs": 500,
+        "df_resid": 496,
+        "r_squared": 0.848441734928431,
+        "r_squared_adj": 0.847525051873562,
+        "f_statistic": 310.078869312139,
+        "f_p_value": 0,
+        "weak_instrument_f": {
+          "endog1": 143.000116914637
+        },
+        "sargan_statistic": 1.48241697106155,
+        "sargan_p_value": 0.223396747329449,
+        "wu_hausman_statistic": 110.927059582874,
+        "wu_hausman_p_value": 1.53124381381211e-23
+      },
+      "hc1": {
+        "coef": {
+          "const": 0.340046083368352,
+          "x1": 0.010540145404244,
+          "x2": -2.27810785900189,
+          "endog1": 1.42968265049113
+        },
+        "se": {
+          "const": 0.0593824558959936,
+          "x1": 0.000491273319593747,
+          "x2": 0.474544433107217,
+          "endog1": 0.0612087519018869
+        },
+        "t_stats": {
+          "const": 5.72637285268112,
+          "x1": 21.4547482712068,
+          "x2": -4.80062076397212,
+          "endog1": 23.3574873864901
+        },
+        "p_values": {
+          "const": 1.77977649652932e-08,
+          "x1": 1.00745328479503e-72,
+          "x2": 2.09709022255991e-06,
+          "endog1": 6.11079096981192e-82
+        },
+        "conf_int": {
+          "const": [
+            0.223373911267741,
+            0.456718255468962
+          ],
+          "x1": [
+            0.00957491208023881,
+            0.0115053787282491
+          ],
+          "x2": [
+            -3.21047296471331,
+            -1.34574275329047
+          ],
+          "endog1": [
+            1.30942224818529,
+            1.54994305279696
+          ]
+        },
+        "nobs": 500,
+        "df_resid": 496,
+        "r_squared": 0.848441734928431,
+        "r_squared_adj": 0.847525051873562,
+        "f_statistic": 307.598238357642,
+        "f_p_value": 0,
+        "weak_instrument_f": {
+          "endog1": 143.000116914637
+        },
+        "sargan_statistic": 1.48241697106155,
+        "sargan_p_value": 0.223396747329449,
+        "wu_hausman_statistic": 109.817788987046,
+        "wu_hausman_p_value": 2.4196331443978e-23
+      },
+      "hc2": {
+        "coef": {
+          "const": 0.340046083368352,
+          "x1": 0.010540145404244,
+          "x2": -2.27810785900189,
+          "endog1": 1.42968265049113
+        },
+        "se": {
+          "const": 0.0594234174711279,
+          "x1": 0.000492275529971554,
+          "x2": 0.475440836793157,
+          "endog1": 0.061330154775171
+        },
+        "t_stats": {
+          "const": 5.72242556620999,
+          "x1": 21.4110691320632,
+          "x2": -4.7915695975291,
+          "endog1": 23.3112513042266
+        },
+        "p_values": {
+          "const": 1.81901194450311e-08,
+          "x1": 1.63969052584752e-72,
+          "x2": 2.18956812935319e-06,
+          "endog1": 1.02297206043206e-81
+        },
+        "conf_int": {
+          "const": [
+            0.223293431673702,
+            0.456798735063002
+          ],
+          "x1": [
+            0.00957294297909747,
+            0.0115073478293905
+          ],
+          "x2": [
+            -3.21223418128039,
+            -1.34398153672339
+          ],
+          "endog1": [
+            1.3091837208844,
+            1.55018158009785
+          ]
+        },
+        "nobs": 500,
+        "df_resid": 496,
+        "r_squared": 0.848441734928431,
+        "r_squared_adj": 0.847525051873562,
+        "f_statistic": 306.167876418237,
+        "f_p_value": 0,
+        "weak_instrument_f": {
+          "endog1": 143.000116914637
+        },
+        "sargan_statistic": 1.48241697106155,
+        "sargan_p_value": 0.223396747329449,
+        "wu_hausman_statistic": 109.4125962669,
+        "wu_hausman_p_value": 2.86040466540227e-23
+      },
+      "hc3": {
+        "coef": {
+          "const": 0.340046083368352,
+          "x1": 0.010540145404244,
+          "x2": -2.27810785900189,
+          "endog1": 1.42968265049113
+        },
+        "se": {
+          "const": 0.0597046709458745,
+          "x1": 0.000495272371673404,
+          "x2": 0.478265388347666,
+          "endog1": 0.0617002845245555
+        },
+        "t_stats": {
+          "const": 5.69546867910254,
+          "x1": 21.2815129756409,
+          "x2": -4.76327142733955,
+          "endog1": 23.1714109830748
+        },
+        "p_values": {
+          "const": 2.11040156742007e-08,
+          "x1": 6.95194946115076e-72,
+          "x2": 2.50473115205402e-06,
+          "endog1": 4.8615109131886e-81
+        },
+        "conf_int": {
+          "const": [
+            0.222740836579504,
+            0.4573513301572
+          ],
+          "x1": [
+            0.00956705490954021,
+            0.0115132358989477
+          ],
+          "x2": [
+            -3.21778374234354,
+            -1.33843197566024
+          ],
+          "endog1": [
+            1.30845650539342,
+            1.55090879558883
+          ]
+        },
+        "nobs": 500,
+        "df_resid": 496,
+        "r_squared": 0.848441734928431,
+        "r_squared_adj": 0.847525051873562,
+        "f_statistic": 302.295486904595,
+        "f_p_value": 0,
+        "weak_instrument_f": {
+          "endog1": 143.000116914637
+        },
+        "sargan_statistic": 1.48241697106155,
+        "sargan_p_value": 0.223396747329449,
+        "wu_hausman_statistic": 107.913464015874,
+        "wu_hausman_p_value": 5.31821921553511e-23
+      },
+      "hac": {
+        "coef": {
+          "const": 0.340046083368352,
+          "x1": 0.010540145404244,
+          "x2": -2.27810785900189,
+          "endog1": 1.42968265049113
+        },
+        "se": {
+          "const": 0.0568946963936402,
+          "x1": 0.000466872800836109,
+          "x2": 0.485211245246707,
+          "endog1": 0.0619179788118231
+        },
+        "t_stats": {
+          "const": 5.97676242115184,
+          "x1": 22.5760536603716,
+          "x2": -4.69508462822946,
+          "endog1": 23.0899437921919
+        },
+        "p_values": {
+          "const": 4.35233028725421e-09,
+          "x1": 3.71819509397635e-78,
+          "x2": 3.4537666700376e-06,
+          "endog1": 1.20559734485439e-80
+        },
+        "conf_int": {
+          "const": [
+            0.228261757356692,
+            0.451830409380012
+          ],
+          "x1": [
+            0.00962285320158316,
+            0.0114574376069048
+          ],
+          "x2": [
+            -3.23143067222011,
+            -1.32478504578367
+          ],
+          "endog1": [
+            1.3080287887393,
+            1.55133651224295
+          ]
+        },
+        "nobs": 500,
+        "df_resid": 496,
+        "r_squared": 0.848441734928431,
+        "r_squared_adj": 0.847525051873562,
+        "f_statistic": 318.798356454952,
+        "f_p_value": 0,
+        "weak_instrument_f": {
+          "endog1": 143.000116914637
+        },
+        "sargan_statistic": 1.48241697106155,
+        "sargan_p_value": 0.223396747329449,
+        "wu_hausman_statistic": 105.538192134363,
+        "wu_hausman_p_value": 1.42546791683389e-22,
+        "hac_lag": 5
+      }
+    },
     "multi_endog": {
       "classical": {
         "coef": {
@@ -4003,9 +4348,9 @@
   "_meta": {
     "method": "2sls",
     "purpose": "linearmodels主リファレンス（iv.json）とは独立した実装（R: ivreg + sandwich/lmtest）によるクロスチェック用。係数・標準誤差・t値・p値・信頼区間・nobs/df_resid・R²・ロバストWald検定（f_statistic/f_p_value）・弱操作変数F統計量・Sargan（過剰識別検定）・Wu-Hausman（全cov_type、clusterのみp値除く）を含む（iv-api-design.md 5.2節）",
-    "generated_at": "2026-09-12T06:26:53.187185+00:00",
+    "generated_at": "2026-09-13T06:54:24.625602+00:00",
     "r_version": "4.5.3",
     "ivreg_version": "0.6.8",
-    "note": "hc2/hc3も`vcovHC(type=\"HC2\"/\"HC3\")`で計算し含める（本実装と数値一致することを実機確認済み、iv-api-design.md 3.1節）。GMMはivregが対応していないため対象外（5.3節、Rクロスチェック省略の例外規定）。weak_instrument_f・sargan_statistic/sargan_p_valueはivregのsummary(diagnostics=TRUE)が常にclassical vcovで計算する仕様のため、全cov_typeエントリで同じ値になる（実測確認済み）。just_identifiedシナリオはsargan_statistic/sargan_p_valueがnull（丁度識別）。wu_hausman_statistic/wu_hausman_p_valueは全cov_typeで実測値を持つ（`summary(diagnostics=TRUE, vcov.=<関数>)`で本実装と同じcov_type別のロバスト共分散を診断表に反映できることが判明、benchmark/iv/references/run_ivreg.Rのモジュールコメント参照）。ただしclustercov_typeのみ、ivreg側のWald検定がF分布の分母自由度にクラスター数を反映しない既知の制約により、wu_hausman_p_valueがnull（statisticのみ実測値、ユーザー確認済み）。t_stats/p_values/conf_intはcoeftest()・手計算信頼区間から、nobs/df_residはnrow(df)・df_inferenceから抽出する。perfect_multicollinearityはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。cluster_g2（G=2境界の成功パス）は`engine/src/iv/CLAUDE.md`「修正済み」に記録の`k_constant`取り違えバグの修正後にフィクスチャ化した。multi_endog（複数内生変数、x_endog=['endog1','endog2']）はbenchmark/iv/datasets.pyの第一段階誤差vが内生変数ごとに独立になるよう修正した後のデータで生成（generate_iv_fixtures.pyの同名注記参照）。weak_instrument_fは内生変数名をキーにしたdict（本実装のweak_instrument_f_statisticsと同じ形、benchmark/iv/references/run_ivreg.R参照）。df1（自由度1境界、n=3・x_exog=[]・x_endog=['endog1']・instruments=['z1']）は境界値・悪条件シナリオの一環。cluster cov_typeはn=3では意味のあるクラスタ数を確保できないため対象外。wooldridge.card（Wooldridge実データ、Card 1995、`generate_iv_fixtures.py`のCARD_X_EXOGと同じ構成）はcluster cov_typeを除く4種のみ（対応する自然なカテゴリ列が無いため）。"
+    "note": "hc2/hc3も`vcovHC(type=\"HC2\"/\"HC3\")`で計算し含める（本実装と数値一致することを実機確認済み、iv-api-design.md 3.1節）。GMMはivregが対応していないため対象外（5.3節、Rクロスチェック省略の例外規定）。weak_instrument_f・sargan_statistic/sargan_p_valueはivregのsummary(diagnostics=TRUE)が常にclassical vcovで計算する仕様のため、全cov_typeエントリで同じ値になる（実測確認済み）。just_identifiedシナリオはsargan_statistic/sargan_p_valueがnull（丁度識別）。wu_hausman_statistic/wu_hausman_p_valueは全cov_typeで実測値を持つ（`summary(diagnostics=TRUE, vcov.=<関数>)`で本実装と同じcov_type別のロバスト共分散を診断表に反映できることが判明、benchmark/iv/references/run_ivreg.Rのモジュールコメント参照）。ただしclustercov_typeのみ、ivreg側のWald検定がF分布の分母自由度にクラスター数を反映しない既知の制約により、wu_hausman_p_valueがnull（statisticのみ実測値、ユーザー確認済み）。t_stats/p_values/conf_intはcoeftest()・手計算信頼区間から、nobs/df_residはnrow(df)・df_inferenceから抽出する。scale_variance_mildはscale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）より緩いスケール差（x1*1e2, x2*1e-1）の成功パス（test-coverage-candidates.md項目11、generate_iv_fixtures.pyと同じ構成）。perfect_multicollinearityはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。cluster_g2（G=2境界の成功パス）は`engine/src/iv/CLAUDE.md`「修正済み」に記録の`k_constant`取り違えバグの修正後にフィクスチャ化した。multi_endog（複数内生変数、x_endog=['endog1','endog2']）はbenchmark/iv/datasets.pyの第一段階誤差vが内生変数ごとに独立になるよう修正した後のデータで生成（generate_iv_fixtures.pyの同名注記参照）。weak_instrument_fは内生変数名をキーにしたdict（本実装のweak_instrument_f_statisticsと同じ形、benchmark/iv/references/run_ivreg.R参照）。df1（自由度1境界、n=3・x_exog=[]・x_endog=['endog1']・instruments=['z1']）は境界値・悪条件シナリオの一環。cluster cov_typeはn=3では意味のあるクラスタ数を確保できないため対象外。wooldridge.card（Wooldridge実データ、Card 1995、`generate_iv_fixtures.py`のCARD_X_EXOGと同じ構成）はcluster cov_typeを除く4種のみ（対応する自然なカテゴリ列が無いため）。"
   }
 }

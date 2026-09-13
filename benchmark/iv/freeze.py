@@ -14,12 +14,14 @@ from benchmark.iv.datasets import SCENARIOS as IV_SCENARIOS
 from benchmark.iv.datasets import generate_iv_dataset
 
 # datasets.pyのSCENARIOS（IV: 2SLS/GMM用の全シナリオ）をそのまま使う。
-# moderate_multicollinearity/high_condition_number/scale_varianceはk_exog=2、
-# perfect_multicollinearityはk_exog=3が必要（datasets.pyのdocstring参照）。
+# moderate_multicollinearity/high_condition_number/scale_variance/
+# scale_variance_mildはk_exog=2、perfect_multicollinearityはk_exog=3が必要
+# （datasets.pyのdocstring参照）。
 IV_K_EXOG_OVERRIDES = {
     "moderate_multicollinearity": 2,
     "high_condition_number": 2,
     "scale_variance": 2,
+    "scale_variance_mild": 2,
     "perfect_multicollinearity": 3,
 }
 

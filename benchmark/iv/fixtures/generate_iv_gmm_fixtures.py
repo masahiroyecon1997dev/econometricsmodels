@@ -12,8 +12,8 @@ GMM固有の`weight_type`軸（`cov_type`とは独立、`iv-api-design.md`6.2節
 既存方針（`ols.json`/`wls.json`）に倣った（ユーザー確認済み）。
 
 検証範囲（ユーザー確認済み、`cov_type`×`weight_type`の全組み合わせ
-（8シナリオ×4weight_type×6cov_type）は規模が大きすぎるため）:
-    - `weight_type="unadjusted"`固定で、全8シナリオ×cov_type（classical/hc0/hc1/
+（10シナリオ×4weight_type×6cov_type）は規模が大きすぎるため）:
+    - `weight_type="unadjusted"`固定で、全10シナリオ×cov_type（classical/hc0/hc1/
       hac、baselineのみ追加でcluster/cluster_imbalanced）を検証する
       （2SLSの`iv.json`と同じ組み合わせ）。
     - 他のweight_type（robust/cluster/kernel）は、`weight_type`と`cov_type`が
@@ -58,6 +58,10 @@ NUMERIC_SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "high_condition_number",
+    # scale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）より
+    # 緩いスケール差（x1*1e2, x2*1e-1）の成功パス（test-coverage-candidates.md
+    # 項目11、generate_iv_fixtures.pyと同じ構成、ユーザー確認済み）。
+    "scale_variance_mild",
 ]
 
 INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
@@ -65,6 +69,7 @@ INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
 X_EXOG_BY_SCENARIO = {
     "moderate_multicollinearity": ["x1", "x2"],
     "high_condition_number": ["x1", "x2"],
+    "scale_variance_mild": ["x1", "x2"],
 }
 
 COV_TYPES = ["classical", "hc0", "hc1", "hac"]
@@ -174,9 +179,13 @@ def build_fixtures() -> dict:
         "primary_reference": "linearmodels",
         "linearmodels_version": linearmodels.__version__,
         "note": (
-            "weight_type='unadjusted'固定で全8シナリオ×cov_type"
+            "weight_type='unadjusted'固定で全10シナリオ×cov_type"
             "（classical/hc0/hc1/hac、baselineのみ追加でcluster/"
-            "cluster_imbalanced）を検証する。hc2/hc3は2SLSと同じ理由で対象外"
+            "cluster_imbalanced）を検証する。scale_variance_mildは"
+            "scale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）"
+            "より緩いスケール差（x1*1e2, x2*1e-1）の成功パス"
+            "（test-coverage-candidates.md項目11、2SLSのiv.jsonと同じ構成）。"
+            "hc2/hc3は2SLSと同じ理由で対象外"
             "（`benchmark/iv/references/linearmodels_ref.py`のモジュールdoc"
             "コメント参照）。"
             "他のweight_type（robust/cluster/kernel）はweight_typeとcov_typeが"

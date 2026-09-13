@@ -119,6 +119,7 @@ INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
 X_EXOG_BY_SCENARIO = {
     "moderate_multicollinearity": ["x1", "x2"],
     "high_condition_number": ["x1", "x2"],
+    "scale_variance_mild": ["x1", "x2"],
 }
 
 

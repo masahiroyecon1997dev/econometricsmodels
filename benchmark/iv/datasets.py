@@ -65,6 +65,7 @@ SCENARIOS = [
     "high_condition_number",
     "perfect_multicollinearity",
     "scale_variance",
+    "scale_variance_mild",
 ]
 
 # 内生性の強さ: 構造誤差uと第一段階誤差vの相関（シナリオ間で共通の固定値）。
@@ -140,7 +141,7 @@ def generate_iv_dataset(
         raise ValueError(f"{scenario} requires k_exog >= 2")
     if scenario == "perfect_multicollinearity" and k_exog < 3:
         raise ValueError(f"{scenario} requires k_exog >= 3")
-    if scenario == "scale_variance" and k_exog < 2:
+    if scenario in ("scale_variance", "scale_variance_mild") and k_exog < 2:
         raise ValueError(f"{scenario} requires k_exog >= 2")
     if scenario in ("heteroskedastic", "autocorrelated") and k_endog != 1:
         # 下記の誤差生成ロジック（二変量正規分布の分岐）がk_endog=1専用のため。
@@ -236,6 +237,20 @@ def generate_iv_dataset(
         beta_exog = beta_exog.copy()
         beta_exog[0] /= SCALE_VARIANCE_X1_SCALE
         beta_exog[1] /= SCALE_VARIANCE_X2_SCALE
+
+    if scenario == "scale_variance_mild":
+        # scale_varianceより緩いスケール差（x1は10^2オーダー、x2は10^-1
+        # オーダー、スケール比1e3程度）。条件数は倍精度の限界より十分低く
+        # 成功パスになるため、faer等の数値計算ライブラリ依存部分の将来の
+        # 精度リグレッションを検知する成功パスケースとして使う
+        # （`benchmark/linear/datasets.py`のscale_variance_mildと同じ発想、
+        # test-coverage-candidates.md項目11）。
+        x_exog = x_exog.copy()
+        x_exog[:, 0] *= 1e2
+        x_exog[:, 1] *= 1e-1
+        beta_exog = beta_exog.copy()
+        beta_exog[0] /= 1e2
+        beta_exog[1] /= 1e-1
 
     y = beta0 + x_exog @ beta_exog + x_endog @ beta_endog + u
 

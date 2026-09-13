@@ -2,11 +2,11 @@
 テスト。
 
 `tests/fixtures/benchmarks/iv_gmm.json`（`benchmark/iv/fixtures/
-generate_iv_gmm_fixtures.py`で生成）を読み込み、8つの合成データシナリオ×
+generate_iv_gmm_fixtures.py`で生成）を読み込み、10個の合成データシナリオ×
 classical/HC0/HC1/HAC（+クラスター、baselineのみ）を`weight_type="unadjusted"`
 固定で、加えてbaselineシナリオ×`cov_type="classical"`固定で他の`weight_type`
 （robust/cluster/kernel）を検証する（ユーザー確認済みの検証範囲。
-`weight_type`×`cov_type`の全組み合わせ（8シナリオ×4weight_type×6cov_type）は
+`weight_type`×`cov_type`の全組み合わせ（10シナリオ×4weight_type×6cov_type）は
 規模が大きすぎるため）。
 
 役割分担（OLS/WLS/Logit/Probit の `test_<手法>_*.py` と同じ4分割、
@@ -79,6 +79,7 @@ INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
 X_EXOG_BY_SCENARIO = {
     "moderate_multicollinearity": ["x1", "x2"],
     "high_condition_number": ["x1", "x2"],
+    "scale_variance_mild": ["x1", "x2"],
 }
 
 # HACラグはIvOptions.hac_lags未指定（自動計算）で、engineとlinearmodelsが

@@ -30,22 +30,22 @@
 //!   ほぼ特異性というbackstopのみ、`ols.rs`の`wald_f_test`docコメント参照）ため別バリアントに
 //!   分離した（`IvError::FirstStageFailed`が`WithinRegressionFailed`と同じ`LeastSquaresError`
 //!   ラップでも変換箇所ごとに専用バリアントにする判断と同じ）。
+//! - `BetweenRegressionFailed`: RE（Swamy-Arora分散成分推定、7.1節、Issue #193）の
+//!   between回帰（エンティティ平均への`OlsEstimator::fit(include_intercept=true)`）が
+//!   失敗した場合（エンティティ数が説明変数の数以下等）。`WithinRegressionFailed`と同じ
+//!   `LeastSquaresError`ラップだが、対象がFEのwithin回帰ではなくREのbetween回帰のため
+//!   別バリアントにする（`FTestFailed`と同じ判断）。
 //!
 //! RE固有（7章）で追加のバリアントが必要になった場合は、FE/RE実装issueで実際に計算
 //! コードを書く過程で随時追加する（`LeastSquaresError`・`IvError`のdocコメントと同じ
-//! 「土台を用意し、必要になった時点で足す」方針）。想定される追加候補:
-//!
-//! - between回帰（エンティティ平均に対するOLS、σ_u²推定）の自由度不足。分母は
-//!   `n_entities - k`（7.1節）で、`InsufficientDegreesOfFreedom`（within側／パネル調整後
-//!   残差自由度）とは別軸のため専用バリアントになる見込み。
-//!
+//! 「土台を用意し、必要になった時点で足す」方針）。
 //! ハウスマン統計量（`hausman_statistic`、Issue #174）は`CommonError`を返す
 //! （`ensure_well_conditioned_symmetric_matrix`等の共通ヘルパーに揃える）。
 //! `cov_fe - cov_re`が有限標本で非正定値になり統計量が負になるケースは**エラーにせず
 //! そのまま返す**（R `plm::phtest`と同じ挙動、7.3節。差行列が数値的に特異なときだけ
 //! `CommonError::ComputationFailed`）。
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 
 use faer::Mat;
@@ -247,6 +247,49 @@ pub enum PanelError {
         #[source]
         source: LeastSquaresError,
     },
+
+    /// RE（Swamy-Arora分散成分推定、7.1節、Issue #193）のbetween回帰
+    /// （エンティティ平均への`OlsEstimator::fit(include_intercept=true)`）が失敗した。
+    ///
+    /// `WithinRegressionFailed`と同じ`LeastSquaresError`ラップだが、対象がFEのwithin回帰
+    /// ではなくREのbetween回帰のため別バリアントにする（`FTestFailed`と同じ判断、
+    /// モジュールdoc参照）。最も起こりやすいのはエンティティ数が説明変数の数以下
+    /// （`CommonError::InsufficientObservations`）。
+    #[error("between-regression least-squares estimation for variance component failed: {source}")]
+    BetweenRegressionFailed {
+        #[source]
+        source: LeastSquaresError,
+    },
+}
+
+/// `ids`の値ごとに観測インデックスをまとめる（`BTreeMap`のキー＝`ids`の辞書順）。
+///
+/// 元々`fe.rs`にFE専用のprivate関数として実装していたが、Issue #193（RE:
+/// Swamy-Arora分散成分推定）でREのbetween回帰（エンティティ平均の集計）でも同じ
+/// グルーピングが必要になったため、FE/RE間で共有するロジックとしてこちらに移設した
+/// （`.claude/rules/rust-style.md`「系統内で共有するロジックは`<系統>/common.rsに置く`」）。
+/// `pub(crate)`にする理由: `engine`クレート内部（`fe.rs`・`re.rs`）専用のヘルパーで、
+/// `engine_pybind`や`engine`クレート外には公開しない内部実装詳細のため。
+///
+/// `BTreeMap`を使う理由: `HashMap`だと反復順序がプロセスごとのハッシュシードに依存し、
+/// グループ間加算（`Σ_g S_g S_g'`等）の順序・延いては浮動小数点丸め誤差が実行のたびに
+/// 変わりうる。FE側ではこれに加え、DKの時点集計でキー順序（`String`の辞書順）がそのまま
+/// 時系列順序とみなす規約（`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）とも
+/// 一致するという二重の意味を持つ。
+pub(crate) fn group_indices_by_key(ids: &[String]) -> BTreeMap<&str, Vec<usize>> {
+    let mut indices: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+    for (i, id) in ids.iter().enumerate() {
+        indices.entry(id.as_str()).or_default().push(i);
+    }
+    indices
+}
+
+/// `ids`のユニークID数を数える（`n_entities`/`n_periods`のカウント）。純粋な
+/// カーディナリティ集計のため`HashSet`でよい（`group_indices_by_key`と異なりグループ間の
+/// 加算順序に依存する計算が無いため反復順序非依存）。`group_indices_by_key`と同じ理由
+/// （Issue #193）でFE/RE間の共有ロジックとしてここに移設した。
+pub(crate) fn count_unique(ids: &[String]) -> usize {
+    ids.iter().collect::<HashSet<_>>().len()
 }
 
 /// θでパラメータ化した準偏差変換を、設計行列の1つの列（`y`または`x`の1列）に適用し、
@@ -626,6 +669,28 @@ mod tests {
         assert_eq!(
             err,
             PanelError::WithinRegressionFailed {
+                source: LeastSquaresError::Common(CommonError::InsufficientObservations {
+                    n: 2,
+                    k: 3,
+                }),
+            }
+        );
+    }
+
+    #[test]
+    fn between_regression_failed_message_and_equality() {
+        let err = PanelError::BetweenRegressionFailed {
+            source: LeastSquaresError::Common(CommonError::InsufficientObservations { n: 2, k: 3 }),
+        };
+        assert_eq!(
+            err.to_string(),
+            "between-regression least-squares estimation for variance component failed: \
+             insufficient observations: n=2 must be greater than k=3 \
+             (number of independent variables, including the intercept)"
+        );
+        assert_eq!(
+            err,
+            PanelError::BetweenRegressionFailed {
                 source: LeastSquaresError::Common(CommonError::InsufficientObservations {
                     n: 2,
                     k: 3,

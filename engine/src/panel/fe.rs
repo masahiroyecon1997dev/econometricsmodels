@@ -362,7 +362,9 @@ use statrs::distribution::StudentsT;
 use crate::error::CommonError;
 use crate::inference;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput, wald_f_test};
-use crate::panel::common::{PanelDimension, PanelError, quasi_demean_column};
+use crate::panel::common::{
+    PanelDimension, PanelError, count_unique, group_indices_by_key, quasi_demean_column,
+};
 use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
 /// FEの被説明変数・説明変数・パネル識別子を保持する入力データ。
@@ -1155,23 +1157,6 @@ fn entity_nested_within_cluster(entity: &[String], cluster: &[String]) -> bool {
     true
 }
 
-/// `ids`の値ごとに観測インデックスをまとめる（`BTreeMap`のキー＝`ids`の辞書順）。
-///
-/// `fe_cluster_cov_params`（クラスター）・`fe_driscoll_kraay_cov_params`（DKの時点集計）
-/// の両方が使う共通ロジック（元々は独立に重複実装していたが、rust-reviewer指摘で
-/// 切り出した）。`BTreeMap`を使う理由: `HashMap`だと反復順序がプロセスごとのハッシュ
-/// シードに依存し、グループ間加算（`Σ_g S_g S_g'`等）の順序・延いては浮動小数点丸め
-/// 誤差が実行のたびに変わりうる。DK側ではこれに加え、キー順序（`String`の辞書順）が
-/// そのまま時系列順序とみなす規約（モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）
-/// と一致するという二重の意味を持つ。
-fn group_indices_by_key(ids: &[String]) -> BTreeMap<&str, Vec<usize>> {
-    let mut indices: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
-    for (i, id) in ids.iter().enumerate() {
-        indices.entry(id.as_str()).or_default().push(i);
-    }
-    indices
-}
-
 /// FE版のクラスターロバスト係数分散共分散行列（k×k）。`ols::cluster_cov_params`と
 /// 同型の構造だが、**Stata流の`(G/(G-1))×((n-1)/(n-k))`小標本補正を適用しない**
 /// （linearmodelsとの数値一致のため、モジュールdoc「`cov_type`対応」参照）。
@@ -1401,12 +1386,6 @@ fn overall_residual_mean(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>) -> f64 {
         .map(|i| slope_only_residual(y, x, params, i))
         .sum::<f64>()
         / n as f64
-}
-
-/// `ids`のユニークID数を数える（`n_entities`/`n_periods`のカウント）。純粋な
-/// カーディナリティ集計のため`HashSet`でよい（`validate_balanced_panel`等と同じ理由）。
-fn count_unique(ids: &[String]) -> usize {
-    ids.iter().collect::<HashSet<_>>().len()
 }
 
 /// `ids`に現れる全ユニークIDに`θ=1.0`を割り当てた`BTreeMap`を作る。

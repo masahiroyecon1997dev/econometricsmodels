@@ -17,9 +17,24 @@
 //! `ReInput`から`FeInput`相当のデータを組み立て直す際に、`time`を`ReInput`が
 //! 既に保持していれば再抽出が不要になる（`ReOptions.time`、1.1節）。この内部FE呼び出し
 //! ロジック自体は本Issueのスコープ外（後続issue、タスクコード#195以降）。
+//!
+//! ## Swamy-Arora分散成分推定（`swamy_arora_variance_components`、Issue #193、7.1節）
+//!
+//! σ_ε²（idiosyncratic variance）は内部1-way FE推定（`FeEstimator`）のwithin回帰残差を
+//! 再利用し、σ_u²（individual variance）はbetween回帰（エンティティ平均への
+//! `OlsEstimator::fit(include_intercept=true)`）から求める（RE→FE/OLS→
+//! `OlsEstimator`という7.4節の委譲チェーン）。分母（自由度）は`panel-api-design.md`
+//! 7.1節の式を手で組み立てず、FE/OLS委譲先が実際に使った`df_resid`相当の値
+//! （`FeEstimator::df_resid()`・`OlsInput::nobs()-k()`）をそのまま再利用する——
+//! 7.1節の式は`linearmodels`ソースの`nvar`（切片を含む列数）表記をそのまま転記した
+//! ものであり、このプロジェクトの`k`規約（傾き係数のみ）では委譲先の値を使えば
+//! 自動的に一致する（詳細な導出・数値検証は`swamy_arora_variance_components`関数doc
+//! 参照、ユーザー確認済み・2026-09-13）。
 
 use crate::error::CommonError;
-use crate::panel::common::{PanelDimension, PanelError};
+use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
+use crate::panel::common::{PanelDimension, PanelError, group_indices_by_key};
+use crate::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput};
 
 /// REの被説明変数・説明変数・パネル識別子を保持する入力データ。
 ///
@@ -148,6 +163,138 @@ impl ReInput {
     pub fn nobs(&self) -> usize {
         self.y.len()
     }
+}
+
+/// エンティティ平均（between回帰用）。`group_indices_by_key`（`common.rs`、Issue #193で
+/// FE/RE共有に移設）でエンティティを集計し、`y`/各`x`列のエンティティごとの単純平均と、
+/// 各エンティティの観測数`T_i`（7.1節の調和平均`t_bar`計算にも使うため、二重集計を避けて
+/// ここで一緒に返す）を返す。
+///
+/// 戻り値の各`Vec`はエンティティのユニークID辞書順（`group_indices_by_key`のキー順）で
+/// 揃っている。entity IDの文字列自体は返さない（between回帰・`t_bar`計算のどちらも
+/// 数値だけで足りるため）。
+fn entity_means(
+    y: &[f64],
+    x: &[Vec<f64>],
+    entity: &[String],
+) -> (Vec<f64>, Vec<Vec<f64>>, Vec<f64>) {
+    let groups = group_indices_by_key(entity);
+    let k = x.len();
+    let mut y_means = Vec::with_capacity(groups.len());
+    let mut x_means: Vec<Vec<f64>> = vec![Vec::with_capacity(groups.len()); k];
+    let mut t = Vec::with_capacity(groups.len());
+    for indices in groups.values() {
+        let t_i = indices.len() as f64;
+        y_means.push(indices.iter().map(|&i| y[i]).sum::<f64>() / t_i);
+        for (j, x_means_j) in x_means.iter_mut().enumerate() {
+            x_means_j.push(indices.iter().map(|&i| x[j][i]).sum::<f64>() / t_i);
+        }
+        t.push(t_i);
+    }
+    (y_means, x_means, t)
+}
+
+/// Swamy-Arora法で分散成分（σ_ε²・σ_u²）を推定する（Issue #193、7.1節）。
+///
+/// - **σ_ε²（idiosyncratic variance）**: 内部で1-way FE推定
+///   （`FeEstimator::fit`、`FeCovType::Classical`固定——`cov_type`は残差そのものには
+///   影響しないため）を呼び、そのwithin回帰残差平方和とFE自身の`df_resid()`
+///   （`n - k - n_entities`）から`SSR / df_resid`として求める（7.4節「σ_ε²の推定は
+///   FEのwithin回帰の残差分散をそのまま利用する」、RE→FE→`OlsEstimator`の委譲チェーン）。
+/// - **σ_u²（individual variance）**: between回帰（エンティティ平均への
+///   `OlsEstimator::fit(include_intercept=true)`。REは切片を持つためFEと異なり
+///   between回帰にも切片が要る）のSSRと、その`df_resid`
+///   （`OlsInput::nobs() - OlsInput::k()`、`k()`は切片込みの設計行列の列数）から、
+///   調和平均`t_bar = n_entities / Σ(1/T_i)`を使う標準式
+///   `max(0, ssr/df_resid - σ_ε²/t_bar)`で求める。
+///
+/// **`k`規約についての注記（ユーザー確認済み、2026-09-13）**: `panel-api-design.md`
+/// 7.1節に書かれている式（σ_ε²分母`n-k-n_entities+1`、σ_u²分母`n_entities-k`）は、
+/// `linearmodels`ソースの`nvar`（切片を含む列数）表記をそのまま転記したものである。
+/// このプロジェクトのFE/OLSの`k`規約（傾き係数のみ、切片を含まない）では、分母の
+/// 「+1」「-1」を式に手で足し引きする必要はない——FE/OLS双方の委譲先が返す実際の
+/// `df_resid`相当の値（`FeEstimator::df_resid()`・`OlsInput::nobs()-k()`）をそのまま
+/// 使えば自動的に一致する（`linearmodels`との数値完全一致を複数の乱数・手動データで
+/// 実地検証済み）。このためFE/OLSへの委譲を経ず`n`・`n_entities`・`k`から直接式を
+/// 組み立てる実装はしない（委譲先の状態を信頼できるソースとして再利用する）。
+///
+/// # Errors
+/// - 内部FE推定が失敗した場合（singleton・分散ゼロ説明変数・自由度不足等）は、その
+///   `PanelError`（FE用バリアント）をそのまま伝播する。
+/// - between回帰が失敗した場合（エンティティ数が説明変数の数以下等）は
+///   `PanelError::BetweenRegressionFailed`。
+///
+/// **可視性について**: 本来はRE内部専用（`ReEstimator::fit`、Issue #195）の実装詳細で
+/// `pub(crate)`が適切だが、Issue #195着手前の現時点では非テストコードからの呼び出しが
+/// 無く`pub(crate)`だと`dead_code`警告になる。`quasi_demean_column`・`hausman_statistic`
+/// （`common.rs`、Issue #173・#174）も同じ理由で`pub`にした前例に倣う。
+pub fn swamy_arora_variance_components(
+    input: &ReInput,
+    confidence_level: f64,
+) -> Result<(f64, f64), PanelError> {
+    // faerのグローバル並列度をPar::Seqに固定する（Issue #283、`crate::parallelism`。
+    // 委譲先の`FeEstimator::fit`/`OlsEstimator::fit`自身も呼ぶが、`cargo test -p engine`で
+    // この関数を直接叩く経路との統一のためここでも呼ぶ、`engine/src/panel/CLAUDE.md`
+    // 「faerのグローバル並列度」参照）。
+    crate::parallelism::ensure_serial();
+
+    // σ_ε²: 内部1-way FE推定のwithin回帰残差を再利用する（7.4節）。
+    let fe_input = FeInput::from_columns(
+        input.y(),
+        input.x(),
+        input.x_names().to_vec(),
+        input.entity(),
+        None,
+        input.dep_var_name().to_string(),
+    )
+    .expect(
+        "ReInput::from_columns already validated the same dimension contract \
+         (y/x/entity lengths) that FeInput::from_columns requires",
+    );
+    let fe = FeEstimator::fit(
+        fe_input,
+        FeEffects::OneWay,
+        FeCovType::Classical,
+        confidence_level,
+    )?;
+
+    let fe_residuals = fe.estimator().residuals();
+    let ssr_within: f64 = (0..fe_residuals.nrows())
+        .map(|i| {
+            let r = *fe_residuals.get(i, 0);
+            r * r
+        })
+        .sum();
+    let sigma2_eps = ssr_within / fe.df_resid() as f64;
+
+    // σ_u²: between回帰（エンティティ平均、切片あり）。
+    let (y_means, x_means, t) = entity_means(input.y(), input.x(), input.entity());
+    let n_entities = y_means.len();
+
+    let between_input = OlsInput::from_columns(
+        &y_means,
+        &x_means,
+        input.x_names().to_vec(),
+        true,
+        input.dep_var_name().to_string(),
+    )
+    .map_err(|source| PanelError::BetweenRegressionFailed { source })?;
+    let between = OlsEstimator::fit(between_input, CovType::Classical, confidence_level)
+        .map_err(|source| PanelError::BetweenRegressionFailed { source })?;
+
+    let between_residuals = between.residuals();
+    let ssr_between: f64 = (0..between_residuals.nrows())
+        .map(|i| {
+            let r = *between_residuals.get(i, 0);
+            r * r
+        })
+        .sum();
+    let df_resid_between = between.input().nobs() - between.input().k();
+
+    let t_bar = n_entities as f64 / t.iter().map(|t_i| 1.0 / t_i).sum::<f64>();
+    let sigma2_u = (ssr_between / df_resid_between as f64 - sigma2_eps / t_bar).max(0.0);
+
+    Ok((sigma2_eps, sigma2_u))
 }
 
 #[cfg(test)]
@@ -299,5 +446,101 @@ mod tests {
             None,
             "y".to_string(),
         );
+    }
+
+    // ── swamy_arora_variance_components ─────────────────────────────────────
+
+    #[test]
+    fn swamy_arora_variance_components_matches_linearmodels_reference() {
+        // 手動データ（不均衡パネル、entity a: T=3, b: T=2, c: T=2）。
+        // `linearmodels.RandomEffects`（Python）で実地検証済みの値と比較する
+        // （`RandomEffects(y, [const, x1]).fit().variance_decomposition`）。
+        // between回帰は切片+傾き1個の2パラメータのため、`n_entities > k+1`（3章参照）を
+        // 満たすには最低3エンティティが必要（2エンティティだと`neffects-nvar=0`で
+        // 除算不能になることを`linearmodels`自身でも実地確認済み）。
+        let entity = strings(&["a", "a", "a", "b", "b", "c", "c"]);
+        let x1 = vec![1.0, 2.0, 4.0, 2.0, 3.0, 5.0, 6.0];
+        let y = [3.0, 4.0, 7.0, 8.0, 9.0, 6.0, 10.0];
+        let input =
+            ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let (sigma2_eps, sigma2_u) = swamy_arora_variance_components(&input, 0.95).unwrap();
+
+        assert!(
+            (sigma2_eps - 1.132_352_941_176_471_5).abs() < 1e-9,
+            "sigma2_eps = {sigma2_eps}"
+        );
+        assert!(
+            (sigma2_u - 6.537_912_784_161_284).abs() < 1e-9,
+            "sigma2_u = {sigma2_u}"
+        );
+    }
+
+    #[test]
+    fn swamy_arora_variance_components_clips_negative_sigma2_u_to_zero() {
+        // entity間のy平均のばらつきが、within回帰から推定したσ_ε²/t_barに対して
+        // 十分小さいため、素朴な式ではσ_u²が負になるが`max(0, ...)`で0にクリップされる
+        // （`linearmodels`と同じ挙動、7.3節のハウスマン統計量の負値と同型の
+        // 「有限標本でのPSD仮定崩れ」）。エンティティ間のx1平均はわずかに異なる値にし、
+        // between回帰の設計行列が特異にならないようにする。`linearmodels`で実地検証済み
+        // （`variance_decomposition["Effects"] == 0.0`）。
+        let entity = strings(&["a", "a", "a", "b", "b", "b", "c", "c", "c"]);
+        let x1 = vec![1.0, 2.0, 3.0, 1.2, 2.1, 2.9, 0.9, 2.2, 3.1];
+        let y = [2.0, 4.0, 6.0, 2.3, 4.1, 5.9, 1.8, 4.3, 6.2];
+        let input =
+            ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let (sigma2_eps, sigma2_u) = swamy_arora_variance_components(&input, 0.95).unwrap();
+
+        assert!(
+            (sigma2_eps - 0.005_868_778_280_543_04).abs() < 1e-9,
+            "sigma2_eps = {sigma2_eps}"
+        );
+        assert_eq!(sigma2_u, 0.0);
+    }
+
+    #[test]
+    fn swamy_arora_variance_components_propagates_fe_singleton_error() {
+        // entity "c"は1観測のみ（singleton）。内部FE推定（1-way）の
+        // `PanelError::SingletonGroup`がそのまま伝播することを確認する。
+        let entity = strings(&["a", "a", "c"]);
+        let x1 = vec![1.0, 2.0, 3.0];
+        let y = [1.0, 2.0, 3.0];
+        let input =
+            ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let result = swamy_arora_variance_components(&input, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::SingletonGroup {
+                dimension: PanelDimension::Entity,
+                group_id: "c".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn swamy_arora_variance_components_returns_between_regression_failed_when_entities_are_insufficient()
+     {
+        // between回帰は切片+傾き1個で2パラメータ。エンティティ数が2つだけだと
+        // `n_entities <= k`（`OlsEstimator::fit`自身の`n<=k`検証）で失敗する。
+        // singletonにならないよう各エンティティは2観測以上にする。
+        let entity = strings(&["a", "a", "b", "b"]);
+        let x1 = vec![1.0, 2.0, 3.0, 4.0];
+        let y = [1.0, 2.0, 3.0, 5.0];
+        let input =
+            ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let result = swamy_arora_variance_components(&input, 0.95);
+
+        assert!(matches!(
+            result,
+            Err(PanelError::BetweenRegressionFailed { .. })
+        ));
     }
 }

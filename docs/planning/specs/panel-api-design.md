@@ -332,6 +332,26 @@ v1では扱わない。
   `t_bar = n_entities / Σ(1/T_i)`を使う標準式`max(0, ssr/(n_entities - k) - σ_ε²/t_bar)`。
 - linearmodelsが提供する`small_sample`補正（不均衡パネル向けのtraceベースの追加調整、
   デフォルト`False`）はv1では実装しない（linearmodelsのデフォルト挙動に合わせる）。
+- **`k`規約についての実装上の注記（Issue #193実装時に判明、ユーザー確認済み、
+  2026-09-13）**: 上記2式の`+1`/`-1`は`linearmodels`ソースの`nvar`（切片を含む列数）
+  表記をそのまま転記したものである。このプロジェクトのFE/OLSの`k`規約（傾き係数のみ、
+  切片を含まない）では、分母を上記の式で手計算する必要はない——**内部1-way FE推定
+  （`FeEstimator::fit`）が返す`df_resid()`（σ_ε²用）と、between回帰
+  （`OlsEstimator::fit(include_intercept=true)`）が返す`nobs()-k()`（σ_u²用）を
+  そのまま使えば自動的に一致する**（`+1`/`-1`が委譲先の切片カウント差分を暗黙に
+  吸収するため）。乱数・手動データ複数ケースで`linearmodels.RandomEffects`との数値
+  完全一致を実地検証済み（詳細な導出は`engine/src/panel/re.rs`の
+  `swamy_arora_variance_components`関数doc参照）。
+- **σ_ε²の内部FE再利用に伴う既知の挙動差異（Issue #193実装時に判明）**:
+  内部1-way FE推定は`FeInput`と同じsingleton検証（6.5節、Issue #179）を継承するため、
+  `T_i=1`のエンティティを含むデータでは`PanelError::SingletonGroup`で失敗する。一方
+  `linearmodels.RandomEffects`自身はsingletonエンティティを問題なく処理できる
+  （該当行のentity-demean値が単に0になるだけで、REの数学的定義自体はsingletonを
+  許容する）。つまりこのプロジェクトのRE実装は、7.4節で確定した「σ_ε²の推定はFEの
+  within回帰の残差分散をそのまま利用する」という設計の自然な帰結として、
+  `linearmodels`より厳格にsingletonエンティティを拒否する（意図的な既定路線として
+  実装済み。ベンチマーク/テストフィクスチャ作成時は全エンティティ`T_i>=2`を
+  確保すること）。
 
 ### 7.2 θ（準偏差変換の重み）計算
 

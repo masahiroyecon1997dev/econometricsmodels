@@ -22,64 +22,6 @@
 
 ## 一覧
 
-### 2. 高次元（説明変数多数）シナリオ・線形確率モデル（LPM）シナリオの追加要否
-
-- **対象**: `benchmark/linear/datasets.py`・
-  `benchmark/nonlinear/datasets.py`（合成データセット生成全般）
-- **内容**: ユーザーからの指摘（2026-08-15）。現状の合成データセットは
-  ほぼ全シナリオで説明変数数`k=3`固定（一部シナリオのみ`k>=2`/`k>=3`要求）。
-  以下2点の追加要否を検討中。
-  1. **説明変数が多い（高k）シナリオ**: 現状`k`が小さい値に固定されており、
-     列数依存のバグ（ループ境界・インデックス誤り等）や、`k`が大きい場合の
-     数値的挙動（条件数・faerの数値計算経路）を突く成功パスが無い。
-  2. **線形確率モデル（LPM）シナリオ**: 2値`y`をOLS/WLSで推定するケース
-     （教科書的に不均一分散の代表例とされる）を、OLS/WLS側のシナリオとして
-     追加する案。
-- **気づいた経緯**: 2026-08-15、`benchmark/nonlinear/freeze.py`のコード解説中の
-  雑談から。
-- **状態**: **対応済み（クローズ、2026-09-13）**。
-  - **LPMサブ項目**: 対応不要と判断してクローズ。項目18（mroz実データによる
-    LPM検証）がより低コストで価値の高い代替案として既にあるため、そちらに
-    一本化する。
-  - **高kサブ項目**: OLS/WLS/Logit/Probit/Tobitに対応済み。実際に確認したところ
-    `engine`のproptest（`ols_case_strategy`）は`MAX_K=4`固定で高kを一切カバー
-    していなかったため、フィクスチャベースで新シナリオ`many_regressors`
-    （k=20、列ごとに0.1〜100倍のスケール差、係数は列取り違え検出のため
-    意図的に間隔を空ける）を追加し、各手法の主リファレンスと数値照合した。
-    - OLS/WLS: `benchmark/linear/datasets.py`に追加。statsmodelsと最大相対
-      誤差1e-12で一致（OLS）。
-    - Logit/Probit: `benchmark/nonlinear/datasets.py`に追加。OLSと同じ設計
-      （係数を列ごとにずらす）だとkが増えるほど線形予測子の分散が増え分離
-      しやすくなるため、係数の大きさをOLSよりずっと小さく較正（実測で
-      |線形予測子|が4〜5程度に収まることを確認、n=500・seed 0〜49）。真の
-      DGPは未スケーリングのXで計算し出力直前にのみスケーリング
-      （scale_varianceと同じ設計）。statsmodelsと最大相対誤差1e-10で一致。
-    - Tobit: 同じく`benchmark/nonlinear/datasets.py`に追加。連続な潜在変数
-      `y*`の線形回帰のため分離の心配が無く、OLSと同じ係数較正で問題ない
-      （打ち切り境界は`y*`の分位点で決まるためkに関わらず左打ち切り30%を
-      維持）。Tobitは主リファレンス自体がR（`AER::tobit`）のため、
-      `benchmark/nonlinear/fixtures/_tobit_fixtures.py`の共有ビルダーが
-      formula決め打ち（`SYNTHETIC_FORMULA`）だった箇所をCSV列から動的に
-      組み立てる形に修正（他手法のRクロスチェック決め打ち問題と同型の修正、
-      主リファレンス側で必須の対応）。副産物として交差検証
-      （`generate_tobit_crosscheck_fixtures.py`、censReg）にも同じ修正で
-      自動的に追加された。
-    - 各手法とも、既存テストファイルの`x=["x1","x2","x3"]`決め打ち箇所を
-      CSV列からの動的検出に修正（Tobitは元々`ref["x_cols"]`参照で対応不要）。
-    - **OLS/WLSのRクロスチェックも追って対応済み（2026-09-13）**。
-      `generate_ols_crosscheck_fixtures.py`・`generate_wls_crosscheck_fixtures.py`
-      のformula決め打ち箇所（`"y ~ x1 + x2 + x3"`固定）をCSV列からの動的組み立てに
-      修正し、`many_regressors`を両方の`NUMERIC_SCENARIOS`に追加。
-      `tests/linear/test_ols_crosscheck.py`・`test_wls_crosscheck.py`の
-      `x=["x1","x2","x3"]`決め打ち箇所（`test_synthetic_matches_r`・
-      `test_predict_none_matches_r_fitted_values`）も同様に動的検出へ修正。
-      R（`lm`+`sandwich`/`lmtest`）と厳密比較（classical/HC0-3）・緩め比較（HAC）
-      とも一致することを確認済み。
-    - ユーザー判断により以下は今回のスコープ外として保留: (a) 誤差項に
-      外れ値・裾の重い分布を混ぜること（項目67として別記録）、(b) OLS
-      proptestの`MAX_K`拡張・全列直交性チェックの強化。(b)は本項目とは別に
-      着手要否を都度判断する。
-
 ### 4. nonlinear系統: `raise_on_non_convergence=False`がclassical cov_typeでしか検証されていない
 
 - **対象**: `tests/nonlinear/test_logit.py`・`tests/nonlinear/test_probit.py`
@@ -1792,3 +1734,28 @@
 - **気づいた経緯**: 2026-09-13、Tobit proptest追加のrust-reviewerレビュー中に
   指摘。
 - **状態**: 未対応（ユーザー確認済み、今回は見送りと決定）。
+
+### 69. IV: `many_regressors`（高k）・`outlier_regressor`（外れ値）シナリオが未追加
+
+- **対象**: `benchmark/iv/datasets.py`（合成データセット生成）
+- **内容**: 旧項目2（高次元シナリオ、2026-09-13クローズ）・旧項目67
+  （外れ値・裾の重い分布シナリオ、2026-09-13クローズ）はいずれもOLS/WLS/
+  Logit/Probit/Tobitの5手法には対応済みだが、IV（2SLS/GMM）には
+  `many_regressors`・`outlier_regressor`のいずれも追加されていない
+  （`benchmark/iv/datasets.py`の`SCENARIOS`に該当エントリなし）。IVは
+  内生変数`x_endog`・操作変数`instruments`・構造誤差と第一段階誤差の相関
+  という他手法に無い構造を持つため、単純な移植ではなく次の設計判断が
+  必要になると考えられる。
+  - **高kサブ項目**: `x_exog`（外生説明変数）側だけを増やすのか、
+    `instruments`側も増やすのか（過剰識別度合いが変わる）を決める必要が
+    ある。
+  - **外れ値サブ項目**: 汚染をどの列に適用するか（`x_exog`のみか、
+    `x_endog`・`instruments`にも適用するか）で、除外制約・関連性の
+    識別前提が崩れないかの検討が必要になりうる。
+- **Claudeの所感**: IV固有の設計判断が伴うため、着手前に既存のIV実装
+  （`docs/planning/specs/iv-api-design.md`5章・`benchmark/iv/datasets.py`の
+  既存シナリオ設計）を確認し、どの列に何を適用するかをユーザーに確認して
+  から実装する方針が良いと考える。
+- **気づいた経緯**: 2026-09-13、旧項目2のクローズ内容を確認する過程で
+  IVが対象外だったことに気づいた。
+- **状態**: 未対応。

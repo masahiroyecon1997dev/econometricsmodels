@@ -89,11 +89,14 @@ def test_confidence_level_changes_interval_width(binary_dataset):
     )
 
 
+@pytest.mark.parametrize(
+    "cov_type", ["classical", "opg", "hc0", "hc1", "cluster"]
+)
 def test_raise_on_non_convergence_false_returns_result_without_raising(
-    binary_dataset,
+    binary_dataset, cov_type
 ):
     _checks.check_raise_on_non_convergence_false_returns_result_without_raising(
-        binary_dataset, Probit, ProbitOptions
+        binary_dataset, Probit, ProbitOptions, cov_type
     )
 
 

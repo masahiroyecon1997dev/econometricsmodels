@@ -824,17 +824,36 @@ def test_mroz_hours_raw_scale_converges_without_false_separation():
     assert 1000.0 < res.sigma < 1250.0
 
 
+@pytest.mark.parametrize(
+    "cov_type", ["classical", "opg", "hc0", "hc1", "cluster"]
+)
 def test_raise_on_non_convergence_false_returns_result_without_raising(
-    censored_dataset,
+    censored_dataset, cov_type
 ):
+    """`raise_on_non_convergence=False`だと未収束でも例外を投げず、
+    `converged=False`の`Results`を返す。`cov_type`は`classical`以外
+    （`opg`/`hc0`/`hc1`/`cluster`）も検証する（test-coverage-candidates.md
+    項目4、`_binary_choice_checks.py`のLogit/Probit版と同じ懸念——打ち切り点
+    でのHessian/スコア評価はcov_typeの分岐によって経由する行列演算が異なる
+    ため、想定外の例外を投げず標準誤差が有限値であることまで確認する）。
+    """
+    kwargs = {
+        "max_iter": 1,
+        "raise_on_non_convergence": False,
+        "cov_type": cov_type,
+    }
+    if cov_type == "cluster":
+        kwargs["cluster_col"] = "cluster"
     res = Tobit(
         censored_dataset,
         y="y",
         x=["x1", "x2"],
-        options=TobitOptions(max_iter=1, raise_on_non_convergence=False),
+        options=TobitOptions(**kwargs),
     ).fit()
     assert res.converged is False
     assert res.n_iter == 1
+    for name, se in res.std_errors.items():
+        assert math.isfinite(se), f"std_errors[{name}]={se} is not finite"
 
 
 def test_confidence_level_changes_interval_width(censored_dataset):

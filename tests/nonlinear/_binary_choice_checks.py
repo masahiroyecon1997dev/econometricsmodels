@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -191,21 +192,35 @@ def check_confidence_level_changes_interval_width(
 
 
 def check_raise_on_non_convergence_false_returns_result_without_raising(
-    dataset, estimator_cls, options_cls
+    dataset, estimator_cls, options_cls, cov_type="classical"
 ):
     """`raise_on_non_convergence=False`だと未収束でも例外を投げず、
     `converged=False`の`Results`を返す（engine側のもう一方の分岐、APIレベル
     での配線確認。例外を送出する既定挙動側は
     `test_<method>_validation.py::test_non_convergence_raises_computation_error_with_tiny_max_iter`）。
+
+    `cov_type`は`classical`以外（`opg`/`hc0`/`hc1`/`cluster`）も検証する
+    （test-coverage-candidates.md項目4）。打ち切り点（収束未満のパラメータ）
+    でのHessian/スコア評価はcov_typeの分岐によって経由する行列演算が異なる
+    ため、想定外の例外を投げず、標準誤差が有限値であることまで確認する。
     """
+    kwargs = {
+        "max_iter": 1,
+        "raise_on_non_convergence": False,
+        "cov_type": cov_type,
+    }
+    if cov_type == "cluster":
+        kwargs["cluster_col"] = "cluster"
     res = estimator_cls(
         dataset,
         y="y",
         x=["x1", "x2"],
-        options=options_cls(max_iter=1, raise_on_non_convergence=False),
+        options=options_cls(**kwargs),
     ).fit()
     assert res.converged is False
     assert res.n_iter == 1
+    for name, se in res.std_errors.items():
+        assert math.isfinite(se), f"std_errors[{name}]={se} is not finite"
 
 
 def check_cov_type_label(dataset, estimator_cls, options_cls):

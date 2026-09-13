@@ -24,7 +24,9 @@
 
 ### 4. nonlinear系統: `raise_on_non_convergence=False`がclassical cov_typeでしか検証されていない
 
-- **対象**: `tests/nonlinear/test_logit.py`・`tests/nonlinear/test_probit.py`
+- **対象**: `tests/nonlinear/test_logit_api.py`・`tests/nonlinear/test_probit_api.py`・
+  `tests/nonlinear/test_tobit.py`（旧`test_logit.py`/`test_probit.py`は
+  `refactoring-candidates-2.md`項目68でファイル分割済み）
 - **内容**: 非収束時に例外を出さず打ち切りパラメータを返す`raise_on_non_convergence=False`
   オプションが、`cov_type="classical"`との組み合わせでしかテストされていない。
   打ち切り点（収束未満のパラメータ）でのHessian評価はcov_typeの分岐によって
@@ -33,8 +35,28 @@
   ある。
 - **気づいた経緯**: 2026-08-15、Issue #231フェーズ4の`testing-completeness-reviewer`
   によるnonlinear系統（Logit/Probit）レビュー（nice to have）。
-- **状態**: 未対応（ユーザー判断により今回のフェーズ4スコープからは除外、
-  優先度低として保留）
+- **状態**: **対応済み（クローズ、2026-09-13）**。Logit/Probit/Tobit全てに
+  対応（Tobitも同じ`run_solver`基盤を共有し同一のギャップを持つことを確認した
+  ため、当初のスコープ外だったが合わせて対応）。実測では5つのcov_type
+  （classical/opg/hc0/hc1/cluster）×`max_iter=1, raise_on_non_convergence=False`
+  のいずれも例外なく`converged=False`を返し、標準誤差も有限値であることを
+  確認した（実際のバグは発見されなかったが、リグレッションガードとして
+  固定する価値があると判断）。
+  - `_binary_choice_checks.py`の`check_raise_on_non_convergence_false_returns_
+    result_without_raising`に`cov_type`引数を追加し、`test_logit_api.py`/
+    `test_probit_api.py`を`@pytest.mark.parametrize("cov_type", [...])`化。
+  - `test_tobit.py`の同名テストも同様にparametrize化。
+  - いずれも「例外を投げない・`converged=False`」に加え、`std_errors`の
+    全値が有限（`math.isfinite`）であることまで確認する。
+  - **今回のスコープ外として残った点（testing-completeness-reviewer指摘）**:
+    (a) `method`（bfgs/lbfgs）は今回`cov_type`と一緒にparametrizeしておらず
+    既定のnewton固定のまま——「打ち切り点×非classical cov_type×非newton
+    method」の組み合わせは項目41（method×cov_type×シナリオの組み合わせ
+    網羅不足）に包含される形で未対応のまま。(b) `engine/src/nonlinear/`側の
+    Rust単体テスト（`fit_returns_unconverged_result_without_raising_when_
+    raise_on_non_convergence_is_false`等）も`CovType::Classical`固定のままで、
+    Python側で今回埋めたのと同じギャップがRustエンジン層にも対称的に残って
+    いる。いずれも実害（バグ）は見つかっておらず影響は限定的。
 
 ### 5. nonlinear系統: `cov_type="cluster"`×`cluster_col`未指定（`MissingClusterColumn`）がPython API境界で未検証
 

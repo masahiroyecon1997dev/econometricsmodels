@@ -1000,3 +1000,39 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `logit.py`に`dep_var_name`が無いことを指摘。`grep`で
   `engine`/`engine_pybind`/`python_package`全層を突き合わせて確認。
 - **状態**:【Issue化】Issue #318として切り出し済み（2026-09-13）
+
+### 47.【Issue化】FE: `time`引数をentityと同様にトップレベル引数にすべきか検討する → Issue #319として切り出し済み（2026-09-13）
+
+- **対象**: [python_package/econometricsmodels/panel/fe.py:68-80](../../../python_package/econometricsmodels/panel/fe.py#L68-L80)
+  の`FE.__init__`、[engine_pybind/src/panel/fe.rs:76-93](../../../engine_pybind/src/panel/fe.rs#L76-L93)
+  の`FeOptions.time`
+- **内容**: `entity`はトップレベルの必須引数だが、`time`は
+  `FeOptions.time: Option<String>`経由でしか指定できない。両者は
+  共に「パネル構造を定義する列名参照」という同じ役割を担っており、
+  CLAUDE.md 2章が引く「列名参照は素の引数、推定オプションは
+  オブジェクト渡し」という区別に照らすと、必須性の違いだけを理由に
+  片方をオプションオブジェクト行きにするのは筋が通っていない可能性
+  がある。`docs/planning/specs/panel-api-design.md`1.1節で既に
+  「確定」済みの設計だが、再検討の余地があるとユーザーが指摘。
+- **気づいた経緯**: 2026-09-13、`panel/fe.py`解説中のユーザー指摘。
+- **状態**:【Issue化】Issue #319として切り出し済み（2026-09-13、
+  「確定」済み節を覆す提案のため単独Issueとして分離）
+
+### 48.【Issue化】FE: `x`空リスト許容の見直し・`n_periods`の追加・固定効果正規化規約のドキュメント化 → Issue #320として切り出し済み（2026-09-13）
+
+- **対象**: [python_package/econometricsmodels/panel/fe.py](../../../python_package/econometricsmodels/panel/fe.py)
+  （`x`の空リスト許容、`n_periods`欠如、`fixed_effects()`docstring）、
+  [engine_pybind/src/panel/fe.rs](../../../engine_pybind/src/panel/fe.rs)
+- **内容**: 3件の指摘をまとめてIssue化。(1) `x`が空のFEモデルは
+  因果推論として意味を持たないため、OLS等と同様`validate_x_non_empty`
+  を適用すべきではないか（`panel-api-design.md`に独立した検討記録が
+  見当たらず、意図的な設計というより実装上の副産物の可能性）。
+  (2) `n_entities`はあるが`n_periods`相当のプロパティが無く、
+  `df_resid`のdocstringが言及する`n_periods`を実際には取得できない
+  不整合がある。(3) 二元効果の固定効果正規化規約はRust側docコメントに
+  詳しく書かれているが、Python側docstringには「`fixest::fixef()`と
+  一致しないことがある」としか書かれておらず、理由が露出していない。
+  FEは実装完了済みだが`docs/spec/fe-spec.md`のような独立仕様書も
+  未整備。
+- **気づいた経緯**: 2026-09-13、`panel/fe.py`解説中のユーザー指摘。
+- **状態**:【Issue化】Issue #320として切り出し済み（2026-09-13）

@@ -1036,3 +1036,31 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   未整備。
 - **気づいた経緯**: 2026-09-13、`panel/fe.py`解説中のユーザー指摘。
 - **状態**:【Issue化】Issue #320として切り出し済み（2026-09-13）
+
+### 49. Probit: `linear_predictor_and_residual`の関数名がHessian修正後の意味とずれている・不変条件`A(u)≥0`の検証範囲が狭い
+
+- **対象**: [engine/src/nonlinear/probit.rs](../../../engine/src/nonlinear/probit.rs)
+  の`linear_predictor_and_residual`・`mod proptests`
+- **内容**: rust-reviewerの指摘（Issue #316修正のレビュー中、2026-09-13）。2点。
+  1. **関数名と戻り値の意味の乖離**: `linear_predictor_and_residual`は元々
+     「生の線形予測子`z`と一般化残差`λ`」を返す関数だったが、Issue #316の
+     修正で第1戻り値は「`λ`と同じクランプ済み引数から再構成した`z̃`
+     （`hessian()`専用）」に変わった。`gradient()`/`scores()`はこの値を
+     使わず`_`で破棄するだけの構造になっているため、将来の実装者が誤って
+     第1戻り値を「線形予測子そのもの」として再利用するリスクがある。
+     関数名を`residual_and_hessian_z`等に改名する、または`hessian()`専用の
+     ヘルパーとして分離する（`gradient()`/`scores()`は`λ`のみ返す軽量版を
+     呼ぶ）ことを検討する余地がある。
+  2. **`A(u)=λ(λ+u)≥0`の不変条件を検証するproptestが無い**: 新規回帰テスト
+     `hessian_weight_is_non_negative_even_when_misclassified_observation_
+     exceeds_u_clamp`は`z=1000`の1点のみのハードコードケース。既存の
+     `mod proptests`（`probit_case_strategy`、`beta∈-1..1`、`x∈-2..2`）は
+     `|z|`が`U_CLAMP≈8.13`に届きにくい較正のため、このバグのクラス
+     （`|u|>U_CLAMP`かつ誤分類）を一般的に検出できる構造になっていない。
+     境界の混在を意図的に作れる`z`のレンジ（例: `x`や`beta`を大きくする、
+     または専用のケース戦略を追加する）で「`hessian`の対角成分は常に
+     非負」という不変条件をproperty-basedテストとして追加する案が
+     考えられる。
+- **気づいた経緯**: 2026-09-13、Issue #316（Probit Hessianクランプバグ）
+  修正のrust-reviewerレビュー中。
+- **状態**: 未対応（nice to have、ユーザー確認済み・記録のみ）

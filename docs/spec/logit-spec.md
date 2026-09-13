@@ -226,6 +226,11 @@ Issue #307）。
   する（`predicted`側のみ`threshold`依存）。これはstatsmodelsの`BinaryResults.pred_table(threshold)`
   の実際の実装（`histogram2d`が常に`[0, 0.5, 1]`でクロス集計する）に合わせた仕様。
 - `threshold`自体の値域は検証しない（範囲外でも自明な分類結果になるだけで破綻しないため）。
+- **OLSの`predict()`との意味の違い**: `predict()`が返す`"probability"`は確率（`[0, 1]`の連続値）
+  であり、OLSの`predict()`が返す`"predicted"`（`y`自体の点予測）とは意味が異なる。0/1の分類結果が
+  欲しい場合は`predict()`の出力に自前でしきい値を適用するか、学習データに限り`pred_table()`を使う。
+  これはstatsmodelsの`predict()`と同じ標準的な慣習であり、キー名を`"predicted"`に統一する変更は
+  行わない（`docs/planning/specs/refactoring-candidates-2.md`項目80、Issue #322項目3で結論）。
 
 ### 3.7 engine_pybind: エラー変換
 

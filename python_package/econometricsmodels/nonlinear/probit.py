@@ -255,6 +255,14 @@ class ProbitResults:
     ) -> list[dict[str, float]]:
         """Predicted probabilities `p_i = Φ(x_i'β̂)`.
 
+        Note:
+            Returns a probability in `[0, 1]`, not a 0/1 class
+            prediction — unlike `OlsResults.predict()`, whose
+            `"predicted"` key is a point prediction of `y` itself.
+            This is the standard statsmodels convention. To get a
+            classification, apply a threshold to this output
+            yourself, or use `pred_table()` (training data only).
+
         Args:
             new_data: New data to predict on. Must contain columns with
                 the same names as the `x` columns passed at fit time

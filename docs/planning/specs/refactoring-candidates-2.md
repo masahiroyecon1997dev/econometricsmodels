@@ -503,7 +503,10 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   ドキュメント改善の余地として記録する価値があると考える。テスト自体の
   変更は不要。
 - **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち、対応するならドキュメント側）
+- **状態**: 対応済み（2026-09-13、Issue #322項目3）。キー名の統一は不要と結論（統計学的に
+  標準的な慣習のため）。ドキュメント改善のみ実施: `logit.py`/`probit.py`の`predict()`docstring
+  に「確率を返す、0/1が欲しい場合は`pred_table()`のthresholdを使う」旨のNoteを追加、
+  `docs/spec/logit-spec.md`3.6節・`docs/getting-started.md`にも同旨を追記。
 
 ### 81. `test_const_collision_with_include_intercept_raises`・`test_cluster_cov_type_requires_at_least_two_groups`のテストデータがOLS/WLS/Logitで似た内容を個別に手書きしている
 

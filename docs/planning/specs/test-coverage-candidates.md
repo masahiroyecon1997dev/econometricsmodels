@@ -22,20 +22,6 @@
 
 ## 一覧
 
-### 5. nonlinear系統: `cov_type="cluster"`×`cluster_col`未指定（`MissingClusterColumn`）がPython API境界で未検証
-
-- **対象**: `tests/nonlinear/test_logit.py`・`tests/nonlinear/test_probit.py`（OLS/WLS側も同様）
-- **内容**: `cov_type="cluster"`を指定しつつ`cluster_col`を渡さない場合の
-  `MissingClusterColumn`エラーは`engine`レベル（`Err(CommonError::MissingClusterColumn.into())`）
-  ではテスト済みだが、Python API境界（`fit()`呼び出し）を通した確認が無い。
-  ただしこれはOLS側にも同種のテストが無く、nonlinear固有の抜けではなく
-  プロジェクト全体の既存パターン（linear/nonlinear横断で対応するかどうかは
-  別途判断が必要）。
-- **気づいた経緯**: 2026-08-15、Issue #231フェーズ4の`testing-completeness-reviewer`
-  によるnonlinear系統（Logit/Probit）レビュー（nice to have）。
-- **状態**: 未対応（ユーザー判断により今回のフェーズ4スコープからは除外、
-  優先度低として保留。対応する場合はOLS/WLS側も含めた横断対応を検討）
-
 ### 6. Logit: `SEPARATION_PARAM_NORM_THRESHOLD`の多変量モデル（k大）での誤検知リスクが未検証
 
 - **対象**: [engine/src/nonlinear/logit.rs](../../../engine/src/nonlinear/logit.rs)、

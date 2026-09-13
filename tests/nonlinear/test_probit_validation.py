@@ -116,6 +116,12 @@ def test_mroz_cluster_cov_type_raises_validation_error():
     )
 
 
+def test_cluster_without_col_raises(binary_dataset):
+    _checks.check_cluster_without_col_raises(
+        binary_dataset, Probit, ProbitOptions
+    )
+
+
 def test_cluster_col_nonexistent_column_raises(binary_dataset):
     _checks.check_cluster_col_nonexistent_column_raises(
         binary_dataset, Probit, ProbitOptions

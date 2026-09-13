@@ -1007,6 +1007,18 @@ def test_mroz_hours_cluster_cov_type_raises_validation_error():
         Tobit(mroz, y="hours", x=MROZ_X, options=options).fit()
 
 
+def test_cluster_without_col_raises(censored_dataset):
+    """`cov_type="cluster"`なのに`cluster_col`未指定の場合`ValidationError`
+    （OLS/WLS/IV/Logit/Probitと同じ検証、共通化された経路。
+    test-coverage-candidates.md項目5）。
+    """
+    options = TobitOptions(cov_type="cluster")
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.MISSING_CLUSTER_COLUMN)
+    ):
+        Tobit(censored_dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+
 def test_cluster_col_nonexistent_column_raises(censored_dataset):
     options = TobitOptions(cov_type="cluster", cluster_col="does_not_exist")
     with pytest.raises(

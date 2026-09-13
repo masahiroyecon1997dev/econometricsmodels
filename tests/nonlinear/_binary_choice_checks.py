@@ -630,6 +630,18 @@ def check_cluster_count_at_most_slopes_raises_validation_error(
         estimator_cls(df, y="y", x=["x1", "x2"], options=options).fit()
 
 
+def check_cluster_without_col_raises(dataset, estimator_cls, options_cls):
+    """`cov_type="cluster"`なのに`cluster_col`未指定の場合`ValidationError`
+    （OLS/WLS/IVと同じ検証、共通化された経路。test-coverage-candidates.md
+    項目5）。
+    """
+    options = options_cls(cov_type="cluster")
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.MISSING_CLUSTER_COLUMN)
+    ):
+        estimator_cls(dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+
 def check_cluster_col_nonexistent_column_raises(
     dataset, estimator_cls, options_cls
 ):

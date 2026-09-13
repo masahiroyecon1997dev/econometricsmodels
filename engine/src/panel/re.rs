@@ -634,6 +634,22 @@ mod tests {
     }
 
     #[test]
+    fn compute_theta_is_zero_when_sigma2_u_is_zero() {
+        // σ_u²=0（individual varianceが無い、REがpooled OLSに退化するケース）では
+        // θ_i = 1 - sqrt(σ_ε²/σ_ε²) = 0 になり、`quasi_demean_column`が実質的に
+        // 何も変換しない（プーリングOLSと同じ設計行列になる、7.2節・
+        // `quasi_demean_column_with_theta_zero_is_identity`と対応する不変条件）。
+        // rust-reviewer指摘（Issue #194）: この退化ケースをフィット実装（#195）より前に
+        // 固定しておく。
+        let entity = strings(&["a", "a", "b", "b", "b"]);
+
+        let theta = compute_theta(&entity, 2.5, 0.0);
+
+        assert_eq!(theta["a"], 0.0);
+        assert_eq!(theta["b"], 0.0);
+    }
+
+    #[test]
     fn quasi_demean_transform_applies_computed_theta_to_y_and_x() {
         // `compute_theta_matches_reference_formula_for_unbalanced_panel`と同じデータ・
         // σ_ε²・σ_u²。`quasi_demean_column`自体の正しさは`common.rs`側で既に検証済み

@@ -9,7 +9,9 @@ JSONにまとめて書き出す。
 両者を分けている理由は`.claude/skills/reference-benchmark/SKILL.md`参照。
 
 入力データは`tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
-（`benchmark/linear/freeze.py`参照）。
+（`benchmark/linear/freeze.py`参照）。Wooldridgeデータ（wage1/gpa2）は
+`load_wooldridge.py`経由で都度ロードする（データの再配布ライセンスが
+未確認のためCSVとして固定しない）。
 
 使用例（リポジトリルートから）:
     python -m benchmark.linear.fixtures.generate_ols_fixtures
@@ -29,6 +31,7 @@ from benchmark.common import (
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
+from benchmark.common.load_wooldridge import load as load_wooldridge
 from benchmark.linear.constants import HAC_MAXLAGS
 from benchmark.linear.references.statsmodels_ref import run
 
@@ -68,6 +71,18 @@ NUMERIC_SCENARIOS = [
 # classical/HC系は全シナリオで確認。HACはautocorrelatedシナリオが本来の目的
 # （他のシナリオでも動くことの確認はできるが、統計的な意味は薄い）。
 COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
+
+# 実データ（Wooldridge）。`generate_ols_crosscheck_fixtures.py`
+# （build_wooldridge_fixtures）と同じデータセット・回帰式・cov_type
+# （wage1/gpa2、classical/HC0-3、HACは横断面データのため対象外）。
+# 従来Rクロスチェック側にしか無かった実データ検証を主リファレンス
+# （statsmodels）側にも追加する（test-coverage-candidates.md項目13・33、
+# ユーザー確認済み）。
+WOOLDRIDGE_DATASETS = {
+    "wage1": "lwage ~ educ + exper + tenure",
+    "gpa2": "colgpa ~ sat + hsperc + tothrs",
+}
+WOOLDRIDGE_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
 
 
 def build_fixtures() -> dict:
@@ -109,6 +124,18 @@ def build_fixtures() -> dict:
                 k1=True,
             )
 
+    for name, formula in WOOLDRIDGE_DATASETS.items():
+        fixtures[name] = {
+            cov_type: run(
+                dataset_source="wooldridge",
+                dataset=name,
+                formula=formula,
+                cov_type=cov_type,
+            )
+            for cov_type in WOOLDRIDGE_COV_TYPES
+        }
+    fixtures["wage1"]["cluster"] = _run_wage1_region_cluster_case()
+
     fixtures["_meta"] = {
         "method": "ols",
         "generated_at": datetime.now(UTC).isoformat(),
@@ -126,6 +153,14 @@ def build_fixtures() -> dict:
             "高次元シナリオ（test-coverage-candidates.md項目2）。"
             "outlier_regressorはx1の5%をTukeyの汚染混合モデル（SD20倍）で"
             "外れ値に置き換えた成功パス（test-coverage-candidates.md項目67）。"
+            "wage1/gpa2はWooldridge実データ（classical/HC0-3、HACは"
+            "時系列順の無いクロスセクションデータのため対象外）。"
+            "generate_ols_crosscheck_fixtures.pyのbuild_wooldridge_fixtures()と"
+            "同じデータセット・回帰式で、従来Rクロスチェック側にしか無かった"
+            "実データ検証を主リファレンス側にも追加したもの"
+            "（test-coverage-candidates.md項目13・33）。wage1.clusterは"
+            "地域ダミー（northcen/south/west、基準northeast）から合成した"
+            "実カテゴリ列regionでのクラスターロバストSE。"
         ),
     }
     return fixtures
@@ -168,6 +203,61 @@ def _run_cluster_case(
             "statsmodels_version": statsmodels.__version__,
             "generated_at": datetime.now(UTC).isoformat(),
             "note": note,
+            "formula": formula,
+        },
+    }
+
+
+def _run_wage1_region_cluster_case() -> dict:
+    """wage1の地域ダミー（northcen/south/west）から実カテゴリ列regionを作り、
+    クラスターロバストSEを確認する（「実データでのグループ列」、4グループ・
+    不均衡サイズ）。`generate_ols_crosscheck_fixtures.py`の
+    `_run_wage1_region_cluster_case`と同じ発想・同じregion定義（こちらは
+    statsmodels側）。
+    """
+    import statsmodels.formula.api as smf
+
+    df = load_wooldridge("wage1")
+    region = (
+        pl.when(pl.col("northcen") == 1)
+        .then(pl.lit("northcen"))
+        .when(pl.col("south") == 1)
+        .then(pl.lit("south"))
+        .when(pl.col("west") == 1)
+        .then(pl.lit("west"))
+        .otherwise(pl.lit("northeast"))
+        .alias("region")
+    )
+    pandas_df = df.with_columns(region).to_pandas()
+    formula = WOOLDRIDGE_DATASETS["wage1"]
+
+    model = smf.ols(formula=formula, data=pandas_df).fit(
+        cov_type="cluster",
+        cov_kwds={"groups": pandas_df["region"]},
+        use_t=True,
+    )
+
+    # patsy由来の切片名"Intercept"を、同じwage1配下の他cov_type（run()経由で
+    # normalize_names適用済み）と揃えて"const"に正規化する。normalize_names
+    # 自体はt_stats/p_values/conf_intの存在を前提とするため（coef/seのみの
+    # このケースには使えない）、ここではcoef/seのみ直接畳む。
+    raw = extract_coef_se(model)
+    coef_se = {
+        stat: {
+            ("const" if name == "Intercept" else name): value
+            for name, value in values.items()
+        }
+        for stat, values in raw.items()
+    }
+
+    return {
+        **coef_se,
+        "_meta": {
+            "reference": "statsmodels",
+            "statsmodels_version": statsmodels.__version__,
+            "generated_at": datetime.now(UTC).isoformat(),
+            "note": "wage1の実カテゴリ列region"
+            "（northcen/south/west、基準northeast）でのクラスターロバストSE。",
             "formula": formula,
         },
     }

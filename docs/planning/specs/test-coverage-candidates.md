@@ -49,29 +49,6 @@
   標準化パラメータノルム≈580、閾値100の約5.8倍）。Issue #317（小標本境界
   での検出漏れ、閾値が緩すぎる方向）とは逆方向の問題。
 
-### 13. OLSに主リファレンス（statsmodels）側の実データ検証が無い（Rクロスチェック側のみ）
-
-- **対象**: [benchmark/linear/fixtures/generate_ols_fixtures.py](../../../benchmark/linear/fixtures/generate_ols_fixtures.py)（statsmodels側、
-  実データ無し）・[benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py](../../../benchmark/linear/fixtures/generate_ols_crosscheck_fixtures.py)
-  （Rクロスチェック側、wage1/gpa2あり）
-- **内容**: ユーザー指摘（2026-08-15）。実測確認したところ、OLSの実データ（wage1/gpa2）
-  検証は`generate_ols_crosscheck_fixtures.py`（Rクロスチェック側）にのみ存在し、
-  `generate_ols_fixtures.py`（statsmodels＝`testing-policy.md`が定める主リファレンス側）
-  には実データが一切含まれていなかった。対照的にWLSは`generate_wls_fixtures.py`
-  （statsmodels側）・`generate_wls_crosscheck_fixtures.py`（R側）の両方に401ksubsが
-  存在し、非対称な状態だった。
-  - ユーザーからの「WLSが内包しているから不要では」という疑問に対し、
-    `engine/src/linear/wls.rs`の`fit_with_all_weights_one_matches_ols`
-    （重み=1でOLSと一致することを確認するRust単体テスト）の存在を確認したが、
-    これは**合成データでの単体テスト**であり、OLS・WLSは別実装（`ols.rs`/`wls.rs`、
-    片方がもう片方を内部で呼ぶ関係ではない）である上、WLSの実データ統合テストは
-    常に`weights=1/inc`（重み≠1）で動くため、実データ経由でOLS相当のコードパスが
-    検証されたことは一度もないと判明した。
-- **Claudeの所感**: 別実装である以上、実データによる早期発見の観点から、
-  wage1/gpa2をstatsmodels側（`generate_ols_fixtures.py`）にも追加することを推奨する。
-- **気づいた経緯**: 2026-08-15、`generate_wls_fixtures.py`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
-
 ### 14. クラスターロバストSEのG<q境界を`ComputationError`ではなく`ValidationError`にすべきでは（設計判断候補、OLS/WLS/IVの再分類＋Logit/Probitへの新規検証追加）
 
 - **対象**: `engine/src/linear/`（OLS/WLS、`ComputationError`扱い済み）・`engine/src/iv/`
@@ -562,30 +539,6 @@
 - **気づいた経緯**: 2026-08-23、ユーザー依頼により`test_ols.py`の
   バリデーション網羅性を確認中に発見。
 - **状態**: 未対応（優先度低、着手要否はユーザー判断待ち、修正は保留）
-
-### 33. Wooldridge実データでの検証が、主リファレンス（statsmodels）側では一度も行われていない（Rクロスチェック側にはある非対称）
-
-- **対象**: `tests/linear/test_ols_fixtures.py`（`wooldridge_loader`/
-  `load_wooldridge_dataset`のimportが無い）と対比した
-  [tests/linear/test_ols_crosscheck.py:284-344](../../../tests/linear/test_ols_crosscheck.py#L284-L344)
-  （`WOOLDRIDGE_DATASETS`、`test_wooldridge_matches_r`・
-  `test_wooldridge_wage1_region_cluster_matches_r`の3テスト）
-- **内容**: ユーザー指摘（2026-08-23）を受けて確認。`test_ols_fixtures.py`は
-  合成データ（`SCENARIOS`）のみを対象にしており、Wooldridge実データでの
-  検証は`test_ols_crosscheck.py`（R）側にしか存在しない。項目28
-  （クラスターのt値・p値・信頼区間が主リファレンス側で未検証）・項目29
-  （クラスターが`baseline`シナリオでしか検証されていない）と同じ
-  「主リファレンスの方がクロスチェックより検証範囲が狭い」パターンの3例目。
-- **Claudeの所感**: `testing-policy.md`「テスト用データセット」2.
-  「実データセット: リファレンス実装との一致のみで検証する」はどの
-  リファレンスかを明記していないが、主リファレンスであるstatsmodelsが
-  実データで一度も検証されていないのは方針の趣旨（推定結果として公開する
-  統計量は独立実装だけでなく主リファレンスとも一致確認する）からすると
-  漏れだと考える。`generate_ols_fixtures.py`にWooldridgeデータ
-  （`wage1`/`gpa2`）でのstatsmodels照合を追加するのが妥当。
-- **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_crosscheck.py`解説中の
-  ユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
 
 ### 34. `test_wls.py`にもOLSと同型のバリデーション抜けがある（`y`列自体の欠落・`fit()`本体のNaN/無限大・空文字列の列名）
 
@@ -1698,3 +1651,29 @@
 - **気づいた経緯**: 2026-09-13、項目10（Probitの`SEPARATION_PARAM_NORM_THRESHOLD`較正
   検証）のrust-reviewerレビュー中。
 - **状態**: 未対応（要否・優先度はユーザー判断待ち）
+
+### 71. OLS/WLSのクラスターSEフィクスチャ生成（`_run_cluster_case`）が、patsy由来の切片名"Intercept"を"const"へ正規化していない（同ファイル内の他cov_typeと不整合）
+
+- **対象**: [benchmark/linear/fixtures/generate_ols_fixtures.py](../../../benchmark/linear/fixtures/generate_ols_fixtures.py)の`_run_cluster_case`
+  （`extract_coef_se(model)`をそのまま返す）・
+  [benchmark/linear/fixtures/generate_wls_fixtures.py](../../../benchmark/linear/fixtures/generate_wls_fixtures.py)の同名関数（同じパターン）
+- **内容**: testing-completeness-reviewerの指摘（項目13・33のOLS実データ追加レビュー、
+  2026-09-13）。`statsmodels_ref.py`の`run()`は`normalize_names(raw, stat_key="t_stats")`で
+  patsyの切片名"Intercept"を本実装の"const"へ正規化しているが、`generate_ols_fixtures.py`・
+  `generate_wls_fixtures.py`双方の`_run_cluster_case`（baselineシナリオの疑似グループ
+  クラスターケース専用ヘルパー、`smf.ols`/`smf.wls`を直接呼ぶ）はこの正規化を経由せず
+  `extract_coef_se(model)`をそのまま返すため、同じフィクスチャJSON内で
+  `classical`等（"const"）と`cluster`系（"Intercept"）のキー名規則が食い違っている。
+  `normalize_names`は`t_stats`/`p_values`/`conf_int`の存在を前提とする設計のため
+  （`coef`/`se`のみの`_run_cluster_case`の返り値にはそのまま適用できない）、項目13の
+  実装で新規追加した`_run_wage1_region_cluster_case`（OLS、wage1の実データクラスター
+  ケース）ではcoef/seのみを直接畳む形で個別に対応済みだが、既存の`_run_cluster_case`
+  （OLS/WLS双方、baseline/cluster_imbalanced/cluster_g2が対象）は未対応のまま。
+  `tests/_assertions.py`の`assert_dict_close`が既定で`rename=rename_intercept`を持つため
+  実害（テスト失敗）は無い。
+- **Claudeの所感**: 実害が無いため優先度は低いが、フィクスチャの一貫性という観点では
+  `_run_cluster_case`側にも同じ正規化（coef/seのみを直接畳む形、`_run_wage1_region_
+  cluster_case`と同じ書き方）を適用するのが妥当。OLS/WLS両方に同型の修正が必要。
+- **気づいた経緯**: 2026-09-13、項目13・33（OLS実データのstatsmodels側追加）の
+  testing-completeness-reviewerレビュー。
+- **状態**: 未対応（実害無しのため優先度低、着手要否はユーザー判断待ち）

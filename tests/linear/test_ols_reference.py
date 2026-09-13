@@ -6,7 +6,10 @@
    （`benchmark/linear/fixtures/generate_ols_fixtures.py` で生成）を読み込み、
    6つの合成データシナリオ×classical/HC0-3/HAC + クラスター(baselineのみ)で、
    係数・標準誤差・検定統計量・適合度統計量を相対誤差1e-8で厳密比較する
-   （`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。
+   （`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。Wooldridge実データ
+   （wage1/gpa2、classical/HC0-3 + wage1のみ地域クラスター）も同じフィクスチャ
+   経由で検証する（従来Rクロスチェック側にしか無かった実データ検証を主
+   リファレンス側にも追加、test-coverage-candidates.md項目13・33）。
 2. **ライブ statsmodels との照合**: 共有 `dataset` フィクスチャ（n=100）で
    毎回 statsmodels を実行し、係数・標準誤差・R²・F統計量・`include_intercept`
    の扱いが一致することを確認する（凍結フィクスチャが対象にしない
@@ -40,7 +43,7 @@ import statsmodels.api as sm
 from _assertions import assert_close, assert_dict_close
 from _assertions import rename_intercept as _rename
 from _constants import DATA_DIR
-from _helpers import with_cluster_groups
+from _helpers import with_cluster_groups, wooldridge_loader
 from _ols_helpers import (
     our_fit,
     our_fit_cluster,
@@ -54,6 +57,8 @@ from benchmark.common import imbalanced_cluster_groups
 from benchmark.linear.constants import HAC_MAXLAGS
 from benchmark.linear.fixtures.generate_ols_fixtures import (
     COV_TYPES,
+    WOOLDRIDGE_COV_TYPES,
+    WOOLDRIDGE_DATASETS,
 )
 from benchmark.linear.fixtures.generate_ols_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
@@ -177,6 +182,72 @@ def test_cluster_g2_matches_statsmodels(fixtures):
     ref = fixtures["baseline"]["cluster_g2"]
     _assert_dict_close(res.params, ref["coef"], "cluster_g2/coef")
     _assert_dict_close(res.std_errors, ref["se"], "cluster_g2/se")
+
+
+# Wooldridge実データ用のy/x列構成。`generate_ols_fixtures.py`のformula文字列
+# （statsmodels側のフォーミュラAPI用）とは別に、本実装のy=str/x=list渡し
+# （CLAUDE.md 2章）用の構成をここで持つ（`test_ols_crosscheck.py`の
+# `WOOLDRIDGE_DATASETS`と同じ持ち方）。
+WOOLDRIDGE_Y_X = {
+    "wage1": ("lwage", ["educ", "exper", "tenure"]),
+    "gpa2": ("colgpa", ["sat", "hsperc", "tothrs"]),
+}
+
+
+@pytest.fixture(scope="module")
+def load_wooldridge():
+    return wooldridge_loader()
+
+
+@pytest.mark.parametrize("cov_type", WOOLDRIDGE_COV_TYPES)
+@pytest.mark.parametrize("dataset_name", list(WOOLDRIDGE_DATASETS))
+def test_wooldridge_matches_statsmodels(
+    fixtures, load_wooldridge, dataset_name, cov_type
+):
+    """Wooldridge実データ（wage1/gpa2）でのstatsmodels照合。従来Rクロスチェック
+    側（`test_ols_crosscheck.py::test_wooldridge_matches_r`）にしか無かった
+    実データ検証を主リファレンス側にも追加したもの
+    （test-coverage-candidates.md項目13・33）。
+    """
+    y, x = WOOLDRIDGE_Y_X[dataset_name]
+    df = load_wooldridge(dataset_name)
+    options = OLSOptions(cov_type=cov_type)
+    res = OLS(df, y=y, x=x, options=options).fit()
+
+    _check_result(
+        res, fixtures[dataset_name][cov_type], f"{dataset_name}/{cov_type}"
+    )
+
+
+def test_wooldridge_wage1_region_cluster_matches_statsmodels(
+    fixtures, load_wooldridge
+):
+    """wage1の実カテゴリ列（northcen/south/westダミーから合成したregion、
+    基準カテゴリnortheast、4グループ・不均衡サイズ）でのクラスターロバストSE。
+    疑似グループ（行番号%N）ではなく実データに由来するグループ構造での検証
+    （`test_ols_crosscheck.py::test_wooldridge_wage1_region_cluster_matches_r`
+    と同じ発想、こちらはstatsmodels側）。
+    """
+    df = load_wooldridge("wage1")
+    region = (
+        pl.when(pl.col("northcen") == 1)
+        .then(pl.lit("northcen"))
+        .when(pl.col("south") == 1)
+        .then(pl.lit("south"))
+        .when(pl.col("west") == 1)
+        .then(pl.lit("west"))
+        .otherwise(pl.lit("northeast"))
+        .alias("region")
+    )
+    df = df.with_columns(region)
+    options = OLSOptions(cov_type="cluster", cluster_col="region")
+    res = OLS(
+        df, y="lwage", x=["educ", "exper", "tenure"], options=options
+    ).fit()
+
+    ref = fixtures["wage1"]["cluster"]
+    _assert_dict_close(res.params, ref["coef"], "wage1/cluster(region)/coef")
+    _assert_dict_close(res.std_errors, ref["se"], "wage1/cluster(region)/se")
 
 
 # ── ライブ statsmodels との照合（共有 dataset フィクスチャ） ────────

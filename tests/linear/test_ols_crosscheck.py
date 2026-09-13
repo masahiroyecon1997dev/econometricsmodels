@@ -149,8 +149,9 @@ NON_HAC_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
 @pytest.mark.parametrize("scenario", SYNTHETIC_SCENARIOS)
 def test_synthetic_matches_r(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
+    x_cols = [c for c in df.columns if c not in ("y", "weight")]
     options = OLSOptions(cov_type=cov_type)
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    res = OLS(df, y="y", x=x_cols, options=options).fit()
 
     ref = crosscheck["synthetic"][scenario][cov_type]["r"]
     label = f"{scenario}/{cov_type}/R"
@@ -163,7 +164,8 @@ def test_synthetic_matches_r(crosscheck, scenario, cov_type):
 def test_predict_none_matches_r_fitted_values(crosscheck, scenario):
     """`predict(new_data=None)`（学習データに対する予測値）がRの`fitted()`と一致すること。"""
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
-    res = OLS(df, y="y", x=["x1", "x2", "x3"]).fit()
+    x_cols = [c for c in df.columns if c not in ("y", "weight")]
+    res = OLS(df, y="y", x=x_cols).fit()
 
     predicted = [row["fitted"] for row in res.predict()]
     ref = crosscheck["synthetic"][scenario]["predict"]["fitted"]

@@ -98,6 +98,9 @@ NUMERIC_SCENARIOS = [
     "scale_variance_mild",
     # n=k+1（自由度1ちょうど）の成功パス。
     "baseline_df1",
+    # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス
+    # （generate_ols_fixtures.pyと同じ理由、test-coverage-candidates.md項目2）。
+    "many_regressors",
 ]
 
 R_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
@@ -130,7 +133,10 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
 
     for scenario in NUMERIC_SCENARIOS:
         df, _ = load_frozen_dataset("synthetic", scenario)
-        formula = "y ~ x1 + x2 + x3"
+        # 列名からformulaを組み立てる（many_regressorsのx1..x20等、3列以外の
+        # シナリオにも対応するため。generate_ols_fixtures.pyのrun()と同じ発想）。
+        x_cols = [c for c in df.columns if c not in ("y", "weight")]
+        formula = "y ~ " + " + ".join(x_cols)
         csv_path = _write_csv(df, tmpdir, scenario)
         n = df.height
 
@@ -313,6 +319,9 @@ def build_fixtures() -> dict:
             "限界を超え、本実装・RのSolve()の双方が全cov_typeで計算不能"
             "（エラー）になるため（perfect_multicollinearityと同様、"
             "ComputationErrorの発生確認のみテストコード側で対応）。"
+            "many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ"
+            "高次元シナリオ（generate_ols_fixtures.pyと同じ理由、"
+            "test-coverage-candidates.md項目2）。"
         ),
     }
     return fixtures

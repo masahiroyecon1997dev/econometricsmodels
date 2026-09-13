@@ -66,12 +66,19 @@
       自動的に追加された。
     - 各手法とも、既存テストファイルの`x=["x1","x2","x3"]`決め打ち箇所を
       CSV列からの動的検出に修正（Tobitは元々`ref["x_cols"]`参照で対応不要）。
+    - **OLS/WLSのRクロスチェックも追って対応済み（2026-09-13）**。
+      `generate_ols_crosscheck_fixtures.py`・`generate_wls_crosscheck_fixtures.py`
+      のformula決め打ち箇所（`"y ~ x1 + x2 + x3"`固定）をCSV列からの動的組み立てに
+      修正し、`many_regressors`を両方の`NUMERIC_SCENARIOS`に追加。
+      `tests/linear/test_ols_crosscheck.py`・`test_wls_crosscheck.py`の
+      `x=["x1","x2","x3"]`決め打ち箇所（`test_synthetic_matches_r`・
+      `test_predict_none_matches_r_fitted_values`）も同様に動的検出へ修正。
+      R（`lm`+`sandwich`/`lmtest`）と厳密比較（classical/HC0-3）・緩め比較（HAC）
+      とも一致することを確認済み。
     - ユーザー判断により以下は今回のスコープ外として保留: (a) 誤差項に
-      外れ値・裾の重い分布を混ぜること（項目67として別記録）、(b) OLS/WLSの
-      Rクロスチェック（`generate_ols_crosscheck_fixtures.py`等がformula文字列を
-      決め打ちしているため対応がより大掛かり。Tobitは主リファレンス自体が
-      Rのため上記の通り対応済み）、(c) OLS proptestの`MAX_K`拡張・全列直交性
-      チェックの強化。(b)(c)は本項目とは別に着手要否を都度判断する。
+      外れ値・裾の重い分布を混ぜること（項目67として別記録）、(b) OLS
+      proptestの`MAX_K`拡張・全列直交性チェックの強化。(b)は本項目とは別に
+      着手要否を都度判断する。
 
 ### 4. nonlinear系統: `raise_on_non_convergence=False`がclassical cov_typeでしか検証されていない
 

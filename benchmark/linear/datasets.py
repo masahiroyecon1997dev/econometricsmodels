@@ -49,6 +49,7 @@ SCENARIOS = [
     "scale_variance_mild",
     "high_condition_number",
     "many_regressors",
+    "outlier_regressor",
 ]
 
 # many_regressorsシナリオで固定する説明変数の数（test-coverage-candidates.md
@@ -61,6 +62,16 @@ MANY_REGRESSORS_K = 20
 # （1シナリオ=1構造的特徴という既存方針を踏襲。外れ値・裾の重い分布は
 # 別シナリオとして検討する、test-coverage-candidates.md参照）。
 _MANY_REGRESSORS_LOG_SCALE_RANGE = (-1.0, 2.0)
+
+# outlier_regressorシナリオでx1に混入させる外れ値（Tukeyの汚染混合モデル、
+# (1-p)*N(0,1) + p*N(0,scale^2)）。列全体をスケールする（many_regressors・
+# scale_variance系）のとは異なり、少数の観測だけが極端な値を持つ設計行列
+# （高レバレッジ行）での数値的頑健性を検証する。誤差項の分布は変えない
+# （1シナリオ=1構造的特徴という既存方針を踏襲）。test-coverage-candidates.md
+# 項目67、n=500・seed 0〜199で実測（ComputationErrorなし、statsmodelsと
+# 最大相対誤差5e-13で一致、条件数は概ね3〜7で健全）。
+_OUTLIER_REGRESSOR_CONTAM_PROB = 0.05
+_OUTLIER_REGRESSOR_CONTAM_SCALE = 20.0
 
 
 def _require_min_k(scenario: str, k: int, minimum: int) -> None:
@@ -150,6 +161,16 @@ def generate_linear_dataset(
         # （testing-policy.md「テスト用データセット」1.）。
         X[:, 0] *= 1e2
         X[:, 1] *= 1e-1
+
+    if scenario == "outlier_regressor":
+        # x1の一部（5%）だけをTukeyの汚染混合モデルで外れ値に置き換える
+        # （SD20倍、少数の高レバレッジ行）。列全体のスケールを変える
+        # many_regressors/scale_variance系とは異なる軸の悪条件シナリオ。
+        is_outlier = rng.uniform(size=n) < _OUTLIER_REGRESSOR_CONTAM_PROB
+        outlier_vals = rng.normal(
+            0.0, _OUTLIER_REGRESSOR_CONTAM_SCALE, size=n
+        )
+        X[:, 0] = np.where(is_outlier, outlier_vals, X[:, 0])
 
     # --- 誤差項 ---
     sigma_i = None  # heteroskedasticの場合のみ使用（weight算出に流用）

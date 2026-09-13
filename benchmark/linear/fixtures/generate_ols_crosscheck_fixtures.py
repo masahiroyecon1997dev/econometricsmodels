@@ -101,6 +101,9 @@ NUMERIC_SCENARIOS = [
     # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス
     # （generate_ols_fixtures.pyと同じ理由、test-coverage-candidates.md項目2）。
     "many_regressors",
+    # x1の5%を外れ値に置き換えた成功パス（generate_ols_fixtures.pyと同じ理由、
+    # test-coverage-candidates.md項目67）。
+    "outlier_regressor",
 ]
 
 R_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
@@ -321,7 +324,9 @@ def build_fixtures() -> dict:
             "ComputationErrorの発生確認のみテストコード側で対応）。"
             "many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ"
             "高次元シナリオ（generate_ols_fixtures.pyと同じ理由、"
-            "test-coverage-candidates.md項目2）。"
+            "test-coverage-candidates.md項目2）。outlier_regressorはx1の5%を"
+            "外れ値に置き換えた成功パス（generate_ols_fixtures.pyと同じ理由、"
+            "test-coverage-candidates.md項目67）。"
         ),
     }
     return fixtures

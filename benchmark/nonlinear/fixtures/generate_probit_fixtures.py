@@ -55,6 +55,11 @@ NUMERIC_SCENARIOS = [
     # （OLSの同種ケース相当、test-coverage-candidates.md項目2）。係数の大きさは
     # 分離を避けるためOLSよりずっと小さく較正済み（benchmark/nonlinear/datasets.py参照）。
     "many_regressors",
+    # x1の5%を外れ値に置き換えた成功パス（OLSの同種ケース相当、
+    # test-coverage-candidates.md項目67）。少数の観測のみが極端な値を持つため
+    # 分離を起こさず、OLSと同じ較正値をそのまま使える
+    # （benchmark/nonlinear/datasets.py参照）。
+    "outlier_regressor",
 ]
 
 # hc1はstatsmodelsで未実装のためここには含めない（上記docstring参照）。
@@ -156,6 +161,8 @@ def build_fixtures() -> dict:
             "シナリオ（OLSの同種ケース相当、test-coverage-candidates.md項目2）。"
             "真のDGPは未スケーリングのXで計算し、係数の大きさは分離を避けるため"
             "OLSよりずっと小さく較正済み。"
+            "outlier_regressorはx1の5%を外れ値に置き換えた成功パス"
+            "（OLSの同種ケース相当、test-coverage-candidates.md項目67）。"
         ),
     }
     return fixtures

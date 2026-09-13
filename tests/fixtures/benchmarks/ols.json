@@ -61,7 +61,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:21.857307+00:00",
+        "generated_at": "2026-09-13T01:25:34.578948+00:00",
         "cov_type_requested": "classical",
         "cov_type_statsmodels": "nonrobust",
         "confidence_level": 0.95,
@@ -131,7 +131,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:21.868366+00:00",
+        "generated_at": "2026-09-13T01:25:34.588520+00:00",
         "cov_type_requested": "hc0",
         "cov_type_statsmodels": "hc0",
         "confidence_level": 0.95,
@@ -201,7 +201,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:21.875717+00:00",
+        "generated_at": "2026-09-13T01:25:34.598992+00:00",
         "cov_type_requested": "hc1",
         "cov_type_statsmodels": "hc1",
         "confidence_level": 0.95,
@@ -271,7 +271,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:21.882795+00:00",
+        "generated_at": "2026-09-13T01:25:34.607946+00:00",
         "cov_type_requested": "hc2",
         "cov_type_statsmodels": "hc2",
         "confidence_level": 0.95,
@@ -341,7 +341,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:21.890367+00:00",
+        "generated_at": "2026-09-13T01:25:34.617391+00:00",
         "cov_type_requested": "hc3",
         "cov_type_statsmodels": "hc3",
         "confidence_level": 0.95,
@@ -411,7 +411,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:21.896997+00:00",
+        "generated_at": "2026-09-13T01:25:34.629346+00:00",
         "cov_type_requested": "hac",
         "cov_type_statsmodels": "hac",
         "confidence_level": 0.95,
@@ -436,7 +436,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:21.907607+00:00",
+        "generated_at": "2026-09-13T01:25:34.637624+00:00",
         "note": "決め打ちの疑似グループ（行番号%10）。統計的な意味はなく、実装の動作確認用。",
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -457,7 +457,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:21.914686+00:00",
+        "generated_at": "2026-09-13T01:25:34.647302+00:00",
         "note": "不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。",
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -474,7 +474,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:21.922168+00:00",
+        "generated_at": "2026-09-13T01:25:34.654141+00:00",
         "note": "クラスタ数境界（G=2、q=1でG>q）の成功パス確認用。説明変数1個（q=1）に絞っている（3個だとG<=qでロバストWald検定の共分散行列が特異になりValidationError）。",
         "formula": "y ~ x1"
       }
@@ -542,7 +542,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:21.928255+00:00",
+        "generated_at": "2026-09-13T01:25:34.662777+00:00",
         "cov_type_requested": "classical",
         "cov_type_statsmodels": "nonrobust",
         "confidence_level": 0.95,
@@ -612,7 +612,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:21.934853+00:00",
+        "generated_at": "2026-09-13T01:25:34.670133+00:00",
         "cov_type_requested": "hc0",
         "cov_type_statsmodels": "hc0",
         "confidence_level": 0.95,
@@ -682,7 +682,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:21.941361+00:00",
+        "generated_at": "2026-09-13T01:25:34.679558+00:00",
         "cov_type_requested": "hc1",
         "cov_type_statsmodels": "hc1",
         "confidence_level": 0.95,
@@ -752,7 +752,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:21.947238+00:00",
+        "generated_at": "2026-09-13T01:25:34.686877+00:00",
         "cov_type_requested": "hc2",
         "cov_type_statsmodels": "hc2",
         "confidence_level": 0.95,
@@ -822,7 +822,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:21.954185+00:00",
+        "generated_at": "2026-09-13T01:25:34.696035+00:00",
         "cov_type_requested": "hc3",
         "cov_type_statsmodels": "hc3",
         "confidence_level": 0.95,
@@ -892,7 +892,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:21.960581+00:00",
+        "generated_at": "2026-09-13T01:25:34.703632+00:00",
         "cov_type_requested": "hac",
         "cov_type_statsmodels": "hac",
         "confidence_level": 0.95,
@@ -964,7 +964,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:21.967795+00:00",
+        "generated_at": "2026-09-13T01:25:34.713983+00:00",
         "cov_type_requested": "classical",
         "cov_type_statsmodels": "nonrobust",
         "confidence_level": 0.95,
@@ -1034,7 +1034,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:21.974621+00:00",
+        "generated_at": "2026-09-13T01:25:34.721238+00:00",
         "cov_type_requested": "hc0",
         "cov_type_statsmodels": "hc0",
         "confidence_level": 0.95,
@@ -1104,7 +1104,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:21.981645+00:00",
+        "generated_at": "2026-09-13T01:25:34.731014+00:00",
         "cov_type_requested": "hc1",
         "cov_type_statsmodels": "hc1",
         "confidence_level": 0.95,
@@ -1174,7 +1174,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:21.989592+00:00",
+        "generated_at": "2026-09-13T01:25:34.739070+00:00",
         "cov_type_requested": "hc2",
         "cov_type_statsmodels": "hc2",
         "confidence_level": 0.95,
@@ -1244,7 +1244,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:21.996583+00:00",
+        "generated_at": "2026-09-13T01:25:34.750126+00:00",
         "cov_type_requested": "hc3",
         "cov_type_statsmodels": "hc3",
         "confidence_level": 0.95,
@@ -1314,7 +1314,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.003640+00:00",
+        "generated_at": "2026-09-13T01:25:34.759709+00:00",
         "cov_type_requested": "hac",
         "cov_type_statsmodels": "hac",
         "confidence_level": 0.95,
@@ -1386,7 +1386,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.009908+00:00",
+        "generated_at": "2026-09-13T01:25:34.769154+00:00",
         "cov_type_requested": "classical",
         "cov_type_statsmodels": "nonrobust",
         "confidence_level": 0.95,
@@ -1456,7 +1456,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.016735+00:00",
+        "generated_at": "2026-09-13T01:25:34.778542+00:00",
         "cov_type_requested": "hc0",
         "cov_type_statsmodels": "hc0",
         "confidence_level": 0.95,
@@ -1526,7 +1526,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.024555+00:00",
+        "generated_at": "2026-09-13T01:25:34.790334+00:00",
         "cov_type_requested": "hc1",
         "cov_type_statsmodels": "hc1",
         "confidence_level": 0.95,
@@ -1596,7 +1596,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.031810+00:00",
+        "generated_at": "2026-09-13T01:25:34.800368+00:00",
         "cov_type_requested": "hc2",
         "cov_type_statsmodels": "hc2",
         "confidence_level": 0.95,
@@ -1666,7 +1666,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.039890+00:00",
+        "generated_at": "2026-09-13T01:25:34.809971+00:00",
         "cov_type_requested": "hc3",
         "cov_type_statsmodels": "hc3",
         "confidence_level": 0.95,
@@ -1736,7 +1736,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.046998+00:00",
+        "generated_at": "2026-09-13T01:25:34.818653+00:00",
         "cov_type_requested": "hac",
         "cov_type_statsmodels": "hac",
         "confidence_level": 0.95,
@@ -1808,7 +1808,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.054557+00:00",
+        "generated_at": "2026-09-13T01:25:34.829112+00:00",
         "cov_type_requested": "classical",
         "cov_type_statsmodels": "nonrobust",
         "confidence_level": 0.95,
@@ -1878,7 +1878,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.061872+00:00",
+        "generated_at": "2026-09-13T01:25:34.836513+00:00",
         "cov_type_requested": "hc0",
         "cov_type_statsmodels": "hc0",
         "confidence_level": 0.95,
@@ -1948,7 +1948,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.068971+00:00",
+        "generated_at": "2026-09-13T01:25:34.845690+00:00",
         "cov_type_requested": "hc1",
         "cov_type_statsmodels": "hc1",
         "confidence_level": 0.95,
@@ -2018,7 +2018,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.075912+00:00",
+        "generated_at": "2026-09-13T01:25:34.853471+00:00",
         "cov_type_requested": "hc2",
         "cov_type_statsmodels": "hc2",
         "confidence_level": 0.95,
@@ -2088,7 +2088,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.082870+00:00",
+        "generated_at": "2026-09-13T01:25:34.862879+00:00",
         "cov_type_requested": "hc3",
         "cov_type_statsmodels": "hc3",
         "confidence_level": 0.95,
@@ -2158,7 +2158,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.090052+00:00",
+        "generated_at": "2026-09-13T01:25:34.870833+00:00",
         "cov_type_requested": "hac",
         "cov_type_statsmodels": "hac",
         "confidence_level": 0.95,
@@ -2230,7 +2230,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.096796+00:00",
+        "generated_at": "2026-09-13T01:25:34.880897+00:00",
         "cov_type_requested": "classical",
         "cov_type_statsmodels": "nonrobust",
         "confidence_level": 0.95,
@@ -2300,7 +2300,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.104459+00:00",
+        "generated_at": "2026-09-13T01:25:34.888021+00:00",
         "cov_type_requested": "hc0",
         "cov_type_statsmodels": "hc0",
         "confidence_level": 0.95,
@@ -2370,7 +2370,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.111150+00:00",
+        "generated_at": "2026-09-13T01:25:34.898072+00:00",
         "cov_type_requested": "hc1",
         "cov_type_statsmodels": "hc1",
         "confidence_level": 0.95,
@@ -2440,7 +2440,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.118727+00:00",
+        "generated_at": "2026-09-13T01:25:34.905503+00:00",
         "cov_type_requested": "hc2",
         "cov_type_statsmodels": "hc2",
         "confidence_level": 0.95,
@@ -2510,7 +2510,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.126162+00:00",
+        "generated_at": "2026-09-13T01:25:34.915655+00:00",
         "cov_type_requested": "hc3",
         "cov_type_statsmodels": "hc3",
         "confidence_level": 0.95,
@@ -2580,7 +2580,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.133481+00:00",
+        "generated_at": "2026-09-13T01:25:34.923689+00:00",
         "cov_type_requested": "hac",
         "cov_type_statsmodels": "hac",
         "confidence_level": 0.95,
@@ -2652,7 +2652,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.140435+00:00",
+        "generated_at": "2026-09-13T01:25:34.933088+00:00",
         "cov_type_requested": "classical",
         "cov_type_statsmodels": "nonrobust",
         "confidence_level": 0.95,
@@ -2722,7 +2722,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.147281+00:00",
+        "generated_at": "2026-09-13T01:25:34.941157+00:00",
         "cov_type_requested": "hc0",
         "cov_type_statsmodels": "hc0",
         "confidence_level": 0.95,
@@ -2792,7 +2792,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.154638+00:00",
+        "generated_at": "2026-09-13T01:25:34.950118+00:00",
         "cov_type_requested": "hc1",
         "cov_type_statsmodels": "hc1",
         "confidence_level": 0.95,
@@ -2862,7 +2862,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.161517+00:00",
+        "generated_at": "2026-09-13T01:25:34.958272+00:00",
         "cov_type_requested": "hc2",
         "cov_type_statsmodels": "hc2",
         "confidence_level": 0.95,
@@ -2932,7 +2932,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.168965+00:00",
+        "generated_at": "2026-09-13T01:25:34.967423+00:00",
         "cov_type_requested": "hc3",
         "cov_type_statsmodels": "hc3",
         "confidence_level": 0.95,
@@ -3002,7 +3002,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.176820+00:00",
+        "generated_at": "2026-09-13T01:25:34.977702+00:00",
         "cov_type_requested": "hac",
         "cov_type_statsmodels": "hac",
         "confidence_level": 0.95,
@@ -3074,7 +3074,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.184252+00:00",
+        "generated_at": "2026-09-13T01:25:34.985924+00:00",
         "cov_type_requested": "classical",
         "cov_type_statsmodels": "nonrobust",
         "confidence_level": 0.95,
@@ -3144,7 +3144,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.194015+00:00",
+        "generated_at": "2026-09-13T01:25:34.995358+00:00",
         "cov_type_requested": "hc0",
         "cov_type_statsmodels": "hc0",
         "confidence_level": 0.95,
@@ -3214,7 +3214,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.201615+00:00",
+        "generated_at": "2026-09-13T01:25:35.002738+00:00",
         "cov_type_requested": "hc1",
         "cov_type_statsmodels": "hc1",
         "confidence_level": 0.95,
@@ -3284,7 +3284,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.208711+00:00",
+        "generated_at": "2026-09-13T01:25:35.013070+00:00",
         "cov_type_requested": "hc2",
         "cov_type_statsmodels": "hc2",
         "confidence_level": 0.95,
@@ -3354,7 +3354,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.215146+00:00",
+        "generated_at": "2026-09-13T01:25:35.021063+00:00",
         "cov_type_requested": "hc3",
         "cov_type_statsmodels": "hc3",
         "confidence_level": 0.95,
@@ -3424,7 +3424,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.222988+00:00",
+        "generated_at": "2026-09-13T01:25:35.031024+00:00",
         "cov_type_requested": "hac",
         "cov_type_statsmodels": "hac",
         "confidence_level": 0.95,
@@ -3496,7 +3496,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.231780+00:00",
+        "generated_at": "2026-09-13T01:25:35.038434+00:00",
         "cov_type_requested": "classical",
         "cov_type_statsmodels": "nonrobust",
         "confidence_level": 0.95,
@@ -3566,7 +3566,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.238205+00:00",
+        "generated_at": "2026-09-13T01:25:35.046881+00:00",
         "cov_type_requested": "hc0",
         "cov_type_statsmodels": "hc0",
         "confidence_level": 0.95,
@@ -3636,7 +3636,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.244034+00:00",
+        "generated_at": "2026-09-13T01:25:35.053940+00:00",
         "cov_type_requested": "hc1",
         "cov_type_statsmodels": "hc1",
         "confidence_level": 0.95,
@@ -3706,7 +3706,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.250674+00:00",
+        "generated_at": "2026-09-13T01:25:35.063304+00:00",
         "cov_type_requested": "hc2",
         "cov_type_statsmodels": "hc2",
         "confidence_level": 0.95,
@@ -3776,7 +3776,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.257086+00:00",
+        "generated_at": "2026-09-13T01:25:35.070477+00:00",
         "cov_type_requested": "hc3",
         "cov_type_statsmodels": "hc3",
         "confidence_level": 0.95,
@@ -3846,7 +3846,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.262777+00:00",
+        "generated_at": "2026-09-13T01:25:35.080013+00:00",
         "cov_type_requested": "hac",
         "cov_type_statsmodels": "hac",
         "confidence_level": 0.95,
@@ -4071,7 +4071,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.286727+00:00",
+        "generated_at": "2026-09-13T01:25:35.104850+00:00",
         "cov_type_requested": "classical",
         "cov_type_statsmodels": "nonrobust",
         "confidence_level": 0.95,
@@ -4294,7 +4294,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.326325+00:00",
+        "generated_at": "2026-09-13T01:25:35.145704+00:00",
         "cov_type_requested": "hc0",
         "cov_type_statsmodels": "hc0",
         "confidence_level": 0.95,
@@ -4517,7 +4517,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.360114+00:00",
+        "generated_at": "2026-09-13T01:25:35.188842+00:00",
         "cov_type_requested": "hc1",
         "cov_type_statsmodels": "hc1",
         "confidence_level": 0.95,
@@ -4740,7 +4740,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.402959+00:00",
+        "generated_at": "2026-09-13T01:25:35.239496+00:00",
         "cov_type_requested": "hc2",
         "cov_type_statsmodels": "hc2",
         "confidence_level": 0.95,
@@ -4963,7 +4963,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.439499+00:00",
+        "generated_at": "2026-09-13T01:25:35.280011+00:00",
         "cov_type_requested": "hc3",
         "cov_type_statsmodels": "hc3",
         "confidence_level": 0.95,
@@ -5186,7 +5186,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T00:53:22.477192+00:00",
+        "generated_at": "2026-09-13T01:25:35.331972+00:00",
         "cov_type_requested": "hac",
         "cov_type_statsmodels": "hac",
         "confidence_level": 0.95,
@@ -5196,12 +5196,434 @@
       }
     }
   },
+  "outlier_regressor": {
+    "classical": {
+      "coef": {
+        "const": 1.7138423671512337,
+        "x1": -0.3592323505333867,
+        "x2": 2.117961564448315,
+        "x3": 1.220113617086961
+      },
+      "se": {
+        "const": 0.04547334902846658,
+        "x1": 0.013550436631397876,
+        "x2": 0.04727381173453218,
+        "x3": 0.043589281221319984
+      },
+      "t_stats": {
+        "const": 37.68894096800213,
+        "x1": -26.51075831025291,
+        "x2": 44.80200531198554,
+        "x3": 27.991138713482396
+      },
+      "p_values": {
+        "const": 1.0925389052419565e-147,
+        "x1": 4.1472786986919213e-97,
+        "x2": 1.7923783593307056e-176,
+        "x3": 3.9180522927689e-104
+      },
+      "conf_int": {
+        "const": [
+          1.6244982279810258,
+          1.8031865063214416
+        ],
+        "x1": [
+          -0.38585568314640406,
+          -0.33260901792036934
+        ],
+        "x2": [
+          2.0250799512627053,
+          2.2108431776339246
+        ],
+        "x3": [
+          1.1344712157470247,
+          1.3057560184268975
+        ]
+      },
+      "r_squared": 0.8793855754817419,
+      "r_squared_adj": 0.8786560527528008,
+      "f_statistic": 1205.4258772145388,
+      "f_p_value": 2.5677912187696276e-227,
+      "aic": 1438.7925754496864,
+      "bic": 1455.6510078433753,
+      "log_likelihood": -715.3962877248432,
+      "nobs": 500,
+      "df_resid": 496,
+      "true_beta": [
+        1.64373629133578,
+        -0.3667293614876863,
+        2.151587519468295,
+        1.1842081743561836
+      ],
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-09-13T01:25:35.343867+00:00",
+        "cov_type_requested": "classical",
+        "cov_type_statsmodels": "nonrobust",
+        "confidence_level": 0.95,
+        "formula": "y ~ x1 + x2 + x3",
+        "weighted": false,
+        "weight_col": null
+      }
+    },
+    "hc0": {
+      "coef": {
+        "const": 1.7138423671512337,
+        "x1": -0.3592323505333867,
+        "x2": 2.117961564448315,
+        "x3": 1.220113617086961
+      },
+      "se": {
+        "const": 0.04517008186212434,
+        "x1": 0.012196962002013211,
+        "x2": 0.0494466527954881,
+        "x3": 0.04274085860844229
+      },
+      "t_stats": {
+        "const": 37.94198054328326,
+        "x1": -29.452608811447668,
+        "x2": 42.83326463387173,
+        "x3": 28.54677366836896
+      },
+      "p_values": {
+        "const": 9.278788130567078e-149,
+        "x1": 5.496965276590806e-111,
+        "x2": 8.893424110940227e-169,
+        "x3": 9.49256302982263e-107
+      },
+      "conf_int": {
+        "const": [
+          1.6250940746581304,
+          1.802590659644337
+        ],
+        "x1": [
+          -0.3831964326571694,
+          -0.335268268409604
+        ],
+        "x2": [
+          2.0208108437900347,
+          2.215112285106595
+        ],
+        "x3": [
+          1.1361381611033616,
+          1.3040890730705605
+        ]
+      },
+      "r_squared": 0.8793855754817419,
+      "r_squared_adj": 0.8786560527528008,
+      "f_statistic": 1280.7435007161487,
+      "f_p_value": 4.466936429845812e-233,
+      "aic": 1438.7925754496864,
+      "bic": 1455.6510078433753,
+      "log_likelihood": -715.3962877248432,
+      "nobs": 500,
+      "df_resid": 496,
+      "true_beta": [
+        1.64373629133578,
+        -0.3667293614876863,
+        2.151587519468295,
+        1.1842081743561836
+      ],
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-09-13T01:25:35.357887+00:00",
+        "cov_type_requested": "hc0",
+        "cov_type_statsmodels": "hc0",
+        "confidence_level": 0.95,
+        "formula": "y ~ x1 + x2 + x3",
+        "weighted": false,
+        "weight_col": null
+      }
+    },
+    "hc1": {
+      "coef": {
+        "const": 1.7138423671512337,
+        "x1": -0.3592323505333867,
+        "x2": 2.117961564448315,
+        "x3": 1.220113617086961
+      },
+      "se": {
+        "const": 0.045351853549708054,
+        "x1": 0.012246044542382914,
+        "x2": 0.049645634093583545,
+        "x3": 0.04291285471023701
+      },
+      "t_stats": {
+        "const": 37.78990786501749,
+        "x1": -29.334561808108937,
+        "x2": 42.661587531662754,
+        "x3": 28.432357281416163
+      },
+      "p_values": {
+        "const": 4.08032120686336e-148,
+        "x1": 1.9514008634999142e-110,
+        "x2": 4.264385825711598e-168,
+        "x3": 3.2734561620832216e-106
+      },
+      "conf_int": {
+        "const": [
+          1.6247369372292924,
+          1.802947797073175
+        ],
+        "x1": [
+          -0.38329286798492307,
+          -0.33517183308185033
+        ],
+        "x2": [
+          2.0204198936363924,
+          2.2155032352602375
+        ],
+        "x3": [
+          1.135800230337676,
+          1.3044270038362462
+        ]
+      },
+      "r_squared": 0.8793855754817419,
+      "r_squared_adj": 0.8786560527528008,
+      "f_statistic": 1270.4975527104189,
+      "f_p_value": 2.604076956838887e-232,
+      "aic": 1438.7925754496864,
+      "bic": 1455.6510078433753,
+      "log_likelihood": -715.3962877248432,
+      "nobs": 500,
+      "df_resid": 496,
+      "true_beta": [
+        1.64373629133578,
+        -0.3667293614876863,
+        2.151587519468295,
+        1.1842081743561836
+      ],
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-09-13T01:25:35.372276+00:00",
+        "cov_type_requested": "hc1",
+        "cov_type_statsmodels": "hc1",
+        "confidence_level": 0.95,
+        "formula": "y ~ x1 + x2 + x3",
+        "weighted": false,
+        "weight_col": null
+      }
+    },
+    "hc2": {
+      "coef": {
+        "const": 1.7138423671512337,
+        "x1": -0.3592323505333867,
+        "x2": 2.117961564448315,
+        "x3": 1.220113617086961
+      },
+      "se": {
+        "const": 0.045346661463627244,
+        "x1": 0.01290562089958832,
+        "x2": 0.049728466370067434,
+        "x3": 0.043018210243679814
+      },
+      "t_stats": {
+        "const": 37.79423472058498,
+        "x1": -27.835340378303375,
+        "x2": 42.590526494160265,
+        "x3": 28.362723836615654
+      },
+      "p_values": {
+        "const": 3.9117958800297166e-148,
+        "x1": 2.1313380035670762e-103,
+        "x2": 8.167880950243169e-168,
+        "x3": 6.957590749980059e-106
+      },
+      "conf_int": {
+        "const": [
+          1.6247471384234269,
+          1.8029375958790406
+        ],
+        "x1": [
+          -0.3845887760961697,
+          -0.3338759249706037
+        ],
+        "x2": [
+          2.0202571482350513,
+          2.2156659806615786
+        ],
+        "x3": [
+          1.1355932321806594,
+          1.3046340019932627
+        ]
+      },
+      "r_squared": 0.8793855754817419,
+      "r_squared_adj": 0.8786560527528008,
+      "f_statistic": 1242.274009071468,
+      "f_p_value": 3.5750936939917943e-230,
+      "aic": 1438.7925754496864,
+      "bic": 1455.6510078433753,
+      "log_likelihood": -715.3962877248432,
+      "nobs": 500,
+      "df_resid": 496,
+      "true_beta": [
+        1.64373629133578,
+        -0.3667293614876863,
+        2.151587519468295,
+        1.1842081743561836
+      ],
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-09-13T01:25:35.387458+00:00",
+        "cov_type_requested": "hc2",
+        "cov_type_statsmodels": "hc2",
+        "confidence_level": 0.95,
+        "formula": "y ~ x1 + x2 + x3",
+        "weighted": false,
+        "weight_col": null
+      }
+    },
+    "hc3": {
+      "coef": {
+        "const": 1.7138423671512337,
+        "x1": -0.3592323505333867,
+        "x2": 2.117961564448315,
+        "x3": 1.220113617086961
+      },
+      "se": {
+        "const": 0.04552856768759365,
+        "x1": 0.0136880162482228,
+        "x2": 0.0500137906165763,
+        "x3": 0.043305196444610145
+      },
+      "t_stats": {
+        "const": 37.643230485773636,
+        "x1": -26.24429603376808,
+        "x2": 42.34755131210449,
+        "x3": 28.174762320904307
+      },
+      "p_values": {
+        "const": 1.7071438517497265e-147,
+        "x1": 7.762054263493006e-96,
+        "x2": 7.572469752834285e-167,
+        "x3": 5.337149502487387e-105
+      },
+      "conf_int": {
+        "const": [
+          1.6243897366631166,
+          1.8032949976393509
+        ],
+        "x1": [
+          -0.3861259938381654,
+          -0.332338707228608
+        ],
+        "x2": [
+          2.0196965550583146,
+          2.2162265738383153
+        ],
+        "x3": [
+          1.1350293736652068,
+          1.3051978605087153
+        ]
+      },
+      "r_squared": 0.8793855754817419,
+      "r_squared_adj": 0.8786560527528008,
+      "f_statistic": 1205.728951342425,
+      "f_p_value": 2.430834380715015e-227,
+      "aic": 1438.7925754496864,
+      "bic": 1455.6510078433753,
+      "log_likelihood": -715.3962877248432,
+      "nobs": 500,
+      "df_resid": 496,
+      "true_beta": [
+        1.64373629133578,
+        -0.3667293614876863,
+        2.151587519468295,
+        1.1842081743561836
+      ],
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-09-13T01:25:35.398026+00:00",
+        "cov_type_requested": "hc3",
+        "cov_type_statsmodels": "hc3",
+        "confidence_level": 0.95,
+        "formula": "y ~ x1 + x2 + x3",
+        "weighted": false,
+        "weight_col": null
+      }
+    },
+    "hac": {
+      "coef": {
+        "const": 1.7138423671512337,
+        "x1": -0.3592323505333867,
+        "x2": 2.117961564448315,
+        "x3": 1.220113617086961
+      },
+      "se": {
+        "const": 0.044633542345341365,
+        "x1": 0.01221403233614762,
+        "x2": 0.049301127054462976,
+        "x3": 0.04218235084407354
+      },
+      "t_stats": {
+        "const": 38.39808083998326,
+        "x1": -29.4114458392445,
+        "x2": 42.9596987125386,
+        "x3": 28.924742046670033
+      },
+      "p_values": {
+        "const": 1.1115576092324532e-150,
+        "x1": 8.549039923653674e-111,
+        "x2": 2.8099348202461996e-169,
+        "x3": 1.6038560297010623e-108
+      },
+      "conf_int": {
+        "const": [
+          1.6261482451180138,
+          1.8015364891844536
+        ],
+        "x1": [
+          -0.3832299717375576,
+          -0.33523472932921583
+        ],
+        "x2": [
+          2.021096766695138,
+          2.214826362201492
+        ],
+        "x3": [
+          1.1372354938596574,
+          1.3029917403142648
+        ]
+      },
+      "r_squared": 0.8793855754817419,
+      "r_squared_adj": 0.8786560527528008,
+      "f_statistic": 1435.4320304443793,
+      "f_p_value": 5.09195861215045e-244,
+      "aic": 1438.7925754496864,
+      "bic": 1455.6510078433753,
+      "log_likelihood": -715.3962877248432,
+      "nobs": 500,
+      "df_resid": 496,
+      "true_beta": [
+        1.64373629133578,
+        -0.3667293614876863,
+        2.151587519468295,
+        1.1842081743561836
+      ],
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-09-13T01:25:35.411550+00:00",
+        "cov_type_requested": "hac",
+        "cov_type_statsmodels": "hac",
+        "confidence_level": 0.95,
+        "formula": "y ~ x1 + x2 + x3",
+        "weighted": false,
+        "weight_col": null
+      }
+    }
+  },
   "_meta": {
     "method": "ols",
-    "generated_at": "2026-09-13T00:53:22.477323+00:00",
+    "generated_at": "2026-09-13T01:25:35.411633+00:00",
     "primary_reference": "statsmodels",
     "statsmodels_version": "0.15.0",
     "hac_maxlags": 1,
-    "note": "perfect_multicollinearity・scale_varianceシナリオはここに含まない（いずれもComputationErrorの発生確認のみ、テストコード側で対応。scale_varianceは傾き係数の同時共分散部分行列の条件数が倍精度の限界を超えるため全cov_typeでComputationErrorになる）。クロスチェック用のRベンチマークは別途 benchmark/linear/references/run_lm_crosscheck.R で生成する。many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ高次元シナリオ（test-coverage-candidates.md項目2）。Rクロスチェック側（generate_ols_crosscheck_fixtures.py、formulaを決め打ちしているため対応がより大掛かり）・WLS/Logit/Probit等への展開は今回のスコープ外（ユーザー確認済み、まずstatsmodels主リファレンスのみで様子を見る）。"
+    "note": "perfect_multicollinearity・scale_varianceシナリオはここに含まない（いずれもComputationErrorの発生確認のみ、テストコード側で対応。scale_varianceは傾き係数の同時共分散部分行列の条件数が倍精度の限界を超えるため全cov_typeでComputationErrorになる）。クロスチェック用のRベンチマークは別途 benchmark/linear/references/run_lm_crosscheck.R で生成する。many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ高次元シナリオ（test-coverage-candidates.md項目2）。outlier_regressorはx1の5%をTukeyの汚染混合モデル（SD20倍）で外れ値に置き換えた成功パス（test-coverage-candidates.md項目67）。"
   }
 }

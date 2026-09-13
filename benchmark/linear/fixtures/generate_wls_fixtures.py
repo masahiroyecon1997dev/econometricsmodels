@@ -56,6 +56,9 @@ NUMERIC_SCENARIOS = [
     # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス
     # （OLSの同種ケース相当、test-coverage-candidates.md項目2）。
     "many_regressors",
+    # x1の5%を外れ値に置き換えた成功パス（OLSの同種ケース相当、
+    # test-coverage-candidates.md項目67）。
+    "outlier_regressor",
 ]
 
 # classical/HC系は全シナリオで確認。HACはautocorrelatedシナリオが本来の目的
@@ -147,7 +150,8 @@ def build_fixtures() -> dict:
             "目的ではないため）。"
             "many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ"
             "高次元シナリオ（OLSの同種ケース相当、test-coverage-candidates.md"
-            "項目2）。"
+            "項目2）。outlier_regressorはx1の5%を外れ値に置き換えた成功パス"
+            "（OLSの同種ケース相当、test-coverage-candidates.md項目67）。"
         ),
     }
     return fixtures

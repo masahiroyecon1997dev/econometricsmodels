@@ -59,6 +59,10 @@ NUMERIC_SCENARIOS = [
     # （test-coverage-candidates.md項目2、ユーザー確認済み）。x1..x20の
     # 列構成のため、他シナリオと同じ自動フォーミュラ生成に乗る。
     "many_regressors",
+    # x1の5%をTukeyの汚染混合モデル（SD20倍）で外れ値に置き換えた成功パス。
+    # 少数の高レバレッジ行での数値的頑健性を検証する
+    # （test-coverage-candidates.md項目67、ユーザー確認済み）。
+    "outlier_regressor",
 ]
 
 # classical/HC系は全シナリオで確認。HACはautocorrelatedシナリオが本来の目的
@@ -119,10 +123,9 @@ def build_fixtures() -> dict:
             "クロスチェック用のRベンチマークは別途 "
             "benchmark/linear/references/run_lm_crosscheck.R で生成する。"
             "many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ"
-            "高次元シナリオ（test-coverage-candidates.md項目2）。Rクロスチェック側"
-            "（generate_ols_crosscheck_fixtures.py、formulaを決め打ちしているため"
-            "対応がより大掛かり）・WLS/Logit/Probit等への展開は今回のスコープ外"
-            "（ユーザー確認済み、まずstatsmodels主リファレンスのみで様子を見る）。"
+            "高次元シナリオ（test-coverage-candidates.md項目2）。"
+            "outlier_regressorはx1の5%をTukeyの汚染混合モデル（SD20倍）で"
+            "外れ値に置き換えた成功パス（test-coverage-candidates.md項目67）。"
         ),
     }
     return fixtures

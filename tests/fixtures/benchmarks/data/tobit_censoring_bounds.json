@@ -54,5 +54,9 @@
   "many_regressors": [
     -16.211888,
     null
+  ],
+  "outlier_regressor": [
+    -0.039488,
+    null
   ]
 }

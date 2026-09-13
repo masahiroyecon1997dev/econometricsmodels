@@ -154,7 +154,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.393246+00:00",
+        "generated_at": "2026-09-13T01:30:26.471206+00:00",
         "model": "logit",
         "cov_type_requested": "classical",
         "method_requested": "newton",
@@ -237,7 +237,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.405999+00:00",
+        "generated_at": "2026-09-13T01:30:26.483091+00:00",
         "model": "logit",
         "cov_type_requested": "opg",
         "method_requested": "newton",
@@ -399,7 +399,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.420085+00:00",
+        "generated_at": "2026-09-13T01:30:26.499354+00:00",
         "model": "logit",
         "cov_type_requested": "hc0",
         "method_requested": "newton",
@@ -423,7 +423,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.996719+00:00",
+        "generated_at": "2026-09-13T01:30:27.226491+00:00",
         "note": "決め打ちの疑似グループ（行番号%10）。統計的な意味はなく、実装の動作確認用。",
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -444,7 +444,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:55.019059+00:00",
+        "generated_at": "2026-09-13T01:30:27.240026+00:00",
         "note": "不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。",
         "formula": "y ~ x1 + x2 + x3"
       }
@@ -605,7 +605,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.433027+00:00",
+        "generated_at": "2026-09-13T01:30:26.512979+00:00",
         "model": "logit",
         "cov_type_requested": "classical",
         "method_requested": "newton",
@@ -688,7 +688,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.442600+00:00",
+        "generated_at": "2026-09-13T01:30:26.527713+00:00",
         "model": "logit",
         "cov_type_requested": "opg",
         "method_requested": "newton",
@@ -850,7 +850,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.452538+00:00",
+        "generated_at": "2026-09-13T01:30:26.540822+00:00",
         "model": "logit",
         "cov_type_requested": "hc0",
         "method_requested": "newton",
@@ -1014,7 +1014,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.465028+00:00",
+        "generated_at": "2026-09-13T01:30:26.559142+00:00",
         "model": "logit",
         "cov_type_requested": "classical",
         "method_requested": "newton",
@@ -1097,7 +1097,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.476101+00:00",
+        "generated_at": "2026-09-13T01:30:26.571617+00:00",
         "model": "logit",
         "cov_type_requested": "opg",
         "method_requested": "newton",
@@ -1259,7 +1259,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.490367+00:00",
+        "generated_at": "2026-09-13T01:30:26.586975+00:00",
         "model": "logit",
         "cov_type_requested": "hc0",
         "method_requested": "newton",
@@ -1423,7 +1423,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.503070+00:00",
+        "generated_at": "2026-09-13T01:30:26.601818+00:00",
         "model": "logit",
         "cov_type_requested": "classical",
         "method_requested": "newton",
@@ -1506,7 +1506,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.512793+00:00",
+        "generated_at": "2026-09-13T01:30:26.614968+00:00",
         "model": "logit",
         "cov_type_requested": "opg",
         "method_requested": "newton",
@@ -1668,7 +1668,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.526064+00:00",
+        "generated_at": "2026-09-13T01:30:26.629683+00:00",
         "model": "logit",
         "cov_type_requested": "hc0",
         "method_requested": "newton",
@@ -1832,7 +1832,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.540195+00:00",
+        "generated_at": "2026-09-13T01:30:26.644649+00:00",
         "model": "logit",
         "cov_type_requested": "classical",
         "method_requested": "newton",
@@ -1915,7 +1915,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.551211+00:00",
+        "generated_at": "2026-09-13T01:30:26.655527+00:00",
         "model": "logit",
         "cov_type_requested": "opg",
         "method_requested": "newton",
@@ -2077,7 +2077,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.563619+00:00",
+        "generated_at": "2026-09-13T01:30:26.672024+00:00",
         "model": "logit",
         "cov_type_requested": "hc0",
         "method_requested": "newton",
@@ -2241,7 +2241,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.577122+00:00",
+        "generated_at": "2026-09-13T01:30:26.688382+00:00",
         "model": "logit",
         "cov_type_requested": "classical",
         "method_requested": "newton",
@@ -2324,7 +2324,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.586940+00:00",
+        "generated_at": "2026-09-13T01:30:26.701436+00:00",
         "model": "logit",
         "cov_type_requested": "opg",
         "method_requested": "newton",
@@ -2486,7 +2486,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.600359+00:00",
+        "generated_at": "2026-09-13T01:30:26.718141+00:00",
         "model": "logit",
         "cov_type_requested": "hc0",
         "method_requested": "newton",
@@ -3211,7 +3211,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.739705+00:00",
+        "generated_at": "2026-09-13T01:30:26.885660+00:00",
         "model": "logit",
         "cov_type_requested": "classical",
         "method_requested": "newton",
@@ -3447,7 +3447,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.792636+00:00",
+        "generated_at": "2026-09-13T01:30:26.959200+00:00",
         "model": "logit",
         "cov_type_requested": "opg",
         "method_requested": "newton",
@@ -4170,12 +4170,421 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:54.966446+00:00",
+        "generated_at": "2026-09-13T01:30:27.142516+00:00",
         "model": "logit",
         "cov_type_requested": "hc0",
         "method_requested": "newton",
         "confidence_level": 0.95,
         "formula": "y ~ x1 + x2 + x3 + x4 + x5 + x6 + x7 + x8 + x9 + x10 + x11 + x12 + x13 + x14 + x15 + x16 + x17 + x18 + x19 + x20"
+      }
+    }
+  },
+  "outlier_regressor": {
+    "classical": {
+      "coef": {
+        "const": 0.5763597158809249,
+        "x1": -0.11624022554443243,
+        "x2": 0.8240629919637117,
+        "x3": 0.3170312387296043
+      },
+      "se": {
+        "const": 0.1024763122923022,
+        "x1": 0.040736410315859894,
+        "x2": 0.1146331707230317,
+        "x3": 0.09845605522371563
+      },
+      "z_stats": {
+        "const": 5.624321396704084,
+        "x1": -2.853472474455528,
+        "x2": 7.188695791681036,
+        "x3": 3.2200278389097936
+      },
+      "p_values": {
+        "const": 1.8623862692753457e-08,
+        "x1": 0.004324427400511531,
+        "x2": 6.541313444893106e-13,
+        "x3": 0.0012817814862345835
+      },
+      "conf_int": {
+        "const": [
+          0.3755098345195334,
+          0.7772095972423165
+        ],
+        "x1": [
+          -0.19608212262296376,
+          -0.03639832846590112
+        ],
+        "x2": [
+          0.5993861059129382,
+          1.0487398780144852
+        ],
+        "x3": [
+          0.12406091643123501,
+          0.5100015610279736
+        ]
+      },
+      "margeff": {
+        "overall": {
+          "x1": {
+            "dydx": -0.02328092247558457,
+            "se": 0.00793889254247161,
+            "z": -2.932515127397925,
+            "p_value": 0.0033622854212342246,
+            "conf_low": -0.038840865935962546,
+            "conf_high": -0.007720979015206592
+          },
+          "x2": {
+            "dydx": 0.1650456762368553,
+            "se": 0.01826045739820474,
+            "z": 9.038419610074039,
+            "p_value": 1.5895315824862104e-19,
+            "conf_low": 0.129255837395146,
+            "conf_high": 0.20083551507856456
+          },
+          "x3": {
+            "dydx": 0.06349591681049495,
+            "se": 0.01898716875547532,
+            "z": 3.344148757943949,
+            "p_value": 0.000825354685252123,
+            "conf_low": 0.026281749881379123,
+            "conf_high": 0.10071008373961077
+          }
+        },
+        "mean": {
+          "x1": {
+            "dydx": -0.027031422991024293,
+            "se": 0.00946848321019484,
+            "z": -2.8548841869328347,
+            "p_value": 0.0043052525214829435,
+            "conf_low": -0.04558930907122838,
+            "conf_high": -0.008473536910820211
+          },
+          "x2": {
+            "dydx": 0.1916341370010967,
+            "se": 0.026311867839425705,
+            "z": 7.283182561214908,
+            "p_value": 3.2603553905284363e-13,
+            "conf_low": 0.14006382366984457,
+            "conf_high": 0.2432044503323488
+          },
+          "x3": {
+            "dydx": 0.07372495601526993,
+            "se": 0.022831612955483954,
+            "z": 3.2290734850409173,
+            "p_value": 0.0012419197835095413,
+            "conf_low": 0.028975816913563282,
+            "conf_high": 0.11847409511697658
+          }
+        },
+        "median": {
+          "x1": {
+            "dydx": -0.026424474018147036,
+            "se": 0.009233284058433629,
+            "z": -2.861871664612232,
+            "p_value": 0.00421147398814191,
+            "conf_low": -0.044521378231704774,
+            "conf_high": -0.008327569804589298
+          },
+          "x2": {
+            "dydx": 0.1873312875854497,
+            "se": 0.025167356789942783,
+            "z": 7.443423206854596,
+            "p_value": 9.810914436633431e-14,
+            "conf_low": 0.13800417469109227,
+            "conf_high": 0.23665840047980713
+          },
+          "x3": {
+            "dydx": 0.07206957566981985,
+            "se": 0.022331518738542066,
+            "z": 3.227258141894069,
+            "p_value": 0.001249826499089718,
+            "conf_low": 0.02830060322219606,
+            "conf_high": 0.11583854811744364
+          }
+        }
+      },
+      "log_likelihood": -292.51836426732353,
+      "log_likelihood_null": -333.92252518694136,
+      "lr_statistic": 82.80832183923565,
+      "lr_p_value": 7.665335310600975e-18,
+      "pseudo_r_squared": 0.12399331520519119,
+      "aic": 593.0367285346471,
+      "bic": 609.8951609283358,
+      "nobs": 500,
+      "df_model": 3.0,
+      "df_resid": 496.0,
+      "converged": true,
+      "n_iter": 6,
+      "pred_table": [
+        [
+          93.0,
+          101.0
+        ],
+        [
+          51.0,
+          255.0
+        ]
+      ],
+      "true_beta": [
+        0.5479120971119267,
+        -0.12224312049589536,
+        0.7171958398227649,
+        0.3947360581187278
+      ],
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-09-13T01:30:27.166873+00:00",
+        "model": "logit",
+        "cov_type_requested": "classical",
+        "method_requested": "newton",
+        "confidence_level": 0.95,
+        "formula": "y ~ x1 + x2 + x3"
+      }
+    },
+    "opg": {
+      "coef": {
+        "const": 0.5763597158809249,
+        "x1": -0.11624022554443243,
+        "x2": 0.8240629919637117,
+        "x3": 0.3170312387296043
+      },
+      "se": {
+        "const": 0.10218852343844594,
+        "x1": 0.05388205692926591,
+        "x2": 0.1185984865694325,
+        "x3": 0.10199144760706619
+      },
+      "z_stats": {
+        "const": 5.64016091521373,
+        "x1": -2.1573086138309026,
+        "x2": 6.948343236077223,
+        "x3": 3.108410030133151
+      },
+      "p_values": {
+        "const": 1.6989131879086017e-08,
+        "x1": 0.03098162629594592,
+        "x2": 3.695932448977146e-12,
+        "x3": 0.0018809690623031727
+      },
+      "conf_int": {
+        "const": [
+          0.37607389030824373,
+          0.7766455414536062
+        ],
+        "x1": [
+          -0.22184711653873046,
+          -0.01063333455013439
+        ],
+        "x2": [
+          0.5916142296666667,
+          1.0565117542607567
+        ],
+        "x3": [
+          0.11713167468865071,
+          0.5169308027705579
+        ]
+      },
+      "margeff": null,
+      "log_likelihood": -292.51836426732353,
+      "log_likelihood_null": -333.92252518694136,
+      "lr_statistic": 82.80832183923565,
+      "lr_p_value": 7.665335310600975e-18,
+      "pseudo_r_squared": 0.12399331520519119,
+      "aic": 593.0367285346471,
+      "bic": 609.8951609283358,
+      "nobs": 500,
+      "df_model": 3.0,
+      "df_resid": 496.0,
+      "converged": true,
+      "n_iter": 6,
+      "pred_table": [
+        [
+          93.0,
+          101.0
+        ],
+        [
+          51.0,
+          255.0
+        ]
+      ],
+      "true_beta": [
+        0.5479120971119267,
+        -0.12224312049589536,
+        0.7171958398227649,
+        0.3947360581187278
+      ],
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-09-13T01:30:27.181917+00:00",
+        "model": "logit",
+        "cov_type_requested": "opg",
+        "method_requested": "newton",
+        "confidence_level": 0.95,
+        "formula": "y ~ x1 + x2 + x3"
+      }
+    },
+    "hc0": {
+      "coef": {
+        "const": 0.5763597158809249,
+        "x1": -0.11624022554443243,
+        "x2": 0.8240629919637117,
+        "x3": 0.3170312387296043
+      },
+      "se": {
+        "const": 0.10284309568194967,
+        "x1": 0.030832446973013888,
+        "x2": 0.11107534948229177,
+        "x3": 0.0952373912482482
+      },
+      "z_stats": {
+        "const": 5.604262610524312,
+        "x1": -3.7700616381882286,
+        "x2": 7.418954752828289,
+        "x3": 3.3288526131844858
+      },
+      "p_values": {
+        "const": 2.0914341149296423e-08,
+        "x1": 0.00016320723418930915,
+        "x2": 1.1804822916688389e-13,
+        "x3": 0.0008720453902509378
+      },
+      "conf_int": {
+        "const": [
+          0.3747909522856968,
+          0.7779284794761531
+        ],
+        "x1": [
+          -0.17667071116678065,
+          -0.055809739922084205
+        ],
+        "x2": [
+          0.6063593074082201,
+          1.0417666765192033
+        ],
+        "x3": [
+          0.1303693819014877,
+          0.5036930955577209
+        ]
+      },
+      "margeff": {
+        "overall": {
+          "x1": {
+            "dydx": -0.02328092247558457,
+            "se": 0.006001139072441002,
+            "z": -3.879417256383446,
+            "p_value": 0.00010470701065150554,
+            "conf_low": -0.035042938923785044,
+            "conf_high": -0.0115189060273841
+          },
+          "x2": {
+            "dydx": 0.1650456762368553,
+            "se": 0.017604270880958905,
+            "z": 9.375320190930012,
+            "p_value": 6.896612176187899e-21,
+            "conf_low": 0.13054193933608862,
+            "conf_high": 0.19954941313762195
+          },
+          "x3": {
+            "dydx": 0.06349591681049495,
+            "se": 0.018225917351989224,
+            "z": 3.483825564673969,
+            "p_value": 0.0004943015337583456,
+            "conf_low": 0.02777377521539244,
+            "conf_high": 0.09921805840559746
+          }
+        },
+        "mean": {
+          "x1": {
+            "dydx": -0.027031422991024293,
+            "se": 0.007164162772353123,
+            "z": -3.773144727439745,
+            "p_value": 0.00016120271148848948,
+            "conf_low": -0.04107292400421904,
+            "conf_high": -0.012989921977829546
+          },
+          "x2": {
+            "dydx": 0.1916341370010967,
+            "se": 0.025477109176073983,
+            "z": 7.521816375504007,
+            "p_value": 5.402042032986395e-14,
+            "conf_low": 0.14169992058579675,
+            "conf_high": 0.24156835341639663
+          },
+          "x3": {
+            "dydx": 0.07372495601526993,
+            "se": 0.022014699929970485,
+            "z": 3.3488967031025427,
+            "p_value": 0.0008113403852134726,
+            "conf_low": 0.03057693702207133,
+            "conf_high": 0.11687297500846854
+          }
+        },
+        "median": {
+          "x1": {
+            "dydx": -0.026424474018147036,
+            "se": 0.006987642608984209,
+            "z": -3.7816006766248096,
+            "p_value": 0.0001558231792225896,
+            "conf_low": -0.04012000186859359,
+            "conf_high": -0.012728946167700487
+          },
+          "x2": {
+            "dydx": 0.1873312875854497,
+            "se": 0.02437701154564197,
+            "z": 7.684751973583903,
+            "p_value": 1.5329368453043468e-14,
+            "conf_low": 0.13955322290527436,
+            "conf_high": 0.23510935226562504
+          },
+          "x3": {
+            "dydx": 0.07206957566981985,
+            "se": 0.021511314712404837,
+            "z": 3.3503101336832657,
+            "p_value": 0.0008072112704867333,
+            "conf_low": 0.029908173573399775,
+            "conf_high": 0.11423097776623992
+          }
+        }
+      },
+      "log_likelihood": -292.51836426732353,
+      "log_likelihood_null": -333.92252518694136,
+      "lr_statistic": 82.80832183923565,
+      "lr_p_value": 7.665335310600975e-18,
+      "pseudo_r_squared": 0.12399331520519119,
+      "aic": 593.0367285346471,
+      "bic": 609.8951609283358,
+      "nobs": 500,
+      "df_model": 3.0,
+      "df_resid": 496.0,
+      "converged": true,
+      "n_iter": 6,
+      "pred_table": [
+        [
+          93.0,
+          101.0
+        ],
+        [
+          51.0,
+          255.0
+        ]
+      ],
+      "true_beta": [
+        0.5479120971119267,
+        -0.12224312049589536,
+        0.7171958398227649,
+        0.3947360581187278
+      ],
+      "_meta": {
+        "reference": "statsmodels",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-09-13T01:30:27.206918+00:00",
+        "model": "logit",
+        "cov_type_requested": "hc0",
+        "method_requested": "newton",
+        "confidence_level": 0.95,
+        "formula": "y ~ x1 + x2 + x3"
       }
     }
   },
@@ -4456,7 +4865,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:55.069331+00:00",
+        "generated_at": "2026-09-13T01:30:27.280158+00:00",
         "model": "logit",
         "cov_type_requested": "classical",
         "method_requested": "newton",
@@ -4565,7 +4974,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:55.100496+00:00",
+        "generated_at": "2026-09-13T01:30:27.331750+00:00",
         "model": "logit",
         "cov_type_requested": "opg",
         "method_requested": "newton",
@@ -4849,7 +5258,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:55.138457+00:00",
+        "generated_at": "2026-09-13T01:30:27.387621+00:00",
         "model": "logit",
         "cov_type_requested": "hc0",
         "method_requested": "newton",
@@ -5013,7 +5422,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:55.167503+00:00",
+        "generated_at": "2026-09-13T01:30:27.421429+00:00",
         "model": "logit",
         "cov_type_requested": "classical",
         "method_requested": "bfgs",
@@ -5175,7 +5584,7 @@
       "_meta": {
         "reference": "statsmodels",
         "statsmodels_version": "0.15.0",
-        "generated_at": "2026-09-13T01:03:55.231721+00:00",
+        "generated_at": "2026-09-13T01:30:27.460628+00:00",
         "model": "logit",
         "cov_type_requested": "classical",
         "method_requested": "lbfgs",
@@ -5186,9 +5595,9 @@
   },
   "_meta": {
     "method": "logit",
-    "generated_at": "2026-09-13T01:03:55.231863+00:00",
+    "generated_at": "2026-09-13T01:30:27.460740+00:00",
     "primary_reference": "statsmodels",
     "statsmodels_version": "0.15.0",
-    "note": "perfect_multicollinearityシナリオはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。cov_type='hc1'はstatsmodelsのdiscrete modelで未実装（HC0と同一値を返す）ため含まない。logit_crosscheck.json（R側）が主リファレンスを担う。cov_type='opg'の限界効果（margeff）はstatsmodels側では算出できないためnullになっている（benchmark/nonlinear/references/statsmodels_ref.py参照）。near_separationはlogit特有の病理（準完全分離）の境界値ケース。完全分離下でのNonConvergence検出には既知の限界があり、専用シナリオは採用していない（docs/spec/logit-spec.md参照）。scale_varianceは真のDGPを未スケーリングのXで計算した後に列のみをスケーリングする設計のため成功パス（benchmark/nonlinear/datasets.py参照）。n=k+1（自由度1ちょうど）の境界値ケースはOLSと異なり非採用（n<=kではlogitのMLEが構造的にほぼ確実に完全分離を起こすため、意味のある成功パスにならない。docs/spec/logit-spec.md参照）。G<=q（傾き係数の数）でのクラスターロバストSE（cluster_g2・mroz/city）はValidationErrorになるため成功パスフィクスチャを持たない（Issue #289）。methodはbfgs/lbfgsがnewtonと同じ最尤解・標準誤差に収束することを主リファレンスに対して確認するためのfixture（baselineシナリオ・classicalcov_typeの1ケースのみ）。many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ高次元シナリオ（OLSの同種ケース相当、test-coverage-candidates.md項目2）。真のDGPは未スケーリングのXで計算し、係数の大きさは分離を避けるためOLSよりずっと小さく較正済み。"
+    "note": "perfect_multicollinearityシナリオはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。cov_type='hc1'はstatsmodelsのdiscrete modelで未実装（HC0と同一値を返す）ため含まない。logit_crosscheck.json（R側）が主リファレンスを担う。cov_type='opg'の限界効果（margeff）はstatsmodels側では算出できないためnullになっている（benchmark/nonlinear/references/statsmodels_ref.py参照）。near_separationはlogit特有の病理（準完全分離）の境界値ケース。完全分離下でのNonConvergence検出には既知の限界があり、専用シナリオは採用していない（docs/spec/logit-spec.md参照）。scale_varianceは真のDGPを未スケーリングのXで計算した後に列のみをスケーリングする設計のため成功パス（benchmark/nonlinear/datasets.py参照）。n=k+1（自由度1ちょうど）の境界値ケースはOLSと異なり非採用（n<=kではlogitのMLEが構造的にほぼ確実に完全分離を起こすため、意味のある成功パスにならない。docs/spec/logit-spec.md参照）。G<=q（傾き係数の数）でのクラスターロバストSE（cluster_g2・mroz/city）はValidationErrorになるため成功パスフィクスチャを持たない（Issue #289）。methodはbfgs/lbfgsがnewtonと同じ最尤解・標準誤差に収束することを主リファレンスに対して確認するためのfixture（baselineシナリオ・classicalcov_typeの1ケースのみ）。many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ高次元シナリオ（OLSの同種ケース相当、test-coverage-candidates.md項目2）。真のDGPは未スケーリングのXで計算し、係数の大きさは分離を避けるためOLSよりずっと小さく較正済み。outlier_regressorはx1の5%を外れ値に置き換えた成功パス（OLSの同種ケース相当、test-coverage-candidates.md項目67）。"
   }
 }

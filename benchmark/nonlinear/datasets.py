@@ -99,6 +99,7 @@ SCENARIOS = [
     "perfect_multicollinearity",
     "scale_variance",
     "many_regressors",
+    "outlier_regressor",
 ]
 
 # near_separationでx1の係数を上書きする値。ベンチマーク作成時の実測確認（モジュール
@@ -126,6 +127,16 @@ _MANY_REGRESSORS_SLOPE_MAGNITUDE_STEP = 0.02
 # OLSのmany_regressorsと同じ発想（scale_variance系と同じく、真のDGPは未スケーリングの
 # Xで計算し、出力直前にのみスケーリングする設計。モジュールdocstring参照）。
 _MANY_REGRESSORS_LOG_SCALE_RANGE = (-1.0, 2.0)
+
+# outlier_regressorでx1に混入させる外れ値（OLSのbenchmark/linear/datasets.pyと
+# 同じTukeyの汚染混合モデル、同じ較正値）。many_regressorsと異なりkが増えず
+# 少数の観測（5%）だけが極端な値を持つため、線形予測子の分散は残り95%の観測に
+# 支配され分離を起こさない（実測確認済み: n=500・seed 0〜99でlogit/probitとも
+# ComputationErrorなし、statsmodelsと最大相対誤差1e-8程度で一致）。そのため
+# many_regressorsのような「未スケーリングのXでDGP計算→出力時のみスケーリング」の
+# 工夫は不要で、OLSと同じくXを直接汚染してから p・y を計算する。
+_OUTLIER_REGRESSOR_CONTAM_PROB = 0.05
+_OUTLIER_REGRESSOR_CONTAM_SCALE = 20.0
 
 _LINK_CDF = {
     "logit": lambda z: 1.0 / (1.0 + np.exp(-z)),
@@ -207,6 +218,16 @@ def generate_binary_choice_dataset(
     if scenario == "scale_variance" and k < 2:
         raise ValueError(f"{scenario} requires k >= 2")
 
+    if scenario == "outlier_regressor":
+        # x1の一部（5%）だけをTukeyの汚染混合モデルで外れ値に置き換える
+        # （OLSのoutlier_regressorと同じ発想。p・yはこの汚染後のXから計算する
+        # ——分離を起こさないことを実測確認済み、上記定数のコメント参照）。
+        is_outlier = rng.uniform(size=n) < _OUTLIER_REGRESSOR_CONTAM_PROB
+        outlier_vals = rng.normal(
+            0.0, _OUTLIER_REGRESSOR_CONTAM_SCALE, size=n
+        )
+        X[:, 0] = np.where(is_outlier, outlier_vals, X[:, 0])
+
     p = _LINK_CDF[link](linear_predictor(X, beta))
     y = rng.binomial(1, p).astype(np.float64)
 
@@ -265,6 +286,10 @@ TOBIT_SCENARIOS = [
     # 打ち切り境界は y* の経験分位点で決まるため、kが増えても左打ち切り30%は
     # そのまま維持される。
     "many_regressors",
+    # x1の5%を外れ値に置き換えた成功パス（OLS/Logit/Probitの同種ケース相当、
+    # test-coverage-candidates.md項目67）。打ち切り境界は y* の経験分位点で
+    # 決まるため左打ち切り30%を維持する。
+    "outlier_regressor",
 ]
 
 # 数値比較の対象外（ComputationError の発生確認のみ）のシナリオ。scale_variance は
@@ -312,6 +337,7 @@ _TOBIT_SCENARIO_CONFIG: dict[str, dict[str, object]] = {
     },
     "perfect_multicollinearity": {"kind": "left", "frac": 0.30},
     "many_regressors": {"kind": "left", "frac": 0.30},
+    "outlier_regressor": {"kind": "left", "frac": 0.30},
 }
 
 # many_regressorsの傾き係数の大きさ（絶対値、OLSのmany_regressorsと同じ発想・
@@ -435,6 +461,15 @@ def generate_censored_regression_dataset(
     col_scale = config.get("col_scale")
     if col_scale is not None and k < 2:
         raise ValueError(f"{scenario} requires k >= 2")
+
+    if scenario == "outlier_regressor":
+        # x1の一部（5%）だけをTukeyの汚染混合モデルで外れ値に置き換える
+        # （OLS/Logit/Probitのoutlier_regressorと同じ発想・同じ較正値）。
+        is_outlier = rng.uniform(size=n) < _OUTLIER_REGRESSOR_CONTAM_PROB
+        outlier_vals = rng.normal(
+            0.0, _OUTLIER_REGRESSOR_CONTAM_SCALE, size=n
+        )
+        X[:, 0] = np.where(is_outlier, outlier_vals, X[:, 0])
 
     err_kind = config.get("err")
     if err_kind == "high_variance":

@@ -1158,3 +1158,19 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   現状維持が妥当と判断）。
 - **気づいた経緯**: 2026-09-13、`validation.rs`解説中のユーザー指摘。
 - **状態**:【Issue化】Issue #332として切り出し済み（2026-09-13）
+
+### 56. `linear/common.rs`の`mat_to_vec`が実際には`linear`系統に限定されず全手法共通で使われている
+
+- **対象**: [engine_pybind/src/linear/common.rs:59-62](../../../engine_pybind/src/linear/common.rs#L59-L62)
+  の`mat_to_vec`
+- **内容**: モジュールdocコメント（同ファイル1〜14行目）は「`linear`系統
+  （OLS/WLS等）で共有するユーティリティ」と位置づけているが、`grep`で確認した
+  ところ`mat_to_vec`は`panel/fe.rs`・`iv/common.rs`からも`crate::linear::common::
+  mat_to_vec`として呼ばれており、実態は`column_extraction.rs`と同じ「全手法共通」
+  ロジックになっている。`.claude/rules/rust-style.md`「ファイル・ディレクトリ構成」
+  の「全手法で共有するロジックは系統ディレクトリの外、クレート直下に置く」という
+  規約に従うなら、`mat_to_vec`単体をクレート直下（`column_extraction.rs`と同じ
+  階層）に移す候補になる。
+- **気づいた経緯**: 2026-09-13、`linear/common.rs`解説中に呼び出し元を`grep`で
+  確認して気づいた（Claude起点、ユーザー指摘ではない）。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

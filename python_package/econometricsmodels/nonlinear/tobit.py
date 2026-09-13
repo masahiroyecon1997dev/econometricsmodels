@@ -288,12 +288,11 @@ class TobitResults:
         ]
 
     def predict(
-        self, target: str = "expected_observed"
+        self,
+        target: str = "expected_observed",
+        new_data: pl.DataFrame | None = None,
     ) -> list[dict[str, float]]:
-        """Predicted values for the training data used in `fit()`.
-
-        Out-of-sample prediction (a `new_data` argument) is not yet
-        supported (same limitation as Logit/Probit's `predict()`).
+        """Predicted values for `target`, on the training data or `new_data`.
 
         Args:
             target: Which quantity to predict. One of
@@ -302,7 +301,17 @@ class TobitResults:
                 censoring-adjusted conditional expectation, directly
                 comparable to the observed `y`), or
                 `"prob_uncensored"` (`P(uncensored|x)`).
-                Case-insensitive.
+                Case-insensitive. Independent of `new_data`: the same
+                three targets are available whether predicting on the
+                training data or new data.
+            new_data: New data to predict on. Must contain columns with
+                the same names as the `x` columns passed at fit time
+                (matched by name; column order does not matter). If
+                `include_intercept=True` was used at fit time, the
+                constant column is added automatically and must not be
+                included here. If `None` (default), returns the
+                predicted values for the training data used in
+                `fit()`.
 
         Returns:
             Row-oriented predictions, one dict per observation. Each
@@ -310,9 +319,12 @@ class TobitResults:
 
         Raises:
             ValidationError: `target` is not one of the three known
+                values, or `new_data` is missing a required `x`
+                column, or a column contains missing/NaN/infinite
                 values. A subclass of `ValueError`.
         """
-        return [{"predicted": p} for p in self._raw.predict(target)]
+        raw = self._raw.predict(target, new_data)
+        return [{"predicted": p} for p in raw]
 
     def marginal_effects(
         self,

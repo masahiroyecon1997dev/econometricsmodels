@@ -228,10 +228,14 @@ Tobit固有の差分:
 
 ### 3.6 predict() / censoring_fit_check()
 
-- `predict(target)`は`marginal_effects`と同じ`MarginalEffectsTarget`を再利用し、`E[y*|x]=x'β`・
-  `E[y|x]`（既定）・`P(uncensored|x)`の3種を返す。値の計算は`predicted_value`（`target_w_and_s`と
-  同じ`boundary_terms`を再利用、左/右/両側いずれでも単一の式）。学習データの各行のみ対象
-  （**in-sample限定**、out-of-sample対応は4章）。
+- `predict(target, new_data=None)`は`marginal_effects`と同じ`MarginalEffectsTarget`を再利用し、
+  `E[y*|x]=x'β`・`E[y|x]`（既定）・`P(uncensored|x)`の3種を返す。値の計算は`predicted_value`
+  （`target_w_and_s`と同じ`boundary_terms`を再利用、左/右/両側いずれでも単一の式）。`new_data`が
+  `None`（既定）なら学習データ、指定すれば新規データ（out-of-sample）に対する予測値を返す
+  （`x`列名マッチング・`include_intercept`時の定数項自動付加はOLS/Logit/Probitの`predict(new_data)`
+  と同じ規約、Issue #131）。engine側の`predict_new_data`は`nonlinear::common::predict_new_data`に
+  `predicted_value`（`target`・`sigma`・打ち切り境界を閉じ込めたクロージャ）を`link`として渡す
+  だけの薄いラッパー。`censoring_fit_check()`のout-of-sample対応は引き続き未対応（4章）。
 - **`pred_table()`は廃止し`censoring_fit_check()`に置き換える**。単一集約値ではなく`lower` /
   `uncensored` / `upper`の**方向別内訳**（`CensoringFitCheck`、該当方向の打ち切りが無ければその
   カテゴリは出力されない）。各カテゴリは`observed_rate`（`y`がちょうど境界値に一致する観測の割合）と
@@ -298,11 +302,19 @@ Tobit固有の差分:
 - **フィクスチャ**（`tobit.json` / `tobit_crosscheck.json`）は`run_tobit_crosscheck.R`の`engine`
   引数（`survreg` / `censReg`）違いで構造が完全に同一のため、pytest本体は`_tobit_checks.py`に
   集約している。
+- **新規データ（out-of-sample）予測値の数値照合（Issue #131）**: `run_tobit_crosscheck.R`が学習
+  データの各スロープ列の「平均±1標準偏差」を新規x値とする2行を組み立て（切片列は`model.matrix`の
+  規約通り常に1.0）、`predicted_value`（上記のformula非依存検証で既に正しさを確認済みの閉形式）で
+  target3種を計算した`predict_new_data`と、その新規x値自体（`new_x`）をフィクスチャに含める。
+  `predicted_value`の数式そのものは検証済みのため、この照合が対象とするのは新規データの設計行列
+  組み立て（切片自動付加・列の対応付け）がRust側（`predict_new_data`/`design_matrix_element`）と
+  Rの`model.matrix`規約とで一致するかであり、`new_mm %*% beta`という単純な行列積で十分（`numDeriv`
+  等の追加の独立検証は不要）。
 
 ## 4. 未実装・未対応
 
-- `predict()`/`censoring_fit_check()`のout-of-sample対応（`new_data`引数、Logit/Probitと同じ理由で
-  別issueトラッキング）。
+- `predict()`のout-of-sample対応は実装済み（Issue #131、3.6参照）。`censoring_fit_check()`の
+  out-of-sample対応は引き続き未実装。
 - `start_params`（ユーザー指定初期値）。
 - **尤度比検定（LR statistic/p-value）**: v1では`llnull`のためのintercept-only再最適化を避けて
   Wald検定を採用した。実装コストは`TobitInput`を`k=1`（切片のみ）で構築し既存のNewton/BFGS/L-BFGS

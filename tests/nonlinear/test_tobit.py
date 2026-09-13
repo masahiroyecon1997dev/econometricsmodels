@@ -216,6 +216,69 @@ def test_predict_unknown_target_raises(censored_dataset):
         res.predict(target="bogus")
 
 
+@pytest.mark.parametrize(
+    "target", ["expected_latent", "expected_observed", "prob_uncensored"]
+)
+def test_predict_new_data_returns_row_oriented_predictions(
+    censored_dataset, target
+):
+    """`predict(new_data=...)`（out-of-sample、Issue #131）が学習データと構造の
+    異なる新規データに対しても同じ行指向の形状を返すこと。
+    """
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
+
+    predicted = res.predict(target=target, new_data=new_data)
+
+    assert len(predicted) == 2
+    for row in predicted:
+        assert set(row.keys()) == {"predicted"}
+
+
+def test_predict_missing_column_raises(censored_dataset):
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
+
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    ):
+        res.predict(new_data=new_data)
+
+
+def test_predict_non_numeric_dtype_raises(censored_dataset):
+    """`test_non_numeric_dtype_raises`と同じ理由でnull経由の
+    `COLUMN_HAS_MISSING_VALUES`になる。
+    """
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": ["a", "b"], "x2": [1.0, 2.0]})
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=2),
+    ):
+        res.predict(new_data=new_data)
+
+
+def test_predict_null_or_non_finite_values_raise(censored_dataset):
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+
+    new_data_null = pl.DataFrame({"x1": [1.0, None], "x2": [1.0, 2.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    ):
+        res.predict(new_data=new_data_null)
+
+    new_data_inf = pl.DataFrame({"x1": [1.0, float("inf")], "x2": [1.0, 2.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="inf", row=1
+        ),
+    ):
+        res.predict(new_data=new_data_inf)
+
+
 def test_censoring_fit_check_structure(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     check = res.censoring_fit_check()

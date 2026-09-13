@@ -112,9 +112,9 @@ use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::nonlinear::common::{
     CovType, MarginalEffects, MarginalEffectsAt, MleError, MleFitOptions, SandwichVariant,
     SeparationNormCheck, U_CLAMP, checked_design_matrix_qr, clamped_pdf_cdf, cluster_cov_params,
-    column_means, column_medians, observed_information_cov_params, opg_cov_params, run_solver,
-    sandwich_cov_params, validate_cluster_cov_type, validate_confidence_level, validate_max_iter,
-    validate_sufficient_observations, validate_tol,
+    column_means, column_medians, observed_information_cov_params, opg_cov_params,
+    predict_new_data, run_solver, sandwich_cov_params, validate_cluster_cov_type,
+    validate_confidence_level, validate_max_iter, validate_sufficient_observations, validate_tol,
 };
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::prelude::{Solve, SolveLstsq};
@@ -1713,10 +1713,10 @@ impl TobitEstimator {
     /// （`predicted_value`のdocコメント「数式」参照。左のみ・右のみ・両側打ち切り
     /// いずれでも同じ式で正しく計算できる）。
     ///
-    /// **新規データでの予測（out-of-sample）は未対応**（Logit/Probitと同じ理由、
-    /// 別issueでトラッキング、ユーザー確認済み）。デフォルト（`target`省略時の
-    /// `E[y|x]`、`nonlinear-api-design.md`6章）はPython層（engine_pybind）の責務
-    /// （`Method`/`CovType`等と同じ設計、`.claude/rules/rust-style.md`参照）。
+    /// 新規データでの予測（out-of-sample）は`predict_new_data`（Issue #131の
+    /// Tobit版）。デフォルト（`target`省略時の`E[y|x]`、`nonlinear-api-design.md`
+    /// 6章）はPython層（engine_pybind）の責務（`Method`/`CovType`等と同じ設計、
+    /// `.claude/rules/rust-style.md`参照）。
     pub fn predict(&self, target: MarginalEffectsTarget) -> Vec<f64> {
         let x = self.input.x();
         let n = x.nrows();
@@ -1730,6 +1730,33 @@ impl TobitEstimator {
                 predicted_value(target, mu, self.sigma, lower, upper, &normal)
             })
             .collect()
+    }
+
+    /// 新規データ（out-of-sample、`new_x_columns`）に対する予測値（Issue #131の
+    /// Tobit版）。`target`は`predict`と同じ3種。
+    ///
+    /// `nonlinear::common::predict_new_data`に`predicted_value`（`mu`から`target`の
+    /// 値を計算する関数）を部分適用したクロージャを`link`として渡すだけの薄い
+    /// ラッパー（`LogitEstimator::predict_new_data`/`ProbitEstimator::predict_new_data`
+    /// と同じ設計。`predict_new_data`は「`x_i'θ`を計算して`link`に渡す」処理しか
+    /// 行わないため、`link`が`logistic`/正規分布CDFのような単純な関数でなくても
+    /// （`target`・`sigma`・`lower`・`upper`を閉じ込めたクロージャでも）そのまま使える）。
+    ///
+    /// `new_x_columns`の本数・順序の契約、パニック条件は
+    /// `nonlinear::common::predict_new_data`のdocコメント参照。
+    pub fn predict_new_data(
+        &self,
+        target: MarginalEffectsTarget,
+        new_x_columns: &[Vec<f64>],
+    ) -> Vec<f64> {
+        let has_intercept = self.input.has_intercept();
+        let lower = self.input.lower();
+        let upper = self.input.upper();
+        let sigma = self.sigma;
+        let normal = Normal::standard();
+        predict_new_data(&self.params, has_intercept, new_x_columns, |mu| {
+            predicted_value(target, mu, sigma, lower, upper, &normal)
+        })
     }
 
     /// 打ち切り予測の適合度チェック（Logit/Probitの`pred_table`の代替、`predict`とは独立
@@ -5000,6 +5027,104 @@ mod tests {
         let predicted_prob = estimator.predict(MarginalEffectsTarget::ProbUncensored);
         for i in 0..n {
             let mu: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
+            assert!((predicted_latent[i] - mu).abs() < 1e-12);
+            let expected_observed = expected_observed_closed_form(mu, sigma, lower, upper);
+            let expected_prob = prob_uncensored_closed_form(mu, sigma, lower, upper);
+            assert!((predicted_observed[i] - expected_observed).abs() < 1e-9);
+            assert!((predicted_prob[i] - expected_prob).abs() < 1e-9);
+        }
+    }
+
+    /// `predict_new_data`（out-of-sample、Issue #131のTobit版）が独立に再計算した
+    /// 値と一致すること。`fit_predict_matches_independent_recomputation_for_
+    /// multivariate_design`と同じモデルを使い、学習データとは異なる新規のx値で
+    /// 3つの`target`すべてを検証する。
+    #[test]
+    fn predict_new_data_matches_independent_recomputation_for_multivariate_design() {
+        let estimator = TobitEstimator::fit(
+            multivariate_censored_input(),
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
+        )
+        .unwrap();
+        let params = estimator.params().to_vec();
+        let sigma = estimator.sigma();
+        let lower = estimator.input().lower();
+        let upper = estimator.input().upper();
+
+        // 学習データには無い新規のx値
+        let new_x_columns = vec![vec![15.0, 25.0], vec![3.0, -1.0]];
+        let predicted_latent =
+            estimator.predict_new_data(MarginalEffectsTarget::ExpectedLatent, &new_x_columns);
+        let predicted_observed =
+            estimator.predict_new_data(MarginalEffectsTarget::ExpectedObserved, &new_x_columns);
+        let predicted_prob =
+            estimator.predict_new_data(MarginalEffectsTarget::ProbUncensored, &new_x_columns);
+
+        assert_eq!(predicted_latent.len(), 2);
+        for i in 0..2 {
+            let mu = params[0] + new_x_columns[0][i] * params[1] + new_x_columns[1][i] * params[2];
+            assert!((predicted_latent[i] - mu).abs() < 1e-12);
+            let expected_observed = expected_observed_closed_form(mu, sigma, lower, upper);
+            let expected_prob = prob_uncensored_closed_form(mu, sigma, lower, upper);
+            assert!((predicted_observed[i] - expected_observed).abs() < 1e-9);
+            assert!((predicted_prob[i] - expected_prob).abs() < 1e-9);
+        }
+    }
+
+    /// `predict_new_data`が`has_intercept=false`でも3つの`target`すべてで
+    /// 正しく動作すること（Logit/Probitの対応するテストと同じ理由の対称性確保、
+    /// rust-reviewer指摘）。
+    #[test]
+    fn predict_new_data_without_intercept_matches_independent_recomputation() {
+        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let x2 = vec![1.0, 0.0, 2.0, 1.0, 0.0, 2.0, 1.0, 0.0];
+        let y = vec![0.0, 0.0, 1.15, 2.9, 5.2, 6.85, 9.1, 10.95];
+        let input = TobitInput::from_columns(
+            &y,
+            &[x1, x2],
+            vec!["x1".to_string(), "x2".to_string()],
+            false,
+            "y".to_string(),
+            Some(0.0),
+            None,
+        )
+        .unwrap();
+
+        let estimator = TobitEstimator::fit(
+            input,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 100,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
+        )
+        .unwrap();
+        let params = estimator.params().to_vec();
+        let sigma = estimator.sigma();
+        let lower = estimator.input().lower();
+        let upper = estimator.input().upper();
+
+        let new_x_columns = vec![vec![15.0, 25.0], vec![3.0, -1.0]];
+        let predicted_latent =
+            estimator.predict_new_data(MarginalEffectsTarget::ExpectedLatent, &new_x_columns);
+        let predicted_observed =
+            estimator.predict_new_data(MarginalEffectsTarget::ExpectedObserved, &new_x_columns);
+        let predicted_prob =
+            estimator.predict_new_data(MarginalEffectsTarget::ProbUncensored, &new_x_columns);
+
+        assert_eq!(predicted_observed.len(), 2);
+        for i in 0..2 {
+            let mu = new_x_columns[0][i] * params[0] + new_x_columns[1][i] * params[1];
             assert!((predicted_latent[i] - mu).abs() < 1e-12);
             let expected_observed = expected_observed_closed_form(mu, sigma, lower, upper);
             let expected_prob = prob_uncensored_closed_form(mu, sigma, lower, upper);

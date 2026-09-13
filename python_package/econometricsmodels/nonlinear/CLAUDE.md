@@ -10,6 +10,7 @@
 - **`log_likelihood_null`/`lr_statistic`/`lr_p_value`/`pseudo_r_squared`は提供しない**。代わりに`wald_statistic`/`wald_p_value`（モデル全体の有意性検定）を提供する（`nonlinear-api-design.md`5章）。
 - **`pred_table()`の代わりに`censoring_fit_check()`**: `y`が連続変数のため分類の的中表は意味を持たない（`nonlinear-api-design.md`6章）。返り値は`pred_table()`と同じ行指向`list[dict]`慣習に合わせ、`category`（`"lower"`/`"uncensored"`/`"upper"`のうち該当するもの）・`observed_rate`・`model_implied_rate`をキーに持つ（実装時の判断、`pred_table()`の`[{"actual":..., "predicted_0":...}]`という先例と同じ理由）。
 - **`predict()`/`marginal_effects()`に`target`引数**（`"expected_latent"`/`"expected_observed"`/`"prob_uncensored"`、既定`"expected_observed"`）を追加。`predict()`の返り値の行は単一キー`"predicted"`（Logitの`"probability"`に相当する汎用キー、複数の予測対象があるため対象非依存の名前にした）。
+- **`predict()`はout-of-sample（`new_data`引数）対応済み（Issue #131）**: `target`と`new_data`は独立したキーワード引数（`predict(target="expected_observed", new_data=None)`）。`target`の3種はどちらの経路でも同じように使える。`censoring_fit_check()`のout-of-sample対応は別issueでトラッキング（引き続き未対応）。
 - **打ち切り境界（`lower`/`upper`）関連の追加バリデーション**: `TobitOptions.lower`/`upper`が両方`None`（`InvalidCensoringBounds`）、`y`が境界外（`YOutOfCensoringBounds`）、非打ち切り観測が1件も無い（`NoUncensoredObservations`、Issue #223）はいずれも`engine`層で検証され`ValidationError`になる。`x`に`"sigma"`という列名がある場合も`ValidationError`（`"sigma"`合成パラメータ名との衝突、`engine_pybind`の`validate_no_sigma_collision`）。
 - **完全な多重共線性の検出経路**: Logitは`method`（newton/bfgs/lbfgs）によって検出経路が異なる（`newton_step`のQR分解 vs 収束後の`observed_information_cov_params`）が、Tobitは`ols_initial_params`のQR検証が`method`に関わらず常に最初に実行されるため、`method`をparametrizeしなくても`ComputationError`（`SingularDesignMatrix`）を一貫して検出できる。
 

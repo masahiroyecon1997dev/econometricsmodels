@@ -16,6 +16,9 @@
 #     予測値（`predicted_value`）・打ち切り適合度（`censoring_fit_check`）:
 #     `numDeriv::grad` による数値微分、および閉形式間の相互整合を `stopifnot` で検証
 #     （末尾の「手計算箇所の formula 非依存検証」ブロック）。
+#   - 新規データ（out-of-sample）予測（`predict_new_data`、Issue #131）: `predicted_value`
+#     自体は上記で検証済みのため、`new_mm %*% beta`という単純な行列積のみ（`predict_head`
+#     の直後を参照）。
 #
 # `AER::tobit` は `survreg(..., dist="gaussian")` に `Surv()` 応答の組み立てと
 # `summary`/`waldtest` を足しただけの薄いラッパーで、係数・スケール・vcov・logLik は
@@ -326,6 +329,38 @@ for (pt in margeff_targets) {
   )
 }
 
+# 新規データ（out-of-sample）予測値（Issue #131のTobit版）。学習データの各スロープ
+# 列の「平均+1標準偏差」「平均-1標準偏差」を独立変数値とする2行の新規データを作り、
+# 同じ`predicted_value`（cov_type非依存の閉形式、上のnumDeriv検証済み）で
+# target3種を計算する。切片列（存在する場合）は`mm`の規約通り常に1.0。この検証が
+# 対象とするのは`predicted_value`の数式そのもの（既に検証済み）ではなく、新規データの
+# 設計行列組み立て（切片自動付加・列の対応付け）が本実装のRust側
+# （`predict_new_data`/`design_matrix_element`）とRの`model.matrix`規約とで一致する
+# ことなので、単純な行列積（`new_mm %*% beta`）で十分（formula依存の閉形式ではない
+# ため、numDerivによる独立検証は不要）。
+slope_cols <- setdiff(seq_len(k), intercept_col)
+slope_means <- colMeans(mm[, slope_cols, drop = FALSE])
+slope_sds <- apply(mm[, slope_cols, drop = FALSE], 2, sd)
+new_mm <- matrix(0, nrow = 2, ncol = k)
+colnames(new_mm) <- colnames(mm)
+if (!is.na(intercept_col)) new_mm[, intercept_col] <- 1
+new_mm[1, slope_cols] <- slope_means + slope_sds
+new_mm[2, slope_cols] <- slope_means - slope_sds
+new_mu <- as.numeric(new_mm %*% beta)
+
+predict_new_data <- list()
+for (pt in margeff_targets) {
+  predict_new_data[[pt]] <- vapply(
+    new_mu, function(mu) predicted_value(pt, mu), numeric(1)
+  )
+}
+# Python側が`Tobit(...).fit().predict(new_data=...)`に渡す`new_data`を組み立てられる
+# よう、実際に使った新規x列（切片を除く）も出力する。
+new_x <- list()
+for (col_idx in slope_cols) {
+  new_x[[colnames(mm)[col_idx]]] <- new_mm[, col_idx]
+}
+
 # 打ち切り適合度チェック（`censoring_fit_check`）。cov_type 非依存。
 cfc_rows <- list()
 cdf_za_all <- if (is.infinite(lower)) rep(0, n) else pnorm((lower - mu_all) / sigma)
@@ -484,6 +519,8 @@ result <- list(
   df_resid = n - p,
   margeff = margeff,
   predict_head = predict_head,
+  predict_new_data = predict_new_data,
+  new_x = new_x,
   censoring_fit_check = cfc_rows
 )
 cat(toJSON(result, auto_unbox = TRUE, digits = NA))

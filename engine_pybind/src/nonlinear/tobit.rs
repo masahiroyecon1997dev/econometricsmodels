@@ -273,22 +273,45 @@ pub struct TobitResult {
 
 #[pymethods]
 impl TobitResult {
-    /// Predicted values for the training data used in `fit()`.
+    /// Predicted values for the training data used in `fit()`, or for `new_data`
+    /// when given.
     ///
     /// `target` selects which quantity to predict: `"expected_latent"` (`E[y*|x]=x'β`),
     /// `"expected_observed"` (`E[y|x]`, the censoring-adjusted conditional expectation;
     /// default, directly comparable to the observed `y`), or `"prob_uncensored"`
-    /// (`P(uncensored|x)`).
-    ///
-    /// Out-of-sample prediction (a `new_data` argument) is not yet supported (same
-    /// limitation as Logit/Probit's `predict()`).
+    /// (`P(uncensored|x)`). Independent of `new_data`: the same three targets are
+    /// available whether predicting on the training data or new data.
     ///
     /// # Errors
-    /// `target` is not one of the three known values (case-insensitive): `ValidationError`
-    #[pyo3(signature = (target="expected_observed".to_string()))]
-    fn predict(&self, target: String) -> PyResult<Vec<f64>> {
+    /// - `target` is not one of the three known values (case-insensitive):
+    ///   `ValidationError`
+    /// - A required `x` column is missing from `new_data`, cannot be cast to a
+    ///   numeric type, or contains missing/NaN/infinite values: `ValidationError`
+    ///   (same validation as `fit()`'s column extraction, via `extract_f64_column`).
+    #[pyo3(signature = (target="expected_observed".to_string(), new_data=None))]
+    fn predict(&self, target: String, new_data: Option<PyDataFrame>) -> PyResult<Vec<f64>> {
         let target = parse_marginal_effects_target(&target.to_lowercase())?;
-        Ok(self.estimator.predict(target))
+        let Some(new_data) = new_data else {
+            return Ok(self.estimator.predict(target));
+        };
+
+        let df: DataFrame = new_data.into();
+        let has_intercept = self.estimator.input().has_intercept();
+        // `param_names`は`(k+1)`長（`has_intercept`時は先頭`"const"`・末尾`"sigma"`を
+        // 含む、モジュールdocコメント参照）。`x`の列名はその両端を除いた部分。
+        let len = self.param_names.len();
+        let x_names: &[String] = if has_intercept {
+            &self.param_names[1..len - 1]
+        } else {
+            &self.param_names[..len - 1]
+        };
+
+        let mut x_columns: Vec<Vec<f64>> = Vec::with_capacity(x_names.len());
+        for name in x_names {
+            x_columns.push(extract_f64_column(&df, name)?);
+        }
+
+        Ok(self.estimator.predict_new_data(target, &x_columns))
     }
 
     /// Marginal effects (`dy/dx`) with delta-method standard errors.

@@ -1,6 +1,6 @@
-# engine_pybind/src/nonlinear/ 実装ノート（Logit/Probit）
+# engine_pybind/src/nonlinear/ 実装ノート（Logit/Probit/Tobit）
 
-このファイルは `engine_pybind/src/nonlinear/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景は`docs/planning/specs/nonlinear-api-design.md`・`nonlinear-implementation-notes.md`・`docs/spec/logit-spec.md`・`docs/spec/probit-spec.md`が正本。ここは差分の索引のみ。
+このファイルは `engine_pybind/src/nonlinear/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景は`docs/planning/specs/nonlinear-api-design.md`・`nonlinear-implementation-notes.md`・`docs/spec/logit-spec.md`・`docs/spec/probit-spec.md`・`docs/spec/tobit-spec.md`が正本。ここは差分の索引のみ。
 
 ## Probitの実装状況（実装済み）
 
@@ -26,13 +26,13 @@ Probit対応は当初「python_packageラッパー実装のみ」というスコ
 
 `engine::nonlinear::common::MleError` → `PyErr`は`mle_error_to_pyerr`（`nonlinear/common.rs`）。`MleError::Common`は`crate::errors::common_error_to_pyerr`に委譲する（`linear`系統の`LeastSquaresError`と同じ`CommonError`を共有、`.claude/rules/rust-style.md`参照）。
 
-## `LogitResult`/`ProbitResult`の設計: `estimator`フィールド
+## `LogitResult`/`ProbitResult`/`TobitResult`の設計: `estimator`フィールド
 
-`predict()`/`pred_table()`/`marginal_effects()`をpymethodsとして提供するため、`LogitResult`/`ProbitResult`はそれぞれ`engine::nonlinear::{logit::LogitEstimator, probit::ProbitEstimator}`を非公開フィールド`estimator`として保持する。`OLSResult`の`fitted_values`/`has_intercept`と同じ「必要な内部状態を非公開フィールドで持つ」位置づけだが、Logit/Probitは3メソッド分の計算に必要なため、個別のスカラー/ベクトルではなく推定量構造体をまるごと保持する設計にした。
+`predict()`/`pred_table()`/`marginal_effects()`（Tobitは`pred_table()`の代わりに`censoring_fit_check()`）をpymethodsとして提供するため、`LogitResult`/`ProbitResult`/`TobitResult`はそれぞれ`engine::nonlinear::{logit::LogitEstimator, probit::ProbitEstimator, tobit::TobitEstimator}`を非公開フィールド`estimator`として保持する。`OLSResult`の`fitted_values`/`has_intercept`と同じ「必要な内部状態を非公開フィールドで持つ」位置づけだが、Logit/Probit/Tobitは複数メソッド分の計算に必要なため、個別のスカラー/ベクトルではなく推定量構造体をまるごと保持する設計にした。
 
-- `LogitEstimator`/`ProbitEstimator`はどちらも`Clone`を実装していないため、`LogitResult`/`ProbitResult`も`#[derive(Clone)]`を外している（`OLSResult`との差異。リポジトリ全体を検索し`.clone()`されている箇所が無いことを確認済み）。
-- 3メソッドはいずれも`self.estimator`への単純な委譲のみ（計算ロジックを`engine_pybind`に書かない原則を維持）。
-- **`predict(new_data=None)`のout-of-sample対応（Issue #131）も同じ委譲方針**: `new_data`指定時は`extract_f64_column`で列を抽出した後、`self.estimator.predict_new_data(&x_columns)`（`LogitEstimator`/`ProbitEstimator`に追加した薄いラッパーメソッド、内部で`nonlinear::common::predict_new_data`に`logistic`/正規分布CDFを渡すだけ）に委譲する。`OLSResult::predict`が`engine::linear::ols::predict_new_data`というフリー関数を直接呼べるのに対し、Logit/Probitがフリー関数を直接呼ばずestimatorメソッド経由にしているのは、リンク関数の選択（Logitはロジスティック関数、Probitは正規分布CDF）という手法固有の分岐を`engine_pybind`に持ち込まないため（`engine_pybind`にはstatrs依存も無い）。新規データの設計行列組み立て（`has_intercept`時の定数項自動付加）はOLS/WLSと共有する`engine::design_matrix::design_matrix_element`を使う。
+- `LogitEstimator`/`ProbitEstimator`/`TobitEstimator`はいずれも`Clone`を実装していないため、`LogitResult`/`ProbitResult`/`TobitResult`も`#[derive(Clone)]`を外している（`OLSResult`との差異。リポジトリ全体を検索し`.clone()`されている箇所が無いことを確認済み）。
+- 各メソッドはいずれも`self.estimator`への単純な委譲のみ（計算ロジックを`engine_pybind`に書かない原則を維持）。
+- **`predict(new_data=None)`のout-of-sample対応（Issue #131、Logit/Probit/Tobit共通）も同じ委譲方針**: `new_data`指定時は`extract_f64_column`で列を抽出した後、`self.estimator.predict_new_data(...)`（`LogitEstimator`/`ProbitEstimator`/`TobitEstimator`に追加した薄いラッパーメソッド、内部で`nonlinear::common::predict_new_data`に`logistic`/正規分布CDF/`predicted_value`を`link`として渡すだけ）に委譲する。`OLSResult::predict`が`engine::linear::ols::predict_new_data`というフリー関数を直接呼べるのに対し、Logit/Probit/Tobitがフリー関数を直接呼ばずestimatorメソッド経由にしているのは、`link`の選択（Logitはロジスティック関数、Probitは正規分布CDF、Tobitは`target`・`sigma`・打ち切り境界を閉じ込めた`predicted_value`）という手法固有の分岐を`engine_pybind`に持ち込まないため（`engine_pybind`にはstatrs依存も無い）。新規データの設計行列組み立て（`has_intercept`時の定数項自動付加）はOLS/WLSと共有する`engine::design_matrix::design_matrix_element`を使う。Tobitのみ`target: MarginalEffectsTarget`を`predict_new_data`に追加で渡す（`param_names`から`x`列名を取り出す際、`has_intercept`時の先頭`"const"`だけでなく末尾の合成パラメータ名`"sigma"`も除外する必要がある点に注意、`tobit.rs`の`predict`実装参照）。
 - `marginal_effects`の結果はpyclass`MarginalEffectsResult`（`nonlinear/common.rs`、`LogitResult`/`ProbitResult`と同じ個別`#[pyo3(get)]`方式）で返す。フィールド名は`LogitResult`/`ProbitResult`の既存フィールド（`param_names`/`std_errors`/`z_stats`/`p_values`/`conf_lower`/`conf_upper`）と揃え、`dydx`のみ新規。元々`logit.rs`にLogit専用で定義していたが、`engine::nonlinear::common::MarginalEffects`（engine側の返り値型）が最初からLogit/Probit共有だったのに合わせ、Probit追加時に`nonlinear/common.rs`へ移動して共有した（`parse_marginal_effects_at`も同様に移動）。
 
 ## `pred_table`の`Mat<f64>`→Python変換

@@ -967,7 +967,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `diff`で突き合わせて確認。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
-### 46. `LogitResults`/`ProbitResults`/`TobitResults`に`dep_var_name`プロパティが無い（`OlsResults`/`WlsResults`/`IvResults`/`FeResults`には有る）
+### 46.【Issue化】`LogitResults`/`ProbitResults`/`TobitResults`に`dep_var_name`プロパティが無い（`OlsResults`/`WlsResults`/`IvResults`/`FeResults`には有る）→ Issue #318として切り出し済み（2026-09-13）
 
 - **対象**: [engine_pybind/src/nonlinear/logit.rs:198-228](../../../engine_pybind/src/nonlinear/logit.rs#L198-L228)、
   [engine_pybind/src/nonlinear/probit.rs:193-223](../../../engine_pybind/src/nonlinear/probit.rs#L193-L223)、
@@ -999,4 +999,4 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-09-13、`iv/iv.py`解説中、ユーザーが
   `logit.py`に`dep_var_name`が無いことを指摘。`grep`で
   `engine`/`engine_pybind`/`python_package`全層を突き合わせて確認。
-- **状態**: 未対応（バグか意図的な設計かの確認待ち）
+- **状態**:【Issue化】Issue #318として切り出し済み（2026-09-13）

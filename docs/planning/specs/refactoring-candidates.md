@@ -966,3 +966,37 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-31、`nonlinear/probit.py`解説時に`logit.py`と
   `diff`で突き合わせて確認。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 46. `LogitResults`/`ProbitResults`/`TobitResults`に`dep_var_name`プロパティが無い（`OlsResults`/`WlsResults`/`IvResults`/`FeResults`には有る）
+
+- **対象**: [engine_pybind/src/nonlinear/logit.rs:198-228](../../../engine_pybind/src/nonlinear/logit.rs#L198-L228)、
+  [engine_pybind/src/nonlinear/probit.rs:193-223](../../../engine_pybind/src/nonlinear/probit.rs#L193-L223)、
+  [engine_pybind/src/nonlinear/tobit.rs:212-242](../../../engine_pybind/src/nonlinear/tobit.rs#L212-L242)
+  の`#[pyclass] pub struct LogitResult/ProbitResult/TobitResult`
+- **内容**: `engine`層（`engine/src/nonlinear/logit.rs:60,149-150`、
+  `probit.rs:87,174-175`、`tobit.rs:137,276-277`）は`Logit`/`Probit`/
+  `Tobit`いずれのInput構造体も`dep_var_name`フィールド・
+  `dep_var_name()`ゲッターを持っており、値自体はRust内部に存在する。
+  しかし`engine_pybind`層の`#[pyclass]`結果構造体（`LogitResult`/
+  `ProbitResult`/`TobitResult`）には`dep_var_name`フィールドが定義され
+  ておらず、Pythonへ公開されていない。一方`OLSResult`
+  （`engine_pybind/src/linear/ols.rs:154`）・`WLSResult`
+  （`engine_pybind/src/linear/wls.rs:164`）・`IvResult`
+  （`engine_pybind/src/iv/common.rs:322`）・`FeResult`
+  （`engine_pybind/src/panel/fe.rs:197`）は全て`pub dep_var_name: String`
+  を持ち、`python_package`側の対応する`OlsResults`/`WlsResults`/
+  `IvResults`にも`dep_var_name`プロパティが存在する（`python_package/
+  econometricsmodels/linear/ols.py:139-141`等）。結果として
+  `LogitResults`/`ProbitResults`/`TobitResults`（`python_package/
+  econometricsmodels/nonlinear/`配下）だけ`dep_var_name`が欠落している。
+- **Claudeの所感**: 値がRust内部に既に計算・保持されているにも
+  関わらず、`engine_pybind`層でPyO3の結果構造体に詰め忘れている
+  ように見え、意図的な設計判断というより実装漏れの可能性が高いと
+  考える。ただし非線形系統3手法全てに一貫して無いことから、
+  「z検定・尤度比検定等の非線形固有の情報を優先し、当初は
+  `dep_var_name`を省略する判断をした」という可能性も否定できない
+  ため、修正要否・意図の有無はユーザー確認が必要（CLAUDE.md 14章）。
+- **気づいた経緯**: 2026-09-13、`iv/iv.py`解説中、ユーザーが
+  `logit.py`に`dep_var_name`が無いことを指摘。`grep`で
+  `engine`/`engine_pybind`/`python_package`全層を突き合わせて確認。
+- **状態**: 未対応（バグか意図的な設計かの確認待ち）

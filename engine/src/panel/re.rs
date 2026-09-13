@@ -938,4 +938,55 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn re_estimator_fit_pins_faer_global_parallelism_to_seq() {
+        // Issue #283: `fit()`冒頭の`crate::parallelism::ensure_serial()`がfaerの
+        // グローバル並列度を`Par::Seq`へ引き戻すことの回帰ガード
+        // （`fe_estimator_fit_pins_faer_global_parallelism_to_seq`と同型、
+        // `engine/src/panel/CLAUDE.md`「faerのグローバル並列度」参照）。
+        faer::set_global_parallelism(faer::Par::rayon(0));
+
+        let entity = strings(&["a", "a", "a", "b", "b", "c", "c"]);
+        let x1 = vec![1.0, 2.0, 4.0, 2.0, 3.0, 5.0, 6.0];
+        let y = [3.0, 4.0, 7.0, 8.0, 9.0, 6.0, 10.0];
+        let input =
+            ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let _ = ReEstimator::fit(input, 0.95).unwrap();
+
+        assert!(matches!(faer::get_global_parallelism(), faer::Par::Seq));
+    }
+
+    #[test]
+    fn re_estimator_fit_returns_quasi_demeaned_regression_failed_when_sigma2_eps_is_zero() {
+        // rust-reviewer指摘（Issue #195）: σ_ε²=0（σ_u²>0、σ_ε²のみゼロ）は
+        // `θ_i = 1 - sqrt(0/(T_i・σ_u²+0)) = 1`（全エンティティ）になり、切片復元用の
+        // 定数列`1 - θ_i・1`が恒等的に全ゼロ列になる。この結果`OlsEstimator::fit`が
+        // 確実に特異行列として失敗し、`QuasiDemeanedRegressionFailed`に実際に到達する
+        // 唯一の現実的な経路になる（`engine/src/panel/CLAUDE.md`参照）。
+        //
+        // ノイズ無しの線形DGP（`y = 2*x1 + entity固有の切片`）にすると、内部FE推定の
+        // within回帰残差平方和が厳密に0になりσ_ε²=0を再現できる
+        // （`fe_estimator_fit_one_way_recovers_known_slope`と同型のデータ構成）。
+        // entity間の切片（5, 10, 1）が異なるためσ_u²>0（between回帰のSSRが非ゼロ）
+        // になり、`BetweenRegressionFailed`より先にこの経路へ到達する
+        // （Pythonで実地確認済み: sigma2_eps=0.0, sigma2_u≈20.02, theta=1.0 for all）。
+        let entity = strings(&["a", "a", "a", "b", "b", "c", "c"]);
+        let x1 = vec![1.0, 2.0, 3.0, 2.0, 3.0, 4.0, 5.0];
+        let y = [7.0, 9.0, 11.0, 14.0, 16.0, 9.0, 11.0];
+        let input =
+            ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let result = ReEstimator::fit(input, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::QuasiDemeanedRegressionFailed {
+                source: crate::linear::common::LeastSquaresError::SingularMatrix,
+            }
+        );
+    }
 }

@@ -30,10 +30,23 @@
 //! ものであり、このプロジェクトの`k`規約（傾き係数のみ）では委譲先の値を使えば
 //! 自動的に一致する（詳細な導出・数値検証は`swamy_arora_variance_components`関数doc
 //! 参照、ユーザー確認済み・2026-09-13）。
+//!
+//! ## θ計算・準偏差変換（`quasi_demean_transform`、Issue #194、7.2節）
+//!
+//! `θ_i = 1 - sqrt(σ_ε² / (T_i・σ_u² + σ_ε²))`（`compute_theta`、7.2節の式そのまま）を
+//! エンティティごとに計算し、`quasi_demean_column`（`common.rs`、Issue #173）を`y`・
+//! 各`x`列に適用する。REはentity方向のみ（2-way REはv1スコープ外、7.2節）のため
+//! 不均衡パネルも無条件でサポートする——`T_i`（エンティティごとの観測数）を直接使う
+//! この式は教科書レベルで不均衡対応済みで、FEの2-wayのような反復アルゴリズムは
+//! 不要（7.2節）。`sigma2_eps`/`sigma2_u`は`swamy_arora_variance_components`の戻り値を
+//! そのまま渡す想定だが、この関数自体はその依存を持たない（テストで独立に検証できる
+//! ようにするため。`quasi_demean_column`が`θ`の値域を検証しないのと同じ設計）。
+
+use std::collections::BTreeMap;
 
 use crate::error::CommonError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
-use crate::panel::common::{PanelDimension, PanelError, group_indices_by_key};
+use crate::panel::common::{PanelDimension, PanelError, group_indices_by_key, quasi_demean_column};
 use crate::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput};
 
 /// REの被説明変数・説明変数・パネル識別子を保持する入力データ。
@@ -297,6 +310,50 @@ pub fn swamy_arora_variance_components(
     Ok((sigma2_eps, sigma2_u))
 }
 
+/// θ（準偏差変換の重み）を計算する（Issue #194、7.2節）。
+///
+/// `θ_i = 1 - sqrt(σ_ε² / (T_i・σ_u² + σ_ε²))`。`T_i`はエンティティ`i`の観測数
+/// （`group_indices_by_key`で集計する）。不均衡パネルもこの式で無条件にサポートする
+/// （`T_i`が式に直接入るため、教科書レベルで不均衡対応済み。7.2節）。
+///
+/// `σ_ε²`/`σ_u²`の値域は検証しない（`quasi_demean_column`が`θ`の値域を検証しないのと
+/// 同じ設計判断——呼び出し側が`swamy_arora_variance_components`の戻り値を渡す限り
+/// `σ_ε²>0`・`σ_u²>=0`は保証されるが、この関数自体はその前提を強制しない）。
+fn compute_theta(entity: &[String], sigma2_eps: f64, sigma2_u: f64) -> BTreeMap<String, f64> {
+    group_indices_by_key(entity)
+        .into_iter()
+        .map(|(id, indices)| {
+            let t_i = indices.len() as f64;
+            let theta_i = 1.0 - (sigma2_eps / (t_i * sigma2_u + sigma2_eps)).sqrt();
+            (id.to_string(), theta_i)
+        })
+        .collect()
+}
+
+/// θ計算・準偏差変換（Issue #194、7.2節・7.4節）。`compute_theta`で求めたθを
+/// `quasi_demean_column`で`y`・各`x`列に適用する（FEの`within_transform_one_way`と
+/// 同型のパターン——FEはθ=1固定、REはエンティティごとに異なるθを使う点だけが異なる）。
+///
+/// 戻り値は`(theta, y_transformed, x_transformed)`。`theta`も返す理由: Issue #195で
+/// `OlsEstimator::fit(include_intercept=false)`への委譲時、切片項を復元するために
+/// 定数列（すべて1.0）にも同じ`theta`で`quasi_demean_column`を適用する必要があり
+/// （REは切片を持つためFEと異なりこの復元が要る、7.4節）、`theta`の再計算を避けるため
+/// 呼び出し側に渡しておく。
+pub fn quasi_demean_transform(
+    input: &ReInput,
+    sigma2_eps: f64,
+    sigma2_u: f64,
+) -> (BTreeMap<String, f64>, Vec<f64>, Vec<Vec<f64>>) {
+    let theta = compute_theta(input.entity(), sigma2_eps, sigma2_u);
+    let y = quasi_demean_column(input.y(), input.entity(), &theta);
+    let x = input
+        .x()
+        .iter()
+        .map(|col| quasi_demean_column(col, input.entity(), &theta))
+        .collect();
+    (theta, y, x)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -542,5 +599,101 @@ mod tests {
             result,
             Err(PanelError::BetweenRegressionFailed { .. })
         ));
+    }
+
+    // ── compute_theta / quasi_demean_transform ──────────────────────────────
+
+    #[test]
+    fn compute_theta_matches_reference_formula_for_unbalanced_panel() {
+        // entity a: T=3, b: T=2, c: T=1（不均衡パネル）。`linearmodels`のθ計算式
+        // （`RandomEffects.fit()`内の`theta = 1 - sqrt(sigma2_e/(t*sigma2_u+sigma2_e))`）と
+        // 数値完全一致することを実地検証済みの値（`swamy_arora_variance_components`の
+        // 参照テストと同じσ_ε²・σ_u²を使う）。
+        let entity = strings(&["a", "a", "a", "b", "b", "c"]);
+        let sigma2_eps = 0.064_516_129_032_258_03;
+        let sigma2_u = 7.429_453_144_752_303;
+
+        let theta = compute_theta(&entity, sigma2_eps, sigma2_u);
+
+        assert!((theta["a"] - 0.946_276_110_063_922_5).abs() < 1e-12);
+        assert!((theta["b"] - 0.934_249_367_520_359).abs() < 1e-12);
+        assert!((theta["c"] - 0.907_214_909_247_309_4).abs() < 1e-12);
+    }
+
+    #[test]
+    fn compute_theta_matches_reference_formula_for_balanced_panel() {
+        // バランスパネル（全エンティティT=2）、σ_ε²=σ_u²=1.0という単純な数値で
+        // θ = 1 - sqrt(1/3)を確認する（手計算で検算可能な境界値）。
+        let entity = strings(&["a", "a", "b", "b"]);
+
+        let theta = compute_theta(&entity, 1.0, 1.0);
+
+        let expected = 1.0 - (1.0_f64 / 3.0).sqrt();
+        assert!((theta["a"] - expected).abs() < 1e-12);
+        assert!((theta["b"] - expected).abs() < 1e-12);
+    }
+
+    #[test]
+    fn quasi_demean_transform_applies_computed_theta_to_y_and_x() {
+        // `compute_theta_matches_reference_formula_for_unbalanced_panel`と同じデータ・
+        // σ_ε²・σ_u²。`quasi_demean_column`自体の正しさは`common.rs`側で既に検証済み
+        // のため、ここでは「θの計算結果が正しくy/xの各列に適用されているか」の配線を
+        // 確認する。期待値はPythonで手計算した参照値。
+        let entity = strings(&["a", "a", "a", "b", "b", "c"]);
+        let x1 = vec![1.0, 2.0, 4.0, 2.0, 3.0, 5.0];
+        let y = [3.0, 4.0, 7.0, 8.0, 9.0, 6.0];
+        let input =
+            ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+        let sigma2_eps = 0.064_516_129_032_258_03;
+        let sigma2_u = 7.429_453_144_752_303;
+
+        let (theta, y_t, x_t) = quasi_demean_transform(&input, sigma2_eps, sigma2_u);
+
+        assert!((theta["a"] - 0.946_276_110_063_922_5).abs() < 1e-12);
+
+        let expected_y = [
+            -1.415_955_180_298_305_5,
+            -0.415_955_180_298_305_47,
+            2.584_044_819_701_694_5,
+            0.058_880_376_076_948_51,
+            1.058_880_376_076_948_5,
+            0.556_710_544_516_143_1,
+        ];
+        for (actual, expected) in y_t.iter().zip(expected_y.iter()) {
+            assert!((actual - expected).abs() < 1e-9, "{actual} vs {expected}");
+        }
+
+        let expected_x1 = [
+            -1.207_977_590_149_152_7,
+            -0.207_977_590_149_152_74,
+            1.792_022_409_850_847_3,
+            -0.335_623_418_800_897_5,
+            0.664_376_581_199_102_5,
+            0.463_925_453_763_453_2,
+        ];
+        for (actual, expected) in x_t[0].iter().zip(expected_x1.iter()) {
+            assert!((actual - expected).abs() < 1e-9, "{actual} vs {expected}");
+        }
+    }
+
+    #[test]
+    fn quasi_demean_transform_supports_unbalanced_panel_without_error() {
+        // REはentity方向のみ（7.2節）のため、FEの2-wayと異なりバランスパネルを
+        // 要求しない。singletonエンティティ（T=1）を含む不均衡パネルでも
+        // （`swamy_arora_variance_components`と違い内部でFE推定を呼ばないため）
+        // エラーにならず変換できることを確認する。
+        let entity = strings(&["a", "a", "a", "b", "b", "c"]);
+        let x1 = vec![1.0, 2.0, 4.0, 2.0, 3.0, 5.0];
+        let y = [3.0, 4.0, 7.0, 8.0, 9.0, 6.0];
+        let input =
+            ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let (theta, y_t, x_t) = quasi_demean_transform(&input, 0.1, 1.0);
+
+        assert_eq!(theta.len(), 3);
+        assert_eq!(y_t.len(), 6);
+        assert_eq!(x_t[0].len(), 6);
     }
 }

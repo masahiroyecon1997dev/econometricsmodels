@@ -248,7 +248,7 @@ def test_predict_none_matches_statsmodels_fitted_values(dataset):
 
     assert len(predicted) == len(dataset)
     for i, (row, expected) in enumerate(zip(predicted, sm_res.fittedvalues)):
-        _assert_close(row["fitted"], expected, f"fitted/{i}")
+        _assert_close(row["predicted"], expected, f"predicted/{i}")
 
 
 def test_predict_new_data_matches_statsmodels(dataset):
@@ -275,7 +275,7 @@ def test_predict_new_data_matches_statsmodels(dataset):
 
     assert len(predicted) == 3
     for i, (row, exp) in enumerate(zip(predicted, expected)):
-        _assert_close(row["fitted"], exp, f"fitted/{i}")
+        _assert_close(row["predicted"], exp, f"predicted/{i}")
 
 
 def test_predict_new_data_without_intercept_matches_statsmodels():
@@ -296,7 +296,7 @@ def test_predict_new_data_without_intercept_matches_statsmodels():
     expected = sm_res.predict(new_x1.reshape(-1, 1))
 
     for i, (row, exp) in enumerate(zip(predicted, expected)):
-        _assert_close(row["fitted"], exp, f"fitted/{i}")
+        _assert_close(row["predicted"], exp, f"predicted/{i}")
 
 
 def test_predict_with_include_intercept_false_and_x_named_const():
@@ -329,7 +329,7 @@ def test_predict_with_include_intercept_false_and_x_named_const():
         zip(predicted, [(100.0, 10.0), (200.0, 20.0)])
     ):
         expected = coef_const * c + coef_x2 * x2
-        _assert_close(row["fitted"], expected, f"fitted/{i}")
+        _assert_close(row["predicted"], expected, f"predicted/{i}")
 
 
 def test_predict_new_data_structure(dataset):
@@ -341,5 +341,5 @@ def test_predict_new_data_structure(dataset):
     assert isinstance(predicted, list)
     assert len(predicted) == 2
     for row in predicted:
-        assert set(row.keys()) == {"fitted"}
-        assert isinstance(row["fitted"], float)
+        assert set(row.keys()) == {"predicted"}
+        assert isinstance(row["predicted"], float)

@@ -167,7 +167,7 @@ def test_predict_none_matches_r_fitted_values(crosscheck, scenario):
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
     res = OLS(df, y="y", x=x_cols).fit()
 
-    predicted = [row["fitted"] for row in res.predict()]
+    predicted = [row["predicted"] for row in res.predict()]
     ref = crosscheck["synthetic"][scenario]["predict"]["fitted"]
 
     assert len(predicted) == len(ref)
@@ -192,7 +192,7 @@ def test_predict_new_data_matches_r(crosscheck):
             "x2": PREDICT_NEW_DATA["x2"],
         }
     )
-    predicted = [row["fitted"] for row in res.predict(new_data)]
+    predicted = [row["predicted"] for row in res.predict(new_data)]
     ref = crosscheck["synthetic"]["baseline"]["predict"]["predicted"]
 
     assert len(predicted) == len(ref)

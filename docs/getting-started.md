@@ -65,7 +65,7 @@ fitted = result.predict()
 new_data = pl.DataFrame({"x1": [6.0, 7.0]})
 predicted = result.predict(new_data)
 
-print(predicted)  # [{"fitted": ...}, {"fitted": ...}]
+print(predicted)  # [{"predicted": ...}, {"predicted": ...}]
 ```
 
 ## WLS (Weighted Least Squares)

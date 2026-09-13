@@ -240,7 +240,7 @@ class OlsResults:
 
         Returns:
             Row-oriented predictions, one dict per observation. Each
-            dict currently has a single key, `"fitted"`.
+            dict currently has a single key, `"predicted"`.
 
         Raises:
             ValidationError: `new_data` is missing a required `x`
@@ -248,4 +248,4 @@ class OlsResults:
                 values.
         """
         raw = self._raw.predict(new_data)
-        return [{"fitted": value} for value in raw]
+        return [{"predicted": value} for value in raw]

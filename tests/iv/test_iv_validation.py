@@ -582,3 +582,20 @@ def test_gmm_raise_on_non_convergence_true_raises_computation_error(
     )
     with pytest.raises(ComputationError):
         our_fit(iv_dataset, options=options)
+
+
+def test_first_stage_augment_none_raises_validation_error(iv_dataset):
+    """`first_stage()`が返す`OlsResults`は、各内生変数の第一段階回帰専用に
+    構築され単一のソースDataFrameを持たないため、`augment(new_data=None)`は
+    `ValidationError`（`new_data`を指定した呼び出しは通常どおり動作する、
+    `docs/spec/ols-spec.md`「augment()」参照、Issue #295）。
+    """
+    res = our_fit(iv_dataset)
+    first_stage = res.first_stage()["endog1"]
+
+    with pytest.raises(ValidationError, match="augment.*training data"):
+        first_stage.augment()
+
+    new_data = pl.DataFrame({"x1": [1.0], "z1": [0.5], "z2": [0.2]})
+    augmented = first_stage.augment(new_data)
+    assert augmented.columns == ["x1", "z1", "z2", "predicted"]

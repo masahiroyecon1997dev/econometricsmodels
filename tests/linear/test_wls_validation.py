@@ -278,6 +278,46 @@ def test_predict_null_or_non_finite_values_raise(dataset):
         res.predict(new_data_inf)
 
 
+# ── ValidationError（augment()、OLSと共通の検証） ─────────────────
+
+
+def test_augment_column_collision_raises(dataset):
+    """元データ（`new_data=None`）・`new_data`のいずれかに既に`"predicted"`列が
+    ある場合`ValidationError`（黙って上書きしない、Issue #295）。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    df_with_predicted = df.with_columns(pl.lit(0.0).alias("predicted"))
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.EXISTING_COLUMN_COLLISION, name="predicted"),
+    ):
+        WLS(
+            df_with_predicted, y="y", x=["x1", "x2"], weight="weight"
+        ).fit().augment()
+
+    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+    new_data = pl.DataFrame({"x1": [1.0], "x2": [0.5], "predicted": [0.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.EXISTING_COLUMN_COLLISION, name="predicted"),
+    ):
+        res.augment(new_data)
+
+
+def test_augment_missing_column_raises(dataset):
+    """`augment()`も`predict()`と同じ`extract_f64_column`経路を通るため、
+    `new_data`に`x`列が欠けていると`ValidationError`。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
+
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    ):
+        res.augment(new_data)
+
+
 # ── ValidationError（オプション、OLSと共通化された経路） ─────────
 
 

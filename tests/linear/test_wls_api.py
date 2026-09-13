@@ -6,9 +6,9 @@ public API 経由で保証する。`ValidationError` パスは `test_wls_validat
 主リファレンス（statsmodels）との数値照合は `test_wls_reference.py`、
 R クロスチェックは `test_wls_crosscheck.py`。
 
-`predict()` のテストは（statsmodels との照合も含め）このファイルに集約する
-（`test_ols_api.py`と同じ方針。predict は独立した API 面で、その statsmodels
-照合はスモーク級）。predict の `ValidationError` パスのみ
+`predict()`/`augment()` のテストは（statsmodels との照合も含め）このファイルに
+集約する（`test_ols_api.py`と同じ方針。predict/augment は独立した API 面で、
+その statsmodels 照合はスモーク級）。両者の `ValidationError` パスのみ
 `test_wls_validation.py`。
 """
 
@@ -458,3 +458,88 @@ def test_predict_returns_predicted_key_only(dataset):
     for row in res.predict():
         assert set(row.keys()) == {"predicted"}
         assert isinstance(row["predicted"], float)
+
+
+# ── augment() ────────────────────────────────────────────────────
+
+
+def test_augment_none_returns_training_data_with_predicted_column(dataset):
+    """`augment(new_data=None)`が、学習データの全列＋`"predicted"`列を持つ
+    DataFrameを、`predict()`と同じ予測値・元データと同じ行順で返すこと。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+
+    augmented = res.augment()
+
+    assert isinstance(augmented, pl.DataFrame)
+    assert augmented.height == df.height
+    assert augmented.columns == [*df.columns, "predicted"]
+    for col in df.columns:
+        assert augmented[col].to_list() == df[col].to_list()
+
+    expected = [row["predicted"] for row in res.predict()]
+    assert augmented["predicted"].to_list() == expected
+
+
+def test_augment_new_data_returns_new_data_with_predicted_column(dataset):
+    """`augment(new_data)`が、`new_data`の全列＋`"predicted"`列を持つ
+    DataFrameを、`predict(new_data)`と同じ予測値で返すこと。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
+
+    augmented = res.augment(new_data)
+
+    assert isinstance(augmented, pl.DataFrame)
+    assert augmented.height == 2
+    assert augmented.columns == ["x1", "x2", "predicted"]
+
+    expected = [row["predicted"] for row in res.predict(new_data)]
+    assert augmented["predicted"].to_list() == expected
+
+
+def test_augment_new_data_with_extra_column_preserves_it(dataset):
+    """`new_data`が`x`列以外の余分な列（予測に使わない識別子列等）を含む場合、
+    その列もそのまま`"predicted"`列と一緒に返されること。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+    new_data = pl.DataFrame(
+        {
+            "id": ["a", "b"],
+            "x1": [1.0, 2.0],
+            "x2": [0.5, -0.5],
+        }
+    )
+
+    augmented = res.augment(new_data)
+
+    assert augmented.columns == ["id", "x1", "x2", "predicted"]
+    assert augmented["id"].to_list() == ["a", "b"]
+
+
+def test_augment_without_intercept_matches_predict():
+    """`include_intercept=False`でfitした場合も`augment()`が`predict()`と
+    同じ予測値を返すこと（`augment()`はRust側で`predict()`とは別に
+    `has_intercept`分岐を実装しているため、個別に確認する）。
+    """
+    df = pl.DataFrame(
+        {
+            "y": [3.0, 7.0, 9.0],
+            "x1": [1.0, 2.0, 3.0],
+            "weight": [1.0, 1.0, 1.0],
+        },
+    )
+    options = WLSOptions(include_intercept=False)
+    res = WLS(df, y="y", x=["x1"], weight="weight", options=options).fit()
+
+    augmented_none = res.augment()
+    expected_none = [row["predicted"] for row in res.predict()]
+    assert augmented_none["predicted"].to_list() == expected_none
+
+    new_data = pl.DataFrame({"x1": [10.0, 20.0]})
+    augmented_new = res.augment(new_data)
+    expected_new = [row["predicted"] for row in res.predict(new_data)]
+    assert augmented_new["predicted"].to_list() == expected_new

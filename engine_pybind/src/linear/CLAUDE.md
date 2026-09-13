@@ -11,6 +11,19 @@
 - `ChunkedArray::rechunk()`は`Cow<'_, ChunkedArray<T>>`を返す。`Cow`は`IntoIterator`非実装のため`.into_iter()`ではなく`.iter()`を使う（`Cow`はDerefで透過的に呼べる）。
 - pyo3 0.28では`PyObject`型エイリアスがpreludeから削除済み。`Py<PyAny>`を直接使う。
 - pyo3 0.28以降、`Clone`実装`#[pyclass]`の`FromPyObject`自動導出はopt-in。Python側インスタンスを引数で受け取るオプション型（`OLSOptions`等）には`#[pyclass(from_py_object)]`を明示する。
+- `DataFrame::new`は`(height: usize, columns: Vec<Column>)`という2引数シグネチャ（`Vec<Column>`のみを渡す旧APIではない）。列を追加するには`polars::prelude::Column::new(name.into(), values)`で構築し、既存の`DataFrame`には`.with_column(column)`（`PolarsResult<&mut Self>`）で付加する（`OLSResult::augment()`/`WLSResult::augment()`、Issue #295で初めてこの方向のDataFrame構築が必要になった）。
+
+## DataFrameを構築して返す（`augment()`、Issue #295）
+
+`predict()`までは全メソッドが`Vec<f64>`等のフラットな値を返すだけだったが、`augment()`は
+`OLSResult`/`WLSResult`が`fit()`時の元`PyDataFrame`を非公開の`training_data`フィールド
+（`OLSResult`は`Option<DataFrame>`、`IvResult.first_stage()`という別経路の構築元を持つため。
+`WLSResult`はこの経路がなく常に`DataFrame`）として保持し、`new_data=None`時にそれへ予測値の列を
+付加して返す設計にした。polarsの列は内部で参照カウント方式のため、`DataFrame`を`clone()`しても
+実際のデータはコピーされない（Arrowゼロコピー方針、CLAUDE.md 2章と整合）。列名衝突
+（ソースデータに既に`"predicted"`列がある場合）は`validation.rs`の
+`validate_no_existing_column`で`ValidationError`にする（黙って上書きしない）。詳細な設計判断は
+`docs/spec/ols-spec.md`「augment()」参照。
 
 ## バリデーションの責務分担（`engine`と重複させない）
 

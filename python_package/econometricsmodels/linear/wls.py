@@ -276,3 +276,25 @@ class WlsResults:
         """
         raw = self._raw.predict(new_data)
         return [{"predicted": value} for value in raw]
+
+    def augment(self, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
+        """Source data with the predicted values appended as a column.
+
+        Same design as `OlsResults.augment()`: weights play no role in
+        either case, matching `predict()`.
+
+        Args:
+            new_data: Same as `predict()`. If `None` (default), returns
+                the training data used in `fit()` with the predicted
+                values appended.
+
+        Returns:
+            A polars DataFrame: the source data's columns plus
+            `"predicted"`, in the same row order as the source.
+
+        Raises:
+            ValidationError: Same as `predict()`, or the source data
+                already has a column named `"predicted"` (which would
+                otherwise be silently overwritten).
+        """
+        return self._raw.augment(new_data)

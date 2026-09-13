@@ -163,7 +163,30 @@ $$
 - エラーハンドリングは列不足・型不一致・NaN/無限大とも既存の`ValidationError`の枠組みをそのまま使う
   （専用のエラーバリアントは新設しない）。
 
-### 3.5 engine/engine_pybind間のデータ受け渡し・エラー変換
+### 3.5 `augment()`（Issue #295）
+
+- `OlsResults.augment(new_data: pl.DataFrame | None = None) -> pl.DataFrame`。
+  `new_data`の意味・エラーハンドリングは`predict()`と完全に同じ。戻り値が
+  `list[dict[str, float]]`ではなく、ソースデータ（`new_data=None`なら学習データ、
+  指定時は`new_data`）に予測値の列（`"predicted"`）を1列付加したpolars DataFrameを返す点のみ異なる。
+- **プロジェクト全体の「DataFrameは返さない」方針（2章）の唯一の例外**。予測値と元データの行対応を
+  分かりやすくしたいというユーザー要望（R `broom::augment()`が先行事例）に応えるため。既存の
+  `predict()`/`residuals`/`coef_table()`は変更せず、この用途専用の新規メソッドとして追加した
+  （フラグで戻り値の型を変える設計はboolean trapのため不採用）。
+- **スコープは予測列のみ**（残差列の同時付加は見送り、必要になれば別issueで拡張検討）。
+- **実装層は`engine_pybind`**（`python_package`側で`predict()`の結果を`with_columns()`するだけでも
+  実現できるが、列名衝突のエラー送出のしやすさを優先しユーザー判断でRust側に置いた）。
+  `OLSResult`（Rust）に`fit()`時の元DataFrameを`training_data: Option<DataFrame>`として非公開保持する
+  （polarsの列は内部で参照カウント方式のため、このクローン自体は実質コピーを伴わない）。
+  `new_data`指定時は`predict()`と同じ`x`列抽出＋`engine::linear::ols::predict_new_data`を再利用し、
+  `new_data`自体をソースにする。
+- **列名衝突は`ValidationError`**（ソースデータに既に`"predicted"`列がある場合、`include_intercept=True`
+  時の`"const"`列衝突と同じ発想で黙って上書きしない。`engine_pybind::validation::validate_no_existing_column`）。
+- `training_data`が`None`（`IvResult.first_stage()`が`OLSResult`を構築する経路——各内生変数の
+  第一段階回帰は単一のソースDataFrameを持たないため）の`OlsResults`に対して`augment(new_data=None)`を
+  呼ぶと`ValidationError`になる（`new_data`を指定した呼び出しは通常どおり動作する）。
+
+### 3.6 engine/engine_pybind間のデータ受け渡し・エラー変換
 
 - Arrowゼロコピーは Python→Rust境界（`pyo3-polars`の`PyDataFrame`）の受け渡しを指す。
   polars DataFrame→`faer::Mat<f64>`は2段階: `engine_pybind`が列ごとに`Vec<f64>`へ抽出
@@ -188,12 +211,12 @@ $$
   `pyo3-polars=0.28.0`が`pyo3="^0.29"`・`polars="^0.55.1"`を要求するための組み合わせ。互換性は数字ではなく
   `pyo3-polars`が使う`polars_ffi::version_0`という安定版FFIプロトコルで担保される。
 
-### 3.6 テスト
+### 3.7 テスト
 
 - 許容誤差: classical/HC0-3/cluster/係数はRとの実測で相対誤差1e-14程度のため`RTOL_STRICT=1e-8`。
   HACはRとの`prewhite`/`adjust`慣習差により実測0.4%程度のため`RTOL_HAC=1e-2`。
 - `tests/linear/` に4ファイルで役割分担する（`refactoring-candidates-2.md`項目68）:
-  `test_ols_api.py`（成功パスの構造・API・オプション反映・`predict()`）/
+  `test_ols_api.py`（成功パスの構造・API・オプション反映・`predict()`/`augment()`）/
   `test_ols_validation.py`（`ValidationError`/`ComputationError`パス）/
   `test_ols_reference.py`（statsmodels主リファレンスとの数値照合、`ols.json`＋ライブ照合）/
   `test_ols_crosscheck.py`（R独立実装、`ols_crosscheck.json`）。一般的なテスト方針は
@@ -212,7 +235,7 @@ $$
   対応付ければ値は変わらない、HC0の標準誤差は常にHC1以下。いずれも意図的なバグ注入により
   実際に検出できることを確認済み。
 
-### 3.7 パフォーマンス（要約）
+### 3.8 パフォーマンス（要約）
 
 releaseビルド（`maturin develop --release`）必須（debugビルドは最大140倍遅い）。
 classical/HC1/clusterはstatsmodels/pyfixest以上に高速、HACも大規模データではほぼ互角。

@@ -16,7 +16,7 @@
 //! 説明・非公開関数のdocコメント等）は日本語のまま。
 
 use engine::linear::wls::WlsEstimator;
-use polars::prelude::DataFrame;
+use polars::prelude::{Column, DataFrame};
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
@@ -24,7 +24,7 @@ use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
 use crate::column_extraction::extract_f64_column;
 use crate::validation::{
     RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
-    validate_no_duplicate_within_role, validate_x_non_empty,
+    validate_no_duplicate_within_role, validate_no_existing_column, validate_x_non_empty,
 };
 
 /// Estimation options for WLS.
@@ -201,6 +201,12 @@ pub struct WLSResult {
     /// Python; only `predict()` reads it to decide whether to auto-prepend a
     /// constant column for out-of-sample data (same reasoning as `OLSResult`).
     has_intercept: bool,
+    /// The original polars DataFrame passed to `fit()`, cached for
+    /// `augment(new_data=None)` (Issue #295). A cheap clone (polars columns are
+    /// internally reference-counted). Unlike `OLSResult` (shared with
+    /// `IvResult.first_stage()`, which has no single source DataFrame), `WLSResult`
+    /// is only ever built from this file's `fit()`, so this is never `None`.
+    training_data: DataFrame,
 }
 
 #[pymethods]
@@ -246,6 +252,52 @@ impl WLSResult {
             has_intercept,
             &x_columns,
         ))
+    }
+
+    /// The source data (training data, or `new_data` when given) with the
+    /// predicted values appended as a new `"predicted"` column.
+    ///
+    /// Same `new_data`/`include_intercept` semantics as `predict()` (same design
+    /// as `OLSResult::augment()`, Issue #295), including weights playing no role.
+    ///
+    /// # Errors
+    /// - Same as `predict()`: a required `x` column missing from `new_data`,
+    ///   non-numeric, or containing missing/NaN/infinite values: `ValidationError`.
+    /// - The source data already has a column named `"predicted"`:
+    ///   `ValidationError` (would otherwise silently overwrite it).
+    #[pyo3(signature = (new_data=None))]
+    fn augment(&self, new_data: Option<PyDataFrame>) -> PyResult<PyDataFrame> {
+        let has_intercept = self.has_intercept;
+        let x_names: &[String] = if has_intercept {
+            &self.param_names[1..]
+        } else {
+            &self.param_names[..]
+        };
+
+        let (mut source, predicted) = match new_data {
+            Some(new_data) => {
+                let df: DataFrame = new_data.into();
+                let mut x_columns: Vec<Vec<f64>> = Vec::with_capacity(x_names.len());
+                for name in x_names {
+                    x_columns.push(extract_f64_column(&df, name)?);
+                }
+                let predicted =
+                    engine::linear::ols::predict_new_data(&self.params, has_intercept, &x_columns);
+                (df, predicted)
+            }
+            None => (self.training_data.clone(), self.fitted_values.clone()),
+        };
+
+        validate_no_existing_column(&source, "predicted")?;
+
+        // `with_column`の唯一の失敗条件（`ShapeMismatch`）はここでは理論上到達不能
+        // （`OLSResult::augment()`と同じ理由: `new_data`指定時は`source`自身から
+        // 抽出した列と同じ観測数から`predicted`を計算し、`None`時は`fitted_values`と
+        // `training_data`が同じ`fit()`呼び出しの同じ`n`に由来するペアのため）。
+        source
+            .with_column(Column::new("predicted".into(), predicted))
+            .expect("predicted.len() matches source.height() by construction");
+        Ok(PyDataFrame(source))
     }
 }
 
@@ -347,5 +399,6 @@ pub fn fit(
         bic: wls_estimator.bic(),
         fitted_values: wls_estimator.fitted_values().to_vec(),
         has_intercept: estimator.input().has_intercept(),
+        training_data: df,
     })
 }

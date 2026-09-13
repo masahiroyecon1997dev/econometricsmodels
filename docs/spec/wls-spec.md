@@ -141,7 +141,15 @@ OLSの`predict()`（`ols-spec.md`「predict()」）と完全に同じ設計・�
   推定した係数にも同じように使える）。
 - 戻り値のキー名は`"predicted"`（OLSと統一、Issue #309）。
 
-### 3.6 テスト
+### 3.6 `augment()`（Issue #295）
+
+`WlsResults.augment(new_data: pl.DataFrame | None = None) -> pl.DataFrame`。
+OLSの`augment()`（`ols-spec.md`「augment()」）と完全に同じ設計・シグネチャを適用する。
+`predict()`と同様、重みは計算に一切関与しない。`WLSResult`（Rust）は`fit()`時の元DataFrameを
+`training_data: DataFrame`として非公開保持する（`OLSResult`と異なり`IvResult.first_stage()`の
+ような別経路の構築元が無いため`Option`にせず常に保持する）。
+
+### 3.7 テスト
 
 - 許容誤差: classical/HC0-3/clusterはOLSと同じ`RTOL_STRICT=1e-8`（Rとの実測でほぼ機械精度）。
   **HACのみOLSより緩い`RTOL_HAC=5e-2`**（OLSは1e-2。実測最大相対誤差約4.3%、重み付けによる

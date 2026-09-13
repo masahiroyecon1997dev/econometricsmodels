@@ -88,6 +88,10 @@ CONST_COLLISION = (
     "when include_intercept=true, x cannot contain a column named 'const' "
     "(it collides with the automatically added intercept)"
 )
+EXISTING_COLUMN_COLLISION = (
+    "the data already has a column named '{name}'; augment() would overwrite "
+    "it, which is not allowed"
+)
 
 # `validate_no_duplicate_roles`のメッセージ（engine_pybind/src/validation.rs
 # `duplicate_role_message`）。単一列ロール（y/weight）と複数列ロール（x/x_exog/

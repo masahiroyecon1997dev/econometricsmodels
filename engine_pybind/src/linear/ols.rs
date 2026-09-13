@@ -12,15 +12,16 @@
 //! それ以外（このファイルの説明・非公開関数のdocコメント等）は日本語のまま。
 
 use engine::linear::ols::{OlsEstimator, OlsInput};
-use polars::prelude::DataFrame;
+use polars::prelude::{Column, DataFrame};
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
 use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
 use crate::column_extraction::extract_f64_column;
+use crate::errors::ValidationError;
 use crate::validation::{
     RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
-    validate_no_duplicate_within_role, validate_x_non_empty,
+    validate_no_duplicate_within_role, validate_no_existing_column, validate_x_non_empty,
 };
 
 /// Estimation options for OLS.
@@ -187,6 +188,17 @@ pub struct OLSResult {
     /// `include_intercept=True`), which would make such an inference silently
     /// wrong instead of erroring.
     has_intercept: bool,
+    /// The original polars DataFrame passed to `fit()`, cached for
+    /// `augment(new_data=None)` (Issue #295). A cheap clone (polars columns are
+    /// internally reference-counted, `docs/spec/ols-spec.md` "predict()" — same
+    /// zero-copy reasoning applies here).
+    ///
+    /// `None` for `OLSResult`s built by `ols_estimator_to_result` without going
+    /// through this file's `fit()` (currently only `IvResult.first_stage()`,
+    /// `engine_pybind/src/iv/common.rs`): those per-equation regressions have no
+    /// single source DataFrame to attach a column to, so `augment(new_data=None)`
+    /// on such a result raises `ValidationError` instead.
+    training_data: Option<DataFrame>,
 }
 
 #[pymethods]
@@ -228,6 +240,67 @@ impl OLSResult {
             has_intercept,
             &x_columns,
         ))
+    }
+
+    /// The source data (training data, or `new_data` when given) with the
+    /// predicted values appended as a new `"predicted"` column.
+    ///
+    /// Same `new_data`/`include_intercept` semantics as `predict()`, but returns
+    /// a polars DataFrame (original columns plus `"predicted"`, row order
+    /// preserved) instead of a bare list of floats.
+    ///
+    /// # Errors
+    /// - Same as `predict()`: a required `x` column missing from `new_data`,
+    ///   non-numeric, or containing missing/NaN/infinite values: `ValidationError`.
+    /// - The source data already has a column named `"predicted"`:
+    ///   `ValidationError` (would otherwise silently overwrite it).
+    /// - `new_data=None` and this result has no cached training data (currently
+    ///   only possible for `IvResult.first_stage()` results): `ValidationError`.
+    #[pyo3(signature = (new_data=None))]
+    fn augment(&self, new_data: Option<PyDataFrame>) -> PyResult<PyDataFrame> {
+        let has_intercept = self.has_intercept;
+        let x_names: &[String] = if has_intercept {
+            &self.param_names[1..]
+        } else {
+            &self.param_names[..]
+        };
+
+        let (mut source, predicted) = match new_data {
+            Some(new_data) => {
+                let df: DataFrame = new_data.into();
+                let mut x_columns: Vec<Vec<f64>> = Vec::with_capacity(x_names.len());
+                for name in x_names {
+                    x_columns.push(extract_f64_column(&df, name)?);
+                }
+                let predicted =
+                    engine::linear::ols::predict_new_data(&self.params, has_intercept, &x_columns);
+                (df, predicted)
+            }
+            None => {
+                let source = self.training_data.clone().ok_or_else(|| {
+                    ValidationError::new_err(
+                        "augment(new_data=None) requires the original training data, which \
+                         is not retained for this result",
+                    )
+                })?;
+                (source, self.fitted_values.clone())
+            }
+        };
+
+        validate_no_existing_column(&source, "predicted")?;
+
+        // `with_column`の唯一の失敗条件（`ShapeMismatch`、追加する列の長さが
+        // DataFrameの高さと食い違う場合）はここでは理論上到達不能。
+        // `new_data`指定時: `predicted`は`x_columns`（`source`自身から
+        // `extract_f64_column`で抽出した列）と同じ観測数`n`から
+        // `predict_new_data`が計算するため、`predicted.len() == source.height()`。
+        // `None`時: `fitted_values`と`training_data`はどちらも同じ`fit()`呼び出しで
+        // 同じ`n`から作られたペア（`ols_estimator_to_result`／この関数の
+        // `training_data = Some(df)`代入）であり、以降どちらも独立に変更されない。
+        source
+            .with_column(Column::new("predicted".into(), predicted))
+            .expect("predicted.len() matches source.height() by construction");
+        Ok(PyDataFrame(source))
     }
 }
 
@@ -283,7 +356,9 @@ pub fn fit(
     let estimator = OlsEstimator::fit(input, cov_type, options.confidence_level)
         .map_err(least_squares_error_to_pyerr)?;
 
-    Ok(ols_estimator_to_result(&estimator, cov_type_lower))
+    let mut result = ols_estimator_to_result(&estimator, cov_type_lower);
+    result.training_data = Some(df);
+    Ok(result)
 }
 
 /// フィット済み`OlsEstimator`を`OLSResult`（pyclass、Pythonに返す形）に変換する。
@@ -329,5 +404,9 @@ pub(crate) fn ols_estimator_to_result(
         bic: estimator.bic(),
         fitted_values: mat_to_vec(&estimator.fitted_values()),
         has_intercept: estimator.input().has_intercept(),
+        // `fit()`（本ファイル）が呼び出し後に`Some(df)`で上書きする。この関数の
+        // もう一つの呼び出し元`iv::common::first_stage()`は単一のソースDataFrameを
+        // 持たないため`None`のまま（`OLSResult`のdocコメント参照）。
+        training_data: None,
     }
 }

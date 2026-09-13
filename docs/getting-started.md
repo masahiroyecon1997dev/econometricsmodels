@@ -68,6 +68,13 @@ predicted = result.predict(new_data)
 print(predicted)  # [{"predicted": ...}, {"predicted": ...}]
 ```
 
+`OlsResults.augment()` takes the same `new_data` argument, but instead returns the source data (the training data, or `new_data` when given) with the predicted values appended as a `"predicted"` column — a polars DataFrame rather than a row-oriented list. This is the one exception to the library's general policy of not returning DataFrames.
+
+```python
+augmented = result.augment(new_data)
+print(augmented)  # original `new_data` columns, plus a "predicted" column
+```
+
 ## WLS (Weighted Least Squares)
 
 `WLS` is `OLS` with an added `weight` argument (the column name of the weight column). Weights are treated as analytic weights proportional to the inverse of the variance, and do not need to be normalized. Values less than or equal to 0 raise a `ValidationError`.
@@ -85,7 +92,7 @@ print(result.std_errors)
 
 Estimation options are configured via `WLSOptions`, which has the same fields as `OLSOptions` (`cov_type`, etc.). See "Switching the type of standard error" above for how to switch standard error types, and the [API Reference](api/wls.md) for details on the `weight` argument.
 
-`WlsResults.predict()` works exactly like `OlsResults.predict()` (see "Predicted values" above); weights play no role in either the training-data or out-of-sample case.
+`WlsResults.predict()` and `WlsResults.augment()` work exactly like their `OlsResults` counterparts (see "Predicted values" above); weights play no role in either the training-data or out-of-sample case.
 
 ## Logit (binary logistic regression)
 

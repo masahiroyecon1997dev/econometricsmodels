@@ -1,4 +1,4 @@
-"""OLS の成功パスの構造・API・オプション反映・`predict()` の検証。
+"""OLS の成功パスの構造・API・オプション反映・`predict()`/`augment()` の検証。
 
 確定済み設計（`docs/spec/ols-spec.md`）どおりの結果型・辞書キー・ラベルに
 なっていること、`OLSOptions` の各フィールドが engine_pybind 経由で反映される
@@ -6,10 +6,10 @@
 `test_ols_validation.py`、主リファレンスとの数値照合は `test_ols_reference.py`、
 R クロスチェックは `test_ols_crosscheck.py`。
 
-`predict()` のテストは（statsmodels との照合も含め）このファイルに集約する
-（predict は独立した API 面で、その statsmodels 照合はスモーク級。手法間の
-predict の意味の違い〔OLS=予測値／Logit=確率〕を1ファイルで対比できる）。
-predict の `ValidationError` パスのみ `test_ols_validation.py`。
+`predict()`/`augment()` のテストは（statsmodels との照合も含め）このファイルに
+集約する（predict/augment は独立した API 面で、その statsmodels 照合は
+スモーク級。手法間の predict の意味の違い〔OLS=予測値／Logit=確率〕を1ファイルで
+対比できる）。両者の `ValidationError` パスのみ `test_ols_validation.py`。
 """
 
 from __future__ import annotations
@@ -343,3 +343,83 @@ def test_predict_new_data_structure(dataset):
     for row in predicted:
         assert set(row.keys()) == {"predicted"}
         assert isinstance(row["predicted"], float)
+
+
+# ── augment() ────────────────────────────────────────────────────
+
+
+def test_augment_none_returns_training_data_with_predicted_column(dataset):
+    """`augment(new_data=None)`が、学習データの全列＋`"predicted"`列を持つ
+    DataFrameを、`predict()`と同じ予測値・元データと同じ行順で返すこと。
+    """
+    res = our_fit(dataset)
+
+    augmented = res.augment()
+
+    assert isinstance(augmented, pl.DataFrame)
+    assert augmented.height == dataset.height
+    assert augmented.columns == [*dataset.columns, "predicted"]
+    for col in dataset.columns:
+        assert augmented[col].to_list() == dataset[col].to_list()
+
+    expected = [row["predicted"] for row in res.predict()]
+    assert augmented["predicted"].to_list() == expected
+
+
+def test_augment_new_data_returns_new_data_with_predicted_column(dataset):
+    """`augment(new_data)`が、`new_data`の全列＋`"predicted"`列を持つ
+    DataFrameを、`predict(new_data)`と同じ予測値で返すこと。
+    """
+    res = our_fit(dataset)
+    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
+
+    augmented = res.augment(new_data)
+
+    assert isinstance(augmented, pl.DataFrame)
+    assert augmented.height == 2
+    assert augmented.columns == ["x1", "x2", "predicted"]
+    assert augmented["x1"].to_list() == new_data["x1"].to_list()
+    assert augmented["x2"].to_list() == new_data["x2"].to_list()
+
+    expected = [row["predicted"] for row in res.predict(new_data)]
+    assert augmented["predicted"].to_list() == expected
+
+
+def test_augment_new_data_with_extra_column_preserves_it(dataset):
+    """`new_data`が`x`列以外の余分な列（予測に使わない識別子列等）を含む場合、
+    その列もそのまま`"predicted"`列と一緒に返されること。
+    """
+    res = our_fit(dataset)
+    new_data = pl.DataFrame(
+        {
+            "id": ["a", "b"],
+            "x1": [1.0, 2.0],
+            "x2": [0.5, -0.5],
+        }
+    )
+
+    augmented = res.augment(new_data)
+
+    assert augmented.columns == ["id", "x1", "x2", "predicted"]
+    assert augmented["id"].to_list() == ["a", "b"]
+
+
+def test_augment_without_intercept_matches_predict():
+    """`include_intercept=False`でfitした場合も`augment()`が`predict()`と
+    同じ予測値を返すこと（`augment()`はRust側で`predict()`とは別に
+    `has_intercept`分岐を実装しているため、個別に確認する）。
+    """
+    df = pl.DataFrame(
+        {"y": [3.0, 7.0, 9.0], "x1": [1.0, 2.0, 3.0]},
+    )
+    options = OLSOptions(include_intercept=False)
+    res = OLS(df, y="y", x=["x1"], options=options).fit()
+
+    augmented_none = res.augment()
+    expected_none = [row["predicted"] for row in res.predict()]
+    assert augmented_none["predicted"].to_list() == expected_none
+
+    new_data = pl.DataFrame({"x1": [10.0, 20.0]})
+    augmented_new = res.augment(new_data)
+    expected_new = [row["predicted"] for row in res.predict(new_data)]
+    assert augmented_new["predicted"].to_list() == expected_new

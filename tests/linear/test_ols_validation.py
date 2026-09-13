@@ -268,6 +268,39 @@ def test_predict_null_or_non_finite_values_raise(dataset):
         res.predict(new_data_inf)
 
 
+def test_augment_column_collision_raises(dataset):
+    """元データ（`new_data=None`）・`new_data`のいずれかに既に`"predicted"`列が
+    ある場合`ValidationError`（黙って上書きしない、Issue #295）。
+    """
+    df_with_predicted = dataset.with_columns(pl.lit(0.0).alias("predicted"))
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.EXISTING_COLUMN_COLLISION, name="predicted"),
+    ):
+        OLS(df_with_predicted, y="y", x=["x1", "x2"]).fit().augment()
+
+    res = our_fit(dataset)
+    new_data = pl.DataFrame({"x1": [1.0], "x2": [0.5], "predicted": [0.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.EXISTING_COLUMN_COLLISION, name="predicted"),
+    ):
+        res.augment(new_data)
+
+
+def test_augment_missing_column_raises(dataset):
+    """`augment()`も`predict()`と同じ`extract_f64_column`経路を通るため、
+    `new_data`に`x`列が欠けていると`ValidationError`。
+    """
+    res = our_fit(dataset)
+    new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
+
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    ):
+        res.augment(new_data)
+
+
 @pytest.mark.parametrize("n_groups", [2, 3])
 def test_cluster_count_at_most_slopes_raises_validation_error(n_groups):
     """クラスター数G≤傾き係数の数q（ここでq=3）は`ValidationError`（Issue #289）。

@@ -22,17 +22,6 @@
 
 ## 一覧
 
-### 1. nonlinear系統（Logit/Probit）に自由度1境界ケースの凍結データが無い
-
-- **対象**: [benchmark/nonlinear/freeze.py](../../../benchmark/nonlinear/freeze.py)
-- **内容**: linear系統（`benchmark/linear/freeze.py`）には`SYNTHETIC_BOUNDARY_DF1_SCENARIOS`
-  （`n = k+1`、残差自由度がちょうど1になる境界ケースの成功パス）が用意されているが、
-  nonlinear系統には対応する凍結データが見当たらない。`testing-policy.md`の
-  「境界値・悪条件」項目（自由度1ちょうどでの成功パス）がLogit/Probitにも
-  必要かどうかは未確認。
-- **気づいた経緯**: 2026-08-15、`benchmark/nonlinear/freeze.py`のコード解説中に発見。
-- **状態**: 未対応（要否を`/review-testing`等で確認待ち）
-
 ### 2. 高次元（説明変数多数）シナリオ・線形確率モデル（LPM）シナリオの追加要否
 
 - **対象**: `benchmark/linear/datasets.py`・
@@ -48,36 +37,22 @@
      追加する案。
 - **気づいた経緯**: 2026-08-15、`benchmark/nonlinear/freeze.py`のコード解説中の
   雑談から。
-- **状態**: 未対応（下記メモの通りClaudeの初期所感を記録済み、方針は未決定）
-
-**Claudeの所感（暫定、要ユーザー判断）**:
-- **高kシナリオ**: 追加する価値はありそうだが、優先度は中程度と考える。
-  `testing-policy.md`の「境界値・悪条件」節が求める数値的リグレッション検知の
-  延長線上にある観点だが、フィクスチャベースの数値比較（シナリオ×cov_type×
-  リファレンス実装の全組み合わせ）に組み込むと組み合わせ数が増える。
-  まず`engine`の`proptest`（`ols_case_strategy`等）側で`k`のレンジが
-  既に十分ランダム化されているかを確認し、不足していればそちらの拡張で
-  安価にカバーできないかを先に検討する方が良いのでは、と考える。
-- **LPMシナリオ**: 数値計算としては既存の`heteroskedastic`シナリオ
-  （分散が`x1`に依存する不均一分散）と本質的に同じ経路を通ると考えられ
-  （OLS/WLSの実装は`y`が0/1かどうかを特別扱いしない）、正確性検証としての
-  追加的な価値は薄いのではと考える。教科書的な例として意味はあるが、
-  本プロジェクトの目的（GUIアプリ「economicon」のエンジン、既存パッケージとの
-  数値一致検証）に照らすと優先度は低いと考える。
-
-### 3. nonlinear系統: n=k+1（自由度1ちょうど）境界値の「ほぼ確実に完全分離する」という主張が未検証
-
-- **対象**: [benchmark/nonlinear/fixtures/generate_logit_fixtures.py](../../../benchmark/nonlinear/fixtures/generate_logit_fixtures.py)
-- **内容**: linear系統と異なりn=k+1の境界値成功パスを採用していない理由として
-  「n<=kではlogitのMLEが構造的にほぼ確実に完全分離を起こすため、意味のある
-  成功パスにならない」という主張が`_meta.note`に記載されているが、この主張
-  自体を検証する回帰テスト（実際に`SeparationSuspected`ないし`NonConvergence`
-  になることを確認する等）が無い。項目1（自由度1境界の凍結データが無いこと
-  自体）とは別に、非採用の理由づけそのものが未検証という論点。
-- **気づいた経緯**: 2026-08-15、Issue #231フェーズ4の`testing-completeness-reviewer`
-  によるnonlinear系統（Logit/Probit）レビュー（nice to have）。
-- **状態**: 未対応（ユーザー判断により今回のフェーズ4スコープからは除外、
-  優先度低として保留）
+- **状態**: **対応済み（クローズ、2026-09-13）**。
+  - **LPMサブ項目**: 対応不要と判断してクローズ。項目18（mroz実データによる
+    LPM検証）がより低コストで価値の高い代替案として既にあるため、そちらに
+    一本化する。
+  - **高kサブ項目**: OLSのみ対応済み。実際に確認したところ`engine`の
+    proptest（`ols_case_strategy`）は`MAX_K=4`固定で高kを一切カバーして
+    いなかったため、フィクスチャベースで新シナリオ`many_regressors`
+    （k=20、列ごとに0.1〜100倍のスケール差、係数は列取り違え検出のため
+    意図的に間隔を空ける）を`benchmark/linear/datasets.py`に追加し、
+    `generate_ols_fixtures.py`のstatsmodels主リファレンスと数値照合した
+    （最大相対誤差1e-12で一致）。ユーザー判断により以下は今回のスコープ外
+    として保留: (a) 誤差項に外れ値・裾の重い分布を混ぜること（項目67として
+    別記録）、(b) Rクロスチェック（`generate_ols_crosscheck_fixtures.py`が
+    formula文字列を決め打ちしているため対応がより大掛かり）、(c) WLS/Logit/
+    Probit等の他手法への展開、(d) OLS proptestの`MAX_K`拡張・全列直交性
+    チェックの強化。(b)〜(d)は本項目とは別に着手要否を都度判断する。
 
 ### 4. nonlinear系統: `raise_on_non_convergence=False`がclassical cov_typeでしか検証されていない
 
@@ -1703,3 +1678,46 @@
 - **状態**: 未対応（ユーザー判断により記録のみ、修正は別Issue・別セッションで
   検討）。今回追加したテスト自体は実際の挙動（`FirstStageFailed`ラップ・
   第一段階の`q`）に合わせて`match=`を設定済み（`tests/iv/test_iv_validation.py`）。
+
+### 66. Logit/Probit: `SeparationSuspected`検出が小標本境界（`n=k+1`）でほとんど機能しない（閾値100.0のスケール不整合）
+
+- **対象**: [engine/src/nonlinear/logit.rs](../../../engine/src/nonlinear/logit.rs)・
+  [docs/spec/logit-spec.md](../../spec/logit-spec.md)3.2節・4章
+  （`SEPARATION_PARAM_NORM_THRESHOLD=100.0`）
+- **内容**: nonlinear系統の自由度1境界ケース（`n=k+1`）に凍結データが無いことの
+  要否検証中に発見（対応済み・クローズ済みの旧項目）。
+  `generate_binary_choice_dataset("baseline", link="logit", n=5, k=3, seed=0..499)`
+  （`n=k+1`、engine側`k=4`）で`Logit(...).fit()`を実測したところ、
+  `converged=True`のまま完全分離（予測確率が0/1の浮動小数点極値に張り付く）に
+  陥ったケースが415/500件（83.0%）あり、そのうち`SeparationSuspected`で
+  実際に例外になったのは62件（12.4%）のみだった。デフォルトseed=42でも
+  再現（`params`が最大±45、`std_errors`が最大4147等の明らかに異常な値でも
+  `converged=True`のまま返る）。項目6（`SEPARATION_PARAM_NORM_THRESHOLD`の
+  多変量モデル・k大での誤検知リスク）とは逆方向（今回は閾値が緩すぎて
+  見逃す）の問題で、閾値`100.0`が`n=200, k=3`の単一データセットでの実測較正値
+  （`docs/spec/logit-spec.md`3.2節）であり小標本でのスケール不整合を検証して
+  いなかったことに起因すると推測される。
+- **Claudeの所感**: Issue化して`engine`側の閾値見直し（`n`依存の基準にする等）を
+  検討する価値があると考える。Probit側は`nonlinear/common.rs`の`run_solver`を
+  共有するため同種の限界を持つ可能性が高いが未検証。
+- **気づいた経緯**: 2026-09-13、自由度1境界ケースの要否検証作業中に発見。
+- **状態**: Issue化済み（[#317](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/317)）。
+
+### 67. OLS: 説明変数に外れ値・裾の重い分布を持つシナリオが無い
+
+- **対象**: `benchmark/linear/datasets.py`（合成データセット生成全般）
+- **内容**: ユーザー提案（2026-09-13）。項目2（高次元シナリオ`many_regressors`
+  の追加）の設計検討中に出た派生案。現状の合成データセットは説明変数`X`が
+  常に正規分布（一部`multivariate_normal`）で、外れ値・裾の重い分布
+  （t分布の低自由度、対数正規分布等）を持つケースが無い。理論上はXの分布は
+  OLSの点推定の望ましい性質（Gauss-Markov）に影響しないはずだが、有限精度の
+  浮動小数点計算では極端な値（レバレッジの高い行）が`col_piv_qr`の
+  ピボット選択・条件数に影響しうるため、数値的頑健性を確認する価値がある。
+  `many_regressors`（列ごとのスケール差のみ、分布形状は変えない）とは
+  意図的に切り分けた別軸の懸念（1シナリオ=1構造的特徴という既存方針を
+  踏襲するため、`many_regressors`には混ぜないと決定済み）。
+- **Claudeの所感**: 検討する価値はあるが、`many_regressors`の実装・検証結果を
+  見てから優先度を判断するのが良いと考える。
+- **気づいた経緯**: 2026-09-13、項目2（`many_regressors`シナリオ設計）の
+  検討中にユーザーが提案。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

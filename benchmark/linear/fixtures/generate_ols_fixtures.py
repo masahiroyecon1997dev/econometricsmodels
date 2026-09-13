@@ -54,6 +54,11 @@ NUMERIC_SCENARIOS = [
     # ため、df_resid=1にはn=5が必要。benchmark/linear/freeze.py参照）。同じx1..x3の
     # 列構成のため、他シナリオと同じ自動フォーミュラ生成に乗る。
     "baseline_df1",
+    # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス。
+    # 列数依存バグ（インデックス誤り等）・高kでの数値的頑健性を検証する
+    # （test-coverage-candidates.md項目2、ユーザー確認済み）。x1..x20の
+    # 列構成のため、他シナリオと同じ自動フォーミュラ生成に乗る。
+    "many_regressors",
 ]
 
 # classical/HC系は全シナリオで確認。HACはautocorrelatedシナリオが本来の目的
@@ -113,6 +118,11 @@ def build_fixtures() -> dict:
             "限界を超えるため全cov_typeでComputationErrorになる）。"
             "クロスチェック用のRベンチマークは別途 "
             "benchmark/linear/references/run_lm_crosscheck.R で生成する。"
+            "many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ"
+            "高次元シナリオ（test-coverage-candidates.md項目2）。Rクロスチェック側"
+            "（generate_ols_crosscheck_fixtures.py、formulaを決め打ちしているため"
+            "対応がより大掛かり）・WLS/Logit/Probit等への展開は今回のスコープ外"
+            "（ユーザー確認済み、まずstatsmodels主リファレンスのみで様子を見る）。"
         ),
     }
     return fixtures

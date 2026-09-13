@@ -2321,7 +2321,7 @@ mod tests {
         use proptest::collection;
         use proptest::prelude::*;
 
-        const MAX_K: usize = 4;
+        const MAX_K: usize = 20;
 
         /// `(n, k, y, x_cols, keys)`を生成する共通ストラテジ。
         ///
@@ -2331,6 +2331,9 @@ mod tests {
         /// `prop_assume!(result.is_ok())`で非フルランクになるレアケース（丸め誤差起因の
         /// 境界事例等）のみを除外する（「ランダムに生成する設計行列は
         /// SingularMatrixにならない範囲に制約する」という方針に対応）。
+        /// `MAX_K=20`（旧4）はbenchmarkの高次元シナリオ`many_regressors`と揃えた値
+        /// （test-coverage-candidates.md項目2、列数依存バグ・高kでの数値的挙動の検証）。
+        /// `k`が最大でも`n-k>=10`のマージンは保たれる。
         ///
         /// `keys`は列順序入れ替えテスト専用の補助データ（他のプロパティでは未使用）。
         fn ols_case_strategy()

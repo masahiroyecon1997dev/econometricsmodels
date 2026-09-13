@@ -313,6 +313,18 @@ Tobit固有の差分:
 - **`SeparationNormCheck`を無効化したことによる「有限だが統計的に無意味なほど巨大な`β̂`」の検知**:
   標準化ノルムとは別の指標（Hessianの条件数、SEの発散、`σ̂/σ_y`比の下限等）は未着手。実データで
   問題が顕在化した時点で再検討する。
+- **`censored_contribution`のHessian項がクランプ済み`λ`と生の`zeta`を混在させるバグは
+  対応済み（2026-09-13、Probit Issue #316のレビュー中に発見した同型のバグ）**: `A(u)=λ(u+λ)`・
+  `C(u)=uA(u)-λ(u)`（モジュール冒頭の数式表）の計算で、以前は`λ`（`clamped_pdf_cdf`で
+  クランプ済みの引数から計算）と生の（非クランプの）`zeta`を混在させていた。`|zeta|>U_CLAMP`
+  かつ打ち切り境界から大きく外れた観測で`A(u)`（`h_beta_coef`）が負になりうる（`A(u)>0`という
+  恒等式が数値的に破れる）ことを確認し、`zeta`を`λ`と同じクランプ済み引数から再構成する
+  よう修正した（`zeta_for_hessian = zeta.clamp(-U_CLAMP, U_CLAMP)`）。この修正により、
+  境界レジーム（軽度の準完全分離＋ごく小さいノイズ、旧Issue #288の「中間レジーム」）で
+  以前は`NonConvergence`になっていたケースが正しく収束するようになったことを実測で確認した
+  （`tests/nonlinear/test_tobit.py`の`test_quasi_separation_tiny_noise_converges_to_true_values`
+  参照）。`score_s`（勾配）は今回のスコープ外（`U_CLAMP`領域でのcost/gradientの数学的非整合は
+  別の既知の課題、[`probit-spec.md`](./probit-spec.md)4章参照）のため変更していない。
 - **`wald_chi2_test`とOLSの`wald_f_test`の重複**: 部分行列抽出→悪条件検出→Cholesky→二次形式の
   構成が同型で、異なるのは検定分布（カイ二乗 vs F）のみ。現時点ではTobit1箇所のみの利用のため
   共通化は見送り。IV等で3箇所目の重複が生まれる場合に二次形式計算のコア部分の共通化を検討する。

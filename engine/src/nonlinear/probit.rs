@@ -55,12 +55,20 @@
 //! 含み同じリスクを共有するため、Tobit実装時に共通化した）。`cost`/`gradient`/`hessian`/
 //! `scores`すべてに同じ関所を経由させることで、statsmodelsの`Probit`実装に見られる
 //! 非対称性（`score`/`loglike`はクリップするが`hessian`はしない）を避けている。
+//!
+//! **Hessianの重み`w=λᵢ(λᵢ+zᵢ)`の`zᵢ`も、`λᵢ`と同じクランプ済み引数から再構成する
+//! 必要がある（Issue #316）**: `λᵢ`はクランプ後の`u`から計算されるため、`|u|>U_CLAMP`
+//! の領域では`zᵢ`に対して事実上定数になる。ここで生の（非クランプの）`zᵢ`を`w`の
+//! 計算に混ぜると、上記導出の前提（`λᵢ`が`zᵢ`の滑らかな関数であること）が崩れ、
+//! `λᵢ(λᵢ+zᵢ)>0`という大域凹性の恒等式が数値的に破れて`w`が負になりうる（実測で
+//! 悪条件パラメータ点にて確認済み）。`linear_predictor_and_residual`が返す`zᵢ`は
+//! `λᵢ`と同じクランプ済み`u`から再構成した値であり、この非対称性を避けている。
 
 use crate::error::CommonError;
 use crate::inference;
 use crate::nonlinear::common::{
     CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
-    MleError, MleFitOptions, SandwichVariant, SeparationNormCheck, clamped_pdf_cdf,
+    MleError, MleFitOptions, SandwichVariant, SeparationNormCheck, U_CLAMP, clamped_pdf_cdf,
     cluster_cov_params, column_means, column_medians, destandardize_cov_params,
     destandardize_params, goodness_of_fit, log_likelihood_null, marginal_effects_from_w_s,
     observed_information_cov_params, ols_based_initial_params, opg_cov_params, pred_table,
@@ -298,11 +306,22 @@ impl ProbitProblem {
             .sum()
     }
 
-    /// 観測`i`の線形予測子`z_i`と一般化残差`λ_i = q_i φ(q_i z_i)/Φ(q_i z_i)`
-    /// （`q_i=2y_i-1`、モジュール冒頭の数式参照）をまとめて計算する。`hessian`が
-    /// `z_i`・`λ_i`の両方を必要とするため、個別に呼び出すより重複計算を避けられる。
+    /// 観測`i`の一般化残差`λ_i = q_i φ(q_i z_i)/Φ(q_i z_i)`（`q_i=2y_i-1`、モジュール
+    /// 冒頭の数式参照）と、`hessian`の重み`w=λᵢ(λᵢ+zᵢ)`が使う**`λᵢ`と整合するように
+    /// クランプ済みの`zᵢ`**（`z̃ᵢ = qᵢ·clamp(qᵢzᵢ, -U_CLAMP, U_CLAMP)`）をまとめて
+    /// 計算する。`hessian`が両方を必要とするため、個別に呼び出すより重複計算を避けられる。
     /// `normal`は呼び出し側（観測`n`件のループ全体）で1回だけ構築して渡す
     /// （`cost`/`gradient`/`hessian`いずれもn回ではなく1回の構築で済ませる）。
+    ///
+    /// **`z̃ᵢ`は生の線形予測子`zᵢ`ではない**（Issue #316）: `λᵢ`は`clamped_pdf_cdf`で
+    /// `u=qᵢzᵢ`を`[-U_CLAMP, U_CLAMP]`にクランプした後の値を使うため、`|u|>U_CLAMP`の
+    /// 領域では`λᵢ`は`zᵢ`に対して事実上定数になる。この領域で`hessian`の重み計算に
+    /// 生の（非クランプの）`zᵢ`を混ぜると、`λᵢ(λᵢ+zᵢ)>0`という大域凹性の前提
+    /// （モジュール冒頭の導出参照）が数学的に破れ、`w`が負になりうる
+    /// （実測: 悪条件パラメータ点で`w<0`の観測を確認済み）。`λᵢ`が実際に依存している
+    /// のと同じクランプ済み引数から`z̃ᵢ`を再構成することで、`λᵢ(λᵢ+z̃ᵢ)>0`の恒等式が
+    /// クランプ領域でも保たれる（クランプ後の`u`に対する同一の解析式を評価しているに
+    /// すぎないため）。
     fn linear_predictor_and_residual(
         &self,
         i: usize,
@@ -311,9 +330,11 @@ impl ProbitProblem {
     ) -> (f64, f64) {
         let z = self.linear_predictor(i, params);
         let q = 2.0 * (*self.y.get(i, 0)) - 1.0;
-        let (phi, big_phi) = clamped_pdf_cdf(normal, q * z);
+        let u = q * z;
+        let (phi, big_phi) = clamped_pdf_cdf(normal, u);
         let lambda = q * phi / big_phi;
-        (z, lambda)
+        let z_for_hessian = q * u.clamp(-U_CLAMP, U_CLAMP);
+        (z_for_hessian, lambda)
     }
 
     /// 観測ごとのスコア行列（n×k）。各行が`sᵢ = λᵢxᵢ`（対数尤度の1階微分そのもの、
@@ -366,6 +387,10 @@ impl Hessian for ProbitProblem {
 
     /// `-ℓ(θ)`のHessian `X'WX`（`W = diag(λᵢ(λᵢ+zᵢ))`、対数尤度のHessian`-X'WX`の
     /// 符号反転）。`run_solver`のdocコメント「`Hessian`トレイトの符号規約」参照。
+    ///
+    /// `zᵢ`は`linear_predictor_and_residual`が返す、`λᵢ`と同じクランプ済み引数から
+    /// 再構成した値（Issue #316、同関数のdocコメント参照）。これにより`λᵢ(λᵢ+zᵢ)>0`
+    /// （`W`の正定値性、対数尤度の大域凹性の根拠）がクランプ領域でも保たれる。
     fn hessian(&self, param: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
         let n = self.x.nrows();
         let k = self.x.ncols();
@@ -1132,6 +1157,30 @@ mod tests {
         for i in 0..2 {
             assert!(scores.get(i, 0).is_finite(), "row {i}");
         }
+    }
+
+    #[test]
+    fn hessian_weight_is_non_negative_even_when_misclassified_observation_exceeds_u_clamp() {
+        // Issue #316: クランプ済みλと生のzを混在させると、|u|>U_CLAMPかつ誤分類
+        // （qz が大きく負）の観測でw=λ(λ+z)が負になりうる（λᵢ(λᵢ+zᵢ)>0という
+        // 大域凹性の前提が数値的に破れる、モジュール冒頭の数値安定化についての節参照）。
+        //
+        // 上の`cost_gradient_hessian_stay_finite_for_extreme_linear_predictor`と
+        // 同じデータ（切片のみ、z=1000）を使う。y=[1,0]の2件はどちらも同じ`z=1000`を
+        // 共有するが、y=0の観測はq=-1でqz=-1000（大きく負、誤分類）となり、
+        // これがまさに#316の再現条件。修正前はh[0][0]が約-8177（Issueの手計算
+        // 概算値≈-8064と整合）だったことを確認済み（バグ注入により再現）。
+        let y = vec![1.0, 0.0];
+        let input = ProbitInput::from_columns(&y, &[], vec![], true, "y".to_string()).unwrap();
+        let problem = ProbitProblem::new(&input);
+        let params = vec![1000.0];
+
+        let hessian = problem.hessian(&params).unwrap();
+        assert!(
+            hessian[0][0] >= 0.0,
+            "Hessian weight should stay non-negative (X'WX positive semi-definite), got {}",
+            hessian[0][0]
+        );
     }
 
     /// 切片のみ（説明変数なし）のProbitは、MLEの一階条件`Σ(y_i-Φ(θ))=0`（`z_i=θ`が

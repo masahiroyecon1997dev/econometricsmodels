@@ -729,18 +729,25 @@ def test_true_separation_noise_free_dgp_raises_computation_error(method):
         ).fit()
 
 
-def test_quasi_separation_tiny_noise_reports_unconverged_without_raising():
-    """境界レジーム（軽度の準完全分離＋ごく小さいノイズ）で
-    `raise_on_non_convergence=False`のとき、旧実装と同様に`converged=False`を
-    返す（無言で`converged=True`を返さない）ことを固定する（Issue #288、
-    rust-reviewer指摘の「中間レジーム」）。
+def test_quasi_separation_tiny_noise_converges_to_true_values():
+    """境界レジーム（軽度の準完全分離＋ごく小さいノイズ）が正しく収束することを
+    固定する。
 
-    `y* = 100·x1 + 0.5·x2 + N(0, 0.001)`。ノイズがあるため理屈上は識別可能だが、
-    数値的には(準)分離的で`σ→0`方向へ退化し、Newtonは`max_iter`まで収束しない。
-    実測では**真値自体は回復する**（`x1≈100`, `x2≈0.5`, `const≈0`, `σ≈ノイズsd`）
-    ——「有限だが巨大な誤った`β̂`で収束扱いになる」病理ではなく、
-    「正しい`β̂`だが収束判定は満たさない」状態。`raise_on_non_convergence=True`
-    （既定）なら`ComputationError`（`NonConvergence`）になる。
+    以前（Issue #288当時）は、この境界レジームでNewtonが`max_iter`まで収束せず、
+    `raise_on_non_convergence=False`のときのみ`converged=False`のまま真値近傍の
+    粗い精度のパラメータを返す（既定の`raise_on_non_convergence=True`では
+    `ComputationError`）という「中間レジーム」として扱っていた
+    （rust-reviewer指摘、Issue #288）。
+
+    この後、`censored_contribution`（`engine/src/nonlinear/tobit.rs`）に
+    Probitの`ProbitProblem`と同型のバグ（Issue #316）——Hessian項`A(u)=λ(u+λ)`の
+    計算でクランプ済み`λ`と生の`zeta`を混在させ、`|zeta|>U_CLAMP`の領域で
+    `A(u)`が負になりHessianの正定値性が崩れる——が見つかり修正された。この
+    境界レジーム（打ち切り境界付近の`zeta`が`U_CLAMP`を超えやすい）はまさに
+    その修正の影響を受け、修正後は`raise_on_non_convergence`の値によらず正しく
+    `converged=True`で真値にほぼ完全一致する結果を返すようになった
+    （`y* = 100·x1 + 0.5·x2 + N(0, 0.001)`に対し`x1≈100.0001`, `x2≈0.49996`,
+    `σ≈0.000956`）。
     """
     rng = random.Random(7)
     n = 200
@@ -752,21 +759,12 @@ def test_quasi_separation_tiny_noise_reports_unconverged_without_raising():
     ]
     df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
 
-    res = Tobit(
-        df,
-        y="y",
-        x=["x1", "x2"],
-        options=TobitOptions(raise_on_non_convergence=False),
-    ).fit()
+    res = Tobit(df, y="y", x=["x1", "x2"]).fit()
 
-    assert res.converged is False
-    # 退化しているのは σ のみ。傾きは真値近傍（巨大な誤った β̂ ではない）。
-    assert abs(res.params["x1"] - 100.0) < 1.0
-    assert abs(res.params["x2"] - 0.5) < 0.5
-    assert 0.0 < res.sigma < 0.1
-
-    with pytest.raises(ComputationError):
-        Tobit(df, y="y", x=["x1", "x2"]).fit()
+    assert res.converged is True
+    assert abs(res.params["x1"] - 100.0) < 0.01
+    assert abs(res.params["x2"] - 0.5) < 0.01
+    assert abs(res.sigma - 0.001) < 0.001
 
 
 def test_many_regressors_no_false_separation():

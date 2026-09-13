@@ -111,7 +111,7 @@ use crate::inference;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::nonlinear::common::{
     CovType, MarginalEffects, MarginalEffectsAt, MleError, MleFitOptions, SandwichVariant,
-    SeparationNormCheck, checked_design_matrix_qr, clamped_pdf_cdf, cluster_cov_params,
+    SeparationNormCheck, U_CLAMP, checked_design_matrix_qr, clamped_pdf_cdf, cluster_cov_params,
     column_means, column_medians, observed_information_cov_params, opg_cov_params, run_solver,
     sandwich_cov_params, validate_cluster_cov_type, validate_confidence_level, validate_max_iter,
     validate_sufficient_observations, validate_tol,
@@ -344,18 +344,29 @@ fn uncensored_contribution(v: f64, s: f64) -> Contribution {
 /// 標準化した値（左打ち切り: `(lower-xᵢ'β)/σ`、右打ち切り: `(xᵢ'β-upper)/σ`）、
 /// `direction`は`β`成分の符号（左: `1.0`、右: `-1.0`。`s`成分・Hessianはいずれも
 /// `direction`に依らず同じ式に帰着する、モジュール冒頭のdocコメント参照）。
+///
+/// **Hessian項（`a=A(u)`・`c=C(u)`・`h_ss`）が使う`u`は、`λ`と同じクランプ済み
+/// 引数から再構成する**（Probitの`ProbitProblem`と同型のバグ、Issue #316参照）。
+/// `λ`は`clamped_pdf_cdf`が`zeta`を`[-U_CLAMP, U_CLAMP]`にクランプした後の値を
+/// 使うため、`|zeta|>U_CLAMP`の領域では`λ`は`zeta`に対して事実上定数になる。
+/// ここで生の（非クランプの）`zeta`を`A(u)=λ(u+λ)`の計算に混ぜると、`A(u)>0`と
+/// いう恒等式（モジュール冒頭の数式表、Probitの大域凹性と同型の根拠）が数値的に
+/// 破れ、`h_beta_coef`が負になりうる。`score_s`（勾配）は今回のスコープ外
+/// （`U_CLAMP`領域でのcost/gradientの数学的非整合は別の既知の課題、
+/// `docs/spec/probit-spec.md`4章参照）のため、`zeta`のまま変更しない。
 fn censored_contribution(normal: &Normal, zeta: f64, direction: f64) -> Contribution {
     let (phi, big_phi) = clamped_pdf_cdf(normal, zeta);
     let lambda = phi / big_phi;
-    let a = lambda * (zeta + lambda);
-    let c = zeta * a - lambda;
+    let zeta_for_hessian = zeta.clamp(-U_CLAMP, U_CLAMP);
+    let a = lambda * (zeta_for_hessian + lambda);
+    let c = zeta_for_hessian * a - lambda;
     Contribution {
         log_lik: big_phi.ln(),
         score_beta_coef: -direction * lambda,
         score_s: -zeta * lambda,
         h_beta_coef: a,
         h_beta_s_coef: direction * c,
-        h_ss: zeta * c,
+        h_ss: zeta_for_hessian * c,
     }
 }
 
@@ -2308,6 +2319,28 @@ mod tests {
         let scores = problem.scores(&params);
         assert!((*scores.get(0, 0) - (-lambda0)).abs() < 1e-12);
         assert!((*scores.get(0, 1)).abs() < 1e-12);
+    }
+
+    /// probit.rsのIssue #316と同型のバグ回帰ガード: `censored_contribution`の
+    /// `A(u)=λ(u+λ)`計算で、クランプ済み`λ`と生の（非クランプの）`zeta`を混在させると、
+    /// `|zeta|>U_CLAMP`の領域で`h_beta_coef`（`A(u)`）が負になりうる（`A(u)>0`という
+    /// 恒等式が数値的に破れる、モジュール冒頭の数式表参照）。左打ち切り（`lower=0.0`）・
+    /// 切片のみで`β0=1000, σ=1`とすると`zeta=(0-1000)/1=-1000`となり、この経路を踏む。
+    #[test]
+    fn hessian_weight_is_non_negative_even_when_censored_observation_exceeds_u_clamp() {
+        let y = vec![0.0];
+        let input =
+            TobitInput::from_columns(&y, &[], vec![], true, "y".to_string(), Some(0.0), None)
+                .unwrap();
+        let problem = TobitProblem::new(&input);
+        let params = vec![1000.0, 0.0]; // β0=1000, s=0（σ=1）→ zeta=(0-1000)/1=-1000
+
+        let hessian = problem.hessian(&params).unwrap();
+        assert!(
+            hessian[0][0] >= 0.0,
+            "Hessian weight A(u) should stay non-negative, got {}",
+            hessian[0][0]
+        );
     }
 
     /// `left_censored_cost_gradient_hessian_scores_match_closed_form_at_zeta_zero`の

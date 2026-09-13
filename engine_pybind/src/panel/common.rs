@@ -25,11 +25,13 @@ use crate::linear::common::least_squares_error_is_computation_error;
 ///   `InsufficientDegreesOfFreedom`・`SingletonGroup`・`UnbalancedPanelForTwoWay`・
 ///   `ZeroVarianceAfterDemeaning`・`TwoWayRequiresTime`・`HacRequiresTime`・
 ///   `InvalidHacBandwidth`）はいずれも入力・オプションの不正なので`ValidationError`。
-/// - `WithinRegressionFailed`: 委譲先の`LeastSquaresError`の分類基準
-///   （`least_squares_error_is_computation_error`）にそのまま従う。`IvError::
-///   SecondStageFailed`と同じ扱い。Pythonに渡すメッセージは`source.to_string()`ではなく
-///   `PanelError`自身の`to_string()`（「within変換後の推定で失敗した」という文脈を含む）を
-///   使うため、`least_squares_error_to_pyerr`自体は呼ばない。
+/// - `WithinRegressionFailed`・`FTestFailed`・`BetweenRegressionFailed`: 委譲先の
+///   `LeastSquaresError`の分類基準（`least_squares_error_is_computation_error`）に
+///   そのまま従う。`IvError::SecondStageFailed`と同じ扱い。Pythonに渡すメッセージは
+///   `source.to_string()`ではなく`PanelError`自身の`to_string()`（「within変換後の推定で
+///   失敗した」等の文脈を含む）を使うため、`least_squares_error_to_pyerr`自体は呼ばない。
+///   `BetweenRegressionFailed`（RE、Issue #193）は対象がFEのwithin回帰ではなくREの
+///   between回帰である点だけが異なり、分類ロジックは同じため同じ`match`アームでまとめる。
 ///
 /// Issue #172時点ではFE/REの`fit()`本体が未実装で、この関数は`#[cfg(test)] mod tests`
 /// からしか呼び出されなかった。当初は`#[expect(dead_code, ...)]`（`cargo build`では未到達で
@@ -52,7 +54,9 @@ pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
         | PanelError::TwoWayRequiresTime
         | PanelError::HacRequiresTime
         | PanelError::InvalidHacBandwidth { .. } => ValidationError::new_err(message),
-        PanelError::WithinRegressionFailed { source } | PanelError::FTestFailed { source } => {
+        PanelError::WithinRegressionFailed { source }
+        | PanelError::FTestFailed { source }
+        | PanelError::BetweenRegressionFailed { source } => {
             if least_squares_error_is_computation_error(&source) {
                 ComputationError::new_err(message)
             } else {

@@ -28,6 +28,25 @@ FEはIVの`#159`（データ抽出・pyclass定義）→`#169`（engine呼び出
 
 `fixed_effects()`自体は`fit`と同じ理由（`PyDataFrame`を経由する`fit`が構築した`FeResult`のメソッドであり、独立に`#[cfg(test)]`から呼べるテスト用コンストラクタが無い）でRustユニットテストを追加していない。検証は`maturin develop`後のPythonからの数値照合で行った（fixestリファレンスフィクスチャで1-way/2-way双方がengine単体テスト`fe_estimator_fit_one_way_fixed_effects_matches_fixest_reference`/`fe_estimator_fit_two_way_fixed_effects_matches_fixest_reference`の期待値と完全一致することを確認済み）。
 
+## 踏んだ罠: `engine`側で`PanelError`に新バリアントを追加すると`panel_error_to_pyerr`が非網羅マッチでコンパイル不能になる
+
+Issue #193（RE: Swamy-Arora分散成分推定）で`engine::panel::common::PanelError`に
+`BetweenRegressionFailed { source: LeastSquaresError }`を追加した際、`engine_pybind/src/
+panel/common.rs`の`panel_error_to_pyerr`側を更新し忘れ、`cargo build -p engine_pybind`
+（`cargo build --workspace`も同様）が`E0004: non-exhaustive patterns`で失敗する状態に
+なった（rust-reviewerの指摘で発覚。`cargo test -p engine`だけでは検出できない——
+`engine_pybind`はワークスペース内の別クレートのため、`engine`側の変更を確認したら
+必ず`cargo build --workspace`/`cargo test --workspace`まで実行すること）。
+
+`PanelError`は`match`で全バリアントを網羅する設計（`panel_error_to_pyerr`）のため、
+**`engine`側で新しいエラーバリアントを追加したら、必ず`engine_pybind/src/panel/
+common.rs`の`panel_error_to_pyerr`にも対応する分類（`ValidationError`/
+`ComputationError`のどちら側か）を追記すること**。`LeastSquaresError`をラップする
+バリアント（`WithinRegressionFailed`・`FTestFailed`・`BetweenRegressionFailed`）は
+分類ロジックが同じため同じ`match`アームにまとめられる（`least_squares_error_is_
+computation_error`に従うだけ）。他系統（`IvError`・`MleError`等）の`*_error_to_pyerr`
+でも同じ「網羅的match＋新バリアント追加時の更新漏れ」という罠が構造的にありうる。
+
 ## 踏んだ罠: `#[expect(dead_code)]`は「テストからも呼ばれる新規関数」の追加で壊れる
 
 `engine_pybind/src/iv/CLAUDE.md`「踏んだ罠」に記録済みの罠を、既存コード（`panel/common.rs`の`panel_error_to_pyerr`）で実際に踏んだ。Issue #172時点で`panel_error_to_pyerr`はどこからも呼ばれておらず`#[expect(dead_code, ...)]`が付いていたが、Issue #186で`build_fe_input`（`FeInput::from_columns`のエラーを`.map_err(panel_error_to_pyerr)`で変換）がこれを呼ぶようになった。`build_fe_input`自体は`#[cfg(test)] mod tests`からしか呼ばれない（`#[pymodule]`未登録のため）ため、`cargo test`/`clippy --all-targets`では`panel_error_to_pyerr`が到達可能になり`dead_code`が発火しなくなる → `#[expect]`の期待が外れ`unfulfilled_lint_expectations`が`-D warnings`下でエラーになった。`#[allow(dead_code)]`（無条件抑制）に変更して解消した。**「本番未接続だがテストからは呼ばれる」関数を新規に追加するとき、その関数が呼ぶ既存の`#[expect(dead_code)]`付き関数にも同じ変更が波及する**ことに注意（呼び出しグラフを辿って確認すること）。

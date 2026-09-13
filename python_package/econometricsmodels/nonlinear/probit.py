@@ -250,25 +250,40 @@ class ProbitResults:
             )
         ]
 
-    def predict(self) -> list[dict[str, float]]:
-        """Predicted probabilities `p_i = Φ(x_i'β̂)` for the training data.
+    def predict(
+        self, new_data: pl.DataFrame | None = None
+    ) -> list[dict[str, float]]:
+        """Predicted probabilities `p_i = Φ(x_i'β̂)`.
 
-        Out-of-sample prediction (a `new_data` argument) is not yet
-        supported (see `docs/spec/probit-spec.md`, "未実装・未対応").
+        Args:
+            new_data: New data to predict on. Must contain columns with
+                the same names as the `x` columns passed at fit time
+                (matched by name; column order does not matter). If
+                `include_intercept=True` was used at fit time, the
+                constant column is added automatically and must not be
+                included here. If `None` (default), returns the
+                predicted probabilities for the training data used in
+                `fit()`.
 
         Returns:
             Row-oriented predictions, one dict per observation. Each
             dict currently has a single key, `"probability"`.
+
+        Raises:
+            ValidationError: `new_data` is missing a required `x`
+                column, or a column contains missing/NaN/infinite
+                values.
         """
-        return [{"probability": p} for p in self._raw.predict()]
+        return [{"probability": p} for p in self._raw.predict(new_data)]
 
     def pred_table(self, threshold: float = 0.5) -> list[dict[str, float]]:
         """Classification (confusion) table.
 
         `actual` always uses a fixed 0.5 split; only the predicted
         class depends on `threshold` (matches statsmodels'
-        `BinaryResults.pred_table(threshold)`). Out-of-sample data is
-        not yet supported (same limitation as `predict()`).
+        `BinaryResults.pred_table(threshold)`). Unlike `predict()`,
+        out-of-sample data (a `new_data` argument) is not yet
+        supported (tracked separately, see Issue #322).
 
         Args:
             threshold: Probability threshold above which an

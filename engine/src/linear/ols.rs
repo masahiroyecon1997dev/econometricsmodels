@@ -13,6 +13,7 @@ use faer::{Accum, Mat, Par, Side};
 use statrs::distribution::{ContinuousCDF, FisherSnedecor, StudentsT};
 
 use super::common::LeastSquaresError;
+use crate::design_matrix::design_matrix_element;
 use crate::error::CommonError;
 use crate::inference;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
@@ -238,19 +239,6 @@ impl OlsInput {
     /// 説明変数の数 k（定数項を含む）
     pub fn k(&self) -> usize {
         self.x.ncols()
-    }
-}
-
-/// 設計行列の`(i, j)`要素を返す（`has_intercept`なら先頭列が定数項1.0、それ以外は
-/// `columns[j または j-1][i]`）。`from_columns_impl`（学習データの設計行列組み立て）と
-/// `predict_new_data`（新規データの設計行列組み立て）が独立に同じ規約を重複実装すると、
-/// 将来どちらか一方だけ規約を変更（例: 切片列の位置）した場合に静かに不整合になる
-/// リスクがあるため、共有ヘルパーとして切り出している。
-fn design_matrix_element(has_intercept: bool, columns: &[Vec<f64>], i: usize, j: usize) -> f64 {
-    if has_intercept {
-        if j == 0 { 1.0 } else { columns[j - 1][i] }
-    } else {
-        columns[j][i]
     }
 }
 

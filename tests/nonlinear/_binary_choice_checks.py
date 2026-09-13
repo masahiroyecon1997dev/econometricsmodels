@@ -320,6 +320,23 @@ def check_predict_returns_row_oriented_probabilities(dataset, estimator_cls):
         assert 0.0 <= row["probability"] <= 1.0
 
 
+def check_predict_new_data_returns_row_oriented_probabilities(
+    dataset, estimator_cls
+):
+    """`predict(new_data)`（out-of-sample、Issue #131）が学習データと構造の
+    異なる新規データに対しても同じ行指向の形状を返すこと。
+    """
+    res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
+
+    predicted = res.predict(new_data)
+
+    assert len(predicted) == 2
+    for row in predicted:
+        assert set(row.keys()) == {"probability"}
+        assert 0.0 <= row["probability"] <= 1.0
+
+
 # ── test_<method>_api.py: pred_table() ──────────────────────────────
 
 
@@ -493,6 +510,55 @@ def check_insufficient_observations_raises(dataset, estimator_cls):
         match=escaped(msgs.INSUFFICIENT_OBSERVATIONS, n=2, k=3),
     ):
         estimator_cls(df, y="y", x=["x1", "x2"]).fit()
+
+
+# ── test_<method>_validation.py: ValidationError（predict()のnew_data） ──
+#
+# OLSの`test_predict_missing_column_raises`等と同型（Issue #131）。
+
+
+def check_predict_missing_column_raises(dataset, estimator_cls):
+    res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
+
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    ):
+        res.predict(new_data)
+
+
+def check_predict_non_numeric_dtype_raises(dataset, estimator_cls):
+    """`check_non_numeric_dtype_raises`と同じ理由でnull経由の
+    `COLUMN_HAS_MISSING_VALUES`になる。
+    """
+    res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": ["a", "b"], "x2": [1.0, 2.0]})
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=2),
+    ):
+        res.predict(new_data)
+
+
+def check_predict_null_or_non_finite_values_raise(dataset, estimator_cls):
+    res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
+
+    new_data_null = pl.DataFrame({"x1": [1.0, None], "x2": [1.0, 2.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    ):
+        res.predict(new_data_null)
+
+    new_data_inf = pl.DataFrame({"x1": [1.0, float("inf")], "x2": [1.0, 2.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="inf", row=1
+        ),
+    ):
+        res.predict(new_data_inf)
 
 
 # ── test_<method>_validation.py: ValidationError（オプション） ─────
@@ -1105,3 +1171,117 @@ def check_include_intercept_false_matches_statsmodels(
         f"{label}/converged"
     )
     assert res.df_model == fitted.df_model, f"{label}/df_model"
+
+
+def check_predict_new_data_matches_statsmodels(
+    config: BinaryChoiceReferenceConfig, sm_estimator_cls
+) -> None:
+    """新規データに対する`predict()`がstatsmodelsの`.predict()`と一致すること
+    （OLSの`test_predict_new_data_matches_statsmodels`と同型、Issue #131）。
+
+    列順を学習時（x1, x2, x3）と入れ替えて渡し、列名でマッチングされる
+    （列順に依存しない）ことも合わせて確認する。`predict()`の値自体は
+    `cov_type`に依存しないため（点推定はcov_typeの影響を受けない）、
+    ここでは`classical`のみで確認する。
+    """
+    import numpy as np
+    import statsmodels.api as sm
+
+    df = pl.read_csv(config.dataset_path("baseline"))
+    y = df["y"].to_numpy()
+    x_cols = ["x1", "x2", "x3"]
+    x = np.column_stack([df[c].to_numpy() for c in x_cols])
+    sm_fitted = sm_estimator_cls(y, sm.add_constant(x)).fit(disp=0)
+
+    options = config.options_cls(cov_type="classical")
+    res = config.estimator_cls(df, y="y", x=x_cols, options=options).fit()
+
+    new_data = pl.DataFrame(
+        {"x2": [0.5, -1.0], "x3": [0.2, 0.1], "x1": [1.0, -0.5]}
+    )
+    predicted = res.predict(new_data)
+
+    sm_new_x = sm.add_constant(
+        np.column_stack(
+            [
+                new_data["x1"].to_numpy(),
+                new_data["x2"].to_numpy(),
+                new_data["x3"].to_numpy(),
+            ]
+        ),
+        has_constant="add",
+    )
+    expected = sm_fitted.predict(sm_new_x)
+
+    assert len(predicted) == 2
+    for i, (row, exp) in enumerate(zip(predicted, expected)):
+        config.assert_close(row["probability"], exp, f"predict_new_data/{i}")
+
+
+def check_predict_new_data_without_intercept_matches_statsmodels(
+    config: BinaryChoiceReferenceConfig, sm_estimator_cls
+) -> None:
+    """`include_intercept=False`でfitした場合の`predict(new_data)`も
+    statsmodelsと一致すること（OLSの`test_predict_new_data_without_intercept_
+    matches_statsmodels`と同型、python-reviewer指摘、Issue #131）。
+    """
+    df = pl.read_csv(config.dataset_path("baseline"))
+    y = df["y"].to_numpy()
+    x1 = df["x1"].to_numpy()
+
+    options = config.options_cls(include_intercept=False)
+    res = config.estimator_cls(df, y="y", x=["x1"], options=options).fit()
+    sm_fitted = sm_estimator_cls(y, x1.reshape(-1, 1)).fit(disp=0)
+
+    new_x1 = [1.0, 2.0, -3.0]
+    new_data = pl.DataFrame({"x1": new_x1})
+    predicted = res.predict(new_data)
+    expected = sm_fitted.predict([[v] for v in new_x1])
+
+    assert len(predicted) == 3
+    for i, (row, exp) in enumerate(zip(predicted, expected)):
+        config.assert_close(
+            row["probability"], exp, f"predict_new_data_no_intercept/{i}"
+        )
+
+
+def check_predict_with_include_intercept_false_and_x_named_const(
+    estimator_cls, options_cls, link
+) -> None:
+    """`include_intercept=False`かつ`x`に`"const"`という名前の列を含む場合でも
+    `predict(new_data)`が正しく動作すること（OLSの`test_predict_with_include_
+    intercept_false_and_x_named_const`と同型の回帰テスト、Issue #131）。
+
+    `include_intercept=True`のときのみ`"const"`列名との衝突チェックが働く仕様
+    のため、`include_intercept=False`ならユーザーが`"const"`という名前の
+    （切片ではない）通常の説明変数を`x`に含めることは正当な入力。`predict()`の
+    内部実装が誤って列名から「自動追加された切片列かどうか」を推測すると、
+    この場合に値を無視して1.0固定にしてしまう回帰バグがOLSで過去にあったため
+    （`test_ols_api.py`参照）、同型の実装（`has_intercept`フラグのみで判定し
+    列名は見ない）を使うLogit/Probitでも固定用に追加する。
+
+    `link`はリンク関数（Logitは`Λ`、Probitは`Φ`）を`z -> probability`の
+    呼び出し可能オブジェクトとして呼び出し側から渡す（このcheck自体はLogit/
+    Probit共有のため、期待値の計算式だけを手法ごとに差し替える）。
+    """
+    df = pl.DataFrame(
+        {
+            "y": [0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0],
+            "const": [2.0, 5.0, 1.0, 8.0, 3.0, 6.0, 4.0, 7.0],
+            "x2": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        }
+    )
+    options = options_cls(include_intercept=False)
+    res = estimator_cls(df, y="y", x=["const", "x2"], options=options).fit()
+
+    new_data = pl.DataFrame({"const": [100.0, 200.0], "x2": [10.0, 20.0]})
+    predicted = res.predict(new_data)
+
+    coef_const = res.params["const"]
+    coef_x2 = res.params["x2"]
+    for i, (row, (c, x2)) in enumerate(
+        zip(predicted, [(100.0, 10.0), (200.0, 20.0)])
+    ):
+        z = coef_const * c + coef_x2 * x2
+        expected = link(z)
+        assert abs(row["probability"] - expected) < 1e-9, f"probability/{i}"

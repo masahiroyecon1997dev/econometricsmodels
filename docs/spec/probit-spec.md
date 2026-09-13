@@ -96,9 +96,10 @@ MLEが`Φ(θ̂)=ȳ`を満たすため、この計算がリンク関数に依存�
 
 ### 3.6 predict() / pred_table()
 
-`predict()`は`p_i=Φ(x_i'θ)`をそのまま計算する（Logitの`Λ`を`Φ`に置き換えたのみ）。`pred_table`の
-計算本体はリンク関数を参照しないため`common.rs`の共有関数をそのまま使う（[`logit-spec.md`](./logit-spec.md)
-3.6節参照）。in-sample限定、out-of-sample非対応もLogitと同じ。
+`predict(new_data=None)`は`p_i=Φ(x_i'θ)`をそのまま計算する（Logitの`Λ`を`Φ`に置き換えたのみ、
+out-of-sample対応も含めて設計は同一）。`pred_table`の計算本体はリンク関数を参照しないため
+`common.rs`の共有関数をそのまま使う（[`logit-spec.md`](./logit-spec.md)3.6節参照）。`pred_table`は
+in-sample限定のまま。
 
 ### 3.7 engine_pybind: エラー変換
 
@@ -128,7 +129,8 @@ MLEが`Φ(θ̂)=ȳ`を満たすため、この計算がリンク関数に依存�
 
 ## 4. 未実装・未対応
 
-- `predict()`/`pred_table()`のout-of-sample対応（Logitと同じ、[`logit-spec.md`](./logit-spec.md)4章）
+- `predict()`のout-of-sample対応は実装済み（Logitと同じ、[`logit-spec.md`](./logit-spec.md)4章）。
+  `pred_table()`のout-of-sample対応は引き続き未実装。
 - `start_params`（ユーザー指定初期値）
 - **`U_CLAMP`とNewton法（line searchなし）の相互作用は対応済み（Issue #316、
   2026-09-13）**: `ProbitProblem::hessian`が使うHessianの重み`w=λᵢ(λᵢ+zᵢ)`は、

@@ -249,12 +249,33 @@ pub struct LogitResult {
 
 #[pymethods]
 impl LogitResult {
-    /// Predicted probabilities for the training data used in `fit()`.
+    /// Predicted probabilities for the training data used in `fit()`, or for
+    /// `new_data` when given.
     ///
-    /// Out-of-sample prediction (a `new_data` argument) is not yet supported
-    /// (see `docs/spec/logit-spec.md`, "未実装・未対応").
-    fn predict(&self) -> Vec<f64> {
-        self.estimator.predict()
+    /// # Errors
+    /// - A required `x` column is missing from `new_data`, cannot be cast to a
+    ///   numeric type, or contains missing/NaN/infinite values: `ValidationError`
+    ///   (same validation as `fit()`'s column extraction, via `extract_f64_column`).
+    #[pyo3(signature = (new_data=None))]
+    fn predict(&self, new_data: Option<PyDataFrame>) -> PyResult<Vec<f64>> {
+        let Some(new_data) = new_data else {
+            return Ok(self.estimator.predict());
+        };
+
+        let df: DataFrame = new_data.into();
+        let has_intercept = self.estimator.input().has_intercept();
+        let x_names: &[String] = if has_intercept {
+            &self.param_names[1..]
+        } else {
+            &self.param_names[..]
+        };
+
+        let mut x_columns: Vec<Vec<f64>> = Vec::with_capacity(x_names.len());
+        for name in x_names {
+            x_columns.push(extract_f64_column(&df, name)?);
+        }
+
+        Ok(self.estimator.predict_new_data(&x_columns))
     }
 
     /// 2x2 classification table as `[[row0], [row1]]`, where row/column index 0 is the

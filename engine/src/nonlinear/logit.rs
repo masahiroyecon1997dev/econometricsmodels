@@ -37,8 +37,8 @@ use crate::nonlinear::common::{
     MleError, MleFitOptions, SandwichVariant, SeparationNormCheck, cluster_cov_params,
     column_means, column_medians, destandardize_cov_params, destandardize_params, goodness_of_fit,
     log_likelihood_null, marginal_effects_from_w_s, observed_information_cov_params,
-    ols_based_initial_params, opg_cov_params, pred_table, predict_from_link, run_solver,
-    sandwich_cov_params, standardize_columns, validate_fit_preconditions,
+    ols_based_initial_params, opg_cov_params, pred_table, predict_from_link, predict_new_data,
+    run_solver, sandwich_cov_params, standardize_columns, validate_fit_preconditions,
 };
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
@@ -831,10 +831,32 @@ impl LogitEstimator {
     /// 各行について返す（`fit()`のReturn本体には含めない別メソッド、
     /// `nonlinear-api-design.md`6章）。
     ///
-    /// **新規データでの予測（out-of-sample）は未対応**（本Issueのスコープ外、
-    /// 別issueでトラッキング。ユーザー確認済み）。
+    /// 新規データでの予測（out-of-sample）は`predict_new_data`（Issue #131）。
     pub fn predict(&self) -> Vec<f64> {
         predict_from_link(self.input.x(), &self.params, logistic)
+    }
+
+    /// 新規データ（out-of-sample、`new_x_columns`）に対する予測確率
+    /// `p_i = Λ(x_i'θ)`（Issue #131）。
+    ///
+    /// `nonlinear::common::predict_new_data`に`logistic`をリンク関数として渡すだけの
+    /// 薄いラッパー。リンク関数の選択（Logitはロジスティック関数）という手法固有の
+    /// 知識を`engine`側に閉じ込め、`engine_pybind`には計算ロジックを持たせない方針
+    /// （`.claude/rules/rust-style.md`「責務分離」）を守るため、`engine_pybind`から
+    /// `common::predict_new_data`を直接呼ばずこのメソッド経由にしている
+    /// （`OLSResult::predict`が`engine::linear::ols::predict_new_data`という
+    /// フリー関数を直接呼べるのは、OLSにはリンク関数の選択という手法固有の分岐が
+    /// 無いため）。
+    ///
+    /// `new_x_columns`の本数・順序の契約、パニック条件は
+    /// `nonlinear::common::predict_new_data`のdocコメント参照。
+    pub fn predict_new_data(&self, new_x_columns: &[Vec<f64>]) -> Vec<f64> {
+        predict_new_data(
+            &self.params,
+            self.input.has_intercept(),
+            new_x_columns,
+            logistic,
+        )
     }
 
     /// 分類の的中表（2×2、`table[actual][predicted]`のカウント。行=実測クラス、
@@ -843,8 +865,8 @@ impl LogitEstimator {
     /// `nonlinear/common.rs`の`pred_table`のdocコメント参照（リンク関数に依存しない計算
     /// のため`common.rs`に共通化されている）。
     ///
-    /// **新規データでの的中表（out-of-sample）は未対応**（スコープ外、
-    /// 別issueでトラッキング。ユーザー確認済み）。
+    /// **新規データでの的中表（out-of-sample）は未対応**（`predict()`とは異なり
+    /// スコープ外のまま、別issueでトラッキング。ユーザー確認済み、Issue #131）。
     pub fn pred_table(&self, threshold: f64) -> Mat<f64> {
         pred_table(&self.predict(), self.input.y(), threshold)
     }
@@ -2779,6 +2801,93 @@ mod tests {
         let predicted = estimator.predict();
         for (i, &p_i) in predicted.iter().enumerate().take(n) {
             let z: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
+            let expected = 1.0 / (1.0 + (-z).exp());
+            assert!((p_i - expected).abs() < 1e-12);
+        }
+    }
+
+    /// `predict_new_data`（out-of-sample、Issue #131）が独立に再計算した
+    /// `p_i=Λ(x_i'θ)`と一致すること。`predict_matches_independently_recomputed_
+    /// logistic_of_linear_predictor`と同じモデルを使い、学習データとは異なる新規の
+    /// x値で検証する。
+    #[test]
+    fn predict_new_data_matches_independently_recomputed_logistic_of_linear_predictor() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![10.0, 20.0, 30.0, 40.0], vec![-5.0, 2.0, 8.0, -1.0]];
+        let input = LogitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = LogitEstimator::fit(
+            input,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
+        )
+        .unwrap();
+
+        let params = estimator.params().to_vec();
+        // 学習データには無い新規のx値
+        let new_x_columns = vec![vec![15.0, 25.0], vec![0.0, -3.0]];
+        let predicted = estimator.predict_new_data(&new_x_columns);
+
+        assert_eq!(predicted.len(), 2);
+        for (i, &p_i) in predicted.iter().enumerate() {
+            let z = params[0] + new_x_columns[0][i] * params[1] + new_x_columns[1][i] * params[2];
+            let expected = 1.0 / (1.0 + (-z).exp());
+            assert!((p_i - expected).abs() < 1e-12);
+        }
+    }
+
+    /// `predict_new_data`が`has_intercept=false`（`LogitInput::from_columns`の
+    /// `include_intercept=false`）でも正しく動作すること（rust-reviewer指摘。
+    /// `has_intercept=true`のみを検証していた`predict_new_data_matches_
+    /// independently_recomputed_logistic_of_linear_predictor`と対になる）。
+    #[test]
+    fn predict_new_data_without_intercept_matches_independently_recomputed_logistic_of_linear_predictor()
+     {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![10.0, 20.0, 30.0, 40.0], vec![-5.0, 2.0, 8.0, -1.0]];
+        let input = LogitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            false,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = LogitEstimator::fit(
+            input,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
+        )
+        .unwrap();
+
+        let params = estimator.params().to_vec();
+        // 学習データには無い新規のx値
+        let new_x_columns = vec![vec![15.0, 25.0], vec![0.0, -3.0]];
+        let predicted = estimator.predict_new_data(&new_x_columns);
+
+        assert_eq!(predicted.len(), 2);
+        for (i, &p_i) in predicted.iter().enumerate() {
+            let z = new_x_columns[0][i] * params[0] + new_x_columns[1][i] * params[1];
             let expected = 1.0 / (1.0 + (-z).exp());
             assert!((p_i - expected).abs() < 1e-12);
         }

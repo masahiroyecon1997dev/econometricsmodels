@@ -120,11 +120,15 @@ print(result.pseudo_r_squared)
 
 ### Predicted values and classification table
 
-`LogitResults.predict()` returns fitted probabilities for the training data. `pred_table()` returns a 2x2 classification (confusion) table for a given probability threshold (default 0.5).
+`LogitResults.predict()` returns predicted probabilities. With no arguments, it returns fitted probabilities for the training data; passing `new_data` returns out-of-sample predictions for new data instead (same `new_data` semantics as `OlsResults.predict()`). `pred_table()` returns a 2x2 classification (confusion) table for a given probability threshold (default 0.5), for the training data only.
 
 ```python
 predicted = result.predict()
 print(predicted)  # [{"probability": ...}, ...]
+
+new_data = pl.DataFrame({"x1": [1.0, 2.0]})
+predicted = result.predict(new_data)
+print(predicted)  # [{"probability": ...}, {"probability": ...}]
 
 table = result.pred_table()
 for row in table:

@@ -32,6 +32,7 @@ Probit対応は当初「python_packageラッパー実装のみ」というスコ
 
 - `LogitEstimator`/`ProbitEstimator`はどちらも`Clone`を実装していないため、`LogitResult`/`ProbitResult`も`#[derive(Clone)]`を外している（`OLSResult`との差異。リポジトリ全体を検索し`.clone()`されている箇所が無いことを確認済み）。
 - 3メソッドはいずれも`self.estimator`への単純な委譲のみ（計算ロジックを`engine_pybind`に書かない原則を維持）。
+- **`predict(new_data=None)`のout-of-sample対応（Issue #131）も同じ委譲方針**: `new_data`指定時は`extract_f64_column`で列を抽出した後、`self.estimator.predict_new_data(&x_columns)`（`LogitEstimator`/`ProbitEstimator`に追加した薄いラッパーメソッド、内部で`nonlinear::common::predict_new_data`に`logistic`/正規分布CDFを渡すだけ）に委譲する。`OLSResult::predict`が`engine::linear::ols::predict_new_data`というフリー関数を直接呼べるのに対し、Logit/Probitがフリー関数を直接呼ばずestimatorメソッド経由にしているのは、リンク関数の選択（Logitはロジスティック関数、Probitは正規分布CDF）という手法固有の分岐を`engine_pybind`に持ち込まないため（`engine_pybind`にはstatrs依存も無い）。新規データの設計行列組み立て（`has_intercept`時の定数項自動付加）はOLS/WLSと共有する`engine::design_matrix::design_matrix_element`を使う。
 - `marginal_effects`の結果はpyclass`MarginalEffectsResult`（`nonlinear/common.rs`、`LogitResult`/`ProbitResult`と同じ個別`#[pyo3(get)]`方式）で返す。フィールド名は`LogitResult`/`ProbitResult`の既存フィールド（`param_names`/`std_errors`/`z_stats`/`p_values`/`conf_lower`/`conf_upper`）と揃え、`dydx`のみ新規。元々`logit.rs`にLogit専用で定義していたが、`engine::nonlinear::common::MarginalEffects`（engine側の返り値型）が最初からLogit/Probit共有だったのに合わせ、Probit追加時に`nonlinear/common.rs`へ移動して共有した（`parse_marginal_effects_at`も同様に移動）。
 
 ## `pred_table`の`Mat<f64>`→Python変換

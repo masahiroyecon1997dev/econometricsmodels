@@ -63,6 +63,23 @@ def test_insufficient_observations_raises(binary_dataset):
     _checks.check_insufficient_observations_raises(binary_dataset, Logit)
 
 
+# ── ValidationError（predict()のnew_data） ─────────────────────────
+
+
+def test_predict_missing_column_raises(binary_dataset):
+    _checks.check_predict_missing_column_raises(binary_dataset, Logit)
+
+
+def test_predict_non_numeric_dtype_raises(binary_dataset):
+    _checks.check_predict_non_numeric_dtype_raises(binary_dataset, Logit)
+
+
+def test_predict_null_or_non_finite_values_raise(binary_dataset):
+    _checks.check_predict_null_or_non_finite_values_raise(
+        binary_dataset, Logit
+    )
+
+
 # ── ValidationError（オプション） ──────────────────────────────────
 
 

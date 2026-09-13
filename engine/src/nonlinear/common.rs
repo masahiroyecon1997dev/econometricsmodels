@@ -28,6 +28,7 @@ use faer::{Mat, Side};
 use statrs::distribution::{ChiSquared, Continuous, ContinuousCDF, Normal};
 use thiserror::Error;
 
+use crate::design_matrix::design_matrix_element;
 use crate::error::CommonError;
 use crate::inference;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
@@ -864,6 +865,52 @@ pub fn predict_from_link(x: &Mat<f64>, params: &[f64], link: impl Fn(f64) -> f64
     (0..n)
         .map(|i| {
             let z: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
+            link(z)
+        })
+        .collect()
+}
+
+/// 新規データ（out-of-sample、`new_x_columns`）に対する予測値`p_i = link(x_i'θ)`を
+/// 計算する（`predict_from_link`のout-of-sample版、Logit/Probit共有。Issue #131）。
+/// `engine::linear::ols::predict_new_data`と同型で、`link`関数（logistic/正規分布CDF）を
+/// 差し替えられるようにしたもの。
+///
+/// `new_x_columns`は、fit時に`x`で渡した列（`param_names`から`has_intercept`なら
+/// `"const"`を除いたもの）と同じ本数・同じ順序である必要がある。`has_intercept`が
+/// `true`の場合、定数項の列はここで自動的に先頭に付加するため`new_x_columns`に
+/// 含めない（`LogitInput::from_columns`/`ProbitInput::from_columns`の切片列自動追加と
+/// 一致させるため、`crate::design_matrix::design_matrix_element`を共有する）。
+///
+/// # パニックについて
+/// `new_x_columns.len()`が`params.len() - usize::from(has_intercept)`と一致しない場合は
+/// `debug_assert_eq!`でパニックする。呼び出し側（`engine_pybind`）が`param_names`に基づいて
+/// 必要な列だけを渡す実装契約であり、実データに起因する`ValidationError`とは性質が異なる
+/// ため区別している（`engine::linear::ols::predict_new_data`と同じパターン）。
+pub fn predict_new_data(
+    params: &[f64],
+    has_intercept: bool,
+    new_x_columns: &[Vec<f64>],
+    link: impl Fn(f64) -> f64,
+) -> Vec<f64> {
+    let k = params.len();
+    let expected = k - usize::from(has_intercept);
+    debug_assert_eq!(
+        new_x_columns.len(),
+        expected,
+        "new_x_columns length must match the number of x columns used at fit time"
+    );
+
+    // `x`は空リストにできない（engine_pybind側でValidationErrorとして弾く）ため、
+    // fit時にx列が1本もないケース（has_intercept=falseかつexpected=0）は到達しない。
+    // したがって`new_x_columns`は常に少なくとも1列持ち、`.first()`でnを安全に取得できる
+    // （`engine::linear::ols::predict_new_data`と同じ理由）。
+    let n = new_x_columns.first().map_or(0, |col| col.len());
+
+    (0..n)
+        .map(|i| {
+            let z: f64 = (0..k)
+                .map(|j| design_matrix_element(has_intercept, new_x_columns, i, j) * params[j])
+                .sum();
             link(z)
         })
         .collect()
@@ -3803,5 +3850,55 @@ mod tests {
                 "threshold={threshold}, actual1={actual1}"
             );
         }
+    }
+
+    // ── predict_new_data（Issue #131） ──────────────────────────────
+
+    #[test]
+    fn predict_new_data_matches_manually_computed_link_of_linear_combination() {
+        // params = [const=1.0, x1=2.0]、リンク関数はidentity（線形結合そのもの）。
+        // 新規データx1=[10, 20]に対する予測値は1+2*10=21, 1+2*20=41
+        let params = vec![1.0, 2.0];
+        let new_x_columns = vec![vec![10.0, 20.0]];
+
+        let predicted = predict_new_data(&params, true, &new_x_columns, |z| z);
+
+        assert_eq!(predicted, vec![21.0, 41.0]);
+    }
+
+    #[test]
+    fn predict_new_data_applies_link_function() {
+        // リンク関数として2倍する関数を渡すと、線形結合の2倍が返るはず
+        // （`link`が実際に適用されていることの確認、`predict_from_link`と同じ発想）。
+        let params = vec![1.0, 2.0];
+        let new_x_columns = vec![vec![10.0]];
+
+        let predicted = predict_new_data(&params, true, &new_x_columns, |z| z * 2.0);
+
+        // 線形結合=1+2*10=21、リンク適用後=42
+        assert_eq!(predicted, vec![42.0]);
+    }
+
+    #[test]
+    fn predict_new_data_without_intercept_omits_constant_term() {
+        let params = vec![2.0, 3.0];
+        let new_x_columns = vec![vec![10.0, 20.0], vec![1.0, 2.0]];
+
+        let predicted = predict_new_data(&params, false, &new_x_columns, |z| z);
+
+        // has_intercept=falseなので2*10+3*1=23, 2*20+3*2=46
+        assert_eq!(predicted, vec![23.0, 46.0]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn predict_new_data_panics_when_column_count_does_not_match_params() {
+        // new_x_columns.len()が期待する列数（params.len() - has_intercept）と
+        // 一致しない場合はengine_pybind側の実装バグでしか起こり得ない内部契約違反のため、
+        // engine::linear::ols::predict_new_dataと同じくdebug_assert_eq!がパニックする。
+        let params = vec![1.0, 2.0, 3.0]; // has_intercept=trueなら期待列数は2
+        let new_x_columns = vec![vec![10.0, 20.0]]; // 1列しかない
+
+        let _ = predict_new_data(&params, true, &new_x_columns, |z| z);
     }
 }

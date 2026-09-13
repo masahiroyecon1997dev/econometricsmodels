@@ -19,7 +19,7 @@
 
 - `summary()`は実装しない（structured onlyの出力方針、`linear/CLAUDE.md`のOLSと同じ）。
 - `LogitOptions`/`ProbitOptions`は`_lib`からそのまま再輸出する（独自クラスとして再定義しない、`OLSOptions`と同じ方針）。
-- `predict()`はout-of-sample（`new_data`引数）未対応。`OLS.predict(new_data=None)`とは異なり引数を取らない（engine側がまだ対応していないため。別issueでトラッキング）。
+- **`predict()`はLogit/Probit両方でout-of-sample（`new_data`引数）対応済み（Issue #131）**: `OLS.predict(new_data=None)`と同じシグネチャ・同じ`None`セマンティクス。戻り値のキーは引き続き`"probability"`（`OLSResult.predict()`の`"predicted"`とは意味が異なるため、キー名は統一しない方針。Issue #322項目3で再検討済み、変更なしと結論）。`pred_table()`のout-of-sample対応は別issueでトラッキング（引き続き未対応）。
 
 ## 実装パターン
 

@@ -210,8 +210,17 @@ Issue #307）。
 
 ### 3.6 predict() / pred_table()
 
-`predict()`（引数なし）は`p_i=Λ(x_i'θ)`を返す。`pred_table(threshold)`は2×2的中表（`table[actual][predicted]`）を返す。いずれも学習データのみを対象とする**in-sample限定**（out-of-sample対応は4章）。
+`predict(new_data=None)`は`p_i=Λ(x_i'θ)`を返す。`new_data`が`None`（既定）なら学習データ
+（`fit()`に使ったデータ）に対する予測確率、指定すれば新規データ（out-of-sample）に対する予測確率を
+返す（`new_data`の列名マッチング・`include_intercept`時の定数項自動付加はOLSの`predict(new_data)`
+（[`ols-spec.md`](./ols-spec.md)「predict()」）と同じ規約、Issue #131）。`pred_table(threshold)`は
+2×2的中表（`table[actual][predicted]`）を返す。こちらは学習データのみを対象とする
+**in-sample限定**のまま（out-of-sample対応は4章、別issueでトラッキング）。
 
+- `predict(new_data)`のengine側実装は`nonlinear::common::predict_new_data`（`engine::linear::ols::
+  predict_new_data`のLogit/Probit共有版、`link`関数を差し替えられるようにしたもの）。新規データの
+  設計行列組み立て（`has_intercept`時の定数項自動付加）は、OLS/WLSと共有する`crate::design_matrix::
+  design_matrix_element`ヘルパーに委ねている。
 - `pred_table`の計算そのもの（`predicted`と`y`のみに依存、リンク関数を参照しない）は`common.rs`の
   `pred_table`関数としてProbitと共有する。`actual`側は`threshold`に関わらず常に**固定0.5**で二値化
   する（`predicted`側のみ`threshold`依存）。これはstatsmodelsの`BinaryResults.pred_table(threshold)`
@@ -253,7 +262,8 @@ Issue #307）。
 
 ## 4. 未実装・未対応
 
-- `predict()`/`pred_table()`のout-of-sample対応（`new_data`引数）
+- `predict()`のout-of-sample対応（`new_data`引数）は実装済み（Issue #131、3.6参照）。
+  `pred_table()`のout-of-sample対応は引き続き未実装（別issueでトラッキング）。
 - `start_params`（ユーザー指定初期値）
 - `SEPARATION_PARAM_NORM_THRESHOLD`の誤検知リスク（Issue #321）: 当初「k大で穏やかな係数が
   積み重なる」ケースを懸念していたが、2026-09-13の実測で真のメカニズムは**強い多重共線性**と

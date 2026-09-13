@@ -24,6 +24,8 @@ Logit/Probit 共通定義。
 
 from __future__ import annotations
 
+import math
+
 import _binary_choice_checks as _checks
 import pytest
 from econometricsmodels import Logit, LogitOptions, LogitResults
@@ -165,6 +167,18 @@ def test_nonrobust_is_alias_for_classical(binary_dataset, cov_type):
 def test_predict_returns_row_oriented_probabilities(binary_dataset):
     _checks.check_predict_returns_row_oriented_probabilities(
         binary_dataset, Logit
+    )
+
+
+def test_predict_new_data_returns_row_oriented_probabilities(binary_dataset):
+    _checks.check_predict_new_data_returns_row_oriented_probabilities(
+        binary_dataset, Logit
+    )
+
+
+def test_predict_with_include_intercept_false_and_x_named_const():
+    _checks.check_predict_with_include_intercept_false_and_x_named_const(
+        Logit, LogitOptions, link=lambda z: 1.0 / (1.0 + math.exp(-z))
     )
 
 

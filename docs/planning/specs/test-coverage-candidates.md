@@ -49,22 +49,6 @@
   標準化パラメータノルム≈580、閾値100の約5.8倍）。Issue #317（小標本境界
   での検出漏れ、閾値が緩すぎる方向）とは逆方向の問題。
 
-### 9. Probit: `U_CLAMP`領域での`cost()`/`gradient()`の数学的非整合がBFGS/L-BFGSのline searchに与える影響が未検証
-
-- **対象**: [engine/src/nonlinear/probit.rs](../../../engine/src/nonlinear/probit.rs)、
-  [docs/spec/probit-spec.md](../../spec/probit-spec.md)4章
-- **内容**: クランプ領域では`cost()`は`θ`に対して定数（微分ゼロ）のはずだが、
-  `gradient()`はクランプ後の値（有限だが非ゼロ）を返すため真の微分と一致しない。
-  この非整合を解消する「修正」（クランプ領域で`gradient`もゼロにする）は、
-  完全分離に近いデータで勾配ノルム基準の収束判定を誤検知させる別のバグを
-  誘発しうるため、あえて行わない設計上の判断（意図的に維持）。line searchが
-  受理可能なステップを見つけられない、または不適切なステップを受理する
-  可能性は理論上あるが未検証。
-- **気づいた経緯**: 実装時（`docs/spec/probit-spec.md`4章に記載済み）。
-  2026-08-15、Issue #231フェーズ4のテスト拡充作業に伴い本メモへ転記・集約。
-- **状態**: 未対応（実装当時からの既知の未検証事項かつ意図的な設計判断、
-  ユーザー確認済み・意図的にスコープ外）
-
 ### 10. Probit: `SEPARATION_PARAM_NORM_THRESHOLD=100.0`がProbitのリンク関数でも適切か未較正
 
 - **対象**: [engine/src/nonlinear/probit.rs](../../../engine/src/nonlinear/probit.rs)、

@@ -1183,6 +1183,180 @@ mod tests {
         );
     }
 
+    /// `U_CLAMP`領域での`cost()`/`gradient()`の数学的非整合（`docs/spec/probit-spec.md`
+    /// 4章に未検証リスクとして記載されていた項目、`test-coverage-candidates.md`項目9）が
+    /// 実際にBFGS/L-BFGSのline searchを壊すかを、near-separationデータ（真の有限MLEは
+    /// 存在するが収束点付近でも一部観測の`|u|`が`U_CLAMP`を大きく超える設計）で検証する。
+    ///
+    /// `ProbitEstimator::fit`を直接呼ばず、その内部パイプライン（標準化・
+    /// `ols_based_initial_params`によるwarm start・`run_solver`）をこのテスト内で
+    /// 再現している。`ProbitProblem`を`Instrumented`でラップし、`cost`/`gradient`/
+    /// `hessian`が呼ばれるたび（line searchのトライアル評価も含む）に`|u|`の最大値を
+    /// 記録することで、**このテストが実際に辿る経路自身で`|u|`が`U_CLAMP`を超えたこと**を
+    /// 下のアサーションで検証する（fit()をブラックボックスのまま呼ぶだけでは、将来
+    /// warm start/line searchの実装が変わり`|u|`が`U_CLAMP`を超えなくなった場合に、
+    /// テスト名が主張する検証内容とテストの中身が乖離したまま気づけないリスクがある
+    /// ため、rust-reviewer指摘によりこの形にした）。
+    ///
+    /// 実測（2026-09-13、調査時点のこのテスト自身のコード）: newton/bfgs/lbfgsいずれも
+    /// `max|u|`が`U_CLAMP`（≈8.13）を大きく超える（bfgsは約36、lbfgsは約185）にもかかわらず
+    /// 3手法とも収束し、destandardize後のパラメータが相互に相対誤差1e-3程度で一致した
+    /// （`rtol=1e-2`はここから1桁のマージンを取った値）。より厳しい設定（コールドスタート
+    /// `[0,0]`・より強い分離`beta1=50`）でも同様に一致することを別途手動で確認済みだが、
+    /// このテストは最も基本的な「fit()と同じwarm startを使った通常の呼び出し」に絞って
+    /// 固定する。line searchが受理可能なステップを見つけられない・不適切なステップを
+    /// 受理するという理論上の懸念は、試した範囲では一度も顕在化しなかった。
+    #[test]
+    fn fit_bfgs_and_lbfgs_match_newton_despite_deep_u_clamp_excursions_in_near_separation_data() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        #[derive(Clone)]
+        struct Instrumented {
+            inner: ProbitProblem,
+            max_abs_u: Rc<Cell<f64>>,
+        }
+
+        impl Instrumented {
+            fn record(&self, params: &[f64]) {
+                let n = self.inner.x.nrows();
+                let mut m = self.max_abs_u.get();
+                for i in 0..n {
+                    let z: f64 = (0..self.inner.x.ncols())
+                        .map(|j| *self.inner.x.get(i, j) * params[j])
+                        .sum();
+                    let q = 2.0 * (*self.inner.y.get(i, 0)) - 1.0;
+                    let u = (q * z).abs();
+                    if u > m {
+                        m = u;
+                    }
+                }
+                self.max_abs_u.set(m);
+            }
+        }
+
+        impl CostFunction for Instrumented {
+            type Param = Vec<f64>;
+            type Output = f64;
+            fn cost(&self, param: &Self::Param) -> Result<Self::Output, OptimizerError> {
+                self.record(param);
+                self.inner.cost(param)
+            }
+        }
+        impl Gradient for Instrumented {
+            type Param = Vec<f64>;
+            type Gradient = Vec<f64>;
+            fn gradient(&self, param: &Self::Param) -> Result<Self::Gradient, OptimizerError> {
+                self.record(param);
+                self.inner.gradient(param)
+            }
+        }
+        impl Hessian for Instrumented {
+            type Param = Vec<f64>;
+            type Hessian = Vec<Vec<f64>>;
+            fn hessian(&self, param: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
+                self.record(param);
+                self.inner.hessian(param)
+            }
+        }
+
+        // 決定論的な疑似乱数（LCG、`std::collections::hash_map::DefaultHasher`は
+        // 実装詳細でありバージョン間の安定性が保証されないため使わない。定数は
+        // `logit.rs`の近傍分離テストの`lcg`と同じ乗数・増分に揃えている）。
+        fn lcg_uniform(state: &mut u64) -> f64 {
+            *state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
+            ((*state >> 11) as f64) / ((1u64 << 53) as f64)
+        }
+
+        let n = 300usize;
+        let beta1_true = 10.0;
+        let normal = Normal::standard();
+        // `x1`はLCGでランダム生成せず、決定論的な分位点格子（`(i+0.5)/n`を`inverse_cdf`に
+        // 通す）にする。ランダム抽出だと裾（`|x1|`が大きい観測）が偶然含まれない
+        // seedを引くリスクがあるが、格子にすることで両端（`u≈1/600`・`599.5/600`）が
+        // 常に含まれ、`beta1_true=10`と組み合わせて`|z|`が`U_CLAMP`を大きく超える
+        // 観測を確実に生成できる。`y`（分離を乱すノイズ）だけLCGで抽出する。
+        let mut x1 = Vec::with_capacity(n);
+        let mut y = Vec::with_capacity(n);
+        let mut rng_state = 42u64;
+        for i in 0..n {
+            let u = (i as f64 + 0.5) / n as f64;
+            let xi = normal.inverse_cdf(u);
+            let p = normal.cdf(beta1_true * xi);
+            let draw = lcg_uniform(&mut rng_state);
+            x1.push(xi);
+            y.push(if draw < p { 1.0 } else { 0.0 });
+        }
+
+        let input =
+            ProbitInput::from_columns(&y, &[x1], vec!["x1".to_string()], true, "y".to_string())
+                .unwrap();
+        let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
+        let initial_params =
+            ols_based_initial_params(&x_std, input.y(), input.has_intercept(), |p_bar| {
+                let eta0 = normal.inverse_cdf(p_bar);
+                (normal.pdf(eta0), eta0)
+            })
+            .unwrap();
+
+        let run = |method: Method| {
+            let inner = ProbitProblem::from_standardized(x_std.clone(), input.y().clone());
+            let tracker = Rc::new(Cell::new(0.0_f64));
+            let problem = Instrumented {
+                inner,
+                max_abs_u: tracker.clone(),
+            };
+            let output = run_solver(
+                problem,
+                method,
+                initial_params.clone(),
+                200,
+                1e-6,
+                input.y().nrows(),
+                true,
+                SeparationNormCheck::Enabled,
+            )
+            .unwrap();
+            assert!(output.converged, "{method:?} did not converge");
+            (destandardize_params(&output.params, &scale), tracker.get())
+        };
+
+        let (newton_params, newton_max_u) = run(Method::Newton);
+        let (bfgs_params, bfgs_max_u) = run(Method::Bfgs);
+        let (lbfgs_params, lbfgs_max_u) = run(Method::Lbfgs);
+
+        // このテストが検証したいのは「U_CLAMPを超える領域を実際に通過してもbfgs/lbfgsが
+        // 壊れない」ことであり、通過しなければテストの主張自体が空虚になる（rust-reviewer
+        // 指摘）。ここで実際に超えたことを固定する。
+        assert!(
+            bfgs_max_u > U_CLAMP,
+            "bfgs did not actually enter the U_CLAMP region (max|u|={bfgs_max_u}); \
+             this test's premise no longer holds"
+        );
+        assert!(
+            lbfgs_max_u > U_CLAMP,
+            "lbfgs did not actually enter the U_CLAMP region (max|u|={lbfgs_max_u}); \
+             this test's premise no longer holds"
+        );
+
+        for (name, params) in [("bfgs", &bfgs_params), ("lbfgs", &lbfgs_params)] {
+            for j in 0..2 {
+                let expected = newton_params[j];
+                let actual = params[j];
+                // 実測相対誤差は1e-3程度（2026-09-13時点）。そこから1桁のマージンを
+                // 取った値。
+                let rtol = 1e-2;
+                assert!(
+                    (actual - expected).abs() <= rtol * expected.abs().max(1.0),
+                    "{name} param[{j}]={actual} diverged from newton's {expected} \
+                     (newton_max_u={newton_max_u})"
+                );
+            }
+        }
+    }
+
     /// 切片のみ（説明変数なし）のProbitは、MLEの一階条件`Σ(y_i-Φ(θ))=0`（`z_i=θ`が
     /// 全観測共通）から`Φ(θ̂) = ȳ`、すなわち`θ̂ = Φ⁻¹(ȳ)`という閉じた形の解析解を持つ
     /// （`LogitInput`の`θ̂ = ln(ȳ/(1-ȳ))`に相当するProbit版。`fit`が最適化ロジックを

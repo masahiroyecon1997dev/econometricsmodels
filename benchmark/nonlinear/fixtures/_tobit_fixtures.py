@@ -161,12 +161,17 @@ def build(engine: str) -> dict:
             df, true_beta = load_frozen_dataset("tobit", scenario)
             csv_path = tmpdir / f"{scenario}.csv"
             df.write_csv(csv_path)
+            # 列名からformulaを組み立てる（many_regressorsのx1..x20等、
+            # 3列以外のシナリオにも対応するため。OLSのgenerate_ols_fixtures.py
+            # と同じ発想）。
+            x_cols = [c for c in df.columns if c != "y"]
+            formula = "y ~ " + " + ".join(x_cols)
 
             fixtures[scenario] = {}
             for cov_type in PER_SCENARIO_COV_TYPES:
                 result = _run(
                     csv_path,
-                    SYNTHETIC_FORMULA,
+                    formula,
                     cov_type,
                     engine=engine,
                     lower=lower,

@@ -98,6 +98,7 @@ SCENARIOS = [
     "near_separation",
     "perfect_multicollinearity",
     "scale_variance",
+    "many_regressors",
 ]
 
 # near_separationでx1の係数を上書きする値。ベンチマーク作成時の実測確認（モジュール
@@ -107,6 +108,24 @@ _NEAR_SEPARATION_BETA1 = {"logit": 20.0, "probit": 10.0}
 
 # scale_varianceで出力直前に列へ適用するスケール（OLSのbenchmark/linear/datasets.py
 # と同じ倍率、実体はbenchmark/common/dgp_constants.pyに集約済み）。x1は1e6倍、x2は1e-3倍。
+
+# many_regressorsシナリオで固定する説明変数の数（benchmark/linear/datasets.pyの
+# 同名シナリオと同じ発想、test-coverage-candidates.md項目2）。OLSと異なりlogit/probit
+# は線形予測子の分散がkに応じて大きくなると分離を起こしやすいため、係数の大きさは
+# OLSよりずっと小さく較正する（下記_MANY_REGRESSORS_SLOPE_MAGNITUDE参照）。
+MANY_REGRESSORS_K = 20
+
+# many_regressorsの係数の大きさ（絶対値、切片を除く傾き係数）。0.10刻みで
+# 0.10〜0.48まで列ごとにずらし（符号はランダム）、列取り違えバグを検出しやすくしつつ、
+# 線形予測子|z|が実測でおよそ4〜5程度に収まる（完全分離を起こさない）よう較正した
+# （n=500・seed 0〜49で実測、モジュールdocstring参照）。
+_MANY_REGRESSORS_SLOPE_MAGNITUDE_BASE = 0.1
+_MANY_REGRESSORS_SLOPE_MAGNITUDE_STEP = 0.02
+
+# many_regressorsで出力直前に列へ適用するスケール範囲（log10、0.1〜100倍の3桁）。
+# OLSのmany_regressorsと同じ発想（scale_variance系と同じく、真のDGPは未スケーリングの
+# Xで計算し、出力直前にのみスケーリングする設計。モジュールdocstring参照）。
+_MANY_REGRESSORS_LOG_SCALE_RANGE = (-1.0, 2.0)
 
 _LINK_CDF = {
     "logit": lambda z: 1.0 / (1.0 + np.exp(-z)),
@@ -130,7 +149,8 @@ def generate_binary_choice_dataset(
             （ロジスティック分布のΛ、または標準正規分布のΦ）を切り替える。
         n: サンプルサイズ（"small_n"シナリオでは40に強制される）。
         k: 説明変数の数（x1..xk）。"perfect_multicollinearity"はk>=3、
-            "scale_variance"はk>=2が必要。
+            "scale_variance"はk>=2が必要。"many_regressors"では
+            `MANY_REGRESSORS_K`（20）に強制される。
         seed: 乱数シード（再現性のため固定する）。
         beta: 真の係数ベクトル（切片含む、長さk+1）。Noneならランダムに生成。
 
@@ -151,8 +171,24 @@ def generate_binary_choice_dataset(
     if scenario == "small_n":
         n = 40
 
+    if scenario == "many_regressors":
+        k = MANY_REGRESSORS_K
+
     if beta is None:
-        beta = rng.uniform(-1.0, 1.0, size=k + 1)  # beta[0] = intercept
+        if scenario == "many_regressors":
+            # 列取り違えバグを検出しやすくするため係数の絶対値を列ごとに
+            # ずらす（OLSのmany_regressorsと同じ発想）。ただしlogit/probitは
+            # kが増えると線形予測子の分散も増え分離しやすくなるため、
+            # OLSよりずっと小さい大きさに較正する（上記定数のコメント参照）。
+            magnitudes = _MANY_REGRESSORS_SLOPE_MAGNITUDE_BASE + (
+                _MANY_REGRESSORS_SLOPE_MAGNITUDE_STEP * np.arange(k)
+            )
+            signs = rng.choice([-1.0, 1.0], size=k)
+            beta = np.concatenate(
+                ([rng.uniform(-0.5, 0.5)], signs * magnitudes)
+            )
+        else:
+            beta = rng.uniform(-1.0, 1.0, size=k + 1)  # beta[0] = intercept
 
     multicollinear = ("moderate_multicollinearity", "high_condition_number")
     if scenario in multicollinear and k < 2:
@@ -183,6 +219,14 @@ def generate_binary_choice_dataset(
         beta = beta.copy()
         beta[1] /= _SCALE_VARIANCE_X1_SCALE
         beta[2] /= _SCALE_VARIANCE_X2_SCALE
+
+    if scenario == "many_regressors":
+        # p・yは上ですでに未スケーリングのXから計算済み（scale_varianceと同じ設計）。
+        # ここから先はデータフレーム出力用に列全体とtrue_betaをスケーリングする。
+        col_scales = np.logspace(*_MANY_REGRESSORS_LOG_SCALE_RANGE, k)
+        X = X * col_scales
+        beta = beta.copy()
+        beta[1:] /= col_scales
 
     data: dict[str, np.ndarray] = {"y": y}
     for j in range(k):
@@ -216,6 +260,11 @@ TOBIT_SCENARIOS = [
     "scale_variance_mild",
     "scale_variance",
     "perfect_multicollinearity",
+    # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス
+    # （OLS/Logit/Probitの同種ケース相当、test-coverage-candidates.md項目2）。
+    # 打ち切り境界は y* の経験分位点で決まるため、kが増えても左打ち切り30%は
+    # そのまま維持される。
+    "many_regressors",
 ]
 
 # 数値比較の対象外（ComputationError の発生確認のみ）のシナリオ。scale_variance は
@@ -262,7 +311,15 @@ _TOBIT_SCENARIO_CONFIG: dict[str, dict[str, object]] = {
         "col_scale": (_SCALE_VARIANCE_X1_SCALE, _SCALE_VARIANCE_X2_SCALE),
     },
     "perfect_multicollinearity": {"kind": "left", "frac": 0.30},
+    "many_regressors": {"kind": "left", "frac": 0.30},
 }
+
+# many_regressorsの傾き係数の大きさ（絶対値、OLSのmany_regressorsと同じ発想・
+# 同じ値）。Tobitは連続な潜在変数y*の線形回帰なのでlogit/probitのような分離の
+# 心配が無く、OLSと同じ較正で問題ない（打ち切り境界はy*の分位点で決まるため
+# 係数の大きさに関わらず左打ち切り30%を維持する）。
+_TOBIT_MANY_REGRESSORS_SLOPE_MAGNITUDE_BASE = 1.0
+_TOBIT_MANY_REGRESSORS_SLOPE_MAGNITUDE_STEP = 0.5
 
 # 潜在回帰 y* = Xβ + ε の誤差項の標準偏差（＝真の sigma）。Tobit の主要な推定量の
 # 一つなので、丸い値に固定して真値との突き合わせを容易にする。
@@ -327,6 +384,7 @@ def generate_censored_regression_dataset(
         k: 説明変数の数（x1..xk）。``moderate_multicollinearity`` /
             ``high_condition_number`` は k>=2、``perfect_multicollinearity`` は k>=3、
             ``scale_variance`` / ``scale_variance_mild`` は k>=2 が必要。
+            ``many_regressors`` では ``MANY_REGRESSORS_K``（20）に強制される。
         seed: 乱数シード（再現性のため固定する）。
         beta: 真の係数ベクトル（切片含む、長さ k+1）。None ならランダムに生成。
 
@@ -347,8 +405,22 @@ def generate_censored_regression_dataset(
     if scenario == "small_n":
         n = 40
 
+    if scenario == "many_regressors":
+        k = MANY_REGRESSORS_K
+
     if beta is None:
-        beta = rng.uniform(-2.0, 2.0, size=k + 1)  # beta[0] = intercept
+        if scenario == "many_regressors":
+            # 列取り違えバグを検出しやすくするため係数の絶対値を列ごとに
+            # ずらす（OLSのmany_regressorsと同じ発想・同じ較正値）。
+            magnitudes = _TOBIT_MANY_REGRESSORS_SLOPE_MAGNITUDE_BASE + (
+                _TOBIT_MANY_REGRESSORS_SLOPE_MAGNITUDE_STEP * np.arange(k)
+            )
+            signs = rng.choice([-1.0, 1.0], size=k)
+            beta = np.concatenate(
+                ([rng.uniform(-2.0, 2.0)], signs * magnitudes)
+            )
+        else:
+            beta = rng.uniform(-2.0, 2.0, size=k + 1)  # beta[0] = intercept
 
     multicollinear = ("moderate_multicollinearity", "high_condition_number")
     if scenario in multicollinear and k < 2:
@@ -392,6 +464,14 @@ def generate_censored_regression_dataset(
         beta = beta.copy()
         beta[1] /= x1_scale
         beta[2] /= x2_scale
+
+    if scenario == "many_regressors":
+        # y*・yは上ですでに未スケーリングのXから計算済み（col_scaleと同じ設計）。
+        # ここから先はデータフレーム出力用に列全体とtrue_betaをスケーリングする。
+        col_scales = np.logspace(*_MANY_REGRESSORS_LOG_SCALE_RANGE, k)
+        X = X * col_scales
+        beta = beta.copy()
+        beta[1:] /= col_scales
 
     data: dict[str, np.ndarray] = {"y": y}
     for j in range(k):

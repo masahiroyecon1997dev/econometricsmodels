@@ -41,18 +41,37 @@
   - **LPMサブ項目**: 対応不要と判断してクローズ。項目18（mroz実データによる
     LPM検証）がより低コストで価値の高い代替案として既にあるため、そちらに
     一本化する。
-  - **高kサブ項目**: OLSのみ対応済み。実際に確認したところ`engine`の
-    proptest（`ols_case_strategy`）は`MAX_K=4`固定で高kを一切カバーして
-    いなかったため、フィクスチャベースで新シナリオ`many_regressors`
+  - **高kサブ項目**: OLS/WLS/Logit/Probit/Tobitに対応済み。実際に確認したところ
+    `engine`のproptest（`ols_case_strategy`）は`MAX_K=4`固定で高kを一切カバー
+    していなかったため、フィクスチャベースで新シナリオ`many_regressors`
     （k=20、列ごとに0.1〜100倍のスケール差、係数は列取り違え検出のため
-    意図的に間隔を空ける）を`benchmark/linear/datasets.py`に追加し、
-    `generate_ols_fixtures.py`のstatsmodels主リファレンスと数値照合した
-    （最大相対誤差1e-12で一致）。ユーザー判断により以下は今回のスコープ外
-    として保留: (a) 誤差項に外れ値・裾の重い分布を混ぜること（項目67として
-    別記録）、(b) Rクロスチェック（`generate_ols_crosscheck_fixtures.py`が
-    formula文字列を決め打ちしているため対応がより大掛かり）、(c) WLS/Logit/
-    Probit等の他手法への展開、(d) OLS proptestの`MAX_K`拡張・全列直交性
-    チェックの強化。(b)〜(d)は本項目とは別に着手要否を都度判断する。
+    意図的に間隔を空ける）を追加し、各手法の主リファレンスと数値照合した。
+    - OLS/WLS: `benchmark/linear/datasets.py`に追加。statsmodelsと最大相対
+      誤差1e-12で一致（OLS）。
+    - Logit/Probit: `benchmark/nonlinear/datasets.py`に追加。OLSと同じ設計
+      （係数を列ごとにずらす）だとkが増えるほど線形予測子の分散が増え分離
+      しやすくなるため、係数の大きさをOLSよりずっと小さく較正（実測で
+      |線形予測子|が4〜5程度に収まることを確認、n=500・seed 0〜49）。真の
+      DGPは未スケーリングのXで計算し出力直前にのみスケーリング
+      （scale_varianceと同じ設計）。statsmodelsと最大相対誤差1e-10で一致。
+    - Tobit: 同じく`benchmark/nonlinear/datasets.py`に追加。連続な潜在変数
+      `y*`の線形回帰のため分離の心配が無く、OLSと同じ係数較正で問題ない
+      （打ち切り境界は`y*`の分位点で決まるためkに関わらず左打ち切り30%を
+      維持）。Tobitは主リファレンス自体がR（`AER::tobit`）のため、
+      `benchmark/nonlinear/fixtures/_tobit_fixtures.py`の共有ビルダーが
+      formula決め打ち（`SYNTHETIC_FORMULA`）だった箇所をCSV列から動的に
+      組み立てる形に修正（他手法のRクロスチェック決め打ち問題と同型の修正、
+      主リファレンス側で必須の対応）。副産物として交差検証
+      （`generate_tobit_crosscheck_fixtures.py`、censReg）にも同じ修正で
+      自動的に追加された。
+    - 各手法とも、既存テストファイルの`x=["x1","x2","x3"]`決め打ち箇所を
+      CSV列からの動的検出に修正（Tobitは元々`ref["x_cols"]`参照で対応不要）。
+    - ユーザー判断により以下は今回のスコープ外として保留: (a) 誤差項に
+      外れ値・裾の重い分布を混ぜること（項目67として別記録）、(b) OLS/WLSの
+      Rクロスチェック（`generate_ols_crosscheck_fixtures.py`等がformula文字列を
+      決め打ちしているため対応がより大掛かり。Tobitは主リファレンス自体が
+      Rのため上記の通り対応済み）、(c) OLS proptestの`MAX_K`拡張・全列直交性
+      チェックの強化。(b)(c)は本項目とは別に着手要否を都度判断する。
 
 ### 4. nonlinear系統: `raise_on_non_convergence=False`がclassical cov_typeでしか検証されていない
 

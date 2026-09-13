@@ -47,6 +47,10 @@ NUMERIC_SCENARIOS = [
     # 変数間のスケールが極端に異なるケース（benchmark/nonlinear/datasets.py参照。
     # 真のDGPは未スケーリングのXで計算済みのため成功パス）。
     "scale_variance",
+    # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス
+    # （OLSの同種ケース相当、test-coverage-candidates.md項目2）。係数の大きさは
+    # 分離を避けるためOLSよりずっと小さく較正済み（benchmark/nonlinear/datasets.py参照）。
+    "many_regressors",
 ]
 
 # hc1はstatsmodelsで未実装のためここには含めない（上記docstring参照）。
@@ -142,6 +146,10 @@ def build_fixtures() -> dict:
             "methodはbfgs/lbfgsがnewtonと同じ最尤解・標準誤差に収束することを主"
             "リファレンスに対して確認するためのfixture（baselineシナリオ・classical"
             "cov_typeの1ケースのみ）。"
+            "many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ高次元"
+            "シナリオ（OLSの同種ケース相当、test-coverage-candidates.md項目2）。"
+            "真のDGPは未スケーリングのXで計算し、係数の大きさは分離を避けるため"
+            "OLSよりずっと小さく較正済み。"
         ),
     }
     return fixtures

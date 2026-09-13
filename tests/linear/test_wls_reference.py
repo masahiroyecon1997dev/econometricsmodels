@@ -106,10 +106,11 @@ def _check_result(res, ref: dict, label: str) -> None:
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_matches_statsmodels(fixtures, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
+    x_cols = [c for c in df.columns if c not in ("y", "weight")]
     kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
     options = WLSOptions(cov_type=cov_type, **kwargs)
     res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        df, y="y", x=x_cols, weight="weight", options=options
     ).fit()
 
     _check_result(res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}")

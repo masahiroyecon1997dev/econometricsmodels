@@ -53,6 +53,9 @@ NUMERIC_SCENARIOS = [
     "scale_variance_mild",
     # n=k+1（自由度1ちょうど）の成功パス（OLSの同種ケース相当）。
     "baseline_df1",
+    # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス
+    # （OLSの同種ケース相当、test-coverage-candidates.md項目2）。
+    "many_regressors",
 ]
 
 # classical/HC系は全シナリオで確認。HACはautocorrelatedシナリオが本来の目的
@@ -142,6 +145,9 @@ def build_fixtures() -> dict:
             "baseline.weight_in_xは、weightと同じ列をxにも含める成功パス"
             "（Issue #277）。classicalのみ（cov_type間の挙動差の検証が"
             "目的ではないため）。"
+            "many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ"
+            "高次元シナリオ（OLSの同種ケース相当、test-coverage-candidates.md"
+            "項目2）。"
         ),
     }
     return fixtures

@@ -842,6 +842,7 @@ def check_matches_statsmodels(
     config: BinaryChoiceReferenceConfig, fixtures, scenario, cov_type
 ) -> None:
     df = pl.read_csv(config.dataset_path(scenario))
+    x_cols = [c for c in df.columns if c != "y"]
     kwargs = (
         {"tol": config.near_separation_tol}
         if scenario == "near_separation"
@@ -849,7 +850,7 @@ def check_matches_statsmodels(
     )
     options = config.options_cls(cov_type=cov_type, **kwargs)
     res = config.estimator_cls(
-        df, y="y", x=["x1", "x2", "x3"], options=options
+        df, y="y", x=x_cols, options=options
     ).fit()
 
     check_result(

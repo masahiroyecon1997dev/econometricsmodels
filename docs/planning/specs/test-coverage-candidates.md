@@ -1768,3 +1768,27 @@
     流用。
   - 各手法とも新規テストコード追加は不要（既存の`x=[...]`動的検出・
     `NUMERIC_SCENARIOS`ベースのparametrizeにより自動的にカバーされる）。
+
+### 68. Tobit: proptestが左打ち切りのみで、右打ち切り・両側打ち切りはproperty-basedでは未カバー
+
+- **対象**: `engine/src/nonlinear/tobit.rs`の`mod proptests`
+- **内容**: OLS/WLS/Logit/Probitに続くproptest拡張（2026-09-13実装）で、
+  Tobitにも`score_is_near_zero_at_converged_params`/
+  `coefficients_and_se_are_invariant_to_column_order`/
+  `hc0_std_errors_are_at_most_hc1_std_errors`の3プロパティを追加したが、
+  ケース生成は左打ち切り（`lower=0.0`固定、`upper`は打ち切りなし）のみを
+  対象にしている。`censored_contribution`の`direction=-1.0`（右打ち切り）
+  分岐や、左右が混在するデータセットは、この3プロパティでは一度も経由され
+  ない。固定フィクスチャ（`benchmark/nonlinear/datasets.py`の
+  `TOBIT_SCENARIOS`の`right_censoring`/`interval_censoring`、
+  `tests/nonlinear/test_tobit*.py`）では既に数値照合済みのため「未検証」
+  ではないが、property-basedテストの強み（多数のランダム構成での不変条件
+  検証）がこの分岐には及んでいない。
+- **Claudeの所感**: rust-reviewerからshould fix指摘として上がったが、
+  Logit/Probitの拡張とIV系統への拡張を優先し、今回は見送りとする方が
+  作業のペースとして適切と考える。対応する場合は、3プロパティを
+  `lower`/`upper`をランダムに持たせる形に拡張する（または右打ち切り専用の
+  ケース戦略を追加する）案が考えられる。
+- **気づいた経緯**: 2026-09-13、Tobit proptest追加のrust-reviewerレビュー中に
+  指摘。
+- **状態**: 未対応（ユーザー確認済み、今回は見送りと決定）。

@@ -5171,4 +5171,264 @@ mod tests {
             "{result:?}"
         );
     }
+
+    /// property-basedテスト。`logit.rs`/`probit.rs`の`mod proptests`と同型の設計だが、
+    /// Tobitは打ち切り回帰でありLogit/Probitと異なり(a)説明変数の係数`β`に加え誤差項の
+    /// 標準偏差`σ`（`s=logσ`でパラメータ化）を持つ、(b)観測ごとの尤度が非打ち切り/左
+    /// 打ち切り/右打ち切りの3分岐になる、という構造上の違いがある。そのため
+    /// `score_is_near_zero_at_converged_params`は3分岐+σパラメータ化のFOCを独立に
+    /// 再導出せず、`TobitProblem::scores()`（本番のOPG/サンドイッチSE計算が使うのと
+    /// 同じ観測ごとのスコア行列）を再利用する（ユーザー確認済み。Probitの
+    /// `clamped_pdf_cdf`共有と同種のトレードオフで、`scores()`自体のバグはこの
+    /// プロパティでは検出できない）。
+    ///
+    /// **単なる重複ではない**: `fit()`は`TobitScaling`で標準化した空間で最適化し、
+    /// `est.params()`/`est.sigma()`は逆変換（destandardization）後の値。このプロパティは
+    /// `TobitProblem::new(est.input())`（生スケール）に`est.params()`/`est.sigma().ln()`を
+    /// 渡してFOCを評価するため、多数のランダム構成で標準化⇔生スケールの逆変換自体を
+    /// 実質的に検証する（既存の固定テスト`gradient_matches_numerical_differentiation_of_
+    /// cost`/`scores_sum_to_negative_gradient`はいずれも`TobitScaling`を経由しないため、
+    /// この往復変換を検証できていなかった）。標準化パラメータ空間でスコアが0なら生
+    /// スケールでもスコアが0になることは、標準化がθに依存しないアフィン変換であり
+    /// 対数尤度の差が定数項（θ非依存のヤコビアン項）のみであることから理論的に導ける
+    /// （rust-reviewer確認済み）。
+    ///
+    /// ケース生成は左打ち切り（`lower=0.0`固定、`upper`は打ち切りなし）のみを対象にする
+    /// （右打ち切り・両側打ち切りは`benchmark/nonlinear/datasets.py`の`TOBIT_SCENARIOS`
+    /// `right_censoring`/`interval_censoring`の固定フィクスチャで別途カバー済み、
+    /// rust-reviewer確認済み。property-basedテストとしての拡張は将来の検討課題として
+    /// 別途記録する）。`y* = β₀ + Σxⱼβⱼ + σε`（`ε`は標準正規、`u∈(1e-6, 1-1e-6)`の
+    /// 逆CDFでサンプリング）を計算し、`y*<lower`の観測を`lower`で打ち切る。
+    ///
+    /// 較正値（`n=k+30..=80`, `beta∈[-1,1]`, `sigma∈[0.5,2]`）は`PROPTEST_CASES=5000`
+    /// （デフォルト256の約20倍）まで増やしても`NoUncensoredObservations`等による
+    /// `prop_assume`棄却が原因の失敗（"too many global rejects"）を起こさないことを
+    /// 実測済み（rust-reviewer確認）。
+    ///
+    /// プロパティの有効性検証（バグ注入→検出確認→元に戻す）は3件とも実施済み:
+    /// `score_is_near_zero_at_converged_params`は`TobitProblem::gradient`の`grad[j]`
+    /// 計算に定数オフセットを注入、`coefficients_and_se_are_invariant_to_column_order`は
+    /// `TobitInput::from_columns`の`param_names`を逆順にするバグを注入、
+    /// `hc0_std_errors_are_at_most_hc1_std_errors`は`nonlinear::common::
+    /// sandwich_cov_params`のHC1補正係数を反転（`n/(n-k)`→`(n-k)/n`、Logit/Probitと
+    /// 共有するロジックのため同一のバグ注入で確認）するバグを注入し、いずれも検出
+    /// できることを確認した。
+    mod proptests {
+        use super::*;
+        use proptest::collection;
+        use proptest::prelude::*;
+
+        // 高kはbenchmarkのmany_regressorsシナリオでカバー済みのため小さく保つ
+        // （logit.rs/probit.rsと同じ理由）。
+        const MAX_K: usize = 3;
+
+        /// `tobit_case_strategy`が生成するタプル: `(n, k, x_cols, beta, sigma, u, keys)`。
+        /// `k`は切片を除いた説明変数の数（`beta`は切片込みで`k+1`要素）。
+        type TobitCase = (
+            usize,
+            usize,
+            Vec<Vec<f64>>,
+            Vec<f64>,
+            f64,
+            Vec<f64>,
+            Vec<u64>,
+        );
+
+        fn tobit_case_strategy() -> impl Strategy<Value = TobitCase> {
+            (1..=MAX_K).prop_flat_map(|k| {
+                (k + 30..=80usize).prop_flat_map(move |n| {
+                    (
+                        Just(n),
+                        Just(k),
+                        collection::vec(collection::vec(-2.0f64..2.0, n), k),
+                        collection::vec(-1.0f64..1.0, k + 1),
+                        0.5f64..2.0,
+                        collection::vec(1e-6f64..1.0 - 1e-6, n),
+                        collection::vec(any::<u64>(), k),
+                    )
+                })
+            })
+        }
+
+        fn x_names(k: usize) -> Vec<String> {
+            (1..=k).map(|i| format!("x{i}")).collect()
+        }
+
+        /// 左打ち切りの下限（打ち切りなしのTobitの意味が薄れない程度に、真の`y*`分布の
+        /// 中心付近を狙う。上限は無し）。
+        const LOWER_BOUND: f64 = 0.0;
+
+        /// 真の`beta`・`sigma`から`y* = β₀+Σxⱼβⱼ+σε`を計算し、`lower`で左打ち切りする。
+        fn simulate_y(
+            n: usize,
+            x_cols: &[Vec<f64>],
+            beta: &[f64],
+            sigma: f64,
+            u: &[f64],
+        ) -> Vec<f64> {
+            let normal = Normal::standard();
+            (0..n)
+                .map(|i| {
+                    let mut y_star = beta[0];
+                    for (j, x_col) in x_cols.iter().enumerate() {
+                        y_star += x_col[i] * beta[j + 1];
+                    }
+                    y_star += sigma * normal.inverse_cdf(u[i]);
+                    if y_star < LOWER_BOUND {
+                        LOWER_BOUND
+                    } else {
+                        y_star
+                    }
+                })
+                .collect()
+        }
+
+        /// `method`ごとの`tol`既定値の解決は`logit.rs`/`probit.rs`の`default_options`と
+        /// 同じ（`docs/spec/tobit-spec.md`、Logit/Probitと共有する`run_solver`のため
+        /// 同じ意味論）。
+        fn default_options(cov_type: CovType, method: Method) -> MleFitOptions {
+            let tol = match method {
+                Method::Newton => 1e-6,
+                Method::Bfgs | Method::Lbfgs => 1e-8,
+            };
+            MleFitOptions {
+                method,
+                max_iter: 50,
+                tol,
+                raise_on_non_convergence: true,
+                cov_type,
+                confidence_level: 0.95,
+            }
+        }
+
+        fn method_strategy() -> impl Strategy<Value = Method> {
+            prop_oneof![
+                Just(Method::Newton),
+                Just(Method::Bfgs),
+                Just(Method::Lbfgs),
+            ]
+        }
+
+        /// `logit.rs`/`probit.rs`と同じ理由で`1e-6`より緩い`1e-4`を使う
+        /// （反復最適化の収束経路が列順序で変わりうるため）。
+        fn assert_approx_eq(actual: f64, expected: f64, msg: &str) {
+            let tol = 1e-4 * expected.abs().max(1.0);
+            let diff = (actual - expected).abs();
+            assert!(
+                diff <= tol,
+                "{msg}: actual={actual}, expected={expected}, diff={diff}, tol={tol}"
+            );
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            /// MLEの一次条件（スコア方程式）: 収束点で`Σᵢsᵢ ≈ 0`（`sᵢ`は
+            /// `TobitProblem::scores()`が返す観測ごとのスコア行、`β`の`k+1`列＋
+            /// `s=logσ`の1列、計`k+2`列）が全パラメータ列で成り立つ。許容誤差の根拠は
+            /// `logit.rs`の同名プロパティのdocコメント参照（`n`非依存の絶対閾値）。
+            #[test]
+            fn score_is_near_zero_at_converged_params(
+                (n, k, x_cols, beta, sigma, u, _keys) in tobit_case_strategy(),
+                method in method_strategy(),
+            ) {
+                let y = simulate_y(n, &x_cols, &beta, sigma, &u);
+                let names = x_names(k);
+                let input = TobitInput::from_columns(
+                    &y, &x_cols, names, true, "y".to_string(), Some(LOWER_BOUND), None,
+                ).unwrap();
+                let result = TobitEstimator::fit(input, default_options(CovType::Classical, method));
+                prop_assume!(result.is_ok());
+                let est = result.unwrap();
+
+                let mut full_params: Vec<f64> = est.params().to_vec();
+                full_params.push(est.sigma().ln());
+
+                let problem = TobitProblem::new(est.input());
+                let scores = problem.scores(&full_params);
+                for j in 0..=(k + 1) {
+                    let score: f64 = (0..n).map(|i| *scores.get(i, j)).sum();
+                    prop_assert!(
+                        score.abs() <= 1e-4,
+                        "score[{j}] should be ~0, got {score} (method={method:?})"
+                    );
+                }
+            }
+
+            /// xの列順序を入れ替えても、係数名で対応付ければ係数・標準誤差の値は変わらない。
+            /// `σ`は列順序に依存しない別パラメータのため、`std_errors()`の末尾要素
+            /// （インデックス`k+1`）で個別に比較する。
+            #[test]
+            fn coefficients_and_se_are_invariant_to_column_order(
+                (n, k, x_cols, beta, sigma, u, keys) in tobit_case_strategy()
+                    .prop_filter("need >=2 columns to permute", |(_, k, _, _, _, _, _)| *k >= 2),
+                method in method_strategy(),
+            ) {
+                let y = simulate_y(n, &x_cols, &beta, sigma, &u);
+                let names = x_names(k);
+                let input1 = TobitInput::from_columns(
+                    &y, &x_cols, names.clone(), true, "y".to_string(), Some(LOWER_BOUND), None,
+                ).unwrap();
+                let result1 = TobitEstimator::fit(input1, default_options(CovType::Classical, method));
+                prop_assume!(result1.is_ok());
+                let est1 = result1.unwrap();
+
+                let mut order: Vec<usize> = (0..k).collect();
+                order.sort_by_key(|&i| keys[i]);
+                let permuted_x: Vec<Vec<f64>> = order.iter().map(|&i| x_cols[i].clone()).collect();
+                let permuted_names: Vec<String> = order.iter().map(|&i| names[i].clone()).collect();
+
+                let input2 = TobitInput::from_columns(
+                    &y, &permuted_x, permuted_names, true, "y".to_string(), Some(LOWER_BOUND), None,
+                ).unwrap();
+                let result2 = TobitEstimator::fit(input2, default_options(CovType::Classical, method));
+                prop_assume!(result2.is_ok());
+                let est2 = result2.unwrap();
+
+                let names1 = est1.input().param_names().to_vec();
+                let names2 = est2.input().param_names().to_vec();
+                let (params1, params2) = (est1.params(), est2.params());
+                let (se1, se2) = (est1.std_errors(), est2.std_errors());
+                for (idx1, name) in names1.iter().enumerate() {
+                    let idx2 = names2.iter().position(|n| n == name)
+                        .expect("name should exist in permuted result");
+                    assert_approx_eq(params2[idx2], params1[idx1], &format!("param[{name}] under column permutation"));
+                    assert_approx_eq(se2[idx2], se1[idx1], &format!("std_error[{name}] under column permutation"));
+                }
+                assert_approx_eq(est2.sigma(), est1.sigma(), "sigma under column permutation");
+                assert_approx_eq(se2[k + 1], se1[k + 1], "std_error[sigma] under column permutation");
+            }
+
+            /// HC0の標準誤差は常にHC1以下（`docs/spec/tobit-spec.md`）。
+            #[test]
+            fn hc0_std_errors_are_at_most_hc1_std_errors(
+                (n, k, x_cols, beta, sigma, u, _keys) in tobit_case_strategy(),
+                method in method_strategy(),
+            ) {
+                let y = simulate_y(n, &x_cols, &beta, sigma, &u);
+                let names = x_names(k);
+                let input1 = TobitInput::from_columns(
+                    &y, &x_cols, names.clone(), true, "y".to_string(), Some(LOWER_BOUND), None,
+                ).unwrap();
+                let result1 = TobitEstimator::fit(input1, default_options(CovType::Hc0, method));
+                prop_assume!(result1.is_ok());
+                let est_hc0 = result1.unwrap();
+
+                let input2 = TobitInput::from_columns(
+                    &y, &x_cols, names, true, "y".to_string(), Some(LOWER_BOUND), None,
+                ).unwrap();
+                let result2 = TobitEstimator::fit(input2, default_options(CovType::Hc1, method));
+                prop_assume!(result2.is_ok());
+                let est_hc1 = result2.unwrap();
+
+                for j in 0..=(k + 1) {
+                    prop_assert!(
+                        est_hc0.std_errors()[j] <= est_hc1.std_errors()[j] + 1e-9,
+                        "HC0 se[{j}]={} should be <= HC1 se[{j}]={}",
+                        est_hc0.std_errors()[j], est_hc1.std_errors()[j]
+                    );
+                }
+            }
+        }
+    }
 }

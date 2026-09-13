@@ -47,15 +47,29 @@ autocorrelated/high_variance）は2値DGPに直接転用できないため、Log
 確認済み: logitはbeta1=20、probitはbeta1=10で、いずれもengine・statsmodelsの推定値が
 完全一致し、既定`tol=1e-6`でも収束することを確認した上で採用）。
 
-**「完全分離でNonConvergenceになる」シナリオは採用していない**（ベンチマーク作成時に
-検討・破棄。理由: 本実装の収束判定（勾配ノルム`‖∇ℓ(θ)‖ < tol`）は、完全分離下で
-係数が発散する過程でスコア項が浮動小数点アンダーフローによりほぼ0になり、
-どんな`tol>0`でも「収束済み」と誤判定してしまう既知の限界がある
-（logit: `docs/spec/logit-spec.md`参照、probitも同じ`nonlinear/common.rs`の
-`run_solver`を共有するため同じ限界を持つ。既知の限界として記録のみ）。このためNonConvergenceの発生確認は、専用
-データセットではなく`LogitOptions(max_iter=1)`/`ProbitOptions(max_iter=1)`等で
-人為的に打ち切ることで行う（`tests/nonlinear/test_logit_validation.py`/
-`test_probit_validation.py`）。
+`complete_separation`（真の完全分離）は`y`を`x1`の符号で決定論的に生成する
+（`near_separation`のようにベルヌーイ乱数を介さない。有限MLEが数学的に存在しない
+データ）。当初は「NonConvergenceになるシナリオ」として検討したが、勾配ノルム
+`‖∇ℓ(θ)‖<tol`の収束判定が完全分離下の係数発散過程でスコア項の浮動小数点
+アンダーフローにより誤って「収束済み」と判定してしまう既知の限界
+（`docs/spec/logit-spec.md`参照。probitも`nonlinear/common.rs`の`run_solver`を
+共有するため同じ限界を持つ）があり、**極小標本（n=k+1近傍）ではこの誤判定が
+無視できない頻度で発生する**ため、当初は見送っていた。2026-09-13に
+`n=100〜200`程度の探索的な実測でこの誤判定が起きないことを確認した上で、
+実際に採用・凍結したフィクスチャは本関数の既定値`n=500`（探索時のnレンジより
+更に余裕を持たせた値、`freeze.py`はnを明示指定しないためこの既定値が使われる）
+であり、この誤判定（無警告の「成功」）は起きず、
+`method`（newton/bfgs/lbfgs）に応じて`SeparationSuspected`または`NonConvergence`
+のいずれか（実測ではnewton/lbfgsは主に`SeparationSuspected`、bfgsは稀に
+`NonConvergence`）が確実に発生することを確認できたため、`perfect_multicollinearity`
+と同型（数値比較の対象外、基底クラス`ComputationError`の発生確認のみ）の
+シナリオとして採用した。`n`を大きく（`n>=100`程度）取ることが、小標本境界での
+誤判定を避ける鍵になる。なお、`raise_on_non_convergence=False`時の挙動確認等、
+`n_iter`を確定的に制御したいテストは引き続き`LogitOptions(max_iter=1)`/
+`ProbitOptions(max_iter=1)`の人為的な打ち切り（`tests/nonlinear/
+test_logit_validation.py`/`test_probit_validation.py`）を使う（本シナリオは
+これを置き換えるものではなく、別の目的——自然な完全分離データでの
+`ComputationError`発生確認——を担う）。
 
 使用例:
     from benchmark.nonlinear.datasets import generate_binary_choice_dataset
@@ -96,6 +110,7 @@ SCENARIOS = [
     "moderate_multicollinearity",
     "high_condition_number",
     "near_separation",
+    "complete_separation",
     "perfect_multicollinearity",
     "scale_variance",
     "many_regressors",
@@ -168,8 +183,9 @@ def generate_binary_choice_dataset(
     Returns:
         (df, true_beta) のタプル。
         df は列 y（0.0/1.0）, x1..xk を持つpolars DataFrame。
-        true_beta は実際にyの生成に使った係数（near_separation/complete_separationは
-        x1の係数を上書き済みの値）。
+        true_beta は実際にyの生成に使った係数（near_separationはx1の係数を上書き済みの
+        値。complete_separationは`y`がx1の符号のみで決定論的に決まりbetaを使わないため、
+        返す値はランダムに生成されたまま未使用）。
 
     Raises:
         ValueError: 未知のscenario/link、またはk不足の場合。
@@ -228,8 +244,13 @@ def generate_binary_choice_dataset(
         )
         X[:, 0] = np.where(is_outlier, outlier_vals, X[:, 0])
 
-    p = _LINK_CDF[link](linear_predictor(X, beta))
-    y = rng.binomial(1, p).astype(np.float64)
+    if scenario == "complete_separation":
+        # 真の完全分離: yをベルヌーイ乱数を介さずx1の符号のみで決定論的に生成する
+        # （有限MLEが数学的に存在しないデータ、上記モジュールdocstring参照）。
+        y = (X[:, 0] > 0.0).astype(np.float64)
+    else:
+        p = _LINK_CDF[link](linear_predictor(X, beta))
+        y = rng.binomial(1, p).astype(np.float64)
 
     if scenario == "scale_variance":
         # p・yは上ですでに未スケーリングのXから計算済み（モジュールdocstring参照）。

@@ -49,17 +49,6 @@
   標準化パラメータノルム≈580、閾値100の約5.8倍）。Issue #317（小標本境界
   での検出漏れ、閾値が緩すぎる方向）とは逆方向の問題。
 
-### 7. Logit: 完全分離でNonConvergenceになるシナリオのベンチマークが技術的制約により見送られている
-
-- **対象**: [docs/spec/logit-spec.md](../../spec/logit-spec.md)4章
-- **内容**: 完全分離（complete separation）でNonConvergenceになるシナリオの
-  ベンチマークは、アンダーフローによる誤収束判定という既知の限界により
-  意図通りに動作しないため見送られている。
-- **気づいた経緯**: 実装時（`docs/spec/logit-spec.md`4章に記載済み）。
-  2026-08-15、Issue #231フェーズ4のテスト拡充作業に伴い本メモへ転記・集約。
-- **状態**: 未対応（実装当時からの既知の技術的制約、ユーザー確認済み・
-  意図的にスコープ外）
-
 ### 8. Probit: `U_CLAMP`とNewton法（line searchなし）の相互作用が未検証
 
 - **対象**: [engine/src/nonlinear/probit.rs](../../../engine/src/nonlinear/probit.rs)、

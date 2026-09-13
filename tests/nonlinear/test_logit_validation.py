@@ -150,6 +150,20 @@ def test_perfect_multicollinearity_raises_computation_error(method):
     )
 
 
+@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
+def test_complete_separation_raises_computation_error(method):
+    _checks.check_complete_separation_raises_computation_error(
+        Logit, "logit", LogitOptions, method
+    )
+
+
+@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
+def test_complete_separation_with_raise_on_non_convergence_false(method):
+    _checks.check_complete_separation_with_raise_on_non_convergence_false(
+        Logit, "logit", LogitOptions, method
+    )
+
+
 def test_non_convergence_raises_computation_error_with_tiny_max_iter(
     binary_dataset,
 ):

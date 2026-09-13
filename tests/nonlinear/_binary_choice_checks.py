@@ -718,6 +718,69 @@ def check_perfect_multicollinearity_raises_computation_error(
         ).fit()
 
 
+def check_complete_separation_raises_computation_error(
+    estimator_cls, dataset_prefix, options_cls, method
+):
+    """真の完全分離（合成データセット、`y`が`x1`の符号のみで決定論的に決まり
+    有限MLEが存在しない）は数値比較の対象外（`testing-policy.md`「テストの3系統」）。
+    想定エラー（`ComputationError`）が発生することのみを確認する。`method`
+    （newton/bfgs/lbfgs）でparametrizeする（test-coverage-candidates.md項目7）。
+
+    実際に発生する例外の**サブタイプはmethodによって異なる**（実測: newton/lbfgsは
+    `SeparationSuspected`、bfgsは`max_iter`到達による`NonConvergence`になりやすい）
+    ため、基底クラス`ComputationError`のみをアサートする（`check_perfect_
+    multicollinearity_raises_computation_error`と同型の設計だが、あちらは
+    `method`によらず常に`SingularDesignMatrix`である点が異なる）。
+
+    以前は「完全分離データは勾配ノルムのアンダーフローにより誤って収束済みと
+    判定されうる」という既知の限界（`docs/spec/logit-spec.md`参照）により、
+    このシナリオ自体の追加を見送っていた。`n=500`（`benchmark/nonlinear/
+    datasets.py`の既定値）程度の標本では、この誤判定（無警告の「成功」）は
+    起きず確実に`ComputationError`になることを実測で確認した上で追加した
+    （小標本境界〔`n=k+1`近傍〕でのみ誤判定が顕在化することはIssue #317で
+    別途確認済み）。
+    """
+    df = pl.read_csv(DATA_DIR / f"{dataset_prefix}_complete_separation.csv")
+    x_cols = [c for c in df.columns if c != "y"]
+    with pytest.raises(ComputationError):
+        estimator_cls(
+            df,
+            y="y",
+            x=x_cols,
+            options=options_cls(method=method),
+        ).fit()
+
+
+def check_complete_separation_with_raise_on_non_convergence_false(
+    estimator_cls, dataset_prefix, options_cls, method
+):
+    """完全分離データ（`check_complete_separation_raises_computation_error`と
+    同じフィクスチャ）で`raise_on_non_convergence=False`を指定した場合の挙動を
+    固定する（test-coverage-candidates.md項目7の派生確認、testing-completeness-
+    reviewer指摘）。
+
+    `SeparationSuspected`検出は`raise_on_non_convergence=False`のとき例外を
+    送出せず`converged=False`のまま結果を返すのみだが（`docs/spec/logit-spec.md`
+    参照）、収束判定とは独立した`SingularHessian`等の別エラー経路は
+    `raise_on_non_convergence`に関わらず発生しうる（test-coverage-candidates.md
+    項目4で確認したTobitと同型の挙動。実測ではLogit×bfgsのみこの経路に入り
+    `SingularHessian`を送出する）。そのため、この関数は「例外を投げず結果を
+    返した場合は標準誤差が有限値であること」のみを保証し、`ComputationError`が
+    飛ぶこと自体は許容する（メソッドごとに収束の軌道が異なり、どちらの経路に
+    入るかは実装の詳細のため）。
+    """
+    df = pl.read_csv(DATA_DIR / f"{dataset_prefix}_complete_separation.csv")
+    x_cols = [c for c in df.columns if c != "y"]
+    options = options_cls(method=method, raise_on_non_convergence=False)
+    try:
+        res = estimator_cls(df, y="y", x=x_cols, options=options).fit()
+    except ComputationError:
+        return
+    assert res.converged is False
+    for name, se in res.std_errors.items():
+        assert math.isfinite(se), f"std_errors[{name}]={se} is not finite"
+
+
 def check_non_convergence_raises_computation_error_with_tiny_max_iter(
     dataset, estimator_cls, options_cls
 ):

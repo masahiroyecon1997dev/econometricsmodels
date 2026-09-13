@@ -255,10 +255,24 @@ Issue #307）。
 
 - `predict()`/`pred_table()`のout-of-sample対応（`new_data`引数）
 - `start_params`（ユーザー指定初期値）
-- `SEPARATION_PARAM_NORM_THRESHOLD`の多変量モデル（k大）での誤検知リスク: L2ノルムは`k`が増えるほど
-  各成分が中程度でも合計が大きくなりやすく、真に分離していないケースでの誤検知は未検証
+- `SEPARATION_PARAM_NORM_THRESHOLD`の誤検知リスク（Issue #321）: 当初「k大で穏やかな係数が
+  積み重なる」ケースを懸念していたが、2026-09-13の実測で真のメカニズムは**強い多重共線性**と
+  判明した。列が無相関なら`norm(β_std)²≈Var(線形予測子)`が近似的に成り立ち閾値は妥当に機能するが、
+  列が強く相関していると係数が符号反対に大きく振れて線形予測子への寄与は打ち消し合う一方で
+  ノルムだけが膨張するため、分離していない正当な有限MLE（statsmodelsは正常収束）を誤って
+  `SeparationSuspected`として弾いてしまう（実測: 列相関をほぼ1に近づけたLogitデータで
+  ノルム推定値≈580、閾値100の約5.8倍）。詳細はIssue #321参照
 - `SeparationSuspected`検出が使う量（標準化パラメータのL2ノルム）と実際にアンダーフローを
   引き起こす量（線形予測子`|x_std_i・θ_std|`の最大値）は相関的な関係に過ぎず、数学的に保証された
-  関係ではない（例: 特定の1列のみが分離に寄与するケースでは検出漏れがありうる）
-- 完全分離でNonConvergenceになるシナリオ（`complete_separation`）のベンチマーク: 3.2の既知の限界
-  （アンダーフローによる誤収束判定）により意図通りに動作しないため見送り
+  関係ではない（例: 特定の1列のみが分離に寄与するケースでは検出漏れがありうる、Issue #321未検証）
+- **完全分離でNonConvergenceになるシナリオ（`complete_separation`）は対応済み（2026-09-13）**:
+  当初は3.2の既知の限界（アンダーフローによる誤収束判定）により意図通りに動作しないと判断し
+  見送っていたが、`n=500`程度（極小標本ではない）では誤判定が起きず、newton/bfgs/lbfgs
+  いずれのmethodでも確実に`ComputationError`（`SeparationSuspected`または`NonConvergence`、
+  method依存）が発生することを実測確認した上で`benchmark/nonlinear/datasets.py`の
+  `complete_separation`シナリオとして追加した（`perfect_multicollinearity`と同型、数値比較の
+  対象外）。小標本境界（`n=k+1`近傍）でのみ誤判定が顕在化することはIssue #317で別途確認済み。
+  - **未対応のまま残る点**: `raise_on_non_convergence=False`とこの完全分離データの組み合わせは
+    未検証（`run_solver`は`raise_on_non_convergence=False`のとき`SeparationSuspected`を
+    送出せず`converged=False`のまま結果を返すのみのため、この経路で無意味な値が返っていないかの
+    確認が別途必要）

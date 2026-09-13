@@ -1064,3 +1064,36 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-09-13、Issue #316（Probit Hessianクランプバグ）
   修正のrust-reviewerレビュー中。
 - **状態**: 未対応（nice to have、ユーザー確認済み・記録のみ）
+
+### 50.【Issue化】欠損値ポリシーの設計思想（サンプルセレクションバイアス回避）がユーザー向けドキュメントに無い → Issue #324として切り出し済み（2026-09-13）
+
+- **対象**: [engine_pybind/src/column_extraction.rs](../../../engine_pybind/src/column_extraction.rs)
+  （モジュールdocコメント）、[docs/spec/ols-spec.md](../../spec/ols-spec.md)・
+  [docs/spec/logit-spec.md](../../spec/logit-spec.md)（該当一文）、`README.md`
+- **内容**: 欠損値・NaN・無限大を自動除外せず常に`ValidationError`にする方針の
+  **理由**（サンプルの黙った除外はGUIアプリの初心者ユーザーに気づかれない恣意的な
+  サンプルセレクションバイアスを生むため、除外の判断はユーザー自身に明示させる、
+  という設計思想）が、`column_extraction.rs`の非公開docコメントにしか書かれておらず、
+  ユーザー向けドキュメント（README、mkdocsで実際にnavから辿れる場所）には存在しない。
+  `docs/spec/ols-spec.md`「API引数」節には方針の一文（`欠損値（NaN/無限大）は常に
+  エラー。listwise deletionはしない。`）のみがあり理由の記載が無く、しかも同一の
+  一文が`logit-spec.md`にもそのまま複製されている。
+- **気づいた経緯**: 2026-09-13、`column_extraction.rs`解説中のユーザー指摘。
+- **状態**:【Issue化】Issue #324として切り出し済み（2026-09-13）
+
+### 51.【Issue化】engine_pybind: column_extraction.rsのエラーメッセージ重複をthiserror列挙型に集約する → Issue #325として切り出し済み（2026-09-13）
+
+- **対象**: [engine_pybind/src/column_extraction.rs](../../../engine_pybind/src/column_extraction.rs)
+  の`extract_f64_column`・`extract_group_key_column`
+- **内容**: 両関数とも`ValidationError::new_err(format!(...))`を呼び出し箇所で
+  直接組み立てており、`"column '{name}' does not exist in the data"`と
+  `"failed to convert column '{name}': {e}"`が文字通り重複している（それぞれ
+  29/88行目、40/105行目）。加えて欠損値のメッセージが表現不揃い（`extract_f64_column`
+  は件数・対処法つき、`extract_group_key_column`は`"contains missing values"`のみ）。
+  既存の`errors.rs`の`common_error_to_pyerr`パターン（`thiserror`列挙型＋
+  `*_error_to_pyerr`変換関数への集約、`.claude/rules/rust-style.md`「エラー
+  ハンドリング」節）がこのファイルには未適用であるため、同型のパターンを
+  `column_extraction.rs`専用に導入することを提案する（フラットな文字列定数
+  ファイルへの集約は、型安全性と系統別ファイル構成の既存方針に反するため不採用）。
+- **気づいた経緯**: 2026-09-13、`column_extraction.rs`解説中のユーザー指摘。
+- **状態**:【Issue化】Issue #325として切り出し済み（2026-09-13）

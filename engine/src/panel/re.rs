@@ -64,8 +64,46 @@
 //! `swamy_arora_variance_components`・`compute_theta`・`quasi_demean_transform`は
 //! これで非テストコードからの呼び出しが生まれたため、`pub`から`pub(crate)`に格下げした
 //! （Issue #194の実装ノート・rust-reviewer指摘の通り）。
+//!
+//! ## df_resid・df_model（Issue #196、7.5節）
+//!
+//! `df_resid = n - k`・`df_model = k`（`k`は変換済み定数列を含む設計行列の全列数、
+//! `estimator().input().k()`）。`OlsInput::k()`は`include_intercept`フラグの値に
+//! 関わらず設計行列の実際の列数を返すため、`ReEstimator::fit`が`include_intercept=false`
+//! で変換済み定数列を`x_all`に手動追加していても、`estimator().input().k()`は既に
+//! `linearmodels`の`wx.shape[1]`（`df_resid = wy.shape[0] - wx.shape[1]`とソースで確認済み）
+//! と一致する。FEのような自由度の再計算・独自の`cov_params`の作り直しは不要。この副産物として
+//! `estimator().std_errors()`/`t_stats()`/`p_values()`/`conf_lower()`/`conf_upper()`/
+//! `aic()`/`bic()`は既にこの時点で正しいRE推定量になっている（`linearmodels.
+//! HomoskedasticCovariance`の`cov_type="unadjusted"`実装で`debiased=True`時
+//! `nobs_eff = nobs - nvar`となり`OlsEstimator`内部の`df_resid = n - k`と同じ値になる
+//! ことを確認済み）。
+//!
+//! ## F統計量（`f_statistic`/`f_p_value`、Issue #337、2.1節）
+//!
+//! `estimator().f_statistic()`/`f_p_value()`は`include_intercept=false`委譲の都合上
+//! （`has_intercept()==false`扱いになり変換済み定数項も検定に含めてしまう）誤りのため、
+//! `ReEstimator`独自に計算し直す。
+//!
+//! **当初`estimator().wald_test_last_columns(df_model - 1)`（`cov_params`の部分行列を
+//! 反転するWald検定、`FeEstimator`の`wald_f_test`直接再利用と同型の発想）を使う実装を
+//! 試みたが、不均衡パネル（θ_iがエンティティごとに異なる）データで
+//! `linearmodels.RandomEffects.fit().f_statistic`と数値が一致しないことが判明した**。
+//! `linearmodels`の`_PanelModelBase._f_statistic`ソースを確認したところ、「定数項を
+//! 除く」際の比較対象（`weps_const`）を、実際にモデルに含まれる変換済み定数列
+//! （`1-θ_i`、エンティティごとに異なる）ではなく**変換済みyの単純平均**
+//! （`y - mean(y)`、定数列が文字通り1のときの構成）で計算している。Wald検定
+//! （部分行列反転、実際にモデルに含まれる列を基準にする方式）とこの定義は、定数列が
+//! 全観測で同一の値（バランスパネルでθが全エンティティ共通）でない限り一致しない
+//! （手動データでの数値不一致で実地確認済み）。`linearmodels`が主リファレンスのため、
+//! `ReEstimator::fit`はこの定義（変換済みyの単純平均を基準にした古典的SST/SSR比較）を
+//! 直接実装している（`wald_f_test`の再利用はしていない）。`residual_ss<=0.0`
+//! （完全な当てはめ）なら`linearmodels`と同じくF統計量を`0.0`とする（NaNにしない）。
+//! 傾き係数が0個（`df_model==1`）ならOLS/FE同様NaN。
 
 use std::collections::BTreeMap;
+
+use statrs::distribution::{ContinuousCDF, FisherSnedecor};
 
 use crate::error::CommonError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
@@ -395,6 +433,12 @@ pub struct ReEstimator {
     /// `FeEstimator::df_model()`の「消費した総自由度」という定義と揃える。Issue #337の
     /// F統計量の分子自由度（`k - 1`、定数項を除く）とは異なる値なので混同しないこと）。
     df_model: usize,
+    /// 傾き係数`df_model - 1`個（定数項を除く）が同時にゼロという帰無仮説のF検定
+    /// （Issue #337、2.1節）。`estimator().f_statistic()`とは異なりREの切片を正しく
+    /// 除外している（`fit()`のdocコメント「F統計量」参照）。
+    f_statistic: f64,
+    /// `f_statistic()`のp値。
+    f_p_value: f64,
 }
 
 impl ReEstimator {
@@ -463,11 +507,85 @@ impl ReEstimator {
         let df_model = estimator.input().k();
         let df_resid = estimator.input().nobs() - df_model;
 
+        // F統計量（Issue #337、2.1節）: 傾き係数`df_model - 1`個（定数項を除く）が
+        // 同時にゼロという帰無仮説の検定。`estimator().f_statistic()`は
+        // `include_intercept=false`で委譲しているため定数項も検定に含めてしまい誤り
+        // （`estimator()`のdocコメント参照）。
+        //
+        // 当初`estimator().wald_test_last_columns(df_model - 1)`（`cov_params`の部分行列を
+        // 反転するWald検定）を使う実装を試みたが、不均衡パネル（θ_iがエンティティごとに
+        // 異なる）データで`linearmodels.RandomEffects.fit().f_statistic`と数値が一致しない
+        // ことが判明した。原因は`linearmodels`の`_f_statistic`のソース確認で判明した設計:
+        // 「定数項を除く」際の比較対象（`weps_const`）を、変換済み定数列（`1-θ_i`、
+        // エンティティごとに異なる）ではなく**変換済みyの単純平均**（`y - mean(y)`、
+        // 通常のOLSで定数列が文字通り1のときの構成）で計算している。Wald検定
+        // （`k_constant=1`列を除いた部分での再回帰と代数的に同値）は「実際にモデルに
+        // 含まれる列（θ変換済み定数項）」を基準にするため、この2つは定数列が文字通り
+        // 全観測で同一の値（バランスパネルでθが全エンティティ共通）でない限り一致しない
+        // （手動データでの数値不一致で実地確認済み）。`linearmodels`が主リファレンスの
+        // ため、こちらの定義に合わせて直接実装し直す。
+        //
+        // **F統計量が負値になりうる**（`linearmodels`自身でも極端な不均衡パネル
+        // （エンティティごとの観測数`T_i`の差が大きい）で実地確認済み）。理由:
+        // `total_ss`（変換済みyの単純平均を基準にした平方和）は、実際にモデルに含まれる
+        // 変換済み定数列（`1-θ_i`、エンティティごとに異なる）に対する直交性を持たないため、
+        // 「制限モデル（定数項のみ）のSSR」としての意味を厳密には持たない
+        // （`total_ss >= residual_ss`が保証される教科書的な入れ子モデル比較とは異なる、
+        // 上記コメント参照）。`linearmodels`が主リファレンスのためこの挙動もそのまま
+        // 踏襲する——負のF統計量をクリップ・エラー化しない判断は`hausman_statistic`
+        // （`common.rs`、負のハウスマン統計量をそのまま返す）と同じ方針。
+        let (f_statistic, f_p_value) = if df_model == 1 {
+            // 傾き係数が無い（定数項のみ）モデル。検定対象が存在しないため`OlsEstimator::fit`
+            // 自身の`df_model==0`分岐と同様NaN（0除算を避ける）。
+            (f64::NAN, f64::NAN)
+        } else {
+            let y_transformed = estimator.input().y();
+            let n = estimator.input().nobs();
+            let y_mean: f64 = (0..n).map(|i| *y_transformed.get(i, 0)).sum::<f64>() / (n as f64);
+            let total_ss: f64 = (0..n)
+                .map(|i| (*y_transformed.get(i, 0) - y_mean).powi(2))
+                .sum();
+            // `linearmodels`の`_f_statistic`の`denom`（`weps.T @ weps`）と同じ量——
+            // **非制限モデル（RE本体の回帰）自身の残差平方和**であり、`total_ss`側では
+            // ないことに注意（変数名の取り違えが起きやすい箇所）。
+            let residual_ss: f64 = (0..n)
+                .map(|i| (*estimator.residuals().get(i, 0)).powi(2))
+                .sum();
+
+            let num_df = df_model - 1;
+            let stat = if residual_ss > 0.0 {
+                ((total_ss - residual_ss) / num_df as f64) / (residual_ss / df_resid as f64)
+            } else {
+                // `linearmodels`の`_f_statistic`と同じ扱い（`denom > 0.0`分岐）。
+                // 非制限モデルの残差平方和がちょうど0（完全な当てはめ）なら0除算を避けて
+                // F統計量は0.0とする（本来のF検定の意味では`+∞`が自然だが、`linearmodels`
+                // 自身がこの値を返すため踏襲する）。
+                //
+                // **この分岐は意図的にテストを追加していない**（rust-reviewer指摘、
+                // Issue #337）。`σ_ε²=0`（内部FE推定のwithin残差が厳密に0になる
+                // ノイズ無しDGP）は、そもそも切片復元用の定数列が全ゼロ列になり
+                // `OlsEstimator::fit`が`SingularMatrix`で先に失敗する
+                // （`re_estimator_fit_returns_quasi_demeaned_regression_failed_when_
+                // sigma2_eps_is_zero`参照）ため、この分岐まで到達しない。`σ_ε²>0`で
+                // `residual_ss`だけが厳密に0になるケースは、`OlsEstimator::fit`が
+                // `n>k`（`.claude/rules/rust-style.md`）を要求する以上、y_transformedが
+                // x_all_transformedの厳密な線形結合になる非退化データを意図的に
+                // 構成する必要があるが、確実な構成方法が見つからなかった
+                // （`panel::fe::FeEstimator::fit`の`FTestFailed`未テスト方針と同型の判断）。
+                0.0
+            };
+            let f_dist = FisherSnedecor::new(num_df as f64, df_resid as f64)
+                .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+            (stat, 1.0 - f_dist.cdf(stat))
+        };
+
         Ok(Self {
             input,
             estimator,
             df_resid,
             df_model,
+            f_statistic,
+            f_p_value,
         })
     }
 
@@ -492,8 +610,8 @@ impl ReEstimator {
     /// `include_intercept=false`で渡している（モジュールdoc「`OlsEstimator`への委譲」）
     /// ため`has_intercept()==false`扱いになり、`f_statistic`は変換済み定数項も含めて
     /// 同時検定してしまい、`r_squared`は非中心化TSSを使ってしまう。正しいF統計量は
-    /// Issue #337（`estimator().wald_test_last_columns(df_model() - 1)`を使う）、
-    /// 正しい適合度（`r_squared_within`/`between`/`overall`）はIssue #338で別途実装する。
+    /// `ReEstimator::f_statistic()`/`f_p_value()`（Issue #337）を使うこと、正しい適合度
+    /// （`r_squared_within`/`between`/`overall`）はIssue #338で別途実装する。
     pub fn estimator(&self) -> &OlsEstimator {
         &self.estimator
     }
@@ -508,6 +626,17 @@ impl ReEstimator {
     /// 自由度を消費した総パラメータ数（`= k`、フィールドdoc参照）。
     pub fn df_model(&self) -> usize {
         self.df_model
+    }
+
+    /// 傾き係数（定数項を除く）が同時にゼロという帰無仮説のF検定（Issue #337、
+    /// 2.1節）。傾き係数が0個（定数項のみのモデル）ならNaN（フィールドdoc参照）。
+    pub fn f_statistic(&self) -> f64 {
+        self.f_statistic
+    }
+
+    /// `f_statistic()`のp値。
+    pub fn f_p_value(&self) -> f64 {
+        self.f_p_value
     }
 }
 
@@ -949,6 +1078,79 @@ mod tests {
         // `loglik = -9.069066112783611`（linearmodels実測）から手計算した参照値。
         assert!((re.estimator().aic() - 22.138_132_225_567_222).abs() < 1e-9);
         assert!((re.estimator().bic() - 22.029_952_523_677_85).abs() < 1e-9);
+
+        // `linearmodels.RandomEffects.fit(cov_type="unadjusted").f_statistic`と数値一致
+        // （Issue #337、2.1節）。`estimator().f_statistic()`（定数項も検定に含めてしまい
+        // 誤り）とは異なる正しい値であることを確認する。
+        assert!((re.f_statistic() - 13.116_023_040_034_996).abs() < 1e-9);
+        assert!((re.f_p_value() - 0.015_193_887_618_281_332).abs() < 1e-9);
+    }
+
+    #[test]
+    fn re_estimator_fit_f_statistic_can_be_negative_for_extremely_unbalanced_panel() {
+        // rust-reviewer指摘（Issue #337）: `fit()`のdocコメントで「F統計量が負値になり
+        // うる」と主張しているため、実際にそうなるデータで`linearmodels`と数値照合する。
+        // T_i={2, 2, 15}という極端に不均衡なパネル（`linearmodels`でのランダム探索で
+        // 発見、乱数シード固定・実地検証済み）。`total_ss`（変換済みyの単純平均基準）が
+        // 変換済み定数列に対する直交性を持たないため、`total_ss < residual_ss`となり
+        // 負のF統計量になる（フィールドdoc「F統計量」参照）。
+        let entity = strings(&[
+            "e0", "e0", "e1", "e1", "e2", "e2", "e2", "e2", "e2", "e2", "e2", "e2", "e2", "e2",
+            "e2", "e2", "e2", "e2", "e2",
+        ]);
+        let x1 = vec![
+            1.206_726_463,
+            0.859_309_915_6,
+            0.412_096_626_7,
+            0.969_400_630_3,
+            5.333_483_877_8,
+            -2.910_149_551_1,
+            -5.141_873_834_4,
+            -4.522_814_339,
+            -0.050_290_856_2,
+            4.133_576_993_4,
+            4.899_532_633_5,
+            0.889_588_287_9,
+            -4.997_800_337_1,
+            -2.746_322_280_7,
+            -3.757_660_566_6,
+            -0.740_528_097_1,
+            -7.434_903_680_5,
+            0.472_973_696_2,
+            2.712_179_870_5,
+        ];
+        let y = [
+            -1.628_726_680_2,
+            -1.987_971_224_5,
+            -9.720_496_074_8,
+            -5.349_549_902_4,
+            15.454_243_372_1,
+            11.482_129_011_1,
+            12.946_870_275_7,
+            17.902_202_464_2,
+            18.976_838_217_0,
+            16.352_866_361_3,
+            21.000_419_954_5,
+            15.678_612_541_9,
+            18.693_076_035_8,
+            16.672_988_029_6,
+            13.874_059_095_9,
+            18.135_545_024_4,
+            11.856_646_694_1,
+            13.925_593_855_6,
+            13.265_351_905_9,
+        ];
+        let input =
+            ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let re = ReEstimator::fit(input, 0.95).unwrap();
+
+        assert_eq!(re.df_resid(), 17);
+        assert_eq!(re.df_model(), 2);
+        // 入力（`x1`/`y`）は10桁に丸めているため、他のテストより緩い許容誤差を使う。
+        assert!((re.f_statistic() - (-0.683_673_528_650_553_5)).abs() < 1e-6);
+        assert_eq!(re.f_p_value(), 1.0);
     }
 
     #[test]
@@ -966,6 +1168,10 @@ mod tests {
         assert_eq!(re.df_resid(), 5);
         assert_eq!(re.df_model(), 1);
         assert!((*re.estimator().params().get(0, 0) - 4.666_666_666_666_667).abs() < 1e-9);
+
+        // 傾き係数0個（定数項のみ）のモデルはOLS/FE同様NaN（Issue #337、2.1節）。
+        assert!(re.f_statistic().is_nan());
+        assert!(re.f_p_value().is_nan());
     }
 
     #[test]

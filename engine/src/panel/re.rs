@@ -375,8 +375,8 @@ pub(crate) fn quasi_demean_transform(
 
 /// REの推定結果。Swamy-Arora分散成分推定（Issue #193）→θ計算・準偏差変換
 /// （Issue #194）→`OlsEstimator::fit`への委譲（Issue #195）というパイプラインで
-/// `θ変換済み`データの係数推定（`β̂`）のみをスコープとする（モジュールdoc
-/// 「`OlsEstimator`への委譲」参照。`FeEstimator`が#178時点で係数推定のみを
+/// `θ変換済み`データの係数推定（`β̂`）と自由度（Issue #196）をスコープとする
+/// （モジュールdoc「`OlsEstimator`への委譲」参照。`FeEstimator`が#178時点で係数推定のみを
 /// スコープにしたのと同型——標準誤差等のFE/RE固有の再計算は別issue）。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」）。
@@ -384,6 +384,17 @@ pub(crate) fn quasi_demean_transform(
 pub struct ReEstimator {
     input: ReInput,
     estimator: OlsEstimator,
+    /// 残差自由度`n - k`（Issue #196、7.5節）。`k`は変換済み定数列を含む設計行列の
+    /// 全列数（`estimator.input().k()`）。`OlsEstimator::fit`自体は`include_intercept=false`
+    /// （切片も含めて`x_all`に組み立て済みのため）で呼ばれているが、`OlsInput::k()`は
+    /// `include_intercept`の値によらず設計行列の実際の列数（`x.ncols()`）を返すため、
+    /// 追加の計算をせず`estimator.input()`からそのまま導出できる（`linearmodels`ソースの
+    /// `df_resid = wy.shape[0] - wx.shape[1]`と同じ値になることを確認済み、7.5節）。
+    df_resid: usize,
+    /// 自由度を消費した総パラメータ数（`= k`。`df_resid + df_model = n`となる対の値、
+    /// `FeEstimator::df_model()`の「消費した総自由度」という定義と揃える。Issue #337の
+    /// F統計量の分子自由度（`k - 1`、定数項を除く）とは異なる値なので混同しないこと）。
+    df_model: usize,
 }
 
 impl ReEstimator {
@@ -449,7 +460,15 @@ impl ReEstimator {
         let estimator = OlsEstimator::fit(ols_input, CovType::Classical, confidence_level)
             .map_err(|source| PanelError::QuasiDemeanedRegressionFailed { source })?;
 
-        Ok(Self { input, estimator })
+        let df_model = estimator.input().k();
+        let df_resid = estimator.input().nobs() - df_model;
+
+        Ok(Self {
+            input,
+            estimator,
+            df_resid,
+            df_model,
+        })
     }
 
     /// 準偏差変換前の入力データ。
@@ -461,12 +480,34 @@ impl ReEstimator {
     /// （`param_names()[0] == "const"`）、以降が`input().x_names()`と同じ並びの
     /// 傾き係数。
     ///
-    /// **係数（`params()`）は正しいRE推定量だが、標準誤差・t値・p値・信頼区間・
-    /// F統計量・調整済みR²・AIC/BICはこの時点では正しくない**（モジュールdoc参照。
-    /// RE固有の自由度・`cov_type`補正が別issueで入るまでの暫定値、`FeEstimator`の
-    /// #178時点と同じ扱い）。
+    /// **`params()`・`std_errors()`・`t_stats()`・`p_values()`・`conf_lower()`/
+    /// `conf_upper()`・`aic()`/`bic()`はこの時点で既に正しいRE推定量になっている**
+    /// （`linearmodels.RandomEffects`のソース・`HomoskedasticCovariance`実装を確認済み。
+    /// `OlsEstimator::fit`が`include_intercept=false`で呼ばれていても、これらの値は
+    /// `df_resid = n - k`（`k`は変換済み定数列を含む全列数、Issue #196・7.5節）・
+    /// `X'X`のみに依存し`has_intercept`フラグには依存しないため）。
+    ///
+    /// **一方`estimator().f_statistic()`/`f_p_value()`・`r_squared()`/`r_squared_adj()`は
+    /// このオブジェクト単体では正しくない**——`OlsInput::from_columns`に
+    /// `include_intercept=false`で渡している（モジュールdoc「`OlsEstimator`への委譲」）
+    /// ため`has_intercept()==false`扱いになり、`f_statistic`は変換済み定数項も含めて
+    /// 同時検定してしまい、`r_squared`は非中心化TSSを使ってしまう。正しいF統計量は
+    /// Issue #337（`estimator().wald_test_last_columns(df_model() - 1)`を使う）、
+    /// 正しい適合度（`r_squared_within`/`between`/`overall`）はIssue #338で別途実装する。
     pub fn estimator(&self) -> &OlsEstimator {
         &self.estimator
+    }
+
+    /// 残差自由度`n - k`（Issue #196、7.5節）。FEの`n - n_entities - k`とは異なる式
+    /// （REはGLS変換でFEのように個体ダミー相当の自由度を消費しないため、通常のOLSと
+    /// 同じ式になる）。
+    pub fn df_resid(&self) -> usize {
+        self.df_resid
+    }
+
+    /// 自由度を消費した総パラメータ数（`= k`、フィールドdoc参照）。
+    pub fn df_model(&self) -> usize {
+        self.df_model
     }
 }
 
@@ -865,6 +906,66 @@ mod tests {
             let actual = *re.estimator().residuals().get(i, 0);
             assert!((actual - expected).abs() < 1e-9, "{actual} vs {expected}");
         }
+
+        // `linearmodels.RandomEffects.fit(cov_type="unadjusted").df_resid`/`df_model`と
+        // 数値一致（Issue #196、7.5節）。n=7、k=2（const+x1）。
+        assert_eq!(re.df_resid(), 5);
+        assert_eq!(re.df_model(), 2);
+
+        // rust-reviewer指摘（Issue #196）: `estimator()`のdocコメントで「`std_errors`/
+        // `t_stats`/`p_values`/`conf_lower`/`conf_upper`/`aic`/`bic`はこの時点で既に
+        // 正しいRE推定量になっている」と主張しているため、`linearmodels.RandomEffects.
+        // fit(cov_type="unadjusted")`の`std_errors`/`tstats`/`pvalues`/`conf_int()`・
+        // `loglik`から手計算した`aic`/`bic`と実地数値照合する（`HomoskedasticCovariance`
+        // が`debiased=True`時`nobs_eff = nobs - nvar`を使うことの検証、モジュールdoc
+        // 「`OlsEstimator`への委譲」参照）。
+        let expected_std_errors = [2.048_733_66, 0.404_536_75];
+        let expected_t_stats = [1.086_025_79, 3.461_355_59];
+        let expected_p_values = [0.327_029_7, 0.018_016_02];
+        let expected_conf_lower = [-3.041_459_93, 0.360_350_72];
+        let expected_conf_upper = [7.491_415_12, 2.440_140_37];
+        for j in 0..2 {
+            assert!(
+                (*re.estimator().std_errors().get(j, 0) - expected_std_errors[j]).abs() < 1e-6,
+                "std_errors[{j}]"
+            );
+            assert!(
+                (*re.estimator().t_stats().get(j, 0) - expected_t_stats[j]).abs() < 1e-6,
+                "t_stats[{j}]"
+            );
+            assert!(
+                (*re.estimator().p_values().get(j, 0) - expected_p_values[j]).abs() < 1e-6,
+                "p_values[{j}]"
+            );
+            assert!(
+                (*re.estimator().conf_lower().get(j, 0) - expected_conf_lower[j]).abs() < 1e-6,
+                "conf_lower[{j}]"
+            );
+            assert!(
+                (*re.estimator().conf_upper().get(j, 0) - expected_conf_upper[j]).abs() < 1e-6,
+                "conf_upper[{j}]"
+            );
+        }
+        // `loglik = -9.069066112783611`（linearmodels実測）から手計算した参照値。
+        assert!((re.estimator().aic() - 22.138_132_225_567_222).abs() < 1e-9);
+        assert!((re.estimator().bic() - 22.029_952_523_677_85).abs() < 1e-9);
+    }
+
+    #[test]
+    fn re_estimator_fit_df_resid_and_df_model_with_no_slope_regressors() {
+        // 説明変数0個（定数項のみ、k=1）のモデルでも`df_resid`/`df_model`が正しいことを
+        // 確認する（`re_estimator_fit_matches_linearmodels_reference`とは別のn/kの組み合わせ
+        // で検証、`linearmodels.RandomEffects(y, const).fit(cov_type="unadjusted")`で
+        // 実地検証済み: df_resid=5, df_model=1, params=[4.666...]）。
+        let entity = strings(&["a", "a", "b", "b", "c", "c"]);
+        let y = [3.0, 5.0, 2.0, 4.0, 6.0, 8.0];
+        let input = ReInput::from_columns(&y, &[], vec![], &entity, None, "y".into()).unwrap();
+
+        let re = ReEstimator::fit(input, 0.95).unwrap();
+
+        assert_eq!(re.df_resid(), 5);
+        assert_eq!(re.df_model(), 1);
+        assert!((*re.estimator().params().get(0, 0) - 4.666_666_666_666_667).abs() < 1e-9);
     }
 
     #[test]

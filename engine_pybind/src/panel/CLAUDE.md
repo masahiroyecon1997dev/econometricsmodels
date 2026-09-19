@@ -56,7 +56,7 @@ computation_error`に従うだけ）。他系統（`IvError`・`MleError`等）�
 ## `FeOptions`のフィールド設計（Issue #186で確定）
 
 - **`include_intercept`は無い**: FEは`within`変換で切片が構造的に消えるため、OLS/WLS/IVと異なりこのオプション自体が意味を持たない（`engine::panel::fe::FeEstimator::fit`が常に`include_intercept=false`でOLSに委譲する設計、`engine/src/panel/fe.rs`モジュールdoc参照）。
-- **`x`は空リストを許容**: 固定効果のみのモデル（`k=0`）がv1から成立するため、`validate_x_non_empty`は呼ばない（OLS/WLS/Logit/Probit/IVの`x_endog`/`instruments`とは異なる、`build_fe_input`のdocコメント参照）。
+- **【変更済み・Issue #320】`x`は空リストを許容しない**: v1では固定効果のみのモデル（`k=0`）を意図的に許容していたが、独立して吟味された設計記録が無く・因果推論として意味を持たない（説明変数がゼロで「個体・時間固定効果によるyの分解」という別の操作になる）ことがユーザーから指摘され、他手法（OLS/WLS/Logit/Probit/IVの`x_endog`/`instruments`）と同じ`validate_x_non_empty`を`build_fe_input`（`panel/fe.rs`）で呼ぶよう変更した。**`engine`側（`FeInput::from_columns`・`FeEstimator::fit`）はk=0を受理したままで変更していない**——`engine_pybind`層のみの業務バリデーション（`engine/src/panel/fe.rs`の`fe_estimator_fit_with_no_regressors_estimates_fixed_effects_only_model`は引き続きengineレベルの動作を検証する）。
 - **`cov_type`のデフォルトは`"cluster"`**（entity単位）。OLS/WLS/IVの`"classical"`から意図的に逸脱する（`panel-api-design.md`3.2節、fixestの前例）。
 - **`cov_type`は`hc0`を受け付けない**: `engine::panel::fe::FeCovType`enum自体が`Hc0`を持たない（Issue #181でスコープ外と判明済み、`engine/src/panel/CLAUDE.md`参照）。`parse_fe_cov_type`は`"hc0"`を専用のエラーメッセージで明示的に弾く（他の未知の値と区別する——`hc0`はOLS/WLS/IVでは有効な値のため、ユーザーが混同しやすいと判断した）。
 - **`time`と`time_col`は別フィールド（重要な設計判断）**: `time`（bareネーミング、`panel-api-design.md`1.1節の既存方針通り）は2-way FE（entity+time）の指定に使う——`Some`なら2-way、`None`なら1-way。`time_col`（OLSの`cluster_col`/`time_col`と同じ「補助列」命名規則、新規）はDriscoll-Kraay HAC（`cov_type="hac"`）専用の時系列順序で、`time`とは独立に指定できる。

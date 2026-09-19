@@ -43,8 +43,8 @@ class FE:
             independent variables, entity identifier, and (if
             specified) time/cluster/HAC time columns.
         y: Column name of the dependent variable.
-        x: List of column names of the independent variables. May be
-            empty (a fixed-effects-only model).
+        x: List of column names of the independent variables. Must
+            contain at least one column name.
         entity: Column name of the entity (individual/panel unit)
             identifier.
         options: Estimation options. Defaults to `FeOptions()`
@@ -86,8 +86,8 @@ class FE:
             The estimation results.
 
         Raises:
-            ValidationError: The input or options are invalid (a
-                column is missing, contains missing values or
+            ValidationError: The input or options are invalid (`x` is
+                empty, a column is missing, contains missing values or
                 NaN/infinity, `y`/`x`/`entity`/`time` overlap,
                 insufficient observations, `confidence_level` out of
                 range, an unknown `cov_type` (or `cov_type="hc0"`,

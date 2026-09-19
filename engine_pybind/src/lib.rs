@@ -178,8 +178,8 @@ fn fit_iv(
 /// y : str
 ///     Column name of the dependent variable.
 /// x : list[str]
-///     Column names of the independent variables. May be empty (a fixed-effects-only
-///     model).
+///     Column names of the independent variables. Must contain at least one
+///     column name.
 /// entity : str
 ///     Column name of the entity (individual/panel unit) identifier.
 /// options : FeOptions

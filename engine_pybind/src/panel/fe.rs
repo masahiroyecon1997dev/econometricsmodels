@@ -49,6 +49,22 @@
 //! 異なりFEの`cov_type`文字列パースはこの1点で分岐が異なるため、`linear::common::
 //! parse_cov_type`を流用せず独立実装する（`iv::common::parse_iv_cov_type`と同じ
 //! 「無理に共通化しない」方針）。
+//!
+//! ## `x`の空リストを許容しない（Issue #320）
+//!
+//! v1では「固定効果のみのモデル」（`x=[]`）を意図的に許容していた（`validate_x_non_empty`を
+//! 呼ばない設計）。しかしユーザーからの指摘（Issue #320）で、この判断が独立して吟味された
+//! 記録が`panel-api-design.md`に見当たらないこと・`x`が空だと何らかの説明変数が`y`に与える
+//! 効果を推定するという因果推論の営みが成立しない（実質「個体・時間固定効果によるyの分解」
+//! という別の操作になる）ことが指摘され、他手法（OLS/WLS/Logit/Probit/IV）と同じ
+//! `validate_x_non_empty`を適用し空を拒否する方針に変更した。**`engine`側
+//! （`FeInput::from_columns`・`FeEstimator::fit`）は変更していない**——k=0を受理する
+//! 既存の振る舞いはそのまま残す（`engine/src/panel/fe.rs`の
+//! `fe_estimator_fit_with_no_regressors_estimates_fixed_effects_only_model`が
+//! 引き続き固定効果のみのモデルがengineレベルでは動作することを検証する）。あくまで
+//! Python向けAPI（`engine_pybind`）の業務的なバリデーションとしてのみ拒否する
+//! （OLS自身も`engine::linear::ols::OlsEstimator::fit`自体はk=0をpanicなく受理するが
+//! Python APIの`validate_x_non_empty`が弾く、という既存の非対称性と同じ構図）。
 
 use std::collections::{HashMap, HashSet};
 
@@ -63,7 +79,7 @@ use crate::column_extraction::{extract_f64_column, extract_group_key_column};
 use crate::errors::ValidationError;
 use crate::linear::common::mat_to_vec;
 use crate::validation::{
-    RoleValue, validate_no_duplicate_roles, validate_no_duplicate_within_role,
+    RoleValue, validate_no_duplicate_roles, validate_no_duplicate_within_role, validate_x_non_empty,
 };
 
 /// Estimation options for FE (fixed effects panel regression).
@@ -330,10 +346,11 @@ fn parse_fe_cov_type(df: &DataFrame, options: &FeOptions) -> PyResult<(FeCovType
 /// # Errors
 /// - 列の抽出時に発覚する問題（列が存在しない、数値/文字列型にキャストできない、
 ///   欠損値・NaN・無限大を含む等）は`column_extraction`の責務で`ValidationError`
-/// - `y`/`entity`/`time`/`x`間の重複、`x`内部の重複は`validation.rs`の責務で
-///   `ValidationError`（`x`が空リストであることは許容する——固定効果のみのモデルも
-///   成立するため、`panel-api-design.md`6章の実装で確認済み、`validate_x_non_empty`は
-///   呼ばない）
+/// - `x`が空リストの場合は`ValidationError`（OLS/WLS/Logit/Probit/IVと同じ
+///   `validate_x_non_empty`。Issue #320で「固定効果のみのモデル」の許容を見直し、
+///   他手法と揃えた——経緯はモジュールdoc「`x`の空リストを許容しない（Issue #320）」参照）。
+///   `y`/`entity`/`time`/`x`間の重複・`x`内部の重複も同じく`validation.rs`の責務で
+///   `ValidationError`
 /// - `cov_type`の文字列が不正な場合は`ValidationError`（`parse_fe_cov_type`参照）
 /// - それ以外（`y`/`entity`/`time`間の行数不一致等）は`engine::panel::common::PanelError`
 ///   から`panel_error_to_pyerr`で変換
@@ -344,9 +361,10 @@ pub(crate) fn build_fe_input(
     entity: String,
     options: &FeOptions,
 ) -> PyResult<(FeInput, FeEffects, FeCovType, String)> {
-    // `x`が空リストであることを許容する（固定効果のみのモデルが成立するため、OLS等と
-    // 異なり`validate_x_non_empty`は呼ばない、モジュールdoc参照）。それ以外の重複検証は
-    // 共通ロジックに従う（`.claude/rules/rust-style.md`「バリデーションの責務分担」）。
+    // `x`が空リストであることを許容しない（Issue #320、モジュールdoc参照）。
+    // OLS/WLS/Logit/Probit/IVと同じ`validate_x_non_empty`を呼ぶ（`.claude/rules/
+    // rust-style.md`「バリデーションの責務分担」）。
+    validate_x_non_empty("x", &x)?;
     let mut roles = vec![
         ("y", RoleValue::Single(&y)),
         ("entity", RoleValue::Single(&entity)),
@@ -528,16 +546,15 @@ mod tests {
     }
 
     #[test]
-    fn build_fe_input_allows_empty_x() {
-        // 固定効果のみのモデル（`x=[]`）を許容する（モジュールdoc参照、OLSと異なり
-        // `validate_x_non_empty`を呼ばない）。
+    fn build_fe_input_returns_error_for_empty_x() {
+        // 固定効果のみのモデル（`x=[]`）を拒否する（Issue #320、モジュールdoc「`x`の
+        // 空リストを許容しない」参照。OLS/WLS/Logit/Probit/IVと同じ`validate_x_non_empty`）。
         let df = well_formed_df();
         let options = default_options();
 
-        let (input, ..) =
-            build_fe_input(&df, "y".to_string(), vec![], "id".to_string(), &options).unwrap();
+        let result = build_fe_input(&df, "y".to_string(), vec![], "id".to_string(), &options);
 
-        assert_eq!(input.x_names(), &[] as &[String]);
+        assert!(result.is_err());
     }
 
     #[test]

@@ -1230,6 +1230,43 @@ mod tests {
     }
 
     #[test]
+    fn swamy_arora_variance_components_does_not_panic_when_entity_means_are_all_zero() {
+        // Issue #340の直接再現データ（本ファイル冒頭「踏んだ罠」参照）: 全エンティティの
+        // `ȳ_i.`が完全に一致し、かつその共通値がちょうど0。between回帰は「切片=0・傾き=0」
+        // という完全な当てはめ（`SSR_between=0`）になり、`classical_cov_params`のσ²=0から
+        // 切片・傾き**両方**の`std_error`が0になる（`re_estimator_fit_r_squared_between_
+        // returns_zero_when_entity_means_are_equal`が使う「エンティティ平均を非ゼロに
+        // シフトする」回避策は切片の係数を非ゼロにするだけで、傾き係数は依然coef=0・se=0
+        // のまま——後述の通りこちらは偶然F検定の特異性チェックに先に弾かれるため表面化
+        // しない）。修正前は`compute_inference_stat`が`stat=0.0/0.0=NaN`を計算し、続く
+        // `StudentsT::cdf(NaN)`が`statrs`内部でパニックしていた（`inference.rs`の
+        // `compute_inference_stat_returns_nan_p_value_without_panicking_when_coef_and_se_are_both_zero`
+        // で直接固定した修正）。
+        //
+        // 修正後はパニックせず`Err`を返す（`Ok`にはならない）: `cov_params`がσ²=0で
+        // 全体ゼロ行列になるため、NaN t統計量のガード通過後に到達する`wald_f_test`の
+        // `ensure_well_conditioned_symmetric_matrix`（傾き係数の共分散部分行列が
+        // ゼロ行列で正定値でない）が`CommonError::ComputationFailed`を返し、
+        // `BetweenRegressionFailed`として伝播する。`swamy_arora_variance_components`は
+        // between回帰のF統計量自体を使わないが、`OlsEstimator::fit`は常にF検定を
+        // 計算するため呼び出し元の用途に関わらずこの経路を通る。ここでの主眼は
+        // 「パニックしないこと」であり、その結果がOk/Errのどちらかは二次的な確認。
+        let entity = strings(&["a", "a", "b", "b", "c", "c"]);
+        let x = vec![1.0, 3.0, 2.0, 6.0, 1.0, 4.0];
+        let y = [1.0, -1.0, 2.0, -2.0, 3.0, -3.0];
+        let input =
+            ReInput::from_columns(&y, &[x], vec!["x".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let result = swamy_arora_variance_components(&input, 0.95);
+
+        assert!(matches!(
+            result,
+            Err(PanelError::BetweenRegressionFailed { .. })
+        ));
+    }
+
+    #[test]
     fn swamy_arora_variance_components_propagates_fe_singleton_error() {
         // entity "c"は1観測のみ（singleton）。内部FE推定（1-way）の
         // `PanelError::SingletonGroup`がそのまま伝播することを確認する。
@@ -1826,9 +1863,12 @@ mod tests {
         // 全て0のため）ため、切片=0・傾き=0という「厳密に完全な当てはめ」になり
         // `SSR_between=0`・classical分散`σ²=0`・全係数の`std_error=0`になる。切片の
         // 係数自体も0のため、t統計量が`0/0=NaN`になり、`StudentsT::cdf(NaN)`が
-        // `statrs`の`beta_reg`内部で不正な引数として扱われパニックする（`OlsEstimator::fit`・
-        // `crate::inference::compute_inference_stat`のどちらもNaN/無限大のt統計量を
-        // ガードしていない、本Issueのスコープ外の既存バグ）。エンティティ平均を「全て同じ
+        // `statrs`の`beta_reg`内部で不正な引数として扱われパニックしていた（当時は
+        // `crate::inference::compute_inference_stat`がNaN/無限大のt統計量をガードして
+        // いなかった、本Issue（#338）当時のスコープ外の既存バグ。**現在はIssue #340で
+        // 修正済み**——NaN t統計量はガードされpanicしない。修正後の同型データでの実際の
+        // 挙動確認・回帰ガードは`swamy_arora_variance_components_does_not_panic_when_
+        // entity_means_are_all_zero`参照）。エンティティ平均を「全て同じ
         // 非ゼロ値」（ここでは5.0、元データを+5シフト）に変えることで、切片の係数自体は
         // 非ゼロになり`t統計量=非ゼロ/0=±∞`（`NaN`ではない）になるためこのパニックを回避
         // できることを確認した——`re_r_squared_between`のTSS=0という条件自体は

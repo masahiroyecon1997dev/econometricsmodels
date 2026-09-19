@@ -338,29 +338,41 @@ def test_instruments_empty_raises(iv_dataset):
 # ── ValidationError（オプション） ──────────────────────────────────
 
 
-def test_unknown_method_raises(iv_dataset):
-    options = IvOptions(method="invalid")
+@pytest.mark.parametrize("method", ["invalid", ""])
+def test_unknown_method_raises(iv_dataset, method):
+    """未知の`method`（空文字列を含む）は`ValidationError`（テスト網羅性
+    候補・項目46）。
+    """
+    options = IvOptions(method=method)
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_IV_METHOD, method="invalid"),
+        match=escaped(msgs.UNKNOWN_IV_METHOD, method=method),
     ):
         our_fit(iv_dataset, options=options)
 
 
-def test_unknown_cov_type_raises(iv_dataset):
-    options = IvOptions(cov_type="invalid")
+@pytest.mark.parametrize("cov_type", ["invalid", ""])
+def test_unknown_cov_type_raises(iv_dataset, cov_type):
+    """未知の`cov_type`（空文字列を含む）は`ValidationError`
+    （テスト網羅性候補・項目46）。
+    """
+    options = IvOptions(cov_type=cov_type)
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_COV_TYPE_LINEAR, other="invalid"),
+        match=escaped(msgs.UNKNOWN_COV_TYPE_LINEAR, other=cov_type),
     ):
         our_fit(iv_dataset, options=options)
 
 
-def test_unknown_weight_type_raises(iv_dataset):
-    options = IvOptions(method="gmm", weight_type="invalid")
+@pytest.mark.parametrize("weight_type", ["invalid", ""])
+def test_unknown_weight_type_raises(iv_dataset, weight_type):
+    """未知の`weight_type`（空文字列を含む）は`ValidationError`
+    （テスト網羅性候補・項目46）。
+    """
+    options = IvOptions(method="gmm", weight_type=weight_type)
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_WEIGHT_TYPE, other="invalid"),
+        match=escaped(msgs.UNKNOWN_WEIGHT_TYPE, other=weight_type),
     ):
         our_fit(iv_dataset, options=options)
 

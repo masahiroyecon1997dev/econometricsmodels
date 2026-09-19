@@ -321,15 +321,16 @@ def test_augment_missing_column_raises(dataset):
 # ── ValidationError（オプション、OLSと共通化された経路） ─────────
 
 
-def test_invalid_cov_type_raises(dataset):
-    """`cov_type`が未知の文字列の場合`ValidationError`
-    （OLSと同じ検証、共通化された経路）。
+@pytest.mark.parametrize("cov_type", ["invalid", ""])
+def test_invalid_cov_type_raises(dataset, cov_type):
+    """`cov_type`が未知の文字列（空文字列を含む）の場合`ValidationError`
+    （OLSと同じ検証、共通化された経路。テスト網羅性候補・項目46）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = WLSOptions(cov_type="invalid")
+    options = WLSOptions(cov_type=cov_type)
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_COV_TYPE_LINEAR, other="invalid"),
+        match=escaped(msgs.UNKNOWN_COV_TYPE_LINEAR, other=cov_type),
     ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 

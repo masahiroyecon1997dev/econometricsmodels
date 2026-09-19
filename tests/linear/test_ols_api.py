@@ -149,6 +149,8 @@ def test_cov_type_label(dataset):
         ("Hc1", "hc1"),
         ("HC2", "hc2"),
         ("hc3", "hc3"),
+        ("HAC", "hac"),
+        ("Hac", "hac"),
         ("nonrobust", "nonrobust"),
         ("NONROBUST", "nonrobust"),
     ],
@@ -156,7 +158,9 @@ def test_cov_type_label(dataset):
 def test_cov_type_is_case_insensitive(dataset, cov_type, expected_label):
     """`cov_type`が大文字小文字を区別しないこと（`engine_pybind`側の
     `parse_cov_type`のRust単体テストと対になる、Python API境界での確認。
-    テスト網羅性レビュー、Issue #231フェーズ4で判明した抜け）。
+    テスト網羅性レビュー、Issue #231フェーズ4で判明した抜け。HACは
+    `hac_lags`省略時の自動計算式で成功パスを確認する
+    （テスト網羅性候補・項目35）。
     """
     options = OLSOptions(cov_type=cov_type)
     res = OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()

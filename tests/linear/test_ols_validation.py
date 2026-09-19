@@ -154,11 +154,16 @@ def test_insufficient_observations_raises(dataset):
 # ── ValidationError（オプション） ──────────────────────────────────
 
 
-def test_invalid_cov_type_raises(dataset):
-    options = OLSOptions(cov_type="invalid")
+@pytest.mark.parametrize("cov_type", ["invalid", ""])
+def test_invalid_cov_type_raises(dataset, cov_type):
+    """未知の文字列（空文字列を含む）は`ValidationError`（テスト網羅性
+    候補・項目46、空文字列は`.is_empty()`等の特別扱いで`match`の網羅から
+    漏れていないことのロックイン）。
+    """
+    options = OLSOptions(cov_type=cov_type)
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_COV_TYPE_LINEAR, other="invalid"),
+        match=escaped(msgs.UNKNOWN_COV_TYPE_LINEAR, other=cov_type),
     ):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
 

@@ -673,29 +673,39 @@ def check_augment_missing_column_raises(dataset, estimator_cls):
 # ── test_<method>_validation.py: ValidationError（オプション） ─────
 
 
-def check_unknown_cov_type_raises(dataset, estimator_cls, options_cls):
+def check_unknown_cov_type_raises(
+    dataset, estimator_cls, options_cls, cov_type="bogus"
+):
+    """未知の`cov_type`（空文字列を含む）は`ValidationError`
+    （テスト網羅性候補・項目46）。
+    """
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_COV_TYPE_NONLINEAR, other="bogus"),
+        match=escaped(msgs.UNKNOWN_COV_TYPE_NONLINEAR, other=cov_type),
     ):
         estimator_cls(
             dataset,
             y="y",
             x=["x1", "x2"],
-            options=options_cls(cov_type="bogus"),
+            options=options_cls(cov_type=cov_type),
         ).fit()
 
 
-def check_unknown_method_raises(dataset, estimator_cls, options_cls):
+def check_unknown_method_raises(
+    dataset, estimator_cls, options_cls, method="bogus"
+):
+    """未知の`method`（空文字列を含む）は`ValidationError`
+    （テスト網羅性候補・項目46）。
+    """
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_METHOD_NONLINEAR, other="bogus"),
+        match=escaped(msgs.UNKNOWN_METHOD_NONLINEAR, other=method),
     ):
         estimator_cls(
             dataset,
             y="y",
             x=["x1", "x2"],
-            options=options_cls(method="bogus"),
+            options=options_cls(method=method),
         ).fit()
 
 

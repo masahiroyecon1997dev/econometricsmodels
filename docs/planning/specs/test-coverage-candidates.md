@@ -583,7 +583,14 @@
   バリエーションをテストしているのにHACだけ抜けているのは網羅性として
   片手落ち。`hac_lags`を明示する必要がある分岐の複雑さが、抜けの一因かもしれない。
 - **気づいた経緯**: 2026-08-23、`tests/linear/test_wls.py`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
+- **状態**: 対応済み（2026-09-19）。`tests/linear/test_ols_api.py`・
+  `tests/linear/test_wls_api.py`の`test_cov_type_is_case_insensitive`に
+  `("HAC", "hac")`・`("Hac", "hac")`を追加。IV/Logit/Probit/Tobitへの
+  対象拡大も検討したが、調査の結果IV（`tests/iv/test_iv_api.py`）は
+  Issue #307対応で既にHAC含め`method`/`cov_type`/`weight_type`の
+  大文字小文字非依存性テストが完備済み、Logit/Probit/Tobitはそもそも
+  `cov_type`にHACの選択肢が無い（`opg`/`hc0`/`hc1`等はテスト済み）ため
+  対象外と判断。実質的な抜けはOLS/WLSのみだった。
 
 ### 36. WLSのHACクロスチェックで、statsmodels側とR側が異なるラグ値でNewey-West公式を検証しており、同一設定が両方の独立実装から検証されていない
 
@@ -917,7 +924,19 @@
   対象は全手法に及ぶため、着手する場合は一括対応が効率的。
 - **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘、
   実機検証で確認。
-- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
+- **状態**: 対応済み（2026-09-19）。対象全手法で既存の「未知の値」
+  テスト（従来`"invalid"`/`"bogus"`の単一値のみ）を`@pytest.mark.parametrize`化し
+  空文字列`""`のケースを追加。OLS/WLS（`test_ols_validation.py`・
+  `test_wls_validation.py`の`test_invalid_cov_type_raises`、`cov_type`のみ、
+  `method`/`weight_type`は存在しない）、Logit/Probit（共通ヘルパー
+  `tests/nonlinear/_binary_choice_checks.py`の
+  `check_unknown_cov_type_raises`/`check_unknown_method_raises`に
+  デフォルト引数付きの`cov_type`/`method`引数を追加）、Tobit
+  （`test_tobit.py`、共通ヘルパーを使わず個別実装のためインラインで
+  parametrize化）、IV（`test_iv_validation.py`の
+  `test_unknown_method_raises`/`test_unknown_cov_type_raises`/
+  `test_unknown_weight_type_raises`）。全て想定通り`ValidationError`が
+  発生することを確認済み（バグは見つからず、ロックインのみ）。
 
 ### 47. `IvOptions`等の数値・真偽値フィールドに型の異なる値を渡した場合の`TypeError`テストが無い（リポジトリ全体）
 

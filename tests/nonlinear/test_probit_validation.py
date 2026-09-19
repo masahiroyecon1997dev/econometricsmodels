@@ -95,14 +95,18 @@ def test_augment_missing_column_raises(binary_dataset):
 # ── ValidationError（オプション） ──────────────────────────────────
 
 
-def test_unknown_cov_type_raises(binary_dataset):
+@pytest.mark.parametrize("cov_type", ["bogus", ""])
+def test_unknown_cov_type_raises(binary_dataset, cov_type):
     _checks.check_unknown_cov_type_raises(
-        binary_dataset, Probit, ProbitOptions
+        binary_dataset, Probit, ProbitOptions, cov_type
     )
 
 
-def test_unknown_method_raises(binary_dataset):
-    _checks.check_unknown_method_raises(binary_dataset, Probit, ProbitOptions)
+@pytest.mark.parametrize("method", ["bogus", ""])
+def test_unknown_method_raises(binary_dataset, method):
+    _checks.check_unknown_method_raises(
+        binary_dataset, Probit, ProbitOptions, method
+    )
 
 
 @pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])

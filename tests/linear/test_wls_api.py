@@ -262,13 +262,17 @@ def test_cov_type_label(dataset):
         ("Hc1", "hc1"),
         ("HC2", "hc2"),
         ("hc3", "hc3"),
+        ("HAC", "hac"),
+        ("Hac", "hac"),
         ("nonrobust", "nonrobust"),
         ("NONROBUST", "nonrobust"),
     ],
 )
 def test_cov_type_is_case_insensitive(dataset, cov_type, expected_label):
     """`cov_type`が大文字小文字を区別しないこと（OLSの`test_ols_api.py::
-    test_cov_type_is_case_insensitive`と同じ観点、共通化された経路の検証）。
+    test_cov_type_is_case_insensitive`と同じ観点、共通化された経路の検証。
+    HACは`hac_lags`省略時の自動計算式で成功パスを確認する
+    （テスト網羅性候補・項目35）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
     options = WLSOptions(cov_type=cov_type)

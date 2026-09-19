@@ -648,29 +648,37 @@ def test_non_numeric_dtype_raises():
         Tobit(df, y="y", x=["x1"]).fit()
 
 
-def test_unknown_cov_type_raises(censored_dataset):
+@pytest.mark.parametrize("cov_type", ["bogus", ""])
+def test_unknown_cov_type_raises(censored_dataset, cov_type):
+    """未知の`cov_type`（空文字列を含む）は`ValidationError`
+    （テスト網羅性候補・項目46）。
+    """
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_COV_TYPE_NONLINEAR, other="bogus"),
+        match=escaped(msgs.UNKNOWN_COV_TYPE_NONLINEAR, other=cov_type),
     ):
         Tobit(
             censored_dataset,
             y="y",
             x=["x1", "x2"],
-            options=TobitOptions(cov_type="bogus"),
+            options=TobitOptions(cov_type=cov_type),
         ).fit()
 
 
-def test_unknown_method_raises(censored_dataset):
+@pytest.mark.parametrize("method", ["bogus", ""])
+def test_unknown_method_raises(censored_dataset, method):
+    """未知の`method`（空文字列を含む）は`ValidationError`
+    （テスト網羅性候補・項目46）。
+    """
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_METHOD_NONLINEAR, other="bogus"),
+        match=escaped(msgs.UNKNOWN_METHOD_NONLINEAR, other=method),
     ):
         Tobit(
             censored_dataset,
             y="y",
             x=["x1", "x2"],
-            options=TobitOptions(method="bogus"),
+            options=TobitOptions(method=method),
         ).fit()
 
 

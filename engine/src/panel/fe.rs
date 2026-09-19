@@ -355,16 +355,17 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use faer::prelude::Solve;
-use faer::{Mat, Side};
+use faer::Mat;
 use statrs::distribution::StudentsT;
 
 use crate::error::CommonError;
 use crate::inference;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput, wald_f_test};
 use crate::panel::common::{
-    PanelDimension, PanelError, all_ones_theta, count_unique, group_indices_by_key,
-    quasi_demean_column,
+    PanelDimension, PanelError, PanelHcVariant, all_ones_theta, count_unique,
+    design_matrix_from_columns, group_indices_by_key, leverage_within, panel_classical_cov_params,
+    panel_cluster_cov_params, panel_driscoll_kraay_cov_params, panel_hc_cov_params,
+    quasi_demean_column, resolve_dk_bandwidth, xtx_inverse,
 };
 use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
@@ -709,14 +710,14 @@ impl FeEstimator {
         let ssr: f64 = residuals.iter().map(|r| r * r).sum();
 
         let cov_params = match &cov_type {
-            FeCovType::Classical => fe_classical_cov_params(&xtx_inv, ssr, df_resid, k),
-            FeCovType::Hc1 => fe_hc_cov_params(
+            FeCovType::Classical => panel_classical_cov_params(&xtx_inv, ssr, df_resid, k),
+            FeCovType::Hc1 => panel_hc_cov_params(
                 &x_mat,
                 &residuals,
                 &xtx_inv,
                 df_resid,
                 None,
-                FeHcVariant::Hc1,
+                PanelHcVariant::Hc1,
             ),
             FeCovType::Hc2 | FeCovType::Hc3 => {
                 let h_within = leverage_within(&x_mat, &xtx_inv, n, k);
@@ -726,11 +727,11 @@ impl FeEstimator {
                 };
                 let h_full = leverage_full(&h_within, input.entity(), time_for_leverage, n);
                 let variant = if matches!(cov_type, FeCovType::Hc2) {
-                    FeHcVariant::Hc2
+                    PanelHcVariant::Hc2
                 } else {
-                    FeHcVariant::Hc3
+                    PanelHcVariant::Hc3
                 };
-                fe_hc_cov_params(
+                panel_hc_cov_params(
                     &x_mat,
                     &residuals,
                     &xtx_inv,
@@ -750,7 +751,7 @@ impl FeEstimator {
                 } else {
                     neffects
                 };
-                fe_cluster_cov_params(
+                panel_cluster_cov_params(
                     &x_mat,
                     &residuals,
                     &xtx_inv,
@@ -772,7 +773,7 @@ impl FeEstimator {
                 };
                 let t_periods = count_unique(time);
                 let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
-                fe_driscoll_kraay_cov_params(
+                panel_driscoll_kraay_cov_params(
                     &x_mat, &residuals, &xtx_inv, time, df_resid, bw, t_periods,
                 )
             }
@@ -1011,42 +1012,6 @@ impl FeEstimator {
     }
 }
 
-/// within変換後の列（`Vec<Vec<f64>>`、列ごとに長さ`n`）から`faer::Mat`を組み立てる。
-/// `OlsInput::from_columns`と同じ列順・行順の規約（`columns[j][i]`がi行j列）。
-fn design_matrix_from_columns(columns: &[Vec<f64>], n: usize) -> Mat<f64> {
-    let k = columns.len();
-    Mat::from_fn(n, k, |i, j| columns[j][i])
-}
-
-/// `(X̃'X̃)⁻¹`を求める（`X̃`はwithin変換後の設計行列）。HC1〜HC3・Clusterいずれの
-/// 計算でも共通して必要になる。`ols::xtx_inverse`と同じ発想だが、`OlsEstimator`が
-/// 保持する`cov_params`はprivateで再利用できないため独立に計算し直す
-/// （モジュールdoc「`cov_type`対応」参照）。
-///
-/// `X̃'X̃`が対称正定値であることは、`OlsEstimator::fit`が同じ`x`で既に成功している
-/// （＝特異ではないと確認済み）ことから理論上保証されるが、`OlsEstimator`と同じく
-/// 浮動小数点演算の境界的なケースに備えて`Result`化する。
-fn xtx_inverse(x: &Mat<f64>, k: usize) -> Result<Mat<f64>, PanelError> {
-    let xtx = x.transpose() * x;
-    let llt = xtx.llt(Side::Lower).map_err(|_| {
-        CommonError::ComputationFailed(
-            "failed to invert the within-transformed design matrix's Gram matrix for FE's \
-             own cov_type computation"
-                .to_string(),
-        )
-    })?;
-    Ok(llt.solve(Mat::<f64>::identity(k, k)))
-}
-
-/// 行ごとのwithinレバレッジ `h_ii = x̃_i (X̃'X̃)⁻¹ x̃_i'`（`ols::hc_cov_params`の
-/// レバレッジ計算と同じ式）。HC2/HC3の`leverage_full`の材料になる。
-fn leverage_within(x: &Mat<f64>, xtx_inv: &Mat<f64>, n: usize, k: usize) -> Vec<f64> {
-    let xh = x * xtx_inv;
-    (0..n)
-        .map(|i| (0..k).map(|j| (*xh.get(i, j)) * (*x.get(i, j))).sum())
-        .collect()
-}
-
 /// `ids`の各値の出現回数（グループサイズ）を数える。
 fn group_sizes(ids: &[String]) -> HashMap<&str, usize> {
     let mut counts = HashMap::new();
@@ -1086,62 +1051,6 @@ fn leverage_full(
     }
 }
 
-/// classical: `σ̂²_fe (X̃'X̃)⁻¹`（`σ̂²_fe = SSR/df_resid`、パネル自由度調整後）。
-fn fe_classical_cov_params(xtx_inv: &Mat<f64>, ssr: f64, df_resid: usize, k: usize) -> Mat<f64> {
-    let sigma2 = ssr / (df_resid as f64);
-    Mat::from_fn(k, k, |i, j| sigma2 * (*xtx_inv.get(i, j)))
-}
-
-/// `fe_hc_cov_params`内部でのみ使うHCの種類（`ols::HcVariant`と同型だがHc0を含まない、
-/// モジュールdoc「`cov_type`対応」参照）。
-enum FeHcVariant {
-    Hc1,
-    Hc2,
-    Hc3,
-}
-
-/// FE版のHC1〜HC3の係数分散共分散行列（k×k）。`ols::hc_cov_params`と同型の構造だが、
-/// 小標本補正がFE用に異なる（モジュールdoc「`cov_type`対応」参照）:
-/// - HC1: `w_i = n/df_resid`（`df_resid`はパネル自由度調整後の値）
-/// - HC2/HC3: `w_i`は`h_full`（`leverage_full`、LSDV相当のフルレバレッジ）ベース
-///
-/// `h_full`の`expect`（`Hc2`/`Hc3`分岐）は、呼び出し元の`fit()`が`variant=Hc2|Hc3`のときは
-/// 必ず`Some(&h_full)`を渡す構造になっており（`FeCovType::Hc2 | FeCovType::Hc3`の
-/// match armで`leverage_full`を計算してから呼ぶ）、`variant`と`h_full`の組み合わせに
-/// 呼び出し側のバグ以外で不整合が生じることはない（`ols::hc_cov_params`の同型の
-/// `.expect("Hc2はleverage計算済み")`と同じ「型で表現しきれない呼び出し規約」の防御）。
-fn fe_hc_cov_params(
-    x: &Mat<f64>,
-    residuals: &[f64],
-    xtx_inv: &Mat<f64>,
-    df_resid: usize,
-    h_full: Option<&[f64]>,
-    variant: FeHcVariant,
-) -> Mat<f64> {
-    let n = x.nrows();
-    let k = x.ncols();
-    let hc1_correction = (n as f64 / df_resid as f64).sqrt();
-
-    let x_scaled = Mat::from_fn(n, k, |i, j| {
-        let resid = residuals[i];
-        let scale = match variant {
-            FeHcVariant::Hc1 => resid * hc1_correction,
-            FeHcVariant::Hc2 => {
-                let h = h_full.expect("Hc2 requires leverage_full")[i];
-                resid / (1.0 - h).sqrt()
-            }
-            FeHcVariant::Hc3 => {
-                let h = h_full.expect("Hc3 requires leverage_full")[i];
-                resid / (1.0 - h)
-            }
-        };
-        scale * (*x.get(i, j))
-    });
-
-    let psi_hat = x_scaled.transpose() * &x_scaled;
-    xtx_inv * &psi_hat * xtx_inv
-}
-
 /// `entity`の各値が`cluster`上でちょうど1つの値にしか対応しないか（＝`cluster`が
 /// `entity`と同じか、`entity`を包含するより粗い分割か）を判定する
 /// （モジュールdoc「`cov_type`対応」のcluster自由度補正の条件参照）。
@@ -1156,131 +1065,6 @@ fn entity_nested_within_cluster(entity: &[String], cluster: &[String]) -> bool {
         }
     }
     true
-}
-
-/// FE版のクラスターロバスト係数分散共分散行列（k×k）。`ols::cluster_cov_params`と
-/// 同型の構造だが、**Stata流の`(G/(G-1))×((n-1)/(n-k))`小標本補正を適用しない**
-/// （linearmodelsとの数値一致のため、モジュールdoc「`cov_type`対応」参照）。
-/// 代わりに`n/(n-extra_df-k)`のみを使う（`extra_df`は呼び出し側が
-/// `entity_nested_within_cluster`の判定結果から決める）。
-fn fe_cluster_cov_params(
-    x: &Mat<f64>,
-    residuals: &[f64],
-    xtx_inv: &Mat<f64>,
-    n: usize,
-    k: usize,
-    groups: &[String],
-    extra_df: usize,
-) -> Mat<f64> {
-    let group_indices = group_indices_by_key(groups);
-
-    let mut s_hat = Mat::<f64>::zeros(k, k);
-    for indices in group_indices.values() {
-        let mut s_g = vec![0.0_f64; k];
-        for &i in indices {
-            let e = residuals[i];
-            for (a, s_g_a) in s_g.iter_mut().enumerate() {
-                *s_g_a += e * (*x.get(i, a));
-            }
-        }
-        for a in 0..k {
-            for b in 0..k {
-                *s_hat.get_mut(a, b) += s_g[a] * s_g[b];
-            }
-        }
-    }
-
-    let df_resid_for_scale = n - extra_df - k;
-    let correction = n as f64 / df_resid_for_scale as f64;
-    let cov_uncorrected = xtx_inv * &s_hat * xtx_inv;
-    Mat::from_fn(k, k, |i, j| correction * (*cov_uncorrected.get(i, j)))
-}
-
-/// `FeCovType::Hac`の`bandwidth`（`Option<i64>`）を実際に使うバンド幅（`usize`）に解決する。
-///
-/// `Some(bw)`の場合は`0 <= bw < t`を検証してそのまま使う（`t`はユニークな時点数）。`None`の
-/// 場合は`linearmodels`の`DriscollKraay`と同じ経験則`floor(4*(t/100)^(2/9))`で自動計算する
-/// （モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照。OLSの`resolve_hac_lags`と式の形は
-/// 同じだが、観測数`n`ではなく時点数`t`が引数になる点が異なる）。
-fn resolve_dk_bandwidth(bandwidth: Option<i64>, t: usize) -> Result<usize, PanelError> {
-    match bandwidth {
-        Some(bw) => {
-            if bw < 0 || (bw as usize) >= t {
-                return Err(PanelError::InvalidHacBandwidth { bandwidth: bw, t });
-            }
-            Ok(bw as usize)
-        }
-        None => Ok((4.0 * (t as f64 / 100.0).powf(2.0 / 9.0)).floor() as usize),
-    }
-}
-
-/// FE版のDriscoll-Kraay型パネルHAC共分散行列（k×k、Issue #182）。
-///
-/// `Ŝ = Σ_t ξ_t ξ_t' + Σ_{l=1}^{bandwidth} w_l (ξ_t ξ_{t-l}' + ξ_{t-l} ξ_t')`
-/// （Bartlett重み`w_l = 1 - l/(bandwidth+1)`、モジュールdoc参照）をまず求め、最後に
-/// `(n/df_resid) × (X̃'X̃)⁻¹ Ŝ (X̃'X̃)⁻¹`にスケールする。`t_periods`（ユニークな時点数）は
-/// `resolve_dk_bandwidth`の呼び出しで既に計算済みの値を呼び出し元からそのまま受け取る
-/// （`time_indices.len()`で二重計算しない）。
-///
-/// `time`を`group_indices_by_key`で集計して`ξ_t`（時点`t`でのクロスセクション和）を求める。
-/// キー順序（`String`の辞書順）がそのまま時系列順序とみなす規約（モジュールdoc参照）と
-/// 一致することを利用している。
-///
-/// **`bandwidth <= t_periods`（狭義の`<`ではない）が呼び出し元の`resolve_dk_bandwidth`から
-/// 保証される**: `Some(bw)`分岐は`bw < t_periods`を検証するが、`None`分岐（既定バンド幅
-/// `floor(4*(t/100)^(2/9))`）はこの上限を検証していない。`t_periods=1`のとき既定値が
-/// ちょうど`1`（`=t_periods`）になるのが唯一のケース（`t_periods>=2`では常に`<t_periods`）。
-/// `l=bandwidth=t_periods`のとき`xi.subrows(l, t_periods - l)`は`(t_periods, 0)`——
-/// 範囲外にはならず0行のスライスになり、その項の寄与は数学的にも自然にゼロになる
-/// （空スライス同士の行列積は零行列）ため安全（`fe_estimator_fit_one_way_hac_with_
-/// single_time_period_yields_zero_variance`が退化ケースを回帰ガードしている）。
-///
-/// ラグごとの`k×k`行列積（`xi_top.transpose() * xi_bot`等）は`FeEstimator::fit`冒頭の
-/// `ensure_serial()`が固定したグローバル`Par::Seq`に依存している（OLSの`hac_cov_params`が
-/// `matmul(..., Par::Seq)`を明示するのと異なり、本関数は演算子オーバーロードを使うため
-/// グローバル設定頼み。`fe_hc_cov_params`/`fe_cluster_cov_params`と同じ流儀。`fit()`を
-/// 経由しない新しい呼び出し経路を将来追加する場合は要再検討）。
-fn fe_driscoll_kraay_cov_params(
-    x: &Mat<f64>,
-    residuals: &[f64],
-    xtx_inv: &Mat<f64>,
-    time: &[String],
-    df_resid: usize,
-    bandwidth: usize,
-    t_periods: usize,
-) -> Mat<f64> {
-    let n = x.nrows();
-    let k = x.ncols();
-    let time_indices = group_indices_by_key(time);
-
-    let mut xi = Mat::<f64>::zeros(t_periods, k);
-    for (row, indices) in time_indices.values().enumerate() {
-        for &i in indices {
-            let e = residuals[i];
-            for col in 0..k {
-                *xi.get_mut(row, col) += e * (*x.get(i, col));
-            }
-        }
-    }
-
-    // l=0項: Ŝ₀ = ξ'ξ（クラスターロバストのΨ̂と同形、時点をグループとみなした版）
-    let mut s_hat = xi.transpose() * &xi;
-    // l=1..=bandwidth項: w_l * (Ŝ_l + Ŝ_l')
-    for l in 1..=bandwidth {
-        let weight = 1.0 - (l as f64) / ((bandwidth + 1) as f64);
-        let xi_top = xi.as_ref().subrows(l, t_periods - l);
-        let xi_bot = xi.as_ref().subrows(0, t_periods - l);
-        let s_l = xi_top.transpose() * xi_bot;
-        for a in 0..k {
-            for b in 0..k {
-                *s_hat.get_mut(a, b) += weight * (*s_l.get(a, b) + *s_l.get(b, a));
-            }
-        }
-    }
-
-    let scale = n as f64 / df_resid as f64;
-    let cov_uncorrected = xtx_inv * &s_hat * xtx_inv;
-    Mat::from_fn(k, k, |i, j| scale * (*cov_uncorrected.get(i, j)))
 }
 
 /// 固定効果の切片項を一切含めない残差`y_i - x_i'β̂`の1行分（Issue #183・#184）。

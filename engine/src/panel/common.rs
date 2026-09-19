@@ -53,8 +53,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 
-use faer::Mat;
-use faer::prelude::SolveLstsq;
+use faer::prelude::{Solve, SolveLstsq};
+use faer::{Mat, Side};
 use statrs::distribution::{ChiSquared, ContinuousCDF};
 use thiserror::Error;
 
@@ -329,6 +329,240 @@ pub(crate) fn all_ones_theta(ids: &[String]) -> BTreeMap<String, f64> {
         .into_iter()
         .map(|id| (id.clone(), 1.0))
         .collect()
+}
+
+/// FE/RE共有のcov_type計算ヘルパー（Issue #197でFE→common.rsへ移設、元は`fe.rs`の
+/// `fe_*_cov_params`。`group_indices_by_key`/`count_unique`/`all_ones_theta`と同じ
+/// 「FE専用で書いたが後にREでも同じ数式が必要と判明したため共有ロジックとして移設した」
+/// 経緯）。**数式自体はFE実装時（Issue #181・#182）のまま変更していない**——移設したのは
+/// 呼び出し側（`fe.rs`/`re.rs`）が渡す`df_resid`・`extra_df`・レバレッジの値がFE/REで
+/// 異なるだけで、計算ロジック自体はモデル非依存（`.claude/rules/rust-style.md`
+/// 「全手法で共有するロジック」）。
+///
+/// **RE（Issue #197）で判明した重要な事実**: `linearmodels.RandomEffects.fit()`の
+/// ソース確認により、REは`cov_type`によらず常に`extra_df=0`を使う（FEのような
+/// `neffects`・`entity_nested_within_cluster`の条件分岐が一切不要）。REの変換済み
+/// 設計行列は「省略された固定効果ダミー」を持たない（切片も含め全パラメータが実際に
+/// 列として含まれている）ため、HC2/HC3のレバレッジも`leverage_full`（FE専用、
+/// `fe.rs`に残置）ではなく本モジュールの`leverage_within`（＝素の`h_ii = x_i(X'X)⁻¹x_i'`）
+/// で足りる。手動データで`linearmodels`（Classical/HC1/Cluster/HAC）・`plm`
+/// （HC2/HC3、`linearmodels`に実装が無いため）との数値一致を実地検証済み
+/// （`engine/src/panel/re.rs`のテスト参照、ユーザー確認済み・2026-09-19）。
+///
+/// within変換後の列（`Vec<Vec<f64>>`、列ごとに長さ`n`）から`faer::Mat`を組み立てる。
+/// `OlsInput::from_columns`と同じ列順・行順の規約（`columns[j][i]`がi行j列）。
+pub(crate) fn design_matrix_from_columns(columns: &[Vec<f64>], n: usize) -> Mat<f64> {
+    let k = columns.len();
+    Mat::from_fn(n, k, |i, j| columns[j][i])
+}
+
+/// `(X̃'X̃)⁻¹`を求める（`X̃`はFE/REそれぞれの変換後の設計行列）。HC1〜HC3・Clusterいずれの
+/// 計算でも共通して必要になる。`ols::xtx_inverse`と同じ発想だが、`OlsEstimator`が
+/// 保持する`cov_params`はprivateで再利用できないため独立に計算し直す。
+///
+/// `X̃'X̃`が対称正定値であることは、`OlsEstimator::fit`が同じ`x`で既に成功している
+/// （＝特異ではないと確認済み）ことから理論上保証されるが、`OlsEstimator`と同じく
+/// 浮動小数点演算の境界的なケースに備えて`Result`化する。
+pub(crate) fn xtx_inverse(x: &Mat<f64>, k: usize) -> Result<Mat<f64>, PanelError> {
+    let xtx = x.transpose() * x;
+    let llt = xtx.llt(Side::Lower).map_err(|_| {
+        CommonError::ComputationFailed(
+            "failed to invert the transformed design matrix's Gram matrix for panel cov_type \
+             computation"
+                .to_string(),
+        )
+    })?;
+    Ok(llt.solve(Mat::<f64>::identity(k, k)))
+}
+
+/// 行ごとのレバレッジ `h_ii = x̃_i (X̃'X̃)⁻¹ x̃_i'`（`ols::hc_cov_params`のレバレッジ計算と
+/// 同じ式）。FEでは`leverage_full`（`fe.rs`）の材料（`h_within`）として使う。REでは
+/// 変換済み設計行列に省略された固定効果ダミーが無いため、この値自体がそのままHC2/HC3の
+/// レバレッジになる（モジュールdoc参照）。
+pub(crate) fn leverage_within(x: &Mat<f64>, xtx_inv: &Mat<f64>, n: usize, k: usize) -> Vec<f64> {
+    let xh = x * xtx_inv;
+    (0..n)
+        .map(|i| (0..k).map(|j| (*xh.get(i, j)) * (*x.get(i, j))).sum())
+        .collect()
+}
+
+/// classical: `σ̂² (X̃'X̃)⁻¹`（`σ̂² = SSR/df_resid`）。
+pub(crate) fn panel_classical_cov_params(
+    xtx_inv: &Mat<f64>,
+    ssr: f64,
+    df_resid: usize,
+    k: usize,
+) -> Mat<f64> {
+    let sigma2 = ssr / (df_resid as f64);
+    Mat::from_fn(k, k, |i, j| sigma2 * (*xtx_inv.get(i, j)))
+}
+
+/// `panel_hc_cov_params`内部でのみ使うHCの種類（`ols::HcVariant`と同型だがHC0を含まない、
+/// FE/REともにHC0はスコープ外、`fe.rs`モジュールdoc「`cov_type`対応」参照）。
+pub(crate) enum PanelHcVariant {
+    Hc1,
+    Hc2,
+    Hc3,
+}
+
+/// HC1〜HC3の係数分散共分散行列（k×k）。`ols::hc_cov_params`と同型の構造だが、
+/// 小標本補正がFE/RE用に異なる（`fe.rs`モジュールdoc「`cov_type`対応」参照）:
+/// - HC1: `w_i = n/df_resid`
+/// - HC2/HC3: `w_i`はレバレッジ`h`ベース（FEは`leverage_full`、REは`leverage_within`を渡す）
+///
+/// `h`の`expect`（`Hc2`/`Hc3`分岐）は、呼び出し元の`fit()`が`variant=Hc2|Hc3`のときは
+/// 必ず`Some(&h)`を渡す構造になっており、`variant`と`h`の組み合わせに呼び出し側のバグ
+/// 以外で不整合が生じることはない（`ols::hc_cov_params`の同型の
+/// `.expect("Hc2はleverage計算済み")`と同じ「型で表現しきれない呼び出し規約」の防御）。
+pub(crate) fn panel_hc_cov_params(
+    x: &Mat<f64>,
+    residuals: &[f64],
+    xtx_inv: &Mat<f64>,
+    df_resid: usize,
+    h: Option<&[f64]>,
+    variant: PanelHcVariant,
+) -> Mat<f64> {
+    let n = x.nrows();
+    let k = x.ncols();
+    let hc1_correction = (n as f64 / df_resid as f64).sqrt();
+
+    let x_scaled = Mat::from_fn(n, k, |i, j| {
+        let resid = residuals[i];
+        let scale = match variant {
+            PanelHcVariant::Hc1 => resid * hc1_correction,
+            PanelHcVariant::Hc2 => {
+                let h = h.expect("Hc2 requires leverage")[i];
+                resid / (1.0 - h).sqrt()
+            }
+            PanelHcVariant::Hc3 => {
+                let h = h.expect("Hc3 requires leverage")[i];
+                resid / (1.0 - h)
+            }
+        };
+        scale * (*x.get(i, j))
+    });
+
+    let psi_hat = x_scaled.transpose() * &x_scaled;
+    xtx_inv * &psi_hat * xtx_inv
+}
+
+/// クラスターロバスト係数分散共分散行列（k×k）。`ols::cluster_cov_params`と同型の
+/// 構造だが、**Stata流の`(G/(G-1))×((n-1)/(n-k))`小標本補正を適用しない**
+/// （`linearmodels`との数値一致のため、`fe.rs`モジュールdoc「`cov_type`対応」参照）。
+/// 代わりに`n/(n-extra_df-k)`のみを使う（`extra_df`は呼び出し側が決める。FEは
+/// `entity_nested_within_cluster`の判定結果、REは常に`0`——モジュールdoc参照）。
+pub(crate) fn panel_cluster_cov_params(
+    x: &Mat<f64>,
+    residuals: &[f64],
+    xtx_inv: &Mat<f64>,
+    n: usize,
+    k: usize,
+    groups: &[String],
+    extra_df: usize,
+) -> Mat<f64> {
+    let group_indices = group_indices_by_key(groups);
+
+    let mut s_hat = Mat::<f64>::zeros(k, k);
+    for indices in group_indices.values() {
+        let mut s_g = vec![0.0_f64; k];
+        for &i in indices {
+            let e = residuals[i];
+            for (a, s_g_a) in s_g.iter_mut().enumerate() {
+                *s_g_a += e * (*x.get(i, a));
+            }
+        }
+        for a in 0..k {
+            for b in 0..k {
+                *s_hat.get_mut(a, b) += s_g[a] * s_g[b];
+            }
+        }
+    }
+
+    let df_resid_for_scale = n - extra_df - k;
+    let correction = n as f64 / df_resid_for_scale as f64;
+    let cov_uncorrected = xtx_inv * &s_hat * xtx_inv;
+    Mat::from_fn(k, k, |i, j| correction * (*cov_uncorrected.get(i, j)))
+}
+
+/// `FeCovType::Hac`/`ReCovType::Hac`の`bandwidth`（`Option<i64>`）を実際に使う
+/// バンド幅（`usize`）に解決する。
+///
+/// `Some(bw)`の場合は`0 <= bw < t`を検証してそのまま使う（`t`はユニークな時点数）。`None`の
+/// 場合は`linearmodels`の`DriscollKraay`と同じ経験則`floor(4*(t/100)^(2/9))`で自動計算する
+/// （`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照。OLSの`resolve_hac_lags`と
+/// 式の形は同じだが、観測数`n`ではなく時点数`t`が引数になる点が異なる）。
+pub(crate) fn resolve_dk_bandwidth(bandwidth: Option<i64>, t: usize) -> Result<usize, PanelError> {
+    match bandwidth {
+        Some(bw) => {
+            if bw < 0 || (bw as usize) >= t {
+                return Err(PanelError::InvalidHacBandwidth { bandwidth: bw, t });
+            }
+            Ok(bw as usize)
+        }
+        None => Ok((4.0 * (t as f64 / 100.0).powf(2.0 / 9.0)).floor() as usize),
+    }
+}
+
+/// Driscoll-Kraay型パネルHAC共分散行列（k×k、Issue #182・#197）。
+///
+/// `Ŝ = Σ_t ξ_t ξ_t' + Σ_{l=1}^{bandwidth} w_l (ξ_t ξ_{t-l}' + ξ_{t-l} ξ_t')`
+/// （Bartlett重み`w_l = 1 - l/(bandwidth+1)`、`fe.rs`モジュールdoc参照）をまず求め、
+/// 最後に`(n/df_resid) × (X̃'X̃)⁻¹ Ŝ (X̃'X̃)⁻¹`にスケールする。`t_periods`（ユニークな
+/// 時点数）は`resolve_dk_bandwidth`の呼び出しで既に計算済みの値を呼び出し元からそのまま
+/// 受け取る（`time_indices.len()`で二重計算しない）。
+///
+/// `time`を`group_indices_by_key`で集計して`ξ_t`（時点`t`でのクロスセクション和）を求める。
+/// キー順序（`String`の辞書順）がそのまま時系列順序とみなす規約（`fe.rs`モジュールdoc参照）と
+/// 一致することを利用している。
+///
+/// **`bandwidth <= t_periods`（狭義の`<`ではない）が呼び出し元の`resolve_dk_bandwidth`から
+/// 保証される**（詳細は`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
+///
+/// ラグごとの`k×k`行列積（`xi_top.transpose() * xi_bot`等）は呼び出し元の`fit()`冒頭の
+/// `ensure_serial()`が固定したグローバル`Par::Seq`に依存している（OLSの`hac_cov_params`が
+/// `matmul(..., Par::Seq)`を明示するのと異なり、本関数は演算子オーバーロードを使うため
+/// グローバル設定頼み。`panel_hc_cov_params`/`panel_cluster_cov_params`と同じ流儀）。
+pub(crate) fn panel_driscoll_kraay_cov_params(
+    x: &Mat<f64>,
+    residuals: &[f64],
+    xtx_inv: &Mat<f64>,
+    time: &[String],
+    df_resid: usize,
+    bandwidth: usize,
+    t_periods: usize,
+) -> Mat<f64> {
+    let n = x.nrows();
+    let k = x.ncols();
+    let time_indices = group_indices_by_key(time);
+
+    let mut xi = Mat::<f64>::zeros(t_periods, k);
+    for (row, indices) in time_indices.values().enumerate() {
+        for &i in indices {
+            let e = residuals[i];
+            for col in 0..k {
+                *xi.get_mut(row, col) += e * (*x.get(i, col));
+            }
+        }
+    }
+
+    // l=0項: Ŝ₀ = ξ'ξ（クラスターロバストのΨ̂と同形、時点をグループとみなした版）
+    let mut s_hat = xi.transpose() * &xi;
+    // l=1..=bandwidth項: w_l * (Ŝ_l + Ŝ_l')
+    for l in 1..=bandwidth {
+        let weight = 1.0 - (l as f64) / ((bandwidth + 1) as f64);
+        let xi_top = xi.as_ref().subrows(l, t_periods - l);
+        let xi_bot = xi.as_ref().subrows(0, t_periods - l);
+        let s_l = xi_top.transpose() * xi_bot;
+        for a in 0..k {
+            for b in 0..k {
+                *s_hat.get_mut(a, b) += weight * (*s_l.get(a, b) + *s_l.get(b, a));
+            }
+        }
+    }
+
+    let scale = n as f64 / df_resid as f64;
+    let cov_uncorrected = xtx_inv * &s_hat * xtx_inv;
+    Mat::from_fn(k, k, |i, j| scale * (*cov_uncorrected.get(i, j)))
 }
 
 /// θでパラメータ化した準偏差変換を、設計行列の1つの列（`y`または`x`の1列）に適用し、

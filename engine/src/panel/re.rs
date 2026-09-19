@@ -139,14 +139,19 @@
 use std::collections::BTreeMap;
 
 use faer::Mat;
-use statrs::distribution::{ContinuousCDF, FisherSnedecor};
+use statrs::distribution::{ContinuousCDF, FisherSnedecor, StudentsT};
 
 use crate::error::CommonError;
+use crate::inference;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::panel::common::{
-    PanelDimension, PanelError, all_ones_theta, group_indices_by_key, quasi_demean_column,
+    PanelDimension, PanelError, PanelHcVariant, all_ones_theta, count_unique, group_indices_by_key,
+    leverage_within, panel_classical_cov_params, panel_cluster_cov_params,
+    panel_driscoll_kraay_cov_params, panel_hc_cov_params, quasi_demean_column,
+    resolve_dk_bandwidth, xtx_inverse,
 };
 use crate::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput};
+use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
 /// REの被説明変数・説明変数・パネル識別子を保持する入力データ。
 ///
@@ -544,17 +549,59 @@ pub(crate) fn quasi_demean_transform(
     (theta, y, x)
 }
 
+/// REの標準誤差計算方式（Issue #197、3.1節）。`FeCovType`と同じ「小さな固定選択肢の
+/// 公開enum」パターン（`docs/planning/specs/panel-api-design.md`4.3節）だが、REは
+/// `extra_df`が常に`0`（`linearmodels.RandomEffects.fit()`のソースで確認済み）・
+/// v1がentity方向のみ（2-way REはスコープ外、7.6節）のためFEより単純。`FeCovType::Hac`の
+/// ような`time`オーバーライドフィールドは持たない（RE自身が2-way構造を持たないため、
+/// FEが2-way FEとDKの時間粒度を分離するために追加したオーバーライドの必要性が無い。
+/// HAC計算には`ReInput::time()`をそのまま使う）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReCovType {
+    /// 等分散前提（`σ̂² (X̃'X̃)⁻¹`、`σ̂² = SSR/df_resid`）。
+    Classical,
+    /// White型の不均一分散ロバスト（小標本補正係数`n/df_resid`）。`linearmodels`の
+    /// `cov_type="robust"`と数値完全一致（実地検証済み）。
+    Hc1,
+    /// レバレッジベースの不均一分散ロバスト。`linearmodels`に参照実装が無いため
+    /// `plm::vcovHC(method="white1", type="HC2")`をクロスチェックに使う（`fit()`の
+    /// docコメント「`cov_type`対応」参照、ユーザー確認済み・2026-09-19）。
+    Hc2,
+    /// Hc2よりさらに保守的なレバレッジ補正。参照実装は`plm`（Hc2と同じ理由）。
+    Hc3,
+    /// クラスターロバスト。`groups`が`None`なら`entity`引数の列を自動的に使う
+    /// （3.2節、`cluster_col`省略時のデフォルト挙動）。
+    Cluster { groups: Option<Vec<String>> },
+    /// Driscoll-Kraay型パネルHAC（3.1節）。`bandwidth`が`None`なら
+    /// `floor(4*(t/100)^(2/9))`（`t`はユニークな時点数）で自動計算する。時系列順序は
+    /// `ReInput::time()`を使う（`time`が`None`なら`PanelError::HacRequiresTime`）。
+    Hac { bandwidth: Option<i64> },
+}
+
 /// REの推定結果。Swamy-Arora分散成分推定（Issue #193）→θ計算・準偏差変換
 /// （Issue #194）→`OlsEstimator::fit`への委譲（Issue #195）というパイプラインで
-/// `θ変換済み`データの係数推定（`β̂`）と自由度（Issue #196）をスコープとする
-/// （モジュールdoc「`OlsEstimator`への委譲」参照。`FeEstimator`が#178時点で係数推定のみを
-/// スコープにしたのと同型——標準誤差等のFE/RE固有の再計算は別issue）。
+/// `θ変換済み`データの係数推定（`β̂`）を求め、その上で`cov_type`別の標準誤差・t値・
+/// p値・信頼区間（Issue #197）を計算する。`FeEstimator`と同型の構成——`OlsEstimator`
+/// 自身の`std_errors()`/`t_stats()`等は使わず、`ReEstimator`が常に自前で計算し直した
+/// 値を保持する（`estimator()`のdocコメント参照。ユーザー確認済み・2026-09-19、
+/// 「一部cov_typeだけ`estimator()`委譲・残りは独自計算」という非対称な設計を避けた）。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」）。
 #[derive(Debug)]
 pub struct ReEstimator {
     input: ReInput,
     estimator: OlsEstimator,
+    cov_type: ReCovType,
+    /// `cov_type`別の標準誤差（Issue #197）。
+    std_errors: Mat<f64>,
+    /// `cov_type`別のt統計量。
+    t_stats: Mat<f64>,
+    /// `cov_type`別のp値（自由度は`cov_type`によらず常に`df_resid`、3.3節）。
+    p_values: Mat<f64>,
+    /// 信頼区間の下限。
+    conf_lower: Mat<f64>,
+    /// 信頼区間の上限。
+    conf_upper: Mat<f64>,
     /// 残差自由度`n - k`（Issue #196、7.5節）。`k`は変換済み定数列を含む設計行列の
     /// 全列数（`estimator.input().k()`）。`OlsEstimator::fit`自体は`include_intercept=false`
     /// （切片も含めて`x_all`に組み立て済みのため）で呼ばれているが、`OlsInput::k()`は
@@ -595,17 +642,61 @@ impl ReEstimator {
     /// 変換済みデータに既に切片相当の列を含めているため、FE同様これ以上の自動追加は
     /// 不要）。
     ///
-    /// `OlsEstimator::fit`自体は`CovType::Classical`固定で呼ぶ（`cov_type`対応は
-    /// 別issue、`FeEstimator::fit`が委譲先を常に`Classical`で呼ぶのと同じ理由——
-    /// `β̂`・残差の取得のみが目的で、`cov_type`ごとの標準誤差は将来REが独自に
-    /// 計算し直す設計になる見込みのため）。
+    /// `OlsEstimator::fit`自体は`CovType::Classical`固定で呼ぶ（`β̂`・残差の取得のみが
+    /// 目的で、`cov_type`ごとの標準誤差は本メソッドが下記で独自に計算し直すため、
+    /// `FeEstimator::fit`と同じ理由）。
+    ///
+    /// ## `cov_type`対応（Issue #197、3.1節）
+    ///
+    /// `linearmodels.RandomEffects.fit()`のソース確認により、REは`cov_type`によらず
+    /// 常に`extra_df=0`を使うことが判明した（FEのような`neffects`・
+    /// `entity_nested_within_cluster`の条件分岐が一切不要）。REの変換済み設計行列
+    /// （`x_all`、切片も含めて全パラメータが実際に列として含まれる）には「省略された
+    /// 固定効果ダミー」が無いため、HC2/HC3のレバレッジも`panel::fe`の`leverage_full`
+    /// （LSDV相当の欠落ダミー補正）ではなく`leverage_within`（＝素の
+    /// `h_ii = x_i(X'X)⁻¹x_i'`、REの実際の設計行列に対して直接計算するだけで良い）で
+    /// 足りる。これにより、`panel::common`の`panel_classical_cov_params`/
+    /// `panel_hc_cov_params`/`panel_cluster_cov_params`/`panel_driscoll_kraay_cov_params`
+    /// （元はFE専用実装だったが、この事実が判明したことで数式自体はFE/RE間で
+    /// 完全に共有できることが分かり、Issue #197で`common.rs`へ移設した）を`extra_df=0`・
+    /// `leverage_within`で呼ぶだけで実装できる。
+    ///
+    /// - **Classical/HC1**: `linearmodels`（`cov_type="unadjusted"`/`"robust"`）と
+    ///   数値完全一致を実地検証済み。
+    /// - **HC2/HC3**: `linearmodels`に参照実装が無い（`RandomEffects`・`PanelOLS`
+    ///   どちらも`_cov_estimators`に単一の"heteroskedastic"＝HC1相当しか無く、FEの
+    ///   HC2/HC3（Issue #181）も実際には`fixest`を参照値にしていた）。REは
+    ///   `plm::vcovHC(fit, method="white1", type="HC2"/"HC3")`をクロスチェックに使う
+    ///   （ユーザー確認済み・2026-09-19）。`plm`は変量効果の分散成分推定法が
+    ///   `linearmodels`と微妙に異なる（点推定自体が僅かに異なる、5.2節のRクロス
+    ///   チェックの一般的な位置づけと同じ）ため、数値一致は`linearmodels`ほどの
+    ///   精度（1e-9）ではなくクロスチェック水準（`re_estimator_fit_matches_...`の
+    ///   テスト参照）。
+    /// - **Cluster**: `linearmodels`/`plm`ともにStata流`(G/(G-1))×((n-1)/(n-k))`
+    ///   補正を使わない（`OlsEstimator`自身の`cluster_cov_params`とは異なる、FEと
+    ///   同じ相違）ため独自計算が必要。`groups`が`None`なら`input.entity()`を使う。
+    /// - **HAC（Driscoll-Kraay）**: `linearmodels`の`cov_type="kernel"`と数値完全
+    ///   一致を実地検証済み（バンド幅0・1の両方）。時系列順序は`input.time()`を使う
+    ///   （`None`なら`PanelError::HacRequiresTime`）。
+    ///
+    /// t値・p値・信頼区間の自由度は`cov_type`によらず常に`df_resid`（3.3節、FEと同じ
+    /// 方針——OLS自身のCluster特有の`n_groups-1`切替はREでは行わない）。
     ///
     /// # Errors
     /// - Swamy-Arora分散成分推定が失敗した場合（内部FE推定のsingleton検出・分散ゼロ・
     ///   自由度不足、またはbetween回帰の失敗）は、その`PanelError`をそのまま伝播する。
     /// - 準偏差変換済みデータへの委譲が失敗した場合（観測数不足・特異行列等）は
     ///   `PanelError::QuasiDemeanedRegressionFailed`。
-    pub fn fit(input: ReInput, confidence_level: f64) -> Result<Self, PanelError> {
+    /// - `cov_type=Cluster`でクラスター数が不足する場合は`CommonError::
+    ///   InsufficientClusters`/`InsufficientClustersForInference`（`PanelError::
+    ///   Common`経由）。
+    /// - `cov_type=Hac`で`time`が未指定の場合は`PanelError::HacRequiresTime`、
+    ///   `bandwidth`が不正な場合は`PanelError::InvalidHacBandwidth`。
+    pub fn fit(
+        input: ReInput,
+        cov_type: ReCovType,
+        confidence_level: f64,
+    ) -> Result<Self, PanelError> {
         // faerのグローバル並列度をPar::Seqに固定する（Issue #283、`crate::parallelism`。
         // 委譲先の`FeEstimator::fit`/`OlsEstimator::fit`自身も呼ぶが、`cargo test -p engine`
         // で`ReEstimator::fit`を直接叩く経路との統一のためここでも呼ぶ、
@@ -647,8 +738,96 @@ impl ReEstimator {
         let estimator = OlsEstimator::fit(ols_input, CovType::Classical, confidence_level)
             .map_err(|source| PanelError::QuasiDemeanedRegressionFailed { source })?;
 
+        let n = estimator.input().nobs();
         let df_model = estimator.input().k();
-        let df_resid = estimator.input().nobs() - df_model;
+        let df_resid = n - df_model;
+
+        // `cov_type`別の共分散行列の計算に使う共通の材料（Issue #197）。`OlsEstimator`は
+        // `cov_params`をprivateで保持しており再利用できないため、`estimator.input().x()`
+        // （既に持っている変換済み設計行列、`OlsInput::x()`は公開）から独立に計算し直す
+        // （`FeEstimator::fit`と同型だが、REは`design_matrix_from_columns`で組み立て
+        // 直す必要が無い——`x_all`は既に`Mat`化済み）。
+        let x_mat = estimator.input().x();
+        let xtx_inv = xtx_inverse(x_mat, df_model)?;
+        let residuals: Vec<f64> = (0..n).map(|i| *estimator.residuals().get(i, 0)).collect();
+        let ssr: f64 = residuals.iter().map(|r| r * r).sum();
+
+        let cov_params = match &cov_type {
+            ReCovType::Classical => panel_classical_cov_params(&xtx_inv, ssr, df_resid, df_model),
+            ReCovType::Hc1 => panel_hc_cov_params(
+                x_mat,
+                &residuals,
+                &xtx_inv,
+                df_resid,
+                None,
+                PanelHcVariant::Hc1,
+            ),
+            ReCovType::Hc2 | ReCovType::Hc3 => {
+                // REの変換済み設計行列には省略された固定効果ダミーが無いため、FEの
+                // `leverage_full`（LSDV相当の欠落ダミー補正）は不要——`leverage_within`
+                // （素のレバレッジ）がそのままHC2/HC3のレバレッジになる（`fit()`のdoc
+                // コメント「`cov_type`対応」参照）。
+                let h = leverage_within(x_mat, &xtx_inv, n, df_model);
+                let variant = if matches!(cov_type, ReCovType::Hc2) {
+                    PanelHcVariant::Hc2
+                } else {
+                    PanelHcVariant::Hc3
+                };
+                panel_hc_cov_params(x_mat, &residuals, &xtx_inv, df_resid, Some(&h), variant)
+            }
+            ReCovType::Cluster { groups } => {
+                let resolved_groups = groups.as_deref().unwrap_or(input.entity());
+                let n_groups = validate_cluster_groups(resolved_groups, n)?;
+                // `q`（傾き係数の数、切片を除く）は`df_model - 1`（`ols::fit`の
+                // `k - k_constant`と同じ規約、`estimator()`のdocコメント参照）。
+                validate_cluster_count_covers_slopes(n_groups, df_model - 1)?;
+                // REは`extra_df`が常に`0`（`fit()`のdocコメント「`cov_type`対応」参照、
+                // FEのような`entity_nested_within_cluster`の条件分岐は不要）。
+                panel_cluster_cov_params(
+                    x_mat,
+                    &residuals,
+                    &xtx_inv,
+                    n,
+                    df_model,
+                    resolved_groups,
+                    0,
+                )
+            }
+            ReCovType::Hac { bandwidth } => {
+                let time = input.time().ok_or(PanelError::HacRequiresTime)?;
+                let t_periods = count_unique(time);
+                let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
+                panel_driscoll_kraay_cov_params(
+                    x_mat, &residuals, &xtx_inv, time, df_resid, bw, t_periods,
+                )
+            }
+        };
+
+        // t値・p値・信頼区間の自由度は`cov_type`によらず常に`df_resid`（3.3節、`fit()`の
+        // docコメント「`cov_type`対応」参照）。`StudentsT::new`は自由度が正でない場合に
+        // 失敗するが、`OlsEstimator::fit`が既に成功している時点で`df_resid = n - k >= 1`
+        // が保証されているため理論上到達不能（`FeEstimator::fit`と同じ「保証済みの不変
+        // 条件に対する防御的`Result`化」、`.claude/rules/rust-style.md`「テスト」参照）。
+        let t_dist = StudentsT::new(0.0, 1.0, df_resid as f64)
+            .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+        let t_crit = inference::critical_value(&t_dist, confidence_level);
+
+        let mut std_errors = Mat::zeros(df_model, 1);
+        let mut t_stats = Mat::zeros(df_model, 1);
+        let mut p_values = Mat::zeros(df_model, 1);
+        let mut conf_lower = Mat::zeros(df_model, 1);
+        let mut conf_upper = Mat::zeros(df_model, 1);
+        for j in 0..df_model {
+            let coef = *estimator.params().get(j, 0);
+            let se = (*cov_params.get(j, j)).sqrt();
+            let stat = inference::compute_inference_stat(&t_dist, coef, se, t_crit);
+
+            *std_errors.get_mut(j, 0) = se;
+            *t_stats.get_mut(j, 0) = stat.stat;
+            *p_values.get_mut(j, 0) = stat.p_value;
+            *conf_lower.get_mut(j, 0) = stat.conf_low;
+            *conf_upper.get_mut(j, 0) = stat.conf_high;
+        }
 
         // F統計量（Issue #337、2.1節）: 傾き係数`df_model - 1`個（定数項を除く）が
         // 同時にゼロという帰無仮説の検定。`estimator().f_statistic()`は
@@ -683,7 +862,6 @@ impl ReEstimator {
             (f64::NAN, f64::NAN)
         } else {
             let y_transformed = estimator.input().y();
-            let n = estimator.input().nobs();
             let y_mean: f64 = (0..n).map(|i| *y_transformed.get(i, 0)).sum::<f64>() / (n as f64);
             let total_ss: f64 = (0..n)
                 .map(|i| (*y_transformed.get(i, 0) - y_mean).powi(2))
@@ -730,6 +908,12 @@ impl ReEstimator {
         Ok(Self {
             input,
             estimator,
+            cov_type,
+            std_errors,
+            t_stats,
+            p_values,
+            conf_lower,
+            conf_upper,
             df_resid,
             df_model,
             f_statistic,
@@ -749,22 +933,56 @@ impl ReEstimator {
     /// （`param_names()[0] == "const"`）、以降が`input().x_names()`と同じ並びの
     /// 傾き係数。
     ///
-    /// **`params()`・`std_errors()`・`t_stats()`・`p_values()`・`conf_lower()`/
-    /// `conf_upper()`・`aic()`/`bic()`はこの時点で既に正しいRE推定量になっている**
-    /// （`linearmodels.RandomEffects`のソース・`HomoskedasticCovariance`実装を確認済み。
-    /// `OlsEstimator::fit`が`include_intercept=false`で呼ばれていても、これらの値は
-    /// `df_resid = n - k`（`k`は変換済み定数列を含む全列数、Issue #196・7.5節）・
-    /// `X'X`のみに依存し`has_intercept`フラグには依存しないため）。
+    /// **`params()`・`residuals()`・`aic()`/`bic()`はこの時点で既に正しいRE推定量に
+    /// なっている**（係数・残差・対数尤度は`cov_type`に依存しないため。`aic`/`bic`は
+    /// `log_likelihood`（`SSR/n`のみに依存）に`k`（変換済み定数列を含む全列数）を
+    /// 掛けるだけの式で`has_intercept`フラグに依存しない、Issue #196参照）。
     ///
-    /// **一方`estimator().f_statistic()`/`f_p_value()`・`r_squared()`/`r_squared_adj()`は
+    /// **一方`estimator().std_errors()`/`t_stats()`/`p_values()`/`conf_lower()`/
+    /// `conf_upper()`/`f_statistic()`/`f_p_value()`・`r_squared()`/`r_squared_adj()`は
     /// このオブジェクト単体では正しくない**——`OlsInput::from_columns`に
     /// `include_intercept=false`で渡している（モジュールdoc「`OlsEstimator`への委譲」）
-    /// ため`has_intercept()==false`扱いになり、`f_statistic`は変換済み定数項も含めて
-    /// 同時検定してしまい、`r_squared`は非中心化TSSを使ってしまう。正しいF統計量は
-    /// `ReEstimator::f_statistic()`/`f_p_value()`（Issue #337）を使うこと、正しい適合度
-    /// （`r_squared_within`/`between`/`overall`）はIssue #338で別途実装する。
+    /// ため`has_intercept()==false`扱いになる（`f_statistic`は変換済み定数項も含めて
+    /// 同時検定してしまい、`r_squared`は非中心化TSSを使ってしまう）ことに加え、
+    /// `OlsEstimator::fit`自体が常に`CovType::Classical`固定で呼ばれているため
+    /// （`fit()`のdocコメント「`cov_type`対応」参照）、`ReCovType::Hc1`等の非Classicalな
+    /// `cov_type`を指定して`ReEstimator::fit`を呼んでいても`estimator()`側は
+    /// Classicalのままである。正しい標準誤差・検定統計量は`ReEstimator`自身の
+    /// `std_errors()`/`t_stats()`/`p_values()`/`conf_lower()`/`conf_upper()`
+    /// （Issue #197）・`f_statistic()`/`f_p_value()`（Issue #337）を使うこと、正しい
+    /// 適合度（`r_squared_within`/`between`/`overall`）はIssue #338で別途実装済み。
     pub fn estimator(&self) -> &OlsEstimator {
         &self.estimator
+    }
+
+    /// `fit()`に渡された`cov_type`。
+    pub fn cov_type(&self) -> &ReCovType {
+        &self.cov_type
+    }
+
+    /// `cov_type`別の標準誤差（Issue #197）。
+    pub fn std_errors(&self) -> &Mat<f64> {
+        &self.std_errors
+    }
+
+    /// `cov_type`別のt統計量。
+    pub fn t_stats(&self) -> &Mat<f64> {
+        &self.t_stats
+    }
+
+    /// `cov_type`別のp値（自由度は`cov_type`によらず常に`df_resid`、3.3節）。
+    pub fn p_values(&self) -> &Mat<f64> {
+        &self.p_values
+    }
+
+    /// 信頼区間の下限。
+    pub fn conf_lower(&self) -> &Mat<f64> {
+        &self.conf_lower
+    }
+
+    /// 信頼区間の上限。
+    pub fn conf_upper(&self) -> &Mat<f64> {
+        &self.conf_upper
     }
 
     /// 残差自由度`n - k`（Issue #196、7.5節）。FEの`n - n_entities - k`とは異なる式
@@ -1180,7 +1398,7 @@ mod tests {
             ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
                 .unwrap();
 
-        let re = ReEstimator::fit(input, 0.95).unwrap();
+        let re = ReEstimator::fit(input, ReCovType::Classical, 0.95).unwrap();
 
         assert_eq!(
             re.estimator().input().param_names(),
@@ -1242,6 +1460,37 @@ mod tests {
                 "conf_upper[{j}]"
             );
         }
+        // rust-reviewer指摘（Issue #197）: `ReCovType::Classical`は`estimator()`委譲
+        // でも数値的に正しい（上記アサーション）が、`ReEstimator`自身は常に独自計算
+        // した`std_errors()`/`t_stats()`/`p_values()`/`conf_lower()`/`conf_upper()`を
+        // 保持する設計にしたため（`fit()`のdocコメント「`ReEstimator`は常に自前の
+        // フィールドを保持する」参照）、`panel_classical_cov_params`経由の値が
+        // `estimator()`委譲の値と一致する（＝独立した2つの経路が同じ答えを出す）ことも
+        // 確認する。
+        for j in 0..2 {
+            assert!(
+                (*re.std_errors().get(j, 0) - expected_std_errors[j]).abs() < 1e-6,
+                "re.std_errors[{j}]"
+            );
+            assert!(
+                (*re.t_stats().get(j, 0) - expected_t_stats[j]).abs() < 1e-6,
+                "re.t_stats[{j}]"
+            );
+            assert!(
+                (*re.p_values().get(j, 0) - expected_p_values[j]).abs() < 1e-6,
+                "re.p_values[{j}]"
+            );
+            assert!(
+                (*re.conf_lower().get(j, 0) - expected_conf_lower[j]).abs() < 1e-6,
+                "re.conf_lower[{j}]"
+            );
+            assert!(
+                (*re.conf_upper().get(j, 0) - expected_conf_upper[j]).abs() < 1e-6,
+                "re.conf_upper[{j}]"
+            );
+        }
+        assert_eq!(re.cov_type(), &ReCovType::Classical);
+
         // `loglik = -9.069066112783611`（linearmodels実測）から手計算した参照値。
         assert!((re.estimator().aic() - 22.138_132_225_567_222).abs() < 1e-9);
         assert!((re.estimator().bic() - 22.029_952_523_677_85).abs() < 1e-9);
@@ -1259,6 +1508,211 @@ mod tests {
         assert!((re.r_squared_within() - 0.793_812_134_496_668).abs() < 1e-9);
         assert!((re.r_squared_between() - (-0.391_981_417_047_268_2)).abs() < 1e-9);
         assert!((re.r_squared_overall() - 0.279_701_906_945_653_1).abs() < 1e-9);
+    }
+
+    // ── cov_type対応（Issue #197） ────────────────────────────────────────
+
+    /// `re_estimator_fit_matches_linearmodels_reference`と同じデータ（entity a: T=3,
+    /// b: T=2, c: T=2）を返す。以下のcov_typeテスト群で共有する。
+    fn cov_type_reference_input() -> ReInput {
+        let entity = strings(&["a", "a", "a", "b", "b", "c", "c"]);
+        let x1 = vec![1.0, 2.0, 4.0, 2.0, 3.0, 5.0, 6.0];
+        let y = [3.0, 4.0, 7.0, 8.0, 9.0, 6.0, 10.0];
+        ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into()).unwrap()
+    }
+
+    #[test]
+    fn re_estimator_fit_hc1_matches_linearmodels_reference() {
+        // `linearmodels.RandomEffects.fit(cov_type="robust").std_errors`と数値一致
+        // （Issue #197。`linearmodels`の"robust"は素のHC0ではなく小標本補正
+        // `n/df_resid`込みのHC1相当——`extra_df=0`のためこの補正がOLS自身のHC1と
+        // 同じ`n/(n-k)`になることを`HeteroskedasticCovariance`のソースで確認済み）。
+        let re = ReEstimator::fit(cov_type_reference_input(), ReCovType::Hc1, 0.95).unwrap();
+
+        assert!((*re.std_errors().get(0, 0) - 1.712_718_460_250_846_5).abs() < 1e-9);
+        assert!((*re.std_errors().get(1, 0) - 0.209_842_170_109_712_15).abs() < 1e-9);
+    }
+
+    #[test]
+    fn re_estimator_fit_hc2_hc3_match_plm_reference() {
+        // `linearmodels`にはHC2/HC3の実装が無い（`RandomEffects`/`PanelOLS`どちらも
+        // `_cov_estimators`が単一の"heteroskedastic"＝HC1相当のみ）ため、Rの
+        // `plm::vcovHC(fit, method="white1", type="HC2"/"HC3")`をクロスチェックに使う
+        // （ユーザー確認済み、`fit()`のdocコメント「`cov_type`対応」参照）。`plm`は
+        // 変量効果の分散成分推定法が`linearmodels`と僅かに異なる（点推定自体が僅かに
+        // 違う、5.2節のRクロスチェックの一般的な位置づけ）ため、`plm`実測値
+        // （`Rscript`で実地確認済み: HC2 std_errors=[1.627395, 0.212174]、
+        // HC3=[1.830351, 0.2548547]）とは1e-3〜1e-2の桁で近いことのみ確認する。
+        // **1e-9アサーションは「正しさの独立検証」ではなく回帰ガード**（rust-reviewer
+        // 指摘）: `linearmodels`が返す`params`/`resids`（本ファイルの
+        // `re_estimator_fit_matches_linearmodels_reference`と同じ値）から、本実装
+        // （`panel_hc_cov_params`）と**同じレバレッジベースHC2/HC3公式**をPythonで
+        // 手計算した値であり、独立実装での検証にはならない
+        // （`.claude/rules/testing-policy.md`「本実装と同じ計算式の手計算は独立検証
+        // としての効力が薄い」通り）。真の独立検証は直後の`plm`比較（1e-2、`plm`は
+        // REにHC2/HC3のネイティブ実装を持つ数少ない参照実装）のみ。
+        let hc2 = ReEstimator::fit(cov_type_reference_input(), ReCovType::Hc2, 0.95).unwrap();
+        assert!((*hc2.std_errors().get(0, 0) - 1.625_640_631_050_364).abs() < 1e-9);
+        assert!((*hc2.std_errors().get(1, 0) - 0.212_277_913_827_970_76).abs() < 1e-9);
+        // `plm`実測値との近さ（クロスチェック、緩い許容誤差）。
+        assert!((*hc2.std_errors().get(0, 0) - 1.627_395).abs() < 1e-2);
+        assert!((*hc2.std_errors().get(1, 0) - 0.212_174).abs() < 1e-2);
+
+        let hc3 = ReEstimator::fit(cov_type_reference_input(), ReCovType::Hc3, 0.95).unwrap();
+        assert!((*hc3.std_errors().get(0, 0) - 1.828_506_411_875_559_6).abs() < 1e-9);
+        assert!((*hc3.std_errors().get(1, 0) - 0.254_973_430_724_023_45).abs() < 1e-9);
+        assert!((*hc3.std_errors().get(0, 0) - 1.830_351).abs() < 1e-2);
+        assert!((*hc3.std_errors().get(1, 0) - 0.254_854_7).abs() < 1e-2);
+    }
+
+    #[test]
+    fn re_estimator_fit_cluster_defaults_to_entity_and_matches_linearmodels_reference() {
+        // `linearmodels.RandomEffects.fit(cov_type="clustered", cluster_entity=True)`
+        // の`std_errors`と数値一致（Issue #197、3.2節「`groups`省略時は`entity`列を
+        // 自動的に使う」）。`linearmodels`/`plm`ともにStata流`G/(G-1)`補正を使わない
+        // （`OlsEstimator`自身の`cluster_cov_params`とは異なる、FEと同じ相違）。
+        let re = ReEstimator::fit(
+            cov_type_reference_input(),
+            ReCovType::Cluster { groups: None },
+            0.95,
+        )
+        .unwrap();
+
+        assert!((*re.std_errors().get(0, 0) - 1.885_037_179_482_400_3).abs() < 1e-9);
+        assert!((*re.std_errors().get(1, 0) - 0.160_487_722_486_115_18).abs() < 1e-9);
+    }
+
+    #[test]
+    fn re_estimator_fit_hac_matches_linearmodels_reference() {
+        // `linearmodels.RandomEffects.fit(cov_type="kernel", kernel="bartlett",
+        // bandwidth=0/1).std_errors`と数値一致（Issue #197、Driscoll-Kraay型パネル
+        // HAC。時系列順序は`input.time()`を使う）。
+        let entity = strings(&["a", "a", "a", "b", "b", "c", "c"]);
+        let time = strings(&["1", "2", "3", "1", "2", "1", "2"]);
+        let x1 = vec![1.0, 2.0, 4.0, 2.0, 3.0, 5.0, 6.0];
+        let y = [3.0, 4.0, 7.0, 8.0, 9.0, 6.0, 10.0];
+        let input = ReInput::from_columns(
+            &y,
+            &[x1],
+            vec!["x1".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
+
+        let bw0 = ReEstimator::fit(input, ReCovType::Hac { bandwidth: Some(0) }, 0.95).unwrap();
+        assert!((*bw0.std_errors().get(0, 0) - 0.067_914_104_766_400_82).abs() < 1e-9);
+        assert!((*bw0.std_errors().get(1, 0) - 0.269_988_522_809_824_16).abs() < 1e-9);
+
+        let input2 = ReInput::from_columns(
+            &y,
+            &[vec![1.0, 2.0, 4.0, 2.0, 3.0, 5.0, 6.0]],
+            vec!["x1".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
+        let bw1 = ReEstimator::fit(input2, ReCovType::Hac { bandwidth: Some(1) }, 0.95).unwrap();
+        assert!((*bw1.std_errors().get(0, 0) - 0.064_720_572_563_281_51).abs() < 1e-9);
+        assert!((*bw1.std_errors().get(1, 0) - 0.169_194_290_229_382_48).abs() < 1e-9);
+    }
+
+    #[test]
+    fn re_estimator_fit_hac_returns_error_when_time_is_none() {
+        // 1-way FEの`HacRequiresTime`と同型（`ReInput::time()`が`None`ならエラー）。
+        let re = ReEstimator::fit(
+            cov_type_reference_input(),
+            ReCovType::Hac { bandwidth: None },
+            0.95,
+        );
+
+        assert_eq!(re.unwrap_err(), PanelError::HacRequiresTime);
+    }
+
+    #[test]
+    fn re_estimator_fit_hac_rejects_bandwidth_at_least_t_periods() {
+        // rust-reviewer指摘（Issue #197）: `fit()`のdocコメントに明記した
+        // `PanelError::InvalidHacBandwidth`の伝播経路が未テストだった
+        // （`resolve_dk_bandwidth`自体はFE側のテストでカバー済みだが、RE経由の配線は
+        // 別途確認する。`fe_estimator_fit_hac_rejects_bandwidth_at_least_t_periods`と
+        // 同型）。t_periods=3（time∈{1,2,3}）に対しbandwidth=3（`>=t`）を指定する。
+        let entity = strings(&["a", "a", "a", "b", "b", "c", "c"]);
+        let time = strings(&["1", "2", "3", "1", "2", "1", "2"]);
+        let x1 = vec![1.0, 2.0, 4.0, 2.0, 3.0, 5.0, 6.0];
+        let y = [3.0, 4.0, 7.0, 8.0, 9.0, 6.0, 10.0];
+        let input = ReInput::from_columns(
+            &y,
+            &[x1],
+            vec!["x1".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
+
+        let result = ReEstimator::fit(input, ReCovType::Hac { bandwidth: Some(3) }, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::InvalidHacBandwidth { bandwidth: 3, t: 3 }
+        );
+    }
+
+    #[test]
+    fn re_estimator_fit_cluster_supports_explicit_groups_column() {
+        // `groups`に`entity`以外の任意の列を明示指定できることを確認する
+        // （3.2節「`cluster_col`を明示指定すれば任意の列でもクラスター可能」）。
+        // ここでは`entity`をそのまま複製した列を明示的に渡し、`groups: None`
+        // （`re_estimator_fit_cluster_defaults_to_entity_and_matches_linearmodels_
+        // reference`）と同じ結果になることを確認する。
+        let entity = strings(&["a", "a", "a", "b", "b", "c", "c"]);
+        let x1 = vec![1.0, 2.0, 4.0, 2.0, 3.0, 5.0, 6.0];
+        let y = [3.0, 4.0, 7.0, 8.0, 9.0, 6.0, 10.0];
+        let input =
+            ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+        let explicit_groups = strings(&["a", "a", "a", "b", "b", "c", "c"]);
+
+        let re = ReEstimator::fit(
+            input,
+            ReCovType::Cluster {
+                groups: Some(explicit_groups),
+            },
+            0.95,
+        )
+        .unwrap();
+
+        assert!((*re.std_errors().get(0, 0) - 1.885_037_179_482_400_3).abs() < 1e-9);
+        assert!((*re.std_errors().get(1, 0) - 0.160_487_722_486_115_18).abs() < 1e-9);
+    }
+
+    #[test]
+    fn re_estimator_fit_cluster_returns_error_when_cluster_count_at_most_slopes() {
+        // クラスター数`G`が傾き係数の数`q`（`df_model - 1`）以下だと構造的に特異になる
+        // （Issue #289、OLS/FE共通の制約。REもここに合わせる）。ここではq=1（傾き1個）
+        // に対しG=1（全観測が同一クラスター）にして発火させる。
+        let entity = strings(&["a", "a", "a", "b", "b", "c", "c"]);
+        let all_same_cluster = strings(&["g0", "g0", "g0", "g0", "g0", "g0", "g0"]);
+        let x1 = vec![1.0, 2.0, 4.0, 2.0, 3.0, 5.0, 6.0];
+        let y = [3.0, 4.0, 7.0, 8.0, 9.0, 6.0, 10.0];
+        let input =
+            ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let result = ReEstimator::fit(
+            input,
+            ReCovType::Cluster {
+                groups: Some(all_same_cluster),
+            },
+            0.95,
+        );
+
+        assert!(matches!(
+            result,
+            Err(PanelError::Common(CommonError::InsufficientClusters { .. }))
+        ));
     }
 
     #[test]
@@ -1319,7 +1773,7 @@ mod tests {
             ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
                 .unwrap();
 
-        let re = ReEstimator::fit(input, 0.95).unwrap();
+        let re = ReEstimator::fit(input, ReCovType::Classical, 0.95).unwrap();
 
         assert_eq!(re.df_resid(), 17);
         assert_eq!(re.df_model(), 2);
@@ -1338,7 +1792,7 @@ mod tests {
         let y = [3.0, 5.0, 2.0, 4.0, 6.0, 8.0];
         let input = ReInput::from_columns(&y, &[], vec![], &entity, None, "y".into()).unwrap();
 
-        let re = ReEstimator::fit(input, 0.95).unwrap();
+        let re = ReEstimator::fit(input, ReCovType::Classical, 0.95).unwrap();
 
         assert_eq!(re.df_resid(), 5);
         assert_eq!(re.df_model(), 1);
@@ -1390,7 +1844,7 @@ mod tests {
             ReInput::from_columns(&y, &[x], vec!["x".to_string()], &entity, None, "y".into())
                 .unwrap();
 
-        let re = ReEstimator::fit(input, 0.95).unwrap();
+        let re = ReEstimator::fit(input, ReCovType::Classical, 0.95).unwrap();
 
         assert!((*re.estimator().params().get(0, 0) - 7.858_407_079_646_017).abs() < 1e-9);
         assert!((*re.estimator().params().get(1, 0) - (-1.008_849_557_522_124)).abs() < 1e-9);
@@ -1411,7 +1865,7 @@ mod tests {
             ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
                 .unwrap();
 
-        let result = ReEstimator::fit(input, 0.95);
+        let result = ReEstimator::fit(input, ReCovType::Classical, 0.95);
 
         assert_eq!(
             result.unwrap_err(),
@@ -1435,7 +1889,7 @@ mod tests {
             ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
                 .unwrap();
 
-        let result = ReEstimator::fit(input, 0.95);
+        let result = ReEstimator::fit(input, ReCovType::Classical, 0.95);
 
         assert!(matches!(
             result,
@@ -1457,7 +1911,7 @@ mod tests {
             ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
                 .unwrap();
 
-        let result = ReEstimator::fit(input, 1.5);
+        let result = ReEstimator::fit(input, ReCovType::Classical, 1.5);
 
         assert_eq!(
             result.unwrap_err(),
@@ -1486,7 +1940,7 @@ mod tests {
             ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
                 .unwrap();
 
-        let _ = ReEstimator::fit(input, 0.95).unwrap();
+        let _ = ReEstimator::fit(input, ReCovType::Classical, 0.95).unwrap();
 
         assert!(matches!(faer::get_global_parallelism(), faer::Par::Seq));
     }
@@ -1512,7 +1966,7 @@ mod tests {
             ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
                 .unwrap();
 
-        let result = ReEstimator::fit(input, 0.95);
+        let result = ReEstimator::fit(input, ReCovType::Classical, 0.95);
 
         assert_eq!(
             result.unwrap_err(),

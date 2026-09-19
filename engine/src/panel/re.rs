@@ -100,14 +100,52 @@
 //! 直接実装している（`wald_f_test`の再利用はしていない）。`residual_ss<=0.0`
 //! （完全な当てはめ）なら`linearmodels`と同じくF統計量を`0.0`とする（NaNにしない）。
 //! 傾き係数が0個（`df_model==1`）ならOLS/FE同様NaN。
+//!
+//! ## パネル固有R²（`r_squared_within`/`between`/`overall`、Issue #338、2.3節）
+//!
+//! `linearmodels`の`_PanelModelBase._rsquared`（FE/RE共通ロジック）ソース確認・実地数値
+//! 検証で判明した設計（FEの`fe_r_squared_between`/`fe_r_squared_overall`——Issue #183——
+//! とは以下の2点で異なるため、`re_r_squared_within`/`re_r_squared_between`/
+//! `re_r_squared_overall`としてRE独自に実装する。無理な共通化はしない
+//! （`panel-api-design.md`7.4節「共通化しない」）——単なる`has_intercept`分岐の追加では
+//! 済まず、フィット済みの値そのものの計算式（切片の有無）が変わるため）。
+//!
+//! - **REは`has_constant=True`のためTSSが中心化される**: FEは固定効果を含み実質的に
+//!   切片が無い（`has_constant=False`）扱いのため`fe_r_squared_between`/
+//!   `fe_r_squared_overall`は非中心化TSS（`Σy²`）を使うが、REは`Σ(y - ȳ)²`という通常の
+//!   中心化TSSを使う（`weights`引数は本プロジェクトのFE/REどちらも未サポートのため
+//!   常に`w=1`、`_prepare_between`の`T_i`ベース重み付けはFE同様常に無効。
+//!   `fe_r_squared_between`関数doc参照）。
+//! - **`r_squared_between`/`r_squared_overall`の当てはめ値は切片`β0`
+//!   （`estimator().params().get(0, 0)`）を含める**: FEは固定効果自体を含めない
+//!   「弱いR²」を意図的に採用する（`slope_only_residual`、切片相当の項を一切含めない）が、
+//!   REは真の切片係数`β0`が推定されているため、`fitted = β0 + Σ_j x_j・β_j`として含める
+//!   （`linearmodels`の`exog`が定数列を含み、`wx @ params`がそのまま`β0`込みの当てはめに
+//!   なることに対応）。
+//! - **`r_squared_within`はFEと同じ定義**（θ=1固定の通常のwithin変換、RE自身の
+//!   Swamy-Arora準偏差変換とは無関係）: `linearmodels`ソースの`_rsquared`のWithin
+//!   セクションはFE/REどちらのモデルでも共通して`self.exog.demean("entity", ...)`
+//!   （θ=1）を使う。定数列もθ=1でdemeanされると恒等的に全ゼロ列になるため
+//!   （`quasi_demean_column`の`θ_i=1`は`ȳ_i.`を引くだけ、定数列のエンティティ平均は
+//!   常に1）、`wx @ params`の切片項の寄与は自動的に消える——傾き係数だけを
+//!   θ=1変換済み`x`に当てはめれば良い。共有ヘルパー`all_ones_theta`
+//!   （`common.rs`、元はFE専用だったが本Issueで共有ロジックとして移設）で
+//!   `quasi_demean_column`用のθマップを組み立てる。
+//! - `linearmodels`の`_rsquared`は`has_constant and exog.nvar==1`（傾き係数が0個）なら
+//!   3種とも`0.0`を即座に返す早期リターンを持つ。RE側もこれに倣い`df_model==1`なら
+//!   3種とも`0.0`とする（`f_statistic`のNaN分岐とは異なる扱いなので注意）。
+//! - どちらのR²も`TSS<=0.0`なら`0.0`を返す（`linearmodels`と同じガード）。
 
 use std::collections::BTreeMap;
 
+use faer::Mat;
 use statrs::distribution::{ContinuousCDF, FisherSnedecor};
 
 use crate::error::CommonError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
-use crate::panel::common::{PanelDimension, PanelError, group_indices_by_key, quasi_demean_column};
+use crate::panel::common::{
+    PanelDimension, PanelError, all_ones_theta, group_indices_by_key, quasi_demean_column,
+};
 use crate::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput};
 
 /// REの被説明変数・説明変数・パネル識別子を保持する入力データ。
@@ -266,6 +304,101 @@ fn entity_means(
         t.push(t_i);
     }
     (y_means, x_means, t)
+}
+
+/// パネル固有R²（`r_squared_within`/`between`/`overall`、Issue #338、2.3節）を計算する。
+/// `df_model==1`（傾き係数0個）なら`linearmodels`の早期リターンに倣い3種とも`0.0`
+/// （モジュールdoc「パネル固有R²」参照）。それ以外は`re_r_squared_within`/
+/// `re_r_squared_between`/`re_r_squared_overall`をそれぞれ計算する。
+///
+/// `params`は`estimator().params()`（先頭が切片`β0`、以降が`input.x_names()`と同じ並びの
+/// 傾き係数）をそのまま渡す想定。
+fn re_r_squared(input: &ReInput, params: &Mat<f64>, df_model: usize) -> (f64, f64, f64) {
+    if df_model == 1 {
+        return (0.0, 0.0, 0.0);
+    }
+    (
+        re_r_squared_within(input, params),
+        re_r_squared_between(input, params),
+        re_r_squared_overall(input, params),
+    )
+}
+
+/// `r_squared_within`（Issue #338、2.3節）: θ=1固定の通常のwithin変換（RE自身の
+/// Swamy-Arora準偏差変換とは無関係、モジュールdoc参照）を`y`・各`x`列に適用し、
+/// 傾き係数`β_j`（`params`の先頭`β0`を除く）だけを当てはめた残差平方和/全平方和で
+/// 計算する。定数列自体はθ=1変換すると恒等的に全ゼロ列になるため明示的には組み立てない
+/// （切片項の寄与は自動的に消える）。
+fn re_r_squared_within(input: &ReInput, params: &Mat<f64>) -> f64 {
+    let theta = all_ones_theta(input.entity());
+    let y = quasi_demean_column(input.y(), input.entity(), &theta);
+    let x: Vec<Vec<f64>> = input
+        .x()
+        .iter()
+        .map(|col| quasi_demean_column(col, input.entity(), &theta))
+        .collect();
+
+    let n = y.len();
+    let k = x.len();
+    let mut ssr = 0.0;
+    let mut tss = 0.0;
+    for i in 0..n {
+        let fitted: f64 = (0..k).map(|j| x[j][i] * *params.get(j + 1, 0)).sum();
+        let resid = y[i] - fitted;
+        ssr += resid * resid;
+        tss += y[i] * y[i];
+    }
+    if tss > 0.0 { 1.0 - ssr / tss } else { 0.0 }
+}
+
+/// `r_squared_between`（Issue #338、2.3節）: エンティティ平均`ȳ_i.`・`x̄_i.`に
+/// `β0 + Σ_j x̄_ij・β_j`を当てはめた残差平方和と、`ȳ_i.`自身の中心化TSS
+/// （エンティティ平均の単純平均を基準、`T_i`による重み付けはしない——`weights`引数を
+/// 本プロジェクトのREはサポートしないため常に`w=1`、`fe_r_squared_between`と同じ理由）
+/// で計算する。FEの`fe_r_squared_between`と異なり、当てはめ値に切片`β0`を含める
+/// （モジュールdoc参照）。
+fn re_r_squared_between(input: &ReInput, params: &Mat<f64>) -> f64 {
+    let (y_means, x_means, _t) = entity_means(input.y(), input.x(), input.entity());
+    let n_entities = y_means.len();
+    let k = x_means.len();
+
+    let mut ssr = 0.0;
+    for i in 0..n_entities {
+        let fitted = *params.get(0, 0)
+            + (0..k)
+                .map(|j| x_means[j][i] * *params.get(j + 1, 0))
+                .sum::<f64>();
+        let resid = y_means[i] - fitted;
+        ssr += resid * resid;
+    }
+
+    let grand_mean: f64 = y_means.iter().sum::<f64>() / (n_entities as f64);
+    let tss: f64 = y_means.iter().map(|y| (y - grand_mean).powi(2)).sum();
+    if tss > 0.0 { 1.0 - ssr / tss } else { 0.0 }
+}
+
+/// `r_squared_overall`（Issue #338、2.3節）: 変換前の元の`y`・`x`（全観測）に
+/// `β0 + Σ_j x_ij・β_j`を当てはめた残差平方和と、`y`自身の中心化TSSで計算する。
+/// FEの`fe_r_squared_overall`（切片を一切含めない「弱いR²」）と異なり、当てはめ値に
+/// 切片`β0`を含める（モジュールdoc参照）。`estimator().residuals()`（quasi-demean済み
+/// データでの残差）とは別物であることに注意。
+fn re_r_squared_overall(input: &ReInput, params: &Mat<f64>) -> f64 {
+    let y = input.y();
+    let x = input.x();
+    let n = y.len();
+    let k = x.len();
+
+    let mut ssr = 0.0;
+    for i in 0..n {
+        let fitted =
+            *params.get(0, 0) + (0..k).map(|j| x[j][i] * *params.get(j + 1, 0)).sum::<f64>();
+        let resid = y[i] - fitted;
+        ssr += resid * resid;
+    }
+
+    let mean_y: f64 = y.iter().sum::<f64>() / (n as f64);
+    let tss: f64 = y.iter().map(|v| (v - mean_y).powi(2)).sum();
+    if tss > 0.0 { 1.0 - ssr / tss } else { 0.0 }
 }
 
 /// Swamy-Arora法で分散成分（σ_ε²・σ_u²）を推定する（Issue #193、7.1節）。
@@ -439,6 +572,16 @@ pub struct ReEstimator {
     f_statistic: f64,
     /// `f_statistic()`のp値。
     f_p_value: f64,
+    /// パネル固有R²（Issue #338、2.3節）。θ=1固定の通常のwithin変換（RE自身の
+    /// Swamy-Arora準偏差変換とは無関係）での適合度。`df_model==1`（傾き係数0個）なら
+    /// `0.0`（`fit()`のdocコメント「パネル固有R²」参照）。
+    r_squared_within: f64,
+    /// パネル固有R²（Issue #338、2.3節）。エンティティ平均への適合度（中心化TSS、
+    /// 切片`β0`込みの当てはめ）。`df_model==1`なら`0.0`。
+    r_squared_between: f64,
+    /// パネル固有R²（Issue #338、2.3節）。変換前の元データへの適合度（中心化TSS、
+    /// 切片`β0`込みの当てはめ）。`df_model==1`なら`0.0`。
+    r_squared_overall: f64,
 }
 
 impl ReEstimator {
@@ -579,6 +722,11 @@ impl ReEstimator {
             (stat, 1.0 - f_dist.cdf(stat))
         };
 
+        // パネル固有R²（Issue #338、2.3節）。`input`はこの後`Self`に格納するため、
+        // ムーブ前にここで計算する。
+        let (r_squared_within, r_squared_between, r_squared_overall) =
+            re_r_squared(&input, estimator.params(), df_model);
+
         Ok(Self {
             input,
             estimator,
@@ -586,6 +734,9 @@ impl ReEstimator {
             df_model,
             f_statistic,
             f_p_value,
+            r_squared_within,
+            r_squared_between,
+            r_squared_overall,
         })
     }
 
@@ -637,6 +788,22 @@ impl ReEstimator {
     /// `f_statistic()`のp値。
     pub fn f_p_value(&self) -> f64 {
         self.f_p_value
+    }
+
+    /// パネル固有R²（Issue #338、2.3節）。θ=1固定の通常のwithin変換での適合度
+    /// （フィールドdoc「パネル固有R²」参照）。
+    pub fn r_squared_within(&self) -> f64 {
+        self.r_squared_within
+    }
+
+    /// パネル固有R²（Issue #338、2.3節）。エンティティ平均への適合度。
+    pub fn r_squared_between(&self) -> f64 {
+        self.r_squared_between
+    }
+
+    /// パネル固有R²（Issue #338、2.3節）。変換前の元データへの適合度。
+    pub fn r_squared_overall(&self) -> f64 {
+        self.r_squared_overall
     }
 }
 
@@ -1084,6 +1251,14 @@ mod tests {
         // 誤り）とは異なる正しい値であることを確認する。
         assert!((re.f_statistic() - 13.116_023_040_034_996).abs() < 1e-9);
         assert!((re.f_p_value() - 0.015_193_887_618_281_332).abs() < 1e-9);
+
+        // `linearmodels.RandomEffects.fit(cov_type="unadjusted")`の`rsquared_within`/
+        // `rsquared_between`/`rsquared_overall`と数値一致（Issue #338、2.3節）。
+        // `rsquared_between`が負値になる（教科書的な入れ子モデル比較の保証が無いR²の
+        // 定義のため、`f_statistic`と同型の性質）ことも含めて実地検証済み。
+        assert!((re.r_squared_within() - 0.793_812_134_496_668).abs() < 1e-9);
+        assert!((re.r_squared_between() - (-0.391_981_417_047_268_2)).abs() < 1e-9);
+        assert!((re.r_squared_overall() - 0.279_701_906_945_653_1).abs() < 1e-9);
     }
 
     #[test]
@@ -1172,6 +1347,56 @@ mod tests {
         // 傾き係数0個（定数項のみ）のモデルはOLS/FE同様NaN（Issue #337、2.1節）。
         assert!(re.f_statistic().is_nan());
         assert!(re.f_p_value().is_nan());
+
+        // 傾き係数0個（`df_model==1`）ならパネル固有R²は3種とも0.0（Issue #338、2.3節）。
+        // `linearmodels`の`_rsquared`早期リターンと数値一致（実地検証済み）。
+        assert_eq!(re.r_squared_within(), 0.0);
+        assert_eq!(re.r_squared_between(), 0.0);
+        assert_eq!(re.r_squared_overall(), 0.0);
+    }
+
+    #[test]
+    fn re_estimator_fit_r_squared_between_returns_zero_when_entity_means_are_equal() {
+        // rust-reviewer指摘（Issue #338）: `re_r_squared_between`の`TSS <= 0`ガード
+        // （`linearmodels`と同じく`0.0`を返す）がこれまでのテストでは一度も通っていなかった。
+        // 全エンティティの`ȳ_i.`が同じ値になるデータで検証する（REは中心化TSS
+        // `Σ(ȳ_i.-grand_mean)²`のため、FEの非中心化TSS`Σȳ_i.²`と異なり「エンティティ平均が
+        // 全て同じ値」であれば0になれば十分）。
+        //
+        // **踏んだ罠**: 当初
+        // `fe_estimator_fit_one_way_r_squared_between_returns_zero_when_entity_means_are_zero`
+        // と同じデータ（エンティティ平均が全て**0**）を流用したところ、`re.rs`とは無関係の
+        // 別の箇所——`swamy_arora_variance_components`内部のbetween回帰
+        // （`OlsEstimator::fit`）——で`StudentsT::cdf`が`XOutOfRange`でパニックした。
+        // 原因: between回帰は`y_means=[0,0,0]`を`x_means`に回帰する（エンティティ平均が
+        // 全て0のため）ため、切片=0・傾き=0という「厳密に完全な当てはめ」になり
+        // `SSR_between=0`・classical分散`σ²=0`・全係数の`std_error=0`になる。切片の
+        // 係数自体も0のため、t統計量が`0/0=NaN`になり、`StudentsT::cdf(NaN)`が
+        // `statrs`の`beta_reg`内部で不正な引数として扱われパニックする（`OlsEstimator::fit`・
+        // `crate::inference::compute_inference_stat`のどちらもNaN/無限大のt統計量を
+        // ガードしていない、本Issueのスコープ外の既存バグ）。エンティティ平均を「全て同じ
+        // 非ゼロ値」（ここでは5.0、元データを+5シフト）に変えることで、切片の係数自体は
+        // 非ゼロになり`t統計量=非ゼロ/0=±∞`（`NaN`ではない）になるためこのパニックを回避
+        // できることを確認した——`re_r_squared_between`のTSS=0という条件自体は
+        // 変わらない（中心化TSSはシフトに対して不変）。詳細は`engine/src/panel/CLAUDE.md`
+        // 「踏んだ罠」参照。
+        //
+        // within/overallは退化しない（`y`自体の分散はあるため）ことも合わせて確認し、
+        // `linearmodels`の実測値と数値比較する（Pythonで独立に計算・検算済み）。
+        let entity = strings(&["a", "a", "b", "b", "c", "c"]);
+        let x = vec![1.0, 3.0, 2.0, 6.0, 1.0, 4.0];
+        let y = [6.0, 4.0, 7.0, 3.0, 8.0, 2.0];
+        let input =
+            ReInput::from_columns(&y, &[x], vec!["x".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let re = ReEstimator::fit(input, 0.95).unwrap();
+
+        assert!((*re.estimator().params().get(0, 0) - 7.858_407_079_646_017).abs() < 1e-9);
+        assert!((*re.estimator().params().get(1, 0) - (-1.008_849_557_522_124)).abs() < 1e-9);
+        assert!((re.r_squared_within() - 0.842_089_659_107_436_4).abs() < 1e-9);
+        assert_eq!(re.r_squared_between(), 0.0);
+        assert!((re.r_squared_overall() - 0.684_576_485_461_441_1).abs() < 1e-9);
     }
 
     #[test]

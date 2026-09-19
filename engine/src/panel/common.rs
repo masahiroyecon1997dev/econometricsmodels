@@ -309,6 +309,28 @@ pub(crate) fn count_unique(ids: &[String]) -> usize {
     ids.iter().collect::<HashSet<_>>().len()
 }
 
+/// `ids`に現れる全ユニークIDに`θ=1.0`を割り当てた`BTreeMap`を作る。
+///
+/// `quasi_demean_column`の`theta`引数はエンティティID→θ_iの対応（`&BTreeMap<String,
+/// f64>`）を要求するが、θ=1固定の通常のwithin変換（FEのwithin変換そのもの、REの
+/// `r_squared_within`計算——`panel-api-design.md`7.4節「FEはθ=1の特殊ケース」・
+/// Issue #338「`linearmodels`の`_rsquared`のWithinセクションはRE/FEどちらのモデルでも
+/// 共通してθ=1のFE型within変換を使う」参照）で毎回同じ組み立てが必要になるため、
+/// FE/RE共有ロジックとしてここに置く（`group_indices_by_key`/`count_unique`と同じ理由、
+/// Issue #193で最初にFE→common.rsへ移設した前例に倣い、Issue #338でFE→common.rsへ再移設）。
+///
+/// 先に`HashSet`でユニークなIDへ絞り込んでから`String`を複製する（`ids.iter().map(|id|
+/// (id.clone(), 1.0)).collect()`のように観測順のまま素朴に`collect`すると、`BTreeMap`の
+/// 重複キーは値のみ上書きされキー自体は複製されたまま即破棄されるため、観測数`n`分の
+/// ヒープ確保が発生してしまう。rust-reviewer指摘、ユニークID数分のみ複製するよう修正済み）。
+pub(crate) fn all_ones_theta(ids: &[String]) -> BTreeMap<String, f64> {
+    ids.iter()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .map(|id| (id.clone(), 1.0))
+        .collect()
+}
+
 /// θでパラメータ化した準偏差変換を、設計行列の1つの列（`y`または`x`の1列）に適用し、
 /// 変換後の新しい`Vec<f64>`を返す。
 ///

@@ -363,7 +363,8 @@ use crate::error::CommonError;
 use crate::inference;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput, wald_f_test};
 use crate::panel::common::{
-    PanelDimension, PanelError, count_unique, group_indices_by_key, quasi_demean_column,
+    PanelDimension, PanelError, all_ones_theta, count_unique, group_indices_by_key,
+    quasi_demean_column,
 };
 use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
@@ -1386,25 +1387,6 @@ fn overall_residual_mean(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>) -> f64 {
         .map(|i| slope_only_residual(y, x, params, i))
         .sum::<f64>()
         / n as f64
-}
-
-/// `ids`に現れる全ユニークIDに`θ=1.0`を割り当てた`BTreeMap`を作る。
-///
-/// `quasi_demean_column`の`theta`引数はエンティティID→θ_iの対応（`&BTreeMap<String,
-/// f64>`）を要求するが、FEのwithin変換は常にθ=1（`panel-api-design.md`7.4節: FEは
-/// `quasi_demean_column`のθ=1の特殊ケース）のため、呼び出し側で毎回組み立てる代わりに
-/// ここに切り出す。1-way（`entity`列）・2-way（entity列・time列の両方）のどちらでも使う。
-///
-/// 先に`HashSet`でユニークなIDへ絞り込んでから`String`を複製する（`ids.iter().map(|id|
-/// (id.clone(), 1.0)).collect()`のように観測順のまま素朴に`collect`すると、`BTreeMap`の
-/// 重複キーは値のみ上書きされキー自体は複製されたまま即破棄されるため、観測数`n`分の
-/// ヒープ確保が発生してしまう。rust-reviewer指摘、ユニークID数分のみ複製するよう修正）。
-fn all_ones_theta(ids: &[String]) -> BTreeMap<String, f64> {
-    ids.iter()
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .map(|id| (id.clone(), 1.0))
-        .collect()
 }
 
 /// 1-way FE（entityのみ）のwithin変換。`y`と各`x`列にentityでのquasi-demean（θ=1）を

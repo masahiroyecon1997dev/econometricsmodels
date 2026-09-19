@@ -58,6 +58,14 @@
     - **F統計量は負値になりうる**（`linearmodels`自身でも極端な不均衡パネルで実地確認済み。`re_estimator_fit_f_statistic_can_be_negative_for_extremely_unbalanced_panel`、T_i={2,2,15}で固定）。原因: `total_ss`（変換済みyの単純平均基準）は実際にモデルに含まれる変換済み定数列に対する直交性を持たないため、教科書的な入れ子モデル比較（`total_ss >= residual_ss`保証）とは異なり`total_ss < residual_ss`になりうる。`hausman_statistic`（負値をそのまま返す）と同じ「主リファレンスの挙動をクリップせずそのまま踏襲する」方針。
     - 失敗経路は`CommonError::ComputationFailed`（`FisherSnedecor::new`が理論上失敗しえない`num_df`/`df_resid`——ともに`OlsEstimator::fit`成功時点で`>=1`保証済み——に対する防御的`Result`化、`hausman_statistic`の`ChiSquared::new`と同じパターン）のみで、新規`PanelError`バリアントは追加していない。
     - 検証は`linearmodels`（`cov_type="unadjusted"`）の`f_statistic`と直接数値比較（相対誤差`1e-9`、`.claude/rules/testing-policy.md`の基本方針どおり）。
+    - **今後の再検討候補（Issue #339）**: `plm:::pwaldtest`（Rクロスチェック）はWald二次形式（`β'V⁻¹β`）を使い理論上負値になり得ない一方、`linearmodels`のSST/SSR方式は上記の通り負値になりうる。#203のベンチマーク作成時に、`f_statistic`/`f_p_value`という1統計量に限定して`plm`定義への切り替えを再検討する（主リファレンス自体を`linearmodels`から`plm`へ全面的に変更するのではない、他の統計量は`linearmodels`と数値完全一致で検証済みのため、ユーザー確認済み・2026-09-19）。
+  - **パネル固有R²（`ReEstimator::r_squared_within()`/`r_squared_between()`/`r_squared_overall()`、Issue #338、2.3節）も実装済み**: FEの`fe_r_squared_between`/`fe_r_squared_overall`（Issue #183）をそのまま流用できない・共有せずRE独自の`re_r_squared_within`/`re_r_squared_between`/`re_r_squared_overall`として実装した（`panel-api-design.md`7.4節「無理な共通化はしない」）。差異は2点:
+    - **TSSの中心化有無**: REは`has_constant=True`のため中心化TSS（`Σ(y-ȳ)²`）を使うが、FEは`has_constant=False`扱いのため非中心化TSS（`Σy²`）を使う（`weights`引数はFE/REどちらも未サポートのため常に`w=1`——`_prepare_between`の`T_i`ベース重み付けはFE同様常に無効、`fe_r_squared_between`関数doc参照）。
+    - **当てはめ値への切片`β0`の有無**: FEは固定効果自体を含めない「弱いR²」を意図的に採用する（`slope_only_residual`）が、REは真の切片係数`β0`（`params().get(0,0)`）を含めて当てはめる（`fitted = β0 + Σ_j x_j・β_j`）。単なる`has_intercept`分岐の追加では済まず、フィット済みの値そのものの計算式が変わるため共有関数化を見送った。
+    - `r_squared_within`はFEと同じ定義（θ=1固定の通常のwithin変換、REの`θ_i`とは無関係）。共有ヘルパー`all_ones_theta`は元々`fe.rs`専用のprivate関数だったが、本Issueで`common.rs`に`pub(crate)`として移設した（`group_indices_by_key`/`count_unique`がIssue #193で同じ理由で移設された前例に倣う）。
+    - `linearmodels`の`_rsquared`の早期リターン（`has_constant and exog.nvar==1`なら3種とも`0.0`）に倣い、`df_model==1`（傾き係数0個）なら3種とも`0.0`とする（`f_statistic`のNaN分岐とは異なる扱い）。
+    - `r_squared_between`が負値になりうる（`f_statistic`と同型の性質、教科書的な保証が無いR²の定義のため）ことも実地確認済み（`re_estimator_fit_matches_linearmodels_reference`でRE Between R²=-0.39...を固定）。
+    - 検証は`linearmodels`（`cov_type="unadjusted"`）の`rsquared_within`/`rsquared_between`/`rsquared_overall`と直接数値比較（相対誤差`1e-9`）。
   - `fit()`本体（ハウスマン検定、Issue #198）はまだ未実装。`hausman_statistic` も現時点ではまだ`#[cfg(test)] mod tests`からのみ呼ばれる（`pub fn`なので`dead_code`にはならない）。
 - **カバレッジ監査（Issue #185）実施済み**: `cargo llvm-cov -p engine`でFE関連（`panel/fe.rs`・`panel/common.rs`）を計測し、OLS/Logit/Probitと同水準（region/function/line いずれも97〜99%台）であることを確認した。境界値・悪条件（singleton・不均衡2-way・分散ゼロ変数・悪条件設計行列＝完全多重共線性）は既存テストで網羅済み。残る未カバー箇所は全て「保証済みの不変条件に対する防御的`Result`化」（`xtx_inverse`のCholesky失敗、`OlsInput::from_columns`のDimensionMismatch、`StudentsT::new`の自由度不正——いずれも`fit()`内の事前バリデーションで到達不能なことをdocコメントで明記済み、`.claude/rules/rust-style.md`「テスト」節の許容パターン）と、テストのアサーション失敗メッセージ内の行（テスト成功時は実行されない）のみ。追加で`FeEstimator::input()`/`cov_type()`の単純getterが未検証だったため`fe_estimator_fit_exposes_input_and_cov_type_via_getters`（`ols::fit_exposes_input_cov_type_and_residuals_via_getters`と同型）を追加した。
 
@@ -82,6 +90,14 @@
   - **p値は `chi2.sf(stat)`（`1.0 - chi2.cdf(stat)` ではない）**。大きい `stat` で `cdf ≈ 1` になり小さいp値の相対精度が失われるのを避けるため（`sf` は正則化上側不完全ガンマを直接計算。`stat<=0` でも `1.0` を返すので負統計量の挙動は不変）。**`iv/gmm.rs` の Hansen J・Wald系は今も `1.0 - chi2.cdf` のまま**——一括で `sf` へ移行するかは別issue（このズレは意図的な暫定）。
   - `df` には常に `k` を使う。差行列の実効ランクが `k` 未満のとき `stat` と `df` に不整合が生じうる（`plm::phtest` も同じ制約）。
   - v1は classical Hausman のみ（`cov_type` 非依存）。robust版は将来issue。
+
+## 踏んだ罠: between回帰でエンティティ平均が完全に一致すると`OlsEstimator::fit`が`StudentsT::cdf(NaN)`でパニックする（Issue #338、本Issueのスコープ外の既存バグ）
+
+- Issue #338（パネル固有R²）の`re_r_squared_between`のテスト作成中に発見した。**`swamy_arora_variance_components`のbetween回帰（`OlsEstimator::fit`）と`re_r_squared_between`は無関係だが、同じデータ条件（全エンティティの`ȳ_i.`が完全に一致）で同時に踏む**——REのbetween R²のTSSが0になる条件（`Σ(ȳ_i.-grand_mean)²=0`）は、between回帰自身が「切片=共通の平均値・傾き=0」という完全な当てはめ（`SSR_between=0`）になる条件と全く同じであるため。
+- `SSR_between=0`だと`classical_cov_params`の`σ²=0`となり、between回帰の**全係数**の`std_error=0`になる。もし共通の平均値自体も0（＝切片の係数も0）なら、`OlsEstimator::fit`内の`compute_inference_stat`（`crate::inference.rs`）が`stat = coef/se = 0.0/0.0 = NaN`を計算し、続く`dist.cdf(stat.abs())`（`StudentsT::cdf`）が`statrs`の`beta_reg`内部で`XOutOfRange`としてパニックする。
+- **`OlsEstimator::fit`・`crate::inference::compute_inference_stat`はこのNaN t統計量をガードしていない**（本来`ValidationError`/`ComputationError`として`Result`で返すべきだが、現状は`panic`する）。OLS/WLS/FE/RE/Logit/Probit/Tobit/2SLS/GMMなど`compute_inference_stat`を経由する全手法に共通するリスクだが、他手法の既存テストでは偶然一度も踏んでいなかった。修正は本Issueのスコープ外のため対応していない（`/implement-rust`での対応、または専用issue化をユーザーと相談のうえ判断すること）。
+- **回避策（`re_r_squared_between`のテストで採用）**: エンティティ平均を「全て同じ非ゼロ値」にすると、切片の係数自体は非ゼロになり`t統計量=非ゼロ/0=±∞`（`NaN`ではない）になるためこのパニックを回避できる（`statrs`は無限大の`t統計量`自体は正しく処理できる。`re_estimator_fit_r_squared_between_returns_zero_when_entity_means_are_equal`参照）。REのbetween R²のTSSはyの水準シフトに対して不変（中心化TSSのため）なので、この回避策でもテストしたい退化条件（TSS=0）自体は変わらない。
+- 今後、between回帰・その他の回帰で「エンティティ（またはグループ）平均が完全に一致する」ような退化データをテストで構成する際は、この罠に注意すること（同じ理由で対称的に踏む）。
 
 ## PanelError（Issue #172で確定済みの方針、変更時は要確認）
 

@@ -22,11 +22,11 @@ use argmin::core::{
     Problem, Solver, State, TerminationReason,
 };
 use argmin::solver::linesearch::MoreThuenteLineSearch;
-use argmin::solver::quasinewton::LBFGS;
 use faer::prelude::{Solve, SolveLstsq};
 use faer::{Mat, Side};
 use statrs::distribution::{ChiSquared, Continuous, ContinuousCDF, Normal};
 use std::cell::Cell;
+use std::collections::VecDeque;
 use thiserror::Error;
 
 use crate::design_matrix::design_matrix_element;
@@ -194,15 +194,19 @@ pub enum MleError {
     /// `bfgs`/`lbfgs`のline search（`MoreThuenteLineSearch`）が、収束判定を一度も満たさない
     /// まま目的関数・勾配の評価回数の総枠（[`BudgetedProblem`]）を使い切った（Issue #342）。
     ///
-    /// **背景**: `bfgs`の自前実装（`FaerBfgs`）・`lbfgs`（argmin組み込み`LBFGS`）はいずれも、
-    /// line searchを走らせる内側`Executor`に反復回数の上限を設定しておらず（argminの既定値
+    /// **背景**: `bfgs`（自前実装`FaerBfgs`）・`lbfgs`（自前実装`FaerLbfgs`、Issue #343。
+    /// 導入当初はargmin組み込み`LBFGS`だった）はいずれも、line searchを走らせる内側
+    /// `Executor`に（Issue #342当時は）反復回数の上限を設定しておらず（argminの既定値
     /// `u64::MAX`）、`MoreThuenteLineSearch`自体もステップ幅の上限（`stpmax`）を設定して
     /// いない。探索方向・勾配の組み合わせが退化し、line search内部の収束判定
     /// （`info`フラグ1〜6のいずれか）もNaN/Infガードも一度も発火しない状況に嵌ると、
     /// この内側ループは理論上終了しない（devビルドで80分超のCPU時間を消費し続ける
     /// ケースを実測で確認済み）。[`BudgetedProblem`]による評価回数の総枠は、この
-    /// 退化状況を有限時間で検出しエラーに変換するための安全弁であり、argmin自体
-    /// （フォーク不可能な固定バージョン依存）を変更せずに`bfgs`/`lbfgs`両方を保護する。
+    /// 退化状況を有限時間で検出しエラーに変換するための安全弁。`lbfgs`が当時argmin
+    /// 組み込みだった間は、フォーク不可能な固定バージョン依存を変更せずに保護する
+    /// 手段でもあった（Issue #343で`FaerLbfgs`に置き換えた後も、[`LINE_SEARCH_MAX_ITERS`]
+    /// による個別のline search反復上限とは別の、複数のline search呼び出しを横断する
+    /// 粗い安全網として引き続き適用する）。
     ///
     /// メッセージは「objective/gradient」の評価回数と表現しているが、実際には
     /// `newton`のHessian評価（最適化ループ内で毎反復呼ばれる分。収束後1回だけの最終
@@ -1001,30 +1005,60 @@ pub struct SolverOutput {
 /// 実測反復回数に対して十分なマージンがあることをrust-reviewer確認済み。
 const MAX_EVALUATIONS_PER_ITER: u64 = 2000;
 
+/// [`FaerLbfgs`]のtwo-loop recursion（[`two_loop_recursion`]）が保持する直近secantペア
+/// `(s,y)`の件数（limited-memoryの由来、Issue #343）。従来のargmin組み込み
+/// `LBFGS::new(linesearch, 7)`と同じ既定値をそのまま踏襲する（変更する積極的な理由が
+/// 無いため）。
+const LBFGS_HISTORY_SIZE: usize = 7;
+
+/// [`FaerLbfgs::next_iter`]が内側line search用`Executor`に設定する反復回数の上限
+/// （Issue #343）。
+///
+/// **背景**: argminの`Executor::run()`は`max_iters`に到達しても`Err`を返さず、
+/// `TerminationStatus::Terminated(TerminationReason::MaxItersReached)`を伴う`Ok`として
+/// 打ち切り時点のパラメータをそのまま返す（収束判定を満たしたわけではない不正な
+/// ステップになりうる）。[`BudgetedProblem`]（Issue #342）は「評価回数の総枠を使い
+/// 切ったら`Err`」という複数回のline search呼び出しを横断する粗い安全網で、この種の
+/// 暴走を有限時間で検出するが、「1回のline searchが収束せず打ち切られた」ことを
+/// 明示的には教えてくれず、黙って不正な点を採用しうる問題は残る。このため
+/// `FaerLbfgs`では内側`Executor`に明示的な`max_iters`を設定した上で、`.run()`後に
+/// 収束判定（`TerminationReason::SolverConverged`）を満たしていない場合は明示的に
+/// エラー化する（`FaerBfgs`には無いチェックだが、本Issueのスコープは`FaerLbfgs`のみで
+/// `FaerBfgs`側は変更しない、ユーザー確認済み）。
+///
+/// **値の根拠**: 正常収束するケースのline searchは数回〜数十回程度で収束する
+/// （[`MAX_EVALUATIONS_PER_ITER`]のdocコメント参照、公式ハーネスの実測でbfgsが6〜7
+/// 反復・lbfgsが17反復で収束）。`100`はこれに対して数倍〜1桁のマージンを残しつつ、
+/// [`BudgetedProblem`]の総枠（1outer反復あたり`2000`）よりずっと小さい専用の値とし、
+/// 退化したline search単体を総枠の消費を待たずに早期検出できるようにする
+/// （ユーザー確認済み）。
+const LINE_SEARCH_MAX_ITERS: u64 = 100;
+
 /// [`run_solver`]に渡す`problem`をラップし、`CostFunction`/`Gradient`/`Hessian`の呼び出し
 /// 回数に総枠（バジェット）を設ける（Issue #342: `nonlinear::tobit::tests::proptests`が
 /// devプロファイルで異常に長時間実行される問題の根本対応）。
 ///
-/// **背景**: `Method::Bfgs`（自前実装`FaerBfgs`、[`FaerBfgs::next_iter`]）・
-/// `Method::Lbfgs`（argmin組み込み`LBFGS`）はいずれも、1回の外側反復ごとに
-/// `MoreThuenteLineSearch`を内側`Executor`で走らせるが、この内側`Executor`には
-/// `max_iters`が設定されておらず（argminの`IterState`既定値`u64::MAX`）、
-/// `MoreThuenteLineSearch`自体もステップ幅の上限（`stpmax`）を設定していない
+/// **背景（Issue #342当時）**: `Method::Bfgs`（自前実装`FaerBfgs`、[`FaerBfgs::next_iter`]）・
+/// `Method::Lbfgs`（当時はargmin組み込み`LBFGS`。Issue #343で`FaerLbfgs`に置き換え済み）は
+/// いずれも、1回の外側反復ごとに`MoreThuenteLineSearch`を内側`Executor`で走らせるが、
+/// この内側`Executor`には`max_iters`が設定されておらず（argminの`IterState`既定値
+/// `u64::MAX`）、`MoreThuenteLineSearch`自体もステップ幅の上限（`stpmax`）を設定していない
 /// （argmin側のデフォルトは`f64::INFINITY`）。探索方向・勾配の組み合わせが退化し、
 /// line search内部の収束判定（`info`フラグ）もNaN/Infガードも一度も発火しない状況に
 /// 嵌ると、この内側ループは理論上終了しない（[`MleError::EvaluationBudgetExceeded`]の
 /// docコメント参照）。
 ///
 /// **なぜここに1箇所実装すれば全methodを保護できるか**: `MoreThuenteLineSearch`は
-/// 呼び出し元（`FaerBfgs`の自前実装、argmin組み込み`LBFGS`のいずれも）を問わず、
-/// 必ず`Problem<O>`経由で`problem.cost()`/`problem.gradient()`を呼ぶ。argminの全trait
-/// メソッドは`Result`を返す設計のため、ここでエラーを返せば`?`演算子で呼び出し元
-/// （`MoreThuenteLineSearch::next_iter`→内側`Executor::run()`→`FaerBfgs::next_iter`または
-/// 組み込み`LBFGS::next_iter`→外側`Executor::run()`）を素通りしてそのまま伝播する。
-/// **argmin自体のソースコードを一切変更・フォークせずに`Method::Lbfgs`（argmin組み込み、
-/// 内部を直接制御できない）も保護できる**のがこの設計の要点（対応方針の検討過程で、
-/// argmin組み込み`LBFGS`内部の同型の呼び出し箇所に直接`max_iters`を注入する案も
-/// 検討したが、依存クレートのソース変更が必要で不採用とした）。
+/// 呼び出し元（`FaerBfgs`・`FaerLbfgs`いずれの自前実装も）を問わず、必ず`Problem<O>`経由で
+/// `problem.cost()`/`problem.gradient()`を呼ぶ。argminの全traitメソッドは`Result`を返す
+/// 設計のため、ここでエラーを返せば`?`演算子で呼び出し元（`MoreThuenteLineSearch::next_iter`
+/// →内側`Executor::run()`→`FaerBfgs::next_iter`または`FaerLbfgs::next_iter`→外側
+/// `Executor::run()`）を素通りしてそのまま伝播する。Issue #343で`FaerLbfgs`が
+/// [`LINE_SEARCH_MAX_ITERS`]による個別の反復上限＋明示的なエラー化を持つようになった後も、
+/// この`BudgetedProblem`は複数回のline search呼び出しを横断する総枠として引き続き
+/// 全methodに一律適用する（個々のline search呼び出しは正常に収束を繰り返しても、
+/// 外側反復自体が`max_iter`に対して過剰に多い場合の粗い安全網、[`FaerNewton`]の
+/// `MAX_LM_ATTEMPTS`と同じ位置づけ）。
 ///
 /// `Method::Newton`（`FaerNewton`）はこの経路を通らず自前のLMラダー
 /// （`MAX_LM_ATTEMPTS`）で既に有限回に抑えられているが、[`run_solver`]は3method共通で
@@ -1203,13 +1237,15 @@ where
             extract_outcome(result.state, result.problem)?
         }
         Method::Lbfgs => {
-            // Bfgsと同じ正規化（`n_obs`で正規化した「観測あたり平均勾配」基準）。argmin
-            // 組み込みのLBFGSは正規化を知らないため、実効的な絶対閾値を`with_tolerance_grad`
-            // に渡す。
-            let linesearch = MoreThuenteLineSearch::new();
-            let solver = LBFGS::new(linesearch, 7)
-                .with_tolerance_grad(tol * n_obs as f64)
-                .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+            // Bfgsと同じ正規化（`n_obs`で正規化した「観測あたり平均勾配」基準）。
+            // `FaerLbfgs`自体は正規化を知らず、実効的な絶対閾値を受け取るだけでよい
+            // （`FaerBfgs`と同じ設計、Issue #343）。
+            let solver = FaerLbfgs {
+                linesearch: MoreThuenteLineSearch::new(),
+                tol: tol * n_obs as f64,
+                s_history: VecDeque::with_capacity(LBFGS_HISTORY_SIZE),
+                y_history: VecDeque::with_capacity(LBFGS_HISTORY_SIZE),
+            };
             let result = Executor::new(problem, solver)
                 .configure(|state| state.param(initial_params).max_iters(max_iter))
                 .run()
@@ -1271,32 +1307,24 @@ where
 
 /// `Executor::run()`の結果から`(params, converged, n_iter, model)`を取り出す。
 /// `Method`の3分岐で共通の後処理のため、`run_solver`から切り出している。
-/// `I`はソルバーごとに異なる状態型（LBFGSはHessianスロットを使わないため`H=()`）だが、
+/// `I`はソルバーごとに異なる状態型（`FaerLbfgs`はHessianスロットを使わないため`H=()`）だが、
 /// いずれも`State`トレイト経由で同じ形で取り出せる。
 ///
-/// **`TerminationReason::SolverExit`は`problem.take_problem()`より先に検出する
-/// （Issue #342で判明、下記`ok_or_else`のdocコメントの前提を修正）**: argmin組み込み
-/// `LBFGS::next_iter`は、line search用の内側`Executor::run()`が`Err`を返しても`?`で
-/// 伝播せず、`Ok(state.terminate_with(TerminationReason::SolverExit(msg)))`として
-/// 握りつぶす（`argmin-0.11.0/src/solver/quasinewton/lbfgs.rs`の`next_iter`実装。
-/// `msg`は元のエラーの`Display`文字列を含む）。この分岐では内部の`O`を呼び出し元へ
-/// 戻す処理（通常成功時の`problem.problem = Some(...)`相当）も行われないため、
-/// 後段の`problem.take_problem()`は必ず`None`になる——`Method::Bfgs`の自前実装
-/// `FaerBfgs`は`?`でそのまま`Err`を伝播するため対象外だが、`Method::Lbfgs`では
-/// [`BudgetedProblem`]（評価回数バジェット超過）のエラーがこの経路を通ることを
-/// 実測で確認した。`take_problem()`が返す`None`を「理論上到達不能な防御的分岐」
-/// として扱うと、この場合に元のエラー内容が失われた不親切な汎用メッセージ
-/// （「failed to recover the optimization problem」）になってしまうため、
-/// `SolverExit`を専用に検出し`msg`をそのまま使って早期に返す。
+/// **`TerminationReason::SolverExit`を専用に検出していた分岐は削除済み（Issue #343）**:
+/// 元々は、`Method::Lbfgs`が当時使っていたargmin組み込み`LBFGS::next_iter`が、line search用
+/// 内側`Executor::run()`の`Err`を`?`で伝播せず`Ok(state.terminate_with(SolverExit(msg)))`と
+/// して握りつぶす挙動（`argmin-0.11.0/src/solver/quasinewton/lbfgs.rs`）を持っていたため、
+/// この分岐で早期検出し元のエラー内容を保っていた（Issue #342）。Issue #343で
+/// `Method::Lbfgs`を自前実装`FaerLbfgs`（[`FaerBfgs`]・[`FaerNewton`]と同じく`?`で
+/// そのまま`Err`を伝播する設計）に置き換えたことで、3method全てが`SolverExit`を
+/// 二度と発生させなくなった（`MoreThuenteLineSearch`自体もこの`TerminationReason`は
+/// 使わない）ため、分岐ごと削除した。
 ///
 /// **残る`ok_or_else`の2箇所は理論上到達不能**（`.claude/rules/rust-style.md`「テスト」の
-/// カバレッジ方針、Logitのカバレッジ確認時に判明・受け入れ済み。上記`SolverExit`の
-/// 早期returnにより`take_problem()`側の前提は「`SolverExit`以外の理由でNoneになる
-/// ケースが無い」に絞られる）:
+/// カバレッジ方針、Logitのカバレッジ確認時に判明・受け入れ済み）:
 /// - `state.get_best_param()`が`None`になるのは`Executor::run()`が`init()`/`next_iter()`を
 ///   一度も呼ばずに終了した場合のみだが、`init()`が必ず初期パラメータを`state`に設定する
-///   （`FaerNewton::init`、BFGS/LBFGSも同様に組み込みソルバーが初期化時に設定する）ため
-///   起こり得ない。
+///   （`FaerNewton::init`・`FaerBfgs::init`・`FaerLbfgs::init`のいずれも）ため起こり得ない。
 /// - `problem.take_problem()`が`None`になるのは既に一度`take_problem()`を呼んだ後に
 ///   再度呼んだ場合のみだが、`run_solver`はこの関数を`Executor::run()`の結果に対して
 ///   1回しか呼ばない。
@@ -1307,10 +1335,6 @@ fn extract_outcome<O, I>(
 where
     I: State<Param = Vec<f64>>,
 {
-    if let Some(TerminationReason::SolverExit(reason)) = state.get_termination_reason() {
-        return Err(CommonError::ComputationFailed(reason.clone()).into());
-    }
-
     let converged = matches!(
         state.get_termination_reason(),
         Some(TerminationReason::SolverConverged)
@@ -1739,11 +1763,12 @@ fn newton_step(hessian: &[Vec<f64>], grad: &[f64]) -> Result<Vec<f64>, MleError>
 /// （固定値のまま反復間で使い回すと、スケール補正済みの反復まで不必要に小さい
 /// ステップから始めることになり逆効果になりうるため）。
 ///
-/// `Method::Lbfgs`は対象外: argmin 0.11.0のLBFGS実装は`s`/`y`履歴・初期`γ`を外部から
-/// 注入する公開APIが無く（privateフィールド、対応するビルダーメソッド無し）、同じ
-/// 手法を適用できない。line searchの初期ステップ幅で代用しようとしても全反復共通の
-/// 固定値になり、2回目以降の反復（LBFGS内部の動的`γ`で既に正しくスケールされている
-/// 反復）を悪化させるリスクがあるため見送った（Issue #285、ユーザー確認済み）。
+/// **`Method::Lbfgs`は当初対象外だった（解消済み、Issue #343）**: 導入当初（Issue #285）は
+/// argmin 0.11.0の組み込みLBFGS実装が`s`/`y`履歴・初期`γ`を外部から注入する公開APIを
+/// 持たず（privateフィールド、対応するビルダーメソッド無し）、同じ手法を適用できな
+/// かった。その後Issue #343で`Method::Lbfgs`自体を自前実装`FaerLbfgs`に置き換え、
+/// `FaerBfgs`と同じ「`self`がline searchを所有し1回目の反復だけ初期ステップ幅を
+/// 切り替える」制御を獲得したことで解消した（詳細は`FaerLbfgs`のdocコメント参照）。
 struct FaerBfgs {
     /// line search。`self`が所有し反復間で使い回す（`initial_step_length`で1回目の
     /// 反復だけ特別なステップ幅を設定し、2回目以降は標準値に戻す、という制御を行う
@@ -2002,6 +2027,283 @@ fn bfgs_updated_inv_hessian(
         inv_hessian
     };
     bfgs_rank2_update(&prior_h, sk, yk, rho)
+}
+
+/// argmin組み込みの`LBFGS`（`argmin::solver::quasinewton::LBFGS`）を、`FaerBfgs`と同型の
+/// パターンで自前実装したもの（Issue #343）。
+///
+/// **経緯**: `FaerBfgs`（Issue #285、上記docコメント参照）は「1回目の反復専用のline
+/// search初期ステップ幅`min(1,1/‖g₀‖)`」を適用することで、単位行列の逆Hessianによる
+/// 最初の探索方向の暴走を防いだが、argmin組み込み`LBFGS`にはこの制御点を適用できな
+/// かった（`linesearch`フィールドがprivateで、`self.linesearch.clone()`を反復ごとに
+/// 使い捨てるだけの内部実装のため、`FaerBfgs`のように`self`が`linesearch`を所有し
+/// 反復間で初期ステップ幅を切り替える制御ができない）。two-loop recursion自体が使う
+/// `γ=(s_{k-1}ᵀy_{k-1})/(y_{k-1}ᵀy_{k-1})`によるself-scalingは、argmin組み込み`LBFGS`も
+/// 2回目以降の反復では既に内部で行っている（履歴`s`/`y`から動的に計算、Nocedal &
+/// Wright *Numerical Optimization* 6.1節そのもの）ため、`FaerBfgs`のケースとは異なり
+/// two-loop recursionの数式自体に欠陥があるわけではない。**欠けていたのは「1回目の
+/// 反復（履歴が空で`γ=1.0`固定）専用のline search初期ステップ幅」という、`FaerBfgs`と
+/// 全く同じ制御点**であり、argmin組み込みの公開APIにはこれが無かった。
+///
+/// `argmin::core::Solver`トレイトを直接実装し、two-loop recursion（[`two_loop_recursion`]）を
+/// 自前で持つことで、この制御点を獲得する（`FaerNewton`/`FaerBfgs`と同じ理由での
+/// 自前化）。line search自体は`FaerBfgs`と同様、引き続き`MoreThuenteLineSearch`を流用する。
+///
+/// あわせて、内側line search用`Executor`に明示的な`max_iters`（[`LINE_SEARCH_MAX_ITERS`]）を
+/// 設定し、収束判定を満たさないまま打ち切られた場合は明示的にエラー化する
+/// （[`LINE_SEARCH_MAX_ITERS`]のdocコメント参照。Issue #342で判明した「`max_iters`到達は
+/// `Err`にならず不正なステップを黙って採用してしまう」問題への対応。`FaerBfgs`には無い
+/// チェックだが、本Issueのスコープは`FaerLbfgs`のみのため`FaerBfgs`側は変更しない、
+/// ユーザー確認済み）。
+///
+/// `FaerBfgs`と異なり逆Hessian近似を陽には持たず、直近[`LBFGS_HISTORY_SIZE`]件の
+/// secantペア`(s,y)`だけを保持する（limited-memoryの由来）。
+struct FaerLbfgs {
+    /// line search。`self`が所有し反復間で使い回す（`FaerBfgs::linesearch`と同じ理由）。
+    linesearch: MoreThuenteLineSearch<Vec<f64>, Vec<f64>, f64>,
+    tol: f64,
+    /// 直近`s`（パラメータ差分`θ_{k+1}-θ_k`）の履歴。古い順（先頭が最古）、
+    /// [`LBFGS_HISTORY_SIZE`]件を超えたら最古のペアから破棄する（limited-memoryの
+    /// 由来）。`y_history`と常に同じ長さ・同じ順序で対応する。
+    s_history: VecDeque<Vec<f64>>,
+    /// 直近`y`（勾配差分`∇f_{k+1}-∇f_k`）の履歴。`s_history`のdocコメント参照。
+    y_history: VecDeque<Vec<f64>>,
+}
+
+type LbfgsState = IterState<Vec<f64>, Vec<f64>, (), (), (), f64>;
+
+impl<O> Solver<O, LbfgsState> for FaerLbfgs
+where
+    O: CostFunction<Param = Vec<f64>, Output = f64>
+        + Gradient<Param = Vec<f64>, Gradient = Vec<f64>>,
+{
+    /// `argmin::core::Solver`トレイトの必須メソッド（`FaerNewton::name`と同じ理由で
+    /// 未カバーでも振る舞いの正しさに影響しない）。
+    fn name(&self) -> &str {
+        "L-BFGS (faer-backed)"
+    }
+
+    fn init(
+        &mut self,
+        problem: &mut Problem<O>,
+        mut state: LbfgsState,
+    ) -> Result<(LbfgsState, Option<KV>), OptimizerError> {
+        let param = state.take_param().ok_or_else(|| {
+            OptimizerError::msg(
+                "FaerLbfgs requires an initial parameter vector via Executor's configure method",
+            )
+        })?;
+        let grad = problem.gradient(&param)?;
+
+        // 1回目の反復専用のline search初期ステップ幅（`FaerBfgs::init`と同じ式・同じ
+        // 理由）。履歴が空の1回目は`two_loop_recursion`のγが既定`1.0`のままで探索方向
+        // `-g₀`をスケールできないため、単位行列の逆Hessianを使う`FaerBfgs`の1回目と
+        // 同型の暴走リスクがある。
+        //
+        // **既知のトレードオフ（未解決、Issue #343）**: `n_obs`で正規化する案
+        // （`min(1, n_obs/‖g₀‖)`、`tol`の正規化と同じ発想）を試したが、
+        // Issue #344のTobit退化ケース（`fit_lbfgs_converges_for_a_previously_
+        // stalling_case_from_issue_344`）が再び`LINE_SEARCH_MAX_ITERS`超過で
+        // 失敗する回帰を確認したため不採用とした（`‖g₀‖`と`n_obs`の関係は単純な
+        // 比例関係ではなく、データセットごとに異なるため）。無正規化のこの式のままだと
+        // `generate_binary_choice_dataset("baseline", link="probit", n=100_000,
+        // k=5, seed=42)`で`alpha0≈7.5e-5`という過度に小さい初期ステップになり、
+        // argmin組み込みLBFGS時代の7反復・0.16sから自前実装後12反復・0.54sへ悪化する
+        // （`docs/performance/probit.md`参照）。詳細な原因・より良い初期ステップ幅の
+        // 設計は次セッションで継続調査する（ユーザー確認済み）。
+        let alpha0 = (1.0 / l2_norm(&grad)).min(1.0);
+        if alpha0.is_finite() && alpha0 > 0.0 {
+            self.linesearch.initial_step_length(alpha0)?;
+        }
+
+        let state = state.param(param).gradient(grad);
+        Ok((state, None))
+    }
+
+    fn next_iter(
+        &mut self,
+        problem: &mut Problem<O>,
+        mut state: LbfgsState,
+    ) -> Result<(LbfgsState, Option<KV>), OptimizerError> {
+        let param = state
+            .take_param()
+            .ok_or_else(|| OptimizerError::msg("FaerLbfgs: parameter vector in state not set"))?;
+        let cur_cost = state.get_cost();
+        let prev_grad = state
+            .take_gradient()
+            .ok_or_else(|| OptimizerError::msg("FaerLbfgs: gradient in state not set"))?;
+        // `FaerBfgs::next_iter`の`is_first_iter`と同じ役割（履歴追加前に判定する）。
+        let is_first_iter = state.get_iter() == 0;
+
+        let direction = two_loop_recursion(&self.s_history, &self.y_history, &prev_grad);
+        self.linesearch.search_direction(direction);
+
+        // `take_problem()`が`None`になるのは既に一度取り出した後に再度取り出した場合
+        // のみだが、`next_iter`はこの箇所でしか呼ばない（`FaerBfgs::next_iter`と同じ
+        // 契約）。
+        let inner_problem = problem.take_problem().ok_or_else(|| {
+            OptimizerError::msg("FaerLbfgs: failed to recover the optimization problem")
+        })?;
+        let result = Executor::new(inner_problem, self.linesearch.clone())
+            .configure(|config| {
+                config
+                    .param(param.clone())
+                    .gradient(prev_grad.clone())
+                    .cost(cur_cost)
+                    .max_iters(LINE_SEARCH_MAX_ITERS)
+            })
+            .ctrlc(false)
+            .run()?;
+        let mut sub_state = result.state;
+        let line_problem = result.problem;
+
+        // `LINE_SEARCH_MAX_ITERS`のdocコメント参照: `max_iters`到達は`Err`にならず
+        // 打ち切り時点のパラメータをそのまま`Ok`で返すため、収束判定を明示的に
+        // 確認する（Issue #343で追加。`FaerBfgs`には無いチェック）。
+        if !matches!(
+            sub_state.get_termination_reason(),
+            Some(TerminationReason::SolverConverged)
+        ) {
+            let mle_error: MleError = CommonError::ComputationFailed(format!(
+                "line search did not converge within {LINE_SEARCH_MAX_ITERS} iterations"
+            ))
+            .into();
+            return Err(mle_error.into());
+        }
+
+        let xk1 = sub_state.take_param().ok_or_else(|| {
+            OptimizerError::msg("FaerLbfgs: no parameters returned by line search")
+        })?;
+        let next_cost = sub_state.get_cost();
+        problem.consume_problem(line_problem);
+
+        let grad = problem.gradient(&xk1)?;
+
+        // 1回目の反復専用のline search初期ステップ幅（`init`で設定）は、2回目以降は
+        // 標準の1.0に戻す（`FaerBfgs::next_iter`と同じ理由）。
+        if is_first_iter {
+            self.linesearch.initial_step_length(1.0)?;
+        }
+
+        let sk: Vec<f64> = xk1.iter().zip(param.iter()).map(|(a, b)| a - b).collect();
+        let yk: Vec<f64> = grad
+            .iter()
+            .zip(prev_grad.iter())
+            .map(|(a, b)| a - b)
+            .collect();
+
+        // secant条件`yᵀs>0`のチェックは行わず、argmin組み込み`LBFGS::next_iter`と同じく
+        // 常にペアを履歴に追加する（`FaerBfgs`のrank-2更新スキップとは異なる設計、
+        // Issue #343で判明）。`MoreThuenteLineSearch`はstrong Wolfe条件（曲率条件
+        // `|φ'(α)|≤c2|φ'(0)|`）を満たすステップのみ受理するため、受理されたペアは
+        // 理論上`yᵀs>0`を自然に満たす（負曲率を追加で弾く必要性が薄い）。
+        //
+        // 当初は`FaerBfgs`に倣い絶対閾値`f64::EPSILON`でペアを弾くガードを入れていたが、
+        // `generate_binary_choice_dataset("baseline", link="probit", n=100_000, k=5,
+        // seed=42)`で実測したところ、収束点近傍でコスト関数が浮動小数点の底に達すると
+        // （Issue #291と同根）`yᵀs`が`f64::EPSILON`をわずかに下回る値になり続け、
+        // このガードが新しいペアの追加を拒否し続けて履歴が古いまま凍結される結果、
+        // 収束までの反復回数が9→31、実行時間が0.27s→5.1sに悪化することが判明した。
+        // ガードを外す（常に追加する）と反復回数は12まで戻る。`rho=1/(yᵀs)`が極端に
+        // 大きくなるリスクはあるが、limited-memoryのため悪いペアの影響は
+        // `LBFGS_HISTORY_SIZE`反復で自然にローテーションアウトされる（argmin組み込み
+        // 版が長年この設計で問題なく動いてきたこととも整合する）。
+        if self.s_history.len() >= LBFGS_HISTORY_SIZE {
+            self.s_history.pop_front();
+            self.y_history.pop_front();
+        }
+        self.s_history.push_back(sk);
+        self.y_history.push_back(yk);
+
+        Ok((state.param(xk1).cost(next_cost).gradient(grad), None))
+    }
+
+    fn terminate(&mut self, state: &LbfgsState) -> TerminationStatus {
+        if let Some(g) = state.get_gradient()
+            && l2_norm(g) < self.tol
+        {
+            return TerminationStatus::Terminated(TerminationReason::SolverConverged);
+        }
+        // コストが（ほぼ）変化しなくなった場合も収束扱いにする（`FaerBfgs::terminate`と
+        // 同じ理由・同じ基準。argmin組み込み`LBFGS`の既定`tol_cost=F::epsilon()`も踏襲）。
+        if (state.get_prev_cost() - state.get_cost()).abs() < f64::EPSILON {
+            return TerminationStatus::Terminated(TerminationReason::SolverConverged);
+        }
+        TerminationStatus::NotTerminated
+    }
+}
+
+/// L-BFGSのtwo-loop recursion（Nocedal & Wright *Numerical Optimization* Algorithm 7.4）:
+/// 直近`m`件のsecantペア`(sᵢ,yᵢ)`（`s_history`/`y_history`、古い順）と現在の勾配`grad`から
+/// 近似逆Hessian×勾配`H_k∇f_k`を計算し、降下方向`-H_k∇f_k`を返す。
+///
+/// `s_history`/`y_history`が空（最適化1回目の反復）の場合は`γ=1.0`（スケーリング無し）
+/// として単位行列近似にフォールバックし、`-grad`を返す（`FaerLbfgs::init`が設定する
+/// line search初期ステップ幅でこの反復のスケールを別途補う、`FaerLbfgs`のdocコメント
+/// 参照）。
+///
+/// `γ=(s_lastᵀy_last)/(y_lastᵀy_last)`（直近のペアのみを使うself-scaling、argmin組み込み
+/// `LBFGS::next_iter`の`gamma`計算と同じ式）。`y_lastᵀy_last`が実質ゼロ（縮退）の場合は
+/// ゼロ除算を避け`γ=1.0`にフォールバックする（`bfgs_updated_inv_hessian`の
+/// `ykyk > f64::EPSILON`ガードと同じ発想）。
+fn two_loop_recursion(
+    s_history: &VecDeque<Vec<f64>>,
+    y_history: &VecDeque<Vec<f64>>,
+    grad: &[f64],
+) -> Vec<f64> {
+    let m = s_history.len();
+    let mut q = grad.to_vec();
+    let mut alpha = vec![0.0; m];
+    let mut rho = vec![0.0; m];
+
+    // `yᵀs`が実質ゼロ（丸め誤差で負・ほぼゼロになりうる）なペアは、そのペアの寄与を
+    // 素通り（`rho_i=alpha_i=0.0`、`q`を更新しない）させて安全に無視する
+    // （rust-reviewer指摘）。`gamma`計算の`yy > f64::EPSILON`ガードと同じ絶対閾値・
+    // 同じ発想だが、`gamma`が履歴の最後のペアだけを見るのに対し、こちらは
+    // two-loop recursionが参照する**全ペア**に適用する必要がある——`FaerLbfgs::
+    // next_iter`は（`FaerBfgs`のrank-2更新スキップとは異なり）secant条件を満たさない
+    // ペアも履歴にそのまま追加する設計（このファイル内の`FaerLbfgs`のdocコメント
+    // 「実装時に踏んだ罠その1」参照）のため、`rho_i=1/(yᵀs)`のゼロ除算が理論上
+    // 履歴中の任意のペアで起こりうる。`rho[i]=alpha[i]=0.0`のままにしておけば、
+    // 後続の前向きループでも`beta_i=rho[i]*..=0`・`coeff=alpha[i]-beta_i=0`となり
+    // 自動的に同じペアの寄与が無視される（前向きループ側に別途ガードを足す必要はない）。
+    for (i, (s, y)) in s_history.iter().zip(y_history.iter()).enumerate().rev() {
+        let yksk = dot(y, s);
+        if yksk <= f64::EPSILON {
+            continue;
+        }
+        let rho_i = 1.0 / yksk;
+        let alpha_i = rho_i * dot(s, &q);
+        for (q_j, y_j) in q.iter_mut().zip(y.iter()) {
+            *q_j -= alpha_i * y_j;
+        }
+        rho[i] = rho_i;
+        alpha[i] = alpha_i;
+    }
+
+    let gamma = s_history
+        .back()
+        .zip(y_history.back())
+        .map(|(s, y)| {
+            let yy = dot(y, y);
+            if yy > f64::EPSILON {
+                dot(s, y) / yy
+            } else {
+                1.0
+            }
+        })
+        .unwrap_or(1.0);
+    let mut r: Vec<f64> = q.iter().map(|v| v * gamma).collect();
+
+    for (i, (s, y)) in s_history.iter().zip(y_history.iter()).enumerate() {
+        let beta_i = rho[i] * dot(y, &r);
+        let coeff = alpha[i] - beta_i;
+        for (r_j, s_j) in r.iter_mut().zip(s.iter()) {
+            *r_j += coeff * s_j;
+        }
+    }
+
+    r.iter().map(|v| -v).collect()
 }
 
 /// 設計行列`x`を列ピボットQR分解し、ランク落ちが無ければQR分解をそのまま返す
@@ -2519,16 +2821,14 @@ mod tests {
 
     #[test]
     fn run_solver_lbfgs_returns_a_bounded_error_instead_of_hanging_on_a_stalled_line_search() {
-        // `Method::Bfgs`（自前実装`FaerBfgs`、上のテスト）とは異なり、argmin組み込み
-        // `LBFGS::next_iter`はline search内側`Executor`のエラーを`?`で伝播せず
-        // `TerminationReason::SolverExit(msg)`として`Ok`に握りつぶす
-        // （`extract_outcome`のdocコメント参照）。そのため戻り値は
-        // `MleError::EvaluationBudgetExceeded`という具体的なバリアントにはならず
-        // `MleError::Common(ComputationFailed(msg))`になるが、`msg`には元の
-        // `EvaluationBudgetExceeded`のメッセージがそのまま残る。このテストの主眼は
-        // 具体的なバリアントの一致ではなく、`Method::Lbfgs`でもハングせず有限時間で
-        // 意味のあるエラーが返ること（Issue #342の安全網がargmin組み込みLBFGSにも
-        // 効くことの確認）。
+        // `FaerLbfgs`（Issue #343で自前実装に置き換え済み）は、`FaerBfgs`と違い内側line
+        // search用`Executor`に明示的な`max_iters`（[`LINE_SEARCH_MAX_ITERS`]=100）を
+        // 設定しているため、[`BudgetedProblem`]の総枠（このテストでは
+        // `(1+1)*2000=4000`評価分）を使い切るより先にこちらの上限に到達し、
+        // `MleError::Common(ComputationFailed(..))`（「line search did not converge
+        // within..」）を返す（`Method::Bfgs`、上のテストとは異なり
+        // `EvaluationBudgetExceeded`という具体的なバリアントにはならない。`FaerBfgs`には
+        // この個別チェックが無いため）。
         let result = run_solver(
             UnboundedBelowProblem,
             Method::Lbfgs,
@@ -2542,8 +2842,101 @@ mod tests {
 
         let message = result.unwrap_err().to_string();
         assert!(
-            message.contains("evaluated the objective/gradient"),
+            message.contains("line search did not converge within 100 iterations"),
             "unexpected error message: {message}"
+        );
+    }
+
+    #[test]
+    fn two_loop_recursion_returns_negative_gradient_when_history_is_empty() {
+        // 履歴が空（最適化1回目の反復）の場合はγ=1.0（スケーリング無し）で単位行列
+        // 近似にフォールバックし、`-grad`をそのまま返すはず。
+        let s_history = VecDeque::new();
+        let y_history = VecDeque::new();
+        let grad = vec![3.0, -4.0];
+
+        let direction = two_loop_recursion(&s_history, &y_history, &grad);
+        assert_eq!(direction, vec![-3.0, 4.0]);
+    }
+
+    #[test]
+    fn two_loop_recursion_matches_hand_computed_values_for_one_history_pair() {
+        // s=[1,0]、y=[0,1]、grad=[2,3]の1件履歴（互いに直交、γ・rhoの手計算を単純化
+        // するため意図的に選んだ値）。
+        //   rho = 1/(y・s) = 1/0 ... y・s=0だと特異になるため、s=[1,0]・y=[1,2]を使う。
+        // rho=1/(y・s)=1/1=1、alpha=rho*(s・grad)=1*2=2、q=grad-alpha*y=[2,3]-2*[1,2]=[0,-1]。
+        // γ=(s・y)/(y・y)=1/5=0.2、r=γ*q=[0,-0.2]。
+        // beta=rho*(y・r)=1*(1*0+2*(-0.2))=-0.4、r+=s*(alpha-beta)=[1,0]*(2-(-0.4))=[2.4,0]
+        // → r=[2.4,-0.2]。方向=-r=[-2.4,0.2]。
+        let mut s_history = VecDeque::new();
+        s_history.push_back(vec![1.0, 0.0]);
+        let mut y_history = VecDeque::new();
+        y_history.push_back(vec![1.0, 2.0]);
+        let grad = vec![2.0, 3.0];
+
+        let direction = two_loop_recursion(&s_history, &y_history, &grad);
+        assert!(
+            (direction[0] - (-2.4)).abs() < 1e-10,
+            "direction={direction:?}"
+        );
+        assert!(
+            (direction[1] - 0.2).abs() < 1e-10,
+            "direction={direction:?}"
+        );
+    }
+
+    /// `dot(y,s)<=f64::EPSILON`（ゼロ除算につながる退化ペア）を履歴の**最古**の位置に
+    /// 混ぜても、そのペアの寄与が黙って無視され、残りの正常なペアだけで
+    /// `two_loop_recursion_matches_hand_computed_values_for_one_history_pair`と
+    /// 完全に同じ結果になるはず（rust-reviewer指摘: `FaerLbfgs`は`FaerBfgs`と異なり
+    /// secant条件を満たさないペアも履歴にそのまま追加する設計のため、
+    /// two-loop recursion自体がこの種のペアに対して頑健である必要がある）。
+    #[test]
+    fn two_loop_recursion_skips_degenerate_pair_with_near_zero_curvature() {
+        let mut s_history = VecDeque::new();
+        // 最古のペア: y=[0,0]なので dot(y,s)=0（退化、無視されるはず）。
+        s_history.push_back(vec![5.0, -3.0]);
+        // 最新のペア: 上の単一ペアテストと同じ値。
+        s_history.push_back(vec![1.0, 0.0]);
+        let mut y_history = VecDeque::new();
+        y_history.push_back(vec![0.0, 0.0]);
+        y_history.push_back(vec![1.0, 2.0]);
+        let grad = vec![2.0, 3.0];
+
+        let direction = two_loop_recursion(&s_history, &y_history, &grad);
+        assert!(
+            (direction[0] - (-2.4)).abs() < 1e-10,
+            "degenerate pair should be fully transparent: direction={direction:?}"
+        );
+        assert!(
+            (direction[1] - 0.2).abs() < 1e-10,
+            "degenerate pair should be fully transparent: direction={direction:?}"
+        );
+    }
+
+    #[test]
+    fn two_loop_recursion_falls_back_to_gamma_one_when_y_norm_is_too_small_to_scale() {
+        // yᵀy=1e-20はf64::EPSILON以下（ゼロ除算ガードが発火する）ため、γ=1.0
+        // （スケーリング無し）にフォールバックするはず。`bfgs_updated_inv_hessian_
+        // first_iteration_uses_prior_when_y_norm_is_too_small_to_scale`と同じ発想の
+        // 退化ケース。
+        //
+        // s=[1,0]・y=[1e-10,0]・grad=[2,3]（第2成分は`y`と直交させ、丸め誤差の影響を
+        // 受けない値で検証できるようにしている）。手計算（γ=1.0フォールバック前提）:
+        // rho=1/(y・s)=1e10、alpha=rho*(s・grad)=2e10、q=grad-alpha*y=[2,3]-2e10*[1e-10,0]
+        // ≈[0,3]（第1成分は桁落ちが乗るが第2成分は`y[1]=0`のため厳密に不変）。
+        // γ=1.0（フォールバック）、r=γ*q≈[0,3]。beta=rho*(y・r)=1e10*(1e-10*r[0]+0*3)、
+        // r[1]+=s[1]*(alpha-beta)=0*(...)=0 → r[1]=3（厳密）。方向[1]=-r[1]=-3。
+        let mut s_history = VecDeque::new();
+        s_history.push_back(vec![1.0, 0.0]);
+        let mut y_history = VecDeque::new();
+        y_history.push_back(vec![1e-10, 0.0]);
+        let grad = vec![2.0, 3.0];
+
+        let direction = two_loop_recursion(&s_history, &y_history, &grad);
+        assert_eq!(
+            direction[1], -3.0,
+            "gamma=1.0 fallback should leave the y-orthogonal component exact: {direction:?}"
         );
     }
 

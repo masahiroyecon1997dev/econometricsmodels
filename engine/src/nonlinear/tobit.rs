@@ -5599,28 +5599,29 @@ mod tests {
         /// サンプリングして30万回試行する使い捨ての探索ハーネスを一時的に実装し
         /// 実行した（コミット履歴には残さず、本テストのみを結果として残す）。
         ///
-        /// **判明した事実**: 30万試行中8件が`MleError::EvaluationBudgetExceeded`相当の
-        /// エラー（`Method::Lbfgs`はargmin組み込みLBFGSの`SolverExit`経由で同じ
-        /// メッセージを含む`ComputationFailed`になる、[`extract_outcome`]のdoc
-        /// コメント参照）を引き起こした。**8件全てが`method=Lbfgs`**で、
-        /// `method=Bfgs`・`method=Newton`は1件もヒットしなかった。打ち切り割合
-        /// （`n_uncensored/n`）は0.38〜0.80、`n`は41〜75、`k`は1〜3、`sigma`は
-        /// 0.53〜1.85とヒット全体に幅広く分布しており、「極端な打ち切り・特定の
-        /// 狭いパラメータ域が必要」という仮説は支持されなかった（8件中7件は
-        /// 0.65〜0.80という中程度の打ち切り）。
+        /// **判明した事実（#344当時）**: 30万試行中8件が`MleError::EvaluationBudgetExceeded`
+        /// 相当のエラー（`Method::Lbfgs`は当時のargmin組み込みLBFGSの`SolverExit`経由で
+        /// 同じメッセージを含む`ComputationFailed`になっていた）を引き起こした。**8件
+        /// 全てが`method=Lbfgs`**で、`method=Bfgs`・`method=Newton`は1件もヒットしな
+        /// かった。打ち切り割合（`n_uncensored/n`）は0.38〜0.80、`n`は41〜75、`k`は
+        /// 1〜3、`sigma`は0.53〜1.85とヒット全体に幅広く分布しており、「極端な打ち切り・
+        /// 特定の狭いパラメータ域が必要」という仮説は支持されなかった（8件中7件は
+        /// 0.65〜0.80という中程度の打ち切り）。真因は当時未確定で、argmin組み込み
+        /// `LBFGS`固有の何か（limited-memory two-loop recursionの初期スケーリング等）に
+        /// 起因すると推測されていた（Issue #343に持ち越し）。
         ///
-        /// **推測される真因（未確定、Issue #343に持ち越し）**: `method=Lbfgs`
-        /// でのみ再現することから、argmin組み込み`LBFGS`固有の何か
-        /// （limited-memory two-loop recursionの初期スケーリング等）に起因すると
-        /// 推測される。`engine/src/nonlinear/CLAUDE.md`に記録済みの既知の弱さ
-        /// （self-scaling注入用の公開APIが無いためLBFGSがBFGSほど高速化できない）
-        /// と同根の可能性がある。探索方向が実際に非降下方向になっているか等の
-        /// 数値的な深掘りは、Issue #343で`FaerLbfgs`を自前実装し line search呼び出し
-        /// 箇所を直接計装できるようになった時点で改めて行う（argmin組み込み
-        /// `LBFGS`は内部状態を計装できないため、これ以上の深掘りは本Issueの
-        /// スコープでは困難と判断、ユーザー確認済み）。
+        /// **Issue #343で判明した実際の原因と解消（本テストの現在の主眼）**: `Method::Lbfgs`
+        /// を`FaerLbfgs`（`FaerBfgs`と同型のself-scaling初期化を持つ自前実装）に置き換えた
+        /// 結果、この入力は**もはや退化せず正常に収束する**（実測: `n_iter=11`、
+        /// `converged=true`）。`FaerBfgs`（Issue #285）で既に確立していた「1回目の
+        /// 反復専用のline search初期ステップ幅`min(1,1/‖g₀‖)`」を、当時のargmin組み込み
+        /// `LBFGS`の公開APIでは適用できていなかったこと（1回目の反復は履歴が空で
+        /// `γ=1.0`固定のため、単位行列の逆Hessianを使う`FaerBfgs`の1回目と同型の
+        /// 暴走リスクを抱えたままだった）が実際の原因だったと裏付けられた。本テストは
+        /// 「境界の有限時間`Err`」から「実際に収束する」への挙動変化そのものを固定する
+        /// 回帰ガードとして残す。
         #[test]
-        fn fit_lbfgs_returns_a_bounded_error_for_a_captured_stalling_case_from_issue_344() {
+        fn fit_lbfgs_converges_for_a_previously_stalling_case_from_issue_344() {
             let beta = vec![0.9873339499036579, -0.12291865368107788];
             let sigma = 1.4304964761886263;
             let x_cols: Vec<Vec<f64>> = vec![vec![
@@ -5729,11 +5730,24 @@ mod tests {
                 TobitEstimator::fit(input, default_options(CovType::Classical, Method::Lbfgs));
             let elapsed = start.elapsed();
 
-            assert!(result.is_err(), "expected a bounded error, got {result:?}");
+            assert!(
+                result.is_ok(),
+                "expected FaerLbfgs's self-scaling to converge on this input, got {result:?}"
+            );
             assert!(
                 elapsed < std::time::Duration::from_secs(30),
-                "fit() took {elapsed:?}, expected a bounded failure within seconds \
-                 (Issue #342's BudgetedProblem should have kicked in)"
+                "fit() took {elapsed:?}, expected a bounded run within seconds"
+            );
+            // 実測`n_iter=11`（緩い上限、rust-reviewer指摘）。`FaerLbfgs`の1回目line
+            // search初期ステップ幅の設計変更（`engine/src/nonlinear/CLAUDE.md`
+            // 「実装時に踏んだ罠その2」参照、未解決）時に、収束はするが反復回数が
+            // 大きく増える形の劣化が紛れ込んでいないかを検知するためのガード。
+            let n_iter = result.unwrap().n_iter();
+            assert!(
+                n_iter < 30,
+                "n_iter={n_iter}, expected roughly the same order as the observed 11 \
+                 iterations (a large increase would indicate a regression in FaerLbfgs's \
+                 first-iteration self-scaling, even though it still converges)"
             );
         }
     }

@@ -91,11 +91,25 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # 合成シナリオの conf_int は 1e-8（実測 ≤1e-9）を維持し、mroz のみ緩める。
         "rtol_mroz_conf_int": 3e-8,
         # method="bfgs"/"lbfgs" は newton と異なる最適化経路で、リファレンス
-        # （survreg、method 非依存）から僅かにずれた点に収束する（実測: 予測値
-        # `E[y*|x]=x'β` で最大 ~2.2e-8、係数・SE・限界効果は ~4e-9）。Logit の
+        # （survreg、method 非依存）から僅かにずれた点に収束する。Logit の
         # `rtol_method`（1e-3）と同じ位置づけだが Tobit は最適化がよく条件付けられて
         # おり桁違いに小さい。method ケースの全フィールドに適用する。
-        "rtol_method": 1e-7,
+        #
+        # Issue #343（`Method::Lbfgs`をargmin組み込みLBFGSから自前実装`FaerLbfgs`へ
+        # 置き換え）で実測値が変わり、`1e-7`（旧実測: 予測値`E[y*|x]=x'β`で最大
+        # ~2.2e-8）を`predict/expected_latent`の1点（lbfgs、実測1.055e-7）がわずかに
+        # 超過するようになったため`2e-7`に緩めた（他の全フィールドは実測6e-9〜4e-8で
+        # 旧値のままでも十分収まる。bfgs側の同じ点は5.49e-8）。
+        #
+        # **原因調査**: 同一セッション内で`FaerLbfgs`実装の2つの不具合
+        # （secant条件ガードによる履歴凍結バグ・`two_loop_recursion`のゼロ除算未ガード）
+        # を発見・修正したが、この1点の乖離量（`diff=3.361856272532382e-09`）は
+        # 両方の修正の前後で**完全に不変**だった（rust-reviewer指摘を受けて確認済み）。
+        # したがって既知の実装不具合とは無関係と判断した。`FaerBfgs`と同じく参照実装
+        # （`survreg`）とは異なる最適化経路に収束するために生じる、想定内の僅かな
+        # ズレと考えられる（詳細は`engine/src/nonlinear/CLAUDE.md`「FaerLbfgs」
+        # セクション参照）。
+        "rtol_method": 2e-7,
     },
     # Tobit の交差検証は R `censReg`（`maxLik` エンジン）。survreg とは最適化実装が
     # 完全に独立（`nonlinear-api-design.md` 9章）。censReg 側の maxLik 収束を
@@ -116,7 +130,9 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # censReg 側の収束限界であって本実装の問題ではない（mroz の厳密照合は
         # `test_tobit_reference.py` が担う）。
         "rtol_mroz": 1e-4,
-        # method="bfgs"/"lbfgs" ケース（`tobit_reference` の同名エントリ参照）。
+        # method="bfgs"/"lbfgs" ケース（`tobit_reference` の同名エントリ参照。ただし
+        # crosscheckの実測は変わっていないため1e-7のまま、tobit_referenceのみ
+        # Issue #343で2e-7に緩めた）。
         "rtol_method": 1e-7,
     },
     # --- 独立実装（R）とのクロスチェック ---

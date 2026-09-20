@@ -527,6 +527,13 @@ pub(crate) fn swamy_arora_variance_components(
     let (y_means, x_means, t) = entity_means(input.y(), input.x(), input.entity());
     let n_entities = y_means.len();
 
+    // `OlsInput::from_columns`が返しうる`LeastSquaresError::Common(DimensionMismatch)`は
+    // ここでは理論上到達不能: `entity_means`は`y_means`・各`x_means`列を同じ
+    // `groups.values()`（エンティティのユニークID集合）から1対1で生成するため、
+    // 常に同じ長さ（`groups.len()`）になる（`FeEstimator::fit`の同種のコメントと
+    // 同じ判断）。この`map_err`が実際に到達しうるのは`OlsEstimator::fit`側の失敗
+    // （`n_entities<=k`等、`PanelError::BetweenRegressionFailed`のdocコメント参照）
+    // のみで、こちらは次の行の`map_err`で別途捕捉している。
     let between_input = OlsInput::from_columns(
         &y_means,
         &x_means,
@@ -1002,6 +1009,11 @@ impl ReEstimator {
                 // （`panel::fe::FeEstimator::fit`の`FTestFailed`未テスト方針と同型の判断）。
                 0.0
             };
+            // `FisherSnedecor::new`は`num_df`/`df_resid`が正でない場合に失敗するが、
+            // この分岐に入る時点で`num_df = df_model - 1 >= 1`（`df_model==1`は上の
+            // `if`分岐で既に弾いている）・`df_resid = n - df_model >= 1`
+            // （`OlsEstimator::fit`成功時点で保証済み、上の`t_dist`と同じ根拠）の
+            // ため理論上到達不能（`.claude/rules/rust-style.md`「テスト」参照）。
             let f_dist = FisherSnedecor::new(num_df as f64, df_resid as f64)
                 .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
             (stat, 1.0 - f_dist.cdf(stat))
@@ -2335,6 +2347,27 @@ mod tests {
         let entity = strings(&["a", "a", "b", "b", "c", "c"]);
         let y = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         let input = ReInput::from_columns(&y, &[], vec![], &entity, None, "y".into()).unwrap();
+
+        let re = ReEstimator::fit(input, ReCovType::Classical, 0.95).unwrap();
+
+        assert_eq!(re.hausman_statistic(), None);
+        assert_eq!(re.hausman_p_value(), None);
+        assert_eq!(re.hausman_df(), None);
+    }
+
+    #[test]
+    fn re_estimator_fit_hausman_is_none_when_time_is_some_and_no_slope_regressors() {
+        // `input.time()`が`Some`（2-way FE比較が要求される、モジュールdoc「1-way/2-way
+        // 選択」参照）でも、比較対象の傾き係数が0個（`x=[]`）の場合は内部2-way FE
+        // 呼び出し自体を試みずNoneを返す（`ReEstimator::fit`本体の
+        // `else if input.x().is_empty()`分岐、モジュールdoc「`None`フォールバック」
+        // 参照——`time`が`None`の場合の同型ケースは
+        // `re_estimator_fit_hausman_is_none_when_no_slope_regressors`で既にカバー済み）。
+        let entity = strings(&["a", "a", "b", "b", "c", "c"]);
+        let time = strings(&["1", "2", "1", "2", "1", "2"]);
+        let y = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let input =
+            ReInput::from_columns(&y, &[], vec![], &entity, Some(&time), "y".into()).unwrap();
 
         let re = ReEstimator::fit(input, ReCovType::Classical, 0.95).unwrap();
 

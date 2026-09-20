@@ -15,11 +15,13 @@ from .nonlinear.logit import Logit, LogitOptions, LogitResults
 from .nonlinear.probit import Probit, ProbitOptions, ProbitResults
 from .nonlinear.tobit import Tobit, TobitOptions, TobitResults
 from .panel.fe import FE, FeOptions, FeResults
+from .panel.re import RE, ReOptions, ReResults
 
 __all__ = [
     "FE",
     "IV",
     "OLS",
+    "RE",
     "WLS",
     "ComputationError",
     "FeOptions",
@@ -34,6 +36,8 @@ __all__ = [
     "Probit",
     "ProbitOptions",
     "ProbitResults",
+    "ReOptions",
+    "ReResults",
     "Tobit",
     "TobitOptions",
     "TobitResults",

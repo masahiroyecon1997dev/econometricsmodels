@@ -53,6 +53,40 @@ computation_error`に従うだけ）。他系統（`IvError`・`MleError`等）�
 
 `build_fe_input`/`parse_fe_cov_type`自身も同じ理由で`#[allow(dead_code, reason = "...")]`を付けている（`build_iv_input`/`parse_iv_cov_type`の#159時点と同じパターン）。#187で`fit_fe`が`#[pymodule]`に登録されたら、これらの属性はすべて削除すること。
 
+## RE: データ抽出・pyclass定義（Issue #200）
+
+FEの#186と同じ段階（`ReOptions`/`ReResult`のpyclass定義・`build_re_input`実装まで、
+`#[pymodule]`未登録・`ReEstimator::fit`未呼び出し）を`panel/re.rs`に実装した。`engine`側
+（`ReInput`/`ReEstimator`/`ReCovType`）はIssue #198（ハウスマン検定）で既に完成済みだった
+ため、本Issueは`engine_pybind`層のみのスコープ。
+
+- **`ReOptions`に`time_col`が無い（`FeOptions`との相違点）**: `engine::panel::re::
+  ReCovType::Hac`は`FeCovType::Hac`と異なり`time`オーバーライドフィールドを持たない
+  （RE自身が2-way構造を持たないため、FEのような「2-way FEの固定効果構造」と「DK HACの
+  時系列粒度」を分離する必要が無い）。`ReOptions.time`は1フィールドで「HAC時系列順序」と
+  「ハウスマン検定用内部FE呼び出しの1-way/2-way選択（`Some`なら2-way、`None`なら1-way、
+  `panel-api-design.md`7.3節）」を兼ねる。詳細は`panel/re.rs`モジュールdoc参照。
+- **`x`の空リストを許容しない（ユーザー確認済み、2026-09-20）**: REで`x=[]`は「分散成分
+  （ICC）のみを推定するnullモデル」として単独で意味を持つ標準的なユースケースだが、
+  `panel-api-design.md`にこの点の明示的な決定が無かったため確認した。他手法（FE
+  post-#320・OLS/WLS/Logit/Probit/IV）と一貫させ`validate_x_non_empty`で拒否する方針を
+  選択した。nullモデル・ICC推定のサポート自体はIssue #346で別途検討する。
+- **`cov_type`は`FeOptions`と同じ集合**（`classical`/`hc1`〜`hc3`/`cluster`/`hac`、`hc0`は
+  非対応）。`parse_re_cov_type`は`parse_fe_cov_type`とほぼ同型だが、上記の通り`hac`分岐で
+  `time_col`相当の追加列抽出が不要な点だけが異なる。
+- **`ReResult`に`estimator`のような非公開フィールドは無い**: `FeResult`は`fixed_effects()`
+  用に`FeEstimator`本体を保持する必要があったが、REのハウスマン検定
+  （`hausman_statistic`/`hausman_p_value`/`hausman_df`）は`fit()`内で計算済みの値を
+  そのまま`ReResult`のフィールドとして持つだけで済む（`panel-api-design.md`2.4節「RE:
+  ハウスマン検定は`fit()`内で自動計算」）。そのため`ReResult`は`#[derive(Clone)]`も
+  問題なく維持できる。
+- **`ReEstimator`自身に`aic()`/`bic()`/`log_likelihood()`メソッドが無い**（`engine/src/
+  panel/CLAUDE.md`「`df_resid`/`df_model`（Issue #196）」参照）: RE用`fit`関数
+  （後続issue）でこれらを`ReResult`に設定する際は、`FeEstimator`のように再計算した値では
+  なく`estimator()`（内部の`OlsEstimator`）の`log_likelihood()`/`aic()`/`bic()`を
+  そのまま使うこと（REの`df_model`が`OlsInput::k()`と自動的に一致するため、`OlsEstimator`
+  委譲時点で既に正しい値になっている、という`engine`側の既存知見）。
+
 ## `FeOptions`のフィールド設計（Issue #186で確定）
 
 - **`include_intercept`は無い**: FEは`within`変換で切片が構造的に消えるため、OLS/WLS/IVと異なりこのオプション自体が意味を持たない（`engine::panel::fe::FeEstimator::fit`が常に`include_intercept=false`でOLSに委譲する設計、`engine/src/panel/fe.rs`モジュールdoc参照）。

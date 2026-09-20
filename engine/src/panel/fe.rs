@@ -598,6 +598,12 @@ pub struct FeEstimator {
     /// 参照）。`k=0`ならNaN。
     f_statistic: f64,
     f_p_value: f64,
+    /// `cov_type`別の`k×k`共分散行列（Issue #198）。`std_errors`等はこの対角成分の
+    /// 平方根に過ぎず、`re.rs`のハウスマン検定（`hausman_statistic`、7.3節）は
+    /// オフ対角成分も含む部分行列比較が必要なため、フィールドとして保持し
+    /// `pub(crate)`で公開する（`FeResult`には含めない内部専用の値、
+    /// `swamy_arora_variance_components`と同じ`pub(crate)`の使い方）。
+    cov_params: Mat<f64>,
 }
 
 impl FeEstimator {
@@ -868,7 +874,15 @@ impl FeEstimator {
             bic,
             f_statistic,
             f_p_value,
+            cov_params,
         })
+    }
+
+    /// `cov_type`別の`k×k`共分散行列（Issue #198）。`re.rs`のハウスマン検定が
+    /// FE推定量の分散共分散行列全体を必要とするために追加した内部専用アクセサ
+    /// （フィールドdoc参照）。
+    pub(crate) fn cov_params(&self) -> &Mat<f64> {
+        &self.cov_params
     }
 
     /// within変換前の入力データ。

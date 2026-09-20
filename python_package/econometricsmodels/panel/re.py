@@ -125,10 +125,19 @@ class ReResults:
     is computed automatically inside `fit()` and exposed directly as
     properties here, rather than as a separate method like FE's
     `fixed_effects()` (`panel-api-design.md` section 2.4). All three
-    are `None` when the internal FE comparison is unavailable (e.g. a
-    singleton entity, a zero-variance regressor after demeaning, or a
-    numerically singular `Var(β_FE) - Var(β_RE)`); RE's own result is
-    still returned normally in that case.
+    are `None` when the internal FE comparison used for the Hausman
+    test is unavailable — in practice this only happens when
+    `ReOptions.time` is set (requesting the two-way FE comparison,
+    `panel-api-design.md` section 7.3) and that two-way regression
+    itself fails (e.g. an unbalanced panel or a singleton time
+    period), or when `Var(β_FE) - Var(β_RE)` is numerically singular;
+    RE's own result is still returned normally in that case. This is
+    a narrower condition than it might appear: a failure in RE's
+    **own** (always one-way) internal FE call — used to estimate σ_ε², not
+    for the Hausman comparison — makes `fit()` itself raise instead
+    (e.g. a singleton entity, or a regressor with zero variance after
+    the one-way within-transformation), since that failure means
+    σ_ε² could not be estimated at all; see `RE.fit()`'s docstring.
 
     Args:
         raw: The estimation result object returned by `_lib.fit_re`

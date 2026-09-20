@@ -267,6 +267,16 @@ HC0_NOT_SUPPORTED_FE = (
     "'hc3' instead"
 )
 
+# RE用cov_type文字列パース（engine_pybind/src/panel/re.rs::parse_re_cov_type）。
+# 「unknown cov_type」文言自体はFEと一字一句同じ（UNKNOWN_COV_TYPE_FEを流用する）が、
+# hc0専用メッセージはFEと文言が異なる（参照実装の主語が「no reference
+# implementation」でlinearmodels/fixestを個別に挙げない）ため別定数にする。
+HC0_NOT_SUPPORTED_RE = (
+    "cov_type='hc0' is not supported for RE (no reference implementation "
+    "offers HC0 for panel/RE regressions); use 'hc1', 'hc2', or 'hc3' "
+    "instead"
+)
+
 # `IvError::FirstStageFailed`（engine/src/iv/common.rs）。`engine_pybind::fit()`
 # （engine_pybind/src/iv/common.rs）が`TwoSlsEstimator::fit`/`GmmEstimator::fit`
 # を呼ぶより前に無条件で`compute_first_stage`（弱操作変数診断用）を呼ぶため、

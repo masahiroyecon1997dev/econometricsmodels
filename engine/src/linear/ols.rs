@@ -17,7 +17,9 @@ use crate::design_matrix::design_matrix_element;
 use crate::error::CommonError;
 use crate::inference;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
-use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
+use crate::validation::{
+    validate_cluster_count_covers_slopes, validate_cluster_groups, validate_has_regressors,
+};
 
 /// 標準誤差の種別。文字列パース（Python文字列 → この型への変換）は`engine_pybind`側の
 /// 責務（PyO3境界の関心事のため）。ここでは`OlsEstimator::fit`が計算方法を分岐するための
@@ -320,6 +322,14 @@ impl OlsEstimator {
     /// （`docs/spec/ols-spec.md`「適合度統計量」参照）。
     ///
     /// # Errors
+    /// - `k`（定数項を含む説明変数の数）が0（`include_intercept=false`かつ説明変数も無い）:
+    ///   `CommonError::NoRegressors`（Logit/Probitと同じ早期リジェクト、Issue #140。
+    ///   `fit_allowing_no_regressors`はこのチェックを行わない）。**このチェックは
+    ///   `confidence_level`より先に行う**（`fit`が`fit_allowing_no_regressors`へ委譲する
+    ///   実装構造上、外側でしか検証できないため）。nonlinear系統の
+    ///   `validate_fit_preconditions`は逆順（`confidence_level`→…→`k==0`）だが、
+    ///   Python APIの`validate_x_non_empty`によりどちらの入力もそもそも到達不能なため
+    ///   実害はなく、系統間で順序を揃えるという明示的な方針も無い
     /// - `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
     /// - 観測数`n`が`k`（定数項を含む説明変数の数）以下: `CommonError::InsufficientObservations`
     /// - 設計行列が特異（完全な多重共線性等）: `LeastSquaresError::SingularMatrix`
@@ -332,6 +342,30 @@ impl OlsEstimator {
     ///   数値的にほぼ特異: `CommonError::ComputationFailed`（`g > q`でも起こりうる
     ///   backstop、`wald_f_test`参照）
     pub fn fit(
+        input: OlsInput,
+        cov_type: CovType,
+        confidence_level: f64,
+    ) -> Result<Self, LeastSquaresError> {
+        validate_has_regressors(input.nobs(), input.k())?;
+        Self::fit_allowing_no_regressors(input, cov_type, confidence_level)
+    }
+
+    /// `fit`と同じ計算を行うが、`k`（定数項を含む説明変数の数）が0の入力も受理する
+    /// （`fit`が行う`CommonError::NoRegressors`の早期リジェクトをスキップする）。
+    ///
+    /// `pub(crate)`: `panel::fe::FeEstimator::fit`が「固定効果のみのモデル」（`x=[]`。
+    /// FEは常に`include_intercept=false`で委譲するためこの場合`k=0`になる、Issue #140）を
+    /// サポートするために、`fit`のガードを迂回してこの内部実装を直接呼ぶ。他の呼び出し元
+    /// （`WlsEstimator::fit`・`panel::re::ReEstimator::fit`・IV系統）はいずれも構造的に
+    /// `k=0`になりえない呼び出し方をしており（RE/IVは常に切片または操作変数由来の列を
+    /// 最低1列持つ、`engine/src/linear/CLAUDE.md`「k=0の扱い」参照）、`fit`（ゲート付き）を
+    /// そのまま使う。`k=0`でも`col_piv_qr`・`wald_f_test`が安全に動作することは
+    /// `ensure_full_rank`のNaN明示チェック・`df_model==0`分岐により保証済み（同ドキュメント
+    /// 参照）。
+    ///
+    /// # Errors
+    /// `fit`から`NoRegressors`を除いたもの。
+    pub(crate) fn fit_allowing_no_regressors(
         input: OlsInput,
         cov_type: CovType,
         confidence_level: f64,
@@ -1277,6 +1311,39 @@ mod tests {
             "x1: {}",
             *params.get(1, 0)
         );
+    }
+
+    #[test]
+    fn fit_returns_no_regressors_error_when_k_is_zero() {
+        // include_intercept=falseかつx_columns=[]の病的な入力（Issue #140）。
+        // Logit/Probitと同じ`CommonError::NoRegressors`で早期リジェクトされる。
+        let y = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let input = OlsInput::from_columns(&y, &[], vec![], false, "y".to_string()).unwrap();
+
+        let result = OlsEstimator::fit(input, CovType::Classical, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            LeastSquaresError::Common(CommonError::NoRegressors { n: 5 })
+        );
+    }
+
+    #[test]
+    fn fit_allowing_no_regressors_succeeds_when_k_is_zero() {
+        // `fit`とは異なり`NoRegressors`ガードを迂回する（`panel::fe::FeEstimator::fit`が
+        // 固定効果のみモデルのために直接呼ぶ経路、Issue #140）。k=0でもOkを返し、
+        // paramsは空（0行）になる。
+        let y = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let input = OlsInput::from_columns(&y, &[], vec![], false, "y".to_string()).unwrap();
+
+        let estimator =
+            OlsEstimator::fit_allowing_no_regressors(input, CovType::Classical, 0.95).unwrap();
+
+        assert_eq!(estimator.params().nrows(), 0);
+        assert_eq!(estimator.residuals().nrows(), 5);
+        for (i, &yi) in y.iter().enumerate() {
+            assert_eq!(*estimator.residuals().get(i, 0), yi);
+        }
     }
 
     #[test]

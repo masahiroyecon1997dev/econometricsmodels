@@ -391,6 +391,32 @@ mod tests {
     }
 
     #[test]
+    fn fit_propagates_no_regressors_error_when_k_is_zero() {
+        // `WlsEstimator::fit`は常に（ゲート付きの）`OlsEstimator::fit`に委譲するため、
+        // k=0拒否（Issue #140）もそのまま伝播する。`fit_allowing_no_regressors`への
+        // 特別扱いは不要（WLSはk=0になりえない呼び出し方をする対象ではなく、
+        // OLSと同じくPython向け公開APIとしてk=0を拒否すべき対象）。
+        let y = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let weights = vec![1.0; 5];
+
+        let result = WlsEstimator::fit(
+            &y,
+            &[],
+            vec![],
+            false,
+            "y".to_string(),
+            &weights,
+            CovType::Classical,
+            0.95,
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            LeastSquaresError::Common(crate::error::CommonError::NoRegressors { n: 5 })
+        );
+    }
+
+    #[test]
     fn fit_matches_manually_transformed_ols_for_all_cov_types() {
         // classical/HC0-3/HAC/clusterのいずれも、WlsEstimator::fitはcov_typeをそのまま
         // OlsEstimator::fitに渡すだけで正しく動作するはず（wls-spec.md「標準誤差」

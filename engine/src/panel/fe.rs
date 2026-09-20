@@ -697,8 +697,16 @@ impl FeEstimator {
         // `cov_type`は常に`Classical`で委譲する（`β̂`・残差の取得のみが目的で、
         // `cov_type`ごとの標準誤差は下記でFE自身が計算し直すため。モジュールdoc
         // 「`cov_type`対応」参照）。
-        let estimator = OlsEstimator::fit(ols_input, CovType::Classical, confidence_level)
-            .map_err(|source| PanelError::WithinRegressionFailed { source })?;
+        //
+        // `OlsEstimator::fit`（ゲート付き公開エントリ）ではなく`fit_allowing_no_regressors`
+        // を呼ぶ: `x=[]`（固定効果のみのモデル）だとwithin変換後の設計行列`x`も0列になり
+        // `k=0`になるため（Issue #140、`engine/src/linear/CLAUDE.md`「k=0の扱い」参照）。
+        let estimator = OlsEstimator::fit_allowing_no_regressors(
+            ols_input,
+            CovType::Classical,
+            confidence_level,
+        )
+        .map_err(|source| PanelError::WithinRegressionFailed { source })?;
 
         // `cov_type`別の共分散行列の計算に使う共通の材料（within変換後の設計行列とその
         // グラム逆行列、残差・SSR）。`OlsEstimator`は`cov_params`をprivateで保持しており

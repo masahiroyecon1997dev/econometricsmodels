@@ -199,6 +199,74 @@ INVALID_GMM_CONVERGENCE = (
     "gmm_convergence must be a positive number, got {gmm_convergence}"
 )
 
+# ── panel系統固有（FE、engine/src/panel/common.rs・
+#    engine_pybind/src/panel/fe.rs） ─────────────────────────────────────
+
+# `PanelError::InsufficientDegreesOfFreedom`。1-wayでは`n_periods_clause`が
+# 空文字列、2-wayでは`, n_periods={n}`になる（Rust側の`n_periods_clause`
+# 関数と同じ。`OptionのDebug表記が漏れるのを避けるための専用フォーマット、
+# engine/src/panel/common.rs参照）。
+INSUFFICIENT_DEGREES_OF_FREEDOM_PANEL = (
+    "insufficient degrees of freedom for panel estimation: n_obs={n_obs}, "
+    "n_entities={n_entities}{n_periods_clause}, k={k} (the panel-adjusted "
+    "residual degrees of freedom must be positive)"
+)
+
+
+def n_periods_clause(n_periods: int | None) -> str:
+    """`INSUFFICIENT_DEGREES_OF_FREEDOM_PANEL`の`{n_periods_clause}`用。"""
+    return "" if n_periods is None else f", n_periods={n_periods}"
+
+
+# `PanelError::SingletonGroup`（6.5節）。`{dimension}`は"entity"/"time"。
+SINGLETON_GROUP = (
+    "singleton {dimension} group detected: {dimension} '{group_id}' has "
+    "only 1 observation. Singleton groups are not dropped automatically; "
+    "remove them from the input"
+)
+
+# `PanelError::UnbalancedPanelForTwoWay`（6.4節）。
+UNBALANCED_PANEL_FOR_TWO_WAY = (
+    "two-way fixed effects requires a balanced panel: got n_obs={n_obs} "
+    "for n_entities={n_entities} x n_periods={n_periods} (expected "
+    "{expected} observations)"
+)
+
+# `PanelError::ZeroVarianceAfterDemeaning`（6.7節）。
+ZERO_VARIANCE_AFTER_DEMEANING = (
+    "regressor '{column}' has zero variance after the within-"
+    "transformation (it is time-invariant, or collinear with the fixed "
+    "effects)"
+)
+
+# `PanelError::TwoWayRequiresTime`。
+TWO_WAY_REQUIRES_TIME = (
+    "two-way fixed effects requires the `time` option to be set"
+)
+
+# `PanelError::HacRequiresTime`（Driscoll-Kraay HAC、1-way限定で到達）。
+HAC_REQUIRES_TIME = (
+    "Driscoll-Kraay panel HAC requires the `time` option to be set"
+)
+
+# `PanelError::InvalidHacBandwidth`。`t`は時点数（観測数`n`ではない点に
+# 注意、OLSの`INVALID_HAC_LAGS`とは上限の意味が異なる）。
+INVALID_HAC_BANDWIDTH = (
+    "bandwidth must be in the range [0, t): got {bandwidth}, t={t}"
+)
+
+# FE用cov_type文字列パース（engine_pybind/src/panel/fe.rs::parse_fe_cov_type）。
+# OLS/WLS/IVの`UNKNOWN_COV_TYPE_LINEAR`と異なりhc0を含まない一覧になる。
+UNKNOWN_COV_TYPE_FE = (
+    "unknown cov_type: '{other}'. Expected one of 'classical', 'hc1' "
+    "through 'hc3', 'cluster', or 'hac'"
+)
+HC0_NOT_SUPPORTED_FE = (
+    "cov_type='hc0' is not supported for FE (neither linearmodels nor "
+    "fixest offer HC0 for panel/FE regressions); use 'hc1', 'hc2', or "
+    "'hc3' instead"
+)
+
 # `IvError::FirstStageFailed`（engine/src/iv/common.rs）。`engine_pybind::fit()`
 # （engine_pybind/src/iv/common.rs）が`TwoSlsEstimator::fit`/`GmmEstimator::fit`
 # を呼ぶより前に無条件で`compute_first_stage`（弱操作変数診断用）を呼ぶため、

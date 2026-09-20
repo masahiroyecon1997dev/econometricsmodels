@@ -24,3 +24,18 @@ MROZ_FORMULA = (
 TOBIT_MROZ_FORMULA = (
     "hours ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6"
 )
+
+# Wooldridge wagepan データセット（FEの実データケース、panel-api-design.md
+# 5.4節）の被説明変数・説明変数・エンティティ/時点列。個人賃金パネル
+# （N=545人×T=8年、1980-1987、バランスパネル）。educ/black/hisp等の
+# 時間不変変数はwithin変換で分散ゼロになりValidationErrorを誘発するため
+# 含めない（6.7節）。expersqのみ採用しexper自体を含めないのは、2-way FE
+# （entity+year）だと exper_it = exper_i0 + (year_t - year_0) が
+# entity効果+time効果の線形結合と完全に共線（実測でValidationError
+# 「zero variance after the within-transformation」を確認済み）になるため
+# （1-way単独ならexperも問題なく使えるが、1-way/2-way共通の1回帰式にするため
+# 両方から除外する）。
+WAGEPAN_Y = "lwage"
+WAGEPAN_X = ["married", "union", "expersq"]
+WAGEPAN_ENTITY = "nr"
+WAGEPAN_TIME = "year"

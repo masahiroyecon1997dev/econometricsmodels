@@ -61,6 +61,16 @@ TOLERANCES: dict[str, dict[str, float]] = {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,
     },
+    # FEの主リファレンスはlinearmodels.PanelOLS。within変換後の閉形式解の
+    # ためOLS/WLS/IVと同じ機械精度一致（実測相対誤差1e-14程度、classical/
+    # hc1/cluster/hac・1-way/2-way全て）。ただし2-way FEの`r_squared_within`
+    # のみ、linearmodels自身がentityのみdemeanの別定義を使うため対象外
+    # （テストコード側でこのフィールドの比較自体をスキップすること、
+    # `benchmark/panel/references/linearmodels_ref.py`モジュールdoc参照）。
+    "fe_reference": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+    },
     # Logit/Probitは反復最適化（Newton/BFGS/L-BFGS）のため、ゼロ近傍の値
     # （信頼区間の境界等）で閉形式解（OLS/WLS）より1桁大きい浮動小数点誤差が
     # 乗ることを実測確認済み（ATOLのみ1e-9、RTOLは同じ1e-8）。
@@ -209,5 +219,33 @@ TOLERANCES: dict[str, dict[str, float]] = {
         "rtol_margeff_se": 1e-3,
         # p値の裾での増幅（実測最大絶対誤差~2.9e-5、mroz）。logitの3e-5と近い値。
         "atol_p_value": 5e-5,
+    },
+    # FEのRクロスチェックはfixest。classical/hc1/hc2/hc3は機械精度一致
+    # （実測相対誤差1e-14程度、1-way/2-way双方）のためrtol_strictを適用。
+    # clusterのみfixestの小標本補正慣行（Stata流G/(G-1)補正）が本実装・
+    # linearmodelsと異なり、`ssc(G.adj=FALSE, K.fixef=...)`で調整しても
+    # 1-way実測相対誤差~1.8e-5・2-way実測相対誤差~0.21%が残る（実装バグ
+    # ではなく規約差、`benchmark/panel/references/run_fixest_benchmark.R`
+    # 参照）。追加検証はIssue #348で追跡中。
+    "fe_crosscheck": {
+        "rtol_strict": RTOL_MACHINE_PRECISION,
+        "rtol_cluster_one_way": 5e-5,
+        "rtol_cluster_two_way": 3e-3,
+        "atol": ATOL_CROSSCHECK_FLOOR,
+        # p_values/conf_intはcoef/se/t_statsのようにcluster特有のズレ
+        # （G/(G-1)補正差）がそのまま相対誤差として伝播しない——p値はt統計量に
+        # t分布のCDFという非線形変換をかけた値、信頼区間はt臨界値×seの積のため、
+        # 僅かなSEの差が非線形に増幅されうる。実測最大絶対誤差（small_panel、
+        # G=5という極端に少ないクラスタ数のケースを除く）はp_values~0.013・
+        # conf_int~0.031で、それぞれマージンを載せた絶対誤差フロア。coef/se/
+        # t_statsは引き続きrtol_cluster_one_way/two_wayで厳しく検証するため、
+        # 実装バグはそちらで検出できる（p_values/conf_intだけの例外的な緩和）。
+        # small_panel自体はG=5でこの増幅がさらに拡大する（実測最大絶対誤差
+        # conf_int~0.40）ため、p_values/conf_intの数値比較はスコープ外とし
+        # coef/se/t_stats/aic/bic/r_squared_withinのみ検証する
+        # （`test_fe_crosscheck.py`参照、`iv_crosscheck`の`rtol_hac_small_n`と
+        # 同型の「小標本ケースは別枠で扱う」判断）。
+        "atol_cluster_p_value": 0.02,
+        "atol_cluster_conf_int": 0.04,
     },
 }

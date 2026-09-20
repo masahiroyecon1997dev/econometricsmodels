@@ -151,6 +151,22 @@
   「`match`文字列がそのままparametrize idになりnode idが読みにくい」との
   指摘を受け、`ids=`で旧関数名相当のラベル（`y_in_x_exog`等）を明示し解消。
   既存9テストケースは1件も欠落なく、46件全てパスを確認済み。
+- `refactoring-candidates.md`項目59（2026-09-20）: OLS/WLS/Logit/Probit/Tobitの
+  `predict()`/`augment()`で重複していた「`x`列名の計算→列抽出ループ→
+  `predict_new_data`呼び出し」を、`engine_pybind/src/column_extraction.rs`の
+  共通ヘルパー`extract_f64_columns`（`extract_f64_column`を列ごとに呼ぶ薄い
+  ラッパー）＋各Result型の非公開ヘルパー`predict_for`（Tobitのみ
+  `predict_for(target, df)`）に切り出して統一。`predict_for`は`&DataFrame`
+  （Tobitは`MarginalEffectsTarget`も）を引数に取り`FromPyObject`未実装のため、
+  `#[pymethods]`ブロック内に置くとpyo3が公開Pythonメソッドとして解釈しようと
+  してビルドエラーになると判明し、各ファイルで`#[pymethods]`が付かない別の
+  `impl XxxResult { ... }`ブロックに分離した。ロジックの挙動は変更せず、
+  `cargo test --workspace`127→130件（`extract_f64_columns`の軽量単体テスト
+  3件を追加）・`maturin develop`後の`pytest`全1365件で回帰無しを確認。
+  rust-reviewerのレビュー済み（規約・設計・パフォーマンス上の重大な問題は
+  無し。`nonlinear/CLAUDE.md`の実装パターン記述の追随漏れのみ指摘を受け、
+  追って更新して解消）。項目60（`fit()`/`build_*_input()`側のy/x列抽出ループの
+  共通化、`panel/fe.rs`・`panel/re.rs`・`iv/common.rs`も対象）は今回のスコープ外。
 
 **Issue化した項目**（バグ調査に近く候補メモの範囲外と判断し、個別Issueへ切り出し）:
 

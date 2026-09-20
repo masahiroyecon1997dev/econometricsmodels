@@ -1199,45 +1199,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-09-13、`linear/common.rs`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
-### 58. `iv::common::parse_iv_cov_type`が`linear::common::parse_cov_type`と実質同一実装で重複している。実装スタイル（列抽出のinline化）もpanel側と不統一
-
-- **対象**: [engine_pybind/src/linear/common.rs:81-128](../../../engine_pybind/src/linear/common.rs#L81-L128)
-  の`parse_cov_type`、[engine_pybind/src/iv/common.rs:444-482](../../../engine_pybind/src/iv/common.rs#L444-L482)
-  の`parse_iv_cov_type`、[engine_pybind/src/panel/fe.rs:283-329](../../../engine_pybind/src/panel/fe.rs#L283-L329)
-  の`parse_fe_cov_type`
-- **内容**: ユーザー指摘（2026-09-13、「`parse_cov_type`は手法間での統一は可能か。
-  matchの中でクラスター/HACの列抽出まで行えばよりスマートに書けそう」）を受けて
-  4系統の実装を比較した。
-  - `iv::common::parse_iv_cov_type`は`linear::common::parse_cov_type`と使っている
-    型（`engine::linear::ols::CovType`）・matchの各アーム（文字列ラベル・
-    エラーメッセージ）が完全に同一。違いは`&IvOptions`を丸ごと受け取るか個々の
-    フィールド値を受け取るかのみ。`linear::common::parse_cov_type`は元々
-    `OLSOptions`/`WLSOptions`という2つの独立した型に共有させるため個々のフィールド
-    値を取る設計に一般化済みであり、同名フィールド（`cov_type`/`cluster_col`/
-    `hac_lags`/`time_col`）を持つ`IvOptions`もこの関数をそのまま呼べる可能性が高い
-    （`parse_iv_cov_type`自体を削除できる）。`nonlinear::common::parse_cov_type`
-    （対応する`cov_type`の種類・型が異なる: opg/hc1まで、hac非対応）・
-    `panel::fe::parse_fe_cov_type`（hc0非対応・`Hac`の意味論がFE固有）は実際に
-    variant集合が異なるため独立実装のままで妥当。
-  - ユーザー提案の「match内で列抽出まで完結させる」スタイルは、
-    `panel::fe::parse_fe_cov_type`が既にこの形（`"cluster" => { let groups = ...;
-    FeCovType::Cluster { groups } }`）で書かれている。`linear`/`iv`側は
-    「match外で`cov_type_lower == "cluster"`をif判定→事前計算→matchで組み立て」
-    という、同じ条件を2回書くスタイルになっており、panel方式に揃える方が
-    可読性が高いと考える。
-- **気づいた経緯**: 2026-09-13、`linear/common.rs`解説後のユーザー指摘。
-- **状態**: 対応済み（2026-09-20）。`iv::common::parse_iv_cov_type`を削除し、
-  `build_iv_input`から`IvOptions`の個々のフィールド値（`cov_type`/`cluster_col`/
-  `hac_lags`/`time_col`）を渡す形で`linear::common::parse_cov_type`を直接呼ぶよう
-  変更した。`linear::common::parse_cov_type`自体も、ユーザー提案の「match内で列抽出まで
-  完結させる」スタイル（`panel::fe::parse_fe_cov_type`と同型）にinline化した。
-  `nonlinear::common::parse_cov_type`・`panel::fe::parse_fe_cov_type`はvariant集合が
-  異なるため独立実装のまま（想定通り）。`cargo build/clippy/fmt --workspace`・
-  `cargo test --workspace`（127件）・`maturin develop`後の`tests/iv/`（315件）・
-  `tests/linear/`（479件）で回帰無しを確認済み。rust-reviewerの指摘を受け、削除した
-  `parse_iv_cov_type`への参照が残っていた`engine_pybind/src/iv/CLAUDE.md`・
-  `engine_pybind/src/panel/fe.rs`のモジュールdocコメントも本対応で更新した。
-
 ### 59. `predict()`/`augment()`内の列抽出＋`predict_new_data`呼び出しブロックが全手法で重複している
 
 - **対象**: [engine_pybind/src/linear/ols.rs:233-236,271-276](../../../engine_pybind/src/linear/ols.rs#L233-L236)
@@ -1256,7 +1217,27 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   メソッドに切り出せば、`predict()`/`augment()`両方のSome分岐から呼び出すだけで
   済む。各`*Result`型ごとに独立して適用可能でリスクが低い。
 - **気づいた経緯**: 2026-09-13、`linear/ols.rs`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
+- **状態**: 対応済み（2026-09-20）。`engine_pybind/src/column_extraction.rs`に
+  `extract_f64_columns(df, names) -> PyResult<Vec<Vec<f64>>>`（`extract_f64_column`を
+  列ごとに呼ぶ薄いラッパー、全手法共通ユーティリティ）を新設。`OLSResult`/`WLSResult`/
+  `LogitResult`/`ProbitResult`/`TobitResult`それぞれに非公開ヘルパーメソッド
+  `predict_for`（Tobitのみ`predict_for(target, df)`）を追加し、`predict()`/`augment()`
+  両方のSome分岐から呼び出す形に統一した。`predict_for`は`&DataFrame`
+  （Tobitは`MarginalEffectsTarget`も）を引数に取るため`FromPyObject`未実装であり、
+  pyo3の`#[pymethods]`ブロック内に置くとPython公開シグネチャとして解釈されビルドエラーに
+  なることが判明したため、各ファイルで`#[pymethods]`が付かない別の`impl XxxResult { ... }`
+  ブロックに分離して定義した。ロジックの挙動は変更していない。`cargo build/clippy/fmt
+  --workspace`・`cargo test --workspace`（127件）・`maturin develop`後の`pytest`全体
+  （1365件）で回帰無しを確認済み。`fit()`/`build_*_input()`側のy/x列抽出ループ
+  （`panel/fe.rs`・`panel/re.rs`・`iv/common.rs`含む、項目60参照）は今回のスコープ外。
+  rust-reviewerのレビュー済み（規約・設計・パフォーマンス上の重大な問題無し）。
+  **追記（2026-09-20、ユーザー指摘）**: `predict_for`内の`x_names`計算
+  （`has_intercept`時に先頭`"const"`を除く、Tobitのみ末尾`"sigma"`も除く）自体も
+  5ファイルで同型に重複しており、今後手法が増えたときの変更容易性を考慮し
+  `column_extraction.rs`に`x_column_names(param_names, has_intercept,
+  exclude_trailing) -> &[String]`として追加集約した（`exclude_trailing`はTobitのみ
+  `1`、他は`0`）。単体テスト3件追加。再度`cargo build/clippy/fmt --workspace`・
+  `cargo test --workspace`（133件）・`pytest`全体（1365件）で回帰無しを確認済み。
 
 ### 60. `fit`/`build_*_input`内のy/x列抽出ループが7ファイルで重複しており、`column_extraction.rs`への集約候補
 
@@ -1278,7 +1259,11 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   操作に名前が付くことでユーザーの言う「カプセル化」にも資する。項目59より対象範囲が
   広いが、抽出ロジック自体は単純でリスクは低いと考える。
 - **気づいた経緯**: 2026-09-13、`linear/ols.rs`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
+- **状態**: 未対応（着手要否はユーザー判断待ち）。**追記（2026-09-20）**:
+  項目59の対応で`extract_f64_columns`自体は既に`column_extraction.rs`に実装済み
+  （`predict()`/`augment()`側から利用中）。本項目に着手する際は新規定義ではなく
+  既存の`extract_f64_columns`をそのまま`fit`/`build_*_input`側の`y`/`x`列抽出
+  ループにも適用する形になる。
 
 ### 61. `fit`冒頭のバリデーション4関数の呼び出し順序が5ファイルで一字一句重複している
 

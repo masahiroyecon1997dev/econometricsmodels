@@ -21,7 +21,7 @@ use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
 use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
-use crate::column_extraction::extract_f64_column;
+use crate::column_extraction::{extract_f64_column, extract_f64_columns, x_column_names};
 use crate::validation::{
     RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
     validate_no_duplicate_within_role, validate_no_existing_column, validate_x_non_empty,
@@ -209,6 +209,23 @@ pub struct WLSResult {
     training_data: DataFrame,
 }
 
+// `#[pymethods]`ブロックの外に置く非公開実装（`OLSResult`と同じ理由）。
+impl WLSResult {
+    /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
+    /// （`x`列の抽出→`predict_new_data`呼び出し、`OLSResult`と同じ設計）。
+    fn predict_for(&self, df: &DataFrame) -> PyResult<Vec<f64>> {
+        let has_intercept = self.has_intercept;
+        let x_names = x_column_names(&self.param_names, has_intercept, 0);
+        let x_columns = extract_f64_columns(df, x_names)?;
+
+        Ok(engine::linear::ols::predict_new_data(
+            &self.params,
+            has_intercept,
+            &x_columns,
+        ))
+    }
+}
+
 #[pymethods]
 impl WLSResult {
     /// Predicted values.
@@ -235,23 +252,7 @@ impl WLSResult {
         };
 
         let df: DataFrame = new_data.into();
-        let has_intercept = self.has_intercept;
-        let x_names: &[String] = if has_intercept {
-            &self.param_names[1..]
-        } else {
-            &self.param_names[..]
-        };
-
-        let mut x_columns: Vec<Vec<f64>> = Vec::with_capacity(x_names.len());
-        for name in x_names {
-            x_columns.push(extract_f64_column(&df, name)?);
-        }
-
-        Ok(engine::linear::ols::predict_new_data(
-            &self.params,
-            has_intercept,
-            &x_columns,
-        ))
+        self.predict_for(&df)
     }
 
     /// The source data (training data, or `new_data` when given) with the
@@ -267,22 +268,10 @@ impl WLSResult {
     ///   `ValidationError` (would otherwise silently overwrite it).
     #[pyo3(signature = (new_data=None))]
     fn augment(&self, new_data: Option<PyDataFrame>) -> PyResult<PyDataFrame> {
-        let has_intercept = self.has_intercept;
-        let x_names: &[String] = if has_intercept {
-            &self.param_names[1..]
-        } else {
-            &self.param_names[..]
-        };
-
         let (mut source, predicted) = match new_data {
             Some(new_data) => {
                 let df: DataFrame = new_data.into();
-                let mut x_columns: Vec<Vec<f64>> = Vec::with_capacity(x_names.len());
-                for name in x_names {
-                    x_columns.push(extract_f64_column(&df, name)?);
-                }
-                let predicted =
-                    engine::linear::ols::predict_new_data(&self.params, has_intercept, &x_columns);
+                let predicted = self.predict_for(&df)?;
                 (df, predicted)
             }
             None => (self.training_data.clone(), self.fitted_values.clone()),

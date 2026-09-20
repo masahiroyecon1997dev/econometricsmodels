@@ -37,7 +37,7 @@ use super::common::{
     MarginalEffectsResult, mle_error_to_pyerr, parse_cov_type, parse_marginal_effects_at,
     parse_method,
 };
-use crate::column_extraction::extract_f64_column;
+use crate::column_extraction::{extract_f64_column, extract_f64_columns, x_column_names};
 use crate::errors::ValidationError;
 use crate::validation::{
     RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
@@ -275,6 +275,21 @@ pub struct TobitResult {
     training_data: DataFrame,
 }
 
+// `#[pymethods]`ブロックの外に置く非公開実装（`LogitResult`と同じ理由）。
+impl TobitResult {
+    /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
+    /// （`x`列の抽出→`predict_new_data`呼び出し）。`x`の列名はLogit/Probitと異なり
+    /// `param_names`の先頭`"const"`（`has_intercept`時）と末尾`"sigma"`の両方を
+    /// 除いた部分（モジュールdocコメント参照）。
+    fn predict_for(&self, target: MarginalEffectsTarget, df: &DataFrame) -> PyResult<Vec<f64>> {
+        let has_intercept = self.estimator.input().has_intercept();
+        let x_names = x_column_names(&self.param_names, has_intercept, 1);
+        let x_columns = extract_f64_columns(df, x_names)?;
+
+        Ok(self.estimator.predict_new_data(target, &x_columns))
+    }
+}
+
 #[pymethods]
 impl TobitResult {
     /// Predicted values for the training data used in `fit()`, or for `new_data`
@@ -300,22 +315,7 @@ impl TobitResult {
         };
 
         let df: DataFrame = new_data.into();
-        let has_intercept = self.estimator.input().has_intercept();
-        // `param_names`は`(k+1)`長（`has_intercept`時は先頭`"const"`・末尾`"sigma"`を
-        // 含む、モジュールdocコメント参照）。`x`の列名はその両端を除いた部分。
-        let len = self.param_names.len();
-        let x_names: &[String] = if has_intercept {
-            &self.param_names[1..len - 1]
-        } else {
-            &self.param_names[..len - 1]
-        };
-
-        let mut x_columns: Vec<Vec<f64>> = Vec::with_capacity(x_names.len());
-        for name in x_names {
-            x_columns.push(extract_f64_column(&df, name)?);
-        }
-
-        Ok(self.estimator.predict_new_data(target, &x_columns))
+        self.predict_for(target, &df)
     }
 
     /// The source data (training data, or `new_data` when given) with the predicted
@@ -340,22 +340,11 @@ impl TobitResult {
     fn augment(&self, target: String, new_data: Option<PyDataFrame>) -> PyResult<PyDataFrame> {
         let target_lower = target.to_lowercase();
         let target_enum = parse_marginal_effects_target(&target_lower)?;
-        let has_intercept = self.estimator.input().has_intercept();
-        let len = self.param_names.len();
-        let x_names: &[String] = if has_intercept {
-            &self.param_names[1..len - 1]
-        } else {
-            &self.param_names[..len - 1]
-        };
 
         let (mut source, predicted) = match new_data {
             Some(new_data) => {
                 let df: DataFrame = new_data.into();
-                let mut x_columns: Vec<Vec<f64>> = Vec::with_capacity(x_names.len());
-                for name in x_names {
-                    x_columns.push(extract_f64_column(&df, name)?);
-                }
-                let predicted = self.estimator.predict_new_data(target_enum, &x_columns);
+                let predicted = self.predict_for(target_enum, &df)?;
                 (df, predicted)
             }
             None => (

@@ -17,7 +17,7 @@ use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
 use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
-use crate::column_extraction::extract_f64_column;
+use crate::column_extraction::{extract_f64_column, extract_f64_columns, x_column_names};
 use crate::errors::ValidationError;
 use crate::validation::{
     RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
@@ -201,6 +201,25 @@ pub struct OLSResult {
     training_data: Option<DataFrame>,
 }
 
+// `#[pymethods]`ブロックの外に置く非公開実装（pyo3は`#[pymethods]`内の全メソッドを
+// Python公開シグネチャとして扱おうとするため、`&DataFrame`のような`FromPyObject`
+// 未実装の型を引数に取るヘルパーはこちらに置く必要がある）。
+impl OLSResult {
+    /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
+    /// （`x`列の抽出→`predict_new_data`呼び出し）。
+    fn predict_for(&self, df: &DataFrame) -> PyResult<Vec<f64>> {
+        let has_intercept = self.has_intercept;
+        let x_names = x_column_names(&self.param_names, has_intercept, 0);
+        let x_columns = extract_f64_columns(df, x_names)?;
+
+        Ok(engine::linear::ols::predict_new_data(
+            &self.params,
+            has_intercept,
+            &x_columns,
+        ))
+    }
+}
+
 #[pymethods]
 impl OLSResult {
     /// Predicted values.
@@ -223,23 +242,7 @@ impl OLSResult {
         };
 
         let df: DataFrame = new_data.into();
-        let has_intercept = self.has_intercept;
-        let x_names: &[String] = if has_intercept {
-            &self.param_names[1..]
-        } else {
-            &self.param_names[..]
-        };
-
-        let mut x_columns: Vec<Vec<f64>> = Vec::with_capacity(x_names.len());
-        for name in x_names {
-            x_columns.push(extract_f64_column(&df, name)?);
-        }
-
-        Ok(engine::linear::ols::predict_new_data(
-            &self.params,
-            has_intercept,
-            &x_columns,
-        ))
+        self.predict_for(&df)
     }
 
     /// The source data (training data, or `new_data` when given) with the
@@ -258,22 +261,10 @@ impl OLSResult {
     ///   only possible for `IvResult.first_stage()` results): `ValidationError`.
     #[pyo3(signature = (new_data=None))]
     fn augment(&self, new_data: Option<PyDataFrame>) -> PyResult<PyDataFrame> {
-        let has_intercept = self.has_intercept;
-        let x_names: &[String] = if has_intercept {
-            &self.param_names[1..]
-        } else {
-            &self.param_names[..]
-        };
-
         let (mut source, predicted) = match new_data {
             Some(new_data) => {
                 let df: DataFrame = new_data.into();
-                let mut x_columns: Vec<Vec<f64>> = Vec::with_capacity(x_names.len());
-                for name in x_names {
-                    x_columns.push(extract_f64_column(&df, name)?);
-                }
-                let predicted =
-                    engine::linear::ols::predict_new_data(&self.params, has_intercept, &x_columns);
+                let predicted = self.predict_for(&df)?;
                 (df, predicted)
             }
             None => {
@@ -291,9 +282,8 @@ impl OLSResult {
 
         // `with_column`の唯一の失敗条件（`ShapeMismatch`、追加する列の長さが
         // DataFrameの高さと食い違う場合）はここでは理論上到達不能。
-        // `new_data`指定時: `predicted`は`x_columns`（`source`自身から
-        // `extract_f64_column`で抽出した列）と同じ観測数`n`から
-        // `predict_new_data`が計算するため、`predicted.len() == source.height()`。
+        // `new_data`指定時: `predicted`は`predict_for`が`source`自身から抽出した
+        // `x_columns`と同じ観測数`n`から計算するため、`predicted.len() == source.height()`。
         // `None`時: `fitted_values`と`training_data`はどちらも同じ`fit()`呼び出しで
         // 同じ`n`から作られたペア（`ols_estimator_to_result`／この関数の
         // `training_data = Some(df)`代入）であり、以降どちらも独立に変更されない。

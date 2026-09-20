@@ -29,7 +29,7 @@ use super::common::{
     MarginalEffectsResult, mat_to_nested_vec, mle_error_to_pyerr, parse_cov_type,
     parse_marginal_effects_at, parse_method,
 };
-use crate::column_extraction::extract_f64_column;
+use crate::column_extraction::{extract_f64_column, extract_f64_columns, x_column_names};
 use crate::validation::{
     RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
     validate_no_duplicate_within_role, validate_no_existing_column, validate_x_non_empty,
@@ -253,6 +253,21 @@ pub struct LogitResult {
     training_data: DataFrame,
 }
 
+// `#[pymethods]`ブロックの外に置く非公開実装（`&DataFrame`が`FromPyObject`未実装の
+// ため、`#[pymethods]`内に置くとpyo3がPython公開シグネチャとして解釈しようとして
+// ビルドエラーになる）。
+impl LogitResult {
+    /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
+    /// （`x`列の抽出→`predict_new_data`呼び出し）。
+    fn predict_for(&self, df: &DataFrame) -> PyResult<Vec<f64>> {
+        let has_intercept = self.estimator.input().has_intercept();
+        let x_names = x_column_names(&self.param_names, has_intercept, 0);
+        let x_columns = extract_f64_columns(df, x_names)?;
+
+        Ok(self.estimator.predict_new_data(&x_columns))
+    }
+}
+
 #[pymethods]
 impl LogitResult {
     /// Predicted probabilities for the training data used in `fit()`, or for
@@ -269,19 +284,7 @@ impl LogitResult {
         };
 
         let df: DataFrame = new_data.into();
-        let has_intercept = self.estimator.input().has_intercept();
-        let x_names: &[String] = if has_intercept {
-            &self.param_names[1..]
-        } else {
-            &self.param_names[..]
-        };
-
-        let mut x_columns: Vec<Vec<f64>> = Vec::with_capacity(x_names.len());
-        for name in x_names {
-            x_columns.push(extract_f64_column(&df, name)?);
-        }
-
-        Ok(self.estimator.predict_new_data(&x_columns))
+        self.predict_for(&df)
     }
 
     /// The source data (training data, or `new_data` when given) with the predicted
@@ -299,21 +302,10 @@ impl LogitResult {
     ///   `ValidationError` (would otherwise silently overwrite it).
     #[pyo3(signature = (new_data=None))]
     fn augment(&self, new_data: Option<PyDataFrame>) -> PyResult<PyDataFrame> {
-        let has_intercept = self.estimator.input().has_intercept();
-        let x_names: &[String] = if has_intercept {
-            &self.param_names[1..]
-        } else {
-            &self.param_names[..]
-        };
-
         let (mut source, probability) = match new_data {
             Some(new_data) => {
                 let df: DataFrame = new_data.into();
-                let mut x_columns: Vec<Vec<f64>> = Vec::with_capacity(x_names.len());
-                for name in x_names {
-                    x_columns.push(extract_f64_column(&df, name)?);
-                }
-                let probability = self.estimator.predict_new_data(&x_columns);
+                let probability = self.predict_for(&df)?;
                 (df, probability)
             }
             None => (self.training_data.clone(), self.estimator.predict()),

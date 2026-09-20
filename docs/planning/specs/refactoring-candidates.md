@@ -1174,3 +1174,58 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-09-13、`linear/common.rs`解説中に呼び出し元を`grep`で
   確認して気づいた（Claude起点、ユーザー指摘ではない）。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 57. `LeastSquaresError::InvalidHacLags`と`IvError::InvalidHacLags`がフィールド・メッセージ完全一致で重複している
+
+- **対象**: [engine/src/linear/common.rs:49-51](../../../engine/src/linear/common.rs#L49-L51)
+  の`LeastSquaresError::InvalidHacLags`、[engine/src/iv/common.rs:92-99](../../../engine/src/iv/common.rs#L92-L99)
+  の`IvError::InvalidHacLags`
+- **内容**: ユーザー指摘（2026-09-13、「`LeastSquaresError`に関して他の手法
+  〔panel/nonlinear/IV〕でまとめられるものはないか」）を受けて4系統のエラー型を
+  比較した。`SingularMatrix`はpanel（`WithinRegressionFailed`等）・IV
+  （`FirstStageFailed`/`SecondStageFailed`）とも`LeastSquaresError`自体を
+  `source`として包む合成で既に再利用されており重複ではない。一方
+  `InvalidHacLags { hac_lags: i64, n: usize }`・メッセージ`"hac_lags must be
+  in the range [0, n): got {hac_lags}, n={n}"`は`LeastSquaresError`と`IvError`で
+  フィールド名・型・メッセージ文言まで完全一致していた。`IvError`側のdocコメントは
+  「2SLSのサンドイッチ型分散計算が独立実装のため共有しない」と説明するが、これは
+  計算方法の独立性であり`hac_lags`という入力値自体の検証（`[0, n)`範囲チェック）とは
+  別の関心事のため、`.claude/rules/rust-style.md`が`CommonError`を導入した基準
+  （系統をまたいで同じ意味・同じメッセージのバリアントが重複する場合）にそのまま
+  当てはまる。`CommonError::InvalidHacLags`への統合を提案する。パネルの
+  `InvalidHacBandwidth`（上限が`n`ではなく時点数`t`、docコメントで意図的に区別
+  済み）は意味が異なるため対象外、nonlinear（Logit/Probit）は`cov_type="hac"`
+  非対応のため該当なし。
+- **気づいた経緯**: 2026-09-13、`linear/common.rs`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 58. `iv::common::parse_iv_cov_type`が`linear::common::parse_cov_type`と実質同一実装で重複している。実装スタイル（列抽出のinline化）もpanel側と不統一
+
+- **対象**: [engine_pybind/src/linear/common.rs:81-128](../../../engine_pybind/src/linear/common.rs#L81-L128)
+  の`parse_cov_type`、[engine_pybind/src/iv/common.rs:444-482](../../../engine_pybind/src/iv/common.rs#L444-L482)
+  の`parse_iv_cov_type`、[engine_pybind/src/panel/fe.rs:283-329](../../../engine_pybind/src/panel/fe.rs#L283-L329)
+  の`parse_fe_cov_type`
+- **内容**: ユーザー指摘（2026-09-13、「`parse_cov_type`は手法間での統一は可能か。
+  matchの中でクラスター/HACの列抽出まで行えばよりスマートに書けそう」）を受けて
+  4系統の実装を比較した。
+  - `iv::common::parse_iv_cov_type`は`linear::common::parse_cov_type`と使っている
+    型（`engine::linear::ols::CovType`）・matchの各アーム（文字列ラベル・
+    エラーメッセージ）が完全に同一。違いは`&IvOptions`を丸ごと受け取るか個々の
+    フィールド値を受け取るかのみ。`linear::common::parse_cov_type`は元々
+    `OLSOptions`/`WLSOptions`という2つの独立した型に共有させるため個々のフィールド
+    値を取る設計に一般化済みであり、同名フィールド（`cov_type`/`cluster_col`/
+    `hac_lags`/`time_col`）を持つ`IvOptions`もこの関数をそのまま呼べる可能性が高い
+    （`parse_iv_cov_type`自体を削除できる）。`nonlinear::common::parse_cov_type`
+    （対応する`cov_type`の種類・型が異なる: opg/hc1まで、hac非対応）・
+    `panel::fe::parse_fe_cov_type`（hc0非対応・`Hac`の意味論がFE固有）は実際に
+    variant集合が異なるため独立実装のままで妥当。
+  - ユーザー提案の「match内で列抽出まで完結させる」スタイルは、
+    `panel::fe::parse_fe_cov_type`が既にこの形（`"cluster" => { let groups = ...;
+    FeCovType::Cluster { groups } }`）で書かれている。`linear`/`iv`側は
+    「match外で`cov_type_lower == "cluster"`をif判定→事前計算→matchで組み立て」
+    という、同じ条件を2回書くスタイルになっており、panel方式に揃える方が
+    可読性が高いと考える。
+- **気づいた経緯**: 2026-09-13、`linear/common.rs`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち。着手する場合は`parse_iv_cov_type`
+  削除〔項目本体〕と`linear::common::parse_cov_type`の内部スタイル変更〔inline化〕を
+  合わせて検討）

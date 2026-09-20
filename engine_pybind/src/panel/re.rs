@@ -1,6 +1,7 @@
 //! REの推定オプション・結果、およびPython（polars DataFrame + 列名 + オプション）から
 //! `engine::panel::re`（Swamy-Arora分散成分推定・準偏差変換・`cov_type`対応・ハウスマン検定）
-//! を呼び出すところまでの一連の処理（Issue #200でデータ抽出・pyclass定義）。
+//! を呼び出すところまでの一連の処理（Issue #200でデータ抽出・pyclass定義、Issue #201で
+//! `ReEstimator::fit`への実際の配線・`#[pymodule]`登録）。
 //!
 //! 【責務分離】`.claude/rules/rust-style.md`「Python境界でのデータ受け渡し」参照。
 //! polars DataFrameから列ごとの`Vec<f64>`/`Vec<String>`への抽出はここ（`column_extraction`
@@ -13,12 +14,19 @@
 //! ## 実装フェーズの分割方針（FE・IV・Logitと同じ3段階、`engine_pybind/src/panel/CLAUDE.md`
 //! 「実装フェーズの分割方針」参照）
 //!
-//! 1. **本Issue（#200）**: `ReOptions`/`ReResult`のpyclass定義、列抽出・バリデーション・
-//!    `engine::panel::re::ReInput`構築までを行う`build_re_input`を実装する。この時点では
-//!    `#[pymodule]`への登録・実際の`ReEstimator::fit`呼び出しは行わない
-//!    （FEの#186と同じ分割）。
-//! 2. **後続Issue**: `build_re_input`を実際に呼び出す`fit`関数を追加し、`lib.rs`に
+//! 1. **データ抽出・pyclass定義issue（#200、完了）**: `ReOptions`/`ReResult`のpyclass定義、
+//!    列抽出・バリデーション・`engine::panel::re::ReInput`構築までを行う`build_re_input`を
+//!    実装した。この時点では`#[pymodule]`への登録・実際の`ReEstimator::fit`呼び出しは
+//!    行わなかった（FEの#186と同じ分割）。
+//! 2. **本Issue（#201）**: `build_re_input`を実際に呼び出す`fit`関数を追加し、`lib.rs`に
 //!    `#[pyfunction] fit_re`を新設して`#[pymodule]`に登録する（FEの#187相当）。
+//!    `build_re_input`/`parse_re_cov_type`の`#[allow(dead_code)]`属性はこの時点で削除する
+//!    （本番経路（`fit_re`）から実際に呼ばれるようになったため）。
+//!
+//! RE自身に`fixed_effects()`のような追加メソッドは無い（ハウスマン検定は`fit()`内で自動
+//! 計算し`ReResult`のフィールドに直接含める、`panel-api-design.md`2.4節）ため、FEの#188
+//! （`fixed_effects()`メソッド）に相当する3段目は存在しない。本Issueでこの系統の実装は
+//! 完結する。
 //!
 //! ## `ReOptions`に`time_col`が無い理由（`FeOptions`との相違点）
 //!
@@ -49,13 +57,17 @@
 //! 決定が無く、他手法（OLS/WLS/Logit/Probit/IV/FE post-#320）と一貫させる方針をユーザーが
 //! 選択した。nullモデル・ICC推定のサポートは別Issue（#346）で検討する。
 
-use engine::panel::re::{ReCovType, ReInput};
+use std::collections::HashSet;
+
+use engine::panel::re::{ReCovType, ReEstimator, ReInput};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
+use pyo3_polars::PyDataFrame;
 
 use super::common::panel_error_to_pyerr;
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
 use crate::errors::ValidationError;
+use crate::linear::common::mat_to_vec;
 use crate::validation::{
     RoleValue, validate_no_duplicate_roles, validate_no_duplicate_within_role, validate_x_non_empty,
 };
@@ -286,12 +298,6 @@ fn parse_re_cov_type(df: &DataFrame, options: &ReOptions) -> PyResult<(ReCovType
 /// - `cov_type`の文字列が不正な場合は`ValidationError`（`parse_re_cov_type`参照）
 /// - それ以外（`y`/`entity`/`time`間の行数不一致等）は`engine::panel::common::PanelError`
 ///   から`panel_error_to_pyerr`で変換
-#[allow(
-    dead_code,
-    reason = "本Issue（#200）では#[pymodule]への登録・fit()の呼び出しを行わないため \
-              #[cfg(test)] mod testsからのみ呼ばれる。後続issueでfit_reが#[pymodule]に \
-              登録されたら削除する（engine_pybind/src/panel/CLAUDE.md「踏んだ罠」参照）"
-)]
 pub(crate) fn build_re_input(
     df: &DataFrame,
     y: String,
@@ -342,6 +348,78 @@ pub(crate) fn build_re_input(
     .map_err(panel_error_to_pyerr)?;
 
     Ok((input, cov_type, cov_type_lower))
+}
+
+/// Pythonから渡された `data` / `y` / `x` / `entity` / `options` を検証し、
+/// `build_re_input`で構築した`ReInput`に対して`engine::panel::re::ReEstimator::fit`を
+/// 呼び出し、`ReResult`として返す。
+///
+/// `n_entities`はengine側に対応するpublicなgetterが無いため（`FeEstimator`と同じ事情、
+/// `engine_pybind/src/panel/CLAUDE.md`「`FeResult`のスコープ」参照）、`ReInput::entity()`
+/// （`build_re_input`が返す`input`から取得可能）から独立に計算する。
+///
+/// `params`/`param_names`/`residuals`/`dep_var_name`/`n_obs`/`log_likelihood`/`aic`/`bic`は
+/// `ReEstimator::estimator()`（内部で委譲した`OlsEstimator`）から取得する。FEと異なり
+/// `aic`/`bic`もそのまま`estimator()`委譲でよい——REの`df_model`が`OlsInput::k()`と自動的に
+/// 一致する設計のため、`OlsEstimator`委譲時点で既に正しい値になっている
+/// （`engine/src/panel/CLAUDE.md`「`df_resid`/`df_model`（Issue #196）」参照。FEの
+/// `aic`/`bic`のようなRE独自の再計算は不要）。`std_errors`/`t_stats`/`p_values`/
+/// `conf_lower`/`conf_upper`/`df_resid`/`df_model`/`f_statistic`/`f_p_value`/
+/// `r_squared_within`/`r_squared_between`/`r_squared_overall`/`hausman_statistic`/
+/// `hausman_p_value`/`hausman_df`は`ReEstimator`自身のgetterから取得する（`cov_type`・
+/// REの切片除外等を反映して独自に計算し直した値のため、`estimator()`委譲では取り違えに
+/// なる、`FeEstimator`と同じ理由）。
+///
+/// # Errors
+/// - `build_re_input`が返すエラー（列抽出・y/x/entity/timeの重複・`cov_type`文字列の
+///   検証等）は`ValidationError`
+/// - `ReEstimator::fit`が返す`engine::panel::common::PanelError`（Swamy-Arora分散成分
+///   推定の失敗——内部FE推定のsingleton検出・分散ゼロ・自由度不足、between回帰の失敗——、
+///   準偏差変換済みデータへの委譲失敗、クラスター数不足、HAC関連のバリデーション等）は
+///   `panel_error_to_pyerr`で変換
+pub(crate) fn fit(
+    data: PyDataFrame,
+    y: String,
+    x: Vec<String>,
+    entity: String,
+    options: &ReOptions,
+) -> PyResult<ReResult> {
+    let df: DataFrame = data.into();
+    let (input, cov_type, cov_type_lower) = build_re_input(&df, y, x, entity, options)?;
+
+    let n_entities = input.entity().iter().collect::<HashSet<_>>().len();
+
+    let estimator = ReEstimator::fit(input, cov_type, options.confidence_level)
+        .map_err(panel_error_to_pyerr)?;
+    let ols = estimator.estimator();
+
+    Ok(ReResult {
+        params: mat_to_vec(ols.params()),
+        std_errors: mat_to_vec(estimator.std_errors()),
+        t_stats: mat_to_vec(estimator.t_stats()),
+        p_values: mat_to_vec(estimator.p_values()),
+        conf_lower: mat_to_vec(estimator.conf_lower()),
+        conf_upper: mat_to_vec(estimator.conf_upper()),
+        param_names: ols.input().param_names().to_vec(),
+        residuals: mat_to_vec(ols.residuals()),
+        dep_var_name: ols.input().dep_var_name().to_string(),
+        n_obs: ols.input().nobs(),
+        df_resid: estimator.df_resid(),
+        df_model: estimator.df_model(),
+        n_entities,
+        cov_type: cov_type_lower,
+        f_statistic: estimator.f_statistic(),
+        f_p_value: estimator.f_p_value(),
+        log_likelihood: ols.log_likelihood(),
+        aic: ols.aic(),
+        bic: ols.bic(),
+        r_squared_within: estimator.r_squared_within(),
+        r_squared_between: estimator.r_squared_between(),
+        r_squared_overall: estimator.r_squared_overall(),
+        hausman_statistic: estimator.hausman_statistic(),
+        hausman_p_value: estimator.hausman_p_value(),
+        hausman_df: estimator.hausman_df(),
+    })
 }
 
 #[cfg(test)]

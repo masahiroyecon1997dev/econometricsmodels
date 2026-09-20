@@ -20,6 +20,7 @@ use nonlinear::tobit::{
     CensoringFitCategoryResult, CensoringFitCheckResult, TobitOptions, TobitResult,
 };
 use panel::fe::{FeOptions, FeResult};
+use panel::re::{ReOptions, ReResult};
 
 /// Entry point for OLS estimation.
 ///
@@ -195,6 +196,33 @@ fn fit_fe(
     panel::fe::fit(data, y, x, entity, &options)
 }
 
+/// Entry point for RE (random effects panel regression) estimation.
+///
+/// Parameters
+/// ----------
+/// data : polars.DataFrame
+///     The input data. Must contain the `y`, `x`, `entity`, and (if specified)
+///     time/cluster columns.
+/// y : str
+///     Column name of the dependent variable.
+/// x : list[str]
+///     Column names of the independent variables. Must contain at least one
+///     column name.
+/// entity : str
+///     Column name of the entity (individual/panel unit) identifier.
+/// options : ReOptions
+///     Estimation options.
+#[pyfunction]
+fn fit_re(
+    data: PyDataFrame,
+    y: String,
+    x: Vec<String>,
+    entity: String,
+    options: ReOptions,
+) -> PyResult<ReResult> {
+    panel::re::fit(data, y, x, entity, &options)
+}
+
 #[pymodule]
 fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // `import econometricsmodels` の時点で faer のグローバル並列度を Par::Seq に
@@ -227,6 +255,9 @@ fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fit_fe, m)?)?;
     m.add_class::<FeOptions>()?;
     m.add_class::<FeResult>()?;
+    m.add_function(wrap_pyfunction!(fit_re, m)?)?;
+    m.add_class::<ReOptions>()?;
+    m.add_class::<ReResult>()?;
     m.add("ValidationError", m.py().get_type::<ValidationError>())?;
     m.add("ComputationError", m.py().get_type::<ComputationError>())?;
     Ok(())

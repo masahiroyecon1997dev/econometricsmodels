@@ -53,6 +53,42 @@ computation_error`に従うだけ）。他系統（`IvError`・`MleError`等）�
 
 `build_fe_input`/`parse_fe_cov_type`自身も同じ理由で`#[allow(dead_code, reason = "...")]`を付けている（`build_iv_input`/`parse_iv_cov_type`の#159時点と同じパターン）。#187で`fit_fe`が`#[pymodule]`に登録されたら、これらの属性はすべて削除すること。
 
+## RE: engine呼び出し・エラー変換（Issue #201）
+
+FEの#187と同じ構成: `build_re_input`で`ReInput`/`ReCovType`/`cov_type`（小文字正規化済み
+文字列）を得たあと、`ReEstimator::fit`を呼び、`ReResult`を組み立てて返す（`panel/re.rs`の
+`fit`関数）。`lib.rs`に`#[pyfunction] fit_re`を新設して`#[pymodule]`に登録し、
+`build_re_input`の`#[allow(dead_code)]`を削除した（`parse_re_cov_type`は元々属性を付けて
+いなかった——`build_re_input`から呼ばれる非公開関数のため、`build_re_input`自体が
+dead_code扱いの間も呼び出しグラフ経由で到達可能だった）。
+
+- **`n_entities`の計算はFEと同じ**（`ReInput::entity()`を`HashSet`でユニーク化、`fit`内で
+  `input`を`ReEstimator::fit`にムーブする前に計算）。
+- **`estimator()`（内部`OlsEstimator`）と`ReEstimator`自身のgetterの使い分けはFEと同型だが
+  `aic`/`bic`の扱いだけ異なる**: `params`/`param_names`/`residuals`/`dep_var_name`/
+  `n_obs`は`estimator()`から取得する点はFEと同じ。**`log_likelihood`/`aic`/`bic`もFEと
+  異なり`estimator()`（`ols.log_likelihood()`/`ols.aic()`/`ols.bic()`）からそのまま
+  取得する**——`ReEstimator`自身は`aic()`/`bic()`メソッドを持たない（`engine`側に実装が
+  無い）。理由は`engine/src/panel/CLAUDE.md`「`df_resid`/`df_model`（Issue #196）」参照:
+  REの`df_model`が`OlsInput::k()`と自動的に一致する設計のため、FEのような独自再計算が
+  不要（`FeEstimator`は`df_model = k + neffects`という異なる式のため`aic`/`bic`の
+  再計算が必要だった、という違い）。`std_errors`/`t_stats`/`p_values`/`conf_lower`/
+  `conf_upper`/`df_resid`/`df_model`/`f_statistic`/`f_p_value`/`r_squared_*`/
+  `hausman_*`は`ReEstimator`自身のgetterから取得する（FEと同じ理由）。
+- **検証**: `maturin develop --release`でビルドし、engine単体テスト
+  `re_estimator_fit_matches_linearmodels_reference`と同じデータ（entity a/a/a/b/b/c/c、
+  `x1`/`y`固定値、`cov_type="classical"`）をPythonから直接`_lib.fit_re`に渡し、
+  `params`/`residuals`/`df_resid`/`df_model`/`std_errors`/`t_stats`/`p_values`/
+  `conf_lower`/`conf_upper`が期待値と完全一致することを確認済み。加えて`x=[]`・未知の
+  `cov_type`・`cov_type="hc0"`・singletonエンティティ・`cov_type="cluster"`
+  （`cluster_col`指定）・`cov_type="hac"`で`time`未指定（`HacRequiresTime`）の各エラー
+  経路が`ValidationError`として正しく変換されることも確認済み。`fit`自体はFEと同じ理由
+  （`PyDataFrame`がGILを要求）で`#[cfg(test)] mod tests`から直接呼べないため、専用の
+  Rustユニットテストは追加していない。
+- RE自身に`fixed_effects()`のような追加メソッドは無いため（`panel-api-design.md`2.4節、
+  `panel/re.rs`モジュールdoc参照）、FEの#188（`fixed_effects()`）に相当する3段目は無く、
+  本Issueでこの系統の実装は完結する。
+
 ## RE: データ抽出・pyclass定義（Issue #200）
 
 FEの#186と同じ段階（`ReOptions`/`ReResult`のpyclass定義・`build_re_input`実装まで、

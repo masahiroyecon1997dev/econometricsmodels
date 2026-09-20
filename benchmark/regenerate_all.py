@@ -48,6 +48,7 @@ _FIXTURE_MODULES = [
     "benchmark.iv.fixtures.generate_iv_fixtures",
     "benchmark.iv.fixtures.generate_iv_gmm_fixtures",
     "benchmark.panel.fixtures.generate_fe_fixtures",
+    "benchmark.panel.fixtures.generate_re_fixtures",
     # Tobit は主リファレンス（AER::tobit）も交差検証（censReg）も R 実装のため
     # 両方 Rscript 必須。
     "benchmark.nonlinear.fixtures.generate_tobit_fixtures",
@@ -58,6 +59,7 @@ _FIXTURE_MODULES = [
     "benchmark.nonlinear.fixtures.generate_tobit_crosscheck_fixtures",
     "benchmark.iv.fixtures.generate_iv_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_fe_crosscheck_fixtures",
+    "benchmark.panel.fixtures.generate_re_crosscheck_fixtures",
 ]
 
 

@@ -1296,36 +1296,14 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-09-13、`linear/ols.rs`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
-### 62.【要設計検討】Logit/Probit/TobitのResult構築ブロックがフィールド単位で完全重複しておりIssue #318の原因になっている。`ols_estimator_to_result`の配置問題とも関連
+### 62.【Issue化】Logit/Probit/TobitのResult構築ブロックがフィールド単位で完全重複しておりIssue #318の原因になっている。`ols_estimator_to_result`の配置問題とも関連
 
-- **対象**: [engine_pybind/src/nonlinear/logit.rs:459-480](../../../engine_pybind/src/nonlinear/logit.rs#L459-L480)
-  の`LogitResult`構築ブロック、[engine_pybind/src/nonlinear/probit.rs:450-471](../../../engine_pybind/src/nonlinear/probit.rs#L450-L471)
-  の`ProbitResult`構築ブロック（`grep`で比較した結果、型名以外一字一句同一）、
-  [engine_pybind/src/linear/ols.rs:382-412](../../../engine_pybind/src/linear/ols.rs#L382-L412)
-  の`ols_estimator_to_result`（IV`first_stage()`が再利用、`engine_pybind/src/iv/common.rs`）
-- **内容**: ユーザー指摘（2026-09-13、「`ols_estimator_to_result`をIVでも使用するのに
-  `ols.rs`にあるのはアーキテクチャ上問題があると思う。他の手法でも似たようなマッピングを
-  行っている。全体の共通化は難しいかもしれないが、`dep_var_name`が非線形で漏れていた
-  （Issue #318）という事象の発生を防げる気がする」）を受けて調査した。
-  - `LogitResult`/`ProbitResult`の`fit()`内構築ブロック（18フィールド）は型名以外
-    完全一致していた。Issue #318（`dep_var_name`がLogit/Probit/Tobit3箇所とも
-    漏れていた）はまさにこの「同じ構築ロジックが3箇所独立に手書きされている」
-    構造が原因。`engine`層では`MleFitOptions`で同種の重複を既に解消済み
-    （`engine_pybind/src/nonlinear/CLAUDE.md`参照）だが、`engine_pybind`層の
-    Result構築だけこの対応が漏れている。
-  - ただし`ols_estimator_to_result`を単純に移動するだけではIssue #318は防げない
-    （Logit/Probit/Tobitはこの関数を呼んでおらず、別のestimator型を扱うため）。
-    `OLSResult`の非公開フィールドへの直接アクセスが必要なため、現状`ols.rs`に
-    置かれていること自体はRustのモジュール可視性上一定の合理性があり、項目56の
-    `mat_to_vec`ほど明確な配置ミスとは言えない（フィールドを`pub(crate)`に緩めて
-    `linear/common.rs`へ移すことは可能だが、副次的な整理に留まる）。
-  - Issue #318の再発防止には、`LogitEstimator`/`ProbitEstimator`/`TobitEstimator`に
-    共通のアクセサ（トレイト等）を用意し、`nonlinear::common`に1つの構築ヘルパーを
-    置くという、トレイト設計を伴うそれなりに大きい変更が必要。`nonlinear/CLAUDE.md`
-    に既に記録済みの「`macro_rules!`によるボイラープレート削減はIssue #315で別軸検討」
-    という未決事項と直結する。
-- **Claudeの所感**: 実害（Issue #318）が既に一度発生している以上、対応の優先度は
-  項目59〜61より高いと考えるが、トレイト設計を伴うためこの場で軽く決めず、
-  Issue化して設計自体を別途検討するのが良いと思う。
-- **気づいた経緯**: 2026-09-13、`linear/ols.rs`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否・設計方針はユーザー判断待ち。Issue #315・#318と関連）
+→ Issue #347として切り出し済み（2026-09-20）。調査の結果、`ols_estimator_to_result`の
+単純な移動ではIssue #318は防げない（Logit/Probit/Tobitは別のestimator型を扱うため）
+ことを確認し、代わりに「`engine::nonlinear::common`への共通アクセサtrait定義
+（読み出し側のtrait化）＋`engine_pybind`側でのプレーン構造体への内部コンポジション＋
+各Resultからの薄い明示的`#[getter]`委譲」という設計方針で合意した（ユーザー提案）。
+コンパイラによる強制力が無い点（フィールド追加時の委譲書き忘れをコンパイルエラーに
+できない）も既知の限界として起票時に明記し、その補強策として「Python層での属性
+一括存在チェック」導入も検討案としてIssue本文に記録した。`macro_rules!`による完全
+機械生成案（Issue #315とスコープ重複）は不採用、詳細はIssue参照。

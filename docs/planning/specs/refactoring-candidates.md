@@ -1229,3 +1229,103 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **状態**: 未対応（着手要否はユーザー判断待ち。着手する場合は`parse_iv_cov_type`
   削除〔項目本体〕と`linear::common::parse_cov_type`の内部スタイル変更〔inline化〕を
   合わせて検討）
+
+### 59. `predict()`/`augment()`内の列抽出＋`predict_new_data`呼び出しブロックが全手法で重複している
+
+- **対象**: [engine_pybind/src/linear/ols.rs:233-236,271-276](../../../engine_pybind/src/linear/ols.rs#L233-L236)
+  （`predict()`と`augment()`のSome分岐）、同型のブロックが
+  [engine_pybind/src/linear/wls.rs:245,280](../../../engine_pybind/src/linear/wls.rs#L245)・
+  [engine_pybind/src/nonlinear/logit.rs:279,312](../../../engine_pybind/src/nonlinear/logit.rs#L279)・
+  [engine_pybind/src/nonlinear/probit.rs:272,305](../../../engine_pybind/src/nonlinear/probit.rs#L272)・
+  [engine_pybind/src/nonlinear/tobit.rs:313,354](../../../engine_pybind/src/nonlinear/tobit.rs#L313)
+  にも存在（`grep`で計10箇所確認）
+- **内容**: ユーザー指摘（2026-09-13、「`predict`と`augment`で処理が共通している個所が
+  あるがこれは共通化できるだろうか」）を受けて確認。`x_names`の計算→
+  `extract_f64_column`ループでの`x_columns`構築→`predict_new_data`（または各手法の
+  対応する予測関数）呼び出し、という一連のブロックが、OLS/WLS/Logit/Probit/Tobitの
+  各ファイルで`predict()`と`augment()`の両方に、かつ手法をまたいでも同型に重複している。
+  `fn predict_for(&self, df: &DataFrame) -> PyResult<Vec<f64>>`のような非公開ヘルパー
+  メソッドに切り出せば、`predict()`/`augment()`両方のSome分岐から呼び出すだけで
+  済む。各`*Result`型ごとに独立して適用可能でリスクが低い。
+- **気づいた経緯**: 2026-09-13、`linear/ols.rs`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 60. `fit`/`build_*_input`内のy/x列抽出ループが7ファイルで重複しており、`column_extraction.rs`への集約候補
+
+- **対象**: [engine_pybind/src/linear/ols.rs:340-343](../../../engine_pybind/src/linear/ols.rs#L340-L343)
+  の`x_slices`ループ、同型のブロックが
+  [engine_pybind/src/linear/wls.rs:343](../../../engine_pybind/src/linear/wls.rs#L343)・
+  [engine_pybind/src/nonlinear/logit.rs:412](../../../engine_pybind/src/nonlinear/logit.rs#L412)・
+  [engine_pybind/src/nonlinear/probit.rs:403](../../../engine_pybind/src/nonlinear/probit.rs#L403)・
+  [engine_pybind/src/nonlinear/tobit.rs:558](../../../engine_pybind/src/nonlinear/tobit.rs#L558)・
+  [engine_pybind/src/panel/fe.rs:382](../../../engine_pybind/src/panel/fe.rs#L382)・
+  [engine_pybind/src/panel/re.rs:317](../../../engine_pybind/src/panel/re.rs#L317)
+  にも存在（`grep`で計7ファイル確認）
+- **内容**: ユーザー指摘（2026-09-13、「列抽出部分も変更容易性が上がる気がする。
+  カプセル化に近くなると思う？」）を受けて確認。`Vec::with_capacity`＋`for`ループで
+  複数列名から`Vec<Vec<f64>>`を組み立てる処理が、全手法の`fit`/`build_*_input`相当の
+  関数で同一パターンとして重複している。`column_extraction.rs`（全手法共通ユーティリティの
+  既存置き場）に`extract_f64_columns(df: &DataFrame, names: &[String]) ->
+  PyResult<Vec<Vec<f64>>>`を追加すれば解消でき、「複数列をまとめて抽出する」という
+  操作に名前が付くことでユーザーの言う「カプセル化」にも資する。項目59より対象範囲が
+  広いが、抽出ロジック自体は単純でリスクは低いと考える。
+- **気づいた経緯**: 2026-09-13、`linear/ols.rs`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 61. `fit`冒頭のバリデーション4関数の呼び出し順序が5ファイルで一字一句重複している
+
+- **対象**: [engine_pybind/src/linear/ols.rs:331-334](../../../engine_pybind/src/linear/ols.rs#L331-L334)、
+  同型の呼び出し順序が
+  [engine_pybind/src/linear/wls.rs:330-337](../../../engine_pybind/src/linear/wls.rs#L330-L337)
+  （`weight`の重複チェックが1行追加される以外は同一）・
+  [engine_pybind/src/nonlinear/logit.rs:403-406](../../../engine_pybind/src/nonlinear/logit.rs#L403-L406)・
+  [engine_pybind/src/nonlinear/probit.rs:394-397](../../../engine_pybind/src/nonlinear/probit.rs#L394-L397)・
+  [engine_pybind/src/nonlinear/tobit.rs:548-551](../../../engine_pybind/src/nonlinear/tobit.rs#L548-L551)
+  にも存在（`grep`で確認。FE/REは`validate_no_const_collision`が無い3行版）
+- **内容**: ユーザー指摘（2026-09-13、「バリデーション部分を共通化すれば漏れがなくなる
+  可能性が高く、また追加バリデーションがはっきりする」）を受けて確認。
+  `validate_x_non_empty`→`validate_no_duplicate_roles`→`validate_no_duplicate_within_role`
+  →`validate_no_const_collision`という4行の呼び出し順序が、OLS/Logit/Probit/Tobitで
+  完全に同一（WLSは`weight`関連の1行が追加されるのみ）。個々の検証ロジック自体は
+  既に`validation.rs`に集約済みだが、「どれを・どの順で呼ぶか」という組み合わせが
+  まだ手法ごとに手書きで複製されており、新しい手法追加時にどれか1つを呼び忘れる
+  リスクがある。`validation.rs`に束ねるヘルパー（例:
+  `validate_common_roles(y, x, include_intercept)`）を追加することを提案する。
+  FE/REは`const`衝突チェックが無い非対称性があるため、そこの扱い（引数化するか
+  FE/RE用に別関数にするか）は着手時に要検討。
+- **気づいた経緯**: 2026-09-13、`linear/ols.rs`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 62.【要設計検討】Logit/Probit/TobitのResult構築ブロックがフィールド単位で完全重複しておりIssue #318の原因になっている。`ols_estimator_to_result`の配置問題とも関連
+
+- **対象**: [engine_pybind/src/nonlinear/logit.rs:459-480](../../../engine_pybind/src/nonlinear/logit.rs#L459-L480)
+  の`LogitResult`構築ブロック、[engine_pybind/src/nonlinear/probit.rs:450-471](../../../engine_pybind/src/nonlinear/probit.rs#L450-L471)
+  の`ProbitResult`構築ブロック（`grep`で比較した結果、型名以外一字一句同一）、
+  [engine_pybind/src/linear/ols.rs:382-412](../../../engine_pybind/src/linear/ols.rs#L382-L412)
+  の`ols_estimator_to_result`（IV`first_stage()`が再利用、`engine_pybind/src/iv/common.rs`）
+- **内容**: ユーザー指摘（2026-09-13、「`ols_estimator_to_result`をIVでも使用するのに
+  `ols.rs`にあるのはアーキテクチャ上問題があると思う。他の手法でも似たようなマッピングを
+  行っている。全体の共通化は難しいかもしれないが、`dep_var_name`が非線形で漏れていた
+  （Issue #318）という事象の発生を防げる気がする」）を受けて調査した。
+  - `LogitResult`/`ProbitResult`の`fit()`内構築ブロック（18フィールド）は型名以外
+    完全一致していた。Issue #318（`dep_var_name`がLogit/Probit/Tobit3箇所とも
+    漏れていた）はまさにこの「同じ構築ロジックが3箇所独立に手書きされている」
+    構造が原因。`engine`層では`MleFitOptions`で同種の重複を既に解消済み
+    （`engine_pybind/src/nonlinear/CLAUDE.md`参照）だが、`engine_pybind`層の
+    Result構築だけこの対応が漏れている。
+  - ただし`ols_estimator_to_result`を単純に移動するだけではIssue #318は防げない
+    （Logit/Probit/Tobitはこの関数を呼んでおらず、別のestimator型を扱うため）。
+    `OLSResult`の非公開フィールドへの直接アクセスが必要なため、現状`ols.rs`に
+    置かれていること自体はRustのモジュール可視性上一定の合理性があり、項目56の
+    `mat_to_vec`ほど明確な配置ミスとは言えない（フィールドを`pub(crate)`に緩めて
+    `linear/common.rs`へ移すことは可能だが、副次的な整理に留まる）。
+  - Issue #318の再発防止には、`LogitEstimator`/`ProbitEstimator`/`TobitEstimator`に
+    共通のアクセサ（トレイト等）を用意し、`nonlinear::common`に1つの構築ヘルパーを
+    置くという、トレイト設計を伴うそれなりに大きい変更が必要。`nonlinear/CLAUDE.md`
+    に既に記録済みの「`macro_rules!`によるボイラープレート削減はIssue #315で別軸検討」
+    という未決事項と直結する。
+- **Claudeの所感**: 実害（Issue #318）が既に一度発生している以上、対応の優先度は
+  項目59〜61より高いと考えるが、トレイト設計を伴うためこの場で軽く決めず、
+  Issue化して設計自体を別途検討するのが良いと思う。
+- **気づいた経緯**: 2026-09-13、`linear/ols.rs`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否・設計方針はユーザー判断待ち。Issue #315・#318と関連）

@@ -1226,9 +1226,17 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
     という、同じ条件を2回書くスタイルになっており、panel方式に揃える方が
     可読性が高いと考える。
 - **気づいた経緯**: 2026-09-13、`linear/common.rs`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち。着手する場合は`parse_iv_cov_type`
-  削除〔項目本体〕と`linear::common::parse_cov_type`の内部スタイル変更〔inline化〕を
-  合わせて検討）
+- **状態**: 対応済み（2026-09-20）。`iv::common::parse_iv_cov_type`を削除し、
+  `build_iv_input`から`IvOptions`の個々のフィールド値（`cov_type`/`cluster_col`/
+  `hac_lags`/`time_col`）を渡す形で`linear::common::parse_cov_type`を直接呼ぶよう
+  変更した。`linear::common::parse_cov_type`自体も、ユーザー提案の「match内で列抽出まで
+  完結させる」スタイル（`panel::fe::parse_fe_cov_type`と同型）にinline化した。
+  `nonlinear::common::parse_cov_type`・`panel::fe::parse_fe_cov_type`はvariant集合が
+  異なるため独立実装のまま（想定通り）。`cargo build/clippy/fmt --workspace`・
+  `cargo test --workspace`（127件）・`maturin develop`後の`tests/iv/`（315件）・
+  `tests/linear/`（479件）で回帰無しを確認済み。rust-reviewerの指摘を受け、削除した
+  `parse_iv_cov_type`への参照が残っていた`engine_pybind/src/iv/CLAUDE.md`・
+  `engine_pybind/src/panel/fe.rs`のモジュールdocコメントも本対応で更新した。
 
 ### 59. `predict()`/`augment()`内の列抽出＋`predict_new_data`呼び出しブロックが全手法で重複している
 

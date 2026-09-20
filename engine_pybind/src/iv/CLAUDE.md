@@ -21,6 +21,8 @@ Logit（Issue #65/#66）と同じ2段階に分けた。
 
 `IvOptions`/`IvResult`/`build_iv_input`/`fit`は`iv/common.rs`に置く（`two_sls.rs`/`gmm.rs`のような手法ごとのファイル分割はしない）。`fit_iv`という単一エントリポイントを`IvOptions.method`（`"2sls"`/`"gmm"`）で2SLS/GMMに振り分ける設計のため、これらは系統内で真に共有されるロジックであり、`<系統>/common.rs`に置くという既存方針にそのまま合致する。
 
+**上記・下記の`parse_iv_cov_type`への言及は#159〜#169時点の実装経緯としてそのまま残しているが、この関数自体は`docs/planning/specs/refactoring-candidates.md`項目58対応（2026-09-20）により削除済み**。`linear::common::parse_cov_type`（OLS/WLS用）と型・matchアーム・エラーメッセージが完全同一だったため、`IvOptions`の同名フィールド（`cov_type`/`cluster_col`/`hac_lags`/`time_col`）を個々の引数として渡す形でそちらへ統合した。現在`build_iv_input`が`cov_type`をパースする箇所は`crate::linear::common::parse_cov_type`を直接呼ぶ。
+
 `weak_instrument_f_statistics`（空`HashMap`）・`overid_statistic`/`overid_p_value`・`wu_hausman_statistic`/`wu_hausman_p_value`（いずれも`None`）は`fit`ではプレースホルダーのまま返す。実際の計算はそれぞれ別issue（#163/#167/#164）。
 
 **`weak_instrument_f_statistics`は後日（#163完了後）配線済み**: `TwoSlsEstimator::weak_instrument_f_statistics()`（`&[(String, f64)]`）を`.iter().cloned().collect()`で`HashMap<String, f64>`に詰め替えるだけ（`fit`、`iv/common.rs`）。`overid_statistic`系はまだ#167が未着手のため引き続きプレースホルダー。
@@ -34,7 +36,7 @@ Logit（Issue #65/#66）と同じ2段階に分けた。
 **`method="gmm"`は実装済み**（当初`GmmEstimator`が点推定のみ・engine側cov_type対応も無かったため`ValidationError`を返していたが、`engine::iv::gmm::GmmEstimator`にcov_type対応SEを実装したうえで本ファイルにも配線した）。
 
 - **`IvOptions`に`gmm_convergence: Option<f64>`（既定`None`）・`raise_on_non_convergence: bool`（既定`true`）を追加**（`GmmEstimator::fit`のシグネチャに対応、Issue #229で追加された引数が今回初めてPython側に配線された）。
-- **`parse_weight_type`**（`parse_iv_cov_type`と対になる新規関数）が`IvOptions.weight_type`文字列を`engine::iv::gmm::WeightType`にパースする。`cluster_col`/`hac_lags`/`time_col`は`cov_type`と共用（`IvOptions`に別フィールドを増やさない設計、`weight_type`と`cov_type`が異なるクラスター変数を使いたいニーズが出てきたら別フィールド化を検討）。
+- **`parse_weight_type`**（`cov_type`側の`linear::common::parse_cov_type`と対になる新規関数。`weight_type`は`WeightType`という`cov_type`側の`CovType`とは異なる型を組み立てるため独立実装のまま）が`IvOptions.weight_type`文字列を`engine::iv::gmm::WeightType`にパースする。`cluster_col`/`hac_lags`/`time_col`は`cov_type`と共用（`IvOptions`に別フィールドを増やさない設計、`weight_type`と`cov_type`が異なるクラスター変数を使いたいニーズが出てきたら別フィールド化を検討）。
 - **`IvResult`の非公開フィールドを`estimator: TwoSlsEstimator`から`first_stage: Vec<(String, OlsEstimator)>`に置き換えた**（`method`非依存の表現にするため）。`first_stage`/`weak_instrument_f_statistics`は`method`によらず`engine::iv::common::compute_first_stage`（`engine/src/iv/CLAUDE.md`参照、2SLS/GMM間で共有するロジックとして抽出済み）から構築する。**`method="2sls"`では第一段階回帰が二重計算になる**（`fit`が明示的に1回、`TwoSlsEstimator::fit`が内部でもう1回）——`OlsEstimator`が`Clone`未実装のため`TwoSlsEstimator::first_stage_estimators()`の借用結果を`IvResult`へ所有権ごと移せず、OLS自体が軽量という前提で許容した設計判断（rust-reviewerの指摘で認識済み、恒久対応する場合は`TwoSlsEstimator`に第一段階結果を外部注入する`fit`のバリエーションを追加する案がある。着手前にユーザー確認すること）。
 - **識別の順序条件（`k_instruments < k_endog`）チェックは`compute_first_stage`呼び出しより前に行う**（`fit`冒頭、`compute_first_stage`自体はこの条件を検証しないため、過小識別な入力で無駄な第一段階回帰が走るのを防ぐ、rust-reviewerの指摘で追加）。
 - **`wu_hausman_statistic`/`wu_hausman_p_value`は`method="gmm"`では常に`None`**（`GmmEstimator`はWu-Hausman検定を実装しない）。`overid_statistic`/`overid_p_value`は`method="gmm"`では`GmmEstimator::hansen_j_statistic()`/`hansen_j_p_value()`から構築する（Hansen J検定、`method="2sls"`のSargan検定と対）。

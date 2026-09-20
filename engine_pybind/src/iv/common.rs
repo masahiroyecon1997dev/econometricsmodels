@@ -64,7 +64,7 @@ use pyo3_polars::PyDataFrame;
 
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
 use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
-use crate::linear::common::{least_squares_error_is_computation_error, mat_to_vec};
+use crate::linear::common::{least_squares_error_is_computation_error, mat_to_vec, parse_cov_type};
 use crate::linear::ols::{OLSResult, ols_estimator_to_result};
 use crate::validation::{
     RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
@@ -428,74 +428,15 @@ impl IvResult {
     }
 }
 
-/// `IvOptions.cov_type`をパースし、該当する`cov_type`のときのみ`cluster_col`/`time_col`を
-/// 抽出したうえで`engine::linear::ols::CovType`を組み立てる。
-///
-/// `engine::linear::ols::CovType`（型そのもの）を流用しているのは、`TwoSlsEstimator::fit`が
-/// 第一段階（`OlsEstimator`への委譲）・第二段階（独立実装のサンドイッチ計算、Issue #166）
-/// のどちらもこの型で`cov_type`を受け取るため。対応するcov_typeの範囲は`engine::linear::
-/// common::parse_cov_type`（OLS/WLS用）と同じだが、`OLSOptions`ではなく`IvOptions`という
-/// 別の型に依存するため独立実装している（`linear/common.rs`の`parse_cov_type`のdocコメントが
-/// 明記する通り、無理に共通化せず系統ごとに素直に実装する方針）。
-///
-/// # Errors
-/// `cov_type`の文字列が既知の値のいずれでもない場合は`ValidationError`。それ以外
-/// （列の抽出時に発覚する問題等）は`column_extraction`の責務で`ValidationError`。
-fn parse_iv_cov_type(df: &DataFrame, options: &IvOptions) -> PyResult<(EngineCovType, String)> {
-    let cov_type_lower = options.cov_type.to_lowercase();
-
-    let cluster_groups = if cov_type_lower == "cluster" {
-        options
-            .cluster_col
-            .as_ref()
-            .map(|col_name| extract_group_key_column(df, col_name))
-            .transpose()?
-    } else {
-        None
-    };
-
-    let time_order = if cov_type_lower == "hac" {
-        options
-            .time_col
-            .as_ref()
-            .map(|col_name| extract_f64_column(df, col_name))
-            .transpose()?
-    } else {
-        None
-    };
-
-    let cov_type = match cov_type_lower.as_str() {
-        "classical" | "nonrobust" => EngineCovType::Classical,
-        "hc0" => EngineCovType::Hc0,
-        "hc1" => EngineCovType::Hc1,
-        "hc2" => EngineCovType::Hc2,
-        "hc3" => EngineCovType::Hc3,
-        "hac" => EngineCovType::Hac {
-            lags: options.hac_lags,
-            time_order,
-        },
-        "cluster" => EngineCovType::Cluster {
-            groups: cluster_groups,
-        },
-        other => {
-            return Err(ValidationError::new_err(format!(
-                "unknown cov_type: '{other}'. Expected one of 'classical', 'hc0' through \
-                 'hc3', 'hac', or 'cluster'"
-            )));
-        }
-    };
-
-    Ok((cov_type, cov_type_lower))
-}
-
 /// `IvOptions.weight_type`をパースし、該当するweight_typeのときのみ`cluster_col`/
 /// `hac_lags`/`time_col`を抽出したうえで`engine::iv::gmm::WeightType`を組み立てる
-/// （`method="gmm"`のみで使用、`parse_iv_cov_type`と対になる関数）。
+/// （`method="gmm"`のみで使用、`cov_type`側の同種の関数は`linear::common::parse_cov_type`
+/// を共有しているのに対し、こちらは`WeightType`が`CovType`と異なる型のため独立実装）。
 ///
 /// `cluster_col`/`hac_lags`/`time_col`は`cov_type`と共用する（モジュールdocコメント
 /// 「GMMのweight_type」参照、`IvOptions`に別フィールドを増やさない設計）。
 ///
-/// 戻り値に正規化済み小文字文字列を含めるのは`parse_iv_cov_type`と同じ理由
+/// 戻り値に正規化済み小文字文字列を含めるのは`linear::common::parse_cov_type`と同じ理由
 /// （`IvResult.weight_type`の構築時に`options.weight_type.to_lowercase()`を
 /// 再計算せずに済ませるため、Issue #307）。
 ///
@@ -558,7 +499,7 @@ fn parse_weight_type(df: &DataFrame, options: &IvOptions) -> PyResult<(WeightTyp
 ///   `x_endog`/`instruments`が空リストの場合（Issue #306、`x_exog`は対象外）は
 ///   ここ（受け口）の責務で`ValidationError`
 /// - `method`の文字列が`"2sls"`/`"gmm"`のいずれでもない場合は`ValidationError`
-/// - `cov_type`の文字列が不正な場合は`ValidationError`（`parse_iv_cov_type`参照）
+/// - `cov_type`の文字列が不正な場合は`ValidationError`（`linear::common::parse_cov_type`参照）
 /// - それ以外（行数不一致等）は`engine::iv::common::IvError`から`iv_error_to_pyerr`で変換
 ///   （`IvInput::from_columns`はこの時点では識別可能性を検証しないため、
 ///   `InsufficientInstruments`はここでは発生しない。`IvInput`の構造体docコメント参照）
@@ -626,7 +567,13 @@ pub(crate) fn build_iv_input(
     }
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
-    let (cov_type, cov_type_lower) = parse_iv_cov_type(df, options)?;
+    let (cov_type, cov_type_lower) = parse_cov_type(
+        df,
+        &options.cov_type,
+        options.cluster_col.as_deref(),
+        options.hac_lags,
+        options.time_col.as_deref(),
+    )?;
 
     let input = IvInput::from_columns(
         &y_slice,

@@ -47,8 +47,12 @@
 //! FEは`hc0`を**サポートしない**（linearmodels・fixestともにパネル/FE向けの`hc0`
 //! オプションが存在しないため、Issue #181で`FeCovType` enumから除外済み）。OLS/WLS/IVとは
 //! 異なりFEの`cov_type`文字列パースはこの1点で分岐が異なるため、`linear::common::
-//! parse_cov_type`を流用せず独立実装する（`iv::common::parse_iv_cov_type`と同じ
-//! 「無理に共通化しない」方針）。
+//! parse_cov_type`を流用せず独立実装する。IVの`cov_type`パースは元々（`iv::common::
+//! parse_iv_cov_type`という）別実装を持っていたが、`OLSOptions`/`IvOptions`が同名
+//! フィールドを持つ偶然の一致により後から`linear::common::parse_cov_type`へ統合された
+//! （`docs/planning/specs/refactoring-candidates.md`項目58）——FEはこの一致が無く
+//! （`hc0`非対応・`Hac`の意味論がFE固有）、意図的に独立実装を維持している点でIVとは事情が
+//! 異なる。
 //!
 //! ## `x`の空リストを許容しない（Issue #320）
 //!

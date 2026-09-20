@@ -65,6 +65,9 @@ Probit固有の差分のみを記載する。
 実装済み）は`run_solver`共通の性質で、Probitも同様に該当する。詳細・実測値・小標本での
 精度検証テストへの影響は[`logit-spec.md`](./logit-spec.md)3.2節を参照。
 
+`bfgs`/`lbfgs`のline searchの評価回数バジェット（`BudgetedProblem`、Issue #342）も`run_solver`
+共通で、Probitも同様に保護される。詳細は[`logit-spec.md`](./logit-spec.md)3.2節を参照。
+
 ### 3.3 標準誤差
 
 `CovType`（`Classical`/`Opg`/`Hc0`/`Hc1`/`Cluster`）・計算式・エラー型（`SingularDesignMatrix`

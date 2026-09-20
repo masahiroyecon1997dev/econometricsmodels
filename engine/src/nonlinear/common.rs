@@ -26,6 +26,7 @@ use argmin::solver::quasinewton::LBFGS;
 use faer::prelude::{Solve, SolveLstsq};
 use faer::{Mat, Side};
 use statrs::distribution::{ChiSquared, Continuous, ContinuousCDF, Normal};
+use std::cell::Cell;
 use thiserror::Error;
 
 use crate::design_matrix::design_matrix_element;
@@ -189,6 +190,32 @@ pub enum MleError {
          pattern is typical of (quasi-)complete separation, where no finite MLE exists"
     )]
     SeparationSuspected { n_iter: usize },
+
+    /// `bfgs`/`lbfgs`のline search（`MoreThuenteLineSearch`）が、収束判定を一度も満たさない
+    /// まま目的関数・勾配の評価回数の総枠（[`BudgetedProblem`]）を使い切った（Issue #342）。
+    ///
+    /// **背景**: `bfgs`の自前実装（`FaerBfgs`）・`lbfgs`（argmin組み込み`LBFGS`）はいずれも、
+    /// line searchを走らせる内側`Executor`に反復回数の上限を設定しておらず（argminの既定値
+    /// `u64::MAX`）、`MoreThuenteLineSearch`自体もステップ幅の上限（`stpmax`）を設定して
+    /// いない。探索方向・勾配の組み合わせが退化し、line search内部の収束判定
+    /// （`info`フラグ1〜6のいずれか）もNaN/Infガードも一度も発火しない状況に嵌ると、
+    /// この内側ループは理論上終了しない（devビルドで80分超のCPU時間を消費し続ける
+    /// ケースを実測で確認済み）。[`BudgetedProblem`]による評価回数の総枠は、この
+    /// 退化状況を有限時間で検出しエラーに変換するための安全弁であり、argmin自体
+    /// （フォーク不可能な固定バージョン依存）を変更せずに`bfgs`/`lbfgs`両方を保護する。
+    ///
+    /// メッセージは「objective/gradient」の評価回数と表現しているが、実際には
+    /// `newton`のHessian評価（最適化ループ内で毎反復呼ばれる分。収束後1回だけの最終
+    /// Hessian評価は[`BudgetedProblem::into_inner`]でバジェット対象から除外している）も
+    /// 同じ総枠を共有する。`newton`は`MAX_LM_ATTEMPTS`で頭打ちのLMラダーによりこの
+    /// バリアントが実質発火しないため、メッセージは主な発火源である`bfgs`/`lbfgs`の
+    /// line search（cost/gradient評価）に絞って表現している。
+    #[error(
+        "the optimizer evaluated the objective/gradient {budget} times without satisfying its \
+         convergence criteria (this typically indicates the line search failed to converge for \
+         this input); try a different method, or adjust max_iter/tol"
+    )]
+    EvaluationBudgetExceeded { budget: u64 },
 }
 
 /// [`SeparationSuspected`](MleError::SeparationSuspected)を検出する閾値。標準化
@@ -958,6 +985,132 @@ pub struct SolverOutput {
     pub n_iter: usize,
 }
 
+/// [`run_solver`]が`problem`に許す目的関数・勾配・Hessian評価の総回数を、外側の
+/// `max_iter`（1回のfit呼び出し全体を通した反復上限）に対してこの倍率でスケールする
+/// （Issue #342の[`BudgetedProblem`]参照）。
+///
+/// **値の根拠**: `newton`は1反復あたり評価回数がO(1)（`cost`/`gradient`各1回＋
+/// `regularized_newton_step`のLM ラダー、`MAX_LM_ATTEMPTS`で頭打ち）のため、この倍率が
+/// どれだけ大きくてもまず消費し切らない。`bfgs`/`lbfgs`は1反復あたりのline search評価
+/// 回数が問題依存で変動するが、正常に収束するケースでは数回〜数十回程度（実測:
+/// `docs/performance/logit.md`でn=1,000,000・classicalのbfgsが6〜7反復、lbfgsが17反復で
+/// 収束）。`2000`は、極端に打ち切りが強い・条件数が悪いなど「正常だが遅い」ケースにも
+/// 数百倍のマージンを残しつつ、退化した無限ループ相当のケースを有限時間（実測で問題に
+/// なった小標本のTobitでは秒オーダー）で打ち切れる値として選んだ。既定`max_iter=35`
+/// （Logit/Probit/Tobit共通）に対する実効バジェットは`(35+1)*2000=72,000`で、上記の
+/// 実測反復回数に対して十分なマージンがあることをrust-reviewer確認済み。
+const MAX_EVALUATIONS_PER_ITER: u64 = 2000;
+
+/// [`run_solver`]に渡す`problem`をラップし、`CostFunction`/`Gradient`/`Hessian`の呼び出し
+/// 回数に総枠（バジェット）を設ける（Issue #342: `nonlinear::tobit::tests::proptests`が
+/// devプロファイルで異常に長時間実行される問題の根本対応）。
+///
+/// **背景**: `Method::Bfgs`（自前実装`FaerBfgs`、[`FaerBfgs::next_iter`]）・
+/// `Method::Lbfgs`（argmin組み込み`LBFGS`）はいずれも、1回の外側反復ごとに
+/// `MoreThuenteLineSearch`を内側`Executor`で走らせるが、この内側`Executor`には
+/// `max_iters`が設定されておらず（argminの`IterState`既定値`u64::MAX`）、
+/// `MoreThuenteLineSearch`自体もステップ幅の上限（`stpmax`）を設定していない
+/// （argmin側のデフォルトは`f64::INFINITY`）。探索方向・勾配の組み合わせが退化し、
+/// line search内部の収束判定（`info`フラグ）もNaN/Infガードも一度も発火しない状況に
+/// 嵌ると、この内側ループは理論上終了しない（[`MleError::EvaluationBudgetExceeded`]の
+/// docコメント参照）。
+///
+/// **なぜここに1箇所実装すれば全methodを保護できるか**: `MoreThuenteLineSearch`は
+/// 呼び出し元（`FaerBfgs`の自前実装、argmin組み込み`LBFGS`のいずれも）を問わず、
+/// 必ず`Problem<O>`経由で`problem.cost()`/`problem.gradient()`を呼ぶ。argminの全trait
+/// メソッドは`Result`を返す設計のため、ここでエラーを返せば`?`演算子で呼び出し元
+/// （`MoreThuenteLineSearch::next_iter`→内側`Executor::run()`→`FaerBfgs::next_iter`または
+/// 組み込み`LBFGS::next_iter`→外側`Executor::run()`）を素通りしてそのまま伝播する。
+/// **argmin自体のソースコードを一切変更・フォークせずに`Method::Lbfgs`（argmin組み込み、
+/// 内部を直接制御できない）も保護できる**のがこの設計の要点（対応方針の検討過程で、
+/// argmin組み込み`LBFGS`内部の同型の呼び出し箇所に直接`max_iters`を注入する案も
+/// 検討したが、依存クレートのソース変更が必要で不採用とした）。
+///
+/// `Method::Newton`（`FaerNewton`）はこの経路を通らず自前のLMラダー
+/// （`MAX_LM_ATTEMPTS`）で既に有限回に抑えられているが、[`run_solver`]は3method共通で
+/// このラッパーを適用する（将来追加されるsolverも含め、個別のsolverが独自の反復上限を
+/// 正しく実装しているかに依存しない、一律の安全網とするため）。
+struct BudgetedProblem<O> {
+    inner: O,
+    budget: u64,
+    remaining: Cell<u64>,
+}
+
+impl<O> BudgetedProblem<O> {
+    fn new(inner: O, budget: u64) -> Self {
+        Self {
+            inner,
+            budget,
+            remaining: Cell::new(budget),
+        }
+    }
+
+    /// ラップした`O`を取り出す（バジェットは破棄する）。`run_solver`が収束後に1回だけ
+    /// 行う最終的なHessian評価（`cov_type`共通行列演算が使う「対数尤度そのもの」の
+    /// Hessian）は、line search内側ループの暴走防止という本来の目的とは無関係な呼び出し
+    /// のため、このバジェットの対象に含めない（rust-reviewer指摘: 理論上、バジェットが
+    /// ちょうど収束と同時に枯渇した場合、正常に収束した結果に対しても
+    /// `EvaluationBudgetExceeded`を誤って返しうる）。
+    fn into_inner(self) -> O {
+        self.inner
+    }
+
+    /// 呼び出し1回分を消費する。残り枠が無ければ
+    /// [`MleError::EvaluationBudgetExceeded`]を返す。`MleError`は`std::error::Error`を
+    /// 実装する（thiserror）ため、`anyhow::Error`（argminの`Error`型）へは`?`でそのまま
+    /// 変換される（[`convert_optimizer_error`]のdocコメント「`FaerNewton::next_iter`内で
+    /// `MleError`から`?`により変換された値はdowncastで復元し」と同じ仕組み）。
+    fn tick(&self) -> Result<(), MleError> {
+        let remaining = self.remaining.get();
+        if remaining == 0 {
+            return Err(MleError::EvaluationBudgetExceeded {
+                budget: self.budget,
+            });
+        }
+        self.remaining.set(remaining - 1);
+        Ok(())
+    }
+}
+
+impl<O> CostFunction for BudgetedProblem<O>
+where
+    O: CostFunction<Param = Vec<f64>, Output = f64>,
+{
+    type Param = Vec<f64>;
+    type Output = f64;
+
+    fn cost(&self, param: &Self::Param) -> Result<Self::Output, OptimizerError> {
+        self.tick()?;
+        self.inner.cost(param)
+    }
+}
+
+impl<O> Gradient for BudgetedProblem<O>
+where
+    O: Gradient<Param = Vec<f64>, Gradient = Vec<f64>>,
+{
+    type Param = Vec<f64>;
+    type Gradient = Vec<f64>;
+
+    fn gradient(&self, param: &Self::Param) -> Result<Self::Gradient, OptimizerError> {
+        self.tick()?;
+        self.inner.gradient(param)
+    }
+}
+
+impl<O> Hessian for BudgetedProblem<O>
+where
+    O: Hessian<Param = Vec<f64>, Hessian = Vec<Vec<f64>>>,
+{
+    type Param = Vec<f64>;
+    type Hessian = Vec<Vec<f64>>;
+
+    fn hessian(&self, param: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
+        self.tick()?;
+        self.inner.hessian(param)
+    }
+}
+
 /// `newton`/`bfgs`/`lbfgs`のいずれかでモデルの負の対数尤度を最小化し、収束点のパラメータ・
 /// Hessian・収束フラグ・反復回数を返す。
 ///
@@ -991,6 +1144,8 @@ pub struct SolverOutput {
 /// - `raise_on_non_convergence=true`かつ`max_iter`回で収束しなかった（`NonConvergence`）
 /// - `separation_norm_check=Enabled`かつ`raise_on_non_convergence=true`で、勾配ノルム基準は
 ///   満たしたが標準化パラメータノルムが過大（`SeparationSuspected`）
+/// - `bfgs`/`lbfgs`のline searchが収束判定を満たさないまま評価回数の総枠を使い切った
+///   （`EvaluationBudgetExceeded`、Issue #342の`BudgetedProblem`参照）
 /// - その他ソルバー内部でのエラー（`ComputationFailed`）
 #[allow(clippy::too_many_arguments)]
 pub fn run_solver<O>(
@@ -1008,6 +1163,19 @@ where
         + Gradient<Param = Vec<f64>, Gradient = Vec<f64>>
         + Hessian<Param = Vec<f64>, Hessian = Vec<Vec<f64>>>,
 {
+    // line search（bfgs/lbfgs）の内側ループが収束判定を満たさないまま暴走するのを防ぐ
+    // 安全網（Issue #342、`BudgetedProblem`のdocコメント参照）。`newton`はこの経路を
+    // 通らず自前のLMラダーで既に有限回に抑えられているが、将来のsolver追加も含めた
+    // 一律の安全網として3method共通で適用する。
+    // `max_iter.saturating_add(1)`: `max_iter=0`（`raise_on_non_convergence`の未収束経路を
+    // 検証するテスト等で使われる）でも、`Executor::init()`が最初の`cost`/`gradient`評価を
+    // 必ず1回行う分の枠は残す（`budget=0`のままだと初回評価から即座に
+    // `EvaluationBudgetExceeded`になり、本来の`NonConvergence`を隠してしまう）。
+    let budget = max_iter
+        .saturating_add(1)
+        .saturating_mul(MAX_EVALUATIONS_PER_ITER);
+    let problem = BudgetedProblem::new(problem, budget);
+
     let (params, mut converged, n_iter, model) = match method {
         Method::Newton => {
             let solver = FaerNewton {
@@ -1081,7 +1249,11 @@ where
     // `loglik`のHessianの符号反転）なので、ここで1回だけ符号反転して契約を合わせる
     // （実装時に発覚、`docs/planning/specs/nonlinear-implementation-notes.md`
     // 参照）。
+    // `into_inner()`でバジェットの対象から外す（`BudgetedProblem::into_inner`のdoc
+    // コメント参照）。この1回の呼び出しはline search内側ループの暴走防止という
+    // バジェット本来の目的とは無関係なため。
     let cost_hessian = model
+        .into_inner()
         .hessian(&params)
         .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
     let hessian: Vec<Vec<f64>> = cost_hessian
@@ -1102,8 +1274,25 @@ where
 /// `I`はソルバーごとに異なる状態型（LBFGSはHessianスロットを使わないため`H=()`）だが、
 /// いずれも`State`トレイト経由で同じ形で取り出せる。
 ///
-/// **`ok_or_else`の2箇所は理論上到達不能**（`.claude/rules/rust-style.md`「テスト」の
-/// カバレッジ方針、Logitのカバレッジ確認時に判明・受け入れ済み）:
+/// **`TerminationReason::SolverExit`は`problem.take_problem()`より先に検出する
+/// （Issue #342で判明、下記`ok_or_else`のdocコメントの前提を修正）**: argmin組み込み
+/// `LBFGS::next_iter`は、line search用の内側`Executor::run()`が`Err`を返しても`?`で
+/// 伝播せず、`Ok(state.terminate_with(TerminationReason::SolverExit(msg)))`として
+/// 握りつぶす（`argmin-0.11.0/src/solver/quasinewton/lbfgs.rs`の`next_iter`実装。
+/// `msg`は元のエラーの`Display`文字列を含む）。この分岐では内部の`O`を呼び出し元へ
+/// 戻す処理（通常成功時の`problem.problem = Some(...)`相当）も行われないため、
+/// 後段の`problem.take_problem()`は必ず`None`になる——`Method::Bfgs`の自前実装
+/// `FaerBfgs`は`?`でそのまま`Err`を伝播するため対象外だが、`Method::Lbfgs`では
+/// [`BudgetedProblem`]（評価回数バジェット超過）のエラーがこの経路を通ることを
+/// 実測で確認した。`take_problem()`が返す`None`を「理論上到達不能な防御的分岐」
+/// として扱うと、この場合に元のエラー内容が失われた不親切な汎用メッセージ
+/// （「failed to recover the optimization problem」）になってしまうため、
+/// `SolverExit`を専用に検出し`msg`をそのまま使って早期に返す。
+///
+/// **残る`ok_or_else`の2箇所は理論上到達不能**（`.claude/rules/rust-style.md`「テスト」の
+/// カバレッジ方針、Logitのカバレッジ確認時に判明・受け入れ済み。上記`SolverExit`の
+/// 早期returnにより`take_problem()`側の前提は「`SolverExit`以外の理由でNoneになる
+/// ケースが無い」に絞られる）:
 /// - `state.get_best_param()`が`None`になるのは`Executor::run()`が`init()`/`next_iter()`を
 ///   一度も呼ばずに終了した場合のみだが、`init()`が必ず初期パラメータを`state`に設定する
 ///   （`FaerNewton::init`、BFGS/LBFGSも同様に組み込みソルバーが初期化時に設定する）ため
@@ -1118,6 +1307,10 @@ fn extract_outcome<O, I>(
 where
     I: State<Param = Vec<f64>>,
 {
+    if let Some(TerminationReason::SolverExit(reason)) = state.get_termination_reason() {
+        return Err(CommonError::ComputationFailed(reason.clone()).into());
+    }
+
     let converged = matches!(
         state.get_termination_reason(),
         Some(TerminationReason::SolverConverged)
@@ -2219,6 +2412,139 @@ mod tests {
             target: vec![3.0, -2.0],
             diag_a: vec![2.0, 5.0],
         }
+    }
+
+    /// [`BudgetedProblem`]（Issue #342）が実際にバジェットを共有カウンタで管理し、
+    /// 使い切ると`MleError::EvaluationBudgetExceeded`を返すことを直接検証する
+    /// （`run_solver`経由の統合テストとは別に、この低レベルの building block 自体を
+    /// 単体で検証する。`bfgs_rank2_update_matches_hand_computed_values_...`と同じ方針）。
+    #[test]
+    fn budgeted_problem_returns_evaluation_budget_exceeded_error_after_budget_is_exhausted() {
+        let wrapped = BudgetedProblem::new(quadratic_problem(), 3);
+        let param = vec![0.0, 0.0];
+
+        assert!(wrapped.cost(&param).is_ok());
+        assert!(wrapped.cost(&param).is_ok());
+        assert!(wrapped.cost(&param).is_ok());
+
+        let err = wrapped.cost(&param).unwrap_err();
+        let mle_error = err.downcast::<MleError>().unwrap();
+        assert_eq!(mle_error, MleError::EvaluationBudgetExceeded { budget: 3 });
+    }
+
+    /// `cost`と`gradient`は独立のカウンタではなく、同じバジェットを共有して消費する
+    /// （実際のline searchは1反復でcost・gradient双方を呼ぶため、この共有が前提）。
+    #[test]
+    fn budgeted_problem_shares_the_same_budget_across_cost_and_gradient_calls() {
+        let wrapped = BudgetedProblem::new(quadratic_problem(), 2);
+        let param = vec![0.0, 0.0];
+
+        assert!(wrapped.cost(&param).is_ok());
+        assert!(wrapped.gradient(&param).is_ok());
+        assert!(wrapped.cost(&param).is_err());
+    }
+
+    /// `f(θ) = -θ₀`（`θ₁`以降は無視）という、下に有界でない（最小点が存在しない）
+    /// ダミー問題。`gradient`は`cost`の真の勾配`[-1, 0, ...]`と整合しており、退化した
+    /// 細工（NaN・不整合な勾配等）は一切無い、正当な降下方向を持つ問題であるにも
+    /// 関わらず、argmin`MoreThuenteLineSearch`は**理論上無限にループする**:
+    /// `θ₀`方向の勾配が常に厳密に`-1`（一定）のため、strong Wolfe条件の曲率条件
+    /// `|dg| <= gtol*|dginit|`（既定`gtol=0.9`）が`|dg|=|dginit|=1`である限り
+    /// **どのステップ幅でも構造的に満たされない**（`1<=0.9`は恒偽）。一方
+    /// 十分減少条件（Armijo）は`cost`が真に無限に減少し続けるため常に満たされ、
+    /// line searchは「ブラケットせず`stpmax`方向へ延々と外挿し続ける」`cstep`の
+    /// 分岐（4番目のケース、`info=4`）に永久に留まる。ステップ幅が実際に`f64::INFINITY`
+    /// に達した後も`(stp-stpmax).abs()`が`NaN`になり比較が常に偽になるため、
+    /// 収束判定（`info`フラグ1〜6）もNaN/Infガードも一度も発火しない
+    /// （Issue #342で実際に踏んだ暴走と同型の構造。手計算でのトレース、および
+    /// devビルドで実際にハングさせてから[`BudgetedProblem`]の除去がハングを再現し
+    /// 導入が解消することを確認済み）。
+    ///
+    /// **単純な定数コスト（`cost`が`param`を無視して常に同じ値を返す）では再現しない**
+    /// ことに注意（既に試して確認済み）: `FaerBfgs::terminate`はargmin組み込みBFGSと
+    /// 同じコスト変化ベースの副次判定（`|prev_cost-cost|<f64::EPSILON`、
+    /// `FaerBfgs`のdocコメント参照）を持つため、コストが真に一定だと外側のBFGS反復が
+    /// line searchに入る前に「収束」と誤判定してしまい、内側のline searchが暴走する
+    /// 状況を再現できない。この問題は`cost`が`param`に応じて真に（無限に）変化し続ける
+    /// ことで外側の誤判定を避けつつ、内側line searchの曲率条件だけを恒久的に破る設計。
+    #[derive(Clone)]
+    struct UnboundedBelowProblem;
+
+    impl CostFunction for UnboundedBelowProblem {
+        type Param = Vec<f64>;
+        type Output = f64;
+
+        fn cost(&self, param: &Self::Param) -> Result<Self::Output, OptimizerError> {
+            Ok(-param[0])
+        }
+    }
+
+    impl Gradient for UnboundedBelowProblem {
+        type Param = Vec<f64>;
+        type Gradient = Vec<f64>;
+
+        fn gradient(&self, param: &Self::Param) -> Result<Self::Gradient, OptimizerError> {
+            Ok(vec![-1.0; param.len()])
+        }
+    }
+
+    impl Hessian for UnboundedBelowProblem {
+        type Param = Vec<f64>;
+        type Hessian = Vec<Vec<f64>>;
+
+        fn hessian(&self, param: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
+            Ok(identity_matrix(param.len()))
+        }
+    }
+
+    #[test]
+    fn run_solver_bfgs_returns_evaluation_budget_exceeded_error_instead_of_hanging_on_a_stalled_line_search()
+     {
+        let result = run_solver(
+            UnboundedBelowProblem,
+            Method::Bfgs,
+            vec![0.0],
+            1,
+            1e-6,
+            1,
+            true,
+            SeparationNormCheck::Enabled,
+        );
+
+        assert!(matches!(
+            result,
+            Err(MleError::EvaluationBudgetExceeded { .. })
+        ));
+    }
+
+    #[test]
+    fn run_solver_lbfgs_returns_a_bounded_error_instead_of_hanging_on_a_stalled_line_search() {
+        // `Method::Bfgs`（自前実装`FaerBfgs`、上のテスト）とは異なり、argmin組み込み
+        // `LBFGS::next_iter`はline search内側`Executor`のエラーを`?`で伝播せず
+        // `TerminationReason::SolverExit(msg)`として`Ok`に握りつぶす
+        // （`extract_outcome`のdocコメント参照）。そのため戻り値は
+        // `MleError::EvaluationBudgetExceeded`という具体的なバリアントにはならず
+        // `MleError::Common(ComputationFailed(msg))`になるが、`msg`には元の
+        // `EvaluationBudgetExceeded`のメッセージがそのまま残る。このテストの主眼は
+        // 具体的なバリアントの一致ではなく、`Method::Lbfgs`でもハングせず有限時間で
+        // 意味のあるエラーが返ること（Issue #342の安全網がargmin組み込みLBFGSにも
+        // 効くことの確認）。
+        let result = run_solver(
+            UnboundedBelowProblem,
+            Method::Lbfgs,
+            vec![0.0],
+            1,
+            1e-6,
+            1,
+            true,
+            SeparationNormCheck::Enabled,
+        );
+
+        let message = result.unwrap_err().to_string();
+        assert!(
+            message.contains("evaluated the objective/gradient"),
+            "unexpected error message: {message}"
+        );
     }
 
     #[test]

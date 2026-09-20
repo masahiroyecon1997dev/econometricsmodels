@@ -150,6 +150,10 @@ Issue #307） / `lower` / `upper`。
     影響をほぼ無償で吸収する）だが、`bfgs`/`lbfgs`は観測あたり平均勾配基準（既定`tol=1e-8`）を
     使う。statsmodelsが`n`で正規化してから最適化するのに倣ったもの。詳細・実測値・小標本での
     精度検証テストへの影響は[`logit-spec.md`](./logit-spec.md)3.2節参照。
+  - **`bfgs`/`lbfgs`のline searchの評価回数バジェット（`BudgetedProblem`、Issue #342）**も
+    `run_solver`共通で、Tobitも同様に保護される（本件は実際に`nonlinear::tobit::tests::
+    proptests`で発覚。devビルドで80分超のCPU時間を消費し続けるケースを実測で確認済み）。
+    詳細は[`logit-spec.md`](./logit-spec.md)3.2節参照。
 - **Tobitの「真の」分離は`σ→0`退化として現れる**（Logit/Probitの「係数が±∞へ発散」とは異なる）。
   そのため`run_solver`共有の`SeparationSuspected`（標準化パラメータノルム基準、`y∈{0,1}`で較正）は
   `run_solver`の`separation_norm_check: SeparationNormCheck`引数で**Tobitは`Disabled`**にし、この

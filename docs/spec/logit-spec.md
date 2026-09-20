@@ -108,6 +108,18 @@ Issue #307）。
   `run_solver`の`separation_norm_check: SeparationNormCheck`引数で切り替え、`y∈{0,1}`で係数が
   ±∞へ発散するLogit/Probitのみ`Enabled`にする。Tobitは`Disabled`（分離が`σ→0`退化として現れ
   標準化パラメータノルムが閾値を超えないため。[`tobit-spec.md`](./tobit-spec.md)3.2節参照）。
+- **`bfgs`/`lbfgs`のline searchの評価回数バジェット（Issue #342、実装済み）**: `MoreThuenteLineSearch`
+  （argmin組み込み）は、`bfgs`の自前実装（`FaerBfgs`）・`lbfgs`（argmin組み込み`LBFGS`）いずれの
+  経路でも内側`Executor`に反復上限が設定されておらず（argmin既定`u64::MAX`）、ステップ幅の上限
+  （`stpmax`）も未設定（既定`f64::INFINITY`）。探索方向・勾配が退化しline search内部の収束判定が
+  一度も発火しない入力に嵌ると、この内側ループは理論上終了しない（devビルドで80分超のCPU時間を
+  消費し続けるケースを実測で確認、`nonlinear::tobit::tests::proptests`で発覚）。対策として
+  `run_solver`は`problem`を`BudgetedProblem`（`common.rs`）でラップし、目的関数・勾配の評価回数に
+  総枠（`(max_iter + 1) * 2000`。`+1`は`Executor::init()`の初回評価分の枠を
+  `max_iter=0`でも確保するため）を設ける。枠を使い切ると`MleError::EvaluationBudgetExceeded { budget }`
+  を返す。argmin組み込み`LBFGS`のソースを変更せずに`bfgs`/`lbfgs`両方を保護できるのは、
+  `MoreThuenteLineSearch`が呼び出し元によらず必ず`Problem<O>`経由で`cost`/`gradient`を呼ぶため
+  （詳細は`common.rs`の`BudgetedProblem`docコメント参照）。
 - 収束判定`tol`の既定値`1e-6`は、通常データでは高精度（statsmodelsとの相対誤差最大1e-7程度）に
   一致するが、準完全分離の境界ケースではやや不足する（相対誤差最大7e-8）。`tol=1e-8`まで締めると
   改善するが、`bfgs`が`max_iter`を使い切りやすくなるリスクが上がるため、既定値は`1e-6`のまま維持し、
@@ -247,7 +259,7 @@ Issue #307）。
 |---|---|
 | `Common(InsufficientObservations \| InvalidConfidenceLevel \| MissingClusterColumn \| InsufficientClusters \| InsufficientClustersForInference \| NoRegressors)` | `ValidationError` |
 | `InvalidMaxIter` / `InvalidTol` / `InvalidBinaryY` | `ValidationError` |
-| `NonConvergence` / `SingularDesignMatrix` / `SingularHessian` / `SingularOpgMatrix` / `SeparationSuspected` | `ComputationError` |
+| `NonConvergence` / `SingularDesignMatrix` / `SingularHessian` / `SingularOpgMatrix` / `SeparationSuspected` / `EvaluationBudgetExceeded` | `ComputationError` |
 
 ### 3.8 テスト
 

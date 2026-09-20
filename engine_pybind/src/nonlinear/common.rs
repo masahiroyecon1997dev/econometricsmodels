@@ -37,7 +37,8 @@ pub(crate) fn mle_error_to_pyerr(err: MleError) -> PyErr {
         | MleError::SingularHessian
         | MleError::SingularOpgMatrix
         | MleError::SingularDesignMatrix
-        | MleError::SeparationSuspected { .. } => ComputationError::new_err(err.to_string()),
+        | MleError::SeparationSuspected { .. }
+        | MleError::EvaluationBudgetExceeded { .. } => ComputationError::new_err(err.to_string()),
     }
 }
 

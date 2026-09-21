@@ -183,7 +183,7 @@ pub enum MleError {
     /// （`fit()`冒頭のバリデーション）、部分的な準完全分離なら`NonConvergence`
     /// （`max_iter`到達）として捕捉される。加えて#286以降のTobitは`standardize_columns`
     /// ではなく`tobit.rs`局所の`TobitScaling`で標準化しており、`y∈{0,1}`で較正した
-    /// この閾値はTobitのパラメータ空間には適用できない（Issue #288）。
+    /// この閾値はTobitのパラメータ空間には適用できない。
     #[error(
         "convergence could not be verified after {n_iter} iterations: the gradient norm \
          dropped below tol, but the (standardized) parameter norm is implausibly large. This \
@@ -192,11 +192,11 @@ pub enum MleError {
     SeparationSuspected { n_iter: usize },
 
     /// `bfgs`/`lbfgs`のline search（`MoreThuenteLineSearch`）が、収束判定を一度も満たさない
-    /// まま目的関数・勾配の評価回数の総枠（[`BudgetedProblem`]）を使い切った（Issue #342）。
+    /// まま目的関数・勾配の評価回数の総枠（[`BudgetedProblem`]）を使い切った。
     ///
-    /// **背景**: `bfgs`（自前実装`FaerBfgs`）・`lbfgs`（自前実装`FaerLbfgs`、Issue #343。
+    /// **背景**: `bfgs`（自前実装`FaerBfgs`）・`lbfgs`（自前実装`FaerLbfgs`。
     /// 導入当初はargmin組み込み`LBFGS`だった）はいずれも、line searchを走らせる内側
-    /// `Executor`に（Issue #342当時は）反復回数の上限を設定しておらず（argminの既定値
+    /// `Executor`に（当時は）反復回数の上限を設定しておらず（argminの既定値
     /// `u64::MAX`）、`MoreThuenteLineSearch`自体もステップ幅の上限（`stpmax`）を設定して
     /// いない。探索方向・勾配の組み合わせが退化し、line search内部の収束判定
     /// （`info`フラグ1〜6のいずれか）もNaN/Infガードも一度も発火しない状況に嵌ると、
@@ -204,7 +204,7 @@ pub enum MleError {
     /// ケースを実測で確認済み）。[`BudgetedProblem`]による評価回数の総枠は、この
     /// 退化状況を有限時間で検出しエラーに変換するための安全弁。`lbfgs`が当時argmin
     /// 組み込みだった間は、フォーク不可能な固定バージョン依存を変更せずに保護する
-    /// 手段でもあった（Issue #343で`FaerLbfgs`に置き換えた後も、[`LINE_SEARCH_MAX_ITERS`]
+    /// 手段でもあった（`FaerLbfgs`に置き換えた後も、[`LINE_SEARCH_MAX_ITERS`]
     /// による個別のline search反復上限とは別の、複数のline search呼び出しを横断する
     /// 粗い安全網として引き続き適用する）。
     ///
@@ -235,14 +235,14 @@ pub enum MleError {
 ///
 /// **Logit/Probitの`y∈{0,1}`で較正した値**であり、`run_solver`に
 /// [`SeparationNormCheck::Enabled`]を渡したとき（Logit/Probit）のみ使われる。Tobitでは
-/// 適用しない（Issue #288、[`MleError::SeparationSuspected`]参照）。
+/// 適用しない（[`MleError::SeparationSuspected`]参照）。
 const SEPARATION_PARAM_NORM_THRESHOLD: f64 = 100.0;
 
 /// `run_solver`の(準)完全分離事後チェック（標準化パラメータノルムが
 /// [`SEPARATION_PARAM_NORM_THRESHOLD`]を超えたら収束判定を取り消す、
 /// [`MleError::SeparationSuspected`]参照）を有効にするか。隣接する`raise_on_non_convergence`
 /// と同型の生`bool`を並べると取り違えても型で気づけないため、bool引数ではなく専用enumで
-/// 呼び出し側を自己記述的にする（rust-reviewer指摘、Issue #288）。
+/// 呼び出し側を自己記述的にする（rust-reviewer指摘）。
 ///
 /// - [`Enabled`](SeparationNormCheck::Enabled): Logit/Probit。`y∈{0,1}`で係数が±∞へ
 ///   発散するため、この検出が意味を持つ。
@@ -318,7 +318,7 @@ pub fn validate_confidence_level(confidence_level: f64) -> Result<(), MleError> 
 ///
 /// Tobitは`logσ`が常に最適化パラメータに含まれるため、対応する「パラメータ数0」の
 /// ケースが生じない（総パラメータ数は常に`k+1>=1`）。そのためTobitの`fit()`は
-/// この関数を呼ばない（Issue #212の結論、モジュール冒頭のdocコメント参照）。
+/// この関数を呼ばない（モジュール冒頭のdocコメント参照）。
 pub fn validate_has_regressors(n: usize, k: usize) -> Result<(), MleError> {
     if k == 0 {
         return Err(CommonError::NoRegressors { n }.into());
@@ -328,7 +328,7 @@ pub fn validate_has_regressors(n: usize, k: usize) -> Result<(), MleError> {
 
 /// 観測数`n`がパラメータ数`k`以下の場合にエラーを返す。`k`の意味は呼び出し側に委ねる
 /// （Logit/Probitでは`input.k()`＝`β`の数（定数項含む）、Tobitでは`k+1`＝`β`の数+`logσ`、
-/// つまり総最適化パラメータ数を渡す。Issue #212の結論、モジュール冒頭のdocコメント参照）。
+/// つまり総最適化パラメータ数を渡す。モジュール冒頭のdocコメント参照）。
 pub fn validate_sufficient_observations(n: usize, k: usize) -> Result<(), MleError> {
     if n <= k {
         return Err(CommonError::InsufficientObservations { n, k }.into());
@@ -340,7 +340,7 @@ pub fn validate_sufficient_observations(n: usize, k: usize) -> Result<(), MleErr
 /// (1) 2以上であること（`validate_cluster_groups`）、(2) 全体Wald検定の傾き係数の数
 /// `n_slopes`（= `k - k_constant`）より多いこと（`validate_cluster_count_covers_slopes`、
 /// `rank(Ŝ) ≤ g - 1`のため`g <= n_slopes`だと`n_slopes×n_slopes`部分行列が構造的に
-/// 特異、Issue #289）を検証する（`Cluster`以外は無検証）。`n`と型が同じ`usize`の
+/// 特異）を検証する（`Cluster`以外は無検証）。`n`と型が同じ`usize`の
 /// `n_slopes`を並べているが、`n`は`validate_cluster_groups`内の`debug_assert_eq!
 /// (groups.len(), n)`で、`n_slopes`は`g <= n_slopes`の比較結果で、取り違えれば
 /// いずれもテスト/デバッグビルドで早期に露見する（`validate_fit_preconditions`が
@@ -365,11 +365,11 @@ pub fn validate_cluster_cov_type(
 /// クラスター数`g <= 傾き係数の数`）。元はLogit/Probitそれぞれの`fit()`に一字一句
 /// 同一のブロックとして重複していたため、こちらへ集約した。
 ///
-/// Tobitの`fit()`（`confidence_level`/`cov_type`をまだ受け取らない、Issue #215時点）は
+/// Tobitの`fit()`（`confidence_level`/`cov_type`をまだ受け取らない時点）は
 /// この関数をそのまま呼べない（引数を揃えられない）ため、上記の各検証を個別の小関数
 /// （[`validate_max_iter`]等）に分割し、Tobitはそのうち必要な部分（`max_iter`/`tol`/
 /// [`validate_sufficient_observations`]/[`validate_cluster_cov_type`]）だけを個別に
-/// 呼ぶ（Issue #212の結論）。この関数自体はLogit/Probit向けに元の挙動をそのまま保つ
+/// 呼ぶ。この関数自体はLogit/Probit向けに元の挙動をそのまま保つ
 /// ラッパーとして残す。
 ///
 /// 引数は検証順序に揃えている。`n`（観測数）は`y`から自明に求まる（`y.nrows()`）ため
@@ -532,7 +532,7 @@ pub enum CovType {
 /// `cov_type`/`confidence_level`）をまとめた構造体。
 ///
 /// 元は3つの`fit()`がこの6引数を個別の位置引数として独立に持っており、シグネチャが
-/// 完全に重複していた（Issue #308で集約）。`engine_pybind`側の`LogitOptions`/
+/// 完全に重複していたため集約した。`engine_pybind`側の`LogitOptions`/
 /// `ProbitOptions`/`TobitOptions`（pyclass、Python公開APIのフラットなkwargsコンストラクタ
 /// が前提）とは異なるレイヤーの問題で、こちらは`engine`内部の純粋Rust関数のシグネチャ
 /// のため、フィールドをまとめても呼び出し側（Python）への影響はない。フィールドは
@@ -644,7 +644,7 @@ pub struct MarginalEffects {
 impl MarginalEffects {
     /// クレート内の他モジュールから`MarginalEffects`を組み立てるためのコンストラクタ。
     /// フィールドはprivateのため（`.claude/rules/rust-style.md`「推定量構造体の設計」）、
-    /// `marginal_effects_from_w_s`を経由しないモデル（Tobit。Issue #211の結論により
+    /// `marginal_effects_from_w_s`を経由しないモデル（Tobit。
     /// `w`/`s`自体の計算式は独自実装だが、出力構造体の形は`coef_table`と同じ行指向で
     /// Logit/Probitと共通、`nonlinear-api-design.md`6章）が、独自に計算したデルタ法の
     /// 結果からこの構造体を構築するために必要。
@@ -902,7 +902,7 @@ pub fn predict_from_link(x: &Mat<f64>, params: &[f64], link: impl Fn(f64) -> f64
 }
 
 /// 新規データ（out-of-sample、`new_x_columns`）に対する予測値`p_i = link(x_i'θ)`を
-/// 計算する（`predict_from_link`のout-of-sample版、Logit/Probit共有。Issue #131）。
+/// 計算する（`predict_from_link`のout-of-sample版、Logit/Probit共有）。
 /// `engine::linear::ols::predict_new_data`と同型で、`link`関数（logistic/正規分布CDF）を
 /// 差し替えられるようにしたもの。
 ///
@@ -991,7 +991,7 @@ pub struct SolverOutput {
 
 /// [`run_solver`]が`problem`に許す目的関数・勾配・Hessian評価の総回数を、外側の
 /// `max_iter`（1回のfit呼び出し全体を通した反復上限）に対してこの倍率でスケールする
-/// （Issue #342の[`BudgetedProblem`]参照）。
+/// （[`BudgetedProblem`]参照）。
 ///
 /// **値の根拠**: `newton`は1反復あたり評価回数がO(1)（`cost`/`gradient`各1回＋
 /// `regularized_newton_step`のLM ラダー、`MAX_LM_ATTEMPTS`で頭打ち）のため、この倍率が
@@ -1006,24 +1006,23 @@ pub struct SolverOutput {
 const MAX_EVALUATIONS_PER_ITER: u64 = 2000;
 
 /// [`FaerLbfgs`]のtwo-loop recursion（[`two_loop_recursion`]）が保持する直近secantペア
-/// `(s,y)`の件数（limited-memoryの由来、Issue #343）。従来のargmin組み込み
+/// `(s,y)`の件数（limited-memoryの由来）。従来のargmin組み込み
 /// `LBFGS::new(linesearch, 7)`と同じ既定値をそのまま踏襲する（変更する積極的な理由が
 /// 無いため）。
 const LBFGS_HISTORY_SIZE: usize = 7;
 
-/// [`FaerLbfgs::next_iter`]が内側line search用`Executor`に設定する反復回数の上限
-/// （Issue #343）。
+/// [`FaerLbfgs::next_iter`]が内側line search用`Executor`に設定する反復回数の上限。
 ///
 /// **背景**: argminの`Executor::run()`は`max_iters`に到達しても`Err`を返さず、
 /// `TerminationStatus::Terminated(TerminationReason::MaxItersReached)`を伴う`Ok`として
 /// 打ち切り時点のパラメータをそのまま返す（収束判定を満たしたわけではない不正な
-/// ステップになりうる）。[`BudgetedProblem`]（Issue #342）は「評価回数の総枠を使い
+/// ステップになりうる）。[`BudgetedProblem`]は「評価回数の総枠を使い
 /// 切ったら`Err`」という複数回のline search呼び出しを横断する粗い安全網で、この種の
 /// 暴走を有限時間で検出するが、「1回のline searchが収束せず打ち切られた」ことを
 /// 明示的には教えてくれず、黙って不正な点を採用しうる問題は残る。このため
 /// `FaerLbfgs`では内側`Executor`に明示的な`max_iters`を設定した上で、`.run()`後に
 /// 収束判定（`TerminationReason::SolverConverged`）を満たしていない場合は明示的に
-/// エラー化する（`FaerBfgs`には無いチェックだが、本Issueのスコープは`FaerLbfgs`のみで
+/// エラー化する（`FaerBfgs`には無いチェックだが、この実装では`FaerLbfgs`のみを対象とし
 /// `FaerBfgs`側は変更しない、ユーザー確認済み）。
 ///
 /// **値の根拠**: 正常収束するケースのline searchは数回〜数十回程度で収束する
@@ -1035,11 +1034,11 @@ const LBFGS_HISTORY_SIZE: usize = 7;
 const LINE_SEARCH_MAX_ITERS: u64 = 100;
 
 /// [`run_solver`]に渡す`problem`をラップし、`CostFunction`/`Gradient`/`Hessian`の呼び出し
-/// 回数に総枠（バジェット）を設ける（Issue #342: `nonlinear::tobit::tests::proptests`が
+/// 回数に総枠（バジェット）を設ける（`nonlinear::tobit::tests::proptests`が
 /// devプロファイルで異常に長時間実行される問題の根本対応）。
 ///
-/// **背景（Issue #342当時）**: `Method::Bfgs`（自前実装`FaerBfgs`、[`FaerBfgs::next_iter`]）・
-/// `Method::Lbfgs`（当時はargmin組み込み`LBFGS`。Issue #343で`FaerLbfgs`に置き換え済み）は
+/// **背景（当時の状況）**: `Method::Bfgs`（自前実装`FaerBfgs`、[`FaerBfgs::next_iter`]）・
+/// `Method::Lbfgs`（当時はargmin組み込み`LBFGS`だったが、現在は`FaerLbfgs`に置き換え済み）は
 /// いずれも、1回の外側反復ごとに`MoreThuenteLineSearch`を内側`Executor`で走らせるが、
 /// この内側`Executor`には`max_iters`が設定されておらず（argminの`IterState`既定値
 /// `u64::MAX`）、`MoreThuenteLineSearch`自体もステップ幅の上限（`stpmax`）を設定していない
@@ -1053,7 +1052,7 @@ const LINE_SEARCH_MAX_ITERS: u64 = 100;
 /// `problem.cost()`/`problem.gradient()`を呼ぶ。argminの全traitメソッドは`Result`を返す
 /// 設計のため、ここでエラーを返せば`?`演算子で呼び出し元（`MoreThuenteLineSearch::next_iter`
 /// →内側`Executor::run()`→`FaerBfgs::next_iter`または`FaerLbfgs::next_iter`→外側
-/// `Executor::run()`）を素通りしてそのまま伝播する。Issue #343で`FaerLbfgs`が
+/// `Executor::run()`）を素通りしてそのまま伝播する。`FaerLbfgs`が
 /// [`LINE_SEARCH_MAX_ITERS`]による個別の反復上限＋明示的なエラー化を持つようになった後も、
 /// この`BudgetedProblem`は複数回のline search呼び出しを横断する総枠として引き続き
 /// 全methodに一律適用する（個々のline search呼び出しは正常に収束を繰り返しても、
@@ -1162,9 +1161,9 @@ where
 /// `separation_norm_check`（[`SeparationNormCheck`]）は(準)完全分離の事後チェック
 /// （標準化パラメータ空間のノルムが[`SEPARATION_PARAM_NORM_THRESHOLD`]を超えたら収束
 /// 判定を取り消す、[`MleError::SeparationSuspected`]参照）を有効にするか。Logit/Probitは
-/// `Enabled`、Tobitは`Disabled`（理由は[`SeparationNormCheck`]のdocコメント参照、Issue #288）。
+/// `Enabled`、Tobitは`Disabled`（理由は[`SeparationNormCheck`]のdocコメント参照）。
 ///
-/// **`tol`の意味論はmethodにより異なる（Issue #285）**: `Newton`は総和勾配に対する
+/// **`tol`の意味論はmethodにより異なる**: `Newton`は総和勾配に対する
 /// 絶対閾値`‖∇ℓ(θ)‖ < tol`のまま（2次収束のため`n`依存性の影響をほとんど受けない、
 /// `docs/spec/logit-spec.md`3.2節参照）。`Bfgs`/`Lbfgs`は`n_obs`（観測数）で正規化した
 /// 「観測あたり平均勾配」基準`‖∇ℓ(θ)‖ / n_obs < tol`を使う（実装上は`tol * n_obs`を
@@ -1179,7 +1178,7 @@ where
 /// - `separation_norm_check=Enabled`かつ`raise_on_non_convergence=true`で、勾配ノルム基準は
 ///   満たしたが標準化パラメータノルムが過大（`SeparationSuspected`）
 /// - `bfgs`/`lbfgs`のline searchが収束判定を満たさないまま評価回数の総枠を使い切った
-///   （`EvaluationBudgetExceeded`、Issue #342の`BudgetedProblem`参照）
+///   （`EvaluationBudgetExceeded`、`BudgetedProblem`参照）
 /// - その他ソルバー内部でのエラー（`ComputationFailed`）
 #[allow(clippy::too_many_arguments)]
 pub fn run_solver<O>(
@@ -1198,7 +1197,7 @@ where
         + Hessian<Param = Vec<f64>, Hessian = Vec<Vec<f64>>>,
 {
     // line search（bfgs/lbfgs）の内側ループが収束判定を満たさないまま暴走するのを防ぐ
-    // 安全網（Issue #342、`BudgetedProblem`のdocコメント参照）。`newton`はこの経路を
+    // 安全網（`BudgetedProblem`のdocコメント参照）。`newton`はこの経路を
     // 通らず自前のLMラダーで既に有限回に抑えられているが、将来のsolver追加も含めた
     // 一律の安全網として3method共通で適用する。
     // `max_iter.saturating_add(1)`: `max_iter=0`（`raise_on_non_convergence`の未収束経路を
@@ -1239,7 +1238,7 @@ where
         Method::Lbfgs => {
             // Bfgsと同じ正規化（`n_obs`で正規化した「観測あたり平均勾配」基準）。
             // `FaerLbfgs`自体は正規化を知らず、実効的な絶対閾値を受け取るだけでよい
-            // （`FaerBfgs`と同じ設計、Issue #343）。
+            // （`FaerBfgs`と同じ設計）。
             let solver = FaerLbfgs {
                 linesearch: MoreThuenteLineSearch::new(),
                 tol: tol * n_obs as f64,
@@ -1259,7 +1258,7 @@ where
     // 収束の判定を取り消す。`raise_on_non_convergence`の扱いは通常の`NonConvergence`と
     // 揃える（`true`なら専用エラーで即座に返す、`false`なら`converged=false`のまま
     // 後続処理を継続する）。この事後チェックはLogit/Probit（`Enabled`）のみ通り、Tobitは
-    // `Disabled`で素通しする（`SeparationNormCheck`のdocコメント・Issue #288参照）。
+    // `Disabled`で素通しする（`SeparationNormCheck`のdocコメント参照）。
     if matches!(separation_norm_check, SeparationNormCheck::Enabled)
         && converged
         && separation_suspected(&params)
@@ -1310,11 +1309,11 @@ where
 /// `I`はソルバーごとに異なる状態型（`FaerLbfgs`はHessianスロットを使わないため`H=()`）だが、
 /// いずれも`State`トレイト経由で同じ形で取り出せる。
 ///
-/// **`TerminationReason::SolverExit`を専用に検出していた分岐は削除済み（Issue #343）**:
+/// **`TerminationReason::SolverExit`を専用に検出していた分岐は削除済み**:
 /// 元々は、`Method::Lbfgs`が当時使っていたargmin組み込み`LBFGS::next_iter`が、line search用
 /// 内側`Executor::run()`の`Err`を`?`で伝播せず`Ok(state.terminate_with(SolverExit(msg)))`と
 /// して握りつぶす挙動（`argmin-0.11.0/src/solver/quasinewton/lbfgs.rs`）を持っていたため、
-/// この分岐で早期検出し元のエラー内容を保っていた（Issue #342）。Issue #343で
+/// この分岐で早期検出し元のエラー内容を保っていた。その後
 /// `Method::Lbfgs`を自前実装`FaerLbfgs`（[`FaerBfgs`]・[`FaerNewton`]と同じく`?`で
 /// そのまま`Err`を伝播する設計）に置き換えたことで、3method全てが`SolverExit`を
 /// 二度と発生させなくなった（`MoreThuenteLineSearch`自体もこの`TerminationReason`は
@@ -1390,13 +1389,12 @@ fn l2_norm(g: &[f64]) -> f64 {
 struct FaerNewton {
     tol: f64,
     /// `regularized_newton_step`が[`RegularizedStep::NoProgress`]を返し、かつ`next_iter`が
-    /// 「最適点に到達しこれ以上進めない」と判定したことを`terminate`へ伝えるフラグ
-    /// （Issue #291）。
+    /// 「最適点に到達しこれ以上進めない」と判定したことを`terminate`へ伝えるフラグ。
     ///
     /// 主たる収束判定（`terminate`の`l2_norm(gradient) < tol`）は**総和勾配に対する絶対
     /// 閾値**であり観測数`n`でスケールしない。大標本では収束点近傍で勾配の丸め誤差の床が
     /// `tol`（既定`1e-6`）を上回り、コスト関数が浮動小数点の底に達しても勾配基準が
-    /// 永久に発火しないことがある（Issue #291。`n=200_000`で床≈`1·tol`、`n=1_000_000`で
+    /// 永久に発火しないことがある（`n=200_000`で床≈`1·tol`、`n=1_000_000`で
     /// 床≈`36·tol`を実測）。その状態で勾配の停滞・目標近傍・コストHessianの正定値性
     /// （`next_iter`の3条件）がそろえば内点最大に到達しているため、このフラグ経由で
     /// 収束として扱う。
@@ -1428,17 +1426,17 @@ const INITIAL_LM_LAMBDA: f64 = 1e-3;
 const LM_LAMBDA_GROWTH: f64 = 4.0;
 
 /// [`RegularizedStep::NoProgress`]（LMラダーがコスト減少ステップを見つけられなかったが
-/// `λ=0`のHessianは可逆）を「最適点で停滞」と解釈するための条件その1（Issue #291）:
+/// `λ=0`のHessianは可逆）を「最適点で停滞」と解釈するための条件その1:
 /// 勾配ノルムがこの反復で「実質的に減っていない」とみなす比。
 /// `‖g_new‖ ≥ NEWTON_STALL_GRAD_RATIO · ‖g_prev‖`のとき停滞とみなす。健全な二次収束では
-/// 勾配が反復ごとに桁で減る（Issue #291の実測でも停滞前は比≈0.01）ため、この条件は
+/// 勾配が反復ごとに桁で減る（実測でも停滞前は比≈0.01）ため、この条件は
 /// 停滞後（実測で連続する勾配ノルムの比≈0.93〜1.0）でしか満たされない。値`0.9`は
 /// その2つの領域の間で、停滞側に十分な余裕を持たせた閾値。
 const NEWTON_STALL_GRAD_RATIO: f64 = 0.9;
-/// `NoProgress`を「最適点で停滞」と解釈するための条件その2（Issue #291）:
+/// `NoProgress`を「最適点で停滞」と解釈するための条件その2:
 /// 収束点の勾配ノルムが収束目標`tol`のこの倍数未満であること。最適点から遠い場所での
 /// 停滞・発散（勾配ノルムが桁違いに大きい）を収束と誤判定しないためのガード。
-/// Issue #291の膠着点の勾配ノルムは`n=200_000`で約`1·tol`、`n=1_000_000`で約`36·tol`
+/// 実測での膠着点の勾配ノルムは`n=200_000`で約`1·tol`、`n=1_000_000`で約`36·tol`
 /// であり、`1e4`の余裕があればおよそ`n≲3e7`までカバーできる一方、最適化初期の
 /// 勾配ノルム（実測で`1e2`〜`1e6`オーダー）は確実に除外できる。
 ///
@@ -1516,7 +1514,7 @@ where
                 }
                 RegularizedStep::NoProgress(raw_candidate) => {
                     // LMラダーがコストを減少させるステップを1つも見つけられなかった
-                    // （＝コスト関数が浮動小数点の底に到達、Issue #291）。ただし`λ=0`の
+                    // （＝コスト関数が浮動小数点の底に到達）。ただし`λ=0`の
                     // Hessianは可逆なので、真に特異な問題（`SingularHessian`）ではない。
                     // 次の3条件がそろったとき「最適点に到達しこれ以上進めない」とみなして
                     // 収束を通知する（`terminate`のフォールバック）:
@@ -1553,8 +1551,8 @@ where
     }
 
     fn terminate(&mut self, state: &NewtonState) -> TerminationStatus {
-        // 勾配ノルム基準が発火しないまま最適点で停滞したケース（Issue #291、
-        // `FaerNewton::stalled_at_optimum`のdocコメント参照）。`next_iter`が直前に
+        // 勾配ノルム基準が発火しないまま最適点で停滞したケース
+        // （`FaerNewton::stalled_at_optimum`のdocコメント参照）。`next_iter`が直前に
         // 判定済みで、通常の勾配基準より先に確認する。
         if self.stalled_at_optimum {
             return TerminationStatus::Terminated(TerminationReason::SolverConverged);
@@ -1576,11 +1574,11 @@ where
 /// 異なる一般のMLE最適化への適用であり、名称はあくまで「`H+λI`による正則化」という
 /// 手法的な類似性を指す（rust-reviewer指摘）。
 ///
-/// **導入経緯（Issue #215）**: Logit/Probitのように尤度が大域凹（Hessianが半正定値）な
+/// **導入経緯**: Logit/Probitのように尤度が大域凹（Hessianが半正定値）な
 /// 問題では、収束点に向かう正常な軌道上は`λ=0`の生のNewtonステップが最初の試行で
 /// 受理されるため、収束の挙動（反復回数・収束点）は変わらない。
 ///
-/// **設計行列が構造的に特異な入力（完全な多重共線性等）について（Issue #279で経路変更）**:
+/// **設計行列が構造的に特異な入力（完全な多重共線性等）について**:
 /// Logit/Probit/Tobitの`fit()`は`run_solver`を呼ぶ前に`checked_design_matrix_qr`で
 /// 設計行列を列ピボットQR分解し、ランク落ちを`SingularDesignMatrix`として弾くように
 /// なった。このためLogit/Probitのこの種の入力は`regularized_newton_step`にそもそも
@@ -1599,18 +1597,18 @@ where
 /// 勾配に対して必ず降下方向）に漸近するため、通常は有限回の試行でコスト減少方向が
 /// 見つかる（ユーザー確認済み）。**例外は`cost`が浮動小数点の底に達した収束点近傍**で、
 /// この場合どの`λ`でも`cost`を狭義に減少させられず、以前は誤って`SingularHessian`を
-/// 返していた（Issue #291）。現在は`λ=0`のHessianが可逆かどうかで
+/// 返していた。現在は`λ=0`のHessianが可逆かどうかで
 /// [`RegularizedStep::NoProgress`]（収束扱い）と`SingularHessian`（真に特異）を分ける
 /// （下記参照）。
 ///
 /// `newton_step`が`MleError::SingularHessian`を返した場合（`λ`を加えても数値的に
 /// 特異なまま）は、そのまま次の`λ`を試す（即座にエラーを伝播しない）。
 ///
-/// **`MAX_LM_ATTEMPTS`回すべて失敗した場合の分岐（Issue #291）**: `λ=0`（正則化前）の
+/// **`MAX_LM_ATTEMPTS`回すべて失敗した場合の分岐**: `λ=0`（正則化前）の
 /// `newton_step`が成功していた（Hessianが数値的に可逆）かどうかで結果を分ける。
 /// - 可逆だった場合 → [`RegularizedStep::NoProgress`]。これは「Hessianは可逆だが、
 ///   `λ`をどれだけ増やしてもコストを狭義に減少させられない」状態。典型的には大標本で
-///   収束点近傍に到達し、コスト関数が浮動小数点の底に達したケース（Issue #291。総和
+///   収束点近傍に到達し、コスト関数が浮動小数点の底に達したケース（総和
 ///   勾配の丸め誤差の床が`tol`を上回り`terminate`の勾配基準が発火しない）。呼び出し元
 ///   （`FaerNewton::next_iter`）が勾配の停滞・目標近傍・コストHessianの正定値性を
 ///   追加確認し、そろえば収束、そうでなければ（鞍点等）生ステップを適用して反復を続け、
@@ -1623,7 +1621,7 @@ enum RegularizedStep {
     /// `θ - Δθ`。
     Accepted(Vec<f64>),
     /// `MAX_LM_ATTEMPTS`回試してもコストを減少させるステップが無かったが、`λ=0`の
-    /// Hessianは可逆だった（＝真に特異ではない、Issue #291）。中身は`λ=0`の生の
+    /// Hessianは可逆だった（＝真に特異ではない）。中身は`λ=0`の生の
     /// Newtonステップを適用した候補パラメータ`θ - H⁻¹g`（最適点近傍なら差は丸め誤差
     /// オーダー）。`FaerNewton::next_iter`がこの候補で停滞条件を判定し、収束と判断した
     /// 場合は候補を適用せず現在点`θ`にとどまる。
@@ -1646,7 +1644,7 @@ where
         |step: &[f64]| -> Vec<f64> { param.iter().zip(step).map(|(p, s)| p - s).collect() };
 
     // `λ=0`（正則化前）のNewtonステップが可逆だったかを、`MAX_LM_ATTEMPTS`回すべて
-    // 失敗したときの分岐（`NoProgress` vs `SingularHessian`、Issue #291）のために覚えておく。
+    // 失敗したときの分岐（`NoProgress` vs `SingularHessian`）のために覚えておく。
     // 可逆なら適用後のパラメータ`θ - H⁻¹g`も控える（`NoProgress`で返す候補。生の局所
     // 2次モデルの最良推定で、最適点との差は丸め誤差オーダー）。ループ初回（`λ=0`）は
     // この値を使い回し、`newton_step`の二重計算を避ける。
@@ -1684,8 +1682,8 @@ where
         };
     }
     // コストを減少させるステップが1つも見つからなかった。`λ=0`のHessianが可逆だったなら
-    // 真に特異な問題ではなく、コスト関数が浮動小数点の底に達した状態（Issue #291。
-    // `n=200_000, seed=1` / `n=1_000_000, seed=42`の`moderate_censoring`Tobitで実測）。
+    // 真に特異な問題ではなく、コスト関数が浮動小数点の底に達した状態
+    // （`n=200_000, seed=1` / `n=1_000_000, seed=42`の`moderate_censoring`Tobitで実測）。
     // `λ=0`でも特異だった場合は従来どおり`SingularHessian`
     // （完全な多重共線性等、`SingularHessianProblem`）。
     match raw_newton_candidate {
@@ -1698,7 +1696,7 @@ where
 /// 真のMLE最大点＝`-ℓ`の最小点ではこれが正定値になる（内点最大の2階十分条件）。
 ///
 /// `FaerNewton::next_iter`が`RegularizedStep::NoProgress`を`stalled_at_optimum`（収束扱い）
-/// に昇格させる前の最終確認に使う（Issue #291、rust-reviewer指摘）。`newton_step`の
+/// に昇格させる前の最終確認に使う（rust-reviewer指摘）。`newton_step`の
 /// 列ピボットQRは可逆性（フルランク）しか見ないため、鞍点（可逆だが不定符号）でも
 /// `NoProgress`が返りうる。Tobitの`(β, logσ)`尤度は大域凹性が保証されない
 /// （`docs/spec/tobit-spec.md`3.1節）ため、勾配ノルムの小ささだけを根拠に収束と
@@ -1742,7 +1740,7 @@ fn newton_step(hessian: &[Vec<f64>], grad: &[f64]) -> Result<Vec<f64>, MleError>
 /// 一度設定すると全反復で同じ固定値が使われ続ける）。単位行列を初期逆Hessianにすると、
 /// Logit/Probit等の尤度Hessianのスケール（観測数`n`個のスコアの和で`O(n)`）との乖離が
 /// `n`が大きいほど桁違いに開き、最初の探索方向`d=-Ig`が暴走してline searchが1反復
-/// あたり多数の関数評価を消費する（Issue #285で実測: n=100,000→1,000,000でNewtonの
+/// あたり多数の関数評価を消費する（実測: n=100,000→1,000,000でNewtonの
 /// 反復回数は4のまま一定なのに対し、BFGSは15→22と増加）。
 ///
 /// 標準的な対策（Nocedal & Wright *Numerical Optimization* 6.1節のself-scaling初期化）
@@ -1753,7 +1751,7 @@ fn newton_step(hessian: &[Vec<f64>], grad: &[f64]) -> Result<Vec<f64>, MleError>
 /// 参照しており、リファクタリングの過程で壊れたまま放置されている）。この手法を
 /// 使うには「1回目の反復の終わり（rank-2更新の直前）」というタイミングにフックする
 /// 必要があり、argminの公開APIには存在しないため、`FaerNewton`と同じ理由（組み込み
-/// ソルバーが必要な制御点を公開していない）で自前実装する（Issue #285）。
+/// ソルバーが必要な制御点を公開していない）で自前実装する。
 ///
 /// あわせて、1回目の反復専用のline search初期ステップ幅も`min(1, 1/‖g₀‖)`に調整する
 /// （単位行列の逆Hessianによる探索方向`-g₀`は`n`が大きいほど大きくなるため、
@@ -1763,10 +1761,10 @@ fn newton_step(hessian: &[Vec<f64>], grad: &[f64]) -> Result<Vec<f64>, MleError>
 /// （固定値のまま反復間で使い回すと、スケール補正済みの反復まで不必要に小さい
 /// ステップから始めることになり逆効果になりうるため）。
 ///
-/// **`Method::Lbfgs`は当初対象外だった（解消済み、Issue #343）**: 導入当初（Issue #285）は
+/// **`Method::Lbfgs`は当初対象外だったが、現在は解消済み**: 導入当初は
 /// argmin 0.11.0の組み込みLBFGS実装が`s`/`y`履歴・初期`γ`を外部から注入する公開APIを
 /// 持たず（privateフィールド、対応するビルダーメソッド無し）、同じ手法を適用できな
-/// かった。その後Issue #343で`Method::Lbfgs`自体を自前実装`FaerLbfgs`に置き換え、
+/// かった。その後`Method::Lbfgs`自体を自前実装`FaerLbfgs`に置き換え、
 /// `FaerBfgs`と同じ「`self`がline searchを所有し1回目の反復だけ初期ステップ幅を
 /// 切り替える」制御を獲得したことで解消した（詳細は`FaerLbfgs`のdocコメント参照）。
 struct FaerBfgs {
@@ -2030,9 +2028,9 @@ fn bfgs_updated_inv_hessian(
 }
 
 /// argmin組み込みの`LBFGS`（`argmin::solver::quasinewton::LBFGS`）を、`FaerBfgs`と同型の
-/// パターンで自前実装したもの（Issue #343）。
+/// パターンで自前実装したもの。
 ///
-/// **経緯**: `FaerBfgs`（Issue #285、上記docコメント参照）は「1回目の反復専用のline
+/// **経緯**: `FaerBfgs`（上記docコメント参照）は「1回目の反復専用のline
 /// search初期ステップ幅`min(1,1/‖g₀‖)`」を適用することで、単位行列の逆Hessianによる
 /// 最初の探索方向の暴走を防いだが、argmin組み込み`LBFGS`にはこの制御点を適用できな
 /// かった（`linesearch`フィールドがprivateで、`self.linesearch.clone()`を反復ごとに
@@ -2051,9 +2049,9 @@ fn bfgs_updated_inv_hessian(
 ///
 /// あわせて、内側line search用`Executor`に明示的な`max_iters`（[`LINE_SEARCH_MAX_ITERS`]）を
 /// 設定し、収束判定を満たさないまま打ち切られた場合は明示的にエラー化する
-/// （[`LINE_SEARCH_MAX_ITERS`]のdocコメント参照。Issue #342で判明した「`max_iters`到達は
-/// `Err`にならず不正なステップを黙って採用してしまう」問題への対応。`FaerBfgs`には無い
-/// チェックだが、本Issueのスコープは`FaerLbfgs`のみのため`FaerBfgs`側は変更しない、
+/// （[`LINE_SEARCH_MAX_ITERS`]のdocコメント参照。`max_iters`到達は
+/// `Err`にならず不正なステップを黙って採用してしまう問題への対応。`FaerBfgs`には無い
+/// チェックだが、この実装では`FaerLbfgs`のみを対象とし`FaerBfgs`側は変更しない、
 /// ユーザー確認済み）。
 ///
 /// `FaerBfgs`と異なり逆Hessian近似を陽には持たず、直近[`LBFGS_HISTORY_SIZE`]件の
@@ -2100,9 +2098,9 @@ where
         // `-g₀`をスケールできないため、単位行列の逆Hessianを使う`FaerBfgs`の1回目と
         // 同型の暴走リスクがある。
         //
-        // **既知のトレードオフ（未解決、Issue #343）**: `n_obs`で正規化する案
+        // **既知のトレードオフ（未解決）**: `n_obs`で正規化する案
         // （`min(1, n_obs/‖g₀‖)`、`tol`の正規化と同じ発想）を試したが、
-        // Issue #344のTobit退化ケース（`fit_lbfgs_converges_for_a_previously_
+        // Tobit退化ケース（`fit_lbfgs_converges_for_a_previously_
         // stalling_case_from_issue_344`）が再び`LINE_SEARCH_MAX_ITERS`超過で
         // 失敗する回帰を確認したため不採用とした（`‖g₀‖`と`n_obs`の関係は単純な
         // 比例関係ではなく、データセットごとに異なるため）。無正規化のこの式のままだと
@@ -2159,7 +2157,7 @@ where
 
         // `LINE_SEARCH_MAX_ITERS`のdocコメント参照: `max_iters`到達は`Err`にならず
         // 打ち切り時点のパラメータをそのまま`Ok`で返すため、収束判定を明示的に
-        // 確認する（Issue #343で追加。`FaerBfgs`には無いチェック）。
+        // 確認する（`FaerBfgs`には無いチェック）。
         if !matches!(
             sub_state.get_termination_reason(),
             Some(TerminationReason::SolverConverged)
@@ -2193,15 +2191,16 @@ where
             .collect();
 
         // secant条件`yᵀs>0`のチェックは行わず、argmin組み込み`LBFGS::next_iter`と同じく
-        // 常にペアを履歴に追加する（`FaerBfgs`のrank-2更新スキップとは異なる設計、
-        // Issue #343で判明）。`MoreThuenteLineSearch`はstrong Wolfe条件（曲率条件
+        // 常にペアを履歴に追加する（`FaerBfgs`のrank-2更新スキップとは異なる設計）。
+        // `MoreThuenteLineSearch`はstrong Wolfe条件（曲率条件
         // `|φ'(α)|≤c2|φ'(0)|`）を満たすステップのみ受理するため、受理されたペアは
         // 理論上`yᵀs>0`を自然に満たす（負曲率を追加で弾く必要性が薄い）。
         //
         // 当初は`FaerBfgs`に倣い絶対閾値`f64::EPSILON`でペアを弾くガードを入れていたが、
         // `generate_binary_choice_dataset("baseline", link="probit", n=100_000, k=5,
         // seed=42)`で実測したところ、収束点近傍でコスト関数が浮動小数点の底に達すると
-        // （Issue #291と同根）`yᵀs`が`f64::EPSILON`をわずかに下回る値になり続け、
+        // （Newtonの収束判定で述べた、コスト関数が浮動小数点の底に達する現象と同根）
+        // `yᵀs`が`f64::EPSILON`をわずかに下回る値になり続け、
         // このガードが新しいペアの追加を拒否し続けて履歴が古いまま凍結される結果、
         // 収束までの反復回数が9→31、実行時間が0.27s→5.1sに悪化することが判明した。
         // ガードを外す（常に追加する）と反復回数は12まで戻る。`rho=1/(yᵀs)`が極端に
@@ -2716,7 +2715,7 @@ mod tests {
         }
     }
 
-    /// [`BudgetedProblem`]（Issue #342）が実際にバジェットを共有カウンタで管理し、
+    /// [`BudgetedProblem`]が実際にバジェットを共有カウンタで管理し、
     /// 使い切ると`MleError::EvaluationBudgetExceeded`を返すことを直接検証する
     /// （`run_solver`経由の統合テストとは別に、この低レベルの building block 自体を
     /// 単体で検証する。`bfgs_rank2_update_matches_hand_computed_values_...`と同じ方針）。
@@ -2758,7 +2757,7 @@ mod tests {
     /// 分岐（4番目のケース、`info=4`）に永久に留まる。ステップ幅が実際に`f64::INFINITY`
     /// に達した後も`(stp-stpmax).abs()`が`NaN`になり比較が常に偽になるため、
     /// 収束判定（`info`フラグ1〜6）もNaN/Infガードも一度も発火しない
-    /// （Issue #342で実際に踏んだ暴走と同型の構造。手計算でのトレース、および
+    /// （実際に踏んだ暴走と同型の構造。手計算でのトレース、および
     /// devビルドで実際にハングさせてから[`BudgetedProblem`]の除去がハングを再現し
     /// 導入が解消することを確認済み）。
     ///
@@ -2821,7 +2820,7 @@ mod tests {
 
     #[test]
     fn run_solver_lbfgs_returns_a_bounded_error_instead_of_hanging_on_a_stalled_line_search() {
-        // `FaerLbfgs`（Issue #343で自前実装に置き換え済み）は、`FaerBfgs`と違い内側line
+        // `FaerLbfgs`（自前実装に置き換え済み）は、`FaerBfgs`と違い内側line
         // search用`Executor`に明示的な`max_iters`（[`LINE_SEARCH_MAX_ITERS`]=100）を
         // 設定しているため、[`BudgetedProblem`]の総枠（このテストでは
         // `(1+1)*2000=4000`評価分）を使い切るより先にこちらの上限に到達し、
@@ -2993,7 +2992,7 @@ mod tests {
         );
     }
 
-    /// `Method::Bfgs`は`tol * n_obs`を実効的な絶対閾値として使うはず（Issue #285、
+    /// `Method::Bfgs`は`tol * n_obs`を実効的な絶対閾値として使うはず（
     /// `run_solver`のdocコメント「tolの意味論はmethodにより異なる」参照）。`n_obs`と`tol`を
     /// 別々に振っても積が同じなら同じ収束点・反復回数になることを直接検証する
     /// （既存のBFGS/LBFGSテストは全て`n_obs=1`で呼んでおり、この正規化ロジック自体は
@@ -3393,7 +3392,7 @@ mod tests {
         );
     }
 
-    /// Issue #291の状況を模した問題。コスト関数は`θ = target`で最小になる素直な2次関数
+    /// 大標本のNewton収束判定で問題になる状況を模した問題。コスト関数は`θ = target`で最小になる素直な2次関数
     /// だが、(1) 大きな定数オフセットによりコストのULPが粗く（`≈1.5e-11`）、`target`
     /// 近傍ではコストがそれ以上減少しない浮動小数点の底に達する。(2) 勾配は`target`
     /// 近傍でも`grad_floor`（`> tol`）で下げ止まる（大標本で総和勾配の丸め誤差の床が
@@ -3445,7 +3444,7 @@ mod tests {
         }
     }
 
-    /// Issue #291の回帰テスト: 勾配ノルムが`tol`の床（`grad_floor > tol`）で下げ止まり、
+    /// 大標本Newton収束判定の回帰テスト: 勾配ノルムが`tol`の床（`grad_floor > tol`）で下げ止まり、
     /// かつコスト関数が浮動小数点の底に達する問題で、`FaerNewton`が`SingularHessian`にも
     /// `NonConvergence`にもならず**収束**する（`regularized_newton_step`が
     /// `RegularizedStep::NoProgress`を返し、`next_iter`が勾配の停滞を確認して
@@ -3509,7 +3508,7 @@ mod tests {
     /// コスト関数が平坦（どのステップでも減少しない）だが勾配ノルムが大きい問題。
     /// `λ=0`のHessianは可逆なので`regularized_newton_step`は`RegularizedStep::NoProgress`
     /// を返すが、勾配ノルムが`NEWTON_STALL_GRAD_FACTOR * tol`を大きく超えるため
-    /// `next_iter`は`stalled_at_optimum`を立てない（Issue #291のガード条件その2:
+    /// `next_iter`は`stalled_at_optimum`を立てない（上記の最適点停滞判定のガード条件その2:
     /// 最適点から遠い場所での停滞を収束と誤判定しない）。結果は`NonConvergence`。
     #[derive(Clone)]
     struct FlatCostLargeGradientProblem;
@@ -3563,7 +3562,7 @@ mod tests {
     /// `λ=0`のHessianは可逆だが**不定符号**（鞍点）で、勾配ノルムは小さく（条件(1)(2)は
     /// 満たす）コスト関数は平坦。`regularized_newton_step`は`RegularizedStep::NoProgress`を
     /// 返すが、`next_iter`のコストHessian正定値チェック（条件(3)、`cost_hessian_is_
-    /// positive_definite`）が偽になるため`stalled_at_optimum`を立てない（Issue #291の
+    /// positive_definite`）が偽になるため`stalled_at_optimum`を立てない（上記の最適点停滞判定の
     /// 2階条件ガード、rust-reviewer指摘）。結果は`NonConvergence`——鞍点を「収束」として
     /// 黙って推定値を返さない。
     #[derive(Clone)]
@@ -4303,7 +4302,7 @@ mod tests {
     }
 
     /// `SeparationNormCheck::Disabled`（Tobit相当）: 同じ大ノルム収束点でも事後チェックを
-    /// 通らず、`converged=true`で`target`へ収束した結果をそのまま返す（Issue #288）。
+    /// 通らず、`converged=true`で`target`へ収束した結果をそのまま返す。
     #[test]
     fn run_solver_ignores_separation_norm_when_check_is_disabled() {
         let output = run_solver(
@@ -4571,7 +4570,7 @@ mod tests {
         }
     }
 
-    // ── predict_new_data（Issue #131） ──────────────────────────────
+    // ── predict_new_data ──────────────────────────────
 
     #[test]
     fn predict_new_data_matches_manually_computed_link_of_linear_combination() {

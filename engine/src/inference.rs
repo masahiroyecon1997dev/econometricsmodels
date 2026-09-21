@@ -3,7 +3,7 @@
 //! OLS（t分布）・Logit（z分布）で、係数から`std_err`/`stat`/`p_value`/
 //! `conf_low`/`conf_high`を計算する処理がほぼ同型のまま独立実装されていたため、
 //! `statrs::distribution::ContinuousCDF`をジェネリックに取る形でここに集約する
-//! （Issue #152、`docs/planning/specs/panel-api-design.md` 4.2節）。
+//! （`docs/planning/specs/panel-api-design.md` 4.2節）。
 //! FE/RE・IVの2SLS（t分布）・GMM（z分布）でも同じ関数を使う想定。
 
 use statrs::distribution::ContinuousCDF;
@@ -42,7 +42,7 @@ where
 /// （`se`のみ0で`coef`が非0の場合は`stat = ±∞`になり、`ContinuousCDF::cdf`は無限大を
 /// 正しく処理できるため問題にならない）。`statrs`の`StudentsT::cdf`はNaN入力で内部の
 /// `beta_reg`が`Result::unwrap()`しているbetaの不完全関数の定義域チェックに失敗し
-/// panicする（Issue #340。実際に踏む経路: `panel::re::swamy_arora_variance_components`の
+/// panicする（実際に踏む経路: `panel::re::swamy_arora_variance_components`の
 /// between回帰で、全エンティティのグループ平均が完全一致し値が0の退化データ）。`stat`が
 /// NaNのときは`cdf`を呼ばず`p_value`もNaNとする（統計的に不定であることをそのまま返す。
 /// `OlsEstimator::fit`の`df_model==0`分岐——検定対象が無いモデルでNaNを返す——と同じ思想）。
@@ -96,7 +96,7 @@ mod tests {
     #[test]
     fn compute_inference_stat_returns_nan_p_value_without_panicking_when_coef_and_se_are_both_zero()
     {
-        // Issue #340: coef=0.0, se=0.0だとstat=0.0/0.0=NaNになり、修正前はdist.cdf(NaN)が
+        // coef=0.0, se=0.0だとstat=0.0/0.0=NaNになり、修正前はdist.cdf(NaN)が
         // panicしていた（statrsのbeta_reg内部でResult::unwrap()）。
         let t_dist = StudentsT::new(0.0, 1.0, 10.0).unwrap();
         let crit = critical_value(&t_dist, 0.95);
@@ -112,7 +112,7 @@ mod tests {
     #[test]
     fn compute_inference_stat_still_handles_infinite_stat_when_only_se_is_zero() {
         // se=0.0だがcoef!=0.0のときはstat=±∞になりNaNではないため、修正後もcdfを
-        // 呼ぶ経路のまま（statrsは無限大を正しく処理できる、Issue #340本文の区別点）。
+        // 呼ぶ経路のまま（statrsは無限大を正しく処理できる）。
         let t_dist = StudentsT::new(0.0, 1.0, 10.0).unwrap();
         let crit = critical_value(&t_dist, 0.95);
 

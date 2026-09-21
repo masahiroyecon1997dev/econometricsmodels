@@ -92,7 +92,7 @@ pub struct LogitOptions {
     /// by `nobs`. The two defaults are not interchangeable: Newton's absolute
     /// semantics with a `1e-8` threshold (or bfgs/lbfgs's normalized
     /// semantics with a `1e-6` threshold) measurably degrades either speed or
-    /// precision (Issue #285). Passing `tol` explicitly always uses the
+    /// precision. Passing `tol` explicitly always uses the
     /// semantics of the chosen `method`. Note: the method-dependent default is
     /// resolved once, at construction time. Changing `method` afterwards via
     /// the setter does not re-resolve `tol` — set both together (or set `tol`
@@ -133,7 +133,7 @@ impl LogitOptions {
     ) -> Self {
         // `tol`の既定値は`method`依存（`tol`フィールドのdocコメント参照）。`newton`は
         // 絶対閾値`1e-6`、`bfgs`/`lbfgs`は観測数正規化後の`1e-8`。共有の単一既定値
-        // では、Newtonの既定値を締めると大標本で無視できない速度低下（実測: Issue #285、
+        // では、Newtonの既定値を締めると大標本で無視できない速度低下（実測:
         // n=1,000,000で0.98s→3.15s）が起きる一方、bfgs/lbfgsの既定値を緩めると小標本の
         // 精度検証テスト（RTOL=1e-8）を壊すため、method別に分岐する（ユーザー確認済み）。
         let tol = tol.unwrap_or(if method.eq_ignore_ascii_case("newton") {
@@ -243,7 +243,7 @@ pub struct LogitResult {
     /// (`OLSResult`の`fitted_values`/`has_intercept`と同じ位置づけ、コメント参照)。
     estimator: LogitEstimator,
     /// The original polars DataFrame passed to `fit()`, cached for
-    /// `augment(new_data=None)` (Issue #322項目4). A cheap clone (polars columns are
+    /// `augment(new_data=None)`. A cheap clone (polars columns are
     /// internally reference-counted). `LogitResult` is only ever built from this
     /// file's `fit()` (unlike `OLSResult`, shared with `IVResult.first_stage()`), so
     /// this is never absent (`WLSResult`と同じ理由、`DataFrame`のまま`Option`にしない)。
@@ -289,8 +289,7 @@ impl LogitResult {
     ///
     /// Same `new_data`/`include_intercept` semantics as `predict()`, but returns a
     /// polars DataFrame (original columns plus `"probability"`, row order preserved)
-    /// instead of a bare list of floats (same design as `OLSResult::augment()`,
-    /// Issue #295/#322).
+    /// instead of a bare list of floats (same design as `OLSResult::augment()`).
     ///
     /// # Errors
     /// - Same as `predict()`: a required `x` column missing from `new_data`,
@@ -496,7 +495,7 @@ mod tests {
     }
 
     /// `tol=None`のとき、`method`に応じた既定値（`newton`は絶対閾値`1e-6`、
-    /// `bfgs`/`lbfgs`は観測数正規化基準`1e-8`）が解決されるはず（Issue #285）。
+    /// `bfgs`/`lbfgs`は観測数正規化基準`1e-8`）が解決されるはず。
     #[test]
     fn new_resolves_tol_default_based_on_method_when_tol_is_none() {
         let newton = LogitOptions::new(
@@ -768,7 +767,7 @@ mod tests {
     /// 呼び出し元の`build_logit_input`が`options.cov_type.to_lowercase()`してから
     /// 渡すことで実現している。そのため、この不変条件は`parse_cov_type`単体ではなく
     /// `build_logit_input`（実際にPythonから渡される文字列を受ける入口）を通して
-    /// 検証する（`testing-completeness-reviewer`指摘、Issue #231フェーズ4。
+    /// 検証する（`testing-completeness-reviewer`指摘。
     /// `.unwrap()`ではなく`let-else`を使う理由は`engine_pybind/src/linear/common.rs`
     /// の`parse_cov_type`テストと同じ、`PyErr`のDebug実装はGIL取得を要求するため）。
     #[test]

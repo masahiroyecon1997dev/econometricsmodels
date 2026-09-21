@@ -1,8 +1,7 @@
 //! FEの推定オプション・結果、およびPython（polars DataFrame + 列名 + オプション）から
 //! `engine::panel::fe`（within変換・パネル自由度調整・`cov_type`対応・パネル固有R²）を
-//! 呼び出すところまでの一連の処理（Issue #186でデータ抽出・pyclass定義、Issue #187で
-//! `FeEstimator::fit`への実際の配線・`#[pymodule]`登録、Issue #188で`fixed_effects()`
-//! メソッド）。
+//! 呼び出すところまでの一連の処理（データ抽出・pyclass定義、`FeEstimator::fit`への
+//! 実際の配線・`#[pymodule]`登録、`fixed_effects()`メソッドを段階的に実装した）。
 //!
 //! 【責務分離】`.claude/rules/rust-style.md`「Python境界でのデータ受け渡し」参照。
 //! polars DataFrameから列ごとの`Vec<f64>`/`Vec<String>`への抽出はここ（`column_extraction`
@@ -15,20 +14,20 @@
 //!
 //! ## 実装フェーズの分割方針（IV・Logitと同じ3段階、`engine_pybind/src/iv/CLAUDE.md`参照）
 //!
-//! 1. **データ抽出・pyclass定義issue（#186、完了）**: `FEOptions`/`FEResult`のpyclass定義、
+//! 1. **データ抽出・pyclass定義段階（完了）**: `FEOptions`/`FEResult`のpyclass定義、
 //!    列抽出・バリデーション・`engine::panel::fe::FeInput`構築までを行う`build_fe_input`を
 //!    実装した。
-//! 2. **本Issue（#187）**: `build_fe_input`を実際に呼び出す`fit`関数を追加し、`lib.rs`に
+//! 2. **engine呼び出し段階**: `build_fe_input`を実際に呼び出す`fit`関数を追加し、`lib.rs`に
 //!    `#[pyfunction] fit_fe`を新設して`#[pymodule]`に登録する。`build_fe_input`/
 //!    `parse_fe_cov_type`/`panel_error_to_pyerr`はこの時点で本番経路（`fit_fe`）から
 //!    実際に呼ばれるようになるため、`#[allow(dead_code)]`はすべて削除する
-//!    （`engine_pybind/src/iv/CLAUDE.md`「実装フェーズの分割方針」の#169と同じ）。
-//! 3. **本Issue（#188）**: `fixed_effects()`メソッド（IVの`first_stage()`と同じ
+//!    （`engine_pybind/src/iv/CLAUDE.md`「実装フェーズの分割方針」の初期実装段階と同じ）。
+//! 3. **`fixed_effects()`メソッド追加段階**: IVの`first_stage()`と同じ
 //!    「追加結果は別メソッド」方針、`docs/spec/fe-spec.md`3.5節）を追加する。`FEResult`に
 //!    非公開フィールド`estimator: FeEstimator`（内部で`OlsEstimator`まで保持する）を
 //!    追加し、`fixed_effects()`はそこから`FeEstimator::fixed_effects()`をオンデマンドに
-//!    呼ぶだけ（IVの`IVResult.first_stage`フィールドが#159ではなく#170で追加されたのと
-//!    同じ段階分割）。
+//!    呼ぶだけ（IVの`IVResult.first_stage`フィールドが初期実装ではなく後続の拡張で
+//!    追加されたのと同じ段階分割）。
 //!
 //! ## `FEOptions.time`と`FEOptions.time_col`は別物（`panel-api-design.md`1.1節）
 //!
@@ -45,7 +44,7 @@
 //! ## `cov_type`の非対応値
 //!
 //! FEは`hc0`を**サポートしない**（linearmodels・fixestともにパネル/FE向けの`hc0`
-//! オプションが存在しないため、Issue #181で`FeCovType` enumから除外済み）。OLS/WLS/IVとは
+//! オプションが存在しないため、`FeCovType` enumから除外済み）。OLS/WLS/IVとは
 //! 異なりFEの`cov_type`文字列パースはこの1点で分岐が異なるため、`linear::common::
 //! parse_cov_type`を流用せず独立実装する。IVの`cov_type`パースは元々（`iv::common::
 //! parse_iv_cov_type`という）別実装を持っていたが、`OLSOptions`/`IVOptions`が同名
@@ -54,10 +53,10 @@
 //! （`hc0`非対応・`Hac`の意味論がFE固有）、意図的に独立実装を維持している点でIVとは事情が
 //! 異なる。
 //!
-//! ## `x`の空リストを許容しない（Issue #320）
+//! ## `x`の空リストを許容しない
 //!
 //! v1では「固定効果のみのモデル」（`x=[]`）を意図的に許容していた（`validate_x_non_empty`を
-//! 呼ばない設計）。しかしユーザーからの指摘（Issue #320）で、この判断が独立して吟味された
+//! 呼ばない設計）。しかしユーザーからの指摘で、この判断が独立して吟味された
 //! 記録が`panel-api-design.md`に見当たらないこと・`x`が空だと何らかの説明変数が`y`に与える
 //! 効果を推定するという因果推論の営みが成立しない（実質「個体・時間固定効果によるyの分解」
 //! という別の操作になる）ことが指摘され、他手法（OLS/WLS/Logit/Probit/IV）と同じ
@@ -351,8 +350,8 @@ fn parse_fe_cov_type(df: &DataFrame, options: &FEOptions) -> PyResult<(FeCovType
 /// - 列の抽出時に発覚する問題（列が存在しない、数値/文字列型にキャストできない、
 ///   欠損値・NaN・無限大を含む等）は`column_extraction`の責務で`ValidationError`
 /// - `x`が空リストの場合は`ValidationError`（OLS/WLS/Logit/Probit/IVと同じ
-///   `validate_x_non_empty`。Issue #320で「固定効果のみのモデル」の許容を見直し、
-///   他手法と揃えた——経緯はモジュールdoc「`x`の空リストを許容しない（Issue #320）」参照）。
+///   `validate_x_non_empty`。「固定効果のみのモデル」の許容を見直し、
+///   他手法と揃えた——経緯はモジュールdoc「`x`の空リストを許容しない」参照）。
 ///   `y`/`entity`/`time`/`x`間の重複・`x`内部の重複も同じく`validation.rs`の責務で
 ///   `ValidationError`
 /// - `cov_type`の文字列が不正な場合は`ValidationError`（`parse_fe_cov_type`参照）
@@ -365,7 +364,7 @@ pub(crate) fn build_fe_input(
     entity: String,
     options: &FEOptions,
 ) -> PyResult<(FeInput, FeEffects, FeCovType, String)> {
-    // `x`が空リストであることを許容しない（Issue #320、モジュールdoc参照）。
+    // `x`が空リストであることを許容しない（モジュールdoc参照）。
     // OLS/WLS/Logit/Probit/IVと同じ`validate_x_non_empty`を呼ぶ（`.claude/rules/
     // rust-style.md`「バリデーションの責務分担」）。
     validate_x_non_empty("x", &x)?;
@@ -548,7 +547,7 @@ mod tests {
 
     #[test]
     fn build_fe_input_returns_error_for_empty_x() {
-        // 固定効果のみのモデル（`x=[]`）を拒否する（Issue #320、モジュールdoc「`x`の
+        // 固定効果のみのモデル（`x=[]`）を拒否する（モジュールdoc「`x`の
         // 空リストを許容しない」参照。OLS/WLS/Logit/Probit/IVと同じ`validate_x_non_empty`）。
         let df = well_formed_df();
         let options = default_options();

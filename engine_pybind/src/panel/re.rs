@@ -1,7 +1,7 @@
 //! REの推定オプション・結果、およびPython（polars DataFrame + 列名 + オプション）から
 //! `engine::panel::re`（Swamy-Arora分散成分推定・準偏差変換・`cov_type`対応・ハウスマン検定）
-//! を呼び出すところまでの一連の処理（Issue #200でデータ抽出・pyclass定義、Issue #201で
-//! `ReEstimator::fit`への実際の配線・`#[pymodule]`登録）。
+//! を呼び出すところまでの一連の処理（データ抽出・pyclass定義、
+//! `ReEstimator::fit`への実際の配線・`#[pymodule]`登録を段階的に実装した）。
 //!
 //! 【責務分離】`.claude/rules/rust-style.md`「Python境界でのデータ受け渡し」参照。
 //! polars DataFrameから列ごとの`Vec<f64>`/`Vec<String>`への抽出はここ（`column_extraction`
@@ -14,11 +14,11 @@
 //! ## 実装フェーズの分割方針（FE・IV・Logitと同じ3段階、`engine_pybind/src/panel/CLAUDE.md`
 //! 「実装フェーズの分割方針」参照）
 //!
-//! 1. **データ抽出・pyclass定義issue（#200、完了）**: `REOptions`/`REResult`のpyclass定義、
+//! 1. **データ抽出・pyclass定義（完了）**: `REOptions`/`REResult`のpyclass定義、
 //!    列抽出・バリデーション・`engine::panel::re::ReInput`構築までを行う`build_re_input`を
 //!    実装した。この時点では`#[pymodule]`への登録・実際の`ReEstimator::fit`呼び出しは
 //!    行わなかった（FEの#186と同じ分割）。
-//! 2. **本Issue（#201）**: `build_re_input`を実際に呼び出す`fit`関数を追加し、`lib.rs`に
+//! 2. **本対応**: `build_re_input`を実際に呼び出す`fit`関数を追加し、`lib.rs`に
 //!    `#[pyfunction] fit_re`を新設して`#[pymodule]`に登録する（FEの#187相当）。
 //!    `build_re_input`/`parse_re_cov_type`の`#[allow(dead_code)]`属性はこの時点で削除する
 //!    （本番経路（`fit_re`）から実際に呼ばれるようになったため）。
@@ -34,7 +34,7 @@
 //! 時系列順序、`time`とは独立に指定できる）を分離しているが、`REOptions`にはこの分離が
 //! 無く`time`のみを持つ。理由: `engine::panel::re::ReCovType::Hac`は`FeCovType::Hac`と
 //! 異なり`time`オーバーライドフィールドを持たない（`engine::panel::re`モジュールdoc・
-//! `engine/src/panel/CLAUDE.md`「`cov_type`対応（Issue #197）」参照）。RE自身が2-way
+//! `engine/src/panel/CLAUDE.md`「`cov_type`対応（`ReCovType`、3.1節・3.2節）」参照）。RE自身が2-way
 //! 構造を持たない（v1はentity方向のみ、`re-spec.md`5章）ため、FEのような「2-way FEの
 //! 固定効果構造に使う時点粒度」と「HACカーネルに使う時系列粒度」を分離する必要が無い——
 //! DK HAC計算は`ReInput::time()`をそのまま使う設計。`REOptions.time`は以下2つの用途を
@@ -49,13 +49,13 @@
 //! REも`hc0`を**サポートしない**（`ReCovType` enumから除外済み、FEと同じ理由・同じ
 //! `hc0`専用エラーメッセージ）。
 //!
-//! ## `x`の空リストを許容しない（Issue #200、ユーザー確認済み・2026-09-20）
+//! ## `x`の空リストを許容しない（ユーザー確認済み・2026-09-20）
 //!
-//! FE（Issue #320）と同じ`validate_x_non_empty`を適用し、`x=[]`を拒否する。REで`x=[]`は
+//! FEと同じ`validate_x_non_empty`を適用し、`x=[]`を拒否する。REで`x=[]`は
 //! 「分散成分（ICC）のみを推定するnullモデル」として単独で意味を持つ標準的なユースケース
 //! （パネル・混合モデル分析の"null model"）だが、`panel-api-design.md`にこの点の明示的な
 //! 決定が無く、他手法（OLS/WLS/Logit/Probit/IV/FE post-#320）と一貫させる方針をユーザーが
-//! 選択した。nullモデル・ICC推定のサポートは別Issue（#346）で検討する。
+//! 選択した。nullモデル・ICC推定のサポートは別途検討する。
 
 use std::collections::HashSet;
 
@@ -362,7 +362,7 @@ pub(crate) fn build_re_input(
 /// `ReEstimator::estimator()`（内部で委譲した`OlsEstimator`）から取得する。FEと異なり
 /// `aic`/`bic`もそのまま`estimator()`委譲でよい——REの`df_model`が`OlsInput::k()`と自動的に
 /// 一致する設計のため、`OlsEstimator`委譲時点で既に正しい値になっている
-/// （`engine/src/panel/CLAUDE.md`「`df_resid`/`df_model`（Issue #196）」参照。FEの
+/// （`engine/src/panel/CLAUDE.md`「`df_resid`/`df_model`（7.5節）」参照。FEの
 /// `aic`/`bic`のようなRE独自の再計算は不要）。`std_errors`/`t_stats`/`p_values`/
 /// `conf_lower`/`conf_upper`/`df_resid`/`df_model`/`f_statistic`/`f_p_value`/
 /// `r_squared_within`/`r_squared_between`/`r_squared_overall`/`hausman_statistic`/
@@ -491,7 +491,7 @@ mod tests {
 
     #[test]
     fn build_re_input_returns_error_for_empty_x() {
-        // `x=[]`を拒否する（Issue #200、モジュールdoc「`x`の空リストを許容しない」参照。
+        // `x=[]`を拒否する（モジュールdoc「`x`の空リストを許容しない」参照。
         // FE post-#320・OLS/WLS/Logit/Probit/IVと同じ`validate_x_non_empty`）。
         let df = well_formed_df();
         let options = default_options();

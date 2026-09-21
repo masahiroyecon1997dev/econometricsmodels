@@ -10,7 +10,7 @@
 //! （`β̂_2SLS = (X'PzX)⁻¹X'Pzy`、`Pz`は全操作変数`Z`への射影行列）と数値的に一致する
 //! （教科書的な2SLSの2段階回帰による構成、`iv-api-design.md`6.2節）。
 //!
-//! ## 標準誤差・適合度統計量（Issue #166）
+//! ## 標準誤差・適合度統計量
 //!
 //! 第二段階の設計行列に`x̂_endog`（推定値）を使う都合上、**第二段階の`OlsEstimator`が
 //! ナイーブに計算する標準誤差・t値・p値・信頼区間は2SLSとして正しくない**（教科書的に
@@ -32,7 +32,7 @@
 //!
 //! 第一段階の各`OlsEstimator`はそれ自体が正しい（ナイーブな）OLS回帰であり、
 //! （弱操作変数診断等で必要になる）SE・F統計量も含めてそのまま公開してよい
-//! （`first_stage_estimators()`、Issue #158の`first_stage()`実装で利用済み）。
+//! （`first_stage_estimators()`、`first_stage()`実装で利用済み）。
 //!
 //! ## `second_stage`フィールドの位置づけ（変わらず内部実装専用）
 //!
@@ -86,7 +86,7 @@ pub struct TwoSlsEstimator {
     /// 内生変数ごとの第一段階回帰（`x_endog[j] ~ x_exog + instruments`）。
     /// タプルの`String`は内生変数名（`IvInput::x_endog_names`と対応）。
     first_stage: Vec<(String, OlsEstimator)>,
-    /// 内生変数ごとの弱操作変数診断（部分F統計量、Issue #163、`iv-api-design.md`6.4節）。
+    /// 内生変数ごとの弱操作変数診断（部分F統計量、`iv-api-design.md`6.4節）。
     /// `first_stage`と同じ順序・同じ内生変数名（`Vec<(String, f64)>`にしている理由も
     /// `first_stage`と同じ、`HashMap`にすると走査順序が非決定的になるため）。
     weak_instrument_f_statistics: Vec<(String, f64)>,
@@ -115,12 +115,12 @@ pub struct TwoSlsEstimator {
     /// ロバストWald検定（OLSと同じ切り替えロジック、`iv-api-design.md`2.1節）
     f_statistic: f64,
     f_p_value: f64,
-    /// Wu-Hausman内生性検定（回帰ベース、Issue #164、`iv-api-design.md`6.6節）の統計量。
+    /// Wu-Hausman内生性検定（回帰ベース、`iv-api-design.md`6.6節）の統計量。
     /// `x_endog=[]`（検定対象の内生変数が無い）、または拡張回帰が想定内の理由で推定不能
     /// （設計行列が特異・観測数不足、`fit()`のdocコメント参照）なら`None`。
     wu_hausman_statistic: Option<f64>,
     wu_hausman_p_value: Option<f64>,
-    /// Sargan過剰識別検定（Issue #167、`iv-api-design.md`6.5節）の統計量。丁度識別
+    /// Sargan過剰識別検定（`iv-api-design.md`6.5節）の統計量。丁度識別
     /// （自由度`len(instruments) - len(x_endog)`が0）なら`None`。
     sargan_statistic: Option<f64>,
     sargan_p_value: Option<f64>,
@@ -150,11 +150,11 @@ impl TwoSlsEstimator {
     ///   `CommonError::InsufficientClusters)`
     /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
     ///   `IvError::Common(CommonError::InsufficientClustersForInference)`（`rank(Ŝ) ≤ g-1`
-    ///   のためロバストWald/F検定の`q×q`部分行列が構造的に特異、Issue #289。`g > q`でも
+    ///   のためロバストWald/F検定の`q×q`部分行列が構造的に特異。`g > q`でも
     ///   悪条件で数値的にほぼ特異なら従来どおり`CommonError::ComputationFailed`が
     ///   backstop）
     ///
-    /// Wu-Hausman検定（`wu_hausman_statistic()`/`wu_hausman_p_value()`、Issue #164）の
+    /// Wu-Hausman検定（`wu_hausman_statistic()`/`wu_hausman_p_value()`）の
     /// 拡張回帰が想定内の理由（設計行列の特異性・観測数不足・Wald検定側の数値的な
     /// ほぼ特異性）で失敗する場合は`fit()`自体を失敗させず、該当フィールドが`None`に
     /// なるのみ（`engine/src/iv/CLAUDE.md`参照）。それ以外の理論上到達不能な理由で
@@ -163,7 +163,7 @@ impl TwoSlsEstimator {
     /// 識別可能性の検証をここで行う理由は`IvInput`の構造体docコメント参照
     /// （`OlsEstimator::fit`が`n<=k`を検証するのと同じ層分け、ユーザー確認済み）。
     pub fn fit(input: IvInput, cov_type: CovType, confidence_level: f64) -> Result<Self, IvError> {
-        // faer のグローバル並列度を Par::Seq に固定する（Issue #283、`crate::parallelism`）。
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
         crate::parallelism::ensure_serial();
 
         if input.k_instruments() < input.k_endog() {
@@ -175,7 +175,7 @@ impl TwoSlsEstimator {
 
         // `cov_type=Cluster`でクラスター数`g`が構造方程式の傾き係数の数`q`
         // （`k - k_constant`）以下だと、ロバストWald/F検定の`q×q`部分行列が構造的に
-        // 特異になる（`rank(Ŝ) ≤ g - 1`、Issue #289。`ols.rs`の同型チェックを参照）。
+        // 特異になる（`rank(Ŝ) ≤ g - 1`。`ols.rs`の同型チェックを参照）。
         // 第一段階・第二段階回帰の`OlsEstimator::fit`内でも同じ検証が走るが、そちらは
         // 第一段階固有の傾き係数の数で判定され`FirstStageFailed`にラップされて`q`の値も
         // 構造方程式のものと食い違うため、`fit()`冒頭で構造方程式の`q`を使って明示的に
@@ -213,7 +213,7 @@ impl TwoSlsEstimator {
         let mut instrument_columns = x_exog_columns.clone();
         instrument_columns.extend(mat_to_columns(input.instruments()));
 
-        // 第一段階回帰・弱操作変数診断（部分F統計量、Issue #163、iv-api-design.md 6.4節）は
+        // 第一段階回帰・弱操作変数診断（部分F統計量、iv-api-design.md 6.4節）は
         // 2SLS/GMM間で共有するロジック（`common::compute_first_stage`、`iv/CLAUDE.md`
         // 「2SLSとGMMの独立実装方針」参照——GMM自体は第一段階回帰を必要としないが、
         // `engine_pybind`が`method="gmm"`でも同じ診断情報を独立に提供するために使う）。
@@ -304,7 +304,7 @@ impl TwoSlsEstimator {
             CovType::Cluster { groups } => {
                 let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
                 // クラスター数 `g <= q`（構造方程式の傾き係数の数）は`fit()`冒頭で
-                // 既に`InsufficientClustersForInference`として弾いている（Issue #289）。
+                // 既に`InsufficientClustersForInference`として弾いている。
                 let n_groups = validate_cluster_groups(groups, n)?;
                 let cov = cluster_cov_params(x_hat, &residuals, &xtx_inv, n, k, groups);
                 (cov, n_groups - 1)
@@ -356,7 +356,7 @@ impl TwoSlsEstimator {
             wald_f_test(beta, &cov_params, k_constant, df_model, df_inference)?
         };
 
-        // Wu-Hausman内生性検定（回帰ベース、Issue #164、iv-api-design.md 6.6節）。構造式
+        // Wu-Hausman内生性検定（回帰ベース、iv-api-design.md 6.6節）。構造式
         // `y ~ x_exog + x_endog`に第一段階残差を追加回帰し（`linearmodels`の
         // `wooldridge_regression`相当）、追加した残差係数のジョイント有意性を
         // `fit()`に渡された`cov_type`と同じcov_typeでのロバストWald検定（F統計量）で
@@ -433,7 +433,7 @@ impl TwoSlsEstimator {
             }
         };
 
-        // Sargan過剰識別検定（Issue #167、iv-api-design.md 6.5節）。構造残差`e`を全操作変数
+        // Sargan過剰識別検定（iv-api-design.md 6.5節）。構造残差`e`を全操作変数
         // `Z = [x_exog, instruments]`（`instrument_columns`、第一段階で使ったものと同じ）に
         // 回帰した際の`n*R²`に相当する`e'Z(Z'Z)⁻¹Z'e / σ̂²`（`σ̂² = e'e/n`）を計算する。
         // 自由度は`len(instruments) - len(x_endog)`（`iv-api-design.md`1.1.1節の`instruments`
@@ -915,7 +915,7 @@ mod tests {
 
     #[test]
     fn fit_pins_faer_global_parallelism_to_seq() {
-        // Issue #283: `fit()` 冒頭の `crate::parallelism::ensure_serial()` が faer の
+        // `fit()` 冒頭の `crate::parallelism::ensure_serial()` が faer の
         // グローバル並列度を `Par::Seq` へ引き戻すことの回帰ガード（iv 系統代表）。
         // 別テストが `Seq` にしている可能性があるため、まず `Rayon` に戻してから通す。
         // 設計行列は極小なので一時的な `Rayon` 設定は #283 の病理を招かない。
@@ -966,7 +966,7 @@ mod tests {
         assert!((*estimator.params().get(1, 0) - 2.0).abs() < 1e-8);
 
         // `x_endog=[]`だと`X̂ = X`（推定値=実際の値）のため、SE・適合度統計量も
-        // 素のOLSと数値的に一致するはず（Issue #166、`OlsEstimator`への直接fitと照合）。
+        // 素のOLSと数値的に一致するはず（`OlsEstimator`への直接fitと照合）。
         let ols_input =
             OlsInput::from_columns(&y, &x_exog, vec!["x1".to_string()], true, "y".to_string())
                 .unwrap();
@@ -1141,7 +1141,7 @@ mod tests {
 
     /// Sargan過剰識別検定の統計量を、`TwoSlsEstimator::fit`とは独立に構造残差`e`を
     /// 全操作変数`Z=[const, x1, z1, z2]`に回帰する形で手計算したオラクルと数値照合する
-    /// （`fit()`のdocコメント「Sargan過剰識別検定」参照、Issue #167）。
+    /// （`fit()`のdocコメント「Sargan過剰識別検定」参照）。
     #[test]
     fn fit_computes_sargan_statistic_matching_manual_formula() {
         use statrs::distribution::{ChiSquared, ContinuousCDF};
@@ -1178,8 +1178,8 @@ mod tests {
     /// `confidence_level`の扱い」参照）。`second_stage`は非公開フィールドだが、この
     /// テストは同一モジュールの子モジュールのため直接参照できる。
     /// 呼び出し元が指定した`cov_type`は第一段階（`OlsEstimator`委譲）・第二段階
-    /// （`TwoSlsEstimator`自身が独立に計算する正しいSE）の両方に反映される
-    /// （Issue #166）。内部実装専用の`second_stage`フィールド自身の委譲フィットだけは
+    /// （`TwoSlsEstimator`自身が独立に計算する正しいSE）の両方に反映される。
+    /// 内部実装専用の`second_stage`フィールド自身の委譲フィットだけは
     /// 常に`Classical`のまま（モジュール冒頭のdocコメント「`second_stage`フィールドの
     /// 位置づけ」参照。`second_stage`は非公開フィールドだが、このテストは同一モジュールの
     /// 子モジュールのため直接参照できる）。
@@ -1345,7 +1345,7 @@ mod tests {
     /// 片方だけデータを更新すると気づかずに非退化性が崩れるリスクがあったため、
     /// レビューを受けて統合）。
     /// `nontrivial_x_exog_*`ヘルパー群が共有する生データ（`(x1, x_endog, z1, z2, y)`）。
-    /// cov_typeごとに別々の`IvInput`が必要なテスト（Issue #166のSE検証群）が同じデータで
+    /// cov_typeごとに別々の`IvInput`が必要なテスト（cov_type対応のSE検証群）が同じデータで
     /// 独立に`fit()`しなおせるように、フィット済みestimatorとは切り離して公開する。
     #[allow(clippy::type_complexity)]
     fn nontrivial_x_exog_columns() -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
@@ -1959,7 +1959,7 @@ mod tests {
     /// スコアの総和がゼロ（正規方程式`X'e = 0`）で`rank(Ŝ) ≤ g - 1`のため全体Wald/F
     /// 検定の`q×q`部分行列が構造的に特異になる。`g`・`q`は入力だけから判定できるため
     /// `fit()`冒頭のバリデーションが`CommonError::InsufficientClustersForInference`で
-    /// 弾く（Issue #289、OLSと同型）。`cluster_test_input_and_groups`の設計行列は
+    /// 弾く（OLSと同型）。`cluster_test_input_and_groups`の設計行列は
     /// `[const, x1, endog1]`（`k=3`・`k_constant=1`・`q=2`）なので、`g=2`（`g == q`）と
     /// 組み合わせる。
     #[test]
@@ -1994,7 +1994,7 @@ mod tests {
     /// を返す。Wu-Hausmanが実際に使うのは末尾`k_endog`列の部分行列（`rank(Ŝ) ≤ g-1 ≥
     /// k_endog`なら計算可能）だが、`OlsEstimator::fit`のoverall F検定がその手前で弾くため、
     /// 他のdegrade理由（`SingularMatrix`/`InsufficientObservations`/`ComputationFailed`）と
-    /// 同じく`wu_hausman_*`を`None`へdegradeする（`fit()`全体は成功、Issue #289）。
+    /// 同じく`wu_hausman_*`を`None`へdegradeする（`fit()`全体は成功する）。
     /// `cluster_test_input_and_groups`は`[const, x1, endog1]`（`q=2`・`k_endog=1`・
     /// `q_aug=3`）なので`g=3`（`q=2 < g=3 <= q_aug=3`）と組み合わせる。
     #[test]
@@ -2014,7 +2014,7 @@ mod tests {
         assert!(estimator.wu_hausman_p_value().is_none());
     }
 
-    /// `G=2`クラスター・`x_exog=[]`・丁度識別（`instruments`1本）という、Issue #171の
+    /// `G=2`クラスター・`x_exog=[]`・丁度識別（`instruments`1本）という、
     /// ベンチマーク作成中に発見した`ComputationError`（`engine/src/iv/CLAUDE.md`
     /// 「修正済み」参照）の再現条件そのもの。第一段階回帰の`OlsInput::
     /// from_columns`に`has_intercept=false`を渡していたため、`IvInput::x_exog()`が
@@ -2130,7 +2130,7 @@ mod tests {
     /// `β̂=(Z'Z)⁻¹Z'x_endog`（`Z=[x_exog, instruments]`）で独立に計算し、
     /// `first_stage_estimators()`が返す`OlsEstimator`の`params()`と数値一致することを
     /// 確認する（既存テストは操作変数が内生変数を完全予測する退化ケースでしか第一段階を
-    /// 検証しておらず、一般的な非退化ケースでの独立検証が無かったため追加。Issue #158）。
+    /// 検証しておらず、一般的な非退化ケースでの独立検証が無かったため追加）。
     #[test]
     fn first_stage_estimators_match_independently_recomputed_ols_closed_form() {
         use faer::Side;

@@ -63,7 +63,7 @@ impl WlsEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, LeastSquaresError> {
-        // faer のグローバル並列度を Par::Seq に固定する（Issue #283、`crate::parallelism`）。
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
         crate::parallelism::ensure_serial();
 
         let input = OlsInput::from_columns_weighted(
@@ -279,7 +279,7 @@ mod tests {
     fn fitted_values_equals_y_minus_residuals() {
         // `ols.rs`の同名テスト（`fitted_values_equals_y_minus_residuals`）と同じ不変条件
         // （`fitted_values()`と`residuals()`が同じ`original_scale_fitted_and_residuals`
-        // 呼び出しから一貫して導かれていることの確認、Issue #132）。
+        // 呼び出しから一貫して導かれていることの確認）。
         let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
         let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
         let weights = vec![1.0, 4.0, 0.25, 9.0, 2.0];
@@ -393,7 +393,7 @@ mod tests {
     #[test]
     fn fit_propagates_no_regressors_error_when_k_is_zero() {
         // `WlsEstimator::fit`は常に（ゲート付きの）`OlsEstimator::fit`に委譲するため、
-        // k=0拒否（Issue #140）もそのまま伝播する。`fit_allowing_no_regressors`への
+        // k=0拒否もそのまま伝播する。`fit_allowing_no_regressors`への
         // 特別扱いは不要（WLSはk=0になりえない呼び出し方をする対象ではなく、
         // OLSと同じくPython向け公開APIとしてk=0を拒否すべき対象）。
         let y = vec![1.0, 2.0, 3.0, 4.0, 5.0];

@@ -13,7 +13,7 @@
 //! Logit/Probitの`validate_binary_y`（`nonlinear/common.rs`）は`fit()`冒頭で呼ばれ、
 //! `from_columns`自体は次元検証のみを行う。Tobitは打ち切り境界（`lower`/`upper`）を
 //! `from_columns`の追加引数として受け取る都合上、境界自体の妥当性検証・`y`との整合性検証も
-//! `from_columns`内で完結させる（Issue #213で確定）。
+//! `from_columns`内で完結させる。
 //!
 //! ## 数式（打ち切り正規回帰）
 //!
@@ -346,7 +346,7 @@ fn uncensored_contribution(v: f64, s: f64) -> Contribution {
 /// `direction`に依らず同じ式に帰着する、モジュール冒頭のdocコメント参照）。
 ///
 /// **Hessian項（`a=A(u)`・`c=C(u)`・`h_ss`）が使う`u`は、`λ`と同じクランプ済み
-/// 引数から再構成する**（Probitの`ProbitProblem`と同型のバグ、Issue #316参照）。
+/// 引数から再構成する**（Probitの`ProbitProblem`と同型のバグ）。
 /// `λ`は`clamped_pdf_cdf`が`zeta`を`[-U_CLAMP, U_CLAMP]`にクランプした後の値を
 /// 使うため、`|zeta|>U_CLAMP`の領域では`λ`は`zeta`に対して事実上定数になる。
 /// ここで生の（非クランプの）`zeta`を`A(u)=λ(u+λ)`の計算に混ぜると、`A(u)>0`と
@@ -553,7 +553,7 @@ impl Hessian for TobitProblem {
 ///
 /// `TobitInput::from_columns`（構造的妥当性: 境界指定自体の整合性・`y`と境界の整合性）
 /// ではなく`fit()`冒頭（推定可能性の前提条件、rust-reviewer指摘で明記）で検証する。
-/// `validate_sufficient_observations`と同じ位置づけ（Issue #223で追加）: 「データとして
+/// `validate_sufficient_observations`と同じ位置づけ: 「データとして
 /// 構造的に妥当か」と「このデータで推定を試みる価値があるか」を分離し、後者を`fit()`側の
 /// 責務とする設計方針（`from_columns`はTobitInput単体で完結する検証のみを行い、
 /// 推定アルゴリズムの成否に関わる検証は持ち込まない）。
@@ -591,7 +591,7 @@ fn population_std(values: impl Iterator<Item = f64> + Clone, n: usize) -> f64 {
 }
 
 /// `TobitEstimator::fit`が最適化に使う、設計行列`x`・被説明変数`y`の標準化スケール
-/// （Tobit局所、Issue #286）。`nonlinear/common.rs`の`standardize_columns`/`ColumnScale`/
+/// （Tobit局所）。`nonlinear/common.rs`の`standardize_columns`/`ColumnScale`/
 /// `destandardize_params`を使わず、Tobit内で完結させる。
 ///
 /// **`standardize_columns`と分けた理由**:
@@ -746,7 +746,7 @@ impl TobitScaling {
 /// あり、Tobitの推定値そのものではない）。
 ///
 /// 特異性検出（列ピボットQRの`R`対角成分の相対閾値、`.claude/rules/rust-style.md`
-/// 「線形代数」）は`nonlinear::common::checked_design_matrix_qr`に委譲する（Issue #279で
+/// 「線形代数」）は`nonlinear::common::checked_design_matrix_qr`に委譲する（
 /// Logit/Probitの`ols_based_initial_params`とランクチェックを共通化した。Logit/Probitは
 /// 同じ関数のQR解に加えてリンクのスケール補正を施すが、Tobitの`β`はOLSと同一スケールの
 /// ため補正は不要で、QR解をそのまま`β`初期値に使い、`σ`初期値だけ残差から別途求める）。
@@ -869,7 +869,7 @@ fn wald_chi2_test(
 }
 
 /// `marginal_effects`が評価する対象（McDonald-Moffitt 1980）。Logit/Probitの
-/// `dydx_and_jacobian`型の共通化はしない（Issue #211の結論。対象ごとに式が異なり、
+/// `dydx_and_jacobian`型の共通化はしない（対象ごとに式が異なり、
 /// 同型の`(w,s)`分解に無理に収める価値がないと判断した。
 /// `docs/planning/specs/nonlinear-api-design.md`6章参照）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1043,7 +1043,7 @@ struct TobitMarginalEffectsInputs<'a> {
 ///
 /// `nonlinear/common.rs`の`marginal_effects_from_w_s`と数式の骨格
 /// （`∂dydx_j/∂θₘ=βⱼ*s_m+[j==m]*w`）は同じだが、パラメータ次元が`k`ではなく`k+1`
-/// （`σ`を含む）である点が異なるため独立実装とする（Issue #211の結論）。
+/// （`σ`を含む）である点が異なるため独立実装とする。
 ///
 /// # Errors
 /// `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
@@ -1229,7 +1229,7 @@ pub struct TobitEstimator {
     /// 誤差項の標準偏差（元のスケール）。内部最適化パラメータ`s̃=logσ̃`（`x`のセンタリング・
     /// スケーリング・`y`のスケーリング`c=y_scale`後の空間、`fit`のdocコメント「標準化空間」
     /// 節・`TobitScaling`参照）を`logσ = s̃ + ln c`で元のスケールへ戻し、`σ = exp(logσ)`で
-    /// 逆変換したもの（Issue #286）。`logσ`は`x`の変換とは無関係だが`y`のスケーリングには
+    /// 逆変換したもの。`logσ`は`x`の変換とは無関係だが`y`のスケーリングには
     /// 比例する（`σ̃ = σ/c`）。
     sigma: f64,
     /// `(β, σ)`の分散共分散行列（元のスケール、`(k+1)×(k+1)`）。`fit`に渡した`cov_type`に
@@ -1285,7 +1285,7 @@ impl TobitEstimator {
     /// 誤差項の標準偏差`σ`を推定する。
     ///
     /// 内部最適化パラメータは`(β, s=logσ)`という`k+1`次元ベクトル（モジュール冒頭の
-    /// 数式参照）。最適化前に`TobitScaling`で設計行列と`y`を標準化する（Issue #286、
+    /// 数式参照）。最適化前に`TobitScaling`で設計行列と`y`を標準化する（
     /// 詳細は`TobitScaling`のdocコメント）: `x`は切片ありなら列を平均センタリング＋
     /// スケーリング・切片なしならスケーリングのみ、`y`（と打ち切り境界`lower`/`upper`）は
     /// `y`の母集団標準偏差を2の冪に丸めた`c`で一律スケーリングする。標準化空間`(β̃, s̃=logσ̃)`で
@@ -1297,8 +1297,8 @@ impl TobitEstimator {
     /// （`LogitEstimator::fit`とは異なる。モジュール冒頭「Newton法の初期値」節参照）。
     ///
     /// `cov_type`は観測情報行列（`Classical`）・OPG（`Opg`）・サンドイッチ型
-    /// （`Hc0`/`Hc1`）・クラスターロバスト（`Cluster`）に対応する（Issue #218・#219、
-    /// Probitの前例＝コミット`c868912`と同じ理由でまとめて実装。`CovType`はLogit/Probit/
+    /// （`Hc0`/`Hc1`）・クラスターロバスト（`Cluster`）に対応する（Probitの前例＝
+    /// コミット`c868912`と同じ理由でまとめて実装。`CovType`はLogit/Probit/
     /// Tobit共有の1つのenumで既に`Cluster`バリアントを含んでおり、`match cov_type`を
     /// 網羅的にする都合上、OPG/サンドイッチのみを先に実装してクラスターを未実装のまま
     /// 残す設計は取れない。ユーザー確認済み）。`Opg`/`Hc0`/`Hc1`/`Cluster`は収束点での
@@ -1307,7 +1307,7 @@ impl TobitEstimator {
     /// 避けるため条件付きで行う、`LogitEstimator::fit`と同じ理由）、`run_solver`が返す
     /// 収束点のパラメータで評価する。観測数の十分性検証（`validate_sufficient_
     /// observations`）には`x`の列数`k`ではなく総最適化パラメータ数`k+1`を使う
-    /// （Issue #212の結論、`validate_sufficient_observations`のdocコメント参照）。
+    /// （`validate_sufficient_observations`のdocコメント参照）。
     /// Logit/Probitの`validate_has_regressors`（`k==0`検証）はTobitでは呼ばない
     /// （`logσ`が常に存在するため対応するケースが生じない、同関数のdocコメント参照）。
     ///
@@ -1336,7 +1336,7 @@ impl TobitEstimator {
     /// - `cov_type=Cluster`でクラスター数が2未満: `CommonError::InsufficientClusters`
     /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
     ///   `CommonError::InsufficientClustersForInference`（`rank(Ŝ) ≤ g - 1`のため全体
-    ///   Wald検定の`q×q`部分行列が構造的に特異、Issue #289。従来は`wald_chi2_test`内の
+    ///   Wald検定の`q×q`部分行列が構造的に特異。従来は`wald_chi2_test`内の
     ///   `ComputationFailed`だったものを`fit()`冒頭のバリデーションへ前倒し、#287）
     /// - OLS初期値計算時に`x`が特異（完全な多重共線性等）: `MleError::SingularDesignMatrix`
     ///   （`ols_initial_params`参照）
@@ -1358,7 +1358,7 @@ impl TobitEstimator {
             confidence_level,
         } = options;
 
-        // faer のグローバル並列度を Par::Seq に固定する（Issue #283、`crate::parallelism`）。
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
         crate::parallelism::ensure_serial();
 
         validate_confidence_level(confidence_level)?;
@@ -1374,7 +1374,7 @@ impl TobitEstimator {
         // `x`（切片ありなら列を平均センタリング＋スケーリング、切片なしはスケーリング
         // のみ）と`y`（と打ち切り境界、`y`の母集団標準偏差を2の冪に丸めた値で一律
         // スケーリング）を標準化してから最適化する（`TobitScaling`のdocコメント・
-        // `fit`のdocコメント「標準化空間」節参照、Issue #286）。
+        // `fit`のdocコメント「標準化空間」節参照）。
         let scaling = TobitScaling::fit(input.x(), input.y(), input.has_intercept());
         let x_std = scaling.standardize_x(input.x());
         let y_std = scaling.standardize_y(input.y());
@@ -1403,8 +1403,8 @@ impl TobitEstimator {
             // Tobitの真の分離は係数発散ではなく`σ→0`退化として現れるため、標準化
             // パラメータノルムによる(準)完全分離の事後チェックは無効にする。全件打ち切りは
             // `validate_has_uncensored_observations`（`NoUncensoredObservations`）、
-            // 部分的な準完全分離は`NonConvergence`で捕捉される（Issue #288、
-            // `SeparationNormCheck`のdocコメント参照）。
+            // 部分的な準完全分離は`NonConvergence`で捕捉される
+            // （`SeparationNormCheck`のdocコメント参照）。
             SeparationNormCheck::Disabled,
         )?;
 
@@ -1645,7 +1645,7 @@ impl TobitEstimator {
     ///
     /// `target`で評価対象を選ぶ（`MarginalEffectsTarget`のdocコメント参照）。
     /// Logit/Probitの`overall_w_and_s`/`at_point_w_and_s`型の共通化はしない
-    /// （Issue #211の結論。計算式自体は`target_w_and_s`/`marginal_effects_from_tobit_w_s`
+    /// （計算式自体は`target_w_and_s`/`marginal_effects_from_tobit_w_s`
     /// のdocコメント参照）。左打ち切りのみ・右打ち切りのみ・両側打ち切りいずれの
     /// `TobitInput`でも同じ式で正しく計算できる（`target_w_and_s`のdocコメント「数式」参照、
     /// ユーザー確認済み）。
@@ -1713,8 +1713,8 @@ impl TobitEstimator {
     /// （`predicted_value`のdocコメント「数式」参照。左のみ・右のみ・両側打ち切り
     /// いずれでも同じ式で正しく計算できる）。
     ///
-    /// 新規データでの予測（out-of-sample）は`predict_new_data`（Issue #131の
-    /// Tobit版）。デフォルト（`target`省略時の`E[y|x]`、`nonlinear-api-design.md`
+    /// 新規データでの予測（out-of-sample）は`predict_new_data`。デフォルト
+    /// （`target`省略時の`E[y|x]`、`nonlinear-api-design.md`
     /// 6章）はPython層（engine_pybind）の責務（`Method`/`CovType`等と同じ設計、
     /// `.claude/rules/rust-style.md`参照）。
     pub fn predict(&self, target: MarginalEffectsTarget) -> Vec<f64> {
@@ -1732,8 +1732,8 @@ impl TobitEstimator {
             .collect()
     }
 
-    /// 新規データ（out-of-sample、`new_x_columns`）に対する予測値（Issue #131の
-    /// Tobit版）。`target`は`predict`と同じ3種。
+    /// 新規データ（out-of-sample、`new_x_columns`）に対する予測値。
+    /// `target`は`predict`と同じ3種。
     ///
     /// `nonlinear::common::predict_new_data`に`predicted_value`（`mu`から`target`の
     /// 値を計算する関数）を部分適用したクロージャを`link`として渡すだけの薄い
@@ -2232,8 +2232,8 @@ mod tests {
     #[test]
     fn cost_matches_closed_form_normal_log_likelihood_when_no_observation_is_censored() {
         // 境界を極端に広く取り、全観測が非打ち切りになるデータ。この場合Tobitの対数尤度は
-        // 通常の正規回帰の対数尤度に一致するはず（Issue #214完了条件「打ち切りなし観測のみの
-        // データで、cost/gradient/hessianがOLSの対数尤度と整合すること」の境界ケース検算）。
+        // 通常の正規回帰の対数尤度に一致するはず（「打ち切りなし観測のみの
+        // データで、cost/gradient/hessianがOLSの対数尤度と整合すること」という完了条件の境界ケース検算）。
         let y = vec![1.0, 2.0, 3.0, 4.0];
         let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0]];
         let input = TobitInput::from_columns(
@@ -2348,7 +2348,7 @@ mod tests {
         assert!((*scores.get(0, 1)).abs() < 1e-12);
     }
 
-    /// probit.rsのIssue #316と同型のバグ回帰ガード: `censored_contribution`の
+    /// probit.rsと同型のバグ回帰ガード: `censored_contribution`の
     /// `A(u)=λ(u+λ)`計算で、クランプ済み`λ`と生の（非クランプの）`zeta`を混在させると、
     /// `|zeta|>U_CLAMP`の領域で`h_beta_coef`（`A(u)`）が負になりうる（`A(u)>0`という
     /// 恒等式が数値的に破れる、モジュール冒頭の数式表参照）。左打ち切り（`lower=0.0`）・
@@ -2433,8 +2433,8 @@ mod tests {
 
     /// 切片のみ（説明変数なし）・打ち切りなしのTobitは、通常の正規分布の最尤推定
     /// （`β̂=ȳ`・`σ̂²=Σ(y-ȳ)²/n`という閉じた形の解析解、OLSの不偏推定量`n-1`除算とは
-    /// 異なる`n`除算のML推定量）に一致するはず（Issue #215完了条件「打ち切りが極端に
-    /// 少ないデータで、Newton法がOLSの閉形式解に近い値に収束すること」の境界ケース）。
+    /// 異なる`n`除算のML推定量）に一致するはず（「打ち切りが極端に
+    /// 少ないデータで、Newton法がOLSの閉形式解に近い値に収束すること」という完了条件の境界ケース）。
     #[test]
     fn fit_newton_converges_to_closed_form_solution_for_intercept_only_uncensored_data() {
         let y = vec![1.0, 2.0, 3.0, 4.0, 10.0];
@@ -2672,7 +2672,7 @@ mod tests {
     /// 組み合わせると`q×q`部分行列は`rank ≤ 1 < 2`で構造的に特異になる。`G`・`q`は
     /// 入力だけから判定できるため、`fit()`冒頭のバリデーション
     /// （`validate_cluster_cov_type` → `validate_cluster_count_covers_slopes`）が
-    /// `CommonError::InsufficientClustersForInference`で弾く（Issue #289 / #287。
+    /// `CommonError::InsufficientClustersForInference`で弾く（
     /// 従来は`wald_chi2_test`内の`ComputationFailed`だった）。`wald_chi2_test`の
     /// `ensure_well_conditioned_symmetric_matrix`側のbackstop（`g > q`だが悪条件で
     /// 数値的にほぼ特異なケース）は、`wald_f_test`と共有する純粋な線形代数
@@ -2802,8 +2802,8 @@ mod tests {
     /// 内部で同じHessianの逆行列計算を行うため、同じ打ち切り点で同じエラーが伝播する
     /// はず。Logit/Probitの`fit_returns_singular_design_matrix_error_for_perfectly_
     /// collinear_design_matrix`（#279で`method`×`cov_type`を1テストに集約）と同じ
-    /// 「cov_type分岐ごとのエラー伝播`?`」のギャップパターン（Issue #64・#80で発覚）を
-    /// Tobitでも確認する（Issue #223、`cargo llvm-cov`で発覚）。
+    /// 「cov_type分岐ごとのエラー伝播`?`」のギャップパターンを
+    /// Tobitでも確認する（`cargo llvm-cov`で発覚）。
     #[test]
     fn fit_returns_singular_hessian_error_when_cov_params_computation_fails_at_truncated_point_with_hc0_and_hc1()
      {
@@ -2861,7 +2861,7 @@ mod tests {
     }
 
     /// 説明変数ありのモデルでも、打ち切りが実質発生しないデータではNewton法がOLSの
-    /// 閉じた形の解（正規方程式）に近い値に収束するはず（Issue #215完了条件の本体、
+    /// 閉じた形の解（正規方程式）に近い値に収束するはず（完了条件の本体、
     /// `expected_*`はOLSの公式から本テスト内で独立に計算する）。
     #[test]
     fn fit_newton_converges_near_ols_closed_form_when_censoring_is_negligible() {
@@ -2992,8 +2992,7 @@ mod tests {
     #[test]
     fn fit_returns_insufficient_observations_error() {
         // n=2, 総パラメータ数k+1=2(切片1+logσ1) → n<=k+1でエラー
-        // （`validate_sufficient_observations`にx列数ではなくk+1を渡す設計、
-        // Issue #212の結論）。
+        // （`validate_sufficient_observations`にx列数ではなくk+1を渡す設計）。
         let input = intercept_only_uncensored_input(&[1.0, 2.0]);
         let result = TobitEstimator::fit(
             input,
@@ -3116,7 +3115,7 @@ mod tests {
         for &p in estimator.params() {
             assert!(p.is_finite());
         }
-        // `n_iter()`が他のどのテストでも未使用だった（`cargo llvm-cov`で発覚、Issue #223）。
+        // `n_iter()`が他のどのテストでも未使用だった（`cargo llvm-cov`で発覚）。
         // 収束時は`0 < n_iter <= max_iter`のはず。
         assert!(estimator.n_iter() > 0 && estimator.n_iter() <= 100);
     }
@@ -3352,14 +3351,14 @@ mod tests {
     }
 
     /// `y`（および打ち切り境界）を大きなスケールに引き伸ばしても、`fit()`が生スケールの
-    /// データと数学的に同値な推定値に収束することを確認する回帰テスト（Issue #286）。
+    /// データと数学的に同値な推定値に収束することを確認する回帰テスト。
     ///
     /// `y`を標準化せず最適化していた頃は、`y`のスケールが大きいと健全なMLE解でも
     /// 標準化パラメータ空間のL2ノルムが`SEPARATION_PARAM_NORM_THRESHOLD`を超え、
     /// (準)分離ヒューリスティック（`nonlinear/common.rs`の`separation_suspected`）が
     /// 誤発火して`MleError::SeparationSuspected`を返していた（Wooldridge mroz `hours`の
     /// 生スケールTobitで発覚）。`TobitScaling`が`y`を2の冪に丸めたスケールで
-    /// スケーリングしてから最適化し収束後に逆変換することで解消した。なおIssue #288で
+    /// スケーリングしてから最適化し収束後に逆変換することで解消した。その後
     /// `run_solver`に`SeparationNormCheck::Disabled`を渡すようになりTobitはこの事後
     /// チェック自体を通らなくなったため、現在は二重に発火し得ない（本テストは
     /// `TobitScaling`によるスケール同値性の回帰テストとして維持する）。
@@ -3488,7 +3487,7 @@ mod tests {
         assert!(est.converged());
         // 傾きは真値 40 の近傍（打ち切り＋ノイズがあるため緩め）。#286以前は`y`の
         // 大スケールで`SeparationSuspected`が誤発火し`.unwrap()`がpanicしていた
-        // （現在はTobitがこの事後チェックを通らない、Issue #288）。
+        // （現在はTobitがこの事後チェックを通らないため）。
         assert!(
             (est.params()[0] - 40.0).abs() < 5.0,
             "slope={}, expected≈40",
@@ -3519,7 +3518,7 @@ mod tests {
     }
 
     /// Tobitの(準)完全分離は`MleError::SeparationSuspected`ではなく
-    /// `MleError::NonConvergence`として現れることを固定する（Issue #288）。
+    /// `MleError::NonConvergence`として現れることを固定する。
     ///
     /// `fit()`は`run_solver`に`SeparationNormCheck::Disabled`を渡すため、標準化
     /// パラメータノルム基準の(準)完全分離事後チェックを通らない。これを
@@ -3579,8 +3578,8 @@ mod tests {
     fn fit_returns_unconverged_result_without_raising_when_raise_on_non_convergence_is_false() {
         // `max_iter=1`（このテストの元々の値）だと、`censored_regression_input`の
         // 打ち切り点（Newtonの初回ステップ、まだ真の最尤推定点から遠い）でHessianが
-        // 不定符号になり、`fit`が非収束時でも`cov_params`を計算するようになった
-        // （Issue #217）ことで`SingularHessian`が先に発生してしまう（実測で確認、
+        // 不定符号になり、`fit`が非収束時でも`cov_params`を計算するようになったことで
+        // `SingularHessian`が先に発生してしまう（実測で確認、
         // `max_iter=1`は`SingularHessian`、`max_iter=2`以降で`cov_params`計算が
         // 安定し`converged=false`が返るようになる。真の収束は`max_iter=11`）。
         // `max_iter=3`のまま（`max_iter=2`でも通るが余裕を持たせる）、「非収束だが
@@ -3745,7 +3744,7 @@ mod tests {
     /// （上のテストで既に正しさを検証済み）と`bfgs`/`lbfgs`の結果が一致するはず）。
     ///
     /// クラスターのグループ数は`G=4`（2件ずつ）にする。`multivariate_censored_input`は
-    /// 傾き係数`q=2`（`x1`・`x2`、切片を除く）を持ち、Issue #220でWald検定が`fit()`に
+    /// 傾き係数`q=2`（`x1`・`x2`、切片を除く）を持ち、Wald検定が`fit()`に
     /// 常時組み込まれたことで、クラスターロバスト共分散`Ŝ=Σ_g S_gS_g'`の構造的な制約
     /// （`rank(Ŝ)≤G`、`engine/src/linear/CLAUDE.md`「クラスター数`G`と傾き係数の数`q`の
     /// 関係」参照）がWald検定の`q×q`部分行列にも及ぶことが判明した。`G=2`（`q`と同数）
@@ -3812,11 +3811,11 @@ mod tests {
     }
 
     /// `multivariate_censored_input`ではなく`censored_regression_input`（傾き係数
-    /// `q=1`、`x1`のみ）を使う。Issue #220でWald検定が`fit()`に常時組み込まれたことで、
+    /// `q=1`、`x1`のみ）を使う。Wald検定が`fit()`に常時組み込まれたことで、
     /// クラスターロバスト共分散`Ŝ=Σ_g S_gS_g'`の構造的な制約（`rank(Ŝ)≤G`、
     /// `engine/src/linear/CLAUDE.md`「クラスター数`G`と傾き係数の数`q`の関係」参照）が
     /// Wald検定の`q×q`部分行列にも及ぶことが判明した。`multivariate_censored_input`
-    /// （`q=2`）に対し`G=2`（Issue #219完了条件「G=2境界値」）を組み合わせると`q`と
+    /// （`q=2`）に対し`G=2`（G=2の境界値）を組み合わせると`q`と
     /// 同数になり、実測でこの部分行列が特異になり`fit()`全体が`ComputationFailed`に
     /// なった。`q=1`のデータセットなら`G=2>q=1`を満たしたまま「G=2の境界値」を検証できる
     /// ため、こちらに切り替えた（OLSの既存ガイドライン「境界の成功パスのテストでは`q`を
@@ -3874,8 +3873,8 @@ mod tests {
 
     /// 上のテストは4:4の均等サイズのグループのみを検証しているが、
     /// `testing-policy.md`が指摘する通り均等サイズのみのテストは実務で起こりやすい
-    /// 偏った分布のグループサイズを見逃しうる。5:3の不均衡なグループ（G=2の境界値、
-    /// Issue #219完了条件「不均衡クラスター、G=2境界値を含む」）でも同じ独立再計算の
+    /// 偏った分布のグループサイズを見逃しうる。5:3の不均衡なグループ（G=2の境界値を
+    /// 含む）でも同じ独立再計算の
     /// 技法で検証する（`fit_cov_type_cluster_matches_independently_recomputed_values`と
     /// 同じデータセット・同じ理由でq=1のデータセットを使う、グループ分割のみ変更）。
     #[test]
@@ -5035,7 +5034,7 @@ mod tests {
         }
     }
 
-    /// `predict_new_data`（out-of-sample、Issue #131のTobit版）が独立に再計算した
+    /// `predict_new_data`（out-of-sample）が独立に再計算した
     /// 値と一致すること。`fit_predict_matches_independent_recomputation_for_
     /// multivariate_design`と同じモデルを使い、学習データとは異なる新規のx値で
     /// 3つの`target`すべてを検証する。
@@ -5179,7 +5178,7 @@ mod tests {
     /// 全件が下限（`lower`）で打ち切られている（非打ち切り観測が1件も無い）場合は
     /// `MleError::NoUncensoredObservations`を返す。実測で確認済み: このバリデーションが
     /// 無いと`fit()`は`converged=true`のまま統計的に無意味な巨大SE（100万倍オーダー）を
-    /// 返す退化収束を起こしていた（Issue #223、rust-reviewer指摘ではなく`cargo llvm-cov`
+    /// 返す退化収束を起こしていた（rust-reviewer指摘ではなく`cargo llvm-cov`
     /// で病理ケースを調査中に発覚。参照実装`survival::survreg`は同種のデータで
     /// エラーを返すことをdevcontainer内で実際に確認した上で対応方針をユーザーに確認済み）。
     #[test]
@@ -5589,7 +5588,7 @@ mod tests {
             }
         }
 
-        /// Issue #344（#342のPhase 2、実際の退化ケースの特定）で捕捉した具体的な
+        /// （#342のPhase 2、実際の退化ケースの特定）で捕捉した具体的な
         /// 入力の1つを固定値化した回帰テスト。
         ///
         /// **調査方法**: `#342`のPhase 1（評価回数バジェット方式）導入後は、line
@@ -5608,12 +5607,12 @@ mod tests {
         /// 特定の狭いパラメータ域が必要」という仮説は支持されなかった（8件中7件は
         /// 0.65〜0.80という中程度の打ち切り）。真因は当時未確定で、argmin組み込み
         /// `LBFGS`固有の何か（limited-memory two-loop recursionの初期スケーリング等）に
-        /// 起因すると推測されていた（Issue #343に持ち越し）。
+        /// 起因すると推測されていたが、真因の特定は後続の調査に持ち越された。
         ///
-        /// **Issue #343で判明した実際の原因と解消（本テストの現在の主眼）**: `Method::Lbfgs`
+        /// **判明した実際の原因と解消（本テストの現在の主眼）**: `Method::Lbfgs`
         /// を`FaerLbfgs`（`FaerBfgs`と同型のself-scaling初期化を持つ自前実装）に置き換えた
         /// 結果、この入力は**もはや退化せず正常に収束する**（実測: `n_iter=11`、
-        /// `converged=true`）。`FaerBfgs`（Issue #285）で既に確立していた「1回目の
+        /// `converged=true`）。`FaerBfgs`で既に確立していた「1回目の
         /// 反復専用のline search初期ステップ幅`min(1,1/‖g₀‖)`」を、当時のargmin組み込み
         /// `LBFGS`の公開APIでは適用できていなかったこと（1回目の反復は履歴が空で
         /// `γ=1.0`固定のため、単位行列の逆Hessianを使う`FaerBfgs`の1回目と同型の

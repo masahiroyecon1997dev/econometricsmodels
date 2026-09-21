@@ -13,12 +13,11 @@
 //!
 //! ## 実装の経緯（要点のみ、詳細は各コミット・`engine/src/iv/CLAUDE.md`参照）
 //!
-//! `IVOptions`/`IVResult`のpyclass定義・`build_iv_input`（Issue #159）→`TwoSlsEstimator::fit`
-//! への配線（Issue #169）→弱操作変数診断・Wu-Hausman・Sargan（Issue #163/#164/#167）→
-//! `first_stage()`（Issue #170）の順に段階実装した。**`method="gmm"`は当初
-//! `GmmEstimator`（engine側）が点推定のみのスコープ（Issue #160）だったため長らく
-//! `ValidationError`で弾いていたが、GMM側のcov_type対応（本来Issue #166の完了条件
-//! だったが実装漏れだったことが発覚、`gmm.rs`参照）を実装したうえで、本ファイルでも
+//! `IVOptions`/`IVResult`のpyclass定義・`build_iv_input`→`TwoSlsEstimator::fit`
+//! への配線→弱操作変数診断・Wu-Hausman・Sargan→`first_stage()`の順に段階実装した。
+//! **`method="gmm"`は当初`GmmEstimator`（engine側）が点推定のみのスコープだったため
+//! 長らく`ValidationError`で弾いていたが、GMM側のcov_type対応（完了条件だったが
+//! 実装漏れだったことが発覚、`gmm.rs`参照）を実装したうえで、本ファイルでも
 //! 実際に配線した**（`fit_iv`から両`method`を呼び分ける）。
 //!
 //! ## `first_stage()`/`weak_instrument_f_statistics`は`method`に依存しない共通ロジック
@@ -34,7 +33,7 @@
 //! `IVResult`は元々`estimator: TwoSlsEstimator`という2SLS専用の非公開フィールドで
 //! `first_stage()`を実装していたが、GMM配線にあたり`first_stage: Vec<(String,
 //! OlsEstimator)>`という`method`非依存の表現に置き換えた（`OlsEstimator → OLSResult`
-//! 変換は`linear::ols::ols_estimator_to_result`を再利用、Issue #170で抽出済み）。
+//! 変換は`linear::ols::ols_estimator_to_result`を再利用、抽出済み）。
 //!
 //! ## GMMの`weight_type`（`IVOptions.weight_type`/`cluster_col`/`hac_lags`/`time_col`）
 //!
@@ -80,8 +79,8 @@ use crate::validation::{
 /// 同じ理由、`engine_pybind/src/linear/common.rs`参照）。
 ///
 /// `FirstStageFailed`/`SecondStageFailed`は2SLS（`engine::iv::two_sls`）が内部で委譲する
-/// `OlsEstimator::fit`の失敗を包んだもの（Issue #157）。`HausmanRegressionFailed`
-/// （Issue #164）も同型だが、Wu-Hausman検定の拡張回帰が理論上到達不能な理由で失敗した
+/// `OlsEstimator::fit`の失敗を包んだもの。`HausmanRegressionFailed`
+/// も同型だが、Wu-Hausman検定の拡張回帰が理論上到達不能な理由で失敗した
 /// 場合のみ構築される防御的なバリアント（想定内の失敗——設計行列の特異性・観測数不足等
 /// ——は`wu_hausman_statistic`が`None`になるだけで`IvError`自体は発生しない、
 /// `engine/src/iv/CLAUDE.md`参照）。`ValidationError`/`ComputationError`の
@@ -91,8 +90,8 @@ use crate::validation::{
 /// （「第一段階/第二段階のどの内生変数で失敗したか」という文脈を含む）を使うため、
 /// `least_squares_error_to_pyerr`自体はそのまま呼ばない。
 ///
-/// Issue #169で`fit`（本ファイル）が実際に`#[pymodule]`経路（`fit_iv`）から呼び出すように
-/// なった。Issue #159時点では`#[cfg(test)] mod tests`からしか呼ばれておらず
+/// 現在は`fit`（本ファイル）が実際に`#[pymodule]`経路（`fit_iv`）から呼び出すように
+/// なっている。当初は`#[cfg(test)] mod tests`からしか呼ばれておらず
 /// `#[allow(dead_code)]`が必要だった（`--all-targets`ビルドでの`#[expect]`の罠、
 /// `engine_pybind/src/iv/CLAUDE.md`参照）が、本番経路から呼ばれるようになった今は不要。
 pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
@@ -105,7 +104,7 @@ pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
         | IvError::InvalidGmmConvergence { .. } => ValidationError::new_err(message),
         // `MleError::NonConvergence`（`nonlinear/common.rs`の`mle_error_to_pyerr`）と同じ
         // 分類: パラメータの不正ではなく、計算過程（反復推定）で発覚した問題のため
-        // `ComputationError`（Issue #229、`engine/src/iv/CLAUDE.md`参照）。
+        // `ComputationError`（`engine/src/iv/CLAUDE.md`参照）。
         IvError::GmmNonConvergence { .. } => ComputationError::new_err(message),
         IvError::FirstStageFailed { source, .. }
         | IvError::SecondStageFailed { source }
@@ -272,7 +271,7 @@ impl IVOptions {
 ///
 /// `first_stage()`（内生変数ごとの第一段階回帰結果）はここにフィールドとして含めない。
 /// `fit()`の戻り値本体には含めず別メソッドとして公開する（`iv-api-design.md`2.2節、
-/// Issue #170で実装済み）。`predict()`/`marginal_effects()`用に`LogitResult`/
+/// 実装済み）。`predict()`/`marginal_effects()`用に`LogitResult`/
 /// `ProbitResult`が推定量そのものを非公開フィールド`estimator`として保持するのと同じ
 /// パターンだが、`IVResult`は`method`（2sls/gmm）非依存の非公開フィールド`first_stage:
 /// Vec<(String, OlsEstimator)>`から`first_stage()`をオンデマンドに構築する（下記
@@ -286,12 +285,12 @@ impl IVOptions {
 /// `weak_instrument_f_statistics`/`first_stage` are populated from `engine::iv::common::
 /// compute_first_stage`, independent of `method` (module docstring参照).
 /// `wu_hausman_statistic`/`wu_hausman_p_value` are populated from `TwoSlsEstimator::
-/// wu_hausman_statistic()`/`wu_hausman_p_value()` for `method="2sls"` (Issue #164);
+/// wu_hausman_statistic()`/`wu_hausman_p_value()` for `method="2sls"`;
 /// always `None` for `method="gmm"` (`GmmEstimator` has no Wu-Hausman test).
 /// `overid_statistic`/`overid_p_value` are populated from `TwoSlsEstimator::
 /// sargan_statistic()`/`sargan_p_value()` (Sargan test, `method="2sls"`) or
 /// `GmmEstimator::hansen_j_statistic()`/`hansen_j_p_value()` (Hansen J test,
-/// `method="gmm"`) (Issue #167).
+/// `method="gmm"`).
 // `IVResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`IVOptions`の`from_py_object`とは
 // 対照的、`OLSResult`/`LogitResult`と同じ理由）。
@@ -412,7 +411,7 @@ impl IVResult {
     /// first stage is a genuine, valid OLS regression in its own right, so no IV-specific
     /// result type is needed (`iv-api-design.md` 2.2節). Its `f_statistic`/`f_p_value`
     /// include `x_exog`'s contribution and are **not** the weak-instrument partial
-    /// F-statistic (`weak_instrument_f_statistics`, computed separately by Issue #163).
+    /// F-statistic (`weak_instrument_f_statistics`, computed separately).
     /// Computed the same way for both `method="2sls"` and `method="gmm"` (module
     /// docstring参照).
     fn first_stage(&self) -> HashMap<String, OLSResult> {
@@ -438,7 +437,7 @@ impl IVResult {
 ///
 /// 戻り値に正規化済み小文字文字列を含めるのは`linear::common::parse_cov_type`と同じ理由
 /// （`IVResult.weight_type`の構築時に`options.weight_type.to_lowercase()`を
-/// 再計算せずに済ませるため、Issue #307）。
+/// 再計算せずに済ませるため）。
 ///
 /// # Errors
 /// `weight_type`の文字列が既知の値のいずれでもない場合は`ValidationError`。それ以外
@@ -496,8 +495,8 @@ fn parse_weight_type(df: &DataFrame, options: &IVOptions) -> PyResult<(WeightTyp
 ///   欠損値・NaN・無限大を含む等）は`column_extraction`の責務で`ValidationError`
 /// - `y`/`x_exog`/`x_endog`/`instruments`間の重複、各ロール内部の重複、
 ///   `include_intercept=true`のときの`x_exog`/`x_endog`/`instruments`いずれかと
-///   `"const"`列との衝突（Issue #305、`x_exog`だけでなく全ロールが対象）、
-///   `x_endog`/`instruments`が空リストの場合（Issue #306、`x_exog`は対象外）は
+///   `"const"`列との衝突（`x_exog`だけでなく全ロールが対象）、
+///   `x_endog`/`instruments`が空リストの場合（`x_exog`は対象外）は
 ///   ここ（受け口）の責務で`ValidationError`
 /// - `method`の文字列が`"2sls"`/`"gmm"`のいずれでもない場合は`ValidationError`
 /// - `cov_type`の文字列が不正な場合は`ValidationError`（`linear::common::parse_cov_type`参照）
@@ -534,8 +533,8 @@ pub(crate) fn build_iv_input(
     validate_no_duplicate_within_role("x_exog", &x_exog)?;
     validate_no_duplicate_within_role("x_endog", &x_endog)?;
     validate_no_duplicate_within_role("instruments", &instruments)?;
-    // `"const"`衝突は`x_exog`だけでなく`x_endog`/`instruments`でも起こりうる
-    // （Issue #305）。`include_intercept=true`が自動追加する切片列は`x_exog`側の
+    // `"const"`衝突は`x_exog`だけでなく`x_endog`/`instruments`でも起こりうる。
+    // `include_intercept=true`が自動追加する切片列は`x_exog`側の
     // 設計行列にのみ足されるが、`first_stage()`の`param_names`（`x_exog`+
     // `instruments`）・構造方程式本体の`param_names`（`x_exog`+`x_endog`、
     // `IvInput::from_columns`参照）はいずれも`x_exog`の`"const"`と同名の列を
@@ -548,7 +547,7 @@ pub(crate) fn build_iv_input(
 
     // `x_exog`は空リストを許容する（内生変数のみのモデルも成立するため、
     // `iv-api-design.md`1.1節）が、`x_endog`/`instruments`はいずれも最低1要素を要求する
-    // （Issue #306、2026-08-30ユーザー決定）。`x_endog=[]`は実質OLSと等価な退化ケースで
+    // （2026-08-30ユーザー決定）。`x_endog=[]`は実質OLSと等価な退化ケースで
     // あり「そもそもIVを使用すること自体が誤り」と判断し、`OLS`への切り替えなしにそのまま
     // `IV`に渡せる利便性よりも誤用防止を優先した。`x_endog`/`instruments`を独立に検証する
     // ため、`instruments=[]`だが`x_endog`が非空という順序条件違反（`InsufficientInstruments`、
@@ -610,10 +609,10 @@ pub(crate) fn build_iv_input(
 /// compute_first_stage`（`IVResult`のdocコメント・モジュールdocコメント「`first_stage()`/
 /// `weak_instrument_f_statistics`は`method`に依存しない共通ロジック」参照）から構築する。
 /// `overid_statistic`/`overid_p_value`は`method="2sls"`では`TwoSlsEstimator::
-/// sargan_statistic()`/`sargan_p_value()`（Sargan検定、Issue #167）、`method="gmm"`では
+/// sargan_statistic()`/`sargan_p_value()`（Sargan検定）、`method="gmm"`では
 /// `GmmEstimator::hansen_j_statistic()`/`hansen_j_p_value()`（Hansen J検定）から構築する。
 /// `wu_hausman_statistic`/`wu_hausman_p_value`は`method="2sls"`では`TwoSlsEstimator::
-/// wu_hausman_statistic()`/`wu_hausman_p_value()`（Issue #164）、`method="gmm"`では
+/// wu_hausman_statistic()`/`wu_hausman_p_value()`、`method="gmm"`では
 /// 常に`None`（`GmmEstimator`は実装しない、モジュールdocコメント参照）。
 ///
 /// # Errors
@@ -639,7 +638,7 @@ pub(crate) fn fit(
     // のと同じチェック）を`compute_first_stage`より先に行う。過小識別な入力で無駄な
     // 第一段階回帰を走らせないため（rust-reviewerの指摘、`compute_first_stage`自体は
     // この条件を検証しないため呼び出し元の責務）。この時点で`build_iv_input`の
-    // `validate_x_non_empty("x_endog"/"instruments", ...)`（Issue #306）を既に通過して
+    // `validate_x_non_empty("x_endog"/"instruments", ...)`を既に通過して
     // いるため`k_endog`/`k_instruments`はともに1以上であり、ここでの`<`判定は「両方
     // 指定されているが数が足りない」過小識別ケースのみを扱う（「そもそも変数が
     // 指定されていない」退化ケースとは排他的、rust-reviewerの指摘で明記）。
@@ -816,7 +815,7 @@ mod tests {
 
     #[test]
     fn build_iv_input_returns_error_when_x_endog_and_instruments_are_both_empty() {
-        // Issue #306: `x_endog=[]`かつ`instruments=[]`（実質OLSと等価な退化ケース）を
+        // `x_endog=[]`かつ`instruments=[]`（実質OLSと等価な退化ケース）を
         // 誤用として`ValidationError`で弾く（旧仕様では成功していた、
         // `docs/planning/specs/iv-api-design.md`1.1節）。
         let df = well_formed_df();
@@ -835,7 +834,7 @@ mod tests {
 
     #[test]
     fn build_iv_input_returns_error_when_x_endog_is_empty_but_instruments_is_not() {
-        // `x_endog`/`instruments`は独立に最低1要素を要求する（Issue #306）ため、
+        // `x_endog`/`instruments`は独立に最低1要素を要求するため、
         // 対応する内生変数の無い操作変数だけを指定する誤用も検出する。
         let df = well_formed_df();
         let options = default_options();
@@ -1032,7 +1031,7 @@ mod tests {
 
     #[test]
     fn build_iv_input_returns_error_when_include_intercept_and_x_endog_contains_const() {
-        // Issue #305: `x_exog`だけでなく`x_endog`に`"const"`を含めた場合も
+        // `x_exog`だけでなく`x_endog`に`"const"`を含めた場合も
         // 同じ`ValidationError`で弾く（構造方程式本体の`param_names`から
         // 真の切片係数がサイレントに失われるケース、列抽出前にここで検出する
         // ため`df`に実際の`"const"`列は不要）。
@@ -1052,7 +1051,7 @@ mod tests {
 
     #[test]
     fn build_iv_input_returns_error_when_include_intercept_and_instruments_contains_const() {
-        // Issue #305: `instruments`に`"const"`を含めた場合も同じ`ValidationError`
+        // `instruments`に`"const"`を含めた場合も同じ`ValidationError`
         // で弾く（`first_stage()`の`param_names`が`x_exog`の`"const"`（真の切片）と
         // 衝突し後勝ちでサイレントに上書きされるケース）。
         let df = well_formed_df();

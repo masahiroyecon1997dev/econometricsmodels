@@ -82,7 +82,7 @@ pub struct MarginalEffectsResult {
 /// `extract_group_key_column`で抽出する（他のcov_typeでは無視する、OLSの
 /// `cluster_col`/`time_col`の扱いと同じ方針）。
 ///
-/// Logit/Probit/Tobit共通（Issue #308で対応: 元は`logit.rs`/`probit.rs`/`tobit.rs`に
+/// Logit/Probit/Tobit共通（元は`logit.rs`/`probit.rs`/`tobit.rs`に
 /// バイト単位で完全一致するコードとして独立複製されていたが、`CovType`自体が
 /// 元々3手法共有の型であるのに合わせてここに集約した）。
 ///
@@ -116,8 +116,7 @@ pub(crate) fn parse_cov_type(
 }
 
 /// `method`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::Method`に
-/// パースする。Logit/Probit/Tobit共通（`parse_cov_type`と同じ理由・同じIssue #308で
-/// ここに集約）。
+/// パースする。Logit/Probit/Tobit共通（`parse_cov_type`と同じ理由でここに集約）。
 ///
 /// # Errors
 /// `method`が既知の値のいずれでもない: `ValidationError`

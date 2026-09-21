@@ -71,7 +71,7 @@ pub(crate) fn mat_to_vec(mat: &faer::Mat<f64>) -> Vec<f64> {
 /// （呼び出し側で二重に`to_lowercase()`しないよう、ここでまとめて返す）。
 ///
 /// `OLSOptions`インスタンスそのものではなく個々のフィールド値を引数で受け取る設計に
-/// しているのは、`WLSOptions`新設（Issue #308）により`OLSOptions`/`WLSOptions`という
+/// しているのは、`WLSOptions`新設により`OLSOptions`/`WLSOptions`という
 /// 独立した2つの型がこの関数を共有する必要が生じたため（`nonlinear::common::
 /// parse_cov_type`が最初から個々の値を引数に取っているのと同じ設計。以前は`WLSOptions`が
 /// 無く`OLSOptions`をそのまま再利用していたため、`&OLSOptions`を直接受け取っていた）。

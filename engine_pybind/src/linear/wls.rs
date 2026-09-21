@@ -4,7 +4,7 @@
 //!
 //! `weight`は`y`と同じく`data`内の列名を指すトップレベル引数として扱う
 //! （`docs/spec/wls-spec.md`「API引数」参照）。`WLSOptions`は`OLSOptions`と
-//! フィールド構成が完全に同一の独立したpyclassである（Issue #308、下記
+//! フィールド構成が完全に同一の独立したpyclassである（下記
 //! `WLSOptions`のdocコメント参照）。エラー変換（`least_squares_error_to_pyerr`）・
 //! `Mat<f64>`→`Vec<f64>`変換（`mat_to_vec`）・`cov_type`のパース（`parse_cov_type`）は
 //! `super::common`のものをそのまま再利用する（`LeastSquaresError`がOLS・WLS共通の
@@ -35,7 +35,7 @@ use crate::validation::{
 /// `confidence_level`/`cluster_col`/`hac_lags`/`time_col`, same defaults and semantics
 /// — `docs/spec/wls-spec.md` "API引数" confirms `hac_lags`/`time_col` mean exactly the
 /// same thing for WLS as for OLS). Kept as an independent pyclass rather than reusing
-/// `OLSOptions` (the pre-Issue #308 design) so that a future WLS-specific option can be
+/// `OLSOptions` (the earlier shared-option design) so that a future WLS-specific option can be
 /// added without affecting `OLSOptions`/OLS users — the same reasoning `WLSResult`
 /// already uses relative to `OLSResult`.
 ///
@@ -48,9 +48,9 @@ use crate::validation::{
 /// or add indirection without reducing the Python surface. `IVOptions`
 /// (`engine_pybind/src/iv/common.rs`) already re-declares this same field group
 /// independently from `OLSOptions`, so this duplication is consistent with the existing
-/// precedent in this codebase (Issue #308 decision, 2026-09-12). Mechanical
+/// precedent in this codebase. Mechanical
 /// deduplication of the Rust-side boilerplate itself (field declarations/constructor/
-/// `__repr__`) via `macro_rules!` is tracked separately in Issue #315.
+/// `__repr__`) via `macro_rules!` is tracked separately as future work.
 // `fit`がPython側から`WLSOptions`インスタンスを引数として受け取るため、
 // `FromPyObject`実装を明示的に維持する（`OLSOptions`と同じ理由、pyo3 0.28以降、Cloneを
 // 実装する#[pyclass]のFromPyObject自動導出はopt-inに変更されたため）。
@@ -147,7 +147,7 @@ impl WLSOptions {
 /// fields (e.g. weighted residuals) may be added later without affecting `OLSResult`
 /// (`docs/spec/wls-spec.md`, "結果構造体").
 // `get_all`ではなく個別`#[pyo3(get)]`にしている理由は`OLSResult`と同じ
-// （`fitted_values`/`has_intercept`をPython側に公開しないため、Issue #132）。
+// （`fitted_values`/`has_intercept`をPython側に公開しないため）。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct WLSResult {
@@ -194,14 +194,14 @@ pub struct WLSResult {
     pub bic: f64,
     /// Original-scale (unweighted) fitted values for the training data (`ŷ = Xβ̂`),
     /// cached at fit time. Not exposed to Python directly; only `predict(new_data=None)`
-    /// reads it (same design as `OLSResult`, Issue #132).
+    /// reads it (same design as `OLSResult`).
     fitted_values: Vec<f64>,
     /// Whether `fit()` was called with `include_intercept=True`. Not exposed to
     /// Python; only `predict()` reads it to decide whether to auto-prepend a
     /// constant column for out-of-sample data (same reasoning as `OLSResult`).
     has_intercept: bool,
     /// The original polars DataFrame passed to `fit()`, cached for
-    /// `augment(new_data=None)` (Issue #295). A cheap clone (polars columns are
+    /// `augment(new_data=None)`. A cheap clone (polars columns are
     /// internally reference-counted). Unlike `OLSResult` (shared with
     /// `IVResult.first_stage()`, which has no single source DataFrame), `WLSResult`
     /// is only ever built from this file's `fit()`, so this is never `None`.
@@ -258,7 +258,7 @@ impl WLSResult {
     /// predicted values appended as a new `"predicted"` column.
     ///
     /// Same `new_data`/`include_intercept` semantics as `predict()` (same design
-    /// as `OLSResult::augment()`, Issue #295), including weights playing no role.
+    /// as `OLSResult::augment()`), including weights playing no role.
     ///
     /// # Errors
     /// - Same as `predict()`: a required `x` column missing from `new_data`,
@@ -295,7 +295,7 @@ impl WLSResult {
 /// # Errors
 /// - 列の抽出時に発覚する問題（列が存在しない、数値/文字列型にキャストできない、
 ///   欠損値・NaN・無限大を含む等）は`column_extraction`の責務で`ValidationError`
-/// - `y`と`x`の重複、`weight`と`y`の重複（`weight`と`x`の重複はIssue #277により許容、
+/// - `y`と`x`の重複、`weight`と`y`の重複（`weight`と`x`の重複は許容、
 ///   下記コメント参照）、`include_intercept=true`のときの`"const"`列との衝突は
 ///   ここ（受け口）の責務で`ValidationError`（OLSの`fit`と同じパターン）
 /// - `cov_type`の文字列が不正な場合は`ValidationError`
@@ -313,7 +313,7 @@ pub fn fit(
 
     // 誤って同じ列を複数の役割に指定するミスを、分かりやすいエラーで早期に防ぐ
     // （`docs/spec/wls-spec.md`「API引数」参照）。`weight`と`x`の重複は禁止しない
-    // （Issue #277: 重みに使った列を説明変数としても含める実務上の利用例があるため。
+    // （重みに使った列を説明変数としても含める実務上の利用例があるため。
     // `weight == y`は`y`を独立変数としても使うのと同型の致命的な問題のため引き続き禁止）。
     validate_common_roles(&y, &x, options.include_intercept)?;
     validate_no_duplicate_roles(&[

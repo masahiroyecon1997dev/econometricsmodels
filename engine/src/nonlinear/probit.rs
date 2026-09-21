@@ -57,7 +57,7 @@
 //! 非対称性（`score`/`loglike`はクリップするが`hessian`はしない）を避けている。
 //!
 //! **Hessianの重み`w=λᵢ(λᵢ+zᵢ)`の`zᵢ`も、`λᵢ`と同じクランプ済み引数から再構成する
-//! 必要がある（Issue #316）**: `λᵢ`はクランプ後の`u`から計算されるため、`|u|>U_CLAMP`
+//! 必要がある**: `λᵢ`はクランプ後の`u`から計算されるため、`|u|>U_CLAMP`
 //! の領域では`zᵢ`に対して事実上定数になる。ここで生の（非クランプの）`zᵢ`を`w`の
 //! 計算に混ぜると、上記導出の前提（`λᵢ`が`zᵢ`の滑らかな関数であること）が崩れ、
 //! `λᵢ(λᵢ+zᵢ)>0`という大域凹性の恒等式が数値的に破れて`w`が負になりうる（実測で
@@ -313,7 +313,7 @@ impl ProbitProblem {
     /// `normal`は呼び出し側（観測`n`件のループ全体）で1回だけ構築して渡す
     /// （`cost`/`gradient`/`hessian`いずれもn回ではなく1回の構築で済ませる）。
     ///
-    /// **`z̃ᵢ`は生の線形予測子`zᵢ`ではない**（Issue #316）: `λᵢ`は`clamped_pdf_cdf`で
+    /// **`z̃ᵢ`は生の線形予測子`zᵢ`ではない**: `λᵢ`は`clamped_pdf_cdf`で
     /// `u=qᵢzᵢ`を`[-U_CLAMP, U_CLAMP]`にクランプした後の値を使うため、`|u|>U_CLAMP`の
     /// 領域では`λᵢ`は`zᵢ`に対して事実上定数になる。この領域で`hessian`の重み計算に
     /// 生の（非クランプの）`zᵢ`を混ぜると、`λᵢ(λᵢ+zᵢ)>0`という大域凹性の前提
@@ -389,7 +389,7 @@ impl Hessian for ProbitProblem {
     /// 符号反転）。`run_solver`のdocコメント「`Hessian`トレイトの符号規約」参照。
     ///
     /// `zᵢ`は`linear_predictor_and_residual`が返す、`λᵢ`と同じクランプ済み引数から
-    /// 再構成した値（Issue #316、同関数のdocコメント参照）。これにより`λᵢ(λᵢ+zᵢ)>0`
+    /// 再構成した値（同関数のdocコメント参照）。これにより`λᵢ(λᵢ+zᵢ)>0`
     /// （`W`の正定値性、対数尤度の大域凹性の根拠）がクランプ領域でも保たれる。
     fn hessian(&self, param: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
         let n = self.x.nrows();
@@ -492,7 +492,7 @@ impl ProbitEstimator {
     ///
     /// 初期値（warm start）は標準化空間でのLPM最小二乗解に、probitのIRLS 1ステップ相当の
     /// スケール補正（`p̄=ȳ`での `1/φ(Φ⁻¹(p̄))` 倍＋切片補正）を施したもの
-    /// （`ols_based_initial_params`、Issue #279。`LogitEstimator::fit`と同じ設計で、
+    /// （`ols_based_initial_params`。`LogitEstimator::fit`と同じ設計で、
     /// 従来のゼロベクトルから変更）。前段で`standardize_columns`後の設計行列を列ピボットQR
     /// しランク落ちを検出する（`checked_design_matrix_qr`、`method`によらず単一経路で
     /// `SingularDesignMatrix`）。`start_params`によるユーザー指定初期値は引き続き未対応。
@@ -533,7 +533,7 @@ impl ProbitEstimator {
     /// - `k`（定数項を含む説明変数の数）が0（定数項も説明変数も無い）: `CommonError::NoRegressors`
     /// - 観測数`n`が`k`以下: `CommonError::InsufficientObservations`
     /// - 設計行列がランク落ち（完全な多重共線性等）: `MleError::SingularDesignMatrix`
-    ///   （最適化前の列ピボットQRランクチェックで`method`によらず検出、Issue #279）
+    ///   （最適化前の列ピボットQRランクチェックで`method`によらず検出）
     /// - `raise_on_non_convergence=true`かつ`max_iter`回で未収束: `MleError::NonConvergence`
     /// - 収束点（または`raise_on_non_convergence=false`時の打ち切り点）のHessianが特異:
     ///   `MleError::SingularHessian`（ランク落ちは前段で`SingularDesignMatrix`として弾くため、
@@ -543,7 +543,7 @@ impl ProbitEstimator {
     /// - `cov_type=Cluster`でクラスター数が2未満: `CommonError::InsufficientClusters`
     /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
     ///   `CommonError::InsufficientClustersForInference`（`rank(Ŝ) ≤ g - 1`のため
-    ///   クラスターロバスト共分散が退化する識別失敗、Issue #289。Logit/Probitでは
+    ///   クラスターロバスト共分散が退化する識別失敗。Logit/Probitでは
     ///   新規制約）
     pub fn fit(input: ProbitInput, options: MleFitOptions) -> Result<Self, MleError> {
         let MleFitOptions {
@@ -555,7 +555,7 @@ impl ProbitEstimator {
             confidence_level,
         } = options;
 
-        // faer のグローバル並列度を Par::Seq に固定する（Issue #283、`crate::parallelism`）。
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
         crate::parallelism::ensure_serial();
 
         let n = input.nobs();
@@ -574,7 +574,7 @@ impl ProbitEstimator {
         // `method`に関わらず、標準化空間でLPMのIRLS 1ステップ相当を初期値（warm start）に
         // する（`ols_based_initial_params`）。前段の列ピボットQRランクチェックにより、
         // 完全な多重共線性は`method`によらず単一経路で`SingularDesignMatrix`として検出される
-        // （Issue #279。Logitと同じ経緯・同じ設計）。
+        // （Logitと同じ経緯・同じ設計）。
         let initial_params = {
             let normal = Normal::standard();
             ols_based_initial_params(
@@ -612,7 +612,7 @@ impl ProbitEstimator {
             input.y().nrows(),
             raise_on_non_convergence,
             // Probitは`y∈{0,1}`で係数が±∞へ発散するため(準)完全分離の
-            // 標準化パラメータノルム事後チェックを有効にする（Issue #288）。
+            // 標準化パラメータノルム事後チェックを有効にする。
             SeparationNormCheck::Enabled,
         )?;
 
@@ -896,14 +896,14 @@ impl ProbitEstimator {
     /// `nonlinear-api-design.md`6章。`LogitEstimator::predict`の`Λ`を`Φ`に置き換えた
     /// Probit版）。
     ///
-    /// 新規データでの予測（out-of-sample）は`predict_new_data`（Issue #131）。
+    /// 新規データでの予測（out-of-sample）は`predict_new_data`。
     pub fn predict(&self) -> Vec<f64> {
         let normal = Normal::standard();
         predict_from_link(self.input.x(), &self.params, |z| normal.cdf(z))
     }
 
     /// 新規データ（out-of-sample、`new_x_columns`）に対する予測確率
-    /// `p_i = Φ(x_i'θ)`（Issue #131）。`LogitEstimator::predict_new_data`の`Λ`を`Φ`に
+    /// `p_i = Φ(x_i'θ)`。`LogitEstimator::predict_new_data`の`Λ`を`Φ`に
     /// 置き換えたProbit版（設計上の理由は同メソッドのdocコメント参照）。
     ///
     /// `new_x_columns`の本数・順序の契約、パニック条件は
@@ -926,7 +926,7 @@ impl ProbitEstimator {
     ///
     /// **新規データでの的中表（out-of-sample）は未対応**（`predict()`とは異なり
     /// スコープ外のまま、別issueでトラッキング。`LogitEstimator::pred_table`と同じ、
-    /// ユーザー確認済み、Issue #131）。
+    /// ユーザー確認済み）。
     pub fn pred_table(&self, threshold: f64) -> Mat<f64> {
         pred_table(&self.predict(), self.input.y(), threshold)
     }
@@ -1177,7 +1177,7 @@ mod tests {
 
     #[test]
     fn hessian_weight_is_non_negative_even_when_misclassified_observation_exceeds_u_clamp() {
-        // Issue #316: クランプ済みλと生のzを混在させると、|u|>U_CLAMPかつ誤分類
+        // クランプ済みλと生のzを混在させると、|u|>U_CLAMPかつ誤分類
         // （qz が大きく負）の観測でw=λ(λ+z)が負になりうる（λᵢ(λᵢ+zᵢ)>0という
         // 大域凹性の前提が数値的に破れる、モジュール冒頭の数値安定化についての節参照）。
         //
@@ -1908,7 +1908,7 @@ mod tests {
     /// recomputed_values`と同じ技法・同じ多変量データセット。情報行列の等式が
     /// 厳密に成り立つ切片のみモデルでは配線ミスを検出できないため。Logitの
     /// 対応するテストと同じ構成）。`G=3 > q=2`（`G <= q`は
-    /// `InsufficientClustersForInference`で弾かれる、Issue #289）ため`G=3`（2:1:1）。
+    /// `InsufficientClustersForInference`で弾かれる）ため`G=3`（2:1:1）。
     #[test]
     fn fit_cov_type_cluster_matches_independently_recomputed_values() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
@@ -1996,7 +1996,7 @@ mod tests {
     /// 上のテストは均等サイズのグループのみを検証しているが、`testing-policy.md`が
     /// 指摘する通り均等サイズのみのテストは実務で起こりやすい偏った分布のグループサイズ
     /// を見逃しうる。OLS/Logit側の対応するテストに倣い、3:1:1の不均衡なグループでも
-    /// 同じ独立再計算の技法で検証する（`G=3 > q=2`、Issue #289）。
+    /// 同じ独立再計算の技法で検証する（`G=3 > q=2`）。
     #[test]
     fn fit_cov_type_cluster_matches_independently_recomputed_values_with_unbalanced_groups() {
         let y = vec![0.0, 1.0, 0.0, 1.0, 1.0];
@@ -2154,7 +2154,7 @@ mod tests {
     /// クラスターロバスト共分散`Ŝ`はクラスター寄与スコアの総和がゼロ（MLEの一次条件
     /// `Σ_i s_i = 0`）で`rank(Ŝ) ≤ g - 1`となり退化する。`fit()`冒頭（Newton反復の前）の
     /// バリデーションで`CommonError::InsufficientClustersForInference`として弾く
-    /// （Issue #289。Logitの同名テストと対、Logit/Probitでは新規制約）。説明変数2個
+    /// （Logitの同名テストと対、Logit/Probitでは新規制約）。説明変数2個
     /// （`q = 3 - 1 = 2`）に対し`g = 2`。
     #[test]
     fn fit_returns_validation_error_when_cluster_count_at_most_slopes() {
@@ -2217,7 +2217,7 @@ mod tests {
             .unwrap()
         };
         let k = 3;
-        // `G=3 > q=2`（`G <= q`は`InsufficientClustersForInference`で弾かれる、Issue #289）。
+        // `G=3 > q=2`（`G <= q`は`InsufficientClustersForInference`で弾かれる）。
         let groups = vec![
             "a".to_string(),
             "a".to_string(),
@@ -2517,8 +2517,8 @@ mod tests {
 
     /// 完全な多重共線性（`x2 = 2·x1`）の設計行列は、`fit()`冒頭の列ピボットQR
     /// ランクチェック（`nonlinear::common::checked_design_matrix_qr`）で`method`・
-    /// `cov_type`に関わらず単一経路で`SingularDesignMatrix`として弾かれる（Issue #279、
-    /// `LogitEstimator`の対応するテストと同じ設計・同じ経緯）。
+    /// `cov_type`に関わらず単一経路で`SingularDesignMatrix`として弾かれる
+    /// （`LogitEstimator`の対応するテストと同じ設計・同じ経緯）。
     ///
     /// 前段QRへの一本化で`method`依存の検出漏れバグクラスを構造的に排除したため、
     /// `method`×`cov_type`を網羅していた旧5テスト（`..._with_bfgs_and_lbfgs` /
@@ -2532,7 +2532,7 @@ mod tests {
     /// （`LogitEstimator`の対応するテストのdocコメント参照、#279レビューで確認）。
     ///
     /// `Cluster`は`G=3 > q=2`にして`fit()`冒頭の`InsufficientClustersForInference`
-    /// （`G <= q`）より手前を通す（Issue #289）。
+    /// （`G <= q`）より手前を通す。
     #[test]
     fn fit_returns_singular_design_matrix_error_for_perfectly_collinear_design_matrix() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
@@ -2583,8 +2583,8 @@ mod tests {
         }
     }
 
-    // `max_iter`打ち切りのテストは`intercept_only_input()`を使わない: Issue #279の
-    // warm start（`ols_based_initial_params`）は切片のみモデルでは初期値がそのまま
+    // `max_iter`打ち切りのテストは`intercept_only_input()`を使わない: warm start
+    // （`ols_based_initial_params`）は切片のみモデルでは初期値がそのまま
     // 厳密なMLE（`η₀=Φ⁻¹(ȳ)`）になり1反復以内で収束してしまうため。代わりに多変量
     // （n=4, k=3、`y=[0,1,0,1]`）データで、warm startからNewtonが1反復では`tol=1e-12`に
     // 届かないことを利用する。この設計行列（`x1=[10,20,30,40]`・`x2=[-5,2,8,-1]`）は
@@ -3036,7 +3036,7 @@ mod tests {
         }
     }
 
-    /// `predict_new_data`（out-of-sample、Issue #131）が独立に再計算した
+    /// `predict_new_data`（out-of-sample）が独立に再計算した
     /// `p_i=Φ(x_i'θ)`と一致すること（`LogitEstimator`の対応するテストの`logistic`を
     /// Φに置き換えたProbit版）。
     #[test]

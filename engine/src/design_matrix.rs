@@ -1,7 +1,7 @@
 //! 新規データ（out-of-sampleの`x`列）から設計行列の要素を計算する共有ヘルパー。
 //!
-//! OLS/WLSの`predict(new_data)`（Issue #86）とLogit/Probitの`predict(new_data)`
-//! （Issue #131）が同じ規約（`has_intercept`時は定数項を先頭列として自動付加）で
+//! OLS/WLSの`predict(new_data)`とLogit/Probitの`predict(new_data)`が
+//! 同じ規約（`has_intercept`時は定数項を先頭列として自動付加）で
 //! 新規データを扱うため、系統をまたいで共有する（`.claude/rules/rust-style.md`
 //! 「全手法で共有するロジックは系統ディレクトリの外に置く」方針）。
 

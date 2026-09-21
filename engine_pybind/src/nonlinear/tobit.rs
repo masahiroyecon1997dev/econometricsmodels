@@ -91,7 +91,7 @@ pub struct TobitOptions {
     /// by `nobs`. The two defaults are not interchangeable: Newton's absolute
     /// semantics with a `1e-8` threshold (or bfgs/lbfgs's normalized
     /// semantics with a `1e-6` threshold) measurably degrades either speed or
-    /// precision (Issue #285). Passing `tol` explicitly always uses the
+    /// precision. Passing `tol` explicitly always uses the
     /// semantics of the chosen `method`. Note: the method-dependent default is
     /// resolved once, at construction time. Changing `method` afterwards via
     /// the setter does not re-resolve `tol` — set both together (or set `tol`
@@ -145,7 +145,7 @@ impl TobitOptions {
         upper: Option<f64>,
     ) -> Self {
         // `tol`の既定値のmethod依存分岐は`LogitOptions::new`と同じ理由
-        // （`tol`フィールドのdocコメント参照、Issue #285）。
+        // （`tol`フィールドのdocコメント参照）。
         let tol = tol.unwrap_or(if method.eq_ignore_ascii_case("newton") {
             1e-6
         } else {
@@ -267,7 +267,7 @@ pub struct TobitResult {
     /// read it (`LogitResult`の`estimator`と同じ位置づけ)。
     estimator: TobitEstimator,
     /// The original polars DataFrame passed to `fit()`, cached for
-    /// `augment(new_data=None)` (Issue #322項目4、`LogitResult`の`training_data`と同じ
+    /// `augment(new_data=None)` (`LogitResult`の`training_data`と同じ
     /// 位置づけ)。
     training_data: DataFrame,
 }
@@ -323,7 +323,7 @@ impl TobitResult {
     /// Same `target`/`new_data`/`include_intercept` semantics as `predict()`, but
     /// returns a polars DataFrame (original columns plus the predicted column, row
     /// order preserved) instead of a bare list of floats (same design as
-    /// `LogitResult::augment()`, Issue #322). The column name is `target`-dependent
+    /// `LogitResult::augment()`). The column name is `target`-dependent
     /// (unlike Logit/Probit's fixed `"probability"`) so that `augment()` can be
     /// called once per `target` on the same DataFrame without a name collision.
     ///
@@ -366,7 +366,7 @@ impl TobitResult {
     /// `target` selects the same three quantities as `predict()` (see its doc). Unlike
     /// Logit/Probit, this is an independent implementation (not the shared
     /// `dydx_and_jacobian` pattern) because the formula differs per `target`
-    /// (`nonlinear-api-design.md` section 6, Issue #211's conclusion).
+    /// (`nonlinear-api-design.md` section 6).
     ///
     /// Independent of `fit()`'s `confidence_level` (re-evaluated here so callers can
     /// use a different confidence level without re-fitting).
@@ -519,7 +519,7 @@ fn validate_no_sigma_collision(x: &[String]) -> PyResult<()> {
 /// - それ以外（次元不一致等）は`engine::nonlinear::common::MleError`から
 ///   `mle_error_to_pyerr`で変換
 ///
-/// Issue #212の結論通り、`validate_binary_y`相当の検証はここでは行わない
+/// `validate_binary_y`相当の検証はここでは行わない
 /// （`y`は連続変数のため）。打ち切り境界の検証は`TobitInput::from_columns`に委ねる
 /// （engine層の責務、`.claude/rules/rust-style.md`「Python境界でのデータ受け渡し」参照）。
 pub(crate) fn build_tobit_input(
@@ -649,8 +649,8 @@ mod tests {
     }
 
     /// `tol=None`のとき、`method`に応じた既定値（`newton`は絶対閾値`1e-6`、
-    /// `bfgs`/`lbfgs`は観測数正規化基準`1e-8`）が解決されるはず（Issue #285、
-    /// `LogitOptions`と同じロジック）。
+    /// `bfgs`/`lbfgs`は観測数正規化基準`1e-8`）が解決されるはず
+    /// （`LogitOptions`と同じロジック）。
     #[test]
     fn new_resolves_tol_default_based_on_method_when_tol_is_none() {
         let newton = TobitOptions::new(
@@ -922,7 +922,7 @@ mod tests {
     // 呼び出し元の`build_tobit_input`が`options.cov_type.to_lowercase()`してから渡す
     // ことで実現している。そのため、この不変条件は`parse_cov_type`単体ではなく
     // `build_tobit_input`（実際にPythonから渡される文字列を受ける入口）を通して検証する
-    // （Logitの`build_logit_input_cov_type_is_case_insensitive`と同じ理由、Issue #231）。
+    // （Logitの`build_logit_input_cov_type_is_case_insensitive`と同じ理由）。
     fn build_tobit_input_cov_type_is_case_insensitive() {
         let df = well_formed_df();
         for (input, is_expected) in [
@@ -1011,7 +1011,7 @@ mod tests {
 
     /// 打ち切り境界の不正（両方`None`）は`TobitInput::from_columns`（engine層）が検出し、
     /// `mle_error_to_pyerr`経由で`ValidationError`になる（`build_tobit_input`のdoc
-    /// コメント参照。Issue #212の結論通り、ここでの独自バリデーションは行わない）。
+    /// コメント参照。ここでの独自バリデーションは行わない）。
     #[test]
     fn build_tobit_input_returns_validation_error_when_both_bounds_are_none() {
         let df = well_formed_df();

@@ -2,7 +2,7 @@
 //!
 //! `LeastSquaresError`（`engine::linear::common`）・`MleError`（`engine::nonlinear::common`）・
 //! `IvError`（`engine::iv::common`）の前例に倣い、FE/REで個別に`FeError`/`ReError`を作らず
-//! `PanelError`を共有する（`docs/planning/specs/panel-api-design.md`4.4節、Issue #172）。
+//! `PanelError`を共有する（`docs/planning/specs/panel-api-design.md`4.4節）。
 //!
 //! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
 //! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は`engine::error::
@@ -12,32 +12,32 @@
 //! （RE固有論点）で仕様が確定しているバリデーション条件をカバーする:
 //!
 //! - `IdentifierDimensionMismatch`: `y`と`entity`/`time`の長さ不一致（`panel-api-design.md`
-//!   1章、Issue #175）
+//!   1章）
 //! - `InsufficientDegreesOfFreedom`: パネル自由度調整（`fe-spec.md`3.2節）
 //! - `SingletonGroup`: 観測数1のグループ（`fe-spec.md`1章）
 //! - `UnbalancedPanelForTwoWay`: 2-way FEのバランスパネル必須（`fe-spec.md`1章）
 //! - `ZeroVarianceAfterDemeaning`: within変換後に分散ゼロの説明変数（`fe-spec.md`1章）
 //! - `TwoWayRequiresTime`: 2-way FE指定時の`time`必須（`panel-api-design.md`1.1節）
 //! - `HacRequiresTime`: Driscoll-Kraay型パネルHAC（`FeCovType::Hac`）指定時の`time`必須
-//!   （`panel-api-design.md`3.1節、Issue #182。2-way FEは`TwoWayRequiresTime`で既に
+//!   （`panel-api-design.md`3.1節。2-way FEは`TwoWayRequiresTime`で既に
 //!   必須化されているため、1-way FEでのみ発生しうる）
 //! - `InvalidHacBandwidth`: `FeCovType::Hac`の明示的な`bandwidth`が`[0, t)`の範囲外
-//!   （`t`はユニークな時点数、Issue #182。`LeastSquaresError::InvalidHacLags`と同型だが
+//!   （`t`はユニークな時点数。`LeastSquaresError::InvalidHacLags`と同型だが
 //!   上限が観測数`n`ではなく時点数`t`）
 //! - `WithinRegressionFailed`: within変換済みデータの最小二乗推定委譲の失敗
 //!   （`panel-api-design.md`4.3節）
-//! - `FTestFailed`: F統計量（Issue #186、`fe.rs`モジュールdoc「自由度調整」のF統計量節）の
+//! - `FTestFailed`: F統計量（`fe.rs`モジュールdoc「自由度調整」のF統計量節）の
 //!   Wald検定（`crate::linear::ols::wald_f_test`）が失敗した場合。`WithinRegressionFailed`と
 //!   意味が異なる（`OlsEstimator::fit`自体は既に成功した後の、F検定固有の共分散部分行列の
 //!   ほぼ特異性というbackstopのみ、`ols.rs`の`wald_f_test`docコメント参照）ため別バリアントに
 //!   分離した（`IvError::FirstStageFailed`が`WithinRegressionFailed`と同じ`LeastSquaresError`
 //!   ラップでも変換箇所ごとに専用バリアントにする判断と同じ）。
-//! - `BetweenRegressionFailed`: RE（Swamy-Arora分散成分推定、`re-spec.md`3.1節、Issue #193）の
+//! - `BetweenRegressionFailed`: RE（Swamy-Arora分散成分推定、`re-spec.md`3.1節）の
 //!   between回帰（エンティティ平均への`OlsEstimator::fit(include_intercept=true)`）が
 //!   失敗した場合（エンティティ数が説明変数の数以下等）。`WithinRegressionFailed`と同じ
 //!   `LeastSquaresError`ラップだが、対象がFEのwithin回帰ではなくREのbetween回帰のため
 //!   別バリアントにする（`FTestFailed`と同じ判断）。
-//! - `QuasiDemeanedRegressionFailed`: RE（`ReEstimator::fit`、`re-spec.md`3.2節、Issue #195）の
+//! - `QuasiDemeanedRegressionFailed`: RE（`ReEstimator::fit`、`re-spec.md`3.2節）の
 //!   準偏差変換済みデータ（`quasi_demean_transform`の出力に、同じθで変換した定数列を
 //!   加えたもの）への`OlsEstimator::fit(include_intercept=false)`委譲が失敗した場合。
 //!   `WithinRegressionFailed`（FEのwithin変換済みデータ）・`BetweenRegressionFailed`
@@ -46,7 +46,7 @@
 //! RE固有（`re-spec.md`）で追加のバリアントが必要になった場合は、FE/RE実装issueで実際に計算
 //! コードを書く過程で随時追加する（`LeastSquaresError`・`IvError`のdocコメントと同じ
 //! 「土台を用意し、必要になった時点で足す」方針）。
-//! ハウスマン統計量（`hausman_statistic`、Issue #174。符号の扱いはIssue #350で修正）は
+//! ハウスマン統計量（`hausman_statistic`）は
 //! `CommonError`を返す（`ensure_well_conditioned_symmetric_matrix`等の共通ヘルパーに
 //! 揃える）。`cov_fe - cov_re`が有限標本で非正定値になり二次形式が負になるケースは
 //! `abs()`を適用して非負値にする（R `plm::phtest`と同じ挙動——`plm`は`abs()`を無条件
@@ -110,7 +110,7 @@ pub enum PanelError {
     Common(#[from] CommonError),
 
     /// `y`と`entity`または`time`の長さが一致しない（`FeInput::from_columns`、
-    /// `docs/planning/specs/panel-api-design.md`1章、Issue #175）。
+    /// `docs/planning/specs/panel-api-design.md`1章）。
     ///
     /// `y`と`x`列の不一致は`CommonError::DimensionMismatch`が既にカバーしている
     /// （対象列が異なるため専用バリアントにする）。`entity`/`time`のどちらの不一致かは
@@ -207,7 +207,7 @@ pub enum PanelError {
     #[error("two-way fixed effects requires the `time` option to be set")]
     TwoWayRequiresTime,
 
-    /// Driscoll-Kraay型パネルHAC（`FeCovType::Hac`、Issue #182、3.1節）を指定したのに
+    /// Driscoll-Kraay型パネルHAC（`FeCovType::Hac`、3.1節）を指定したのに
     /// `time`列が指定されていない。
     ///
     /// DKは時点ごとにクロスセクション和を取ってからHACカーネルを適用するため`time`が
@@ -242,7 +242,7 @@ pub enum PanelError {
         source: LeastSquaresError,
     },
 
-    /// F統計量（Issue #186）のWald検定（`crate::linear::ols::wald_f_test`への委譲）が
+    /// F統計量のWald検定（`crate::linear::ols::wald_f_test`への委譲）が
     /// 失敗した。`WithinRegressionFailed`とは別バリアント（理由はモジュールdoc参照）。
     ///
     /// 実際に発生しうるのは`LeastSquaresError::Common(CommonError::ComputationFailed)`
@@ -256,7 +256,7 @@ pub enum PanelError {
         source: LeastSquaresError,
     },
 
-    /// RE（Swamy-Arora分散成分推定、7.1節、Issue #193）のbetween回帰
+    /// RE（Swamy-Arora分散成分推定、7.1節）のbetween回帰
     /// （エンティティ平均への`OlsEstimator::fit(include_intercept=true)`）が失敗した。
     ///
     /// `WithinRegressionFailed`と同じ`LeastSquaresError`ラップだが、対象がFEのwithin回帰
@@ -269,7 +269,7 @@ pub enum PanelError {
         source: LeastSquaresError,
     },
 
-    /// RE（`ReEstimator::fit`、7.4節、Issue #195）の準偏差変換済みデータへの
+    /// RE（`ReEstimator::fit`、7.4節）の準偏差変換済みデータへの
     /// `OlsEstimator::fit(include_intercept=false)`委譲が失敗した。
     ///
     /// `WithinRegressionFailed`（FEのwithin変換済みデータ）・`BetweenRegressionFailed`
@@ -284,9 +284,9 @@ pub enum PanelError {
 
 /// `ids`の値ごとに観測インデックスをまとめる（`BTreeMap`のキー＝`ids`の辞書順）。
 ///
-/// 元々`fe.rs`にFE専用のprivate関数として実装していたが、Issue #193（RE:
-/// Swamy-Arora分散成分推定）でREのbetween回帰（エンティティ平均の集計）でも同じ
-/// グルーピングが必要になったため、FE/RE間で共有するロジックとしてこちらに移設した
+/// 元々`fe.rs`にFE専用のprivate関数として実装していたが、後にRE（Swamy-Arora分散成分推定）
+/// のbetween回帰（エンティティ平均の集計）でも同じグルーピングが必要になったため、
+/// FE/RE間で共有するロジックとしてこちらに移設した
 /// （`.claude/rules/rust-style.md`「系統内で共有するロジックは`<系統>/common.rsに置く`」）。
 /// `pub(crate)`にする理由: `engine`クレート内部（`fe.rs`・`re.rs`）専用のヘルパーで、
 /// `engine_pybind`や`engine`クレート外には公開しない内部実装詳細のため。
@@ -306,8 +306,8 @@ pub(crate) fn group_indices_by_key(ids: &[String]) -> BTreeMap<&str, Vec<usize>>
 
 /// `ids`のユニークID数を数える（`n_entities`/`n_periods`のカウント）。純粋な
 /// カーディナリティ集計のため`HashSet`でよい（`group_indices_by_key`と異なりグループ間の
-/// 加算順序に依存する計算が無いため反復順序非依存）。`group_indices_by_key`と同じ理由
-/// （Issue #193）でFE/RE間の共有ロジックとしてここに移設した。
+/// 加算順序に依存する計算が無いため反復順序非依存）。`group_indices_by_key`と同じ理由で
+/// FE/RE間の共有ロジックとしてここに移設した。
 pub(crate) fn count_unique(ids: &[String]) -> usize {
     ids.iter().collect::<HashSet<_>>().len()
 }
@@ -316,11 +316,12 @@ pub(crate) fn count_unique(ids: &[String]) -> usize {
 ///
 /// `quasi_demean_column`の`theta`引数はエンティティID→θ_iの対応（`&BTreeMap<String,
 /// f64>`）を要求するが、θ=1固定の通常のwithin変換（FEのwithin変換そのもの、REの
-/// `r_squared_within`計算——`docs/spec/re-spec.md`3.2節「FEはθ=1の特殊ケース」・
-/// Issue #338「`linearmodels`の`_rsquared`のWithinセクションはRE/FEどちらのモデルでも
-/// 共通してθ=1のFE型within変換を使う」参照）で毎回同じ組み立てが必要になるため、
-/// FE/RE共有ロジックとしてここに置く（`group_indices_by_key`/`count_unique`と同じ理由、
-/// Issue #193で最初にFE→common.rsへ移設した前例に倣い、Issue #338でFE→common.rsへ再移設）。
+/// `r_squared_within`計算——`docs/spec/re-spec.md`3.2節「FEはθ=1の特殊ケース」。
+/// `linearmodels`の`_rsquared`のWithinセクションはRE/FEどちらのモデルでも共通してθ=1の
+/// FE型within変換を使う、という点も参照）で毎回同じ組み立てが必要になるため、FE/RE共有
+/// ロジックとしてここに置く（`group_indices_by_key`/`count_unique`と同じ理由。最初は
+/// FE専用としてFE→common.rsへ移設し、後にREの`r_squared_within`計算でも同じ組み立てが
+/// 必要になったため改めて共有ロジックとして整理した）。
 ///
 /// 先に`HashSet`でユニークなIDへ絞り込んでから`String`を複製する（`ids.iter().map(|id|
 /// (id.clone(), 1.0)).collect()`のように観測順のまま素朴に`collect`すると、`BTreeMap`の
@@ -334,15 +335,15 @@ pub(crate) fn all_ones_theta(ids: &[String]) -> BTreeMap<String, f64> {
         .collect()
 }
 
-/// FE/RE共有のcov_type計算ヘルパー（Issue #197でFE→common.rsへ移設、元は`fe.rs`の
-/// `fe_*_cov_params`。`group_indices_by_key`/`count_unique`/`all_ones_theta`と同じ
+/// FE/RE共有のcov_type計算ヘルパー（元は`fe.rs`の`fe_*_cov_params`をFE→common.rsへ移設。
+/// `group_indices_by_key`/`count_unique`/`all_ones_theta`と同じ
 /// 「FE専用で書いたが後にREでも同じ数式が必要と判明したため共有ロジックとして移設した」
-/// 経緯）。**数式自体はFE実装時（Issue #181・#182）のまま変更していない**——移設したのは
+/// 経緯）。**数式自体はFE実装時のまま変更していない**——移設したのは
 /// 呼び出し側（`fe.rs`/`re.rs`）が渡す`df_resid`・`extra_df`・レバレッジの値がFE/REで
 /// 異なるだけで、計算ロジック自体はモデル非依存（`.claude/rules/rust-style.md`
 /// 「全手法で共有するロジック」）。
 ///
-/// **RE（Issue #197）で判明した重要な事実**: `linearmodels.RandomEffects.fit()`の
+/// **RE実装で判明した重要な事実**: `linearmodels.RandomEffects.fit()`の
 /// ソース確認により、REは`cov_type`によらず常に`extra_df=0`を使う（FEのような
 /// `neffects`・`entity_nested_within_cluster`の条件分岐が一切不要）。REの変換済み
 /// 設計行列は「省略された固定効果ダミー」を持たない（切片も含め全パラメータが実際に
@@ -506,7 +507,7 @@ pub(crate) fn resolve_dk_bandwidth(bandwidth: Option<i64>, t: usize) -> Result<u
     }
 }
 
-/// Driscoll-Kraay型パネルHAC共分散行列（k×k、Issue #182・#197）。
+/// Driscoll-Kraay型パネルHAC共分散行列（k×k）。
 ///
 /// `Ŝ = Σ_t ξ_t ξ_t' + Σ_{l=1}^{bandwidth} w_l (ξ_t ξ_{t-l}' + ξ_{t-l} ξ_t')`
 /// （Bartlett重み`w_l = 1 - l/(bandwidth+1)`、`fe.rs`モジュールdoc参照）をまず求め、
@@ -607,7 +608,7 @@ pub(crate) fn panel_driscoll_kraay_cov_params(
 /// エラーではなく`engine_pybind`〜`engine`間の内部契約違反のため、`validate_cluster_groups`
 /// と同じ扱い。
 ///
-/// グループ平均（`ȳ_i.`）は返さない。`fixed_effects()`（6.6節、Issue #184）の`α_i`復元は
+/// グループ平均（`ȳ_i.`）は返さない。`fixed_effects()`（6.6節）の`α_i`復元は
 /// この関数を拡張せず`fe.rs`側で`FeInput`の元データから独立に再計算する形で実装済み
 /// （`engine/src/panel/CLAUDE.md`参照）。σ_ε²再利用（7.4節、RE実装）で平均の保持が
 /// 必要になった場合は、その時点で改めて検討する。
@@ -685,7 +686,7 @@ pub fn quasi_demean_column(
 /// **`Var(β_FE) - Var(β_RE)`は理論上は半正定値だが、有限標本では非正定値になりうる**
 /// （二次形式 `d'(Var(β_FE)-Var(β_RE))⁻¹d` が負になりうる）。参照実装 R `plm::phtest`
 /// （`stat <- as.numeric(abs(t(dbeta) %*% solve(dvcov) %*% dbeta))`）に合わせ、
-/// **`stat`には`abs()`を適用してから返す**（Issue #350）。`p_value`もこの`abs()`適用後の
+/// **`stat`には`abs()`を適用してから返す**。`p_value`もこの`abs()`適用後の
 /// `stat`から計算するため、`plm::phtest`のp値と直接比較できる。
 ///
 /// 以前は符号付きのまま返す設計だった（`stat<=0`なら`sf`により`p_value==1.0`）が、
@@ -755,7 +756,7 @@ pub fn hausman_statistic(
     let raw_stat: f64 = (0..k).map(|i| (*d.get(i, 0)) * (*z.get(i, 0))).sum();
     // `Var(β_FE) - Var(β_RE)`が有限標本で非正定値になると二次形式が負になりうる。
     // `plm::phtest`（`stat <- as.numeric(abs(t(dbeta) %*% solve(dvcov) %*% dbeta))`）に
-    // 合わせ`abs()`を適用する（Issue #350）。
+    // 合わせ`abs()`を適用する。
     let stat = raw_stat.abs();
 
     let chi2 =
@@ -1209,7 +1210,7 @@ mod tests {
     fn hausman_statistic_takes_absolute_value_when_variance_diff_is_indefinite() {
         // cov_diff = [[-1.0, 0.0], [0.0, 0.5]]（非正定値だが可逆）→ inv = [[-1, 0], [0, 2]]。
         // d = [1, 0] → 二次形式 = -1·1² = -1。有限標本でのPSD仮定崩れ。plm::phtest と
-        // 同じく abs() を適用し stat = 1.0 を返す（Issue #350）。
+        // 同じく abs() を適用し stat = 1.0 を返す。
         let beta_fe = [2.0, 5.0];
         let beta_re = [1.0, 5.0];
         let cov_fe = vec![vec![1.0, 0.0], vec![0.0, 1.0]];

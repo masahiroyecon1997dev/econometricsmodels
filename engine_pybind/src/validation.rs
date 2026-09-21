@@ -24,7 +24,7 @@ use crate::errors::ValidationError;
 
 /// `validate_no_duplicate_roles`に渡す1ロール分の値。単一列（`y`/`weight`等）と
 /// 複数列（`x`/`x_exog`/`instruments`等）の両方を同じ関数で扱えるようにするための
-/// 判別共用体（Issue #154、IVの`instruments`が`x_exog`/`x_endog`という複数列ロールと
+/// 判別共用体（IVの`instruments`が`x_exog`/`x_endog`という複数列ロールと
 /// 重複していないかを検証する必要があるため導入）。
 pub enum RoleValue<'a> {
     /// `y`/`weight`のような単一列ロール。
@@ -36,7 +36,7 @@ pub enum RoleValue<'a> {
 /// 複数列ロール（`x`/`x_endog`/`instruments`等）が空リストでないことを検証する。
 /// `role_name`はエラーメッセージに使う。
 ///
-/// 元は`x`専用の関数だったが、IVの`x_endog`/`instruments`（Issue #306、`x_exog`とは
+/// 元は`x`専用の関数だったが、IVの`x_endog`/`instruments`（`x_exog`とは
 /// 異なり空リストを許容しない）でも同じ検証が必要になったため`validate_no_duplicate_
 /// within_role`と同じ形で汎用化した。既存の呼び出し元（OLS/WLS/Logit/Probit/Tobit）は
 /// `role_name="x"`で呼ぶため、メッセージ文言は変わらない。
@@ -53,8 +53,8 @@ pub fn validate_x_non_empty(role_name: &str, x: &[String]) -> PyResult<()> {
 /// 無いことを検証する。`role_name`はエラーメッセージに使う。
 ///
 /// 元は`validate_no_duplicate_x`という`x`専用の関数だったが、IVの`x_exog`/`x_endog`/
-/// `instruments`という3つの複数列ロールそれぞれで同じ検証が必要になったため汎用化した
-/// （Issue #159）。既存の呼び出し元（OLS/WLS/Logit/Probit）は`role_name="x"`で呼ぶため、
+/// `instruments`という3つの複数列ロールそれぞれで同じ検証が必要になったため汎用化した。
+/// 既存の呼び出し元（OLS/WLS/Logit/Probit）は`role_name="x"`で呼ぶため、
 /// メッセージ文言は変わらない。
 pub fn validate_no_duplicate_within_role(role_name: &str, columns: &[String]) -> PyResult<()> {
     let mut seen = HashSet::new();
@@ -75,7 +75,7 @@ pub fn validate_no_duplicate_within_role(role_name: &str, columns: &[String]) ->
 /// 元は`x`専用の関数だったが、IVでは`x_exog`だけでなく`x_endog`/`instruments`に
 /// `"const"`という列名が含まれていても同じ衝突が起き結果がサイレントに破損する
 /// ため（`first_stage()`/構造方程式本体の`param_names`に`"const"`が重複し、
-/// 後勝ちで真の切片係数が上書きされる、Issue #305）、`validate_x_non_empty`/
+/// 後勝ちで真の切片係数が上書きされる）、`validate_x_non_empty`/
 /// `validate_no_duplicate_within_role`と同じ形で`role_name`を引数化した。
 /// 既存の呼び出し元（OLS/WLS/Logit/Probit/Tobit）は`role_name="x"`で呼ぶため、
 /// メッセージ文言は変わらない。
@@ -116,7 +116,7 @@ pub fn validate_common_roles(y: &str, x: &[String], include_intercept: bool) -> 
 }
 
 /// `df`が`column_name`という名前の列をまだ持っていないことを検証する（`augment()`が
-/// 予測値を新しい列として追加する際、既存の同名列を黙って上書きしないため。Issue #295）。
+/// 予測値を新しい列として追加する際、既存の同名列を黙って上書きしないため）。
 pub fn validate_no_existing_column(df: &DataFrame, column_name: &str) -> PyResult<()> {
     if df
         .get_column_names()
@@ -202,8 +202,8 @@ fn role_contains(value: &RoleValue, col: &str) -> bool {
 /// 「is also included in」の主語として振る舞う（`(i, j)`のどちらが単一列ロールかに
 /// 関わらず、単一列ロールの方をメッセージの主語にする）。これは旧実装（単一列ロールのみ、
 /// `x`という1つの複数列ロールと必ず対で使われていた）のメッセージ文言をそのまま踏襲する
-/// ための特別扱いで、`y`/`weight`のような単一列ロールの既存の挙動（Issue #154の
-/// 完了条件）を変えないために必要。両方とも複数列ロール（例: IVの`instruments`と
+/// ための特別扱いで、`y`/`weight`のような単一列ロールの既存の挙動を変えないために
+/// 必要。両方とも複数列ロール（例: IVの`instruments`と
 /// `x_exog`）の場合のみ、リスト内で後に置かれた方（`i`側、`name_i`）を主語にする
 /// （新規のケースのため文言の踏襲対象が無い）。
 fn duplicate_role_message(
@@ -299,7 +299,7 @@ mod tests {
         // `role_name`がメッセージにそのまま使われることの直接確認は`PyErr::to_string()`が
         // GILを要求するためできない（`nonlinear/CLAUDE.md`「テストの制約」参照）。ここでは
         // `role_name`が異なっても（`x`専用だった旧実装から汎用化した後も）挙動そのもの
-        // （衝突検出）が変わらないことのみ確認する（Issue #305）。
+        // （衝突検出）が変わらないことのみ確認する。
         let instruments = ["const".to_string()];
         assert!(validate_no_const_collision("instruments", &instruments, true).is_err());
     }
@@ -433,8 +433,8 @@ mod tests {
 
     #[test]
     fn validate_no_duplicate_roles_returns_error_when_two_multi_roles_overlap() {
-        // `instruments`が`x_exog`と重複する列名を含むケース（Issue #154の主目的、
-        // `docs/planning/specs/iv-api-design.md`1.1.1節）。
+        // `instruments`が`x_exog`と重複する列名を含むケース
+        // （`docs/planning/specs/iv-api-design.md`1.1.1節）。
         let x_exog = ["x1".to_string(), "x2".to_string()];
         let instruments = ["z1".to_string(), "x1".to_string()];
         assert!(
@@ -449,7 +449,7 @@ mod tests {
     // 以下は`find_duplicate_role_message`（`PyErr`に依存しない純粋関数）を直接呼び、
     // メッセージ文言をGILなしに検証する。判定順序は`roles`のリスト順の総当たり
     // （各ロールを、それより前の全ロールと照合し、最初に見つかった違反を返す）に
-    // 単純化した（Issue #154、複数列ロール同士の重複検証に対応させるため。単一列
+    // 単純化した（複数列ロール同士の重複検証に対応させるため。単一列
     // ロールと複数列ロールが同時に絡む複合違反時にどちらが先に報告されるかの優先順位は
     // 旧実装から変更している。ユーザー確認済み・仕様上の保証はしない）。
     // ただし個々のペアのメッセージ文言自体は旧実装と完全に同じ形式を維持する:

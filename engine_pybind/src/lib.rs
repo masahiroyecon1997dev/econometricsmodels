@@ -226,7 +226,7 @@ fn fit_re(
 #[pymodule]
 fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // `import econometricsmodels` の時点で faer のグローバル並列度を Par::Seq に
-    // 固定する（Issue #283）。各 `Estimator::fit()` 冒頭でも呼ぶが（`cargo test`
+    // 固定する。各 `Estimator::fit()` 冒頭でも呼ぶが（`cargo test`
     // との経路統一のため）、ここで一度呼んでおくことで将来 `fit()` 以外の Python
     // 入口が増えても確実に適用される。
     engine::parallelism::ensure_serial();

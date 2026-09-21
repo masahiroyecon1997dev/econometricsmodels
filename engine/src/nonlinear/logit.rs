@@ -67,7 +67,7 @@ impl LogitInput {
     /// `LogitInput`を組み立てる。`include_intercept=true`の場合、設計行列の先頭列に
     /// 定数項（すべて1.0）を自動追加する。
     ///
-    /// `y`が単位区間`[0,1]`に収まることの検証は、このIssue（#54、次元検証のみがスコープ）では
+    /// `y`が単位区間`[0,1]`に収まることの検証は、次元検証のみがスコープの本関数では
     /// 行わない。statsmodelsの`Logit`はコンストラクタ時点でこの検証を行っている（`endog`が
     /// 範囲外だと`ValueError: endog must be in the unit interval.`）ため、本実装でも尤度・
     /// スコア・Hessianを実装するIssue（B2）で同等の検証を追加する予定
@@ -422,7 +422,7 @@ impl LogitEstimator {
     ///
     /// 初期値（warm start）は標準化空間でのLPM（線形確率モデル）最小二乗解に、logitの
     /// IRLS 1ステップ相当のスケール補正（`p̄=ȳ`での `1/(p̄(1-p̄))` 倍＋切片補正）を施した
-    /// もの（`ols_based_initial_params`、Issue #279。従来のゼロベクトルから変更）。前段で
+    /// もの（`ols_based_initial_params`。従来のゼロベクトルから変更）。前段で
     /// `standardize_columns`後の設計行列を列ピボットQRしランク落ちを検出する
     /// （`checked_design_matrix_qr`、`method`によらず単一経路で`SingularDesignMatrix`）。
     /// `start_params`によるユーザー指定初期値は引き続き未対応（`nonlinear-api-design.md`
@@ -468,7 +468,7 @@ impl LogitEstimator {
     /// - `k`（定数項を含む説明変数の数）が0（定数項も説明変数も無い）: `CommonError::NoRegressors`
     /// - 観測数`n`が`k`以下: `CommonError::InsufficientObservations`
     /// - 設計行列がランク落ち（完全な多重共線性等）: `MleError::SingularDesignMatrix`
-    ///   （最適化前の列ピボットQRランクチェックで`method`によらず検出、Issue #279）
+    ///   （最適化前の列ピボットQRランクチェックで`method`によらず検出）
     /// - `raise_on_non_convergence=true`かつ`max_iter`回で未収束: `MleError::NonConvergence`
     /// - 収束点（または`raise_on_non_convergence=false`時の打ち切り点）のHessianが特異:
     ///   `MleError::SingularHessian`（ランク落ちは前段で`SingularDesignMatrix`として弾くため、
@@ -478,8 +478,8 @@ impl LogitEstimator {
     /// - `cov_type=Cluster`でクラスター数が2未満: `CommonError::InsufficientClusters`
     /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
     ///   `CommonError::InsufficientClustersForInference`（`rank(Ŝ) ≤ g - 1`のため
-    ///   ロバストWald検定（LRではなくクラスターロバスト共分散側）で退化する識別失敗、
-    ///   Issue #289。Logit/Probitでは新規制約——従来は縮退した共分散から読んだSEを
+    ///   ロバストWald検定（LRではなくクラスターロバスト共分散側）で退化する識別失敗。
+    ///   Logit/Probitでは新規制約——従来は縮退した共分散から読んだSEを
     ///   無警告で返していた）
     pub fn fit(input: LogitInput, options: MleFitOptions) -> Result<Self, MleError> {
         let MleFitOptions {
@@ -491,7 +491,7 @@ impl LogitEstimator {
             confidence_level,
         } = options;
 
-        // faer のグローバル並列度を Par::Seq に固定する（Issue #283、`crate::parallelism`）。
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
         crate::parallelism::ensure_serial();
 
         let n = input.nobs();
@@ -510,7 +510,7 @@ impl LogitEstimator {
         // `method`に関わらず、標準化空間でLPMのIRLS 1ステップ相当を初期値（warm start）に
         // する（`ols_based_initial_params`）。前段の列ピボットQRランクチェックにより、
         // 完全な多重共線性は`method`によらず単一経路で`SingularDesignMatrix`として検出される
-        // （Issue #279。従来はゼロベクトル初期値で、`newton`は`newton_step`内のQR、
+        // （従来はゼロベクトル初期値で、`newton`は`newton_step`内のQR、
         // `bfgs`/`lbfgs`は収束後の`observed_information_cov_params`という`method`依存の
         // 別経路に分かれていた）。
         let initial_params = ols_based_initial_params(
@@ -544,7 +544,7 @@ impl LogitEstimator {
             input.y().nrows(),
             raise_on_non_convergence,
             // Logitは`y∈{0,1}`で係数が±∞へ発散するため(準)完全分離の
-            // 標準化パラメータノルム事後チェックを有効にする（Issue #288）。
+            // 標準化パラメータノルム事後チェックを有効にする。
             SeparationNormCheck::Enabled,
         )?;
 
@@ -831,13 +831,13 @@ impl LogitEstimator {
     /// 各行について返す（`fit()`のReturn本体には含めない別メソッド、
     /// `nonlinear-api-design.md`6章）。
     ///
-    /// 新規データでの予測（out-of-sample）は`predict_new_data`（Issue #131）。
+    /// 新規データでの予測（out-of-sample）は`predict_new_data`。
     pub fn predict(&self) -> Vec<f64> {
         predict_from_link(self.input.x(), &self.params, logistic)
     }
 
     /// 新規データ（out-of-sample、`new_x_columns`）に対する予測確率
-    /// `p_i = Λ(x_i'θ)`（Issue #131）。
+    /// `p_i = Λ(x_i'θ)`。
     ///
     /// `nonlinear::common::predict_new_data`に`logistic`をリンク関数として渡すだけの
     /// 薄いラッパー。リンク関数の選択（Logitはロジスティック関数）という手法固有の
@@ -866,7 +866,7 @@ impl LogitEstimator {
     /// のため`common.rs`に共通化されている）。
     ///
     /// **新規データでの的中表（out-of-sample）は未対応**（`predict()`とは異なり
-    /// スコープ外のまま、別issueでトラッキング。ユーザー確認済み、Issue #131）。
+    /// スコープ外のまま、別issueでトラッキング。ユーザー確認済み）。
     pub fn pred_table(&self, threshold: f64) -> Mat<f64> {
         pred_table(&self.predict(), self.input.y(), threshold)
     }
@@ -1134,7 +1134,7 @@ mod tests {
 
     #[test]
     fn fit_pins_faer_global_parallelism_to_seq() {
-        // Issue #283: `fit()` 冒頭の `crate::parallelism::ensure_serial()` が faer の
+        // `fit()` 冒頭の `crate::parallelism::ensure_serial()` が faer の
         // グローバル並列度を `Par::Seq` へ引き戻すことの回帰ガード（nonlinear 系統代表）。
         // 別テストが `Seq` にしている可能性があるため、まず `Rayon` に戻してから通す。
         // 設計行列は極小なので一時的な `Rayon` 設定は #283 の病理を招かない。
@@ -1526,7 +1526,7 @@ mod tests {
     /// recomputed_values`と同じ技法・同じ多変量データセット。情報行列の等式が
     /// 厳密に成り立つ切片のみモデルでは配線ミスを検出できないため）。
     /// クラスター数`G`は傾き係数の数`q=2`より多くする必要がある（`G <= q`は
-    /// `InsufficientClustersForInference`で弾かれる、Issue #289）ため`G=3`（2:1:1）。
+    /// `InsufficientClustersForInference`で弾かれる）ため`G=3`（2:1:1）。
     #[test]
     fn fit_cov_type_cluster_matches_independently_recomputed_values() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
@@ -1616,7 +1616,7 @@ mod tests {
     /// 偏った分布のグループサイズ（クラスター内の観測数がクラスターごとに異なる場合）
     /// を見逃しうる。OLS側の対応するテスト（`fit_computes_cluster_std_errors_t_stats_
     /// p_values_conf_int_and_f_test`、2:3の不均衡）に倣い、3:1:1の不均衡なグループでも
-    /// 同じ独立再計算の技法で検証する（`G=3 > q=2`、Issue #289）。
+    /// 同じ独立再計算の技法で検証する（`G=3 > q=2`）。
     #[test]
     fn fit_cov_type_cluster_matches_independently_recomputed_values_with_unbalanced_groups() {
         let y = vec![0.0, 1.0, 0.0, 1.0, 1.0];
@@ -1775,7 +1775,7 @@ mod tests {
     /// `Σ_i s_i = 0`）で`rank(Ŝ) ≤ g - 1`となり退化する。Logit/Probitは全体検定がLR
     /// のため`q×q`反転こそ通らないが、縮退した共分散から読んだSEを無警告で返すのは
     /// 実質バグのため、`fit()`冒頭（Newton反復の前）のバリデーションで
-    /// `CommonError::InsufficientClustersForInference`として弾く（Issue #289。
+    /// `CommonError::InsufficientClustersForInference`として弾く（
     /// Logit/Probitでは新規制約）。説明変数2個（`q = 3 - 1 = 2`）に対し`g = 2`。
     #[test]
     fn fit_returns_validation_error_when_cluster_count_at_most_slopes() {
@@ -1838,7 +1838,7 @@ mod tests {
             .unwrap()
         };
         let k = 3;
-        // `G=3 > q=2`（`G <= q`は`InsufficientClustersForInference`で弾かれる、Issue #289）。
+        // `G=3 > q=2`（`G <= q`は`InsufficientClustersForInference`で弾かれる）。
         let groups = vec![
             "a".to_string(),
             "a".to_string(),
@@ -2165,7 +2165,7 @@ mod tests {
 
     /// 完全な多重共線性（`x2 = 2·x1`）の設計行列は、`fit()`冒頭の列ピボットQR
     /// ランクチェック（`nonlinear::common::checked_design_matrix_qr`）で`method`・
-    /// `cov_type`に関わらず単一経路で`SingularDesignMatrix`として弾かれる（Issue #279）。
+    /// `cov_type`に関わらず単一経路で`SingularDesignMatrix`として弾かれる。
     ///
     /// 従来はゼロベクトル初期値で、`newton`は`newton_step`内の列ピボットQR、`bfgs`/`lbfgs`は
     /// 収束後の`observed_information_cov_params`（`cov_type=Opg`なら`opg_cov_params`）と
@@ -2189,7 +2189,7 @@ mod tests {
     /// `testing-policy.md`のカバレッジ方針上これで足りる（#279レビューで確認）。
     ///
     /// `Cluster`は`G=3 > q=2`（`q = k - k_constant`）にして`fit()`冒頭の
-    /// `InsufficientClustersForInference`（`G <= q`）より手前を通す（Issue #289）。
+    /// `InsufficientClustersForInference`（`G <= q`）より手前を通す。
     #[test]
     fn fit_returns_singular_design_matrix_error_for_perfectly_collinear_design_matrix() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
@@ -2240,8 +2240,8 @@ mod tests {
         }
     }
 
-    // `max_iter`打ち切りのテストは`intercept_only_input()`を使わない: Issue #279の
-    // warm start（`ols_based_initial_params`）は切片のみモデルでは初期値がそのまま
+    // `max_iter`打ち切りのテストは`intercept_only_input()`を使わない: warm start
+    // （`ols_based_initial_params`）は切片のみモデルでは初期値がそのまま
     // 厳密なMLE（`η₀=ln(ȳ/(1-ȳ))`）になり1反復以内で収束してしまうため。代わりに
     // 多変量かつ収束に多反復を要する`near_separation_input_with_beta1(20.0)`を使う。
     // `beta1=20`への暗黙の依存が2つある:
@@ -2344,7 +2344,7 @@ mod tests {
     #[test]
     fn fit_returns_separation_suspected_error_for_near_separation_data() {
         // 実測で確認済みの最小反復回数（`SeparationSuspected`が発火するまでの
-        // `n_iter`）: newton=22・bfgs=36（自前実装`FaerBfgs`、Issue #285）・
+        // `n_iter`）: newton=22・bfgs=36（自前実装`FaerBfgs`）・
         // lbfgs=29。手法ごとに実測値+数回分の余裕を持たせた`max_iter`にすることで、
         // 将来いずれかの手法だけ反復回数が増加する回帰が起きても検出できるように
         // する（3手法で同じ`max_iter`を共有すると、他手法に合わせて緩めた分だけ
@@ -2806,7 +2806,7 @@ mod tests {
         }
     }
 
-    /// `predict_new_data`（out-of-sample、Issue #131）が独立に再計算した
+    /// `predict_new_data`（out-of-sample）が独立に再計算した
     /// `p_i=Λ(x_i'θ)`と一致すること。`predict_matches_independently_recomputed_
     /// logistic_of_linear_predictor`と同じモデルを使い、学習データとは異なる新規の
     /// x値で検証する。
@@ -3099,8 +3099,8 @@ mod tests {
                 .collect()
         }
 
-        /// `method`ごとに`tol`の意味論が異なる（`docs/spec/logit-spec.md`3.2節、
-        /// Issue #285）: `newton`は総和勾配に対する絶対閾値（既定`1e-6`）、
+        /// `method`ごとに`tol`の意味論が異なる（`docs/spec/logit-spec.md`3.2節）:
+        /// `newton`は総和勾配に対する絶対閾値（既定`1e-6`）、
         /// `bfgs`/`lbfgs`は観測数`n_obs`で正規化した基準（既定`1e-8`、`run_solver`が
         /// 内部で`tol*n_obs`を実効的な絶対閾値に変換する）。`engine_pybind`側の
         /// `LogitOptions`と同じ既定値の解決をここでも行う（呼び出し元がこの対応を

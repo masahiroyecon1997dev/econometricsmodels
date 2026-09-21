@@ -186,7 +186,7 @@ pub struct OLSResult {
     /// wrong instead of erroring.
     has_intercept: bool,
     /// The original polars DataFrame passed to `fit()`, cached for
-    /// `augment(new_data=None)` (Issue #295). A cheap clone (polars columns are
+    /// `augment(new_data=None)`. A cheap clone (polars columns are
     /// internally reference-counted, `docs/spec/ols-spec.md` "predict()" — same
     /// zero-copy reasoning applies here).
     ///
@@ -345,8 +345,8 @@ pub fn fit(
 /// フィット済み`OlsEstimator`を`OLSResult`（pyclass、Pythonに返す形）に変換する。
 ///
 /// `fit`（本ファイル、OLS本体）と`iv::common`の`first_stage()`（IVの第一段階回帰
-/// `x_endog[i] ~ x_exog + instruments`の結果を`dict[str, OLSResults]`として返す、
-/// Issue #170）の両方で使う共通の変換ロジック。第一段階回帰はそれ自体が正しい
+/// `x_endog[i] ~ x_exog + instruments`の結果を`dict[str, OLSResults]`として返す）
+/// の両方で使う共通の変換ロジック。第一段階回帰はそれ自体が正しい
 /// （ナイーブな）通常のOLS回帰であり（`engine::iv::two_sls`のモジュールdocコメント
 /// 「第一段階の各`OlsEstimator`はそれ自体が正しい」参照）、`OLSResult`への変換方法に
 /// OLS本体との違いは無いため、このように同じ関数をそのまま再利用できる（`OLSResult`の

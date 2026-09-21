@@ -92,7 +92,7 @@ pub struct ProbitOptions {
     /// by `nobs`. The two defaults are not interchangeable: Newton's absolute
     /// semantics with a `1e-8` threshold (or bfgs/lbfgs's normalized
     /// semantics with a `1e-6` threshold) measurably degrades either speed or
-    /// precision (Issue #285). Passing `tol` explicitly always uses the
+    /// precision. Passing `tol` explicitly always uses the
     /// semantics of the chosen `method`. Note: the method-dependent default is
     /// resolved once, at construction time. Changing `method` afterwards via
     /// the setter does not re-resolve `tol` — set both together (or set `tol`
@@ -132,7 +132,7 @@ impl ProbitOptions {
         raise_on_non_convergence: bool,
     ) -> Self {
         // `tol`の既定値のmethod依存分岐は`LogitOptions::new`と同じ理由
-        // （`tol`フィールドのdocコメント参照、Issue #285）。
+        // （`tol`フィールドのdocコメント参照）。
         let tol = tol.unwrap_or(if method.eq_ignore_ascii_case("newton") {
             1e-6
         } else {
@@ -238,7 +238,7 @@ pub struct ProbitResult {
     /// (`LogitResult`の`estimator`と同じ位置づけ、コメント参照)。
     estimator: ProbitEstimator,
     /// The original polars DataFrame passed to `fit()`, cached for
-    /// `augment(new_data=None)` (Issue #322項目4、`LogitResult`の`training_data`と同じ
+    /// `augment(new_data=None)` (`LogitResult`の`training_data`と同じ
     /// 位置づけ)。
     training_data: DataFrame,
 }
@@ -280,8 +280,7 @@ impl ProbitResult {
     ///
     /// Same `new_data`/`include_intercept` semantics as `predict()`, but returns a
     /// polars DataFrame (original columns plus `"probability"`, row order preserved)
-    /// instead of a bare list of floats (same design as `LogitResult::augment()`,
-    /// Issue #322).
+    /// instead of a bare list of floats (same design as `LogitResult::augment()`).
     ///
     /// # Errors
     /// - Same as `predict()`: a required `x` column missing from `new_data`,
@@ -476,8 +475,8 @@ mod tests {
     }
 
     /// `tol=None`のとき、`method`に応じた既定値（`newton`は絶対閾値`1e-6`、
-    /// `bfgs`/`lbfgs`は観測数正規化基準`1e-8`）が解決されるはず（Issue #285、
-    /// `LogitOptions`と同じロジック）。
+    /// `bfgs`/`lbfgs`は観測数正規化基準`1e-8`）が解決されるはず
+    /// （`LogitOptions`と同じロジック）。
     #[test]
     fn new_resolves_tol_default_based_on_method_when_tol_is_none() {
         let newton = ProbitOptions::new(
@@ -722,7 +721,7 @@ mod tests {
 
     /// `build_probit_input`（Python境界から渡された文字列を受ける入口）を通した
     /// 大文字小文字非依存性の検証（`build_logit_input`の同名テストと同じ理由、
-    /// `testing-completeness-reviewer`指摘、Issue #231フェーズ4）。
+    /// `testing-completeness-reviewer`指摘）。
     #[test]
     fn build_probit_input_cov_type_is_case_insensitive() {
         let df = well_formed_df();

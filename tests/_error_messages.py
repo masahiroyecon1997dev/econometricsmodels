@@ -85,7 +85,7 @@ GROUP_KEY_COLUMN_HAS_MISSING_VALUES = "column '{name}' contains missing values"
 X_EMPTY = "{role} must contain at least one column name"
 DUPLICATE_WITHIN_ROLE = "column '{name}' is specified more than once in {role}"
 CONST_COLLISION = (
-    "when include_intercept=true, x cannot contain a column named 'const' "
+    "when include_intercept=true, {role} cannot contain a column named 'const' "
     "(it collides with the automatically added intercept)"
 )
 EXISTING_COLUMN_COLLISION = (

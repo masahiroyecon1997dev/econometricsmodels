@@ -495,7 +495,8 @@ fn parse_weight_type(df: &DataFrame, options: &IVOptions) -> PyResult<(WeightTyp
 /// - 列の抽出時に発覚する問題（列が存在しない、数値/文字列型にキャストできない、
 ///   欠損値・NaN・無限大を含む等）は`column_extraction`の責務で`ValidationError`
 /// - `y`/`x_exog`/`x_endog`/`instruments`間の重複、各ロール内部の重複、
-///   `include_intercept=true`のときの`x_exog`と`"const"`列との衝突、
+///   `include_intercept=true`のときの`x_exog`/`x_endog`/`instruments`いずれかと
+///   `"const"`列との衝突（Issue #305、`x_exog`だけでなく全ロールが対象）、
 ///   `x_endog`/`instruments`が空リストの場合（Issue #306、`x_exog`は対象外）は
 ///   ここ（受け口）の責務で`ValidationError`
 /// - `method`の文字列が`"2sls"`/`"gmm"`のいずれでもない場合は`ValidationError`
@@ -533,7 +534,17 @@ pub(crate) fn build_iv_input(
     validate_no_duplicate_within_role("x_exog", &x_exog)?;
     validate_no_duplicate_within_role("x_endog", &x_endog)?;
     validate_no_duplicate_within_role("instruments", &instruments)?;
-    validate_no_const_collision(&x_exog, options.include_intercept)?;
+    // `"const"`衝突は`x_exog`だけでなく`x_endog`/`instruments`でも起こりうる
+    // （Issue #305）。`include_intercept=true`が自動追加する切片列は`x_exog`側の
+    // 設計行列にのみ足されるが、`first_stage()`の`param_names`（`x_exog`+
+    // `instruments`）・構造方程式本体の`param_names`（`x_exog`+`x_endog`、
+    // `IvInput::from_columns`参照）はいずれも`x_exog`の`"const"`と同名の列を
+    // 連結してしまうため、衝突源が`x_endog`/`instruments`側でも同じ実害
+    // （`OlsResults.params`/`IVResult.params`の`dict(zip(param_names, params))`
+    // 構築時の後勝ちによる真の切片係数のサイレントな上書き）が起きる。
+    validate_no_const_collision("x_exog", &x_exog, options.include_intercept)?;
+    validate_no_const_collision("x_endog", &x_endog, options.include_intercept)?;
+    validate_no_const_collision("instruments", &instruments, options.include_intercept)?;
 
     // `x_exog`は空リストを許容する（内生変数のみのモデルも成立するため、
     // `iv-api-design.md`1.1節）が、`x_endog`/`instruments`はいずれも最低1要素を要求する
@@ -1014,6 +1025,45 @@ mod tests {
             vec!["x1".to_string(), "const".to_string()],
             vec!["endog1".to_string()],
             vec!["z1".to_string(), "z2".to_string()],
+            &options,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_iv_input_returns_error_when_include_intercept_and_x_endog_contains_const() {
+        // Issue #305: `x_exog`だけでなく`x_endog`に`"const"`を含めた場合も
+        // 同じ`ValidationError`で弾く（構造方程式本体の`param_names`から
+        // 真の切片係数がサイレントに失われるケース、列抽出前にここで検出する
+        // ため`df`に実際の`"const"`列は不要）。
+        let df = well_formed_df();
+        let options = default_options();
+
+        let result = build_iv_input(
+            &df,
+            "y".to_string(),
+            vec!["x1".to_string()],
+            vec!["const".to_string()],
+            vec!["z1".to_string(), "z2".to_string()],
+            &options,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_iv_input_returns_error_when_include_intercept_and_instruments_contains_const() {
+        // Issue #305: `instruments`に`"const"`を含めた場合も同じ`ValidationError`
+        // で弾く（`first_stage()`の`param_names`が`x_exog`の`"const"`（真の切片）と
+        // 衝突し後勝ちでサイレントに上書きされるケース）。
+        let df = well_formed_df();
+        let options = default_options();
+
+        let result = build_iv_input(
+            &df,
+            "y".to_string(),
+            vec!["x1".to_string()],
+            vec!["endog1".to_string()],
+            vec!["const".to_string(), "z2".to_string()],
             &options,
         );
         assert!(result.is_err());

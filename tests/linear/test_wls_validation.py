@@ -149,7 +149,9 @@ def test_const_collision_with_include_intercept_raises():
             "weight": [1.0, 1.0, 1.0],
         }
     )
-    with pytest.raises(ValidationError, match=escaped(msgs.CONST_COLLISION)):
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.CONST_COLLISION, role="x")
+    ):
         WLS(df, y="y", x=["const"], weight="weight").fit()
 
 

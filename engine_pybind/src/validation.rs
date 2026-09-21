@@ -68,14 +68,27 @@ pub fn validate_no_duplicate_within_role(role_name: &str, columns: &[String]) ->
     Ok(())
 }
 
-/// `include_intercept=true`のとき、`x`に`"const"`という列名が含まれていないことを
-/// 検証する（自動追加する定数項名との衝突を防ぐ）。
-pub fn validate_no_const_collision(x: &[String], include_intercept: bool) -> PyResult<()> {
+/// `include_intercept=true`のとき、単一の複数列ロール（`x`/`x_exog`/`x_endog`/
+/// `instruments`等）に`"const"`という列名が含まれていないことを検証する
+/// （自動追加する定数項名との衝突を防ぐ）。`role_name`はエラーメッセージに使う。
+///
+/// 元は`x`専用の関数だったが、IVでは`x_exog`だけでなく`x_endog`/`instruments`に
+/// `"const"`という列名が含まれていても同じ衝突が起き結果がサイレントに破損する
+/// ため（`first_stage()`/構造方程式本体の`param_names`に`"const"`が重複し、
+/// 後勝ちで真の切片係数が上書きされる、Issue #305）、`validate_x_non_empty`/
+/// `validate_no_duplicate_within_role`と同じ形で`role_name`を引数化した。
+/// 既存の呼び出し元（OLS/WLS/Logit/Probit/Tobit）は`role_name="x"`で呼ぶため、
+/// メッセージ文言は変わらない。
+pub fn validate_no_const_collision(
+    role_name: &str,
+    x: &[String],
+    include_intercept: bool,
+) -> PyResult<()> {
     if include_intercept && x.iter().any(|name| name == "const") {
-        return Err(ValidationError::new_err(
-            "when include_intercept=true, x cannot contain a column named 'const' \
-             (it collides with the automatically added intercept)",
-        ));
+        return Err(ValidationError::new_err(format!(
+            "when include_intercept=true, {role_name} cannot contain a column named \
+             'const' (it collides with the automatically added intercept)"
+        )));
     }
     Ok(())
 }
@@ -98,7 +111,7 @@ pub fn validate_common_roles(y: &str, x: &[String], include_intercept: bool) -> 
     validate_x_non_empty("x", x)?;
     validate_no_duplicate_roles(&[("y", RoleValue::Single(y)), ("x", RoleValue::Multi(x))])?;
     validate_no_duplicate_within_role("x", x)?;
-    validate_no_const_collision(x, include_intercept)?;
+    validate_no_const_collision("x", x, include_intercept)?;
     Ok(())
 }
 
@@ -266,19 +279,29 @@ mod tests {
     #[test]
     fn validate_no_const_collision_ok_when_include_intercept_is_false() {
         let x = ["const".to_string()];
-        assert!(validate_no_const_collision(&x, false).is_ok());
+        assert!(validate_no_const_collision("x", &x, false).is_ok());
     }
 
     #[test]
     fn validate_no_const_collision_ok_when_no_const_column() {
         let x = ["x1".to_string()];
-        assert!(validate_no_const_collision(&x, true).is_ok());
+        assert!(validate_no_const_collision("x", &x, true).is_ok());
     }
 
     #[test]
     fn validate_no_const_collision_returns_error_when_include_intercept_and_const_present() {
         let x = ["x1".to_string(), "const".to_string()];
-        assert!(validate_no_const_collision(&x, true).is_err());
+        assert!(validate_no_const_collision("x", &x, true).is_err());
+    }
+
+    #[test]
+    fn validate_no_const_collision_returns_error_using_custom_role_name() {
+        // `role_name`がメッセージにそのまま使われることの直接確認は`PyErr::to_string()`が
+        // GILを要求するためできない（`nonlinear/CLAUDE.md`「テストの制約」参照）。ここでは
+        // `role_name`が異なっても（`x`専用だった旧実装から汎用化した後も）挙動そのもの
+        // （衝突検出）が変わらないことのみ確認する（Issue #305）。
+        let instruments = ["const".to_string()];
+        assert!(validate_no_const_collision("instruments", &instruments, true).is_err());
     }
 
     #[test]

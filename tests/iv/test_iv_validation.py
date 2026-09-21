@@ -161,9 +161,65 @@ def test_const_collision_with_include_intercept_raises():
             "z1": [1.0, 3.0, 2.0, 4.0],
         }
     )
-    with pytest.raises(ValidationError, match=escaped(msgs.CONST_COLLISION)):
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.CONST_COLLISION, role="x_exog")
+    ):
         IV(
             df, y="y", x_exog=["const"], x_endog=["endog1"], instruments=["z1"]
+        ).fit()
+
+
+def test_const_collision_in_x_endog_with_include_intercept_raises():
+    """Issue #305: `x_exog`だけでなく`x_endog`に`"const"`という列名を含めた
+    場合も、自動追加される定数項と衝突し`ValidationError`になること。
+
+    修正前は`fit()`自体は成功していたが、構造方程式本体の`param_names`が
+    `['const', 'x1', 'const']`という重複を持つことになり、`res.params`辞書
+    （`dict(zip(param_names, params))`）構築時の後勝ちにより真の切片係数が
+    サイレントに失われていた（Issue #305背景参照）。
+    """
+    df = pl.DataFrame(
+        {
+            "y": [1.0, 2.0, 3.0, 4.0],
+            "x1": [2.0, 1.0, 4.0, 3.0],
+            "const": [2.0, 1.0, 4.0, 3.0],
+            "z1": [1.0, 3.0, 2.0, 4.0],
+        }
+    )
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.CONST_COLLISION, role="x_endog")
+    ):
+        IV(
+            df, y="y", x_exog=["x1"], x_endog=["const"], instruments=["z1"]
+        ).fit()
+
+
+def test_const_collision_in_instruments_with_include_intercept_raises():
+    """Issue #305: `instruments`に`"const"`という列名を含めた場合も、自動
+    追加される定数項と衝突し`ValidationError`になること。
+
+    修正前は`fit()`自体は成功していたが、`first_stage()[endog名].param_names`
+    に`"const"`が2回出現し、`OlsResults.params`構築時の後勝ちにより真の切片
+    係数が操作変数の係数でサイレントに上書きされていた（Issue #305背景参照）。
+    """
+    df = pl.DataFrame(
+        {
+            "y": [1.0, 2.0, 3.0, 4.0],
+            "x1": [2.0, 1.0, 4.0, 3.0],
+            "endog1": [3.0, 4.0, 1.0, 2.0],
+            "const": [1.0, 3.0, 2.0, 4.0],
+            "z1": [2.0, 4.0, 1.0, 3.0],
+        }
+    )
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.CONST_COLLISION, role="instruments")
+    ):
+        IV(
+            df,
+            y="y",
+            x_exog=["x1"],
+            x_endog=["endog1"],
+            instruments=["const", "z1"],
         ).fit()
 
 

@@ -555,7 +555,9 @@ def test_const_collision_with_include_intercept_raises():
     df = pl.DataFrame(
         {"y": [0.0, 1.0, 0.0, 1.0], "const": [1.0, 2.0, 3.0, 3.5]}
     )
-    with pytest.raises(ValidationError, match=escaped(msgs.CONST_COLLISION)):
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.CONST_COLLISION, role="x")
+    ):
         Tobit(df, y="y", x=["const"]).fit()
 
 

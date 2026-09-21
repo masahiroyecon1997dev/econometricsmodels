@@ -390,6 +390,50 @@ def test_include_intercept_false_omits_const(iv_dataset):
     assert res.param_names == ["x1", "endog1"]
 
 
+def test_include_intercept_false_allows_const_in_x_endog():
+    """`include_intercept=False`なら`x_endog`に`"const"`という名前の（切片
+    ではない）通常の内生変数を含められること（Issue #305: 衝突チェックは
+    `include_intercept=True`のときのみ働く仕様、`test_const_collision_in_
+    x_endog_with_include_intercept_raises`と対称）。
+    """
+    df = pl.DataFrame(
+        {
+            "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            "x1": [2.0, 4.0, 1.0, 5.0, 3.0, 6.0],
+            "const": [5.0, 4.0, 3.0, 6.0, 2.0, 1.0],
+            "z1": [2.0, 1.0, 4.0, 3.0, 6.0, 5.0],
+        }
+    )
+    options = IVOptions(include_intercept=False)
+    res = our_fit(
+        df, x_exog=["x1"], x_endog=["const"], instruments=["z1"], options=options
+    )
+    assert res.param_names == ["x1", "const"]
+
+
+def test_include_intercept_false_allows_const_in_instruments():
+    """`include_intercept=False`なら`instruments`に`"const"`という名前の
+    （切片ではない）通常の操作変数を含められること（Issue #305と対称）。
+    """
+    df = pl.DataFrame(
+        {
+            "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            "x1": [2.0, 4.0, 1.0, 5.0, 3.0, 6.0],
+            "endog1": [5.0, 4.0, 3.0, 6.0, 2.0, 1.0],
+            "const": [1.0, 3.0, 2.0, 5.0, 4.0, 6.0],
+        }
+    )
+    options = IVOptions(include_intercept=False)
+    res = our_fit(
+        df,
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["const"],
+        options=options,
+    )
+    assert res.first_stage()["endog1"].param_names == ["x1", "const"]
+
+
 @pytest.mark.parametrize(
     "weight_type", ["unadjusted", "robust", "cluster", "kernel"]
 )

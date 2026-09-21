@@ -131,7 +131,9 @@ def test_const_collision_with_include_intercept_raises():
     自動追加される定数項と衝突し`ValidationError`になること。
     """
     df = pl.DataFrame({"y": [1.0, 2.0, 3.0], "const": [1.0, 2.0, 3.5]})
-    with pytest.raises(ValidationError, match=escaped(msgs.CONST_COLLISION)):
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.CONST_COLLISION, role="x")
+    ):
         OLS(df, y="y", x=["const"]).fit()
 
 

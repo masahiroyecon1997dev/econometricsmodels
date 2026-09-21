@@ -12,7 +12,7 @@ separate class; same policy as `LogitOptions`, see
 `docs/spec/ols-spec.md`, "API引数").
 
 `summary()` is not implemented (structured-data-only output policy; see
-`docs/planning/specs/nonlinear-api-design.md` section 5 and the
+`docs/spec/nonlinear-common.md` section 5 and the
 `OLSResults`/`WLSResults`/`LogitResults` precedent).
 """
 
@@ -85,12 +85,12 @@ class ProbitResults:
     Array-valued properties (`params`, `std_errors`, etc.) are exposed
     as dictionaries keyed by coefficient name (for O(1) lookup of a
     single parameter). Use `coef_table()` for a row-oriented listing
-    (`docs/planning/specs/nonlinear-api-design.md` section 5).
+    (`docs/spec/nonlinear-common.md` section 5).
 
     `marginal_effects()`, `predict()`, and `pred_table()` are provided
     as separate methods rather than fields on this class (they depend
     on a representative point / threshold not fixed at `fit()` time;
-    see `docs/planning/specs/nonlinear-api-design.md` section 6).
+    see `docs/spec/nonlinear-common.md` section 6).
 
     Args:
         raw: The estimation result object returned by `_lib.fit_probit`
@@ -125,7 +125,7 @@ class ProbitResults:
         """Coefficient name to z-statistic.
 
         Probit uses a z-test (standard normal), not a t-test (see
-        `docs/planning/specs/nonlinear-api-design.md` section 5).
+        `docs/spec/nonlinear-common.md` section 4).
         """
         return dict(zip(self._raw.param_names, self._raw.z_stats))
 
@@ -342,7 +342,7 @@ class ProbitResults:
 
         Independent of the `confidence_level` used in `fit()` (may
         differ from it; see
-        `docs/planning/specs/nonlinear-api-design.md` section 6). The
+        `docs/spec/nonlinear-common.md` section 6). The
         constant term (intercept) is excluded from the output.
 
         Args:
@@ -357,7 +357,7 @@ class ProbitResults:
             A list of dictionaries, one per explanatory variable
             (excluding the intercept). Keys are `param`, `dydx`,
             `std_err`, `z`, `p_value`, `conf_low`, `conf_high` (see
-            `docs/planning/specs/nonlinear-api-design.md` section 6).
+            `docs/spec/nonlinear-common.md` section 6).
 
         Raises:
             ValidationError: `at` is not one of `"overall"`, `"mean"`,

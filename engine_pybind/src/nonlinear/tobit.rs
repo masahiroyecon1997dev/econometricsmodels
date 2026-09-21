@@ -5,7 +5,7 @@
 //! CLAUDE.md`参照）だが、以下の点がTobit固有:
 //!
 //! - `TobitOptions`は`lower`/`upper`（打ち切り境界）フィールドを追加で持つ
-//!   （`nonlinear-api-design.md`7章で確定済みの既定値`lower=Some(0.0)`・`upper=None`）
+//!   （`docs/spec/nonlinear-common.md`7章で確定済みの既定値`lower=Some(0.0)`・`upper=None`）
 //! - `TobitResult`の`params`/`param_names`/`std_errors`等は`(k+1)`長に統一する
 //!   （`engine::nonlinear::tobit::TobitEstimator::params()`は`β`のみ`k`長だが、
 //!   `std_errors()`等は`σ`を含む`k+1`長という非対称な設計になっているため、Python側では
@@ -15,9 +15,9 @@
 //!   `"expected_observed"`/`"prob_uncensored"`、Rust側`MarginalEffectsTarget`の
 //!   snake_case版、ユーザー確認済み）を追加で受け取る
 //! - `pred_table()`の代わりに`censoring_fit_check()`を提供する（`y`が連続変数のため
-//!   分類の的中表は意味を持たない、`nonlinear-api-design.md`6章）
+//!   分類の的中表は意味を持たない、`docs/spec/nonlinear-common.md`6章）
 //! - `log_likelihood_null`/`lr_statistic`/`lr_p_value`/`pseudo_r_squared`は無い
-//!   （Tobitはこの共通コアから意図的に外れる、`nonlinear-api-design.md`5章）
+//!   （Tobitはこの共通コアから意図的に外れる、`docs/spec/nonlinear-common.md`5章）
 //!
 //! 【責務分離】【言語方針】は`logit.rs`のモジュールdocコメントと同じ
 //! （`.claude/rules/rust-style.md`参照）。
@@ -186,7 +186,7 @@ impl TobitOptions {
 
 /// Estimation results for Tobit.
 ///
-/// Structured data only (no `summary()`); see `docs/planning/specs/nonlinear-api-design.md`
+/// Structured data only (no `summary()`); see `docs/spec/nonlinear-common.md`
 /// section 5. `predict()` / `marginal_effects()` / `censoring_fit_check()` are provided as
 /// separate methods (not part of this struct's fields), matching section 6.
 ///
@@ -201,7 +201,7 @@ impl TobitOptions {
 ///
 /// `log_likelihood_null`/`lr_statistic`/`lr_p_value`/`pseudo_r_squared` are not provided for
 /// Tobit (no closed form exists under censoring; `wald_statistic`/`wald_p_value` provide the
-/// overall model significance test instead, see `nonlinear-api-design.md` section 5).
+/// overall model significance test instead, see `docs/spec/nonlinear-common.md` section 5).
 // `LogitResult`と同じ理由で`skip_from_py_object`・フィールドごとの個別`#[pyo3(get)]`・
 // `Clone`非導出（`estimator: TobitEstimator`が`Clone`を実装していないため）。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
@@ -366,7 +366,7 @@ impl TobitResult {
     /// `target` selects the same three quantities as `predict()` (see its doc). Unlike
     /// Logit/Probit, this is an independent implementation (not the shared
     /// `dydx_and_jacobian` pattern) because the formula differs per `target`
-    /// (`nonlinear-api-design.md` section 6).
+    /// (`docs/spec/nonlinear-common.md` section 6).
     ///
     /// Independent of `fit()`'s `confidence_level` (re-evaluated here so callers can
     /// use a different confidence level without re-fitting).
@@ -410,7 +410,7 @@ impl TobitResult {
     /// that applies to this model, compares the observed rate (fraction of training
     /// observations exactly at that boundary) against the model-implied average
     /// probability. Replaces Logit/Probit's `pred_table()` (which is not meaningful for
-    /// Tobit's continuous `y`, `nonlinear-api-design.md` section 6).
+    /// Tobit's continuous `y`, `docs/spec/nonlinear-common.md` section 6).
     ///
     /// `lower`/`upper` in the returned `CensoringFitCheckResult` are `None` when the
     /// corresponding `TobitOptions.lower`/`upper` was `None` (that direction has no

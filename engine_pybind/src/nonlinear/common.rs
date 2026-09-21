@@ -22,8 +22,7 @@ use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
 /// 書けない。関数として実装し、呼び出し側で`.map_err(mle_error_to_pyerr)?`する
 /// （`least_squares_error_to_pyerr`と同じ理由、`engine_pybind/src/linear/common.rs`参照）。
 ///
-/// 対応表は`docs/planning/specs/nonlinear-implementation-notes.md`「エラー型: nonlinear系統で
-/// 共有（MleError）」参照。
+/// 対応表は`docs/spec/nonlinear-common.md`2章「エラー型（`MleError`、共有）」参照。
 pub(crate) fn mle_error_to_pyerr(err: MleError) -> PyErr {
     match err {
         MleError::Common(common) => common_error_to_pyerr(common),

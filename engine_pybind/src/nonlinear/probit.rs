@@ -34,10 +34,9 @@ use crate::validation::{validate_common_roles, validate_no_existing_column};
 
 /// Estimation options for Probit.
 ///
-/// See `docs/planning/specs/nonlinear-api-design.md` and
-/// `docs/planning/specs/nonlinear-implementation-notes.md` for the rationale behind
+/// See `docs/spec/nonlinear-common.md` for the rationale behind
 /// each field's meaning and default value. Field-for-field identical to `LogitOptions`
-/// (the two models share the same option surface, `nonlinear-api-design.md` section 7).
+/// (the two models share the same option surface, `docs/spec/nonlinear-common.md` section 7).
 ///
 /// `start_params` (user-specified initial values) is intentionally omitted: the
 /// underlying engine (`ProbitEstimator::fit`) does not accept it yet (deferred,
@@ -168,13 +167,13 @@ impl ProbitOptions {
 
 /// Estimation results for Probit.
 ///
-/// Structured data only (no `summary()`); see `docs/planning/specs/nonlinear-api-design.md`
+/// Structured data only (no `summary()`); see `docs/spec/nonlinear-common.md`
 /// section 5. Row-oriented table construction (e.g. a `coef_table`) is left to
 /// `python_package`. All array-valued fields (`params`, `std_errors`, etc.) share the
 /// same order as `param_names`.
 ///
 /// `predict()` / `pred_table()` / `marginal_effects()` are provided as separate methods
-/// (not part of this struct's fields), matching `nonlinear-api-design.md` section 6.
+/// (not part of this struct's fields), matching `docs/spec/nonlinear-common.md` section 6.
 // `ProbitResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`ProbitOptions`の`from_py_object`とは
 // 対照的。`LogitResult`と同じ理由）。
@@ -324,7 +323,7 @@ impl ProbitResult {
     ///
     /// Independent of `fit()`'s `confidence_level` (re-evaluated here so callers can
     /// use a different confidence level without re-fitting). See
-    /// `docs/planning/specs/nonlinear-api-design.md` section 6.
+    /// `docs/spec/nonlinear-common.md` section 6.
     ///
     /// # Errors
     /// - `at` is not one of `"overall"`, `"mean"`, `"median"` (case-insensitive):

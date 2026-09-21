@@ -12,14 +12,14 @@ separate class; same policy as `LogitOptions`/`OLSOptions`, see
 `docs/spec/ols-spec.md`, "API引数").
 
 `summary()` is not implemented (structured-data-only output policy; see
-`docs/planning/specs/nonlinear-api-design.md` section 5 and the
+`docs/spec/nonlinear-common.md` section 5 and the
 `OLSResults`/`WLSResults`/`LogitResults` precedent).
 
 Unlike Logit/Probit, Tobit does not have `log_likelihood_null`,
 `lr_statistic`, `lr_p_value`, or `pseudo_r_squared` (no closed form
 exists for the intercept-only model under censoring); `wald_statistic`/
 `wald_p_value` provide the overall model significance test instead (see
-`docs/planning/specs/nonlinear-api-design.md` section 5). There is no
+`docs/spec/nonlinear-common.md` section 5). There is no
 `pred_table()`; `censoring_fit_check()` takes its place (`y` is
 continuous, so a classification table is not meaningful).
 """
@@ -102,12 +102,12 @@ class TobitResults:
     `beta` in a unified `(k+1)`-length representation (see
     `engine_pybind/src/nonlinear/tobit.rs`, `TobitResult`). Use
     `coef_table()` for a row-oriented listing
-    (`docs/planning/specs/nonlinear-api-design.md` section 5).
+    (`docs/spec/nonlinear-common.md` section 5).
 
     `marginal_effects()`, `predict()`, and `censoring_fit_check()` are
     provided as separate methods rather than fields on this class (they
     depend on a representative point / prediction target not fixed at
-    `fit()` time; see `docs/planning/specs/nonlinear-api-design.md`
+    `fit()` time; see `docs/spec/nonlinear-common.md`
     section 6).
 
     Args:
@@ -143,7 +143,7 @@ class TobitResults:
         """Coefficient name to z-statistic (includes `"sigma"`).
 
         Tobit uses a z-test (standard normal), not a t-test (see
-        `docs/planning/specs/nonlinear-api-design.md` section 5).
+        `docs/spec/nonlinear-common.md` section 4).
         """
         return dict(zip(self._raw.param_names, self._raw.z_stats))
 
@@ -376,7 +376,7 @@ class TobitResults:
 
         Unlike Logit/Probit, this is Tobit's own implementation (not
         the shared `dydx_and_jacobian` pattern) because the formula
-        differs per `target` (`nonlinear-api-design.md` section 6,
+        differs per `target` (`docs/spec/nonlinear-common.md` section 6,
         Issue #211's conclusion). Independent of the `confidence_level`
         used in `fit()` (may differ from it). The constant term
         (intercept) is excluded from the output.
@@ -395,7 +395,7 @@ class TobitResults:
             A list of dictionaries, one per explanatory variable
             (excluding the intercept). Keys are `param`, `dydx`,
             `std_err`, `z`, `p_value`, `conf_low`, `conf_high` (see
-            `docs/planning/specs/nonlinear-api-design.md` section 6).
+            `docs/spec/nonlinear-common.md` section 6).
 
         Raises:
             ValidationError: `at` is not one of `"overall"`, `"mean"`,
@@ -433,7 +433,7 @@ class TobitResults:
         training observations exactly at that boundary) against the
         model-implied average probability. Replaces Logit/Probit's
         `pred_table()`, which is not meaningful for Tobit's continuous
-        `y` (`nonlinear-api-design.md` section 6). A direction is
+        `y` (`docs/spec/nonlinear-common.md` section 6). A direction is
         omitted from the result when the corresponding
         `TobitOptions.lower`/`upper` was `None` (that direction has no
         censoring).

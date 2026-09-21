@@ -1,6 +1,6 @@
 # engine_pybind/src/nonlinear/ 実装ノート（Logit/Probit/Tobit）
 
-このファイルは `engine_pybind/src/nonlinear/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景は`docs/planning/specs/nonlinear-api-design.md`・`nonlinear-implementation-notes.md`・`docs/spec/logit-spec.md`・`docs/spec/probit-spec.md`・`docs/spec/tobit-spec.md`が正本。ここは差分の索引のみ。
+このファイルは `engine_pybind/src/nonlinear/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景は`docs/spec/nonlinear-common.md`・`docs/spec/logit-spec.md`・`docs/spec/probit-spec.md`・`docs/spec/tobit-spec.md`が正本。ここは差分の索引のみ。
 
 ## Probitの実装状況（実装済み）
 

@@ -1,6 +1,6 @@
 # engine_pybind/src/iv/ 実装ノート（IV: 2SLS/GMM）
 
-このファイルは `engine_pybind/src/iv/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景は `docs/planning/specs/iv-api-design.md` が正本。ここは差分の索引のみ。
+このファイルは `engine_pybind/src/iv/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景は `docs/spec/iv-spec.md` が正本。ここは差分の索引のみ。
 
 ## 踏んだ罠（再発防止）
 
@@ -44,4 +44,4 @@ Logitと同じ2段階に分けた。
 
 ## `IVResult.stats`の命名（`t_stats`/`z_stats`ではない理由）
 
-`IVResult`は`method="2sls"`（t分布）・`method="gmm"`（z分布、`iv-api-design.md`3.2節）の両方で共有される単一の型のため、`OLSResult.t_stats`・`LogitResult.z_stats`のような分布固定の名前は使えない。`engine::inference::InferenceStat`が同じ理由で`stat`という分布非依存の名前を使っている前例に倣い、`stats`とした（ユーザー確認済み、`iv-api-design.md`2.1節に反映済み）。GMM側は`GmmEstimator::z_stats()`から配線する（`engine/src/iv/gmm.rs`参照、z分布で確定済み）。
+`IVResult`は`method="2sls"`（t分布）・`method="gmm"`（z分布、`docs/spec/iv-spec.md`3.2節）の両方で共有される単一の型のため、`OLSResult.t_stats`・`LogitResult.z_stats`のような分布固定の名前は使えない。`engine::inference::InferenceStat`が同じ理由で`stat`という分布非依存の名前を使っている前例に倣い、`stats`とした（ユーザー確認済み、`docs/spec/iv-spec.md`2章に反映済み）。GMM側は`GmmEstimator::z_stats()`から配線する（`engine/src/iv/gmm.rs`参照、z分布で確定済み）。

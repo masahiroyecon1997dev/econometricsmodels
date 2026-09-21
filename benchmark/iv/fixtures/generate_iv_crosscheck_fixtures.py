@@ -3,7 +3,7 @@ iv_crosscheck.json）を生成するスクリプト。
 
 `tests/fixtures/benchmarks/iv.json`（linearmodels、主リファレンス）とは
 別に、独立実装（R: ivreg + sandwich/lmtest）によるクロスチェック値を生成する
-（`docs/planning/specs/iv-api-design.md`5.2節参照）。
+（`docs/spec/iv-spec.md`4章参照）。
 
 シナリオ・cov_type・クラスタケースの構成は`generate_iv_fixtures.py`
 （linearmodelsクロスチェック）と揃える（ユーザー確認済み）。
@@ -12,7 +12,7 @@ iv_crosscheck.json）を生成するスクリプト。
 
 - **cov_type**: classical/hc0〜hc3/cluster/hac。hc2/hc3は`vcovHC(type="HC2"/"HC3")`
   で計算でき本実装と数値一致することを実機確認済みのため対象に含む
-  （`iv-api-design.md`3.1節、`benchmark/iv/references/run_ivreg.R`参照）。
+  （`iv-spec.md`3.1節、`benchmark/iv/references/run_ivreg.R`参照）。
 - **weak_instrument_f・sargan（過剰識別検定）**: ivregの`summary(diagnostics=TRUE)`が
   常にclassical（iid）vcovで計算する仕様のため、cov_typeによらず同じ値を全cov_type
   エントリに含める（`weak_instrument_f_statistics`/`overid_statistic`が常にclassical
@@ -280,15 +280,15 @@ def build_fixtures() -> dict:
             "信頼区間・nobs/df_resid・R²・ロバストWald検定（f_statistic/"
             "f_p_value）・弱操作変数F統計量・Sargan（過剰識別検定）・"
             "Wu-Hausman（全cov_type、clusterのみp値除く）を含む"
-            "（iv-api-design.md 5.2節）"
+            "（iv-spec.md 4章）"
         ),
         "generated_at": datetime.now(UTC).isoformat(),
         "r_version": r_version,
         "ivreg_version": ivreg_version,
         "note": (
-            "hc2/hc3も`vcovHC(type=\"HC2\"/\"HC3\")`で計算し含める（本実装と数値"
-            "一致することを実機確認済み、iv-api-design.md 3.1節）。GMMはivregが"
-            "対応していないため対象外（5.3節、Rクロスチェック省略の例外規定）。"
+            'hc2/hc3も`vcovHC(type="HC2"/"HC3")`で計算し含める（本実装と数値'
+            "一致することを実機確認済み、iv-spec.md 3.1節）。GMMはivregが"
+            "対応していないため対象外（iv-spec.md4章、Rクロスチェック省略の例外規定）。"
             "weak_instrument_f・sargan_statistic/sargan_p_valueはivregの"
             "summary(diagnostics=TRUE)が常にclassical vcovで計算する仕様のため、"
             "全cov_typeエントリで同じ値になる（実測確認済み）。just_identified"

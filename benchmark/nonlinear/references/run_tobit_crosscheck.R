@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # Tobit（打ち切り回帰）の数値照合用リファレンス値生成スクリプト。
 #
-# `docs/planning/specs/nonlinear-api-design.md` 9章で確定した役割分担:
+# `docs/spec/nonlinear-common.md` 8章で確定した役割分担:
 #   - 主リファレンス : R `AER::tobit`（`survival::survreg` エンジン）
 #   - 交差検証       : R `censReg`（`maxLik` エンジン）
 # `survreg` と `maxLik` は最適化実装が完全に独立しているため交差検証として
@@ -26,7 +26,7 @@
 # パラメータ化するため、本実装が公開する `(β, σ)` 空間へヤコビアン
 # `diag(1,…,1, σ)`（`dσ/d(log σ) = σ`）で両側から変換する
 # （`engine/src/nonlinear/tobit.rs` の `cov_params` と同じ方針、
-# `docs/planning/specs/nonlinear-implementation-notes.md`「限界効果」節）。
+# `docs/spec/tobit-spec.md`3.3節）。
 #
 # ロバスト共分散は `sandwich` パッケージの `estfun.survreg`/`bread.survreg`
 # （`censReg` は `maxLik` 経由の `estfun`）を使う:

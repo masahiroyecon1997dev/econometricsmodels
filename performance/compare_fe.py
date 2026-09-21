@@ -11,7 +11,7 @@ CLAUDE.md 1章「計算コアはRustで実装し高速化」の狙いを定量�
 
 ## リファレンス実装
 
-FE/RE共通のPython主リファレンス（`docs/planning/specs/panel-api-design.md`5.1節・
+FE/RE共通のPython主リファレンス（`docs/spec/panel-common.md`5.1節・
 `benchmark/panel/references/linearmodels_ref.py`と同じ）である
 `linearmodels.panel.PanelOLS`と比較する。
 

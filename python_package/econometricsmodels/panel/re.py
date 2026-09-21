@@ -6,7 +6,7 @@ logic live entirely on the Rust side; this module only provides the
 Python-facing API shape for polars DataFrames — `entity`/`time` as bare
 column-name arguments, `x` as a list, an options object for estimation
 settings (CLAUDE.md section 2, `.claude/rules/python-style.md`
-"設計方針との整合性", `docs/planning/specs/panel-api-design.md` section 1).
+"設計方針との整合性", `docs/spec/panel-common.md` section 1).
 
 `REOptions` is re-exported as-is from `_lib` (not redefined as a
 separate class; same policy as `OLSOptions`/`IVOptions`/`FEOptions`).
@@ -14,7 +14,7 @@ separate class; same policy as `OLSOptions`/`IVOptions`/`FEOptions`).
 Unlike FE, RE has no separate "additional result" method: the Hausman
 test comparing RE against the equivalent FE specification is computed
 automatically inside `fit()` and exposed directly as properties on
-`REResults` (`docs/planning/specs/panel-api-design.md` section 2.4).
+`REResults` (`docs/spec/panel-common.md` section 2.4).
 
 `summary()` is not implemented (structured-data-only output policy; see
 the `OLSResults`/`FEResults` precedent).
@@ -34,7 +34,7 @@ class RE:
     """Random effects (Swamy-Arora GLS) panel regression estimator.
 
     Unlike FE, RE has an intercept and supports entity-direction random
-    effects only (`docs/planning/specs/panel-api-design.md` section
+    effects only (`docs/spec/panel-common.md` section
     7.6, two-way RE is out of scope for v1).
 
     Args:
@@ -124,7 +124,7 @@ class REResults:
     specification (`hausman_statistic`/`hausman_p_value`/`hausman_df`)
     is computed automatically inside `fit()` and exposed directly as
     properties here, rather than as a separate method like FE's
-    `fixed_effects()` (`panel-api-design.md` section 2.4). All three
+    `fixed_effects()` (`panel-common.md` section 2.4). All three
     are `None` when the internal FE comparison used for the Hausman
     test is unavailable — in practice this only happens when
     `REOptions.time` is set (requesting the two-way FE comparison,

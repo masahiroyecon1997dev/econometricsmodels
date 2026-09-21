@@ -3,7 +3,7 @@
 
 `tests/fixtures/benchmarks/re.json`（linearmodels、主リファレンス）とは別に、
 独立実装（R: plm）によるクロスチェック値を生成する。役割分担は
-`docs/planning/specs/panel-api-design.md`5.2節・5.3節の通り。
+`docs/spec/panel-common.md`5.2節・5.3節の通り。
 
 ## このフィクスチャだけが持つ統計量（単一参照実装の例外）
 
@@ -36,8 +36,8 @@ REのaic/bic/log_likelihoodの独立検証は現時点で行わない
 
 ## `hausman_statistic`の符号について（Issue #350で解決済み）
 
-本フィクスチャ作成時（2026-09-20）に、当時の設計文書（`panel-api-design.md`
-7.3節・`engine/src/panel/CLAUDE.md`）の「本実装の`hausman_statistic`は差行列
+本フィクスチャ作成時（2026-09-20）に、当時の設計文書（`panel-common.md`
+`re-spec.md`3.7節・`engine/src/panel/CLAUDE.md`）の「本実装の`hausman_statistic`は差行列
 `Var(β_FE)-Var(β_RE)`が有限標本で非正定値になると負になりうるが、その場合も
 そのまま返す。これは`plm::phtest`と同じ挙動」という記載が誤りであることが
 判明した。`plm`の`phtest.panelmodel`（`plm:::phtest.panelmodel`）は

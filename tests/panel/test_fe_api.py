@@ -1,6 +1,6 @@
 """FE の成功パスの構造・API・オプション反映の検証。
 
-確定済み設計（`docs/planning/specs/panel-api-design.md`）どおりの結果型・
+確定済み設計（`docs/spec/panel-common.md`）どおりの結果型・
 辞書キー・ラベルになっていること、`FEOptions`の各フィールドが
 engine_pybind経由で反映されることを確認する。`ValidationError`/
 `ComputationError`パスは`test_fe_validation.py`、主リファレンス
@@ -29,7 +29,7 @@ def test_fit_succeeds_and_returns_fe_results(fe_dataset):
 
 def test_default_options_use_cluster_cov_type_one_way(fe_dataset):
     """`options`省略時は`FEOptions()`の既定値（cov_type="cluster"、entity
-    単位・1-way）が使われる（panel-api-design.md 3.2節）。
+    単位・1-way）が使われる（panel-common.md 3.2節）。
     """
     res = our_fit(fe_dataset)
     assert res.cov_type == "cluster"
@@ -169,8 +169,8 @@ def test_confidence_level_affects_conf_int_width(fe_dataset):
 
 
 def test_time_option_switches_one_way_two_way(fe_dataset):
-    """`time`が`None`なら1-way、指定すれば2-way（6.2節）。自由度の式の違い
-    （6.3節: 1-way`n-n_entities-k`、2-way`n-n_entities-n_periods+1-k`）が
+    """`time`が`None`なら1-way、指定すれば2-way（`fe-spec.md`1章）。自由度の式の違い
+    （`fe-spec.md`3.2節: 1-way`n-n_entities-k`、2-way`n-n_entities-n_periods+1-k`）が
     `df_model`に反映されることで区別する。
     """
     n_entities = fe_dataset["entity"].n_unique()

@@ -2,7 +2,7 @@
 //!
 //! `LeastSquaresError`（`engine::linear::common`）・`MleError`（`engine::nonlinear::common`）・
 //! `IvError`（`engine::iv::common`）の前例に倣い、FE/REで個別に`FeError`/`ReError`を作らず
-//! `PanelError`を共有する（`docs/planning/specs/panel-api-design.md`4.4節）。
+//! `PanelError`を共有する（`docs/spec/panel-common.md`4.4節）。
 //!
 //! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
 //! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は`engine::error::
@@ -11,21 +11,21 @@
 //! FE/RE固有バリアントは、`docs/spec/fe-spec.md`（FE固有論点）・`docs/spec/re-spec.md`
 //! （RE固有論点）で仕様が確定しているバリデーション条件をカバーする:
 //!
-//! - `IdentifierDimensionMismatch`: `y`と`entity`/`time`の長さ不一致（`panel-api-design.md`
+//! - `IdentifierDimensionMismatch`: `y`と`entity`/`time`の長さ不一致（`panel-common.md`
 //!   1章）
 //! - `InsufficientDegreesOfFreedom`: パネル自由度調整（`fe-spec.md`3.2節）
 //! - `SingletonGroup`: 観測数1のグループ（`fe-spec.md`1章）
 //! - `UnbalancedPanelForTwoWay`: 2-way FEのバランスパネル必須（`fe-spec.md`1章）
 //! - `ZeroVarianceAfterDemeaning`: within変換後に分散ゼロの説明変数（`fe-spec.md`1章）
-//! - `TwoWayRequiresTime`: 2-way FE指定時の`time`必須（`panel-api-design.md`1.1節）
+//! - `TwoWayRequiresTime`: 2-way FE指定時の`time`必須（`panel-common.md`1.1節）
 //! - `HacRequiresTime`: Driscoll-Kraay型パネルHAC（`FeCovType::Hac`）指定時の`time`必須
-//!   （`panel-api-design.md`3.1節。2-way FEは`TwoWayRequiresTime`で既に
+//!   （`panel-common.md`3.1節。2-way FEは`TwoWayRequiresTime`で既に
 //!   必須化されているため、1-way FEでのみ発生しうる）
 //! - `InvalidHacBandwidth`: `FeCovType::Hac`の明示的な`bandwidth`が`[0, t)`の範囲外
 //!   （`t`はユニークな時点数。`LeastSquaresError::InvalidHacLags`と同型だが
 //!   上限が観測数`n`ではなく時点数`t`）
 //! - `WithinRegressionFailed`: within変換済みデータの最小二乗推定委譲の失敗
-//!   （`panel-api-design.md`4.3節）
+//!   （`panel-common.md`4.3節）
 //! - `FTestFailed`: F統計量（`fe.rs`モジュールdoc「自由度調整」のF統計量節）の
 //!   Wald検定（`crate::linear::ols::wald_f_test`）が失敗した場合。`WithinRegressionFailed`と
 //!   意味が異なる（`OlsEstimator::fit`自体は既に成功した後の、F検定固有の共分散部分行列の
@@ -110,7 +110,7 @@ pub enum PanelError {
     Common(#[from] CommonError),
 
     /// `y`と`entity`または`time`の長さが一致しない（`FeInput::from_columns`、
-    /// `docs/planning/specs/panel-api-design.md`1章）。
+    /// `docs/spec/panel-common.md`1章）。
     ///
     /// `y`と`x`列の不一致は`CommonError::DimensionMismatch`が既にカバーしている
     /// （対象列が異なるため専用バリアントにする）。`entity`/`time`のどちらの不一致かは
@@ -129,7 +129,7 @@ pub enum PanelError {
     /// FEの`df_resid`は`n_obs`から個体ダミー相当の自由度を追加で消費するため、
     /// - 1-way: `df_resid = n_obs - n_entities - k`
     /// - 2-way: `df_resid = n_obs - n_entities - n_periods + 1 - k`
-    ///   （entityダミーとtimeダミーの間の定数項ぶんのランク落ちを`+1`で補正、6.3節）
+    ///   （entityダミーとtimeダミーの間の定数項ぶんのランク落ちを`+1`で補正、`fe-spec.md`3.2節）
     ///
     /// となる。`CommonError::InsufficientObservations`（単純な`n <= k`）とは
     /// 消費する自由度の内訳が異なるため別バリアントにする。`n_periods`は1-wayでは
@@ -201,7 +201,7 @@ pub enum PanelError {
     /// 2-way FE（entity + time FE）を要求したのに`time`列が指定されていない。
     ///
     /// `time`は`FEOptions`内の`Option`フィールドで、2-way指定時のみ実質必須になる
-    /// 「条件付き必須」パターン（`panel-api-design.md`1.1節。`OLSOptions.cluster_col`が
+    /// 「条件付き必須」パターン（`panel-common.md`1.1節。`OLSOptions.cluster_col`が
     /// `cov_type="cluster"`のときだけ必須になるのと同型）。未指定時のバリデーション
     /// エラーとしてここで担保する。
     #[error("two-way fixed effects requires the `time` option to be set")]
@@ -228,7 +228,7 @@ pub enum PanelError {
     InvalidHacBandwidth { bandwidth: i64, t: usize },
 
     /// within変換済みデータに対する最小二乗推定（`OlsEstimator::fit`への委譲、
-    /// `panel-api-design.md`4.3節。WLSがOLSへ委譲するのと同型のパターン）が失敗した。
+    /// `panel-common.md`4.3節。WLSがOLSへ委譲するのと同型のパターン）が失敗した。
     ///
     /// 委譲先が返す`LeastSquaresError`をそのまま保持する（IVの`SecondStageFailed
     /// { source }`と同型のラップ）。`#[from]`で透過させず明示的に
@@ -256,7 +256,7 @@ pub enum PanelError {
         source: LeastSquaresError,
     },
 
-    /// RE（Swamy-Arora分散成分推定、7.1節）のbetween回帰
+    /// RE（Swamy-Arora分散成分推定、`re-spec.md`3.1節）のbetween回帰
     /// （エンティティ平均への`OlsEstimator::fit(include_intercept=true)`）が失敗した。
     ///
     /// `WithinRegressionFailed`と同じ`LeastSquaresError`ラップだが、対象がFEのwithin回帰
@@ -269,7 +269,7 @@ pub enum PanelError {
         source: LeastSquaresError,
     },
 
-    /// RE（`ReEstimator::fit`、7.4節）の準偏差変換済みデータへの
+    /// RE（`ReEstimator::fit`、`re-spec.md`3.2節）の準偏差変換済みデータへの
     /// `OlsEstimator::fit(include_intercept=false)`委譲が失敗した。
     ///
     /// `WithinRegressionFailed`（FEのwithin変換済みデータ）・`BetweenRegressionFailed`
@@ -587,7 +587,7 @@ pub(crate) fn panel_driscoll_kraay_cov_params(
 ///
 /// FE/REの`fit()`は`y`と`x`の各列にこの関数をループ適用し、変換後の列を
 /// `OlsEstimator::fit`へ渡す（WLSがsqrt(w)変換したデータをOLSへ委譲するのと同型の
-/// パターン、`panel-api-design.md`4.3節・`re-spec.md`3.2節）。列ごとに独立な変換のため、
+/// パターン、`panel-common.md`4.3節・`re-spec.md`3.2節）。列ごとに独立な変換のため、
 /// 列単位の関数として実装し
 /// 呼び出し側でループする（`y`/`x`をまとめて受けるより単体テストが単純）。
 ///
@@ -608,9 +608,9 @@ pub(crate) fn panel_driscoll_kraay_cov_params(
 /// エラーではなく`engine_pybind`〜`engine`間の内部契約違反のため、`validate_cluster_groups`
 /// と同じ扱い。
 ///
-/// グループ平均（`ȳ_i.`）は返さない。`fixed_effects()`（6.6節）の`α_i`復元は
+/// グループ平均（`ȳ_i.`）は返さない。`fixed_effects()`（`fe-spec.md`3.5節）の`α_i`復元は
 /// この関数を拡張せず`fe.rs`側で`FeInput`の元データから独立に再計算する形で実装済み
-/// （`engine/src/panel/CLAUDE.md`参照）。σ_ε²再利用（7.4節、RE実装）で平均の保持が
+/// （`engine/src/panel/CLAUDE.md`参照）。σ_ε²再利用（`re-spec.md`3.2節、RE実装）で平均の保持が
 /// 必要になった場合は、その時点で改めて検討する。
 ///
 /// # Panics
@@ -1107,7 +1107,7 @@ mod tests {
     fn quasi_demean_column_single_group_with_theta_one_is_all_zero() {
         // 全行が同一エンティティ（グループが1つだけ）＋ θ=1 → 全行がグループ平均に
         // 一致するため出力は全ゼロ（この列だけでは within 変換後に情報が残らない。
-        // 6.7節の分散ゼロ検証・6.5節のsingleton検証は消費側 fe.rs の責務）。
+        // `fe-spec.md`1章の分散ゼロ検証・`fe-spec.md`1章のsingleton検証は消費側 fe.rs の責務）。
         let entity = entities(&["a", "a", "a", "a"]);
         let col = [3.0, 5.0, 7.0, 9.0]; // mean = 6.0
         let theta = theta_map(&[("a", 1.0)]);

@@ -5,7 +5,7 @@ FE（固定効果パネル回帰、within推定）の確定済み仕様。`engin
 `python_package/econometricsmodels/panel/fe.py`として実装済み。FE/RE共通の設計判断（`entity`/
 `time`の引数設計、結果フィールドの共通コア、`cov_type`のサポート対象・デフォルト、内部実装の
 共通化方針、リファレンス実装・テスト方針）は
-[`panel-api-design.md`](../planning/specs/panel-api-design.md)を参照し、本ドキュメントには
+[`panel-common.md`](./panel-common.md)を参照し、本ドキュメントには
 FE固有の内容のみを記載する。
 
 ## 1. API引数
@@ -88,7 +88,7 @@ FE固有の内容のみを記載する。
 ### 3.1 within変換
 
 polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）を直接扱う。1-way/2-wayとも
-`quasi_demean_column`（θ=1固定、7.4節参照）を使う:
+`quasi_demean_column`（θ=1固定、[`re-spec.md`](./re-spec.md)3.2節参照）を使う:
 
 - **1-way**: `quasi_demean_column`を1回呼ぶだけ（`ỹ_i = y_i - ȳ_i.`）。
 - **2-way**: 閉形式の二重デミーニング`ỹ_it = y_it - ȳ_i. - ȳ_.t + ȳ..`を直接計算するのでは

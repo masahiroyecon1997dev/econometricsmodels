@@ -3,7 +3,7 @@
 //! OLS（t分布）・Logit（z分布）で、係数から`std_err`/`stat`/`p_value`/
 //! `conf_low`/`conf_high`を計算する処理がほぼ同型のまま独立実装されていたため、
 //! `statrs::distribution::ContinuousCDF`をジェネリックに取る形でここに集約する
-//! （`docs/planning/specs/panel-api-design.md` 4.2節）。
+//! （`docs/spec/panel-common.md` 4.2節）。
 //! FE/RE・IVの2SLS（t分布）・GMM（z分布）でも同じ関数を使う想定。
 
 use statrs::distribution::ContinuousCDF;

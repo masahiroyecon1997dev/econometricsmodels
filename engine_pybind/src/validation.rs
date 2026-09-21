@@ -136,7 +136,7 @@ pub fn validate_no_existing_column(df: &DataFrame, column_name: &str) -> PyResul
 ///
 /// `roles`は`(ロール名, 値)`のペアのリスト（例: `[("y", RoleValue::Single(&y)),
 /// ("x", RoleValue::Multi(&x))]`はOLS/Logit、IVの`instruments`が`x_exog`/`x_endog`と
-/// 重複していないかの検証（`docs/planning/specs/iv-api-design.md`1.1.1節）にも使う）。
+/// 重複していないかの検証（`docs/spec/iv-spec.md`1.1節）にも使う）。
 ///
 /// 判定順序は`roles`のリスト順（各ロールを、それより前の全ロールと総当たりで照合する）。
 /// 複数の違反が同時に存在する場合にどのメッセージが優先されるかはこの順序に従うが、
@@ -148,7 +148,7 @@ pub fn validate_no_existing_column(df: &DataFrame, column_name: &str) -> PyResul
 /// `roles`のリストで後方に置かれた方が使われる（`duplicate_role_message`参照）。重複時に
 /// 「こちらの問題として報告したい」ロールは、リストの後ろに置くこと（例:
 /// `instruments`が`x_exog`/`x_endog`と重複していないかを検証する場合、`instruments`を
-/// 最後に置く。IV実装時の呼び出しコードは`docs/planning/specs/iv-api-design.md`1.1.1節の
+/// 最後に置く。IV実装時の呼び出しコードは`docs/spec/iv-spec.md`1.1節の
 /// 意図に沿ってこの順序を守ること）。単一列ロール（`Single`）が複数列ロール（`Multi`）と
 /// 重複した場合は、リスト内の位置に関わらず常に単一列ロール側が主語になるため、この契約は
 /// 影響しない。
@@ -434,7 +434,7 @@ mod tests {
     #[test]
     fn validate_no_duplicate_roles_returns_error_when_two_multi_roles_overlap() {
         // `instruments`が`x_exog`と重複する列名を含むケース
-        // （`docs/planning/specs/iv-api-design.md`1.1.1節）。
+        // （`docs/spec/iv-spec.md`1.1節）。
         let x_exog = ["x1".to_string(), "x2".to_string()];
         let instruments = ["z1".to_string(), "x1".to_string()];
         assert!(

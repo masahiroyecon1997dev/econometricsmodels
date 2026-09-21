@@ -38,7 +38,7 @@ from benchmark.panel.references.linearmodels_ref import run
 # でも動くことの確認はできるが統計的な意味は薄い、OLSのHACと同じ扱い）。
 COV_TYPES = ["classical", "hc1", "cluster", "hac"]
 
-# unbalancedは1-way専用（6.4節: 2-way FEはバランスパネル必須、2-way要求時の
+# unbalancedは1-way専用（`fe-spec.md`3.1節: 2-way FEはバランスパネル必須、2-way要求時の
 # ValidationErrorはunbalanced_two_wayシナリオで別途確認する。数値比較対象外）。
 ONE_WAY_ONLY_SCENARIOS = ["unbalanced"]
 
@@ -135,7 +135,7 @@ def build_fixtures() -> dict:
             "2-way要求時のValidationErrorはunbalanced_two_wayシナリオで確認）。"
             "hc2/hc3はlinearmodels.PanelOLSが提供しないため対象外"
             "（generate_fe_crosscheck_fixtures.pyのfixestクロスチェックのみで"
-            "検証する単一参照実装の例外、panel-api-design.md5.4節と同型）。"
+            "検証する単一参照実装の例外、panel-common.md5.4節と同型）。"
             "aic/bicも同じ理由でlinearmodelsに無く、"
             "generate_fe_crosscheck_fixtures.py側のみに含まれる。"
             "2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの"

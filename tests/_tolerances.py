@@ -129,7 +129,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
         "rtol_method": 2e-7,
     },
     # Tobit の交差検証は R `censReg`（`maxLik` エンジン）。survreg とは最適化実装が
-    # 完全に独立（`nonlinear-api-design.md` 9章）。censReg 側の maxLik 収束を
+    # 完全に独立（`nonlinear-common.md` 8章）。censReg 側の maxLik 収束を
     # reltol=1e-14 まで詰めた上で、合成シナリオは点推定・SE・限界効果とも
     # 相対 ~2e-9 で一致するため RTOL_MACHINE_PRECISION を適用する。
     "tobit_crosscheck": {

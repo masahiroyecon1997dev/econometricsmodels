@@ -1,6 +1,6 @@
 """RE の成功パスの構造・API・オプション反映の検証。
 
-確定済み設計（`docs/planning/specs/panel-api-design.md`）どおりの結果型・
+確定済み設計（`docs/spec/panel-common.md`）どおりの結果型・
 辞書キー・ラベルになっていること、`REOptions`の各フィールドがengine_pybind
 経由で反映されることを確認する。`ValidationError`/`ComputationError`パスは
 `test_re_validation.py`、主リファレンス（linearmodels）との数値照合は
@@ -31,7 +31,7 @@ def test_fit_succeeds_and_returns_re_results(fe_dataset):
 
 def test_default_options_use_cluster_cov_type(fe_dataset):
     """`options`省略時は`REOptions()`の既定値（cov_type="cluster"、entity
-    単位）が使われる（panel-api-design.md 3.2節、FEと同じデフォルト）。
+    単位）が使われる（panel-common.md 3.2節、FEと同じデフォルト）。
     """
     res = our_fit_re(fe_dataset)
     assert res.cov_type == "cluster"
@@ -117,7 +117,7 @@ def test_n_obs_dep_var_name_n_entities(fe_dataset):
 
 def test_df_resid_and_df_model(fe_dataset):
     """REのdf_residは`n - k`（FEの`n - n_entities - k`とは異なる式、GLS変換
-    のためentityダミー相当の自由度を消費しない、7.5節）。`df_model`は切片を
+    のためentityダミー相当の自由度を消費しない、`re-spec.md`3.3節）。`df_model`は切片を
     含む設計行列の全列数（`k=3`: const, x1, x2）。
     """
     res = our_fit_re(fe_dataset)
@@ -125,7 +125,7 @@ def test_df_resid_and_df_model(fe_dataset):
     assert res.df_resid == fe_dataset.height - 3
 
 
-# ── ハウスマン検定（panel-api-design.md 2.4節・docs/spec/re-spec.md 3.7節） ──
+# ── ハウスマン検定（panel-common.md 2.4節・docs/spec/re-spec.md 3.7節） ──
 
 
 def test_hausman_present_for_one_way(fe_dataset):

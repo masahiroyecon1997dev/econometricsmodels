@@ -3,7 +3,7 @@
 
 `tests/fixtures/benchmarks/fe.json`（linearmodels、主リファレンス）とは別に、
 独立実装（R: fixest）によるクロスチェック値を生成する。役割分担は
-`docs/planning/specs/panel-api-design.md`5.2節の通り。
+`docs/spec/panel-common.md`5.2節の通り。
 
 ## このフィクスチャだけが持つ統計量（単一参照実装の例外）
 

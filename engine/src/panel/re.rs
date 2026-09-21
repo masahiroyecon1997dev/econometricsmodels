@@ -9,7 +9,7 @@
 //! 同じ理由（`quasi_demean_column`が`&[f64]`の列単位で動く設計のため）で`faer::Mat`は
 //! 組み立てない（`docs/spec/re-spec.md`3.2節）。
 //!
-//! `time`フィールドの扱いは`FeInput`をそのまま踏襲する（`panel-api-design.md`1章）が、
+//! `time`フィールドの扱いは`FeInput`をそのまま踏襲する（`panel-common.md`1章）が、
 //! RE自身の準偏差変換（`re-spec.md`3.2節）は
 //! **entity方向のみ**
 //! （2-way REはv1スコープ外）で`time`を使わない。`ReInput`が`time`を保持する理由は、
@@ -19,31 +19,31 @@
 //! 既に保持していれば再抽出が不要になる（`REOptions.time`、1.1節）。この内部FE呼び出し
 //! ロジック自体は、`ReInput`自体の実装スコープ外（`ReEstimator`側で扱う）。
 //!
-//! ## Swamy-Arora分散成分推定（`swamy_arora_variance_components`、7.1節）
+//! ## Swamy-Arora分散成分推定（`swamy_arora_variance_components`、`re-spec.md`3.1節）
 //!
 //! σ_ε²（idiosyncratic variance）は内部1-way FE推定（`FeEstimator`）のwithin回帰残差を
 //! 再利用し、σ_u²（individual variance）はbetween回帰（エンティティ平均への
 //! `OlsEstimator::fit(include_intercept=true)`）から求める（RE→FE/OLS→
-//! `OlsEstimator`という7.4節の委譲チェーン）。分母（自由度）は`panel-api-design.md`
-//! 7.1節の式を手で組み立てず、FE/OLS委譲先が実際に使った`df_resid`相当の値
+//! `OlsEstimator`という`re-spec.md`3.2節の委譲チェーン）。分母（自由度）は`panel-common.md`
+//! `re-spec.md`3.1節の式を手で組み立てず、FE/OLS委譲先が実際に使った`df_resid`相当の値
 //! （`FeEstimator::df_resid()`・`OlsInput::nobs()-k()`）をそのまま再利用する——
-//! 7.1節の式は`linearmodels`ソースの`nvar`（切片を含む列数）表記をそのまま転記した
+//! `re-spec.md`3.1節の式は`linearmodels`ソースの`nvar`（切片を含む列数）表記をそのまま転記した
 //! ものであり、このプロジェクトの`k`規約（傾き係数のみ）では委譲先の値を使えば
 //! 自動的に一致する（詳細な導出・数値検証は`swamy_arora_variance_components`関数doc
 //! 参照、ユーザー確認済み・2026-09-13）。
 //!
-//! ## θ計算・準偏差変換（`quasi_demean_transform`、7.2節）
+//! ## θ計算・準偏差変換（`quasi_demean_transform`、`re-spec.md`3.2節）
 //!
-//! `θ_i = 1 - sqrt(σ_ε² / (T_i・σ_u² + σ_ε²))`（`compute_theta`、7.2節の式そのまま）を
+//! `θ_i = 1 - sqrt(σ_ε² / (T_i・σ_u² + σ_ε²))`（`compute_theta`、`re-spec.md`3.2節の式そのまま）を
 //! エンティティごとに計算し、`quasi_demean_column`（`common.rs`）を`y`・
-//! 各`x`列に適用する。REはentity方向のみ（2-way REはv1スコープ外、7.2節）のため
+//! 各`x`列に適用する。REはentity方向のみ（2-way REはv1スコープ外、`re-spec.md`3.2節）のため
 //! 不均衡パネルも無条件でサポートする——`T_i`（エンティティごとの観測数）を直接使う
 //! この式は教科書レベルで不均衡対応済みで、FEの2-wayのような反復アルゴリズムは
-//! 不要（7.2節）。`sigma2_eps`/`sigma2_u`は`swamy_arora_variance_components`の戻り値を
+//! 不要（`re-spec.md`3.2節）。`sigma2_eps`/`sigma2_u`は`swamy_arora_variance_components`の戻り値を
 //! そのまま渡す想定だが、この関数自体はその依存を持たない（テストで独立に検証できる
 //! ようにするため。`quasi_demean_column`が`θ`の値域を検証しないのと同じ設計）。
 //!
-//! ## `OlsEstimator`への委譲（`ReEstimator`、7.4節）
+//! ## `OlsEstimator`への委譲（`ReEstimator`、`re-spec.md`3.2節）
 //!
 //! `ReEstimator::fit`は「Swamy-Arora分散成分推定（`swamy_arora_variance_components`）
 //! →θ計算・準偏差変換（`quasi_demean_transform`）→
@@ -66,7 +66,7 @@
 //! これで非テストコードからの呼び出しが生まれたため、`pub`から`pub(crate)`に格下げした
 //! （rust-reviewer指摘の通り）。
 //!
-//! ## df_resid・df_model（7.5節）
+//! ## df_resid・df_model（`re-spec.md`3.3節）
 //!
 //! `df_resid = n - k`・`df_model = k`（`k`は変換済み定数列を含む設計行列の全列数、
 //! `estimator().input().k()`）。`OlsInput::k()`は`include_intercept`フラグの値に
@@ -137,7 +137,7 @@
 //!   3種とも`0.0`とする（`f_statistic`のNaN分岐とは異なる扱いなので注意）。
 //! - どちらのR²も`TSS<=0.0`なら`0.0`を返す（`linearmodels`と同じガード）。
 //!
-//! ## ハウスマン検定（`hausman_statistic`/`hausman_p_value`/`hausman_df`、7.3節）
+//! ## ハウスマン検定（`hausman_statistic`/`hausman_p_value`/`hausman_df`、`re-spec.md`3.7節）
 //!
 //! `ReEstimator::fit`内部で、比較用にもう一度FE推定（`FeEstimator::fit`、
 //! `swamy_arora_variance_components`がσ_ε²用に呼ぶ内部1-way FE推定とは別の独立した
@@ -152,10 +152,10 @@
 //! - **比較対象の係数align**: REが内部FE呼び出しに渡す`x`はRE自身の`x`と完全に同一の
 //!   列・順序（`ReInput::x()`/`x_names()`をそのまま渡す）ため、alignは「REの切片
 //!   （`params()`の先頭行/列）を除外するだけ」で済む——時間不変変数だけを選んで除外する
-//!   ような部分alignは行わない。REが時間不変変数を含む場合、内部FE推定は6.7節の分散ゼロ
+//!   ような部分alignは行わない。REが時間不変変数を含む場合、内部FE推定は`fe-spec.md`1章の分散ゼロ
 //!   検証で（部分的にではなく）全体が失敗するため、次項の「内部FE推定失敗→None」に
 //!   自然に帰着する。
-//! - **v1はclassical Hausman検定のみ（`cov_type`非連動、7.3節）**: `ReEstimator::fit`に
+//! - **v1はclassical Hausman検定のみ（`cov_type`非連動、`re-spec.md`3.7節）**: `ReEstimator::fit`に
 //!   `ReCovType::Hc1`等の非Classicalな`cov_type`を渡していても、Hausman比較には
 //!   `panel_classical_cov_params`で計算し直したclassical版の共分散行列を使う（内部FE呼び出し
 //!   も`FeCovType::Classical`固定）。ユーザーが選んだ`cov_type`別の`cov_params`
@@ -170,7 +170,7 @@
 //!   - 内部FE推定が失敗した場合（singleton検出・within変換後の分散ゼロ・2-wayの不均衡
 //!     パネル・自由度不足等、`FeEstimator::fit`が返しうる`PanelError`全般）。
 //!   - `hausman_statistic`自体が`Var(β_FE)-Var(β_RE)`の数値的特異性で
-//!     `CommonError::ComputationFailed`を返した場合——これは7.3節本文が明示していない
+//!     `CommonError::ComputationFailed`を返した場合——これは`re-spec.md`3.7節本文が明示していない
 //!     ケースだが、「内部FE推定失敗時はNoneにしてRE本体は正常に返す」という設計意図
 //!     （ハウスマン検定はRE本体の付随的な診断情報であり、その失敗がRE推定自体を
 //!     道連れにしてはならない）をそのまま延長し、同じ`None`フォールバックに含める
@@ -324,7 +324,7 @@ impl ReInput {
 
 /// エンティティ平均（between回帰用）。`group_indices_by_key`（`common.rs`にFE/RE共有として
 /// 移設済み）でエンティティを集計し、`y`/各`x`列のエンティティごとの単純平均と、
-/// 各エンティティの観測数`T_i`（7.1節の調和平均`t_bar`計算にも使うため、二重集計を避けて
+/// 各エンティティの観測数`T_i`（`re-spec.md`3.1節の調和平均`t_bar`計算にも使うため、二重集計を避けて
 /// ここで一緒に返す）を返す。
 ///
 /// 戻り値の各`Vec`はエンティティのユニークID辞書順（`group_indices_by_key`のキー順）で
@@ -446,12 +446,12 @@ fn re_r_squared_overall(input: &ReInput, params: &Mat<f64>) -> f64 {
     if tss > 0.0 { 1.0 - ssr / tss } else { 0.0 }
 }
 
-/// Swamy-Arora法で分散成分（σ_ε²・σ_u²）を推定する（7.1節）。
+/// Swamy-Arora法で分散成分（σ_ε²・σ_u²）を推定する（`re-spec.md`3.1節）。
 ///
 /// - **σ_ε²（idiosyncratic variance）**: 内部で1-way FE推定
 ///   （`FeEstimator::fit`、`FeCovType::Classical`固定——`cov_type`は残差そのものには
 ///   影響しないため）を呼び、そのwithin回帰残差平方和とFE自身の`df_resid()`
-///   （`n - k - n_entities`）から`SSR / df_resid`として求める（7.4節「σ_ε²の推定は
+///   （`n - k - n_entities`）から`SSR / df_resid`として求める（`re-spec.md`3.2節「σ_ε²の推定は
 ///   FEのwithin回帰の残差分散をそのまま利用する」、RE→FE→`OlsEstimator`の委譲チェーン）。
 /// - **σ_u²（individual variance）**: between回帰（エンティティ平均への
 ///   `OlsEstimator::fit(include_intercept=true)`。REは切片を持つためFEと異なり
@@ -460,8 +460,8 @@ fn re_r_squared_overall(input: &ReInput, params: &Mat<f64>) -> f64 {
 ///   調和平均`t_bar = n_entities / Σ(1/T_i)`を使う標準式
 ///   `max(0, ssr/df_resid - σ_ε²/t_bar)`で求める。
 ///
-/// **`k`規約についての注記（ユーザー確認済み、2026-09-13）**: `panel-api-design.md`
-/// 7.1節に書かれている式（σ_ε²分母`n-k-n_entities+1`、σ_u²分母`n_entities-k`）は、
+/// **`k`規約についての注記（ユーザー確認済み、2026-09-13）**: `panel-common.md`
+/// `re-spec.md`3.1節に書かれている式（σ_ε²分母`n-k-n_entities+1`、σ_u²分母`n_entities-k`）は、
 /// `linearmodels`ソースの`nvar`（切片を含む列数）表記をそのまま転記したものである。
 /// このプロジェクトのFE/OLSの`k`規約（傾き係数のみ、切片を含まない）では、分母の
 /// 「+1」「-1」を式に手で足し引きする必要はない——FE/OLS双方の委譲先が返す実際の
@@ -472,7 +472,7 @@ fn re_r_squared_overall(input: &ReInput, params: &Mat<f64>) -> f64 {
 ///
 /// **戻り値に内部で構築した1-way`FeEstimator`（σ_ε²用）も含める（rust-reviewer指摘）**:
 /// `input.time()`が`None`のRE推定では、ハウスマン検定
-/// （`re_hausman_test`、7.3節）が必要とする内部FE呼び出しも1-way・`FeCovType::Classical`・
+/// （`re_hausman_test`、`re-spec.md`3.7節）が必要とする内部FE呼び出しも1-way・`FeCovType::Classical`・
 /// 同じ`y`/`x`/`entity`/`confidence_level`で完全に一致するため、呼び出し側
 /// （`ReEstimator::fit`）がこの`FeEstimator`をそのまま再利用できる（同じFE推定を2回
 /// 計算する無駄を避ける）。`input.time()`が`Some`の場合はハウスマン検定側が2-way FEを
@@ -495,7 +495,7 @@ pub(crate) fn swamy_arora_variance_components(
     // 「faerのグローバル並列度」参照）。
     crate::parallelism::ensure_serial();
 
-    // σ_ε²: 内部1-way FE推定のwithin回帰残差を再利用する（7.4節）。
+    // σ_ε²: 内部1-way FE推定のwithin回帰残差を再利用する（`re-spec.md`3.2節）。
     let fe_input = FeInput::from_columns(
         input.y(),
         input.x(),
@@ -561,11 +561,11 @@ pub(crate) fn swamy_arora_variance_components(
     Ok((sigma2_eps, sigma2_u, fe))
 }
 
-/// θ（準偏差変換の重み）を計算する（7.2節）。
+/// θ（準偏差変換の重み）を計算する（`re-spec.md`3.2節）。
 ///
 /// `θ_i = 1 - sqrt(σ_ε² / (T_i・σ_u² + σ_ε²))`。`T_i`はエンティティ`i`の観測数
 /// （`group_indices_by_key`で集計する）。不均衡パネルもこの式で無条件にサポートする
-/// （`T_i`が式に直接入るため、教科書レベルで不均衡対応済み。7.2節）。
+/// （`T_i`が式に直接入るため、教科書レベルで不均衡対応済み。`re-spec.md`3.2節）。
 ///
 /// `σ_ε²`/`σ_u²`の値域は検証しない（`quasi_demean_column`が`θ`の値域を検証しないのと
 /// 同じ設計判断——呼び出し側が`swamy_arora_variance_components`の戻り値を渡す限り
@@ -581,14 +581,14 @@ fn compute_theta(entity: &[String], sigma2_eps: f64, sigma2_u: f64) -> BTreeMap<
         .collect()
 }
 
-/// θ計算・準偏差変換（7.2節・7.4節）。`compute_theta`で求めたθを
+/// θ計算・準偏差変換（`re-spec.md`3.2節・`re-spec.md`3.2節）。`compute_theta`で求めたθを
 /// `quasi_demean_column`で`y`・各`x`列に適用する（FEの`within_transform_one_way`と
 /// 同型のパターン——FEはθ=1固定、REはエンティティごとに異なるθを使う点だけが異なる）。
 ///
 /// 戻り値は`(theta, y_transformed, x_transformed)`。`theta`も返す理由:
 /// `OlsEstimator::fit(include_intercept=false)`への委譲時、切片項を復元するために
 /// 定数列（すべて1.0）にも同じ`theta`で`quasi_demean_column`を適用する必要があり
-/// （REは切片を持つためFEと異なりこの復元が要る、7.4節）、`theta`の再計算を避けるため
+/// （REは切片を持つためFEと異なりこの復元が要る、`re-spec.md`3.2節）、`theta`の再計算を避けるため
 /// 呼び出し側に渡しておく。
 pub(crate) fn quasi_demean_transform(
     input: &ReInput,
@@ -605,7 +605,7 @@ pub(crate) fn quasi_demean_transform(
     (theta, y, x)
 }
 
-/// ハウスマン検定（7.3節、モジュールdoc「ハウスマン検定」参照）。
+/// ハウスマン検定（`re-spec.md`3.7節、モジュールdoc「ハウスマン検定」参照）。
 ///
 /// `fe`は呼び出し側（`ReEstimator::fit`）が用意した比較用のFE推定量——`input.time()`が
 /// `None`のときは`swamy_arora_variance_components`が返す1-way FE推定量をそのまま
@@ -638,7 +638,7 @@ fn re_hausman_test(
         .map(|i| (0..k).map(|j| *fe.cov_params().get(i, j)).collect())
         .collect();
 
-    // REの切片（index 0）を除外して次元をFEに揃える（7.3節）。
+    // REの切片（index 0）を除外して次元をFEに揃える（`re-spec.md`3.7節）。
     let beta_re: Vec<f64> = (0..k)
         .map(|j| *beta_re_with_intercept.get(j + 1, 0))
         .collect();
@@ -654,9 +654,9 @@ fn re_hausman_test(
 }
 
 /// REの標準誤差計算方式（3.1節）。`FeCovType`と同じ「小さな固定選択肢の
-/// 公開enum」パターン（`docs/planning/specs/panel-api-design.md`4.3節）だが、REは
+/// 公開enum」パターン（`docs/spec/panel-common.md`4.3節）だが、REは
 /// `extra_df`が常に`0`（`linearmodels.RandomEffects.fit()`のソースで確認済み）・
-/// v1がentity方向のみ（2-way REはスコープ外、7.6節）のためFEより単純。`FeCovType::Hac`の
+/// v1がentity方向のみ（2-way REはスコープ外、`re-spec.md`5章）のためFEより単純。`FeCovType::Hac`の
 /// ような`time`オーバーライドフィールドは持たない（RE自身が2-way構造を持たないため、
 /// FEが2-way FEとDKの時間粒度を分離するために追加したオーバーライドの必要性が無い。
 /// HAC計算には`ReInput::time()`をそのまま使う）。
@@ -706,12 +706,12 @@ pub struct ReEstimator {
     conf_lower: Mat<f64>,
     /// 信頼区間の上限。
     conf_upper: Mat<f64>,
-    /// 残差自由度`n - k`（7.5節）。`k`は変換済み定数列を含む設計行列の
+    /// 残差自由度`n - k`（`re-spec.md`3.3節）。`k`は変換済み定数列を含む設計行列の
     /// 全列数（`estimator.input().k()`）。`OlsEstimator::fit`自体は`include_intercept=false`
     /// （切片も含めて`x_all`に組み立て済みのため）で呼ばれているが、`OlsInput::k()`は
     /// `include_intercept`の値によらず設計行列の実際の列数（`x.ncols()`）を返すため、
     /// 追加の計算をせず`estimator.input()`からそのまま導出できる（`linearmodels`ソースの
-    /// `df_resid = wy.shape[0] - wx.shape[1]`と同じ値になることを確認済み、7.5節）。
+    /// `df_resid = wy.shape[0] - wx.shape[1]`と同じ値になることを確認済み、`re-spec.md`3.3節）。
     df_resid: usize,
     /// 自由度を消費した総パラメータ数（`= k`。`df_resid + df_model = n`となる対の値、
     /// `FeEstimator::df_model()`の「消費した総自由度」という定義と揃える。F統計量の
@@ -733,7 +733,7 @@ pub struct ReEstimator {
     /// パネル固有R²（2.3節）。変換前の元データへの適合度（中心化TSS、
     /// 切片`β0`込みの当てはめ）。`df_model==1`なら`0.0`。
     r_squared_overall: f64,
-    /// ハウスマン検定統計量（7.3節）。内部FE推定の失敗・比較対象の傾き係数が
+    /// ハウスマン検定統計量（`re-spec.md`3.7節）。内部FE推定の失敗・比較対象の傾き係数が
     /// 0個・`Var(β_FE)-Var(β_RE)`の数値的特異性のいずれかに該当する場合は`None`
     /// （モジュールdoc「ハウスマン検定」参照。RE本体の推定結果自体は`None`でも
     /// 正常に返る）。
@@ -1026,7 +1026,7 @@ impl ReEstimator {
         let (r_squared_within, r_squared_between, r_squared_overall) =
             re_r_squared(&input, estimator.params(), df_model);
 
-        // ハウスマン検定（7.3節、モジュールdoc「ハウスマン検定」参照）。
+        // ハウスマン検定（`re-spec.md`3.7節、モジュールdoc「ハウスマン検定」参照）。
         // Hausman比較にはユーザーが選んだ`cov_type`ではなく常にclassical版の`cov_params`を
         // 使う（`cov_type`非連動）。`xtx_inv`・`ssr`・`df_resid`・`df_model`は上の
         // `cov_type`分岐に関わらず既に手元にあるため、この呼び出し1回の追加コストのみ。
@@ -1158,7 +1158,7 @@ impl ReEstimator {
         &self.conf_upper
     }
 
-    /// 残差自由度`n - k`（7.5節）。FEの`n - n_entities - k`とは異なる式
+    /// 残差自由度`n - k`（`re-spec.md`3.3節）。FEの`n - n_entities - k`とは異なる式
     /// （REはGLS変換でFEのように個体ダミー相当の自由度を消費しないため、通常のOLSと
     /// 同じ式になる）。
     pub fn df_resid(&self) -> usize {
@@ -1197,7 +1197,7 @@ impl ReEstimator {
         self.r_squared_overall
     }
 
-    /// ハウスマン検定統計量（7.3節）。`None`フォールバックの条件は
+    /// ハウスマン検定統計量（`re-spec.md`3.7節）。`None`フォールバックの条件は
     /// フィールドdoc・モジュールdoc「ハウスマン検定」参照。
     pub fn hausman_statistic(&self) -> Option<f64> {
         self.hausman_statistic
@@ -1398,7 +1398,7 @@ mod tests {
     fn swamy_arora_variance_components_clips_negative_sigma2_u_to_zero() {
         // entity間のy平均のばらつきが、within回帰から推定したσ_ε²/t_barに対して
         // 十分小さいため、素朴な式ではσ_u²が負になるが`max(0, ...)`で0にクリップされる
-        // （`linearmodels`と同じ挙動、7.3節のハウスマン統計量の負値と同型の
+        // （`linearmodels`と同じ挙動、`re-spec.md`3.7節のハウスマン統計量の負値と同型の
         // 「有限標本でのPSD仮定崩れ」）。エンティティ間のx1平均はわずかに異なる値にし、
         // between回帰の設計行列が特異にならないようにする。`linearmodels`で実地検証済み
         // （`variance_decomposition["Effects"] == 0.0`）。
@@ -1534,7 +1534,7 @@ mod tests {
     fn compute_theta_is_zero_when_sigma2_u_is_zero() {
         // σ_u²=0（individual varianceが無い、REがpooled OLSに退化するケース）では
         // θ_i = 1 - sqrt(σ_ε²/σ_ε²) = 0 になり、`quasi_demean_column`が実質的に
-        // 何も変換しない（プーリングOLSと同じ設計行列になる、7.2節・
+        // 何も変換しない（プーリングOLSと同じ設計行列になる、`re-spec.md`3.2節・
         // `quasi_demean_column_with_theta_zero_is_identity`と対応する不変条件）。
         // rust-reviewer指摘: この退化ケースをフィット実装（#195）より前に
         // 固定しておく。
@@ -1592,7 +1592,7 @@ mod tests {
 
     #[test]
     fn quasi_demean_transform_supports_unbalanced_panel_without_error() {
-        // REはentity方向のみ（7.2節）のため、FEの2-wayと異なりバランスパネルを
+        // REはentity方向のみ（`re-spec.md`3.2節）のため、FEの2-wayと異なりバランスパネルを
         // 要求しない。singletonエンティティ（T=1）を含む不均衡パネルでも
         // （`swamy_arora_variance_components`と違い内部でFE推定を呼ばないため）
         // エラーにならず変換できることを確認する。
@@ -1648,7 +1648,7 @@ mod tests {
         }
 
         // `linearmodels.RandomEffects.fit(cov_type="unadjusted").df_resid`/`df_model`と
-        // 数値一致（7.5節）。n=7、k=2（const+x1）。
+        // 数値一致（`re-spec.md`3.3節）。n=7、k=2（const+x1）。
         assert_eq!(re.df_resid(), 5);
         assert_eq!(re.df_model(), 2);
 

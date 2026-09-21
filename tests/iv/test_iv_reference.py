@@ -24,7 +24,7 @@ Note:
       hc2/hc3相当の実装を持たないため、`iv.json`の`_meta.note`参照）。ただし
       「参照実装が無い」わけではない——R `ivreg`+`sandwich::vcovHC`では検証可能なことを
       実機確認済みで、`test_iv_crosscheck.py`が独立にクロスチェックする
-      （`iv-api-design.md`3.1節、`refactoring-candidates.md`項目12）。`engine`側の
+      （`iv-spec.md`3.1節、`refactoring-candidates.md`項目12）。`engine`側の
       Rust単体テスト
       （`two_sls.rs`の`fit_computes_hc2_std_errors_matching_manual_sandwich_formula`
       等、独立な素朴ループでの手計算とのクロスチェック）は数式レベルの細粒度回帰確認と

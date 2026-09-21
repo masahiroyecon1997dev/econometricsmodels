@@ -153,7 +153,7 @@ def build_fixtures() -> dict:
         "primary_reference": "linearmodels",
         "linearmodels_version": linearmodels.__version__,
         "note": (
-            "hc2/hc3はlinearmodelsに対応する実装が無いため対象外（`iv-api-design.md`"
+            "hc2/hc3はlinearmodelsに対応する実装が無いため対象外（`iv-spec.md`"
             "3.1節、`benchmark/iv/references/linearmodels_ref.py`のモジュール"
             "docstring参照）。"
             "GMMは`method='gmm'`がまだPython側に配線されていないため対象外。"

@@ -796,7 +796,7 @@ def test_no_uncensored_observations_raises():
 
 def test_supports_right_censoring_only():
     """`lower=None`・`upper`指定で右打ち切りのみのモデルとして推定できる
-    （`nonlinear-api-design.md`7章）。
+    （`nonlinear-common.md`7章）。
     """
     df = pl.DataFrame(
         {

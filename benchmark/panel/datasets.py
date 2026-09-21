@@ -80,7 +80,7 @@ _TIME_TREND_SLOPE = 0.3
 _TIME_EFFECT_NOISE_SD = 0.5
 
 # unbalancedシナリオでの行の脱落確率（各エンティティの残り観測数が2未満に
-# ならない範囲でのみ脱落させる。6.5節のsingleton自動検出との切り分けのため、
+# ならない範囲でのみ脱落させる。`fe-spec.md`1章のsingleton自動検出との切り分けのため、
 # このシナリオ自体はsingletonを含まない「成功パス」として設計する）。
 _UNBALANCED_DROP_PROB = 0.2
 
@@ -172,7 +172,7 @@ def _cross_sectionally_correlated_errors(
 
     cluster(entity)はエンティティ内相関には頑健だがエンティティ間の同時点
     相関には対応できず、Driscoll-Kraay HAC（`cov_type="hac"`）が必要になる
-    典型例（panel-api-design.md 3.1節の設計動機そのもの）。
+    典型例（panel-common.md 3.1節の設計動機そのもの）。
     """
     common_shock = rng.normal(0.0, _CROSS_SECTIONAL_SHOCK_SD, size=n_periods)
     idio = rng.normal(size=(n_entities, n_periods))
@@ -270,7 +270,7 @@ def generate_fe_dataset(
 
     if scenario == "unbalanced":
         # 不均衡だが各エンティティT_i>=2を保つ「成功パス」
-        # （6.4節: 1-wayは不均衡パネルもサポート）。
+        # （`fe-spec.md`3.1節: 1-wayは不均衡パネルもサポート）。
         df = _drop_rows_keep_min_count(
             df, rng, _UNBALANCED_DROP_PROB, min_count=2
         )
@@ -299,7 +299,7 @@ def generate_fe_dataset(
         df = df.filter(keep)
     elif scenario == "zero_variance_regressor":
         # エンティティ内で時間不変な列を追加する（within変換後に分散ゼロ、
-        # 6.7節のValidationErrorを誘発。エラーパス専用）。
+        # `fe-spec.md`1章のValidationErrorを誘発。エラーパス専用）。
         entity_to_const = dict(zip(entity_ids, rng.normal(size=n_entities)))
         df = df.with_columns(
             pl.col("entity")

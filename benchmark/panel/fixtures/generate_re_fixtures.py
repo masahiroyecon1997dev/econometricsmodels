@@ -43,7 +43,7 @@ COV_TYPES = ["classical", "hc1", "cluster", "hac"]
 
 # `NUMERIC_SCENARIOS`（unbalanced + baseline/small_panel/heteroskedastic/
 # autocorrelated/cross_sectionally_correlated）はFE（generate_fe_fixtures.py）
-# のものをそのまま再利用する。REは常にentity方向のみ（1-way相当、7.6節）
+# のものをそのまま再利用する。REは常にentity方向のみ（1-way相当、`re-spec.md`5章）
 # なのでFEのような1-way/2-wayの区別が無く、unbalancedもFEの
 # ONE_WAY_ONLY_SCENARIOS制約（2-way FEはバランスパネル必須）を受けずそのまま
 # success pathとして扱える。singleton_entity/singleton_time/
@@ -114,9 +114,9 @@ def build_fixtures() -> dict:
             "linearmodelsに専用実装が無いため本フィクスチャに含まない——"
             "plm::phtestのみを参照値とする例外として"
             "generate_re_crosscheck_fixtures.json側にのみ含める"
-            "（panel-api-design.md5.3節）。v1のハウスマン検定ベンチマークは"
+            "（panel-common.md5.3節）。v1のハウスマン検定ベンチマークは"
             "1-way（REOptions.time未指定の内部FE呼び出し）に限定する"
-            "（RE自身がv1でentity方向のみをサポートするため、7.6節。2-way内部"
+            "（RE自身がv1でentity方向のみをサポートするため、`re-spec.md`5章。2-way内部"
             "FE呼び出しのクロスチェックは別issueで検討、ユーザー確認済み・"
             "2026-09-20）。"
             "wagepan（Wooldridge、N=545人×T=8年、1980-1987、バランスパネル）は"

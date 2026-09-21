@@ -12,7 +12,7 @@ fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmod
   モジュールdoc参照）。
 - **ハウスマン検定**（`hausman_statistic`/`hausman_p_value`/`hausman_df`）:
   `linearmodels`に専用実装が無いため、`plm::phtest`が唯一の参照実装
-  （panel-api-design.md 5.3節）。v1は1-way（`REOptions.time`未指定の内部FE
+  （panel-common.md 5.3節）。v1は1-way（`REOptions.time`未指定の内部FE
   呼び出し）限定で検証する（`generate_re_fixtures.py`の`_meta.note`・
   `generate_re_crosscheck_fixtures.py`モジュールdoc参照）。
 

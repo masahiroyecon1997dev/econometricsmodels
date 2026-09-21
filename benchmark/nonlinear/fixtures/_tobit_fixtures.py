@@ -6,7 +6,7 @@ Logit/Probit と違い、Tobit は主リファレンス（`AER::tobit` ＝ `surv
 `generate_tobit_fixtures.py`（`engine="survreg"`）と
 `generate_tobit_crosscheck_fixtures.py`（`engine="censReg"`）が薄く呼び出す。
 
-`docs/planning/specs/nonlinear-api-design.md` 9章の役割分担に対応。合成データは
+`docs/spec/nonlinear-common.md` 8章の役割分担に対応。合成データは
 `tests/fixtures/benchmarks/data/tobit_*.csv`（`benchmark/nonlinear/freeze.py` が固定）と
 `tobit_censoring_bounds.json`（打ち切り境界）を読む。Wooldridge mroz（`hours`、
 生スケール、左打ち切り 0）は `load_wooldridge` 経由で都度ロードする。

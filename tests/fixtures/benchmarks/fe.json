@@ -44,13 +44,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:31.839079+00:00",
+          "generated_at": "2026-09-21T09:53:24.483748+00:00",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hc1": {
@@ -96,13 +96,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:31.869481+00:00",
+          "generated_at": "2026-09-21T09:53:24.527941+00:00",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "cluster": {
@@ -148,13 +148,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:31.898037+00:00",
+          "generated_at": "2026-09-21T09:53:24.578952+00:00",
           "cov_type_requested": "cluster",
           "cov_type_linearmodels": "clustered",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hac": {
@@ -200,13 +200,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:31.924821+00:00",
+          "generated_at": "2026-09-21T09:53:24.623263+00:00",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": 2,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       }
     }
@@ -256,13 +256,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:31.950945+00:00",
+          "generated_at": "2026-09-21T09:53:24.666154+00:00",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hc1": {
@@ -308,13 +308,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:31.978443+00:00",
+          "generated_at": "2026-09-21T09:53:24.709745+00:00",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "cluster": {
@@ -360,13 +360,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.008100+00:00",
+          "generated_at": "2026-09-21T09:53:24.755950+00:00",
           "cov_type_requested": "cluster",
           "cov_type_linearmodels": "clustered",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hac": {
@@ -412,13 +412,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.033010+00:00",
+          "generated_at": "2026-09-21T09:53:24.796982+00:00",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": 2,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       }
     },
@@ -466,13 +466,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.108289+00:00",
+          "generated_at": "2026-09-21T09:53:24.880289+00:00",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hc1": {
@@ -518,13 +518,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.142613+00:00",
+          "generated_at": "2026-09-21T09:53:24.936918+00:00",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "cluster": {
@@ -570,13 +570,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.177224+00:00",
+          "generated_at": "2026-09-21T09:53:24.993142+00:00",
           "cov_type_requested": "cluster",
           "cov_type_linearmodels": "clustered",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hac": {
@@ -622,13 +622,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.214281+00:00",
+          "generated_at": "2026-09-21T09:53:25.044213+00:00",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": 2,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       }
     }
@@ -678,13 +678,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.236141+00:00",
+          "generated_at": "2026-09-21T09:53:25.077851+00:00",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hc1": {
@@ -730,13 +730,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.260208+00:00",
+          "generated_at": "2026-09-21T09:53:25.117341+00:00",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "cluster": {
@@ -782,13 +782,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.285564+00:00",
+          "generated_at": "2026-09-21T09:53:25.156617+00:00",
           "cov_type_requested": "cluster",
           "cov_type_linearmodels": "clustered",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hac": {
@@ -834,13 +834,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.309141+00:00",
+          "generated_at": "2026-09-21T09:53:25.194558+00:00",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": 1,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       }
     },
@@ -888,13 +888,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.342306+00:00",
+          "generated_at": "2026-09-21T09:53:25.290539+00:00",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hc1": {
@@ -940,13 +940,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.374658+00:00",
+          "generated_at": "2026-09-21T09:53:25.336163+00:00",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "cluster": {
@@ -992,13 +992,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.408693+00:00",
+          "generated_at": "2026-09-21T09:53:25.385046+00:00",
           "cov_type_requested": "cluster",
           "cov_type_linearmodels": "clustered",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hac": {
@@ -1044,13 +1044,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.441025+00:00",
+          "generated_at": "2026-09-21T09:53:25.432615+00:00",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": 1,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       }
     }
@@ -1100,13 +1100,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.465140+00:00",
+          "generated_at": "2026-09-21T09:53:25.468446+00:00",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hc1": {
@@ -1152,13 +1152,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.490087+00:00",
+          "generated_at": "2026-09-21T09:53:25.505520+00:00",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "cluster": {
@@ -1204,13 +1204,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.516662+00:00",
+          "generated_at": "2026-09-21T09:53:25.542879+00:00",
           "cov_type_requested": "cluster",
           "cov_type_linearmodels": "clustered",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hac": {
@@ -1256,13 +1256,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.541270+00:00",
+          "generated_at": "2026-09-21T09:53:25.583193+00:00",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": 2,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       }
     },
@@ -1310,13 +1310,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.575940+00:00",
+          "generated_at": "2026-09-21T09:53:25.632339+00:00",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hc1": {
@@ -1362,13 +1362,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.608919+00:00",
+          "generated_at": "2026-09-21T09:53:25.680306+00:00",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "cluster": {
@@ -1414,13 +1414,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.645166+00:00",
+          "generated_at": "2026-09-21T09:53:25.732580+00:00",
           "cov_type_requested": "cluster",
           "cov_type_linearmodels": "clustered",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hac": {
@@ -1466,13 +1466,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.679674+00:00",
+          "generated_at": "2026-09-21T09:53:25.789424+00:00",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": 2,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       }
     }
@@ -1522,13 +1522,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.703764+00:00",
+          "generated_at": "2026-09-21T09:53:25.826488+00:00",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hc1": {
@@ -1574,13 +1574,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.727754+00:00",
+          "generated_at": "2026-09-21T09:53:25.863456+00:00",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "cluster": {
@@ -1626,13 +1626,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.755727+00:00",
+          "generated_at": "2026-09-21T09:53:25.901383+00:00",
           "cov_type_requested": "cluster",
           "cov_type_linearmodels": "clustered",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hac": {
@@ -1678,13 +1678,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.779812+00:00",
+          "generated_at": "2026-09-21T09:53:25.936627+00:00",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": 2,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       }
     },
@@ -1732,13 +1732,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.814426+00:00",
+          "generated_at": "2026-09-21T09:53:25.986096+00:00",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hc1": {
@@ -1784,13 +1784,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.848425+00:00",
+          "generated_at": "2026-09-21T09:53:26.035814+00:00",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "cluster": {
@@ -1836,13 +1836,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.886474+00:00",
+          "generated_at": "2026-09-21T09:53:26.087646+00:00",
           "cov_type_requested": "cluster",
           "cov_type_linearmodels": "clustered",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hac": {
@@ -1888,13 +1888,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.922993+00:00",
+          "generated_at": "2026-09-21T09:53:26.136202+00:00",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": 2,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       }
     }
@@ -1944,13 +1944,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.948839+00:00",
+          "generated_at": "2026-09-21T09:53:26.173696+00:00",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hc1": {
@@ -1996,13 +1996,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:32.975573+00:00",
+          "generated_at": "2026-09-21T09:53:26.215002+00:00",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "cluster": {
@@ -2048,13 +2048,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:33.004884+00:00",
+          "generated_at": "2026-09-21T09:53:26.259018+00:00",
           "cov_type_requested": "cluster",
           "cov_type_linearmodels": "clustered",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hac": {
@@ -2100,13 +2100,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:33.030457+00:00",
+          "generated_at": "2026-09-21T09:53:26.295186+00:00",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": 2,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       }
     },
@@ -2154,13 +2154,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:33.082188+00:00",
+          "generated_at": "2026-09-21T09:53:26.351386+00:00",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hc1": {
@@ -2206,13 +2206,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:33.122345+00:00",
+          "generated_at": "2026-09-21T09:53:26.406004+00:00",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "cluster": {
@@ -2258,13 +2258,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:33.165439+00:00",
+          "generated_at": "2026-09-21T09:53:26.474196+00:00",
           "cov_type_requested": "cluster",
           "cov_type_linearmodels": "clustered",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hac": {
@@ -2310,13 +2310,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:33.204893+00:00",
+          "generated_at": "2026-09-21T09:53:26.563432+00:00",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": 2,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       }
     }
@@ -2370,13 +2370,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:33.257867+00:00",
+          "generated_at": "2026-09-21T09:53:26.640995+00:00",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hc1": {
@@ -2426,13 +2426,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:33.298688+00:00",
+          "generated_at": "2026-09-21T09:53:26.706721+00:00",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "cluster": {
@@ -2482,13 +2482,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:33.342905+00:00",
+          "generated_at": "2026-09-21T09:53:26.777155+00:00",
           "cov_type_requested": "cluster",
           "cov_type_linearmodels": "clustered",
           "effects": "one_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       }
     },
@@ -2540,13 +2540,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:33.393850+00:00",
+          "generated_at": "2026-09-21T09:53:26.874623+00:00",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "hc1": {
@@ -2596,13 +2596,13 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:33.449211+00:00",
+          "generated_at": "2026-09-21T09:53:26.974849+00:00",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       },
       "cluster": {
@@ -2652,22 +2652,22 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
-          "generated_at": "2026-09-20T12:35:33.512538+00:00",
+          "generated_at": "2026-09-21T09:53:27.084962+00:00",
           "cov_type_requested": "cluster",
           "cov_type_linearmodels": "clustered",
           "effects": "two_way",
           "confidence_level": 0.95,
           "hac_bandwidth": null,
-          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-api-design.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
         }
       }
     }
   },
   "_meta": {
     "method": "fe",
-    "generated_at": "2026-09-20T12:35:33.512686+00:00",
+    "generated_at": "2026-09-21T09:53:27.085302+00:00",
     "primary_reference": "linearmodels",
     "linearmodels_version": "7.0",
-    "note": "singleton_entity/singleton_time/unbalanced_two_way/zero_variance_regressorシナリオはここに含まない（いずれもValidationErrorの発生確認のみ、テストコード側で対応）。unbalancedは1-way専用（2-way FEはバランスパネル必須のため、2-way要求時のValidationErrorはunbalanced_two_wayシナリオで確認）。hc2/hc3はlinearmodels.PanelOLSが提供しないため対象外（generate_fe_crosscheck_fixtures.pyのfixestクロスチェックのみで検証する単一参照実装の例外、panel-api-design.md5.4節と同型）。aic/bicも同じ理由でlinearmodelsに無く、generate_fe_crosscheck_fixtures.py側のみに含まれる。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため、この値をそのまま数値比較に使わないこと（fixestのfitstat(m,'wr2')で検証、linearmodels_ref.pyモジュールdoc参照）。wagepan（Wooldridge、N=545人×T=8年、1980-1987、バランスパネル）はmarried/union/expersqのみ使用——educ/black/hisp等の時間不変変数はwithin変換で分散ゼロになり除外、exper自体も2-way FEでentity+time効果と完全共線になるため除外している（benchmark/common/constants.pyのWAGEPAN_X参照）。hacはwagepan（T=8）には適用しない（Driscoll-Kraay HACはfixestドキュメントが20時点以上を推奨するほど時点数に依存するため、合成データのcross_sectionally_correlatedシナリオ（T=25）でのみ数値照合する）。"
+    "note": "singleton_entity/singleton_time/unbalanced_two_way/zero_variance_regressorシナリオはここに含まない（いずれもValidationErrorの発生確認のみ、テストコード側で対応）。unbalancedは1-way専用（2-way FEはバランスパネル必須のため、2-way要求時のValidationErrorはunbalanced_two_wayシナリオで確認）。hc2/hc3はlinearmodels.PanelOLSが提供しないため対象外（generate_fe_crosscheck_fixtures.pyのfixestクロスチェックのみで検証する単一参照実装の例外、panel-common.md5.4節と同型）。aic/bicも同じ理由でlinearmodelsに無く、generate_fe_crosscheck_fixtures.py側のみに含まれる。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため、この値をそのまま数値比較に使わないこと（fixestのfitstat(m,'wr2')で検証、linearmodels_ref.pyモジュールdoc参照）。wagepan（Wooldridge、N=545人×T=8年、1980-1987、バランスパネル）はmarried/union/expersqのみ使用——educ/black/hisp等の時間不変変数はwithin変換で分散ゼロになり除外、exper自体も2-way FEでentity+time効果と完全共線になるため除外している（benchmark/common/constants.pyのWAGEPAN_X参照）。hacはwagepan（T=8）には適用しない（Driscoll-Kraay HACはfixestドキュメントが20時点以上を推奨するほど時点数に依存するため、合成データのcross_sectionally_correlatedシナリオ（T=25）でのみ数値照合する）。"
   }
 }

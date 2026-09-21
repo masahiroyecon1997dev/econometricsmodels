@@ -5,7 +5,7 @@
 # run_re()）とは独立した実装のため、testing-policy.mdの役割分担「R: 独立実装に
 # よるクロスチェック用」に対応する（Issue #203）。
 #
-# ## 対象はHC2/HC3のみ（単一参照実装の例外、panel-api-design.md 5.4節と同型）
+# ## 対象はHC2/HC3のみ（単一参照実装の例外、panel-common.md 5.4節と同型）
 #
 # linearmodels.RandomEffectsはHC2/HC3を提供しない（PanelOLSと同じ`_cov_estimators`
 # 実装のため、engine/src/panel/CLAUDE.md「cov_type対応（Issue #197）」参照）ため、
@@ -24,24 +24,24 @@
 #
 # `summary(model, vcov=...)`はz値・正規分布p値を返す（plmの`RandomEffects`は
 # 漸近正規近似の検定を既定にしている、実測確認済み）。本実装は`cov_type`に
-# 関わらず常にt(df_resid)分布で報告する（panel-api-design.md 3.3節）ため、
+# 関わらず常にt(df_resid)分布で報告する（panel-common.md 3.3節）ため、
 # t統計量・p値・信頼区間はcoef/seから本実装と同じt分布の式で計算し直す。
 # **HC2/HC3クロスチェックの本体はcoef/se（vcovHCの生の値）であり、t検定への
 # 変換は両実装共通の標準的な式（バグを覆い隠す余地が薄い）のため、この手計算
 # 自体が独立性を大きく損なうものではないと判断した**（AIC/BIC計算での前例
 # （run_lm_crosscheck.R等）と同型の対応）。
 #
-# ## ハウスマン検定（plm::phtestのみを参照値とする例外規定、panel-api-design.md
+# ## ハウスマン検定（plm::phtestのみを参照値とする例外規定、panel-common.md
 # 5.3節）
 #
 # linearmodelsにはハウスマン検定の専用実装が無い（ソース確認済み）ため、本
 # スクリプトが唯一の参照実装になる。cov_typeに関わらず常にclassical Hausman
 # 検定（plm::phtestの既定、内部でwithin/random双方をclassicalで再フィットして
 # 比較）を計算し、出力に常に含める（本実装のReEstimator::fitも常にclassical
-# Hausmanのみ計算するため整合、7.3節）。
+# Hausmanのみ計算するため整合、`re-spec.md`3.7節）。
 #
 # v1のハウスマン検定ベンチマークは1-way（entity方向のみ、`ReOptions.time`
-# 未指定）に限定する——RE自身がv1でentity方向のみをサポートし（7.6節、2-way
+# 未指定）に限定する——RE自身がv1でentity方向のみをサポートし（`re-spec.md`5章、2-way
 # REはスコープ外）、本スクリプトのphtest呼び出しもeffect="individual"（既定）
 # のみを使う（ユーザー確認済み・2026-09-20）。2-way内部FE呼び出し
 # （`ReOptions.time`指定時）のHausmanクロスチェックは別issueで検討する。

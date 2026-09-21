@@ -29,7 +29,7 @@
 //!    呼ぶだけ（IVの`IVResult.first_stage`フィールドが初期実装ではなく後続の拡張で
 //!    追加されたのと同じ段階分割）。
 //!
-//! ## `FEOptions.time`と`FEOptions.time_col`は別物（`panel-api-design.md`1.1節）
+//! ## `FEOptions.time`と`FEOptions.time_col`は別物（`panel-common.md`1.1節）
 //!
 //! `time`（bareネーミング）は2-way FE（entity + time FE）の指定に使う: `Some`なら2-way・
 //! `None`なら1-way。`time_col`（OLSの`cluster_col`/`time_col`と同じ「補助列」命名規則）は
@@ -57,7 +57,7 @@
 //!
 //! v1では「固定効果のみのモデル」（`x=[]`）を意図的に許容していた（`validate_x_non_empty`を
 //! 呼ばない設計）。しかしユーザーからの指摘で、この判断が独立して吟味された
-//! 記録が`panel-api-design.md`に見当たらないこと・`x`が空だと何らかの説明変数が`y`に与える
+//! 記録が`panel-common.md`に見当たらないこと・`x`が空だと何らかの説明変数が`y`に与える
 //! 効果を推定するという因果推論の営みが成立しない（実質「個体・時間固定効果によるyの分解」
 //! という別の操作になる）ことが指摘され、他手法（OLS/WLS/Logit/Probit/IV）と同じ
 //! `validate_x_non_empty`を適用し空を拒否する方針に変更した。**`engine`側
@@ -87,7 +87,7 @@ use crate::validation::{
 
 /// Estimation options for FE (fixed effects panel regression).
 ///
-/// See `docs/planning/specs/panel-api-design.md` for the rationale behind each field's
+/// See `docs/spec/panel-common.md` for the rationale behind each field's
 /// meaning and default value.
 // module/from_py_objectの理由は`OLSOptions`と同じ（`engine_pybind/src/linear/ols.rs`参照）。
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
@@ -178,7 +178,7 @@ impl FEOptions {
 
 /// Estimation results for FE.
 ///
-/// Structured data only (no `summary()`); see `docs/planning/specs/panel-api-design.md`
+/// Structured data only (no `summary()`); see `docs/spec/panel-common.md`
 /// section 2. All array-valued fields (`params`, `std_errors`, etc.) share the same order
 /// as `param_names`.
 ///
@@ -220,7 +220,7 @@ pub struct FEResult {
     pub df_resid: usize,
     #[pyo3(get)]
     pub df_model: usize,
-    /// Number of panel entities (`panel-api-design.md` section 2.1, following the
+    /// Number of panel entities (`panel-common.md` section 2.1, following the
     /// pyfixest/plm precedent).
     #[pyo3(get)]
     pub n_entities: usize,

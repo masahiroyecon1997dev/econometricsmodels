@@ -6,7 +6,7 @@ logic live entirely on the Rust side; this module only provides the
 Python-facing API shape for polars DataFrames — `entity`/`time` as bare
 column-name arguments, `x` as a list, an options object for estimation
 settings (CLAUDE.md section 2, `.claude/rules/python-style.md`
-"設計方針との整合性", `docs/planning/specs/panel-api-design.md` section 1).
+"設計方針との整合性", `docs/spec/panel-common.md` section 1).
 
 `FEOptions` is re-exported as-is from `_lib` (not redefined as a
 separate class; same policy as `OLSOptions`/`IVOptions`).
@@ -287,7 +287,7 @@ class FEResults:
 
         One-way: `dict[str, float]` keyed by entity id. Two-way:
         `dict[str, dict[str, float]]` with top-level keys `"entity"`/
-        `"time"`. See `docs/planning/specs/panel-api-design.md`
+        `"time"`. See `docs/spec/panel-common.md`
         section 6.6 and `_lib.FEResult.fixed_effects`'s docstring for
         the exact formula, including the two-way normalization
         convention (which does not always numerically match

@@ -1,6 +1,6 @@
 """IV の成功パスの構造・API・オプション反映の検証。
 
-確定済み設計（`docs/planning/specs/iv-api-design.md`）どおりの結果型・辞書キー・
+確定済み設計（`docs/spec/iv-spec.md`）どおりの結果型・辞書キー・
 ラベルになっていること、`IVOptions` の各フィールド（2SLS/GMM 共通・GMM 固有）が
 engine_pybind 経由で反映されることを確認する。`ValidationError`/
 `ComputationError` パスは `test_iv_validation.py`、主リファレンス（linearmodels）
@@ -81,7 +81,7 @@ def test_residuals_length_matches_n_obs(iv_dataset):
 
 def test_param_names_order(iv_dataset):
     """`param_names`は定数項→x_exog→x_endogの順（`IvInput::from_columns`の
-    設計行列の列順、`docs/planning/specs/iv-api-design.md`参照）。
+    設計行列の列順、`docs/spec/iv-spec.md`参照）。
     """
     res = our_fit(iv_dataset)
     assert res.param_names == ["const", "x1", "endog1"]

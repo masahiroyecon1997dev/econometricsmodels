@@ -4,7 +4,7 @@
 `tests/fixtures/benchmarks/iv_crosscheck.json`
 （`benchmark/iv/fixtures/generate_iv_crosscheck_fixtures.py`で生成）を用いて、
 linearmodelsとは独立した実装（R `ivreg`）との一致を確認する
-（`docs/planning/specs/iv-api-design.md`5.2節）。
+（`docs/spec/iv-spec.md`4章）。
 
 シナリオ・cov_type・クラスタケースの構成は`test_iv_reference.py`と揃える。
 
@@ -33,7 +33,7 @@ Note:
     - `hc2`/`hc3`は`vcovHC(model, type="HC2"/"HC3")`（`ivreg:::hatvalues.ivreg`の
       type="stage2"、第二段階OLSのレバレッジをそのまま使う実装）で計算でき、本実装
       （`engine/src/iv/two_sls.rs`の`hc_cov_params`）と数値一致することを実機確認済み
-      のため対象に含む（`iv-api-design.md`3.1節。旧記述「ivreg側に確立した参照実装が
+      のため対象に含む（`iv-spec.md`3.1節。旧記述「ivreg側に確立した参照実装が
       無い」は`ivreg`がdevcontainerにインストールできなかった時期の調査に基づく
       誤りだった）。`linearmodels`（`test_iv_reference.py`）は引き続き対応していない
       ため、hc2/hc3の主リファレンス比較はこのファイルのみで行う。

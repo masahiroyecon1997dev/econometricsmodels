@@ -24,7 +24,7 @@
 //!    （本番経路（`fit_re`）から実際に呼ばれるようになったため）。
 //!
 //! RE自身に`fixed_effects()`のような追加メソッドは無い（ハウスマン検定は`fit()`内で自動
-//! 計算し`REResult`のフィールドに直接含める、`panel-api-design.md`2.4節）ため、FEの#188
+//! 計算し`REResult`のフィールドに直接含める、`panel-common.md`2.4節）ため、FEの#188
 //! （`fixed_effects()`メソッド）に相当する3段目は存在しない。本Issueでこの系統の実装は
 //! 完結する。
 //!
@@ -42,7 +42,7 @@
 //! - `cov_type="hac"`時のDriscoll-Kraay型パネルHACの時系列順序（`None`なら
 //!   `PanelError::HacRequiresTime`）
 //! - ハウスマン検定用の内部FE呼び出しの1-way/2-way選択（`Some`なら2-way FE、`None`なら
-//!   1-way FE。RE自身が2-wayをサポートしないこととは独立の判断、7.3節）
+//!   1-way FE。RE自身が2-wayをサポートしないこととは独立の判断、`re-spec.md`3.7節）
 //!
 //! ## `cov_type`の非対応値
 //!
@@ -53,7 +53,7 @@
 //!
 //! FEと同じ`validate_x_non_empty`を適用し、`x=[]`を拒否する。REで`x=[]`は
 //! 「分散成分（ICC）のみを推定するnullモデル」として単独で意味を持つ標準的なユースケース
-//! （パネル・混合モデル分析の"null model"）だが、`panel-api-design.md`にこの点の明示的な
+//! （パネル・混合モデル分析の"null model"）だが、`panel-common.md`にこの点の明示的な
 //! 決定が無く、他手法（OLS/WLS/Logit/Probit/IV/FE post-#320）と一貫させる方針をユーザーが
 //! 選択した。nullモデル・ICC推定のサポートは別途検討する。
 
@@ -74,7 +74,7 @@ use crate::validation::{
 
 /// Estimation options for RE (random effects panel regression).
 ///
-/// See `docs/planning/specs/panel-api-design.md` for the rationale behind each field's
+/// See `docs/spec/panel-common.md` for the rationale behind each field's
 /// meaning and default value.
 // module/from_py_objectの理由は`OLSOptions`と同じ（`engine_pybind/src/linear/ols.rs`参照）。
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
@@ -149,14 +149,14 @@ impl REOptions {
 
 /// Estimation results for RE.
 ///
-/// Structured data only (no `summary()`); see `docs/planning/specs/panel-api-design.md`
+/// Structured data only (no `summary()`); see `docs/spec/panel-common.md`
 /// section 2. All array-valued fields (`params`, `std_errors`, etc.) share the same order
 /// as `param_names` (`param_names[0]` is always `"const"`, since RE — unlike FE — has an
 /// intercept).
 ///
 /// The Hausman test (`hausman_statistic` / `hausman_p_value` / `hausman_df`) is computed
 /// automatically inside `fit()` and included directly here (unlike FE's
-/// `fixed_effects()`, RE has no separate diagnostic method; see `panel-api-design.md`
+/// `fixed_effects()`, RE has no separate diagnostic method; see `panel-common.md`
 /// section 2.4). All three are `None` when the internal FE comparison fails (singleton
 /// entities, zero-variance regressors after demeaning, etc.) or when the comparison is
 /// otherwise not well-defined — RE's own result is still returned normally in that case.
@@ -193,7 +193,7 @@ pub struct REResult {
     pub df_resid: usize,
     #[pyo3(get)]
     pub df_model: usize,
-    /// Number of panel entities (`panel-api-design.md` section 2.1, following the
+    /// Number of panel entities (`panel-common.md` section 2.1, following the
     /// pyfixest/plm precedent).
     #[pyo3(get)]
     pub n_entities: usize,
@@ -362,7 +362,7 @@ pub(crate) fn build_re_input(
 /// `ReEstimator::estimator()`（内部で委譲した`OlsEstimator`）から取得する。FEと異なり
 /// `aic`/`bic`もそのまま`estimator()`委譲でよい——REの`df_model`が`OlsInput::k()`と自動的に
 /// 一致する設計のため、`OlsEstimator`委譲時点で既に正しい値になっている
-/// （`engine/src/panel/CLAUDE.md`「`df_resid`/`df_model`（7.5節）」参照。FEの
+/// （`engine/src/panel/CLAUDE.md`「`df_resid`/`df_model`（`re-spec.md`3.3節）」参照。FEの
 /// `aic`/`bic`のようなRE独自の再計算は不要）。`std_errors`/`t_stats`/`p_values`/
 /// `conf_lower`/`conf_upper`/`df_resid`/`df_model`/`f_statistic`/`f_p_value`/
 /// `r_squared_within`/`r_squared_between`/`r_squared_overall`/`hausman_statistic`/

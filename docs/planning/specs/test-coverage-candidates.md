@@ -51,9 +51,9 @@
 
 ### 15. IV: 複数内生変数対応後もCragg-Donald統計量をv1スコープ外のままにしてよいか（設計判断候補）
 
-- **対象**: `iv-api-design.md`6.4節（弱操作変数診断）・`engine/src/iv/two_sls.rs`の
+- **対象**: `iv-spec.md`3.4節（弱操作変数診断）・`engine/src/iv/two_sls.rs`の
   `partial_f_statistic`（内生変数ごとの単変量部分F統計量のみ実装済み）
-- **内容**: ユーザー提案（2026-08-16）。`iv-api-design.md`6.4節は「複数内生変数の同時検定
+- **内容**: ユーザー提案（2026-08-16）。`iv-spec.md`3.4節は「複数内生変数の同時検定
   （Cragg-Donald統計量等）も...v1スコープ外とし、各内生変数ごとの部分F統計量のみ返す」と
   確定していたが、この判断がされた時点では複数内生変数（`k_endog>=2`）のシナリオ自体が
   まだ実装されていなかった可能性がある。その後Issue #231フェーズ4で`multi_endog`シナリオ
@@ -142,7 +142,7 @@
 
 ### 21. IV(GMM): RクロスチェックがivregのGMM非対応で省略されている件を再検討する
 
-- **対象**: `docs/planning/specs/iv-api-design.md`5.3節（「GMMのRクロスチェック
+- **対象**: `docs/spec/iv-spec.md`4章（「GMMのRクロスチェック
   省略（例外規定）」）・`benchmark/iv/fixtures/generate_iv_gmm_fixtures.py`
   （`linearmodels`との照合のみ、Rクロスチェックなし）
 - **内容**: ユーザー指摘（2026-08-16）。GMM（Hansen J検定含む）は`linearmodels`
@@ -1093,7 +1093,7 @@
 ### 61. `test_iv_gmm_fixtures.py`（GMMのlinearmodels主リファレンス照合）に実データセット（Wooldridge `card`）での検証が無い——ドキュメント上も明示的に決定された事項ではない
 
 - **対象**: `tests/test_iv_gmm_fixtures.py`全体（`grep`で`card`/
-  `wooldridge`が0件）。対比: [docs/planning/specs/iv-api-design.md:220-227](../../../docs/planning/specs/iv-api-design.md#L220-L227)
+  `wooldridge`が0件）。対比: `iv-spec.md`4章（当時: 220-227行目）
   （「5.5 実データセット」節、`test_iv_fixtures.py`〔linearmodels〕・
   `test_iv_crosscheck.py`〔ivreg〕の両方でCard実データをクロスチェック
   すると明記されているが、GMMについては「5.3節の方針によりRクロス
@@ -1108,7 +1108,7 @@
   crosscheck.py`のGMM省略）とは**性質が異なる**という点——項目26は
   「Rクロスチェックの省略」という明確に文書化された決定だが、本項目は
   「`linearmodels`主リファレンスでのGMM実データ検証」の話であり、
-  `iv-api-design.md`5.5節の文言（「Rクロスチェックも対象外」）を素直に
+  当時の設計ドキュメント5.5節の文言（「Rクロスチェックも対象外」）を素直に
   読むと、Rクロスチェックの省略についてのみ言及しており、`linearmodels`
   側（Python）の実データ検証を省略してよいという決定までは読み取れない。
   `testing-policy.md`「テスト用データセット」2.は「実データセットでの
@@ -1123,7 +1123,7 @@
   （Hansen J）等、GMMでも実データで検証する価値のある統計量は多い
   ため、追加する方向を推奨する。
 - **気づいた経緯**: 2026-08-31、`tests/test_iv_crosscheck.py`解説時の
-  ユーザー指摘、`iv-api-design.md`5.5節の文言を精査して確認。
+  ユーザー指摘、当時の設計ドキュメント5.5節の文言を精査して確認。
 - **状態**: 未対応（**要ユーザー判断**: 意図的な省略だったか確認した
   上で、追加するならフィクスチャ生成〔`generate_iv_gmm_fixtures.py`〕を
   伴う）
@@ -1357,7 +1357,7 @@
     `x_endog`・`instruments`にも適用するか）で、除外制約・関連性の
     識別前提が崩れないかの検討が必要になりうる。
 - **Claudeの所感**: IV固有の設計判断が伴うため、着手前に既存のIV実装
-  （`docs/planning/specs/iv-api-design.md`5章・`benchmark/iv/datasets.py`の
+  （`docs/spec/iv-spec.md`4章・`benchmark/iv/datasets.py`の
   既存シナリオ設計）を確認し、どの列に何を適用するかをユーザーに確認して
   から実装する方針が良いと考える。
 - **気づいた経緯**: 2026-09-13、旧項目2のクローズ内容を確認する過程で

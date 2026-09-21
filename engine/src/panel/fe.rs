@@ -32,13 +32,13 @@
 //!     等しいため）。したがって`e_it`をtimeでquasi-demeanすると
 //!     `e_it - (ȳ_.t - ȳ..) = y_it - ȳ_i. - ȳ_.t + ȳ..`となり閉形式と一致する。
 //!     不均衡パネルではこの等式が成り立たない（`(1/N)Σ_i ȳ_i. ≠ ȳ..`となりうる）ため、
-//!     2-wayを不均衡パネルに適用してはならない（6.4節がバランスパネルを必須にする
+//!     2-wayを不均衡パネルに適用してはならない（`fe-spec.md`3.1節がバランスパネルを必須にする
 //!     所以）。
 //!
 //! ## 分散ゼロ説明変数の検出（`validate_no_zero_variance_regressors`）
 //!
 //! within変換後の設計行列の各列の分散を確認し、ゼロの列があれば
-//! `PanelError::ZeroVarianceAfterDemeaning`を返す（6.7節）。1-way/2-way共通ロジック
+//! `PanelError::ZeroVarianceAfterDemeaning`を返す（`fe-spec.md`1章）。1-way/2-way共通ロジック
 //! （`within_transform_one_way`/`within_transform_two_way`のどちらの出力にも適用できる、
 //! `column_is_zero_variance`関数doc参照）。時間不変変数（1-way）だけでなく、2-wayで
 //! time FEと完全共線な「エンティティ間で変動しない列」も同じチェックで検出できる。
@@ -46,10 +46,10 @@
 //! ## singleton検出（`validate_no_singleton_groups_one_way`/`validate_no_singleton_groups_two_way`）
 //!
 //! 観測数1のグループ（singleton）を明示的に検出し`PanelError::SingletonGroup`を返す
-//! （6.5節）。自動除外はしない。**下流の特異行列エラーとして偶発的に検出される形には
+//! （`fe-spec.md`1章）。自動除外はしない。**下流の特異行列エラーとして偶発的に検出される形には
 //! しない**——singletonのエンティティ/時点はwithin変換後にその行が全列ゼロになり
 //! `OlsEstimator::fit`側で特異行列として（間接的に、かつ原因の分かりにくいエラー
-//! メッセージで）検出されうるが、6.5節はこれを避け、within変換の**前**に生の
+//! メッセージで）検出されうるが、`fe-spec.md`1章はこれを避け、within変換の**前**に生の
 //! `entity`/`time`列から直接カウントして専用のバリデーションエラーにすることを要求する。
 //! - **1-way**: entityのみ検出（`validate_no_singleton_groups_one_way`）。
 //! - **2-way**: entity・time双方を対称に検出する（`validate_no_singleton_groups_two_way`。
@@ -60,11 +60,11 @@
 //! ## `OlsEstimator`への委譲（`FeEstimator`、4.3節）
 //!
 //! FEは**まず`OlsEstimator`への委譲を試す**（within変換したデータを`OlsEstimator::fit`に
-//! 渡す、`WlsEstimator`と同型のパターン。`docs/planning/specs/panel-api-design.md`4.3節）。
+//! 渡す、`WlsEstimator`と同型のパターン。`docs/spec/panel-common.md`4.3節）。
 //! `FeEstimator::fit`は「singleton検出→within変換（2-wayはバランスパネル検証も内包）→
 //! 分散ゼロ検出→`OlsEstimator::fit`」の順にパイプラインを実行する。
 //!
-//! **`FeEstimator::fit`はwithin推定量`β̂`の委譲に加えて、自由度調整（6.3節）・
+//! **`FeEstimator::fit`はwithin推定量`β̂`の委譲に加えて、自由度調整（`fe-spec.md`3.2節）・
 //! `cov_type`対応（3.1節・3.2節）・パネル固有R²（2.3節）まで
 //! 実装している**。within変換後のOLS推定量`β̂`はwithin推定量として数学的に正しい値になる
 //! （自由度・`cov_type`に依存しない）ため、委譲だけで正しく求まる（4.3節。WLSがR²等を
@@ -82,14 +82,14 @@
 //!
 //! `FeEffects`（`OneWay`/`TwoWay`）で1-way/2-wayを切り替える。将来`FEOptions`
 //! が導入されたら、その一部（またはそのままのフィールド型）として
-//! 統合する想定の暫定的なパラメータ（1-way/2-wayの区別自体は`panel-api-design.md`で
+//! 統合する想定の暫定的なパラメータ（1-way/2-wayの区別自体は`panel-common.md`で
 //! 確定済みの設計だが、`FEOptions`自体は未着手のため）。
 //!
-//! ## 自由度調整（6.3節）
+//! ## 自由度調整（`fe-spec.md`3.2節）
 //!
 //! `df_model = k + neffects`（`neffects`は1-wayなら`n_entities`、2-wayなら
 //! `n_entities + n_periods - 1`。entityダミー・timeダミー間の定数項ぶんの重複を`+1`で
-//! 補正する、6.3節）。`df_resid = n - df_model`。`n <= df_model`なら
+//! 補正する、`fe-spec.md`3.2節）。`df_resid = n - df_model`。`n <= df_model`なら
 //! `PanelError::InsufficientDegreesOfFreedom`。
 //!
 //! **`OlsEstimator`自身のt検定・調整済みR²・AIC/BICは`df_resid_ols = n - k`（`k`のみ、
@@ -105,7 +105,7 @@
 //!   `aic = -2*log_likelihood + 2*df_model`、`bic = -2*log_likelihood + ln(n)*df_model`。
 //! - **F統計量**（`f_statistic`/`f_p_value`）: 当初は検定統計量（t検定）に限定してスコープ
 //!   外だったが、`FEOptions`/`FEResult`のフィールド設計
-//!   （`panel-api-design.md`2.1節がOLS同様
+//!   （`panel-common.md`2.1節がOLS同様
 //!   `f_statistic`/`f_p_value`を含める前提だった）の実装時に、engine側に対応する
 //!   panel自由度調整版が存在しないことが判明し、ユーザー確認の上で本節に前倒しで
 //!   実装した。**`OlsEstimator`自身の`estimator().f_statistic()`/`f_p_value()`は
@@ -305,21 +305,21 @@
 //!   あくまで`FeCovType::Hac`が持つcov_type固有のオプションであり、パネル構造
 //!   （2-wayの有無）とは独立に指定できる設計）。
 //!
-//! ## 固定効果自体（α_i）の復元（`fixed_effects()`、6.6節）
+//! ## 固定効果自体（α_i）の復元（`fixed_effects()`、`fe-spec.md`3.5節）
 //!
-//! 6.6節どおり別メソッド（`fit()`の戻り値本体には含めない、IVの`first_stage()`と同じ
+//! `fe-spec.md`3.5節どおり別メソッド（`fit()`の戻り値本体には含めない、IVの`first_stage()`と同じ
 //! 「追加結果は別メソッド」方針）。`FeEstimator`は`fit()`時点で`input`（変換前の元の
 //! `y`/`x`/`entity`/`time`）と`estimator().params()`（β̂）を既に保持しているため、
 //! `fixed_effects()`は追加のフィールドを持たず呼び出し時に計算し直す（IVの`first_stage`
 //! と異なり、固定効果自体の値は主推定`β̂`の計算に必要ないため、常に計算しておく理由が無い）。
 //!
-//! - **1-wayは一意に決まる**: `α_i = ȳ_i. - x̄_i.'β̂`（6.6節の式そのまま）。モデル
+//! - **1-wayは一意に決まる**: `α_i = ȳ_i. - x̄_i.'β̂`（`fe-spec.md`3.5節の式そのまま）。モデル
 //!   `y_it = α_i + x_it'β + ε_it`では切片が全てentityに吸収される設計のため
 //!   （`OlsInput::from_columns`が`include_intercept=false`で呼ばれる、FEの基本設計）
 //!   正規化の任意性は無い。
 //! - **2-wayには正規化の任意性がある**（着手時に発見、ユーザー承認済み、2026-09-12）:
 //!   モデル`y_it = α_i + γ_t + x_it'β̂ + ε̂_it`は`α_i`に定数`c`を足し`γ_t`から`c`を引いても
-//!   同じ予測値になるため一意に決まらない。6.6節の式をそのままentity/timeに当てはめる
+//!   同じ予測値になるため一意に決まらない。`fe-spec.md`3.5節の式をそのままentity/timeに当てはめる
 //!   （`α_i = ȳ_i. - x̄_i.'β̂`、`γ_t = ȳ_.t - x̄_.t'β̂`）と、大域平均`ȳ.. - x̄..'β̂`が
 //!   両方に二重計上されるバグになる（`α_i + γ_t`が正しい合成効果より大域平均ぶん
 //!   大きくなる）。**採用した正規化: 基準時点を`γ_{t_ref} = 0`に固定し、`α_i`に大域的な
@@ -342,7 +342,7 @@
 //!     時点と辞書順で最小の時点が一致する構成のため、その入力に限り`fixest::feols(y ~ x |
 //!     entity + time)`の`fixef()`と数値完全一致する
 //!     （`fe_estimator_fit_two_way_fixed_effects_matches_fixest_reference`）。
-//!   - 代替案（`α_i`・`γ_t`をともに大域平均からの偏差にする対称正規化）は、6.6節のAPI
+//!   - 代替案（`α_i`・`γ_t`をともに大域平均からの偏差にする対称正規化）は、`fe-spec.md`3.5節のAPI
 //!     形状（entity/timeの2キーのみ）に大域平均を格納する場所が無いため不採用
 //!     （ユーザーとの相談で決定）。
 //! - 新規ヘルパー（`fe.rs`内private）: `slope_only_residual`（`fe_r_squared_overall`と共有、
@@ -384,7 +384,7 @@ pub struct FeInput {
     /// 各行のエンティティID（長さ`n`）。
     entity: Vec<String>,
     /// 各行の時点ID（長さ`n`）。2-way FE（entity + time FE）を指定しない場合は`None`
-    /// （`panel-api-design.md`1.1節: `time`は`FEOptions`内の条件付き必須オプション）。
+    /// （`panel-common.md`1.1節: `time`は`FEOptions`内の条件付き必須オプション）。
     time: Option<Vec<String>>,
     /// 被説明変数名。
     dep_var_name: String,
@@ -502,16 +502,16 @@ impl FeInput {
 /// 統合される想定の暫定的なパラメータ）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeEffects {
-    /// entityのみ（`within_transform_one_way`、6.1節）。
+    /// entityのみ（`within_transform_one_way`、`fe-spec.md`3.1節）。
     OneWay,
-    /// entity + time（`within_transform_two_way`、6.2節。バランスパネル必須、6.4節）。
+    /// entity + time（`within_transform_two_way`、`fe-spec.md`1章。バランスパネル必須、`fe-spec.md`3.1節）。
     TwoWay,
 }
 
 /// 固定効果自体（α_i、2-wayはγ_tも）の復元結果（`FeEstimator::fixed_effects`、
-/// 6.6節）。モジュールdoc「固定効果自体（α_i）の復元」参照。
+/// `fe-spec.md`3.5節）。モジュールdoc「固定効果自体（α_i）の復元」参照。
 ///
-/// `BTreeMap<String, f64>`（ID→効果）を使う理由: 6.6節のPython API形状
+/// `BTreeMap<String, f64>`（ID→効果）を使う理由: `fe-spec.md`3.5節のPython API形状
 /// （1-wayは`dict[str, float]`、2-wayは`dict[str, dict[str, float]]`）にそのまま対応でき、
 /// かつ`group_indices_by_key`と同じくキー順序が決定的になる（`HashMap`だとプロセスごとの
 /// ハッシュシードで反復順序が変わりうる、他のグループ集約と同じ理由）。
@@ -519,7 +519,7 @@ pub enum FeEffects {
 pub enum FixedEffects {
     /// エンティティID → α_i。
     OneWay(BTreeMap<String, f64>),
-    /// entity効果・time効果それぞれのID→効果（6.6節のPython API形状のトップレベルキー
+    /// entity効果・time効果それぞれのID→効果（`fe-spec.md`3.5節のPython API形状のトップレベルキー
     /// `"entity"`/`"time"`に対応）。
     TwoWay {
         entity: BTreeMap<String, f64>,
@@ -572,9 +572,9 @@ pub struct FeEstimator {
     effects: FeEffects,
     cov_type: FeCovType,
     estimator: OlsEstimator,
-    /// パネル自由度調整後のモデル自由度（`k + neffects`、6.3節）。
+    /// パネル自由度調整後のモデル自由度（`k + neffects`、`fe-spec.md`3.2節）。
     df_model: usize,
-    /// パネル自由度調整後の残差自由度（`n - df_model`、6.3節）。
+    /// パネル自由度調整後の残差自由度（`n - df_model`、`fe-spec.md`3.2節）。
     df_resid: usize,
     std_errors: Mat<f64>,
     t_stats: Mat<f64>,
@@ -598,7 +598,7 @@ pub struct FeEstimator {
     f_statistic: f64,
     f_p_value: f64,
     /// `cov_type`別の`k×k`共分散行列。`std_errors`等はこの対角成分の
-    /// 平方根に過ぎず、`re.rs`のハウスマン検定（`hausman_statistic`、7.3節）は
+    /// 平方根に過ぎず、`re.rs`のハウスマン検定（`hausman_statistic`、`re-spec.md`3.7節）は
     /// オフ対角成分も含む部分行列比較が必要なため、フィールドとして保持し
     /// `pub(crate)`で公開する（`FEResult`には含めない内部専用の値、
     /// `swamy_arora_variance_components`と同じ`pub(crate)`の使い方）。
@@ -607,7 +607,7 @@ pub struct FeEstimator {
 
 impl FeEstimator {
     /// `input`を`effects`が指定する方向でwithin変換した上で`OlsEstimator::fit`に委譲し、
-    /// FEを推定する。パネル自由度調整（6.3節）・`cov_type`対応
+    /// FEを推定する。パネル自由度調整（`fe-spec.md`3.2節）・`cov_type`対応
     /// （3.1節・3.2節）を反映した標準誤差・t値・p値・信頼区間・AIC/BIC、
     /// パネル固有R²（2.3節）を計算し直す（モジュールdoc「自由度調整」
     /// 「`cov_type`対応」「パネル固有R²」参照）。
@@ -665,7 +665,7 @@ impl FeEstimator {
             ))),
         };
         let k = input.x_names().len();
-        // `neffects`: entityダミー・timeダミーの実効パラメータ数（6.3節）。2-wayは両者の
+        // `neffects`: entityダミー・timeダミーの実効パラメータ数（`fe-spec.md`3.2節）。2-wayは両者の
         // 間に定数項ぶんの重複が1つ生じるため`+1`補正（`n_entities + n_periods - 1`）。
         let neffects = match n_periods {
             None => n_entities,
@@ -914,12 +914,12 @@ impl FeEstimator {
         &self.estimator
     }
 
-    /// パネル自由度調整後のモデル自由度（`k + neffects`、6.3節）。
+    /// パネル自由度調整後のモデル自由度（`k + neffects`、`fe-spec.md`3.2節）。
     pub fn df_model(&self) -> usize {
         self.df_model
     }
 
-    /// パネル自由度調整後の残差自由度（`n - df_model`、6.3節）。
+    /// パネル自由度調整後の残差自由度（`n - df_model`、`fe-spec.md`3.2節）。
     pub fn df_resid(&self) -> usize {
         self.df_resid
     }
@@ -987,7 +987,7 @@ impl FeEstimator {
         self.f_p_value
     }
 
-    /// 固定効果自体（α_i、2-wayはγ_tも）を事後的に復元する（6.6節）。
+    /// 固定効果自体（α_i、2-wayはγ_tも）を事後的に復元する（`fe-spec.md`3.5節）。
     ///
     /// `fit()`の戻り値本体には含めない別メソッド（IVの`first_stage()`と同じ方針、
     /// モジュールdoc「固定効果自体（α_i）の復元」参照）。2-wayは正規化に任意性があるため
@@ -1195,7 +1195,7 @@ fn overall_residual_mean(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>) -> f64 {
 }
 
 /// 1-way FE（entityのみ）のwithin変換。`y`と各`x`列にentityでのquasi-demean（θ=1）を
-/// 適用する。不均衡パネルも無条件でサポートする（モジュールdoc・6.1節参照）。
+/// 適用する。不均衡パネルも無条件でサポートする（モジュールdoc・`fe-spec.md`3.1節参照）。
 ///
 /// 戻り値は`(y_transformed, x_transformed)`（元の列順を保持）。
 pub fn within_transform_one_way(input: &FeInput) -> (Vec<f64>, Vec<Vec<f64>>) {
@@ -1211,7 +1211,7 @@ pub fn within_transform_one_way(input: &FeInput) -> (Vec<f64>, Vec<Vec<f64>>) {
 
 /// 2-way FE（entity + time FE）のwithin変換。閉形式の二重デミーニングと数学的に等価な
 /// 「entityでquasi-demean → その結果をtimeでquasi-demean」の2段階適用で計算する
-/// （モジュールdoc参照）。事前にバランスパネルであることを検証する（6.4節）。
+/// （モジュールdoc参照）。事前にバランスパネルであることを検証する（`fe-spec.md`3.1節）。
 ///
 /// 戻り値は`(y_transformed, x_transformed)`（元の列順を保持）。
 ///
@@ -1240,7 +1240,7 @@ pub fn within_transform_two_way(input: &FeInput) -> Result<(Vec<f64>, Vec<Vec<f6
     Ok((y, x))
 }
 
-/// 1-way FE向けのsingleton検出（6.5節）。`entity`に観測数1のグループがあれば
+/// 1-way FE向けのsingleton検出（`fe-spec.md`1章）。`entity`に観測数1のグループがあれば
 /// `PanelError::SingletonGroup`を返す。
 ///
 /// # Errors
@@ -1250,7 +1250,7 @@ pub fn validate_no_singleton_groups_one_way(input: &FeInput) -> Result<(), Panel
     reject_singleton_group(PanelDimension::Entity, input.entity())
 }
 
-/// 2-way FE向けのsingleton検出（6.5節）。entity・time双方を対称に検出する
+/// 2-way FE向けのsingleton検出（`fe-spec.md`1章）。entity・time双方を対称に検出する
 /// （`within_transform_two_way`と同じく`time`必須）。
 ///
 /// **`time`の存在チェックを最初に行う**（`within_transform_two_way`と同じ順序に揃える。
@@ -1295,12 +1295,12 @@ fn reject_singleton_group(dimension: PanelDimension, ids: &[String]) -> Result<(
     Ok(())
 }
 
-/// within変換後の説明変数の各列に分散ゼロの列がないことを検証する（6.7節）。1-way/2-way
+/// within変換後の説明変数の各列に分散ゼロの列がないことを検証する（`fe-spec.md`1章）。1-way/2-way
 /// 共通ロジック（`within_transform_one_way`/`within_transform_two_way`のどちらの出力も
 /// 引数に渡せる）。
 ///
 /// 時間不変変数（1-way）だけでなく、2-wayでtime FEと完全共線な「エンティティ間で変動しない
-/// 列」も同じチェックで検出できる（6.7節）。`x_transformed`は呼び出し側が`within_transform_*`
+/// 列」も同じチェックで検出できる（`fe-spec.md`1章）。`x_transformed`は呼び出し側が`within_transform_*`
 /// の戻り値をそのまま渡す想定で、`input.x()`（変換前の生の列）と同じ列順・同じ列数・列ごとに
 /// 同じ長さを持つことを前提とする（`engine`内の内部契約であり、ユーザー入力起因ではない。
 /// `quasi_demean_column`の呼び出し元契約と同じ扱いで`assert_eq!`で守る。`debug_assert_eq!`
@@ -1361,7 +1361,7 @@ fn column_is_zero_variance(original: &[f64], transformed: &[f64]) -> bool {
         // n=0は`FeInput::from_columns`が許容する境界ケース（`from_columns_with_zero_
         // observations_succeeds`）。分散の定義自体が意味を持たないため、ゼロ分散とは
         // 判定しない（呼び出し側の`fit()`は別途`InsufficientDegreesOfFreedom`等で
-        // n=0を弾く想定、6.7節はあくまで「デミーニング後の分散」の検証に限定する）。
+        // n=0を弾く想定、`fe-spec.md`1章はあくまで「デミーニング後の分散」の検証に限定する）。
         return false;
     }
 
@@ -1376,7 +1376,7 @@ fn column_is_zero_variance(original: &[f64], transformed: &[f64]) -> bool {
 }
 
 /// 2-way FEがバランスパネル（`entity` × `time`の全組合せが過不足なく1回ずつ存在する）
-/// であることを検証する（6.4節）。
+/// であることを検証する（`fe-spec.md`3.1節）。
 ///
 /// 観測数カウントの一致（`n_obs == n_entities * n_periods`）だけでは不十分
 /// （`PanelError::UnbalancedPanelForTwoWay`のdocコメント参照: あるペアの重複と別ペアの
@@ -1841,7 +1841,7 @@ mod tests {
     #[test]
     fn validate_no_zero_variance_regressors_detects_time_invariant_variable_in_one_way_fe() {
         // "female"は各エンティティ内で一定（時間不変）のため、1-way within変換後は
-        // 浮動小数点誤差の範囲でゼロになる（6.7節のユースケースそのもの）。
+        // 浮動小数点誤差の範囲でゼロになる（`fe-spec.md`1章のユースケースそのもの）。
         let entity = strings(&["a", "a", "b", "b"]);
         let y = [1.0, 2.0, 3.0, 5.0];
         let x_varying = vec![10.0, 20.0, 5.0, 15.0];
@@ -1884,7 +1884,7 @@ mod tests {
     #[test]
     fn validate_no_zero_variance_regressors_detects_entity_invariant_variable_in_two_way_fe() {
         // "year_dummy"はエンティティ間で変動しない（time FEと完全共線）ため、2-way
-        // within変換後はゼロ分散になる（6.7節「time FEと完全共線な列も同じチェックで
+        // within変換後はゼロ分散になる（`fe-spec.md`1章「time FEと完全共線な列も同じチェックで
         // 検出できる」の具体例）。
         let entity = strings(&["a", "a", "b", "b"]);
         let time = strings(&["1", "2", "1", "2"]);

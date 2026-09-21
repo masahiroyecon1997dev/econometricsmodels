@@ -1,6 +1,6 @@
 """linearmodelsでFE/REのベンチマーク値を生成するスクリプト。
 
-FE/RE共通のPython主リファレンス（`docs/planning/specs/panel-api-design.md`
+FE/RE共通のPython主リファレンス（`docs/spec/panel-common.md`
 5.1節）。`linearmodels.panel.PanelOLS`（FE、`entity_effects=True`、2-wayなら
 `time_effects=True`も）・`linearmodels.panel.RandomEffects`（RE、`run_re()`）
 を使う。
@@ -12,10 +12,10 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/panel/freeze.py`参
 凍結済みの`fe_*.csv`をそのまま再利用する（ユーザー確認済み・2026-09-20。
 `benchmark/linear`系統でOLS/WLSがprefix"synthetic"を共有する前例と同型）。
 
-## `cov_type`の対応関係（実測して確定、`panel-api-design.md`5.4節）
+## `cov_type`の対応関係（実測して確定、`panel-common.md`5.4節）
 
 `engine::panel::fe`の`cov_type`と`linearmodels.PanelOLS.fit()`の`cov_type`の
-対応（`debiased`は`panel-api-design.md`3.3節「検定分布は常にt分布」の通り、
+対応（`debiased`は`panel-common.md`3.3節「検定分布は常にt分布」の通り、
 本実装は`cov_type`によらず常にt(df_resid)分布で報告するため、
 `linearmodels`側も常に`debiased=True`で揃える。`engine/src/panel/CLAUDE.md`
 「`cov_type`対応」節で、`linearmodels`が`kernel`/`cluster`とも常に
@@ -58,16 +58,16 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/panel/freeze.py`参
 
 `run()`（FE）とほぼ同型のパイプライン（パネルインデックス構築→`cov_type`別の
 設定組み立て→`fit()`→結果抽出）を共有するが、以下の3点がFEと異なる
-（`docs/planning/specs/panel-api-design.md`7章・`engine/src/panel/CLAUDE.md`
+（`docs/spec/re-spec.md`3章・`engine/src/panel/CLAUDE.md`
 「RE」節参照、いずれも実測確認済み）。
 
 1. **REは切片を持つ**（`engine::panel::re::ReEstimator`が常に準偏差変換した
-   定数列を含む、7.4節）。`linearmodels.RandomEffects`はOLS同様、`exog`に
+   定数列を含む、`re-spec.md`3.2節）。`linearmodels.RandomEffects`はOLS同様、`exog`に
    明示的な定数列を含めない限り切片を推定しない（`PanelOLS`と違い
    `entity_effects`が無いため、これを入れ忘れると切片自体が存在しないモデルに
    なってしまう）。呼び出し側で`exog`に`"const"`列（すべて1.0）を追加する。
 2. **`two_way`引数が無い**: REは常にentity方向のみ（v1は2-way REがスコープ外、
-   7.6節）。
+   `re-spec.md`5章）。
 3. **`f_statistic`は`res.f_statistic`（cov_type非依存、homoskedastic固定）を
    使う**（FEの`res.f_statistic_robust`とは異なる）——`engine::panel::re::
    ReEstimator`のF統計量は`cov_type`に連動しない独自定義（変換済みyの単純
@@ -129,7 +129,7 @@ def _load_panel_dataset(
 
 
 # engine cov_type -> linearmodels cov_type。モジュールdocstring参照。
-# debiasedは常にTrue（panel-api-design.md 3.3節）。FE/RE共通
+# debiasedは常にTrue（panel-common.md 3.3節）。FE/RE共通
 # （`RandomEffects`も`PanelOLS`と同じ`_cov_estimators`実装、
 # engine/src/panel/CLAUDE.md「cov_type対応（Issue #197）」参照）。
 _COV_TYPE_MAP: dict[str, str] = {
@@ -330,7 +330,7 @@ def run(
         "hac_bandwidth": hac_bandwidth_used,
         "note": (
             "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに"
-            "含まない（fixestクロスチェック側のみで検証、panel-api-design.md"
+            "含まない（fixestクロスチェック側のみで検証、panel-common.md"
             "5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinは"
             "linearmodels自身がentityのみdemeanの別定義を使うため本実装の値と"
             "意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
@@ -446,7 +446,7 @@ def run_re(
             "対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する"
             "単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無い"
             "ため本フィクスチャに含まず、plm::phtestのみを参照値とする"
-            "（panel-api-design.md5.3節、generate_re_crosscheck_fixtures.py"
+            "（panel-common.md5.3節、generate_re_crosscheck_fixtures.py"
             "参照）。"
         ),
     }

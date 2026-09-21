@@ -148,10 +148,10 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **状態**: 未対応（優先度低、項目81〔`refactoring-candidates-2.md`〕と
   合わせて検討）
 
-### 9.【解消済み】`iv-api-design.md`の「`x_endog`/`instruments`は最低1要素を要求する見込み」という記述が実装と食い違っている
+### 9.【解消済み】`iv-spec.md`の前身ドキュメントの「`x_endog`/`instruments`は最低1要素を要求する見込み」という記述が実装と食い違っている
 
 → Issue #306で対応済み（2026-09-12）。`x_endog`/`instruments`が空リストの場合を
-`ValidationError`で弾くよう実装し、`iv-api-design.md`の記述も確定表現に更新した。
+`ValidationError`で弾くよう実装し、設計ドキュメントの記述も確定表現に更新した（現在は`iv-spec.md`に集約済み）。
 
 ### 10.【解消済み】`x_endog=[]`（内生変数ゼロ、実質OLSへの意図的な縮退）を許容し続けるべきかは設計判断が必要
 
@@ -210,7 +210,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ### 12.【重要な発見】IVのHC2/HC3がR `ivreg`+`sandwich`で実際に検証可能なことを実機確認した——「参照実装が無い」というドキュメント記述は現在のivregバージョンでは事実と異なる
 
-- **対象**: [docs/planning/specs/iv-api-design.md:110-116](../../../docs/planning/specs/iv-api-design.md#L110-L116)
+- **対象**: `iv-spec.md`の前身ドキュメント（当時: 110-116行目）
   （「`hc2`/`hc3`は引き続き外部の参照実装で検証できない...R `ivreg`も同様
   （`hatvalues.ivreg`の実装がソース上コメントアウトされている）」）、
   [tests/test_iv_fixtures.py:19-22](../../../tests/test_iv_fixtures.py#L19-L22)、
@@ -238,7 +238,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
     実装であることをソースで確認しており、本実装が「`X̂`のみから
     レバレッジを計算する」（`two_sls.rs`のdocコメント）としている定義と
     完全に一致する。
-  - **原因の推測**: `iv-api-design.md`の記述はIssue #166/#171時点の
+  - **原因の推測**: 当時の設計ドキュメントの記述はIssue #166/#171時点の
     調査に基づくが、CLAUDE.md 10章に記録されている通り`ivreg`は当初
     Debian標準のr-baseでは依存関係を満たせず**インストール自体が
     サイレントに失敗していた**（CRAN APTリポジトリ追加で解消）経緯が
@@ -254,7 +254,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   R `ivreg`実装との数値一致**が確認でき、この懸念を解消できる。
   対応するなら: (1) `test_iv_crosscheck.py`に`hc2`/`hc3`のクロスチェック
   テストを追加する（`benchmark/iv/references/run_ivreg.R`に
-  `vcovHC(type="HC2"/"HC3")`を追加）、(2) `iv-api-design.md`3.1節・
+  `vcovHC(type="HC2"/"HC3")`を追加）、(2) 設計ドキュメント3.1節・
   関連するdocstring群（本項目「対象」に列挙した4箇所）の「参照実装が
   無い」という記述を訂正する、の2段階が必要になる。ユーザー指示により
   本セッションでは記録のみ。
@@ -267,7 +267,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `iv_crosscheck.json`を再生成、`tests/iv/test_iv_crosscheck.py`に
   hc2/hc3をCOV_TYPESとして追加（既存のRTOL_STRICT=1e-8でdf1境界
   シナリオ含め全て通過、実測で許容誤差の追加緩和は不要だった）。
-  `iv-api-design.md`3.1節・5.2節・冒頭未決着事項、`test_iv_reference.py`・
+  `iv-spec.md`3.1節・4章・冒頭未決着事項、`test_iv_reference.py`・
   `test_iv_crosscheck.py`のdocstring、`engine/src/iv/two_sls.rs`・
   `gmm.rs`のdocコメントの「参照実装が無い」という誤った記述も訂正した
   （GMM側はivreg非対応という結論は維持し根拠のみ訂正、ユーザー承認済み）。
@@ -551,14 +551,14 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ### 26. `test_iv_crosscheck.py`にGMMのRクロスチェックが無い件——v1時点では意図的な例外規定だったが、今後のGMM拡張（C統計量等）に合わせてテストも拡張予定
 
-- **対象**: [docs/planning/specs/iv-api-design.md:207-212](../../../docs/planning/specs/iv-api-design.md#L207-L212)
+- **対象**: `iv-spec.md`の前身ドキュメント（当時: 207-212行目）
   （「5.3 GMMのRクロスチェック省略（例外規定）」、「GMMは`ivreg`が
   対応していないため、Python（`linearmodels`）のみで検証しRクロス
-  チェックを省略することを許容する。`panel-api-design.md`5.3の
+  チェックを省略することを許容する。`panel-common.md`5.3の
   ハウスマン検定と同様...」）
 - **内容**: ユーザー指摘（2026-08-31、「benchmarkで指摘したかもしれ
   ないが、`test_iv_crosscheck.py`にGMMの検証が抜けている」）を受けて
-  確認したところ、v1実装時点では見落としではなく`iv-api-design.md`
+  確認したところ、v1実装時点では見落としではなく当時の設計ドキュメント
   5.3節に明記された**意図的な設計判断（例外規定）**だった
   （`ivreg`パッケージ自体がGMM推定に対応していないというツール側の
   制約が根拠、パネルデータのHausman検定と同種の前例あり）。
@@ -738,8 +738,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   computation_error`（`method`×3 parametrize、CSVフィクスチャ）＋ engine
   `fit_returns_singular_design_matrix_error_for_perfectly_collinear_design_matrix`
   （`method`×`cov_type` ループ）へ集約。設計背景・数式は
-  `docs/spec/logit-spec.md` 3.2・`docs/planning/specs/nonlinear-implementation-notes.md`
-  「Issue #279」段落が正本。`refactoring-candidates-2.md` 項目82 も同時解消。
+  `docs/spec/logit-spec.md` 3.2・`docs/spec/nonlinear-common.md`1.4節が正本。`refactoring-candidates-2.md` 項目82 も同時解消。
 - **フォローアップ（未完・別Issue）**:
   - **#304**: warm start 導入で `method="bfgs"` 大標本が ~33% 悪化（既定 newton は逆に高速化）。
     quasi-Newton × warm start の相互作用の是正。あわせて下記の項目番号欠落を整理する。
@@ -966,7 +965,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   可能性がある。ただし、テスト側の項目11・44で「無理な統合は避けるべき」
   という判断が繰り返されている通り、コードの完全一致度が高くても
   **将来Tobitのように固有機能が増えた際に基底クラスの抽象化が破綻する
-  リスク**（Tobit方式の初期値統一を`nonlinear-api-design.md`が既に検討して
+  リスク**（Tobit方式の初期値統一を`nonlinear-common.md`1.4節が既に検討して
   いる、項目35参照）もあるため、着手前にユーザー判断が必要と考える。
 - **気づいた経緯**: 2026-08-31、`nonlinear/probit.py`解説時に`logit.py`と
   `diff`で突き合わせて確認。
@@ -1017,7 +1016,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   CLAUDE.md 2章が引く「列名参照は素の引数、推定オプションは
   オブジェクト渡し」という区別に照らすと、必須性の違いだけを理由に
   片方をオプションオブジェクト行きにするのは筋が通っていない可能性
-  がある。`docs/planning/specs/panel-api-design.md`1.1節で既に
+  がある。`docs/spec/panel-common.md`1.1節で既に
   「確定」済みの設計だが、再検討の余地があるとユーザーが指摘。
 - **気づいた経緯**: 2026-09-13、`panel/fe.py`解説中のユーザー指摘。
 - **状態**:【Issue化】Issue #319として切り出し済み（2026-09-13、
@@ -1030,7 +1029,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   [engine_pybind/src/panel/fe.rs](../../../engine_pybind/src/panel/fe.rs)
 - **内容**: 3件の指摘をまとめてIssue化。(1) `x`が空のFEモデルは
   因果推論として意味を持たないため、OLS等と同様`validate_x_non_empty`
-  を適用すべきではないか（`panel-api-design.md`に独立した検討記録が
+  を適用すべきではないか（`panel-common.md`に独立した検討記録が
   見当たらず、意図的な設計というより実装上の副産物の可能性）。
   (2) `n_entities`はあるが`n_periods`相当のプロパティが無く、
   `df_resid`のdocstringが言及する`n_periods`を実際には取得できない
@@ -1111,7 +1110,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   「Issue #295」という過去の由来説明が埋め込まれている。CLAUDE.md 13章の
   「経緯は削除し理由のみ簡潔に記載」という既存方針をコードコメントにも適用し、
   Issue番号は削除して理由の文章のみ残す（`git log`/`git blame`で常に追跡可能な
-  情報のため）。ただし`docs/planning/specs/iv-api-design.md`1.1.1節のような
+  情報のため）。ただし`docs/spec/iv-spec.md`1.1節のような
   設計ドキュメントの節番号への参照は「生きた契約」のため削除対象外。
 - **気づいた経緯**: 2026-09-13、`validation.rs`解説中のユーザー指摘。
 - **状態**:【Issue化】Issue #330として切り出し済み（2026-09-13）

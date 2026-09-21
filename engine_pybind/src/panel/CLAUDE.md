@@ -1,6 +1,6 @@
 # engine_pybind/src/panel/ 実装ノート（FE/RE）
 
-このファイルは `engine_pybind/src/panel/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景は `docs/spec/fe-spec.md` / `docs/spec/re-spec.md`（FE/RE共通の論点は `docs/planning/specs/panel-api-design.md`）が正本。ここは差分の索引のみ。
+このファイルは `engine_pybind/src/panel/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景は `docs/spec/fe-spec.md` / `docs/spec/re-spec.md`（FE/RE共通の論点は `docs/spec/panel-common.md`）が正本。ここは差分の索引のみ。
 
 ## 実装フェーズの分割方針（IV・Logitと同じ3段階、`engine_pybind/src/iv/CLAUDE.md`参照）
 
@@ -69,7 +69,7 @@ dead_code扱いの間も呼び出しグラフ経由で到達可能だった）�
   `n_obs`は`estimator()`から取得する点はFEと同じ。**`log_likelihood`/`aic`/`bic`もFEと
   異なり`estimator()`（`ols.log_likelihood()`/`ols.aic()`/`ols.bic()`）からそのまま
   取得する**——`ReEstimator`自身は`aic()`/`bic()`メソッドを持たない（`engine`側に実装が
-  無い）。理由は`engine/src/panel/CLAUDE.md`「`df_resid`/`df_model`（7.5節）」参照:
+  無い）。理由は`engine/src/panel/CLAUDE.md`「`df_resid`/`df_model`（`re-spec.md`3.3節）」参照:
   REの`df_model`が`OlsInput::k()`と自動的に一致する設計のため、FEのような独自再計算が
   不要（`FeEstimator`は`df_model = k + neffects`という異なる式のため`aic`/`bic`の
   再計算が必要だった、という違い）。`std_errors`/`t_stats`/`p_values`/`conf_lower`/
@@ -85,7 +85,7 @@ dead_code扱いの間も呼び出しグラフ経由で到達可能だった）�
   経路が`ValidationError`として正しく変換されることも確認済み。`fit`自体はFEと同じ理由
   （`PyDataFrame`がGILを要求）で`#[cfg(test)] mod tests`から直接呼べないため、専用の
   Rustユニットテストは追加していない。
-- RE自身に`fixed_effects()`のような追加メソッドは無いため（`panel-api-design.md`2.4節、
+- RE自身に`fixed_effects()`のような追加メソッドは無いため（`panel-common.md`2.4節、
   `panel/re.rs`モジュールdoc参照）、FEの#188（`fixed_effects()`）に相当する3段目は無く、
   本Issueでこの系統の実装は完結する。
 
@@ -104,7 +104,7 @@ FEの#186と同じ段階（`REOptions`/`REResult`のpyclass定義・`build_re_in
   `docs/spec/re-spec.md`3.7節）」を兼ねる。詳細は`panel/re.rs`モジュールdoc参照。
 - **`x`の空リストを許容しない（ユーザー確認済み、2026-09-20）**: REで`x=[]`は「分散成分
   （ICC）のみを推定するnullモデル」として単独で意味を持つ標準的なユースケースだが、
-  `panel-api-design.md`にこの点の明示的な決定が無かったため確認した。他手法（FE
+  `panel-common.md`にこの点の明示的な決定が無かったため確認した。他手法（FE
   post-#320・OLS/WLS/Logit/Probit/IV）と一貫させ`validate_x_non_empty`で拒否する方針を
   選択した。nullモデル・ICC推定のサポート自体は別途検討する。
 - **`cov_type`は`FEOptions`と同じ集合**（`classical`/`hc1`〜`hc3`/`cluster`/`hac`、`hc0`は
@@ -113,11 +113,11 @@ FEの#186と同じ段階（`REOptions`/`REResult`のpyclass定義・`build_re_in
 - **`REResult`に`estimator`のような非公開フィールドは無い**: `FEResult`は`fixed_effects()`
   用に`FeEstimator`本体を保持する必要があったが、REのハウスマン検定
   （`hausman_statistic`/`hausman_p_value`/`hausman_df`）は`fit()`内で計算済みの値を
-  そのまま`REResult`のフィールドとして持つだけで済む（`panel-api-design.md`2.4節「RE:
+  そのまま`REResult`のフィールドとして持つだけで済む（`panel-common.md`2.4節「RE:
   ハウスマン検定は`fit()`内で自動計算」）。そのため`REResult`は`#[derive(Clone)]`も
   問題なく維持できる。
 - **`ReEstimator`自身に`aic()`/`bic()`/`log_likelihood()`メソッドが無い**（`engine/src/
-  panel/CLAUDE.md`「`df_resid`/`df_model`（7.5節）」参照）: RE用`fit`関数
+  panel/CLAUDE.md`「`df_resid`/`df_model`（`re-spec.md`3.3節）」参照）: RE用`fit`関数
   （後続issue）でこれらを`REResult`に設定する際は、`FeEstimator`のように再計算した値では
   なく`estimator()`（内部の`OlsEstimator`）の`log_likelihood()`/`aic()`/`bic()`を
   そのまま使うこと（REの`df_model`が`OlsInput::k()`と自動的に一致するため、`OlsEstimator`
@@ -127,9 +127,9 @@ FEの#186と同じ段階（`REOptions`/`REResult`のpyclass定義・`build_re_in
 
 - **`include_intercept`は無い**: FEは`within`変換で切片が構造的に消えるため、OLS/WLS/IVと異なりこのオプション自体が意味を持たない（`engine::panel::fe::FeEstimator::fit`が常に`include_intercept=false`でOLSに委譲する設計、`engine/src/panel/fe.rs`モジュールdoc参照）。
 - **【変更済み】`x`は空リストを許容しない**: v1では固定効果のみのモデル（`k=0`）を意図的に許容していたが、独立して吟味された設計記録が無く・因果推論として意味を持たない（説明変数がゼロで「個体・時間固定効果によるyの分解」という別の操作になる）ことがユーザーから指摘され、他手法（OLS/WLS/Logit/Probit/IVの`x_endog`/`instruments`）と同じ`validate_x_non_empty`を`build_fe_input`（`panel/fe.rs`）で呼ぶよう変更した。**`engine`側（`FeInput::from_columns`・`FeEstimator::fit`）はk=0を受理したままで変更していない**——`engine_pybind`層のみの業務バリデーション（`engine/src/panel/fe.rs`の`fe_estimator_fit_with_no_regressors_estimates_fixed_effects_only_model`は引き続きengineレベルの動作を検証する）。
-- **`cov_type`のデフォルトは`"cluster"`**（entity単位）。OLS/WLS/IVの`"classical"`から意図的に逸脱する（`panel-api-design.md`3.2節、fixestの前例）。
+- **`cov_type`のデフォルトは`"cluster"`**（entity単位）。OLS/WLS/IVの`"classical"`から意図的に逸脱する（`panel-common.md`3.2節、fixestの前例）。
 - **`cov_type`は`hc0`を受け付けない**: `engine::panel::fe::FeCovType`enum自体が`Hc0`を持たない（スコープ外と判明済み、`engine/src/panel/CLAUDE.md`参照）。`parse_fe_cov_type`は`"hc0"`を専用のエラーメッセージで明示的に弾く（他の未知の値と区別する——`hc0`はOLS/WLS/IVでは有効な値のため、ユーザーが混同しやすいと判断した）。
-- **`time`と`time_col`は別フィールド（重要な設計判断）**: `time`（bareネーミング、`panel-api-design.md`1.1節の既存方針通り）は2-way FE（entity+time）の指定に使う——`Some`なら2-way、`None`なら1-way。`time_col`（OLSの`cluster_col`/`time_col`と同じ「補助列」命名規則、新規）はDriscoll-Kraay HAC（`cov_type="hac"`）専用の時系列順序で、`time`とは独立に指定できる。
+- **`time`と`time_col`は別フィールド（重要な設計判断）**: `time`（bareネーミング、`panel-common.md`1.1節の既存方針通り）は2-way FE（entity+time）の指定に使う——`Some`なら2-way、`None`なら1-way。`time_col`（OLSの`cluster_col`/`time_col`と同じ「補助列」命名規則、新規）はDriscoll-Kraay HAC（`cov_type="hac"`）専用の時系列順序で、`time`とは独立に指定できる。
   - **経緯**: 当初「`time`の有無だけで1-way/2-wayを決める」案を検討したが、DK HAC（`cov_type="hac"`）は1-way FEでも`time`列を要求する（既存のengineテスト`fe_estimator_fit_hac_one_way_requires_time`）ため、「`time`指定=常に2-way」にすると1-way FE + DK HACという組み合わせを表現できなくなることが判明した（ユーザーとの相談で発見）。ユーザーからは「`time_effects: bool`のような追加フラグは、変数を指定すれば1-way/2-wayが分かるはずなので冗長」という指摘があり、OLSの`time_col`（HAC専用の補助列という既存の命名規則）を踏襲する分離案を採用した（ユーザー確認済み、2026-09-12）。
   - **優先順位**: `time_col`が指定されていれば、**2-way（`time`指定あり）でも常に`time_col`が優先**される（`parse_fe_cov_type`）。「2-way FEの固定効果構造に使う時点粒度」と「DK HACカーネルに使う時系列粒度」が異なるケース（例: 固定効果は年単位、HACカーネルは四半期単位）に対応するための設計（ユーザーの追加提案、確認済み）。`time_col`未指定なら`time`にフォールバックし、どちらも`None`（1-way FEで`time_col`も未指定）なら`PanelError::HacRequiresTime`。
   - **`time_col`は`FeInput.time`には一切渡らない**: `FeInput::from_columns`の`time`引数には常に`options.time`由来の値のみを渡す（2-way判定・within変換用）。`time_col`は`FeCovType::Hac { time: Option<Vec<String>> }`（下記）に直接渡す、別経路。
@@ -141,6 +141,6 @@ FEの#186と同じ段階（`REOptions`/`REResult`のpyclass定義・`build_re_in
 
 ## `FEResult`のスコープ（実装完結時点）
 
-`panel-api-design.md`2章のフィールドをすべて含む（`f_statistic`/`f_p_value`を含む——これはフィールド設計時にengine側が未対応と判明し前倒しで実装した、`engine/src/panel/CLAUDE.md`参照）。`fixed_effects()`メソッド（上記「`fixed_effects()`の実装」参照）も実装済みで、IV/Logit/Probitと同じ3段階の実装フェーズはこれで完結した。
+`panel-common.md`2章のフィールドをすべて含む（`f_statistic`/`f_p_value`を含む——これはフィールド設計時にengine側が未対応と判明し前倒しで実装した、`engine/src/panel/CLAUDE.md`参照）。`fixed_effects()`メソッド（上記「`fixed_effects()`の実装」参照）も実装済みで、IV/Logit/Probitと同じ3段階の実装フェーズはこれで完結した。
 
 `n_entities`はengine側に対応するpublicなgetterが無いため（`FeEstimator`内部のprivateな`count_unique`を使うのみ）、`fit()`実装時（#187）に`engine_pybind`側で`entity`列から独立に計算する想定（`HashSet`でユニーク数を数えるだけの単純な処理のため、engine側にgetterを追加するほどではないと判断——ただし#187着手時に再検討してもよい）。

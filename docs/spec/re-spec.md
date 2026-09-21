@@ -5,7 +5,7 @@ RE（Swamy-Arora GLSによる変量効果パネル回帰）の確定済み仕様
 `python_package/econometricsmodels/panel/re.py`として実装済み。FE/RE共通の設計判断（`entity`/
 `time`の引数設計、結果フィールドの共通コア、`cov_type`のサポート対象・デフォルト、内部実装の
 共通化方針、リファレンス実装・テスト方針）は
-[`panel-api-design.md`](../planning/specs/panel-api-design.md)を参照し、本ドキュメントには
+[`panel-common.md`](./panel-common.md)を参照し、本ドキュメントには
 RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](./fe-spec.md)も参照。
 
 ## 1. API引数

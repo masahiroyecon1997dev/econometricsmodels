@@ -9,14 +9,20 @@
    （`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。Wooldridge実データ
    （wage1/gpa2、classical/HC0-3 + wage1のみ地域クラスター）も同じフィクスチャ
    経由で検証する（従来Rクロスチェック側にしか無かった実データ検証を主
-   リファレンス側にも追加、test-coverage-candidates.md項目13・33）。
+   リファレンス側にも追加、test-coverage-candidates.md項目13・33）。全シナリオの
+   `predict()`（学習データに対するfitted値、baselineシナリオのみout-of-sample
+   predicted値）も同じフィクスチャ経由で検証する（従来Rクロスチェック側にしか
+   無かったpredict()の網羅的検証を主リファレンス側にも追加、
+   test-coverage-candidates.md項目17）。
 2. **ライブ statsmodels との照合**: 共有 `dataset` フィクスチャ（n=100）で
    毎回 statsmodels を実行し、係数・標準誤差・R²・F統計量・`include_intercept`
    の扱いが一致することを確認する（凍結フィクスチャが対象にしない
    `include_intercept=False` 等の分岐と、statsmodels の挙動変化そのものの検知）。
 
 役割分担:
-    - 構造・API・`predict()`: `test_ols_api.py`
+    - 構造・API・`predict()`/`augment()`（1データセットでのスモーク級照合含む）:
+      `test_ols_api.py`
+    - `predict()`の全シナリオ×statsmodels凍結フィクスチャでの数値照合: このファイル
     - `ValidationError`/`ComputationError` パス: `test_ols_validation.py`
     - 主リファレンス（statsmodels）との数値照合: このファイル
     - 独立実装（R）とのクロスチェック: `test_ols_crosscheck.py`
@@ -54,7 +60,7 @@ from _tolerances import TOLERANCES
 from econometricsmodels import OLS, OLSOptions
 
 from benchmark.common import imbalanced_cluster_groups
-from benchmark.linear.constants import HAC_MAXLAGS
+from benchmark.linear.constants import HAC_MAXLAGS, PREDICT_NEW_DATA
 from benchmark.linear.fixtures.generate_ols_fixtures import (
     COV_TYPES,
     WOOLDRIDGE_COV_TYPES,
@@ -131,6 +137,57 @@ def test_matches_statsmodels(fixtures, scenario, cov_type):
     res = OLS(df, y="y", x=x_cols, options=options).fit()
 
     _check_result(res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}")
+
+
+@pytest.mark.parametrize("scenario", SCENARIOS)
+def test_predict_none_matches_frozen_statsmodels(fixtures, scenario):
+    """`predict(new_data=None)`（学習データに対する予測値）が、凍結フィクスチャの
+    statsmodels `fittedvalues`と全シナリオで一致すること。`test_ols_api.py`の
+    同種テストは1データセットのみのライブ照合（スモーク級）のため、こちらは
+    Rクロスチェック側（`test_ols_crosscheck.py::test_predict_none_matches_r_
+    fitted_values`）と同じ網羅性で主リファレンス側を検証する
+    （test-coverage-candidates.md項目17）。
+    """
+    df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
+    x_cols = [c for c in df.columns if c not in ("y", "weight")]
+    res = OLS(df, y="y", x=x_cols, options=OLSOptions()).fit()
+
+    predicted = [row["predicted"] for row in res.predict()]
+    ref = fixtures[scenario]["predict"]["fitted"]
+
+    assert len(predicted) == len(ref)
+    for i, (our_val, ref_val) in enumerate(zip(predicted, ref)):
+        _assert_close(
+            our_val, ref_val, f"{scenario}/predict(None)/statsmodels row {i}"
+        )
+
+
+def test_predict_new_data_matches_frozen_statsmodels(fixtures):
+    """`predict(new_data)`（新規データに対する予測値、baselineシナリオ）が、
+    凍結フィクスチャのstatsmodels `.predict()`と一致すること。列順を入れ替えて
+    渡し、列名マッチング（列順不問）も合わせて確認する（Rクロスチェック側
+    `test_predict_new_data_matches_r`と同じ発想）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=OLSOptions()).fit()
+
+    new_data = pl.DataFrame(
+        {
+            "x3": PREDICT_NEW_DATA["x3"],
+            "x1": PREDICT_NEW_DATA["x1"],
+            "x2": PREDICT_NEW_DATA["x2"],
+        }
+    )
+    predicted = [row["predicted"] for row in res.predict(new_data)]
+    ref = fixtures["baseline"]["predict"]["predicted"]
+
+    assert len(predicted) == len(ref)
+    for i, (our_val, ref_val) in enumerate(zip(predicted, ref)):
+        _assert_close(
+            our_val,
+            ref_val,
+            f"baseline/predict(new_data)/statsmodels row {i}",
+        )
 
 
 def test_cluster_matches_statsmodels(fixtures):

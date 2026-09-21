@@ -68,20 +68,11 @@ from benchmark.common import (
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
+from benchmark.linear.constants import PREDICT_NEW_DATA
 from benchmark.linear.references.r import run_lm_r
 
 REFERENCES_DIR = Path(__file__).resolve().parent.parent / "references"
 PREDICT_R_SCRIPT = REFERENCES_DIR / "run_lm_predict_crosscheck.R"
-
-# fitted_values/predict()のout-of-sample crosscheck用の新規データ
-# （baselineシナリオのみ）。学習データの実現値とは無関係に、x1/x2/x3の値域内で
-# 手で選んだ値。predict(new_data)の列名マッチング（列順は問わない）も合わせて
-# 確認するため、Python側テストではx3/x1/x2の順に並べ替えて渡す想定。
-PREDICT_NEW_DATA = {
-    "x1": [1.0, -1.0, 0.0, 2.5, -2.0],
-    "x2": [0.5, -0.5, 2.0, -1.5, 0.0],
-    "x3": [0, 1, 2, 0, 1],
-}
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（generate_ols_fixtures.pyと
 # 同じ方針。scale_varianceは全cov_typeでComputationErrorになる）。

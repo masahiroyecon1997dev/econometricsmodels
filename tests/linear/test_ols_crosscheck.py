@@ -56,11 +56,9 @@ from _tolerances import TOLERANCES
 from econometricsmodels import OLS, OLSOptions
 
 from benchmark.common import imbalanced_cluster_groups
+from benchmark.linear.constants import PREDICT_NEW_DATA
 from benchmark.linear.fixtures.generate_ols_crosscheck_fixtures import (
     NUMERIC_SCENARIOS as SYNTHETIC_SCENARIOS,
-)
-from benchmark.linear.fixtures.generate_ols_crosscheck_fixtures import (
-    PREDICT_NEW_DATA,
 )
 
 FIXTURE_PATH = (

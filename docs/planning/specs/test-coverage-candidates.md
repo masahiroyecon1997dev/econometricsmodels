@@ -141,7 +141,20 @@
   `run()`呼び出しに`predict`/`fitted`のキーを追加し、`test_ols_fixtures.py`に対応する
   テストを追加する形で対応できそう。
 - **気づいた経緯**: 2026-08-16、`benchmark/linear/references/run_lm_predict_crosscheck.R`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
+- **状態**: 対応済み（2026-09-21）。記録時点から状況が変化しており、`predict()`のstatsmodels照合自体は
+  記録前（2026-07-31）から`test_ols_api.py`にライブ照合として存在していた（`test_predict_none_matches_
+  statsmodels_fitted_values`等、凍結フィクスチャと同じ許容誤差だが1データセット・スモーク級）。
+  ユーザー確認の上、Rクロスチェック側（`ols_crosscheck.json`）と同じ網羅性（全シナリオ×fitted、
+  baselineのみout-of-sample predicted）を凍結フィクスチャパイプライン側にも追加する方針とした。
+  `benchmark/linear/references/statsmodels_ref.py`に`run_predict()`を新設（cov_type非依存のため
+  既存`run()`とは別関数）、`generate_ols_fixtures.py`で各シナリオに`predict`キーを追加、
+  `tests/linear/test_ols_reference.py`に`test_predict_none_matches_frozen_statsmodels`・
+  `test_predict_new_data_matches_frozen_statsmodels`を追加。`PREDICT_NEW_DATA`（out-of-sample新規データ）は
+  `generate_ols_crosscheck_fixtures.py`から`benchmark/linear/constants.py`へ移設し、主リファレンス・
+  クロスチェック双方から単一定義元として参照する形にした（値は不変、移設前後でフィクスチャの
+  非メタ部分が完全一致することを確認済み）。`test_ols_api.py`側の既存ライブ照合はpredict()のAPI面の
+  スモークテストとして引き続き残す。Wooldridge実データ側はRクロスチェック側と同じくpredict()検証の
+  対象外（元々そちらも未対応のため、本項目のスコープ外）。
 
 ### 18. OLS: `gpa2`を`mroz`に置き換え、実データでの線形確率モデル（LPM）検証を追加する案
 
@@ -435,7 +448,12 @@
   検証を広げるのが妥当。
 - **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_fixtures.py`解説中の
   ユーザー指摘を受けて`test_ols_crosscheck.py`と突き合わせて確認。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
+- **状態**: 未対応（着手要否はユーザー判断待ち）。2026-09-21、項目17
+  （`predict()`の主リファレンス側検証追加）対応時に`testing-completeness-reviewer`が
+  同種の「一方の参照実装（R）だけ先行している」非対称パターンとして再指摘。
+  項目17で採った対応方針（`_run_cluster_case`等の返り値を拡張し、
+  凍結フィクスチャパイプライン側で主リファレンスの検証範囲をRクロスチェック側に
+  揃える）がそのまま横展開の参考になる。
 
 ### 29. クラスターロバストSEが、どの検証層でも`baseline`シナリオでしか数値比較されていない（悪条件・境界シナリオとの組み合わせが未検証）
 
@@ -471,7 +489,10 @@
 - **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_fixtures.py`解説中の
   ユーザー指摘（「clusterに関してはシナリオごとで検証する必要はないのか、
   精度漏れの可能性が残ることは避けたい」）を受けて3層を確認。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
+- **状態**: 未対応（着手要否はユーザー判断待ち）。2026-09-21、項目17対応時に
+  `testing-completeness-reviewer`が項目28と合わせて再指摘（predict()同様、
+  クラスター系の検証網羅性を先に手厚くしたRクロスチェック側に主リファレンス側を
+  追いつかせる、という同型の対応が必要という指摘）。
 
 ### 30. `time_col`が存在しない列名を指した場合の`ValidationError`テストが無い（`cluster_col`には対になるテストがある）
 
@@ -521,7 +542,10 @@
   `fit()`側のテストを追加するのが妥当。
 - **気づいた経緯**: 2026-08-23、ユーザー依頼により`test_ols.py`の
   バリデーション網羅性を確認中に発見。
-- **状態**: 未対応（着手要否はユーザー判断待ち、修正は保留）
+- **状態**: 未対応（着手要否はユーザー判断待ち、修正は保留）。2026-09-21、
+  項目17対応のレビューで`testing-completeness-reviewer`が項目32と合わせて
+  再指摘（`predict()`側は既にカバー済みのため、`fit()`側との非対称が
+  残っている旨）。
 
 ### 32. `y`列自体が存在しない場合・`cluster_col`にNull値を含む場合の専用テストが無い（低優先度、同一コードパスの既存テストで実質カバー済み）
 
@@ -538,7 +562,9 @@
   見逃すリスクは項目30・31より低いと判断する。優先度は低い。
 - **気づいた経緯**: 2026-08-23、ユーザー依頼により`test_ols.py`の
   バリデーション網羅性を確認中に発見。
-- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち、修正は保留）
+- **状態**: 未対応（優先度低、着手要否はユーザー判断待ち、修正は保留）。
+  2026-09-21、項目17対応のレビューで`testing-completeness-reviewer`が
+  項目31と合わせて再指摘（`fit()`側バリデーションの非対称パターンの一例として）。
 
 ### 34. `test_wls.py`にもOLSと同型のバリデーション抜けがある（`y`列自体の欠落・`fit()`本体のNaN/無限大・空文字列の列名）
 

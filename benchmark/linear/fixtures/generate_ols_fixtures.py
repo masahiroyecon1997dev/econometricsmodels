@@ -32,8 +32,8 @@ from benchmark.common import (
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
-from benchmark.linear.constants import HAC_MAXLAGS
-from benchmark.linear.references.statsmodels_ref import run
+from benchmark.linear.constants import HAC_MAXLAGS, PREDICT_NEW_DATA
+from benchmark.linear.references.statsmodels_ref import run, run_predict
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md「テストの3系統」参照）。
 # ComputationErrorが発生することのみをテストコード側で対応する。scale_varianceは
@@ -99,6 +99,18 @@ def build_fixtures() -> dict:
             )
             fixtures[scenario][cov_type] = result
 
+        # fitted/predicted値。predict()はcov_typeに依存しないため、上記の
+        # cov_typeループとは別に1回だけ計算する。全シナリオで学習データに
+        # 対する予測値（fitted）、baselineシナリオのみout-of-sample予測値
+        # （predicted）も確認する（Rクロスチェック側`ols_crosscheck.json`と
+        # 同じ網羅性。test-coverage-candidates.md項目17、ユーザー確認済み）。
+        fixtures[scenario]["predict"] = run_predict(
+            dataset_source="synthetic",
+            dataset=scenario,
+            formula=None,
+            new_data=PREDICT_NEW_DATA if scenario == "baseline" else None,
+        )
+
         # クラスターロバストSEは、シナリオ依存ではなくグルーピングの動作確認が目的のため、
         # baselineシナリオでのみ、複数のグルーピングパターンで確認する
         # （testing-policy.md「テスト用データセット」3.）。
@@ -160,7 +172,15 @@ def build_fixtures() -> dict:
             "実データ検証を主リファレンス側にも追加したもの"
             "（test-coverage-candidates.md項目13・33）。wage1.clusterは"
             "地域ダミー（northcen/south/west、基準northeast）から合成した"
-            "実カテゴリ列regionでのクラスターロバストSE。"
+            "実カテゴリ列regionでのクラスターロバストSE。各シナリオの"
+            "'predict'キーは学習データに対する予測値（fitted、cov_typeに"
+            "依存しないためcov_typeループとは別に1回だけ計算）。baseline"
+            "シナリオのみout-of-sample予測値（predicted、"
+            "benchmark.linear.constants.PREDICT_NEW_DATA）も含む。従来"
+            "Rクロスチェック側（ols_crosscheck.json）にしか無かったpredict()の"
+            "検証を主リファレンス側にも追加したもの（test-coverage-candidates.md"
+            "項目17）。Wooldridge実データ側はRクロスチェック側と同じくpredict()"
+            "検証の対象外。"
         ),
     }
     return fixtures

@@ -142,6 +142,57 @@ def run(
     return result
 
 
+def run_predict(
+    dataset_source: str,
+    dataset: str,
+    formula: str | None,
+    new_data: dict[str, list] | None = None,
+) -> dict:
+    """fitted/predicted値を計算する（`run()`とは別関数。predict()の結果は
+    係数のみに依存しcov_typeに依存しないため、cov_typeごとに`run()`を呼ぶ
+    ループの中で重複計算・重複格納しないようにする）。
+
+    R側`run_lm_predict_crosscheck.R`と同じ役割分担: 全シナリオで学習データに
+    対する予測値（`fitted`）を返し、`new_data`指定時（baselineシナリオのみ）は
+    out-of-sample予測値（`predicted`）も返す（test-coverage-candidates.md項目17）。
+    """
+    import statsmodels.formula.api as smf
+
+    if dataset_source == "synthetic":
+        df, _ = _load_synthetic(dataset)
+        pandas_df = df.to_pandas()
+        if formula is None:
+            x_cols = [c for c in df.columns if c not in ("y", "weight")]
+            formula = "y ~ " + " + ".join(x_cols)
+    elif dataset_source == "wooldridge":
+        pandas_df = _load_wooldridge(dataset).to_pandas()
+        if formula is None:
+            raise ValueError(
+                "wooldridgeデータセットの場合は--formulaの指定が必須です"
+            )
+    else:
+        raise ValueError(f"unknown dataset_source: {dataset_source!r}")
+
+    model = smf.ols(formula=formula, data=pandas_df).fit()
+
+    result: dict = {"fitted": [float(v) for v in model.fittedvalues]}
+    if new_data is not None:
+        new_pandas_df = pl.DataFrame(new_data).to_pandas()
+        result["predicted"] = [
+            float(v) for v in model.predict(new_pandas_df)
+        ]
+
+    import statsmodels
+
+    result["_meta"] = {
+        "reference": "statsmodels",
+        "statsmodels_version": statsmodels.__version__,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "formula": formula,
+    }
+    return result
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(

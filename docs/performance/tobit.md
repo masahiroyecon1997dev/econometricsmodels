@@ -49,7 +49,7 @@ uv run python -m performance.render_performance_summary \
 
 ## 今後の検討事項
 
-- **~~engineのTobitのHessian特異化~~（#291、解消済み）**: `d797f9b` / `5b79ffe` で `FaerNewton` の収束判定に停滞検出（`RegularizedStep::NoProgress` + 勾配停滞 + 目標近傍 + コストHessian正定値）を追加。n 軸に engine 単独の n=200,000 / 1,000,000 行を追加済み（回帰ガード）。残る派生検討: (a) `NEWTON_STALL_GRAD_FACTOR` の絶対閾値を Newton 減少量 `√(gᵀH⁻¹g)` ベースのスケール不変な基準に置き換える（`docs/planning/specs/nonlinear-implementation-notes.md`）、(b) 大 n の凍結フィクスチャ + `AER::tobit` 数値クロスチェック（正確性は scipy 数値微分MLE との照合で logLik 相対誤差 2.6e-13 を確認済みのため優先度は低い）。
+- **~~engineのTobitのHessian特異化~~（#291、解消済み）**: `d797f9b` / `5b79ffe` で `FaerNewton` の収束判定に停滞検出（`RegularizedStep::NoProgress` + 勾配停滞 + 目標近傍 + コストHessian正定値）を追加。n 軸に engine 単独の n=200,000 / 1,000,000 行を追加済み（回帰ガード）。残る派生検討: (a) `NEWTON_STALL_GRAD_FACTOR` の絶対閾値を Newton 減少量 `√(gᵀH⁻¹g)` ベースのスケール不変な基準に置き換える（`docs/spec/nonlinear-common.md` 9章）、(b) 大 n の凍結フィクスチャ + `AER::tobit` 数値クロスチェック（正確性は scipy 数値微分MLE との照合で logLik 相対誤差 2.6e-13 を確認済みのため優先度は低い）。
 - **engineのTobit BFGSが発散する**（#292）: n>=10,000 で `MoreThuenteLineSearch: NaN or Inf`。解消後に method軸へ bfgs を戻す。
 - **engineのquasi-Newton（L-BFGS）が遅い**（#285）: Logit/Probit と共通。Tobit では lbfgs/newton ~3x（probit の ~7x よりは軽い）。`_check_method_ratios` が 5x 超で job summary に警告する。
 - **engineのマルチスレッド線形代数の不安定性**（#283）: OLSと共通。

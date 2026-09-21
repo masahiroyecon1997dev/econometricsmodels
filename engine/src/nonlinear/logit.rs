@@ -5,11 +5,10 @@
 //! `engine_pybind`はpolars DataFrameから列ごとに`Vec<f64>`を抽出するところまでを担い
 //! （`column_extraction::extract_f64_column`）、それらの列を本モジュールの
 //! `LogitInput::from_columns`に渡す。`faer::Mat`への組み立て（切片列の自動追加を含む）は
-//! ここ（engine側）の責務とする。`engine::linear::ols::OlsInput`と同型の設計
-//! （`docs/planning/specs/nonlinear-api-design.md`参照）。
+//! ここ（engine側）の責務とする。`engine::linear::ols::OlsInput`と同型の設計。
 //!
 //! OLSと異なり、Phase2（Logit/Probit/Tobit）では`weights`/`offset`を見送っているため
-//! （`nonlinear-api-design.md`7章）、`from_columns_weighted`に相当するものはない。
+//! （`docs/spec/nonlinear-common.md`7章）、`from_columns_weighted`に相当するものはない。
 //!
 //! ## 数式（ロジスティック回帰）
 //!
@@ -70,8 +69,7 @@ impl LogitInput {
     /// `y`が単位区間`[0,1]`に収まることの検証は、次元検証のみがスコープの本関数では
     /// 行わない。statsmodelsの`Logit`はコンストラクタ時点でこの検証を行っている（`endog`が
     /// 範囲外だと`ValueError: endog must be in the unit interval.`）ため、本実装でも尤度・
-    /// スコア・Hessianを実装するIssue（B2）で同等の検証を追加する予定
-    /// （`docs/planning/specs/nonlinear-implementation-notes.md`参照）。
+    /// スコア・Hessianを実装するIssue（B2）で同等の検証を追加する予定。
     ///
     /// # Errors
     /// `y`といずれかの`x_columns`の長さが一致しない場合は`CommonError::DimensionMismatch`を返す。
@@ -278,7 +276,7 @@ impl LogitProblem {
     /// 観測ごとのスコア行列（n×k）。各行が`sᵢ = (yᵢ-pᵢ)xᵢ`（対数尤度の1階微分そのもの、
     /// `Gradient`トレイトとは符号が逆）。OPG/サンドイッチ/クラスターSEの計算に使う
     /// （argminの`Gradient`は合計済みの1本のベクトルしか返さないため別途必要、
-    /// `docs/planning/specs/nonlinear-implementation-notes.md`「engine内のtrait設計」参照）。
+    /// `docs/spec/nonlinear-common.md`3章参照）。
     pub fn scores(&self, params: &[f64]) -> Mat<f64> {
         let n = self.x.nrows();
         let k = self.x.ncols();
@@ -347,7 +345,7 @@ impl Hessian for LogitProblem {
 /// 適合度統計量の計算を通過した状態を表す。
 ///
 /// `marginal_effects`/`predict`/`pred_table`は`fit`とは別のメソッドとして提供する
-/// （`docs/planning/specs/nonlinear-api-design.md`6章）。
+/// （`docs/spec/nonlinear-common.md`6章）。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
 #[derive(Debug)]
@@ -381,7 +379,7 @@ pub struct LogitEstimator {
     /// （`nᵢ log(ȳ) + (1-nᵢ) log(1-ȳ)`の総和）から直接計算する（ソルバーの
     /// 再フィットは経由しない。ユーザー確認済み、`log_likelihood`のdocコメント
     /// 「切片のみモデルのllf」参照）。`include_intercept`の値に関わらず常にこの
-    /// 「切片のみ」モデルを参照する（`nonlinear-api-design.md`5章の定義通り、
+    /// 「切片のみ」モデルを参照する（`docs/spec/nonlinear-common.md`5章の定義通り、
     /// statsmodelsも`k_constant`の有無に関わらず同じ挙動）。
     ///
     /// **`include_intercept=false`のとき、この値が参照する「切片のみ」モデルは
@@ -416,8 +414,8 @@ impl LogitEstimator {
     /// 観測情報行列によるSE・z値・p値・信頼区間を推定する。
     ///
     /// `method`の選択に関わらず、収束点でのHessian評価（SE計算用）は常に解析的に行う
-    /// （`run_solver`の実装方針、`docs/planning/specs/nonlinear-implementation-notes.md`
-    /// 「engine内のtrait設計」参照）。BFGS/L-BFGSが最適化中に内部で保持する近似Hessianは
+    /// （`run_solver`の実装方針、`docs/spec/nonlinear-common.md`1.2節参照）。
+    /// BFGS/L-BFGSが最適化中に内部で保持する近似Hessianは
     /// 使い回さない。
     ///
     /// 初期値（warm start）は標準化空間でのLPM（線形確率モデル）最小二乗解に、logitの
@@ -425,12 +423,12 @@ impl LogitEstimator {
     /// もの（`ols_based_initial_params`。従来のゼロベクトルから変更）。前段で
     /// `standardize_columns`後の設計行列を列ピボットQRしランク落ちを検出する
     /// （`checked_design_matrix_qr`、`method`によらず単一経路で`SingularDesignMatrix`）。
-    /// `start_params`によるユーザー指定初期値は引き続き未対応（`nonlinear-api-design.md`
-    /// 7章では確定オプションだが対応Issueが無く、ユーザー確認の上で見送り）。
+    /// `start_params`によるユーザー指定初期値は引き続き未対応（`docs/spec/
+    /// nonlinear-common.md`7章では確定オプションだが対応Issueが無く、見送り）。
     ///
     /// 設計行列は`standardize_columns`で内部的に標準化してから最適化し（勾配ノルムに
     /// 基づく収束判定`tol`が設計行列のスケールに依存しないようにするため、
-    /// `docs/planning/specs/nonlinear-implementation-notes.md`「収束判定のtol」参照）、
+    /// `docs/spec/nonlinear-common.md`1.3節参照）、
     /// 収束後のパラメータを`destandardize_params`で元のスケールへ逆変換する。
     /// `run_solver`が返すHessianは標準化空間（θ_std）で評価されたものであり、
     /// 分散共分散行列もいったん標準化空間で計算してから`destandardize_cov_params`で
@@ -447,7 +445,7 @@ impl LogitEstimator {
     /// scores`）が必要なため、標準化空間の設計行列を保持したまま`LogitProblem`を
     /// クローンしておき（`argmin::core::Executor`向けに元々`Clone`を要求しているため
     /// 追加コストは`Clone`実装自体のみ）、`run_solver`が返す収束点のパラメータで
-    /// 評価する。検定分布は標準正規分布（`nonlinear-api-design.md`5章、OLSのt分布とは
+    /// 評価する。検定分布は標準正規分布（`docs/spec/nonlinear-common.md`4章、OLSのt分布とは
     /// 異なる）。
     ///
     /// `n <= k`（観測数が説明変数の数、定数項を含む、以下）のとき`CommonError::
@@ -768,7 +766,7 @@ impl LogitEstimator {
     }
 
     /// 限界効果（`marginal_effects`）。`fit()`とは独立した別メソッド（`fit()`のReturn
-    /// 本体には含めない、`nonlinear-api-design.md`6章で確定済み）。`fit()`時の
+    /// 本体には含めない、`docs/spec/nonlinear-common.md`6章で確定済み）。`fit()`時の
     /// `cov_params`を再利用するため再最適化は不要（`confidence_level`は`fit()`とは
     /// 独立したパラメータとして受け取り、`fit()`時の値に縛られず事後的に異なる
     /// CI幅を見られるようにする）。
@@ -777,7 +775,7 @@ impl LogitEstimator {
     ///
     /// `p_i = Λ(x_i'θ)`のとき、変数`j`（連続変数として扱う。`dummy=False`が既定の
     /// statsmodelsの`get_margeff()`に倣い、離散変数の自動判定は行わない設計、
-    /// `nonlinear-implementation-notes.md`「限界効果」参照）の限界効果は
+    /// `docs/spec/nonlinear-common.md`6章参照）の限界効果は
     /// `dy/dx_j = p(1-p)θ_j`。
     ///
     /// - `at="overall"`（AME）: `g_j(θ) = w(θ)*θ_j`、`w(θ) = (1/n)Σᵢ pᵢ(1-pᵢ)`
@@ -794,7 +792,7 @@ impl LogitEstimator {
     ///
     /// 変数`j`の分散は`Var(g_j) = jac_j · Σ · jac_jᵀ`（`jac_j`はヤコビアンの`j`行目、
     /// `Σ=cov_params`）。標準誤差はこの平方根、検定分布は標準正規分布
-    /// （`fit()`本体と同じ、`nonlinear-api-design.md`5章）。
+    /// （`fit()`本体と同じ、`docs/spec/nonlinear-common.md`4章）。
     ///
     /// 定数項（切片）は出力から除外する（切片の限界効果は意味を持たない、
     /// statsmodelsも同様）。
@@ -829,7 +827,7 @@ impl LogitEstimator {
 
     /// 予測確率 `p_i = Λ(x_i'θ)` を、`fit()`に使った学習データ（`self.input.x()`）の
     /// 各行について返す（`fit()`のReturn本体には含めない別メソッド、
-    /// `nonlinear-api-design.md`6章）。
+    /// `docs/spec/nonlinear-common.md`6章）。
     ///
     /// 新規データでの予測（out-of-sample）は`predict_new_data`。
     pub fn predict(&self) -> Vec<f64> {

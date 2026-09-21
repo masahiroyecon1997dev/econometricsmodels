@@ -8,8 +8,8 @@
 //! 型を分ける必要はない。OLSの`CovType::Hac`/`CovType::Cluster`がフィールド付きバリアントとして
 //! 共存しているのと同じ考え方）。
 //!
-//! バリアント一覧・Python例外との対応表は`docs/planning/specs/nonlinear-implementation-notes.md`
-//! 「エラー型: nonlinear系統で共有（MleError）」を参照。
+//! バリアント一覧・Python例外との対応表は`docs/spec/nonlinear-common.md`2章
+//! 「エラー型（`MleError`、共有）」を参照。
 //!
 //! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
 //! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は、linear系統の
@@ -424,7 +424,7 @@ pub fn log_likelihood_null(y: &Mat<f64>) -> f64 {
         })
 }
 
-/// 対数尤度から導かれる適合度統計量一式（`docs/planning/specs/nonlinear-api-design.md`
+/// 対数尤度から導かれる適合度統計量一式（`docs/spec/nonlinear-common.md`
 /// 5章参照）。`goodness_of_fit`の戻り値。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GoodnessOfFit {
@@ -502,7 +502,7 @@ pub enum Method {
 /// `"classical"`/`"nonrobust"`のエイリアス化を含む）は`engine_pybind`側の責務
 /// （OLSの`CovType`と同じ設計。`.claude/rules/rust-style.md`参照）。
 ///
-/// Logit/Probit/Tobitで共通のバリアント（`nonlinear-api-design.md`4章）のため
+/// Logit/Probit/Tobitで共通のバリアント（`docs/spec/nonlinear-common.md`3章）のため
 /// `nonlinear/common.rs`に定義する（`Method`と同じ理由）。
 ///
 /// `Cluster`のみ、他のバリアントと異なり追加データ（グループキー）を持つため
@@ -519,7 +519,7 @@ pub enum CovType {
     /// サンドイッチ型+小標本補正（`"hc1"`）: `hc0`の`Σ`に`n/(n-k)`を乗じる
     Hc1,
     /// クラスターロバスト（`"cluster"`）: `Σ = correction * H⁻¹(Σ_g S_gS_g')H⁻¹`
-    /// （`docs/planning/specs/nonlinear-implementation-notes.md`「標準誤差の技術仕様」参照）。
+    /// （`docs/spec/nonlinear-common.md`3章参照）。
     Cluster {
         /// クラスターのグループキー。モデルの入力データの行と対応する長さnの配列。
         /// `None`の場合、モデルの`fit()`は`CommonError::MissingClusterColumn`を返す。
@@ -563,7 +563,7 @@ pub struct MleFitOptions {
 /// この型への変換）は`engine_pybind`側の責務（`Method`/`CovType`と同じ設計。
 /// `.claude/rules/rust-style.md`参照）。
 ///
-/// Logit/Probit/Tobitで共通の概念（`nonlinear-api-design.md`6章）のため`nonlinear/
+/// Logit/Probit/Tobitで共通の概念（`docs/spec/nonlinear-common.md`6章）のため`nonlinear/
 /// common.rs`に定義する（`Method`/`CovType`と同じ理由）。`w=∂p/∂z`相当のリンク関数の
 /// 微分（Logitなら`p(1-p)`、Probitなら`φ(z)`）の計算式のみモデルごとの実装
 /// （`logit.rs`等の`overall_w_and_s`/`at_point_w_and_s`）に置き、`w`・その勾配`s`から
@@ -617,7 +617,7 @@ pub fn column_medians(x: &Mat<f64>) -> Vec<f64> {
 }
 
 /// `marginal_effects`の結果。`coef_table`と同じ行指向（`dydx`/`std_err`/`z`/`p_value`/
-/// `conf_low`/`conf_high`、`nonlinear-api-design.md`6章）。定数項（切片）は行から除外する
+/// `conf_low`/`conf_high`、`docs/spec/nonlinear-common.md`6章）。定数項（切片）は行から除外する
 /// （切片の限界効果は経済学的に意味を持たない、statsmodelsの`get_margeff()`と同じ扱い）。
 /// Logit/Probit/Tobitいずれでも同じ形の結果になるため`common.rs`に置く（元はLogitの
 /// `MarginalEffects`、`common.rs`へ移設）。
@@ -646,7 +646,7 @@ impl MarginalEffects {
     /// フィールドはprivateのため（`.claude/rules/rust-style.md`「推定量構造体の設計」）、
     /// `marginal_effects_from_w_s`を経由しないモデル（Tobit。
     /// `w`/`s`自体の計算式は独自実装だが、出力構造体の形は`coef_table`と同じ行指向で
-    /// Logit/Probitと共通、`nonlinear-api-design.md`6章）が、独自に計算したデルタ法の
+    /// Logit/Probitと共通、`docs/spec/nonlinear-common.md`6章）が、独自に計算したデルタ法の
     /// 結果からこの構造体を構築するために必要。
     pub(crate) fn from_parts(
         param_names: Vec<String>,
@@ -740,8 +740,8 @@ impl MarginalEffects {
 /// そのヤコビアン`jacobian[j][m]=∂dydx_j/∂θₘ=θⱼ*s_m + [j==m]*w`を計算する。
 ///
 /// `at="overall"`（AME）・`"mean"`・`"median"`のいずれも`g_j(θ)=w(θ)*θⱼ`という同じ形に
-/// 帰着する（Logitなら`w=p(1-p)`、Probitなら`w=φ(z)`。`docs/planning/specs/
-/// nonlinear-implementation-notes.md`「限界効果」参照）ため、`w`・`s`の計算方法
+/// 帰着する（Logitなら`w=p(1-p)`、Probitなら`w=φ(z)`。`docs/spec/nonlinear-common.md`
+/// 6章「限界効果の共通骨格」参照）ため、`w`・`s`の計算方法
 /// （`at`・リンク関数ごとに異なる）とこの式（それらに依らず共通）を分離できる。
 /// 元はLogitの`dydx_and_jacobian`（`common.rs`へ移設、Probitでも同型の
 /// 式であることを確認済み）。`pub`にしているのは`marginal_effects_from_w_s`からの
@@ -981,7 +981,7 @@ pub struct SolverOutput {
     /// 等）はこの符号（対数尤度のHessian）を前提とする。モデルの`Hessian`トレイト実装
     /// 自体は`CostFunction`/`Gradient`と同じ符号（コスト関数＝負の対数尤度のHessian）を
     /// 返す契約になっており、ここに格納する値は`run_solver`内部で1回符号反転したもの
-    /// （`docs/planning/specs/nonlinear-implementation-notes.md`「engine内のtrait設計」参照）。
+    /// （`docs/spec/nonlinear-common.md`1.2節「Hessianトレイトの符号規約」参照）。
     pub hessian: Vec<Vec<f64>>,
     /// 収束したかどうか。
     pub converged: bool,
@@ -1282,8 +1282,7 @@ where
     // 演算（`neg_hessian_inverse`等）が前提とする「対数尤度そのもののHessian」（真の
     // 最大点で負定値）でなければならない。両者は符号が逆（`-loglik`のHessian＝
     // `loglik`のHessianの符号反転）なので、ここで1回だけ符号反転して契約を合わせる
-    // （実装時に発覚、`docs/planning/specs/nonlinear-implementation-notes.md`
-    // 参照）。
+    // （`docs/spec/nonlinear-common.md`1.2節「Hessianトレイトの符号規約」参照）。
     // `into_inner()`でバジェットの対象から外す（`BudgetedProblem::into_inner`のdoc
     // コメント参照）。この1回の呼び出しはline search内側ループの暴走防止という
     // バジェット本来の目的とは無関係なため。
@@ -1385,7 +1384,7 @@ fn l2_norm(g: &[f64]) -> f64 {
 /// `argmin-math`の`vec`機能（`Vec<Vec<f64>>`向け）には`ArgminInv`の実装が存在しない
 /// （faer/nalgebra/ndarrayの行列型にしか実装されていない）ため使えない。Newton法は独自の
 /// `Solver`実装とし、ステップの求解はfaer（列ピボットQR、OLSの`ensure_full_rank`と同じ
-/// 特異性検出パターン）で行う（`docs/planning/specs/nonlinear-implementation-notes.md`参照）。
+/// 特異性検出パターン）で行う（`docs/spec/nonlinear-common.md`1.2節参照）。
 struct FaerNewton {
     tol: f64,
     /// `regularized_newton_step`が[`RegularizedStep::NoProgress`]を返し、かつ`next_iter`が
@@ -1445,7 +1444,7 @@ const NEWTON_STALL_GRAD_RATIO: f64 = 0.9;
 /// 空間で最適化する**ことに依存している。非標準化スケール（`x`が極端に大きい等）で
 /// `run_solver`を呼ぶ手法を将来追加する場合、この定数の妥当性は再検証が必要
 /// （rust-reviewer指摘。より根本的にはNewton減少量`√(gᵀH⁻¹g)`のようなスケール不変な
-/// 停止基準への置き換えが望ましい。`docs/planning/specs/nonlinear-implementation-notes.md`）。
+/// 停止基準への置き換えが望ましい。`docs/spec/nonlinear-common.md`9章）。
 const NEWTON_STALL_GRAD_FACTOR: f64 = 1e4;
 
 impl<O> Solver<O, NewtonState> for FaerNewton
@@ -2403,7 +2402,7 @@ pub fn ols_based_initial_params(
 /// のとき逆変換の式が成立しない（吸収先の切片が存在しないため）。`x_std = x/std`のみなら
 /// `θ_orig_j = θ_std_j/std_j`で完結し、切片の有無に関係なく成立する。当初の目的（勾配ノルムの
 /// 絶対閾値がxのスケールに依存する問題への対処）もスケーリングのみで達成できる
-/// （`docs/planning/specs/nonlinear-implementation-notes.md`参照）。
+/// （`docs/spec/nonlinear-common.md`1.3節「スケール依存への対処（標準化）」参照）。
 #[derive(Debug, Clone)]
 pub struct ColumnScale {
     /// 列ごとの標準偏差。切片列（`has_intercept=true`の先頭列）は`1.0`のまま
@@ -2490,8 +2489,8 @@ pub fn destandardize_cov_params(cov_std: &Mat<f64>, scale: &ColumnScale) -> Mat<
 
 // `cov_type`ごとの係数分散共分散行列の共通計算。モデル固有の尤度計算には依存せず、
 // 収束点で評価した`H`（対数尤度のHessian、k×k）と`scores`（観測ごとのスコア行列、n×k、
-// 各行が観測`i`のスコアベクトル`sᵢ`）だけを受け取る（`docs/planning/specs/
-// nonlinear-implementation-notes.md`「標準誤差の技術仕様」参照）。
+// 各行が観測`i`のスコアベクトル`sᵢ`）だけを受け取る（`docs/spec/nonlinear-common.md`
+// 3章参照）。
 //
 // `"classical"`/`"nonrobust"`は同じ計算（観測情報行列）のエイリアスのため、
 // engine側では区別せず`observed_information_cov_params`ひとつに統一する
@@ -4345,7 +4344,7 @@ mod tests {
     }
 
     /// `goodness_of_fit`をLogit/Probitの尤度計算とは独立に、直接与えた`llf`/`llnull`から
-    /// 検証する。数式は`docs/planning/specs/nonlinear-api-design.md`5章通り。
+    /// 検証する。数式は`docs/spec/nonlinear-common.md`5章通り。
     #[test]
     fn goodness_of_fit_computes_expected_statistics() {
         let llf = -5.0;

@@ -6,7 +6,7 @@
 //! `TobitInput::from_columns`に渡す。`faer::Mat`への組み立て（切片列の自動追加を含む）は
 //! ここ（engine側）の責務とする。`LogitInput`/`ProbitInput`と同型の設計だが、Tobitは
 //! 打ち切り境界（`lower`/`upper`）という他の2手法にはない引数・検証を追加で持つ
-//! （`docs/planning/specs/nonlinear-api-design.md`7章「Tobitの打ち切り境界オプション」）。
+//! （`docs/spec/nonlinear-common.md`7章「Tobitの打ち切り境界オプション」）。
 //!
 //! ## Logit/Probitとの設計上の違い: 検証の実施箇所
 //!
@@ -810,7 +810,7 @@ fn log_likelihood(
 }
 
 /// モデル全体の有意性検定（切片以外の係数`β`が同時にゼロという帰無仮説のWald検定）。
-/// `docs/planning/specs/nonlinear-api-design.md`5章「Tobitはこの共通コアから2点を意図的に
+/// `docs/spec/nonlinear-common.md`5章「Tobitはこの共通コアから2点を意図的に
 /// 外す」の通り、Tobitは`llnull`（打ち切りがあると閉形式解を持たない）に基づく尤度比検定
 /// ではなく、`cov_params`から直接計算できるWald検定を使う（`AER::tobit`の`summary.tobit`と
 /// 同じ方式）。
@@ -821,7 +821,7 @@ fn log_likelihood(
 /// `df_model`個の範囲（`k_constant..k`）には含まれず、検定対象から自動的に除外される。
 /// OLSの`wald_f_test`と同型の構成（`ensure_well_conditioned_symmetric_matrix`による
 /// 悪条件検出→Cholesky分解）だが、検定分布はF分布ではなく標準正規分布に基づく
-/// カイ二乗分布（`nonlinear-api-design.md`5章「検定分布はz検定」、自由度で正規化する
+/// カイ二乗分布（`docs/spec/nonlinear-common.md`4章「検定分布」、自由度で正規化する
 /// `F=W/df_model`の変換を行わない）。
 ///
 /// `Logit`/`Probit`と異なりTobit専用（`llnull`を使わない検定方式のため`common.rs`には
@@ -871,7 +871,7 @@ fn wald_chi2_test(
 /// `marginal_effects`が評価する対象（McDonald-Moffitt 1980）。Logit/Probitの
 /// `dydx_and_jacobian`型の共通化はしない（対象ごとに式が異なり、
 /// 同型の`(w,s)`分解に無理に収める価値がないと判断した。
-/// `docs/planning/specs/nonlinear-api-design.md`6章参照）。
+/// `docs/spec/nonlinear-common.md`6章参照）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarginalEffectsTarget {
     /// 潜在変数の期待値 `E[y*|x] = x'β`
@@ -1186,7 +1186,7 @@ impl CensoringFitCategory {
 }
 
 /// 打ち切り予測の適合度チェック（`TobitEstimator::censoring_fit_check`のdocコメント参照。
-/// Logit/Probitの`pred_table`の代替、`nonlinear-api-design.md`6章「Tobitは
+/// Logit/Probitの`pred_table`の代替、`docs/spec/nonlinear-common.md`6章「Tobitは
 /// predict()/marginal_effects()/pred_table()のいずれも独自の形になる」で確定済み）。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
@@ -1638,7 +1638,7 @@ impl TobitEstimator {
     }
 
     /// 限界効果（`marginal_effects`）。`fit()`とは独立した別メソッド（`fit()`のReturn
-    /// 本体には含めない、`nonlinear-api-design.md`6章で確定済み）。`fit()`時の
+    /// 本体には含めない、`docs/spec/nonlinear-common.md`6章で確定済み）。`fit()`時の
     /// `cov_params`（`(k+1)×(k+1)`、`β∪{σ}`空間）を再利用するため再最適化は不要
     /// （`confidence_level`は`fit()`とは独立したパラメータとして受け取る、
     /// `LogitEstimator::marginal_effects`と同じ設計）。
@@ -1714,7 +1714,7 @@ impl TobitEstimator {
     /// いずれでも同じ式で正しく計算できる）。
     ///
     /// 新規データでの予測（out-of-sample）は`predict_new_data`。デフォルト
-    /// （`target`省略時の`E[y|x]`、`nonlinear-api-design.md`
+    /// （`target`省略時の`E[y|x]`、`docs/spec/nonlinear-common.md`
     /// 6章）はPython層（engine_pybind）の責務（`Method`/`CovType`等と同じ設計、
     /// `.claude/rules/rust-style.md`参照）。
     pub fn predict(&self, target: MarginalEffectsTarget) -> Vec<f64> {
@@ -1897,7 +1897,7 @@ mod tests {
     #[test]
     fn from_columns_supports_right_censoring_only() {
         // lower=None（左側は打ち切りなし）でupperのみ指定する構成
-        // （`nonlinear-api-design.md`7章の「右打ち切りのみ」）。
+        // （`docs/spec/nonlinear-common.md`7章の「右打ち切りのみ」）。
         let y = vec![-100.0, 5.0, 10.0];
         let input =
             TobitInput::from_columns(&y, &[], vec![], true, "y".to_string(), None, Some(10.0))

@@ -1,6 +1,6 @@
 # 検定分布・診断統計量の運用ノート
 
-特定の推定手法に限定しない、検定分布・診断統計量の選択に関する手法横断の記録。各手法の詳細な数式は個別のspec（`ols-spec.md`等）・design doc（`docs/planning/specs/*-api-design.md`）を正本とし、ここではそれらの決定を一覧化し、選択の理由と他の統計ソフトウェアとの違いをまとめる（[Issue #246](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/246)）。
+特定の推定手法に限定しない、検定分布・診断統計量の選択に関する手法横断の記録。各手法の詳細な数式は個別のspec（`docs/spec/`配下の`ols-spec.md`・`iv-spec.md`・`nonlinear-common.md`等）を正本とし、ここではそれらの決定を一覧化し、選択の理由と他の統計ソフトウェアとの違いをまとめる（[Issue #246](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/246)）。
 
 ## 1. 検定分布（t/F分布 vs z/カイ二乗分布）
 
@@ -13,9 +13,9 @@
 | Logit / Probit | z分布・カイ二乗（`z_stats`、`lr_statistic`） | なし（漸近正規性のみに依拠） |
 | Tobit | 未確定（正式spec未作成、実装中。MLEベースのためLogit/Probitと同じz分布を継承する見込みだが本ドキュメントでは保留） | - |
 
-**OLS/WLS/2SLSがt分布を使う理由**: 古典的仮定（誤差項が正規分布に従う等）の下では、係数の標準化統計量`(β̂-β)/ŝe`が**有限標本で厳密に**t分布に従う（コクランの定理）。この結果はサンプルサイズによらず成り立つ厳密な理論であり、`cov_type`（classical/HC系/cluster/hac）によらず一貫してt分布を採用する（`ols-spec.md`30行目、`iv-api-design.md`3.2節、`panel-api-design.md`3.3節で同じ判断を踏襲）。
+**OLS/WLS/2SLSがt分布を使う理由**: 古典的仮定（誤差項が正規分布に従う等）の下では、係数の標準化統計量`(β̂-β)/ŝe`が**有限標本で厳密に**t分布に従う（コクランの定理）。この結果はサンプルサイズによらず成り立つ厳密な理論であり、`cov_type`（classical/HC系/cluster/hac）によらず一貫してt分布を採用する（`ols-spec.md`30行目、`iv-spec.md`3.2節、`panel-api-design.md`3.3節で同じ判断を踏襲）。
 
-**GMM/Logit/Probitがz分布を使う理由**: GMMの理論的正当化（Hansen 1982）およびMLEの漸近理論は、いずれもサンプルサイズが無限大に近づくときの漸近正規性のみに依拠しており、OLSの`n-k`に相当する自然な自由度・有限標本での厳密な分布の閉形式が存在しない。t分布を使うことは、存在しない有限標本の理論的裏付けを偽って主張することになるため、素直に漸近論が保証するz分布・カイ二乗分布を採用する（`iv-api-design.md`3.2節、`nonlinear-api-design.md`5章）。statsmodels/R glmがいずれもz検定を標準とすることとも一致する。
+**GMM/Logit/Probitがz分布を使う理由**: GMMの理論的正当化（Hansen 1982）およびMLEの漸近理論は、いずれもサンプルサイズが無限大に近づくときの漸近正規性のみに依拠しており、OLSの`n-k`に相当する自然な自由度・有限標本での厳密な分布の閉形式が存在しない。t分布を使うことは、存在しない有限標本の理論的裏付けを偽って主張することになるため、素直に漸近論が保証するz分布・カイ二乗分布を採用する（`iv-spec.md`3.2節、`nonlinear-common.md`4章）。statsmodels/R glmがいずれもz検定を標準とすることとも一致する。
 
 ## 2. 他の統計ソフトウェアの既定値との違い
 
@@ -25,8 +25,8 @@
 
 ## 3. Stock-Yogoの弱操作変数F統計量
 
-- v1スコープでは、内生変数ごとの**生の部分F統計量のみ**を返す（`weak_instrument_f_statistics`）。Stock-Yogoの臨界値テーブルとの照合（弱操作変数かどうかの合否判定）は、テーブルが経験的なシミュレーション値でクローズドフォームでないため実装コストが高く、v1では実装しない（`iv-api-design.md`6.4節）。目安として一般に10前後がよく引用される閾値だが、本プロジェクトはこの判定自体を提供せず、利用者側の解釈に委ねる。
-- 複数内生変数の同時弱操作変数診断（Cragg-Donald統計量）も同様の理由でv1スコープ外（`iv-api-design.md`6.4節）。複数内生変数（`k_endog>=2`）シナリオが実際にサポートされた後もこの判断を維持するかは再検討中（[Issue #247](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/247)）。
+- v1スコープでは、内生変数ごとの**生の部分F統計量のみ**を返す（`weak_instrument_f_statistics`）。Stock-Yogoの臨界値テーブルとの照合（弱操作変数かどうかの合否判定）は、テーブルが経験的なシミュレーション値でクローズドフォームでないため実装コストが高く、v1では実装しない（`iv-spec.md`3.4節）。目安として一般に10前後がよく引用される閾値だが、本プロジェクトはこの判定自体を提供せず、利用者側の解釈に委ねる。
+- 複数内生変数の同時弱操作変数診断（Cragg-Donald統計量）も同様の理由でv1スコープ外（`iv-spec.md`3.4節）。複数内生変数（`k_endog>=2`）シナリオが実際にサポートされた後もこの判断を維持するかは再検討中（[Issue #247](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/247)）。
 
 ## 4. 過剰識別検定（Sargan/Hansen J）の`cov_type`依存性
 

@@ -5,11 +5,10 @@
 //! `engine_pybind`はpolars DataFrameから列ごとに`Vec<f64>`を抽出するところまでを担い
 //! （`column_extraction::extract_f64_column`）、それらの列を本モジュールの
 //! `ProbitInput::from_columns`に渡す。`faer::Mat`への組み立て（切片列の自動追加を含む）は
-//! ここ（engine側）の責務とする。`engine::nonlinear::logit::LogitInput`とほぼ同型の設計
-//! （`docs/planning/specs/nonlinear-api-design.md`参照）。
+//! ここ（engine側）の責務とする。`engine::nonlinear::logit::LogitInput`とほぼ同型の設計。
 //!
 //! OLS/Logitと同様、Phase2（Logit/Probit/Tobit）では`weights`/`offset`を見送っているため
-//! （`nonlinear-api-design.md`7章）、`from_columns_weighted`に相当するものはない。
+//! （`docs/spec/nonlinear-common.md`7章）、`from_columns_weighted`に相当するものはない。
 //!
 //! ## 数式（プロビット回帰）
 //!
@@ -47,7 +46,7 @@
 //! 絶対にNaNを産まない設計だったのとは異なる、Probit固有のリスク）。既定手法の
 //! `Method::Newton`（`FaerNewton`）はline searchなしで`gradient`/`hessian`を直接
 //! 使うため、Logitで実際に問題になった「(準)完全分離データでの収束判定誤検知」
-//! （勾配ノルムのアンダーフロー、`nonlinear-implementation-notes.md`参照）よりも
+//! （勾配ノルムのアンダーフロー、`docs/spec/logit-spec.md`3.2節参照）よりも
 //! 緩い条件でこのNaN汚染に到達しうる。
 //!
 //! 対策として、`u`を`φ`/`Φ`評価前にクランプする（`nonlinear/common.rs`の`clamped_pdf_cdf`・
@@ -447,7 +446,7 @@ pub struct ProbitEstimator {
     /// （`nᵢ log(ȳ) + (1-nᵢ) log(1-ȳ)`の総和）から直接計算する（ソルバーの
     /// 再フィットは経由しない。`LogitEstimator`と同じ方針）。
     /// `include_intercept`の値に関わらず常にこの「切片のみ」モデルを参照する
-    /// （`nonlinear-api-design.md`5章の定義通り）。
+    /// （`docs/spec/nonlinear-common.md`5章の定義通り）。
     ///
     /// この閉じた形は「切片のみモデルのMLEは`Φ(θ̂)=ȳ`を満たす」という性質
     /// （リンク関数に依らず成り立つ、`fit_newton_converges_to_closed_form_solution_
@@ -486,8 +485,8 @@ impl ProbitEstimator {
     /// （骨格実装＋method分岐＋SE計算）と同じ設計・スコープ。
     ///
     /// `method`の選択に関わらず、収束点でのHessian評価（SE計算用）は常に解析的に行う
-    /// （`run_solver`の実装方針、`docs/planning/specs/nonlinear-implementation-notes.md`
-    /// 「engine内のtrait設計」参照）。BFGS/L-BFGSが最適化中に内部で保持する近似Hessianは
+    /// （`run_solver`の実装方針、`docs/spec/nonlinear-common.md`1.2節参照）。
+    /// BFGS/L-BFGSが最適化中に内部で保持する近似Hessianは
     /// 使い回さない。
     ///
     /// 初期値（warm start）は標準化空間でのLPM最小二乗解に、probitのIRLS 1ステップ相当の
@@ -513,7 +512,7 @@ impl ProbitEstimator {
     /// （`ProbitProblem::scores`）が必要なため、標準化空間の設計行列を保持したまま
     /// `ProbitProblem`をクローンしておき（`argmin::core::Executor`向けに元々`Clone`を
     /// 要求しているため追加コストは`Clone`実装自体のみ）、`run_solver`が返す収束点の
-    /// パラメータで評価する。検定分布は標準正規分布（`nonlinear-api-design.md`5章、
+    /// パラメータで評価する。検定分布は標準正規分布（`docs/spec/nonlinear-common.md`4章、
     /// OLSのt分布とは異なる）。
     ///
     /// `n <= k`で`CommonError::InsufficientObservations`、`k == 0`で
@@ -831,7 +830,7 @@ impl ProbitEstimator {
     }
 
     /// 限界効果（`marginal_effects`）。`fit()`とは独立した別メソッド（`fit()`のReturn
-    /// 本体には含めない、`nonlinear-api-design.md`6章で確定済み）。`fit()`時の
+    /// 本体には含めない、`docs/spec/nonlinear-common.md`6章で確定済み）。`fit()`時の
     /// `cov_params`を再利用するため再最適化は不要（`confidence_level`は`fit()`とは
     /// 独立したパラメータとして受け取り、`fit()`時の値に縛られず事後的に異なる
     /// CI幅を見られるようにする、`LogitEstimator::marginal_effects`と同じ設計）。
@@ -840,7 +839,7 @@ impl ProbitEstimator {
     ///
     /// `p_i = Φ(x_i'θ)`のとき、変数`j`（連続変数として扱う。`dummy=False`が既定の
     /// statsmodelsの`get_margeff()`に倣い、離散変数の自動判定は行わない設計、
-    /// `nonlinear-implementation-notes.md`「限界効果」参照）の限界効果は
+    /// `docs/spec/nonlinear-common.md`6章参照）の限界効果は
     /// `dy/dx_j = φ(x_i'θ)θ_j`（Logitの`p(1-p)θ_j`とは異なり標準正規PDF`φ`を使う。
     /// 参照）。
     ///
@@ -858,7 +857,7 @@ impl ProbitEstimator {
     ///
     /// 変数`j`の分散は`Var(g_j) = jac_j · Σ · jac_jᵀ`（`jac_j`はヤコビアンの`j`行目、
     /// `Σ=cov_params`）。標準誤差はこの平方根、検定分布は標準正規分布
-    /// （`fit()`本体と同じ、`nonlinear-api-design.md`5章）。
+    /// （`fit()`本体と同じ、`docs/spec/nonlinear-common.md`4章）。
     ///
     /// 定数項（切片）は出力から除外する（切片の限界効果は意味を持たない、
     /// statsmodelsも同様）。
@@ -893,7 +892,7 @@ impl ProbitEstimator {
 
     /// 予測確率 `p_i = Φ(x_i'θ)` を、`fit()`に使った学習データ（`self.input.x()`）の
     /// 各行について返す（`fit()`のReturn本体には含めない別メソッド、
-    /// `nonlinear-api-design.md`6章。`LogitEstimator::predict`の`Λ`を`Φ`に置き換えた
+    /// `docs/spec/nonlinear-common.md`6章。`LogitEstimator::predict`の`Λ`を`Φ`に置き換えた
     /// Probit版）。
     ///
     /// 新規データでの予測（out-of-sample）は`predict_new_data`。

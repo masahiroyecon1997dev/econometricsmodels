@@ -4,11 +4,11 @@
 //!
 //! 第一段階: 内生変数ごとに`x_endog[j] ~ x_exog + instruments`をOLS推定し、
 //! 予測値`x̂_endog[j]`を得る（`instruments`は除外操作変数のみ、`x_exog ++ instruments`が
-//! 「全操作変数」、`docs/planning/specs/iv-api-design.md`1.1.1節）。
+//! 「全操作変数」、`docs/spec/iv-spec.md`1.1節）。
 //!
 //! 第二段階: `y ~ x_exog + x̂_endog`をOLS推定する。この係数が2SLS推定量
 //! （`β̂_2SLS = (X'PzX)⁻¹X'Pzy`、`Pz`は全操作変数`Z`への射影行列）と数値的に一致する
-//! （教科書的な2SLSの2段階回帰による構成、`iv-api-design.md`6.2節）。
+//! （教科書的な2SLSの2段階回帰による構成）。
 //!
 //! ## 標準誤差・適合度統計量
 //!
@@ -17,7 +17,7 @@
 //! 有名な罠。`X = [x_exog, x_endog]`を実際の（推定値ではない）内生変数、
 //! `X̂ = Pz X = [x_exog, x̂_endog]`を第二段階の設計行列とすると、2SLSの正しい分散は
 //! `(X'PzX)⁻¹X'Pz Ω Pz X(X'PzX)⁻¹ = (X̂'X̂)⁻¹X̂'ΩX̂(X̂'X̂)⁻¹`というサンドイッチ型で、
-//! `Ω`の推定方法は`cov_type`により変わる。`iv-api-design.md`3.1節）。
+//! `Ω`の推定方法は`cov_type`により変わる。`docs/spec/iv-spec.md`3.1節）。
 //!
 //! 上式の`(X̂'X̂)⁻¹X̂'ΩX̂(X̂'X̂)⁻¹`は、**設計行列にX̂を使い、残差に構造残差
 //! `e = y - Xβ̂`（実際のXを使う。第二段階回帰自身の残差`y - X̂β̂`ではない）を使えば、
@@ -27,7 +27,7 @@
 //! この`(X̂, e)`に対する独立実装のサンドイッチ計算（`classical_cov_params`/`hc_cov_params`/
 //! `hac_cov_params`/`cluster_cov_params`/`wald_f_test`、いずれも本ファイル下部）を行う。
 //! OLS（`engine::linear::ols`）の同名の同型計算とは**意図的に独立実装**にしている
-//! （`iv-api-design.md`4章「IVのサンドイッチ型分散計算は独自実装でよい……OLS/nonlinear
+//! （`docs/spec/iv-spec.md`3.1節「IVのサンドイッチ型分散計算は独自実装でよい……OLS/nonlinear
 //! どちらの既存計算にも寄せない」）。
 //!
 //! 第一段階の各`OlsEstimator`はそれ自体が正しい（ナイーブな）OLS回帰であり、
@@ -86,7 +86,7 @@ pub struct TwoSlsEstimator {
     /// 内生変数ごとの第一段階回帰（`x_endog[j] ~ x_exog + instruments`）。
     /// タプルの`String`は内生変数名（`IvInput::x_endog_names`と対応）。
     first_stage: Vec<(String, OlsEstimator)>,
-    /// 内生変数ごとの弱操作変数診断（部分F統計量、`iv-api-design.md`6.4節）。
+    /// 内生変数ごとの弱操作変数診断（部分F統計量、`docs/spec/iv-spec.md`3.4節）。
     /// `first_stage`と同じ順序・同じ内生変数名（`Vec<(String, f64)>`にしている理由も
     /// `first_stage`と同じ、`HashMap`にすると走査順序が非決定的になるため）。
     weak_instrument_f_statistics: Vec<(String, f64)>,
@@ -101,7 +101,7 @@ pub struct TwoSlsEstimator {
     residuals: Mat<f64>,
     /// 標準誤差 (k, 1)。`cov_type`に応じたサンドイッチ型分散の対角成分の平方根。
     std_errors: Mat<f64>,
-    /// t統計量 (k, 1) = params / std_errors（`iv-api-design.md`3.2節、2SLSはt分布）。
+    /// t統計量 (k, 1) = params / std_errors（`docs/spec/iv-spec.md`3.2節、2SLSはt分布）。
     t_stats: Mat<f64>,
     /// 両側p値 (k, 1)。t分布（自由度`df_inference`）に基づく
     p_values: Mat<f64>,
@@ -112,15 +112,15 @@ pub struct TwoSlsEstimator {
     r_squared: f64,
     r_squared_adj: f64,
     /// F統計量。`cov_type=Classical`なら古典的F検定、それ以外（HC0-3/HAC/cluster）は
-    /// ロバストWald検定（OLSと同じ切り替えロジック、`iv-api-design.md`2.1節）
+    /// ロバストWald検定（OLSと同じ切り替えロジック、`docs/spec/iv-spec.md`2章）
     f_statistic: f64,
     f_p_value: f64,
-    /// Wu-Hausman内生性検定（回帰ベース、`iv-api-design.md`6.6節）の統計量。
+    /// Wu-Hausman内生性検定（回帰ベース、`docs/spec/iv-spec.md`3.6節）の統計量。
     /// `x_endog=[]`（検定対象の内生変数が無い）、または拡張回帰が想定内の理由で推定不能
     /// （設計行列が特異・観測数不足、`fit()`のdocコメント参照）なら`None`。
     wu_hausman_statistic: Option<f64>,
     wu_hausman_p_value: Option<f64>,
-    /// Sargan過剰識別検定（`iv-api-design.md`6.5節）の統計量。丁度識別
+    /// Sargan過剰識別検定（`docs/spec/iv-spec.md`3.5節）の統計量。丁度識別
     /// （自由度`len(instruments) - len(x_endog)`が0）なら`None`。
     sargan_statistic: Option<f64>,
     sargan_p_value: Option<f64>,
@@ -204,7 +204,7 @@ impl TwoSlsEstimator {
             input.has_intercept(),
         );
 
-        // 全操作変数（`x_exog ++ instruments`のunion、`iv-api-design.md`1.1.1節）。Sargan
+        // 全操作変数（`x_exog ++ instruments`のunion、`docs/spec/iv-spec.md`1.1節）。Sargan
         // 過剰識別検定（下記）専用に保持する（第一段階自体は`compute_first_stage`内部で
         // 独立に構築するため、ここでの計算とは重複するが`mat_to_columns`はcheapなため
         // 許容する）。`Z = [x_exog, instruments]`は`OlsInput::from_columns`を経由せず
@@ -213,7 +213,7 @@ impl TwoSlsEstimator {
         let mut instrument_columns = x_exog_columns.clone();
         instrument_columns.extend(mat_to_columns(input.instruments()));
 
-        // 第一段階回帰・弱操作変数診断（部分F統計量、iv-api-design.md 6.4節）は
+        // 第一段階回帰・弱操作変数診断（部分F統計量、docs/spec/iv-spec.md 3.4節）は
         // 2SLS/GMM間で共有するロジック（`common::compute_first_stage`、`iv/CLAUDE.md`
         // 「2SLSとGMMの独立実装方針」参照——GMM自体は第一段階回帰を必要としないが、
         // `engine_pybind`が`method="gmm"`でも同じ診断情報を独立に提供するために使う）。
@@ -356,7 +356,7 @@ impl TwoSlsEstimator {
             wald_f_test(beta, &cov_params, k_constant, df_model, df_inference)?
         };
 
-        // Wu-Hausman内生性検定（回帰ベース、iv-api-design.md 6.6節）。構造式
+        // Wu-Hausman内生性検定（回帰ベース、docs/spec/iv-spec.md 3.6節）。構造式
         // `y ~ x_exog + x_endog`に第一段階残差を追加回帰し（`linearmodels`の
         // `wooldridge_regression`相当）、追加した残差係数のジョイント有意性を
         // `fit()`に渡された`cov_type`と同じcov_typeでのロバストWald検定（F統計量）で
@@ -433,13 +433,13 @@ impl TwoSlsEstimator {
             }
         };
 
-        // Sargan過剰識別検定（iv-api-design.md 6.5節）。構造残差`e`を全操作変数
+        // Sargan過剰識別検定（docs/spec/iv-spec.md 3.5節）。構造残差`e`を全操作変数
         // `Z = [x_exog, instruments]`（`instrument_columns`、第一段階で使ったものと同じ）に
         // 回帰した際の`n*R²`に相当する`e'Z(Z'Z)⁻¹Z'e / σ̂²`（`σ̂² = e'e/n`）を計算する。
-        // 自由度は`len(instruments) - len(x_endog)`（`iv-api-design.md`1.1.1節の`instruments`
+        // 自由度は`len(instruments) - len(x_endog)`（`docs/spec/iv-spec.md`1.1節の`instruments`
         // ＝除外操作変数のみという定義に対応、`fit()`冒頭で`k_instruments() >= k_endog()`を
-        // 検証済みのため常に0以上）。丁度識別（自由度0）では`None`（`iv-api-design.md`6.3節・
-        // 6.5節）。
+        // 検証済みのため常に0以上）。丁度識別（自由度0）では`None`（`docs/spec/iv-spec.md`
+        // 1.2節・3.5節）。
         //
         // **常に等分散（古典的）前提で計算し、`cov_type`には依存しない**（弱操作変数診断
         // #163と同じ判断だが、こちらはユーザー確認を要さない: Sargan検定はその定義自体が
@@ -598,13 +598,13 @@ impl TwoSlsEstimator {
 
     /// 内生変数ごとの弱操作変数診断（部分F統計量、`first_stage_estimators()`と同じ順序）。
     /// タプルの`String`は内生変数名。Stock-Yogo臨界値との照合は行わない（v1スコープ外、
-    /// `iv-api-design.md`6.4節）。
+    /// `docs/spec/iv-spec.md`3.4節）。
     pub fn weak_instrument_f_statistics(&self) -> &[(String, f64)] {
         &self.weak_instrument_f_statistics
     }
 
     /// Wu-Hausman内生性検定（回帰ベース）の統計量。`x_endog=[]`、または拡張回帰が想定内の
-    /// 理由で推定不能な場合は`None`（`iv-api-design.md`6.6節、`fit()`のdocコメント参照）。
+    /// 理由で推定不能な場合は`None`（`docs/spec/iv-spec.md`3.6節、`fit()`のdocコメント参照）。
     pub fn wu_hausman_statistic(&self) -> Option<f64> {
         self.wu_hausman_statistic
     }
@@ -615,7 +615,7 @@ impl TwoSlsEstimator {
     }
 
     /// Sargan過剰識別検定の統計量。丁度識別（自由度0）の場合は`None`
-    /// （`iv-api-design.md`6.5節、`fit()`のdocコメント参照）。
+    /// （`docs/spec/iv-spec.md`3.5節、`fit()`のdocコメント参照）。
     pub fn sargan_statistic(&self) -> Option<f64> {
         self.sargan_statistic
     }
@@ -882,7 +882,7 @@ mod tests {
     /// 構造式: `y = 1 + 2*x_endog + e`、操作変数`z`は`x_endog`と相関するが`e`とは無相関
     /// （手計算しやすいよう`x_endog = z`の完全予測になるデータを使う。この場合、第一段階の
     /// 予測値`x̂_endog`は`x_endog`そのものと一致するため、2SLSはOLSと数値的に一致する
-    /// （操作変数が内生変数を完全に予測する退化ケース、`iv-api-design.md`6.3節の丁度識別と
+    /// （操作変数が内生変数を完全に予測する退化ケース、`docs/spec/iv-spec.md`1.2節の丁度識別と
     /// 同様の考え方をさらに単純化したもの）。
     fn perfectly_predicted_endog_data() -> (Vec<f64>, Vec<f64>, Vec<f64>) {
         let z = vec![1.0, 2.0, 3.0, 4.0, 5.0];
@@ -1117,7 +1117,7 @@ mod tests {
     }
 
     /// 丁度識別（`len(instruments) == len(x_endog)`）ではSargan過剰識別検定の自由度が0の
-    /// ため`None`になる（`iv-api-design.md`6.3節・6.5節）。
+    /// ため`None`になる（`docs/spec/iv-spec.md`1.2節・3.5節）。
     #[test]
     fn fit_sets_sargan_statistic_to_none_when_just_identified() {
         let (y, x_endog, z) = perfectly_predicted_endog_data();
@@ -1647,7 +1647,7 @@ mod tests {
     }
 
     /// HC2はレバレッジ`h_ii`によるスケーリングを要する（`X̂`のみからレバレッジを計算する
-    /// 拡張、`iv-api-design.md`3.1節参照）。このテストは本実装が意図した式（下記
+    /// 拡張、`docs/spec/iv-spec.md`3.1節参照）。このテストは本実装が意図した式（下記
     /// `manual_hc2_std_errors`と同一の式）通りに計算されていることを固定する、
     /// 数式レベルの細粒度回帰確認。真に独立した参照実装（R `ivreg`+
     /// `sandwich::vcovHC(type="HC2"/"HC3")`）との数値一致は
@@ -2336,7 +2336,7 @@ mod tests {
     /// 同じ`x_exog`（定数項のみ）・同じ`z1`/`z2`の下で、内生変数の生成方法だけを変え、
     /// 操作変数が強く効く場合とほぼ無関係な場合とで部分F統計量が大きく異なることを確認する
     /// （弱操作変数の経験則である閾値10を跨いだ値になっていることも合わせて確認する。
-    /// Stock-Yogo臨界値との正式な照合はv1スコープ外、`iv-api-design.md`6.4節）。
+    /// Stock-Yogo臨界値との正式な照合はv1スコープ外、`docs/spec/iv-spec.md`3.4節）。
     #[test]
     fn fit_weak_instrument_f_statistic_is_large_for_strong_instruments_and_small_for_weak_instruments()
      {

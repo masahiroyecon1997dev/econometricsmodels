@@ -129,7 +129,11 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 - **2SLSの分散はサンドイッチ型**: `(X'PzX)^-1 X'Pz Ω Pz X (X'PzX)^-1`（`Ω`の推定方法が
   `cov_type`で変わる）。`hc_cov_params`/`cluster_cov_params`/`hac_cov_params`
   （`engine/src/iv/two_sls.rs`）は`X̂`（射影後の予測値）ベースのレバレッジ・スコアで
-  OLSの対応する実装と同型に計算する。
+  OLSの対応する実装と同型に計算するが、コード自体はOLS（`engine::linear::ols`）に寄せず
+  **意図的に独立実装**にしている（IVのサンドイッチ型分散計算はOLS/nonlinearどちらの既存
+  計算にも寄せない独立実装でよいという既存方針）。GMMのモーメント共分散行列計算
+  （`gmm.rs`）も同じ理由で2SLS側と独立に実装している（`iv/CLAUDE.md`「2SLSとGMMの独立実装
+  方針」参照）。
 - **GMMのSEサンドイッチは常に一般形**: `Avar(β̂) = B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`
   （`B=X'ZWZ'X`、`W=S_used⁻¹`は点推定に実際に使った重み）。`weight_type`と`cov_type`は
   独立な選択のため一般に一致せず、「効率的GMM」の特殊ケースでも`B⁻¹`のみへの簡略化分岐は

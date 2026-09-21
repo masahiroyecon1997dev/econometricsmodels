@@ -12,7 +12,7 @@
 //!
 //! ## `weight_type`・`gmm_iterations`と点推定への影響
 //!
-//! `W`の選び方（`weight_type`）が点推定`β̂`自体を左右する（`iv-api-design.md`6.2節、
+//! `W`の選び方（`weight_type`）が点推定`β̂`自体を左右する（`docs/spec/iv-spec.md`1.2節、
 //! `cov_type`が点推定に影響しないOLS/2SLSとの重要な違い）。`gmm_iterations`は
 //! 1以上の任意の整数を受け付ける（`IvError::InvalidGmmIterations`。当初は
 //! 1・2の2値のみに限定していたが、後に3以上（iterated GMM）にも対応する形で一般化した）。
@@ -77,12 +77,12 @@
 //!   `cluster_cov_params`と同型だが小標本補正は無し）。
 //! - `Kernel`: Newey-West（Bartlettカーネル）による`S`。`two_sls.rs`の`hac_cov_params`と
 //!   同型（時系列相関を仮定する`kernel`、パネルのDriscoll-Kraayではない。
-//!   `iv-api-design.md`6.2節・`two_sls.rs`冒頭コメント参照）。
+//!   `docs/spec/iv-spec.md`1.2節・`two_sls.rs`冒頭コメント参照）。
 //!
 //! 上記4関数は、数式としては`two_sls.rs`の`hc_cov_params`/`cluster_cov_params`/
 //! `hac_cov_params`と同型だが、独立に実装している（後述「2SLSとの共通化の判断」参照）。
 //!
-//! ## Hansen J過剰識別検定（`iv-api-design.md`6.5節）
+//! ## Hansen J過剰識別検定（`docs/spec/iv-spec.md`3.5節）
 //!
 //! `J = (Z'ê)'S⁻¹(Z'ê)`（`ê`は最終推定`β̂`に基づく残差、`S`は最終推定に実際に使った
 //! 重み行列）。自由度は`len(instruments) - len(x_endog)`（丁度識別＝自由度0では`None`、
@@ -149,8 +149,8 @@
 //!   が常に中心化する設計と実測突き合わせて判明）。
 //! - `hc0`〜`hc3`: `two_sls.rs`の`hc_cov_params`と同型（`X̂`→`Z`）。HC2/HC3のレバレッジは
 //!   `Z`から計算する自己拡張で、**GMM自体の外部参照実装での検証は不可能**（R `ivreg`が
-//!   GMMに対応していないため、`iv-api-design.md`5.3節。2SLSのHC2/HC3はR `ivreg`+
-//!   `sandwich::vcovHC`で検証可能なことを実機確認済み——`iv-api-design.md`3.1節、
+//!   GMMに対応していないため、`docs/spec/iv-spec.md`4章。2SLSのHC2/HC3はR `ivreg`+
+//!   `sandwich::vcovHC`で検証可能なことを実機確認済み——`docs/spec/iv-spec.md`4章、
 //!   `refactoring-candidates.md`項目12——だが、GMMはivreg非対応という別軸の制約が
 //!   残るため対象外のまま。ユーザー確認済み）。**HC1の小標本補正
 //!   `n/(n-k)`・クラスターの補正`(G/(G-1))((n-1)/(n-k))`はどちらも`l`（全操作変数の数）
@@ -163,13 +163,13 @@
 //! - `cluster`: `two_sls.rs`の`cluster_cov_params`と同型（`X̂`→`Z`、上記の通り補正は`k`）。
 //! - `hac`: 上記の通り`kernel_moment_covariance`をそのまま再利用。
 //!
-//! **検定分布はz（標準正規）**（`iv-api-design.md`3.2節で確定済み、2-step efficient GMMの
+//! **検定分布はz（標準正規）**（`docs/spec/iv-spec.md`3.2節で確定済み、2-step efficient GMMの
 //! 漸近正規性が根拠）。`engine::inference`の分布非依存関数（`critical_value`/
 //! `compute_inference_stat`）を`statrs::distribution::Normal`で使う（`two_sls.rs`が
 //! `StudentsT`で使うのと同じ関数で、分布に依存しない設計方針に沿っている）。
 //!
 //! **F統計量は常にロバストWald検定（χ²、`df_model`で割らない生の二次形式）**
-//! （`iv-api-design.md`2.1節で確定済み: 「GMMは3章でz分布と決定済みで古典的F検定の正当化が
+//! （`docs/spec/iv-spec.md`2章で確定済み: 「GMMは3.2節でz分布と決定済みで古典的F検定の正当化が
 //! 無いため……常にWald版にする」）。`two_sls.rs`の`wald_f_test`と異なり`FisherSnedecor`
 //! ではなく`ChiSquared(df_model)`を使い、`df_model`で割らない（`linearmodels`の
 //! `debiased=False`のときの`f_statistic`と同じ規約、`run_linearmodels_benchmark.py`の
@@ -200,7 +200,7 @@
 //!    （モーメント条件`Z'(y-Xβ)=0`を直接使うため）、この点でも構造が異なる。
 //!
 //! 以上より、**点推定の数値的一致は確認しつつ、実装は独立のまま維持する**
-//! （`iv-api-design.md`4章の既存方針「IVのサンドイッチ型分散計算は独自実装でよい」を
+//! （`docs/spec/iv-spec.md`3.1節の既存方針「IVのサンドイッチ型分散計算は独自実装でよい」を
 //! 2SLS/GMM間の関係にも適用した判断）。
 
 use std::collections::BTreeMap;
@@ -217,7 +217,7 @@ use crate::linear::ols::CovType;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
-/// GMMの点推定に使う重み行列の種別（`iv-api-design.md`6.2節）。
+/// GMMの点推定に使う重み行列の種別（`docs/spec/iv-spec.md`1.2節）。
 ///
 /// `cov_type`（標準誤差の報告方法）とは独立の概念で、こちらは点推定自体に影響する
 /// （モジュール冒頭のdocコメント参照）。
@@ -266,7 +266,7 @@ pub struct GmmEstimator {
     cov_type: CovType,
     /// 標準誤差 (k, 1)。`cov_type`に応じたサンドイッチ型分散の対角成分の平方根。
     std_errors: Mat<f64>,
-    /// z統計量 (k, 1) = params / std_errors（`iv-api-design.md`3.2節、GMMはz分布）。
+    /// z統計量 (k, 1) = params / std_errors（`docs/spec/iv-spec.md`3.2節、GMMはz分布）。
     z_stats: Mat<f64>,
     /// 両側p値 (k, 1)。標準正規分布に基づく。
     p_values: Mat<f64>,
@@ -280,7 +280,7 @@ pub struct GmmEstimator {
     /// モジュール冒頭のdocコメント参照）。
     f_statistic: f64,
     f_p_value: f64,
-    /// Hansen J過剰識別検定（`iv-api-design.md`6.5節）の統計量。丁度識別
+    /// Hansen J過剰識別検定（`docs/spec/iv-spec.md`3.5節）の統計量。丁度識別
     /// （自由度`len(instruments) - len(x_endog)`が0）なら`None`（モジュール冒頭の
     /// docコメント「Hansen J過剰識別検定」参照）。
     hansen_j_statistic: Option<f64>,
@@ -391,7 +391,7 @@ impl GmmEstimator {
 
         let x_exog_columns = mat_to_columns(input.x_exog());
 
-        // Z = x_exog ++ instruments（全操作変数、iv-api-design.md 1.1.1節）。
+        // Z = x_exog ++ instruments（全操作変数、docs/spec/iv-spec.md 1.1節）。
         let mut z_columns = x_exog_columns.clone();
         z_columns.extend(mat_to_columns(input.instruments()));
         let l = z_columns.len();
@@ -505,13 +505,13 @@ impl GmmEstimator {
             });
         }
 
-        // Hansen J過剰識別検定（iv-api-design.md 6.5節）。
+        // Hansen J過剰識別検定（docs/spec/iv-spec.md 3.5節）。
         // `J = (Z'ê)'S⁻¹(Z'ê)`（`n`で割らない、モジュール冒頭のdocコメント
         // 「Hansen J過剰識別検定」参照。`ê`は最終推定に基づく残差、`S`は最終推定`beta`に
         // 実際に使った重み行列`s_used`）。自由度は`len(instruments) - len(x_endog)`
-        // （`two_sls.rs`のSargan検定と同じ、`iv-api-design.md`1.1.1節の`instruments`＝
+        // （`two_sls.rs`のSargan検定と同じ、`docs/spec/iv-spec.md`1.1節の`instruments`＝
         // 除外操作変数のみという定義に対応）。丁度識別（自由度0）では`None`
-        // （`iv-api-design.md`6.3節・6.5節）。
+        // （`docs/spec/iv-spec.md`1.2節・3.5節）。
         //
         // `s_used`は`beta`計算時（`gmm_point_estimate`内の`llt`、または`unadjusted_s`
         // 自体が正定値`Z'Z`の正のスカラー倍）で既に反転成功済み・正定値性が保証された
@@ -726,7 +726,7 @@ impl GmmEstimator {
     }
 
     /// Hansen J過剰識別検定の統計量。丁度識別（自由度0）の場合は`None`
-    /// （`iv-api-design.md`6.5節、`fit()`のdocコメント参照）。
+    /// （`docs/spec/iv-spec.md`3.5節、`fit()`のdocコメント参照）。
     pub fn hansen_j_statistic(&self) -> Option<f64> {
         self.hansen_j_statistic
     }
@@ -1014,9 +1014,9 @@ fn invert_spd(mat: &Mat<f64>, dim: usize, context: &str) -> Result<Mat<f64>, IvE
 /// HC0〜HC3ロバストなモーメント条件の分散共分散行列（cov_type用）: `Σᵢ scaleᵢ² zᵢzᵢ'`
 /// （l×l）。`two_sls.rs`の`hc_cov_params`と同型の自己拡張（`X̂`→`Z`）で、レバレッジは
 /// `Z`（点推定用の`ztz`をそのまま流用）から計算する——**GMM自体の外部参照実装での検証は
-/// 不可能**（R `ivreg`が2SLSのみ対応でGMMには対応していないため、`iv-api-design.md`
-/// 5.3節）。2SLSのHC2/HC3は逆にR `ivreg`+`sandwich::vcovHC`で検証可能なことを実機確認
-/// 済み（`iv-api-design.md`3.1節、`refactoring-candidates.md`項目12）だが、GMMは
+/// 不可能**（R `ivreg`が2SLSのみ対応でGMMには対応していないため、`docs/spec/iv-spec.md`
+/// 4章）。2SLSのHC2/HC3は逆にR `ivreg`+`sandwich::vcovHC`で検証可能なことを実機確認
+/// 済み（`docs/spec/iv-spec.md`4章、`refactoring-candidates.md`項目12）だが、GMMは
 /// ivreg非対応という別軸の制約のため対象外のまま。モジュール冒頭のdocコメント
 /// 「標準誤差・検定統計量（cov_type対応）」参照。
 ///
@@ -1133,7 +1133,7 @@ fn gmm_cluster_omega(
 /// （χ²、`df_model`で割らない生の二次形式）を行い、統計量とp値を返す。モジュール冒頭の
 /// docコメント「標準誤差・検定統計量（cov_type対応）」参照——`two_sls.rs`の`wald_f_test`と
 /// 数式は同型だが、F分布ではなくχ²分布を使い`df_model`で割らない点が異なる
-/// （`iv-api-design.md`2.1節「GMMは常にロバストWald検定（χ²）とする」）。
+/// （`docs/spec/iv-spec.md`2章「GMMは常にロバストWald検定（χ²）とする」）。
 fn gmm_wald_chi2_test(
     params: &Mat<f64>,
     cov_params: &Mat<f64>,
@@ -1228,7 +1228,7 @@ mod tests {
 
     /// 丁度識別かつ操作変数が内生変数を完全予測する退化ケース（`two_sls.rs`の
     /// `fit_matches_closed_form_ols_when_instrument_perfectly_predicts_endog`と同じデータ）。
-    /// `weight_type`によらず丁度識別ではGMMの点推定は一致するはず（`iv-api-design.md`6.3節）。
+    /// `weight_type`によらず丁度識別ではGMMの点推定は一致するはず（`docs/spec/iv-spec.md`1.2節）。
     #[test]
     fn fit_matches_closed_form_ols_when_just_identified_and_instrument_perfectly_predicts_endog() {
         let z = vec![1.0, 2.0, 3.0, 4.0, 5.0];
@@ -2489,7 +2489,7 @@ mod tests {
     }
 
     /// 丁度識別（`len(instruments) == len(x_endog)`）ではHansen J過剰識別検定の自由度が
-    /// 0のため`None`になる（`iv-api-design.md`6.3節・6.5節、`two_sls.rs`のSargan検定と
+    /// 0のため`None`になる（`docs/spec/iv-spec.md`1.2節・3.5節、`two_sls.rs`のSargan検定と
     /// 同じ扱い）。
     #[test]
     fn fit_sets_hansen_j_statistic_to_none_when_just_identified() {

@@ -116,7 +116,7 @@ def generate_iv_dataset(
         df は列 y, x1..x{k_exog}, endog1..endog{k_endog}, z1..z{k_instruments} を
         持つpolars DataFrame。
         true_beta は `[beta0, *beta_exog, *beta_endog]`（構造式の係数、
-        `IvResults.param_names`と同じ並び順: 定数項→x_exog→x_endog）。
+        `IVResults.param_names`と同じ並び順: 定数項→x_exog→x_endog）。
         内生性のため、naive OLSはtrue_betaに一致しないが、2SLS/GMMは
         （操作変数が有効なシナリオでは）漸近的に一致するはず。
 

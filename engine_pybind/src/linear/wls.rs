@@ -45,7 +45,7 @@ use crate::validation::{
 /// base struct/trait here: PyO3's `#[pyclass]`/`#[pymethods]` constructor is inherently a
 /// flat keyword-argument surface, so a shared base type would either leak into the
 /// Python-facing API shape (composition: `WLSOptions(cov_type=..., mle=MleOptions(...))`)
-/// or add indirection without reducing the Python surface. `IvOptions`
+/// or add indirection without reducing the Python surface. `IVOptions`
 /// (`engine_pybind/src/iv/common.rs`) already re-declares this same field group
 /// independently from `OLSOptions`, so this duplication is consistent with the existing
 /// precedent in this codebase (Issue #308 decision, 2026-09-12). Mechanical
@@ -203,7 +203,7 @@ pub struct WLSResult {
     /// The original polars DataFrame passed to `fit()`, cached for
     /// `augment(new_data=None)` (Issue #295). A cheap clone (polars columns are
     /// internally reference-counted). Unlike `OLSResult` (shared with
-    /// `IvResult.first_stage()`, which has no single source DataFrame), `WLSResult`
+    /// `IVResult.first_stage()`, which has no single source DataFrame), `WLSResult`
     /// is only ever built from this file's `fit()`, so this is never `None`.
     training_data: DataFrame,
 }

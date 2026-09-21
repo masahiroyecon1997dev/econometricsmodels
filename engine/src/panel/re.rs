@@ -15,7 +15,7 @@
 //! `RE.fit()`が内部でFE推定を実行してハウスマン検定の比較対象を得る際
 //! （2.4節）、「`entity`/`time`/`x`はRE呼び出し時と同一の指定を使う」ため——つまり
 //! `ReInput`から`FeInput`相当のデータを組み立て直す際に、`time`を`ReInput`が
-//! 既に保持していれば再抽出が不要になる（`ReOptions.time`、1.1節）。この内部FE呼び出し
+//! 既に保持していれば再抽出が不要になる（`REOptions.time`、1.1節）。この内部FE呼び出し
 //! ロジック自体は本Issueのスコープ外（後続issue、タスクコード#195以降）。
 //!
 //! ## Swamy-Arora分散成分推定（`swamy_arora_variance_components`、Issue #193、7.1節）
@@ -147,7 +147,7 @@
 //!   2026-09-13）**: RE自身の準偏差変換はentity方向のみ（v1で2-way REはスコープ外）だが、
 //!   このHausman比較用の内部FE呼び出しは**`input.time()`が`Some`なら2-way FEを試みる**
 //!   （`None`なら1-way FE）——RE自身が2-wayをサポートしないこととは独立の判断
-//!   （`FeOptions.time`と同じ「`Some`なら2-way」というルールをそのまま踏襲、1.1節）。
+//!   （`FEOptions.time`と同じ「`Some`なら2-way」というルールをそのまま踏襲、1.1節）。
 //! - **比較対象の係数align**: REが内部FE呼び出しに渡す`x`はRE自身の`x`と完全に同一の
 //!   列・順序（`ReInput::x()`/`x_names()`をそのまま渡す）ため、alignは「REの切片
 //!   （`params()`の先頭行/列）を除外するだけ」で済む——時間不変変数だけを選んで除外する
@@ -2309,7 +2309,7 @@ mod tests {
 
     #[test]
     fn re_estimator_fit_hausman_is_none_when_internal_two_way_fe_call_fails() {
-        // `time`が指定されている（`ReOptions.time`がSome）ため、Hausman比較用の内部
+        // `time`が指定されている（`REOptions.time`がSome）ため、Hausman比較用の内部
         // FE呼び出しは2-way FEを試みる（モジュールdoc「1-way/2-way選択」参照）。
         // ここでは意図的に不均衡パネル（entity=3・time=3のはずが(c,1)が重複し
         // (c,2)・(c,3)が欠落）にして`FeEstimator::fit(TwoWay)`を失敗させる一方、

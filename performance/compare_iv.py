@@ -85,12 +85,12 @@ def _build_dataframe(n: int, k: int, seed: int):
 
 
 def _fit_once_engine(ctx: FitContext):
-    from econometricsmodels import IV, IvOptions
+    from econometricsmodels import IV, IVOptions
 
     if ctx.cov_type == "classical":
-        options = IvOptions(method=ctx.method, cov_type="classical")
+        options = IVOptions(method=ctx.method, cov_type="classical")
     elif ctx.cov_type == "hac":
-        options = IvOptions(
+        options = IVOptions(
             method=ctx.method, cov_type="hac", hac_lags=ctx.hac_lags
         )
     else:

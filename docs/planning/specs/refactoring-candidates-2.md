@@ -238,7 +238,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ### 67.【完了】`WLSOptions`新設の要否は、Logit/Probitの`method`/`max_iter`/`tol`/`raise_on_non_convergence`共通化と合わせてLogit/Probit実装確認時に再検討する
 
-→ Issue #308として切り出し済み（2026-09-11）、2026-09-12に対応完了。`WLSOptions`を`OLSOptions`と同一フィールド構成の独立pyclassとして新設し、`engine_pybind/src/nonlinear/{logit,probit,tobit}.rs`に完全複製されていた`parse_method`/`parse_cov_type`を`nonlinear/common.rs`に集約、`engine`層の`LogitEstimator::fit`/`ProbitEstimator::fit`/`TobitEstimator::fit`のシグネチャ重複（`method`/`max_iter`/`tol`/`raise_on_non_convergence`/`cov_type`/`confidence_level`の6引数）は`engine::nonlinear::common::MleFitOptions`構造体に集約した。一方、pyclass自体（`LogitOptions`/`ProbitOptions`/`TobitOptions`/`WLSOptions`）のフィールド宣言・コンストラクタの重複は、PyO3のフラットなkwargsコンストラクタという制約・`IvOptions`の既存precedentとの一貫性から意図的に現状維持とし、`macro_rules!`等での機械的な共通化の検討はIssue #315として別途切り出した。
+→ Issue #308として切り出し済み（2026-09-11）、2026-09-12に対応完了。`WLSOptions`を`OLSOptions`と同一フィールド構成の独立pyclassとして新設し、`engine_pybind/src/nonlinear/{logit,probit,tobit}.rs`に完全複製されていた`parse_method`/`parse_cov_type`を`nonlinear/common.rs`に集約、`engine`層の`LogitEstimator::fit`/`ProbitEstimator::fit`/`TobitEstimator::fit`のシグネチャ重複（`method`/`max_iter`/`tol`/`raise_on_non_convergence`/`cov_type`/`confidence_level`の6引数）は`engine::nonlinear::common::MleFitOptions`構造体に集約した。一方、pyclass自体（`LogitOptions`/`ProbitOptions`/`TobitOptions`/`WLSOptions`）のフィールド宣言・コンストラクタの重複は、PyO3のフラットなkwargsコンストラクタという制約・`IVOptions`の既存precedentとの一貫性から意図的に現状維持とし、`macro_rules!`等での機械的な共通化の検討はIssue #315として別途切り出した。
 
 ### 69. `test_hac_time_col_reorders_rows_before_computing_lags`の`ordered_df`/`shuffled_df`が手書きで重複、OLS/WLS間でも同一データが独立に書かれている
 
@@ -259,18 +259,18 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-23、`tests/linear/test_wls.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
-### 70. `test_result_is_wls_results_type`に対応する`isinstance(res, OlsResults)`テストがOLS側に無い、`test_nobs_and_dep_var_name`（WLS）と`test_n_obs_and_dep_var_name`（OLS）の命名揺れ
+### 70. `test_result_is_wls_results_type`に対応する`isinstance(res, OLSResults)`テストがOLS側に無い、`test_nobs_and_dep_var_name`（WLS）と`test_n_obs_and_dep_var_name`（OLS）の命名揺れ
 
 - **対象**: [tests/linear/test_wls.py:312-316](../../../tests/linear/test_wls.py#L312-L316)
   （`test_result_is_wls_results_type`）に対応するテストが`test_ols.py`に
-  無い（`isinstance(res, OlsResults)`が0件）。命名揺れは
+  無い（`isinstance(res, OLSResults)`が0件）。命名揺れは
   [tests/linear/test_wls.py:362](../../../tests/linear/test_wls.py#L362)
   （`test_nobs_and_dep_var_name`）と
   [tests/linear/test_ols.py:472](../../../tests/linear/test_ols.py#L472)
   （`test_n_obs_and_dep_var_name`、アンダースコアの位置が異なる）
 - **内容**: ユーザー指摘（2026-08-23）を受けてOLS/WLSのテスト関数名を
   突き合わせて確認。`isinstance`チェックはWLS側にしかなく、OLS側の
-  返り値型（`OlsResults`）が正しいことを確認するテストが無い。
+  返り値型（`OLSResults`）が正しいことを確認するテストが無い。
 - **Claudeの所感**: どちらも小さい抜け・揺れだが、項目68（ファイル分割）と
   合わせて手法間のテスト命名規則を統一するタイミングで一括対応するのが
   効率的だと考える。
@@ -447,7 +447,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 ### 78.【Issue化】`LogitResult`に実際に収束した`method`が含まれておらず、検証する手段が無い
 
 → Issue #307として切り出し済み（2026-09-11）。`refactoring-candidates.md`
-項目3（`IvResults`の`method`/`weight_type`欠落）と統合して1つのIssueに
+項目3（`IVResults`の`method`/`weight_type`欠落）と統合して1つのIssueに
 まとめた。詳細はIssueを参照。
 
 ### 79. 項目51（Issue #231フェーズ4コメント残置）が`test_logit.py`にも該当し、件数がOLSより大幅に多い（11箇所）

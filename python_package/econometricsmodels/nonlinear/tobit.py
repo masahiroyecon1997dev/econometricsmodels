@@ -13,7 +13,7 @@ separate class; same policy as `LogitOptions`/`OLSOptions`, see
 
 `summary()` is not implemented (structured-data-only output policy; see
 `docs/planning/specs/nonlinear-api-design.md` section 5 and the
-`OlsResults`/`WlsResults`/`LogitResults` precedent).
+`OLSResults`/`WLSResults`/`LogitResults` precedent).
 
 Unlike Logit/Probit, Tobit does not have `log_likelihood_null`,
 `lr_statistic`, `lr_p_value`, or `pseudo_r_squared` (no closed form
@@ -336,7 +336,7 @@ class TobitResults:
         Same `target`/`new_data` semantics as `predict()`, but returns
         a polars DataFrame (the training data, or `new_data` when
         given, plus a new predicted-value column) instead of a
-        row-oriented list. See `OlsResults.augment()` for the
+        row-oriented list. See `OLSResults.augment()` for the
         project's general policy on this DataFrame-returning
         exception.
 

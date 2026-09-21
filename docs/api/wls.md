@@ -14,4 +14,4 @@ The `weight` argument specifies the column name of the weight column in `data`. 
 
 ::: econometricsmodels.WLSOptions
 
-::: econometricsmodels.WlsResults
+::: econometricsmodels.WLSResults

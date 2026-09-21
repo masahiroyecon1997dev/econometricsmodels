@@ -13,7 +13,7 @@ separate class; same policy as `OLSOptions`, see
 
 `summary()` is not implemented (structured-data-only output policy; see
 `docs/planning/specs/nonlinear-api-design.md` section 5 and the
-`OlsResults`/`WlsResults` precedent).
+`OLSResults`/`WLSResults` precedent).
 """
 
 from __future__ import annotations
@@ -221,7 +221,7 @@ class LogitResults:
         """Row-oriented summary table of the coefficients.
 
         Shaped to be usable almost as-is in a REST API response. Same
-        shape as `OlsResults.coef_table()` except `z_stat` in place of
+        shape as `OLSResults.coef_table()` except `z_stat` in place of
         `t_stat` (Logit uses a z-test rather than a t-test).
 
         Returns:
@@ -257,7 +257,7 @@ class LogitResults:
 
         Note:
             Returns a probability in `[0, 1]`, not a 0/1 class
-            prediction — unlike `OlsResults.predict()`, whose
+            prediction — unlike `OLSResults.predict()`, whose
             `"predicted"` key is a point prediction of `y` itself.
             This is the standard statsmodels convention. To get a
             classification, apply a threshold to this output
@@ -291,7 +291,7 @@ class LogitResults:
         Same `new_data` semantics as `predict()`, but returns a polars
         DataFrame (the training data, or `new_data` when given, plus a
         new `"probability"` column) instead of a row-oriented list.
-        See `OlsResults.augment()` for the project's general policy on
+        See `OLSResults.augment()` for the project's general policy on
         this DataFrame-returning exception.
 
         Args:

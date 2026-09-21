@@ -50,7 +50,7 @@ from _assertions import assert_close, assert_dict_close
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
 from _tolerances import TOLERANCES
-from econometricsmodels import FE, FeOptions
+from econometricsmodels import FE, FEOptions
 
 from benchmark.common import WAGEPAN_ENTITY, WAGEPAN_TIME, WAGEPAN_X, WAGEPAN_Y
 from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
@@ -192,7 +192,7 @@ def _check_result(
 def test_synthetic_one_way_matches_fixest(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
-    options = FeOptions(cov_type=cov_type)
+    options = FEOptions(cov_type=cov_type)
     res = FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
 
     _check_result(
@@ -210,7 +210,7 @@ def test_synthetic_one_way_matches_fixest(crosscheck, scenario, cov_type):
 def test_synthetic_two_way_matches_fixest(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
-    options = FeOptions(cov_type=cov_type, time="time")
+    options = FEOptions(cov_type=cov_type, time="time")
     res = FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
 
     _check_result(
@@ -229,7 +229,7 @@ def test_synthetic_two_way_matches_fixest(crosscheck, scenario, cov_type):
 @pytest.mark.parametrize("cov_type", WAGEPAN_COV_TYPES)
 def test_wagepan_one_way_matches_fixest(crosscheck, cov_type):
     df = load_wooldridge_dataset("wagepan")
-    options = FeOptions(cov_type=cov_type)
+    options = FEOptions(cov_type=cov_type)
     res = FE(
         df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
     ).fit()
@@ -246,7 +246,7 @@ def test_wagepan_one_way_matches_fixest(crosscheck, cov_type):
 @pytest.mark.parametrize("cov_type", WAGEPAN_COV_TYPES)
 def test_wagepan_two_way_matches_fixest(crosscheck, cov_type):
     df = load_wooldridge_dataset("wagepan")
-    options = FeOptions(cov_type=cov_type, time=WAGEPAN_TIME)
+    options = FEOptions(cov_type=cov_type, time=WAGEPAN_TIME)
     res = FE(
         df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
     ).fit()

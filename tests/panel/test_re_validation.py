@@ -28,9 +28,9 @@ Note:
     （σ_ε²推定）は常に1-way・`x`全体を使う内部FE呼び出しに委譲するため、
     singleton entity・within変換後の分散ゼロ・完全な多重共線性・極端な
     スケール差はすべて**この内部FE呼び出しが真っ先に失敗し`RE.fit()`自体が
-    例外を送出する**（`ReResults`クラスdocstring参照、`FeEstimator::fit`の
+    例外を送出する**（`REResults`クラスdocstring参照、`FeEstimator::fit`の
     失敗がそのまま伝播するため`WithinRegressionFailed`のメッセージ文言に
-    なる）。一方、ハウスマン検定専用の内部FE呼び出し（`ReOptions.time`
+    なる）。一方、ハウスマン検定専用の内部FE呼び出し（`REOptions.time`
     設定時のみ2-way）が単独で失敗するケース（例: singleton time）は
     `RE.fit()`自体は成功し`hausman_*`が`None`になるだけに留まる
     （`test_re_api.py`参照）。
@@ -44,7 +44,7 @@ import pytest
 from _constants import DATA_DIR
 from _error_messages import escaped
 from _re_helpers import our_fit_re
-from econometricsmodels import RE, ComputationError, ReOptions, ValidationError
+from econometricsmodels import RE, ComputationError, REOptions, ValidationError
 
 # ── ValidationError（変数ロールの重複） ────────────────────────────
 #
@@ -92,8 +92,8 @@ def test_entity_overlaps_x_raises(fe_dataset):
 
 
 def test_y_overlaps_time_raises(fe_dataset):
-    """`time`ロールは`ReOptions.time`設定時のみ存在する。"""
-    options = ReOptions(time="y")
+    """`time`ロールは`REOptions.time`設定時のみ存在する。"""
+    options = REOptions(time="y")
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -109,7 +109,7 @@ def test_y_overlaps_time_raises(fe_dataset):
 
 
 def test_entity_overlaps_time_raises(fe_dataset):
-    options = ReOptions(time="entity")
+    options = REOptions(time="entity")
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -125,7 +125,7 @@ def test_entity_overlaps_time_raises(fe_dataset):
 
 
 def test_time_overlaps_x_raises(fe_dataset):
-    options = ReOptions(time="time")
+    options = REOptions(time="time")
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -189,7 +189,7 @@ def test_missing_entity_column_raises(fe_dataset):
 
 
 def test_missing_time_column_raises(fe_dataset):
-    options = ReOptions(time="nonexistent")
+    options = REOptions(time="nonexistent")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
@@ -253,7 +253,7 @@ def test_group_key_column_null_values_raise(bad_col):
     }
     values[bad_col][1] = None
     df = pl.DataFrame(values)
-    options = ReOptions(time="time")
+    options = REOptions(time="time")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name=bad_col),
@@ -270,7 +270,7 @@ def test_cluster_col_null_values_raise():
             "state": ["x", None, "y", "y", "x", "y"],
         }
     )
-    options = ReOptions(cov_type="cluster", cluster_col="state")
+    options = REOptions(cov_type="cluster", cluster_col="state")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name="state"),
@@ -348,7 +348,7 @@ def test_unknown_cov_type_raises(fe_dataset, cov_type):
     """`unknown cov_type`の文言はFEと一字一句同じ（`UNKNOWN_COV_TYPE_FE`を
     流用、`_error_messages.py`のコメント参照）。
     """
-    options = ReOptions(cov_type=cov_type)
+    options = REOptions(cov_type=cov_type)
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.UNKNOWN_COV_TYPE_FE, other=cov_type),
@@ -357,7 +357,7 @@ def test_unknown_cov_type_raises(fe_dataset, cov_type):
 
 
 def test_hc0_not_supported_raises(fe_dataset):
-    options = ReOptions(cov_type="hc0")
+    options = REOptions(cov_type="hc0")
     with pytest.raises(
         ValidationError, match=escaped(msgs.HC0_NOT_SUPPORTED_RE)
     ):
@@ -366,7 +366,7 @@ def test_hc0_not_supported_raises(fe_dataset):
 
 @pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])
 def test_invalid_confidence_level_raises(fe_dataset, confidence_level):
-    options = ReOptions(confidence_level=confidence_level)
+    options = REOptions(confidence_level=confidence_level)
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -378,18 +378,18 @@ def test_invalid_confidence_level_raises(fe_dataset, confidence_level):
 
 
 def test_hac_requires_time_raises(fe_dataset):
-    """`ReOptions`には`FeOptions.time_col`に相当する分離フィールドが無く、
+    """`REOptions`には`FEOptions.time_col`に相当する分離フィールドが無く、
     `time`のみでHAC時系列順序を兼ねる（`engine_pybind/src/panel/re.rs`
-    モジュールdoc「`ReOptions`に`time_col`が無い理由」参照）。
+    モジュールdoc「`REOptions`に`time_col`が無い理由」参照）。
     """
-    options = ReOptions(cov_type="hac")
+    options = REOptions(cov_type="hac")
     with pytest.raises(ValidationError, match=escaped(msgs.HAC_REQUIRES_TIME)):
         our_fit_re(fe_dataset, options=options)
 
 
 @pytest.mark.parametrize("dk_bandwidth", [-1, 6])  # t=6（fe_datasetの時点数）
 def test_invalid_hac_bandwidth_raises(fe_dataset, dk_bandwidth):
-    options = ReOptions(cov_type="hac", time="time", dk_bandwidth=dk_bandwidth)
+    options = REOptions(cov_type="hac", time="time", dk_bandwidth=dk_bandwidth)
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.INVALID_HAC_BANDWIDTH, bandwidth=dk_bandwidth, t=6),
@@ -398,7 +398,7 @@ def test_invalid_hac_bandwidth_raises(fe_dataset, dk_bandwidth):
 
 
 def test_cluster_col_nonexistent_column_raises(fe_dataset):
-    options = ReOptions(cov_type="cluster", cluster_col="does_not_exist")
+    options = REOptions(cov_type="cluster", cluster_col="does_not_exist")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
@@ -421,7 +421,7 @@ def test_insufficient_clusters_raises():
             "entity": ["a", "a", "b", "b", "c", "c", "d", "d"],
         }
     ).with_columns(pl.lit(0).alias("single_cluster"))
-    options = ReOptions(cov_type="cluster", cluster_col="single_cluster")
+    options = REOptions(cov_type="cluster", cluster_col="single_cluster")
     with pytest.raises(
         ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
     ):
@@ -444,7 +444,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error():
             "cluster_group": ["1", "1", "1", "1", "2", "2", "2", "2"],
         }
     )
-    options = ReOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = REOptions(cov_type="cluster", cluster_col="cluster_group")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=2),
@@ -482,7 +482,7 @@ def test_scale_variance_raises_computation_error(fe_dataset, cov_type):
     df = fe_dataset.with_columns(
         (pl.col("x1") * 1e6).alias("x1"), (pl.col("x2") * 1e-3).alias("x2")
     )
-    options = ReOptions(cov_type=cov_type)
+    options = REOptions(cov_type=cov_type)
     with pytest.raises(ComputationError):
         RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 

@@ -64,7 +64,7 @@ from _assertions import rename_intercept as _rename
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset, with_cluster_groups
 from _tolerances import TOLERANCES
-from econometricsmodels import IV, IvOptions
+from econometricsmodels import IV, IVOptions
 
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.iv.fixtures.generate_iv_fixtures import CARD_X_EXOG
@@ -93,7 +93,7 @@ X_EXOG_BY_SCENARIO = {
     "scale_variance_mild": ["x1", "x2"],
 }
 
-# HACラグ: `IvOptions.hac_lags`未指定（自動計算）で、`engine::iv::two_sls::
+# HACラグ: `IVOptions.hac_lags`未指定（自動計算）で、`engine::iv::two_sls::
 # resolve_hac_lags`と`benchmark/iv/references/linearmodels_ref.py`の`_hac_auto_lag`が
 # 同じ式（`floor(4*(n/100)**(2/9))`）を使うため、明示指定しなくても一致する
 # （OLSの`HAC_MAXLAGS`のような固定値の受け渡しが不要）。
@@ -175,7 +175,7 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
     x_exog = X_EXOG_BY_SCENARIO.get(scenario, ["x1"])
     instruments = INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
     df = pl.read_csv(DATA_DIR / f"iv_{scenario}.csv")
-    options = IvOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type)
     res = IV(
         df,
         y="y",
@@ -195,7 +195,7 @@ def test_cluster_matches_linearmodels(fixtures):
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     df = with_cluster_groups(df, 10)
-    options = IvOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = IVOptions(cov_type="cluster", cluster_col="cluster_group")
     res = IV(
         df,
         y="y",
@@ -219,7 +219,7 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
-    options = IvOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = IVOptions(cov_type="cluster", cluster_col="cluster_group")
     res = IV(
         df,
         y="y",
@@ -243,7 +243,7 @@ def test_cluster_g2_matches_linearmodels(fixtures):
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_g2.csv")
     df = df.with_columns((pl.int_range(pl.len()) % 2).alias("cluster_group"))
-    options = IvOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = IVOptions(cov_type="cluster", cluster_col="cluster_group")
     res = IV(
         df,
         y="y",
@@ -267,7 +267,7 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
     フェーズ4）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
-    options = IvOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type)
     res = IV(
         df,
         y="y",
@@ -290,7 +290,7 @@ def test_card_matches_linearmodels(fixtures, cov_type):
     Issue #231フェーズ4）。
     """
     df = load_wooldridge_dataset("card")
-    options = IvOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type)
     res = IV(
         df,
         y="lwage",
@@ -313,7 +313,7 @@ def test_df1_matches_linearmodels(fixtures, cov_type):
     （`_check_result`のref Noneスキップ、`benchmark/iv/references/linearmodels_ref.py`参照）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_df1.csv")
-    options = IvOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type)
     res = IV(
         df,
         y="y",

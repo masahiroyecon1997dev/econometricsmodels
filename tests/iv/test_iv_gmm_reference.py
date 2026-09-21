@@ -28,7 +28,7 @@ Note:
     - `hansen_j_statistic`/`hansen_j_p_value`はGMMの過剰識別検定（Hansen J）。
       2SLSのSargan検定に対応し、丁度識別のときは`None`。
     - `wu_hausman_statistic`相当のキーはフィクスチャに存在しない
-      （`GmmEstimator`はWu-Hausman検定を実装しないため、`IvResults.
+      （`GmmEstimator`はWu-Hausman検定を実装しないため、`IVResults.
       wu_hausman_statistic`は`method="gmm"`で常に`None`。`test_iv_api.py`の
       `test_wu_hausman_is_none_for_gmm`で構造確認済み）。
     - `weak_instrument_f_statistics`は本実装が`method`によらず常にclassicalで
@@ -52,7 +52,7 @@ from _assertions import rename_intercept as _rename
 from _constants import DATA_DIR
 from _helpers import with_cluster_groups
 from _tolerances import TOLERANCES
-from econometricsmodels import IV, IvOptions
+from econometricsmodels import IV, IVOptions
 
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.iv.fixtures.generate_iv_gmm_fixtures import (
@@ -82,7 +82,7 @@ X_EXOG_BY_SCENARIO = {
     "scale_variance_mild": ["x1", "x2"],
 }
 
-# HACラグはIvOptions.hac_lags未指定（自動計算）で、engineとlinearmodelsが
+# HACラグはIVOptions.hac_lags未指定（自動計算）で、engineとlinearmodelsが
 # 同じ式を使うため明示指定不要（`test_iv_reference.py`と同じ理由）。
 
 
@@ -170,7 +170,7 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
     x_exog = X_EXOG_BY_SCENARIO.get(scenario, ["x1"])
     instruments = INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
     df = pl.read_csv(DATA_DIR / f"iv_{scenario}.csv")
-    options = IvOptions(
+    options = IVOptions(
         method="gmm", weight_type="unadjusted", cov_type=cov_type
     )
     res = IV(
@@ -195,7 +195,7 @@ def test_cluster_matches_linearmodels(fixtures):
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     df = with_cluster_groups(df, 10)
-    options = IvOptions(
+    options = IVOptions(
         method="gmm",
         weight_type="unadjusted",
         cov_type="cluster",
@@ -222,7 +222,7 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
-    options = IvOptions(
+    options = IVOptions(
         method="gmm",
         weight_type="unadjusted",
         cov_type="cluster",
@@ -251,7 +251,7 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
     Issue #231フェーズ4）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
-    options = IvOptions(
+    options = IVOptions(
         method="gmm", weight_type="unadjusted", cov_type=cov_type
     )
     res = IV(
@@ -279,7 +279,7 @@ def test_kernel_hac_matches_linearmodels(fixtures):
     Issue #231フェーズ4）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
-    options = IvOptions(method="gmm", weight_type="kernel", cov_type="hac")
+    options = IVOptions(method="gmm", weight_type="kernel", cov_type="hac")
     res = IV(
         df,
         y="y",
@@ -299,7 +299,7 @@ def test_gmm_iterations_matches_linearmodels(fixtures, n_iter):
     指摘、Issue #231フェーズ4）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
-    options = IvOptions(
+    options = IVOptions(
         method="gmm",
         weight_type="unadjusted",
         cov_type="classical",
@@ -334,7 +334,7 @@ def test_other_weight_types_match_linearmodels(fixtures, weight_type):
         df = with_cluster_groups(df, 10)
         kwargs["cluster_col"] = "cluster_group"
 
-    options = IvOptions(
+    options = IVOptions(
         method="gmm", weight_type=weight_type, cov_type="classical", **kwargs
     )
     res = IV(

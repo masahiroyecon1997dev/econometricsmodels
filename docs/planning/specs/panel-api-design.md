@@ -16,13 +16,13 @@ IV固有論点は`iv-api-design.md`参照。
 - `y: str`、`x: list[str]`はOLSと同じ。
 - `entity: str`（エンティティID列名）は**独立の必須引数**とする。FE/REいずれもパネル構造が
   無ければモデルとして成立しないため、`y`/`x`と同格に扱う。
-- `time`（時点ID列名）は必須ではないため`Options`内に置く（`FeOptions.time` /
-  `ReOptions.time`、`str | None`、デフォルト`None`）。
+- `time`（時点ID列名）は必須ではないため`Options`内に置く（`FEOptions.time` /
+  `REOptions.time`、`str | None`、デフォルト`None`）。
   - FEの2-way（entity + time FE）を指定する場合は`time`が実質的に必須になるが、これは
     `OLSOptions.cluster_col`が`cov_type="cluster"`のときのみ必須になるのと同じ「条件付き必須」
     パターンであり、`Options`に置くという判断自体は変えない。未指定時のバリデーションエラーで
     担保する。
-  - **`FeOptions.time`と`FeOptions.time_col`は別物（Issue #186で確定）**: `time`は2-way FE
+  - **`FEOptions.time`と`FEOptions.time_col`は別物（Issue #186で確定）**: `time`は2-way FE
     （固定効果構造）を指定するbareフィールドで、`Some`なら常に2-way・`None`なら1-way。
     Driscoll-Kraay型HAC（`cov_type="hac"`）専用の時系列順序は別フィールド`time_col`
     （`str | None`、`OLSOptions.cluster_col`/`time_col`と同じ「補助列」命名規則）で指定する。
@@ -47,7 +47,7 @@ IV固有論点は`iv-api-design.md`参照。
 
 ### 1.2 モデル固有オプションの置き場所
 
-`FeOptions`/`ReOptions`という別々の`#[pyclass]`構造体に含める（`OLSOptions`/`LogitOptions`の
+`FEOptions`/`REOptions`という別々の`#[pyclass]`構造体に含める（`OLSOptions`/`LogitOptions`の
 前例を踏襲）。共有可能なフィールド（`entity`/`time`等）を内部実装上どこまで共通化するか
 （トレイト・共通struct等）はAPI設計とは別問題として#122（内部実装・共通化方針）で扱う。
 
@@ -98,7 +98,7 @@ OLS（`OLSResult`, `engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
 
 ### 2.4 モデル固有の追加結果の配置
 
-- **RE: ハウスマン検定は`fit()`内で自動計算**し、`ReResult`に`hausman_statistic` /
+- **RE: ハウスマン検定は`fit()`内で自動計算**し、`REResult`に`hausman_statistic` /
   `hausman_p_value` / `hausman_df`として含める。
   - v1は**classical Hausman検定のみ**実装する（`cov_type`に依存しない、常にclassical SE
     前提での計算）。`cov_type="cluster"`等でfitした場合でも、ハウスマン検定自体は内部で
@@ -132,7 +132,7 @@ Newey-West型HACだが、これをパネルにそのまま適用すると異な�
 
 ### 3.2 `cov_type`のデフォルト
 
-- `FeOptions`/`ReOptions`の`cov_type`デフォルト値は**`"cluster"`（entity単位）**とする。
+- `FEOptions`/`REOptions`の`cov_type`デフォルト値は**`"cluster"`（entity単位）**とする。
   OLSの`"classical"`デフォルトから**意図的に逸脱する**。
   - 理由: fixestは実際にこの挙動（FE指定時は自動的に最初のFE変数でクラスターする）を
     デフォルトにしている前例がある。パネルデータでは異分散だけでなくエンティティ内の
@@ -364,7 +364,7 @@ v1では扱わない。
 
 ### 7.3 ハウスマン検定の実装場所・インターフェース
 
-- 2章の決定通り、**`RE.fit()`内で自動計算し`ReResult`にのみ含める**（`FeResult`には
+- 2章の決定通り、**`RE.fit()`内で自動計算し`REResult`にのみ含める**（`FEResult`には
   追加しない）。
 - **計算部分（カイ二乗統計量そのもの）は共通関数化する**: `engine/src/panel/common.rs`に
   `hausman_statistic`を実装し、RE側からのみ呼ぶ（Issue #174で実装済み）。
@@ -387,8 +387,8 @@ v1では扱わない。
 - **内部FE呼び出しの1-way/2-way選択（Issue #192実装時に判明した曖昧さ、ユーザー確認済み、
   2026-09-13）**: RE自身の準偏差変換は7.2節の通りentity方向のみ（v1は2-way REをスコープ外と
   する、後述の「今後の拡張候補」参照）だが、Hausman比較用の内部FE呼び出しは
-  **`ReOptions.time`が`Some`なら2-way FE（entity+time）を試みる**（`None`なら1-way FE）。
-  つまり内部FE呼び出しの1-way/2-way判定は、REの推定構造ではなく`FeOptions.time`と同じ
+  **`REOptions.time`が`Some`なら2-way FE（entity+time）を試みる**（`None`なら1-way FE）。
+  つまり内部FE呼び出しの1-way/2-way判定は、REの推定構造ではなく`FEOptions.time`と同じ
   「`Some`なら2-way」というルール（1.1節）をそのまま踏襲する（v1でRE自身が2-wayを
   サポートしないこととは独立の判断）。2-way FE推定が
   `PanelError::UnbalancedPanelForTwoWay`（不均衡パネル、6.4節）等で失敗した場合も、上記の

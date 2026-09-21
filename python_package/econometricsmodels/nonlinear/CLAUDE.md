@@ -23,13 +23,13 @@
 - `LogitOptions`/`ProbitOptions`は`_lib`からそのまま再輸出する（独自クラスとして再定義しない、`OLSOptions`と同じ方針）。
 - **`predict()`はLogit/Probit両方でout-of-sample（`new_data`引数）対応済み（Issue #131）**: `OLS.predict(new_data=None)`と同じシグネチャ・同じ`None`セマンティクス。戻り値のキーは引き続き`"probability"`（`OLSResult.predict()`の`"predicted"`とは意味が異なるため、キー名は統一しない方針。Issue #322項目3で再検討済み、変更なしと結論）。`pred_table()`のout-of-sample対応は別issueでトラッキング（引き続き未対応）。
 - **OLSからの類推による誤解対策（`refactoring-candidates-2.md`項目80、Issue #322項目3、2026-09-13対応済み）**: `predict()`が確率を返しOLSのような点予測ではないことを、`logit.py`/`probit.py`の`predict()`docstring（Note節）・`docs/spec/logit-spec.md`3.6節・`docs/getting-started.md`に明記した。キー名の統一は行わない（上記の通り）。
-- **`augment(new_data=None)`はLogit/Probit両方に拡張済み（Issue #322項目4、2026-09-13）**: `OlsResults.augment()`と同型（`predict()`と同じ`new_data`意味論、ソースデータに予測確率の列を1列付加したpolars DataFrameを返す）。列名は固定`"probability"`（`predict()`の戻り値キーと同じ）。`LogitResult`/`ProbitResult`は`fit()`時の元DataFrameを`training_data: DataFrame`として保持する（`engine_pybind/src/nonlinear/CLAUDE.md`参照）。
+- **`augment(new_data=None)`はLogit/Probit両方に拡張済み（Issue #322項目4、2026-09-13）**: `OLSResults.augment()`と同型（`predict()`と同じ`new_data`意味論、ソースデータに予測確率の列を1列付加したpolars DataFrameを返す）。列名は固定`"probability"`（`predict()`の戻り値キーと同じ）。`LogitResult`/`ProbitResult`は`fit()`時の元DataFrameを`training_data: DataFrame`として保持する（`engine_pybind/src/nonlinear/CLAUDE.md`参照）。
 
 ## 実装パターン
 
-- `Logit`/`LogitResults`（`Probit`/`ProbitResults`も同様）は`OLS`/`OlsResults`と同型（`data`/`y`/`x`/`options`を保持するだけのコンストラクタ、`fit()`呼び出し時に初めて`_lib.fit_logit`/`_lib.fit_probit`を呼ぶ。コンストラクタでは検証しない）。
+- `Logit`/`LogitResults`（`Probit`/`ProbitResults`も同様）は`OLS`/`OLSResults`と同型（`data`/`y`/`x`/`options`を保持するだけのコンストラクタ、`fit()`呼び出し時に初めて`_lib.fit_logit`/`_lib.fit_probit`を呼ぶ。コンストラクタでは検証しない）。
 - `params`/`std_errors`/`z_stats`/`p_values`は係数名→値の`dict[str, float]`（O(1)取り出し用）。行指向で欲しい場合は`coef_table()`。
-- `coef_table()`のキーは`OlsResults.coef_table()`と同じ形状だが、`t_stat`ではなく`z_stat`（Logit/Probitは正規分布ベースのz検定、`nonlinear-api-design.md`5章）。
+- `coef_table()`のキーは`OLSResults.coef_table()`と同じ形状だが、`t_stat`ではなく`z_stat`（Logit/Probitは正規分布ベースのz検定、`nonlinear-api-design.md`5章）。
 
 ## `marginal_effects()`/`pred_table()`のキー命名（混同注意）
 

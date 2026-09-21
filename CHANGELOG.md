@@ -5,6 +5,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- Renamed `IvOptions`/`IvResults` → `IVOptions`/`IVResults`, `FeOptions`/`FeResults` → `FEOptions`/`FEResults`, `ReOptions`/`ReResults` → `REOptions`/`REResults`, `OlsResults` → `OLSResults`, `WlsResults` → `WLSResults`, for naming consistency with the estimator classes (`IV`/`FE`/`RE`/`OLS`/`WLS`), which already used fully-uppercase acronyms (breaking change, permitted during the `0.x.x` pre-release period; #310)
+
 ## [0.6.0] - 2026-09-06
 
 Added Tobit (censored regression) to Phase 2 (generalized and discrete choice models).

@@ -10,7 +10,7 @@ use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
 use errors::{ComputationError, ValidationError};
-use iv::common::{IvOptions, IvResult};
+use iv::common::{IVOptions, IVResult};
 use linear::ols::{OLSOptions, OLSResult};
 use linear::wls::{WLSOptions, WLSResult};
 use nonlinear::common::MarginalEffectsResult;
@@ -19,8 +19,8 @@ use nonlinear::probit::{ProbitOptions, ProbitResult};
 use nonlinear::tobit::{
     CensoringFitCategoryResult, CensoringFitCheckResult, TobitOptions, TobitResult,
 };
-use panel::fe::{FeOptions, FeResult};
-use panel::re::{ReOptions, ReResult};
+use panel::fe::{FEOptions, FEResult};
+use panel::re::{REOptions, REResult};
 
 /// Entry point for OLS estimation.
 ///
@@ -154,7 +154,7 @@ fn fit_tobit(
 ///     Column names of the endogenous independent variables.
 /// instruments : list[str]
 ///     Column names of the excluded instruments (must not overlap with `x_exog`).
-/// options : IvOptions
+/// options : IVOptions
 ///     Estimation options. `options.method` selects "2sls" (the only method currently
 ///     implemented) or "gmm" (not yet implemented, raises `ValidationError`).
 #[pyfunction]
@@ -164,8 +164,8 @@ fn fit_iv(
     x_exog: Vec<String>,
     x_endog: Vec<String>,
     instruments: Vec<String>,
-    options: IvOptions,
-) -> PyResult<IvResult> {
+    options: IVOptions,
+) -> PyResult<IVResult> {
     iv::common::fit(data, y, x_exog, x_endog, instruments, &options)
 }
 
@@ -183,7 +183,7 @@ fn fit_iv(
 ///     column name.
 /// entity : str
 ///     Column name of the entity (individual/panel unit) identifier.
-/// options : FeOptions
+/// options : FEOptions
 ///     Estimation options.
 #[pyfunction]
 fn fit_fe(
@@ -191,8 +191,8 @@ fn fit_fe(
     y: String,
     x: Vec<String>,
     entity: String,
-    options: FeOptions,
-) -> PyResult<FeResult> {
+    options: FEOptions,
+) -> PyResult<FEResult> {
     panel::fe::fit(data, y, x, entity, &options)
 }
 
@@ -210,7 +210,7 @@ fn fit_fe(
 ///     column name.
 /// entity : str
 ///     Column name of the entity (individual/panel unit) identifier.
-/// options : ReOptions
+/// options : REOptions
 ///     Estimation options.
 #[pyfunction]
 fn fit_re(
@@ -218,8 +218,8 @@ fn fit_re(
     y: String,
     x: Vec<String>,
     entity: String,
-    options: ReOptions,
-) -> PyResult<ReResult> {
+    options: REOptions,
+) -> PyResult<REResult> {
     panel::re::fit(data, y, x, entity, &options)
 }
 
@@ -250,14 +250,14 @@ fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<CensoringFitCategoryResult>()?;
     m.add_class::<CensoringFitCheckResult>()?;
     m.add_function(wrap_pyfunction!(fit_iv, m)?)?;
-    m.add_class::<IvOptions>()?;
-    m.add_class::<IvResult>()?;
+    m.add_class::<IVOptions>()?;
+    m.add_class::<IVResult>()?;
     m.add_function(wrap_pyfunction!(fit_fe, m)?)?;
-    m.add_class::<FeOptions>()?;
-    m.add_class::<FeResult>()?;
+    m.add_class::<FEOptions>()?;
+    m.add_class::<FEResult>()?;
     m.add_function(wrap_pyfunction!(fit_re, m)?)?;
-    m.add_class::<ReOptions>()?;
-    m.add_class::<ReResult>()?;
+    m.add_class::<REOptions>()?;
+    m.add_class::<REResult>()?;
     m.add("ValidationError", m.py().get_type::<ValidationError>())?;
     m.add("ComputationError", m.py().get_type::<ComputationError>())?;
     Ok(())

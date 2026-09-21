@@ -197,7 +197,7 @@ pub enum PanelError {
 
     /// 2-way FE（entity + time FE）を要求したのに`time`列が指定されていない。
     ///
-    /// `time`は`FeOptions`内の`Option`フィールドで、2-way指定時のみ実質必須になる
+    /// `time`は`FEOptions`内の`Option`フィールドで、2-way指定時のみ実質必須になる
     /// 「条件付き必須」パターン（`panel-api-design.md`1.1節。`OLSOptions.cluster_col`が
     /// `cov_type="cluster"`のときだけ必須になるのと同型）。未指定時のバリデーション
     /// エラーとしてここで担保する。

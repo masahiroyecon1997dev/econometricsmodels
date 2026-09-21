@@ -13,7 +13,7 @@
 - **DGP**: REはFE用の合成データセットをそのまま再利用する既存方針（`benchmark/panel/references/linearmodels_ref.py`のモジュールdocstring「RE専用の合成データセット・凍結コードは追加していない」）に倣い、`generate_fe_dataset`を直接使う。
 - **`RandomEffects`の切片**: `linearmodels.RandomEffects`は明示的な定数列が無いと切片を推定しないため、`build_pandas_df`でMultiIndex構築に加え`pdf["const"] = 1.0`を追加する（計測区間の外）。
 - **cov_type**: classicalとhacの代表2点。classical/hc1/hc2/hc3/cluster/hacをn_entities=16,666・n_periods=6・k=5で実測した結果、hacが最重量（engine 0.4151s、classicalの0.2692sに対し+54%）だったため、FEと同じ組み合わせを採用した。
-- **既知の限界: cov_type間でハウスマン内部FEの構造も変わる**: `ReOptions.time`は「HACの時系列順序」と「ハウスマン検定用の内部FE呼び出しの1-way/2-way選択（`Some`なら2-way、`None`なら1-way）」を兼ねる（`engine_pybind/src/panel/re.rs`）。本スクリプトは`cov_type="hac"`のときのみ`time`を渡すため、classicalとhacの計測差には「cov_type自体の計算コスト差」に加え「内部ハウスマン用FEが1-way→2-wayに変わることによる追加コスト」が混入する（RE自身のAPI設計上不可避な交絡）。
+- **既知の限界: cov_type間でハウスマン内部FEの構造も変わる**: `REOptions.time`は「HACの時系列順序」と「ハウスマン検定用の内部FE呼び出しの1-way/2-way選択（`Some`なら2-way、`None`なら1-way）」を兼ねる（`engine_pybind/src/panel/re.rs`）。本スクリプトは`cov_type="hac"`のときのみ`time`を渡すため、classicalとhacの計測差には「cov_type自体の計算コスト差」に加え「内部ハウスマン用FEが1-way→2-wayに変わることによる追加コスト」が混入する（RE自身のAPI設計上不可避な交絡）。
 - **2-way軸なし**: REはv1で2-wayをスコープ外にしているため（`extra_methods=()`）、FEと異なりmethod軸は無い。
 - **計測範囲の対称性**: engine（`ReEstimator::fit`）は係数・標準誤差と同じ`.fit()`の中でパネル固有R²・F統計量まで常に一括計算する。linearmodelsの`PanelResults`は遅延評価プロパティのため、`.fit()`直後に`params`/`std_errors`/`tstats`/`pvalues`/`rsquared_within`/`rsquared_between`/`rsquared_overall`/`f_statistic.stat`へ明示アクセスして確定させる（`f_statistic`はcov_type非依存のhomoskedastic固定——FEの`f_statistic_robust`とは異なり、engineの`ReEstimator`のF統計量自体がcov_typeに連動しない独自定義のため）。`aic`/`bic`はlinearmodelsが提供しないため対称性を取る対象に含めない。
 - **スイープ軸**: n軸（k=5固定、n=1,000〜1,000,000）、k軸（n=10,000固定、k=5・20、classical/hac両方）。
@@ -59,7 +59,7 @@
 ## 既知の限界
 
 - **n=1,000,000での run-to-run 分散が大きい**: 2回のフルスイープでlinearmodelsのclassical/hacの大小関係が変わらないことは確認したが、絶対値は±20%程度変動した（classical 8.25s/10.21s）。計測は開発コンテナ上の少数回のスイープ（`repeats=3`の中央値）であり、大標本での環境ノイズ（メモリ確保・GC等）を排除しきれていない。
-- **cov_type間の比較に「ハウスマン内部FEの構造変化」という交絡が混入する**（上記「計測方法」参照）。RE自身のAPI設計（`ReOptions.time`がHAC時系列順序とハウスマン内部FEの1-way/2-way選択を兼ねる）に起因する不可避な交絡であり、回避策は無い。
+- **cov_type間の比較に「ハウスマン内部FEの構造変化」という交絡が混入する**（上記「計測方法」参照）。RE自身のAPI設計（`REOptions.time`がHAC時系列順序とハウスマン内部FEの1-way/2-way選択を兼ねる）に起因する不可避な交絡であり、回避策は無い。
 - その他は`ols.md`「既知の限界」と共通。
 
 ## 再現方法
@@ -75,5 +75,5 @@ uv run python -m performance.render_performance_summary \
 ## 今後の検討事項
 
 - **n=1,000,000でのlinearmodels classical/hacの逆転現象の原因調査**: 上記「考察」参照。`linearmodels`側の内部実装（`HomoskedasticCovariance` vs `DriscollKraay`）の違いを深掘りする価値があるが、engine側の性能には影響しないため優先度は低い。
-- **ハウスマン内部FE構造変化の交絡を除いた計測**: `ReOptions.time`を分離できるAPI変更（`FeOptions.time_col`のような独立フィールド）が将来入れば、cov_type単体の計測に切り替えられる。現状のAPI設計を変更する動機としては優先度が低い。
+- **ハウスマン内部FE構造変化の交絡を除いた計測**: `REOptions.time`を分離できるAPI変更（`FEOptions.time_col`のような独立フィールド）が将来入れば、cov_type単体の計測に切り替えられる。現状のAPI設計を変更する動機としては優先度が低い。
 - **releaseビルドでの再計測が前提**: 改善見込みの見積もりは、debugビルドの数値（誤り）ではなく本ドキュメントのreleaseビルド数値を基準にすること。

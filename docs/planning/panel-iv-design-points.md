@@ -17,7 +17,7 @@
   - 詳細: [`panel-api-design.md`](./specs/panel-api-design.md)1章、
     [`iv-api-design.md`](./specs/iv-api-design.md)1章
 - [x] モデル固有オプションの置き場所（`XxxOptions`構造体に含めるか、別構造体に分離するか）
-  - `FeOptions`/`ReOptions`/`IvOptions`という別々の`#[pyclass]`構造体に含める（`OLSOptions`/
+  - `FEOptions`/`REOptions`/`IVOptions`という別々の`#[pyclass]`構造体に含める（`OLSOptions`/
     `LogitOptions`の前例を踏襲）。内部実装上の共通化は1.4（#122）で別途検討。
 - [x] `weights`/`offset`の扱い（非線形モデルではv1見送り・Phase6再検討という判断を踏襲するか）
   - `offset`は線形モデルのため該当なし。`weights`は汎用オプションとしては見送り（Phase6再検討
@@ -34,7 +34,7 @@
   - IVの第一段階回帰結果は別メソッド（`marginal_effects()`分離方針を踏襲）。FE/REのパネル
     R²・REのハウスマン検定は`fit()`結果本体に含める。
 - [x] IV: 第一段階回帰結果の粒度（フルの回帰結果オブジェクトか、係数＋F統計量のみか）
-  - `first_stage() -> dict[str, OlsResults]`（内生変数名キー、既存`OlsResults`型を再利用）。
+  - `first_stage() -> dict[str, OLSResults]`（内生変数名キー、既存`OLSResults`型を再利用）。
     詳細: [`iv-api-design.md`](./specs/iv-api-design.md)2.2節
 - [x] FE/RE: R²の種類（within/between/overall）をどれだけ含めるか、命名規則
   - `r_squared_within`/`r_squared_between`/`r_squared_overall`の3種のみ（bareの`r_squared`は
@@ -128,7 +128,7 @@
   - `θ_i = 1 - sqrt(σ_ε² / (T_i・σ_u² + σ_ε²))`。REはentity方向のみ（2-wayスコープ外）なので
     FEの1-wayと同様、不均衡パネルもv1から無条件でサポート。
 - [x] ハウスマン検定の実装場所・インターフェース（1.2参照）
-  - `RE.fit()`内で自動計算し`ReResult`にのみ含める（FEには追加しない）。計算部分
+  - `RE.fit()`内で自動計算し`REResult`にのみ含める（FEには追加しない）。計算部分
     （カイ二乗統計量）は`hausman_statistic`として`engine/src/panel/common.rs`に共通関数化。
     linearmodelsに専用実装が無いことをソースコードで確認済み（#123の例外判断の裏付け）。
 - [x] FEとの内部設計共有範囲（within/between変換ロジックの共通化）
@@ -155,7 +155,7 @@
     特別分岐は不要。
 - [x] 弱操作変数診断：第一段階F統計量（Stock-Yogo基準）を結果に含めるか
   - x_exogを直交化した「部分F統計量」として専用計算し`fit()`の結果本体に含める（単純に
-    `first_stage()`のOlsResults.f_statisticを流用すると不正確になるため注意）。Stock-Yogo
+    `first_stage()`のOLSResults.f_statisticを流用すると不正確になるため注意）。Stock-Yogo
     臨界値照合・複数内生変数の同時検定はv1スコープ外。
 - [x] 過剰識別検定：Sargan検定（2SLS）／Hansen J検定（GMM）を含めるか
   - `fit()`の結果本体に含める。自由度`len(instruments) - len(x_endog)`、丁度識別時は`None`。

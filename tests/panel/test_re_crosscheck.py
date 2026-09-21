@@ -12,7 +12,7 @@ fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmod
   モジュールdoc参照）。
 - **ハウスマン検定**（`hausman_statistic`/`hausman_p_value`/`hausman_df`）:
   `linearmodels`に専用実装が無いため、`plm::phtest`が唯一の参照実装
-  （panel-api-design.md 5.3節）。v1は1-way（`ReOptions.time`未指定の内部FE
+  （panel-api-design.md 5.3節）。v1は1-way（`REOptions.time`未指定の内部FE
   呼び出し）限定で検証する（`generate_re_fixtures.py`の`_meta.note`・
   `generate_re_crosscheck_fixtures.py`モジュールdoc参照）。
 
@@ -60,7 +60,7 @@ from _assertions import assert_close, assert_dict_close
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
 from _tolerances import TOLERANCES
-from econometricsmodels import RE, ReOptions
+from econometricsmodels import RE, REOptions
 
 from benchmark.common import WAGEPAN_ENTITY, WAGEPAN_X, WAGEPAN_Y
 from benchmark.panel.fixtures.generate_fe_fixtures import NUMERIC_SCENARIOS
@@ -150,7 +150,7 @@ def _check_result(
 def test_synthetic_matches_plm(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
-    options = ReOptions(cov_type=cov_type)
+    options = REOptions(cov_type=cov_type)
     res = RE(df, y="y", x=x_cols, entity="entity", options=options).fit()
 
     _check_result(
@@ -167,7 +167,7 @@ def test_synthetic_matches_plm(crosscheck, scenario, cov_type):
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 def test_wagepan_matches_plm(crosscheck, cov_type):
     df = load_wooldridge_dataset("wagepan")
-    options = ReOptions(cov_type=cov_type)
+    options = REOptions(cov_type=cov_type)
     res = RE(
         df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
     ).fit()

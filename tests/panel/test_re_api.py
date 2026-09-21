@@ -1,7 +1,7 @@
 """RE の成功パスの構造・API・オプション反映の検証。
 
 確定済み設計（`docs/planning/specs/panel-api-design.md`）どおりの結果型・
-辞書キー・ラベルになっていること、`ReOptions`の各フィールドがengine_pybind
+辞書キー・ラベルになっていること、`REOptions`の各フィールドがengine_pybind
 経由で反映されることを確認する。`ValidationError`/`ComputationError`パスは
 `test_re_validation.py`、主リファレンス（linearmodels）との数値照合は
 `test_re_reference.py`、Rクロスチェックは`test_re_crosscheck.py`（`test_fe_*.py`
@@ -19,18 +19,18 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _re_helpers import our_fit_re
-from econometricsmodels import RE, ReOptions, ReResults
+from econometricsmodels import RE, REOptions, REResults
 
 # ── 成功パス・結果型 ──────────────────────────────────────────────
 
 
 def test_fit_succeeds_and_returns_re_results(fe_dataset):
     res = our_fit_re(fe_dataset)
-    assert isinstance(res, ReResults)
+    assert isinstance(res, REResults)
 
 
 def test_default_options_use_cluster_cov_type(fe_dataset):
-    """`options`省略時は`ReOptions()`の既定値（cov_type="cluster"、entity
+    """`options`省略時は`REOptions()`の既定値（cov_type="cluster"、entity
     単位）が使われる（panel-api-design.md 3.2節、FEと同じデフォルト）。
     """
     res = our_fit_re(fe_dataset)
@@ -129,7 +129,7 @@ def test_df_resid_and_df_model(fe_dataset):
 
 
 def test_hausman_present_for_one_way(fe_dataset):
-    """既定（`ReOptions.time`未指定、内部FE比較が1-way）ではハウスマン検定が
+    """既定（`REOptions.time`未指定、内部FE比較が1-way）ではハウスマン検定が
     計算される。
     """
     res = our_fit_re(fe_dataset)
@@ -139,7 +139,7 @@ def test_hausman_present_for_one_way(fe_dataset):
 
 
 def test_hausman_present_for_two_way_balanced_panel(fe_dataset):
-    """`ReOptions.time`設定時（ハウスマン検定専用の内部FE比較が2-way）でも、
+    """`REOptions.time`設定時（ハウスマン検定専用の内部FE比較が2-way）でも、
     バランスパネル（singleton等の問題が無い`fe_dataset`）では2-way内部FE
     比較自体が成功し、`hausman_*`が非`None`になる（`test_hausman_none_for_
     singleton_time_two_way`の対照——2-way比較の「失敗パス」だけでなく
@@ -148,7 +148,7 @@ def test_hausman_present_for_two_way_balanced_panel(fe_dataset):
     （`generate_re_fixtures.py`の`_meta.note`参照）のため、型・自由度のみ
     確認する。
     """
-    options = ReOptions(time="time")
+    options = REOptions(time="time")
     res = our_fit_re(fe_dataset, options=options)
 
     assert isinstance(res.hausman_statistic, float)
@@ -157,10 +157,10 @@ def test_hausman_present_for_two_way_balanced_panel(fe_dataset):
 
 
 def test_hausman_none_for_singleton_time_two_way():
-    """`ReOptions.time`設定時（ハウスマン検定専用の内部FE比較が2-way）、
+    """`REOptions.time`設定時（ハウスマン検定専用の内部FE比較が2-way）、
     その2-way FE比較自体がsingleton timeで失敗すると`hausman_*`が`None`に
     フォールバックする一方、RE本体の結果は正常に返る
-    （`fe_singleton_time.csv`、`ReResults`クラスdocstring参照）。
+    （`fe_singleton_time.csv`、`REResults`クラスdocstring参照）。
 
     singleton **entity**（`test_re_validation.py::test_singleton_entity_
     raises`）とは対照的に、singleton **time**はσ_ε²推定用の内部1-way FE
@@ -168,7 +168,7 @@ def test_hausman_none_for_singleton_time_two_way():
     （モジュールdoc参照）。
     """
     df = pl.read_csv(DATA_DIR / "fe_singleton_time.csv")
-    options = ReOptions(time="time")
+    options = REOptions(time="time")
     res = RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
     assert res.hausman_statistic is None
@@ -198,14 +198,14 @@ def test_cov_type_is_case_insensitive(fe_dataset, cov_type, expected_label):
     （`test_re_validation.py::test_hac_requires_time_raises`と対照）。
     """
     kwargs = {"time": "time"} if expected_label == "hac" else {}
-    options = ReOptions(cov_type=cov_type, **kwargs)
+    options = REOptions(cov_type=cov_type, **kwargs)
     res = our_fit_re(fe_dataset, options=options)
     assert res.cov_type == expected_label
 
 
 def test_confidence_level_affects_conf_int_width(fe_dataset):
-    narrow = our_fit_re(fe_dataset, options=ReOptions(confidence_level=0.80))
-    wide = our_fit_re(fe_dataset, options=ReOptions(confidence_level=0.99))
+    narrow = our_fit_re(fe_dataset, options=REOptions(confidence_level=0.80))
+    wide = our_fit_re(fe_dataset, options=REOptions(confidence_level=0.99))
 
     for name in narrow.param_names:
         narrow_lo, narrow_hi = narrow.conf_int[name]
@@ -214,13 +214,13 @@ def test_confidence_level_affects_conf_int_width(fe_dataset):
 
 
 def test_time_option_does_not_affect_coefficients(fe_dataset):
-    """`ReOptions.time`はハウスマン検定用の内部FE比較の1-way/2-way選択と
+    """`REOptions.time`はハウスマン検定用の内部FE比較の1-way/2-way選択と
     HAC時系列順序のみに使われ、RE自身の準偏差変換（entity方向のみ）には
     影響しない（`engine/src/panel/CLAUDE.md`「RE」節参照。FEの`time`が
     `df_model`を変えるのとは対照的）。
     """
     one_way = our_fit_re(fe_dataset)
-    two_way = our_fit_re(fe_dataset, options=ReOptions(time="time"))
+    two_way = our_fit_re(fe_dataset, options=REOptions(time="time"))
 
     for name in one_way.param_names:
         assert one_way.params[name] == pytest.approx(two_way.params[name])
@@ -235,10 +235,10 @@ def test_cluster_col_defaults_to_entity(fe_dataset):
     使う（3.2節）。明示的に`cluster_col="entity"`を渡した場合と同じ結果に
     なることで確認する。
     """
-    default_res = our_fit_re(fe_dataset, options=ReOptions(cov_type="cluster"))
+    default_res = our_fit_re(fe_dataset, options=REOptions(cov_type="cluster"))
     explicit_res = our_fit_re(
         fe_dataset,
-        options=ReOptions(cov_type="cluster", cluster_col="entity"),
+        options=REOptions(cov_type="cluster", cluster_col="entity"),
     )
 
     for name in default_res.param_names:
@@ -249,10 +249,10 @@ def test_cluster_col_defaults_to_entity(fe_dataset):
 
 def test_dk_bandwidth_zero_succeeds(fe_dataset):
     """`dk_bandwidth=0`（ラグ項なし）も有効な範囲`[0, t)`として受理される
-    （`FeOptions`の同名テストと同じ、engine/src/panel/CLAUDE.md
+    （`FEOptions`の同名テストと同じ、engine/src/panel/CLAUDE.md
     「Driscoll-Kraay型パネルHAC対応」参照）。
     """
-    options = ReOptions(cov_type="hac", time="time", dk_bandwidth=0)
+    options = REOptions(cov_type="hac", time="time", dk_bandwidth=0)
     res = our_fit_re(fe_dataset, options=options)
     assert all(se > 0.0 for se in res.std_errors.values())
 
@@ -273,14 +273,14 @@ def test_cluster_se_exceeds_classical_under_serial_correlation():
         y="y",
         x=["x1", "x2"],
         entity="entity",
-        options=ReOptions(cov_type="classical"),
+        options=REOptions(cov_type="classical"),
     ).fit()
     clustered = RE(
         df,
         y="y",
         x=["x1", "x2"],
         entity="entity",
-        options=ReOptions(cov_type="cluster"),
+        options=REOptions(cov_type="cluster"),
     ).fit()
 
     classical_variance_sum = sum(se**2 for se in classical.std_errors.values())

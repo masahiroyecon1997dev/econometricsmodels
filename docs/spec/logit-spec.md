@@ -248,7 +248,7 @@ Issue #307）。
   `augment()`と同型、Issue #295/#322項目4）。列名衝突（ソースデータに既に`"probability"`列が
   ある場合）は`ValidationError`（`engine_pybind::validation::validate_no_existing_column`）。
   `LogitResult`は`fit()`時の元DataFrameを非公開`training_data: DataFrame`として保持する
-  （`IvResult.first_stage()`のような単一DataFrameを持たない構築経路が無いため、OLSと異なり
+  （`IVResult.first_stage()`のような単一DataFrameを持たない構築経路が無いため、OLSと異なり
   `Option`にせず常に`DataFrame`、`WLSResult`と同じ設計）。
 
 ### 3.7 engine_pybind: エラー変換

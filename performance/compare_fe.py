@@ -143,15 +143,15 @@ def _build_pandas_df(df: pl.DataFrame) -> pd.DataFrame:
 
 
 def _fit_once_engine(ctx: FitContext):
-    from econometricsmodels import FE, FeOptions
+    from econometricsmodels import FE, FEOptions
 
     two_way = ctx.method == "two_way"
     if ctx.cov_type == "classical":
-        options = FeOptions(
+        options = FEOptions(
             cov_type="classical", time=_TIME_COL if two_way else None
         )
     elif ctx.cov_type == "hac":
-        options = FeOptions(
+        options = FEOptions(
             cov_type="hac",
             time=_TIME_COL if two_way else None,
             time_col=_TIME_COL,

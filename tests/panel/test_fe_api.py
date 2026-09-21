@@ -1,7 +1,7 @@
 """FE の成功パスの構造・API・オプション反映の検証。
 
 確定済み設計（`docs/planning/specs/panel-api-design.md`）どおりの結果型・
-辞書キー・ラベルになっていること、`FeOptions`の各フィールドが
+辞書キー・ラベルになっていること、`FEOptions`の各フィールドが
 engine_pybind経由で反映されることを確認する。`ValidationError`/
 `ComputationError`パスは`test_fe_validation.py`、主リファレンス
 （linearmodels）との数値照合は`test_fe_reference.py`、Rクロスチェックは
@@ -17,18 +17,18 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _fe_helpers import our_fit
-from econometricsmodels import FE, FeOptions, FeResults
+from econometricsmodels import FE, FEOptions, FEResults
 
 # ── 成功パス・結果型 ──────────────────────────────────────────────
 
 
 def test_fit_succeeds_and_returns_fe_results(fe_dataset):
     res = our_fit(fe_dataset)
-    assert isinstance(res, FeResults)
+    assert isinstance(res, FEResults)
 
 
 def test_default_options_use_cluster_cov_type_one_way(fe_dataset):
-    """`options`省略時は`FeOptions()`の既定値（cov_type="cluster"、entity
+    """`options`省略時は`FEOptions()`の既定値（cov_type="cluster"、entity
     単位・1-way）が使われる（panel-api-design.md 3.2節）。
     """
     res = our_fit(fe_dataset)
@@ -118,7 +118,7 @@ def test_fixed_effects_two_way_structure(fe_dataset):
     """2-way（`time`指定）はトップレベルキー"entity"/"time"を持つ
     `dict[str, dict[str, float]]`。
     """
-    res = our_fit(fe_dataset, options=FeOptions(time="time"))
+    res = our_fit(fe_dataset, options=FEOptions(time="time"))
     effects = res.fixed_effects()
 
     assert set(effects.keys()) == {"entity", "time"}
@@ -153,14 +153,14 @@ def test_cov_type_is_case_insensitive(fe_dataset, cov_type, expected_label):
     `test_hac_requires_time_raises`と対照）。
     """
     kwargs = {"time_col": "time"} if expected_label == "hac" else {}
-    options = FeOptions(cov_type=cov_type, **kwargs)
+    options = FEOptions(cov_type=cov_type, **kwargs)
     res = our_fit(fe_dataset, options=options)
     assert res.cov_type == expected_label
 
 
 def test_confidence_level_affects_conf_int_width(fe_dataset):
-    narrow = our_fit(fe_dataset, options=FeOptions(confidence_level=0.80))
-    wide = our_fit(fe_dataset, options=FeOptions(confidence_level=0.99))
+    narrow = our_fit(fe_dataset, options=FEOptions(confidence_level=0.80))
+    wide = our_fit(fe_dataset, options=FEOptions(confidence_level=0.99))
 
     for name in narrow.param_names:
         narrow_lo, narrow_hi = narrow.conf_int[name]
@@ -177,7 +177,7 @@ def test_time_option_switches_one_way_two_way(fe_dataset):
     n_periods = fe_dataset["time"].n_unique()
 
     one_way = our_fit(fe_dataset)
-    two_way = our_fit(fe_dataset, options=FeOptions(time="time"))
+    two_way = our_fit(fe_dataset, options=FEOptions(time="time"))
 
     assert one_way.df_model == n_entities + 2
     assert two_way.df_model == n_entities + n_periods - 1 + 2
@@ -188,10 +188,10 @@ def test_cluster_col_defaults_to_entity(fe_dataset):
     使う（3.2節）。明示的に`cluster_col="entity"`を渡した場合と同じ結果に
     なることで確認する。
     """
-    default_res = our_fit(fe_dataset, options=FeOptions(cov_type="cluster"))
+    default_res = our_fit(fe_dataset, options=FEOptions(cov_type="cluster"))
     explicit_res = our_fit(
         fe_dataset,
-        options=FeOptions(cov_type="cluster", cluster_col="entity"),
+        options=FEOptions(cov_type="cluster", cluster_col="entity"),
     )
 
     for name in default_res.param_names:
@@ -204,7 +204,7 @@ def test_dk_bandwidth_zero_succeeds(fe_dataset):
     """`dk_bandwidth=0`（ラグ項なし）も有効な範囲`[0, t)`として受理される
     （engine/src/panel/CLAUDE.md「Driscoll-Kraay型パネルHAC対応」参照）。
     """
-    options = FeOptions(cov_type="hac", time="time", dk_bandwidth=0)
+    options = FEOptions(cov_type="hac", time="time", dk_bandwidth=0)
     res = our_fit(fe_dataset, options=options)
     assert all(se > 0.0 for se in res.std_errors.values())
 
@@ -229,14 +229,14 @@ def test_cluster_se_exceeds_classical_under_serial_correlation():
         y="y",
         x=["x1", "x2"],
         entity="entity",
-        options=FeOptions(cov_type="classical"),
+        options=FEOptions(cov_type="classical"),
     ).fit()
     clustered = FE(
         df,
         y="y",
         x=["x1", "x2"],
         entity="entity",
-        options=FeOptions(cov_type="cluster"),
+        options=FEOptions(cov_type="cluster"),
     ).fit()
 
     classical_variance_sum = sum(se**2 for se in classical.std_errors.values())

@@ -34,7 +34,7 @@ import pytest
 from _constants import DATA_DIR
 from _error_messages import escaped
 from _fe_helpers import our_fit
-from econometricsmodels import FE, ComputationError, FeOptions, ValidationError
+from econometricsmodels import FE, ComputationError, FEOptions, ValidationError
 
 # `test_scale_variance_raises_computation_error`用（OLS/WLS/IVの同名テストと
 # 同じ全cov_type網羅、hc0はFE非対応のため除く）。
@@ -91,7 +91,7 @@ def test_entity_overlaps_x_raises(fe_dataset):
 
 def test_y_overlaps_time_raises(fe_dataset):
     """2-way限定（`time`が設定されているときのみ`time`ロールが存在する）。"""
-    options = FeOptions(time="y")
+    options = FEOptions(time="y")
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -107,7 +107,7 @@ def test_y_overlaps_time_raises(fe_dataset):
 
 
 def test_entity_overlaps_time_raises(fe_dataset):
-    options = FeOptions(time="entity")
+    options = FEOptions(time="entity")
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -123,7 +123,7 @@ def test_entity_overlaps_time_raises(fe_dataset):
 
 
 def test_time_overlaps_x_raises(fe_dataset):
-    options = FeOptions(time="time")
+    options = FEOptions(time="time")
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -187,7 +187,7 @@ def test_missing_entity_column_raises(fe_dataset):
 
 
 def test_missing_time_column_raises(fe_dataset):
-    options = FeOptions(time="nonexistent")
+    options = FEOptions(time="nonexistent")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
@@ -257,7 +257,7 @@ def test_group_key_column_null_values_raise(bad_col):
     }
     values[bad_col][1] = None
     df = pl.DataFrame(values)
-    options = FeOptions(time="time")
+    options = FEOptions(time="time")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name=bad_col),
@@ -277,7 +277,7 @@ def test_cluster_col_null_values_raise():
             "state": ["x", None, "y", "y", "x", "y"],
         }
     )
-    options = FeOptions(cov_type="cluster", cluster_col="state")
+    options = FEOptions(cov_type="cluster", cluster_col="state")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name="state"),
@@ -343,7 +343,7 @@ def test_insufficient_degrees_of_freedom_two_way_raises():
             "time": times,
         }
     )
-    options = FeOptions(time="time")
+    options = FEOptions(time="time")
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -387,7 +387,7 @@ def test_singleton_time_raises():
     `singleton_time`コメント参照）。
     """
     df = pl.read_csv(DATA_DIR / "fe_singleton_time.csv")
-    options = FeOptions(time="time")
+    options = FEOptions(time="time")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.SINGLETON_GROUP, dimension="time", group_id="t5"),
@@ -400,7 +400,7 @@ def test_unbalanced_two_way_raises():
     40×6=240）は2-way FE要求時に`PanelError::UnbalancedPanelForTwoWay`。
     """
     df = pl.read_csv(DATA_DIR / "fe_unbalanced_two_way.csv")
-    options = FeOptions(time="time")
+    options = FEOptions(time="time")
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -434,7 +434,7 @@ def test_zero_variance_after_demeaning_raises():
 
 @pytest.mark.parametrize("cov_type", ["invalid", ""])
 def test_unknown_cov_type_raises(fe_dataset, cov_type):
-    options = FeOptions(cov_type=cov_type)
+    options = FEOptions(cov_type=cov_type)
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.UNKNOWN_COV_TYPE_FE, other=cov_type),
@@ -447,7 +447,7 @@ def test_hc0_not_supported_raises(fe_dataset):
     （`UNKNOWN_COV_TYPE_FE`ではなく`HC0_NOT_SUPPORTED_FE`）で弾く
     （`engine_pybind/src/panel/fe.rs::parse_fe_cov_type`）。
     """
-    options = FeOptions(cov_type="hc0")
+    options = FEOptions(cov_type="hc0")
     with pytest.raises(
         ValidationError, match=escaped(msgs.HC0_NOT_SUPPORTED_FE)
     ):
@@ -456,7 +456,7 @@ def test_hc0_not_supported_raises(fe_dataset):
 
 @pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])
 def test_invalid_confidence_level_raises(fe_dataset, confidence_level):
-    options = FeOptions(confidence_level=confidence_level)
+    options = FEOptions(confidence_level=confidence_level)
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -471,7 +471,7 @@ def test_hac_requires_time_raises(fe_dataset):
     """1-way（`time`未指定）で`cov_type="hac"`かつ`time_col`も未指定だと
     `PanelError::HacRequiresTime`。
     """
-    options = FeOptions(cov_type="hac")
+    options = FEOptions(cov_type="hac")
     with pytest.raises(ValidationError, match=escaped(msgs.HAC_REQUIRES_TIME)):
         our_fit(fe_dataset, options=options)
 
@@ -479,7 +479,7 @@ def test_hac_requires_time_raises(fe_dataset):
 @pytest.mark.parametrize("dk_bandwidth", [-1, 6])  # t=6（fe_datasetの時点数）
 def test_invalid_hac_bandwidth_raises(fe_dataset, dk_bandwidth):
     """`dk_bandwidth`は`[0, t)`の範囲外（`t`=時点数、上限は`>=t`で無効）。"""
-    options = FeOptions(
+    options = FEOptions(
         cov_type="hac", time_col="time", dk_bandwidth=dk_bandwidth
     )
     with pytest.raises(
@@ -490,7 +490,7 @@ def test_invalid_hac_bandwidth_raises(fe_dataset, dk_bandwidth):
 
 
 def test_cluster_col_nonexistent_column_raises(fe_dataset):
-    options = FeOptions(cov_type="cluster", cluster_col="does_not_exist")
+    options = FEOptions(cov_type="cluster", cluster_col="does_not_exist")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
@@ -501,7 +501,7 @@ def test_cluster_col_nonexistent_column_raises(fe_dataset):
 def test_insufficient_clusters_raises(fe_dataset):
     """クラスターが1種類しかない場合`CommonError::InsufficientClusters`。"""
     df = fe_dataset.with_columns(pl.lit(0).alias("single_cluster"))
-    options = FeOptions(cov_type="cluster", cluster_col="single_cluster")
+    options = FEOptions(cov_type="cluster", cluster_col="single_cluster")
     with pytest.raises(
         ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
     ):
@@ -528,7 +528,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error():
             "cluster_group": ["1", "1", "1", "2", "2", "2"],
         }
     )
-    options = FeOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = FEOptions(cov_type="cluster", cluster_col="cluster_group")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=2),
@@ -566,7 +566,7 @@ def test_scale_variance_raises_computation_error(fe_dataset, cov_type):
     df = fe_dataset.with_columns(
         (pl.col("x1") * 1e6).alias("x1"), (pl.col("x2") * 1e-3).alias("x2")
     )
-    options = FeOptions(cov_type=cov_type)
+    options = FEOptions(cov_type=cov_type)
     with pytest.raises(ComputationError):
         FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 

@@ -7,7 +7,7 @@ WLS（Weighted Least Squares）の確定済み仕様。`engine/src/linear/wls.rs
 
 ## 1. API引数
 
-3層構成: `WLS(data, y, x, weight, options).fit() -> WlsResults`（python_package）→
+3層構成: `WLS(data, y, x, weight, options).fit() -> WLSResults`（python_package）→
 `fit_wls(data, y, x, weight, options) -> WLSResult`（engine_pybind）→
 `OlsInput::from_columns_weighted` + 既存`OlsEstimator::fit`（engine、無変更で再利用）。
 
@@ -22,7 +22,7 @@ WLS（Weighted Least Squares）の確定済み仕様。`engine/src/linear/wls.rs
   ことと、将来WLS固有のオプションが必要になった際に`OLSOptions`/OLS利用者へ影響を与えずに
   拡張できるようにするため、独立型に変更した。このフィールド重複自体は意図的に共通base
   構造体へ切り出さない（PyO3の`#[pyclass]`コンストラクタがフラットなkwargs surface前提の
-  ため。`IvOptions`が`OLSOptions`と同種のフィールドを独立再定義している既存precedentとも
+  ため。`IVOptions`が`OLSOptions`と同種のフィールドを独立再定義している既存precedentとも
   一貫している。`engine_pybind/src/linear/CLAUDE.md`参照）。
 - 重みはanalytic weight（分散の逆数に比例、正規化不要）。frequency weight/probability weightは
   対象外。
@@ -123,7 +123,7 @@ $$
 
 ### 3.5 `predict()`（Issue #132）
 
-`WlsResults.predict(new_data: pl.DataFrame | None = None) -> list[dict[str, float]]`。
+`WLSResults.predict(new_data: pl.DataFrame | None = None) -> list[dict[str, float]]`。
 OLSの`predict()`（`ols-spec.md`「predict()」）と完全に同じ設計・シグネチャを適用する。
 
 - **重みは予測値の計算に一切関与しない**。「学習データに対する重み付き予測値」という概念自体が
@@ -143,10 +143,10 @@ OLSの`predict()`（`ols-spec.md`「predict()」）と完全に同じ設計・�
 
 ### 3.6 `augment()`（Issue #295）
 
-`WlsResults.augment(new_data: pl.DataFrame | None = None) -> pl.DataFrame`。
+`WLSResults.augment(new_data: pl.DataFrame | None = None) -> pl.DataFrame`。
 OLSの`augment()`（`ols-spec.md`「augment()」）と完全に同じ設計・シグネチャを適用する。
 `predict()`と同様、重みは計算に一切関与しない。`WLSResult`（Rust）は`fit()`時の元DataFrameを
-`training_data: DataFrame`として非公開保持する（`OLSResult`と異なり`IvResult.first_stage()`の
+`training_data: DataFrame`として非公開保持する（`OLSResult`と異なり`IVResult.first_stage()`の
 ような別経路の構築元が無いため`Option`にせず常に保持する）。
 
 ### 3.7 テスト

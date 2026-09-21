@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import polars as pl
-from econometricsmodels import RE, ReOptions, ReResults
+from econometricsmodels import RE, REOptions, REResults
 
 
 def our_fit_re(
@@ -14,8 +14,8 @@ def our_fit_re(
     *,
     x: list[str] | None = None,
     entity: str = "entity",
-    options: ReOptions | None = None,
-) -> ReResults:
+    options: REOptions | None = None,
+) -> REResults:
     """既定は`x=["x1", "x2"], entity="entity"`（`_fe_helpers.our_fit`と同じ既定、
     `benchmark/panel/datasets.py`が生成する列構成。RE専用の合成データセットは
     無く`fe_*.csv`を再利用するため列構成もFEと共通、`benchmark/panel/

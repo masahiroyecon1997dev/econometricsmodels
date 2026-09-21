@@ -8,17 +8,17 @@ column-name arguments, `x` as a list, an options object for estimation
 settings (CLAUDE.md section 2, `.claude/rules/python-style.md`
 "設計方針との整合性", `docs/planning/specs/panel-api-design.md` section 1).
 
-`FeOptions` is re-exported as-is from `_lib` (not redefined as a
-separate class; same policy as `OLSOptions`/`IvOptions`).
+`FEOptions` is re-exported as-is from `_lib` (not redefined as a
+separate class; same policy as `OLSOptions`/`IVOptions`).
 
 `fixed_effects()` (the fixed effects themselves, `α_i`/`γ_t`) is
-provided as a separate method rather than a field on `FeResults`
+provided as a separate method rather than a field on `FEResults`
 (`docs/planning/specs/panel-api-design.md` section 6.6, the same
 "additional results are a separate method" policy as IV's
 `first_stage()`).
 
 `summary()` is not implemented (structured-data-only output policy; see
-the `OlsResults`/`IvResults` precedent).
+the `OLSResults`/`IVResults` precedent).
 """
 
 from __future__ import annotations
@@ -26,16 +26,16 @@ from __future__ import annotations
 import polars as pl
 
 from .. import _lib
-from .._lib import FeOptions
+from .._lib import FEOptions
 
-__all__ = ["FE", "FeOptions", "FeResults"]
+__all__ = ["FE", "FEOptions", "FEResults"]
 
 
 class FE:
     """Fixed effects (within) panel regression estimator.
 
     Supports one-way (entity) and two-way (entity + time) fixed
-    effects, selected via `FeOptions.time` (`docs/planning/specs/
+    effects, selected via `FEOptions.time` (`docs/planning/specs/
     panel-api-design.md` section 6.2).
 
     Args:
@@ -47,7 +47,7 @@ class FE:
             contain at least one column name.
         entity: Column name of the entity (individual/panel unit)
             identifier.
-        options: Estimation options. Defaults to `FeOptions()`
+        options: Estimation options. Defaults to `FEOptions()`
             (`cov_type="cluster"` on `entity`, one-way,
             confidence_level=0.95) when omitted.
 
@@ -71,15 +71,15 @@ class FE:
         y: str,
         x: list[str],
         entity: str,
-        options: FeOptions | None = None,
+        options: FEOptions | None = None,
     ) -> None:
         self._data = data
         self._y = y
         self._x = x
         self._entity = entity
-        self._options = options if options is not None else FeOptions()
+        self._options = options if options is not None else FEOptions()
 
-    def fit(self) -> FeResults:
+    def fit(self) -> FEResults:
         """Estimate the FE model.
 
         Returns:
@@ -102,10 +102,10 @@ class FE:
         raw = _lib.fit_fe(
             self._data, self._y, self._x, self._entity, self._options
         )
-        return FeResults(raw)
+        return FEResults(raw)
 
 
-class FeResults:
+class FEResults:
     """FE estimation results.
 
     Array-valued properties (`params`, `std_errors`, etc.) are exposed
@@ -118,14 +118,14 @@ class FeResults:
 
     Args:
         raw: The estimation result object returned by `_lib.fit_fe`
-            (`_lib.FeResult`).
+            (`_lib.FEResult`).
 
     Note:
         Users normally do not construct this directly; it is returned
         by `FE.fit()`.
     """
 
-    def __init__(self, raw: _lib.FeResult) -> None:
+    def __init__(self, raw: _lib.FEResult) -> None:
         self._raw = raw
 
     @property
@@ -249,7 +249,7 @@ class FeResults:
         """Row-oriented summary table of the coefficients.
 
         Shaped to be usable almost as-is in a REST API response (same
-        policy as `OlsResults.coef_table()`). Returned as `list[dict]`
+        policy as `OLSResults.coef_table()`). Returned as `list[dict]`
         rather than a polars DataFrame, per the project's policy of
         not using DataFrames for the coefficient table itself.
 
@@ -288,7 +288,7 @@ class FeResults:
         One-way: `dict[str, float]` keyed by entity id. Two-way:
         `dict[str, dict[str, float]]` with top-level keys `"entity"`/
         `"time"`. See `docs/planning/specs/panel-api-design.md`
-        section 6.6 and `_lib.FeResult.fixed_effects`'s docstring for
+        section 6.6 and `_lib.FEResult.fixed_effects`'s docstring for
         the exact formula, including the two-way normalization
         convention (which does not always numerically match
         `fixest::fixef()`).

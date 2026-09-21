@@ -18,7 +18,7 @@ import polars as pl
 from .. import _lib
 from .._lib import OLSOptions
 
-__all__ = ["OLS", "OLSOptions", "OlsResults"]
+__all__ = ["OLS", "OLSOptions", "OLSResults"]
 
 
 class OLS:
@@ -53,7 +53,7 @@ class OLS:
         self._x = x
         self._options = options if options is not None else OLSOptions()
 
-    def fit(self) -> OlsResults:
+    def fit(self) -> OLSResults:
         """Estimate the OLS model.
 
         Returns:
@@ -70,10 +70,10 @@ class OLS:
                 subclass of `RuntimeError`.
         """
         raw = _lib.fit_ols(self._data, self._y, self._x, self._options)
-        return OlsResults(raw)
+        return OLSResults(raw)
 
 
-class OlsResults:
+class OLSResults:
     """OLS estimation results.
 
     Array-valued properties (`params`, `std_errors`, etc.) are exposed
@@ -275,7 +275,7 @@ class OlsResults:
                 otherwise be silently overwritten). Also raised for
                 `new_data=None` when this result has no retained
                 training data (currently only possible for the
-                `OlsResults` returned by `IvResult.first_stage()`,
+                `OLSResults` returned by `IVResult.first_stage()`,
                 which has no single source DataFrame to attach a
                 column to; calling `augment(new_data)` with an
                 explicit `new_data` still works normally in that case).

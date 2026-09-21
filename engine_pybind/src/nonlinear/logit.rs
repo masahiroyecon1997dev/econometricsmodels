@@ -245,7 +245,7 @@ pub struct LogitResult {
     /// The original polars DataFrame passed to `fit()`, cached for
     /// `augment(new_data=None)` (Issue #322項目4). A cheap clone (polars columns are
     /// internally reference-counted). `LogitResult` is only ever built from this
-    /// file's `fit()` (unlike `OLSResult`, shared with `IvResult.first_stage()`), so
+    /// file's `fit()` (unlike `OLSResult`, shared with `IVResult.first_stage()`), so
     /// this is never absent (`WLSResult`と同じ理由、`DataFrame`のまま`Option`にしない)。
     training_data: DataFrame,
 }

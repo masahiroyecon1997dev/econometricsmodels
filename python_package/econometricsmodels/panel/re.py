@@ -8,16 +8,16 @@ column-name arguments, `x` as a list, an options object for estimation
 settings (CLAUDE.md section 2, `.claude/rules/python-style.md`
 "設計方針との整合性", `docs/planning/specs/panel-api-design.md` section 1).
 
-`ReOptions` is re-exported as-is from `_lib` (not redefined as a
-separate class; same policy as `OLSOptions`/`IvOptions`/`FeOptions`).
+`REOptions` is re-exported as-is from `_lib` (not redefined as a
+separate class; same policy as `OLSOptions`/`IVOptions`/`FEOptions`).
 
 Unlike FE, RE has no separate "additional result" method: the Hausman
 test comparing RE against the equivalent FE specification is computed
 automatically inside `fit()` and exposed directly as properties on
-`ReResults` (`docs/planning/specs/panel-api-design.md` section 2.4).
+`REResults` (`docs/planning/specs/panel-api-design.md` section 2.4).
 
 `summary()` is not implemented (structured-data-only output policy; see
-the `OlsResults`/`FeResults` precedent).
+the `OLSResults`/`FEResults` precedent).
 """
 
 from __future__ import annotations
@@ -25,9 +25,9 @@ from __future__ import annotations
 import polars as pl
 
 from .. import _lib
-from .._lib import ReOptions
+from .._lib import REOptions
 
-__all__ = ["RE", "ReOptions", "ReResults"]
+__all__ = ["RE", "REOptions", "REResults"]
 
 
 class RE:
@@ -46,7 +46,7 @@ class RE:
             contain at least one column name.
         entity: Column name of the entity (individual/panel unit)
             identifier.
-        options: Estimation options. Defaults to `ReOptions()`
+        options: Estimation options. Defaults to `REOptions()`
             (`cov_type="cluster"` on `entity`, confidence_level=0.95)
             when omitted.
 
@@ -70,15 +70,15 @@ class RE:
         y: str,
         x: list[str],
         entity: str,
-        options: ReOptions | None = None,
+        options: REOptions | None = None,
     ) -> None:
         self._data = data
         self._y = y
         self._x = x
         self._entity = entity
-        self._options = options if options is not None else ReOptions()
+        self._options = options if options is not None else REOptions()
 
-    def fit(self) -> ReResults:
+    def fit(self) -> REResults:
         """Estimate the RE model.
 
         Returns:
@@ -96,7 +96,7 @@ class RE:
                 encountered by the separate internal FE comparison
                 used for the Hausman test, which falls back to `None`
                 on `hausman_statistic`/`hausman_p_value`/`hausman_df`
-                instead of failing `fit()`; see `ReResults`'s
+                instead of failing `fit()`; see `REResults`'s
                 docstring), or a `cov_type="hac"` request with `time`
                 unset). A subclass of `ValueError`.
             ComputationError: A problem was detected during
@@ -106,10 +106,10 @@ class RE:
         raw = _lib.fit_re(
             self._data, self._y, self._x, self._entity, self._options
         )
-        return ReResults(raw)
+        return REResults(raw)
 
 
-class ReResults:
+class REResults:
     """RE estimation results.
 
     Array-valued properties (`params`, `std_errors`, etc.) are exposed
@@ -127,7 +127,7 @@ class ReResults:
     `fixed_effects()` (`panel-api-design.md` section 2.4). All three
     are `None` when the internal FE comparison used for the Hausman
     test is unavailable — in practice this only happens when
-    `ReOptions.time` is set (requesting the two-way FE comparison,
+    `REOptions.time` is set (requesting the two-way FE comparison,
     `panel-api-design.md` section 7.3) and that two-way regression
     itself fails (e.g. an unbalanced panel or a singleton time
     period), or when `Var(β_FE) - Var(β_RE)` is numerically singular;
@@ -141,14 +141,14 @@ class ReResults:
 
     Args:
         raw: The estimation result object returned by `_lib.fit_re`
-            (`_lib.ReResult`).
+            (`_lib.REResult`).
 
     Note:
         Users normally do not construct this directly; it is returned
         by `RE.fit()`.
     """
 
-    def __init__(self, raw: _lib.ReResult) -> None:
+    def __init__(self, raw: _lib.REResult) -> None:
         self._raw = raw
 
     @property
@@ -302,7 +302,7 @@ class ReResults:
         """Row-oriented summary table of the coefficients.
 
         Shaped to be usable almost as-is in a REST API response (same
-        policy as `OlsResults.coef_table()`). Returned as `list[dict]`
+        policy as `OLSResults.coef_table()`). Returned as `list[dict]`
         rather than a polars DataFrame, per the project's policy of
         not using DataFrames for the coefficient table itself.
 

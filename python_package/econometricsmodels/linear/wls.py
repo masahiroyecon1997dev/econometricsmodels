@@ -13,7 +13,7 @@ in `data` (see `docs/spec/wls-spec.md`, "API引数").
 Python class), matching `OLSOptions`'s pattern (see
 `python_package/econometricsmodels/linear/CLAUDE.md`). Its fields are
 field-for-field identical to `OLSOptions` today, but it is a separate
-class (`WlsResults` was already independent from `OlsResults` from the
+class (`WLSResults` was already independent from `OLSResults` from the
 start, so keeping `WLSOptions` tied to `OLSOptions` would have been
 the odd one out): WLS-specific options may be added later without
 affecting `OLSOptions`/OLS users.
@@ -26,7 +26,7 @@ import polars as pl
 from .. import _lib
 from .._lib import WLSOptions
 
-__all__ = ["WLS", "WLSOptions", "WlsResults"]
+__all__ = ["WLS", "WLSOptions", "WLSResults"]
 
 
 class WLS:
@@ -69,7 +69,7 @@ class WLS:
         self._weight = weight
         self._options = options if options is not None else WLSOptions()
 
-    def fit(self) -> WlsResults:
+    def fit(self) -> WLSResults:
         """Estimate the WLS model.
 
         Returns:
@@ -89,16 +89,16 @@ class WLS:
         raw = _lib.fit_wls(
             self._data, self._y, self._x, self._weight, self._options
         )
-        return WlsResults(raw)
+        return WLSResults(raw)
 
 
-class WlsResults:
+class WLSResults:
     """WLS estimation results.
 
     Array-valued properties (`params`, `std_errors`, etc.) are exposed
     as dictionaries keyed by coefficient name (for O(1) lookup of a
     single parameter). Use `coef_table()` for a row-oriented listing
-    (same shape as `OlsResults`; see
+    (same shape as `OLSResults`; see
     `docs/spec/ols-spec.md`, "結果構造体").
 
     Args:
@@ -248,7 +248,7 @@ class WlsResults:
     ) -> list[dict[str, float]]:
         """Predicted values.
 
-        Same design as `OlsResults.predict()`: unified into a single
+        Same design as `OLSResults.predict()`: unified into a single
         method rather than a separate `fitted_values` property.
         Weights play no role in either case: the predicted value is
         `x_i'β̂` on the original (unweighted) scale regardless of
@@ -280,7 +280,7 @@ class WlsResults:
     def augment(self, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
         """Source data with the predicted values appended as a column.
 
-        Same design as `OlsResults.augment()`: weights play no role in
+        Same design as `OLSResults.augment()`: weights play no role in
         either case, matching `predict()`.
 
         Args:

@@ -7,7 +7,7 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
 
 ## 1. API引数
 
-3層構成: `OLS(data, y, x, options).fit() -> OlsResults`（python_package）→
+3層構成: `OLS(data, y, x, options).fit() -> OLSResults`（python_package）→
 `fit_ols(data, y, x, options) -> OLSResult`（engine_pybind、PyO3境界）→
 正規方程式ソルバー・標準誤差計算（engine）。
 
@@ -45,7 +45,7 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
   には引き続き含めない。
 - `summary()`（テキスト整形）・DataFrame版の`coef_table()`/`conf_int()`は作らない
   （economiconのGUIエンジンという用途上、テキスト表示・対話的操作を前提にしないため）。
-- python_package層（`OlsResults`）:
+- python_package層（`OLSResults`）:
   - `params`/`std_errors`/`t_stats`/`p_values`/`conf_int`: 係数名→値の`dict`（O(1)取り出し用）。
   - `coef_table()`: 行指向`list[dict]`（REST APIレスポンスにそのまま使える形）。
   - `residuals`: `list[float]`をそのまま素通し。
@@ -142,8 +142,8 @@ $$
 
 ### 3.4 `predict()`
 
-- `OlsResults.predict(new_data: pl.DataFrame | None = None) -> list[dict[str, float]]`
-  （`OLS`側ではなく`OlsResults`側。`OLS`はfit前の設定を保持するだけのステートレスな値のため）。
+- `OLSResults.predict(new_data: pl.DataFrame | None = None) -> list[dict[str, float]]`
+  （`OLS`側ではなく`OLSResults`側。`OLS`はfit前の設定を保持するだけのステートレスな値のため）。
 - `new_data=None`（デフォルト）: 学習データに対する予測値`ŷ = Xβ̂`を返す（`fit()`時に計算し
   内部に保持。独立したプロパティとしては公開せず`predict()`経由のみ）。
 - `new_data`指定時: 新規データに対する予測値（out-of-sample）。`x`と同じ列名を持つ列を含む必要が
@@ -165,7 +165,7 @@ $$
 
 ### 3.5 `augment()`（Issue #295）
 
-- `OlsResults.augment(new_data: pl.DataFrame | None = None) -> pl.DataFrame`。
+- `OLSResults.augment(new_data: pl.DataFrame | None = None) -> pl.DataFrame`。
   `new_data`の意味・エラーハンドリングは`predict()`と完全に同じ。戻り値が
   `list[dict[str, float]]`ではなく、ソースデータ（`new_data=None`なら学習データ、
   指定時は`new_data`）に予測値の列（`"predicted"`）を1列付加したpolars DataFrameを返す点のみ異なる。
@@ -182,8 +182,8 @@ $$
   `new_data`自体をソースにする。
 - **列名衝突は`ValidationError`**（ソースデータに既に`"predicted"`列がある場合、`include_intercept=True`
   時の`"const"`列衝突と同じ発想で黙って上書きしない。`engine_pybind::validation::validate_no_existing_column`）。
-- `training_data`が`None`（`IvResult.first_stage()`が`OLSResult`を構築する経路——各内生変数の
-  第一段階回帰は単一のソースDataFrameを持たないため）の`OlsResults`に対して`augment(new_data=None)`を
+- `training_data`が`None`（`IVResult.first_stage()`が`OLSResult`を構築する経路——各内生変数の
+  第一段階回帰は単一のソースDataFrameを持たないため）の`OLSResults`に対して`augment(new_data=None)`を
   呼ぶと`ValidationError`になる（`new_data`を指定した呼び出しは通常どおり動作する）。
 
 ### 3.6 engine/engine_pybind間のデータ受け渡し・エラー変換

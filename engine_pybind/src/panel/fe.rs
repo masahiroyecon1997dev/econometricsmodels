@@ -10,12 +10,12 @@
 //! `engine/src/panel/fe.rs`モジュールdoc参照）に委ねる。
 //!
 //! 【言語方針】`.claude/rules/rust-style.md`「言語方針」参照。
-//! 公開API（`FeOptions`/`FeResult`）のdocコメントと、`ValidationError`のメッセージ文字列は
+//! 公開API（`FEOptions`/`FEResult`）のdocコメントと、`ValidationError`のメッセージ文字列は
 //! 英語。それ以外（このファイルの説明・非公開関数のdocコメント等）は日本語のまま。
 //!
 //! ## 実装フェーズの分割方針（IV・Logitと同じ3段階、`engine_pybind/src/iv/CLAUDE.md`参照）
 //!
-//! 1. **データ抽出・pyclass定義issue（#186、完了）**: `FeOptions`/`FeResult`のpyclass定義、
+//! 1. **データ抽出・pyclass定義issue（#186、完了）**: `FEOptions`/`FEResult`のpyclass定義、
 //!    列抽出・バリデーション・`engine::panel::fe::FeInput`構築までを行う`build_fe_input`を
 //!    実装した。
 //! 2. **本Issue（#187）**: `build_fe_input`を実際に呼び出す`fit`関数を追加し、`lib.rs`に
@@ -24,13 +24,13 @@
 //!    実際に呼ばれるようになるため、`#[allow(dead_code)]`はすべて削除する
 //!    （`engine_pybind/src/iv/CLAUDE.md`「実装フェーズの分割方針」の#169と同じ）。
 //! 3. **本Issue（#188）**: `fixed_effects()`メソッド（IVの`first_stage()`と同じ
-//!    「追加結果は別メソッド」方針、`panel-api-design.md`6.6節）を追加する。`FeResult`に
+//!    「追加結果は別メソッド」方針、`panel-api-design.md`6.6節）を追加する。`FEResult`に
 //!    非公開フィールド`estimator: FeEstimator`（内部で`OlsEstimator`まで保持する）を
 //!    追加し、`fixed_effects()`はそこから`FeEstimator::fixed_effects()`をオンデマンドに
-//!    呼ぶだけ（IVの`IvResult.first_stage`フィールドが#159ではなく#170で追加されたのと
+//!    呼ぶだけ（IVの`IVResult.first_stage`フィールドが#159ではなく#170で追加されたのと
 //!    同じ段階分割）。
 //!
-//! ## `FeOptions.time`と`FeOptions.time_col`は別物（`panel-api-design.md`1.1節）
+//! ## `FEOptions.time`と`FEOptions.time_col`は別物（`panel-api-design.md`1.1節）
 //!
 //! `time`（bareネーミング）は2-way FE（entity + time FE）の指定に使う: `Some`なら2-way・
 //! `None`なら1-way。`time_col`（OLSの`cluster_col`/`time_col`と同じ「補助列」命名規則）は
@@ -48,7 +48,7 @@
 //! オプションが存在しないため、Issue #181で`FeCovType` enumから除外済み）。OLS/WLS/IVとは
 //! 異なりFEの`cov_type`文字列パースはこの1点で分岐が異なるため、`linear::common::
 //! parse_cov_type`を流用せず独立実装する。IVの`cov_type`パースは元々（`iv::common::
-//! parse_iv_cov_type`という）別実装を持っていたが、`OLSOptions`/`IvOptions`が同名
+//! parse_iv_cov_type`という）別実装を持っていたが、`OLSOptions`/`IVOptions`が同名
 //! フィールドを持つ偶然の一致により後から`linear::common::parse_cov_type`へ統合された
 //! （`docs/planning/specs/refactoring-candidates.md`項目58）——FEはこの一致が無く
 //! （`hc0`非対応・`Hac`の意味論がFE固有）、意図的に独立実装を維持している点でIVとは事情が
@@ -93,7 +93,7 @@ use crate::validation::{
 // module/from_py_objectの理由は`OLSOptions`と同じ（`engine_pybind/src/linear/ols.rs`参照）。
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
-pub struct FeOptions {
+pub struct FEOptions {
     /// Standard error type: one of "classical", "hc1", "hc2", "hc3", "cluster", "hac".
     /// Case-insensitive. Unlike OLS/WLS/IV, "hc0" is **not** supported (neither
     /// linearmodels nor fixest offer it for panel/FE regressions).
@@ -134,7 +134,7 @@ pub struct FeOptions {
 }
 
 #[pymethods]
-impl FeOptions {
+impl FEOptions {
     #[new]
     #[pyo3(signature = (
         cov_type = "cluster".to_string(),
@@ -165,7 +165,7 @@ impl FeOptions {
 
     fn __repr__(&self) -> String {
         format!(
-            "FeOptions(cov_type={:?}, confidence_level={}, time={:?}, cluster_col={:?}, \
+            "FEOptions(cov_type={:?}, confidence_level={}, time={:?}, cluster_col={:?}, \
              time_col={:?}, dk_bandwidth={:?})",
             self.cov_type,
             self.confidence_level,
@@ -187,7 +187,7 @@ impl FeOptions {
 /// intentionally not included as a field here. It is exposed as a separate method
 /// instead (see `panel-api-design.md` section 6.6 — the same pattern as IV's
 /// `first_stage()`).
-// `FeResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
+// `FEResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`OLSResult`と同じ理由）。
 //
 // `Clone`を派生しない: `estimator`フィールドの`FeEstimator`（内部の`OlsEstimator`も）が
@@ -196,7 +196,7 @@ impl FeOptions {
 // `Clone`を要求する既存の呼び出し元も無い）。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug)]
-pub struct FeResult {
+pub struct FEResult {
     #[pyo3(get)]
     pub params: Vec<f64>,
     #[pyo3(get)]
@@ -225,7 +225,7 @@ pub struct FeResult {
     /// pyfixest/plm precedent).
     #[pyo3(get)]
     pub n_entities: usize,
-    /// Standard error type actually used (echoes `FeOptions.cov_type`, normalized to
+    /// Standard error type actually used (echoes `FEOptions.cov_type`, normalized to
     /// lowercase; e.g. "classical", "hc1", "cluster", "hac").
     #[pyo3(get)]
     pub cov_type: String,
@@ -251,7 +251,7 @@ pub struct FeResult {
 }
 
 #[pymethods]
-impl FeResult {
+impl FEResult {
     /// The fixed effects themselves (`α_i` for entity, `γ_t` for time), recovered
     /// post-hoc from the fitted coefficients (`α_i = ȳ_i - x̄_i'β̂`; see
     /// `docs/planning/specs/panel-api-design.md` section 6.6 and
@@ -282,7 +282,7 @@ impl FeResult {
     }
 }
 
-/// `FeOptions.cov_type`をパースし、該当する`cov_type`のときのみ`cluster_col`/`time_col`を
+/// `FEOptions.cov_type`をパースし、該当する`cov_type`のときのみ`cluster_col`/`time_col`を
 /// 抽出したうえで`engine::panel::fe::FeCovType`を組み立てる。
 ///
 /// `linear::common::parse_cov_type`（OLS/WLS用）を流用しない理由はモジュールdoc
@@ -292,7 +292,7 @@ impl FeResult {
 /// `cov_type`の文字列が既知の値のいずれでもない場合は`ValidationError`（`hc0`は非対応の
 /// 専用メッセージ、それ以外の未知の値は一般的な「unknown cov_type」メッセージ）。それ以外
 /// （列の抽出時に発覚する問題等）は`column_extraction`の責務で`ValidationError`。
-fn parse_fe_cov_type(df: &DataFrame, options: &FeOptions) -> PyResult<(FeCovType, String)> {
+fn parse_fe_cov_type(df: &DataFrame, options: &FEOptions) -> PyResult<(FeCovType, String)> {
     let cov_type_lower = options.cov_type.to_lowercase();
 
     let cov_type = match cov_type_lower.as_str() {
@@ -309,7 +309,7 @@ fn parse_fe_cov_type(df: &DataFrame, options: &FeOptions) -> PyResult<(FeCovType
             FeCovType::Cluster { groups }
         }
         "hac" => {
-            // `time_col`が優先（モジュールdoc「`FeOptions.time`と`FeOptions.time_col`は
+            // `time_col`が優先（モジュールdoc「`FEOptions.time`と`FEOptions.time_col`は
             // 別物」参照）。`None`なら`FeCovType::Hac.time`も`None`にし、engine側で
             // `FeInput.time()`（`time`から構築）へのフォールバックに委ねる
             // （`engine::panel::fe`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
@@ -342,9 +342,9 @@ fn parse_fe_cov_type(df: &DataFrame, options: &FeOptions) -> PyResult<(FeCovType
 
 /// Pythonから渡された `data` / `y` / `x` / `entity` / `options` を検証し、
 /// `engine::panel::fe::FeInput::from_columns`を呼び出すところまでを行う。
-/// `FeEstimator::fit`の呼び出し・`FeResult`の構築は`fit`（本ファイル）が行う。
+/// `FeEstimator::fit`の呼び出し・`FEResult`の構築は`fit`（本ファイル）が行う。
 ///
-/// `FeOptions.time`の有無で1-way/2-wayを切り替える（`options.time`が`Some`なら
+/// `FEOptions.time`の有無で1-way/2-wayを切り替える（`options.time`が`Some`なら
 /// `FeEffects::TwoWay`、`None`なら`FeEffects::OneWay`。モジュールdoc参照）。
 ///
 /// # Errors
@@ -363,7 +363,7 @@ pub(crate) fn build_fe_input(
     y: String,
     x: Vec<String>,
     entity: String,
-    options: &FeOptions,
+    options: &FEOptions,
 ) -> PyResult<(FeInput, FeEffects, FeCovType, String)> {
     // `x`が空リストであることを許容しない（Issue #320、モジュールdoc参照）。
     // OLS/WLS/Logit/Probit/IVと同じ`validate_x_non_empty`を呼ぶ（`.claude/rules/
@@ -417,12 +417,12 @@ pub(crate) fn build_fe_input(
 
 /// Pythonから渡された `data` / `y` / `x` / `entity` / `options` を検証し、
 /// `build_fe_input`で構築した`FeInput`に対して`engine::panel::fe::FeEstimator::fit`を
-/// 呼び出し、`FeResult`として返す。
+/// 呼び出し、`FEResult`として返す。
 ///
 /// `n_entities`はengine側に対応するpublicなgetterが無いため（`FeEstimator`内部の
 /// privateな`count_unique`を使うのみ）、`FeInput::entity()`（`build_fe_input`が返す
 /// `input`から取得可能）から独立に計算する（`engine_pybind/src/panel/CLAUDE.md`
-/// 「`FeResult`のスコープ」参照）。
+/// 「`FEResult`のスコープ」参照）。
 ///
 /// `params`/`param_names`/`residuals`/`dep_var_name`/`n_obs`/`log_likelihood`は
 /// `FeEstimator::estimator()`（内部で委譲した`OlsEstimator`）から取得する
@@ -441,8 +441,8 @@ pub(crate) fn fit(
     y: String,
     x: Vec<String>,
     entity: String,
-    options: &FeOptions,
-) -> PyResult<FeResult> {
+    options: &FEOptions,
+) -> PyResult<FEResult> {
     let df: DataFrame = data.into();
     let (input, effects, cov_type, cov_type_lower) = build_fe_input(&df, y, x, entity, options)?;
 
@@ -452,7 +452,7 @@ pub(crate) fn fit(
         .map_err(panel_error_to_pyerr)?;
     let ols = estimator.estimator();
 
-    Ok(FeResult {
+    Ok(FEResult {
         params: mat_to_vec(ols.params()),
         std_errors: mat_to_vec(estimator.std_errors()),
         t_stats: mat_to_vec(estimator.t_stats()),
@@ -484,10 +484,10 @@ mod tests {
     use super::*;
     use polars::df;
 
-    /// `build_fe_input`のテスト全体で使う既定の`FeOptions`（`cov_type="cluster"`・
+    /// `build_fe_input`のテスト全体で使う既定の`FEOptions`（`cov_type="cluster"`・
     /// `time=None`）。フィールドごとに上書きして使う。
-    fn default_options() -> FeOptions {
-        FeOptions::new("cluster".to_string(), 0.95, None, None, None, None)
+    fn default_options() -> FEOptions {
+        FEOptions::new("cluster".to_string(), 0.95, None, None, None, None)
     }
 
     fn well_formed_df() -> DataFrame {
@@ -688,7 +688,7 @@ mod tests {
     #[test]
     fn build_fe_input_hac_uses_time_col_when_time_is_not_set() {
         // 1-way FE + DK HAC（`time`未指定・`time_col`のみ指定）の組み合わせ
-        // （モジュールdoc「`FeOptions.time`と`FeOptions.time_col`は別物」参照）。
+        // （モジュールdoc「`FEOptions.time`と`FEOptions.time_col`は別物」参照）。
         let df = well_formed_df();
         let mut options = default_options();
         options.cov_type = "hac".to_string();

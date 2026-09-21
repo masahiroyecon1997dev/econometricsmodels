@@ -34,7 +34,7 @@ from _assertions import assert_close, assert_dict_close
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
 from _tolerances import TOLERANCES
-from econometricsmodels import RE, ReOptions
+from econometricsmodels import RE, REOptions
 
 from benchmark.common import WAGEPAN_ENTITY, WAGEPAN_X, WAGEPAN_Y
 from benchmark.panel.fixtures.generate_re_fixtures import (
@@ -101,17 +101,17 @@ def _check_result(res, ref: dict, label: str) -> None:
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 @pytest.mark.parametrize("scenario", NUMERIC_SCENARIOS)
 def test_matches_linearmodels(fixtures, scenario, cov_type):
-    """`hac`は`time`（内部FE呼び出しの1-way/2-way選択とは無関係、`ReOptions`
-    には`time_col`が独立に無い。`FeOptions`と違い、REの`ReOptions.time`は
+    """`hac`は`time`（内部FE呼び出しの1-way/2-way選択とは無関係、`REOptions`
+    には`time_col`が独立に無い。`FEOptions`と違い、REの`REOptions.time`は
     HAC時系列順序と内部FE1-way/2-way選択を兼ねる1フィールドのため、`hac`
-    ケースでも常に`time="time"`を渡す。本フィクスチャの数値比較は`ReOptions.
+    ケースでも常に`time="time"`を渡す。本フィクスチャの数値比較は`REOptions.
     time`の値に依存しない（係数・標準誤差はtimeを使わないため、
     `_re_helpers`・`engine/src/panel/CLAUDE.md`参照）。
     """
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
     kwargs = {"time": "time"} if cov_type == "hac" else {}
-    options = ReOptions(cov_type=cov_type, **kwargs)
+    options = REOptions(cov_type=cov_type, **kwargs)
     res = RE(df, y="y", x=x_cols, entity="entity", options=options).fit()
 
     _check_result(res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}")
@@ -123,7 +123,7 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
 @pytest.mark.parametrize("cov_type", WAGEPAN_COV_TYPES)
 def test_wagepan_matches_linearmodels(fixtures, cov_type):
     df = load_wooldridge_dataset("wagepan")
-    options = ReOptions(cov_type=cov_type)
+    options = REOptions(cov_type=cov_type)
     res = RE(
         df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
     ).fit()

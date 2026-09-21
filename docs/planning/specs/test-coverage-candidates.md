@@ -846,7 +846,7 @@
   なく、`has_intercept=true`になっているかを確認したほうがよいかも
   しれない（実際はIVのオプションで`intercept=false`にしたら
   `first_stage`はどっちになる）」）を受けて実機確認した。
-  `IvOptions(include_intercept=False)`でfitした結果、`first_stage()
+  `IVOptions(include_intercept=False)`でfitした結果、`first_stage()
   ["endog1"].param_names`は`['x1', 'z1', 'z2']`（`const`を含まない）、
   `r_squared`は`OLS(y="endog1", x=["x1","z1","z2"],
   options=OLSOptions(include_intercept=False))`の直接fitと**完全一致**
@@ -925,7 +925,7 @@
   docstring上の説明のみ）
 - **内容**: ユーザー指摘（2026-08-30、「第一段階の結果の検証がされて
   いないのでは？」）を受けて確認したところ、指摘の通り**`first_stage()`
-  が返す`OlsResults`の実際の数値（`params`/`r_squared`/`std_errors`等）を
+  が返す`OLSResults`の実際の数値（`params`/`r_squared`/`std_errors`等）を
   外部リファレンス（statsmodels/linearmodels/R）と照合するテストは
   1つも存在しない**ことを確認した。`test_iv_fixtures.py`のモジュール
   docstringは「`first_stage()`は通常のOLS回帰の結果をそのまま返すだけ
@@ -950,7 +950,7 @@
   crosscheck.py`に「`first_stage()['endog1']`の`params`/`r_squared`等が、
   同じデータで直接`OLS(y=x_endog名, x=x_exog+instruments)`をfitした
   結果と一致する」という比較テストを追加する（新規フィクスチャ生成は
-  不要、既存の`OlsResults`同士の比較で足りる）のが最も手軽。
+  不要、既存の`OLSResults`同士の比較で足りる）のが最も手軽。
 - **気づいた経緯**: 2026-08-30、`tests/test_iv_fixtures.py`解説時の
   ユーザー指摘、`grep`で確認。
 - **状態**: 未対応（**優先度高**、着手要否はユーザー判断待ち）
@@ -1214,7 +1214,7 @@
     複数`n`で通過）。HACのSEはラグ数が変われば通常は明確に数値が変わるため、
     式が食い違ったまま複数の異なる`n`で偶然一致し続ける可能性は低いと考えられるが、
     **確率的な傍証であり証明ではない**。
-  - `OLSResult`/`IvResult`（`engine_pybind/src/linear/ols.rs:136-160`等）は
+  - `OLSResult`/`IVResult`（`engine_pybind/src/linear/ols.rs:136-160`等）は
     `cov_type`文字列のみをエコーバックし、実際に解決されたラグ数自体は
     結果オブジェクトのどこにも露出していないため、外部から直接確認する
     手段が現状無い（`refactoring-candidates.md`系ではなくAPI追加の話のため、

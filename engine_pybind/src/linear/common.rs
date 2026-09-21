@@ -75,7 +75,7 @@ pub(crate) fn mat_to_vec(mat: &faer::Mat<f64>) -> Vec<f64> {
 /// 独立した2つの型がこの関数を共有する必要が生じたため（`nonlinear::common::
 /// parse_cov_type`が最初から個々の値を引数に取っているのと同じ設計。以前は`WLSOptions`が
 /// 無く`OLSOptions`をそのまま再利用していたため、`&OLSOptions`を直接受け取っていた）。
-/// 同じ理由で`IvOptions`も同名フィールド（`cov_type`/`cluster_col`/`hac_lags`/`time_col`）を
+/// 同じ理由で`IVOptions`も同名フィールド（`cov_type`/`cluster_col`/`hac_lags`/`time_col`）を
 /// 持つため、`iv::common::parse_iv_cov_type`という重複実装を廃止しこの関数をそのまま
 /// 共有する（`docs/planning/specs/refactoring-candidates.md`項目58）。
 ///

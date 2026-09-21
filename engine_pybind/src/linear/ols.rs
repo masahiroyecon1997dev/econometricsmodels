@@ -191,7 +191,7 @@ pub struct OLSResult {
     /// zero-copy reasoning applies here).
     ///
     /// `None` for `OLSResult`s built by `ols_estimator_to_result` without going
-    /// through this file's `fit()` (currently only `IvResult.first_stage()`,
+    /// through this file's `fit()` (currently only `IVResult.first_stage()`,
     /// `engine_pybind/src/iv/common.rs`): those per-equation regressions have no
     /// single source DataFrame to attach a column to, so `augment(new_data=None)`
     /// on such a result raises `ValidationError` instead.
@@ -255,7 +255,7 @@ impl OLSResult {
     /// - The source data already has a column named `"predicted"`:
     ///   `ValidationError` (would otherwise silently overwrite it).
     /// - `new_data=None` and this result has no cached training data (currently
-    ///   only possible for `IvResult.first_stage()` results): `ValidationError`.
+    ///   only possible for `IVResult.first_stage()` results): `ValidationError`.
     #[pyo3(signature = (new_data=None))]
     fn augment(&self, new_data: Option<PyDataFrame>) -> PyResult<PyDataFrame> {
         let (mut source, predicted) = match new_data {
@@ -345,7 +345,7 @@ pub fn fit(
 /// フィット済み`OlsEstimator`を`OLSResult`（pyclass、Pythonに返す形）に変換する。
 ///
 /// `fit`（本ファイル、OLS本体）と`iv::common`の`first_stage()`（IVの第一段階回帰
-/// `x_endog[i] ~ x_exog + instruments`の結果を`dict[str, OlsResults]`として返す、
+/// `x_endog[i] ~ x_exog + instruments`の結果を`dict[str, OLSResults]`として返す、
 /// Issue #170）の両方で使う共通の変換ロジック。第一段階回帰はそれ自体が正しい
 /// （ナイーブな）通常のOLS回帰であり（`engine::iv::two_sls`のモジュールdocコメント
 /// 「第一段階の各`OlsEstimator`はそれ自体が正しい」参照）、`OLSResult`への変換方法に
@@ -354,7 +354,7 @@ pub fn fit(
 /// 同じ`linear::ols`モジュール内に置く）。
 ///
 /// `cov_type_lower`を引数で受け取るのは、`fit`ではPythonから渡された`OLSOptions.cov_type`
-/// をパース時に一度だけ小文字化した値、`first_stage()`では`IvResult.cov_type`
+/// をパース時に一度だけ小文字化した値、`first_stage()`では`IVResult.cov_type`
 /// （呼び出し元が指定した`cov_type`、第一段階にもそのまま使われる、`iv::two_sls`の
 /// モジュールdocコメント参照）と、呼び出し元ごとに文字列の出どころが異なるため。
 /// **呼び出し元が正規化済み（`to_lowercase()`済み）の値を渡す責任を持つ**（この関数自体は

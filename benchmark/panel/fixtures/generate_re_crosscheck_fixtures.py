@@ -15,7 +15,7 @@
   （5.3節）。cov_typeに依存しない単一の統計量だが、`run_plm_benchmark.R`の
   呼び出しのたびに毎回計算されるため、hc2/hc3どちらのエントリにも同じ値が
   含まれる（`run_fixest_benchmark.R`がaic/bicを毎回含めるのと同じ設計）。
-  v1は1-way（`ReOptions.time`未指定の内部FE呼び出し）限定で検証する
+  v1は1-way（`REOptions.time`未指定の内部FE呼び出し）限定で検証する
   （`generate_re_fixtures.py`の`_meta.note`参照、ユーザー確認済み・
   2026-09-20）。
 

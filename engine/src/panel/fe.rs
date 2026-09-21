@@ -81,10 +81,10 @@
 //! `OlsInput::from_columns`/`OlsEstimator::fit`が返す`LeastSquaresError`は
 //! `PanelError::WithinRegressionFailed { source }`に包む（`common.rs`のdocコメント参照）。
 //!
-//! `FeEffects`（`OneWay`/`TwoWay`）で1-way/2-wayを切り替える。将来`FeOptions`
+//! `FeEffects`（`OneWay`/`TwoWay`）で1-way/2-wayを切り替える。将来`FEOptions`
 //! （Issue #186）が導入されたら、その一部（またはそのままのフィールド型）として
 //! 統合する想定の暫定的なパラメータ（1-way/2-wayの区別自体は`panel-api-design.md`で
-//! 確定済みの設計だが、`FeOptions`自体は未着手のため）。
+//! 確定済みの設計だが、`FEOptions`自体は未着手のため）。
 //!
 //! ## 自由度調整（Issue #180、6.3節）
 //!
@@ -106,7 +106,7 @@
 //!   `aic = -2*log_likelihood + 2*df_model`、`bic = -2*log_likelihood + ln(n)*df_model`。
 //! - **F統計量**（`f_statistic`/`f_p_value`）: 当初Issue #180のスコープ外だったが
 //!   （issue本文が明示的に「検定統計量（t検定）」と限定していたため）、Issue #186
-//!   （`FeOptions`/`FeResult`のフィールド設計、`panel-api-design.md`2.1節がOLS同様
+//!   （`FEOptions`/`FEResult`のフィールド設計、`panel-api-design.md`2.1節がOLS同様
 //!   `f_statistic`/`f_p_value`を含める前提だった）の実装時に、engine側に対応する
 //!   panel自由度調整版が存在しないことが判明し、ユーザー確認の上で本節に前倒しで
 //!   実装した。**`OlsEstimator`自身の`estimator().f_statistic()`/`f_p_value()`は
@@ -246,7 +246,7 @@
 //! `FeEstimator`が`df_resid`で計算し直したものを使う。
 //!
 //! `cov_type`のデフォルト（`"cluster"`、entity単位、3.2節）は`engine_pybind`層
-//! （`FeOptions`、Issue #186以降）の責務。`FeEstimator::fit`自体はデフォルトを
+//! （`FEOptions`、Issue #186以降）の責務。`FeEstimator::fit`自体はデフォルトを
 //! 持たず、呼び出し側が`FeCovType`を明示的に渡す（`cluster_col`省略時のentity自動
 //! 使用——`FeCovType::Cluster { groups: None }`——のみこのモジュールの責務）。
 //!
@@ -296,7 +296,7 @@
 //!   DKは常に`extra_df=neffects`（linearmodelsが`cov_type="kernel"`でこの分岐を
 //!   一切行わないため、上記スケールの導出参照）。
 //! - **`FeCovType::Hac.time`による明示的な時系列順序の上書き（Issue #186）**: 元々は
-//!   `bandwidth`のみを持つバリアントだったが、`engine_pybind`のFeOptions設計
+//!   `bandwidth`のみを持つバリアントだったが、`engine_pybind`のFEOptions設計
 //!   （Issue #186）で「2-way FEの`time`（固定効果構造）とDK HACの時系列順序を別の列に
 //!   したい」というユースケースが判明し（ユーザー承認済み、2026-09-12）、
 //!   `Hac { bandwidth, time: Option<Vec<String>> }`に拡張した。`time`が`Some`なら
@@ -385,7 +385,7 @@ pub struct FeInput {
     /// 各行のエンティティID（長さ`n`）。
     entity: Vec<String>,
     /// 各行の時点ID（長さ`n`）。2-way FE（entity + time FE）を指定しない場合は`None`
-    /// （`panel-api-design.md`1.1節: `time`は`FeOptions`内の条件付き必須オプション）。
+    /// （`panel-api-design.md`1.1節: `time`は`FEOptions`内の条件付き必須オプション）。
     time: Option<Vec<String>>,
     /// 被説明変数名。
     dep_var_name: String,
@@ -499,7 +499,7 @@ impl FeInput {
 }
 
 /// FEの固定効果の方向（1-way/2-way）を指定する。`FeEstimator::fit`が受け取る
-/// （モジュールdoc「`OlsEstimator`への委譲」参照。将来`FeOptions`（Issue #186）に
+/// （モジュールdoc「`OlsEstimator`への委譲」参照。将来`FEOptions`（Issue #186）に
 /// 統合される想定の暫定的なパラメータ）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeEffects {
@@ -552,7 +552,7 @@ pub enum FeCovType {
     ///
     /// `time`（Issue #186で追加）: `Some`なら、DK計算の時系列順序として`input.time()`より
     /// 優先してこちらを使う（2-way FEでも、`input.time()`とは別の時間粒度でDKカーネルを
-    /// 適用したいケースに対応、ユーザー承認済み・`engine_pybind`の`FeOptions.time_col`が
+    /// 適用したいケースに対応、ユーザー承認済み・`engine_pybind`の`FEOptions.time_col`が
     /// この経路に配線される想定）。`None`なら従来通り`input.time()`にフォールバックし、
     /// それも`None`なら`PanelError::HacRequiresTime`（1-way FEで`time`列を一切指定しない
     /// 場合）。
@@ -601,7 +601,7 @@ pub struct FeEstimator {
     /// `cov_type`別の`k×k`共分散行列（Issue #198）。`std_errors`等はこの対角成分の
     /// 平方根に過ぎず、`re.rs`のハウスマン検定（`hausman_statistic`、7.3節）は
     /// オフ対角成分も含む部分行列比較が必要なため、フィールドとして保持し
-    /// `pub(crate)`で公開する（`FeResult`には含めない内部専用の値、
+    /// `pub(crate)`で公開する（`FEResult`には含めない内部専用の値、
     /// `swamy_arora_variance_components`と同じ`pub(crate)`の使い方）。
     cov_params: Mat<f64>,
 }
@@ -779,7 +779,7 @@ impl FeEstimator {
                 bandwidth,
                 time: hac_time,
             } => {
-                // `hac_time`（`FeOptions.time_col`経由の明示指定）があれば`input.time()`
+                // `hac_time`（`FEOptions.time_col`経由の明示指定）があれば`input.time()`
                 // より優先する（モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
                 let time: &[String] = match hac_time {
                     Some(t) => t,
@@ -3011,7 +3011,7 @@ mod tests {
     #[test]
     fn fe_estimator_fit_one_way_hac_uses_explicit_time_override_without_fe_input_time() {
         // Issue #186: `FeCovType::Hac.time`（明示指定）は`FeInput.time()`を経由せずに
-        // DK HACを成立させられる（`engine_pybind`の`FeOptions.time_col`が1-way FE + DK HAC
+        // DK HACを成立させられる（`engine_pybind`の`FEOptions.time_col`が1-way FE + DK HAC
         // の組み合わせをこの経路で配線する想定）。`FeInput::from_columns`には`time=None`を
         // 渡し、`fe_estimator_fit_one_way_hac_matches_linearmodels_default_bandwidth`と
         // 同じ結果になることを確認する（同じ`time`列を使っているため数値は完全一致する）。

@@ -57,7 +57,7 @@ Issue #171（`linearmodels`/`ivreg`とのベンチマーク作成）でリファ
 
 ### 1.2 モデル固有オプションの置き場所
 
-`IvOptions`という独立の`#[pyclass]`構造体に含める（`OLSOptions`/`LogitOptions`の前例を踏襲）。
+`IVOptions`という独立の`#[pyclass]`構造体に含める（`OLSOptions`/`LogitOptions`の前例を踏襲）。
 2SLS/GMMの方式切り替え等、IV固有の詳細は6章で確定。
 
 ### 1.3 `weights` / `offset` の扱い
@@ -72,9 +72,9 @@ Issue #171（`linearmodels`/`ivreg`とのベンチマーク作成）でリファ
 
 | フィールド | FE/REとの違い |
 |---|---|
-| `params` / `std_errors` / `stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` / `residuals` / `dep_var_name` / `n_obs` / `df_resid` / `df_model` / `cov_type` / `f_statistic` / `f_p_value` | `t_stats`ではなく**`stats`**という分布非依存の名前にする（Issue #159で確定）。1つの`IvResult`型を2SLS（t分布）・GMM（z分布、3章参照）の両方が共有するため、`OLSResult.t_stats`/`LogitResult.z_stats`のような分布固定の名前は使えない。`engine::inference::InferenceStat`が同じ理由で`stat`という分布非依存の名前を使っている前例に倣った。それ以外は共通（そのまま踏襲） |
-| `method` | **追加**（Issue #307）。`IvOptions.method`を正規化した小文字文字列（`"2sls"`/`"gmm"`）。`cov_type`と同じく常に反映される |
-| `weight_type` | **追加**（Issue #307）。`IvOptions.weight_type`を正規化した小文字文字列だが、型は`Option<String>`。GMMの点推定にのみ意味を持つ概念のため、`method="gmm"`のときだけ`Some`、`method="2sls"`では常に`None`（`overid_statistic`/`wu_hausman_statistic`が`method`依存で`None`を使う既存パターンに揃えた） |
+| `params` / `std_errors` / `stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` / `residuals` / `dep_var_name` / `n_obs` / `df_resid` / `df_model` / `cov_type` / `f_statistic` / `f_p_value` | `t_stats`ではなく**`stats`**という分布非依存の名前にする（Issue #159で確定）。1つの`IVResult`型を2SLS（t分布）・GMM（z分布、3章参照）の両方が共有するため、`OLSResult.t_stats`/`LogitResult.z_stats`のような分布固定の名前は使えない。`engine::inference::InferenceStat`が同じ理由で`stat`という分布非依存の名前を使っている前例に倣った。それ以外は共通（そのまま踏襲） |
+| `method` | **追加**（Issue #307）。`IVOptions.method`を正規化した小文字文字列（`"2sls"`/`"gmm"`）。`cov_type`と同じく常に反映される |
+| `weight_type` | **追加**（Issue #307）。`IVOptions.weight_type`を正規化した小文字文字列だが、型は`Option<String>`。GMMの点推定にのみ意味を持つ概念のため、`method="gmm"`のときだけ`Some`、`method="2sls"`では常に`None`（`overid_statistic`/`wu_hausman_statistic`が`method`依存で`None`を使う既存パターンに揃えた） |
 | `n_entities` | **含めない**（IVはパネル構造を前提としない） |
 | `log_likelihood` / `aic` / `bic` | **除外する**。2SLS/GMMは尤度ベースの推定法ではなく
   （Stataの`ivregress`もデフォルトでは出力しない）、正規性を仮定した疑似尤度を計算して
@@ -101,8 +101,8 @@ Issue #171（`linearmodels`/`ivreg`とのベンチマーク作成）でリファ
 
 - **第一段階回帰結果は`first_stage()`という別メソッド**に切り出す
   （`fit()`の戻り値本体には含めない）。非線形モデルの`marginal_effects()`分離方針を踏襲。
-- **戻り値の構造**: `first_stage() -> dict[str, OlsResults]`。キーは`x_endog`の変数名、値は
-  既存の`OlsResults`型（新規のIV専用型は作らない）。内生変数が複数ある場合、内生変数の数だけ
+- **戻り値の構造**: `first_stage() -> dict[str, OLSResults]`。キーは`x_endog`の変数名、値は
+  既存の`OLSResults`型（新規のIV専用型は作らない）。内生変数が複数ある場合、内生変数の数だけ
   第一段階回帰（`x_endog[i] ~ x_exog + instruments`）が存在するため、変数名キーのdictで
   複数の完全な回帰結果を返す。
 - 弱操作変数診断（第一段階F統計量）・Sargan/Hansen J（過剰識別）・Wu-Hausman（内生性）は
@@ -261,7 +261,7 @@ Rクロスチェックも対象外。
 
 - **`weight_type`（GMMの点推定に使う重み行列）と`cov_type`（最終的な報告用SE計算）を分離
   する**。`linearmodels.IVGMM`と同じ構造（`weight_type`はコンストラクタ/Options側、
-  `cov_type`は`fit()`側という区別ではなく、`IvOptions`に両方のフィールドを持たせる）。
+  `cov_type`は`fit()`側という区別ではなく、`IVOptions`に両方のフィールドを持たせる）。
   他のモデルと違い、**GMMは`cov_type`相当の選択が点推定自体に影響する**
   （効率的GMMの重み行列は仮定する誤差構造に依存するため）。この分離をしないと、GMMだけ
   「SEを変えたら係数も変わる」という他モデルには無い挙動を`cov_type`の名の下に隠すことに
@@ -269,11 +269,11 @@ Rクロスチェックも対象外。
   - `weight_type`の取りうる値: `unadjusted`/`homoskedastic`、`robust`/`heteroskedastic`、
     `cluster`、`kernel`（Driscoll-Kraayではなく通常のHAC、IVはパネル構造を前提としないため
     3.1と同じ理由）。
-  - **`IvResult.weight_type`（結果側、Issue #307）もこの`method`依存性をそのまま反映する**:
-    `method="gmm"`のときは`IvOptions.weight_type`を正規化した`Some(String)`、
+  - **`IVResult.weight_type`（結果側、Issue #307）もこの`method`依存性をそのまま反映する**:
+    `method="gmm"`のときは`IVOptions.weight_type`を正規化した`Some(String)`、
     `method="2sls"`のときは概念自体が存在しないため常に`None`（`overid_statistic`/
     `wu_hausman_statistic`が`method`によって`None`になる既存パターンと同じ扱い）。
-- **GMMのstep数（1-step/2-step efficient/iterated）を選択可能にする**。`IvOptions`に
+- **GMMのstep数（1-step/2-step efficient/iterated）を選択可能にする**。`IVOptions`に
   `gmm_iterations: int`（デフォルト`2`＝efficient two-step、`1`で1-step GMM）を追加する。
   `linearmodels.IVGMM.fit(iter_limit=2, ...)`と同じ考え方。当初は1・2の2値のみ許容していた
   が（Issue #165）、Issue #229で3以上（iterated GMM）・収束条件に一般化した:
@@ -292,7 +292,7 @@ Rクロスチェックも対象外。
     `method="gmm"`のパラメータとして扱う（`linearmodels`等の慣行と同じ、詳細は
     `engine/src/iv/CLAUDE.md`参照）。
   - `engine`側の実装は`engine::iv::gmm::GmmEstimator::fit`のみ完了（Issue #229）。
-    `IvOptions`/`IvResult`（`engine_pybind`）・`python_package`への配線は
+    `IVOptions`/`IVResult`（`engine_pybind`）・`python_package`への配線は
     `method="gmm"`自体がまだ未実装（本節冒頭、6章の前提）のため別issueで行う。
 - **2SLSはGMMの特殊ケース（`weight_type="unadjusted"`、`gmm_iterations=1`）として実装できる**
   ことを踏まえ、共通のGMM推定コアを実装し、2SLSはそのコアを固定パラメータで呼び出す設計に
@@ -309,7 +309,7 @@ Rクロスチェックも対象外。
 
 - **x_exogを直交化した後の操作変数係数のみを検定する「部分F統計量」として専用計算する**
   （`linearmodels.iv.results.FirstStageResults.diagnostics`と同じ方式）。`first_stage()`が
-  返す`OlsResults.f_statistic`（x_exog込みの全回帰係数に対する検定）をそのまま使うと、
+  返す`OLSResults.f_statistic`（x_exog込みの全回帰係数に対する検定）をそのまま使うと、
   x_exogの寄与が混ざり弱操作変数診断として不正確になるため、**別計算が必要**。
 - 内生変数ごとに計算し、**`fit()`の主結果にサマリーとして含める**
   （フィールド名は実装時に確定、例: 内生変数名キーの`dict[str, float]`）。詳細な内訳

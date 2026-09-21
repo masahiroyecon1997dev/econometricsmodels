@@ -34,7 +34,7 @@ FEと同じプロセスで実測選定した（`.claude/rules/testing-policy.md`
 
 ## 既知の限界: `cov_type`間でハウスマン内部FEの構造も変わる
 
-`ReOptions.time`は「HACの時系列順序」と「ハウスマン検定用の内部FE呼び出しの
+`REOptions.time`は「HACの時系列順序」と「ハウスマン検定用の内部FE呼び出しの
 1-way/2-way選択（`Some`なら2-way、`None`なら1-way）」を兼ねる
 （`engine_pybind/src/panel/re.rs`モジュールdoc参照）。そのため本スクリプトの
 `_fit_once_engine`は`cov_type="hac"`のときのみ`time=_TIME_COL`を渡すことになり、
@@ -112,12 +112,12 @@ def _build_pandas_df(df: pl.DataFrame) -> pd.DataFrame:
 
 
 def _fit_once_engine(ctx: FitContext):
-    from econometricsmodels import RE, ReOptions
+    from econometricsmodels import RE, REOptions
 
     if ctx.cov_type == "classical":
-        options = ReOptions(cov_type="classical")
+        options = REOptions(cov_type="classical")
     elif ctx.cov_type == "hac":
-        options = ReOptions(
+        options = REOptions(
             cov_type="hac", time=_TIME_COL, dk_bandwidth=_DK_BANDWIDTH
         )
     else:

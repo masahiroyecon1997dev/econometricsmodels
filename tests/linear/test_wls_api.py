@@ -25,7 +25,7 @@ from econometricsmodels import (
     WLS,
     OLSOptions,
     WLSOptions,
-    WlsResults,
+    WLSResults,
 )
 
 # predict()のstatsmodels照合は主リファレンス照合と同じ許容誤差
@@ -174,10 +174,10 @@ def test_residuals_are_original_scale_not_weighted(dataset):
 
 
 def test_result_is_wls_results_type(dataset):
-    """`WLS.fit()`の返り値が`WlsResults`（`OlsResults`とは別型）であること。"""
+    """`WLS.fit()`の返り値が`WLSResults`（`OLSResults`とは別型）であること。"""
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
-    assert isinstance(res, WlsResults)
+    assert isinstance(res, WLSResults)
 
 
 # ── API構造 ──────────────────────────────────────────────────────

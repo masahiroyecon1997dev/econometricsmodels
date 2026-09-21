@@ -35,7 +35,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ## 一覧
 
-### 3.【Issue化】`IvResults`に`method`だけでなく`weight_type`も含まれておらず、正規化値を検証する手段が無い
+### 3.【Issue化】`IVResults`に`method`だけでなく`weight_type`も含まれておらず、正規化値を検証する手段が無い
 
 → Issue #307として切り出し済み（2026-09-11）。`refactoring-candidates-2.md`
 項目78（`LogitResult`/`ProbitResult`の`method`欠落）と合わせて1つのIssueに
@@ -429,7 +429,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   にも適用できることを記録してほしい」）。個別に項目を複製すると項目数が
   倍増するため、該当箇所を1項目にまとめて記録する。
   - **項目14**（OLSのHAC自動ラグが`maxlags=1`固定のまま放置）: GMM版も
-    `IvOptions.hac_lags`未指定（自動計算）でフィクスチャと一致する設計
+    `IVOptions.hac_lags`未指定（自動計算）でフィクスチャと一致する設計
     （`test_iv_gmm_fixtures.py:80-81`のコメント）であり、IV側
     （2SLS/GMM共通）は既にこの問題を回避できている、という文脈でOLS/WLS
     側の改善余地の参考になる点は同じ。
@@ -488,7 +488,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   純粋に点推定側の重み選択でありDGPのシナリオ性質（不均一分散・自己相関
   等）との相互作用は`cov_type`ほど強くないと考えられるため、そちらは
   優先度を下げてよいと考える。既定`weight_type="unadjusted"`を主軸に
-  シナリオを広くスイープする現状の設計（`IvOptions().weight_type`の
+  シナリオを広くスイープする現状の設計（`IVOptions().weight_type`の
   実際の既定値と一致）は妥当で、`robust`に差し替える積極的な理由は薄い。
 - **気づいた経緯**: 2026-08-30、`tests/test_iv_gmm_fixtures.py`解説時の
   ユーザー指摘、`gmm.rs`のモジュールdocコメントで設計を確認。
@@ -503,11 +503,11 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   テストが無い。GMMにfirst_stageの概念がないから問題にならない？」）を
   受けて実機確認した。**予想に反し、GMMも`first_stage()`を持ち、
   `include_intercept=False`の影響を受ける**ことを確認した。
-  `IV(..., options=IvOptions(method="gmm", include_intercept=False))
+  `IV(..., options=IVOptions(method="gmm", include_intercept=False))
   .fit().first_stage()`は正常に動作し、`param_names`から`const`が
   正しく除外されていた。`engine/src/iv/CLAUDE.md`にも「（過去の
   `k_constant`取り違えバグの）影響を受けていたのは`first_stage()`が
-  返す`OlsResults`...`method`によらず、`fit()`が常に`compute_first_
+  返す`OLSResults`...`method`によらず、`fit()`が常に`compute_first_
   stage`経由で構築するため2SLS/GMM両方に及んでいた」と明記されており、
   GMMも2SLSと全く同じ第一段階回帰の配線コードを共有している。
   つまり本項目は`test-coverage-candidates.md`項目50・51（2SLSの
@@ -824,7 +824,12 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ### 40.【Issue化】結果クラスの命名が頭字語の大文字小文字で不統一（`OlsResults`/`WlsResults`/`IvResults` vs `OLS`/`WLS`/`IV`）
 
-→ Issue #310として切り出し済み（2026-09-11）。詳細はIssueを参照。
+→ Issue #310として切り出し済み（2026-09-11）、2026-09-21に対応完了。`OlsResults`/
+`WlsResults`/`IvResults`/`FeResults`/`ReResults`を`OLSResults`/`WLSResults`/
+`IVResults`/`FEResults`/`REResults`へ、対応する`IvOptions`/`FeOptions`/`ReOptions`
+（本文では未言及だったが同じ不統一を抱えていたため合わせて対応）を`IVOptions`/
+`FEOptions`/`REOptions`へリネームした。Rust側（`engine_pybind`）のpyclass名自体も
+揃えた。詳細はIssueを参照。
 
 ### 41. `__version__`がバージョン文字列の3つ目の手書きソースになっている
 
@@ -967,7 +972,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `diff`で突き合わせて確認。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
-### 46.【Issue化】`LogitResults`/`ProbitResults`/`TobitResults`に`dep_var_name`プロパティが無い（`OlsResults`/`WlsResults`/`IvResults`/`FeResults`には有る）→ Issue #318として切り出し済み（2026-09-13）
+### 46.【Issue化】`LogitResults`/`ProbitResults`/`TobitResults`に`dep_var_name`プロパティが無い（`OLSResults`/`WLSResults`/`IVResults`/`FEResults`には有る）→ Issue #318として切り出し済み（2026-09-13）
 
 - **対象**: [engine_pybind/src/nonlinear/logit.rs:198-228](../../../engine_pybind/src/nonlinear/logit.rs#L198-L228)、
   [engine_pybind/src/nonlinear/probit.rs:193-223](../../../engine_pybind/src/nonlinear/probit.rs#L193-L223)、
@@ -981,11 +986,11 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `ProbitResult`/`TobitResult`）には`dep_var_name`フィールドが定義され
   ておらず、Pythonへ公開されていない。一方`OLSResult`
   （`engine_pybind/src/linear/ols.rs:154`）・`WLSResult`
-  （`engine_pybind/src/linear/wls.rs:164`）・`IvResult`
-  （`engine_pybind/src/iv/common.rs:322`）・`FeResult`
+  （`engine_pybind/src/linear/wls.rs:164`）・`IVResult`
+  （`engine_pybind/src/iv/common.rs:322`）・`FEResult`
   （`engine_pybind/src/panel/fe.rs:197`）は全て`pub dep_var_name: String`
-  を持ち、`python_package`側の対応する`OlsResults`/`WlsResults`/
-  `IvResults`にも`dep_var_name`プロパティが存在する（`python_package/
+  を持ち、`python_package`側の対応する`OLSResults`/`WLSResults`/
+  `IVResults`にも`dep_var_name`プロパティが存在する（`python_package/
   econometricsmodels/linear/ols.py:139-141`等）。結果として
   `LogitResults`/`ProbitResults`/`TobitResults`（`python_package/
   econometricsmodels/nonlinear/`配下）だけ`dep_var_name`が欠落している。
@@ -1005,9 +1010,9 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 - **対象**: [python_package/econometricsmodels/panel/fe.py:68-80](../../../python_package/econometricsmodels/panel/fe.py#L68-L80)
   の`FE.__init__`、[engine_pybind/src/panel/fe.rs:76-93](../../../engine_pybind/src/panel/fe.rs#L76-L93)
-  の`FeOptions.time`
+  の`FEOptions.time`
 - **内容**: `entity`はトップレベルの必須引数だが、`time`は
-  `FeOptions.time: Option<String>`経由でしか指定できない。両者は
+  `FEOptions.time: Option<String>`経由でしか指定できない。両者は
   共に「パネル構造を定義する列名参照」という同じ役割を担っており、
   CLAUDE.md 2章が引く「列名参照は素の引数、推定オプションは
   オブジェクト渡し」という区別に照らすと、必須性の違いだけを理由に

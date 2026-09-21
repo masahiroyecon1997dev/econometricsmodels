@@ -83,14 +83,14 @@ Issue化済み（2026-08-02）:
   - 依存: B7（#158）
 - [x] **B11. engine単体テストのカバレッジ確認・不足分を追加** → [#168](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/168)
   - 依存: B5〜B10（#165, #166, #158, #163, #167, #164）
-- [x] **B12. engine_pybind: データ抽出・`IvOptions`/`IvResult` pyclass定義** → [#159](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/159)
+- [x] **B12. engine_pybind: データ抽出・`IVOptions`/`IVResult` pyclass定義** → [#159](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/159)
   - 依存: A3（#154）, B2（#156）
 - [x] **B13. engine_pybind: engine呼び出し・エラー変換実装** → [#169](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/169)
   - 依存: B11（#168）, B12（#159）
 - [x] **B14. engine_pybind: `first_stage()`メソッド実装** → [#170](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/170)
-  戻り値 `dict[str, OlsResults]`（内生変数名キー）。詳細: `iv-api-design.md`2.2節
+  戻り値 `dict[str, OLSResults]`（内生変数名キー）。詳細: `iv-api-design.md`2.2節
   - 依存: B13（#169）
-- [x] **B15. python_package: IV/IvResultsラッパー実装** → [#161](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/161)
+- [x] **B15. python_package: IV/IVResultsラッパー実装** → [#161](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/161)
   2SLS/GMM両対応。
   - 依存: B14（#170）
 - [x] **B16. tests/api_tests: linearmodels/ivregとの数値照合ベンチマーク作成** → [#171](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/171)
@@ -121,7 +121,7 @@ Issue化済み（2026-08-02）:
 - [x] **B17. ドキュメント（mkdocs）** → [#162](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/162)
   - 依存: B16（#171）
   - **完了済み**: Logit/Probit（`docs/api/logit.md`/`probit.md`）と同じ構成で`docs/api/iv.md`を
-    新規作成（mkdocstringsによる`IV`/`IvOptions`/`IvResults`の自動リファレンスに、IV固有の
+    新規作成（mkdocstringsによる`IV`/`IVOptions`/`IVResults`の自動リファレンスに、IV固有の
     手書き補足セクション: 標準誤差の種類、GMMの`weight_type`/反復設定、3種の診断
     （弱操作変数F統計量・過剰識別検定・Wu-Hausman検定）、`first_stage()`）。`docs/mkdocs.yml`の
     navに`API Reference > IV`を追加、`docs/getting-started.md`にIVセクション（基本的な`fit()`・
@@ -189,7 +189,7 @@ Issue化済み（2026-08-02）:
   - 依存: D5（#178）
 - [x] **D11. engine単体テストのカバレッジ確認・不足分を追加** → [#185](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/185)
   - 依存: D6〜D10（#180, #181, #182, #183, #184）
-- [x] **D12. engine_pybind: データ抽出・`FeOptions`/`FeResult` pyclass定義** → [#186](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/186)
+- [x] **D12. engine_pybind: データ抽出・`FEOptions`/`FEResult` pyclass定義** → [#186](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/186)
   - 依存: D1（#175）
 - [x] **D13. engine_pybind: engine呼び出し・エラー変換実装** → [#187](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/187)
   - 依存: D11（#185）, D12（#186）
@@ -197,7 +197,7 @@ Issue化済み（2026-08-02）:
   1-way: `dict[str, float]`。2-way: `dict[str, dict[str, float]]`
   （`"entity"`/`"time"`キー）。詳細: `panel-api-design.md`6.6節
   - 依存: D13（#187）
-- [x] **D15. python_package: FE/FeResultsラッパー実装** → [#189](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/189)
+- [x] **D15. python_package: FE/FEResultsラッパー実装** → [#189](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/189)
   - 依存: D14（#188）
 - [x] **D16. tests/api_tests: fixest/linearmodelsとの数値照合ベンチマーク作成** → [#190](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/190)
   - 依存: D15（#189）
@@ -234,11 +234,11 @@ Issue化済み（2026-08-02）:
   - 依存: C3（#174）, D5（#178）, E4（#195）
 - [x] **E8. engine単体テストのカバレッジ確認・不足分を追加** → [#199](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/199)
   - 依存: E5〜E7（#196, #197, #198）
-- [x] **E9. engine_pybind: データ抽出・`ReOptions`/`ReResult` pyclass定義** → [#200](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/200)
+- [x] **E9. engine_pybind: データ抽出・`REOptions`/`REResult` pyclass定義** → [#200](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/200)
   - 依存: E1（#192）
 - [x] **E10. engine_pybind: engine呼び出し・エラー変換実装** → [#201](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/201)
   - 依存: E8（#199）, E9（#200）
-- [x] **E11. python_package: RE/ReResultsラッパー実装** → [#202](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/202)
+- [x] **E11. python_package: RE/REResultsラッパー実装** → [#202](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/202)
   - 依存: E10（#201）
 - [x] **E12. tests/api_tests: plm/linearmodelsとの数値照合ベンチマーク作成** → [#203](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/203)
   ハウスマン検定は`plm::phtest`のみを参照値とする（Rクロスチェックの例外規定、

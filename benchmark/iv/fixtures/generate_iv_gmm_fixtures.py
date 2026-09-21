@@ -6,7 +6,7 @@ iv_gmm.json）を生成するスクリプト。
 組み合わせで呼び出し、結果を1つのJSONにまとめて書き出す。
 
 2SLS用の`iv.json`/`generate_iv_fixtures.py`とは別ファイル・別スクリプトにしている
-理由: `IV`/`IvOptions`は`method="2sls"`/`"gmm"`を単一クラスで切り替える設計だが、
+理由: `IV`/`IVOptions`は`method="2sls"`/`"gmm"`を単一クラスで切り替える設計だが、
 GMM固有の`weight_type`軸（`cov_type`とは独立、`iv-api-design.md`6.2節）がある分
 2SLSとフィクスチャの形状が異なるため、OLS/WLSと同じ「推定量ごとに別ファイル」の
 既存方針（`ols.json`/`wls.json`）に倣った（ユーザー確認済み）。

@@ -23,7 +23,7 @@ from _iv_helpers import our_fit
 from econometricsmodels import (
     IV,
     ComputationError,
-    IvOptions,
+    IVOptions,
     ValidationError,
 )
 
@@ -343,7 +343,7 @@ def test_unknown_method_raises(iv_dataset, method):
     """未知の`method`（空文字列を含む）は`ValidationError`（テスト網羅性
     候補・項目46）。
     """
-    options = IvOptions(method=method)
+    options = IVOptions(method=method)
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.UNKNOWN_IV_METHOD, method=method),
@@ -356,7 +356,7 @@ def test_unknown_cov_type_raises(iv_dataset, cov_type):
     """未知の`cov_type`（空文字列を含む）は`ValidationError`
     （テスト網羅性候補・項目46）。
     """
-    options = IvOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type)
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.UNKNOWN_COV_TYPE_LINEAR, other=cov_type),
@@ -369,7 +369,7 @@ def test_unknown_weight_type_raises(iv_dataset, weight_type):
     """未知の`weight_type`（空文字列を含む）は`ValidationError`
     （テスト網羅性候補・項目46）。
     """
-    options = IvOptions(method="gmm", weight_type=weight_type)
+    options = IVOptions(method="gmm", weight_type=weight_type)
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.UNKNOWN_WEIGHT_TYPE, other=weight_type),
@@ -378,7 +378,7 @@ def test_unknown_weight_type_raises(iv_dataset, weight_type):
 
 
 def test_cluster_without_col_raises(iv_dataset):
-    options = IvOptions(cov_type="cluster")
+    options = IVOptions(cov_type="cluster")
     with pytest.raises(
         ValidationError, match=escaped(msgs.MISSING_CLUSTER_COLUMN)
     ):
@@ -389,7 +389,7 @@ def test_cluster_col_nonexistent_column_raises(iv_dataset):
     """`cluster_col`が実在しない列名を指すと`ValidationError`（OLS/WLS/Logit/
     Probitと同じ理由、Issue #231フェーズ4）。
     """
-    options = IvOptions(cov_type="cluster", cluster_col="does_not_exist")
+    options = IVOptions(cov_type="cluster", cluster_col="does_not_exist")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
@@ -400,7 +400,7 @@ def test_cluster_col_nonexistent_column_raises(iv_dataset):
 def test_insufficient_clusters_raises(iv_dataset):
     """クラスターが1種類しかない場合`ValidationError`。"""
     df = iv_dataset.with_columns(pl.lit(0).alias("single_cluster"))
-    options = IvOptions(cov_type="cluster", cluster_col="single_cluster")
+    options = IVOptions(cov_type="cluster", cluster_col="single_cluster")
     with pytest.raises(
         ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
     ):
@@ -431,7 +431,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
         "cluster_group", [i % 2 for i in range(iv_dataset.height)]
     )
     df = iv_dataset.with_columns(cluster)
-    options = IvOptions(
+    options = IVOptions(
         method=method, cov_type="cluster", cluster_col="cluster_group"
     )
     with pytest.raises(
@@ -450,7 +450,7 @@ def test_invalid_confidence_level_raises(iv_dataset, confidence_level):
     """`confidence_level`が(0, 1)の範囲外（境界値0.0を含む）の場合
     `ValidationError`。
     """
-    options = IvOptions(confidence_level=confidence_level)
+    options = IVOptions(confidence_level=confidence_level)
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -464,7 +464,7 @@ def test_invalid_confidence_level_raises(iv_dataset, confidence_level):
 @pytest.mark.parametrize("hac_lags", [-1, 500])  # 500 == iv_dataset の n_obs
 def test_invalid_hac_lags_raises(iv_dataset, hac_lags):
     """`hac_lags`が`[0, n)`の範囲外の場合`ValidationError`。"""
-    options = IvOptions(cov_type="hac", hac_lags=hac_lags)
+    options = IVOptions(cov_type="hac", hac_lags=hac_lags)
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.INVALID_HAC_LAGS, hac_lags=hac_lags, n=500),
@@ -474,7 +474,7 @@ def test_invalid_hac_lags_raises(iv_dataset, hac_lags):
 
 @pytest.mark.parametrize("gmm_iterations", [0, -1])
 def test_invalid_gmm_iterations_raises(iv_dataset, gmm_iterations):
-    options = IvOptions(method="gmm", gmm_iterations=gmm_iterations)
+    options = IVOptions(method="gmm", gmm_iterations=gmm_iterations)
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -486,7 +486,7 @@ def test_invalid_gmm_iterations_raises(iv_dataset, gmm_iterations):
 
 @pytest.mark.parametrize("gmm_convergence", [0.0, -1.0])
 def test_invalid_gmm_convergence_raises(iv_dataset, gmm_convergence):
-    options = IvOptions(method="gmm", gmm_convergence=gmm_convergence)
+    options = IVOptions(method="gmm", gmm_convergence=gmm_convergence)
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -534,7 +534,7 @@ def test_scale_variance_raises_computation_error(cov_type):
     せずエラーパスのみ確認する（`_reference.py` から移設）。
     """
     df = pl.read_csv(DATA_DIR / "iv_scale_variance.csv")
-    options = IvOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type)
     with pytest.raises(ComputationError):
         IV(
             df,
@@ -562,7 +562,7 @@ def test_gmm_cluster_weight_type_raises_computation_error_when_cluster_count_is_
     df = iv_dataset.with_columns(
         (pl.int_range(pl.len()) < n // 2).cast(pl.Int64).alias("cluster_group")
     )
-    options = IvOptions(
+    options = IVOptions(
         method="gmm",
         weight_type="cluster",
         cluster_col="cluster_group",
@@ -586,7 +586,7 @@ def test_gmm_raise_on_non_convergence_true_raises_computation_error(
     （`raise_on_non_convergence=True`）では`ComputationError`（`MleError.
     NonConvergence`と同じ分類、`engine_pybind/src/iv/common.rs`参照）。
     """
-    options = IvOptions(
+    options = IVOptions(
         method="gmm",
         weight_type="robust",
         gmm_convergence=1e-300,
@@ -597,7 +597,7 @@ def test_gmm_raise_on_non_convergence_true_raises_computation_error(
 
 
 def test_first_stage_augment_none_raises_validation_error(iv_dataset):
-    """`first_stage()`が返す`OlsResults`は、各内生変数の第一段階回帰専用に
+    """`first_stage()`が返す`OLSResults`は、各内生変数の第一段階回帰専用に
     構築され単一のソースDataFrameを持たないため、`augment(new_data=None)`は
     `ValidationError`（`new_data`を指定した呼び出しは通常どおり動作する、
     `docs/spec/ols-spec.md`「augment()」参照、Issue #295）。

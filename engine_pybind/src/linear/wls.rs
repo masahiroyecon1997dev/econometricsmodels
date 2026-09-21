@@ -329,10 +329,7 @@ pub fn fit(
     let y_slice = extract_f64_column(&df, &y)?;
 
     // ── x列の抽出 ──────────────────────────────────────────────────────
-    let mut x_slices: Vec<Vec<f64>> = Vec::with_capacity(x.len());
-    for col_name in &x {
-        x_slices.push(extract_f64_column(&df, col_name)?);
-    }
+    let x_slices = extract_f64_columns(&df, &x)?;
 
     // ── weight列の抽出 ─────────────────────────────────────────────────
     // NaN/無限大・欠損値の検証はextract_f64_columnがy/xと同じ経路で行う。0以下の値

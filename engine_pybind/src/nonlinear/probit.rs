@@ -390,10 +390,7 @@ pub(crate) fn build_probit_input(
     let y_slice = extract_f64_column(df, &y)?;
 
     // ── x列の抽出 ──────────────────────────────────────────────────────
-    let mut x_slices: Vec<Vec<f64>> = Vec::with_capacity(x.len());
-    for col_name in &x {
-        x_slices.push(extract_f64_column(df, col_name)?);
-    }
+    let x_slices = extract_f64_columns(df, &x)?;
 
     let cov_type = parse_cov_type(df, &cov_type_lower, &options.cluster_col)?;
     let method = parse_method(&method_lower)?;

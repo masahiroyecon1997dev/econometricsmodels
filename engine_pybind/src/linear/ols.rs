@@ -327,10 +327,7 @@ pub fn fit(
     let y_slice = extract_f64_column(&df, &y)?;
 
     // ── x列の抽出 ──────────────────────────────────────────────────────
-    let mut x_slices: Vec<Vec<f64>> = Vec::with_capacity(x.len());
-    for col_name in &x {
-        x_slices.push(extract_f64_column(&df, col_name)?);
-    }
+    let x_slices = extract_f64_columns(&df, &x)?;
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
     let (cov_type, cov_type_lower) = parse_cov_type(

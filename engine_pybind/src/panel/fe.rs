@@ -79,7 +79,7 @@ use pyo3::types::PyDict;
 use pyo3_polars::PyDataFrame;
 
 use super::common::panel_error_to_pyerr;
-use crate::column_extraction::{extract_f64_column, extract_group_key_column};
+use crate::column_extraction::{extract_f64_column, extract_f64_columns, extract_group_key_column};
 use crate::errors::ValidationError;
 use crate::linear::common::mat_to_vec;
 use crate::validation::{
@@ -383,10 +383,7 @@ pub(crate) fn build_fe_input(
     // ── y/x/entity列の抽出 ─────────────────────────────────────────────
     let y_slice = extract_f64_column(df, &y)?;
 
-    let mut x_slices: Vec<Vec<f64>> = Vec::with_capacity(x.len());
-    for col_name in &x {
-        x_slices.push(extract_f64_column(df, col_name)?);
-    }
+    let x_slices = extract_f64_columns(df, &x)?;
 
     let entity_slice = extract_group_key_column(df, &entity)?;
 

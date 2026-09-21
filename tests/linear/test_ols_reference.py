@@ -4,9 +4,14 @@
 
 1. **凍結フィクスチャとの厳密比較**: `tests/fixtures/benchmarks/ols.json`
    （`benchmark/linear/fixtures/generate_ols_fixtures.py` で生成）を読み込み、
-   6つの合成データシナリオ×classical/HC0-3/HAC + クラスター(baselineのみ)で、
+   合成データシナリオ×classical/HC0-3/HAC + クラスター(baselineのみ)で、
    係数・標準誤差・検定統計量・適合度統計量を相対誤差1e-8で厳密比較する
-   （`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。Wooldridge実データ
+   （`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。クラスター系
+   （cluster/cluster_imbalanced/cluster_g2/wage1の地域クラスター）は従来
+   係数・標準誤差のみだったが、t値・p値・信頼区間・適合度統計量まで
+   `_check_result`で検証するよう拡張した（従来Rクロスチェック側にしか
+   無かった検証範囲を主リファレンス側にも追加、
+   test-coverage-candidates.md項目28）。Wooldridge実データ
    （wage1/gpa2、classical/HC0-3 + wage1のみ地域クラスター）も同じフィクスチャ
    経由で検証する（従来Rクロスチェック側にしか無かった実データ検証を主
    リファレンス側にも追加、test-coverage-candidates.md項目13・33）。全シナリオの
@@ -193,16 +198,16 @@ def test_predict_new_data_matches_frozen_statsmodels(fixtures):
 def test_cluster_matches_statsmodels(fixtures):
     """クラスターロバストSE。`generate_ols_fixtures.py`と同じ疑似グループ
     （行番号%10）を再現する。統計的な意味はなく、実装の動作確認用のため
-    `baseline`シナリオのみ（`coef`/`se`のみが記録されている）。
+    `baseline`シナリオのみ。coef/seだけでなくt値・p値・信頼区間・適合度統計量
+    まで`_check_result`で検証する（従来coef/seのみだった非対称の解消、
+    test-coverage-candidates.md項目28）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, 10)
     options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
     res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
-    ref = fixtures["baseline"]["cluster"]
-    _assert_dict_close(res.params, ref["coef"], "cluster/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster/se")
+    _check_result(res, fixtures["baseline"]["cluster"], "cluster")
 
 
 def test_cluster_imbalanced_matches_statsmodels(fixtures):
@@ -210,6 +215,8 @@ def test_cluster_imbalanced_matches_statsmodels(fixtures):
 
     均等サイズの疑似グループ（行番号%10）だけでは見逃す、実務で起こりやすい
     グループサイズの偏りを持つケース（`testing-policy.md`「テスト用データセット」3.）。
+    coef/seに加えt値・p値・信頼区間・適合度統計量も検証する
+    （test-coverage-candidates.md項目28）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     groups = imbalanced_cluster_groups(df.height)
@@ -217,9 +224,9 @@ def test_cluster_imbalanced_matches_statsmodels(fixtures):
     options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
     res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
-    ref = fixtures["baseline"]["cluster_imbalanced"]
-    _assert_dict_close(res.params, ref["coef"], "cluster_imbalanced/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster_imbalanced/se")
+    _check_result(
+        res, fixtures["baseline"]["cluster_imbalanced"], "cluster_imbalanced"
+    )
 
 
 def test_cluster_g2_matches_statsmodels(fixtures):
@@ -229,16 +236,15 @@ def test_cluster_g2_matches_statsmodels(fixtures):
     `rank(Ŝ)≤G-1`のためロバストWald検定のq×q部分行列が構造的に特異になり、
     `fit()`冒頭のバリデーションが`ValidationError`で弾く（成功パスにならない。
     `test_ols_validation.py::test_cluster_count_at_most_slopes_raises_`
-    `validation_error`参照、Issue #289）。
+    `validation_error`参照、Issue #289）。coef/seに加えt値・p値・信頼区間・
+    適合度統計量も検証する（test-coverage-candidates.md項目28）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
     df = with_cluster_groups(df, 2)
     options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
     res = OLS(df, y="y", x=["x1"], options=options).fit()
 
-    ref = fixtures["baseline"]["cluster_g2"]
-    _assert_dict_close(res.params, ref["coef"], "cluster_g2/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster_g2/se")
+    _check_result(res, fixtures["baseline"]["cluster_g2"], "cluster_g2")
 
 
 # Wooldridge実データ用のy/x列構成。`generate_ols_fixtures.py`のformula文字列
@@ -283,7 +289,8 @@ def test_wooldridge_wage1_region_cluster_matches_statsmodels(
     基準カテゴリnortheast、4グループ・不均衡サイズ）でのクラスターロバストSE。
     疑似グループ（行番号%N）ではなく実データに由来するグループ構造での検証
     （`test_ols_crosscheck.py::test_wooldridge_wage1_region_cluster_matches_r`
-    と同じ発想、こちらはstatsmodels側）。
+    と同じ発想、こちらはstatsmodels側）。coef/seに加えt値・p値・信頼区間・
+    適合度統計量も検証する（test-coverage-candidates.md項目28）。
     """
     df = load_wooldridge("wage1")
     region = (
@@ -302,9 +309,7 @@ def test_wooldridge_wage1_region_cluster_matches_statsmodels(
         df, y="lwage", x=["educ", "exper", "tenure"], options=options
     ).fit()
 
-    ref = fixtures["wage1"]["cluster"]
-    _assert_dict_close(res.params, ref["coef"], "wage1/cluster(region)/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "wage1/cluster(region)/se")
+    _check_result(res, fixtures["wage1"]["cluster"], "wage1/cluster(region)")
 
 
 # ── ライブ statsmodels との照合（共有 dataset フィクスチャ） ────────

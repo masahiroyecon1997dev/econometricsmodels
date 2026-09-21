@@ -44,6 +44,61 @@ def _load_synthetic(dataset: str) -> tuple[pl.DataFrame, list[float]]:
     return load_frozen_dataset("synthetic", dataset)
 
 
+def extract_full_fit_stats(model, confidence_level: float = 0.95) -> dict:
+    """statsmodelsのfit結果から、係数・標準誤差に加えcov_type依存の検定統計量
+    （t値・p値・信頼区間・ロバストWald F検定）・適合度統計量まで含めたフルの
+    辞書を取り出す。`run()`本体と、クラスター専用フィクスチャ生成
+    （`generate_ols_fixtures.py`の`_run_cluster_case`等）の双方で共有する
+    （従来クラスター側は`coef`/`se`のみでt値・p値・信頼区間が未検証だった非対称の
+    解消、test-coverage-candidates.md項目28）。
+
+    Args:
+        model: statsmodelsのfit結果（`use_t=True`でfitしたもの。呼び出し側の
+            責務——`cov_type="cluster"`のとき`use_t=True`が無いと既定で
+            正規分布（自由度`n-k`ではなく暗黙に無限大）を使ってしまい、
+            本プロジェクトのt分布統一方針・`cluster`時の自由度`G-1`
+            〔`docs/spec/ols-spec.md`「標準誤差」〕と一致しなくなる）。
+        confidence_level: 信頼区間の信頼水準。
+
+    Returns:
+        `coef`/`se`/`t_stats`/`p_values`/`conf_int`/`r_squared`/
+        `r_squared_adj`/`f_statistic`/`f_p_value`/`aic`/`bic`/
+        `log_likelihood`/`nobs`/`df_resid`を含む辞書（パラメータ名の
+        "Intercept"→"const"正規化済み）。
+    """
+    alpha = 1.0 - confidence_level
+    ci = model.conf_int(alpha=alpha)
+
+    raw: dict = {
+        **extract_coef_se(model),
+        "t_stats": {
+            str(k): float(v) for k, v in model.tvalues.to_dict().items()
+        },
+        "p_values": {
+            str(k): float(v) for k, v in model.pvalues.to_dict().items()
+        },
+        "conf_int": {
+            str(idx): [float(row[0]), float(row[1])]
+            for idx, row in ci.iterrows()
+        },
+    }
+    # patsy（formula API）由来の生の切片名"Intercept"を、生成時点で本実装の
+    # "const"へ正規化する（Rクロスチェック側`normalize_names`と同じ処理を
+    # 生成時に揃える。`docs/planning/specs/refactoring-issue231-progress.md`
+    # 項目63参照）。
+    result = normalize_names(raw, stat_key="t_stats")
+    result["r_squared"] = float(model.rsquared)
+    result["r_squared_adj"] = float(model.rsquared_adj)
+    result["f_statistic"] = float(model.fvalue)
+    result["f_p_value"] = float(model.f_pvalue)
+    result["aic"] = float(model.aic)
+    result["bic"] = float(model.bic)
+    result["log_likelihood"] = float(model.llf)
+    result["nobs"] = int(model.nobs)
+    result["df_resid"] = int(model.df_resid)
+    return result
+
+
 def run(
     dataset_source: str,
     dataset: str,
@@ -93,36 +148,7 @@ def run(
     else:
         model = smf.ols(formula=formula, data=pandas_df).fit(**fit_kwargs)
 
-    alpha = 1.0 - confidence_level
-    ci = model.conf_int(alpha=alpha)
-
-    raw: dict = {
-        **extract_coef_se(model),
-        "t_stats": {
-            str(k): float(v) for k, v in model.tvalues.to_dict().items()
-        },
-        "p_values": {
-            str(k): float(v) for k, v in model.pvalues.to_dict().items()
-        },
-        "conf_int": {
-            str(idx): [float(row[0]), float(row[1])]
-            for idx, row in ci.iterrows()
-        },
-    }
-    # patsy（formula API）由来の生の切片名"Intercept"を、生成時点で本実装の
-    # "const"へ正規化する（Rクロスチェック側`normalize_names`と同じ処理を
-    # 生成時に揃える。`docs/planning/specs/refactoring-issue231-progress.md`
-    # 項目63参照）。
-    result = normalize_names(raw, stat_key="t_stats")
-    result["r_squared"] = float(model.rsquared)
-    result["r_squared_adj"] = float(model.rsquared_adj)
-    result["f_statistic"] = float(model.fvalue)
-    result["f_p_value"] = float(model.f_pvalue)
-    result["aic"] = float(model.aic)
-    result["bic"] = float(model.bic)
-    result["log_likelihood"] = float(model.llf)
-    result["nobs"] = int(model.nobs)
-    result["df_resid"] = int(model.df_resid)
+    result = extract_full_fit_stats(model, confidence_level)
     if true_beta is not None:
         result["true_beta"] = true_beta
 

@@ -27,13 +27,16 @@ import statsmodels
 from benchmark.common import (
     BENCHMARKS_DIR,
     DATA_DIR,
-    extract_coef_se,
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
 from benchmark.linear.constants import HAC_MAXLAGS, PREDICT_NEW_DATA
-from benchmark.linear.references.statsmodels_ref import run, run_predict
+from benchmark.linear.references.statsmodels_ref import (
+    extract_full_fit_stats,
+    run,
+    run_predict,
+)
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md「テストの3系統」参照）。
 # ComputationErrorが発生することのみをテストコード側で対応する。scale_varianceは
@@ -180,7 +183,15 @@ def build_fixtures() -> dict:
             "Rクロスチェック側（ols_crosscheck.json）にしか無かったpredict()の"
             "検証を主リファレンス側にも追加したもの（test-coverage-candidates.md"
             "項目17）。Wooldridge実データ側はRクロスチェック側と同じくpredict()"
-            "検証の対象外。"
+            "検証の対象外。クラスター系（cluster/cluster_imbalanced/cluster_g2/"
+            "wage1.cluster）は従来coef/seのみだったが、t_stats/p_values/"
+            "conf_int/r_squared等のフル統計量まで検証範囲を広げた"
+            "（_run_cluster_case等がextract_full_fit_statsを使うよう変更、"
+            "test-coverage-candidates.md項目28）。あわせて_run_cluster_caseに"
+            "use_t=Trueが指定されていなかった不備を修正（cluster時に既定の"
+            "正規分布ではなく自由度G-1のt分布を使う本プロジェクトの方針"
+            "〔docs/spec/ols-spec.md「標準誤差」〕に合わせた。coef/seは"
+            "use_tに依存しないため既存フィクスチャの値に影響なし）。"
         ),
     }
     return fixtures
@@ -212,20 +223,24 @@ def _run_cluster_case(
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
     formula = "y ~ " + " + ".join(x_cols)
 
+    # use_t=Trueが無いと既定で正規分布を使ってしまい、本プロジェクトのt分布
+    # 統一方針・cluster時の自由度G-1（docs/spec/ols-spec.md「標準誤差」）と
+    # 一致しなくなる（test-coverage-candidates.md項目28で発覚した抜け）。
     model = smf.ols(formula=formula, data=pandas_df).fit(
-        cov_type="cluster", cov_kwds={"groups": pandas_df["_group"]}
+        cov_type="cluster",
+        cov_kwds={"groups": pandas_df["_group"]},
+        use_t=True,
     )
 
-    return {
-        **extract_coef_se(model),
-        "_meta": {
-            "reference": "statsmodels",
-            "statsmodels_version": statsmodels.__version__,
-            "generated_at": datetime.now(UTC).isoformat(),
-            "note": note,
-            "formula": formula,
-        },
+    result = extract_full_fit_stats(model)
+    result["_meta"] = {
+        "reference": "statsmodels",
+        "statsmodels_version": statsmodels.__version__,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "note": note,
+        "formula": formula,
     }
+    return result
 
 
 def _run_wage1_region_cluster_case() -> dict:
@@ -257,30 +272,18 @@ def _run_wage1_region_cluster_case() -> dict:
         use_t=True,
     )
 
-    # patsy由来の切片名"Intercept"を、同じwage1配下の他cov_type（run()経由で
-    # normalize_names適用済み）と揃えて"const"に正規化する。normalize_names
-    # 自体はt_stats/p_values/conf_intの存在を前提とするため（coef/seのみの
-    # このケースには使えない）、ここではcoef/seのみ直接畳む。
-    raw = extract_coef_se(model)
-    coef_se = {
-        stat: {
-            ("const" if name == "Intercept" else name): value
-            for name, value in values.items()
-        }
-        for stat, values in raw.items()
+    # 切片名"Intercept"→"const"正規化はextract_full_fit_stats内部
+    # （normalize_names経由）で行われる。
+    result = extract_full_fit_stats(model)
+    result["_meta"] = {
+        "reference": "statsmodels",
+        "statsmodels_version": statsmodels.__version__,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "note": "wage1の実カテゴリ列region"
+        "（northcen/south/west、基準northeast）でのクラスターロバストSE。",
+        "formula": formula,
     }
-
-    return {
-        **coef_se,
-        "_meta": {
-            "reference": "statsmodels",
-            "statsmodels_version": statsmodels.__version__,
-            "generated_at": datetime.now(UTC).isoformat(),
-            "note": "wage1の実カテゴリ列region"
-            "（northcen/south/west、基準northeast）でのクラスターロバストSE。",
-            "formula": formula,
-        },
-    }
+    return result
 
 
 if __name__ == "__main__":

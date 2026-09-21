@@ -49,45 +49,6 @@
   標準化パラメータノルム≈580、閾値100の約5.8倍）。Issue #317（小標本境界
   での検出漏れ、閾値が緩すぎる方向）とは逆方向の問題。
 
-### 14. クラスターロバストSEのG<q境界を`ComputationError`ではなく`ValidationError`にすべきでは（設計判断候補、OLS/WLS/IVの再分類＋Logit/Probitへの新規検証追加）
-
-- **対象**: `engine/src/linear/`（OLS/WLS、`ComputationError`扱い済み）・`engine/src/iv/`
-  （IV、同様の扱いと推測、要確認）・`engine/src/nonlinear/`（Logit/Probit、現状この種の
-  検証自体が無い）
-- **内容**: ユーザー提案（2026-08-15）。クラスターロバストSEのG（クラスター数のユニーク数）と
-  q（傾き係数の数）の関係は、実際の行列計算を一切せずに入力データフレームと列指定だけから
-  即座に判定できる（`df[cluster_col].n_unique()`と説明変数の列数を数えるだけ）。これは
-  「実際に計算してみないと分からない」典型的な`ComputationError`（完全な多重共線性等）とは
-  性質が異なり、`ValidationError`（入力起因、事前チェック可能）に分類し直す方が筋が通る
-  という提案。
-  - 背景（`generate_logit_fixtures.py`解説時の議論）: OLSはG<qのときF検定の`q×q`部分行列
-    反転が構造的に特異になり`fit()`全体が`ComputationError`になる設計。Logitは overall
-    有意性検定がWald型F検定ではなく尤度比検定（LR検定）のため同種の強制失敗ステップが無く、
-    G=2でも係数・標準誤差が普通に返る。ただし「ソフトウェアとして正しく計算できる」ことと
-    「G=2でクラスターロバストSEを統計的に信頼してよいか」は別問題で、クラスターロバストSEの
-    漸近的正当化はG依存のため、この脆弱性自体はLogitにも同様に存在する（OLSはF検定の破綻という
-    形で表面化するが、Logitは表面化しないまま数値だけ返る）。
-- **Claudeの所感**: 提案の理屈（G/qが事前にトリビアルに判定できる）には妥当性があるが、
-  実施すると（1）OLS/WLS/IVの既存`ComputationError`前提テスト（`test_cluster_g2_with_
-  multiple_slopes_raises_computation_error`等）の更新、（2）Logit/Probitへの新規検証ロジック
-  追加（単なる再分類ではなく機能追加）、（3）`docs/spec/ols-spec.md`等の該当箇所更新が
-  必要になり、`refactor`スキルの範囲外（ロジックの挙動を変える変更）の規模になる。
-  **ただし、現在`0.x.x`のプレリリース期間中（CLAUDE.md 8章「0.x.xのプレリリース期間中は、
-  Yの変更でも破壊的変更を許容する」）のため、エラー分類の変更を含む破壊的変更を行う
-  ハードルは低い**。実施するならまずIssue化し、対象範囲（OLS/WLS/IVの再分類のみか、
-  Logit/Probitへの新規追加も含めるか）を確定させてから着手するのが良いと思われる。
-- **気づいた経緯**: 2026-08-15、`generate_logit_fixtures.py`解説後のユーザー提案。
-- **状態**: **対応済み（クローズ、2026-09-06）**。Issue #289（アンブレラ）＋サブタスク#287で
-  実装。閾値は当初提案の`G < q`ではなく**`G <= q`**を採用した——OLS/MLEの一次条件
-  （`X'e = 0` / `Σ_i s_i = 0`）によりクラスター寄与スコアの総和が厳密にゼロになるため
-  `rank(Ŝ) ≤ G - 1`であり、`G = q`ちょうども数学的に常に特異（`ensure_well_conditioned_
-  symmetric_matrix`の相対閾値が検出できるかがデータ依存だっただけ）。新エラー
-  `CommonError::InsufficientClustersForInference { g, q }`（`ValidationError`）を
-  OLS/WLS/Tobit/Logit/Probit/IV(2SLS,GMM)横断で`fit()`冒頭に追加。`G > q`かつ悪条件の
-  残余は従来どおり`ComputationError`がbackstop。GMMの`weight_type=Cluster`（重み行列`S`が
-  `G<l`で特異）は別軸として#290に分離。少数クラスタ一般の信頼性は`refactoring-
-  candidates-2.md`項目90（doc注記のみ・別軸）として残置。
-
 ### 15. IV: 複数内生変数対応後もCragg-Donald統計量をv1スコープ外のままにしてよいか（設計判断候補）
 
 - **対象**: `iv-api-design.md`6.4節（弱操作変数診断）・`engine/src/iv/two_sls.rs`の
@@ -121,40 +82,6 @@
   Issue化済み（[#249](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/249)）。
 - **気づいた経緯**: 2026-08-16、`generate_iv_gmm_fixtures.py`解説後のユーザー提案。
 - **状態**: 未対応（[#249](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/249)で検討中）
-
-### 17. OLS: `predict()`が主リファレンス（statsmodels）側で一度も検証されていない
-
-- **対象**: `benchmark/linear/references/statsmodels_ref.py`・
-  `benchmark/linear/fixtures/generate_ols_fixtures.py`・
-  `tests/linear/test_ols_fixtures.py`（いずれも`predict`/`fitted`という単語が一切登場しない、
-  実測確認済み）
-- **内容**: ユーザー指摘（2026-08-16）。`predict()`を実際に検証しているのは
-  `tests/linear/test_ols_crosscheck.py`（Rクロスチェック側、`test_predict_none_matches_r_
-  fitted_values`・`test_predict_new_data_matches_r`の2テスト）のみで、**主リファレンス
-  （statsmodels）側では一度も検証されていない**。`testing-policy.md`の設計思想
-  （statsmodelsを主リファレンス、Rは独立実装によるクロスチェック）に照らすと、
-  本来あるべき優先順位が逆転している。statsmodelsの`results.predict()`/
-  `results.fittedvalues`は同等の機能を持つため、`benchmark/linear/references/statsmodels_ref.py`側にも
-  追加できるはず。
-- **Claudeの所感**: 項目13（OLSの実データ検証がRクロスチェック側のみで主リファレンス側に
-  無い）と同種の「主リファレンス側の検証が手薄」パターン。`generate_ols_fixtures.py`の
-  `run()`呼び出しに`predict`/`fitted`のキーを追加し、`test_ols_fixtures.py`に対応する
-  テストを追加する形で対応できそう。
-- **気づいた経緯**: 2026-08-16、`benchmark/linear/references/run_lm_predict_crosscheck.R`解説後のユーザー指摘。
-- **状態**: 対応済み（2026-09-21）。記録時点から状況が変化しており、`predict()`のstatsmodels照合自体は
-  記録前（2026-07-31）から`test_ols_api.py`にライブ照合として存在していた（`test_predict_none_matches_
-  statsmodels_fitted_values`等、凍結フィクスチャと同じ許容誤差だが1データセット・スモーク級）。
-  ユーザー確認の上、Rクロスチェック側（`ols_crosscheck.json`）と同じ網羅性（全シナリオ×fitted、
-  baselineのみout-of-sample predicted）を凍結フィクスチャパイプライン側にも追加する方針とした。
-  `benchmark/linear/references/statsmodels_ref.py`に`run_predict()`を新設（cov_type非依存のため
-  既存`run()`とは別関数）、`generate_ols_fixtures.py`で各シナリオに`predict`キーを追加、
-  `tests/linear/test_ols_reference.py`に`test_predict_none_matches_frozen_statsmodels`・
-  `test_predict_new_data_matches_frozen_statsmodels`を追加。`PREDICT_NEW_DATA`（out-of-sample新規データ）は
-  `generate_ols_crosscheck_fixtures.py`から`benchmark/linear/constants.py`へ移設し、主リファレンス・
-  クロスチェック双方から単一定義元として参照する形にした（値は不変、移設前後でフィクスチャの
-  非メタ部分が完全一致することを確認済み）。`test_ols_api.py`側の既存ライブ照合はpredict()のAPI面の
-  スモークテストとして引き続き残す。Wooldridge実データ側はRクロスチェック側と同じくpredict()検証の
-  対象外（元々そちらも未対応のため、本項目のスコープ外）。
 
 ### 18. OLS: `gpa2`を`mroz`に置き換え、実データでの線形確率モデル（LPM）検証を追加する案
 
@@ -338,61 +265,6 @@
 - **気づいた経緯**: 2026-08-22、`tests/linear/test_ols.py`解説後のユーザー指摘。
 - **状態**: 未対応（設計判断待ち、`refactoring-candidates-2.md`項目6と関連）
 
-### 26. `ValidationError`の検証範囲: `y`が空文字列のケースが無い／例外メッセージ内容を検証するテストが無い
-
-- **対象**: [tests/linear/test_ols.py](../../../tests/linear/test_ols.py)のエラーハンドリング
-  ブロック（151〜277行目）。`tests/`配下全体で`pytest.raises(..., match=...)`が
-  0件（`grep`で確認）。
-- **内容**: ユーザー指摘（2026-08-22）を受けて確認。(1) `y=""`（空文字列の
-  列名）を渡すケースの専用テストが無い（`x`が空リストの`test_empty_x_raises`は
-  存在するが対称なテストが`y`側に無い）。(2) 例外の**型**（`ValidationError`/
-  `ComputationError`）を確認するテストはあるが、**メッセージの内容**を
-  確認するテストは`tests/`配下に1件も無い。一方Rust側
-  （[engine/src/linear/ols.rs:1180](../../../engine/src/linear/ols.rs#L1180)
-  `least_squares_error_messages_are_human_readable`）はメッセージ文字列を
-  `assert_eq!`で厳密検証しており、
-  [engine_pybind/src/errors.rs:45-46](../../../engine_pybind/src/errors.rs#L45-L46)
-  で`err.to_string()`がそのままPython例外メッセージになる実装のため、
-  「Rustで検証済みのメッセージが、Python境界まで壊れずに伝わるか」を
-  確認する層が丸ごと欠けている。
-- **Claudeの所感**: `y=""`は`test_missing_column_raises`（存在しない列名）の
-  亜種として暗黙にカバーされている可能性はあるが、意図的な検証ではないため
-  専用テストの追加が望ましい。メッセージ検証は全パターンに広げる必要はなく、
-  169・317・503行目周辺（`test_hac_time_col_reorders_rows_before_computing_lags`
-  等、既に「Rust単体テストと対になるPython API境界確認」という位置づけの
-  テストがある）と同じ考え方で、代表的な1〜2件に`match=`を追加すれば
-  「Rust→Python境界でメッセージが壊れない」ことの確認としては十分と考える。
-- **気づいた経緯**: 2026-08-22、`tests/linear/test_ols.py`解説後のユーザー指摘。
-- **状態**: **対応済み（2026-09-11）**。`y=""`テストと例外メッセージ内容の検証を
-  OLS/WLS/Logit/Probit/Tobit/IV全系統に横展開した。メッセージ文字列は
-  `tests/_error_messages.py`（新規、`_constants.py`/`_tolerances.py`と同じ並びの
-  共有ファイル）にRust側（`engine/src/error.rs`のCommonError・
-  `engine_pybind/src/column_extraction.rs`・`engine_pybind/src/validation.rs`・
-  各系統の`cov_type`/`method`文字列パース）のメッセージをテンプレート文字列として
-  集約し、`pytest.raises(ValidationError, match=escaped(TEMPLATE, ...))`
-  （`escaped()`は`str.format`後に`re.escape`するヘルパー）で各テストから参照する
-  形にした。系統間で文言が完全一致するメッセージ（CommonError・column_extraction
-  由来）はそのまま共有定数を使い回せるため、直書きの重複を避けられた。
-  実装過程で以下の事実確認上の発見があった（メッセージを実測するまで気づけな
-  かった類のもの）。
-  - `test_non_numeric_dtype_raises`系（全系統）: polarsの`cast(Float64)`は
-    数値として解釈できない文字列を「キャストエラー」ではなく**null**に変換する
-    ため、想定した`COLUMN_NOT_CASTABLE_TO_NUMERIC`ではなく
-    `COLUMN_HAS_MISSING_VALUES`経路を通ることが判明（該当分岐は現状どのテストも
-    踏んでいない）。
-  - IV系統: `IvError::FirstStageFailed`絡みで、Issue #289が
-    `TwoSlsEstimator::fit`/`GmmEstimator::fit`冒頭に追加した「構造方程式のqを
-    使ったG<=qの事前チェック」が、Python API（`engine_pybind::fit()`）からは
-    **実質到達不能**であることが判明（`engine_pybind::fit()`が弱操作変数診断用に
-    `compute_first_stage`を無条件で先に呼ぶため、第一段階回帰自身の同種チェック
-    ——識別条件上`q`が構造方程式以上になる——が常に先に`FirstStageFailed`として
-    発火する）。ドキュメント（`engine/src/iv/CLAUDE.md`）・既存テストの
-    docstringはこの事前チェックが直接発火する前提で書かれていたが、実際に
-    観測される例外は常にラップされた第一段階側のメッセージだった。ユーザー判断
-    により今回は記録のみ（項目65参照、修正は別Issueで検討）。
-  - Tobitの`test_insufficient_observations_raises`: `k`はLogit/Probitの`k=3`
-    ではなく`k=4`（`sigma`もMLEパラメータとして数えるため）。
-
 ### 27. `include_intercept=False`・`confidence_level`オプションの効果が、frozen JSON数値照合（fixturesパイプライン）で検証されていない
 
 - **対象**: [benchmark/linear/datasets.py](../../../benchmark/linear/datasets.py)・
@@ -422,38 +294,6 @@
 - **気づいた経緯**: 2026-08-22、`tests/linear/test_ols.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち、`refactoring-candidates-2.md`
   項目52と関連）
-
-### 28. クラスターロバストSEのt値・p値・信頼区間が、主リファレンス（statsmodels）側では検証されていない（Rクロスチェック側にはある非対称）
-
-- **対象**: [benchmark/linear/fixtures/generate_ols_fixtures.py:114-150](../../../benchmark/linear/fixtures/generate_ols_fixtures.py#L114-L150)
-  （`_run_cluster_case`、返り値が`coef`/`se`のみ）と対比した
-  [tests/linear/test_ols_crosscheck.py:112-150](../../../tests/linear/test_ols_crosscheck.py#L112-L150)
-  （`_assert_fit_stats_close`、cluster系テストからも呼ばれ、t_stats/p_values/
-  conf_intまで含めてR側と数値照合している）
-- **内容**: ユーザー指摘（2026-08-23）を受けて確認。`test_ols_fixtures.py`の
-  クラスター系4テスト（`test_cluster_matches_statsmodels`・
-  `test_cluster_imbalanced_matches_statsmodels`・
-  `test_cluster_g2_matches_statsmodels`、いずれも`coef`/`se`のみ照合）は
-  statsmodelsとの数値照合が係数・標準誤差止まりで、t値・p値・信頼区間は
-  検証していない。一方`test_ols_crosscheck.py`の同名クラスター系テスト
-  （`test_cluster_matches_r`等）は`_assert_fit_stats_close`経由でt値・p値・
-  信頼区間までRと数値照合している。つまりクラスターのt値・p値・信頼区間は
-  「クロスチェック（R）とは照合されているが、主リファレンス（statsmodels）
-  とは照合されていない」という、優先順位が逆転した非対称な状態になっている。
-- **Claudeの所感**: `testing-policy.md`は主リファレンスを最も信頼する基準と
-  位置付けているため、主リファレンス側の検証範囲がクロスチェック側より
-  狭いのは本来のあるべき優先順位と逆だと考える。`_run_cluster_case`の
-  返り値にt値・p値・信頼区間を追加し、`test_ols_fixtures.py`側の
-  クラスター系テストも`_check_result`相当（または部分適用）まで
-  検証を広げるのが妥当。
-- **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_fixtures.py`解説中の
-  ユーザー指摘を受けて`test_ols_crosscheck.py`と突き合わせて確認。
-- **状態**: 未対応（着手要否はユーザー判断待ち）。2026-09-21、項目17
-  （`predict()`の主リファレンス側検証追加）対応時に`testing-completeness-reviewer`が
-  同種の「一方の参照実装（R）だけ先行している」非対称パターンとして再指摘。
-  項目17で採った対応方針（`_run_cluster_case`等の返り値を拡張し、
-  凍結フィクスチャパイプライン側で主リファレンスの検証範囲をRクロスチェック側に
-  揃える）がそのまま横展開の参考になる。
 
 ### 29. クラスターロバストSEが、どの検証層でも`baseline`シナリオでしか数値比較されていない（悪条件・境界シナリオとの組み合わせが未検証）
 
@@ -587,36 +427,6 @@
 - **気づいた経緯**: 2026-08-23、`tests/linear/test_wls.py`解説後のユーザー指摘を
   受けた確認。
 - **状態**: 未対応（着手要否はユーザー判断待ち。(3)は優先度低）
-
-### 35. `test_cov_type_label`/`test_cov_type_is_case_insensitive`がOLS・WLSともHACを含んでいない（大文字小文字を区別しないことが未検証）
-
-- **対象**: [tests/linear/test_ols.py:478-484](../../../tests/linear/test_ols.py#L478-L484)・
-  [tests/linear/test_wls.py:372-386](../../../tests/linear/test_wls.py#L372-L386)
-  （`test_cov_type_label`、`["classical", "hc0", "hc1", "hc2", "hc3"]`＋
-  cluster別途、hac無し）、
-  [tests/linear/test_ols.py:487-507](../../../tests/linear/test_ols.py#L487-L507)・
-  [tests/linear/test_wls.py:389-411](../../../tests/linear/test_wls.py#L389-L411)
-  （`test_cov_type_is_case_insensitive`、`CLASSICAL`/`HC0`〜`hc3`/
-  `nonrobust`のみパラメータ化、`HAC`/`Hac`等は無し）
-- **内容**: ユーザー指摘（2026-08-23）を受けて確認。`res.cov_type == "hac"`
-  になること自体は別テスト（`test_hac_runs_and_returns_finite_std_errors`
-  等）で確認済みだが、**HACが大文字小文字を区別しないこと**
-  （`"HAC"`/`"Hac"`等）は`test_cov_type_is_case_insensitive`のパラメータ
-  リストに含まれておらず、OLS・WLSどちらでも未検証。
-- **Claudeの所感**: `parse_cov_type`（`engine_pybind/src/linear/common.rs`）は
-  `cov_type_lower.as_str()`で全cov_typeを同じロジックで判定しているため
-  実装上のリスクは低いと考えられるが、他のcov_type全てで大文字小文字
-  バリエーションをテストしているのにHACだけ抜けているのは網羅性として
-  片手落ち。`hac_lags`を明示する必要がある分岐の複雑さが、抜けの一因かもしれない。
-- **気づいた経緯**: 2026-08-23、`tests/linear/test_wls.py`解説後のユーザー指摘。
-- **状態**: 対応済み（2026-09-19）。`tests/linear/test_ols_api.py`・
-  `tests/linear/test_wls_api.py`の`test_cov_type_is_case_insensitive`に
-  `("HAC", "hac")`・`("Hac", "hac")`を追加。IV/Logit/Probit/Tobitへの
-  対象拡大も検討したが、調査の結果IV（`tests/iv/test_iv_api.py`）は
-  Issue #307対応で既にHAC含め`method`/`cov_type`/`weight_type`の
-  大文字小文字非依存性テストが完備済み、Logit/Probit/Tobitはそもそも
-  `cov_type`にHACの選択肢が無い（`opg`/`hc0`/`hc1`等はテスト済み）ため
-  対象外と判断。実質的な抜けはOLS/WLSのみだった。
 
 ### 36. WLSのHACクロスチェックで、statsmodels側とR側が異なるラグ値でNewey-West公式を検証しており、同一設定が両方の独立実装から検証されていない
 
@@ -930,72 +740,6 @@
   `test_<method>_crosscheck.py`・対応する`generate_*_fixtures.py`/
   `generate_*_crosscheck_fixtures.py`が対象になる見込み）
 
-### 46. `method`/`cov_type`/`weight_type`の空文字列入力に対する専用テストが無い（IV/Logit/Probit/OLS/WLS共通）
-
-- **対象**: [tests/test_iv.py:504-519](../../../tests/test_iv.py#L504-L519)
-  （`test_unknown_method_raises`等、`"invalid"`のみ）。`grep`で確認した
-  ところ、`method=""`/`cov_type=""`/`weight_type=""`という空文字列を
-  明示的に試すテストはIV/Logit/Probit/OLS/WLSいずれにも存在しない。
-- **内容**: ユーザー指摘（2026-08-30、「methodが空文字みたいなテストは
-  logit/probit含めてない？」）を受けて確認。実機で`IvOptions(method="")`・
-  `IvOptions(cov_type="")`・`IvOptions(method="gmm", weight_type="")`を
-  試したところ、いずれも`"invalid"`と同じ`ValidationError`（分かりやすい
-  メッセージ付き）になることを確認した——**バグではない**が、空文字列は
-  「文字列が来ることは来るが値が無い」という`"invalid"`とは性質の異なる
-  境界値であり（例えば実装が`.is_empty()`を先に特別扱いしていた場合、
-  その分岐だけ`match`の網羅から漏れて別の挙動になるリスクがある）、
-  ロックインする専用テストが無いのはリポジトリ全体の共通の抜けと言える。
-- **Claudeの所感**: 実害は確認されなかったが、`@pytest.mark.parametrize`
-  の値リストに`""`を1つ追加するだけで済む安価な対応。IVで気づいた点だが
-  対象は全手法に及ぶため、着手する場合は一括対応が効率的。
-- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘、
-  実機検証で確認。
-- **状態**: 対応済み（2026-09-19）。対象全手法で既存の「未知の値」
-  テスト（従来`"invalid"`/`"bogus"`の単一値のみ）を`@pytest.mark.parametrize`化し
-  空文字列`""`のケースを追加。OLS/WLS（`test_ols_validation.py`・
-  `test_wls_validation.py`の`test_invalid_cov_type_raises`、`cov_type`のみ、
-  `method`/`weight_type`は存在しない）、Logit/Probit（共通ヘルパー
-  `tests/nonlinear/_binary_choice_checks.py`の
-  `check_unknown_cov_type_raises`/`check_unknown_method_raises`に
-  デフォルト引数付きの`cov_type`/`method`引数を追加）、Tobit
-  （`test_tobit.py`、共通ヘルパーを使わず個別実装のためインラインで
-  parametrize化）、IV（`test_iv_validation.py`の
-  `test_unknown_method_raises`/`test_unknown_cov_type_raises`/
-  `test_unknown_weight_type_raises`）。全て想定通り`ValidationError`が
-  発生することを確認済み（バグは見つからず、ロックインのみ）。
-
-### 47. `IvOptions`等の数値・真偽値フィールドに型の異なる値を渡した場合の`TypeError`テストが無い（リポジトリ全体）
-
-- **対象**: `IvOptions.gmm_iterations`/`gmm_convergence`/
-  `raise_on_non_convergence`（[tests/test_iv.py:817-828](../../../tests/test_iv.py#L817-L828)
-  周辺、値の範囲外〔`ValidationError`〕は検証されているが型違いは無い）。
-  `grep -rn "TypeError" tests/`は0件で、他手法の同種オプション
-  （`max_iter`/`tol`等）も同様に未検証。
-- **内容**: ユーザー指摘（2026-08-30、「gmm_convergence, gmm_iterations,
-  raise_on_non_convergenceの指定された値の型が想定と不一致だった時の
-  テストはある？」）を受けて実機確認した。`IvOptions(gmm_iterations="abc")`
-  →`TypeError: 'str' object cannot be interpreted as an integer`、
-  `IvOptions(gmm_convergence="abc")`→`TypeError: must be real number, not
-  str`、`IvOptions(raise_on_non_convergence="not_a_bool")`→
-  `TypeError: 'str' object is not an instance of 'bool'`、
-  `IvOptions(gmm_iterations=1.5)`→`TypeError: 'float' object cannot be
-  interpreted as an integer`と、いずれもPyO3の型変換層が送出する
-  `TypeError`（`ValidationError`ではない）になることを確認した。これは
-  想定通りの挙動と考えられるが、**この「`ValidationError`ではなく
-  `TypeError`になる」という境界をロックインするテストが1つも存在しない**
-  （リポジトリ全体で`TypeError`という語自体が`tests/`に出現しない）。
-- **Claudeの所感**: 型違いの入力は本来Pythonの型ヒント・静的型検査
-  （mypy等）で防ぐべき領域であり、実行時テストで全フィールド×全誤った型を
-  網羅する必要は無いと考えるが、「`ValidationError`ではなく`TypeError`に
-  なる」という利用者から見て重要な仕様は、代表的な1〜2ケースだけでも
-  ロックインしておく価値がある。IVで気づいたが対象は全手法の全オプション
-  フィールドに及ぶため、着手するなら方針を1箇所（`testing-policy.md`等）
-  に明記した上で各手法1ケース程度に絞るのが効率的と考える。
-- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘、
-  実機検証で確認。
-- **状態**: 対応不要と判断（ユーザー確認2026-08-30。`ValidationError`では
-  なく`TypeError`になる現状の挙動のままでよいとの判断）
-
 ### 48. `test_missing_column_raises`が`x_exog`のみを検証しており、`y`/`x_endog`/`instruments`側の存在しない列名が未検証
 
 - **対象**: [tests/test_iv.py:639-647](../../../tests/test_iv.py#L639-L647)
@@ -1104,34 +848,6 @@
 - **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘、
   実機検証で確認（現状は正しく動作していることを確認済み）。
 - **状態**: 未対応（着手要否はユーザー判断待ち、項目50と合わせて検討）
-
-### 52. `test_insufficient_instruments_raises`の境界ケースが常に`instruments=0`本のみで、より一般的な「1本不足」パターンが無い
-
-- **対象**: [tests/test_iv.py:762-773](../../../tests/test_iv.py#L762-L773)
-  （`x_endog=["endog1"]`〔1個〕・`instruments=[]`〔0個〕の組み合わせのみ）
-- **内容**: ユーザー指摘（2026-08-30、「満たさない例なら内生変数2個,
-  操作変数1個のほうが良いと思う」）。`engine/src/iv/two_sls.rs:160-165`の
-  実装を確認したところ、識別条件の判定は`input.k_instruments() <
-  input.k_endog()`という一般的な大小比較であり、`instruments`が
-  空リストであることを特別扱いする分岐は無い（`0 < 1`も`1 < 2`も同じ
-  比較式を通る）。そのため現状のテストが検出漏れを起こしているわけでは
-  ないが、`instruments=[]`という極端な境界値だけに頼っており、
-  「1本だけ不足している」という、より一般的で実務上遭遇しやすい
-  パターンでの確認が無い。
-- **Claudeの所感**: 現在のデータセット（`iv_baseline.csv`）は`x_endog`
-  候補列が`endog1`の1つしか無いため、`x_endog`を2個にするには
-  `x_endog=["endog1", "x1"]`のように既存の外生変数を内生変数として
-  転用するダミー的な指定が必要になる（新規データ列は不要）。
-  実施すること自体は容易だが、実装側の判定ロジックは既に一般的な
-  比較式であることを確認済みのため、優先度は低いと考える。
-- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘、
-  `engine/src/iv/two_sls.rs`で実装確認。
-- **状態**: 対応済み（Issue #306、2026-09-12）。`x_endog`/`instruments`が
-  空リストの場合を`ValidationError`で弾く実装（`refactoring-candidates.md`
-  項目9・10）と同時に、`test_insufficient_instruments_raises`
-  （`tests/iv/test_iv_validation.py`）を`x_exog=["x1"]`・
-  `x_endog=["endog1", "z2"]`・`instruments=["z1"]`（2個に対し1個、
-  `x1`は既に`x_exog`にあるため`x_endog`への転用は`z2`で行った）へ修正した。
 
 ### 53. `cov_type="cluster"`の大文字小文字非依存性（`"CLUSTER"`等）がリポジトリ全体で未検証
 
@@ -1582,46 +1298,6 @@
 - **気づいた経緯**: 2026-09-13、自由度1境界ケースの要否検証作業中に発見。
 - **状態**: Issue化済み（[#317](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/317)）。
 
-### 67. OLS: 説明変数に外れ値・裾の重い分布を持つシナリオが無い
-
-- **対象**: `benchmark/linear/datasets.py`（合成データセット生成全般）
-- **内容**: ユーザー提案（2026-09-13）。項目2（高次元シナリオ`many_regressors`
-  の追加）の設計検討中に出た派生案。現状の合成データセットは説明変数`X`が
-  常に正規分布（一部`multivariate_normal`）で、外れ値・裾の重い分布
-  （t分布の低自由度、対数正規分布等）を持つケースが無い。理論上はXの分布は
-  OLSの点推定の望ましい性質（Gauss-Markov）に影響しないはずだが、有限精度の
-  浮動小数点計算では極端な値（レバレッジの高い行）が`col_piv_qr`の
-  ピボット選択・条件数に影響しうるため、数値的頑健性を確認する価値がある。
-  `many_regressors`（列ごとのスケール差のみ、分布形状は変えない）とは
-  意図的に切り分けた別軸の懸念（1シナリオ=1構造的特徴という既存方針を
-  踏襲するため、`many_regressors`には混ぜないと決定済み）。
-- **Claudeの所感**: 検討する価値はあるが、`many_regressors`の実装・検証結果を
-  見てから優先度を判断するのが良いと考える。
-- **気づいた経緯**: 2026-09-13、項目2（`many_regressors`シナリオ設計）の
-  検討中にユーザーが提案。
-- **状態**: **対応済み（クローズ、2026-09-13）**。OLSでまず検証し、問題なければ
-  他手法へ展開する方針で実装。Tukeyの汚染混合モデル
-  （`(1-p)*N(0,1) + p*N(0,scale²)`、`p=0.05`・`scale=20.0`）でx1の5%だけを
-  外れ値に置き換える新シナリオ`outlier_regressor`を`benchmark/linear/datasets.py`・
-  `benchmark/nonlinear/datasets.py`に追加し、OLS/WLS/Logit/Probit/Tobit全手法の
-  主リファレンス（statsmodels/R）およびOLS/WLSのRクロスチェックと数値照合した。
-  - **OLS**: n=500・seed 0〜199で実測（`ComputationError`なし、条件数3〜7で健全、
-    statsmodelsと最大相対誤差5e-13で一致）。
-  - **Logit/Probit**: 事前の懸念（`many_regressors`と同様に分離を誘発するのでは）は
-    実測の結果杞憂と判明——契約している観測の95%が汚染されていない多数派のため、
-    5%の外れ値行がどれだけ極端でも（scale=20でも）分離を起こさないことを
-    確認した（`many_regressors`はk個の説明変数**全体**が線形予測子の分散を
-    底上げするため分離しやすくなるのに対し、こちらは少数の**観測**だけが
-    極端という違いに起因すると考えられる）。そのためOLSと全く同じ較正値を
-    そのまま流用でき、`many_regressors`で必要だった「未スケーリングのXで
-    DGP計算→出力時のみスケーリング」という工夫は不要だった。statsmodelsと
-    最大相対誤差1e-8程度で一致。
-  - **Tobit**: 連続な潜在変数`y*`の線形回帰のため分離の心配が無く、打ち切り境界は
-    `y*`の分位点で決まるためkに関わらず左打ち切り30%を維持。OLSと同じ較正値を
-    流用。
-  - 各手法とも新規テストコード追加は不要（既存の`x=[...]`動的検出・
-    `NUMERIC_SCENARIOS`ベースのparametrizeにより自動的にカバーされる）。
-
 ### 68. Tobit: proptestが左打ち切りのみで、右打ち切り・両側打ち切りはproperty-basedでは未カバー
 
 - **対象**: `engine/src/nonlinear/tobit.rs`の`mod proptests`
@@ -1722,3 +1398,4 @@
 - **気づいた経緯**: 2026-09-13、項目13・33（OLS実データのstatsmodels側追加）の
   testing-completeness-reviewerレビュー。
 - **状態**: 未対応（実害無しのため優先度低、着手要否はユーザー判断待ち）
+

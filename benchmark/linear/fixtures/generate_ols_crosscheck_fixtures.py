@@ -99,6 +99,14 @@ NUMERIC_SCENARIOS = [
 
 R_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
 
+# 悪条件・多重共線性シナリオとクラスターロバストSEの組み合わせでの数値的
+# 頑健性確認用（generate_ols_fixtures.pyと同じリスト・同じ理由、
+# test-coverage-candidates.md項目29）。
+CLUSTER_ILL_CONDITIONED_SCENARIOS = [
+    "high_condition_number",
+    "moderate_multicollinearity",
+]
+
 
 def _write_csv(df, tmpdir: Path, name: str) -> Path:
     path = tmpdir / f"{name}.csv"
@@ -185,6 +193,14 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
                 formula_g2,
                 groups=[str(i % 2) for i in range(df_g2.height)],
                 suffix="_cluster_g2",
+            )
+        elif scenario in CLUSTER_ILL_CONDITIONED_SCENARIOS:
+            # 悪条件・多重共線性シナリオとクラスターの組み合わせでの数値的
+            # 頑健性確認用（generate_ols_fixtures.pyと同じ理由、
+            # test-coverage-candidates.md項目29）。均等な疑似グループ
+            # （行番号%10）のみ。
+            fixtures[scenario]["cluster"] = _run_cluster_case(
+                df, csv_path, formula
             )
 
     return fixtures
@@ -302,10 +318,12 @@ def build_fixtures() -> dict:
             "perfect_multicollinearityシナリオはここに含まない"
             "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
             "HACはR側のみ（explicit lagを本実装の自動ラグ式に合わせて指定）。"
-            "clusterはbaselineシナリオのみ、R側のみ確認。均等疑似グループ（行番号%10）"
+            "clusterはR側のみ確認。baselineシナリオで均等疑似グループ（行番号%10）"
             "に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2"
             "（cluster_g2）、wage1の実カテゴリ列region（northcen/south/west"
-            "ダミーから合成、基準カテゴリnortheast）を含む。"
+            "ダミーから合成、基準カテゴリnortheast）を含む"
+            "（グルーピングパターンのバリエーションはbaselineシナリオのみ、"
+            "他シナリオは均等疑似グループ1パターンのみ、後述）。"
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
             "pyfixestとの比較は正確性検証から除外（性能比較専用）。"
             "high_condition_number/baseline_df1は境界値・悪条件ケース。"
@@ -317,7 +335,11 @@ def build_fixtures() -> dict:
             "高次元シナリオ（generate_ols_fixtures.pyと同じ理由、"
             "test-coverage-candidates.md項目2）。outlier_regressorはx1の5%を"
             "外れ値に置き換えた成功パス（generate_ols_fixtures.pyと同じ理由、"
-            "test-coverage-candidates.md項目67）。"
+            "test-coverage-candidates.md項目67）。high_condition_number/"
+            "moderate_multicollinearityにもclusterエントリを追加（従来"
+            "クラスター系はbaselineシナリオのみで、悪条件・多重共線性シナリオ"
+            "との組み合わせが未検証だった。均等な疑似グループ（行番号%10）のみ。"
+            "test-coverage-candidates.md項目29）。"
         ),
     }
     return fixtures

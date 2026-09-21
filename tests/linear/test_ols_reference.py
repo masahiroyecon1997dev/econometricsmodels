@@ -247,6 +247,28 @@ def test_cluster_g2_matches_statsmodels(fixtures):
     _check_result(res, fixtures["baseline"]["cluster_g2"], "cluster_g2")
 
 
+@pytest.mark.parametrize(
+    "scenario", ["high_condition_number", "moderate_multicollinearity"]
+)
+def test_cluster_ill_conditioned_matches_statsmodels(fixtures, scenario):
+    """悪条件・多重共線性シナリオとクラスターロバストSEの組み合わせ。
+
+    クラスターロバスト共分散`Ŝ=(X'X)⁻¹(...)`は`(X'X)⁻¹`を他のcov_type
+    （classical/HC0-3/HAC）と共有する。他のcov_typeは全シナリオで検証済みだが、
+    クラスターは従来`baseline`シナリオのみで、悪条件・多重共線性との組み合わせ
+    での数値的挙動が未検証だった。均等な疑似グループ（行番号%10）のみ確認する
+    （グルーピングパターン自体の網羅性は`test_cluster_matches_statsmodels`等
+    `baseline`シナリオで確認済みのため重複させない、
+    test-coverage-candidates.md項目29）。
+    """
+    df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
+    df = with_cluster_groups(df, 10)
+    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    _check_result(res, fixtures[scenario]["cluster"], f"{scenario}/cluster")
+
+
 # Wooldridge実データ用のy/x列構成。`generate_ols_fixtures.py`のformula文字列
 # （statsmodels側のフォーミュラAPI用）とは別に、本実装のy=str/x=list渡し
 # （CLAUDE.md 2章）用の構成をここで持つ（`test_ols_crosscheck.py`の

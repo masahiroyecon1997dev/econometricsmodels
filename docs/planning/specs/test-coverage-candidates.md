@@ -329,10 +329,27 @@
 - **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_fixtures.py`解説中の
   ユーザー指摘（「clusterに関してはシナリオごとで検証する必要はないのか、
   精度漏れの可能性が残ることは避けたい」）を受けて3層を確認。
-- **状態**: 未対応（着手要否はユーザー判断待ち）。2026-09-21、項目17対応時に
-  `testing-completeness-reviewer`が項目28と合わせて再指摘（predict()同様、
-  クラスター系の検証網羅性を先に手厚くしたRクロスチェック側に主リファレンス側を
-  追いつかせる、という同型の対応が必要という指摘）。
+- **状態**: 対応済み（OLS、2026-09-21）。`high_condition_number`・
+  `moderate_multicollinearity`の両シナリオ（「いずれか1シナリオ」という
+  所感に対し、より手厚くする方針でユーザー確認の上、両方追加）に、
+  均等な疑似グループ（行番号%10）のみのクラスターケースを追加した。
+  `benchmark/linear/fixtures/generate_ols_fixtures.py`の`_run_cluster_case`が
+  `scenario`引数を取れるよう拡張、`generate_ols_crosscheck_fixtures.py`にも
+  同様の`CLUSTER_ILL_CONDITIONED_SCENARIOS`定数と分岐を追加。
+  `tests/linear/test_ols_reference.py::test_cluster_ill_conditioned_matches_
+  statsmodels`・`tests/linear/test_ols_crosscheck.py::test_cluster_ill_
+  conditioned_matches_r`を追加し、Python fixtures層・Rクロスチェック層の
+  両方で悪条件・多重共線性シナリオとクラスターの組み合わせが数値的に
+  問題なく計算できることを確認した（Rust単体テスト層はリファレンス実装との
+  数値比較を目的としないため対象外のまま）。`tests/`配下1675件全通過・
+  Ruffクリーンを確認済み。WLS側（`generate_wls_fixtures.py`等）は同じ
+  ギャップが存在するが、ユーザー判断によりこの場では対応せず
+  [Issue #351](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/351)
+  として切り出した（他手法〔IV/Logit/Probit等〕への横展開要否も同Issueで
+  検討）。2026-09-21、項目17対応時に`testing-completeness-reviewer`が項目28と
+  合わせて再指摘（predict()同様、クラスター系の検証網羅性を先に手厚くした
+  Rクロスチェック側に主リファレンス側を追いつかせる、という同型の対応が
+  必要という指摘）。
 
 ### 30. `time_col`が存在しない列名を指した場合の`ValidationError`テストが無い（`cluster_col`には対になるテストがある）
 
@@ -1398,4 +1415,33 @@
 - **気づいた経緯**: 2026-09-13、項目13・33（OLS実データのstatsmodels側追加）の
   testing-completeness-reviewerレビュー。
 - **状態**: 未対応（実害無しのため優先度低、着手要否はユーザー判断待ち）
+
+### 73. OLS: `test_scale_variance_raises_computation_error`のcov_typeパラメトライズに`cluster`が含まれておらず、docstringの「全cov_typeでbackstop」という主張が未検証
+
+- **対象**: `tests/linear/test_ols_validation.py`の
+  `test_cluster_count_at_most_slopes_raises_validation_error`のdocstring
+  （「`G>q`でも悪条件で数値的にほぼ特異なケースは`test_scale_variance_raises_
+  computation_error`がbackstop」と明記）と、実際の
+  `test_scale_variance_raises_computation_error`の実装
+  （`@pytest.mark.parametrize("cov_type", COV_TYPES)`、
+  `COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]`で
+  `cluster`を含まない）
+- **内容**: `testing-completeness-reviewer`の指摘（2026-09-21、項目29の
+  レビュー中）。docstringは「全cov_typeでbackstopされる」と主張しているが、
+  実装上`cov_type="cluster"`はこの`ComputationError`backstopテストで
+  一度も実行されていない。手動で`scale_variance`データセット＋
+  `cov_type="cluster"`（`G=10>q=3`）を実行したところ実際には
+  `ComputationError`が正しく発生することを確認できたが、これは自動テストで
+  検証されておらず、docstringの主張と実装が食い違っている状態。
+  項目29でクラスター×悪条件シナリオの成功パス側を拡充したのに対し、
+  こちらは同じ組み合わせのエラーパス側（`ComputationError`backstop）の
+  対称漏れであり、項目29と直接関連する。
+- **Claudeの所感**: `test_scale_variance_raises_computation_error`の
+  `cov_type`パラメトライズに`cluster`を追加する形が自然だが、`cluster`は
+  `cluster_col`パラメータが別途必要なため、既存の`COV_TYPES`パラメトライズに
+  単純に含めることはできず、別テスト（または条件分岐）が必要になる。
+- **気づいた経緯**: 2026-09-21、項目29（クラスターロバストSEの悪条件・
+  多重共線性シナリオとの組み合わせ追加）対応の`testing-completeness-reviewer`
+  レビューで発見。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
 

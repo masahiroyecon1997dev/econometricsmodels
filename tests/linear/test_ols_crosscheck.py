@@ -253,6 +253,30 @@ def test_cluster_g2_matches_r(crosscheck):
     _assert_fit_stats_close(res, ref, "cluster_g2/R", rtol=RTOL_STRICT)
 
 
+@pytest.mark.parametrize(
+    "scenario", ["high_condition_number", "moderate_multicollinearity"]
+)
+def test_cluster_ill_conditioned_matches_r(crosscheck, scenario):
+    """悪条件・多重共線性シナリオとクラスターロバストSEの組み合わせ。
+
+    クラスターは従来`baseline`シナリオのみで、他のcov_typeでは全シナリオ検証
+    済みの悪条件・多重共線性との組み合わせが未検証だった。均等な疑似グループ
+    （行番号%10）のみ確認する（グルーピングパターン自体の網羅性は
+    `test_cluster_matches_r`等`baseline`シナリオで確認済み、
+    test-coverage-candidates.md項目29）。
+    """
+    df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
+    df = with_cluster_groups(df, 10)
+    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = crosscheck["synthetic"][scenario]["cluster"]["r"]
+    label = f"{scenario}/cluster/R"
+    _assert_close(res.params, ref["coef"], f"{label} coef")
+    _assert_close(res.std_errors, ref["se"], f"{label} se")
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
+
+
 def test_hac_matches_r(crosscheck):
     """HAC標準誤差。フィクスチャ生成時に本実装の自動ラグ式で計算した
     ラグ（`hac_lag`）をそのまま使い、ラグ選択方式自体の違いを比較対象から

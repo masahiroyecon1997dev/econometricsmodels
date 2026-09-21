@@ -87,6 +87,19 @@ WOOLDRIDGE_DATASETS = {
 }
 WOOLDRIDGE_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
 
+# クラスターロバスト共分散Ŝ=(X'X)⁻¹(Σ_g X_g'e_ge_g'X_g)(X'X)⁻¹は(X'X)⁻¹を他の
+# cov_type（classical/HC0-3/HAC）と共有するが、この(X'X)⁻¹自体が悪条件・
+# 多重共線性シナリオでは数値的に不安定になりうる（他のcov_typeでは
+# COV_TYPES経由で全シナリオ検証済みだが、クラスターは従来baselineのみ
+# だったため、この組み合わせが未検証だった）。均等な疑似グループ
+# （行番号%10）1パターンのみ追加確認する（グルーピングパターン自体の
+# 網羅性はbaselineシナリオで既に確認済みのため重複させない。
+# test-coverage-candidates.md項目29、ユーザー確認済み）。
+CLUSTER_ILL_CONDITIONED_SCENARIOS = [
+    "high_condition_number",
+    "moderate_multicollinearity",
+]
+
 
 def build_fixtures() -> dict:
     fixtures: dict = {}
@@ -137,6 +150,14 @@ def build_fixtures() -> dict:
                 "説明変数1個（q=1）に絞っている（"
                 "3個だとG<=qでロバストWald検定の共分散行列が特異になりValidationError）。",
                 k1=True,
+            )
+        elif scenario in CLUSTER_ILL_CONDITIONED_SCENARIOS:
+            fixtures[scenario]["cluster"] = _run_cluster_case(
+                scenario=scenario,
+                note=f"悪条件・多重共線性シナリオ（{scenario}）とクラスターロバストSEの"
+                "組み合わせでの数値的頑健性確認用。均等な疑似グループ（行番号%10）のみ"
+                "（グルーピングパターン自体の網羅性はbaselineシナリオで確認済み、"
+                "test-coverage-candidates.md項目29）。",
             )
 
     for name, formula in WOOLDRIDGE_DATASETS.items():
@@ -192,6 +213,11 @@ def build_fixtures() -> dict:
             "正規分布ではなく自由度G-1のt分布を使う本プロジェクトの方針"
             "〔docs/spec/ols-spec.md「標準誤差」〕に合わせた。coef/seは"
             "use_tに依存しないため既存フィクスチャの値に影響なし）。"
+            "high_condition_number/moderate_multicollinearityにもcluster"
+            "エントリを追加（従来クラスター系はbaselineシナリオのみで、"
+            "悪条件・多重共線性シナリオとの組み合わせが未検証だった。"
+            "均等な疑似グループ（行番号%10）のみ。"
+            "test-coverage-candidates.md項目29）。"
         ),
     }
     return fixtures
@@ -201,6 +227,7 @@ def _run_cluster_case(
     groups: list | None = None,
     note: str = "決め打ちの疑似グループ（行番号%10）。統計的な意味はなく、実装の動作確認用。",
     k1: bool = False,
+    scenario: str = "baseline",
 ) -> dict:
     """クラスターロバストSE確認用に、疑似グループを付けて実行する。
 
@@ -208,10 +235,15 @@ def _run_cluster_case(
         groups: 各行のグループラベル。Noneなら既定（行番号%10、10均等グループ）。
         note: フィクスチャの`_meta.note`に記録する説明文。
         k1: TrueならG=2境界ケース用の説明変数1個版（synthetic_baseline_k1.csv）を使う。
+        scenario: 対象シナリオ名（`k1=True`のときは無視、常に
+            `synthetic_baseline_k1.csv`を使う）。悪条件・多重共線性シナリオ
+            とクラスターの組み合わせ確認用（test-coverage-candidates.md項目29）。
     """
     import statsmodels.formula.api as smf
 
-    filename = "synthetic_baseline_k1.csv" if k1 else "synthetic_baseline.csv"
+    filename = (
+        "synthetic_baseline_k1.csv" if k1 else f"synthetic_{scenario}.csv"
+    )
     df = pl.read_csv(DATA_DIR / filename)
     pandas_df = df.to_pandas()
     pandas_df["_group"] = (

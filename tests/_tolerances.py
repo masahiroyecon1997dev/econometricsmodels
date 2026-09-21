@@ -267,14 +267,12 @@ TOLERANCES: dict[str, dict[str, float]] = {
     "re_crosscheck": {
         "rtol": 2e-2,
         "atol": ATOL_CROSSCHECK_FLOOR,
-        # ハウスマン検定はIssue #350（別issue）: plm::phtestは常にabs()を
-        # 適用するため非負値のみ返すが、本実装のengineは符号付きのまま返す
-        # （差行列が有限標本で負定値になるケースで負値になりうる）。
-        # そのため比較はengine側の値にabs()を適用してから行う
-        # （panel-api-design.md7.3節・engine/src/panel/CLAUDE.mdの「plmと
-        # 同じ挙動」という記載が誤りだったことが本フィクスチャ作成時に判明、
-        # `generate_re_crosscheck_fixtures.py`モジュールdoc参照）。abs()適用後は
-        # バランスパネルで機械精度一致（実測相対誤差1e-11〜1e-14程度）。
+        # ハウスマン検定（Issue #350で解決済み）: plm::phtestは常にabs()を
+        # 適用するため非負値のみ返す。本実装のengineも`hausman_statistic`
+        # （`engine/src/panel/common.rs`）で同様にabs()を適用するため
+        # （`generate_re_crosscheck_fixtures.py`モジュールdoc参照）、
+        # plmの出力と直接比較できる。バランスパネルでは機械精度一致
+        # （実測相対誤差1e-11〜1e-14程度）。
         "rtol_hausman": RTOL_MACHINE_PRECISION,
         "atol_hausman": ATOL_REFERENCE_FLOOR,
         # unbalancedシナリオのみ、Var(β_RE)自体がplm/linearmodelsの分散成分
@@ -286,10 +284,10 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # ハウスマン検定のp値は裾確率がゼロ近傍に潰れるケースが多く、
         # unbalancedシナリオでは絶対誤差フロアで比較する
         # （実測最大絶対誤差1.5e-8にマージン、他のRクロスチェックの
-        # atol_p_value系と同じ理由）。符号が負転する
-        # small_panel/autocorrelatedシナリオではp値自体を比較しない
-        # （本実装は`stat<=0`ならp値を常に1.0にする設計のため、plmの
-        # abs()適用後の値と比較する意味が無い、test_re_crosscheck.py参照）。
+        # atol_p_value系と同じ理由）。Issue #350の対応後は全シナリオで
+        # p値を比較する（`hausman_statistic`同様abs()適用後の値同士の比較に
+        # なるため、small_panel/autocorrelatedシナリオも特別扱いしない、
+        # test_re_crosscheck.py参照）。
         "atol_hausman_p_value": 1e-6,
     },
 }

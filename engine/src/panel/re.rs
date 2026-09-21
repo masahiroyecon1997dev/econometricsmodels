@@ -968,8 +968,9 @@ impl ReEstimator {
         // 「制限モデル（定数項のみ）のSSR」としての意味を厳密には持たない
         // （`total_ss >= residual_ss`が保証される教科書的な入れ子モデル比較とは異なる、
         // 上記コメント参照）。`linearmodels`が主リファレンスのためこの挙動もそのまま
-        // 踏襲する——負のF統計量をクリップ・エラー化しない判断は`hausman_statistic`
-        // （`common.rs`、負のハウスマン統計量をそのまま返す）と同じ方針。
+        // 踏襲し、クリップ・エラー化はしない（`linearmodels`自身の値と一致させることが
+        // 目的のため、`hausman_statistic`——`common.rs`、`plm::phtest`に合わせabs()を
+        // 適用する、Issue #350——とは参照実装が異なり判断も独立）。
         let (f_statistic, f_p_value) = if df_model == 1 {
             // 傾き係数が無い（定数項のみ）モデル。検定対象が存在しないため`OlsEstimator::fit`
             // 自身の`df_model==0`分岐と同様NaN（0除算を避ける）。

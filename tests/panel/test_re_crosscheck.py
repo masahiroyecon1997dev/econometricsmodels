@@ -16,24 +16,16 @@ fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmod
   呼び出し）限定で検証する（`generate_re_fixtures.py`の`_meta.note`・
   `generate_re_crosscheck_fixtures.py`モジュールdoc参照）。
 
-## 重要: ハウスマン統計量の符号（Issue #350、別issueで engine側の対応を検討中）
+## ハウスマン統計量の符号について（Issue #350で解決済み）
 
 `plm::phtest`（`plm:::phtest.panelmodel`）は`abs()`を無条件適用するため常に
-非負値を返すが、本実装のengineは`Var(β_FE)-Var(β_RE)`が有限標本で負定値に
-なるケース（`small_panel`/`autocorrelated`等）で符号付きの負値を返す
-（`generate_re_crosscheck_fixtures.py`モジュールdoc「重要」節で詳しく実測・
-ソース確認済み）。**このため統計量の比較は本実装側の値に`abs()`を適用して
-から行う**（`_tolerances.py`の`re_crosscheck.rtol_hausman`/`atol_hausman`
-参照）。
-
-**p値は`stat<=0`のシナリオ（`small_panel`/`autocorrelated`）では比較しない**:
-本実装は`stat<=0`なら`p_value`を常に`1.0`とする設計（`plm::phtest`と同じ
-慣行、`engine/src/panel/common.rs`の`hausman_statistic`docコメント参照）
-だが、これは`plm`が`abs()`適用後の（大きな）正の統計量から計算する
-tiny p値とは全く異なる量になる——両者は「異なる統計量から計算した異なる
-p値」であり、`abs()`を揃えても比較可能にならない（統計量自体は`abs()`で
-揃えれば比較可能なのとは対照的）。`df`は符号に関わらず常に一致するため
-全シナリオで比較する。
+非負値を返す。本実装のengine（`engine::panel::common::hausman_statistic`）も
+Issue #350でこれに合わせ`abs()`を適用するよう修正済みのため、
+`Var(β_FE)-Var(β_RE)`が有限標本で負定値になるケース（`small_panel`/
+`autocorrelated`等）でも`plm`と直接一致する非負値を返す。統計量・p値ともに
+`abs()`適用後の値同士の比較になるため、Python側で`abs()`を適用したり
+シナリオごとに比較をスキップしたりする必要はない。`df`は元々符号に
+関わらず常に一致する。
 
 ## 許容誤差について
 
@@ -87,11 +79,6 @@ ATOL_HAUSMAN_P_VALUE = TOLERANCES["re_crosscheck"]["atol_hausman_p_value"]
 # モジュールdoc「許容誤差について」参照）唯一のシナリオ。
 _UNBALANCED_HAUSMAN_SCENARIO = "unbalanced"
 
-# 差行列`Var(β_FE)-Var(β_RE)`が有限標本で負定値になり、本実装の
-# `hausman_statistic`が負値を返すシナリオ（モジュールdoc「重要」節参照）。
-# この2シナリオはp値を比較しない（`_check_result`参照）。
-_HAUSMAN_SIGN_FLIP_SCENARIOS = {"small_panel", "autocorrelated"}
-
 
 @pytest.fixture(scope="module")
 def crosscheck() -> dict:
@@ -117,28 +104,28 @@ def _check_result(
 
     # ハウスマン検定はcov_typeに依存しない単一の統計量（`ref`のhc2/hc3どちらの
     # エントリにも同じ値が含まれる、`run_plm_benchmark.R`のモジュールコメント
-    # 参照）。符号の扱いはモジュールdoc「重要」節参照。`df`は符号・シナリオに
-    # 関わらず常に一致するため無条件で比較する。
+    # 参照）。engine側も`abs()`適用後の値を返すため（モジュールdoc参照）、
+    # `plm`の出力と直接比較できる。`df`はシナリオに関わらず常に一致するため
+    # 無条件で比較する。
     rtol_hausman = (
         RTOL_HAUSMAN_UNBALANCED
         if scenario == _UNBALANCED_HAUSMAN_SCENARIO
         else RTOL_HAUSMAN
     )
     assert_close(
-        abs(res.hausman_statistic),
+        res.hausman_statistic,
         ref["hausman_statistic"],
         f"{label}/hausman_statistic",
         rtol=rtol_hausman,
         atol=ATOL_HAUSMAN,
     )
-    if scenario not in _HAUSMAN_SIGN_FLIP_SCENARIOS:
-        assert_close(
-            res.hausman_p_value,
-            ref["hausman_p_value"],
-            f"{label}/hausman_p_value",
-            rtol=rtol_hausman,
-            atol=ATOL_HAUSMAN_P_VALUE,
-        )
+    assert_close(
+        res.hausman_p_value,
+        ref["hausman_p_value"],
+        f"{label}/hausman_p_value",
+        rtol=rtol_hausman,
+        atol=ATOL_HAUSMAN_P_VALUE,
+    )
     assert res.hausman_df == ref["hausman_df"], f"{label}/hausman_df"
 
 

@@ -1,6 +1,6 @@
 # engine/src/panel/ 実装ノート（FE/RE）
 
-このファイルは `engine/src/panel/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景・数式の正本は `docs/planning/specs/panel-api-design.md`（FE/RE論点はすべて確定済み）。ここに書くのは「削除するとClaudeが同じ判断を再発見するはめになる」レベルの実装上の決定事項・罠のみ。
+このファイルは `engine/src/panel/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景・数式の正本は `docs/spec/fe-spec.md` / `docs/spec/re-spec.md`（FE/RE共通の論点は `docs/planning/specs/panel-api-design.md`）。ここに書くのは「削除するとClaudeが同じ判断を再発見するはめになる」レベルの実装上の決定事項・罠のみ。
 
 ## 実装済み（現状）
 
@@ -98,12 +98,13 @@
 - **`quasi_demean_column` はグループ平均（`ȳ_i.`）を返さない**（Issue #173スコープ外）。**`fixed_effects()`（6.6節、Issue #184）はこの関数を拡張せず実装済み**——`FeEstimator::fixed_effects()`は`fit()`が既に保持している`input`（変換前の元の`y`/`x`/`entity`/`time`）と`estimator().params()`から`slope_only_residual`/`group_residual_means`で都度再計算する（`quasi_demean_column`はwithin変換専用のまま据え置き）。σ_ε²再利用（7.4節、RE実装）で平均の保持が必要になったら、その時点で改めて検討する。
 - **契約違反（`entity`と列の長さ不一致・`theta`のキー欠け）は`assert!`/`expect`でpanic**（`Result`を返さない）。ユーザー入力起因ではなく`engine_pybind`〜`engine`間の内部契約違反のため、`validate_cluster_groups`の`assert_eq!`と同じ扱い。`hausman_statistic`のshape契約（`beta_fe`/`beta_re`同長・`cov`が`k×k`）も同様に`assert!`。
 
-- **`hausman_statistic` の設計（Issue #174、7.3節）**:
+- **`hausman_statistic` の設計（Issue #174、符号の扱いはIssue #350で修正。詳細は`docs/spec/re-spec.md`3.7節）**:
   - 入力は `beta_*: &[f64]` / `cov_*: &[Vec<f64>]`（`newton_step` と同じ形。RE呼び出し側が `Mat` から一度変換）。戻り値 `Result<(stat, df, p_value), CommonError>`。
   - **比較対象のalign（重なるスロープ係数のみ、REの切片・時間不変変数を除外）は呼び出し側（RE実装）の責務**。この関数は渡された `k` 個をそのまま使う。
   - 差行列 `Var(β_FE) - Var(β_RE)` は対称だが有限標本で非正定値になりうるため、Choleskyではなく `col_piv_qr` + `solve_lstsq`（`newton_step` と同じ相対閾値・NaN明示チェックの特異性検出）。
-  - **統計量が負でもそのまま返す**（`plm::phtest` と同じ。`stat<=0` なら `p_value == 1.0`）。差行列が数値的に特異なときだけ `CommonError::ComputationFailed`。
-  - **p値は `chi2.sf(stat)`（`1.0 - chi2.cdf(stat)` ではない）**。大きい `stat` で `cdf ≈ 1` になり小さいp値の相対精度が失われるのを避けるため（`sf` は正則化上側不完全ガンマを直接計算。`stat<=0` でも `1.0` を返すので負統計量の挙動は不変）。**`iv/gmm.rs` の Hansen J・Wald系は今も `1.0 - chi2.cdf` のまま**——一括で `sf` へ移行するかは別issue（このズレは意図的な暫定）。
+  - **二次形式が負でも`abs()`を適用して非負値を返す**（`plm::phtest`の`stat <- as.numeric(abs(t(dbeta) %*% solve(dvcov) %*% dbeta))`と同じ。`p_value`も`abs()`適用後の`stat`から計算する）。差行列が数値的に特異なときだけ `CommonError::ComputationFailed`。
+    **Issue #350以前は符号付きのまま返す設計だった**（`stat<=0`なら`p_value==1.0`）が、`plm::phtest`のソース確認で「`plm`と同じ挙動」という当初の設計文書の記載が誤りと判明し修正した——`plm`は理論上も実装上も負の値を一切返さない。再発見コスト削減のため明記: **符号に関する新たな設計判断をする際は、この節を更新した上で`docs/spec/re-spec.md`3.7節・`benchmark/panel/fixtures/generate_re_crosscheck_fixtures.py`・`tests/panel/test_re_crosscheck.py`の記載も揃って更新すること**（Issue #350で一度この4箇所の記載が食い違った経緯があるため）。
+  - **p値は `chi2.sf(stat)`（`1.0 - chi2.cdf(stat)` ではない）**。大きい `stat` で `cdf ≈ 1` になり小さいp値の相対精度が失われるのを避けるため（`sf` は正則化上側不完全ガンマを直接計算）。**`iv/gmm.rs` の Hansen J・Wald系は今も `1.0 - chi2.cdf` のまま**——一括で `sf` へ移行するかは別issue（このズレは意図的な暫定）。
   - `df` には常に `k` を使う。差行列の実効ランクが `k` 未満のとき `stat` と `df` に不整合が生じうる（`plm::phtest` も同じ制約）。
   - v1は classical Hausman のみ（`cov_type` 非依存）。robust版は将来issue。
 

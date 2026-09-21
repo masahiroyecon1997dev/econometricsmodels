@@ -34,36 +34,31 @@ FEのfixestクロスチェックとは精度の前提が異なる。
 REのaic/bic/log_likelihoodの独立検証は現時点で行わない
 （`linearmodels_ref.py`モジュールdoc参照）。
 
-## 重要: `hausman_statistic`の符号について（本フィクスチャ作成時に判明した既存
-## 設計文書の誤り、engine側修正はフォローアップIssue #350に切り出し済み）
+## `hausman_statistic`の符号について（Issue #350で解決済み）
 
-`panel-api-design.md`7.3節・`engine/src/panel/CLAUDE.md`は「本実装の
-`hausman_statistic`は差行列`Var(β_FE)-Var(β_RE)`が有限標本で非正定値になると
-負になりうるが、その場合もそのまま返す。これは`plm::phtest`と同じ挙動」と
-記載しているが、**この記載は誤り**であることが本フィクスチャ作成時に判明した
-（実測・ソース確認済み、2026-09-20）。`plm`の`phtest.panelmodel`
-（`plm:::phtest.panelmodel`）は
+本フィクスチャ作成時（2026-09-20）に、当時の設計文書（`panel-api-design.md`
+7.3節・`engine/src/panel/CLAUDE.md`）の「本実装の`hausman_statistic`は差行列
+`Var(β_FE)-Var(β_RE)`が有限標本で非正定値になると負になりうるが、その場合も
+そのまま返す。これは`plm::phtest`と同じ挙動」という記載が誤りであることが
+判明した。`plm`の`phtest.panelmodel`（`plm:::phtest.panelmodel`）は
 
 ```r
 stat <- as.numeric(abs(t(dbeta) %*% solve(dvcov) %*% dbeta))
 ```
 
-と`abs()`を無条件に適用しており、**`plm::phtest`は理論上も実装上も負の値を
-一切返さない**。`small_panel`/`autocorrelated`シナリオ（差行列が負定値になる
-ケース）で実測したところ、本実装のengineは負値（例: `-113.06`）を返す一方
-`plm`は同じ絶対値の正値（`113.06`）を返すことを確認済み。`baseline`/
+と`abs()`を無条件に適用しており、`plm::phtest`は理論上も実装上も負の値を
+一切返さない。`small_panel`/`autocorrelated`シナリオ（差行列が負定値になる
+ケース）で実測したところ、当時のengineは負値（例: `-113.06`）を返す一方
+`plm`は同じ絶対値の正値（`113.06`）を返すことを確認した。`baseline`/
 `heteroskedastic`（差行列が正定値）では両者とも正値になるため偶然一致して
 見えていた。
 
 **このフィクスチャ自体には`plm`の実際の出力（常に非負）をそのまま記録して
 いる**（参照実装の値をありのまま記録するという本フィクスチャの役割上、正しい
-挙動）。後続のテストコード（`/test-new`）で本フィクスチャの`hausman_statistic`
-と本実装のengineを比較する際は、**engine側の値に`abs()`を適用してから比較
-すること**（本実装は符号付きのまま返す設計を維持する場合）。engine側の
-`hausman_statistic`実装（`engine/src/panel/common.rs`）自体に`abs()`を適用して
-`plm`と完全に一致させるかどうかは、本タスク（Issue #203、ベンチマーク
-フィクスチャ作成）のスコープ外のためフォローアップIssue #350として
-切り出した（ユーザー確認済み・2026-09-20）。
+挙動）。engine側の`hausman_statistic`実装（`engine/src/panel/common.rs`）は
+Issue #350で`abs()`を適用するよう修正済みのため、現在は本フィクスチャの値と
+engineの出力を`abs()`無しで直接比較できる（`tests/panel/test_re_crosscheck.py`
+参照）。
 
 使用例（リポジトリルートから）:
     python -m benchmark.panel.fixtures.generate_re_crosscheck_fixtures

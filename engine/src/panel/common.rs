@@ -44,11 +44,12 @@
 //! RE固有（7章）で追加のバリアントが必要になった場合は、FE/RE実装issueで実際に計算
 //! コードを書く過程で随時追加する（`LeastSquaresError`・`IvError`のdocコメントと同じ
 //! 「土台を用意し、必要になった時点で足す」方針）。
-//! ハウスマン統計量（`hausman_statistic`、Issue #174）は`CommonError`を返す
-//! （`ensure_well_conditioned_symmetric_matrix`等の共通ヘルパーに揃える）。
-//! `cov_fe - cov_re`が有限標本で非正定値になり統計量が負になるケースは**エラーにせず
-//! そのまま返す**（R `plm::phtest`と同じ挙動、7.3節。差行列が数値的に特異なときだけ
-//! `CommonError::ComputationFailed`）。
+//! ハウスマン統計量（`hausman_statistic`、Issue #174。符号の扱いはIssue #350で修正）は
+//! `CommonError`を返す（`ensure_well_conditioned_symmetric_matrix`等の共通ヘルパーに
+//! 揃える）。`cov_fe - cov_re`が有限標本で非正定値になり二次形式が負になるケースは
+//! `abs()`を適用して非負値にする（R `plm::phtest`と同じ挙動——`plm`は`abs()`を無条件
+//! 適用し理論上も実装上も負の値を返さない）。差行列が数値的に特異なときだけ
+//! `CommonError::ComputationFailed`。
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
@@ -678,11 +679,15 @@ pub fn quasi_demean_column(
 /// ガンマの直接計算——を使う。`iv/gmm.rs` 等の既存箇所は `1.0 - cdf` のままで、一括移行は
 /// 別issue）。
 ///
-/// **`Var(β_FE) - Var(β_RE)`は理論上は半正定値だが、有限標本では非正定値になり`stat`が
-/// 負になりうる**。その場合も`stat`をそのまま返す（`sf` は `stat <= 0` で `1.0` を返すため
-/// `p_value == 1.0`）。参照実装 R `plm::phtest`と同じ挙動で、「classical HausmanのPSD仮定が
-/// 有限標本で崩れている」ことを示す情報として呼び出し側に委ねる（`panel-api-design.md`
-/// 7.3節、Issue #174）。
+/// **`Var(β_FE) - Var(β_RE)`は理論上は半正定値だが、有限標本では非正定値になりうる**
+/// （二次形式 `d'(Var(β_FE)-Var(β_RE))⁻¹d` が負になりうる）。参照実装 R `plm::phtest`
+/// （`stat <- as.numeric(abs(t(dbeta) %*% solve(dvcov) %*% dbeta))`）に合わせ、
+/// **`stat`には`abs()`を適用してから返す**（Issue #350）。`p_value`もこの`abs()`適用後の
+/// `stat`から計算するため、`plm::phtest`のp値と直接比較できる。
+///
+/// 以前は符号付きのまま返す設計だった（`stat<=0`なら`sf`により`p_value==1.0`）が、
+/// `plm::phtest`のソース確認により「`plm`と同じ挙動」という当初の設計文書の記載が
+/// 誤りだったことが判明し修正した——`plm`は理論上も実装上も負の値を一切返さない。
 ///
 /// `df` には常に `k`（渡された係数の数）を使う。`Var(β_FE) - Var(β_RE)` が閾値は通過するが
 /// 実効ランクが `k` 未満のとき、`stat` と `df` に不整合が生じうる（R `plm::phtest` も同じ
@@ -744,7 +749,11 @@ pub fn hausman_statistic(
     }
 
     let z = qr.solve_lstsq(&d);
-    let stat: f64 = (0..k).map(|i| (*d.get(i, 0)) * (*z.get(i, 0))).sum();
+    let raw_stat: f64 = (0..k).map(|i| (*d.get(i, 0)) * (*z.get(i, 0))).sum();
+    // `Var(β_FE) - Var(β_RE)`が有限標本で非正定値になると二次形式が負になりうる。
+    // `plm::phtest`（`stat <- as.numeric(abs(t(dbeta) %*% solve(dvcov) %*% dbeta))`）に
+    // 合わせ`abs()`を適用する（Issue #350）。
+    let stat = raw_stat.abs();
 
     let chi2 =
         ChiSquared::new(k as f64).map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
@@ -1194,10 +1203,10 @@ mod tests {
     }
 
     #[test]
-    fn hausman_statistic_returns_negative_stat_when_variance_diff_is_indefinite() {
+    fn hausman_statistic_takes_absolute_value_when_variance_diff_is_indefinite() {
         // cov_diff = [[-1.0, 0.0], [0.0, 0.5]]（非正定値だが可逆）→ inv = [[-1, 0], [0, 2]]。
-        // d = [1, 0] → H = -1·1² = -1。有限標本でのPSD仮定崩れ。plm::phtest と同じく
-        // そのまま返し、p_value は 1.0 になる（エラーにしない）。
+        // d = [1, 0] → 二次形式 = -1·1² = -1。有限標本でのPSD仮定崩れ。plm::phtest と
+        // 同じく abs() を適用し stat = 1.0 を返す（Issue #350）。
         let beta_fe = [2.0, 5.0];
         let beta_re = [1.0, 5.0];
         let cov_fe = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
@@ -1205,9 +1214,12 @@ mod tests {
 
         let (stat, df, p_value) = hausman_statistic(&beta_fe, &cov_fe, &beta_re, &cov_re).unwrap();
 
-        assert!((stat - (-1.0)).abs() < 1e-10, "stat = {stat}");
+        assert!((stat - 1.0).abs() < 1e-10, "stat = {stat}");
         assert_eq!(df, 2);
-        assert_eq!(p_value, 1.0);
+        assert!(
+            (p_value - ChiSquared::new(2.0).unwrap().sf(1.0)).abs() < 1e-12,
+            "p_value = {p_value}"
+        );
     }
 
     #[test]

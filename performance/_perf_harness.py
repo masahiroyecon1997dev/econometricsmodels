@@ -28,7 +28,12 @@
   pandas入力を前提とするため `df.to_pandas()` が必要だが、これはライブラリ本体の
   仕事ではなく変換コストなので、`_worker()` が計測ループの外で1回だけ実施し、
   `FitContext.pandas_df` として渡す（`.claude/rules/testing-policy.md`「パフォーマンス
-  比較（ベンチマーク）の方法論」）。
+  比較（ベンチマーク）の方法論」）。**単純な`to_pandas()`だけでは足りない手法
+  （linearmodelsがMultiIndex(entity, time)を要求するパネル系のFE/RE等）は、
+  `PerfAdapter.build_pandas_df`でこの変換ステップ自体を差し替えられる**——
+  MultiIndex構築（・REの切片用定数列追加）も実務上は一度きりのデータ準備段階で
+  行うものであり、`to_pandas()`と同じ性質のコストのため計測区間の外に置く
+  （`performance/compare_fe.py`/`compare_re.py`参照）。
 - **HACのラグ数を明示的に揃える**: ライブラリごとに自動ラグ選択式が異なりうるため、
   `benchmark.common.hac_auto_lag(n)`（engineの自動選択式と同じ）で計算した同一の
   ラグ数を `FitContext.hac_lags` で渡す。ラグ選択方式自体の違いではなく、
@@ -166,6 +171,12 @@ class PerfAdapter:
             engine 分は git ハッシュで足りるため不要。
         build_dataframe: `(n, k, seed) -> pl.DataFrame`。cluster 列など手法側で
             必要な派生列の付与もここで行う。
+        build_pandas_df: `pl.DataFrame -> object`。`library != "engine"` のとき
+            `_worker()` がこれを呼んで `FitContext.pandas_df` を作る。既定は単純な
+            `df.to_pandas()`（OLS/WLS/Logit/Probit/IV/Tobitはこのまま使う）。
+            linearmodelsがMultiIndex(entity, time)を要求するパネル系（FE/RE）等、
+            単純な変換だけでは足りない手法はこれを上書きする（モジュールdocstring
+            「DataFrame→pandas変換は計測区間の外」参照）。
         fit_once: `FitContext -> object`。1回の推定を実行する（計測区間内で
             呼ばれる）。返り値は使われないが、**リファレンス実装が結果を遅延評価
             （lazy property）で計算する設計の場合、この関数内で明示的にアクセスして
@@ -189,6 +200,12 @@ class PerfAdapter:
             なら `libraries` をそのまま使う。リファレンス実装が k を増やすと
             計測不能になる手法で、k 軸だけ engine 単独に絞るために使う。n 軸・
             method 軸には影響しない。`libraries=("engine",)` の手法では指定不要。
+        k_sweep_cov_types: k 軸スイープでのみ使う cov_type の部分集合。`None`
+            なら `cov_types` をそのまま使う。`k_sweep_libraries` と同じ発想だが
+            対象が cov_type（`FE` の Driscoll-Kraay HAC は時点数 T ベースの
+            バンド幅を使うため、k 軸で k を増やすと T に対して次元過多になり
+            共分散行列が特異になる——`performance/compare_fe.py` 参照）。n 軸・
+            method 軸には影響しない。
         n_sweep_engine_only: n 軸に追加する engine 単独計測点の n の刻み。大 n を
             全 cov_type で回すと高コスト（またはリファレンス実装が大 n で計測不能）
             だが、engine の大標本での健全性（収束すること・実行時間）は回帰検知
@@ -215,12 +232,17 @@ class PerfAdapter:
     build_dataframe: Callable[[int, int, int], pl.DataFrame]
     fit_once: Callable[[FitContext], object]
 
+    build_pandas_df: Callable[[pl.DataFrame], object] = lambda df: (
+        df.to_pandas()
+    )
+
     n_sweep: Sequence[int] = (1_000, 10_000, 100_000, 1_000_000)
     n_sweep_fixed_k: int = 5
     n_sweep_engine_only: Sequence[int] = ()
     k_sweep: Sequence[int] = (5, 20)
     k_sweep_fixed_n: int = 10_000
     k_sweep_libraries: Sequence[str] | None = None
+    k_sweep_cov_types: Sequence[str] | None = None
     cluster_col: str | None = None
     weight_col: str | None = None
     default_method: str = "newton"
@@ -263,7 +285,7 @@ def _worker(
 ) -> dict:
     df = adapter.build_dataframe(n, k, seed)
     x_cols = [f"x{j + 1}" for j in range(k)]
-    pandas_df = None if library == "engine" else df.to_pandas()
+    pandas_df = None if library == "engine" else adapter.build_pandas_df(df)
     ctx = FitContext(
         library=library,
         df=df,
@@ -419,11 +441,14 @@ def run_k_sweep(adapter: PerfAdapter, repeats: int, seed: int) -> list[dict]:
 
     `adapter.k_sweep_libraries` が設定されていればそのライブラリのみを回す
     （リファレンス実装が k 軸で計測不能な手法向け。`PerfAdapter` docstring 参照）。
+    `adapter.k_sweep_cov_types` が設定されていればその cov_type のみを回す
+    （k 軸で計測不能になる cov_type 向け、同 docstring 参照）。
     """
     libraries = adapter.k_sweep_libraries or adapter.libraries
+    cov_types = adapter.k_sweep_cov_types or adapter.cov_types
     results = []
     for k in adapter.k_sweep:
-        for cov_type in adapter.cov_types:
+        for cov_type in cov_types:
             for library in libraries:
                 results.append(
                     _measure_point(

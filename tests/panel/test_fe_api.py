@@ -48,7 +48,7 @@ def test_residuals_length_matches_n_obs(fe_dataset):
 def test_param_names_have_no_intercept(fe_dataset):
     """FEはwithin変換で切片が構造的に消えるため`param_names`に"const"は
     含まれない（`param_names[0]`が常に"const"になるREとの対比、
-    panel-api-design.md 7章）。
+    docs/spec/re-spec.md 2章）。
     """
     res = our_fit(fe_dataset)
     assert res.param_names == ["x1", "x2"]
@@ -101,7 +101,7 @@ def test_n_obs_dep_var_name_n_entities(fe_dataset):
     assert res.n_entities == fe_dataset["entity"].n_unique()
 
 
-# ── fixed_effects()（追加メソッド、panel-api-design.md 6.6節） ─────────
+# ── fixed_effects()（追加メソッド、docs/spec/fe-spec.md 3.5節） ────────
 
 
 def test_fixed_effects_one_way_structure(fe_dataset):

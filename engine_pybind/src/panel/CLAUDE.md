@@ -1,6 +1,6 @@
 # engine_pybind/src/panel/ 実装ノート（FE/RE）
 
-このファイルは `engine_pybind/src/panel/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景は `docs/planning/specs/panel-api-design.md` が正本。ここは差分の索引のみ。
+このファイルは `engine_pybind/src/panel/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景は `docs/spec/fe-spec.md` / `docs/spec/re-spec.md`（FE/RE共通の論点は `docs/planning/specs/panel-api-design.md`）が正本。ここは差分の索引のみ。
 
 ## 実装フェーズの分割方針（IV・Logitと同じ3段階、`engine_pybind/src/iv/CLAUDE.md`参照）
 
@@ -8,7 +8,7 @@ FEはIVの`#159`（データ抽出・pyclass定義）→`#169`（engine呼び出
 
 1. **データ抽出・pyclass定義issue（FEでは#186、完了）**: `FEOptions`/`FEResult`のpyclass定義、列抽出・バリデーション・`engine::panel::fe::FeInput`構築までを行う`build_fe_input`を`panel/fe.rs`に実装した。この時点では`#[pymodule]`への登録・実際の`FeEstimator::fit`呼び出しは行わなかった。
 2. **engine呼び出し・エラー変換issue（FEでは#187、完了）**: `build_fe_input`を実際に呼び出す`fit`関数（`panel/fe.rs`）を追加し、`lib.rs`に`#[pyfunction] fit_fe`を新設して`#[pymodule]`に登録した。`build_fe_input`/`parse_fe_cov_type`/`panel_error_to_pyerr`の`#[allow(dead_code)]`属性はこの時点で全て削除した（本番経路（`fit_fe`）から実際に呼ばれるようになったため、IVの#169と同じ）。`maturin develop --release`でビルドし、fixestリファレンスフィクスチャ（`engine::panel::fe`の`fixest_reference_input`と同じデータ）を使ってPythonから直接`_lib.fit_fe`を呼び出し、engine単体テストの期待値と完全一致することを確認済み（k=0・`cov_type="hc0"`拒否・`time_col`経由のHACも動作確認済み）。
-3. **`fixed_effects()`メソッドissue（FEでは#188、完了）**: IVの`first_stage()`と同じ「追加結果は別メソッド」方針（`panel-api-design.md`6.6節）。`FEResult`に`FeEstimator`本体を保持する非公開フィールド`estimator`を追加し（`IVResult.first_stage`が#159ではなく#170で追加されたのと同じ段階分割）、`fixed_effects()`pymethodがそこから`FeEstimator::fixed_effects()`をオンデマンドに呼ぶ。詳細は下記「`fixed_effects()`の実装（Issue #188）」参照。
+3. **`fixed_effects()`メソッドissue（FEでは#188、完了）**: IVの`first_stage()`と同じ「追加結果は別メソッド」方針（`docs/spec/fe-spec.md`3.5節）。`FEResult`に`FeEstimator`本体を保持する非公開フィールド`estimator`を追加し（`IVResult.first_stage`が#159ではなく#170で追加されたのと同じ段階分割）、`fixed_effects()`pymethodがそこから`FeEstimator::fixed_effects()`をオンデマンドに呼ぶ。詳細は下記「`fixed_effects()`の実装（Issue #188）」参照。
 
 ## `fit`の実装（Issue #187）
 
@@ -101,7 +101,7 @@ FEの#186と同じ段階（`REOptions`/`REResult`のpyclass定義・`build_re_in
   （RE自身が2-way構造を持たないため、FEのような「2-way FEの固定効果構造」と「DK HACの
   時系列粒度」を分離する必要が無い）。`REOptions.time`は1フィールドで「HAC時系列順序」と
   「ハウスマン検定用内部FE呼び出しの1-way/2-way選択（`Some`なら2-way、`None`なら1-way、
-  `panel-api-design.md`7.3節）」を兼ねる。詳細は`panel/re.rs`モジュールdoc参照。
+  `docs/spec/re-spec.md`3.7節）」を兼ねる。詳細は`panel/re.rs`モジュールdoc参照。
 - **`x`の空リストを許容しない（ユーザー確認済み、2026-09-20）**: REで`x=[]`は「分散成分
   （ICC）のみを推定するnullモデル」として単独で意味を持つ標準的なユースケースだが、
   `panel-api-design.md`にこの点の明示的な決定が無かったため確認した。他手法（FE

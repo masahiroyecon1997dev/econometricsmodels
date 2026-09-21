@@ -35,10 +35,10 @@
 //! 無く`time`のみを持つ。理由: `engine::panel::re::ReCovType::Hac`は`FeCovType::Hac`と
 //! 異なり`time`オーバーライドフィールドを持たない（`engine::panel::re`モジュールdoc・
 //! `engine/src/panel/CLAUDE.md`「`cov_type`対応（Issue #197）」参照）。RE自身が2-way
-//! 構造を持たない（v1はentity方向のみ、7.6節）ため、FEのような「2-way FEの固定効果構造に
-//! 使う時点粒度」と「HACカーネルに使う時系列粒度」を分離する必要が無い——DK HAC計算は
-//! `ReInput::time()`をそのまま使う設計。`REOptions.time`は以下2つの用途を1つのフィールドで
-//! 兼ねる（`panel-api-design.md`7.3節）:
+//! 構造を持たない（v1はentity方向のみ、`re-spec.md`5章）ため、FEのような「2-way FEの
+//! 固定効果構造に使う時点粒度」と「HACカーネルに使う時系列粒度」を分離する必要が無い——
+//! DK HAC計算は`ReInput::time()`をそのまま使う設計。`REOptions.time`は以下2つの用途を
+//! 1つのフィールドで兼ねる（`docs/spec/re-spec.md`3.7節）:
 //! - `cov_type="hac"`時のDriscoll-Kraay型パネルHACの時系列順序（`None`なら
 //!   `PanelError::HacRequiresTime`）
 //! - ハウスマン検定用の内部FE呼び出しの1-way/2-way選択（`Some`なら2-way FE、`None`なら
@@ -218,9 +218,12 @@ pub struct REResult {
     #[pyo3(get)]
     pub r_squared_overall: f64,
     /// Classical Hausman test statistic comparing RE against the equivalent FE
-    /// specification (`panel-api-design.md` section 7.3). Computed with classical
-    /// standard errors regardless of `cov_type`. `None` if the internal FE comparison
-    /// is unavailable (see the struct-level docstring).
+    /// specification (`docs/spec/re-spec.md` section 3.7). Computed with classical
+    /// standard errors regardless of `cov_type`. Always non-negative, matching R's
+    /// `plm::phtest` (the underlying quadratic form is negative when the compared
+    /// variance difference is indefinite in finite samples; corrected by taking its
+    /// absolute value, as `plm::phtest` does unconditionally). `None` if the internal
+    /// FE comparison is unavailable (see the struct-level docstring).
     #[pyo3(get)]
     pub hausman_statistic: Option<f64>,
     /// p-value of `hausman_statistic` (upper-tail chi-squared probability).

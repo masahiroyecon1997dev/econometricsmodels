@@ -13,7 +13,7 @@ separate class; same policy as `OLSOptions`/`IVOptions`).
 
 `fixed_effects()` (the fixed effects themselves, `α_i`/`γ_t`) is
 provided as a separate method rather than a field on `FEResults`
-(`docs/planning/specs/panel-api-design.md` section 6.6, the same
+(`docs/spec/fe-spec.md` section 3.5, the same
 "additional results are a separate method" policy as IV's
 `first_stage()`).
 
@@ -35,8 +35,8 @@ class FE:
     """Fixed effects (within) panel regression estimator.
 
     Supports one-way (entity) and two-way (entity + time) fixed
-    effects, selected via `FEOptions.time` (`docs/planning/specs/
-    panel-api-design.md` section 6.2).
+    effects, selected via `FEOptions.time` (`docs/spec/fe-spec.md`
+    section 1).
 
     Args:
         data: A polars DataFrame containing the dependent variable,
@@ -114,7 +114,7 @@ class FEResults:
 
     `fixed_effects()` (the fixed effects themselves) is provided as a
     separate method rather than a field on this class
-    (`docs/planning/specs/panel-api-design.md` section 6.6).
+    (`docs/spec/fe-spec.md` section 3.5).
 
     Args:
         raw: The estimation result object returned by `_lib.fit_fe`

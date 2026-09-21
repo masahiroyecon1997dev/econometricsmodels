@@ -62,7 +62,7 @@ def test_aic_bic_log_likelihood_are_finite(fe_dataset):
 def test_param_names_start_with_const(fe_dataset):
     """REは切片を持つため`param_names[0]`が常に"const"になる
     （FEはwithin変換で切片が構造的に消えるため無い、との対比。
-    panel-api-design.md 7章）。
+    docs/spec/re-spec.md 2章）。
     """
     res = our_fit_re(fe_dataset)
     assert res.param_names == ["const", "x1", "x2"]
@@ -125,7 +125,7 @@ def test_df_resid_and_df_model(fe_dataset):
     assert res.df_resid == fe_dataset.height - 3
 
 
-# ── ハウスマン検定（panel-api-design.md 2.4節・7.3節） ────────────────
+# ── ハウスマン検定（panel-api-design.md 2.4節・docs/spec/re-spec.md 3.7節） ──
 
 
 def test_hausman_present_for_one_way(fe_dataset):

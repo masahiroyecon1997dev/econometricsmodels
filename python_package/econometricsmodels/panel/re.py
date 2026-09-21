@@ -128,7 +128,7 @@ class REResults:
     are `None` when the internal FE comparison used for the Hausman
     test is unavailable — in practice this only happens when
     `REOptions.time` is set (requesting the two-way FE comparison,
-    `panel-api-design.md` section 7.3) and that two-way regression
+    `docs/spec/re-spec.md` section 3.7) and that two-way regression
     itself fails (e.g. an unbalanced panel or a singleton time
     period), or when `Var(β_FE) - Var(β_RE)` is numerically singular;
     RE's own result is still returned normally in that case. This is
@@ -280,7 +280,11 @@ class REResults:
     def hausman_statistic(self) -> float | None:
         """Classical Hausman test statistic comparing RE against the
         equivalent FE specification. Computed with classical standard
-        errors regardless of `cov_type`. `None` if the internal FE
+        errors regardless of `cov_type`. Always non-negative, matching
+        R's `plm::phtest` (the underlying quadratic form is negative
+        when the compared variance difference is indefinite in finite
+        samples; this is corrected by taking its absolute value, as
+        `plm::phtest` does unconditionally). `None` if the internal FE
         comparison is unavailable (see the class docstring)."""
         return self._raw.hausman_statistic
 

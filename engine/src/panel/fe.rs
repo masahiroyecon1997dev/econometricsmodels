@@ -9,15 +9,15 @@
 //! `FeInput`自体はwithin変換前の生データを保持するだけの入れ物であり、`OlsInput`/
 //! `IvInput`と異なり`faer::Mat`は組み立てない（within変換（`panel::common::
 //! quasi_demean_column`）が`&[f64]`の列単位で動く設計のため、`Mat`に詰め直す
-//! 変換をこの段階で行う意味が無い。`docs/planning/specs/panel-api-design.md`7.4節）。
+//! 変換をこの段階で行う意味が無い。`docs/spec/re-spec.md`3.2節）。
 //!
 //! ## within変換（`within_transform_one_way`/`within_transform_two_way`）
 //!
-//! - **1-way**（`docs/planning/specs/panel-api-design.md`6.1節）: `y`/各`x`列に
+//! - **1-way**（`docs/spec/fe-spec.md`3.1節）: `y`/各`x`列に
 //!   entityでのquasi-demean（θ=1、`col[i] - ȳ_{e(i)}.`）を適用する。不均衡パネルも
 //!   無条件でサポートする（エンティティごとの平均を引くだけで数学的に正確に成立する
 //!   ため）。
-//! - **2-way**（同6.2節・6.4節）: 閉形式の二重デミーニング
+//! - **2-way**（同3.1節。バランスパネル必須の理由は`fe-spec.md`1章）: 閉形式の二重デミーニング
 //!   `ỹ_it = y_it - ȳ_i. - ȳ_.t + ȳ..`で計算する。この閉形式は**バランスパネルでのみ
 //!   正確**なため、事前にバランスパネルであることを検証し
 //!   （`PanelError::UnbalancedPanelForTwoWay`）、`time`が指定されていなければ
@@ -404,7 +404,7 @@ impl FeInput {
     ///   `PanelError::IdentifierDimensionMismatch { dimension: PanelDimension::Time, .. }`
     ///
     /// within変換の実施・singleton検出・分散ゼロ検証・バランスパネルの検証は行わない
-    /// （いずれも別issueで`fit()`側が担う、`panel-api-design.md`6章）。
+    /// （いずれも別issueで`fit()`側が担う、`docs/spec/fe-spec.md`）。
     ///
     /// # パニックについて
     /// `x_names.len() != x_columns.len()`の場合は`debug_assert!`でパニックする

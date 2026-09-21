@@ -7,10 +7,11 @@
 //!
 //! `ReInput`自体は準偏差変換前の生データを保持するだけの入れ物であり、`FeInput`と
 //! 同じ理由（`quasi_demean_column`が`&[f64]`の列単位で動く設計のため）で`faer::Mat`は
-//! 組み立てない（`docs/planning/specs/panel-api-design.md`7.4節）。
+//! 組み立てない（`docs/spec/re-spec.md`3.2節）。
 //!
 //! `time`フィールドの扱いは`FeInput`をそのまま踏襲する（Issue #192のスコープ、
-//! `panel-api-design.md`1章）が、RE自身の準偏差変換（7.2節）は**entity方向のみ**
+//! `panel-api-design.md`1章）が、RE自身の準偏差変換（`re-spec.md`3.2節）は
+//! **entity方向のみ**
 //! （2-way REはv1スコープ外）で`time`を使わない。`ReInput`が`time`を保持する理由は、
 //! `RE.fit()`が内部でFE推定を実行してハウスマン検定の比較対象を得る際
 //! （2.4節）、「`entity`/`time`/`x`はRE呼び出し時と同一の指定を使う」ため——つまり
@@ -107,7 +108,7 @@
 //! 検証で判明した設計（FEの`fe_r_squared_between`/`fe_r_squared_overall`——Issue #183——
 //! とは以下の2点で異なるため、`re_r_squared_within`/`re_r_squared_between`/
 //! `re_r_squared_overall`としてRE独自に実装する。無理な共通化はしない
-//! （`panel-api-design.md`7.4節「共通化しない」）——単なる`has_intercept`分岐の追加では
+//! （`docs/spec/re-spec.md`3.6節）——単なる`has_intercept`分岐の追加では
 //! 済まず、フィット済みの値そのものの計算式（切片の有無）が変わるため）。
 //!
 //! - **REは`has_constant=True`のためTSSが中心化される**: FEは固定効果を含み実質的に
@@ -227,7 +228,7 @@ impl ReInput {
     ///   `PanelError::IdentifierDimensionMismatch { dimension: PanelDimension::Time, .. }`
     ///
     /// 準偏差変換の実施・θ計算・分散成分推定・ハウスマン検定は行わない
-    /// （いずれも別issueで`fit()`側が担う、`panel-api-design.md`7章）。
+    /// （いずれも別issueで`fit()`側が担う、`docs/spec/re-spec.md`）。
     ///
     /// # パニックについて
     /// `x_names.len() != x_columns.len()`の場合は`debug_assert!`でパニックする

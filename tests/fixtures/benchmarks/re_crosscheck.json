@@ -577,10 +577,10 @@
   },
   "_meta": {
     "method": "re",
-    "generated_at": "2026-09-20T15:04:58.027720+00:00",
+    "generated_at": "2026-09-21T05:46:42.477284+00:00",
     "reference": "plm (R)",
     "r_version": "4.5.3",
     "plm_version": "2.6.7",
-    "note": "hc2/hc3・ハウスマン検定は、linearmodelsが提供しない/実装を持たないためplmのみが参照値になる単一参照実装の例外（モジュールdoc参照）。plmの変量効果分散成分推定（Swamy-Arora）はlinearmodelsと僅かに異なる実装のため、点推定自体が不均衡パネルで最大0.1%程度乖離する（実測確認済み、実装バグではない）。テストコード側ではこのフィクスチャ全体をクロスチェック水準（1e-2程度）の緩い許容誤差で比較すること（.claude/rules/testing-policy.md「許容誤差」参照）。t検定（t_stats/p_values/conf_int）はplmの既定であるz検定（漸近正規近似）ではなく、本実装と同じt(df_resid)分布の式でcoef/seから計算し直している（run_plm_benchmark.Rのコメント参照）。ハウスマン検定はv1のRE自身のentity方向のみ（1-way内部FE比較）に限定して検証する（2-way内部FE比較のクロスチェックは別issueで検討、ユーザー確認済み・2026-09-20）。wagepanはre.jsonと同じmarried/union/expersqを使用。【重要】hausman_statisticはplm::phtestの実装（plm:::phtest.panelmodel）がabs()を無条件適用するため常に非負。本実装のengineは符号付きのまま返す設計（差行列が負定値になる有限標本では負値になりうる）のため、本実装の値と比較する際はabs()を適用してから比較すること（panel-api-design.md7.3節・engine/src/panel/CLAUDE.mdの「plmと同じ挙動」という記載は誤り、本スクリプトのモジュールdoc参照。engine側の修正可否はIssue #350で検討）。"
+    "note": "hc2/hc3・ハウスマン検定は、linearmodelsが提供しない/実装を持たないためplmのみが参照値になる単一参照実装の例外（モジュールdoc参照）。plmの変量効果分散成分推定（Swamy-Arora）はlinearmodelsと僅かに異なる実装のため、点推定自体が不均衡パネルで最大0.1%程度乖離する（実測確認済み、実装バグではない）。テストコード側ではこのフィクスチャ全体をクロスチェック水準（1e-2程度）の緩い許容誤差で比較すること（.claude/rules/testing-policy.md「許容誤差」参照）。t検定（t_stats/p_values/conf_int）はplmの既定であるz検定（漸近正規近似）ではなく、本実装と同じt(df_resid)分布の式でcoef/seから計算し直している（run_plm_benchmark.Rのコメント参照）。ハウスマン検定はv1のRE自身のentity方向のみ（1-way内部FE比較）に限定して検証する（2-way内部FE比較のクロスチェックは別issueで検討、ユーザー確認済み・2026-09-20）。wagepanはre.jsonと同じmarried/union/expersqを使用。hausman_statisticはplm::phtestの実装（plm:::phtest.panelmodel）がabs()を無条件適用するため常に非負。本実装のengineもIssue #350で同様にabs()を適用するよう修正済みのため、abs()適用等の追加処理無しでplmの出力と直接比較できる（docs/spec/re-spec.md 3.7節、本スクリプトのモジュールdoc参照）。"
   }
 }

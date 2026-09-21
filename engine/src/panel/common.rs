@@ -8,40 +8,42 @@
 //! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は`engine::error::
 //! CommonError`に切り出し済みのため、ここでは`Common`バリアント経由で保持する。
 //!
-//! FE/RE固有バリアントは、`panel-api-design.md`6章（FE固有論点）・7章（RE固有論点）で
-//! 仕様が確定しているバリデーション条件をカバーする:
+//! FE/RE固有バリアントは、`docs/spec/fe-spec.md`（FE固有論点）・`docs/spec/re-spec.md`
+//! （RE固有論点）で仕様が確定しているバリデーション条件をカバーする:
 //!
-//! - `IdentifierDimensionMismatch`: `y`と`entity`/`time`の長さ不一致（1章、Issue #175）
-//! - `InsufficientDegreesOfFreedom`: パネル自由度調整（6.3節）
-//! - `SingletonGroup`: 観測数1のグループ（6.5節）
-//! - `UnbalancedPanelForTwoWay`: 2-way FEのバランスパネル必須（6.4節）
-//! - `ZeroVarianceAfterDemeaning`: within変換後に分散ゼロの説明変数（6.7節）
-//! - `TwoWayRequiresTime`: 2-way FE指定時の`time`必須（1.1節）
+//! - `IdentifierDimensionMismatch`: `y`と`entity`/`time`の長さ不一致（`panel-api-design.md`
+//!   1章、Issue #175）
+//! - `InsufficientDegreesOfFreedom`: パネル自由度調整（`fe-spec.md`3.2節）
+//! - `SingletonGroup`: 観測数1のグループ（`fe-spec.md`1章）
+//! - `UnbalancedPanelForTwoWay`: 2-way FEのバランスパネル必須（`fe-spec.md`1章）
+//! - `ZeroVarianceAfterDemeaning`: within変換後に分散ゼロの説明変数（`fe-spec.md`1章）
+//! - `TwoWayRequiresTime`: 2-way FE指定時の`time`必須（`panel-api-design.md`1.1節）
 //! - `HacRequiresTime`: Driscoll-Kraay型パネルHAC（`FeCovType::Hac`）指定時の`time`必須
-//!   （3.1節、Issue #182。2-way FEは`TwoWayRequiresTime`で既に必須化されているため、
-//!   1-way FEでのみ発生しうる）
+//!   （`panel-api-design.md`3.1節、Issue #182。2-way FEは`TwoWayRequiresTime`で既に
+//!   必須化されているため、1-way FEでのみ発生しうる）
 //! - `InvalidHacBandwidth`: `FeCovType::Hac`の明示的な`bandwidth`が`[0, t)`の範囲外
 //!   （`t`はユニークな時点数、Issue #182。`LeastSquaresError::InvalidHacLags`と同型だが
 //!   上限が観測数`n`ではなく時点数`t`）
-//! - `WithinRegressionFailed`: within変換済みデータの最小二乗推定委譲の失敗（4.3節）
+//! - `WithinRegressionFailed`: within変換済みデータの最小二乗推定委譲の失敗
+//!   （`panel-api-design.md`4.3節）
 //! - `FTestFailed`: F統計量（Issue #186、`fe.rs`モジュールdoc「自由度調整」のF統計量節）の
 //!   Wald検定（`crate::linear::ols::wald_f_test`）が失敗した場合。`WithinRegressionFailed`と
 //!   意味が異なる（`OlsEstimator::fit`自体は既に成功した後の、F検定固有の共分散部分行列の
 //!   ほぼ特異性というbackstopのみ、`ols.rs`の`wald_f_test`docコメント参照）ため別バリアントに
 //!   分離した（`IvError::FirstStageFailed`が`WithinRegressionFailed`と同じ`LeastSquaresError`
 //!   ラップでも変換箇所ごとに専用バリアントにする判断と同じ）。
-//! - `BetweenRegressionFailed`: RE（Swamy-Arora分散成分推定、7.1節、Issue #193）の
+//! - `BetweenRegressionFailed`: RE（Swamy-Arora分散成分推定、`re-spec.md`3.1節、Issue #193）の
 //!   between回帰（エンティティ平均への`OlsEstimator::fit(include_intercept=true)`）が
 //!   失敗した場合（エンティティ数が説明変数の数以下等）。`WithinRegressionFailed`と同じ
 //!   `LeastSquaresError`ラップだが、対象がFEのwithin回帰ではなくREのbetween回帰のため
 //!   別バリアントにする（`FTestFailed`と同じ判断）。
-//! - `QuasiDemeanedRegressionFailed`: RE（`ReEstimator::fit`、7.4節、Issue #195）の
+//! - `QuasiDemeanedRegressionFailed`: RE（`ReEstimator::fit`、`re-spec.md`3.2節、Issue #195）の
 //!   準偏差変換済みデータ（`quasi_demean_transform`の出力に、同じθで変換した定数列を
 //!   加えたもの）への`OlsEstimator::fit(include_intercept=false)`委譲が失敗した場合。
 //!   `WithinRegressionFailed`（FEのwithin変換済みデータ）・`BetweenRegressionFailed`
 //!   （REのbetween回帰）とは対象が異なるため別バリアントにする（同じ判断の3件目）。
 //!
-//! RE固有（7章）で追加のバリアントが必要になった場合は、FE/RE実装issueで実際に計算
+//! RE固有（`re-spec.md`）で追加のバリアントが必要になった場合は、FE/RE実装issueで実際に計算
 //! コードを書く過程で随時追加する（`LeastSquaresError`・`IvError`のdocコメントと同じ
 //! 「土台を用意し、必要になった時点で足す」方針）。
 //! ハウスマン統計量（`hausman_statistic`、Issue #174。符号の扱いはIssue #350で修正）は
@@ -66,7 +68,7 @@ use crate::linear::common::LeastSquaresError;
 /// 問題か」を区別するために使う。
 ///
 /// 2-way FEではエンティティ・時点のsingletonを対称に検出する
-/// （`docs/planning/specs/panel-api-design.md`6.5節）ため、`PanelError::SingletonGroup`が
+/// （`docs/spec/fe-spec.md`1章）ため、`PanelError::SingletonGroup`が
 /// この型をフィールドとして持つ。FE/RE実装が進んだ段階で、singleton検出以外
 /// （`fixed_effects()`の次元指定等）でも再利用できる想定。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,7 +148,7 @@ pub enum PanelError {
     },
 
     /// 観測数1のグループ（singleton）を検出した。エンティティ方向は常に、2-way FEでは
-    /// 時点方向も対称に検出する（`panel-api-design.md`6.5節）。
+    /// 時点方向も対称に検出する（`docs/spec/fe-spec.md`1章）。
     ///
     /// listwise deletion等の自動除外はせず常にエラーとする（欠損値を常にエラーとする
     /// 全体方針の踏襲）。下流の特異行列エラーとして偶発的に検出される形にはせず、
@@ -166,7 +168,7 @@ pub enum PanelError {
     /// 2-way FEのwithin変換は閉形式の二重デミーニング
     /// （`ỹ_it = y_it - ȳ_i. - ȳ_.t + ȳ..`）で計算するが、この閉形式は
     /// バランスパネルでのみ正確なため、2-wayでは常にバランスパネルを必須とする
-    /// （`panel-api-design.md`6.4節）。1-way FEはエンティティ平均を引くだけで
+    /// （`docs/spec/fe-spec.md`1章）。1-way FEはエンティティ平均を引くだけで
     /// 不均衡でも数学的に正確に成立するため、このエラーは発生しない。
     ///
     /// なお「バランス」の判定は観測数カウント（`n_obs == n_entities * n_periods`）
@@ -189,7 +191,7 @@ pub enum PanelError {
     ///
     /// 時間不変変数（1-way FEで問題になる典型例）だけでなく、2-wayで time FE と
     /// 完全共線な「エンティティ間で変動しない列」も同じチェックで検出できる
-    /// （`panel-api-design.md`6.7節。1-way/2-wayで同一ロジックを共有する）。
+    /// （`docs/spec/fe-spec.md`1章。1-way/2-wayで同一ロジックを共有する）。
     #[error(
         "regressor '{column}' has zero variance after the within-transformation \
          (it is time-invariant, or collinear with the fixed effects)"
@@ -314,7 +316,7 @@ pub(crate) fn count_unique(ids: &[String]) -> usize {
 ///
 /// `quasi_demean_column`の`theta`引数はエンティティID→θ_iの対応（`&BTreeMap<String,
 /// f64>`）を要求するが、θ=1固定の通常のwithin変換（FEのwithin変換そのもの、REの
-/// `r_squared_within`計算——`panel-api-design.md`7.4節「FEはθ=1の特殊ケース」・
+/// `r_squared_within`計算——`docs/spec/re-spec.md`3.2節「FEはθ=1の特殊ケース」・
 /// Issue #338「`linearmodels`の`_rsquared`のWithinセクションはRE/FEどちらのモデルでも
 /// 共通してθ=1のFE型within変換を使う」参照）で毎回同じ組み立てが必要になるため、
 /// FE/RE共有ロジックとしてここに置く（`group_indices_by_key`/`count_unique`と同じ理由、
@@ -579,12 +581,13 @@ pub(crate) fn panel_driscoll_kraay_cov_params(
 /// 行の`col`の単純平均（`ȳ_i.`）。
 ///
 /// - **FE（within変換）**: 全エンティティに`θ_i = 1.0`を渡す → `col[i] - ȳ_i.`
-///   （`docs/planning/specs/panel-api-design.md`7.4節: FEはこの関数の`θ_i = 1`の特殊ケース）。
-/// - **RE（準偏差変換）**: `θ_i = 1 - sqrt(σ_ε² / (T_i·σ_u² + σ_ε²))`（同7.2節）を渡す。
+///   （`docs/spec/re-spec.md`3.2節: FEはこの関数の`θ_i = 1`の特殊ケース）。
+/// - **RE（準偏差変換）**: `θ_i = 1 - sqrt(σ_ε² / (T_i·σ_u² + σ_ε²))`（同3.2節）を渡す。
 ///
 /// FE/REの`fit()`は`y`と`x`の各列にこの関数をループ適用し、変換後の列を
 /// `OlsEstimator::fit`へ渡す（WLSがsqrt(w)変換したデータをOLSへ委譲するのと同型の
-/// パターン、同4.3節・7.4節）。列ごとに独立な変換のため、列単位の関数として実装し
+/// パターン、`panel-api-design.md`4.3節・`re-spec.md`3.2節）。列ごとに独立な変換のため、
+/// 列単位の関数として実装し
 /// 呼び出し側でループする（`y`/`x`をまとめて受けるより単体テストが単純）。
 ///
 /// # 引数
@@ -663,14 +666,14 @@ pub fn quasi_demean_column(
 /// 帰無仮説 H0: 個体効果と説明変数が無相関（＝REが一致推定量）。棄却されればFEを使う。
 /// `H` は自由度 `k`（比較する係数の数）のカイ二乗分布に漸近的に従う。
 ///
-/// `docs/planning/specs/panel-api-design.md` 7.3節:
+/// `docs/spec/re-spec.md` 3.7節:
 /// - **v1は classical Hausman のみ**（`cov_type`に依存せず、常にclassical SE前提で計算）。
 ///   呼び出し側（RE実装）は`cov_type="cluster"`等でfitした場合でも、この関数には
 ///   classical前提の`cov_fe`/`cov_re`を渡す。
 /// - **比較対象はFE/RE間で重なりのあるスロープ係数のみ**。FEには切片が無いため、
 ///   RE側の切片・時間不変変数の係数は呼び出し側で除外し、対応する順序に揃えた
 ///   `beta_fe`/`beta_re`（同じ長さ`k`）と、その`k×k`部分共分散行列`cov_fe`/`cov_re`を
-///   渡す（このalignは7.3節の通り呼び出し側の責務）。
+///   渡す（このalignは同3.7節の通り呼び出し側の責務）。
 ///
 /// # 戻り値
 /// `(stat, df, p_value)`。`df == beta_fe.len()`、`p_value` は自由度 `df` のカイ二乗分布の
@@ -1055,7 +1058,7 @@ mod tests {
     #[test]
     fn quasi_demean_column_handles_unbalanced_panel() {
         // 不均衡パネル（T_a = 1, T_b = 3）でも1-wayは各エンティティ平均を引くだけで
-        // 正確に成立する（`panel-api-design.md`6.4節）。
+        // 正確に成立する（`docs/spec/fe-spec.md`1章）。
         // a: mean = 4.0（単一観測）→ θ_a = 1.0 で 0.0 になる。
         // b: mean = (2 + 4 + 6) / 3 = 4.0。
         let entity = entities(&["a", "b", "b", "b"]);

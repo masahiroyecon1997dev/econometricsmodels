@@ -160,13 +160,11 @@ def build_fixtures() -> dict:
             "限定して検証する（2-way内部FE比較のクロスチェックは別issueで検討、"
             "ユーザー確認済み・2026-09-20）。wagepanはre.jsonと同じ"
             "married/union/expersqを使用。"
-            "【重要】hausman_statisticはplm::phtestの実装（plm:::phtest."
-            "panelmodel）がabs()を無条件適用するため常に非負。本実装のengineは"
-            "符号付きのまま返す設計（差行列が負定値になる有限標本では負値になり"
-            "うる）のため、本実装の値と比較する際はabs()を適用してから比較する"
-            "こと（panel-api-design.md7.3節・engine/src/panel/CLAUDE.mdの「plmと"
-            "同じ挙動」という記載は誤り、本スクリプトのモジュールdoc参照。engine"
-            "側の修正可否はIssue #350で検討）。"
+            "hausman_statisticはplm::phtestの実装（plm:::phtest.panelmodel）"
+            "がabs()を無条件適用するため常に非負。本実装のengineもIssue #350で"
+            "同様にabs()を適用するよう修正済みのため、abs()適用等の追加処理無しで"
+            "plmの出力と直接比較できる（docs/spec/re-spec.md 3.7節、本スクリプト"
+            "のモジュールdoc参照）。"
         ),
     }
     return fixtures

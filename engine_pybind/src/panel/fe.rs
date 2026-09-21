@@ -24,7 +24,7 @@
 //!    実際に呼ばれるようになるため、`#[allow(dead_code)]`はすべて削除する
 //!    （`engine_pybind/src/iv/CLAUDE.md`「実装フェーズの分割方針」の#169と同じ）。
 //! 3. **本Issue（#188）**: `fixed_effects()`メソッド（IVの`first_stage()`と同じ
-//!    「追加結果は別メソッド」方針、`panel-api-design.md`6.6節）を追加する。`FEResult`に
+//!    「追加結果は別メソッド」方針、`docs/spec/fe-spec.md`3.5節）を追加する。`FEResult`に
 //!    非公開フィールド`estimator: FeEstimator`（内部で`OlsEstimator`まで保持する）を
 //!    追加し、`fixed_effects()`はそこから`FeEstimator::fixed_effects()`をオンデマンドに
 //!    呼ぶだけ（IVの`IVResult.first_stage`フィールドが#159ではなく#170で追加されたのと
@@ -185,7 +185,7 @@ impl FEOptions {
 ///
 /// `fixed_effects()` (recovering the fixed effects themselves, `α_i`/`γ_t`) is
 /// intentionally not included as a field here. It is exposed as a separate method
-/// instead (see `panel-api-design.md` section 6.6 — the same pattern as IV's
+/// instead (see `docs/spec/fe-spec.md` section 3.5 — the same pattern as IV's
 /// `first_stage()`).
 // `FEResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`OLSResult`と同じ理由）。
@@ -254,7 +254,7 @@ pub struct FEResult {
 impl FEResult {
     /// The fixed effects themselves (`α_i` for entity, `γ_t` for time), recovered
     /// post-hoc from the fitted coefficients (`α_i = ȳ_i - x̄_i'β̂`; see
-    /// `docs/planning/specs/panel-api-design.md` section 6.6 and
+    /// `docs/spec/fe-spec.md` section 3.5 and
     /// `engine::panel::fe::FeEstimator::fixed_effects`'s doc comment for the exact
     /// formula, including the two-way normalization convention).
     ///

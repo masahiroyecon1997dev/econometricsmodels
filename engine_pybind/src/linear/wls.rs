@@ -23,8 +23,7 @@ use pyo3_polars::PyDataFrame;
 use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
 use crate::column_extraction::{extract_f64_column, extract_f64_columns, x_column_names};
 use crate::validation::{
-    RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
-    validate_no_duplicate_within_role, validate_no_existing_column, validate_x_non_empty,
+    RoleValue, validate_common_roles, validate_no_duplicate_roles, validate_no_existing_column,
 };
 
 /// Estimation options for WLS.
@@ -316,14 +315,11 @@ pub fn fit(
     // （`docs/spec/wls-spec.md`「API引数」参照）。`weight`と`x`の重複は禁止しない
     // （Issue #277: 重みに使った列を説明変数としても含める実務上の利用例があるため。
     // `weight == y`は`y`を独立変数としても使うのと同型の致命的な問題のため引き続き禁止）。
-    validate_x_non_empty("x", &x)?;
-    validate_no_duplicate_roles(&[("y", RoleValue::Single(&y)), ("x", RoleValue::Multi(&x))])?;
+    validate_common_roles(&y, &x, options.include_intercept)?;
     validate_no_duplicate_roles(&[
         ("y", RoleValue::Single(&y)),
         ("weight", RoleValue::Single(&weight)),
     ])?;
-    validate_no_duplicate_within_role("x", &x)?;
-    validate_no_const_collision(&x, options.include_intercept)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
     let y_slice = extract_f64_column(&df, &y)?;

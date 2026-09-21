@@ -1199,30 +1199,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-09-13、`linear/common.rs`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
-### 61. `fit`冒頭のバリデーション4関数の呼び出し順序が5ファイルで一字一句重複している
-
-- **対象**: [engine_pybind/src/linear/ols.rs:331-334](../../../engine_pybind/src/linear/ols.rs#L331-L334)、
-  同型の呼び出し順序が
-  [engine_pybind/src/linear/wls.rs:330-337](../../../engine_pybind/src/linear/wls.rs#L330-L337)
-  （`weight`の重複チェックが1行追加される以外は同一）・
-  [engine_pybind/src/nonlinear/logit.rs:403-406](../../../engine_pybind/src/nonlinear/logit.rs#L403-L406)・
-  [engine_pybind/src/nonlinear/probit.rs:394-397](../../../engine_pybind/src/nonlinear/probit.rs#L394-L397)・
-  [engine_pybind/src/nonlinear/tobit.rs:548-551](../../../engine_pybind/src/nonlinear/tobit.rs#L548-L551)
-  にも存在（`grep`で確認。FE/REは`validate_no_const_collision`が無い3行版）
-- **内容**: ユーザー指摘（2026-09-13、「バリデーション部分を共通化すれば漏れがなくなる
-  可能性が高く、また追加バリデーションがはっきりする」）を受けて確認。
-  `validate_x_non_empty`→`validate_no_duplicate_roles`→`validate_no_duplicate_within_role`
-  →`validate_no_const_collision`という4行の呼び出し順序が、OLS/Logit/Probit/Tobitで
-  完全に同一（WLSは`weight`関連の1行が追加されるのみ）。個々の検証ロジック自体は
-  既に`validation.rs`に集約済みだが、「どれを・どの順で呼ぶか」という組み合わせが
-  まだ手法ごとに手書きで複製されており、新しい手法追加時にどれか1つを呼び忘れる
-  リスクがある。`validation.rs`に束ねるヘルパー（例:
-  `validate_common_roles(y, x, include_intercept)`）を追加することを提案する。
-  FE/REは`const`衝突チェックが無い非対称性があるため、そこの扱い（引数化するか
-  FE/RE用に別関数にするか）は着手時に要検討。
-- **気づいた経緯**: 2026-09-13、`linear/ols.rs`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
-
 ### 62.【Issue化】Logit/Probit/TobitのResult構築ブロックがフィールド単位で完全重複しておりIssue #318の原因になっている。`ols_estimator_to_result`の配置問題とも関連
 
 → Issue #347として切り出し済み（2026-09-20）。調査の結果、`ols_estimator_to_result`の

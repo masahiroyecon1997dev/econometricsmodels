@@ -30,10 +30,7 @@ use super::common::{
     parse_marginal_effects_at, parse_method,
 };
 use crate::column_extraction::{extract_f64_column, extract_f64_columns, x_column_names};
-use crate::validation::{
-    RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
-    validate_no_duplicate_within_role, validate_no_existing_column, validate_x_non_empty,
-};
+use crate::validation::{validate_common_roles, validate_no_existing_column};
 
 /// Estimation options for Logit.
 ///
@@ -392,10 +389,7 @@ pub(crate) fn build_logit_input(
 
     // 完全な多重共線性を早期に、分かりやすいエラーで防ぐ（`validation.rs`に集約、
     // OLS/WLSと共通、`.claude/rules/rust-style.md`参照）。
-    validate_x_non_empty("x", &x)?;
-    validate_no_duplicate_roles(&[("y", RoleValue::Single(&y)), ("x", RoleValue::Multi(&x))])?;
-    validate_no_duplicate_within_role("x", &x)?;
-    validate_no_const_collision(&x, options.include_intercept)?;
+    validate_common_roles(&y, &x, options.include_intercept)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
     let y_slice = extract_f64_column(df, &y)?;

@@ -6,6 +6,9 @@
 //! OLS/WLS/Logitの`fit`/`build_logit_input`冒頭で、メッセージ文言まで
 //! ほぼ同一のまま重複していたバリデーション（xが空・yやweight等のロール間の重複・
 //! x内の重複・`include_intercept=true`時の`"const"`列衝突）をここに集約する。
+//! `validate_common_roles`は、このうち`x`が空・`y`と`x`の重複・`x`内の重複・
+//! `const`衝突の4つを決まった順序でまとめて呼ぶ束ねるヘルパー（`refactoring-
+//! candidates.md`項目61）。
 //!
 //! `cov_type`/`method`文字列のパースはここに含めない（戻り値の型が系統ごとに異なる
 //! ため。`engine::linear::ols::CovType`は`Hc2`/`Hc3`/`Hac`を持つが
@@ -74,6 +77,28 @@ pub fn validate_no_const_collision(x: &[String], include_intercept: bool) -> PyR
              (it collides with the automatically added intercept)",
         ));
     }
+    Ok(())
+}
+
+/// `y`/`x`/`include_intercept`に関する4つの共通バリデーションを、この順序でまとめて
+/// 実行する（`validate_x_non_empty`→`validate_no_duplicate_roles`（`y`と`x`の重複）→
+/// `validate_no_duplicate_within_role`（`x`内部の重複）→`validate_no_const_collision`）。
+///
+/// OLS/Logit/Probit/Tobitの`fit`/`build_*_input`冒頭でこの4行が完全に同一のまま
+/// 重複していたため集約した（`refactoring-candidates.md`項目61）。Tobitは本関数の
+/// 呼び出し後に`validate_no_sigma_collision`を追加で呼ぶ。WLSは`weight`ロールとの
+/// 重複チェックが追加で必要なため、本関数の呼び出し後に`validate_no_duplicate_roles`で
+/// `weight`用のチェックを別途呼ぶ（`y`/`x`両方の検証を1関数にまとめたことで、`weight`
+/// チェックの実行順序が従来より後にずれるが、複合違反時のメッセージ優先順位に依存する
+/// テストは無いことを確認済み）。
+///
+/// `panel::fe`/`panel::re`は`entity`/`time`という動的なロール構成を持ち`const`衝突
+/// チェックも無いため対象外（呼び出し元で個別にロールリストを組み立てる）。
+pub fn validate_common_roles(y: &str, x: &[String], include_intercept: bool) -> PyResult<()> {
+    validate_x_non_empty("x", x)?;
+    validate_no_duplicate_roles(&[("y", RoleValue::Single(y)), ("x", RoleValue::Multi(x))])?;
+    validate_no_duplicate_within_role("x", x)?;
+    validate_no_const_collision(x, include_intercept)?;
     Ok(())
 }
 
@@ -254,6 +279,41 @@ mod tests {
     fn validate_no_const_collision_returns_error_when_include_intercept_and_const_present() {
         let x = ["x1".to_string(), "const".to_string()];
         assert!(validate_no_const_collision(&x, true).is_err());
+    }
+
+    #[test]
+    fn validate_common_roles_ok_for_well_formed_input() {
+        let x = ["x1".to_string(), "x2".to_string()];
+        assert!(validate_common_roles("y", &x, true).is_ok());
+    }
+
+    #[test]
+    fn validate_common_roles_returns_error_for_empty_x() {
+        assert!(validate_common_roles("y", &[], true).is_err());
+    }
+
+    #[test]
+    fn validate_common_roles_returns_error_when_y_in_x() {
+        let x = ["y".to_string(), "x1".to_string()];
+        assert!(validate_common_roles("y", &x, true).is_err());
+    }
+
+    #[test]
+    fn validate_common_roles_returns_error_for_duplicate_within_x() {
+        let x = ["x1".to_string(), "x1".to_string()];
+        assert!(validate_common_roles("y", &x, true).is_err());
+    }
+
+    #[test]
+    fn validate_common_roles_returns_error_for_const_collision_when_include_intercept() {
+        let x = ["const".to_string()];
+        assert!(validate_common_roles("y", &x, true).is_err());
+    }
+
+    #[test]
+    fn validate_common_roles_ok_for_const_column_when_include_intercept_is_false() {
+        let x = ["const".to_string()];
+        assert!(validate_common_roles("y", &x, false).is_ok());
     }
 
     #[test]

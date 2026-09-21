@@ -39,10 +39,7 @@ use super::common::{
 };
 use crate::column_extraction::{extract_f64_column, extract_f64_columns, x_column_names};
 use crate::errors::ValidationError;
-use crate::validation::{
-    RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
-    validate_no_duplicate_within_role, validate_no_existing_column, validate_x_non_empty,
-};
+use crate::validation::{validate_common_roles, validate_no_existing_column};
 
 /// Estimation options for Tobit.
 ///
@@ -534,10 +531,7 @@ pub(crate) fn build_tobit_input(
     let cov_type_lower = options.cov_type.to_lowercase();
     let method_lower = options.method.to_lowercase();
 
-    validate_x_non_empty("x", &x)?;
-    validate_no_duplicate_roles(&[("y", RoleValue::Single(&y)), ("x", RoleValue::Multi(&x))])?;
-    validate_no_duplicate_within_role("x", &x)?;
-    validate_no_const_collision(&x, options.include_intercept)?;
+    validate_common_roles(&y, &x, options.include_intercept)?;
     validate_no_sigma_collision(&x)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────

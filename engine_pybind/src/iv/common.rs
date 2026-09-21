@@ -4,7 +4,7 @@
 //! `<系統>/common.rs`に置く（`engine_pybind/src/linear/common.rs`と同じ位置づけ）。
 //! `IVOptions`/`IVResult`/`build_iv_input`は2SLS/GMMどちらの`method`でも共有する
 //! （`fit_iv`という単一エントリポイントの背後で`method`により推定方式を切り替える設計、
-//! `docs/planning/specs/iv-api-design.md`1.2節・6.2節）ため、系統内共有ロジックの
+//! `docs/spec/iv-spec.md`1.2節）ため、系統内共有ロジックの
 //! 置き場所という位置づけに素直に合致する（`two_sls.rs`/`gmm.rs`のような手法ごとの
 //! ファイル分割はしない）。
 //!
@@ -45,7 +45,7 @@
 //! 共用する（別々のクラスター変数を使い分けたいニーズが出てきたら別フィールド化を検討）。
 //!
 //! `wu_hausman_statistic`/`wu_hausman_p_value`は`method="gmm"`では常に`None`
-//! （`GmmEstimator`はWu-Hausman検定を持たない、`iv-api-design.md`6.6節はTwoSlsEstimator
+//! （`GmmEstimator`はWu-Hausman検定を持たない、`docs/spec/iv-spec.md`3.6節はTwoSlsEstimator
 //! のみのスコープ）。`overid_statistic`/`overid_p_value`は`method="gmm"`では
 //! `GmmEstimator::hansen_j_statistic()`/`hansen_j_p_value()`から配線する
 //! （`method="2sls"`のSargan検定と同じ`Option<f64>`同士の代入）。
@@ -120,7 +120,7 @@ pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
 
 /// Estimation options for IV (2SLS/GMM).
 ///
-/// See `docs/planning/specs/iv-api-design.md` for the rationale behind each field's
+/// See `docs/spec/iv-spec.md` for the rationale behind each field's
 /// meaning and default value. A single `IVOptions`/`fit_iv` pair serves both
 /// estimation methods; fields that apply to only one method are documented as such.
 // module/from_py_objectの理由は`OLSOptions`/`LogitOptions`と同じ
@@ -259,18 +259,18 @@ impl IVOptions {
 
 /// Estimation results for IV (2SLS/GMM).
 ///
-/// Structured data only (no `summary()`); see `docs/planning/specs/iv-api-design.md`
+/// Structured data only (no `summary()`); see `docs/spec/iv-spec.md`
 /// section 2. All array-valued fields (`params`, `std_errors`, etc.) share the same
 /// order as `param_names`.
 ///
 /// `stats` holds the t-statistics (`method="2sls"`) or z-statistics (`method="gmm"`),
 /// depending on which distribution the fitted model uses for inference
-/// (`iv-api-design.md` 3.2節) — named generically rather than `t_stats`/`z_stats`
+/// (`docs/spec/iv-spec.md` 3.2節) — named generically rather than `t_stats`/`z_stats`
 /// because this single type is shared by both methods (mirrors the distribution-agnostic
 /// naming already used internally by `engine::inference::InferenceStat`).
 ///
 /// `first_stage()`（内生変数ごとの第一段階回帰結果）はここにフィールドとして含めない。
-/// `fit()`の戻り値本体には含めず別メソッドとして公開する（`iv-api-design.md`2.2節、
+/// `fit()`の戻り値本体には含めず別メソッドとして公開する（`docs/spec/iv-spec.md`2章、
 /// 実装済み）。`predict()`/`marginal_effects()`用に`LogitResult`/
 /// `ProbitResult`が推定量そのものを非公開フィールド`estimator`として保持するのと同じ
 /// パターンだが、`IVResult`は`method`（2sls/gmm）非依存の非公開フィールド`first_stage:
@@ -330,7 +330,7 @@ pub struct IVResult {
     /// trivially satisfied — mirrors `GmmEstimator`'s own `gmm_iterations=1` convention,
     /// `engine/src/iv/gmm.rs`参照). When `IVOptions.gmm_convergence` is `None` (fixed
     /// iteration count, the default), always `true` — convergence is only actually checked
-    /// when `gmm_convergence` is set (`iv-api-design.md` 6.2節).
+    /// when `gmm_convergence` is set (`docs/spec/iv-spec.md` 3.3節).
     #[pyo3(get)]
     pub converged: bool,
     /// Number of GMM iterations actually run (`method="gmm"` only). Always `1` for
@@ -365,7 +365,7 @@ pub struct IVResult {
     pub r_squared_adj: f64,
     /// Weak-instrument diagnostic: the partial F-statistic for each endogenous
     /// variable (keyed by variable name), testing the excluded instruments' joint
-    /// significance after partialling out `x_exog` (`iv-api-design.md` 6.4節).
+    /// significance after partialling out `x_exog` (`docs/spec/iv-spec.md` 3.4節).
     /// **Not** the same as the plain F-statistic of the corresponding regression in
     /// `first_stage()`, which includes `x_exog`'s contribution too. Empty when
     /// `x_endog=[]`. Computed the same way for both `method="2sls"` and `method="gmm"`
@@ -374,14 +374,14 @@ pub struct IVResult {
     pub weak_instrument_f_statistics: HashMap<String, f64>,
     /// Overidentification test statistic: Sargan (`method="2sls"`) or Hansen J
     /// (`method="gmm"`). `None` when just-identified (`len(instruments) ==
-    /// len(x_endog)`, degrees of freedom 0), per `iv-api-design.md` 6.5節.
+    /// len(x_endog)`, degrees of freedom 0), per `docs/spec/iv-spec.md` 3.5節.
     #[pyo3(get)]
     pub overid_statistic: Option<f64>,
     #[pyo3(get)]
     pub overid_p_value: Option<f64>,
     /// Wu-Hausman endogeneity test statistic (joint test over all endogenous
     /// variables, regression-based / `wooldridge_regression` formulation,
-    /// `iv-api-design.md` 6.6節). Always computed under the `cov_type` passed to
+    /// `docs/spec/iv-spec.md` 3.6節). Always computed under the `cov_type` passed to
     /// `fit()` (unlike `weak_instrument_f_statistics`, which is always classical;
     /// `linearmodels`' `wooldridge_regression` uses the same covariance as the
     /// underlying model, and this mirrors that). `None` when there are no endogenous
@@ -389,8 +389,8 @@ pub struct IVResult {
     /// estimated (e.g. the first-stage residual has zero variance, or there are too
     /// few observations for the extra residual columns) — neither case fails `fit()`
     /// itself, since the other results remain valid. **Always `None` for
-    /// `method="gmm"`** (`GmmEstimator` does not implement this test; `iv-api-design.md`
-    /// 6.6節's implementation is `TwoSlsEstimator`-only).
+    /// `method="gmm"`** (`GmmEstimator` does not implement this test; `docs/spec/iv-spec.md`
+    /// 3.6節's implementation is `TwoSlsEstimator`-only).
     #[pyo3(get)]
     pub wu_hausman_statistic: Option<f64>,
     #[pyo3(get)]
@@ -409,7 +409,7 @@ impl IVResult {
     ///
     /// Each value is a full `OLSResults` (the same type OLS's `fit_ols` returns) — the
     /// first stage is a genuine, valid OLS regression in its own right, so no IV-specific
-    /// result type is needed (`iv-api-design.md` 2.2節). Its `f_statistic`/`f_p_value`
+    /// result type is needed (`docs/spec/iv-spec.md` 2章). Its `f_statistic`/`f_p_value`
     /// include `x_exog`'s contribution and are **not** the weak-instrument partial
     /// F-statistic (`weak_instrument_f_statistics`, computed separately).
     /// Computed the same way for both `method="2sls"` and `method="gmm"` (module
@@ -523,7 +523,7 @@ pub(crate) fn build_iv_input(
     // （`validation.rs`に集約、OLS/WLS/Logit/Probitと共通の方針）。`instruments`を
     // リストの末尾に置くのは、`x_exog`/`x_endog`と重複した場合にメッセージの主語を
     // `instruments`側にするため（`validate_no_duplicate_roles`のdocコメント
-    // 「呼び出し側の契約」、`iv-api-design.md`1.1.1節参照）。
+    // 「呼び出し側の契約」、`docs/spec/iv-spec.md`1.1節参照）。
     validate_no_duplicate_roles(&[
         ("y", RoleValue::Single(&y)),
         ("x_exog", RoleValue::Multi(&x_exog)),
@@ -546,7 +546,7 @@ pub(crate) fn build_iv_input(
     validate_no_const_collision("instruments", &instruments, options.include_intercept)?;
 
     // `x_exog`は空リストを許容する（内生変数のみのモデルも成立するため、
-    // `iv-api-design.md`1.1節）が、`x_endog`/`instruments`はいずれも最低1要素を要求する
+    // `docs/spec/iv-spec.md`1.1節）が、`x_endog`/`instruments`はいずれも最低1要素を要求する
     // （2026-08-30ユーザー決定）。`x_endog=[]`は実質OLSと等価な退化ケースで
     // あり「そもそもIVを使用すること自体が誤り」と判断し、`OLS`への切り替えなしにそのまま
     // `IV`に渡せる利便性よりも誤用防止を優先した。`x_endog`/`instruments`を独立に検証する
@@ -817,7 +817,7 @@ mod tests {
     fn build_iv_input_returns_error_when_x_endog_and_instruments_are_both_empty() {
         // `x_endog=[]`かつ`instruments=[]`（実質OLSと等価な退化ケース）を
         // 誤用として`ValidationError`で弾く（旧仕様では成功していた、
-        // `docs/planning/specs/iv-api-design.md`1.1節）。
+        // `docs/spec/iv-spec.md`1.1節）。
         let df = well_formed_df();
         let options = default_options();
 

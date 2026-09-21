@@ -12,7 +12,7 @@ settings (CLAUDE.md section 2, `.claude/rules/python-style.md`
 separate class; same policy as `OLSOptions`/`LogitOptions`, see
 `docs/spec/ols-spec.md`, "API引数"). `IVOptions.method` selects
 `"2sls"` (default) or `"gmm"` — a single `IV`/`IVResults` pair serves
-both methods (`docs/planning/specs/iv-api-design.md` section 1.2).
+both methods (`docs/spec/iv-spec.md` section 1.2).
 
 `summary()` is not implemented (structured-data-only output policy; see
 the `OLSResults`/`LogitResults` precedent).
@@ -43,7 +43,7 @@ class IV:
             variables.
         instruments: List of column names of the excluded instruments
             (must not overlap `x_exog`; see
-            `docs/planning/specs/iv-api-design.md` section 1.1.1).
+            `docs/spec/iv-spec.md` section 1.1).
         options: Estimation options. Defaults to `IVOptions()`
             (`method="2sls"`, classical, with intercept,
             confidence_level=0.95) when omitted.
@@ -119,7 +119,7 @@ class IVResults:
 
     `first_stage()` (per-endogenous-variable first-stage regression
     results) is provided as a separate method rather than a field on
-    this class (`docs/planning/specs/iv-api-design.md` section 2.2).
+    this class (`docs/spec/iv-spec.md` section 2).
 
     Args:
         raw: The estimation result object returned by `_lib.fit_iv`
@@ -156,8 +156,8 @@ class IVResults:
         t-statistic for `method="2sls"`, z-statistic for
         `method="gmm"` — named generically (not `t_stats`/`z_stats`)
         because `IVResults` is shared by both methods (mirrors the
-        `_lib.IVResult.stats` naming, `docs/planning/specs/
-        iv-api-design.md` section 2.1).
+        `_lib.IVResult.stats` naming, `docs/spec/iv-spec.md`
+        section 2).
         """
         return dict(zip(self._raw.param_names, self._raw.stats))
 
@@ -273,8 +273,7 @@ class IVResults:
         same as the plain F-statistic of the corresponding regression
         in `first_stage()`, which includes `x_exog`'s contribution
         too. Computed the same way for both `method="2sls"` and
-        `method="gmm"`; see `docs/planning/specs/iv-api-design.md`
-        section 6.4.
+        `method="gmm"`; see `docs/spec/iv-spec.md` section 3.4.
         """
         return self._raw.weak_instrument_f_statistics
 
@@ -285,7 +284,7 @@ class IVResults:
 
         `None` when just-identified (`len(instruments) ==
         len(x_endog)`, degrees of freedom 0); see
-        `docs/planning/specs/iv-api-design.md` section 6.5.
+        `docs/spec/iv-spec.md` section 3.5.
         """
         return self._raw.overid_statistic
 
@@ -315,7 +314,7 @@ class IVResults:
         residual columns) — this does not affect the validity of
         the other results. **Always `None` for `method="gmm"`**
         (not implemented for GMM). See
-        `docs/planning/specs/iv-api-design.md` section 6.6.
+        `docs/spec/iv-spec.md` section 3.6.
         """
         return self._raw.wu_hausman_statistic
 
@@ -366,8 +365,8 @@ class IVResults:
         """Per-endogenous-variable first-stage regression results.
 
         Each first-stage regression is `x_endog[i] ~ x_exog +
-        instruments`, estimated by plain OLS (`docs/planning/specs/
-        iv-api-design.md` section 2.2). Returns the existing
+        instruments`, estimated by plain OLS (`docs/spec/iv-spec.md`
+        section 2). Returns the existing
         `OLSResults` type rather than a new IV-specific type — the
         first stage is a genuine, valid OLS regression in its own
         right. Its `f_statistic`/`f_p_value` include `x_exog`'s

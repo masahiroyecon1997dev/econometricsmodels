@@ -4,9 +4,7 @@ Tobit（打ち切り正規回帰、最尤推定）の確定済み仕様。`engin
 `engine/src/nonlinear/common.rs`）・`engine_pybind/src/nonlinear/tobit.rs`・
 `python_package/econometricsmodels/nonlinear/tobit.py`として実装済み。nonlinear系統共通の設計判断
 （ソルバー実行の共通化、`cov_type`共通行列演算、検定分布＝標準正規分布、標準化の基本方針等）は
-[`logit-spec.md`](./logit-spec.md)・
-[`nonlinear-api-design.md`](../planning/specs/nonlinear-api-design.md)・
-[`nonlinear-implementation-notes.md`](../planning/specs/nonlinear-implementation-notes.md)を参照し、
+[`logit-spec.md`](./logit-spec.md)・[`nonlinear-common.md`](./nonlinear-common.md)を参照し、
 本ドキュメントにはTobit固有の内容のみを記載する。Tobitは連続の潜在変数 `y* = Xβ + ε`
 （`ε ~ N(0, σ²)`）を左/右/両側に打ち切った `y` を観測するモデルで、`y` が二値の
 Logit/Probitとは尤度・予測量・内部パラメータ化が異なる。

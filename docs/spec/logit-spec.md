@@ -4,8 +4,7 @@ Logit（二項ロジスティック回帰、最尤推定）の確定済み仕様
 `engine/src/nonlinear/common.rs`）・`engine_pybind/src/nonlinear/logit.rs`・
 `python_package/econometricsmodels/nonlinear/logit.py`として実装済み。nonlinear系統共通の設計判断
 （ソルバー実行の共通化、`cov_type`共通行列演算、標準化の方針等）は
-[`nonlinear-api-design.md`](../planning/specs/nonlinear-api-design.md)・
-[`nonlinear-implementation-notes.md`](../planning/specs/nonlinear-implementation-notes.md)を参照し、
+[`nonlinear-common.md`](./nonlinear-common.md)を参照し、
 本ドキュメントにはLogit固有の内容のみを記載する。
 
 ## 1. API引数

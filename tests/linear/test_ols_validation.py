@@ -316,7 +316,10 @@ def test_cluster_count_at_most_slopes_raises_validation_error(n_groups):
     `fit()`冒頭で`ValidationError`（`CommonError::InsufficientClustersForInference`）。
     G=2（G<q）とG=3（G==q、`rank(Ŝ)≤2<3`で依然特異）の両方を確認する。
     G>qでも悪条件で数値的にほぼ特異なケースは従来どおり`ComputationError`が
-    backstop（`test_scale_variance_raises_computation_error`）。
+    backstop（`cluster`は`cluster_col`が別途必要なため専用の
+    `test_scale_variance_cluster_raises_computation_error`で確認、
+    他のcov_typeは`test_scale_variance_raises_computation_error`。
+    test-coverage-candidates.md項目73）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, n_groups)
@@ -360,6 +363,24 @@ def test_scale_variance_raises_computation_error(cov_type):
     df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
     kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
     options = OLSOptions(cov_type=cov_type, **kwargs)
+    with pytest.raises(ComputationError):
+        OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+
+def test_scale_variance_cluster_raises_computation_error():
+    """`cluster`も上記`test_scale_variance_raises_computation_error`と同じ
+    backstopの対象（`test_cluster_count_at_most_slopes_raises_validation_error`
+    のdocstring参照）。`cluster`は`cluster_col`が別途必要なため
+    `COV_TYPES`パラメトライズには含められず、専用テストとして確認する
+    （`test-coverage-candidates.md`項目73。従来docstringの主張のみで
+    自動テストが無かった非対称の解消）。均等な疑似グループ（行番号%10、
+    `G=10>q=3`）を使い、クラスター数不足による`ValidationError`
+    （Issue #289）ではなく、傾き係数の共分散部分行列の条件数超過による
+    `ComputationError`が発生することを確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
+    df = with_cluster_groups(df, 10)
+    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
     with pytest.raises(ComputationError):
         OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 

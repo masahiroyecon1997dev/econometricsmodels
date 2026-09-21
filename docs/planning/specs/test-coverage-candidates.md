@@ -1443,5 +1443,41 @@
 - **気づいた経緯**: 2026-09-21、項目29（クラスターロバストSEの悪条件・
   多重共線性シナリオとの組み合わせ追加）対応の`testing-completeness-reviewer`
   レビューで発見。
+- **状態**: 対応済み（2026-09-21）。`tests/linear/test_ols_validation.py`に
+  `test_scale_variance_cluster_raises_computation_error`を専用テストとして
+  追加（`cluster_col`が必要なため既存の`COV_TYPES`パラメトライズには
+  含めず、均等な疑似グループ`G=10>q=3`で`ComputationError`が発生することを
+  確認）。`test_cluster_count_at_most_slopes_raises_validation_error`の
+  docstringも新テスト名を指すよう更新した。`tests/`配下1676件全通過・
+  Ruffクリーンを確認済み。
+
+### 74. WLS/IVにも項目73と同型の構造的ギャップがある（`test_scale_variance_raises_computation_error`のcov_typeパラメトライズに`cluster`が無い。ただしOLSと異なりdocstringの虚偽記載は伴わない）
+
+- **対象**: `tests/linear/test_wls_validation.py`（`COV_TYPES`は
+  `generate_wls_fixtures.py`由来、`classical/hc0/hc1/hc2/hc3/hac`のみで
+  `cluster`を含まない）、`tests/iv/test_iv_validation.py`
+  （`COV_TYPES = ["classical", "hc0", "hc1", "hac"]`をファイル内で独自定義、
+  同じく`cluster`を含まない）。いずれも`test_scale_variance_raises_
+  computation_error`相当のテストに`cluster`専用backstopが無い。
+- **内容**: `testing-completeness-reviewer`の指摘（2026-09-21、項目73対応の
+  レビュー中）。項目73と全く同型の構造（`cov_type="cluster"`は
+  `cluster_col`が別途必要なため既存の`COV_TYPES`パラメトライズに単純に
+  含められず、backstopテストが存在しない）がWLS・IVにも現存する。
+  ただしOLSの元の問題（docstringが「全cov_typeでbackstop」と誤って主張して
+  いた）とは異なり、WLS・IVの該当docstring（
+  `test_cluster_count_at_most_slopes_raises_validation_error`相当）は
+  そのような虚偽の主張をしていないため、**虚偽記載ではなく単なる未検証
+  カバレッジの欠落**（重要度はOLSのケースより一段低い）。
+  対照的に`tests/panel/test_fe_validation.py`・`tests/panel/test_re_
+  validation.py`は`COV_TYPES`に`cluster`を含めた上で`cluster_col`省略時に
+  entityへフォールバックする実装特性を利用しており、既にこのギャップを
+  回避できていることを実行確認済み（`cluster`含む5ケース全通過）。
+- **Claudeの所感**: 項目73と同じ形（専用テスト追加、`cluster_col`は
+  `with_cluster_groups`等の既存ヘルパーでG十分大きく設定）で対応できる。
+  IVは`COV_TYPES`がファイル内独自定義なので、まず`cluster`を含むかどうか
+  含め既存の`ValidationError`側テスト（クラスタ数境界）の構成を確認してから
+  着手するのが安全。
+- **気づいた経緯**: 2026-09-21、項目73（OLSの`cluster`×`scale_variance`
+  backstopテスト追加）対応の`testing-completeness-reviewer`レビューで発見。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 

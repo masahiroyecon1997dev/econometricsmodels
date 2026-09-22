@@ -35,51 +35,11 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ## 一覧
 
-### 2. IVの変数集合重複チェック（`y`/`x_exog`/`x_endog`/`instruments`）が個別関数の羅列で組み合わせ数が多い
+### 3.【Issue化】`IVResults`に`method`だけでなく`weight_type`も含まれておらず、正規化値を検証する手段が無い
 
-- **対象**: [tests/test_iv.py:522-618](../../../tests/test_iv.py#L522-L618)
-  （`test_y_in_x_exog_raises`から`test_duplicate_x_endog_column_raises`までの
-  9関数）
-- **内容**: IVは`y`・`x_exog`・`x_endog`・`instruments`という4つの変数集合を
-  持つため、「yが他集合に含まれる」（3パターン）・「集合間の重複」
-  （3パターン、$\binom{4}{2}$のうちyを除く3組）・「集合内の重複」
-  （3パターン、instruments/x_exog/x_endogそれぞれ）を計9個の独立関数として
-  1つずつ書いている。各関数はほぼ同じ形（`IV(...).fit()`を`pytest.raises
-  (ValidationError)`で包むだけ）で、変えているのは引数の組み立て方のみ。
-- **Claudeの所感**: 網羅性自体は高く良い点だが、
-  `@pytest.mark.parametrize`で「どの引数にどの重複を仕込むか」を
-  タプルのリストとして渡し1関数に統合する余地がある（例:
-  `[("x_exog", ["y", "x1"]), ("x_endog", ["y"]), ...]`のような形）。
-  ただしOLS/Logit/Probitの`test_cov_type_is_case_insensitive`等、既存の
-  parametrize済みテストと違い、ここは「どの引数キーワードに値を渡すか」
-  自体が変数のため、素直な`parametrize`よりは`**kwargs`の組み立てが
-  やや複雑になる可能性がある。実施するかはコード量と可読性のトレードオフ
-  次第でユーザー判断が必要。
-- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時。
-- **状態**: 未対応
-
-### 3. `IvResults`に`method`だけでなく`weight_type`も含まれておらず、正規化値を検証する手段が無い
-
-- **対象**: [python_package/econometricsmodels/iv/iv.py:113-373](../../../python_package/econometricsmodels/iv/iv.py#L113-L373)
-  （`IvResults`、`cov_type`プロパティはあるが`method`/`weight_type`が無い）
-- **内容**: ユーザー指摘（2026-08-30）。`refactoring-candidates-2.md`項目78
-  （`LogitResult`に`method`フィールドが無い）と同型の論点がIVにも存在する。
-  IVはLogit/Probitと異なり`method`（`"2sls"`/`"gmm"`）に加えて`weight_type`
-  （GMMの点推定重み行列の種類、`"unadjusted"`/`"robust"`/`"cluster"`/
-  `"kernel"`、`"homoskedastic"`/`"heteroskedastic"`のエイリアスも受け付ける）
-  という**もう1軸の入力オプションを持つが、こちらも結果に反映されない**。
-  そのため`test_weight_type_is_case_insensitive_and_aliased`
-  （[tests/test_iv.py:208-222](../../../tests/test_iv.py#L208-L222)）は
-  `cov_type`の`test_cov_type_is_case_insensitive`のように「正規化後の
-  ラベルを直接読んで検証する」のではなく、「点推定`params`が2つの呼び方で
-  一致すること」という間接的な検証にとどまっている。
-- **Claudeの所感**: ユーザー見解に同意。`res.method`・`res.weight_type`を
-  追加すれば、(1) 実際にどちらのmethodで推定されたかが結果から確認できる、
-  (2) `weight_type`についても`cov_type`と同様の「ラベル直接検証」テストが
-  書けるようになる。項目78・67（`WLSOptions`検討）と合わせて設計変更として
-  検討するのが良い。
-- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち、項目78と合わせて検討）
+→ Issue #307として切り出し済み（2026-09-11）。`refactoring-candidates-2.md`
+項目78（`LogitResult`/`ProbitResult`の`method`欠落）と合わせて1つのIssueに
+統合した。詳細はIssueを参照。
 
 ### 4. `test_cov_type_label`/`test_cluster_cov_type_label`/`test_nonrobust_is_alias_for_classical`が`test_cov_type_is_case_insensitive`と部分的に重複している
 
@@ -163,53 +123,10 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘。
 - **状態**: 未対応（優先度低）
 
-### 7.【要注意・バグ疑い】`const`名衝突チェックが`x_exog`のみに存在し、`instruments`/`x_endog`に含まれる場合は検証されず`first_stage()`・`params`辞書がサイレントに破損しうる
+### 7.【Issue化】`const`名衝突チェックが`x_exog`のみに存在し、`instruments`/`x_endog`に含まれる場合は検証されず`first_stage()`・`params`辞書がサイレントに破損しうる
 
-- **対象**: [tests/test_iv.py:621-636](../../../tests/test_iv.py#L621-L636)
-  （`test_const_collision_with_include_intercept_raises`、`x_exog`のみ検証）、
-  実装側は`engine`/`engine_pybind`のconst名衝突バリデーション箇所（未特定、
-  `x_exog`側のみ実装されている可能性が高い）
-- **内容**: ユーザー指摘（2026-08-30、「操作変数にconstが入っていたらと
-  内生変数に入っていたらも検証したほうがいい（内生変数は2段階目のときに
-  問題になるはず）」）を受けて、実際に構築済みパッケージで動作確認した。
-  - **`instruments`に`"const"`という名前の列（実際の値は定数ではない）を
-    含めた場合**、`fit()`自体はエラーにならず成功するが、
-    `first_stage()[endog名].param_names`が`['const', 'x1', 'const', 'z1']`
-    のように**`"const"`が2回出現**する。`OlsResults.params`は
-    `dict(zip(param_names, params))`で辞書化するため、後から出てくる
-    `"const"`（ユーザーの操作変数の係数値）が先の`"const"`（実際の
-    切片の係数値）を**サイレントに上書き**する。実測で確認した具体例
-    （`tests/fixtures/benchmarks/data/iv_baseline.csv`の`z2`列を
-    `"const"`に改名し`instruments=["const", "z1"]`とした場合）:
-    `fs.params["const"]`が真の切片係数`0.5193043061061868`ではなく
-    `0.555951305782325`（本来`z2`＝改名後`"const"`の係数）を返す。
-  - **`x_endog`に`"const"`という名前の列を含めた場合はさらに深刻**で、
-    **構造方程式本体の`res.params`辞書からも真の切片の値が消える**。
-    実測例（`endog1`列を`"const"`に改名し`x_endog=["const"]`とした場合）:
-    `res.param_names`は`['const', 'x1', 'const']`（3要素）だが
-    `res.params`辞書は`{'const': -0.1259924352302418, 'x1': ...}`の
-    **2キーしか持たない**——真の切片の係数（本来`0.7602470494600461`）が
-    完全に失われ、代わりに内生変数`endog1`（改名後`"const"`）の係数で
-    上書きされている。
-  - 一方、`instruments`に`"const"`という名前の**リテラルに定数な**列
-    （全行同じ値）を含めた場合は、二重の定数列による完全な多重共線性で
-    `ComputationError`（設計行列が特異）になり実害は無い（が、メッセージが
-    `x_exog`側の衝突チェックのような明確な`ValidationError`ではなく
-    分かりにくい`ComputationError`になる）。
-- **Claudeの所感**: これは単なるテストカバレッジの抜けではなく、
-  **`x_exog`側だけに実装されているconst名衝突バリデーションを
-  `instruments`/`x_endog`にも拡張すべき、実装側の潜在バグ**だと考える
-  （`x_endog`側の症状——構造方程式の主要な推定結果が説明もなく静かに
-  消える/上書きされる——は特に深刻）。統計的には「たまたま説明変数の
-  1つが`"const"`という列名を持っていた」という現実的にあり得る入力
-  （ユーザーがデータの列名を制御できない場面、例えば外部データの
-  結合等）で発生しうる。ユーザー指示により本セッションでは記録のみに
-  留めるが、対応の優先度は本ファイル中では最も高いと考える。
-- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘・
-  実機検証で確認。
-- **状態**: 対応予定（ユーザー決定2026-08-30、別セッションで実装する。
-  `x_exog`と同じ`ValidationError`を`instruments`/`x_endog`の`"const"`
-  衝突にも拡張する方向）
+→ Issue #305として切り出し済み（2026-09-11）。実測での再現例等の詳細はIssue
+本文に転記済み。
 
 ### 8. `test_const_collision_with_include_intercept_raises`のデータが手書きで、`refactoring-candidates-2.md`項目81（OLS/WLS/Logitのconst衝突データ共有）にIVも該当しうる
 
@@ -231,65 +148,16 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **状態**: 未対応（優先度低、項目81〔`refactoring-candidates-2.md`〕と
   合わせて検討）
 
-### 9.【ドキュメント不整合】`iv-api-design.md`の「`x_endog`/`instruments`は最低1要素を要求する見込み」という記述が実装と食い違っている
+### 9.【解消済み】`iv-spec.md`の前身ドキュメントの「`x_endog`/`instruments`は最低1要素を要求する見込み」という記述が実装と食い違っている
 
-- **対象**: [docs/planning/specs/iv-api-design.md:26-28](../../../docs/planning/specs/iv-api-design.md#L26-L28)
-  と、[tests/test_iv.py:277-285](../../../tests/test_iv.py#L277-L285)
-  （`test_weak_instrument_f_statistics_empty_when_no_endog`、
-  `x_endog=[]`かつ`instruments=[]`が実際に成功パスとして存在する）
-- **内容**: `tests/test_iv.py`解説時にユーザーから挙がった論点
-  （項目10）の調査中に発見。設計ドキュメントは「`x_endog`/`instruments`は
-  最低1要素を要求する**見込み**」（＝設計当時の予定、確定ではない書き方）
-  としているが、実際に構築済みパッケージで確認したところ、
-  `x_endog=[]`かつ`instruments=[]`は`ValidationError`にならず**成功する**
-  （実質OLSとして完走する）。CLAUDE.md 14章「既存ドキュメント・issueの
-  記述と、実装時に判明した事実が食い違う」に該当する典型例。
-- **Claudeの所感**: ドキュメントが「見込み」という未確定表現のまま
-  更新されずに残っていた可能性が高い。実装が意図的にこの制約を
-  設けなかった（`x_endog=[]`を許容する設計にした）のであれば
-  ドキュメント側を実態に合わせて修正すべきだし、逆に本来は制約を
-  入れるはずだったのが実装時に漏れたのであれば実装側の検討が必要——
-  どちらが正しい経緯かはこのセッションでは分からないため、著者
-  （ユーザー）に確認したい。
-- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘
-  （項目10「`x_endog=[]`のケースはバリデーションエラーにすべきか」）の
-  調査中に発見。
-- **状態**: 対応予定（ユーザー決定2026-08-30、別セッションで実装する。
-  `x_endog`/`instruments`が空の場合は`ValidationError`で弾く方向——
-  ドキュメント記述通りの制約を実装側に追加する。項目10もこれで解消）。
-  **付随する影響**: `test-coverage-candidates.md`項目52
-  （`test_insufficient_instruments_raises`の境界ケース）が、この対応後は
-  `x_endog=1`・`instruments=0`という現状の組み合わせでは「空リスト」
-  バリデーションが先に発火してしまい、本来確認したい識別の順序条件
-  （`len(instruments) < len(x_endog)`、両方とも1要素以上だが数が
-  足りない場合）を検証できなくなる。そのため対応時は
-  `x_endog=["endog1", "x1"]`・`instruments=["z1"]`（2個に対し1個、
-  ユーザー指摘の組み合わせ）へのテスト修正が必須になる。
+→ Issue #306で対応済み（2026-09-12）。`x_endog`/`instruments`が空リストの場合を
+`ValidationError`で弾くよう実装し、設計ドキュメントの記述も確定表現に更新した（現在は`iv-spec.md`に集約済み）。
 
-### 10. `x_endog=[]`（内生変数ゼロ、実質OLSへの意図的な縮退）を許容し続けるべきかは設計判断が必要
+### 10.【解消済み】`x_endog=[]`（内生変数ゼロ、実質OLSへの意図的な縮退）を許容し続けるべきかは設計判断が必要
 
-- **対象**: [tests/test_iv.py:277-285](../../../tests/test_iv.py#L277-L285)
-  （`test_weak_instrument_f_statistics_empty_when_no_endog`）
-- **内容**: ユーザー指摘（2026-08-30、「このケースはそもそもバリデーション
-  チェックでエラーにしたほうがよいのか？確かにOLSに帰着するが、そもそも
-  IVを使用することが誤りであるケースになる」）。現状は`x_endog=[]`は
-  正常に受理され、`weak_instrument_f_statistics`/`overid_statistic`/
-  `wu_hausman_statistic`が意味を持たないため`{}`/`None`になる、という
-  設計（項目9のドキュメント不整合とも関連）。
-- **Claudeの所感**: 一理あると思う一方、「`IV`クラスにわざわざ
-  `x_endog=[]`を渡す」というのは、プログラムから動的に変数リストを
-  組み立てる場面（CLAUDE.md 2章の設計方針が重視する使い方）では
-  `x_endog`が実行時に空になりうるケースを`OLS`への切り替えなしに
-  そのまま`IV`に渡せる、という実務上の利便性にもなりうる。
-  「誤用を防ぐ」（`ValidationError`にする）か「柔軟性を許容する」
-  （現状維持）かはトレードオフであり、`.claude/rules`にも明確な
-  指針が無いためユーザー判断が必要と考える。項目9のドキュメント
-  不整合の解消と合わせて、まず「意図的な設計か実装漏れか」を
-  確認してから、必要なら本項目の要否を判断するのが良い。
-- **気づいた経緯**: 2026-08-30、`tests/test_iv.py`解説時のユーザー指摘。
-- **状態**: 決定済み（ユーザー決定2026-08-30、項目9参照）。「誤用を防ぐ」
-  側を採用し、`x_endog`/`instruments`が空の場合は`ValidationError`で
-  弾く方向で実装する（別セッション）。
+→ Issue #306で対応済み（2026-09-12）。「誤用を防ぐ」側を採用し、`x_endog=[]`
+（`instruments=[]`も同様）は`ValidationError`にする方針で確定・実装した。項目9と
+同一の対応。
 
 ### 11. `test_iv_fixtures.py`と`test_iv_gmm_fixtures.py`の統合可否を検討した結果、完全統合は非推奨・部分的な共通化に留めるべき
 
@@ -342,7 +210,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ### 12.【重要な発見】IVのHC2/HC3がR `ivreg`+`sandwich`で実際に検証可能なことを実機確認した——「参照実装が無い」というドキュメント記述は現在のivregバージョンでは事実と異なる
 
-- **対象**: [docs/planning/specs/iv-api-design.md:110-116](../../../docs/planning/specs/iv-api-design.md#L110-L116)
+- **対象**: `iv-spec.md`の前身ドキュメント（当時: 110-116行目）
   （「`hc2`/`hc3`は引き続き外部の参照実装で検証できない...R `ivreg`も同様
   （`hatvalues.ivreg`の実装がソース上コメントアウトされている）」）、
   [tests/test_iv_fixtures.py:19-22](../../../tests/test_iv_fixtures.py#L19-L22)、
@@ -370,7 +238,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
     実装であることをソースで確認しており、本実装が「`X̂`のみから
     レバレッジを計算する」（`two_sls.rs`のdocコメント）としている定義と
     完全に一致する。
-  - **原因の推測**: `iv-api-design.md`の記述はIssue #166/#171時点の
+  - **原因の推測**: 当時の設計ドキュメントの記述はIssue #166/#171時点の
     調査に基づくが、CLAUDE.md 10章に記録されている通り`ivreg`は当初
     Debian標準のr-baseでは依存関係を満たせず**インストール自体が
     サイレントに失敗していた**（CRAN APTリポジトリ追加で解消）経緯が
@@ -386,16 +254,23 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   R `ivreg`実装との数値一致**が確認でき、この懸念を解消できる。
   対応するなら: (1) `test_iv_crosscheck.py`に`hc2`/`hc3`のクロスチェック
   テストを追加する（`benchmark/iv/references/run_ivreg.R`に
-  `vcovHC(type="HC2"/"HC3")`を追加）、(2) `iv-api-design.md`3.1節・
+  `vcovHC(type="HC2"/"HC3")`を追加）、(2) 設計ドキュメント3.1節・
   関連するdocstring群（本項目「対象」に列挙した4箇所）の「参照実装が
   無い」という記述を訂正する、の2段階が必要になる。ユーザー指示により
   本セッションでは記録のみ。
 - **気づいた経緯**: 2026-08-30、`tests/test_iv_fixtures.py`解説時の
   ユーザー指摘、R実機検証で確認（`ivreg`/`sandwich`とも devcontainerに
   導入済みのものをそのまま使用）。
-- **状態**: 未対応（優先度: 高。次にIV関連のリファクタリング・
-  クロスチェック拡充に着手する際は、まず本項目の実機検証結果を
-  再現・拡張してから着手することを推奨）
+- **状態**: 対応済み（2026-09-12）。`benchmark/iv/references/run_ivreg.R`に
+  hc2/hc3の`vcovHC(type="HC2"/"HC3")`分岐を追加し、
+  `generate_iv_crosscheck_fixtures.py`のCOV_TYPESに追加して
+  `iv_crosscheck.json`を再生成、`tests/iv/test_iv_crosscheck.py`に
+  hc2/hc3をCOV_TYPESとして追加（既存のRTOL_STRICT=1e-8でdf1境界
+  シナリオ含め全て通過、実測で許容誤差の追加緩和は不要だった）。
+  `iv-spec.md`3.1節・4章・冒頭未決着事項、`test_iv_reference.py`・
+  `test_iv_crosscheck.py`のdocstring、`engine/src/iv/two_sls.rs`・
+  `gmm.rs`のdocコメントの「参照実装が無い」という誤った記述も訂正した
+  （GMM側はivreg非対応という結論は維持し根拠のみ訂正、ユーザー承認済み）。
 
 ### 13. `wu_hausman_statistic`の`cov_type="hac"`時のNone原因調査について、R側では既に独立検証済み（Issue #233）という事実が`test_iv_fixtures.py`側のドキュメントに反映されていない
 
@@ -521,39 +396,9 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   ユーザー指摘。
 - **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
 
-### 19.【検討事項】GMMの推論統計量がz/カイ二乗分布固定であること・過剰棄却問題への対処（CUE/bootstrap/Windmeijer 2005補正）は未検討
+### 19.【Issue化】GMMの推論統計量がz/カイ二乗分布固定であること・過剰棄却問題への対処（CUE/bootstrap/Windmeijer 2005補正）は未検討
 
-- **対象**: [docs/planning/specs/iv-api-design.md:120-128](../../../docs/planning/specs/iv-api-design.md#L120-L128)
-  （GMMは常にz分布・カイ二乗分布、`debiased`のような小標本切り替え
-  オプションは無い）
-- **内容**: ユーザー指摘（2026-08-30）。Stata `ivreg2`は既定でlarge-sample
-  統計量（z・カイ二乗）を報告し、`small`オプションで従来型の小標本統計量
-  （t分布・F分布、伝統的な自由度調整込み）に切り替えられる仕様がある
-  （`linearmodels`も`debiased`という同種の切り替えを持つ、前回解説の
-  `iv-api-design.md`3.2節参照）。本実装の`IvOptions`にはこの切り替え
-  オプションが無く、GMMは常にz/カイ二乗分布固定であることを確認した。
-  ユーザーはさらに、この「小標本補正+t分布」自体よりも、GMM推定量の
-  **過剰棄却問題**（Hansen, Heaton and Yaron 1996等で指摘された、
-  2-step GMMの標準的な検定統計量が小〜中標本で棄却しすぎる傾向がある
-  という既知の問題）への対処のほうが理論的に重要かもしれないとして、
-  continuously-updated GMM（CUE）・ブートストラップによる標準誤差/検定・
-  Windmeijer (2005)型の補正分散を検討候補に挙げている。`grep`で確認した
-  ところ、**CUEは実装されていない**（`CUE`/`continuously_updated`等で
-  ヒット無し）。
-- **Claudeの所感**: 統計的に正当な問題提起だと思う。2-step efficient GMM
-  （本実装の既定）はまさにHansen-Heaton-Yaronが過剰棄却を指摘した対象
-  そのものであり、小標本での推論の信頼性という観点では、単純な
-  t分布切り替えよりCUE・ブートストラップ・Windmeijer補正の方が理論的な
-  改善効果が大きいというユーザーの見立てに同意する。ただしこれらは
-  いずれも実装コストが軽くない（CUEは点推定自体の最適化方法が変わる、
-  ブートストラップは計算コストが重い、Windmeijer補正は2-step特有の
-  補正項の追加実装が必要）ため、既存の`docs/planning/specs/iv-api-
-  design.md`や`CLAUDE.md`12章「今後の検討事項」のような場所に、実装
-  着手前の検討候補として記録しておく価値はあると考える。優先度・
-  着手判断はユーザー次第。
-- **気づいた経緯**: 2026-08-30、`tests/test_iv_gmm_fixtures.py`解説時の
-  ユーザー指摘、`grep`でCUE未実装を確認。
-- **状態**: 未対応（検討事項として記録のみ、着手要否はユーザー判断待ち）
+→ Issue #312として切り出し済み（2026-09-11）。詳細はIssueを参照。
 
 ### 20. `INSTRUMENTS_BY_SCENARIO`/`X_EXOG_BY_SCENARIO`が`test_iv_fixtures.py`と`test_iv_gmm_fixtures.py`に同一内容で重複定義されている
 
@@ -584,7 +429,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   にも適用できることを記録してほしい」）。個別に項目を複製すると項目数が
   倍増するため、該当箇所を1項目にまとめて記録する。
   - **項目14**（OLSのHAC自動ラグが`maxlags=1`固定のまま放置）: GMM版も
-    `IvOptions.hac_lags`未指定（自動計算）でフィクスチャと一致する設計
+    `IVOptions.hac_lags`未指定（自動計算）でフィクスチャと一致する設計
     （`test_iv_gmm_fixtures.py:80-81`のコメント）であり、IV側
     （2SLS/GMM共通）は既にこの問題を回避できている、という文脈でOLS/WLS
     側の改善余地の参考になる点は同じ。
@@ -643,7 +488,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   純粋に点推定側の重み選択でありDGPのシナリオ性質（不均一分散・自己相関
   等）との相互作用は`cov_type`ほど強くないと考えられるため、そちらは
   優先度を下げてよいと考える。既定`weight_type="unadjusted"`を主軸に
-  シナリオを広くスイープする現状の設計（`IvOptions().weight_type`の
+  シナリオを広くスイープする現状の設計（`IVOptions().weight_type`の
   実際の既定値と一致）は妥当で、`robust`に差し替える積極的な理由は薄い。
 - **気づいた経緯**: 2026-08-30、`tests/test_iv_gmm_fixtures.py`解説時の
   ユーザー指摘、`gmm.rs`のモジュールdocコメントで設計を確認。
@@ -658,11 +503,11 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   テストが無い。GMMにfirst_stageの概念がないから問題にならない？」）を
   受けて実機確認した。**予想に反し、GMMも`first_stage()`を持ち、
   `include_intercept=False`の影響を受ける**ことを確認した。
-  `IV(..., options=IvOptions(method="gmm", include_intercept=False))
+  `IV(..., options=IVOptions(method="gmm", include_intercept=False))
   .fit().first_stage()`は正常に動作し、`param_names`から`const`が
   正しく除外されていた。`engine/src/iv/CLAUDE.md`にも「（過去の
   `k_constant`取り違えバグの）影響を受けていたのは`first_stage()`が
-  返す`OlsResults`...`method`によらず、`fit()`が常に`compute_first_
+  返す`OLSResults`...`method`によらず、`fit()`が常に`compute_first_
   stage`経由で構築するため2SLS/GMM両方に及んでいた」と明記されており、
   GMMも2SLSと全く同じ第一段階回帰の配線コードを共有している。
   つまり本項目は`test-coverage-candidates.md`項目50・51（2SLSの
@@ -706,14 +551,14 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 
 ### 26. `test_iv_crosscheck.py`にGMMのRクロスチェックが無い件——v1時点では意図的な例外規定だったが、今後のGMM拡張（C統計量等）に合わせてテストも拡張予定
 
-- **対象**: [docs/planning/specs/iv-api-design.md:207-212](../../../docs/planning/specs/iv-api-design.md#L207-L212)
+- **対象**: `iv-spec.md`の前身ドキュメント（当時: 207-212行目）
   （「5.3 GMMのRクロスチェック省略（例外規定）」、「GMMは`ivreg`が
   対応していないため、Python（`linearmodels`）のみで検証しRクロス
-  チェックを省略することを許容する。`panel-api-design.md`5.3の
+  チェックを省略することを許容する。`panel-common.md`5.3の
   ハウスマン検定と同様...」）
 - **内容**: ユーザー指摘（2026-08-31、「benchmarkで指摘したかもしれ
   ないが、`test_iv_crosscheck.py`にGMMの検証が抜けている」）を受けて
-  確認したところ、v1実装時点では見落としではなく`iv-api-design.md`
+  確認したところ、v1実装時点では見落としではなく当時の設計ドキュメント
   5.3節に明記された**意図的な設計判断（例外規定）**だった
   （`ivreg`パッケージ自体がGMM推定に対応していないというツール側の
   制約が根拠、パネルデータのHausman検定と同種の前例あり）。
@@ -882,57 +727,25 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **状態**: 未対応（項目76〔`refactoring-candidates-2.md`〕と統合して
   対応するのが効率的、着手タイミングはユーザー判断待ち）
 
-### 35.【重要な設計提案】Tobitの「`method`によらず常にOLSベースの初期値・QR検証を実行する」設計は、Logit/Probitの過去の実バグ（`bfgs`の特異性検出漏れ）を構造的に解消できる可能性がある
+### 35.【完了】Logit/Probitの初期値・特異性検出をTobit方式（`method`共通のQRランクチェック＋OLSベース初期値）に統一 → Issue #279（2026-09-08 実施）
 
-- **対象**: [tests/test_tobit.py:415-421](../../../tests/test_tobit.py#L415-L421)
-  （`test_singular_design_matrix_raises_computation_error`、`method`を
-  parametrizeする必要が無い理由の説明）と対比した
-  [tests/nonlinear/test_logit.py:336-359](../../../tests/nonlinear/test_logit.py#L336-L359)
-  （`test_singular_hessian_raises_computation_error`、`method`を
-  `["newton", "bfgs", "lbfgs"]`でparametrizeする必要がある理由として
-  「過去に`bfgs`だけ検出漏れし桁違いに巨大な標準誤差を含む`Ok`が
-  返る実バグがあった」と明記）
-- **内容**: ユーザー指摘（2026-08-31、「反復最適化の初期値をOLSベース
-  にするというのがlogit/probitに適用できない？Tobitの実装がいい
-  アイディアだと思った」）を受けて両ファイルを比較した。
-  - Tobitは`method`（newton/bfgs/lbfgs）に関わらず、`ols_initial_
-    params`のQR検証が**常に最初に実行される**設計のため、完全な
-    多重共線性は`method`を問わず同じ経路（QR分解）で確実に検出
-    できる。そのため`test_singular_design_matrix_raises_computation_
-    error`は`method`をparametrizeする必要が無い。
-  - 一方Logit/Probitは`start_params`の既定が**ゼロベクトル**
-    （`nonlinear-api-design.md`7章、statsmodels方式）であり、多重
-    共線性の検出は`method`ごとに異なる経路（`newton`は`newton_step`
-    内のピボット付きQR分解、`bfgs`/`lbfgs`は準ニュートン法のため
-    収束後の`observed_information_cov_params`呼び出しが唯一の検出
-    経路）に依存する。この構造的な違いにより、**過去に実際に
-    `bfgs`だけが検出漏れし、桁違いに巨大な標準誤差を含む`Ok`
-    （エラーにならず、統計的に無意味な結果が静かに返る）という
-    実バグがあった**ことが`test_logit.py`のdocコメントに明記されて
-    いる。
-- **Claudeの所感**: ユーザーの着眼点に強く同意する。Tobitの設計
-  （`method`共通のOLSベース初期値・QR検証を最初に必ず通す）を
-  Logit/Probitにも適用すれば、(1) 最適化の収束が速くなりうる
-  （実務的によく使われる高速化手法でもある）という利点に加え、
-  (2) **多重共線性検出が`method`によらず単一の経路に統一され、
-  過去に実際に発生したような`method`依存の検出漏れバグのクラス
-  自体を構造的に排除できる**、という利点がある。(2)の方が実務上
-  重要だと考える——「`method`ごとに異なる検出経路を持つ」という
-  設計自体が、将来また同種のバグを生みうる構造的リスクだと言える。
-  ただし変更する場合は、(a) ゼロベクトル初期値からOLSベース初期値へ
-  変更することが既存のRクロスチェック・statsmodelsクロスチェックの
-  数値（収束先は同じでも収束過程・収束判定の境界ケースでの挙動が
-  変わりうる）に影響しないか、(b) OLSベースの初期値計算自体の
-  コスト（QR分解）が既存のゼロベクトル開始と比べて有意に重くならないか、
-  の2点を実装時に確認する必要がある。
-- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
-  指摘、`test_logit.py`との比較調査で確認。
-- **状態**: Issue 化済み（2026-08-31、**#279**）。`refactoring-candidates-2.md`
-  項目54（多重共線性テストの CSV 一本化）を OLS/IV について実施した際、
-  Logit/Probit は `test_singular_hessian_raises_computation_error` の `method`×3
-  parametrize が本項目の検出漏れバグの回帰テストとして機能しているため一本化を
-  見送り、本設計変更を前提とする残タスクとして #279 に集約した（完了後に
-  Logit/Probit も CSV 一本化、項目82・本ファイル項目1 も解消）。
+- **完了内容**: `nonlinear::common::checked_design_matrix_qr`（列ピボットQR＋相対閾値ランク
+  チェック、logit/probit/tobit 共有）と `ols_based_initial_params`（標準化LPM解 + IRLS 1
+  ステップ相当のスケール補正、logit/probit 共有）を新設。Logit/Probit の `fit()` を
+  ゼロベクトル初期値 → この warm start に変更し、多重共線性検出を `method` 非依存の単一経路
+  （前段QR → `MleError::SingularDesignMatrix`）に統一。過去に `bfgs` だけ検出漏れした
+  バグクラスを構造的に排除。テストは Python `test_perfect_multicollinearity_raises_
+  computation_error`（`method`×3 parametrize、CSVフィクスチャ）＋ engine
+  `fit_returns_singular_design_matrix_error_for_perfectly_collinear_design_matrix`
+  （`method`×`cov_type` ループ）へ集約。設計背景・数式は
+  `docs/spec/logit-spec.md` 3.2・`docs/spec/nonlinear-common.md`1.4節が正本。`refactoring-candidates-2.md` 項目82 も同時解消。
+- **フォローアップ（未完・別Issue）**:
+  - **#304**: warm start 導入で `method="bfgs"` 大標本が ~33% 悪化（既定 newton は逆に高速化）。
+    quasi-Newton × warm start の相互作用の是正。あわせて下記の項目番号欠落を整理する。
+  - **stale 参照（要調査）**: Issue #279 本文が参照する `refactoring-candidates-2.md` 項目54・
+    `refactoring-candidates-3.md`、`docs/performance/{logit,probit}.md` が参照する項目44/45/46
+    （マルチスレッド不安定・Probit Hessian 飽和・BFGS/L-BFGS 遅い）が、現行
+    `refactoring-candidates*.md`（項目43 まで）に存在しない。番号ずれ or 過去の整理での欠落。
 
 ### 36. `test_separation_suspected_raises_computation_error_for_near_separation_data`のDGPがインライン生成で、Logit/Probitの`separation_suspected_dataset`共有ヘルパーを使っていない
 
@@ -955,9 +768,9 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **Claudeの所感**: `testing-policy.md`「テスト用データセット」が
   求める`benchmark/`側でのDGP定義＋CSV固定は、この種の
   `ComputationError`パス専用データ（数値比較をしないデータ）には
-  必須ではない（`test_singular_hessian_raises_computation_error`等の
-  既存の小さい手書きDataFrameも同様に固定CSV化されていない）ため、
-  `benchmark/`フル対応は過剰だと考える。ただし`_helpers.py`に
+  必須ではない（`engine`側の`fit_returns_singular_design_matrix_error_
+  for_perfectly_collinear_design_matrix`等の小さい手書きデータも
+  同様に固定CSV化されていない）ため、`benchmark/`フル対応は過剰だと考える。ただし`_helpers.py`に
   Tobit版の「打ち切り付き分離疑いデータセット」ヘルパーとして切り出し、
   `random`ではなく他のDGPと統一感のある`numpy`ベースの乱数生成に
   揃えるのは、再利用性・一貫性の両面で価値があると考える（実施コストは
@@ -988,35 +801,9 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **状態**: 未対応（本ファイル項目4と合わせて検討、着手要否はユーザー
   判断待ち）
 
-### 38.【検討事項】`marginal_effects()`/`predict()`に4つ目のtarget候補`E[y|y>0,x]`（打ち切られていないサブサンプルへの条件付き期待値）を追加すべきか
+### 38.【Issue化】`marginal_effects()`/`predict()`に4つ目のtarget候補`E[y|y>0,x]`（打ち切られていないサブサンプルへの条件付き期待値）を追加すべきか
 
-- **対象**: [docs/planning/specs/nonlinear-api-design.md:112](../../../docs/planning/specs/nonlinear-api-design.md#L112)
-  （McDonald-Moffitt 1980を根拠に`E[y*|x]`/`E[y|x]`/`P(uncensored|x)`の
-  3種類のみを提供すると確定済み）
-- **内容**: ユーザー指摘（2026-08-31、「"expected_latent",
-  "expected_observed", "prob_uncensored"が現状限界効果の候補にあるが、
-  ゼロを超えるサブサンプル（条件付き）への限界効果
-  （`expected_conditional`）も候補に加えたほうがいいか？」）を受けて
-  `nonlinear-api-design.md`を確認した。McDonald-Moffitt (1980)の
-  古典的な分解は実際には`E[y|x] = P(y>0|x) · E[y|y>0,x]`という関係
-  （観測される期待値＝非打ち切り確率×打ち切られなかった場合の条件付き
-  期待値）を含むが、設計ドキュメントは前2者（`E[y*|x]`・`E[y|x]`）と
-  `P(uncensored|x)`の3種類のみを採用しており、**`E[y|y>0,x]`
-  （切断回帰・truncated regressionの条件付き期待値に相当）自体は
-  設計時に検討・却下された形跡が無く、単純に候補に挙がらなかった
-  可能性が高い**。
-- **Claudeの所感**: 統計的に正当な追加候補だと考える。`E[y|y>0,x]`は
-  「打ち切りを受けなかった集団に限定した場合の効果」という、実務上
-  意味のある解釈を持つ（例: 「支出額がプラスだった世帯に限定すると、
-  平均支出額はどう変わるか」）。既存3種と合わせて4種類目として提供
-  すれば、McDonald-Moffittの分解を完全にカバーできる。ただし実装
-  コスト（デルタ法での標準誤差計算式を新たに導出する必要がある）は
-  既存3種と同程度かかると見込まれ、v1スコープに含めるかは既存の
-  `nonlinear-api-design.md`6章の確定事項を覆す変更になるため、
-  ユーザー判断が必要。
-- **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時のユーザー
-  指摘、`nonlinear-api-design.md`で確認。
-- **状態**: 未対応（**検討事項として記録**、着手要否はユーザー判断待ち）
+→ Issue #311として切り出し済み（2026-09-11）。詳細はIssueを参照。
 
 ### 39. `fit_iv`のdoc commentがGMM実装状況について古い記述のまま
 
@@ -1034,25 +821,14 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   コード全体を確認して発見。
 - **状態**: 未対応
 
-### 40. 結果クラスの命名が頭字語の大文字小文字で不統一（`OlsResults`/`WlsResults`/`IvResults` vs `OLS`/`WLS`/`IV`）
+### 40.【Issue化】結果クラスの命名が頭字語の大文字小文字で不統一（`OlsResults`/`WlsResults`/`IvResults` vs `OLS`/`WLS`/`IV`）
 
-- **対象**: [python_package/econometricsmodels/__init__.py:11-13](../../../python_package/econometricsmodels/__init__.py#L11-L13)
-  （`IV`/`IvOptions`/`IvResults`、`OLS`/`OLSOptions`/`OlsResults`、
-  `WLS`/`WlsResults`の再エクスポート箇所）
-- **内容**: 推定量本体のクラス名は`OLS`/`WLS`/`IV`と頭字語をそのまま
-  大文字表記しているのに対し、対応する結果クラスは`OlsResults`/
-  `WlsResults`/`IvResults`と頭字語部分だけ「単語として扱った
-  PascalCase」（`Ols`/`Wls`/`Iv`）になっている。`Logit`/`Probit`/
-  `Tobit`は頭字語ではないためこの不統一自体が発生しない
-  （`LogitResults`等は自然に一貫している）。
-- **Claudeの所感**: 実害は無いが、命名規則としては`OLSResults`/
-  `WLSResults`/`IVResults`の方が推定量本体のクラス名と一貫する。
-  既存コード・ドキュメント・テスト全体に`OlsResults`等の名前が
-  広く使われているため、直すなら破壊的変更（リネーム）になる点に
-  注意が必要。
-- **気づいた経緯**: 2026-08-31、`python_package/econometricsmodels/
-  __init__.py`解説時に`__all__`の一覧を確認して発見。
-- **状態**: 未対応
+→ Issue #310として切り出し済み（2026-09-11）、2026-09-21に対応完了。`OlsResults`/
+`WlsResults`/`IvResults`/`FeResults`/`ReResults`を`OLSResults`/`WLSResults`/
+`IVResults`/`FEResults`/`REResults`へ、対応する`IvOptions`/`FeOptions`/`ReOptions`
+（本文では未言及だったが同じ不統一を抱えていたため合わせて対応）を`IVOptions`/
+`FEOptions`/`REOptions`へリネームした。Rust側（`engine_pybind`）のpyclass名自体も
+揃えた。詳細はIssueを参照。
 
 ### 41. `__version__`がバージョン文字列の3つ目の手書きソースになっている
 
@@ -1100,3 +876,341 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-31、`python_package/econometricsmodels/
   linear/ols.py`解説時に、他の結果クラスと`grep`で突き合わせて確認。
 - **状態**: 未対応
+
+### 43. `ols.py`等のモジュールdocstringと`linear/CLAUDE.md`「実装パターン」節が同じ設計方針を2箇所に重複記述
+
+- **対象**: [python_package/econometricsmodels/linear/ols.py:1-8](../../../python_package/econometricsmodels/linear/ols.py#L1-L8)
+  と[python_package/econometricsmodels/linear/CLAUDE.md](../../../python_package/econometricsmodels/linear/CLAUDE.md)
+  「実装パターン」節（`OLS`/`WLS`クラスはコンストラクタでは検証せず
+  `fit()`呼び出し時に初めて`_lib.fit_ols`/`_lib.fit_wls`を呼ぶ、という
+  記述）
+- **内容**: `ols.py`のモジュールdocstringは「Validation and estimation
+  logic live entirely on the Rust side; this module only provides the
+  Python-facing API shape」と説明しており、`linear/CLAUDE.md`の
+  「実装パターン」節も同じ設計方針（コンストラクタでは検証しない、
+  `fit()`時に初めてRust側を呼ぶ）を別の言葉で改めて説明している。
+  同じ設計方針が2箇所（docstring・ネストCLAUDE.md）に独立して
+  記述されており、どちらかを更新した際にもう片方が古いままになる
+  リスクがある。なお、同型のdocstring文言（"A thin wrapper
+  around...Validation and estimation logic live entirely on the
+  Rust side..."）自体は`wls.py`/`logit.py`/`probit.py`/`tobit.py`/
+  `iv.py`の6ファイル全てにほぼ同一の形で存在するが、`linear/CLAUDE.md`
+  が明示的に同じ内容を繰り返しているのはOLS/WLSの2ファイルのみ
+  （`nonlinear/CLAUDE.md`はTobit固有差分の説明に特化しており、
+  この一般論は繰り返していない）。
+- **Claudeの所感**: 実害の大きいバグではないが、CLAUDE.mdの目的が
+  「実装ノウハウ・設計判断の理由の集約」である以上、docstringに
+  既にある内容をネストCLAUDE.mdでも全文近く繰り返す必要は薄いと
+  考える。ネストCLAUDE.md側は「なぜそうしたか」の背景・経緯に
+  絞り、「何をしているか」はdocstring（またはコード自体）を参照する
+  形にする方が重複を減らせる。
+- **気づいた経緯**: 2026-08-31、`python_package/econometricsmodels/
+  linear/ols.py`解説時のユーザー指摘。
+- **状態**: 未対応
+
+### 44. `tests/nonlinear/test_tobit.py`の一部テストが`_binary_choice_checks.py`（Logit/Probit共有）と重複しており、部分的な共通化の余地がある
+
+- **対象**: [tests/nonlinear/test_tobit.py](../../../tests/nonlinear/test_tobit.py)
+  と[tests/nonlinear/_binary_choice_checks.py](../../../tests/nonlinear/_binary_choice_checks.py)
+- **内容**: ユーザー指摘（2026-09-11、Issue #307対応でTobitに`test_method_label`を
+  新規で書き下ろした際、「`test_tobit.py`の内容は`_binary_choice_checks.py`と
+  同様な気がする、共通化したほうが良いか検討してほしい」）を受けて全件突き合わせた。
+  - **完全に同じ挙動でそのまま流用できるもの（4件）**: `test_fit_succeeds_and_returns_tobit_results`
+    ⇔`check_fit_succeeds_and_returns_results`、`test_method_option_converges_to_same_params`
+    ⇔`check_method_option_converges_to_same_params`、`test_n_obs_matches_dataset_size`
+    ⇔`check_n_obs_matches_dataset_size`、今回追加した`test_method_label`
+    ⇔`check_method_label`。いずれも`res.converged`/`res.param_names`/`res.n_obs`/
+    `res.method`など、Tobit固有の`"sigma"`追加パラメータの有無に依存しないフィールドしか
+    見ておらず、コード変更なしでそのまま呼べる（Issue #307で`test_method_label`を
+    独自に書き下ろしたのは、この既存の重複ヘルパーに気づかず車輪の再発明をした形になる）。
+  - **一見似ているが実質的に異なるもの（大半、10件以上）**: `test_params_std_errors_z_stats_p_values_share_keys`/
+    `test_conf_int_structure`/`test_coef_table_structure`/
+    `test_param_names_include_const_first_and_sigma_last`/
+    `test_include_intercept_false_omits_const_and_converges`は、いずれも`"sigma"`が
+    末尾に追加される分だけ期待値（キー集合・件数・`df_model`の値）が異なり、単純な
+    パラメータ化では吸収しきれない（`python_package/econometricsmodels/nonlinear/CLAUDE.md`
+    「Tobit固有の設計」節が明記する設計差）。`predict()`/`marginal_effects()`の
+    `target`引数・`censoring_fit_check()`（`pred_table()`と無関係な形状）・打ち切り境界
+    関連のバリデーションはLogit/Probitに対応物が無いTobit固有機能。
+- **Claudeの所感**: `refactoring-candidates.md`項目11（IV 2SLS/GMMの`_check_result`
+  統合可否）と同じ構図で、全面統合は不適切（Tobit側の固有機能・フィールドが多く、
+  無理に共通化すると可読性が落ちる）だが、上記4件の完全重複だけを共通化する価値は
+  あると考える。対応する場合は`test_tobit.py`の該当4関数を削除し`_binary_choice_checks`
+  をimportして呼ぶ薄いラッパーに置き換えることになるが、その場合`_binary_choice_checks.py`
+  のモジュールdocstring（現在「Logit/Probitの重複を集約」とだけ記載）もTobitを含む
+  形に更新する必要がある。
+- **気づいた経緯**: 2026-09-11、Issue #307（Logit/Probit/Tobit/IVの結果オブジェクトに
+  `method`フィールドを追加）対応中のユーザー指摘。
+- **状態**: 未対応（ユーザー判断によりIssue化はせず本メモへの記録のみ。engineの修正を
+  伴わないテストのみの変更のため）
+
+### 45. `python_package/econometricsmodels/nonlinear/logit.py`と`probit.py`が実質1文字しか違わない（本体コード340行の重複）
+
+- **対象**: [python_package/econometricsmodels/nonlinear/logit.py](../../../python_package/econometricsmodels/nonlinear/logit.py)
+  と[python_package/econometricsmodels/nonlinear/probit.py](../../../python_package/econometricsmodels/nonlinear/probit.py)
+- **内容**: `diff`を取ったところ、全340行中、`Logit`→`Probit`という名前の
+  機械的な置換（クラス名・型名・docstring中の言及）を除いて実質的な差分は
+  `predict()`のdocstring1箇所のみ（`p_i = Λ(x_i'β̂)` vs `p_i = Φ(x_i'β̂)`、
+  リンク関数がロジスティック分布CDFか標準正規分布CDFかの違いを示すのみで、
+  コードとしての差分ではない）だった。`nonlinear/CLAUDE.md`にも「`probit.py`
+  は`logit.py`と完全に同型のパターン」と明記されている、既知・意図的な
+  重複ではあるが、テスト側（`test_logit_*.py`/`test_probit_*.py`の共通化、
+  項目95で対応済み）とは異なり、**この本体コード（`logit.py`/`probit.py`）
+  自体の重複は未検討**だった。
+- **Claudeの所感**: `_lib.fit_logit`/`_lib.fit_probit`という呼び出し先関数名、
+  `LogitOptions`/`ProbitOptions`という型、`Λ`/`Φ`というdocstring中の記号の
+  3点だけが実際の相違点であり、共有基底クラス（例:
+  `_BinaryChoiceEstimator`/`_BinaryChoiceResults`）にこれらをパラメータ化
+  して切り出せば、340行×2ファイルを実質1ファイル+数十行の差分に圧縮できる
+  可能性がある。ただし、テスト側の項目11・44で「無理な統合は避けるべき」
+  という判断が繰り返されている通り、コードの完全一致度が高くても
+  **将来Tobitのように固有機能が増えた際に基底クラスの抽象化が破綻する
+  リスク**（Tobit方式の初期値統一を`nonlinear-common.md`1.4節が既に検討して
+  いる、項目35参照）もあるため、着手前にユーザー判断が必要と考える。
+- **気づいた経緯**: 2026-08-31、`nonlinear/probit.py`解説時に`logit.py`と
+  `diff`で突き合わせて確認。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 46.【Issue化】`LogitResults`/`ProbitResults`/`TobitResults`に`dep_var_name`プロパティが無い（`OLSResults`/`WLSResults`/`IVResults`/`FEResults`には有る）→ Issue #318として切り出し済み（2026-09-13）
+
+- **対象**: [engine_pybind/src/nonlinear/logit.rs:198-228](../../../engine_pybind/src/nonlinear/logit.rs#L198-L228)、
+  [engine_pybind/src/nonlinear/probit.rs:193-223](../../../engine_pybind/src/nonlinear/probit.rs#L193-L223)、
+  [engine_pybind/src/nonlinear/tobit.rs:212-242](../../../engine_pybind/src/nonlinear/tobit.rs#L212-L242)
+  の`#[pyclass] pub struct LogitResult/ProbitResult/TobitResult`
+- **内容**: `engine`層（`engine/src/nonlinear/logit.rs:60,149-150`、
+  `probit.rs:87,174-175`、`tobit.rs:137,276-277`）は`Logit`/`Probit`/
+  `Tobit`いずれのInput構造体も`dep_var_name`フィールド・
+  `dep_var_name()`ゲッターを持っており、値自体はRust内部に存在する。
+  しかし`engine_pybind`層の`#[pyclass]`結果構造体（`LogitResult`/
+  `ProbitResult`/`TobitResult`）には`dep_var_name`フィールドが定義され
+  ておらず、Pythonへ公開されていない。一方`OLSResult`
+  （`engine_pybind/src/linear/ols.rs:154`）・`WLSResult`
+  （`engine_pybind/src/linear/wls.rs:164`）・`IVResult`
+  （`engine_pybind/src/iv/common.rs:322`）・`FEResult`
+  （`engine_pybind/src/panel/fe.rs:197`）は全て`pub dep_var_name: String`
+  を持ち、`python_package`側の対応する`OLSResults`/`WLSResults`/
+  `IVResults`にも`dep_var_name`プロパティが存在する（`python_package/
+  econometricsmodels/linear/ols.py:139-141`等）。結果として
+  `LogitResults`/`ProbitResults`/`TobitResults`（`python_package/
+  econometricsmodels/nonlinear/`配下）だけ`dep_var_name`が欠落している。
+- **Claudeの所感**: 値がRust内部に既に計算・保持されているにも
+  関わらず、`engine_pybind`層でPyO3の結果構造体に詰め忘れている
+  ように見え、意図的な設計判断というより実装漏れの可能性が高いと
+  考える。ただし非線形系統3手法全てに一貫して無いことから、
+  「z検定・尤度比検定等の非線形固有の情報を優先し、当初は
+  `dep_var_name`を省略する判断をした」という可能性も否定できない
+  ため、修正要否・意図の有無はユーザー確認が必要（CLAUDE.md 14章）。
+- **気づいた経緯**: 2026-09-13、`iv/iv.py`解説中、ユーザーが
+  `logit.py`に`dep_var_name`が無いことを指摘。`grep`で
+  `engine`/`engine_pybind`/`python_package`全層を突き合わせて確認。
+- **状態**:【Issue化】Issue #318として切り出し済み（2026-09-13）
+
+### 47.【Issue化】FE: `time`引数をentityと同様にトップレベル引数にすべきか検討する → Issue #319として切り出し済み（2026-09-13）
+
+- **対象**: [python_package/econometricsmodels/panel/fe.py:68-80](../../../python_package/econometricsmodels/panel/fe.py#L68-L80)
+  の`FE.__init__`、[engine_pybind/src/panel/fe.rs:76-93](../../../engine_pybind/src/panel/fe.rs#L76-L93)
+  の`FEOptions.time`
+- **内容**: `entity`はトップレベルの必須引数だが、`time`は
+  `FEOptions.time: Option<String>`経由でしか指定できない。両者は
+  共に「パネル構造を定義する列名参照」という同じ役割を担っており、
+  CLAUDE.md 2章が引く「列名参照は素の引数、推定オプションは
+  オブジェクト渡し」という区別に照らすと、必須性の違いだけを理由に
+  片方をオプションオブジェクト行きにするのは筋が通っていない可能性
+  がある。`docs/spec/panel-common.md`1.1節で既に
+  「確定」済みの設計だが、再検討の余地があるとユーザーが指摘。
+- **気づいた経緯**: 2026-09-13、`panel/fe.py`解説中のユーザー指摘。
+- **状態**:【Issue化】Issue #319として切り出し済み（2026-09-13、
+  「確定」済み節を覆す提案のため単独Issueとして分離）
+
+### 48.【Issue化】FE: `x`空リスト許容の見直し・`n_periods`の追加・固定効果正規化規約のドキュメント化 → Issue #320として切り出し済み（2026-09-13）
+
+- **対象**: [python_package/econometricsmodels/panel/fe.py](../../../python_package/econometricsmodels/panel/fe.py)
+  （`x`の空リスト許容、`n_periods`欠如、`fixed_effects()`docstring）、
+  [engine_pybind/src/panel/fe.rs](../../../engine_pybind/src/panel/fe.rs)
+- **内容**: 3件の指摘をまとめてIssue化。(1) `x`が空のFEモデルは
+  因果推論として意味を持たないため、OLS等と同様`validate_x_non_empty`
+  を適用すべきではないか（`panel-common.md`に独立した検討記録が
+  見当たらず、意図的な設計というより実装上の副産物の可能性）。
+  (2) `n_entities`はあるが`n_periods`相当のプロパティが無く、
+  `df_resid`のdocstringが言及する`n_periods`を実際には取得できない
+  不整合がある。(3) 二元効果の固定効果正規化規約はRust側docコメントに
+  詳しく書かれているが、Python側docstringには「`fixest::fixef()`と
+  一致しないことがある」としか書かれておらず、理由が露出していない。
+  FEは実装完了済みだが`docs/spec/fe-spec.md`のような独立仕様書も
+  未整備。
+- **気づいた経緯**: 2026-09-13、`panel/fe.py`解説中のユーザー指摘。
+- **状態**:【Issue化】Issue #320として切り出し済み（2026-09-13）
+
+### 49. Probit: `linear_predictor_and_residual`の関数名がHessian修正後の意味とずれている・不変条件`A(u)≥0`の検証範囲が狭い
+
+- **対象**: [engine/src/nonlinear/probit.rs](../../../engine/src/nonlinear/probit.rs)
+  の`linear_predictor_and_residual`・`mod proptests`
+- **内容**: rust-reviewerの指摘（Issue #316修正のレビュー中、2026-09-13）。2点。
+  1. **関数名と戻り値の意味の乖離**: `linear_predictor_and_residual`は元々
+     「生の線形予測子`z`と一般化残差`λ`」を返す関数だったが、Issue #316の
+     修正で第1戻り値は「`λ`と同じクランプ済み引数から再構成した`z̃`
+     （`hessian()`専用）」に変わった。`gradient()`/`scores()`はこの値を
+     使わず`_`で破棄するだけの構造になっているため、将来の実装者が誤って
+     第1戻り値を「線形予測子そのもの」として再利用するリスクがある。
+     関数名を`residual_and_hessian_z`等に改名する、または`hessian()`専用の
+     ヘルパーとして分離する（`gradient()`/`scores()`は`λ`のみ返す軽量版を
+     呼ぶ）ことを検討する余地がある。
+  2. **`A(u)=λ(λ+u)≥0`の不変条件を検証するproptestが無い**: 新規回帰テスト
+     `hessian_weight_is_non_negative_even_when_misclassified_observation_
+     exceeds_u_clamp`は`z=1000`の1点のみのハードコードケース。既存の
+     `mod proptests`（`probit_case_strategy`、`beta∈-1..1`、`x∈-2..2`）は
+     `|z|`が`U_CLAMP≈8.13`に届きにくい較正のため、このバグのクラス
+     （`|u|>U_CLAMP`かつ誤分類）を一般的に検出できる構造になっていない。
+     境界の混在を意図的に作れる`z`のレンジ（例: `x`や`beta`を大きくする、
+     または専用のケース戦略を追加する）で「`hessian`の対角成分は常に
+     非負」という不変条件をproperty-basedテストとして追加する案が
+     考えられる。
+- **気づいた経緯**: 2026-09-13、Issue #316（Probit Hessianクランプバグ）
+  修正のrust-reviewerレビュー中。
+- **状態**: 未対応（nice to have、ユーザー確認済み・記録のみ）
+
+### 50.【Issue化】欠損値ポリシーの設計思想（サンプルセレクションバイアス回避）がユーザー向けドキュメントに無い → Issue #324として切り出し済み（2026-09-13）
+
+- **対象**: [engine_pybind/src/column_extraction.rs](../../../engine_pybind/src/column_extraction.rs)
+  （モジュールdocコメント）、[docs/spec/ols-spec.md](../../spec/ols-spec.md)・
+  [docs/spec/logit-spec.md](../../spec/logit-spec.md)（該当一文）、`README.md`
+- **内容**: 欠損値・NaN・無限大を自動除外せず常に`ValidationError`にする方針の
+  **理由**（サンプルの黙った除外はGUIアプリの初心者ユーザーに気づかれない恣意的な
+  サンプルセレクションバイアスを生むため、除外の判断はユーザー自身に明示させる、
+  という設計思想）が、`column_extraction.rs`の非公開docコメントにしか書かれておらず、
+  ユーザー向けドキュメント（README、mkdocsで実際にnavから辿れる場所）には存在しない。
+  `docs/spec/ols-spec.md`「API引数」節には方針の一文（`欠損値（NaN/無限大）は常に
+  エラー。listwise deletionはしない。`）のみがあり理由の記載が無く、しかも同一の
+  一文が`logit-spec.md`にもそのまま複製されている。
+- **気づいた経緯**: 2026-09-13、`column_extraction.rs`解説中のユーザー指摘。
+- **状態**:【Issue化】Issue #324として切り出し済み（2026-09-13）
+
+### 51.【Issue化】engine_pybind: column_extraction.rsのエラーメッセージ重複をthiserror列挙型に集約する → Issue #325として切り出し済み（2026-09-13）
+
+- **対象**: [engine_pybind/src/column_extraction.rs](../../../engine_pybind/src/column_extraction.rs)
+  の`extract_f64_column`・`extract_group_key_column`
+- **内容**: 両関数とも`ValidationError::new_err(format!(...))`を呼び出し箇所で
+  直接組み立てており、`"column '{name}' does not exist in the data"`と
+  `"failed to convert column '{name}': {e}"`が文字通り重複している（それぞれ
+  29/88行目、40/105行目）。加えて欠損値のメッセージが表現不揃い（`extract_f64_column`
+  は件数・対処法つき、`extract_group_key_column`は`"contains missing values"`のみ）。
+  既存の`errors.rs`の`common_error_to_pyerr`パターン（`thiserror`列挙型＋
+  `*_error_to_pyerr`変換関数への集約、`.claude/rules/rust-style.md`「エラー
+  ハンドリング」節）がこのファイルには未適用であるため、同型のパターンを
+  `column_extraction.rs`専用に導入することを提案する（フラットな文字列定数
+  ファイルへの集約は、型安全性と系統別ファイル構成の既存方針に反するため不採用）。
+- **気づいた経緯**: 2026-09-13、`column_extraction.rs`解説中のユーザー指摘。
+- **状態**:【Issue化】Issue #325として切り出し済み（2026-09-13）
+
+### 52.【Issue化】engine/engine_pybindのコードコメントからIssue番号への言及を削除する方針を導入する → Issue #330として切り出し済み（2026-09-13）
+
+- **対象**: [engine_pybind/src/validation.rs](../../../engine_pybind/src/validation.rs)
+  （具体例）、`engine`/`engine_pybind`全体のコード内コメント
+- **内容**: `validation.rs`だけでも「Issue #154」「Issue #159」「Issue #306」
+  「Issue #295」という過去の由来説明が埋め込まれている。CLAUDE.md 13章の
+  「経緯は削除し理由のみ簡潔に記載」という既存方針をコードコメントにも適用し、
+  Issue番号は削除して理由の文章のみ残す（`git log`/`git blame`で常に追跡可能な
+  情報のため）。ただし`docs/spec/iv-spec.md`1.1節のような
+  設計ドキュメントの節番号への参照は「生きた契約」のため削除対象外。
+- **気づいた経緯**: 2026-09-13、`validation.rs`解説中のユーザー指摘。
+- **状態**:【Issue化】Issue #330として切り出し済み（2026-09-13）
+
+### 53.【Issue化】engine/engine_pybindの肥大化したファイルをモジュール分割する（テストは同一ファイル内に維持） → Issue #331として切り出し済み（2026-09-13）
+
+- **対象**: `engine`/`engine_pybind`全体（具体例:
+  [engine/src/nonlinear/tobit.rs](../../../engine/src/nonlinear/tobit.rs) 5592行、
+  [engine/src/nonlinear/common.rs](../../../engine/src/nonlinear/common.rs) 3904行、
+  [engine/src/iv/gmm.rs](../../../engine/src/iv/gmm.rs) 3824行、
+  [engine/src/panel/fe.rs](../../../engine/src/panel/fe.rs) 3752行ほか）
+- **内容**: `.claude/rules/rust-style.md`の「ファイルが肥大化したら`ols/`ディレクトリに
+  昇格し`mod.rs`+`data.rs`+`options.rs`等に分割する」という既存方針が、実際には
+  1000行を大きく超えるファイルが多数あるにも関わらずまだ一つも適用されていない。
+  既存方針に沿ってディレクトリ昇格・分割することを提案する。テストは分割後も
+  各実装ファイル末尾に維持する（`rust-style.md`「テスト」節の「同じファイルにある
+  ことでリファクタリング時の追従漏れを防げる」という既存理由を維持する判断、
+  ユーザー確認済み）。
+- **気づいた経緯**: 2026-09-13、`validation.rs`解説中のユーザー指摘。
+- **状態**:【Issue化】Issue #331として切り出し済み（2026-09-13）
+
+### 54. Tobitの`validate_no_sigma_collision`と`validate_no_const_collision`の統合について検討・対応不要と判断
+
+- **対象**: [engine_pybind/src/nonlinear/tobit.rs](../../../engine_pybind/src/nonlinear/tobit.rs)
+  の`validate_no_sigma_collision`、[engine_pybind/src/validation.rs](../../../engine_pybind/src/validation.rs)
+  の`validate_no_const_collision`
+- **内容**: 両者は構造上似ている（禁止列名との衝突検出）が、`const`衝突は
+  `include_intercept`という条件フラグを持ち全手法共有なのに対し、`sigma`衝突は
+  条件無し・Tobit専用（誤差項の標準偏差という合成パラメータ）という違いがある。
+  共通化すると関数の引数が増え可読性が下がる、かつ`validation.rs`は「全手法で
+  共有する」検証専用という位置づけのため、Tobit専用の`sigma`衝突検証を
+  持ち込むのはモジュールの責務からもずれる。統合しない方が良いと判断した
+  （`.claude/rules/rust-style.md`エラーハンドリング節の「系統固有の追加バリアントは
+  各系統のエラー型に直接定義してよい」と同じ精神）。
+- **気づいた経緯**: 2026-09-13、`validation.rs`解説中のユーザー指摘。
+- **状態**: 検討の結果、対応不要と判断（ユーザー確認済み、2026-09-13）
+
+### 55.【Issue化】validation.rs: `duplicate_role_message`の4分岐match実装をヘルパー関数で簡潔化する（出力文言は維持） → Issue #332として切り出し済み（2026-09-13）
+
+- **対象**: [engine_pybind/src/validation.rs](../../../engine_pybind/src/validation.rs)
+  の`duplicate_role_message`
+- **内容**: 4本のmatchアームのうち3本がほぼ同じ`format!`テンプレートの使い回しに
+  なっている。実際のルールは「主語の言い回しは常に`specified as`固定・目的語の
+  言い回しだけがSingle/Multiで`specified as`/`included in`と変わる、主語には
+  単一列ロールを優先する」というものであり、ロールごとの言い回しを返す小さな
+  ヘルパー関数＋主語選択の1回の判定に整理できる。出力される文言自体（単一列
+  ロールを優先して主語にする現在の規則）は可読性上の合理性があるため変更しない
+  （ユーザー確認済み、プレリリース期間中で後方互換性の制約は無いが、文言自体は
+  現状維持が妥当と判断）。
+- **気づいた経緯**: 2026-09-13、`validation.rs`解説中のユーザー指摘。
+- **状態**:【Issue化】Issue #332として切り出し済み（2026-09-13）
+
+### 56. `linear/common.rs`の`mat_to_vec`が実際には`linear`系統に限定されず全手法共通で使われている
+
+- **対象**: [engine_pybind/src/linear/common.rs:59-62](../../../engine_pybind/src/linear/common.rs#L59-L62)
+  の`mat_to_vec`
+- **内容**: モジュールdocコメント（同ファイル1〜14行目）は「`linear`系統
+  （OLS/WLS等）で共有するユーティリティ」と位置づけているが、`grep`で確認した
+  ところ`mat_to_vec`は`panel/fe.rs`・`iv/common.rs`からも`crate::linear::common::
+  mat_to_vec`として呼ばれており、実態は`column_extraction.rs`と同じ「全手法共通」
+  ロジックになっている。`.claude/rules/rust-style.md`「ファイル・ディレクトリ構成」
+  の「全手法で共有するロジックは系統ディレクトリの外、クレート直下に置く」という
+  規約に従うなら、`mat_to_vec`単体をクレート直下（`column_extraction.rs`と同じ
+  階層）に移す候補になる。
+- **気づいた経緯**: 2026-09-13、`linear/common.rs`解説中に呼び出し元を`grep`で
+  確認して気づいた（Claude起点、ユーザー指摘ではない）。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 57. `LeastSquaresError::InvalidHacLags`と`IvError::InvalidHacLags`がフィールド・メッセージ完全一致で重複している
+
+- **対象**: [engine/src/linear/common.rs:49-51](../../../engine/src/linear/common.rs#L49-L51)
+  の`LeastSquaresError::InvalidHacLags`、[engine/src/iv/common.rs:92-99](../../../engine/src/iv/common.rs#L92-L99)
+  の`IvError::InvalidHacLags`
+- **内容**: ユーザー指摘（2026-09-13、「`LeastSquaresError`に関して他の手法
+  〔panel/nonlinear/IV〕でまとめられるものはないか」）を受けて4系統のエラー型を
+  比較した。`SingularMatrix`はpanel（`WithinRegressionFailed`等）・IV
+  （`FirstStageFailed`/`SecondStageFailed`）とも`LeastSquaresError`自体を
+  `source`として包む合成で既に再利用されており重複ではない。一方
+  `InvalidHacLags { hac_lags: i64, n: usize }`・メッセージ`"hac_lags must be
+  in the range [0, n): got {hac_lags}, n={n}"`は`LeastSquaresError`と`IvError`で
+  フィールド名・型・メッセージ文言まで完全一致していた。`IvError`側のdocコメントは
+  「2SLSのサンドイッチ型分散計算が独立実装のため共有しない」と説明するが、これは
+  計算方法の独立性であり`hac_lags`という入力値自体の検証（`[0, n)`範囲チェック）とは
+  別の関心事のため、`.claude/rules/rust-style.md`が`CommonError`を導入した基準
+  （系統をまたいで同じ意味・同じメッセージのバリアントが重複する場合）にそのまま
+  当てはまる。`CommonError::InvalidHacLags`への統合を提案する。パネルの
+  `InvalidHacBandwidth`（上限が`n`ではなく時点数`t`、docコメントで意図的に区別
+  済み）は意味が異なるため対象外、nonlinear（Logit/Probit）は`cov_type="hac"`
+  非対応のため該当なし。
+- **気づいた経緯**: 2026-09-13、`linear/common.rs`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 62.【Issue化】Logit/Probit/TobitのResult構築ブロックがフィールド単位で完全重複しておりIssue #318の原因になっている。`ols_estimator_to_result`の配置問題とも関連
+
+→ Issue #347として切り出し済み（2026-09-20）。調査の結果、`ols_estimator_to_result`の
+単純な移動ではIssue #318は防げない（Logit/Probit/Tobitは別のestimator型を扱うため）
+ことを確認し、代わりに「`engine::nonlinear::common`への共通アクセサtrait定義
+（読み出し側のtrait化）＋`engine_pybind`側でのプレーン構造体への内部コンポジション＋
+各Resultからの薄い明示的`#[getter]`委譲」という設計方針で合意した（ユーザー提案）。
+コンパイラによる強制力が無い点（フィールド追加時の委譲書き忘れをコンパイルエラーに
+できない）も既知の限界として起票時に明記し、その補強策として「Python層での属性
+一括存在チェック」導入も検討案としてIssue本文に記録した。`macro_rules!`による完全
+機械生成案（Issue #315とスコープ重複）は不採用、詳細はIssue参照。

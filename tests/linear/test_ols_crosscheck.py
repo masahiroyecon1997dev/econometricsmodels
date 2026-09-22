@@ -56,11 +56,9 @@ from _tolerances import TOLERANCES
 from econometricsmodels import OLS, OLSOptions
 
 from benchmark.common import imbalanced_cluster_groups
+from benchmark.linear.constants import PREDICT_NEW_DATA
 from benchmark.linear.fixtures.generate_ols_crosscheck_fixtures import (
     NUMERIC_SCENARIOS as SYNTHETIC_SCENARIOS,
-)
-from benchmark.linear.fixtures.generate_ols_crosscheck_fixtures import (
-    PREDICT_NEW_DATA,
 )
 
 FIXTURE_PATH = (
@@ -149,8 +147,9 @@ NON_HAC_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
 @pytest.mark.parametrize("scenario", SYNTHETIC_SCENARIOS)
 def test_synthetic_matches_r(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
+    x_cols = [c for c in df.columns if c not in ("y", "weight")]
     options = OLSOptions(cov_type=cov_type)
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    res = OLS(df, y="y", x=x_cols, options=options).fit()
 
     ref = crosscheck["synthetic"][scenario][cov_type]["r"]
     label = f"{scenario}/{cov_type}/R"
@@ -163,9 +162,10 @@ def test_synthetic_matches_r(crosscheck, scenario, cov_type):
 def test_predict_none_matches_r_fitted_values(crosscheck, scenario):
     """`predict(new_data=None)`（学習データに対する予測値）がRの`fitted()`と一致すること。"""
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
-    res = OLS(df, y="y", x=["x1", "x2", "x3"]).fit()
+    x_cols = [c for c in df.columns if c not in ("y", "weight")]
+    res = OLS(df, y="y", x=x_cols).fit()
 
-    predicted = [row["fitted"] for row in res.predict()]
+    predicted = [row["predicted"] for row in res.predict()]
     ref = crosscheck["synthetic"][scenario]["predict"]["fitted"]
 
     assert len(predicted) == len(ref)
@@ -190,7 +190,7 @@ def test_predict_new_data_matches_r(crosscheck):
             "x2": PREDICT_NEW_DATA["x2"],
         }
     )
-    predicted = [row["fitted"] for row in res.predict(new_data)]
+    predicted = [row["predicted"] for row in res.predict(new_data)]
     ref = crosscheck["synthetic"]["baseline"]["predict"]["predicted"]
 
     assert len(predicted) == len(ref)
@@ -251,6 +251,30 @@ def test_cluster_g2_matches_r(crosscheck):
     _assert_close(res.params, ref["coef"], "cluster_g2/R coef")
     _assert_close(res.std_errors, ref["se"], "cluster_g2/R se")
     _assert_fit_stats_close(res, ref, "cluster_g2/R", rtol=RTOL_STRICT)
+
+
+@pytest.mark.parametrize(
+    "scenario", ["high_condition_number", "moderate_multicollinearity"]
+)
+def test_cluster_ill_conditioned_matches_r(crosscheck, scenario):
+    """悪条件・多重共線性シナリオとクラスターロバストSEの組み合わせ。
+
+    クラスターは従来`baseline`シナリオのみで、他のcov_typeでは全シナリオ検証
+    済みの悪条件・多重共線性との組み合わせが未検証だった。均等な疑似グループ
+    （行番号%10）のみ確認する（グルーピングパターン自体の網羅性は
+    `test_cluster_matches_r`等`baseline`シナリオで確認済み、
+    test-coverage-candidates.md項目29）。
+    """
+    df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
+    df = with_cluster_groups(df, 10)
+    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = crosscheck["synthetic"][scenario]["cluster"]["r"]
+    label = f"{scenario}/cluster/R"
+    _assert_close(res.params, ref["coef"], f"{label} coef")
+    _assert_close(res.std_errors, ref["se"], f"{label} se")
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
 
 
 def test_hac_matches_r(crosscheck):

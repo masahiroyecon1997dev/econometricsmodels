@@ -3,10 +3,13 @@
 //! 各推定手法は本クレート配下にモジュールとして追加していく想定
 //! （例: `ols`, `fe`, ...）。
 
+pub mod design_matrix;
 pub mod error;
 pub mod inference;
 pub mod iv;
 pub mod linear;
 pub mod linear_algebra;
 pub mod nonlinear;
+pub mod panel;
+pub mod parallelism;
 pub mod validation;

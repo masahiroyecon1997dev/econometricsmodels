@@ -23,15 +23,18 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+import _error_messages as msgs
 import polars as pl
 import pytest
 from _assertions import assert_close, assert_dict_close, check_margeff
 from _assertions import rename_intercept as _rename
 from _constants import DATA_DIR, MROZ_X
+from _error_messages import escaped
 from _helpers import (
     load_wooldridge_dataset,
     separation_suspected_dataset,
@@ -189,21 +192,35 @@ def check_confidence_level_changes_interval_width(
 
 
 def check_raise_on_non_convergence_false_returns_result_without_raising(
-    dataset, estimator_cls, options_cls
+    dataset, estimator_cls, options_cls, cov_type="classical"
 ):
     """`raise_on_non_convergence=False`だと未収束でも例外を投げず、
     `converged=False`の`Results`を返す（engine側のもう一方の分岐、APIレベル
     での配線確認。例外を送出する既定挙動側は
     `test_<method>_validation.py::test_non_convergence_raises_computation_error_with_tiny_max_iter`）。
+
+    `cov_type`は`classical`以外（`opg`/`hc0`/`hc1`/`cluster`）も検証する
+    （test-coverage-candidates.md項目4）。打ち切り点（収束未満のパラメータ）
+    でのHessian/スコア評価はcov_typeの分岐によって経由する行列演算が異なる
+    ため、想定外の例外を投げず、標準誤差が有限値であることまで確認する。
     """
+    kwargs = {
+        "max_iter": 1,
+        "raise_on_non_convergence": False,
+        "cov_type": cov_type,
+    }
+    if cov_type == "cluster":
+        kwargs["cluster_col"] = "cluster"
     res = estimator_cls(
         dataset,
         y="y",
         x=["x1", "x2"],
-        options=options_cls(max_iter=1, raise_on_non_convergence=False),
+        options=options_cls(**kwargs),
     ).fit()
     assert res.converged is False
     assert res.n_iter == 1
+    for name, se in res.std_errors.items():
+        assert math.isfinite(se), f"std_errors[{name}]={se} is not finite"
 
 
 def check_cov_type_label(dataset, estimator_cls, options_cls):
@@ -226,6 +243,31 @@ def check_cov_type_label(dataset, estimator_cls, options_cls):
         options=options_cls(cov_type="cluster", cluster_col="cluster"),
     ).fit()
     assert res.cov_type == "cluster"
+
+
+def check_method_label(dataset, estimator_cls, options_cls):
+    """`res.method`が指定した`method`（正規化済み小文字）を反映すること
+    （`check_cov_type_label`と同型、Issue #307）。
+    """
+    for method in ["newton", "bfgs", "lbfgs"]:
+        res = estimator_cls(
+            dataset,
+            y="y",
+            x=["x1", "x2"],
+            options=options_cls(method=method),
+        ).fit()
+        assert res.method == method
+
+
+def check_method_is_case_insensitive(
+    dataset, estimator_cls, options_cls, method, expected_label
+):
+    """`method`が大文字小文字を区別しないこと（`check_cov_type_is_case_insensitive`
+    と同型、Issue #307）。
+    """
+    options = options_cls(method=method)
+    res = estimator_cls(dataset, y="y", x=["x1", "x2"], options=options).fit()
+    assert res.method == expected_label
 
 
 def check_cov_type_is_case_insensitive(
@@ -276,6 +318,94 @@ def check_predict_returns_row_oriented_probabilities(dataset, estimator_cls):
     for row in predicted:
         assert set(row.keys()) == {"probability"}
         assert 0.0 <= row["probability"] <= 1.0
+
+
+def check_predict_new_data_returns_row_oriented_probabilities(
+    dataset, estimator_cls
+):
+    """`predict(new_data)`（out-of-sample、Issue #131）が学習データと構造の
+    異なる新規データに対しても同じ行指向の形状を返すこと。
+    """
+    res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
+
+    predicted = res.predict(new_data)
+
+    assert len(predicted) == 2
+    for row in predicted:
+        assert set(row.keys()) == {"probability"}
+        assert 0.0 <= row["probability"] <= 1.0
+
+
+# ── test_<method>_api.py: augment() ─────────────────────────────────
+
+
+def check_augment_none_returns_training_data_with_probability_column(
+    dataset, estimator_cls
+):
+    """`augment(new_data=None)`が、学習データの全列＋`"probability"`列を
+    持つDataFrameを、`predict()`と同じ予測確率・元データと同じ行順で
+    返すこと（Issue #322項目4）。
+    """
+    res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
+
+    augmented = res.augment()
+
+    assert isinstance(augmented, pl.DataFrame)
+    assert augmented.height == dataset.height
+    assert augmented.columns == [*dataset.columns, "probability"]
+    for col in dataset.columns:
+        assert augmented[col].to_list() == dataset[col].to_list()
+
+    expected = [row["probability"] for row in res.predict()]
+    assert augmented["probability"].to_list() == expected
+
+
+def check_augment_new_data_returns_new_data_with_probability_column(
+    dataset, estimator_cls
+):
+    """`augment(new_data)`が、`new_data`の全列＋`"probability"`列を持つ
+    DataFrameを、`predict(new_data)`と同じ予測確率で返すこと。
+    """
+    res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
+
+    augmented = res.augment(new_data)
+
+    assert isinstance(augmented, pl.DataFrame)
+    assert augmented.height == 2
+    assert augmented.columns == ["x1", "x2", "probability"]
+
+    expected = [row["probability"] for row in res.predict(new_data)]
+    assert augmented["probability"].to_list() == expected
+
+
+def check_augment_without_intercept_matches_predict(
+    estimator_cls, options_cls
+) -> None:
+    """`include_intercept=False`でfitした場合も`augment()`が`predict()`と
+    同じ予測確率を返すこと（`augment()`はRust側で`predict()`とは別に
+    `has_intercept`分岐を実装しているため、個別に確認する。OLSの
+    `test_augment_without_intercept_matches_predict`と同型、Issue #322項目4、
+    python-reviewer指摘）。
+    """
+    df = pl.DataFrame(
+        {
+            "y": [0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0],
+            "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        }
+    )
+    options = options_cls(include_intercept=False)
+    res = estimator_cls(df, y="y", x=["x1"], options=options).fit()
+
+    augmented_none = res.augment()
+    expected_none = [row["probability"] for row in res.predict()]
+    assert augmented_none["probability"].to_list() == expected_none
+
+    new_data = pl.DataFrame({"x1": [10.0, 20.0]})
+    augmented_new = res.augment(new_data)
+    expected_new = [row["probability"] for row in res.predict(new_data)]
+    assert augmented_new["probability"].to_list() == expected_new
 
 
 # ── test_<method>_api.py: pred_table() ──────────────────────────────
@@ -352,12 +482,33 @@ def check_marginal_effects_at_is_case_insensitive(dataset, estimator_cls):
 
 
 def check_y_in_x_raises(dataset, estimator_cls):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
+            col="y",
+            single_role="y",
+            multi_role="x",
+        ),
+    ):
         estimator_cls(dataset, y="y", x=["y", "x1"]).fit()
 
 
+def check_y_empty_string_raises(dataset, estimator_cls):
+    """`y`に空文字列を渡した場合`ValidationError`（`x`側の`check_empty_x_raises`と
+    対称。`test_ols_validation.py::test_y_empty_string_raises`参照）。
+    """
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="")
+    ):
+        estimator_cls(dataset, y="", x=["x1", "x2"]).fit()
+
+
 def check_duplicate_x_column_raises(dataset, estimator_cls):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.DUPLICATE_WITHIN_ROLE, name="x1", role="x"),
+    ):
         estimator_cls(dataset, y="y", x=["x1", "x1"]).fit()
 
 
@@ -365,17 +516,22 @@ def check_const_collision_with_include_intercept_raises(estimator_cls):
     df = pl.DataFrame(
         {"y": [0.0, 1.0, 0.0, 1.0], "const": [1.0, 2.0, 3.0, 3.5]}
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.CONST_COLLISION, role="x")
+    ):
         estimator_cls(df, y="y", x=["const"]).fit()
 
 
 def check_empty_x_raises(dataset, estimator_cls):
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY, role="x")):
         estimator_cls(dataset, y="y", x=[]).fit()
 
 
 def check_missing_column_raises(dataset, estimator_cls):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    ):
         estimator_cls(dataset, y="y", x=["does_not_exist"]).fit()
 
 
@@ -385,16 +541,24 @@ def check_null_values_raise(estimator_cls):
     Issue #231フェーズ4）。
     """
     df = pl.DataFrame({"y": [0.0, None, 1.0], "x1": [1.0, 2.0, 3.0]})
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=1),
+    ):
         estimator_cls(df, y="y", x=["x1"]).fit()
 
 
 def check_non_numeric_dtype_raises(estimator_cls):
     """数値/文字列型にキャストできない列は`ValidationError`（OLSの
-    `test_non_numeric_dtype_raises`と同型、Issue #231フェーズ4）。
+    `test_non_numeric_dtype_raises`と同型、Issue #231フェーズ4）。文字列を
+    数値キャストするとnullになるため`COLUMN_HAS_MISSING_VALUES`経路になる
+    （`test_ols_validation.py::test_non_numeric_dtype_raises`参照）。
     """
     df = pl.DataFrame({"y": ["a", "b", "c"], "x1": [1.0, 2.0, 3.0]})
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=3),
+    ):
         estimator_cls(df, y="y", x=["x1"]).fit()
 
 
@@ -403,36 +567,147 @@ def check_non_binary_y_raises(dataset, estimator_cls, bad_value):
     （engine側の`MleError::InvalidBinaryY`）。
     """
     df = dataset.with_columns(dataset["y"].scatter(0, bad_value))
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INVALID_BINARY_Y, row=0, value=msgs.rust_f64(bad_value)
+        ),
+    ):
         estimator_cls(df, y="y", x=["x1", "x2"]).fit()
 
 
 def check_insufficient_observations_raises(dataset, estimator_cls):
     df = dataset.head(2)
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INSUFFICIENT_OBSERVATIONS, n=2, k=3),
+    ):
         estimator_cls(df, y="y", x=["x1", "x2"]).fit()
+
+
+# ── test_<method>_validation.py: ValidationError（predict()のnew_data） ──
+#
+# OLSの`test_predict_missing_column_raises`等と同型（Issue #131）。
+
+
+def check_predict_missing_column_raises(dataset, estimator_cls):
+    res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
+
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    ):
+        res.predict(new_data)
+
+
+def check_predict_non_numeric_dtype_raises(dataset, estimator_cls):
+    """`check_non_numeric_dtype_raises`と同じ理由でnull経由の
+    `COLUMN_HAS_MISSING_VALUES`になる。
+    """
+    res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": ["a", "b"], "x2": [1.0, 2.0]})
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=2),
+    ):
+        res.predict(new_data)
+
+
+def check_predict_null_or_non_finite_values_raise(dataset, estimator_cls):
+    res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
+
+    new_data_null = pl.DataFrame({"x1": [1.0, None], "x2": [1.0, 2.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    ):
+        res.predict(new_data_null)
+
+    new_data_inf = pl.DataFrame({"x1": [1.0, float("inf")], "x2": [1.0, 2.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="inf", row=1
+        ),
+    ):
+        res.predict(new_data_inf)
+
+
+def check_augment_column_collision_raises(dataset, estimator_cls):
+    """元データ（`new_data=None`）・`new_data`のいずれかに既に`"probability"`
+    列がある場合`ValidationError`（黙って上書きしない、Issue #322項目4、
+    OLSの`test_augment_column_collision_raises`と同型）。
+    """
+    df_with_probability = dataset.with_columns(
+        pl.lit(0.0).alias("probability")
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.EXISTING_COLUMN_COLLISION, name="probability"),
+    ):
+        estimator_cls(
+            df_with_probability, y="y", x=["x1", "x2"]
+        ).fit().augment()
+
+    res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": [1.0], "x2": [0.5], "probability": [0.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.EXISTING_COLUMN_COLLISION, name="probability"),
+    ):
+        res.augment(new_data)
+
+
+def check_augment_missing_column_raises(dataset, estimator_cls):
+    """`augment()`も`predict()`と同じ`extract_f64_column`経路を通るため、
+    `new_data`に`x`列が欠けていると`ValidationError`。
+    """
+    res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
+
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    ):
+        res.augment(new_data)
 
 
 # ── test_<method>_validation.py: ValidationError（オプション） ─────
 
 
-def check_unknown_cov_type_raises(dataset, estimator_cls, options_cls):
-    with pytest.raises(ValidationError):
+def check_unknown_cov_type_raises(
+    dataset, estimator_cls, options_cls, cov_type="bogus"
+):
+    """未知の`cov_type`（空文字列を含む）は`ValidationError`
+    （テスト網羅性候補・項目46）。
+    """
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_COV_TYPE_NONLINEAR, other=cov_type),
+    ):
         estimator_cls(
             dataset,
             y="y",
             x=["x1", "x2"],
-            options=options_cls(cov_type="bogus"),
+            options=options_cls(cov_type=cov_type),
         ).fit()
 
 
-def check_unknown_method_raises(dataset, estimator_cls, options_cls):
-    with pytest.raises(ValidationError):
+def check_unknown_method_raises(
+    dataset, estimator_cls, options_cls, method="bogus"
+):
+    """未知の`method`（空文字列を含む）は`ValidationError`
+    （テスト網羅性候補・項目46）。
+    """
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_METHOD_NONLINEAR, other=method),
+    ):
         estimator_cls(
             dataset,
             y="y",
             x=["x1", "x2"],
-            options=options_cls(method="bogus"),
+            options=options_cls(method=method),
         ).fit()
 
 
@@ -449,7 +724,13 @@ def check_invalid_confidence_level_raises(
     `test_invalid_confidence_level_raises`との非対称、Issue #231フェーズ4）。
     """
     options = options_cls(confidence_level=confidence_level)
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INVALID_CONFIDENCE_LEVEL,
+            confidence_level=msgs.rust_f64(confidence_level),
+        ),
+    ):
         estimator_cls(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
@@ -457,7 +738,10 @@ def check_non_positive_tol_raises(dataset, estimator_cls, options_cls, tol):
     """`tol<=0`は勾配ノルム基準の収束条件が理論上満たされないため
     `ValidationError`（engine側の`MleError::InvalidTol`）。
     """
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INVALID_TOL, tol=msgs.rust_f64(tol)),
+    ):
         estimator_cls(
             dataset,
             y="y",
@@ -475,7 +759,10 @@ def check_non_positive_max_iter_raises(
     `max_iter`側のPython API境界のテストが無かった
     （`testing-completeness-reviewer`指摘、Issue #231フェーズ4）。
     """
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INVALID_MAX_ITER, max_iter=max_iter),
+    ):
         estimator_cls(
             dataset,
             y="y",
@@ -497,7 +784,9 @@ def check_cluster_cov_type_requires_at_least_two_groups(
             "cluster": ["a", "a", "a", "a"],
         }
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
+    ):
         estimator_cls(
             df,
             y="y",
@@ -521,8 +810,23 @@ def check_cluster_count_at_most_slopes_raises_validation_error(
     """
     df = with_cluster_groups(binary_dataset, 2)
     options = options_cls(cov_type="cluster", cluster_col="cluster_group")
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=2),
+    ):
         estimator_cls(df, y="y", x=["x1", "x2"], options=options).fit()
+
+
+def check_cluster_without_col_raises(dataset, estimator_cls, options_cls):
+    """`cov_type="cluster"`なのに`cluster_col`未指定の場合`ValidationError`
+    （OLS/WLS/IVと同じ検証、共通化された経路。test-coverage-candidates.md
+    項目5）。
+    """
+    options = options_cls(cov_type="cluster")
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.MISSING_CLUSTER_COLUMN)
+    ):
+        estimator_cls(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
 def check_cluster_col_nonexistent_column_raises(
@@ -532,7 +836,10 @@ def check_cluster_col_nonexistent_column_raises(
     Issue #231フェーズ4）。
     """
     options = options_cls(cov_type="cluster", cluster_col="does_not_exist")
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    ):
         estimator_cls(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
@@ -541,7 +848,10 @@ def check_cluster_col_nonexistent_column_raises(
 
 def check_marginal_effects_unknown_at_raises(dataset, estimator_cls):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_MARGINAL_EFFECTS_AT, other="bogus"),
+    ):
         res.marginal_effects(at="bogus")
 
 
@@ -549,56 +859,113 @@ def check_marginal_effects_confidence_level_out_of_range_raises(
     dataset, estimator_cls
 ):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INVALID_CONFIDENCE_LEVEL,
+            confidence_level=msgs.rust_f64(1.5),
+        ),
+    ):
         res.marginal_effects(confidence_level=1.5)
 
 
 # ── test_<method>_validation.py: ComputationError ───────────────────
 
 
-def check_singular_hessian_raises_computation_error(
-    estimator_cls, options_cls, method
-):
-    """完全な多重共線性は`ComputationError`。
-
-    `method`をparametrizeしているのは、`newton`は`newton_step`内の
-    ピボット付きQR分解経由でたまたま特異性を検出できていたが、`bfgs`/
-    `lbfgs`は準ニュートン法のため`newton_step`を経由せず、収束後の
-    `observed_information_cov_params`呼び出しが唯一の検出経路になるという
-    構造的な違いがあるため（`docs/planning/specs/nonlinear-implementation-notes.md`
-    「`cov_type`共通行列演算の特異性検出」参照。過去に`bfgs`だけ検出漏れし
-    桁違いに巨大な標準誤差を含む`Ok`が返る実バグがあり、`engine`側には
-    専用の回帰テストがあるが、`method`の文字列パース〜`engine_pybind`配線を
-    経由するAPI境界での確認が無かった。`testing-completeness-reviewer`指摘、
-    Issue #231フェーズ4）。
-    """
-    df = pl.DataFrame(
-        {
-            "y": [0.0, 1.0, 0.0, 1.0, 1.0],
-            "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
-            "x2": [2.0, 4.0, 6.0, 8.0, 10.0],  # x2 = 2 * x1
-        }
-    )
-    with pytest.raises(ComputationError):
-        estimator_cls(
-            df, y="y", x=["x1", "x2"], options=options_cls(method=method)
-        ).fit()
-
-
 def check_perfect_multicollinearity_raises_computation_error(
-    estimator_cls, dataset_prefix
+    estimator_cls, dataset_prefix, options_cls, method
 ):
     """完全な多重共線性（合成データセット）は数値比較の対象外
     （`testing-policy.md`「テストの3系統」）。想定エラー（`ComputationError`）が
-    発生することのみを確認する
-    （`check_singular_hessian_raises_computation_error`はインラインの
-    極小データ、こちらは`benchmark`のCSVフィクスチャ）。
+    発生することのみを確認する。`method`（newton/bfgs/lbfgs）でparametrizeする。
+
+    #279以前は、この`method`網羅を`check_singular_hessian_raises_computation_error`
+    （インラインの極小データ、`x2=2*x1`直書き）が担っていた。`newton`は
+    `newton_step`内のQR、`bfgs`/`lbfgs`は収束後の`observed_information_cov_params`と
+    いう`method`依存の別経路で特異性を検出しており、過去に`bfgs`だけ検出漏れした
+    実バグの回帰ガードだった。#279で`engine`内の検出経路は`fit()`冒頭の列ピボットQR
+    ランクチェック（`method`非依存の単一経路、`SingularDesignMatrix`）に一本化された
+    が、**`engine_pybind`側のmethod文字列パース（`"bfgs"`/`"lbfgs"` → `EngineMethod`）
+    と配線はmethod固有のまま**なので、「非既定methodの文字列 × 特異入力 ×
+    `ComputationError`」を踏むAPI境界テストは引き続き必要（testing-completeness-
+    reviewer指摘、#279レビュー）。インラインの極小データはCSVフィクスチャ版へ統合した
+    （`engine`側の`method`×`cov_type`網羅は
+    `fit_returns_singular_design_matrix_error_for_perfectly_collinear_design_matrix`
+    1本に集約）。
     """
     df = pl.read_csv(
         DATA_DIR / f"{dataset_prefix}_perfect_multicollinearity.csv"
     )
     with pytest.raises(ComputationError):
-        estimator_cls(df, y="y", x=["x1", "x2", "x3"]).fit()
+        estimator_cls(
+            df,
+            y="y",
+            x=["x1", "x2", "x3"],
+            options=options_cls(method=method),
+        ).fit()
+
+
+def check_complete_separation_raises_computation_error(
+    estimator_cls, dataset_prefix, options_cls, method
+):
+    """真の完全分離（合成データセット、`y`が`x1`の符号のみで決定論的に決まり
+    有限MLEが存在しない）は数値比較の対象外（`testing-policy.md`「テストの3系統」）。
+    想定エラー（`ComputationError`）が発生することのみを確認する。`method`
+    （newton/bfgs/lbfgs）でparametrizeする（test-coverage-candidates.md項目7）。
+
+    実際に発生する例外の**サブタイプはmethodによって異なる**（実測: newton/lbfgsは
+    `SeparationSuspected`、bfgsは`max_iter`到達による`NonConvergence`になりやすい）
+    ため、基底クラス`ComputationError`のみをアサートする（`check_perfect_
+    multicollinearity_raises_computation_error`と同型の設計だが、あちらは
+    `method`によらず常に`SingularDesignMatrix`である点が異なる）。
+
+    以前は「完全分離データは勾配ノルムのアンダーフローにより誤って収束済みと
+    判定されうる」という既知の限界（`docs/spec/logit-spec.md`参照）により、
+    このシナリオ自体の追加を見送っていた。`n=500`（`benchmark/nonlinear/
+    datasets.py`の既定値）程度の標本では、この誤判定（無警告の「成功」）は
+    起きず確実に`ComputationError`になることを実測で確認した上で追加した
+    （小標本境界〔`n=k+1`近傍〕でのみ誤判定が顕在化することはIssue #317で
+    別途確認済み）。
+    """
+    df = pl.read_csv(DATA_DIR / f"{dataset_prefix}_complete_separation.csv")
+    x_cols = [c for c in df.columns if c != "y"]
+    with pytest.raises(ComputationError):
+        estimator_cls(
+            df,
+            y="y",
+            x=x_cols,
+            options=options_cls(method=method),
+        ).fit()
+
+
+def check_complete_separation_with_raise_on_non_convergence_false(
+    estimator_cls, dataset_prefix, options_cls, method
+):
+    """完全分離データ（`check_complete_separation_raises_computation_error`と
+    同じフィクスチャ）で`raise_on_non_convergence=False`を指定した場合の挙動を
+    固定する（test-coverage-candidates.md項目7の派生確認、testing-completeness-
+    reviewer指摘）。
+
+    `SeparationSuspected`検出は`raise_on_non_convergence=False`のとき例外を
+    送出せず`converged=False`のまま結果を返すのみだが（`docs/spec/logit-spec.md`
+    参照）、収束判定とは独立した`SingularHessian`等の別エラー経路は
+    `raise_on_non_convergence`に関わらず発生しうる（test-coverage-candidates.md
+    項目4で確認したTobitと同型の挙動。実測ではLogit×bfgsのみこの経路に入り
+    `SingularHessian`を送出する）。そのため、この関数は「例外を投げず結果を
+    返した場合は標準誤差が有限値であること」のみを保証し、`ComputationError`が
+    飛ぶこと自体は許容する（メソッドごとに収束の軌道が異なり、どちらの経路に
+    入るかは実装の詳細のため）。
+    """
+    df = pl.read_csv(DATA_DIR / f"{dataset_prefix}_complete_separation.csv")
+    x_cols = [c for c in df.columns if c != "y"]
+    options = options_cls(method=method, raise_on_non_convergence=False)
+    try:
+        res = estimator_cls(df, y="y", x=x_cols, options=options).fit()
+    except ComputationError:
+        return
+    assert res.converged is False
+    for name, se in res.std_errors.items():
+        assert math.isfinite(se), f"std_errors[{name}]={se} is not finite"
 
 
 def check_non_convergence_raises_computation_error_with_tiny_max_iter(
@@ -752,15 +1119,14 @@ def check_matches_statsmodels(
     config: BinaryChoiceReferenceConfig, fixtures, scenario, cov_type
 ) -> None:
     df = pl.read_csv(config.dataset_path(scenario))
+    x_cols = [c for c in df.columns if c != "y"]
     kwargs = (
         {"tol": config.near_separation_tol}
         if scenario == "near_separation"
         else {}
     )
     options = config.options_cls(cov_type=cov_type, **kwargs)
-    res = config.estimator_cls(
-        df, y="y", x=["x1", "x2", "x3"], options=options
-    ).fit()
+    res = config.estimator_cls(df, y="y", x=x_cols, options=options).fit()
 
     check_result(
         config, res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}"
@@ -822,7 +1188,12 @@ def check_mroz_cluster_cov_type_raises_validation_error(
     """
     df = load_wooldridge_dataset("mroz")
     options = options_cls(cov_type="cluster", cluster_col="city")
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=len(MROZ_X)
+        ),
+    ):
         estimator_cls(df, y="inlf", x=MROZ_X, options=options).fit()
 
 
@@ -919,3 +1290,117 @@ def check_include_intercept_false_matches_statsmodels(
         f"{label}/converged"
     )
     assert res.df_model == fitted.df_model, f"{label}/df_model"
+
+
+def check_predict_new_data_matches_statsmodels(
+    config: BinaryChoiceReferenceConfig, sm_estimator_cls
+) -> None:
+    """新規データに対する`predict()`がstatsmodelsの`.predict()`と一致すること
+    （OLSの`test_predict_new_data_matches_statsmodels`と同型、Issue #131）。
+
+    列順を学習時（x1, x2, x3）と入れ替えて渡し、列名でマッチングされる
+    （列順に依存しない）ことも合わせて確認する。`predict()`の値自体は
+    `cov_type`に依存しないため（点推定はcov_typeの影響を受けない）、
+    ここでは`classical`のみで確認する。
+    """
+    import numpy as np
+    import statsmodels.api as sm
+
+    df = pl.read_csv(config.dataset_path("baseline"))
+    y = df["y"].to_numpy()
+    x_cols = ["x1", "x2", "x3"]
+    x = np.column_stack([df[c].to_numpy() for c in x_cols])
+    sm_fitted = sm_estimator_cls(y, sm.add_constant(x)).fit(disp=0)
+
+    options = config.options_cls(cov_type="classical")
+    res = config.estimator_cls(df, y="y", x=x_cols, options=options).fit()
+
+    new_data = pl.DataFrame(
+        {"x2": [0.5, -1.0], "x3": [0.2, 0.1], "x1": [1.0, -0.5]}
+    )
+    predicted = res.predict(new_data)
+
+    sm_new_x = sm.add_constant(
+        np.column_stack(
+            [
+                new_data["x1"].to_numpy(),
+                new_data["x2"].to_numpy(),
+                new_data["x3"].to_numpy(),
+            ]
+        ),
+        has_constant="add",
+    )
+    expected = sm_fitted.predict(sm_new_x)
+
+    assert len(predicted) == 2
+    for i, (row, exp) in enumerate(zip(predicted, expected)):
+        config.assert_close(row["probability"], exp, f"predict_new_data/{i}")
+
+
+def check_predict_new_data_without_intercept_matches_statsmodels(
+    config: BinaryChoiceReferenceConfig, sm_estimator_cls
+) -> None:
+    """`include_intercept=False`でfitした場合の`predict(new_data)`も
+    statsmodelsと一致すること（OLSの`test_predict_new_data_without_intercept_
+    matches_statsmodels`と同型、python-reviewer指摘、Issue #131）。
+    """
+    df = pl.read_csv(config.dataset_path("baseline"))
+    y = df["y"].to_numpy()
+    x1 = df["x1"].to_numpy()
+
+    options = config.options_cls(include_intercept=False)
+    res = config.estimator_cls(df, y="y", x=["x1"], options=options).fit()
+    sm_fitted = sm_estimator_cls(y, x1.reshape(-1, 1)).fit(disp=0)
+
+    new_x1 = [1.0, 2.0, -3.0]
+    new_data = pl.DataFrame({"x1": new_x1})
+    predicted = res.predict(new_data)
+    expected = sm_fitted.predict([[v] for v in new_x1])
+
+    assert len(predicted) == 3
+    for i, (row, exp) in enumerate(zip(predicted, expected)):
+        config.assert_close(
+            row["probability"], exp, f"predict_new_data_no_intercept/{i}"
+        )
+
+
+def check_predict_with_include_intercept_false_and_x_named_const(
+    estimator_cls, options_cls, link
+) -> None:
+    """`include_intercept=False`かつ`x`に`"const"`という名前の列を含む場合でも
+    `predict(new_data)`が正しく動作すること（OLSの`test_predict_with_include_
+    intercept_false_and_x_named_const`と同型の回帰テスト、Issue #131）。
+
+    `include_intercept=True`のときのみ`"const"`列名との衝突チェックが働く仕様
+    のため、`include_intercept=False`ならユーザーが`"const"`という名前の
+    （切片ではない）通常の説明変数を`x`に含めることは正当な入力。`predict()`の
+    内部実装が誤って列名から「自動追加された切片列かどうか」を推測すると、
+    この場合に値を無視して1.0固定にしてしまう回帰バグがOLSで過去にあったため
+    （`test_ols_api.py`参照）、同型の実装（`has_intercept`フラグのみで判定し
+    列名は見ない）を使うLogit/Probitでも固定用に追加する。
+
+    `link`はリンク関数（Logitは`Λ`、Probitは`Φ`）を`z -> probability`の
+    呼び出し可能オブジェクトとして呼び出し側から渡す（このcheck自体はLogit/
+    Probit共有のため、期待値の計算式だけを手法ごとに差し替える）。
+    """
+    df = pl.DataFrame(
+        {
+            "y": [0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0],
+            "const": [2.0, 5.0, 1.0, 8.0, 3.0, 6.0, 4.0, 7.0],
+            "x2": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        }
+    )
+    options = options_cls(include_intercept=False)
+    res = estimator_cls(df, y="y", x=["const", "x2"], options=options).fit()
+
+    new_data = pl.DataFrame({"const": [100.0, 200.0], "x2": [10.0, 20.0]})
+    predicted = res.predict(new_data)
+
+    coef_const = res.params["const"]
+    coef_x2 = res.params["x2"]
+    for i, (row, (c, x2)) in enumerate(
+        zip(predicted, [(100.0, 10.0), (200.0, 20.0)])
+    ):
+        z = coef_const * c + coef_x2 * x2
+        expected = link(z)
+        assert abs(row["probability"] - expected) < 1e-9, f"probability/{i}"

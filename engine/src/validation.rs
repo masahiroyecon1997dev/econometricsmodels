@@ -43,7 +43,7 @@ pub fn validate_cluster_groups(groups: &[String], n: usize) -> Result<usize, Com
 /// `Σ_i s_i = 0`）になるため`rank(Ŝ) ≤ g - 1`。全体検定が使う`q×q`部分行列
 /// （`q = k - k_constant`）は`g <= q`だと構造的に特異になる。`g`（クラスター列の
 /// ユニーク数）も`q`（説明変数の列数）も入力だけから判定できるため、行列計算を
-/// 待たず`fit()`冒頭のバリデーションで弾く（Issue #289。`g < 2`の
+/// 待たず`fit()`冒頭のバリデーションで弾く（`g < 2`の
 /// `InsufficientClusters`と同じカテゴリの閾値違い）。
 ///
 /// `q == 0`（切片のみモデル、全体検定自体がスキップされる）のときは`g >= 2 > 0 = q`
@@ -64,9 +64,46 @@ pub fn validate_cluster_count_covers_slopes(g: usize, q: usize) -> Result<(), Co
     Ok(())
 }
 
+/// 設計行列の列数`k`（定数項を含む）が0（`include_intercept=false`かつ説明変数も無い、
+/// 病的な入力）でないことを検証する。
+///
+/// OLS（`engine::linear::ols`）とnonlinear（`engine::nonlinear::common`）で意味・
+/// エラーメッセージが同一のため共有化した（`validate_cluster_groups`と同じ理由：
+/// モデル固有の計算に一切依存しない純粋な検証ロジックのため）。
+///
+/// `OlsEstimator::fit`（公開のゲート付きエントリ）から呼ぶ想定。`FeEstimator::fit`が
+/// 内部委譲する`OlsEstimator::fit_allowing_no_regressors`（固定効果のみモデル、
+/// `x=[]`でk=0になりうる正当なケース）はこの関数を経由しない
+/// （`engine/src/linear/CLAUDE.md`「k=0の扱い」参照）。
+///
+/// `n`はエラーメッセージ（`CommonError::NoRegressors { n }`）用。呼び出し側は
+/// `InsufficientObservations`と同じ引数順（`n`→`k`）で渡す。
+///
+/// nonlinear系統は`nonlinear::common::validate_has_regressors`という同名・同ロジックの
+/// 関数を独立に持つ（この関数への委譲は別途検討とし、今回は行わない）。
+pub fn validate_has_regressors(n: usize, k: usize) -> Result<(), CommonError> {
+    if k == 0 {
+        return Err(CommonError::NoRegressors { n });
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validate_has_regressors_accepts_positive_k() {
+        assert_eq!(validate_has_regressors(10, 1), Ok(()));
+    }
+
+    #[test]
+    fn validate_has_regressors_rejects_k_zero() {
+        assert_eq!(
+            validate_has_regressors(10, 0),
+            Err(CommonError::NoRegressors { n: 10 })
+        );
+    }
 
     #[test]
     fn validate_cluster_groups_returns_distinct_group_count_when_at_least_two() {

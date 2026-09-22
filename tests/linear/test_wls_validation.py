@@ -10,15 +10,17 @@
 
 from __future__ import annotations
 
+import _error_messages as msgs
 import polars as pl
 import pytest
 from _constants import DATA_DIR
+from _error_messages import escaped
 from _helpers import with_cluster_groups
 from econometricsmodels import (
     WLS,
     ComputationError,
-    OLSOptions,
     ValidationError,
+    WLSOptions,
 )
 
 from benchmark.linear.constants import HAC_MAXLAGS
@@ -28,21 +30,40 @@ from benchmark.linear.fixtures.generate_wls_fixtures import COV_TYPES
 
 
 def test_missing_weight_column_raises(dataset):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
+    ):
         WLS(dataset, y="y", x=["x1", "x2"], weight="nonexistent").fit()
 
 
 def test_weight_equals_y_raises(dataset):
     """`weight`に`y`と同じ列名を指定した場合`ValidationError`。"""
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.ROLE_OVERLAP_SINGLE_EQUALS_SINGLE,
+            col="y",
+            later_role="weight",
+            earlier_role="y",
+        ),
+    ):
         WLS(dataset, y="y", x=["x1", "x2"], weight="y").fit()
 
 
-def test_weight_in_x_raises(dataset):
-    """`weight`が`x`にも含まれる場合`ValidationError`。"""
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    with pytest.raises(ValidationError):
-        WLS(df, y="y", x=["x1", "x2", "weight"], weight="weight").fit()
+def test_weight_in_x_succeeds(dataset):
+    """`weight`と同じ列を`x`にも含めても成功する（Issue #277で許容に変更）。
+
+    重みに使った列を説明変数としても含める実務上の利用例（例: 人口規模で
+    重み付けしつつ人口規模自体を説明変数として含める）を許容するための緩和。
+    定数の重みだと`include_intercept=True`の既定の切片列と衝突し完全な
+    多重共線性になるため、分散のある列を重みに使う。数値の妥当性は
+    `test_wls_reference.py::test_weight_in_x_matches_statsmodels`で確認し、
+    ここでは`ValidationError`にならないことのみを確認する。
+    """
+    df = dataset.with_columns((pl.col("x1").abs() + 1.0).alias("weight"))
+    res = WLS(df, y="y", x=["x1", "x2", "weight"], weight="weight").fit()
+    assert "weight" in res.param_names
 
 
 @pytest.mark.parametrize("bad_weight", [0.0, -1.0])
@@ -51,7 +72,14 @@ def test_non_positive_weight_raises(dataset, bad_weight):
     n = dataset.height
     weight = [1.0] * (n - 1) + [bad_weight]
     df = dataset.with_columns(pl.Series("weight", weight))
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NON_POSITIVE_WEIGHT,
+            row=n - 1,
+            weight=msgs.rust_f64(bad_weight),
+        ),
+    ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
 
 
@@ -60,7 +88,15 @@ def test_nan_weight_raises(dataset):
     n = dataset.height
     weight = [1.0] * (n - 1) + [float("nan")]
     df = dataset.with_columns(pl.Series("weight", weight))
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE,
+            name="weight",
+            value="NaN",
+            row=n - 1,
+        ),
+    ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
 
 
@@ -69,7 +105,10 @@ def test_null_weight_raises(dataset):
     n = dataset.height
     weight: list[float | None] = [1.0] * (n - 1) + [None]
     df = dataset.with_columns(pl.Series("weight", weight))
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="weight", count=1),
+    ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
 
 
@@ -79,14 +118,25 @@ def test_null_weight_raises(dataset):
 def test_y_in_x_raises(dataset):
     """`y`と同じ列名が`x`にも含まれる場合`ValidationError`（OLSと同じ検証）。"""
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
+            col="y",
+            single_role="y",
+            multi_role="x",
+        ),
+    ):
         WLS(df, y="y", x=["y", "x1"], weight="weight").fit()
 
 
 def test_duplicate_x_column_raises(dataset):
     """`x`に同じ列名が重複して含まれる場合`ValidationError`（OLSと同じ検証）。"""
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.DUPLICATE_WITHIN_ROLE, name="x1", role="x"),
+    ):
         WLS(df, y="y", x=["x1", "x1"], weight="weight").fit()
 
 
@@ -99,21 +149,26 @@ def test_const_collision_with_include_intercept_raises():
             "weight": [1.0, 1.0, 1.0],
         }
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.CONST_COLLISION, role="x")
+    ):
         WLS(df, y="y", x=["const"], weight="weight").fit()
 
 
 def test_empty_x_raises(dataset):
     """`x`が空リストの場合`ValidationError`（OLSと同じ検証）。"""
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY, role="x")):
         WLS(df, y="y", x=[], weight="weight").fit()
 
 
 def test_insufficient_observations_raises(dataset):
     """観測数nが説明変数の数k（定数項込み）以下の場合`ValidationError`。"""
     df = dataset.with_columns(pl.lit(1.0).alias("weight")).head(2)
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INSUFFICIENT_OBSERVATIONS, n=2, k=3),
+    ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
 
 
@@ -123,8 +178,22 @@ def test_missing_column_raises(dataset):
     OLSと同じ検証）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
+    ):
         WLS(df, y="y", x=["x1", "nonexistent"], weight="weight").fit()
+
+
+def test_y_empty_string_raises(dataset):
+    """`y`に空文字列を渡した場合`ValidationError`（OLSと同じ検証、
+    `test_ols_validation.py::test_y_empty_string_raises`参照）。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="")
+    ):
+        WLS(df, y="", x=["x1", "x2"], weight="weight").fit()
 
 
 def test_null_values_raise():
@@ -134,29 +203,137 @@ def test_null_values_raise():
     df = pl.DataFrame(
         {"y": [1.0, None, 3.0], "x1": [1.0, 2.0, 3.0], "weight": [1.0] * 3}
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=1),
+    ):
         WLS(df, y="y", x=["x1"], weight="weight").fit()
 
 
 def test_non_numeric_dtype_raises():
-    """`y`が非数値型の場合`ValidationError`（OLSと同じ検証）。"""
+    """`y`が非数値型の場合`ValidationError`（OLSと同じ検証。文字列を数値
+    キャストするとnullになるため`COLUMN_HAS_MISSING_VALUES`経路になる、
+    `test_ols_validation.py::test_non_numeric_dtype_raises`参照）。
+    """
     df = pl.DataFrame(
         {"y": ["a", "b", "c"], "x1": [1.0, 2.0, 3.0], "weight": [1.0] * 3}
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=3),
+    ):
         WLS(df, y="y", x=["x1"], weight="weight").fit()
+
+
+# ── ValidationError（predict()、OLSと共通の検証） ─────────────────
+
+
+def test_predict_missing_column_raises(dataset):
+    """`predict()`に`x`列が欠けた`new_data`を渡すと`ValidationError`
+    （`test_ols_validation.py::test_predict_missing_column_raises`と同じ検証。
+    `WLSResult::predict()`もOLSと同じ`extract_f64_column`経路を通ることの
+    確認、Issue #132）。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
+
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    ):
+        res.predict(new_data)
+
+
+def test_predict_non_numeric_dtype_raises(dataset):
+    """`test_ols_validation.py::test_predict_non_numeric_dtype_raises`と
+    同じ理由でnull経由の`COLUMN_HAS_MISSING_VALUES`になる。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+    new_data = pl.DataFrame({"x1": ["a", "b"], "x2": [1.0, 2.0]})
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=2),
+    ):
+        res.predict(new_data)
+
+
+def test_predict_null_or_non_finite_values_raise(dataset):
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+
+    new_data_null = pl.DataFrame({"x1": [1.0, None], "x2": [1.0, 2.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    ):
+        res.predict(new_data_null)
+
+    new_data_inf = pl.DataFrame({"x1": [1.0, float("inf")], "x2": [1.0, 2.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="inf", row=1
+        ),
+    ):
+        res.predict(new_data_inf)
+
+
+# ── ValidationError（augment()、OLSと共通の検証） ─────────────────
+
+
+def test_augment_column_collision_raises(dataset):
+    """元データ（`new_data=None`）・`new_data`のいずれかに既に`"predicted"`列が
+    ある場合`ValidationError`（黙って上書きしない、Issue #295）。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    df_with_predicted = df.with_columns(pl.lit(0.0).alias("predicted"))
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.EXISTING_COLUMN_COLLISION, name="predicted"),
+    ):
+        WLS(
+            df_with_predicted, y="y", x=["x1", "x2"], weight="weight"
+        ).fit().augment()
+
+    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+    new_data = pl.DataFrame({"x1": [1.0], "x2": [0.5], "predicted": [0.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.EXISTING_COLUMN_COLLISION, name="predicted"),
+    ):
+        res.augment(new_data)
+
+
+def test_augment_missing_column_raises(dataset):
+    """`augment()`も`predict()`と同じ`extract_f64_column`経路を通るため、
+    `new_data`に`x`列が欠けていると`ValidationError`。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
+
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    ):
+        res.augment(new_data)
 
 
 # ── ValidationError（オプション、OLSと共通化された経路） ─────────
 
 
-def test_invalid_cov_type_raises(dataset):
-    """`cov_type`が未知の文字列の場合`ValidationError`
-    （OLSと同じ検証、共通化された経路）。
+@pytest.mark.parametrize("cov_type", ["invalid", ""])
+def test_invalid_cov_type_raises(dataset, cov_type):
+    """`cov_type`が未知の文字列（空文字列を含む）の場合`ValidationError`
+    （OLSと同じ検証、共通化された経路。テスト網羅性候補・項目46）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = OLSOptions(cov_type="invalid")
-    with pytest.raises(ValidationError):
+    options = WLSOptions(cov_type=cov_type)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_COV_TYPE_LINEAR, other=cov_type),
+    ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 
 
@@ -165,8 +342,10 @@ def test_cluster_without_col_raises(dataset):
     （OLSと同じ検証、共通化された経路）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = OLSOptions(cov_type="cluster")
-    with pytest.raises(ValidationError):
+    options = WLSOptions(cov_type="cluster")
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.MISSING_CLUSTER_COLUMN)
+    ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 
 
@@ -175,8 +354,11 @@ def test_cluster_col_nonexistent_column_raises(dataset):
     （`test_ols_validation.py`と同じ理由、Issue #231フェーズ4）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = OLSOptions(cov_type="cluster", cluster_col="does_not_exist")
-    with pytest.raises(ValidationError):
+    options = WLSOptions(cov_type="cluster", cluster_col="does_not_exist")
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 
 
@@ -187,8 +369,10 @@ def test_insufficient_clusters_raises(dataset):
     df = dataset.with_columns(
         pl.lit(1.0).alias("weight"), pl.lit(0).alias("single_cluster")
     )
-    options = OLSOptions(cov_type="cluster", cluster_col="single_cluster")
-    with pytest.raises(ValidationError):
+    options = WLSOptions(cov_type="cluster", cluster_col="single_cluster")
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
+    ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 
 
@@ -198,8 +382,14 @@ def test_invalid_confidence_level_raises(dataset, confidence_level):
     `ValidationError`（OLSと同じ検証、共通化された経路）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = OLSOptions(confidence_level=confidence_level)
-    with pytest.raises(ValidationError):
+    options = WLSOptions(confidence_level=confidence_level)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INVALID_CONFIDENCE_LEVEL,
+            confidence_level=msgs.rust_f64(confidence_level),
+        ),
+    ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 
 
@@ -211,8 +401,11 @@ def test_invalid_hac_lags_raises(dataset, hac_lags):
     共通化された経路）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = OLSOptions(cov_type="hac", hac_lags=hac_lags)
-    with pytest.raises(ValidationError):
+    options = WLSOptions(cov_type="hac", hac_lags=hac_lags)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INVALID_HAC_LAGS, hac_lags=hac_lags, n=100),
+    ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 
 
@@ -224,8 +417,13 @@ def test_cluster_count_at_most_slopes_raises_validation_error(n_groups):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, n_groups)
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
-    with pytest.raises(ValidationError):
+    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=n_groups, q=3
+        ),
+    ):
         WLS(
             df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
         ).fit()
@@ -254,7 +452,7 @@ def test_scale_variance_raises_computation_error(cov_type):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
     kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
-    options = OLSOptions(cov_type=cov_type, **kwargs)
+    options = WLSOptions(cov_type=cov_type, **kwargs)
     with pytest.raises(ComputationError):
         WLS(
             df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options

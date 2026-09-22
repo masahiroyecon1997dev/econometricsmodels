@@ -3,15 +3,16 @@ iv_crosscheck.json）を生成するスクリプト。
 
 `tests/fixtures/benchmarks/iv.json`（linearmodels、主リファレンス）とは
 別に、独立実装（R: ivreg + sandwich/lmtest）によるクロスチェック値を生成する
-（`docs/planning/specs/iv-api-design.md`5.2節参照）。
+（`docs/spec/iv-spec.md`4章参照）。
 
 シナリオ・cov_type・クラスタケースの構成は`generate_iv_fixtures.py`
 （linearmodelsクロスチェック）と揃える（ユーザー確認済み）。
 
 ## 対象範囲
 
-- **cov_type**: classical/hc0/hc1/cluster/hac。hc2/hc3は対象外
-  （`iv-api-design.md`3.1節、ivreg側にレバレッジ算出の確立した参照実装が無いため）。
+- **cov_type**: classical/hc0〜hc3/cluster/hac。hc2/hc3は`vcovHC(type="HC2"/"HC3")`
+  で計算でき本実装と数値一致することを実機確認済みのため対象に含む
+  （`iv-spec.md`3.1節、`benchmark/iv/references/run_ivreg.R`参照）。
 - **weak_instrument_f・sargan（過剰識別検定）**: ivregの`summary(diagnostics=TRUE)`が
   常にclassical（iid）vcovで計算する仕様のため、cov_typeによらず同じ値を全cov_type
   エントリに含める（`weak_instrument_f_statistics`/`overid_statistic`が常にclassical
@@ -71,13 +72,18 @@ NUMERIC_SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "high_condition_number",
+    # scale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）より
+    # 緩いスケール差（x1*1e2, x2*1e-1）の成功パス（test-coverage-candidates.md
+    # 項目11、generate_iv_fixtures.pyと同じ構成、ユーザー確認済み）。
+    "scale_variance_mild",
 ]
 INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
 X_EXOG_BY_SCENARIO = {
     "moderate_multicollinearity": ["x1", "x2"],
     "high_condition_number": ["x1", "x2"],
+    "scale_variance_mild": ["x1", "x2"],
 }
-COV_TYPES = ["classical", "hc0", "hc1", "hac", "cluster"]
+COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster"]
 
 
 def _ivreg_formula(
@@ -274,15 +280,15 @@ def build_fixtures() -> dict:
             "信頼区間・nobs/df_resid・R²・ロバストWald検定（f_statistic/"
             "f_p_value）・弱操作変数F統計量・Sargan（過剰識別検定）・"
             "Wu-Hausman（全cov_type、clusterのみp値除く）を含む"
-            "（iv-api-design.md 5.2節）"
+            "（iv-spec.md 4章）"
         ),
         "generated_at": datetime.now(UTC).isoformat(),
         "r_version": r_version,
         "ivreg_version": ivreg_version,
         "note": (
-            "hc2/hc3はここに含まない（ivreg側にレバレッジ算出の確立した参照実装が"
-            "無いため、iv-api-design.md 3.1節）。GMMはivregが対応していないため"
-            "対象外（5.3節、Rクロスチェック省略の例外規定）。"
+            'hc2/hc3も`vcovHC(type="HC2"/"HC3")`で計算し含める（本実装と数値'
+            "一致することを実機確認済み、iv-spec.md 3.1節）。GMMはivregが"
+            "対応していないため対象外（iv-spec.md4章、Rクロスチェック省略の例外規定）。"
             "weak_instrument_f・sargan_statistic/sargan_p_valueはivregの"
             "summary(diagnostics=TRUE)が常にclassical vcovで計算する仕様のため、"
             "全cov_typeエントリで同じ値になる（実測確認済み）。just_identified"
@@ -297,6 +303,10 @@ def build_fixtures() -> dict:
             "実測値、ユーザー確認済み）。"
             "t_stats/p_values/conf_intはcoeftest()・手計算信頼区間から、"
             "nobs/df_residはnrow(df)・df_inferenceから抽出する。"
+            "scale_variance_mildはscale_variance（x1*1e6, x2*1e-3、全cov_typeで"
+            "ComputationError）より緩いスケール差（x1*1e2, x2*1e-1）の成功パス"
+            "（test-coverage-candidates.md項目11、generate_iv_fixtures.pyと"
+            "同じ構成）。"
             "perfect_multicollinearityはここに含まない（ComputationErrorの"
             "発生確認のみ、テストコード側で対応）。cluster_g2（G=2境界の成功"
             "パス）は`engine/src/iv/CLAUDE.md`「修正済み」に記録の`k_constant`"

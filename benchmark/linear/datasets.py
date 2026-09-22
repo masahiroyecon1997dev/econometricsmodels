@@ -48,7 +48,30 @@ SCENARIOS = [
     "scale_variance",
     "scale_variance_mild",
     "high_condition_number",
+    "many_regressors",
+    "outlier_regressor",
 ]
+
+# many_regressorsシナリオで固定する説明変数の数（test-coverage-candidates.md
+# 項目2、実務でのミクロ計量の上限規模を想定した値、ユーザー確認済み）。
+MANY_REGRESSORS_K = 20
+
+# many_regressorsシナリオで列ごとに持たせるスケール差の範囲（log10、
+# 0.1〜100倍の3桁）。scale_variance_mild（2列限定、1e3差）と同じ発想を
+# 列全体に広げたもの。誤差項の分布・構造は変えない
+# （1シナリオ=1構造的特徴という既存方針を踏襲。外れ値・裾の重い分布は
+# 別シナリオとして検討する、test-coverage-candidates.md参照）。
+_MANY_REGRESSORS_LOG_SCALE_RANGE = (-1.0, 2.0)
+
+# outlier_regressorシナリオでx1に混入させる外れ値（Tukeyの汚染混合モデル、
+# (1-p)*N(0,1) + p*N(0,scale^2)）。列全体をスケールする（many_regressors・
+# scale_variance系）のとは異なり、少数の観測だけが極端な値を持つ設計行列
+# （高レバレッジ行）での数値的頑健性を検証する。誤差項の分布は変えない
+# （1シナリオ=1構造的特徴という既存方針を踏襲）。test-coverage-candidates.md
+# 項目67、n=500・seed 0〜199で実測（ComputationErrorなし、statsmodelsと
+# 最大相対誤差5e-13で一致、条件数は概ね3〜7で健全）。
+_OUTLIER_REGRESSOR_CONTAM_PROB = 0.05
+_OUTLIER_REGRESSOR_CONTAM_SCALE = 20.0
 
 
 def _require_min_k(scenario: str, k: int, minimum: int) -> None:
@@ -70,6 +93,7 @@ def generate_linear_dataset(
         scenario: SCENARIOSのいずれか。
         n: サンプルサイズ（"small_n"シナリオでは20に強制される）。
         k: 説明変数の数（x1..xk）。"perfect_multicollinearity"はk>=3が必要。
+            "many_regressors"では`MANY_REGRESSORS_K`（20）に強制される。
         seed: 乱数シード（再現性のため固定する）。
         beta: 真の係数ベクトル（切片含む、長さk+1）。Noneならランダムに生成。
 
@@ -89,13 +113,31 @@ def generate_linear_dataset(
     if scenario == "small_n":
         n = 20
 
+    if scenario == "many_regressors":
+        k = MANY_REGRESSORS_K
+
     if beta is None:
-        beta = rng.uniform(-3, 3, size=k + 1)  # beta[0] = intercept
+        if scenario == "many_regressors":
+            # 列取り違えバグを検出しやすくするため、係数の絶対値を列ごとに
+            # 意図的にずらす（隣接インデックス間で最低0.5の間隔を保証、
+            # test-coverage-candidates.md項目25と同じ発想）。
+            magnitudes = 1.0 + 0.5 * np.arange(k)
+            signs = rng.choice([-1.0, 1.0], size=k)
+            beta = np.concatenate(([rng.uniform(-3, 3)], signs * magnitudes))
+        else:
+            beta = rng.uniform(-3, 3, size=k + 1)  # beta[0] = intercept
 
     # --- 説明変数 ---
     if scenario in ("moderate_multicollinearity", "high_condition_number"):
         _require_min_k(scenario, k, 2)
     X = correlated_design_matrix(rng, scenario, n, k)
+
+    if scenario == "many_regressors":
+        # 列ごとに分散（スケール）を大きくばらつかせる（0.1〜100倍、3桁の
+        # スケール差）。高次元での数値的頑健性（faerのcol_piv_qr等）を
+        # 検証する成功パス。
+        col_scales = np.logspace(*_MANY_REGRESSORS_LOG_SCALE_RANGE, k)
+        X = X * col_scales
 
     if scenario == "perfect_multicollinearity":
         _require_min_k(scenario, k, 3)
@@ -119,6 +161,14 @@ def generate_linear_dataset(
         # （testing-policy.md「テスト用データセット」1.）。
         X[:, 0] *= 1e2
         X[:, 1] *= 1e-1
+
+    if scenario == "outlier_regressor":
+        # x1の一部（5%）だけをTukeyの汚染混合モデルで外れ値に置き換える
+        # （SD20倍、少数の高レバレッジ行）。列全体のスケールを変える
+        # many_regressors/scale_variance系とは異なる軸の悪条件シナリオ。
+        is_outlier = rng.uniform(size=n) < _OUTLIER_REGRESSOR_CONTAM_PROB
+        outlier_vals = rng.normal(0.0, _OUTLIER_REGRESSOR_CONTAM_SCALE, size=n)
+        X[:, 0] = np.where(is_outlier, outlier_vals, X[:, 0])
 
     # --- 誤差項 ---
     sigma_i = None  # heteroskedasticの場合のみ使用（weight算出に流用）

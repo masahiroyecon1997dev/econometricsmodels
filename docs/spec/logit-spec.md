@@ -4,8 +4,7 @@ Logit（二項ロジスティック回帰、最尤推定）の確定済み仕様
 `engine/src/nonlinear/common.rs`）・`engine_pybind/src/nonlinear/logit.rs`・
 `python_package/econometricsmodels/nonlinear/logit.py`として実装済み。nonlinear系統共通の設計判断
 （ソルバー実行の共通化、`cov_type`共通行列演算、標準化の方針等）は
-[`nonlinear-api-design.md`](../planning/specs/nonlinear-api-design.md)・
-[`nonlinear-implementation-notes.md`](../planning/specs/nonlinear-implementation-notes.md)を参照し、
+[`nonlinear-common.md`](./nonlinear-common.md)を参照し、
 本ドキュメントにはLogit固有の内容のみを記載する。
 
 ## 1. API引数
@@ -30,8 +29,9 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   | `tol` | `float` | `1e-6` | 勾配ノルム収束判定の閾値、以下は`InvalidTol` |
   | `raise_on_non_convergence` | `bool` | `True` | `False`なら未収束時も`converged=False`の結果を返す |
 
-- `start_params`（ユーザー指定初期値）は提供しない。初期値は常にゼロベクトル固定（標準化空間への
-  変換ロジックが逆方向にも必要になる点を含め、需要が顕在化してから対応する）。
+- `start_params`（ユーザー指定初期値）は提供しない。反復最適化の初期値（warm start）は、標準化空間の
+  設計行列に対する線形確率モデル（LPM）最小二乗解に、logitのIRLS 1ステップ相当のスケール補正を
+  施したものを内部で自動生成する（3.2節、`method`に依らず共通、Issue #279）。
 - `n<=k`は`InsufficientObservations`（OLSと同じ閾値だが根拠は異なる: OLSは残差自由度がゼロ以下という
   数学的必要条件、Logitは`n<=k`がほぼ確実に完全分離を引き起こすという経験則的な安全側の判断）。
   `k==0`（`include_intercept=false`かつ`x`が空、`n<=k`チェックをすり抜けうる病的な入力）は別途
@@ -45,7 +45,8 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 （**z検定**、t検定ではない） / `p_values` / `conf_lower` / `conf_upper` / `param_names` /
 `log_likelihood` / `log_likelihood_null` / `lr_statistic` / `lr_p_value` / `pseudo_r_squared`
 （McFadden） / `aic` / `bic` / `n_obs` / `df_model` / `df_resid` / `converged` / `n_iter` /
-`cov_type`（実際に使われた種別の小文字文字列）。
+`cov_type`（実際に使われた種別の小文字文字列） / `method`（実際に使われたソルバーの小文字文字列、
+Issue #307）。
 
 - `k×kの分散共分散行列（cov_params）はPython側に公開しない`が、`predict()`/`pred_table()`/
   `marginal_effects()`用に非公開フィールド`estimator: LogitEstimator`として結果オブジェクト内部に
@@ -83,6 +84,19 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 `destandardize_params`で元のスケールへ逆変換する。`method`（`newton`/`bfgs`/`lbfgs`）に関わらず、
 収束点でのHessian評価（SE計算用）は常に解析的に行う。
 
+- **初期値（warm start）と設計行列のランクチェック**: `method`に関わらず、最適化を開始する前に
+  標準化空間の設計行列を列ピボットQR分解する（`nonlinear::common::checked_design_matrix_qr`）。
+  `R`の対角成分の相対閾値`k·ε·max|R_ii|`（`linear::ols`の`ensure_full_rank`と同一式）でランク落ちを
+  検出し、完全な多重共線性等は`MleError::SingularDesignMatrix`（`ComputationError`）で弾く。この
+  QR解＝標準化空間のLPM最小二乗解 `b_lpm` に、nullモデル `p≡p̄`（`p̄=ȳ`）を起点にしたIRLSの
+  1反復目に相当するスケール補正を施したものを初期値にする: 全成分を `1/w` 倍し（`w`はlogitの
+  IRLS重み `p̄(1-p̄)`）、切片成分にのみ `η₀ - p̄/w`（`η₀ = ln(p̄/(1-p̄))`）を加える
+  （`β⁽¹⁾ = b_lpm/w + (η₀ - p̄/w)·e₀`）。`p̄`が0/1の近傍（全観測で`y`が同一）では補正が発散する
+  ため素の`b_lpm`にフォールバックする。従来のゼロベクトル初期値から変更（Issue #279）。この変更で
+  多重共線性の検出経路が`method`非依存の単一経路（前段QR）に統一され、従来`bfgs`/`lbfgs`のみ
+  検出が収束後の`observed_information_cov_params`に依存していた構造的な差が解消された。収束先の
+  推定値・既存のクロスチェック数値は不変（尤度が大域凹で無制約のためMLEは一意）。
+
 - **完全分離下でのアンダーフロー対策**: 完全分離に近いデータでは、係数が発散する過程でスコア項
   `p(1-p)`が浮動小数点アンダーフローし、勾配ノルム基準が`tol`の値によらず「収束済み」と誤判定しうる
   （`tol`の調整では解決しない構造的な限界）。対策として、`run_solver`の後処理で標準化パラメータ空間
@@ -93,10 +107,65 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   `run_solver`の`separation_norm_check: SeparationNormCheck`引数で切り替え、`y∈{0,1}`で係数が
   ±∞へ発散するLogit/Probitのみ`Enabled`にする。Tobitは`Disabled`（分離が`σ→0`退化として現れ
   標準化パラメータノルムが閾値を超えないため。[`tobit-spec.md`](./tobit-spec.md)3.2節参照）。
+- **`bfgs`/`lbfgs`のline searchの評価回数バジェット（Issue #342、実装済み）**: `MoreThuenteLineSearch`
+  （argmin組み込み）は、`bfgs`の自前実装（`FaerBfgs`）・`lbfgs`（argmin組み込み`LBFGS`）いずれの
+  経路でも内側`Executor`に反復上限が設定されておらず（argmin既定`u64::MAX`）、ステップ幅の上限
+  （`stpmax`）も未設定（既定`f64::INFINITY`）。探索方向・勾配が退化しline search内部の収束判定が
+  一度も発火しない入力に嵌ると、この内側ループは理論上終了しない（devビルドで80分超のCPU時間を
+  消費し続けるケースを実測で確認、`nonlinear::tobit::tests::proptests`で発覚）。対策として
+  `run_solver`は`problem`を`BudgetedProblem`（`common.rs`）でラップし、目的関数・勾配の評価回数に
+  総枠（`(max_iter + 1) * 2000`。`+1`は`Executor::init()`の初回評価分の枠を
+  `max_iter=0`でも確保するため）を設ける。枠を使い切ると`MleError::EvaluationBudgetExceeded { budget }`
+  を返す。argmin組み込み`LBFGS`のソースを変更せずに`bfgs`/`lbfgs`両方を保護できるのは、
+  `MoreThuenteLineSearch`が呼び出し元によらず必ず`Problem<O>`経由で`cost`/`gradient`を呼ぶため
+  （詳細は`common.rs`の`BudgetedProblem`docコメント参照）。
 - 収束判定`tol`の既定値`1e-6`は、通常データでは高精度（statsmodelsとの相対誤差最大1e-7程度）に
   一致するが、準完全分離の境界ケースではやや不足する（相対誤差最大7e-8）。`tol=1e-8`まで締めると
   改善するが、`bfgs`が`max_iter`を使い切りやすくなるリスクが上がるため、既定値は`1e-6`のまま維持し、
   境界ケースの数値比較テストのみ`tol`を明示的に締める運用とした。
+- **`tol`は総和勾配に対する絶対閾値で観測数`n`でスケールしない（Issue #291）**。`FaerNewton`
+  （Newton）には、`regularized_newton_step`のLMラダーが全失敗したとき`λ=0`のHessianが可逆かつ
+  勾配ノルムが停滞（前反復比`≥0.9`）かつ収束目標近傍（`<1e4·tol`）なら収束扱いにする副次判定を
+  追加した。Logit/Probitは尤度が大域凹でこの経路に入らず挙動不変（大標本Tobitで顕在化。
+  詳細は[`tobit-spec.md`](./tobit-spec.md)3.2節）。
+- **`bfgs`/`lbfgs`は`tol`を観測数`n`で正規化した基準を使う（Issue #285、実装済み）**:
+  `newton`は上記の通り総和勾配に対する絶対閾値のまま（既定`1e-6`）だが、`bfgs`/`lbfgs`は
+  「観測あたり平均勾配」基準`‖∇ℓ(θ)‖ / n < tol`（既定`1e-8`）を使う。実装上は`run_solver`
+  （`nonlinear/common.rs`）が`tol * n_obs`を実効的な絶対閾値としてソルバーへ渡す形で、
+  `FaerBfgs`/組み込み`LBFGS`自体は正規化を知らない。`n_obs`は各モデルの`fit()`が観測数
+  （`y.nrows()`）をそのまま渡す。statsmodels（scipy）が対数尤度・スコア・Hessianを観測数`n`で
+  割ってから最適化する設計（`statsmodels.base.model.LikelihoodModel.fit`の`f=-loglike/nobs`等）に
+  倣ったもの。`newton`は2次収束のため`tol`の絶対閾値のままでも大標本での追加反復はごく僅かで
+  済むが、`bfgs`/`lbfgs`は超1次収束のため、正規化前は同じ絶対閾値を満たすのに`n`が大きいほど
+  反復・関数評価が増えていた（実測: `n`=100,000→1,000,000で`bfgs`の反復回数が16→17〜22）。
+  - **`newton`にも同じ正規化を適用する案は検証の上で不採用**: `newton`の絶対閾値`tol`を観測数
+    正規化に統一すれば既定値を1つに揃えられるため検討したが、実測したところ`near_separation`
+    （Logit/Probit）・`heavy_censoring`/`interval_censoring`（Tobit）等、境界条件に近いシナリオで
+    `RTOL=1e-8`の精度検証テストが28件失敗した（例: `interval_censoring/hc1/wald_statistic`で
+    相対誤差6.5e-6）。`newton`は元々2次収束による高精度を前提にテストが組まれているため、
+    `n`が小さいケースで正規化により実効閾値が緩む（`tol*n < tol`となる`n<1`は無いが、`n`倍する
+    こと自体で絶対閾値`1e-8`が`n*1e-8`まで緩む）とこの精度マージンを食いつぶす。この結果を
+    ユーザーに報告の上、`newton`は正規化せず既定値`1e-6`の絶対閾値のまま維持する方針を確定した。
+  - **既定値は`method`により異なる**: `newton`（既定`tol=1e-6`、絶対閾値）と`bfgs`/`lbfgs`
+    （既定`tol=1e-8`、正規化基準）で共有の単一既定値は採れない——`newton`の既定を`1e-8`
+    （絶対閾値のまま）に締めると大標本で無視できない速度低下（実測: `n`=1,000,000で
+    0.98秒→3.15秒）が生じる一方、`bfgs`/`lbfgs`の既定を`1e-6`（正規化基準）に緩めると
+    `n`=500の精度検証テストを壊す（後述）。`tol`を明示的に指定した場合は、選択した`method`の
+    意味論（`newton`なら絶対、`bfgs`/`lbfgs`なら正規化）がそのまま適用される。
+  - **実測（`generate_binary_choice_dataset("baseline", link="logit", n=1_000_000, k=5, seed=42)`、
+    公式計測ハーネス`performance.compare_logit --worker`、単一スレッド）**: `bfgs`は
+    実行時間15.0秒→0.73秒（既定`tol=1e-8`、正規化後の実効閾値`1e-2`相当）。`newton`は
+    0.63秒（既定`tol=1e-6`のまま、旧実装から不変）。`lbfgs`は17.5秒で、旧実装（18.2秒）から
+    ほぼ改善しない——同じ実効閾値でも`bfgs`より収束に必要な反復数がずっと多い（実測:
+    実効閾値`1e-2`相当で`bfgs`は6反復・`lbfgs`は17反復）ため、`bfgs`に効いた既定値の正規化
+    だけでは`lbfgs`は速くならない。`lbfgs`固有により緩い既定値が必要かどうかは別Issueで検討する
+    （今回のスコープは正規化という仕組みの導入のみ、ユーザー確認済み）。
+  - **小標本での精度は既定値`1e-8`で維持される**: `tests/fixtures/benchmarks/logit.json`の
+    `baseline`シナリオ（`n=500`、`.claude/rules/testing-policy.md`の基本方針`相対誤差1e-8`と
+    厳密比較する）で、`bfgs`の`tol=n*1e-8=5e-6`（既定値と同じ実効閾値）は`tol=1e-6`（旧既定の
+    絶対閾値）と完全に同じ反復回数（7）・精度（相対誤差1.77e-9）だった。一方`tol=n*1e-6`
+    （実効閾値100倍緩い設定）を試すと相対誤差3.84e-6まで悪化する——既定値を`1e-8`にした
+    理由はこの安全マージンによる（`1e-6`ではなく`1e-8`を選んだ根拠）。
 
 ### 3.3 標準誤差
 
@@ -127,10 +196,10 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   のため、`fit()`冒頭で弾く（従来はsilent-passだった、実質バグ。OLS/WLS/Tobit/IVと横断で統一）。
   少数クラスタ一般の漸近的信頼性（`G=5, q=2`等、計算は通るケース）は別軸で、これは弾かない
   （`docs/planning/specs/refactoring-candidates-2.md`項目90）。
-- Hessianが特異な場合は`SingularHessian`、OPG行列（`Σᵢsᵢsᵢ'`）が特異な場合は`SingularOpgMatrix`
-  （原因が異なるため区別）。`method=newton`はステップ求解中の別経路（ピボット付きQR）で先に
-  特異性を検出してしまうため、`cov_type`側の特異性検出パスを実際に通すテストには`bfgs`/`lbfgs`が
-  必要になる。
+- 完全な多重共線性等の設計行列のランク落ちは、`method`に依らず最適化前の列ピボットQR
+  （`checked_design_matrix_qr`、3.2節）で`SingularDesignMatrix`として弾く。前段で弾かれた後に
+  なお発生しうるHessianのランクエラーはHessian自体が特異な場合は`SingularHessian`、OPG行列
+  （`Σᵢsᵢsᵢ'`）が特異な場合は`SingularOpgMatrix`（原因が異なるため区別）。
 
 ### 3.4 適合度統計量
 
@@ -150,15 +219,36 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 （`dydx_and_jacobian`/`marginal_effects_from_w_s`）はリンク関数に依存しないためProbitと共有する
 （`nonlinear/common.rs`）。
 
-### 3.6 predict() / pred_table()
+### 3.6 predict() / augment() / pred_table()
 
-`predict()`（引数なし）は`p_i=Λ(x_i'θ)`を返す。`pred_table(threshold)`は2×2的中表（`table[actual][predicted]`）を返す。いずれも学習データのみを対象とする**in-sample限定**（out-of-sample対応は4章）。
+`predict(new_data=None)`は`p_i=Λ(x_i'θ)`を返す。`new_data`が`None`（既定）なら学習データ
+（`fit()`に使ったデータ）に対する予測確率、指定すれば新規データ（out-of-sample）に対する予測確率を
+返す（`new_data`の列名マッチング・`include_intercept`時の定数項自動付加はOLSの`predict(new_data)`
+（[`ols-spec.md`](./ols-spec.md)「predict()」）と同じ規約、Issue #131）。`pred_table(threshold)`は
+2×2的中表（`table[actual][predicted]`）を返す。こちらは学習データのみを対象とする
+**in-sample限定**のまま（out-of-sample対応は4章、別issueでトラッキング）。
 
+- `predict(new_data)`のengine側実装は`nonlinear::common::predict_new_data`（`engine::linear::ols::
+  predict_new_data`のLogit/Probit共有版、`link`関数を差し替えられるようにしたもの）。新規データの
+  設計行列組み立て（`has_intercept`時の定数項自動付加）は、OLS/WLSと共有する`crate::design_matrix::
+  design_matrix_element`ヘルパーに委ねている。
 - `pred_table`の計算そのもの（`predicted`と`y`のみに依存、リンク関数を参照しない）は`common.rs`の
   `pred_table`関数としてProbitと共有する。`actual`側は`threshold`に関わらず常に**固定0.5**で二値化
   する（`predicted`側のみ`threshold`依存）。これはstatsmodelsの`BinaryResults.pred_table(threshold)`
   の実際の実装（`histogram2d`が常に`[0, 0.5, 1]`でクロス集計する）に合わせた仕様。
 - `threshold`自体の値域は検証しない（範囲外でも自明な分類結果になるだけで破綻しないため）。
+- **OLSの`predict()`との意味の違い**: `predict()`が返す`"probability"`は確率（`[0, 1]`の連続値）
+  であり、OLSの`predict()`が返す`"predicted"`（`y`自体の点予測）とは意味が異なる。0/1の分類結果が
+  欲しい場合は`predict()`の出力に自前でしきい値を適用するか、学習データに限り`pred_table()`を使う。
+  これはstatsmodelsの`predict()`と同じ標準的な慣習であり、キー名を`"predicted"`に統一する変更は
+  行わない（`docs/planning/specs/refactoring-candidates-2.md`項目80、Issue #322項目3で結論）。
+- **`augment(new_data=None)`は`predict()`と同じ`new_data`意味論**で、ソースデータ（学習データまたは
+  `new_data`）に予測確率の列（`"probability"`）を1列付加したpolars DataFrameを返す（OLSの
+  `augment()`と同型、Issue #295/#322項目4）。列名衝突（ソースデータに既に`"probability"`列が
+  ある場合）は`ValidationError`（`engine_pybind::validation::validate_no_existing_column`）。
+  `LogitResult`は`fit()`時の元DataFrameを非公開`training_data: DataFrame`として保持する
+  （`IVResult.first_stage()`のような単一DataFrameを持たない構築経路が無いため、OLSと異なり
+  `Option`にせず常に`DataFrame`、`WLSResult`と同じ設計）。
 
 ### 3.7 engine_pybind: エラー変換
 
@@ -168,7 +258,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 |---|---|
 | `Common(InsufficientObservations \| InvalidConfidenceLevel \| MissingClusterColumn \| InsufficientClusters \| InsufficientClustersForInference \| NoRegressors)` | `ValidationError` |
 | `InvalidMaxIter` / `InvalidTol` / `InvalidBinaryY` | `ValidationError` |
-| `NonConvergence` / `SingularHessian` / `SingularOpgMatrix` / `SeparationSuspected` | `ComputationError` |
+| `NonConvergence` / `SingularDesignMatrix` / `SingularHessian` / `SingularOpgMatrix` / `SeparationSuspected` / `EvaluationBudgetExceeded` | `ComputationError` |
 
 ### 3.8 テスト
 
@@ -195,12 +285,28 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 ## 4. 未実装・未対応
 
-- `predict()`/`pred_table()`のout-of-sample対応（`new_data`引数）
+- `predict()`のout-of-sample対応（`new_data`引数）は実装済み（Issue #131、3.6参照）。
+  `pred_table()`のout-of-sample対応は引き続き未実装（別issueでトラッキング）。
+- `augment()`は実装済み（Issue #322項目4、3.6参照）。
 - `start_params`（ユーザー指定初期値）
-- `SEPARATION_PARAM_NORM_THRESHOLD`の多変量モデル（k大）での誤検知リスク: L2ノルムは`k`が増えるほど
-  各成分が中程度でも合計が大きくなりやすく、真に分離していないケースでの誤検知は未検証
+- `SEPARATION_PARAM_NORM_THRESHOLD`の誤検知リスク（Issue #321）: 当初「k大で穏やかな係数が
+  積み重なる」ケースを懸念していたが、2026-09-13の実測で真のメカニズムは**強い多重共線性**と
+  判明した。列が無相関なら`norm(β_std)²≈Var(線形予測子)`が近似的に成り立ち閾値は妥当に機能するが、
+  列が強く相関していると係数が符号反対に大きく振れて線形予測子への寄与は打ち消し合う一方で
+  ノルムだけが膨張するため、分離していない正当な有限MLE（statsmodelsは正常収束）を誤って
+  `SeparationSuspected`として弾いてしまう（実測: 列相関をほぼ1に近づけたLogitデータで
+  ノルム推定値≈580、閾値100の約5.8倍）。詳細はIssue #321参照
 - `SeparationSuspected`検出が使う量（標準化パラメータのL2ノルム）と実際にアンダーフローを
   引き起こす量（線形予測子`|x_std_i・θ_std|`の最大値）は相関的な関係に過ぎず、数学的に保証された
-  関係ではない（例: 特定の1列のみが分離に寄与するケースでは検出漏れがありうる）
-- 完全分離でNonConvergenceになるシナリオ（`complete_separation`）のベンチマーク: 3.2の既知の限界
-  （アンダーフローによる誤収束判定）により意図通りに動作しないため見送り
+  関係ではない（例: 特定の1列のみが分離に寄与するケースでは検出漏れがありうる、Issue #321未検証）
+- **完全分離でNonConvergenceになるシナリオ（`complete_separation`）は対応済み（2026-09-13）**:
+  当初は3.2の既知の限界（アンダーフローによる誤収束判定）により意図通りに動作しないと判断し
+  見送っていたが、`n=500`程度（極小標本ではない）では誤判定が起きず、newton/bfgs/lbfgs
+  いずれのmethodでも確実に`ComputationError`（`SeparationSuspected`または`NonConvergence`、
+  method依存）が発生することを実測確認した上で`benchmark/nonlinear/datasets.py`の
+  `complete_separation`シナリオとして追加した（`perfect_multicollinearity`と同型、数値比較の
+  対象外）。小標本境界（`n=k+1`近傍）でのみ誤判定が顕在化することはIssue #317で別途確認済み。
+  - **未対応のまま残る点**: `raise_on_non_convergence=False`とこの完全分離データの組み合わせは
+    未検証（`run_solver`は`raise_on_non_convergence=False`のとき`SeparationSuspected`を
+    送出せず`converged=False`のまま結果を返すのみのため、この経路で無意味な値が返っていないかの
+    確認が別途必要）

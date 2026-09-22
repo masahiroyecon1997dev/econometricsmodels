@@ -7,7 +7,7 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
 
 ## 1. API引数
 
-3層構成: `OLS(data, y, x, options).fit() -> OlsResults`（python_package）→
+3層構成: `OLS(data, y, x, options).fit() -> OLSResults`（python_package）→
 `fit_ols(data, y, x, options) -> OLSResult`（engine_pybind、PyO3境界）→
 正規方程式ソルバー・標準誤差計算（engine）。
 
@@ -45,7 +45,7 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
   には引き続き含めない。
 - `summary()`（テキスト整形）・DataFrame版の`coef_table()`/`conf_int()`は作らない
   （economiconのGUIエンジンという用途上、テキスト表示・対話的操作を前提にしないため）。
-- python_package層（`OlsResults`）:
+- python_package層（`OLSResults`）:
   - `params`/`std_errors`/`t_stats`/`p_values`/`conf_int`: 係数名→値の`dict`（O(1)取り出し用）。
   - `coef_table()`: 行指向`list[dict]`（REST APIレスポンスにそのまま使える形）。
   - `residuals`: `list[float]`をそのまま素通し。
@@ -142,22 +142,51 @@ $$
 
 ### 3.4 `predict()`
 
-- `OlsResults.predict(new_data: pl.DataFrame | None = None) -> list[dict[str, float]]`
-  （`OLS`側ではなく`OlsResults`側。`OLS`はfit前の設定を保持するだけのステートレスな値のため）。
+- `OLSResults.predict(new_data: pl.DataFrame | None = None) -> list[dict[str, float]]`
+  （`OLS`側ではなく`OLSResults`側。`OLS`はfit前の設定を保持するだけのステートレスな値のため）。
 - `new_data=None`（デフォルト）: 学習データに対する予測値`ŷ = Xβ̂`を返す（`fit()`時に計算し
   内部に保持。独立したプロパティとしては公開せず`predict()`経由のみ）。
 - `new_data`指定時: 新規データに対する予測値（out-of-sample）。`x`と同じ列名を持つ列を含む必要が
   ある（列名でマッチング、列順不問）。`include_intercept=True`でfitした場合、定数項の列は
   `new_data`に含めない（自動付加される）。
 - 戻り値は行指向`list[dict[str, float]]`で統一（点予測のみの現段階では1キーのみだが、将来
-  信頼区間・予測区間を追加する場合にキーを追加できる形にするため）。
+  信頼区間・予測区間を追加する場合にキーを追加できる形にするため）。キー名は`"predicted"`
+  （学習データ・新規データいずれの場合も同じキー。当初`"fitted"`固定だったが、
+  new_data指定時（out-of-sample）に対して統計学の慣習上不正確という指摘を受け、
+  Issue #309で`"predicted"`に統一した。統計学の慣習では学習データに対する予測を
+  「fitted values」、新規データに対する予測を「predicted values」と呼び分けるが、
+  本APIは`new_data`の有無で戻り値の型・構造を変えない設計方針のため、キー名も
+  呼び分けず`"predicted"`で統一する）。
 - **Logitとの命名整合**: `LogitEstimator::predict()`（学習データの予測確率のみを返す設計、
   statsmodelsの`results.predict(exog=None)`と同型）が先に実装・マージ済みだったため、OLS側を
   この命名（`fitted_values`プロパティを作らず`predict(new_data=None)`に一本化）に揃えた。
 - エラーハンドリングは列不足・型不一致・NaN/無限大とも既存の`ValidationError`の枠組みをそのまま使う
   （専用のエラーバリアントは新設しない）。
 
-### 3.5 engine/engine_pybind間のデータ受け渡し・エラー変換
+### 3.5 `augment()`（Issue #295）
+
+- `OLSResults.augment(new_data: pl.DataFrame | None = None) -> pl.DataFrame`。
+  `new_data`の意味・エラーハンドリングは`predict()`と完全に同じ。戻り値が
+  `list[dict[str, float]]`ではなく、ソースデータ（`new_data=None`なら学習データ、
+  指定時は`new_data`）に予測値の列（`"predicted"`）を1列付加したpolars DataFrameを返す点のみ異なる。
+- **プロジェクト全体の「DataFrameは返さない」方針（2章）の唯一の例外**。予測値と元データの行対応を
+  分かりやすくしたいというユーザー要望（R `broom::augment()`が先行事例）に応えるため。既存の
+  `predict()`/`residuals`/`coef_table()`は変更せず、この用途専用の新規メソッドとして追加した
+  （フラグで戻り値の型を変える設計はboolean trapのため不採用）。
+- **スコープは予測列のみ**（残差列の同時付加は見送り、必要になれば別issueで拡張検討）。
+- **実装層は`engine_pybind`**（`python_package`側で`predict()`の結果を`with_columns()`するだけでも
+  実現できるが、列名衝突のエラー送出のしやすさを優先しユーザー判断でRust側に置いた）。
+  `OLSResult`（Rust）に`fit()`時の元DataFrameを`training_data: Option<DataFrame>`として非公開保持する
+  （polarsの列は内部で参照カウント方式のため、このクローン自体は実質コピーを伴わない）。
+  `new_data`指定時は`predict()`と同じ`x`列抽出＋`engine::linear::ols::predict_new_data`を再利用し、
+  `new_data`自体をソースにする。
+- **列名衝突は`ValidationError`**（ソースデータに既に`"predicted"`列がある場合、`include_intercept=True`
+  時の`"const"`列衝突と同じ発想で黙って上書きしない。`engine_pybind::validation::validate_no_existing_column`）。
+- `training_data`が`None`（`IVResult.first_stage()`が`OLSResult`を構築する経路——各内生変数の
+  第一段階回帰は単一のソースDataFrameを持たないため）の`OLSResults`に対して`augment(new_data=None)`を
+  呼ぶと`ValidationError`になる（`new_data`を指定した呼び出しは通常どおり動作する）。
+
+### 3.6 engine/engine_pybind間のデータ受け渡し・エラー変換
 
 - Arrowゼロコピーは Python→Rust境界（`pyo3-polars`の`PyDataFrame`）の受け渡しを指す。
   polars DataFrame→`faer::Mat<f64>`は2段階: `engine_pybind`が列ごとに`Vec<f64>`へ抽出
@@ -170,7 +199,7 @@ $$
 
   | `LeastSquaresError` | Python例外 |
   |---|---|
-  | `Common(DimensionMismatch \| InsufficientObservations \| MissingClusterColumn \| InvalidConfidenceLevel \| InsufficientClusters \| InsufficientClustersForInference)` | `ValidationError` |
+  | `Common(DimensionMismatch \| InsufficientObservations \| MissingClusterColumn \| InvalidConfidenceLevel \| InsufficientClusters \| InsufficientClustersForInference \| NoRegressors)` | `ValidationError` |
   | `InvalidHacLags` | `ValidationError` |
   | `SingularMatrix` | `ComputationError` |
   | `Common(ComputationFailed)` | `ComputationError` |
@@ -182,39 +211,53 @@ $$
   `pyo3-polars=0.28.0`が`pyo3="^0.29"`・`polars="^0.55.1"`を要求するための組み合わせ。互換性は数字ではなく
   `pyo3-polars`が使う`polars_ffi::version_0`という安定版FFIプロトコルで担保される。
 
-### 3.6 テスト
+### 3.7 テスト
 
 - 許容誤差: classical/HC0-3/cluster/係数はRとの実測で相対誤差1e-14程度のため`RTOL_STRICT=1e-8`。
   HACはRとの`prewhite`/`adjust`慣習差により実測0.4%程度のため`RTOL_HAC=1e-2`。
 - `tests/linear/` に4ファイルで役割分担する（`refactoring-candidates-2.md`項目68）:
-  `test_ols_api.py`（成功パスの構造・API・オプション反映・`predict()`）/
+  `test_ols_api.py`（成功パスの構造・API・オプション反映・`predict()`/`augment()`）/
   `test_ols_validation.py`（`ValidationError`/`ComputationError`パス）/
   `test_ols_reference.py`（statsmodels主リファレンスとの数値照合、`ols.json`＋ライブ照合）/
   `test_ols_crosscheck.py`（R独立実装、`ols_crosscheck.json`）。一般的なテスト方針は
   `.claude/rules/testing-policy.md`を参照。
 - pyfixestはOLSの正確性検証には使わない（HC2/HC3にHC1用の小標本補正を誤って適用する既知の
   実装バグがあるため）。性能比較専用（[`../performance/ols.md`](../performance/ols.md)）。
-- 実データセット（`test_ols_crosscheck.py`）: `wage1`（`lwage ~ educ + exper + tenure`）・
+- 実データセット: `wage1`（`lwage ~ educ + exper + tenure`）・
   `gpa2`（`colgpa ~ sat + hsperc + tothrs`）のWooldridgeデータセット2つ、
-  classical/HC0-3でRクロスチェック。`wage1`はさらに地域ダミー（northcen/south/west、
-  基準northeast）から合成したregion列でのクラスターロバストSE（実データでのグループ列、
-  4グループ・不均衡サイズ）も検証する。
+  classical/HC0-3で主リファレンス（statsmodels、`test_ols_reference.py`）・
+  独立実装（R、`test_ols_crosscheck.py`）の両方と照合する（従来Rクロスチェック側にしか
+  無かった実データ検証をstatsmodels側にも追加、test-coverage-candidates.md項目13・33）。
+  `wage1`はさらに地域ダミー（northcen/south/west、基準northeast）から合成したregion列
+  でのクラスターロバストSE（実データでのグループ列、4グループ・不均衡サイズ）も両方で検証する。
 - `engine`側は上記の固定シナリオ単体テストに加え、property-basedテスト（`proptest`、
   `engine/src/linear/ols.rs`の`mod proptests`）で不変条件を検証する（詳細な方針は
   `testing-policy.md`「property-basedテスト」参照）。対象プロパティ: 定数項ありなら残差和は常に0、
   yのスカラー倍で係数（切片含む）も同じ倍率でスケールする、xの列順序を入れ替えても係数名で
   対応付ければ値は変わらない、HC0の標準誤差は常にHC1以下。いずれも意図的なバグ注入により
   実際に検出できることを確認済み。
+- 上記4ファイルの役割分担（リファレンス実装との数値照合）とは別に、`test_ols_api.py`末尾に
+  クラスターロバストSEの統計的健全性チェックを1本持つ
+  （`test_cluster_std_error_exceeds_classical_under_true_intra_cluster_correlation`）。
+  既存のクラスター系テストは誤差i.i.d.なデータに疑似グループラベルを後付けしたもので、
+  「クラスターロバストSEが真のクラスター内相関がある状況で意図通り機能するか」は未検証
+  だった（旧test-coverage-candidates.md項目12）。説明変数・誤差の両方にクラスター内相関を
+  持たせたMoulton型DGPを使い、クラスターSEが古典的SEより明確に大きくなることを確認する
+  （seed固定、実測レンジに対し十分なマージンを持たせた閾値で判定）。リファレンス実装との
+  数値比較ではなく本実装内で完結した健全性チェックのため、`freeze.py`の固定CSVパイプラインは
+  経由せずテスト内でDGPを都度生成する。
 
-### 3.7 パフォーマンス（要約）
+### 3.8 パフォーマンス（要約）
 
 releaseビルド（`maturin develop --release`）必須（debugビルドは最大140倍遅い）。
 classical/HC1/clusterはstatsmodels/pyfixest以上に高速、HACも大規模データではほぼ互角。
 メモリはengineが一貫して最小。詳細な実測データは[`../performance/ols.md`](../performance/ols.md)参照。
+faerのグローバル並列度は`engine::parallelism::ensure_serial()`で常時`Par::Seq`に固定
+している（tall-skinnyな設計行列では暗黙の全コア並列化が高速化せず、多コア機・負荷下で
+不安定になったため。Issue #283、`engine/src/linear/CLAUDE.md`「faerのグローバル並列度」）。
 
 ## 4. 未実装・未対応
 
 - `predict()`の信頼区間・予測区間（点予測のみ対応）
-- WLSへの`predict()`適用（Issue #132）
 - HACの完全なデータ依存バンド幅自動選択（Newey & West 1994）: 参照実装がなく数値照合手段がないため見送り
 - `SingularMatrix`のエラーメッセージを状況に応じて分岐させる（優先度低）

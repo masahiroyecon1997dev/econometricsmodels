@@ -1,7 +1,7 @@
 """IV(2SLS)の主リファレンス（linearmodels）による数値比較テスト。
 
 `tests/fixtures/benchmarks/iv.json`（`benchmark/iv/fixtures/
-generate_iv_fixtures.py`で生成）を読み込み、8つの合成データシナリオ×
+generate_iv_fixtures.py`で生成）を読み込み、10個の合成データシナリオ×
 classical/HC0/HC1/HAC（+クラスター、baselineのみ）で、係数・標準誤差・
 検定統計量・適合度統計量・診断統計量を相対誤差1e-8で厳密比較する
 （`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。
@@ -20,10 +20,15 @@ Note:
       `benchmark/iv/fixtures/generate_iv_fixtures.py`のモジュールdoc
       コメント参照）。GMMのlinearmodels（`IVGMM`）クロスチェックは
       別途フィクスチャ生成からやり直す必要がある。
-    - `hc2`/`hc3`はlinearmodelsに対応する実装が無いため対象外（`iv.json`の
-      `_meta.note`参照）。`engine`側のRust単体テスト
+    - `hc2`/`hc3`は`linearmodels`固有の制約により対象外（`linearmodels.iv.covariance`が
+      hc2/hc3相当の実装を持たないため、`iv.json`の`_meta.note`参照）。ただし
+      「参照実装が無い」わけではない——R `ivreg`+`sandwich::vcovHC`では検証可能なことを
+      実機確認済みで、`test_iv_crosscheck.py`が独立にクロスチェックする
+      （`iv-spec.md`3.1節、`refactoring-candidates.md`項目12）。`engine`側の
+      Rust単体テスト
       （`two_sls.rs`の`fit_computes_hc2_std_errors_matching_manual_sandwich_formula`
-      等、独立な素朴ループでの手計算とのクロスチェック）による検証に留める。
+      等、独立な素朴ループでの手計算とのクロスチェック）は数式レベルの細粒度回帰確認と
+      して引き続き有効。
     - `wu_hausman_statistic`はcov_type="hac"のときlinearmodels側との対応式が
       不明なためフィクスチャ自体が`None`（原因未特定、次セッションで別途調査
       予定、`benchmark/iv/references/linearmodels_ref.py`のモジュールdocコメント参照）。
@@ -59,7 +64,7 @@ from _assertions import rename_intercept as _rename
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset, with_cluster_groups
 from _tolerances import TOLERANCES
-from econometricsmodels import IV, IvOptions
+from econometricsmodels import IV, IVOptions
 
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.iv.fixtures.generate_iv_fixtures import CARD_X_EXOG
@@ -85,9 +90,10 @@ INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
 X_EXOG_BY_SCENARIO = {
     "moderate_multicollinearity": ["x1", "x2"],
     "high_condition_number": ["x1", "x2"],
+    "scale_variance_mild": ["x1", "x2"],
 }
 
-# HACラグ: `IvOptions.hac_lags`未指定（自動計算）で、`engine::iv::two_sls::
+# HACラグ: `IVOptions.hac_lags`未指定（自動計算）で、`engine::iv::two_sls::
 # resolve_hac_lags`と`benchmark/iv/references/linearmodels_ref.py`の`_hac_auto_lag`が
 # 同じ式（`floor(4*(n/100)**(2/9))`）を使うため、明示指定しなくても一致する
 # （OLSの`HAC_MAXLAGS`のような固定値の受け渡しが不要）。
@@ -169,7 +175,7 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
     x_exog = X_EXOG_BY_SCENARIO.get(scenario, ["x1"])
     instruments = INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
     df = pl.read_csv(DATA_DIR / f"iv_{scenario}.csv")
-    options = IvOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type)
     res = IV(
         df,
         y="y",
@@ -189,7 +195,7 @@ def test_cluster_matches_linearmodels(fixtures):
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     df = with_cluster_groups(df, 10)
-    options = IvOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = IVOptions(cov_type="cluster", cluster_col="cluster_group")
     res = IV(
         df,
         y="y",
@@ -213,7 +219,7 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
-    options = IvOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = IVOptions(cov_type="cluster", cluster_col="cluster_group")
     res = IV(
         df,
         y="y",
@@ -237,7 +243,7 @@ def test_cluster_g2_matches_linearmodels(fixtures):
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_g2.csv")
     df = df.with_columns((pl.int_range(pl.len()) % 2).alias("cluster_group"))
-    options = IvOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = IVOptions(cov_type="cluster", cluster_col="cluster_group")
     res = IV(
         df,
         y="y",
@@ -261,7 +267,7 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
     フェーズ4）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
-    options = IvOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type)
     res = IV(
         df,
         y="y",
@@ -284,7 +290,7 @@ def test_card_matches_linearmodels(fixtures, cov_type):
     Issue #231フェーズ4）。
     """
     df = load_wooldridge_dataset("card")
-    options = IvOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type)
     res = IV(
         df,
         y="lwage",
@@ -307,7 +313,7 @@ def test_df1_matches_linearmodels(fixtures, cov_type):
     （`_check_result`のref Noneスキップ、`benchmark/iv/references/linearmodels_ref.py`参照）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_df1.csv")
-    options = IvOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type)
     res = IV(
         df,
         y="y",

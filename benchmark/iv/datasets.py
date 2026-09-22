@@ -7,7 +7,7 @@
 （`SCENARIOS`+`generate_*_dataset(scenario, ...)`関数）だが、IVはOLS/Logit/Probit
 と異なり「操作変数が内生変数と相関し（関連性）、かつ構造誤差とは無相関
 （除外制約）」という識別のための構造をDGP自体に組み込む必要があるため、
-シナリオ構成を新たに設計している（`docs/planning/specs/iv-api-design.md`5章参照）。
+シナリオ構成を新たに設計している（`docs/spec/iv-spec.md`4章参照）。
 
 構造方程式（線形IVの標準的なDGP、`linearmodels`のドキュメント例と同型）:
     x_endog = pi0 + Z @ pi + x_exog @ gamma + v   （第一段階）
@@ -65,6 +65,7 @@ SCENARIOS = [
     "high_condition_number",
     "perfect_multicollinearity",
     "scale_variance",
+    "scale_variance_mild",
 ]
 
 # 内生性の強さ: 構造誤差uと第一段階誤差vの相関（シナリオ間で共通の固定値）。
@@ -115,7 +116,7 @@ def generate_iv_dataset(
         df は列 y, x1..x{k_exog}, endog1..endog{k_endog}, z1..z{k_instruments} を
         持つpolars DataFrame。
         true_beta は `[beta0, *beta_exog, *beta_endog]`（構造式の係数、
-        `IvResults.param_names`と同じ並び順: 定数項→x_exog→x_endog）。
+        `IVResults.param_names`と同じ並び順: 定数項→x_exog→x_endog）。
         内生性のため、naive OLSはtrue_betaに一致しないが、2SLS/GMMは
         （操作変数が有効なシナリオでは）漸近的に一致するはず。
 
@@ -140,7 +141,7 @@ def generate_iv_dataset(
         raise ValueError(f"{scenario} requires k_exog >= 2")
     if scenario == "perfect_multicollinearity" and k_exog < 3:
         raise ValueError(f"{scenario} requires k_exog >= 3")
-    if scenario == "scale_variance" and k_exog < 2:
+    if scenario in ("scale_variance", "scale_variance_mild") and k_exog < 2:
         raise ValueError(f"{scenario} requires k_exog >= 2")
     if scenario in ("heteroskedastic", "autocorrelated") and k_endog != 1:
         # 下記の誤差生成ロジック（二変量正規分布の分岐）がk_endog=1専用のため。
@@ -236,6 +237,20 @@ def generate_iv_dataset(
         beta_exog = beta_exog.copy()
         beta_exog[0] /= SCALE_VARIANCE_X1_SCALE
         beta_exog[1] /= SCALE_VARIANCE_X2_SCALE
+
+    if scenario == "scale_variance_mild":
+        # scale_varianceより緩いスケール差（x1は10^2オーダー、x2は10^-1
+        # オーダー、スケール比1e3程度）。条件数は倍精度の限界より十分低く
+        # 成功パスになるため、faer等の数値計算ライブラリ依存部分の将来の
+        # 精度リグレッションを検知する成功パスケースとして使う
+        # （`benchmark/linear/datasets.py`のscale_variance_mildと同じ発想、
+        # test-coverage-candidates.md項目11）。
+        x_exog = x_exog.copy()
+        x_exog[:, 0] *= 1e2
+        x_exog[:, 1] *= 1e-1
+        beta_exog = beta_exog.copy()
+        beta_exog[0] /= 1e2
+        beta_exog[1] /= 1e-1
 
     y = beta0 + x_exog @ beta_exog + x_endog @ beta_endog + u
 

@@ -12,6 +12,8 @@ on:
       # benchmark/配下のフィクスチャ生成モジュールは pytest が import 時に読み込む
       # （定数・ヘルパーの単一定義元）。壊れると pytest も落ちるため CI をトリガーする。
       - "benchmark/**"
+      # testジョブが import 時間チェック（performance/check_import_time.py）を回す。
+      - "performance/**"
       - ".github/workflows/ci_python.yml"
   # pull_requestにはpathsフィルタを付けない（ci_engine.ymlと同じ理由、
   # 「必須ステータスチェック」参照）。
@@ -49,6 +51,15 @@ jobs:
 
       - name: maturin develop
         run: uv run --locked --group test maturin develop
+
+      # パッケージ健全性（Issue #278）: import 時間の回帰ゲート。直前の
+      # maturin develop でビルドしたデバッグ拡張をそのまま使う（追加ビルド無し・
+      # 実行数秒）。判定値は `import econometricsmodels` − `import polars` の差分で、
+      # polars 分（import 時間の約 98%）を相殺し自前ラッパー + `_lib` の dlopen/init
+      # だけを見る。デバッグビルドの差分は悲観側に出るため、閾値内ならリリースは
+      # さらに速いだけで安全側。詳細は docs/performance/package-health.md。
+      - name: import time check (package health)
+        run: uv run --locked --group test python -m performance.check_import_time
 
       - name: pytest
         run: uv run --locked --group test pytest tests

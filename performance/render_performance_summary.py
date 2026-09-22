@@ -203,9 +203,17 @@ def render(report: dict) -> str:
         lines += [f"> {w}" for w in warnings]
         lines.append("")
 
+    n_subtitle = "実行時間（秒、中央値） / ピークRSS（MB）"
+    engine_only_n = meta.get("n_sweep_engine_only") or []
+    if engine_only_n:
+        joined = "/".join(f"{n:,}" for n in engine_only_n)
+        n_subtitle += (
+            f"（n={joined} は大標本での engine の回帰検知用で "
+            f"cov_type={cov_types[0]} のみ。全 cov_type / 全ライブラリでは回さない）"
+        )
     lines += _render_axis_section(
         title=f"## n軸（k={meta['n_sweep_fixed_k']}固定）",
-        subtitle="実行時間（秒、中央値） / ピークRSS（MB）",
+        subtitle=n_subtitle,
         axis_key="n",
         axis_results=[r for r in results if r["axis"] == "n"],
         cov_types=cov_types,

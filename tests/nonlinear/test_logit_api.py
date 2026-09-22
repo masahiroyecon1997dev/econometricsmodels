@@ -24,6 +24,8 @@ Logit/Probit 共通定義。
 
 from __future__ import annotations
 
+import math
+
 import _binary_choice_checks as _checks
 import pytest
 from econometricsmodels import Logit, LogitOptions, LogitResults
@@ -94,16 +96,40 @@ def test_confidence_level_changes_interval_width(binary_dataset):
     )
 
 
+@pytest.mark.parametrize(
+    "cov_type", ["classical", "opg", "hc0", "hc1", "cluster"]
+)
 def test_raise_on_non_convergence_false_returns_result_without_raising(
-    binary_dataset,
+    binary_dataset, cov_type
 ):
     _checks.check_raise_on_non_convergence_false_returns_result_without_raising(
-        binary_dataset, Logit, LogitOptions
+        binary_dataset, Logit, LogitOptions, cov_type
     )
 
 
 def test_cov_type_label(binary_dataset):
     _checks.check_cov_type_label(binary_dataset, Logit, LogitOptions)
+
+
+def test_method_label(binary_dataset):
+    _checks.check_method_label(binary_dataset, Logit, LogitOptions)
+
+
+@pytest.mark.parametrize(
+    "method, expected_label",
+    [
+        ("NEWTON", "newton"),
+        ("Newton", "newton"),
+        ("BFGS", "bfgs"),
+        ("Bfgs", "bfgs"),
+        ("LBFGS", "lbfgs"),
+        ("Lbfgs", "lbfgs"),
+    ],
+)
+def test_method_is_case_insensitive(binary_dataset, method, expected_label):
+    _checks.check_method_is_case_insensitive(
+        binary_dataset, Logit, LogitOptions, method, expected_label
+    )
 
 
 @pytest.mark.parametrize(
@@ -141,6 +167,43 @@ def test_nonrobust_is_alias_for_classical(binary_dataset, cov_type):
 def test_predict_returns_row_oriented_probabilities(binary_dataset):
     _checks.check_predict_returns_row_oriented_probabilities(
         binary_dataset, Logit
+    )
+
+
+def test_predict_new_data_returns_row_oriented_probabilities(binary_dataset):
+    _checks.check_predict_new_data_returns_row_oriented_probabilities(
+        binary_dataset, Logit
+    )
+
+
+def test_predict_with_include_intercept_false_and_x_named_const():
+    _checks.check_predict_with_include_intercept_false_and_x_named_const(
+        Logit, LogitOptions, link=lambda z: 1.0 / (1.0 + math.exp(-z))
+    )
+
+
+# ── augment() ────────────────────────────────────────────────────
+
+
+def test_augment_none_returns_training_data_with_probability_column(
+    binary_dataset,
+):
+    _checks.check_augment_none_returns_training_data_with_probability_column(
+        binary_dataset, Logit
+    )
+
+
+def test_augment_new_data_returns_new_data_with_probability_column(
+    binary_dataset,
+):
+    _checks.check_augment_new_data_returns_new_data_with_probability_column(
+        binary_dataset, Logit
+    )
+
+
+def test_augment_without_intercept_matches_predict():
+    _checks.check_augment_without_intercept_matches_predict(
+        Logit, LogitOptions
     )
 
 

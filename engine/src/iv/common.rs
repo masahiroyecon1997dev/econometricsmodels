@@ -8,7 +8,7 @@
 //!
 //! `LeastSquaresError`（`engine::linear::common`）・`MleError`（`engine::nonlinear::common`）の
 //! 前例に倣い、2SLS/GMMで個別に`TwoSlsError`/`GmmError`を作らず`IvError`を共有する
-//! （`docs/planning/specs/iv-api-design.md`4章、Issue #155）。
+//! （`docs/spec/iv-spec.md`3.8節）。
 //!
 //! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
 //! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は`engine::error::
@@ -24,7 +24,7 @@
 //! `OlsInput`/`LogitInput`と同じ役割（`engine_pybind`が列ごとに抽出した`Vec<f64>`から
 //! `faer::Mat`を組み立てる）だが、IVは`y`・`x_exog`・`x_endog`・`instruments`という
 //! 4つのロールを持つため単一の`x`ではなく3つの設計行列を個別に保持する
-//! （`docs/planning/specs/iv-api-design.md`1章、Issue #156）。
+//! （`docs/spec/iv-spec.md`1章）。
 //!
 //! **配置場所の判断**: 既存の`OlsInput`/`WlsEstimator`の前例は、`OlsInput`をols.rsに
 //! 定義したまま`WlsEstimator`（wls.rs）が`super::ols::OlsInput`をそのままimportして使う
@@ -55,8 +55,8 @@ pub enum IvError {
     /// 操作変数の数が内生変数の数に満たない（識別のための順序条件
     /// `len(instruments) >= len(x_endog)`を満たさない）。
     ///
-    /// `instruments`は除外操作変数のみを指す（`docs/planning/specs/iv-api-design.md`
-    /// 1.1.1節）。順序条件は必要条件に過ぎず、階数条件（rank condition）はこの時点の
+    /// `instruments`は除外操作変数のみを指す（`docs/spec/iv-spec.md`
+    /// 1.1節）。順序条件は必要条件に過ぎず、階数条件（rank condition）はこの時点の
     /// 列数チェックでは検出できない（実際の推定計算時に特異行列として顕在化する）。
     #[error(
         "insufficient instruments for identification: {n_instruments} instrument(s) provided \
@@ -92,16 +92,16 @@ pub enum IvError {
     /// `cov_type=Hac`の`hac_lags`が負、または観測数`n`以上。
     ///
     /// `LeastSquaresError::InvalidHacLags`と同じ検証だが、2SLSのサンドイッチ型分散計算は
-    /// OLS/nonlinearどちらの既存計算にも寄せない独立実装のため（`docs/planning/specs/
-    /// iv-api-design.md`4章）、`CommonError`にもなく、`LeastSquaresError`をそのまま
-    /// 再利用もしない。Issue #166で追加（`engine/src/iv/two_sls.rs`のcov_type対応）。
+    /// OLS/nonlinearどちらの既存計算にも寄せない独立実装のため（`docs/spec/
+    /// iv-spec.md`3.1節）、`CommonError`にもなく、`LeastSquaresError`をそのまま
+    /// 再利用もしない。2SLSの`cov_type`対応実装時に追加した（`engine/src/iv/two_sls.rs`参照）。
     #[error("hac_lags must be in the range [0, n): got {hac_lags}, n={n}")]
     InvalidHacLags { hac_lags: i64, n: usize },
 
     /// `gmm_iterations`が1未満。
     ///
-    /// Issue #165時点では1（1-step GMM）・2（2-step efficient GMM）の2値のみを許容していたが、
-    /// Issue #229で3以上（iterated GMM）・収束条件（`gmm_convergence`）ベースの反復に一般化した
+    /// 当初は1（1-step GMM）・2（2-step efficient GMM）の2値のみを許容していたが、
+    /// 後に3以上（iterated GMM）・収束条件（`gmm_convergence`）ベースの反復に一般化した
     /// （`gmm_convergence`指定時は`gmm_iterations`が最大反復回数＝安全弁として働く、
     /// `gmm.rs`の`fit()`参照）。いずれのモードでも1以上であることは共通の前提のため、
     /// この検証自体は残す。
@@ -110,12 +110,12 @@ pub enum IvError {
 
     /// `gmm_convergence`（`Some`のとき）が0以下。
     ///
-    /// 収束判定の許容誤差として意味を持たないため（Issue #229）。
+    /// 収束判定の許容誤差として意味を持たないため。
     #[error("gmm_convergence must be a positive number, got {gmm_convergence}")]
     InvalidGmmConvergence { gmm_convergence: f64 },
 
     /// `raise_on_non_convergence=true`（既定）かつ`gmm_convergence`指定時、`gmm_iterations`回
-    /// （収束モードでの上限反復回数）以内に係数が収束しなかった（Issue #229）。
+    /// （収束モードでの上限反復回数）以内に係数が収束しなかった。
     ///
     /// `nonlinear::common::MleError::NonConvergence`と同型のメッセージ・意味論
     /// （`raise_on_non_convergence=false`にすると`converged=false`のまま結果を返す）。
@@ -130,7 +130,7 @@ pub enum IvError {
     )]
     GmmNonConvergence { n_iter: usize },
 
-    /// Wu-Hausman内生性検定（回帰ベース、Issue #164、`iv-api-design.md`6.6節）のための
+    /// Wu-Hausman内生性検定（回帰ベース、`iv-spec.md`3.6節）のための
     /// 拡張回帰（構造式に第一段階残差を追加した`y ~ x_exog + x_endog + 第一段階残差`）が
     /// `OlsEstimator::fit`または`OlsEstimator::wald_test_last_columns`で失敗した。
     ///
@@ -157,7 +157,7 @@ pub enum IvError {
 ///
 /// `instruments`は除外操作変数のみを保持する（`x_exog`との重複が無いことは
 /// `engine_pybind`側の`validate_no_duplicate_roles`で検証済みという前提で、ここでは
-/// 検証しない、`docs/planning/specs/iv-api-design.md`1.1.1節）。第一段階で使う
+/// 検証しない、`docs/spec/iv-spec.md`1.1節）。第一段階で使う
 /// 「全操作変数」（`x_exog ++ instruments`のunion）は、この構造体では持たず、
 /// 実際に必要になる2SLS/GMM推定器側で`x_exog()`/`instruments()`から組み立てる
 /// （`IvInput`自体は生の入力を保持するだけの薄い構造体に留める）。
@@ -356,7 +356,7 @@ impl IvInput {
 /// `IvInput`は`faer::Mat`で設計行列を保持するが、`OlsInput::from_columns`は列ごとの
 /// `Vec<f64>`を受け取るAPI（`OlsInput`に`Mat`を直接渡すコンストラクタは無い）。2SLS
 /// （`two_sls.rs`）が第一段階・第二段階の設計行列を`OlsInput`経由で組み立てる際に
-/// 必要になる変換で、GMM（`gmm.rs`、Issue #160）でも同じ変換が必要になる見込みのため
+/// 必要になる変換で、GMM（`gmm.rs`）でも同じ変換が必要になる見込みのため
 /// ここに置く。
 pub(crate) fn mat_column_to_vec(m: &Mat<f64>, col: usize) -> Vec<f64> {
     (0..m.nrows()).map(|i| *m.get(i, col)).collect()
@@ -404,7 +404,7 @@ pub(crate) fn without_baked_in_intercept<'a>(
 pub type FirstStageResult = (Vec<(String, OlsEstimator)>, Vec<(String, f64)>);
 
 /// 内生変数ごとの第一段階回帰（`x_endog[j] ~ x_exog + instruments`）と弱操作変数診断
-/// （部分F統計量、`iv-api-design.md`6.4節）を計算する。
+/// （部分F統計量、`iv-spec.md`3.4節）を計算する。
 ///
 /// `TwoSlsEstimator::fit`（`two_sls.rs`、第二段階の予測値`x̂_endog`を得るために内部で
 /// 使う）・`engine_pybind`の`fit`（`method="gmm"`でも同じ診断情報を独立に提供するため、
@@ -433,7 +433,7 @@ pub fn compute_first_stage(
     let (x_exog_bare, x_exog_names_bare) =
         without_baked_in_intercept(&x_exog_columns, input.x_exog_names(), input.has_intercept());
 
-    // 全操作変数（`x_exog ++ instruments`のunion、`iv-api-design.md`1.1.1節）。
+    // 全操作変数（`x_exog ++ instruments`のunion、`iv-spec.md`1.1節）。
     let mut instrument_columns: Vec<Vec<f64>> = x_exog_bare.to_vec();
     instrument_columns.extend(mat_to_columns(input.instruments()));
     let mut instrument_names: Vec<String> = x_exog_names_bare.to_vec();
@@ -484,14 +484,14 @@ pub fn compute_first_stage(
     Ok((first_stage, weak_instrument_f_statistics))
 }
 
-/// 弱操作変数診断の部分F統計量（Issue #163、`iv-api-design.md`6.4節）。
+/// 弱操作変数診断の部分F統計量（`iv-spec.md`3.4節）。
 ///
 /// `x_exog`を直交化した後の操作変数（`instruments`）係数のみを検定する、常に等分散前提の
 /// 古典的ネストF検定: `F = [(SSR_r - SSR_u)/q] / [SSR_u/(n-k_u)]`。`SSR_u`は制限なしモデル
 /// （`x_endog[j] ~ x_exog + instruments`、`unrestricted`＝`compute_first_stage`が構築した
 /// `OlsEstimator`そのもの）の残差平方和、`SSR_r`は制限モデル（`x_endog[j] ~ x_exog`、
 /// `instruments`を除く）の残差平方和、`q`は除外操作変数の数（`instruments`のみ、`x_exog`は
-/// 含まない、`iv-api-design.md`1.1.1節の定義と一致）。
+/// 含まない、`iv-spec.md`1.1節の定義と一致）。
 ///
 /// **`cov_type`には依存しない**（呼び出し元が指定した`cov_type`によらず常に等分散前提の
 /// F検定を使う）。Stock-Yogoの臨界値表自体が等分散前提の古典的F統計量向けにキャリブレー
@@ -701,7 +701,7 @@ mod tests {
     #[test]
     fn from_columns_allows_empty_x_exog() {
         // `x_exog`は空リストを許容する（内生変数のみのモデルも成立するため、
-        // `docs/planning/specs/iv-api-design.md`1.1節）。
+        // `docs/spec/iv-spec.md`1.1節）。
         let (y, _, x_endog, instruments) = sample_columns();
         let input = IvInput::from_columns(
             &y,

@@ -5,13 +5,26 @@ name: Benchmark (performance)
 # メモリ比較）を統一環境で実行し、結果をjob summaryに出力する。手法ごとに
 # 独立ジョブ（matrix。ジョブ単位で個別リラン可）。
 #
-# トリガーはタグpush（v*）+ workflow_dispatchのみ（ユーザー確認済み）。n=1,000,000込みの
-# フルスイープは数分かかり重いため、cd_release.ymlと同じくPR/push毎には回さない。
-# ソロ開発でコード変更頻度が低いこと、リリース単位で性能を記録できれば十分という判断。
+# トリガー:
+#  - タグpush（v*）: リリースごとに性能を記録する（従来どおり）。
+#  - main を base とするPR（＝dev⇒mainのリリースPR）: リリース作業時に、
+#    #291クラスの回帰（大標本で推定量が例外を投げる等）をタグを切る前に検知する。
+#    Tobitは compare_tobit.py の n_sweep_engine_only=(200_000, 1_000_000) を回し、
+#    _run_isolated が check=True のため .fit() が例外を投げるとジョブが失敗する。
+#    実効的なゲートにするには main のブランチ保護で
+#    「Benchmark (performance) / benchmark gate」1個だけを required status check に
+#    設定すること（下記 benchmark-gate 集約ジョブ。matrix に手法を足しても登録の
+#    追加は不要）。
+#  - workflow_dispatch: 任意実行。
+#  通常のPR/push毎には回さない（フルスイープは数分かかり重い。ソロ開発でコード
+#  変更頻度が低く、リリース単位で足りるという判断）。
 on:
   push:
     tags:
       - "v*"
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 env:
@@ -28,7 +41,7 @@ jobs:
       # 1手法が失敗しても他手法の計測は続行する（手法ごとに独立した記録のため）。
       fail-fast: false
       matrix:
-        method: [ols, wls, logit, probit, iv, tobit]
+        method: [ols, wls, logit, probit, iv, tobit, fe, re]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -66,3 +79,25 @@ jobs:
         with:
           name: ${{ matrix.method }}-performance-results
           path: results.json
+
+  # 集約ジョブ。matrix の全 leg が success のときだけ success になる。
+  # main のブランチ保護では「このジョブ1個」を required status check にすればよく、
+  # 手法を benchmark の matrix に足しても登録の追加は不要。
+  # `if: always()` が無いと benchmark が1つでも失敗した時にこのジョブが skip され、
+  # GitHub は skip された required check を「合格」扱いにするためゲートが機能しない。
+  # always() で必ず走らせ、needs.benchmark.result（matrix の集約結果。全 leg 成功時
+  # のみ 'success'）を明示的に判定して exit 1 する。
+  benchmark-gate:
+    name: benchmark gate
+    needs: [benchmark]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all benchmark matrix jobs succeeded
+        run: |
+          result='${{ needs.benchmark.result }}'
+          echo "benchmark matrix aggregate result: $result"
+          if [ "$result" != "success" ]; then
+            echo "::error::one or more compare_<method>.py jobs did not succeed ($result)"
+            exit 1
+          fi

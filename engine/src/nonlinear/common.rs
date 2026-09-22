@@ -8,8 +8,8 @@
 //! 型を分ける必要はない。OLSの`CovType::Hac`/`CovType::Cluster`がフィールド付きバリアントとして
 //! 共存しているのと同じ考え方）。
 //!
-//! バリアント一覧・Python例外との対応表は`docs/planning/specs/nonlinear-implementation-notes.md`
-//! 「エラー型: nonlinear系統で共有（MleError）」を参照。
+//! バリアント一覧・Python例外との対応表は`docs/spec/nonlinear-common.md`2章
+//! 「エラー型（`MleError`、共有）」を参照。
 //!
 //! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
 //! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は、linear系統の
@@ -18,16 +18,18 @@
 
 use argmin::core::TerminationStatus;
 use argmin::core::{
-    CostFunction, Error as OptimizerError, Executor, Gradient, Hessian, IterState, KV, Problem,
-    Solver, State, TerminationReason,
+    CostFunction, Error as OptimizerError, Executor, Gradient, Hessian, IterState, KV, LineSearch,
+    Problem, Solver, State, TerminationReason,
 };
 use argmin::solver::linesearch::MoreThuenteLineSearch;
-use argmin::solver::quasinewton::{BFGS, LBFGS};
 use faer::prelude::{Solve, SolveLstsq};
 use faer::{Mat, Side};
 use statrs::distribution::{ChiSquared, Continuous, ContinuousCDF, Normal};
+use std::cell::Cell;
+use std::collections::VecDeque;
 use thiserror::Error;
 
+use crate::design_matrix::design_matrix_element;
 use crate::error::CommonError;
 use crate::inference;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
@@ -181,13 +183,43 @@ pub enum MleError {
     /// （`fit()`冒頭のバリデーション）、部分的な準完全分離なら`NonConvergence`
     /// （`max_iter`到達）として捕捉される。加えて#286以降のTobitは`standardize_columns`
     /// ではなく`tobit.rs`局所の`TobitScaling`で標準化しており、`y∈{0,1}`で較正した
-    /// この閾値はTobitのパラメータ空間には適用できない（Issue #288）。
+    /// この閾値はTobitのパラメータ空間には適用できない。
     #[error(
         "convergence could not be verified after {n_iter} iterations: the gradient norm \
          dropped below tol, but the (standardized) parameter norm is implausibly large. This \
          pattern is typical of (quasi-)complete separation, where no finite MLE exists"
     )]
     SeparationSuspected { n_iter: usize },
+
+    /// `bfgs`/`lbfgs`のline search（`MoreThuenteLineSearch`）が、収束判定を一度も満たさない
+    /// まま目的関数・勾配の評価回数の総枠（[`BudgetedProblem`]）を使い切った。
+    ///
+    /// **背景**: `bfgs`（自前実装`FaerBfgs`）・`lbfgs`（自前実装`FaerLbfgs`。
+    /// 導入当初はargmin組み込み`LBFGS`だった）はいずれも、line searchを走らせる内側
+    /// `Executor`に（当時は）反復回数の上限を設定しておらず（argminの既定値
+    /// `u64::MAX`）、`MoreThuenteLineSearch`自体もステップ幅の上限（`stpmax`）を設定して
+    /// いない。探索方向・勾配の組み合わせが退化し、line search内部の収束判定
+    /// （`info`フラグ1〜6のいずれか）もNaN/Infガードも一度も発火しない状況に嵌ると、
+    /// この内側ループは理論上終了しない（devビルドで80分超のCPU時間を消費し続ける
+    /// ケースを実測で確認済み）。[`BudgetedProblem`]による評価回数の総枠は、この
+    /// 退化状況を有限時間で検出しエラーに変換するための安全弁。`lbfgs`が当時argmin
+    /// 組み込みだった間は、フォーク不可能な固定バージョン依存を変更せずに保護する
+    /// 手段でもあった（`FaerLbfgs`に置き換えた後も、[`LINE_SEARCH_MAX_ITERS`]
+    /// による個別のline search反復上限とは別の、複数のline search呼び出しを横断する
+    /// 粗い安全網として引き続き適用する）。
+    ///
+    /// メッセージは「objective/gradient」の評価回数と表現しているが、実際には
+    /// `newton`のHessian評価（最適化ループ内で毎反復呼ばれる分。収束後1回だけの最終
+    /// Hessian評価は[`BudgetedProblem::into_inner`]でバジェット対象から除外している）も
+    /// 同じ総枠を共有する。`newton`は`MAX_LM_ATTEMPTS`で頭打ちのLMラダーによりこの
+    /// バリアントが実質発火しないため、メッセージは主な発火源である`bfgs`/`lbfgs`の
+    /// line search（cost/gradient評価）に絞って表現している。
+    #[error(
+        "the optimizer evaluated the objective/gradient {budget} times without satisfying its \
+         convergence criteria (this typically indicates the line search failed to converge for \
+         this input); try a different method, or adjust max_iter/tol"
+    )]
+    EvaluationBudgetExceeded { budget: u64 },
 }
 
 /// [`SeparationSuspected`](MleError::SeparationSuspected)を検出する閾値。標準化
@@ -203,14 +235,14 @@ pub enum MleError {
 ///
 /// **Logit/Probitの`y∈{0,1}`で較正した値**であり、`run_solver`に
 /// [`SeparationNormCheck::Enabled`]を渡したとき（Logit/Probit）のみ使われる。Tobitでは
-/// 適用しない（Issue #288、[`MleError::SeparationSuspected`]参照）。
+/// 適用しない（[`MleError::SeparationSuspected`]参照）。
 const SEPARATION_PARAM_NORM_THRESHOLD: f64 = 100.0;
 
 /// `run_solver`の(準)完全分離事後チェック（標準化パラメータノルムが
 /// [`SEPARATION_PARAM_NORM_THRESHOLD`]を超えたら収束判定を取り消す、
 /// [`MleError::SeparationSuspected`]参照）を有効にするか。隣接する`raise_on_non_convergence`
 /// と同型の生`bool`を並べると取り違えても型で気づけないため、bool引数ではなく専用enumで
-/// 呼び出し側を自己記述的にする（rust-reviewer指摘、Issue #288）。
+/// 呼び出し側を自己記述的にする（rust-reviewer指摘）。
 ///
 /// - [`Enabled`](SeparationNormCheck::Enabled): Logit/Probit。`y∈{0,1}`で係数が±∞へ
 ///   発散するため、この検出が意味を持つ。
@@ -286,7 +318,7 @@ pub fn validate_confidence_level(confidence_level: f64) -> Result<(), MleError> 
 ///
 /// Tobitは`logσ`が常に最適化パラメータに含まれるため、対応する「パラメータ数0」の
 /// ケースが生じない（総パラメータ数は常に`k+1>=1`）。そのためTobitの`fit()`は
-/// この関数を呼ばない（Issue #212の結論、モジュール冒頭のdocコメント参照）。
+/// この関数を呼ばない（モジュール冒頭のdocコメント参照）。
 pub fn validate_has_regressors(n: usize, k: usize) -> Result<(), MleError> {
     if k == 0 {
         return Err(CommonError::NoRegressors { n }.into());
@@ -296,7 +328,7 @@ pub fn validate_has_regressors(n: usize, k: usize) -> Result<(), MleError> {
 
 /// 観測数`n`がパラメータ数`k`以下の場合にエラーを返す。`k`の意味は呼び出し側に委ねる
 /// （Logit/Probitでは`input.k()`＝`β`の数（定数項含む）、Tobitでは`k+1`＝`β`の数+`logσ`、
-/// つまり総最適化パラメータ数を渡す。Issue #212の結論、モジュール冒頭のdocコメント参照）。
+/// つまり総最適化パラメータ数を渡す。モジュール冒頭のdocコメント参照）。
 pub fn validate_sufficient_observations(n: usize, k: usize) -> Result<(), MleError> {
     if n <= k {
         return Err(CommonError::InsufficientObservations { n, k }.into());
@@ -308,7 +340,7 @@ pub fn validate_sufficient_observations(n: usize, k: usize) -> Result<(), MleErr
 /// (1) 2以上であること（`validate_cluster_groups`）、(2) 全体Wald検定の傾き係数の数
 /// `n_slopes`（= `k - k_constant`）より多いこと（`validate_cluster_count_covers_slopes`、
 /// `rank(Ŝ) ≤ g - 1`のため`g <= n_slopes`だと`n_slopes×n_slopes`部分行列が構造的に
-/// 特異、Issue #289）を検証する（`Cluster`以外は無検証）。`n`と型が同じ`usize`の
+/// 特異）を検証する（`Cluster`以外は無検証）。`n`と型が同じ`usize`の
 /// `n_slopes`を並べているが、`n`は`validate_cluster_groups`内の`debug_assert_eq!
 /// (groups.len(), n)`で、`n_slopes`は`g <= n_slopes`の比較結果で、取り違えれば
 /// いずれもテスト/デバッグビルドで早期に露見する（`validate_fit_preconditions`が
@@ -333,11 +365,11 @@ pub fn validate_cluster_cov_type(
 /// クラスター数`g <= 傾き係数の数`）。元はLogit/Probitそれぞれの`fit()`に一字一句
 /// 同一のブロックとして重複していたため、こちらへ集約した。
 ///
-/// Tobitの`fit()`（`confidence_level`/`cov_type`をまだ受け取らない、Issue #215時点）は
+/// Tobitの`fit()`（`confidence_level`/`cov_type`をまだ受け取らない時点）は
 /// この関数をそのまま呼べない（引数を揃えられない）ため、上記の各検証を個別の小関数
 /// （[`validate_max_iter`]等）に分割し、Tobitはそのうち必要な部分（`max_iter`/`tol`/
 /// [`validate_sufficient_observations`]/[`validate_cluster_cov_type`]）だけを個別に
-/// 呼ぶ（Issue #212の結論）。この関数自体はLogit/Probit向けに元の挙動をそのまま保つ
+/// 呼ぶ。この関数自体はLogit/Probit向けに元の挙動をそのまま保つ
 /// ラッパーとして残す。
 ///
 /// 引数は検証順序に揃えている。`n`（観測数）は`y`から自明に求まる（`y.nrows()`）ため
@@ -392,7 +424,7 @@ pub fn log_likelihood_null(y: &Mat<f64>) -> f64 {
         })
 }
 
-/// 対数尤度から導かれる適合度統計量一式（`docs/planning/specs/nonlinear-api-design.md`
+/// 対数尤度から導かれる適合度統計量一式（`docs/spec/nonlinear-common.md`
 /// 5章参照）。`goodness_of_fit`の戻り値。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GoodnessOfFit {
@@ -470,7 +502,7 @@ pub enum Method {
 /// `"classical"`/`"nonrobust"`のエイリアス化を含む）は`engine_pybind`側の責務
 /// （OLSの`CovType`と同じ設計。`.claude/rules/rust-style.md`参照）。
 ///
-/// Logit/Probit/Tobitで共通のバリアント（`nonlinear-api-design.md`4章）のため
+/// Logit/Probit/Tobitで共通のバリアント（`docs/spec/nonlinear-common.md`3章）のため
 /// `nonlinear/common.rs`に定義する（`Method`と同じ理由）。
 ///
 /// `Cluster`のみ、他のバリアントと異なり追加データ（グループキー）を持つため
@@ -487,7 +519,7 @@ pub enum CovType {
     /// サンドイッチ型+小標本補正（`"hc1"`）: `hc0`の`Σ`に`n/(n-k)`を乗じる
     Hc1,
     /// クラスターロバスト（`"cluster"`）: `Σ = correction * H⁻¹(Σ_g S_gS_g')H⁻¹`
-    /// （`docs/planning/specs/nonlinear-implementation-notes.md`「標準誤差の技術仕様」参照）。
+    /// （`docs/spec/nonlinear-common.md`3章参照）。
     Cluster {
         /// クラスターのグループキー。モデルの入力データの行と対応する長さnの配列。
         /// `None`の場合、モデルの`fit()`は`CommonError::MissingClusterColumn`を返す。
@@ -495,11 +527,43 @@ pub enum CovType {
     },
 }
 
+/// `LogitEstimator::fit`/`ProbitEstimator::fit`/`TobitEstimator::fit`が共通で受け取る
+/// 最適化・推論オプション（`method`/`max_iter`/`tol`/`raise_on_non_convergence`/
+/// `cov_type`/`confidence_level`）をまとめた構造体。
+///
+/// 元は3つの`fit()`がこの6引数を個別の位置引数として独立に持っており、シグネチャが
+/// 完全に重複していたため集約した。`engine_pybind`側の`LogitOptions`/
+/// `ProbitOptions`/`TobitOptions`（pyclass、Python公開APIのフラットなkwargsコンストラクタ
+/// が前提）とは異なるレイヤーの問題で、こちらは`engine`内部の純粋Rust関数のシグネチャ
+/// のため、フィールドをまとめても呼び出し側（Python）への影響はない。フィールドは
+/// `fit()`冒頭で個別の変数へ分解して使う（本体ロジックの変更を避けるため）。
+///
+/// バリデーション（`confidence_level`の範囲・`max_iter`/`tol`の符号等）はこの構造体
+/// 自体では行わず、従来通り`validate_fit_preconditions`が担う（このフィールド群は
+/// 単なる引数バンドルであり、`LogitInput`等のように構築時点で不変条件を保証する
+/// 設計ではない）。
+#[derive(Debug, Clone)]
+pub struct MleFitOptions {
+    /// 数値最適化ソルバーの種類。
+    pub method: Method,
+    /// 最大反復回数。
+    pub max_iter: i64,
+    /// 勾配ノルムの収束判定閾値。
+    pub tol: f64,
+    /// `true`（既定）なら`max_iter`回で未収束のとき`MleError::NonConvergence`を返す。
+    /// `false`なら打ち切り点の結果をそのまま返す（`converged=false`）。
+    pub raise_on_non_convergence: bool,
+    /// 標準誤差（係数分散共分散行列）の種別。
+    pub cov_type: CovType,
+    /// 信頼区間の信頼水準、`(0, 1)`の範囲。
+    pub confidence_level: f64,
+}
+
 /// 限界効果（`marginal_effects`）をどの代表点で評価するか。文字列パース（Python文字列 →
 /// この型への変換）は`engine_pybind`側の責務（`Method`/`CovType`と同じ設計。
 /// `.claude/rules/rust-style.md`参照）。
 ///
-/// Logit/Probit/Tobitで共通の概念（`nonlinear-api-design.md`6章）のため`nonlinear/
+/// Logit/Probit/Tobitで共通の概念（`docs/spec/nonlinear-common.md`6章）のため`nonlinear/
 /// common.rs`に定義する（`Method`/`CovType`と同じ理由）。`w=∂p/∂z`相当のリンク関数の
 /// 微分（Logitなら`p(1-p)`、Probitなら`φ(z)`）の計算式のみモデルごとの実装
 /// （`logit.rs`等の`overall_w_and_s`/`at_point_w_and_s`）に置き、`w`・その勾配`s`から
@@ -553,7 +617,7 @@ pub fn column_medians(x: &Mat<f64>) -> Vec<f64> {
 }
 
 /// `marginal_effects`の結果。`coef_table`と同じ行指向（`dydx`/`std_err`/`z`/`p_value`/
-/// `conf_low`/`conf_high`、`nonlinear-api-design.md`6章）。定数項（切片）は行から除外する
+/// `conf_low`/`conf_high`、`docs/spec/nonlinear-common.md`6章）。定数項（切片）は行から除外する
 /// （切片の限界効果は経済学的に意味を持たない、statsmodelsの`get_margeff()`と同じ扱い）。
 /// Logit/Probit/Tobitいずれでも同じ形の結果になるため`common.rs`に置く（元はLogitの
 /// `MarginalEffects`、`common.rs`へ移設）。
@@ -580,9 +644,9 @@ pub struct MarginalEffects {
 impl MarginalEffects {
     /// クレート内の他モジュールから`MarginalEffects`を組み立てるためのコンストラクタ。
     /// フィールドはprivateのため（`.claude/rules/rust-style.md`「推定量構造体の設計」）、
-    /// `marginal_effects_from_w_s`を経由しないモデル（Tobit。Issue #211の結論により
+    /// `marginal_effects_from_w_s`を経由しないモデル（Tobit。
     /// `w`/`s`自体の計算式は独自実装だが、出力構造体の形は`coef_table`と同じ行指向で
-    /// Logit/Probitと共通、`nonlinear-api-design.md`6章）が、独自に計算したデルタ法の
+    /// Logit/Probitと共通、`docs/spec/nonlinear-common.md`6章）が、独自に計算したデルタ法の
     /// 結果からこの構造体を構築するために必要。
     pub(crate) fn from_parts(
         param_names: Vec<String>,
@@ -676,8 +740,8 @@ impl MarginalEffects {
 /// そのヤコビアン`jacobian[j][m]=∂dydx_j/∂θₘ=θⱼ*s_m + [j==m]*w`を計算する。
 ///
 /// `at="overall"`（AME）・`"mean"`・`"median"`のいずれも`g_j(θ)=w(θ)*θⱼ`という同じ形に
-/// 帰着する（Logitなら`w=p(1-p)`、Probitなら`w=φ(z)`。`docs/planning/specs/
-/// nonlinear-implementation-notes.md`「限界効果」参照）ため、`w`・`s`の計算方法
+/// 帰着する（Logitなら`w=p(1-p)`、Probitなら`w=φ(z)`。`docs/spec/nonlinear-common.md`
+/// 6章「限界効果の共通骨格」参照）ため、`w`・`s`の計算方法
 /// （`at`・リンク関数ごとに異なる）とこの式（それらに依らず共通）を分離できる。
 /// 元はLogitの`dydx_and_jacobian`（`common.rs`へ移設、Probitでも同型の
 /// 式であることを確認済み）。`pub`にしているのは`marginal_effects_from_w_s`からの
@@ -837,6 +901,52 @@ pub fn predict_from_link(x: &Mat<f64>, params: &[f64], link: impl Fn(f64) -> f64
         .collect()
 }
 
+/// 新規データ（out-of-sample、`new_x_columns`）に対する予測値`p_i = link(x_i'θ)`を
+/// 計算する（`predict_from_link`のout-of-sample版、Logit/Probit共有）。
+/// `engine::linear::ols::predict_new_data`と同型で、`link`関数（logistic/正規分布CDF）を
+/// 差し替えられるようにしたもの。
+///
+/// `new_x_columns`は、fit時に`x`で渡した列（`param_names`から`has_intercept`なら
+/// `"const"`を除いたもの）と同じ本数・同じ順序である必要がある。`has_intercept`が
+/// `true`の場合、定数項の列はここで自動的に先頭に付加するため`new_x_columns`に
+/// 含めない（`LogitInput::from_columns`/`ProbitInput::from_columns`の切片列自動追加と
+/// 一致させるため、`crate::design_matrix::design_matrix_element`を共有する）。
+///
+/// # パニックについて
+/// `new_x_columns.len()`が`params.len() - usize::from(has_intercept)`と一致しない場合は
+/// `debug_assert_eq!`でパニックする。呼び出し側（`engine_pybind`）が`param_names`に基づいて
+/// 必要な列だけを渡す実装契約であり、実データに起因する`ValidationError`とは性質が異なる
+/// ため区別している（`engine::linear::ols::predict_new_data`と同じパターン）。
+pub fn predict_new_data(
+    params: &[f64],
+    has_intercept: bool,
+    new_x_columns: &[Vec<f64>],
+    link: impl Fn(f64) -> f64,
+) -> Vec<f64> {
+    let k = params.len();
+    let expected = k - usize::from(has_intercept);
+    debug_assert_eq!(
+        new_x_columns.len(),
+        expected,
+        "new_x_columns length must match the number of x columns used at fit time"
+    );
+
+    // `x`は空リストにできない（engine_pybind側でValidationErrorとして弾く）ため、
+    // fit時にx列が1本もないケース（has_intercept=falseかつexpected=0）は到達しない。
+    // したがって`new_x_columns`は常に少なくとも1列持ち、`.first()`でnを安全に取得できる
+    // （`engine::linear::ols::predict_new_data`と同じ理由）。
+    let n = new_x_columns.first().map_or(0, |col| col.len());
+
+    (0..n)
+        .map(|i| {
+            let z: f64 = (0..k)
+                .map(|j| design_matrix_element(has_intercept, new_x_columns, i, j) * params[j])
+                .sum();
+            link(z)
+        })
+        .collect()
+}
+
 /// `φ(u)`・`Φ(u)`を評価する前に`u`をこの絶対値以下にクランプする閾値。`u`がこれより
 /// 極端になると`λ=φ(u)/Φ(u)`（逆ミルズ比、一般化残差）が`0.0/0.0`のNaNになりうる
 /// （実測では`|u|≳39`から発生。本閾値`≈8.126`はそれよりずっと手前で安全に倒す）。
@@ -871,12 +981,167 @@ pub struct SolverOutput {
     /// 等）はこの符号（対数尤度のHessian）を前提とする。モデルの`Hessian`トレイト実装
     /// 自体は`CostFunction`/`Gradient`と同じ符号（コスト関数＝負の対数尤度のHessian）を
     /// 返す契約になっており、ここに格納する値は`run_solver`内部で1回符号反転したもの
-    /// （`docs/planning/specs/nonlinear-implementation-notes.md`「engine内のtrait設計」参照）。
+    /// （`docs/spec/nonlinear-common.md`1.2節「Hessianトレイトの符号規約」参照）。
     pub hessian: Vec<Vec<f64>>,
     /// 収束したかどうか。
     pub converged: bool,
     /// 実際の反復回数。
     pub n_iter: usize,
+}
+
+/// [`run_solver`]が`problem`に許す目的関数・勾配・Hessian評価の総回数を、外側の
+/// `max_iter`（1回のfit呼び出し全体を通した反復上限）に対してこの倍率でスケールする
+/// （[`BudgetedProblem`]参照）。
+///
+/// **値の根拠**: `newton`は1反復あたり評価回数がO(1)（`cost`/`gradient`各1回＋
+/// `regularized_newton_step`のLM ラダー、`MAX_LM_ATTEMPTS`で頭打ち）のため、この倍率が
+/// どれだけ大きくてもまず消費し切らない。`bfgs`/`lbfgs`は1反復あたりのline search評価
+/// 回数が問題依存で変動するが、正常に収束するケースでは数回〜数十回程度（実測:
+/// `docs/performance/logit.md`でn=1,000,000・classicalのbfgsが6〜7反復、lbfgsが17反復で
+/// 収束）。`2000`は、極端に打ち切りが強い・条件数が悪いなど「正常だが遅い」ケースにも
+/// 数百倍のマージンを残しつつ、退化した無限ループ相当のケースを有限時間（実測で問題に
+/// なった小標本のTobitでは秒オーダー）で打ち切れる値として選んだ。既定`max_iter=35`
+/// （Logit/Probit/Tobit共通）に対する実効バジェットは`(35+1)*2000=72,000`で、上記の
+/// 実測反復回数に対して十分なマージンがあることをrust-reviewer確認済み。
+const MAX_EVALUATIONS_PER_ITER: u64 = 2000;
+
+/// [`FaerLbfgs`]のtwo-loop recursion（[`two_loop_recursion`]）が保持する直近secantペア
+/// `(s,y)`の件数（limited-memoryの由来）。従来のargmin組み込み
+/// `LBFGS::new(linesearch, 7)`と同じ既定値をそのまま踏襲する（変更する積極的な理由が
+/// 無いため）。
+const LBFGS_HISTORY_SIZE: usize = 7;
+
+/// [`FaerLbfgs::next_iter`]が内側line search用`Executor`に設定する反復回数の上限。
+///
+/// **背景**: argminの`Executor::run()`は`max_iters`に到達しても`Err`を返さず、
+/// `TerminationStatus::Terminated(TerminationReason::MaxItersReached)`を伴う`Ok`として
+/// 打ち切り時点のパラメータをそのまま返す（収束判定を満たしたわけではない不正な
+/// ステップになりうる）。[`BudgetedProblem`]は「評価回数の総枠を使い
+/// 切ったら`Err`」という複数回のline search呼び出しを横断する粗い安全網で、この種の
+/// 暴走を有限時間で検出するが、「1回のline searchが収束せず打ち切られた」ことを
+/// 明示的には教えてくれず、黙って不正な点を採用しうる問題は残る。このため
+/// `FaerLbfgs`では内側`Executor`に明示的な`max_iters`を設定した上で、`.run()`後に
+/// 収束判定（`TerminationReason::SolverConverged`）を満たしていない場合は明示的に
+/// エラー化する（`FaerBfgs`には無いチェックだが、この実装では`FaerLbfgs`のみを対象とし
+/// `FaerBfgs`側は変更しない、ユーザー確認済み）。
+///
+/// **値の根拠**: 正常収束するケースのline searchは数回〜数十回程度で収束する
+/// （[`MAX_EVALUATIONS_PER_ITER`]のdocコメント参照、公式ハーネスの実測でbfgsが6〜7
+/// 反復・lbfgsが17反復で収束）。`100`はこれに対して数倍〜1桁のマージンを残しつつ、
+/// [`BudgetedProblem`]の総枠（1outer反復あたり`2000`）よりずっと小さい専用の値とし、
+/// 退化したline search単体を総枠の消費を待たずに早期検出できるようにする
+/// （ユーザー確認済み）。
+const LINE_SEARCH_MAX_ITERS: u64 = 100;
+
+/// [`run_solver`]に渡す`problem`をラップし、`CostFunction`/`Gradient`/`Hessian`の呼び出し
+/// 回数に総枠（バジェット）を設ける（`nonlinear::tobit::tests::proptests`が
+/// devプロファイルで異常に長時間実行される問題の根本対応）。
+///
+/// **背景（当時の状況）**: `Method::Bfgs`（自前実装`FaerBfgs`、[`FaerBfgs::next_iter`]）・
+/// `Method::Lbfgs`（当時はargmin組み込み`LBFGS`だったが、現在は`FaerLbfgs`に置き換え済み）は
+/// いずれも、1回の外側反復ごとに`MoreThuenteLineSearch`を内側`Executor`で走らせるが、
+/// この内側`Executor`には`max_iters`が設定されておらず（argminの`IterState`既定値
+/// `u64::MAX`）、`MoreThuenteLineSearch`自体もステップ幅の上限（`stpmax`）を設定していない
+/// （argmin側のデフォルトは`f64::INFINITY`）。探索方向・勾配の組み合わせが退化し、
+/// line search内部の収束判定（`info`フラグ）もNaN/Infガードも一度も発火しない状況に
+/// 嵌ると、この内側ループは理論上終了しない（[`MleError::EvaluationBudgetExceeded`]の
+/// docコメント参照）。
+///
+/// **なぜここに1箇所実装すれば全methodを保護できるか**: `MoreThuenteLineSearch`は
+/// 呼び出し元（`FaerBfgs`・`FaerLbfgs`いずれの自前実装も）を問わず、必ず`Problem<O>`経由で
+/// `problem.cost()`/`problem.gradient()`を呼ぶ。argminの全traitメソッドは`Result`を返す
+/// 設計のため、ここでエラーを返せば`?`演算子で呼び出し元（`MoreThuenteLineSearch::next_iter`
+/// →内側`Executor::run()`→`FaerBfgs::next_iter`または`FaerLbfgs::next_iter`→外側
+/// `Executor::run()`）を素通りしてそのまま伝播する。`FaerLbfgs`が
+/// [`LINE_SEARCH_MAX_ITERS`]による個別の反復上限＋明示的なエラー化を持つようになった後も、
+/// この`BudgetedProblem`は複数回のline search呼び出しを横断する総枠として引き続き
+/// 全methodに一律適用する（個々のline search呼び出しは正常に収束を繰り返しても、
+/// 外側反復自体が`max_iter`に対して過剰に多い場合の粗い安全網、[`FaerNewton`]の
+/// `MAX_LM_ATTEMPTS`と同じ位置づけ）。
+///
+/// `Method::Newton`（`FaerNewton`）はこの経路を通らず自前のLMラダー
+/// （`MAX_LM_ATTEMPTS`）で既に有限回に抑えられているが、[`run_solver`]は3method共通で
+/// このラッパーを適用する（将来追加されるsolverも含め、個別のsolverが独自の反復上限を
+/// 正しく実装しているかに依存しない、一律の安全網とするため）。
+struct BudgetedProblem<O> {
+    inner: O,
+    budget: u64,
+    remaining: Cell<u64>,
+}
+
+impl<O> BudgetedProblem<O> {
+    fn new(inner: O, budget: u64) -> Self {
+        Self {
+            inner,
+            budget,
+            remaining: Cell::new(budget),
+        }
+    }
+
+    /// ラップした`O`を取り出す（バジェットは破棄する）。`run_solver`が収束後に1回だけ
+    /// 行う最終的なHessian評価（`cov_type`共通行列演算が使う「対数尤度そのもの」の
+    /// Hessian）は、line search内側ループの暴走防止という本来の目的とは無関係な呼び出し
+    /// のため、このバジェットの対象に含めない（rust-reviewer指摘: 理論上、バジェットが
+    /// ちょうど収束と同時に枯渇した場合、正常に収束した結果に対しても
+    /// `EvaluationBudgetExceeded`を誤って返しうる）。
+    fn into_inner(self) -> O {
+        self.inner
+    }
+
+    /// 呼び出し1回分を消費する。残り枠が無ければ
+    /// [`MleError::EvaluationBudgetExceeded`]を返す。`MleError`は`std::error::Error`を
+    /// 実装する（thiserror）ため、`anyhow::Error`（argminの`Error`型）へは`?`でそのまま
+    /// 変換される（[`convert_optimizer_error`]のdocコメント「`FaerNewton::next_iter`内で
+    /// `MleError`から`?`により変換された値はdowncastで復元し」と同じ仕組み）。
+    fn tick(&self) -> Result<(), MleError> {
+        let remaining = self.remaining.get();
+        if remaining == 0 {
+            return Err(MleError::EvaluationBudgetExceeded {
+                budget: self.budget,
+            });
+        }
+        self.remaining.set(remaining - 1);
+        Ok(())
+    }
+}
+
+impl<O> CostFunction for BudgetedProblem<O>
+where
+    O: CostFunction<Param = Vec<f64>, Output = f64>,
+{
+    type Param = Vec<f64>;
+    type Output = f64;
+
+    fn cost(&self, param: &Self::Param) -> Result<Self::Output, OptimizerError> {
+        self.tick()?;
+        self.inner.cost(param)
+    }
+}
+
+impl<O> Gradient for BudgetedProblem<O>
+where
+    O: Gradient<Param = Vec<f64>, Gradient = Vec<f64>>,
+{
+    type Param = Vec<f64>;
+    type Gradient = Vec<f64>;
+
+    fn gradient(&self, param: &Self::Param) -> Result<Self::Gradient, OptimizerError> {
+        self.tick()?;
+        self.inner.gradient(param)
+    }
+}
+
+impl<O> Hessian for BudgetedProblem<O>
+where
+    O: Hessian<Param = Vec<f64>, Hessian = Vec<Vec<f64>>>,
+{
+    type Param = Vec<f64>;
+    type Hessian = Vec<Vec<f64>>;
+
+    fn hessian(&self, param: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
+        self.tick()?;
+        self.inner.hessian(param)
+    }
 }
 
 /// `newton`/`bfgs`/`lbfgs`のいずれかでモデルの負の対数尤度を最小化し、収束点のパラメータ・
@@ -896,20 +1161,33 @@ pub struct SolverOutput {
 /// `separation_norm_check`（[`SeparationNormCheck`]）は(準)完全分離の事後チェック
 /// （標準化パラメータ空間のノルムが[`SEPARATION_PARAM_NORM_THRESHOLD`]を超えたら収束
 /// 判定を取り消す、[`MleError::SeparationSuspected`]参照）を有効にするか。Logit/Probitは
-/// `Enabled`、Tobitは`Disabled`（理由は[`SeparationNormCheck`]のdocコメント参照、Issue #288）。
+/// `Enabled`、Tobitは`Disabled`（理由は[`SeparationNormCheck`]のdocコメント参照）。
+///
+/// **`tol`の意味論はmethodにより異なる**: `Newton`は総和勾配に対する
+/// 絶対閾値`‖∇ℓ(θ)‖ < tol`のまま（2次収束のため`n`依存性の影響をほとんど受けない、
+/// `docs/spec/logit-spec.md`3.2節参照）。`Bfgs`/`Lbfgs`は`n_obs`（観測数）で正規化した
+/// 「観測あたり平均勾配」基準`‖∇ℓ(θ)‖ / n_obs < tol`を使う（実装上は`tol * n_obs`を
+/// 実効的な絶対閾値としてソルバーへ渡す形。statsmodels（scipy）が対数尤度・スコア・
+/// Hessianを`nobs`で割ってから最適化する設計に倣い、大標本での`bfgs`/`lbfgs`の
+/// 実行時間がNewtonから桁違いに遅れる問題を解消する）。`n_obs`は各モデルの`fit()`が
+/// 観測数（`y.nrows()`）をそのまま渡す。
 ///
 /// # Errors
 /// - 収束点のHessianが特異（`SingularHessian`）
 /// - `raise_on_non_convergence=true`かつ`max_iter`回で収束しなかった（`NonConvergence`）
 /// - `separation_norm_check=Enabled`かつ`raise_on_non_convergence=true`で、勾配ノルム基準は
 ///   満たしたが標準化パラメータノルムが過大（`SeparationSuspected`）
+/// - `bfgs`/`lbfgs`のline searchが収束判定を満たさないまま評価回数の総枠を使い切った
+///   （`EvaluationBudgetExceeded`、`BudgetedProblem`参照）
 /// - その他ソルバー内部でのエラー（`ComputationFailed`）
+#[allow(clippy::too_many_arguments)]
 pub fn run_solver<O>(
     problem: O,
     method: Method,
     initial_params: Vec<f64>,
     max_iter: u64,
     tol: f64,
+    n_obs: usize,
     raise_on_non_convergence: bool,
     separation_norm_check: SeparationNormCheck,
 ) -> Result<SolverOutput, MleError>
@@ -918,11 +1196,25 @@ where
         + Gradient<Param = Vec<f64>, Gradient = Vec<f64>>
         + Hessian<Param = Vec<f64>, Hessian = Vec<Vec<f64>>>,
 {
-    let k = initial_params.len();
+    // line search（bfgs/lbfgs）の内側ループが収束判定を満たさないまま暴走するのを防ぐ
+    // 安全網（`BudgetedProblem`のdocコメント参照）。`newton`はこの経路を
+    // 通らず自前のLMラダーで既に有限回に抑えられているが、将来のsolver追加も含めた
+    // 一律の安全網として3method共通で適用する。
+    // `max_iter.saturating_add(1)`: `max_iter=0`（`raise_on_non_convergence`の未収束経路を
+    // 検証するテスト等で使われる）でも、`Executor::init()`が最初の`cost`/`gradient`評価を
+    // 必ず1回行う分の枠は残す（`budget=0`のままだと初回評価から即座に
+    // `EvaluationBudgetExceeded`になり、本来の`NonConvergence`を隠してしまう）。
+    let budget = max_iter
+        .saturating_add(1)
+        .saturating_mul(MAX_EVALUATIONS_PER_ITER);
+    let problem = BudgetedProblem::new(problem, budget);
 
     let (params, mut converged, n_iter, model) = match method {
         Method::Newton => {
-            let solver = FaerNewton { tol };
+            let solver = FaerNewton {
+                tol,
+                stalled_at_optimum: false,
+            };
             let result = Executor::new(problem, solver)
                 .configure(|state| state.param(initial_params).max_iters(max_iter))
                 .run()
@@ -930,26 +1222,29 @@ where
             extract_outcome(result.state, result.problem)?
         }
         Method::Bfgs => {
-            let linesearch = MoreThuenteLineSearch::new();
-            let solver = BFGS::new(linesearch)
-                .with_tolerance_grad(tol)
-                .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+            // `n_obs`で正規化した「観測あたり平均勾配」基準（run_solverのdocコメント
+            // 「tolの意味論はmethodにより異なる」参照）。`FaerBfgs`自体は正規化を知らず、
+            // 実効的な絶対閾値を受け取るだけでよい。
+            let solver = FaerBfgs {
+                linesearch: MoreThuenteLineSearch::new(),
+                tol: tol * n_obs as f64,
+            };
             let result = Executor::new(problem, solver)
-                .configure(|state| {
-                    state
-                        .param(initial_params)
-                        .inv_hessian(identity_matrix(k))
-                        .max_iters(max_iter)
-                })
+                .configure(|state| state.param(initial_params).max_iters(max_iter))
                 .run()
                 .map_err(convert_optimizer_error)?;
             extract_outcome(result.state, result.problem)?
         }
         Method::Lbfgs => {
-            let linesearch = MoreThuenteLineSearch::new();
-            let solver = LBFGS::new(linesearch, 7)
-                .with_tolerance_grad(tol)
-                .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+            // Bfgsと同じ正規化（`n_obs`で正規化した「観測あたり平均勾配」基準）。
+            // `FaerLbfgs`自体は正規化を知らず、実効的な絶対閾値を受け取るだけでよい
+            // （`FaerBfgs`と同じ設計）。
+            let solver = FaerLbfgs {
+                linesearch: MoreThuenteLineSearch::new(),
+                tol: tol * n_obs as f64,
+                s_history: VecDeque::with_capacity(LBFGS_HISTORY_SIZE),
+                y_history: VecDeque::with_capacity(LBFGS_HISTORY_SIZE),
+            };
             let result = Executor::new(problem, solver)
                 .configure(|state| state.param(initial_params).max_iters(max_iter))
                 .run()
@@ -963,7 +1258,7 @@ where
     // 収束の判定を取り消す。`raise_on_non_convergence`の扱いは通常の`NonConvergence`と
     // 揃える（`true`なら専用エラーで即座に返す、`false`なら`converged=false`のまま
     // 後続処理を継続する）。この事後チェックはLogit/Probit（`Enabled`）のみ通り、Tobitは
-    // `Disabled`で素通しする（`SeparationNormCheck`のdocコメント・Issue #288参照）。
+    // `Disabled`で素通しする（`SeparationNormCheck`のdocコメント参照）。
     if matches!(separation_norm_check, SeparationNormCheck::Enabled)
         && converged
         && separation_suspected(&params)
@@ -987,9 +1282,12 @@ where
     // 演算（`neg_hessian_inverse`等）が前提とする「対数尤度そのもののHessian」（真の
     // 最大点で負定値）でなければならない。両者は符号が逆（`-loglik`のHessian＝
     // `loglik`のHessianの符号反転）なので、ここで1回だけ符号反転して契約を合わせる
-    // （実装時に発覚、`docs/planning/specs/nonlinear-implementation-notes.md`
-    // 参照）。
+    // （`docs/spec/nonlinear-common.md`1.2節「Hessianトレイトの符号規約」参照）。
+    // `into_inner()`でバジェットの対象から外す（`BudgetedProblem::into_inner`のdoc
+    // コメント参照）。この1回の呼び出しはline search内側ループの暴走防止という
+    // バジェット本来の目的とは無関係なため。
     let cost_hessian = model
+        .into_inner()
         .hessian(&params)
         .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
     let hessian: Vec<Vec<f64>> = cost_hessian
@@ -1007,15 +1305,24 @@ where
 
 /// `Executor::run()`の結果から`(params, converged, n_iter, model)`を取り出す。
 /// `Method`の3分岐で共通の後処理のため、`run_solver`から切り出している。
-/// `I`はソルバーごとに異なる状態型（LBFGSはHessianスロットを使わないため`H=()`）だが、
+/// `I`はソルバーごとに異なる状態型（`FaerLbfgs`はHessianスロットを使わないため`H=()`）だが、
 /// いずれも`State`トレイト経由で同じ形で取り出せる。
 ///
-/// **`ok_or_else`の2箇所は理論上到達不能**（`.claude/rules/rust-style.md`「テスト」の
+/// **`TerminationReason::SolverExit`を専用に検出していた分岐は削除済み**:
+/// 元々は、`Method::Lbfgs`が当時使っていたargmin組み込み`LBFGS::next_iter`が、line search用
+/// 内側`Executor::run()`の`Err`を`?`で伝播せず`Ok(state.terminate_with(SolverExit(msg)))`と
+/// して握りつぶす挙動（`argmin-0.11.0/src/solver/quasinewton/lbfgs.rs`）を持っていたため、
+/// この分岐で早期検出し元のエラー内容を保っていた。その後
+/// `Method::Lbfgs`を自前実装`FaerLbfgs`（[`FaerBfgs`]・[`FaerNewton`]と同じく`?`で
+/// そのまま`Err`を伝播する設計）に置き換えたことで、3method全てが`SolverExit`を
+/// 二度と発生させなくなった（`MoreThuenteLineSearch`自体もこの`TerminationReason`は
+/// 使わない）ため、分岐ごと削除した。
+///
+/// **残る`ok_or_else`の2箇所は理論上到達不能**（`.claude/rules/rust-style.md`「テスト」の
 /// カバレッジ方針、Logitのカバレッジ確認時に判明・受け入れ済み）:
 /// - `state.get_best_param()`が`None`になるのは`Executor::run()`が`init()`/`next_iter()`を
 ///   一度も呼ばずに終了した場合のみだが、`init()`が必ず初期パラメータを`state`に設定する
-///   （`FaerNewton::init`、BFGS/LBFGSも同様に組み込みソルバーが初期化時に設定する）ため
-///   起こり得ない。
+///   （`FaerNewton::init`・`FaerBfgs::init`・`FaerLbfgs::init`のいずれも）ため起こり得ない。
 /// - `problem.take_problem()`が`None`になるのは既に一度`take_problem()`を呼んだ後に
 ///   再度呼んだ場合のみだが、`run_solver`はこの関数を`Executor::run()`の結果に対して
 ///   1回しか呼ばない。
@@ -1077,9 +1384,26 @@ fn l2_norm(g: &[f64]) -> f64 {
 /// `argmin-math`の`vec`機能（`Vec<Vec<f64>>`向け）には`ArgminInv`の実装が存在しない
 /// （faer/nalgebra/ndarrayの行列型にしか実装されていない）ため使えない。Newton法は独自の
 /// `Solver`実装とし、ステップの求解はfaer（列ピボットQR、OLSの`ensure_full_rank`と同じ
-/// 特異性検出パターン）で行う（`docs/planning/specs/nonlinear-implementation-notes.md`参照）。
+/// 特異性検出パターン）で行う（`docs/spec/nonlinear-common.md`1.2節参照）。
 struct FaerNewton {
     tol: f64,
+    /// `regularized_newton_step`が[`RegularizedStep::NoProgress`]を返し、かつ`next_iter`が
+    /// 「最適点に到達しこれ以上進めない」と判定したことを`terminate`へ伝えるフラグ。
+    ///
+    /// 主たる収束判定（`terminate`の`l2_norm(gradient) < tol`）は**総和勾配に対する絶対
+    /// 閾値**であり観測数`n`でスケールしない。大標本では収束点近傍で勾配の丸め誤差の床が
+    /// `tol`（既定`1e-6`）を上回り、コスト関数が浮動小数点の底に達しても勾配基準が
+    /// 永久に発火しないことがある（`n=200_000`で床≈`1·tol`、`n=1_000_000`で
+    /// 床≈`36·tol`を実測）。その状態で勾配の停滞・目標近傍・コストHessianの正定値性
+    /// （`next_iter`の3条件）がそろえば内点最大に到達しているため、このフラグ経由で
+    /// 収束として扱う。
+    ///
+    /// `next_iter`が毎反復書き換え、`terminate`が読む。argminの`Executor`が各反復で
+    /// `next_iter`→`terminate`の順に呼ぶ契約に依存している（`terminate`が`next_iter`で
+    /// 立てたフラグを同じ反復内で見られる前提。argminバージョン更新時はこの順序を要確認）。
+    /// `FaerNewton`は`run_solver`内で`method`ごとに毎回新規構築されるため、`run_solver`
+    /// 呼び出しをまたぐフラグの持ち越しは無い。
+    stalled_at_optimum: bool,
 }
 
 type NewtonState = IterState<Vec<f64>, Vec<f64>, (), Vec<Vec<f64>>, (), f64>;
@@ -1099,6 +1423,29 @@ const MAX_LM_ATTEMPTS: usize = 40;
 const INITIAL_LM_LAMBDA: f64 = 1e-3;
 /// 各試行で`λ`を増やす倍率。
 const LM_LAMBDA_GROWTH: f64 = 4.0;
+
+/// [`RegularizedStep::NoProgress`]（LMラダーがコスト減少ステップを見つけられなかったが
+/// `λ=0`のHessianは可逆）を「最適点で停滞」と解釈するための条件その1:
+/// 勾配ノルムがこの反復で「実質的に減っていない」とみなす比。
+/// `‖g_new‖ ≥ NEWTON_STALL_GRAD_RATIO · ‖g_prev‖`のとき停滞とみなす。健全な二次収束では
+/// 勾配が反復ごとに桁で減る（実測でも停滞前は比≈0.01）ため、この条件は
+/// 停滞後（実測で連続する勾配ノルムの比≈0.93〜1.0）でしか満たされない。値`0.9`は
+/// その2つの領域の間で、停滞側に十分な余裕を持たせた閾値。
+const NEWTON_STALL_GRAD_RATIO: f64 = 0.9;
+/// `NoProgress`を「最適点で停滞」と解釈するための条件その2:
+/// 収束点の勾配ノルムが収束目標`tol`のこの倍数未満であること。最適点から遠い場所での
+/// 停滞・発散（勾配ノルムが桁違いに大きい）を収束と誤判定しないためのガード。
+/// 実測での膠着点の勾配ノルムは`n=200_000`で約`1·tol`、`n=1_000_000`で約`36·tol`
+/// であり、`1e4`の余裕があればおよそ`n≲3e7`までカバーできる一方、最適化初期の
+/// 勾配ノルム（実測で`1e2`〜`1e6`オーダー）は確実に除外できる。
+///
+/// この「初期の勾配ノルムは`1e2`〜`1e6`」という前提は、`run_solver`の呼び出し元
+/// （Logit/Probitの`standardize_columns`、Tobitの`TobitScaling`）が**設計行列を標準化した
+/// 空間で最適化する**ことに依存している。非標準化スケール（`x`が極端に大きい等）で
+/// `run_solver`を呼ぶ手法を将来追加する場合、この定数の妥当性は再検証が必要
+/// （rust-reviewer指摘。より根本的にはNewton減少量`√(gᵀH⁻¹g)`のようなスケール不変な
+/// 停止基準への置き換えが望ましい。`docs/spec/nonlinear-common.md`9章）。
+const NEWTON_STALL_GRAD_FACTOR: f64 = 1e4;
 
 impl<O> Solver<O, NewtonState> for FaerNewton
 where
@@ -1156,15 +1503,59 @@ where
             .ok_or_else(|| OptimizerError::msg("FaerNewton: gradient in state not set"))?;
         let hessian = problem.hessian(&param)?;
         let cost = problem.cost(&param)?;
-        let new_param = regularized_newton_step(problem, &param, &grad, &hessian, cost)?;
         // 収束判定（terminate）が「更新後のparamに対応する勾配」を見られるよう、
         // 更新前のgradを使い回さずnew_paramで改めて評価する。
-        let new_grad = problem.gradient(&new_param)?;
+        let (new_param, new_grad) =
+            match regularized_newton_step(problem, &param, &grad, &hessian, cost)? {
+                RegularizedStep::Accepted(next) => {
+                    let next_grad = problem.gradient(&next)?;
+                    (next, next_grad)
+                }
+                RegularizedStep::NoProgress(raw_candidate) => {
+                    // LMラダーがコストを減少させるステップを1つも見つけられなかった
+                    // （＝コスト関数が浮動小数点の底に到達）。ただし`λ=0`の
+                    // Hessianは可逆なので、真に特異な問題（`SingularHessian`）ではない。
+                    // 次の3条件がそろったとき「最適点に到達しこれ以上進めない」とみなして
+                    // 収束を通知する（`terminate`のフォールバック）:
+                    //   (1) 生のNewtonステップを1回進めても勾配ノルムが実質的に減らない
+                    //       （＝これ以上詰められない）。
+                    //   (2) 勾配ノルムが収束目標`tol`の近傍にある（`NEWTON_STALL_GRAD_FACTOR`
+                    //       倍未満）。最適点から遠い場所での停滞は (2) で除外される。
+                    //   (3) コスト関数（負の対数尤度）のHessianが正定値
+                    //       （＝内点最大の2階条件）。`newton_step`の可逆性判定だけでは
+                    //       鞍点（可逆だが不定符号）を弾けないため（Tobitの`(β, logσ)`
+                    //       尤度は大域凹ではない、`docs/spec/tobit-spec.md`3.1節）、
+                    //       ここで`llt`により明示的に確認する（rust-reviewer指摘）。
+                    let raw_grad = problem.gradient(&raw_candidate)?;
+                    let raw_grad_norm = l2_norm(&raw_grad);
+                    let stalled = raw_grad_norm >= NEWTON_STALL_GRAD_RATIO * l2_norm(&grad)
+                        && raw_grad_norm < NEWTON_STALL_GRAD_FACTOR * self.tol
+                        && cost_hessian_is_positive_definite(&hessian);
+                    if stalled {
+                        // 最適点に到達しており、これ以上動かさない（現在点をそのまま返す。
+                        // 生のNewtonステップは丸め誤差オーダーでコストを狭義には減少
+                        // させないため適用しない）。
+                        self.stalled_at_optimum = true;
+                        (param, grad)
+                    } else {
+                        // まだ収束と断定できない（鞍点、または勾配がまだ目標から遠い等）。
+                        // 生のNewtonステップを適用して次反復へ進む。降下方向が最後まで
+                        // 見つからなければ`max_iter`到達で`NonConvergence`になる。
+                        (raw_candidate, raw_grad)
+                    }
+                }
+            };
         let state = state.param(new_param).gradient(new_grad);
         Ok((state, None))
     }
 
     fn terminate(&mut self, state: &NewtonState) -> TerminationStatus {
+        // 勾配ノルム基準が発火しないまま最適点で停滞したケース
+        // （`FaerNewton::stalled_at_optimum`のdocコメント参照）。`next_iter`が直前に
+        // 判定済みで、通常の勾配基準より先に確認する。
+        if self.stalled_at_optimum {
+            return TerminationStatus::Terminated(TerminationReason::SolverConverged);
+        }
         if let Some(g) = state.get_gradient()
             && l2_norm(g) < self.tol
         {
@@ -1182,61 +1573,106 @@ where
 /// 異なる一般のMLE最適化への適用であり、名称はあくまで「`H+λI`による正則化」という
 /// 手法的な類似性を指す（rust-reviewer指摘）。
 ///
-/// **導入経緯（Issue #215）**: Logit/Probitのように尤度が大域凹（Hessianが半正定値）な
+/// **導入経緯**: Logit/Probitのように尤度が大域凹（Hessianが半正定値）な
 /// 問題では、収束点に向かう正常な軌道上は`λ=0`の生のNewtonステップが最初の試行で
-/// 受理されるため、収束の挙動（反復回数・収束点）は変わらない。ただし例外がある:
-/// 設計行列が構造的に特異な入力（完全な多重共線性等、`logit.rs`の
-/// `fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix`が使う
-/// ケース）では、Hessianが**すべての点で**特異なため、導入前は`newton_step`が初回から
-/// 即座に`SingularHessian`を返していたが、導入後は`λ>0`の正則化により一旦有限のステップが
-/// 得られてしまい、Newton自体は「収束」した扱いになる（最終的には収束後の
-/// `observed_information_cov_params`が同じ構造的特異Hessianを検出し、結局
-/// `SingularHessian`を返すため、`fit()`全体としてのエラーバリアント・最終的な
-/// ユーザー向け挙動は変わらない。既存テストが変化なくパスするのはこのため）。
-/// つまり保証されるのは「`fit()`が最終的に返す結果」の不変性であり、Newton内部の
-/// 反復過程・エラー発生箇所まで完全に不変というわけではない（rust-reviewer指摘、
-/// 独立シミュレーションで確認済み）。一方Tobitは`(β, logσ)`パラメータ化で大域凹性が保証されず
+/// 受理されるため、収束の挙動（反復回数・収束点）は変わらない。
+///
+/// **設計行列が構造的に特異な入力（完全な多重共線性等）について**:
+/// Logit/Probit/Tobitの`fit()`は`run_solver`を呼ぶ前に`checked_design_matrix_qr`で
+/// 設計行列を列ピボットQR分解し、ランク落ちを`SingularDesignMatrix`として弾くように
+/// なった。このためLogit/Probitのこの種の入力は`regularized_newton_step`にそもそも
+/// 到達しない。`newton_step`が`SingularHessian`を返す経路自体は残しており
+/// （収束点近傍で丸め誤差により不定符号Hessianになる等）、その回帰ガードは合成問題
+/// `SingularHessianProblem`（実データではなく`hessian()`が常にゼロ行列を返すモデル）を
+/// 使う`run_solver_newton_returns_singular_hessian_error`が担う。
+///
+/// 一方Tobitは`(β, logσ)`パラメータ化で大域凹性が保証されず
 /// （`docs/spec/tobit-spec.md`3.1節参照。Olsen(1978)の`(β/σ, 1/σ)`変換は不採用）、
 /// Hessianが不定符号になる領域では
 /// **生のNewtonステップが降下方向ですらなくなる**ことが実測で判明した（OLS推定値を
 /// 初期値にしても、実際に打ち切りが発生するデータで一貫して再現。ステップをどれだけ
 /// 小さくスケールしても`cost`が改善しないケースを確認済み）。`λI`を加えて
 /// Hessianを正定値に近づけることで、十分大きな`λ`では最急降下方向（`-g/λ`、非零の
-/// 勾配に対して必ず降下方向）に漸近するため、有限回の試行で必ずコスト減少方向が
-/// 見つかる（ユーザー確認済み）。
+/// 勾配に対して必ず降下方向）に漸近するため、通常は有限回の試行でコスト減少方向が
+/// 見つかる（ユーザー確認済み）。**例外は`cost`が浮動小数点の底に達した収束点近傍**で、
+/// この場合どの`λ`でも`cost`を狭義に減少させられず、以前は誤って`SingularHessian`を
+/// 返していた。現在は`λ=0`のHessianが可逆かどうかで
+/// [`RegularizedStep::NoProgress`]（収束扱い）と`SingularHessian`（真に特異）を分ける
+/// （下記参照）。
 ///
 /// `newton_step`が`MleError::SingularHessian`を返した場合（`λ`を加えても数値的に
 /// 特異なまま）は、そのまま次の`λ`を試す（即座にエラーを伝播しない）。
-/// `MAX_LM_ATTEMPTS`回すべて失敗した場合のみ`SingularHessian`を返す
-/// （既存のエラー型・意味を変えない）。
+///
+/// **`MAX_LM_ATTEMPTS`回すべて失敗した場合の分岐**: `λ=0`（正則化前）の
+/// `newton_step`が成功していた（Hessianが数値的に可逆）かどうかで結果を分ける。
+/// - 可逆だった場合 → [`RegularizedStep::NoProgress`]。これは「Hessianは可逆だが、
+///   `λ`をどれだけ増やしてもコストを狭義に減少させられない」状態。典型的には大標本で
+///   収束点近傍に到達し、コスト関数が浮動小数点の底に達したケース（総和
+///   勾配の丸め誤差の床が`tol`を上回り`terminate`の勾配基準が発火しない）。呼び出し元
+///   （`FaerNewton::next_iter`）が勾配の停滞・目標近傍・コストHessianの正定値性を
+///   追加確認し、そろえば収束、そうでなければ（鞍点等）生ステップを適用して反復を続け、
+///   最終的に`NonConvergence`になる。
+/// - `λ=0`で`newton_step`が特異だった場合 → `SingularHessian`（完全な多重共線性等、
+///   `run_solver_newton_returns_singular_hessian_error`のケース。既存のエラー型・意味を
+///   変えない）。
+enum RegularizedStep {
+    /// コストを狭義に減少させる有限のステップが見つかった。中身は更新後のパラメータ
+    /// `θ - Δθ`。
+    Accepted(Vec<f64>),
+    /// `MAX_LM_ATTEMPTS`回試してもコストを減少させるステップが無かったが、`λ=0`の
+    /// Hessianは可逆だった（＝真に特異ではない）。中身は`λ=0`の生の
+    /// Newtonステップを適用した候補パラメータ`θ - H⁻¹g`（最適点近傍なら差は丸め誤差
+    /// オーダー）。`FaerNewton::next_iter`がこの候補で停滞条件を判定し、収束と判断した
+    /// 場合は候補を適用せず現在点`θ`にとどまる。
+    NoProgress(Vec<f64>),
+}
+
 fn regularized_newton_step<O>(
     problem: &mut Problem<O>,
     param: &[f64],
     grad: &[f64],
     hessian: &[Vec<f64>],
     cost: f64,
-) -> Result<Vec<f64>, OptimizerError>
+) -> Result<RegularizedStep, OptimizerError>
 where
     O: CostFunction<Param = Vec<f64>, Output = f64>,
 {
     let k = grad.len();
+    // ステップ`Δθ`を現在のパラメータに適用して候補`θ - Δθ`を作る。
+    let apply_step =
+        |step: &[f64]| -> Vec<f64> { param.iter().zip(step).map(|(p, s)| p - s).collect() };
+
+    // `λ=0`（正則化前）のNewtonステップが可逆だったかを、`MAX_LM_ATTEMPTS`回すべて
+    // 失敗したときの分岐（`NoProgress` vs `SingularHessian`）のために覚えておく。
+    // 可逆なら適用後のパラメータ`θ - H⁻¹g`も控える（`NoProgress`で返す候補。生の局所
+    // 2次モデルの最良推定で、最適点との差は丸め誤差オーダー）。ループ初回（`λ=0`）は
+    // この値を使い回し、`newton_step`の二重計算を避ける。
+    let raw_newton_candidate = newton_step(hessian, grad)
+        .ok()
+        .map(|step| apply_step(&step));
+
     let mut lambda = 0.0_f64;
-    for _ in 0..MAX_LM_ATTEMPTS {
-        let regularized: Vec<Vec<f64>> = (0..k)
-            .map(|i| {
-                (0..k)
-                    .map(|j| hessian[i][j] + if i == j { lambda } else { 0.0 })
-                    .collect()
-            })
-            .collect();
-        if let Ok(step) = newton_step(&regularized, grad) {
-            let candidate: Vec<f64> = param.iter().zip(&step).map(|(p, s)| p - s).collect();
-            if let Ok(candidate_cost) = problem.cost(&candidate)
-                && candidate_cost.is_finite()
-                && candidate_cost < cost
-            {
-                return Ok(candidate);
-            }
+    for attempt in 0..MAX_LM_ATTEMPTS {
+        let candidate = if attempt == 0 {
+            raw_newton_candidate.clone()
+        } else {
+            let regularized: Vec<Vec<f64>> = (0..k)
+                .map(|i| {
+                    (0..k)
+                        .map(|j| hessian[i][j] + if i == j { lambda } else { 0.0 })
+                        .collect()
+                })
+                .collect();
+            newton_step(&regularized, grad)
+                .ok()
+                .map(|step| apply_step(&step))
+        };
+        if let Some(candidate) = candidate
+            && let Ok(candidate_cost) = problem.cost(&candidate)
+            && candidate_cost.is_finite()
+            && candidate_cost < cost
+        {
+            return Ok(RegularizedStep::Accepted(candidate));
         }
         lambda = if lambda == 0.0 {
             INITIAL_LM_LAMBDA
@@ -1244,12 +1680,31 @@ where
             lambda * LM_LAMBDA_GROWTH
         };
     }
-    // `MAX_LM_ATTEMPTS`回すべて失敗する経路は、既存のテストデータ（Tobitの打ち切り
-    // データ、Logit/Probitの完全な多重共線性データ含む）では一度も到達していない
-    // （`MAX_LM_ATTEMPTS`のdocコメントの通り、理論上は`λ`が十分大きくなれば必ず
-    // 降下方向が見つかるはずだが、これを「理論上到達不能」と断定できる証明は無い。
-    // rust-reviewer指摘。再現データが見つかった場合はテストを追加する）。
-    Err(MleError::SingularHessian.into())
+    // コストを減少させるステップが1つも見つからなかった。`λ=0`のHessianが可逆だったなら
+    // 真に特異な問題ではなく、コスト関数が浮動小数点の底に達した状態
+    // （`n=200_000, seed=1` / `n=1_000_000, seed=42`の`moderate_censoring`Tobitで実測）。
+    // `λ=0`でも特異だった場合は従来どおり`SingularHessian`
+    // （完全な多重共線性等、`SingularHessianProblem`）。
+    match raw_newton_candidate {
+        Some(candidate) => Ok(RegularizedStep::NoProgress(candidate)),
+        None => Err(MleError::SingularHessian.into()),
+    }
+}
+
+/// コスト関数（負の対数尤度`-ℓ`）のHessianが正定値か（Cholesky分解`llt`が成功するか）。
+/// 真のMLE最大点＝`-ℓ`の最小点ではこれが正定値になる（内点最大の2階十分条件）。
+///
+/// `FaerNewton::next_iter`が`RegularizedStep::NoProgress`を`stalled_at_optimum`（収束扱い）
+/// に昇格させる前の最終確認に使う（rust-reviewer指摘）。`newton_step`の
+/// 列ピボットQRは可逆性（フルランク）しか見ないため、鞍点（可逆だが不定符号）でも
+/// `NoProgress`が返りうる。Tobitの`(β, logσ)`尤度は大域凹性が保証されない
+/// （`docs/spec/tobit-spec.md`3.1節）ため、勾配ノルムの小ささだけを根拠に収束と
+/// 判定すると、鞍点で`cov_type="opg"`（`-H`を使わない）が誤った推定値を黙って返す
+/// リスクがある。ここで正定値性を明示的に確認して内点最大でのみ収束扱いにする。
+fn cost_hessian_is_positive_definite(hessian: &[Vec<f64>]) -> bool {
+    let k = hessian.len();
+    let h = Mat::from_fn(k, k, |i, j| hessian[i][j]);
+    h.llt(Side::Lower).is_ok()
 }
 
 /// Newtonステップ`Δθ = H⁻¹g`を求める。`H`は対称とは限らない（収束点から離れた場所では
@@ -1278,6 +1733,668 @@ fn newton_step(hessian: &[Vec<f64>], grad: &[f64]) -> Result<Vec<f64>, MleError>
     Ok((0..k).map(|i| *step.get(i, 0)).collect())
 }
 
+/// argmin組み込みのBFGS（`argmin::solver::quasinewton::BFGS`）は、外側反復をまたぐ
+/// line searchの初期ステップ幅・逆Hessianの初期スケールを実行中に調整する手段を
+/// 公開していない（`linesearch`フィールドはprivateで、`initial_step_length`は
+/// 一度設定すると全反復で同じ固定値が使われ続ける）。単位行列を初期逆Hessianにすると、
+/// Logit/Probit等の尤度Hessianのスケール（観測数`n`個のスコアの和で`O(n)`）との乖離が
+/// `n`が大きいほど桁違いに開き、最初の探索方向`d=-Ig`が暴走してline searchが1反復
+/// あたり多数の関数評価を消費する（実測: n=100,000→1,000,000でNewtonの
+/// 反復回数は4のまま一定なのに対し、BFGSは15→22と増加）。
+///
+/// 標準的な対策（Nocedal & Wright *Numerical Optimization* 6.1節のself-scaling初期化）
+/// は、「1回目の反復でline searchが実際に受理したステップ」から秘密方程式ペア
+/// `(s₀,y₀)`を作り、`γ=(y₀ᵀs₀)/(y₀ᵀy₀)`で初期逆Hessianをスケーリングしてから通常の
+/// BFGS rank-2更新を適用する、というもの。これはargmin自身の`BFGS::next_iter`に
+/// コメントアウトされた形で存在する（`self.inv_hessian`という現存しないフィールドを
+/// 参照しており、リファクタリングの過程で壊れたまま放置されている）。この手法を
+/// 使うには「1回目の反復の終わり（rank-2更新の直前）」というタイミングにフックする
+/// 必要があり、argminの公開APIには存在しないため、`FaerNewton`と同じ理由（組み込み
+/// ソルバーが必要な制御点を公開していない）で自前実装する。
+///
+/// あわせて、1回目の反復専用のline search初期ステップ幅も`min(1, 1/‖g₀‖)`に調整する
+/// （単位行列の逆Hessianによる探索方向`-g₀`は`n`が大きいほど大きくなるため、
+/// `alpha=1`から始めて大きくバックトラックする代わりに、あらかじめ妥当な大きさへ
+/// 抑える）。2回目以降の反復は、既にrank-2更新でスケールが補正された逆Hessianにより
+/// 探索方向自体が適切な大きさになっているはずなので、標準の`alpha=1.0`に戻す
+/// （固定値のまま反復間で使い回すと、スケール補正済みの反復まで不必要に小さい
+/// ステップから始めることになり逆効果になりうるため）。
+///
+/// **`Method::Lbfgs`は当初対象外だったが、現在は解消済み**: 導入当初は
+/// argmin 0.11.0の組み込みLBFGS実装が`s`/`y`履歴・初期`γ`を外部から注入する公開APIを
+/// 持たず（privateフィールド、対応するビルダーメソッド無し）、同じ手法を適用できな
+/// かった。その後`Method::Lbfgs`自体を自前実装`FaerLbfgs`に置き換え、
+/// `FaerBfgs`と同じ「`self`がline searchを所有し1回目の反復だけ初期ステップ幅を
+/// 切り替える」制御を獲得したことで解消した（詳細は`FaerLbfgs`のdocコメント参照）。
+struct FaerBfgs {
+    /// line search。`self`が所有し反復間で使い回す（`initial_step_length`で1回目の
+    /// 反復だけ特別なステップ幅を設定し、2回目以降は標準値に戻す、という制御を行う
+    /// ため。built-inのBFGSは`self.linesearch.clone()`を反復ごとに使い捨てるだけで、
+    /// `self.linesearch`自体を反復間で更新する経路が無い）。
+    linesearch: MoreThuenteLineSearch<Vec<f64>, Vec<f64>, f64>,
+    tol: f64,
+}
+
+type BfgsState = IterState<Vec<f64>, Vec<f64>, (), Vec<Vec<f64>>, (), f64>;
+
+impl<O> Solver<O, BfgsState> for FaerBfgs
+where
+    O: CostFunction<Param = Vec<f64>, Output = f64>
+        + Gradient<Param = Vec<f64>, Gradient = Vec<f64>>,
+{
+    /// `argmin::core::Solver`トレイトの必須メソッド（`FaerNewton::name`と同じ理由で
+    /// 未カバーでも振る舞いの正しさに影響しない）。
+    fn name(&self) -> &str {
+        "BFGS (faer-backed)"
+    }
+
+    fn init(
+        &mut self,
+        problem: &mut Problem<O>,
+        mut state: BfgsState,
+    ) -> Result<(BfgsState, Option<KV>), OptimizerError> {
+        let param = state.take_param().ok_or_else(|| {
+            OptimizerError::msg(
+                "FaerBfgs requires an initial parameter vector via Executor's configure method",
+            )
+        })?;
+        let grad = problem.gradient(&param)?;
+
+        // 1回目の反復専用のline search初期ステップ幅（`FaerBfgs`のdocコメント参照）。
+        // `g0_norm`が実質ゼロ（既に停留点付近）なら`1.0/g0_norm`は`f64::INFINITY`に
+        // なり`min(1.0)`で1.0（＝標準値）に収まるため、この場合は特別扱い不要で
+        // 自然に既定動作へ落ちる。
+        let alpha0 = (1.0 / l2_norm(&grad)).min(1.0);
+        if alpha0.is_finite() && alpha0 > 0.0 {
+            self.linesearch.initial_step_length(alpha0)?;
+        }
+
+        let k = param.len();
+        let state = state
+            .param(param)
+            .gradient(grad)
+            .inv_hessian(identity_matrix(k));
+        Ok((state, None))
+    }
+
+    fn next_iter(
+        &mut self,
+        problem: &mut Problem<O>,
+        mut state: BfgsState,
+    ) -> Result<(BfgsState, Option<KV>), OptimizerError> {
+        let param = state
+            .take_param()
+            .ok_or_else(|| OptimizerError::msg("FaerBfgs: parameter vector in state not set"))?;
+        let cur_cost = state.get_cost();
+        let prev_grad = state
+            .take_gradient()
+            .ok_or_else(|| OptimizerError::msg("FaerBfgs: gradient in state not set"))?;
+        let inv_hessian = state
+            .take_inv_hessian()
+            .ok_or_else(|| OptimizerError::msg("FaerBfgs: inverse Hessian in state not set"))?;
+        // `terminate`が「1回目の反復だけの特別扱い」を後段で正しく戻せるよう、
+        // rank-2更新前に判定しておく（`next_iter`本体の途中でstateの反復カウントが
+        // 変わることはない）。
+        let is_first_iter = state.get_iter() == 0;
+
+        let direction: Vec<f64> = mat_vec(&inv_hessian, &prev_grad)
+            .into_iter()
+            .map(|d| -d)
+            .collect();
+        self.linesearch.search_direction(direction);
+
+        // `take_problem()`が`None`になるのは既に一度取り出した後に再度取り出した場合
+        // のみだが、`next_iter`はこの箇所でしか呼ばない（`FaerNewton`と同様、argmin
+        // 組み込みソルバー自体も同じ契約に依存して`.unwrap()`している）。
+        let inner_problem = problem.take_problem().ok_or_else(|| {
+            OptimizerError::msg("FaerBfgs: failed to recover the optimization problem")
+        })?;
+        let result = Executor::new(inner_problem, self.linesearch.clone())
+            .configure(|config| {
+                config
+                    .param(param.clone())
+                    .gradient(prev_grad.clone())
+                    .cost(cur_cost)
+            })
+            .ctrlc(false)
+            .run()?;
+        let mut sub_state = result.state;
+        let line_problem = result.problem;
+
+        let xk1 = sub_state.take_param().ok_or_else(|| {
+            OptimizerError::msg("FaerBfgs: no parameters returned by line search")
+        })?;
+        let next_cost = sub_state.get_cost();
+        problem.consume_problem(line_problem);
+
+        let grad = problem.gradient(&xk1)?;
+
+        // 1回目の反復専用のline search初期ステップ幅（`init`で設定）は、2回目以降は
+        // 標準の1.0に戻す（`FaerBfgs`のdocコメント参照）。
+        if is_first_iter {
+            self.linesearch.initial_step_length(1.0)?;
+        }
+
+        let sk: Vec<f64> = xk1.iter().zip(param.iter()).map(|(a, b)| a - b).collect();
+        let yk: Vec<f64> = grad
+            .iter()
+            .zip(prev_grad.iter())
+            .map(|(a, b)| a - b)
+            .collect();
+
+        let updated_inv_hessian = bfgs_updated_inv_hessian(inv_hessian, &sk, &yk, is_first_iter);
+
+        Ok((
+            state
+                .param(xk1)
+                .cost(next_cost)
+                .gradient(grad)
+                .inv_hessian(updated_inv_hessian),
+            None,
+        ))
+    }
+
+    fn terminate(&mut self, state: &BfgsState) -> TerminationStatus {
+        if let Some(g) = state.get_gradient()
+            && l2_norm(g) < self.tol
+        {
+            return TerminationStatus::Terminated(TerminationReason::SolverConverged);
+        }
+        // コストが（ほぼ）変化しなくなった場合も収束扱いにする。built-inのBFGS
+        // （`argmin::solver::quasinewton::BFGS`）が持つ副次的な収束判定
+        // （既定`tol_cost=f64::EPSILON`）と同じ基準。通常のデータでは勾配ノルム基準
+        // より先に発火することは無いが、near-separation等の退化した尤度面では
+        // line searchがこれ以上進めずコストが完全に変化しなくなる一方、勾配ノルムが
+        // まだ`tol`を下回らないことがある（実測: この基準を落とすとnear-separation
+        // ・Tobitの一部データで`NonConvergence`になる回帰を確認したため、built-inと
+        // 同じ基準を明示的に踏襲する）。
+        if (state.get_prev_cost() - state.get_cost()).abs() < f64::EPSILON {
+            return TerminationStatus::Terminated(TerminationReason::SolverConverged);
+        }
+        TerminationStatus::NotTerminated
+    }
+}
+
+/// 対角成分が`scale`の`k×k`対角行列。`identity_matrix`の一般化（`scale=1.0`で
+/// 一致する）だが、`FaerBfgs`のself-scaling初期化専用に使うため、意味が伝わる
+/// 別名の関数として分離する。
+fn scaled_identity(scale: f64, k: usize) -> Vec<Vec<f64>> {
+    (0..k)
+        .map(|i| (0..k).map(|j| if i == j { scale } else { 0.0 }).collect())
+        .collect()
+}
+
+fn dot(a: &[f64], b: &[f64]) -> f64 {
+    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+}
+
+fn mat_vec(mat: &[Vec<f64>], v: &[f64]) -> Vec<f64> {
+    mat.iter().map(|row| dot(row, v)).collect()
+}
+
+fn mat_mat(a: &[Vec<f64>], b: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    let n = a.len();
+    let m = b.len();
+    let p = b[0].len();
+    (0..n)
+        .map(|i| {
+            (0..p)
+                .map(|j| (0..m).map(|t| a[i][t] * b[t][j]).sum())
+                .collect()
+        })
+        .collect()
+}
+
+fn transpose(a: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    let n = a.len();
+    let m = a[0].len();
+    (0..m).map(|j| (0..n).map(|i| a[i][j]).collect()).collect()
+}
+
+/// BFGSの逆Hessian近似のrank-2更新: `H₊ = (I-ρsyᵀ)H(I-ρysᵀ)+ρssᵀ`
+/// （`ρ=1/(yᵀs)`は呼び出し側が渡す）。`k`は小さい（Logit/Probit/Tobitのパラメータ数、
+/// 実務的には数〜数十）ため、faerを介さず素朴な行列積で十分（`O(k³)`は無視できる
+/// コスト）。
+fn bfgs_rank2_update(h: &[Vec<f64>], s: &[f64], y: &[f64], rho: f64) -> Vec<Vec<f64>> {
+    let k = s.len();
+    let v: Vec<Vec<f64>> = (0..k)
+        .map(|i| {
+            (0..k)
+                .map(|m| (if i == m { 1.0 } else { 0.0 }) - rho * s[i] * y[m])
+                .collect()
+        })
+        .collect();
+    let vh = mat_mat(&v, h);
+    let vt = transpose(&v);
+    let mut result = mat_mat(&vh, &vt);
+    for (i, row) in result.iter_mut().enumerate() {
+        for (j, cell) in row.iter_mut().enumerate() {
+            *cell += rho * s[i] * s[j];
+        }
+    }
+    result
+}
+
+/// `FaerBfgs::next_iter`が1回の反復の終わりに呼ぶ、逆Hessian近似の更新ロジック本体。
+/// `next_iter`のargmin`Solver`実装（`Problem`/`IterState`の出し入れ、line searchの
+/// 実行）から分離した純粋関数にすることで、rank-2更新・self-scaling・secant条件の
+/// 安全策を単体テストで直接検証できるようにしている（`mod tests`の
+/// `bfgs_updated_inv_hessian_*`参照）。
+///
+/// secant条件`yᵀs>0`を満たさない場合はrank-2更新を行わず、`inv_hessian`をそのまま
+/// 返す（更新すると正定値性が壊れうるため。標準的なBFGSの安全策）。
+///
+/// **閾値は絶対値`f64::EPSILON`のまま（`‖s‖‖y‖`に対する相対値は不採用、rust-reviewer
+/// 指摘を検証した結果）**: 当初はrust-style.md「線形代数」節の特異性判定の方針
+/// （データのスケールに依存しない相対閾値を使う）に倣い`yksk <= f64::EPSILON *
+/// l2_norm(sk) * l2_norm(yk)`を試したが、`generate_binary_choice_dataset("baseline",
+/// link="logit", n=1_000_000, k=5, seed=42)`で実測したところ、絶対閾値では反復
+/// 6回目以降のrank-2更新が正常に適用され続けるのに対し、相対閾値では途中の反復で
+/// 更新がスキップされる頻度が増え、収束までの反復回数・実行時間がかえって悪化した
+/// （n_iter 17→23、実行時間 15.0s→20.7s）。secant条件は「行列の特異性判定」ではなく
+/// 「BFGS更新の正定値性を保つための降下方向チェック」であり、既存の特異性判定
+/// （QR分解のR対角成分等）とは性質が異なるため、この方針をそのまま転用するのは
+/// 適切でなかったと判断し、絶対閾値に戻した。
+///
+/// `is_first_iter`が`true`の場合のみ、Nocedal & Wright *Numerical Optimization*
+/// 6.1節のself-scaling初期化（`γ=(yᵀs)/(yᵀy)`で単位行列の代わりに`γI`を
+/// 「更新前の逆Hessian」としてrank-2更新に使う）を行う（`FaerBfgs`のdocコメント
+/// 参照）。`yᵀy`が実質ゼロ（縮退、勾配がほとんど変化しなかった）の場合は
+/// `inv_hessian`をそのまま「更新前の逆Hessian」として使う（スケーリングを諦める
+/// フォールバック。ゼロ除算を避けるためだけの絶対閾値ガード）。
+fn bfgs_updated_inv_hessian(
+    inv_hessian: Vec<Vec<f64>>,
+    sk: &[f64],
+    yk: &[f64],
+    is_first_iter: bool,
+) -> Vec<Vec<f64>> {
+    let yksk = dot(yk, sk);
+    if yksk <= f64::EPSILON {
+        return inv_hessian;
+    }
+    let rho = 1.0 / yksk;
+    let prior_h = if is_first_iter {
+        let ykyk = dot(yk, yk);
+        if ykyk > f64::EPSILON {
+            scaled_identity(yksk / ykyk, sk.len())
+        } else {
+            inv_hessian
+        }
+    } else {
+        inv_hessian
+    };
+    bfgs_rank2_update(&prior_h, sk, yk, rho)
+}
+
+/// argmin組み込みの`LBFGS`（`argmin::solver::quasinewton::LBFGS`）を、`FaerBfgs`と同型の
+/// パターンで自前実装したもの。
+///
+/// **経緯**: `FaerBfgs`（上記docコメント参照）は「1回目の反復専用のline
+/// search初期ステップ幅`min(1,1/‖g₀‖)`」を適用することで、単位行列の逆Hessianによる
+/// 最初の探索方向の暴走を防いだが、argmin組み込み`LBFGS`にはこの制御点を適用できな
+/// かった（`linesearch`フィールドがprivateで、`self.linesearch.clone()`を反復ごとに
+/// 使い捨てるだけの内部実装のため、`FaerBfgs`のように`self`が`linesearch`を所有し
+/// 反復間で初期ステップ幅を切り替える制御ができない）。two-loop recursion自体が使う
+/// `γ=(s_{k-1}ᵀy_{k-1})/(y_{k-1}ᵀy_{k-1})`によるself-scalingは、argmin組み込み`LBFGS`も
+/// 2回目以降の反復では既に内部で行っている（履歴`s`/`y`から動的に計算、Nocedal &
+/// Wright *Numerical Optimization* 6.1節そのもの）ため、`FaerBfgs`のケースとは異なり
+/// two-loop recursionの数式自体に欠陥があるわけではない。**欠けていたのは「1回目の
+/// 反復（履歴が空で`γ=1.0`固定）専用のline search初期ステップ幅」という、`FaerBfgs`と
+/// 全く同じ制御点**であり、argmin組み込みの公開APIにはこれが無かった。
+///
+/// `argmin::core::Solver`トレイトを直接実装し、two-loop recursion（[`two_loop_recursion`]）を
+/// 自前で持つことで、この制御点を獲得する（`FaerNewton`/`FaerBfgs`と同じ理由での
+/// 自前化）。line search自体は`FaerBfgs`と同様、引き続き`MoreThuenteLineSearch`を流用する。
+///
+/// あわせて、内側line search用`Executor`に明示的な`max_iters`（[`LINE_SEARCH_MAX_ITERS`]）を
+/// 設定し、収束判定を満たさないまま打ち切られた場合は明示的にエラー化する
+/// （[`LINE_SEARCH_MAX_ITERS`]のdocコメント参照。`max_iters`到達は
+/// `Err`にならず不正なステップを黙って採用してしまう問題への対応。`FaerBfgs`には無い
+/// チェックだが、この実装では`FaerLbfgs`のみを対象とし`FaerBfgs`側は変更しない、
+/// ユーザー確認済み）。
+///
+/// `FaerBfgs`と異なり逆Hessian近似を陽には持たず、直近[`LBFGS_HISTORY_SIZE`]件の
+/// secantペア`(s,y)`だけを保持する（limited-memoryの由来）。
+struct FaerLbfgs {
+    /// line search。`self`が所有し反復間で使い回す（`FaerBfgs::linesearch`と同じ理由）。
+    linesearch: MoreThuenteLineSearch<Vec<f64>, Vec<f64>, f64>,
+    tol: f64,
+    /// 直近`s`（パラメータ差分`θ_{k+1}-θ_k`）の履歴。古い順（先頭が最古）、
+    /// [`LBFGS_HISTORY_SIZE`]件を超えたら最古のペアから破棄する（limited-memoryの
+    /// 由来）。`y_history`と常に同じ長さ・同じ順序で対応する。
+    s_history: VecDeque<Vec<f64>>,
+    /// 直近`y`（勾配差分`∇f_{k+1}-∇f_k`）の履歴。`s_history`のdocコメント参照。
+    y_history: VecDeque<Vec<f64>>,
+}
+
+type LbfgsState = IterState<Vec<f64>, Vec<f64>, (), (), (), f64>;
+
+impl<O> Solver<O, LbfgsState> for FaerLbfgs
+where
+    O: CostFunction<Param = Vec<f64>, Output = f64>
+        + Gradient<Param = Vec<f64>, Gradient = Vec<f64>>,
+{
+    /// `argmin::core::Solver`トレイトの必須メソッド（`FaerNewton::name`と同じ理由で
+    /// 未カバーでも振る舞いの正しさに影響しない）。
+    fn name(&self) -> &str {
+        "L-BFGS (faer-backed)"
+    }
+
+    fn init(
+        &mut self,
+        problem: &mut Problem<O>,
+        mut state: LbfgsState,
+    ) -> Result<(LbfgsState, Option<KV>), OptimizerError> {
+        let param = state.take_param().ok_or_else(|| {
+            OptimizerError::msg(
+                "FaerLbfgs requires an initial parameter vector via Executor's configure method",
+            )
+        })?;
+        let grad = problem.gradient(&param)?;
+
+        // 1回目の反復専用のline search初期ステップ幅（`FaerBfgs::init`と同じ式・同じ
+        // 理由）。履歴が空の1回目は`two_loop_recursion`のγが既定`1.0`のままで探索方向
+        // `-g₀`をスケールできないため、単位行列の逆Hessianを使う`FaerBfgs`の1回目と
+        // 同型の暴走リスクがある。
+        //
+        // **既知のトレードオフ（未解決）**: `n_obs`で正規化する案
+        // （`min(1, n_obs/‖g₀‖)`、`tol`の正規化と同じ発想）を試したが、
+        // Tobit退化ケース（`fit_lbfgs_converges_for_a_previously_
+        // stalling_case_from_issue_344`）が再び`LINE_SEARCH_MAX_ITERS`超過で
+        // 失敗する回帰を確認したため不採用とした（`‖g₀‖`と`n_obs`の関係は単純な
+        // 比例関係ではなく、データセットごとに異なるため）。無正規化のこの式のままだと
+        // `generate_binary_choice_dataset("baseline", link="probit", n=100_000,
+        // k=5, seed=42)`で`alpha0≈7.5e-5`という過度に小さい初期ステップになり、
+        // argmin組み込みLBFGS時代の7反復・0.16sから自前実装後12反復・0.54sへ悪化する
+        // （`docs/performance/probit.md`参照）。詳細な原因・より良い初期ステップ幅の
+        // 設計は次セッションで継続調査する（ユーザー確認済み）。
+        let alpha0 = (1.0 / l2_norm(&grad)).min(1.0);
+        if alpha0.is_finite() && alpha0 > 0.0 {
+            self.linesearch.initial_step_length(alpha0)?;
+        }
+
+        let state = state.param(param).gradient(grad);
+        Ok((state, None))
+    }
+
+    fn next_iter(
+        &mut self,
+        problem: &mut Problem<O>,
+        mut state: LbfgsState,
+    ) -> Result<(LbfgsState, Option<KV>), OptimizerError> {
+        let param = state
+            .take_param()
+            .ok_or_else(|| OptimizerError::msg("FaerLbfgs: parameter vector in state not set"))?;
+        let cur_cost = state.get_cost();
+        let prev_grad = state
+            .take_gradient()
+            .ok_or_else(|| OptimizerError::msg("FaerLbfgs: gradient in state not set"))?;
+        // `FaerBfgs::next_iter`の`is_first_iter`と同じ役割（履歴追加前に判定する）。
+        let is_first_iter = state.get_iter() == 0;
+
+        let direction = two_loop_recursion(&self.s_history, &self.y_history, &prev_grad);
+        self.linesearch.search_direction(direction);
+
+        // `take_problem()`が`None`になるのは既に一度取り出した後に再度取り出した場合
+        // のみだが、`next_iter`はこの箇所でしか呼ばない（`FaerBfgs::next_iter`と同じ
+        // 契約）。
+        let inner_problem = problem.take_problem().ok_or_else(|| {
+            OptimizerError::msg("FaerLbfgs: failed to recover the optimization problem")
+        })?;
+        let result = Executor::new(inner_problem, self.linesearch.clone())
+            .configure(|config| {
+                config
+                    .param(param.clone())
+                    .gradient(prev_grad.clone())
+                    .cost(cur_cost)
+                    .max_iters(LINE_SEARCH_MAX_ITERS)
+            })
+            .ctrlc(false)
+            .run()?;
+        let mut sub_state = result.state;
+        let line_problem = result.problem;
+
+        // `LINE_SEARCH_MAX_ITERS`のdocコメント参照: `max_iters`到達は`Err`にならず
+        // 打ち切り時点のパラメータをそのまま`Ok`で返すため、収束判定を明示的に
+        // 確認する（`FaerBfgs`には無いチェック）。
+        if !matches!(
+            sub_state.get_termination_reason(),
+            Some(TerminationReason::SolverConverged)
+        ) {
+            let mle_error: MleError = CommonError::ComputationFailed(format!(
+                "line search did not converge within {LINE_SEARCH_MAX_ITERS} iterations"
+            ))
+            .into();
+            return Err(mle_error.into());
+        }
+
+        let xk1 = sub_state.take_param().ok_or_else(|| {
+            OptimizerError::msg("FaerLbfgs: no parameters returned by line search")
+        })?;
+        let next_cost = sub_state.get_cost();
+        problem.consume_problem(line_problem);
+
+        let grad = problem.gradient(&xk1)?;
+
+        // 1回目の反復専用のline search初期ステップ幅（`init`で設定）は、2回目以降は
+        // 標準の1.0に戻す（`FaerBfgs::next_iter`と同じ理由）。
+        if is_first_iter {
+            self.linesearch.initial_step_length(1.0)?;
+        }
+
+        let sk: Vec<f64> = xk1.iter().zip(param.iter()).map(|(a, b)| a - b).collect();
+        let yk: Vec<f64> = grad
+            .iter()
+            .zip(prev_grad.iter())
+            .map(|(a, b)| a - b)
+            .collect();
+
+        // secant条件`yᵀs>0`のチェックは行わず、argmin組み込み`LBFGS::next_iter`と同じく
+        // 常にペアを履歴に追加する（`FaerBfgs`のrank-2更新スキップとは異なる設計）。
+        // `MoreThuenteLineSearch`はstrong Wolfe条件（曲率条件
+        // `|φ'(α)|≤c2|φ'(0)|`）を満たすステップのみ受理するため、受理されたペアは
+        // 理論上`yᵀs>0`を自然に満たす（負曲率を追加で弾く必要性が薄い）。
+        //
+        // 当初は`FaerBfgs`に倣い絶対閾値`f64::EPSILON`でペアを弾くガードを入れていたが、
+        // `generate_binary_choice_dataset("baseline", link="probit", n=100_000, k=5,
+        // seed=42)`で実測したところ、収束点近傍でコスト関数が浮動小数点の底に達すると
+        // （Newtonの収束判定で述べた、コスト関数が浮動小数点の底に達する現象と同根）
+        // `yᵀs`が`f64::EPSILON`をわずかに下回る値になり続け、
+        // このガードが新しいペアの追加を拒否し続けて履歴が古いまま凍結される結果、
+        // 収束までの反復回数が9→31、実行時間が0.27s→5.1sに悪化することが判明した。
+        // ガードを外す（常に追加する）と反復回数は12まで戻る。`rho=1/(yᵀs)`が極端に
+        // 大きくなるリスクはあるが、limited-memoryのため悪いペアの影響は
+        // `LBFGS_HISTORY_SIZE`反復で自然にローテーションアウトされる（argmin組み込み
+        // 版が長年この設計で問題なく動いてきたこととも整合する）。
+        if self.s_history.len() >= LBFGS_HISTORY_SIZE {
+            self.s_history.pop_front();
+            self.y_history.pop_front();
+        }
+        self.s_history.push_back(sk);
+        self.y_history.push_back(yk);
+
+        Ok((state.param(xk1).cost(next_cost).gradient(grad), None))
+    }
+
+    fn terminate(&mut self, state: &LbfgsState) -> TerminationStatus {
+        if let Some(g) = state.get_gradient()
+            && l2_norm(g) < self.tol
+        {
+            return TerminationStatus::Terminated(TerminationReason::SolverConverged);
+        }
+        // コストが（ほぼ）変化しなくなった場合も収束扱いにする（`FaerBfgs::terminate`と
+        // 同じ理由・同じ基準。argmin組み込み`LBFGS`の既定`tol_cost=F::epsilon()`も踏襲）。
+        if (state.get_prev_cost() - state.get_cost()).abs() < f64::EPSILON {
+            return TerminationStatus::Terminated(TerminationReason::SolverConverged);
+        }
+        TerminationStatus::NotTerminated
+    }
+}
+
+/// L-BFGSのtwo-loop recursion（Nocedal & Wright *Numerical Optimization* Algorithm 7.4）:
+/// 直近`m`件のsecantペア`(sᵢ,yᵢ)`（`s_history`/`y_history`、古い順）と現在の勾配`grad`から
+/// 近似逆Hessian×勾配`H_k∇f_k`を計算し、降下方向`-H_k∇f_k`を返す。
+///
+/// `s_history`/`y_history`が空（最適化1回目の反復）の場合は`γ=1.0`（スケーリング無し）
+/// として単位行列近似にフォールバックし、`-grad`を返す（`FaerLbfgs::init`が設定する
+/// line search初期ステップ幅でこの反復のスケールを別途補う、`FaerLbfgs`のdocコメント
+/// 参照）。
+///
+/// `γ=(s_lastᵀy_last)/(y_lastᵀy_last)`（直近のペアのみを使うself-scaling、argmin組み込み
+/// `LBFGS::next_iter`の`gamma`計算と同じ式）。`y_lastᵀy_last`が実質ゼロ（縮退）の場合は
+/// ゼロ除算を避け`γ=1.0`にフォールバックする（`bfgs_updated_inv_hessian`の
+/// `ykyk > f64::EPSILON`ガードと同じ発想）。
+fn two_loop_recursion(
+    s_history: &VecDeque<Vec<f64>>,
+    y_history: &VecDeque<Vec<f64>>,
+    grad: &[f64],
+) -> Vec<f64> {
+    let m = s_history.len();
+    let mut q = grad.to_vec();
+    let mut alpha = vec![0.0; m];
+    let mut rho = vec![0.0; m];
+
+    // `yᵀs`が実質ゼロ（丸め誤差で負・ほぼゼロになりうる）なペアは、そのペアの寄与を
+    // 素通り（`rho_i=alpha_i=0.0`、`q`を更新しない）させて安全に無視する
+    // （rust-reviewer指摘）。`gamma`計算の`yy > f64::EPSILON`ガードと同じ絶対閾値・
+    // 同じ発想だが、`gamma`が履歴の最後のペアだけを見るのに対し、こちらは
+    // two-loop recursionが参照する**全ペア**に適用する必要がある——`FaerLbfgs::
+    // next_iter`は（`FaerBfgs`のrank-2更新スキップとは異なり）secant条件を満たさない
+    // ペアも履歴にそのまま追加する設計（このファイル内の`FaerLbfgs`のdocコメント
+    // 「実装時に踏んだ罠その1」参照）のため、`rho_i=1/(yᵀs)`のゼロ除算が理論上
+    // 履歴中の任意のペアで起こりうる。`rho[i]=alpha[i]=0.0`のままにしておけば、
+    // 後続の前向きループでも`beta_i=rho[i]*..=0`・`coeff=alpha[i]-beta_i=0`となり
+    // 自動的に同じペアの寄与が無視される（前向きループ側に別途ガードを足す必要はない）。
+    for (i, (s, y)) in s_history.iter().zip(y_history.iter()).enumerate().rev() {
+        let yksk = dot(y, s);
+        if yksk <= f64::EPSILON {
+            continue;
+        }
+        let rho_i = 1.0 / yksk;
+        let alpha_i = rho_i * dot(s, &q);
+        for (q_j, y_j) in q.iter_mut().zip(y.iter()) {
+            *q_j -= alpha_i * y_j;
+        }
+        rho[i] = rho_i;
+        alpha[i] = alpha_i;
+    }
+
+    let gamma = s_history
+        .back()
+        .zip(y_history.back())
+        .map(|(s, y)| {
+            let yy = dot(y, y);
+            if yy > f64::EPSILON {
+                dot(s, y) / yy
+            } else {
+                1.0
+            }
+        })
+        .unwrap_or(1.0);
+    let mut r: Vec<f64> = q.iter().map(|v| v * gamma).collect();
+
+    for (i, (s, y)) in s_history.iter().zip(y_history.iter()).enumerate() {
+        let beta_i = rho[i] * dot(y, &r);
+        let coeff = alpha[i] - beta_i;
+        for (r_j, s_j) in r.iter_mut().zip(s.iter()) {
+            *r_j += coeff * s_j;
+        }
+    }
+
+    r.iter().map(|v| -v).collect()
+}
+
+/// 設計行列`x`を列ピボットQR分解し、ランク落ちが無ければQR分解をそのまま返す
+/// （呼び出し側が`solve_lstsq`で最小二乗解＝反復最適化の初期値を、再分解せずに
+/// 取り出せるようにするため）。
+///
+/// `x`は標準化済み（Logit/Probitの`ols_based_initial_params`）でも生スケール
+/// （`tobit::ols_initial_params`）でもよい。特異性判定は`R`の対角成分に対する相対閾値
+/// `k·ε·max|R_ii|`（`.claude/rules/rust-style.md`「線形代数」、`linear::ols`の
+/// `ensure_full_rank`・`newton_step`と同一式）で、列ごとの一様スケーリングに対して
+/// 不変なため、標準化の有無で判定結果は変わらない。全ゼロ列を含む設計行列では
+/// `col_piv_qr`が`R`の対角にNaNを生成しうるため、NaNも明示的に弾く（`newton_step`と
+/// 同じ罠、`engine/src/linear/CLAUDE.md`「相対閾値との比較だけではNaNをすり抜ける」参照）。
+///
+/// Logit/Probit（`ols_based_initial_params`）とTobit（`tobit::ols_initial_params`）が
+/// `fit()`冒頭で共有する。Newton法が一度も反復していない段階での検出のため、エラーは
+/// `SingularHessian`（最適化中・収束後のHessian逆行列計算）ではなく`SingularDesignMatrix`
+/// （後者のdocコメント参照。`method`（newton/bfgs/lbfgs）に関わらず同じこの単一経路で
+/// 多重共線性を検出するのが本関数を共有する目的）。
+///
+/// # Errors
+/// `x`がランク落ち（完全な多重共線性等）: `MleError::SingularDesignMatrix`
+pub fn checked_design_matrix_qr(
+    x: &Mat<f64>,
+) -> Result<faer::linalg::solvers::ColPivQr<f64>, MleError> {
+    let k = x.ncols();
+    let qr = x.col_piv_qr();
+    let r = qr.thin_R();
+    let max_abs_diag = (0..k).map(|i| (*r.get(i, i)).abs()).fold(0.0_f64, f64::max);
+    let threshold = (k as f64) * f64::EPSILON * max_abs_diag;
+    for i in 0..k {
+        let diag = (*r.get(i, i)).abs();
+        if diag.is_nan() || diag <= threshold {
+            return Err(MleError::SingularDesignMatrix);
+        }
+    }
+    Ok(qr)
+}
+
+/// 標準化空間での線形確率モデル（LPM）最小二乗解を、リンク関数のIRLS 1ステップ相当の
+/// スケール補正を施してNewton/準Newton法の初期値（warm start）に変換する。Logit/Probitが
+/// `fit()`冒頭で共有する（Tobitは`β`がOLSと同一スケールでスケール補正が不要なため、
+/// `tobit::ols_initial_params`が`checked_design_matrix_qr`だけを共有し補正は行わない）。
+///
+/// ## 数式（nullモデル `p≡p̄` を起点にしたIRLSの1反復目）
+///
+/// `p̄ = ȳ`（標本平均）、`w`＝リンクのIRLS重み（logit: `p̄(1-p̄)`、probit: `φ(Φ⁻¹(p̄))`）、
+/// `η₀`＝`p̄`でのリンク値（logit: `ln(p̄/(1-p̄))`、probit: `Φ⁻¹(p̄)`）とすると、nullモデルを
+/// 起点にしたIRLSの1反復目の解は
+/// `β⁽¹⁾ = b_lpm / w + (η₀ - p̄/w)·e₀`（`b_lpm`はLPM最小二乗解、`e₀`は切片成分の
+/// 単位ベクトル）に整理できる（設計行列`X`が切片列を含むとき`(X'X)⁻¹X'𝟙 = e₀`・
+/// `(X'X)⁻¹X'(y - p̄𝟙) = b_lpm - p̄e₀`を使う）。実装は全成分を`1/w`倍し、切片成分にのみ
+/// `η₀ - p̄/w`を加える。切片なしモデルでは切片補正項を落とし`b_lpm/w`のみとする
+/// （吸収先の切片列が無く上の整理が成り立たないため、素の`1/w`スケーリングに留める）。
+///
+/// `p̄`が0または1の近傍（全観測で`y`が同一＝完全分離）では`w→0`で補正が発散するため、
+/// 補正を行わず素のLPM解を返す（分離の検出は`run_solver`の事後チェック・`NonConvergence`に
+/// 委ねる。`tobit::ols_initial_params`が完全当てはまりで`σ=1`にフォールバックするのと
+/// 同じ発想）。
+///
+/// `link_terms`は`p̄`を受け取り`(w, η₀)`を返すクロージャ（Logit/Probitでリンクが
+/// 異なるためクロージャで受ける、`predict_from_link`と同じ方針）。
+///
+/// # Errors
+/// `x_std`がランク落ち: `MleError::SingularDesignMatrix`（`checked_design_matrix_qr`）
+pub fn ols_based_initial_params(
+    x_std: &Mat<f64>,
+    y: &Mat<f64>,
+    has_intercept: bool,
+    link_terms: impl Fn(f64) -> (f64, f64),
+) -> Result<Vec<f64>, MleError> {
+    let qr = checked_design_matrix_qr(x_std)?;
+    let k = x_std.ncols();
+    let n = y.nrows();
+    let beta_lpm = qr.solve_lstsq(y);
+    let mut params: Vec<f64> = (0..k).map(|i| *beta_lpm.get(i, 0)).collect();
+
+    let p_bar = (0..n).map(|i| *y.get(i, 0)).sum::<f64>() / n as f64;
+    // 全観測でyが同一（p̄が0/1近傍）だとIRLS重みwが0へ潰れて補正が発散する。その場合は
+    // 素のLPM解を初期値にし、分離の検出はrun_solverに委ねる（docコメント参照）。
+    const P_BAR_DEGENERACY_FLOOR: f64 = 1e-6;
+    if p_bar > P_BAR_DEGENERACY_FLOOR && p_bar < 1.0 - P_BAR_DEGENERACY_FLOOR {
+        let (w, eta0) = link_terms(p_bar);
+        for param in params.iter_mut() {
+            *param /= w;
+        }
+        if has_intercept {
+            params[0] += eta0 - p_bar / w;
+        }
+    }
+    Ok(params)
+}
+
 /// 設計行列の列ごとの標準化スケール（標準偏差のみ。平均は引かない）。
 ///
 /// 分散1へのスケーリングのみ行い、平均センタリングは行わない。理由: `x_std = (x-mean)/std`と
@@ -1285,7 +2402,7 @@ fn newton_step(hessian: &[Vec<f64>], grad: &[f64]) -> Result<Vec<f64>, MleError>
 /// のとき逆変換の式が成立しない（吸収先の切片が存在しないため）。`x_std = x/std`のみなら
 /// `θ_orig_j = θ_std_j/std_j`で完結し、切片の有無に関係なく成立する。当初の目的（勾配ノルムの
 /// 絶対閾値がxのスケールに依存する問題への対処）もスケーリングのみで達成できる
-/// （`docs/planning/specs/nonlinear-implementation-notes.md`参照）。
+/// （`docs/spec/nonlinear-common.md`1.3節「スケール依存への対処（標準化）」参照）。
 #[derive(Debug, Clone)]
 pub struct ColumnScale {
     /// 列ごとの標準偏差。切片列（`has_intercept=true`の先頭列）は`1.0`のまま
@@ -1372,8 +2489,8 @@ pub fn destandardize_cov_params(cov_std: &Mat<f64>, scale: &ColumnScale) -> Mat<
 
 // `cov_type`ごとの係数分散共分散行列の共通計算。モデル固有の尤度計算には依存せず、
 // 収束点で評価した`H`（対数尤度のHessian、k×k）と`scores`（観測ごとのスコア行列、n×k、
-// 各行が観測`i`のスコアベクトル`sᵢ`）だけを受け取る（`docs/planning/specs/
-// nonlinear-implementation-notes.md`「標準誤差の技術仕様」参照）。
+// 各行が観測`i`のスコアベクトル`sᵢ`）だけを受け取る（`docs/spec/nonlinear-common.md`
+// 3章参照）。
 //
 // `"classical"`/`"nonrobust"`は同じ計算（観測情報行列）のエイリアスのため、
 // engine側では区別せず`observed_information_cov_params`ひとつに統一する
@@ -1597,6 +2714,230 @@ mod tests {
         }
     }
 
+    /// [`BudgetedProblem`]が実際にバジェットを共有カウンタで管理し、
+    /// 使い切ると`MleError::EvaluationBudgetExceeded`を返すことを直接検証する
+    /// （`run_solver`経由の統合テストとは別に、この低レベルの building block 自体を
+    /// 単体で検証する。`bfgs_rank2_update_matches_hand_computed_values_...`と同じ方針）。
+    #[test]
+    fn budgeted_problem_returns_evaluation_budget_exceeded_error_after_budget_is_exhausted() {
+        let wrapped = BudgetedProblem::new(quadratic_problem(), 3);
+        let param = vec![0.0, 0.0];
+
+        assert!(wrapped.cost(&param).is_ok());
+        assert!(wrapped.cost(&param).is_ok());
+        assert!(wrapped.cost(&param).is_ok());
+
+        let err = wrapped.cost(&param).unwrap_err();
+        let mle_error = err.downcast::<MleError>().unwrap();
+        assert_eq!(mle_error, MleError::EvaluationBudgetExceeded { budget: 3 });
+    }
+
+    /// `cost`と`gradient`は独立のカウンタではなく、同じバジェットを共有して消費する
+    /// （実際のline searchは1反復でcost・gradient双方を呼ぶため、この共有が前提）。
+    #[test]
+    fn budgeted_problem_shares_the_same_budget_across_cost_and_gradient_calls() {
+        let wrapped = BudgetedProblem::new(quadratic_problem(), 2);
+        let param = vec![0.0, 0.0];
+
+        assert!(wrapped.cost(&param).is_ok());
+        assert!(wrapped.gradient(&param).is_ok());
+        assert!(wrapped.cost(&param).is_err());
+    }
+
+    /// `f(θ) = -θ₀`（`θ₁`以降は無視）という、下に有界でない（最小点が存在しない）
+    /// ダミー問題。`gradient`は`cost`の真の勾配`[-1, 0, ...]`と整合しており、退化した
+    /// 細工（NaN・不整合な勾配等）は一切無い、正当な降下方向を持つ問題であるにも
+    /// 関わらず、argmin`MoreThuenteLineSearch`は**理論上無限にループする**:
+    /// `θ₀`方向の勾配が常に厳密に`-1`（一定）のため、strong Wolfe条件の曲率条件
+    /// `|dg| <= gtol*|dginit|`（既定`gtol=0.9`）が`|dg|=|dginit|=1`である限り
+    /// **どのステップ幅でも構造的に満たされない**（`1<=0.9`は恒偽）。一方
+    /// 十分減少条件（Armijo）は`cost`が真に無限に減少し続けるため常に満たされ、
+    /// line searchは「ブラケットせず`stpmax`方向へ延々と外挿し続ける」`cstep`の
+    /// 分岐（4番目のケース、`info=4`）に永久に留まる。ステップ幅が実際に`f64::INFINITY`
+    /// に達した後も`(stp-stpmax).abs()`が`NaN`になり比較が常に偽になるため、
+    /// 収束判定（`info`フラグ1〜6）もNaN/Infガードも一度も発火しない
+    /// （実際に踏んだ暴走と同型の構造。手計算でのトレース、および
+    /// devビルドで実際にハングさせてから[`BudgetedProblem`]の除去がハングを再現し
+    /// 導入が解消することを確認済み）。
+    ///
+    /// **単純な定数コスト（`cost`が`param`を無視して常に同じ値を返す）では再現しない**
+    /// ことに注意（既に試して確認済み）: `FaerBfgs::terminate`はargmin組み込みBFGSと
+    /// 同じコスト変化ベースの副次判定（`|prev_cost-cost|<f64::EPSILON`、
+    /// `FaerBfgs`のdocコメント参照）を持つため、コストが真に一定だと外側のBFGS反復が
+    /// line searchに入る前に「収束」と誤判定してしまい、内側のline searchが暴走する
+    /// 状況を再現できない。この問題は`cost`が`param`に応じて真に（無限に）変化し続ける
+    /// ことで外側の誤判定を避けつつ、内側line searchの曲率条件だけを恒久的に破る設計。
+    #[derive(Clone)]
+    struct UnboundedBelowProblem;
+
+    impl CostFunction for UnboundedBelowProblem {
+        type Param = Vec<f64>;
+        type Output = f64;
+
+        fn cost(&self, param: &Self::Param) -> Result<Self::Output, OptimizerError> {
+            Ok(-param[0])
+        }
+    }
+
+    impl Gradient for UnboundedBelowProblem {
+        type Param = Vec<f64>;
+        type Gradient = Vec<f64>;
+
+        fn gradient(&self, param: &Self::Param) -> Result<Self::Gradient, OptimizerError> {
+            Ok(vec![-1.0; param.len()])
+        }
+    }
+
+    impl Hessian for UnboundedBelowProblem {
+        type Param = Vec<f64>;
+        type Hessian = Vec<Vec<f64>>;
+
+        fn hessian(&self, param: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
+            Ok(identity_matrix(param.len()))
+        }
+    }
+
+    #[test]
+    fn run_solver_bfgs_returns_evaluation_budget_exceeded_error_instead_of_hanging_on_a_stalled_line_search()
+     {
+        let result = run_solver(
+            UnboundedBelowProblem,
+            Method::Bfgs,
+            vec![0.0],
+            1,
+            1e-6,
+            1,
+            true,
+            SeparationNormCheck::Enabled,
+        );
+
+        assert!(matches!(
+            result,
+            Err(MleError::EvaluationBudgetExceeded { .. })
+        ));
+    }
+
+    #[test]
+    fn run_solver_lbfgs_returns_a_bounded_error_instead_of_hanging_on_a_stalled_line_search() {
+        // `FaerLbfgs`（自前実装に置き換え済み）は、`FaerBfgs`と違い内側line
+        // search用`Executor`に明示的な`max_iters`（[`LINE_SEARCH_MAX_ITERS`]=100）を
+        // 設定しているため、[`BudgetedProblem`]の総枠（このテストでは
+        // `(1+1)*2000=4000`評価分）を使い切るより先にこちらの上限に到達し、
+        // `MleError::Common(ComputationFailed(..))`（「line search did not converge
+        // within..」）を返す（`Method::Bfgs`、上のテストとは異なり
+        // `EvaluationBudgetExceeded`という具体的なバリアントにはならない。`FaerBfgs`には
+        // この個別チェックが無いため）。
+        let result = run_solver(
+            UnboundedBelowProblem,
+            Method::Lbfgs,
+            vec![0.0],
+            1,
+            1e-6,
+            1,
+            true,
+            SeparationNormCheck::Enabled,
+        );
+
+        let message = result.unwrap_err().to_string();
+        assert!(
+            message.contains("line search did not converge within 100 iterations"),
+            "unexpected error message: {message}"
+        );
+    }
+
+    #[test]
+    fn two_loop_recursion_returns_negative_gradient_when_history_is_empty() {
+        // 履歴が空（最適化1回目の反復）の場合はγ=1.0（スケーリング無し）で単位行列
+        // 近似にフォールバックし、`-grad`をそのまま返すはず。
+        let s_history = VecDeque::new();
+        let y_history = VecDeque::new();
+        let grad = vec![3.0, -4.0];
+
+        let direction = two_loop_recursion(&s_history, &y_history, &grad);
+        assert_eq!(direction, vec![-3.0, 4.0]);
+    }
+
+    #[test]
+    fn two_loop_recursion_matches_hand_computed_values_for_one_history_pair() {
+        // s=[1,0]、y=[0,1]、grad=[2,3]の1件履歴（互いに直交、γ・rhoの手計算を単純化
+        // するため意図的に選んだ値）。
+        //   rho = 1/(y・s) = 1/0 ... y・s=0だと特異になるため、s=[1,0]・y=[1,2]を使う。
+        // rho=1/(y・s)=1/1=1、alpha=rho*(s・grad)=1*2=2、q=grad-alpha*y=[2,3]-2*[1,2]=[0,-1]。
+        // γ=(s・y)/(y・y)=1/5=0.2、r=γ*q=[0,-0.2]。
+        // beta=rho*(y・r)=1*(1*0+2*(-0.2))=-0.4、r+=s*(alpha-beta)=[1,0]*(2-(-0.4))=[2.4,0]
+        // → r=[2.4,-0.2]。方向=-r=[-2.4,0.2]。
+        let mut s_history = VecDeque::new();
+        s_history.push_back(vec![1.0, 0.0]);
+        let mut y_history = VecDeque::new();
+        y_history.push_back(vec![1.0, 2.0]);
+        let grad = vec![2.0, 3.0];
+
+        let direction = two_loop_recursion(&s_history, &y_history, &grad);
+        assert!(
+            (direction[0] - (-2.4)).abs() < 1e-10,
+            "direction={direction:?}"
+        );
+        assert!(
+            (direction[1] - 0.2).abs() < 1e-10,
+            "direction={direction:?}"
+        );
+    }
+
+    /// `dot(y,s)<=f64::EPSILON`（ゼロ除算につながる退化ペア）を履歴の**最古**の位置に
+    /// 混ぜても、そのペアの寄与が黙って無視され、残りの正常なペアだけで
+    /// `two_loop_recursion_matches_hand_computed_values_for_one_history_pair`と
+    /// 完全に同じ結果になるはず（rust-reviewer指摘: `FaerLbfgs`は`FaerBfgs`と異なり
+    /// secant条件を満たさないペアも履歴にそのまま追加する設計のため、
+    /// two-loop recursion自体がこの種のペアに対して頑健である必要がある）。
+    #[test]
+    fn two_loop_recursion_skips_degenerate_pair_with_near_zero_curvature() {
+        let mut s_history = VecDeque::new();
+        // 最古のペア: y=[0,0]なので dot(y,s)=0（退化、無視されるはず）。
+        s_history.push_back(vec![5.0, -3.0]);
+        // 最新のペア: 上の単一ペアテストと同じ値。
+        s_history.push_back(vec![1.0, 0.0]);
+        let mut y_history = VecDeque::new();
+        y_history.push_back(vec![0.0, 0.0]);
+        y_history.push_back(vec![1.0, 2.0]);
+        let grad = vec![2.0, 3.0];
+
+        let direction = two_loop_recursion(&s_history, &y_history, &grad);
+        assert!(
+            (direction[0] - (-2.4)).abs() < 1e-10,
+            "degenerate pair should be fully transparent: direction={direction:?}"
+        );
+        assert!(
+            (direction[1] - 0.2).abs() < 1e-10,
+            "degenerate pair should be fully transparent: direction={direction:?}"
+        );
+    }
+
+    #[test]
+    fn two_loop_recursion_falls_back_to_gamma_one_when_y_norm_is_too_small_to_scale() {
+        // yᵀy=1e-20はf64::EPSILON以下（ゼロ除算ガードが発火する）ため、γ=1.0
+        // （スケーリング無し）にフォールバックするはず。`bfgs_updated_inv_hessian_
+        // first_iteration_uses_prior_when_y_norm_is_too_small_to_scale`と同じ発想の
+        // 退化ケース。
+        //
+        // s=[1,0]・y=[1e-10,0]・grad=[2,3]（第2成分は`y`と直交させ、丸め誤差の影響を
+        // 受けない値で検証できるようにしている）。手計算（γ=1.0フォールバック前提）:
+        // rho=1/(y・s)=1e10、alpha=rho*(s・grad)=2e10、q=grad-alpha*y=[2,3]-2e10*[1e-10,0]
+        // ≈[0,3]（第1成分は桁落ちが乗るが第2成分は`y[1]=0`のため厳密に不変）。
+        // γ=1.0（フォールバック）、r=γ*q≈[0,3]。beta=rho*(y・r)=1e10*(1e-10*r[0]+0*3)、
+        // r[1]+=s[1]*(alpha-beta)=0*(...)=0 → r[1]=3（厳密）。方向[1]=-r[1]=-3。
+        let mut s_history = VecDeque::new();
+        s_history.push_back(vec![1.0, 0.0]);
+        let mut y_history = VecDeque::new();
+        y_history.push_back(vec![1e-10, 0.0]);
+        let grad = vec![2.0, 3.0];
+
+        let direction = two_loop_recursion(&s_history, &y_history, &grad);
+        assert_eq!(
+            direction[1], -3.0,
+            "gamma=1.0 fallback should leave the y-orthogonal component exact: {direction:?}"
+        );
+    }
+
     #[test]
     fn run_solver_newton_converges_to_known_minimum() {
         let output = run_solver(
@@ -1605,6 +2946,7 @@ mod tests {
             vec![0.0, 0.0],
             35,
             1e-6,
+            1,
             true,
             SeparationNormCheck::Enabled,
         )
@@ -1634,6 +2976,7 @@ mod tests {
             vec![0.0, 0.0],
             100,
             1e-6,
+            1,
             true,
             SeparationNormCheck::Enabled,
         )
@@ -1648,6 +2991,191 @@ mod tests {
         );
     }
 
+    /// `Method::Bfgs`は`tol * n_obs`を実効的な絶対閾値として使うはず（
+    /// `run_solver`のdocコメント「tolの意味論はmethodにより異なる」参照）。`n_obs`と`tol`を
+    /// 別々に振っても積が同じなら同じ収束点・反復回数になることを直接検証する
+    /// （既存のBFGS/LBFGSテストは全て`n_obs=1`で呼んでおり、この正規化ロジック自体は
+    /// 未検証だった、rust-reviewer指摘）。
+    #[test]
+    fn run_solver_bfgs_scales_effective_tol_by_n_obs() {
+        let via_n_obs = run_solver(
+            quadratic_problem(),
+            Method::Bfgs,
+            vec![0.0, 0.0],
+            100,
+            1e-9,
+            1000,
+            true,
+            SeparationNormCheck::Enabled,
+        )
+        .unwrap();
+        let via_tol = run_solver(
+            quadratic_problem(),
+            Method::Bfgs,
+            vec![0.0, 0.0],
+            100,
+            1e-6,
+            1,
+            true,
+            SeparationNormCheck::Enabled,
+        )
+        .unwrap();
+
+        assert_eq!(via_n_obs.n_iter, via_tol.n_iter);
+        assert!((via_n_obs.params[0] - via_tol.params[0]).abs() < 1e-12);
+        assert!((via_n_obs.params[1] - via_tol.params[1]).abs() < 1e-12);
+    }
+
+    /// `Method::Lbfgs`も`Bfgs`と同じ正規化を使うはず（同じ理由）。
+    #[test]
+    fn run_solver_lbfgs_scales_effective_tol_by_n_obs() {
+        let via_n_obs = run_solver(
+            quadratic_problem(),
+            Method::Lbfgs,
+            vec![0.0, 0.0],
+            100,
+            1e-9,
+            1000,
+            true,
+            SeparationNormCheck::Enabled,
+        )
+        .unwrap();
+        let via_tol = run_solver(
+            quadratic_problem(),
+            Method::Lbfgs,
+            vec![0.0, 0.0],
+            100,
+            1e-6,
+            1,
+            true,
+            SeparationNormCheck::Enabled,
+        )
+        .unwrap();
+
+        assert_eq!(via_n_obs.n_iter, via_tol.n_iter);
+        assert!((via_n_obs.params[0] - via_tol.params[0]).abs() < 1e-12);
+        assert!((via_n_obs.params[1] - via_tol.params[1]).abs() < 1e-12);
+    }
+
+    /// `Method::Newton`は`n_obs`を無視し、`tol`をそのまま絶対閾値として使うはず
+    /// （`newton`は正規化の対象外、`docs/spec/logit-spec.md`3.2節参照）。
+    #[test]
+    fn run_solver_newton_ignores_n_obs() {
+        let small_n_obs = run_solver(
+            quadratic_problem(),
+            Method::Newton,
+            vec![0.0, 0.0],
+            35,
+            1e-6,
+            1,
+            true,
+            SeparationNormCheck::Enabled,
+        )
+        .unwrap();
+        let large_n_obs = run_solver(
+            quadratic_problem(),
+            Method::Newton,
+            vec![0.0, 0.0],
+            35,
+            1e-6,
+            1_000_000,
+            true,
+            SeparationNormCheck::Enabled,
+        )
+        .unwrap();
+
+        assert_eq!(small_n_obs.n_iter, large_n_obs.n_iter);
+        assert_eq!(small_n_obs.params, large_n_obs.params);
+    }
+
+    #[test]
+    fn bfgs_rank2_update_matches_hand_computed_values_for_non_diagonal_case() {
+        // H=[[2,1],[1,3]]（対称正定値・非対角）、s=[1,0]、y=[1,1]、rho=1/(y・s)=1。
+        // V=I-rho*s*y^T=[[0,-1],[0,1]]、V*H=[[-1,-3],[1,3]]、V*H*V^T=[[3,-3],[-3,3]]、
+        // +rho*s*s^T=[[1,0],[0,0]] で H+=[[4,-3],[-3,3]]（手計算で検証済み）。
+        let h = vec![vec![2.0, 1.0], vec![1.0, 3.0]];
+        let s = vec![1.0, 0.0];
+        let y = vec![1.0, 1.0];
+        let rho = 1.0 / dot(&y, &s);
+
+        let updated = bfgs_rank2_update(&h, &s, &y, rho);
+        let expected = vec![vec![4.0, -3.0], vec![-3.0, 3.0]];
+        for i in 0..2 {
+            for j in 0..2 {
+                assert!(
+                    (updated[i][j] - expected[i][j]).abs() < 1e-10,
+                    "updated={updated:?}, expected={expected:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn scaled_identity_returns_diagonal_matrix_with_given_scale() {
+        let m = scaled_identity(2.5, 3);
+        for i in 0..3 {
+            for j in 0..3 {
+                let expected = if i == j { 2.5 } else { 0.0 };
+                assert_eq!(m[i][j], expected, "i={i}, j={j}, m={m:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn bfgs_updated_inv_hessian_skips_update_when_secant_condition_violated() {
+        let inv_hessian = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        // yᵀs = -1 < 0（secant条件`yᵀs>0`を満たさない）ため、rank-2更新をせず
+        // `inv_hessian`をそのまま返すはず。
+        let s = vec![1.0, 0.0];
+        let y = vec![-1.0, 0.0];
+
+        let updated = bfgs_updated_inv_hessian(inv_hessian.clone(), &s, &y, false);
+        assert_eq!(updated, inv_hessian);
+    }
+
+    #[test]
+    fn bfgs_updated_inv_hessian_applies_self_scaling_gamma_on_first_iteration() {
+        // yᵀs=1・yᵀy=2 → γ=0.5。1回目の反復では`inv_hessian`（ここでは意図的に
+        // γIとは異なる値にしている）を使わず、`scaled_identity(0.5, 2)`を
+        // 「更新前の逆Hessian」としてrank-2更新するはず。
+        let inv_hessian = vec![vec![7.0, 0.0], vec![0.0, 7.0]];
+        let s = vec![1.0, 0.0];
+        let y = vec![1.0, 1.0];
+
+        let updated = bfgs_updated_inv_hessian(inv_hessian, &s, &y, true);
+        let expected = bfgs_rank2_update(&scaled_identity(0.5, 2), &s, &y, 1.0);
+        assert_eq!(updated, expected);
+    }
+
+    #[test]
+    fn bfgs_updated_inv_hessian_does_not_apply_self_scaling_after_first_iteration() {
+        // 同じ`(s,y)`でも`is_first_iter=false`なら、γIではなく渡された`inv_hessian`
+        // をそのまま「更新前の逆Hessian」として使うはず。
+        let inv_hessian = vec![vec![7.0, 0.0], vec![0.0, 7.0]];
+        let s = vec![1.0, 0.0];
+        let y = vec![1.0, 1.0];
+
+        let updated = bfgs_updated_inv_hessian(inv_hessian.clone(), &s, &y, false);
+        let expected = bfgs_rank2_update(&inv_hessian, &s, &y, 1.0 / dot(&y, &s));
+        assert_eq!(updated, expected);
+    }
+
+    #[test]
+    fn bfgs_updated_inv_hessian_first_iteration_uses_prior_when_y_norm_is_too_small_to_scale() {
+        // yᵀy=1e-20はf64::EPSILON以下（self-scalingのゼロ除算ガードが発火する）が、
+        // yᵀs=1e-10はsecant条件の絶対閾値`f64::EPSILON`は上回る（rank-2更新自体は
+        // スキップされない）。この場合`inv_hessian`をスケーリングせずそのまま
+        // 「更新前の逆Hessian」として使うはず。
+        let inv_hessian = vec![vec![9.0, 0.0], vec![0.0, 9.0]];
+        let s = vec![1.0, 0.0];
+        let y = vec![1e-10, 0.0];
+
+        let updated = bfgs_updated_inv_hessian(inv_hessian.clone(), &s, &y, true);
+        let yksk = dot(&y, &s);
+        let expected = bfgs_rank2_update(&inv_hessian, &s, &y, 1.0 / yksk);
+        assert_eq!(updated, expected);
+    }
+
     #[test]
     fn run_solver_lbfgs_converges_to_known_minimum() {
         let output = run_solver(
@@ -1656,6 +3184,7 @@ mod tests {
             vec![0.0, 0.0],
             100,
             1e-6,
+            1,
             true,
             SeparationNormCheck::Enabled,
         )
@@ -1678,6 +3207,7 @@ mod tests {
             vec![1000.0, -1000.0],
             1,
             1e-12,
+            1,
             true,
             SeparationNormCheck::Enabled,
         );
@@ -1693,6 +3223,7 @@ mod tests {
             vec![1000.0, -1000.0],
             1,
             1e-12,
+            1,
             false,
             SeparationNormCheck::Enabled,
         )
@@ -1709,6 +3240,7 @@ mod tests {
             vec![1000.0, -1000.0],
             0,
             1e-12,
+            1,
             true,
             SeparationNormCheck::Enabled,
         );
@@ -1724,6 +3256,7 @@ mod tests {
             vec![1000.0, -1000.0],
             0,
             1e-12,
+            1,
             false,
             SeparationNormCheck::Enabled,
         )
@@ -1774,6 +3307,7 @@ mod tests {
             vec![0.0],
             35,
             1e-6,
+            1,
             true,
             SeparationNormCheck::Enabled,
         );
@@ -1841,6 +3375,7 @@ mod tests {
             vec![0.5],
             10,
             1e-6,
+            1,
             false,
             SeparationNormCheck::Enabled,
         )
@@ -1853,6 +3388,344 @@ mod tests {
             "converged=true was reported but the actual gradient at the returned params {:?} is {:?}",
             output.params,
             actual_grad
+        );
+    }
+
+    /// 大標本のNewton収束判定で問題になる状況を模した問題。コスト関数は`θ = target`で最小になる素直な2次関数
+    /// だが、(1) 大きな定数オフセットによりコストのULPが粗く（`≈1.5e-11`）、`target`
+    /// 近傍ではコストがそれ以上減少しない浮動小数点の底に達する。(2) 勾配は`target`
+    /// 近傍でも`grad_floor`（`> tol`）で下げ止まる（大標本で総和勾配の丸め誤差の床が
+    /// `tol`を上回る状況の模擬）。Hessianは常に正定値（`H_DIAG`）で、生のNewtonステップ
+    /// `grad_floor / H_DIAG`はパラメータのスケールに対して無視できる。
+    #[derive(Clone)]
+    struct FloatingPointFloorProblem {
+        target: f64,
+        /// 勾配の下げ止まり値（`gradient`が返す絶対値の下限）。
+        grad_floor: f64,
+    }
+
+    impl FloatingPointFloorProblem {
+        const COST_OFFSET: f64 = 1.0e5;
+        const H_DIAG: f64 = 1.0e6;
+    }
+
+    impl CostFunction for FloatingPointFloorProblem {
+        type Param = Vec<f64>;
+        type Output = f64;
+
+        fn cost(&self, param: &Self::Param) -> Result<Self::Output, OptimizerError> {
+            let d = param[0] - self.target;
+            Ok(Self::COST_OFFSET + 0.5 * Self::H_DIAG * d * d)
+        }
+    }
+
+    impl Gradient for FloatingPointFloorProblem {
+        type Param = Vec<f64>;
+        type Gradient = Vec<f64>;
+
+        fn gradient(&self, param: &Self::Param) -> Result<Self::Gradient, OptimizerError> {
+            let raw = Self::H_DIAG * (param[0] - self.target);
+            let floored = if raw.abs() < self.grad_floor {
+                self.grad_floor.copysign(if raw == 0.0 { 1.0 } else { raw })
+            } else {
+                raw
+            };
+            Ok(vec![floored])
+        }
+    }
+
+    impl Hessian for FloatingPointFloorProblem {
+        type Param = Vec<f64>;
+        type Hessian = Vec<Vec<f64>>;
+
+        fn hessian(&self, _param: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
+            Ok(vec![vec![Self::H_DIAG]])
+        }
+    }
+
+    /// 大標本Newton収束判定の回帰テスト: 勾配ノルムが`tol`の床（`grad_floor > tol`）で下げ止まり、
+    /// かつコスト関数が浮動小数点の底に達する問題で、`FaerNewton`が`SingularHessian`にも
+    /// `NonConvergence`にもならず**収束**する（`regularized_newton_step`が
+    /// `RegularizedStep::NoProgress`を返し、`next_iter`が勾配の停滞を確認して
+    /// `stalled_at_optimum`を立てる経路）。修正前は`regularized_newton_step`が
+    /// `MAX_LM_ATTEMPTS`回すべて失敗して`Err(MleError::SingularHessian)`を返していた。
+    #[test]
+    fn run_solver_newton_converges_when_cost_hits_floating_point_floor_above_gradient_tol() {
+        let output = run_solver(
+            FloatingPointFloorProblem {
+                target: 2.0,
+                grad_floor: 5.0e-5,
+            },
+            Method::Newton,
+            vec![0.0],
+            50,
+            1e-6,
+            1,
+            true,
+            SeparationNormCheck::Disabled,
+        )
+        .unwrap();
+
+        assert!(output.converged, "{output:?}");
+        assert!(
+            (output.params[0] - 2.0).abs() < 1e-6,
+            "params={:?}",
+            output.params
+        );
+        // `stalled_at_optimum`経由の収束は最適点近傍に到達してから数反復以内に起きる。
+        assert!(output.n_iter <= 5, "n_iter={}", output.n_iter);
+    }
+
+    /// `raise_on_non_convergence=false`でも、`stalled_at_optimum`経由の収束は
+    /// `converged=true`（`SolverConverged`）として返る（`NonConvergence`の
+    /// `converged=false`降格ではない）。
+    #[test]
+    fn run_solver_newton_stalled_at_optimum_reports_converged_even_without_raising() {
+        let output = run_solver(
+            FloatingPointFloorProblem {
+                target: -1.5,
+                grad_floor: 5.0e-5,
+            },
+            Method::Newton,
+            vec![10.0],
+            50,
+            1e-6,
+            1,
+            false,
+            SeparationNormCheck::Disabled,
+        )
+        .unwrap();
+
+        assert!(output.converged, "{output:?}");
+        assert!(
+            (output.params[0] - (-1.5)).abs() < 1e-6,
+            "params={:?}",
+            output.params
+        );
+    }
+
+    /// コスト関数が平坦（どのステップでも減少しない）だが勾配ノルムが大きい問題。
+    /// `λ=0`のHessianは可逆なので`regularized_newton_step`は`RegularizedStep::NoProgress`
+    /// を返すが、勾配ノルムが`NEWTON_STALL_GRAD_FACTOR * tol`を大きく超えるため
+    /// `next_iter`は`stalled_at_optimum`を立てない（上記の最適点停滞判定のガード条件その2:
+    /// 最適点から遠い場所での停滞を収束と誤判定しない）。結果は`NonConvergence`。
+    #[derive(Clone)]
+    struct FlatCostLargeGradientProblem;
+
+    impl CostFunction for FlatCostLargeGradientProblem {
+        type Param = Vec<f64>;
+        type Output = f64;
+
+        fn cost(&self, _param: &Self::Param) -> Result<Self::Output, OptimizerError> {
+            Ok(0.0)
+        }
+    }
+
+    impl Gradient for FlatCostLargeGradientProblem {
+        type Param = Vec<f64>;
+        type Gradient = Vec<f64>;
+
+        fn gradient(&self, _param: &Self::Param) -> Result<Self::Gradient, OptimizerError> {
+            Ok(vec![1.0])
+        }
+    }
+
+    impl Hessian for FlatCostLargeGradientProblem {
+        type Param = Vec<f64>;
+        type Hessian = Vec<Vec<f64>>;
+
+        fn hessian(&self, _param: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
+            Ok(vec![vec![1.0]])
+        }
+    }
+
+    #[test]
+    fn run_solver_newton_does_not_treat_flat_cost_with_large_gradient_as_converged() {
+        let result = run_solver(
+            FlatCostLargeGradientProblem,
+            Method::Newton,
+            vec![0.0],
+            20,
+            1e-6,
+            1,
+            true,
+            SeparationNormCheck::Disabled,
+        );
+
+        assert!(
+            matches!(result, Err(MleError::NonConvergence { .. })),
+            "{result:?}"
+        );
+    }
+
+    /// `λ=0`のHessianは可逆だが**不定符号**（鞍点）で、勾配ノルムは小さく（条件(1)(2)は
+    /// 満たす）コスト関数は平坦。`regularized_newton_step`は`RegularizedStep::NoProgress`を
+    /// 返すが、`next_iter`のコストHessian正定値チェック（条件(3)、`cost_hessian_is_
+    /// positive_definite`）が偽になるため`stalled_at_optimum`を立てない（上記の最適点停滞判定の
+    /// 2階条件ガード、rust-reviewer指摘）。結果は`NonConvergence`——鞍点を「収束」として
+    /// 黙って推定値を返さない。
+    #[derive(Clone)]
+    struct IndefiniteHessianStallProblem;
+
+    impl CostFunction for IndefiniteHessianStallProblem {
+        type Param = Vec<f64>;
+        type Output = f64;
+
+        fn cost(&self, _param: &Self::Param) -> Result<Self::Output, OptimizerError> {
+            Ok(0.0)
+        }
+    }
+
+    impl Gradient for IndefiniteHessianStallProblem {
+        type Param = Vec<f64>;
+        type Gradient = Vec<f64>;
+
+        fn gradient(&self, _param: &Self::Param) -> Result<Self::Gradient, OptimizerError> {
+            // `tol=1e-6 < 5e-5 < NEWTON_STALL_GRAD_FACTOR·tol = 1e-2`（条件(2)を満たす）。
+            Ok(vec![5.0e-5, 0.0])
+        }
+    }
+
+    impl Hessian for IndefiniteHessianStallProblem {
+        type Param = Vec<f64>;
+        type Hessian = Vec<Vec<f64>>;
+
+        fn hessian(&self, _param: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
+            // 可逆（`det = -1`）だが不定符号（固有値 `+1`, `-1`）。`col_piv_qr`は可逆と
+            // 判定するが`llt`（Cholesky）は失敗する。
+            Ok(vec![vec![1.0, 0.0], vec![0.0, -1.0]])
+        }
+    }
+
+    #[test]
+    fn run_solver_newton_does_not_treat_indefinite_hessian_stall_as_converged() {
+        let result = run_solver(
+            IndefiniteHessianStallProblem,
+            Method::Newton,
+            vec![0.0, 0.0],
+            20,
+            1e-6,
+            1,
+            true,
+            SeparationNormCheck::Disabled,
+        );
+
+        assert!(
+            matches!(result, Err(MleError::NonConvergence { .. })),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn checked_design_matrix_qr_accepts_full_rank_and_returns_usable_decomposition() {
+        // フルランクな設計行列（切片 + 独立な2列）。QR分解が返り、その`solve_lstsq`が
+        // 最小二乗解を与えることを確認する（呼び出し側が再分解せず初期値を取り出せる）。
+        let x = Mat::from_fn(5, 3, |i, j| match j {
+            0 => 1.0,
+            1 => [1.0, 2.0, 3.0, 4.0, 5.0][i],
+            _ => [2.0, 1.0, 4.0, 3.0, 6.0][i],
+        });
+        let y = Mat::from_fn(5, 1, |i, _| [1.0, 2.0, 2.0, 4.0, 5.0][i]);
+
+        let qr = checked_design_matrix_qr(&x).expect("full-rank design matrix must be accepted");
+        let beta = qr.solve_lstsq(&y);
+        // 正規方程式 X'Xβ = X'y を満たすはず（残差が設計行列と直交）。
+        let resid = &y - &x * &beta;
+        for j in 0..3 {
+            let dot: f64 = (0..5).map(|i| *x.get(i, j) * *resid.get(i, 0)).sum();
+            assert!(
+                dot.abs() < 1e-9,
+                "column {j} not orthogonal to residual: {dot}"
+            );
+        }
+    }
+
+    #[test]
+    fn checked_design_matrix_qr_rejects_rank_deficient_design_matrix() {
+        // 3列目 = 2 × 2列目（完全な多重共線性）。
+        let x = Mat::from_fn(5, 3, |i, j| match j {
+            0 => 1.0,
+            1 => [1.0, 2.0, 3.0, 4.0, 5.0][i],
+            _ => 2.0 * [1.0, 2.0, 3.0, 4.0, 5.0][i],
+        });
+        assert_eq!(
+            checked_design_matrix_qr(&x).unwrap_err(),
+            MleError::SingularDesignMatrix
+        );
+    }
+
+    #[test]
+    fn checked_design_matrix_qr_rejects_all_zero_design_matrix_via_nan_guard() {
+        // 全ゼロ列の`col_piv_qr`は`R`の対角にNaNを生じうる（`newton_step`と同じ罠）。
+        let x = Mat::from_fn(4, 2, |_, _| 0.0);
+        assert_eq!(
+            checked_design_matrix_qr(&x).unwrap_err(),
+            MleError::SingularDesignMatrix
+        );
+    }
+
+    #[test]
+    fn ols_based_initial_params_recovers_exact_logit_mle_for_intercept_only_model() {
+        // 切片のみ（`x`が定数列だけ）: LPMの最小二乗解は`b_lpm = [p̄]`、logitの補正で
+        // `β⁽¹⁾[0] = p̄/w + (η₀ - p̄/w) = η₀ = ln(p̄/(1-p̄))`（切片のみモデルの厳密なMLE）。
+        let y = Mat::from_fn(7, 1, |i, _| if i < 4 { 1.0 } else { 0.0 });
+        let x = Mat::from_fn(7, 1, |_, _| 1.0);
+        let params = ols_based_initial_params(&x, &y, true, |p_bar| {
+            (p_bar * (1.0 - p_bar), (p_bar / (1.0 - p_bar)).ln())
+        })
+        .unwrap();
+
+        let p_bar: f64 = 4.0 / 7.0;
+        let expected = (p_bar / (1.0 - p_bar)).ln();
+        assert!((params[0] - expected).abs() < 1e-12, "{params:?}");
+    }
+
+    #[test]
+    fn ols_based_initial_params_scales_slopes_by_link_derivative_reciprocal() {
+        // 切片なしモデル: 補正は全成分を`1/w`倍するだけ（切片補正項なし）。`w`を既知の
+        // 定数に固定して、返り値が`b_lpm / w`（LPM解のスケール変換）であることを確認する。
+        let x = Mat::from_fn(4, 1, |i, _| [1.0, 2.0, 3.0, 4.0][i]);
+        let y = Mat::from_fn(4, 1, |i, _| [0.0, 0.0, 1.0, 1.0][i]);
+
+        let raw = ols_based_initial_params(&x, &y, false, |_| (1.0, 0.0)).unwrap();
+        let scaled = ols_based_initial_params(&x, &y, false, |_| (0.25, 0.0)).unwrap();
+        assert!(
+            (scaled[0] - raw[0] / 0.25).abs() < 1e-12,
+            "{scaled:?} {raw:?}"
+        );
+    }
+
+    #[test]
+    fn ols_based_initial_params_falls_back_to_raw_lpm_when_all_y_are_identical() {
+        // 全観測でy=1（p̄=1、完全分離）: IRLS重み`w`が0へ潰れるため補正を行わず、
+        // 素のLPM解（切片=1.0、傾き=0.0）を返す（`link_terms`は呼ばれないので発散しない）。
+        let x = Mat::from_fn(
+            4,
+            2,
+            |i, j| if j == 0 { 1.0 } else { [1.0, 2.0, 3.0, 4.0][i] },
+        );
+        let y = Mat::from_fn(4, 1, |_, _| 1.0);
+        let params = ols_based_initial_params(&x, &y, true, |_| {
+            panic!("link_terms must not be called for a degenerate p_bar")
+        })
+        .unwrap();
+        assert!(
+            (params[0] - 1.0).abs() < 1e-9 && params[1].abs() < 1e-9,
+            "{params:?}"
+        );
+    }
+
+    #[test]
+    fn ols_based_initial_params_propagates_singular_design_matrix_error() {
+        let x = Mat::from_fn(5, 3, |i, j| match j {
+            0 => 1.0,
+            1 => [1.0, 2.0, 3.0, 4.0, 5.0][i],
+            _ => 2.0 * [1.0, 2.0, 3.0, 4.0, 5.0][i],
+        });
+        let y = Mat::from_fn(5, 1, |i, _| [0.0, 1.0, 0.0, 1.0, 1.0][i]);
+        assert_eq!(
+            ols_based_initial_params(&x, &y, true, |p| (p * (1.0 - p), 0.0)).unwrap_err(),
+            MleError::SingularDesignMatrix
         );
     }
 
@@ -2387,6 +4260,7 @@ mod tests {
             vec![0.0, 0.0],
             35,
             1e-6,
+            1,
             true,
             SeparationNormCheck::Enabled,
         );
@@ -2409,6 +4283,7 @@ mod tests {
             vec![0.0, 0.0],
             35,
             1e-6,
+            1,
             false,
             SeparationNormCheck::Enabled,
         )
@@ -2426,7 +4301,7 @@ mod tests {
     }
 
     /// `SeparationNormCheck::Disabled`（Tobit相当）: 同じ大ノルム収束点でも事後チェックを
-    /// 通らず、`converged=true`で`target`へ収束した結果をそのまま返す（Issue #288）。
+    /// 通らず、`converged=true`で`target`へ収束した結果をそのまま返す。
     #[test]
     fn run_solver_ignores_separation_norm_when_check_is_disabled() {
         let output = run_solver(
@@ -2435,6 +4310,7 @@ mod tests {
             vec![0.0, 0.0],
             35,
             1e-6,
+            1,
             true,
             SeparationNormCheck::Disabled,
         )
@@ -2468,7 +4344,7 @@ mod tests {
     }
 
     /// `goodness_of_fit`をLogit/Probitの尤度計算とは独立に、直接与えた`llf`/`llnull`から
-    /// 検証する。数式は`docs/planning/specs/nonlinear-api-design.md`5章通り。
+    /// 検証する。数式は`docs/spec/nonlinear-common.md`5章通り。
     #[test]
     fn goodness_of_fit_computes_expected_statistics() {
         let llf = -5.0;
@@ -2691,5 +4567,55 @@ mod tests {
                 "threshold={threshold}, actual1={actual1}"
             );
         }
+    }
+
+    // ── predict_new_data ──────────────────────────────
+
+    #[test]
+    fn predict_new_data_matches_manually_computed_link_of_linear_combination() {
+        // params = [const=1.0, x1=2.0]、リンク関数はidentity（線形結合そのもの）。
+        // 新規データx1=[10, 20]に対する予測値は1+2*10=21, 1+2*20=41
+        let params = vec![1.0, 2.0];
+        let new_x_columns = vec![vec![10.0, 20.0]];
+
+        let predicted = predict_new_data(&params, true, &new_x_columns, |z| z);
+
+        assert_eq!(predicted, vec![21.0, 41.0]);
+    }
+
+    #[test]
+    fn predict_new_data_applies_link_function() {
+        // リンク関数として2倍する関数を渡すと、線形結合の2倍が返るはず
+        // （`link`が実際に適用されていることの確認、`predict_from_link`と同じ発想）。
+        let params = vec![1.0, 2.0];
+        let new_x_columns = vec![vec![10.0]];
+
+        let predicted = predict_new_data(&params, true, &new_x_columns, |z| z * 2.0);
+
+        // 線形結合=1+2*10=21、リンク適用後=42
+        assert_eq!(predicted, vec![42.0]);
+    }
+
+    #[test]
+    fn predict_new_data_without_intercept_omits_constant_term() {
+        let params = vec![2.0, 3.0];
+        let new_x_columns = vec![vec![10.0, 20.0], vec![1.0, 2.0]];
+
+        let predicted = predict_new_data(&params, false, &new_x_columns, |z| z);
+
+        // has_intercept=falseなので2*10+3*1=23, 2*20+3*2=46
+        assert_eq!(predicted, vec![23.0, 46.0]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn predict_new_data_panics_when_column_count_does_not_match_params() {
+        // new_x_columns.len()が期待する列数（params.len() - has_intercept）と
+        // 一致しない場合はengine_pybind側の実装バグでしか起こり得ない内部契約違反のため、
+        // engine::linear::ols::predict_new_dataと同じくdebug_assert_eq!がパニックする。
+        let params = vec![1.0, 2.0, 3.0]; // has_intercept=trueなら期待列数は2
+        let new_x_columns = vec![vec![10.0, 20.0]]; // 1列しかない
+
+        let _ = predict_new_data(&params, true, &new_x_columns, |z| z);
     }
 }

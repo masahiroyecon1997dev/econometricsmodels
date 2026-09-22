@@ -120,3 +120,13 @@ def test_include_intercept_false_matches_statsmodels(cov_type):
     _checks.check_include_intercept_false_matches_statsmodels(
         CONFIG, sm.Logit, cov_type
     )
+
+
+def test_predict_new_data_matches_statsmodels():
+    _checks.check_predict_new_data_matches_statsmodels(CONFIG, sm.Logit)
+
+
+def test_predict_new_data_without_intercept_matches_statsmodels():
+    _checks.check_predict_new_data_without_intercept_matches_statsmodels(
+        CONFIG, sm.Logit
+    )

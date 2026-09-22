@@ -51,6 +51,15 @@ NUMERIC_SCENARIOS = [
     # 変数間のスケールが極端に異なるケース（真のDGPは未スケーリングのXで計算済みの
     # ため成功パス）。
     "scale_variance",
+    # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス
+    # （OLSの同種ケース相当、test-coverage-candidates.md項目2）。係数の大きさは
+    # 分離を避けるためOLSよりずっと小さく較正済み（benchmark/nonlinear/datasets.py参照）。
+    "many_regressors",
+    # x1の5%を外れ値に置き換えた成功パス（OLSの同種ケース相当、
+    # test-coverage-candidates.md項目67）。少数の観測のみが極端な値を持つため
+    # 分離を起こさず、OLSと同じ較正値をそのまま使える
+    # （benchmark/nonlinear/datasets.py参照）。
+    "outlier_regressor",
 ]
 
 # hc1はstatsmodelsで未実装のためここには含めない（上記docstring参照）。
@@ -136,9 +145,9 @@ def build_fixtures() -> dict:
             "near_separationはprobit特有の病理（準完全分離）の境界値ケース"
             "（較正値はlogitと異なりbeta1=10、"
             "benchmark/nonlinear/datasets.py参照）。"
-            "完全分離下でのNonConvergence検出には既知の限界（logitと同じ、"
-            "nonlinear/common.rsのrun_solverを共有するため）があり、専用シナリオは"
-            "採用していない。"
+            "complete_separationシナリオ（真の完全分離、n=500、logitと同じ"
+            "nonlinear/common.rsのrun_solverを共有）も同様にここに含まない"
+            "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
             "scale_varianceは真のDGPを未スケーリングのXで計算した後に列のみを"
             "スケーリングする設計のため成功パス。"
             "n=k+1（自由度1ちょうど）の境界値ケースはLogitと同じ理由で非採用"
@@ -148,6 +157,12 @@ def build_fixtures() -> dict:
             "methodはbfgs/lbfgsがnewtonと同じ最尤解・標準誤差に収束することを主"
             "リファレンスに対して確認するためのfixture（baselineシナリオ・classical"
             "cov_typeの1ケースのみ）。"
+            "many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ高次元"
+            "シナリオ（OLSの同種ケース相当、test-coverage-candidates.md項目2）。"
+            "真のDGPは未スケーリングのXで計算し、係数の大きさは分離を避けるため"
+            "OLSよりずっと小さく較正済み。"
+            "outlier_regressorはx1の5%を外れ値に置き換えた成功パス"
+            "（OLSの同種ケース相当、test-coverage-candidates.md項目67）。"
         ),
     }
     return fixtures

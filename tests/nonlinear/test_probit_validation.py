@@ -27,6 +27,10 @@ def test_y_in_x_raises(binary_dataset):
     _checks.check_y_in_x_raises(binary_dataset, Probit)
 
 
+def test_y_empty_string_raises(binary_dataset):
+    _checks.check_y_empty_string_raises(binary_dataset, Probit)
+
+
 def test_duplicate_x_column_raises(binary_dataset):
     _checks.check_duplicate_x_column_raises(binary_dataset, Probit)
 
@@ -60,17 +64,49 @@ def test_insufficient_observations_raises(binary_dataset):
     _checks.check_insufficient_observations_raises(binary_dataset, Probit)
 
 
-# ── ValidationError（オプション） ──────────────────────────────────
+# ── ValidationError（predict()のnew_data） ─────────────────────────
 
 
-def test_unknown_cov_type_raises(binary_dataset):
-    _checks.check_unknown_cov_type_raises(
-        binary_dataset, Probit, ProbitOptions
+def test_predict_missing_column_raises(binary_dataset):
+    _checks.check_predict_missing_column_raises(binary_dataset, Probit)
+
+
+def test_predict_non_numeric_dtype_raises(binary_dataset):
+    _checks.check_predict_non_numeric_dtype_raises(binary_dataset, Probit)
+
+
+def test_predict_null_or_non_finite_values_raise(binary_dataset):
+    _checks.check_predict_null_or_non_finite_values_raise(
+        binary_dataset, Probit
     )
 
 
-def test_unknown_method_raises(binary_dataset):
-    _checks.check_unknown_method_raises(binary_dataset, Probit, ProbitOptions)
+# ── ValidationError（augment()） ────────────────────────────────────
+
+
+def test_augment_column_collision_raises(binary_dataset):
+    _checks.check_augment_column_collision_raises(binary_dataset, Probit)
+
+
+def test_augment_missing_column_raises(binary_dataset):
+    _checks.check_augment_missing_column_raises(binary_dataset, Probit)
+
+
+# ── ValidationError（オプション） ──────────────────────────────────
+
+
+@pytest.mark.parametrize("cov_type", ["bogus", ""])
+def test_unknown_cov_type_raises(binary_dataset, cov_type):
+    _checks.check_unknown_cov_type_raises(
+        binary_dataset, Probit, ProbitOptions, cov_type
+    )
+
+
+@pytest.mark.parametrize("method", ["bogus", ""])
+def test_unknown_method_raises(binary_dataset, method):
+    _checks.check_unknown_method_raises(
+        binary_dataset, Probit, ProbitOptions, method
+    )
 
 
 @pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])
@@ -112,6 +148,12 @@ def test_mroz_cluster_cov_type_raises_validation_error():
     )
 
 
+def test_cluster_without_col_raises(binary_dataset):
+    _checks.check_cluster_without_col_raises(
+        binary_dataset, Probit, ProbitOptions
+    )
+
+
 def test_cluster_col_nonexistent_column_raises(binary_dataset):
     _checks.check_cluster_col_nonexistent_column_raises(
         binary_dataset, Probit, ProbitOptions
@@ -137,15 +179,23 @@ def test_marginal_effects_confidence_level_out_of_range_raises(
 
 
 @pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
-def test_singular_hessian_raises_computation_error(method):
-    _checks.check_singular_hessian_raises_computation_error(
-        Probit, ProbitOptions, method
+def test_perfect_multicollinearity_raises_computation_error(method):
+    _checks.check_perfect_multicollinearity_raises_computation_error(
+        Probit, "probit", ProbitOptions, method
     )
 
 
-def test_perfect_multicollinearity_raises_computation_error():
-    _checks.check_perfect_multicollinearity_raises_computation_error(
-        Probit, "probit"
+@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
+def test_complete_separation_raises_computation_error(method):
+    _checks.check_complete_separation_raises_computation_error(
+        Probit, "probit", ProbitOptions, method
+    )
+
+
+@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
+def test_complete_separation_with_raise_on_non_convergence_false(method):
+    _checks.check_complete_separation_with_raise_on_non_convergence_false(
+        Probit, "probit", ProbitOptions, method
     )
 
 

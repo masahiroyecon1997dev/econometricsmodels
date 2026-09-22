@@ -68,20 +68,11 @@ from benchmark.common import (
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
+from benchmark.linear.constants import PREDICT_NEW_DATA
 from benchmark.linear.references.r import run_lm_r
 
 REFERENCES_DIR = Path(__file__).resolve().parent.parent / "references"
 PREDICT_R_SCRIPT = REFERENCES_DIR / "run_lm_predict_crosscheck.R"
-
-# fitted_values/predict()のout-of-sample crosscheck用の新規データ
-# （baselineシナリオのみ）。学習データの実現値とは無関係に、x1/x2/x3の値域内で
-# 手で選んだ値。predict(new_data)の列名マッチング（列順は問わない）も合わせて
-# 確認するため、Python側テストではx3/x1/x2の順に並べ替えて渡す想定。
-PREDICT_NEW_DATA = {
-    "x1": [1.0, -1.0, 0.0, 2.5, -2.0],
-    "x2": [0.5, -0.5, 2.0, -1.5, 0.0],
-    "x3": [0, 1, 2, 0, 1],
-}
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（generate_ols_fixtures.pyと
 # 同じ方針。scale_varianceは全cov_typeでComputationErrorになる）。
@@ -98,9 +89,23 @@ NUMERIC_SCENARIOS = [
     "scale_variance_mild",
     # n=k+1（自由度1ちょうど）の成功パス。
     "baseline_df1",
+    # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス
+    # （generate_ols_fixtures.pyと同じ理由、test-coverage-candidates.md項目2）。
+    "many_regressors",
+    # x1の5%を外れ値に置き換えた成功パス（generate_ols_fixtures.pyと同じ理由、
+    # test-coverage-candidates.md項目67）。
+    "outlier_regressor",
 ]
 
 R_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
+
+# 悪条件・多重共線性シナリオとクラスターロバストSEの組み合わせでの数値的
+# 頑健性確認用（generate_ols_fixtures.pyと同じリスト・同じ理由、
+# test-coverage-candidates.md項目29）。
+CLUSTER_ILL_CONDITIONED_SCENARIOS = [
+    "high_condition_number",
+    "moderate_multicollinearity",
+]
 
 
 def _write_csv(df, tmpdir: Path, name: str) -> Path:
@@ -130,7 +135,10 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
 
     for scenario in NUMERIC_SCENARIOS:
         df, _ = load_frozen_dataset("synthetic", scenario)
-        formula = "y ~ x1 + x2 + x3"
+        # 列名からformulaを組み立てる（many_regressorsのx1..x20等、3列以外の
+        # シナリオにも対応するため。generate_ols_fixtures.pyのrun()と同じ発想）。
+        x_cols = [c for c in df.columns if c not in ("y", "weight")]
+        formula = "y ~ " + " + ".join(x_cols)
         csv_path = _write_csv(df, tmpdir, scenario)
         n = df.height
 
@@ -185,6 +193,14 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
                 formula_g2,
                 groups=[str(i % 2) for i in range(df_g2.height)],
                 suffix="_cluster_g2",
+            )
+        elif scenario in CLUSTER_ILL_CONDITIONED_SCENARIOS:
+            # 悪条件・多重共線性シナリオとクラスターの組み合わせでの数値的
+            # 頑健性確認用（generate_ols_fixtures.pyと同じ理由、
+            # test-coverage-candidates.md項目29）。均等な疑似グループ
+            # （行番号%10）のみ。
+            fixtures[scenario]["cluster"] = _run_cluster_case(
+                df, csv_path, formula
             )
 
     return fixtures
@@ -302,10 +318,12 @@ def build_fixtures() -> dict:
             "perfect_multicollinearityシナリオはここに含まない"
             "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
             "HACはR側のみ（explicit lagを本実装の自動ラグ式に合わせて指定）。"
-            "clusterはbaselineシナリオのみ、R側のみ確認。均等疑似グループ（行番号%10）"
+            "clusterはR側のみ確認。baselineシナリオで均等疑似グループ（行番号%10）"
             "に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2"
             "（cluster_g2）、wage1の実カテゴリ列region（northcen/south/west"
-            "ダミーから合成、基準カテゴリnortheast）を含む。"
+            "ダミーから合成、基準カテゴリnortheast）を含む"
+            "（グルーピングパターンのバリエーションはbaselineシナリオのみ、"
+            "他シナリオは均等疑似グループ1パターンのみ、後述）。"
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
             "pyfixestとの比較は正確性検証から除外（性能比較専用）。"
             "high_condition_number/baseline_df1は境界値・悪条件ケース。"
@@ -313,6 +331,15 @@ def build_fixtures() -> dict:
             "限界を超え、本実装・RのSolve()の双方が全cov_typeで計算不能"
             "（エラー）になるため（perfect_multicollinearityと同様、"
             "ComputationErrorの発生確認のみテストコード側で対応）。"
+            "many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ"
+            "高次元シナリオ（generate_ols_fixtures.pyと同じ理由、"
+            "test-coverage-candidates.md項目2）。outlier_regressorはx1の5%を"
+            "外れ値に置き換えた成功パス（generate_ols_fixtures.pyと同じ理由、"
+            "test-coverage-candidates.md項目67）。high_condition_number/"
+            "moderate_multicollinearityにもclusterエントリを追加（従来"
+            "クラスター系はbaselineシナリオのみで、悪条件・多重共線性シナリオ"
+            "との組み合わせが未検証だった。均等な疑似グループ（行番号%10）のみ。"
+            "test-coverage-candidates.md項目29）。"
         ),
     }
     return fixtures

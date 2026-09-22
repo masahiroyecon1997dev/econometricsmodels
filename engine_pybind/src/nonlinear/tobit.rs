@@ -5,7 +5,7 @@
 //! CLAUDE.md`参照）だが、以下の点がTobit固有:
 //!
 //! - `TobitOptions`は`lower`/`upper`（打ち切り境界）フィールドを追加で持つ
-//!   （`nonlinear-api-design.md`7章で確定済みの既定値`lower=Some(0.0)`・`upper=None`）
+//!   （`docs/spec/nonlinear-common.md`7章で確定済みの既定値`lower=Some(0.0)`・`upper=None`）
 //! - `TobitResult`の`params`/`param_names`/`std_errors`等は`(k+1)`長に統一する
 //!   （`engine::nonlinear::tobit::TobitEstimator::params()`は`β`のみ`k`長だが、
 //!   `std_errors()`等は`σ`を含む`k+1`長という非対称な設計になっているため、Python側では
@@ -15,9 +15,9 @@
 //!   `"expected_observed"`/`"prob_uncensored"`、Rust側`MarginalEffectsTarget`の
 //!   snake_case版、ユーザー確認済み）を追加で受け取る
 //! - `pred_table()`の代わりに`censoring_fit_check()`を提供する（`y`が連続変数のため
-//!   分類の的中表は意味を持たない、`nonlinear-api-design.md`6章）
+//!   分類の的中表は意味を持たない、`docs/spec/nonlinear-common.md`6章）
 //! - `log_likelihood_null`/`lr_statistic`/`lr_p_value`/`pseudo_r_squared`は無い
-//!   （Tobitはこの共通コアから意図的に外れる、`nonlinear-api-design.md`5章）
+//!   （Tobitはこの共通コアから意図的に外れる、`docs/spec/nonlinear-common.md`5章）
 //!
 //! 【責務分離】【言語方針】は`logit.rs`のモジュールdocコメントと同じ
 //! （`.claude/rules/rust-style.md`参照）。
@@ -25,21 +25,21 @@
 //! `build_tobit_input`が`PyDataFrame`ではなく`polars::DataFrame`を受け取る設計にしている
 //! 理由も`logit.rs`と同じ（GILなしで`cargo test`から直接ユニットテストできるようにするため）。
 
-use engine::nonlinear::common::{CovType as EngineCovType, Method as EngineMethod};
+use engine::nonlinear::common::{CovType as EngineCovType, Method as EngineMethod, MleFitOptions};
 use engine::nonlinear::tobit::{
     CensoringFitCategory, CensoringFitCheck, MarginalEffectsTarget, TobitEstimator, TobitInput,
 };
-use polars::prelude::DataFrame;
+use polars::prelude::{Column, DataFrame};
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
-use super::common::{MarginalEffectsResult, mle_error_to_pyerr, parse_marginal_effects_at};
-use crate::column_extraction::{extract_f64_column, extract_group_key_column};
-use crate::errors::ValidationError;
-use crate::validation::{
-    RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
-    validate_no_duplicate_within_role, validate_x_non_empty,
+use super::common::{
+    MarginalEffectsResult, mle_error_to_pyerr, parse_cov_type, parse_marginal_effects_at,
+    parse_method,
 };
+use crate::column_extraction::{extract_f64_column, extract_f64_columns, x_column_names};
+use crate::errors::ValidationError;
+use crate::validation::{validate_common_roles, validate_no_existing_column};
 
 /// Estimation options for Tobit.
 ///
@@ -83,7 +83,19 @@ pub struct TobitOptions {
     #[pyo3(get, set)]
     pub max_iter: i64,
 
-    /// Gradient-norm convergence tolerance.
+    /// Convergence tolerance. For `method="newton"`, an absolute threshold on
+    /// the total gradient norm (default `1e-6`). For `method="bfgs"`/`"lbfgs"`,
+    /// a per-observation-average gradient threshold (the total gradient norm
+    /// divided by the number of observations must fall below `tol`, default
+    /// `1e-8`), matching how statsmodels/scipy normalize convergence checks
+    /// by `nobs`. The two defaults are not interchangeable: Newton's absolute
+    /// semantics with a `1e-8` threshold (or bfgs/lbfgs's normalized
+    /// semantics with a `1e-6` threshold) measurably degrades either speed or
+    /// precision. Passing `tol` explicitly always uses the
+    /// semantics of the chosen `method`. Note: the method-dependent default is
+    /// resolved once, at construction time. Changing `method` afterwards via
+    /// the setter does not re-resolve `tol` — set both together (or set `tol`
+    /// explicitly) if you change `method` after construction.
     #[pyo3(get, set)]
     pub tol: f64,
 
@@ -114,7 +126,7 @@ impl TobitOptions {
         cluster_col = None,
         method = "newton".to_string(),
         max_iter = 35,
-        tol = 1e-6,
+        tol = None,
         raise_on_non_convergence = true,
         lower = Some(0.0),
         upper = None,
@@ -127,11 +139,18 @@ impl TobitOptions {
         cluster_col: Option<String>,
         method: String,
         max_iter: i64,
-        tol: f64,
+        tol: Option<f64>,
         raise_on_non_convergence: bool,
         lower: Option<f64>,
         upper: Option<f64>,
     ) -> Self {
+        // `tol`の既定値のmethod依存分岐は`LogitOptions::new`と同じ理由
+        // （`tol`フィールドのdocコメント参照）。
+        let tol = tol.unwrap_or(if method.eq_ignore_ascii_case("newton") {
+            1e-6
+        } else {
+            1e-8
+        });
         Self {
             cov_type,
             include_intercept,
@@ -167,7 +186,7 @@ impl TobitOptions {
 
 /// Estimation results for Tobit.
 ///
-/// Structured data only (no `summary()`); see `docs/planning/specs/nonlinear-api-design.md`
+/// Structured data only (no `summary()`); see `docs/spec/nonlinear-common.md`
 /// section 5. `predict()` / `marginal_effects()` / `censoring_fit_check()` are provided as
 /// separate methods (not part of this struct's fields), matching section 6.
 ///
@@ -182,7 +201,7 @@ impl TobitOptions {
 ///
 /// `log_likelihood_null`/`lr_statistic`/`lr_p_value`/`pseudo_r_squared` are not provided for
 /// Tobit (no closed form exists under censoring; `wald_statistic`/`wald_p_value` provide the
-/// overall model significance test instead, see `nonlinear-api-design.md` section 5).
+/// overall model significance test instead, see `docs/spec/nonlinear-common.md` section 5).
 // `LogitResult`と同じ理由で`skip_from_py_object`・フィールドごとの個別`#[pyo3(get)]`・
 // `Clone`非導出（`estimator: TobitEstimator`が`Clone`を実装していないため）。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
@@ -234,6 +253,10 @@ pub struct TobitResult {
     /// to lowercase).
     #[pyo3(get)]
     pub cov_type: String,
+    /// Optimization solver actually used (echoes `TobitOptions.method`, normalized
+    /// to lowercase; one of `"newton"`, `"bfgs"`, `"lbfgs"`).
+    #[pyo3(get)]
+    pub method: String,
     /// Lower censoring bound actually used (echoes `TobitOptions.lower`).
     #[pyo3(get)]
     pub lower: Option<f64>,
@@ -243,26 +266,99 @@ pub struct TobitResult {
     /// Not exposed to Python; only `predict`/`marginal_effects`/`censoring_fit_check`
     /// read it (`LogitResult`の`estimator`と同じ位置づけ)。
     estimator: TobitEstimator,
+    /// The original polars DataFrame passed to `fit()`, cached for
+    /// `augment(new_data=None)` (`LogitResult`の`training_data`と同じ
+    /// 位置づけ)。
+    training_data: DataFrame,
+}
+
+// `#[pymethods]`ブロックの外に置く非公開実装（`LogitResult`と同じ理由）。
+impl TobitResult {
+    /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
+    /// （`x`列の抽出→`predict_new_data`呼び出し）。`x`の列名はLogit/Probitと異なり
+    /// `param_names`の先頭`"const"`（`has_intercept`時）と末尾`"sigma"`の両方を
+    /// 除いた部分（モジュールdocコメント参照）。
+    fn predict_for(&self, target: MarginalEffectsTarget, df: &DataFrame) -> PyResult<Vec<f64>> {
+        let has_intercept = self.estimator.input().has_intercept();
+        let x_names = x_column_names(&self.param_names, has_intercept, 1);
+        let x_columns = extract_f64_columns(df, x_names)?;
+
+        Ok(self.estimator.predict_new_data(target, &x_columns))
+    }
 }
 
 #[pymethods]
 impl TobitResult {
-    /// Predicted values for the training data used in `fit()`.
+    /// Predicted values for the training data used in `fit()`, or for `new_data`
+    /// when given.
     ///
     /// `target` selects which quantity to predict: `"expected_latent"` (`E[y*|x]=x'β`),
     /// `"expected_observed"` (`E[y|x]`, the censoring-adjusted conditional expectation;
     /// default, directly comparable to the observed `y`), or `"prob_uncensored"`
-    /// (`P(uncensored|x)`).
-    ///
-    /// Out-of-sample prediction (a `new_data` argument) is not yet supported (same
-    /// limitation as Logit/Probit's `predict()`).
+    /// (`P(uncensored|x)`). Independent of `new_data`: the same three targets are
+    /// available whether predicting on the training data or new data.
     ///
     /// # Errors
-    /// `target` is not one of the three known values (case-insensitive): `ValidationError`
-    #[pyo3(signature = (target="expected_observed".to_string()))]
-    fn predict(&self, target: String) -> PyResult<Vec<f64>> {
+    /// - `target` is not one of the three known values (case-insensitive):
+    ///   `ValidationError`
+    /// - A required `x` column is missing from `new_data`, cannot be cast to a
+    ///   numeric type, or contains missing/NaN/infinite values: `ValidationError`
+    ///   (same validation as `fit()`'s column extraction, via `extract_f64_column`).
+    #[pyo3(signature = (target="expected_observed".to_string(), new_data=None))]
+    fn predict(&self, target: String, new_data: Option<PyDataFrame>) -> PyResult<Vec<f64>> {
         let target = parse_marginal_effects_target(&target.to_lowercase())?;
-        Ok(self.estimator.predict(target))
+        let Some(new_data) = new_data else {
+            return Ok(self.estimator.predict(target));
+        };
+
+        let df: DataFrame = new_data.into();
+        self.predict_for(target, &df)
+    }
+
+    /// The source data (training data, or `new_data` when given) with the predicted
+    /// values appended as a new column named `"predicted_{target}"`, using the
+    /// lowercased `target` (e.g. `"predicted_expected_observed"` for the default
+    /// `target`).
+    ///
+    /// Same `target`/`new_data`/`include_intercept` semantics as `predict()`, but
+    /// returns a polars DataFrame (original columns plus the predicted column, row
+    /// order preserved) instead of a bare list of floats (same design as
+    /// `LogitResult::augment()`). The column name is `target`-dependent
+    /// (unlike Logit/Probit's fixed `"probability"`) so that `augment()` can be
+    /// called once per `target` on the same DataFrame without a name collision.
+    ///
+    /// # Errors
+    /// - Same as `predict()`: `target` unknown, or a required `x` column missing
+    ///   from `new_data`, non-numeric, or containing missing/NaN/infinite values:
+    ///   `ValidationError`.
+    /// - The source data already has a column named `"predicted_{target}"`:
+    ///   `ValidationError` (would otherwise silently overwrite it).
+    #[pyo3(signature = (target="expected_observed".to_string(), new_data=None))]
+    fn augment(&self, target: String, new_data: Option<PyDataFrame>) -> PyResult<PyDataFrame> {
+        let target_lower = target.to_lowercase();
+        let target_enum = parse_marginal_effects_target(&target_lower)?;
+
+        let (mut source, predicted) = match new_data {
+            Some(new_data) => {
+                let df: DataFrame = new_data.into();
+                let predicted = self.predict_for(target_enum, &df)?;
+                (df, predicted)
+            }
+            None => (
+                self.training_data.clone(),
+                self.estimator.predict(target_enum),
+            ),
+        };
+
+        let column_name = format!("predicted_{target_lower}");
+        validate_no_existing_column(&source, &column_name)?;
+
+        // `with_column`の唯一の失敗条件（`ShapeMismatch`）はここでは理論上到達不能
+        // （`LogitResult::augment()`と同じ理由）。
+        source
+            .with_column(Column::new(column_name.into(), predicted))
+            .expect("predicted.len() matches source.height() by construction");
+        Ok(PyDataFrame(source))
     }
 
     /// Marginal effects (`dy/dx`) with delta-method standard errors.
@@ -270,7 +366,7 @@ impl TobitResult {
     /// `target` selects the same three quantities as `predict()` (see its doc). Unlike
     /// Logit/Probit, this is an independent implementation (not the shared
     /// `dydx_and_jacobian` pattern) because the formula differs per `target`
-    /// (`nonlinear-api-design.md` section 6, Issue #211's conclusion).
+    /// (`docs/spec/nonlinear-common.md` section 6).
     ///
     /// Independent of `fit()`'s `confidence_level` (re-evaluated here so callers can
     /// use a different confidence level without re-fitting).
@@ -314,7 +410,7 @@ impl TobitResult {
     /// that applies to this model, compares the observed rate (fraction of training
     /// observations exactly at that boundary) against the model-implied average
     /// probability. Replaces Logit/Probit's `pred_table()` (which is not meaningful for
-    /// Tobit's continuous `y`, `nonlinear-api-design.md` section 6).
+    /// Tobit's continuous `y`, `docs/spec/nonlinear-common.md` section 6).
     ///
     /// `lower`/`upper` in the returned `CensoringFitCheckResult` are `None` when the
     /// corresponding `TobitOptions.lower`/`upper` was `None` (that direction has no
@@ -364,53 +460,6 @@ fn censoring_fit_check_to_result(check: CensoringFitCheck) -> CensoringFitCheckR
         lower: check.lower().map(censoring_fit_category_to_result),
         uncensored: censoring_fit_category_to_result(check.uncensored()),
         upper: check.upper().map(censoring_fit_category_to_result),
-    }
-}
-
-/// `cov_type`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::CovType`に
-/// パースする。`logit.rs`の`parse_cov_type`と同じロジック（`CovType`はLogit/Probit/Tobit
-/// 共有の型のため）だが、モデルファイルごとに独立して定義する既存方針を踏襲する
-/// （`probit.rs`も同様に複製している）。
-///
-/// # Errors
-/// `cov_type`が既知の値のいずれでもない: `ValidationError`
-fn parse_cov_type(
-    df: &DataFrame,
-    cov_type_lower: &str,
-    cluster_col: &Option<String>,
-) -> PyResult<EngineCovType> {
-    match cov_type_lower {
-        "classical" | "nonrobust" => Ok(EngineCovType::Classical),
-        "opg" => Ok(EngineCovType::Opg),
-        "hc0" => Ok(EngineCovType::Hc0),
-        "hc1" => Ok(EngineCovType::Hc1),
-        "cluster" => {
-            let groups = cluster_col
-                .as_ref()
-                .map(|col_name| extract_group_key_column(df, col_name))
-                .transpose()?;
-            Ok(EngineCovType::Cluster { groups })
-        }
-        other => Err(ValidationError::new_err(format!(
-            "unknown cov_type: '{other}'. Expected one of 'classical' (or 'nonrobust'), \
-             'opg', 'hc0', 'hc1', or 'cluster'"
-        ))),
-    }
-}
-
-/// `method`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::Method`に
-/// パースする（`logit.rs`と同じロジック、`parse_cov_type`と同じ理由で複製）。
-///
-/// # Errors
-/// `method`が既知の値のいずれでもない: `ValidationError`
-fn parse_method(method_lower: &str) -> PyResult<EngineMethod> {
-    match method_lower {
-        "newton" => Ok(EngineMethod::Newton),
-        "bfgs" => Ok(EngineMethod::Bfgs),
-        "lbfgs" => Ok(EngineMethod::Lbfgs),
-        other => Err(ValidationError::new_err(format!(
-            "unknown method: '{other}'. Expected one of 'newton', 'bfgs', or 'lbfgs'"
-        ))),
     }
 }
 
@@ -470,7 +519,7 @@ fn validate_no_sigma_collision(x: &[String]) -> PyResult<()> {
 /// - それ以外（次元不一致等）は`engine::nonlinear::common::MleError`から
 ///   `mle_error_to_pyerr`で変換
 ///
-/// Issue #212の結論通り、`validate_binary_y`相当の検証はここでは行わない
+/// `validate_binary_y`相当の検証はここでは行わない
 /// （`y`は連続変数のため）。打ち切り境界の検証は`TobitInput::from_columns`に委ねる
 /// （engine層の責務、`.claude/rules/rust-style.md`「Python境界でのデータ受け渡し」参照）。
 pub(crate) fn build_tobit_input(
@@ -482,20 +531,14 @@ pub(crate) fn build_tobit_input(
     let cov_type_lower = options.cov_type.to_lowercase();
     let method_lower = options.method.to_lowercase();
 
-    validate_x_non_empty(&x)?;
-    validate_no_duplicate_roles(&[("y", RoleValue::Single(&y)), ("x", RoleValue::Multi(&x))])?;
-    validate_no_duplicate_within_role("x", &x)?;
-    validate_no_const_collision(&x, options.include_intercept)?;
+    validate_common_roles(&y, &x, options.include_intercept)?;
     validate_no_sigma_collision(&x)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
     let y_slice = extract_f64_column(df, &y)?;
 
     // ── x列の抽出 ──────────────────────────────────────────────────────
-    let mut x_slices: Vec<Vec<f64>> = Vec::with_capacity(x.len());
-    for col_name in &x {
-        x_slices.push(extract_f64_column(df, col_name)?);
-    }
+    let x_slices = extract_f64_columns(df, &x)?;
 
     let cov_type = parse_cov_type(df, &cov_type_lower, &options.cluster_col)?;
     let method = parse_method(&method_lower)?;
@@ -536,12 +579,14 @@ pub(crate) fn fit(
 
     let estimator = TobitEstimator::fit(
         input,
-        method,
-        options.max_iter,
-        options.tol,
-        options.raise_on_non_convergence,
-        cov_type,
-        options.confidence_level,
+        MleFitOptions {
+            method,
+            max_iter: options.max_iter,
+            tol: options.tol,
+            raise_on_non_convergence: options.raise_on_non_convergence,
+            cov_type,
+            confidence_level: options.confidence_level,
+        },
     )
     .map_err(mle_error_to_pyerr)?;
 
@@ -572,9 +617,11 @@ pub(crate) fn fit(
         converged: estimator.converged(),
         n_iter: estimator.n_iter(),
         cov_type: options.cov_type.to_lowercase(),
+        method: options.method.to_lowercase(),
         lower: options.lower,
         upper: options.upper,
         estimator,
+        training_data: df,
     })
 }
 
@@ -594,11 +641,59 @@ mod tests {
             None,
             "newton".to_string(),
             35,
-            1e-6,
+            Some(1e-6),
             true,
             Some(0.0),
             None,
         )
+    }
+
+    /// `tol=None`のとき、`method`に応じた既定値（`newton`は絶対閾値`1e-6`、
+    /// `bfgs`/`lbfgs`は観測数正規化基準`1e-8`）が解決されるはず
+    /// （`LogitOptions`と同じロジック）。
+    #[test]
+    fn new_resolves_tol_default_based_on_method_when_tol_is_none() {
+        let newton = TobitOptions::new(
+            "classical".to_string(),
+            true,
+            0.95,
+            None,
+            "newton".to_string(),
+            35,
+            None,
+            true,
+            Some(0.0),
+            None,
+        );
+        assert_eq!(newton.tol, 1e-6);
+
+        let bfgs = TobitOptions::new(
+            "classical".to_string(),
+            true,
+            0.95,
+            None,
+            "bfgs".to_string(),
+            35,
+            None,
+            true,
+            Some(0.0),
+            None,
+        );
+        assert_eq!(bfgs.tol, 1e-8);
+
+        let lbfgs = TobitOptions::new(
+            "classical".to_string(),
+            true,
+            0.95,
+            None,
+            "lbfgs".to_string(),
+            35,
+            None,
+            true,
+            Some(0.0),
+            None,
+        );
+        assert_eq!(lbfgs.tol, 1e-8);
     }
 
     /// `y`は`lower=0.0`（既定の境界）以上の値のみで構成する（`TobitInput::from_columns`の
@@ -827,7 +922,7 @@ mod tests {
     // 呼び出し元の`build_tobit_input`が`options.cov_type.to_lowercase()`してから渡す
     // ことで実現している。そのため、この不変条件は`parse_cov_type`単体ではなく
     // `build_tobit_input`（実際にPythonから渡される文字列を受ける入口）を通して検証する
-    // （Logitの`build_logit_input_cov_type_is_case_insensitive`と同じ理由、Issue #231）。
+    // （Logitの`build_logit_input_cov_type_is_case_insensitive`と同じ理由）。
     fn build_tobit_input_cov_type_is_case_insensitive() {
         let df = well_formed_df();
         for (input, is_expected) in [
@@ -916,7 +1011,7 @@ mod tests {
 
     /// 打ち切り境界の不正（両方`None`）は`TobitInput::from_columns`（engine層）が検出し、
     /// `mle_error_to_pyerr`経由で`ValidationError`になる（`build_tobit_input`のdoc
-    /// コメント参照。Issue #212の結論通り、ここでの独自バリデーションは行わない）。
+    /// コメント参照。ここでの独自バリデーションは行わない）。
     #[test]
     fn build_tobit_input_returns_validation_error_when_both_bounds_are_none() {
         let df = well_formed_df();
@@ -970,12 +1065,14 @@ mod tests {
                 .expect("expected Ok");
         let estimator = TobitEstimator::fit(
             input,
-            method,
-            options.max_iter,
-            options.tol,
-            options.raise_on_non_convergence,
-            cov_type,
-            options.confidence_level,
+            MleFitOptions {
+                method,
+                max_iter: options.max_iter,
+                tol: options.tol,
+                raise_on_non_convergence: options.raise_on_non_convergence,
+                cov_type,
+                confidence_level: options.confidence_level,
+            },
         )
         .expect("expected converged fit");
 

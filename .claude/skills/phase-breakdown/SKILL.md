@@ -22,6 +22,7 @@ $ARGUMENTS
    - `python_package`のラッパー実装
    - ドキュメント（mkdocs）
    - pyfixest/R比較テスト（`/test-new`で対応）
+   - 性能比較スクリプト（`performance/compare_<手法>.py` + `docs/performance/<手法>.md`。既存手法の`compare_<method>.py`をテンプレートに、主リファレンス実装との実行時間・メモリ比較を追加する。`.claude/rules/testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」参照。正確性検証テストとセットではなく独立したタスクとして分解する——数値照合が済んでいても性能比較が漏れがちなため）
 3. 手法間・タスク間の依存関係（共通基盤を先に作る必要があるか等）を整理する。
 4. タスク一覧をMarkdown形式（チェックボックス）で提示する。`docs/planning/specs/`への保存も検討する。
 5. 推奨する着手順序を提示する。

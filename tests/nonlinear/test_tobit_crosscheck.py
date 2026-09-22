@@ -6,7 +6,7 @@ generate_tobit_crosscheck_fixtures.py` で生成）を読み込み、`test_tobit
 `test_tobit_reference.py` の docstring 参照（`.claude/rules/testing-policy.md`
 「リファレンス実装」）。
 
-`docs/planning/specs/nonlinear-api-design.md` 9章:「`survreg` と `maxLik` は
+`docs/spec/nonlinear-common.md` 8章:「`survreg` と `maxLik` は
 最適化実装が完全に独立しているため交差検証として組み合わせる価値が高い」。
 主リファレンス（`AER::tobit`）と交差検証（`censReg`）がどちらも R 実装のため、
 限界効果等の手計算箇所は `run_tobit_crosscheck.R` 内で本実装の閉形式を再現し、

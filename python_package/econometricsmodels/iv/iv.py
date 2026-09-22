@@ -8,14 +8,14 @@ for `x_exog`/`x_endog`/`instruments`, an options object for estimation
 settings (CLAUDE.md section 2, `.claude/rules/python-style.md`
 "設計方針との整合性").
 
-`IvOptions` is re-exported as-is from `_lib` (not redefined as a
+`IVOptions` is re-exported as-is from `_lib` (not redefined as a
 separate class; same policy as `OLSOptions`/`LogitOptions`, see
-`docs/spec/ols-spec.md`, "API引数"). `IvOptions.method` selects
-`"2sls"` (default) or `"gmm"` — a single `IV`/`IvResults` pair serves
-both methods (`docs/planning/specs/iv-api-design.md` section 1.2).
+`docs/spec/ols-spec.md`, "API引数"). `IVOptions.method` selects
+`"2sls"` (default) or `"gmm"` — a single `IV`/`IVResults` pair serves
+both methods (`docs/spec/iv-spec.md` section 1.2).
 
 `summary()` is not implemented (structured-data-only output policy; see
-the `OlsResults`/`LogitResults` precedent).
+the `OLSResults`/`LogitResults` precedent).
 """
 
 from __future__ import annotations
@@ -23,10 +23,10 @@ from __future__ import annotations
 import polars as pl
 
 from .. import _lib
-from .._lib import IvOptions
-from ..linear.ols import OlsResults
+from .._lib import IVOptions
+from ..linear.ols import OLSResults
 
-__all__ = ["IV", "IvOptions", "IvResults"]
+__all__ = ["IV", "IVOptions", "IVResults"]
 
 
 class IV:
@@ -43,8 +43,8 @@ class IV:
             variables.
         instruments: List of column names of the excluded instruments
             (must not overlap `x_exog`; see
-            `docs/planning/specs/iv-api-design.md` section 1.1.1).
-        options: Estimation options. Defaults to `IvOptions()`
+            `docs/spec/iv-spec.md` section 1.1).
+        options: Estimation options. Defaults to `IVOptions()`
             (`method="2sls"`, classical, with intercept,
             confidence_level=0.95) when omitted.
 
@@ -71,16 +71,16 @@ class IV:
         x_exog: list[str],
         x_endog: list[str],
         instruments: list[str],
-        options: IvOptions | None = None,
+        options: IVOptions | None = None,
     ) -> None:
         self._data = data
         self._y = y
         self._x_exog = x_exog
         self._x_endog = x_endog
         self._instruments = instruments
-        self._options = options if options is not None else IvOptions()
+        self._options = options if options is not None else IVOptions()
 
-    def fit(self) -> IvResults:
+    def fit(self) -> IVResults:
         """Estimate the IV model.
 
         Returns:
@@ -90,11 +90,11 @@ class IV:
             ValidationError: The input or options are invalid (a
                 column is missing, contains missing values or
                 NaN/infinity, `y`/`x_exog`/`x_endog`/`instruments`
-                overlap, insufficient observations,
-                `confidence_level` out of range, an unknown `cov_type`
-                or (`method="gmm"` only) `weight_type` string, or too
-                few instruments for identification). A subclass of
-                `ValueError`.
+                overlap, `x_endog` or `instruments` is empty,
+                insufficient observations, `confidence_level` out of
+                range, an unknown `cov_type` or (`method="gmm"` only)
+                `weight_type` string, or too few instruments for
+                identification). A subclass of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. a singular first- or second-stage
                 design matrix). A subclass of `RuntimeError`.
@@ -107,10 +107,10 @@ class IV:
             self._instruments,
             self._options,
         )
-        return IvResults(raw)
+        return IVResults(raw)
 
 
-class IvResults:
+class IVResults:
     """IV estimation results.
 
     Array-valued properties (`params`, `std_errors`, etc.) are exposed
@@ -119,18 +119,18 @@ class IvResults:
 
     `first_stage()` (per-endogenous-variable first-stage regression
     results) is provided as a separate method rather than a field on
-    this class (`docs/planning/specs/iv-api-design.md` section 2.2).
+    this class (`docs/spec/iv-spec.md` section 2).
 
     Args:
         raw: The estimation result object returned by `_lib.fit_iv`
-            (`_lib.IvResult`).
+            (`_lib.IVResult`).
 
     Note:
         Users normally do not construct this directly; it is returned
         by `IV.fit()`.
     """
 
-    def __init__(self, raw: _lib.IvResult) -> None:
+    def __init__(self, raw: _lib.IVResult) -> None:
         self._raw = raw
 
     @property
@@ -155,9 +155,9 @@ class IvResults:
 
         t-statistic for `method="2sls"`, z-statistic for
         `method="gmm"` — named generically (not `t_stats`/`z_stats`)
-        because `IvResults` is shared by both methods (mirrors the
-        `_lib.IvResult.stats` naming, `docs/planning/specs/
-        iv-api-design.md` section 2.1).
+        because `IVResults` is shared by both methods (mirrors the
+        `_lib.IVResult.stats` naming, `docs/spec/iv-spec.md`
+        section 2).
         """
         return dict(zip(self._raw.param_names, self._raw.stats))
 
@@ -210,7 +210,7 @@ class IvResults:
     def converged(self) -> bool:
         """Whether GMM iteration converged (`method="gmm"` only).
 
-        Only meaningful when `IvOptions.gmm_convergence` is set (fixed
+        Only meaningful when `IVOptions.gmm_convergence` is set (fixed
         iteration count otherwise trivially satisfies convergence).
         Always `True` for `method="2sls"` (2SLS is a closed-form,
         non-iterative estimator).
@@ -227,6 +227,19 @@ class IvResults:
     def cov_type(self) -> str:
         """Standard error type actually used (normalized to lowercase)."""
         return self._raw.cov_type
+
+    @property
+    def method(self) -> str:
+        """Estimation method actually used (normalized to lowercase):
+        `"2sls"` or `"gmm"`."""
+        return self._raw.method
+
+    @property
+    def weight_type(self) -> str | None:
+        """Weight matrix actually used for GMM point estimation
+        (normalized to lowercase). Only meaningful for `method="gmm"`;
+        always `None` for `method="2sls"`, which has no such concept."""
+        return self._raw.weight_type
 
     @property
     def r_squared(self) -> float:
@@ -259,9 +272,8 @@ class IvResults:
         (homoskedastic) formula regardless of `cov_type`. Not the
         same as the plain F-statistic of the corresponding regression
         in `first_stage()`, which includes `x_exog`'s contribution
-        too. Empty when `x_endog=[]`. Computed the same way for both
-        `method="2sls"` and `method="gmm"`; see
-        `docs/planning/specs/iv-api-design.md` section 6.4.
+        too. Computed the same way for both `method="2sls"` and
+        `method="gmm"`; see `docs/spec/iv-spec.md` section 3.4.
         """
         return self._raw.weak_instrument_f_statistics
 
@@ -272,7 +284,7 @@ class IvResults:
 
         `None` when just-identified (`len(instruments) ==
         len(x_endog)`, degrees of freedom 0); see
-        `docs/planning/specs/iv-api-design.md` section 6.5.
+        `docs/spec/iv-spec.md` section 3.5.
         """
         return self._raw.overid_statistic
 
@@ -295,15 +307,14 @@ class IvResults:
         `weak_instrument_f_statistics`, this is always computed under
         the same `cov_type` passed to `fit()`.
 
-        `None` when there are no endogenous variables to test
-        (`x_endog=[]`), or when the augmented regression cannot be
-        estimated (e.g. the first-stage residual has zero variance,
-        such as when an instrument perfectly predicts its endogenous
+        `None` when the augmented regression cannot be estimated
+        (e.g. the first-stage residual has zero variance, such as
+        when an instrument perfectly predicts its endogenous
         variable, or there are too few observations for the extra
-        residual columns) — neither case affects the validity of
+        residual columns) — this does not affect the validity of
         the other results. **Always `None` for `method="gmm"`**
         (not implemented for GMM). See
-        `docs/planning/specs/iv-api-design.md` section 6.6.
+        `docs/spec/iv-spec.md` section 3.6.
         """
         return self._raw.wu_hausman_statistic
 
@@ -319,7 +330,7 @@ class IvResults:
         """Row-oriented summary table of the coefficients.
 
         Shaped to be usable almost as-is in a REST API response (same
-        policy as `OlsResults.coef_table()`). Returned as `list[dict]`
+        policy as `OLSResults.coef_table()`). Returned as `list[dict]`
         rather than a polars DataFrame, per the project's policy of
         not using DataFrames for the coefficient table itself.
 
@@ -350,13 +361,13 @@ class IvResults:
             )
         ]
 
-    def first_stage(self) -> dict[str, OlsResults]:
+    def first_stage(self) -> dict[str, OLSResults]:
         """Per-endogenous-variable first-stage regression results.
 
         Each first-stage regression is `x_endog[i] ~ x_exog +
-        instruments`, estimated by plain OLS (`docs/planning/specs/
-        iv-api-design.md` section 2.2). Returns the existing
-        `OlsResults` type rather than a new IV-specific type — the
+        instruments`, estimated by plain OLS (`docs/spec/iv-spec.md`
+        section 2). Returns the existing
+        `OLSResults` type rather than a new IV-specific type — the
         first stage is a genuine, valid OLS regression in its own
         right. Its `f_statistic`/`f_p_value` include `x_exog`'s
         contribution and are **not** the weak-instrument partial
@@ -364,9 +375,9 @@ class IvResults:
 
         Returns:
             A dictionary keyed by endogenous variable name (matching
-            `x_endog`), values are the first-stage `OlsResults`.
+            `x_endog`), values are the first-stage `OLSResults`.
         """
         return {
-            name: OlsResults(raw)
+            name: OLSResults(raw)
             for name, raw in self._raw.first_stage().items()
         }

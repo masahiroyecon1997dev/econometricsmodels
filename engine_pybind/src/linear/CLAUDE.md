@@ -11,12 +11,26 @@
 - `ChunkedArray::rechunk()`は`Cow<'_, ChunkedArray<T>>`を返す。`Cow`は`IntoIterator`非実装のため`.into_iter()`ではなく`.iter()`を使う（`Cow`はDerefで透過的に呼べる）。
 - pyo3 0.28では`PyObject`型エイリアスがpreludeから削除済み。`Py<PyAny>`を直接使う。
 - pyo3 0.28以降、`Clone`実装`#[pyclass]`の`FromPyObject`自動導出はopt-in。Python側インスタンスを引数で受け取るオプション型（`OLSOptions`等）には`#[pyclass(from_py_object)]`を明示する。
+- `DataFrame::new`は`(height: usize, columns: Vec<Column>)`という2引数シグネチャ（`Vec<Column>`のみを渡す旧APIではない）。列を追加するには`polars::prelude::Column::new(name.into(), values)`で構築し、既存の`DataFrame`には`.with_column(column)`（`PolarsResult<&mut Self>`）で付加する（`OLSResult::augment()`/`WLSResult::augment()`で使う）。
+
+## DataFrameを構築して返す（`augment()`）
+
+`predict()`までは全メソッドが`Vec<f64>`等のフラットな値を返すだけだったが、`augment()`は
+`OLSResult`/`WLSResult`が`fit()`時の元`PyDataFrame`を非公開の`training_data`フィールド
+（`OLSResult`は`Option<DataFrame>`、`IVResult.first_stage()`という別経路の構築元を持つため。
+`WLSResult`はこの経路がなく常に`DataFrame`）として保持し、`new_data=None`時にそれへ予測値の列を
+付加して返す設計にした。polarsの列は内部で参照カウント方式のため、`DataFrame`を`clone()`しても
+実際のデータはコピーされない（Arrowゼロコピー方針、CLAUDE.md 2章と整合）。列名衝突
+（ソースデータに既に`"predicted"`列がある場合）は`validation.rs`の
+`validate_no_existing_column`で`ValidationError`にする（黙って上書きしない）。詳細な設計判断は
+`docs/spec/ols-spec.md`「augment()」参照。
 
 ## バリデーションの責務分担（`engine`と重複させない）
 
 `engine`は列名を知らないため検知できず、`engine_pybind`側で`ValidationError`として弾く項目（OLS/WLS/Logit共通）:
 
-- `y`と`x`に同じ列名が含まれる場合（WLSは`weight`も）／`x`内の重複列名
+- `y`と`x`に同じ列名が含まれる場合（WLSは`weight`と`y`の重複も。`weight`と`x`の重複は
+  許容、`docs/spec/wls-spec.md`「API引数」参照）／`x`内の重複列名
 - `include_intercept=true`のとき`x`に`"const"`という列名がある場合（自動追加する定数項名と衝突）
 - `x`が空リストの場合
 
@@ -33,3 +47,9 @@
 ## `cov_type`固有の追加列
 
 `cluster_col`/`time_col`の抽出は該当する`cov_type`のときのみ行う。無関係な列を誤って要求してエラーにしないこと。
+
+## `WLSOptions`（`OLSOptions`とは独立したpyclass）
+
+`WLS`は当初専用の`WLSOptions`を持たず`OLSOptions`をそのまま再利用していたが（`WLSResult`は元から独立型だったのと非対称だった）、ユーザビリティ向上のため`WLSOptions`を新設した。フィールド構成は`OLSOptions`と完全に同一（`cov_type`/`include_intercept`/`confidence_level`/`cluster_col`/`hac_lags`/`time_col`、既定値・意味論とも同じ、`docs/spec/wls-spec.md`「API引数」参照）。このフィールド重複は意図的で共通base構造体には切り出さない（`engine_pybind/src/nonlinear/CLAUDE.md`「`LogitOptions`/`ProbitOptions`/`TobitOptions`のフィールド重複は意図的」節と同じ理由。`IVOptions`が`OLSOptions`と同種のフィールドを独立再定義している既存precedentとの一貫性、PyO3のpyclassコンストラクタがフラットなkwargs surface前提であること）。
+
+`parse_cov_type`（`linear/common.rs`）はこの新設に伴い、`&OLSOptions`ではなく`cov_type: &str, cluster_col: Option<&str>, hac_lags: Option<i64>, time_col: Option<&str>`という個々のフィールド値を引数に取る形に一般化した（`nonlinear::common::parse_cov_type`が最初から個々の値を取っているのと同じ設計）。`OLSOptions`/`WLSOptions`どちらの`fit`関数も、呼び出し側で`&options.cov_type`等を展開して渡す。

@@ -30,13 +30,15 @@ import statsmodels
 from benchmark.common import (
     BENCHMARKS_DIR,
     DATA_DIR,
-    extract_coef_se,
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
 from benchmark.linear.constants import HAC_MAXLAGS
-from benchmark.linear.references.statsmodels_ref import run
+from benchmark.linear.references.statsmodels_ref import (
+    extract_full_fit_stats,
+    run,
+)
 
 # 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md
 # 「テストの3系統」参照）。ComputationErrorが発生することのみをテスト
@@ -53,6 +55,12 @@ NUMERIC_SCENARIOS = [
     "scale_variance_mild",
     # n=k+1（自由度1ちょうど）の成功パス（OLSの同種ケース相当）。
     "baseline_df1",
+    # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス
+    # （OLSの同種ケース相当、test-coverage-candidates.md項目2）。
+    "many_regressors",
+    # x1の5%を外れ値に置き換えた成功パス（OLSの同種ケース相当、
+    # test-coverage-candidates.md項目67）。
+    "outlier_regressor",
 ]
 
 # classical/HC系は全シナリオで確認。HACはautocorrelatedシナリオが本来の目的
@@ -103,6 +111,16 @@ def build_fixtures() -> dict:
                 "ComputationError）。",
                 k1=True,
             )
+            # `weight`と同じ列を`x`にも含める成功パス（Issue #277）。
+            # 列名の重複が許容されることの数値的な確認が目的で、cov_type間の
+            # 挙動差を検証する趣旨ではないためclassicalのみ（cluster系と同じ方針）。
+            fixtures[scenario]["weight_in_x"] = run(
+                dataset_source="synthetic",
+                dataset=scenario,
+                formula="y ~ x1 + x2 + x3 + weight",
+                cov_type="classical",
+                weight_col="weight",
+            )
 
     fixtures["401ksubs"] = {
         cov_type: _run_401ksubs_case(cov_type)
@@ -129,6 +147,25 @@ def build_fixtures() -> dict:
             "401ksubsの回帰式・重み定義はdocs/spec/wls-spec.md参照。"
             "401ksubsはclassical/HC0-3（HACは時系列順が無いため対象外）と"
             "クラスター（ageの分位ビン、_add_age_bin参照）をcov_type別に持つ。"
+            "baseline.weight_in_xは、weightと同じ列をxにも含める成功パス"
+            "（Issue #277）。classicalのみ（cov_type間の挙動差の検証が"
+            "目的ではないため）。"
+            "many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ"
+            "高次元シナリオ（OLSの同種ケース相当、test-coverage-candidates.md"
+            "項目2）。outlier_regressorはx1の5%を外れ値に置き換えた成功パス"
+            "（OLSの同種ケース相当、test-coverage-candidates.md項目67）。"
+            "クラスター系（cluster/cluster_imbalanced/cluster_g2）は従来coef/se"
+            "のみだったが、t_stats/p_values/conf_int/r_squared等のフル統計量まで"
+            "検証範囲を広げた（_run_cluster_caseがextract_full_fit_statsを"
+            "使うよう変更、OLS側項目28対応の横展開、"
+            "test-coverage-candidates.md項目72）。あわせて_run_cluster_caseに"
+            "use_t=Trueが指定されていなかった不備を修正（cluster時に既定の"
+            "正規分布ではなく自由度G-1のt分布を使う本プロジェクトの方針"
+            "〔docs/spec/ols-spec.md「標準誤差」〕に合わせた。coef/seは"
+            "use_tに依存しないため既存フィクスチャの値に影響なし）。"
+            "401ksubsも同じくextract_full_fit_statsを使うよう変更（元々"
+            "use_t=Trueは指定済みで、フル統計量の手書き重複を解消したのみ、"
+            "数値自体に変更なし）。"
         ),
     }
     return fixtures
@@ -160,21 +197,28 @@ def _run_cluster_case(
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
     formula = "y ~ " + " + ".join(x_cols)
 
+    # use_t=Trueが無いと既定で正規分布を使ってしまい、本プロジェクトのt分布
+    # 統一方針・cluster時の自由度G-1（docs/spec/ols-spec.md「標準誤差」）と
+    # 一致しなくなる（OLS側で発覚したのと同型の不備、
+    # test-coverage-candidates.md項目72）。
     model = smf.wls(
         formula=formula, data=pandas_df, weights=pandas_df["weight"]
-    ).fit(cov_type="cluster", cov_kwds={"groups": pandas_df["_group"]})
+    ).fit(
+        cov_type="cluster",
+        cov_kwds={"groups": pandas_df["_group"]},
+        use_t=True,
+    )
 
-    return {
-        **extract_coef_se(model),
-        "_meta": {
-            "reference": "statsmodels",
-            "statsmodels_version": statsmodels.__version__,
-            "generated_at": datetime.now(UTC).isoformat(),
-            "note": note,
-            "formula": formula,
-            "weight_col": "weight",
-        },
+    result = extract_full_fit_stats(model)
+    result["_meta"] = {
+        "reference": "statsmodels",
+        "statsmodels_version": statsmodels.__version__,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "note": note,
+        "formula": formula,
+        "weight_col": "weight",
     }
+    return result
 
 
 def _run_401ksubs_case(cov_type: str, cluster_col: str | None = None) -> dict:
@@ -211,50 +255,29 @@ def _run_401ksubs_case(cov_type: str, cluster_col: str | None = None) -> dict:
         formula=formula, data=pandas_df, weights=pandas_df["inv_inc"]
     ).fit(**fit_kwargs)
 
-    ci = model.conf_int(alpha=0.05)
-    return {
-        **extract_coef_se(model),
-        "t_stats": {
-            str(k): float(v) for k, v in model.tvalues.to_dict().items()
-        },
-        "p_values": {
-            str(k): float(v) for k, v in model.pvalues.to_dict().items()
-        },
-        "conf_int": {
-            str(idx): [float(row[0]), float(row[1])]
-            for idx, row in ci.iterrows()
-        },
-        "r_squared": float(model.rsquared),
-        "r_squared_adj": float(model.rsquared_adj),
-        "f_statistic": float(model.fvalue),
-        "f_p_value": float(model.f_pvalue),
-        "aic": float(model.aic),
-        "bic": float(model.bic),
-        "log_likelihood": float(model.llf),
-        "nobs": int(model.nobs),
-        "df_resid": int(model.df_resid),
-        "_meta": {
-            "reference": "statsmodels",
-            "statsmodels_version": statsmodels.__version__,
-            "generated_at": datetime.now(UTC).isoformat(),
-            "formula": formula,
-            "weight": "1/inc",
-            "filter": "fsize == 1",
-            "cov_type": cov_type,
-            "note": (
-                "Wooldridge『Introductory Econometrics』Example 8.5と同じ変数構成"
-                "（nettfa ~ inc + incsq + age + agesq + male + e401k、fsize==1の"
-                "単身世帯サブサンプル）。重みはVar(u|inc) ∝ incという単純な仮定に"
-                "基づく1/inc（feasible GLSではない、analytic weight）。"
-                + (
-                    "地域等の実カテゴリ列が無いため、ageの分位ビン（8分位、"
-                    "_add_age_bin参照）を疑似的なクラスター列として使う。"
-                    if cov_type.lower() == "cluster"
-                    else ""
-                )
-            ),
-        },
+    result = extract_full_fit_stats(model)
+    result["_meta"] = {
+        "reference": "statsmodels",
+        "statsmodels_version": statsmodels.__version__,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "formula": formula,
+        "weight": "1/inc",
+        "filter": "fsize == 1",
+        "cov_type": cov_type,
+        "note": (
+            "Wooldridge『Introductory Econometrics』Example 8.5と同じ変数構成"
+            "（nettfa ~ inc + incsq + age + agesq + male + e401k、fsize==1の"
+            "単身世帯サブサンプル）。重みはVar(u|inc) ∝ incという単純な仮定に"
+            "基づく1/inc（feasible GLSではない、analytic weight）。"
+            + (
+                "地域等の実カテゴリ列が無いため、ageの分位ビン（8分位、"
+                "_add_age_bin参照）を疑似的なクラスター列として使う。"
+                if cov_type.lower() == "cluster"
+                else ""
+            )
+        ),
     }
+    return result
 
 
 def _add_age_bin(df: pl.DataFrame, n_bins: int = 8) -> pl.DataFrame:

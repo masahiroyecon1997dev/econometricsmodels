@@ -1,4 +1,4 @@
-"""OLS の成功パスの構造・API・オプション反映・`predict()` の検証。
+"""OLS の成功パスの構造・API・オプション反映・`predict()`/`augment()` の検証。
 
 確定済み設計（`docs/spec/ols-spec.md`）どおりの結果型・辞書キー・ラベルに
 なっていること、`OLSOptions` の各フィールドが engine_pybind 経由で反映される
@@ -6,10 +6,16 @@
 `test_ols_validation.py`、主リファレンスとの数値照合は `test_ols_reference.py`、
 R クロスチェックは `test_ols_crosscheck.py`。
 
-`predict()` のテストは（statsmodels との照合も含め）このファイルに集約する
-（predict は独立した API 面で、その statsmodels 照合はスモーク級。手法間の
-predict の意味の違い〔OLS=予測値／Logit=確率〕を1ファイルで対比できる）。
-predict の `ValidationError` パスのみ `test_ols_validation.py`。
+`predict()`/`augment()` のテストは（statsmodels との照合も含め）このファイルに
+集約する（predict/augment は独立した API 面で、その statsmodels 照合は
+スモーク級。手法間の predict の意味の違い〔OLS=予測値／Logit=確率〕を1ファイルで
+対比できる）。両者の `ValidationError` パスのみ `test_ols_validation.py`。
+
+上記4分類のいずれにも当てはまらない例外として、末尾に「クラスターロバストSEの
+健全性チェック」を1本含む。これはリファレンス実装との数値照合ではなく、
+真のクラスター内相関があるDGPでクラスターロバストSEが古典的SEより意図通り
+大きくなることを確認する、本実装内で完結した統計的健全性の検証
+（詳細は当該テストのdocstring参照）。
 """
 
 from __future__ import annotations
@@ -143,6 +149,8 @@ def test_cov_type_label(dataset):
         ("Hc1", "hc1"),
         ("HC2", "hc2"),
         ("hc3", "hc3"),
+        ("HAC", "hac"),
+        ("Hac", "hac"),
         ("nonrobust", "nonrobust"),
         ("NONROBUST", "nonrobust"),
     ],
@@ -150,7 +158,9 @@ def test_cov_type_label(dataset):
 def test_cov_type_is_case_insensitive(dataset, cov_type, expected_label):
     """`cov_type`が大文字小文字を区別しないこと（`engine_pybind`側の
     `parse_cov_type`のRust単体テストと対になる、Python API境界での確認。
-    テスト網羅性レビュー、Issue #231フェーズ4で判明した抜け）。
+    テスト網羅性レビュー、Issue #231フェーズ4で判明した抜け。HACは
+    `hac_lags`省略時の自動計算式で成功パスを確認する
+    （テスト網羅性候補・項目35）。
     """
     options = OLSOptions(cov_type=cov_type)
     res = OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
@@ -248,7 +258,7 @@ def test_predict_none_matches_statsmodels_fitted_values(dataset):
 
     assert len(predicted) == len(dataset)
     for i, (row, expected) in enumerate(zip(predicted, sm_res.fittedvalues)):
-        _assert_close(row["fitted"], expected, f"fitted/{i}")
+        _assert_close(row["predicted"], expected, f"predicted/{i}")
 
 
 def test_predict_new_data_matches_statsmodels(dataset):
@@ -275,7 +285,7 @@ def test_predict_new_data_matches_statsmodels(dataset):
 
     assert len(predicted) == 3
     for i, (row, exp) in enumerate(zip(predicted, expected)):
-        _assert_close(row["fitted"], exp, f"fitted/{i}")
+        _assert_close(row["predicted"], exp, f"predicted/{i}")
 
 
 def test_predict_new_data_without_intercept_matches_statsmodels():
@@ -296,7 +306,7 @@ def test_predict_new_data_without_intercept_matches_statsmodels():
     expected = sm_res.predict(new_x1.reshape(-1, 1))
 
     for i, (row, exp) in enumerate(zip(predicted, expected)):
-        _assert_close(row["fitted"], exp, f"fitted/{i}")
+        _assert_close(row["predicted"], exp, f"predicted/{i}")
 
 
 def test_predict_with_include_intercept_false_and_x_named_const():
@@ -329,7 +339,7 @@ def test_predict_with_include_intercept_false_and_x_named_const():
         zip(predicted, [(100.0, 10.0), (200.0, 20.0)])
     ):
         expected = coef_const * c + coef_x2 * x2
-        _assert_close(row["fitted"], expected, f"fitted/{i}")
+        _assert_close(row["predicted"], expected, f"predicted/{i}")
 
 
 def test_predict_new_data_structure(dataset):
@@ -341,5 +351,148 @@ def test_predict_new_data_structure(dataset):
     assert isinstance(predicted, list)
     assert len(predicted) == 2
     for row in predicted:
-        assert set(row.keys()) == {"fitted"}
-        assert isinstance(row["fitted"], float)
+        assert set(row.keys()) == {"predicted"}
+        assert isinstance(row["predicted"], float)
+
+
+# ── augment() ────────────────────────────────────────────────────
+
+
+def test_augment_none_returns_training_data_with_predicted_column(dataset):
+    """`augment(new_data=None)`が、学習データの全列＋`"predicted"`列を持つ
+    DataFrameを、`predict()`と同じ予測値・元データと同じ行順で返すこと。
+    """
+    res = our_fit(dataset)
+
+    augmented = res.augment()
+
+    assert isinstance(augmented, pl.DataFrame)
+    assert augmented.height == dataset.height
+    assert augmented.columns == [*dataset.columns, "predicted"]
+    for col in dataset.columns:
+        assert augmented[col].to_list() == dataset[col].to_list()
+
+    expected = [row["predicted"] for row in res.predict()]
+    assert augmented["predicted"].to_list() == expected
+
+
+def test_augment_new_data_returns_new_data_with_predicted_column(dataset):
+    """`augment(new_data)`が、`new_data`の全列＋`"predicted"`列を持つ
+    DataFrameを、`predict(new_data)`と同じ予測値で返すこと。
+    """
+    res = our_fit(dataset)
+    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
+
+    augmented = res.augment(new_data)
+
+    assert isinstance(augmented, pl.DataFrame)
+    assert augmented.height == 2
+    assert augmented.columns == ["x1", "x2", "predicted"]
+    assert augmented["x1"].to_list() == new_data["x1"].to_list()
+    assert augmented["x2"].to_list() == new_data["x2"].to_list()
+
+    expected = [row["predicted"] for row in res.predict(new_data)]
+    assert augmented["predicted"].to_list() == expected
+
+
+def test_augment_new_data_with_extra_column_preserves_it(dataset):
+    """`new_data`が`x`列以外の余分な列（予測に使わない識別子列等）を含む場合、
+    その列もそのまま`"predicted"`列と一緒に返されること。
+    """
+    res = our_fit(dataset)
+    new_data = pl.DataFrame(
+        {
+            "id": ["a", "b"],
+            "x1": [1.0, 2.0],
+            "x2": [0.5, -0.5],
+        }
+    )
+
+    augmented = res.augment(new_data)
+
+    assert augmented.columns == ["id", "x1", "x2", "predicted"]
+    assert augmented["id"].to_list() == ["a", "b"]
+
+
+def test_augment_without_intercept_matches_predict():
+    """`include_intercept=False`でfitした場合も`augment()`が`predict()`と
+    同じ予測値を返すこと（`augment()`はRust側で`predict()`とは別に
+    `has_intercept`分岐を実装しているため、個別に確認する）。
+    """
+    df = pl.DataFrame(
+        {"y": [3.0, 7.0, 9.0], "x1": [1.0, 2.0, 3.0]},
+    )
+    options = OLSOptions(include_intercept=False)
+    res = OLS(df, y="y", x=["x1"], options=options).fit()
+
+    augmented_none = res.augment()
+    expected_none = [row["predicted"] for row in res.predict()]
+    assert augmented_none["predicted"].to_list() == expected_none
+
+    new_data = pl.DataFrame({"x1": [10.0, 20.0]})
+    augmented_new = res.augment(new_data)
+    expected_new = [row["predicted"] for row in res.predict(new_data)]
+    assert augmented_new["predicted"].to_list() == expected_new
+
+
+# ── クラスターロバストSEの健全性チェック（真のクラスター内相関） ──────
+#
+# 上記のクラスター系テスト・test_ols_reference.py/test_ols_crosscheck.pyの
+# クラスター系テストは、いずれも誤差i.i.d.なデータに疑似グループラベルを
+# 後付けしたものであり、リファレンス実装（statsmodels/R）との数値一致を
+# 検証する目的には十分だが、「クラスターロバストSEが真のクラスター内相関が
+# ある状況で意図通り機能するか（通常のSEより適切に大きくなるか）」という
+# 別種の健全性は検証していなかった（旧test-coverage-candidates.md項目12、
+# 対応済みのため同ファイルからは削除済み、ユーザー確認済み）。以下はその
+# 健全性のみを確認する専用テストであり、他のテストと異なりリファレンス
+# 実装との数値比較は行わない。
+
+
+def test_cluster_std_error_exceeds_classical_under_true_intra_cluster_correlation():
+    """説明変数・誤差の両方にクラスター内相関を持たせたMoulton型DGPで、
+    クラスターロバストSEが古典的SEより明確に大きくなることを確認する。
+
+    説明変数x1がクラスターレベルの成分を持たない（個体ごとに独立な）DGPでは、
+    誤差だけにクラスター内相関を持たせても、クラスターSEが古典的SEより
+    小さくなることさえあることを実測確認済み。クラスターロバストSEの効果を
+    検出するには説明変数自体もクラスター内相関を持つ必要がある（古典的な
+    Moulton問題の構造）。
+    seed=42固定でratio≈3.48（30シードでの実測範囲2.09〜4.49に対し、
+    十分なマージンを持たせた閾値1.5を使う）。
+
+    有効性検証について: `testing-policy.md`「property-basedテスト」節の
+    本格的なバグ注入要件は`proptest`（engineクレート内）専用のため本テストには
+    形式上適用されないが、参考として「assert文の機構自体が正しく機能するか」
+    （classical同士の比較でratio=1.0を作りassertが落ちることを確認）のみ
+    実施済み。`engine::linear::ols::cluster_cov_params`への実際のバグ注入に
+    よる検出力の実証（他手法のproptestが満たす基準）は行っていない。
+    """
+    rng = np.random.default_rng(42)
+    n_groups = 30
+    group_size = 20
+    n = n_groups * group_size
+    group = np.repeat(np.arange(n_groups), group_size)
+
+    # 説明変数x1: クラスターレベルの成分 + 個体ごとの誤差。
+    x1_group = rng.normal(scale=1.0, size=n_groups)
+    x1 = x1_group[group] + rng.normal(scale=0.5, size=n)
+
+    # 誤差: クラスターレベルのランダム効果 + 個体ごとの誤差。
+    u_g = rng.normal(0.0, 2.0, size=n_groups)
+    e = u_g[group] + rng.normal(0.0, 1.0, size=n)
+
+    y = 1.0 + 2.0 * x1 + e
+    df = pl.DataFrame({"y": y, "x1": x1, "cluster": [str(g) for g in group]})
+
+    classical = OLS(
+        df, y="y", x=["x1"], options=OLSOptions(cov_type="classical")
+    ).fit()
+    cluster = OLS(
+        df,
+        y="y",
+        x=["x1"],
+        options=OLSOptions(cov_type="cluster", cluster_col="cluster"),
+    ).fit()
+
+    ratio = cluster.std_errors["x1"] / classical.std_errors["x1"]
+    assert ratio > 1.5, f"ratio={ratio}"

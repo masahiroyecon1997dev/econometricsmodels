@@ -4,7 +4,7 @@
 `tests/fixtures/benchmarks/iv_crosscheck.json`
 （`benchmark/iv/fixtures/generate_iv_crosscheck_fixtures.py`で生成）を用いて、
 linearmodelsとは独立した実装（R `ivreg`）との一致を確認する
-（`docs/planning/specs/iv-api-design.md`5.2節）。
+（`docs/spec/iv-spec.md`4章）。
 
 シナリオ・cov_type・クラスタケースの構成は`test_iv_reference.py`と揃える。
 
@@ -30,8 +30,13 @@ Newey-West小標本補正の慣習差がより強く出るためと考えられ�
 `RTOL_HAC`を超えることがあるため、同じ`ATOL_F_PVALUE`を使う。
 
 Note:
-    - `hc2`/`hc3`はivreg側にレバレッジ算出の確立した参照実装が無いため対象外
-      （`iv-api-design.md`3.1節）。
+    - `hc2`/`hc3`は`vcovHC(model, type="HC2"/"HC3")`（`ivreg:::hatvalues.ivreg`の
+      type="stage2"、第二段階OLSのレバレッジをそのまま使う実装）で計算でき、本実装
+      （`engine/src/iv/two_sls.rs`の`hc_cov_params`）と数値一致することを実機確認済み
+      のため対象に含む（`iv-spec.md`3.1節。旧記述「ivreg側に確立した参照実装が
+      無い」は`ivreg`がdevcontainerにインストールできなかった時期の調査に基づく
+      誤りだった）。`linearmodels`（`test_iv_reference.py`）は引き続き対応していない
+      ため、hc2/hc3の主リファレンス比較はこのファイルのみで行う。
     - `weak_instrument_f`・`sargan_statistic`/`sargan_p_value`はivregの
       `summary(diagnostics=TRUE)`が常にclassical vcovで計算する仕様のため、
       全cov_typeで同じ値になる（`benchmark/iv/references/run_ivreg.R`参照）。
@@ -63,7 +68,7 @@ from _assertions import assert_close, assert_dict_close
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset, with_cluster_groups
 from _tolerances import TOLERANCES
-from econometricsmodels import IV, IvOptions
+from econometricsmodels import IV, IVOptions
 
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.iv.fixtures.generate_iv_crosscheck_fixtures import CARD_X_EXOG
@@ -108,12 +113,13 @@ RTOL_HAC_WU_HAUSMAN_SMALL_N = TOLERANCES["iv_crosscheck"][
     "rtol_hac_wu_hausman_small_n"
 ]
 
-COV_TYPES = ["classical", "hc0", "hc1", "hac"]
+COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
 
 INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
 X_EXOG_BY_SCENARIO = {
     "moderate_multicollinearity": ["x1", "x2"],
     "high_condition_number": ["x1", "x2"],
+    "scale_variance_mild": ["x1", "x2"],
 }
 
 
@@ -267,7 +273,7 @@ def test_synthetic_matches_r(crosscheck, scenario, cov_type):
     x_exog = X_EXOG_BY_SCENARIO.get(scenario, ["x1"])
     instruments = INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
     df = pl.read_csv(DATA_DIR / f"iv_{scenario}.csv")
-    options = IvOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type)
     res = IV(
         df,
         y="y",
@@ -300,7 +306,7 @@ def test_cluster_matches_r(crosscheck):
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     df = with_cluster_groups(df, 10)
-    options = IvOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = IVOptions(cov_type="cluster", cluster_col="cluster_group")
     res = IV(
         df,
         y="y",
@@ -326,7 +332,7 @@ def test_cluster_g2_matches_r(crosscheck):
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_g2.csv")
     df = df.with_columns((pl.int_range(pl.len()) % 2).alias("cluster_group"))
-    options = IvOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = IVOptions(cov_type="cluster", cluster_col="cluster_group")
     res = IV(
         df,
         y="y",
@@ -352,7 +358,7 @@ def test_multi_endog_matches_r(crosscheck, cov_type):
     （`test_iv_reference.py`の同名テストと同じ理由、Issue #231フェーズ4）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
-    options = IvOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type)
     res = IV(
         df,
         y="y",
@@ -383,7 +389,7 @@ def test_df1_matches_r(crosscheck, cov_type):
     （モジュールdocコメント参照）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_df1.csv")
-    options = IvOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type)
     res = IV(
         df,
         y="y",
@@ -404,7 +410,7 @@ def test_card_matches_r(crosscheck_wooldridge, cov_type):
     同じ理由、Issue #231フェーズ4）。
     """
     df = load_wooldridge_dataset("card")
-    options = IvOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type)
     res = IV(
         df,
         y="lwage",
@@ -428,7 +434,7 @@ def test_cluster_imbalanced_matches_r(crosscheck):
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
-    options = IvOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = IVOptions(cov_type="cluster", cluster_col="cluster_group")
     res = IV(
         df,
         y="y",

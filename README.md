@@ -155,7 +155,7 @@ The computational core is written in Rust, so the aim is that calling `fit()` is
 
 Peak resident memory is roughly 160–260 MB at n ≤ 100,000 for every method, growing with n (about 400 MB for OLS/WLS and 1.1 GB for IV at n = 1,000,000).
 
-Per-method detail — n- and k-axis sweeps, every `cov_type`, the non-default optimizers, and a side-by-side comparison against statsmodels / linearmodels / py4etrics — is in [`docs/performance/`](docs/performance/). Reproduce with `python -m performance.compare_<method> --repeats 3`.
+Per-method detail — n- and k-axis sweeps, every `cov_type`, the non-default optimizers, and a side-by-side comparison against statsmodels / linearmodels (Tobit is engine-only) — is in [`docs/performance/`](docs/performance/). Reproduce with `python -m performance.compare_<method> --repeats 3`.
 
 ### Known performance issues
 

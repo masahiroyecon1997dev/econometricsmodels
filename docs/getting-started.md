@@ -44,7 +44,7 @@ See the [API Reference](api/ols.md) for the full list of available options.
 
 ## Retrieving results
 
-`OlsResults` exposes coefficients, standard errors, etc. as dictionaries keyed by coefficient name (`str`). If you need a row-oriented listing — e.g. for a REST API response — use `coef_table()`.
+`OLSResults` exposes coefficients, standard errors, etc. as dictionaries keyed by coefficient name (`str`). If you need a row-oriented listing — e.g. for a REST API response — use `coef_table()`.
 
 ```python
 for row in result.coef_table():
@@ -53,7 +53,7 @@ for row in result.coef_table():
 
 ## Predicted values
 
-`OlsResults.predict()` returns predicted values. With no arguments, it returns the fitted values for the training data used in `fit()`; passing `new_data` returns out-of-sample predictions for new data instead.
+`OLSResults.predict()` returns predicted values. With no arguments, it returns the fitted values for the training data used in `fit()`; passing `new_data` returns out-of-sample predictions for new data instead.
 
 ```python
 # Fitted values for the training data
@@ -65,7 +65,14 @@ fitted = result.predict()
 new_data = pl.DataFrame({"x1": [6.0, 7.0]})
 predicted = result.predict(new_data)
 
-print(predicted)  # [{"fitted": ...}, {"fitted": ...}]
+print(predicted)  # [{"predicted": ...}, {"predicted": ...}]
+```
+
+`OLSResults.augment()` takes the same `new_data` argument, but instead returns the source data (the training data, or `new_data` when given) with the predicted values appended as a `"predicted"` column — a polars DataFrame rather than a row-oriented list. This is the one exception to the library's general policy of not returning DataFrames.
+
+```python
+augmented = result.augment(new_data)
+print(augmented)  # original `new_data` columns, plus a "predicted" column
 ```
 
 ## WLS (Weighted Least Squares)
@@ -83,7 +90,9 @@ print(result.params)
 print(result.std_errors)
 ```
 
-Estimation options (`cov_type`, etc.) use the same `OLSOptions` as OLS. See "Switching the type of standard error" above for how to switch standard error types, and the [API Reference](api/wls.md) for details on the `weight` argument.
+Estimation options are configured via `WLSOptions`, which has the same fields as `OLSOptions` (`cov_type`, etc.). See "Switching the type of standard error" above for how to switch standard error types, and the [API Reference](api/wls.md) for details on the `weight` argument.
+
+`WLSResults.predict()` and `WLSResults.augment()` work exactly like their `OLSResults` counterparts (see "Predicted values" above); weights play no role in either the training-data or out-of-sample case.
 
 ## Logit (binary logistic regression)
 
@@ -111,15 +120,26 @@ print(result.pseudo_r_squared)
 
 ### Predicted values and classification table
 
-`LogitResults.predict()` returns fitted probabilities for the training data. `pred_table()` returns a 2x2 classification (confusion) table for a given probability threshold (default 0.5).
+`LogitResults.predict()` returns predicted probabilities (not a 0/1 class prediction, unlike `OLSResults.predict()`'s `"predicted"` — this is the standard statsmodels convention). With no arguments, it returns fitted probabilities for the training data; passing `new_data` returns out-of-sample predictions for new data instead (same `new_data` semantics as `OLSResults.predict()`). `pred_table()` returns a 2x2 classification (confusion) table for a given probability threshold (default 0.5), for the training data only.
 
 ```python
 predicted = result.predict()
 print(predicted)  # [{"probability": ...}, ...]
 
+new_data = pl.DataFrame({"x1": [1.0, 2.0]})
+predicted = result.predict(new_data)
+print(predicted)  # [{"probability": ...}, {"probability": ...}]
+
 table = result.pred_table()
 for row in table:
     print(row["actual"], row["predicted_0"], row["predicted_1"])
+```
+
+`LogitResults.augment()` takes the same `new_data` argument as `predict()`, but returns a polars DataFrame (the source data plus a new `"probability"` column) instead of a row-oriented list, mirroring `OLSResults.augment()`.
+
+```python
+augmented = result.augment(new_data)
+print(augmented)  # original `new_data` columns, plus a "probability" column
 ```
 
 ### Marginal effects
@@ -156,7 +176,7 @@ print(result.std_errors)  # {"const": ..., "x1": ...}
 print(result.pseudo_r_squared)
 ```
 
-`ProbitOptions` supports the same `cov_type` and `method` choices as `LogitOptions`; see the [API Reference](api/probit.md) for the full list of options. `ProbitResults.predict()`, `pred_table()`, and `marginal_effects()` work exactly like their [Logit](#predicted-values-and-classification-table) counterparts (substitute `Probit`/`ProbitOptions` for `Logit`/`LogitOptions` in the examples above).
+`ProbitOptions` supports the same `cov_type` and `method` choices as `LogitOptions`; see the [API Reference](api/probit.md) for the full list of options. `ProbitResults.predict()`, `augment()`, `pred_table()`, and `marginal_effects()` work exactly like their [Logit](#predicted-values-and-classification-table) counterparts (substitute `Probit`/`ProbitOptions` for `Logit`/`LogitOptions` in the examples above).
 
 ## Tobit (censored regression)
 
@@ -192,6 +212,20 @@ for row in result.marginal_effects(target="expected_observed"):
 
 # predict() returns a list of {"predicted": ...} dicts
 fitted = result.predict(target="expected_observed")
+
+# new_data (out-of-sample) works the same way as OLS/Logit/Probit
+new_data = pl.DataFrame({"x1": [1.0, 2.0]})
+predicted = result.predict(target="expected_observed", new_data=new_data)
+```
+
+`augment()` takes the same `target`/`new_data` arguments as `predict()`, but returns a polars DataFrame instead of a row-oriented list. Unlike Logit/Probit's fixed `"probability"` column, the appended column is named `"predicted_{target}"` (e.g. `"predicted_expected_observed"`), since `predict()`'s meaning depends on `target` — this also lets you call `augment()` once per `target` on the same DataFrame without a column name collision.
+
+```python
+augmented = result.augment(target="expected_observed")
+print(augmented)  # original columns, plus "predicted_expected_observed"
+
+# Stack a second target onto the same DataFrame without a name collision
+augmented = result.augment(target="prob_uncensored", new_data=augmented)
 ```
 
 ### Censoring fit check
@@ -228,7 +262,7 @@ print(result.std_errors)  # {"const": ..., "endog1": ...}
 print(result.r_squared)
 ```
 
-`IvOptions.method` selects `"2sls"` (default) or `"gmm"`. `cov_type` supports the same range as [OLS](#switching-the-type-of-standard-error); for `method="gmm"`, a separate `weight_type` selects the weight matrix used for point estimation. See the [API Reference](api/iv.md) for the full list of options.
+`IVOptions.method` selects `"2sls"` (default) or `"gmm"`. `cov_type` supports the same range as [OLS](#switching-the-type-of-standard-error); for `method="gmm"`, a separate `weight_type` selects the weight matrix used for point estimation. See the [API Reference](api/iv.md) for the full list of options.
 
 ### Diagnostics and first-stage results
 
@@ -244,7 +278,7 @@ print(
 first_stage = result.first_stage()
 print(
     first_stage["endog1"].params
-)  # OlsResults for endog1 ~ x_exog + instruments
+)  # OLSResults for endog1 ~ x_exog + instruments
 ```
 
 See the [API Reference](api/iv.md#diagnostics) for what each diagnostic tests and when it is `None`.

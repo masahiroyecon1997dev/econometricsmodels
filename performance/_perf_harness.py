@@ -28,26 +28,39 @@
   pandas入力を前提とするため `df.to_pandas()` が必要だが、これはライブラリ本体の
   仕事ではなく変換コストなので、`_worker()` が計測ループの外で1回だけ実施し、
   `FitContext.pandas_df` として渡す（`.claude/rules/testing-policy.md`「パフォーマンス
-  比較（ベンチマーク）の方法論」）。
+  比較（ベンチマーク）の方法論」）。**単純な`to_pandas()`だけでは足りない手法
+  （linearmodelsがMultiIndex(entity, time)を要求するパネル系のFE/RE等）は、
+  `PerfAdapter.build_pandas_df`でこの変換ステップ自体を差し替えられる**——
+  MultiIndex構築（・REの切片用定数列追加）も実務上は一度きりのデータ準備段階で
+  行うものであり、`to_pandas()`と同じ性質のコストのため計測区間の外に置く
+  （`performance/compare_fe.py`/`compare_re.py`参照）。
 - **HACのラグ数を明示的に揃える**: ライブラリごとに自動ラグ選択式が異なりうるため、
   `benchmark.common.hac_auto_lag(n)`（engineの自動選択式と同じ）で計算した同一の
   ラグ数を `FitContext.hac_lags` で渡す。ラグ選択方式自体の違いではなく、
   Newey-West計算そのものの性能差を見るため。
 - **スレッド数を1に固定する**: `_run_isolated()` がワーカーサブプロセスの環境変数で
-  engine（faer/rayon）・リファレンス実装（numpy/BLAS）とも1スレッドに固定する
-  （`_SINGLE_THREAD_ENV`）。多コア機で線形代数バックエンドのスレッドプールが負荷下で
-  競合し、engine の classical n=1,000,000 の実行時間が単一スレッド時の20倍以上
-  （約0.15秒→3〜4秒）に膨れ上がり計測が不安定になる現象を実測で確認したため
-  （`docs/performance/ols.md`「既知の限界」）。単一スレッドに揃えることで
-  「Rustコアの計算効率 vs Python+BLAS」という比較の主目的を、スレッドプール挙動の
-  環境差から切り離す。
+  engine・リファレンス実装（numpy/BLAS）とも1スレッドに固定する
+  （`_SINGLE_THREAD_ENV`）。engine 側は Issue #283 対応で faer のグローバル並列度を
+  常時 `Par::Seq` にした（`engine::parallelism::ensure_serial`）ため
+  `RAYON_NUM_THREADS` は実質効かないが、リファレンス実装と対称（両者とも逐次）に
+  するため環境変数の設定は維持している。#283 以前は engine の classical
+  n=1,000,000 が全コア並列＋負荷下で中央値24.9秒（単一スレッド比 約190倍）に
+  膨れ上がる現象があった（`docs/performance/ols.md`「既知の限界」）。単一スレッドに
+  揃えることで「Rustコアの計算効率 vs Python+BLAS」という比較の主目的を、
+  スレッドプール挙動の環境差から切り離す。リファレンス実装を1スレッドに固定する
+  ことがユーザー実環境（マルチスレッドBLAS）を歪めないかは実測で確認済み——
+  tall-skinny な設計行列（`k` が数個〜数十）では OpenBLAS のマルチスレッド化も
+  逆効果で、statsmodels も1スレッドの方が速い（`docs/performance/ols.md`
+  「マルチスレッド環境での挙動」）。
 
 ## 既知の限界
 
 - 単一スレッド固定のため、線形代数バックエンドのマルチスレッド化による高速化は
-  この比較には現れない（多コアでの実利用の性能特性とは別軸）。engine 側の
-  マルチスレッド時の不安定性そのものは別途エンジン側で調査する
-  （`docs/planning/specs/refactoring-candidates.md`）。
+  この比較には現れない（多コアでの実利用の性能特性とは別軸）。ただし engine の
+  設計行列は tall-skinny 中心で faer の暗黙並列化はそもそも高速化せず逆効果だった
+  ため、グローバル並列度を `Par::Seq` に固定済み（Issue #283、対応済み）。
+  リファレンス実装（statsmodels/numpy）も同じ形状ではマルチスレッドで悪化する
+  ことを実測で確認済み（`docs/performance/ols.md`「マルチスレッド環境での挙動」）。
 """
 
 from __future__ import annotations
@@ -144,9 +157,12 @@ class PerfAdapter:
         libraries: 計測対象ライブラリ。先頭は必ず "engine"。以降は
             README「Verification accuracy」表の primary reference
             （OLS/WLS/Logit/Probit: "statsmodels"、IV: "linearmodels"）。
-            primary reference が共通ハーネスのインプロセス計測に乗らない手法は
-            性能比較専用の代替でよい（Tob: 主リファレンスは R `AER::tobit` だが
-            性能比較は "py4etrics"＝statsmodels GenericLikelihoodModel ベース）。
+            インプロセス計測できるリファレンス実装が無い手法は `("engine",)` の
+            単独指定でよい（Tobit: 主リファレンスの R `AER::tobit` は共通ハーネス
+            のインプロセス計測に乗らず、代替の py4etrics も撤去したため engine 単独。
+            `performance/compare_tobit.py` docstring 参照）。engine 単独の場合は
+            n/k/method の全軸が engine のみで回り、レポートは相対比較ではなく
+            engine の絶対値・スケーリングの推移になる。
         cov_types: 計測する cov_type。`.claude/rules/testing-policy.md`
             「パフォーマンス比較（ベンチマーク）の方法論」に従い、代表2点
             （最も軽い classical と、最も計算コストの重いもの）で足りる。
@@ -155,6 +171,12 @@ class PerfAdapter:
             engine 分は git ハッシュで足りるため不要。
         build_dataframe: `(n, k, seed) -> pl.DataFrame`。cluster 列など手法側で
             必要な派生列の付与もここで行う。
+        build_pandas_df: `pl.DataFrame -> object`。`library != "engine"` のとき
+            `_worker()` がこれを呼んで `FitContext.pandas_df` を作る。既定は単純な
+            `df.to_pandas()`（OLS/WLS/Logit/Probit/IV/Tobitはこのまま使う）。
+            linearmodelsがMultiIndex(entity, time)を要求するパネル系（FE/RE）等、
+            単純な変換だけでは足りない手法はこれを上書きする（モジュールdocstring
+            「DataFrame→pandas変換は計測区間の外」参照）。
         fit_once: `FitContext -> object`。1回の推定を実行する（計測区間内で
             呼ばれる）。返り値は使われないが、**リファレンス実装が結果を遅延評価
             （lazy property）で計算する設計の場合、この関数内で明示的にアクセスして
@@ -175,10 +197,23 @@ class PerfAdapter:
             cov_type=cov_types[0]・k=n_sweep_fixed_k・n=n_sweep[-1] の1点でのみ
             回す（testing-policy.md「方法論」＝代表点で足りる）。
         k_sweep_libraries: k 軸スイープでのみ使うライブラリの部分集合。`None`
-            なら `libraries` をそのまま使う。リファレンス実装が特定の軸で計測
-            不能なとき（例: Tobit の py4etrics は k を増やすと数値微分ヘッシアン
-            のコストが爆発し k>=8 で事実上フリーズする）、その軸だけ engine 単独
-            に絞るために使う。n 軸・method 軸には影響しない。
+            なら `libraries` をそのまま使う。リファレンス実装が k を増やすと
+            計測不能になる手法で、k 軸だけ engine 単独に絞るために使う。n 軸・
+            method 軸には影響しない。`libraries=("engine",)` の手法では指定不要。
+        k_sweep_cov_types: k 軸スイープでのみ使う cov_type の部分集合。`None`
+            なら `cov_types` をそのまま使う。`k_sweep_libraries` と同じ発想だが
+            対象が cov_type（`FE` の Driscoll-Kraay HAC は時点数 T ベースの
+            バンド幅を使うため、k 軸で k を増やすと T に対して次元過多になり
+            共分散行列が特異になる——`performance/compare_fe.py` 参照）。n 軸・
+            method 軸には影響しない。
+        n_sweep_engine_only: n 軸に追加する engine 単独計測点の n の刻み。大 n を
+            全 cov_type で回すと高コスト（またはリファレンス実装が大 n で計測不能）
+            だが、engine の大標本での健全性（収束すること・実行時間）は回帰検知
+            したい場合に使う。cov_type は `cov_types[0]`（最も軽いもの）のみ・
+            method は `default_method` のみ・library は engine のみ。`_run_isolated`
+            は `check=True` なので、engine の `.fit()` が例外を投げれば benchmark
+            ジョブが失敗する（例: Tobit で Issue #291 の大標本 Hessian 特異エラーが
+            再発した場合）。空なら追加なし。
         check_report: `report dict -> list[str]`。全スイープ完了後に呼ばれ、
             返した文字列は `_meta["warnings"]` に格納されて job summary に
             `> [!WARNING]` として表示される（`render_performance_summary`）。
@@ -197,11 +232,17 @@ class PerfAdapter:
     build_dataframe: Callable[[int, int, int], pl.DataFrame]
     fit_once: Callable[[FitContext], object]
 
+    build_pandas_df: Callable[[pl.DataFrame], object] = lambda df: (
+        df.to_pandas()
+    )
+
     n_sweep: Sequence[int] = (1_000, 10_000, 100_000, 1_000_000)
     n_sweep_fixed_k: int = 5
+    n_sweep_engine_only: Sequence[int] = ()
     k_sweep: Sequence[int] = (5, 20)
     k_sweep_fixed_n: int = 10_000
     k_sweep_libraries: Sequence[str] | None = None
+    k_sweep_cov_types: Sequence[str] | None = None
     cluster_col: str | None = None
     weight_col: str | None = None
     default_method: str = "newton"
@@ -244,7 +285,7 @@ def _worker(
 ) -> dict:
     df = adapter.build_dataframe(n, k, seed)
     x_cols = [f"x{j + 1}" for j in range(k)]
-    pandas_df = None if library == "engine" else df.to_pandas()
+    pandas_df = None if library == "engine" else adapter.build_pandas_df(df)
     ctx = FitContext(
         library=library,
         df=df,
@@ -354,7 +395,13 @@ def _measure_point(
 
 
 def run_n_sweep(adapter: PerfAdapter, repeats: int, seed: int) -> list[dict]:
-    """n 軸のスイープ（k は `adapter.n_sweep_fixed_k` 固定）。"""
+    """n 軸のスイープ（k は `adapter.n_sweep_fixed_k` 固定）。
+
+    `adapter.n_sweep_engine_only` が設定されていれば、その n では engine 単独・
+    `cov_types[0]` のみ追加で計測する（大 n を全 cov_type で回すと高コストな手法、
+    またはリファレンス実装が大 n で計測不能な手法の大標本回帰検知。`PerfAdapter`
+    docstring 参照）。
+    """
     results = []
     for cov_type in adapter.cov_types:
         for n in adapter.n_sweep:
@@ -372,6 +419,20 @@ def run_n_sweep(adapter: PerfAdapter, repeats: int, seed: int) -> list[dict]:
                         adapter.default_method,
                     )
                 )
+    for n in adapter.n_sweep_engine_only:
+        results.append(
+            _measure_point(
+                adapter,
+                "n",
+                n,
+                adapter.n_sweep_fixed_k,
+                adapter.cov_types[0],
+                "engine",
+                repeats,
+                seed,
+                adapter.default_method,
+            )
+        )
     return results
 
 
@@ -380,11 +441,14 @@ def run_k_sweep(adapter: PerfAdapter, repeats: int, seed: int) -> list[dict]:
 
     `adapter.k_sweep_libraries` が設定されていればそのライブラリのみを回す
     （リファレンス実装が k 軸で計測不能な手法向け。`PerfAdapter` docstring 参照）。
+    `adapter.k_sweep_cov_types` が設定されていればその cov_type のみを回す
+    （k 軸で計測不能になる cov_type 向け、同 docstring 参照）。
     """
     libraries = adapter.k_sweep_libraries or adapter.libraries
+    cov_types = adapter.k_sweep_cov_types or adapter.cov_types
     results = []
     for k in adapter.k_sweep:
-        for cov_type in adapter.cov_types:
+        for cov_type in cov_types:
             for library in libraries:
                 results.append(
                     _measure_point(
@@ -439,17 +503,26 @@ def build_report(adapter: PerfAdapter, repeats: int, seed: int) -> dict:
     n_results = run_n_sweep(adapter, repeats, seed)
     k_results = run_k_sweep(adapter, repeats, seed)
     method_results = run_method_sweep(adapter, repeats, seed)
+    # リファレンス実装（`libraries` の "engine" 以降）が無い手法（Tobit）では
+    # 相対比較ではなく engine 単独の推移を記録する。
+    reference_libs = "/".join(adapter.libraries[1:])
+    purpose = (
+        f"{adapter.method}の推定のエンドツーエンド実行時間・ピークRSSを"
+        + (
+            f"{reference_libs}と比較する"
+            if reference_libs
+            else "engine 単独で計測する"
+        )
+    )
     report = {
         "_meta": {
             "method": adapter.method,
-            "purpose": (
-                f"{adapter.method}の推定のエンドツーエンド実行時間・ピークRSSを"
-                f"{'/'.join(adapter.libraries[1:])}と比較する"
-            ),
+            "purpose": purpose,
             "generated_at": datetime.now(UTC).isoformat(),
             **adapter.reference_versions(),
             "n_sweep": list(adapter.n_sweep),
             "n_sweep_fixed_k": adapter.n_sweep_fixed_k,
+            "n_sweep_engine_only": list(adapter.n_sweep_engine_only),
             "k_sweep": list(adapter.k_sweep),
             "k_sweep_fixed_n": adapter.k_sweep_fixed_n,
             "cov_types": list(adapter.cov_types),

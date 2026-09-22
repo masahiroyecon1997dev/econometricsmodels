@@ -108,8 +108,12 @@ def run_tobit_r(
         ``coef`` / ``se`` / ``z_stats`` / ``p_values`` / ``conf_int``（切片名は
         ``"const"`` へ、末尾に ``"sigma"`` を含む）と、スカラー統計量
         （``_TOBIT_SCALAR_KEYS``）、``margeff``（``[target][at][param]`` の3階層）、
-        ``predict_head``（各 target の先頭10行の予測値）、``censoring_fit_check``
-        （該当カテゴリの ``observed_rate`` / ``model_implied_rate``）を持つ dict。
+        ``predict_head``（各 target の先頭10行の予測値）、``predict_new_data``
+        （``new_x`` に対する各 target の予測値、Issue #131）、``new_x``
+        （``predict_new_data`` の計算に使った新規データの x 列、
+        ``Tobit(...).predict(new_data=...)`` に渡す ``new_data`` をテスト側で
+        組み立てるためのもの）、``censoring_fit_check``（該当カテゴリの
+        ``observed_rate`` / ``model_implied_rate``）を持つ dict。
     """
     extra: list[str] = [engine, _bound_arg(lower), _bound_arg(upper)]
     if cov_type == "cluster":
@@ -128,5 +132,7 @@ def run_tobit_r(
     )
     result["margeff"] = raw["margeff"]
     result["predict_head"] = raw["predict_head"]
+    result["predict_new_data"] = raw["predict_new_data"]
+    result["new_x"] = raw["new_x"]
     result["censoring_fit_check"] = raw["censoring_fit_check"]
     return result

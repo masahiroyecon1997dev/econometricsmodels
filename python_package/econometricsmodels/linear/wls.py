@@ -9,9 +9,14 @@ for `x`, an options object for estimation settings (CLAUDE.md section 2,
 
 `weight`, like `y`, is a top-level argument referring to a column name
 in `data` (see `docs/spec/wls-spec.md`, "API引数").
-Since the estimation options WLS needs are identical to OLS's, no
-separate options class is introduced; WLS reuses `OLSOptions` as-is
-(see section 3).
+`WLSOptions` is re-exported as-is from `_lib` (not redefined as a
+Python class), matching `OLSOptions`'s pattern (see
+`python_package/econometricsmodels/linear/CLAUDE.md`). Its fields are
+field-for-field identical to `OLSOptions` today, but it is a separate
+class (`WLSResults` was already independent from `OLSResults` from the
+start, so keeping `WLSOptions` tied to `OLSOptions` would have been
+the odd one out): WLS-specific options may be added later without
+affecting `OLSOptions`/OLS users.
 """
 
 from __future__ import annotations
@@ -19,9 +24,9 @@ from __future__ import annotations
 import polars as pl
 
 from .. import _lib
-from .._lib import OLSOptions
+from .._lib import WLSOptions
 
-__all__ = ["WLS", "WlsResults"]
+__all__ = ["WLS", "WLSOptions", "WLSResults"]
 
 
 class WLS:
@@ -36,9 +41,9 @@ class WLS:
             analytic weight (proportional to the inverse of the
             variance; no normalization required). Non-positive values
             raise `ValidationError`.
-        options: Estimation options. Uses the same `OLSOptions` as
-            `OLS`. Defaults to `OLSOptions()` (classical, with
-            intercept, confidence_level=0.95) when omitted.
+        options: Estimation options. Defaults to `WLSOptions()`
+            (classical, with intercept, confidence_level=0.95) when
+            omitted.
 
     Examples:
         >>> import polars as pl
@@ -56,15 +61,15 @@ class WLS:
         y: str,
         x: list[str],
         weight: str,
-        options: OLSOptions | None = None,
+        options: WLSOptions | None = None,
     ) -> None:
         self._data = data
         self._y = y
         self._x = x
         self._weight = weight
-        self._options = options if options is not None else OLSOptions()
+        self._options = options if options is not None else WLSOptions()
 
-    def fit(self) -> WlsResults:
+    def fit(self) -> WLSResults:
         """Estimate the WLS model.
 
         Returns:
@@ -84,16 +89,16 @@ class WLS:
         raw = _lib.fit_wls(
             self._data, self._y, self._x, self._weight, self._options
         )
-        return WlsResults(raw)
+        return WLSResults(raw)
 
 
-class WlsResults:
+class WLSResults:
     """WLS estimation results.
 
     Array-valued properties (`params`, `std_errors`, etc.) are exposed
     as dictionaries keyed by coefficient name (for O(1) lookup of a
     single parameter). Use `coef_table()` for a row-oriented listing
-    (same shape as `OlsResults`; see
+    (same shape as `OLSResults`; see
     `docs/spec/ols-spec.md`, "結果構造体").
 
     Args:
@@ -237,3 +242,59 @@ class WlsResults:
                 self._raw.conf_upper,
             )
         ]
+
+    def predict(
+        self, new_data: pl.DataFrame | None = None
+    ) -> list[dict[str, float]]:
+        """Predicted values.
+
+        Same design as `OLSResults.predict()`: unified into a single
+        method rather than a separate `fitted_values` property.
+        Weights play no role in either case: the predicted value is
+        `x_i'β̂` on the original (unweighted) scale regardless of
+        `new_data`, and out-of-sample observations have no weight to
+        apply (see `docs/spec/wls-spec.md`, "predict()").
+
+        Args:
+            new_data: New data to predict on. Must contain columns with
+                the same names as the `x` columns passed at fit time
+                (matched by name; column order does not matter). If
+                `include_intercept=True` was used at fit time, the
+                constant column is added automatically and must not be
+                included here. If `None` (default), returns the fitted
+                values for the training data used in `fit()`, on the
+                same original (unweighted) scale as `residuals`.
+
+        Returns:
+            Row-oriented predictions, one dict per observation. Each
+            dict currently has a single key, `"predicted"`.
+
+        Raises:
+            ValidationError: `new_data` is missing a required `x`
+                column, or a column contains missing/NaN/infinite
+                values.
+        """
+        raw = self._raw.predict(new_data)
+        return [{"predicted": value} for value in raw]
+
+    def augment(self, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
+        """Source data with the predicted values appended as a column.
+
+        Same design as `OLSResults.augment()`: weights play no role in
+        either case, matching `predict()`.
+
+        Args:
+            new_data: Same as `predict()`. If `None` (default), returns
+                the training data used in `fit()` with the predicted
+                values appended.
+
+        Returns:
+            A polars DataFrame: the source data's columns plus
+            `"predicted"`, in the same row order as the source.
+
+        Raises:
+            ValidationError: Same as `predict()`, or the source data
+                already has a column named `"predicted"` (which would
+                otherwise be silently overwritten).
+        """
+        return self._raw.augment(new_data)

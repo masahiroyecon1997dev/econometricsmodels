@@ -61,12 +61,12 @@ def _build_dataframe(n: int, k: int, seed: int):
 
 
 def _fit_once_engine(ctx: FitContext):
-    from econometricsmodels import WLS, OLSOptions
+    from econometricsmodels import WLS, WLSOptions
 
     if ctx.cov_type == "classical":
-        options = OLSOptions(cov_type="classical")
+        options = WLSOptions(cov_type="classical")
     elif ctx.cov_type == "hac":
-        options = OLSOptions(cov_type="hac", hac_lags=ctx.hac_lags)
+        options = WLSOptions(cov_type="hac", hac_lags=ctx.hac_lags)
     else:
         raise ValueError(f"unknown cov_type: {ctx.cov_type!r}")
     return WLS(

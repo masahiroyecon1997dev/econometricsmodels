@@ -5,11 +5,10 @@
 //! `engine_pybind`はpolars DataFrameから列ごとに`Vec<f64>`を抽出するところまでを担い
 //! （`column_extraction::extract_f64_column`）、それらの列を本モジュールの
 //! `LogitInput::from_columns`に渡す。`faer::Mat`への組み立て（切片列の自動追加を含む）は
-//! ここ（engine側）の責務とする。`engine::linear::ols::OlsInput`と同型の設計
-//! （`docs/planning/specs/nonlinear-api-design.md`参照）。
+//! ここ（engine側）の責務とする。`engine::linear::ols::OlsInput`と同型の設計。
 //!
 //! OLSと異なり、Phase2（Logit/Probit/Tobit）では`weights`/`offset`を見送っているため
-//! （`nonlinear-api-design.md`7章）、`from_columns_weighted`に相当するものはない。
+//! （`docs/spec/nonlinear-common.md`7章）、`from_columns_weighted`に相当するものはない。
 //!
 //! ## 数式（ロジスティック回帰）
 //!
@@ -34,11 +33,11 @@ use crate::error::CommonError;
 use crate::inference;
 use crate::nonlinear::common::{
     CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
-    Method, MleError, SandwichVariant, SeparationNormCheck, cluster_cov_params, column_means,
-    column_medians, destandardize_cov_params, destandardize_params, goodness_of_fit,
+    MleError, MleFitOptions, SandwichVariant, SeparationNormCheck, cluster_cov_params,
+    column_means, column_medians, destandardize_cov_params, destandardize_params, goodness_of_fit,
     log_likelihood_null, marginal_effects_from_w_s, observed_information_cov_params,
-    opg_cov_params, pred_table, predict_from_link, run_solver, sandwich_cov_params,
-    standardize_columns, validate_fit_preconditions,
+    ols_based_initial_params, opg_cov_params, pred_table, predict_from_link, predict_new_data,
+    run_solver, sandwich_cov_params, standardize_columns, validate_fit_preconditions,
 };
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
@@ -67,11 +66,10 @@ impl LogitInput {
     /// `LogitInput`を組み立てる。`include_intercept=true`の場合、設計行列の先頭列に
     /// 定数項（すべて1.0）を自動追加する。
     ///
-    /// `y`が単位区間`[0,1]`に収まることの検証は、このIssue（#54、次元検証のみがスコープ）では
+    /// `y`が単位区間`[0,1]`に収まることの検証は、次元検証のみがスコープの本関数では
     /// 行わない。statsmodelsの`Logit`はコンストラクタ時点でこの検証を行っている（`endog`が
     /// 範囲外だと`ValueError: endog must be in the unit interval.`）ため、本実装でも尤度・
-    /// スコア・Hessianを実装するIssue（B2）で同等の検証を追加する予定
-    /// （`docs/planning/specs/nonlinear-implementation-notes.md`参照）。
+    /// スコア・Hessianを実装するIssue（B2）で同等の検証を追加する予定。
     ///
     /// # Errors
     /// `y`といずれかの`x_columns`の長さが一致しない場合は`CommonError::DimensionMismatch`を返す。
@@ -278,7 +276,7 @@ impl LogitProblem {
     /// 観測ごとのスコア行列（n×k）。各行が`sᵢ = (yᵢ-pᵢ)xᵢ`（対数尤度の1階微分そのもの、
     /// `Gradient`トレイトとは符号が逆）。OPG/サンドイッチ/クラスターSEの計算に使う
     /// （argminの`Gradient`は合計済みの1本のベクトルしか返さないため別途必要、
-    /// `docs/planning/specs/nonlinear-implementation-notes.md`「engine内のtrait設計」参照）。
+    /// `docs/spec/nonlinear-common.md`3章参照）。
     pub fn scores(&self, params: &[f64]) -> Mat<f64> {
         let n = self.x.nrows();
         let k = self.x.ncols();
@@ -347,7 +345,7 @@ impl Hessian for LogitProblem {
 /// 適合度統計量の計算を通過した状態を表す。
 ///
 /// `marginal_effects`/`predict`/`pred_table`は`fit`とは別のメソッドとして提供する
-/// （`docs/planning/specs/nonlinear-api-design.md`6章）。
+/// （`docs/spec/nonlinear-common.md`6章）。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
 #[derive(Debug)]
@@ -381,7 +379,7 @@ pub struct LogitEstimator {
     /// （`nᵢ log(ȳ) + (1-nᵢ) log(1-ȳ)`の総和）から直接計算する（ソルバーの
     /// 再フィットは経由しない。ユーザー確認済み、`log_likelihood`のdocコメント
     /// 「切片のみモデルのllf」参照）。`include_intercept`の値に関わらず常にこの
-    /// 「切片のみ」モデルを参照する（`nonlinear-api-design.md`5章の定義通り、
+    /// 「切片のみ」モデルを参照する（`docs/spec/nonlinear-common.md`5章の定義通り、
     /// statsmodelsも`k_constant`の有無に関わらず同じ挙動）。
     ///
     /// **`include_intercept=false`のとき、この値が参照する「切片のみ」モデルは
@@ -416,17 +414,21 @@ impl LogitEstimator {
     /// 観測情報行列によるSE・z値・p値・信頼区間を推定する。
     ///
     /// `method`の選択に関わらず、収束点でのHessian評価（SE計算用）は常に解析的に行う
-    /// （`run_solver`の実装方針、`docs/planning/specs/nonlinear-implementation-notes.md`
-    /// 「engine内のtrait設計」参照）。BFGS/L-BFGSが最適化中に内部で保持する近似Hessianは
+    /// （`run_solver`の実装方針、`docs/spec/nonlinear-common.md`1.2節参照）。
+    /// BFGS/L-BFGSが最適化中に内部で保持する近似Hessianは
     /// 使い回さない。
     ///
-    /// 初期値は常にゼロベクトル（`start_params`によるユーザー指定は未対応。
-    /// `nonlinear-api-design.md`7章では確定オプションだが、対応するIssueが存在しないため
-    /// 本Issueのスコープ外とし、ユーザー確認の上で見送った）。
+    /// 初期値（warm start）は標準化空間でのLPM（線形確率モデル）最小二乗解に、logitの
+    /// IRLS 1ステップ相当のスケール補正（`p̄=ȳ`での `1/(p̄(1-p̄))` 倍＋切片補正）を施した
+    /// もの（`ols_based_initial_params`。従来のゼロベクトルから変更）。前段で
+    /// `standardize_columns`後の設計行列を列ピボットQRしランク落ちを検出する
+    /// （`checked_design_matrix_qr`、`method`によらず単一経路で`SingularDesignMatrix`）。
+    /// `start_params`によるユーザー指定初期値は引き続き未対応（`docs/spec/
+    /// nonlinear-common.md`7章では確定オプションだが対応Issueが無く、見送り）。
     ///
     /// 設計行列は`standardize_columns`で内部的に標準化してから最適化し（勾配ノルムに
     /// 基づく収束判定`tol`が設計行列のスケールに依存しないようにするため、
-    /// `docs/planning/specs/nonlinear-implementation-notes.md`「収束判定のtol」参照）、
+    /// `docs/spec/nonlinear-common.md`1.3節参照）、
     /// 収束後のパラメータを`destandardize_params`で元のスケールへ逆変換する。
     /// `run_solver`が返すHessianは標準化空間（θ_std）で評価されたものであり、
     /// 分散共分散行列もいったん標準化空間で計算してから`destandardize_cov_params`で
@@ -443,7 +445,7 @@ impl LogitEstimator {
     /// scores`）が必要なため、標準化空間の設計行列を保持したまま`LogitProblem`を
     /// クローンしておき（`argmin::core::Executor`向けに元々`Clone`を要求しているため
     /// 追加コストは`Clone`実装自体のみ）、`run_solver`が返す収束点のパラメータで
-    /// 評価する。検定分布は標準正規分布（`nonlinear-api-design.md`5章、OLSのt分布とは
+    /// 評価する。検定分布は標準正規分布（`docs/spec/nonlinear-common.md`4章、OLSのt分布とは
     /// 異なる）。
     ///
     /// `n <= k`（観測数が説明変数の数、定数項を含む、以下）のとき`CommonError::
@@ -463,26 +465,33 @@ impl LogitEstimator {
     /// - `y`が`{0.0, 1.0}`以外の値を含む: `MleError::InvalidBinaryY`
     /// - `k`（定数項を含む説明変数の数）が0（定数項も説明変数も無い）: `CommonError::NoRegressors`
     /// - 観測数`n`が`k`以下: `CommonError::InsufficientObservations`
+    /// - 設計行列がランク落ち（完全な多重共線性等）: `MleError::SingularDesignMatrix`
+    ///   （最適化前の列ピボットQRランクチェックで`method`によらず検出）
     /// - `raise_on_non_convergence=true`かつ`max_iter`回で未収束: `MleError::NonConvergence`
-    /// - 収束点（または`raise_on_non_convergence=false`時の打ち切り点）のHessianが特異
-    ///   （設計行列の完全な多重共線性等）: `MleError::SingularHessian`
+    /// - 収束点（または`raise_on_non_convergence=false`時の打ち切り点）のHessianが特異:
+    ///   `MleError::SingularHessian`（ランク落ちは前段で`SingularDesignMatrix`として弾くため、
+    ///   ここに至るのは丸め誤差境界での不定符号Hessian等）
     /// - `cov_type=Opg`でOPG行列（`Σᵢ sᵢsᵢ'`）が特異: `MleError::SingularOpgMatrix`
     /// - `cov_type=Cluster`でグループキー未指定: `CommonError::MissingClusterColumn`
     /// - `cov_type=Cluster`でクラスター数が2未満: `CommonError::InsufficientClusters`
     /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
     ///   `CommonError::InsufficientClustersForInference`（`rank(Ŝ) ≤ g - 1`のため
-    ///   ロバストWald検定（LRではなくクラスターロバスト共分散側）で退化する識別失敗、
-    ///   Issue #289。Logit/Probitでは新規制約——従来は縮退した共分散から読んだSEを
+    ///   ロバストWald検定（LRではなくクラスターロバスト共分散側）で退化する識別失敗。
+    ///   Logit/Probitでは新規制約——従来は縮退した共分散から読んだSEを
     ///   無警告で返していた）
-    pub fn fit(
-        input: LogitInput,
-        method: Method,
-        max_iter: i64,
-        tol: f64,
-        raise_on_non_convergence: bool,
-        cov_type: CovType,
-        confidence_level: f64,
-    ) -> Result<Self, MleError> {
+    pub fn fit(input: LogitInput, options: MleFitOptions) -> Result<Self, MleError> {
+        let MleFitOptions {
+            method,
+            max_iter,
+            tol,
+            raise_on_non_convergence,
+            cov_type,
+            confidence_level,
+        } = options;
+
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
+        crate::parallelism::ensure_serial();
+
         let n = input.nobs();
         let k = input.k();
         validate_fit_preconditions(
@@ -496,6 +505,19 @@ impl LogitEstimator {
         )?;
 
         let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
+        // `method`に関わらず、標準化空間でLPMのIRLS 1ステップ相当を初期値（warm start）に
+        // する（`ols_based_initial_params`）。前段の列ピボットQRランクチェックにより、
+        // 完全な多重共線性は`method`によらず単一経路で`SingularDesignMatrix`として検出される
+        // （従来はゼロベクトル初期値で、`newton`は`newton_step`内のQR、
+        // `bfgs`/`lbfgs`は収束後の`observed_information_cov_params`という`method`依存の
+        // 別経路に分かれていた）。
+        let initial_params = ols_based_initial_params(
+            &x_std,
+            input.y(),
+            input.has_intercept(),
+            // logit: IRLS重み `w = p̄(1-p̄)`、リンク値 `η₀ = ln(p̄/(1-p̄))`。
+            |p_bar| (p_bar * (1.0 - p_bar), (p_bar / (1.0 - p_bar)).ln()),
+        )?;
         let problem = LogitProblem::from_standardized(x_std, input.y().clone());
         // `cov_type`がOPG/サンドイッチ型の場合、収束点でのスコア評価に元の
         // `LogitProblem`（標準化空間のx_std）が必要になる。`run_solver`は`problem`の
@@ -514,12 +536,13 @@ impl LogitEstimator {
         let output = run_solver(
             problem,
             method,
-            vec![0.0; k],
+            initial_params,
             max_iter as u64,
             tol,
+            input.y().nrows(),
             raise_on_non_convergence,
             // Logitは`y∈{0,1}`で係数が±∞へ発散するため(準)完全分離の
-            // 標準化パラメータノルム事後チェックを有効にする（Issue #288）。
+            // 標準化パラメータノルム事後チェックを有効にする。
             SeparationNormCheck::Enabled,
         )?;
 
@@ -743,7 +766,7 @@ impl LogitEstimator {
     }
 
     /// 限界効果（`marginal_effects`）。`fit()`とは独立した別メソッド（`fit()`のReturn
-    /// 本体には含めない、`nonlinear-api-design.md`6章で確定済み）。`fit()`時の
+    /// 本体には含めない、`docs/spec/nonlinear-common.md`6章で確定済み）。`fit()`時の
     /// `cov_params`を再利用するため再最適化は不要（`confidence_level`は`fit()`とは
     /// 独立したパラメータとして受け取り、`fit()`時の値に縛られず事後的に異なる
     /// CI幅を見られるようにする）。
@@ -752,7 +775,7 @@ impl LogitEstimator {
     ///
     /// `p_i = Λ(x_i'θ)`のとき、変数`j`（連続変数として扱う。`dummy=False`が既定の
     /// statsmodelsの`get_margeff()`に倣い、離散変数の自動判定は行わない設計、
-    /// `nonlinear-implementation-notes.md`「限界効果」参照）の限界効果は
+    /// `docs/spec/nonlinear-common.md`6章参照）の限界効果は
     /// `dy/dx_j = p(1-p)θ_j`。
     ///
     /// - `at="overall"`（AME）: `g_j(θ) = w(θ)*θ_j`、`w(θ) = (1/n)Σᵢ pᵢ(1-pᵢ)`
@@ -769,7 +792,7 @@ impl LogitEstimator {
     ///
     /// 変数`j`の分散は`Var(g_j) = jac_j · Σ · jac_jᵀ`（`jac_j`はヤコビアンの`j`行目、
     /// `Σ=cov_params`）。標準誤差はこの平方根、検定分布は標準正規分布
-    /// （`fit()`本体と同じ、`nonlinear-api-design.md`5章）。
+    /// （`fit()`本体と同じ、`docs/spec/nonlinear-common.md`4章）。
     ///
     /// 定数項（切片）は出力から除外する（切片の限界効果は意味を持たない、
     /// statsmodelsも同様）。
@@ -804,12 +827,34 @@ impl LogitEstimator {
 
     /// 予測確率 `p_i = Λ(x_i'θ)` を、`fit()`に使った学習データ（`self.input.x()`）の
     /// 各行について返す（`fit()`のReturn本体には含めない別メソッド、
-    /// `nonlinear-api-design.md`6章）。
+    /// `docs/spec/nonlinear-common.md`6章）。
     ///
-    /// **新規データでの予測（out-of-sample）は未対応**（本Issueのスコープ外、
-    /// 別issueでトラッキング。ユーザー確認済み）。
+    /// 新規データでの予測（out-of-sample）は`predict_new_data`。
     pub fn predict(&self) -> Vec<f64> {
         predict_from_link(self.input.x(), &self.params, logistic)
+    }
+
+    /// 新規データ（out-of-sample、`new_x_columns`）に対する予測確率
+    /// `p_i = Λ(x_i'θ)`。
+    ///
+    /// `nonlinear::common::predict_new_data`に`logistic`をリンク関数として渡すだけの
+    /// 薄いラッパー。リンク関数の選択（Logitはロジスティック関数）という手法固有の
+    /// 知識を`engine`側に閉じ込め、`engine_pybind`には計算ロジックを持たせない方針
+    /// （`.claude/rules/rust-style.md`「責務分離」）を守るため、`engine_pybind`から
+    /// `common::predict_new_data`を直接呼ばずこのメソッド経由にしている
+    /// （`OLSResult::predict`が`engine::linear::ols::predict_new_data`という
+    /// フリー関数を直接呼べるのは、OLSにはリンク関数の選択という手法固有の分岐が
+    /// 無いため）。
+    ///
+    /// `new_x_columns`の本数・順序の契約、パニック条件は
+    /// `nonlinear::common::predict_new_data`のdocコメント参照。
+    pub fn predict_new_data(&self, new_x_columns: &[Vec<f64>]) -> Vec<f64> {
+        predict_new_data(
+            &self.params,
+            self.input.has_intercept(),
+            new_x_columns,
+            logistic,
+        )
     }
 
     /// 分類の的中表（2×2、`table[actual][predicted]`のカウント。行=実測クラス、
@@ -818,8 +863,8 @@ impl LogitEstimator {
     /// `nonlinear/common.rs`の`pred_table`のdocコメント参照（リンク関数に依存しない計算
     /// のため`common.rs`に共通化されている）。
     ///
-    /// **新規データでの的中表（out-of-sample）は未対応**（スコープ外、
-    /// 別issueでトラッキング。ユーザー確認済み）。
+    /// **新規データでの的中表（out-of-sample）は未対応**（`predict()`とは異なり
+    /// スコープ外のまま、別issueでトラッキング。ユーザー確認済み）。
     pub fn pred_table(&self, threshold: f64) -> Mat<f64> {
         pred_table(&self.predict(), self.input.y(), threshold)
     }
@@ -828,7 +873,7 @@ impl LogitEstimator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nonlinear::common::dydx_and_jacobian;
+    use crate::nonlinear::common::{Method, dydx_and_jacobian};
     use statrs::distribution::{ChiSquared, ContinuousCDF};
 
     #[test]
@@ -1059,12 +1104,14 @@ mod tests {
         let input = intercept_only_input();
         let estimator = LogitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -1083,6 +1130,30 @@ mod tests {
         assert!(estimator.n_iter() <= 10, "n_iter={}", estimator.n_iter());
     }
 
+    #[test]
+    fn fit_pins_faer_global_parallelism_to_seq() {
+        // `fit()` 冒頭の `crate::parallelism::ensure_serial()` が faer の
+        // グローバル並列度を `Par::Seq` へ引き戻すことの回帰ガード（nonlinear 系統代表）。
+        // 別テストが `Seq` にしている可能性があるため、まず `Rayon` に戻してから通す。
+        // 設計行列は極小なので一時的な `Rayon` 設定は #283 の病理を招かない。
+        faer::set_global_parallelism(faer::Par::rayon(0));
+
+        let _ = LogitEstimator::fit(
+            small_input(),
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
+        )
+        .unwrap();
+
+        assert!(matches!(faer::get_global_parallelism(), faer::Par::Seq));
+    }
+
     /// 切片のみモデルは観測情報行列も閉じた形で書ける: 全観測で`p_i=ȳ`（closed form）
     /// なので、Hessianは`-Σp_i(1-p_i) = -n*ȳ*(1-ȳ)`というスカラーになり、
     /// `Var(θ̂) = -H⁻¹ = 1/(n*ȳ*(1-ȳ))`。z値・p値・信頼区間はこの分散から
@@ -1092,12 +1163,14 @@ mod tests {
      {
         let estimator = LogitEstimator::fit(
             intercept_only_input(),
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -1149,12 +1222,14 @@ mod tests {
 
         let estimator = LogitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         let k = 3;
@@ -1194,12 +1269,14 @@ mod tests {
     fn fit_computes_goodness_of_fit_statistics_for_intercept_only_model() {
         let estimator = LogitEstimator::fit(
             intercept_only_input(),
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -1242,12 +1319,14 @@ mod tests {
 
         let estimator = LogitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -1310,12 +1389,14 @@ mod tests {
 
         let estimator = LogitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -1362,12 +1443,14 @@ mod tests {
 
         let classical = LogitEstimator::fit(
             make_input(),
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -1412,12 +1495,14 @@ mod tests {
         for (cov_type, expected) in cases {
             let estimator = LogitEstimator::fit(
                 make_input(),
-                Method::Newton,
-                35,
-                1e-8,
-                true,
-                cov_type.clone(),
-                0.95,
+                MleFitOptions {
+                    method: Method::Newton,
+                    max_iter: 35,
+                    tol: 1e-8,
+                    raise_on_non_convergence: true,
+                    cov_type: cov_type.clone(),
+                    confidence_level: 0.95,
+                },
             )
             .unwrap();
             for i in 0..k {
@@ -1439,7 +1524,7 @@ mod tests {
     /// recomputed_values`と同じ技法・同じ多変量データセット。情報行列の等式が
     /// 厳密に成り立つ切片のみモデルでは配線ミスを検出できないため）。
     /// クラスター数`G`は傾き係数の数`q=2`より多くする必要がある（`G <= q`は
-    /// `InsufficientClustersForInference`で弾かれる、Issue #289）ため`G=3`（2:1:1）。
+    /// `InsufficientClustersForInference`で弾かれる）ため`G=3`（2:1:1）。
     #[test]
     fn fit_cov_type_cluster_matches_independently_recomputed_values() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
@@ -1465,12 +1550,14 @@ mod tests {
 
         let classical = LogitEstimator::fit(
             make_input(),
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -1498,14 +1585,16 @@ mod tests {
 
         let estimator = LogitEstimator::fit(
             make_input(),
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Cluster {
-                groups: Some(groups),
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Cluster {
+                    groups: Some(groups),
+                },
+                confidence_level: 0.95,
             },
-            0.95,
         )
         .unwrap();
         for i in 0..k {
@@ -1525,7 +1614,7 @@ mod tests {
     /// 偏った分布のグループサイズ（クラスター内の観測数がクラスターごとに異なる場合）
     /// を見逃しうる。OLS側の対応するテスト（`fit_computes_cluster_std_errors_t_stats_
     /// p_values_conf_int_and_f_test`、2:3の不均衡）に倣い、3:1:1の不均衡なグループでも
-    /// 同じ独立再計算の技法で検証する（`G=3 > q=2`、Issue #289）。
+    /// 同じ独立再計算の技法で検証する（`G=3 > q=2`）。
     #[test]
     fn fit_cov_type_cluster_matches_independently_recomputed_values_with_unbalanced_groups() {
         let y = vec![0.0, 1.0, 0.0, 1.0, 1.0];
@@ -1555,12 +1644,14 @@ mod tests {
 
         let classical = LogitEstimator::fit(
             make_input(),
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -1588,14 +1679,16 @@ mod tests {
 
         let estimator = LogitEstimator::fit(
             make_input(),
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Cluster {
-                groups: Some(groups),
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Cluster {
+                    groups: Some(groups),
+                },
+                confidence_level: 0.95,
             },
-            0.95,
         )
         .unwrap();
         for i in 0..k {
@@ -1625,12 +1718,14 @@ mod tests {
 
         let result = LogitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Cluster { groups: None },
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Cluster { groups: None },
+                confidence_level: 0.95,
+            },
         );
 
         assert_eq!(
@@ -1655,14 +1750,16 @@ mod tests {
 
         let result = LogitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Cluster {
-                groups: Some(groups),
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Cluster {
+                    groups: Some(groups),
+                },
+                confidence_level: 0.95,
             },
-            0.95,
         );
 
         assert_eq!(
@@ -1676,7 +1773,7 @@ mod tests {
     /// `Σ_i s_i = 0`）で`rank(Ŝ) ≤ g - 1`となり退化する。Logit/Probitは全体検定がLR
     /// のため`q×q`反転こそ通らないが、縮退した共分散から読んだSEを無警告で返すのは
     /// 実質バグのため、`fit()`冒頭（Newton反復の前）のバリデーションで
-    /// `CommonError::InsufficientClustersForInference`として弾く（Issue #289。
+    /// `CommonError::InsufficientClustersForInference`として弾く（
     /// Logit/Probitでは新規制約）。説明変数2個（`q = 3 - 1 = 2`）に対し`g = 2`。
     #[test]
     fn fit_returns_validation_error_when_cluster_count_at_most_slopes() {
@@ -1699,14 +1796,16 @@ mod tests {
 
         let result = LogitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Cluster {
-                groups: Some(groups),
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Cluster {
+                    groups: Some(groups),
+                },
+                confidence_level: 0.95,
             },
-            0.95,
         );
 
         assert_eq!(
@@ -1737,7 +1836,7 @@ mod tests {
             .unwrap()
         };
         let k = 3;
-        // `G=3 > q=2`（`G <= q`は`InsufficientClustersForInference`で弾かれる、Issue #289）。
+        // `G=3 > q=2`（`G <= q`は`InsufficientClustersForInference`で弾かれる）。
         let groups = vec![
             "a".to_string(),
             "a".to_string(),
@@ -1755,24 +1854,28 @@ mod tests {
         ] {
             let newton = LogitEstimator::fit(
                 make_input(),
-                Method::Newton,
-                35,
-                1e-8,
-                true,
-                cov_type.clone(),
-                0.95,
+                MleFitOptions {
+                    method: Method::Newton,
+                    max_iter: 35,
+                    tol: 1e-8,
+                    raise_on_non_convergence: true,
+                    cov_type: cov_type.clone(),
+                    confidence_level: 0.95,
+                },
             )
             .unwrap();
 
             for method in [Method::Bfgs, Method::Lbfgs] {
                 let estimator = LogitEstimator::fit(
                     make_input(),
-                    method,
-                    200,
-                    1e-8,
-                    true,
-                    cov_type.clone(),
-                    0.95,
+                    MleFitOptions {
+                        method,
+                        max_iter: 200,
+                        tol: 1e-8,
+                        raise_on_non_convergence: true,
+                        cov_type: cov_type.clone(),
+                        confidence_level: 0.95,
+                    },
                 )
                 .unwrap();
 
@@ -1810,12 +1913,14 @@ mod tests {
         for method in [Method::Bfgs, Method::Lbfgs] {
             let estimator = LogitEstimator::fit(
                 intercept_only_input(),
-                method,
-                100,
-                1e-6,
-                true,
-                CovType::Classical,
-                0.95,
+                MleFitOptions {
+                    method,
+                    max_iter: 100,
+                    tol: 1e-6,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
             )
             .unwrap();
 
@@ -1856,12 +1961,14 @@ mod tests {
 
         let newton = LogitEstimator::fit(
             make_input(),
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         assert!(newton.converged());
@@ -1869,12 +1976,14 @@ mod tests {
         for method in [Method::Bfgs, Method::Lbfgs] {
             let estimator = LogitEstimator::fit(
                 make_input(),
-                method,
-                200,
-                1e-8,
-                true,
-                CovType::Classical,
-                0.95,
+                MleFitOptions {
+                    method,
+                    max_iter: 200,
+                    tol: 1e-8,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
             )
             .unwrap();
 
@@ -1895,12 +2004,14 @@ mod tests {
     fn fit_returns_invalid_confidence_level_error_out_of_range() {
         let result = LogitEstimator::fit(
             intercept_only_input(),
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            1.5,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 1.5,
+            },
         );
         assert_eq!(
             result.unwrap_err(),
@@ -1914,12 +2025,14 @@ mod tests {
     fn fit_returns_invalid_max_iter_error_for_non_positive_max_iter() {
         let result = LogitEstimator::fit(
             intercept_only_input(),
-            Method::Newton,
-            0,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 0,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         );
         assert_eq!(
             result.unwrap_err(),
@@ -1942,12 +2055,14 @@ mod tests {
 
         let result = LogitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         );
         assert_eq!(
             result.unwrap_err(),
@@ -1973,12 +2088,14 @@ mod tests {
 
         let result = LogitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         );
         assert_eq!(
             result.unwrap_err(),
@@ -1991,12 +2108,14 @@ mod tests {
         for tol in [0.0, -1.0] {
             let result = LogitEstimator::fit(
                 intercept_only_input(),
-                Method::Newton,
-                35,
-                tol,
-                true,
-                CovType::Classical,
-                0.95,
+                MleFitOptions {
+                    method: Method::Newton,
+                    max_iter: 35,
+                    tol,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
             );
             assert_eq!(result.unwrap_err(), MleError::InvalidTol { tol });
         }
@@ -2023,12 +2142,14 @@ mod tests {
 
             let result = LogitEstimator::fit(
                 input,
-                Method::Newton,
-                35,
-                1e-6,
-                true,
-                CovType::Classical,
-                0.95,
+                MleFitOptions {
+                    method: Method::Newton,
+                    max_iter: 35,
+                    tol: 1e-6,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
             );
             assert_eq!(
                 result.unwrap_err(),
@@ -2040,207 +2161,110 @@ mod tests {
         }
     }
 
-    #[test]
-    fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix() {
-        // x2 = 2*x1（完全な多重共線性）。θ=0でのHessianは0.25*X'Xで、X'X自体が
-        // 構造的に特異（yの値に関わらず、θの値に関わらず常に特異）なので、
-        // 収束後の観測情報行列計算（`observed_information_cov_params`）で確実に
-        // `SingularHessian`を検出する（完全分離のような「収束の挙動に依存する」
-        // ケースと異なり、決定的に再現できる）。
-        //
-        // Newton法自体の反復過程は、`regularized_newton_step`（Tobit実装時に
-        // `nonlinear/common.rs`へ追加、Issue #215）導入前は初回ステップで即座に
-        // `newton_step`が特異性を検出していたが、導入後はHessianが構造的に特異な
-        // このケースでもλ>0の正則化により有限のステップが得られ、Newton自体は
-        // 「収束」した扱いになる。最終的にこのテストが検証する`fit()`全体の
-        // 結果（`Err(MleError::SingularHessian)`）は変わらない（収束後の
-        // `observed_information_cov_params`が同じ構造的特異Hessianを検出するため）が、
-        // 内部の反復過程は変化している点に注意（rust-reviewer指摘）。
-        let y = vec![0.0, 1.0, 0.0, 1.0];
-        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
-        let input = LogitInput::from_columns(
-            &y,
-            &x_columns,
-            vec!["x1".to_string(), "x2".to_string()],
-            true,
-            "y".to_string(),
-        )
-        .unwrap();
-
-        let result = LogitEstimator::fit(
-            input,
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
-        );
-        assert!(
-            matches!(result, Err(MleError::SingularHessian)),
-            "{:?}",
-            result
-        );
-    }
-
-    /// 同じ完全な多重共線性のデータセットを`bfgs`/`lbfgs`で最適化した場合の
-    /// `SingularHessian`伝播経路: `newton`は`newton_step`内の特異性検出
-    /// （最適化のステップ計算中）で検出するが、`bfgs`/`lbfgs`は`newton_step`を
-    /// 一切経由しない（準ニュートン法は内部の近似逆Hessianで降下方向を決めるため、
-    /// モデルの解析的Hessianの特異性に依存しない）。この場合、収束後に
-    /// `observed_information_cov_params`（`neg_hessian_inverse`）が呼ぶ
-    /// `ensure_well_conditioned_symmetric_matrix`（固有値ベースの悪条件検出）が、
-    /// `bfgs`/`lbfgs`にとって唯一の特異性検出経路になる。修正前（発覚時点）
-    /// はこのテストは失敗していた（非ピボットCholeskyが特異性を検出できず、
-    /// 桁違いに巨大な値を含む`Ok`が返っていた）。両方のソルバーで同じコードパスを
-    /// 通ることをそれぞれ独立に確認する。
-    #[test]
-    fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_bfgs_and_lbfgs()
-     {
-        let y = vec![0.0, 1.0, 0.0, 1.0];
-        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
-
-        for method in [Method::Bfgs, Method::Lbfgs] {
-            let input = LogitInput::from_columns(
-                &y,
-                &x_columns,
-                vec!["x1".to_string(), "x2".to_string()],
-                true,
-                "y".to_string(),
-            )
-            .unwrap();
-
-            let result =
-                LogitEstimator::fit(input, method, 100, 1e-6, true, CovType::Classical, 0.95);
-            assert!(
-                matches!(result, Err(MleError::SingularHessian)),
-                "method={:?}, result={:?}",
-                method,
-                result
-            );
-        }
-    }
-
-    /// `sandwich_cov_params`（`cov_type=Hc0`/`Hc1`）も内部で`neg_hessian_inverse`を
-    /// 呼ぶため、`Classical`と同じ完全な多重共線性のデータセットで`SingularHessian`に
-    /// なるはずだが、カバレッジ確認時点ではこの伝播経路
-    /// （`fit()`の`CovType::Hc0`/`Hc1`分岐の`?`）を通るテストが無かった
-    /// （`cargo-llvm-cov`で判明）。`Opg`/`Cluster`分岐は既存の`fit_cov_type_*`系
-    /// テストが特異でないデータセットでの成功パスのみ検証しているのと対照的に、
-    /// ここでは特異データセットでのエラー伝播を検証する。
+    /// 完全な多重共線性（`x2 = 2·x1`）の設計行列は、`fit()`冒頭の列ピボットQR
+    /// ランクチェック（`nonlinear::common::checked_design_matrix_qr`）で`method`・
+    /// `cov_type`に関わらず単一経路で`SingularDesignMatrix`として弾かれる。
     ///
-    /// `method=Newton`は使わない: `newton_step`内の特異性検出（ピボット付きQR）が
-    /// `cov_type`の分岐に到達する前（最適化中）に`SingularHessian`を返してしまうため
-    /// （`fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_
-    /// with_bfgs_and_lbfgs`のdocコメントと同じ理由。当初`Method::Newton`で書いていて
-    /// この経路を実際には通れていなかったことが`cargo-llvm-cov`の再計測で発覚し、
-    /// `Method::Bfgs`に修正した）。
+    /// 従来はゼロベクトル初期値で、`newton`は`newton_step`内の列ピボットQR、`bfgs`/`lbfgs`は
+    /// 収束後の`observed_information_cov_params`（`cov_type=Opg`なら`opg_cov_params`）と
+    /// いう`method`/`cov_type`依存の別経路で検出しており、過去に`bfgs`だけ検出漏れして
+    /// 桁違いに巨大なSEを含む`Ok`が返る実バグがあった（`tests/nonlinear/
+    /// test_logit_validation.py`の履歴参照）。前段QRへの一本化でそのバグクラスを
+    /// 構造的に排除したため、`method`×`cov_type`を網羅していた旧5テスト
+    /// （`..._with_bfgs_and_lbfgs` / `..._with_hc0_and_hc1` / `fit_returns_singular_opg_
+    /// matrix_error_...` / `..._with_cluster`）を本1テストへ集約した。`x2`は`x1`から
+    /// 生成し関係を自明にする（`refactoring-candidates-2.md`項目82）。
+    ///
+    /// 旧5テストが検証していた「`fit()`の各`cov_type`分岐で`SingularHessian`/
+    /// `SingularOpgMatrix`が`?`で伝播する」経路は、本入力では前段QRで先に弾かれるため
+    /// もう通らない。この伝播経路のカバレッジは (1) `common.rs`の関数レベルテスト
+    /// （`observed_information_cov_params_returns_singular_hessian_error_*` /
+    /// `opg_cov_params_*` / `sandwich_cov_params_*` / `cluster_cov_params_*`）と、
+    /// (2) 共有インフラを`fit()`レベルで踏む`tobit.rs`の
+    /// `fit_returns_singular_hessian_error_when_cov_params_computation_fails_at_
+    /// truncated_point_with_hc0_and_hc1` / `..._with_cluster` が担う（`cov_params`計算は
+    /// Logit/Probit/Tobitで同一コード）。`?`自体は分岐ロジックを持たないため
+    /// `testing-policy.md`のカバレッジ方針上これで足りる（#279レビューで確認）。
+    ///
+    /// `Cluster`は`G=3 > q=2`（`q = k - k_constant`）にして`fit()`冒頭の
+    /// `InsufficientClustersForInference`（`G <= q`）より手前を通す。
     #[test]
-    fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_hc0_and_hc1() {
+    fn fit_returns_singular_design_matrix_error_for_perfectly_collinear_design_matrix() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
-        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
-
-        for cov_type in [CovType::Hc0, CovType::Hc1] {
-            let input = LogitInput::from_columns(
-                &y,
-                &x_columns,
-                vec!["x1".to_string(), "x2".to_string()],
-                true,
-                "y".to_string(),
-            )
-            .unwrap();
-
-            let result =
-                LogitEstimator::fit(input, Method::Bfgs, 100, 1e-6, true, cov_type.clone(), 0.95);
-            assert!(
-                matches!(result, Err(MleError::SingularHessian)),
-                "cov_type={:?}, result={:?}",
-                cov_type,
-                result
-            );
-        }
-    }
-
-    /// `cov_type=Opg`のエラー伝播（`opg_cov_params`が返す`SingularOpgMatrix`。
-    /// `SingularHessian`とは別のエラー型、`common.rs`「OPG行列特異時のエラー型を分離」
-    /// 参照）も、Hc0/Hc1と同じ完全な多重共線性データセットで検証する。
-    /// `scores_i=(y_i-p_i)x_i`かつ`x2=2*x1`のため、スコア行列も`x1`と同じ構造的な
-    /// 多重共線性を持ち（列2=2×列1）、OPG行列`Σsᵢsᵢ'`も特異になる。rust-reviewerの
-    /// 指摘（Hc0/Hc1の修正時、同種のギャップがOpg/Clusterにも残っていることが
-    /// `cargo-llvm-cov`のHTMLレポートで判明）を受けて追加。
-    #[test]
-    fn fit_returns_singular_opg_matrix_error_for_perfectly_collinear_design_matrix() {
-        let y = vec![0.0, 1.0, 0.0, 1.0];
-        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
-        let input = LogitInput::from_columns(
-            &y,
-            &x_columns,
-            vec!["x1".to_string(), "x2".to_string()],
-            true,
-            "y".to_string(),
-        )
-        .unwrap();
-
-        let result = LogitEstimator::fit(input, Method::Bfgs, 100, 1e-6, true, CovType::Opg, 0.95);
-        assert!(
-            matches!(result, Err(MleError::SingularOpgMatrix)),
-            "{:?}",
-            result
-        );
-    }
-
-    /// `cov_type=Cluster`のエラー伝播（`cluster_cov_params`も内部で`neg_hessian_inverse`を
-    /// 呼ぶため`SingularHessian`）も、Hc0/Hc1と同じ完全な多重共線性データセットで検証する
-    /// （rust-reviewerの指摘、上記2テストと同じ経緯）。`G=3 > q=2`にして`fit()`冒頭の
-    /// `InsufficientClustersForInference`より先にNewton反復のHessian特異へ到達させる
-    /// （Issue #289。`q`は共線性で実質1次元だが列数としては2）。
-    #[test]
-    fn fit_returns_singular_hessian_error_for_perfectly_collinear_design_matrix_with_cluster() {
-        let y = vec![0.0, 1.0, 0.0, 1.0];
-        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
+        let x1 = vec![1.0, 2.0, 3.0, 4.0];
+        let x2: Vec<f64> = x1.iter().map(|v| v * 2.0).collect();
         let groups = vec![
             "g1".to_string(),
             "g1".to_string(),
             "g2".to_string(),
             "g3".to_string(),
         ];
-        let input = LogitInput::from_columns(
-            &y,
-            &x_columns,
-            vec!["x1".to_string(), "x2".to_string()],
-            true,
-            "y".to_string(),
-        )
-        .unwrap();
 
-        let result = LogitEstimator::fit(
-            input,
-            Method::Bfgs,
-            100,
-            1e-6,
-            true,
-            CovType::Cluster {
-                groups: Some(groups),
-            },
-            0.95,
-        );
-        assert!(
-            matches!(result, Err(MleError::SingularHessian)),
-            "{:?}",
-            result
-        );
+        for method in [Method::Newton, Method::Bfgs, Method::Lbfgs] {
+            for cov_type in [
+                CovType::Classical,
+                CovType::Hc0,
+                CovType::Hc1,
+                CovType::Opg,
+                CovType::Cluster {
+                    groups: Some(groups.clone()),
+                },
+            ] {
+                let input = LogitInput::from_columns(
+                    &y,
+                    &[x1.clone(), x2.clone()],
+                    vec!["x1".to_string(), "x2".to_string()],
+                    true,
+                    "y".to_string(),
+                )
+                .unwrap();
+
+                let result = LogitEstimator::fit(
+                    input,
+                    MleFitOptions {
+                        method,
+                        max_iter: 100,
+                        tol: 1e-6,
+                        raise_on_non_convergence: true,
+                        cov_type: cov_type.clone(),
+                        confidence_level: 0.95,
+                    },
+                );
+                assert!(
+                    matches!(result, Err(MleError::SingularDesignMatrix)),
+                    "method={method:?}, cov_type={cov_type:?}, result={result:?}"
+                );
+            }
+        }
     }
 
+    // `max_iter`打ち切りのテストは`intercept_only_input()`を使わない: warm start
+    // （`ols_based_initial_params`）は切片のみモデルでは初期値がそのまま
+    // 厳密なMLE（`η₀=ln(ȳ/(1-ȳ))`）になり1反復以内で収束してしまうため。代わりに
+    // 多変量かつ収束に多反復を要する`near_separation_input_with_beta1(20.0)`を使う。
+    // `beta1=20`への暗黙の依存が2つある:
+    //   1. 収束の遅さ: `beta1`が大きいほど収束に多反復かかる。`20`は
+    //      `fit_converges_normally_for_mild_near_separation_data_across_all_methods`
+    //      （`max_iter=35`で3手法とも収束）で正常収束が保証されており、かつ warm start
+    //      からでも1反復では`tol=1e-12`に到底届かない。
+    //   2. `SeparationNormCheck::Enabled`との相互作用: `run_solver`の事後チェックは
+    //      「収束扱い かつ 標準化パラメータノルム>閾値」でのみ`SeparationSuspected`を
+    //      返す。`max_iter=1`では未収束のため事後チェックは素通りし、必ず
+    //      `NonConvergence`（`raise=true`）／`converged=false`（`raise=false`）になる。
+    //      `beta1=100`（`fit_returns_separation_suspected_error_for_near_separation_data`）
+    //      だと収束判定が絡んで話が変わるため、境界側の`20`である必要がある。
     #[test]
     fn fit_returns_non_convergence_error_when_max_iter_is_too_small_and_raise_is_true() {
         let result = LogitEstimator::fit(
-            intercept_only_input(),
-            Method::Newton,
-            1,
-            1e-12,
-            true,
-            CovType::Classical,
-            0.95,
+            near_separation_input_with_beta1(20.0),
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 1,
+                tol: 1e-12,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         );
         assert!(
             matches!(result, Err(MleError::NonConvergence { .. })),
@@ -2252,13 +2276,15 @@ mod tests {
     #[test]
     fn fit_returns_unconverged_result_without_raising_when_raise_on_non_convergence_is_false() {
         let estimator = LogitEstimator::fit(
-            intercept_only_input(),
-            Method::Newton,
-            1,
-            1e-12,
-            false,
-            CovType::Classical,
-            0.95,
+            near_separation_input_with_beta1(20.0),
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 1,
+                tol: 1e-12,
+                raise_on_non_convergence: false,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         assert!(!estimator.converged());
@@ -2315,15 +2341,27 @@ mod tests {
 
     #[test]
     fn fit_returns_separation_suspected_error_for_near_separation_data() {
-        for method in [Method::Newton, Method::Bfgs, Method::Lbfgs] {
+        // 実測で確認済みの最小反復回数（`SeparationSuspected`が発火するまでの
+        // `n_iter`）: newton=22・bfgs=36（自前実装`FaerBfgs`）・
+        // lbfgs=29。手法ごとに実測値+数回分の余裕を持たせた`max_iter`にすることで、
+        // 将来いずれかの手法だけ反復回数が増加する回帰が起きても検出できるように
+        // する（3手法で同じ`max_iter`を共有すると、他手法に合わせて緩めた分だけ
+        // 検出力が落ちるため）。
+        for (method, max_iter) in [
+            (Method::Newton, 25),
+            (Method::Bfgs, 40),
+            (Method::Lbfgs, 32),
+        ] {
             let result = LogitEstimator::fit(
                 near_separation_input(),
-                method,
-                35,
-                1e-6,
-                true,
-                CovType::Classical,
-                0.95,
+                MleFitOptions {
+                    method,
+                    max_iter,
+                    tol: 1e-6,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
             );
             assert!(
                 matches!(result, Err(MleError::SeparationSuspected { .. })),
@@ -2338,12 +2376,14 @@ mod tests {
     fn fit_returns_unconverged_result_for_near_separation_data_without_raising() {
         let estimator = LogitEstimator::fit(
             near_separation_input(),
-            Method::Newton,
-            35,
-            1e-6,
-            false,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: false,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         assert!(!estimator.converged());
@@ -2359,12 +2399,14 @@ mod tests {
         for method in [Method::Newton, Method::Bfgs, Method::Lbfgs] {
             let result = LogitEstimator::fit(
                 near_separation_input_with_beta1(20.0),
-                method,
-                35,
-                1e-6,
-                true,
-                CovType::Classical,
-                0.95,
+                MleFitOptions {
+                    method,
+                    max_iter: 35,
+                    tol: 1e-6,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
             );
             assert!(result.is_ok(), "method={:?}, result={:?}", method, result);
             assert!(result.unwrap().converged(), "method={:?}", method);
@@ -2449,12 +2491,14 @@ mod tests {
     fn marginal_effects_returns_empty_result_for_intercept_only_model() {
         let estimator = LogitEstimator::fit(
             intercept_only_input(),
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2487,12 +2531,14 @@ mod tests {
 
         let estimator = LogitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
         let k = 3;
@@ -2580,12 +2626,14 @@ mod tests {
 
         let estimator = LogitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2632,12 +2680,14 @@ mod tests {
 
         let estimator = LogitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2669,12 +2719,14 @@ mod tests {
     fn marginal_effects_returns_invalid_confidence_level_error_out_of_range() {
         let estimator = LogitEstimator::fit(
             intercept_only_input(),
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2693,12 +2745,14 @@ mod tests {
     fn predict_matches_closed_form_for_intercept_only_model() {
         let estimator = LogitEstimator::fit(
             intercept_only_input(),
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2727,12 +2781,14 @@ mod tests {
 
         let estimator = LogitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2748,6 +2804,93 @@ mod tests {
         }
     }
 
+    /// `predict_new_data`（out-of-sample）が独立に再計算した
+    /// `p_i=Λ(x_i'θ)`と一致すること。`predict_matches_independently_recomputed_
+    /// logistic_of_linear_predictor`と同じモデルを使い、学習データとは異なる新規の
+    /// x値で検証する。
+    #[test]
+    fn predict_new_data_matches_independently_recomputed_logistic_of_linear_predictor() {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![10.0, 20.0, 30.0, 40.0], vec![-5.0, 2.0, 8.0, -1.0]];
+        let input = LogitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = LogitEstimator::fit(
+            input,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
+        )
+        .unwrap();
+
+        let params = estimator.params().to_vec();
+        // 学習データには無い新規のx値
+        let new_x_columns = vec![vec![15.0, 25.0], vec![0.0, -3.0]];
+        let predicted = estimator.predict_new_data(&new_x_columns);
+
+        assert_eq!(predicted.len(), 2);
+        for (i, &p_i) in predicted.iter().enumerate() {
+            let z = params[0] + new_x_columns[0][i] * params[1] + new_x_columns[1][i] * params[2];
+            let expected = 1.0 / (1.0 + (-z).exp());
+            assert!((p_i - expected).abs() < 1e-12);
+        }
+    }
+
+    /// `predict_new_data`が`has_intercept=false`（`LogitInput::from_columns`の
+    /// `include_intercept=false`）でも正しく動作すること（rust-reviewer指摘。
+    /// `has_intercept=true`のみを検証していた`predict_new_data_matches_
+    /// independently_recomputed_logistic_of_linear_predictor`と対になる）。
+    #[test]
+    fn predict_new_data_without_intercept_matches_independently_recomputed_logistic_of_linear_predictor()
+     {
+        let y = vec![0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![10.0, 20.0, 30.0, 40.0], vec![-5.0, 2.0, 8.0, -1.0]];
+        let input = LogitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            false,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = LogitEstimator::fit(
+            input,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
+        )
+        .unwrap();
+
+        let params = estimator.params().to_vec();
+        // 学習データには無い新規のx値
+        let new_x_columns = vec![vec![15.0, 25.0], vec![0.0, -3.0]];
+        let predicted = estimator.predict_new_data(&new_x_columns);
+
+        assert_eq!(predicted.len(), 2);
+        for (i, &p_i) in predicted.iter().enumerate() {
+            let z = new_x_columns[0][i] * params[0] + new_x_columns[1][i] * params[1];
+            let expected = 1.0 / (1.0 + (-z).exp());
+            assert!((p_i - expected).abs() < 1e-12);
+        }
+    }
+
     /// 切片のみモデルは全観測で`p_i=ȳ=4/7≈0.571`（closed form）のため、`threshold`に
     /// よって全観測が一方のクラスに分類される自明なケースになる。この性質を使い、
     /// `pred_table`の的中表を手計算で検証する（`y=[0,0,0,1,1,1,1]`、実測は
@@ -2756,12 +2899,14 @@ mod tests {
     fn pred_table_matches_hand_computed_counts_for_intercept_only_model() {
         let estimator = LogitEstimator::fit(
             intercept_only_input(),
-            Method::Newton,
-            35,
-            1e-6,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-6,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2800,12 +2945,14 @@ mod tests {
 
         let estimator = LogitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2855,12 +3002,14 @@ mod tests {
 
         let estimator = LogitEstimator::fit(
             input,
-            Method::Newton,
-            35,
-            1e-8,
-            true,
-            CovType::Classical,
-            0.95,
+            MleFitOptions {
+                method: Method::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
         )
         .unwrap();
 
@@ -2877,6 +3026,221 @@ mod tests {
                 (actual1 - 2.0).abs() < 1e-12,
                 "threshold={threshold}, actual1={actual1}"
             );
+        }
+    }
+
+    /// property-basedテスト。`ols.rs`の`mod proptests`と同型の設計だが、Logitは
+    /// MLEベースのため不変条件が異なる（`testing-policy.md`「property-basedテスト」参照）。
+    /// OLSの`coefficients_scale_linearly_with_y`（yに関する線形性）に相当する不変条件は
+    /// 無い（yは0/1のためスケール自体に意味が無い）代わりに、MLEの一次条件
+    /// （スコア方程式）が収束点で恒等的に成り立つことを検証する。
+    ///
+    /// プロパティの有効性検証（バグ注入→検出確認→元に戻す）は3件とも実施済み:
+    /// `score_is_near_zero_at_converged_params`は`LogitProblem::gradient`の
+    /// `diff`計算に定数オフセットを注入、`coefficients_and_se_are_invariant_to_
+    /// column_order`は`LogitInput::from_columns`の`param_names`を逆順にする
+    /// バグを注入、`hc0_std_errors_are_at_most_hc1_std_errors`は
+    /// `nonlinear::common::sandwich_cov_params`のHC1補正係数を反転（`n/(n-k)`→
+    /// `(n-k)/n`）するバグを注入し、いずれも検出できることを確認した。
+    mod proptests {
+        use super::*;
+        use proptest::collection;
+        use proptest::prelude::*;
+
+        // 高k（列数依存バグ・数値的頑健性）はbenchmarkのmany_regressorsシナリオ
+        // （test-coverage-candidates.md項目2）で別途カバーしているため、ここでは
+        // MAX_Kを小さく保つ（分離を避けるための較正、下記`logit_case_strategy`参照）。
+        const MAX_K: usize = 4;
+
+        /// `logit_case_strategy`が生成するタプル: `(n, k, x_cols, beta, u, keys)`。
+        type LogitCase = (usize, usize, Vec<Vec<f64>>, Vec<f64>, Vec<f64>, Vec<u64>);
+
+        /// `(n, k, x_cols, beta, u, keys)`を生成する共通ストラテジ。
+        ///
+        /// `x_cols`は`-2.0..2.0`、`beta`（切片含むk+1個）は`-1.0..1.0`の一様分布
+        /// （OLSの`-100.0..100.0`よりずっと狭い範囲。分離を避けるための較正、
+        /// `n=100・seed多数で実測しComputationError/NonConvergenceが十分低頻度に
+        /// 収まることを確認済み）。`u`はBernoulliサンプリング用の一様乱数
+        /// （`0.0..1.0`）で、`y_i = u_i < p_i ? 1.0 : 0.0`として`simulate_y`内で計算する
+        /// （proptestのstrategyには二値分布が無いため、閾値判定で代用）。
+        fn logit_case_strategy() -> impl Strategy<Value = LogitCase> {
+            (1..=MAX_K).prop_flat_map(|k| {
+                (k + 20..=100usize).prop_flat_map(move |n| {
+                    (
+                        Just(n),
+                        Just(k),
+                        collection::vec(collection::vec(-2.0f64..2.0, n), k),
+                        collection::vec(-1.0f64..1.0, k + 1),
+                        collection::vec(0.0f64..1.0, n),
+                        collection::vec(any::<u64>(), k),
+                    )
+                })
+            })
+        }
+
+        fn x_names(k: usize) -> Vec<String> {
+            (1..=k).map(|i| format!("x{i}")).collect()
+        }
+
+        /// 真の`beta`から線形予測子`z`・ロジスティック確率`p`を計算し、`u`との比較で
+        /// 二値`y`をサンプリングする。
+        fn simulate_y(n: usize, x_cols: &[Vec<f64>], beta: &[f64], u: &[f64]) -> Vec<f64> {
+            (0..n)
+                .map(|i| {
+                    let mut z = beta[0];
+                    for (j, x_col) in x_cols.iter().enumerate() {
+                        z += x_col[i] * beta[j + 1];
+                    }
+                    let p = 1.0 / (1.0 + (-z).exp());
+                    if u[i] < p { 1.0 } else { 0.0 }
+                })
+                .collect()
+        }
+
+        /// `method`ごとに`tol`の意味論が異なる（`docs/spec/logit-spec.md`3.2節）:
+        /// `newton`は総和勾配に対する絶対閾値（既定`1e-6`）、
+        /// `bfgs`/`lbfgs`は観測数`n_obs`で正規化した基準（既定`1e-8`、`run_solver`が
+        /// 内部で`tol*n_obs`を実効的な絶対閾値に変換する）。`engine_pybind`側の
+        /// `LogitOptions`と同じ既定値の解決をここでも行う（呼び出し元がこの対応を
+        /// 誤ると実質的に閾値が数桁ずれるため、テストコード側でも明示する）。
+        fn default_options(cov_type: CovType, method: Method) -> MleFitOptions {
+            let tol = match method {
+                Method::Newton => 1e-6,
+                Method::Bfgs | Method::Lbfgs => 1e-8,
+            };
+            MleFitOptions {
+                method,
+                max_iter: 50,
+                tol,
+                raise_on_non_convergence: true,
+                cov_type,
+                confidence_level: 0.95,
+            }
+        }
+
+        /// `Method::Newton`/`Bfgs`/`Lbfgs`を等確率で生成する。3手法とも収束経路・
+        /// `tol`の意味論が異なるため（上記`default_options`参照）、各プロパティを
+        /// method非依存で1種類だけ検証するとBFGS/L-BFGS固有の経路がproptestの
+        /// 恩恵を受けない（rust-reviewer指摘）。
+        fn method_strategy() -> impl Strategy<Value = Method> {
+            prop_oneof![
+                Just(Method::Newton),
+                Just(Method::Bfgs),
+                Just(Method::Lbfgs),
+            ]
+        }
+
+        /// `ols.rs`側の同名ヘルパー（`RTOL=1e-6`）より緩い`1e-4`を使う理由: OLSの
+        /// 列順序不変性は閉形式解（col_piv_qr）の数値誤差のみが要因だが、Logitは
+        /// 反復最適化（Newton/BFGS/L-BFGS）を経るため、列順序の違いで収束経路
+        /// （標準化空間での列スケールが変わる）が変わり、`tol`ちょうどで停止する
+        /// 反復回数がわずかにずれうる。この経路依存の誤差蓄積を吸収するため。
+        fn assert_approx_eq(actual: f64, expected: f64, msg: &str) {
+            let tol = 1e-4 * expected.abs().max(1.0);
+            let diff = (actual - expected).abs();
+            assert!(
+                diff <= tol,
+                "{msg}: actual={actual}, expected={expected}, diff={diff}, tol={tol}"
+            );
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            /// MLEの一次条件（スコア方程式）: 収束点で`Σᵢ(yᵢ-pᵢ)xᵢ ≈ 0`が全パラメータ列で
+            /// 成り立つ（`docs/spec/logit-spec.md`3.1節のスコア`∂ℓ/∂θ=X'(y-p)`が
+            /// 収束点でゼロになるという、MLEの定義そのものに由来する不変条件）。
+            /// 許容誤差`1e-4`は`n`に依存しない絶対閾値（`newton`の収束判定`tol=1e-6`・
+            /// `bfgs`/`lbfgs`の実効閾値`tol*n_obs=1e-8*n`のいずれも、標準化空間の
+            /// 勾配ノルムに対する基準であり原スケールのスコア自体は`n`でスケールしない。
+            /// 実測（n<=100の256ケース）でも最大7.5e-7程度に収まることを確認済み、
+            /// `1e-4`は2桁以上の安全マージンを持つ）。
+            #[test]
+            fn score_is_near_zero_at_converged_params(
+                (n, k, x_cols, beta, u, _keys) in logit_case_strategy(),
+                method in method_strategy(),
+            ) {
+                let y = simulate_y(n, &x_cols, &beta, &u);
+                let names = x_names(k);
+                let input = LogitInput::from_columns(&y, &x_cols, names, true, "y".to_string()).unwrap();
+                let result = LogitEstimator::fit(input, default_options(CovType::Classical, method));
+                prop_assume!(result.is_ok());
+                let est = result.unwrap();
+
+                let p = est.predict();
+                let x = est.input().x();
+                for j in 0..=k {
+                    let score: f64 = (0..n).map(|i| (y[i] - p[i]) * x.get(i, j)).sum();
+                    prop_assert!(
+                        score.abs() <= 1e-4,
+                        "score[{j}] should be ~0, got {score} (method={method:?})"
+                    );
+                }
+            }
+
+            /// xの列順序を入れ替えても、係数名で対応付ければ係数・標準誤差の値は変わらない。
+            #[test]
+            fn coefficients_and_se_are_invariant_to_column_order(
+                (n, k, x_cols, beta, u, keys) in logit_case_strategy()
+                    .prop_filter("need >=2 columns to permute", |(_, k, _, _, _, _)| *k >= 2),
+                method in method_strategy(),
+            ) {
+                let y = simulate_y(n, &x_cols, &beta, &u);
+                let names = x_names(k);
+                let input1 = LogitInput::from_columns(&y, &x_cols, names.clone(), true, "y".to_string()).unwrap();
+                let result1 = LogitEstimator::fit(input1, default_options(CovType::Classical, method));
+                prop_assume!(result1.is_ok());
+                let est1 = result1.unwrap();
+
+                let mut order: Vec<usize> = (0..k).collect();
+                order.sort_by_key(|&i| keys[i]);
+                let permuted_x: Vec<Vec<f64>> = order.iter().map(|&i| x_cols[i].clone()).collect();
+                let permuted_names: Vec<String> = order.iter().map(|&i| names[i].clone()).collect();
+
+                let input2 = LogitInput::from_columns(&y, &permuted_x, permuted_names, true, "y".to_string()).unwrap();
+                let result2 = LogitEstimator::fit(input2, default_options(CovType::Classical, method));
+                prop_assume!(result2.is_ok());
+                let est2 = result2.unwrap();
+
+                let names1 = est1.input().param_names().to_vec();
+                let names2 = est2.input().param_names().to_vec();
+                let (params1, params2) = (est1.params(), est2.params());
+                let (se1, se2) = (est1.std_errors(), est2.std_errors());
+                for (idx1, name) in names1.iter().enumerate() {
+                    let idx2 = names2.iter().position(|n| n == name)
+                        .expect("name should exist in permuted result");
+                    assert_approx_eq(params2[idx2], params1[idx1], &format!("param[{name}] under column permutation"));
+                    assert_approx_eq(se2[idx2], se1[idx1], &format!("std_error[{name}] under column permutation"));
+                }
+            }
+
+            /// HC0の標準誤差は常にHC1以下（`hc1 = hc0`にn/(n-k)の小標本補正を乗じたもの、
+            /// `docs/spec/logit-spec.md`3.3節）。
+            #[test]
+            fn hc0_std_errors_are_at_most_hc1_std_errors(
+                (n, k, x_cols, beta, u, _keys) in logit_case_strategy(),
+                method in method_strategy(),
+            ) {
+                let y = simulate_y(n, &x_cols, &beta, &u);
+                let names = x_names(k);
+                let input1 = LogitInput::from_columns(&y, &x_cols, names.clone(), true, "y".to_string()).unwrap();
+                let result1 = LogitEstimator::fit(input1, default_options(CovType::Hc0, method));
+                prop_assume!(result1.is_ok());
+                let est_hc0 = result1.unwrap();
+
+                let input2 = LogitInput::from_columns(&y, &x_cols, names, true, "y".to_string()).unwrap();
+                let result2 = LogitEstimator::fit(input2, default_options(CovType::Hc1, method));
+                prop_assume!(result2.is_ok());
+                let est_hc1 = result2.unwrap();
+
+                let (se_hc0, se_hc1) = (est_hc0.std_errors(), est_hc1.std_errors());
+                for i in 0..=k {
+                    prop_assert!(
+                        se_hc0[i] <= se_hc1[i] + 1e-9,
+                        "HC0 se[{i}]={} should be <= HC1 se[{i}]={}", se_hc0[i], se_hc1[i]
+                    );
+                }
+            }
         }
     }
 }

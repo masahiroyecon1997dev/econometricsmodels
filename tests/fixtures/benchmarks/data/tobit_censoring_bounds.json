@@ -50,5 +50,13 @@
   "perfect_multicollinearity": [
     -1.212196,
     null
+  ],
+  "many_regressors": [
+    -16.211888,
+    null
+  ],
+  "outlier_regressor": [
+    -0.039488,
+    null
   ]
 }

@@ -65,8 +65,8 @@ pub enum CommonError {
     /// クラスター寄与スコアの総和がゼロ（OLSの正規方程式`X'e = 0`、MLEの一次条件
     /// `Σ_i s_i = 0`）になるため`rank(Ŝ) ≤ g - 1`であり、`g <= q`だと検定の`q×q`
     /// 部分行列が構造的に特異になる。`g`（クラスター列のユニーク数）も`q`（説明変数の
-    /// 列数）も入力だけから判定できるため、行列計算を待たず`fit()`冒頭で弾く
-    /// （Issue #289）。`InsufficientClusters`（`g < 2`）とはメッセージが異なるため
+    /// 列数）も入力だけから判定できるため、行列計算を待たず`fit()`冒頭で弾く。
+    /// `InsufficientClusters`（`g < 2`）とはメッセージが異なるため
     /// 別バリアントに分ける。
     #[error(
         "cov_type='cluster' requires more clusters than slope coefficients for joint \

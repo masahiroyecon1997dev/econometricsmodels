@@ -38,7 +38,7 @@ from _assertions import assert_close, assert_dict_close
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset, with_cluster_groups
 from _tolerances import TOLERANCES
-from econometricsmodels import WLS, OLSOptions
+from econometricsmodels import WLS, WLSOptions
 
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.linear.fixtures.generate_wls_crosscheck_fixtures import (
@@ -127,10 +127,9 @@ NON_HAC_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
 @pytest.mark.parametrize("scenario", SYNTHETIC_SCENARIOS)
 def test_synthetic_matches_r(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
-    options = OLSOptions(cov_type=cov_type)
-    res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
-    ).fit()
+    x_cols = [c for c in df.columns if c not in ("y", "weight")]
+    options = WLSOptions(cov_type=cov_type)
+    res = WLS(df, y="y", x=x_cols, weight="weight", options=options).fit()
 
     ref = crosscheck["synthetic"][scenario][cov_type]["r"]
     label = f"{scenario}/{cov_type}/R"
@@ -145,7 +144,7 @@ def test_cluster_matches_r(crosscheck):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, 10)
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
     res = WLS(
         df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
     ).fit()
@@ -166,7 +165,7 @@ def test_cluster_imbalanced_matches_r(crosscheck):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
     res = WLS(
         df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
     ).fit()
@@ -188,13 +187,36 @@ def test_cluster_g2_matches_r(crosscheck):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
     df = with_cluster_groups(df, 2)
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
     res = WLS(df, y="y", x=["x1"], weight="weight", options=options).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["cluster_g2"]["r"]
     _assert_close(res.params, ref["coef"], "cluster_g2/R coef")
     _assert_close(res.std_errors, ref["se"], "cluster_g2/R se")
     _assert_fit_stats_close(res, ref, "cluster_g2/R", rtol=RTOL_STRICT)
+
+
+def test_weight_in_x_matches_r(crosscheck):
+    """`weight`と同じ列を`x`にも含める成功パス（Issue #277）。
+
+    列名の重複が許容されることの数値的な確認が目的で、cov_type間の
+    挙動差を検証する趣旨ではないためclassicalのみ
+    （`generate_wls_crosscheck_fixtures.py`と同じ方針）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    options = WLSOptions(cov_type="classical")
+    res = WLS(
+        df,
+        y="y",
+        x=["x1", "x2", "x3", "weight"],
+        weight="weight",
+        options=options,
+    ).fit()
+
+    ref = crosscheck["synthetic"]["baseline"]["weight_in_x"]["r"]
+    _assert_close(res.params, ref["coef"], "weight_in_x/R coef")
+    _assert_close(res.std_errors, ref["se"], "weight_in_x/R se")
+    _assert_fit_stats_close(res, ref, "weight_in_x/R", rtol=RTOL_STRICT)
 
 
 def test_hac_matches_r(crosscheck):
@@ -204,7 +226,7 @@ def test_hac_matches_r(crosscheck):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_autocorrelated.csv")
     entry = crosscheck["synthetic"]["autocorrelated"]["hac"]
-    options = OLSOptions(cov_type="hac", hac_lags=entry["hac_lag"])
+    options = WLSOptions(cov_type="hac", hac_lags=entry["hac_lag"])
     res = WLS(
         df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
     ).fit()
@@ -224,7 +246,7 @@ def test_401ksubs_matches_r(crosscheck, cov_type):
     """
     df = load_wooldridge_dataset("401ksubs").filter(pl.col("fsize") == 1)
     df = df.with_columns((1.0 / pl.col("inc")).alias("inv_inc"))
-    options = OLSOptions(cov_type=cov_type)
+    options = WLSOptions(cov_type=cov_type)
 
     res = WLS(
         df,
@@ -250,7 +272,7 @@ def test_401ksubs_cluster_matches_r(crosscheck):
     df = load_wooldridge_dataset("401ksubs").filter(pl.col("fsize") == 1)
     df = df.with_columns((1.0 / pl.col("inc")).alias("inv_inc"))
     df = _add_age_bin(df)
-    options = OLSOptions(cov_type="cluster", cluster_col="age_bin")
+    options = WLSOptions(cov_type="cluster", cluster_col="age_bin")
 
     res = WLS(
         df,

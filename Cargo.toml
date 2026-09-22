@@ -6,7 +6,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 license = "MIT"
 publish = false
@@ -29,8 +29,8 @@ faer = "=0.24.4"
 statrs = { version = "=0.19.1", default-features = false }
 # argmin: 非線形モデル（Logit/Probit/Tobit）のMLE数値最適化。
 # argmin-mathのfaerバックエンドはfaer 0.23までしか対応しておらず、本プロジェクトのfaerピン
-# （=0.24.4）と噛み合わないため使わない（docs/planning/specs/nonlinear-implementation-notes.md
-# 「argmin-mathのfaerバックエンド不使用」参照）。代わりにargmin-mathの`vec`機能
+# （=0.24.4）と噛み合わないため使わない（docs/spec/nonlinear-common.md1.1節
+# 「argmin-mathはfaerバックエンドを使わない」参照）。代わりにargmin-mathの`vec`機能
 # （追加の線形代数クレート不要、`Vec<f64>`/`Vec<Vec<f64>>`への実装のみ）を使う。
 # モデル固有の尤度・勾配・Hessian計算自体は引き続きfaerで行い、argminに値を渡す境界でのみ変換する。
 argmin = "=0.11.0"

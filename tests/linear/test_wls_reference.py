@@ -1,11 +1,16 @@
 """WLSの主リファレンス（statsmodels）との数値照合テスト。
 
 `tests/fixtures/benchmarks/wls.json`（`benchmark/linear/fixtures/
-generate_wls_fixtures.py`で生成）を読み込み、6つの合成データシナリオ×
+generate_wls_fixtures.py`で生成）を読み込み、合成データシナリオ×
 classical/HC0-3/HAC + クラスター(baselineのみ) + 実データ（401ksubs）で、
 係数・標準誤差・検定統計量・適合度統計量を相対誤差1e-8で厳密比較する
 （`.claude/rules/testing-policy.md`「許容誤差」の基本方針。`test_ols_reference.py`
-と同じ方針）。加えて `include_intercept=False` は凍結フィクスチャではなく
+と同じ方針）。クラスター系（cluster/cluster_imbalanced/cluster_g2）は従来
+係数・標準誤差のみだったが、t値・p値・信頼区間・適合度統計量まで
+`_check_result`で検証するよう拡張した（OLS側項目28対応の横展開、
+test-coverage-candidates.md項目72。あわせて`generate_wls_fixtures.py`の
+`_run_cluster_case`に`use_t=True`が指定されていなかった不備も修正済み）。
+加えて `include_intercept=False` は凍結フィクスチャではなく
 ライブ statsmodels（`sm.WLS`）との直接比較で確認する。
 
 役割分担:
@@ -35,7 +40,7 @@ from _assertions import rename_intercept as _rename
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset, with_cluster_groups
 from _tolerances import TOLERANCES
-from econometricsmodels import WLS, OLSOptions
+from econometricsmodels import WLS, WLSOptions
 
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.linear.constants import HAC_MAXLAGS
@@ -106,11 +111,10 @@ def _check_result(res, ref: dict, label: str) -> None:
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_matches_statsmodels(fixtures, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
+    x_cols = [c for c in df.columns if c not in ("y", "weight")]
     kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
-    options = OLSOptions(cov_type=cov_type, **kwargs)
-    res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
-    ).fit()
+    options = WLSOptions(cov_type=cov_type, **kwargs)
+    res = WLS(df, y="y", x=x_cols, weight="weight", options=options).fit()
 
     _check_result(res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}")
 
@@ -118,18 +122,18 @@ def test_matches_statsmodels(fixtures, scenario, cov_type):
 def test_cluster_matches_statsmodels(fixtures):
     """クラスターロバストSE。`generate_wls_fixtures.py`と同じ疑似グループ
     （行番号%10）を再現する。統計的な意味はなく、実装の動作確認用のため
-    `baseline`シナリオのみ（`coef`/`se`のみが記録されている）。
+    `baseline`シナリオのみ。coef/seだけでなくt値・p値・信頼区間・適合度統計量
+    まで`_check_result`で検証する（従来coef/seのみだった非対称の解消、OLS側
+    項目28対応の横展開、test-coverage-candidates.md項目72）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, 10)
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
     res = WLS(
         df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
     ).fit()
 
-    ref = fixtures["baseline"]["cluster"]
-    _assert_dict_close(res.params, ref["coef"], "cluster/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster/se")
+    _check_result(res, fixtures["baseline"]["cluster"], "cluster")
 
 
 def test_cluster_imbalanced_matches_statsmodels(fixtures):
@@ -137,18 +141,20 @@ def test_cluster_imbalanced_matches_statsmodels(fixtures):
 
     均等サイズの疑似グループ（行番号%10）だけでは見逃す、実務で起こりやすい
     グループサイズの偏りを持つケース（`testing-policy.md`「テスト用データセット」3.）。
+    coef/seに加えt値・p値・信頼区間・適合度統計量も検証する
+    （test-coverage-candidates.md項目72）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
     res = WLS(
         df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
     ).fit()
 
-    ref = fixtures["baseline"]["cluster_imbalanced"]
-    _assert_dict_close(res.params, ref["coef"], "cluster_imbalanced/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster_imbalanced/se")
+    _check_result(
+        res, fixtures["baseline"]["cluster_imbalanced"], "cluster_imbalanced"
+    )
 
 
 def test_cluster_g2_matches_statsmodels(fixtures):
@@ -158,15 +164,37 @@ def test_cluster_g2_matches_statsmodels(fixtures):
     `rank(Ŝ)≤G-1`のためロバストWald検定のq×q部分行列が構造的に特異になり、
     `fit()`冒頭のバリデーションが`ValidationError`で弾く（成功パスにならない。
     `test_cluster_count_at_most_slopes_raises_validation_error`参照、Issue #289）。
+    coef/seに加えt値・p値・信頼区間・適合度統計量も検証する
+    （test-coverage-candidates.md項目72）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
     df = with_cluster_groups(df, 2)
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
     res = WLS(df, y="y", x=["x1"], weight="weight", options=options).fit()
 
-    ref = fixtures["baseline"]["cluster_g2"]
-    _assert_dict_close(res.params, ref["coef"], "cluster_g2/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster_g2/se")
+    _check_result(res, fixtures["baseline"]["cluster_g2"], "cluster_g2")
+
+
+def test_weight_in_x_matches_statsmodels(fixtures):
+    """`weight`と同じ列を`x`にも含める成功パス（Issue #277）。
+
+    列名の重複が許容されることの数値的な確認が目的で、cov_type間の
+    挙動差を検証する趣旨ではないためclassicalのみ
+    （`generate_wls_fixtures.py`と同じ方針）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    options = WLSOptions(cov_type="classical")
+    res = WLS(
+        df,
+        y="y",
+        x=["x1", "x2", "x3", "weight"],
+        weight="weight",
+        options=options,
+    ).fit()
+
+    _check_result(
+        res, fixtures["baseline"]["weight_in_x"], "baseline/weight_in_x"
+    )
 
 
 @pytest.mark.parametrize("cov_type", WOOLDRIDGE_COV_TYPES)
@@ -180,7 +208,7 @@ def test_401ksubs_matches_statsmodels(fixtures, cov_type):
     """
     df = load_wooldridge_dataset("401ksubs").filter(pl.col("fsize") == 1)
     df = df.with_columns((1.0 / pl.col("inc")).alias("inv_inc"))
-    options = OLSOptions(cov_type=cov_type)
+    options = WLSOptions(cov_type=cov_type)
 
     res = WLS(
         df,
@@ -203,7 +231,7 @@ def test_401ksubs_cluster_matches_statsmodels(fixtures):
     df = load_wooldridge_dataset("401ksubs").filter(pl.col("fsize") == 1)
     df = df.with_columns((1.0 / pl.col("inc")).alias("inv_inc"))
     df = _add_age_bin(df)
-    options = OLSOptions(cov_type="cluster", cluster_col="age_bin")
+    options = WLSOptions(cov_type="cluster", cluster_col="age_bin")
 
     res = WLS(
         df,
@@ -257,7 +285,7 @@ def test_include_intercept_false_matches_statsmodels(cov_type):
 
     sm_res = sm.WLS(y, x, weights=weights).fit(**fit_kwargs)  # 定数項なし
 
-    options = OLSOptions(
+    options = WLSOptions(
         include_intercept=False,
         cov_type=cov_type,
         cluster_col="cluster_group" if cov_type == "cluster" else None,

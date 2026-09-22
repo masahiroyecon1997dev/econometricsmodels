@@ -1,7 +1,7 @@
 """linearmodelsでIV（2SLS/GMM）のベンチマーク値（係数・標準誤差・適合度統計量・
 診断統計量）を生成するスクリプト。
 
-IVの主リファレンス（`docs/planning/specs/iv-api-design.md`5.1節参照）。
+IVの主リファレンス（`docs/spec/iv-spec.md`4章参照）。
 2SLSは`run()`、GMMは`run_gmm()`（`method="gmm"`のPython配線完了後に追加、
 `run_gmm()`のモジュールdocコメント参照）。
 
@@ -9,8 +9,7 @@ IVの主リファレンス（`docs/planning/specs/iv-api-design.md`5.1節参照�
 benchmarks/data/`に固定済みのCSVを読む（`benchmark/iv/freeze.py`参照。
 `benchmark/linear/references/statsmodels_ref.py`と同じ理由）。
 
-## `cov_type`/`debiased`の対応関係（実装時に実測して確定、`iv-api-design.md`3.1節の
-「未確定事項」に対応）
+## `cov_type`/`debiased`の対応関係（実装時に実測して確定、`iv-spec.md`3.1節に対応）
 
 `engine::iv::two_sls`の`cov_type`と`linearmodels.iv.IV2SLS.fit()`の
 `cov_type`/`debiased`の対応は、`baseline`シナリオで実際に`econometricsmodels.IV`と
@@ -31,25 +30,25 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/iv/freeze.py`参照
 
 `hc2`/`hc3`は対応するlinearmodels側の実装が無い（`HomoskedasticCovariance`/
 `HeteroskedasticCovariance`/`KernelCovariance`/`ClusteredCovariance`のみ、レバレッジ
-`h_ii`によるスケーリングは未実装）ため、本スクリプトの対象外（`iv-api-design.md`
+`h_ii`によるスケーリングは未実装）ため、本スクリプトの対象外（`iv-spec.md`
 3.1節の既存の記述通り。R `ivreg`側にも確立した参照実装が無いことは以前から判明
 済み）。`engine`側は独自のOLS拡張として実装済みで、`engine`のRust単体テスト
 （`two_sls.rs`の`fit_computes_hc2_std_errors_matching_manual_sandwich_formula`等、
 独立な素朴ループでの手計算とのクロスチェック）による検証に留める。
 
-## 検定分布（`iv-api-design.md`3.2節の「未確定事項」に対応）
+## 検定分布（`iv-spec.md`3.2節）
 
 `linearmodels`の`pvalues`/`tstats`/`f_statistic`は`debiased=False`だと正規分布/
 カイ二乗形式（`f_statistic`はqで割らない生の二次形式）、`debiased=True`だと
 t(df_resid)分布/F分布（`f_statistic`はqで割る）を使う仕様（`linearmodels.iv.
 results.IVResults.pvalues`/`f_statistic`のdocstring参照、実装ソースで確認済み）。
-本実装の2SLSは`cov_type`によらず常にt分布・F分布で報告する設計（`iv-api-design.md`
+本実装の2SLSは`cov_type`によらず常にt分布・F分布で報告する設計（`iv-spec.md`
 3.2節）のため、`hc0`/`hac`（`debiased=False`）と突き合わせる際は`linearmodels`が
 返す`coef`/`se`のみ使い、t統計量・p値・信頼区間・F統計量は本関数側で
 t(df_resid)・F(q, df_resid)分布を使って独自に計算し直す（`debiased`の値に
 関係なく一貫した比較ができるようにするため。`run()`本体のコメント参照）。
 
-## Wu-Hausman検定の対応関係（実装時に実測して発覚、`iv-api-design.md`6.6節の
+## Wu-Hausman検定の対応関係（実装時に実測して発覚、`iv-spec.md`3.6節の
 実装が前提とする定式化を再確認）
 
 `linearmodels`にはWu-Hausman系の検定が2つある（`res.wu_hausman()`: SSR差分に
@@ -236,7 +235,7 @@ def run(
         return "const" if name == "Intercept" else name
 
     # 本実装はcov_typeによらず常にt分布（df=df_resid）で推論統計量を報告する
-    # （iv-api-design.md 3.2節）。`linearmodels`は`debiased=False`のとき正規分布・
+    # （iv-spec.md 3.2節）。`linearmodels`は`debiased=False`のとき正規分布・
     # F統計量は生のカイ二乗形式（qで割らない）を返す仕様のため（`IVResults.pvalues`/
     # `f_statistic`のdocstring参照、モジュールdocstringの表は`coef`/`se`のみに
     # ついての対応関係）、coef/seは`linearmodels`の値をそのまま使いつつ、
@@ -262,7 +261,7 @@ def run(
     f_p_value = float(1 - scipy_stats.f.cdf(f_statistic, q, df_resid))
 
     # Wu-Hausman検定: 本実装（`wald_test_last_columns`によるaugmented regression
-    # Wald検定、iv-api-design.md 6.6節）と数式が対応するのは`res.wu_hausman()`
+    # Wald検定、iv-spec.md 3.6節）と数式が対応するのは`res.wu_hausman()`
     # （SSR差分に基づく射影ベースの検定、cov_type非依存の別定式化）ではなく
     # `res.wooldridge_regression`（augmented regression、モデルのcov_typeをそのまま
     # 使う）の方だと実測で判明した（`wu_hausman()`は理論上asymptotically
@@ -412,7 +411,7 @@ def run_gmm(
     ## 検定分布・F統計量の対応関係
 
     本実装のGMMは`cov_type`によらず常にz分布・カイ二乗形式（qで割らない）で
-    検定統計量を報告する設計（`iv-api-design.md`3.2節、`gmm.rs`のモジュールdoc
+    検定統計量を報告する設計（`iv-spec.md`3.2節、`gmm.rs`のモジュールdoc
     コメント参照）。`linearmodels`の`tstats`/`pvalues`は`run()`と同じく
     `debiased`で分布が切り替わる（`OLSResults.pvalues`のdocstring参照）ため、
     `coef`/`se`のみ使って本関数側でz分布から独自に計算し直す。

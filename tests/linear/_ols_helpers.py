@@ -17,7 +17,7 @@ from __future__ import annotations
 import numpy as np
 import polars as pl
 import statsmodels.api as sm
-from econometricsmodels import OLS, OLSOptions, OlsResults
+from econometricsmodels import OLS, OLSOptions, OLSResults
 
 
 def sm_design(df: pl.DataFrame) -> np.ndarray:
@@ -51,11 +51,11 @@ def sm_fit_cluster(df: pl.DataFrame):
     )
 
 
-def our_fit(df: pl.DataFrame, cov_type: str = "classical") -> OlsResults:
+def our_fit(df: pl.DataFrame, cov_type: str = "classical") -> OLSResults:
     options = OLSOptions(cov_type=cov_type)
     return OLS(df, y="y", x=["x1", "x2"], options=options).fit()
 
 
-def our_fit_cluster(df: pl.DataFrame) -> OlsResults:
+def our_fit_cluster(df: pl.DataFrame) -> OLSResults:
     options = OLSOptions(cov_type="cluster", cluster_col="cluster")
     return OLS(df, y="y", x=["x1", "x2"], options=options).fit()

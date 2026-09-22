@@ -13,10 +13,13 @@ use faer::{Accum, Mat, Par, Side};
 use statrs::distribution::{ContinuousCDF, FisherSnedecor, StudentsT};
 
 use super::common::LeastSquaresError;
+use crate::design_matrix::design_matrix_element;
 use crate::error::CommonError;
 use crate::inference;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
-use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
+use crate::validation::{
+    validate_cluster_count_covers_slopes, validate_cluster_groups, validate_has_regressors,
+};
 
 /// 標準誤差の種別。文字列パース（Python文字列 → この型への変換）は`engine_pybind`側の
 /// 責務（PyO3境界の関心事のため）。ここでは`OlsEstimator::fit`が計算方法を分岐するための
@@ -241,19 +244,6 @@ impl OlsInput {
     }
 }
 
-/// 設計行列の`(i, j)`要素を返す（`has_intercept`なら先頭列が定数項1.0、それ以外は
-/// `columns[j または j-1][i]`）。`from_columns_impl`（学習データの設計行列組み立て）と
-/// `predict_new_data`（新規データの設計行列組み立て）が独立に同じ規約を重複実装すると、
-/// 将来どちらか一方だけ規約を変更（例: 切片列の位置）した場合に静かに不整合になる
-/// リスクがあるため、共有ヘルパーとして切り出している。
-fn design_matrix_element(has_intercept: bool, columns: &[Vec<f64>], i: usize, j: usize) -> f64 {
-    if has_intercept {
-        if j == 0 { 1.0 } else { columns[j - 1][i] }
-    } else {
-        columns[j][i]
-    }
-}
-
 /// OLSの推定結果。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
@@ -294,7 +284,7 @@ pub struct OlsEstimator {
     bic: f64,
     /// 係数の分散共分散行列 (k, k)。Python側には公開しない（`docs/spec/ols-spec.md`
     /// 「結果構造体」）。クレート内の他系統から呼ばれる[`Self::wald_test_last_columns`]
-    /// のためだけに保持している（Issue #164、`engine::iv::two_sls`のWu-Hausman検定が
+    /// のためだけに保持している（`engine::iv::two_sls`のWu-Hausman検定が
     /// 唯一の呼び出し元。それまでは`fit()`内のローカル変数として使い切っていた）。
     cov_params: Mat<f64>,
     /// t検定・F検定・信頼区間に使う自由度。通常`df_resid`と同じだが`cov_type=Cluster`の
@@ -332,6 +322,14 @@ impl OlsEstimator {
     /// （`docs/spec/ols-spec.md`「適合度統計量」参照）。
     ///
     /// # Errors
+    /// - `k`（定数項を含む説明変数の数）が0（`include_intercept=false`かつ説明変数も無い）:
+    ///   `CommonError::NoRegressors`（Logit/Probitと同じ早期リジェクト。
+    ///   `fit_allowing_no_regressors`はこのチェックを行わない）。**このチェックは
+    ///   `confidence_level`より先に行う**（`fit`が`fit_allowing_no_regressors`へ委譲する
+    ///   実装構造上、外側でしか検証できないため）。nonlinear系統の
+    ///   `validate_fit_preconditions`は逆順（`confidence_level`→…→`k==0`）だが、
+    ///   Python APIの`validate_x_non_empty`によりどちらの入力もそもそも到達不能なため
+    ///   実害はなく、系統間で順序を揃えるという明示的な方針も無い
     /// - `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
     /// - 観測数`n`が`k`（定数項を含む説明変数の数）以下: `CommonError::InsufficientObservations`
     /// - 設計行列が特異（完全な多重共線性等）: `LeastSquaresError::SingularMatrix`
@@ -339,7 +337,7 @@ impl OlsEstimator {
     /// - `cov_type=Cluster`でクラスター数が2未満: `CommonError::InsufficientClusters`
     /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
     ///   `CommonError::InsufficientClustersForInference`（`rank(Ŝ) ≤ g - 1`のため
-    ///   ロバストWald/F検定の`q×q`部分行列が構造的に特異、Issue #289）
+    ///   ロバストWald/F検定の`q×q`部分行列が構造的に特異）
     /// - 傾き係数間の悪条件（極端なスケール差等）でロバストWald/F検定の`q×q`部分行列が
     ///   数値的にほぼ特異: `CommonError::ComputationFailed`（`g > q`でも起こりうる
     ///   backstop、`wald_f_test`参照）
@@ -348,6 +346,33 @@ impl OlsEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, LeastSquaresError> {
+        validate_has_regressors(input.nobs(), input.k())?;
+        Self::fit_allowing_no_regressors(input, cov_type, confidence_level)
+    }
+
+    /// `fit`と同じ計算を行うが、`k`（定数項を含む説明変数の数）が0の入力も受理する
+    /// （`fit`が行う`CommonError::NoRegressors`の早期リジェクトをスキップする）。
+    ///
+    /// `pub(crate)`: `panel::fe::FeEstimator::fit`が「固定効果のみのモデル」（`x=[]`。
+    /// FEは常に`include_intercept=false`で委譲するためこの場合`k=0`になる）を
+    /// サポートするために、`fit`のガードを迂回してこの内部実装を直接呼ぶ。他の呼び出し元
+    /// （`WlsEstimator::fit`・`panel::re::ReEstimator::fit`・IV系統）はいずれも構造的に
+    /// `k=0`になりえない呼び出し方をしており（RE/IVは常に切片または操作変数由来の列を
+    /// 最低1列持つ、`engine/src/linear/CLAUDE.md`「k=0の扱い」参照）、`fit`（ゲート付き）を
+    /// そのまま使う。`k=0`でも`col_piv_qr`・`wald_f_test`が安全に動作することは
+    /// `ensure_full_rank`のNaN明示チェック・`df_model==0`分岐により保証済み（同ドキュメント
+    /// 参照）。
+    ///
+    /// # Errors
+    /// `fit`から`NoRegressors`を除いたもの。
+    pub(crate) fn fit_allowing_no_regressors(
+        input: OlsInput,
+        cov_type: CovType,
+        confidence_level: f64,
+    ) -> Result<Self, LeastSquaresError> {
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
+        crate::parallelism::ensure_serial();
+
         if !(confidence_level > 0.0 && confidence_level < 1.0) {
             return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
         }
@@ -361,7 +386,7 @@ impl OlsEstimator {
 
         // `cov_type=Cluster`のクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下だと、
         // クラスター寄与スコアの総和がゼロ（正規方程式`X'e = 0`）で`rank(Ŝ) ≤ g - 1`の
-        // ため、ロバストWald/F検定の`q×q`部分行列が構造的に特異になる（Issue #289）。
+        // ため、ロバストWald/F検定の`q×q`部分行列が構造的に特異になる。
         // `g`・`q`は入力だけから判定できるため、QR分解・残差計算より前に弾く
         // （nonlinear/IVと同じく`fit()`冒頭で検証する方針に揃える）。`groups=None`は
         // 下の`CovType::Cluster`アームで`MissingClusterColumn`として扱う。
@@ -419,8 +444,8 @@ impl OlsEstimator {
             }
             CovType::Cluster { groups } => {
                 let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-                // クラスター数`g >= 2`・`g > q`（傾き係数の数）は`fit()`冒頭で検証済み
-                // （Issue #289）。ここでは`n_groups - 1`（検定の自由度）に再利用するため
+                // クラスター数`g >= 2`・`g > q`（傾き係数の数）は`fit()`冒頭で検証済み。
+                // ここでは`n_groups - 1`（検定の自由度）に再利用するため
                 // 再度ユニーク数を数えるだけ。
                 let n_groups = validate_cluster_groups(groups, n)?;
                 let cov = cluster_cov_params(input.x(), &residuals, &xtx_inv, n, k, groups);
@@ -587,7 +612,7 @@ impl OlsEstimator {
     /// `wald_f_test`のdocコメントと同じ）。
     ///
     /// クレート内の他系統から、この`OlsEstimator`自身が構築した設計行列の一部（末尾に
-    /// 追加した列）だけをまとめて検定したい場合に使う（Issue #164、`engine::iv::two_sls`の
+    /// 追加した列）だけをまとめて検定したい場合に使う（`engine::iv::two_sls`の
     /// Wu-Hausman検定——構造式に第一段階残差を追加回帰し、追加した残差係数のジョイント
     /// 有意性を検定する——が現時点で唯一の呼び出し元）。
     ///
@@ -947,7 +972,7 @@ fn ensure_full_rank(
 ///
 /// **`CovType::Cluster`の構造的特異性（`g <= q`）は、この関数に到達する前に
 /// `fit()`冒頭のバリデーション（`validate_cluster_count_covers_slopes`、`CommonError::
-/// InsufficientClustersForInference`）で弾かれる**（Issue #289）。クラスターロバスト
+/// InsufficientClustersForInference`）で弾かれる**。クラスターロバスト
 /// 共分散`Ŝ = Σ_g S_g S_g'`はクラスター寄与スコアの総和がゼロ（正規方程式`X'e = 0`）に
 /// なるため`rank(Ŝ) ≤ g - 1`であり、傾き係数の数`q ≥ g`なら`Σ`が構造的に特異になる。
 /// `g`・`q`は入力だけから判定できるため、行列計算を待たず事前検証する方針にした。
@@ -962,7 +987,14 @@ fn ensure_full_rank(
 /// F統計量を黙って返しうるため、`Llt`分解の**前**にこのチェックを置き
 /// `ComputationFailed`で止める。`Llt`分解自体の`map_err`は、両方のチェックを
 /// すり抜けるごく僅かな境界ケースに備えた防御的なフォールバック。
-fn wald_f_test(
+///
+/// `pub(crate)`: `panel::fe::FeEstimator::fit`がFE独自に計算し直した
+/// `cov_params`・`df_resid`（パネル自由度調整済み）でF検定するために再利用する
+/// （`wald_test_last_columns`と同じ「サンドイッチ計算を複製しない」方針。FEは
+/// `OlsEstimator`インスタンス自身の`cov_params`/`df_inference`とは異なる値を使うため
+/// `wald_test_last_columns`メソッドは使えず、この下位の自由関数を直接呼ぶ、
+/// `engine/src/panel/CLAUDE.md`参照）。
+pub(crate) fn wald_f_test(
     params: &Mat<f64>,
     cov_params: &Mat<f64>,
     k_constant: usize,
@@ -1282,6 +1314,39 @@ mod tests {
     }
 
     #[test]
+    fn fit_returns_no_regressors_error_when_k_is_zero() {
+        // include_intercept=falseかつx_columns=[]の病的な入力。
+        // Logit/Probitと同じ`CommonError::NoRegressors`で早期リジェクトされる。
+        let y = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let input = OlsInput::from_columns(&y, &[], vec![], false, "y".to_string()).unwrap();
+
+        let result = OlsEstimator::fit(input, CovType::Classical, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            LeastSquaresError::Common(CommonError::NoRegressors { n: 5 })
+        );
+    }
+
+    #[test]
+    fn fit_allowing_no_regressors_succeeds_when_k_is_zero() {
+        // `fit`とは異なり`NoRegressors`ガードを迂回する（`panel::fe::FeEstimator::fit`が
+        // 固定効果のみモデルのために直接呼ぶ経路）。k=0でもOkを返し、
+        // paramsは空（0行）になる。
+        let y = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let input = OlsInput::from_columns(&y, &[], vec![], false, "y".to_string()).unwrap();
+
+        let estimator =
+            OlsEstimator::fit_allowing_no_regressors(input, CovType::Classical, 0.95).unwrap();
+
+        assert_eq!(estimator.params().nrows(), 0);
+        assert_eq!(estimator.residuals().nrows(), 5);
+        for (i, &yi) in y.iter().enumerate() {
+            assert_eq!(*estimator.residuals().get(i, 0), yi);
+        }
+    }
+
+    #[test]
     fn fit_returns_insufficient_observations_when_n_le_k() {
         let y = vec![1.0, 2.0];
         let x_columns = vec![vec![1.0, 2.0]];
@@ -1377,10 +1442,30 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn fit_pins_faer_global_parallelism_to_seq() {
+        // `fit()` 冒頭の `crate::parallelism::ensure_serial()` が faer の
+        // グローバル並列度を `Par::Seq` へ引き戻すことの回帰ガード（linear 系統代表）。
+        // 別テストが既に `Seq` にしている可能性があるため、まず `Rayon` に戻してから
+        // `fit()` を通す。ここで扱う設計行列は極小なので、この一時的な `Rayon` 設定が
+        // #283 の病理（大標本 tall-skinny での不安定化）を招くことはない。
+        faer::set_global_parallelism(faer::Par::rayon(0));
+
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0, 7.0, 6.0];
+        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
+        let input =
+            OlsInput::from_columns(&y, &[x1], vec!["x1".to_string()], true, "y".to_string())
+                .unwrap();
+
+        let _ = OlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
+
+        assert!(matches!(faer::get_global_parallelism(), faer::Par::Seq));
+    }
+
     /// `wald_test_last_columns`が「切片を除く全傾き係数」（`q = df_model`）を対象に呼ばれた
     /// 場合、`fit()`が計算する`f_statistic()`/`f_p_value()`（同じ`wald_f_test`を
     /// `k_constant=1`で呼ぶ）と数値的に一致するはず（対象列の一般化が既存の挙動を
-    /// 壊していないことの確認、Issue #164でIVのWu-Hausman検定用に追加）。
+    /// 壊していないことの確認。IVのWu-Hausman検定用に追加）。
     #[test]
     fn wald_test_last_columns_matches_f_statistic_when_q_equals_df_model() {
         let y = vec![2.0, 4.0, 5.0, 4.0, 5.0, 7.0, 6.0];
@@ -2065,7 +2150,7 @@ mod tests {
     /// スコアの総和がゼロ（正規方程式`X'e = 0`）で`rank(Ŝ) ≤ g - 1`のため、ロバスト
     /// Wald/F検定の`q×q`部分行列が構造的に特異になる。`g`・`q`は入力だけから判定
     /// できるため`fit()`のバリデーションが`CommonError::InsufficientClustersForInference`
-    /// で弾く（Issue #289）。切片＋説明変数3個（`q = 4 - 1 = 3`）に対し`g = 2`
+    /// で弾く。切片＋説明変数3個（`q = 4 - 1 = 3`）に対し`g = 2`
     /// （`g < q`）と`g = 3`（`g == q`、`rank(Ŝ) ≤ 2 < 3`で依然特異）の両方を確認する。
     /// backstop（`g > q`だが悪条件で数値的にほぼ特異）は
     /// `fit_returns_computation_failed_for_cluster_when_slope_submatrix_is_ill_conditioned`。
@@ -2291,7 +2376,7 @@ mod tests {
         use proptest::collection;
         use proptest::prelude::*;
 
-        const MAX_K: usize = 4;
+        const MAX_K: usize = 20;
 
         /// `(n, k, y, x_cols, keys)`を生成する共通ストラテジ。
         ///
@@ -2301,6 +2386,9 @@ mod tests {
         /// `prop_assume!(result.is_ok())`で非フルランクになるレアケース（丸め誤差起因の
         /// 境界事例等）のみを除外する（「ランダムに生成する設計行列は
         /// SingularMatrixにならない範囲に制約する」という方針に対応）。
+        /// `MAX_K=20`（旧4）はbenchmarkの高次元シナリオ`many_regressors`と揃えた値
+        /// （test-coverage-candidates.md項目2、列数依存バグ・高kでの数値的挙動の検証）。
+        /// `k`が最大でも`n-k>=10`のマージンは保たれる。
         ///
         /// `keys`は列順序入れ替えテスト専用の補助データ（他のプロパティでは未使用）。
         fn ols_case_strategy()

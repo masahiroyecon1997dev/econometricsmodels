@@ -12,8 +12,8 @@ separate class; same policy as `OLSOptions`, see
 `docs/spec/ols-spec.md`, "API引数").
 
 `summary()` is not implemented (structured-data-only output policy; see
-`docs/planning/specs/nonlinear-api-design.md` section 5 and the
-`OlsResults`/`WlsResults` precedent).
+`docs/spec/nonlinear-common.md` section 5 and the
+`OLSResults`/`WLSResults` precedent).
 """
 
 from __future__ import annotations
@@ -85,12 +85,12 @@ class LogitResults:
     Array-valued properties (`params`, `std_errors`, etc.) are exposed
     as dictionaries keyed by coefficient name (for O(1) lookup of a
     single parameter). Use `coef_table()` for a row-oriented listing
-    (`docs/planning/specs/nonlinear-api-design.md` section 5).
+    (`docs/spec/nonlinear-common.md` section 5).
 
     `marginal_effects()`, `predict()`, and `pred_table()` are provided
     as separate methods rather than fields on this class (they depend
     on a representative point / threshold not fixed at `fit()` time;
-    see `docs/planning/specs/nonlinear-api-design.md` section 6).
+    see `docs/spec/nonlinear-common.md` section 6).
 
     Args:
         raw: The estimation result object returned by `_lib.fit_logit`
@@ -125,7 +125,7 @@ class LogitResults:
         """Coefficient name to z-statistic.
 
         Logit uses a z-test (standard normal), not a t-test (see
-        `docs/planning/specs/nonlinear-api-design.md` section 5).
+        `docs/spec/nonlinear-common.md` section 4).
         """
         return dict(zip(self._raw.param_names, self._raw.z_stats))
 
@@ -212,11 +212,16 @@ class LogitResults:
         """Standard error type actually used (normalized to lowercase)."""
         return self._raw.cov_type
 
+    @property
+    def method(self) -> str:
+        """Optimization solver actually used (normalized to lowercase)."""
+        return self._raw.method
+
     def coef_table(self) -> list[dict[str, float | str]]:
         """Row-oriented summary table of the coefficients.
 
         Shaped to be usable almost as-is in a REST API response. Same
-        shape as `OlsResults.coef_table()` except `z_stat` in place of
+        shape as `OLSResults.coef_table()` except `z_stat` in place of
         `t_stat` (Logit uses a z-test rather than a t-test).
 
         Returns:
@@ -245,25 +250,74 @@ class LogitResults:
             )
         ]
 
-    def predict(self) -> list[dict[str, float]]:
-        """Predicted probabilities `p_i = Λ(x_i'β̂)` for the training data.
+    def predict(
+        self, new_data: pl.DataFrame | None = None
+    ) -> list[dict[str, float]]:
+        """Predicted probabilities `p_i = Λ(x_i'β̂)`.
 
-        Out-of-sample prediction (a `new_data` argument) is not yet
-        supported (see `docs/spec/logit-spec.md`, "未実装・未対応").
+        Note:
+            Returns a probability in `[0, 1]`, not a 0/1 class
+            prediction — unlike `OLSResults.predict()`, whose
+            `"predicted"` key is a point prediction of `y` itself.
+            This is the standard statsmodels convention. To get a
+            classification, apply a threshold to this output
+            yourself, or use `pred_table()` (training data only).
+
+        Args:
+            new_data: New data to predict on. Must contain columns with
+                the same names as the `x` columns passed at fit time
+                (matched by name; column order does not matter). If
+                `include_intercept=True` was used at fit time, the
+                constant column is added automatically and must not be
+                included here. If `None` (default), returns the
+                predicted probabilities for the training data used in
+                `fit()`.
 
         Returns:
             Row-oriented predictions, one dict per observation. Each
             dict currently has a single key, `"probability"`.
+
+        Raises:
+            ValidationError: `new_data` is missing a required `x`
+                column, or a column contains missing/NaN/infinite
+                values.
         """
-        return [{"probability": p} for p in self._raw.predict()]
+        return [{"probability": p} for p in self._raw.predict(new_data)]
+
+    def augment(self, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
+        """Source data with the predicted probabilities appended as a
+        column.
+
+        Same `new_data` semantics as `predict()`, but returns a polars
+        DataFrame (the training data, or `new_data` when given, plus a
+        new `"probability"` column) instead of a row-oriented list.
+        See `OLSResults.augment()` for the project's general policy on
+        this DataFrame-returning exception.
+
+        Args:
+            new_data: Same as `predict()`. If `None` (default), returns
+                the training data used in `fit()` with the predicted
+                probabilities appended.
+
+        Returns:
+            A polars DataFrame: the source data's columns plus
+            `"probability"`, in the same row order as the source.
+
+        Raises:
+            ValidationError: Same as `predict()`, or the source data
+                already has a column named `"probability"` (which
+                would otherwise be silently overwritten).
+        """
+        return self._raw.augment(new_data)
 
     def pred_table(self, threshold: float = 0.5) -> list[dict[str, float]]:
         """Classification (confusion) table.
 
         `actual` always uses a fixed 0.5 split; only the predicted
         class depends on `threshold` (matches statsmodels'
-        `BinaryResults.pred_table(threshold)`). Out-of-sample data is
-        not yet supported (same limitation as `predict()`).
+        `BinaryResults.pred_table(threshold)`). Unlike `predict()`,
+        out-of-sample data (a `new_data` argument) is not yet
+        supported (tracked separately, see Issue #322).
 
         Args:
             threshold: Probability threshold above which an
@@ -288,7 +342,7 @@ class LogitResults:
 
         Independent of the `confidence_level` used in `fit()` (may
         differ from it; see
-        `docs/planning/specs/nonlinear-api-design.md` section 6). The
+        `docs/spec/nonlinear-common.md` section 6). The
         constant term (intercept) is excluded from the output.
 
         Args:
@@ -303,7 +357,7 @@ class LogitResults:
             A list of dictionaries, one per explanatory variable
             (excluding the intercept). Keys are `param`, `dydx`,
             `std_err`, `z`, `p_value`, `conf_low`, `conf_high` (see
-            `docs/planning/specs/nonlinear-api-design.md` section 6).
+            `docs/spec/nonlinear-common.md` section 6).
 
         Raises:
             ValidationError: `at` is not one of `"overall"`, `"mean"`,

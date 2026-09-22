@@ -4,9 +4,7 @@ Tobit（打ち切り正規回帰、最尤推定）の確定済み仕様。`engin
 `engine/src/nonlinear/common.rs`）・`engine_pybind/src/nonlinear/tobit.rs`・
 `python_package/econometricsmodels/nonlinear/tobit.py`として実装済み。nonlinear系統共通の設計判断
 （ソルバー実行の共通化、`cov_type`共通行列演算、検定分布＝標準正規分布、標準化の基本方針等）は
-[`logit-spec.md`](./logit-spec.md)・
-[`nonlinear-api-design.md`](../planning/specs/nonlinear-api-design.md)・
-[`nonlinear-implementation-notes.md`](../planning/specs/nonlinear-implementation-notes.md)を参照し、
+[`logit-spec.md`](./logit-spec.md)・[`nonlinear-common.md`](./nonlinear-common.md)を参照し、
 本ドキュメントにはTobit固有の内容のみを記載する。Tobitは連続の潜在変数 `y* = Xβ + ε`
 （`ε ~ N(0, σ²)`）を左/右/両側に打ち切った `y` を観測するモデルで、`y` が二値の
 Logit/Probitとは尤度・予測量・内部パラメータ化が異なる。
@@ -56,7 +54,8 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 `TobitResult`（`#[pyclass]`）が公開する配列＋名前リスト: `params` / `std_errors` / `z_stats`
 （**z検定**） / `p_values` / `conf_lower` / `conf_upper` / `param_names` / `sigma` /
 `log_likelihood` / `aic` / `bic` / `wald_statistic` / `wald_p_value` / `n_obs` / `df_model` /
-`df_resid` / `converged` / `n_iter` / `cov_type` / `lower` / `upper`。
+`df_resid` / `converged` / `n_iter` / `cov_type` / `method`（実際に使われたソルバーの小文字文字列、
+Issue #307） / `lower` / `upper`。
 
 - **`σ`を含めた`k+1`長への統一**: engine層の`TobitEstimator`は`params()`が`k`長（`β`のみ）だが
   `std_errors()`等は`(k+1)`長（末尾が`σ`）という非対称設計（`cov_params`が`(β,σ)`空間の
@@ -128,6 +127,31 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     末尾行へ折り込んだもの、`TobitScaling::param_jacobian`）。
 - **収束判定`tol`の既定値`1e-6`**はLogit/Probitと同じ結論（通常データでは高精度一致、境界ケース
   のみ`tol`を明示的に締める運用）。
+  - **大標本での`tol`スケール問題と副次的な収束判定（Issue #291）**: `terminate`の主判定
+    `l2_norm(gradient) < tol`は**総和勾配に対する絶対閾値**で観測数`n`でスケールしない。大 `n`
+    （実測で `n≳2·10⁵`、`β`の引き次第）では収束点近傍で勾配の丸め誤差の床が`tol`を上回り、
+    コスト関数が浮動小数点の底に達しても主判定が発火しないことがある。この状態で
+    `regularized_newton_step`が`MAX_LM_ATTEMPTS`回すべてコスト減少に失敗し、以前は誤って
+    `SingularHessian`（`ComputationError`）を返していた（`moderate_censoring, n=10⁶, seed=42` /
+    `n=2·10⁵, seed=1`で再現）。現在は`common.rs`共有の`FaerNewton`が、`λ=0`のHessianが可逆
+    （＝真に特異ではない）かつ次の3条件——(1) 生Newtonステップを1回進めても勾配ノルムが
+    減らない（`≥0.9·前反復`）、(2) 勾配ノルムが収束目標近傍（`<10⁴·tol`）、(3) **コスト関数
+    （負の対数尤度）のHessianが正定値**（`llt`成功＝内点最大の2階条件。`(β, logσ)`尤度は
+    大域凹でなく鞍点で `NoProgress` が返りうるため必須）——を確認して**収束扱い**にする
+    （`FaerNewton::stalled_at_optimum`、`RegularizedStep::NoProgress`。現在点をそのまま返し
+    生ステップは適用しない）。3条件が揃わなければ生ステップを適用して反復継続し、
+    `max_iter`到達で`NonConvergence`。Logit/Probitの大域凹な尤度ではこの経路（LMラダーの
+    全失敗）に入らないため挙動は不変。真の特異性（完全な多重共線性等、`λ=0`のHessianが
+    可逆でない）は従来どおり`SingularHessian`。
+  - **`bfgs`/`lbfgs`は`tol`を観測数`n`で正規化した基準を使う（Issue #285、実装済み）**:
+    `newton`は絶対閾値のまま（既定`tol=1e-6`、Tobitでも反復回数は`n`によらずほぼ一定でこの
+    影響をほぼ無償で吸収する）だが、`bfgs`/`lbfgs`は観測あたり平均勾配基準（既定`tol=1e-8`）を
+    使う。statsmodelsが`n`で正規化してから最適化するのに倣ったもの。詳細・実測値・小標本での
+    精度検証テストへの影響は[`logit-spec.md`](./logit-spec.md)3.2節参照。
+  - **`bfgs`/`lbfgs`のline searchの評価回数バジェット（`BudgetedProblem`、Issue #342）**も
+    `run_solver`共通で、Tobitも同様に保護される（本件は実際に`nonlinear::tobit::tests::
+    proptests`で発覚。devビルドで80分超のCPU時間を消費し続けるケースを実測で確認済み）。
+    詳細は[`logit-spec.md`](./logit-spec.md)3.2節参照。
 - **Tobitの「真の」分離は`σ→0`退化として現れる**（Logit/Probitの「係数が±∞へ発散」とは異なる）。
   そのため`run_solver`共有の`SeparationSuspected`（標準化パラメータノルム基準、`y∈{0,1}`で較正）は
   `run_solver`の`separation_norm_check: SeparationNormCheck`引数で**Tobitは`Disabled`**にし、この
@@ -204,12 +228,23 @@ Tobit固有の差分:
   `fit()`時の`cov_params`をそのまま再利用し再最適化しない。
 - 定数項は出力から除外する。
 
-### 3.6 predict() / censoring_fit_check()
+### 3.6 predict() / augment() / censoring_fit_check()
 
-- `predict(target)`は`marginal_effects`と同じ`MarginalEffectsTarget`を再利用し、`E[y*|x]=x'β`・
-  `E[y|x]`（既定）・`P(uncensored|x)`の3種を返す。値の計算は`predicted_value`（`target_w_and_s`と
-  同じ`boundary_terms`を再利用、左/右/両側いずれでも単一の式）。学習データの各行のみ対象
-  （**in-sample限定**、out-of-sample対応は4章）。
+- `predict(target, new_data=None)`は`marginal_effects`と同じ`MarginalEffectsTarget`を再利用し、
+  `E[y*|x]=x'β`・`E[y|x]`（既定）・`P(uncensored|x)`の3種を返す。値の計算は`predicted_value`
+  （`target_w_and_s`と同じ`boundary_terms`を再利用、左/右/両側いずれでも単一の式）。`new_data`が
+  `None`（既定）なら学習データ、指定すれば新規データ（out-of-sample）に対する予測値を返す
+  （`x`列名マッチング・`include_intercept`時の定数項自動付加はOLS/Logit/Probitの`predict(new_data)`
+  と同じ規約、Issue #326）。engine側の`predict_new_data`は`nonlinear::common::predict_new_data`に
+  `predicted_value`（`target`・`sigma`・打ち切り境界を閉じ込めたクロージャ）を`link`として渡す
+  だけの薄いラッパー。`censoring_fit_check()`のout-of-sample対応は引き続き未対応（4章）。
+- **`augment(target="expected_observed", new_data=None)`は`predict()`と同じ`target`/`new_data`
+  意味論**で、ソースデータに予測値の列を1列付加したpolars DataFrameを返す（Issue #322項目4）。
+  **列名はLogit/Probitの固定名`"probability"`とは異なり`"predicted_{target}"`**（例:
+  `"predicted_expected_observed"`）にした。理由: Tobitは`target`によって`predict()`の意味が
+  変わるため、固定名だと同じDataFrameに複数の`target`を積み上げようとした2回目の`augment()`が
+  列名衝突で失敗する（`target`ごとに別の列名にすればこれを避けられる、ユーザー確認済み・提案）。
+  `TobitResult`も`LogitResult`と同じく`training_data: DataFrame`を保持する。
 - **`pred_table()`は廃止し`censoring_fit_check()`に置き換える**。単一集約値ではなく`lower` /
   `uncensored` / `upper`の**方向別内訳**（`CensoringFitCheck`、該当方向の打ち切りが無ければその
   カテゴリは出力されない）。各カテゴリは`observed_rate`（`y`がちょうど境界値に一致する観測の割合）と
@@ -276,11 +311,20 @@ Tobit固有の差分:
 - **フィクスチャ**（`tobit.json` / `tobit_crosscheck.json`）は`run_tobit_crosscheck.R`の`engine`
   引数（`survreg` / `censReg`）違いで構造が完全に同一のため、pytest本体は`_tobit_checks.py`に
   集約している。
+- **新規データ（out-of-sample）予測値の数値照合（Issue #326）**: `run_tobit_crosscheck.R`が学習
+  データの各スロープ列の「平均±1標準偏差」を新規x値とする2行を組み立て（切片列は`model.matrix`の
+  規約通り常に1.0）、`predicted_value`（上記のformula非依存検証で既に正しさを確認済みの閉形式）で
+  target3種を計算した`predict_new_data`と、その新規x値自体（`new_x`）をフィクスチャに含める。
+  `predicted_value`の数式そのものは検証済みのため、この照合が対象とするのは新規データの設計行列
+  組み立て（切片自動付加・列の対応付け）がRust側（`predict_new_data`/`design_matrix_element`）と
+  Rの`model.matrix`規約とで一致するかであり、`new_mm %*% beta`という単純な行列積で十分（`numDeriv`
+  等の追加の独立検証は不要）。
 
 ## 4. 未実装・未対応
 
-- `predict()`/`censoring_fit_check()`のout-of-sample対応（`new_data`引数、Logit/Probitと同じ理由で
-  別issueトラッキング）。
+- `predict()`のout-of-sample対応は実装済み（Issue #326、3.6参照）。`censoring_fit_check()`の
+  out-of-sample対応は引き続き未実装。
+- `augment()`は実装済み（Issue #322項目4、3.6参照）。
 - `start_params`（ユーザー指定初期値）。
 - **尤度比検定（LR statistic/p-value）**: v1では`llnull`のためのintercept-only再最適化を避けて
   Wald検定を採用した。実装コストは`TobitInput`を`k=1`（切片のみ）で構築し既存のNewton/BFGS/L-BFGS
@@ -291,6 +335,18 @@ Tobit固有の差分:
 - **`SeparationNormCheck`を無効化したことによる「有限だが統計的に無意味なほど巨大な`β̂`」の検知**:
   標準化ノルムとは別の指標（Hessianの条件数、SEの発散、`σ̂/σ_y`比の下限等）は未着手。実データで
   問題が顕在化した時点で再検討する。
+- **`censored_contribution`のHessian項がクランプ済み`λ`と生の`zeta`を混在させるバグは
+  対応済み（2026-09-13、Probit Issue #316のレビュー中に発見した同型のバグ）**: `A(u)=λ(u+λ)`・
+  `C(u)=uA(u)-λ(u)`（モジュール冒頭の数式表）の計算で、以前は`λ`（`clamped_pdf_cdf`で
+  クランプ済みの引数から計算）と生の（非クランプの）`zeta`を混在させていた。`|zeta|>U_CLAMP`
+  かつ打ち切り境界から大きく外れた観測で`A(u)`（`h_beta_coef`）が負になりうる（`A(u)>0`という
+  恒等式が数値的に破れる）ことを確認し、`zeta`を`λ`と同じクランプ済み引数から再構成する
+  よう修正した（`zeta_for_hessian = zeta.clamp(-U_CLAMP, U_CLAMP)`）。この修正により、
+  境界レジーム（軽度の準完全分離＋ごく小さいノイズ、旧Issue #288の「中間レジーム」）で
+  以前は`NonConvergence`になっていたケースが正しく収束するようになったことを実測で確認した
+  （`tests/nonlinear/test_tobit.py`の`test_quasi_separation_tiny_noise_converges_to_true_values`
+  参照）。`score_s`（勾配）は今回のスコープ外（`U_CLAMP`領域でのcost/gradientの数学的非整合は
+  別の既知の課題、[`probit-spec.md`](./probit-spec.md)4章参照）のため変更していない。
 - **`wald_chi2_test`とOLSの`wald_f_test`の重複**: 部分行列抽出→悪条件検出→Cholesky→二次形式の
   構成が同型で、異なるのは検定分布（カイ二乗 vs F）のみ。現時点ではTobit1箇所のみの利用のため
   共通化は見送り。IV等で3箇所目の重複が生まれる場合に二次形式計算のコア部分の共通化を検討する。

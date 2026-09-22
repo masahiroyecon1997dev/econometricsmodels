@@ -8,33 +8,42 @@ around the native extension (`econometricsmodels._lib`) built by
 from __future__ import annotations
 
 from ._lib import ComputationError, ValidationError
-from .iv.iv import IV, IvOptions, IvResults
-from .linear.ols import OLS, OLSOptions, OlsResults
-from .linear.wls import WLS, WlsResults
+from .iv.iv import IV, IVOptions, IVResults
+from .linear.ols import OLS, OLSOptions, OLSResults
+from .linear.wls import WLS, WLSOptions, WLSResults
 from .nonlinear.logit import Logit, LogitOptions, LogitResults
 from .nonlinear.probit import Probit, ProbitOptions, ProbitResults
 from .nonlinear.tobit import Tobit, TobitOptions, TobitResults
+from .panel.fe import FE, FEOptions, FEResults
+from .panel.re import RE, REOptions, REResults
 
 __all__ = [
+    "FE",
     "IV",
     "OLS",
+    "RE",
     "WLS",
     "ComputationError",
-    "IvOptions",
-    "IvResults",
+    "FEOptions",
+    "FEResults",
+    "IVOptions",
+    "IVResults",
     "Logit",
     "LogitOptions",
     "LogitResults",
     "OLSOptions",
-    "OlsResults",
+    "OLSResults",
     "Probit",
     "ProbitOptions",
     "ProbitResults",
+    "REOptions",
+    "REResults",
     "Tobit",
     "TobitOptions",
     "TobitResults",
     "ValidationError",
-    "WlsResults",
+    "WLSOptions",
+    "WLSResults",
 ]
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"

@@ -21,6 +21,10 @@ from benchmark.common.constants import (
     MROZ_FORMULA,
     SYNTHETIC_FORMULA,
     TOBIT_MROZ_FORMULA,
+    WAGEPAN_ENTITY,
+    WAGEPAN_TIME,
+    WAGEPAN_X,
+    WAGEPAN_Y,
     WEIGHT_COLUMN_NAME,
 )
 from benchmark.common.datasets_io import (
@@ -48,6 +52,10 @@ __all__ = [
     "MROZ_FORMULA",
     "SYNTHETIC_FORMULA",
     "TOBIT_MROZ_FORMULA",
+    "WAGEPAN_ENTITY",
+    "WAGEPAN_TIME",
+    "WAGEPAN_X",
+    "WAGEPAN_Y",
     "WEIGHT_COLUMN_NAME",
     "apply_perfect_multicollinearity",
     "correlated_design_matrix",

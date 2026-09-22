@@ -33,6 +33,8 @@ use super::ols::{CovType, OlsEstimator, OlsInput};
 #[derive(Debug)]
 pub struct WlsEstimator {
     estimator: OlsEstimator,
+    /// 元スケール（unweighted）の予測値 `ŷ_i = x_i'β̂`（`predict(new_data=None)`が返す値）
+    fitted_values: Vec<f64>,
     /// 元スケール（unweighted）の残差 `y_i - x_i'β̂`
     residuals: Vec<f64>,
     r_squared: f64,
@@ -61,6 +63,9 @@ impl WlsEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, LeastSquaresError> {
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
+        crate::parallelism::ensure_serial();
+
         let input = OlsInput::from_columns_weighted(
             y,
             x_columns,
@@ -70,12 +75,14 @@ impl WlsEstimator {
             weights,
         )?;
         let estimator = OlsEstimator::fit(input, cov_type, confidence_level)?;
-        let residuals = original_scale_residuals(y, x_columns, include_intercept, &estimator);
+        let (fitted_values, residuals) =
+            original_scale_fitted_and_residuals(y, x_columns, include_intercept, &estimator);
         let (r_squared, r_squared_adj, log_likelihood, aic, bic) =
             weighted_fit_statistics(y, weights, &residuals, &estimator);
 
         Ok(Self {
             estimator,
+            fitted_values,
             residuals,
             r_squared,
             r_squared_adj,
@@ -91,6 +98,11 @@ impl WlsEstimator {
     /// `WlsEstimator`自身のメソッドを使うこと（型ドキュメント参照）。
     pub fn estimator(&self) -> &OlsEstimator {
         &self.estimator
+    }
+
+    /// 元スケール（unweighted）の予測値 `ŷ_i = x_i'β̂`（学習データに対する`predict()`が返す値）。
+    pub fn fitted_values(&self) -> &[f64] {
+        &self.fitted_values
     }
 
     /// 元スケール（unweighted）の残差 `y_i - x_i'β̂`。
@@ -130,7 +142,7 @@ impl WlsEstimator {
 /// 統計量ごとの理由はモジュール冒頭のdocコメント参照。SSR自体は重み付き残差の二乗和
 /// （`Σ w_i (y_i - ŷ_i)²`）で、`estimator`が変換後データに対して計算したSSRと数学的に
 /// 同一の値になる（`sqrt(w_i)(y_i-ŷ_i)`の二乗が`w_i(y_i-ŷ_i)²`のため）ため、
-/// `original_scale_residuals`と`weights`から計算し直しても内部で二重計算にはならない。
+/// `original_scale_fitted_and_residuals`と`weights`から計算し直しても内部で二重計算にはならない。
 fn weighted_fit_statistics(
     y: &[f64],
     weights: &[f64],
@@ -171,15 +183,15 @@ fn weighted_fit_statistics(
     (r_squared, r_squared_adj, log_likelihood, aic, bic)
 }
 
-/// 元の（重み変換前の）`y`・`x_columns`と推定済みの係数から、元スケールの残差
-/// `y_i - x_i'β̂`を計算する。`estimator.residuals()`（重み付き残差）をそのまま使わない理由は
-/// `WlsEstimator`のdocコメントを参照。
-fn original_scale_residuals(
+/// 元の（重み変換前の）`y`・`x_columns`と推定済みの係数から、元スケールの予測値
+/// `ŷ_i = x_i'β̂`と残差`y_i - ŷ_i`を計算する。`estimator.residuals()`（重み付き残差）を
+/// そのまま使わない理由は`WlsEstimator`のdocコメントを参照。
+fn original_scale_fitted_and_residuals(
     y: &[f64],
     x_columns: &[Vec<f64>],
     include_intercept: bool,
     estimator: &OlsEstimator,
-) -> Vec<f64> {
+) -> (Vec<f64>, Vec<f64>) {
     let params = estimator.params();
     (0..y.len())
         .map(|i| {
@@ -192,9 +204,9 @@ fn original_scale_residuals(
             for (j, x_col) in x_columns.iter().enumerate() {
                 fitted += x_col[i] * *params.get(col + j, 0);
             }
-            y[i] - fitted
+            (fitted, y[i] - fitted)
         })
-        .collect()
+        .unzip()
 }
 
 #[cfg(test)]
@@ -260,6 +272,33 @@ mod tests {
         // 丸め誤差レベルでの一致を確認する（構造的な完全一致の保証対象はestimator()側）。
         for i in 0..5 {
             assert!((wls.residuals()[i] - *ols.residuals().get(i, 0)).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn fitted_values_equals_y_minus_residuals() {
+        // `ols.rs`の同名テスト（`fitted_values_equals_y_minus_residuals`）と同じ不変条件
+        // （`fitted_values()`と`residuals()`が同じ`original_scale_fitted_and_residuals`
+        // 呼び出しから一貫して導かれていることの確認）。
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+        let weights = vec![1.0, 4.0, 0.25, 9.0, 2.0];
+
+        let wls = WlsEstimator::fit(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            &weights,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        for (i, &y_i) in y.iter().enumerate() {
+            let expected = y_i - wls.residuals()[i];
+            assert!((wls.fitted_values()[i] - expected).abs() < 1e-9);
         }
     }
 
@@ -348,6 +387,32 @@ mod tests {
                 row: 1,
                 weight: 0.0
             }
+        );
+    }
+
+    #[test]
+    fn fit_propagates_no_regressors_error_when_k_is_zero() {
+        // `WlsEstimator::fit`は常に（ゲート付きの）`OlsEstimator::fit`に委譲するため、
+        // k=0拒否もそのまま伝播する。`fit_allowing_no_regressors`への
+        // 特別扱いは不要（WLSはk=0になりえない呼び出し方をする対象ではなく、
+        // OLSと同じくPython向け公開APIとしてk=0を拒否すべき対象）。
+        let y = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let weights = vec![1.0; 5];
+
+        let result = WlsEstimator::fit(
+            &y,
+            &[],
+            vec![],
+            false,
+            "y".to_string(),
+            &weights,
+            CovType::Classical,
+            0.95,
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            LeastSquaresError::Common(crate::error::CommonError::NoRegressors { n: 5 })
         );
     }
 
@@ -454,7 +519,7 @@ mod tests {
     #[test]
     fn fit_without_intercept_uses_uncentered_r_squared_and_omits_const() {
         // include_intercept=falseのとき、WLSがOLS側のuncentered TSS分岐
-        // （has_intercept()=falseのときのr_squared計算）と、original_scale_residualsの
+        // （has_intercept()=falseのときのr_squared計算）と、original_scale_fitted_and_residualsの
         // 「切片項を足さない」分岐を正しく通ることを確認する。
         //
         // y = 2*x1に対する厳密解（ノイズなし）は使わない: k=1（切片なし・x1のみ）で
@@ -490,7 +555,7 @@ mod tests {
         assert!((wls.r_squared() - wls.estimator().r_squared()).abs() < 1e-12);
 
         // 内部整合性: residuals()は「元スケールのy - 推定された係数による予測値」であるはず
-        // （original_scale_residualsの定義そのものの確認。真の係数2.0とは比較しない）。
+        // （original_scale_fitted_and_residualsの定義そのものの確認。真の係数2.0とは比較しない）。
         for (i, &r) in wls.residuals().iter().enumerate() {
             let expected = y[i] - beta_hat * x1[i];
             assert!(
@@ -502,7 +567,7 @@ mod tests {
 
     #[test]
     fn fit_with_multiple_x_columns_recovers_known_coefficients() {
-        // original_scale_residualsのx_columnsループ（複数列）が正しく計算できることを確認する
+        // original_scale_fitted_and_residualsのx_columnsループ（複数列）が正しく計算できることを確認する
         // （これまでのテストはx列1本のみだった）。
         let y = vec![9.0, 8.0, 19.0, 18.0, 29.0, 28.0]; // 1 + 2*x1 + 3*x2
         let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
@@ -526,6 +591,238 @@ mod tests {
         assert!((*wls.estimator().params().get(2, 0) - 3.0).abs() < 1e-9); // x2
         for r in wls.residuals() {
             assert!(r.abs() < 1e-9);
+        }
+    }
+
+    /// property-basedテスト。`ols.rs`の`mod proptests`と同型の設計
+    /// （`testing-policy.md`「property-basedテスト」参照）。
+    ///
+    /// プロパティの有効性検証（バグ注入→検出確認→元に戻す）は、新規プロパティ
+    /// `weights_all_one_matches_ols`（`weighted_fit_statistics`のAIC計算式にk+1の
+    /// バグを注入）・`weighted_residuals_sum_to_zero_when_intercept_included`
+    /// （`original_scale_fitted_and_residuals`の切片寄与を半分にするバグを注入）・
+    /// `coefficients_scale_linearly_with_y`（`OlsInput::from_columns_impl`の
+    /// y変換に定数オフセットのバグを注入）の3件で実施済み。残り2件
+    /// （`coefficients_and_se_are_invariant_to_column_order`・
+    /// `hc0_std_errors_are_at_most_hc1_std_errors`）は`ols.rs`側で検証済みの
+    /// 同一ロジック（`OlsEstimator::fit`）をWLSの重み付き変換経由で呼ぶのみのため
+    /// 個別のバグ注入は省略した。
+    mod proptests {
+        use super::*;
+        use proptest::collection;
+        use proptest::prelude::*;
+
+        // OLSのMAX_K拡張（test-coverage-candidates.md項目2）と揃えた値。
+        const MAX_K: usize = 20;
+
+        /// `wls_case_strategy`が生成するタプル: `(n, k, y, x_cols, weights, keys)`。
+        type WlsCase = (usize, usize, Vec<f64>, Vec<Vec<f64>>, Vec<f64>, Vec<u64>);
+
+        /// `(n, k, y, x_cols, weights, keys)`を生成する共通ストラテジ。
+        ///
+        /// `y`/`x_cols`の生成方針は`ols.rs`の`ols_case_strategy`と同じ
+        /// （`n=k+10..=60`のマージン、独立な連続一様分布）。`weights`は正値
+        /// （`0.1..10.0`）のみ生成する（`WlsInput`が非正の重みを拒否するため）。
+        fn wls_case_strategy() -> impl Strategy<Value = WlsCase> {
+            (1..=MAX_K).prop_flat_map(|k| {
+                (k + 10..=60usize).prop_flat_map(move |n| {
+                    (
+                        Just(n),
+                        Just(k),
+                        collection::vec(-100.0f64..100.0, n),
+                        collection::vec(collection::vec(-100.0f64..100.0, n), k),
+                        collection::vec(0.1f64..10.0, n),
+                        collection::vec(any::<u64>(), k),
+                    )
+                })
+            })
+        }
+
+        fn x_names(k: usize) -> Vec<String> {
+            (1..=k).map(|i| format!("x{i}")).collect()
+        }
+
+        fn assert_approx_eq(actual: f64, expected: f64, msg: &str) {
+            let tol = 1e-6 * expected.abs().max(1.0);
+            let diff = (actual - expected).abs();
+            assert!(
+                diff <= tol,
+                "{msg}: actual={actual}, expected={expected}, diff={diff}, tol={tol}"
+            );
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            /// 切片ありなら重み付き残差和は常に0（`Σ w_i・residuals_i ≈ 0`）。
+            ///
+            /// `ols.rs`の`residuals_sum_to_zero_when_intercept_included`の単純移植では
+            /// **ない**点に注意: WLSの正規方程式は変換後データ（切片列も`sqrt(w_i)`倍）の
+            /// `X'e=0`から従うため、元スケールに戻すと単純な残差和ゼロではなく重み付き和が
+            /// ゼロになる（`Σ sqrt(w_i)・sqrt(w_i)・residuals_i = Σ w_i・residuals_i = 0`）。
+            #[test]
+            fn weighted_residuals_sum_to_zero_when_intercept_included(
+                (n, k, y, x_cols, weights, _keys) in wls_case_strategy()
+            ) {
+                let names = x_names(k);
+                let result = WlsEstimator::fit(
+                    &y, &x_cols, names, true, "y".to_string(),
+                    &weights, CovType::Classical, 0.95,
+                );
+                prop_assume!(result.is_ok());
+                let wls = result.unwrap();
+
+                let weighted_sum: f64 = wls.residuals().iter().zip(&weights).map(|(r, w)| w * r).sum();
+                let scale = y.iter().fold(1.0_f64, |acc, v| acc.max(v.abs()));
+                prop_assert!(
+                    weighted_sum.abs() <= 1e-6 * scale * (n as f64),
+                    "weighted residual sum should be ~0, got {weighted_sum} (scale={scale}, n={n})"
+                );
+            }
+
+            /// 重みが全て1のとき、WLSはOLSと（丸め誤差の範囲内で）完全一致する
+            /// （`wls-spec.md`「sqrt(w)変換」の構造的保証、固定値テスト
+            /// `fit_with_all_weights_one_matches_ols`のproperty-based版）。
+            /// `r_squared`等は`WlsEstimator`側で再計算する専用ロジック
+            /// （`weighted_fit_statistics`）を通るため、変換パイプライン
+            /// （`OlsInput::from_columns_weighted`）だけでなくこの再計算ロジックも
+            /// 検証対象に含む。
+            #[test]
+            fn weights_all_one_matches_ols(
+                (n, k, y, x_cols, _weights, _keys) in wls_case_strategy()
+            ) {
+                let weights = vec![1.0; n];
+                let names = x_names(k);
+
+                let wls_result = WlsEstimator::fit(
+                    &y, &x_cols, names.clone(), true, "y".to_string(),
+                    &weights, CovType::Classical, 0.95,
+                );
+                let ols_input = OlsInput::from_columns(&y, &x_cols, names, true, "y".to_string()).unwrap();
+                let ols_result = OlsEstimator::fit(ols_input, CovType::Classical, 0.95);
+                prop_assume!(wls_result.is_ok() && ols_result.is_ok());
+                let wls = wls_result.unwrap();
+                let ols = ols_result.unwrap();
+
+                for i in 0..=k {
+                    assert_approx_eq(
+                        *wls.estimator().params().get(i, 0),
+                        *ols.params().get(i, 0),
+                        &format!("param[{i}]"),
+                    );
+                    assert_approx_eq(
+                        *wls.estimator().std_errors().get(i, 0),
+                        *ols.std_errors().get(i, 0),
+                        &format!("std_error[{i}]"),
+                    );
+                }
+                assert_approx_eq(wls.r_squared(), ols.r_squared(), "r_squared");
+                assert_approx_eq(wls.r_squared_adj(), ols.r_squared_adj(), "r_squared_adj");
+                assert_approx_eq(wls.log_likelihood(), ols.log_likelihood(), "log_likelihood");
+                assert_approx_eq(wls.aic(), ols.aic(), "aic");
+                assert_approx_eq(wls.bic(), ols.bic(), "bic");
+            }
+
+            /// yをc倍すると、切片を含む全ての係数がc倍にスケールする
+            /// （WLSも重み付き最小二乗解がyに関して線形なため、`ols.rs`の
+            /// `coefficients_scale_linearly_with_y`と同じ理由で成り立つ）。
+            #[test]
+            fn coefficients_scale_linearly_with_y(
+                (_n, k, y, x_cols, weights, _keys) in wls_case_strategy(),
+                c in prop_oneof![-10.0f64..-0.1, 0.1f64..10.0],
+            ) {
+                let names = x_names(k);
+                let result1 = WlsEstimator::fit(
+                    &y, &x_cols, names.clone(), true, "y".to_string(),
+                    &weights, CovType::Classical, 0.95,
+                );
+                prop_assume!(result1.is_ok());
+                let wls1 = result1.unwrap();
+
+                let y_scaled: Vec<f64> = y.iter().map(|v| v * c).collect();
+                let result2 = WlsEstimator::fit(
+                    &y_scaled, &x_cols, names, true, "y".to_string(),
+                    &weights, CovType::Classical, 0.95,
+                );
+                prop_assume!(result2.is_ok());
+                let wls2 = result2.unwrap();
+
+                for i in 0..=k {
+                    let expected = c * *wls1.estimator().params().get(i, 0);
+                    let actual = *wls2.estimator().params().get(i, 0);
+                    assert_approx_eq(actual, expected, &format!("param[{i}] scaled by c={c}"));
+                }
+            }
+
+            /// xの列順序を入れ替えても、係数名で対応付ければ係数・標準誤差の値は変わらない。
+            #[test]
+            fn coefficients_and_se_are_invariant_to_column_order(
+                (_n, k, y, x_cols, weights, keys) in wls_case_strategy()
+                    .prop_filter("need >=2 columns to permute", |(_, k, _, _, _, _)| *k >= 2)
+            ) {
+                let names = x_names(k);
+                let result1 = WlsEstimator::fit(
+                    &y, &x_cols, names.clone(), true, "y".to_string(),
+                    &weights, CovType::Classical, 0.95,
+                );
+                prop_assume!(result1.is_ok());
+                let wls1 = result1.unwrap();
+
+                let mut order: Vec<usize> = (0..k).collect();
+                order.sort_by_key(|&i| keys[i]);
+                let permuted_x: Vec<Vec<f64>> = order.iter().map(|&i| x_cols[i].clone()).collect();
+                let permuted_names: Vec<String> = order.iter().map(|&i| names[i].clone()).collect();
+
+                let result2 = WlsEstimator::fit(
+                    &y, &permuted_x, permuted_names, true, "y".to_string(),
+                    &weights, CovType::Classical, 0.95,
+                );
+                prop_assume!(result2.is_ok());
+                let wls2 = result2.unwrap();
+
+                let names1 = wls1.estimator().input().param_names().to_vec();
+                let names2 = wls2.estimator().input().param_names().to_vec();
+                for (idx1, name) in names1.iter().enumerate() {
+                    let idx2 = names2.iter().position(|n| n == name)
+                        .expect("name should exist in permuted result");
+                    let p1 = *wls1.estimator().params().get(idx1, 0);
+                    let p2 = *wls2.estimator().params().get(idx2, 0);
+                    assert_approx_eq(p2, p1, &format!("param[{name}] under column permutation"));
+                    let se1 = *wls1.estimator().std_errors().get(idx1, 0);
+                    let se2 = *wls2.estimator().std_errors().get(idx2, 0);
+                    assert_approx_eq(se2, se1, &format!("std_error[{name}] under column permutation"));
+                }
+            }
+
+            /// HC0の標準誤差は常にHC1以下（`HC1 = HC0 * n/(n-k)`で`n/(n-k) >= 1`のため）。
+            #[test]
+            fn hc0_std_errors_are_at_most_hc1_std_errors(
+                (_n, k, y, x_cols, weights, _keys) in wls_case_strategy()
+            ) {
+                let names = x_names(k);
+                let result1 = WlsEstimator::fit(
+                    &y, &x_cols, names.clone(), true, "y".to_string(),
+                    &weights, CovType::Hc0, 0.95,
+                );
+                prop_assume!(result1.is_ok());
+                let wls_hc0 = result1.unwrap();
+
+                let result2 = WlsEstimator::fit(
+                    &y, &x_cols, names, true, "y".to_string(),
+                    &weights, CovType::Hc1, 0.95,
+                );
+                prop_assume!(result2.is_ok());
+                let wls_hc1 = result2.unwrap();
+
+                for i in 0..=k {
+                    let se_hc0 = *wls_hc0.estimator().std_errors().get(i, 0);
+                    let se_hc1 = *wls_hc1.estimator().std_errors().get(i, 0);
+                    prop_assert!(
+                        se_hc0 <= se_hc1 + 1e-9,
+                        "HC0 se[{i}]={se_hc0} should be <= HC1 se[{i}]={se_hc1}"
+                    );
+                }
+            }
         }
     }
 }

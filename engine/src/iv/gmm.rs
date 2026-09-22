@@ -1,4 +1,4 @@
-//! GMM（一般化モーメント法）による2SLS/IVの共通推定コア（Issue #160）。
+//! GMM（一般化モーメント法）による2SLS/IVの共通推定コア。
 //!
 //! ## 数式
 //!
@@ -12,10 +12,10 @@
 //!
 //! ## `weight_type`・`gmm_iterations`と点推定への影響
 //!
-//! `W`の選び方（`weight_type`）が点推定`β̂`自体を左右する（`iv-api-design.md`6.2節、
+//! `W`の選び方（`weight_type`）が点推定`β̂`自体を左右する（`docs/spec/iv-spec.md`1.2節、
 //! `cov_type`が点推定に影響しないOLS/2SLSとの重要な違い）。`gmm_iterations`は
-//! 1以上の任意の整数を受け付ける（`IvError::InvalidGmmIterations`、Issue #165で
-//! 1・2の2値のみに限定していたが、Issue #229で3以上（iterated GMM）に一般化した）。
+//! 1以上の任意の整数を受け付ける（`IvError::InvalidGmmIterations`。当初は
+//! 1・2の2値のみに限定していたが、後に3以上（iterated GMM）にも対応する形で一般化した）。
 //!
 //! 1. **`gmm_iterations=1`（1-step GMM）**: `W₀ = (Z'Z)⁻¹`による初期推定`β̂₀`を、
 //!    残差に基づく重みの再構築を一切行わずそのまま最終推定値とする（この`W₀`は2SLSの
@@ -31,13 +31,13 @@
 //!    残差`ê_{k-1} = y - Xβ̂_{k-1}`から`weight_type`に応じたモーメント条件の分散共分散行列
 //!    `S_k`（下記「`weight_type`ごとの`S`」）を構築し、`W_k = S_k⁻¹`で`β̂_k = β̂(W_k)`を
 //!    求める、という手続きを`gmm_iterations`回に達するまで繰り返す（`k=1,...,gmm_iterations-1`）。
-//!    3回目以降の反復（`gmm_iterations>=3`、Issue #229）は、標準的な2-step efficient GMMを
+//!    3回目以降の反復（`gmm_iterations>=3`）は、標準的な2-step efficient GMMを
 //!    「Sの再構築を1回だけ行う特殊ケース」として素直に一般化したもの——各ステップで
 //!    「直前の残差からSを再構築→再推定」を繰り返すだけで、2-stepと3-step以降で
 //!    アルゴリズムを分岐させる必要はない（`fit()`のループ参照）。`weight_type`が
 //!    点推定に意味を持つのは`gmm_iterations>=2`のときのみ。
 //!
-//! ## 収束条件（`gmm_convergence`、Issue #229）
+//! ## 収束条件（`gmm_convergence`）
 //!
 //! `gmm_convergence: Option<f64>`（既定`None`）を指定すると、`gmm_iterations`を
 //! 「固定反復回数」ではなく「収束判定の上限反復回数（安全弁）」として扱う: 各ステップで
@@ -77,12 +77,12 @@
 //!   `cluster_cov_params`と同型だが小標本補正は無し）。
 //! - `Kernel`: Newey-West（Bartlettカーネル）による`S`。`two_sls.rs`の`hac_cov_params`と
 //!   同型（時系列相関を仮定する`kernel`、パネルのDriscoll-Kraayではない。
-//!   `iv-api-design.md`6.2節・`two_sls.rs`冒頭コメント参照）。
+//!   `docs/spec/iv-spec.md`1.2節・`two_sls.rs`冒頭コメント参照）。
 //!
 //! 上記4関数は、数式としては`two_sls.rs`の`hc_cov_params`/`cluster_cov_params`/
 //! `hac_cov_params`と同型だが、独立に実装している（後述「2SLSとの共通化の判断」参照）。
 //!
-//! ## Hansen J過剰識別検定（Issue #167、`iv-api-design.md`6.5節）
+//! ## Hansen J過剰識別検定（`docs/spec/iv-spec.md`3.5節）
 //!
 //! `J = (Z'ê)'S⁻¹(Z'ê)`（`ê`は最終推定`β̂`に基づく残差、`S`は最終推定に実際に使った
 //! 重み行列）。自由度は`len(instruments) - len(x_endog)`（丁度識別＝自由度0では`None`、
@@ -111,9 +111,9 @@
 //!
 //! ## 標準誤差・検定統計量（`cov_type`対応）
 //!
-//! Issue #166は「2SLS・GMMともに`classical`/`hc0`〜`hc3`/`cluster`/`hac`でSEが計算できる」
-//! ことを完了条件としてクローズされたが、実際には2SLS側（`two_sls.rs`）のみが実装され、
-//! `GmmEstimator`は本節を追加するまで点推定とHansen J検定のみだった（Issue #171の
+//! 「2SLS・GMMともに`classical`/`hc0`〜`hc3`/`cluster`/`hac`でSEが計算できる」
+//! ことを完了条件として先に完了扱いになっていたが、実際には2SLS側（`two_sls.rs`）のみが実装され、
+//! `GmmEstimator`は本節を追加するまで点推定とHansen J検定のみだった（後続の
 //! ベンチマーク作業中に発覚、ユーザー確認済み）。本節はそのギャップを埋める。
 //!
 //! **`weight_type`（点推定に使う重み）と`cov_type`（SE計算方法）は独立**（モジュール冒頭
@@ -144,12 +144,15 @@
 //!   有無で結果が変わらないが、GMMの一次条件`X'ZWZ'ê=0`は`weight_type=Unadjusted`
 //!   以外では`ē=0`を保証しない（`X'ZW`による重み付き制約であり、`ē=(1/n)Σêᵢ`という
 //!   単純平均をゼロにする制約とは一般に一致しない）ため、非中心化SSRを使うと
-//!   `weight_type≠Unadjusted`のときのみ`σ̂²`が系統的にずれる（初版のバグ、Issue #171の
+//!   `weight_type≠Unadjusted`のときのみ`σ̂²`が系統的にずれる（初版のバグ、
 //!   GMMクロスチェック実装中に発覚・修正。`linearmodels`の`HomoskedasticWeightMatrix`
 //!   が常に中心化する設計と実測突き合わせて判明）。
 //! - `hc0`〜`hc3`: `two_sls.rs`の`hc_cov_params`と同型（`X̂`→`Z`）。HC2/HC3のレバレッジは
-//!   `Z`から計算する自己拡張で、**外部参照実装での検証は不可能**（2SLS自身のHC2/HC3が
-//!   既にこの位置づけ、`iv-api-design.md`3.1節参照。ユーザー確認済み）。**HC1の小標本補正
+//!   `Z`から計算する自己拡張で、**GMM自体の外部参照実装での検証は不可能**（R `ivreg`が
+//!   GMMに対応していないため、`docs/spec/iv-spec.md`4章。2SLSのHC2/HC3はR `ivreg`+
+//!   `sandwich::vcovHC`で検証可能なことを実機確認済み——`docs/spec/iv-spec.md`4章、
+//!   `refactoring-candidates.md`項目12——だが、GMMはivreg非対応という別軸の制約が
+//!   残るため対象外のまま。ユーザー確認済み）。**HC1の小標本補正
 //!   `n/(n-k)`・クラスターの補正`(G/(G-1))((n-1)/(n-k))`はどちらも`l`（全操作変数の数）
 //!   ではなく`k`（構造方程式の係数の数）を使う**（rust-reviewerの指摘で修正）:
 //!   補正対象の残差`êᵢ = yᵢ - xᵢ'β̂`は常に`k`個のパラメータで推定された構造残差であり、
@@ -160,13 +163,13 @@
 //! - `cluster`: `two_sls.rs`の`cluster_cov_params`と同型（`X̂`→`Z`、上記の通り補正は`k`）。
 //! - `hac`: 上記の通り`kernel_moment_covariance`をそのまま再利用。
 //!
-//! **検定分布はz（標準正規）**（`iv-api-design.md`3.2節で確定済み、2-step efficient GMMの
+//! **検定分布はz（標準正規）**（`docs/spec/iv-spec.md`3.2節で確定済み、2-step efficient GMMの
 //! 漸近正規性が根拠）。`engine::inference`の分布非依存関数（`critical_value`/
 //! `compute_inference_stat`）を`statrs::distribution::Normal`で使う（`two_sls.rs`が
-//! `StudentsT`で使うのと同じ関数、Issue #152の設計通り）。
+//! `StudentsT`で使うのと同じ関数で、分布に依存しない設計方針に沿っている）。
 //!
 //! **F統計量は常にロバストWald検定（χ²、`df_model`で割らない生の二次形式）**
-//! （`iv-api-design.md`2.1節で確定済み: 「GMMは3章でz分布と決定済みで古典的F検定の正当化が
+//! （`docs/spec/iv-spec.md`2章で確定済み: 「GMMは3.2節でz分布と決定済みで古典的F検定の正当化が
 //! 無いため……常にWald版にする」）。`two_sls.rs`の`wald_f_test`と異なり`FisherSnedecor`
 //! ではなく`ChiSquared(df_model)`を使い、`df_model`で割らない（`linearmodels`の
 //! `debiased=False`のときの`f_statistic`と同じ規約、`run_linearmodels_benchmark.py`の
@@ -175,29 +178,29 @@
 //! `R²`/調整済み`R²`は2SLSと同じ式（`ssr`は最終残差`e = y - Xβ̂`から、`sst`は`y`の
 //! 平均からの偏差二乗和、`has_intercept`で分岐）。
 //!
-//! ## 2SLSとの共通化の判断（Issue #160完了条件）
+//! ## 2SLSとの共通化の判断
 //!
 //! **点推定の意味では、2SLSは`weight_type=Unadjusted`のGMMコアの特殊ケースとして
 //! 数値的に吸収できる**（上記`fit_matches_two_sls_point_estimate_when_weight_type_is_unadjusted`
 //! で検証済み）。しかし、**`TwoSlsEstimator`の実装をこの`GmmEstimator`に委譲するリファクタリング
-//! はしない**（Issue #122の「無理をしない」方針）。理由:
+//! はしない**（「無理をしない」方針）。理由:
 //!
-//! 1. `TwoSlsEstimator`は既に`cov_type`対応の標準誤差・t検定・信頼区間・R²・F検定
-//!    （Issue #157/#166）を独自に実装済みで安定稼働している。`GmmEstimator`は
+//! 1. `TwoSlsEstimator`は既に`cov_type`対応の標準誤差・t検定・信頼区間・R²・F検定を
+//!    独自に実装済みで安定稼働している。`GmmEstimator`は
 //!    上記「標準誤差・検定統計量（`cov_type`対応）」で独立に同等の推論統計量を実装した。
-//! 2. `GmmEstimator::fit`は`gmm_iterations`（Issue #165で1/2の2値、Issue #229で3以上・
-//!    収束条件に一般化）に対応済みだが、2SLSが必要とするのは
+//! 2. `GmmEstimator::fit`は`gmm_iterations`（当初は1・2の2値のみを許容していたが、
+//!    後に3以上・収束条件による一般化にも対応した）に対応済みだが、2SLSが必要とするのは
 //!    `gmm_iterations=2, weight_type=Unadjusted`（この場合`S=Z'Z`と
 //!    なり初期推定`β̂₀`と再推定`β̂₁`が数値的に同じ`β̂`になる、上記参照。実際には
 //!    `weight_type`が無視される`gmm_iterations=1`でも同一の結果になる）1点のみであり、
 //!    2SLS呼び出し側がこの1点のためだけに`GmmEstimator`の汎用性
 //!    （`weight_type`×`gmm_iterations`の組み合わせ全体）を引きずるのは過剰設計になる。
 //! 3. `two_sls.rs`は第一段階回帰（`first_stage_estimators()`、`OlsEstimator`委譲）を
-//!    弱操作変数診断（Issue #163）等の内部で公開している。GMMは第一段階回帰を必要とせず
+//!    弱操作変数診断等の内部で公開している。GMMは第一段階回帰を必要とせず
 //!    （モーメント条件`Z'(y-Xβ)=0`を直接使うため）、この点でも構造が異なる。
 //!
 //! 以上より、**点推定の数値的一致は確認しつつ、実装は独立のまま維持する**
-//! （`iv-api-design.md`4章の既存方針「IVのサンドイッチ型分散計算は独自実装でよい」を
+//! （`docs/spec/iv-spec.md`3.1節の既存方針「IVのサンドイッチ型分散計算は独自実装でよい」を
 //! 2SLS/GMM間の関係にも適用した判断）。
 
 use std::collections::BTreeMap;
@@ -214,7 +217,7 @@ use crate::linear::ols::CovType;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
-/// GMMの点推定に使う重み行列の種別（`iv-api-design.md`6.2節）。
+/// GMMの点推定に使う重み行列の種別（`docs/spec/iv-spec.md`1.2節）。
 ///
 /// `cov_type`（標準誤差の報告方法）とは独立の概念で、こちらは点推定自体に影響する
 /// （モジュール冒頭のdocコメント参照）。
@@ -249,7 +252,7 @@ pub struct GmmEstimator {
     /// 指定された`gmm_iterations`（固定反復回数、または`gmm_convergence`指定時は
     /// 収束判定の上限反復回数。モジュール冒頭のdocコメント参照）。
     gmm_iterations: i64,
-    /// 指定された`gmm_convergence`（`None`なら固定回数モード、Issue #229）。
+    /// 指定された`gmm_convergence`（`None`なら固定回数モード）。
     gmm_convergence: Option<f64>,
     /// 実際に実行した反復回数（1以上、`gmm_iterations`以下）。
     n_iterations: i64,
@@ -263,7 +266,7 @@ pub struct GmmEstimator {
     cov_type: CovType,
     /// 標準誤差 (k, 1)。`cov_type`に応じたサンドイッチ型分散の対角成分の平方根。
     std_errors: Mat<f64>,
-    /// z統計量 (k, 1) = params / std_errors（`iv-api-design.md`3.2節、GMMはz分布）。
+    /// z統計量 (k, 1) = params / std_errors（`docs/spec/iv-spec.md`3.2節、GMMはz分布）。
     z_stats: Mat<f64>,
     /// 両側p値 (k, 1)。標準正規分布に基づく。
     p_values: Mat<f64>,
@@ -277,7 +280,7 @@ pub struct GmmEstimator {
     /// モジュール冒頭のdocコメント参照）。
     f_statistic: f64,
     f_p_value: f64,
-    /// Hansen J過剰識別検定（Issue #167、`iv-api-design.md`6.5節）の統計量。丁度識別
+    /// Hansen J過剰識別検定（`docs/spec/iv-spec.md`3.5節）の統計量。丁度識別
     /// （自由度`len(instruments) - len(x_endog)`が0）なら`None`（モジュール冒頭の
     /// docコメント「Hansen J過剰識別検定」参照）。
     hansen_j_statistic: Option<f64>,
@@ -311,9 +314,9 @@ impl GmmEstimator {
     ///   `CommonError::InsufficientClusters)`
     /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
     ///   `IvError::Common(CommonError::InsufficientClustersForInference)`（`rank(Ŝ) ≤ g-1`
-    ///   のためロバストWald（χ²）検定の`q×q`部分行列が構造的に特異、Issue #289。
+    ///   のためロバストWald（χ²）検定の`q×q`部分行列が構造的に特異になる。
     ///   `weight_type=Cluster`の重み行列`S`（l×l）が`G<l`で特異になる別軸の問題は
-    ///   Issue #290、そちらは従来どおり`ComputationFailed`）
+    ///   従来どおり`ComputationFailed`のまま）
     /// - `cov_type=Hac`の`lags`が不正: `IvError::InvalidHacLags`
     #[allow(clippy::too_many_arguments)]
     pub fn fit(
@@ -325,6 +328,9 @@ impl GmmEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, IvError> {
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
+        crate::parallelism::ensure_serial();
+
         if !(confidence_level > 0.0 && confidence_level < 1.0) {
             return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
         }
@@ -365,10 +371,10 @@ impl GmmEstimator {
 
         // `cov_type=Cluster`でクラスター数`g`が構造方程式の傾き係数の数`q`
         // （`k - k_constant`）以下だと、ロバストWald（χ²）検定の`q×q`部分行列が構造的に
-        // 特異になる（`rank(Ŝ) ≤ g - 1`、Issue #289。`two_sls.rs`/`ols.rs`と同型）。
+        // 特異になる（`rank(Ŝ) ≤ g - 1`、`two_sls.rs`/`ols.rs`と同型）。
         // `g`・`q`は入力だけから判定できるため、点推定・SE計算より前に弾く。
-        // `weight_type=Cluster`の重み行列`S`（l×l）が`G<l`で特異になる別軸の問題
-        // （Issue #290）はここでは対象外——`validate_weight_type`側は変更しない。
+        // `weight_type=Cluster`の重み行列`S`（l×l）が`G<l`で特異になる別軸の問題は
+        // ここでは対象外——`validate_weight_type`側は変更しない。
         if let CovType::Cluster {
             groups: Some(groups),
         } = &cov_type
@@ -385,7 +391,7 @@ impl GmmEstimator {
 
         let x_exog_columns = mat_to_columns(input.x_exog());
 
-        // Z = x_exog ++ instruments（全操作変数、iv-api-design.md 1.1.1節）。
+        // Z = x_exog ++ instruments（全操作変数、docs/spec/iv-spec.md 1.1節）。
         let mut z_columns = x_exog_columns.clone();
         z_columns.extend(mat_to_columns(input.instruments()));
         let l = z_columns.len();
@@ -417,7 +423,7 @@ impl GmmEstimator {
             (0..n).map(|i| (*residuals0.get(i, 0)).powi(2)).sum::<f64>() / (n as f64);
         let unadjusted_s = Mat::from_fn(l, l, |i, j| sigma2_0 * (*ztz.get(i, j)));
 
-        // 反復本体（Issue #229でN回・収束条件に一般化。モジュール冒頭のdocコメント
+        // 反復本体（N回・収束条件に一般化済み。モジュール冒頭のdocコメント
         // 「weight_type・gmm_iterationsと点推定への影響」「収束条件」参照）。
         // gmm_iterations=1なら1度も回らず打ち切り（weight_typeに応じた重み付けを
         // 一切行わない、weight_type自体の妥当性検証は上記で実施済み）。`s_used`は
@@ -439,7 +445,7 @@ impl GmmEstimator {
         // Kernelのlags解決・時系列順序（`O(n log n)`のソートを含む）はweight_typeに対して
         // 不変な前処理のため、ループの外で一度だけ計算し使い回す（ループ内で反復のたびに
         // 再計算すると、gmm_iterationsが大きいiterated GMMで無駄なコストが反復回数倍に
-        // 膨らむ。rust-reviewerの指摘、Issue #229）。Clusterのgroups検証は`validate_weight_type`
+        // 膨らむ。rust-reviewerの指摘）。Clusterのgroups検証は`validate_weight_type`
         // （`fit()`冒頭）で既に1回行っているため、ループ内では再検証しない。
         let kernel_precomputed = match &weight_type {
             WeightType::Kernel { lags, time_order } => {
@@ -499,13 +505,13 @@ impl GmmEstimator {
             });
         }
 
-        // Hansen J過剰識別検定（Issue #167、iv-api-design.md 6.5節）。
+        // Hansen J過剰識別検定（docs/spec/iv-spec.md 3.5節）。
         // `J = (Z'ê)'S⁻¹(Z'ê)`（`n`で割らない、モジュール冒頭のdocコメント
         // 「Hansen J過剰識別検定」参照。`ê`は最終推定に基づく残差、`S`は最終推定`beta`に
         // 実際に使った重み行列`s_used`）。自由度は`len(instruments) - len(x_endog)`
-        // （`two_sls.rs`のSargan検定と同じ、`iv-api-design.md`1.1.1節の`instruments`＝
+        // （`two_sls.rs`のSargan検定と同じ、`docs/spec/iv-spec.md`1.1節の`instruments`＝
         // 除外操作変数のみという定義に対応）。丁度識別（自由度0）では`None`
-        // （`iv-api-design.md`6.3節・6.5節）。
+        // （`docs/spec/iv-spec.md`1.2節・3.5節）。
         //
         // `s_used`は`beta`計算時（`gmm_point_estimate`内の`llt`、または`unadjusted_s`
         // 自体が正定値`Z'Z`の正のスカラー倍）で既に反転成功済み・正定値性が保証された
@@ -583,7 +589,7 @@ impl GmmEstimator {
             CovType::Cluster { groups } => {
                 let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
                 // クラスター数 `g <= df_model`（構造方程式の傾き係数の数）は`fit()`冒頭で
-                // 既に`InsufficientClustersForInference`として弾いている（Issue #289）。
+                // 既に`InsufficientClustersForInference`として弾いている。
                 validate_cluster_groups(groups, n)?;
                 gmm_cluster_omega(&z, &residuals, n, k, l, groups)
             }
@@ -693,7 +699,7 @@ impl GmmEstimator {
         self.gmm_iterations
     }
 
-    /// 指定された`gmm_convergence`。`None`なら固定回数モード（Issue #229）。
+    /// 指定された`gmm_convergence`。`None`なら固定回数モード。
     pub fn gmm_convergence(&self) -> Option<f64> {
         self.gmm_convergence
     }
@@ -720,7 +726,7 @@ impl GmmEstimator {
     }
 
     /// Hansen J過剰識別検定の統計量。丁度識別（自由度0）の場合は`None`
-    /// （`iv-api-design.md`6.5節、`fit()`のdocコメント参照）。
+    /// （`docs/spec/iv-spec.md`3.5節、`fit()`のdocコメント参照）。
     pub fn hansen_j_statistic(&self) -> Option<f64> {
         self.hansen_j_statistic
     }
@@ -792,7 +798,7 @@ impl GmmEstimator {
     }
 }
 
-/// GMMの収束判定に使う絶対誤差の床（Issue #229）。ユーザーには公開せず内部固定値とする
+/// GMMの収束判定に使う絶対誤差の床。ユーザーには公開せず内部固定値とする
 /// （モジュール冒頭のdocコメント「収束条件」参照）。`tests/api_tests`のクロスチェックが
 /// 使う`ATOL`の既定値と同じ`1e-8`を踏襲する（`.claude/rules/testing-policy.md`
 /// 「許容誤差は相対誤差1e-8を基本」）。
@@ -1007,9 +1013,12 @@ fn invert_spd(mat: &Mat<f64>, dim: usize, context: &str) -> Result<Mat<f64>, IvE
 
 /// HC0〜HC3ロバストなモーメント条件の分散共分散行列（cov_type用）: `Σᵢ scaleᵢ² zᵢzᵢ'`
 /// （l×l）。`two_sls.rs`の`hc_cov_params`と同型の自己拡張（`X̂`→`Z`）で、レバレッジは
-/// `Z`（点推定用の`ztz`をそのまま流用）から計算する——**外部参照実装での検証は不可能**
-/// （2SLS自身のHC2/HC3と同じ位置づけ、`iv-api-design.md`3.1節）。モジュール冒頭の
-/// docコメント「標準誤差・検定統計量（cov_type対応）」参照。
+/// `Z`（点推定用の`ztz`をそのまま流用）から計算する——**GMM自体の外部参照実装での検証は
+/// 不可能**（R `ivreg`が2SLSのみ対応でGMMには対応していないため、`docs/spec/iv-spec.md`
+/// 4章）。2SLSのHC2/HC3は逆にR `ivreg`+`sandwich::vcovHC`で検証可能なことを実機確認
+/// 済み（`docs/spec/iv-spec.md`4章、`refactoring-candidates.md`項目12）だが、GMMは
+/// ivreg非対応という別軸の制約のため対象外のまま。モジュール冒頭のdocコメント
+/// 「標準誤差・検定統計量（cov_type対応）」参照。
 ///
 /// **HC1の小標本補正`n/(n-k)`は`l`（全操作変数の数）ではなく`k`（構造方程式の係数の数）を
 /// 使う**（rust-reviewerの指摘で修正）: 補正対象の残差`êᵢ = yᵢ - xᵢ'β̂`は常にk個の
@@ -1124,7 +1133,7 @@ fn gmm_cluster_omega(
 /// （χ²、`df_model`で割らない生の二次形式）を行い、統計量とp値を返す。モジュール冒頭の
 /// docコメント「標準誤差・検定統計量（cov_type対応）」参照——`two_sls.rs`の`wald_f_test`と
 /// 数式は同型だが、F分布ではなくχ²分布を使い`df_model`で割らない点が異なる
-/// （`iv-api-design.md`2.1節「GMMは常にロバストWald検定（χ²）とする」）。
+/// （`docs/spec/iv-spec.md`2章「GMMは常にロバストWald検定（χ²）とする」）。
 fn gmm_wald_chi2_test(
     params: &Mat<f64>,
     cov_params: &Mat<f64>,
@@ -1219,7 +1228,7 @@ mod tests {
 
     /// 丁度識別かつ操作変数が内生変数を完全予測する退化ケース（`two_sls.rs`の
     /// `fit_matches_closed_form_ols_when_instrument_perfectly_predicts_endog`と同じデータ）。
-    /// `weight_type`によらず丁度識別ではGMMの点推定は一致するはず（`iv-api-design.md`6.3節）。
+    /// `weight_type`によらず丁度識別ではGMMの点推定は一致するはず（`docs/spec/iv-spec.md`1.2節）。
     #[test]
     fn fit_matches_closed_form_ols_when_just_identified_and_instrument_perfectly_predicts_endog() {
         let z = vec![1.0, 2.0, 3.0, 4.0, 5.0];
@@ -1290,8 +1299,8 @@ mod tests {
         );
     }
 
-    /// `gmm_iterations`が1未満（0・負）なら`InvalidGmmIterations`（Issue #229で1以上の
-    /// 任意の整数に一般化、モジュール冒頭のdocコメント「`weight_type`・`gmm_iterations`と
+    /// `gmm_iterations`が1未満（0・負）なら`InvalidGmmIterations`（1以上の
+    /// 任意の整数に一般化済み、モジュール冒頭のdocコメント「`weight_type`・`gmm_iterations`と
     /// 点推定への影響」参照）。
     #[test]
     fn fit_returns_invalid_gmm_iterations_error_for_disallowed_values() {
@@ -1331,7 +1340,7 @@ mod tests {
         }
     }
 
-    /// `gmm_iterations>=3`（iterated GMM、Issue #229）は正常に受理され、`n_iterations`が
+    /// `gmm_iterations>=3`（iterated GMM）は正常に受理され、`n_iterations`が
     /// 指定通りになる。固定回数モード（`gmm_convergence=None`）では`converged`は常に`true`
     /// （収束判定自体を行わないため、モジュール冒頭のdocコメント「収束条件」参照）。
     #[test]
@@ -2480,7 +2489,7 @@ mod tests {
     }
 
     /// 丁度識別（`len(instruments) == len(x_endog)`）ではHansen J過剰識別検定の自由度が
-    /// 0のため`None`になる（`iv-api-design.md`6.3節・6.5節、`two_sls.rs`のSargan検定と
+    /// 0のため`None`になる（`docs/spec/iv-spec.md`1.2節・3.5節、`two_sls.rs`のSargan検定と
     /// 同じ扱い）。
     #[test]
     fn fit_sets_hansen_j_statistic_to_none_when_just_identified() {
@@ -2517,7 +2526,7 @@ mod tests {
     /// 2-step efficient GMM（`gmm_iterations=2`）のHansen J統計量を、`GmmEstimator::fit`とは
     /// 独立に「W₀=(Z'Z)⁻¹で初期推定→残差→S=Σêᵢ²zᵢzᵢ'（=最終推定に使った重み行列）→
     /// 最終推定の残差でJ=(Z'ê)'S⁻¹(Z'ê)/nを計算」という同じ手順を再現した手計算オラクルと
-    /// 数値照合する（`fit()`のdocコメント「Hansen J過剰識別検定」参照、Issue #167。
+    /// 数値照合する（`fit()`のdocコメント「Hansen J過剰識別検定」参照。
     /// `fit_computes_robust_weighted_estimate_matching_manual_formula`と同じデータ・
     /// 同じ`S`構築だが、点推定ではなくJ統計量を検証する点が異なる）。
     #[test]
@@ -2730,7 +2739,7 @@ mod tests {
         );
     }
 
-    /// `gmm_convergence`が`Some`かつ0以下（0・負）なら`InvalidGmmConvergence`（Issue #229）。
+    /// `gmm_convergence`が`Some`かつ0以下（0・負）なら`InvalidGmmConvergence`。
     #[test]
     fn fit_returns_invalid_gmm_convergence_error_for_non_positive_values() {
         let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
@@ -2770,7 +2779,7 @@ mod tests {
     }
 
     /// `gmm_convergence`を指定すると、上限（`gmm_iterations`）に達する前でも収束条件を
-    /// 満たした時点で早期終了する（Issue #229、`fit()`のdocコメント「収束条件」参照）。
+    /// 満たした時点で早期終了する（`fit()`のdocコメント「収束条件」参照）。
     /// 極めて緩い許容誤差（`rtol=1.0`）を使うことで、実際の収束の速さに依存せず
     /// 「上限に達する前に打ち切られる」ことを決定的に検証する。
     #[test]
@@ -3440,11 +3449,10 @@ mod tests {
     /// クラスター寄与スコアの総和がゼロ（一次条件）で`rank(Ŝ) ≤ g - 1`のため、ロバスト
     /// Wald（χ²）検定の`q×q`部分行列が構造的に特異になる。`fit()`冒頭
     /// （反復推定・`validate_weight_type`より前）で構造方程式の`q`を使って
-    /// `CommonError::InsufficientClustersForInference`を返す（Issue #289、2SLSと同型。
+    /// `CommonError::InsufficientClustersForInference`を返す（2SLSと同型。
     /// `gmm_convergence`非収束等が先に起きないよう最適化前に弾く）。`x_exog=[z1]`・
     /// `x_endog=[endog1]`・切片ありで`q = k - k_constant = 3 - 1 = 2`、`g=2`（`g == q`）。
-    /// `weight_type=Cluster`の重み行列`S`（l×l）が`G<l`で特異になる別軸の問題
-    /// （Issue #290）とは区別する。
+    /// `weight_type=Cluster`の重み行列`S`（l×l）が`G<l`で特異になる別軸の問題とは区別する。
     #[test]
     fn fit_returns_validation_error_when_cov_type_cluster_count_at_most_slopes() {
         let (y, x_endog, z1, z2) = heteroskedastic_test_columns();

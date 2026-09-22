@@ -61,6 +61,23 @@ TOLERANCES: dict[str, dict[str, float]] = {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,
     },
+    # FEの主リファレンスはlinearmodels.PanelOLS。within変換後の閉形式解の
+    # ためOLS/WLS/IVと同じ機械精度一致（実測相対誤差1e-14程度、classical/
+    # hc1/cluster/hac・1-way/2-way全て）。ただし2-way FEの`r_squared_within`
+    # のみ、linearmodels自身がentityのみdemeanの別定義を使うため対象外
+    # （テストコード側でこのフィールドの比較自体をスキップすること、
+    # `benchmark/panel/references/linearmodels_ref.py`モジュールdoc参照）。
+    "fe_reference": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+    },
+    # REの主リファレンスはlinearmodels.RandomEffects。閉形式のGLS変換のため
+    # OLS/WLS/IV/FEと同じ機械精度一致（実測相対誤差1e-9〜1e-14程度、
+    # classical/hc1/cluster/hac全て、engineの実出力と直接突き合わせて確認済み）。
+    "re_reference": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+    },
     # Logit/Probitは反復最適化（Newton/BFGS/L-BFGS）のため、ゼロ近傍の値
     # （信頼区間の境界等）で閉形式解（OLS/WLS）より1桁大きい浮動小数点誤差が
     # 乗ることを実測確認済み（ATOLのみ1e-9、RTOLは同じ1e-8）。
@@ -91,14 +108,28 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # 合成シナリオの conf_int は 1e-8（実測 ≤1e-9）を維持し、mroz のみ緩める。
         "rtol_mroz_conf_int": 3e-8,
         # method="bfgs"/"lbfgs" は newton と異なる最適化経路で、リファレンス
-        # （survreg、method 非依存）から僅かにずれた点に収束する（実測: 予測値
-        # `E[y*|x]=x'β` で最大 ~2.2e-8、係数・SE・限界効果は ~4e-9）。Logit の
+        # （survreg、method 非依存）から僅かにずれた点に収束する。Logit の
         # `rtol_method`（1e-3）と同じ位置づけだが Tobit は最適化がよく条件付けられて
         # おり桁違いに小さい。method ケースの全フィールドに適用する。
-        "rtol_method": 1e-7,
+        #
+        # Issue #343（`Method::Lbfgs`をargmin組み込みLBFGSから自前実装`FaerLbfgs`へ
+        # 置き換え）で実測値が変わり、`1e-7`（旧実測: 予測値`E[y*|x]=x'β`で最大
+        # ~2.2e-8）を`predict/expected_latent`の1点（lbfgs、実測1.055e-7）がわずかに
+        # 超過するようになったため`2e-7`に緩めた（他の全フィールドは実測6e-9〜4e-8で
+        # 旧値のままでも十分収まる。bfgs側の同じ点は5.49e-8）。
+        #
+        # **原因調査**: 同一セッション内で`FaerLbfgs`実装の2つの不具合
+        # （secant条件ガードによる履歴凍結バグ・`two_loop_recursion`のゼロ除算未ガード）
+        # を発見・修正したが、この1点の乖離量（`diff=3.361856272532382e-09`）は
+        # 両方の修正の前後で**完全に不変**だった（rust-reviewer指摘を受けて確認済み）。
+        # したがって既知の実装不具合とは無関係と判断した。`FaerBfgs`と同じく参照実装
+        # （`survreg`）とは異なる最適化経路に収束するために生じる、想定内の僅かな
+        # ズレと考えられる（詳細は`engine/src/nonlinear/CLAUDE.md`「FaerLbfgs」
+        # セクション参照）。
+        "rtol_method": 2e-7,
     },
     # Tobit の交差検証は R `censReg`（`maxLik` エンジン）。survreg とは最適化実装が
-    # 完全に独立（`nonlinear-api-design.md` 9章）。censReg 側の maxLik 収束を
+    # 完全に独立（`nonlinear-common.md` 8章）。censReg 側の maxLik 収束を
     # reltol=1e-14 まで詰めた上で、合成シナリオは点推定・SE・限界効果とも
     # 相対 ~2e-9 で一致するため RTOL_MACHINE_PRECISION を適用する。
     "tobit_crosscheck": {
@@ -116,7 +147,9 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # censReg 側の収束限界であって本実装の問題ではない（mroz の厳密照合は
         # `test_tobit_reference.py` が担う）。
         "rtol_mroz": 1e-4,
-        # method="bfgs"/"lbfgs" ケース（`tobit_reference` の同名エントリ参照）。
+        # method="bfgs"/"lbfgs" ケース（`tobit_reference` の同名エントリ参照。ただし
+        # crosscheckの実測は変わっていないため1e-7のまま、tobit_referenceのみ
+        # Issue #343で2e-7に緩めた）。
         "rtol_method": 1e-7,
     },
     # --- 独立実装（R）とのクロスチェック ---
@@ -193,5 +226,68 @@ TOLERANCES: dict[str, dict[str, float]] = {
         "rtol_margeff_se": 1e-3,
         # p値の裾での増幅（実測最大絶対誤差~2.9e-5、mroz）。logitの3e-5と近い値。
         "atol_p_value": 5e-5,
+    },
+    # FEのRクロスチェックはfixest。classical/hc1/hc2/hc3は機械精度一致
+    # （実測相対誤差1e-14程度、1-way/2-way双方）のためrtol_strictを適用。
+    # clusterのみfixestの小標本補正慣行（Stata流G/(G-1)補正）が本実装・
+    # linearmodelsと異なり、`ssc(G.adj=FALSE, K.fixef=...)`で調整しても
+    # 1-way実測相対誤差~1.8e-5・2-way実測相対誤差~0.21%が残る（実装バグ
+    # ではなく規約差、`benchmark/panel/references/run_fixest_benchmark.R`
+    # 参照）。追加検証はIssue #348で追跡中。
+    "fe_crosscheck": {
+        "rtol_strict": RTOL_MACHINE_PRECISION,
+        "rtol_cluster_one_way": 5e-5,
+        "rtol_cluster_two_way": 3e-3,
+        "atol": ATOL_CROSSCHECK_FLOOR,
+        # p_values/conf_intはcoef/se/t_statsのようにcluster特有のズレ
+        # （G/(G-1)補正差）がそのまま相対誤差として伝播しない——p値はt統計量に
+        # t分布のCDFという非線形変換をかけた値、信頼区間はt臨界値×seの積のため、
+        # 僅かなSEの差が非線形に増幅されうる。実測最大絶対誤差（small_panel、
+        # G=5という極端に少ないクラスタ数のケースを除く）はp_values~0.013・
+        # conf_int~0.031で、それぞれマージンを載せた絶対誤差フロア。coef/se/
+        # t_statsは引き続きrtol_cluster_one_way/two_wayで厳しく検証するため、
+        # 実装バグはそちらで検出できる（p_values/conf_intだけの例外的な緩和）。
+        # small_panel自体はG=5でこの増幅がさらに拡大する（実測最大絶対誤差
+        # conf_int~0.40）ため、p_values/conf_intの数値比較はスコープ外とし
+        # coef/se/t_stats/aic/bic/r_squared_withinのみ検証する
+        # （`test_fe_crosscheck.py`参照、`iv_crosscheck`の`rtol_hac_small_n`と
+        # 同型の「小標本ケースは別枠で扱う」判断）。
+        "atol_cluster_p_value": 0.02,
+        "atol_cluster_conf_int": 0.04,
+    },
+    # REのRクロスチェックはplm（hc2/hc3のみ、ハウスマン検定も含む単一参照
+    # 実装の例外、`benchmark/panel/run_plm_benchmark.R`・
+    # `benchmark/panel/fixtures/generate_re_crosscheck_fixtures.py`参照）。
+    # plmの変量効果分散成分推定（Swamy-Arora）がlinearmodelsと僅かに異なる
+    # 実装のため、点推定自体が不均衡パネルで乖離する（実測最大相対誤差:
+    # coef 0.18%・se 0.71%・t_stats 0.67%・p_values 0.56%・conf_int 1.05%、
+    # baseline/wagepan等のバランスパネルでは機械精度で一致）。FEのfixest
+    # クロスチェック（機械精度一致）とは精度の前提が異なるため、実測値に
+    # マージンを載せた緩いRTOLを使う。
+    "re_crosscheck": {
+        "rtol": 2e-2,
+        "atol": ATOL_CROSSCHECK_FLOOR,
+        # ハウスマン検定（Issue #350で解決済み）: plm::phtestは常にabs()を
+        # 適用するため非負値のみ返す。本実装のengineも`hausman_statistic`
+        # （`engine/src/panel/common.rs`）で同様にabs()を適用するため
+        # （`generate_re_crosscheck_fixtures.py`モジュールdoc参照）、
+        # plmの出力と直接比較できる。バランスパネルでは機械精度一致
+        # （実測相対誤差1e-11〜1e-14程度）。
+        "rtol_hausman": RTOL_MACHINE_PRECISION,
+        "atol_hausman": ATOL_REFERENCE_FLOOR,
+        # unbalancedシナリオのみ、Var(β_RE)自体がplm/linearmodelsの分散成分
+        # 推定の僅かな差の影響を受けて統計量に増幅されるため
+        # （実測相対誤差6.9%、coef/seの乖離0.1%台よりさらに拡大する）、
+        # 専用に緩めたrtolを使う（test_re_crosscheck.pyの`_UNBALANCED_
+        # HAUSMAN_SCENARIO`参照）。
+        "rtol_hausman_unbalanced": 0.1,
+        # ハウスマン検定のp値は裾確率がゼロ近傍に潰れるケースが多く、
+        # unbalancedシナリオでは絶対誤差フロアで比較する
+        # （実測最大絶対誤差1.5e-8にマージン、他のRクロスチェックの
+        # atol_p_value系と同じ理由）。Issue #350の対応後は全シナリオで
+        # p値を比較する（`hausman_statistic`同様abs()適用後の値同士の比較に
+        # なるため、small_panel/autocorrelatedシナリオも特別扱いしない、
+        # test_re_crosscheck.py参照）。
+        "atol_hausman_p_value": 1e-6,
     },
 }

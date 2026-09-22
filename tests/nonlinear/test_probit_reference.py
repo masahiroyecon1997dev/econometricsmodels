@@ -62,8 +62,7 @@ FIXTURE_PATH = (
 # near_separation（probit特有の準完全分離境界ケース）は、既定のtol=1e-6（勾配ノルム
 # 基準）だとstatsmodelsとの数値一致がRTOL=1e-8を満たさない（実測diff~4.4e-8相対、
 # Logitのnear_separationと同種の現象）。tol=1e-8まで締めると一致することを確認済み
-# だが、既定値自体は変更しない（Logitと同じ理由、`nonlinear-implementation-notes.md`
-# 「収束判定のtol」参照）。このシナリオの数値比較テストに限り、明示的にtol=1e-8を
+# だが、既定値自体は変更しない（Logitと同じ理由、`nonlinear-common.md`1.3節参照）。このシナリオの数値比較テストに限り、明示的にtol=1e-8を
 # 指定する。
 CONFIG = _checks.BinaryChoiceReferenceConfig(
     estimator_cls=Probit,
@@ -121,4 +120,14 @@ def test_mroz_matches_statsmodels(fixtures, cov_type):
 def test_include_intercept_false_matches_statsmodels(cov_type):
     _checks.check_include_intercept_false_matches_statsmodels(
         CONFIG, sm.Probit, cov_type
+    )
+
+
+def test_predict_new_data_matches_statsmodels():
+    _checks.check_predict_new_data_matches_statsmodels(CONFIG, sm.Probit)
+
+
+def test_predict_new_data_without_intercept_matches_statsmodels():
+    _checks.check_predict_new_data_without_intercept_matches_statsmodels(
+        CONFIG, sm.Probit
     )

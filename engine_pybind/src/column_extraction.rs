@@ -74,6 +74,37 @@ pub fn extract_f64_column(df: &DataFrame, name: &str) -> PyResult<Vec<f64>> {
     Ok(values)
 }
 
+/// `param_names`から`x`列名部分を取り出す。`has_intercept`時は先頭の`"const"`、
+/// `exclude_trailing`個は末尾の要素を除く（Tobitの`"sigma"`等、末尾に合成
+/// パラメータ名を持つ手法向け。持たない手法は`exclude_trailing=0`を渡す）。
+///
+/// OLS/WLS/Logit/Probit/Tobitの`predict()`/`augment()`が`param_names`から`x`列名
+/// だけを取り出す際に共通して使う規約（切片項の自動追加）を集約したもの。
+pub fn x_column_names(
+    param_names: &[String],
+    has_intercept: bool,
+    exclude_trailing: usize,
+) -> &[String] {
+    let start = usize::from(has_intercept);
+    let end = param_names.len() - exclude_trailing;
+    &param_names[start..end]
+}
+
+/// `df`から`names`（複数の列名）を、`names`と同じ順序の`Vec<Vec<f64>>`としてまとめて
+/// 取り出す（`extract_f64_column`を列ごとに呼ぶだけの薄いラッパー）。`predict()`/
+/// `augment()`の`x`列抽出ループがOLS/WLS/Logit/Probit/Tobitで重複していたため、
+/// 共通ユーティリティとしてここに集約した。
+///
+/// # Errors
+/// 各列につき`extract_f64_column`と同じ（列が存在しない・数値型にキャストできない・
+/// 欠損値/NaN/無限大を含む場合に`ValidationError`）。最初にエラーになった列で打ち切る。
+pub fn extract_f64_columns(df: &DataFrame, names: &[String]) -> PyResult<Vec<Vec<f64>>> {
+    names
+        .iter()
+        .map(|name| extract_f64_column(df, name))
+        .collect()
+}
+
 /// `df`から`name`列を、クラスターのグループキーとして文字列のVecで取り出す。
 ///
 /// クラスター変数は整数IDとは限らない（州名・産業コード・企業ID等の文字列/
@@ -108,4 +139,61 @@ pub fn extract_group_key_column(df: &DataFrame, name: &str) -> PyResult<Vec<Stri
         .iter()
         .map(|v| v.expect("null_countチェック済み").to_string())
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use polars::df;
+
+    fn names(values: &[&str]) -> Vec<String> {
+        values.iter().map(|v| v.to_string()).collect()
+    }
+
+    #[test]
+    fn x_column_names_keeps_all_names_when_no_intercept_and_no_trailing_exclusion() {
+        let param_names = names(&["x1", "x2"]);
+        assert_eq!(x_column_names(&param_names, false, 0), &param_names[..]);
+    }
+
+    #[test]
+    fn x_column_names_drops_leading_const_when_has_intercept() {
+        let param_names = names(&["const", "x1", "x2"]);
+        assert_eq!(x_column_names(&param_names, true, 0), &param_names[1..]);
+    }
+
+    #[test]
+    fn x_column_names_drops_trailing_elements_for_exclude_trailing() {
+        // Tobitの`param_names`が末尾に`"sigma"`を持つケースを想定。
+        let param_names = names(&["const", "x1", "x2", "sigma"]);
+        assert_eq!(x_column_names(&param_names, true, 1), &param_names[1..3]);
+    }
+
+    #[test]
+    fn extract_f64_columns_preserves_name_order() {
+        let df = df!(
+            "a" => [1.0, 2.0],
+            "b" => [10.0, 20.0],
+        )
+        .unwrap();
+
+        let columns = extract_f64_columns(&df, &["b".to_string(), "a".to_string()]).unwrap();
+        assert_eq!(columns, vec![vec![10.0, 20.0], vec![1.0, 2.0]]);
+    }
+
+    #[test]
+    fn extract_f64_columns_returns_empty_vec_for_empty_names() {
+        let df = df!("a" => [1.0, 2.0]).unwrap();
+
+        let columns = extract_f64_columns(&df, &[]).unwrap();
+        assert!(columns.is_empty());
+    }
+
+    #[test]
+    fn extract_f64_columns_returns_error_when_a_column_is_missing() {
+        let df = df!("a" => [1.0, 2.0]).unwrap();
+
+        let result = extract_f64_columns(&df, &["a".to_string(), "does_not_exist".to_string()]);
+        assert!(result.is_err());
+    }
 }

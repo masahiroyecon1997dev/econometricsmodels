@@ -148,8 +148,8 @@ if (cov_type == "classical") {
 }
 
 # z検定（本実装・statsmodelsと同じくz分布ベース、glm/binomialのcoeftestの既定）。
-# 信頼区間は標準正規分布の臨界値で手計算する（本実装のz検定・nonlinear-api-design.md
-# 5章と揃える。coeftestは信頼区間を返さないため）。
+# 信頼区間は標準正規分布の臨界値で手計算する（本実装のz検定・nonlinear-common.md
+# 4章と揃える。coeftestは信頼区間を返さないため）。
 ct <- coeftest(model, vcov = vc)
 coefs <- ct[, 1]
 ses <- ct[, 2]
@@ -198,7 +198,7 @@ format_margeff <- function(me_df) {
 # newdata="mean"/"median"のショートカット文字列は使わない: marginaleffects::datagrid()は
 # 整数のみを値に持つ数値列（本データではage/educ/exper等）をFUN_integer（既定は
 # round(mean(x))相当）で丸めてしまい、本実装・statsmodelsが使う「生の標本平均・
-# 中央値」（nonlinear-implementation-notes.md「限界効果」節）と評価点がずれる
+# 中央値」（nonlinear-common.md6章「限界効果」節）と評価点がずれる
 # （ベンチマーク作成時に実機確認済み、mrozデータでdydxが大きくずれた）。
 # FUN_numeric/FUN_integerを両方明示することで全列を統一的に生の平均・中央値にする。
 margeff <- list(

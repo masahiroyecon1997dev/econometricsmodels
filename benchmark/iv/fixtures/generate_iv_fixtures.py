@@ -45,6 +45,12 @@ NUMERIC_SCENARIOS = [
     "autocorrelated",
     "moderate_multicollinearity",
     "high_condition_number",
+    # scale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）より
+    # 緩いスケール差（x1*1e2, x2*1e-1）の成功パス。faer等の数値計算
+    # ライブラリ依存部分の将来の精度リグレッションを検知する
+    # （test-coverage-candidates.md項目11、OLSのscale_variance_mildと同じ発想、
+    # ユーザー確認済み）。
+    "scale_variance_mild",
 ]
 
 # just_identifiedのみinstruments=['z1']（k_instruments == k_endogに強制される、
@@ -56,6 +62,7 @@ INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
 X_EXOG_BY_SCENARIO = {
     "moderate_multicollinearity": ["x1", "x2"],
     "high_condition_number": ["x1", "x2"],
+    "scale_variance_mild": ["x1", "x2"],
 }
 
 # clusterはbaselineのみ、下のcluster専用ケース（_run_cluster_case/
@@ -146,7 +153,7 @@ def build_fixtures() -> dict:
         "primary_reference": "linearmodels",
         "linearmodels_version": linearmodels.__version__,
         "note": (
-            "hc2/hc3はlinearmodelsに対応する実装が無いため対象外（`iv-api-design.md`"
+            "hc2/hc3はlinearmodelsに対応する実装が無いため対象外（`iv-spec.md`"
             "3.1節、`benchmark/iv/references/linearmodels_ref.py`のモジュール"
             "docstring参照）。"
             "GMMは`method='gmm'`がまだPython側に配線されていないため対象外。"
@@ -163,6 +170,10 @@ def build_fixtures() -> dict:
             "（独立計算自体のミスパターン検出用、ユーザー確認済み）。"
             "perfect_multicollinearityはここに含まない"
             "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
+            "scale_variance_mildはscale_variance（x1*1e6, x2*1e-3、"
+            "全cov_typeでComputationError）より緩いスケール差（x1*1e2, x2*1e-1）"
+            "の成功パス（test-coverage-candidates.md項目11、OLSの"
+            "scale_variance_mildと同じ発想）。"
             "cluster_g2（G=2境界の成功パス）は、`engine/src/iv/CLAUDE.md`"
             "「修正済み」に記録の`k_constant`取り違えバグの修正後にフィクスチャ化"
             "した。"

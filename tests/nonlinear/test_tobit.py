@@ -11,11 +11,14 @@ Issue #227）。ここでは`fit()`の成功パス・`coef_table()`/`predict()`/
 from __future__ import annotations
 
 import json
+import math
 import random
 
+import _error_messages as msgs
 import polars as pl
 import pytest
 from _constants import DATA_DIR
+from _error_messages import escaped
 from econometricsmodels import (
     ComputationError,
     Tobit,
@@ -70,6 +73,44 @@ def test_method_option_converges_to_same_params(censored_dataset, method):
         assert res.params[name] == pytest.approx(
             baseline.params[name], rel=1e-4
         )
+
+
+@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
+def test_method_label(censored_dataset, method):
+    """`res.method`が指定した`method`（正規化済み小文字）を反映すること
+    （Logit/Probitの`check_method_label`と同型、Issue #307）。
+    """
+    res = Tobit(
+        censored_dataset,
+        y="y",
+        x=["x1", "x2"],
+        options=TobitOptions(method=method),
+    ).fit()
+    assert res.method == method
+
+
+@pytest.mark.parametrize(
+    "method, expected_label",
+    [
+        ("NEWTON", "newton"),
+        ("Newton", "newton"),
+        ("BFGS", "bfgs"),
+        ("Bfgs", "bfgs"),
+        ("LBFGS", "lbfgs"),
+        ("Lbfgs", "lbfgs"),
+    ],
+)
+def test_method_is_case_insensitive(censored_dataset, method, expected_label):
+    """`method`が大文字小文字を区別しないこと（Logit/Probitの
+    `check_method_is_case_insensitive`と同型、Issue #307）。
+    """
+    res = Tobit(
+        censored_dataset,
+        y="y",
+        x=["x1", "x2"],
+        options=TobitOptions(method=method),
+    ).fit()
+    assert res.method == expected_label
 
 
 def test_param_names_include_const_first_and_sigma_last(censored_dataset):
@@ -168,8 +209,211 @@ def test_predict_prob_uncensored_is_a_probability(censored_dataset):
 
 def test_predict_unknown_target_raises(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_MARGINAL_EFFECTS_TARGET, other="bogus"),
+    ):
         res.predict(target="bogus")
+
+
+@pytest.mark.parametrize(
+    "target", ["expected_latent", "expected_observed", "prob_uncensored"]
+)
+def test_predict_new_data_returns_row_oriented_predictions(
+    censored_dataset, target
+):
+    """`predict(new_data=...)`（out-of-sample、Issue #131）が学習データと構造の
+    異なる新規データに対しても同じ行指向の形状を返すこと。
+    """
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
+
+    predicted = res.predict(target=target, new_data=new_data)
+
+    assert len(predicted) == 2
+    for row in predicted:
+        assert set(row.keys()) == {"predicted"}
+
+
+def test_predict_missing_column_raises(censored_dataset):
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
+
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    ):
+        res.predict(new_data=new_data)
+
+
+def test_predict_non_numeric_dtype_raises(censored_dataset):
+    """`test_non_numeric_dtype_raises`と同じ理由でnull経由の
+    `COLUMN_HAS_MISSING_VALUES`になる。
+    """
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": ["a", "b"], "x2": [1.0, 2.0]})
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=2),
+    ):
+        res.predict(new_data=new_data)
+
+
+def test_predict_null_or_non_finite_values_raise(censored_dataset):
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+
+    new_data_null = pl.DataFrame({"x1": [1.0, None], "x2": [1.0, 2.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    ):
+        res.predict(new_data=new_data_null)
+
+    new_data_inf = pl.DataFrame({"x1": [1.0, float("inf")], "x2": [1.0, 2.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="inf", row=1
+        ),
+    ):
+        res.predict(new_data=new_data_inf)
+
+
+# ── augment() ──────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "target", ["expected_latent", "expected_observed", "prob_uncensored"]
+)
+def test_augment_none_returns_training_data_with_predicted_column(
+    censored_dataset, target
+):
+    """`augment(new_data=None)`が、学習データの全列＋`"predicted_{target}"`
+    列を持つDataFrameを、`predict()`と同じ予測値・元データと同じ行順で
+    返すこと（Issue #322項目4）。
+    """
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+
+    augmented = res.augment(target=target)
+    column_name = f"predicted_{target}"
+
+    assert isinstance(augmented, pl.DataFrame)
+    assert augmented.height == censored_dataset.height
+    assert augmented.columns == [*censored_dataset.columns, column_name]
+    for col in censored_dataset.columns:
+        assert augmented[col].to_list() == censored_dataset[col].to_list()
+
+    expected = [row["predicted"] for row in res.predict(target=target)]
+    assert augmented[column_name].to_list() == expected
+
+
+def test_augment_new_data_returns_new_data_with_predicted_column(
+    censored_dataset,
+):
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
+
+    augmented = res.augment(target="expected_observed", new_data=new_data)
+
+    assert isinstance(augmented, pl.DataFrame)
+    assert augmented.height == 2
+    assert augmented.columns == ["x1", "x2", "predicted_expected_observed"]
+
+    expected = [
+        row["predicted"]
+        for row in res.predict(target="expected_observed", new_data=new_data)
+    ]
+    assert augmented["predicted_expected_observed"].to_list() == expected
+
+
+def test_augment_without_intercept_matches_predict(censored_dataset):
+    """`include_intercept=False`でfitした場合も`augment()`が`predict()`と
+    同じ予測値を返すこと（`augment()`はRust側で`predict()`とは別に
+    `has_intercept`分岐を実装しているため、個別に確認する。OLSの
+    `test_augment_without_intercept_matches_predict`と同型、Issue #322項目4、
+    python-reviewer指摘）。
+    """
+    options = TobitOptions(include_intercept=False)
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+    augmented_none = res.augment()
+    expected_none = [row["predicted"] for row in res.predict()]
+    assert (
+        augmented_none["predicted_expected_observed"].to_list()
+        == expected_none
+    )
+
+    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
+    augmented_new = res.augment(new_data=new_data)
+    expected_new = [row["predicted"] for row in res.predict(new_data=new_data)]
+    assert (
+        augmented_new["predicted_expected_observed"].to_list() == expected_new
+    )
+
+
+def test_augment_different_targets_do_not_collide_on_same_dataframe(
+    censored_dataset,
+):
+    """`predicted_{target}`という列名にした狙い（ユーザー確認済み）:
+    Logit/Probitのような固定名`"probability"`だと、複数の`target`を
+    同じDataFrameに積み上げようとした2回目の`augment()`呼び出しが列名衝突で
+    失敗する。`target`依存の列名ならこれが起きない。
+    """
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+
+    once = res.augment(target="expected_observed")
+    twice = res.augment(target="prob_uncensored", new_data=once)
+
+    assert "predicted_expected_observed" in twice.columns
+    assert "predicted_prob_uncensored" in twice.columns
+
+
+def test_augment_unknown_target_raises(censored_dataset):
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_MARGINAL_EFFECTS_TARGET, other="bogus"),
+    ):
+        res.augment(target="bogus")
+
+
+def test_augment_column_collision_raises(censored_dataset):
+    """元データ（`new_data=None`）・`new_data`のいずれかに既に
+    `"predicted_expected_observed"`列がある場合`ValidationError`
+    （黙って上書きしない、Issue #322項目4）。
+    """
+    df_with_predicted = censored_dataset.with_columns(
+        pl.lit(0.0).alias("predicted_expected_observed")
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.EXISTING_COLUMN_COLLISION, name="predicted_expected_observed"
+        ),
+    ):
+        Tobit(df_with_predicted, y="y", x=["x1", "x2"]).fit().augment()
+
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame(
+        {"x1": [1.0], "x2": [0.5], "predicted_expected_observed": [0.0]}
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.EXISTING_COLUMN_COLLISION, name="predicted_expected_observed"
+        ),
+    ):
+        res.augment(new_data=new_data)
+
+
+def test_augment_missing_column_raises(censored_dataset):
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
+
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    ):
+        res.augment(new_data=new_data)
 
 
 def test_censoring_fit_check_structure(censored_dataset):
@@ -243,13 +487,19 @@ def test_marginal_effects_at_is_case_insensitive(censored_dataset):
 
 def test_marginal_effects_unknown_at_raises(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_MARGINAL_EFFECTS_AT, other="bogus"),
+    ):
         res.marginal_effects(at="bogus")
 
 
 def test_marginal_effects_unknown_target_raises(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_MARGINAL_EFFECTS_TARGET, other="bogus"),
+    ):
         res.marginal_effects(target="bogus")
 
 
@@ -257,7 +507,13 @@ def test_marginal_effects_confidence_level_out_of_range_raises(
     censored_dataset,
 ):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INVALID_CONFIDENCE_LEVEL,
+            confidence_level=msgs.rust_f64(1.5),
+        ),
+    ):
         res.marginal_effects(confidence_level=1.5)
 
 
@@ -265,12 +521,33 @@ def test_marginal_effects_confidence_level_out_of_range_raises(
 
 
 def test_y_in_x_raises(censored_dataset):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
+            col="y",
+            single_role="y",
+            multi_role="x",
+        ),
+    ):
         Tobit(censored_dataset, y="y", x=["y", "x1"]).fit()
 
 
+def test_y_empty_string_raises(censored_dataset):
+    """`y`に空文字列を渡した場合`ValidationError`
+    （`test_ols_validation.py::test_y_empty_string_raises`参照）。
+    """
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="")
+    ):
+        Tobit(censored_dataset, y="", x=["x1", "x2"]).fit()
+
+
 def test_duplicate_x_column_raises(censored_dataset):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.DUPLICATE_WITHIN_ROLE, name="x1", role="x"),
+    ):
         Tobit(censored_dataset, y="y", x=["x1", "x1"]).fit()
 
 
@@ -278,7 +555,9 @@ def test_const_collision_with_include_intercept_raises():
     df = pl.DataFrame(
         {"y": [0.0, 1.0, 0.0, 1.0], "const": [1.0, 2.0, 3.0, 3.5]}
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.CONST_COLLISION, role="x")
+    ):
         Tobit(df, y="y", x=["const"]).fit()
 
 
@@ -290,23 +569,29 @@ def test_sigma_collision_raises():
     df = pl.DataFrame(
         {"y": [0.0, 1.0, 0.0, 1.0], "sigma": [1.0, 2.0, 3.0, 3.5]}
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match=escaped(msgs.SIGMA_COLLISION)):
         Tobit(df, y="y", x=["sigma"]).fit()
 
 
 def test_empty_x_raises(censored_dataset):
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY, role="x")):
         Tobit(censored_dataset, y="y", x=[]).fit()
 
 
 def test_missing_column_raises(censored_dataset):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    ):
         Tobit(censored_dataset, y="y", x=["does_not_exist"]).fit()
 
 
 def test_null_values_raise():
     df = pl.DataFrame({"y": [0.0, None, 1.0], "x1": [1.0, 2.0, 3.0]})
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=1),
+    ):
         Tobit(df, y="y", x=["x1"]).fit()
 
 
@@ -314,7 +599,10 @@ def test_null_values_in_x_raise():
     """`x` 列に null が含まれる場合も `ValidationError`（`y` だけでなく `x` も
     欠損チェックの対象、テスト網羅性レビュー 観点5）。"""
     df = pl.DataFrame({"y": [0.0, 1.0, 2.0, 3.0], "x1": [1.0, None, 3.0, 4.0]})
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    ):
         Tobit(df, y="y", x=["x1"]).fit()
 
 
@@ -326,55 +614,95 @@ def test_non_finite_values_raise(bad):
     `column_extraction.rs` 内で別ロジックのため個別に確認する（OLS の
     `test_non_finite_values_raise` と同じ、テスト網羅性レビュー 観点5）。
     """
+    bad_repr = "NaN" if math.isnan(bad) else "inf"
     df_y = pl.DataFrame(
         {"y": [0.0, bad, 1.0, 2.0], "x1": [1.0, 2.0, 3.0, 4.0]}
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="y", value=bad_repr, row=1
+        ),
+    ):
         Tobit(df_y, y="y", x=["x1"]).fit()
 
     df_x = pl.DataFrame(
         {"y": [0.0, 1.0, 2.0, 3.0], "x1": [1.0, bad, 3.0, 4.0]}
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value=bad_repr, row=1
+        ),
+    ):
         Tobit(df_x, y="y", x=["x1"]).fit()
 
 
 def test_non_numeric_dtype_raises():
+    """文字列を数値キャストするとnullになるため`COLUMN_HAS_MISSING_VALUES`経路
+    になる（`test_ols_validation.py::test_non_numeric_dtype_raises`参照）。
+    """
     df = pl.DataFrame({"y": ["a", "b", "c"], "x1": [1.0, 2.0, 3.0]})
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=3),
+    ):
         Tobit(df, y="y", x=["x1"]).fit()
 
 
-def test_unknown_cov_type_raises(censored_dataset):
-    with pytest.raises(ValidationError):
+@pytest.mark.parametrize("cov_type", ["bogus", ""])
+def test_unknown_cov_type_raises(censored_dataset, cov_type):
+    """未知の`cov_type`（空文字列を含む）は`ValidationError`
+    （テスト網羅性候補・項目46）。
+    """
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_COV_TYPE_NONLINEAR, other=cov_type),
+    ):
         Tobit(
             censored_dataset,
             y="y",
             x=["x1", "x2"],
-            options=TobitOptions(cov_type="bogus"),
+            options=TobitOptions(cov_type=cov_type),
         ).fit()
 
 
-def test_unknown_method_raises(censored_dataset):
-    with pytest.raises(ValidationError):
+@pytest.mark.parametrize("method", ["bogus", ""])
+def test_unknown_method_raises(censored_dataset, method):
+    """未知の`method`（空文字列を含む）は`ValidationError`
+    （テスト網羅性候補・項目46）。
+    """
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_METHOD_NONLINEAR, other=method),
+    ):
         Tobit(
             censored_dataset,
             y="y",
             x=["x1", "x2"],
-            options=TobitOptions(method="bogus"),
+            options=TobitOptions(method=method),
         ).fit()
 
 
 @pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])
 def test_invalid_confidence_level_raises(censored_dataset, confidence_level):
     options = TobitOptions(confidence_level=confidence_level)
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INVALID_CONFIDENCE_LEVEL,
+            confidence_level=msgs.rust_f64(confidence_level),
+        ),
+    ):
         Tobit(censored_dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
 @pytest.mark.parametrize("tol", [0.0, -1.0])
 def test_non_positive_tol_raises(censored_dataset, tol):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INVALID_TOL, tol=msgs.rust_f64(tol)),
+    ):
         Tobit(
             censored_dataset,
             y="y",
@@ -385,7 +713,10 @@ def test_non_positive_tol_raises(censored_dataset, tol):
 
 @pytest.mark.parametrize("max_iter", [0, -1])
 def test_non_positive_max_iter_raises(censored_dataset, max_iter):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INVALID_MAX_ITER, max_iter=max_iter),
+    ):
         Tobit(
             censored_dataset,
             y="y",
@@ -395,8 +726,17 @@ def test_non_positive_max_iter_raises(censored_dataset, max_iter):
 
 
 def test_insufficient_observations_raises(censored_dataset):
+    """観測数nが説明変数の数k（定数項込み）以下の場合`ValidationError`。
+
+    Tobitは`sigma`（誤差項の標準偏差）もMLEパラメータとして数えるため
+    `k=4`（const, x1, x2, sigma）。Logit/Probitの同名テスト（`k=3`）とは
+    ここが異なる（実測確認済み）。
+    """
     df = censored_dataset.head(2)
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INSUFFICIENT_OBSERVATIONS, n=2, k=4),
+    ):
         Tobit(df, y="y", x=["x1", "x2"]).fit()
 
 
@@ -404,7 +744,14 @@ def test_invalid_censoring_bounds_raises(censored_dataset):
     """`lower`/`upper`が両方`None`は`ValidationError`（engine側の
     `InvalidCensoringBounds`）。
     """
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INVALID_CENSORING_BOUNDS,
+            lower=msgs.rust_option_f64_debug(None),
+            upper=msgs.rust_option_f64_debug(None),
+        ),
+    ):
         Tobit(
             censored_dataset,
             y="y",
@@ -418,7 +765,16 @@ def test_y_out_of_censoring_bounds_raises():
     （engine側の`YOutOfCensoringBounds`）。
     """
     df = pl.DataFrame({"y": [-1.0, 0.0, 1.0, 2.0], "x1": [1.0, 2.0, 3.0, 4.0]})
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.Y_OUT_OF_CENSORING_BOUNDS,
+            row=0,
+            value=msgs.rust_f64(-1.0),
+            lower=msgs.rust_option_f64_debug(0.0),
+            upper=msgs.rust_option_f64_debug(None),
+        ),
+    ):
         Tobit(df, y="y", x=["x1"], options=TobitOptions(lower=0.0)).fit()
 
 
@@ -427,13 +783,20 @@ def test_no_uncensored_observations_raises():
     （engine側の`NoUncensoredObservations`、Issue #223）。
     """
     df = pl.DataFrame({"y": [0.0, 0.0, 0.0, 0.0], "x1": [1.0, 2.0, 3.0, 4.0]})
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NO_UNCENSORED_OBSERVATIONS,
+            lower=msgs.rust_option_f64_debug(0.0),
+            upper=msgs.rust_option_f64_debug(None),
+        ),
+    ):
         Tobit(df, y="y", x=["x1"]).fit()
 
 
 def test_supports_right_censoring_only():
     """`lower=None`・`upper`指定で右打ち切りのみのモデルとして推定できる
-    （`nonlinear-api-design.md`7章）。
+    （`nonlinear-common.md`7章）。
     """
     df = pl.DataFrame(
         {
@@ -576,18 +939,25 @@ def test_true_separation_noise_free_dgp_raises_computation_error(method):
         ).fit()
 
 
-def test_quasi_separation_tiny_noise_reports_unconverged_without_raising():
-    """境界レジーム（軽度の準完全分離＋ごく小さいノイズ）で
-    `raise_on_non_convergence=False`のとき、旧実装と同様に`converged=False`を
-    返す（無言で`converged=True`を返さない）ことを固定する（Issue #288、
-    rust-reviewer指摘の「中間レジーム」）。
+def test_quasi_separation_tiny_noise_converges_to_true_values():
+    """境界レジーム（軽度の準完全分離＋ごく小さいノイズ）が正しく収束することを
+    固定する。
 
-    `y* = 100·x1 + 0.5·x2 + N(0, 0.001)`。ノイズがあるため理屈上は識別可能だが、
-    数値的には(準)分離的で`σ→0`方向へ退化し、Newtonは`max_iter`まで収束しない。
-    実測では**真値自体は回復する**（`x1≈100`, `x2≈0.5`, `const≈0`, `σ≈ノイズsd`）
-    ——「有限だが巨大な誤った`β̂`で収束扱いになる」病理ではなく、
-    「正しい`β̂`だが収束判定は満たさない」状態。`raise_on_non_convergence=True`
-    （既定）なら`ComputationError`（`NonConvergence`）になる。
+    以前（Issue #288当時）は、この境界レジームでNewtonが`max_iter`まで収束せず、
+    `raise_on_non_convergence=False`のときのみ`converged=False`のまま真値近傍の
+    粗い精度のパラメータを返す（既定の`raise_on_non_convergence=True`では
+    `ComputationError`）という「中間レジーム」として扱っていた
+    （rust-reviewer指摘、Issue #288）。
+
+    この後、`censored_contribution`（`engine/src/nonlinear/tobit.rs`）に
+    Probitの`ProbitProblem`と同型のバグ（Issue #316）——Hessian項`A(u)=λ(u+λ)`の
+    計算でクランプ済み`λ`と生の`zeta`を混在させ、`|zeta|>U_CLAMP`の領域で
+    `A(u)`が負になりHessianの正定値性が崩れる——が見つかり修正された。この
+    境界レジーム（打ち切り境界付近の`zeta`が`U_CLAMP`を超えやすい）はまさに
+    その修正の影響を受け、修正後は`raise_on_non_convergence`の値によらず正しく
+    `converged=True`で真値にほぼ完全一致する結果を返すようになった
+    （`y* = 100·x1 + 0.5·x2 + N(0, 0.001)`に対し`x1≈100.0001`, `x2≈0.49996`,
+    `σ≈0.000956`）。
     """
     rng = random.Random(7)
     n = 200
@@ -599,21 +969,12 @@ def test_quasi_separation_tiny_noise_reports_unconverged_without_raising():
     ]
     df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
 
-    res = Tobit(
-        df,
-        y="y",
-        x=["x1", "x2"],
-        options=TobitOptions(raise_on_non_convergence=False),
-    ).fit()
+    res = Tobit(df, y="y", x=["x1", "x2"]).fit()
 
-    assert res.converged is False
-    # 退化しているのは σ のみ。傾きは真値近傍（巨大な誤った β̂ ではない）。
-    assert abs(res.params["x1"] - 100.0) < 1.0
-    assert abs(res.params["x2"] - 0.5) < 0.5
-    assert 0.0 < res.sigma < 0.1
-
-    with pytest.raises(ComputationError):
-        Tobit(df, y="y", x=["x1", "x2"]).fit()
+    assert res.converged is True
+    assert abs(res.params["x1"] - 100.0) < 0.01
+    assert abs(res.params["x2"] - 0.5) < 0.01
+    assert abs(res.sigma - 0.001) < 0.001
 
 
 def test_many_regressors_no_false_separation():
@@ -671,17 +1032,36 @@ def test_mroz_hours_raw_scale_converges_without_false_separation():
     assert 1000.0 < res.sigma < 1250.0
 
 
+@pytest.mark.parametrize(
+    "cov_type", ["classical", "opg", "hc0", "hc1", "cluster"]
+)
 def test_raise_on_non_convergence_false_returns_result_without_raising(
-    censored_dataset,
+    censored_dataset, cov_type
 ):
+    """`raise_on_non_convergence=False`だと未収束でも例外を投げず、
+    `converged=False`の`Results`を返す。`cov_type`は`classical`以外
+    （`opg`/`hc0`/`hc1`/`cluster`）も検証する（test-coverage-candidates.md
+    項目4、`_binary_choice_checks.py`のLogit/Probit版と同じ懸念——打ち切り点
+    でのHessian/スコア評価はcov_typeの分岐によって経由する行列演算が異なる
+    ため、想定外の例外を投げず標準誤差が有限値であることまで確認する）。
+    """
+    kwargs = {
+        "max_iter": 1,
+        "raise_on_non_convergence": False,
+        "cov_type": cov_type,
+    }
+    if cov_type == "cluster":
+        kwargs["cluster_col"] = "cluster"
     res = Tobit(
         censored_dataset,
         y="y",
         x=["x1", "x2"],
-        options=TobitOptions(max_iter=1, raise_on_non_convergence=False),
+        options=TobitOptions(**kwargs),
     ).fit()
     assert res.converged is False
     assert res.n_iter == 1
+    for name, se in res.std_errors.items():
+        assert math.isfinite(se), f"std_errors[{name}]={se} is not finite"
 
 
 def test_confidence_level_changes_interval_width(censored_dataset):
@@ -772,7 +1152,9 @@ def test_cluster_cov_type_requires_at_least_two_groups():
             "cluster": ["a", "a", "a", "a"],
         }
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
+    ):
         Tobit(
             df,
             y="y",
@@ -796,7 +1178,10 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
         "cluster", [i % 2 for i in range(censored_dataset.height)]
     )
     df = censored_dataset.with_columns(cluster)
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=2),
+    ):
         Tobit(
             df,
             y="y",
@@ -821,13 +1206,33 @@ def test_mroz_hours_cluster_cov_type_raises_validation_error():
 
     mroz = load_wooldridge_dataset("mroz")
     options = TobitOptions(cov_type="cluster", cluster_col="city", lower=0.0)
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=len(MROZ_X)
+        ),
+    ):
         Tobit(mroz, y="hours", x=MROZ_X, options=options).fit()
+
+
+def test_cluster_without_col_raises(censored_dataset):
+    """`cov_type="cluster"`なのに`cluster_col`未指定の場合`ValidationError`
+    （OLS/WLS/IV/Logit/Probitと同じ検証、共通化された経路。
+    test-coverage-candidates.md項目5）。
+    """
+    options = TobitOptions(cov_type="cluster")
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.MISSING_CLUSTER_COLUMN)
+    ):
+        Tobit(censored_dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
 def test_cluster_col_nonexistent_column_raises(censored_dataset):
     options = TobitOptions(cov_type="cluster", cluster_col="does_not_exist")
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    ):
         Tobit(censored_dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
@@ -838,5 +1243,8 @@ def test_cluster_col_with_null_raises(censored_dataset):
     groups = [None] + [str(i % 5) for i in range(n - 1)]
     df = censored_dataset.with_columns(pl.Series("grp", groups, dtype=pl.Utf8))
     options = TobitOptions(cov_type="cluster", cluster_col="grp")
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name="grp"),
+    ):
         Tobit(df, y="y", x=["x1", "x2"], options=options).fit()

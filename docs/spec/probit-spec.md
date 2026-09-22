@@ -17,7 +17,7 @@ Probit固有の差分のみを記載する。
 
 ## 2. 結果構造体
 
-`ProbitResult`はフィールド構成が`LogitResult`と同一（`params`/`std_errors`/`z_stats`/.../`cov_type`）。
+`ProbitResult`はフィールド構成が`LogitResult`と同一（`params`/`std_errors`/`z_stats`/.../`cov_type`/`method`）。
 `df_model=k-1`固定・`log_likelihood_null`の非入れ子性等、[`logit-spec.md`](./logit-spec.md)2章の設計
 判断をそのまま踏襲する。
 
@@ -49,16 +49,31 @@ Probit固有の差分のみを記載する。
 評価、`SeparationSuspected`による完全分離下のアンダーフロー対策を共有）。近似解析解
 （切片のみモデル、`Φ(θ̂)=ȳ`すなわち`θ̂=Φ⁻¹(ȳ)`）で検証している。
 
+初期値（warm start）・設計行列のランクチェックもLogitと共通（[`logit-spec.md`](./logit-spec.md)
+3.2節、Issue #279）。`method`に依らず最適化前に標準化空間の設計行列を列ピボットQRしてランク落ちを
+`SingularDesignMatrix`で弾き、そのLPM最小二乗解にprobitのIRLS 1ステップ相当のスケール補正を施す
+（`w = φ(Φ⁻¹(p̄))`、`η₀ = Φ⁻¹(p̄)`）。切片のみモデルではこの初期値がそのまま厳密な近似解析解
+`Φ⁻¹(ȳ)`になる。従来のゼロベクトル初期値から変更（収束先・クロスチェック数値は不変）。
+
 収束判定`tol`の既定値`1e-6`は、Logitと同じ結論（通常データでは高精度に一致、`near_separation`
 境界ケースのみ`tol=1e-6`だと相対誤差最大4.4e-8とわずかに超過し`tol=1e-8`で解消。既定値は変更しない）
 に至った。`near_separation`の較正値はリンク関数ごとに異なる（`Φ`は`Λ`より裾が薄く同じベータ値でも
 速く飽和するため、Logitの`beta1=20`ではなく`beta1=10`を採用）。
 
+`tol`の意味論（`newton`は総和勾配に対する絶対閾値、`bfgs`/`lbfgs`は観測数`n`で正規化した
+「観測あたり平均勾配」基準、既定値は`newton`が`1e-6`・`bfgs`/`lbfgs`が`1e-8`、Issue #285で
+実装済み）は`run_solver`共通の性質で、Probitも同様に該当する。詳細・実測値・小標本での
+精度検証テストへの影響は[`logit-spec.md`](./logit-spec.md)3.2節を参照。
+
+`bfgs`/`lbfgs`のline searchの評価回数バジェット（`BudgetedProblem`、Issue #342）も`run_solver`
+共通で、Probitも同様に保護される。詳細は[`logit-spec.md`](./logit-spec.md)3.2節を参照。
+
 ### 3.3 標準誤差
 
-`CovType`（`Classical`/`Opg`/`Hc0`/`Hc1`/`Cluster`）・計算式・エラー型（`SingularHessian`/
-`SingularOpgMatrix`/`MissingClusterColumn`/`InsufficientClusters`/`InsufficientClustersForInference`
-＝クラスター数`G <= 傾き係数の数q`、Issue #289）は[`logit-spec.md`](./logit-spec.md)
+`CovType`（`Classical`/`Opg`/`Hc0`/`Hc1`/`Cluster`）・計算式・エラー型（`SingularDesignMatrix`
+＝最適化前のランクチェック／`SingularHessian`/`SingularOpgMatrix`/`MissingClusterColumn`/
+`InsufficientClusters`/`InsufficientClustersForInference`＝クラスター数`G <= 傾き係数の数q`、
+Issue #289）は[`logit-spec.md`](./logit-spec.md)
 3.3節と共通（`opg_cov_params`/`sandwich_cov_params`/`cluster_cov_params`を共有インフラとしてそのまま
 再利用、Probit固有の新規計算は無い）。
 
@@ -82,11 +97,13 @@ MLEが`Φ(θ̂)=ȳ`を満たすため、この計算がリンク関数に依存�
 極端でも滑らかに0へ収束するのみで`U_CLAMP`によるクランプは不要（`cost`/`gradient`/`hessian`が使う
 `λ=φ(u)/Φ(u)`とは異なり0除算のリスクが無い）。
 
-### 3.6 predict() / pred_table()
+### 3.6 predict() / augment() / pred_table()
 
-`predict()`は`p_i=Φ(x_i'θ)`をそのまま計算する（Logitの`Λ`を`Φ`に置き換えたのみ）。`pred_table`の
-計算本体はリンク関数を参照しないため`common.rs`の共有関数をそのまま使う（[`logit-spec.md`](./logit-spec.md)
-3.6節参照）。in-sample限定、out-of-sample非対応もLogitと同じ。
+`predict(new_data=None)`は`p_i=Φ(x_i'θ)`をそのまま計算する（Logitの`Λ`を`Φ`に置き換えたのみ、
+out-of-sample対応も含めて設計は同一）。`pred_table`の計算本体はリンク関数を参照しないため
+`common.rs`の共有関数をそのまま使う（[`logit-spec.md`](./logit-spec.md)3.6節参照）。`pred_table`は
+in-sample限定のまま。`augment(new_data=None)`もLogitと完全に同一の設計（`"probability"`列、
+Issue #322項目4）。
 
 ### 3.7 engine_pybind: エラー変換
 
@@ -116,21 +133,63 @@ MLEが`Φ(θ̂)=ȳ`を満たすため、この計算がリンク関数に依存�
 
 ## 4. 未実装・未対応
 
-- `predict()`/`pred_table()`のout-of-sample対応（Logitと同じ、[`logit-spec.md`](./logit-spec.md)4章）
+- `predict()`のout-of-sample対応は実装済み（Logitと同じ、[`logit-spec.md`](./logit-spec.md)4章）。
+  `pred_table()`のout-of-sample対応は引き続き未実装。
+- `augment()`は実装済み（Logitと同じ、Issue #322項目4、3.6参照）。
 - `start_params`（ユーザー指定初期値）
-- **`U_CLAMP`とNewton法（line searchなし）の相互作用は未検証**: `U_CLAMP`は一般化残差`λᵢ`の
-  NaN化のみを防ぐ局所的な保護で、Hessianが使う線形予測子`zᵢ`自体は無制限のまま。理論上は
-  悪条件な中間反復でパラメータが大きくジャンプし発散的に増幅する経路がありうるが、最終的に
-  NaN化すれば`newton_step`のNaNチェックが`SingularHessian`として偶発的に捕捉する見込み。
-  実データで踏むかどうかは未検証。
+- **`U_CLAMP`とNewton法（line searchなし）の相互作用は対応済み（Issue #316、
+  2026-09-13）**: `ProbitProblem::hessian`が使うHessianの重み`w=λᵢ(λᵢ+zᵢ)`は、
+  以前は`λᵢ`（`clamped_pdf_cdf`でクランプ済みの引数から計算）と生の（非クランプの）
+  `zᵢ`を混在させていた。この非対称性により、`|z|>U_CLAMP`かつ誤分類（`qᵢzᵢ`が
+  大きく負）の観測で`w`が**負**になりうる（`λᵢ(λᵢ+zᵢ)>0`という大域凹性の前提が
+  数値的に破れる）ことをIssue #284の調査時（2026-09-12）に数値実験で確認していた。
+  修正として、`linear_predictor_and_residual`が返す`zᵢ`を`λᵢ`と同じクランプ済み
+  引数から`z̃ᵢ = qᵢ·clamp(qᵢzᵢ, -U_CLAMP, U_CLAMP)`として再構成し、`hessian`は
+  この`z̃ᵢ`を使うように変更した。修正前は既存の境界値テストのデータ（切片のみ、
+  `z=1000`、`y=[1,0]`）で`h[0][0]≈-8177`（負）だったが、修正後は`h[0][0]≈0.986`
+  （正）になることを確認し、回帰テスト
+  （`hessian_weight_is_non_negative_even_when_misclassified_observation_exceeds_
+  u_clamp`）として固定した。通常データ（`|z|`が`U_CLAMP`未満の領域）では`z̃ᵢ=zᵢ`
+  のため挙動は不変（既存の数値照合フィクスチャは全て非リグレッションでパス）。
 - **`U_CLAMP`領域での`cost()`/`gradient()`の数学的非整合とBFGS/L-BFGSのline searchへの影響は
-  未検証**: クランプ領域では`cost()`は`θ`に対して定数（微分ゼロ）のはずだが、`gradient()`は
-  クランプ後の`λᵢ`（有限だが非ゼロ）を返すため真の微分と一致しない。この非整合を解消する
-  「修正」（クランプ領域で`gradient`もゼロにする）は、完全分離に近いデータで勾配ノルム基準の
-  収束判定を誤検知させる別のバグを誘発しうるため、あえて行わない設計上の判断（意図的に維持）。
-  line searchが受理可能なステップを見つけられない、または不適切なステップを受理する可能性は
-  理論上あるが未検証。
-- `SEPARATION_PARAM_NORM_THRESHOLD=100.0`（Logitの実測に基づく較正値）がProbitのリンク関数
-  （テイルの減衰特性が異なる）でも同程度に適切かは未較正。この事後チェック（`run_solver`の
-  `separation_norm_check: SeparationNormCheck`）は`y∈{0,1}`のLogit/Probitのみ`Enabled`で、
-  Tobitは`Disabled`（Issue #288）
+  実測で検証済み（実害なし、2026-09-13）**: クランプ領域では`cost()`は`θ`に対して定数
+  （微分ゼロ）のはずだが、`gradient()`はクランプ後の`λᵢ`（有限だが非ゼロ）を返すため真の
+  微分と一致しない。この非整合を解消する「修正」（クランプ領域で`gradient`もゼロにする）は、
+  完全分離に近いデータで勾配ノルム基準の収束判定を誤検知させる別のバグを誘発しうるため、
+  あえて行わない設計上の判断（意図的に維持）。
+  - **実測内容**: (1) ほぼ完全分離のデータ（rare event、初期値の時点で`max|u|≈2868`）
+    ではnewton/bfgs/lbfgsいずれもクラッシュ・NaN・不当な`ComputationError`なしで
+    `NonConvergence`という妥当な結果に落ち着いた。(2) 真の有限MLEが存在するnear
+    separationデータ（`beta1=10`、収束点近傍で`max|u|≈36〜185`）では3手法とも収束し、
+    パラメータ推定値が相互に5桁程度で一致した。(3) さらに厳しい設定（`beta1=50`、
+    ウォームスタートを使わないコールドスタート`[0,0]`からのbfgs/lbfgs、line search中に
+    `max|u|≈566`まで到達）でも3手法は相互に3〜4桁で一致する結果に収束した。line search
+    が受理可能なステップを見つけられない・不適切なステップを受理するという理論上の懸念は、
+    試した範囲では一度も顕在化しなかった。
+  - **回帰テスト**:
+    `fit_bfgs_and_lbfgs_match_newton_despite_deep_u_clamp_excursions_in_near_separation_data`
+    （near separationデータでbfgs/lbfgsがnewtonと一致し続けることを固定）。
+- **`SEPARATION_PARAM_NORM_THRESHOLD=100.0`（Logitの実測に基づく較正値）はProbitでも
+  同程度に機能することを実測で確認済み（実害なし、2026-09-13）**: Probitはリンク関数の
+  テイルの減衰特性がLogitと異なるため、同じ閾値がProbitでも適切かは未較正だった。
+  この事後チェック（`run_solver`の`separation_norm_check: SeparationNormCheck`）は
+  `y∈{0,1}`のLogit/Probitのみ`Enabled`で、Tobitは`Disabled`（Issue #288）。
+  - **実測内容**: 同一の`x1`/`x2`分布・同一の疑似乱数seedで、リンク関数のみ変えて
+    分離度合い（`beta1`）を段階的に強めながら、収束点の標準化パラメータL2ノルムを
+    比較した。既存のcalibration値での成功パス（probit `beta1=10`→norm≈7.5、logit
+    `beta1=20`→norm≈17.7）ではどちらも閾値100に対して十分な余裕があった。真の分離に
+    限りなく近い境界付近（浮動小数点精度で`p`が飽和する直前）では、probitはnorm≈93.3、
+    logitはnorm≈89.0で収束しており、どちらも閾値100に対し5〜11%程度の余裕で収まって
+    いた（probitの方がやや余裕が小さいが差は5%程度）。さらに分離度を上げると、両リンク
+    ともnormが数百に急激に飛び、`SeparationSuspected`が正常に発火した。真の分離に
+    近づくほど`SeparationSuspected`が発火する`beta1`はLogit（`100`）よりProbitの方が
+    小さい値（`50`）で足りたが、これは較正のズレではなくProbitのテイルの減衰が速く
+    同じ標準化スケールでもより低い`beta1`で飽和に達するという、リンク関数の性質の
+    違いとして期待通り。この実測の範囲ではProbit固有の追加の誤検知/検出漏れリスクは
+    確認できなかった。
+  - **回帰テスト**:
+    `fit_returns_separation_suspected_error_for_near_separation_data`
+    （`beta1=50`で3手法とも`SeparationSuspected`を返すことを固定）・
+    `fit_returns_unconverged_result_for_near_separation_data_without_raising`・
+    `fit_converges_normally_for_mild_near_separation_data_across_all_methods`
+    （`beta1=20`で3手法とも誤検知なく正常収束することを固定）。

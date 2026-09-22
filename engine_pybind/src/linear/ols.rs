@@ -12,16 +12,14 @@
 //! それ以外（このファイルの説明・非公開関数のdocコメント等）は日本語のまま。
 
 use engine::linear::ols::{OlsEstimator, OlsInput};
-use polars::prelude::DataFrame;
+use polars::prelude::{Column, DataFrame};
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
 use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
-use crate::column_extraction::extract_f64_column;
-use crate::validation::{
-    RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
-    validate_no_duplicate_within_role, validate_x_non_empty,
-};
+use crate::column_extraction::{extract_f64_column, extract_f64_columns, x_column_names};
+use crate::errors::ValidationError;
+use crate::validation::{validate_common_roles, validate_no_existing_column};
 
 /// Estimation options for OLS.
 ///
@@ -187,6 +185,36 @@ pub struct OLSResult {
     /// `include_intercept=True`), which would make such an inference silently
     /// wrong instead of erroring.
     has_intercept: bool,
+    /// The original polars DataFrame passed to `fit()`, cached for
+    /// `augment(new_data=None)`. A cheap clone (polars columns are
+    /// internally reference-counted, `docs/spec/ols-spec.md` "predict()" — same
+    /// zero-copy reasoning applies here).
+    ///
+    /// `None` for `OLSResult`s built by `ols_estimator_to_result` without going
+    /// through this file's `fit()` (currently only `IVResult.first_stage()`,
+    /// `engine_pybind/src/iv/common.rs`): those per-equation regressions have no
+    /// single source DataFrame to attach a column to, so `augment(new_data=None)`
+    /// on such a result raises `ValidationError` instead.
+    training_data: Option<DataFrame>,
+}
+
+// `#[pymethods]`ブロックの外に置く非公開実装（pyo3は`#[pymethods]`内の全メソッドを
+// Python公開シグネチャとして扱おうとするため、`&DataFrame`のような`FromPyObject`
+// 未実装の型を引数に取るヘルパーはこちらに置く必要がある）。
+impl OLSResult {
+    /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
+    /// （`x`列の抽出→`predict_new_data`呼び出し）。
+    fn predict_for(&self, df: &DataFrame) -> PyResult<Vec<f64>> {
+        let has_intercept = self.has_intercept;
+        let x_names = x_column_names(&self.param_names, has_intercept, 0);
+        let x_columns = extract_f64_columns(df, x_names)?;
+
+        Ok(engine::linear::ols::predict_new_data(
+            &self.params,
+            has_intercept,
+            &x_columns,
+        ))
+    }
 }
 
 #[pymethods]
@@ -211,23 +239,55 @@ impl OLSResult {
         };
 
         let df: DataFrame = new_data.into();
-        let has_intercept = self.has_intercept;
-        let x_names: &[String] = if has_intercept {
-            &self.param_names[1..]
-        } else {
-            &self.param_names[..]
+        self.predict_for(&df)
+    }
+
+    /// The source data (training data, or `new_data` when given) with the
+    /// predicted values appended as a new `"predicted"` column.
+    ///
+    /// Same `new_data`/`include_intercept` semantics as `predict()`, but returns
+    /// a polars DataFrame (original columns plus `"predicted"`, row order
+    /// preserved) instead of a bare list of floats.
+    ///
+    /// # Errors
+    /// - Same as `predict()`: a required `x` column missing from `new_data`,
+    ///   non-numeric, or containing missing/NaN/infinite values: `ValidationError`.
+    /// - The source data already has a column named `"predicted"`:
+    ///   `ValidationError` (would otherwise silently overwrite it).
+    /// - `new_data=None` and this result has no cached training data (currently
+    ///   only possible for `IVResult.first_stage()` results): `ValidationError`.
+    #[pyo3(signature = (new_data=None))]
+    fn augment(&self, new_data: Option<PyDataFrame>) -> PyResult<PyDataFrame> {
+        let (mut source, predicted) = match new_data {
+            Some(new_data) => {
+                let df: DataFrame = new_data.into();
+                let predicted = self.predict_for(&df)?;
+                (df, predicted)
+            }
+            None => {
+                let source = self.training_data.clone().ok_or_else(|| {
+                    ValidationError::new_err(
+                        "augment(new_data=None) requires the original training data, which \
+                         is not retained for this result",
+                    )
+                })?;
+                (source, self.fitted_values.clone())
+            }
         };
 
-        let mut x_columns: Vec<Vec<f64>> = Vec::with_capacity(x_names.len());
-        for name in x_names {
-            x_columns.push(extract_f64_column(&df, name)?);
-        }
+        validate_no_existing_column(&source, "predicted")?;
 
-        Ok(engine::linear::ols::predict_new_data(
-            &self.params,
-            has_intercept,
-            &x_columns,
-        ))
+        // `with_column`の唯一の失敗条件（`ShapeMismatch`、追加する列の長さが
+        // DataFrameの高さと食い違う場合）はここでは理論上到達不能。
+        // `new_data`指定時: `predicted`は`predict_for`が`source`自身から抽出した
+        // `x_columns`と同じ観測数`n`から計算するため、`predicted.len() == source.height()`。
+        // `None`時: `fitted_values`と`training_data`はどちらも同じ`fit()`呼び出しで
+        // 同じ`n`から作られたペア（`ols_estimator_to_result`／この関数の
+        // `training_data = Some(df)`代入）であり、以降どちらも独立に変更されない。
+        source
+            .with_column(Column::new("predicted".into(), predicted))
+            .expect("predicted.len() matches source.height() by construction");
+        Ok(PyDataFrame(source))
     }
 }
 
@@ -255,36 +315,38 @@ pub fn fit(
 
     // 完全な多重共線性を早期に、分かりやすいエラーで防ぐ（`validation.rs`に集約、
     // WLS/Logitと共通、`.claude/rules/rust-style.md`参照）。
-    validate_x_non_empty(&x)?;
-    validate_no_duplicate_roles(&[("y", RoleValue::Single(&y)), ("x", RoleValue::Multi(&x))])?;
-    validate_no_duplicate_within_role("x", &x)?;
-    validate_no_const_collision(&x, options.include_intercept)?;
+    validate_common_roles(&y, &x, options.include_intercept)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
     let y_slice = extract_f64_column(&df, &y)?;
 
     // ── x列の抽出 ──────────────────────────────────────────────────────
-    let mut x_slices: Vec<Vec<f64>> = Vec::with_capacity(x.len());
-    for col_name in &x {
-        x_slices.push(extract_f64_column(&df, col_name)?);
-    }
+    let x_slices = extract_f64_columns(&df, &x)?;
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
-    let (cov_type, cov_type_lower) = parse_cov_type(&df, options)?;
+    let (cov_type, cov_type_lower) = parse_cov_type(
+        &df,
+        &options.cov_type,
+        options.cluster_col.as_deref(),
+        options.hac_lags,
+        options.time_col.as_deref(),
+    )?;
 
     let input = OlsInput::from_columns(&y_slice, &x_slices, x, options.include_intercept, y)
         .map_err(least_squares_error_to_pyerr)?;
     let estimator = OlsEstimator::fit(input, cov_type, options.confidence_level)
         .map_err(least_squares_error_to_pyerr)?;
 
-    Ok(ols_estimator_to_result(&estimator, cov_type_lower))
+    let mut result = ols_estimator_to_result(&estimator, cov_type_lower);
+    result.training_data = Some(df);
+    Ok(result)
 }
 
 /// フィット済み`OlsEstimator`を`OLSResult`（pyclass、Pythonに返す形）に変換する。
 ///
 /// `fit`（本ファイル、OLS本体）と`iv::common`の`first_stage()`（IVの第一段階回帰
-/// `x_endog[i] ~ x_exog + instruments`の結果を`dict[str, OlsResults]`として返す、
-/// Issue #170）の両方で使う共通の変換ロジック。第一段階回帰はそれ自体が正しい
+/// `x_endog[i] ~ x_exog + instruments`の結果を`dict[str, OLSResults]`として返す）
+/// の両方で使う共通の変換ロジック。第一段階回帰はそれ自体が正しい
 /// （ナイーブな）通常のOLS回帰であり（`engine::iv::two_sls`のモジュールdocコメント
 /// 「第一段階の各`OlsEstimator`はそれ自体が正しい」参照）、`OLSResult`への変換方法に
 /// OLS本体との違いは無いため、このように同じ関数をそのまま再利用できる（`OLSResult`の
@@ -292,7 +354,7 @@ pub fn fit(
 /// 同じ`linear::ols`モジュール内に置く）。
 ///
 /// `cov_type_lower`を引数で受け取るのは、`fit`ではPythonから渡された`OLSOptions.cov_type`
-/// をパース時に一度だけ小文字化した値、`first_stage()`では`IvResult.cov_type`
+/// をパース時に一度だけ小文字化した値、`first_stage()`では`IVResult.cov_type`
 /// （呼び出し元が指定した`cov_type`、第一段階にもそのまま使われる、`iv::two_sls`の
 /// モジュールdocコメント参照）と、呼び出し元ごとに文字列の出どころが異なるため。
 /// **呼び出し元が正規化済み（`to_lowercase()`済み）の値を渡す責任を持つ**（この関数自体は
@@ -323,5 +385,9 @@ pub(crate) fn ols_estimator_to_result(
         bic: estimator.bic(),
         fitted_values: mat_to_vec(&estimator.fitted_values()),
         has_intercept: estimator.input().has_intercept(),
+        // `fit()`（本ファイル）が呼び出し後に`Some(df)`で上書きする。この関数の
+        // もう一つの呼び出し元`iv::common::first_stage()`は単一のソースDataFrameを
+        // 持たないため`None`のまま（`OLSResult`のdocコメント参照）。
+        training_data: None,
     }
 }

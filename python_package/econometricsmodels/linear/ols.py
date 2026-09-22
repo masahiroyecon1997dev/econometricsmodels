@@ -18,7 +18,7 @@ import polars as pl
 from .. import _lib
 from .._lib import OLSOptions
 
-__all__ = ["OLS", "OLSOptions", "OlsResults"]
+__all__ = ["OLS", "OLSOptions", "OLSResults"]
 
 
 class OLS:
@@ -53,7 +53,7 @@ class OLS:
         self._x = x
         self._options = options if options is not None else OLSOptions()
 
-    def fit(self) -> OlsResults:
+    def fit(self) -> OLSResults:
         """Estimate the OLS model.
 
         Returns:
@@ -70,10 +70,10 @@ class OLS:
                 subclass of `RuntimeError`.
         """
         raw = _lib.fit_ols(self._data, self._y, self._x, self._options)
-        return OlsResults(raw)
+        return OLSResults(raw)
 
 
-class OlsResults:
+class OLSResults:
     """OLS estimation results.
 
     Array-valued properties (`params`, `std_errors`, etc.) are exposed
@@ -240,7 +240,7 @@ class OlsResults:
 
         Returns:
             Row-oriented predictions, one dict per observation. Each
-            dict currently has a single key, `"fitted"`.
+            dict currently has a single key, `"predicted"`.
 
         Raises:
             ValidationError: `new_data` is missing a required `x`
@@ -248,4 +248,36 @@ class OlsResults:
                 values.
         """
         raw = self._raw.predict(new_data)
-        return [{"fitted": value} for value in raw]
+        return [{"predicted": value} for value in raw]
+
+    def augment(self, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
+        """Source data with the predicted values appended as a column.
+
+        Same `new_data` semantics as `predict()`, but returns a polars
+        DataFrame (the training data, or `new_data` when given, plus a
+        new `"predicted"` column) instead of a row-oriented list. This
+        is the one exception to the project's policy of not returning
+        DataFrames (`docs/spec/ols-spec.md`, "augment()"): it exists
+        specifically to attach predictions back to their source rows.
+
+        Args:
+            new_data: Same as `predict()`. If `None` (default), returns
+                the training data used in `fit()` with the predicted
+                values appended.
+
+        Returns:
+            A polars DataFrame: the source data's columns plus
+            `"predicted"`, in the same row order as the source.
+
+        Raises:
+            ValidationError: Same as `predict()`, or the source data
+                already has a column named `"predicted"` (which would
+                otherwise be silently overwritten). Also raised for
+                `new_data=None` when this result has no retained
+                training data (currently only possible for the
+                `OLSResults` returned by `IVResult.first_stage()`,
+                which has no single source DataFrame to attach a
+                column to; calling `augment(new_data)` with an
+                explicit `new_data` still works normally in that case).
+        """
+        return self._raw.augment(new_data)

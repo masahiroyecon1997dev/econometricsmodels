@@ -1,0 +1,2673 @@
+{
+  "unbalanced": {
+    "one_way": {
+      "classical": {
+        "coef": {
+          "x1": 1.6383501685694963,
+          "x2": -0.11852577355115819
+        },
+        "se": {
+          "x1": 0.09836834072129566,
+          "x2": 0.10672255720675806
+        },
+        "t_stats": {
+          "x1": 16.655258760655414,
+          "x2": -1.110597203190449
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.2684840926209735
+        },
+        "conf_int": {
+          "x1": [
+            1.4440146273373682,
+            1.8326857098016245
+          ],
+          "x2": [
+            -0.32936582396142305,
+            0.09231427685910669
+          ]
+        },
+        "n_obs": 195,
+        "df_resid": 153,
+        "df_model": 42,
+        "n_entities": 40,
+        "f_statistic": 139.1650297085373,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.6452832427056591,
+        "r_squared_between": 0.6247083491307188,
+        "r_squared_overall": 0.6371988540116964,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:24.483748+00:00",
+          "cov_type_requested": "classical",
+          "cov_type_linearmodels": "unadjusted",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hc1": {
+        "coef": {
+          "x1": 1.6383501685694963,
+          "x2": -0.11852577355115819
+        },
+        "se": {
+          "x1": 0.09358528880044344,
+          "x2": 0.11772673702175698
+        },
+        "t_stats": {
+          "x1": 17.506492629018133,
+          "x2": -1.0067872137597218
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.3156266296376917
+        },
+        "conf_int": {
+          "x1": [
+            1.4534639783883712,
+            1.8232363587506215
+          ],
+          "x2": [
+            -0.3511055750285112,
+            0.11405402792619483
+          ]
+        },
+        "n_obs": 195,
+        "df_resid": 153,
+        "df_model": 42,
+        "n_entities": 40,
+        "f_statistic": 154.6505228312094,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.6452832427056591,
+        "r_squared_between": 0.6247083491307188,
+        "r_squared_overall": 0.6371988540116964,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:24.527941+00:00",
+          "cov_type_requested": "hc1",
+          "cov_type_linearmodels": "robust",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "cluster": {
+        "coef": {
+          "x1": 1.6383501685694963,
+          "x2": -0.11852577355115819
+        },
+        "se": {
+          "x1": 0.09617971754922293,
+          "x2": 0.12321108405003117
+        },
+        "t_stats": {
+          "x1": 17.034258472749414,
+          "x2": -0.9619733034978374
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.33758087663859726
+        },
+        "conf_int": {
+          "x1": [
+            1.448338450079311,
+            1.8283618870596816
+          ],
+          "x2": [
+            -0.3619403979016975,
+            0.12488885079938113
+          ]
+        },
+        "n_obs": 195,
+        "df_resid": 153,
+        "df_model": 42,
+        "n_entities": 40,
+        "f_statistic": 154.60561927974794,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.6452832427056591,
+        "r_squared_between": 0.6247083491307188,
+        "r_squared_overall": 0.6371988540116964,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:24.578952+00:00",
+          "cov_type_requested": "cluster",
+          "cov_type_linearmodels": "clustered",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hac": {
+        "coef": {
+          "x1": 1.6383501685694963,
+          "x2": -0.11852577355115819
+        },
+        "se": {
+          "x1": 0.03462740347090196,
+          "x2": 0.07623187888410796
+        },
+        "t_stats": {
+          "x1": 47.31368812987182,
+          "x2": -1.554805880245295
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.12205840650526545
+        },
+        "conf_int": {
+          "x1": [
+            1.5699406056386034,
+            1.7067597315003893
+          ],
+          "x2": [
+            -0.269128735169255,
+            0.03207718806693864
+          ]
+        },
+        "n_obs": 195,
+        "df_resid": 153,
+        "df_model": 42,
+        "n_entities": 40,
+        "f_statistic": 1413.9526519808312,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.6452832427056591,
+        "r_squared_between": 0.6247083491307188,
+        "r_squared_overall": 0.6371988540116964,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:24.623263+00:00",
+          "cov_type_requested": "hac",
+          "cov_type_linearmodels": "kernel",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": 2,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      }
+    }
+  },
+  "baseline": {
+    "one_way": {
+      "classical": {
+        "coef": {
+          "x1": 1.5472181094690278,
+          "x2": -0.1947122382797479
+        },
+        "se": {
+          "x1": 0.09059692719058153,
+          "x2": 0.093999372952166
+        },
+        "t_stats": {
+          "x1": 17.07804179952228,
+          "x2": -2.0714206080803566
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.03961576261026378
+        },
+        "conf_int": {
+          "x1": [
+            1.368559385610937,
+            1.7258768333271186
+          ],
+          "x2": [
+            -0.38008064464707336,
+            -0.009343831912422412
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 198,
+        "df_model": 42,
+        "n_entities": 40,
+        "f_statistic": 146.82100442429467,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.5972679379784692,
+        "r_squared_between": 0.6150261629187818,
+        "r_squared_overall": 0.6078419448674636,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:24.666154+00:00",
+          "cov_type_requested": "classical",
+          "cov_type_linearmodels": "unadjusted",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hc1": {
+        "coef": {
+          "x1": 1.5472181094690278,
+          "x2": -0.1947122382797479
+        },
+        "se": {
+          "x1": 0.08538533657295799,
+          "x2": 0.10598513056832343
+        },
+        "t_stats": {
+          "x1": 18.120419401837204,
+          "x2": -1.837165621589025
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.0676843267484677
+        },
+        "conf_int": {
+          "x1": [
+            1.3788367333962184,
+            1.7155994855418373
+          ],
+          "x2": [
+            -0.4037167681512456,
+            0.014292291591749745
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 198,
+        "df_model": 42,
+        "n_entities": 40,
+        "f_statistic": 168.01235849169458,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.5972679379784692,
+        "r_squared_between": 0.6150261629187818,
+        "r_squared_overall": 0.6078419448674636,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:24.709745+00:00",
+          "cov_type_requested": "hc1",
+          "cov_type_linearmodels": "robust",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "cluster": {
+        "coef": {
+          "x1": 1.5472181094690278,
+          "x2": -0.1947122382797479
+        },
+        "se": {
+          "x1": 0.08066268317694371,
+          "x2": 0.10529329141628392
+        },
+        "t_stats": {
+          "x1": 19.181337001584872,
+          "x2": -1.8492368854720318
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.06591429911511137
+        },
+        "conf_int": {
+          "x1": [
+            1.3881498884349215,
+            1.7062863305031342
+          ],
+          "x2": [
+            -0.4023524492515722,
+            0.012927972692076406
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 198,
+        "df_model": 42,
+        "n_entities": 40,
+        "f_statistic": 199.47726026697802,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.5972679379784692,
+        "r_squared_between": 0.6150261629187818,
+        "r_squared_overall": 0.6078419448674636,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:24.755950+00:00",
+          "cov_type_requested": "cluster",
+          "cov_type_linearmodels": "clustered",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hac": {
+        "coef": {
+          "x1": 1.5472181094690278,
+          "x2": -0.1947122382797479
+        },
+        "se": {
+          "x1": 0.024921273003874273,
+          "x2": 0.0716476212228307
+        },
+        "t_stats": {
+          "x1": 62.08423258428639,
+          "x2": -2.717637165847766
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.007157913988912634
+        },
+        "conf_int": {
+          "x1": [
+            1.4980729235354575,
+            1.5963632954025981
+          ],
+          "x2": [
+            -0.3360025995765661,
+            -0.05342187698292969
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 198,
+        "df_model": 42,
+        "n_entities": 40,
+        "f_statistic": 2494.2536784743584,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.5972679379784692,
+        "r_squared_between": 0.6150261629187818,
+        "r_squared_overall": 0.6078419448674636,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:24.796982+00:00",
+          "cov_type_requested": "hac",
+          "cov_type_linearmodels": "kernel",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": 2,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      }
+    },
+    "two_way": {
+      "classical": {
+        "coef": {
+          "x1": 1.631113967094485,
+          "x2": -0.2894597368467221
+        },
+        "se": {
+          "x1": 0.0752945940906334,
+          "x2": 0.07962726292232289
+        },
+        "t_stats": {
+          "x1": 21.663095296470885,
+          "x2": -3.6351838079514636
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.0003562142585213923
+        },
+        "conf_int": {
+          "x1": [
+            1.4826080541533453,
+            1.7796198800356247
+          ],
+          "x2": [
+            -0.446511109765336,
+            -0.13240836392810823
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 193,
+        "df_model": 47,
+        "n_entities": 40,
+        "f_statistic": 236.57696469650486,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.5935993809060993,
+        "r_squared_between": 0.6335406795904788,
+        "r_squared_overall": 0.6173821389724907,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:24.880289+00:00",
+          "cov_type_requested": "classical",
+          "cov_type_linearmodels": "unadjusted",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hc1": {
+        "coef": {
+          "x1": 1.631113967094485,
+          "x2": -0.2894597368467221
+        },
+        "se": {
+          "x1": 0.0765422479306538,
+          "x2": 0.08926575985456639
+        },
+        "t_stats": {
+          "x1": 21.309982541566473,
+          "x2": -3.242673756637661
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.001395205733421001
+        },
+        "conf_int": {
+          "x1": [
+            1.4801472669642448,
+            1.7820806672247251
+          ],
+          "x2": [
+            -0.46552142257186,
+            -0.11339805112158421
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 193,
+        "df_model": 47,
+        "n_entities": 40,
+        "f_statistic": 229.24651316282473,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.5935993809060993,
+        "r_squared_between": 0.6335406795904788,
+        "r_squared_overall": 0.6173821389724907,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:24.936918+00:00",
+          "cov_type_requested": "hc1",
+          "cov_type_linearmodels": "robust",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "cluster": {
+        "coef": {
+          "x1": 1.631113967094485,
+          "x2": -0.2894597368467221
+        },
+        "se": {
+          "x1": 0.08413465909648116,
+          "x2": 0.08712528755662527
+        },
+        "t_stats": {
+          "x1": 19.38694450789906,
+          "x2": -3.3223389553646383
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.0010677730062329527
+        },
+        "conf_int": {
+          "x1": [
+            1.4651725139262182,
+            1.7970554202627518
+          ],
+          "x2": [
+            -0.46129970125746744,
+            -0.1176197724359768
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 193,
+        "df_model": 47,
+        "n_entities": 40,
+        "f_statistic": 200.38732533515866,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.5935993809060993,
+        "r_squared_between": 0.6335406795904788,
+        "r_squared_overall": 0.6173821389724907,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:24.993142+00:00",
+          "cov_type_requested": "cluster",
+          "cov_type_linearmodels": "clustered",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hac": {
+        "coef": {
+          "x1": 1.631113967094485,
+          "x2": -0.2894597368467221
+        },
+        "se": {
+          "x1": 0.028444346974805208,
+          "x2": 0.08223459762981553
+        },
+        "t_stats": {
+          "x1": 57.344046904618914,
+          "x2": -3.5199264687807466
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.000538461220974229
+        },
+        "conf_int": {
+          "x1": [
+            1.5750122805587516,
+            1.6872156536302183
+          ],
+          "x2": [
+            -0.45165363859832536,
+            -0.12726583509511885
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 193,
+        "df_model": 47,
+        "n_entities": 40,
+        "f_statistic": 1928.2894592896175,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.5935993809060993,
+        "r_squared_between": 0.6335406795904788,
+        "r_squared_overall": 0.6173821389724907,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.044213+00:00",
+          "cov_type_requested": "hac",
+          "cov_type_linearmodels": "kernel",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": 2,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      }
+    }
+  },
+  "small_panel": {
+    "one_way": {
+      "classical": {
+        "coef": {
+          "x1": 1.4649410502155864,
+          "x2": -0.47794693186688025
+        },
+        "se": {
+          "x1": 0.3426329205508127,
+          "x2": 0.552216036118965
+        },
+        "t_stats": {
+          "x1": 4.275540855387055,
+          "x2": -0.8655071577166499
+        },
+        "p_values": {
+          "x1": 0.0009033245065741546,
+          "x2": 0.4024508509006026
+        },
+        "conf_int": {
+          "x1": [
+            0.7247276279853049,
+            2.205154472445868
+          ],
+          "x2": [
+            -1.6709371478944168,
+            0.7150432841606562
+          ]
+        },
+        "n_obs": 20,
+        "df_resid": 13,
+        "df_model": 7,
+        "n_entities": 5,
+        "f_statistic": 10.38269860124945,
+        "f_p_value": 0.0020209924021885595,
+        "r_squared_within": 0.614990461328324,
+        "r_squared_between": 0.5994121909559942,
+        "r_squared_overall": 0.6019611295956919,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.077851+00:00",
+          "cov_type_requested": "classical",
+          "cov_type_linearmodels": "unadjusted",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hc1": {
+        "coef": {
+          "x1": 1.4649410502155864,
+          "x2": -0.47794693186688025
+        },
+        "se": {
+          "x1": 0.328132000934408,
+          "x2": 0.6758921879812659
+        },
+        "t_stats": {
+          "x1": 4.464486993173279,
+          "x2": -0.7071348661306436
+        },
+        "p_values": {
+          "x1": 0.0006374461690472621,
+          "x2": 0.4919648141617552
+        },
+        "conf_int": {
+          "x1": [
+            0.756054960214472,
+            2.1738271402167006
+          ],
+          "x2": [
+            -1.9381232299296642,
+            0.9822293661959036
+          ]
+        },
+        "n_obs": 20,
+        "df_resid": 13,
+        "df_model": 7,
+        "n_entities": 5,
+        "f_statistic": 13.527897777719705,
+        "f_p_value": 0.0006657435056205419,
+        "r_squared_within": 0.614990461328324,
+        "r_squared_between": 0.5994121909559942,
+        "r_squared_overall": 0.6019611295956919,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.117341+00:00",
+          "cov_type_requested": "hc1",
+          "cov_type_linearmodels": "robust",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "cluster": {
+        "coef": {
+          "x1": 1.4649410502155864,
+          "x2": -0.47794693186688025
+        },
+        "se": {
+          "x1": 0.32090047492744883,
+          "x2": 0.6433622537015488
+        },
+        "t_stats": {
+          "x1": 4.56509467786481,
+          "x2": -0.7428892962200367
+        },
+        "p_values": {
+          "x1": 0.0005303444872082341,
+          "x2": 0.4707609330945288
+        },
+        "conf_int": {
+          "x1": [
+            0.7716777223383021,
+            2.158204378092871
+          ],
+          "x2": [
+            -1.8678465795149686,
+            0.911952715781208
+          ]
+        },
+        "n_obs": 20,
+        "df_resid": 13,
+        "df_model": 7,
+        "n_entities": 5,
+        "f_statistic": 13.32881965981467,
+        "f_p_value": 0.0007104069622447806,
+        "r_squared_within": 0.614990461328324,
+        "r_squared_between": 0.5994121909559942,
+        "r_squared_overall": 0.6019611295956919,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.156617+00:00",
+          "cov_type_requested": "cluster",
+          "cov_type_linearmodels": "clustered",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hac": {
+        "coef": {
+          "x1": 1.4649410502155864,
+          "x2": -0.47794693186688025
+        },
+        "se": {
+          "x1": 0.3157643664085558,
+          "x2": 0.3415107075377621
+        },
+        "t_stats": {
+          "x1": 4.639348850149081,
+          "x2": -1.399507896290578
+        },
+        "p_values": {
+          "x1": 0.0004633805466556229,
+          "x2": 0.18506822516353272
+        },
+        "conf_int": {
+          "x1": [
+            0.7827736101987102,
+            2.147108490232463
+          ],
+          "x2": [
+            -1.2157359602778925,
+            0.2598420965441321
+          ]
+        },
+        "n_obs": 20,
+        "df_resid": 13,
+        "df_model": 7,
+        "n_entities": 5,
+        "f_statistic": 1006.951535053644,
+        "f_p_value": 5.551115123125783e-15,
+        "r_squared_within": 0.614990461328324,
+        "r_squared_between": 0.5994121909559942,
+        "r_squared_overall": 0.6019611295956919,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.194558+00:00",
+          "cov_type_requested": "hac",
+          "cov_type_linearmodels": "kernel",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": 1,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      }
+    },
+    "two_way": {
+      "classical": {
+        "coef": {
+          "x1": 1.7532529173823796,
+          "x2": -0.4075141502900115
+        },
+        "se": {
+          "x1": 0.49941438483898876,
+          "x2": 0.5243513005924494
+        },
+        "t_stats": {
+          "x1": 3.510617576519404,
+          "x2": -0.7771777238457748
+        },
+        "p_values": {
+          "x1": 0.005625852136443843,
+          "x2": 0.4550457545847981
+        },
+        "conf_int": {
+          "x1": [
+            0.6404883232818039,
+            2.8660175114829554
+          ],
+          "x2": [
+            -1.5758416552295813,
+            0.7608133546495583
+          ]
+        },
+        "n_obs": 20,
+        "df_resid": 10,
+        "df_model": 10,
+        "n_entities": 5,
+        "f_statistic": 7.006099924261681,
+        "f_p_value": 0.012526803177492885,
+        "r_squared_within": 0.5940185318705196,
+        "r_squared_between": 0.6686137701621617,
+        "r_squared_overall": 0.6564083917296022,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.290539+00:00",
+          "cov_type_requested": "classical",
+          "cov_type_linearmodels": "unadjusted",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hc1": {
+        "coef": {
+          "x1": 1.7532529173823796,
+          "x2": -0.4075141502900115
+        },
+        "se": {
+          "x1": 0.4099432868489043,
+          "x2": 0.5347380384158328
+        },
+        "t_stats": {
+          "x1": 4.276818217610155,
+          "x2": -0.7620818438450284
+        },
+        "p_values": {
+          "x1": 0.0016194934877014067,
+          "x2": 0.4636063620714257
+        },
+        "conf_int": {
+          "x1": [
+            0.8398423528433823,
+            2.6666634819213773
+          ],
+          "x2": [
+            -1.5989847493192573,
+            0.7839564487392343
+          ]
+        },
+        "n_obs": 20,
+        "df_resid": 10,
+        "df_model": 10,
+        "n_entities": 5,
+        "f_statistic": 11.730144396194415,
+        "f_p_value": 0.0023842488126402106,
+        "r_squared_within": 0.5940185318705196,
+        "r_squared_between": 0.6686137701621617,
+        "r_squared_overall": 0.6564083917296022,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.336163+00:00",
+          "cov_type_requested": "hc1",
+          "cov_type_linearmodels": "robust",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "cluster": {
+        "coef": {
+          "x1": 1.7532529173823796,
+          "x2": -0.4075141502900115
+        },
+        "se": {
+          "x1": 0.33103695061960325,
+          "x2": 0.7093509264444708
+        },
+        "t_stats": {
+          "x1": 5.296245371100745,
+          "x2": -0.5744887827702194
+        },
+        "p_values": {
+          "x1": 0.0003494160767383292,
+          "x2": 0.578330742654499
+        },
+        "conf_int": {
+          "x1": [
+            1.0156566262637798,
+            2.4908492085009795
+          ],
+          "x2": [
+            -1.9880465091933945,
+            1.1730182086133716
+          ]
+        },
+        "n_obs": 20,
+        "df_resid": 10,
+        "df_model": 10,
+        "n_entities": 5,
+        "f_statistic": 19.809525871510345,
+        "f_p_value": 0.0003324740076042776,
+        "r_squared_within": 0.5940185318705196,
+        "r_squared_between": 0.6686137701621617,
+        "r_squared_overall": 0.6564083917296022,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.385046+00:00",
+          "cov_type_requested": "cluster",
+          "cov_type_linearmodels": "clustered",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hac": {
+        "coef": {
+          "x1": 1.7532529173823796,
+          "x2": -0.4075141502900115
+        },
+        "se": {
+          "x1": 0.2828017682600909,
+          "x2": 0.2943053614329826
+        },
+        "t_stats": {
+          "x1": 6.199582584540011,
+          "x2": -1.384664378201646
+        },
+        "p_values": {
+          "x1": 0.0001015091487468478,
+          "x2": 0.19626900432410732
+        },
+        "conf_int": {
+          "x1": [
+            1.1231313101116525,
+            2.3833745246531066
+          ],
+          "x2": [
+            -1.0632673604467027,
+            0.2482390598666797
+          ]
+        },
+        "n_obs": 20,
+        "df_resid": 10,
+        "df_model": 10,
+        "n_entities": 5,
+        "f_statistic": 552.7763018887076,
+        "f_p_value": 5.7882809656462086e-11,
+        "r_squared_within": 0.5940185318705196,
+        "r_squared_between": 0.6686137701621617,
+        "r_squared_overall": 0.6564083917296022,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.432615+00:00",
+          "cov_type_requested": "hac",
+          "cov_type_linearmodels": "kernel",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": 1,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      }
+    }
+  },
+  "heteroskedastic": {
+    "one_way": {
+      "classical": {
+        "coef": {
+          "x1": 1.5081321609697584,
+          "x2": -0.00407654154344912
+        },
+        "se": {
+          "x1": 0.2152667127009236,
+          "x2": 0.22335123981406418
+        },
+        "t_stats": {
+          "x1": 7.005877230378164,
+          "x2": -0.01825170769968757
+        },
+        "p_values": {
+          "x1": 3.7513325779059414e-11,
+          "x2": 0.9854564314075978
+        },
+        "conf_int": {
+          "x1": [
+            1.0836224411271687,
+            1.9326418808123482
+          ],
+          "x2": [
+            -0.4445290901531938,
+            0.4363760070662956
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 198,
+        "df_model": 42,
+        "n_entities": 40,
+        "f_statistic": 24.573549813847713,
+        "f_p_value": 2.9326319150868585e-10,
+        "r_squared_within": 0.19885768314388896,
+        "r_squared_between": 0.49437062185453184,
+        "r_squared_overall": 0.31421216624323745,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.468446+00:00",
+          "cov_type_requested": "classical",
+          "cov_type_linearmodels": "unadjusted",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hc1": {
+        "coef": {
+          "x1": 1.5081321609697584,
+          "x2": -0.00407654154344912
+        },
+        "se": {
+          "x1": 0.30004496366520705,
+          "x2": 0.2551212530496986
+        },
+        "t_stats": {
+          "x1": 5.026353858925445,
+          "x2": -0.015978839452685637
+        },
+        "p_values": {
+          "x1": 1.1152041958784054e-06,
+          "x2": 0.9872673625985144
+        },
+        "conf_int": {
+          "x1": [
+            0.9164382484852082,
+            2.0998260734543086
+          ],
+          "x2": [
+            -0.507180111524956,
+            0.49902702843805774
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 198,
+        "df_model": 42,
+        "n_entities": 40,
+        "f_statistic": 12.717394450041523,
+        "f_p_value": 6.36685911792334e-06,
+        "r_squared_within": 0.19885768314388896,
+        "r_squared_between": 0.49437062185453184,
+        "r_squared_overall": 0.31421216624323745,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.505520+00:00",
+          "cov_type_requested": "hc1",
+          "cov_type_linearmodels": "robust",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "cluster": {
+        "coef": {
+          "x1": 1.5081321609697584,
+          "x2": -0.00407654154344912
+        },
+        "se": {
+          "x1": 0.3069750952517133,
+          "x2": 0.2132533092179587
+        },
+        "t_stats": {
+          "x1": 4.912881156476622,
+          "x2": -0.019115959130475348
+        },
+        "p_values": {
+          "x1": 1.876043304038788e-06,
+          "x2": 0.9847678494800649
+        },
+        "conf_int": {
+          "x1": [
+            0.9027719078729124,
+            2.1134924140666045
+          ],
+          "x2": [
+            -0.42461579452769577,
+            0.41646271144079755
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 198,
+        "df_model": 42,
+        "n_entities": 40,
+        "f_statistic": 12.466068815743663,
+        "f_p_value": 7.95716711965433e-06,
+        "r_squared_within": 0.19885768314388896,
+        "r_squared_between": 0.49437062185453184,
+        "r_squared_overall": 0.31421216624323745,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.542879+00:00",
+          "cov_type_requested": "cluster",
+          "cov_type_linearmodels": "clustered",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hac": {
+        "coef": {
+          "x1": 1.5081321609697584,
+          "x2": -0.00407654154344912
+        },
+        "se": {
+          "x1": 0.14184154622480422,
+          "x2": 0.17064028691861752
+        },
+        "t_stats": {
+          "x1": 10.632513541409965,
+          "x2": -0.023889678205905276
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.9809646662767544
+        },
+        "conf_int": {
+          "x1": [
+            1.228418152731117,
+            1.7878461692083998
+          ],
+          "x2": [
+            -0.3405821697699663,
+            0.3324290866830681
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 198,
+        "df_model": 42,
+        "n_entities": 40,
+        "f_statistic": 59.43688246200591,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.19885768314388896,
+        "r_squared_between": 0.49437062185453184,
+        "r_squared_overall": 0.31421216624323745,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.583193+00:00",
+          "cov_type_requested": "hac",
+          "cov_type_linearmodels": "kernel",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": 2,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      }
+    },
+    "two_way": {
+      "classical": {
+        "coef": {
+          "x1": 1.571118579512086,
+          "x2": -0.03386586249462181
+        },
+        "se": {
+          "x1": 0.2100130845319344,
+          "x2": 0.22209784515237418
+        },
+        "t_stats": {
+          "x1": 7.481050921249543,
+          "x2": -0.15248172476138855
+        },
+        "p_values": {
+          "x1": 2.5355273436389325e-12,
+          "x2": 0.8789662924974286
+        },
+        "conf_int": {
+          "x1": [
+            1.1569031205581815,
+            1.9853340384659908
+          ],
+          "x2": [
+            -0.47191647761462896,
+            0.40418475262538534
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 193,
+        "df_model": 47,
+        "n_entities": 40,
+        "f_statistic": 28.07437198494054,
+        "f_p_value": 1.9861667865939125e-11,
+        "r_squared_within": 0.1984509732459656,
+        "r_squared_between": 0.5085391089267084,
+        "r_squared_overall": 0.3194949341728933,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.632339+00:00",
+          "cov_type_requested": "classical",
+          "cov_type_linearmodels": "unadjusted",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hc1": {
+        "coef": {
+          "x1": 1.571118579512086,
+          "x2": -0.03386586249462181
+        },
+        "se": {
+          "x1": 0.2990451824546353,
+          "x2": 0.25864232404794496
+        },
+        "t_stats": {
+          "x1": 5.253783279890899,
+          "x2": -0.130937048370877
+        },
+        "p_values": {
+          "x1": 3.9216461611424336e-07,
+          "x2": 0.8959614890794358
+        },
+        "conf_int": {
+          "x1": [
+            0.9813022936626895,
+            2.1609348653614826
+          ],
+          "x2": [
+            -0.5439943109158125,
+            0.47626258592656884
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 193,
+        "df_model": 47,
+        "n_entities": 40,
+        "f_statistic": 13.938739886187175,
+        "f_p_value": 2.2164937985014177e-06,
+        "r_squared_within": 0.1984509732459656,
+        "r_squared_between": 0.5085391089267084,
+        "r_squared_overall": 0.3194949341728933,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.680306+00:00",
+          "cov_type_requested": "hc1",
+          "cov_type_linearmodels": "robust",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "cluster": {
+        "coef": {
+          "x1": 1.571118579512086,
+          "x2": -0.03386586249462181
+        },
+        "se": {
+          "x1": 0.3447968641735407,
+          "x2": 0.24281587680081143
+        },
+        "t_stats": {
+          "x1": 4.556649850276254,
+          "x2": -0.13947136793860854
+        },
+        "p_values": {
+          "x1": 9.204615081914724e-06,
+          "x2": 0.8892231131126649
+        },
+        "conf_int": {
+          "x1": [
+            0.891064802587567,
+            2.251172356436605
+          ],
+          "x2": [
+            -0.5127793076949806,
+            0.44504758270573697
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 193,
+        "df_model": 47,
+        "n_entities": 40,
+        "f_statistic": 10.635675948212242,
+        "f_p_value": 4.1518698678078e-05,
+        "r_squared_within": 0.1984509732459656,
+        "r_squared_between": 0.5085391089267084,
+        "r_squared_overall": 0.3194949341728933,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.732580+00:00",
+          "cov_type_requested": "cluster",
+          "cov_type_linearmodels": "clustered",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hac": {
+        "coef": {
+          "x1": 1.571118579512086,
+          "x2": -0.03386586249462181
+        },
+        "se": {
+          "x1": 0.14714496721439851,
+          "x2": 0.21571999889204033
+        },
+        "t_stats": {
+          "x1": 10.677351792962636,
+          "x2": -0.1569899066779172
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.8754169102747487
+        },
+        "conf_int": {
+          "x1": [
+            1.2808998997412009,
+            1.8613372592829713
+          ],
+          "x2": [
+            -0.45933724941201703,
+            0.3916055244227734
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 193,
+        "df_model": 47,
+        "n_entities": 40,
+        "f_statistic": 58.25226110632389,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.1984509732459656,
+        "r_squared_between": 0.5085391089267084,
+        "r_squared_overall": 0.3194949341728933,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.789424+00:00",
+          "cov_type_requested": "hac",
+          "cov_type_linearmodels": "kernel",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": 2,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      }
+    }
+  },
+  "autocorrelated": {
+    "one_way": {
+      "classical": {
+        "coef": {
+          "x1": 1.5373191890702669,
+          "x2": -0.19826035372992715
+        },
+        "se": {
+          "x1": 0.08711780337270222,
+          "x2": 0.09038958763775193
+        },
+        "t_stats": {
+          "x1": 17.646441135497863,
+          "x2": -2.1933981436499232
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.029443182012659275
+        },
+        "conf_int": {
+          "x1": [
+            1.3655213581885906,
+            1.7091170199519432
+          ],
+          "x2": [
+            -0.37651020036599125,
+            -0.020010507093863067
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 198,
+        "df_model": 42,
+        "n_entities": 40,
+        "f_statistic": 156.83539839119453,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.6130324395194897,
+        "r_squared_between": 0.533347212940378,
+        "r_squared_overall": 0.5608518535050777,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.826488+00:00",
+          "cov_type_requested": "classical",
+          "cov_type_linearmodels": "unadjusted",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hc1": {
+        "coef": {
+          "x1": 1.5373191890702669,
+          "x2": -0.19826035372992715
+        },
+        "se": {
+          "x1": 0.07879245647005394,
+          "x2": 0.10138314375011057
+        },
+        "t_stats": {
+          "x1": 19.510994553831996,
+          "x2": -1.9555553950723779
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.051924568263562954
+        },
+        "conf_int": {
+          "x1": [
+            1.3819390877896636,
+            1.6926992903508702
+          ],
+          "x2": [
+            -0.3981896851631367,
+            0.0016689777032824205
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 198,
+        "df_model": 42,
+        "n_entities": 40,
+        "f_statistic": 194.9044239464096,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.6130324395194897,
+        "r_squared_between": 0.533347212940378,
+        "r_squared_overall": 0.5608518535050777,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.863456+00:00",
+          "cov_type_requested": "hc1",
+          "cov_type_linearmodels": "robust",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "cluster": {
+        "coef": {
+          "x1": 1.5373191890702669,
+          "x2": -0.19826035372992715
+        },
+        "se": {
+          "x1": 0.0807705875087638,
+          "x2": 0.12403265500249801
+        },
+        "t_stats": {
+          "x1": 19.033155960435028,
+          "x2": -1.598452872962642
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.11153678493340613
+        },
+        "conf_int": {
+          "x1": [
+            1.378038178807877,
+            1.6966001993326567
+          ],
+          "x2": [
+            -0.44285491721729503,
+            0.046334209757440736
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 198,
+        "df_model": 42,
+        "n_entities": 40,
+        "f_statistic": 189.14734922031835,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.6130324395194897,
+        "r_squared_between": 0.533347212940378,
+        "r_squared_overall": 0.5608518535050777,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.901383+00:00",
+          "cov_type_requested": "cluster",
+          "cov_type_linearmodels": "clustered",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hac": {
+        "coef": {
+          "x1": 1.5373191890702669,
+          "x2": -0.19826035372992715
+        },
+        "se": {
+          "x1": 0.03256692303860862,
+          "x2": 0.05856794623732521
+        },
+        "t_stats": {
+          "x1": 47.204925907423,
+          "x2": -3.3851341299650404
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.0008577845987922661
+        },
+        "conf_int": {
+          "x1": [
+            1.4730966476387806,
+            1.6015417305017532
+          ],
+          "x2": [
+            -0.3137573673509101,
+            -0.0827633401089442
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 198,
+        "df_model": 42,
+        "n_entities": 40,
+        "f_statistic": 1140.7688644360728,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.6130324395194897,
+        "r_squared_between": 0.533347212940378,
+        "r_squared_overall": 0.5608518535050777,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.936627+00:00",
+          "cov_type_requested": "hac",
+          "cov_type_linearmodels": "kernel",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": 2,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      }
+    },
+    "two_way": {
+      "classical": {
+        "coef": {
+          "x1": 1.6218817443896314,
+          "x2": -0.29986638338465116
+        },
+        "se": {
+          "x1": 0.07342697891281634,
+          "x2": 0.07765217976266404
+        },
+        "t_stats": {
+          "x1": 22.08836272993576,
+          "x2": -3.8616608613069476
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.0001536100871806223
+        },
+        "conf_int": {
+          "x1": [
+            1.4770593880218972,
+            1.7667041007573656
+          ],
+          "x2": [
+            -0.4530222372251391,
+            -0.14671052954416317
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 193,
+        "df_model": 47,
+        "n_entities": 40,
+        "f_statistic": 246.28054487023488,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.6088811661597141,
+        "r_squared_between": 0.550801610559106,
+        "r_squared_overall": 0.5708487054790942,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:25.986096+00:00",
+          "cov_type_requested": "classical",
+          "cov_type_linearmodels": "unadjusted",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hc1": {
+        "coef": {
+          "x1": 1.6218817443896314,
+          "x2": -0.29986638338465116
+        },
+        "se": {
+          "x1": 0.06945763749695265,
+          "x2": 0.08691278858693671
+        },
+        "t_stats": {
+          "x1": 23.350660961665866,
+          "x2": -3.450198621629799
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.0006879738594836038
+        },
+        "conf_int": {
+          "x1": [
+            1.4848882458284531,
+            1.7588752429508097
+          ],
+          "x2": [
+            -0.47128722934640577,
+            -0.12844553742289655
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 193,
+        "df_model": 47,
+        "n_entities": 40,
+        "f_statistic": 273.76765592216964,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.6088811661597141,
+        "r_squared_between": 0.550801610559106,
+        "r_squared_overall": 0.5708487054790942,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:26.035814+00:00",
+          "cov_type_requested": "hc1",
+          "cov_type_linearmodels": "robust",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "cluster": {
+        "coef": {
+          "x1": 1.6218817443896314,
+          "x2": -0.29986638338465116
+        },
+        "se": {
+          "x1": 0.07763242928787861,
+          "x2": 0.11254797729424287
+        },
+        "t_stats": {
+          "x1": 20.891807190205615,
+          "x2": -2.664342714935581
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.008366447674180266
+        },
+        "conf_int": {
+          "x1": [
+            1.4687648450361748,
+            1.774998643743088
+          ],
+          "x2": [
+            -0.5218483240488272,
+            -0.0778844427204751
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 193,
+        "df_model": 47,
+        "n_entities": 40,
+        "f_statistic": 224.53369844895641,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.6088811661597141,
+        "r_squared_between": 0.550801610559106,
+        "r_squared_overall": 0.5708487054790942,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:26.087646+00:00",
+          "cov_type_requested": "cluster",
+          "cov_type_linearmodels": "clustered",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hac": {
+        "coef": {
+          "x1": 1.6218817443896314,
+          "x2": -0.29986638338465116
+        },
+        "se": {
+          "x1": 0.03500786517894309,
+          "x2": 0.083910226772128
+        },
+        "t_stats": {
+          "x1": 46.32906737098549,
+          "x2": -3.5736571681421805
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.0004446808320939244
+        },
+        "conf_int": {
+          "x1": [
+            1.5528346229952148,
+            1.690928865784048
+          ],
+          "x2": [
+            -0.46536518157052376,
+            -0.13436758519877853
+          ]
+        },
+        "n_obs": 240,
+        "df_resid": 193,
+        "df_model": 47,
+        "n_entities": 40,
+        "f_statistic": 1075.1150998312817,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.6088811661597141,
+        "r_squared_between": 0.550801610559106,
+        "r_squared_overall": 0.5708487054790942,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:26.136202+00:00",
+          "cov_type_requested": "hac",
+          "cov_type_linearmodels": "kernel",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": 2,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      }
+    }
+  },
+  "cross_sectionally_correlated": {
+    "one_way": {
+      "classical": {
+        "coef": {
+          "x1": 1.836157768714259,
+          "x2": -0.14351768668823223
+        },
+        "se": {
+          "x1": 0.14540674974463166,
+          "x2": 0.14024213407213973
+        },
+        "t_stats": {
+          "x1": 12.627734076574729,
+          "x2": -1.0233564088122586
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.3068303638707892
+        },
+        "conf_int": {
+          "x1": [
+            1.5501990343418286,
+            2.1221165030866893
+          ],
+          "x2": [
+            -0.4193196232241142,
+            0.13228424984764975
+          ]
+        },
+        "n_obs": 375,
+        "df_resid": 358,
+        "df_model": 17,
+        "n_entities": 15,
+        "f_statistic": 79.75156397182246,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.3082167417566113,
+        "r_squared_between": 0.6864435994251286,
+        "r_squared_overall": 0.4522404117614135,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:26.173696+00:00",
+          "cov_type_requested": "classical",
+          "cov_type_linearmodels": "unadjusted",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hc1": {
+        "coef": {
+          "x1": 1.836157768714259,
+          "x2": -0.14351768668823223
+        },
+        "se": {
+          "x1": 0.13901171197355136,
+          "x2": 0.13898189067010597
+        },
+        "t_stats": {
+          "x1": 13.208655174778437,
+          "x2": -1.032635877928101
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.3024714129204844
+        },
+        "conf_int": {
+          "x1": [
+            1.562775595680925,
+            2.1095399417475926
+          ],
+          "x2": [
+            -0.41684121277288216,
+            0.1298058393964177
+          ]
+        },
+        "n_obs": 375,
+        "df_resid": 358,
+        "df_model": 17,
+        "n_entities": 15,
+        "f_statistic": 87.42028329745234,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.3082167417566113,
+        "r_squared_between": 0.6864435994251286,
+        "r_squared_overall": 0.4522404117614135,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:26.215002+00:00",
+          "cov_type_requested": "hc1",
+          "cov_type_linearmodels": "robust",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "cluster": {
+        "coef": {
+          "x1": 1.836157768714259,
+          "x2": -0.14351768668823223
+        },
+        "se": {
+          "x1": 0.1362585899532116,
+          "x2": 0.17430711681319938
+        },
+        "t_stats": {
+          "x1": 13.475537720922826,
+          "x2": -0.8233610268594861
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.4108508554504875
+        },
+        "conf_int": {
+          "x1": [
+            1.5681899199120344,
+            2.1041256175164835
+          ],
+          "x2": [
+            -0.48631224473693874,
+            0.19927687136047428
+          ]
+        },
+        "n_obs": 375,
+        "df_resid": 358,
+        "df_model": 17,
+        "n_entities": 15,
+        "f_statistic": 95.17368078806996,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.3082167417566113,
+        "r_squared_between": 0.6864435994251286,
+        "r_squared_overall": 0.4522404117614135,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:26.259018+00:00",
+          "cov_type_requested": "cluster",
+          "cov_type_linearmodels": "clustered",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hac": {
+        "coef": {
+          "x1": 1.836157768714259,
+          "x2": -0.14351768668823223
+        },
+        "se": {
+          "x1": 0.13782093062587816,
+          "x2": 0.11400309661006111
+        },
+        "t_stats": {
+          "x1": 13.322778770799346,
+          "x2": -1.2588928805953712
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.2088892886742184
+        },
+        "conf_int": {
+          "x1": [
+            1.565117401186467,
+            2.107198136242051
+          ],
+          "x2": [
+            -0.3677176036687338,
+            0.08068223029226934
+          ]
+        },
+        "n_obs": 375,
+        "df_resid": 358,
+        "df_model": 17,
+        "n_entities": 15,
+        "f_statistic": 90.27285892880414,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.3082167417566113,
+        "r_squared_between": 0.6864435994251286,
+        "r_squared_overall": 0.4522404117614135,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:26.295186+00:00",
+          "cov_type_requested": "hac",
+          "cov_type_linearmodels": "kernel",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": 2,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      }
+    },
+    "two_way": {
+      "classical": {
+        "coef": {
+          "x1": 1.7569873722004752,
+          "x2": -0.4226258073219361
+        },
+        "se": {
+          "x1": 0.05482046077605535,
+          "x2": 0.05257476996835903
+        },
+        "t_stats": {
+          "x1": 32.0498468514861,
+          "x2": -8.038566931938725
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 1.5987211554602254e-14
+        },
+        "conf_int": {
+          "x1": [
+            1.6491504844043772,
+            1.8648242599965732
+          ],
+          "x2": [
+            -0.5260452147790136,
+            -0.31920639986485866
+          ]
+        },
+        "n_obs": 375,
+        "df_resid": 334,
+        "df_model": 41,
+        "n_entities": 15,
+        "f_statistic": 525.4826833332887,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.299499113283878,
+        "r_squared_between": 0.6676994570472325,
+        "r_squared_overall": 0.43970482245195597,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:26.351386+00:00",
+          "cov_type_requested": "classical",
+          "cov_type_linearmodels": "unadjusted",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hc1": {
+        "coef": {
+          "x1": 1.7569873722004752,
+          "x2": -0.4226258073219361
+        },
+        "se": {
+          "x1": 0.05703215875641578,
+          "x2": 0.05239889859409664
+        },
+        "t_stats": {
+          "x1": 30.80695892478074,
+          "x2": -8.065547533656556
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 1.3100631690576847e-14
+        },
+        "conf_int": {
+          "x1": [
+            1.6447998710828058,
+            1.8691748733181446
+          ],
+          "x2": [
+            -0.5256992596121944,
+            -0.3195523550316778
+          ]
+        },
+        "n_obs": 375,
+        "df_resid": 334,
+        "df_model": 41,
+        "n_entities": 15,
+        "f_statistic": 474.676653554138,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.299499113283878,
+        "r_squared_between": 0.6676994570472325,
+        "r_squared_overall": 0.43970482245195597,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:26.406004+00:00",
+          "cov_type_requested": "hc1",
+          "cov_type_linearmodels": "robust",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "cluster": {
+        "coef": {
+          "x1": 1.7569873722004752,
+          "x2": -0.4226258073219361
+        },
+        "se": {
+          "x1": 0.0455282064508491,
+          "x2": 0.0448244429659772
+        },
+        "t_stats": {
+          "x1": 38.591183557763614,
+          "x2": -9.428467580572478
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 0.0
+        },
+        "conf_int": {
+          "x1": [
+            1.66742920320489,
+            1.8465455411960603
+          ],
+          "x2": [
+            -0.5107996088226336,
+            -0.3344520058212386
+          ]
+        },
+        "n_obs": 375,
+        "df_resid": 334,
+        "df_model": 41,
+        "n_entities": 15,
+        "f_statistic": 746.3793516499671,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.299499113283878,
+        "r_squared_between": 0.6676994570472325,
+        "r_squared_overall": 0.43970482245195597,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:26.474196+00:00",
+          "cov_type_requested": "cluster",
+          "cov_type_linearmodels": "clustered",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hac": {
+        "coef": {
+          "x1": 1.7569873722004752,
+          "x2": -0.4226258073219361
+        },
+        "se": {
+          "x1": 0.05719495887349465,
+          "x2": 0.04935373881961481
+        },
+        "t_stats": {
+          "x1": 30.71926978890967,
+          "x2": -8.56319738746866
+        },
+        "p_values": {
+          "x1": 0.0,
+          "x2": 4.440892098500626e-16
+        },
+        "conf_int": {
+          "x1": [
+            1.6444796282809377,
+            1.8694951161200126
+          ],
+          "x2": [
+            -0.5197091502940068,
+            -0.3255424643498654
+          ]
+        },
+        "n_obs": 375,
+        "df_resid": 334,
+        "df_model": 41,
+        "n_entities": 15,
+        "f_statistic": 488.21188819422105,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.299499113283878,
+        "r_squared_between": 0.6676994570472325,
+        "r_squared_overall": 0.43970482245195597,
+        "true_beta": [
+          1.64373629133578,
+          -0.3667293614876863
+        ],
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:26.563432+00:00",
+          "cov_type_requested": "hac",
+          "cov_type_linearmodels": "kernel",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": 2,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      }
+    }
+  },
+  "wagepan": {
+    "one_way": {
+      "classical": {
+        "coef": {
+          "married": 0.10734286250585942,
+          "union": 0.08276249391848843,
+          "expersq": 0.0036990922128552974
+        },
+        "se": {
+          "married": 0.018196287632781326,
+          "union": 0.01976950077889506,
+          "expersq": 0.00018911145313167948
+        },
+        "t_stats": {
+          "married": 5.899162767271113,
+          "union": 4.186372475669268,
+          "expersq": 19.56038173044758
+        },
+        "p_values": {
+          "married": 3.971410977854362e-09,
+          "union": 2.8984895491079854e-05,
+          "expersq": 0.0
+        },
+        "conf_int": {
+          "married": [
+            0.07166746670454882,
+            0.14301825830717002
+          ],
+          "union": [
+            0.04400267766834292,
+            0.12152231016863393
+          ],
+          "expersq": [
+            0.00332832285169839,
+            0.004069861574012205
+          ]
+        },
+        "n_obs": 4360,
+        "df_resid": 3812,
+        "df_model": 548,
+        "n_entities": 545,
+        "f_statistic": 200.87349544111427,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.13650561541819595,
+        "r_squared_between": 0.2655054178259577,
+        "r_squared_overall": 0.25986980681865945,
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:26.640995+00:00",
+          "cov_type_requested": "classical",
+          "cov_type_linearmodels": "unadjusted",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hc1": {
+        "coef": {
+          "married": 0.10734286250585942,
+          "union": 0.08276249391848843,
+          "expersq": 0.0036990922128552974
+        },
+        "se": {
+          "married": 0.01826966278148762,
+          "union": 0.0201479228000865,
+          "expersq": 0.00018616624637077226
+        },
+        "t_stats": {
+          "married": 5.875470378940347,
+          "union": 4.107743251732785,
+          "expersq": 19.86983293141182
+        },
+        "p_values": {
+          "married": 4.577408230233004e-09,
+          "union": 4.079340059015557e-05,
+          "expersq": 0.0
+        },
+        "conf_int": {
+          "married": [
+            0.07152360837888896,
+            0.14316211663282988
+          ],
+          "union": [
+            0.04326074856399005,
+            0.12226423927298681
+          ],
+          "expersq": [
+            0.00333409718430032,
+            0.004064087241410275
+          ]
+        },
+        "n_obs": 4360,
+        "df_resid": 3812,
+        "df_model": 548,
+        "n_entities": 545,
+        "f_statistic": 192.22921381469112,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.13650561541819595,
+        "r_squared_between": 0.2655054178259577,
+        "r_squared_overall": 0.25986980681865945,
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:26.706721+00:00",
+          "cov_type_requested": "hc1",
+          "cov_type_linearmodels": "robust",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "cluster": {
+        "coef": {
+          "married": 0.10734286250585942,
+          "union": 0.08276249391848843,
+          "expersq": 0.0036990922128552974
+        },
+        "se": {
+          "married": 0.021792913274256167,
+          "union": 0.02376983188030707,
+          "expersq": 0.0002364178692218134
+        },
+        "t_stats": {
+          "married": 4.925585723899653,
+          "union": 3.481829166282655,
+          "expersq": 15.64641549740351
+        },
+        "p_values": {
+          "married": 8.767745736104615e-07,
+          "union": 0.0005035937639359389,
+          "expersq": 0.0
+        },
+        "conf_int": {
+          "married": [
+            0.06461597104245562,
+            0.15006975396926323
+          ],
+          "union": [
+            0.036159682533331836,
+            0.12936530530364504
+          ],
+          "expersq": [
+            0.0032355745311609305,
+            0.004162609894549665
+          ]
+        },
+        "n_obs": 4360,
+        "df_resid": 3812,
+        "df_model": 548,
+        "n_entities": 545,
+        "f_statistic": 114.80684247954736,
+        "f_p_value": 0.0,
+        "r_squared_within": 0.13650561541819595,
+        "r_squared_between": 0.2655054178259577,
+        "r_squared_overall": 0.25986980681865945,
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:26.777155+00:00",
+          "cov_type_requested": "cluster",
+          "cov_type_linearmodels": "clustered",
+          "effects": "one_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      }
+    },
+    "two_way": {
+      "classical": {
+        "coef": {
+          "married": 0.04668035979691523,
+          "union": 0.08000185534923389,
+          "expersq": -0.005185497688901239
+        },
+        "se": {
+          "married": 0.01831043520135421,
+          "union": 0.01931030683420419,
+          "expersq": 0.0007044368746858012
+        },
+        "t_stats": {
+          "married": 2.5493855980803137,
+          "union": 4.142961374778739,
+          "expersq": -7.3611956943822925
+        },
+        "p_values": {
+          "married": 0.010830193542771704,
+          "union": 3.503024006445976e-05,
+          "expersq": 2.2226664952995634e-13
+        },
+        "conf_int": {
+          "married": [
+            0.010781146838059474,
+            0.08257957275577099
+          ],
+          "union": [
+            0.04214230642433044,
+            0.11786140427413733
+          ],
+          "expersq": [
+            -0.006566607919342187,
+            -0.003804387458460291
+          ]
+        },
+        "n_obs": 4360,
+        "df_resid": 3805,
+        "df_model": 555,
+        "n_entities": 545,
+        "f_statistic": 27.958970224971853,
+        "f_p_value": 0.0,
+        "r_squared_within": -0.4809361220456627,
+        "r_squared_between": -0.2716784656808051,
+        "r_squared_overall": -0.28082029946318277,
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:26.874623+00:00",
+          "cov_type_requested": "classical",
+          "cov_type_linearmodels": "unadjusted",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "hc1": {
+        "coef": {
+          "married": 0.04668035979691523,
+          "union": 0.08000185534923389,
+          "expersq": -0.005185497688901239
+        },
+        "se": {
+          "married": 0.018117196127043524,
+          "union": 0.019505314695228523,
+          "expersq": 0.0006647064469960378
+        },
+        "t_stats": {
+          "married": 2.576577494087813,
+          "union": 4.101541379837584,
+          "expersq": -7.801184586573069
+        },
+        "p_values": {
+          "married": 0.010015737456299023,
+          "union": 4.189915092522867e-05,
+          "expersq": 7.771561172376096e-15
+        },
+        "conf_int": {
+          "married": [
+            0.011160008978929749,
+            0.08220071061490072
+          ],
+          "union": [
+            0.04175997642208966,
+            0.11824373427637812
+          ],
+          "expersq": [
+            -0.006488712933838197,
+            -0.0038822824439642806
+          ]
+        },
+        "n_obs": 4360,
+        "df_resid": 3805,
+        "df_model": 555,
+        "n_entities": 545,
+        "f_statistic": 31.024974251760796,
+        "f_p_value": 0.0,
+        "r_squared_within": -0.4809361220456627,
+        "r_squared_between": -0.2716784656808051,
+        "r_squared_overall": -0.28082029946318277,
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:26.974849+00:00",
+          "cov_type_requested": "hc1",
+          "cov_type_linearmodels": "robust",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      },
+      "cluster": {
+        "coef": {
+          "married": 0.04668035979691523,
+          "union": 0.08000185534923389,
+          "expersq": -0.005185497688901239
+        },
+        "se": {
+          "married": 0.02243710047278754,
+          "union": 0.024295063754022874,
+          "expersq": 0.0008655286731508024
+        },
+        "t_stats": {
+          "married": 2.080498763801086,
+          "union": 3.29292633924399,
+          "expersq": -5.991133338222478
+        },
+        "p_values": {
+          "married": 0.03754655984728639,
+          "union": 0.0010005650776045982,
+          "expersq": 2.2772579377772217e-09
+        },
+        "conf_int": {
+          "married": [
+            0.002690457907949126,
+            0.09067026168588134
+          ],
+          "union": [
+            0.03236925361346847,
+            0.12763445708499932
+          ],
+          "expersq": [
+            -0.0068824425084945216,
+            -0.003488552869307956
+          ]
+        },
+        "n_obs": 4360,
+        "df_resid": 3805,
+        "df_model": 555,
+        "n_entities": 545,
+        "f_statistic": 18.496496988189683,
+        "f_p_value": 6.5498717560785735e-12,
+        "r_squared_within": -0.4809361220456627,
+        "r_squared_between": -0.2716784656808051,
+        "r_squared_overall": -0.28082029946318277,
+        "_meta": {
+          "reference": "linearmodels",
+          "linearmodels_version": "7.0",
+          "generated_at": "2026-09-21T09:53:27.084962+00:00",
+          "cov_type_requested": "cluster",
+          "cov_type_linearmodels": "clustered",
+          "effects": "two_way",
+          "confidence_level": 0.95,
+          "hac_bandwidth": null,
+          "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+        }
+      }
+    }
+  },
+  "_meta": {
+    "method": "fe",
+    "generated_at": "2026-09-21T09:53:27.085302+00:00",
+    "primary_reference": "linearmodels",
+    "linearmodels_version": "7.0",
+    "note": "singleton_entity/singleton_time/unbalanced_two_way/zero_variance_regressorシナリオはここに含まない（いずれもValidationErrorの発生確認のみ、テストコード側で対応）。unbalancedは1-way専用（2-way FEはバランスパネル必須のため、2-way要求時のValidationErrorはunbalanced_two_wayシナリオで確認）。hc2/hc3はlinearmodels.PanelOLSが提供しないため対象外（generate_fe_crosscheck_fixtures.pyのfixestクロスチェックのみで検証する単一参照実装の例外、panel-common.md5.4節と同型）。aic/bicも同じ理由でlinearmodelsに無く、generate_fe_crosscheck_fixtures.py側のみに含まれる。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため、この値をそのまま数値比較に使わないこと（fixestのfitstat(m,'wr2')で検証、linearmodels_ref.pyモジュールdoc参照）。wagepan（Wooldridge、N=545人×T=8年、1980-1987、バランスパネル）はmarried/union/expersqのみ使用——educ/black/hisp等の時間不変変数はwithin変換で分散ゼロになり除外、exper自体も2-way FEでentity+time効果と完全共線になるため除外している（benchmark/common/constants.pyのWAGEPAN_X参照）。hacはwagepan（T=8）には適用しない（Driscoll-Kraay HACはfixestドキュメントが20時点以上を推奨するほど時点数に依存するため、合成データのcross_sectionally_correlatedシナリオ（T=25）でのみ数値照合する）。"
+  }
+}

@@ -10,7 +10,7 @@ validation に分けた際、`_our_fit` を両方が使うためここへ集約�
 from __future__ import annotations
 
 import polars as pl
-from econometricsmodels import IV, IvOptions, IvResults
+from econometricsmodels import IV, IVOptions, IVResults
 
 
 def our_fit(
@@ -19,8 +19,8 @@ def our_fit(
     x_exog: list[str] | None = None,
     x_endog: list[str] | None = None,
     instruments: list[str] | None = None,
-    options: IvOptions | None = None,
-) -> IvResults:
+    options: IVOptions | None = None,
+) -> IVResults:
     """既定は `x_exog=["x1"], x_endog=["endog1"], instruments=["z1", "z2"]`
     （IV テストの大半が使う共通パターン）。異なる変数構成が必要なテストのみ
     明示的に上書きする。

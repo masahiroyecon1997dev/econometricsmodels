@@ -2,7 +2,7 @@
 生成するスクリプト。
 
 主リファレンスは R `AER::tobit`（`survival::survreg` エンジン、
-`docs/planning/specs/nonlinear-api-design.md` 9章）。交差検証（`censReg`）は
+`docs/spec/nonlinear-common.md` 8章）。交差検証（`censReg`）は
 `generate_tobit_crosscheck_fixtures.py` が担う。両者は生成ロジックを共有する
 （`_tobit_fixtures.build`）——`run_tobit_crosscheck.R` の `engine` 引数を
 切り替えるだけの違いしかないため。

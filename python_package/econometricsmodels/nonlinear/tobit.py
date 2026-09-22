@@ -12,14 +12,14 @@ separate class; same policy as `LogitOptions`/`OLSOptions`, see
 `docs/spec/ols-spec.md`, "API引数").
 
 `summary()` is not implemented (structured-data-only output policy; see
-`docs/planning/specs/nonlinear-api-design.md` section 5 and the
-`OlsResults`/`WlsResults`/`LogitResults` precedent).
+`docs/spec/nonlinear-common.md` section 5 and the
+`OLSResults`/`WLSResults`/`LogitResults` precedent).
 
 Unlike Logit/Probit, Tobit does not have `log_likelihood_null`,
 `lr_statistic`, `lr_p_value`, or `pseudo_r_squared` (no closed form
 exists for the intercept-only model under censoring); `wald_statistic`/
 `wald_p_value` provide the overall model significance test instead (see
-`docs/planning/specs/nonlinear-api-design.md` section 5). There is no
+`docs/spec/nonlinear-common.md` section 5). There is no
 `pred_table()`; `censoring_fit_check()` takes its place (`y` is
 continuous, so a classification table is not meaningful).
 """
@@ -102,12 +102,12 @@ class TobitResults:
     `beta` in a unified `(k+1)`-length representation (see
     `engine_pybind/src/nonlinear/tobit.rs`, `TobitResult`). Use
     `coef_table()` for a row-oriented listing
-    (`docs/planning/specs/nonlinear-api-design.md` section 5).
+    (`docs/spec/nonlinear-common.md` section 5).
 
     `marginal_effects()`, `predict()`, and `censoring_fit_check()` are
     provided as separate methods rather than fields on this class (they
     depend on a representative point / prediction target not fixed at
-    `fit()` time; see `docs/planning/specs/nonlinear-api-design.md`
+    `fit()` time; see `docs/spec/nonlinear-common.md`
     section 6).
 
     Args:
@@ -143,7 +143,7 @@ class TobitResults:
         """Coefficient name to z-statistic (includes `"sigma"`).
 
         Tobit uses a z-test (standard normal), not a t-test (see
-        `docs/planning/specs/nonlinear-api-design.md` section 5).
+        `docs/spec/nonlinear-common.md` section 4).
         """
         return dict(zip(self._raw.param_names, self._raw.z_stats))
 
@@ -237,6 +237,11 @@ class TobitResults:
         return self._raw.cov_type
 
     @property
+    def method(self) -> str:
+        """Optimization solver actually used (normalized to lowercase)."""
+        return self._raw.method
+
+    @property
     def lower(self) -> float | None:
         """Lower censoring bound actually used (echoes
         `TobitOptions.lower`). `None` means no censoring from below."""
@@ -283,12 +288,11 @@ class TobitResults:
         ]
 
     def predict(
-        self, target: str = "expected_observed"
+        self,
+        target: str = "expected_observed",
+        new_data: pl.DataFrame | None = None,
     ) -> list[dict[str, float]]:
-        """Predicted values for the training data used in `fit()`.
-
-        Out-of-sample prediction (a `new_data` argument) is not yet
-        supported (same limitation as Logit/Probit's `predict()`).
+        """Predicted values for `target`, on the training data or `new_data`.
 
         Args:
             target: Which quantity to predict. One of
@@ -297,7 +301,17 @@ class TobitResults:
                 censoring-adjusted conditional expectation, directly
                 comparable to the observed `y`), or
                 `"prob_uncensored"` (`P(uncensored|x)`).
-                Case-insensitive.
+                Case-insensitive. Independent of `new_data`: the same
+                three targets are available whether predicting on the
+                training data or new data.
+            new_data: New data to predict on. Must contain columns with
+                the same names as the `x` columns passed at fit time
+                (matched by name; column order does not matter). If
+                `include_intercept=True` was used at fit time, the
+                constant column is added automatically and must not be
+                included here. If `None` (default), returns the
+                predicted values for the training data used in
+                `fit()`.
 
         Returns:
             Row-oriented predictions, one dict per observation. Each
@@ -305,9 +319,52 @@ class TobitResults:
 
         Raises:
             ValidationError: `target` is not one of the three known
+                values, or `new_data` is missing a required `x`
+                column, or a column contains missing/NaN/infinite
                 values. A subclass of `ValueError`.
         """
-        return [{"predicted": p} for p in self._raw.predict(target)]
+        raw = self._raw.predict(target, new_data)
+        return [{"predicted": p} for p in raw]
+
+    def augment(
+        self,
+        target: str = "expected_observed",
+        new_data: pl.DataFrame | None = None,
+    ) -> pl.DataFrame:
+        """Source data with the predicted values appended as a column.
+
+        Same `target`/`new_data` semantics as `predict()`, but returns
+        a polars DataFrame (the training data, or `new_data` when
+        given, plus a new predicted-value column) instead of a
+        row-oriented list. See `OLSResults.augment()` for the
+        project's general policy on this DataFrame-returning
+        exception.
+
+        Unlike Logit/Probit's fixed `"probability"` column, the
+        appended column here is named `"predicted_{target}"`, using
+        the lowercased `target` (e.g. `target="expected_observed"` or
+        `target="Expected_Observed"` both produce
+        `"predicted_expected_observed"`), since `predict()`'s meaning
+        depends on `target`. This also lets `augment()` be called once
+        per `target` on the same DataFrame without a name collision.
+
+        Args:
+            target: Same as `predict()`.
+            new_data: Same as `predict()`. If `None` (default), returns
+                the training data used in `fit()` with the predicted
+                values appended.
+
+        Returns:
+            A polars DataFrame: the source data's columns plus
+            `"predicted_{target}"`, in the same row order as the
+            source.
+
+        Raises:
+            ValidationError: Same as `predict()`, or the source data
+                already has a column named `"predicted_{target}"`
+                (which would otherwise be silently overwritten).
+        """
+        return self._raw.augment(target, new_data)
 
     def marginal_effects(
         self,
@@ -319,7 +376,7 @@ class TobitResults:
 
         Unlike Logit/Probit, this is Tobit's own implementation (not
         the shared `dydx_and_jacobian` pattern) because the formula
-        differs per `target` (`nonlinear-api-design.md` section 6,
+        differs per `target` (`docs/spec/nonlinear-common.md` section 6,
         Issue #211's conclusion). Independent of the `confidence_level`
         used in `fit()` (may differ from it). The constant term
         (intercept) is excluded from the output.
@@ -338,7 +395,7 @@ class TobitResults:
             A list of dictionaries, one per explanatory variable
             (excluding the intercept). Keys are `param`, `dydx`,
             `std_err`, `z`, `p_value`, `conf_low`, `conf_high` (see
-            `docs/planning/specs/nonlinear-api-design.md` section 6).
+            `docs/spec/nonlinear-common.md` section 6).
 
         Raises:
             ValidationError: `at` is not one of `"overall"`, `"mean"`,
@@ -376,7 +433,7 @@ class TobitResults:
         training observations exactly at that boundary) against the
         model-implied average probability. Replaces Logit/Probit's
         `pred_table()`, which is not meaningful for Tobit's continuous
-        `y` (`nonlinear-api-design.md` section 6). A direction is
+        `y` (`docs/spec/nonlinear-common.md` section 6). A direction is
         omitted from the result when the corresponding
         `TobitOptions.lower`/`upper` was `None` (that direction has no
         censoring).

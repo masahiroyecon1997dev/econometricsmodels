@@ -7,16 +7,23 @@ WLS（Weighted Least Squares）の確定済み仕様。`engine/src/linear/wls.rs
 
 ## 1. API引数
 
-3層構成: `WLS(data, y, x, weight, options).fit() -> WlsResults`（python_package）→
+3層構成: `WLS(data, y, x, weight, options).fit() -> WLSResults`（python_package）→
 `fit_wls(data, y, x, weight, options) -> WLSResult`（engine_pybind）→
 `OlsInput::from_columns_weighted` + 既存`OlsEstimator::fit`（engine、無変更で再利用）。
 
-- `weight: str`は`y`/`x`と同格の**必須のトップレベル引数**（`OLSOptions`側には置かない）。
+- `weight: str`は`y`/`x`と同格の**必須のトップレベル引数**（`WLSOptions`側には置かない）。
   理由: `cluster_col`/`time_col`は`cov_type`に応じた条件付き・デフォルトありの「推定方法の設定」
   だが、`weight`はモデルそのものを規定する必須データであり、性質が異なる。この分類はFE
   （`entity_id`）・IV（`instruments`）等、今後の必須データ列にも適用する。
-- 専用の`WLSOptions`型は新設せず、`OLSOptions`をそのまま使う（`cov_type`/`include_intercept`/
-  `confidence_level`/`cluster_col`/`hac_lags`/`time_col`の意味論はOLSと完全に同じ）。
+- 専用の`WLSOptions`型を新設し（Issue #308、2026-09-12）、`OLSOptions`と完全に同一のフィールド
+  構成（`cov_type`/`include_intercept`/`confidence_level`/`cluster_col`/`hac_lags`/`time_col`、
+  意味論もOLSと完全に同じ）を持つ独立したpyclassとして実装する。当初は専用型を新設せず
+  `OLSOptions`をそのまま再利用していたが、`WLSResult`が元から独立型だったのと非対称だった
+  ことと、将来WLS固有のオプションが必要になった際に`OLSOptions`/OLS利用者へ影響を与えずに
+  拡張できるようにするため、独立型に変更した。このフィールド重複自体は意図的に共通base
+  構造体へ切り出さない（PyO3の`#[pyclass]`コンストラクタがフラットなkwargs surface前提の
+  ため。`IVOptions`が`OLSOptions`と同種のフィールドを独立再定義している既存precedentとも
+  一貫している。`engine_pybind/src/linear/CLAUDE.md`参照）。
 - 重みはanalytic weight（分散の逆数に比例、正規化不要）。frequency weight/probability weightは
   対象外。
 - **重みの検証**: 0以下（0を含む）・NaN・無限大は常にエラー（`ValidationError`）とし、該当観測を
@@ -24,8 +31,11 @@ WLS（Weighted Least Squares）の確定済み仕様。`engine/src/linear/wls.rs
   「API引数」）。NaN/Infは既存の`column_extraction::extract_f64_column`が`weight`列にも適用される
   ことで検出されるため、追加実装が必要なのは0以下の値の検証のみ。ゼロ重みの許容（観測除外の手段
   としての活用）は将来の別issue。
-- `weight`は`y`/`x`と重複してはならない（`weight == y`、`x.contains(weight)`はエラー）。
-  `include_intercept=True`時の`"const"`列衝突チェック等、OLSの検証はそのまま踏襲する。
+- `weight`は`y`と重複してはならない（`weight == y`はエラー）。`y`を独立変数としても使うのと
+  同型の致命的な問題のため。一方`x.contains(weight)`は許容する（重みに使った列を説明変数
+  としても含める実務上の利用例があるため、例: 人口規模で重み付けしつつ人口規模自体を
+  説明変数として含める。Issue #277）。`include_intercept=True`時の`"const"`列衝突チェック等、
+  OLSの検証はそのまま踏襲する。
 
 ## 2. 結果構造体
 
@@ -111,7 +121,35 @@ $$
 `weighted_fit_statistics`関数を`WlsEstimator`に持たせている（`residuals`と同じ「WLS固有の後処理を
 `WlsEstimator`層に置く」パターン）。
 
-### 3.5 テスト
+### 3.5 `predict()`（Issue #132）
+
+`WLSResults.predict(new_data: pl.DataFrame | None = None) -> list[dict[str, float]]`。
+OLSの`predict()`（`ols-spec.md`「predict()」）と完全に同じ設計・シグネチャを適用する。
+
+- **重みは予測値の計算に一切関与しない**。「学習データに対する重み付き予測値」という概念自体が
+  存在しない: 予測値は常に$\hat y_i = x_i'\hat\beta$（元スケール）であり、これは`residuals`
+  （`ε_i = y_i - x_i'\hat\beta$、上記「結果構造体」参照）と対をなす値そのもの。`new_data=None`
+  （学習データ）でも`new_data`指定時（新規データ、out-of-sample）でも同じ式を使うため、
+  Issue #132が挙げていた「学習データに対する予測値は変換後（重み付き）データではなく元スケールを
+  返すべきか」という論点は、実装してみると「そもそも重み付きの版という選択肢が存在しない」
+  ことが分かり解消した。
+- **実装**: `WlsEstimator`に`fitted_values`フィールド（`residuals`と同じ`fit()`時点で計算する
+  元スケールの`ŷ_i`）を追加し、`engine_pybind`側の`WLSResult::predict()`は`new_data=None`なら
+  これを返す。`new_data`指定時は`engine::linear::ols::predict_new_data`（OLS用に実装済みの
+  純粋関数、係数と設計行列だけから予測値を計算し重みの概念を持たない）をそのまま再利用する
+  （`WlsEstimator`が内部で`OlsEstimator`をラップする設計のため、この関数はWLS/OLSのどちらで
+  推定した係数にも同じように使える）。
+- 戻り値のキー名は`"predicted"`（OLSと統一、Issue #309）。
+
+### 3.6 `augment()`（Issue #295）
+
+`WLSResults.augment(new_data: pl.DataFrame | None = None) -> pl.DataFrame`。
+OLSの`augment()`（`ols-spec.md`「augment()」）と完全に同じ設計・シグネチャを適用する。
+`predict()`と同様、重みは計算に一切関与しない。`WLSResult`（Rust）は`fit()`時の元DataFrameを
+`training_data: DataFrame`として非公開保持する（`OLSResult`と異なり`IVResult.first_stage()`の
+ような別経路の構築元が無いため`Option`にせず常に保持する）。
+
+### 3.7 テスト
 
 - 許容誤差: classical/HC0-3/clusterはOLSと同じ`RTOL_STRICT=1e-8`（Rとの実測でほぼ機械精度）。
   **HACのみOLSより緩い`RTOL_HAC=5e-2`**（OLSは1e-2。実測最大相対誤差約4.3%、重み付けによる
@@ -126,7 +164,3 @@ $$
 - `tests/linear/` の4ファイル分担（`test_wls_api.py`／`test_wls_validation.py`／
   `test_wls_reference.py`〔statsmodels主リファレンス〕／`test_wls_crosscheck.py`〔Rクロスチェック〕）
   は OLS と同じ（`refactoring-candidates-2.md`項目68）。
-
-## 4. 未実装・未対応
-
-- `predict()`（Issue #132。OLSの`predict(new_data=None)`と同じ設計を適用予定）

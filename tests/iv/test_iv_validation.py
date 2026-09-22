@@ -14,14 +14,16 @@
 
 from __future__ import annotations
 
+import _error_messages as msgs
 import polars as pl
 import pytest
 from _constants import DATA_DIR
+from _error_messages import escaped
 from _iv_helpers import our_fit
 from econometricsmodels import (
     IV,
     ComputationError,
-    IvOptions,
+    IVOptions,
     ValidationError,
 )
 
@@ -34,103 +36,117 @@ COV_TYPES = ["classical", "hc0", "hc1", "hac"]
 # ── ValidationError（入力データ・変数指定） ───────────────────────
 
 
-def test_y_in_x_exog_raises(iv_dataset):
-    with pytest.raises(ValidationError):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["y", "x1"],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-        ).fit()
+_DEFAULT_ROLE_KWARGS = {
+    "y": "y",
+    "x_exog": ["x1"],
+    "x_endog": ["endog1"],
+    "instruments": ["z1", "z2"],
+}
 
 
-def test_y_in_x_endog_raises(iv_dataset):
-    with pytest.raises(ValidationError):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["y"],
-            instruments=["z1", "z2"],
-        ).fit()
+@pytest.mark.parametrize(
+    "field, value, match",
+    [
+        (
+            "x_exog",
+            ["y", "x1"],
+            escaped(
+                msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
+                col="y",
+                single_role="y",
+                multi_role="x_exog",
+            ),
+        ),
+        (
+            "x_endog",
+            ["y"],
+            escaped(
+                msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
+                col="y",
+                single_role="y",
+                multi_role="x_endog",
+            ),
+        ),
+        (
+            "instruments",
+            ["y", "z1"],
+            escaped(
+                msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
+                col="y",
+                single_role="y",
+                multi_role="instruments",
+            ),
+        ),
+        (
+            "x_exog",
+            ["x1", "endog1"],
+            escaped(
+                msgs.ROLE_OVERLAP_MULTI_VS_MULTI,
+                col="endog1",
+                later_role="x_endog",
+                earlier_role="x_exog",
+            ),
+        ),
+        (
+            "instruments",
+            ["x1", "z2"],
+            escaped(
+                msgs.ROLE_OVERLAP_MULTI_VS_MULTI,
+                col="x1",
+                later_role="instruments",
+                earlier_role="x_exog",
+            ),
+        ),
+        (
+            "instruments",
+            ["endog1", "z2"],
+            escaped(
+                msgs.ROLE_OVERLAP_MULTI_VS_MULTI,
+                col="endog1",
+                later_role="instruments",
+                earlier_role="x_endog",
+            ),
+        ),
+    ],
+    ids=[
+        "y_in_x_exog",
+        "y_in_x_endog",
+        "y_in_instruments",
+        "x_exog_overlaps_x_endog",
+        "instruments_overlaps_x_exog",
+        "x_endog_overlaps_instruments",
+    ],
+)
+def test_variable_role_overlap_raises(iv_dataset, field, value, match):
+    """同じ列名が2つの異なるロール（`y`/`x_exog`/`x_endog`/`instruments`）に
+    渡された場合、`ValidationError`になること。
+    """
+    with pytest.raises(ValidationError, match=match):
+        IV(iv_dataset, **{**_DEFAULT_ROLE_KWARGS, field: value}).fit()
 
 
-def test_y_in_instruments_raises(iv_dataset):
-    with pytest.raises(ValidationError):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1"],
-            instruments=["y", "z1"],
-        ).fit()
-
-
-def test_x_exog_overlaps_x_endog_raises(iv_dataset):
-    with pytest.raises(ValidationError):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1", "endog1"],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-        ).fit()
-
-
-def test_instruments_overlaps_x_exog_raises(iv_dataset):
-    with pytest.raises(ValidationError):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1"],
-            instruments=["x1", "z2"],
-        ).fit()
-
-
-def test_x_endog_overlaps_instruments_raises(iv_dataset):
-    with pytest.raises(ValidationError):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1"],
-            instruments=["endog1", "z2"],
-        ).fit()
-
-
-def test_duplicate_instruments_column_raises(iv_dataset):
-    with pytest.raises(ValidationError):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1"],
-            instruments=["z1", "z1"],
-        ).fit()
-
-
-def test_duplicate_x_exog_column_raises(iv_dataset):
-    with pytest.raises(ValidationError):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1", "x1"],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-        ).fit()
-
-
-def test_duplicate_x_endog_column_raises(iv_dataset):
-    with pytest.raises(ValidationError):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["x1"],
-            x_endog=["endog1", "endog1"],
-            instruments=["z1", "z2"],
-        ).fit()
+@pytest.mark.parametrize(
+    "field, value, name, role",
+    [
+        ("instruments", ["z1", "z1"], "z1", "instruments"),
+        ("x_exog", ["x1", "x1"], "x1", "x_exog"),
+        ("x_endog", ["endog1", "endog1"], "endog1", "x_endog"),
+    ],
+    ids=[
+        "duplicate_instruments_column",
+        "duplicate_x_exog_column",
+        "duplicate_x_endog_column",
+    ],
+)
+def test_duplicate_column_within_role_raises(
+    iv_dataset, field, value, name, role
+):
+    """同じロール内で同じ列名を2回渡した場合、`ValidationError`になること。"""
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.DUPLICATE_WITHIN_ROLE, name=name, role=role),
+    ):
+        IV(iv_dataset, **{**_DEFAULT_ROLE_KWARGS, field: value}).fit()
 
 
 def test_const_collision_with_include_intercept_raises():
@@ -145,18 +161,94 @@ def test_const_collision_with_include_intercept_raises():
             "z1": [1.0, 3.0, 2.0, 4.0],
         }
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.CONST_COLLISION, role="x_exog")
+    ):
         IV(
             df, y="y", x_exog=["const"], x_endog=["endog1"], instruments=["z1"]
         ).fit()
 
 
+def test_const_collision_in_x_endog_with_include_intercept_raises():
+    """Issue #305: `x_exog`だけでなく`x_endog`に`"const"`という列名を含めた
+    場合も、自動追加される定数項と衝突し`ValidationError`になること。
+
+    修正前は`fit()`自体は成功していたが、構造方程式本体の`param_names`が
+    `['const', 'x1', 'const']`という重複を持つことになり、`res.params`辞書
+    （`dict(zip(param_names, params))`）構築時の後勝ちにより真の切片係数が
+    サイレントに失われていた（Issue #305背景参照）。
+    """
+    df = pl.DataFrame(
+        {
+            "y": [1.0, 2.0, 3.0, 4.0],
+            "x1": [2.0, 1.0, 4.0, 3.0],
+            "const": [2.0, 1.0, 4.0, 3.0],
+            "z1": [1.0, 3.0, 2.0, 4.0],
+        }
+    )
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.CONST_COLLISION, role="x_endog")
+    ):
+        IV(
+            df, y="y", x_exog=["x1"], x_endog=["const"], instruments=["z1"]
+        ).fit()
+
+
+def test_const_collision_in_instruments_with_include_intercept_raises():
+    """Issue #305: `instruments`に`"const"`という列名を含めた場合も、自動
+    追加される定数項と衝突し`ValidationError`になること。
+
+    修正前は`fit()`自体は成功していたが、`first_stage()[endog名].param_names`
+    に`"const"`が2回出現し、`OlsResults.params`構築時の後勝ちにより真の切片
+    係数が操作変数の係数でサイレントに上書きされていた（Issue #305背景参照）。
+    """
+    df = pl.DataFrame(
+        {
+            "y": [1.0, 2.0, 3.0, 4.0],
+            "x1": [2.0, 1.0, 4.0, 3.0],
+            "endog1": [3.0, 4.0, 1.0, 2.0],
+            "const": [1.0, 3.0, 2.0, 4.0],
+            "z1": [2.0, 4.0, 1.0, 3.0],
+        }
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.CONST_COLLISION, role="instruments"),
+    ):
+        IV(
+            df,
+            y="y",
+            x_exog=["x1"],
+            x_endog=["endog1"],
+            instruments=["const", "z1"],
+        ).fit()
+
+
 def test_missing_column_raises(iv_dataset):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
+    ):
         IV(
             iv_dataset,
             y="y",
             x_exog=["nonexistent"],
+            x_endog=["endog1"],
+            instruments=["z1", "z2"],
+        ).fit()
+
+
+def test_y_empty_string_raises(iv_dataset):
+    """`y`に空文字列を渡した場合`ValidationError`
+    （`test_ols_validation.py::test_y_empty_string_raises`参照）。
+    """
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="")
+    ):
+        IV(
+            iv_dataset,
+            y="",
+            x_exog=["x1"],
             x_endog=["endog1"],
             instruments=["z1", "z2"],
         ).fit()
@@ -176,7 +268,10 @@ def test_null_values_raise(bad_col):
     }
     values[bad_col] = [values[bad_col][0], None, *values[bad_col][2:]]
     df = pl.DataFrame(values)
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name=bad_col, count=1),
+    ):
         IV(
             df, y="y", x_exog=["x1"], x_endog=["endog1"], instruments=["z1"]
         ).fit()
@@ -186,7 +281,9 @@ def test_null_values_raise(bad_col):
 def test_non_numeric_dtype_raises(bad_col):
     """数値/文字列型にキャストできない列は`ValidationError`。`y`列だけでなく
     `x_exog`/`x_endog`/`instruments`側の列でも検証する（`test_null_values_raise`
-    と同じ理由、Issue #231フェーズ4）。
+    と同じ理由、Issue #231フェーズ4）。文字列4件が全て数値キャストでnullになる
+    ため`COLUMN_HAS_MISSING_VALUES`経路（`count=4`）になる
+    （`test_ols_validation.py::test_non_numeric_dtype_raises`参照）。
     """
     values: dict[str, list] = {
         "y": [1.0, 2.0, 3.0, 4.0],
@@ -196,24 +293,96 @@ def test_non_numeric_dtype_raises(bad_col):
     }
     values[bad_col] = ["a", "b", "c", "d"]
     df = pl.DataFrame(values)
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name=bad_col, count=4),
+    ):
         IV(
             df, y="y", x_exog=["x1"], x_endog=["endog1"], instruments=["z1"]
         ).fit()
 
 
 def test_insufficient_observations_raises(iv_dataset):
-    """観測数nが説明変数の数k（定数項込み）以下の場合`ValidationError`。"""
-    df = iv_dataset.head(2)  # n=2、k=3（const, x1, endog1）
-    with pytest.raises(ValidationError):
+    """観測数nが説明変数の数k（定数項込み）以下の場合`ValidationError`。
+
+    実際に先に失敗するのは構造方程式（`fit()`冒頭、k=3: const, x1, endog1）
+    ではなく第一段階回帰（`endog1 ~ x_exog(x1) + instruments(z1, z2)`、
+    k=4: const, x1, z1, z2）。`engine_pybind::fit()`が弱操作変数診断のため
+    `compute_first_stage`を`TwoSlsEstimator::fit`より先に無条件で呼ぶため
+    （`_error_messages.py`の`FIRST_STAGE_FAILED`のコメント、
+    `test-coverage-candidates.md`項目31参照）。
+    """
+    df = iv_dataset.head(2)  # n=2、第一段階回帰はk=4（const, x1, z1, z2）
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.FIRST_STAGE_FAILED,
+            endog_name="endog1",
+            source=msgs.INSUFFICIENT_OBSERVATIONS.format(n=2, k=4),
+        ),
+    ):
         our_fit(df)
 
 
 def test_insufficient_instruments_raises(iv_dataset):
     """識別の順序条件`len(instruments) >= len(x_endog)`を満たさない場合
     `ValidationError`（`IvError::InsufficientInstruments`）。
+
+    `x_endog`・`instruments`のどちらも1要素以上（Issue #306の空リスト検証には
+    引っかからない）だが、`instruments`の数が`x_endog`に足りない組み合わせにする
+    必要がある（`test-coverage-candidates.md`項目52、Issue #306対応時に必須の修正）。
     """
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INSUFFICIENT_INSTRUMENTS, n_instruments=1, n_endog=2
+        ),
+    ):
+        IV(
+            iv_dataset,
+            y="y",
+            x_exog=["x1"],
+            x_endog=["endog1", "z2"],
+            instruments=["z1"],
+        ).fit()
+
+
+@pytest.mark.parametrize(
+    "x_endog, instruments",
+    [
+        pytest.param([], [], id="both_empty"),
+        pytest.param([], ["z1"], id="x_endog_empty_only"),
+    ],
+)
+def test_x_endog_empty_raises(iv_dataset, x_endog, instruments):
+    """`x_endog`が空リストの場合`ValidationError`（Issue #306）。
+
+    旧仕様では`x_endog=[]`・`instruments=[]`は実質OLSとして成功していたが、
+    「そもそもIVを使用すること自体が誤り」と判断し弾く方向にした
+    （2026-08-30ユーザー決定）。`x_endog=[]`・`instruments`非空（対応する内生変数の
+    無い操作変数だけを指定する誤用）も同様に弾く。
+    """
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.X_EMPTY, role="x_endog")
+    ):
+        IV(
+            iv_dataset,
+            y="y",
+            x_exog=["x1"],
+            x_endog=x_endog,
+            instruments=instruments,
+        ).fit()
+
+
+def test_instruments_empty_raises(iv_dataset):
+    """`instruments`が空リストの場合`ValidationError`（Issue #306）。
+
+    `x_endog`は非空にする（空だと`test_x_endog_empty_raises`の`x_endog`側の
+    バリデーションが先に発火してしまうため）。
+    """
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.X_EMPTY, role="instruments")
+    ):
         IV(
             iv_dataset,
             y="y",
@@ -226,27 +395,50 @@ def test_insufficient_instruments_raises(iv_dataset):
 # ── ValidationError（オプション） ──────────────────────────────────
 
 
-def test_unknown_method_raises(iv_dataset):
-    options = IvOptions(method="invalid")
-    with pytest.raises(ValidationError):
+@pytest.mark.parametrize("method", ["invalid", ""])
+def test_unknown_method_raises(iv_dataset, method):
+    """未知の`method`（空文字列を含む）は`ValidationError`（テスト網羅性
+    候補・項目46）。
+    """
+    options = IVOptions(method=method)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_IV_METHOD, method=method),
+    ):
         our_fit(iv_dataset, options=options)
 
 
-def test_unknown_cov_type_raises(iv_dataset):
-    options = IvOptions(cov_type="invalid")
-    with pytest.raises(ValidationError):
+@pytest.mark.parametrize("cov_type", ["invalid", ""])
+def test_unknown_cov_type_raises(iv_dataset, cov_type):
+    """未知の`cov_type`（空文字列を含む）は`ValidationError`
+    （テスト網羅性候補・項目46）。
+    """
+    options = IVOptions(cov_type=cov_type)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_COV_TYPE_LINEAR, other=cov_type),
+    ):
         our_fit(iv_dataset, options=options)
 
 
-def test_unknown_weight_type_raises(iv_dataset):
-    options = IvOptions(method="gmm", weight_type="invalid")
-    with pytest.raises(ValidationError):
+@pytest.mark.parametrize("weight_type", ["invalid", ""])
+def test_unknown_weight_type_raises(iv_dataset, weight_type):
+    """未知の`weight_type`（空文字列を含む）は`ValidationError`
+    （テスト網羅性候補・項目46）。
+    """
+    options = IVOptions(method="gmm", weight_type=weight_type)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_WEIGHT_TYPE, other=weight_type),
+    ):
         our_fit(iv_dataset, options=options)
 
 
 def test_cluster_without_col_raises(iv_dataset):
-    options = IvOptions(cov_type="cluster")
-    with pytest.raises(ValidationError):
+    options = IVOptions(cov_type="cluster")
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.MISSING_CLUSTER_COLUMN)
+    ):
         our_fit(iv_dataset, options=options)
 
 
@@ -254,16 +446,21 @@ def test_cluster_col_nonexistent_column_raises(iv_dataset):
     """`cluster_col`が実在しない列名を指すと`ValidationError`（OLS/WLS/Logit/
     Probitと同じ理由、Issue #231フェーズ4）。
     """
-    options = IvOptions(cov_type="cluster", cluster_col="does_not_exist")
-    with pytest.raises(ValidationError):
+    options = IVOptions(cov_type="cluster", cluster_col="does_not_exist")
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    ):
         our_fit(iv_dataset, options=options)
 
 
 def test_insufficient_clusters_raises(iv_dataset):
     """クラスターが1種類しかない場合`ValidationError`。"""
     df = iv_dataset.with_columns(pl.lit(0).alias("single_cluster"))
-    options = IvOptions(cov_type="cluster", cluster_col="single_cluster")
-    with pytest.raises(ValidationError):
+    options = IVOptions(cov_type="cluster", cluster_col="single_cluster")
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
+    ):
         our_fit(df, options=options)
 
 
@@ -277,18 +474,31 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
     （`CommonError::InsufficientClustersForInference`、Issue #289）。
 
     `rank(Ŝ)≤G-1`のためG≤qでロバストWald/F（χ²）検定のq×q部分行列が構造的に
-    特異になる。2SLS/GMMともに`fit()`冒頭で構造方程式のqを使って弾く
-    （第一段階回帰の`FirstStageFailed`ラップより前）。`weight_type="cluster"`の
-    重み行列`S`（l×l）が`G<l`で特異になる別軸の問題（Issue #290）とは区別する。
+    特異になる。ドキュメント上は「2SLS/GMMともに`fit()`冒頭で構造方程式のqを
+    使って弾く（第一段階回帰の`FirstStageFailed`ラップより前）」とされているが、
+    実際にはこの事前チェックはPython APIからは到達不能で、常に第一段階回帰
+    （`endog1 ~ x_exog(x1) + instruments(z1, z2)`、q=3: x1, z1, z2）の同種チェックが
+    先に`FirstStageFailed`としてラップされる（`engine_pybind::fit()`が
+    `compute_first_stage`を無条件に先に呼ぶため。`_error_messages.py`の
+    `FIRST_STAGE_FAILED`のコメント、`test-coverage-candidates.md`項目31参照）。
+    `weight_type="cluster"`の重み行列`S`（l×l）が`G<l`で特異になる別軸の問題
+    （Issue #290）とは区別する。
     """
     cluster = pl.Series(
         "cluster_group", [i % 2 for i in range(iv_dataset.height)]
     )
     df = iv_dataset.with_columns(cluster)
-    options = IvOptions(
+    options = IVOptions(
         method=method, cov_type="cluster", cluster_col="cluster_group"
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.FIRST_STAGE_FAILED,
+            endog_name="endog1",
+            source=msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE.format(g=2, q=3),
+        ),
+    ):
         our_fit(df, options=options)
 
 
@@ -297,30 +507,50 @@ def test_invalid_confidence_level_raises(iv_dataset, confidence_level):
     """`confidence_level`が(0, 1)の範囲外（境界値0.0を含む）の場合
     `ValidationError`。
     """
-    options = IvOptions(confidence_level=confidence_level)
-    with pytest.raises(ValidationError):
+    options = IVOptions(confidence_level=confidence_level)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INVALID_CONFIDENCE_LEVEL,
+            confidence_level=msgs.rust_f64(confidence_level),
+        ),
+    ):
         our_fit(iv_dataset, options=options)
 
 
 @pytest.mark.parametrize("hac_lags", [-1, 500])  # 500 == iv_dataset の n_obs
 def test_invalid_hac_lags_raises(iv_dataset, hac_lags):
     """`hac_lags`が`[0, n)`の範囲外の場合`ValidationError`。"""
-    options = IvOptions(cov_type="hac", hac_lags=hac_lags)
-    with pytest.raises(ValidationError):
+    options = IVOptions(cov_type="hac", hac_lags=hac_lags)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INVALID_HAC_LAGS, hac_lags=hac_lags, n=500),
+    ):
         our_fit(iv_dataset, options=options)
 
 
 @pytest.mark.parametrize("gmm_iterations", [0, -1])
 def test_invalid_gmm_iterations_raises(iv_dataset, gmm_iterations):
-    options = IvOptions(method="gmm", gmm_iterations=gmm_iterations)
-    with pytest.raises(ValidationError):
+    options = IVOptions(method="gmm", gmm_iterations=gmm_iterations)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INVALID_GMM_ITERATIONS, gmm_iterations=gmm_iterations
+        ),
+    ):
         our_fit(iv_dataset, options=options)
 
 
 @pytest.mark.parametrize("gmm_convergence", [0.0, -1.0])
 def test_invalid_gmm_convergence_raises(iv_dataset, gmm_convergence):
-    options = IvOptions(method="gmm", gmm_convergence=gmm_convergence)
-    with pytest.raises(ValidationError):
+    options = IVOptions(method="gmm", gmm_convergence=gmm_convergence)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INVALID_GMM_CONVERGENCE,
+            gmm_convergence=msgs.rust_f64(gmm_convergence),
+        ),
+    ):
         our_fit(iv_dataset, options=options)
 
 
@@ -361,7 +591,7 @@ def test_scale_variance_raises_computation_error(cov_type):
     せずエラーパスのみ確認する（`_reference.py` から移設）。
     """
     df = pl.read_csv(DATA_DIR / "iv_scale_variance.csv")
-    options = IvOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type)
     with pytest.raises(ComputationError):
         IV(
             df,
@@ -389,7 +619,7 @@ def test_gmm_cluster_weight_type_raises_computation_error_when_cluster_count_is_
     df = iv_dataset.with_columns(
         (pl.int_range(pl.len()) < n // 2).cast(pl.Int64).alias("cluster_group")
     )
-    options = IvOptions(
+    options = IVOptions(
         method="gmm",
         weight_type="cluster",
         cluster_col="cluster_group",
@@ -413,7 +643,7 @@ def test_gmm_raise_on_non_convergence_true_raises_computation_error(
     （`raise_on_non_convergence=True`）では`ComputationError`（`MleError.
     NonConvergence`と同じ分類、`engine_pybind/src/iv/common.rs`参照）。
     """
-    options = IvOptions(
+    options = IVOptions(
         method="gmm",
         weight_type="robust",
         gmm_convergence=1e-300,
@@ -421,3 +651,20 @@ def test_gmm_raise_on_non_convergence_true_raises_computation_error(
     )
     with pytest.raises(ComputationError):
         our_fit(iv_dataset, options=options)
+
+
+def test_first_stage_augment_none_raises_validation_error(iv_dataset):
+    """`first_stage()`が返す`OLSResults`は、各内生変数の第一段階回帰専用に
+    構築され単一のソースDataFrameを持たないため、`augment(new_data=None)`は
+    `ValidationError`（`new_data`を指定した呼び出しは通常どおり動作する、
+    `docs/spec/ols-spec.md`「augment()」参照、Issue #295）。
+    """
+    res = our_fit(iv_dataset)
+    first_stage = res.first_stage()["endog1"]
+
+    with pytest.raises(ValidationError, match="augment.*training data"):
+        first_stage.augment()
+
+    new_data = pl.DataFrame({"x1": [1.0], "z1": [0.5], "z2": [0.2]})
+    augmented = first_stage.augment(new_data)
+    assert augmented.columns == ["x1", "z1", "z2", "predicted"]

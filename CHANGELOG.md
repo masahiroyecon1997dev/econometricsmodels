@@ -5,6 +5,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-22
+
+Added FE (Fixed Effects) and RE (Random Effects) to Phase 4 (panel data models).
+
+### Added
+
+- FE (Fixed Effects) estimation (`FE` / `FEOptions` / `FEResults`), estimated via within transformation delegated to the OLS estimator
+- 1-way and 2-way within (demeaning) transformation, with singleton-group detection and validation of zero-variance regressors that arise after transformation
+- Fixed effects themselves (α_i) can be recovered from the fit
+- Standard error options: classical, HC1-3, cluster-robust, and Driscoll-Kraay panel HAC
+- Panel-specific R² (within / between / overall), degrees-of-freedom adjustment (`df_resid` / `df_model`)
+- FE API reference and usage examples in mkdocs
+- RE (Random Effects) estimation (`RE` / `REOptions` / `REResults`), estimated by Swamy-Arora variance component estimation (σ_ε², σ_u²) followed by GLS via quasi-demeaning (θ transformation), delegated to the OLS estimator
+- Standard error options: classical, HC1-3, cluster-robust
+- Hausman test (fixed vs. random effects); the reported statistic is non-negative by construction (`hausman_statistic` uses `abs()`, matching `plm::phtest`'s sign convention)
+- Panel-specific R² (within / between / overall), `f_statistic` / `f_p_value`, degrees-of-freedom adjustment
+- RE API reference and usage examples in mkdocs
+- `augment()` extended to Logit/Probit/Tobit (previously OLS/WLS only), and newly added to OLS/WLS itself — returns the source (or `new_data`) DataFrame with a predicted-value column appended
+- `predict()` out-of-sample support (`new_data`) added to Logit/Probit/Tobit
+- WLS: added `predict()`
+- Logit/Probit/Tobit/IV results now expose the `method` actually used for estimation (IV additionally exposes `weight_type`, set only when `method="gmm"`)
+- WLS: the weight column may now also be included in `x` (previously rejected; only `weight == y` remains disallowed)
+
+### Changed
+
+- WLS now has its own dedicated `WLSOptions` class instead of reusing `OLSOptions` (breaking change, permitted during the `0.x.x` pre-release period; #308)
+- Renamed `IvOptions`/`IvResults` → `IVOptions`/`IVResults`, `FeOptions`/`FeResults` → `FEOptions`/`FEResults`, `ReOptions`/`ReResults` → `REOptions`/`REResults`, `OlsResults` → `OLSResults`, `WlsResults` → `WLSResults`, for naming consistency with the estimator classes (`IV`/`FE`/`RE`/`OLS`/`WLS`), which already used fully-uppercase acronyms (breaking change, permitted during the `0.x.x` pre-release period; #310)
+- OLS's `predict()` return key renamed from `"fitted"` to `"predicted"`, for consistency between in-sample and out-of-sample (`new_data`) predictions (breaking change, permitted during the `0.x.x` pre-release period; #309)
+- Logit/Probit/Tobit's BFGS/L-BFGS solvers reimplemented in-house (`FaerBfgs`/`FaerLbfgs`), replacing the `argmin` crate dependency
+- faer's global parallelism pinned to single-threaded (`Par::Seq`), for reproducible results across runs
+
+### Fixed
+
+- IV: the `"const"` column-name collision check (previously applied only to `x_exog`) now also covers `x_endog`/`instruments`, preventing a true intercept coefficient from being silently overwritten by dictionary key collision
+- IV: `x_endog`/`instruments` given as empty lists now raise `ValidationError`, instead of silently falling back to plain OLS
+- OLS/WLS: `x=[]` (zero regressors) is now rejected with a `NoRegressors` error (except when used internally by FE's delegation to the OLS estimator)
+- Logit/Probit/Tobit: BFGS/L-BFGS line search now has an evaluation-count budget, preventing an infinite loop in degenerate cases
+- Tobit: fixed a Hessian weight computation bug that mixed the clamped λ with the raw z, producing incorrect standard errors in some regions
+- Tobit: large-sample inputs could converge to a point where the Hessian becomes singular; convergence detection now includes a second-order condition guard
+
 ## [0.6.0] - 2026-09-06
 
 Added Tobit (censored regression) to Phase 2 (generalized and discrete choice models).
@@ -116,7 +156,8 @@ Initial release. Only OLS (Ordinary Least Squares) from Phase 1 (basic regressio
 - Python API taking a polars DataFrame as input (`OLS` / `OLSOptions` / `OlsResults`)
 - Rust computational core (`engine`) and PyO3 bindings (`engine_pybind`)
 
-[Unreleased]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.3.0...v0.4.0

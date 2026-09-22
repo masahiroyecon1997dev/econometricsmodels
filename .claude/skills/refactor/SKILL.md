@@ -22,8 +22,8 @@ $ARGUMENTS
 ## 観点（Issue #231 4章）
 
 1. **重複ロジックの共通化**
-   呼び出し箇所の性質上、分離したままが適切な場合は無理に共通化しない（IV実装時のA章共通基盤
-   切り出しと同じ判断基準。`docs/planning/specs/panel-iv-issue-breakdown.md`参照）。
+   呼び出し箇所の性質上、分離したままが適切な場合は無理に共通化しない（IV実装時の
+   crate横断共通基盤切り出し〔Issue #152〜#154〕と同じ判断基準）。
 2. **パフォーマンス劣化箇所の指摘・修正**
    不要な`clone`・非効率なループ等。深い規約チェックは`rust-reviewer`/`python-reviewer`に
    委ねてよい（対象ファイルを明示して`/review-rust`・`/review-python`を呼び出す）。

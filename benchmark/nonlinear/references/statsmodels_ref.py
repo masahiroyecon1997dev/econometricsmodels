@@ -15,7 +15,7 @@ Probit追加にあたり`--model logit`/`--model probit`で切り替えられる
 のモデル専用で、`Logit`/`Probit`のような組み込み`DiscreteModel`では
 "cov_type not recognized"エラーになる。ベンチマーク作成時に両モデルで実機確認済み）。
 このため`opg`は`model.score_obs(params)`（statsmodels自身が検証済みのスコア計算）を
-使い、`Σ = (Σᵢ sᵢsᵢ')⁻¹`（`nonlinear-implementation-notes.md`の式）を手計算する。
+使い、`Σ = (Σᵢ sᵢsᵢ')⁻¹`（`nonlinear-common.md`3章の式）を手計算する。
 係数自体は`cov_type`に依存しないため、`classical`でfitした`params`をそのまま使う。
 
 **`cov_type="opg"`の限界効果はstatsmodels側では算出しない**（`get_margeff()`は

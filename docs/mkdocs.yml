@@ -20,6 +20,8 @@ nav:
       - Probit: api/probit.md
       - Tobit: api/tobit.md
       - IV: api/iv.md
+      - FE: api/fe.md
+      - RE: api/re.md
 
 theme:
   name: material

@@ -33,6 +33,7 @@ from benchmark.common import DATA_DIR
 from benchmark.iv.freeze import freeze as _freeze_iv
 from benchmark.linear.freeze import freeze as _freeze_linear
 from benchmark.nonlinear.freeze import freeze as _freeze_nonlinear
+from benchmark.panel.freeze import freeze as _freeze_panel
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -46,6 +47,8 @@ _FIXTURE_MODULES = [
     "benchmark.nonlinear.fixtures.generate_probit_fixtures",
     "benchmark.iv.fixtures.generate_iv_fixtures",
     "benchmark.iv.fixtures.generate_iv_gmm_fixtures",
+    "benchmark.panel.fixtures.generate_fe_fixtures",
+    "benchmark.panel.fixtures.generate_re_fixtures",
     # Tobit は主リファレンス（AER::tobit）も交差検証（censReg）も R 実装のため
     # 両方 Rscript 必須。
     "benchmark.nonlinear.fixtures.generate_tobit_fixtures",
@@ -55,6 +58,8 @@ _FIXTURE_MODULES = [
     "benchmark.nonlinear.fixtures.generate_probit_crosscheck_fixtures",
     "benchmark.nonlinear.fixtures.generate_tobit_crosscheck_fixtures",
     "benchmark.iv.fixtures.generate_iv_crosscheck_fixtures",
+    "benchmark.panel.fixtures.generate_fe_crosscheck_fixtures",
+    "benchmark.panel.fixtures.generate_re_crosscheck_fixtures",
 ]
 
 
@@ -64,6 +69,7 @@ def regenerate_datasets() -> None:
     _freeze_linear(DATA_DIR)
     _freeze_nonlinear(DATA_DIR)
     _freeze_iv(DATA_DIR)
+    _freeze_panel(DATA_DIR)
     print(f"[ok] frozen datasets -> {DATA_DIR}")
 
 

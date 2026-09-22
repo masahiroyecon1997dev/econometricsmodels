@@ -3,17 +3,22 @@
 #
 # OLS/WLSクロスチェック（../../linear/references/run_lm_crosscheck.R）と同じ役割分担
 # （testing-policy.md「リファレンス実装」章）で、linearmodels（Python主リファレンス）
-# とは独立の実装によるクロスチェックとしてivregを使う（iv-api-design.md 5.2節）。
+# とは独立の実装によるクロスチェックとしてivregを使う（iv-spec.md 4章）。
 #
 # 係数・標準誤差・R²・ロバストWald検定（f_statistic/f_p_value）は要求されたcov_type
-# （classical/hc0/hc1/cluster/hac）ごとにvcov/sandwichで計算する。hc2/hc3は対象外
-# （iv-api-design.md 3.1節、ivreg側にレバレッジ算出の確立した参照実装が無いため）。
+# （classical/hc0〜hc3/cluster/hac）ごとにvcov/sandwichで計算する。hc2/hc3は
+# `vcovHC(model, type="HC2"/"HC3")`（`ivreg:::hatvalues.ivreg`のtype="stage2"、
+# 第二段階OLSのレバレッジをそのまま使う実装）で計算でき、本実装
+# （engine/src/iv/two_sls.rsのhc_cov_params、X̂ベースのレバレッジ）と数値一致することを
+# 実機確認済み（iv-spec.md 3.1節。旧記述「ivreg側に確立した参照実装が無い」は
+# `ivreg`がdevcontainerにインストールできなかった時期（CLAUDE.md 10章）の調査に
+# 基づく誤りだった）。
 #
 # 弱操作変数F統計量・Sargan（過剰識別検定）はivregのsummary(diagnostics=TRUE)が
 # 常にclassical（iid）vcovで計算する仕様のため（`vcov.`に行列を渡すと警告付きで
 # NULLにフォールバックする。ただし関数を渡せば反映される、後述）、要求された
 # cov_typeによらず同じ値になる（weak_instrument_f_statistics/overid_statisticが
-# 常にclassicalという本実装の設計とも一致、iv-api-design.md 6.4節・6.5節）。
+# 常にclassicalという本実装の設計とも一致、iv-spec.md 3.4節・3.5節）。
 # このため`vcov.`を渡さないデフォルト呼び出し（`diag_table`、classical固定）から
 # 抽出する。
 #
@@ -22,7 +27,7 @@
 # 全cov_typeでクロスチェックする。`ivreg:::ivdiag`のソースを確認したところ
 # `vcov.`は**関数**として渡せば診断表（Wu-Hausman行含む）に正しく反映される
 # （行列を渡すと上記の通りNULLにフォールバックするため、これまで見落とされていた。
-# `iv-api-design.md`3.2節・6.6節の「原因未特定」記載は本スクリプトの
+# `iv-spec.md`3.2節・3.6節の「原因未特定」記載は本スクリプトの
 # 誤用が原因だったことが判明）。このため`vcov.`に、上で計算した`vc`と同じ計算式を
 # 関数化した`vcov_fn`を渡した専用の`summary()`呼び出し（`diag_table_wu`）を別途行い、
 # Wu-Hausman行のみそちらから抽出する（weak_instrument_f/Sarganは`ivdiag`内で
@@ -85,7 +90,7 @@ df_inference <- df.residual(model)
 # 適用できる関数として持つ（Wu-Hausman診断のvcov.引数に渡すため、後述）。
 if (cov_type == "classical") {
   vcov_fn <- function(m) vcov(m)
-} else if (cov_type %in% c("hc0", "hc1")) {
+} else if (cov_type %in% c("hc0", "hc1", "hc2", "hc3")) {
   vcov_fn <- function(m) vcovHC(m, type = toupper(cov_type))
 } else if (cov_type == "cluster") {
   if (length(args) < 4) {

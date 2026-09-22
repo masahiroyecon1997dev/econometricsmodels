@@ -15,7 +15,8 @@
     対数尤度・AIC・BIC・全体 Wald 統計量/ p値・`n_obs`/`df_model`/`df_resid`・
     限界効果（`expected_latent`/`expected_observed`/`prob_uncensored` ×
     `overall`/`mean`/`median`）・予測値（`predict()` の3対象、フィクスチャに固定した
-    先頭行分）・打ち切り適合度（`censoring_fit_check()`）。
+    先頭行分）・新規データ（out-of-sample）予測値（`predict(new_data=...)` の3対象、
+    Issue #131）・打ち切り適合度（`censoring_fit_check()`）。
 """
 
 from __future__ import annotations
@@ -181,6 +182,41 @@ def _check_predict_head(
             )
 
 
+def _check_predict_new_data(
+    res,
+    ref_new_x: dict,
+    ref_predict: dict,
+    label: str,
+    *,
+    rtol: float,
+    atol: float,
+) -> None:
+    """新規データ（out-of-sample）に対する`predict()`の数値照合（Issue #131）。
+
+    `ref_new_x`（`run_tobit_crosscheck.R`が学習データの各スロープ列の
+    「平均±1標準偏差」から組み立てた2行の新規x値）をそのまま`new_data`として渡し、
+    `ref_predict`（同じ新規x値に対するRの`predicted_value`の計算結果）と突き合わせる。
+    """
+    new_data = pl.DataFrame(ref_new_x)
+    for target in MARGEFF_TARGETS:
+        ours = [
+            row["predicted"]
+            for row in res.predict(target=target, new_data=new_data)
+        ]
+        ref_vals = ref_predict[target]
+        assert len(ours) == len(ref_vals), (
+            f"{label}/predict_new_data/{target}/length"
+        )
+        for i, ref_v in enumerate(ref_vals):
+            assert_close(
+                ours[i],
+                ref_v,
+                f"{label}/predict_new_data/{target}/[{i}]",
+                rtol=rtol,
+                atol=atol,
+            )
+
+
 def _check_censoring_fit_check(
     res, ref_rows: list, label: str, *, rtol: float, atol: float
 ) -> None:
@@ -311,6 +347,14 @@ def check_result(
     )
     _check_predict_head(
         res, ref["predict_head"], label, rtol=rtol_point, atol=atol
+    )
+    _check_predict_new_data(
+        res,
+        ref["new_x"],
+        ref["predict_new_data"],
+        label,
+        rtol=rtol_point,
+        atol=atol,
     )
     _check_censoring_fit_check(
         res, ref["censoring_fit_check"], label, rtol=rtol_point, atol=atol

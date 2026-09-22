@@ -3,7 +3,7 @@
 
 `tobit.json`（主リファレンス、R `AER::tobit` ＝ `survival::survreg`）とは独立した
 最適化実装である R `censReg`（`maxLik` エンジン）で同じケースを計算する
-（`docs/planning/specs/nonlinear-api-design.md` 9章:「`survreg` と `maxLik` は
+（`docs/spec/nonlinear-common.md` 8章:「`survreg` と `maxLik` は
 最適化実装が完全に独立しているため交差検証として組み合わせる価値が高い」）。
 
 statsmodels のような独立系統の主リファレンスが無く、主・交差検証とも R 実装のため、

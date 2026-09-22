@@ -204,9 +204,7 @@ def run_predict(
     result: dict = {"fitted": [float(v) for v in model.fittedvalues]}
     if new_data is not None:
         new_pandas_df = pl.DataFrame(new_data).to_pandas()
-        result["predicted"] = [
-            float(v) for v in model.predict(new_pandas_df)
-        ]
+        result["predicted"] = [float(v) for v in model.predict(new_pandas_df)]
 
     import statsmodels
 

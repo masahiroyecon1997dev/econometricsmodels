@@ -239,9 +239,7 @@ def generate_binary_choice_dataset(
         # （OLSのoutlier_regressorと同じ発想。p・yはこの汚染後のXから計算する
         # ——分離を起こさないことを実測確認済み、上記定数のコメント参照）。
         is_outlier = rng.uniform(size=n) < _OUTLIER_REGRESSOR_CONTAM_PROB
-        outlier_vals = rng.normal(
-            0.0, _OUTLIER_REGRESSOR_CONTAM_SCALE, size=n
-        )
+        outlier_vals = rng.normal(0.0, _OUTLIER_REGRESSOR_CONTAM_SCALE, size=n)
         X[:, 0] = np.where(is_outlier, outlier_vals, X[:, 0])
 
     if scenario == "complete_separation":
@@ -487,9 +485,7 @@ def generate_censored_regression_dataset(
         # x1の一部（5%）だけをTukeyの汚染混合モデルで外れ値に置き換える
         # （OLS/Logit/Probitのoutlier_regressorと同じ発想・同じ較正値）。
         is_outlier = rng.uniform(size=n) < _OUTLIER_REGRESSOR_CONTAM_PROB
-        outlier_vals = rng.normal(
-            0.0, _OUTLIER_REGRESSOR_CONTAM_SCALE, size=n
-        )
+        outlier_vals = rng.normal(0.0, _OUTLIER_REGRESSOR_CONTAM_SCALE, size=n)
         X[:, 0] = np.where(is_outlier, outlier_vals, X[:, 0])
 
     err_kind = config.get("err")

@@ -114,9 +114,7 @@ def test_matches_statsmodels(fixtures, scenario, cov_type):
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
     kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
     options = WLSOptions(cov_type=cov_type, **kwargs)
-    res = WLS(
-        df, y="y", x=x_cols, weight="weight", options=options
-    ).fit()
+    res = WLS(df, y="y", x=x_cols, weight="weight", options=options).fit()
 
     _check_result(res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}")
 

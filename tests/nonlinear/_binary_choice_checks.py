@@ -1126,9 +1126,7 @@ def check_matches_statsmodels(
         else {}
     )
     options = config.options_cls(cov_type=cov_type, **kwargs)
-    res = config.estimator_cls(
-        df, y="y", x=x_cols, options=options
-    ).fit()
+    res = config.estimator_cls(df, y="y", x=x_cols, options=options).fit()
 
     check_result(
         config, res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}"

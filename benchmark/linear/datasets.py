@@ -167,9 +167,7 @@ def generate_linear_dataset(
         # （SD20倍、少数の高レバレッジ行）。列全体のスケールを変える
         # many_regressors/scale_variance系とは異なる軸の悪条件シナリオ。
         is_outlier = rng.uniform(size=n) < _OUTLIER_REGRESSOR_CONTAM_PROB
-        outlier_vals = rng.normal(
-            0.0, _OUTLIER_REGRESSOR_CONTAM_SCALE, size=n
-        )
+        outlier_vals = rng.normal(0.0, _OUTLIER_REGRESSOR_CONTAM_SCALE, size=n)
         X[:, 0] = np.where(is_outlier, outlier_vals, X[:, 0])
 
     # --- 誤差項 ---

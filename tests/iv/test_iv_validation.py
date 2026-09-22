@@ -212,7 +212,8 @@ def test_const_collision_in_instruments_with_include_intercept_raises():
         }
     )
     with pytest.raises(
-        ValidationError, match=escaped(msgs.CONST_COLLISION, role="instruments")
+        ValidationError,
+        match=escaped(msgs.CONST_COLLISION, role="instruments"),
     ):
         IV(
             df,

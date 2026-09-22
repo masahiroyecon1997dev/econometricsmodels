@@ -406,7 +406,11 @@ def test_include_intercept_false_allows_const_in_x_endog():
     )
     options = IVOptions(include_intercept=False)
     res = our_fit(
-        df, x_exog=["x1"], x_endog=["const"], instruments=["z1"], options=options
+        df,
+        x_exog=["x1"],
+        x_endog=["const"],
+        instruments=["z1"],
+        options=options,
     )
     assert res.param_names == ["x1", "const"]
 

@@ -129,9 +129,7 @@ def test_synthetic_matches_r(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
     options = WLSOptions(cov_type=cov_type)
-    res = WLS(
-        df, y="y", x=x_cols, weight="weight", options=options
-    ).fit()
+    res = WLS(df, y="y", x=x_cols, weight="weight", options=options).fit()
 
     ref = crosscheck["synthetic"][scenario][cov_type]["r"]
     label = f"{scenario}/{cov_type}/R"

@@ -277,6 +277,41 @@ def test_null_values_raise(bad_col):
         ).fit()
 
 
+@pytest.mark.parametrize(
+    "value, display",
+    [(float("nan"), "NaN"), (float("inf"), "inf")],
+    ids=["nan", "inf"],
+)
+@pytest.mark.parametrize("bad_col", ["y", "x1", "endog1", "z1"])
+def test_non_finite_values_raise(bad_col, value, display):
+    """NaN・無限大は`column_extraction.rs`内でnull（`test_null_values_raise`）
+    とは別ロジックのため個別に確認する。`y`列だけでなく`x_exog`/`x_endog`/
+    `instruments`側の列でも検証する（`test_null_values_raise`と同じ理由。
+    `test-coverage-candidates.md`項目31・34・40の流れでIVにも同型のテストを
+    追加、IVには`predict()`が無いため比較対象は無い）。
+    """
+    values: dict[str, list[float]] = {
+        "y": [1.0, 2.0, 3.0, 4.0],
+        "x1": [0.5, 1.5, 2.5, 3.5],
+        "endog1": [2.0, 1.0, 4.0, 3.0],
+        "z1": [1.0, 3.0, 2.0, 4.0],
+    }
+    values[bad_col] = [values[bad_col][0], value, *values[bad_col][2:]]
+    df = pl.DataFrame(values)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE,
+            name=bad_col,
+            value=display,
+            row=1,
+        ),
+    ):
+        IV(
+            df, y="y", x_exog=["x1"], x_endog=["endog1"], instruments=["z1"]
+        ).fit()
+
+
 @pytest.mark.parametrize("bad_col", ["y", "x1", "endog1", "z1"])
 def test_non_numeric_dtype_raises(bad_col):
     """数値/文字列型にキャストできない列は`ValidationError`。`y`列だけでなく

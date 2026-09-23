@@ -1191,7 +1191,13 @@
 - **気づいた経緯**: 2026-08-31、`tests/nonlinear/test_tobit.py`解説時のユーザー
   指摘。
 - **状態**: 未対応（項目32・39・40と統合して対応するのが効率的、
-  着手要否はユーザー判断待ち）
+  着手要否はユーザー判断待ち）。2026-09-23追記: 項目75の調査で
+  `test_null_values_raise`/`test_non_finite_values_raise`の`x`側
+  （2番目の箇条書き）は現状のコードで既に`x1`をカバーしており
+  解消済みと判明（v0.6.0リリース時点、2026-09-06、Tobit実装時から
+  既に対称に実装されていた）。`y`列欠落専用テスト（項目32相当）・
+  `marginal_effects`の`confidence_level`境界値parametrize（項目39相当）は
+  未対応のまま残っている。
 
 ### 64. HACの自動ラグ選択式（`L = floor(4*(n/100)^(2/9))`）がRust実装とPython実装（`benchmark/common/dgp.py`の`hac_auto_lag`）で一致することを直接検証するテストが無い（IV 2SLS/GMMは特に、Rust内の自己整合性チェックのみ）
 
@@ -1507,4 +1513,44 @@
   作業内容はすべて引き継がれていることを確認した上で、ユーザー確認の上、
   本項目は現在チェックアウトされている`release/v0.8.0`側にコミットする
   方針とした（このコミット自体が本項目の変更に含まれる）。
+
+### 75. 項目31（OLSのfit()でx列のNaN/無限大検証テストが無い）と同型のギャップをLogit/Probit/IVにも適用する（2026-08-23時点の既定方針を上書き）
+
+- **対象**: `tests/nonlinear/_binary_choice_checks.py`の`check_null_values_raise`
+  （`y`側のみ）・`tests/iv/test_iv_validation.py`の`test_null_values_raise`
+  （`y`/`x1`/`endog1`/`z1`全列parametrize済みだがNaN/無限大側のテストが丸ごと
+  無い）。
+- **内容**: ユーザー依頼（2026-09-23）で、項目31（OLS）・項目34（WLS）対応後に
+  Probit/Logit/Tobit/IV/Panelを横断確認した。
+  - **Tobit**: ギャップ無し。`test_tobit.py`の`test_null_values_raise`/
+    `test_non_finite_values_raise`が`y`/`x1`×null/NaN/無限大を既に対称に
+    網羅済み（v0.6.0リリース時点、項目63の追記参照）。
+  - **Panel（FE/RE）**: ギャップ無し。`test_numeric_column_non_finite_
+    values_raise`が`bad_col=["y","x1"]`×`{NaN,inf}`を全組み合わせ
+    parametrizeしており、OLS/WLSより網羅的（先に実装済みだった）。
+  - **Logit/Probit**: 項目31と同型のギャップを確認。`check_null_values_raise`
+    は`y`列のみで`x1`側が未検証、かつNaN/無限大の専用テストが丸ごと無い
+    （`predict()`側の`check_predict_null_or_non_finite_values_raise`は
+    `x1`のnull/infを既にカバー済みで非対称）。
+  - **IV**: 別の形のギャップ。`test_null_values_raise`は`y`/`x_exog`/
+    `x_endog`/`instruments`の全列をparametrizeで既にカバーしていたが、
+    NaN/無限大側のテストがどの列についても存在しなかった（IVには
+    `predict()`自体が無いため、比較対象となる非対称は無い）。
+  - 項目40の「NaN/無限大の専用テストが無いのは、既存分（OLS/Logit/Probit）は
+    そのままにする、というユーザー既定方針（2026-08-23）」との整合性を
+    ユーザーに確認した上で、今回OLS/WLSに適用したのと同じ方針変更として
+    Logit/Probit/IVにも適用する判断を得た。
+- **Claudeの所感**: `_binary_choice_checks.py`で共通化されているため
+  Logit/Probitは1箇所の修正で両方に反映される。IVは`predict()`が無い分、
+  修正のスコープはOLS/WLSより単純（`fit()`側のみ）。
+- **気づいた経緯**: 2026-09-23、項目31（OLS）・項目34（WLS）対応後の
+  ユーザー依頼によるPhase横断確認。
+- **状態**: 対応済み（2026-09-23）。`_binary_choice_checks.py`の
+  `check_null_values_raise`に`x1`列のnullケースを追加し、新規
+  `check_non_finite_values_raise`（`y`/`x1`×NaN/無限大の4ケース）を追加、
+  `test_logit_validation.py`・`test_probit_validation.py`双方に薄い
+  ラッパーを追加した。`test_iv_validation.py`には新規
+  `test_non_finite_values_raise`（`bad_col=["y","x1","endog1","z1"]`×
+  `{NaN,inf}`の8ケース）を追加した。`tests/`配下1693件全通過・Ruffクリーンを
+  確認済み。
 

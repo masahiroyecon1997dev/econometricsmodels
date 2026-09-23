@@ -51,6 +51,10 @@ def test_null_values_raise():
     _checks.check_null_values_raise(Probit)
 
 
+def test_non_finite_values_raise():
+    _checks.check_non_finite_values_raise(Probit)
+
+
 def test_non_numeric_dtype_raises():
     _checks.check_non_numeric_dtype_raises(Probit)
 

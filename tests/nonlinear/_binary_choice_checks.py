@@ -540,12 +540,71 @@ def check_null_values_raise(estimator_cls):
     `test_null_values_raise`と同型、Python API境界で未検証だった、
     Issue #231フェーズ4）。
     """
-    df = pl.DataFrame({"y": [0.0, None, 1.0], "x1": [1.0, 2.0, 3.0]})
+    df_y = pl.DataFrame({"y": [0.0, None, 1.0], "x1": [1.0, 2.0, 3.0]})
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=1),
     ):
-        estimator_cls(df, y="y", x=["x1"]).fit()
+        estimator_cls(df_y, y="y", x=["x1"]).fit()
+
+    df_x = pl.DataFrame({"y": [0.0, 1.0, 0.0], "x1": [1.0, None, 3.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    ):
+        estimator_cls(df_x, y="y", x=["x1"]).fit()
+
+
+def check_non_finite_values_raise(estimator_cls):
+    """`y`/`x`にNaN・無限大が含まれる場合`ValidationError`
+    （OLSの`test_non_finite_values_raise`と同型、`test-coverage-candidates.md`
+    項目40関連。null（`check_null_values_raise`）とNaN/Inf は
+    `column_extraction.rs`内で別ロジックのため個別に確認する。`predict()`側は
+    `check_predict_null_or_non_finite_values_raise`が`x1`をカバー済み）。
+    """
+    df_y_nan = pl.DataFrame(
+        {"y": [0.0, float("nan"), 1.0], "x1": [1.0, 2.0, 3.0]}
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="y", value="NaN", row=1
+        ),
+    ):
+        estimator_cls(df_y_nan, y="y", x=["x1"]).fit()
+
+    df_y_inf = pl.DataFrame(
+        {"y": [0.0, float("inf"), 1.0], "x1": [1.0, 2.0, 3.0]}
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="y", value="inf", row=1
+        ),
+    ):
+        estimator_cls(df_y_inf, y="y", x=["x1"]).fit()
+
+    df_x_nan = pl.DataFrame(
+        {"y": [0.0, 1.0, 0.0], "x1": [1.0, float("nan"), 3.0]}
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="NaN", row=1
+        ),
+    ):
+        estimator_cls(df_x_nan, y="y", x=["x1"]).fit()
+
+    df_x_inf = pl.DataFrame(
+        {"y": [0.0, 1.0, 0.0], "x1": [1.0, float("inf"), 3.0]}
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="inf", row=1
+        ),
+    ):
+        estimator_cls(df_x_inf, y="y", x=["x1"]).fit()
 
 
 def check_non_numeric_dtype_raises(estimator_cls):

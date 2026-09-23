@@ -49,12 +49,19 @@ def test_y_empty_string_raises(dataset):
 
 
 def test_null_values_raise():
-    df = pl.DataFrame({"y": [1.0, None, 3.0], "x1": [1.0, 2.0, 3.0]})
+    df_y = pl.DataFrame({"y": [1.0, None, 3.0], "x1": [1.0, 2.0, 3.0]})
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=1),
     ):
-        OLS(df, y="y", x=["x1"]).fit()
+        OLS(df_y, y="y", x=["x1"]).fit()
+
+    df_x = pl.DataFrame({"y": [1.0, 2.0, 3.0], "x1": [1.0, None, 3.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    ):
+        OLS(df_x, y="y", x=["x1"]).fit()
 
 
 def test_non_finite_values_raise():
@@ -62,8 +69,11 @@ def test_non_finite_values_raise():
 
     null（`test_null_values_raise`）とNaN/無限大は`column_extraction.rs`内で
     別ロジックのため個別に確認する（テスト網羅性レビューで判明した抜け）。
+    `x`側も`y`側と同じ`extract_f64_column`を通るため対称に確認する
+    （test-coverage-candidates.md項目31、predict()側の
+    `test_predict_null_or_non_finite_values_raise`との非対称を解消）。
     """
-    df_nan = pl.DataFrame(
+    df_y_nan = pl.DataFrame(
         {"y": [1.0, float("nan"), 3.0], "x1": [1.0, 2.0, 3.0]}
     )
     with pytest.raises(
@@ -72,9 +82,9 @@ def test_non_finite_values_raise():
             msgs.COLUMN_HAS_NON_FINITE_VALUE, name="y", value="NaN", row=1
         ),
     ):
-        OLS(df_nan, y="y", x=["x1"]).fit()
+        OLS(df_y_nan, y="y", x=["x1"]).fit()
 
-    df_inf = pl.DataFrame(
+    df_y_inf = pl.DataFrame(
         {"y": [1.0, float("inf"), 3.0], "x1": [1.0, 2.0, 3.0]}
     )
     with pytest.raises(
@@ -83,7 +93,29 @@ def test_non_finite_values_raise():
             msgs.COLUMN_HAS_NON_FINITE_VALUE, name="y", value="inf", row=1
         ),
     ):
-        OLS(df_inf, y="y", x=["x1"]).fit()
+        OLS(df_y_inf, y="y", x=["x1"]).fit()
+
+    df_x_nan = pl.DataFrame(
+        {"y": [1.0, 2.0, 3.0], "x1": [1.0, float("nan"), 3.0]}
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="NaN", row=1
+        ),
+    ):
+        OLS(df_x_nan, y="y", x=["x1"]).fit()
+
+    df_x_inf = pl.DataFrame(
+        {"y": [1.0, 2.0, 3.0], "x1": [1.0, float("inf"), 3.0]}
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="inf", row=1
+        ),
+    ):
+        OLS(df_x_inf, y="y", x=["x1"]).fit()
 
 
 def test_non_numeric_dtype_raises():

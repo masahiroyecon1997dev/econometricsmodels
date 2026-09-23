@@ -399,10 +399,12 @@
   `fit()`側のテストを追加するのが妥当。
 - **気づいた経緯**: 2026-08-23、ユーザー依頼により`test_ols.py`の
   バリデーション網羅性を確認中に発見。
-- **状態**: 未対応（着手要否はユーザー判断待ち、修正は保留）。2026-09-21、
-  項目17対応のレビューで`testing-completeness-reviewer`が項目32と合わせて
-  再指摘（`predict()`側は既にカバー済みのため、`fit()`側との非対称が
-  残っている旨）。
+- **状態**: 対応済み（OLS、2026-09-23）。`tests/linear/test_ols_validation.py`の
+  `test_null_values_raise`・`test_non_finite_values_raise`に`x1`列の
+  null・NaN・無限大ケースを追加し、`y`列側と対称に、かつ`predict()`側の
+  `test_predict_null_or_non_finite_values_raise`と同じ範囲まで検証する
+  ようにした。37件全通過・Ruffクリーンを確認済み。WLS側（項目34）には
+  同型のギャップが残っている。
 
 ### 32. `y`列自体が存在しない場合・`cluster_col`にNull値を含む場合の専用テストが無い（低優先度、同一コードパスの既存テストで実質カバー済み）
 

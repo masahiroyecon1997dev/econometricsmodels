@@ -457,3 +457,23 @@ def test_scale_variance_raises_computation_error(cov_type):
         WLS(
             df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
         ).fit()
+
+
+def test_scale_variance_cluster_raises_computation_error():
+    """`cluster`も上記`test_scale_variance_raises_computation_error`と同じ
+    backstopの対象。`cluster`は`cluster_col`が別途必要なため`COV_TYPES`
+    パラメトライズには含められず、専用テストとして確認する（OLS
+    `test_ols_validation.py`の同名テストと同じ理由、
+    `test-coverage-candidates.md`項目74）。均等な疑似グループ（行番号%10、
+    `G=10>q=3`）を使い、クラスター数不足による`ValidationError`
+    （`test_cluster_count_at_most_slopes_raises_validation_error`参照）
+    ではなく、傾き係数の共分散部分行列の条件数超過による
+    `ComputationError`が発生することを確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
+    df = with_cluster_groups(df, 10)
+    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    with pytest.raises(ComputationError):
+        WLS(
+            df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        ).fit()

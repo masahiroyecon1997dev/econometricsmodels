@@ -603,6 +603,36 @@ def test_scale_variance_raises_computation_error(cov_type):
         ).fit()
 
 
+def test_scale_variance_cluster_raises_computation_error():
+    """`cluster`も上記`test_scale_variance_raises_computation_error`と同じ
+    backstopの対象。`cluster`は`cluster_col`が別途必要なため`COV_TYPES`
+    パラメトライズには含められず、専用テストとして確認する
+    （OLS`test_ols_validation.py::test_scale_variance_cluster_raises_
+    computation_error`・WLS`test_wls_validation.py`の同名テストと同じ理由、
+    `test-coverage-candidates.md`項目74）。均等な疑似グループ（行番号%10、
+    `G=10`、各グループ50件）を使う——第一段階回帰の`q`（`x_exog`2列+
+    `instruments`2列=4）より十分大きく、
+    `test_cluster_count_at_most_slopes_raises_validation_error`が
+    確認するクラスター数不足の`ValidationError`（第一段階の`q=3`〔`x_exog`
+    〔x1〕+`instruments`〔z1,z2〕〕相当）ではなく、傾き係数の共分散部分行列の
+    条件数超過による`ComputationError`（第一段階回帰の`FirstStageFailed`）が
+    発生することを確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_scale_variance.csv")
+    cluster = pl.Series("cluster_group", [i % 10 for i in range(df.height)])
+    df = df.with_columns(cluster)
+    options = IVOptions(cov_type="cluster", cluster_col="cluster_group")
+    with pytest.raises(ComputationError):
+        IV(
+            df,
+            y="y",
+            x_exog=["x1", "x2"],
+            x_endog=["endog1"],
+            instruments=["z1", "z2"],
+            options=options,
+        ).fit()
+
+
 def test_gmm_cluster_weight_type_raises_computation_error_when_cluster_count_is_less_than_instrument_count(
     iv_dataset,
 ):

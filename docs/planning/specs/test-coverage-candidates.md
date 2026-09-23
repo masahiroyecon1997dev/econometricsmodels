@@ -1479,5 +1479,24 @@
   着手するのが安全。
 - **気づいた経緯**: 2026-09-21、項目73（OLSの`cluster`×`scale_variance`
   backstopテスト追加）対応の`testing-completeness-reviewer`レビューで発見。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
+- **状態**: 対応済み（2026-09-21）。WLS・IVそれぞれに項目73と同型の専用
+  テストを追加した。`tests/linear/test_wls_validation.py::test_scale_
+  variance_cluster_raises_computation_error`（`with_cluster_groups`で
+  `G=10>q=3`）、`tests/iv/test_iv_validation.py::test_scale_variance_
+  cluster_raises_computation_error`（`G=10`、第一段階回帰の`q=4`
+  〔`x_exog`2列+`instruments`2列〕より十分大きい値。実装前にPythonから
+  手動実行し、想定通り第一段階回帰の`ComputationError`
+  〔`FirstStageFailed`〕が発生し、クラスタ数不足の`ValidationError`
+  〔`test_cluster_count_at_most_slopes_raises_validation_error`が別途
+  確認済みの経路〕とは区別できることを確認済み）。`tests/`配下1682件
+  全通過・Ruffクリーンを確認済み。
+
+  **作業中の余談（このドキュメントの経緯として記録）**: 対応中に、
+  このセッションのgit作業ディレクトリが（本セッションの外側で並行して
+  動いていた別セッションにより）`release/v0.7.0`から`release/v0.8.0`へ
+  切り替わっていたことが判明した。`release/v0.7.0`は既に
+  `chore(release): v0.7.0`としてリリース済みで、項目17・28・29・72・73の
+  作業内容はすべて引き継がれていることを確認した上で、ユーザー確認の上、
+  本項目は現在チェックアウトされている`release/v0.8.0`側にコミットする
+  方針とした（このコミット自体が本項目の変更に含まれる）。
 

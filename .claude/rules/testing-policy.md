@@ -8,6 +8,10 @@ paths:
 
 このファイルは `tests/` 配下で作業する際に自動的に読み込まれる。
 
+## コメント運用
+
+Issue番号・内部管理ドキュメント（`refactoring-candidates.md`等）への参照可否は、CLAUDE.md 6章「コメント・ドキュメントでの参照方針」に準じる（`tests`/`benchmark`固有の追加規約はない）。
+
 ## テストの分離
 
 - `engine`の純粋ロジックの単体テストは、対象コードと同じファイル内の`#[cfg(test)] mod tests`に置く（`cargo test -p engine`）。

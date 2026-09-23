@@ -100,6 +100,8 @@ econometricsmodels/
 
 詳細は `.claude/rules/rust-style.md`（engine/engine_pybind配下で自動ロード）、`.claude/rules/python-style.md`（python_package配下で自動ロード）を参照。要点: Rustはthiserror+PyErr変換・unwrap/expect回避、Pythonは型ヒント＋Googleスタイルdocstring必須・Ruff line-length=79。
 
+**コメント・ドキュメントでの参照方針**: GitHub Issue番号、および`docs/planning/specs/`配下（`refactoring-candidates.md`・`test-coverage-candidates.md`・各手法の設計ノート・進捗記録等、項目の追加・変更・削除が起こりうる内部管理ドキュメント。13章参照）への参照は、コード（Rust/Python問わず）・`Cargo.toml`等の設定ファイル・仕様書・各CLAUDE.md（ネストCLAUDE.md含む）のコメント/説明文に書き込まない。git log/GitHub側で常に追跡可能な経緯を重複記録する必然性がなく、かつ内部ドキュメントは変更・削除されうるためリンク切れ・文脈不明のノイズになる。一方、`docs/spec/`配下（実装済み手法の正式仕様書、13章参照）の節への参照は、今後も同期すべき生きた契約であるため許可する（例:「詳細は`docs/spec/ols-spec.md`「テスト」参照」）。過去形の由来説明からIssue番号を削除する際は、そこに書かれている理由（なぜそう実装したか）の文章は残す。複数Issueにまたがる経緯で、その変遷自体が非自明な価値を持つ場合はIssue番号を使わず平易な文章で要約し、単なる経緯の記録に過ぎない場合は削除する。
+
 ## 7. テスト方針
 
 詳細は `.claude/rules/testing-policy.md`（tests配下で自動ロード）を参照。要点: pyfixest/Rとの数値比較で検証、許容誤差は相対誤差1e-8を基本（手法により例外あり）、engineの単体テストはソース内`mod tests`、`tests/`はpytestに分離。

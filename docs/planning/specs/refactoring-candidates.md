@@ -1235,8 +1235,39 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `Option<&str>`か`Option<String>`かのみ。`column_extraction.rs`に
   `extract_optional_group_key_column(df: &DataFrame, col: Option<&str>) ->
   PyResult<Option<Vec<String>>>`を追加すれば、`Option<String>`を保持する呼び出し側は
-  `.as_deref()`を渡すだけで済み、`as_ref()`有無の違い自体が吸収される。項目56・59〜61と
-  同じ「全手法共通の列抽出操作をcolumn_extraction.rsに集約する」方針の延長で、
-  リスクは低いと考える。
+  `.as_deref()`を渡すだけで済み、`as_ref()`有無の違い自体が吸収される。項目56（`mat_to_vec`の
+  配置）や、`predict_for`/`extract_f64_columns`/`x_column_names`/`validate_common_roles`
+  として既に対応済みの列抽出関連の重複解消と同じ「全手法共通の列抽出操作を
+  column_extraction.rsに集約する」方針の延長で、リスクは低いと考える。
 - **気づいた経緯**: 2026-09-23、`nonlinear/common.rs`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 64. `iv::common::parse_iv_cov_type`が`linear::common::parse_cov_type`と実質同一実装で重複している。実装スタイル（列抽出のinline化）もpanel側と不統一
+
+- **対象**: [engine_pybind/src/linear/common.rs:81-128](../../../engine_pybind/src/linear/common.rs#L81-L128)
+  の`parse_cov_type`、[engine_pybind/src/iv/common.rs:444-482](../../../engine_pybind/src/iv/common.rs#L444-L482)
+  の`parse_iv_cov_type`、[engine_pybind/src/panel/fe.rs:283-329](../../../engine_pybind/src/panel/fe.rs#L283-L329)
+  の`parse_fe_cov_type`
+- **内容**: ユーザー指摘（2026-09-13、「`parse_cov_type`は手法間での統一は可能か。matchの
+  中でクラスター/HACの列抽出まで行えばよりスマートに書けそう」）を受けて`release/v0.7.0`
+  時点で調査した内容（`release/v0.8.0`にはまだ未記録だったため、項目63と合わせて再記録）。
+  `iv::common::parse_iv_cov_type`は`linear::common::parse_cov_type`と使っている型
+  （`engine::linear::ols::CovType`）・matchの各アーム（文字列ラベル・エラーメッセージ）が
+  完全に同一。違いは`&IvOptions`を丸ごと受け取るか個々のフィールド値を受け取るかのみ。
+  `linear::common::parse_cov_type`は元々`OLSOptions`/`WLSOptions`という2つの独立した型に
+  共有させるため個々のフィールド値を取る設計に一般化済みであり、同名フィールド
+  （`cov_type`/`cluster_col`/`hac_lags`/`time_col`）を持つ`IvOptions`もこの関数をそのまま
+  呼べる可能性が高い（`parse_iv_cov_type`自体を削除できる）。`nonlinear::common::
+  parse_cov_type`（対応する`cov_type`の種類・型が異なる: opg/hc1まで、hac非対応）・
+  `panel::fe::parse_fe_cov_type`（hc0非対応・`Hac`の意味論がFE固有）は実際にvariant集合が
+  異なるため独立実装のままで妥当。また`panel::fe::parse_fe_cov_type`は既にmatch内で列抽出
+  まで完結させるスタイル（`"cluster" => { let groups = ...; FeCovType::Cluster { groups } }`）
+  で書かれており、`linear`/`iv`側は「match外で`cov_type_lower == "cluster"`をif判定→
+  事前計算→matchで組み立て」という同じ条件を2回書くスタイルになっているため、panel方式に
+  揃える方が可読性が高いと考える。項目63（`extract_optional_group_key_column`の導入）と
+  合わせて対応すると、`linear`/`iv`双方のmatch内での書き方がより簡潔になる。
+- **気づいた経緯**: 2026-09-13、`linear/common.rs`解説後のユーザー指摘（`release/v0.7.0`側
+  で発見・記録済みだったが、作業ブランチが`release/v0.8.0`に切り替わったため再記録）。
+- **状態**: 未対応（着手要否はユーザー判断待ち。着手する場合は`parse_iv_cov_type`削除
+  〔項目本体〕・`linear::common::parse_cov_type`の内部スタイル変更〔inline化〕・項目63の
+  `extract_optional_group_key_column`導入を合わせて検討）

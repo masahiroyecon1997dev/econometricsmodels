@@ -1214,3 +1214,29 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 できない）も既知の限界として起票時に明記し、その補強策として「Python層での属性
 一括存在チェック」導入も検討案としてIssue本文に記録した。`macro_rules!`による完全
 機械生成案（Issue #315とスコープ重複）は不採用、詳細はIssue参照。
+
+### 63. `Option<cluster_col>`から`extract_group_key_column`を呼ぶ処理が8箇所で重複している（`as_ref()`有無の違いのみ）
+
+- **対象**: [engine_pybind/src/linear/common.rs:104-108](../../../engine_pybind/src/linear/common.rs#L104-L108)
+  の`parse_cov_type`（`cluster_col: Option<&str>`のため`as_ref()`不要）、
+  [engine_pybind/src/nonlinear/common.rs:104-108](../../../engine_pybind/src/nonlinear/common.rs#L104-L108)
+  の`parse_cov_type`、[engine_pybind/src/iv/common.rs:452-456](../../../engine_pybind/src/iv/common.rs#L452-L456)
+  の`parse_iv_cov_type`、[engine_pybind/src/panel/fe.rs:303-307,315-319,390-394](../../../engine_pybind/src/panel/fe.rs#L303-L307)
+  の`parse_fe_cov_type`（cluster・hac time）と`build`（time）、
+  [engine_pybind/src/panel/re.rs:259-263,331-335](../../../engine_pybind/src/panel/re.rs#L259-L263)
+  の`parse_re_cov_type`（cluster）と`build`（time）（いずれも`cluster_col`/`time_col`が
+  `Option<String>`フィールドのため`as_ref()`が必要、計6箇所）
+- **内容**: ユーザー指摘（2026-09-23、「linearとnonlinearのparse_cov_typeのクラスターの
+  処理はほぼ同じなのでまとめたほうがいいのでは（`as_ref()`があるかないかの違いのみ）」）
+  を受けて調査したところ、指摘の2箇所だけでなく`iv`・`panel`（FE/RE）の`cov_type`/`time`
+  抽出も含めて計8箇所に同一パターンが重複していた。`col.map(|name|
+  extract_group_key_column(df, name)).transpose()?`という「値があれば抽出、無ければ
+  `None`、失敗したら即座にエラー」というロジック自体は完全に同一で、違いは元の型が
+  `Option<&str>`か`Option<String>`かのみ。`column_extraction.rs`に
+  `extract_optional_group_key_column(df: &DataFrame, col: Option<&str>) ->
+  PyResult<Option<Vec<String>>>`を追加すれば、`Option<String>`を保持する呼び出し側は
+  `.as_deref()`を渡すだけで済み、`as_ref()`有無の違い自体が吸収される。項目56・59〜61と
+  同じ「全手法共通の列抽出操作をcolumn_extraction.rsに集約する」方針の延長で、
+  リスクは低いと考える。
+- **気づいた経緯**: 2026-09-23、`nonlinear/common.rs`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）

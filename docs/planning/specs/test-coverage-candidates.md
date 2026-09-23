@@ -425,14 +425,15 @@
   2026-09-21、項目17対応のレビューで`testing-completeness-reviewer`が
   項目31と合わせて再指摘（`fit()`側バリデーションの非対称パターンの一例として）。
 
-### 34. `test_wls.py`にもOLSと同型のバリデーション抜けがある（`y`列自体の欠落・`fit()`本体のNaN/無限大・空文字列の列名）
+### 34. `test_wls_validation.py`にもOLSと同型のバリデーション抜けがある（`y`列自体の欠落・`fit()`本体のNaN/無限大・空文字列の列名）
 
-- **対象**: [tests/linear/test_wls.py:218-225](../../../tests/linear/test_wls.py#L218-L225)
+- **対象**: [tests/linear/test_wls_validation.py:175](../../../tests/linear/test_wls_validation.py#L175)
   （`test_missing_column_raises`、`x`側のみ`x=["x1", "nonexistent"]`、`y`側の
-  欠落は未テスト）・[tests/linear/test_wls.py:228-236](../../../tests/linear/test_wls.py#L228-L236)
-  （`test_null_values_raise`、null値のみ、NaN・無限大は未テスト。`weight`列は
-  `test_nan_weight_raises`/`test_null_weight_raises`で既に分割済みなのと
-  対照的）
+  欠落は未テスト）・[tests/linear/test_wls_validation.py:199](../../../tests/linear/test_wls_validation.py#L199)
+  （`test_null_values_raise`）・[tests/linear/test_wls_validation.py:222](../../../tests/linear/test_wls_validation.py#L222)
+  （`test_non_finite_values_raise`、対応済み後の現状）。当時の対象ファイル名は
+  `test_wls.py`だったが、その後`test_wls_validation.py`等に分割された
+  （項目自体の内容は変わらない）。
 - **内容**: ユーザー依頼（2026-08-23）を受けて`test_wls.py`のバリデーション
   網羅性を確認したところ、項目30〜32（`test_ols.py`）と同型の抜けが存在した。
   (1) `y`が存在しない列名の場合の専用テストが無い。(2) `fit()`本体の`y`/`x`
@@ -445,7 +446,12 @@
   既存分としては未対応のまま残っている。
 - **気づいた経緯**: 2026-08-23、`tests/linear/test_wls.py`解説後のユーザー指摘を
   受けた確認。
-- **状態**: 未対応（着手要否はユーザー判断待ち。(3)は優先度低）
+- **状態**: (2)は対応済み（WLS、2026-09-23）。項目31のOLS対応と同じ形で、
+  `test_null_values_raise`に`x1`列のnullケースを追加し、新規
+  `test_non_finite_values_raise`（`y`/`x1`×NaN/無限大の4ケース）を追加した。
+  42件全通過・Ruffクリーンを確認済み。(1)・(3)は未対応のまま
+  （優先度低、着手要否はユーザー判断待ち。OLS側の項目32も同じ状態で
+  対称性は保たれている）。
 
 ### 36. WLSのHACクロスチェックで、statsmodels側とR側が異なるラグ値でNewey-West公式を検証しており、同一設定が両方の独立実装から検証されていない
 

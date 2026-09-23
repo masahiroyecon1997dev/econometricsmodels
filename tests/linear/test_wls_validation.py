@@ -200,14 +200,91 @@ def test_null_values_raise():
     """`y`/`x`に欠損値が含まれる場合`ValidationError`（OLSと同じ検証、
     `weight`列自体の欠損値検証は`test_null_weight_raises`が対象）。
     """
-    df = pl.DataFrame(
+    df_y = pl.DataFrame(
         {"y": [1.0, None, 3.0], "x1": [1.0, 2.0, 3.0], "weight": [1.0] * 3}
     )
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=1),
     ):
-        WLS(df, y="y", x=["x1"], weight="weight").fit()
+        WLS(df_y, y="y", x=["x1"], weight="weight").fit()
+
+    df_x = pl.DataFrame(
+        {"y": [1.0, 2.0, 3.0], "x1": [1.0, None, 3.0], "weight": [1.0] * 3}
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    ):
+        WLS(df_x, y="y", x=["x1"], weight="weight").fit()
+
+
+def test_non_finite_values_raise():
+    """`y`/`x`にNaN・無限大が含まれる場合`ValidationError`
+    （OLSと同じ検証、`test_ols_validation.py::test_non_finite_values_raise`
+    参照。`weight`列自体のNaN検証は`test_nan_weight_raises`が対象。
+    test-coverage-candidates.md項目34（`weight`列は既に分割済みなのに
+    `y`/`x`列本体は未検証という非対称）に対応）。
+    """
+    df_y_nan = pl.DataFrame(
+        {
+            "y": [1.0, float("nan"), 3.0],
+            "x1": [1.0, 2.0, 3.0],
+            "weight": [1.0] * 3,
+        }
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="y", value="NaN", row=1
+        ),
+    ):
+        WLS(df_y_nan, y="y", x=["x1"], weight="weight").fit()
+
+    df_y_inf = pl.DataFrame(
+        {
+            "y": [1.0, float("inf"), 3.0],
+            "x1": [1.0, 2.0, 3.0],
+            "weight": [1.0] * 3,
+        }
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="y", value="inf", row=1
+        ),
+    ):
+        WLS(df_y_inf, y="y", x=["x1"], weight="weight").fit()
+
+    df_x_nan = pl.DataFrame(
+        {
+            "y": [1.0, 2.0, 3.0],
+            "x1": [1.0, float("nan"), 3.0],
+            "weight": [1.0] * 3,
+        }
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="NaN", row=1
+        ),
+    ):
+        WLS(df_x_nan, y="y", x=["x1"], weight="weight").fit()
+
+    df_x_inf = pl.DataFrame(
+        {
+            "y": [1.0, 2.0, 3.0],
+            "x1": [1.0, float("inf"), 3.0],
+            "weight": [1.0] * 3,
+        }
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="inf", row=1
+        ),
+    ):
+        WLS(df_x_inf, y="y", x=["x1"], weight="weight").fit()
 
 
 def test_non_numeric_dtype_raises():

@@ -126,7 +126,7 @@ _NEAR_SEPARATION_BETA1 = {"logit": 20.0, "probit": 10.0}
 # と同じ倍率、実体はbenchmark/common/dgp_constants.pyに集約済み）。x1は1e6倍、x2は1e-3倍。
 
 # many_regressorsシナリオで固定する説明変数の数（benchmark/linear/datasets.pyの
-# 同名シナリオと同じ発想、test-coverage-candidates.md項目2）。OLSと異なりlogit/probit
+# 同名シナリオと同じ発想）。OLSと異なりlogit/probit
 # は線形予測子の分散がkに応じて大きくなると分離を起こしやすいため、係数の大きさは
 # OLSよりずっと小さく較正する（下記_MANY_REGRESSORS_SLOPE_MAGNITUDE参照）。
 MANY_REGRESSORS_K = 20
@@ -301,12 +301,12 @@ TOBIT_SCENARIOS = [
     "scale_variance",
     "perfect_multicollinearity",
     # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス
-    # （OLS/Logit/Probitの同種ケース相当、test-coverage-candidates.md項目2）。
+    # （OLS/Logit/Probitの同種ケース相当）。
     # 打ち切り境界は y* の経験分位点で決まるため、kが増えても左打ち切り30%は
     # そのまま維持される。
     "many_regressors",
-    # x1の5%を外れ値に置き換えた成功パス（OLS/Logit/Probitの同種ケース相当、
-    # test-coverage-candidates.md項目67）。打ち切り境界は y* の経験分位点で
+    # x1の5%を外れ値に置き換えた成功パス（OLS/Logit/Probitの同種ケース相当）。
+    # 打ち切り境界は y* の経験分位点で
     # 決まるため左打ち切り30%を維持する。
     "outlier_regressor",
 ]

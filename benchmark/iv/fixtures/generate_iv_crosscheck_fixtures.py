@@ -73,8 +73,8 @@ NUMERIC_SCENARIOS = [
     "moderate_multicollinearity",
     "high_condition_number",
     # scale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）より
-    # 緩いスケール差（x1*1e2, x2*1e-1）の成功パス（test-coverage-candidates.md
-    # 項目11、generate_iv_fixtures.pyと同じ構成、ユーザー確認済み）。
+    # 緩いスケール差（x1*1e2, x2*1e-1）の成功パス
+    # （generate_iv_fixtures.pyと同じ構成、ユーザー確認済み）。
     "scale_variance_mild",
 ]
 INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
@@ -305,7 +305,7 @@ def build_fixtures() -> dict:
             "nobs/df_residはnrow(df)・df_inferenceから抽出する。"
             "scale_variance_mildはscale_variance（x1*1e6, x2*1e-3、全cov_typeで"
             "ComputationError）より緩いスケール差（x1*1e2, x2*1e-1）の成功パス"
-            "（test-coverage-candidates.md項目11、generate_iv_fixtures.pyと"
+            "（generate_iv_fixtures.pyと"
             "同じ構成）。"
             "perfect_multicollinearityはここに含まない（ComputationErrorの"
             "発生確認のみ、テストコード側で対応）。cluster_g2（G=2境界の成功"

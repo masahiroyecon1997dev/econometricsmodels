@@ -243,8 +243,7 @@ def generate_iv_dataset(
         # オーダー、スケール比1e3程度）。条件数は倍精度の限界より十分低く
         # 成功パスになるため、faer等の数値計算ライブラリ依存部分の将来の
         # 精度リグレッションを検知する成功パスケースとして使う
-        # （`benchmark/linear/datasets.py`のscale_variance_mildと同じ発想、
-        # test-coverage-candidates.md項目11）。
+        # （`benchmark/linear/datasets.py`のscale_variance_mildと同じ発想）。
         x_exog = x_exog.copy()
         x_exog[:, 0] *= 1e2
         x_exog[:, 1] *= 1e-1

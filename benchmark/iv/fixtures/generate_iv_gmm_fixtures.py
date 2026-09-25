@@ -59,8 +59,8 @@ NUMERIC_SCENARIOS = [
     "moderate_multicollinearity",
     "high_condition_number",
     # scale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）より
-    # 緩いスケール差（x1*1e2, x2*1e-1）の成功パス（test-coverage-candidates.md
-    # 項目11、generate_iv_fixtures.pyと同じ構成、ユーザー確認済み）。
+    # 緩いスケール差（x1*1e2, x2*1e-1）の成功パス
+    # （generate_iv_fixtures.pyと同じ構成、ユーザー確認済み）。
     "scale_variance_mild",
 ]
 
@@ -184,7 +184,7 @@ def build_fixtures() -> dict:
             "cluster_imbalanced）を検証する。scale_variance_mildは"
             "scale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）"
             "より緩いスケール差（x1*1e2, x2*1e-1）の成功パス"
-            "（test-coverage-candidates.md項目11、2SLSのiv.jsonと同じ構成）。"
+            "（2SLSのiv.jsonと同じ構成）。"
             "hc2/hc3は2SLSと同じ理由で対象外"
             "（`benchmark/iv/references/linearmodels_ref.py`のモジュールdoc"
             "コメント参照）。"

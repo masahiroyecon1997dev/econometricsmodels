@@ -67,10 +67,9 @@ NUMERIC_SCENARIOS = [
     # n=k+1（自由度1ちょうど）の成功パス（OLSの同種ケース相当）。
     "baseline_df1",
     # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス
-    # （OLSの同種ケース相当、test-coverage-candidates.md項目2）。
+    # （OLSの同種ケース相当）。
     "many_regressors",
-    # x1の5%を外れ値に置き換えた成功パス（OLSの同種ケース相当、
-    # test-coverage-candidates.md項目67）。
+    # x1の5%を外れ値に置き換えた成功パス（OLSの同種ケース相当）。
     "outlier_regressor",
 ]
 
@@ -273,9 +272,9 @@ def build_fixtures() -> dict:
             "（Issue #277）。classicalのみ（cov_type間の挙動差の検証が"
             "目的ではないため）。"
             "many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ"
-            "高次元シナリオ（OLSの同種ケース相当、test-coverage-candidates.md"
-            "項目2）。outlier_regressorはx1の5%を外れ値に置き換えた成功パス"
-            "（OLSの同種ケース相当、test-coverage-candidates.md項目67）。"
+            "高次元シナリオ（OLSの同種ケース相当）。"
+            "outlier_regressorはx1の5%を外れ値に置き換えた成功パス"
+            "（OLSの同種ケース相当）。"
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
             "重みは合成データセットの'weight'列。401ksubsはinv_inc（1/inc）。"
             "401ksubsはclassical/HC0-3（HACは時系列順が無いため対象外）に加え、"

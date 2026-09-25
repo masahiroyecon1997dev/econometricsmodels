@@ -7,9 +7,7 @@
 
 参照値生成スクリプト（`references/statsmodels_ref.py`等）はこのファイルの
 定数を消費する側であり、値の定義そのものは置かない。生成スクリプトを
-将来編集する際に、テスト側が依存する定数を意図せず壊すリスクを避けるため
-（経緯は`docs/planning/specs/refactoring-issue231-progress.md`「項目58」
-参照）。
+将来編集する際に、テスト側が依存する定数を意図せず壊すリスクを避けるため。
 """
 
 from __future__ import annotations
@@ -24,8 +22,8 @@ HAC_MAXLAGS = 1
 # 学習データの実現値とは無関係に、値域内で手で選んだ値。主リファレンス
 # （statsmodels、`generate_ols_fixtures.py`）とクロスチェック（R、
 # `generate_ols_crosscheck_fixtures.py`）の両フィクスチャ生成が同じ新規データを
-# 参照することで、同一のout-of-sample predict()を独立に検証できる
-# （test-coverage-candidates.md項目17）。predict(new_data)の列名マッチング
+# 参照することで、同一のout-of-sample predict()を独立に検証できる。
+# predict(new_data)の列名マッチング
 # （列順は問わない）も合わせて確認するため、テスト側ではx3/x1/x2の順に
 # 並べ替えて渡す想定。
 PREDICT_NEW_DATA: dict[str, list] = {

@@ -52,11 +52,11 @@ NUMERIC_SCENARIOS = [
     # ため成功パス）。
     "scale_variance",
     # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス
-    # （OLSの同種ケース相当、test-coverage-candidates.md項目2）。係数の大きさは
+    # （OLSの同種ケース相当）。係数の大きさは
     # 分離を避けるためOLSよりずっと小さく較正済み（benchmark/nonlinear/datasets.py参照）。
     "many_regressors",
-    # x1の5%を外れ値に置き換えた成功パス（OLSの同種ケース相当、
-    # test-coverage-candidates.md項目67）。少数の観測のみが極端な値を持つため
+    # x1の5%を外れ値に置き換えた成功パス（OLSの同種ケース相当）。
+    # 少数の観測のみが極端な値を持つため
     # 分離を起こさず、OLSと同じ較正値をそのまま使える
     # （benchmark/nonlinear/datasets.py参照）。
     "outlier_regressor",
@@ -158,11 +158,11 @@ def build_fixtures() -> dict:
             "リファレンスに対して確認するためのfixture（baselineシナリオ・classical"
             "cov_typeの1ケースのみ）。"
             "many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ高次元"
-            "シナリオ（OLSの同種ケース相当、test-coverage-candidates.md項目2）。"
+            "シナリオ（OLSの同種ケース相当）。"
             "真のDGPは未スケーリングのXで計算し、係数の大きさは分離を避けるため"
             "OLSよりずっと小さく較正済み。"
             "outlier_regressorはx1の5%を外れ値に置き換えた成功パス"
-            "（OLSの同種ケース相当、test-coverage-candidates.md項目67）。"
+            "（OLSの同種ケース相当）。"
         ),
     }
     return fixtures

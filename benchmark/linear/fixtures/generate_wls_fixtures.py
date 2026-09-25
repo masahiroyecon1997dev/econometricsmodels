@@ -56,10 +56,9 @@ NUMERIC_SCENARIOS = [
     # n=k+1（自由度1ちょうど）の成功パス（OLSの同種ケース相当）。
     "baseline_df1",
     # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス
-    # （OLSの同種ケース相当、test-coverage-candidates.md項目2）。
+    # （OLSの同種ケース相当）。
     "many_regressors",
-    # x1の5%を外れ値に置き換えた成功パス（OLSの同種ケース相当、
-    # test-coverage-candidates.md項目67）。
+    # x1の5%を外れ値に置き換えた成功パス（OLSの同種ケース相当）。
     "outlier_regressor",
 ]
 
@@ -151,14 +150,13 @@ def build_fixtures() -> dict:
             "（Issue #277）。classicalのみ（cov_type間の挙動差の検証が"
             "目的ではないため）。"
             "many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ"
-            "高次元シナリオ（OLSの同種ケース相当、test-coverage-candidates.md"
-            "項目2）。outlier_regressorはx1の5%を外れ値に置き換えた成功パス"
-            "（OLSの同種ケース相当、test-coverage-candidates.md項目67）。"
+            "高次元シナリオ（OLSの同種ケース相当）。"
+            "outlier_regressorはx1の5%を外れ値に置き換えた成功パス"
+            "（OLSの同種ケース相当）。"
             "クラスター系（cluster/cluster_imbalanced/cluster_g2）は従来coef/se"
             "のみだったが、t_stats/p_values/conf_int/r_squared等のフル統計量まで"
             "検証範囲を広げた（_run_cluster_caseがextract_full_fit_statsを"
-            "使うよう変更、OLS側項目28対応の横展開、"
-            "test-coverage-candidates.md項目72）。あわせて_run_cluster_caseに"
+            "使うよう変更、OLS側の横展開）。あわせて_run_cluster_caseに"
             "use_t=Trueが指定されていなかった不備を修正（cluster時に既定の"
             "正規分布ではなく自由度G-1のt分布を使う本プロジェクトの方針"
             "〔docs/spec/ols-spec.md「標準誤差」〕に合わせた。coef/seは"
@@ -199,8 +197,7 @@ def _run_cluster_case(
 
     # use_t=Trueが無いと既定で正規分布を使ってしまい、本プロジェクトのt分布
     # 統一方針・cluster時の自由度G-1（docs/spec/ols-spec.md「標準誤差」）と
-    # 一致しなくなる（OLS側で発覚したのと同型の不備、
-    # test-coverage-candidates.md項目72）。
+    # 一致しなくなる（OLS側で発覚したのと同型の不備）。
     model = smf.wls(
         formula=formula, data=pandas_df, weights=pandas_df["weight"]
     ).fit(

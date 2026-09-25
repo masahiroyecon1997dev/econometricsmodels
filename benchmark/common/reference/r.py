@@ -9,9 +9,8 @@ R スクリプトの位置引数の契約が系統ごとに違うため、呼び
 normalize.py`に分離されている（statsmodels主リファレンス側でも同じ正規化が
 必要になったため、Rクロスチェック専用のこのモジュールから独立させた）。
 
-Rスクリプトはどの分岐でも `list(...)` で全キーを無条件に構築するため
-（`docs/planning/specs/refactoring-candidates.md` 項目39）、旧実装にあった
-`if key in raw:` の存在チェックは省き、IV版と同じく直接アクセスに統一する。
+Rスクリプトはどの分岐でも `list(...)` で全キーを無条件に構築するため、
+旧実装にあった`if key in raw:` の存在チェックは省き、IV版と同じく直接アクセスに統一する。
 """
 
 from __future__ import annotations

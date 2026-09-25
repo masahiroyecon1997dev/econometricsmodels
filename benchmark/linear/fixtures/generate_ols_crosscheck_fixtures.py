@@ -90,18 +90,16 @@ NUMERIC_SCENARIOS = [
     # n=k+1（自由度1ちょうど）の成功パス。
     "baseline_df1",
     # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス
-    # （generate_ols_fixtures.pyと同じ理由、test-coverage-candidates.md項目2）。
+    # （generate_ols_fixtures.pyと同じ理由）。
     "many_regressors",
-    # x1の5%を外れ値に置き換えた成功パス（generate_ols_fixtures.pyと同じ理由、
-    # test-coverage-candidates.md項目67）。
+    # x1の5%を外れ値に置き換えた成功パス（generate_ols_fixtures.pyと同じ理由）。
     "outlier_regressor",
 ]
 
 R_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
 
 # 悪条件・多重共線性シナリオとクラスターロバストSEの組み合わせでの数値的
-# 頑健性確認用（generate_ols_fixtures.pyと同じリスト・同じ理由、
-# test-coverage-candidates.md項目29）。
+# 頑健性確認用（generate_ols_fixtures.pyと同じリスト・同じ理由）。
 CLUSTER_ILL_CONDITIONED_SCENARIOS = [
     "high_condition_number",
     "moderate_multicollinearity",
@@ -196,8 +194,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             )
         elif scenario in CLUSTER_ILL_CONDITIONED_SCENARIOS:
             # 悪条件・多重共線性シナリオとクラスターの組み合わせでの数値的
-            # 頑健性確認用（generate_ols_fixtures.pyと同じ理由、
-            # test-coverage-candidates.md項目29）。均等な疑似グループ
+            # 頑健性確認用（generate_ols_fixtures.pyと同じ理由）。均等な疑似グループ
             # （行番号%10）のみ。
             fixtures[scenario]["cluster"] = _run_cluster_case(
                 df, csv_path, formula
@@ -332,14 +329,13 @@ def build_fixtures() -> dict:
             "（エラー）になるため（perfect_multicollinearityと同様、"
             "ComputationErrorの発生確認のみテストコード側で対応）。"
             "many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ"
-            "高次元シナリオ（generate_ols_fixtures.pyと同じ理由、"
-            "test-coverage-candidates.md項目2）。outlier_regressorはx1の5%を"
-            "外れ値に置き換えた成功パス（generate_ols_fixtures.pyと同じ理由、"
-            "test-coverage-candidates.md項目67）。high_condition_number/"
+            "高次元シナリオ（generate_ols_fixtures.pyと同じ理由）。"
+            "outlier_regressorはx1の5%を"
+            "外れ値に置き換えた成功パス（generate_ols_fixtures.pyと同じ理由）。"
+            "high_condition_number/"
             "moderate_multicollinearityにもclusterエントリを追加（従来"
             "クラスター系はbaselineシナリオのみで、悪条件・多重共線性シナリオ"
-            "との組み合わせが未検証だった。均等な疑似グループ（行番号%10）のみ。"
-            "test-coverage-candidates.md項目29）。"
+            "との組み合わせが未検証だった。均等な疑似グループ（行番号%10）のみ）。"
         ),
     }
     return fixtures

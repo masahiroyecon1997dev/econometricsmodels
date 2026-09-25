@@ -62,12 +62,12 @@ NUMERIC_SCENARIOS = [
     "baseline_df1",
     # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス。
     # 列数依存バグ（インデックス誤り等）・高kでの数値的頑健性を検証する
-    # （test-coverage-candidates.md項目2、ユーザー確認済み）。x1..x20の
+    # （ユーザー確認済み）。x1..x20の
     # 列構成のため、他シナリオと同じ自動フォーミュラ生成に乗る。
     "many_regressors",
     # x1の5%をTukeyの汚染混合モデル（SD20倍）で外れ値に置き換えた成功パス。
     # 少数の高レバレッジ行での数値的頑健性を検証する
-    # （test-coverage-candidates.md項目67、ユーザー確認済み）。
+    # （ユーザー確認済み）。
     "outlier_regressor",
 ]
 
@@ -79,8 +79,7 @@ COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
 # （build_wooldridge_fixtures）と同じデータセット・回帰式・cov_type
 # （wage1/gpa2、classical/HC0-3、HACは横断面データのため対象外）。
 # 従来Rクロスチェック側にしか無かった実データ検証を主リファレンス
-# （statsmodels）側にも追加する（test-coverage-candidates.md項目13・33、
-# ユーザー確認済み）。
+# （statsmodels）側にも追加する（ユーザー確認済み）。
 WOOLDRIDGE_DATASETS = {
     "wage1": "lwage ~ educ + exper + tenure",
     "gpa2": "colgpa ~ sat + hsperc + tothrs",
@@ -94,7 +93,7 @@ WOOLDRIDGE_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
 # だったため、この組み合わせが未検証だった）。均等な疑似グループ
 # （行番号%10）1パターンのみ追加確認する（グルーピングパターン自体の
 # 網羅性はbaselineシナリオで既に確認済みのため重複させない。
-# test-coverage-candidates.md項目29、ユーザー確認済み）。
+# ユーザー確認済み）。
 CLUSTER_ILL_CONDITIONED_SCENARIOS = [
     "high_condition_number",
     "moderate_multicollinearity",
@@ -119,7 +118,7 @@ def build_fixtures() -> dict:
         # cov_typeループとは別に1回だけ計算する。全シナリオで学習データに
         # 対する予測値（fitted）、baselineシナリオのみout-of-sample予測値
         # （predicted）も確認する（Rクロスチェック側`ols_crosscheck.json`と
-        # 同じ網羅性。test-coverage-candidates.md項目17、ユーザー確認済み）。
+        # 同じ網羅性。ユーザー確認済み）。
         fixtures[scenario]["predict"] = run_predict(
             dataset_source="synthetic",
             dataset=scenario,
@@ -156,8 +155,7 @@ def build_fixtures() -> dict:
                 scenario=scenario,
                 note=f"悪条件・多重共線性シナリオ（{scenario}）とクラスターロバストSEの"
                 "組み合わせでの数値的頑健性確認用。均等な疑似グループ（行番号%10）のみ"
-                "（グルーピングパターン自体の網羅性はbaselineシナリオで確認済み、"
-                "test-coverage-candidates.md項目29）。",
+                "（グルーピングパターン自体の網羅性はbaselineシナリオで確認済み）。",
             )
 
     for name, formula in WOOLDRIDGE_DATASETS.items():
@@ -186,15 +184,14 @@ def build_fixtures() -> dict:
             "クロスチェック用のRベンチマークは別途 "
             "benchmark/linear/references/run_lm_crosscheck.R で生成する。"
             "many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ"
-            "高次元シナリオ（test-coverage-candidates.md項目2）。"
+            "高次元シナリオ。"
             "outlier_regressorはx1の5%をTukeyの汚染混合モデル（SD20倍）で"
-            "外れ値に置き換えた成功パス（test-coverage-candidates.md項目67）。"
+            "外れ値に置き換えた成功パス。"
             "wage1/gpa2はWooldridge実データ（classical/HC0-3、HACは"
             "時系列順の無いクロスセクションデータのため対象外）。"
             "generate_ols_crosscheck_fixtures.pyのbuild_wooldridge_fixtures()と"
             "同じデータセット・回帰式で、従来Rクロスチェック側にしか無かった"
-            "実データ検証を主リファレンス側にも追加したもの"
-            "（test-coverage-candidates.md項目13・33）。wage1.clusterは"
+            "実データ検証を主リファレンス側にも追加したもの。wage1.clusterは"
             "地域ダミー（northcen/south/west、基準northeast）から合成した"
             "実カテゴリ列regionでのクラスターロバストSE。各シナリオの"
             "'predict'キーは学習データに対する予測値（fitted、cov_typeに"
@@ -202,13 +199,13 @@ def build_fixtures() -> dict:
             "シナリオのみout-of-sample予測値（predicted、"
             "benchmark.linear.constants.PREDICT_NEW_DATA）も含む。従来"
             "Rクロスチェック側（ols_crosscheck.json）にしか無かったpredict()の"
-            "検証を主リファレンス側にも追加したもの（test-coverage-candidates.md"
-            "項目17）。Wooldridge実データ側はRクロスチェック側と同じくpredict()"
+            "検証を主リファレンス側にも追加したもの。Wooldridge実データ側は"
+            "Rクロスチェック側と同じくpredict()"
             "検証の対象外。クラスター系（cluster/cluster_imbalanced/cluster_g2/"
             "wage1.cluster）は従来coef/seのみだったが、t_stats/p_values/"
             "conf_int/r_squared等のフル統計量まで検証範囲を広げた"
-            "（_run_cluster_case等がextract_full_fit_statsを使うよう変更、"
-            "test-coverage-candidates.md項目28）。あわせて_run_cluster_caseに"
+            "（_run_cluster_case等がextract_full_fit_statsを使うよう変更）。"
+            "あわせて_run_cluster_caseに"
             "use_t=Trueが指定されていなかった不備を修正（cluster時に既定の"
             "正規分布ではなく自由度G-1のt分布を使う本プロジェクトの方針"
             "〔docs/spec/ols-spec.md「標準誤差」〕に合わせた。coef/seは"
@@ -216,8 +213,7 @@ def build_fixtures() -> dict:
             "high_condition_number/moderate_multicollinearityにもcluster"
             "エントリを追加（従来クラスター系はbaselineシナリオのみで、"
             "悪条件・多重共線性シナリオとの組み合わせが未検証だった。"
-            "均等な疑似グループ（行番号%10）のみ。"
-            "test-coverage-candidates.md項目29）。"
+            "均等な疑似グループ（行番号%10）のみ）。"
         ),
     }
     return fixtures
@@ -237,7 +233,7 @@ def _run_cluster_case(
         k1: TrueならG=2境界ケース用の説明変数1個版（synthetic_baseline_k1.csv）を使う。
         scenario: 対象シナリオ名（`k1=True`のときは無視、常に
             `synthetic_baseline_k1.csv`を使う）。悪条件・多重共線性シナリオ
-            とクラスターの組み合わせ確認用（test-coverage-candidates.md項目29）。
+            とクラスターの組み合わせ確認用。
     """
     import statsmodels.formula.api as smf
 
@@ -257,7 +253,7 @@ def _run_cluster_case(
 
     # use_t=Trueが無いと既定で正規分布を使ってしまい、本プロジェクトのt分布
     # 統一方針・cluster時の自由度G-1（docs/spec/ols-spec.md「標準誤差」）と
-    # 一致しなくなる（test-coverage-candidates.md項目28で発覚した抜け）。
+    # 一致しなくなる（過去に発覚した抜け）。
     model = smf.ols(formula=formula, data=pandas_df).fit(
         cov_type="cluster",
         cov_kwds={"groups": pandas_df["_group"]},

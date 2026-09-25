@@ -189,8 +189,7 @@ def run(
         }
         # patsy（formula API）由来の生の切片名"Intercept"を、生成時点で
         # 本実装の"const"へ正規化する（Rクロスチェック側`normalize_names`と
-        # 同じ処理を生成時に揃える。`docs/planning/specs/
-        # refactoring-issue231-progress.md`項目63参照）。margeffの内側の
+        # 同じ処理を生成時に揃える）。margeffの内側の
         # パラメータ名も同時に畳む（fix_margeff=True）。
         result = normalize_names(raw, stat_key="z_stats", fix_margeff=True)
         model_for_stats = fitted

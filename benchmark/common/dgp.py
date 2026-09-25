@@ -9,8 +9,7 @@
 - `preview_dataset`: `benchmark/<系統>/datasets.py`共通の単体実行プレビュー。
 
 数値の定数（誤差項・スケール倍率）は `benchmark.common.dgp_constants` に分けている。
-旧 `benchmark/_common.py` から Initiative A で関心事ごとに分割した
-（経緯は `docs/planning/specs/refactoring-issue231-progress.md`「Initiative A」節）。
+旧 `benchmark/_common.py` から関心事ごとに分割した。
 """
 
 from __future__ import annotations

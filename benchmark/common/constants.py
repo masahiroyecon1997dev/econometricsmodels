@@ -1,7 +1,6 @@
 """複数の系統・手法で共有する文字列定数。
 
-各手法のフィクスチャ生成スクリプトに同一のリテラルが散在していたものを集約する
-（`docs/planning/specs/refactoring-candidates.md` 項目16/25/27）。
+各手法のフィクスチャ生成スクリプトに同一のリテラルが散在していたものを集約する。
 """
 
 from __future__ import annotations

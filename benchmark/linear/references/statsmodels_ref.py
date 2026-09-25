@@ -50,7 +50,7 @@ def extract_full_fit_stats(model, confidence_level: float = 0.95) -> dict:
     辞書を取り出す。`run()`本体と、クラスター専用フィクスチャ生成
     （`generate_ols_fixtures.py`の`_run_cluster_case`等）の双方で共有する
     （従来クラスター側は`coef`/`se`のみでt値・p値・信頼区間が未検証だった非対称の
-    解消、test-coverage-candidates.md項目28）。
+    解消）。
 
     Args:
         model: statsmodelsのfit結果（`use_t=True`でfitしたもの。呼び出し側の
@@ -84,8 +84,7 @@ def extract_full_fit_stats(model, confidence_level: float = 0.95) -> dict:
     }
     # patsy（formula API）由来の生の切片名"Intercept"を、生成時点で本実装の
     # "const"へ正規化する（Rクロスチェック側`normalize_names`と同じ処理を
-    # 生成時に揃える。`docs/planning/specs/refactoring-issue231-progress.md`
-    # 項目63参照）。
+    # 生成時に揃える）。
     result = normalize_names(raw, stat_key="t_stats")
     result["r_squared"] = float(model.rsquared)
     result["r_squared_adj"] = float(model.rsquared_adj)
@@ -180,7 +179,7 @@ def run_predict(
 
     R側`run_lm_predict_crosscheck.R`と同じ役割分担: 全シナリオで学習データに
     対する予測値（`fitted`）を返し、`new_data`指定時（baselineシナリオのみ）は
-    out-of-sample予測値（`predicted`）も返す（test-coverage-candidates.md項目17）。
+    out-of-sample予測値（`predicted`）も返す。
     """
     import statsmodels.formula.api as smf
 

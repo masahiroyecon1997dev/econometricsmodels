@@ -3,8 +3,7 @@
 `run_r`（R呼び出し）から独立させているのは、この正規化ロジック自体は
 Rクロスチェック側だけでなくstatsmodels主リファレンス側（`references/
 statsmodels_ref.py`、OLS/WLS/Logit/Probit共通）でも同じ形（切片名を
-`"const"`へ揃える）で必要になったため（`docs/planning/specs/
-refactoring-issue231-progress.md`項目63参照）。
+`"const"`へ揃える）で必要になったため。
 """
 
 from __future__ import annotations

@@ -139,7 +139,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
                 groups=[str(i % 2) for i in range(df_g2.height)],
                 suffix="_cluster_g2",
             )
-            # `weight`と同じ列を`x`にも含める成功パス（Issue #277）。
+            # `weight`と同じ列を`x`にも含める成功パス。
             # 列名の重複が許容されることの数値的な確認が目的で、cov_type間の
             # 挙動差を検証する趣旨ではないためclassicalのみ
             # （generate_wls_fixtures.pyと同じ方針）。
@@ -268,8 +268,8 @@ def build_fixtures() -> dict:
             "（cluster_g2）をR側のみ確認（OLSの同種ケース相当）。"
             "high_condition_number/baseline_df1は境界値・悪条件ケース"
             "（OLSの同種ケース相当）。"
-            "baseline.weight_in_xは、weightと同じ列をxにも含める成功パス"
-            "（Issue #277）。classicalのみ（cov_type間の挙動差の検証が"
+            "baseline.weight_in_xは、weightと同じ列をxにも含める成功パス。"
+            "classicalのみ（cov_type間の挙動差の検証が"
             "目的ではないため）。"
             "many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ"
             "高次元シナリオ（OLSの同種ケース相当）。"

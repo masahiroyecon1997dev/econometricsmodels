@@ -58,7 +58,7 @@ WAGEPAN_COV_TYPES = ["classical", "hc1", "cluster"]
 def _run_re(scenario: str, cov_type: str) -> dict:
     # `time_col`は常に実在の"time"列を渡す（`generate_fe_fixtures.py`と同じ
     # 理由——不均衡パネルでcov_type="hac"のバンド幅・カーネル計算が不正確に
-    # なることを避けるため、Issue #190）。`REOptions.time`自体は本フィクス
+    # なることを避けるため）。`REOptions.time`自体は本フィクス
     # チャの対象外（RE.fit()自体はtimeを使わない、`time_col`はlinearmodels
     # 呼び出し側のMultiIndex構築専用）。
     return run_re(

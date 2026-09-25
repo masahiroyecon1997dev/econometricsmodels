@@ -3,7 +3,7 @@
 - `generate_binary_choice_dataset`: 真の二値選択DGP（リンク関数(Xβ)からのベルヌーイ
   乱数）で2値yを持つデータ（Logit/Probit）。
 - `generate_censored_regression_dataset`: 潜在回帰 `y* = Xβ + ε` を左/右/両側に
-  打ち切った連続yを持つデータ（Tobit、Issue #227）。打ち切り比率を変えた複数シナリオ
+  打ち切った連続yを持つデータ（Tobit）。打ち切り比率を変えた複数シナリオ
   ＋誤差項構造（高分散・不均一分散）＋構造的な悪条件シナリオを持つ。詳細は同関数の
   docstring参照。
 
@@ -276,11 +276,11 @@ def generate_binary_choice_dataset(
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Tobit（打ち切り回帰）用のDGP（Issue #227）
+# Tobit（打ち切り回帰）用のDGP
 # ─────────────────────────────────────────────────────────────────────
 
 TOBIT_SCENARIOS = [
-    # 打ち切り比率を変えた左打ち切りシナリオ（Issue #227の主眼）。
+    # 打ち切り比率を変えた左打ち切りシナリオ（本DGPの主眼）。
     "light_censoring",
     "moderate_censoring",
     "heavy_censoring",

@@ -16,7 +16,7 @@
 #     予測値（`predicted_value`）・打ち切り適合度（`censoring_fit_check`）:
 #     `numDeriv::grad` による数値微分、および閉形式間の相互整合を `stopifnot` で検証
 #     （末尾の「手計算箇所の formula 非依存検証」ブロック）。
-#   - 新規データ（out-of-sample）予測（`predict_new_data`、Issue #131）: `predicted_value`
+#   - 新規データ（out-of-sample）予測（`predict_new_data`）: `predicted_value`
 #     自体は上記で検証済みのため、`new_mm %*% beta`という単純な行列積のみ（`predict_head`
 #     の直後を参照）。
 #
@@ -329,7 +329,7 @@ for (pt in margeff_targets) {
   )
 }
 
-# 新規データ（out-of-sample）予測値（Issue #131のTobit版）。学習データの各スロープ
+# 新規データ（out-of-sample）予測値の検証。学習データの各スロープ
 # 列の「平均+1標準偏差」「平均-1標準偏差」を独立変数値とする2行の新規データを作り、
 # 同じ`predicted_value`（cov_type非依存の閉形式、上のnumDeriv検証済み）で
 # target3種を計算する。切片列（存在する場合）は`mm`の規約通り常に1.0。この検証が

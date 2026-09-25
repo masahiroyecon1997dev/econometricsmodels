@@ -67,7 +67,7 @@ def _run_effects(scenario: str, cov_type: str, *, two_way: bool) -> dict:
     # `time_col`は常に実在の"time"列を渡す（`two_way`とは独立、
     # `linearmodels_ref.py`モジュールdoc参照）。1-way + hacで観測順ダミーを
     # 使うと不均衡パネル（unbalancedシナリオ）でバンド幅・カーネル計算が
-    # 不正確になるため（実測で発覚、Issue #190）。
+    # 不正確になるため（実測で発覚）。
     return run(
         scenario,
         ["x1", "x2"],

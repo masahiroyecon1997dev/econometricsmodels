@@ -110,7 +110,7 @@ def build_fixtures() -> dict:
                 "ComputationError）。",
                 k1=True,
             )
-            # `weight`と同じ列を`x`にも含める成功パス（Issue #277）。
+            # `weight`と同じ列を`x`にも含める成功パス。
             # 列名の重複が許容されることの数値的な確認が目的で、cov_type間の
             # 挙動差を検証する趣旨ではないためclassicalのみ（cluster系と同じ方針）。
             fixtures[scenario]["weight_in_x"] = run(
@@ -146,8 +146,8 @@ def build_fixtures() -> dict:
             "401ksubsの回帰式・重み定義はdocs/spec/wls-spec.md参照。"
             "401ksubsはclassical/HC0-3（HACは時系列順が無いため対象外）と"
             "クラスター（ageの分位ビン、_add_age_bin参照）をcov_type別に持つ。"
-            "baseline.weight_in_xは、weightと同じ列をxにも含める成功パス"
-            "（Issue #277）。classicalのみ（cov_type間の挙動差の検証が"
+            "baseline.weight_in_xは、weightと同じ列をxにも含める成功パス。"
+            "classicalのみ（cov_type間の挙動差の検証が"
             "目的ではないため）。"
             "many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ"
             "高次元シナリオ（OLSの同種ケース相当）。"

@@ -96,7 +96,7 @@ def build_fixtures() -> dict:
         groups=imbalanced_cluster_groups(n),
         note="不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。",
     )
-    # NOTE: G=2×説明変数3個（cluster_g2）の成功パスフィクスチャは Issue #289 で
+    # NOTE: G=2×説明変数3個（cluster_g2）の成功パスフィクスチャは
     # 削除した（Logitと同じ理由。`rank(Ŝ)<=G-1`のため`G<=q`でクラスターロバスト
     # 共分散が退化し ValidationError になる）。エラーパスは
     # test_probit_validation.py 側で確認する。
@@ -113,7 +113,7 @@ def build_fixtures() -> dict:
             model="probit",
         )
     # NOTE: mrozの`city`（G=2）クラスターロバストSEの成功パスフィクスチャは
-    # Issue #289 で削除した（`G=2 <= q=7`で ValidationError。Logitと同じ）。
+    # 削除した（`G=2 <= q=7`で ValidationError。Logitと同じ）。
     # エラーパスは
     # test_probit_validation.py::test_mroz_cluster_cov_type_raises_validation_error。
 
@@ -153,7 +153,7 @@ def build_fixtures() -> dict:
             "n=k+1（自由度1ちょうど）の境界値ケースはLogitと同じ理由で非採用"
             "（n<=kではMLEが構造的にほぼ確実に完全分離を起こすため）。"
             "G<=q（傾き係数の数）でのクラスターロバストSE（cluster_g2・mroz/city）は"
-            "ValidationErrorになるため成功パスフィクスチャを持たない（Issue #289）。"
+            "ValidationErrorになるため成功パスフィクスチャを持たない。"
             "methodはbfgs/lbfgsがnewtonと同じ最尤解・標準誤差に収束することを主"
             "リファレンスに対して確認するためのfixture（baselineシナリオ・classical"
             "cov_typeの1ケースのみ）。"

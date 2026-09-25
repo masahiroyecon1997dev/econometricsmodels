@@ -109,7 +109,7 @@ def run_tobit_r(
         ``"const"`` へ、末尾に ``"sigma"`` を含む）と、スカラー統計量
         （``_TOBIT_SCALAR_KEYS``）、``margeff``（``[target][at][param]`` の3階層）、
         ``predict_head``（各 target の先頭10行の予測値）、``predict_new_data``
-        （``new_x`` に対する各 target の予測値、Issue #131）、``new_x``
+        （``new_x`` に対する各 target の予測値）、``new_x``
         （``predict_new_data`` の計算に使った新規データの x 列、
         ``Tobit(...).predict(new_data=...)`` に渡す ``new_data`` をテスト側で
         組み立てるためのもの）、``censoring_fit_check``（該当カテゴリの

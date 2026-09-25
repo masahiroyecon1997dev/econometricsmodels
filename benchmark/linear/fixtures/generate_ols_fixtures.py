@@ -139,7 +139,7 @@ def build_fixtures() -> dict:
             )
             # G=2×説明変数3個（既定のbaseline）はG<=q（q=3）で、rank(Ŝ)<=G-1の
             # ためロバストWald検定のq×q部分行列が構造的に特異になり、fit()冒頭の
-            # バリデーションがValidationErrorで弾く（成功パスではない、Issue #289。
+            # バリデーションがValidationErrorで弾く（成功パスではない。
             # test_ols_validation.py側でエラーパスとして確認）。ここでの
             # 「G=2境界の成功パス」は説明変数1個（q=1、G=2>q=1）に絞って確認する。
             n_g2 = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv").height

@@ -3,7 +3,7 @@
 #
 # linearmodels（主リファレンス、benchmark/panel/references/linearmodels_ref.py）とは
 # 独立した実装のため、testing-policy.mdの役割分担「R: 独立実装によるクロスチェック用」
-# に対応する（Issue #190）。
+# に対応する。
 #
 # classical/hc1/hc2/hc3/clusterのみを対象とする。cov_type="hac"
 # （Driscoll-Kraay）はfixestのvcov="DK"が既定バンド幅公式（n_t^0.25、

@@ -1,6 +1,6 @@
 """panel系統（FE/RE）の R（fixest/plm）クロスチェック呼び出し。
 
-`run_fixest_benchmark.R`（FE）・`run_plm_benchmark.R`（RE、Issue #203）
+`run_fixest_benchmark.R`（FE）・`run_plm_benchmark.R`（RE）
 それぞれの位置引数の契約をここで組み立て、共通の
 `benchmark.common.reference.r`に渡す。
 """
@@ -23,8 +23,8 @@ _FIXEST_SCALAR_KEYS = (
 )
 
 # `benchmark/panel/run_plm_benchmark.R`は`references/`直下ではなく
-# `benchmark/panel/`直下に置いたまま（既存スタブのパスを踏襲、Issue #203で
-# 中身のみRE専用に更新した。移動は本Issueのスコープ外）。
+# `benchmark/panel/`直下に置いたまま（既存スタブのパスを踏襲。
+# 中身のみRE専用に更新済みで、ファイルの移動は行っていない）。
 _PLM_R_SCRIPT = Path(__file__).resolve().parents[1] / "run_plm_benchmark.R"
 
 # ハウスマン検定はcov_typeに依存しない単一の統計量だが、

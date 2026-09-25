@@ -8,7 +8,7 @@ FE/RE共通のPython主リファレンス（`docs/spec/panel-common.md`
 合成データは`benchmark/panel/datasets.py`を直接呼ばず、`tests/fixtures/
 benchmarks/data/`に固定済みのCSVを読む（`benchmark/panel/freeze.py`参照。
 `benchmark/linear/references/statsmodels_ref.py`と同じ理由）。**RE専用の
-合成データセット・凍結コードは追加していない**——RE（Issue #203）はFEが既に
+合成データセット・凍結コードは追加していない**——REはFEが既に
 凍結済みの`fe_*.csv`をそのまま再利用する（ユーザー確認済み・2026-09-20。
 `benchmark/linear`系統でOLS/WLSがprefix"synthetic"を共有する前例と同型）。
 
@@ -72,16 +72,15 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/panel/freeze.py`参
    使う**（FEの`res.f_statistic_robust`とは異なる）——`engine::panel::re::
    ReEstimator`のF統計量は`cov_type`に連動しない独自定義（変換済みyの単純
    平均を基準にしたSST/SSR比較、`wald_test_last_columns`を再利用しない、
-   `engine/src/panel/CLAUDE.md`「F統計量（Issue #337）」参照）を採用している
+   `docs/spec/re-spec.md`3.5節参照）を採用している
    ため。
 4. **`aic`/`bic`を結果に含めない**: `linearmodels.RandomEffects`も`PanelOLS`と
    同じ`_cov_estimators`実装のため`aic`/`bic`属性を持たない（実測確認済み）。
    FEと異なり、この2つを検証する独立したRクロスチェックも用意していない——
    `plm`の`model="random"`オブジェクトは`logLik()`未対応（実測確認済み、
    `"no applicable method for 'logLik'"`）なため。REのaic/bic/log_likelihood
-   自体はOLS委譲による計算式（`engine/src/panel/CLAUDE.md`「df_resid/
-   df_model（Issue #196）」参照）で、この式自体の正しさはOLS本体のテストで
-   別途担保されている。
+   自体はOLS委譲による計算式（`docs/spec/re-spec.md`3.3節参照）で、この式自体の
+   正しさはOLS本体のテストで別途担保されている。
 
 `hc2`/`hc3`はFEと同じ理由（`linearmodels`が提供しない）で対象外——REは
 `plm::vcovHC(method="white1", type="HC2"/"HC3")`を唯一の参照実装とする
@@ -131,7 +130,7 @@ def _load_panel_dataset(
 # engine cov_type -> linearmodels cov_type。モジュールdocstring参照。
 # debiasedは常にTrue（panel-common.md 3.3節）。FE/RE共通
 # （`RandomEffects`も`PanelOLS`と同じ`_cov_estimators`実装、
-# engine/src/panel/CLAUDE.md「cov_type対応（Issue #197）」参照）。
+# engine/src/panel/CLAUDE.md「cov_type対応」参照）。
 _COV_TYPE_MAP: dict[str, str] = {
     "classical": "unadjusted",
     "hc1": "robust",

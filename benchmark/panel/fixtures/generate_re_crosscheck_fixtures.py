@@ -34,7 +34,7 @@ FEのfixestクロスチェックとは精度の前提が異なる。
 REのaic/bic/log_likelihoodの独立検証は現時点で行わない
 （`linearmodels_ref.py`モジュールdoc参照）。
 
-## `hausman_statistic`の符号について（Issue #350で解決済み）
+## `hausman_statistic`の符号について（解決済み）
 
 本フィクスチャ作成時（2026-09-20）に、当時の設計文書（`panel-common.md`
 `re-spec.md`3.7節・`engine/src/panel/CLAUDE.md`）の「本実装の`hausman_statistic`は差行列
@@ -56,7 +56,7 @@ stat <- as.numeric(abs(t(dbeta) %*% solve(dvcov) %*% dbeta))
 **このフィクスチャ自体には`plm`の実際の出力（常に非負）をそのまま記録して
 いる**（参照実装の値をありのまま記録するという本フィクスチャの役割上、正しい
 挙動）。engine側の`hausman_statistic`実装（`engine/src/panel/common.rs`）は
-Issue #350で`abs()`を適用するよう修正済みのため、現在は本フィクスチャの値と
+`abs()`を適用するよう修正済みのため、現在は本フィクスチャの値と
 engineの出力を`abs()`無しで直接比較できる（`tests/panel/test_re_crosscheck.py`
 参照）。
 
@@ -161,7 +161,7 @@ def build_fixtures() -> dict:
             "ユーザー確認済み・2026-09-20）。wagepanはre.jsonと同じ"
             "married/union/expersqを使用。"
             "hausman_statisticはplm::phtestの実装（plm:::phtest.panelmodel）"
-            "がabs()を無条件適用するため常に非負。本実装のengineもIssue #350で"
+            "がabs()を無条件適用するため常に非負。本実装のengineも"
             "同様にabs()を適用するよう修正済みのため、abs()適用等の追加処理無しで"
             "plmの出力と直接比較できる（docs/spec/re-spec.md 3.7節、本スクリプト"
             "のモジュールdoc参照）。"

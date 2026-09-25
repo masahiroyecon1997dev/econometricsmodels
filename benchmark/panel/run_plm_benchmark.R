@@ -3,12 +3,12 @@
 #
 # linearmodels（主リファレンス、benchmark/panel/references/linearmodels_ref.pyの
 # run_re()）とは独立した実装のため、testing-policy.mdの役割分担「R: 独立実装に
-# よるクロスチェック用」に対応する（Issue #203）。
+# よるクロスチェック用」に対応する。
 #
 # ## 対象はHC2/HC3のみ（単一参照実装の例外、panel-common.md 5.4節と同型）
 #
 # linearmodels.RandomEffectsはHC2/HC3を提供しない（PanelOLSと同じ`_cov_estimators`
-# 実装のため、engine/src/panel/CLAUDE.md「cov_type対応（Issue #197）」参照）ため、
+# 実装のため、engine/src/panel/CLAUDE.md「cov_type対応」参照）ため、
 # plm::vcovHC(method="white1", type="HC2"/"HC3")を唯一の参照実装とする。
 #
 # classical/hc1/cluster/hacはlinearmodelsのみで検証する（本スクリプトでは計算
@@ -51,7 +51,7 @@
 # `logLik.plm`は`model="random"`のplmオブジェクトを未サポート（実測確認済み、
 # "no applicable method for 'logLik' applied to an object of class
 # 'c(plm, panelmodel)'"）。REのaic/bic/log_likelihoodはOLS委譲による計算式
-# （engine/src/panel/CLAUDE.md「df_resid/df_model（Issue #196）」参照）であり、
+# （docs/spec/re-spec.md3.3節参照）であり、
 # 独立したR実装での検証は現時点で行わない（式自体の正しさはOLS本体のテストで
 # 別途担保済み）。
 #

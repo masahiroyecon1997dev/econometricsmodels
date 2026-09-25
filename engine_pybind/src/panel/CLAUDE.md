@@ -4,11 +4,11 @@
 
 ## 実装フェーズの分割方針（IV・Logitと同じ3段階、`engine_pybind/src/iv/CLAUDE.md`参照）
 
-FEはIVの`#159`（データ抽出・pyclass定義）→`#169`（engine呼び出し）→`#170`（`first_stage()`）と同じ3段階に分けた。
+FEはIVの「データ抽出・pyclass定義」→「engine呼び出し」→「`first_stage()`」と同じ3段階に分けた。
 
-1. **データ抽出・pyclass定義issue（FEでは#186、完了）**: `FEOptions`/`FEResult`のpyclass定義、列抽出・バリデーション・`engine::panel::fe::FeInput`構築までを行う`build_fe_input`を`panel/fe.rs`に実装した。この時点では`#[pymodule]`への登録・実際の`FeEstimator::fit`呼び出しは行わなかった。
-2. **engine呼び出し・エラー変換issue（FEでは#187、完了）**: `build_fe_input`を実際に呼び出す`fit`関数（`panel/fe.rs`）を追加し、`lib.rs`に`#[pyfunction] fit_fe`を新設して`#[pymodule]`に登録した。`build_fe_input`/`parse_fe_cov_type`/`panel_error_to_pyerr`の`#[allow(dead_code)]`属性はこの時点で全て削除した（本番経路（`fit_fe`）から実際に呼ばれるようになったため、IVの#169と同じ）。`maturin develop --release`でビルドし、fixestリファレンスフィクスチャ（`engine::panel::fe`の`fixest_reference_input`と同じデータ）を使ってPythonから直接`_lib.fit_fe`を呼び出し、engine単体テストの期待値と完全一致することを確認済み（k=0・`cov_type="hc0"`拒否・`time_col`経由のHACも動作確認済み）。
-3. **`fixed_effects()`メソッドissue（FEでは#188、完了）**: IVの`first_stage()`と同じ「追加結果は別メソッド」方針（`docs/spec/fe-spec.md`3.5節）。`FEResult`に`FeEstimator`本体を保持する非公開フィールド`estimator`を追加し（`IVResult.first_stage`が#159ではなく#170で追加されたのと同じ段階分割）、`fixed_effects()`pymethodがそこから`FeEstimator::fixed_effects()`をオンデマンドに呼ぶ。詳細は下記「`fixed_effects()`の実装」参照。
+1. **データ抽出・pyclass定義段階（完了）**: `FEOptions`/`FEResult`のpyclass定義、列抽出・バリデーション・`engine::panel::fe::FeInput`構築までを行う`build_fe_input`を`panel/fe.rs`に実装した。この時点では`#[pymodule]`への登録・実際の`FeEstimator::fit`呼び出しは行わなかった。
+2. **engine呼び出し・エラー変換段階（完了）**: `build_fe_input`を実際に呼び出す`fit`関数（`panel/fe.rs`）を追加し、`lib.rs`に`#[pyfunction] fit_fe`を新設して`#[pymodule]`に登録した。`build_fe_input`/`parse_fe_cov_type`/`panel_error_to_pyerr`の`#[allow(dead_code)]`属性はこの時点で全て削除した（本番経路（`fit_fe`）から実際に呼ばれるようになったため、IVの同じ段階と同じ）。`maturin develop --release`でビルドし、fixestリファレンスフィクスチャ（`engine::panel::fe`の`fixest_reference_input`と同じデータ）を使ってPythonから直接`_lib.fit_fe`を呼び出し、engine単体テストの期待値と完全一致することを確認済み（k=0・`cov_type="hc0"`拒否・`time_col`経由のHACも動作確認済み）。
+3. **`fixed_effects()`メソッド段階（完了）**: IVの`first_stage()`と同じ「追加結果は別メソッド」方針（`docs/spec/fe-spec.md`3.5節）。`FEResult`に`FeEstimator`本体を保持する非公開フィールド`estimator`を追加し（`IVResult.first_stage`が1段階目ではなく3段階目で追加されたのと同じ段階分割）、`fixed_effects()`pymethodがそこから`FeEstimator::fixed_effects()`をオンデマンドに呼ぶ。詳細は下記「`fixed_effects()`の実装」参照。
 
 ## `fit`の実装
 
@@ -51,11 +51,11 @@ computation_error`に従うだけ）。他系統（`IvError`・`MleError`等）�
 
 `engine_pybind/src/iv/CLAUDE.md`「踏んだ罠」に記録済みの罠を、既存コード（`panel/common.rs`の`panel_error_to_pyerr`）で実際に踏んだ。初期実装の時点では`panel_error_to_pyerr`はどこからも呼ばれておらず`#[expect(dead_code, ...)]`が付いていたが、後続の実装で`build_fe_input`（`FeInput::from_columns`のエラーを`.map_err(panel_error_to_pyerr)`で変換）がこれを呼ぶようになった。`build_fe_input`自体は`#[cfg(test)] mod tests`からしか呼ばれない（`#[pymodule]`未登録のため）ため、`cargo test`/`clippy --all-targets`では`panel_error_to_pyerr`が到達可能になり`dead_code`が発火しなくなる → `#[expect]`の期待が外れ`unfulfilled_lint_expectations`が`-D warnings`下でエラーになった。`#[allow(dead_code)]`（無条件抑制）に変更して解消した。**「本番未接続だがテストからは呼ばれる」関数を新規に追加するとき、その関数が呼ぶ既存の`#[expect(dead_code)]`付き関数にも同じ変更が波及する**ことに注意（呼び出しグラフを辿って確認すること）。
 
-`build_fe_input`/`parse_fe_cov_type`自身も同じ理由で`#[allow(dead_code, reason = "...")]`を付けている（`build_iv_input`/`parse_iv_cov_type`の#159時点と同じパターン）。#187で`fit_fe`が`#[pymodule]`に登録されたら、これらの属性はすべて削除すること。
+`build_fe_input`/`parse_fe_cov_type`自身も同じ理由で`#[allow(dead_code, reason = "...")]`を付けている（`build_iv_input`/`parse_iv_cov_type`の1段階目時点と同じパターン）。`fit_fe`が`#[pymodule]`に登録されたら、これらの属性はすべて削除すること。
 
 ## RE: engine呼び出し・エラー変換
 
-FEの#187と同じ構成: `build_re_input`で`ReInput`/`ReCovType`/`cov_type`（小文字正規化済み
+FEの2段階目（engine呼び出し・エラー変換）と同じ構成: `build_re_input`で`ReInput`/`ReCovType`/`cov_type`（小文字正規化済み
 文字列）を得たあと、`ReEstimator::fit`を呼び、`REResult`を組み立てて返す（`panel/re.rs`の
 `fit`関数）。`lib.rs`に`#[pyfunction] fit_re`を新設して`#[pymodule]`に登録し、
 `build_re_input`の`#[allow(dead_code)]`を削除した（`parse_re_cov_type`は元々属性を付けて
@@ -86,12 +86,12 @@ dead_code扱いの間も呼び出しグラフ経由で到達可能だった）�
   （`PyDataFrame`がGILを要求）で`#[cfg(test)] mod tests`から直接呼べないため、専用の
   Rustユニットテストは追加していない。
 - RE自身に`fixed_effects()`のような追加メソッドは無いため（`panel-common.md`2.4節、
-  `panel/re.rs`モジュールdoc参照）、FEの#188（`fixed_effects()`）に相当する3段目は無く、
-  本Issueでこの系統の実装は完結する。
+  `panel/re.rs`モジュールdoc参照）、FEの`fixed_effects()`段階に相当する3段目は無く、
+  本対応でこの系統の実装は完結する。
 
 ## RE: データ抽出・pyclass定義
 
-FEの#186と同じ段階（`REOptions`/`REResult`のpyclass定義・`build_re_input`実装まで、
+FEの1段階目（データ抽出・pyclass定義）と同じ段階（`REOptions`/`REResult`のpyclass定義・`build_re_input`実装まで、
 `#[pymodule]`未登録・`ReEstimator::fit`未呼び出し）を`panel/re.rs`に実装した。`engine`側
 （`ReInput`/`ReEstimator`/`ReCovType`）はハウスマン検定の実装時点で既に完成済みだった
 ため、本対応は`engine_pybind`層のみのスコープ。
@@ -104,8 +104,8 @@ FEの#186と同じ段階（`REOptions`/`REResult`のpyclass定義・`build_re_in
   `docs/spec/re-spec.md`3.7節）」を兼ねる。詳細は`panel/re.rs`モジュールdoc参照。
 - **`x`の空リストを許容しない（ユーザー確認済み、2026-09-20）**: REで`x=[]`は「分散成分
   （ICC）のみを推定するnullモデル」として単独で意味を持つ標準的なユースケースだが、
-  `panel-common.md`にこの点の明示的な決定が無かったため確認した。他手法（FE
-  post-#320・OLS/WLS/Logit/Probit/IV）と一貫させ`validate_x_non_empty`で拒否する方針を
+  `panel-common.md`にこの点の明示的な決定が無かったため確認した。他手法（FE・
+  OLS/WLS/Logit/Probit/IV）と一貫させ`validate_x_non_empty`で拒否する方針を
   選択した。nullモデル・ICC推定のサポート自体は別途検討する。
 - **`cov_type`は`FEOptions`と同じ集合**（`classical`/`hc1`〜`hc3`/`cluster`/`hac`、`hc0`は
   非対応）。`parse_re_cov_type`は`parse_fe_cov_type`とほぼ同型だが、上記の通り`hac`分岐で
@@ -143,4 +143,4 @@ FEの#186と同じ段階（`REOptions`/`REResult`のpyclass定義・`build_re_in
 
 `panel-common.md`2章のフィールドをすべて含む（`f_statistic`/`f_p_value`を含む——これはフィールド設計時にengine側が未対応と判明し前倒しで実装した、`engine/src/panel/CLAUDE.md`参照）。`fixed_effects()`メソッド（上記「`fixed_effects()`の実装」参照）も実装済みで、IV/Logit/Probitと同じ3段階の実装フェーズはこれで完結した。
 
-`n_entities`はengine側に対応するpublicなgetterが無いため（`FeEstimator`内部のprivateな`count_unique`を使うのみ）、`fit()`実装時（#187）に`engine_pybind`側で`entity`列から独立に計算する想定（`HashSet`でユニーク数を数えるだけの単純な処理のため、engine側にgetterを追加するほどではないと判断——ただし#187着手時に再検討してもよい）。
+`n_entities`はengine側に対応するpublicなgetterが無いため（`FeEstimator`内部のprivateな`count_unique`を使うのみ）、`fit()`実装時に`engine_pybind`側で`entity`列から独立に計算する想定（`HashSet`でユニーク数を数えるだけの単純な処理のため、engine側にgetterを追加するほどではないと判断——ただし実装時に再検討してもよい）。

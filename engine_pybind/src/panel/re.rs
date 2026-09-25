@@ -17,16 +17,16 @@
 //! 1. **データ抽出・pyclass定義（完了）**: `REOptions`/`REResult`のpyclass定義、
 //!    列抽出・バリデーション・`engine::panel::re::ReInput`構築までを行う`build_re_input`を
 //!    実装した。この時点では`#[pymodule]`への登録・実際の`ReEstimator::fit`呼び出しは
-//!    行わなかった（FEの#186と同じ分割）。
+//!    行わなかった（FEの1段階目と同じ分割）。
 //! 2. **本対応**: `build_re_input`を実際に呼び出す`fit`関数を追加し、`lib.rs`に
-//!    `#[pyfunction] fit_re`を新設して`#[pymodule]`に登録する（FEの#187相当）。
+//!    `#[pyfunction] fit_re`を新設して`#[pymodule]`に登録する（FEの2段階目相当）。
 //!    `build_re_input`/`parse_re_cov_type`の`#[allow(dead_code)]`属性はこの時点で削除する
 //!    （本番経路（`fit_re`）から実際に呼ばれるようになったため）。
 //!
 //! RE自身に`fixed_effects()`のような追加メソッドは無い（ハウスマン検定は`fit()`内で自動
-//! 計算し`REResult`のフィールドに直接含める、`panel-common.md`2.4節）ため、FEの#188
-//! （`fixed_effects()`メソッド）に相当する3段目は存在しない。本Issueでこの系統の実装は
-//! 完結する。
+//! 計算し`REResult`のフィールドに直接含める、`panel-common.md`2.4節）ため、FEの
+//! `fixed_effects()`段階（`fixed_effects()`メソッド）に相当する3段目は存在しない。
+//! 本対応でこの系統の実装は完結する。
 //!
 //! ## `REOptions`に`time_col`が無い理由（`FEOptions`との相違点）
 //!
@@ -54,7 +54,7 @@
 //! FEと同じ`validate_x_non_empty`を適用し、`x=[]`を拒否する。REで`x=[]`は
 //! 「分散成分（ICC）のみを推定するnullモデル」として単独で意味を持つ標準的なユースケース
 //! （パネル・混合モデル分析の"null model"）だが、`panel-common.md`にこの点の明示的な
-//! 決定が無く、他手法（OLS/WLS/Logit/Probit/IV/FE post-#320）と一貫させる方針をユーザーが
+//! 決定が無く、他手法（OLS/WLS/Logit/Probit/IV/FE）と一貫させる方針をユーザーが
 //! 選択した。nullモデル・ICC推定のサポートは別途検討する。
 
 use std::collections::HashSet;
@@ -492,7 +492,7 @@ mod tests {
     #[test]
     fn build_re_input_returns_error_for_empty_x() {
         // `x=[]`を拒否する（モジュールdoc「`x`の空リストを許容しない」参照。
-        // FE post-#320・OLS/WLS/Logit/Probit/IVと同じ`validate_x_non_empty`）。
+        // FE・OLS/WLS/Logit/Probit/IVと同じ`validate_x_non_empty`）。
         let df = well_formed_df();
         let options = default_options();
 

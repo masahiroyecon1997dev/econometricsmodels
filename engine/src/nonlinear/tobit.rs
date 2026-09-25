@@ -1337,7 +1337,7 @@ impl TobitEstimator {
     /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
     ///   `CommonError::InsufficientClustersForInference`（`rank(Ŝ) ≤ g - 1`のため全体
     ///   Wald検定の`q×q`部分行列が構造的に特異。従来は`wald_chi2_test`内の
-    ///   `ComputationFailed`だったものを`fit()`冒頭のバリデーションへ前倒し、#287）
+    ///   `ComputationFailed`だったものを`fit()`冒頭のバリデーションへ前倒し）
     /// - OLS初期値計算時に`x`が特異（完全な多重共線性等）: `MleError::SingularDesignMatrix`
     ///   （`ols_initial_params`参照）
     /// - `raise_on_non_convergence=true`かつ`max_iter`回で未収束: `MleError::NonConvergence`
@@ -2801,7 +2801,7 @@ mod tests {
     /// `SingularHessian`エラー伝播を検証しているが、`sandwich_cov_params`（`Hc0`/`Hc1`）も
     /// 内部で同じHessianの逆行列計算を行うため、同じ打ち切り点で同じエラーが伝播する
     /// はず。Logit/Probitの`fit_returns_singular_design_matrix_error_for_perfectly_
-    /// collinear_design_matrix`（#279で`method`×`cov_type`を1テストに集約）と同じ
+    /// collinear_design_matrix`（`method`×`cov_type`を1テストに集約）と同じ
     /// 「cov_type分岐ごとのエラー伝播`?`」のギャップパターンを
     /// Tobitでも確認する（`cargo llvm-cov`で発覚）。
     #[test]
@@ -3485,7 +3485,7 @@ mod tests {
         .unwrap();
 
         assert!(est.converged());
-        // 傾きは真値 40 の近傍（打ち切り＋ノイズがあるため緩め）。#286以前は`y`の
+        // 傾きは真値 40 の近傍（打ち切り＋ノイズがあるため緩め）。以前は`y`の
         // 大スケールで`SeparationSuspected`が誤発火し`.unwrap()`がpanicしていた
         // （現在はTobitがこの事後チェックを通らないため）。
         assert!(
@@ -3522,7 +3522,7 @@ mod tests {
     ///
     /// `fit()`は`run_solver`に`SeparationNormCheck::Disabled`を渡すため、標準化
     /// パラメータノルム基準の(準)完全分離事後チェックを通らない。これを
-    /// `SeparationNormCheck::Enabled`へ戻す回帰が入っても、#286以降の`TobitScaling`が
+    /// `SeparationNormCheck::Enabled`へ戻す回帰が入っても、その後の`TobitScaling`が
     /// 標準化ノルムを閾値以下に保つため`SeparationSuspected`は発火せず——この失敗モードが
     /// `NonConvergence`であること自体を、Tobitの分離の現れ方の正本として固定する
     /// （`SeparationSuspected`と`NonConvergence`はどちらも`ComputationError`にマップ
@@ -5588,17 +5588,17 @@ mod tests {
             }
         }
 
-        /// （#342のPhase 2、実際の退化ケースの特定）で捕捉した具体的な
+        /// （Phase 2、実際の退化ケースの特定）で捕捉した具体的な
         /// 入力の1つを固定値化した回帰テスト。
         ///
-        /// **調査方法**: `#342`のPhase 1（評価回数バジェット方式）導入後は、line
+        /// **調査方法**: Phase 1（評価回数バジェット方式）導入後は、line
         /// searchの暴走が数秒程度の有限時間で`Err`に変換されるようになったため、
         /// `kill`前提の外部タイムアウト無しで大量試行を安全に回せることを利用し、
         /// `tobit_case_strategy()`・`method_strategy()`を`TestRunner`で直接
         /// サンプリングして30万回試行する使い捨ての探索ハーネスを一時的に実装し
         /// 実行した（コミット履歴には残さず、本テストのみを結果として残す）。
         ///
-        /// **判明した事実（#344当時）**: 30万試行中8件が`MleError::EvaluationBudgetExceeded`
+        /// **判明した事実（当時）**: 30万試行中8件が`MleError::EvaluationBudgetExceeded`
         /// 相当のエラー（`Method::Lbfgs`は当時のargmin組み込みLBFGSの`SolverExit`経由で
         /// 同じメッセージを含む`ComputationFailed`になっていた）を引き起こした。**8件
         /// 全てが`method=Lbfgs`**で、`method=Bfgs`・`method=Newton`は1件もヒットしな

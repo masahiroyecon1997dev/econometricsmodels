@@ -1536,7 +1536,7 @@ mod tests {
         // θ_i = 1 - sqrt(σ_ε²/σ_ε²) = 0 になり、`quasi_demean_column`が実質的に
         // 何も変換しない（プーリングOLSと同じ設計行列になる、`re-spec.md`3.2節・
         // `quasi_demean_column_with_theta_zero_is_identity`と対応する不変条件）。
-        // rust-reviewer指摘: この退化ケースをフィット実装（#195）より前に
+        // rust-reviewer指摘: この退化ケースをフィット実装より前に
         // 固定しておく。
         let entity = strings(&["a", "a", "b", "b", "b"]);
 

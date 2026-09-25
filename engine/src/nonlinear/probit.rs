@@ -1183,7 +1183,7 @@ mod tests {
         // 上の`cost_gradient_hessian_stay_finite_for_extreme_linear_predictor`と
         // 同じデータ（切片のみ、z=1000）を使う。y=[1,0]の2件はどちらも同じ`z=1000`を
         // 共有するが、y=0の観測はq=-1でqz=-1000（大きく負、誤分類）となり、
-        // これがまさに#316の再現条件。修正前はh[0][0]が約-8177（Issueの手計算
+        // これがまさに再現条件。修正前はh[0][0]が約-8177（手計算
         // 概算値≈-8064と整合）だったことを確認済み（バグ注入により再現）。
         let y = vec![1.0, 0.0];
         let input = ProbitInput::from_columns(&y, &[], vec![], true, "y".to_string()).unwrap();
@@ -2528,7 +2528,7 @@ mod tests {
     /// 旧5テストが検証していた「`fit()`の各`cov_type`分岐での`SingularHessian`/
     /// `SingularOpgMatrix`の`?`伝播」経路のカバレッジは、`common.rs`の関数レベルテストと
     /// `tobit.rs`の`fit()`レベルテスト（`cov_params`計算は3手法で同一コード）が担う
-    /// （`LogitEstimator`の対応するテストのdocコメント参照、#279レビューで確認）。
+    /// （`LogitEstimator`の対応するテストのdocコメント参照、レビューで確認）。
     ///
     /// `Cluster`は`G=3 > q=2`にして`fit()`冒頭の`InsufficientClustersForInference`
     /// （`G <= q`）より手前を通す。

@@ -181,7 +181,7 @@ pub enum MleError {
     /// 起きても係数は±∞へ発散せず`σ→0`退化として現れるため標準化パラメータノルムは
     /// 閾値を超えない。Tobitの分離は全件打ち切りなら`NoUncensoredObservations`
     /// （`fit()`冒頭のバリデーション）、部分的な準完全分離なら`NonConvergence`
-    /// （`max_iter`到達）として捕捉される。加えて#286以降のTobitは`standardize_columns`
+    /// （`max_iter`到達）として捕捉される。加えてその後のTobitは`standardize_columns`
     /// ではなく`tobit.rs`局所の`TobitScaling`で標準化しており、`y∈{0,1}`で較正した
     /// この閾値はTobitのパラメータ空間には適用できない。
     #[error(
@@ -247,7 +247,7 @@ const SEPARATION_PARAM_NORM_THRESHOLD: f64 = 100.0;
 /// - [`Enabled`](SeparationNormCheck::Enabled): Logit/Probit。`y∈{0,1}`で係数が±∞へ
 ///   発散するため、この検出が意味を持つ。
 /// - [`Disabled`](SeparationNormCheck::Disabled): Tobit。真の分離は`σ→0`退化として現れ
-///   標準化パラメータノルムは閾値を超えず、実質発火しない。かつ#286以降のTobitは
+///   標準化パラメータノルムは閾値を超えず、実質発火しない。かつその後のTobitは
 ///   `standardize_columns`ではなく`tobit.rs`局所の`TobitScaling`で標準化しており、この
 ///   閾値はそもそもTobitのパラメータ空間には未較正。Tobitの分離は
 ///   `NoUncensoredObservations`（全件打ち切り）または`NonConvergence`（部分的準分離）で

@@ -360,7 +360,7 @@ impl TwoSlsEstimator {
         // `y ~ x_exog + x_endog`に第一段階残差を追加回帰し（`linearmodels`の
         // `wooldridge_regression`相当）、追加した残差係数のジョイント有意性を
         // `fit()`に渡された`cov_type`と同じcov_typeでのロバストWald検定（F統計量）で
-        // 調べる（弱操作変数診断#163とは異なり、cov_typeに追従させる設計をユーザー確認済み。
+        // 調べる（弱操作変数診断とは異なり、cov_typeに追従させる設計をユーザー確認済み。
         // `engine/src/iv/CLAUDE.md`参照）。`x_endog=[]`なら検定対象が無いため`None`。
         //
         // 拡張回帰は元の第二段階（k_exog+k_endog列）より内生変数の数だけ列が多い
@@ -441,8 +441,8 @@ impl TwoSlsEstimator {
         // 検証済みのため常に0以上）。丁度識別（自由度0）では`None`（`docs/spec/iv-spec.md`
         // 1.2節・3.5節）。
         //
-        // **常に等分散（古典的）前提で計算し、`cov_type`には依存しない**（弱操作変数診断
-        // #163と同じ判断だが、こちらはユーザー確認を要さない: Sargan検定はその定義自体が
+        // **常に等分散（古典的）前提で計算し、`cov_type`には依存しない**（弱操作変数診断と
+        // 同じ判断だが、こちらはユーザー確認を要さない: Sargan検定はその定義自体が
         // 等分散前提の検定であり、不均一分散に頑健な版が欲しい場合はGMM＋Hansen J検定
         // （`gmm.rs`）を使うのが標準的な使い分けのため、`engine/src/iv/CLAUDE.md`参照）。
         //
@@ -918,7 +918,7 @@ mod tests {
         // `fit()` 冒頭の `crate::parallelism::ensure_serial()` が faer の
         // グローバル並列度を `Par::Seq` へ引き戻すことの回帰ガード（iv 系統代表）。
         // 別テストが `Seq` にしている可能性があるため、まず `Rayon` に戻してから通す。
-        // 設計行列は極小なので一時的な `Rayon` 設定は #283 の病理を招かない。
+        // 設計行列は極小なので一時的な `Rayon` 設定は病理を招かない。
         faer::set_global_parallelism(faer::Par::rayon(0));
 
         let (y, x_endog, z) = perfectly_predicted_endog_data();
@@ -2678,7 +2678,7 @@ mod tests {
         );
     }
 
-    /// 弱操作変数診断（#163）とは異なり、Wu-Hausman検定は`fit()`に渡された`cov_type`に
+    /// 弱操作変数診断とは異なり、Wu-Hausman検定は`fit()`に渡された`cov_type`に
     /// 追従する設計（ユーザー確認済み）。同じデータで`cov_type`を変えると統計量が変わる
     /// ことを確認し、この設計が実際に反映されていることを固定する。
     #[test]

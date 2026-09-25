@@ -1135,7 +1135,7 @@ mod tests {
         // `fit()` 冒頭の `crate::parallelism::ensure_serial()` が faer の
         // グローバル並列度を `Par::Seq` へ引き戻すことの回帰ガード（nonlinear 系統代表）。
         // 別テストが `Seq` にしている可能性があるため、まず `Rayon` に戻してから通す。
-        // 設計行列は極小なので一時的な `Rayon` 設定は #283 の病理を招かない。
+        // 設計行列は極小なので一時的な `Rayon` 設定は病理を招かない。
         faer::set_global_parallelism(faer::Par::rayon(0));
 
         let _ = LogitEstimator::fit(
@@ -2184,7 +2184,7 @@ mod tests {
     /// `fit_returns_singular_hessian_error_when_cov_params_computation_fails_at_
     /// truncated_point_with_hc0_and_hc1` / `..._with_cluster` が担う（`cov_params`計算は
     /// Logit/Probit/Tobitで同一コード）。`?`自体は分岐ロジックを持たないため
-    /// `testing-policy.md`のカバレッジ方針上これで足りる（#279レビューで確認）。
+    /// `testing-policy.md`のカバレッジ方針上これで足りる（レビューで確認）。
     ///
     /// `Cluster`は`G=3 > q=2`（`q = k - k_constant`）にして`fit()`冒頭の
     /// `InsufficientClustersForInference`（`G <= q`）より手前を通す。

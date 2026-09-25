@@ -1,6 +1,6 @@
 # 検定分布・診断統計量の運用ノート
 
-特定の推定手法に限定しない、検定分布・診断統計量の選択に関する手法横断の記録。各手法の詳細な数式は個別のspec（`docs/spec/`配下の`ols-spec.md`・`iv-spec.md`・`nonlinear-common.md`等）を正本とし、ここではそれらの決定を一覧化し、選択の理由と他の統計ソフトウェアとの違いをまとめる（[Issue #246](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/246)）。
+特定の推定手法に限定しない、検定分布・診断統計量の選択に関する手法横断の記録。各手法の詳細な数式は個別のspec（`docs/spec/`配下の`ols-spec.md`・`iv-spec.md`・`nonlinear-common.md`等）を正本とし、ここではそれらの決定を一覧化し、選択の理由と他の統計ソフトウェアとの違いをまとめる。
 
 ## 1. 検定分布（t/F分布 vs z/カイ二乗分布）
 
@@ -26,7 +26,7 @@
 ## 3. Stock-Yogoの弱操作変数F統計量
 
 - v1スコープでは、内生変数ごとの**生の部分F統計量のみ**を返す（`weak_instrument_f_statistics`）。Stock-Yogoの臨界値テーブルとの照合（弱操作変数かどうかの合否判定）は、テーブルが経験的なシミュレーション値でクローズドフォームでないため実装コストが高く、v1では実装しない（`iv-spec.md`3.4節）。目安として一般に10前後がよく引用される閾値だが、本プロジェクトはこの判定自体を提供せず、利用者側の解釈に委ねる。
-- 複数内生変数の同時弱操作変数診断（Cragg-Donald統計量）も同様の理由でv1スコープ外（`iv-spec.md`3.4節）。複数内生変数（`k_endog>=2`）シナリオが実際にサポートされた後もこの判断を維持するかは再検討中（[Issue #247](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/247)）。
+- 複数内生変数の同時弱操作変数診断（Cragg-Donald統計量）も同様の理由でv1スコープ外（`iv-spec.md`3.4節）。複数内生変数（`k_endog>=2`）シナリオが実際にサポートされた後もこの判断を維持するかは再検討中。
 
 ## 4. 過剰識別検定（Sargan/Hansen J）の`cov_type`依存性
 

@@ -31,7 +31,7 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
   「HAC時系列順序」と「ハウスマン検定用内部FE呼び出しの1-way/2-way選択」を兼ねる。
 - **`x`は空リストを許容しない**: `x=[]`は「説明変数を一切投入しない、分散成分（σ_ε²・
   σ_u²、ICC）のみを推定するnullモデル」として単独で意味を持つ標準的なユースケース
-  （マルチレベルモデルの"null model"）だが、他手法（FE post-#320・OLS/WLS/Logit/Probit/IV）
+  （マルチレベルモデルの"null model"）だが、他手法（FE・OLS/WLS/Logit/Probit/IV）
   との一貫性を優先し`validate_x_non_empty`で拒否する。nullモデル・ICC推定のサポート自体は
   別途検討中（5章参照）。
 - **REはentity方向のみ（2-way REはv1スコープ外）**なので、FEの1-wayと同じ扱いで不均衡パネル
@@ -209,13 +209,13 @@ hausman_statistic`（FE/RE共有関数、シグネチャ`(beta_fe, cov_fe, beta_
   比較対象の傾き係数が0個（`x=[]`は拒否されるため通常発生しない）、内部FE推定の失敗
   （例: 時間不変変数を含む場合の分散ゼロ検証エラー、または`time`ありの不均衡パネルでの
   2-way FE推定失敗）、または`Var(β_FE)-Var(β_RE)`が数値的に特異な場合。
-- **符号の扱い（Issue #350で確定）**: 差行列`Var(β_FE)-Var(β_RE)`は理論上半正定値だが
+- **符号の扱い**: 差行列`Var(β_FE)-Var(β_RE)`は理論上半正定値だが
   有限標本では非正定値になり、二次形式`d'(Var(β_FE)-Var(β_RE))⁻¹d`が負になりうる。
   `hausman_statistic`はこれに`abs()`を適用し非負値を返す——参照実装R `plm::phtest`
   （`stat <- as.numeric(abs(t(dbeta) %*% solve(dvcov) %*% dbeta))`）に合わせた挙動。
   当初の設計文書は「符号付きのまま返すのが`plm::phtest`と同じ挙動」としていたが、
   `plm::phtest`のソース確認で`abs()`を無条件適用しており負の値を一切返さないことが
-  判明し、この記載は誤りだったと判明した（Issue #350、`benchmark/panel/fixtures/
+  判明し、この記載は誤りだったと判明した（`benchmark/panel/fixtures/
   generate_re_crosscheck_fixtures.py`モジュールdoc参照）。p値は`abs()`適用後の`stat`
   から上側確率`χ²_df.sf(stat)`で計算する（`df`には常に比較したスロープ係数の数を使う）。
   これにより`hausman_statistic`/`hausman_p_value`双方が`plm::phtest`の出力と直接
@@ -245,12 +245,12 @@ pyerr`、FE/RE共有）を使う。RE固有の追加バリアントは`BetweenRe
 
 ## 5. 未実装・未対応
 
-- **nullモデル・ICC推定のサポート**（`x=[]`、Issue #346で検討中）: 分散成分のみを推定する
+- **nullモデル・ICC推定のサポート**（`x=[]`、検討中）: 分散成分のみを推定する
   マルチレベルモデルの標準的なユースケースだが、v1は他手法との一貫性を優先し`x`の空リストを
   拒否している。
 - **2-way RE**（v1スコープ外）: バランスパネル限定の2-way RE（Wallace-Hussain法・Amemiya法
-  等のANOVA型閉形式推定量、Issue #327）・アンバランスパネルの2-way RE（教科書レベルの
-  閉形式が存在せず、Wansbeek and Kapteyn (1989)の推定量が候補、Issue #328）は別issueで
+  等のANOVA型閉形式推定量）・アンバランスパネルの2-way RE（教科書レベルの
+  閉形式が存在せず、Wansbeek and Kapteyn (1989)の推定量が候補）は別issueで
   検討する。
 - 将来的に`cov_type`と連動するrobust版Hausman検定（Wooldridgeの回帰ベース検定等）は
   未実装（v1はフィールド名・置き場所に拡張余地を残すのみ）。

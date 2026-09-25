@@ -20,7 +20,7 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
     `uv run maturin develop` → **import時間チェック** → `pytest tests` → `ruff check .` →
     `ruff format --check .`。
     `engine_pybind`はabi3を使っていないためPythonマイナーバージョンごとに別ビルドが必要。
-    import時間チェック（`python -m performance.check_import_time`、Issue #278）は
+    import時間チェック（`python -m performance.check_import_time`）は
     直前の`maturin develop`（デバッグ）拡張をそのまま使い、`import econometricsmodels`
     −`import polars`の差分（min of 10）が50msを超えたらfailさせる（パッケージ健全性
     メトリクスの節・`docs/performance/package-health.md`参照）。
@@ -31,8 +31,8 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
   `workflow_dispatch`のみ。PR毎には回さない）: ビルド対象Pythonは
   `-i python3.12 -i python3.13 -i python3.14`を明示指定（`--find-interpreter`は未サポート
   バージョンまで検出するため不採用）。各ビルドジョブは`Build wheels`直後に
-  **wheelサイズ記録ステップ**（`python -m performance.measure_wheel_size dist`、
-  Issue #278）を持つ。ビルド済みwheelのサイズ（圧縮/展開後/うち`.so`|`.pyd`）を
+  **wheelサイズ記録ステップ**（`python -m performance.measure_wheel_size dist`）
+  を持つ。ビルド済みwheelのサイズ（圧縮/展開後/うち`.so`|`.pyd`）を
   ジョブサマリーにMarkdown表で出すだけで、**リリースはゲートしない**。linux
   x86_64ジョブのみ`--baseline docs/performance/package-health.md --warn-pct 10`を
   渡し、展開後サイズが同ファイルの最新記録行比+10%超なら`::warning::`を出す
@@ -58,7 +58,7 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
 
 `benchmark/`・`performance/`が手法ごとの数値精度・推定速度をカバーするのに対し、
 パッケージとしての健全性（`import econometricsmodels`の所要時間、`pip install`時の
-容量）をCIで監視する（Issue #278）。正本は`docs/performance/package-health.md`
+容量）をCIで監視する。正本は`docs/performance/package-health.md`
 （ベースライン実測値・監視の仕組み・サイズ記録表）。要点のみ以下に再掲する。
 
 - **監視は「絶対値」ではなく「自前の差分」**。import時間の約98%、インストール容量の

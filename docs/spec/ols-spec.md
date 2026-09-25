@@ -40,7 +40,7 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
 - `conf_int`は`conf_lower`/`conf_upper`の2配列に分割（engine内部表現・pyo3実装の簡潔さを優先）。
 - `k×kの分散共分散行列（cov_params）はPython側に公開しない`。`OlsEstimator`自体は非公開
   フィールドとして保持する（クレート内の他系統からの部分Wald検定の再利用のため、
-  `engine/src/linear/CLAUDE.md`参照。Issue #164でIVのWu-Hausman検定用に追加するまでは
+  `engine/src/linear/CLAUDE.md`参照。IVのWu-Hausman検定用に追加するまでは
   `fit()`内のローカル変数として使い切っていた）が、`engine_pybind`側に公開する`OLSResult`
   には引き続き含めない。
 - `summary()`（テキスト整形）・DataFrame版の`coef_table()`/`conf_int()`は作らない
@@ -111,7 +111,7 @@ $$
 - t検定・信頼区間・F検定の自由度は`cov_type="cluster"`のときのみ`n-k`ではなく**`G-1`**に切り替える
   （statsmodelsの既定`df_correction=True`、計量経済学の標準的慣行）。`df_resid`自体（σ̂²・調整済み
   R²・AIC/BIC）は常に`n-k`のまま。
-- **`G ≤ q`の境界（`ValidationError`、Issue #289）**: $\hat S = \sum_g S_g S_g'$は、クラスター
+- **`G ≤ q`の境界（`ValidationError`）**: $\hat S = \sum_g S_g S_g'$は、クラスター
   寄与スコアの総和がゼロ（正規方程式$X'e = 0$）になるため`rank(Ŝ) ≤ G - 1`。F検定が使う`q×q`
   （`q = k - k_constant` = 傾き係数の数）部分行列は`G ≤ q`のとき構造的に特異になる（`G = q`
   ちょうども数学的には常に特異。`rank(Ŝ) ≤ G`という緩い上限で考えると`G = q`は「境界」に見えるが、
@@ -153,7 +153,7 @@ $$
   信頼区間・予測区間を追加する場合にキーを追加できる形にするため）。キー名は`"predicted"`
   （学習データ・新規データいずれの場合も同じキー。当初`"fitted"`固定だったが、
   new_data指定時（out-of-sample）に対して統計学の慣習上不正確という指摘を受け、
-  Issue #309で`"predicted"`に統一した。統計学の慣習では学習データに対する予測を
+  `"predicted"`に統一した。統計学の慣習では学習データに対する予測を
   「fitted values」、新規データに対する予測を「predicted values」と呼び分けるが、
   本APIは`new_data`の有無で戻り値の型・構造を変えない設計方針のため、キー名も
   呼び分けず`"predicted"`で統一する）。
@@ -163,7 +163,7 @@ $$
 - エラーハンドリングは列不足・型不一致・NaN/無限大とも既存の`ValidationError`の枠組みをそのまま使う
   （専用のエラーバリアントは新設しない）。
 
-### 3.5 `augment()`（Issue #295）
+### 3.5 `augment()`
 
 - `OLSResults.augment(new_data: pl.DataFrame | None = None) -> pl.DataFrame`。
   `new_data`の意味・エラーハンドリングは`predict()`と完全に同じ。戻り値が
@@ -207,7 +207,7 @@ $$
   `impl From<LeastSquaresError> for PyErr`は書けない（`LeastSquaresError`・`PyErr`ともこのクレート
   外定義の型でorphan ruleに抵触）。関数`least_squares_error_to_pyerr`として実装し
   `.map_err(...)?`で変換する。
-- バージョン固定: `pyo3=0.29.2` / `polars=0.55.2` / `pyo3-polars=0.28.0`（すべて`=`固定、Issue #49で更新）。
+- バージョン固定: `pyo3=0.29.2` / `polars=0.55.2` / `pyo3-polars=0.28.0`（すべて`=`固定）。
   `pyo3-polars=0.28.0`が`pyo3="^0.29"`・`polars="^0.55.1"`を要求するための組み合わせ。互換性は数字ではなく
   `pyo3-polars`が使う`polars_ffi::version_0`という安定版FFIプロトコルで担保される。
 
@@ -215,7 +215,7 @@ $$
 
 - 許容誤差: classical/HC0-3/cluster/係数はRとの実測で相対誤差1e-14程度のため`RTOL_STRICT=1e-8`。
   HACはRとの`prewhite`/`adjust`慣習差により実測0.4%程度のため`RTOL_HAC=1e-2`。
-- `tests/linear/` に4ファイルで役割分担する（`refactoring-candidates-2.md`項目68）:
+- `tests/linear/` に4ファイルで役割分担する:
   `test_ols_api.py`（成功パスの構造・API・オプション反映・`predict()`/`augment()`）/
   `test_ols_validation.py`（`ValidationError`/`ComputationError`パス）/
   `test_ols_reference.py`（statsmodels主リファレンスとの数値照合、`ols.json`＋ライブ照合）/
@@ -254,7 +254,7 @@ classical/HC1/clusterはstatsmodels/pyfixest以上に高速、HACも大規模デ
 メモリはengineが一貫して最小。詳細な実測データは[`../performance/ols.md`](../performance/ols.md)参照。
 faerのグローバル並列度は`engine::parallelism::ensure_serial()`で常時`Par::Seq`に固定
 している（tall-skinnyな設計行列では暗黙の全コア並列化が高速化せず、多コア機・負荷下で
-不安定になったため。Issue #283、`engine/src/linear/CLAUDE.md`「faerのグローバル並列度」）。
+不安定になったため。`engine/src/linear/CLAUDE.md`「faerのグローバル並列度」）。
 
 ## 4. 未実装・未対応
 

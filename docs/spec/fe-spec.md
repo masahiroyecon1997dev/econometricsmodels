@@ -29,7 +29,7 @@ FE固有の内容のみを記載する。
 - **`include_intercept`は無い**: withinの変換で切片が構造的に消えるため、OLS/WLS/IVと異なり
   このオプション自体が意味を持たない（`FeEstimator::fit`は常に`include_intercept=false`で
   `OlsEstimator`に委譲する）。
-- **`x`は空リストを許容しない（Issue #320）**: v1では固定効果のみのモデル（`k=0`）を許容して
+- **`x`は空リストを許容しない**: v1では固定効果のみのモデル（`k=0`）を許容して
   いたが、独立して吟味された設計記録が無く、説明変数ゼロは因果推論として意味を持たない
   （個体・時間固定効果によるyの分解という別の操作になる）ためユーザー指摘を受けて拒否に
   変更した。**この検証は`engine_pybind`層のみ**（`build_fe_input`の`validate_x_non_empty`）。
@@ -243,4 +243,4 @@ demeanしたR²」を3種とも定義すると誤る）:
   （閉形式の二重デミーニングはバランスパネルでのみ正確なため、6.4節相当の制約として
   `ValidationError`にする）。
 - **2-way clustering（entity+time同時）**: v1スコープ外。
-- **Driscoll-Kraay HACのカーネル拡張**: Parzen/QSカーネルへの拡張は別issue（Issue #313）。
+- **Driscoll-Kraay HACのカーネル拡張**: Parzen/QSカーネルへの拡張は別issue。

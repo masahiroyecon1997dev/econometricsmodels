@@ -24,7 +24,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   過剰識別検定の自由度が`len(instruments) - len(x_endog)`とそのまま一致し、`x_exog`分を
   差し引く補正が不要になる。
 - `x_exog`は空リストを許容する（内生変数のみのモデルも成立するため）。**`x_endog`/
-  `instruments`はいずれも独立に最低1要素を要求し、空リストは`ValidationError`**（Issue #306）。
+  `instruments`はいずれも独立に最低1要素を要求し、空リストは`ValidationError`**。
   `x_endog=[]`は実質OLSと等価な退化ケースであり「そもそもIVを使用すること自体が誤り」と
   判断し、`OLS`への切り替えなしにそのまま`IV`に渡せる利便性よりも誤用防止を優先した。
   `x_endog`/`instruments`は独立に検証するため、「操作変数はあるが対応する内生変数が無い」
@@ -35,7 +35,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   - `y`/`x_exog`/`x_endog`/`instruments`間の重複列名は`ValidationError`。
   - 各ロール内部（`x_exog`/`x_endog`/`instruments`それぞれ）の重複列名も`ValidationError`。
   - `include_intercept=True`のとき、`x_exog`だけでなく`x_endog`/`instruments`のいずれかに
-    `"const"`列が含まれていても`ValidationError`（Issue #305）。`x_exog`側でのみ自動追加
+    `"const"`列が含まれていても`ValidationError`。`x_exog`側でのみ自動追加
     される切片列と、構造方程式本体・`first_stage()`双方の`param_names`が衝突し、
     `dict(zip(param_names, params))`構築時に真の切片係数が後勝ちでサイレントに
     上書きされるため、衝突源が`x_endog`/`instruments`側でも同じ実害が生じる。
@@ -81,13 +81,13 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 `f_statistic` / `f_p_value` / `r_squared` / `r_squared_adj` / `weak_instrument_f_statistics` /
 `overid_statistic` / `overid_p_value` / `wu_hausman_statistic` / `wu_hausman_p_value`。
 
-- **`t_stats`ではなく`stats`という分布非依存の名前**（Issue #159）: 1つの`IVResult`型を
+- **`t_stats`ではなく`stats`という分布非依存の名前**: 1つの`IVResult`型を
   `method="2sls"`（t分布）・`method="gmm"`（z分布）の両方が共有するため、`OLSResult.t_stats`・
   `LogitResult.z_stats`のような分布固定の名前は使えない。`engine::inference::InferenceStat`が
   同じ理由で`stat`という名前を使っている前例に倣った。
-- **`method`**（Issue #307）: `IVOptions.method`を正規化した小文字文字列（`"2sls"`/`"gmm"`）。
+- **`method`**: `IVOptions.method`を正規化した小文字文字列（`"2sls"`/`"gmm"`）。
   常に反映される。
-- **`weight_type`**（Issue #307）: 型は`Option<String>`。`method="gmm"`のときだけ
+- **`weight_type`**: 型は`Option<String>`。`method="gmm"`のときだけ
   `Some(String)`（`IVOptions.weight_type`を正規化した小文字文字列。エイリアス入力
   （`"homoskedastic"`/`"heteroskedastic"`）は正規化されずそのままechoされる）、
   `method="2sls"`では概念自体が存在しないため常に`None`。
@@ -147,7 +147,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   消費した数（`k`）」を混同しないよう区別する。
 - **`cov_type="cluster"`はクラスター数`G`が構造方程式の傾き係数の数`q`（`k - k_constant`）
   より多くなければならない**（`G <= q`は`CommonError::InsufficientClustersForInference`＝
-  `ValidationError`、Issue #289。`rank(Ŝ) ≤ G-1`のためロバストWald/F（χ²）検定の`q×q`
+  `ValidationError`。`rank(Ŝ) ≤ G-1`のためロバストWald/F（χ²）検定の`q×q`
   部分行列が構造的に特異。`fit()`冒頭で構造方程式の`q`を使って弾く。第一段階・第二段階
   回帰の`OlsEstimator::fit`内でも同じ検証が走るが、そちらは`FirstStageFailed`/
   `SecondStageFailed`にラップされるため区別される）。OLS/WLS/Tobit/Logit/Probit/IVで横断
@@ -156,7 +156,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   `None`へdegradeする（3.6節）。
 - **GMMの`weight_type="cluster"`の重み行列`S`（l×l、全操作変数の本数`l`）が`G<l`で
   特異になる問題は別軸**（`cov_type=Cluster`の`G<=q`とは対象・閾値が異なる。現状
-  `ComputationError`、`ValidationError`への再分類はIssue #290で未着手）。
+  `ComputationError`、`ValidationError`への再分類は未着手）。
 
 ### 3.2 検定分布
 
@@ -196,7 +196,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   （`linearmodels.iv.results.FirstStageResults.diagnostics`と同じ方式）。`first_stage()`が
   返す`OLSResults.f_statistic`（x_exog込みの全回帰係数に対する検定）とは別物。
 - 内生変数ごとに計算し`dict[str, float]`で`fit()`の主結果に含める。
-- **常に等分散前提、`cov_type`には依存しない**（Issue #163）。理由: (1) Stock-Yogoの臨界値
+- **常に等分散前提、`cov_type`には依存しない**。理由: (1) Stock-Yogoの臨界値
   表自体が等分散前提でキャリブレーションされている（v1では臨界値照合はしないが意味合いは
   引き継ぐ）、(2) `OlsEstimator`が係数の分散共分散行列全体を公開していないため。
   `method="2sls"`/`method="gmm"`ともに同じ計算方式（`engine::iv::common::
@@ -230,7 +230,7 @@ Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含�
 有意性を検定する方式**（`linearmodels.iv.results.IVResults.wooldridge_regression`相当）で
 実装する（SSR差に基づく古典公式の`wu_hausman`とは別物）。
 
-- **`fit()`に渡された`cov_type`に対応させる**（弱操作変数診断とは対照的な判断、Issue #164）。
+- **`fit()`に渡された`cov_type`に対応させる**（弱操作変数診断とは対照的な判断）。
   `linearmodels`の`wooldridge_regression`が「fit時と同じcovarianceでのWald検定」という
   仕様のため。
 - `fit()`の結果本体に含める（内生変数全体のジョイント検定のみ、変数ごとのサブセット検定は
@@ -312,4 +312,4 @@ common.rs`）:
 - Wu-Hausman検定のGMM対応（`method="gmm"`では常に`None`）
 - Wu-Hausman検定の変数ごとのサブセット検定（現状は内生変数全体のジョイント検定のみ）
 - GMMの`weight_type="cluster"`が`G<l`で特異になる場合の`ComputationError`→
-  `ValidationError`への再分類（Issue #290、未着手）
+  `ValidationError`への再分類（未着手）

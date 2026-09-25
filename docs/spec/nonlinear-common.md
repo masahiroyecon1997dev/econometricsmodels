@@ -180,7 +180,7 @@ Hessianとする。いずれも標準化空間で`Σ_std`を計算した後、`d
   のため、OLSの`cov_type=Cluster`時の自由度切り替え（`n-k`→`G-1`）に相当する処理が不要。
   分散共分散行列のスケーリング（`correction`）だけ気にすればよい。
 - **クラスター数`G`は傾き係数の数`q`（`k - k_constant`）より多くなければならない**
-  （`G <= q`は`InsufficientClustersForInference`、`ValidationError`、Issue #289）。
+  （`G <= q`は`InsufficientClustersForInference`、`ValidationError`）。
   クラスターロバスト共分散`Ŝ`はクラスター寄与スコアの総和がゼロ（MLEの一次条件
   `Σᵢsᵢ=0`）のため`rank(Ŝ) ≤ G-1`で、`G<=q`だと退化する。Logit/Probitは全体検定がLR
   （`q×q`部分行列の反転を要求しない）だが、退化した共分散から読んだSEを黙って返すのは

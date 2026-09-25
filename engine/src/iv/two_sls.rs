@@ -1172,17 +1172,13 @@ mod tests {
         assert!((estimator.sargan_p_value().unwrap() - expected_p_value).abs() < 1e-8);
     }
 
-    /// 呼び出し元が指定した`cov_type`は第一段階（`first_stage_estimators()`で公開する
-    /// `OlsEstimator`）にそのまま反映され、第二段階には反映されない（常に`Classical`）
-    /// ことを確認する（モジュール冒頭のdocコメント「第一段階・第二段階での`cov_type`/
-    /// `confidence_level`の扱い」参照）。`second_stage`は非公開フィールドだが、この
-    /// テストは同一モジュールの子モジュールのため直接参照できる。
     /// 呼び出し元が指定した`cov_type`は第一段階（`OlsEstimator`委譲）・第二段階
-    /// （`TwoSlsEstimator`自身が独立に計算する正しいSE）の両方に反映される。
-    /// 内部実装専用の`second_stage`フィールド自身の委譲フィットだけは
-    /// 常に`Classical`のまま（モジュール冒頭のdocコメント「`second_stage`フィールドの
-    /// 位置づけ」参照。`second_stage`は非公開フィールドだが、このテストは同一モジュールの
-    /// 子モジュールのため直接参照できる）。
+    /// （`TwoSlsEstimator`自身が独立に計算する正しいSE）の両方に反映される
+    /// （モジュール冒頭のdocコメント「第一段階・第二段階での`cov_type`/
+    /// `confidence_level`の扱い」参照）。内部実装専用の`second_stage`フィールド自身の
+    /// 委譲フィットだけは常に`Classical`のまま（モジュール冒頭のdocコメント
+    /// 「`second_stage`フィールドの位置づけ」参照）。`second_stage`は非公開フィールド
+    /// だが、このテストは同一モジュールの子モジュールのため直接参照できる。
     #[test]
     fn fit_uses_caller_provided_cov_type_for_first_stage_and_second_stage_se() {
         let y = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];

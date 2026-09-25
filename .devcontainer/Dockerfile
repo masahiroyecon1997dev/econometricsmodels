@@ -56,7 +56,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
 # -------------------------
 # R インストール（ベンチマーク用リファレンス実装: fixest, plm, ivreg等）
 # Debian bookworm標準のr-baseは4.2.2固定で、ivregの依存先（car→MatrixModels→
-# Matrix>=1.6.0、R>=4.4が必要）が導入できない制約があった（Issue #171）。
+# Matrix>=1.6.0、R>=4.4が必要）が導入できない制約があった。
 # CRAN公式のDebian向けAPTリポジトリ（bookworm-cran40）を追加しR 4.x系を導入する。
 # 2025年後半以降、CRANのDebian向け署名鍵配布はmarutter_pubkey.ascのURL経由ではなく
 # keyserver.ubuntu.comからのGPG鍵取得方式に変更されている（Ubuntu向けとは別方式）。
@@ -76,14 +76,14 @@ RUN apt update && apt install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ベンチマーク（benchmark/）のリファレンス実装として使うパッケージはバージョンを明示的に
-# ピン留めする（Issue #239。install.packages()自体はバージョン指定に対応しないため
+# ピン留めする（install.packages()自体はバージョン指定に対応しないため
 # remotes::install_version()を使う）。ピン留め対象外のlanguageserverはIDE補完用でベンチ
 # マーク結果に影響しないため、最新版のままinstall.packages()で導入する。
 # 依存関係により後段のパッケージが前段のsandwich/lmtestを別バージョンで引き込むことがある
 # ため、他パッケージに依存されがちなsandwich/lmtestは最後にピン留めし直し、最終的な導入
 # バージョンを確定させる。
 # AER（tobit＝survival::survreg薄ラッパー、Tobit主リファレンス）とcensReg（maxLikエンジン、
-# Tobit交差検証）はIssue #227で追加。両者はsandwich等を引き込むため、最終ピン留めの前に
+# Tobit交差検証）を追加。両者はsandwich等を引き込むため、最終ピン留めの前に
 # upgrade="never"で導入する。numDeriv はTobit限界効果のデルタ法SEをformula非依存に検証する
 # （testing-policy.md「リファレンス実装」）ために追加。
 RUN Rscript -e 'install.packages("remotes", repos = "https://cloud.r-project.org")' \

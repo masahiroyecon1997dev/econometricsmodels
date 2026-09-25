@@ -41,7 +41,7 @@ CLAUDE.md（特に1章・7章）、`.claude/rules/python-style.md`、`.claude/ru
 `_run_isolated` は `subprocess.run(..., check=True)` のため、**1つの計測点でも例外を投げると benchmark ジョブ全体が落ちる**。設定した `(library × cov_type × n/k × method)` の全組み合わせについて、代表点を単点実行して成功を確認する。
 
 - 実行は必ず**単点 `--worker` 呼び出し**に限る。フルスイープ（`--output` 付き実行）は重いので回さない。
-- **スレッド数を1に固定して実行すること**（`--worker` を直接呼ぶとハーネスの `_SINGLE_THREAD_ENV` が効かず、faer/rayon がマルチスレッドで動いて #283 の不安定性を踏み、実行時間が数倍〜数十倍ぶれる）。必ず環境変数を前置する:
+- **スレッド数を1に固定して実行すること**（`--worker` を直接呼ぶとハーネスの `_SINGLE_THREAD_ENV` が効かず、faer/rayon がマルチスレッドで動いて既知の不安定性を踏み、実行時間が数倍〜数十倍ぶれる）。必ず環境変数を前置する:
   ```
   RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 POLARS_MAX_THREADS=1 \
     uv run --no-sync python -m performance.compare_<method> --worker \

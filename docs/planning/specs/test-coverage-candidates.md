@@ -342,14 +342,26 @@
   両方で悪条件・多重共線性シナリオとクラスターの組み合わせが数値的に
   問題なく計算できることを確認した（Rust単体テスト層はリファレンス実装との
   数値比較を目的としないため対象外のまま）。`tests/`配下1675件全通過・
-  Ruffクリーンを確認済み。WLS側（`generate_wls_fixtures.py`等）は同じ
-  ギャップが存在するが、ユーザー判断によりこの場では対応せず
+  Ruffクリーンを確認済み。WLS側は当初同じギャップが存在し
   [Issue #351](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/351)
-  として切り出した（他手法〔IV/Logit/Probit等〕への横展開要否も同Issueで
-  検討）。2026-09-21、項目17対応時に`testing-completeness-reviewer`が項目28と
-  合わせて再指摘（predict()同様、クラスター系の検証網羅性を先に手厚くした
-  Rクロスチェック側に主リファレンス側を追いつかせる、という同型の対応が
-  必要という指摘）。
+  として切り出していたが、同Issueで対応済み（後述）。2026-09-21、項目17対応時に
+  `testing-completeness-reviewer`が項目28と合わせて再指摘（predict()同様、
+  クラスター系の検証網羅性を先に手厚くしたRクロスチェック側に主リファレンス側を
+  追いつかせる、という同型の対応が必要という指摘）。
+
+  **Issue #351（WLS横展開）対応済み**。`benchmark/linear/fixtures/
+  generate_wls_fixtures.py`の`_run_cluster_case`に`scenario`引数を追加し、
+  `high_condition_number`・`moderate_multicollinearity`にも均等な疑似グループ
+  （行番号%10）のみの`cluster`エントリを追加。`generate_wls_crosscheck_
+  fixtures.py`にも同様の`CLUSTER_ILL_CONDITIONED_SCENARIOS`定数と分岐を追加。
+  `tests/linear/test_wls_reference.py::test_cluster_ill_conditioned_matches_
+  statsmodels`・`tests/linear/test_wls_crosscheck.py::test_cluster_ill_
+  conditioned_matches_r`を追加。OLS側対応時に見つかった`ols_crosscheck.json`
+  の`_meta.note`の新旧矛盾（testing-completeness-reviewer指摘）と同型の問題を
+  WLS側でも事前に修正した上でフィクスチャ生成。`tests/`配下1697件全通過・
+  Ruffクリーンを確認済み。IV/Logit/Probit等への横展開要否はIssueのスコープ外
+  として残す（Logit/Probitは検定分布がz検定でOLS/WLSと設計が異なるため項目
+  28/72系は非該当、シナリオ網羅性系の要否は別途確認要）。
 
 ### 30. `time_col`が存在しない列名を指した場合の`ValidationError`テストが無い（`cluster_col`には対になるテストがある）
 

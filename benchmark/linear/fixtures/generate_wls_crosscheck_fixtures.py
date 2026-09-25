@@ -75,6 +75,14 @@ NUMERIC_SCENARIOS = [
 
 R_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
 
+# 悪条件・多重共線性シナリオとクラスターロバストSEの組み合わせでの数値的
+# 頑健性確認用（generate_ols_crosscheck_fixtures.pyと同じリスト・同じ理由、
+# OLS側の横展開）。
+CLUSTER_ILL_CONDITIONED_SCENARIOS = [
+    "high_condition_number",
+    "moderate_multicollinearity",
+]
+
 
 def _write_csv(df, tmpdir: Path, name: str) -> Path:
     path = tmpdir / f"{name}.csv"
@@ -151,6 +159,13 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
                     weight_col=WEIGHT_COLUMN_NAME,
                 )
             }
+        elif scenario in CLUSTER_ILL_CONDITIONED_SCENARIOS:
+            # 悪条件・多重共線性シナリオとクラスターの組み合わせでの数値的
+            # 頑健性確認用（generate_ols_crosscheck_fixtures.pyと同じ理由）。
+            # 均等な疑似グループ（行番号%10）のみ。
+            fixtures[scenario]["cluster"] = _run_cluster_case(
+                df, csv_path, formula
+            )
 
     return fixtures
 
@@ -263,11 +278,17 @@ def build_fixtures() -> dict:
             "共分散部分行列が全cov_typeで数値的にほぼ特異になる、"
             "WLSでも実測確認済み）。"
             "HACはR側のみ（explicit lagを本実装の自動ラグ式に合わせて指定）。"
-            "clusterはbaselineシナリオのみ、疑似グループ（行番号%10）に加え、"
-            "不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2"
-            "（cluster_g2）をR側のみ確認（OLSの同種ケース相当）。"
+            "clusterはR側のみ確認。baselineシナリオで疑似グループ（行番号%10）"
+            "に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2"
+            "（cluster_g2）を含む（OLSの同種ケース相当。グルーピングパターンの"
+            "バリエーションはbaselineシナリオのみ、他シナリオは均等疑似グループ"
+            "1パターンのみ、後述）。"
             "high_condition_number/baseline_df1は境界値・悪条件ケース"
-            "（OLSの同種ケース相当）。"
+            "（OLSの同種ケース相当）。high_condition_number/"
+            "moderate_multicollinearityにもclusterエントリを追加（従来"
+            "クラスター系はbaselineシナリオのみで、悪条件・多重共線性シナリオ"
+            "との組み合わせが未検証だった。均等な疑似グループ（行番号%10）のみ。"
+            "OLS側の横展開）。"
             "baseline.weight_in_xは、weightと同じ列をxにも含める成功パス。"
             "classicalのみ（cov_type間の挙動差の検証が"
             "目的ではないため）。"

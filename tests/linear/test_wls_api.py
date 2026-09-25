@@ -30,7 +30,7 @@ from econometricsmodels import (
 
 # predict()のstatsmodels照合は主リファレンス照合と同じ許容誤差
 # （`_tolerances.py`の"wls_reference"）で行う（`test_ols_api.py`と同じ方針、
-# `refactoring-candidates-2.md`項目53/56「独自の絶対誤差定数は持たない」）。
+# 独自の絶対誤差定数は持たない）。
 _assert_close = partial(
     assert_close,
     rtol=TOLERANCES["wls_reference"]["rtol"],
@@ -62,8 +62,8 @@ def test_weight_one_matches_ols(dataset, option_kwargs):
     等に由来する浮動小数点誤差レベルの差が生じうる（`engine/src/linear/wls.rs`
     の対応するRust単体テストで確認済みの挙動）。
 
-    `OLSOptions`/`WLSOptions`はフィールド構成が同一の独立クラス（Issue #308）
-    のため、同じ`option_kwargs`からそれぞれ構築して`OLS`/`WLS`に渡す。
+    `OLSOptions`/`WLSOptions`はフィールド構成が同一の独立クラスのため、
+    同じ`option_kwargs`からそれぞれ構築して`OLS`/`WLS`に渡す。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
 
@@ -120,7 +120,7 @@ def test_weight_one_matches_ols_coef_table(dataset):
 
 def test_weight_one_matches_ols_predict(dataset):
     """重み=1のとき、`predict()`（学習データ・新規データいずれも）が
-    OLSの`predict()`と一致すること（Issue #132: 予測値は重みに関与しない、
+    OLSの`predict()`と一致すること（予測値は重みに関与しない、
     という設計の帰結を確認する）。
 
     学習データ（`new_data=None`）の計算経路自体はwls.rs（手動ループ、
@@ -454,7 +454,7 @@ def test_predict_new_data_matches_statsmodels(dataset):
 
 def test_predict_returns_predicted_key_only(dataset):
     """`predict()`の各行が`"predicted"`という1つのキーのみを持つこと
-    （Issue #309: `"fitted"`固定は統計学的に不正確なため`"predicted"`に統一）。
+    （`"fitted"`固定は統計学的に不正確なため`"predicted"`に統一）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()

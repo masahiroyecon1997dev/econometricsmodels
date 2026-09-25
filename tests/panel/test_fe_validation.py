@@ -151,7 +151,7 @@ def test_duplicate_within_x_raises(fe_dataset):
 
 
 def test_x_empty_raises(fe_dataset):
-    """v1では固定効果のみのモデル（`x=[]`）を許容していたが、Issue #320で
+    """v1では固定効果のみのモデル（`x=[]`）を許容していたが、
     他手法と同じ`validate_x_non_empty`を適用する方針に変更した
     （`engine_pybind/src/panel/fe.rs`モジュールdoc参照）。
     """

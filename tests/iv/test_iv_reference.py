@@ -6,8 +6,7 @@ classical/HC0/HC1/HAC（+クラスター、baselineのみ）で、係数・標�
 検定統計量・適合度統計量・診断統計量を相対誤差1e-8で厳密比較する
 （`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。
 
-役割分担（OLS/WLS/Logit/Probit の `test_<手法>_*.py` と同じ4分割、
-`refactoring-candidates-2.md` 項目68）:
+役割分担（OLS/WLS/Logit/Probit の `test_<手法>_*.py` と同じ4分割）:
     - 成功パスの構造・API・オプション反映: `test_iv_api.py`
     - `ValidationError`/`ComputationError` パス: `test_iv_validation.py`
     - 主リファレンス（linearmodels）との厳密な数値一致: このファイル（2SLS）
@@ -24,7 +23,7 @@ Note:
       hc2/hc3相当の実装を持たないため、`iv.json`の`_meta.note`参照）。ただし
       「参照実装が無い」わけではない——R `ivreg`+`sandwich::vcovHC`では検証可能なことを
       実機確認済みで、`test_iv_crosscheck.py`が独立にクロスチェックする
-      （`iv-spec.md`3.1節、`refactoring-candidates.md`項目12）。`engine`側の
+      （`iv-spec.md`3.1節）。`engine`側の
       Rust単体テスト
       （`two_sls.rs`の`fit_computes_hc2_std_errors_matching_manual_sandwich_formula`
       等、独立な素朴ループでの手計算とのクロスチェック）は数式レベルの細粒度回帰確認と
@@ -34,7 +33,7 @@ Note:
       予定、`benchmark/iv/references/linearmodels_ref.py`のモジュールdocコメント参照）。
       本実装側は`hac`でも値を返す（`None`にはならない）ため、`ref`が`None`の
       ときは比較をスキップするだけで、本実装側の値が`None`であることは
-      要求しない。df1（自由度1境界、Issue #235）は逆にaugmented regressionが
+      要求しない。df1（自由度1境界）は逆にaugmented regressionが
       saturated（残差自由度0）になるため全cov_typeでフィクスチャが`None`に
       なり、本実装側も同じ理由でNoneを返す（`engine/src/iv/CLAUDE.md`
       「Wu-Hausmanの拡張回帰が想定内の理由で失敗した場合」参照）。
@@ -237,7 +236,7 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
 def test_cluster_g2_matches_linearmodels(fixtures):
     """クラスタ数境界（G=2ちょうど）の成功パス。`x_exog=[]`・`instruments`1本・
     行番号%2の疑似グループ（`engine/src/iv/CLAUDE.md`「修正済み」の再現条件と
-    同じ、Issue #231フェーズ4でフィクスチャ化。以前は構造確認
+    同じ、フィクスチャ化した。以前は構造確認
     （`test_iv_api.py::test_cluster_g2_boundary_succeeds_when_x_exog_is_empty`）
     のみでリファレンス実装との数値照合が無かった）。
     """
@@ -263,8 +262,7 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
     """複数内生変数（`x_endog=["endog1", "endog2"]`）の成功パス。
     `weak_instrument_f_statistics`・`overid_statistic`（Sargan、過剰識別）・
     `wu_hausman_statistic`（複数内生変数のジョイント検定）が正しく機能することを
-    確認する（`testing-completeness-reviewer`指摘のmust fix、Issue #231
-    フェーズ4）。
+    確認する（`testing-completeness-reviewer`指摘のmust fix）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
     options = IVOptions(cov_type=cov_type)
@@ -286,8 +284,7 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
 def test_card_matches_linearmodels(fixtures, cov_type):
     """実データセット（Wooldridge card、Card 1995の大学近接操作変数による教育の
     収益率推定）。`testing-policy.md`「テスト用データセット」2.が要求する実データ
-    検証がIV系統に無かった（`testing-completeness-reviewer`指摘のshould fix、
-    Issue #231フェーズ4）。
+    検証がIV系統に無かった（`testing-completeness-reviewer`指摘のshould fix）。
     """
     df = load_wooldridge_dataset("card")
     options = IVOptions(cov_type=cov_type)
@@ -307,7 +304,7 @@ def test_card_matches_linearmodels(fixtures, cov_type):
 def test_df1_matches_linearmodels(fixtures, cov_type):
     """自由度1境界（df_resid=1ちょうど）の成功パス。`x_exog=[]`・
     `x_endog=['endog1']`・`instruments=['z1']`（丁度識別、n=3）。境界値・
-    悪条件シナリオの一環（Issue #235、`testing-policy.md`「テスト用データセット」）。
+    悪条件シナリオの一環（`testing-policy.md`「テスト用データセット」）。
     augmented regressionがsaturated（残差自由度0）になるため
     `wu_hausman_statistic`/`wu_hausman_p_value`は全cov_typeで`None`になる
     （`_check_result`のref Noneスキップ、`benchmark/iv/references/linearmodels_ref.py`参照）。

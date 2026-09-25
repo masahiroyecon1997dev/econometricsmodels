@@ -14,7 +14,7 @@
 `RTOL_MACHINE_PRECISION`/`ATOL_REFERENCE_FLOOR`/`ATOL_CROSSCHECK_FLOOR`の
 3つは、testing-policy.md「相対誤差1e-8程度（厳密）を基本方針とする」に
 直接対応する**設計方針レベルで複数箇所に共通する値**のみを名前付き定数化した
-ものであり、下記辞書内で使う（`refactoring-candidates-2.md`項目49）。
+ものであり、下記辞書内で使う。
 `rtol_hac`・`atol_p_value`のように実測値に基づき個別に決めた値は、現在
 たまたま複数エントリで同じ値でも共通定数化しない（`testing-policy.md`
 「一律に緩めると本来検出できるはずのバグを見逃す」、将来の再実測で値が
@@ -42,7 +42,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # --- 主リファレンス（statsmodels/linearmodels）との数値比較 ---
     # 相対誤差1e-8が基本方針。ATOLは0近傍の値（p値のアンダーフロー等）向けの
     # 下限フロー。
-    # 関心事分割（refactoring-candidates-2.md 項目68）で test_<手法>_fixtures.py を
+    # 関心事分割で test_<手法>_fixtures.py を
     # test_<手法>_reference.py にリネームし、キー名も *_reference に統一した
     # （linear/nonlinear/iv とも移行済み）。
     "ols_reference": {
@@ -83,7 +83,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # 乗ることを実測確認済み（ATOLのみ1e-9、RTOLは同じ1e-8）。
     # rtol_method: method="bfgs"/"lbfgs"がnewtonと異なる最適化経路で収束するため、
     # 収束後の係数・標準誤差が既定のRTOLより1桁以上大きくばらつく（実測最大相対誤差
-    # ~7.7e-5、Issue #231フェーズ4）。実測値に対し約13倍のマージンを持たせた。
+    # ~7.7e-5）。実測値に対し約13倍のマージンを持たせた。
     "logit_reference": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": 1e-9,
@@ -96,7 +96,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
     },
     # Tobit の主リファレンスは R `AER::tobit`（`survival::survreg` エンジン）。
     # survreg は (β, log σ) を独自の Newton-Raphson で最適化するが、本実装との
-    # 一致は実測で係数 ~3e-9・標準誤差 ~1e-9・対数尤度 ~1e-12（Issue #227）と
+    # 一致は実測で係数 ~3e-9・標準誤差 ~1e-9・対数尤度 ~1e-12と
     # RTOL_MACHINE_PRECISION を満たす。ATOL は Logit/Probit と同じ 1e-9
     # （反復最適化由来の 0 近傍ノイズが閉形式解より1桁大きい）。
     "tobit_reference": {
@@ -112,8 +112,8 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # `rtol_method`（1e-3）と同じ位置づけだが Tobit は最適化がよく条件付けられて
         # おり桁違いに小さい。method ケースの全フィールドに適用する。
         #
-        # Issue #343（`Method::Lbfgs`をargmin組み込みLBFGSから自前実装`FaerLbfgs`へ
-        # 置き換え）で実測値が変わり、`1e-7`（旧実測: 予測値`E[y*|x]=x'β`で最大
+        # `Method::Lbfgs`をargmin組み込みLBFGSから自前実装`FaerLbfgs`へ
+        # 置き換えたことで実測値が変わり、`1e-7`（旧実測: 予測値`E[y*|x]=x'β`で最大
         # ~2.2e-8）を`predict/expected_latent`の1点（lbfgs、実測1.055e-7）がわずかに
         # 超過するようになったため`2e-7`に緩めた（他の全フィールドは実測6e-9〜4e-8で
         # 旧値のままでも十分収まる。bfgs側の同じ点は5.49e-8）。
@@ -149,7 +149,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
         "rtol_mroz": 1e-4,
         # method="bfgs"/"lbfgs" ケース（`tobit_reference` の同名エントリ参照。ただし
         # crosscheckの実測は変わっていないため1e-7のまま、tobit_referenceのみ
-        # Issue #343で2e-7に緩めた）。
+        # 2e-7に緩めた）。
         "rtol_method": 1e-7,
     },
     # --- 独立実装（R）とのクロスチェック ---
@@ -185,16 +185,16 @@ TOLERANCES: dict[str, dict[str, float]] = {
         "atol_f_pvalue": 1e-5,
         # ols_crosscheckと同じ絶対誤差フロア（f_p_value以外の統計量向け）。
         "atol": ATOL_CROSSCHECK_FLOOR,
-        # p_values/wu_hausman_p_value（Issue #232/#233で追加）はhacケースで
+        # p_values/wu_hausman_p_valueはhacケースで
         # t分布/F分布の裾の確率がわずかな統計量の差を増幅する（f_p_valueと同じ
         # 理由）。実測最大乖離0.00157（multi_endog/hac/p_values/const）に
         # マージンを載せた絶対誤差フロア。hac以外はatol（1e-8）のまま。
         "atol_hac_pvalue": 2e-3,
-        # conf_int（Issue #232で追加）もhacケースで実測乖離がrtol_hac（1%）を
+        # conf_intもhacケースで実測乖離がrtol_hac（1%）を
         # 超えることがある（実測最大乖離0.00856、multi_endog/hac/conf_lower/
         # const）。絶対誤差フロアにマージンを載せた値。
         "atol_hac_conf_int": 1.2e-2,
-        # wu_hausman_statistic（Issue #233で追加）はhacケースで実測乖離が
+        # wu_hausman_statisticはhacケースで実測乖離が
         # rtol_hac（1%）を僅かに超えることがある（実測最大相対誤差1.01%、
         # high_condition_number）。専用に緩めた相対誤差。
         "rtol_hac_wu_hausman": 0.02,
@@ -233,7 +233,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # linearmodelsと異なり、`ssc(G.adj=FALSE, K.fixef=...)`で調整しても
     # 1-way実測相対誤差~1.8e-5・2-way実測相対誤差~0.21%が残る（実装バグ
     # ではなく規約差、`benchmark/panel/references/run_fixest_benchmark.R`
-    # 参照）。追加検証はIssue #348で追跡中。
+    # 参照）。
     "fe_crosscheck": {
         "rtol_strict": RTOL_MACHINE_PRECISION,
         "rtol_cluster_one_way": 5e-5,
@@ -267,7 +267,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
     "re_crosscheck": {
         "rtol": 2e-2,
         "atol": ATOL_CROSSCHECK_FLOOR,
-        # ハウスマン検定（Issue #350で解決済み）: plm::phtestは常にabs()を
+        # ハウスマン検定: plm::phtestは常にabs()を
         # 適用するため非負値のみ返す。本実装のengineも`hausman_statistic`
         # （`engine/src/panel/common.rs`）で同様にabs()を適用するため
         # （`generate_re_crosscheck_fixtures.py`モジュールdoc参照）、
@@ -284,7 +284,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # ハウスマン検定のp値は裾確率がゼロ近傍に潰れるケースが多く、
         # unbalancedシナリオでは絶対誤差フロアで比較する
         # （実測最大絶対誤差1.5e-8にマージン、他のRクロスチェックの
-        # atol_p_value系と同じ理由）。Issue #350の対応後は全シナリオで
+        # atol_p_value系と同じ理由）。全シナリオで
         # p値を比較する（`hausman_statistic`同様abs()適用後の値同士の比較に
         # なるため、small_panel/autocorrelatedシナリオも特別扱いしない、
         # test_re_crosscheck.py参照）。

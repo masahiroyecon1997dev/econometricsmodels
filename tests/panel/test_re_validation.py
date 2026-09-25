@@ -20,7 +20,7 @@ Note:
     （`cluster_col=None`は常に`entity`引数の列に自動フォールバックする、
     `engine_pybind/src/panel/re.rs::parse_re_cov_type`参照）。`x=[]`が
     `ValidationError`になる設計判断の経緯は`engine_pybind/src/panel/re.rs`
-    モジュールdoc「`x`の空リストを許容しない」参照（Issue #200、ユーザー
+    モジュールdoc「`x`の空リストを許容しない」参照（ユーザー
     確認済み・2026-09-20）。
 
     **RE固有の重要な注意（σ_ε²用の内部1-way FE呼び出し vs ハウスマン検定用の
@@ -432,7 +432,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error():
     """クラスター数G(=2)が傾き係数の数q(=df_model-1=2)以下は`ValidationError`
     （`CommonError::InsufficientClustersForInference`）。REは切片を持つため
     `q = df_model - 1`（FEの`q = k`とは規約が異なる、`engine/src/panel/
-    CLAUDE.md`「cov_type対応（Issue #197）」参照）。between回帰の自由度制約を
+    CLAUDE.md`「cov_type対応」参照）。between回帰の自由度制約を
     避けるため4エンティティ使う。
     """
     df = pl.DataFrame(

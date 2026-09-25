@@ -236,7 +236,7 @@ def test_cluster_g2_matches_statsmodels(fixtures):
     `rank(Ŝ)≤G-1`のためロバストWald検定のq×q部分行列が構造的に特異になり、
     `fit()`冒頭のバリデーションが`ValidationError`で弾く（成功パスにならない。
     `test_ols_validation.py::test_cluster_count_at_most_slopes_raises_`
-    `validation_error`参照、Issue #289）。coef/seに加えt値・p値・信頼区間・
+    `validation_error`参照）。coef/seに加えt値・p値・信頼区間・
     適合度統計量も検証する（test-coverage-candidates.md項目28）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
@@ -417,7 +417,7 @@ def test_include_intercept_false_matches_statsmodels_robust_cov_types(
     上の`test_include_intercept_false_matches_statsmodels`はcov_typeを指定
     しない（classical相当）比較のみだったため、include_intercept=Falseが
     engine_pybind側のcov_type分岐ロジックとも独立に正しく配線されていることを
-    確認する（テスト網羅性レビュー、Issue #231フェーズ4で判明した抜け）。
+    確認する（テスト網羅性レビューで判明した抜け）。
     """
     y = dataset["y"].to_numpy()
     x = np.column_stack([dataset["x1"].to_numpy(), dataset["x2"].to_numpy()])

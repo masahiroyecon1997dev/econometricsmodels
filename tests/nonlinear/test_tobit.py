@@ -1,8 +1,8 @@
 """Tobit python_packageラッパーの構造・API・エラーパスのスモークテスト。
 
 主リファレンス（R survival::survreg / AER::tobit）との厳密な数値比較は別途
-実施する（`test_logit_reference.py`/`test_logit_crosscheck.py`と同じ役割分担、
-Issue #227）。ここでは`fit()`の成功パス・`coef_table()`/`predict()`/
+実施する（`test_logit_reference.py`/`test_logit_crosscheck.py`と同じ役割分担）。
+ここでは`fit()`の成功パス・`coef_table()`/`predict()`/
 `censoring_fit_check()`/`marginal_effects()`の構造・`ValidationError`/
 `ComputationError`パスのみを検証する（`test_logit_api.py`/
 `test_logit_validation.py`のTobit版）。
@@ -78,7 +78,7 @@ def test_method_option_converges_to_same_params(censored_dataset, method):
 @pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
 def test_method_label(censored_dataset, method):
     """`res.method`が指定した`method`（正規化済み小文字）を反映すること
-    （Logit/Probitの`check_method_label`と同型、Issue #307）。
+    （Logit/Probitの`check_method_label`と同型）。
     """
     res = Tobit(
         censored_dataset,
@@ -102,7 +102,7 @@ def test_method_label(censored_dataset, method):
 )
 def test_method_is_case_insensitive(censored_dataset, method, expected_label):
     """`method`が大文字小文字を区別しないこと（Logit/Probitの
-    `check_method_is_case_insensitive`と同型、Issue #307）。
+    `check_method_is_case_insensitive`と同型）。
     """
     res = Tobit(
         censored_dataset,
@@ -222,7 +222,7 @@ def test_predict_unknown_target_raises(censored_dataset):
 def test_predict_new_data_returns_row_oriented_predictions(
     censored_dataset, target
 ):
-    """`predict(new_data=...)`（out-of-sample、Issue #131）が学習データと構造の
+    """`predict(new_data=...)`（out-of-sample）が学習データと構造の
     異なる新規データに対しても同じ行指向の形状を返すこと。
     """
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
@@ -290,7 +290,7 @@ def test_augment_none_returns_training_data_with_predicted_column(
 ):
     """`augment(new_data=None)`が、学習データの全列＋`"predicted_{target}"`
     列を持つDataFrameを、`predict()`と同じ予測値・元データと同じ行順で
-    返すこと（Issue #322項目4）。
+    返すこと。
     """
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
 
@@ -330,7 +330,7 @@ def test_augment_without_intercept_matches_predict(censored_dataset):
     """`include_intercept=False`でfitした場合も`augment()`が`predict()`と
     同じ予測値を返すこと（`augment()`はRust側で`predict()`とは別に
     `has_intercept`分岐を実装しているため、個別に確認する。OLSの
-    `test_augment_without_intercept_matches_predict`と同型、Issue #322項目4、
+    `test_augment_without_intercept_matches_predict`と同型、
     python-reviewer指摘）。
     """
     options = TobitOptions(include_intercept=False)
@@ -380,7 +380,7 @@ def test_augment_unknown_target_raises(censored_dataset):
 def test_augment_column_collision_raises(censored_dataset):
     """元データ（`new_data=None`）・`new_data`のいずれかに既に
     `"predicted_expected_observed"`列がある場合`ValidationError`
-    （黙って上書きしない、Issue #322項目4）。
+    （黙って上書きしない）。
     """
     df_with_predicted = censored_dataset.with_columns(
         pl.lit(0.0).alias("predicted_expected_observed")
@@ -780,7 +780,7 @@ def test_y_out_of_censoring_bounds_raises():
 
 def test_no_uncensored_observations_raises():
     """非打ち切り観測が1件も無い（全観測が`lower`ちょうど）場合`ValidationError`
-    （engine側の`NoUncensoredObservations`、Issue #223）。
+    （engine側の`NoUncensoredObservations`）。
     """
     df = pl.DataFrame({"y": [0.0, 0.0, 0.0, 0.0], "x1": [1.0, 2.0, 3.0, 4.0]})
     with pytest.raises(
@@ -868,15 +868,15 @@ def test_non_convergence_raises_computation_error_with_tiny_max_iter(
 @pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
 def test_large_true_coefficient_dgp_converges_and_recovers_truth(method):
     """大きい真の係数（`x1`の係数=100）でもノイズがあれば識別可能で、真値を回復する
-    （Issue #286の回帰テスト）。
+    回帰テスト。
 
-    Issue #286（`y`のスケール由来の分離ヒューリスティック誤発火）の修正前は、この
+    `y`のスケール由来の分離ヒューリスティック誤発火の修正前は、この
     DGP（`y* = 100·x1 + 0.5·x2 + N(0,1)`、n=200、左打ち切り約51%）が`run_solver`
     共有の`SeparationSuspected`（標準化パラメータノルム基準、Logit/Probitの
     `y∈{0,1}`で較正）に誤って引っかかり`ComputationError`になっていた。`y`の
     標準偏差が約65あり標準化パラメータノルムが閾値100を超えていたのが原因で、
-    真の分離ではなかった。#286（`TobitScaling`導入）と#288（Tobitでは
-    `SeparationNormCheck.Disabled`）を経て、Newton/BFGS/LBFGSのいずれでも
+    真の分離ではなかった。`TobitScaling`導入と、Tobitでは
+    `SeparationNormCheck.Disabled`とする対応を経て、Newton/BFGS/LBFGSのいずれでも
     `x1≈100`・`σ≈1`（真値`β1=100`, `σ=1`）で収束する。
 
     真の（準完全）分離が`ComputationError`になることは
@@ -896,7 +896,7 @@ def test_large_true_coefficient_dgp_converges_and_recovers_truth(method):
         df, y="y", x=["x1", "x2"], options=TobitOptions(method=method)
     ).fit()
 
-    # これはリファレンス数値照合ではなく#286の回帰テスト。許容幅は「真値を回復し、
+    # これはリファレンス数値照合ではなく分離誤検知に対する回帰テスト。許容幅は「真値を回復し、
     # かつσ→0退化に倒れていない」ことだけを担保する緩いバンド。実測は3メソッドとも
     # x1≈99.98・x2≈0.5・const≈0・σ≈1.02（相互のズレは1e-3未満）だが、将来の
     # ソルバー変更でのメソッド間変動を吸収するためマージンを広く取る。σの下限0.5は
@@ -917,12 +917,12 @@ def test_true_separation_noise_free_dgp_raises_computation_error(method):
     BFGS/L-BFGSも`ComputationError`になる（変種は問わない）。`max_iter`を
     35→2000に増やしてもNewton/BFGSは`NonConvergence`のまま。標準化パラメータ
     ノルム基準の`SeparationSuspected`はTobitでは無効
-    （Issue #288、`run_solver`に`SeparationNormCheck.Disabled`）。
+    （`run_solver`に`SeparationNormCheck.Disabled`）。
 
     **全件打ち切りとの棲み分け**: 非打ち切り観測が1件も無い（全観測が境界値
     ちょうど）ケースは`fit()`冒頭の`validate_has_uncensored_observations`が
     `ValidationError`（`NoUncensoredObservations`）で先に弾く
-    （`test_no_uncensored_observations_raises`、Issue #223）。本ケースは
+    （`test_no_uncensored_observations_raises`）。本ケースは
     非打ち切り観測が存在するため、そのバリデーションは通過し、最適化の
     非収束＝`ComputationError`（`ValueError`系ではない）として現れる。
     """
@@ -943,14 +943,14 @@ def test_quasi_separation_tiny_noise_converges_to_true_values():
     """境界レジーム（軽度の準完全分離＋ごく小さいノイズ）が正しく収束することを
     固定する。
 
-    以前（Issue #288当時）は、この境界レジームでNewtonが`max_iter`まで収束せず、
+    以前は、この境界レジームでNewtonが`max_iter`まで収束せず、
     `raise_on_non_convergence=False`のときのみ`converged=False`のまま真値近傍の
     粗い精度のパラメータを返す（既定の`raise_on_non_convergence=True`では
     `ComputationError`）という「中間レジーム」として扱っていた
-    （rust-reviewer指摘、Issue #288）。
+    （rust-reviewer指摘）。
 
     この後、`censored_contribution`（`engine/src/nonlinear/tobit.rs`）に
-    Probitの`ProbitProblem`と同型のバグ（Issue #316）——Hessian項`A(u)=λ(u+λ)`の
+    Probitの`ProbitProblem`と同型のバグ——Hessian項`A(u)=λ(u+λ)`の
     計算でクランプ済み`λ`と生の`zeta`を混在させ、`|zeta|>U_CLAMP`の領域で
     `A(u)`が負になりHessianの正定値性が崩れる——が見つかり修正された。この
     境界レジーム（打ち切り境界付近の`zeta`が`U_CLAMP`を超えやすい）はまさに
@@ -979,10 +979,10 @@ def test_quasi_separation_tiny_noise_converges_to_true_values():
 
 def test_many_regressors_no_false_separation():
     """説明変数を15本に増やしても、健全なDGPで偽の`SeparationSuspected`無しに
-    収束する（Issue #288）。
+    収束する。
 
     `SeparationNormCheck.Disabled`採用の根拠の一つが「多変量モデルでは
-    標準化パラメータノルムが`√k`オーダーで増え、#286型の偽陽性が再発しうる」
+    標準化パラメータノルムが`√k`オーダーで増え、この種の偽陽性が再発しうる」
     （Tobitでは係数由来でもノルムが増える）。Tobitは検出自体を通らないため
     ここで`ComputationError`になってはいけない。`TobitScaling`が設計行列を
     列標準化・平均センタリングしてノルムを抑える回帰ガードでもある。
@@ -1001,7 +1001,7 @@ def test_many_regressors_no_false_separation():
     res = Tobit(df, y="y", x=[f"x{j}" for j in range(k)]).fit()
 
     assert res.converged
-    # 代表的な係数が真値近傍（厳密照合はIssue #227の数値テストの領分）。
+    # 代表的な係数が真値近傍（厳密照合は数値テストの領分）。
     assert abs(res.params["x0"] - 1.0) < 0.5
     assert abs(res.params["x1"] - (-0.7)) < 0.5
     assert 1.0 < res.sigma < 2.0
@@ -1009,12 +1009,13 @@ def test_many_regressors_no_false_separation():
 
 def test_mroz_hours_raw_scale_converges_without_false_separation():
     """実データ（Wooldridge mroz `hours`、生スケール）で偽の`SeparationSuspected`
-    無しに収束する（Issue #286の実データ回帰、#288で無効化を確定）。
+    無しに収束する（分離ヒューリスティック誤発火の実データ回帰、
+    `SeparationNormCheck.Disabled`で無効化を確定）。
 
     `hours`（0〜4950、左打ち切り約43%）を Example 17.2 の RHS 7変数で推定する。
-    `y`の標準偏差が大きく（σ̂≈1122）、#286修正前は標準化パラメータノルムが
+    `y`の標準偏差が大きく（σ̂≈1122）、修正前は標準化パラメータノルムが
     閾値100を超え`ComputationError`になっていた。R `AER::tobit`（survreg）との
-    厳密な数値照合はIssue #227の別テストの領分。ここでは「生スケールでも
+    厳密な数値照合は別テストの領分。ここでは「生スケールでも
     収束し、教科書的な係数（`educ`≈80）を返す」ことのみ確認する。
     """
     from _constants import MROZ_X
@@ -1167,11 +1168,11 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
     censored_dataset,
 ):
     """クラスター数G≤傾き係数の数q（ここで`G=2 == q=2`、x1/x2）は`ValidationError`
-    （engine側の`CommonError::InsufficientClustersForInference`、Issue #289 / #287）。
+    （engine側の`CommonError::InsufficientClustersForInference`）。
 
     `rank(Ŝ)≤G-1`のため全体Wald検定のq×q部分行列がG≤qで構造的に特異になる。
     従来は`wald_chi2_test`内の`ComputationError`だったが、GもqもR行列計算なしで
-    即座に判定できるため`fit()`冒頭の`ValidationError`へ前倒しした（#287のmroz
+    即座に判定できるため`fit()`冒頭の`ValidationError`へ前倒しした（mroz
     `hours`クラスターケースがこの経路。`G<q`側はOLSの同名テストで確認）。
     """
     cluster = pl.Series(
@@ -1191,7 +1192,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
 
 
 def test_mroz_hours_cluster_cov_type_raises_validation_error():
-    """実データでの`G <= q`境界（#287の顕在化ケース、Issue #289で解決）。
+    """実データでの`G <= q`境界の顕在化ケース。
 
     Wooldridge mroz `hours` Tobit（Wooldridge Example 17.2、RHS 7変数 → q=7）を
     `cluster_col="city"`（都市部居住ダミー、G=2）で推定すると`G=2 <= q=7`。

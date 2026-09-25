@@ -1,5 +1,5 @@
 """Logit/Probitの`test_logit_*.py`/`test_probit_*.py`で重複していた
-テスト本体を関数として集約する（`refactoring-candidates-2.md`項目95）。
+テスト本体を関数として集約する。
 
 `tests/linear/_ols_helpers.py`と同じ仕組み（pytestが各テストファイルの
 ディレクトリを`sys.path`に載せるrootless import）で、`tests/nonlinear/`配下
@@ -151,7 +151,7 @@ def check_include_intercept_false_omits_const_and_converges(
 
     `include_intercept`の値に関わらず`df_model`は常に`k-1`（`docs/spec/
     <method>-spec.md`参照）となるため、その旨も確認する
-    （`testing-completeness-reviewer`指摘、Issue #231フェーズ4）。
+    （`testing-completeness-reviewer`指摘）。
     """
     res = estimator_cls(
         dataset,
@@ -169,8 +169,7 @@ def check_confidence_level_changes_interval_width(
 ):
     """`confidence_level`を下げると信頼区間が狭くなること（既定の0.95以外の
     値が`engine_pybind`経由で実際に反映されることの確認、OLSの
-    `test_confidence_level_changes_interval_width`と同型、Issue #231
-    フェーズ4）。
+    `test_confidence_level_changes_interval_width`と同型）。
     """
     wide = estimator_cls(
         dataset,
@@ -225,7 +224,7 @@ def check_raise_on_non_convergence_false_returns_result_without_raising(
 
 def check_cov_type_label(dataset, estimator_cls, options_cls):
     """`res.cov_type`が指定した`cov_type`（正規化済み小文字）を反映すること
-    （OLSの`test_cov_type_label`と同型、Issue #231フェーズ4）。
+    （OLSの`test_cov_type_label`と同型）。
     """
     for cov_type in ["classical", "opg", "hc0", "hc1"]:
         res = estimator_cls(
@@ -247,7 +246,7 @@ def check_cov_type_label(dataset, estimator_cls, options_cls):
 
 def check_method_label(dataset, estimator_cls, options_cls):
     """`res.method`が指定した`method`（正規化済み小文字）を反映すること
-    （`check_cov_type_label`と同型、Issue #307）。
+    （`check_cov_type_label`と同型）。
     """
     for method in ["newton", "bfgs", "lbfgs"]:
         res = estimator_cls(
@@ -263,7 +262,7 @@ def check_method_is_case_insensitive(
     dataset, estimator_cls, options_cls, method, expected_label
 ):
     """`method`が大文字小文字を区別しないこと（`check_cov_type_is_case_insensitive`
-    と同型、Issue #307）。
+    と同型）。
     """
     options = options_cls(method=method)
     res = estimator_cls(dataset, y="y", x=["x1", "x2"], options=options).fit()
@@ -275,8 +274,7 @@ def check_cov_type_is_case_insensitive(
 ):
     """`cov_type`が大文字小文字を区別しないこと（`engine_pybind`側の
     `build_<method>_input`のRust単体テストと対になる、Python API境界での
-    確認。OLS/WLSの`test_cov_type_is_case_insensitive`と同型、Issue #231
-    フェーズ4）。
+    確認。OLS/WLSの`test_cov_type_is_case_insensitive`と同型）。
     """
     kwargs = {"cluster_col": "cluster"} if cov_type == "CLUSTER" else {}
     options = options_cls(cov_type=cov_type, **kwargs)
@@ -289,7 +287,7 @@ def check_nonrobust_is_alias_for_classical(
 ):
     """`"nonrobust"`が`"classical"`と同じ計算方法（標準誤差も一致）の
     エイリアスであること（OLS/WLSの`test_nonrobust_is_alias_for_classical`と
-    同型、Issue #231フェーズ4）。
+    同型）。
     """
     res = estimator_cls(
         dataset,
@@ -323,7 +321,7 @@ def check_predict_returns_row_oriented_probabilities(dataset, estimator_cls):
 def check_predict_new_data_returns_row_oriented_probabilities(
     dataset, estimator_cls
 ):
-    """`predict(new_data)`（out-of-sample、Issue #131）が学習データと構造の
+    """`predict(new_data)`（out-of-sample）が学習データと構造の
     異なる新規データに対しても同じ行指向の形状を返すこと。
     """
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
@@ -345,7 +343,7 @@ def check_augment_none_returns_training_data_with_probability_column(
 ):
     """`augment(new_data=None)`が、学習データの全列＋`"probability"`列を
     持つDataFrameを、`predict()`と同じ予測確率・元データと同じ行順で
-    返すこと（Issue #322項目4）。
+    返すこと。
     """
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
 
@@ -386,7 +384,7 @@ def check_augment_without_intercept_matches_predict(
     """`include_intercept=False`でfitした場合も`augment()`が`predict()`と
     同じ予測確率を返すこと（`augment()`はRust側で`predict()`とは別に
     `has_intercept`分岐を実装しているため、個別に確認する。OLSの
-    `test_augment_without_intercept_matches_predict`と同型、Issue #322項目4、
+    `test_augment_without_intercept_matches_predict`と同型、
     python-reviewer指摘）。
     """
     df = pl.DataFrame(
@@ -537,8 +535,7 @@ def check_missing_column_raises(dataset, estimator_cls):
 
 def check_null_values_raise(estimator_cls):
     """欠損値は`column_extraction`の責務で`ValidationError`（OLSの
-    `test_null_values_raise`と同型、Python API境界で未検証だった、
-    Issue #231フェーズ4）。
+    `test_null_values_raise`と同型、Python API境界で未検証だった）。
     """
     df_y = pl.DataFrame({"y": [0.0, None, 1.0], "x1": [1.0, 2.0, 3.0]})
     with pytest.raises(
@@ -609,7 +606,7 @@ def check_non_finite_values_raise(estimator_cls):
 
 def check_non_numeric_dtype_raises(estimator_cls):
     """数値/文字列型にキャストできない列は`ValidationError`（OLSの
-    `test_non_numeric_dtype_raises`と同型、Issue #231フェーズ4）。文字列を
+    `test_non_numeric_dtype_raises`と同型）。文字列を
     数値キャストするとnullになるため`COLUMN_HAS_MISSING_VALUES`経路になる
     （`test_ols_validation.py::test_non_numeric_dtype_raises`参照）。
     """
@@ -646,7 +643,7 @@ def check_insufficient_observations_raises(dataset, estimator_cls):
 
 # ── test_<method>_validation.py: ValidationError（predict()のnew_data） ──
 #
-# OLSの`test_predict_missing_column_raises`等と同型（Issue #131）。
+# OLSの`test_predict_missing_column_raises`等と同型。
 
 
 def check_predict_missing_column_raises(dataset, estimator_cls):
@@ -695,7 +692,7 @@ def check_predict_null_or_non_finite_values_raise(dataset, estimator_cls):
 
 def check_augment_column_collision_raises(dataset, estimator_cls):
     """元データ（`new_data=None`）・`new_data`のいずれかに既に`"probability"`
-    列がある場合`ValidationError`（黙って上書きしない、Issue #322項目4、
+    列がある場合`ValidationError`（黙って上書きしない、
     OLSの`test_augment_column_collision_raises`と同型）。
     """
     df_with_probability = dataset.with_columns(
@@ -780,7 +777,7 @@ def check_invalid_confidence_level_raises(
     `check_marginal_effects_confidence_level_out_of_range_raises`で既存
     だが、`fit()`本体側（`Options.confidence_level`）が未検証だった
     （`testing-policy.md`「テストの3系統」・OLS/WLSの
-    `test_invalid_confidence_level_raises`との非対称、Issue #231フェーズ4）。
+    `test_invalid_confidence_level_raises`との非対称）。
     """
     options = options_cls(confidence_level=confidence_level)
     with pytest.raises(
@@ -816,7 +813,7 @@ def check_non_positive_max_iter_raises(
 
     `tol<=0`側は`check_non_positive_tol_raises`で既存だが、対応する
     `max_iter`側のPython API境界のテストが無かった
-    （`testing-completeness-reviewer`指摘、Issue #231フェーズ4）。
+    （`testing-completeness-reviewer`指摘）。
     """
     with pytest.raises(
         ValidationError,
@@ -858,7 +855,7 @@ def check_cluster_count_at_most_slopes_raises_validation_error(
     binary_dataset, estimator_cls, options_cls
 ):
     """クラスター数G≤傾き係数の数q（`k - k_constant`）は`ValidationError`
-    （engine側の`CommonError::InsufficientClustersForInference`、Issue #289）。
+    （engine側の`CommonError::InsufficientClustersForInference`）。
 
     クラスターロバスト共分散はクラスター寄与スコアの総和がゼロ（MLEの一次条件
     `Σ_i s_i = 0`）で`rank(Ŝ)≤G-1`のため、G≤qだと退化する。Logit/Probitは
@@ -891,9 +888,7 @@ def check_cluster_without_col_raises(dataset, estimator_cls, options_cls):
 def check_cluster_col_nonexistent_column_raises(
     dataset, estimator_cls, options_cls
 ):
-    """`cluster_col`が実在しない列名を指すと`ValidationError`（OLSと同じ理由、
-    Issue #231フェーズ4）。
-    """
+    """`cluster_col`が実在しない列名を指すと`ValidationError`（OLSと同じ理由）。"""
     options = options_cls(cov_type="cluster", cluster_col="does_not_exist")
     with pytest.raises(
         ValidationError,
@@ -938,16 +933,16 @@ def check_perfect_multicollinearity_raises_computation_error(
     （`testing-policy.md`「テストの3系統」）。想定エラー（`ComputationError`）が
     発生することのみを確認する。`method`（newton/bfgs/lbfgs）でparametrizeする。
 
-    #279以前は、この`method`網羅を`check_singular_hessian_raises_computation_error`
+    以前は、この`method`網羅を`check_singular_hessian_raises_computation_error`
     （インラインの極小データ、`x2=2*x1`直書き）が担っていた。`newton`は
     `newton_step`内のQR、`bfgs`/`lbfgs`は収束後の`observed_information_cov_params`と
     いう`method`依存の別経路で特異性を検出しており、過去に`bfgs`だけ検出漏れした
-    実バグの回帰ガードだった。#279で`engine`内の検出経路は`fit()`冒頭の列ピボットQR
+    実バグの回帰ガードだった。その後`engine`内の検出経路は`fit()`冒頭の列ピボットQR
     ランクチェック（`method`非依存の単一経路、`SingularDesignMatrix`）に一本化された
     が、**`engine_pybind`側のmethod文字列パース（`"bfgs"`/`"lbfgs"` → `EngineMethod`）
     と配線はmethod固有のまま**なので、「非既定methodの文字列 × 特異入力 ×
     `ComputationError`」を踏むAPI境界テストは引き続き必要（testing-completeness-
-    reviewer指摘、#279レビュー）。インラインの極小データはCSVフィクスチャ版へ統合した
+    reviewer指摘）。インラインの極小データはCSVフィクスチャ版へ統合した
     （`engine`側の`method`×`cov_type`網羅は
     `fit_returns_singular_design_matrix_error_for_perfectly_collinear_design_matrix`
     1本に集約）。
@@ -983,7 +978,7 @@ def check_complete_separation_raises_computation_error(
     このシナリオ自体の追加を見送っていた。`n=500`（`benchmark/nonlinear/
     datasets.py`の既定値）程度の標本では、この誤判定（無警告の「成功」）は
     起きず確実に`ComputationError`になることを実測で確認した上で追加した
-    （小標本境界〔`n=k+1`近傍〕でのみ誤判定が顕在化することはIssue #317で
+    （小標本境界〔`n=k+1`近傍〕でのみ誤判定が顕在化することは
     別途確認済み）。
     """
     df = pl.read_csv(DATA_DIR / f"{dataset_prefix}_complete_separation.csv")
@@ -1073,7 +1068,7 @@ def check_separation_suspected_raises_computation_error_for_near_separation_data
 # `FIXTURE_PATH`（`logit.json`/`probit.json`）・`SCENARIOS`
 # （`generate_logit_fixtures`/`generate_probit_fixtures`由来）・
 # `TOLERANCES`キー接頭辞等、手法ごとに異なる値が多いため、個別引数ではなく
-# この設定オブジェクトにまとめて渡す（`refactoring-candidates-2.md`項目95）。
+# この設定オブジェクトにまとめて渡す。
 
 
 @dataclass(frozen=True)
@@ -1236,14 +1231,14 @@ def check_cluster_imbalanced_matches_statsmodels(
 def check_mroz_cluster_cov_type_raises_validation_error(
     estimator_cls, options_cls
 ) -> None:
-    """実データでのクラスターロバストSEの`G <= q`境界（Issue #289 / #287）。
+    """実データでのクラスターロバストSEの`G <= q`境界。
 
     mrozの`city`（都市部居住ダミー、484/269の2値）はG=2、`MROZ_X`は7変数なので
     `G=2 <= q=7`。`rank(Ŝ) <= G-1`のためクラスターロバスト共分散が退化するため、
     `fit()`冒頭のバリデーションが`ValidationError`
     （`CommonError::InsufficientClustersForInference`）で弾く。従来はLogit/Probitが
     この縮退した共分散から読んだSEを無警告で返していた（silent-pass、実質バグ。
-    数値照合フィクスチャ`mroz/cluster`を持っていたが、本Issueで削除）。
+    数値照合フィクスチャ`mroz/cluster`を持っていたが、この対応で削除）。
     """
     df = load_wooldridge_dataset("mroz")
     options = options_cls(cov_type="cluster", cluster_col="city")
@@ -1266,7 +1261,7 @@ def check_method_matches_statsmodels(
     bfgs/lbfgsは`test_<method>_api.py::test_method_option_converges_to_same_params`
     で自身のnewton結果とparamsのみ緩い許容誤差(rel=1e-4)で比較していたが、
     主リファレンスに対するフルの統計量照合が無かった
-    （`testing-completeness-reviewer`指摘、Issue #231フェーズ4）。
+    （`testing-completeness-reviewer`指摘）。
     """
     df = pl.read_csv(config.dataset_path("baseline"))
     options = config.options_cls(cov_type="classical", method=method)
@@ -1304,7 +1299,7 @@ def check_include_intercept_false_matches_statsmodels(
     常に`k-1`、`log_likelihood_null`は常に「切片のみ」モデルを参照するため
     `include_intercept=False`時は`lr_statistic`が負値になりうる、という特殊
     挙動が`engine`側の単体テストのみで数値照合が無かった。
-    `testing-completeness-reviewer`指摘、Issue #231フェーズ4）。frozen
+    `testing-completeness-reviewer`指摘）。frozen
     fixtureではなくstatsmodelsとの直接照合で確認する
     （`test_ols_reference.py`と同じ方針）。
 
@@ -1355,7 +1350,7 @@ def check_predict_new_data_matches_statsmodels(
     config: BinaryChoiceReferenceConfig, sm_estimator_cls
 ) -> None:
     """新規データに対する`predict()`がstatsmodelsの`.predict()`と一致すること
-    （OLSの`test_predict_new_data_matches_statsmodels`と同型、Issue #131）。
+    （OLSの`test_predict_new_data_matches_statsmodels`と同型）。
 
     列順を学習時（x1, x2, x3）と入れ替えて渡し、列名でマッチングされる
     （列順に依存しない）ことも合わせて確認する。`predict()`の値自体は
@@ -1401,7 +1396,7 @@ def check_predict_new_data_without_intercept_matches_statsmodels(
 ) -> None:
     """`include_intercept=False`でfitした場合の`predict(new_data)`も
     statsmodelsと一致すること（OLSの`test_predict_new_data_without_intercept_
-    matches_statsmodels`と同型、python-reviewer指摘、Issue #131）。
+    matches_statsmodels`と同型、python-reviewer指摘）。
     """
     df = pl.read_csv(config.dataset_path("baseline"))
     y = df["y"].to_numpy()
@@ -1428,7 +1423,7 @@ def check_predict_with_include_intercept_false_and_x_named_const(
 ) -> None:
     """`include_intercept=False`かつ`x`に`"const"`という名前の列を含む場合でも
     `predict(new_data)`が正しく動作すること（OLSの`test_predict_with_include_
-    intercept_false_and_x_named_const`と同型の回帰テスト、Issue #131）。
+    intercept_false_and_x_named_const`と同型の回帰テスト）。
 
     `include_intercept=True`のときのみ`"const"`列名との衝突チェックが働く仕様
     のため、`include_intercept=False`ならユーザーが`"const"`という名前の

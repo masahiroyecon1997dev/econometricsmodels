@@ -12,7 +12,7 @@ classical/hc1/hc2/hc3はfixestと機械精度で一致する（実測相対誤�
 小標本補正の既定慣行（Stata流のG/(G-1)補正）が本実装・linearmodelsと異なり、
 `ssc(G.adj=FALSE, K.fixef=...)`で調整してもなお1-way相対誤差1.8e-5程度・
 2-way相対誤差0.21%程度の乖離が残る（規約上の系統的な差、実装バグではない。
-`run_fixest_benchmark.R`のコメント参照）。追加検証はIssue #348で追跡中。
+`run_fixest_benchmark.R`のコメント参照）。追加検証は追跡中。
 
 ## このファイルだけが持つ統計量（単一参照実装の例外）
 

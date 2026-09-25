@@ -6,7 +6,7 @@ engine_pybind 経由で反映されることを確認する。`ValidationError`/
 `ComputationError` パスは `test_iv_validation.py`、主リファレンス（linearmodels）
 との数値照合は `test_iv_reference.py`（2SLS）・`test_iv_gmm_reference.py`（GMM）、
 R クロスチェックは `test_iv_crosscheck.py`（OLS/WLS/Logit/Probit の
-`test_<手法>_api.py` 等と同じ4分割、`refactoring-candidates-2.md` 項目68）。
+`test_<手法>_api.py` 等と同じ4分割）。
 
 `iv_dataset`/`clustered_dataset` フィクスチャと `our_fit` ヘルパーは
 `tests/iv/conftest.py`／`tests/iv/_iv_helpers.py`。
@@ -212,7 +212,7 @@ def test_wu_hausman_degrades_to_none_when_cluster_count_at_most_augmented_slopes
     Wu-Hausman拡張回帰は第一段階残差列の分だけ傾き係数が増える
     （`q_aug = q + k_endog`）ため`G <= q_aug`になり、拡張回帰が
     `InsufficientClustersForInference`を返す → `wu_hausman_*`が`None`にdegradeする
-    （`fit()`全体は成功、Issue #289。既存の`x_endog=[]`・完全予測退化ケースの
+    （`fit()`全体は成功。既存の`x_endog=[]`・完全予測退化ケースの
     degradeと同じ意味論）。`x_exog=["x1"]`+`x_endog=["endog1"]`+丁度識別
     （`instruments=["z1"]`、第一段階`q_fs=2`なので`G=3`で第一段階は成功）で
     構造方程式`q=2`・`k_endog=1`・`q_aug=3`、`G=3`（`q=2 < G=3 <= q_aug=3`）。
@@ -264,7 +264,7 @@ def test_cov_type_is_case_insensitive(iv_dataset, cov_type, expected_label):
     """`cov_type`が大文字小文字を区別しないこと（`engine_pybind`側の
     `parse_iv_cov_type`のRust実装と対になる、Python API境界での確認。
     OLS/WLS/Logit/Probitの`test_cov_type_is_case_insensitive`と同型、
-    `testing-completeness-reviewer`指摘、Issue #231フェーズ4）。
+    `testing-completeness-reviewer`指摘）。
     """
     options = IVOptions(cov_type=cov_type)
     res = our_fit(iv_dataset, options=options)
@@ -274,7 +274,7 @@ def test_cov_type_is_case_insensitive(iv_dataset, cov_type, expected_label):
 @pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
 def test_nonrobust_is_alias_for_classical(iv_dataset, cov_type):
     """`"nonrobust"`が`"classical"`と同じ計算方法（標準誤差も一致）のエイリアス
-    であること（OLS/WLS/Logit/Probitの同名テストと同型、Issue #231フェーズ4）。
+    であること（OLS/WLS/Logit/Probitの同名テストと同型）。
     """
     res = our_fit(iv_dataset, options=IVOptions(cov_type=cov_type))
     classical_res = our_fit(
@@ -303,7 +303,7 @@ def test_weight_type_is_case_insensitive_and_aliased(
     """`weight_type`が大文字小文字を区別しないこと、および`"homoskedastic"`/
     `"heteroskedastic"`が`"unadjusted"`/`"robust"`のエイリアスであること
     （`engine_pybind`側の`parse_weight_type`と対になる、Python API境界での確認。
-    `testing-completeness-reviewer`指摘、Issue #231フェーズ4）。
+    `testing-completeness-reviewer`指摘）。
     """
     options = IVOptions(method="gmm", weight_type=weight_type)
     res = our_fit(iv_dataset, options=options)
@@ -392,7 +392,7 @@ def test_include_intercept_false_omits_const(iv_dataset):
 
 def test_include_intercept_false_allows_const_in_x_endog():
     """`include_intercept=False`なら`x_endog`に`"const"`という名前の（切片
-    ではない）通常の内生変数を含められること（Issue #305: 衝突チェックは
+    ではない）通常の内生変数を含められること（衝突チェックは
     `include_intercept=True`のときのみ働く仕様、`test_const_collision_in_
     x_endog_with_include_intercept_raises`と対称）。
     """
@@ -417,7 +417,7 @@ def test_include_intercept_false_allows_const_in_x_endog():
 
 def test_include_intercept_false_allows_const_in_instruments():
     """`include_intercept=False`なら`instruments`に`"const"`という名前の
-    （切片ではない）通常の操作変数を含められること（Issue #305と対称）。
+    （切片ではない）通常の操作変数を含められること（前項のテストと対称）。
     """
     df = pl.DataFrame(
         {
@@ -479,7 +479,7 @@ def test_gmm_cov_type_options_run_independently_of_weight_type(
 @pytest.mark.parametrize("method", ["2sls", "gmm"])
 def test_method_label(iv_dataset, method):
     """`res.method`が指定した`method`（正規化済み小文字）を反映すること
-    （`test_cov_type_label`と同型、Issue #307）。
+    （`test_cov_type_label`と同型）。
     """
     res = our_fit(iv_dataset, options=IVOptions(method=method))
     assert res.method == method
@@ -490,7 +490,7 @@ def test_method_label(iv_dataset, method):
 )
 def test_weight_type_label(iv_dataset, clustered_dataset, weight_type):
     """`res.weight_type`が`method="gmm"`のとき指定した`weight_type`
-    （正規化済み小文字）を反映すること（Issue #307）。
+    （正規化済み小文字）を反映すること。
     """
     df = clustered_dataset if weight_type == "cluster" else iv_dataset
     kwargs = (
@@ -512,7 +512,7 @@ def test_weight_type_label(iv_dataset, clustered_dataset, weight_type):
 )
 def test_method_is_case_insensitive(iv_dataset, method, expected_label):
     """`method`が大文字小文字を区別しないこと（`test_cov_type_is_case_insensitive`
-    と同型、Issue #307）。
+    と同型）。
     """
     res = our_fit(iv_dataset, options=IVOptions(method=method))
     assert res.method == expected_label
@@ -529,7 +529,7 @@ def test_method_is_case_insensitive(iv_dataset, method, expected_label):
         ("KERNEL", "kernel"),
         # エイリアス入力は`cov_type`の`"nonrobust"`と同じく正準名へは変換されず、
         # 小文字化されたそのままの文字列がエコーされる（`IVResult.weight_type`の
-        # docコメント参照、Issue #307）。
+        # docコメント参照）。
         ("homoskedastic", "homoskedastic"),
         ("HOMOSKEDASTIC", "homoskedastic"),
         ("heteroskedastic", "heteroskedastic"),
@@ -551,7 +551,7 @@ def test_weight_type_is_case_insensitive(
 
 def test_weight_type_is_none_for_2sls(iv_dataset):
     """`weight_type`はGMM専用の概念のため、`method="2sls"`では常に`None`
-    であること（Issue #307）。
+    であること。
     """
     res = our_fit(iv_dataset, options=IVOptions(method="2sls"))
     assert res.weight_type is None
@@ -559,7 +559,7 @@ def test_weight_type_is_none_for_2sls(iv_dataset):
 
 def test_weight_type_is_none_for_2sls_even_when_explicitly_set(iv_dataset):
     """`method="2sls"`では`weight_type`を明示的に既定値以外にしても無視され、
-    `res.weight_type`は常に`None`であること（Issue #307）。
+    `res.weight_type`は常に`None`であること。
     """
     res = our_fit(
         iv_dataset, options=IVOptions(method="2sls", weight_type="cluster")

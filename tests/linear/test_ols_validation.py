@@ -213,7 +213,7 @@ def test_cluster_without_col_raises(dataset):
 def test_cluster_col_nonexistent_column_raises(dataset):
     """`cluster_col`が実在しない列名を指すと`ValidationError`
     （`column_extraction`の責務、既存の欠落を確認するテストが無かった、
-    `testing-completeness-reviewer`指摘、Issue #231フェーズ4）。
+    `testing-completeness-reviewer`指摘）。
     """
     options = OLSOptions(cov_type="cluster", cluster_col="does_not_exist")
     with pytest.raises(
@@ -309,7 +309,7 @@ def test_predict_null_or_non_finite_values_raise(dataset):
 
 def test_augment_column_collision_raises(dataset):
     """元データ（`new_data=None`）・`new_data`のいずれかに既に`"predicted"`列が
-    ある場合`ValidationError`（黙って上書きしない、Issue #295）。
+    ある場合`ValidationError`（黙って上書きしない）。
     """
     df_with_predicted = dataset.with_columns(pl.lit(0.0).alias("predicted"))
     with pytest.raises(
@@ -342,7 +342,7 @@ def test_augment_missing_column_raises(dataset):
 
 @pytest.mark.parametrize("n_groups", [2, 3])
 def test_cluster_count_at_most_slopes_raises_validation_error(n_groups):
-    """クラスター数G≤傾き係数の数q（ここでq=3）は`ValidationError`（Issue #289）。
+    """クラスター数G≤傾き係数の数q（ここでq=3）は`ValidationError`。
 
     クラスターロバスト共分散はクラスター寄与スコアの総和がゼロ（正規方程式
     `X'e=0`）で`rank(Ŝ)≤G-1`のため、G≤qだとロバストWald/F検定のq×q部分行列が
@@ -377,8 +377,7 @@ def test_perfect_multicollinearity_raises_computation_error():
 
     以前は手書きの極小 df（`x2 = 2*x1`）による `test_singular_matrix_raises_
     computation_error` も併存していたが、同じ経路の確認で追加検証が無かったため、
-    固定済みベンチマーク CSV を使うこのテストへ一本化した
-    （`refactoring-candidates-2.md` 項目54）。
+    固定済みベンチマーク CSV を使うこのテストへ一本化した。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_perfect_multicollinearity.csv")
     with pytest.raises(ComputationError):
@@ -409,7 +408,7 @@ def test_scale_variance_cluster_raises_computation_error():
     （`test-coverage-candidates.md`項目73。従来docstringの主張のみで
     自動テストが無かった非対称の解消）。均等な疑似グループ（行番号%10、
     `G=10>q=3`）を使い、クラスター数不足による`ValidationError`
-    （Issue #289）ではなく、傾き係数の共分散部分行列の条件数超過による
+    ではなく、傾き係数の共分散部分行列の条件数超過による
     `ComputationError`が発生することを確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")

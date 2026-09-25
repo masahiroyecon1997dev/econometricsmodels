@@ -183,7 +183,7 @@ def test_cluster_g2_matches_r(crosscheck):
     `rank(Ŝ)≤G-1`のためロバストWald検定のq×q部分行列が構造的に特異になり、
     `fit()`冒頭のバリデーションが`ValidationError`で弾く（成功パスにならない。
     `test_wls_validation.py::test_cluster_count_at_most_slopes_raises_validation_error`
-    参照、Issue #289）。
+    参照）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
     df = with_cluster_groups(df, 2)
@@ -197,7 +197,7 @@ def test_cluster_g2_matches_r(crosscheck):
 
 
 def test_weight_in_x_matches_r(crosscheck):
-    """`weight`と同じ列を`x`にも含める成功パス（Issue #277）。
+    """`weight`と同じ列を`x`にも含める成功パス。
 
     列名の重複が許容されることの数値的な確認が目的で、cov_type間の
     挙動差を検証する趣旨ではないためclassicalのみ

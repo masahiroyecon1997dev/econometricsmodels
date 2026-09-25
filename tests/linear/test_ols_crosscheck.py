@@ -240,7 +240,7 @@ def test_cluster_g2_matches_r(crosscheck):
     `rank(Ŝ)≤G-1`のためロバストWald検定のq×q部分行列が構造的に特異になり、
     `fit()`冒頭のバリデーションが`ValidationError`で弾く（成功パスにならない。
     `test_ols_validation.py::test_cluster_count_at_most_slopes_raises_validation_error`
-    参照、Issue #289）。
+    参照）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
     df = with_cluster_groups(df, 2)

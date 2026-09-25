@@ -163,7 +163,7 @@ def test_cluster_g2_matches_statsmodels(fixtures):
     説明変数1個（q=1）に絞っている。baseline既定の3個（q=3）のままG=2にすると、
     `rank(Ŝ)≤G-1`のためロバストWald検定のq×q部分行列が構造的に特異になり、
     `fit()`冒頭のバリデーションが`ValidationError`で弾く（成功パスにならない。
-    `test_cluster_count_at_most_slopes_raises_validation_error`参照、Issue #289）。
+    `test_cluster_count_at_most_slopes_raises_validation_error`参照）。
     coef/seに加えt値・p値・信頼区間・適合度統計量も検証する
     （test-coverage-candidates.md項目72）。
     """
@@ -176,7 +176,7 @@ def test_cluster_g2_matches_statsmodels(fixtures):
 
 
 def test_weight_in_x_matches_statsmodels(fixtures):
-    """`weight`と同じ列を`x`にも含める成功パス（Issue #277）。
+    """`weight`と同じ列を`x`にも含める成功パス。
 
     列名の重複が許容されることの数値的な確認が目的で、cov_type間の
     挙動差を検証する趣旨ではないためclassicalのみ
@@ -250,8 +250,8 @@ def test_401ksubs_cluster_matches_statsmodels(fixtures):
 def test_include_intercept_false_matches_statsmodels(cov_type):
     """`include_intercept=False`が、WLSでもcov_typeによらずstatsmodelsと
     一致すること（`test_ols.py::test_include_intercept_false_matches_
-    statsmodels_robust_cov_types`と同じ観点。テスト網羅性レビュー、
-    Issue #231フェーズ4で判明したWLS側の抜け）。frozen fixtureではなく
+    statsmodels_robust_cov_types`と同じ観点。テスト網羅性レビューで
+    判明したWLS側の抜け）。frozen fixtureではなく
     OLS側と同様にstatsmodelsとの直接比較で確認する。
 
     OLS側と同じ配列API（`sm.WLS(y, x, weights=w)`）を使い、formula API

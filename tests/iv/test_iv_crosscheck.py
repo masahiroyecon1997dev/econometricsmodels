@@ -19,14 +19,14 @@ Newey-West小標本補正の慣習差がより強く出るためと考えられ�
 分けてよい」という規定に従い、`RTOL_HAC_SMALL_N`を実測最大値にマージンを載せた
 値で個別に設定する。ユーザー確認済み）。`high_variance`シナリオも同じ緩めたRTOLを
 使う（f_statistic自体は0.6%程度しか違わないが、F分布の裾でp値がその差を増幅する。
-実測相対誤差2.37%、Issue #231フェーズ4で発覚）。
+実測相対誤差2.37%）。
 
 `f_p_value`は浮動小数点アンダーフローに近い極小値（1e-9〜1e-12オーダー）になる
 ケースがあり、その領域では相対誤差比較が意味を持たない（F統計量自体は0.6%程度
 しか違わなくても、F分布の裾の確率はその差を大きく増幅する）。`f_p_value`の比較
 のみ`ATOL_F_PVALUE`（絶対誤差フロア、実測最大乖離1.523e-6にマージンを載せた値）を
 使う（他の統計量の比較式は変更しない。ユーザー確認済み）。係数ごとの`p_values`
-（Issue #232で追加）も同じ理由（t分布の裾での増幅）でhacケースにて実測乖離が
+も同じ理由（t分布の裾での増幅）でhacケースにて実測乖離が
 `RTOL_HAC`を超えることがあるため、同じ`ATOL_F_PVALUE`を使う。
 
 Note:
@@ -41,7 +41,7 @@ Note:
       `summary(diagnostics=TRUE)`が常にclassical vcovで計算する仕様のため、
       全cov_typeで同じ値になる（`benchmark/iv/references/run_ivreg.R`参照）。
     - `wu_hausman_statistic`/`wu_hausman_p_value`は全cov_typeでフィクスチャに
-      実測値がある（Issue #233。`summary(diagnostics=TRUE, vcov.=<関数>)`で
+      実測値がある（`summary(diagnostics=TRUE, vcov.=<関数>)`で
       cov_type別のロバスト共分散を診断表に反映できることが判明、
       `benchmark/iv/references/run_ivreg.R`のモジュールコメント参照）。ただしcluster
       cov_typeのみ、ivreg側のWald検定がF分布の分母自由度にクラスター数を
@@ -103,8 +103,8 @@ ATOL_F_PVALUE = TOLERANCES["iv_crosscheck"]["atol_f_pvalue"]
 # と同じ計算式に修正）。
 ATOL = TOLERANCES["iv_crosscheck"]["atol"]
 
-# p_values/wu_hausman_p_value・conf_int・wu_hausman_statistic（Issue #232/#233で
-# 追加）のhacケース専用の緩めた許容誤差（モジュールdocコメント・_tolerances.py
+# p_values/wu_hausman_p_value・conf_int・wu_hausman_statisticの
+# hacケース専用の緩めた許容誤差（モジュールdocコメント・_tolerances.py
 # 参照）。
 ATOL_HAC_PVALUE = TOLERANCES["iv_crosscheck"]["atol_hac_pvalue"]
 ATOL_HAC_CONF_INT = TOLERANCES["iv_crosscheck"]["atol_hac_conf_int"]
@@ -230,7 +230,7 @@ def _check_result(
             f"{label}/overid_p_value",
         )
 
-    # wu_hausmanは全cov_typeでフィクスチャに実測値を持つ（Issue #233）。
+    # wu_hausmanは全cov_typeでフィクスチャに実測値を持つ。
     # 境界的なサンプルサイズ（df1シナリオ等、拡張回帰がsaturatedになる）では
     # 本実装・ivreg双方がNoneを返すため、refがNoneのケースは本実装側もNoneに
     # なることだけ確認する。
@@ -287,7 +287,7 @@ def test_synthetic_matches_r(crosscheck, scenario, cov_type):
         # small_n/high_varianceのみ実測乖離が大きいため専用の緩めたRTOLを使う
         # （モジュールdocコメント参照）。high_varianceはf_statistic自体は0.6%
         # 程度しか違わないが、F分布の裾でp値がその差を増幅する（実測相対誤差
-        # 2.37%、Issue #231フェーズ4で発覚）。
+        # 2.37%）。
         rtol = (
             RTOL_HAC_SMALL_N
             if scenario in ("small_n", "high_variance")
@@ -328,7 +328,7 @@ def test_cluster_matches_r(crosscheck):
 
 def test_cluster_g2_matches_r(crosscheck):
     """クラスタ数境界（G=2ちょうど）の成功パス（`test_iv_reference.py`の同名テスト
-    と同じ再現条件、Issue #231フェーズ4）。
+    と同じ再現条件）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_g2.csv")
     df = df.with_columns((pl.int_range(pl.len()) % 2).alias("cluster_group"))
@@ -355,7 +355,7 @@ def test_cluster_g2_matches_r(crosscheck):
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 def test_multi_endog_matches_r(crosscheck, cov_type):
     """複数内生変数（`x_endog=["endog1", "endog2"]`）の成功パス
-    （`test_iv_reference.py`の同名テストと同じ理由、Issue #231フェーズ4）。
+    （`test_iv_reference.py`の同名テストと同じ理由）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
     options = IVOptions(cov_type=cov_type)
@@ -382,7 +382,7 @@ DF1_COV_TYPES = [ct for ct in COV_TYPES if ct != "hac"]
 @pytest.mark.parametrize("cov_type", DF1_COV_TYPES)
 def test_df1_matches_r(crosscheck, cov_type):
     """自由度1境界（df_resid=1ちょうど）の成功パス（`test_iv_reference.py`の
-    同名テストと同じ再現条件、Issue #235）。x_exog=[]・x_endog=['endog1']・
+    同名テストと同じ再現条件）。x_exog=[]・x_endog=['endog1']・
     instruments=['z1']（丁度識別、n=3）。augmented regressionがsaturated
     （残差自由度0）になるため、wu_hausman_statistic/wu_hausman_p_valueは
     本実装・ivreg双方でNoneになる（`_check_result`参照）。hacは対象外
@@ -407,7 +407,7 @@ def test_df1_matches_r(crosscheck, cov_type):
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 def test_card_matches_r(crosscheck_wooldridge, cov_type):
     """実データセット（Wooldridge card）。`test_iv_reference.py`の同名テストと
-    同じ理由、Issue #231フェーズ4）。
+    同じ理由。
     """
     df = load_wooldridge_dataset("card")
     options = IVOptions(cov_type=cov_type)

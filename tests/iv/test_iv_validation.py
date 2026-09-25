@@ -6,7 +6,7 @@
 オプション反映は `test_iv_api.py`、主リファレンス（linearmodels）との数値照合は
 `test_iv_reference.py`（2SLS）・`test_iv_gmm_reference.py`（GMM）、R クロスチェックは
 `test_iv_crosscheck.py`（OLS/WLS/Logit/Probit の `test_<手法>_validation.py` 等と
-同じ4分割、`refactoring-candidates-2.md` 項目68）。
+同じ4分割）。
 
 `iv_dataset` フィクスチャと `our_fit` ヘルパーは `tests/iv/conftest.py`／
 `tests/iv/_iv_helpers.py`。
@@ -170,13 +170,13 @@ def test_const_collision_with_include_intercept_raises():
 
 
 def test_const_collision_in_x_endog_with_include_intercept_raises():
-    """Issue #305: `x_exog`だけでなく`x_endog`に`"const"`という列名を含めた
+    """`x_exog`だけでなく`x_endog`に`"const"`という列名を含めた
     場合も、自動追加される定数項と衝突し`ValidationError`になること。
 
     修正前は`fit()`自体は成功していたが、構造方程式本体の`param_names`が
     `['const', 'x1', 'const']`という重複を持つことになり、`res.params`辞書
     （`dict(zip(param_names, params))`）構築時の後勝ちにより真の切片係数が
-    サイレントに失われていた（Issue #305背景参照）。
+    サイレントに失われていた（前項のテストの背景参照）。
     """
     df = pl.DataFrame(
         {
@@ -195,12 +195,12 @@ def test_const_collision_in_x_endog_with_include_intercept_raises():
 
 
 def test_const_collision_in_instruments_with_include_intercept_raises():
-    """Issue #305: `instruments`に`"const"`という列名を含めた場合も、自動
+    """`instruments`に`"const"`という列名を含めた場合も、自動
     追加される定数項と衝突し`ValidationError`になること。
 
     修正前は`fit()`自体は成功していたが、`first_stage()[endog名].param_names`
     に`"const"`が2回出現し、`OlsResults.params`構築時の後勝ちにより真の切片
-    係数が操作変数の係数でサイレントに上書きされていた（Issue #305背景参照）。
+    係数が操作変数の係数でサイレントに上書きされていた（前々項のテストの背景参照）。
     """
     df = pl.DataFrame(
         {
@@ -258,7 +258,7 @@ def test_y_empty_string_raises(iv_dataset):
 def test_null_values_raise(bad_col):
     """欠損値は`column_extraction`の責務で`ValidationError`。`y`列だけでなく
     `x_exog`/`x_endog`/`instruments`側の列でも検証する（`testing-completeness-
-    reviewer`指摘、Issue #231フェーズ4）。
+    reviewer`指摘）。
     """
     values: dict[str, list[float | None]] = {
         "y": [1.0, 2.0, 3.0, 4.0],
@@ -316,7 +316,7 @@ def test_non_finite_values_raise(bad_col, value, display):
 def test_non_numeric_dtype_raises(bad_col):
     """数値/文字列型にキャストできない列は`ValidationError`。`y`列だけでなく
     `x_exog`/`x_endog`/`instruments`側の列でも検証する（`test_null_values_raise`
-    と同じ理由、Issue #231フェーズ4）。文字列4件が全て数値キャストでnullになる
+    と同じ理由）。文字列4件が全て数値キャストでnullになる
     ため`COLUMN_HAS_MISSING_VALUES`経路（`count=4`）になる
     （`test_ols_validation.py::test_non_numeric_dtype_raises`参照）。
     """
@@ -363,9 +363,10 @@ def test_insufficient_instruments_raises(iv_dataset):
     """識別の順序条件`len(instruments) >= len(x_endog)`を満たさない場合
     `ValidationError`（`IvError::InsufficientInstruments`）。
 
-    `x_endog`・`instruments`のどちらも1要素以上（Issue #306の空リスト検証には
-    引っかからない）だが、`instruments`の数が`x_endog`に足りない組み合わせにする
-    必要がある（`test-coverage-candidates.md`項目52、Issue #306対応時に必須の修正）。
+    `x_endog`・`instruments`のどちらも1要素以上（`test_x_endog_empty_raises`・
+    `test_instruments_empty_raises`の空リスト検証には引っかからない）だが、
+    `instruments`の数が`x_endog`に足りない組み合わせにする必要がある
+    （空リスト検証対応時に必須の修正）。
     """
     with pytest.raises(
         ValidationError,
@@ -390,7 +391,7 @@ def test_insufficient_instruments_raises(iv_dataset):
     ],
 )
 def test_x_endog_empty_raises(iv_dataset, x_endog, instruments):
-    """`x_endog`が空リストの場合`ValidationError`（Issue #306）。
+    """`x_endog`が空リストの場合`ValidationError`。
 
     旧仕様では`x_endog=[]`・`instruments=[]`は実質OLSとして成功していたが、
     「そもそもIVを使用すること自体が誤り」と判断し弾く方向にした
@@ -410,7 +411,7 @@ def test_x_endog_empty_raises(iv_dataset, x_endog, instruments):
 
 
 def test_instruments_empty_raises(iv_dataset):
-    """`instruments`が空リストの場合`ValidationError`（Issue #306）。
+    """`instruments`が空リストの場合`ValidationError`。
 
     `x_endog`は非空にする（空だと`test_x_endog_empty_raises`の`x_endog`側の
     バリデーションが先に発火してしまうため）。
@@ -479,7 +480,7 @@ def test_cluster_without_col_raises(iv_dataset):
 
 def test_cluster_col_nonexistent_column_raises(iv_dataset):
     """`cluster_col`が実在しない列名を指すと`ValidationError`（OLS/WLS/Logit/
-    Probitと同じ理由、Issue #231フェーズ4）。
+    Probitと同じ理由）。
     """
     options = IVOptions(cov_type="cluster", cluster_col="does_not_exist")
     with pytest.raises(
@@ -506,7 +507,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
     """`cov_type="cluster"`でクラスター数G≤構造方程式の傾き係数の数q
     （`our_fit`既定は`x_exog=["x1"]`・`x_endog=["endog1"]`で`q=2`、ここで
     `G=2 == q=2`）は`ValidationError`
-    （`CommonError::InsufficientClustersForInference`、Issue #289）。
+    （`CommonError::InsufficientClustersForInference`）。
 
     `rank(Ŝ)≤G-1`のためG≤qでロバストWald/F（χ²）検定のq×q部分行列が構造的に
     特異になる。ドキュメント上は「2SLS/GMMともに`fit()`冒頭で構造方程式のqを
@@ -515,9 +516,9 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
     （`endog1 ~ x_exog(x1) + instruments(z1, z2)`、q=3: x1, z1, z2）の同種チェックが
     先に`FirstStageFailed`としてラップされる（`engine_pybind::fit()`が
     `compute_first_stage`を無条件に先に呼ぶため。`_error_messages.py`の
-    `FIRST_STAGE_FAILED`のコメント、`test-coverage-candidates.md`項目31参照）。
+    `FIRST_STAGE_FAILED`のコメント参照）。
     `weight_type="cluster"`の重み行列`S`（l×l）が`G<l`で特異になる別軸の問題
-    （Issue #290）とは区別する。
+    とは区別する。
     """
     cluster = pl.Series(
         "cluster_group", [i % 2 for i in range(iv_dataset.height)]
@@ -601,8 +602,7 @@ def test_perfect_multicollinearity_raises_computation_error():
     以前は手書きの極小 df（`x2 = 2*x1`）による
     `test_singular_first_stage_design_matrix_raises_computation_error` も
     併存していたが、同じ経路の確認で追加検証が無かったため、固定済みベンチマーク
-    CSV を使うこのテストへ一本化した（`refactoring-candidates-2.md` 項目54、
-    OLS の同名テストと同じ整理）。
+    CSV を使うこのテストへ一本化した（OLS の同名テストと同じ整理）。
     """
     df = pl.read_csv(DATA_DIR / "iv_perfect_multicollinearity.csv")
     with pytest.raises(ComputationError):
@@ -722,7 +722,7 @@ def test_first_stage_augment_none_raises_validation_error(iv_dataset):
     """`first_stage()`が返す`OLSResults`は、各内生変数の第一段階回帰専用に
     構築され単一のソースDataFrameを持たないため、`augment(new_data=None)`は
     `ValidationError`（`new_data`を指定した呼び出しは通常どおり動作する、
-    `docs/spec/ols-spec.md`「augment()」参照、Issue #295）。
+    `docs/spec/ols-spec.md`「augment()」参照）。
     """
     res = our_fit(iv_dataset)
     first_stage = res.first_stage()["endog1"]

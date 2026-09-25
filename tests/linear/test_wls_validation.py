@@ -52,7 +52,7 @@ def test_weight_equals_y_raises(dataset):
 
 
 def test_weight_in_x_succeeds(dataset):
-    """`weight`と同じ列を`x`にも含めても成功する（Issue #277で許容に変更）。
+    """`weight`と同じ列を`x`にも含めても成功する（許容に変更）。
 
     重みに使った列を説明変数としても含める実務上の利用例（例: 人口規模で
     重み付けしつつ人口規模自体を説明変数として含める）を許容するための緩和。
@@ -309,7 +309,7 @@ def test_predict_missing_column_raises(dataset):
     """`predict()`に`x`列が欠けた`new_data`を渡すと`ValidationError`
     （`test_ols_validation.py::test_predict_missing_column_raises`と同じ検証。
     `WLSResult::predict()`もOLSと同じ`extract_f64_column`経路を通ることの
-    確認、Issue #132）。
+    確認）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
@@ -362,7 +362,7 @@ def test_predict_null_or_non_finite_values_raise(dataset):
 
 def test_augment_column_collision_raises(dataset):
     """元データ（`new_data=None`）・`new_data`のいずれかに既に`"predicted"`列が
-    ある場合`ValidationError`（黙って上書きしない、Issue #295）。
+    ある場合`ValidationError`（黙って上書きしない）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
     df_with_predicted = df.with_columns(pl.lit(0.0).alias("predicted"))
@@ -428,7 +428,7 @@ def test_cluster_without_col_raises(dataset):
 
 def test_cluster_col_nonexistent_column_raises(dataset):
     """`cluster_col`が実在しない列名を指すと`ValidationError`
-    （`test_ols_validation.py`と同じ理由、Issue #231フェーズ4）。
+    （`test_ols_validation.py`と同じ理由）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
     options = WLSOptions(cov_type="cluster", cluster_col="does_not_exist")
@@ -488,7 +488,7 @@ def test_invalid_hac_lags_raises(dataset, hac_lags):
 
 @pytest.mark.parametrize("n_groups", [2, 3])
 def test_cluster_count_at_most_slopes_raises_validation_error(n_groups):
-    """クラスター数G≤傾き係数の数q（ここでq=3）は`ValidationError`（Issue #289、
+    """クラスター数G≤傾き係数の数q（ここでq=3）は`ValidationError`（
     OLSと同じ挙動・同じ理由。`rank(Ŝ)≤G-1`のためG≤qでロバストWald/F検定の
     q×q部分行列が構造的に特異）。G=2（G<q）とG=3（G==q）の両方を確認する。
     """

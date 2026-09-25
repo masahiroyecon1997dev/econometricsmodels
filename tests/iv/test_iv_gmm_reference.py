@@ -9,8 +9,8 @@ classical/HC0/HC1/HAC（+クラスター、baselineのみ）を`weight_type="una
 `weight_type`×`cov_type`の全組み合わせ（10シナリオ×4weight_type×6cov_type）は
 規模が大きすぎるため）。
 
-役割分担（OLS/WLS/Logit/Probit の `test_<手法>_*.py` と同じ4分割、
-`refactoring-candidates-2.md` 項目68。IV は主リファレンス数値照合のみ 2SLS/GMM で
+役割分担（OLS/WLS/Logit/Probit の `test_<手法>_*.py` と同じ4分割。
+IV は主リファレンス数値照合のみ 2SLS/GMM で
 ファイルが分かれ、api/validation は 2SLS と共通）:
     - 主リファレンス（linearmodels `IVGMM`）との厳密な数値一致: このファイル
     - `method="2sls"`の同種テスト: `test_iv_reference.py`
@@ -126,8 +126,8 @@ def _check_result(
     # コメント「Hansen Jのgmm_iterations=1...のSは...」参照）。しかしlinearmodelsの
     # `IVGMM.fit(iter_limit=1)`のj_statはこの不変性を持たず、iter_limit=2/3の値
     # （2SLSのSarganと一致）とは異なる値を返す（実測: 0.30086708530935663 vs
-    # 0.32832429087644643）。原因判明済み（`linearmodels`ソース実機調査、
-    # `refactoring-candidates-3.md`旧項目21）: `IVGMM.fit`は`iters < iter_limit`
+    # 0.32832429087644643）。原因判明済み（`linearmodels`ソース実機調査）:
+    # `IVGMM.fit`は`iters < iter_limit`
     # ループの中で初めて残差から重み行列`wmat`を再構築するため、`iter_limit=1`
     # では一度もループが実行されず`wmat`が`(Z'Z/n)⁻¹`という生の初期値のまま
     # J統計量に使われる（σ̂²スケーリング無し）。一方、本実装は
@@ -247,8 +247,7 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
     """複数内生変数（`x_endog=["endog1", "endog2"]`）の成功パス
     （`weak_instrument_f_statistics`・`overid_statistic`（Hansen J、過剰識別）が
     複数内生変数を同時に扱うことをGMMでも確認する。`test_iv_reference.py`の
-    同名テストと同じ理由、`testing-completeness-reviewer`指摘、
-    Issue #231フェーズ4）。
+    同名テストと同じ理由、`testing-completeness-reviewer`指摘）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
     options = IVOptions(
@@ -275,8 +274,7 @@ def test_kernel_hac_matches_linearmodels(fixtures):
     「HACカーネル重み＋HAC標準誤差」の組み合わせ経路が、他の`weight_type`×
     `cov_type`の組み合わせと同様に独立して機能することを確認する。
     `test_other_weight_types_match_linearmodels`はcov_type="classical"固定のため
-    この組み合わせを通らない（`testing-completeness-reviewer`指摘、
-    Issue #231フェーズ4）。
+    この組み合わせを通らない（`testing-completeness-reviewer`指摘）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     options = IVOptions(method="gmm", weight_type="kernel", cov_type="hac")
@@ -296,7 +294,7 @@ def test_kernel_hac_matches_linearmodels(fixtures):
 def test_gmm_iterations_matches_linearmodels(fixtures, n_iter):
     """`gmm_iterations`が既定値（2）以外（1: 1-step、3: iterated固定回数モード）
     でも主リファレンスと一致することを確認する（`testing-completeness-reviewer`
-    指摘、Issue #231フェーズ4）。
+    指摘）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     options = IVOptions(

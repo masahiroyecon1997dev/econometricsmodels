@@ -7,16 +7,15 @@
 の構造が完全に同一。推定器（`Tobit`）・入力データ・検証フィールドも共通なため、
 テスト本体をこのモジュールに集約し、2ファイルはフィクスチャパスと許容誤差
 （`tests/_tolerances.py`）だけを渡す薄いラッパーにする（Logit/Probit の
-`_binary_choice_checks.py` と同じ rootless import の仕組み、
-`refactoring-candidates-2.md` 項目95）。
+`_binary_choice_checks.py` と同じ rootless import の仕組み）。
 
 検証対象フィールド:
     係数・標準誤差・z値・p値・信頼区間（末尾に `sigma` を含む）・`sigma` プロパティ・
     対数尤度・AIC・BIC・全体 Wald 統計量/ p値・`n_obs`/`df_model`/`df_resid`・
     限界効果（`expected_latent`/`expected_observed`/`prob_uncensored` ×
     `overall`/`mean`/`median`）・予測値（`predict()` の3対象、フィクスチャに固定した
-    先頭行分）・新規データ（out-of-sample）予測値（`predict(new_data=...)` の3対象、
-    Issue #131）・打ち切り適合度（`censoring_fit_check()`）。
+    先頭行分）・新規データ（out-of-sample）予測値（`predict(new_data=...)` の3対象）・
+    打ち切り適合度（`censoring_fit_check()`）。
 """
 
 from __future__ import annotations
@@ -191,7 +190,7 @@ def _check_predict_new_data(
     rtol: float,
     atol: float,
 ) -> None:
-    """新規データ（out-of-sample）に対する`predict()`の数値照合（Issue #131）。
+    """新規データ（out-of-sample）に対する`predict()`の数値照合。
 
     `ref_new_x`（`run_tobit_crosscheck.R`が学習データの各スロープ列の
     「平均±1標準偏差」から組み立てた2行の新規x値）をそのまま`new_data`として渡し、

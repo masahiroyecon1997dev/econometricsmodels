@@ -16,11 +16,11 @@ fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmod
   呼び出し）限定で検証する（`generate_re_fixtures.py`の`_meta.note`・
   `generate_re_crosscheck_fixtures.py`モジュールdoc参照）。
 
-## ハウスマン統計量の符号について（Issue #350で解決済み）
+## ハウスマン統計量の符号について（解決済み）
 
 `plm::phtest`（`plm:::phtest.panelmodel`）は`abs()`を無条件適用するため常に
 非負値を返す。本実装のengine（`engine::panel::common::hausman_statistic`）も
-Issue #350でこれに合わせ`abs()`を適用するよう修正済みのため、
+これに合わせ`abs()`を適用するよう修正済みのため、
 `Var(β_FE)-Var(β_RE)`が有限標本で負定値になるケース（`small_panel`/
 `autocorrelated`等）でも`plm`と直接一致する非負値を返す。統計量・p値ともに
 `abs()`適用後の値同士の比較になるため、Python側で`abs()`を適用したり

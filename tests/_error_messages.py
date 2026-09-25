@@ -7,8 +7,7 @@
 Rust側のメッセージ文言が正本であり（`engine/src/error.rs`・
 `engine_pybind/src/column_extraction.rs`・`engine_pybind/src/validation.rs`等）、
 このファイルはそのコピー。Rust側で文言を変更した場合はこのファイルも同時に
-更新すること（`docs/planning/specs/test-coverage-candidates.md`項目26、
-複数系統でメッセージが文字通り重複しているため直書きではなく共通化した）。
+更新すること（複数系統でメッセージが文字通り重複しているため直書きではなく共通化した）。
 
 各テストは`pytest.raises(ValidationError, match=escaped(TEMPLATE, name=...))`の
 形で使う（`escaped()`は`str.format(**kwargs)`した上で`re.escape`する。メッセージ中の
@@ -283,8 +282,7 @@ HC0_NOT_SUPPORTED_RE = (
 # 第一段階回帰由来の`ValidationError`（`InsufficientObservations`・
 # `InsufficientClustersForInference`等）は常にこのラッパー経由で観測される。
 # 構造方程式自身のqを使う`TwoSlsEstimator::fit`/`GmmEstimator::fit`冒頭の同種
-# 事前チェック（Issue #289）はPython APIからは実質到達不能（第一段階のqは
+# 事前チェックはPython APIからは実質到達不能（第一段階のqは
 # 識別条件`instruments>=x_endog`により常に構造方程式のq以上のため、第一段階側の
-# チェックが必ず先に発火する）——`docs/planning/specs/test-coverage-candidates.md`
-# 項目31に記録済み、修正は別Issueで検討。
+# チェックが必ず先に発火する）。修正は別Issueで検討。
 FIRST_STAGE_FAILED = "first stage regression for endogenous variable '{endog_name}' failed: {source}"

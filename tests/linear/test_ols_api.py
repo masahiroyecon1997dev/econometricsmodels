@@ -33,8 +33,7 @@ from econometricsmodels import OLS, OLSOptions
 
 # predict() の statsmodels 照合も凍結フィクスチャ照合と同じ許容誤差
 # （`_tolerances.py` の "ols_reference"）で行う。`_assertions.assert_close`
-# （`tol = max(rtol*|ref|, atol)`）に統一し、独自の絶対誤差定数は持たない
-# （`refactoring-candidates-2.md` 項目53/56）。
+# （`tol = max(rtol*|ref|, atol)`）に統一し、独自の絶対誤差定数は持たない。
 _assert_close = partial(
     assert_close,
     rtol=TOLERANCES["ols_reference"]["rtol"],
@@ -158,7 +157,7 @@ def test_cov_type_label(dataset):
 def test_cov_type_is_case_insensitive(dataset, cov_type, expected_label):
     """`cov_type`が大文字小文字を区別しないこと（`engine_pybind`側の
     `parse_cov_type`のRust単体テストと対になる、Python API境界での確認。
-    テスト網羅性レビュー、Issue #231フェーズ4で判明した抜け。HACは
+    テスト網羅性レビューで判明した抜け。HACは
     `hac_lags`省略時の自動計算式で成功パスを確認する
     （テスト網羅性候補・項目35）。
     """

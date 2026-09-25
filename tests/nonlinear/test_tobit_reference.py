@@ -7,8 +7,7 @@ G>q 境界）+ method(bfgs/lbfgs) + Wooldridge 実データ（mroz `hours`、Exa
 係数・標準誤差・検定統計量・適合度統計量・限界効果・予測値・打ち切り適合度を
 相対誤差 1e-8 で厳密比較する（`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。
 
-役割分担（Logit/Probit の `test_<手法>_*.py` と同じ4分割、
-`refactoring-candidates-2.md` 項目68）:
+役割分担（Logit/Probit の `test_<手法>_*.py` と同じ4分割）:
     - 成功パスの構造・API・オプション反映・predict/marginal_effects/
       censoring_fit_check の構造・`ValidationError`/`ComputationError` パス:
       `test_tobit.py`
@@ -18,7 +17,7 @@ G>q 境界）+ method(bfgs/lbfgs) + Wooldridge 実データ（mroz `hours`、Exa
 `AER::tobit` は `survival::survreg` の薄いラッパーで係数・スケール・vcov・logLik は
 survreg 由来。survreg は内部で `(β, log σ)` を最適化するが、本実装が公開する
 `(β, σ)` 空間へヤコビアン `diag(1,…,1, σ)` で変換した値と実測で係数 ~3e-9・
-標準誤差 ~1e-9・対数尤度 ~1e-12 で一致する（Issue #227）。
+標準誤差 ~1e-9・対数尤度 ~1e-12 で一致する。
 
 Note:
     mroz（`hours` 生スケール）は説明変数のスケール差が大きく、信頼区間の端点が

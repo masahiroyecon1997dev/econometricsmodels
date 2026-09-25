@@ -1199,7 +1199,7 @@ mod tests {
     }
 
     /// `U_CLAMP`領域での`cost()`/`gradient()`の数学的非整合（`docs/spec/probit-spec.md`
-    /// 4章に未検証リスクとして記載されていた項目、`test-coverage-candidates.md`項目9）が
+    /// 4章に未検証リスクとして記載されていた項目）が
     /// 実際にBFGS/L-BFGSのline searchを壊すかを、near-separationデータ（真の有限MLEは
     /// 存在するが収束点付近でも一部観測の`|u|`が`U_CLAMP`を大きく超える設計）で検証する。
     ///
@@ -1374,7 +1374,7 @@ mod tests {
 
     /// `SEPARATION_PARAM_NORM_THRESHOLD=100.0`（`nonlinear/common.rs`、Logitの実測に
     /// 基づく較正値）がProbitでも同程度に機能するかを検証する一連のテスト
-    /// （`test-coverage-candidates.md`項目10、`docs/spec/probit-spec.md`4章）。
+    /// （`docs/spec/probit-spec.md`4章）。
     ///
     /// `logit.rs`の`near_separation_input_with_beta1`と同型の設計（`beta=[0,beta1,0.5]`、
     /// 同じLCG・同じ`n=200`・同じ`x1`/`x2`分布）だが、リンク関数のみ`Normal::cdf`に
@@ -2522,8 +2522,7 @@ mod tests {
     /// 前段QRへの一本化で`method`依存の検出漏れバグクラスを構造的に排除したため、
     /// `method`×`cov_type`を網羅していた旧5テスト（`..._with_bfgs_and_lbfgs` /
     /// `..._with_hc0_and_hc1` / `fit_returns_singular_opg_matrix_error_...` /
-    /// `..._with_cluster`）を本1テストへ集約した。`x2`は`x1`から生成する
-    /// （`refactoring-candidates-2.md`項目82）。
+    /// `..._with_cluster`）を本1テストへ集約した。`x2`は`x1`から生成する。
     ///
     /// 旧5テストが検証していた「`fit()`の各`cov_type`分岐での`SingularHessian`/
     /// `SingularOpgMatrix`の`?`伝播」経路のカバレッジは、`common.rs`の関数レベルテストと
@@ -3277,7 +3276,7 @@ mod tests {
         use proptest::prelude::*;
 
         // logit.rsと同じ理由でMAX_Kは小さく保つ（高kはbenchmarkのmany_regressors
-        // シナリオでカバー、test-coverage-candidates.md項目2）。
+        // シナリオでカバー）。
         const MAX_K: usize = 4;
 
         /// `probit_case_strategy`が生成するタプル: `(n, k, x_cols, beta, u, keys)`。

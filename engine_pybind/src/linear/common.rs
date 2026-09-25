@@ -77,7 +77,7 @@ pub(crate) fn mat_to_vec(mat: &faer::Mat<f64>) -> Vec<f64> {
 /// 無く`OLSOptions`をそのまま再利用していたため、`&OLSOptions`を直接受け取っていた）。
 /// 同じ理由で`IVOptions`も同名フィールド（`cov_type`/`cluster_col`/`hac_lags`/`time_col`）を
 /// 持つため、`iv::common::parse_iv_cov_type`という重複実装を廃止しこの関数をそのまま
-/// 共有する（`docs/planning/specs/refactoring-candidates.md`項目58）。
+/// 共有する。
 ///
 /// # Errors
 /// `cov_type`の文字列が既知の値のいずれでもない場合は`ValidationError`。それ以外

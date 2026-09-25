@@ -150,8 +150,8 @@
 //! - `hc0`〜`hc3`: `two_sls.rs`の`hc_cov_params`と同型（`X̂`→`Z`）。HC2/HC3のレバレッジは
 //!   `Z`から計算する自己拡張で、**GMM自体の外部参照実装での検証は不可能**（R `ivreg`が
 //!   GMMに対応していないため、`docs/spec/iv-spec.md`4章。2SLSのHC2/HC3はR `ivreg`+
-//!   `sandwich::vcovHC`で検証可能なことを実機確認済み——`docs/spec/iv-spec.md`4章、
-//!   `refactoring-candidates.md`項目12——だが、GMMはivreg非対応という別軸の制約が
+//!   `sandwich::vcovHC`で検証可能なことを実機確認済み——`docs/spec/iv-spec.md`4章——
+//!   だが、GMMはivreg非対応という別軸の制約が
 //!   残るため対象外のまま。ユーザー確認済み）。**HC1の小標本補正
 //!   `n/(n-k)`・クラスターの補正`(G/(G-1))((n-1)/(n-k))`はどちらも`l`（全操作変数の数）
 //!   ではなく`k`（構造方程式の係数の数）を使う**（rust-reviewerの指摘で修正）:
@@ -1016,7 +1016,7 @@ fn invert_spd(mat: &Mat<f64>, dim: usize, context: &str) -> Result<Mat<f64>, IvE
 /// `Z`（点推定用の`ztz`をそのまま流用）から計算する——**GMM自体の外部参照実装での検証は
 /// 不可能**（R `ivreg`が2SLSのみ対応でGMMには対応していないため、`docs/spec/iv-spec.md`
 /// 4章）。2SLSのHC2/HC3は逆にR `ivreg`+`sandwich::vcovHC`で検証可能なことを実機確認
-/// 済み（`docs/spec/iv-spec.md`4章、`refactoring-candidates.md`項目12）だが、GMMは
+/// 済み（`docs/spec/iv-spec.md`4章）だが、GMMは
 /// ivreg非対応という別軸の制約のため対象外のまま。モジュール冒頭のdocコメント
 /// 「標準誤差・検定統計量（cov_type対応）」参照。
 ///

@@ -612,7 +612,7 @@ mod tests {
         use proptest::collection;
         use proptest::prelude::*;
 
-        // OLSのMAX_K拡張（test-coverage-candidates.md項目2）と揃えた値。
+        // OLSのMAX_K拡張と揃えた値。
         const MAX_K: usize = 20;
 
         /// `wls_case_strategy`が生成するタプル: `(n, k, y, x_cols, weights, keys)`。

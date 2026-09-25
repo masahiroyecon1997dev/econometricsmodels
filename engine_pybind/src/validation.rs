@@ -98,7 +98,7 @@ pub fn validate_no_const_collision(
 /// `validate_no_duplicate_within_role`（`x`内部の重複）→`validate_no_const_collision`）。
 ///
 /// OLS/Logit/Probit/Tobitの`fit`/`build_*_input`冒頭でこの4行が完全に同一のまま
-/// 重複していたため集約した（`refactoring-candidates.md`項目61）。Tobitは本関数の
+/// 重複していたため集約した。Tobitは本関数の
 /// 呼び出し後に`validate_no_sigma_collision`を追加で呼ぶ。WLSは`weight`ロールとの
 /// 重複チェックが追加で必要なため、本関数の呼び出し後に`validate_no_duplicate_roles`で
 /// `weight`用のチェックを別途呼ぶ（`y`/`x`両方の検証を1関数にまとめたことで、`weight`

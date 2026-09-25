@@ -227,7 +227,7 @@ $$
   `gpa2`（`colgpa ~ sat + hsperc + tothrs`）のWooldridgeデータセット2つ、
   classical/HC0-3で主リファレンス（statsmodels、`test_ols_reference.py`）・
   独立実装（R、`test_ols_crosscheck.py`）の両方と照合する（従来Rクロスチェック側にしか
-  無かった実データ検証をstatsmodels側にも追加、test-coverage-candidates.md項目13・33）。
+  無かった実データ検証をstatsmodels側にも追加）。
   `wage1`はさらに地域ダミー（northcen/south/west、基準northeast）から合成したregion列
   でのクラスターロバストSE（実データでのグループ列、4グループ・不均衡サイズ）も両方で検証する。
 - `engine`側は上記の固定シナリオ単体テストに加え、property-basedテスト（`proptest`、
@@ -241,7 +241,7 @@ $$
   （`test_cluster_std_error_exceeds_classical_under_true_intra_cluster_correlation`）。
   既存のクラスター系テストは誤差i.i.d.なデータに疑似グループラベルを後付けしたもので、
   「クラスターロバストSEが真のクラスター内相関がある状況で意図通り機能するか」は未検証
-  だった（旧test-coverage-candidates.md項目12）。説明変数・誤差の両方にクラスター内相関を
+  だった。説明変数・誤差の両方にクラスター内相関を
   持たせたMoulton型DGPを使い、クラスターSEが古典的SEより明確に大きくなることを確認する
   （seed固定、実測レンジに対し十分なマージンを持たせた閾値で判定）。リファレンス実装との
   数値比較ではなく本実装内で完結した健全性チェックのため、`freeze.py`の固定CSVパイプラインは

@@ -1647,8 +1647,8 @@ mod tests {
     /// `manual_hc2_std_errors`と同一の式）通りに計算されていることを固定する、
     /// 数式レベルの細粒度回帰確認。真に独立した参照実装（R `ivreg`+
     /// `sandwich::vcovHC(type="HC2"/"HC3")`）との数値一致は
-    /// `tests/iv/test_iv_crosscheck.py`で別途検証済み（`refactoring-candidates.md`
-    /// 項目12。`linearmodels`は引き続きhc2/hc3非対応のため対象外）。
+    /// `tests/iv/test_iv_crosscheck.py`で別途検証済み
+    /// （`linearmodels`は引き続きhc2/hc3非対応のため対象外）。
     #[test]
     fn fit_computes_hc2_std_errors_matching_manual_sandwich_formula() {
         let estimator =

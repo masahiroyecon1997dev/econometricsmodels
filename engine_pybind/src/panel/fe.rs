@@ -49,7 +49,7 @@
 //! parse_cov_type`を流用せず独立実装する。IVの`cov_type`パースは元々（`iv::common::
 //! parse_iv_cov_type`という）別実装を持っていたが、`OLSOptions`/`IVOptions`が同名
 //! フィールドを持つ偶然の一致により後から`linear::common::parse_cov_type`へ統合された
-//! （`docs/planning/specs/refactoring-candidates.md`項目58）——FEはこの一致が無く
+//! ——FEはこの一致が無く
 //! （`hc0`非対応・`Hac`の意味論がFE固有）、意図的に独立実装を維持している点でIVとは事情が
 //! 異なる。
 //!

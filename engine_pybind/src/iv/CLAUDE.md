@@ -21,7 +21,7 @@ Logitと同じ2段階に分けた。
 
 `IVOptions`/`IVResult`/`build_iv_input`/`fit`は`iv/common.rs`に置く（`two_sls.rs`/`gmm.rs`のような手法ごとのファイル分割はしない）。`fit_iv`という単一エントリポイントを`IVOptions.method`（`"2sls"`/`"gmm"`）で2SLS/GMMに振り分ける設計のため、これらは系統内で真に共有されるロジックであり、`<系統>/common.rs`に置くという既存方針にそのまま合致する。
 
-**上記・下記の`parse_iv_cov_type`への言及は上記1・2段階目時点の実装経緯としてそのまま残しているが、この関数自体は`docs/planning/specs/refactoring-candidates.md`項目58対応（2026-09-20）により削除済み**。`linear::common::parse_cov_type`（OLS/WLS用）と型・matchアーム・エラーメッセージが完全同一だったため、`IVOptions`の同名フィールド（`cov_type`/`cluster_col`/`hac_lags`/`time_col`）を個々の引数として渡す形でそちらへ統合した。現在`build_iv_input`が`cov_type`をパースする箇所は`crate::linear::common::parse_cov_type`を直接呼ぶ。
+**上記・下記の`parse_iv_cov_type`への言及は上記1・2段階目時点の実装経緯としてそのまま残しているが、この関数自体は2026-09-20対応で削除済み**。`linear::common::parse_cov_type`（OLS/WLS用）と型・matchアーム・エラーメッセージが完全同一だったため、`IVOptions`の同名フィールド（`cov_type`/`cluster_col`/`hac_lags`/`time_col`）を個々の引数として渡す形でそちらへ統合した。現在`build_iv_input`が`cov_type`をパースする箇所は`crate::linear::common::parse_cov_type`を直接呼ぶ。
 
 `weak_instrument_f_statistics`（空`HashMap`）・`overid_statistic`/`overid_p_value`・`wu_hausman_statistic`/`wu_hausman_p_value`（いずれも`None`）は`fit`ではプレースホルダーのまま返す。実際の計算はそれぞれ別途行う。
 

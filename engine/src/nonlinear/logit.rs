@@ -2173,7 +2173,7 @@ mod tests {
     /// 構造的に排除したため、`method`×`cov_type`を網羅していた旧5テスト
     /// （`..._with_bfgs_and_lbfgs` / `..._with_hc0_and_hc1` / `fit_returns_singular_opg_
     /// matrix_error_...` / `..._with_cluster`）を本1テストへ集約した。`x2`は`x1`から
-    /// 生成し関係を自明にする（`refactoring-candidates-2.md`項目82）。
+    /// 生成し関係を自明にする。
     ///
     /// 旧5テストが検証していた「`fit()`の各`cov_type`分岐で`SingularHessian`/
     /// `SingularOpgMatrix`が`?`で伝播する」経路は、本入力では前段QRで先に弾かれるため
@@ -3047,8 +3047,8 @@ mod tests {
         use proptest::collection;
         use proptest::prelude::*;
 
-        // 高k（列数依存バグ・数値的頑健性）はbenchmarkのmany_regressorsシナリオ
-        // （test-coverage-candidates.md項目2）で別途カバーしているため、ここでは
+        // 高k（列数依存バグ・数値的頑健性）はbenchmarkのmany_regressorsシナリオで
+        // 別途カバーしているため、ここでは
         // MAX_Kを小さく保つ（分離を避けるための較正、下記`logit_case_strategy`参照）。
         const MAX_K: usize = 4;
 

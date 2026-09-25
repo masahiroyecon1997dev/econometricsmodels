@@ -376,8 +376,8 @@ class TobitResults:
 
         Unlike Logit/Probit, this is Tobit's own implementation (not
         the shared `dydx_and_jacobian` pattern) because the formula
-        differs per `target` (`docs/spec/nonlinear-common.md` section 6,
-        Issue #211's conclusion). Independent of the `confidence_level`
+        differs per `target` (see `docs/spec/nonlinear-common.md`
+        section 6). Independent of the `confidence_level`
         used in `fit()` (may differ from it). The constant term
         (intercept) is excluded from the output.
 

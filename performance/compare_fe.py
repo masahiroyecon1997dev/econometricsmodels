@@ -59,7 +59,7 @@ DKの`S`行列はバンド幅内の時点ペアからの寄与の和で、実効
 制約されるため）。RE（`compare_re.py`）は同じ`k=20`・`hac`で問題なく成功する
 ——RE自身のF統計量はFEの`wald_f_test`（部分行列の反転）とは異なる定義
 （変換済みyの単純平均を基準にしたSST/SSR比較）を使うため、この特異性の
-影響を受けない（`engine/src/panel/CLAUDE.md`「F統計量（Issue #337）」参照）。
+影響を受けない（`docs/spec/re-spec.md`3.5節参照）。
 FEのみ`k_sweep_cov_types=("classical",)`でk軸のcov_typeをclassicalに絞る
 （n軸はk=5固定のため`hac`込みで問題なく計測できる。`_perf_harness.py`の
 `PerfAdapter.k_sweep_cov_types`参照）。

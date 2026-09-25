@@ -51,21 +51,21 @@ opg 0.148s < hc1 0.150s < hc0 0.154s < cluster 0.162s、engine・newton）。省
 
 ## n 軸の大標本点（classical のみ n=200,000 / 1,000,000）
 
-- **n=1,000,000（seed=42）が Issue #291 の再現点**。#291 は乱数 β の
+- **n=1,000,000（seed=42）が過去の再現点**。乱数 β の
   `moderate_censoring` DGP で engine が
   `ComputationError: the Hessian is singular and cannot be inverted` になっていた
-  バグで、seed=42 では n=1,000,000 で失敗（n=500,000 までは成功）。Probit #284 と
+  バグで、seed=42 では n=1,000,000 で失敗（n=500,000 までは成功）。Probit と
   同系統。修正は `d797f9b` / `5b79ffe`（`FaerNewton` の停滞収束判定）。
   `_perf_harness._run_isolated` は `check=True` なので、**再発すれば engine の
   `.fit()` が例外を投げて benchmark ジョブが失敗する**。
-- **n=200,000 は n スケーリングのデータ点＋安価な早期警告**。#291 は seed 依存で、
+- **n=200,000 は n スケーリングのデータ点＋安価な早期警告**。このバグは seed 依存で、
   seed=1 は n=200,000 で既に破綻していたが、この guard が回す seed=42 では
-  n=200,000 は #291 を再現しない。
+  n=200,000 は再現しない。
 - **このガードの限界**（深いカバレッジは docstring 末尾「今後」および
   `docs/performance/tobit.md`「今後の検討事項」の凍結フィクスチャ + `AER::tobit` に委ねる）:
-  - **単一 seed**（42）。#291 が示した seed 感度（seed=1 は n=200,000 で破綻）は
+  - **単一 seed**（42）。このバグが示した seed 感度（seed=1 は n=200,000 で破綻）は
     `run_cli` の `--seed` がレポート全体で1つのため、この仕組みでは検査できない。
-  - **捕捉できるのは再発時の「例外」のみ**。#291 の修正が持ち込みうる新しい失敗様式
+  - **捕捉できるのは再発時の「例外」のみ**。この修正が持ち込みうる新しい失敗様式
     （非最適点で収束宣言＝silently-wrong な収束）は、finite な結果さえ返れば
     `check=True` を通ってしまうため、この性能スクリプトでは構造上検知できない。
   - **発火はリリース単位**。`benchmark_performance.yml` はタグ push（`v*`）+
@@ -90,7 +90,7 @@ quasi-Newton のパフォーマンス劣化の早期検知として、`check_rep
 （`_check_method_ratios`）で engine の `lbfgs/newton` 実行時間比を計算し、5x を
 超えたら job summary に `> [!WARNING]` を出す（CI failure にはしない。実時間の
 絶対値ではなく同一ジョブ内の比を見るため、共有ランナーの速度差に影響されない。
-#285 と同系統の劣化のガード）。
+同種の過去の劣化と同系統のガード）。
 
 使用例（リポジトリルートから）:
     # 一括実行（n軸・k軸両方、結果をJSONに保存）
@@ -202,7 +202,7 @@ def _check_method_ratios(report: dict) -> list[str]:
                 f"engine method={r['method']} が newton の {ratio:.1f}x 遅い "
                 f"(n={n:,}, k={r['k']}, classical; 想定上限 "
                 f"{_QUASI_NEWTON_RATIO_LIMIT:.0f}x)。quasi-Newton 実装の"
-                f"パフォーマンス劣化の可能性（#285 参照）。"
+                f"パフォーマンス劣化の可能性。"
             )
     return warnings
 
@@ -221,9 +221,9 @@ TOBIT_ADAPTER = PerfAdapter(
     cluster_col="cluster_group",
     # classical / cluster とも n=1,000〜100,000。
     n_sweep=(1_000, 10_000, 100_000),
-    # classical のみ追加する大標本点。n=1,000,000（seed=42）が Issue #291（大標本
-    # Hessian 特異エラー）の再現点で、修正（d797f9b / 5b79ffe）の回帰検知を担う。
-    # n=200,000 は n スケーリングのデータ点＋早期警告（seed=42 では #291 を再現
+    # classical のみ追加する大標本点。n=1,000,000（seed=42）が過去の大標本
+    # Hessian 特異エラーの再現点で、修正（d797f9b / 5b79ffe）の回帰検知を担う。
+    # n=200,000 は n スケーリングのデータ点＋早期警告（seed=42 では再現
     # しない）。全 cov_type で回すと CI 時間がかさむため classical に絞る。詳細・
     # 限界（単一 seed / 例外のみ捕捉 / リリース単位で発火）は docstring
     # 「## n 軸の大標本点」参照。

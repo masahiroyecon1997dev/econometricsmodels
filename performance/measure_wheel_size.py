@@ -1,6 +1,6 @@
 """ビルド済み wheel のサイズを記録する（パッケージ健全性）。
 
-Issue #278。`cd_release.yml` の各ビルドジョブから、`dist/` に出力された
+`cd_release.yml` の各ビルドジョブから、`dist/` に出力された
 wheel のサイズ（圧縮ダウンロード / 展開後ディスク / うち拡張モジュール
 `.so`|`.pyd`）を GitHub Actions のジョブサマリーに Markdown 表として出力する。
 **リリースをゲートしない**（fail させない）。linux x86_64 manylinux wheel に
@@ -92,7 +92,7 @@ def measure_wheel(path: Path) -> WheelSizes:
 def render_table(wheels: list[WheelSizes]) -> str:
     """計測結果を Markdown 表（ジョブサマリー向け）に整形する。"""
     lines = [
-        "## パッケージ健全性: wheel サイズ（Issue #278）",
+        "## パッケージ健全性: wheel サイズ",
         "",
         "| wheel | 圧縮（DL） | 展開後（disk） | うち .so/.pyd |",
         "|---|--:|--:|--:|",
@@ -174,7 +174,7 @@ def _emit_warning_if_regressed(
 def main(argv: list[str] | None = None) -> int:
     """CLI エントリポイント。常に 0 を返す（リリースをゲートしない）。"""
     parser = argparse.ArgumentParser(
-        description="ビルド済み wheel のサイズを記録する（Issue #278）"
+        description="ビルド済み wheel のサイズを記録する"
     )
     parser.add_argument(
         "dist_dir", type=Path, help="wheel（*.whl）が置かれたディレクトリ"

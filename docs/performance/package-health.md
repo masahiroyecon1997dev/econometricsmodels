@@ -2,8 +2,8 @@
 
 `benchmark/` と `performance/` が**手法ごとの数値精度・推定速度**をカバーするのに
 対し、このファイルは**パッケージとしての健全性**——`pip install` 時のインストール
-容量と `import econometricsmodels` の所要時間——のベースラインと記録を扱う
-（Issue #278）。実行環境依存の実測値という性質は既存の `docs/performance/` と
+容量と `import econometricsmodels` の所要時間——のベースラインと記録を扱う。
+実行環境依存の実測値という性質は既存の `docs/performance/` と
 同じ。mkdocs nav には含めない（CLAUDE.md 9 章、他の `docs/performance/*.md` と同じ）。
 
 このパッケージは GUI アプリ economicon のエンジンであり、アプリ起動時に import
@@ -55,7 +55,7 @@
 
 ## ベースライン実測（devcontainer / Python 3.14 / x86_64 / FS キャッシュ温）
 
-Issue #278 起票時の実測（wheel は `0.5.0`, cp314 manylinux_2_34 x86_64）。
+当初計測時の実測（wheel は `0.5.0`, cp314 manylinux_2_34 x86_64）。
 
 ### インストール容量
 

@@ -4,7 +4,7 @@
 
 再実行可能なスクリプトは`performance/compare_ols.py`（手法非依存の計測ハーネス`performance/_perf_harness.py` ＋ OLS固有アダプタ、コミット対象）。生の計測結果JSONはコミットしない（`.gitignore`の`docs/performance/results/*.json`参照。実行環境依存で再現性が低いため）。
 
-比較対象を statsmodels 単体に絞っている（README「Verification accuracy」表の primary reference を性能比較でも踏襲、Issue #250）。以前は pyfixest とも比較していたが、正確性検証に使わない実装を性能比較のためだけに依存させる意味が薄いため廃止した（過去の pyfixest 込みの数値は git 履歴の本ファイル旧版を参照）。
+比較対象を statsmodels 単体に絞っている（README「Verification accuracy」表の primary reference を性能比較でも踏襲）。以前は pyfixest とも比較していたが、正確性検証に使わない実装を性能比較のためだけに依存させる意味が薄いため廃止した（過去の pyfixest 込みの数値は git 履歴の本ファイル旧版を参照）。
 
 ## 最重要の教訓: engineは必ずreleaseビルドで計測する
 
@@ -18,8 +18,8 @@
 
 - **計測対象**: `OLS(...).fit()`全体（Python API呼び出し、Arrow変換・PyO3オーバーヘッド込みのエンドツーエンド。実際のユーザー体験に近い値にするため）
 - **cov_type**: classical と HAC（Newey-West）の代表2点のみ。`.claude/rules/testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」に従い、最も軽いものと最も計算コストの重いものの2点で足りるため（HC1/cluster は classical と同傾向のため省く）。HACのラグ数は両ライブラリで明示的に揃える（`hac_auto_lag(n) = 4*(n/100)^(2/9)`、engineの自動選択式と同じ）
-- **計測範囲の対称性（Issue #98）**: engine は係数・標準誤差と同じ呼び出しの中で R²・調整済みR²・対数尤度・AIC・BIC・F統計量・F検定のp値まで**常に一括計算**する。statsmodels はこれらを遅延評価（`cached_value`）にしているため、`.fit()`直後に該当プロパティへ明示アクセスして「フルセットの適合度統計量込み」で計測範囲を揃えている
-- **スレッド数を1に固定**: engine・statsmodels（numpy/BLAS）とも`RAYON_NUM_THREADS=1`等でシングルスレッドに固定する（`_perf_harness._SINGLE_THREAD_ENV`）。engine側は Issue #283 対応で faer のグローバル並列度を常時`Par::Seq`にしたため実質的に冗長だが、リファレンス実装と対称にする（両者とも逐次）目的で維持している。この選択がユーザー実環境（マルチスレッドBLAS）とどう乖離するかは下記「マルチスレッド環境での挙動」参照
+- **計測範囲の対称性**: engine は係数・標準誤差と同じ呼び出しの中で R²・調整済みR²・対数尤度・AIC・BIC・F統計量・F検定のp値まで**常に一括計算**する。statsmodels はこれらを遅延評価（`cached_value`）にしているため、`.fit()`直後に該当プロパティへ明示アクセスして「フルセットの適合度統計量込み」で計測範囲を揃えている
+- **スレッド数を1に固定**: engine・statsmodels（numpy/BLAS）とも`RAYON_NUM_THREADS=1`等でシングルスレッドに固定する（`_perf_harness._SINGLE_THREAD_ENV`）。engine側は faer のグローバル並列度を常時`Par::Seq`にしたため実質的に冗長だが、リファレンス実装と対称にする（両者とも逐次）目的で維持している。この選択がユーザー実環境（マルチスレッドBLAS）とどう乖離するかは下記「マルチスレッド環境での挙動」参照
 - **実行時間**: ウォームアップ1回 + `repeats`回実行（今回`repeats=3`）の中央値（`time.perf_counter()`）
 - **メモリ**: プロセス単位のピークRSS（`resource.getrusage(RUSAGE_SELF).ru_maxrss`）。`tracemalloc`はRust内部（faerの行列確保等）やnumpyバッファのようなネイティブメモリ確保を捕捉できないことを実測で確認したため不採用（設計行列だけで80MB相当のケースで3.8KB程度しか検知しなかった）
 - **サブプロセス隔離**: 1計測点＝1サブプロセス。同一プロセス内で連続測定するとアロケータが解放済みメモリを保持したままになり後続の計測のRSSが汚染されるため
@@ -58,7 +58,7 @@
 
 ## 考察
 
-- **classical**: 全nでengineがstatsmodelsより高速。n=1,000,000でengineはstatsmodelsの約1.9倍（0.139s vs 0.268s）、n=100,000で約2.3倍速い。小規模nではstatsmodels側のPython/formula/pandasオーバーヘッドが支配的で、engineは1ミリ秒未満に収まる。適合度統計量一式の計算を両者に含めた対称な計測（Issue #98）でもこの差は変わらない。
+- **classical**: 全nでengineがstatsmodelsより高速。n=1,000,000でengineはstatsmodelsの約1.9倍（0.139s vs 0.268s）、n=100,000で約2.3倍速い。小規模nではstatsmodels側のPython/formula/pandasオーバーヘッドが支配的で、engineは1ミリ秒未満に収まる。適合度統計量一式の計算を両者に含めた対称な計測でもこの差は変わらない。
 - **HAC**: engineが全nで一貫して約3倍速い（n=1,000,000で0.36s vs 1.19s、n=100,000で0.022s vs 0.065s）。以前の pyfixest 込みの計測では n=1,000,000 で3者ほぼ互角だったが、シングルスレッド固定・対称計測にした結果、engine優位がはっきり出た。
 - **HACのkスケーリングに気になる点が残る**: n=10,000固定でk=5→20に増やすと、engineは0.0016s→0.0123s（**約7.7倍**）、statsmodelsは0.0108s→0.0361s（**約3.3倍**）。classical（engine約3.1倍 / statsmodels約2.6倍）と比べ、HACだけengineのk方向の伸びがリファレンスより急。Newey-West計算のk方向の計算量・実装に余地がある可能性（下記「今後の検討事項」）。
 - **メモリはengineが一貫して軽い**: 全cov_type・全nでengineのピークRSSが小さい（n=1,000,000でengine 402〜440MB、statsmodels 518〜612MB）。小〜中規模nではengineが約158〜192MB、statsmodelsが約203〜243MBで、statsmodels側のimport一式（pandas等）の基礎コストの差が出ている。
@@ -66,7 +66,7 @@
 
 ## 既知の限界
 
-- **engineのマルチスレッド線形代数が多コア機・負荷下で不安定だった（Issue #283、対応済み）**: スレッド数を制限しないと、classical n=1,000,000 でengineの実行時間がシングルスレッド時の約0.13秒から、全コア並列＋背景CPU負荷下では**中央値24.9秒**（無負荷でも中央値0.24秒・単発スパイク1.0秒）に膨れ上がる現象を実測。faerが`rayon` feature既定ONでグローバル並列度が`Par::Rayon(0)`（全コア）のまま、tall-skinnyな設計行列のQR/Gramを暗黙並列化していたことが原因（コードリグレッションではない）。**対策**: `engine::parallelism::ensure_serial()`でfaerのグローバル並列度を常時`Par::Seq`に固定（全`Estimator::fit()`冒頭＋`#[pymodule]`初期化）。対応後は全コア並列＋負荷下でも0.39秒、無負荷で0.14秒（分散1/14）に安定。並列化は今後、実測で有効な箇所のみ`Par::Rayon`を明示opt-inする方針（`.claude/rules/rust-style.md`「パフォーマンス」・`engine/src/linear/CLAUDE.md`）。tall-skinny OLS では暗黙の全コア並列化が高速化しないのは OpenBLAS も同様で、statsmodels 側も1スレッドの方が速い（下記「マルチスレッド環境での挙動」）。WSL2固有か native 多コア Linux でも同程度かは未検証（傾向自体はスレッドプールのオーバーサブスクリプションの一般的挙動でOS問わず出るはず）。
+- **engineのマルチスレッド線形代数が多コア機・負荷下で不安定だった（対応済み）**: スレッド数を制限しないと、classical n=1,000,000 でengineの実行時間がシングルスレッド時の約0.13秒から、全コア並列＋背景CPU負荷下では**中央値24.9秒**（無負荷でも中央値0.24秒・単発スパイク1.0秒）に膨れ上がる現象を実測。faerが`rayon` feature既定ONでグローバル並列度が`Par::Rayon(0)`（全コア）のまま、tall-skinnyな設計行列のQR/Gramを暗黙並列化していたことが原因（コードリグレッションではない）。**対策**: `engine::parallelism::ensure_serial()`でfaerのグローバル並列度を常時`Par::Seq`に固定（全`Estimator::fit()`冒頭＋`#[pymodule]`初期化）。対応後は全コア並列＋負荷下でも0.39秒、無負荷で0.14秒（分散1/14）に安定。並列化は今後、実測で有効な箇所のみ`Par::Rayon`を明示opt-inする方針（`.claude/rules/rust-style.md`「パフォーマンス」・`engine/src/linear/CLAUDE.md`）。tall-skinny OLS では暗黙の全コア並列化が高速化しないのは OpenBLAS も同様で、statsmodels 側も1スレッドの方が速い（下記「マルチスレッド環境での挙動」）。WSL2固有か native 多コア Linux でも同程度かは未検証（傾向自体はスレッドプールのオーバーサブスクリプションの一般的挙動でOS問わず出るはず）。
 - 計測は開発コンテナ（devcontainer）上の1回のスイープ（`repeats=3`の中央値）。環境ノイズ・実行順序の影響を排除しきれていない。CI（`benchmark_performance.yml`、`ubuntu-latest`）でも同じスクリプトを回すが、共有ランナーのため数値は参考値。
 
 ## マルチスレッド環境での挙動（1スレッド固定の妥当性）
@@ -93,7 +93,7 @@
   `k=5`）では、BLAS のマルチスレッド化は statsmodels をむしろ 40〜55% 遅くし、試行間分散も
   数倍に増やす**。tall-skinny な `X'X`（`1e6×5 → 5×5` の縮約）は演算密度が低くメモリ帯域律速で、
   スレッドプールのオーバーサブスクリプション・帯域競合がオーバーヘッドとして支配的になるため
-  （engine が Issue #283 で踏んだのと同じ現象が OpenBLAS でも起きる）。つまり **1スレッド固定は
+  （engine が過去に踏んだのと同じ現象が OpenBLAS でも起きる）。つまり **1スレッド固定は
   statsmodels を不利にしているのではなく、statsmodels の最良ケースを見せている**（実マルチコア
   環境のユーザーはむしろ遅い側を体験する）。
 - **`k=20`（k軸スイープの上限）で statsmodels のマルチスレッド化がほぼ均衡、`k=50` で初めて
@@ -124,6 +124,6 @@ uv run python -m performance.render_performance_summary \
 
 ## 今後の検討事項
 
-- **engineのマルチスレッド線形代数の不安定性（Issue #283、対応済み）**: 上記「既知の限界」参照。faerのグローバル並列度を`Par::Seq`固定にして解消した。残課題は「WSL2固有か native 多コア Linux でも同程度か」の切り分け（優先度低、#283 に記録）。
+- **engineのマルチスレッド線形代数の不安定性（対応済み）**: 上記「既知の限界」参照。faerのグローバル並列度を`Par::Seq`固定にして解消した。残課題は「WSL2固有か native 多コア Linux でも同程度か」の切り分け（優先度低）。
 - **HACのkスケーリング**（上記「考察」参照）: engineのNewey-West計算（`hac_cov_params`）のk方向の計算量・実装を見る価値がある。
 - **releaseビルドでの再計測が前提**: 改善見込みの見積もりは、debugビルドの数値（誤り）ではなく本ドキュメントのreleaseビルド数値を基準にすること。

@@ -36,7 +36,7 @@ linearmodels 側の `IVGMM` + kernel が病的に遅く（n=100,000 で約40秒�
 （`docs/performance/iv.md`「計測方法」）。`hc2`/`hc3` は linearmodels 側に対応実装が
 無いため（`linearmodels_ref.py` docstring 参照）、性能比較でも扱わない。
 
-## 計測範囲の対称性（Issue #98）
+## 計測範囲の対称性
 
 engine（`engine::iv`）は係数・標準誤差と同じ `.fit()` の中で、R²・調整済みR²・
 F統計量・過剰識別検定（Sargan / Hansen J）・弱操作変数F統計量・Wu-Hausman検定・

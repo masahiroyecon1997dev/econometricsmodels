@@ -40,10 +40,10 @@
   Newey-West計算そのものの性能差を見るため。
 - **スレッド数を1に固定する**: `_run_isolated()` がワーカーサブプロセスの環境変数で
   engine・リファレンス実装（numpy/BLAS）とも1スレッドに固定する
-  （`_SINGLE_THREAD_ENV`）。engine 側は Issue #283 対応で faer のグローバル並列度を
+  （`_SINGLE_THREAD_ENV`）。engine 側は faer のグローバル並列度を
   常時 `Par::Seq` にした（`engine::parallelism::ensure_serial`）ため
   `RAYON_NUM_THREADS` は実質効かないが、リファレンス実装と対称（両者とも逐次）に
-  するため環境変数の設定は維持している。#283 以前は engine の classical
+  するため環境変数の設定は維持している。対応前は engine の classical
   n=1,000,000 が全コア並列＋負荷下で中央値24.9秒（単一スレッド比 約190倍）に
   膨れ上がる現象があった（`docs/performance/ols.md`「既知の限界」）。単一スレッドに
   揃えることで「Rustコアの計算効率 vs Python+BLAS」という比較の主目的を、
@@ -58,7 +58,7 @@
 - 単一スレッド固定のため、線形代数バックエンドのマルチスレッド化による高速化は
   この比較には現れない（多コアでの実利用の性能特性とは別軸）。ただし engine の
   設計行列は tall-skinny 中心で faer の暗黙並列化はそもそも高速化せず逆効果だった
-  ため、グローバル並列度を `Par::Seq` に固定済み（Issue #283、対応済み）。
+  ため、グローバル並列度を `Par::Seq` に固定済み（対応済み）。
   リファレンス実装（statsmodels/numpy）も同じ形状ではマルチスレッドで悪化する
   ことを実測で確認済み（`docs/performance/ols.md`「マルチスレッド環境での挙動」）。
 """
@@ -212,7 +212,7 @@ class PerfAdapter:
             したい場合に使う。cov_type は `cov_types[0]`（最も軽いもの）のみ・
             method は `default_method` のみ・library は engine のみ。`_run_isolated`
             は `check=True` なので、engine の `.fit()` が例外を投げれば benchmark
-            ジョブが失敗する（例: Tobit で Issue #291 の大標本 Hessian 特異エラーが
+            ジョブが失敗する（例: Tobit で大標本 Hessian 特異エラーが
             再発した場合）。空なら追加なし。
         check_report: `report dict -> list[str]`。全スイープ完了後に呼ばれ、
             返した文字列は `_meta["warnings"]` に格納されて job summary に

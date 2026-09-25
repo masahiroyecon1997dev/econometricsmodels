@@ -19,23 +19,23 @@
 - **cov_type**: classical と cluster の代表2点。`opg`/`hc0`/`hc1` は省略（Logit/Probit と同じ絞り方）。n=100,000・k=5 で全 cov_type を実測して確認済み（classical 0.138s < opg 0.148s < hc1 0.150s < hc0 0.154s < cluster 0.162s、newton）。cluster の疑似グループ数は 50 固定。
 - **打ち切りシナリオ**: `moderate_censoring`（左打ち切り ~35%、`benchmark/nonlinear/datasets.py` の `_TOBIT_SCENARIO_CONFIG`。Tobit テストの `BASELINE_SCENARIO` と同じ）。潜在回帰の誤差 SD（真の σ）は `_TOBIT_ERROR_SD`。
 - **スイープ軸**:
-    - n 軸（k=5 固定、newton）: classical / cluster とも n=1,000〜**100,000**。加えて **classical のみ n=200,000 / 1,000,000**（`n_sweep_engine_only`、seed=42 のみ。全 cov_type で大 n を回すと CI 時間がかさむため classical に絞る）。n=1,000,000 が Issue #291 の再現点で修正の回帰ガード、n=200,000 は追加のスケーリング点（下記「n 軸の大標本ガード」）。
+    - n 軸（k=5 固定、newton）: classical / cluster とも n=1,000〜**100,000**。加えて **classical のみ n=200,000 / 1,000,000**（`n_sweep_engine_only`、seed=42 のみ。全 cov_type で大 n を回すと CI 時間がかさむため classical に絞る）。n=1,000,000 が過去の再現点で修正の回帰ガード、n=200,000 は追加のスケーリング点（下記「n 軸の大標本ガード」）。
     - k 軸（n=10,000 固定、newton）: k=5・20、classical / cluster。
     - method 軸: `lbfgs` を代表点1つ（classical・k=5・n=100,000）で計測。**`bfgs` は除外**（engine の Tobit BFGS が n>=10,000 で `MoreThuenteLineSearch: NaN or Inf` 発散、#292。解消後に `extra_methods` へ戻す）。
-- **quasi-Newton の劣化ガード**: `compare_tobit.py` の `check_report`（`_check_method_ratios`）が engine の `lbfgs/newton` 実行時間比を計算し、5x を超えたら job summary に `> [!WARNING]` を出す（CI failure にはしない。実時間の絶対値ではなく同一ジョブ内の比なので共有ランナーの速度差に影響されない。#285 と同系統の劣化の早期検知）。
+- **quasi-Newton の劣化ガード**: `compare_tobit.py` の `check_report`（`_check_method_ratios`）が engine の `lbfgs/newton` 実行時間比を計算し、5x を超えたら job summary に `> [!WARNING]` を出す（CI failure にはしない。実時間の絶対値ではなく同一ジョブ内の比なので共有ランナーの速度差に影響されない。同種の過去の劣化と同系統の早期検知）。
 
 ## n 軸の大標本ガード（classical のみ n=200,000 / 1,000,000、seed=42）
 
-- かつて engine は乱数 β の `moderate_censoring` DGP で `ComputationError: the Hessian is singular and cannot be inverted` になっていた（seed 依存。seed=42 は n=500,000 まで成功・n=1,000,000 で失敗、seed=1 は n=200,000 で失敗。**Issue #291**、Probit の #284 と同系統）。`d797f9b` / `5b79ffe` で `FaerNewton` に停滞収束判定を入れて解消済み。
-- **n=1,000,000（seed=42）が #291 の再現点**で、再発を benchmark ジョブの失敗（`_run_isolated` は `check=True`）として捕捉する回帰ガード。実 Tobit 経路を大標本で通す唯一の自動チェック（`engine/src/nonlinear/common.rs` の単体テストは停滞判定ロジックの模擬）。n=1,000,000 は `n_iter=11` で真の β と ~1e-3、σ≈1.001、logLik≈-1.03e6 の正しい最適点へ収束することを確認済み（停滞判定の早期打ち切りではない）。
-- **n=200,000 は n スケーリングのデータ点＋安価な早期警告**。guard が回す seed=42 では #291 を再現しない（破綻していたのは seed=1）。
-- **この guard の限界**（深いカバレッジは「今後の検討事項」の凍結フィクスチャ + `AER::tobit` に委ねる）: (1) **単一 seed（42）**——`run_cli` の `--seed` はレポート全体で1つのため、#291 が示した seed 感度は検査できない。(2) **捕捉できるのは再発時の「例外」のみ**——#291 の修正が持ち込みうる silently-wrong な収束（非最適点で収束宣言）は、finite な結果さえ返れば `check=True` を通る。(3) **発火はリリース単位**——`benchmark_performance.yml` はタグ push（`v*`）+ `workflow_dispatch` のみで、solver 回帰がリリースブランチにマージされても次のタグまで捕捉されない。
+- かつて engine は乱数 β の `moderate_censoring` DGP で `ComputationError: the Hessian is singular and cannot be inverted` になっていた（seed 依存。seed=42 は n=500,000 まで成功・n=1,000,000 で失敗、seed=1 は n=200,000 で失敗。Probit と同系統）。`d797f9b` / `5b79ffe` で `FaerNewton` に停滞収束判定を入れて解消済み。
+- **n=1,000,000（seed=42）が過去の再現点**で、再発を benchmark ジョブの失敗（`_run_isolated` は `check=True`）として捕捉する回帰ガード。実 Tobit 経路を大標本で通す唯一の自動チェック（`engine/src/nonlinear/common.rs` の単体テストは停滞判定ロジックの模擬）。n=1,000,000 は `n_iter=11` で真の β と ~1e-3、σ≈1.001、logLik≈-1.03e6 の正しい最適点へ収束することを確認済み（停滞判定の早期打ち切りではない）。
+- **n=200,000 は n スケーリングのデータ点＋安価な早期警告**。guard が回す seed=42 では再現しない（破綻していたのは seed=1）。
+- **この guard の限界**（深いカバレッジは「今後の検討事項」の凍結フィクスチャ + `AER::tobit` に委ねる）: (1) **単一 seed（42）**——`run_cli` の `--seed` はレポート全体で1つのため、このバグが示した seed 感度は検査できない。(2) **捕捉できるのは再発時の「例外」のみ**——この修正が持ち込みうる silently-wrong な収束（非最適点で収束宣言）は、finite な結果さえ返れば `check=True` を通る。(3) **発火はリリース単位**——`benchmark_performance.yml` はタグ push（`v*`）+ `workflow_dispatch` のみで、solver 回帰がリリースブランチにマージされても次のタグまで捕捉されない。
 
 ## 結果（engine 単独）
 
 - **正の出力**: `benchmark_performance.yml` がタグ push（`v*`）ごとに `compare_tobit.py` → `render_performance_summary.py` を回した job summary。共有ランナーのため数値はぶれる（`ols.md`「計測方法」と同じ前提）。
-- **代表値**: 下記「[アーカイブ]」節の各表の **engine 列**（n=1,000〜1,000,000、k=5・20、newton / lbfgs）。py4etrics 撤去は engine 側の計算経路に影響しないため、engine 側が変わらない限りこれらが現行の代表値。要点: n=100,000・classical・newton で ~0.15s / ~244MB、n スケーリングは概ね線形、lbfgs は newton の ~3.2x（`_check_method_ratios` の上限 5x 内）、n=1,000,000 も `n_iter=11` で正しい最適点へ収束（#291 解消）。
-- **1スレッド固定の解釈**: engine のマルチスレッド線形代数が多コア機・負荷下で不安定になる問題（#283）のため本計測は1スレッドに固定しており、数値は「シングルスレッドでの計算コア効率」。多コアでの実利用の性能特性とは別軸（`ols.md`「既知の限界」と共通）。
+- **代表値**: 下記「[アーカイブ]」節の各表の **engine 列**（n=1,000〜1,000,000、k=5・20、newton / lbfgs）。py4etrics 撤去は engine 側の計算経路に影響しないため、engine 側が変わらない限りこれらが現行の代表値。要点: n=100,000・classical・newton で ~0.15s / ~244MB、n スケーリングは概ね線形、lbfgs は newton の ~3.2x（`_check_method_ratios` の上限 5x 内）、n=1,000,000 も `n_iter=11` で正しい最適点へ収束（過去のHessian特異バグは解消済み）。
+- **1スレッド固定の解釈**: engine のマルチスレッド線形代数が多コア機・負荷下で不安定になる問題（対応済み）のため本計測は1スレッドに固定しており、数値は「シングルスレッドでの計算コア効率」。多コアでの実利用の性能特性とは別軸（`ols.md`「既知の限界」と共通）。
 
 ## 再現方法
 
@@ -49,10 +49,10 @@ uv run python -m performance.render_performance_summary \
 
 ## 今後の検討事項
 
-- **~~engineのTobitのHessian特異化~~（#291、解消済み）**: `d797f9b` / `5b79ffe` で `FaerNewton` の収束判定に停滞検出（`RegularizedStep::NoProgress` + 勾配停滞 + 目標近傍 + コストHessian正定値）を追加。n 軸に engine 単独の n=200,000 / 1,000,000 行を追加済み（回帰ガード）。残る派生検討: (a) `NEWTON_STALL_GRAD_FACTOR` の絶対閾値を Newton 減少量 `√(gᵀH⁻¹g)` ベースのスケール不変な基準に置き換える（`docs/spec/nonlinear-common.md` 9章）、(b) 大 n の凍結フィクスチャ + `AER::tobit` 数値クロスチェック（正確性は scipy 数値微分MLE との照合で logLik 相対誤差 2.6e-13 を確認済みのため優先度は低い）。
+- **~~engineのTobitのHessian特異化~~（解消済み）**: `d797f9b` / `5b79ffe` で `FaerNewton` の収束判定に停滞検出（`RegularizedStep::NoProgress` + 勾配停滞 + 目標近傍 + コストHessian正定値）を追加。n 軸に engine 単独の n=200,000 / 1,000,000 行を追加済み（回帰ガード）。残る派生検討: (a) `NEWTON_STALL_GRAD_FACTOR` の絶対閾値を Newton 減少量 `√(gᵀH⁻¹g)` ベースのスケール不変な基準に置き換える（`docs/spec/nonlinear-common.md` 9章）、(b) 大 n の凍結フィクスチャ + `AER::tobit` 数値クロスチェック（正確性は scipy 数値微分MLE との照合で logLik 相対誤差 2.6e-13 を確認済みのため優先度は低い）。
 - **engineのTobit BFGSが発散する**（#292）: n>=10,000 で `MoreThuenteLineSearch: NaN or Inf`。解消後に method軸へ bfgs を戻す。
-- **engineのquasi-Newton（L-BFGS）が遅い**（#285）: Logit/Probit と共通。Tobit では lbfgs/newton ~3x（probit の ~7x よりは軽い）。`_check_method_ratios` が 5x 超で job summary に警告する。
-- **engineのマルチスレッド線形代数の不安定性**（#283）: OLSと共通。
+- **engineのquasi-Newton（L-BFGS）が遅い**: Logit/Probit と共通。Tobit では lbfgs/newton ~3x（probit の ~7x よりは軽い）。`_check_method_ratios` が 5x 超で job summary に警告する。
+- **engineのマルチスレッド線形代数の不安定性**: OLSと共通。
 - **releaseビルドでの再計測が前提**: 改善見込みの見積もりは、debugビルドの数値（誤り）ではなく本ドキュメントのreleaseビルド数値を基準にすること。
 - **Tobit のライブ性能リファレンス**: 現状は engine 単独。将来 statsmodels がネイティブ Tobit を持つ、またはインプロセス計測できる保守された実装が現れた場合は n 軸・method 軸のリファレンスとして再検討する（py4etrics 撤去の経緯は冒頭ノート）。
 
@@ -72,9 +72,9 @@ uv run python -m performance.render_performance_summary \
 - **cov_type**: classical と cluster の代表2点。`opg`/`hc0`/`hc1` は省略（Logit/Probit と同じ絞り方）。cluster の疑似グループ数は 50 固定。
 - **k 軸は engine 単独**（`PerfAdapter.k_sweep_libraries=("engine",)`）: py4etrics の数値微分ヘッシアンは k に対してコストが崖状に悪化し、k=5 は約1.5秒だが k>=8 で事実上フリーズする（n=10,000 でも実機確認）。k 軸のスケーリング比較にならないため engine のみ回す（n 軸・method 軸では py4etrics を比較対象に使う）。
 - **method（オプティマイザ）**: engine・py4etrics とも Newton-Raphson（`method="newton"`）で n/k スイープを回す。加えて `lbfgs` を **method 軸**として代表点1つ（cov_type=classical, k=5, n=100,000）で計測する。**`bfgs` は計測対象外**: engine の Tobit BFGS 経路は n>=10,000 で `MoreThuenteLineSearch: NaN or Inf` により発散する（#292）。解消後に戻す。
-- **quasi-Newton の劣化ガード**: `compare_tobit.py` の `check_report`（`_check_method_ratios`）が engine の `lbfgs/newton` 実行時間比を計算し、5x を超えたら job summary に `> [!WARNING]` を出す（CI failure にはしない。実時間の絶対値ではなく同一ジョブ内の比なので共有ランナーの速度差に影響されない。#285 と同系統の劣化の早期検知）。
+- **quasi-Newton の劣化ガード**: `compare_tobit.py` の `check_report`（`_check_method_ratios`）が engine の `lbfgs/newton` 実行時間比を計算し、5x を超えたら job summary に `> [!WARNING]` を出す（CI failure にはしない。実時間の絶対値ではなく同一ジョブ内の比なので共有ランナーの速度差に影響されない。同種の過去の劣化と同系統の早期検知）。
 - **打ち切りシナリオ**: `moderate_censoring`（左打ち切り ~35%、`benchmark/nonlinear/datasets.py` の `_TOBIT_SCENARIO_CONFIG`。Tobit テストの `BASELINE_SCENARIO` と同じ）。潜在回帰の誤差 SD（真の σ）は `_TOBIT_ERROR_SD`。
-- **スイープ軸**: n軸（k=5固定。engine/py4etrics 比較は n=1,000〜**100,000**、加えて **engine 単独で n=200,000 / 1,000,000**（`n_sweep_engine_only`、cov_type=classical・newton・seed=42 のみ。n=1,000,000 が Issue #291 の再現点で修正の回帰ガード、n=200,000 は追加のスケーリング点。下記「既知の限界」参照）、k軸（n=10,000固定、k=5・20、engine のみ）、method軸（上記）。
+- **スイープ軸**: n軸（k=5固定。engine/py4etrics 比較は n=1,000〜**100,000**、加えて **engine 単独で n=200,000 / 1,000,000**（`n_sweep_engine_only`、cov_type=classical・newton・seed=42 のみ。n=1,000,000 が過去の再現点で修正の回帰ガード、n=200,000 は追加のスケーリング点。下記「既知の限界」参照）、k軸（n=10,000固定、k=5・20、engine のみ）、method軸（上記）。
 
 計測環境: devcontainer（12論理コア、シングルスレッド固定）、`repeats=3`、seed=42、scenario=moderate_censoring、release build。n軸 n≤100,000・k軸・method軸は 2026-09-06、engine 単独の n=200,000 / 1,000,000 行は 2026-09-07 のローカル実測（CI の job summary は毎タグ push で更新され、共有ランナーのため数値はぶれる）。
 
@@ -92,7 +92,7 @@ uv run python -m performance.render_performance_summary \
 | 200,000 | 0.2530s / 229MB | -（engine 単独） | - |
 | 1,000,000 | 5.9000s / 461MB | -（engine 単独） | - |
 
-engine 単独の 200,000 / 1,000,000 行は Issue #291 の回帰ガード（下記「既知の限界」）。n=1,000,000 は `n_iter=11` で真の β と ~1e-3、σ≈1.001、logLik≈-1.03e6 の正しい最適点へ収束することを確認済み（停滞判定の早期打ち切りではない）。
+engine 単独の 200,000 / 1,000,000 行は過去のバグの回帰ガード（下記「既知の限界」）。n=1,000,000 は `n_iter=11` で真の β と ~1e-3、σ≈1.001、logLik≈-1.03e6 の正しい最適点へ収束することを確認済み（停滞判定の早期打ち切りではない）。
 
 #### cluster
 
@@ -130,10 +130,10 @@ engine の `lbfgs/newton` 比は約 3.2x で、`_check_method_ratios` の想定�
 - **cluster（newton）**: 同傾向（n=100,000 で約85倍）。engine の cluster は 10,000→100,000 で ~10x で classical とほぼ同じ伸び。ピーク RSS は engine 260MB vs py4etrics 269MB で同等。
 - **解析的微分 vs 数値微分の寄与**: この ~80〜200倍差の主因は Rust 化だけでなく、engine が Tobit 対数尤度のスコア・ヘッシアンを**解析式**で持つのに対し、py4etrics（`GenericLikelihoodModel`）が**有限差分**で近似すること。k を増やすと py4etrics の数値ヘッシアンは O(k²) 回の対数尤度評価を要し、k=5→8 で約1.5秒→150秒超に崖状に悪化する（k 軸を engine 単独にした理由）。
 - **k スケーリング（engine, newton）**: classical k=5→20（k 4倍）で 0.0177s→0.0536s（~3.0x）、cluster も 0.0153s→0.0592s（~3.9x）。k 方向は 4倍のパラメータ増に対し 3〜4倍で、概ね線形。
-- **method軸**: engine の lbfgs（0.494s）は newton（0.154s）の **約3.2倍**。probit の #285（newton 比 ~7倍）ほど極端ではないが同系統の遅さで、quasi-Newton 実装に改善余地がある。py4etrics の lbfgs（2.52s）は自身の newton（12.05s）より速い（数値ヘッシアンが不要なため）。**bfgs は engine が n>=10,000 で発散する（#292）ため計測対象外**。
-  - **Issue #285（`tol`の観測数`n`正規化、2026-09-12）の続報（このbullet自体は当時のpy4etrics比較の凍結記録だが、engine単独の数値は現行値として読み替える）**: `bfgs`/`lbfgs`の`tol`を観測数`n`で正規化する変更（詳細は[`logit.md`](./logit.md)「考察」参照）はTobitにも共通で適用される。単体ワーカーでのスポット計測（`performance.compare_tobit --worker`、cov_type=classical・k=5・n=100,000、`repeats=3`の中央値）: **lbfgs 0.17s**（旧0.49sから約2.9倍改善、newton 0.15sとほぼ同オーダーまで縮小）。**bfgs は引き続き#292未解決のため計測対象外**。
+- **method軸**: engine の lbfgs（0.494s）は newton（0.154s）の **約3.2倍**。probit（newton 比 ~7倍）ほど極端ではないが同系統の遅さで、quasi-Newton 実装に改善余地がある。py4etrics の lbfgs（2.52s）は自身の newton（12.05s）より速い（数値ヘッシアンが不要なため）。**bfgs は engine が n>=10,000 で発散する（#292）ため計測対象外**。
+  - **`tol`の観測数`n`正規化（2026-09-12）の続報（このbullet自体は当時のpy4etrics比較の凍結記録だが、engine単独の数値は現行値として読み替える）**: `bfgs`/`lbfgs`の`tol`を観測数`n`で正規化する変更（詳細は[`logit.md`](./logit.md)「考察」参照）はTobitにも共通で適用される。単体ワーカーでのスポット計測（`performance.compare_tobit --worker`、cov_type=classical・k=5・n=100,000、`repeats=3`の中央値）: **lbfgs 0.17s**（旧0.49sから約2.9倍改善、newton 0.15sとほぼ同オーダーまで縮小）。**bfgs は引き続き#292未解決のため計測対象外**。
   - **Issue #343（`FaerLbfgs`自前実装への置き換え）**: `Method::Lbfgs`をargmin組み込みLBFGSから自前実装`FaerLbfgs`に置き換えた（詳細は`engine/src/nonlinear/CLAUDE.md`参照、同Issueの本来の目的はIssue #344で捕捉したTobitの暴走ケースの解消）。単体ワーカーでの再計測（同条件）: **lbfgs 0.13s**（0.17sから約1.3倍改善、newtonとの差がさらに縮小）。Logit（n=1,000,000）は約32倍・Probit（n=100,000）は逆に約2倍の後退という異なる結果になっており（詳細は各`docs/performance/{logit,probit}.md`「method軸」参照）、`FaerLbfgs`の1回目line search初期ステップ幅の設計に`n`・データセット依存の未解決課題が残っている。
-- **改善余地**: engine の絶対性能は n=100,000 で 0.15〜0.16秒と実用上問題ない。newton の大標本での Hessian 特異（#291）は `d797f9b` / `5b79ffe`（`FaerNewton` の停滞収束判定）で解消済みで、engine 単独 n=1,000,000（seed=42）の行がその回帰ガード（下記「既知の限界」に限界つき）。継続課題は quasi-Newton（lbfgs ~3.2x・bfgs 発散 #292）のみ。cluster 経路は classical とほぼ同じ伸びで、現時点で特段の懸念はない。
+- **改善余地**: engine の絶対性能は n=100,000 で 0.15〜0.16秒と実用上問題ない。newton の大標本での Hessian 特異は `d797f9b` / `5b79ffe`（`FaerNewton` の停滞収束判定）で解消済みで、engine 単独 n=1,000,000（seed=42）の行がその回帰ガード（下記「既知の限界」に限界つき）。継続課題は quasi-Newton（lbfgs ~3.2x・bfgs 発散 #292）のみ。cluster 経路は classical とほぼ同じ伸びで、現時点で特段の懸念はない。
 
 ### 既知の限界（当時）
 
@@ -141,4 +141,4 @@ engine の `lbfgs/newton` 比は約 3.2x で、`_check_method_ratios` の想定�
 - **engine 単独 n=200,000 / 1,000,000 の位置づけ**（`n_sweep_engine_only`、cov_type=classical・newton・seed=42）: 現行の「n 軸の大標本ガード」節に移設。
 - **k軸が engine 単独・k は 20 まで**: py4etrics の数値微分ヘッシアンが k>=8 で破綻するため k 軸は engine のみ（「計測方法（当時）」参照）。
 - **method軸に bfgs を含まない**: engine の Tobit BFGS 経路が n>=10,000 で発散する（**Issue #292**）。#292 解消後に `compare_tobit.py` の `extra_methods` へ戻す。
-- その他は `ols.md`「既知の限界」と共通。特に **engineのマルチスレッド線形代数が多コア機・負荷下で不安定になる問題**（#283）のため、本計測はengine・py4etricsとも1スレッドに固定しており、数値は「シングルスレッドでの計算コア効率」である。
+- その他は `ols.md`「既知の限界」と共通。特に **engineのマルチスレッド線形代数が多コア機・負荷下で不安定になる問題**のため、本計測はengine・py4etricsとも1スレッドに固定しており、数値は「シングルスレッドでの計算コア効率」である。

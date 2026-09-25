@@ -2,14 +2,13 @@
 
 pytest が各テストファイルのディレクトリ（`tests/linear/`）を `sys.path` に載せる
 ため、`from _ols_helpers import ...` の裸importで解決できる（`tests/_helpers.py`
-と同じ仕組みの、系統ディレクトリ版）。関心事分割（`refactoring-candidates-2.md`
-項目68）で `test_ols.py` を validation/api/reference に分けた際、ライブ statsmodels
+と同じ仕組みの、系統ディレクトリ版）。関心事分割で `test_ols.py` を
+validation/api/reference に分けた際、ライブ statsmodels
 照合（reference）と predict() の statsmodels 照合（api）の双方が同じラッパーを
 使うため、重複を避けてここへ集約した。
 
 許容誤差は独自の絶対誤差定数を持たず、`_tolerances.py` の `"ols_reference"`
-（`_assertions.assert_close` 経由、`tol = max(rtol*|ref|, atol)`）で統一する
-（`refactoring-candidates-2.md` 項目53/56）。
+（`_assertions.assert_close` 経由、`tol = max(rtol*|ref|, atol)`）で統一する。
 """
 
 from __future__ import annotations

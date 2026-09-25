@@ -7,9 +7,9 @@ classical/HC0-3/HAC + クラスター(baselineのみ) + 実データ（401ksubs�
 （`.claude/rules/testing-policy.md`「許容誤差」の基本方針。`test_ols_reference.py`
 と同じ方針）。クラスター系（cluster/cluster_imbalanced/cluster_g2）は従来
 係数・標準誤差のみだったが、t値・p値・信頼区間・適合度統計量まで
-`_check_result`で検証するよう拡張した（OLS側項目28対応の横展開、
-test-coverage-candidates.md項目72。あわせて`generate_wls_fixtures.py`の
-`_run_cluster_case`に`use_t=True`が指定されていなかった不備も修正済み）。
+`_check_result`で検証するよう拡張した（OLS側の同種の拡張を横展開したもの。
+あわせて`generate_wls_fixtures.py`の`_run_cluster_case`に`use_t=True`が
+指定されていなかった不備も修正済み）。
 加えて `include_intercept=False` は凍結フィクスチャではなく
 ライブ statsmodels（`sm.WLS`）との直接比較で確認する。
 
@@ -123,8 +123,8 @@ def test_cluster_matches_statsmodels(fixtures):
     """クラスターロバストSE。`generate_wls_fixtures.py`と同じ疑似グループ
     （行番号%10）を再現する。統計的な意味はなく、実装の動作確認用のため
     `baseline`シナリオのみ。coef/seだけでなくt値・p値・信頼区間・適合度統計量
-    まで`_check_result`で検証する（従来coef/seのみだった非対称の解消、OLS側
-    項目28対応の横展開、test-coverage-candidates.md項目72）。
+    まで`_check_result`で検証する（従来coef/seのみだった非対称の解消、OLS側の
+    同種の拡張を横展開したもの）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, 10)
@@ -141,8 +141,7 @@ def test_cluster_imbalanced_matches_statsmodels(fixtures):
 
     均等サイズの疑似グループ（行番号%10）だけでは見逃す、実務で起こりやすい
     グループサイズの偏りを持つケース（`testing-policy.md`「テスト用データセット」3.）。
-    coef/seに加えt値・p値・信頼区間・適合度統計量も検証する
-    （test-coverage-candidates.md項目72）。
+    coef/seに加えt値・p値・信頼区間・適合度統計量も検証する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     groups = imbalanced_cluster_groups(df.height)
@@ -164,8 +163,7 @@ def test_cluster_g2_matches_statsmodels(fixtures):
     `rank(Ŝ)≤G-1`のためロバストWald検定のq×q部分行列が構造的に特異になり、
     `fit()`冒頭のバリデーションが`ValidationError`で弾く（成功パスにならない。
     `test_cluster_count_at_most_slopes_raises_validation_error`参照）。
-    coef/seに加えt値・p値・信頼区間・適合度統計量も検証する
-    （test-coverage-candidates.md項目72）。
+    coef/seに加えt値・p値・信頼区間・適合度統計量も検証する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
     df = with_cluster_groups(df, 2)

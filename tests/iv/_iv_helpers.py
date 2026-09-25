@@ -3,8 +3,8 @@
 pytest が各テストファイルのディレクトリ（`tests/iv/`）を `sys.path` に載せる
 ため、`from _iv_helpers import ...` の裸importで解決できる（`tests/_helpers.py`
 と同じ仕組みの、系統ディレクトリ版。`tests/linear/_ols_helpers.py` に対応）。
-関心事分割（`refactoring-candidates-2.md` 項目68）で `test_iv.py` を api/
-validation に分けた際、`_our_fit` を両方が使うためここへ集約した。
+関心事分割で `test_iv.py` を api/validation に分けた際、`_our_fit` を
+両方が使うためここへ集約した。
 """
 
 from __future__ import annotations

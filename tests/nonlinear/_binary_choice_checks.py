@@ -198,10 +198,10 @@ def check_raise_on_non_convergence_false_returns_result_without_raising(
     での配線確認。例外を送出する既定挙動側は
     `test_<method>_validation.py::test_non_convergence_raises_computation_error_with_tiny_max_iter`）。
 
-    `cov_type`は`classical`以外（`opg`/`hc0`/`hc1`/`cluster`）も検証する
-    （test-coverage-candidates.md項目4）。打ち切り点（収束未満のパラメータ）
-    でのHessian/スコア評価はcov_typeの分岐によって経由する行列演算が異なる
-    ため、想定外の例外を投げず、標準誤差が有限値であることまで確認する。
+    `cov_type`は`classical`以外（`opg`/`hc0`/`hc1`/`cluster`）も検証する。
+    打ち切り点（収束未満のパラメータ）でのHessian/スコア評価はcov_typeの
+    分岐によって経由する行列演算が異なるため、想定外の例外を投げず、
+    標準誤差が有限値であることまで確認する。
     """
     kwargs = {
         "max_iter": 1,
@@ -554,10 +554,10 @@ def check_null_values_raise(estimator_cls):
 
 def check_non_finite_values_raise(estimator_cls):
     """`y`/`x`にNaN・無限大が含まれる場合`ValidationError`
-    （OLSの`test_non_finite_values_raise`と同型、`test-coverage-candidates.md`
-    項目40関連。null（`check_null_values_raise`）とNaN/Inf は
-    `column_extraction.rs`内で別ロジックのため個別に確認する。`predict()`側は
-    `check_predict_null_or_non_finite_values_raise`が`x1`をカバー済み）。
+    （OLSの`test_non_finite_values_raise`と同型。null（`check_null_values_raise`）
+    とNaN/Inf は`column_extraction.rs`内で別ロジックのため個別に確認する。
+    `predict()`側は`check_predict_null_or_non_finite_values_raise`が`x1`を
+    カバー済み）。
     """
     df_y_nan = pl.DataFrame(
         {"y": [0.0, float("nan"), 1.0], "x1": [1.0, 2.0, 3.0]}
@@ -875,8 +875,7 @@ def check_cluster_count_at_most_slopes_raises_validation_error(
 
 def check_cluster_without_col_raises(dataset, estimator_cls, options_cls):
     """`cov_type="cluster"`なのに`cluster_col`未指定の場合`ValidationError`
-    （OLS/WLS/IVと同じ検証、共通化された経路。test-coverage-candidates.md
-    項目5）。
+    （OLS/WLS/IVと同じ検証、共通化された経路）。
     """
     options = options_cls(cov_type="cluster")
     with pytest.raises(
@@ -965,7 +964,7 @@ def check_complete_separation_raises_computation_error(
     """真の完全分離（合成データセット、`y`が`x1`の符号のみで決定論的に決まり
     有限MLEが存在しない）は数値比較の対象外（`testing-policy.md`「テストの3系統」）。
     想定エラー（`ComputationError`）が発生することのみを確認する。`method`
-    （newton/bfgs/lbfgs）でparametrizeする（test-coverage-candidates.md項目7）。
+    （newton/bfgs/lbfgs）でparametrizeする。
 
     実際に発生する例外の**サブタイプはmethodによって異なる**（実測: newton/lbfgsは
     `SeparationSuspected`、bfgsは`max_iter`到達による`NonConvergence`になりやすい）
@@ -997,15 +996,14 @@ def check_complete_separation_with_raise_on_non_convergence_false(
 ):
     """完全分離データ（`check_complete_separation_raises_computation_error`と
     同じフィクスチャ）で`raise_on_non_convergence=False`を指定した場合の挙動を
-    固定する（test-coverage-candidates.md項目7の派生確認、testing-completeness-
-    reviewer指摘）。
+    固定する（testing-completeness-reviewer指摘）。
 
     `SeparationSuspected`検出は`raise_on_non_convergence=False`のとき例外を
     送出せず`converged=False`のまま結果を返すのみだが（`docs/spec/logit-spec.md`
     参照）、収束判定とは独立した`SingularHessian`等の別エラー経路は
-    `raise_on_non_convergence`に関わらず発生しうる（test-coverage-candidates.md
-    項目4で確認したTobitと同型の挙動。実測ではLogit×bfgsのみこの経路に入り
-    `SingularHessian`を送出する）。そのため、この関数は「例外を投げず結果を
+    `raise_on_non_convergence`に関わらず発生しうる（Tobitと同型の挙動。
+    実測ではLogit×bfgsのみこの経路に入り`SingularHessian`を送出する）。
+    そのため、この関数は「例外を投げず結果を
     返した場合は標準誤差が有限値であること」のみを保証し、`ComputationError`が
     飛ぶこと自体は許容する（メソッドごとに収束の軌道が異なり、どちらの経路に
     入るかは実装の詳細のため）。

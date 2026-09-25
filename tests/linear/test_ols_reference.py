@@ -10,15 +10,13 @@
    （cluster/cluster_imbalanced/cluster_g2/wage1の地域クラスター）は従来
    係数・標準誤差のみだったが、t値・p値・信頼区間・適合度統計量まで
    `_check_result`で検証するよう拡張した（従来Rクロスチェック側にしか
-   無かった検証範囲を主リファレンス側にも追加、
-   test-coverage-candidates.md項目28）。Wooldridge実データ
+   無かった検証範囲を主リファレンス側にも追加した）。Wooldridge実データ
    （wage1/gpa2、classical/HC0-3 + wage1のみ地域クラスター）も同じフィクスチャ
    経由で検証する（従来Rクロスチェック側にしか無かった実データ検証を主
-   リファレンス側にも追加、test-coverage-candidates.md項目13・33）。全シナリオの
+   リファレンス側にも追加した）。全シナリオの
    `predict()`（学習データに対するfitted値、baselineシナリオのみout-of-sample
    predicted値）も同じフィクスチャ経由で検証する（従来Rクロスチェック側にしか
-   無かったpredict()の網羅的検証を主リファレンス側にも追加、
-   test-coverage-candidates.md項目17）。
+   無かったpredict()の網羅的検証を主リファレンス側にも追加した）。
 2. **ライブ statsmodels との照合**: 共有 `dataset` フィクスチャ（n=100）で
    毎回 statsmodels を実行し、係数・標準誤差・R²・F統計量・`include_intercept`
    の扱いが一致することを確認する（凍結フィクスチャが対象にしない
@@ -150,8 +148,7 @@ def test_predict_none_matches_frozen_statsmodels(fixtures, scenario):
     statsmodels `fittedvalues`と全シナリオで一致すること。`test_ols_api.py`の
     同種テストは1データセットのみのライブ照合（スモーク級）のため、こちらは
     Rクロスチェック側（`test_ols_crosscheck.py::test_predict_none_matches_r_
-    fitted_values`）と同じ網羅性で主リファレンス側を検証する
-    （test-coverage-candidates.md項目17）。
+    fitted_values`）と同じ網羅性で主リファレンス側を検証する。
     """
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
@@ -199,8 +196,7 @@ def test_cluster_matches_statsmodels(fixtures):
     """クラスターロバストSE。`generate_ols_fixtures.py`と同じ疑似グループ
     （行番号%10）を再現する。統計的な意味はなく、実装の動作確認用のため
     `baseline`シナリオのみ。coef/seだけでなくt値・p値・信頼区間・適合度統計量
-    まで`_check_result`で検証する（従来coef/seのみだった非対称の解消、
-    test-coverage-candidates.md項目28）。
+    まで`_check_result`で検証する（従来coef/seのみだった非対称の解消）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, 10)
@@ -215,8 +211,7 @@ def test_cluster_imbalanced_matches_statsmodels(fixtures):
 
     均等サイズの疑似グループ（行番号%10）だけでは見逃す、実務で起こりやすい
     グループサイズの偏りを持つケース（`testing-policy.md`「テスト用データセット」3.）。
-    coef/seに加えt値・p値・信頼区間・適合度統計量も検証する
-    （test-coverage-candidates.md項目28）。
+    coef/seに加えt値・p値・信頼区間・適合度統計量も検証する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     groups = imbalanced_cluster_groups(df.height)
@@ -237,7 +232,7 @@ def test_cluster_g2_matches_statsmodels(fixtures):
     `fit()`冒頭のバリデーションが`ValidationError`で弾く（成功パスにならない。
     `test_ols_validation.py::test_cluster_count_at_most_slopes_raises_`
     `validation_error`参照）。coef/seに加えt値・p値・信頼区間・
-    適合度統計量も検証する（test-coverage-candidates.md項目28）。
+    適合度統計量も検証する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
     df = with_cluster_groups(df, 2)
@@ -258,8 +253,7 @@ def test_cluster_ill_conditioned_matches_statsmodels(fixtures, scenario):
     クラスターは従来`baseline`シナリオのみで、悪条件・多重共線性との組み合わせ
     での数値的挙動が未検証だった。均等な疑似グループ（行番号%10）のみ確認する
     （グルーピングパターン自体の網羅性は`test_cluster_matches_statsmodels`等
-    `baseline`シナリオで確認済みのため重複させない、
-    test-coverage-candidates.md項目29）。
+    `baseline`シナリオで確認済みのため重複させない）。
     """
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     df = with_cluster_groups(df, 10)
@@ -291,8 +285,7 @@ def test_wooldridge_matches_statsmodels(
 ):
     """Wooldridge実データ（wage1/gpa2）でのstatsmodels照合。従来Rクロスチェック
     側（`test_ols_crosscheck.py::test_wooldridge_matches_r`）にしか無かった
-    実データ検証を主リファレンス側にも追加したもの
-    （test-coverage-candidates.md項目13・33）。
+    実データ検証を主リファレンス側にも追加したものである。
     """
     y, x = WOOLDRIDGE_Y_X[dataset_name]
     df = load_wooldridge(dataset_name)
@@ -312,7 +305,7 @@ def test_wooldridge_wage1_region_cluster_matches_statsmodels(
     疑似グループ（行番号%N）ではなく実データに由来するグループ構造での検証
     （`test_ols_crosscheck.py::test_wooldridge_wage1_region_cluster_matches_r`
     と同じ発想、こちらはstatsmodels側）。coef/seに加えt値・p値・信頼区間・
-    適合度統計量も検証する（test-coverage-candidates.md項目28）。
+    適合度統計量も検証する。
     """
     df = load_wooldridge("wage1")
     region = (

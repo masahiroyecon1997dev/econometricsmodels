@@ -6,8 +6,7 @@
 ことを確認する。`ValidationError`/`ComputationError` パスは
 `test_logit_validation.py`、主リファレンス（statsmodels）との数値照合は
 `test_logit_reference.py`、R クロスチェックは `test_logit_crosscheck.py`
-（OLS/WLS の `test_<手法>_api.py` 等と同じ4分割、`refactoring-candidates-2.md`
-項目68）。
+（OLS/WLS の `test_<手法>_api.py` 等と同じ4分割）。
 
 `predict()`/`pred_table()`/`marginal_effects()` の構造・オプション反映は
 このファイルに集約する（数値照合は `test_logit_reference.py` の
@@ -18,8 +17,7 @@
 Logit/Probit 共通定義。
 
 テスト本体は `Logit`/`Probit` で完全に重複するため
-`_binary_choice_checks.py` に集約し（`refactoring-candidates-2.md` 項目95）、
-このファイルは薄いラッパーに保つ。
+`_binary_choice_checks.py` に集約し、このファイルは薄いラッパーに保つ。
 """
 
 from __future__ import annotations

@@ -70,8 +70,8 @@ def test_non_finite_values_raise():
     null（`test_null_values_raise`）とNaN/無限大は`column_extraction.rs`内で
     別ロジックのため個別に確認する（テスト網羅性レビューで判明した抜け）。
     `x`側も`y`側と同じ`extract_f64_column`を通るため対称に確認する
-    （test-coverage-candidates.md項目31、predict()側の
-    `test_predict_null_or_non_finite_values_raise`との非対称を解消）。
+    （predict()側の`test_predict_null_or_non_finite_values_raise`との
+    非対称を解消）。
     """
     df_y_nan = pl.DataFrame(
         {"y": [1.0, float("nan"), 3.0], "x1": [1.0, 2.0, 3.0]}
@@ -352,8 +352,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error(n_groups):
     G>qでも悪条件で数値的にほぼ特異なケースは従来どおり`ComputationError`が
     backstop（`cluster`は`cluster_col`が別途必要なため専用の
     `test_scale_variance_cluster_raises_computation_error`で確認、
-    他のcov_typeは`test_scale_variance_raises_computation_error`。
-    test-coverage-candidates.md項目73）。
+    他のcov_typeは`test_scale_variance_raises_computation_error`）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, n_groups)
@@ -405,8 +404,8 @@ def test_scale_variance_cluster_raises_computation_error():
     backstopの対象（`test_cluster_count_at_most_slopes_raises_validation_error`
     のdocstring参照）。`cluster`は`cluster_col`が別途必要なため
     `COV_TYPES`パラメトライズには含められず、専用テストとして確認する
-    （`test-coverage-candidates.md`項目73。従来docstringの主張のみで
-    自動テストが無かった非対称の解消）。均等な疑似グループ（行番号%10、
+    （従来docstringの主張のみで自動テストが無かった非対称の解消）。
+    均等な疑似グループ（行番号%10、
     `G=10>q=3`）を使い、クラスター数不足による`ValidationError`
     ではなく、傾き係数の共分散部分行列の条件数超過による
     `ComputationError`が発生することを確認する。

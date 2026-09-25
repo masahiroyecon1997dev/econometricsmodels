@@ -15,8 +15,7 @@
   微妙に異なる書き方（直接呼び出し／`load_wooldridge.py`経由）で重複していた。
 
 定数（`DATA_DIR`・`MROZ_X`）は`_constants.py`に分離済み
-（`refactoring-candidates-2.md`項目46、ファイル名が関数を示唆するのに
-定数も同居していたための整理）。
+（ファイル名が関数を示唆するのに定数も同居していたための整理）。
 """
 
 from __future__ import annotations
@@ -54,8 +53,7 @@ def separation_suspected_dataset() -> pl.DataFrame:
 
     `benchmark/`側のDGP（`benchmark/nonlinear/datasets.py`等）と同じ
     `numpy`（`np.random.default_rng`）ベースのベクトル化演算で書く
-    （`refactoring-candidates-2.md`項目45、以前は標準ライブラリ`random`＋
-    素朴な`for`ループだった）。
+    （以前は標準ライブラリ`random`＋素朴な`for`ループだった）。
     """
     rng = np.random.default_rng(42)
     n = 200

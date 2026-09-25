@@ -14,7 +14,7 @@ crosscheck系（`test_*_crosscheck.py`）は`test_ols_crosscheck.py`/
 ままになっている。`_check_result`は手法ごとに検証するフィールド自体が異なるため、
 いずれもこのモジュールには含めない（Logit/Probit間では検証フィールドが同一
 だったため、両者の`_check_result`は`tests/nonlinear/_binary_choice_checks.py`
-の`check_result`に集約済み、`refactoring-candidates-2.md`項目95）。
+の`check_result`に集約済み）。
 
 `MARGEFF_AT`定数は`_constants.py`に分離済み（項目46、ファイル名が関数
 〔アサーション〕を示唆するのに定数も同居していたための整理）。
@@ -31,8 +31,7 @@ def rename_intercept(name: str) -> str:
     """statsmodels/linearmodels(formula API)の切片名"Intercept"を本実装の"const"に揃える。
 
     OLS/WLS/Logit/Probitの主リファレンス（statsmodels）は生成時点で
-    `benchmark/common/reference/normalize.py`により`"const"`へ正規化済み
-    （`docs/planning/specs/refactoring-issue231-progress.md`項目63）なため、
+    `benchmark/common/reference/normalize.py`により`"const"`へ正規化済みなため、
     現状このデフォルト値がそのまま使われる呼び出しでは実質no-opになる。
     `rename`引数自体は、`normalize.py`の`intercept_aliases`引数と同じ理由
     （将来切片名の命名規則が異なるリファレンス実装が加わった場合の拡張

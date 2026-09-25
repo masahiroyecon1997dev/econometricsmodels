@@ -1041,10 +1041,10 @@ def test_raise_on_non_convergence_false_returns_result_without_raising(
 ):
     """`raise_on_non_convergence=False`だと未収束でも例外を投げず、
     `converged=False`の`Results`を返す。`cov_type`は`classical`以外
-    （`opg`/`hc0`/`hc1`/`cluster`）も検証する（test-coverage-candidates.md
-    項目4、`_binary_choice_checks.py`のLogit/Probit版と同じ懸念——打ち切り点
-    でのHessian/スコア評価はcov_typeの分岐によって経由する行列演算が異なる
-    ため、想定外の例外を投げず標準誤差が有限値であることまで確認する）。
+    （`opg`/`hc0`/`hc1`/`cluster`）も検証する（`_binary_choice_checks.py`の
+    Logit/Probit版と同じ懸念——打ち切り点でのHessian/スコア評価はcov_typeの
+    分岐によって経由する行列演算が異なるため、想定外の例外を投げず標準誤差が
+    有限値であることまで確認する）。
     """
     kwargs = {
         "max_iter": 1,
@@ -1218,8 +1218,7 @@ def test_mroz_hours_cluster_cov_type_raises_validation_error():
 
 def test_cluster_without_col_raises(censored_dataset):
     """`cov_type="cluster"`なのに`cluster_col`未指定の場合`ValidationError`
-    （OLS/WLS/IV/Logit/Probitと同じ検証、共通化された経路。
-    test-coverage-candidates.md項目5）。
+    （OLS/WLS/IV/Logit/Probitと同じ検証、共通化された経路）。
     """
     options = TobitOptions(cov_type="cluster")
     with pytest.raises(

@@ -287,8 +287,7 @@ def test_non_finite_values_raise(bad_col, value, display):
     """NaN・無限大は`column_extraction.rs`内でnull（`test_null_values_raise`）
     とは別ロジックのため個別に確認する。`y`列だけでなく`x_exog`/`x_endog`/
     `instruments`側の列でも検証する（`test_null_values_raise`と同じ理由。
-    `test-coverage-candidates.md`項目31・34・40の流れでIVにも同型のテストを
-    追加、IVには`predict()`が無いため比較対象は無い）。
+    IVにも同型のテストを追加、IVには`predict()`が無いため比較対象は無い）。
     """
     values: dict[str, list[float]] = {
         "y": [1.0, 2.0, 3.0, 4.0],
@@ -344,8 +343,7 @@ def test_insufficient_observations_raises(iv_dataset):
     ではなく第一段階回帰（`endog1 ~ x_exog(x1) + instruments(z1, z2)`、
     k=4: const, x1, z1, z2）。`engine_pybind::fit()`が弱操作変数診断のため
     `compute_first_stage`を`TwoSlsEstimator::fit`より先に無条件で呼ぶため
-    （`_error_messages.py`の`FIRST_STAGE_FAILED`のコメント、
-    `test-coverage-candidates.md`項目31参照）。
+    （`_error_messages.py`の`FIRST_STAGE_FAILED`のコメント参照）。
     """
     df = iv_dataset.head(2)  # n=2、第一段階回帰はk=4（const, x1, z1, z2）
     with pytest.raises(
@@ -643,8 +641,8 @@ def test_scale_variance_cluster_raises_computation_error():
     backstopの対象。`cluster`は`cluster_col`が別途必要なため`COV_TYPES`
     パラメトライズには含められず、専用テストとして確認する
     （OLS`test_ols_validation.py::test_scale_variance_cluster_raises_
-    computation_error`・WLS`test_wls_validation.py`の同名テストと同じ理由、
-    `test-coverage-candidates.md`項目74）。均等な疑似グループ（行番号%10、
+    computation_error`・WLS`test_wls_validation.py`の同名テストと同じ理由）。
+    均等な疑似グループ（行番号%10、
     `G=10`、各グループ50件）を使う——第一段階回帰の`q`（`x_exog`2列+
     `instruments`2列=4）より十分大きく、
     `test_cluster_count_at_most_slopes_raises_validation_error`が

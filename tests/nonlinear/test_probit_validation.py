@@ -6,12 +6,10 @@
 と同型）。成功パスの構造・API・オプション反映は `test_probit_api.py`、
 主リファレンス（statsmodels）との数値照合は `test_probit_reference.py`、
 R クロスチェックは `test_probit_crosscheck.py`（OLS/WLS の
-`test_<手法>_validation.py` 等と同じ4分割、`refactoring-candidates-2.md`
-項目68）。
+`test_<手法>_validation.py` 等と同じ4分割）。
 
 テスト本体は `Logit`/`Probit` で完全に重複するため
-`_binary_choice_checks.py` に集約し（`refactoring-candidates-2.md` 項目95）、
-このファイルは薄いラッパーに保つ。
+`_binary_choice_checks.py` に集約し、このファイルは薄いラッパーに保つ。
 """
 
 from __future__ import annotations

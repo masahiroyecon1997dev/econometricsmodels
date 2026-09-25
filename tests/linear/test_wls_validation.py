@@ -223,8 +223,8 @@ def test_non_finite_values_raise():
     """`y`/`x`にNaN・無限大が含まれる場合`ValidationError`
     （OLSと同じ検証、`test_ols_validation.py::test_non_finite_values_raise`
     参照。`weight`列自体のNaN検証は`test_nan_weight_raises`が対象。
-    test-coverage-candidates.md項目34（`weight`列は既に分割済みなのに
-    `y`/`x`列本体は未検証という非対称）に対応）。
+    `weight`列は既に分割済みなのに`y`/`x`列本体は未検証という非対称の
+    解消に対応する。
     """
     df_y_nan = pl.DataFrame(
         {
@@ -540,9 +540,8 @@ def test_scale_variance_cluster_raises_computation_error():
     """`cluster`も上記`test_scale_variance_raises_computation_error`と同じ
     backstopの対象。`cluster`は`cluster_col`が別途必要なため`COV_TYPES`
     パラメトライズには含められず、専用テストとして確認する（OLS
-    `test_ols_validation.py`の同名テストと同じ理由、
-    `test-coverage-candidates.md`項目74）。均等な疑似グループ（行番号%10、
-    `G=10>q=3`）を使い、クラスター数不足による`ValidationError`
+    `test_ols_validation.py`の同名テストと同じ理由）。均等な疑似グループ
+    （行番号%10、`G=10>q=3`）を使い、クラスター数不足による`ValidationError`
     （`test_cluster_count_at_most_slopes_raises_validation_error`参照）
     ではなく、傾き係数の共分散部分行列の条件数超過による
     `ComputationError`が発生することを確認する。

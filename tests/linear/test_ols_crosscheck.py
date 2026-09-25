@@ -262,8 +262,7 @@ def test_cluster_ill_conditioned_matches_r(crosscheck, scenario):
     クラスターは従来`baseline`シナリオのみで、他のcov_typeでは全シナリオ検証
     済みの悪条件・多重共線性との組み合わせが未検証だった。均等な疑似グループ
     （行番号%10）のみ確認する（グルーピングパターン自体の網羅性は
-    `test_cluster_matches_r`等`baseline`シナリオで確認済み、
-    test-coverage-candidates.md項目29）。
+    `test_cluster_matches_r`等`baseline`シナリオで確認済み）。
     """
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     df = with_cluster_groups(df, 10)

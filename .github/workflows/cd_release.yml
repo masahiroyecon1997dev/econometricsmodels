@@ -47,7 +47,7 @@ jobs:
           manylinux: auto
           args: --release --out dist ${{ env.MATURIN_INTERPRETER_ARGS }} --manifest-path engine_pybind/Cargo.toml
 
-      # パッケージ健全性（Issue #278）: wheel サイズをジョブサマリーに記録する
+      # パッケージ健全性: wheel サイズをジョブサマリーに記録する
       # （追加ビルド無し・記録のみ・リリースをゲートしない）。linux x86_64 は
       # 代表値として、展開後サイズが docs/performance/package-health.md の最新記録
       # 比 +10% を超えたら warning アノテーションを出す（fail はしない）。
@@ -83,7 +83,7 @@ jobs:
           target: x64
           args: --release --out dist ${{ env.MATURIN_INTERPRETER_ARGS }} --manifest-path engine_pybind/Cargo.toml
 
-      # パッケージ健全性（Issue #278）: wheel サイズをジョブサマリーに記録する
+      # パッケージ健全性: wheel サイズをジョブサマリーに記録する
       # （記録のみ）。回帰 warning は linux x86_64 を代表値とするためここでは出さない。
       - name: wheel size record (package health)
         shell: bash
@@ -126,7 +126,7 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: --release --out dist ${{ env.MATURIN_INTERPRETER_ARGS }} --manifest-path engine_pybind/Cargo.toml
 
-      # パッケージ健全性（Issue #278）: wheel サイズをジョブサマリーに記録する
+      # パッケージ健全性: wheel サイズをジョブサマリーに記録する
       # （記録のみ）。回帰 warning は linux x86_64 を代表値とするためここでは出さない。
       - name: wheel size record (package health)
         shell: bash

@@ -8,7 +8,7 @@ name: Benchmark (performance)
 # トリガー:
 #  - タグpush（v*）: リリースごとに性能を記録する（従来どおり）。
 #  - main を base とするPR（＝dev⇒mainのリリースPR）: リリース作業時に、
-#    #291クラスの回帰（大標本で推定量が例外を投げる等）をタグを切る前に検知する。
+#    大標本で推定量が例外を投げる等の回帰をタグを切る前に検知する。
 #    Tobitは compare_tobit.py の n_sweep_engine_only=(200_000, 1_000_000) を回し、
 #    _run_isolated が check=True のため .fit() が例外を投げるとジョブが失敗する。
 #    実効的なゲートにするには main のブランチ保護で

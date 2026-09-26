@@ -68,7 +68,7 @@ COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
 
 # 401ksubs（クロスセクションデータ）ではHACは時系列順が無いため対象外
 # （OLSのwage1/gpa2実データcrosscheckと同じくHC0-3のみを対象にする）。
-# クラスターはage分位ビン（_run_401ksubs_caseのcluster_col="age_bin"）で別途追加。
+# クラスターはage分位ビン（_run_401ksubs_caseのcluster="age_bin"）で別途追加。
 WOOLDRIDGE_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
 
 # クラスターロバスト共分散Ŝ=(X'X)⁻¹(Σ_g X_g'e_ge_g'X_g)(X'X)⁻¹は(X'X)⁻¹を他の
@@ -196,7 +196,7 @@ def build_fixtures() -> dict:
         for cov_type in WOOLDRIDGE_COV_TYPES
     }
     fixtures["401ksubs"]["cluster"] = _run_401ksubs_case(
-        "cluster", cluster_col="age_bin"
+        "cluster", cluster="age_bin"
     )
 
     fixtures["_meta"] = {
@@ -317,7 +317,7 @@ def _run_cluster_case(
     return result
 
 
-def _run_401ksubs_case(cov_type: str, cluster_col: str | None = None) -> dict:
+def _run_401ksubs_case(cov_type: str, cluster: str | None = None) -> dict:
     """実データ（401ksubs、fsize==1）でのWLSベンチマーク。
 
     回帰式・重み定義はdocs/spec/wls-spec.md「テスト」で確定した内容（Wooldridge Example 8.5・8.6と同じ変数構成、
@@ -326,7 +326,7 @@ def _run_401ksubs_case(cov_type: str, cluster_col: str | None = None) -> dict:
     Args:
         cov_type: "classical"/"hc0"-"hc3"/"cluster"（HACは時系列順の無い
             クロスセクションデータのため対象外、OLSのwage1/gpa2と同じ方針）。
-        cluster_col: cov_type="cluster"のときのグループ列名
+        cluster: cov_type="cluster"のときのグループ列名
             （`age_bin`、地域等の自然なカテゴリ列が無いため年齢の分位ビンで代用。
             `_add_age_bin`参照）。
     """
@@ -345,7 +345,7 @@ def _run_401ksubs_case(cov_type: str, cluster_col: str | None = None) -> dict:
     )
     fit_kwargs: dict = {"cov_type": sm_cov_type, "use_t": True}
     if sm_cov_type == "cluster":
-        fit_kwargs["cov_kwds"] = {"groups": pandas_df[cluster_col]}
+        fit_kwargs["cov_kwds"] = {"groups": pandas_df[cluster]}
 
     model = smf.wls(
         formula=formula, data=pandas_df, weights=pandas_df["inv_inc"]

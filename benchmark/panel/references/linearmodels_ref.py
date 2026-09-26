@@ -25,7 +25,7 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/panel/freeze.py`参
 |---|---|---|
 | classical        | unadjusted             | |
 | hc1              | robust                 | |
-| cluster          | clustered              | `cluster_col`省略時は`entity`列を使う |
+| cluster          | clustered              | `cluster`省略時は`entity`列を使う |
 | dk               | kernel (bartlett)      | Driscoll-Kraay相当（`panel_effects=True`は不要、`PanelOLS`が自動判定） |
 
 **`hc2`/`hc3`は対象外**: `linearmodels.PanelOLS`はパネル向けの`HC2`/`HC3`を
@@ -193,7 +193,7 @@ def _build_cov_config(
     df: pl.DataFrame,
     pdf: pd.DataFrame,
     entity_col: str,
-    cluster_col: str | None,
+    cluster: str | None,
     hac_bandwidth: int | None,
     n_entities: int,
     n_periods: int | None,
@@ -207,7 +207,7 @@ def _build_cov_config(
     cov_config: dict = {"debiased": True}
     hac_bandwidth_used = None
     if cov_type == "cluster":
-        cluster_key = cluster_col or entity_col
+        cluster_key = cluster or entity_col
         if cluster_key == entity_col:
             clusters = pdf.index.get_level_values(entity_col)
         else:
@@ -235,7 +235,7 @@ def run(
     entity_col: str = "entity",
     time_col: str | None = None,
     two_way: bool = False,
-    cluster_col: str | None = None,
+    cluster: str | None = None,
     hac_bandwidth: int | None = None,
     confidence_level: float = 0.95,
     dataset_source: str = "synthetic",
@@ -262,7 +262,7 @@ def run(
         two_way: `True`なら`time_effects=True`（2-way FE）、`False`なら
             `time_effects=False`（1-way FE、`time_col`はHAC等の時点情報
             としてのみ使われ、時点固定効果自体は推定しない）。
-        cluster_col: `cov_type="cluster"`のときのクラスター列名。`None`なら
+        cluster: `cov_type="cluster"`のときのクラスター列名。`None`なら
             `entity_col`を使う（本実装の既定挙動と同じ、3.2節）。
         hac_bandwidth: `cov_type="dk"`のときのバンド幅。`None`なら
             `hac_auto_lag`（`floor(4*(t/100)^(2/9))`、`t`=時点数）で自動計算する
@@ -290,7 +290,7 @@ def run(
         df=df,
         pdf=pdf,
         entity_col=entity_col,
-        cluster_col=cluster_col,
+        cluster=cluster,
         hac_bandwidth=hac_bandwidth,
         n_entities=n_entities,
         n_periods=n_periods,
@@ -360,7 +360,7 @@ def run_re(
     *,
     entity_col: str = "entity",
     time_col: str | None = None,
-    cluster_col: str | None = None,
+    cluster: str | None = None,
     hac_bandwidth: int | None = None,
     confidence_level: float = 0.95,
     dataset_source: str = "synthetic",
@@ -381,7 +381,7 @@ def run_re(
         entity_col: エンティティ識別子の列名。
         time_col: 時点識別子の列名。`None`なら観測順の連番をダミーで使う
             （`run()`と同じ、`_build_panel_index`参照）。
-        cluster_col: `cov_type="cluster"`のときのクラスター列名。`None`なら
+        cluster: `cov_type="cluster"`のときのクラスター列名。`None`なら
             `entity_col`を使う。
         hac_bandwidth: `cov_type="dk"`のときのバンド幅。`None`なら自動計算。
         confidence_level: 信頼区間の信頼水準。
@@ -404,7 +404,7 @@ def run_re(
         df=df,
         pdf=pdf,
         entity_col=entity_col,
-        cluster_col=cluster_col,
+        cluster=cluster,
         hac_bandwidth=hac_bandwidth,
         n_entities=n_entities,
         n_periods=n_periods,
@@ -475,7 +475,7 @@ if __name__ == "__main__":
     parser.add_argument("--entity-col", default="entity")
     parser.add_argument("--time-col", default=None)
     parser.add_argument("--two-way", action="store_true")
-    parser.add_argument("--cluster-col", default=None)
+    parser.add_argument("--cluster", default=None)
     parser.add_argument("--hac-bandwidth", type=int, default=None)
     parser.add_argument("--confidence-level", type=float, default=0.95)
     parser.add_argument("--dataset-source", default="synthetic")
@@ -489,7 +489,7 @@ if __name__ == "__main__":
         entity_col=args.entity_col,
         time_col=args.time_col,
         two_way=args.two_way,
-        cluster_col=args.cluster_col,
+        cluster=args.cluster,
         hac_bandwidth=args.hac_bandwidth,
         confidence_level=args.confidence_level,
         dataset_source=args.dataset_source,

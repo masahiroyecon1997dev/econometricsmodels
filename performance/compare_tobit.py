@@ -150,7 +150,7 @@ def _fit_once_engine(ctx: FitContext):
             lower=lower,
             upper=None,
             cov_type="cluster",
-            cluster=ctx.cluster_col,
+            cluster=ctx.cluster,
             solver=ctx.method,
         )
     else:
@@ -218,7 +218,7 @@ TOBIT_ADAPTER = PerfAdapter(
     reference_versions=dict,
     build_dataframe=_build_dataframe,
     fit_once=_fit_once_engine,
-    cluster_col="cluster_group",
+    cluster="cluster_group",
     # classical / cluster とも n=1,000〜100,000。
     n_sweep=(1_000, 10_000, 100_000),
     # classical のみ追加する大標本点。n=1,000,000（seed=42）が過去の大標本

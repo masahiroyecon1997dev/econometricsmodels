@@ -1,7 +1,7 @@
 """Rクロスチェックスクリプト（`benchmark/<系統>/references/*.R`）の呼び出し共通層。
 
 `run_r`: コマンドライン組み立て → `subprocess.run` → JSON parse の骨格。
-cov_type 固有の末尾引数（cluster_col / hac_lag / weight_col / link 等）は
+cov_type 固有の末尾引数（cluster / hac_lag / weight_col / link 等）は
 R スクリプトの位置引数の契約が系統ごとに違うため、呼び出し側（系統別の
 `references/r.py`）が `extra_args` として組み立てて渡す。
 

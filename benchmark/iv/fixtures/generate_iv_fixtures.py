@@ -217,7 +217,7 @@ def _run_cluster_case(dataset: str, groups: list | None = None) -> dict:
             x_endog_cols=["endog1"],
             instrument_cols=["z1", "z2"],
             cov_type="cluster",
-            cluster_col="cluster_group",
+            cluster="cluster_group",
         )
     finally:
         tmp_path.unlink()
@@ -242,7 +242,7 @@ def _run_cluster_g2_case() -> dict:
             x_endog_cols=["endog1"],
             instrument_cols=["z1"],
             cov_type="cluster",
-            cluster_col="cluster_group",
+            cluster="cluster_group",
         )
     finally:
         tmp_path.unlink()

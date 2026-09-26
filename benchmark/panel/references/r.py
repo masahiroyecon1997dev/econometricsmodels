@@ -43,7 +43,7 @@ def run_fixest_r(
     formula: str,
     cov_type: str,
     *,
-    cluster_col: str | None = None,
+    cluster: str | None = None,
 ) -> dict:
     """`run_fixest_benchmark.R`を呼び、係数・標準誤差・AIC/BIC・Within R2を得る。
 
@@ -53,11 +53,11 @@ def run_fixest_r(
             2-wayは"y ~ x1 + x2 | entity + time"）。
         cov_type: classical / hc1 / hc2 / hc3 / cluster
             （dkは対象外、`run_fixest_benchmark.R`のモジュールコメント参照）。
-        cluster_col: `cov_type="cluster"`のときのクラスター列名。
+        cluster: `cov_type="cluster"`のときのクラスター列名。
     """
     extra: list[str] = []
     if cov_type == "cluster":
-        extra.append(cluster_col or "")
+        extra.append(cluster or "")
 
     raw = run_r(_R_SCRIPT, csv_path, formula, cov_type, extra_args=extra)
     return normalize_names(

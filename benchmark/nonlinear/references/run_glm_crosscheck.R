@@ -43,11 +43,11 @@
 #   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" classical logit
 #   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" opg probit
 #   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" hc0 logit
-#   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" cluster logit cluster_col
+#   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" cluster logit cluster
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 2) {
-  stop("usage: Rscript run_glm_crosscheck.R <data.csv> <formula> [cov_type=classical] [link=logit] [cluster_col]")
+  stop("usage: Rscript run_glm_crosscheck.R <data.csv> <formula> [cov_type=classical] [link=logit] [cluster]")
 }
 data_path <- args[1]
 formula_str <- args[2]
@@ -137,11 +137,11 @@ if (cov_type == "classical") {
   vc <- sandwich(model, bread. = bread_obs, meat. = meat)
 } else if (cov_type == "cluster") {
   if (length(args) < 5) {
-    stop("cluster requires <cluster_col> as arg5")
+    stop("cluster requires <cluster> as arg5")
   }
-  cluster_col <- args[5]
+  cluster <- args[5]
   # cadjust=TRUE: G/(G-1)の小標本補正（linear/references/run_lm_crosscheck.Rと同じ方針）。
-  meat <- meatCL(model, cluster = df[[cluster_col]], type = "HC1", cadjust = TRUE)
+  meat <- meatCL(model, cluster = df[[cluster]], type = "HC1", cadjust = TRUE)
   vc <- sandwich(model, bread. = bread_obs, meat. = meat)
 } else {
   stop(paste("unknown cov_type:", cov_type))

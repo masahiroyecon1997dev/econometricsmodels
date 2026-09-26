@@ -197,9 +197,7 @@ def _run_cluster_case(
     grouped = df.with_columns(pl.Series("cluster_group", cluster_group))
     tmp_path = tmpdir / (csv_path.stem + suffix + ".csv")
     grouped.write_csv(tmp_path)
-    return run_ivreg_r(
-        tmp_path, formula, "cluster", cluster_col="cluster_group"
-    )
+    return run_ivreg_r(tmp_path, formula, "cluster", cluster="cluster_group")
 
 
 def _run_cluster_g2_case(tmpdir: Path) -> dict:
@@ -216,9 +214,7 @@ def _run_cluster_g2_case(tmpdir: Path) -> dict:
     )
     tmp_path = tmpdir / (csv_path.stem + "_cluster_g2.csv")
     grouped.write_csv(tmp_path)
-    return run_ivreg_r(
-        tmp_path, formula, "cluster", cluster_col="cluster_group"
-    )
+    return run_ivreg_r(tmp_path, formula, "cluster", cluster="cluster_group")
 
 
 def build_wooldridge_fixtures(tmpdir: Path) -> dict:

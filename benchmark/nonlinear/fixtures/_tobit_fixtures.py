@@ -84,7 +84,7 @@ def _run(
     engine: str,
     lower: float | None,
     upper: float | None,
-    cluster_col: str | None = None,
+    cluster: str | None = None,
     include_intercept: bool = True,
 ) -> dict:
     """`run_tobit_r` を呼び、テスト側が `TobitOptions` を復元できる情報
@@ -102,7 +102,7 @@ def _run(
         engine=engine,
         lower=lower,
         upper=upper,
-        cluster_col=cluster_col,
+        cluster=cluster,
     )
     result["censoring_bounds"] = [lower, upper]
     result["x_cols"] = x_cols
@@ -144,7 +144,7 @@ def _cluster_case(
         engine=engine,
         lower=lower,
         upper=upper,
-        cluster_col="cluster_group",
+        cluster="cluster_group",
     )
 
 

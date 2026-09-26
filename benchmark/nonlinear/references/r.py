@@ -1,10 +1,10 @@
 """nonlinear系統（Logit/Probit/Tobit）の R リファレンス呼び出し。
 
 - `run_glm_r`: `run_glm_crosscheck.R`（Logit/Probit クロスチェック）。位置引数の契約は
-  `link` が cov_type の直後＝arg4、`cluster_col` は `cov_type="cluster"` のとき arg5。
+  `link` が cov_type の直後＝arg4、`cluster` は `cov_type="cluster"` のとき arg5。
 - `run_tobit_r`: `run_tobit_crosscheck.R`（Tobit の主リファレンス `AER::tobit` と
   交差検証 `censReg` の両方）。位置引数は `engine`（arg4）・`lower`（arg5）・`upper`
-  （arg6）・`cluster_col`（`cov_type="cluster"` のとき arg7）。
+  （arg6）・`cluster`（`cov_type="cluster"` のとき arg7）。
 
 いずれも位置引数をここで組み立て、共通の `benchmark.common.reference.r` に渡す。
 """
@@ -36,7 +36,7 @@ def run_glm_r(
     formula: str,
     cov_type: str,
     *,
-    cluster_col: str | None = None,
+    cluster: str | None = None,
     link: str = "logit",
 ) -> dict:
     """`run_glm_crosscheck.R` を呼び、係数・標準誤差・適合度統計量・限界効果を得る。
@@ -45,12 +45,12 @@ def run_glm_r(
         csv_path: データ CSV。
         formula: 回帰式。
         cov_type: classical / opg / hc0 / hc1 / cluster。
-        cluster_col: `cov_type="cluster"` のときのグループ列名。
+        cluster: `cov_type="cluster"` のときのグループ列名。
         link: "logit" または "probit"。
     """
     extra: list[str] = [link]
     if cov_type == "cluster":
-        extra.append(cluster_col or "")
+        extra.append(cluster or "")
 
     raw = run_r(_R_SCRIPT, csv_path, formula, cov_type, extra_args=extra)
     return normalize_names(
@@ -89,7 +89,7 @@ def run_tobit_r(
     engine: str,
     lower: float | None,
     upper: float | None,
-    cluster_col: str | None = None,
+    cluster: str | None = None,
 ) -> dict:
     """`run_tobit_crosscheck.R` を呼び、Tobit の係数・標準誤差・適合度統計量・
     限界効果・予測値・打ち切り適合度を得る。
@@ -102,7 +102,7 @@ def run_tobit_r(
             （交差検証）。
         lower: 下側打ち切り境界（無ければ None）。
         upper: 上側打ち切り境界（無ければ None）。
-        cluster_col: ``cov_type="cluster"`` のときのグループ列名。
+        cluster: ``cov_type="cluster"`` のときのグループ列名。
 
     Returns:
         ``coef`` / ``se`` / ``test_stats`` / ``p_values`` / ``conf_int``（切片名は
@@ -117,7 +117,7 @@ def run_tobit_r(
     """
     extra: list[str] = [engine, _bound_arg(lower), _bound_arg(upper)]
     if cov_type == "cluster":
-        extra.append(cluster_col or "")
+        extra.append(cluster or "")
 
     raw = run_r(_R_SCRIPT_TOBIT, csv_path, formula, cov_type, extra_args=extra)
     # coef/se/z/p/conf_int + スカラーは共通の normalize_names（切片名→"const"）。

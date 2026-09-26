@@ -117,7 +117,7 @@ class FitContext:
         y_col: 被説明変数の列名。
         cov_type: 計測対象の分散推定タイプ。
         hac_lags: `hac_auto_lag(n)` の値。cov_type が HAC 以外なら無視してよい。
-        cluster_col: クラスターロバスト用のグループ列名。使わない手法・
+        cluster: クラスターロバスト用のグループ列名。使わない手法・
             cov_type では `None`。
         weight_col: WLS の重み列名。重みを使わない手法（OLS/Logit 等）では
             `None`。
@@ -134,7 +134,7 @@ class FitContext:
     y_col: str
     cov_type: str
     hac_lags: int
-    cluster_col: str | None
+    cluster: str | None
     weight_col: str | None
     method: str
 
@@ -184,7 +184,7 @@ class PerfAdapter:
             統計量まで常に一括計算するため、揃えないと不公平な比較になる）。
         n_sweep / n_sweep_fixed_k: n 軸スイープの n の刻みと、その際固定する k。
         k_sweep / k_sweep_fixed_n: k 軸スイープの k の刻みと、その際固定する n。
-        cluster_col: `FitContext.cluster_col` に渡す列名。cluster を計測しない
+        cluster: `FitContext.cluster` に渡す列名。cluster を計測しない
             手法では `None` のまま。
         weight_col: `FitContext.weight_col` に渡す列名。WLS のみ設定する
             （`build_dataframe` がその列を含む DataFrame を返す前提）。
@@ -243,7 +243,7 @@ class PerfAdapter:
     k_sweep_fixed_n: int = 10_000
     k_sweep_libraries: Sequence[str] | None = None
     k_sweep_cov_types: Sequence[str] | None = None
-    cluster_col: str | None = None
+    cluster: str | None = None
     weight_col: str | None = None
     default_method: str = "newton"
     extra_methods: Sequence[str] = ()
@@ -294,7 +294,7 @@ def _worker(
         y_col="y",
         cov_type=cov_type,
         hac_lags=hac_auto_lag(n),
-        cluster_col=adapter.cluster_col,
+        cluster=adapter.cluster,
         weight_col=adapter.weight_col,
         method=method,
     )

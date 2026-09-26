@@ -50,7 +50,7 @@
 # 使用例:
 #   Rscript run_ivreg.R data.csv "y ~ x1 + endog1 | x1 + z1 + z2" classical
 #   Rscript run_ivreg.R data.csv "y ~ x1 + endog1 | x1 + z1 + z2" hc0
-#   Rscript run_ivreg.R data.csv "y ~ x1 + endog1 | x1 + z1 + z2" cluster cluster_col
+#   Rscript run_ivreg.R data.csv "y ~ x1 + endog1 | x1 + z1 + z2" cluster cluster
 #   Rscript run_ivreg.R data.csv "y ~ x1 + endog1 | x1 + z1 + z2" hac 2   # hac_lag=2
 #
 # 注: 弱操作変数F統計量は内生変数名をキーにしたdictとして返す（本実装の
@@ -60,7 +60,7 @@
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 2) {
-  stop("usage: Rscript run_ivreg.R <data.csv> <formula> [cov_type=classical] [cluster_col|hac_lag]")
+  stop("usage: Rscript run_ivreg.R <data.csv> <formula> [cov_type=classical] [cluster|hac_lag]")
 }
 data_path <- args[1]
 formula_str <- args[2]
@@ -94,14 +94,14 @@ if (cov_type == "classical") {
   vcov_fn <- function(m) vcovHC(m, type = toupper(cov_type))
 } else if (cov_type == "cluster") {
   if (length(args) < 4) {
-    stop("cluster requires <cluster_col> as arg4")
+    stop("cluster requires <cluster> as arg4")
   }
-  cluster_col <- args[4]
+  cluster <- args[4]
   # cadjust=TRUE: G/(G-1)の小標本補正（OLS/WLSクロスチェックと同じ方針）。
   vcov_fn <- function(m) {
-    vcovCL(m, cluster = df[[cluster_col]], type = "HC1", cadjust = TRUE)
+    vcovCL(m, cluster = df[[cluster]], type = "HC1", cadjust = TRUE)
   }
-  df_inference <- length(unique(df[[cluster_col]])) - 1
+  df_inference <- length(unique(df[[cluster]])) - 1
 } else if (cov_type == "hac") {
   if (length(args) < 4 || is.na(as.integer(args[4]))) {
     stop("hac requires <hac_lag> (integer) as arg4")

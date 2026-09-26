@@ -197,7 +197,7 @@ def run(
     x_endog_cols: list[str],
     instrument_cols: list[str],
     cov_type: str,
-    cluster_col: str | None = None,
+    cluster: str | None = None,
     hac_lags: int | None = None,
     confidence_level: float = 0.95,
     dataset_source: str = "synthetic",
@@ -222,7 +222,7 @@ def run(
     cov_config: dict = {"debiased": debiased}
     hac_lag_used = None
     if cov_type == "cluster":
-        cov_config["clusters"] = pdf[cluster_col]
+        cov_config["clusters"] = pdf[cluster]
     elif cov_type == "hac":
         hac_lag_used = hac_lags if hac_lags is not None else hac_auto_lag(n)
         cov_config["kernel"] = "bartlett"
@@ -378,7 +378,7 @@ def run_gmm(
     instrument_cols: list[str],
     weight_type: str,
     cov_type: str,
-    cluster_col: str | None = None,
+    cluster: str | None = None,
     hac_lags: int | None = None,
     gmm_iterations: int = 2,
     confidence_level: float = 0.95,
@@ -459,7 +459,7 @@ def run_gmm(
     weight_config: dict = {}
     weight_hac_lag_used = None
     if weight_type == "cluster":
-        weight_config["clusters"] = pdf[cluster_col]
+        weight_config["clusters"] = pdf[cluster]
     elif weight_type == "hac":
         weight_hac_lag_used = (
             hac_lags if hac_lags is not None else hac_auto_lag(n)
@@ -475,7 +475,7 @@ def run_gmm(
     cov_config: dict = {"debiased": debiased}
     cov_hac_lag_used = None
     if cov_type == "cluster":
-        cov_config["clusters"] = pdf[cluster_col]
+        cov_config["clusters"] = pdf[cluster]
     elif cov_type == "hac":
         cov_hac_lag_used = (
             hac_lags if hac_lags is not None else hac_auto_lag(n)
@@ -577,7 +577,7 @@ if __name__ == "__main__":
     parser.add_argument("--instruments", nargs="*", default=["z1", "z2"])
     parser.add_argument("--weight-type", default="classical")
     parser.add_argument("--cov-type", default="classical")
-    parser.add_argument("--cluster-col", default=None)
+    parser.add_argument("--cluster", default=None)
     parser.add_argument("--hac-lags", type=int, default=None)
     parser.add_argument("--gmm-iterations", type=int, default=2)
     parser.add_argument("--confidence-level", type=float, default=0.95)
@@ -591,7 +591,7 @@ if __name__ == "__main__":
             args.instruments,
             args.weight_type,
             args.cov_type,
-            args.cluster_col,
+            args.cluster,
             args.hac_lags,
             args.gmm_iterations,
             args.confidence_level,
@@ -603,7 +603,7 @@ if __name__ == "__main__":
             args.x_endog,
             args.instruments,
             args.cov_type,
-            args.cluster_col,
+            args.cluster,
             args.hac_lags,
             args.confidence_level,
         )

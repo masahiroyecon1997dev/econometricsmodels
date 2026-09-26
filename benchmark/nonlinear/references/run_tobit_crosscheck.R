@@ -55,7 +55,7 @@ args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 6) {
   stop(paste(
     "usage: Rscript run_tobit_crosscheck.R <data.csv> <formula> <cov_type>",
-    "<engine> <lower> <upper> [cluster_col]"
+    "<engine> <lower> <upper> [cluster]"
   ))
 }
 data_path <- args[1]
@@ -131,12 +131,12 @@ if (cov_type == "classical") {
   v_raw <- sandwich::sandwich(fit) * n / (n - p)
 } else { # cluster
   if (length(args) < 7) {
-    stop("cluster requires <cluster_col> as arg7")
+    stop("cluster requires <cluster> as arg7")
   }
-  cluster_col <- args[7]
+  cluster <- args[7]
   v_raw <- sandwich::vcovCL(
     fit,
-    cluster = df[[cluster_col]], type = "HC1", cadjust = TRUE
+    cluster = df[[cluster]], type = "HC1", cadjust = TRUE
   )
 }
 

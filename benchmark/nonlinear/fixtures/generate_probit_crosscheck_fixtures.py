@@ -116,7 +116,7 @@ def _run_cluster_case(
             tmp_path,
             formula,
             "cluster",
-            cluster_col="cluster_group",
+            cluster="cluster_group",
             link="probit",
         )
     }

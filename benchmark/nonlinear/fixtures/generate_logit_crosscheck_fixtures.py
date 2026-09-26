@@ -112,9 +112,7 @@ def _run_cluster_case(
     tmp_path = csv_path.with_name(csv_path.stem + suffix + ".csv")
     grouped.write_csv(tmp_path)
     return {
-        "r": run_glm_r(
-            tmp_path, formula, "cluster", cluster_col="cluster_group"
-        )
+        "r": run_glm_r(tmp_path, formula, "cluster", cluster="cluster_group")
     }
 
 

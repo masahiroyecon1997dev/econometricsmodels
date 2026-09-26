@@ -10,14 +10,14 @@
 # 使用例:
 #   Rscript run_lm_crosscheck.R data.csv "y ~ x1 + x2 + x3" classical
 #   Rscript run_lm_crosscheck.R data.csv "y ~ x1 + x2 + x3" hc3
-#   Rscript run_lm_crosscheck.R data.csv "y ~ x1 + x2 + x3" cluster cluster_col
+#   Rscript run_lm_crosscheck.R data.csv "y ~ x1 + x2 + x3" cluster cluster
 #   Rscript run_lm_crosscheck.R data.csv "y ~ x1 + x2 + x3" hac 2   # hac_lag=2
 #
 #   # WLSの標準誤差クロスチェック（lm(weights=) + sandwich/lmtest）。
-#   # weight_colはcov_type固有の引数（cluster_col/hac_lag）の後ろに置く
+#   # weight_colはcov_type固有の引数（cluster/hac_lag）の後ろに置く
 #   # （classical/hc0-3はarg4、cluster/hacはarg5）。省略時（引数なし or 空文字）はOLSと同じ。
 #   Rscript run_lm_crosscheck.R data.csv "y ~ x1 + x2 + x3" classical weight
-#   Rscript run_lm_crosscheck.R data.csv "y ~ x1 + x2 + x3" cluster cluster_col weight
+#   Rscript run_lm_crosscheck.R data.csv "y ~ x1 + x2 + x3" cluster cluster weight
 #
 #   # 信頼区間のconfidence_level（既定0.95）を変える場合は"--confidence-level="
 #   # フラグを任意の位置に追加する（cov_type固有の位置引数とは独立に抜き出すため）。
@@ -27,7 +27,7 @@
 
 args_raw <- commandArgs(trailingOnly = TRUE)
 
-# "--confidence-level="フラグは、cluster_col/hac_lag/weight_colのようなcov_type
+# "--confidence-level="フラグは、cluster/hac_lag/weight_colのようなcov_type
 # 依存の位置引数とは独立に、先に抜き出しておく（残りの引数の位置関係を崩さない
 # ため）。
 confidence_level <- 0.95
@@ -63,15 +63,15 @@ source(file.path(script_dir, "..", "..", "common", "_common.R"))
 
 cov_type <- ifelse(length(args) >= 3, tolower(args[3]), "classical")
 
-# weight_colはcov_type固有の引数（cluster_col/hac_lag）の後ろに置く。
+# weight_colはcov_type固有の引数（cluster/hac_lag）の後ろに置く。
 # classical/hc0-3はarg4、cluster/hacはarg5（WLSクロスチェック用、fit_wls側の
 # weight引数に対応。docs/spec/wls-spec.md参照）。
 weight_col <- NA
 if (cov_type == "cluster") {
   if (length(args) < 4) {
-    stop("cluster requires <cluster_col> as arg4")
+    stop("cluster requires <cluster> as arg4")
   }
-  cluster_col <- args[4]
+  cluster <- args[4]
   if (length(args) >= 5 && args[5] != "") {
     weight_col <- args[5]
   }
@@ -102,10 +102,10 @@ if (cov_type == "classical") {
   vc <- vcovHC(model, type = toupper(cov_type))
 } else if (cov_type == "cluster") {
   # cadjust=TRUE: G/(G-1)の小標本補正を適用する（Stata流、本実装のcluster_cov_paramsと同じ方針）
-  vc <- vcovCL(model, cluster = df[[cluster_col]], type = "HC1", cadjust = TRUE)
+  vc <- vcovCL(model, cluster = df[[cluster]], type = "HC1", cadjust = TRUE)
   # 本実装（engine::linear::ols::OlsEstimator::fit）と同じくG-1（クラスター数-1）を
   # F検定の自由度に使う（AIC/BIC/対数尤度等はdf_residualのまま変えない、本実装と同じ方針）。
-  df_inference <- length(unique(df[[cluster_col]])) - 1
+  df_inference <- length(unique(df[[cluster]])) - 1
 } else if (cov_type == "hac") {
   # 本実装（Newey-West, Bartlettカーネル）と同じlagを明示的に渡し、
   # bwNeweyWest()による自動バンド幅選択（本実装のfloor(4*(n/100)^(2/9))とは

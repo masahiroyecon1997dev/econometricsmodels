@@ -298,7 +298,7 @@ def _run_cluster_case(
             tmp_path,
             formula,
             "cluster",
-            cluster_col="cluster_group",
+            cluster="cluster_group",
             confidence_level=confidence_level,
         )
     }
@@ -351,7 +351,7 @@ def _run_wage1_region_cluster_case(df, csv_path: Path, formula: str) -> dict:
     grouped = df.with_columns(region)
     tmp_path = csv_path.with_name(csv_path.stem + "_region_cluster.csv")
     grouped.write_csv(tmp_path)
-    return {"r": run_lm_r(tmp_path, formula, "cluster", cluster_col="region")}
+    return {"r": run_lm_r(tmp_path, formula, "cluster", cluster="region")}
 
 
 def build_fixtures() -> dict:

@@ -82,7 +82,7 @@ def _fit_once_engine(ctx: FitContext):
     elif ctx.cov_type == "cluster":
         options = LogitOptions(
             cov_type="cluster",
-            cluster=ctx.cluster_col,
+            cluster=ctx.cluster,
             solver=ctx.method,
         )
     else:
@@ -100,7 +100,7 @@ def _fit_once_statsmodels(ctx: FitContext):
         "cov_type": "nonrobust" if ctx.cov_type == "classical" else "cluster",
     }
     if ctx.cov_type == "cluster":
-        fit_kwargs["cov_kwds"] = {"groups": ctx.pandas_df[ctx.cluster_col]}
+        fit_kwargs["cov_kwds"] = {"groups": ctx.pandas_df[ctx.cluster]}
     res = smf.logit(formula, data=ctx.pandas_df).fit(**fit_kwargs)
     # engine と計測範囲を揃えるため、遅延評価プロパティを明示的に確定させる
     # （モジュール docstring「計測範囲の対称性」参照）。
@@ -134,7 +134,7 @@ LOGIT_ADAPTER = PerfAdapter(
     },
     build_dataframe=_build_dataframe,
     fit_once=_fit_once,
-    cluster_col="cluster_group",
+    cluster="cluster_group",
     # method 軸: bfgs/lbfgs を代表点（classical・k=5・n=1,000,000）で計測する。
     # 既定の newton は n/k スイープに含まれる。
     extra_methods=("bfgs", "lbfgs"),

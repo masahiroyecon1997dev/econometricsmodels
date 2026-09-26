@@ -20,7 +20,7 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/linear/freeze.py`�
 
     python -m benchmark.linear.references.statsmodels_ref --dataset-source wooldridge \\
         --dataset wage1 --formula "lwage ~ educ + exper + tenure" \\
-        --cov-type cluster --cluster-col nearc4
+        --cov-type cluster --cluster nearc4
 
     python -m benchmark.linear.references.statsmodels_ref --dataset-source synthetic \\
         --dataset baseline --cov-type classical --weight-col weight
@@ -103,7 +103,7 @@ def run(
     dataset: str,
     formula: str | None,
     cov_type: str,
-    cluster_col: str | None = None,
+    cluster: str | None = None,
     confidence_level: float = 0.95,
     weight_col: str | None = None,
     include_intercept: bool = True,
@@ -141,7 +141,7 @@ def run(
     # 明示的にuse_t=Trueを指定する。
     fit_kwargs: dict = {"cov_type": sm_cov_type, "use_t": True}
     if sm_cov_type == "cluster":
-        fit_kwargs["cov_kwds"] = {"groups": pandas_df[cluster_col]}
+        fit_kwargs["cov_kwds"] = {"groups": pandas_df[cluster]}
     elif sm_cov_type == "hac":
         fit_kwargs["cov_kwds"] = {"maxlags": HAC_MAXLAGS}
 
@@ -234,7 +234,7 @@ if __name__ == "__main__":
         "--formula", default=None, help="省略時はsyntheticのy,x列から自動生成"
     )
     parser.add_argument("--cov-type", default="classical")
-    parser.add_argument("--cluster-col", default=None)
+    parser.add_argument("--cluster", default=None)
     parser.add_argument("--confidence-level", type=float, default=0.95)
     parser.add_argument(
         "--weight-col", default=None, help="指定するとWLS（smf.wls）を使う"
@@ -251,7 +251,7 @@ if __name__ == "__main__":
         args.dataset,
         args.formula,
         args.cov_type,
-        args.cluster_col,
+        args.cluster,
         args.confidence_level,
         args.weight_col,
         include_intercept=not args.no_intercept,

@@ -53,7 +53,7 @@ args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 3) {
   stop(
     "usage: Rscript run_fixest_benchmark.R <data.csv> <formula with | fe> ",
-    "<cov_type> [cluster_col]"
+    "<cov_type> [cluster]"
   )
 }
 data_path <- args[1]
@@ -99,10 +99,10 @@ if (cov_type == "classical") {
   vc <- toupper(cov_type)
 } else if (cov_type == "cluster") {
   if (length(args) < 4) {
-    stop("cluster requires <cluster_col> as arg4")
+    stop("cluster requires <cluster> as arg4")
   }
-  cluster_col <- args[4]
-  vc <- as.formula(paste0("~", cluster_col))
+  cluster <- args[4]
+  vc <- as.formula(paste0("~", cluster))
 } else {
   stop(paste("unknown cov_type (or unsupported for R crosscheck):", cov_type))
 }

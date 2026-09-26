@@ -273,7 +273,7 @@ def _run_cluster_case(
             tmp_path,
             formula,
             "cluster",
-            cluster_col="cluster_group",
+            cluster="cluster_group",
             weight_col=WEIGHT_COLUMN_NAME,
             confidence_level=confidence_level,
         )
@@ -312,7 +312,7 @@ def build_401ksubs_fixture(tmpdir: Path) -> dict:
             csv_path_clustered,
             formula,
             "cluster",
-            cluster_col="age_bin",
+            cluster="age_bin",
             weight_col="inv_inc",
         )
     }

@@ -82,8 +82,8 @@ def _run_effects(scenario: str, cov_type: str, *, two_way: bool) -> dict:
     csv_path = DATA_DIR / f"fe_{scenario}.csv"
     x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
     formula = _formula(x_cols, "entity + time" if two_way else "entity")
-    cluster_col = "entity" if cov_type == "cluster" else None
-    return run_fixest_r(csv_path, formula, cov_type, cluster_col=cluster_col)
+    cluster = "entity" if cov_type == "cluster" else None
+    return run_fixest_r(csv_path, formula, cov_type, cluster=cluster)
 
 
 def _run_cluster_imbalanced_case(tmpdir: Path) -> dict:
@@ -96,9 +96,7 @@ def _run_cluster_imbalanced_case(tmpdir: Path) -> dict:
     csv_path = tmpdir / "fe_baseline_cluster_imbalanced_with_cluster.csv"
     df.write_csv(csv_path)
     formula = _formula(["x1", "x2"], "entity")
-    return run_fixest_r(
-        csv_path, formula, "cluster", cluster_col="cluster_group"
-    )
+    return run_fixest_r(csv_path, formula, "cluster", cluster="cluster_group")
 
 
 def _run_cluster_g2_case(tmpdir: Path) -> dict:
@@ -111,9 +109,7 @@ def _run_cluster_g2_case(tmpdir: Path) -> dict:
     csv_path = tmpdir / "fe_baseline_k1_with_cluster.csv"
     df.write_csv(csv_path)
     formula = _formula(["x1"], "entity")
-    return run_fixest_r(
-        csv_path, formula, "cluster", cluster_col="cluster_group"
-    )
+    return run_fixest_r(csv_path, formula, "cluster", cluster="cluster_group")
 
 
 def _run_boundary_df1_case(*, two_way: bool) -> dict:
@@ -131,8 +127,8 @@ def _run_wagepan(csv_path: Path, cov_type: str, *, two_way: bool) -> dict:
         f"{WAGEPAN_ENTITY} + {WAGEPAN_TIME}" if two_way else WAGEPAN_ENTITY
     )
     formula = f"{WAGEPAN_Y} ~ {WAGEPAN_FORMULA_RHS} | {fe_part}"
-    cluster_col = WAGEPAN_ENTITY if cov_type == "cluster" else None
-    return run_fixest_r(csv_path, formula, cov_type, cluster_col=cluster_col)
+    cluster = WAGEPAN_ENTITY if cov_type == "cluster" else None
+    return run_fixest_r(csv_path, formula, cov_type, cluster=cluster)
 
 
 def build_fixtures() -> dict:

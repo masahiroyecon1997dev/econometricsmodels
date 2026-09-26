@@ -110,7 +110,7 @@ def _fit_once_engine(ctx: FitContext):
     elif ctx.cov_type == "cluster":
         options = ProbitOptions(
             cov_type="cluster",
-            cluster=ctx.cluster_col,
+            cluster=ctx.cluster,
             solver=ctx.method,
         )
     else:
@@ -128,7 +128,7 @@ def _fit_once_statsmodels(ctx: FitContext):
         "cov_type": "nonrobust" if ctx.cov_type == "classical" else "cluster",
     }
     if ctx.cov_type == "cluster":
-        fit_kwargs["cov_kwds"] = {"groups": ctx.pandas_df[ctx.cluster_col]}
+        fit_kwargs["cov_kwds"] = {"groups": ctx.pandas_df[ctx.cluster]}
     res = smf.probit(formula, data=ctx.pandas_df).fit(**fit_kwargs)
     # engine と計測範囲を揃えるため、遅延評価プロパティを明示的に確定させる
     # （モジュール docstring「計測範囲の対称性」参照）。
@@ -162,7 +162,7 @@ PROBIT_ADAPTER = PerfAdapter(
     },
     build_dataframe=_build_dataframe,
     fit_once=_fit_once,
-    cluster_col="cluster_group",
+    cluster="cluster_group",
     # classical / cluster とも n=1,000〜100,000。
     n_sweep=(1_000, 10_000, 100_000),
     # classical・engine単独のみ追加する大標本点。n=1,000,000（seed=42）が

@@ -34,7 +34,7 @@ def run_ivreg_r(
     formula: str,
     cov_type: str,
     *,
-    cluster_col: str | None = None,
+    cluster: str | None = None,
     hac_lag: int | None = None,
 ) -> dict:
     """`run_ivreg.R` を呼び、係数・標準誤差・診断統計量を得る。
@@ -44,12 +44,12 @@ def run_ivreg_r(
         formula: `ivreg` の回帰式
             （`y ~ x_exog + x_endog | x_exog + instruments`）。
         cov_type: classical / hc0 / hc1 / cluster / hac。
-        cluster_col: `cov_type="cluster"` のときのグループ列名。
+        cluster: `cov_type="cluster"` のときのグループ列名。
         hac_lag: `cov_type="hac"` のときのラグ数。
     """
     extra: list[str] = []
     if cov_type == "cluster":
-        extra.append(cluster_col or "")
+        extra.append(cluster or "")
     elif cov_type == "hac":
         extra.append(str(hac_lag))
 

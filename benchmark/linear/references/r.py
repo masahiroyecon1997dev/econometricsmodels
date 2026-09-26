@@ -32,7 +32,7 @@ def run_lm_r(
     formula: str,
     cov_type: str,
     *,
-    cluster_col: str | None = None,
+    cluster: str | None = None,
     hac_lag: int | None = None,
     weight_col: str | None = None,
     confidence_level: float = 0.95,
@@ -45,17 +45,17 @@ def run_lm_r(
             formula自体に`"- 1"`を付けて表現する（Rのformula構文がそのまま
             対応するため、スクリプト側の引数追加は不要）。
         cov_type: classical / hc0-3 / cluster / hac。
-        cluster_col: `cov_type="cluster"` のときのグループ列名。
+        cluster: `cov_type="cluster"` のときのグループ列名。
         hac_lag: `cov_type="hac"` のときのラグ数。
         weight_col: 指定すると WLS（`lm(weights=)`）。None なら OLS。
         confidence_level: 信頼区間の信頼水準。既定0.95以外を指定すると
             `--confidence-level=`フラグとして渡す（cov_type依存の位置引数
-            〔cluster_col/hac_lag/weight_col〕とは独立にRスクリプト側で
+            〔cluster/hac_lag/weight_col〕とは独立にRスクリプト側で
             抜き出すため、位置には依存しない）。
     """
     extra: list[str] = []
     if cov_type == "cluster":
-        extra.append(cluster_col or "")
+        extra.append(cluster or "")
     elif cov_type == "hac":
         extra.append(str(hac_lag))
     if weight_col is not None:

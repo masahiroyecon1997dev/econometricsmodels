@@ -126,7 +126,7 @@ def _run_cluster_imbalanced_case() -> dict:
         entity_col="entity",
         time_col="time",
         two_way=False,
-        cluster_col="cluster_group",
+        cluster="cluster_group",
         dataset_source="synthetic",
         df_override=df,
     )
@@ -151,7 +151,7 @@ def _run_cluster_g2_case() -> dict:
         entity_col="entity",
         time_col="time",
         two_way=False,
-        cluster_col="cluster_group",
+        cluster="cluster_group",
         dataset_source="synthetic",
         df_override=df,
     )

@@ -54,7 +54,7 @@ get_robustcov_results`は`HC1`指定時に`getattr(self, "cov_HC1", None)`でモ
     python -m benchmark.nonlinear.references.statsmodels_ref --model logit \\
         --dataset-source wooldridge --dataset mroz \\
         --formula "inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6" \\
-        --cov-type cluster --cluster-col city
+        --cov-type cluster --cluster city
 """
 
 from __future__ import annotations
@@ -95,7 +95,7 @@ def run(
     dataset: str,
     formula: str | None,
     cov_type: str,
-    cluster_col: str | None = None,
+    cluster: str | None = None,
     confidence_level: float = 0.95,
     model: str = "logit",
     method: str = "newton",
@@ -164,7 +164,7 @@ def run(
         )
         fit_kwargs: dict = {"cov_type": sm_cov_type, "method": method}
         if sm_cov_type == "cluster":
-            fit_kwargs["cov_kwds"] = {"groups": pandas_df[cluster_col]}
+            fit_kwargs["cov_kwds"] = {"groups": pandas_df[cluster]}
 
         sm_model = smf_fit(formula=formula, data=pandas_df)
         fitted = sm_model.fit(disp=0, **fit_kwargs)
@@ -245,7 +245,7 @@ if __name__ == "__main__":
         "--formula", default=None, help="省略時はsyntheticのy,x列から自動生成"
     )
     parser.add_argument("--cov-type", default="classical")
-    parser.add_argument("--cluster-col", default=None)
+    parser.add_argument("--cluster", default=None)
     parser.add_argument("--confidence-level", type=float, default=0.95)
     parser.add_argument("--method", default="newton")
     args = parser.parse_args()
@@ -255,7 +255,7 @@ if __name__ == "__main__":
         args.dataset,
         args.formula,
         args.cov_type,
-        args.cluster_col,
+        args.cluster,
         args.confidence_level,
         args.model,
         args.method,

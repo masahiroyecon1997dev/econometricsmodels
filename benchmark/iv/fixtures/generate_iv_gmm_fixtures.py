@@ -236,7 +236,7 @@ def _run_cluster_case(
             instrument_cols=["z1", "z2"],
             weight_type=weight_type,
             cov_type=cov_type,
-            cluster_col="cluster_group",
+            cluster="cluster_group",
         )
     finally:
         tmp_path.unlink()

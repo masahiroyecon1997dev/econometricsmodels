@@ -394,7 +394,7 @@ class TobitResults:
         Returns:
             A list of dictionaries, one per explanatory variable
             (excluding the intercept). Keys are `param`, `dydx`,
-            `std_err`, `z`, `p_value`, `conf_low`, `conf_high` (see
+            `std_err`, `z_stat`, `p_value`, `conf_lower`, `conf_upper` (see
             `docs/spec/nonlinear-common.md` section 6).
 
         Raises:
@@ -409,10 +409,10 @@ class TobitResults:
                 "param": name,
                 "dydx": dydx,
                 "std_err": se,
-                "z": z,
+                "z_stat": z,
                 "p_value": p,
-                "conf_low": lower,
-                "conf_high": upper,
+                "conf_lower": lower,
+                "conf_upper": upper,
             }
             for name, dydx, se, z, p, lower, upper in zip(
                 raw.param_names,

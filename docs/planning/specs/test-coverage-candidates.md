@@ -1303,3 +1303,31 @@
   暫定rtolを実測値ベースの恒久的な計算式（または妥当な安全マージン）に
   置き換える。
 
+
+### 77. フィクスチャの係数側キー（`coef`/`se`）とAPIの名前（`params`/`std_errors`）が全系統で食い違っており、テスト側で読み替えている
+
+- **対象**: `tests/fixtures/benchmarks/*.json`（ols/wls/iv/iv_gmm/fe/re/logit/probit/tobit と各`*_crosscheck.json`）、
+  [benchmark/](../../../benchmark/)配下の各リファレンスアダプタ・`normalize.py`、
+  `tests/`配下の`ref["coef"]`/`ref["se"]`を読むテスト全般
+- **内容**: 各手法のAPIは`params`/`std_errors`/`t_stats`（または`z_stats`）/`p_values`/`conf_int`
+  だが、フィクスチャは`coef`/`se`/`t_stats`（または`z_stats`）/`p_values`/`conf_int`
+  （`coef`/`se`のみ名前が異なる）。テストは`_assert_dict_close(res.std_errors, ref["se"], ...)`の
+  ように読み替えている。限界効果側（`margeff`）は`std_err`/`z_stat`/`conf_lower`/`conf_upper`に
+  揃え済みだが、係数側は未着手。全系統のフィクスチャ再生成を伴うため、公開API命名の整理とは
+  切り離して扱った。
+- **気づいた経緯**: 2026-09-26、Issue #423 A1（`marginal_effects()`のキー統一）対応後の他系統確認中。
+- **状態**: 未対応。揃える場合は`coef`→`params`、`se`→`std_errors`とし、生成側アダプタ・
+  `normalize.py`・全系統の再生成・テスト側の参照を一括で更新する（要ユーザー判断）。
+
+### 78. IVのAPI名（`stats`/`stat`）とフィクスチャ名（`t_stats`/`z_stats`）が食い違っている
+
+- **対象**: [python_package/econometricsmodels/iv/iv.py](../../../python_package/econometricsmodels/iv/iv.py)
+  （`IvResults.stats`・`coef_table()`の`stat`キー）、`tests/fixtures/benchmarks/iv*.json`、
+  `tests/iv/`配下のテスト
+- **内容**: IVのAPIは、2SLSがt統計量・GMMがz統計量になるため汎用名`stats`/`stat`にしているが、
+  フィクスチャは`t_stats`（2SLS）/`z_stats`（GMM）。テストは`res.stats`を`ref["z_stats"]`と
+  照合している。名前自体の見直しはIssue #423 B2（`stats`→`test_stats`等）で扱うため、
+  B2の結論次第でAPI側・フィクスチャ側のどちらに揃えるかが変わる。
+- **気づいた経緯**: 2026-09-26、Issue #423 A1対応後の他系統確認中。
+- **状態**: 未対応（B2の判断待ち）。B2で名称を確定した後、フィクスチャ・テストの読み替えの
+  有無を合わせて見直す。

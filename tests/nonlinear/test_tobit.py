@@ -449,10 +449,10 @@ def test_marginal_effects_default_excludes_intercept(censored_dataset):
         "param",
         "dydx",
         "std_err",
-        "z",
+        "z_stat",
         "p_value",
-        "conf_low",
-        "conf_high",
+        "conf_lower",
+        "conf_upper",
     }
     for row in effects:
         assert expected_keys <= set(row.keys())

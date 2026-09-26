@@ -118,8 +118,8 @@ def _check_margeff(res, ref_margeff: dict, label: str) -> None:
             )
             _assert_close(
                 row["std_err"],
-                ref_stats["se"],
-                f"{label}/{at}/{name}/se",
+                ref_stats["std_err"],
+                f"{label}/{at}/{name}/std_err",
                 rtol=RTOL_MARGEFF_SE,
             )
 

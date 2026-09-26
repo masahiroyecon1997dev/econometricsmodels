@@ -91,15 +91,15 @@ def check_margeff(
             )
             assert_close(
                 row["std_err"],
-                ref_stats["se"],
-                f"{label}/{at}/{name}/se",
+                ref_stats["std_err"],
+                f"{label}/{at}/{name}/std_err",
                 rtol=rtol,
                 atol=atol,
             )
             assert_close(
-                row["z"],
-                ref_stats["z"],
-                f"{label}/{at}/{name}/z",
+                row["z_stat"],
+                ref_stats["z_stat"],
+                f"{label}/{at}/{name}/z_stat",
                 rtol=rtol,
                 atol=atol,
             )
@@ -111,16 +111,16 @@ def check_margeff(
                 atol=atol,
             )
             assert_close(
-                row["conf_low"],
-                ref_stats["conf_low"],
-                f"{label}/{at}/{name}/conf_low",
+                row["conf_lower"],
+                ref_stats["conf_lower"],
+                f"{label}/{at}/{name}/conf_lower",
                 rtol=rtol,
                 atol=atol,
             )
             assert_close(
-                row["conf_high"],
-                ref_stats["conf_high"],
-                f"{label}/{at}/{name}/conf_high",
+                row["conf_upper"],
+                ref_stats["conf_upper"],
+                f"{label}/{at}/{name}/conf_upper",
                 rtol=rtol,
                 atol=atol,
             )

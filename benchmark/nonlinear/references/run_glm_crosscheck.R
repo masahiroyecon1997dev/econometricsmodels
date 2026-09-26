@@ -185,11 +185,11 @@ format_margeff <- function(me_df) {
   for (i in seq_len(nrow(me_df))) {
     out[[me_df$term[i]]] <- list(
       dydx = me_df$estimate[i],
-      se = me_df$std.error[i],
-      z = me_df$statistic[i],
+      std_err = me_df$std.error[i],
+      z_stat = me_df$statistic[i],
       p_value = me_df$p.value[i],
-      conf_low = me_df$conf.low[i],
-      conf_high = me_df$conf.high[i]
+      conf_lower = me_df$conf.low[i],
+      conf_upper = me_df$conf.high[i]
     )
   }
   out

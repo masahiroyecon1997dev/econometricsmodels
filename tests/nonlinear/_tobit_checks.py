@@ -148,17 +148,17 @@ def _check_margeff(
                     rtol=rtol_point,
                     atol=atol,
                 )
-                for our_key, ref_key in (
-                    ("std_err", "se"),
-                    ("z", "z"),
-                    ("p_value", "p_value"),
-                    ("conf_low", "conf_low"),
-                    ("conf_high", "conf_high"),
+                for key in (
+                    "std_err",
+                    "z_stat",
+                    "p_value",
+                    "conf_lower",
+                    "conf_upper",
                 ):
                     assert_close(
-                        row[our_key],
-                        ref_stats[ref_key],
-                        f"{lbl}/{our_key}",
+                        row[key],
+                        ref_stats[key],
+                        f"{lbl}/{key}",
                         rtol=rtol_se,
                         atol=atol,
                     )

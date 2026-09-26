@@ -77,11 +77,11 @@ def _margeff_frame(fit_result, at: str) -> dict:
     return {
         str(name): {
             "dydx": float(row.iloc[0]),
-            "se": float(row.iloc[1]),
-            "z": float(row.iloc[2]),
+            "std_err": float(row.iloc[1]),
+            "z_stat": float(row.iloc[2]),
             "p_value": float(row.iloc[3]),
-            "conf_low": float(row.iloc[4]),
-            "conf_high": float(row.iloc[5]),
+            "conf_lower": float(row.iloc[4]),
+            "conf_upper": float(row.iloc[5]),
         }
         for name, row in sf.iterrows()
     }

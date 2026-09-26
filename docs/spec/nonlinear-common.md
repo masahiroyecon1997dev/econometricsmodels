@@ -262,7 +262,7 @@ MLEベースの非線形モデルは漸近理論が正規分布に基づいて�
 - `marginal_effects(at="overall" | "mean" | "median", ...)`: 限界効果。既定は`at="overall"`
   （AME、average marginal effects）。標準誤差はデルタ法で計算し、`fit()`時の`cov_params`を
   再利用する（再最適化不要）。Return形式は`coef_table`と同じ行指向
-  （`dydx`/`std_err`/`z`/`p_value`/`conf_low`/`conf_high`）。「見る/見ない」を切り替える
+  （`dydx`/`std_err`/`z_stat`/`p_value`/`conf_lower`/`conf_upper`。`dydx`以外は`coef_table`と同名）。「見る/見ない」を切り替える
   フラグは設けない（可変なのは`at`のみ）。
 - `predict()`: 予測確率（Logit/Probit）。
 - `pred_table()`: 分類の的中表（閾値依存のため、コアのReturnには含めない。Logit/Probit

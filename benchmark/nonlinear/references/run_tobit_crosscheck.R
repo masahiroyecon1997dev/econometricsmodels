@@ -286,10 +286,10 @@ margeff_at <- function(target, at) {
     se_j <- sqrt(as.numeric(t(jac) %*% v %*% jac))
     zj <- dydx[j] / se_j
     out[[names(beta)[j]]] <- list(
-      dydx = dydx[j], se = se_j, z = zj,
+      dydx = dydx[j], std_err = se_j, z_stat = zj,
       p_value = 2 * pnorm(-abs(zj)),
-      conf_low = dydx[j] - z_crit * se_j,
-      conf_high = dydx[j] + z_crit * se_j
+      conf_lower = dydx[j] - z_crit * se_j,
+      conf_upper = dydx[j] + z_crit * se_j
     )
   }
   out

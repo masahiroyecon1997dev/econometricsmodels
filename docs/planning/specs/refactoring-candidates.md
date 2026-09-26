@@ -1271,3 +1271,47 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **状態**: 未対応（着手要否はユーザー判断待ち。着手する場合は`parse_iv_cov_type`削除
   〔項目本体〕・`linear::common::parse_cov_type`の内部スタイル変更〔inline化〕・項目63の
   `extract_optional_group_key_column`導入を合わせて検討）
+
+### 65. `LogitOptions`/`ProbitOptions`/`TobitOptions::new`の`tol`既定値解決ロジックが3箇所で一字一句重複している
+
+- **対象**: [engine_pybind/src/nonlinear/logit.rs:138-142](../../../engine_pybind/src/nonlinear/logit.rs#L138-L142)、
+  [engine_pybind/src/nonlinear/probit.rs:137-141](../../../engine_pybind/src/nonlinear/probit.rs#L137-L141)、
+  [engine_pybind/src/nonlinear/tobit.rs:151-155](../../../engine_pybind/src/nonlinear/tobit.rs#L151-L155)
+  （いずれも`#[new]`コンストラクタ内の`let tol = tol.unwrap_or(if method.eq_ignore_ascii_case
+  ("newton") { 1e-6 } else { 1e-8 });`）
+- **内容**: ユーザー指摘（2026-09-23、「ProbitOptionsのtolの分岐がprobit, tobitで重複している
+  気がする」）を受けて確認したところ、3ファイルとも一字一句同一（コメントも「同じ理由」と
+  明記済み）だった。各pyclassの`#[new]`コンストラクタ自体はフラットなkwargs surfaceを保つ
+  意図的な設計（`nonlinear/CLAUDE.md`「フィールド重複は意図的」参照）のため共通base化は
+  しないが、この既定値解決の**計算ロジックだけ**は`nonlinear/common.rs`に
+  `fn resolve_mle_tol_default(method: &str, tol: Option<f64>) -> f64`として切り出し、
+  3つのコンストラクタから呼ぶ形にできる（`parse_method`と同じ「計算ロジックのみ共有」
+  パターン）。Python公開APIの形を変えずに重複だけ解消でき、リスクは低い。
+- **気づいた経緯**: 2026-09-23、`nonlinear/logit.rs`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 66.【要設計検討】`predict_for`の共通部分（`x_names`計算＋列抽出）がOLS/WLS/Logit/Probit/Tobitの5ファイルで重複している。Issue #347のスコープ拡張候補
+
+- **対象**: [engine_pybind/src/linear/ols.rs](../../../engine_pybind/src/linear/ols.rs)の
+  `OLSResult::predict_for`、[engine_pybind/src/linear/wls.rs](../../../engine_pybind/src/linear/wls.rs)の
+  `WLSResult::predict_for`、[engine_pybind/src/nonlinear/logit.rs:256-264](../../../engine_pybind/src/nonlinear/logit.rs#L256-L264)の
+  `LogitResult::predict_for`、`probit.rs`/`tobit.rs`の同名メソッド
+- **内容**: ユーザー指摘（2026-09-23、「`predict_for`の処理がlinear系統と全く同じである。
+  手法全体で共通している？」「プロパティやメソッドに関して抽象化や継承やダックタイピングは
+  使えない？engine_pybind/srcはできないのだろうか」）を受けて比較した。`has_intercept`
+  取得→`x_column_names`での列名計算→`extract_f64_columns`での列抽出、という前半3行は
+  5ファイルとも完全に同一構造で、最後の1行（実際の予測値計算）だけが「フリー関数へ
+  `params`/`has_intercept`を渡す」（OLS/WLS）か「estimatorのメソッド呼び出し」
+  （Logit/Probit/Tobit）かで異なる。PyO3の制約上`#[pyclass]`自体は各手法で独立した
+  具体型である必要があるが、Pythonに公開しない内部ロジックはトレイトで共有できる
+  （例: `trait PredictSource { fn param_names(&self) -> &[String]; fn has_intercept
+  (&self) -> bool; fn predict_from_columns(&self, x_columns: &[Vec<f64>]) -> Vec<f64>; }`
+  を各`*Result`が実装し、`predict_for`本体を1つの自由関数に共通化する）。これは項目62
+  （Issue #347、「`engine::nonlinear::common`への共通アクセサtrait定義＋プレーン構造体への
+  内部コンポジション＋薄い`#[getter]`委譲」という設計で合意済み）と同種の解決策であり、
+  Issue #347のスコープを「Logit/Probit/TobitのResult構築」から「OLS/WLSも含めた
+  `predict_for`の共通化」へ拡張する形で対応するのが筋が良いと考える。`z_stats`/`t_stats`の
+  ような意味自体が異なるフィールドまで無理に1つのトレイトへ統一することは狙わない
+  （Issue #347が「読み出し側アクセサ」という限定範囲に留めているのと同じ考え方）。
+- **気づいた経緯**: 2026-09-23、`nonlinear/logit.rs`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否・Issue #347との統合要否はユーザー判断待ち）

@@ -451,9 +451,13 @@ def test_gmm_weight_type_options_run(
     """
     df = clustered_dataset if gmm_weight_type == "cluster" else iv_dataset
     kwargs = (
-        {"cluster_col": "cluster_group"} if gmm_weight_type == "cluster" else {}
+        {"cluster_col": "cluster_group"}
+        if gmm_weight_type == "cluster"
+        else {}
     )
-    options = IVOptions(method="gmm", gmm_weight_type=gmm_weight_type, **kwargs)
+    options = IVOptions(
+        method="gmm", gmm_weight_type=gmm_weight_type, **kwargs
+    )
     res = our_fit(df, options=options)
     assert res.converged
 
@@ -494,9 +498,13 @@ def test_weight_type_label(iv_dataset, clustered_dataset, gmm_weight_type):
     """
     df = clustered_dataset if gmm_weight_type == "cluster" else iv_dataset
     kwargs = (
-        {"cluster_col": "cluster_group"} if gmm_weight_type == "cluster" else {}
+        {"cluster_col": "cluster_group"}
+        if gmm_weight_type == "cluster"
+        else {}
     )
-    options = IVOptions(method="gmm", gmm_weight_type=gmm_weight_type, **kwargs)
+    options = IVOptions(
+        method="gmm", gmm_weight_type=gmm_weight_type, **kwargs
+    )
     res = our_fit(df, options=options)
     assert res.gmm_weight_type == gmm_weight_type
 
@@ -538,13 +546,19 @@ def test_method_is_case_insensitive(iv_dataset, method, expected_label):
 def test_weight_type_is_case_insensitive(
     iv_dataset, clustered_dataset, gmm_weight_type, expected_label
 ):
-    df = clustered_dataset if gmm_weight_type.lower() == "cluster" else iv_dataset
+    df = (
+        clustered_dataset
+        if gmm_weight_type.lower() == "cluster"
+        else iv_dataset
+    )
     kwargs = (
         {"cluster_col": "cluster_group"}
         if gmm_weight_type.lower() == "cluster"
         else {}
     )
-    options = IVOptions(method="gmm", gmm_weight_type=gmm_weight_type, **kwargs)
+    options = IVOptions(
+        method="gmm", gmm_weight_type=gmm_weight_type, **kwargs
+    )
     res = our_fit(df, options=options)
     assert res.gmm_weight_type == expected_label
 

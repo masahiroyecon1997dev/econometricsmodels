@@ -333,7 +333,10 @@ def test_other_weight_types_match_linearmodels(fixtures, gmm_weight_type):
         kwargs["cluster_col"] = "cluster_group"
 
     options = IVOptions(
-        method="gmm", gmm_weight_type=gmm_weight_type, cov_type="classical", **kwargs
+        method="gmm",
+        gmm_weight_type=gmm_weight_type,
+        cov_type="classical",
+        **kwargs,
     )
     res = IV(
         df,

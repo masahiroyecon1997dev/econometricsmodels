@@ -190,7 +190,10 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
                     )
                 fixtures[scenario]["no_intercept"][cov_type] = entry
             fixtures[scenario]["no_intercept"]["cluster"] = _run_cluster_case(
-                df, csv_path, formula_no_intercept, suffix="_no_intercept_cluster"
+                df,
+                csv_path,
+                formula_no_intercept,
+                suffix="_no_intercept_cluster",
             )
 
             # confidence_level非既定（0.95以外）。全cov_type

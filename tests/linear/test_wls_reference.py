@@ -211,9 +211,7 @@ def test_no_intercept_matches_statsmodels(fixtures, cov_type):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
-    options = WLSOptions(
-        include_intercept=False, cov_type=cov_type, **kwargs
-    )
+    options = WLSOptions(include_intercept=False, cov_type=cov_type, **kwargs)
     res = WLS(
         df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
     ).fit()
@@ -236,7 +234,9 @@ def test_no_intercept_cluster_matches_statsmodels(fixtures):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, 10)
     options = WLSOptions(
-        include_intercept=False, cov_type="cluster", cluster_col="cluster_group"
+        include_intercept=False,
+        cov_type="cluster",
+        cluster_col="cluster_group",
     )
     res = WLS(
         df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options

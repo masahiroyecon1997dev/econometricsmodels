@@ -162,8 +162,8 @@ Per-method detail — n- and k-axis sweeps, every `cov_type`, the non-default op
 All of the following are engine-side and under investigation.
 
 - **Multi-threaded linear algebra is unstable under load** ([#283](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/283)). Under contention on a many-core machine the pure-Rust linear-algebra backend can slow down by 20x or more, so every measurement above pins it to a single thread; multi-core speedup is not reflected here.
-- **Non-default optimizers are slow for Logit / Probit / Tobit** ([#285](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/285)). The default Newton–Raphson is fine; selecting `method="bfgs"` or `"lbfgs"` is currently several times to ~40x slower.
-- **Tobit `method="bfgs"` diverges at n ≥ 10,000** ([#292](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/292)) with a line-search NaN/Inf error. Use the default Newton, or L-BFGS.
+- **Non-default optimizers are slow for Logit / Probit / Tobit** ([#285](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/285)). The default Newton–Raphson is fine; selecting `solver="bfgs"` or `"lbfgs"` is currently several times to ~40x slower.
+- **Tobit `solver="bfgs"` diverges at n ≥ 10,000** ([#292](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/292)) with a line-search NaN/Inf error. Use the default Newton, or L-BFGS.
 - **Probit / Tobit Newton Hessian goes singular at large n** ([#284](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/284) Probit, [#291](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/291) Tobit) for some datasets — this is why the table above stops at n = 100,000 for those two. The statsmodels / R reference implementations converge on the same data.
 
 ## License

@@ -113,7 +113,7 @@ def build_fixtures() -> dict:
     # 同じ理由で ValidationError になる。エラーパスは
     # test_logit_validation.py::test_mroz_cluster_cov_type_raises_validation_error。
 
-    fixtures["method"] = {
+    fixtures["solver"] = {
         method: run(
             dataset_source="synthetic",
             dataset="baseline",

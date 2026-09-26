@@ -8,11 +8,11 @@
 
 ## Solver options
 
-`LogitOptions.method` selects the optimization algorithm used to maximize the log-likelihood: `"newton"` (default, Newton-Raphson), `"bfgs"`, or `"lbfgs"`. All three converge to the same maximum-likelihood estimate; they differ in iteration cost and behavior on ill-conditioned problems. `max_iter` and `tol` control the iteration limit and the gradient-norm convergence threshold. When the solver does not converge within `max_iter` iterations, a `ComputationError` is raised unless `raise_on_non_convergence=False`, in which case `LogitResults.converged` is `False` instead.
+`LogitOptions.solver` selects the optimization algorithm used to maximize the log-likelihood: `"newton"` (default, Newton-Raphson), `"bfgs"`, or `"lbfgs"`. All three converge to the same maximum-likelihood estimate; they differ in iteration cost and behavior on ill-conditioned problems. `max_iter` and `tol` control the iteration limit and the gradient-norm convergence threshold. When the solver does not converge within `max_iter` iterations, a `ComputationError` is raised unless `raise_on_non_convergence=False`, in which case `LogitResults.converged` is `False` instead.
 
 ## Marginal effects
 
-`LogitResults.marginal_effects()` computes `dy/dx` with delta-method standard errors, evaluated at `"overall"` (average marginal effects, the default), `"mean"`, or `"median"`. The constant term is excluded from the output. See [Getting Started](../getting-started.md#marginal-effects) for an example.
+`LogitResults.marginal_effects()` computes `dy/dx` with delta-solver standard errors, evaluated at `"overall"` (average marginal effects, the default), `"mean"`, or `"median"`. The constant term is excluded from the output. See [Getting Started](../getting-started.md#marginal-effects) for an example.
 
 ::: econometricsmodels.Logit
     options:

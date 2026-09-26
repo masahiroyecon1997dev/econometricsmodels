@@ -160,8 +160,7 @@ fn fit_tobit(
 /// instruments : list[str]
 ///     Column names of the excluded instruments (must not overlap with `x_exog`).
 /// options : IVOptions
-///     Estimation options. `options.method` selects "2sls" (the only method currently
-///     implemented) or "gmm" (not yet implemented, raises `ValidationError`).
+///     Estimation options. `options.estimator` selects "2sls" (default) or "gmm".
 #[pyfunction]
 fn fit_iv(
     data: &Bound<'_, PyAny>,

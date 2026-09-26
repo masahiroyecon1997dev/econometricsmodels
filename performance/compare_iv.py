@@ -88,10 +88,10 @@ def _fit_once_engine(ctx: FitContext):
     from econometricsmodels import IV, IVOptions
 
     if ctx.cov_type == "classical":
-        options = IVOptions(method=ctx.method, cov_type="classical")
+        options = IVOptions(estimator=ctx.method, cov_type="classical")
     elif ctx.cov_type == "hac":
         options = IVOptions(
-            method=ctx.method, cov_type="hac", hac_lags=ctx.hac_lags
+            estimator=ctx.method, cov_type="hac", hac_lags=ctx.hac_lags
         )
     else:
         raise ValueError(f"unknown cov_type: {ctx.cov_type!r}")

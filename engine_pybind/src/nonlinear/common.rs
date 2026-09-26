@@ -7,7 +7,7 @@
 //! `LeastSquaresError`と共有する6種のバリデーションエラー）は`crate::errors::
 //! common_error_to_pyerr`に委譲する（系統ごとに同じ判定ロジックを重複させない）。
 
-use engine::nonlinear::common::{CovType, MarginalEffectsAt, Method, MleError};
+use engine::nonlinear::common::{CovType, MarginalEffectsAt, MleError, SolverType};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
@@ -114,18 +114,18 @@ pub(crate) fn parse_cov_type(
     }
 }
 
-/// `method`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::Method`に
+/// `solver`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::SolverType`に
 /// パースする。Logit/Probit/Tobit共通（`parse_cov_type`と同じ理由でここに集約）。
 ///
 /// # Errors
-/// `method`が既知の値のいずれでもない: `ValidationError`
-pub(crate) fn parse_method(method_lower: &str) -> PyResult<Method> {
-    match method_lower {
-        "newton" => Ok(Method::Newton),
-        "bfgs" => Ok(Method::Bfgs),
-        "lbfgs" => Ok(Method::Lbfgs),
+/// `solver`が既知の値のいずれでもない: `ValidationError`
+pub(crate) fn parse_solver_type(solver_lower: &str) -> PyResult<SolverType> {
+    match solver_lower {
+        "newton" => Ok(SolverType::Newton),
+        "bfgs" => Ok(SolverType::Bfgs),
+        "lbfgs" => Ok(SolverType::Lbfgs),
         other => Err(ValidationError::new_err(format!(
-            "unknown method: '{other}'. Expected one of 'newton', 'bfgs', or 'lbfgs'"
+            "unknown solver: '{other}'. Expected one of 'newton', 'bfgs', or 'lbfgs'"
         ))),
     }
 }
@@ -167,7 +167,7 @@ mod tests {
     }
 
     // `parse_marginal_effects_at`自体は渡された文字列をそのまま照合する（`parse_cov_type`/
-    // `parse_method`と同じ設計）。大文字小文字を区別しない処理は呼び出し側
+    // `parse_solver_type`と同じ設計）。大文字小文字を区別しない処理は呼び出し側
     // （`LogitResult::marginal_effects`/`ProbitResult::marginal_effects`）が
     // `.to_lowercase()`してから渡すことで実現するため、ここでは小文字化済みの入力を渡す。
     #[test]

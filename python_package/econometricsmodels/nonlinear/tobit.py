@@ -80,7 +80,7 @@ class Tobit:
                 the censoring bounds themselves are invalid,
                 insufficient observations, no uncensored observations,
                 `confidence_level` out of range, an unknown
-                `cov_type`/`method` string, an `x` column named
+                `cov_type`/`solver` string, an `x` column named
                 `"const"`/`"sigma"`, etc.). A subclass of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. non-convergence, a singular
@@ -237,9 +237,9 @@ class TobitResults:
         return self._raw.cov_type
 
     @property
-    def method(self) -> str:
+    def solver(self) -> str:
         """Optimization solver actually used (normalized to lowercase)."""
-        return self._raw.method
+        return self._raw.solver
 
     @property
     def lower(self) -> float | None:
@@ -372,7 +372,7 @@ class TobitResults:
         target: str = "expected_observed",
         confidence_level: float = 0.95,
     ) -> list[dict[str, float | str]]:
-        """Marginal effects (`dy/dx`) with delta-method standard errors.
+        """Marginal effects (`dy/dx`) with delta-solver standard errors.
 
         Unlike Logit/Probit, this is Tobit's own implementation (not
         the shared `dydx_and_jacobian` pattern) because the formula

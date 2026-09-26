@@ -45,7 +45,7 @@ from econometricsmodels import ComputationError, ValidationError
 
 from benchmark.common import imbalanced_cluster_groups
 
-# ── test_<method>_api.py: 成功パス・結果型 ──────────────────────────
+# ── test_<solver>_api.py: 成功パス・結果型 ──────────────────────────
 
 
 def check_fit_succeeds_and_returns_results(
@@ -61,7 +61,7 @@ def check_default_options_use_classical_and_converge(dataset, estimator_cls):
     assert res.converged
 
 
-# ── test_<method>_api.py: API構造 ───────────────────────────────────
+# ── test_<solver>_api.py: API構造 ───────────────────────────────────
 
 
 def check_coef_table_structure(dataset, estimator_cls):
@@ -113,17 +113,17 @@ def check_param_names_include_const_first(dataset, estimator_cls):
     assert res.param_names == ["const", "x1", "x2"]
 
 
-# ── test_<method>_api.py: オプションの反映 ──────────────────────────
+# ── test_<solver>_api.py: オプションの反映 ──────────────────────────
 #
-# cov_type 以外の Options フィールド（method・include_intercept・
+# cov_type 以外の Options フィールド（solver・include_intercept・
 # confidence_level・raise_on_non_convergence）が、engine_pybind 側の
 # 文字列パース・列抽出・分岐ロジックを経て正しく反映されることを確認する。
 
 
 def check_method_option_converges_to_same_params(
-    dataset, estimator_cls, options_cls, method
+    dataset, estimator_cls, options_cls, solver
 ):
-    """`method`（newton/bfgs/lbfgs）はいずれも同じ最尤解に収束する。
+    """`solver`（newton/bfgs/lbfgs）はいずれも同じ最尤解に収束する。
 
     engineのRust単体テストは3手法の一致を検証済みだが、engine_pybindの
     文字列→`Method`パースやpython_packageラッパーの配線（例:
@@ -135,7 +135,7 @@ def check_method_option_converges_to_same_params(
         dataset,
         y="y",
         x=["x1", "x2"],
-        options=options_cls(method=method),
+        options=options_cls(solver=solver),
     ).fit()
     assert res.converged
     for name in res.param_names:
@@ -151,7 +151,7 @@ def check_include_intercept_false_omits_const_and_converges(
     `test_<method>_reference.py::test_include_intercept_false_matches_statsmodels`）。
 
     `include_intercept`の値に関わらず`df_model`は常に`k-1`（`docs/spec/
-    <method>-spec.md`参照）となるため、その旨も確認する
+    <solver>-spec.md`参照）となるため、その旨も確認する
     （`testing-completeness-reviewer`指摘）。
     """
     res = estimator_cls(
@@ -197,7 +197,7 @@ def check_raise_on_non_convergence_false_returns_result_without_raising(
     """`raise_on_non_convergence=False`だと未収束でも例外を投げず、
     `converged=False`の`Results`を返す（engine側のもう一方の分岐、APIレベル
     での配線確認。例外を送出する既定挙動側は
-    `test_<method>_validation.py::test_non_convergence_raises_computation_error_with_tiny_max_iter`）。
+    `test_<solver>_validation.py::test_non_convergence_raises_computation_error_with_tiny_max_iter`）。
 
     `cov_type`は`classical`以外（`opg`/`hc0`/`hc1`/`cluster`）も検証する。
     打ち切り点（収束未満のパラメータ）でのHessian/スコア評価はcov_typeの
@@ -246,35 +246,35 @@ def check_cov_type_label(dataset, estimator_cls, options_cls):
 
 
 def check_method_label(dataset, estimator_cls, options_cls):
-    """`res.method`が指定した`method`（正規化済み小文字）を反映すること
+    """`res.solver`が指定した`solver`（正規化済み小文字）を反映すること
     （`check_cov_type_label`と同型）。
     """
-    for method in ["newton", "bfgs", "lbfgs"]:
+    for solver in ["newton", "bfgs", "lbfgs"]:
         res = estimator_cls(
             dataset,
             y="y",
             x=["x1", "x2"],
-            options=options_cls(method=method),
+            options=options_cls(solver=solver),
         ).fit()
-        assert res.method == method
+        assert res.solver == solver
 
 
 def check_method_is_case_insensitive(
-    dataset, estimator_cls, options_cls, method, expected_label
+    dataset, estimator_cls, options_cls, solver, expected_label
 ):
-    """`method`が大文字小文字を区別しないこと（`check_cov_type_is_case_insensitive`
+    """`solver`が大文字小文字を区別しないこと（`check_cov_type_is_case_insensitive`
     と同型）。
     """
-    options = options_cls(method=method)
+    options = options_cls(solver=solver)
     res = estimator_cls(dataset, y="y", x=["x1", "x2"], options=options).fit()
-    assert res.method == expected_label
+    assert res.solver == expected_label
 
 
 def check_cov_type_is_case_insensitive(
     dataset, estimator_cls, options_cls, cov_type, expected_label
 ):
     """`cov_type`が大文字小文字を区別しないこと（`engine_pybind`側の
-    `build_<method>_input`のRust単体テストと対になる、Python API境界での
+    `build_<solver>_input`のRust単体テストと対になる、Python API境界での
     確認。OLS/WLSの`test_cov_type_is_case_insensitive`と同型）。
     """
     kwargs = {"cluster_col": "cluster"} if cov_type == "CLUSTER" else {}
@@ -306,7 +306,7 @@ def check_nonrobust_is_alias_for_classical(
         assert res.std_errors[name] == classical_res.std_errors[name], name
 
 
-# ── test_<method>_api.py: predict() ─────────────────────────────────
+# ── test_<solver>_api.py: predict() ─────────────────────────────────
 
 
 def check_predict_returns_row_oriented_probabilities(dataset, estimator_cls):
@@ -336,7 +336,7 @@ def check_predict_new_data_returns_row_oriented_probabilities(
         assert 0.0 <= row["probability"] <= 1.0
 
 
-# ── test_<method>_api.py: augment() ─────────────────────────────────
+# ── test_<solver>_api.py: augment() ─────────────────────────────────
 
 
 def check_augment_none_returns_training_data_with_probability_column(
@@ -407,7 +407,7 @@ def check_augment_without_intercept_matches_predict(
     assert augmented_new["probability"].to_list() == expected_new
 
 
-# ── test_<method>_api.py: pred_table() ──────────────────────────────
+# ── test_<solver>_api.py: pred_table() ──────────────────────────────
 
 
 def check_pred_table_default_threshold_sums_to_n_obs(dataset, estimator_cls):
@@ -437,7 +437,7 @@ def check_pred_table_actual_counts_invariant_to_threshold(
     assert row_totals(table_default) == row_totals(table_other)
 
 
-# ── test_<method>_api.py: marginal_effects() ────────────────────────
+# ── test_<solver>_api.py: marginal_effects() ────────────────────────
 
 
 def check_marginal_effects_default_excludes_intercept(dataset, estimator_cls):
@@ -477,7 +477,7 @@ def check_marginal_effects_at_is_case_insensitive(dataset, estimator_cls):
     )
 
 
-# ── test_<method>_validation.py: ValidationError（入力データ） ──────
+# ── test_<solver>_validation.py: ValidationError（入力データ） ──────
 
 
 def check_y_in_x_raises(dataset, estimator_cls):
@@ -680,7 +680,7 @@ def check_insufficient_observations_raises(dataset, estimator_cls):
         estimator_cls(df, y="y", x=["x1", "x2"]).fit()
 
 
-# ── test_<method>_validation.py: ValidationError（predict()のnew_data） ──
+# ── test_<solver>_validation.py: ValidationError（predict()のnew_data） ──
 #
 # OLSの`test_predict_missing_column_raises`等と同型。
 
@@ -767,7 +767,7 @@ def check_augment_missing_column_raises(dataset, estimator_cls):
         res.augment(new_data)
 
 
-# ── test_<method>_validation.py: ValidationError（オプション） ─────
+# ── test_<solver>_validation.py: ValidationError（オプション） ─────
 
 
 def check_unknown_cov_type_raises(
@@ -789,20 +789,20 @@ def check_unknown_cov_type_raises(
 
 
 def check_unknown_method_raises(
-    dataset, estimator_cls, options_cls, method="bogus"
+    dataset, estimator_cls, options_cls, solver="bogus"
 ):
-    """未知の`method`（空文字列を含む）は`ValidationError`
+    """未知の`solver`（空文字列を含む）は`ValidationError`
     （テスト網羅性候補・項目46）。
     """
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_METHOD_NONLINEAR, other=method),
+        match=escaped(msgs.UNKNOWN_METHOD_NONLINEAR, other=solver),
     ):
         estimator_cls(
             dataset,
             y="y",
             x=["x1", "x2"],
-            options=options_cls(method=method),
+            options=options_cls(solver=solver),
         ).fit()
 
 
@@ -935,7 +935,7 @@ def check_cluster_col_nonexistent_column_raises(
         estimator_cls(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
-# ── test_<method>_validation.py: ValidationError（marginal_effects()） ─
+# ── test_<solver>_validation.py: ValidationError（marginal_effects()） ─
 
 
 def check_marginal_effects_unknown_at_raises(dataset, estimator_cls):
@@ -961,27 +961,27 @@ def check_marginal_effects_confidence_level_out_of_range_raises(
         res.marginal_effects(confidence_level=1.5)
 
 
-# ── test_<method>_validation.py: ComputationError ───────────────────
+# ── test_<solver>_validation.py: ComputationError ───────────────────
 
 
 def check_perfect_multicollinearity_raises_computation_error(
-    estimator_cls, dataset_prefix, options_cls, method
+    estimator_cls, dataset_prefix, options_cls, solver
 ):
     """完全な多重共線性（合成データセット）は数値比較の対象外
     （`testing-policy.md`「テストの3系統」）。想定エラー（`ComputationError`）が
-    発生することのみを確認する。`method`（newton/bfgs/lbfgs）でparametrizeする。
+    発生することのみを確認する。`solver`（newton/bfgs/lbfgs）でparametrizeする。
 
-    以前は、この`method`網羅を`check_singular_hessian_raises_computation_error`
+    以前は、この`solver`網羅を`check_singular_hessian_raises_computation_error`
     （インラインの極小データ、`x2=2*x1`直書き）が担っていた。`newton`は
     `newton_step`内のQR、`bfgs`/`lbfgs`は収束後の`observed_information_cov_params`と
-    いう`method`依存の別経路で特異性を検出しており、過去に`bfgs`だけ検出漏れした
+    いう`solver`依存の別経路で特異性を検出しており、過去に`bfgs`だけ検出漏れした
     実バグの回帰ガードだった。その後`engine`内の検出経路は`fit()`冒頭の列ピボットQR
-    ランクチェック（`method`非依存の単一経路、`SingularDesignMatrix`）に一本化された
-    が、**`engine_pybind`側のmethod文字列パース（`"bfgs"`/`"lbfgs"` → `EngineMethod`）
-    と配線はmethod固有のまま**なので、「非既定methodの文字列 × 特異入力 ×
+    ランクチェック（`solver`非依存の単一経路、`SingularDesignMatrix`）に一本化された
+    が、**`engine_pybind`側のsolver文字列パース（`"bfgs"`/`"lbfgs"` → `EngineMethod`）
+    と配線はsolver固有のまま**なので、「非既定solverの文字列 × 特異入力 ×
     `ComputationError`」を踏むAPI境界テストは引き続き必要（testing-completeness-
     reviewer指摘）。インラインの極小データはCSVフィクスチャ版へ統合した
-    （`engine`側の`method`×`cov_type`網羅は
+    （`engine`側の`solver`×`cov_type`網羅は
     `fit_returns_singular_design_matrix_error_for_perfectly_collinear_design_matrix`
     1本に集約）。
     """
@@ -993,23 +993,23 @@ def check_perfect_multicollinearity_raises_computation_error(
             df,
             y="y",
             x=["x1", "x2", "x3"],
-            options=options_cls(method=method),
+            options=options_cls(solver=solver),
         ).fit()
 
 
 def check_complete_separation_raises_computation_error(
-    estimator_cls, dataset_prefix, options_cls, method
+    estimator_cls, dataset_prefix, options_cls, solver
 ):
     """真の完全分離（合成データセット、`y`が`x1`の符号のみで決定論的に決まり
     有限MLEが存在しない）は数値比較の対象外（`testing-policy.md`「テストの3系統」）。
-    想定エラー（`ComputationError`）が発生することのみを確認する。`method`
+    想定エラー（`ComputationError`）が発生することのみを確認する。`solver`
     （newton/bfgs/lbfgs）でparametrizeする。
 
-    実際に発生する例外の**サブタイプはmethodによって異なる**（実測: newton/lbfgsは
+    実際に発生する例外の**サブタイプはsolverによって異なる**（実測: newton/lbfgsは
     `SeparationSuspected`、bfgsは`max_iter`到達による`NonConvergence`になりやすい）
     ため、基底クラス`ComputationError`のみをアサートする（`check_perfect_
     multicollinearity_raises_computation_error`と同型の設計だが、あちらは
-    `method`によらず常に`SingularDesignMatrix`である点が異なる）。
+    `solver`によらず常に`SingularDesignMatrix`である点が異なる）。
 
     以前は「完全分離データは勾配ノルムのアンダーフローにより誤って収束済みと
     判定されうる」という既知の限界（`docs/spec/logit-spec.md`参照）により、
@@ -1026,12 +1026,12 @@ def check_complete_separation_raises_computation_error(
             df,
             y="y",
             x=x_cols,
-            options=options_cls(method=method),
+            options=options_cls(solver=solver),
         ).fit()
 
 
 def check_complete_separation_with_raise_on_non_convergence_false(
-    estimator_cls, dataset_prefix, options_cls, method
+    estimator_cls, dataset_prefix, options_cls, solver
 ):
     """完全分離データ（`check_complete_separation_raises_computation_error`と
     同じフィクスチャ）で`raise_on_non_convergence=False`を指定した場合の挙動を
@@ -1049,7 +1049,7 @@ def check_complete_separation_with_raise_on_non_convergence_false(
     """
     df = pl.read_csv(DATA_DIR / f"{dataset_prefix}_complete_separation.csv")
     x_cols = [c for c in df.columns if c != "y"]
-    options = options_cls(method=method, raise_on_non_convergence=False)
+    options = options_cls(solver=solver, raise_on_non_convergence=False)
     try:
         res = estimator_cls(df, y="y", x=x_cols, options=options).fit()
     except ComputationError:
@@ -1070,7 +1070,7 @@ def check_non_convergence_raises_computation_error_with_tiny_max_iter(
     `check_separation_suspected_raises_computation_error_for_near_separation_data`
     参照）を返すため、`NonConvergence`自体の発生確認には使えない。そのため
     `NonConvergence`の発生確認は、専用データセットに頼らずmax_iterを
-    人為的に小さくする方法で行う（`docs/spec/<method>-spec.md`参照）。
+    人為的に小さくする方法で行う（`docs/spec/<solver>-spec.md`参照）。
     """
     with pytest.raises(ComputationError):
         estimator_cls(
@@ -1120,7 +1120,7 @@ class BinaryChoiceReferenceConfig:
     cov_types: Sequence[str]
     rtol: float
     atol: float
-    rtol_method: float
+    rtol_solver: float
     near_separation_tol: float
 
     def load_fixtures(self) -> dict:
@@ -1141,7 +1141,7 @@ class BinaryChoiceReferenceConfig:
         self, ours: dict[str, float], ref: dict[str, float], label: str
     ) -> None:
         assert_dict_close(
-            ours, ref, label, rtol=self.rtol_method, atol=self.atol
+            ours, ref, label, rtol=self.rtol_solver, atol=self.atol
         )
 
     def check_margeff(self, res, ref_margeff: dict, label: str) -> None:
@@ -1288,26 +1288,26 @@ def check_mroz_cluster_cov_type_raises_validation_error(
         estimator_cls(df, y="inlf", x=MROZ_X, options=options).fit()
 
 
-def check_method_matches_statsmodels(
-    config: BinaryChoiceReferenceConfig, fixtures, method
+def check_solver_matches_statsmodels(
+    config: BinaryChoiceReferenceConfig, fixtures, solver
 ) -> None:
-    """`method="bfgs"/"lbfgs"`が主リファレンス（statsmodelsの同じmethod）と
+    """`solver="bfgs"/"lbfgs"`が主リファレンス（statsmodelsの同じsolver）と
     フルの統計量（std_errors含む）で一致すること。
 
-    既定の`method="newton"`のみ全シナリオ×cov_typeで数値照合しており、
-    bfgs/lbfgsは`test_<method>_api.py::test_method_option_converges_to_same_params`
+    既定の`solver="newton"`のみ全シナリオ×cov_typeで数値照合しており、
+    bfgs/lbfgsは`test_<solver>_api.py::test_method_option_converges_to_same_params`
     で自身のnewton結果とparamsのみ緩い許容誤差(rel=1e-4)で比較していたが、
     主リファレンスに対するフルの統計量照合が無かった
     （`testing-completeness-reviewer`指摘）。
     """
     df = pl.read_csv(config.dataset_path("baseline"))
-    options = config.options_cls(cov_type="classical", method=method)
+    options = config.options_cls(cov_type="classical", solver=solver)
     res = config.estimator_cls(
         df, y="y", x=["x1", "x2", "x3"], options=options
     ).fit()
 
-    ref = fixtures["method"][method]
-    label = f"method/{method}"
+    ref = fixtures["solver"][solver]
+    label = f"solver/{solver}"
     config.assert_dict_close_method(res.params, ref["coef"], f"{label}/coef")
     config.assert_dict_close_method(res.std_errors, ref["se"], f"{label}/se")
     assert res.converged == ref["converged"], f"{label}/converged"

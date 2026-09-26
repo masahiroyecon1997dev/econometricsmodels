@@ -13,7 +13,7 @@
 - **`predict()`はout-of-sample（`new_data`引数）対応済み**: `target`と`new_data`は独立したキーワード引数（`predict(target="expected_observed", new_data=None)`）。`target`の3種はどちらの経路でも同じように使える。`censoring_fit_check()`のout-of-sample対応は別途トラッキング（引き続き未対応）。
 - **`augment(target="expected_observed", new_data=None)`も実装済み**: `predict()`と同じ`target`/`new_data`。追加する列名はLogit/Probitの固定`"probability"`とは異なり`"predicted_{target}"`（例: `"predicted_expected_observed"`）。理由: `target`ごとに`predict()`の意味が変わるため、固定名だと同じDataFrameに複数の`target`を積み上げようとした2回目の`augment()`が列名衝突で失敗する（ユーザー提案・確認済み、`engine_pybind/src/nonlinear/CLAUDE.md`参照）。
 - **打ち切り境界（`lower`/`upper`）関連の追加バリデーション**: `TobitOptions.lower`/`upper`が両方`None`（`InvalidCensoringBounds`）、`y`が境界外（`YOutOfCensoringBounds`）、非打ち切り観測が1件も無い（`NoUncensoredObservations`）はいずれも`engine`層で検証され`ValidationError`になる。`x`に`"sigma"`という列名がある場合も`ValidationError`（`"sigma"`合成パラメータ名との衝突、`engine_pybind`の`validate_no_sigma_collision`）。
-- **完全な多重共線性の検出経路**: Logitは`method`（newton/bfgs/lbfgs）によって検出経路が異なる（`newton_step`のQR分解 vs 収束後の`observed_information_cov_params`）が、Tobitは`ols_initial_params`のQR検証が`method`に関わらず常に最初に実行されるため、`method`をparametrizeしなくても`ComputationError`（`SingularDesignMatrix`）を一貫して検出できる。
+- **完全な多重共線性の検出経路**: Logitは`solver`（newton/bfgs/lbfgs）によって検出経路が異なる（`newton_step`のQR分解 vs 収束後の`observed_information_cov_params`）が、Tobitは`ols_initial_params`のQR検証が`solver`に関わらず常に最初に実行されるため、`solver`をparametrizeしなくても`ComputationError`（`SingularDesignMatrix`）を一貫して検出できる。
 
 ## 確定済みのスコープ（再提案しない）
 

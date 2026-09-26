@@ -10,7 +10,7 @@ settings (CLAUDE.md section 2, `.claude/rules/python-style.md`
 
 `IVOptions` is re-exported as-is from `_lib` (not redefined as a
 separate class; same policy as `OLSOptions`/`LogitOptions`, see
-`docs/spec/ols-spec.md`, "API引数"). `IVOptions.method` selects
+`docs/spec/ols-spec.md`, "API引数"). `IVOptions.estimator` selects
 `"2sls"` (default) or `"gmm"` — a single `IV`/`IVResults` pair serves
 both methods (`docs/spec/iv-spec.md` section 1.2).
 
@@ -45,7 +45,7 @@ class IV:
             (must not overlap `x_exog`; see
             `docs/spec/iv-spec.md` section 1.1).
         options: Estimation options. Defaults to `IVOptions()`
-            (`method="2sls"`, classical, with intercept,
+            (`estimator="2sls"`, classical, with intercept,
             confidence_level=0.95) when omitted.
 
     Examples:
@@ -92,7 +92,7 @@ class IV:
                 NaN/infinity, `y`/`x_exog`/`x_endog`/`instruments`
                 overlap, `x_endog` or `instruments` is empty,
                 insufficient observations, `confidence_level` out of
-                range, an unknown `cov_type` or (`method="gmm"` only)
+                range, an unknown `cov_type` or (`estimator="gmm"` only)
                 `gmm_type`/`gmm_weight_type` string, `gmm_max_iter`/
                 `gmm_tol` given with a `gmm_type` other than
                 `"iterated"`, or too few instruments for
@@ -155,8 +155,8 @@ class IVResults:
     def stats(self) -> dict[str, float]:
         """Coefficient name to test statistic.
 
-        t-statistic for `method="2sls"`, z-statistic for
-        `method="gmm"` — named generically (not `t_stats`/`z_stats`)
+        t-statistic for `estimator="2sls"`, z-statistic for
+        `estimator="gmm"` — named generically (not `t_stats`/`z_stats`)
         because `IVResults` is shared by both methods (mirrors the
         `_lib.IVResult.stats` naming, `docs/spec/iv-spec.md`
         section 2).
@@ -210,11 +210,11 @@ class IVResults:
 
     @property
     def converged(self) -> bool:
-        """Whether GMM iteration converged (`method="gmm"` only).
+        """Whether GMM iteration converged (`estimator="gmm"` only).
 
         Only meaningful for `gmm_type="iterated"`; always `True` for
         `"one_step"`/`"two_step"` (which never check convergence) and
-        for `method="2sls"` (2SLS is a closed-form, non-iterative
+        for `estimator="2sls"` (2SLS is a closed-form, non-iterative
         estimator).
         """
         return self._raw.converged
@@ -222,9 +222,9 @@ class IVResults:
     @property
     def n_iter(self) -> int:
         """Number of GMM estimations actually run, counting the initial
-        estimate (`method="gmm"` only): 1 for `"one_step"`, 2 for
+        estimate (`estimator="gmm"` only): 1 for `"one_step"`, 2 for
         `"two_step"`, at most `gmm_max_iter` for `"iterated"`. Always
-        `1` for `method="2sls"`."""
+        `1` for `estimator="2sls"`."""
         return self._raw.n_iter
 
     @property
@@ -233,16 +233,16 @@ class IVResults:
         return self._raw.cov_type
 
     @property
-    def method(self) -> str:
-        """Estimation method actually used (normalized to lowercase):
+    def estimator(self) -> str:
+        """Estimator actually used (normalized to lowercase):
         `"2sls"` or `"gmm"`."""
-        return self._raw.method
+        return self._raw.estimator
 
     @property
     def gmm_weight_type(self) -> str | None:
         """Weight matrix actually used for GMM point estimation
-        (normalized to lowercase). Only meaningful for `method="gmm"`;
-        always `None` for `method="2sls"`, which has no such concept,
+        (normalized to lowercase). Only meaningful for `estimator="gmm"`;
+        always `None` for `estimator="2sls"`, which has no such concept,
         and for `gmm_type="one_step"`, which does not use a weight
         type."""
         return self._raw.gmm_weight_type
@@ -251,7 +251,7 @@ class IVResults:
     def gmm_type(self) -> str | None:
         """GMM estimation type actually used (normalized to
         lowercase): `"one_step"`, `"two_step"` or `"iterated"`. Always
-        `None` for `method="2sls"`."""
+        `None` for `estimator="2sls"`."""
         return self._raw.gmm_type
 
     @property
@@ -285,15 +285,15 @@ class IVResults:
         (homoskedastic) formula regardless of `cov_type`. Not the
         same as the plain F-statistic of the corresponding regression
         in `first_stage()`, which includes `x_exog`'s contribution
-        too. Computed the same way for both `method="2sls"` and
-        `method="gmm"`; see `docs/spec/iv-spec.md` section 3.4.
+        too. Computed the same way for both `estimator="2sls"` and
+        `estimator="gmm"`; see `docs/spec/iv-spec.md` section 3.4.
         """
         return self._raw.weak_instrument_f_statistics
 
     @property
     def overid_statistic(self) -> float | None:
-        """Overidentification test statistic: Sargan (`method="2sls"`)
-        or Hansen J (`method="gmm"`).
+        """Overidentification test statistic: Sargan (`estimator="2sls"`)
+        or Hansen J (`estimator="gmm"`).
 
         `None` when just-identified (`len(instruments) ==
         len(x_endog)`, degrees of freedom 0); see
@@ -325,7 +325,7 @@ class IVResults:
         when an instrument perfectly predicts its endogenous
         variable, or there are too few observations for the extra
         residual columns) — this does not affect the validity of
-        the other results. **Always `None` for `method="gmm"`**
+        the other results. **Always `None` for `estimator="gmm"`**
         (not implemented for GMM). See
         `docs/spec/iv-spec.md` section 3.6.
         """

@@ -464,15 +464,15 @@ def test_instruments_empty_raises(iv_dataset):
 # ── ValidationError（オプション） ──────────────────────────────────
 
 
-@pytest.mark.parametrize("method", ["invalid", ""])
-def test_unknown_method_raises(iv_dataset, method):
-    """未知の`method`（空文字列を含む）は`ValidationError`（テスト網羅性
+@pytest.mark.parametrize("estimator", ["invalid", ""])
+def test_unknown_estimator_raises(iv_dataset, estimator):
+    """未知の`estimator`（空文字列を含む）は`ValidationError`（テスト網羅性
     候補・項目46）。
     """
-    options = IVOptions(method=method)
+    options = IVOptions(estimator=estimator)
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_IV_METHOD, method=method),
+        match=escaped(msgs.UNKNOWN_IV_ESTIMATOR, estimator=estimator),
     ):
         our_fit(iv_dataset, options=options)
 
@@ -495,7 +495,7 @@ def test_unknown_weight_type_raises(iv_dataset, gmm_weight_type):
     """未知の`gmm_weight_type`（空文字列を含む）は`ValidationError`
     （テスト網羅性候補・項目46）。
     """
-    options = IVOptions(method="gmm", gmm_weight_type=gmm_weight_type)
+    options = IVOptions(estimator="gmm", gmm_weight_type=gmm_weight_type)
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.UNKNOWN_WEIGHT_TYPE, other=gmm_weight_type),
@@ -533,9 +533,9 @@ def test_insufficient_clusters_raises(iv_dataset):
         our_fit(df, options=options)
 
 
-@pytest.mark.parametrize("method", ["2sls", "gmm"])
+@pytest.mark.parametrize("estimator", ["2sls", "gmm"])
 def test_cluster_count_at_most_slopes_raises_validation_error(
-    iv_dataset, method
+    iv_dataset, estimator
 ):
     """`cov_type="cluster"`でクラスター数G≤構造方程式の傾き係数の数q
     （`our_fit`既定は`x_exog=["x1"]`・`x_endog=["endog1"]`で`q=2`、ここで
@@ -558,7 +558,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
     )
     df = iv_dataset.with_columns(cluster)
     options = IVOptions(
-        method=method, cov_type="cluster", cluster_col="cluster_group"
+        estimator=estimator, cov_type="cluster", cluster_col="cluster_group"
     )
     with pytest.raises(
         ValidationError,
@@ -601,7 +601,7 @@ def test_invalid_hac_lags_raises(iv_dataset, hac_lags):
 @pytest.mark.parametrize("gmm_max_iter", [-1, 0, 1, 2])
 def test_invalid_gmm_max_iter_raises(iv_dataset, gmm_max_iter):
     options = IVOptions(
-        method="gmm", gmm_type="iterated", gmm_max_iter=gmm_max_iter
+        estimator="gmm", gmm_type="iterated", gmm_max_iter=gmm_max_iter
     )
     with pytest.raises(
         ValidationError,
@@ -611,7 +611,7 @@ def test_invalid_gmm_max_iter_raises(iv_dataset, gmm_max_iter):
 
 
 def test_unknown_gmm_type_raises(iv_dataset):
-    options = IVOptions(method="gmm", gmm_type="three_step")
+    options = IVOptions(estimator="gmm", gmm_type="three_step")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.UNKNOWN_GMM_TYPE, other="three_step"),
@@ -627,7 +627,7 @@ def test_gmm_iter_options_with_non_iterated_type_raise(
     iv_dataset, gmm_type, iter_options
 ):
     """`gmm_max_iter`/`gmm_tol`は`"iterated"`のときだけ使える。"""
-    options = IVOptions(method="gmm", gmm_type=gmm_type, **iter_options)
+    options = IVOptions(estimator="gmm", gmm_type=gmm_type, **iter_options)
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -638,14 +638,14 @@ def test_gmm_iter_options_with_non_iterated_type_raise(
 
 
 def test_gmm_iter_options_are_ignored_for_2sls(iv_dataset):
-    """`method="2sls"`ではGMM専用オプションが矛盾していても黙って無視する。"""
-    options = IVOptions(method="2sls", gmm_type="one_step", gmm_max_iter=10)
+    """`estimator="2sls"`ではGMM専用オプションが矛盾していても黙って無視する。"""
+    options = IVOptions(estimator="2sls", gmm_type="one_step", gmm_max_iter=10)
     our_fit(iv_dataset, options=options)
 
 
 @pytest.mark.parametrize("gmm_tol", [0.0, -1.0])
 def test_invalid_gmm_tol_raises(iv_dataset, gmm_tol):
-    options = IVOptions(method="gmm", gmm_type="iterated", gmm_tol=gmm_tol)
+    options = IVOptions(estimator="gmm", gmm_type="iterated", gmm_tol=gmm_tol)
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -663,7 +663,7 @@ def test_non_finite_gmm_tol_raises(iv_dataset, gmm_tol, shown):
     """NaN/infの`gmm_tol`は収束判定として無意味なため、常に未収束になる前に
     `ValidationError`で弾く。
     """
-    options = IVOptions(method="gmm", gmm_type="iterated", gmm_tol=gmm_tol)
+    options = IVOptions(estimator="gmm", gmm_type="iterated", gmm_tol=gmm_tol)
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.INVALID_GMM_TOL, gmm_tol=shown),
@@ -753,7 +753,7 @@ def test_scale_variance_cluster_raises_computation_error():
 def test_gmm_cluster_weight_type_raises_validation_error_when_cluster_count_is_less_than_instrument_count(
     iv_dataset, gmm_type
 ):
-    """`method="gmm"`固有のValidationErrorパス。`gmm_weight_type="cluster"`の重み行列`S`
+    """`estimator="gmm"`固有のValidationErrorパス。`gmm_weight_type="cluster"`の重み行列`S`
     （l×l、`l`は全操作変数の数）はG個のランク1行列の和のため`rank(S)≤G`
     （`engine/src/iv/CLAUDE.md`「クラスター数Gと操作変数の数lの関係」参照）。
     `G=2 < l=3`（`x_exog=[]`・`instruments=["z1","z2"]`で`l=const+z1+z2=3`、過剰識別）
@@ -766,7 +766,7 @@ def test_gmm_cluster_weight_type_raises_validation_error_when_cluster_count_is_l
         (pl.int_range(pl.len()) < n // 2).cast(pl.Int64).alias("cluster_group")
     )
     options = IVOptions(
-        method="gmm",
+        estimator="gmm",
         gmm_weight_type="cluster",
         cluster_col="cluster_group",
         cov_type="classical",
@@ -794,7 +794,7 @@ def test_gmm_raise_on_non_convergence_true_raises_computation_error(
     NonConvergence`と同じ分類、`engine_pybind/src/iv/common.rs`参照）。
     """
     options = IVOptions(
-        method="gmm",
+        estimator="gmm",
         gmm_type="iterated",
         gmm_weight_type="robust",
         gmm_tol=1e-300,

@@ -87,9 +87,9 @@ def build_fit(scenario: str, cov_key: str, ref: dict):
     return Tobit(df, y=y, x=ref["x_cols"], options=TobitOptions(**opts)).fit()
 
 
-def build_method_fit(method: str, ref: dict):
-    """`method`（bfgs/lbfgs）ケース。リファレンスは method 非依存のため baseline 相当
-    シナリオ・classical で `method` だけ替えて推定する（`_tobit_fixtures.py` 参照）。"""
+def build_method_fit(solver: str, ref: dict):
+    """`solver`（bfgs/lbfgs）ケース。リファレンスは solver 非依存のため baseline 相当
+    シナリオ・classical で `solver` だけ替えて推定する（`_tobit_fixtures.py` 参照）。"""
     df, _ = _load_dataset(BASELINE_SCENARIO)
     lower, upper = ref["censoring_bounds"]
     return Tobit(
@@ -97,7 +97,7 @@ def build_method_fit(method: str, ref: dict):
         y="y",
         x=ref["x_cols"],
         options=TobitOptions(
-            method=method, cov_type="classical", lower=lower, upper=upper
+            solver=solver, cov_type="classical", lower=lower, upper=upper
         ),
     ).fit()
 

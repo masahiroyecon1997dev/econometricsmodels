@@ -116,7 +116,7 @@ print(result.std_errors)  # {"const": ..., "x1": ...}
 print(result.pseudo_r_squared)
 ```
 
-`LogitOptions` supports `cov_type` (`"classical"`, `"opg"`, `"hc0"`, `"hc1"`, or `"cluster"`) and `method` (`"newton"`, `"bfgs"`, or `"lbfgs"`); see the [API Reference](api/logit.md) for the full list of options.
+`LogitOptions` supports `cov_type` (`"classical"`, `"opg"`, `"hc0"`, `"hc1"`, or `"cluster"`) and `solver` (`"newton"`, `"bfgs"`, or `"lbfgs"`); see the [API Reference](api/logit.md) for the full list of options.
 
 ### Predicted values and classification table
 
@@ -176,7 +176,7 @@ print(result.std_errors)  # {"const": ..., "x1": ...}
 print(result.pseudo_r_squared)
 ```
 
-`ProbitOptions` supports the same `cov_type` and `method` choices as `LogitOptions`; see the [API Reference](api/probit.md) for the full list of options. `ProbitResults.predict()`, `augment()`, `pred_table()`, and `marginal_effects()` work exactly like their [Logit](#predicted-values-and-classification-table) counterparts (substitute `Probit`/`ProbitOptions` for `Logit`/`LogitOptions` in the examples above).
+`ProbitOptions` supports the same `cov_type` and `solver` choices as `LogitOptions`; see the [API Reference](api/probit.md) for the full list of options. `ProbitResults.predict()`, `augment()`, `pred_table()`, and `marginal_effects()` work exactly like their [Logit](#predicted-values-and-classification-table) counterparts (substitute `Probit`/`ProbitOptions` for `Logit`/`LogitOptions` in the examples above).
 
 ## Tobit (censored regression)
 
@@ -262,7 +262,7 @@ print(result.std_errors)  # {"const": ..., "endog1": ...}
 print(result.r_squared)
 ```
 
-`IVOptions.method` selects `"2sls"` (default) or `"gmm"`. `cov_type` supports the same range as [OLS](#switching-the-type-of-standard-error); for `method="gmm"`, a separate `gmm_weight_type` selects the weight matrix used for point estimation. See the [API Reference](api/iv.md) for the full list of options.
+`IVOptions.estimator` selects `"2sls"` (default) or `"gmm"`. `cov_type` supports the same range as [OLS](#switching-the-type-of-standard-error); for `estimator="gmm"`, a separate `gmm_weight_type` selects the weight matrix used for point estimation. See the [API Reference](api/iv.md) for the full list of options.
 
 ### Diagnostics and first-stage results
 
@@ -273,7 +273,7 @@ print(
 )  # None, None (just-identified)
 print(
     result.wu_hausman_statistic, result.wu_hausman_p_value
-)  # method="2sls" only
+)  # estimator="2sls" only
 
 first_stage = result.first_stage()
 print(

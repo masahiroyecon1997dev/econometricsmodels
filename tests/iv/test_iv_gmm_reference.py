@@ -1,4 +1,4 @@
-"""GMM（`method="gmm"`）の主リファレンス（linearmodels `IVGMM`）による数値比較
+"""GMM（`estimator="gmm"`）の主リファレンス（linearmodels `IVGMM`）による数値比較
 テスト。
 
 `tests/fixtures/benchmarks/iv_gmm.json`（`benchmark/iv/fixtures/
@@ -13,7 +13,7 @@ classical/HC0/HC1/HAC（+クラスター、baselineのみ）を`gmm_weight_type=
 IV は主リファレンス数値照合のみ 2SLS/GMM で
 ファイルが分かれ、api/validation は 2SLS と共通）:
     - 主リファレンス（linearmodels `IVGMM`）との厳密な数値一致: このファイル
-    - `method="2sls"`の同種テスト: `test_iv_reference.py`
+    - `estimator="2sls"`の同種テスト: `test_iv_reference.py`
     - GMM固有の構造・API・オプション反映（`gmm_weight_type`×`cov_type`の独立性の構造
       確認、収束等）: `test_iv_api.py`
     - `ValidationError`/`ComputationError` パス（GMM 固有含む）: `test_iv_validation.py`
@@ -29,9 +29,9 @@ Note:
       2SLSのSargan検定に対応し、丁度識別のときは`None`。
     - `wu_hausman_statistic`相当のキーはフィクスチャに存在しない
       （`GmmEstimator`はWu-Hausman検定を実装しないため、`IVResults.
-      wu_hausman_statistic`は`method="gmm"`で常に`None`。`test_iv_api.py`の
+      wu_hausman_statistic`は`estimator="gmm"`で常に`None`。`test_iv_api.py`の
       `test_wu_hausman_is_none_for_gmm`で構造確認済み）。
-    - `weak_instrument_f_statistics`は本実装が`method`によらず常にclassicalで
+    - `weak_instrument_f_statistics`は本実装が`estimator`によらず常にclassicalで
       計算する設計のため、フィクスチャの`weak_instrument_f_independent`と比較する
       （`test_iv_reference.py`と同じ理由）。
 
@@ -171,7 +171,7 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
     instruments = INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
     df = pl.read_csv(DATA_DIR / f"iv_{scenario}.csv")
     options = IVOptions(
-        method="gmm", gmm_weight_type="unadjusted", cov_type=cov_type
+        estimator="gmm", gmm_weight_type="unadjusted", cov_type=cov_type
     )
     res = IV(
         df,
@@ -196,7 +196,7 @@ def test_cluster_matches_linearmodels(fixtures):
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     df = with_cluster_groups(df, 10)
     options = IVOptions(
-        method="gmm",
+        estimator="gmm",
         gmm_weight_type="unadjusted",
         cov_type="cluster",
         cluster_col="cluster_group",
@@ -223,7 +223,7 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
     options = IVOptions(
-        method="gmm",
+        estimator="gmm",
         gmm_weight_type="unadjusted",
         cov_type="cluster",
         cluster_col="cluster_group",
@@ -251,7 +251,7 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
     options = IVOptions(
-        method="gmm", gmm_weight_type="unadjusted", cov_type=cov_type
+        estimator="gmm", gmm_weight_type="unadjusted", cov_type=cov_type
     )
     res = IV(
         df,
@@ -277,7 +277,9 @@ def test_kernel_hac_matches_linearmodels(fixtures):
     この組み合わせを通らない（`testing-completeness-reviewer`指摘）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
-    options = IVOptions(method="gmm", gmm_weight_type="kernel", cov_type="hac")
+    options = IVOptions(
+        estimator="gmm", gmm_weight_type="kernel", cov_type="hac"
+    )
     res = IV(
         df,
         y="y",
@@ -315,7 +317,7 @@ def test_gmm_type_matches_linearmodels(fixtures, n_iter):
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     options = IVOptions(
-        method="gmm",
+        estimator="gmm",
         gmm_weight_type="unadjusted",
         cov_type="classical",
         **_GMM_TYPE_OPTIONS[n_iter],
@@ -350,7 +352,7 @@ def test_other_weight_types_match_linearmodels(fixtures, gmm_weight_type):
         kwargs["cluster_col"] = "cluster_group"
 
     options = IVOptions(
-        method="gmm",
+        estimator="gmm",
         gmm_weight_type=gmm_weight_type,
         cov_type="classical",
         **kwargs,

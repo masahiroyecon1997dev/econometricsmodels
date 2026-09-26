@@ -2,14 +2,14 @@
 
 IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two_sls.rs`/`gmm.rs`、共通基盤は
 `engine/src/iv/common.rs`）・`engine_pybind/src/iv/common.rs`・
-`python_package/econometricsmodels/iv/iv.py`として実装済み。`method="2sls"`/`method="gmm"`を
+`python_package/econometricsmodels/iv/iv.py`として実装済み。`estimator="2sls"`/`estimator="gmm"`を
 単一の`IV`/`IVResults`ペアで扱う設計のため、本ドキュメントは2SLS/GMM両方を扱う。
 
 ## 1. API引数
 
 3層構成: `IV(data, y, x_exog, x_endog, instruments, options).fit() -> IVResults`
 （python_package）→ `fit_iv(data, y, x_exog, x_endog, instruments, options) -> IVResult`
-（engine_pybind）→ `TwoSlsEstimator::fit` / `GmmEstimator::fit`（engine、`IVOptions.method`で
+（engine_pybind）→ `TwoSlsEstimator::fit` / `GmmEstimator::fit`（engine、`IVOptions.estimator`で
 振り分け）。
 
 ### 1.1 `y` / `x_exog` / `x_endog` / `instruments`
@@ -44,15 +44,15 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 
 | フィールド | 型 | デフォルト | 説明 |
 |---|---|---|---|
-| `method` | `str` | `"2sls"` | `"2sls"` / `"gmm"`（大小無視） |
-| `cov_type` | `str` | `"classical"` | `"classical"` / `"hc0"`〜`"hc3"` / `"cluster"` / `"hac"`（大小無視）。`method="gmm"`でも`gmm_weight_type`とは独立の軸（最終的な報告用SE計算） |
+| `estimator` | `str` | `"2sls"` | `"2sls"` / `"gmm"`（大小無視） |
+| `cov_type` | `str` | `"classical"` | `"classical"` / `"hc0"`〜`"hc3"` / `"cluster"` / `"hac"`（大小無視）。`estimator="gmm"`でも`gmm_weight_type`とは独立の軸（最終的な報告用SE計算） |
 | `include_intercept` | `bool` | `True` | `x_exog`側の設計行列にのみ定数列を自動追加する。`x_endog`/`instruments`には自動追加しない |
 | `confidence_level` | `float` | `0.95` | |
 | `cluster_col` | `str \| None` | `None` | `cov_type="cluster"`時（`gmm_weight_type="cluster"`とも共用）のグループキー列名 |
 | `hac_lags` | `int \| None` | `None` | `cov_type="hac"`時（`gmm_weight_type="kernel"`とも共用）のラグ数。`None`なら自動計算 |
 | `time_col` | `str \| None` | `None` | `cov_type="hac"`時（`gmm_weight_type="kernel"`とも共用）の時系列順序列 |
-| `gmm_weight_type` | `str` | `"unadjusted"` | GMMの点推定に使う重み行列（`method="gmm"`のみ）: `"unadjusted"`（別名`"homoskedastic"`）/ `"robust"`（別名`"heteroskedastic"`）/ `"cluster"` / `"kernel"`。`method="2sls"`と`gmm_type="one_step"`では無視 |
-| `gmm_type` | `str` | `"two_step"` | GMMの推定方式（`method="gmm"`のみ）: `"one_step"`（1段階、重み`(Z'Z)⁻¹`のみ）/ `"two_step"`（2段階の効率的GMM）/ `"iterated"`（収束まで反復）。大文字小文字は区別しない |
+| `gmm_weight_type` | `str` | `"unadjusted"` | GMMの点推定に使う重み行列（`estimator="gmm"`のみ）: `"unadjusted"`（別名`"homoskedastic"`）/ `"robust"`（別名`"heteroskedastic"`）/ `"cluster"` / `"kernel"`。`estimator="2sls"`と`gmm_type="one_step"`では無視 |
+| `gmm_type` | `str` | `"two_step"` | GMMの推定方式（`estimator="gmm"`のみ）: `"one_step"`（1段階、重み`(Z'Z)⁻¹`のみ）/ `"two_step"`（2段階の効率的GMM）/ `"iterated"`（収束まで反復）。大文字小文字は区別しない |
 | `gmm_max_iter` | `int \| None` | `None` | `"iterated"`の最大推定回数（初回推定を含む、3以上）。`None`は実効既定値`100`。`"one_step"`/`"two_step"`で指定すると`ValidationError` |
 | `gmm_tol` | `float \| None` | `None` | `"iterated"`の収束許容誤差。`None`は実効既定値`1e-6`。`"one_step"`/`"two_step"`で指定すると`ValidationError` |
 | `raise_on_non_convergence` | `bool` | `True` | `gmm_type="iterated"`で収束しなければ`True`でエラー、`False`で`converged=False`のまま結果を返す。それ以外の`gmm_type`では無視 |
@@ -78,24 +78,24 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 
 `IVResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `stats` / `p_values` /
 `conf_lower` / `conf_upper` / `param_names` / `residuals` / `dep_var_name` / `n_obs` /
-`df_resid` / `df_model` / `converged` / `n_iter` / `cov_type` / `method` / `gmm_weight_type` /
+`df_resid` / `df_model` / `converged` / `n_iter` / `cov_type` / `estimator` / `gmm_weight_type` /
 `f_statistic` / `f_p_value` / `r_squared` / `adj_r_squared` / `weak_instrument_f_statistics` /
 `overid_statistic` / `overid_p_value` / `wu_hausman_statistic` / `wu_hausman_p_value`。
 
 - **`t_stats`ではなく`stats`という分布非依存の名前**: 1つの`IVResult`型を
-  `method="2sls"`（t分布）・`method="gmm"`（z分布）の両方が共有するため、`OLSResult.t_stats`・
+  `estimator="2sls"`（t分布）・`estimator="gmm"`（z分布）の両方が共有するため、`OLSResult.t_stats`・
   `LogitResult.z_stats`のような分布固定の名前は使えない。`engine::inference::InferenceStat`が
   同じ理由で`stat`という名前を使っている前例に倣った。
-- **`method`**: `IVOptions.method`を正規化した小文字文字列（`"2sls"`/`"gmm"`）。
+- **`estimator`**: `IVOptions.estimator`を正規化した小文字文字列（`"2sls"`/`"gmm"`）。
   常に反映される。
-- **`gmm_weight_type`**: 型は`Option<String>`。`method="gmm"`のときだけ
+- **`gmm_weight_type`**: 型は`Option<String>`。`estimator="gmm"`のときだけ
   `Some(String)`（`IVOptions.gmm_weight_type`を正規化した小文字文字列。エイリアス入力
   （`"homoskedastic"`/`"heteroskedastic"`）は正規化されずそのままechoされる）、
-  `method="2sls"`では概念自体が存在しないため常に`None`。
-- **`converged`/`n_iter`**: `method="2sls"`では常に`converged=true`・`n_iter=1`
-  （2SLSは閉形式・非反復のため）。`method="gmm"`では実際の反復回数・収束判定結果を返す
+  `estimator="2sls"`では概念自体が存在しないため常に`None`。
+- **`converged`/`n_iter`**: `estimator="2sls"`では常に`converged=true`・`n_iter=1`
+  （2SLSは閉形式・非反復のため）。`estimator="gmm"`では実際の反復回数・収束判定結果を返す
   （`gmm_type="iterated"`以外は収束判定を行わないため常に`converged=true`、`n_iter`は1・2）。
-- **`gmm_type`**: `method="gmm"`では実際に使った推定方式（小文字に正規化）、`method="2sls"`では常に`None`。
+- **`gmm_type`**: `estimator="gmm"`では実際に使った推定方式（小文字に正規化）、`estimator="2sls"`では常に`None`。
   `gmm_type="one_step"`では`gmm_weight_type`は使われないため結果の`gmm_weight_type`も`None`。
 - **`n_entities`は含めない**（IVはパネル構造を前提としない）。
 - **`log_likelihood`/`aic`/`bic`は除外する**（2SLS/GMMは尤度ベースの推定法ではなく、
@@ -112,7 +112,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 - **第一段階回帰結果は`first_stage()`という別メソッド**に切り出す（`fit()`の戻り値本体には
   含めない。非線形モデルの`marginal_effects()`分離方針を踏襲）。`first_stage() -> dict[str,
   OLSResults]`。キーは`x_endog`の変数名、値は既存の`OLSResults`型（新規のIV専用型は
-  作らない）。第一段階回帰は`x_endog[i] ~ x_exog + instruments`、`method`によらず同じ
+  作らない）。第一段階回帰は`x_endog[i] ~ x_exog + instruments`、`estimator`によらず同じ
   （`engine::iv::common::compute_first_stage`を共有）。
 - 弱操作変数診断・過剰識別検定・Wu-Hausman検定はいずれも`fit()`の結果本体に含める
   （別メソッド化しない）。
@@ -193,7 +193,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 - **`gmm_max_iter`/`gmm_tol`は`"iterated"`専用**: `"one_step"`/`"two_step"`で指定すると
   `ValidationError`。`IVOptions`は既定値と明示指定を区別できないため既定値は`None`とし、
   `"iterated"`のときだけ実効既定値（`gmm_max_iter=100`、`gmm_tol=1e-6`）に解決する。
-  `method="2sls"`のときは他のオプション同様に黙って無視する。
+  `estimator="2sls"`のときは他のオプション同様に黙って無視する。
 - **`gmm_max_iter`は初回推定を含めて数え、3以上を必須とする**（linearmodelsの`iter_limit`と
   同じ数え方）。上限2回の反復は「two_stepに収束判定を付けたもの」になり紛らわしいため、
   2段階が欲しい場合は`gmm_type="two_step"`を使う（エラーメッセージでも案内する）。
@@ -217,7 +217,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 - **常に等分散前提、`cov_type`には依存しない**。理由: (1) Stock-Yogoの臨界値
   表自体が等分散前提でキャリブレーションされている（v1では臨界値照合はしないが意味合いは
   引き継ぐ）、(2) `OlsEstimator`が係数の分散共分散行列全体を公開していないため。
-  `method="2sls"`/`method="gmm"`ともに同じ計算方式（`engine::iv::common::
+  `estimator="2sls"`/`estimator="gmm"`ともに同じ計算方式（`engine::iv::common::
   compute_first_stage`を共有）。
 - **v1のスコープ**: 生の部分F統計量のみ返す。Stock-Yogo臨界値テーブルとの照合（弱操作変数の
   合否判定）・複数内生変数の同時検定（Cragg-Donald統計量等）はv1スコープ外。
@@ -253,7 +253,7 @@ Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含�
   仕様のため。
 - `fit()`の結果本体に含める（内生変数全体のジョイント検定のみ、変数ごとのサブセット検定は
   v1スコープ外）。
-- **`method="gmm"`では常に`None`**（`GmmEstimator`はWu-Hausman検定を実装しない）。
+- **`estimator="gmm"`では常に`None`**（`GmmEstimator`はWu-Hausman検定を実装しない）。
 - **想定内の理由で失敗した場合は`fit()`全体を失敗させず`None`にする**（`FirstStageFailed`/
   `SecondStageFailed`の"all-or-nothing"方針とは意図的に異なる）。想定内の理由は2つ:
   (1) 第一段階残差の分散がゼロ（操作変数が内生変数を完全予測する退化ケース）で拡張回帰の
@@ -268,9 +268,9 @@ Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含�
 
 - 各内生変数`x_endog[i]`について`x_endog[i] ~ x_exog + instruments`を通常のOLSで推定
   （`OlsEstimator → OLSResult`変換は`linear::ols::ols_estimator_to_result`を再利用）。
-- `method`によらず`engine::iv::common::compute_first_stage`から構築する共通ロジック
+- `estimator`によらず`engine::iv::common::compute_first_stage`から構築する共通ロジック
   （GMMでも2SLSと同じ診断情報を提供する）。
-- **`method="2sls"`では第一段階回帰が二重計算になる**（`fit`が明示的に1回、
+- **`estimator="2sls"`では第一段階回帰が二重計算になる**（`fit`が明示的に1回、
   `TwoSlsEstimator::fit`が内部でもう1回）。`OlsEstimator`が`Clone`未実装のため
   `TwoSlsEstimator::first_stage_estimators()`の借用結果を`IVResult`へ所有権ごと移せず、
   OLS自体が軽量という前提で許容した設計判断。
@@ -327,5 +327,5 @@ common.rs`）:
 
 - Stock-Yogo臨界値テーブルとの照合（弱操作変数の合否判定）
 - 複数内生変数の同時検定（Cragg-Donald統計量等）
-- Wu-Hausman検定のGMM対応（`method="gmm"`では常に`None`）
+- Wu-Hausman検定のGMM対応（`estimator="gmm"`では常に`None`）
 - Wu-Hausman検定の変数ごとのサブセット検定（現状は内生変数全体のジョイント検定のみ）

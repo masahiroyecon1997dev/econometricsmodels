@@ -17,7 +17,7 @@ Probit固有の差分のみを記載する。
 
 ## 2. 結果構造体
 
-`ProbitResult`はフィールド構成が`LogitResult`と同一（`params`/`std_errors`/`z_stats`/.../`cov_type`/`method`）。
+`ProbitResult`はフィールド構成が`LogitResult`と同一（`params`/`std_errors`/`z_stats`/.../`cov_type`/`solver`）。
 `df_model=k-1`固定・`log_likelihood_null`の非入れ子性等、[`logit-spec.md`](./logit-spec.md)2章の設計
 判断をそのまま踏襲する。
 
@@ -45,12 +45,12 @@ Probit固有の差分のみを記載する。
 
 ### 3.2 最適化・収束判定
 
-`LogitEstimator::fit`と同じ設計（標準化空間での最適化、`method`に関わらず収束点のHessianを解析的に
+`LogitEstimator::fit`と同じ設計（標準化空間での最適化、`solver`に関わらず収束点のHessianを解析的に
 評価、`SeparationSuspected`による完全分離下のアンダーフロー対策を共有）。近似解析解
 （切片のみモデル、`Φ(θ̂)=ȳ`すなわち`θ̂=Φ⁻¹(ȳ)`）で検証している。
 
 初期値（warm start）・設計行列のランクチェックもLogitと共通（[`logit-spec.md`](./logit-spec.md)
-3.2節）。`method`に依らず最適化前に標準化空間の設計行列を列ピボットQRしてランク落ちを
+3.2節）。`solver`に依らず最適化前に標準化空間の設計行列を列ピボットQRしてランク落ちを
 `SingularDesignMatrix`で弾き、そのLPM最小二乗解にprobitのIRLS 1ステップ相当のスケール補正を施す
 （`w = φ(Φ⁻¹(p̄))`、`η₀ = Φ⁻¹(p̄)`）。切片のみモデルではこの初期値がそのまま厳密な近似解析解
 `Φ⁻¹(ȳ)`になる。従来のゼロベクトル初期値から変更（収束先・クロスチェック数値は不変）。

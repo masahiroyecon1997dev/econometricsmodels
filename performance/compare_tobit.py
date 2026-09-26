@@ -143,7 +143,7 @@ def _fit_once_engine(ctx: FitContext):
     lower = _lower_bound(ctx.df[ctx.y_col])
     if ctx.cov_type == "classical":
         options = TobitOptions(
-            lower=lower, upper=None, cov_type="classical", method=ctx.method
+            lower=lower, upper=None, cov_type="classical", solver=ctx.method
         )
     elif ctx.cov_type == "cluster":
         options = TobitOptions(
@@ -151,7 +151,7 @@ def _fit_once_engine(ctx: FitContext):
             upper=None,
             cov_type="cluster",
             cluster_col=ctx.cluster_col,
-            method=ctx.method,
+            solver=ctx.method,
         )
     else:
         raise ValueError(f"unknown cov_type: {ctx.cov_type!r}")

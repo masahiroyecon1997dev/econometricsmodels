@@ -108,10 +108,10 @@ def test_unknown_cov_type_raises(binary_dataset, cov_type):
     )
 
 
-@pytest.mark.parametrize("method", ["bogus", ""])
-def test_unknown_method_raises(binary_dataset, method):
+@pytest.mark.parametrize("solver", ["bogus", ""])
+def test_unknown_solver_raises(binary_dataset, solver):
     _checks.check_unknown_method_raises(
-        binary_dataset, Logit, LogitOptions, method
+        binary_dataset, Logit, LogitOptions, solver
     )
 
 
@@ -184,24 +184,24 @@ def test_marginal_effects_confidence_level_out_of_range_raises(
 # ── ComputationError ──────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
-def test_perfect_multicollinearity_raises_computation_error(method):
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_perfect_multicollinearity_raises_computation_error(solver):
     _checks.check_perfect_multicollinearity_raises_computation_error(
-        Logit, "logit", LogitOptions, method
+        Logit, "logit", LogitOptions, solver
     )
 
 
-@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
-def test_complete_separation_raises_computation_error(method):
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_complete_separation_raises_computation_error(solver):
     _checks.check_complete_separation_raises_computation_error(
-        Logit, "logit", LogitOptions, method
+        Logit, "logit", LogitOptions, solver
     )
 
 
-@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
-def test_complete_separation_with_raise_on_non_convergence_false(method):
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_complete_separation_with_raise_on_non_convergence_false(solver):
     _checks.check_complete_separation_with_raise_on_non_convergence_false(
-        Logit, "logit", LogitOptions, method
+        Logit, "logit", LogitOptions, solver
     )
 
 

@@ -71,10 +71,10 @@ CONFIG = _checks.BinaryChoiceReferenceConfig(
     cov_types=["classical", "opg", "hc0"],
     rtol=TOLERANCES["probit_reference"]["rtol"],
     atol=TOLERANCES["probit_reference"]["atol"],
-    # method="bfgs"/"lbfgs"はnewtonと異なる最適化経路で収束するため、既定の
+    # solver="bfgs"/"lbfgs"はnewtonと異なる最適化経路で収束するため、既定の
     # RTOLより緩めた許容誤差を使う（tests/_tolerances.py参照、
     # test_logit_reference.pyと同じ方針）。
-    rtol_method=TOLERANCES["probit_reference"]["rtol_method"],
+    rtol_solver=TOLERANCES["probit_reference"]["rtol_solver"],
     near_separation_tol=1e-8,
 )
 
@@ -101,9 +101,9 @@ def test_cluster_imbalanced_matches_statsmodels(fixtures):
     _checks.check_cluster_imbalanced_matches_statsmodels(CONFIG, fixtures)
 
 
-@pytest.mark.parametrize("method", ["bfgs", "lbfgs"])
-def test_method_matches_statsmodels(fixtures, method):
-    _checks.check_method_matches_statsmodels(CONFIG, fixtures, method)
+@pytest.mark.parametrize("solver", ["bfgs", "lbfgs"])
+def test_solver_matches_statsmodels(fixtures, solver):
+    _checks.check_solver_matches_statsmodels(CONFIG, fixtures, solver)
 
 
 @pytest.mark.parametrize("cov_type", CONFIG.cov_types)

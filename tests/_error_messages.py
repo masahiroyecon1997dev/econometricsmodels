@@ -1,7 +1,7 @@
 """全系統で共有する`ValidationError`メッセージのテンプレート文字列。
 
 `engine`（`CommonError`等）・`engine_pybind`（`column_extraction.rs`・
-`validation.rs`・各系統の`cov_type`/`method`文字列パース）が実際に送出する
+`validation.rs`・各系統の`cov_type`/`solver`/`estimator`文字列パース）が実際に送出する
 メッセージの正確な文字列をPythonのフォーマット文字列としてここに集約する。
 
 Rust側のメッセージ文言が正本であり（`engine/src/error.rs`・
@@ -180,7 +180,7 @@ UNKNOWN_COV_TYPE_NONLINEAR = (
     "'nonrobust'), 'opg', 'hc0', 'hc1', or 'cluster'"
 )
 UNKNOWN_METHOD_NONLINEAR = (
-    "unknown method: '{other}'. Expected one of 'newton', 'bfgs', or 'lbfgs'"
+    "unknown solver: '{other}'. Expected one of 'newton', 'bfgs', or 'lbfgs'"
 )
 INVALID_TOL = "tol must be a positive number, got {tol}"
 INVALID_MAX_ITER = "max_iter must be a positive integer, got {max_iter}"
@@ -215,8 +215,8 @@ UNKNOWN_MARGINAL_EFFECTS_TARGET = (
 
 # ── IV系統固有（engine/src/iv/common.rs・engine_pybind/src/iv/common.rs） ──
 
-UNKNOWN_IV_METHOD = (
-    "unknown method: '{method}'. Expected one of '2sls' or 'gmm'"
+UNKNOWN_IV_ESTIMATOR = (
+    "unknown estimator: '{estimator}'. Expected one of '2sls' or 'gmm'"
 )
 UNKNOWN_WEIGHT_TYPE = (
     "unknown gmm_weight_type: '{other}'. Expected one of 'unadjusted' "

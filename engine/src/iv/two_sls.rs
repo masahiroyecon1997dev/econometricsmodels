@@ -216,7 +216,7 @@ impl TwoSlsEstimator {
         // 第一段階回帰・弱操作変数診断（部分F統計量、docs/spec/iv-spec.md 3.4節）は
         // 2SLS/GMM間で共有するロジック（`common::compute_first_stage`、`iv/CLAUDE.md`
         // 「2SLSとGMMの独立実装方針」参照——GMM自体は第一段階回帰を必要としないが、
-        // `engine_pybind`が`method="gmm"`でも同じ診断情報を独立に提供するために使う）。
+        // `engine_pybind`が`estimator="gmm"`でも同じ診断情報を独立に提供するために使う）。
         let (first_stage, weak_instrument_f_statistics) =
             compute_first_stage(&input, &cov_type, confidence_level)?;
         let x_endog_hat_columns: Vec<Vec<f64>> = first_stage

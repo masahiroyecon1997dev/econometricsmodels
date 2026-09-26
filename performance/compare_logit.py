@@ -78,12 +78,12 @@ def _fit_once_engine(ctx: FitContext):
     from econometricsmodels import Logit, LogitOptions
 
     if ctx.cov_type == "classical":
-        options = LogitOptions(cov_type="classical", method=ctx.method)
+        options = LogitOptions(cov_type="classical", solver=ctx.method)
     elif ctx.cov_type == "cluster":
         options = LogitOptions(
             cov_type="cluster",
             cluster_col=ctx.cluster_col,
-            method=ctx.method,
+            solver=ctx.method,
         )
     else:
         raise ValueError(f"unknown cov_type: {ctx.cov_type!r}")

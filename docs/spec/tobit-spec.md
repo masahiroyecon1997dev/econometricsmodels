@@ -17,7 +17,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 - `y: str`（単一列名、**連続変数**）、`x: list[str]`。`y`の値域検証（`{0.0, 1.0}`）は行わない。
 - `TobitOptions`（`#[pyclass]`）は`LogitOptions`の8フィールド（`cov_type` / `include_intercept` /
-  `confidence_level` / `cluster_col` / `method` / `max_iter` / `tol` / `raise_on_non_convergence`、
+  `confidence_level` / `cluster_col` / `solver` / `max_iter` / `tol` / `raise_on_non_convergence`、
   型・デフォルト値とも[`logit-spec.md`](./logit-spec.md)1章の表と同一）に、打ち切り境界の2フィールドを
   追加する:
 
@@ -54,7 +54,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 `TobitResult`（`#[pyclass]`）が公開する配列＋名前リスト: `params` / `std_errors` / `z_stats`
 （**z検定**） / `p_values` / `conf_lower` / `conf_upper` / `param_names` / `sigma` /
 `log_likelihood` / `aic` / `bic` / `wald_statistic` / `wald_p_value` / `n_obs` / `df_model` /
-`df_resid` / `converged` / `n_iter` / `cov_type` / `method`（実際に使われたソルバーの小文字文字列）
+`df_resid` / `converged` / `n_iter` / `cov_type` / `solver`（実際に使われたソルバーの小文字文字列）
 / `lower` / `upper`。
 
 - **`σ`を含めた`k+1`長への統一**: engine層の`TobitEstimator`は`params()`が`k`長（`β`のみ）だが
@@ -107,9 +107,9 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 - **初期値はOLS推定値**（打ち切りを無視した単純なOLSの`β`とその残差の標本標準偏差、
   `ols_initial_params`）。ゼロベクトル初期値ではNewtonが`SingularHessian`で失敗するケースが
-  あったため。`ols_initial_params`のQRベースの階数検定が`method`に関わらず最初に走るため、完全な
+  あったため。`ols_initial_params`のQRベースの階数検定が`solver`に関わらず最初に走るため、完全な
   多重共線性は最適化前に`SingularDesignMatrix`（`ComputationError`）で検出される
-  （`method`をparametrizeする必要が無い）。
+  （`solver`をparametrizeする必要が無い）。
 - **`TobitScaling`（`tobit.rs`局所の標準化。共有`standardize_columns`は未使用）**: Logit/Probitが
   使う`common.rs`の`standardize_columns`は`x`列を分散1へスケーリングするだけで`y`をスケーリング
   しないため、`y`のスケールが大きいデータ（例: Wooldridge mroz `hours`、`σ̂≈1122`）で健全なMLE解
@@ -284,7 +284,7 @@ Tobit固有の差分:
     信頼区間・限界効果SEが ~1e-7〜3e-5 乖離するため`1e-4`（点推定・σ・対数尤度・限界効果dydx・
     予測値・打ち切り適合度は ~3e-9 で一致。engineと`survreg`は同データで ~3e-10 一致するため
     `censReg`側の収束限界であって本実装の問題ではない）。
-  - `method="bfgs"/"lbfgs"`: `newton`と異なる最適化経路でリファレンス（method非依存）から僅かに
+  - `solver="bfgs"/"lbfgs"`: `newton`と異なる最適化経路でリファレンス（solver非依存）から僅かに
     ずれた点に収束するため全フィールド`1e-7`（予測値で最大 ~2.2e-8）。
 - **手計算箇所のformula非依存検証**（主・交差ともR実装で第三者三角測量が効かないため、
   `.claude/rules/testing-policy.md`「リファレンス実装」2.）: `run_tobit_crosscheck.R`内で

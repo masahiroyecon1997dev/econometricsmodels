@@ -69,7 +69,7 @@ class Probit:
                 column is missing, contains missing values or
                 NaN/infinity, `y` contains a value other than 0.0/1.0,
                 insufficient observations, `confidence_level` out of
-                range, an unknown `cov_type`/`method` string, etc.).
+                range, an unknown `cov_type`/`solver` string, etc.).
                 A subclass of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. non-convergence, a singular
@@ -213,9 +213,9 @@ class ProbitResults:
         return self._raw.cov_type
 
     @property
-    def method(self) -> str:
+    def solver(self) -> str:
         """Optimization solver actually used (normalized to lowercase)."""
-        return self._raw.method
+        return self._raw.solver
 
     def coef_table(self) -> list[dict[str, float | str]]:
         """Row-oriented summary table of the coefficients.
@@ -338,7 +338,7 @@ class ProbitResults:
     def marginal_effects(
         self, at: str = "overall", confidence_level: float = 0.95
     ) -> list[dict[str, float | str]]:
-        """Marginal effects (`dy/dx`) with delta-method standard errors.
+        """Marginal effects (`dy/dx`) with delta-solver standard errors.
 
         Independent of the `confidence_level` used in `fit()` (may
         differ from it; see

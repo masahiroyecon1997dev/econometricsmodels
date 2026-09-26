@@ -56,7 +56,7 @@ def _tolerances(scenario: str) -> dict:
 
 
 def _method_tolerances() -> dict:
-    rtol = _TOL["rtol_method"]
+    rtol = _TOL["rtol_solver"]
     return {
         "rtol_point": rtol,
         "rtol_inference": rtol,
@@ -87,11 +87,11 @@ def test_cluster_matches_censreg(fixtures, cov_key):
     )
 
 
-@pytest.mark.parametrize("method", _checks.METHODS)
-def test_method_matches_censreg(fixtures, method):
-    ref = fixtures["method"][method]
-    res = _checks.build_method_fit(method, ref)
-    _checks.check_result(res, ref, f"method/{method}", **_method_tolerances())
+@pytest.mark.parametrize("solver", _checks.METHODS)
+def test_method_matches_censreg(fixtures, solver):
+    ref = fixtures["solver"][solver]
+    res = _checks.build_method_fit(solver, ref)
+    _checks.check_result(res, ref, f"solver/{solver}", **_method_tolerances())
 
 
 @pytest.mark.parametrize("cov_type", _checks.COV_TYPES)

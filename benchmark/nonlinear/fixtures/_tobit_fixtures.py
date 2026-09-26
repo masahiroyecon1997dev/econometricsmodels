@@ -223,7 +223,7 @@ def build(engine: str) -> dict:
             lower=base_lower,
             upper=base_upper,
         )
-        fixtures["method"] = {method: method_ref for method in METHODS}
+        fixtures["solver"] = {method: method_ref for method in METHODS}
 
         # include_intercept=False（切片なし）。baseline 相当シナリオで per-scenario と
         # 同じ 4 cov_type を回す（切片なし経路がロバスト共分散でも一致することの確認、

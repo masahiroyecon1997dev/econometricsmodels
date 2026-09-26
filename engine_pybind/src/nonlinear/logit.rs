@@ -19,7 +19,9 @@
 //! これに委譲する）が`PyDataFrame`を受け取り、`.into()`で`DataFrame`に変換して
 //! から`build_logit_input`を呼ぶ（`ols.rs`の`fit`関数と同じ変換パターン）。
 
-use engine::nonlinear::common::{CovType as EngineCovType, Method as EngineMethod, MleFitOptions};
+use engine::nonlinear::common::{
+    CovType as EngineCovType, MleFitOptions, SolverType as EngineSolverType,
+};
 use engine::nonlinear::logit::{LogitEstimator, LogitInput};
 use polars::prelude::{Column, DataFrame};
 use pyo3::prelude::*;
@@ -27,7 +29,7 @@ use pyo3_polars::PyDataFrame;
 
 use super::common::{
     MarginalEffectsResult, mat_to_nested_vec, mle_error_to_pyerr, parse_cov_type,
-    parse_marginal_effects_at, parse_method,
+    parse_marginal_effects_at, parse_solver_type,
 };
 use crate::column_extraction::{
     extract_dataframe, extract_f64_column, extract_f64_columns, x_column_names,
@@ -79,14 +81,14 @@ pub struct LogitOptions {
     /// Optimization solver: one of "newton" (default), "bfgs", "lbfgs".
     /// Case-insensitive.
     #[pyo3(get, set)]
-    pub method: String,
+    pub solver: String,
 
     /// Maximum number of solver iterations.
     #[pyo3(get, set)]
     pub max_iter: i64,
 
-    /// Convergence tolerance. For `method="newton"`, an absolute threshold on
-    /// the total gradient norm (default `1e-6`). For `method="bfgs"`/`"lbfgs"`,
+    /// Convergence tolerance. For `solver="newton"`, an absolute threshold on
+    /// the total gradient norm (default `1e-6`). For `solver="bfgs"`/`"lbfgs"`,
     /// a per-observation-average gradient threshold (the total gradient norm
     /// divided by the number of observations must fall below `tol`, default
     /// `1e-8`), matching how statsmodels/scipy normalize convergence checks
@@ -94,15 +96,15 @@ pub struct LogitOptions {
     /// semantics with a `1e-8` threshold (or bfgs/lbfgs's normalized
     /// semantics with a `1e-6` threshold) measurably degrades either speed or
     /// precision. Passing `tol` explicitly always uses the
-    /// semantics of the chosen `method`. For `bfgs`/`lbfgs`, the solver also
+    /// semantics of the chosen `solver`. For `bfgs`/`lbfgs`, the solver also
     /// reports convergence when the gradient norm is within `100 * tol` of the
     /// target and the line search can no longer make progress because the
     /// log-likelihood has reached floating-point precision (common with very
     /// large samples); this window scales with `tol`, so it widens if you
-    /// loosen `tol`. Note: the method-dependent default is
-    /// resolved once, at construction time. Changing `method` afterwards via
+    /// loosen `tol`. Note: the solver-dependent default is
+    /// resolved once, at construction time. Changing `solver` afterwards via
     /// the setter does not re-resolve `tol` — set both together (or set `tol`
-    /// explicitly) if you change `method` after construction.
+    /// explicitly) if you change `solver` after construction.
     #[pyo3(get, set)]
     pub tol: f64,
 
@@ -121,7 +123,7 @@ impl LogitOptions {
         include_intercept = true,
         confidence_level = 0.95,
         cluster_col = None,
-        method = "newton".to_string(),
+        solver = "newton".to_string(),
         max_iter = 35,
         tol = None,
         raise_on_non_convergence = true,
@@ -132,17 +134,17 @@ impl LogitOptions {
         include_intercept: bool,
         confidence_level: f64,
         cluster_col: Option<String>,
-        method: String,
+        solver: String,
         max_iter: i64,
         tol: Option<f64>,
         raise_on_non_convergence: bool,
     ) -> Self {
-        // `tol`の既定値は`method`依存（`tol`フィールドのdocコメント参照）。`newton`は
+        // `tol`の既定値は`solver`依存（`tol`フィールドのdocコメント参照）。`newton`は
         // 絶対閾値`1e-6`、`bfgs`/`lbfgs`は観測数正規化後の`1e-8`。共有の単一既定値
         // では、Newtonの既定値を締めると大標本で無視できない速度低下（実測:
         // n=1,000,000で0.98s→3.15s）が起きる一方、bfgs/lbfgsの既定値を緩めると小標本の
-        // 精度検証テスト（RTOL=1e-8）を壊すため、method別に分岐する（ユーザー確認済み）。
-        let tol = tol.unwrap_or(if method.eq_ignore_ascii_case("newton") {
+        // 精度検証テスト（RTOL=1e-8）を壊すため、solver別に分岐する（ユーザー確認済み）。
+        let tol = tol.unwrap_or(if solver.eq_ignore_ascii_case("newton") {
             1e-6
         } else {
             1e-8
@@ -152,7 +154,7 @@ impl LogitOptions {
             include_intercept,
             confidence_level,
             cluster_col,
-            method,
+            solver,
             max_iter,
             tol,
             raise_on_non_convergence,
@@ -162,12 +164,12 @@ impl LogitOptions {
     fn __repr__(&self) -> String {
         format!(
             "LogitOptions(cov_type={:?}, include_intercept={}, confidence_level={}, \
-             cluster_col={:?}, method={:?}, max_iter={}, tol={}, raise_on_non_convergence={})",
+             cluster_col={:?}, solver={:?}, max_iter={}, tol={}, raise_on_non_convergence={})",
             self.cov_type,
             self.include_intercept,
             self.confidence_level,
             self.cluster_col,
-            self.method,
+            self.solver,
             self.max_iter,
             self.tol,
             self.raise_on_non_convergence
@@ -241,10 +243,10 @@ pub struct LogitResult {
     /// to lowercase; e.g. `"classical"`, `"opg"`, `"hc1"`, `"cluster"`).
     #[pyo3(get)]
     pub cov_type: String,
-    /// Optimization solver actually used (echoes `LogitOptions.method`, normalized
+    /// Optimization solver actually used (echoes `LogitOptions.solver`, normalized
     /// to lowercase; one of `"newton"`, `"bfgs"`, `"lbfgs"`).
     #[pyo3(get)]
-    pub method: String,
+    pub solver: String,
     /// Not exposed to Python; only `predict`/`pred_table`/`marginal_effects` read it
     /// (`OLSResult`の`fitted_values`/`has_intercept`と同じ位置づけ、コメント参照)。
     estimator: LogitEstimator,
@@ -337,7 +339,7 @@ impl LogitResult {
         mat_to_nested_vec(&self.estimator.pred_table(threshold))
     }
 
-    /// Marginal effects (`dy/dx`) with delta-method standard errors.
+    /// Marginal effects (`dy/dx`) with delta-solver standard errors.
     ///
     /// Independent of `fit()`'s `confidence_level` (re-evaluated here so callers can
     /// use a different confidence level without re-fitting). See
@@ -380,7 +382,7 @@ impl LogitResult {
 ///   欠損値・NaN・無限大を含む等）は`column_extraction`の責務で`ValidationError`
 /// - `y`・`x`の重複、`include_intercept=true`のときの`"const"`列との衝突は
 ///   ここ（受け口）の責務で`ValidationError`（OLSの`fit()`と同じ役割分担）
-/// - `cov_type`/`method`の文字列が不正な場合は`ValidationError`
+/// - `cov_type`/`solver`の文字列が不正な場合は`ValidationError`
 /// - それ以外（次元不一致等）は`engine::nonlinear::common::MleError`から
 ///   `mle_error_to_pyerr`で変換
 pub(crate) fn build_logit_input(
@@ -388,9 +390,9 @@ pub(crate) fn build_logit_input(
     y: String,
     x: Vec<String>,
     options: &LogitOptions,
-) -> PyResult<(LogitInput, EngineCovType, EngineMethod)> {
+) -> PyResult<(LogitInput, EngineCovType, EngineSolverType)> {
     let cov_type_lower = options.cov_type.to_lowercase();
-    let method_lower = options.method.to_lowercase();
+    let solver_lower = options.solver.to_lowercase();
 
     // 完全な多重共線性を早期に、分かりやすいエラーで防ぐ（`validation.rs`に集約、
     // OLS/WLSと共通、`.claude/rules/rust-style.md`参照）。
@@ -403,12 +405,12 @@ pub(crate) fn build_logit_input(
     let x_slices = extract_f64_columns(df, &x)?;
 
     let cov_type = parse_cov_type(df, &cov_type_lower, &options.cluster_col)?;
-    let method = parse_method(&method_lower)?;
+    let solver = parse_solver_type(&solver_lower)?;
 
     let input = LogitInput::from_columns(&y_slice, &x_slices, x, options.include_intercept, y)
         .map_err(mle_error_to_pyerr)?;
 
-    Ok((input, cov_type, method))
+    Ok((input, cov_type, solver))
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `options` を検証し、
@@ -417,7 +419,7 @@ pub(crate) fn build_logit_input(
 ///
 /// # Errors
 /// - `build_logit_input`が返すエラー（列抽出・y/xの重複・`"const"`列衝突・
-///   `cov_type`/`method`文字列の検証等）は`ValidationError`
+///   `cov_type`/`solver`文字列の検証等）は`ValidationError`
 /// - `LogitEstimator::fit`が返す`MleError`（`confidence_level`範囲外・`max_iter`が
 ///   0以下・観測数不足・未収束・特異Hessian・特異OPG行列・クラスターキー未指定・
 ///   クラスター数不足等）は`mle_error_to_pyerr`で変換（詳細は
@@ -429,12 +431,12 @@ pub(crate) fn fit(
     options: &LogitOptions,
 ) -> PyResult<LogitResult> {
     let df: DataFrame = data.into();
-    let (input, cov_type, method) = build_logit_input(&df, y, x, options)?;
+    let (input, cov_type, solver) = build_logit_input(&df, y, x, options)?;
 
     let estimator = LogitEstimator::fit(
         input,
         MleFitOptions {
-            method,
+            solver,
             max_iter: options.max_iter,
             tol: options.tol,
             raise_on_non_convergence: options.raise_on_non_convergence,
@@ -465,7 +467,7 @@ pub(crate) fn fit(
         converged: estimator.converged(),
         n_iter: estimator.n_iter(),
         cov_type: options.cov_type.to_lowercase(),
-        method: options.method.to_lowercase(),
+        solver: options.solver.to_lowercase(),
         estimator,
         training_data: df,
     })
@@ -477,7 +479,7 @@ mod tests {
     use polars::df;
 
     /// `build_logit_input`のテスト全体で使う既定の`LogitOptions`（`cov_type="classical"`・
-    /// `include_intercept=true`・`method="newton"`）。フィールドごとに上書きして使う。
+    /// `include_intercept=true`・`solver="newton"`）。フィールドごとに上書きして使う。
     fn default_options() -> LogitOptions {
         LogitOptions::new(
             "classical".to_string(),
@@ -500,7 +502,7 @@ mod tests {
         .unwrap()
     }
 
-    /// `tol=None`のとき、`method`に応じた既定値（`newton`は絶対閾値`1e-6`、
+    /// `tol=None`のとき、`solver`に応じた既定値（`newton`は絶対閾値`1e-6`、
     /// `bfgs`/`lbfgs`は観測数正規化基準`1e-8`）が解決されるはず。
     #[test]
     fn new_resolves_tol_default_based_on_method_when_tol_is_none() {
@@ -541,7 +543,7 @@ mod tests {
         assert_eq!(lbfgs.tol, 1e-8);
     }
 
-    /// `method`の大文字小文字判定は`fit()`側の`parse_method`と同じく区別しないはず。
+    /// `solver`の大文字小文字判定は`fit()`側の`parse_solver_type`と同じく区別しないはず。
     #[test]
     fn new_resolves_newton_tol_default_case_insensitively() {
         let opts = LogitOptions::new(
@@ -557,7 +559,7 @@ mod tests {
         assert_eq!(opts.tol, 1e-6);
     }
 
-    /// `tol`を明示的に渡した場合は`method`に関わらずその値がそのまま使われるはず
+    /// `tol`を明示的に渡した場合は`solver`に関わらずその値がそのまま使われるはず
     /// （既定値解決ロジックを経由しない）。
     #[test]
     fn new_keeps_explicit_tol_regardless_of_method() {
@@ -579,7 +581,7 @@ mod tests {
         let df = well_formed_df();
         let options = default_options();
 
-        let Ok((input, cov_type, method)) = build_logit_input(
+        let Ok((input, cov_type, solver)) = build_logit_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string(), "x2".to_string()],
@@ -596,7 +598,7 @@ mod tests {
         );
         assert_eq!(input.dep_var_name(), "y");
         assert!(matches!(cov_type, EngineCovType::Classical));
-        assert!(matches!(method, EngineMethod::Newton));
+        assert!(matches!(solver, EngineSolverType::Newton));
     }
 
     #[test]
@@ -707,7 +709,7 @@ mod tests {
     fn build_logit_input_returns_validation_error_for_unknown_method() {
         let df = well_formed_df();
         let mut options = default_options();
-        options.method = "bogus".to_string();
+        options.solver = "bogus".to_string();
 
         let result = build_logit_input(&df, "y".to_string(), vec!["x1".to_string()], &options);
         assert!(result.is_err());

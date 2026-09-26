@@ -24,14 +24,14 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   | `include_intercept` | `bool` | `True` | |
   | `confidence_level` | `float` | `0.95` | |
   | `cluster_col` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名 |
-  | `method` | `str` | `"newton"` | `"newton"` / `"bfgs"` / `"lbfgs"`（大小無視） |
+  | `solver` | `str` | `"newton"` | `"newton"` / `"bfgs"` / `"lbfgs"`（大小無視） |
   | `max_iter` | `int` | `35` | 正整数、以下は`InvalidMaxIter` |
   | `tol` | `float` | `1e-6` | 勾配ノルム収束判定の閾値、以下は`InvalidTol` |
   | `raise_on_non_convergence` | `bool` | `True` | `False`なら未収束時も`converged=False`の結果を返す |
 
 - `start_params`（ユーザー指定初期値）は提供しない。反復最適化の初期値（warm start）は、標準化空間の
   設計行列に対する線形確率モデル（LPM）最小二乗解に、logitのIRLS 1ステップ相当のスケール補正を
-  施したものを内部で自動生成する（3.2節、`method`に依らず共通）。
+  施したものを内部で自動生成する（3.2節、`solver`に依らず共通）。
 - `n<=k`は`InsufficientObservations`（OLSと同じ閾値だが根拠は異なる: OLSは残差自由度がゼロ以下という
   数学的必要条件、Logitは`n<=k`がほぼ確実に完全分離を引き起こすという経験則的な安全側の判断）。
   `k==0`（`include_intercept=false`かつ`x`が空、`n<=k`チェックをすり抜けうる病的な入力）は別途
@@ -45,7 +45,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 （**z検定**、t検定ではない） / `p_values` / `conf_lower` / `conf_upper` / `param_names` /
 `log_likelihood` / `log_likelihood_null` / `lr_statistic` / `lr_p_value` / `pseudo_r_squared`
 （McFadden） / `aic` / `bic` / `n_obs` / `df_model` / `df_resid` / `converged` / `n_iter` /
-`cov_type`（実際に使われた種別の小文字文字列） / `method`（実際に使われたソルバーの小文字文字列）。
+`cov_type`（実際に使われた種別の小文字文字列） / `solver`（実際に使われたソルバーの小文字文字列）。
 
 - `k×kの分散共分散行列（cov_params）はPython側に公開しない`が、`predict()`/`pred_table()`/
   `marginal_effects()`用に非公開フィールド`estimator: LogitEstimator`として結果オブジェクト内部に
@@ -80,10 +80,10 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 ### 3.2 最適化・収束判定
 
 `LogitEstimator::fit`は設計行列を標準化した空間（`standardize_columns`）で最適化し、収束後に
-`destandardize_params`で元のスケールへ逆変換する。`method`（`newton`/`bfgs`/`lbfgs`）に関わらず、
+`destandardize_params`で元のスケールへ逆変換する。`solver`（`newton`/`bfgs`/`lbfgs`）に関わらず、
 収束点でのHessian評価（SE計算用）は常に解析的に行う。
 
-- **初期値（warm start）と設計行列のランクチェック**: `method`に関わらず、最適化を開始する前に
+- **初期値（warm start）と設計行列のランクチェック**: `solver`に関わらず、最適化を開始する前に
   標準化空間の設計行列を列ピボットQR分解する（`nonlinear::common::checked_design_matrix_qr`）。
   `R`の対角成分の相対閾値`k·ε·max|R_ii|`（`linear::ols`の`ensure_full_rank`と同一式）でランク落ちを
   検出し、完全な多重共線性等は`MleError::SingularDesignMatrix`（`ComputationError`）で弾く。この
@@ -92,7 +92,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   IRLS重み `p̄(1-p̄)`）、切片成分にのみ `η₀ - p̄/w`（`η₀ = ln(p̄/(1-p̄))`）を加える
   （`β⁽¹⁾ = b_lpm/w + (η₀ - p̄/w)·e₀`）。`p̄`が0/1の近傍（全観測で`y`が同一）では補正が発散する
   ため素の`b_lpm`にフォールバックする。従来のゼロベクトル初期値から変更した。この変更で
-  多重共線性の検出経路が`method`非依存の単一経路（前段QR）に統一され、従来`bfgs`/`lbfgs`のみ
+  多重共線性の検出経路が`solver`非依存の単一経路（前段QR）に統一され、従来`bfgs`/`lbfgs`のみ
   検出が収束後の`observed_information_cov_params`に依存していた構造的な差が解消された。収束先の
   推定値・既存のクロスチェック数値は不変（尤度が大域凹で無制約のためMLEは一意）。
 
@@ -145,11 +145,11 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     `n`が小さいケースで正規化により実効閾値が緩む（`tol*n < tol`となる`n<1`は無いが、`n`倍する
     こと自体で絶対閾値`1e-8`が`n*1e-8`まで緩む）とこの精度マージンを食いつぶす。この結果を
     ユーザーに報告の上、`newton`は正規化せず既定値`1e-6`の絶対閾値のまま維持する方針を確定した。
-  - **既定値は`method`により異なる**: `newton`（既定`tol=1e-6`、絶対閾値）と`bfgs`/`lbfgs`
+  - **既定値は`solver`により異なる**: `newton`（既定`tol=1e-6`、絶対閾値）と`bfgs`/`lbfgs`
     （既定`tol=1e-8`、正規化基準）で共有の単一既定値は採れない——`newton`の既定を`1e-8`
     （絶対閾値のまま）に締めると大標本で無視できない速度低下（実測: `n`=1,000,000で
     0.98秒→3.15秒）が生じる一方、`bfgs`/`lbfgs`の既定を`1e-6`（正規化基準）に緩めると
-    `n`=500の精度検証テストを壊す（後述）。`tol`を明示的に指定した場合は、選択した`method`の
+    `n`=500の精度検証テストを壊す（後述）。`tol`を明示的に指定した場合は、選択した`solver`の
     意味論（`newton`なら絶対、`bfgs`/`lbfgs`なら正規化）がそのまま適用される。
   - **実測（`generate_binary_choice_dataset("baseline", link="logit", n=1_000_000, k=5, seed=42)`、
     公式計測ハーネス`performance.compare_logit --worker`、単一スレッド）**: `bfgs`は
@@ -194,7 +194,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   読んだSEを黙って返すのは識別失敗の隠蔽（fail-fast方針・多重共線性をエラーで止めるのと整合）
   のため、`fit()`冒頭で弾く（従来はsilent-passだった、実質バグ。OLS/WLS/Tobit/IVと横断で統一）。
   少数クラスタ一般の漸近的信頼性（`G=5, q=2`等、計算は通るケース）は別軸で、これは弾かない。
-- 完全な多重共線性等の設計行列のランク落ちは、`method`に依らず最適化前の列ピボットQR
+- 完全な多重共線性等の設計行列のランク落ちは、`solver`に依らず最適化前の列ピボットQR
   （`checked_design_matrix_qr`、3.2節）で`SingularDesignMatrix`として弾く。前段で弾かれた後に
   なお発生しうるHessianのランクエラーはHessian自体が特異な場合は`SingularHessian`、OPG行列
   （`Σᵢsᵢsᵢ'`）が特異な場合は`SingularOpgMatrix`（原因が異なるため区別）。
@@ -300,8 +300,8 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 - **完全分離でNonConvergenceになるシナリオ（`complete_separation`）は対応済み（2026-09-13）**:
   当初は3.2の既知の限界（アンダーフローによる誤収束判定）により意図通りに動作しないと判断し
   見送っていたが、`n=500`程度（極小標本ではない）では誤判定が起きず、newton/bfgs/lbfgs
-  いずれのmethodでも確実に`ComputationError`（`SeparationSuspected`または`NonConvergence`、
-  method依存）が発生することを実測確認した上で`benchmark/nonlinear/datasets.py`の
+  いずれのsolverでも確実に`ComputationError`（`SeparationSuspected`または`NonConvergence`、
+  solver依存）が発生することを実測確認した上で`benchmark/nonlinear/datasets.py`の
   `complete_separation`シナリオとして追加した（`perfect_multicollinearity`と同型、数値比較の
   対象外）。小標本境界（`n=k+1`近傍）でのみ誤判定が顕在化することは別途確認済み。
   - **未対応のまま残る点**: `raise_on_non_convergence=False`とこの完全分離データの組み合わせは

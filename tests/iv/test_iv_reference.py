@@ -14,8 +14,8 @@ classical/HC0/HC1/HAC（+クラスター、baselineのみ）で、係数・標�
     - 独立実装（R `ivreg`）とのクロスチェック: `test_iv_crosscheck.py`
 
 Note:
-    - `method="gmm"`はこのフィクスチャの対象外（フィクスチャ生成時点で
-      `method="gmm"`がまだPython側に配線されていなかったため、
+    - `estimator="gmm"`はこのフィクスチャの対象外（フィクスチャ生成時点で
+      `estimator="gmm"`がまだPython側に配線されていなかったため、
       `benchmark/iv/fixtures/generate_iv_fixtures.py`のモジュールdoc
       コメント参照）。GMMのlinearmodels（`IVGMM`）クロスチェックは
       別途フィクスチャ生成からやり直す必要がある。

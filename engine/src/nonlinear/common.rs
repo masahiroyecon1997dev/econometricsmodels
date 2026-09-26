@@ -217,7 +217,7 @@ pub enum MleError {
     #[error(
         "the optimizer evaluated the objective/gradient {budget} times without satisfying its \
          convergence criteria (this typically indicates the line search failed to converge for \
-         this input); try a different method, or adjust max_iter/tol"
+         this input); try a different solver, or adjust max_iter/tol"
     )]
     EvaluationBudgetExceeded { budget: u64 },
 }
@@ -514,7 +514,7 @@ pub fn goodness_of_fit(
 /// 数値最適化ソルバーの種類。文字列パース（Python文字列 → この型への変換）は
 /// `engine_pybind`側の責務（OLSの`CovType`と同じ設計。`.claude/rules/rust-style.md`参照）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Method {
+pub enum SolverType {
     /// Newton-Raphson法（既定）。解析的Hessianを使う。
     Newton,
     /// BFGS法（準ニュートン法、Hessianを近似的に更新する）。
@@ -528,7 +528,7 @@ pub enum Method {
 /// （OLSの`CovType`と同じ設計。`.claude/rules/rust-style.md`参照）。
 ///
 /// Logit/Probit/Tobitで共通のバリアント（`docs/spec/nonlinear-common.md`3章）のため
-/// `nonlinear/common.rs`に定義する（`Method`と同じ理由）。
+/// `nonlinear/common.rs`に定義する（`SolverType`と同じ理由）。
 ///
 /// `Cluster`のみ、他のバリアントと異なり追加データ（グループキー）を持つため
 /// フィールド付きバリアントにしている（OLSの`CovType::Cluster`と同じ設計パターン。
@@ -553,7 +553,7 @@ pub enum CovType {
 }
 
 /// `LogitEstimator::fit`/`ProbitEstimator::fit`/`TobitEstimator::fit`が共通で受け取る
-/// 最適化・推論オプション（`method`/`max_iter`/`tol`/`raise_on_non_convergence`/
+/// 最適化・推論オプション（`solver`/`max_iter`/`tol`/`raise_on_non_convergence`/
 /// `cov_type`/`confidence_level`）をまとめた構造体。
 ///
 /// 元は3つの`fit()`がこの6引数を個別の位置引数として独立に持っており、シグネチャが
@@ -570,7 +570,7 @@ pub enum CovType {
 #[derive(Debug, Clone)]
 pub struct MleFitOptions {
     /// 数値最適化ソルバーの種類。
-    pub method: Method,
+    pub solver: SolverType,
     /// 最大反復回数。
     pub max_iter: i64,
     /// 勾配ノルムの収束判定閾値。
@@ -585,11 +585,11 @@ pub struct MleFitOptions {
 }
 
 /// 限界効果（`marginal_effects`）をどの代表点で評価するか。文字列パース（Python文字列 →
-/// この型への変換）は`engine_pybind`側の責務（`Method`/`CovType`と同じ設計。
+/// この型への変換）は`engine_pybind`側の責務（`SolverType`/`CovType`と同じ設計。
 /// `.claude/rules/rust-style.md`参照）。
 ///
 /// Logit/Probit/Tobitで共通の概念（`docs/spec/nonlinear-common.md`6章）のため`nonlinear/
-/// common.rs`に定義する（`Method`/`CovType`と同じ理由）。`w=∂p/∂z`相当のリンク関数の
+/// common.rs`に定義する（`SolverType`/`CovType`と同じ理由）。`w=∂p/∂z`相当のリンク関数の
 /// 微分（Logitなら`p(1-p)`、Probitなら`φ(z)`）の計算式のみモデルごとの実装
 /// （`logit.rs`等の`overall_w_and_s`/`at_point_w_and_s`）に置き、`w`・その勾配`s`から
 /// `dydx`・デルタ法標準誤差を求める部分は`w`/`s`の意味に依存しないためこのモジュールの
@@ -1006,7 +1006,7 @@ pub struct SolverOutput {
     /// 収束点（`raise_on_non_convergence=false`で未収束の場合は打ち切り時点）のパラメータ。
     pub params: Vec<f64>,
     /// 収束点で解析的に評価した**対数尤度そのもの**のHessian（k×k、真の最大点では負定値）。
-    /// `method`の選択に関わらず常に評価する。`cov_type`共通行列演算（`neg_hessian_inverse`
+    /// `solver`の選択に関わらず常に評価する。`cov_type`共通行列演算（`neg_hessian_inverse`
     /// 等）はこの符号（対数尤度のHessian）を前提とする。モデルの`Hessian`トレイト実装
     /// 自体は`CostFunction`/`Gradient`と同じ符号（コスト関数＝負の対数尤度のHessian）を
     /// 返す契約になっており、ここに格納する値は`run_solver`内部で1回符号反転したもの
@@ -1160,8 +1160,8 @@ fn line_search_step_satisfies_wolfe(
 /// 回数に総枠（バジェット）を設ける（`nonlinear::tobit::tests::proptests`が
 /// devプロファイルで異常に長時間実行される問題の根本対応）。
 ///
-/// **背景（当時の状況）**: `Method::Bfgs`（自前実装`FaerBfgs`、[`FaerBfgs::next_iter`]）・
-/// `Method::Lbfgs`（当時はargmin組み込み`LBFGS`だったが、現在は`FaerLbfgs`に置き換え済み）は
+/// **背景（当時の状況）**: `SolverType::Bfgs`（自前実装`FaerBfgs`、[`FaerBfgs::next_iter`]）・
+/// `SolverType::Lbfgs`（当時はargmin組み込み`LBFGS`だったが、現在は`FaerLbfgs`に置き換え済み）は
 /// いずれも、1回の外側反復ごとに`MoreThuenteLineSearch`を内側`Executor`で走らせるが、
 /// この内側`Executor`には`max_iters`が設定されておらず（argminの`IterState`既定値
 /// `u64::MAX`）、`MoreThuenteLineSearch`自体もステップ幅の上限（`stpmax`）を設定していない
@@ -1170,7 +1170,7 @@ fn line_search_step_satisfies_wolfe(
 /// 嵌ると、この内側ループは理論上終了しない（[`MleError::EvaluationBudgetExceeded`]の
 /// docコメント参照）。
 ///
-/// **なぜここに1箇所実装すれば全methodを保護できるか**: `MoreThuenteLineSearch`は
+/// **なぜここに1箇所実装すれば全solverを保護できるか**: `MoreThuenteLineSearch`は
 /// 呼び出し元（`FaerBfgs`・`FaerLbfgs`いずれの自前実装も）を問わず、必ず`Problem<O>`経由で
 /// `problem.cost()`/`problem.gradient()`を呼ぶ。argminの全traitメソッドは`Result`を返す
 /// 設計のため、ここでエラーを返せば`?`演算子で呼び出し元（`MoreThuenteLineSearch::next_iter`
@@ -1178,11 +1178,11 @@ fn line_search_step_satisfies_wolfe(
 /// `Executor::run()`）を素通りしてそのまま伝播する。`FaerLbfgs`が
 /// [`LINE_SEARCH_MAX_ITERS`]による個別の反復上限＋明示的なエラー化を持つようになった後も、
 /// この`BudgetedProblem`は複数回のline search呼び出しを横断する総枠として引き続き
-/// 全methodに一律適用する（個々のline search呼び出しは正常に収束を繰り返しても、
+/// 全solverに一律適用する（個々のline search呼び出しは正常に収束を繰り返しても、
 /// 外側反復自体が`max_iter`に対して過剰に多い場合の粗い安全網、[`FaerNewton`]の
 /// `MAX_LM_ATTEMPTS`と同じ位置づけ）。
 ///
-/// `Method::Newton`（`FaerNewton`）はこの経路を通らず自前のLMラダー
+/// `SolverType::Newton`（`FaerNewton`）はこの経路を通らず自前のLMラダー
 /// （`MAX_LM_ATTEMPTS`）で既に有限回に抑えられているが、[`run_solver`]は3method共通で
 /// このラッパーを適用する（将来追加されるsolverも含め、個別のsolverが独自の反復上限を
 /// 正しく実装しているかに依存しない、一律の安全網とするため）。
@@ -1286,7 +1286,7 @@ where
 /// 判定を取り消す、[`MleError::SeparationSuspected`]参照）を有効にするか。Logit/Probitは
 /// `Enabled`、Tobitは`Disabled`（理由は[`SeparationNormCheck`]のdocコメント参照）。
 ///
-/// **`tol`の意味論はmethodにより異なる**: `Newton`は総和勾配に対する
+/// **`tol`の意味論はsolverにより異なる**: `Newton`は総和勾配に対する
 /// 絶対閾値`‖∇ℓ(θ)‖ < tol`のまま（2次収束のため`n`依存性の影響をほとんど受けない、
 /// `docs/spec/logit-spec.md`3.2節参照）。`Bfgs`/`Lbfgs`は`n_obs`（観測数）で正規化した
 /// 「観測あたり平均勾配」基準`‖∇ℓ(θ)‖ / n_obs < tol`を使う（実装上は`tol * n_obs`を
@@ -1306,7 +1306,7 @@ where
 #[allow(clippy::too_many_arguments)]
 pub fn run_solver<O>(
     problem: O,
-    method: Method,
+    solver: SolverType,
     initial_params: Vec<f64>,
     max_iter: u64,
     tol: f64,
@@ -1332,45 +1332,45 @@ where
         .saturating_mul(MAX_EVALUATIONS_PER_ITER);
     let problem = BudgetedProblem::new(problem, budget);
 
-    let (params, mut converged, n_iter, model) = match method {
-        Method::Newton => {
-            let solver = FaerNewton {
+    let (params, mut converged, n_iter, model) = match solver {
+        SolverType::Newton => {
+            let optimizer = FaerNewton {
                 tol,
                 stalled_at_optimum: false,
             };
-            let result = Executor::new(problem, solver)
+            let result = Executor::new(problem, optimizer)
                 .configure(|state| state.param(initial_params).max_iters(max_iter))
                 .run()
                 .map_err(convert_optimizer_error)?;
             extract_outcome(result.state, result.problem)?
         }
-        Method::Bfgs => {
+        SolverType::Bfgs => {
             // `n_obs`で正規化した「観測あたり平均勾配」基準（run_solverのdocコメント
-            // 「tolの意味論はmethodにより異なる」参照）。`FaerBfgs`自体は正規化を知らず、
+            // 「tolの意味論はsolverにより異なる」参照）。`FaerBfgs`自体は正規化を知らず、
             // 実効的な絶対閾値を受け取るだけでよい。
-            let solver = FaerBfgs {
+            let optimizer = FaerBfgs {
                 linesearch: wolfe_line_search()?,
                 tol: tol * n_obs as f64,
                 stalled_at_optimum: false,
             };
-            let result = Executor::new(problem, solver)
+            let result = Executor::new(problem, optimizer)
                 .configure(|state| state.param(initial_params).max_iters(max_iter))
                 .run()
                 .map_err(convert_optimizer_error)?;
             extract_outcome(result.state, result.problem)?
         }
-        Method::Lbfgs => {
+        SolverType::Lbfgs => {
             // Bfgsと同じ正規化（`n_obs`で正規化した「観測あたり平均勾配」基準）。
             // `FaerLbfgs`自体は正規化を知らず、実効的な絶対閾値を受け取るだけでよい
             // （`FaerBfgs`と同じ設計）。
-            let solver = FaerLbfgs {
+            let optimizer = FaerLbfgs {
                 linesearch: wolfe_line_search()?,
                 tol: tol * n_obs as f64,
                 stalled_at_optimum: false,
                 s_history: VecDeque::with_capacity(LBFGS_HISTORY_SIZE),
                 y_history: VecDeque::with_capacity(LBFGS_HISTORY_SIZE),
             };
-            let result = Executor::new(problem, solver)
+            let result = Executor::new(problem, optimizer)
                 .configure(|state| state.param(initial_params).max_iters(max_iter))
                 .run()
                 .map_err(convert_optimizer_error)?;
@@ -1398,7 +1398,7 @@ where
         return Err(MleError::NonConvergence { n_iter });
     }
 
-    // Hessianはmethodの選択に関わらず、収束点で常に解析的に評価する
+    // Hessianはsolverの選択に関わらず、収束点で常に解析的に評価する
     // （bfgs/lbfgsの内部近似Hessianは使い回さない）。
     //
     // `Hessian`トレイトの契約は「`CostFunction`/`Gradientと同じ符号（コスト関数=負の
@@ -1429,16 +1429,16 @@ where
 }
 
 /// `Executor::run()`の結果から`(params, converged, n_iter, model)`を取り出す。
-/// `Method`の3分岐で共通の後処理のため、`run_solver`から切り出している。
+/// `SolverType`の3分岐で共通の後処理のため、`run_solver`から切り出している。
 /// `I`はソルバーごとに異なる状態型（`FaerLbfgs`はHessianスロットを使わないため`H=()`）だが、
 /// いずれも`State`トレイト経由で同じ形で取り出せる。
 ///
 /// **`TerminationReason::SolverExit`を専用に検出していた分岐は削除済み**:
-/// 元々は、`Method::Lbfgs`が当時使っていたargmin組み込み`LBFGS::next_iter`が、line search用
+/// 元々は、`SolverType::Lbfgs`が当時使っていたargmin組み込み`LBFGS::next_iter`が、line search用
 /// 内側`Executor::run()`の`Err`を`?`で伝播せず`Ok(state.terminate_with(SolverExit(msg)))`と
 /// して握りつぶす挙動（`argmin-0.11.0/src/solver/quasinewton/lbfgs.rs`）を持っていたため、
 /// この分岐で早期検出し元のエラー内容を保っていた。その後
-/// `Method::Lbfgs`を自前実装`FaerLbfgs`（[`FaerBfgs`]・[`FaerNewton`]と同じく`?`で
+/// `SolverType::Lbfgs`を自前実装`FaerLbfgs`（[`FaerBfgs`]・[`FaerNewton`]と同じく`?`で
 /// そのまま`Err`を伝播する設計）に置き換えたことで、3method全てが`SolverExit`を
 /// 二度と発生させなくなった（`MoreThuenteLineSearch`自体もこの`TerminationReason`は
 /// 使わない）ため、分岐ごと削除した。
@@ -1526,7 +1526,7 @@ struct FaerNewton {
     /// `next_iter`が毎反復書き換え、`terminate`が読む。argminの`Executor`が各反復で
     /// `next_iter`→`terminate`の順に呼ぶ契約に依存している（`terminate`が`next_iter`で
     /// 立てたフラグを同じ反復内で見られる前提。argminバージョン更新時はこの順序を要確認）。
-    /// `FaerNewton`は`run_solver`内で`method`ごとに毎回新規構築されるため、`run_solver`
+    /// `FaerNewton`は`run_solver`内で`solver`ごとに毎回新規構築されるため、`run_solver`
     /// 呼び出しをまたぐフラグの持ち越しは無い。
     stalled_at_optimum: bool,
 }
@@ -1885,10 +1885,10 @@ fn newton_step(hessian: &[Vec<f64>], grad: &[f64]) -> Result<Vec<f64>, MleError>
 /// （固定値のまま反復間で使い回すと、スケール補正済みの反復まで不必要に小さい
 /// ステップから始めることになり逆効果になりうるため）。
 ///
-/// **`Method::Lbfgs`は当初対象外だったが、現在は解消済み**: 導入当初は
+/// **`SolverType::Lbfgs`は当初対象外だったが、現在は解消済み**: 導入当初は
 /// argmin 0.11.0の組み込みLBFGS実装が`s`/`y`履歴・初期`γ`を外部から注入する公開APIを
 /// 持たず（privateフィールド、対応するビルダーメソッド無し）、同じ手法を適用できな
-/// かった。その後`Method::Lbfgs`自体を自前実装`FaerLbfgs`に置き換え、
+/// かった。その後`SolverType::Lbfgs`自体を自前実装`FaerLbfgs`に置き換え、
 /// `FaerBfgs`と同じ「`self`がline searchを所有し1回目の反復だけ初期ステップ幅を
 /// 切り替える」制御を獲得したことで解消した（詳細は`FaerLbfgs`のdocコメント参照）。
 struct FaerBfgs {
@@ -2503,7 +2503,7 @@ fn two_loop_recursion(
 /// Logit/Probit（`ols_based_initial_params`）とTobit（`tobit::ols_initial_params`）が
 /// `fit()`冒頭で共有する。Newton法が一度も反復していない段階での検出のため、エラーは
 /// `SingularHessian`（最適化中・収束後のHessian逆行列計算）ではなく`SingularDesignMatrix`
-/// （後者のdocコメント参照。`method`（newton/bfgs/lbfgs）に関わらず同じこの単一経路で
+/// （後者のdocコメント参照。`solver`（newton/bfgs/lbfgs）に関わらず同じこの単一経路で
 /// 多重共線性を検出するのが本関数を共有する目的）。
 ///
 /// # Errors
@@ -2699,7 +2699,7 @@ pub fn destandardize_cov_params(cov_std: &Mat<f64>, scale: &ColumnScale) -> Mat<
 /// Newton法は`newton_step`内の別の検出経路（ピボット付きQR）が
 /// 最適化中に必ず通るためこの問題が表面化しなかったが、BFGS/L-BFGSは
 /// `newton_step`を経由しないため、収束後のこの関数が唯一の検出経路になる
-/// （発覚済み: `Method::Bfgs`で完全な多重共線性のあるデータセットを
+/// （発覚済み: `SolverType::Bfgs`で完全な多重共線性のあるデータセットを
 /// 最適化すると、修正前はエラーにならず桁違いに巨大な値を返していた）。
 fn neg_hessian_inverse(hessian: &Mat<f64>, k: usize) -> Result<Mat<f64>, MleError> {
     let neg_h = Mat::from_fn(k, k, |i, j| -(*hessian.get(i, j)));
@@ -2986,7 +2986,7 @@ mod tests {
      {
         let result = run_solver(
             UnboundedBelowProblem,
-            Method::Bfgs,
+            SolverType::Bfgs,
             vec![0.0],
             1,
             1e-6,
@@ -3008,12 +3008,12 @@ mod tests {
         // 設定しているため、[`BudgetedProblem`]の総枠（このテストでは
         // `(1+1)*2000=4000`評価分）を使い切るより先にこちらの上限に到達し、
         // `MleError::Common(ComputationFailed(..))`（「line search did not converge
-        // within..」）を返す（`Method::Bfgs`、上のテストとは異なり
+        // within..」）を返す（`SolverType::Bfgs`、上のテストとは異なり
         // `EvaluationBudgetExceeded`という具体的なバリアントにはならない。`FaerBfgs`には
         // この個別チェックが無いため）。
         let result = run_solver(
             UnboundedBelowProblem,
-            Method::Lbfgs,
+            SolverType::Lbfgs,
             vec![0.0],
             1,
             1e-6,
@@ -3126,7 +3126,7 @@ mod tests {
     fn run_solver_newton_converges_to_known_minimum() {
         let output = run_solver(
             quadratic_problem(),
-            Method::Newton,
+            SolverType::Newton,
             vec![0.0, 0.0],
             35,
             1e-6,
@@ -3156,7 +3156,7 @@ mod tests {
     fn run_solver_bfgs_converges_to_known_minimum() {
         let output = run_solver(
             quadratic_problem(),
-            Method::Bfgs,
+            SolverType::Bfgs,
             vec![0.0, 0.0],
             100,
             1e-6,
@@ -3175,8 +3175,8 @@ mod tests {
         );
     }
 
-    /// `Method::Bfgs`は`tol * n_obs`を実効的な絶対閾値として使うはず（
-    /// `run_solver`のdocコメント「tolの意味論はmethodにより異なる」参照）。`n_obs`と`tol`を
+    /// `SolverType::Bfgs`は`tol * n_obs`を実効的な絶対閾値として使うはず（
+    /// `run_solver`のdocコメント「tolの意味論はsolverにより異なる」参照）。`n_obs`と`tol`を
     /// 別々に振っても積が同じなら同じ収束点・反復回数になることを直接検証する
     /// （既存のBFGS/LBFGSテストは全て`n_obs=1`で呼んでおり、この正規化ロジック自体は
     /// 未検証だった、rust-reviewer指摘）。
@@ -3184,7 +3184,7 @@ mod tests {
     fn run_solver_bfgs_scales_effective_tol_by_n_obs() {
         let via_n_obs = run_solver(
             quadratic_problem(),
-            Method::Bfgs,
+            SolverType::Bfgs,
             vec![0.0, 0.0],
             100,
             1e-9,
@@ -3195,7 +3195,7 @@ mod tests {
         .unwrap();
         let via_tol = run_solver(
             quadratic_problem(),
-            Method::Bfgs,
+            SolverType::Bfgs,
             vec![0.0, 0.0],
             100,
             1e-6,
@@ -3210,12 +3210,12 @@ mod tests {
         assert!((via_n_obs.params[1] - via_tol.params[1]).abs() < 1e-12);
     }
 
-    /// `Method::Lbfgs`も`Bfgs`と同じ正規化を使うはず（同じ理由）。
+    /// `SolverType::Lbfgs`も`Bfgs`と同じ正規化を使うはず（同じ理由）。
     #[test]
     fn run_solver_lbfgs_scales_effective_tol_by_n_obs() {
         let via_n_obs = run_solver(
             quadratic_problem(),
-            Method::Lbfgs,
+            SolverType::Lbfgs,
             vec![0.0, 0.0],
             100,
             1e-9,
@@ -3226,7 +3226,7 @@ mod tests {
         .unwrap();
         let via_tol = run_solver(
             quadratic_problem(),
-            Method::Lbfgs,
+            SolverType::Lbfgs,
             vec![0.0, 0.0],
             100,
             1e-6,
@@ -3241,13 +3241,13 @@ mod tests {
         assert!((via_n_obs.params[1] - via_tol.params[1]).abs() < 1e-12);
     }
 
-    /// `Method::Newton`は`n_obs`を無視し、`tol`をそのまま絶対閾値として使うはず
+    /// `SolverType::Newton`は`n_obs`を無視し、`tol`をそのまま絶対閾値として使うはず
     /// （`newton`は正規化の対象外、`docs/spec/logit-spec.md`3.2節参照）。
     #[test]
     fn run_solver_newton_ignores_n_obs() {
         let small_n_obs = run_solver(
             quadratic_problem(),
-            Method::Newton,
+            SolverType::Newton,
             vec![0.0, 0.0],
             35,
             1e-6,
@@ -3258,7 +3258,7 @@ mod tests {
         .unwrap();
         let large_n_obs = run_solver(
             quadratic_problem(),
-            Method::Newton,
+            SolverType::Newton,
             vec![0.0, 0.0],
             35,
             1e-6,
@@ -3529,12 +3529,12 @@ mod tests {
     /// line searchを繰り返して評価回数が膨れていた（Probit `n=1_000_000`で26反復・評価約1200回）。
     #[test]
     fn run_solver_quasi_newton_stops_at_noisy_cost_floor_near_gradient_target() {
-        for method in [Method::Bfgs, Method::Lbfgs] {
+        for solver in [SolverType::Bfgs, SolverType::Lbfgs] {
             let problem = NoisyCostFloorProblem::new();
             let evaluations = std::rc::Rc::clone(&problem.evaluations);
             let output = run_solver(
                 problem,
-                method,
+                solver,
                 vec![0.0, 0.0],
                 100,
                 1e-2,
@@ -3544,17 +3544,17 @@ mod tests {
             )
             .unwrap();
 
-            assert!(output.converged, "{method:?}: {output:?}");
+            assert!(output.converged, "{solver:?}: {output:?}");
             let grad = NoisyCostFloorProblem::new()
                 .gradient(&output.params)
                 .unwrap();
             assert!(
                 l2_norm(&grad) < QUASI_NEWTON_STALL_GRAD_FACTOR * 1e-2,
-                "{method:?}: {grad:?}"
+                "{solver:?}: {grad:?}"
             );
             assert!(
                 evaluations.get() < 60,
-                "{method:?}: {} evaluations",
+                "{solver:?}: {} evaluations",
                 evaluations.get()
             );
         }
@@ -3625,7 +3625,7 @@ mod tests {
     fn run_solver_lbfgs_converges_to_known_minimum() {
         let output = run_solver(
             quadratic_problem(),
-            Method::Lbfgs,
+            SolverType::Lbfgs,
             vec![0.0, 0.0],
             100,
             1e-6,
@@ -3648,7 +3648,7 @@ mod tests {
     fn run_solver_returns_non_convergence_error_when_max_iter_is_too_small() {
         let result = run_solver(
             quadratic_problem(),
-            Method::Bfgs,
+            SolverType::Bfgs,
             vec![1000.0, -1000.0],
             1,
             1e-12,
@@ -3664,7 +3664,7 @@ mod tests {
     fn run_solver_returns_result_without_raising_when_raise_on_non_convergence_is_false() {
         let output = run_solver(
             quadratic_problem(),
-            Method::Bfgs,
+            SolverType::Bfgs,
             vec![1000.0, -1000.0],
             1,
             1e-12,
@@ -3681,7 +3681,7 @@ mod tests {
     fn run_solver_newton_returns_non_convergence_error_when_max_iter_is_too_small() {
         let result = run_solver(
             quadratic_problem(),
-            Method::Newton,
+            SolverType::Newton,
             vec![1000.0, -1000.0],
             0,
             1e-12,
@@ -3697,7 +3697,7 @@ mod tests {
     fn run_solver_newton_returns_result_without_raising_when_raise_on_non_convergence_is_false() {
         let output = run_solver(
             quadratic_problem(),
-            Method::Newton,
+            SolverType::Newton,
             vec![1000.0, -1000.0],
             0,
             1e-12,
@@ -3748,7 +3748,7 @@ mod tests {
     fn run_solver_newton_returns_singular_hessian_error() {
         let result = run_solver(
             SingularHessianProblem,
-            Method::Newton,
+            SolverType::Newton,
             vec![0.0],
             35,
             1e-6,
@@ -3816,7 +3816,7 @@ mod tests {
         // 動かずにconverged=trueを返す。
         let output = run_solver(
             IllConditionedProblem,
-            Method::Newton,
+            SolverType::Newton,
             vec![0.5],
             10,
             1e-6,
@@ -3901,7 +3901,7 @@ mod tests {
                 target: 2.0,
                 grad_floor: 5.0e-5,
             },
-            Method::Newton,
+            SolverType::Newton,
             vec![0.0],
             50,
             1e-6,
@@ -3931,7 +3931,7 @@ mod tests {
                 target: -1.5,
                 grad_floor: 5.0e-5,
             },
-            Method::Newton,
+            SolverType::Newton,
             vec![10.0],
             50,
             1e-6,
@@ -3988,7 +3988,7 @@ mod tests {
     fn run_solver_newton_does_not_treat_flat_cost_with_large_gradient_as_converged() {
         let result = run_solver(
             FlatCostLargeGradientProblem,
-            Method::Newton,
+            SolverType::Newton,
             vec![0.0],
             20,
             1e-6,
@@ -4046,7 +4046,7 @@ mod tests {
     fn run_solver_newton_does_not_treat_indefinite_hessian_stall_as_converged() {
         let result = run_solver(
             IndefiniteHessianStallProblem,
-            Method::Newton,
+            SolverType::Newton,
             vec![0.0, 0.0],
             20,
             1e-6,
@@ -4734,7 +4734,7 @@ mod tests {
     fn run_solver_returns_separation_suspected_when_check_is_enabled() {
         let result = run_solver(
             large_norm_minimum_problem(),
-            Method::Newton,
+            SolverType::Newton,
             vec![0.0, 0.0],
             35,
             1e-6,
@@ -4757,7 +4757,7 @@ mod tests {
     fn run_solver_downgrades_to_unconverged_on_separation_norm_when_raise_is_false() {
         let output = run_solver(
             large_norm_minimum_problem(),
-            Method::Newton,
+            SolverType::Newton,
             vec![0.0, 0.0],
             35,
             1e-6,
@@ -4784,7 +4784,7 @@ mod tests {
     fn run_solver_ignores_separation_norm_when_check_is_disabled() {
         let output = run_solver(
             large_norm_minimum_problem(),
-            Method::Newton,
+            SolverType::Newton,
             vec![0.0, 0.0],
             35,
             1e-6,

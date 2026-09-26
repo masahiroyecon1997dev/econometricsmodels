@@ -3,7 +3,7 @@
 `tests/fixtures/benchmarks/tobit.json`（`benchmark/nonlinear/fixtures/
 generate_tobit_fixtures.py` で生成）を読み込み、打ち切り比率違い・右/区間打ち切り・
 構造的悪条件の合成シナリオ × classical/opg/hc0/hc1 + クラスター（均等・不均衡・
-G>q 境界）+ method(bfgs/lbfgs) + Wooldridge 実データ（mroz `hours`、Example 17.2）で、
+G>q 境界）+ solver(bfgs/lbfgs) + Wooldridge 実データ（mroz `hours`、Example 17.2）で、
 係数・標準誤差・検定統計量・適合度統計量・限界効果・予測値・打ち切り適合度を
 相対誤差 1e-8 で厳密比較する（`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。
 
@@ -54,7 +54,7 @@ def _tolerances(scenario: str) -> dict:
 
 
 def _method_tolerances() -> dict:
-    rtol = _TOL["rtol_method"]
+    rtol = _TOL["rtol_solver"]
     return {
         "rtol_point": rtol,
         "rtol_inference": rtol,
@@ -85,11 +85,11 @@ def test_cluster_matches_aer_tobit(fixtures, cov_key):
     )
 
 
-@pytest.mark.parametrize("method", _checks.METHODS)
-def test_method_matches_aer_tobit(fixtures, method):
-    ref = fixtures["method"][method]
-    res = _checks.build_method_fit(method, ref)
-    _checks.check_result(res, ref, f"method/{method}", **_method_tolerances())
+@pytest.mark.parametrize("solver", _checks.METHODS)
+def test_method_matches_aer_tobit(fixtures, solver):
+    ref = fixtures["solver"][solver]
+    res = _checks.build_method_fit(solver, ref)
+    _checks.check_result(res, ref, f"solver/{solver}", **_method_tolerances())
 
 
 @pytest.mark.parametrize("cov_type", _checks.COV_TYPES)

@@ -114,7 +114,7 @@ pub enum IvError {
     #[error("gmm_tol must be a positive finite number, got {gmm_tol}")]
     InvalidGmmTol { gmm_tol: f64 },
 
-    /// `method="gmm"`かつ`gmm_weight_type=Cluster`で、クラスター数`g`がモーメント条件の重み行列
+    /// `estimator="gmm"`かつ`gmm_weight_type=Cluster`で、クラスター数`g`がモーメント条件の重み行列
     /// `S`（l×l、`l`は全操作変数`x_exog ++ instruments`の数）を非特異にするのに足りない。
     ///
     /// `S = Σ_g S_g S_g'`はG個のランク1行列の和なので`rank(S) ≤ g`。丁度識別（`l == k`）の
@@ -424,11 +424,11 @@ pub type FirstStageResult = (Vec<(String, OlsEstimator)>, Vec<(String, f64)>);
 /// （部分F統計量、`iv-spec.md`3.4節）を計算する。
 ///
 /// `TwoSlsEstimator::fit`（`two_sls.rs`、第二段階の予測値`x̂_endog`を得るために内部で
-/// 使う）・`engine_pybind`の`fit`（`method="gmm"`でも同じ診断情報を独立に提供するため、
+/// 使う）・`engine_pybind`の`fit`（`estimator="gmm"`でも同じ診断情報を独立に提供するため、
 /// `GmmEstimator`を経由せず直接呼ぶ）の両方から使う、2SLS/GMM間で真に共有されるロジック
 /// （`iv/CLAUDE.md`「2SLSとGMMの独立実装方針」参照——GMMはモーメント条件`Z'(y-Xβ)=0`を
 /// 直接解くため点推定自体には第一段階回帰を必要としないが、第一段階回帰・弱操作変数診断
-/// 自体は`method`に依存しない、素の（第二段階の推定方式によらない）診断情報のため、
+/// 自体は`estimator`に依存しない、素の（第二段階の推定方式によらない）診断情報のため、
 /// SEサンドイッチ計算（2SLS/GMMで数式が異なるため独立実装が必要）とは性質が異なる）。
 ///
 /// `cov_type`は第一段階`OlsEstimator::fit`にそのまま渡す（`two_sls.rs`の`fit()`冒頭

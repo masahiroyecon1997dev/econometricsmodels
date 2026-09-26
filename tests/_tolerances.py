@@ -81,18 +81,18 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # Logit/Probitは反復最適化（Newton/BFGS/L-BFGS）のため、ゼロ近傍の値
     # （信頼区間の境界等）で閉形式解（OLS/WLS）より1桁大きい浮動小数点誤差が
     # 乗ることを実測確認済み（ATOLのみ1e-9、RTOLは同じ1e-8）。
-    # rtol_method: method="bfgs"/"lbfgs"がnewtonと異なる最適化経路で収束するため、
+    # rtol_solver: solver="bfgs"/"lbfgs"がnewtonと異なる最適化経路で収束するため、
     # 収束後の係数・標準誤差が既定のRTOLより1桁以上大きくばらつく（実測最大相対誤差
     # ~7.7e-5）。実測値に対し約13倍のマージンを持たせた。
     "logit_reference": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": 1e-9,
-        "rtol_method": 1e-3,
+        "rtol_solver": 1e-3,
     },
     "probit_reference": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": 1e-9,
-        "rtol_method": 1e-3,
+        "rtol_solver": 1e-3,
     },
     # Tobit の主リファレンスは R `AER::tobit`（`survival::survreg` エンジン）。
     # survreg は (β, log σ) を独自の Newton-Raphson で最適化するが、本実装との
@@ -107,10 +107,10 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # 相対誤差が増幅する（実測最大 ~1.4e-8、構成要素の係数・SE は ~3e-10）。
         # 合成シナリオの conf_int は 1e-8（実測 ≤1e-9）を維持し、mroz のみ緩める。
         "rtol_mroz_conf_int": 3e-8,
-        # method="bfgs"/"lbfgs" は newton と異なる最適化経路で、リファレンス
-        # （survreg、method 非依存）から僅かにずれた点に収束する。Logit の
-        # `rtol_method`（1e-3）と同じ位置づけだが Tobit は最適化がよく条件付けられて
-        # おり桁違いに小さい。method ケースの全フィールドに適用する。
+        # solver="bfgs"/"lbfgs" は newton と異なる最適化経路で、リファレンス
+        # （survreg、solver 非依存）から僅かにずれた点に収束する。Logit の
+        # `rtol_solver`（1e-3）と同じ位置づけだが Tobit は最適化がよく条件付けられて
+        # おり桁違いに小さい。solver ケースの全フィールドに適用する。
         #
         # `Method::Lbfgs`をargmin組み込みLBFGSから自前実装`FaerLbfgs`へ
         # 置き換えたことで実測値が変わり、`1e-7`（旧実測: 予測値`E[y*|x]=x'β`で最大
@@ -126,7 +126,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # （`survreg`）とは異なる最適化経路に収束するために生じる、想定内の僅かな
         # ズレと考えられる（詳細は`engine/src/nonlinear/CLAUDE.md`「FaerLbfgs」
         # セクション参照）。
-        "rtol_method": 2e-7,
+        "rtol_solver": 2e-7,
     },
     # Tobit の交差検証は R `censReg`（`maxLik` エンジン）。survreg とは最適化実装が
     # 完全に独立（`nonlinear-common.md` 8章）。censReg 側の maxLik 収束を
@@ -147,10 +147,10 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # censReg 側の収束限界であって本実装の問題ではない（mroz の厳密照合は
         # `test_tobit_reference.py` が担う）。
         "rtol_mroz": 1e-4,
-        # method="bfgs"/"lbfgs" ケース（`tobit_reference` の同名エントリ参照。ただし
+        # solver="bfgs"/"lbfgs" ケース（`tobit_reference` の同名エントリ参照。ただし
         # crosscheckの実測は変わっていないため1e-7のまま、tobit_referenceのみ
         # 2e-7に緩めた）。
-        "rtol_method": 1e-7,
+        "rtol_solver": 1e-7,
     },
     # --- 独立実装（R）とのクロスチェック ---
     # classical/HC0-3/clusterは機械精度一致（実測1e-14程度）のためRTOL_STRICTを

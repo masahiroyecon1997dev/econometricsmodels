@@ -23,9 +23,9 @@ Logit/Probit/Tobit（最尤推定ベースの非線形モデル）が共有す�
   （`run_solver`関数の内部）でのみ`Vec<Vec<f64>>`⇔`faer::Mat`の変換を行う（k×kで
   パラメータ数は小さくコストは無視できる）。
 
-### 1.2 ソルバー（`method`）
+### 1.2 ソルバー（`solver`）
 
-`method`引数を公開する。値は`"newton"`（既定）/`"bfgs"`/`"lbfgs"`（statsmodelsの`method`
+`solver`引数を公開する。値は`"newton"`（既定）/`"bfgs"`/`"lbfgs"`（statsmodelsの`method`
 引数の値に揃えた文字列、大小無視）。3手法いずれも解析的スコアが書け、Newton-Raphsonを
 既定にできる（statsmodelsの既定とも一致）。BFGS/L-BFGSはHessian計算が重い・不安定な
 ケースのフォールバックとして用意する。Nelder-Mead/SANN等の勾配不要法はv1では対象外。
@@ -61,7 +61,7 @@ Logit/Probit/Tobit（最尤推定ベースの非線形モデル）が共有す�
   勾配の評価回数に総枠`(max_iter + 1) * 2000`を設ける。枠を使い切ると
   `MleError::EvaluationBudgetExceeded`。
 
-**収束点のHessian評価**: `method`の3分岐で`Executor::run()`実行後、最終パラメータで
+**収束点のHessian評価**: `solver`の3分岐で`Executor::run()`実行後、最終パラメータで
 Hessianを1回評価し直す（Newtonの最後のイテレーションで計算済みのものを使い回さない。
 3手法で同じコードパスにできるため）。BFGS/L-BFGSの内部近似逆Hessianは使い回さず、
 `cov_type="classical"`（観測情報行列）には常に解析的Hessianを使う。
@@ -78,8 +78,8 @@ Hessianとして扱う（`Σ_classical = -H⁻¹`が成り立つ前提と一致�
 
 | フィールド | 型 | デフォルト | 説明 |
 |---|---|---|---|
-| `max_iter` | `int` | `35` | 最大反復回数。`method`に関わらず単一の値（statsmodelsもdiscreteモデルで`method`に依らず`maxiter=35`を一律適用） |
-| `tol` | `float \| None` | `None` | 勾配ノルム収束判定の閾値。`None`時は`method`により既定値が異なる（下記） |
+| `max_iter` | `int` | `35` | 最大反復回数。`solver`に関わらず単一の値（statsmodelsもdiscreteモデルで`method`に依らず`maxiter=35`を一律適用） |
+| `tol` | `float \| None` | `None` | 勾配ノルム収束判定の閾値。`None`時は`solver`により既定値が異なる（下記） |
 | `raise_on_non_convergence` | `bool` | `True` | `True`なら`max_iter`到達時に`ComputationError`。`False`なら最終反復時点のパラメータを`converged=False`として返す |
 
 **Return**: `converged: bool` / `n_iter: int`。
@@ -88,7 +88,7 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
 プロジェクトは**デフォルトで厳格（例外を投げる）**とする。未収束の結果をそれと知らず
 使ってしまうリスクを避けるため。
 
-**判定基準・既定値は`method`により異なる**:
+**判定基準・既定値は`solver`により異なる**:
 
 - **`newton`**: 総和勾配に対する絶対閾値`‖∇ℓ(θ)‖ < tol`。既定`tol=1e-6`。2次収束のため
   観測数`n`が増えても追加反復はごく僅かで済む。
@@ -132,7 +132,7 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
   公開の`tol`のdocstringにこの挙動を明記する方針とした（ユーザー判断）。Probit
   （`generate_binary_choice_dataset("baseline", link="probit", k=5, seed=42)`）の実測で、
   `n=1,000,000`はbfgs 43秒→約2秒・lbfgs 47秒→約2秒、`n=100,000`のlbfgsは3.0秒→約0.18秒に
-  短縮し、statsmodelsの同methodと同程度になった。line searchの前に予測減少量`-gᵀd`を
+  短縮し、statsmodelsの同solverと同程度になった。line searchの前に予測減少量`-gᵀd`を
   コストの丸め誤差の水準と比べて打ち切る案も試したが、近似Hessianが粗い局面で`gᵀd`が
   達成可能な減少量を過小評価して早く止まり、Tobitの`bfgs`参照比較テストが精度不足で
   失敗したため不採用とした。
@@ -146,10 +146,10 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
 
 ### 1.4 設計行列のランクチェック・初期値
 
-**多重共線性の検出は`fit()`冒頭の列ピボットQRランクチェックに一本化**: `method`に関わらず、
+**多重共線性の検出は`fit()`冒頭の列ピボットQRランクチェックに一本化**: `solver`に関わらず、
 `run_solver`を呼ぶ前に`nonlinear::common::checked_design_matrix_qr(x_std)`を必ず通し、
 ランク落ちを`MleError::SingularDesignMatrix`（`ComputationError`）で弾く。旧来のゼロベクトル
-初期値では検出経路が`method`ごとに分かれ（newtonは`newton_step`内QR、bfgs/lbfgsは収束後の
+初期値では検出経路が`solver`ごとに分かれ（newtonは`newton_step`内QR、bfgs/lbfgsは収束後の
 `observed_information_cov_params`）、bfgs/lbfgsのみ検出漏れする構造的リスクがあった。
 
 Logit/Probitはこの列ピボットQR解（標準化空間のLPM最小二乗解）を、nullモデル
@@ -217,7 +217,7 @@ Hessianとする。いずれも標準化空間で`Σ_std`を計算した後、`d
   に集約済み）。反復最適化の無駄を避けるため、この検証は全手法`fit()`冒頭・最適化実行前に
   行う（OLS/WLSも閉形式解だが位置を統一）。
 - **特異性検出は固有値分解ベースの相対閾値判定を経由する**: 非ピボットCholesky分解の失敗
-  だけでは構造的な特異性・悪条件を確実には検出できない（`method=Bfgs`/`Lbfgs`は
+  だけでは構造的な特異性・悪条件を確実には検出できない（`solver=Bfgs`/`Lbfgs`は
   `newton_step`のピボット付きQRを経由しないため顕在化した）。`ensure_well_conditioned_
   symmetric_matrix`（`engine/src/linear_algebra.rs`、`SelfAdjointEigen`ベース、OLSの
   `wald_f_test`用実装を系統横断で共有）をCholesky分解の前に呼び、エラー時は

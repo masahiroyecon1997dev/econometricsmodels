@@ -53,9 +53,9 @@ def test_default_options_use_classical_left_censored_at_zero(
     assert res.converged
 
 
-@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
-def test_method_option_converges_to_same_params(censored_dataset, method):
-    """`method`（newton/bfgs/lbfgs）はいずれも同じ最尤解に収束する。
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_method_option_converges_to_same_params(censored_dataset, solver):
+    """`solver`（newton/bfgs/lbfgs）はいずれも同じ最尤解に収束する。
 
     `engine/src/nonlinear/tobit.rs`のRust単体テストは3手法の一致を検証済み
     だが、engine_pybindの文字列→`Method`パースやpython_packageラッパーの
@@ -67,7 +67,7 @@ def test_method_option_converges_to_same_params(censored_dataset, method):
         censored_dataset,
         y="y",
         x=["x1", "x2"],
-        options=TobitOptions(method=method),
+        options=TobitOptions(solver=solver),
     ).fit()
     assert res.converged
     for name in res.param_names:
@@ -76,22 +76,22 @@ def test_method_option_converges_to_same_params(censored_dataset, method):
         )
 
 
-@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
-def test_method_label(censored_dataset, method):
-    """`res.method`が指定した`method`（正規化済み小文字）を反映すること
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_method_label(censored_dataset, solver):
+    """`res.solver`が指定した`solver`（正規化済み小文字）を反映すること
     （Logit/Probitの`check_method_label`と同型）。
     """
     res = Tobit(
         censored_dataset,
         y="y",
         x=["x1", "x2"],
-        options=TobitOptions(method=method),
+        options=TobitOptions(solver=solver),
     ).fit()
-    assert res.method == method
+    assert res.solver == solver
 
 
 @pytest.mark.parametrize(
-    "method, expected_label",
+    "solver, expected_label",
     [
         ("NEWTON", "newton"),
         ("Newton", "newton"),
@@ -101,17 +101,17 @@ def test_method_label(censored_dataset, method):
         ("Lbfgs", "lbfgs"),
     ],
 )
-def test_method_is_case_insensitive(censored_dataset, method, expected_label):
-    """`method`が大文字小文字を区別しないこと（Logit/Probitの
+def test_method_is_case_insensitive(censored_dataset, solver, expected_label):
+    """`solver`が大文字小文字を区別しないこと（Logit/Probitの
     `check_method_is_case_insensitive`と同型）。
     """
     res = Tobit(
         censored_dataset,
         y="y",
         x=["x1", "x2"],
-        options=TobitOptions(method=method),
+        options=TobitOptions(solver=solver),
     ).fit()
-    assert res.method == expected_label
+    assert res.solver == expected_label
 
 
 def test_param_names_include_const_first_and_sigma_last(censored_dataset):
@@ -706,20 +706,20 @@ def test_unknown_cov_type_raises(censored_dataset, cov_type):
         ).fit()
 
 
-@pytest.mark.parametrize("method", ["bogus", ""])
-def test_unknown_method_raises(censored_dataset, method):
-    """未知の`method`（空文字列を含む）は`ValidationError`
+@pytest.mark.parametrize("solver", ["bogus", ""])
+def test_unknown_solver_raises(censored_dataset, solver):
+    """未知の`solver`（空文字列を含む）は`ValidationError`
     （テスト網羅性候補・項目46）。
     """
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_METHOD_NONLINEAR, other=method),
+        match=escaped(msgs.UNKNOWN_METHOD_NONLINEAR, other=solver),
     ):
         Tobit(
             censored_dataset,
             y="y",
             x=["x1", "x2"],
-            options=TobitOptions(method=method),
+            options=TobitOptions(solver=solver),
         ).fit()
 
 
@@ -857,9 +857,9 @@ def test_perfect_multicollinearity_raises_computation_error():
     （`tobit_perfect_multicollinearity.csv`、`x3 = 2·x1 + 3·x2`）を使う
     （テスト網羅性レビュー 観点3。旧テストは inline n=5 データだった）。
 
-    Logit とは異なり、Tobit は `ols_initial_params` の QR 検証が `method` に
+    Logit とは異なり、Tobit は `ols_initial_params` の QR 検証が `solver` に
     関わらず常に最初に実行されるため、完全な多重共線性は常にこの経路で検出される
-    （`method` を parametrize する必要が無い、`docs/spec/tobit-spec.md` 3.2節参照）。
+    （`solver` を parametrize する必要が無い、`docs/spec/tobit-spec.md` 3.2節参照）。
     """
     df = pl.read_csv(DATA_DIR / "tobit_perfect_multicollinearity.csv")
     lower, upper = _TOBIT_CENSORING_BOUNDS["perfect_multicollinearity"]
@@ -904,8 +904,8 @@ def test_non_convergence_raises_computation_error_with_tiny_max_iter(
         ).fit()
 
 
-@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
-def test_large_true_coefficient_dgp_converges_and_recovers_truth(method):
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_large_true_coefficient_dgp_converges_and_recovers_truth(solver):
     """大きい真の係数（`x1`の係数=100）でもノイズがあれば識別可能で、真値を回復する
     回帰テスト。
 
@@ -932,7 +932,7 @@ def test_large_true_coefficient_dgp_converges_and_recovers_truth(method):
     df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
 
     res = Tobit(
-        df, y="y", x=["x1", "x2"], options=TobitOptions(method=method)
+        df, y="y", x=["x1", "x2"], options=TobitOptions(solver=solver)
     ).fit()
 
     # これはリファレンス数値照合ではなく分離誤検知に対する回帰テスト。許容幅は「真値を回復し、
@@ -947,8 +947,8 @@ def test_large_true_coefficient_dgp_converges_and_recovers_truth(method):
     assert 0.5 < res.sigma < 2.0
 
 
-@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
-def test_true_separation_noise_free_dgp_raises_computation_error(method):
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_true_separation_noise_free_dgp_raises_computation_error(solver):
     """ノイズを除いた完全分離DGP（`y* = 100·x1 + 0.5·x2`）は`ComputationError`。
 
     Tobitの「真の」分離は、Logit/Probitのように係数が±∞へ発散するのではなく
@@ -974,7 +974,7 @@ def test_true_separation_noise_free_dgp_raises_computation_error(method):
 
     with pytest.raises(ComputationError):
         Tobit(
-            df, y="y", x=["x1", "x2"], options=TobitOptions(method=method)
+            df, y="y", x=["x1", "x2"], options=TobitOptions(solver=solver)
         ).fit()
 
 

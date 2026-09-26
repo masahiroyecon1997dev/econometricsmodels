@@ -410,10 +410,10 @@ pub struct LogitEstimator {
 }
 
 impl LogitEstimator {
-    /// `method`（Newton-Raphson/BFGS/L-BFGS）で負の対数尤度を最小化し、Logitの係数・
+    /// `solver`（Newton-Raphson/BFGS/L-BFGS）で負の対数尤度を最小化し、Logitの係数・
     /// 観測情報行列によるSE・z値・p値・信頼区間を推定する。
     ///
-    /// `method`の選択に関わらず、収束点でのHessian評価（SE計算用）は常に解析的に行う
+    /// `solver`の選択に関わらず、収束点でのHessian評価（SE計算用）は常に解析的に行う
     /// （`run_solver`の実装方針、`docs/spec/nonlinear-common.md`1.2節参照）。
     /// BFGS/L-BFGSが最適化中に内部で保持する近似Hessianは
     /// 使い回さない。
@@ -422,7 +422,7 @@ impl LogitEstimator {
     /// IRLS 1ステップ相当のスケール補正（`p̄=ȳ`での `1/(p̄(1-p̄))` 倍＋切片補正）を施した
     /// もの（`ols_based_initial_params`。従来のゼロベクトルから変更）。前段で
     /// `standardize_columns`後の設計行列を列ピボットQRしランク落ちを検出する
-    /// （`checked_design_matrix_qr`、`method`によらず単一経路で`SingularDesignMatrix`）。
+    /// （`checked_design_matrix_qr`、`solver`によらず単一経路で`SingularDesignMatrix`）。
     /// `start_params`によるユーザー指定初期値は引き続き未対応（`docs/spec/
     /// nonlinear-common.md`7章では確定オプションだが対応Issueが無く、見送り）。
     ///
@@ -466,7 +466,7 @@ impl LogitEstimator {
     /// - `k`（定数項を含む説明変数の数）が0（定数項も説明変数も無い）: `CommonError::NoRegressors`
     /// - 観測数`n`が`k`以下: `CommonError::InsufficientObservations`
     /// - 設計行列がランク落ち（完全な多重共線性等）: `MleError::SingularDesignMatrix`
-    ///   （最適化前の列ピボットQRランクチェックで`method`によらず検出）
+    ///   （最適化前の列ピボットQRランクチェックで`solver`によらず検出）
     /// - `raise_on_non_convergence=true`かつ`max_iter`回で未収束: `MleError::NonConvergence`
     /// - 収束点（または`raise_on_non_convergence=false`時の打ち切り点）のHessianが特異:
     ///   `MleError::SingularHessian`（ランク落ちは前段で`SingularDesignMatrix`として弾くため、
@@ -481,7 +481,7 @@ impl LogitEstimator {
     ///   無警告で返していた）
     pub fn fit(input: LogitInput, options: MleFitOptions) -> Result<Self, MleError> {
         let MleFitOptions {
-            method,
+            solver,
             max_iter,
             tol,
             raise_on_non_convergence,
@@ -505,11 +505,11 @@ impl LogitEstimator {
         )?;
 
         let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
-        // `method`に関わらず、標準化空間でLPMのIRLS 1ステップ相当を初期値（warm start）に
+        // `solver`に関わらず、標準化空間でLPMのIRLS 1ステップ相当を初期値（warm start）に
         // する（`ols_based_initial_params`）。前段の列ピボットQRランクチェックにより、
-        // 完全な多重共線性は`method`によらず単一経路で`SingularDesignMatrix`として検出される
+        // 完全な多重共線性は`solver`によらず単一経路で`SingularDesignMatrix`として検出される
         // （従来はゼロベクトル初期値で、`newton`は`newton_step`内のQR、
-        // `bfgs`/`lbfgs`は収束後の`observed_information_cov_params`という`method`依存の
+        // `bfgs`/`lbfgs`は収束後の`observed_information_cov_params`という`solver`依存の
         // 別経路に分かれていた）。
         let initial_params = ols_based_initial_params(
             &x_std,
@@ -535,7 +535,7 @@ impl LogitEstimator {
 
         let output = run_solver(
             problem,
-            method,
+            solver,
             initial_params,
             max_iter as u64,
             tol,
@@ -873,7 +873,7 @@ impl LogitEstimator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nonlinear::common::{Method, dydx_and_jacobian};
+    use crate::nonlinear::common::{SolverType, dydx_and_jacobian};
     use statrs::distribution::{ChiSquared, ContinuousCDF};
 
     #[test]
@@ -1105,7 +1105,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -1141,7 +1141,7 @@ mod tests {
         let _ = LogitEstimator::fit(
             small_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -1164,7 +1164,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             intercept_only_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -1223,7 +1223,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -1270,7 +1270,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             intercept_only_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -1320,7 +1320,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -1390,7 +1390,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -1444,7 +1444,7 @@ mod tests {
         let classical = LogitEstimator::fit(
             make_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -1496,7 +1496,7 @@ mod tests {
             let estimator = LogitEstimator::fit(
                 make_input(),
                 MleFitOptions {
-                    method: Method::Newton,
+                    solver: SolverType::Newton,
                     max_iter: 35,
                     tol: 1e-8,
                     raise_on_non_convergence: true,
@@ -1551,7 +1551,7 @@ mod tests {
         let classical = LogitEstimator::fit(
             make_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -1586,7 +1586,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             make_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -1645,7 +1645,7 @@ mod tests {
         let classical = LogitEstimator::fit(
             make_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -1680,7 +1680,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             make_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -1719,7 +1719,7 @@ mod tests {
         let result = LogitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -1751,7 +1751,7 @@ mod tests {
         let result = LogitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -1797,7 +1797,7 @@ mod tests {
         let result = LogitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -1814,9 +1814,9 @@ mod tests {
         );
     }
 
-    /// `method`（`bfgs`/`lbfgs`）と`cov_type`（`Opg`/`Hc0`/`Hc1`/`Cluster`）の組み合わせが
-    /// 正しく機能することを確認する（rust-reviewer指摘: 既存テストは`method`横断が
-    /// `CovType::Classical`のみ、`cov_type`横断が`Method::Newton`のみで、両方を
+    /// `solver`（`bfgs`/`lbfgs`）と`cov_type`（`Opg`/`Hc0`/`Hc1`/`Cluster`）の組み合わせが
+    /// 正しく機能することを確認する（rust-reviewer指摘: 既存テストは`solver`横断が
+    /// `CovType::Classical`のみ、`cov_type`横断が`SolverType::Newton`のみで、両方を
     /// 同時に変える組み合わせが未検証だった）。`scores_std`の評価は収束点の
     /// パラメータにのみ依存し最適化アルゴリズムの種類に依存しない設計のため、
     /// `newton`で計算した`cov_params`（既に上のテストで正しさを検証済み）と
@@ -1855,7 +1855,7 @@ mod tests {
             let newton = LogitEstimator::fit(
                 make_input(),
                 MleFitOptions {
-                    method: Method::Newton,
+                    solver: SolverType::Newton,
                     max_iter: 35,
                     tol: 1e-8,
                     raise_on_non_convergence: true,
@@ -1865,11 +1865,11 @@ mod tests {
             )
             .unwrap();
 
-            for method in [Method::Bfgs, Method::Lbfgs] {
+            for solver in [SolverType::Bfgs, SolverType::Lbfgs] {
                 let estimator = LogitEstimator::fit(
                     make_input(),
                     MleFitOptions {
-                        method,
+                        solver,
                         max_iter: 200,
                         tol: 1e-8,
                         raise_on_non_convergence: true,
@@ -1883,7 +1883,7 @@ mod tests {
                     estimator.converged(),
                     "cov_type={:?}, {:?}",
                     cov_type,
-                    method
+                    solver
                 );
                 for i in 0..k {
                     for j in 0..k {
@@ -1891,9 +1891,9 @@ mod tests {
                             (*estimator.cov_params().get(i, j) - *newton.cov_params().get(i, j))
                                 .abs()
                                 < 1e-4,
-                            "cov_type={:?}, method={:?}, ({i},{j}): actual={}, newton={}",
+                            "cov_type={:?}, solver={:?}, ({i},{j}): actual={}, newton={}",
                             cov_type,
-                            method,
+                            solver,
                             *estimator.cov_params().get(i, j),
                             *newton.cov_params().get(i, j)
                         );
@@ -1910,11 +1910,11 @@ mod tests {
         let y_bar: f64 = 4.0 / 7.0;
         let expected = (y_bar / (1.0 - y_bar)).ln();
 
-        for method in [Method::Bfgs, Method::Lbfgs] {
+        for solver in [SolverType::Bfgs, SolverType::Lbfgs] {
             let estimator = LogitEstimator::fit(
                 intercept_only_input(),
                 MleFitOptions {
-                    method,
+                    solver,
                     max_iter: 100,
                     tol: 1e-6,
                     raise_on_non_convergence: true,
@@ -1924,11 +1924,11 @@ mod tests {
             )
             .unwrap();
 
-            assert!(estimator.converged(), "{:?}", method);
+            assert!(estimator.converged(), "{:?}", solver);
             assert!(
                 (estimator.params()[0] - expected).abs() < 1e-4,
-                "method={:?}, params={:?}, expected={}",
-                method,
+                "solver={:?}, params={:?}, expected={}",
+                solver,
                 estimator.params(),
                 expected
             );
@@ -1962,7 +1962,7 @@ mod tests {
         let newton = LogitEstimator::fit(
             make_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -1973,11 +1973,11 @@ mod tests {
         .unwrap();
         assert!(newton.converged());
 
-        for method in [Method::Bfgs, Method::Lbfgs] {
+        for solver in [SolverType::Bfgs, SolverType::Lbfgs] {
             let estimator = LogitEstimator::fit(
                 make_input(),
                 MleFitOptions {
-                    method,
+                    solver,
                     max_iter: 200,
                     tol: 1e-8,
                     raise_on_non_convergence: true,
@@ -1987,12 +1987,12 @@ mod tests {
             )
             .unwrap();
 
-            assert!(estimator.converged(), "{:?}", method);
+            assert!(estimator.converged(), "{:?}", solver);
             for j in 0..2 {
                 assert!(
                     (estimator.params()[j] - newton.params()[j]).abs() < 1e-4,
-                    "method={:?}, j={j}, params={:?}, newton_params={:?}",
-                    method,
+                    "solver={:?}, j={j}, params={:?}, newton_params={:?}",
+                    solver,
                     estimator.params(),
                     newton.params()
                 );
@@ -2005,7 +2005,7 @@ mod tests {
         let result = LogitEstimator::fit(
             intercept_only_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -2026,7 +2026,7 @@ mod tests {
         let result = LogitEstimator::fit(
             intercept_only_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 0,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -2056,7 +2056,7 @@ mod tests {
         let result = LogitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -2089,7 +2089,7 @@ mod tests {
         let result = LogitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -2109,7 +2109,7 @@ mod tests {
             let result = LogitEstimator::fit(
                 intercept_only_input(),
                 MleFitOptions {
-                    method: Method::Newton,
+                    solver: SolverType::Newton,
                     max_iter: 35,
                     tol,
                     raise_on_non_convergence: true,
@@ -2143,7 +2143,7 @@ mod tests {
             let result = LogitEstimator::fit(
                 input,
                 MleFitOptions {
-                    method: Method::Newton,
+                    solver: SolverType::Newton,
                     max_iter: 35,
                     tol: 1e-6,
                     raise_on_non_convergence: true,
@@ -2162,15 +2162,15 @@ mod tests {
     }
 
     /// 完全な多重共線性（`x2 = 2·x1`）の設計行列は、`fit()`冒頭の列ピボットQR
-    /// ランクチェック（`nonlinear::common::checked_design_matrix_qr`）で`method`・
+    /// ランクチェック（`nonlinear::common::checked_design_matrix_qr`）で`solver`・
     /// `cov_type`に関わらず単一経路で`SingularDesignMatrix`として弾かれる。
     ///
     /// 従来はゼロベクトル初期値で、`newton`は`newton_step`内の列ピボットQR、`bfgs`/`lbfgs`は
     /// 収束後の`observed_information_cov_params`（`cov_type=Opg`なら`opg_cov_params`）と
-    /// いう`method`/`cov_type`依存の別経路で検出しており、過去に`bfgs`だけ検出漏れして
+    /// いう`solver`/`cov_type`依存の別経路で検出しており、過去に`bfgs`だけ検出漏れして
     /// 桁違いに巨大なSEを含む`Ok`が返る実バグがあった（`tests/nonlinear/
     /// test_logit_validation.py`の履歴参照）。前段QRへの一本化でそのバグクラスを
-    /// 構造的に排除したため、`method`×`cov_type`を網羅していた旧5テスト
+    /// 構造的に排除したため、`solver`×`cov_type`を網羅していた旧5テスト
     /// （`..._with_bfgs_and_lbfgs` / `..._with_hc0_and_hc1` / `fit_returns_singular_opg_
     /// matrix_error_...` / `..._with_cluster`）を本1テストへ集約した。`x2`は`x1`から
     /// 生成し関係を自明にする。
@@ -2200,7 +2200,7 @@ mod tests {
             "g3".to_string(),
         ];
 
-        for method in [Method::Newton, Method::Bfgs, Method::Lbfgs] {
+        for solver in [SolverType::Newton, SolverType::Bfgs, SolverType::Lbfgs] {
             for cov_type in [
                 CovType::Classical,
                 CovType::Hc0,
@@ -2222,7 +2222,7 @@ mod tests {
                 let result = LogitEstimator::fit(
                     input,
                     MleFitOptions {
-                        method,
+                        solver,
                         max_iter: 100,
                         tol: 1e-6,
                         raise_on_non_convergence: true,
@@ -2232,7 +2232,7 @@ mod tests {
                 );
                 assert!(
                     matches!(result, Err(MleError::SingularDesignMatrix)),
-                    "method={method:?}, cov_type={cov_type:?}, result={result:?}"
+                    "solver={solver:?}, cov_type={cov_type:?}, result={result:?}"
                 );
             }
         }
@@ -2258,7 +2258,7 @@ mod tests {
         let result = LogitEstimator::fit(
             near_separation_input_with_beta1(20.0),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 1,
                 tol: 1e-12,
                 raise_on_non_convergence: true,
@@ -2278,7 +2278,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             near_separation_input_with_beta1(20.0),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 1,
                 tol: 1e-12,
                 raise_on_non_convergence: false,
@@ -2347,15 +2347,15 @@ mod tests {
         // 将来いずれかの手法だけ反復回数が増加する回帰が起きても検出できるように
         // する（3手法で同じ`max_iter`を共有すると、他手法に合わせて緩めた分だけ
         // 検出力が落ちるため）。
-        for (method, max_iter) in [
-            (Method::Newton, 25),
-            (Method::Bfgs, 40),
-            (Method::Lbfgs, 32),
+        for (solver, max_iter) in [
+            (SolverType::Newton, 25),
+            (SolverType::Bfgs, 40),
+            (SolverType::Lbfgs, 32),
         ] {
             let result = LogitEstimator::fit(
                 near_separation_input(),
                 MleFitOptions {
-                    method,
+                    solver,
                     max_iter,
                     tol: 1e-6,
                     raise_on_non_convergence: true,
@@ -2365,8 +2365,8 @@ mod tests {
             );
             assert!(
                 matches!(result, Err(MleError::SeparationSuspected { .. })),
-                "method={:?}, result={:?}",
-                method,
+                "solver={:?}, result={:?}",
+                solver,
                 result
             );
         }
@@ -2377,7 +2377,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             near_separation_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: false,
@@ -2396,11 +2396,11 @@ mod tests {
     /// 壊れないか確認することで、閾値の調整が既存の合格ケースを誤検知させないことを保証する。
     #[test]
     fn fit_converges_normally_for_mild_near_separation_data_across_all_methods() {
-        for method in [Method::Newton, Method::Bfgs, Method::Lbfgs] {
+        for solver in [SolverType::Newton, SolverType::Bfgs, SolverType::Lbfgs] {
             let result = LogitEstimator::fit(
                 near_separation_input_with_beta1(20.0),
                 MleFitOptions {
-                    method,
+                    solver,
                     max_iter: 35,
                     tol: 1e-6,
                     raise_on_non_convergence: true,
@@ -2408,8 +2408,8 @@ mod tests {
                     confidence_level: 0.95,
                 },
             );
-            assert!(result.is_ok(), "method={:?}, result={:?}", method, result);
-            assert!(result.unwrap().converged(), "method={:?}", method);
+            assert!(result.is_ok(), "solver={:?}, result={:?}", solver, result);
+            assert!(result.unwrap().converged(), "solver={:?}", solver);
         }
     }
 
@@ -2492,7 +2492,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             intercept_only_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -2532,7 +2532,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2627,7 +2627,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2681,7 +2681,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2720,7 +2720,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             intercept_only_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -2746,7 +2746,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             intercept_only_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -2782,7 +2782,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2824,7 +2824,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2868,7 +2868,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2900,7 +2900,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             intercept_only_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -2946,7 +2946,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -3003,7 +3003,7 @@ mod tests {
         let estimator = LogitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -3097,19 +3097,19 @@ mod tests {
                 .collect()
         }
 
-        /// `method`ごとに`tol`の意味論が異なる（`docs/spec/logit-spec.md`3.2節）:
+        /// `solver`ごとに`tol`の意味論が異なる（`docs/spec/logit-spec.md`3.2節）:
         /// `newton`は総和勾配に対する絶対閾値（既定`1e-6`）、
         /// `bfgs`/`lbfgs`は観測数`n_obs`で正規化した基準（既定`1e-8`、`run_solver`が
         /// 内部で`tol*n_obs`を実効的な絶対閾値に変換する）。`engine_pybind`側の
         /// `LogitOptions`と同じ既定値の解決をここでも行う（呼び出し元がこの対応を
         /// 誤ると実質的に閾値が数桁ずれるため、テストコード側でも明示する）。
-        fn default_options(cov_type: CovType, method: Method) -> MleFitOptions {
-            let tol = match method {
-                Method::Newton => 1e-6,
-                Method::Bfgs | Method::Lbfgs => 1e-8,
+        fn default_options(cov_type: CovType, solver: SolverType) -> MleFitOptions {
+            let tol = match solver {
+                SolverType::Newton => 1e-6,
+                SolverType::Bfgs | SolverType::Lbfgs => 1e-8,
             };
             MleFitOptions {
-                method,
+                solver,
                 max_iter: 50,
                 tol,
                 raise_on_non_convergence: true,
@@ -3118,15 +3118,15 @@ mod tests {
             }
         }
 
-        /// `Method::Newton`/`Bfgs`/`Lbfgs`を等確率で生成する。3手法とも収束経路・
+        /// `SolverType::Newton`/`Bfgs`/`Lbfgs`を等確率で生成する。3手法とも収束経路・
         /// `tol`の意味論が異なるため（上記`default_options`参照）、各プロパティを
-        /// method非依存で1種類だけ検証するとBFGS/L-BFGS固有の経路がproptestの
+        /// solver非依存で1種類だけ検証するとBFGS/L-BFGS固有の経路がproptestの
         /// 恩恵を受けない（rust-reviewer指摘）。
-        fn method_strategy() -> impl Strategy<Value = Method> {
+        fn solver_strategy() -> impl Strategy<Value = SolverType> {
             prop_oneof![
-                Just(Method::Newton),
-                Just(Method::Bfgs),
-                Just(Method::Lbfgs),
+                Just(SolverType::Newton),
+                Just(SolverType::Bfgs),
+                Just(SolverType::Lbfgs),
             ]
         }
 
@@ -3158,12 +3158,12 @@ mod tests {
             #[test]
             fn score_is_near_zero_at_converged_params(
                 (n, k, x_cols, beta, u, _keys) in logit_case_strategy(),
-                method in method_strategy(),
+                solver in solver_strategy(),
             ) {
                 let y = simulate_y(n, &x_cols, &beta, &u);
                 let names = x_names(k);
                 let input = LogitInput::from_columns(&y, &x_cols, names, true, "y".to_string()).unwrap();
-                let result = LogitEstimator::fit(input, default_options(CovType::Classical, method));
+                let result = LogitEstimator::fit(input, default_options(CovType::Classical, solver));
                 prop_assume!(result.is_ok());
                 let est = result.unwrap();
 
@@ -3173,7 +3173,7 @@ mod tests {
                     let score: f64 = (0..n).map(|i| (y[i] - p[i]) * x.get(i, j)).sum();
                     prop_assert!(
                         score.abs() <= 1e-4,
-                        "score[{j}] should be ~0, got {score} (method={method:?})"
+                        "score[{j}] should be ~0, got {score} (solver={solver:?})"
                     );
                 }
             }
@@ -3183,12 +3183,12 @@ mod tests {
             fn coefficients_and_se_are_invariant_to_column_order(
                 (n, k, x_cols, beta, u, keys) in logit_case_strategy()
                     .prop_filter("need >=2 columns to permute", |(_, k, _, _, _, _)| *k >= 2),
-                method in method_strategy(),
+                solver in solver_strategy(),
             ) {
                 let y = simulate_y(n, &x_cols, &beta, &u);
                 let names = x_names(k);
                 let input1 = LogitInput::from_columns(&y, &x_cols, names.clone(), true, "y".to_string()).unwrap();
-                let result1 = LogitEstimator::fit(input1, default_options(CovType::Classical, method));
+                let result1 = LogitEstimator::fit(input1, default_options(CovType::Classical, solver));
                 prop_assume!(result1.is_ok());
                 let est1 = result1.unwrap();
 
@@ -3198,7 +3198,7 @@ mod tests {
                 let permuted_names: Vec<String> = order.iter().map(|&i| names[i].clone()).collect();
 
                 let input2 = LogitInput::from_columns(&y, &permuted_x, permuted_names, true, "y".to_string()).unwrap();
-                let result2 = LogitEstimator::fit(input2, default_options(CovType::Classical, method));
+                let result2 = LogitEstimator::fit(input2, default_options(CovType::Classical, solver));
                 prop_assume!(result2.is_ok());
                 let est2 = result2.unwrap();
 
@@ -3219,17 +3219,17 @@ mod tests {
             #[test]
             fn hc0_std_errors_are_at_most_hc1_std_errors(
                 (n, k, x_cols, beta, u, _keys) in logit_case_strategy(),
-                method in method_strategy(),
+                solver in solver_strategy(),
             ) {
                 let y = simulate_y(n, &x_cols, &beta, &u);
                 let names = x_names(k);
                 let input1 = LogitInput::from_columns(&y, &x_cols, names.clone(), true, "y".to_string()).unwrap();
-                let result1 = LogitEstimator::fit(input1, default_options(CovType::Hc0, method));
+                let result1 = LogitEstimator::fit(input1, default_options(CovType::Hc0, solver));
                 prop_assume!(result1.is_ok());
                 let est_hc0 = result1.unwrap();
 
                 let input2 = LogitInput::from_columns(&y, &x_cols, names, true, "y".to_string()).unwrap();
-                let result2 = LogitEstimator::fit(input2, default_options(CovType::Hc1, method));
+                let result2 = LogitEstimator::fit(input2, default_options(CovType::Hc1, solver));
                 prop_assume!(result2.is_ok());
                 let est_hc1 = result2.unwrap();
 

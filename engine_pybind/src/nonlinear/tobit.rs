@@ -25,7 +25,9 @@
 //! `build_tobit_input`が`PyDataFrame`ではなく`polars::DataFrame`を受け取る設計にしている
 //! 理由も`logit.rs`と同じ（GILなしで`cargo test`から直接ユニットテストできるようにするため）。
 
-use engine::nonlinear::common::{CovType as EngineCovType, Method as EngineMethod, MleFitOptions};
+use engine::nonlinear::common::{
+    CovType as EngineCovType, MleFitOptions, SolverType as EngineSolverType,
+};
 use engine::nonlinear::tobit::{
     CensoringFitCategory, CensoringFitCheck, MarginalEffectsTarget, TobitEstimator, TobitInput,
 };
@@ -35,7 +37,7 @@ use pyo3_polars::PyDataFrame;
 
 use super::common::{
     MarginalEffectsResult, mle_error_to_pyerr, parse_cov_type, parse_marginal_effects_at,
-    parse_method,
+    parse_solver_type,
 };
 use crate::column_extraction::{
     extract_dataframe, extract_f64_column, extract_f64_columns, x_column_names,
@@ -79,14 +81,14 @@ pub struct TobitOptions {
     /// Optimization solver: one of "newton" (default), "bfgs", "lbfgs".
     /// Case-insensitive.
     #[pyo3(get, set)]
-    pub method: String,
+    pub solver: String,
 
     /// Maximum number of solver iterations.
     #[pyo3(get, set)]
     pub max_iter: i64,
 
-    /// Convergence tolerance. For `method="newton"`, an absolute threshold on
-    /// the total gradient norm (default `1e-6`). For `method="bfgs"`/`"lbfgs"`,
+    /// Convergence tolerance. For `solver="newton"`, an absolute threshold on
+    /// the total gradient norm (default `1e-6`). For `solver="bfgs"`/`"lbfgs"`,
     /// a per-observation-average gradient threshold (the total gradient norm
     /// divided by the number of observations must fall below `tol`, default
     /// `1e-8`), matching how statsmodels/scipy normalize convergence checks
@@ -94,15 +96,15 @@ pub struct TobitOptions {
     /// semantics with a `1e-8` threshold (or bfgs/lbfgs's normalized
     /// semantics with a `1e-6` threshold) measurably degrades either speed or
     /// precision. Passing `tol` explicitly always uses the
-    /// semantics of the chosen `method`. For `bfgs`/`lbfgs`, the solver also
+    /// semantics of the chosen `solver`. For `bfgs`/`lbfgs`, the solver also
     /// reports convergence when the gradient norm is within `100 * tol` of the
     /// target and the line search can no longer make progress because the
     /// log-likelihood has reached floating-point precision (common with very
     /// large samples); this window scales with `tol`, so it widens if you
-    /// loosen `tol`. Note: the method-dependent default is
-    /// resolved once, at construction time. Changing `method` afterwards via
+    /// loosen `tol`. Note: the solver-dependent default is
+    /// resolved once, at construction time. Changing `solver` afterwards via
     /// the setter does not re-resolve `tol` — set both together (or set `tol`
-    /// explicitly) if you change `method` after construction.
+    /// explicitly) if you change `solver` after construction.
     #[pyo3(get, set)]
     pub tol: f64,
 
@@ -131,7 +133,7 @@ impl TobitOptions {
         include_intercept = true,
         confidence_level = 0.95,
         cluster_col = None,
-        method = "newton".to_string(),
+        solver = "newton".to_string(),
         max_iter = 35,
         tol = None,
         raise_on_non_convergence = true,
@@ -144,16 +146,16 @@ impl TobitOptions {
         include_intercept: bool,
         confidence_level: f64,
         cluster_col: Option<String>,
-        method: String,
+        solver: String,
         max_iter: i64,
         tol: Option<f64>,
         raise_on_non_convergence: bool,
         lower: Option<f64>,
         upper: Option<f64>,
     ) -> Self {
-        // `tol`の既定値のmethod依存分岐は`LogitOptions::new`と同じ理由
+        // `tol`の既定値のsolver依存分岐は`LogitOptions::new`と同じ理由
         // （`tol`フィールドのdocコメント参照）。
-        let tol = tol.unwrap_or(if method.eq_ignore_ascii_case("newton") {
+        let tol = tol.unwrap_or(if solver.eq_ignore_ascii_case("newton") {
             1e-6
         } else {
             1e-8
@@ -163,7 +165,7 @@ impl TobitOptions {
             include_intercept,
             confidence_level,
             cluster_col,
-            method,
+            solver,
             max_iter,
             tol,
             raise_on_non_convergence,
@@ -175,13 +177,13 @@ impl TobitOptions {
     fn __repr__(&self) -> String {
         format!(
             "TobitOptions(cov_type={:?}, include_intercept={}, confidence_level={}, \
-             cluster_col={:?}, method={:?}, max_iter={}, tol={}, raise_on_non_convergence={}, \
+             cluster_col={:?}, solver={:?}, max_iter={}, tol={}, raise_on_non_convergence={}, \
              lower={:?}, upper={:?})",
             self.cov_type,
             self.include_intercept,
             self.confidence_level,
             self.cluster_col,
-            self.method,
+            self.solver,
             self.max_iter,
             self.tol,
             self.raise_on_non_convergence,
@@ -260,10 +262,10 @@ pub struct TobitResult {
     /// to lowercase).
     #[pyo3(get)]
     pub cov_type: String,
-    /// Optimization solver actually used (echoes `TobitOptions.method`, normalized
+    /// Optimization solver actually used (echoes `TobitOptions.solver`, normalized
     /// to lowercase; one of `"newton"`, `"bfgs"`, `"lbfgs"`).
     #[pyo3(get)]
-    pub method: String,
+    pub solver: String,
     /// Lower censoring bound actually used (echoes `TobitOptions.lower`).
     #[pyo3(get)]
     pub lower: Option<f64>,
@@ -372,7 +374,7 @@ impl TobitResult {
         Ok(PyDataFrame(source))
     }
 
-    /// Marginal effects (`dy/dx`) with delta-method standard errors.
+    /// Marginal effects (`dy/dx`) with delta-solver standard errors.
     ///
     /// `target` selects the same three quantities as `predict()` (see its doc). Unlike
     /// Logit/Probit, this is an independent implementation (not the shared
@@ -524,7 +526,7 @@ fn validate_no_sigma_collision(x: &[String]) -> PyResult<()> {
 ///   `"sigma"`という列名がある場合は、ここ（受け口）の責務で`ValidationError`
 ///   （Logitの`build_logit_input`と同じ役割分担。`"sigma"`衝突はTobit固有、
 ///   `validate_no_sigma_collision`参照）
-/// - `cov_type`/`method`の文字列が不正な場合は`ValidationError`
+/// - `cov_type`/`solver`の文字列が不正な場合は`ValidationError`
 /// - 打ち切り境界（`options.lower`/`options.upper`）の不正・`y`との不整合は
 ///   `TobitInput::from_columns`が検出し`mle_error_to_pyerr`で`ValidationError`に変換
 /// - それ以外（次元不一致等）は`engine::nonlinear::common::MleError`から
@@ -538,9 +540,9 @@ pub(crate) fn build_tobit_input(
     y: String,
     x: Vec<String>,
     options: &TobitOptions,
-) -> PyResult<(TobitInput, EngineCovType, EngineMethod)> {
+) -> PyResult<(TobitInput, EngineCovType, EngineSolverType)> {
     let cov_type_lower = options.cov_type.to_lowercase();
-    let method_lower = options.method.to_lowercase();
+    let solver_lower = options.solver.to_lowercase();
 
     validate_common_roles(&y, &x, options.include_intercept)?;
     validate_no_sigma_collision(&x)?;
@@ -552,7 +554,7 @@ pub(crate) fn build_tobit_input(
     let x_slices = extract_f64_columns(df, &x)?;
 
     let cov_type = parse_cov_type(df, &cov_type_lower, &options.cluster_col)?;
-    let method = parse_method(&method_lower)?;
+    let solver = parse_solver_type(&solver_lower)?;
 
     let input = TobitInput::from_columns(
         &y_slice,
@@ -565,7 +567,7 @@ pub(crate) fn build_tobit_input(
     )
     .map_err(mle_error_to_pyerr)?;
 
-    Ok((input, cov_type, method))
+    Ok((input, cov_type, solver))
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `options` を検証し、
@@ -574,7 +576,7 @@ pub(crate) fn build_tobit_input(
 ///
 /// # Errors
 /// - `build_tobit_input`が返すエラー（列抽出・y/xの重複・`"const"`列衝突・
-///   `cov_type`/`method`文字列の検証・打ち切り境界の検証等）は`ValidationError`
+///   `cov_type`/`solver`文字列の検証・打ち切り境界の検証等）は`ValidationError`
 /// - `TobitEstimator::fit`が返す`MleError`（`confidence_level`範囲外・`max_iter`が
 ///   0以下・観測数不足・非打ち切り観測ゼロ・未収束・特異Hessian・特異OPG行列・
 ///   特異設計行列・クラスターキー未指定・クラスター数不足等）は`mle_error_to_pyerr`で
@@ -586,12 +588,12 @@ pub(crate) fn fit(
     options: &TobitOptions,
 ) -> PyResult<TobitResult> {
     let df: DataFrame = data.into();
-    let (input, cov_type, method) = build_tobit_input(&df, y, x, options)?;
+    let (input, cov_type, solver) = build_tobit_input(&df, y, x, options)?;
 
     let estimator = TobitEstimator::fit(
         input,
         MleFitOptions {
-            method,
+            solver,
             max_iter: options.max_iter,
             tol: options.tol,
             raise_on_non_convergence: options.raise_on_non_convergence,
@@ -628,7 +630,7 @@ pub(crate) fn fit(
         converged: estimator.converged(),
         n_iter: estimator.n_iter(),
         cov_type: options.cov_type.to_lowercase(),
-        method: options.method.to_lowercase(),
+        solver: options.solver.to_lowercase(),
         lower: options.lower,
         upper: options.upper,
         estimator,
@@ -642,7 +644,7 @@ mod tests {
     use polars::df;
 
     /// `build_tobit_input`のテスト全体で使う既定の`TobitOptions`（`cov_type="classical"`・
-    /// `include_intercept=true`・`method="newton"`・`lower=Some(0.0)`・`upper=None`）。
+    /// `include_intercept=true`・`solver="newton"`・`lower=Some(0.0)`・`upper=None`）。
     /// フィールドごとに上書きして使う。
     fn default_options() -> TobitOptions {
         TobitOptions::new(
@@ -659,7 +661,7 @@ mod tests {
         )
     }
 
-    /// `tol=None`のとき、`method`に応じた既定値（`newton`は絶対閾値`1e-6`、
+    /// `tol=None`のとき、`solver`に応じた既定値（`newton`は絶対閾値`1e-6`、
     /// `bfgs`/`lbfgs`は観測数正規化基準`1e-8`）が解決されるはず
     /// （`LogitOptions`と同じロジック）。
     #[test]
@@ -723,7 +725,7 @@ mod tests {
         let df = well_formed_df();
         let options = default_options();
 
-        let Ok((input, cov_type, method)) = build_tobit_input(
+        let Ok((input, cov_type, solver)) = build_tobit_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string(), "x2".to_string()],
@@ -742,7 +744,7 @@ mod tests {
         assert_eq!(input.lower(), Some(0.0));
         assert_eq!(input.upper(), None);
         assert!(matches!(cov_type, EngineCovType::Classical));
-        assert!(matches!(method, EngineMethod::Newton));
+        assert!(matches!(solver, EngineSolverType::Newton));
     }
 
     #[test]
@@ -869,7 +871,7 @@ mod tests {
     fn build_tobit_input_returns_validation_error_for_unknown_method() {
         let df = well_formed_df();
         let mut options = default_options();
-        options.method = "bogus".to_string();
+        options.solver = "bogus".to_string();
 
         let result = build_tobit_input(&df, "y".to_string(), vec!["x1".to_string()], &options);
         assert!(result.is_err());
@@ -1071,13 +1073,13 @@ mod tests {
         )
         .unwrap();
         let options = default_options();
-        let (input, cov_type, method) =
+        let (input, cov_type, solver) =
             build_tobit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
                 .expect("expected Ok");
         let estimator = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method,
+                solver,
                 max_iter: options.max_iter,
                 tol: options.tol,
                 raise_on_non_convergence: options.raise_on_non_convergence,

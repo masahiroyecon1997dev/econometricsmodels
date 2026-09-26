@@ -106,12 +106,12 @@ def _fit_once_engine(ctx: FitContext):
     from econometricsmodels import Probit, ProbitOptions
 
     if ctx.cov_type == "classical":
-        options = ProbitOptions(cov_type="classical", method=ctx.method)
+        options = ProbitOptions(cov_type="classical", solver=ctx.method)
     elif ctx.cov_type == "cluster":
         options = ProbitOptions(
             cov_type="cluster",
             cluster_col=ctx.cluster_col,
-            method=ctx.method,
+            solver=ctx.method,
         )
     else:
         raise ValueError(f"unknown cov_type: {ctx.cov_type!r}")

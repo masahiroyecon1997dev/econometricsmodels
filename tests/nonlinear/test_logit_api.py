@@ -70,15 +70,15 @@ def test_param_names_include_const_first(binary_dataset):
 
 # ── オプションの反映 ──────────────────────────────────────────────
 #
-# cov_type 以外の LogitOptions フィールド（method・include_intercept・
+# cov_type 以外の LogitOptions フィールド（solver・include_intercept・
 # confidence_level・raise_on_non_convergence）が、engine_pybind 側の
 # 文字列パース・列抽出・分岐ロジックを経て正しく反映されることを確認する。
 
 
-@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
-def test_method_option_converges_to_same_params(binary_dataset, method):
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_method_option_converges_to_same_params(binary_dataset, solver):
     _checks.check_method_option_converges_to_same_params(
-        binary_dataset, Logit, LogitOptions, method
+        binary_dataset, Logit, LogitOptions, solver
     )
 
 
@@ -114,7 +114,7 @@ def test_method_label(binary_dataset):
 
 
 @pytest.mark.parametrize(
-    "method, expected_label",
+    "solver, expected_label",
     [
         ("NEWTON", "newton"),
         ("Newton", "newton"),
@@ -124,9 +124,9 @@ def test_method_label(binary_dataset):
         ("Lbfgs", "lbfgs"),
     ],
 )
-def test_method_is_case_insensitive(binary_dataset, method, expected_label):
+def test_method_is_case_insensitive(binary_dataset, solver, expected_label):
     _checks.check_method_is_case_insensitive(
-        binary_dataset, Logit, LogitOptions, method, expected_label
+        binary_dataset, Logit, LogitOptions, solver, expected_label
     )
 
 

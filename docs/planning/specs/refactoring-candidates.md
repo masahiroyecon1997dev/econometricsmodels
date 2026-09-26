@@ -148,17 +148,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **状態**: 未対応（優先度低、項目81〔`refactoring-candidates-2.md`〕と
   合わせて検討）
 
-### 9.【解消済み】`iv-spec.md`の前身ドキュメントの「`x_endog`/`instruments`は最低1要素を要求する見込み」という記述が実装と食い違っている
-
-→ Issue #306で対応済み（2026-09-12）。`x_endog`/`instruments`が空リストの場合を
-`ValidationError`で弾くよう実装し、設計ドキュメントの記述も確定表現に更新した（現在は`iv-spec.md`に集約済み）。
-
-### 10.【解消済み】`x_endog=[]`（内生変数ゼロ、実質OLSへの意図的な縮退）を許容し続けるべきかは設計判断が必要
-
-→ Issue #306で対応済み（2026-09-12）。「誤用を防ぐ」側を採用し、`x_endog=[]`
-（`instruments=[]`も同様）は`ValidationError`にする方針で確定・実装した。項目9と
-同一の対応。
-
 ### 11. `test_iv_fixtures.py`と`test_iv_gmm_fixtures.py`の統合可否を検討した結果、完全統合は非推奨・部分的な共通化に留めるべき
 
 - **対象**: [tests/test_iv_fixtures.py:100-155](../../../tests/test_iv_fixtures.py#L100-L155)
@@ -207,70 +196,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   ユーザー指摘、両ファイルの比較調査で確認。
 - **状態**: 未対応（優先度低。完全統合は非推奨、`_check_result`共通部分の
   部分的なヘルパー化のみ検討の余地あり）
-
-### 12.【重要な発見】IVのHC2/HC3がR `ivreg`+`sandwich`で実際に検証可能なことを実機確認した——「参照実装が無い」というドキュメント記述は現在のivregバージョンでは事実と異なる
-
-- **対象**: `iv-spec.md`の前身ドキュメント（当時: 110-116行目）
-  （「`hc2`/`hc3`は引き続き外部の参照実装で検証できない...R `ivreg`も同様
-  （`hatvalues.ivreg`の実装がソース上コメントアウトされている）」）、
-  [tests/test_iv_fixtures.py:19-22](../../../tests/test_iv_fixtures.py#L19-L22)、
-  [tests/test_iv_crosscheck.py:33-34](../../../tests/test_iv_crosscheck.py#L33-L34)、
-  [engine/src/iv/two_sls.rs:1584-1590](../../../engine/src/iv/two_sls.rs#L1584-L1590)
-  （いずれも同じ「参照実装が無い」という前提を踏襲している）
-- **内容**: ユーザー指摘（2026-08-30、「HC2/HC3はR側かpythonならpyfixest
-  などで検証できそう？Rust側だとパッケージ後の結合テストが未完のまま」）
-  を受けて、devcontainerに導入済みのR（`ivreg` 0.6.8、CLAUDE.md 10章参照）
-  で直接実機検証した。
-  - `Rscript -e 'print(ivreg:::hatvalues.ivreg)'`で実際の関数定義を確認
-    したところ、**コメントアウトされておらず、`type="stage2"`
-    （既定）で第二段階OLS回帰（`lm(y ~ X̂)`、`X̂`は第一段階の予測値）の
-    `hatvalues()`をそのまま返す、正常に動作する実装**だった（`ivreg`の
-    `NEWS`ファイルにVersion 0.6-4で`hatvalues.ivreg()`のバグ修正記録が
-    あり、少なくとも0.6-4時点で既に存在する関数）。
-  - `sandwich::vcovHC(ivreg_fit, type="HC2")`/`type="HC3"`が実際に
-    エラーなく計算できることを確認した。
-  - **本実装（`X̂`から計算するレバレッジ、`two_sls.rs`の
-    `hc_cov_params`）と同じ合成データ（`y ~ x1 + endog1 | x1 + z1 + z2`、
-    n=200）で数値を突き合わせたところ、HC2/HC3とも6桁以上の精度で一致**
-    した（実測: HC2の`endog1`のSE、本実装`0.13356919386622892`、R
-    `0.1335692`。HC3も同様）。R側の`hatvalues.ivreg(type="stage2")`が
-    第二段階回帰（`X̂`を設計行列とする`lm`）のレバレッジをそのまま使う
-    実装であることをソースで確認しており、本実装が「`X̂`のみから
-    レバレッジを計算する」（`two_sls.rs`のdocコメント）としている定義と
-    完全に一致する。
-  - **原因の推測**: 当時の設計ドキュメントの記述はIssue #166/#171時点の
-    調査に基づくが、CLAUDE.md 10章に記録されている通り`ivreg`は当初
-    Debian標準のr-baseでは依存関係を満たせず**インストール自体が
-    サイレントに失敗していた**（CRAN APTリポジトリ追加で解消）経緯が
-    ある。この調査がその失敗期間中、または古いivregバージョンに基づいて
-    行われた可能性が高い。
-- **Claudeの所感**: これは単なるテストカバレッジの話ではなく、
-  **ドキュメント上の技術的前提そのものが現状のツールチェーンでは
-  誤りになっている**、重要度の高い発見だと考える。現状のRust単体
-  テスト（`fit_computes_hc2_std_errors_matching_manual_sandwich_
-  formula`）は同じ開発者が書いた「手計算オラクル」と本実装を突き合わせる
-  だけの**自己参照的な検証**（`testing-policy.md`が警告する「独立性が
-  限定的」なパターン）に留まっていたが、今回の発見により**真に独立した
-  R `ivreg`実装との数値一致**が確認でき、この懸念を解消できる。
-  対応するなら: (1) `test_iv_crosscheck.py`に`hc2`/`hc3`のクロスチェック
-  テストを追加する（`benchmark/iv/references/run_ivreg.R`に
-  `vcovHC(type="HC2"/"HC3")`を追加）、(2) 設計ドキュメント3.1節・
-  関連するdocstring群（本項目「対象」に列挙した4箇所）の「参照実装が
-  無い」という記述を訂正する、の2段階が必要になる。ユーザー指示により
-  本セッションでは記録のみ。
-- **気づいた経緯**: 2026-08-30、`tests/test_iv_fixtures.py`解説時の
-  ユーザー指摘、R実機検証で確認（`ivreg`/`sandwich`とも devcontainerに
-  導入済みのものをそのまま使用）。
-- **状態**: 対応済み（2026-09-12）。`benchmark/iv/references/run_ivreg.R`に
-  hc2/hc3の`vcovHC(type="HC2"/"HC3")`分岐を追加し、
-  `generate_iv_crosscheck_fixtures.py`のCOV_TYPESに追加して
-  `iv_crosscheck.json`を再生成、`tests/iv/test_iv_crosscheck.py`に
-  hc2/hc3をCOV_TYPESとして追加（既存のRTOL_STRICT=1e-8でdf1境界
-  シナリオ含め全て通過、実測で許容誤差の追加緩和は不要だった）。
-  `iv-spec.md`3.1節・4章・冒頭未決着事項、`test_iv_reference.py`・
-  `test_iv_crosscheck.py`のdocstring、`engine/src/iv/two_sls.rs`・
-  `gmm.rs`のdocコメントの「参照実装が無い」という誤った記述も訂正した
-  （GMM側はivreg非対応という結論は維持し根拠のみ訂正、ユーザー承認済み）。
 
 ### 13. `wu_hausman_statistic`の`cov_type="hac"`時のNone原因調査について、R側では既に独立検証済み（Issue #233）という事実が`test_iv_fixtures.py`側のドキュメントに反映されていない
 
@@ -820,15 +745,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-31、`engine_pybind/src/lib.rs`解説時に
   コード全体を確認して発見。
 - **状態**: 未対応
-
-### 40.【Issue化】結果クラスの命名が頭字語の大文字小文字で不統一（`OlsResults`/`WlsResults`/`IvResults` vs `OLS`/`WLS`/`IV`）
-
-→ Issue #310として切り出し済み（2026-09-11）、2026-09-21に対応完了。`OlsResults`/
-`WlsResults`/`IvResults`/`FeResults`/`ReResults`を`OLSResults`/`WLSResults`/
-`IVResults`/`FEResults`/`REResults`へ、対応する`IvOptions`/`FeOptions`/`ReOptions`
-（本文では未言及だったが同じ不統一を抱えていたため合わせて対応）を`IVOptions`/
-`FEOptions`/`REOptions`へリネームした。Rust側（`engine_pybind`）のpyclass名自体も
-揃えた。詳細はIssueを参照。
 
 ### 41. `__version__`がバージョン文字列の3つ目の手書きソースになっている
 

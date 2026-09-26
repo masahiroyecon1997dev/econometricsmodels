@@ -199,10 +199,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_crosscheck.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
 
-### 64.【Issue化】`predict()`の戻り値辞書のキーが`"fitted"`固定で、新規データ（out-of-sample）予測に対しても統計学的に不正確な用語になっている
-
-→ Issue #309として切り出し済み（2026-09-11）、2026-09-13に対応完了。OLS/WLSとも`predict()`の戻り値キーを`"fitted"`から`"predicted"`に統一した（`new_data`の有無で戻り値の型・構造を変えない設計方針のため、学習データ・新規データで呼び分けない）。
-
 ### 65. `df = dataset.with_columns(pl.lit(1.0).alias("weight"))`が`test_wls.py`内に25回重複している
 
 - **対象**: [tests/linear/test_wls.py](../../../tests/linear/test_wls.py)全体（`grep -c`で25箇所確認）
@@ -235,10 +231,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   意図的に大きい重み）のような名前を`test_wls.py`冒頭に定義するのが妥当。
 - **気づいた経緯**: 2026-08-23、`tests/linear/test_wls.py`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否はユーザー判断待ち）
-
-### 67.【完了】`WLSOptions`新設の要否は、Logit/Probitの`method`/`max_iter`/`tol`/`raise_on_non_convergence`共通化と合わせてLogit/Probit実装確認時に再検討する
-
-→ Issue #308として切り出し済み（2026-09-11）、2026-09-12に対応完了。`WLSOptions`を`OLSOptions`と同一フィールド構成の独立pyclassとして新設し、`engine_pybind/src/nonlinear/{logit,probit,tobit}.rs`に完全複製されていた`parse_method`/`parse_cov_type`を`nonlinear/common.rs`に集約、`engine`層の`LogitEstimator::fit`/`ProbitEstimator::fit`/`TobitEstimator::fit`のシグネチャ重複（`method`/`max_iter`/`tol`/`raise_on_non_convergence`/`cov_type`/`confidence_level`の6引数）は`engine::nonlinear::common::MleFitOptions`構造体に集約した。一方、pyclass自体（`LogitOptions`/`ProbitOptions`/`TobitOptions`/`WLSOptions`）のフィールド宣言・コンストラクタの重複は、PyO3のフラットなkwargsコンストラクタという制約・`IVOptions`の既存precedentとの一貫性から意図的に現状維持とし、`macro_rules!`等での機械的な共通化の検討はIssue #315として別途切り出した。
 
 ### 69. `test_hac_time_col_reorders_rows_before_computing_lags`の`ordered_df`/`shuffled_df`が手書きで重複、OLS/WLS間でも同一データが独立に書かれている
 
@@ -483,31 +475,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   対応箇所が`_binary_choice_checks.py`1ファイルに集約されたため、対応時の
   作業量は縮小済み）
 
-### 80. `predict()`の意味がOLS（予測値）とLogit/Probit（確率）で異なり、利用者が混同するリスクがある
-
-- **対象**: [python_package/econometricsmodels/nonlinear/logit.py](../../../python_package/econometricsmodels/nonlinear/logit.py)
-  の`predict()`（`{"probability": ...}`を返す）と、OLSの`predict()`
-  （`{"fitted": ...}`、項目64で既出）
-- **内容**: ユーザー指摘（2026-08-23、「LogitのpredictはOLSと違って0/1の
-  予測値ではなく確率を返す、というユーザー目線での乖離が生まれないか」）。
-  OLSユーザーが「`predict()`＝モデルの目的変数の予測値」という理解のまま
-  Logit/Probitに移ると、`predict()`が0/1ではなく連続値の確率を返すことに
-  戸惑う可能性がある。ただし統計学的にはLogit/Probitの`predict()`が確率を
-  返すのは標準的な慣習（statsmodelsの`predict()`も同様に確率を返す）であり、
-  0/1の分類結果が欲しい場合は別途しきい値を適用する（本実装では
-  `pred_table()`がその役割を担う）。
-- **Claudeの所感**: 実装自体は統計学の標準的な慣習に沿っており変更は
-  不要と考えるが、**ドキュメント（docstring・`docs/spec/logit-spec.md`等）に
-  「確率を返す、0/1が欲しい場合は`pred_table()`のthresholdを使う」という
-  誘導が無いと、OLSからの類推で誤解するユーザーが出うる**という点は
-  ドキュメント改善の余地として記録する価値があると考える。テスト自体の
-  変更は不要。
-- **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
-- **状態**: 対応済み（2026-09-13、Issue #322項目3）。キー名の統一は不要と結論（統計学的に
-  標準的な慣習のため）。ドキュメント改善のみ実施: `logit.py`/`probit.py`の`predict()`docstring
-  に「確率を返す、0/1が欲しい場合は`pred_table()`のthresholdを使う」旨のNoteを追加、
-  `docs/spec/logit-spec.md`3.6節・`docs/getting-started.md`にも同旨を追記。
-
 ### 81. `test_const_collision_with_include_intercept_raises`・`test_cluster_cov_type_requires_at_least_two_groups`のテストデータがOLS/WLS/Logitで似た内容を個別に手書きしている
 
 - **対象**: [tests/linear/test_ols.py:269-276](../../../tests/linear/test_ols.py#L269-L276)・
@@ -529,11 +496,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   タイミングで対応するのが効率的と考える。
 - **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
 - **状態**: 未対応（優先度低、着手要否はユーザー判断待ち）
-
-### 82.【完了】`test_singular_hessian_raises_computation_error`の`x2`列が`2 * x1`の値を直書き → Issue #279（2026-09-08）
-
-当該テストごと削除し CSV フィクスチャ版へ一本化（`refactoring-candidates.md` 項目35）。
-engine 側の集約先テストは `x2: Vec<f64> = x1.iter().map(|v| v * 2.0).collect()` で生成。
 
 ### 83. `test_cov_type_label`の`cov_type`候補リストが直書き（項目61パターンの再登場）
 

@@ -210,7 +210,7 @@ def check_raise_on_non_convergence_false_returns_result_without_raising(
         "cov_type": cov_type,
     }
     if cov_type == "cluster":
-        kwargs["cluster_col"] = "cluster"
+        kwargs["cluster"] = "cluster"
     res = estimator_cls(
         dataset,
         y="y",
@@ -240,7 +240,7 @@ def check_cov_type_label(dataset, estimator_cls, options_cls):
         dataset,
         y="y",
         x=["x1", "x2"],
-        options=options_cls(cov_type="cluster", cluster_col="cluster"),
+        options=options_cls(cov_type="cluster", cluster="cluster"),
     ).fit()
     assert res.cov_type == "cluster"
 
@@ -277,7 +277,7 @@ def check_cov_type_is_case_insensitive(
     `build_<solver>_input`のRust単体テストと対になる、Python API境界での
     確認。OLS/WLSの`test_cov_type_is_case_insensitive`と同型）。
     """
-    kwargs = {"cluster_col": "cluster"} if cov_type == "CLUSTER" else {}
+    kwargs = {"cluster": "cluster"} if cov_type == "CLUSTER" else {}
     options = options_cls(cov_type=cov_type, **kwargs)
     res = estimator_cls(dataset, y="y", x=["x1", "x2"], options=options).fit()
     assert res.cov_type == expected_label
@@ -886,7 +886,7 @@ def check_cluster_cov_type_requires_at_least_two_groups(
             df,
             y="y",
             x=["x1"],
-            options=options_cls(cov_type="cluster", cluster_col="cluster"),
+            options=options_cls(cov_type="cluster", cluster="cluster"),
         ).fit()
 
 
@@ -904,7 +904,7 @@ def check_cluster_count_at_most_slopes_raises_validation_error(
     潰して`G=2 == q=2`を作る。
     """
     df = with_cluster_groups(binary_dataset, 2)
-    options = options_cls(cov_type="cluster", cluster_col="cluster_group")
+    options = options_cls(cov_type="cluster", cluster="cluster_group")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=2),
@@ -913,7 +913,7 @@ def check_cluster_count_at_most_slopes_raises_validation_error(
 
 
 def check_cluster_without_col_raises(dataset, estimator_cls, options_cls):
-    """`cov_type="cluster"`なのに`cluster_col`未指定の場合`ValidationError`
+    """`cov_type="cluster"`なのに`cluster`未指定の場合`ValidationError`
     （OLS/WLS/IVと同じ検証、共通化された経路）。
     """
     options = options_cls(cov_type="cluster")
@@ -923,11 +923,11 @@ def check_cluster_without_col_raises(dataset, estimator_cls, options_cls):
         estimator_cls(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
-def check_cluster_col_nonexistent_column_raises(
+def check_cluster_nonexistent_column_raises(
     dataset, estimator_cls, options_cls
 ):
-    """`cluster_col`が実在しない列名を指すと`ValidationError`（OLSと同じ理由）。"""
-    options = options_cls(cov_type="cluster", cluster_col="does_not_exist")
+    """`cluster`が実在しない列名を指すと`ValidationError`（OLSと同じ理由）。"""
+    options = options_cls(cov_type="cluster", cluster="does_not_exist")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
@@ -1232,9 +1232,7 @@ def check_cluster_matches_statsmodels(
     """クラスターロバストSE（baselineシナリオ、行番号%10の疑似グループ）。"""
     df = pl.read_csv(config.dataset_path("baseline"))
     df = with_cluster_groups(df, 10)
-    options = config.options_cls(
-        cov_type="cluster", cluster_col="cluster_group"
-    )
+    options = config.options_cls(cov_type="cluster", cluster="cluster_group")
     res = config.estimator_cls(
         df, y="y", x=["x1", "x2", "x3"], options=options
     ).fit()
@@ -1251,9 +1249,7 @@ def check_cluster_imbalanced_matches_statsmodels(
     df = pl.read_csv(config.dataset_path("baseline"))
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
-    options = config.options_cls(
-        cov_type="cluster", cluster_col="cluster_group"
-    )
+    options = config.options_cls(cov_type="cluster", cluster="cluster_group")
     res = config.estimator_cls(
         df, y="y", x=["x1", "x2", "x3"], options=options
     ).fit()
@@ -1280,7 +1276,7 @@ def check_mroz_cluster_cov_type_raises_validation_error(
     数値照合フィクスチャ`mroz/cluster`を持っていたが、この対応で削除）。
     """
     df = load_wooldridge_dataset("mroz")
-    options = options_cls(cov_type="cluster", cluster_col="city")
+    options = options_cls(cov_type="cluster", cluster="city")
     with pytest.raises(
         ValidationError,
         match=escaped(

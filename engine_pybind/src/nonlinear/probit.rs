@@ -76,7 +76,7 @@ pub struct ProbitOptions {
     /// Refers to a column in `data` rather than being passed as a separate array.
     /// Ignored when `cov_type` is not "cluster".
     #[pyo3(get, set)]
-    pub cluster_col: Option<String>,
+    pub cluster: Option<String>,
 
     /// Optimization solver: one of "newton" (default), "bfgs", "lbfgs".
     /// Case-insensitive.
@@ -122,7 +122,7 @@ impl ProbitOptions {
         cov_type = "classical".to_string(),
         include_intercept = true,
         confidence_level = 0.95,
-        cluster_col = None,
+        cluster = None,
         solver = "newton".to_string(),
         max_iter = 35,
         tol = None,
@@ -133,7 +133,7 @@ impl ProbitOptions {
         cov_type: String,
         include_intercept: bool,
         confidence_level: f64,
-        cluster_col: Option<String>,
+        cluster: Option<String>,
         solver: String,
         max_iter: i64,
         tol: Option<f64>,
@@ -150,7 +150,7 @@ impl ProbitOptions {
             cov_type,
             include_intercept,
             confidence_level,
-            cluster_col,
+            cluster,
             solver,
             max_iter,
             tol,
@@ -161,11 +161,11 @@ impl ProbitOptions {
     fn __repr__(&self) -> String {
         format!(
             "ProbitOptions(cov_type={:?}, include_intercept={}, confidence_level={}, \
-             cluster_col={:?}, solver={:?}, max_iter={}, tol={}, raise_on_non_convergence={})",
+             cluster={:?}, solver={:?}, max_iter={}, tol={}, raise_on_non_convergence={})",
             self.cov_type,
             self.include_intercept,
             self.confidence_level,
-            self.cluster_col,
+            self.cluster,
             self.solver,
             self.max_iter,
             self.tol,
@@ -400,7 +400,7 @@ pub(crate) fn build_probit_input(
     // ── x列の抽出 ──────────────────────────────────────────────────────
     let x_slices = extract_f64_columns(df, &x)?;
 
-    let cov_type = parse_cov_type(df, &cov_type_lower, &options.cluster_col)?;
+    let cov_type = parse_cov_type(df, &cov_type_lower, &options.cluster)?;
     let solver = parse_solver_type(&solver_lower)?;
 
     let input = ProbitInput::from_columns(&y_slice, &x_slices, x, options.include_intercept, y)
@@ -691,7 +691,7 @@ mod tests {
         .unwrap();
         let mut options = default_options();
         options.cov_type = "cluster".to_string();
-        options.cluster_col = Some("cluster".to_string());
+        options.cluster = Some("cluster".to_string());
 
         let Ok((_, cov_type, _)) =
             build_probit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
@@ -716,7 +716,7 @@ mod tests {
     }
 
     #[test]
-    fn build_probit_input_leaves_cluster_groups_none_when_cluster_col_not_specified() {
+    fn build_probit_input_leaves_cluster_groups_none_when_cluster_not_specified() {
         // クラスターキー未指定自体はここではエラーにせず、`groups=None`のまま返す
         // （`engine`側の`CommonError::MissingClusterColumn`検証に委ねる設計、
         // `build_probit_input`のdocコメント参照）。

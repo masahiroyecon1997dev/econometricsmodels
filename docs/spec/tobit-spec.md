@@ -17,7 +17,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 - `y: str`（単一列名、**連続変数**）、`x: list[str]`。`y`の値域検証（`{0.0, 1.0}`）は行わない。
 - `TobitOptions`（`#[pyclass]`）は`LogitOptions`の8フィールド（`cov_type` / `include_intercept` /
-  `confidence_level` / `cluster_col` / `solver` / `max_iter` / `tol` / `raise_on_non_convergence`、
+  `confidence_level` / `cluster` / `solver` / `max_iter` / `tol` / `raise_on_non_convergence`、
   型・デフォルト値とも[`logit-spec.md`](./logit-spec.md)1章の表と同一）に、打ち切り境界の2フィールドを
   追加する:
 
@@ -45,7 +45,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   可能」であること）が、連続`x`で非分離配置が実データに現れることは考えにくいため保守的に単純化
   している。
 - `n<=k`（`InsufficientObservations`）・`k==0`（`NoRegressors`）・`"const"`列衝突・欠損値
-  （NaN/無限大）・`x`列のnull・`cluster_col`のnull検証はLogitと共通（共有インフラ）。`x`に`"sigma"`
+  （NaN/無限大）・`x`列のnull・`cluster`のnull検証はLogitと共通（共有インフラ）。`x`に`"sigma"`
   列があると、`TobitResult`が`param_names`末尾に付ける合成名`"sigma"`と衝突するためエラー
   （`"const"`列衝突と同型、engine_pybind境界の`validate_no_sigma_collision`）。
 

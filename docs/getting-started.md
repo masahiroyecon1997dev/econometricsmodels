@@ -36,7 +36,7 @@ options = OLSOptions(cov_type="hc1")
 result = OLS(df, y="y", x=["x1"], options=options).fit()
 
 # Cluster-robust standard errors (specify a column name from data)
-options = OLSOptions(cov_type="cluster", cluster_col="group_id")
+options = OLSOptions(cov_type="cluster", cluster="group_id")
 result = OLS(df, y="y", x=["x1"], options=options).fit()
 ```
 

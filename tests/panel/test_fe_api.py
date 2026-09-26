@@ -148,11 +148,11 @@ def test_fixed_effects_two_way_structure(fe_dataset):
     ],
 )
 def test_cov_type_is_case_insensitive(fe_dataset, cov_type, expected_label):
-    """`dk`は`time`/`time_col`いずれか無いと`DkRequiresTime`になるため、
-    1-way維持のまま`time_col`だけ渡す（`test_fe_validation.py`
+    """`dk`は`time`/`dk_time`いずれか無いと`DkRequiresTime`になるため、
+    1-way維持のまま`dk_time`だけ渡す（`test_fe_validation.py`
     `test_dk_requires_time_raises`と対照）。
     """
-    kwargs = {"time_col": "time"} if expected_label == "dk" else {}
+    kwargs = {"dk_time": "time"} if expected_label == "dk" else {}
     options = FEOptions(cov_type=cov_type, **kwargs)
     res = our_fit(fe_dataset, options=options)
     assert res.cov_type == expected_label
@@ -183,15 +183,15 @@ def test_time_option_switches_one_way_two_way(fe_dataset):
     assert two_way.df_model == n_entities + n_periods - 1 + 2
 
 
-def test_cluster_col_defaults_to_entity(fe_dataset):
-    """`cluster_col`省略時は`entity`引数の列を自動的にクラスターキーとして
-    使う（3.2節）。明示的に`cluster_col="entity"`を渡した場合と同じ結果に
+def test_cluster_defaults_to_entity(fe_dataset):
+    """`cluster`省略時は`entity`引数の列を自動的にクラスターキーとして
+    使う（3.2節）。明示的に`cluster="entity"`を渡した場合と同じ結果に
     なることで確認する。
     """
     default_res = our_fit(fe_dataset, options=FEOptions(cov_type="cluster"))
     explicit_res = our_fit(
         fe_dataset,
-        options=FEOptions(cov_type="cluster", cluster_col="entity"),
+        options=FEOptions(cov_type="cluster", cluster="entity"),
     )
 
     for name in default_res.param_names:

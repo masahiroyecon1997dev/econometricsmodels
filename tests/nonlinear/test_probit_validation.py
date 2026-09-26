@@ -160,8 +160,8 @@ def test_cluster_without_col_raises(binary_dataset):
     )
 
 
-def test_cluster_col_nonexistent_column_raises(binary_dataset):
-    _checks.check_cluster_col_nonexistent_column_raises(
+def test_cluster_nonexistent_column_raises(binary_dataset):
+    _checks.check_cluster_nonexistent_column_raises(
         binary_dataset, Probit, ProbitOptions
     )
 

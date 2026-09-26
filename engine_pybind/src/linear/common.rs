@@ -61,11 +61,11 @@ pub(crate) fn mat_to_vec(mat: &faer::Mat<f64>) -> Vec<f64> {
     (0..mat.nrows()).map(|i| *mat.get(i, 0)).collect()
 }
 
-/// `cov_type`文字列をパースし、該当する`cov_type`のときのみ`cluster_col`/`time_col`を
+/// `cov_type`文字列をパースし、該当する`cov_type`のときのみ`cluster`/`hac_time`を
 /// 抽出したうえで`engine::linear::ols::CovType`を組み立てる（OLS/WLS/IV共通、
 /// `docs/spec/ols-spec.md`「標準誤差」参照）。
 ///
-/// `cluster_col`/`time_col`が指定されていても、`cov_type`がcluster/hacでなければ無視する
+/// `cluster`/`hac_time`が指定されていても、`cov_type`がcluster/hacでなければ無視する
 /// （該当しない分岐では列抽出自体を行わない、`match`の各アーム内で完結させている）。
 /// 戻り値の2つ目は`*Result.cov_type`にそのまま格納する小文字化済み文字列
 /// （呼び出し側で二重に`to_lowercase()`しないよう、ここでまとめて返す）。
@@ -75,7 +75,7 @@ pub(crate) fn mat_to_vec(mat: &faer::Mat<f64>) -> Vec<f64> {
 /// 独立した2つの型がこの関数を共有する必要が生じたため（`nonlinear::common::
 /// parse_cov_type`が最初から個々の値を引数に取っているのと同じ設計。以前は`WLSOptions`が
 /// 無く`OLSOptions`をそのまま再利用していたため、`&OLSOptions`を直接受け取っていた）。
-/// 同じ理由で`IVOptions`も同名フィールド（`cov_type`/`cluster_col`/`hac_lags`/`time_col`）を
+/// 同じ理由で`IVOptions`も同名フィールド（`cov_type`/`cluster`/`hac_lags`/`hac_time`）を
 /// 持つため、`iv::common::parse_iv_cov_type`という重複実装を廃止しこの関数をそのまま
 /// 共有する。
 ///
@@ -85,9 +85,9 @@ pub(crate) fn mat_to_vec(mat: &faer::Mat<f64>) -> Vec<f64> {
 pub(crate) fn parse_cov_type(
     df: &DataFrame,
     cov_type: &str,
-    cluster_col: Option<&str>,
+    cluster: Option<&str>,
     hac_lags: Option<i64>,
-    time_col: Option<&str>,
+    hac_time: Option<&str>,
 ) -> PyResult<(EngineCovType, String)> {
     let cov_type_lower = cov_type.to_lowercase();
 
@@ -98,7 +98,7 @@ pub(crate) fn parse_cov_type(
         "hc2" => EngineCovType::Hc2,
         "hc3" => EngineCovType::Hc3,
         "hac" => {
-            let time_order = time_col
+            let time_order = hac_time
                 .map(|col_name| extract_f64_column(df, col_name))
                 .transpose()?;
             EngineCovType::Hac {
@@ -107,7 +107,7 @@ pub(crate) fn parse_cov_type(
             }
         }
         "cluster" => {
-            let groups = cluster_col
+            let groups = cluster
                 .map(|col_name| extract_group_key_column(df, col_name))
                 .transpose()?;
             EngineCovType::Cluster { groups }

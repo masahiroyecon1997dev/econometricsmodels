@@ -76,7 +76,7 @@ def test_ols_classical_uses_t_with_residual_df(df):
 
 
 def test_ols_cluster_uses_g_minus_one_df(df):
-    options = OLSOptions(cov_type="cluster", cluster_col="entity")
+    options = OLSOptions(cov_type="cluster", cluster="entity")
     res = OLS(df, y="y", x=["x1", "x2"], options=options).fit()
     _check_t(res, N_ENTITIES - 1)
 
@@ -131,7 +131,7 @@ def test_iv_2sls_cluster_uses_g_minus_one_df(df):
         x_exog=["x1"],
         x_endog=["endog"],
         instruments=["z1", "z2"],
-        options=IVOptions(cov_type="cluster", cluster_col="entity"),
+        options=IVOptions(cov_type="cluster", cluster="entity"),
     ).fit()
     _check_t(res, N_ENTITIES - 1)
 
@@ -155,7 +155,7 @@ def test_test_stats_are_consistent_with_stat_df_for_t_dist(df):
     """
     from scipy import stats as sps
 
-    options = OLSOptions(cov_type="cluster", cluster_col="entity")
+    options = OLSOptions(cov_type="cluster", cluster="entity")
     res = OLS(df, y="y", x=["x1", "x2"], options=options).fit()
     for name, t in res.test_stats.items():
         p = 2.0 * sps.t.sf(abs(t), res.stat_df)

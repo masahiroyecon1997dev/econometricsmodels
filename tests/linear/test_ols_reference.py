@@ -205,7 +205,7 @@ def test_cluster_matches_statsmodels(fixtures):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, 10)
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = OLSOptions(cov_type="cluster", cluster="cluster_group")
     res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
     _check_result(res, fixtures["baseline"]["cluster"], "cluster")
@@ -221,7 +221,7 @@ def test_cluster_imbalanced_matches_statsmodels(fixtures):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = OLSOptions(cov_type="cluster", cluster="cluster_group")
     res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
     _check_result(
@@ -241,7 +241,7 @@ def test_cluster_g2_matches_statsmodels(fixtures):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
     df = with_cluster_groups(df, 2)
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = OLSOptions(cov_type="cluster", cluster="cluster_group")
     res = OLS(df, y="y", x=["x1"], options=options).fit()
 
     _check_result(res, fixtures["baseline"]["cluster_g2"], "cluster_g2")
@@ -262,7 +262,7 @@ def test_cluster_ill_conditioned_matches_statsmodels(fixtures, scenario):
     """
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     df = with_cluster_groups(df, 10)
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = OLSOptions(cov_type="cluster", cluster="cluster_group")
     res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
     _check_result(res, fixtures[scenario]["cluster"], f"{scenario}/cluster")
@@ -300,7 +300,7 @@ def test_no_intercept_cluster_matches_statsmodels(fixtures):
     options = OLSOptions(
         include_intercept=False,
         cov_type="cluster",
-        cluster_col="cluster_group",
+        cluster="cluster_group",
     )
     res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
@@ -347,7 +347,7 @@ def test_confidence_level_cluster_matches_statsmodels(fixtures):
     options = OLSOptions(
         confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
         cov_type="cluster",
-        cluster_col="cluster_group",
+        cluster="cluster_group",
     )
     res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
@@ -414,7 +414,7 @@ def test_wooldridge_wage1_region_cluster_matches_statsmodels(
         .alias("region")
     )
     df = df.with_columns(region)
-    options = OLSOptions(cov_type="cluster", cluster_col="region")
+    options = OLSOptions(cov_type="cluster", cluster="region")
     res = OLS(
         df, y="lwage", x=["educ", "exper", "tenure"], options=options
     ).fit()

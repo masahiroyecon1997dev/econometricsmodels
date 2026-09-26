@@ -179,7 +179,7 @@ def test_matches_r_glm(fixtures, scenario, cov_type):
 def test_cluster_matches_r_glm(fixtures):
     df = pl.read_csv(DATA_DIR / "logit_baseline.csv")
     df = with_cluster_groups(df, 10)
-    options = LogitOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = LogitOptions(cov_type="cluster", cluster="cluster_group")
     res = Logit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
     ref = fixtures["synthetic"]["baseline"]["cluster"]["r"]
@@ -191,7 +191,7 @@ def test_cluster_imbalanced_matches_r_glm(fixtures):
     df = pl.read_csv(DATA_DIR / "logit_baseline.csv")
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
-    options = LogitOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = LogitOptions(cov_type="cluster", cluster="cluster_group")
     res = Logit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
     ref = fixtures["synthetic"]["baseline"]["cluster_imbalanced"]["r"]

@@ -22,10 +22,10 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
   | `cov_type` | `str` | `"cluster"` | `"classical"` / `"hc1"`〜`"hc3"` / `"cluster"` / `"dk"`（大小無視）。`"hc0"`は非対応 |
   | `confidence_level` | `float` | `0.95` | |
   | `time` | `str \| None` | `None` | RE自身の準偏差変換はentity方向のみで`time`を使わないが、`cov_type="dk"`時のDK時系列順序、およびハウスマン検定用の内部FE呼び出しの1-way/2-way選択（`Some`なら2-way）を兼ねる |
-  | `cluster_col` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名。省略時は`entity`をそのまま使う |
+  | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名。省略時は`entity`をそのまま使う |
   | `dk_bandwidth` | `int \| None` | `None` | DK HACのバンド幅。省略時は自動計算 |
 
-- **`FEOptions`と異なり`time_col`が無い**: `ReCovType::Dk`は`FeCovType::Dk`と違い`time`
+- **`FEOptions`と異なり`dk_time`が無い**: `ReCovType::Dk`は`FeCovType::Dk`と違い`time`
   オーバーライドフィールドを持たない。REは2-way構造自体を持たないため、「2-way FEの固定効果
   構造」と「DK HACの時系列粒度」を分離する必要が無く、`REOptions.time`1フィールドで
   「HAC時系列順序」と「ハウスマン検定用内部FE呼び出しの1-way/2-way選択」を兼ねる。

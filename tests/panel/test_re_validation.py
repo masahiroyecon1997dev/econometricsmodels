@@ -17,7 +17,7 @@ n_periods=6）は`tests/panel/conftest.py`（FEと共用、RE専用の合成デ�
 
 Note:
     `MISSING_CLUSTER_COLUMN`はFEと同じ理由で構造的に到達不能
-    （`cluster_col=None`は常に`entity`引数の列に自動フォールバックする、
+    （`cluster=None`は常に`entity`引数の列に自動フォールバックする、
     `engine_pybind/src/panel/re.rs::parse_re_cov_type`参照）。`x=[]`が
     `ValidationError`になる設計判断の経緯は`engine_pybind/src/panel/re.rs`
     モジュールdoc「`x`の空リストを許容しない」参照（ユーザー
@@ -282,7 +282,7 @@ def test_group_key_column_null_values_raise(bad_col):
         RE(df, y="y", x=["x1"], entity="entity", options=options).fit()
 
 
-def test_cluster_col_null_values_raise():
+def test_cluster_null_values_raise():
     df = pl.DataFrame(
         {
             "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
@@ -291,7 +291,7 @@ def test_cluster_col_null_values_raise():
             "state": ["x", None, "y", "y", "x", "y"],
         }
     )
-    options = REOptions(cov_type="cluster", cluster_col="state")
+    options = REOptions(cov_type="cluster", cluster="state")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name="state"),
@@ -399,9 +399,9 @@ def test_invalid_confidence_level_raises(fe_dataset, confidence_level):
 
 
 def test_dk_requires_time_raises(fe_dataset):
-    """`REOptions`には`FEOptions.time_col`に相当する分離フィールドが無く、
+    """`REOptions`には`FEOptions.dk_time`に相当する分離フィールドが無く、
     `time`のみでHAC時系列順序を兼ねる（`engine_pybind/src/panel/re.rs`
-    モジュールdoc「`REOptions`に`time_col`が無い理由」参照）。
+    モジュールdoc「`REOptions`に`dk_time`が無い理由」参照）。
     """
     options = REOptions(cov_type="dk")
     with pytest.raises(ValidationError, match=escaped(msgs.DK_REQUIRES_TIME)):
@@ -418,8 +418,8 @@ def test_invalid_dk_bandwidth_raises(fe_dataset, dk_bandwidth):
         our_fit_re(fe_dataset, options=options)
 
 
-def test_cluster_col_nonexistent_column_raises(fe_dataset):
-    options = REOptions(cov_type="cluster", cluster_col="does_not_exist")
+def test_cluster_nonexistent_column_raises(fe_dataset):
+    options = REOptions(cov_type="cluster", cluster="does_not_exist")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
@@ -442,7 +442,7 @@ def test_insufficient_clusters_raises():
             "entity": ["a", "a", "b", "b", "c", "c", "d", "d"],
         }
     ).with_columns(pl.lit(0).alias("single_cluster"))
-    options = REOptions(cov_type="cluster", cluster_col="single_cluster")
+    options = REOptions(cov_type="cluster", cluster="single_cluster")
     with pytest.raises(
         ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
     ):
@@ -465,7 +465,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error():
             "cluster_group": ["1", "1", "1", "1", "2", "2", "2", "2"],
         }
     )
-    options = REOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = REOptions(cov_type="cluster", cluster="cluster_group")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=2),

@@ -29,15 +29,15 @@
 //!    呼ぶだけ（IVの`IVResult.first_stage`フィールドが初期実装ではなく後続の拡張で
 //!    追加されたのと同じ段階分割）。
 //!
-//! ## `FEOptions.time`と`FEOptions.time_col`は別物（`panel-common.md`1.1節）
+//! ## `FEOptions.time`と`FEOptions.dk_time`は別物（`panel-common.md`1.1節）
 //!
 //! `time`（bareネーミング）は2-way FE（entity + time FE）の指定に使う: `Some`なら2-way・
-//! `None`なら1-way。`time_col`（OLSの`cluster_col`/`time_col`と同じ「補助列」命名規則）は
+//! `None`なら1-way。`dk_time`（`cov_type="dk"`の値を接頭辞にした命名）は
 //! Driscoll-Kraay型HAC（`cov_type="dk"`）専用の時系列順序で、`time`とは独立に指定できる
-//! （ユーザー確認済み、2026-09-12）。**`time_col`が指定されていれば、2-way（`time`指定あり）
+//! （ユーザー確認済み、2026-09-12）。**`dk_time`が指定されていれば、2-way（`time`指定あり）
 //! でも常にこちらがDK計算に優先される**（`time`未指定なら`FeCovType::Dk.time`の上書きが
 //! `None`になり`FeInput.time()`——`time`から構築——にフォールバックする、`parse_fe_cov_type`
-//! 参照）。1-way FE + DK HAC（`time`未指定・`time_col`のみ指定）を表現するために導入した
+//! 参照）。1-way FE + DK HAC（`time`未指定・`dk_time`のみ指定）を表現するために導入した
 //! 設計（詳細な経緯・engine側の対応する変更は`engine/src/panel/fe.rs`モジュールdoc
 //! 「Driscoll-Kraay型パネルHAC対応」参照）。
 //!
@@ -106,8 +106,8 @@ pub struct FEOptions {
 
     /// Column name of the time identifier. When set, requests two-way fixed effects
     /// (entity + time); when `None` (default), one-way (entity only). Also used as the
-    /// Driscoll-Kraay HAC time ordering when `cov_type="dk"`, unless `time_col` is set
-    /// (see `time_col`).
+    /// Driscoll-Kraay HAC time ordering when `cov_type="dk"`, unless `dk_time` is set
+    /// (see `dk_time`).
     #[pyo3(get, set)]
     pub time: Option<String>,
 
@@ -115,15 +115,15 @@ pub struct FEOptions {
     /// `None`, the `entity` argument's column is used automatically. Ignored when
     /// `cov_type` is not "cluster".
     #[pyo3(get, set)]
-    pub cluster_col: Option<String>,
+    pub cluster: Option<String>,
 
     /// Column name giving the time order for Driscoll-Kraay HAC, independent of `time`
-    /// (`time` and `time_col` serve different purposes; see the module docstring). When
+    /// (`time` and `dk_time` serve different purposes; see the module docstring). When
     /// set, always takes priority over `time` for the HAC computation (even with
     /// two-way effects). When `None`, falls back to `time`. Ignored when `cov_type` is
     /// not "dk".
     #[pyo3(get, set)]
-    pub time_col: Option<String>,
+    pub dk_time: Option<String>,
 
     /// Bandwidth for Driscoll-Kraay HAC when `cov_type="dk"`. When `None`, computed
     /// automatically via `floor(4*(t/100)^(2/9))` (`t` = number of unique time periods).
@@ -139,8 +139,8 @@ impl FEOptions {
         cov_type = "cluster".to_string(),
         confidence_level = 0.95,
         time = None,
-        cluster_col = None,
-        time_col = None,
+        cluster = None,
+        dk_time = None,
         dk_bandwidth = None,
     ))]
     #[allow(clippy::too_many_arguments)]
@@ -148,29 +148,29 @@ impl FEOptions {
         cov_type: String,
         confidence_level: f64,
         time: Option<String>,
-        cluster_col: Option<String>,
-        time_col: Option<String>,
+        cluster: Option<String>,
+        dk_time: Option<String>,
         dk_bandwidth: Option<i64>,
     ) -> Self {
         Self {
             cov_type,
             confidence_level,
             time,
-            cluster_col,
-            time_col,
+            cluster,
+            dk_time,
             dk_bandwidth,
         }
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "FEOptions(cov_type={:?}, confidence_level={}, time={:?}, cluster_col={:?}, \
-             time_col={:?}, dk_bandwidth={:?})",
+            "FEOptions(cov_type={:?}, confidence_level={}, time={:?}, cluster={:?}, \
+             dk_time={:?}, dk_bandwidth={:?})",
             self.cov_type,
             self.confidence_level,
             self.time,
-            self.cluster_col,
-            self.time_col,
+            self.cluster,
+            self.dk_time,
             self.dk_bandwidth
         )
     }
@@ -288,7 +288,7 @@ impl FEResult {
     }
 }
 
-/// `FEOptions.cov_type`をパースし、該当する`cov_type`のときのみ`cluster_col`/`time_col`を
+/// `FEOptions.cov_type`をパースし、該当する`cov_type`のときのみ`cluster`/`dk_time`を
 /// 抽出したうえで`engine::panel::fe::FeCovType`を組み立てる。
 ///
 /// `linear::common::parse_cov_type`（OLS/WLS用）を流用しない理由はモジュールdoc
@@ -308,19 +308,19 @@ fn parse_fe_cov_type(df: &DataFrame, options: &FEOptions) -> PyResult<(FeCovType
         "hc3" => FeCovType::Hc3,
         "cluster" => {
             let groups = options
-                .cluster_col
+                .cluster
                 .as_ref()
                 .map(|col_name| extract_group_key_column(df, col_name))
                 .transpose()?;
             FeCovType::Cluster { groups }
         }
         "dk" => {
-            // `time_col`が優先（モジュールdoc「`FEOptions.time`と`FEOptions.time_col`は
+            // `dk_time`が優先（モジュールdoc「`FEOptions.time`と`FEOptions.dk_time`は
             // 別物」参照）。`None`なら`FeCovType::Dk.time`も`None`にし、engine側で
             // `FeInput.time()`（`time`から構築）へのフォールバックに委ねる
             // （`engine::panel::fe`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
             let time = options
-                .time_col
+                .dk_time
                 .as_ref()
                 .map(|col_name| extract_group_key_column(df, col_name))
                 .transpose()?;
@@ -529,7 +529,7 @@ mod tests {
         assert_eq!(
             cov_type,
             FeCovType::Cluster { groups: None },
-            "cluster_col未指定時はNone（engine側でentity列にフォールバック）"
+            "cluster未指定時はNone（engine側でentity列にフォールバック）"
         );
         assert_eq!(cov_type_lower, "cluster");
     }
@@ -660,7 +660,7 @@ mod tests {
     }
 
     #[test]
-    fn build_fe_input_extracts_cluster_groups_when_cov_type_is_cluster_and_cluster_col_set() {
+    fn build_fe_input_extracts_cluster_groups_when_cov_type_is_cluster_and_cluster_set() {
         let df = df!(
             "y" => [1.0, 2.0, 3.0, 4.0],
             "x1" => [2.0, 4.0, 1.0, 5.0],
@@ -669,7 +669,7 @@ mod tests {
         )
         .unwrap();
         let mut options = default_options();
-        options.cluster_col = Some("state".to_string());
+        options.cluster = Some("state".to_string());
 
         let (_, _, cov_type, _) = build_fe_input(
             &df,
@@ -694,13 +694,13 @@ mod tests {
     }
 
     #[test]
-    fn build_fe_input_hac_uses_time_col_when_time_is_not_set() {
-        // 1-way FE + DK HAC（`time`未指定・`time_col`のみ指定）の組み合わせ
-        // （モジュールdoc「`FEOptions.time`と`FEOptions.time_col`は別物」参照）。
+    fn build_fe_input_hac_uses_dk_time_when_time_is_not_set() {
+        // 1-way FE + DK HAC（`time`未指定・`dk_time`のみ指定）の組み合わせ
+        // （モジュールdoc「`FEOptions.time`と`FEOptions.dk_time`は別物」参照）。
         let df = well_formed_df();
         let mut options = default_options();
         options.cov_type = "dk".to_string();
-        options.time_col = Some("t".to_string());
+        options.dk_time = Some("t".to_string());
 
         let (input, effects, cov_type, _) = build_fe_input(
             &df,
@@ -712,7 +712,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(effects, FeEffects::OneWay);
-        assert_eq!(input.time(), None); // time_colはFeInput.timeには渡らない
+        assert_eq!(input.time(), None); // dk_timeはFeInput.timeには渡らない
         assert_eq!(
             cov_type,
             FeCovType::Dk {
@@ -730,8 +730,8 @@ mod tests {
     }
 
     #[test]
-    fn build_fe_input_hac_prefers_time_col_over_time_when_both_set() {
-        // 2-way（`time`指定あり）でも`time_col`が優先されることを確認する
+    fn build_fe_input_hac_prefers_dk_time_over_time_when_both_set() {
+        // 2-way（`time`指定あり）でも`dk_time`が優先されることを確認する
         // （モジュールdoc参照）。
         let df = df!(
             "y" => [1.0, 2.0, 3.0, 4.0],
@@ -744,7 +744,7 @@ mod tests {
         let mut options = default_options();
         options.cov_type = "dk".to_string();
         options.time = Some("t".to_string());
-        options.time_col = Some("t_fine".to_string());
+        options.dk_time = Some("t_fine".to_string());
 
         let (input, effects, cov_type, _) = build_fe_input(
             &df,
@@ -773,7 +773,7 @@ mod tests {
     }
 
     #[test]
-    fn build_fe_input_hac_falls_back_to_time_when_time_col_is_not_set() {
+    fn build_fe_input_hac_falls_back_to_time_when_dk_time_is_not_set() {
         let df = well_formed_df();
         let mut options = default_options();
         options.cov_type = "dk".to_string();
@@ -794,7 +794,7 @@ mod tests {
                 bandwidth: None,
                 time: None,
             },
-            "time_col未指定時はNone（engine側でFeInput.time()にフォールバック）"
+            "dk_time未指定時はNone（engine側でFeInput.time()にフォールバック）"
         );
     }
 }

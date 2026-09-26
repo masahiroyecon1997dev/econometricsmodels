@@ -58,7 +58,7 @@ pub struct OLSOptions {
     /// Refers to a column in `data` rather than being passed as a separate array.
     /// Ignored when `cov_type` is not "cluster".
     #[pyo3(get, set)]
-    pub cluster_col: Option<String>,
+    pub cluster: Option<String>,
 
     /// Number of lags (bandwidth) for HAC (Newey-West) when `cov_type="hac"`.
     /// When `None`, computed automatically via `L = floor(4*(n/100)^(2/9))`.
@@ -70,7 +70,7 @@ pub struct OLSOptions {
     /// When `None`, the row order of `data` is treated as the time order.
     /// Ignored when `cov_type` is not "hac".
     #[pyo3(get, set)]
-    pub time_col: Option<String>,
+    pub hac_time: Option<String>,
 }
 
 #[pymethods]
@@ -80,39 +80,39 @@ impl OLSOptions {
         cov_type = "classical".to_string(),
         include_intercept = true,
         confidence_level = 0.95,
-        cluster_col = None,
+        cluster = None,
         hac_lags = None,
-        time_col = None,
+        hac_time = None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         cov_type: String,
         include_intercept: bool,
         confidence_level: f64,
-        cluster_col: Option<String>,
+        cluster: Option<String>,
         hac_lags: Option<i64>,
-        time_col: Option<String>,
+        hac_time: Option<String>,
     ) -> Self {
         Self {
             cov_type,
             include_intercept,
             confidence_level,
-            cluster_col,
+            cluster,
             hac_lags,
-            time_col,
+            hac_time,
         }
     }
 
     fn __repr__(&self) -> String {
         format!(
             "OLSOptions(cov_type={:?}, include_intercept={}, confidence_level={}, \
-             cluster_col={:?}, hac_lags={:?}, time_col={:?})",
+             cluster={:?}, hac_lags={:?}, hac_time={:?})",
             self.cov_type,
             self.include_intercept,
             self.confidence_level,
-            self.cluster_col,
+            self.cluster,
             self.hac_lags,
-            self.time_col
+            self.hac_time
         )
     }
 }
@@ -336,9 +336,9 @@ pub fn fit(
     let (cov_type, cov_type_lower) = parse_cov_type(
         &df,
         &options.cov_type,
-        options.cluster_col.as_deref(),
+        options.cluster.as_deref(),
         options.hac_lags,
-        options.time_col.as_deref(),
+        options.hac_time.as_deref(),
     )?;
 
     let input = OlsInput::from_columns(&y_slice, &x_slices, x, options.include_intercept, y)

@@ -12,11 +12,11 @@ WLS（Weighted Least Squares）の確定済み仕様。`engine/src/linear/wls.rs
 `OlsInput::from_columns_weighted` + 既存`OlsEstimator::fit`（engine、無変更で再利用）。
 
 - `weight: str`は`y`/`x`と同格の**必須のトップレベル引数**（`WLSOptions`側には置かない）。
-  理由: `cluster_col`/`time_col`は`cov_type`に応じた条件付き・デフォルトありの「推定方法の設定」
+  理由: `cluster`/`hac_time`は`cov_type`に応じた条件付き・デフォルトありの「推定方法の設定」
   だが、`weight`はモデルそのものを規定する必須データであり、性質が異なる。この分類はFE
   （`entity_id`）・IV（`instruments`）等、今後の必須データ列にも適用する。
 - 専用の`WLSOptions`型を新設し（2026-09-12）、`OLSOptions`と完全に同一のフィールド
-  構成（`cov_type`/`include_intercept`/`confidence_level`/`cluster_col`/`hac_lags`/`time_col`、
+  構成（`cov_type`/`include_intercept`/`confidence_level`/`cluster`/`hac_lags`/`hac_time`、
   意味論もOLSと完全に同じ）を持つ独立したpyclassとして実装する。当初は専用型を新設せず
   `OLSOptions`をそのまま再利用していたが、`WLSResult`が元から独立型だったのと非対称だった
   ことと、将来WLS固有のオプションが必要になった際に`OLSOptions`/OLS利用者へ影響を与えずに
@@ -83,12 +83,12 @@ statsmodelsの`WLS`も内部的に同じ変換方式`wexog=sqrt(weights)*exog`�
 
 - HC0の$\hat\Psi=\sum_i\tilde\varepsilon_i^2\tilde x_i\tilde x_i^\top=\sum_i w_i^2\hat\varepsilon_i^2 x_i x_i^\top$
   のように、重みが2乗で効く（残差と設計行列の両方に$\sqrt{w_i}$がかかるため）。
-- クラスターのグループ分け自体（`cluster_col`によるグルーピング）は重み変換の影響を受けない
+- クラスターのグループ分け自体（`cluster`によるグルーピング）は重み変換の影響を受けない
   （グループ内で合計する対象が変換後の値になるだけ）。小標本補正・自由度の扱いもOLSと同じ。
   クラスター数`G <= 傾き係数の数q`は`InsufficientClustersForInference`（`ValidationError`）
   ——`WlsEstimator::fit`は変換後データで`OlsEstimator::fit`に委譲するため、
   この検証もOLS実装（`ols-spec.md`「`G ≤ q`の境界」）をそのまま継承する。
-- HAC・cluster・時間順序（`time_col`）を含め、ラグ選択式・小標本補正・自由度切替はすべて
+- HAC・cluster・時間順序（`hac_time`）を含め、ラグ選択式・小標本補正・自由度切替はすべて
   観測数`n`・クラスター数`G`のみに依存し重みには依存しないため、OLSと同じ式・同じオプションを
   そのまま使う。
 

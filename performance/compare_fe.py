@@ -154,7 +154,7 @@ def _fit_once_engine(ctx: FitContext):
         options = FEOptions(
             cov_type="dk",
             time=_TIME_COL if two_way else None,
-            time_col=_TIME_COL,
+            dk_time=_TIME_COL,
             dk_bandwidth=_DK_BANDWIDTH,
         )
     else:

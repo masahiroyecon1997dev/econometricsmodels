@@ -16,7 +16,7 @@ n_periods=6）は`tests/panel/conftest.py`、`our_fit`ヘルパー（既定
 
 Note:
     `MISSING_CLUSTER_COLUMN`（OLS/WLS/IVが持つ「`cov_type='cluster'`なのに
-    クラスター列が一切無い」エラー）はFEには存在しない。`cluster_col=None`
+    クラスター列が一切無い」エラー）はFEには存在しない。`cluster=None`
     は常に`entity`引数の列に自動フォールバックするため、この失敗経路が
     構造的に到達不能（`engine_pybind/src/panel/fe.rs::parse_fe_cov_type`
     参照）。
@@ -286,8 +286,8 @@ def test_group_key_column_null_values_raise(bad_col):
         FE(df, y="y", x=["x1"], entity="entity", options=options).fit()
 
 
-def test_cluster_col_null_values_raise():
-    """`cluster_col`（`extract_group_key_column`経由）の欠損値も`entity`/
+def test_cluster_null_values_raise():
+    """`cluster`（`extract_group_key_column`経由）の欠損値も`entity`/
     `time`と同じ`GROUP_KEY_COLUMN_HAS_MISSING_VALUES`。
     """
     df = pl.DataFrame(
@@ -298,7 +298,7 @@ def test_cluster_col_null_values_raise():
             "state": ["x", None, "y", "y", "x", "y"],
         }
     )
-    options = FEOptions(cov_type="cluster", cluster_col="state")
+    options = FEOptions(cov_type="cluster", cluster="state")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name="state"),
@@ -489,7 +489,7 @@ def test_invalid_confidence_level_raises(fe_dataset, confidence_level):
 
 
 def test_dk_requires_time_raises(fe_dataset):
-    """1-way（`time`未指定）で`cov_type="dk"`かつ`time_col`も未指定だと
+    """1-way（`time`未指定）で`cov_type="dk"`かつ`dk_time`も未指定だと
     `PanelError::DkRequiresTime`。
     """
     options = FEOptions(cov_type="dk")
@@ -501,7 +501,7 @@ def test_dk_requires_time_raises(fe_dataset):
 def test_invalid_dk_bandwidth_raises(fe_dataset, dk_bandwidth):
     """`dk_bandwidth`は`[0, t)`の範囲外（`t`=時点数、上限は`>=t`で無効）。"""
     options = FEOptions(
-        cov_type="dk", time_col="time", dk_bandwidth=dk_bandwidth
+        cov_type="dk", dk_time="time", dk_bandwidth=dk_bandwidth
     )
     with pytest.raises(
         ValidationError,
@@ -510,8 +510,8 @@ def test_invalid_dk_bandwidth_raises(fe_dataset, dk_bandwidth):
         our_fit(fe_dataset, options=options)
 
 
-def test_cluster_col_nonexistent_column_raises(fe_dataset):
-    options = FEOptions(cov_type="cluster", cluster_col="does_not_exist")
+def test_cluster_nonexistent_column_raises(fe_dataset):
+    options = FEOptions(cov_type="cluster", cluster="does_not_exist")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
@@ -522,7 +522,7 @@ def test_cluster_col_nonexistent_column_raises(fe_dataset):
 def test_insufficient_clusters_raises(fe_dataset):
     """クラスターが1種類しかない場合`CommonError::InsufficientClusters`。"""
     df = fe_dataset.with_columns(pl.lit(0).alias("single_cluster"))
-    options = FEOptions(cov_type="cluster", cluster_col="single_cluster")
+    options = FEOptions(cov_type="cluster", cluster="single_cluster")
     with pytest.raises(
         ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
     ):
@@ -532,9 +532,9 @@ def test_insufficient_clusters_raises(fe_dataset):
 def test_cluster_count_at_most_slopes_raises_validation_error():
     """クラスター数G(=2)が傾き係数の数q(=k=2)以下は`ValidationError`
     （`CommonError::InsufficientClustersForInference`）。デフォルトの
-    entityクラスタリング・明示`cluster_col`のどちらでも同じ
+    entityクラスタリング・明示`cluster`のどちらでも同じ
     `validate_cluster_count_covers_slopes`が働く
-    （`engine/src/panel/fe.rs`）ため、明示`cluster_col`側で確認する。
+    （`engine/src/panel/fe.rs`）ため、明示`cluster`側で確認する。
 
     engineユニットテスト
     `fe_estimator_fit_cluster_propagates_insufficient_clusters_for_inference_error`
@@ -549,7 +549,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error():
             "cluster_group": ["1", "1", "1", "2", "2", "2"],
         }
     )
-    options = FEOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = FEOptions(cov_type="cluster", cluster="cluster_group")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=2),

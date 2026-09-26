@@ -56,5 +56,5 @@ def our_fit(df: pl.DataFrame, cov_type: str = "classical") -> OLSResults:
 
 
 def our_fit_cluster(df: pl.DataFrame) -> OLSResults:
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster")
+    options = OLSOptions(cov_type="cluster", cluster="cluster")
     return OLS(df, y="y", x=["x1", "x2"], options=options).fit()

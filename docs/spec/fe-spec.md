@@ -21,9 +21,9 @@ FE固有の内容のみを記載する。
   |---|---|---|---|
   | `cov_type` | `str` | `"cluster"` | `"classical"` / `"hc1"`〜`"hc3"` / `"cluster"` / `"dk"`（大小無視）。OLSと異なり`"hc0"`は非対応（`FeCovType` enum自体が持たない、専用エラーメッセージで弾く） |
   | `confidence_level` | `float` | `0.95` | |
-  | `time` | `str \| None` | `None` | `Some`なら2-way（entity+time）、`None`なら1-way。`cov_type="dk"`時のDK時系列順序としても使われる（`time_col`未指定の場合） |
-  | `cluster_col` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名。省略時は`entity`をそのまま使う |
-  | `time_col` | `str \| None` | `None` | DK HAC専用の時系列順序。`time`とは独立に指定でき、指定時は2-wayでも常にこちらが優先される |
+  | `time` | `str \| None` | `None` | `Some`なら2-way（entity+time）、`None`なら1-way。`cov_type="dk"`時のDK時系列順序としても使われる（`dk_time`未指定の場合） |
+  | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名。省略時は`entity`をそのまま使う |
+  | `dk_time` | `str \| None` | `None` | DK HAC専用の時系列順序。`time`とは独立に指定でき、指定時は2-wayでも常にこちらが優先される |
   | `dk_bandwidth` | `int \| None` | `None` | DK HACのバンド幅（時点数`t`ベース、OLSの`hac_lags`とは意味が異なるため別名）。省略時は`floor(4*(t/100)^(2/9))`で自動計算 |
 
 - **`include_intercept`は無い**: withinの変換で切片が構造的に消えるため、OLS/WLS/IVと異なり
@@ -37,9 +37,8 @@ FE固有の内容のみを記載する。
   維持している（`OlsEstimator::fit_allowing_no_regressors`という、通常の`fit`からk=0拒否
   ガードだけを外した別関数への切り替えで実現。RE自身の内部`OlsEstimator::fit`呼び出しは
   between回帰・最終回帰どちらも構造的にk=0にならないため無変更）。
-- `entity`/`time`はbareネーミング（`_col`サフィックスなし、`y`/`x`と同格の中核変数という
-  位置づけ）。`cluster_col`/`time_col`は「補助列」という別の位置づけのため`_col`サフィックスを
-  持つ（既存の`OLSOptions.cluster_col`/`time_col`と同じ規約）。
+- 列名を受け取る引数は`entity`/`time`/`cluster`/`dk_time`のいずれも`_col`サフィックスを
+  付けない（`y`/`x`と同じ規約）。`dk_time`は`cov_type="dk"`の値を接頭辞にした名前。
 - **2-wayはバランスパネルを必須とする**。`(entity, time)`のユニークペア数が`n_obs`と一致しない
   （重複・欠落がある）場合も含め`ValidationError`（`validate_balanced_panel`が
   `n_obs == n_entities * n_periods`のカウント一致だけでなくユニークペア数も検証する。ペアの
@@ -139,13 +138,13 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
    するが、linearmodels（FEの主リファレンス）はこの補正を使わず`n/(n-extra_df-k)`のみを
    使う。`extra_df`はcluster変数とFEの関係で決まる（linearmodelsの`_determine_df_adjustment`
    と数値一致確認済み）: 1-way FEで「クラスター変数がentityと同じか、entityを包含するより
-   粗い分割」なら`extra_df=0`（`cluster_col`省略時のデフォルト、すなわちentity自体は常に
+   粗い分割」なら`extra_df=0`（`cluster`省略時のデフォルト、すなわちentity自体は常に
    この条件を満たす）、それ以外（1-way FEでentityと無関係なクラスター変数、または2-way FE）
    は`extra_df=neffects`。
 
-`cov_type`のデフォルト（`"cluster"`、entity単位）・`cluster_col`文字列パースは
+`cov_type`のデフォルト（`"cluster"`、entity単位）・`cluster`文字列パースは
 `engine_pybind`層の責務。`FeEstimator::fit`自体はデフォルトを持たない。**2-way FEでも
-クラスターのデフォルトはentity単位のまま**（`cluster_col`で上書き可能）。2-way clustering
+クラスターのデフォルトはentity単位のまま**（`cluster`で上書き可能）。2-way clustering
 （entity+time同時）はv1スコープ外。
 
 **Driscoll-Kraay型パネルHAC（`FeCovType::Dk { bandwidth, time }`）**: `linearmodels.panel.
@@ -160,10 +159,10 @@ covariance.DriscollKraay`のソース確認に基づく実装。
    辞書順=時系列順になる形式で渡すことが呼び出し側の契約。`engine`側にこの契約の
    バリデーションは無い）。
 4. **1-way/2-way両対応**。1-way FEで`FeCovType::Dk`を指定したのに時系列順序が一切ない
-   （`time`も`time_col`も未指定）なら`PanelError::DkRequiresTime`。
+   （`time`も`dk_time`も未指定）なら`PanelError::DkRequiresTime`。
 5. スケールは`(n/df_resid) × (X̃'X̃)⁻¹ Ŝ (X̃'X̃)⁻¹`（linearmodelsは`cov_type="kernel"`で常に
    `extra_df=neffects`かつデフォルト`debiased=True`のため、素直に`df_resid`と一致する）。
-6. **`FeCovType::Dk.time`による明示的な上書き**: `time`が`Some`（`FEOptions.time_col`由来）
+6. **`FeCovType::Dk.time`による明示的な上書き**: `time`が`Some`（`FEOptions.dk_time`由来）
    なら`FeInput.time()`より優先してDK計算に使う（`time`未指定の1-way FEでもこれだけでDK HAC
    が成立する）。
 

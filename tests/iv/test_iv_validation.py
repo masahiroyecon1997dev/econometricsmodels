@@ -511,11 +511,11 @@ def test_cluster_without_col_raises(iv_dataset):
         our_fit(iv_dataset, options=options)
 
 
-def test_cluster_col_nonexistent_column_raises(iv_dataset):
-    """`cluster_col`が実在しない列名を指すと`ValidationError`（OLS/WLS/Logit/
+def test_cluster_nonexistent_column_raises(iv_dataset):
+    """`cluster`が実在しない列名を指すと`ValidationError`（OLS/WLS/Logit/
     Probitと同じ理由）。
     """
-    options = IVOptions(cov_type="cluster", cluster_col="does_not_exist")
+    options = IVOptions(cov_type="cluster", cluster="does_not_exist")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
@@ -526,7 +526,7 @@ def test_cluster_col_nonexistent_column_raises(iv_dataset):
 def test_insufficient_clusters_raises(iv_dataset):
     """クラスターが1種類しかない場合`ValidationError`。"""
     df = iv_dataset.with_columns(pl.lit(0).alias("single_cluster"))
-    options = IVOptions(cov_type="cluster", cluster_col="single_cluster")
+    options = IVOptions(cov_type="cluster", cluster="single_cluster")
     with pytest.raises(
         ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
     ):
@@ -558,7 +558,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
     )
     df = iv_dataset.with_columns(cluster)
     options = IVOptions(
-        estimator=estimator, cov_type="cluster", cluster_col="cluster_group"
+        estimator=estimator, cov_type="cluster", cluster="cluster_group"
     )
     with pytest.raises(
         ValidationError,
@@ -737,7 +737,7 @@ def test_scale_variance_raises_computation_error(cov_type):
 
 def test_scale_variance_cluster_raises_computation_error():
     """`cluster`も上記`test_scale_variance_raises_computation_error`と同じ
-    backstopの対象。`cluster`は`cluster_col`が別途必要なため`COV_TYPES`
+    backstopの対象。`cluster`は`cluster`が別途必要なため`COV_TYPES`
     パラメトライズには含められず、専用テストとして確認する
     （OLS`test_ols_validation.py::test_scale_variance_cluster_raises_
     computation_error`・WLS`test_wls_validation.py`の同名テストと同じ理由）。
@@ -753,7 +753,7 @@ def test_scale_variance_cluster_raises_computation_error():
     df = pl.read_csv(DATA_DIR / "iv_scale_variance.csv")
     cluster = pl.Series("cluster_group", [i % 10 for i in range(df.height)])
     df = df.with_columns(cluster)
-    options = IVOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = IVOptions(cov_type="cluster", cluster="cluster_group")
     with pytest.raises(ComputationError):
         IV(
             df,
@@ -784,7 +784,7 @@ def test_gmm_cluster_weight_type_raises_validation_error_when_cluster_count_is_l
     options = IVOptions(
         estimator="gmm",
         gmm_weight_type="cluster",
-        cluster_col="cluster_group",
+        cluster="cluster_group",
         cov_type="classical",
         gmm_type=gmm_type,
     )

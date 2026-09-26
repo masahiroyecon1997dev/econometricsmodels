@@ -97,7 +97,7 @@ def test_cluster_g2_boundary_succeeds_when_x_exog_is_empty():
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_g2.csv")
     df = df.with_columns((pl.int_range(pl.len()) % 2).alias("cluster_group"))
-    options = IVOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = IVOptions(cov_type="cluster", cluster="cluster_group")
     res = IV(
         df,
         y="y",
@@ -259,7 +259,7 @@ def test_wu_hausman_degrades_to_none_when_cluster_count_at_most_augmented_slopes
         "cluster_group", [i % 3 for i in range(iv_dataset.height)]
     )
     df = iv_dataset.with_columns(cluster)
-    options = IVOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = IVOptions(cov_type="cluster", cluster="cluster_group")
     res = our_fit(df, instruments=["z1"], options=options)
 
     assert res.wu_hausman_statistic is None
@@ -279,7 +279,7 @@ def test_cov_type_label(iv_dataset):
 
 
 def test_cluster_cov_type_label(clustered_dataset):
-    options = IVOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = IVOptions(cov_type="cluster", cluster="cluster_group")
     res = our_fit(clustered_dataset, options=options)
     assert res.cov_type == "cluster"
 
@@ -366,10 +366,10 @@ def test_hac_auto_lags_runs_and_returns_finite_std_errors(iv_dataset):
         assert se > 0.0
 
 
-def test_hac_time_col_reorders_rows_before_computing_lags():
-    """`time_col`を指定すると、DataFrameの行順に関わらず時系列順で
+def test_hac_time_reorders_rows_before_computing_lags():
+    """`hac_time`を指定すると、DataFrameの行順に関わらず時系列順で
     ラグ付き自己共分散を計算すること（`test_ols_api.py`の同名テストと同じ発想を
-    IVに適用、engine_pybindの`time_col`列抽出経路をAPI境界から検証する）。
+    IVに適用、engine_pybindの`hac_time`列抽出経路をAPI境界から検証する）。
     """
     ordered_df = pl.DataFrame(
         {
@@ -397,7 +397,7 @@ def test_hac_time_col_reorders_rows_before_computing_lags():
             "time": [float(i) for i in perm],
         }
     )
-    shuffled_options = IVOptions(cov_type="hac", hac_lags=1, time_col="time")
+    shuffled_options = IVOptions(cov_type="hac", hac_lags=1, hac_time="time")
     shuffled_res = IV(
         shuffled_df,
         y="y",
@@ -479,14 +479,12 @@ def test_gmm_weight_type_options_run(
 ):
     """`estimator="gmm"`の`gmm_weight_type`各値が成功パスで動作すること（数値照合は
     `test_iv_gmm_reference.py`）。`cluster`/`hac`は`cov_type`と同じ
-    `cluster_col`/`hac_lags`フィールドを共用する仕様
+    `cluster`/`hac_lags`フィールドを共用する仕様
     （`engine_pybind/src/iv/CLAUDE.md`参照）。
     """
     df = clustered_dataset if gmm_weight_type == "cluster" else iv_dataset
     kwargs = (
-        {"cluster_col": "cluster_group"}
-        if gmm_weight_type == "cluster"
-        else {}
+        {"cluster": "cluster_group"} if gmm_weight_type == "cluster" else {}
     )
     options = IVOptions(
         estimator="gmm", gmm_weight_type=gmm_weight_type, **kwargs
@@ -506,7 +504,7 @@ def test_gmm_cov_type_options_run_independently_of_weight_type(
     ことで確認する。
     """
     df = clustered_dataset if cov_type == "cluster" else iv_dataset
-    kwargs = {"cluster_col": "cluster_group"} if cov_type == "cluster" else {}
+    kwargs = {"cluster": "cluster_group"} if cov_type == "cluster" else {}
     options = IVOptions(estimator="gmm", cov_type=cov_type, **kwargs)
     res = our_fit(df, options=options)
     assert res.cov_type == cov_type
@@ -531,9 +529,7 @@ def test_weight_type_label(iv_dataset, clustered_dataset, gmm_weight_type):
     """
     df = clustered_dataset if gmm_weight_type == "cluster" else iv_dataset
     kwargs = (
-        {"cluster_col": "cluster_group"}
-        if gmm_weight_type == "cluster"
-        else {}
+        {"cluster": "cluster_group"} if gmm_weight_type == "cluster" else {}
     )
     options = IVOptions(
         estimator="gmm", gmm_weight_type=gmm_weight_type, **kwargs
@@ -579,7 +575,7 @@ def test_weight_type_is_case_insensitive(
         else iv_dataset
     )
     kwargs = (
-        {"cluster_col": "cluster_group"}
+        {"cluster": "cluster_group"}
         if gmm_weight_type.lower() == "cluster"
         else {}
     )

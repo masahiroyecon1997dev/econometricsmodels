@@ -461,7 +461,7 @@ def test_invalid_cov_type_raises(dataset, cov_type):
 
 
 def test_cluster_without_col_raises(dataset):
-    """`cov_type="cluster"`なのに`cluster_col`未指定の場合`ValidationError`
+    """`cov_type="cluster"`なのに`cluster`未指定の場合`ValidationError`
     （OLSと同じ検証、共通化された経路）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
@@ -472,12 +472,12 @@ def test_cluster_without_col_raises(dataset):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 
 
-def test_cluster_col_nonexistent_column_raises(dataset):
-    """`cluster_col`が実在しない列名を指すと`ValidationError`
+def test_cluster_nonexistent_column_raises(dataset):
+    """`cluster`が実在しない列名を指すと`ValidationError`
     （`test_ols_validation.py`と同じ理由）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = WLSOptions(cov_type="cluster", cluster_col="does_not_exist")
+    options = WLSOptions(cov_type="cluster", cluster="does_not_exist")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
@@ -492,7 +492,7 @@ def test_insufficient_clusters_raises(dataset):
     df = dataset.with_columns(
         pl.lit(1.0).alias("weight"), pl.lit(0).alias("single_cluster")
     )
-    options = WLSOptions(cov_type="cluster", cluster_col="single_cluster")
+    options = WLSOptions(cov_type="cluster", cluster="single_cluster")
     with pytest.raises(
         ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
     ):
@@ -540,7 +540,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error(n_groups):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, n_groups)
-    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = WLSOptions(cov_type="cluster", cluster="cluster_group")
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -584,7 +584,7 @@ def test_scale_variance_raises_computation_error(cov_type):
 
 def test_scale_variance_cluster_raises_computation_error():
     """`cluster`も上記`test_scale_variance_raises_computation_error`と同じ
-    backstopの対象。`cluster`は`cluster_col`が別途必要なため`COV_TYPES`
+    backstopの対象。`cluster`は`cluster`が別途必要なため`COV_TYPES`
     パラメトライズには含められず、専用テストとして確認する（OLS
     `test_ols_validation.py`の同名テストと同じ理由）。均等な疑似グループ
     （行番号%10、`G=10>q=3`）を使い、クラスター数不足による`ValidationError`
@@ -594,7 +594,7 @@ def test_scale_variance_cluster_raises_computation_error():
     """
     df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
     df = with_cluster_groups(df, 10)
-    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = WLSOptions(cov_type="cluster", cluster="cluster_group")
     with pytest.raises(ComputationError):
         WLS(
             df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options

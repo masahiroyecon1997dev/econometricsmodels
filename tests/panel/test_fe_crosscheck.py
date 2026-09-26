@@ -279,7 +279,7 @@ def test_cluster_imbalanced_matches_fixest(crosscheck):
     df = pl.read_csv(DATA_DIR / "fe_baseline_cluster_imbalanced.csv")
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
-    options = FEOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = FEOptions(cov_type="cluster", cluster="cluster_group")
     res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
     _check_result(
@@ -296,7 +296,7 @@ def test_cluster_g2_matches_fixest(crosscheck):
     df = pl.read_csv(DATA_DIR / "fe_baseline_k1.csv")
     groups = [str(i % 2) for i in range(df.height)]
     df = df.with_columns(pl.Series("cluster_group", groups))
-    options = FEOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = FEOptions(cov_type="cluster", cluster="cluster_group")
     res = FE(df, y="y", x=["x1"], entity="entity", options=options).fit()
 
     _check_result(

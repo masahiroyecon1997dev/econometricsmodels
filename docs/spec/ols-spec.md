@@ -20,9 +20,9 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
   | `cov_type` | `str` | `"classical"` | `"classical"` / `"hc0"`〜`"hc3"` / `"cluster"` / `"hac"`（大小無視） |
   | `include_intercept` | `bool` | `True` | `True`なら設計行列の先頭に定数列を自動追加する |
   | `confidence_level` | `float` | `0.95` | 信頼区間の信頼水準、`(0, 1)` |
-  | `cluster_col` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名（`data`内の列） |
+  | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名（`data`内の列） |
   | `hac_lags` | `int \| None` | `None` | `cov_type="hac"`時のラグ数。`None`なら`L=floor(4*(n/100)^(2/9))`で自動計算 |
-  | `time_col` | `str \| None` | `None` | `cov_type="hac"`時の時系列順序列。`None`なら`data`の行順を使用 |
+  | `hac_time` | `str \| None` | `None` | `cov_type="hac"`時の時系列順序列。`None`なら`data`の行順を使用 |
 
 - `include_intercept=True`のとき`x`に`"const"`列があるとエラー（自動追加する定数項と衝突）。
   `x`に自前の定数列を含める重複検出は行わず、生じる多重共線性は`SingularMatrix`に委ねる。
@@ -91,7 +91,7 @@ $$
 - ラグ数`L`: `hac_lags`指定時はその値（`0 <= L < n`を検証）、未指定時は経験則
   `L = floor(4*(n/100)^(2/9))`で自動計算（EViews等でも使われるデータ非依存の式。完全な
   データ依存の自動バンド幅選択は主リファレンスのstatsmodelsに同等機能がなく未実装）。
-- `time_col`未指定なら`data`の行順を時系列順とみなす。指定時は昇順ソートしたインデックスで
+- `hac_time`未指定なら`data`の行順を時系列順とみなす。指定時は昇順ソートしたインデックスで
   ラグ付き自己共分散を計算する（`OlsInput`自体は並べ替えない。Python側に返す残差配列と
   元DataFrameの行対応を保つため）。
 - **パフォーマンス上の罠**: `k×k`という小さい出力サイズの行列積で、faer既定の並列実行は
@@ -193,7 +193,7 @@ $$
   （`column_extraction::extract_f64_column`）→`engine`（`OlsInput::from_columns`）が
   `faer::Mat`を組み立てる。この2回のコピー自体は許容する（QR分解本体のコストに対して無視できる）。
 - `engine`はpolars/PyO3を知らない。列名が要る検証（`y`/`x`重複、`"const"`衝突、`x`空リスト）は
-  `engine_pybind`側の責務。`confidence_level`範囲・`cluster_col`未指定は`engine`側が検知するため
+  `engine_pybind`側の責務。`confidence_level`範囲・`cluster`未指定は`engine`側が検知するため
   `engine_pybind`側で重複チェックしない。
 - `engine::linear::common::LeastSquaresError` → `PyErr`対応表:
 

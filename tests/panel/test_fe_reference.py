@@ -135,16 +135,16 @@ def _check_result(
 
 @pytest.mark.parametrize("scenario, cov_type", ONE_WAY_CASES)
 def test_matches_linearmodels_one_way(fixtures, scenario, cov_type):
-    """1-way HACは`time_col`（DK専用の時系列順序、`time`＝2-way構造とは独立の
+    """1-way HACは`dk_time`（DK専用の時系列順序、`time`＝2-way構造とは独立の
     フィールド）が必要。フィクスチャ生成側（`linearmodels_ref.py`）は`time`
     列が無い場合エンティティ内の観測順（`groupby(entity).cumcount()`）を
     代用しているが、`benchmark/panel/datasets.py`が生成する行順はエンティ
-    ティ内で時系列順そのものなので、`time_col="time"`を明示するのと数学的
+    ティ内で時系列順そのものなので、`dk_time="time"`を明示するのと数学的
     に同じ結果になる（実測確認済み）。
     """
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
-    kwargs = {"time_col": "time"} if cov_type == "dk" else {}
+    kwargs = {"dk_time": "time"} if cov_type == "dk" else {}
     options = FEOptions(cov_type=cov_type, **kwargs)
     res = FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
 
@@ -184,7 +184,7 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
     df = pl.read_csv(DATA_DIR / "fe_baseline_cluster_imbalanced.csv")
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
-    options = FEOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = FEOptions(cov_type="cluster", cluster="cluster_group")
     res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
     _check_result(
@@ -205,7 +205,7 @@ def test_cluster_g2_matches_linearmodels(fixtures):
     df = pl.read_csv(DATA_DIR / "fe_baseline_k1.csv")
     groups = [str(i % 2) for i in range(df.height)]
     df = df.with_columns(pl.Series("cluster_group", groups))
-    options = FEOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = FEOptions(cov_type="cluster", cluster="cluster_group")
     res = FE(df, y="y", x=["x1"], entity="entity", options=options).fit()
 
     _check_result(

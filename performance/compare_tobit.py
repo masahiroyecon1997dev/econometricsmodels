@@ -150,7 +150,7 @@ def _fit_once_engine(ctx: FitContext):
             lower=lower,
             upper=None,
             cov_type="cluster",
-            cluster_col=ctx.cluster_col,
+            cluster=ctx.cluster_col,
             solver=ctx.method,
         )
     else:

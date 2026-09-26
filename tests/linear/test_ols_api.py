@@ -126,7 +126,7 @@ def test_n_obs_and_dep_var_name(dataset):
 # ── オプションの反映 ──────────────────────────────────────────────
 #
 # cov_type以外のOLSOptionsフィールド（include_intercept・confidence_level・
-# hac_lags=None・time_col）が、engine_pybind側の列抽出・分岐ロジックを経て
+# hac_lags=None・hac_time）が、engine_pybind側の列抽出・分岐ロジックを経て
 # 正しく反映されることを確認する。
 
 
@@ -208,14 +208,14 @@ def test_confidence_level_changes_interval_width(dataset):
         assert narrow_width < wide_width, name
 
 
-def test_hac_time_col_reorders_rows_before_computing_lags():
-    """`time_col`を指定すると、DataFrameの行順に関わらず時系列順で
+def test_hac_time_reorders_rows_before_computing_lags():
+    """`hac_time`を指定すると、DataFrameの行順に関わらず時系列順で
 
     ラグ付き自己共分散を計算すること。データは`engine/src/linear/ols.rs`の
     `fit_computes_hac_std_errors_respecting_time_order`と同一（時系列順で
     x=[1..5], y=[2,4,5,4,5]をtime順=[3,1,5,2,4]にシャッフルして入力し、
-    `time_col`無指定・時系列順の入力と同じ結果になることを確認する）。
-    engine_pybindの`time_col`列抽出（`extract_f64_column`）を
+    `hac_time`無指定・時系列順の入力と同じ結果になることを確認する）。
+    engine_pybindの`hac_time`列抽出（`extract_f64_column`）を
     Python API境界から検証する。
     """
     ordered_df = pl.DataFrame(
@@ -233,7 +233,7 @@ def test_hac_time_col_reorders_rows_before_computing_lags():
             "time": [3.0, 1.0, 5.0, 2.0, 4.0],
         }
     )
-    shuffled_options = OLSOptions(cov_type="hac", hac_lags=1, time_col="time")
+    shuffled_options = OLSOptions(cov_type="hac", hac_lags=1, hac_time="time")
     shuffled_res = OLS(
         shuffled_df, y="y", x=["x1"], options=shuffled_options
     ).fit()
@@ -489,7 +489,7 @@ def test_cluster_std_error_exceeds_classical_under_true_intra_cluster_correlatio
         df,
         y="y",
         x=["x1"],
-        options=OLSOptions(cov_type="cluster", cluster_col="cluster"),
+        options=OLSOptions(cov_type="cluster", cluster="cluster"),
     ).fit()
 
     ratio = cluster.std_errors["x1"] / classical.std_errors["x1"]

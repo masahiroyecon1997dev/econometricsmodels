@@ -48,16 +48,16 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 | `cov_type` | `str` | `"classical"` | `"classical"` / `"hc0"`〜`"hc3"` / `"cluster"` / `"hac"`（大小無視）。`estimator="gmm"`でも`gmm_weight_type`とは独立の軸（最終的な報告用SE計算） |
 | `include_intercept` | `bool` | `True` | `x_exog`側の設計行列にのみ定数列を自動追加する。`x_endog`/`instruments`には自動追加しない |
 | `confidence_level` | `float` | `0.95` | |
-| `cluster_col` | `str \| None` | `None` | `cov_type="cluster"`時（`gmm_weight_type="cluster"`とも共用）のグループキー列名 |
+| `cluster` | `str \| None` | `None` | `cov_type="cluster"`時（`gmm_weight_type="cluster"`とも共用）のグループキー列名 |
 | `hac_lags` | `int \| None` | `None` | `cov_type="hac"`時（`gmm_weight_type="hac"`とも共用）のラグ数。`None`なら自動計算 |
-| `time_col` | `str \| None` | `None` | `cov_type="hac"`時（`gmm_weight_type="hac"`とも共用）の時系列順序列 |
+| `hac_time` | `str \| None` | `None` | `cov_type="hac"`時（`gmm_weight_type="hac"`とも共用）の時系列順序列 |
 | `gmm_weight_type` | `str` | `"classical"` | GMMの点推定に使う重み行列（`estimator="gmm"`のみ）: `"classical"` / `"robust"` / `"cluster"` / `"hac"`（`cov_type`と同じ語彙。旧名`unadjusted`/`kernel`と別名`homoskedastic`/`heteroskedastic`は受け付けない）。`estimator="2sls"`と`gmm_type="one_step"`では無視 |
 | `gmm_type` | `str` | `"two_step"` | GMMの推定方式（`estimator="gmm"`のみ）: `"one_step"`（1段階、重み`(Z'Z)⁻¹`のみ）/ `"two_step"`（2段階の効率的GMM）/ `"iterated"`（収束まで反復）。大文字小文字は区別しない |
 | `gmm_max_iter` | `int \| None` | `None` | `"iterated"`の最大推定回数（初回推定を含む、3以上）。`None`は実効既定値`100`。`"one_step"`/`"two_step"`で指定すると`ValidationError` |
 | `gmm_tol` | `float \| None` | `None` | `"iterated"`の収束許容誤差。`None`は実効既定値`1e-6`。`"one_step"`/`"two_step"`で指定すると`ValidationError` |
 | `raise_on_non_convergence` | `bool` | `True` | `gmm_type="iterated"`で収束しなければ`True`でエラー、`False`で`converged=False`のまま結果を返す。それ以外の`gmm_type`では無視 |
 
-- **`cluster_col`/`hac_lags`/`time_col`は`cov_type`と`gmm_weight_type`（GMM）で共用する**
+- **`cluster`/`hac_lags`/`hac_time`は`cov_type`と`gmm_weight_type`（GMM）で共用する**
   （`IVOptions`に別フィールドを増やさない設計。異なるクラスター変数を使い分けたいニーズが
   出てきたら別フィールド化を検討）。
 - **`gmm_weight_type`（GMMの点推定に使う重み行列）と`cov_type`（最終的な報告用SE計算）を

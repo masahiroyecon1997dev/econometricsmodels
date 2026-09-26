@@ -104,7 +104,7 @@ def _check_result(res, ref: dict, label: str) -> None:
 @pytest.mark.parametrize("scenario", NUMERIC_SCENARIOS)
 def test_matches_linearmodels(fixtures, scenario, cov_type):
     """`dk`は`time`（内部FE呼び出しの1-way/2-way選択とは無関係、`REOptions`
-    には`time_col`が独立に無い。`FEOptions`と違い、REの`REOptions.time`は
+    には`dk_time`が独立に無い。`FEOptions`と違い、REの`REOptions.time`は
     HAC時系列順序と内部FE1-way/2-way選択を兼ねる1フィールドのため、`dk`
     ケースでも常に`time="time"`を渡す。本フィクスチャの数値比較は`REOptions.
     time`の値に依存しない（係数・標準誤差はtimeを使わないため、

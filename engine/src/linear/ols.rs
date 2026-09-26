@@ -54,7 +54,7 @@ pub enum CovType {
         /// クラスターのグループキー。`OlsInput`の行と対応する長さnの配列。
         /// `None`の場合、`OlsEstimator::fit`は`CommonError::MissingClusterColumn`を返す
         /// （`hac_lags: Option<i64>`と同じ設計パターンで、値の妥当性検証を`engine`内で
-        /// 行うため`Option`にしている。`engine_pybind`側で`cluster_col`未指定を
+        /// 行うため`Option`にしている。`engine_pybind`側で`cluster`未指定を
         /// 事前に弾かない）。
         groups: Option<Vec<String>>,
     },
@@ -801,7 +801,7 @@ fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, LeastSquaresEr
 
 /// `CovType::Hac`の`time_order`から、時系列の昇順に並べたときの行インデックス列を求める。
 ///
-/// `None`（`time_col`未指定）の場合は`OlsInput`の行順をそのまま時系列順とみなし、恒等順序
+/// `None`（`hac_time`未指定）の場合は`OlsInput`の行順をそのまま時系列順とみなし、恒等順序
 /// `[0, 1, ..., n-1]`を返す。
 ///
 /// `partial_cmp().unwrap()`について: `time_order`の値はNaN/無限大を含まないことが

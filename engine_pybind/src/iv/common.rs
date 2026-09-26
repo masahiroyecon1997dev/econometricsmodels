@@ -35,10 +35,10 @@
 //! OlsEstimator)>`という`estimator`非依存の表現に置き換えた（`OlsEstimator → OLSResult`
 //! 変換は`linear::ols::ols_estimator_to_result`を再利用、抽出済み）。
 //!
-//! ## GMMの`gmm_weight_type`（`IVOptions.gmm_weight_type`/`cluster_col`/`hac_lags`/`time_col`）
+//! ## GMMの`gmm_weight_type`（`IVOptions.gmm_weight_type`/`cluster`/`hac_lags`/`hac_time`）
 //!
 //! `gmm_weight_type`は`cov_type`とは独立の軸（点推定に使う重み行列の選択、`engine::iv::gmm`の
-//! モジュールdocコメント参照）だが、`cluster_col`/`hac_lags`/`time_col`は`cov_type`と
+//! モジュールdocコメント参照）だが、`cluster`/`hac_lags`/`hac_time`は`cov_type`と
 //! 共用する（`IVOptions`に別フィールドを増やさない設計、`parse_weight_type`参照）。
 //! `gmm_weight_type="cluster"`かつ`cov_type="cluster"`のように両軸が同じクラスター列を
 //! 参照する使い方を主に想定するが、`gmm_weight_type`と`cov_type`が異なる場合でも同じ列を
@@ -152,7 +152,7 @@ pub struct IVOptions {
     /// Column name to use as the cluster group key when `cov_type="cluster"`.
     /// Ignored when `cov_type` is not "cluster".
     #[pyo3(get, set)]
-    pub cluster_col: Option<String>,
+    pub cluster: Option<String>,
 
     /// Number of lags (bandwidth) for HAC (Newey-West) when `cov_type="hac"`.
     /// When `None`, computed automatically. Ignored when `cov_type` is not "hac".
@@ -162,13 +162,13 @@ pub struct IVOptions {
     /// Column name giving the time order for HAC when `cov_type="hac"`.
     /// Ignored when `cov_type` is not "hac".
     #[pyo3(get, set)]
-    pub time_col: Option<String>,
+    pub hac_time: Option<String>,
 
     /// Weight matrix used for GMM point estimation (`estimator="gmm"` only): one of
     /// "classical" (homoskedastic), "robust" (heteroskedasticity-robust), "cluster", "hac"
     /// (Newey-West). Same vocabulary as `cov_type`. Case-insensitive. Ignored when
     /// `estimator="2sls"` or `gmm_type="one_step"`. "cluster"/"hac" draw from the same
-    /// `cluster_col`/`hac_lags`/`time_col` fields as `cov_type` (no separate fields; see
+    /// `cluster`/`hac_lags`/`hac_time` fields as `cov_type` (no separate fields; see
     /// module docstring "GMMのgmm_weight_type").
     #[pyo3(get, set)]
     pub gmm_weight_type: String,
@@ -210,9 +210,9 @@ impl IVOptions {
         cov_type = "classical".to_string(),
         include_intercept = true,
         confidence_level = 0.95,
-        cluster_col = None,
+        cluster = None,
         hac_lags = None,
-        time_col = None,
+        hac_time = None,
         gmm_weight_type = "classical".to_string(),
         gmm_type = "two_step".to_string(),
         gmm_max_iter = None,
@@ -225,9 +225,9 @@ impl IVOptions {
         cov_type: String,
         include_intercept: bool,
         confidence_level: f64,
-        cluster_col: Option<String>,
+        cluster: Option<String>,
         hac_lags: Option<i64>,
-        time_col: Option<String>,
+        hac_time: Option<String>,
         gmm_weight_type: String,
         gmm_type: String,
         gmm_max_iter: Option<i64>,
@@ -239,9 +239,9 @@ impl IVOptions {
             cov_type,
             include_intercept,
             confidence_level,
-            cluster_col,
+            cluster,
             hac_lags,
-            time_col,
+            hac_time,
             gmm_weight_type,
             gmm_type,
             gmm_max_iter,
@@ -253,16 +253,16 @@ impl IVOptions {
     fn __repr__(&self) -> String {
         format!(
             "IVOptions(estimator={:?}, cov_type={:?}, include_intercept={}, \
-             confidence_level={}, cluster_col={:?}, hac_lags={:?}, time_col={:?}, \
+             confidence_level={}, cluster={:?}, hac_lags={:?}, hac_time={:?}, \
              gmm_weight_type={:?}, gmm_type={:?}, gmm_max_iter={:?}, gmm_tol={:?}, \
              raise_on_non_convergence={})",
             self.estimator,
             self.cov_type,
             self.include_intercept,
             self.confidence_level,
-            self.cluster_col,
+            self.cluster,
             self.hac_lags,
-            self.time_col,
+            self.hac_time,
             self.gmm_weight_type,
             self.gmm_type,
             self.gmm_max_iter,
@@ -450,12 +450,12 @@ impl IVResult {
     }
 }
 
-/// `IVOptions.gmm_weight_type`をパースし、該当するgmm_weight_typeのときのみ`cluster_col`/
-/// `hac_lags`/`time_col`を抽出したうえで`engine::iv::gmm::WeightType`を組み立てる
+/// `IVOptions.gmm_weight_type`をパースし、該当するgmm_weight_typeのときのみ`cluster`/
+/// `hac_lags`/`hac_time`を抽出したうえで`engine::iv::gmm::WeightType`を組み立てる
 /// （`estimator="gmm"`のみで使用、`cov_type`側の同種の関数は`linear::common::parse_cov_type`
 /// を共有しているのに対し、こちらは`WeightType`が`CovType`と異なる型のため独立実装）。
 ///
-/// `cluster_col`/`hac_lags`/`time_col`は`cov_type`と共用する（モジュールdocコメント
+/// `cluster`/`hac_lags`/`hac_time`は`cov_type`と共用する（モジュールdocコメント
 /// 「GMMのgmm_weight_type」参照、`IVOptions`に別フィールドを増やさない設計）。
 ///
 /// 戻り値に正規化済み小文字文字列を含めるのは`linear::common::parse_cov_type`と同じ理由
@@ -473,7 +473,7 @@ fn parse_weight_type(df: &DataFrame, options: &IVOptions) -> PyResult<(WeightTyp
         "robust" => WeightType::Robust,
         "cluster" => {
             let groups = options
-                .cluster_col
+                .cluster
                 .as_ref()
                 .map(|col_name| extract_group_key_column(df, col_name))
                 .transpose()?;
@@ -481,7 +481,7 @@ fn parse_weight_type(df: &DataFrame, options: &IVOptions) -> PyResult<(WeightTyp
         }
         "hac" => {
             let time_order = options
-                .time_col
+                .hac_time
                 .as_ref()
                 .map(|col_name| extract_f64_column(df, col_name))
                 .transpose()?;
@@ -667,9 +667,9 @@ pub(crate) fn build_iv_input(
     let (cov_type, cov_type_lower) = parse_cov_type(
         df,
         &options.cov_type,
-        options.cluster_col.as_deref(),
+        options.cluster.as_deref(),
         options.hac_lags,
-        options.time_col.as_deref(),
+        options.hac_time.as_deref(),
     )?;
 
     let input = IvInput::from_columns(
@@ -1189,7 +1189,7 @@ mod tests {
         .unwrap();
         let mut options = default_options();
         options.cov_type = "cluster".to_string();
-        options.cluster_col = Some("group".to_string());
+        options.cluster = Some("group".to_string());
 
         let (_, cov_type, ..) = build_iv_input(
             &df,
@@ -1225,7 +1225,7 @@ mod tests {
         .unwrap();
         let mut options = default_options();
         options.cov_type = "hac".to_string();
-        options.time_col = Some("t".to_string());
+        options.hac_time = Some("t".to_string());
         options.hac_lags = Some(1);
 
         let (_, cov_type, ..) = build_iv_input(

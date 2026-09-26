@@ -674,7 +674,7 @@ pub enum ReCovType {
     /// Hc2よりさらに保守的なレバレッジ補正。参照実装は`plm`（Hc2と同じ理由）。
     Hc3,
     /// クラスターロバスト。`groups`が`None`なら`entity`引数の列を自動的に使う
-    /// （3.2節、`cluster_col`省略時のデフォルト挙動）。
+    /// （3.2節、`cluster`省略時のデフォルト挙動）。
     Cluster { groups: Option<Vec<String>> },
     /// Driscoll-Kraay型パネルHAC（3.1節）。`bandwidth`が`None`なら
     /// `floor(4*(t/100)^(2/9))`（`t`はユニークな時点数）で自動計算する。時系列順序は
@@ -1894,7 +1894,7 @@ mod tests {
     #[test]
     fn re_estimator_fit_cluster_supports_explicit_groups_column() {
         // `groups`に`entity`以外の任意の列を明示指定できることを確認する
-        // （3.2節「`cluster_col`を明示指定すれば任意の列でもクラスター可能」）。
+        // （3.2節「`cluster`を明示指定すれば任意の列でもクラスター可能」）。
         // ここでは`entity`をそのまま複製した列を明示的に渡し、`groups: None`
         // （`re_estimator_fit_cluster_defaults_to_entity_and_matches_linearmodels_
         // reference`）と同じ結果になることを確認する。

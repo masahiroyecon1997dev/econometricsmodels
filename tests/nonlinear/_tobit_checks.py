@@ -80,7 +80,7 @@ def build_fit(scenario: str, cov_key: str, ref: dict):
         groups = _CLUSTER_GROUP_BUILDERS[cov_key](df.height)
         df = df.with_columns(pl.Series("cluster_group", groups))
         opts["cov_type"] = "cluster"
-        opts["cluster_col"] = "cluster_group"
+        opts["cluster"] = "cluster_group"
     else:
         opts["cov_type"] = cov_key
 

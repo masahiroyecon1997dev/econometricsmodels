@@ -4,7 +4,7 @@
 
 ## Standard error types
 
-`ProbitOptions.cov_type` supports `"classical"` (observed-information / Hessian-based), `"opg"` (outer product of gradients), `"hc0"`, `"hc1"`, and `"cluster"` (requires `cluster_col`). As with [Logit](logit.md#standard-error-types), HC2/HC3 and HAC are not available.
+`ProbitOptions.cov_type` supports `"classical"` (observed-information / Hessian-based), `"opg"` (outer product of gradients), `"hc0"`, `"hc1"`, and `"cluster"` (requires `cluster`). As with [Logit](logit.md#standard-error-types), HC2/HC3 and HAC are not available.
 
 ## Solver options
 

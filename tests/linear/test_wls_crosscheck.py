@@ -151,7 +151,7 @@ def test_cluster_matches_r(crosscheck):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, 10)
-    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = WLSOptions(cov_type="cluster", cluster="cluster_group")
     res = WLS(
         df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
     ).fit()
@@ -172,7 +172,7 @@ def test_cluster_imbalanced_matches_r(crosscheck):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
-    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = WLSOptions(cov_type="cluster", cluster="cluster_group")
     res = WLS(
         df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
     ).fit()
@@ -194,7 +194,7 @@ def test_cluster_g2_matches_r(crosscheck):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
     df = with_cluster_groups(df, 2)
-    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = WLSOptions(cov_type="cluster", cluster="cluster_group")
     res = WLS(df, y="y", x=["x1"], weight="weight", options=options).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["cluster_g2"]["r"]
@@ -217,7 +217,7 @@ def test_cluster_ill_conditioned_matches_r(crosscheck, scenario):
     """
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     df = with_cluster_groups(df, 10)
-    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = WLSOptions(cov_type="cluster", cluster="cluster_group")
     res = WLS(
         df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
     ).fit()
@@ -282,11 +282,11 @@ NO_INTERCEPT_AND_CONFIDENCE_LEVEL_STRICT_COV_TYPES = [
 
 def _options_kwargs_for_cov_type(df: pl.DataFrame, cov_type: str):
     """`cov_type="cluster"`のときのみ疑似グループ列を付け、
-    `cluster_col`を返す。それ以外は`cluster_col=None`。
+    `cluster`を返す。それ以外は`cluster=None`。
     """
     if cov_type == "cluster":
-        return with_cluster_groups(df, 10), {"cluster_col": "cluster_group"}
-    return df, {"cluster_col": None}
+        return with_cluster_groups(df, 10), {"cluster": "cluster_group"}
+    return df, {"cluster": None}
 
 
 @pytest.mark.parametrize(
@@ -419,7 +419,7 @@ def test_401ksubs_cluster_matches_r(crosscheck):
     df = load_wooldridge_dataset("401ksubs").filter(pl.col("fsize") == 1)
     df = df.with_columns((1.0 / pl.col("inc")).alias("inv_inc"))
     df = _add_age_bin(df)
-    options = WLSOptions(cov_type="cluster", cluster_col="age_bin")
+    options = WLSOptions(cov_type="cluster", cluster="age_bin")
 
     res = WLS(
         df,

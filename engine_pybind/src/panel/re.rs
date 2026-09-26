@@ -28,9 +28,9 @@
 //! `fixed_effects()`段階（`fixed_effects()`メソッド）に相当する3段目は存在しない。
 //! 本対応でこの系統の実装は完結する。
 //!
-//! ## `REOptions`に`time_col`が無い理由（`FEOptions`との相違点）
+//! ## `REOptions`に`dk_time`が無い理由（`FEOptions`との相違点）
 //!
-//! `FEOptions`は`time`（2-way FE構造の指定）と`time_col`（Driscoll-Kraay HAC専用の
+//! `FEOptions`は`time`（2-way FE構造の指定）と`dk_time`（Driscoll-Kraay HAC専用の
 //! 時系列順序、`time`とは独立に指定できる）を分離しているが、`REOptions`にはこの分離が
 //! 無く`time`のみを持つ。理由: `engine::panel::re::ReCovType::Dk`は`FeCovType::Dk`と
 //! 異なり`time`オーバーライドフィールドを持たない（`engine::panel::re`モジュールdoc・
@@ -95,7 +95,7 @@ pub struct REOptions {
     /// docstring): the Driscoll-Kraay HAC time ordering when `cov_type="dk"`, and the
     /// one-way/two-way choice for the internal FE regression used by the Hausman test
     /// (`Some` requests two-way FE, `None` one-way). Unlike `FEOptions`, RE has no
-    /// separate `time_col` field, since it never needs to decouple these two uses.
+    /// separate `dk_time` field, since it never needs to decouple these two uses.
     #[pyo3(get, set)]
     pub time: Option<String>,
 
@@ -103,7 +103,7 @@ pub struct REOptions {
     /// `None`, the `entity` argument's column is used automatically. Ignored when
     /// `cov_type` is not "cluster".
     #[pyo3(get, set)]
-    pub cluster_col: Option<String>,
+    pub cluster: Option<String>,
 
     /// Bandwidth for Driscoll-Kraay HAC when `cov_type="dk"`. When `None`, computed
     /// automatically via `floor(4*(t/100)^(2/9))` (`t` = number of unique time periods).
@@ -119,30 +119,30 @@ impl REOptions {
         cov_type = "cluster".to_string(),
         confidence_level = 0.95,
         time = None,
-        cluster_col = None,
+        cluster = None,
         dk_bandwidth = None,
     ))]
     fn new(
         cov_type: String,
         confidence_level: f64,
         time: Option<String>,
-        cluster_col: Option<String>,
+        cluster: Option<String>,
         dk_bandwidth: Option<i64>,
     ) -> Self {
         Self {
             cov_type,
             confidence_level,
             time,
-            cluster_col,
+            cluster,
             dk_bandwidth,
         }
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "REOptions(cov_type={:?}, confidence_level={}, time={:?}, cluster_col={:?}, \
+            "REOptions(cov_type={:?}, confidence_level={}, time={:?}, cluster={:?}, \
              dk_bandwidth={:?})",
-            self.cov_type, self.confidence_level, self.time, self.cluster_col, self.dk_bandwidth
+            self.cov_type, self.confidence_level, self.time, self.cluster, self.dk_bandwidth
         )
     }
 }
@@ -242,18 +242,18 @@ pub struct REResult {
     pub hausman_df: Option<usize>,
 }
 
-/// `REOptions.cov_type`をパースし、該当する`cov_type`のときのみ`cluster_col`を抽出した
+/// `REOptions.cov_type`をパースし、該当する`cov_type`のときのみ`cluster`を抽出した
 /// うえで`engine::panel::re::ReCovType`を組み立てる。
 ///
 /// `ReCovType::Dk`は`FeCovType::Dk`と異なり`time`オーバーライドフィールドを持たない
-/// （モジュールdoc「`REOptions`に`time_col`が無い理由」参照）ため、`cov_type="dk"`の
+/// （モジュールdoc「`REOptions`に`dk_time`が無い理由」参照）ため、`cov_type="dk"`の
 /// 分岐でも追加の列抽出は不要——HAC計算は`ReEstimator::fit`内部で`ReInput::time()`を
 /// 直接使う。
 ///
 /// # Errors
 /// `cov_type`の文字列が既知の値のいずれでもない場合は`ValidationError`（`hc0`は非対応の
 /// 専用メッセージ、それ以外の未知の値は一般的な「unknown cov_type」メッセージ）。それ以外
-/// （`cluster_col`列の抽出時に発覚する問題等）は`column_extraction`の責務で`ValidationError`。
+/// （`cluster`列の抽出時に発覚する問題等）は`column_extraction`の責務で`ValidationError`。
 fn parse_re_cov_type(df: &DataFrame, options: &REOptions) -> PyResult<(ReCovType, String)> {
     let cov_type_lower = options.cov_type.to_lowercase();
 
@@ -264,7 +264,7 @@ fn parse_re_cov_type(df: &DataFrame, options: &REOptions) -> PyResult<(ReCovType
         "hc3" => ReCovType::Hc3,
         "cluster" => {
             let groups = options
-                .cluster_col
+                .cluster
                 .as_ref()
                 .map(|col_name| extract_group_key_column(df, col_name))
                 .transpose()?;
@@ -472,7 +472,7 @@ mod tests {
         assert_eq!(
             cov_type,
             ReCovType::Cluster { groups: None },
-            "cluster_col未指定時はNone（engine側でentity列にフォールバック）"
+            "cluster未指定時はNone（engine側でentity列にフォールバック）"
         );
         assert_eq!(cov_type_lower, "cluster");
     }
@@ -604,7 +604,7 @@ mod tests {
     }
 
     #[test]
-    fn build_re_input_extracts_cluster_groups_when_cov_type_is_cluster_and_cluster_col_set() {
+    fn build_re_input_extracts_cluster_groups_when_cov_type_is_cluster_and_cluster_set() {
         let df = df!(
             "y" => [1.0, 2.0, 3.0, 4.0],
             "x1" => [2.0, 4.0, 1.0, 5.0],
@@ -613,7 +613,7 @@ mod tests {
         )
         .unwrap();
         let mut options = default_options();
-        options.cluster_col = Some("state".to_string());
+        options.cluster = Some("state".to_string());
 
         let (_, cov_type, _) = build_re_input(
             &df,
@@ -640,7 +640,7 @@ mod tests {
     #[test]
     fn build_re_input_hac_uses_dk_bandwidth_and_no_time_override() {
         // `ReCovType::Dk`は`FeCovType::Dk`と異なり`time`オーバーライドを持たない
-        // （モジュールdoc「`REOptions`に`time_col`が無い理由」参照）。
+        // （モジュールdoc「`REOptions`に`dk_time`が無い理由」参照）。
         let df = well_formed_df();
         let mut options = default_options();
         options.cov_type = "dk".to_string();

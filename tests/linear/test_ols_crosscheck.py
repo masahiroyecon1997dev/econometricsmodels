@@ -216,7 +216,7 @@ def test_cluster_matches_r(crosscheck):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, 10)
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = OLSOptions(cov_type="cluster", cluster="cluster_group")
     res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["cluster"]["r"]
@@ -234,7 +234,7 @@ def test_cluster_imbalanced_matches_r(crosscheck):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = OLSOptions(cov_type="cluster", cluster="cluster_group")
     res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["cluster_imbalanced"]["r"]
@@ -254,7 +254,7 @@ def test_cluster_g2_matches_r(crosscheck):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
     df = with_cluster_groups(df, 2)
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = OLSOptions(cov_type="cluster", cluster="cluster_group")
     res = OLS(df, y="y", x=["x1"], options=options).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["cluster_g2"]["r"]
@@ -276,7 +276,7 @@ def test_cluster_ill_conditioned_matches_r(crosscheck, scenario):
     """
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     df = with_cluster_groups(df, 10)
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = OLSOptions(cov_type="cluster", cluster="cluster_group")
     res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
     ref = crosscheck["synthetic"][scenario]["cluster"]["r"]
@@ -317,11 +317,11 @@ NO_INTERCEPT_AND_CONFIDENCE_LEVEL_STRICT_COV_TYPES = [
 
 def _options_kwargs_for_cov_type(df: pl.DataFrame, cov_type: str):
     """`cov_type="cluster"`のときのみ疑似グループ列を付け、
-    `cluster_col`を返す。それ以外は`cluster_col=None`。
+    `cluster`を返す。それ以外は`cluster=None`。
     """
     if cov_type == "cluster":
-        return with_cluster_groups(df, 10), {"cluster_col": "cluster_group"}
-    return df, {"cluster_col": None}
+        return with_cluster_groups(df, 10), {"cluster": "cluster_group"}
+    return df, {"cluster": None}
 
 
 @pytest.mark.parametrize(
@@ -461,7 +461,7 @@ def test_wooldridge_wage1_region_cluster_matches_r(
         .alias("region")
     )
     df = df.with_columns(region)
-    options = OLSOptions(cov_type="cluster", cluster_col="region")
+    options = OLSOptions(cov_type="cluster", cluster="region")
     res = OLS(
         df, y="lwage", x=["educ", "exper", "tenure"], options=options
     ).fit()

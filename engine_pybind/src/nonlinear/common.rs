@@ -77,9 +77,9 @@ pub struct MarginalEffectsResult {
 }
 
 /// `cov_type`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::CovType`に
-/// パースする。`cov_type="cluster"`のときのみ`cluster_col`で指定された列を
+/// パースする。`cov_type="cluster"`のときのみ`cluster`で指定された列を
 /// `extract_group_key_column`で抽出する（他のcov_typeでは無視する、OLSの
-/// `cluster_col`/`time_col`の扱いと同じ方針）。
+/// `cluster`/`hac_time`の扱いと同じ方針）。
 ///
 /// Logit/Probit/Tobit共通（元は`logit.rs`/`probit.rs`/`tobit.rs`に
 /// バイト単位で完全一致するコードとして独立複製されていたが、`CovType`自体が
@@ -88,12 +88,12 @@ pub struct MarginalEffectsResult {
 /// # Errors
 /// - `cov_type`が既知の値のいずれでもない: `ValidationError`
 ///
-/// `cluster_col`未指定自体はここでは`ValidationError`にせず、`groups=None`のまま
+/// `cluster`未指定自体はここでは`ValidationError`にせず、`groups=None`のまま
 /// `engine`側の`CommonError::MissingClusterColumn`検証に委ねる（OLSの`fit()`と同じ役割分担）。
 pub(crate) fn parse_cov_type(
     df: &DataFrame,
     cov_type_lower: &str,
-    cluster_col: &Option<String>,
+    cluster: &Option<String>,
 ) -> PyResult<CovType> {
     match cov_type_lower {
         "classical" | "nonrobust" => Ok(CovType::Classical),
@@ -101,7 +101,7 @@ pub(crate) fn parse_cov_type(
         "hc0" => Ok(CovType::Hc0),
         "hc1" => Ok(CovType::Hc1),
         "cluster" => {
-            let groups = cluster_col
+            let groups = cluster
                 .as_ref()
                 .map(|col_name| extract_group_key_column(df, col_name))
                 .transpose()?;

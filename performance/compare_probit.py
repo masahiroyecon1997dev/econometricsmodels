@@ -110,7 +110,7 @@ def _fit_once_engine(ctx: FitContext):
     elif ctx.cov_type == "cluster":
         options = ProbitOptions(
             cov_type="cluster",
-            cluster_col=ctx.cluster_col,
+            cluster=ctx.cluster_col,
             solver=ctx.method,
         )
     else:

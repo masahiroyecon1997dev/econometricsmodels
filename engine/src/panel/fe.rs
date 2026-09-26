@@ -232,7 +232,7 @@
 //!      （linearmodelsの`_determine_df_adjustment`と数値一致を確認済み）:
 //!      - **1-way FEで、クラスター変数がentityと同じか、entityを包含するより粗い
 //!        分割**（`entity_nested_within_cluster`参照。各entityが単一のクラスターに
-//!        属する、が正確な条件）の場合は`extra_df=0`（追加補正なし、`cluster_col`
+//!        属する、が正確な条件）の場合は`extra_df=0`（追加補正なし、`cluster`
 //!        省略時のデフォルト——entityそのものを使う——は常にこの条件を満たす）。
 //!      - **それ以外**（1-way FEでentityと無関係なクラスター変数、または2-way FE）
 //!        は`extra_df=neffects`（他のcov_typeと同じ、常に自由度調整を適用）。
@@ -246,7 +246,7 @@
 //!
 //! `cov_type`のデフォルト（`"cluster"`、entity単位、3.2節）は`engine_pybind`層
 //! （`FEOptions`）の責務。`FeEstimator::fit`自体はデフォルトを
-//! 持たず、呼び出し側が`FeCovType`を明示的に渡す（`cluster_col`省略時のentity自動
+//! 持たず、呼び出し側が`FeCovType`を明示的に渡す（`cluster`省略時のentity自動
 //! 使用——`FeCovType::Cluster { groups: None }`——のみこのモジュールの責務）。
 //!
 //! ## Driscoll-Kraay型パネルHAC対応（`FeCovType::Dk`、3.1節）
@@ -543,7 +543,7 @@ pub enum FeCovType {
     /// Hc2よりさらに保守的なレバレッジ補正。
     Hc3,
     /// クラスターロバスト。`groups`が`None`なら`entity`引数の列を自動的に使う
-    /// （3.2節、`cluster_col`省略時のデフォルト挙動）。
+    /// （3.2節、`cluster`省略時のデフォルト挙動）。
     Cluster { groups: Option<Vec<String>> },
     /// Driscoll-Kraay型パネルHAC（3.1節）。`bandwidth`が`None`なら
     /// `floor(4*(t/100)^(2/9))`（`t`はユニークな時点数）で自動計算する（モジュールdoc
@@ -551,7 +551,7 @@ pub enum FeCovType {
     ///
     /// `time`: `Some`なら、DK計算の時系列順序として`input.time()`より
     /// 優先してこちらを使う（2-way FEでも、`input.time()`とは別の時間粒度でDKカーネルを
-    /// 適用したいケースに対応、ユーザー承認済み・`engine_pybind`の`FEOptions.time_col`が
+    /// 適用したいケースに対応、ユーザー承認済み・`engine_pybind`の`FEOptions.dk_time`が
     /// この経路に配線される想定）。`None`なら従来通り`input.time()`にフォールバックし、
     /// それも`None`なら`PanelError::DkRequiresTime`（1-way FEで`time`列を一切指定しない
     /// 場合）。
@@ -778,7 +778,7 @@ impl FeEstimator {
                 bandwidth,
                 time: hac_time,
             } => {
-                // `hac_time`（`FEOptions.time_col`経由の明示指定）があれば`input.time()`
+                // `hac_time`（`FEOptions.dk_time`経由の明示指定）があれば`input.time()`
                 // より優先する（モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
                 let time: &[String] = match hac_time {
                     Some(t) => t,
@@ -3015,7 +3015,7 @@ mod tests {
     #[test]
     fn fe_estimator_fit_one_way_hac_uses_explicit_time_override_without_fe_input_time() {
         // `FeCovType::Dk.time`（明示指定）は`FeInput.time()`を経由せずに
-        // DK HACを成立させられる（`engine_pybind`の`FEOptions.time_col`が1-way FE + DK HAC
+        // DK HACを成立させられる（`engine_pybind`の`FEOptions.dk_time`が1-way FE + DK HAC
         // の組み合わせをこの経路で配線する想定）。`FeInput::from_columns`には`time=None`を
         // 渡し、`fe_estimator_fit_one_way_hac_matches_linearmodels_default_bandwidth`と
         // 同じ結果になることを確認する（同じ`time`列を使っているため数値は完全一致する）。

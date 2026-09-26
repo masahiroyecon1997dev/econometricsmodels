@@ -75,5 +75,5 @@ uv run python -m performance.render_performance_summary \
 ## 今後の検討事項
 
 - **n=1,000,000でのlinearmodels classical/hacの逆転現象の原因調査**: 上記「考察」参照。`linearmodels`側の内部実装（`HomoskedasticCovariance` vs `DriscollKraay`）の違いを深掘りする価値があるが、engine側の性能には影響しないため優先度は低い。
-- **ハウスマン内部FE構造変化の交絡を除いた計測**: `REOptions.time`を分離できるAPI変更（`FEOptions.time_col`のような独立フィールド）が将来入れば、cov_type単体の計測に切り替えられる。現状のAPI設計を変更する動機としては優先度が低い。
+- **ハウスマン内部FE構造変化の交絡を除いた計測**: `REOptions.time`を分離できるAPI変更（`FEOptions.hac_time`のような独立フィールド）が将来入れば、cov_type単体の計測に切り替えられる。現状のAPI設計を変更する動機としては優先度が低い。
 - **releaseビルドでの再計測が前提**: 改善見込みの見積もりは、debugビルドの数値（誤り）ではなく本ドキュメントのreleaseビルド数値を基準にすること。

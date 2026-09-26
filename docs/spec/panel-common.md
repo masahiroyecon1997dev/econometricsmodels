@@ -16,28 +16,25 @@ Swamy-Arora分散成分推定の具体式、固定効果の復元等）は[`fe-s
 - `time`（時点ID列名）は必須ではないため`Options`内に置く（`FEOptions.time` /
   `REOptions.time`、`str | None`、デフォルト`None`）。
   - FEの2-way（entity + time FE）を指定する場合は`time`が実質的に必須になるが、これは
-    `OLSOptions.cluster_col`が`cov_type="cluster"`のときのみ必須になるのと同じ「条件付き必須」
+    `OLSOptions.cluster`が`cov_type="cluster"`のときのみ必須になるのと同じ「条件付き必須」
     パターンであり、`Options`に置くという判断自体は変えない。未指定時のバリデーションエラーで
     担保する。
-  - **`FEOptions.time`と`FEOptions.time_col`は別物**: `time`は2-way FE（固定効果構造）を
+  - **`FEOptions.time`と`FEOptions.dk_time`は別物**: `time`は2-way FE（固定効果構造）を
     指定するbareフィールドで、`Some`なら常に2-way・`None`なら1-way。Driscoll-Kraay型HAC
-    （`cov_type="dk"`）専用の時系列順序は別フィールド`time_col`（`str | None`、
-    `OLSOptions.cluster_col`/`time_col`と同じ「補助列」命名規則）で指定する。1-way FE +
+    （`cov_type="dk"`）専用の時系列順序は別フィールド`dk_time`（`str | None`、
+    `cov_type`の値`"dk"`を接頭辞にした命名）で指定する。1-way FE +
     DK HAC（`time`未指定だが時系列順序だけ要る）という組み合わせを表現するために導入した
     ——`time`の有無だけで1-way/2-wayを決める設計（ブールフラグ等の追加無し）にすると、
     時系列順序と2-way構造を1つの`time`フィールドに詰め込めなくなるため分離が必要になった。
-    **`time_col`は2-way（`time`指定あり）でも常に優先される**——「2-way FEの固定効果構造に
+    **`dk_time`は2-way（`time`指定あり）でも常に優先される**——「2-way FEの固定効果構造に
     使う時点粒度」と「DK HACカーネルに使う時系列粒度」が異なるケースにも対応するための設計。
-    `time_col`未指定なら`time`（2-way）にフォールバックし、どちらも`None`なら（1-way FEで
+    `dk_time`未指定なら`time`（2-way）にフォールバックし、どちらも`None`なら（1-way FEで
     `cov_type="dk"`のとき）`PanelError::DkRequiresTime`。engine側は`FeCovType::Dk {
     bandwidth, time: Option<Vec<String>> }`（`time`が優先の上書き値）として実装
     （`engine/src/panel/fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
-- **命名規則**: `entity`/`time`は**bareネーミング**（`_col`サフィックスなし）を採用する。
-  `y`/`x`/`weight`（WLS、`engine_pybind/src/linear/wls.rs`）と同じく、モデルを構成する中核的な
-  変数という位置づけのため。既存`OLSOptions.cluster_col`/`time_col`
-  （`engine_pybind/src/linear/ols.rs:58-74`）は「診断・ロバストSE計算のための補助列」という
-  別の位置づけであり`_col`サフィックスを持つが、これを遡って改名することはしない
-  （新規追加分から新しい命名規則を適用する）。
+- **命名規則**: 列名を受け取る引数は`entity`/`time`/`cluster`/`dk_time`のいずれも**`_col`サフィックスを
+  付けない**（`y`/`x`/`weight`と同じ規約）。`dk_time`はDriscoll-Kraay型HACの時系列順序で、
+  `cov_type`の値`"dk"`を接頭辞にした名前（OLS/WLS/IVの`hac_time`と対応）。
 - FE/RE間で`entity`/`time`の命名は統一する。IV側の対応する引数は性質が異なるため
   [`iv-spec.md`](./iv-spec.md)を参照。
 
@@ -116,7 +113,7 @@ OLS（`OLSResult`、`engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
 存在しないため、`FeCovType` enumは`Hc1`/`Hc2`/`Hc3`のみを持つ。詳細・数式は
 `engine/src/panel/fe.rs`モジュールdoc「`cov_type`対応」参照）。以下`hc0`を除く
 `classical`/`hc1`〜`hc3`/`cluster`/`dk`が実装対象。ただし**`dk`はOLSの`hac`の実装を
-そのまま流用しない**。OLSの`hac`はグローバルな時系列順序（`time_col`）に対する単純な
+そのまま流用しない**。OLSの`hac`はグローバルな時系列順序（`dk_time`）に対する単純な
 Newey-West型HACだが、これをパネルにそのまま適用すると異なるエンティティの観測を単一の
 時系列カーネルに混ぜてしまい、経済学的に不正確になる。パネル用に**Driscoll-Kraay型の
 パネルHAC**（fixestの`vcov="DK"`、Stataの`xtscc`相当。時間方向にクロスセクション平均を
@@ -133,9 +130,9 @@ Newey-West型HACだが、これをパネルにそのまま適用すると異な�
     標準誤差を過小評価するリスクが高い（Cameron & Miller 2015）。
   - FE/REは`entity`が必須引数（1章）のため、OLSと違いクラスター対象列が常に確実に
     存在し、デフォルト化の実装上の障害がない。
-- `cov_type="cluster"`時、`cluster_col`省略なら`entity`引数の列を自動的にクラスターキーとして
-  使う。`cluster_col`を明示指定すれば任意の列（例: `entity`より粗い粒度の`state`等）でも
-  クラスター可能（OLSの`cluster_col`と同じ任意指定パターン）。
+- `cov_type="cluster"`時、`cluster`省略なら`entity`引数の列を自動的にクラスターキーとして
+  使う。`cluster`を明示指定すれば任意の列（例: `entity`より粗い粒度の`state`等）でも
+  クラスター可能（OLSの`cluster`と同じ任意指定パターン）。
 - **2-way clustering（entity+time同時）はv1スコープ外**。2-way FEのスコープ（2-way FEでも
   クラスターのデフォルトはentity単位のまま維持する。詳細は[`fe-spec.md`](./fe-spec.md)参照）と
   合わせて別途検討する。
@@ -166,7 +163,7 @@ Newey-West型HACだが、これをパネルにそのまま適用すると異な�
    `marginal_effects_from_w_s`（限界効果のSE/z値/CI、Logit/Probit共通）も対象に含めた。
    FE/RE（t分布）・IVの2SLS（t分布）・GMM（z分布、[`iv-spec.md`](./iv-spec.md)3.3節）もこの
    関数を使う。
-2. **`engine_pybind`の`cov_type`文字列パース＋`cluster_col`/`time_col`抽出ブロックの共通化**:
+2. **`engine_pybind`の`cov_type`文字列パース＋`cluster`/`dk_time`抽出ブロックの共通化**:
    `ols.rs:297-316`と`wls.rs:124-143`がほぼ完全一致で重複していたため共通関数化した。
 3. **`validate_no_duplicate_roles`の複数列ロール対応拡張**: IVの`instruments`（複数列
    ロール）に必要（詳細は[`iv-spec.md`](./iv-spec.md)3.1節）。

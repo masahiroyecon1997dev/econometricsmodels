@@ -196,7 +196,7 @@ def test_cluster_matches_linearmodels(fixtures):
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     df = with_cluster_groups(df, 10)
-    options = IVOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = IVOptions(cov_type="cluster", cluster="cluster_group")
     res = IV(
         df,
         y="y",
@@ -220,7 +220,7 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
-    options = IVOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = IVOptions(cov_type="cluster", cluster="cluster_group")
     res = IV(
         df,
         y="y",
@@ -244,7 +244,7 @@ def test_cluster_g2_matches_linearmodels(fixtures):
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_g2.csv")
     df = df.with_columns((pl.int_range(pl.len()) % 2).alias("cluster_group"))
-    options = IVOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = IVOptions(cov_type="cluster", cluster="cluster_group")
     res = IV(
         df,
         y="y",

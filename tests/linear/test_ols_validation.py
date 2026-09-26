@@ -249,12 +249,12 @@ def test_cluster_without_col_raises(dataset):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
-def test_cluster_col_nonexistent_column_raises(dataset):
-    """`cluster_col`が実在しない列名を指すと`ValidationError`
+def test_cluster_nonexistent_column_raises(dataset):
+    """`cluster`が実在しない列名を指すと`ValidationError`
     （`column_extraction`の責務、既存の欠落を確認するテストが無かった、
     `testing-completeness-reviewer`指摘）。
     """
-    options = OLSOptions(cov_type="cluster", cluster_col="does_not_exist")
+    options = OLSOptions(cov_type="cluster", cluster="does_not_exist")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
@@ -265,7 +265,7 @@ def test_cluster_col_nonexistent_column_raises(dataset):
 def test_insufficient_clusters_raises(dataset):
     """クラスターが1種類しかない場合`ValidationError`。"""
     df = dataset.with_columns(pl.lit(0).alias("single_cluster"))
-    options = OLSOptions(cov_type="cluster", cluster_col="single_cluster")
+    options = OLSOptions(cov_type="cluster", cluster="single_cluster")
     with pytest.raises(
         ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
     ):
@@ -389,13 +389,13 @@ def test_cluster_count_at_most_slopes_raises_validation_error(n_groups):
     `fit()`冒頭で`ValidationError`（`CommonError::InsufficientClustersForInference`）。
     G=2（G<q）とG=3（G==q、`rank(Ŝ)≤2<3`で依然特異）の両方を確認する。
     G>qでも悪条件で数値的にほぼ特異なケースは従来どおり`ComputationError`が
-    backstop（`cluster`は`cluster_col`が別途必要なため専用の
+    backstop（`cluster`は`cluster`が別途必要なため専用の
     `test_scale_variance_cluster_raises_computation_error`で確認、
     他のcov_typeは`test_scale_variance_raises_computation_error`）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, n_groups)
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = OLSOptions(cov_type="cluster", cluster="cluster_group")
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -441,7 +441,7 @@ def test_scale_variance_raises_computation_error(cov_type):
 def test_scale_variance_cluster_raises_computation_error():
     """`cluster`も上記`test_scale_variance_raises_computation_error`と同じ
     backstopの対象（`test_cluster_count_at_most_slopes_raises_validation_error`
-    のdocstring参照）。`cluster`は`cluster_col`が別途必要なため
+    のdocstring参照）。`cluster`は`cluster`が別途必要なため
     `COV_TYPES`パラメトライズには含められず、専用テストとして確認する
     （従来docstringの主張のみで自動テストが無かった非対称の解消）。
     均等な疑似グループ（行番号%10、
@@ -451,7 +451,7 @@ def test_scale_variance_cluster_raises_computation_error():
     """
     df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
     df = with_cluster_groups(df, 10)
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = OLSOptions(cov_type="cluster", cluster="cluster_group")
     with pytest.raises(ComputationError):
         OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 

@@ -201,7 +201,7 @@ def test_cluster_matches_linearmodels(fixtures):
         estimator="gmm",
         gmm_weight_type="classical",
         cov_type="cluster",
-        cluster_col="cluster_group",
+        cluster="cluster_group",
     )
     res = IV(
         df,
@@ -228,7 +228,7 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
         estimator="gmm",
         gmm_weight_type="classical",
         cov_type="cluster",
-        cluster_col="cluster_group",
+        cluster="cluster_group",
     )
     res = IV(
         df,
@@ -349,7 +349,7 @@ def test_other_weight_types_match_linearmodels(fixtures, gmm_weight_type):
     kwargs = {}
     if gmm_weight_type == "cluster":
         df = with_cluster_groups(df, 10)
-        kwargs["cluster_col"] = "cluster_group"
+        kwargs["cluster"] = "cluster_group"
 
     options = IVOptions(
         estimator="gmm",

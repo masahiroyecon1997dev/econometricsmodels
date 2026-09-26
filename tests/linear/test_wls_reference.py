@@ -134,7 +134,7 @@ def test_cluster_matches_statsmodels(fixtures):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, 10)
-    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = WLSOptions(cov_type="cluster", cluster="cluster_group")
     res = WLS(
         df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
     ).fit()
@@ -152,7 +152,7 @@ def test_cluster_imbalanced_matches_statsmodels(fixtures):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
-    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = WLSOptions(cov_type="cluster", cluster="cluster_group")
     res = WLS(
         df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
     ).fit()
@@ -173,7 +173,7 @@ def test_cluster_g2_matches_statsmodels(fixtures):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
     df = with_cluster_groups(df, 2)
-    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = WLSOptions(cov_type="cluster", cluster="cluster_group")
     res = WLS(df, y="y", x=["x1"], weight="weight", options=options).fit()
 
     _check_result(res, fixtures["baseline"]["cluster_g2"], "cluster_g2")
@@ -195,7 +195,7 @@ def test_cluster_ill_conditioned_matches_statsmodels(fixtures, scenario):
     """
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     df = with_cluster_groups(df, 10)
-    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = WLSOptions(cov_type="cluster", cluster="cluster_group")
     res = WLS(
         df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
     ).fit()
@@ -238,7 +238,7 @@ def test_no_intercept_cluster_matches_statsmodels(fixtures):
     options = WLSOptions(
         include_intercept=False,
         cov_type="cluster",
-        cluster_col="cluster_group",
+        cluster="cluster_group",
     )
     res = WLS(
         df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
@@ -290,7 +290,7 @@ def test_confidence_level_cluster_matches_statsmodels(fixtures):
     options = WLSOptions(
         confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
         cov_type="cluster",
-        cluster_col="cluster_group",
+        cluster="cluster_group",
     )
     res = WLS(
         df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
@@ -359,7 +359,7 @@ def test_401ksubs_cluster_matches_statsmodels(fixtures):
     df = load_wooldridge_dataset("401ksubs").filter(pl.col("fsize") == 1)
     df = df.with_columns((1.0 / pl.col("inc")).alias("inv_inc"))
     df = _add_age_bin(df)
-    options = WLSOptions(cov_type="cluster", cluster_col="age_bin")
+    options = WLSOptions(cov_type="cluster", cluster="age_bin")
 
     res = WLS(
         df,

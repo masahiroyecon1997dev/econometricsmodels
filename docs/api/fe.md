@@ -26,7 +26,7 @@ supported (neither `linearmodels` nor `fixest` offer it for panel/FE models).
 `"dk"` is not the same Newey-West estimator as OLS's: it is a **Driscoll-Kraay** panel HAC
 estimator (`fixest`'s `vcov="DK"`, Stata's `xtscc`), which is robust to both cross-entity and
 within-entity correlation. Its time ordering comes from `FEOptions.time` by default, or from
-`FEOptions.time_col` when set (`time_col` always takes priority, letting the fixed effects
+`FEOptions.dk_time` when set (`dk_time` always takes priority, letting the fixed effects
 structure and the HAC kernel use different time granularities). `FEOptions.dk_bandwidth` sets
 the kernel bandwidth explicitly; when omitted it is chosen automatically from the number of
 unique time periods.

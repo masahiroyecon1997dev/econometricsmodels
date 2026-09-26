@@ -113,7 +113,7 @@ in-sample限定のまま。`augment(new_data=None)`もLogitと完全に同一の
 
 - 許容誤差はLogitと同じ基本方針（statsmodels主リファレンス`RTOL=1e-8`、Rクロスチェック
   `RTOL=2e-4`）。個別に緩めた項目もLogitと同種の性質: 限界効果`std_err`（`RTOL=1e-3`）・p値
-  （`ATOL=5e-5`）に加え、Wooldridge実データ（`mroz`）のクラスターロバストSE（`cluster_col="city"`、
+  （`ATOL=5e-5`）に加え、Wooldridge実データ（`mroz`）のクラスターロバストSE（`cluster="city"`、
   G=2）は`RTOL=2e-3`（合成データのクラスターケースより大きいが、実データ・クラスタ数境界・相関の
   強い説明変数が重なる境界的なケースのため）。
 - **`cov_type="hc1"`/`"opg"`の既知の欠落はLogitと同様**（statsmodelsのdiscrete modelでの非対応、

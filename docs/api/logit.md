@@ -4,7 +4,7 @@
 
 ## Standard error types
 
-`LogitOptions.cov_type` supports `"classical"` (observed-information / Hessian-based), `"opg"` (outer product of gradients), `"hc0"`, `"hc1"`, and `"cluster"` (requires `cluster_col`). Unlike [OLS](../getting-started.md#switching-the-type-of-standard-error), HC2/HC3 and HAC are not available for Logit.
+`LogitOptions.cov_type` supports `"classical"` (observed-information / Hessian-based), `"opg"` (outer product of gradients), `"hc0"`, `"hc1"`, and `"cluster"` (requires `cluster`). Unlike [OLS](../getting-started.md#switching-the-type-of-standard-error), HC2/HC3 and HAC are not available for Logit.
 
 ## Solver options
 

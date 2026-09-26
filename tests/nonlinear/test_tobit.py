@@ -1091,7 +1091,7 @@ def test_raise_on_non_convergence_false_returns_result_without_raising(
         "cov_type": cov_type,
     }
     if cov_type == "cluster":
-        kwargs["cluster_col"] = "cluster"
+        kwargs["cluster"] = "cluster"
     res = Tobit(
         censored_dataset,
         y="y",
@@ -1138,7 +1138,7 @@ def test_cov_type_label(censored_dataset):
         censored_dataset,
         y="y",
         x=["x1", "x2"],
-        options=TobitOptions(cov_type="cluster", cluster_col="cluster"),
+        options=TobitOptions(cov_type="cluster", cluster="cluster"),
     ).fit()
     assert res.cov_type == "cluster"
 
@@ -1160,7 +1160,7 @@ def test_cov_type_label(censored_dataset):
 def test_cov_type_is_case_insensitive(
     censored_dataset, cov_type, expected_label
 ):
-    kwargs = {"cluster_col": "cluster"} if cov_type == "CLUSTER" else {}
+    kwargs = {"cluster": "cluster"} if cov_type == "CLUSTER" else {}
     options = TobitOptions(cov_type=cov_type, **kwargs)
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"], options=options).fit()
     assert res.cov_type == expected_label
@@ -1199,7 +1199,7 @@ def test_cluster_cov_type_requires_at_least_two_groups():
             df,
             y="y",
             x=["x1"],
-            options=TobitOptions(cov_type="cluster", cluster_col="cluster"),
+            options=TobitOptions(cov_type="cluster", cluster="cluster"),
         ).fit()
 
 
@@ -1226,7 +1226,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
             df,
             y="y",
             x=["x1", "x2"],
-            options=TobitOptions(cov_type="cluster", cluster_col="cluster"),
+            options=TobitOptions(cov_type="cluster", cluster="cluster"),
         ).fit()
 
 
@@ -1234,7 +1234,7 @@ def test_mroz_hours_cluster_cov_type_raises_validation_error():
     """実データでの`G <= q`境界の顕在化ケース。
 
     Wooldridge mroz `hours` Tobit（Wooldridge Example 17.2、RHS 7変数 → q=7）を
-    `cluster_col="city"`（都市部居住ダミー、G=2）で推定すると`G=2 <= q=7`。
+    `cluster="city"`（都市部居住ダミー、G=2）で推定すると`G=2 <= q=7`。
     `rank(Ŝ) <= G-1 = 1`のため全体Wald検定の`7×7`部分行列が構造的に特異になり、
     `fit()`冒頭のバリデーションが`ValidationError`
     （`CommonError::InsufficientClustersForInference`）で弾く。従来は
@@ -1245,7 +1245,7 @@ def test_mroz_hours_cluster_cov_type_raises_validation_error():
     from _helpers import load_wooldridge_dataset
 
     mroz = load_wooldridge_dataset("mroz")
-    options = TobitOptions(cov_type="cluster", cluster_col="city", lower=0.0)
+    options = TobitOptions(cov_type="cluster", cluster="city", lower=0.0)
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -1256,7 +1256,7 @@ def test_mroz_hours_cluster_cov_type_raises_validation_error():
 
 
 def test_cluster_without_col_raises(censored_dataset):
-    """`cov_type="cluster"`なのに`cluster_col`未指定の場合`ValidationError`
+    """`cov_type="cluster"`なのに`cluster`未指定の場合`ValidationError`
     （OLS/WLS/IV/Logit/Probitと同じ検証、共通化された経路）。
     """
     options = TobitOptions(cov_type="cluster")
@@ -1266,8 +1266,8 @@ def test_cluster_without_col_raises(censored_dataset):
         Tobit(censored_dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
-def test_cluster_col_nonexistent_column_raises(censored_dataset):
-    options = TobitOptions(cov_type="cluster", cluster_col="does_not_exist")
+def test_cluster_nonexistent_column_raises(censored_dataset):
+    options = TobitOptions(cov_type="cluster", cluster="does_not_exist")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
@@ -1275,13 +1275,13 @@ def test_cluster_col_nonexistent_column_raises(censored_dataset):
         Tobit(censored_dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
-def test_cluster_col_with_null_raises(censored_dataset):
-    """`cluster_col` に null（欠損）が含まれる場合 `ValidationError`
+def test_cluster_with_null_raises(censored_dataset):
+    """`cluster` に null（欠損）が含まれる場合 `ValidationError`
     （`extract_group_key_column` の null チェック、テスト網羅性レビュー 観点5）。"""
     n = censored_dataset.height
     groups = [None] + [str(i % 5) for i in range(n - 1)]
     df = censored_dataset.with_columns(pl.Series("grp", groups, dtype=pl.Utf8))
-    options = TobitOptions(cov_type="cluster", cluster_col="grp")
+    options = TobitOptions(cov_type="cluster", cluster="grp")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name="grp"),

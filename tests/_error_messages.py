@@ -86,7 +86,7 @@ DATAFRAME_EXTRACTION_FAILED = (
     "failed to read '{param_name}' as a polars.DataFrame: {error}"
 )
 
-# extract_f64_column: y/x/weight/time_col の抽出で使う（engine_pybind/src/
+# extract_f64_column: y/x/weight/hac_time の抽出で使う（engine_pybind/src/
 # column_extraction.rs:27-75）。
 
 COLUMN_DOES_NOT_EXIST = "column '{name}' does not exist in the data"
@@ -109,7 +109,7 @@ COLUMN_NOT_CASTABLE_TO_NUMERIC = (
     "column '{name}' could not be cast to a numeric type (f64):"
 )
 
-# extract_group_key_column: cluster_col の抽出で使う（同ファイル86-111行）。
+# extract_group_key_column: cluster の抽出で使う（同ファイル86-111行）。
 # 列が存在しない場合のメッセージは extract_f64_column と同文言だが、欠損値の
 # メッセージはグループキー列専用の短い文言になる点に注意。
 GROUP_KEY_COLUMN_HAS_MISSING_VALUES = "column '{name}' contains missing values"

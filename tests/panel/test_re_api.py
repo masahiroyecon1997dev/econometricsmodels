@@ -230,15 +230,15 @@ def test_time_option_does_not_affect_coefficients(fe_dataset):
     assert one_way.df_model == two_way.df_model == 3
 
 
-def test_cluster_col_defaults_to_entity(fe_dataset):
-    """`cluster_col`省略時は`entity`引数の列を自動的にクラスターキーとして
-    使う（3.2節）。明示的に`cluster_col="entity"`を渡した場合と同じ結果に
+def test_cluster_defaults_to_entity(fe_dataset):
+    """`cluster`省略時は`entity`引数の列を自動的にクラスターキーとして
+    使う（3.2節）。明示的に`cluster="entity"`を渡した場合と同じ結果に
     なることで確認する。
     """
     default_res = our_fit_re(fe_dataset, options=REOptions(cov_type="cluster"))
     explicit_res = our_fit_re(
         fe_dataset,
-        options=REOptions(cov_type="cluster", cluster_col="entity"),
+        options=REOptions(cov_type="cluster", cluster="entity"),
     )
 
     for name in default_res.param_names:

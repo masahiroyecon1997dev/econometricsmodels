@@ -48,7 +48,7 @@ _assert_close = partial(
     [
         {},
         {"cov_type": "hc3"},
-        {"cov_type": "cluster", "cluster_col": "cluster"},
+        {"cov_type": "cluster", "cluster": "cluster"},
         {"include_intercept": False},
     ],
 )
@@ -246,7 +246,7 @@ def test_cov_type_label(dataset):
         ).fit()
         assert res.cov_type == cov_type
 
-    cluster_options = WLSOptions(cov_type="cluster", cluster_col="cluster")
+    cluster_options = WLSOptions(cov_type="cluster", cluster="cluster")
     cluster_res = WLS(
         df, y="y", x=["x1", "x2"], weight="weight", options=cluster_options
     ).fit()
@@ -344,8 +344,8 @@ def test_hac_auto_lags_runs_and_returns_finite_std_errors(dataset):
         assert se > 0.0
 
 
-def test_hac_time_col_reorders_rows_before_computing_lags():
-    """`time_col`を指定すると、DataFrameの行順に関わらず時系列順で
+def test_hac_time_reorders_rows_before_computing_lags():
+    """`hac_time`を指定すると、DataFrameの行順に関わらず時系列順で
     ラグ付き自己共分散を計算すること（OLSと同じ検証データ・観点、重み=1で
     OLSと同じ結果になることを利用する）。
     """
@@ -369,7 +369,7 @@ def test_hac_time_col_reorders_rows_before_computing_lags():
             "weight": [1.0] * 5,
         }
     )
-    shuffled_options = WLSOptions(cov_type="hac", hac_lags=1, time_col="time")
+    shuffled_options = WLSOptions(cov_type="hac", hac_lags=1, hac_time="time")
     shuffled_res = WLS(
         shuffled_df,
         y="y",

@@ -94,7 +94,12 @@ pub struct ProbitOptions {
     /// semantics with a `1e-8` threshold (or bfgs/lbfgs's normalized
     /// semantics with a `1e-6` threshold) measurably degrades either speed or
     /// precision. Passing `tol` explicitly always uses the
-    /// semantics of the chosen `method`. Note: the method-dependent default is
+    /// semantics of the chosen `method`. For `bfgs`/`lbfgs`, the solver also
+    /// reports convergence when the gradient norm is within `100 * tol` of the
+    /// target and the line search can no longer make progress because the
+    /// log-likelihood has reached floating-point precision (common with very
+    /// large samples); this window scales with `tol`, so it widens if you
+    /// loosen `tol`. Note: the method-dependent default is
     /// resolved once, at construction time. Changing `method` afterwards via
     /// the setter does not re-resolve `tol` — set both together (or set `tol`
     /// explicitly) if you change `method` after construction.

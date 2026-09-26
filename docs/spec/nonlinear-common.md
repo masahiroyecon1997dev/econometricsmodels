@@ -110,6 +110,32 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
   正定値性（鞍点除外）の3条件が揃えば収束扱いにする（`stalled_at_optimum`）。Logit/Probitは
   尤度が大域凹でこの経路に入らず挙動不変（Tobitで顕在化、[`tobit-spec.md`](./tobit-spec.md)
   3.2節参照）。
+- **`bfgs`/`lbfgs`の副次収束判定（line searchの停滞）**: 収束点近傍では1ステップあたりの
+  コスト減少量（`≈‖g‖²/2H`）がコスト（`n`個の対数尤度の和）の丸め誤差と同程度まで小さくなり、
+  line searchが十分減少条件を正しく判定できなくなる。到達可能な勾配ノルムの下限（`√(2Hδ)`、
+  `H`・丸め誤差`δ`とも`O(n)`）は正規化後の実効閾値`tol·n`とほぼ同じ大きさのため、勾配ノルム
+  基準に届くかはデータ次第になる。argminの`MoreThuenteLineSearch`は異常終了（区間幅の下限
+  到達・丸め誤差で進めない等）も正常終了と区別せず返すため、次の2つで停滞を検出し、勾配ノルムが
+  収束目標の近傍（`<1e2·tol·n`、`QUASI_NEWTON_STALL_GRAD_FACTOR`）にある場合に限り収束扱いに
+  する（`stalled_at_optimum`。scipyの`fmin_bfgs`がline search失敗を「precision loss」として
+  打ち切るのと同じ発想）:
+  1. line searchが受理したステップがstrong Wolfe条件（`c1=1e-4`・`c2=0.9`）を実際に満たすかを
+     再判定し、満たさなければ停滞とみなす（`line_search_step_satisfies_wolfe`）。
+  2. 収束目標の近傍ではline searchの反復上限を`10`に絞り（`NEAR_TARGET_LINE_SEARCH_MAX_ITERS`）、
+     上限到達は打ち切り時点の試行点を採用せず直前の反復点で停滞とみなす。区間幅が`xtol`まで
+     縮むまで諦めない失敗したline searchは、1回で約90回（cost＋勾配）の評価を消費していたため。
+
+  近傍以外での一時的なline search失敗は従来どおり反復を継続する。**窓（`1e2·tol·n`）は`tol`に
+  比例する**一方、根拠となる丸め誤差の床（`≈1e-8·n`程度）は`tol`に依存しない。既定`tol=1e-8`では
+  両者が一致するが、`tol`を大きくすると窓も広がり床に届く前の正常なline searchでも上限到達で
+  打ち切られうる。逆に`tol`を小さくすると停滞検出が効かず従来の遅さに戻る。コードは変えず、
+  公開の`tol`のdocstringにこの挙動を明記する方針とした（ユーザー判断）。Probit
+  （`generate_binary_choice_dataset("baseline", link="probit", k=5, seed=42)`）の実測で、
+  `n=1,000,000`はbfgs 43秒→約2秒・lbfgs 47秒→約2秒、`n=100,000`のlbfgsは3.0秒→約0.18秒に
+  短縮し、statsmodelsの同methodと同程度になった。line searchの前に予測減少量`-gᵀd`を
+  コストの丸め誤差の水準と比べて打ち切る案も試したが、近似Hessianが粗い局面で`gᵀd`が
+  達成可能な減少量を過小評価して早く止まり、Tobitの`bfgs`参照比較テストが精度不足で
+  失敗したため不採用とした。
 
 **スケール依存への対処（標準化）**: 説明変数のスケールが異なると勾配の絶対閾値の妥当性が
 崩れるため、`nonlinear/common.rs`の`standardize_columns`/`destandardize_params`で

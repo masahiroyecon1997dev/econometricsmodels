@@ -1058,6 +1058,100 @@ const LBFGS_HISTORY_SIZE: usize = 7;
 /// （ユーザー確認済み）。
 const LINE_SEARCH_MAX_ITERS: u64 = 100;
 
+/// `FaerBfgs`/`FaerLbfgs`のline search（`MoreThuenteLineSearch`）に渡すstrong Wolfe条件の
+/// 係数`c1`（十分減少条件）。argminの既定値と同じ値だが、[`line_search_step_satisfies_wolfe`]
+/// の再判定と必ず同じ値を使うため、[`wolfe_line_search`]で明示的に設定する。
+const LINE_SEARCH_C1: f64 = 1e-4;
+/// strong Wolfe条件の係数`c2`（曲率条件）。[`LINE_SEARCH_C1`]と同じ理由で明示する。
+const LINE_SEARCH_C2: f64 = 0.9;
+
+/// `FaerBfgs`/`FaerLbfgs`で、line searchがstrong Wolfe条件を満たすステップを見つけられずに
+/// 終了した（[`line_search_step_satisfies_wolfe`]が偽）とき、それを「最適点で停滞」と
+/// 解釈するための条件: 勾配ノルムが実効的な収束目標`tol`（`n_obs`で正規化済みの値）の
+/// この倍数未満であること（[`NEWTON_STALL_GRAD_FACTOR`]と同じ位置づけのガード）。
+///
+/// **背景**: 収束点近傍では1ステップあたりのコスト減少量（`≈‖g‖²/2H`）が、
+/// コスト（`n`個の対数尤度の和）の浮動小数点の丸め誤差と同程度まで小さくなる。すると
+/// line searchは十分減少条件を正しく判定できず（より良い点も誤差で棄却される）、
+/// 極小ステップで評価を数十回繰り返してから異常終了する。到達可能な勾配ノルムの下限は
+/// `√(2Hδ)`（`H`・丸め誤差`δ`とも`O(n)`）で`n`に比例し、実効閾値`tol·n`（既定`1e-8·n`）と
+/// ほぼ同じ大きさのため、勾配ノルム基準に届くかはデータ次第になる（実測:
+/// `generate_binary_choice_dataset("baseline", link="probit", n=1_000_000, k=5, seed=42)`
+/// で勾配ノルムが`1.2·tol`で頭打ちになり、bfgsが26反復・cost評価587回・43秒を要した）。
+/// scipyの`fmin_bfgs`がline search失敗を「precision loss」として即座に打ち切るのと
+/// 同じ発想で、この状態を検出して終了する。
+///
+/// **値の根拠**: 実測の頭打ち点は`tol`の約1〜3倍（Probit `n=100_000`・`1_000_000`）。
+/// `1e2`はこれに十分な余裕を持たせつつ、「観測あたり平均勾配`1e-6`」相当で、statsmodelsの
+/// 既定（平均勾配の最大成分`gtol=1e-5`）より厳しい。最適化初期の勾配ノルム（`tol`の
+/// `1e4`倍以上）での一時的なline search失敗は従来どおり反復を継続する。
+const QUASI_NEWTON_STALL_GRAD_FACTOR: f64 = 1e2;
+
+/// `FaerBfgs`/`FaerLbfgs`で、勾配ノルムが収束目標の近傍（[`is_near_convergence_target`]）に
+/// あるときのline searchの反復上限。上限に達したら（`TerminationReason::MaxItersReached`）
+/// 打ち切り時点の試行点は採用せず、直前の反復点で「最適点で停滞」として終了する。
+///
+/// **背景**: [`QUASI_NEWTON_STALL_GRAD_FACTOR`]のdocコメントの状況では、line searchは
+/// 区間幅が`xtol`（argmin既定`1e-10`）まで縮むまで諦めないため、異常終了までに
+/// 1回で約45回（cost＋勾配で約90回）の評価を消費していた（実測: Probit
+/// `n=1_000_000`で停滞検出後もbfgs 4.8秒、statsmodelsの約5倍）。収束目標の近傍では
+/// 準Newton方向の`α=1`がほぼそのまま受理される（実測で1〜3回）ため、それを大きく
+/// 超える試行は失敗の兆候とみなしてよい。
+///
+/// **値の根拠**: `5`と`10`で精度・既存テスト結果に差が無く（実行時間の差も計測の
+/// ばらつきの範囲内）、正常なline searchを誤って打ち切る余地が小さい`10`を採った
+/// （Probit `n=1_000_000`でbfgs 43秒→約2秒・lbfgs 47秒→約2秒）。近傍以外の反復には
+/// 適用しない（`FaerBfgs`は上限無し、`FaerLbfgs`は[`LINE_SEARCH_MAX_ITERS`]のまま）。
+const NEAR_TARGET_LINE_SEARCH_MAX_ITERS: u64 = 10;
+
+/// 勾配ノルムが実効的な収束目標`tol`の[`QUASI_NEWTON_STALL_GRAD_FACTOR`]倍未満か
+/// （`FaerBfgs`/`FaerLbfgs`の停滞判定が適用される範囲）。
+fn is_near_convergence_target(grad: &[f64], tol: f64) -> bool {
+    l2_norm(grad) < QUASI_NEWTON_STALL_GRAD_FACTOR * tol
+}
+
+/// 内側line searchの`Executor`が`TerminationReason::SolverConverged`で終了したか。
+/// argminの`MoreThuenteLineSearch`は異常終了もこの理由で返すため、条件を満たしたかどうかは
+/// 別途[`line_search_step_satisfies_wolfe`]で確かめる必要がある。
+fn line_search_converged<S: State>(state: &S) -> bool {
+    matches!(
+        state.get_termination_reason(),
+        Some(TerminationReason::SolverConverged)
+    )
+}
+
+/// [`LINE_SEARCH_C1`]/[`LINE_SEARCH_C2`]を設定した`MoreThuenteLineSearch`を構築する。
+fn wolfe_line_search() -> Result<MoreThuenteLineSearch<Vec<f64>, Vec<f64>, f64>, MleError> {
+    MoreThuenteLineSearch::new()
+        .with_c(LINE_SEARCH_C1, LINE_SEARCH_C2)
+        .map_err(convert_optimizer_error)
+}
+
+/// line searchが受理したステップ`step`（`s=θ_{k+1}-θ_k`）が、strong Wolfe条件
+/// （十分減少条件`f₁ ≤ f₀ + c1·g₀ᵀs`と曲率条件`|g₁ᵀs| ≤ c2·|g₀ᵀs|`）を満たすかを判定する。
+///
+/// argminの`MoreThuenteLineSearch`は、条件を満たして終了した場合（MINPACKの`info=1`）も、
+/// 区間幅が下限に達した・丸め誤差で進めない等の異常終了（`info=2,4,5,6`）も、区別せず
+/// `TerminationReason::SolverConverged`として返す。呼び出し側からは失敗を見分けられない
+/// ため、受理されたステップ自体から条件を再判定する（`step`は探索方向`d`とステップ幅
+/// `α`の積なので、`α>0`である限り`d`基準の判定と丸め誤差を除いて同値）。
+///
+/// `g₀ᵀs ≥ 0`（降下しないステップ、`s=0`を含む）は失敗とみなす。`cost0`が
+/// `f64::INFINITY`（1回目の反復、`init`がコストを評価しないため）の場合、十分減少条件は
+/// 常に真になり曲率条件のみで判定する。
+fn line_search_step_satisfies_wolfe(
+    cost0: f64,
+    grad0: &[f64],
+    cost1: f64,
+    grad1: &[f64],
+    step: &[f64],
+) -> bool {
+    let slope0 = dot(grad0, step);
+    slope0 < 0.0
+        && cost1 <= cost0 + LINE_SEARCH_C1 * slope0
+        && dot(grad1, step).abs() <= LINE_SEARCH_C2 * (-slope0)
+}
+
 /// [`run_solver`]に渡す`problem`をラップし、`CostFunction`/`Gradient`/`Hessian`の呼び出し
 /// 回数に総枠（バジェット）を設ける（`nonlinear::tobit::tests::proptests`が
 /// devプロファイルで異常に長時間実行される問題の根本対応）。
@@ -1251,8 +1345,9 @@ where
             // 「tolの意味論はmethodにより異なる」参照）。`FaerBfgs`自体は正規化を知らず、
             // 実効的な絶対閾値を受け取るだけでよい。
             let solver = FaerBfgs {
-                linesearch: MoreThuenteLineSearch::new(),
+                linesearch: wolfe_line_search()?,
                 tol: tol * n_obs as f64,
+                stalled_at_optimum: false,
             };
             let result = Executor::new(problem, solver)
                 .configure(|state| state.param(initial_params).max_iters(max_iter))
@@ -1265,8 +1360,9 @@ where
             // `FaerLbfgs`自体は正規化を知らず、実効的な絶対閾値を受け取るだけでよい
             // （`FaerBfgs`と同じ設計）。
             let solver = FaerLbfgs {
-                linesearch: MoreThuenteLineSearch::new(),
+                linesearch: wolfe_line_search()?,
                 tol: tol * n_obs as f64,
+                stalled_at_optimum: false,
                 s_history: VecDeque::with_capacity(LBFGS_HISTORY_SIZE),
                 y_history: VecDeque::with_capacity(LBFGS_HISTORY_SIZE),
             };
@@ -1798,6 +1894,11 @@ struct FaerBfgs {
     /// `self.linesearch`自体を反復間で更新する経路が無い）。
     linesearch: MoreThuenteLineSearch<Vec<f64>, Vec<f64>, f64>,
     tol: f64,
+    /// `next_iter`でline searchがstrong Wolfe条件を満たせずに終了し、かつ勾配ノルムが
+    /// 収束目標の近傍にあった（コストが浮動小数点の底に達し、これ以上改善できない）ことを
+    /// 示すフラグ。`terminate`で収束として扱う（[`QUASI_NEWTON_STALL_GRAD_FACTOR`]の
+    /// docコメント参照、`FaerNewton::stalled_at_optimum`と同じ位置づけ）。
+    stalled_at_optimum: bool,
 }
 
 type BfgsState = IterState<Vec<f64>, Vec<f64>, (), Vec<Vec<f64>>, (), f64>;
@@ -1874,23 +1975,45 @@ where
         let inner_problem = problem.take_problem().ok_or_else(|| {
             OptimizerError::msg("FaerBfgs: failed to recover the optimization problem")
         })?;
+        // 収束目標の近傍ではline searchの反復上限を絞り、上限到達は停滞とみなす
+        // （`NEAR_TARGET_LINE_SEARCH_MAX_ITERS`のdocコメント参照）。近傍以外では従来どおり
+        // 上限を設けない（`BudgetedProblem`の総枠のみ）。
+        let near_target = is_near_convergence_target(&prev_grad, self.tol);
         let result = Executor::new(inner_problem, self.linesearch.clone())
             .configure(|config| {
-                config
+                let config = config
                     .param(param.clone())
                     .gradient(prev_grad.clone())
-                    .cost(cur_cost)
+                    .cost(cur_cost);
+                if near_target {
+                    config.max_iters(NEAR_TARGET_LINE_SEARCH_MAX_ITERS)
+                } else {
+                    config
+                }
             })
             .ctrlc(false)
             .run()?;
         let mut sub_state = result.state;
         let line_problem = result.problem;
+        problem.consume_problem(line_problem);
+
+        if near_target && !line_search_converged(&sub_state) {
+            // 打ち切り時点の試行点は採用せず、直前の反復点に留まる。
+            self.stalled_at_optimum = true;
+            return Ok((
+                state
+                    .param(param)
+                    .cost(cur_cost)
+                    .gradient(prev_grad)
+                    .inv_hessian(inv_hessian),
+                None,
+            ));
+        }
 
         let xk1 = sub_state.take_param().ok_or_else(|| {
             OptimizerError::msg("FaerBfgs: no parameters returned by line search")
         })?;
         let next_cost = sub_state.get_cost();
-        problem.consume_problem(line_problem);
 
         let grad = problem.gradient(&xk1)?;
 
@@ -1906,6 +2029,12 @@ where
             .zip(prev_grad.iter())
             .map(|(a, b)| a - b)
             .collect();
+
+        // line searchが条件を満たさないまま`SolverConverged`で返った（異常終了）場合の
+        // 停滞判定（`line_search_step_satisfies_wolfe`のdocコメント参照）。
+        self.stalled_at_optimum =
+            !line_search_step_satisfies_wolfe(cur_cost, &prev_grad, next_cost, &grad, &sk)
+                && is_near_convergence_target(&grad, self.tol);
 
         let updated_inv_hessian = bfgs_updated_inv_hessian(inv_hessian, &sk, &yk, is_first_iter);
 
@@ -1923,6 +2052,10 @@ where
         if let Some(g) = state.get_gradient()
             && l2_norm(g) < self.tol
         {
+            return TerminationStatus::Terminated(TerminationReason::SolverConverged);
+        }
+        // line searchが最適点近傍で進めなくなった（`stalled_at_optimum`のdocコメント参照）。
+        if self.stalled_at_optimum {
             return TerminationStatus::Terminated(TerminationReason::SolverConverged);
         }
         // コストが（ほぼ）変化しなくなった場合も収束扱いにする。built-inのBFGS
@@ -2084,6 +2217,8 @@ struct FaerLbfgs {
     /// line search。`self`が所有し反復間で使い回す（`FaerBfgs::linesearch`と同じ理由）。
     linesearch: MoreThuenteLineSearch<Vec<f64>, Vec<f64>, f64>,
     tol: f64,
+    /// `FaerBfgs::stalled_at_optimum`と同じ役割・同じ判定。
+    stalled_at_optimum: bool,
     /// 直近`s`（パラメータ差分`θ_{k+1}-θ_k`）の履歴。古い順（先頭が最古）、
     /// [`LBFGS_HISTORY_SIZE`]件を超えたら最古のペアから破棄する（limited-memoryの
     /// 由来）。`y_history`と常に同じ長さ・同じ順序で対応する。
@@ -2122,17 +2257,18 @@ where
         // `-g₀`をスケールできないため、単位行列の逆Hessianを使う`FaerBfgs`の1回目と
         // 同型の暴走リスクがある。
         //
-        // **既知のトレードオフ（未解決）**: `n_obs`で正規化する案
-        // （`min(1, n_obs/‖g₀‖)`、`tol`の正規化と同じ発想）を試したが、
+        // `n_obs`で正規化する案（`min(1, n_obs/‖g₀‖)`、`tol`の正規化と同じ発想）は、
         // Tobit退化ケース（`fit_lbfgs_converges_for_a_previously_
         // stalling_case_from_issue_344`）が再び`LINE_SEARCH_MAX_ITERS`超過で
         // 失敗する回帰を確認したため不採用とした（`‖g₀‖`と`n_obs`の関係は単純な
-        // 比例関係ではなく、データセットごとに異なるため）。無正規化のこの式のままだと
-        // `generate_binary_choice_dataset("baseline", link="probit", n=100_000,
-        // k=5, seed=42)`で`alpha0≈7.5e-5`という過度に小さい初期ステップになり、
-        // argmin組み込みLBFGS時代の7反復・0.16sから自前実装後12反復・0.54sへ悪化する
-        // （`docs/performance/probit.md`参照）。詳細な原因・より良い初期ステップ幅の
-        // 設計は次セッションで継続調査する（ユーザー確認済み）。
+        // 比例関係ではなく、データセットごとに異なるため）。
+        //
+        // 無正規化のこの式は`generate_binary_choice_dataset("baseline", link="probit",
+        // n=100_000, k=5, seed=42)`で`alpha0≈7.5e-5`と小さくなるが、同データで
+        // lbfgsが遅かった（23反復・約3秒）主因はこれではなく、収束点近傍でコストが
+        // 丸め誤差の床に達しline searchが極小ステップを繰り返していたことだった
+        // （`QUASI_NEWTON_STALL_GRAD_FACTOR`のdocコメント参照）。停滞検出の導入後は
+        // 9反復・約0.18秒（argmin組み込みLBFGS時代の7反復・0.16秒と同程度）。
         let alpha0 = (1.0 / l2_norm(&grad)).min(1.0);
         if alpha0.is_finite() && alpha0 > 0.0 {
             self.linesearch.initial_step_length(alpha0)?;
@@ -2166,26 +2302,37 @@ where
         let inner_problem = problem.take_problem().ok_or_else(|| {
             OptimizerError::msg("FaerLbfgs: failed to recover the optimization problem")
         })?;
+        // `FaerBfgs::next_iter`と同じく、収束目標の近傍ではline searchの反復上限を絞る。
+        let near_target = is_near_convergence_target(&prev_grad, self.tol);
+        let line_search_max_iters = if near_target {
+            NEAR_TARGET_LINE_SEARCH_MAX_ITERS
+        } else {
+            LINE_SEARCH_MAX_ITERS
+        };
         let result = Executor::new(inner_problem, self.linesearch.clone())
             .configure(|config| {
                 config
                     .param(param.clone())
                     .gradient(prev_grad.clone())
                     .cost(cur_cost)
-                    .max_iters(LINE_SEARCH_MAX_ITERS)
+                    .max_iters(line_search_max_iters)
             })
             .ctrlc(false)
             .run()?;
         let mut sub_state = result.state;
         let line_problem = result.problem;
 
+        if near_target && !line_search_converged(&sub_state) {
+            // `FaerBfgs::next_iter`と同じく、直前の反復点に留まり停滞として終了する。
+            problem.consume_problem(line_problem);
+            self.stalled_at_optimum = true;
+            return Ok((state.param(param).cost(cur_cost).gradient(prev_grad), None));
+        }
+
         // `LINE_SEARCH_MAX_ITERS`のdocコメント参照: `max_iters`到達は`Err`にならず
         // 打ち切り時点のパラメータをそのまま`Ok`で返すため、収束判定を明示的に
         // 確認する（`FaerBfgs`には無いチェック）。
-        if !matches!(
-            sub_state.get_termination_reason(),
-            Some(TerminationReason::SolverConverged)
-        ) {
+        if !line_search_converged(&sub_state) {
             let mle_error: MleError = CommonError::ComputationFailed(format!(
                 "line search did not converge within {LINE_SEARCH_MAX_ITERS} iterations"
             ))
@@ -2213,6 +2360,11 @@ where
             .zip(prev_grad.iter())
             .map(|(a, b)| a - b)
             .collect();
+
+        // `FaerBfgs::next_iter`と同じ停滞判定。
+        self.stalled_at_optimum =
+            !line_search_step_satisfies_wolfe(cur_cost, &prev_grad, next_cost, &grad, &sk)
+                && is_near_convergence_target(&grad, self.tol);
 
         // secant条件`yᵀs>0`のチェックは行わず、argmin組み込み`LBFGS::next_iter`と同じく
         // 常にペアを履歴に追加する（`FaerBfgs`のrank-2更新スキップとは異なる設計）。
@@ -2245,6 +2397,9 @@ where
         if let Some(g) = state.get_gradient()
             && l2_norm(g) < self.tol
         {
+            return TerminationStatus::Terminated(TerminationReason::SolverConverged);
+        }
+        if self.stalled_at_optimum {
             return TerminationStatus::Terminated(TerminationReason::SolverConverged);
         }
         // コストが（ほぼ）変化しなくなった場合も収束扱いにする（`FaerBfgs::terminate`と
@@ -3199,6 +3354,267 @@ mod tests {
         let yksk = dot(&y, &s);
         let expected = bfgs_rank2_update(&inv_hessian, &s, &y, 1.0 / yksk);
         assert_eq!(updated, expected);
+    }
+
+    /// `line_search_step_satisfies_wolfe`: 十分減少条件・曲率条件の両方を満たすステップ。
+    /// `f(θ)=θ²`、`θ₀=1`（`f₀=1`、`g₀=2`）から`s=-1`（`θ₁=0`、`f₁=0`、`g₁=0`）:
+    /// `g₀ᵀs=-2<0`、`f₁=0 ≤ 1+1e-4·(-2)`、`|g₁ᵀs|=0 ≤ 0.9·2`。
+    #[test]
+    fn line_search_step_satisfies_wolfe_accepts_exact_minimizer_step() {
+        assert!(line_search_step_satisfies_wolfe(
+            1.0,
+            &[2.0],
+            0.0,
+            &[0.0],
+            &[-1.0]
+        ));
+    }
+
+    /// 十分減少条件違反: 同じ問題で`s=-2`（`θ₁=-1`、`f₁=1`）。コストが減っていない
+    /// （`1 > 1+1e-4·(-4)`）ため偽（曲率条件`|(-2)(-2)|=4 > 0.9·4=3.6`も満たさない）。
+    /// 浮動小数点の底で丸め誤差によりコストが見かけ上増えた状況に相当する。
+    #[test]
+    fn line_search_step_satisfies_wolfe_rejects_step_without_sufficient_decrease() {
+        assert!(!line_search_step_satisfies_wolfe(
+            1.0,
+            &[2.0],
+            1.0,
+            &[-2.0],
+            &[-2.0]
+        ));
+    }
+
+    /// 曲率条件違反: 同じ問題で`s=-0.01`（`θ₁=0.99`、`f₁=0.9801`、`g₁=1.98`）。
+    /// 十分減少条件は満たすが、`|g₁ᵀs|=0.0198 > 0.9·0.02=0.018`で極小ステップのため偽
+    /// （区間幅が下限に達したline searchが返す、ほとんど進まないステップに相当する）。
+    #[test]
+    fn line_search_step_satisfies_wolfe_rejects_tiny_step_violating_curvature_condition() {
+        assert!(!line_search_step_satisfies_wolfe(
+            1.0,
+            &[2.0],
+            0.9801,
+            &[1.98],
+            &[-0.01]
+        ));
+    }
+
+    /// 降下しないステップ（`s=0`を含む）は、両条件が形式的に満たされても偽。
+    #[test]
+    fn line_search_step_satisfies_wolfe_rejects_zero_or_ascent_step() {
+        assert!(!line_search_step_satisfies_wolfe(
+            1.0,
+            &[2.0],
+            1.0,
+            &[2.0],
+            &[0.0]
+        ));
+        assert!(!line_search_step_satisfies_wolfe(
+            1.0,
+            &[2.0],
+            4.0,
+            &[4.0],
+            &[1.0]
+        ));
+    }
+
+    /// `cost0`が`f64::INFINITY`（1回目の反復）なら十分減少条件は常に真で、曲率条件のみで
+    /// 判定される。
+    #[test]
+    fn line_search_step_satisfies_wolfe_uses_only_curvature_condition_when_initial_cost_is_infinite()
+     {
+        assert!(line_search_step_satisfies_wolfe(
+            f64::INFINITY,
+            &[2.0],
+            1.0e300,
+            &[0.0],
+            &[-1.0]
+        ));
+        assert!(!line_search_step_satisfies_wolfe(
+            f64::INFINITY,
+            &[2.0],
+            0.9801,
+            &[1.98],
+            &[-0.01]
+        ));
+    }
+
+    /// 大標本の尤度の収束点近傍を模した問題: 2次関数`COST_OFFSET + ½·H_DIAG·‖θ-target‖²`に、
+    /// パラメータのビット列から決まる振幅`NOISE`の決定的なジッターを加える（`n`個の
+    /// 対数尤度の和の丸め誤差の模擬）。勾配は各成分が`GRAD_FLOOR`で下げ止まる
+    /// （`FloatingPointFloorProblem`と同じ、総和勾配の丸め誤差の床の模擬）。収束点近傍では
+    /// 勾配とジッターを含むコストが整合せず、line searchは十分減少条件を満たすステップを
+    /// 見つけられずに異常終了する（`QUASI_NEWTON_STALL_GRAD_FACTOR`のdocコメント参照）。
+    /// `evaluations`はcost・勾配の呼び出し回数の合計（`run_solver`が所有権を取るため`Rc`で共有）。
+    #[derive(Clone)]
+    struct NoisyCostFloorProblem {
+        target: Vec<f64>,
+        evaluations: std::rc::Rc<Cell<u64>>,
+    }
+
+    impl NoisyCostFloorProblem {
+        const COST_OFFSET: f64 = 1.0e5;
+        const H_DIAG: f64 = 1.0e6;
+        const NOISE: f64 = 1.0e-10;
+        const GRAD_FLOOR: f64 = 5.0e-2;
+
+        fn new() -> Self {
+            Self {
+                target: vec![2.0, -1.0],
+                evaluations: std::rc::Rc::new(Cell::new(0)),
+            }
+        }
+
+        /// パラメータのビット列をハッシュした`[-NOISE, NOISE]`の決定的な値。
+        fn jitter(param: &[f64]) -> f64 {
+            let hash = param.iter().fold(0x9E37_79B9_7F4A_7C15_u64, |acc, p| {
+                (acc ^ p.to_bits()).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            });
+            let unit = (hash >> 11) as f64 / (1_u64 << 53) as f64;
+            (2.0 * unit - 1.0) * Self::NOISE
+        }
+    }
+
+    impl CostFunction for NoisyCostFloorProblem {
+        type Param = Vec<f64>;
+        type Output = f64;
+
+        fn cost(&self, param: &Self::Param) -> Result<Self::Output, OptimizerError> {
+            self.evaluations.set(self.evaluations.get() + 1);
+            let quadratic: f64 = param
+                .iter()
+                .zip(self.target.iter())
+                .map(|(p, t)| 0.5 * Self::H_DIAG * (p - t).powi(2))
+                .sum();
+            Ok(Self::COST_OFFSET + quadratic + Self::jitter(param))
+        }
+    }
+
+    impl Gradient for NoisyCostFloorProblem {
+        type Param = Vec<f64>;
+        type Gradient = Vec<f64>;
+
+        fn gradient(&self, param: &Self::Param) -> Result<Self::Gradient, OptimizerError> {
+            self.evaluations.set(self.evaluations.get() + 1);
+            Ok(param
+                .iter()
+                .zip(self.target.iter())
+                .map(|(p, t)| {
+                    let raw = Self::H_DIAG * (p - t);
+                    if raw.abs() < Self::GRAD_FLOOR {
+                        Self::GRAD_FLOOR.copysign(if raw == 0.0 { 1.0 } else { raw })
+                    } else {
+                        raw
+                    }
+                })
+                .collect())
+        }
+    }
+
+    impl Hessian for NoisyCostFloorProblem {
+        type Param = Vec<f64>;
+        type Hessian = Vec<Vec<f64>>;
+
+        fn hessian(&self, _param: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
+            Ok(vec![vec![Self::H_DIAG, 0.0], vec![0.0, Self::H_DIAG]])
+        }
+    }
+
+    /// bfgs/lbfgsは、勾配ノルムが床（`GRAD_FLOOR·√2≈7.1e-2`）で頭打ちになり
+    /// 実効閾値`tol=1e-2`に届かなくても、line searchの異常終了を停滞として検出し、評価回数を
+    /// 浪費せずに**収束**する（`stalled_at_optimum`経路）。修正前は極小ステップの
+    /// line searchを繰り返して評価回数が膨れていた（Probit `n=1_000_000`で26反復・評価約1200回）。
+    #[test]
+    fn run_solver_quasi_newton_stops_at_noisy_cost_floor_near_gradient_target() {
+        for method in [Method::Bfgs, Method::Lbfgs] {
+            let problem = NoisyCostFloorProblem::new();
+            let evaluations = std::rc::Rc::clone(&problem.evaluations);
+            let output = run_solver(
+                problem,
+                method,
+                vec![0.0, 0.0],
+                100,
+                1e-2,
+                1,
+                true,
+                SeparationNormCheck::Disabled,
+            )
+            .unwrap();
+
+            assert!(output.converged, "{method:?}: {output:?}");
+            let grad = NoisyCostFloorProblem::new()
+                .gradient(&output.params)
+                .unwrap();
+            assert!(
+                l2_norm(&grad) < QUASI_NEWTON_STALL_GRAD_FACTOR * 1e-2,
+                "{method:?}: {grad:?}"
+            );
+            assert!(
+                evaluations.get() < 60,
+                "{method:?}: {} evaluations",
+                evaluations.get()
+            );
+        }
+    }
+
+    /// Wolfe再判定経路の統合テスト: line searchが反復上限（`NEAR_TARGET_LINE_SEARCH_MAX_ITERS`）
+    /// より先に異常終了し、条件を満たさないステップを`SolverConverged`で返す状況で、
+    /// `line_search_step_satisfies_wolfe`による再判定だけで停滞を検出する。区間幅の許容値
+    /// （`xtol`）を大きくしたline searchを直接渡し、区間が少し縮んだだけで異常終了（MINPACKの
+    /// `info=2`）させて再現する（`run_solver`経由では既定`xtol=1e-10`のため先に反復上限に
+    /// 達し、この経路を切り分けられない）。`stalled_at_optimum`を直接確認する。
+    #[test]
+    fn quasi_newton_detects_stall_via_wolfe_recheck_when_line_search_terminates_abnormally() {
+        let linesearch = || {
+            wolfe_line_search()
+                .unwrap()
+                .with_width_tolerance(0.5)
+                .unwrap()
+        };
+
+        let bfgs = FaerBfgs {
+            linesearch: linesearch(),
+            tol: 1e-2,
+            stalled_at_optimum: false,
+        };
+        let result = Executor::new(NoisyCostFloorProblem::new(), bfgs)
+            .configure(|state| state.param(vec![0.0, 0.0]).max_iters(100))
+            .run()
+            .unwrap();
+        assert!(result.solver.stalled_at_optimum, "Bfgs: {:?}", result.state);
+
+        let lbfgs = FaerLbfgs {
+            linesearch: linesearch(),
+            tol: 1e-2,
+            stalled_at_optimum: false,
+            s_history: VecDeque::with_capacity(LBFGS_HISTORY_SIZE),
+            y_history: VecDeque::with_capacity(LBFGS_HISTORY_SIZE),
+        };
+        let result = Executor::new(NoisyCostFloorProblem::new(), lbfgs)
+            .configure(|state| state.param(vec![0.0, 0.0]).max_iters(100))
+            .run()
+            .unwrap();
+        assert!(
+            result.solver.stalled_at_optimum,
+            "Lbfgs: {:?}",
+            result.state
+        );
+    }
+
+    /// 停滞判定のガード（`is_near_convergence_target`）: 勾配ノルムが
+    /// `QUASI_NEWTON_STALL_GRAD_FACTOR·tol`未満のときだけ真。最適化初期の大きな勾配での
+    /// line search失敗を停滞（収束）と誤判定しないための境界を直接検証する（統合テストでは、
+    /// 既存のコスト変化ベースの副次判定が先に発火しうるため、このガード単体の効果を
+    /// 切り分けられない）。
+    #[test]
+    fn is_near_convergence_target_is_true_only_below_stall_grad_factor_times_tol() {
+        let tol = 1e-2;
+        let bound = QUASI_NEWTON_STALL_GRAD_FACTOR * tol;
+        assert!(is_near_convergence_target(&[0.99 * bound], tol));
+        assert!(!is_near_convergence_target(&[bound], tol));
+        assert!(!is_near_convergence_target(
+            &[0.8 * bound, 0.8 * bound],
+            tol
+        ));
     }
 
     #[test]

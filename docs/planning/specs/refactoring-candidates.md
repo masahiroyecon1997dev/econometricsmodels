@@ -1231,3 +1231,17 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   （Issue #347が「読み出し側アクセサ」という限定範囲に留めているのと同じ考え方）。
 - **気づいた経緯**: 2026-09-23、`nonlinear/logit.rs`解説後のユーザー指摘。
 - **状態**: 未対応（着手要否・Issue #347との統合要否はユーザー判断待ち）
+
+### 67. `ProbitResult`の`cov_type`が「小文字化のみ」で、docコメントの「正規化済み（例: `"classical"`）」と食い違う（`"nonrobust"`がそのまま返る）。`to_lowercase()`も`build_probit_input`と`fit`で重複
+
+- **対象**: [engine_pybind/src/nonlinear/probit.rs:230-231](../../../engine_pybind/src/nonlinear/probit.rs#L230-L231)（docコメント）、
+  [同:451-452](../../../engine_pybind/src/nonlinear/probit.rs#L451-L452)（`fit`の`options.cov_type.to_lowercase()`）、
+  [同:376-377](../../../engine_pybind/src/nonlinear/probit.rs#L376-L377)（`build_probit_input`側の同じ小文字化）。`logit.rs`/`tobit.rs`にも同型あり
+- **内容**: `ProbitResult.cov_type`のdocは「normalized to lowercase; e.g. `"classical"`」だが、
+  実装は単なる`to_lowercase()`のため`cov_type="NonRobust"`を渡すと`"nonrobust"`がそのまま返る
+  （`parse_cov_type`側では`classical`のエイリアスとして受理されているのに、結果には正規名が出ない）。
+  正規名を返したいなら`EngineCovType`から名前を逆引きするか、`parse_cov_type`が正規名も返す形にする。
+  また小文字化が`build_probit_input`と`fit`の2箇所で独立に行われている。
+  実際の挙動を仕様として確認してからdoc側を直すか実装側を直すか、ユーザー判断が要る。
+- **気づいた経緯**: 2026-09-26、`nonlinear/probit.rs`の`/explain-code`解説中。
+- **状態**: 未対応（挙動確認・方針はユーザー判断待ち）

@@ -142,7 +142,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # mroz（hours 生スケール）は censReg の maxLik が survreg ほど収束が詰まらず、
         # SE・z・Wald 統計量・信頼区間・限界効果の SE/z/信頼区間が実測 ~1e-7〜3e-5
         # 乖離する（限界効果の信頼区間端点が 0 近傍の係数で相対誤差が最も増幅し hc0 で
-        # ~3e-5）。係数・σ・対数尤度・限界効果 dydx・予測値・打ち切り適合度は ~3e-9 で
+        # ~3e-5）。係数・σ・対数尤度・限界効果・予測値・打ち切り適合度は ~3e-9 で
         # 一致。engine と主リファレンス survreg は同データで ~3e-10 一致するため、これは
         # censReg 側の収束限界であって本実装の問題ではない（mroz の厳密照合は
         # `test_tobit_reference.py` が担う）。

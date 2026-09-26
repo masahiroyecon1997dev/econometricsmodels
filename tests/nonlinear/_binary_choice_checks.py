@@ -447,7 +447,7 @@ def check_marginal_effects_default_excludes_intercept(dataset, estimator_cls):
     assert [row["param"] for row in effects] == ["x1", "x2"]
     expected_keys = {
         "param",
-        "dydx",
+        "effect",
         "std_err",
         "z_stat",
         "p_value",
@@ -462,9 +462,9 @@ def check_marginal_effects_mean_and_median_differ_from_overall(
     dataset, estimator_cls
 ):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
-    overall = [row["dydx"] for row in res.marginal_effects(at="overall")]
-    mean = [row["dydx"] for row in res.marginal_effects(at="mean")]
-    median = [row["dydx"] for row in res.marginal_effects(at="median")]
+    overall = [row["effect"] for row in res.marginal_effects(at="overall")]
+    mean = [row["effect"] for row in res.marginal_effects(at="mean")]
+    median = [row["effect"] for row in res.marginal_effects(at="median")]
 
     assert overall != mean
     assert overall != median

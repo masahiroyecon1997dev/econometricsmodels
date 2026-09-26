@@ -148,7 +148,7 @@ print(augmented)  # original `new_data` columns, plus a "probability" column
 
 ```python
 for row in result.marginal_effects():
-    print(row["param"], row["dydx"], row["std_err"], row["p_value"])
+    print(row["param"], row["effect"], row["std_err"], row["p_value"])
 
 # Marginal effects evaluated at the mean of the explanatory variables
 mean_effects = result.marginal_effects(at="mean")
@@ -208,7 +208,7 @@ print(result.wald_statistic, result.wald_p_value)
 
 ```python
 for row in result.marginal_effects(target="expected_observed"):
-    print(row["param"], row["dydx"], row["std_err"])
+    print(row["param"], row["effect"], row["std_err"])
 
 # predict() returns a list of {"predicted": ...} dicts
 fitted = result.predict(target="expected_observed")

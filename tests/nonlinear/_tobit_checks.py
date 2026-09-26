@@ -142,9 +142,9 @@ def _check_margeff(
                 row = rows[name]  # 限界効果は切片を除外済み（rename 不要）
                 lbl = f"{label}/margeff/{target}/{at}/{name}"
                 assert_close(
-                    row["dydx"],
-                    ref_stats["dydx"],
-                    f"{lbl}/dydx",
+                    row["effect"],
+                    ref_stats["effect"],
+                    f"{lbl}/effect",
                     rtol=rtol_point,
                     atol=atol,
                 )
@@ -250,7 +250,7 @@ def check_result(
 
     許容誤差は3種類に分ける（`tests/_tolerances.py` の tobit_* エントリ参照）:
         - ``rtol_point``  : 点推定・尤度系（係数・sigma・対数尤度・AIC・BIC・
-          限界効果 dydx・予測値・打ち切り適合度）。基本は 1e-8。
+          限界効果・予測値・打ち切り適合度）。基本は 1e-8。
         - ``rtol_inference``: 分散に依存する量（標準誤差・z値・p値・Wald 統計量・
           限界効果の SE/z/p/信頼区間）。悪条件シナリオ・mroz で個別に緩める。
         - ``rtol_conf_int`` : 係数の信頼区間端点（0 近傍で相対誤差が増幅するため

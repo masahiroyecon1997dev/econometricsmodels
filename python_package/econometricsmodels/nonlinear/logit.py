@@ -355,9 +355,11 @@ class LogitResults:
 
         Returns:
             A list of dictionaries, one per explanatory variable
-            (excluding the intercept). Keys are `param`, `dydx`,
+            (excluding the intercept). Keys are `param`, `effect`,
             `std_err`, `z_stat`, `p_value`, `conf_lower`, `conf_upper` (see
-            `docs/spec/nonlinear-common.md` section 6).
+            `docs/spec/nonlinear-common.md` section 6). `effect` is
+            the marginal effect estimate (corresponds to `dy/dx` in
+            Stata's `margins, dydx(*)` and statsmodels).
 
         Raises:
             ValidationError: `at` is not one of `"overall"`, `"mean"`,
@@ -368,16 +370,16 @@ class LogitResults:
         return [
             {
                 "param": name,
-                "dydx": dydx,
+                "effect": effect,
                 "std_err": se,
                 "z_stat": z,
                 "p_value": p,
                 "conf_lower": lower,
                 "conf_upper": upper,
             }
-            for name, dydx, se, z, p, lower, upper in zip(
+            for name, effect, se, z, p, lower, upper in zip(
                 raw.param_names,
-                raw.dydx,
+                raw.effect,
                 raw.std_errors,
                 raw.z_stats,
                 raw.p_values,

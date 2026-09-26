@@ -184,7 +184,7 @@ format_margeff <- function(me_df) {
   out <- list()
   for (i in seq_len(nrow(me_df))) {
     out[[me_df$term[i]]] <- list(
-      dydx = me_df$estimate[i],
+      effect = me_df$estimate[i],
       std_err = me_df$std.error[i],
       z_stat = me_df$statistic[i],
       p_value = me_df$p.value[i],

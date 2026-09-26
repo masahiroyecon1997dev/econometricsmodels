@@ -114,7 +114,9 @@ def _check_margeff(res, ref_margeff: dict, label: str) -> None:
         for name, ref_stats in ref_margeff[at].items():
             row = effects[name]
             _assert_close(
-                row["dydx"], ref_stats["dydx"], f"{label}/{at}/{name}/dydx"
+                row["effect"],
+                ref_stats["effect"],
+                f"{label}/{at}/{name}/effect",
             )
             _assert_close(
                 row["std_err"],

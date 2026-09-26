@@ -641,7 +641,7 @@ pub fn column_medians(x: &Mat<f64>) -> Vec<f64> {
         .collect()
 }
 
-/// `marginal_effects`の結果。`coef_table`と同じ行指向（`dydx`/`std_err`/`z`/`p_value`/
+/// `marginal_effects`の結果。`coef_table`と同じ行指向（`effect`/`std_err`/`z`/`p_value`/
 /// `conf_low`/`conf_high`、`docs/spec/nonlinear-common.md`6章）。定数項（切片）は行から除外する
 /// （切片の限界効果は経済学的に意味を持たない、statsmodelsの`get_margeff()`と同じ扱い）。
 /// Logit/Probit/Tobitいずれでも同じ形の結果になるため`common.rs`に置く（元はLogitの

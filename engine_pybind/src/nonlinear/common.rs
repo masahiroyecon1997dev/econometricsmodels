@@ -63,7 +63,7 @@ pub struct MarginalEffectsResult {
     #[pyo3(get)]
     pub param_names: Vec<String>,
     #[pyo3(get)]
-    pub dydx: Vec<f64>,
+    pub effect: Vec<f64>,
     #[pyo3(get)]
     pub std_errors: Vec<f64>,
     #[pyo3(get)]

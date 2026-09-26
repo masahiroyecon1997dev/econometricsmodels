@@ -76,7 +76,7 @@ def _margeff_frame(fit_result, at: str) -> dict:
     sf = fit_result.get_margeff(at=at).summary_frame()
     return {
         str(name): {
-            "dydx": float(row.iloc[0]),
+            "effect": float(row.iloc[0]),
             "std_err": float(row.iloc[1]),
             "z_stat": float(row.iloc[2]),
             "p_value": float(row.iloc[3]),

@@ -83,9 +83,9 @@ def check_margeff(
         for name, ref_stats in ref_margeff[at].items():
             row = effects[rename(name)]
             assert_close(
-                row["dydx"],
-                ref_stats["dydx"],
-                f"{label}/{at}/{name}/dydx",
+                row["effect"],
+                ref_stats["effect"],
+                f"{label}/{at}/{name}/effect",
                 rtol=rtol,
                 atol=atol,
             )

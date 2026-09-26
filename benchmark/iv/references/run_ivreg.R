@@ -135,7 +135,7 @@ df_resid_val <- df.residual(model)
 
 s <- summary(model)
 r_squared_val <- s$r.squared
-r_squared_adj_val <- s$adj.r.squared
+adj_r_squared_val <- s$adj.r.squared
 
 # ロバストWald検定（本実装のIV版wald_f_testと同じ定義。特異な場合の扱い・
 # NUMERIC_SCENARIOSからの除外方針はwald_f_test()のコメント参照）。
@@ -211,7 +211,7 @@ result <- list(
   nobs = n_obs_val,
   df_resid = df_resid_val,
   r_squared = r_squared_val,
-  r_squared_adj = r_squared_adj_val,
+  adj_r_squared = adj_r_squared_val,
   f_statistic = f_statistic_val,
   f_p_value = f_p_value_val,
   weak_instrument_f = weak_instrument_f_val,

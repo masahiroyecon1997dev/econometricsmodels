@@ -62,7 +62,7 @@ def extract_full_fit_stats(model, confidence_level: float = 0.95) -> dict:
 
     Returns:
         `coef`/`se`/`t_stats`/`p_values`/`conf_int`/`r_squared`/
-        `r_squared_adj`/`f_statistic`/`f_p_value`/`aic`/`bic`/
+        `adj_r_squared`/`f_statistic`/`f_p_value`/`aic`/`bic`/
         `log_likelihood`/`nobs`/`df_resid`を含む辞書（パラメータ名の
         "Intercept"→"const"正規化済み）。
     """
@@ -87,7 +87,7 @@ def extract_full_fit_stats(model, confidence_level: float = 0.95) -> dict:
     # 生成時に揃える）。
     result = normalize_names(raw, stat_key="t_stats")
     result["r_squared"] = float(model.rsquared)
-    result["r_squared_adj"] = float(model.rsquared_adj)
+    result["adj_r_squared"] = float(model.rsquared_adj)
     result["f_statistic"] = float(model.fvalue)
     result["f_p_value"] = float(model.f_pvalue)
     result["aic"] = float(model.aic)

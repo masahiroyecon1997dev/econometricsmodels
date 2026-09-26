@@ -95,7 +95,7 @@ statsmodelsの`WLS`も内部的に同じ変換方式`wexog=sqrt(weights)*exog`�
 ### 3.4 適合度統計量（OLSと異なり要注意）
 
 `f_statistic`・`f_p_value`・係数・標準誤差・t値・p値・信頼区間は変換後データへの代入のままで
-正しい。一方、**`r_squared`・`r_squared_adj`・`log_likelihood`（→`aic`/`bic`）は変換後データに
+正しい。一方、**`r_squared`・`adj_r_squared`・`log_likelihood`（→`aic`/`bic`）は変換後データに
 OLSの計算式をそのまま適用するだけでは誤りになる**（statsmodelsとのクロスチェックで、R²相対誤差
 0.2〜1%程度、対数尤度に加法的なずれが実際に発生することを確認済み）。
 

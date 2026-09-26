@@ -33,7 +33,7 @@ unique time periods.
 
 ## Panel R²
 
-`FEResults` reports three separate R² values instead of OLS's single `r_squared`/`r_squared_adj`
+`FEResults` reports three separate R² values instead of OLS's single `r_squared`/`adj_r_squared`
 pair, since "the" R² is not well-defined once fixed effects are involved:
 `r_squared_within` (based on the within-transformed variables), `r_squared_between` (based on
 entity-mean variables), and `r_squared_overall` (based on the untransformed variables).

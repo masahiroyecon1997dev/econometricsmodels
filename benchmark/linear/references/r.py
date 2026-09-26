@@ -23,7 +23,7 @@ _LM_SCALAR_KEYS = (
     "f_statistic",
     "f_p_value",
     "r_squared",
-    "r_squared_adj",
+    "adj_r_squared",
 )
 
 

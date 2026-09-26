@@ -156,9 +156,9 @@ class OLSResults:
         return self._raw.r_squared
 
     @property
-    def r_squared_adj(self) -> float:
+    def adj_r_squared(self) -> float:
         """Degrees-of-freedom-adjusted R²."""
-        return self._raw.r_squared_adj
+        return self._raw.adj_r_squared
 
     @property
     def f_statistic(self) -> float:

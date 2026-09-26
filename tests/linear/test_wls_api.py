@@ -93,7 +93,7 @@ def test_weight_one_matches_ols(dataset, option_kwargs):
     assert wls_res.cov_type == ols_res.cov_type
 
     assert abs(wls_res.r_squared - ols_res.r_squared) < 1e-9
-    assert abs(wls_res.r_squared_adj - ols_res.r_squared_adj) < 1e-9
+    assert abs(wls_res.adj_r_squared - ols_res.adj_r_squared) < 1e-9
     assert abs(wls_res.log_likelihood - ols_res.log_likelihood) < 1e-9
     assert abs(wls_res.aic - ols_res.aic) < 1e-9
     assert abs(wls_res.bic - ols_res.bic) < 1e-9

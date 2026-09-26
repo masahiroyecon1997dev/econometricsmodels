@@ -132,7 +132,7 @@ conf_upper <- coefs + crit * ses
 # R²・調整済みR²はcov_typeに依存しない（残差・SSTのみに基づく）ため、
 # summary()の値をそのまま使う（本実装・statsmodelsと同じ定義）。
 r_squared_val <- summary(model)$r.squared
-r_squared_adj_val <- summary(model)$adj.r.squared
+adj_r_squared_val <- summary(model)$adj.r.squared
 
 # AIC/BIC/対数尤度はcov_typeに依存しない（残差・SSRのみに基づく）。
 # R標準のAIC()/BIC()（stats:::AIC.lm）は使わない。推定された残差分散σ²を
@@ -166,7 +166,7 @@ result <- list(
     SIMPLIFY = FALSE
   ),
   r_squared = r_squared_val,
-  r_squared_adj = r_squared_adj_val,
+  adj_r_squared = adj_r_squared_val,
   aic = aic_val,
   bic = bic_val,
   log_likelihood = loglik_val,

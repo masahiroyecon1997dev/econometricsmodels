@@ -270,7 +270,7 @@ pub struct OlsEstimator {
     /// 決定係数（`include_intercept`に応じてcentered/uncentered TSSを切り替える）
     r_squared: f64,
     /// 自由度調整済み決定係数
-    r_squared_adj: f64,
+    adj_r_squared: f64,
     /// F統計量。`cov_type=Classical`なら古典的F検定、それ以外（HC0-3/HAC）は
     /// `cov_params`を使ったロバストWald検定（`docs/spec/ols-spec.md`
     /// 「適合度統計量」参照）
@@ -488,7 +488,7 @@ impl OlsEstimator {
             (0..n).map(|i| (*input.y().get(i, 0)).powi(2)).sum()
         };
         let r_squared = 1.0 - ssr / sst;
-        let r_squared_adj = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
+        let adj_r_squared = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
 
         let log_likelihood =
             -(n as f64 / 2.0) * ((2.0 * std::f64::consts::PI).ln() + (ssr / n as f64).ln() + 1.0);
@@ -515,7 +515,7 @@ impl OlsEstimator {
             conf_lower,
             conf_upper,
             r_squared,
-            r_squared_adj,
+            adj_r_squared,
             f_statistic,
             f_p_value,
             log_likelihood,
@@ -577,8 +577,8 @@ impl OlsEstimator {
     }
 
     /// 自由度調整済み決定係数
-    pub fn r_squared_adj(&self) -> f64 {
-        self.r_squared_adj
+    pub fn adj_r_squared(&self) -> f64 {
+        self.adj_r_squared
     }
 
     /// F統計量
@@ -1936,7 +1936,7 @@ mod tests {
         let estimator = OlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
 
         assert!((estimator.r_squared() - 0.599_999_999_999_999_9).abs() < 1e-9);
-        assert!((estimator.r_squared_adj() - 0.466_666_666_666_666_56).abs() < 1e-9);
+        assert!((estimator.adj_r_squared() - 0.466_666_666_666_666_56).abs() < 1e-9);
         assert!((estimator.log_likelihood() - (-5.259_769_728_322_863)).abs() < 1e-9);
         assert!((estimator.aic() - 14.519_539_456_645_726).abs() < 1e-9);
         assert!((estimator.bic() - 13.738_415_281_513_927).abs() < 1e-9);
@@ -1963,7 +1963,7 @@ mod tests {
         let estimator = OlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
 
         assert!((estimator.r_squared() - 0.920_930_232_558_139_5).abs() < 1e-9);
-        assert!((estimator.r_squared_adj() - 0.901_162_790_697_674_5).abs() < 1e-9);
+        assert!((estimator.adj_r_squared() - 0.901_162_790_697_674_5).abs() < 1e-9);
         assert!((estimator.log_likelihood() - (-7.863_404_415_393_264)).abs() < 1e-9);
         assert!((estimator.aic() - 17.726_808_830_786_528).abs() < 1e-9);
         assert!((estimator.bic() - 17.336_246_743_220_627).abs() < 1e-9);

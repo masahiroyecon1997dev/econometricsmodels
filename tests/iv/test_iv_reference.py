@@ -121,7 +121,7 @@ def _check_result(res, ref: dict, label: str) -> None:
 
     _assert_close(res.r_squared, ref["r_squared"], f"{label}/r_squared")
     _assert_close(
-        res.r_squared_adj, ref["r_squared_adj"], f"{label}/r_squared_adj"
+        res.adj_r_squared, ref["adj_r_squared"], f"{label}/adj_r_squared"
     )
     _assert_close(res.f_statistic, ref["f_statistic"], f"{label}/f_statistic")
     _assert_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")

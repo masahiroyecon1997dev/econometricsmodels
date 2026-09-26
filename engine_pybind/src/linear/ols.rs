@@ -161,7 +161,7 @@ pub struct OLSResult {
     #[pyo3(get)]
     pub r_squared: f64,
     #[pyo3(get)]
-    pub r_squared_adj: f64,
+    pub adj_r_squared: f64,
     #[pyo3(get)]
     pub f_statistic: f64,
     #[pyo3(get)]
@@ -379,7 +379,7 @@ pub(crate) fn ols_estimator_to_result(
         n_obs: estimator.input().nobs(),
         cov_type: cov_type_lower,
         r_squared: estimator.r_squared(),
-        r_squared_adj: estimator.r_squared_adj(),
+        adj_r_squared: estimator.adj_r_squared(),
         f_statistic: estimator.f_statistic(),
         f_p_value: estimator.f_p_value(),
         log_likelihood: estimator.log_likelihood(),

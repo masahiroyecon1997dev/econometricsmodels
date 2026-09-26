@@ -78,7 +78,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 `IVResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `stats` / `p_values` /
 `conf_lower` / `conf_upper` / `param_names` / `residuals` / `dep_var_name` / `n_obs` /
 `df_resid` / `df_model` / `converged` / `n_iter` / `cov_type` / `method` / `gmm_weight_type` /
-`f_statistic` / `f_p_value` / `r_squared` / `r_squared_adj` / `weak_instrument_f_statistics` /
+`f_statistic` / `f_p_value` / `r_squared` / `adj_r_squared` / `weak_instrument_f_statistics` /
 `overid_statistic` / `overid_p_value` / `wu_hausman_statistic` / `wu_hausman_p_value`。
 
 - **`t_stats`ではなく`stats`という分布非依存の名前**: 1つの`IVResult`型を
@@ -99,7 +99,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   Stataの`ivregress`もデフォルトでは出力しない。正規性を仮定した疑似尤度を計算して
   OLS/FE/REと同じフィールド名で返すと、異なる推定基準の値を同列に比較できるかのように
   誤解させるため統計的な誠実さを優先して含めない）。
-- **`r_squared`/`r_squared_adj`はFE/REのような3分割はせず、OLSと同じ単一フィールド**
+- **`r_squared`/`adj_r_squared`はFE/REのような3分割はせず、OLSと同じ単一フィールド**
   （IVはパネルのwithin/between区別を持たない）。
 - **`f_statistic`/`f_p_value`はGMMでは常にロバストWald検定（χ²）**。OLSが`cov_type`が
   HC系/clusterのときF検定をロバストWald検定に切り替える既存挙動をGMMにも一貫適用する

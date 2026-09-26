@@ -200,7 +200,7 @@ def _check_result(
 
     _assert_close(res.r_squared, ref["r_squared"], f"{label}/r_squared")
     _assert_close(
-        res.r_squared_adj, ref["r_squared_adj"], f"{label}/r_squared_adj"
+        res.adj_r_squared, ref["adj_r_squared"], f"{label}/adj_r_squared"
     )
     _assert_close(
         res.f_statistic, ref["f_statistic"], f"{label}/f_statistic", rtol=rtol

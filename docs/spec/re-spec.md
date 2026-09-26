@@ -121,7 +121,7 @@ wx.shape[1]`）と自動的に一致する。この副産物として`estimator(
 推定量になっている（`linearmodels.HomoskedasticCovariance`の`cov_type="unadjusted"`実装を
 確認済み）ため、FEのように`cov_params`を独自に作り直す必要は無い。
 
-一方`estimator().f_statistic()`/`f_p_value()`・`r_squared()`/`r_squared_adj()`はこの時点でも
+一方`estimator().f_statistic()`/`f_p_value()`・`r_squared()`/`adj_r_squared()`はこの時点でも
 正しくない（`has_intercept()==false`扱いになるため）。正しいF統計量・パネル固有R²は
 下記3.4節・3.5節でRE独自に計算し直す。
 

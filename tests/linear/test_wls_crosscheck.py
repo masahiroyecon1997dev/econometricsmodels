@@ -94,7 +94,7 @@ def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
     """
     _assert_scalar_close(res.r_squared, ref["r_squared"], f"{label}/r_squared")
     _assert_scalar_close(
-        res.r_squared_adj, ref["r_squared_adj"], f"{label}/r_squared_adj"
+        res.adj_r_squared, ref["adj_r_squared"], f"{label}/adj_r_squared"
     )
     _assert_scalar_close(res.aic, ref["aic"], f"{label}/aic")
     _assert_scalar_close(res.bic, ref["bic"], f"{label}/bic")

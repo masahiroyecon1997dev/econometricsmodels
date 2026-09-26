@@ -363,7 +363,7 @@ pub struct IVResult {
     #[pyo3(get)]
     pub r_squared: f64,
     #[pyo3(get)]
-    pub r_squared_adj: f64,
+    pub adj_r_squared: f64,
     /// Weak-instrument diagnostic: the partial F-statistic for each endogenous
     /// variable (keyed by variable name), testing the excluded instruments' joint
     /// significance after partialling out `x_exog` (`docs/spec/iv-spec.md` 3.4節).
@@ -690,7 +690,7 @@ pub(crate) fn fit(
             f_statistic: estimator.f_statistic(),
             f_p_value: estimator.f_p_value(),
             r_squared: estimator.r_squared(),
-            r_squared_adj: estimator.r_squared_adj(),
+            adj_r_squared: estimator.adj_r_squared(),
             weak_instrument_f_statistics: weak_instrument_f_statistics.into_iter().collect(),
             overid_statistic: estimator.hansen_j_statistic(),
             overid_p_value: estimator.hansen_j_p_value(),
@@ -728,7 +728,7 @@ pub(crate) fn fit(
         f_statistic: estimator.f_statistic(),
         f_p_value: estimator.f_p_value(),
         r_squared: estimator.r_squared(),
-        r_squared_adj: estimator.r_squared_adj(),
+        adj_r_squared: estimator.adj_r_squared(),
         weak_instrument_f_statistics: weak_instrument_f_statistics.into_iter().collect(),
         overid_statistic: estimator.sargan_statistic(),
         overid_p_value: estimator.sargan_p_value(),

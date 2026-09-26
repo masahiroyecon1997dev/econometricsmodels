@@ -18,7 +18,7 @@ _IV_SCALAR_KEYS = (
     "nobs",
     "df_resid",
     "r_squared",
-    "r_squared_adj",
+    "adj_r_squared",
     "f_statistic",
     "f_p_value",
     "weak_instrument_f",

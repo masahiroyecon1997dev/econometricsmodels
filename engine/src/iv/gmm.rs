@@ -275,7 +275,7 @@ pub struct GmmEstimator {
     df_resid: usize,
     df_model: usize,
     r_squared: f64,
-    r_squared_adj: f64,
+    adj_r_squared: f64,
     /// F統計量。常にロバストWald検定（χ²、`df_model`で割らない生の二次形式、
     /// モジュール冒頭のdocコメント参照）。
     f_statistic: f64,
@@ -632,7 +632,7 @@ impl GmmEstimator {
             (0..n).map(|i| (*y.get(i, 0)).powi(2)).sum()
         };
         let r_squared = 1.0 - ssr / sst;
-        let r_squared_adj = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
+        let adj_r_squared = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
 
         let (f_statistic, f_p_value) = if df_model == 0 {
             // 説明変数が定数項のみ（傾き係数が無い）モデル。検定対象が存在しないため
@@ -663,7 +663,7 @@ impl GmmEstimator {
             df_resid,
             df_model,
             r_squared,
-            r_squared_adj,
+            adj_r_squared,
             f_statistic,
             f_p_value,
             hansen_j_statistic,
@@ -784,8 +784,8 @@ impl GmmEstimator {
     }
 
     /// 自由度調整済み決定係数。
-    pub fn r_squared_adj(&self) -> f64 {
-        self.r_squared_adj
+    pub fn adj_r_squared(&self) -> f64 {
+        self.adj_r_squared
     }
 
     /// F統計量。常にロバストWald検定（χ²、`df_model`で割らない生の二次形式、

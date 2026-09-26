@@ -73,7 +73,7 @@ OLS（`OLSResult`、`engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
 | `cov_type` | OLS共通 | サポート対象は3.1節 |
 | `f_statistic` / `f_p_value` | OLS共通 | そのまま踏襲（ただしengine側の実装はOLSの単純な流用ではない。傾き係数`k`個の同時Wald検定をFE/RE独自の`cov_type`別`cov_params`・パネル自由度調整済み`df_resid`で行う） |
 | `log_likelihood` / `aic` / `bic` | OLS共通 | FE/REは最小二乗族で正規性下の尤度が定義できるため含める |
-| `r_squared_within` / `r_squared_between` / `r_squared_overall` | 新規追加（OLSの`r_squared`/`r_squared_adj`を置き換え） | 詳細は2.3節 |
+| `r_squared_within` / `r_squared_between` / `r_squared_overall` | 新規追加（OLSの`r_squared`/`adj_r_squared`を置き換え） | 詳細は2.3節 |
 
 ### 2.2 OLSの`nobs`→`n_obs`リネーム
 
@@ -85,7 +85,7 @@ OLS（`OLSResult`、`engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
 
 - `r_squared_within` / `r_squared_between` / `r_squared_overall`の3フィールドを`fit()`の
   戻り値に含める。
-- **bareの`r_squared`/`r_squared_adj`は廃止する**（OLSの`r_squared`をそのまま流用しない）。
+- **bareの`r_squared`/`adj_r_squared`は廃止する**（OLSの`r_squared`をそのまま流用しない）。
   パネルモデルでは「どのR²か」が一意に決まらないため、曖昧な単一フィールドを残さず
   明示的な3フィールドのみとする。
 - 修正済み（adjusted）版の3種展開はv1スコープ外とし、必要になった時点で別途検討する

@@ -1112,7 +1112,7 @@ impl ReEstimator {
     /// 掛けるだけの式で`has_intercept`フラグに依存しない）。
     ///
     /// **一方`estimator().std_errors()`/`t_stats()`/`p_values()`/`conf_lower()`/
-    /// `conf_upper()`/`f_statistic()`/`f_p_value()`・`r_squared()`/`r_squared_adj()`は
+    /// `conf_upper()`/`f_statistic()`/`f_p_value()`・`r_squared()`/`adj_r_squared()`は
     /// このオブジェクト単体では正しくない**——`OlsInput::from_columns`に
     /// `include_intercept=false`で渡している（モジュールdoc「`OlsEstimator`への委譲」）
     /// ため`has_intercept()==false`扱いになる（`f_statistic`は変換済み定数項も含めて

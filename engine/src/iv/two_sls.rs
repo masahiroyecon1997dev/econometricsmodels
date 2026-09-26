@@ -110,7 +110,7 @@ pub struct TwoSlsEstimator {
     df_resid: usize,
     df_model: usize,
     r_squared: f64,
-    r_squared_adj: f64,
+    adj_r_squared: f64,
     /// F統計量。`cov_type=Classical`なら古典的F検定、それ以外（HC0-3/HAC/cluster）は
     /// ロバストWald検定（OLSと同じ切り替えロジック、`docs/spec/iv-spec.md`2章）
     f_statistic: f64,
@@ -345,7 +345,7 @@ impl TwoSlsEstimator {
             (0..n).map(|i| (*input.y().get(i, 0)).powi(2)).sum()
         };
         let r_squared = 1.0 - ssr / sst;
-        let r_squared_adj = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
+        let adj_r_squared = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
 
         let df_model = k - k_constant;
         let (f_statistic, f_p_value) = if df_model == 0 {
@@ -489,7 +489,7 @@ impl TwoSlsEstimator {
             df_resid,
             df_model,
             r_squared,
-            r_squared_adj,
+            adj_r_squared,
             f_statistic,
             f_p_value,
             wu_hausman_statistic,
@@ -576,8 +576,8 @@ impl TwoSlsEstimator {
     }
 
     /// 自由度調整済み決定係数。
-    pub fn r_squared_adj(&self) -> f64 {
-        self.r_squared_adj
+    pub fn adj_r_squared(&self) -> f64 {
+        self.adj_r_squared
     }
 
     /// F統計量。
@@ -2097,7 +2097,7 @@ mod tests {
         assert!((first_stage_estimator.f_statistic() - expected.f_statistic()).abs() < 1e-8);
     }
 
-    /// `r_squared`/`r_squared_adj`/`df_resid`/`df_model`を、構造残差のSSR・元の`y`のTSSから
+    /// `r_squared`/`adj_r_squared`/`df_resid`/`df_model`を、構造残差のSSR・元の`y`のTSSから
     /// 素朴な式で独立計算し照合する。
     #[test]
     fn fit_computes_r_squared_matching_manual_formula() {
@@ -2113,11 +2113,11 @@ mod tests {
         let sst: f64 = y.iter().map(|v| (v - y_mean).powi(2)).sum();
         let expected_r_squared = 1.0 - ssr / sst;
         let expected_df_resid = n - k;
-        let expected_r_squared_adj =
+        let expected_adj_r_squared =
             1.0 - ((n - 1) as f64 / expected_df_resid as f64) * (1.0 - expected_r_squared);
 
         assert!((estimator.r_squared() - expected_r_squared).abs() < 1e-8);
-        assert!((estimator.r_squared_adj() - expected_r_squared_adj).abs() < 1e-8);
+        assert!((estimator.adj_r_squared() - expected_adj_r_squared).abs() < 1e-8);
         assert_eq!(estimator.df_resid(), expected_df_resid);
         assert_eq!(estimator.df_model(), k - 1);
     }

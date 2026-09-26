@@ -2739,7 +2739,7 @@ mod tests {
             .marginal_effects(MarginalEffectsAt::Overall, 0.95)
             .unwrap();
         assert!(effects.param_names().is_empty());
-        assert!(effects.dydx().is_empty());
+        assert!(effects.effect().is_empty());
     }
 
     /// `marginal_effects(at="overall")`の`dydx`を、実装の内部ヘルパー（`overall_w_and_s`/
@@ -2795,7 +2795,7 @@ mod tests {
         };
         let params = estimator.params();
         for (idx, j) in (1..k).enumerate() {
-            assert!((effects.dydx()[idx] - dydx_j(params, j)).abs() < 1e-9);
+            assert!((effects.effect()[idx] - dydx_j(params, j)).abs() < 1e-9);
         }
 
         // 標準誤差の独立検証: `dydx_j`をfit済みパラメータの周りで数値微分して
@@ -2828,7 +2828,7 @@ mod tests {
         let z_crit = normal.inverse_cdf(0.975);
         for idx in 0..2 {
             let se = effects.std_errors()[idx];
-            assert!((effects.z_stats()[idx] - effects.dydx()[idx] / se).abs() < 1e-9);
+            assert!((effects.z_stats()[idx] - effects.effect()[idx] / se).abs() < 1e-9);
             let expected_p = 2.0 * (1.0 - normal.cdf(effects.z_stats()[idx].abs()));
             assert!((effects.p_values()[idx] - expected_p).abs() < 1e-9);
             assert!(
@@ -2874,7 +2874,7 @@ mod tests {
             .marginal_effects(MarginalEffectsAt::Mean, 0.95)
             .unwrap();
 
-        assert!((overall.dydx()[0] - at_mean.dydx()[0]).abs() > 1e-9);
+        assert!((overall.effect()[0] - at_mean.effect()[0]).abs() > 1e-9);
 
         // 独立再計算: x̄=[1, 25, 1]（定数項1、x1の平均25、x2の平均1）でφ(z̄)を評価
         let params = estimator.params();
@@ -2882,7 +2882,7 @@ mod tests {
         let z_bar: f64 = (0..3).map(|m| x_bar[m] * params[m]).sum();
         let w = Normal::standard().pdf(z_bar);
         for (idx, j) in (1..3).enumerate() {
-            assert!((at_mean.dydx()[idx] - w * params[j]).abs() < 1e-9);
+            assert!((at_mean.effect()[idx] - w * params[j]).abs() < 1e-9);
         }
     }
 
@@ -2930,8 +2930,8 @@ mod tests {
             .marginal_effects(MarginalEffectsAt::Median, 0.95)
             .unwrap();
 
-        assert!((at_median.dydx()[0] - at_mean.dydx()[0]).abs() > 1e-9);
-        assert!((at_median.dydx()[0] - overall.dydx()[0]).abs() > 1e-9);
+        assert!((at_median.effect()[0] - at_mean.effect()[0]).abs() > 1e-9);
+        assert!((at_median.effect()[0] - overall.effect()[0]).abs() > 1e-9);
 
         // 独立再計算: x̄=[1, 30, 2]（定数項1、x1の中央値30、x2の中央値2）でφ(z̄)を評価
         let params = estimator.params();
@@ -2939,7 +2939,7 @@ mod tests {
         let z_bar: f64 = (0..3).map(|m| x_bar[m] * params[m]).sum();
         let w = Normal::standard().pdf(z_bar);
         for (idx, j) in (1..3).enumerate() {
-            assert!((at_median.dydx()[idx] - w * params[j]).abs() < 1e-9);
+            assert!((at_median.effect()[idx] - w * params[j]).abs() < 1e-9);
         }
     }
 

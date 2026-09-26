@@ -361,7 +361,7 @@ impl LogitResult {
 
         Ok(MarginalEffectsResult {
             param_names: effects.param_names().to_vec(),
-            effect: effects.dydx().to_vec(),
+            effect: effects.effect().to_vec(),
             std_errors: effects.std_errors().to_vec(),
             z_stats: effects.z_stats().to_vec(),
             p_values: effects.p_values().to_vec(),

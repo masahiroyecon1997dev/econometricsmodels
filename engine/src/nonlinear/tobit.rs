@@ -4152,7 +4152,7 @@ mod tests {
             )
             .unwrap();
         assert!(effects.param_names().is_empty());
-        assert!(effects.dydx().is_empty());
+        assert!(effects.effect().is_empty());
     }
 
     #[test]
@@ -4213,7 +4213,7 @@ mod tests {
                 .unwrap();
             assert_eq!(effects.param_names(), ["x1".to_string(), "x2".to_string()]);
             for (idx, j) in (1..3).enumerate() {
-                assert!((effects.dydx()[idx] - estimator.params()[j]).abs() < 1e-12);
+                assert!((effects.effect()[idx] - estimator.params()[j]).abs() < 1e-12);
                 assert!(
                     (effects.std_errors()[idx] - estimator.std_errors()[j]).abs() < 1e-9,
                     "at={at:?}, idx={idx}, actual={}, expected={}",
@@ -4277,9 +4277,9 @@ mod tests {
         let params = estimator.params();
         let sigma = estimator.sigma();
         assert!(
-            (effects.dydx()[0] - dydx_ame(params, sigma)).abs() < 1e-6,
+            (effects.effect()[0] - dydx_ame(params, sigma)).abs() < 1e-6,
             "actual={}, expected={}",
-            effects.dydx()[0],
+            effects.effect()[0],
             dydx_ame(params, sigma)
         );
 
@@ -4295,9 +4295,9 @@ mod tests {
             .sum::<f64>()
             / (n as f64);
         assert!(
-            (effects.dydx()[0] - expected_dydx_exact).abs() < 1e-9,
+            (effects.effect()[0] - expected_dydx_exact).abs() < 1e-9,
             "actual={}, expected={expected_dydx_exact}",
-            effects.dydx()[0]
+            effects.effect()[0]
         );
 
         // 標準誤差の独立検証: `dydx_ame`をfit済み`(β,σ)`の周りで数値微分してヤコビアン行を
@@ -4367,8 +4367,8 @@ mod tests {
             )
             .unwrap();
 
-        assert!((overall.dydx()[0] - at_mean.dydx()[0]).abs() > 1e-9);
-        assert!((at_mean.dydx()[0] - at_median.dydx()[0]).abs() < 1e-12);
+        assert!((overall.effect()[0] - at_mean.effect()[0]).abs() > 1e-9);
+        assert!((at_mean.effect()[0] - at_median.effect()[0]).abs() < 1e-12);
 
         // x1の平均・中央値がともに4.5（[1..8]の対称なデータのため）であることを利用し、
         // `expected_observed_closed_form`から独立に再計算したdydxと突き合わせる。
@@ -4381,7 +4381,7 @@ mod tests {
         let expected_dydx = (expected_observed_closed_form(mu(4.5 + h), sigma, lower, upper)
             - expected_observed_closed_form(mu(4.5 - h), sigma, lower, upper))
             / (2.0 * h);
-        assert!((at_mean.dydx()[0] - expected_dydx).abs() < 1e-6);
+        assert!((at_mean.effect()[0] - expected_dydx).abs() < 1e-6);
     }
 
     /// `target="E[y|x]"`が右打ち切りのみのデータでも正しく計算できることを、
@@ -4431,9 +4431,9 @@ mod tests {
             / (n as f64);
 
         assert!(
-            (effects.dydx()[0] - expected_dydx).abs() < 1e-6,
+            (effects.effect()[0] - expected_dydx).abs() < 1e-6,
             "actual={}, expected={expected_dydx}",
-            effects.dydx()[0]
+            effects.effect()[0]
         );
     }
 
@@ -4485,9 +4485,9 @@ mod tests {
             / (n as f64);
 
         assert!(
-            (effects.dydx()[0] - expected_dydx).abs() < 1e-6,
+            (effects.effect()[0] - expected_dydx).abs() < 1e-6,
             "actual={}, expected={expected_dydx}",
-            effects.dydx()[0]
+            effects.effect()[0]
         );
     }
 
@@ -4536,9 +4536,9 @@ mod tests {
         let params = estimator.params();
         let sigma = estimator.sigma();
         assert!(
-            (effects.dydx()[0] - dydx_ame(params, sigma)).abs() < 1e-9,
+            (effects.effect()[0] - dydx_ame(params, sigma)).abs() < 1e-9,
             "actual={}, expected={}",
-            effects.dydx()[0],
+            effects.effect()[0],
             dydx_ame(params, sigma)
         );
 
@@ -4611,13 +4611,13 @@ mod tests {
             / (n as f64);
 
         assert!(
-            (effects.dydx()[0] - expected_dydx).abs() < 1e-9,
+            (effects.effect()[0] - expected_dydx).abs() < 1e-9,
             "actual={}, expected={expected_dydx}",
-            effects.dydx()[0]
+            effects.effect()[0]
         );
         // x1の真の係数は正（+2相当）なので、右打ち切りのみでは非打ち切り確率の限界効果は
         // 負になるはず（xが増えるほど上側で打ち切られやすくなるため）。
-        assert!(effects.dydx()[0] < 0.0, "dydx={}", effects.dydx()[0]);
+        assert!(effects.effect()[0] < 0.0, "dydx={}", effects.effect()[0]);
     }
 
     /// `target="P(uncensored)"`が両側打ち切りのデータでも正しく計算できることを検証する。
@@ -4660,9 +4660,9 @@ mod tests {
             / (n as f64);
 
         assert!(
-            (effects.dydx()[0] - expected_dydx).abs() < 1e-9,
+            (effects.effect()[0] - expected_dydx).abs() < 1e-9,
             "actual={}, expected={expected_dydx}",
-            effects.dydx()[0]
+            effects.effect()[0]
         );
     }
 

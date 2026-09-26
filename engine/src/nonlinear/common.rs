@@ -652,8 +652,8 @@ pub fn column_medians(x: &Mat<f64>) -> Vec<f64> {
 pub struct MarginalEffects {
     /// 説明変数名（定数項を除く）
     param_names: Vec<String>,
-    /// 限界効果 `dy/dx`
-    dydx: Vec<f64>,
+    /// 限界効果の推定値（`dy/dx`）
+    effect: Vec<f64>,
     /// デルタ法標準誤差
     std_errors: Vec<f64>,
     /// z統計量
@@ -675,7 +675,7 @@ impl MarginalEffects {
     /// 結果からこの構造体を構築するために必要。
     pub(crate) fn from_parts(
         param_names: Vec<String>,
-        dydx: Vec<f64>,
+        effect: Vec<f64>,
         std_errors: Vec<f64>,
         z_stats: Vec<f64>,
         p_values: Vec<f64>,
@@ -687,7 +687,11 @@ impl MarginalEffects {
         // 検証する（`TobitInput::from_columns`の`x_columns.len() == x_names.len()`と
         // 同じ方針、rust-reviewer指摘）。
         let n = param_names.len();
-        debug_assert_eq!(dydx.len(), n, "dydx length must match param_names length");
+        debug_assert_eq!(
+            effect.len(),
+            n,
+            "effect length must match param_names length"
+        );
         debug_assert_eq!(
             std_errors.len(),
             n,
@@ -715,7 +719,7 @@ impl MarginalEffects {
         );
         Self {
             param_names,
-            dydx,
+            effect,
             std_errors,
             z_stats,
             p_values,
@@ -729,9 +733,9 @@ impl MarginalEffects {
         &self.param_names
     }
 
-    /// 限界効果 `dy/dx`
-    pub fn dydx(&self) -> &[f64] {
-        &self.dydx
+    /// 限界効果の推定値（`dy/dx`）
+    pub fn effect(&self) -> &[f64] {
+        &self.effect
     }
 
     /// デルタ法標準誤差
@@ -831,7 +835,7 @@ pub fn marginal_effects_from_w_s(
 
     let k_constant = usize::from(has_intercept);
     let mut out_param_names = Vec::with_capacity(k - k_constant);
-    let mut out_dydx = Vec::with_capacity(k - k_constant);
+    let mut out_effect = Vec::with_capacity(k - k_constant);
     let mut std_errors = Vec::with_capacity(k - k_constant);
     let mut z_stats = Vec::with_capacity(k - k_constant);
     let mut p_values = Vec::with_capacity(k - k_constant);
@@ -850,7 +854,7 @@ pub fn marginal_effects_from_w_s(
         let stat = inference::compute_inference_stat(&normal, dydx_j, se, z_crit);
 
         out_param_names.push(param_names[j].clone());
-        out_dydx.push(dydx_j);
+        out_effect.push(dydx_j);
         std_errors.push(se);
         z_stats.push(stat.stat);
         p_values.push(stat.p_value);
@@ -860,7 +864,7 @@ pub fn marginal_effects_from_w_s(
 
     Ok(MarginalEffects {
         param_names: out_param_names,
-        dydx: out_dydx,
+        effect: out_effect,
         std_errors,
         z_stats,
         p_values,
@@ -4941,13 +4945,13 @@ mod tests {
         .unwrap();
 
         assert_eq!(effects.param_names(), ["x1".to_string(), "x2".to_string()]);
-        assert_eq!(effects.dydx().len(), 2);
+        assert_eq!(effects.effect().len(), 2);
 
         let (dydx, jacobian) = dydx_and_jacobian(k, &params, w, &s);
         let normal = Normal::new(0.0, 1.0).unwrap();
         let z_crit = normal.inverse_cdf(0.975);
         for (idx, j) in (1..k).enumerate() {
-            assert!((effects.dydx()[idx] - dydx[j]).abs() < 1e-12);
+            assert!((effects.effect()[idx] - dydx[j]).abs() < 1e-12);
 
             let jac_row: Vec<f64> = (0..k).map(|m| *jacobian.get(j, m)).collect();
             let mut var_j = 0.0;

@@ -3,7 +3,7 @@
 
 `tests/fixtures/benchmarks/iv_gmm.json`（`benchmark/iv/fixtures/
 generate_iv_gmm_fixtures.py`で生成）を読み込み、10個の合成データシナリオ×
-classical/HC0/HC1/HAC（+クラスター、baselineのみ）を`gmm_weight_type="unadjusted"`
+classical/HC0/HC1/HAC（+クラスター、baselineのみ）を`gmm_weight_type="classical"`
 固定で、加えてbaselineシナリオ×`cov_type="classical"`固定で他の`gmm_weight_type`
 （robust/cluster/kernel）を検証する（ユーザー確認済みの検証範囲。
 `gmm_weight_type`×`cov_type`の全組み合わせ（10シナリオ×4weight_type×6cov_type）は
@@ -121,7 +121,7 @@ def _check_result(
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
 
     # check_overid=False: one_step（linearmodelsのiter_limit=1）のHansen J（過剰識別検定）専用の抜け穴。
-    # gmm_weight_type="unadjusted"はSがZ'Zに固定され残差に依存しないため、係数・SEは
+    # gmm_weight_type="classical"はSがZ'Zに固定され残差に依存しないため、係数・SEは
     # one_step/two_step/iterated（iter_limit=1/2/3）で完全に一致する（実測確認済み）。本実装のHansen Jも
     # この不変性を保ち、one_stepでもtwo_step以降（2SLSのSarganと機械
     # 精度一致）と同じ値を返す（`gmm.rs`のσ̂²·Z'Zスケーリング設計、モジュールdoc
@@ -173,7 +173,7 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
     instruments = INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
     df = pl.read_csv(DATA_DIR / f"iv_{scenario}.csv")
     options = IVOptions(
-        estimator="gmm", gmm_weight_type="unadjusted", cov_type=cov_type
+        estimator="gmm", gmm_weight_type="classical", cov_type=cov_type
     )
     res = IV(
         df,
@@ -186,20 +186,20 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
 
     _check_result(
         res,
-        fixtures[scenario]["unadjusted"][cov_type],
-        f"{scenario}/unadjusted/{cov_type}",
+        fixtures[scenario]["classical"][cov_type],
+        f"{scenario}/classical/{cov_type}",
     )
 
 
 def test_cluster_matches_linearmodels(fixtures):
-    """クラスターロバストSE（`gmm_weight_type="unadjusted"`固定）。
+    """クラスターロバストSE（`gmm_weight_type="classical"`固定）。
     `generate_iv_gmm_fixtures.py`と同じ疑似グループ（行番号%10）を再現する。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     df = with_cluster_groups(df, 10)
     options = IVOptions(
         estimator="gmm",
-        gmm_weight_type="unadjusted",
+        gmm_weight_type="classical",
         cov_type="cluster",
         cluster_col="cluster_group",
     )
@@ -212,13 +212,13 @@ def test_cluster_matches_linearmodels(fixtures):
         options=options,
     ).fit()
 
-    ref = fixtures["baseline"]["unadjusted"]["cluster"]
+    ref = fixtures["baseline"]["classical"]["cluster"]
     _assert_dict_close(res.params, ref["coef"], "cluster/coef")
     _assert_dict_close(res.std_errors, ref["se"], "cluster/se")
 
 
 def test_cluster_imbalanced_matches_linearmodels(fixtures):
-    """不均衡クラスタ（`gmm_weight_type="unadjusted"`固定、サイズ
+    """不均衡クラスタ（`gmm_weight_type="classical"`固定、サイズ
     [2, 3, 5, 10, 30, 50]のタイル）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
@@ -226,7 +226,7 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
     df = df.with_columns(pl.Series("cluster_group", groups))
     options = IVOptions(
         estimator="gmm",
-        gmm_weight_type="unadjusted",
+        gmm_weight_type="classical",
         cov_type="cluster",
         cluster_col="cluster_group",
     )
@@ -239,7 +239,7 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
         options=options,
     ).fit()
 
-    ref = fixtures["baseline"]["unadjusted"]["cluster_imbalanced"]
+    ref = fixtures["baseline"]["classical"]["cluster_imbalanced"]
     _assert_dict_close(res.params, ref["coef"], "cluster_imbalanced/coef")
     _assert_dict_close(res.std_errors, ref["se"], "cluster_imbalanced/se")
 
@@ -253,7 +253,7 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
     options = IVOptions(
-        estimator="gmm", gmm_weight_type="unadjusted", cov_type=cov_type
+        estimator="gmm", gmm_weight_type="classical", cov_type=cov_type
     )
     res = IV(
         df,
@@ -266,22 +266,20 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
 
     _check_result(
         res,
-        fixtures["multi_endog"]["unadjusted"][cov_type],
-        f"multi_endog/unadjusted/{cov_type}",
+        fixtures["multi_endog"]["classical"][cov_type],
+        f"multi_endog/classical/{cov_type}",
     )
 
 
-def test_kernel_hac_matches_linearmodels(fixtures):
-    """`gmm_weight_type="kernel"`×`cov_type="hac"`の組み合わせ（実務上最も典型的な
+def test_hac_weight_hac_cov_matches_linearmodels(fixtures):
+    """`gmm_weight_type="hac"`×`cov_type="hac"`の組み合わせ（実務上最も典型的な
     「HACカーネル重み＋HAC標準誤差」の組み合わせ経路が、他の`gmm_weight_type`×
     `cov_type`の組み合わせと同様に独立して機能することを確認する。
     `test_other_weight_types_match_linearmodels`はcov_type="classical"固定のため
     この組み合わせを通らない（`testing-completeness-reviewer`指摘）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
-    options = IVOptions(
-        estimator="gmm", gmm_weight_type="kernel", cov_type="hac"
-    )
+    options = IVOptions(estimator="gmm", gmm_weight_type="hac", cov_type="hac")
     res = IV(
         df,
         y="y",
@@ -291,7 +289,7 @@ def test_kernel_hac_matches_linearmodels(fixtures):
         options=options,
     ).fit()
 
-    _check_result(res, fixtures["kernel_hac"], "kernel_hac")
+    _check_result(res, fixtures["hac_weight_hac_cov"], "hac_weight_hac_cov")
 
 
 # linearmodelsの`iter_limit`（初回推定を含む推定回数）ごとの対応する本実装の
@@ -320,7 +318,7 @@ def test_gmm_type_matches_linearmodels(fixtures, n_iter):
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     options = IVOptions(
         estimator="gmm",
-        gmm_weight_type="unadjusted",
+        gmm_weight_type="classical",
         cov_type="classical",
         **_GMM_TYPE_OPTIONS[n_iter],
     )
@@ -341,11 +339,11 @@ def test_gmm_type_matches_linearmodels(fixtures, n_iter):
     )
 
 
-@pytest.mark.parametrize("gmm_weight_type", ["robust", "cluster", "kernel"])
+@pytest.mark.parametrize("gmm_weight_type", ["robust", "cluster", "hac"])
 def test_other_weight_types_match_linearmodels(fixtures, gmm_weight_type):
     """`gmm_weight_type`（点推定の重み）が`cov_type`（SE計算方式、ここでは`classical`
     固定）と独立な軸であることを、baselineシナリオで数値照合する
-    （`gmm_weight_type="unadjusted"`は`test_matches_linearmodels`で既に検証済み）。
+    （`gmm_weight_type="classical"`は`test_matches_linearmodels`で既に検証済み）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     kwargs = {}

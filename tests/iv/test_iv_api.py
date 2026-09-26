@@ -325,21 +325,16 @@ def test_nonrobust_is_alias_for_classical(iv_dataset, cov_type):
 @pytest.mark.parametrize(
     "gmm_weight_type, expected",
     [
-        ("UNADJUSTED", "unadjusted"),
-        ("Unadjusted", "unadjusted"),
+        ("CLASSICAL", "classical"),
+        ("Classical", "classical"),
         ("ROBUST", "robust"),
-        ("KERNEL", "kernel"),
-        ("homoskedastic", "unadjusted"),
-        ("HOMOSKEDASTIC", "unadjusted"),
-        ("heteroskedastic", "robust"),
-        ("HETEROSKEDASTIC", "robust"),
+        ("HAC", "hac"),
     ],
 )
-def test_weight_type_is_case_insensitive_and_aliased(
+def test_weight_type_matches_canonical_result_regardless_of_case(
     iv_dataset, gmm_weight_type, expected
 ):
-    """`gmm_weight_type`が大文字小文字を区別しないこと、および`"homoskedastic"`/
-    `"heteroskedastic"`が`"unadjusted"`/`"robust"`のエイリアスであること
+    """`gmm_weight_type`が大文字小文字を区別しないこと
     （`engine_pybind`側の`parse_weight_type`と対になる、Python API境界での確認。
     `testing-completeness-reviewer`指摘）。
     """
@@ -477,13 +472,13 @@ def test_include_intercept_false_allows_const_in_instruments():
 
 
 @pytest.mark.parametrize(
-    "gmm_weight_type", ["unadjusted", "robust", "cluster", "kernel"]
+    "gmm_weight_type", ["classical", "robust", "cluster", "hac"]
 )
 def test_gmm_weight_type_options_run(
     iv_dataset, clustered_dataset, gmm_weight_type
 ):
     """`estimator="gmm"`の`gmm_weight_type`各値が成功パスで動作すること（数値照合は
-    `test_iv_gmm_reference.py`）。`cluster`/`kernel`は`cov_type`と同じ
+    `test_iv_gmm_reference.py`）。`cluster`/`hac`は`cov_type`と同じ
     `cluster_col`/`hac_lags`フィールドを共用する仕様
     （`engine_pybind/src/iv/CLAUDE.md`参照）。
     """
@@ -505,7 +500,7 @@ def test_gmm_cov_type_options_run_independently_of_weight_type(
     iv_dataset, clustered_dataset, cov_type
 ):
     """`estimator="gmm"`で`cov_type`（SE計算方式）と`gmm_weight_type`（点推定に使う
-    重み行列、既定`unadjusted`のまま）が独立な軸であること
+    重み行列、既定`classical`のまま）が独立な軸であること
     （`engine_pybind/src/iv/common.rs`のモジュールdocコメント参照）を、
     `gmm_weight_type`を固定したまま`cov_type`だけ変えても成功パスで動作する
     ことで確認する。
@@ -528,7 +523,7 @@ def test_estimator_label(iv_dataset, estimator):
 
 
 @pytest.mark.parametrize(
-    "gmm_weight_type", ["unadjusted", "robust", "cluster", "kernel"]
+    "gmm_weight_type", ["classical", "robust", "cluster", "hac"]
 )
 def test_weight_type_label(iv_dataset, clustered_dataset, gmm_weight_type):
     """`res.gmm_weight_type`が`estimator="gmm"`のとき指定した`gmm_weight_type`
@@ -567,18 +562,12 @@ def test_estimator_is_case_insensitive(iv_dataset, estimator, expected_label):
 @pytest.mark.parametrize(
     "gmm_weight_type, expected_label",
     [
-        ("UNADJUSTED", "unadjusted"),
-        ("Unadjusted", "unadjusted"),
+        ("CLASSICAL", "classical"),
+        ("Classical", "classical"),
         ("ROBUST", "robust"),
         ("Robust", "robust"),
         ("CLUSTER", "cluster"),
-        ("KERNEL", "kernel"),
-        # エイリアス入力は`cov_type`の`"nonrobust"`と同じく正準名へは変換されず、
-        # 小文字化されたそのままの文字列がエコーされる（`IVResult.gmm_weight_type`の
-        # docコメント参照）。
-        ("homoskedastic", "homoskedastic"),
-        ("HOMOSKEDASTIC", "homoskedastic"),
-        ("heteroskedastic", "heteroskedastic"),
+        ("HAC", "hac"),
     ],
 )
 def test_weight_type_is_case_insensitive(

@@ -1,6 +1,6 @@
 {
   "baseline": {
-    "unadjusted": {
+    "classical": {
       "classical": {
         "coef": {
           "const": 0.760247049460046,
@@ -59,7 +59,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:48.348123+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
@@ -129,7 +129,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:48.436895+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc0",
           "cov_type_linearmodels": "robust",
@@ -199,7 +199,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:48.519805+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
@@ -269,7 +269,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:48.606476+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
@@ -334,7 +334,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:48.704004+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "cluster",
           "cov_type_linearmodels": "clustered",
@@ -399,7 +399,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:48.791300+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "cluster",
           "cov_type_linearmodels": "clustered",
@@ -551,7 +551,7 @@
         }
       }
     },
-    "kernel": {
+    "hac": {
       "classical": {
         "coef": {
           "const": 0.7577244928914004,
@@ -610,7 +610,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:49.064655+00:00",
-          "weight_type_requested": "kernel",
+          "weight_type_requested": "hac",
           "weight_type_linearmodels": "kernel",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
@@ -625,7 +625,7 @@
     }
   },
   "just_identified": {
-    "unadjusted": {
+    "classical": {
       "classical": {
         "coef": {
           "const": 0.9265541920639742,
@@ -684,7 +684,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:49.144295+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
@@ -754,7 +754,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:49.229167+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc0",
           "cov_type_linearmodels": "robust",
@@ -824,7 +824,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:49.295110+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
@@ -894,7 +894,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:49.369169+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
@@ -909,7 +909,7 @@
     }
   },
   "weak_instruments": {
-    "unadjusted": {
+    "classical": {
       "classical": {
         "coef": {
           "const": 0.5671762719641659,
@@ -968,7 +968,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:49.437655+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
@@ -1038,7 +1038,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:49.503097+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc0",
           "cov_type_linearmodels": "robust",
@@ -1108,7 +1108,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:49.578976+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
@@ -1178,7 +1178,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:49.650440+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
@@ -1193,7 +1193,7 @@
     }
   },
   "small_n": {
-    "unadjusted": {
+    "classical": {
       "classical": {
         "coef": {
           "const": 0.6340907721702564,
@@ -1252,7 +1252,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:49.709226+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
@@ -1322,7 +1322,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:49.773807+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc0",
           "cov_type_linearmodels": "robust",
@@ -1392,7 +1392,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:49.832625+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
@@ -1462,7 +1462,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:49.890385+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
@@ -1477,7 +1477,7 @@
     }
   },
   "high_variance": {
-    "unadjusted": {
+    "classical": {
       "classical": {
         "coef": {
           "const": 0.9656473911333914,
@@ -1536,7 +1536,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:49.963743+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
@@ -1606,7 +1606,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:50.064996+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc0",
           "cov_type_linearmodels": "robust",
@@ -1676,7 +1676,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:50.156387+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
@@ -1746,7 +1746,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:49.472515+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
@@ -1761,7 +1761,7 @@
     }
   },
   "heteroskedastic": {
-    "unadjusted": {
+    "classical": {
       "classical": {
         "coef": {
           "const": 0.7005814150211446,
@@ -1820,7 +1820,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:49.561076+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
@@ -1890,7 +1890,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:49.654350+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc0",
           "cov_type_linearmodels": "robust",
@@ -1960,7 +1960,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:49.749835+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
@@ -2030,7 +2030,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:49.830019+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
@@ -2045,7 +2045,7 @@
     }
   },
   "autocorrelated": {
-    "unadjusted": {
+    "classical": {
       "classical": {
         "coef": {
           "const": 1.0084846330274764,
@@ -2104,7 +2104,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:49.926860+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
@@ -2174,7 +2174,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:50.027034+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc0",
           "cov_type_linearmodels": "robust",
@@ -2244,7 +2244,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:50.133701+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
@@ -2314,7 +2314,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:50.224478+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
@@ -2329,7 +2329,7 @@
     }
   },
   "moderate_multicollinearity": {
-    "unadjusted": {
+    "classical": {
       "classical": {
         "coef": {
           "const": 0.3400460833683534,
@@ -2397,7 +2397,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:50.309754+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
@@ -2476,7 +2476,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:50.402480+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc0",
           "cov_type_linearmodels": "robust",
@@ -2555,7 +2555,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:50.489941+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
@@ -2634,7 +2634,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:50.566519+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
@@ -2649,7 +2649,7 @@
     }
   },
   "high_condition_number": {
-    "unadjusted": {
+    "classical": {
       "classical": {
         "coef": {
           "const": 0.34004608336835207,
@@ -2717,7 +2717,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:50.650125+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
@@ -2796,7 +2796,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:50.752169+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc0",
           "cov_type_linearmodels": "robust",
@@ -2875,7 +2875,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:50.837743+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
@@ -2954,7 +2954,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:50.913306+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
@@ -2969,7 +2969,7 @@
     }
   },
   "scale_variance_mild": {
-    "unadjusted": {
+    "classical": {
       "classical": {
         "coef": {
           "const": 0.34004608336834574,
@@ -3037,7 +3037,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:50.998357+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
@@ -3116,7 +3116,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:51.082338+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc0",
           "cov_type_linearmodels": "robust",
@@ -3195,7 +3195,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:51.172726+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
@@ -3274,7 +3274,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:51.255191+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
@@ -3289,7 +3289,7 @@
     }
   },
   "multi_endog": {
-    "unadjusted": {
+    "classical": {
       "classical": {
         "coef": {
           "const": 1.6211651677699592,
@@ -3359,7 +3359,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:51.351335+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
@@ -3440,7 +3440,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:51.463480+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc0",
           "cov_type_linearmodels": "robust",
@@ -3521,7 +3521,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:51.571780+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hc1",
           "cov_type_linearmodels": "robust",
@@ -3602,7 +3602,7 @@
           "reference": "linearmodels",
           "linearmodels_version": "7.0",
           "generated_at": "2026-09-13T06:53:51.680732+00:00",
-          "weight_type_requested": "unadjusted",
+          "weight_type_requested": "classical",
           "weight_type_linearmodels": "unadjusted",
           "cov_type_requested": "hac",
           "cov_type_linearmodels": "kernel",
@@ -3616,7 +3616,7 @@
       }
     }
   },
-  "kernel_hac": {
+  "hac_weight_hac_cov": {
     "coef": {
       "const": 0.7577244928914004,
       "x1": 1.0841971588176407,
@@ -3674,7 +3674,7 @@
       "reference": "linearmodels",
       "linearmodels_version": "7.0",
       "generated_at": "2026-09-13T06:53:51.758638+00:00",
-      "weight_type_requested": "kernel",
+      "weight_type_requested": "hac",
       "weight_type_linearmodels": "kernel",
       "cov_type_requested": "hac",
       "cov_type_linearmodels": "kernel",
@@ -3745,7 +3745,7 @@
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
         "generated_at": "2026-09-13T06:53:51.827333+00:00",
-        "weight_type_requested": "unadjusted",
+        "weight_type_requested": "classical",
         "weight_type_linearmodels": "unadjusted",
         "cov_type_requested": "classical",
         "cov_type_linearmodels": "unadjusted",
@@ -3815,7 +3815,7 @@
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
         "generated_at": "2026-09-13T06:53:51.907331+00:00",
-        "weight_type_requested": "unadjusted",
+        "weight_type_requested": "classical",
         "weight_type_linearmodels": "unadjusted",
         "cov_type_requested": "classical",
         "cov_type_linearmodels": "unadjusted",
@@ -3833,6 +3833,6 @@
     "generated_at": "2026-09-13T06:53:51.907557+00:00",
     "primary_reference": "linearmodels",
     "linearmodels_version": "7.0",
-    "note": "weight_type='unadjusted'固定で全10シナリオ×cov_type（classical/hc0/hc1/hac、baselineのみ追加でcluster/cluster_imbalanced）を検証する。scale_variance_mildはscale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）より緩いスケール差（x1*1e2, x2*1e-1）の成功パス（test-coverage-candidates.md項目11、2SLSのiv.jsonと同じ構成）。hc2/hc3は2SLSと同じ理由で対象外（`benchmark/iv/references/linearmodels_ref.py`のモジュールdocコメント参照）。他のweight_type（robust/cluster/kernel）はweight_typeとcov_typeが独立な軸であることの確認が目的のため、baselineシナリオ×cov_type=classicalのみで検証する（ユーザー確認済み）。test_stats/p_values/conf_int/f_statistic/f_p_valueは常にz分布・カイ二乗形式（qで割らない）で独自に計算し直した値（`gmm.rs`の設計、`run_gmm()`のモジュールdocコメント参照）。hansen_j_statistic/hansen_j_p_valueは過剰識別のときのみ値を持ち、丁度識別では`None`。wu_hausman_statistic相当のキーはGMMには存在しないため含まない。perfect_multicollinearity/G=2クラスター境界はここに含まない（2SLSの`iv.json`と同じ理由、G=2境界は`engine/src/iv/CLAUDE.md`「修正済み」参照）。multi_endog（複数内生変数、x_endog=['endog1','endog2']）はbenchmark/iv/datasets.pyの第一段階誤差vが内生変数ごとに独立になるよう修正した後のデータで生成（generate_iv_fixtures.pyの同名注記参照）。kernel_hac（weight_type='kernel'×cov_type='hac'）・gmm_iterations（1/3、既定値2以外の成功パス）も追加。"
+    "note": "weight_type='classical'固定で全10シナリオ×cov_type（classical/hc0/hc1/hac、baselineのみ追加でcluster/cluster_imbalanced）を検証する。scale_variance_mildはscale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）より緩いスケール差（x1*1e2, x2*1e-1）の成功パス（test-coverage-candidates.md項目11、2SLSのiv.jsonと同じ構成）。hc2/hc3は2SLSと同じ理由で対象外（`benchmark/iv/references/linearmodels_ref.py`のモジュールdocコメント参照）。他のweight_type（robust/cluster/hac）はweight_typeとcov_typeが独立な軸であることの確認が目的のため、baselineシナリオ×cov_type=classicalのみで検証する（ユーザー確認済み）。test_stats/p_values/conf_int/f_statistic/f_p_valueは常にz分布・カイ二乗形式（qで割らない）で独自に計算し直した値（`gmm.rs`の設計、`run_gmm()`のモジュールdocコメント参照）。hansen_j_statistic/hansen_j_p_valueは過剰識別のときのみ値を持ち、丁度識別では`None`。wu_hausman_statistic相当のキーはGMMには存在しないため含まない。perfect_multicollinearity/G=2クラスター境界はここに含まない（2SLSの`iv.json`と同じ理由、G=2境界は`engine/src/iv/CLAUDE.md`「修正済み」参照）。multi_endog（複数内生変数、x_endog=['endog1','endog2']）はbenchmark/iv/datasets.pyの第一段階誤差vが内生変数ごとに独立になるよう修正した後のデータで生成（generate_iv_fixtures.pyの同名注記参照）。hac_weight_hac_cov（weight_type='hac'×cov_type='hac'）・gmm_iterations（1/3、既定値2以外の成功パス）も追加。"
   }
 }

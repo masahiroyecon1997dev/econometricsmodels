@@ -13,10 +13,10 @@ GMM固有の`weight_type`軸（`cov_type`とは独立、`iv-spec.md`1.2節）が
 
 検証範囲（ユーザー確認済み、`cov_type`×`weight_type`の全組み合わせ
 （10シナリオ×4weight_type×6cov_type）は規模が大きすぎるため）:
-    - `weight_type="unadjusted"`固定で、全10シナリオ×cov_type（classical/hc0/hc1/
+    - `weight_type="classical"`固定で、全10シナリオ×cov_type（classical/hc0/hc1/
       hac、baselineのみ追加でcluster/cluster_imbalanced）を検証する
       （2SLSの`iv.json`と同じ組み合わせ）。
-    - 他のweight_type（robust/cluster/kernel）は、`weight_type`と`cov_type`が
+    - 他のweight_type（robust/cluster/hac）は、`weight_type`と`cov_type`が
       独立な軸であることの確認が目的のため、baselineシナリオ×cov_type=classical
       のみで動作確認する。
 
@@ -74,7 +74,7 @@ X_EXOG_BY_SCENARIO = {
 
 COV_TYPES = ["classical", "hc0", "hc1", "hac"]
 # `weight_type`と`cov_type`が独立な軸であることの確認用（baselineのみ）。
-OTHER_WEIGHT_TYPES = ["robust", "cluster", "kernel"]
+OTHER_WEIGHT_TYPES = ["robust", "cluster", "hac"]
 # 1-step（gmm_iterations=1）・iterated GMM（3以上、固定回数モード）の成功パス確認用
 # （既定値2以外）。
 GMM_ITERATIONS_SCENARIOS = [1, 3]
@@ -87,27 +87,27 @@ def build_fixtures() -> dict:
         x_exog = X_EXOG_BY_SCENARIO.get(scenario, ["x1"])
         instruments = INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
 
-        fixtures[scenario] = {"unadjusted": {}}
+        fixtures[scenario] = {"classical": {}}
         for cov_type in COV_TYPES:
             result = run_gmm(
                 dataset=scenario,
                 x_exog_cols=x_exog,
                 x_endog_cols=["endog1"],
                 instrument_cols=instruments,
-                weight_type="unadjusted",
+                weight_type="classical",
                 cov_type=cov_type,
             )
-            fixtures[scenario]["unadjusted"][cov_type] = result
+            fixtures[scenario]["classical"][cov_type] = result
 
         if scenario == "baseline":
             n = pl.read_csv(DATA_DIR / "iv_baseline.csv").height
-            fixtures[scenario]["unadjusted"]["cluster"] = _run_cluster_case(
-                "baseline", weight_type="unadjusted"
+            fixtures[scenario]["classical"]["cluster"] = _run_cluster_case(
+                "baseline", weight_type="classical"
             )
-            fixtures[scenario]["unadjusted"]["cluster_imbalanced"] = (
+            fixtures[scenario]["classical"]["cluster_imbalanced"] = (
                 _run_cluster_case(
                     "baseline",
-                    weight_type="unadjusted",
+                    weight_type="classical",
                     groups=imbalanced_cluster_groups(n),
                 )
             )
@@ -134,39 +134,39 @@ def build_fixtures() -> dict:
                     }
 
     # 複数内生変数（k_endog>=2）。2SLSのiv.jsonと同じ構成。weight_type=
-    # 'unadjusted'固定でcov_typeのみ変える（上記と同じ検証範囲の絞り方）。
-    fixtures["multi_endog"] = {"unadjusted": {}}
+    # 'classical'固定でcov_typeのみ変える（上記と同じ検証範囲の絞り方）。
+    fixtures["multi_endog"] = {"classical": {}}
     for cov_type in COV_TYPES:
-        fixtures["multi_endog"]["unadjusted"][cov_type] = run_gmm(
+        fixtures["multi_endog"]["classical"][cov_type] = run_gmm(
             dataset="baseline_multi_endog",
             x_exog_cols=["x1"],
             x_endog_cols=["endog1", "endog2"],
             instrument_cols=["z1", "z2", "z3"],
-            weight_type="unadjusted",
+            weight_type="classical",
             cov_type=cov_type,
         )
 
-    # weight_type='kernel' × cov_type='hac'の組み合わせ（実務上最も典型的な
+    # weight_type='hac' × cov_type='hac'の組み合わせ（実務上最も典型的な
     # 「HACカーネル重み＋HAC標準誤差」の組み合わせ経路。上記OTHER_WEIGHT_TYPESループは
     # cov_type='classical'固定のためこの組み合わせを通らない）。
-    fixtures["kernel_hac"] = run_gmm(
+    fixtures["hac_weight_hac_cov"] = run_gmm(
         dataset="baseline",
         x_exog_cols=["x1"],
         x_endog_cols=["endog1"],
         instrument_cols=["z1", "z2"],
-        weight_type="kernel",
+        weight_type="hac",
         cov_type="hac",
     )
 
     # gmm_iterations: 1（1-step）・3以上（iterated、固定回数モード）の成功パス。
-    # baselineシナリオ・weight_type='unadjusted'・cov_type='classical'固定。
+    # baselineシナリオ・weight_type='classical'・cov_type='classical'固定。
     fixtures["gmm_iterations"] = {
         n_iter: run_gmm(
             dataset="baseline",
             x_exog_cols=["x1"],
             x_endog_cols=["endog1"],
             instrument_cols=["z1", "z2"],
-            weight_type="unadjusted",
+            weight_type="classical",
             cov_type="classical",
             gmm_iterations=n_iter,
         )
@@ -179,7 +179,7 @@ def build_fixtures() -> dict:
         "primary_reference": "linearmodels",
         "linearmodels_version": linearmodels.__version__,
         "note": (
-            "weight_type='unadjusted'固定で全10シナリオ×cov_type"
+            "weight_type='classical'固定で全10シナリオ×cov_type"
             "（classical/hc0/hc1/hac、baselineのみ追加でcluster/"
             "cluster_imbalanced）を検証する。scale_variance_mildは"
             "scale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）"
@@ -188,7 +188,7 @@ def build_fixtures() -> dict:
             "hc2/hc3は2SLSと同じ理由で対象外"
             "（`benchmark/iv/references/linearmodels_ref.py`のモジュールdoc"
             "コメント参照）。"
-            "他のweight_type（robust/cluster/kernel）はweight_typeとcov_typeが"
+            "他のweight_type（robust/cluster/hac）はweight_typeとcov_typeが"
             "独立な軸であることの確認が目的のため、baselineシナリオ×"
             "cov_type=classicalのみで検証する（ユーザー確認済み）。"
             "test_stats/p_values/conf_int/f_statistic/f_p_valueは常にz分布・"
@@ -203,7 +203,7 @@ def build_fixtures() -> dict:
             "benchmark/iv/datasets.pyの第一段階誤差vが内生変数ごとに独立になる"
             "よう修正した後のデータで生成（"
             "generate_iv_fixtures.pyの同名注記参照）。"
-            "kernel_hac（weight_type='kernel'×cov_type='hac'）・gmm_iterations"
+            "hac_weight_hac_cov（weight_type='hac'×cov_type='hac'）・gmm_iterations"
             "（1/3、既定値2以外の成功パス）も追加。"
         ),
     }

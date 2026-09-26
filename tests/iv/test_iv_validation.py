@@ -598,6 +598,22 @@ def test_invalid_hac_lags_raises(iv_dataset, hac_lags):
         our_fit(iv_dataset, options=options)
 
 
+@pytest.mark.parametrize(
+    "gmm_weight_type",
+    ["unadjusted", "homoskedastic", "heteroskedastic", "kernel", "invalid"],
+)
+def test_unknown_gmm_weight_type_raises(iv_dataset, gmm_weight_type):
+    """旧名（`unadjusted`/`kernel`）と別名（`homoskedastic`/`heteroskedastic`）は
+    受け付けない（`cov_type`と同じ語彙`classical`/`hac`に統一済み）。
+    """
+    options = IVOptions(estimator="gmm", gmm_weight_type=gmm_weight_type)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_WEIGHT_TYPE, other=gmm_weight_type),
+    ):
+        our_fit(iv_dataset, options=options)
+
+
 @pytest.mark.parametrize("gmm_max_iter", [-1, 0, 1, 2])
 def test_invalid_gmm_max_iter_raises(iv_dataset, gmm_max_iter):
     options = IVOptions(

@@ -49,9 +49,9 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 | `include_intercept` | `bool` | `True` | `x_exog`側の設計行列にのみ定数列を自動追加する。`x_endog`/`instruments`には自動追加しない |
 | `confidence_level` | `float` | `0.95` | |
 | `cluster_col` | `str \| None` | `None` | `cov_type="cluster"`時（`gmm_weight_type="cluster"`とも共用）のグループキー列名 |
-| `hac_lags` | `int \| None` | `None` | `cov_type="hac"`時（`gmm_weight_type="kernel"`とも共用）のラグ数。`None`なら自動計算 |
-| `time_col` | `str \| None` | `None` | `cov_type="hac"`時（`gmm_weight_type="kernel"`とも共用）の時系列順序列 |
-| `gmm_weight_type` | `str` | `"unadjusted"` | GMMの点推定に使う重み行列（`estimator="gmm"`のみ）: `"unadjusted"`（別名`"homoskedastic"`）/ `"robust"`（別名`"heteroskedastic"`）/ `"cluster"` / `"kernel"`。`estimator="2sls"`と`gmm_type="one_step"`では無視 |
+| `hac_lags` | `int \| None` | `None` | `cov_type="hac"`時（`gmm_weight_type="hac"`とも共用）のラグ数。`None`なら自動計算 |
+| `time_col` | `str \| None` | `None` | `cov_type="hac"`時（`gmm_weight_type="hac"`とも共用）の時系列順序列 |
+| `gmm_weight_type` | `str` | `"classical"` | GMMの点推定に使う重み行列（`estimator="gmm"`のみ）: `"classical"` / `"robust"` / `"cluster"` / `"hac"`（`cov_type`と同じ語彙。旧名`unadjusted`/`kernel`と別名`homoskedastic`/`heteroskedastic`は受け付けない）。`estimator="2sls"`と`gmm_type="one_step"`では無視 |
 | `gmm_type` | `str` | `"two_step"` | GMMの推定方式（`estimator="gmm"`のみ）: `"one_step"`（1段階、重み`(Z'Z)⁻¹`のみ）/ `"two_step"`（2段階の効率的GMM）/ `"iterated"`（収束まで反復）。大文字小文字は区別しない |
 | `gmm_max_iter` | `int \| None` | `None` | `"iterated"`の最大推定回数（初回推定を含む、3以上）。`None`は実効既定値`100`。`"one_step"`/`"two_step"`で指定すると`ValidationError` |
 | `gmm_tol` | `float \| None` | `None` | `"iterated"`の収束許容誤差。`None`は実効既定値`1e-6`。`"one_step"`/`"two_step"`で指定すると`ValidationError` |
@@ -68,7 +68,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 - **丁度識別（`len(instruments) == len(x_endog)`）では、GMMの点推定は`gmm_weight_type`に
   よらず2SLSと数値的に一致する**（GMMの一般的性質: モーメント条件を正確に0にできるため
   重み行列が点推定に影響しない）。共通GMM推定コアで自然に吸収され、特別な分岐は不要。
-- **2SLSはGMMの特殊ケース**（`gmm_weight_type="unadjusted"`、`gmm_type="one_step"`）として点推定は
+- **2SLSはGMMの特殊ケース**（`gmm_weight_type="classical"`、`gmm_type="one_step"`）として点推定は
   数値的に一致するが、実装（`TwoSlsEstimator`/`GmmEstimator`）は意図的に独立させている
   （`TwoSlsEstimator`は`cov_type`対応の推論統計量一式・Sargan・Wu-Hausmanを持つのに対し
   `GmmEstimator`はそれらを持たないため、委譲すると過剰設計になる）。
@@ -90,8 +90,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 - **`estimator`**: `IVOptions.estimator`を正規化した小文字文字列（`"2sls"`/`"gmm"`）。
   常に反映される。
 - **`gmm_weight_type`**: 型は`Option<String>`。`estimator="gmm"`のときだけ
-  `Some(String)`（`IVOptions.gmm_weight_type`を正規化した小文字文字列。エイリアス入力
-  （`"homoskedastic"`/`"heteroskedastic"`）は正規化されずそのままechoされる）、
+  `Some(String)`（`IVOptions.gmm_weight_type`を正規化した小文字文字列）、
   `estimator="2sls"`では概念自体が存在しないため常に`None`。
 - **`converged`/`n_iter`**: `estimator="2sls"`では常に`converged=true`・`n_iter=1`
   （2SLSは閉形式・非反復のため）。`estimator="gmm"`では実際の反復回数・収束判定結果を返す
@@ -235,9 +234,9 @@ Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含�
 - **Hansen J検定**（`gmm.rs`）は点推定に使った重み行列`S`（`gmm_weight_type`依存）をそのまま
   流用するのが定義そのもの（`J=(Z'ê)'S⁻¹(Z'ê)`）。`S`は`n`で正規化していない生の和のため
   `n`で割ってはならない（標準形`J=n·ḡₙ'Ŝ⁻¹ḡₙ`に代入すると`n`は完全に相殺する）。
-  `one_step`・`gmm_weight_type=Unadjusted`時の`S`は`σ̂²・Z'Z`（`σ̂²`スケーリング必須、
-  Unadjusted以外の`Robust`/`Cluster`/`Kernel`と絶対スケールを揃えるため）。
-  `gmm_weight_type=Unadjusted`かつ`two_step`のHansen Jは2SLSのSargan統計量と数値的に
+  `one_step`・`gmm_weight_type=Classical`時の`S`は`σ̂²・Z'Z`（`σ̂²`スケーリング必須、
+  Classical以外の`Robust`/`Cluster`/`Hac`と絶対スケールを揃えるため）。
+  `gmm_weight_type=Classical`かつ`two_step`のHansen Jは2SLSのSargan統計量と数値的に
   一致する。
 - どちらも計算失敗は`None`にせず`IvError`として伝播する（使う行列はいずれも点推定計算で
   既に反転成功済みの行列の再利用であり、理論上ここでの特異性は到達不能なため）。

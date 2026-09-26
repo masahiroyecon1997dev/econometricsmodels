@@ -165,11 +165,11 @@ pub struct IVOptions {
     pub time_col: Option<String>,
 
     /// Weight matrix used for GMM point estimation (`estimator="gmm"` only): one of
-    /// "unadjusted" (alias "homoskedastic"), "robust" (alias "heteroskedastic"),
-    /// "cluster", "kernel". Case-insensitive. Ignored when `estimator="2sls"` or
-    /// `gmm_type="one_step"`. "cluster"/"kernel"
-    /// draw from the same `cluster_col`/`hac_lags`/`time_col` fields as `cov_type` (no separate
-    /// fields; see module docstring "GMMのgmm_weight_type").
+    /// "classical" (homoskedastic), "robust" (heteroskedasticity-robust), "cluster", "hac"
+    /// (Newey-West). Same vocabulary as `cov_type`. Case-insensitive. Ignored when
+    /// `estimator="2sls"` or `gmm_type="one_step"`. "cluster"/"hac" draw from the same
+    /// `cluster_col`/`hac_lags`/`time_col` fields as `cov_type` (no separate fields; see
+    /// module docstring "GMMのgmm_weight_type").
     #[pyo3(get, set)]
     pub gmm_weight_type: String,
 
@@ -213,7 +213,7 @@ impl IVOptions {
         cluster_col = None,
         hac_lags = None,
         time_col = None,
-        gmm_weight_type = "unadjusted".to_string(),
+        gmm_weight_type = "classical".to_string(),
         gmm_type = "two_step".to_string(),
         gmm_max_iter = None,
         gmm_tol = None,
@@ -367,11 +367,8 @@ pub struct IVResult {
     #[pyo3(get)]
     pub estimator: String,
     /// Weight matrix actually used for GMM point estimation (echoes
-    /// `IVOptions.gmm_weight_type`, normalized to lowercase; e.g. `"unadjusted"`,
-    /// `"robust"`, `"cluster"`, `"kernel"`). Like `cov_type`'s `"nonrobust"` alias,
-    /// an alias input (`"homoskedastic"`/`"heteroskedastic"`) is echoed as-is rather
-    /// than canonicalized to its primary name (`parse_weight_type` accepts both but
-    /// does not rewrite the string). `Some` only for `estimator="gmm"` (mirrors
+    /// `IVOptions.gmm_weight_type`, normalized to lowercase; e.g. `"classical"`,
+    /// `"robust"`, `"cluster"`, `"hac"`). `Some` only for `estimator="gmm"` (mirrors
     /// `overid_statistic`/`wu_hausman_statistic`'s use of `None` for "not applicable to
     /// this estimator"); always `None` for `estimator="2sls"`, which has no such concept, and
     /// for `gmm_type="one_step"`, which does not use a weight type.
@@ -472,8 +469,8 @@ fn parse_weight_type(df: &DataFrame, options: &IVOptions) -> PyResult<(WeightTyp
     let weight_type_lower = options.gmm_weight_type.to_lowercase();
 
     let gmm_weight_type = match weight_type_lower.as_str() {
-        "unadjusted" | "homoskedastic" => WeightType::Unadjusted,
-        "robust" | "heteroskedastic" => WeightType::Robust,
+        "classical" => WeightType::Classical,
+        "robust" => WeightType::Robust,
         "cluster" => {
             let groups = options
                 .cluster_col
@@ -482,21 +479,21 @@ fn parse_weight_type(df: &DataFrame, options: &IVOptions) -> PyResult<(WeightTyp
                 .transpose()?;
             WeightType::Cluster { groups }
         }
-        "kernel" => {
+        "hac" => {
             let time_order = options
                 .time_col
                 .as_ref()
                 .map(|col_name| extract_f64_column(df, col_name))
                 .transpose()?;
-            WeightType::Kernel {
+            WeightType::Hac {
                 lags: options.hac_lags,
                 time_order,
             }
         }
         other => {
             return Err(ValidationError::new_err(format!(
-                "unknown gmm_weight_type: '{other}'. Expected one of 'unadjusted' \
-                 ('homoskedastic'), 'robust' ('heteroskedastic'), 'cluster', or 'kernel'"
+                "unknown gmm_weight_type: '{other}'. Expected one of 'classical', \
+                 'robust', 'cluster', or 'hac'"
             )));
         }
     };
@@ -848,7 +845,7 @@ mod tests {
             None,
             None,
             None,
-            "unadjusted".to_string(),
+            "classical".to_string(),
             "two_step".to_string(),
             None,
             None,

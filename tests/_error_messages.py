@@ -219,8 +219,8 @@ UNKNOWN_IV_ESTIMATOR = (
     "unknown estimator: '{estimator}'. Expected one of '2sls' or 'gmm'"
 )
 UNKNOWN_WEIGHT_TYPE = (
-    "unknown gmm_weight_type: '{other}'. Expected one of 'unadjusted' "
-    "('homoskedastic'), 'robust' ('heteroskedastic'), 'cluster', or 'kernel'"
+    "unknown gmm_weight_type: '{other}'. Expected one of 'classical', "
+    "'robust', 'cluster', or 'hac'"
 )
 INSUFFICIENT_INSTRUMENTS = (
     "insufficient instruments for identification: {n_instruments} "

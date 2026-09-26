@@ -26,7 +26,7 @@
 //!    残差`ê_{k-1} = y - Xβ̂_{k-1}`から`weight`に応じたモーメント条件の分散共分散行列
 //!    `S_k`（下記「`weight_type`ごとの`S`」）を構築し、`W_k = S_k⁻¹`で`β̂_k = β̂(W_k)`を
 //!    求める、という手続きを2回目の推定まで行う。`weight`の妥当性（`Cluster`の`groups`
-//!    未指定、`Kernel`の`lags`範囲外等）は`validate_weight_type`で検証する。
+//!    未指定、`Hac`の`lags`範囲外等）は`validate_weight_type`で検証する。
 //! 3. **`GmmType::Iterated { weight, max_iter, tol }`（反復GMM）**: 上記の手続きを、
 //!    係数が`tol`で収束するか、初回推定を含めて`max_iter`回に達するまで繰り返す
 //!    （`max_iter`は3以上。2回以下は`TwoStep`と紛らわしいため`IvError::InvalidGmmMaxIter`）。
@@ -59,18 +59,18 @@
 //!
 //! ## `weight_type`ごとの`S`
 //!
-//! - `Unadjusted`（別名`homoskedastic`）: **点推定では**`S = Z'Z`で足りる（`σ̂²`による
+//! - `Classical`: **点推定では**`S = Z'Z`で足りる（`σ̂²`による
 //!   スケーリングは上記の正のスカラー倍不変性の理由で省略可能）。この場合`W₁ ∝ W₀`となり、
 //!   `β̂₁ = β̂₀`（2SLSと厳密に一致、
-//!   `fit_matches_two_sls_point_estimate_when_weight_type_is_unadjusted`で検証）。
+//!   `fit_matches_two_sls_point_estimate_when_weight_type_is_classical`で検証）。
 //!   **ただしHansen J検定（下記）に使う`S`はこの限りでなく、`σ̂²・Z'Z`が必要**
 //!   （後述「Hansen J過剰識別検定」参照、点推定とHansen Jで`S`の要件が異なる点に注意）。
-//! - `Robust`（別名`heteroskedastic`）: `S = Σᵢ êᵢ² zᵢzᵢ'`（`two_sls.rs`の`hc_cov_params`
+//! - `Robust`: `S = Σᵢ êᵢ² zᵢzᵢ'`（`two_sls.rs`の`hc_cov_params`
 //!   のHC0相当だがレバレッジ調整は無し）。
 //! - `Cluster`: `S = Σ_g (Σ_{i∈g} êᵢzᵢ)(Σ_{i∈g} êᵢzᵢ)'`（`two_sls.rs`の
 //!   `cluster_cov_params`と同型だが小標本補正は無し）。
-//! - `Kernel`: Newey-West（Bartlettカーネル）による`S`。`two_sls.rs`の`hac_cov_params`と
-//!   同型（時系列相関を仮定する`kernel`、パネルのDriscoll-Kraayではない。
+//! - `Hac`: Newey-West（Bartlettカーネル）による`S`。`two_sls.rs`の`hac_cov_params`と
+//!   同型（時系列相関を仮定する、パネルのDriscoll-Kraayではない。
 //!   `docs/spec/iv-spec.md`1.2節・`two_sls.rs`冒頭コメント参照）。
 //!
 //! 上記4関数は、数式としては`two_sls.rs`の`hc_cov_params`/`cluster_cov_params`/
@@ -88,19 +88,19 @@
 //! `n`で割らない生の和）は`S = n·Ŝ`の関係にあるため、代入すると
 //! `J = n・[(1/n)Z'ê]'・(n・S⁻¹)・[(1/n)Z'ê] = (Z'ê)'S⁻¹(Z'ê)`となり、`n`は完全に相殺する。
 //!
-//! **`weight_type=Unadjusted`はHansen Jのためだけに`σ̂²`スケーリングが必要**（点推定は
-//! 上記の通り不要、ユーザー確認済み）: `Robust`/`Cluster`/`Kernel`の`S`は各観測の
+//! **`weight_type=Classical`はHansen Jのためだけに`σ̂²`スケーリングが必要**（点推定は
+//! 上記の通り不要、ユーザー確認済み）: `Robust`/`Cluster`/`Hac`の`S`は各観測の
 //! `êᵢ²`（またはクラスター和・カーネル重み付き和）で個別に分散を見積もっており、
-//! `S = n・Ŝ`の関係が最初から成り立っている。一方`Unadjusted`の`S = Z'Z`は「共通の
+//! `S = n・Ŝ`の関係が最初から成り立っている。一方`Classical`の`S = Z'Z`は「共通の
 //! 分散`σ̂²`」で見積もる版であり、`Ŝ_homoskedastic = σ̂²・(1/n)Z'Z`が正しい正規化済み
 //! 共分散行列のため、`n・Ŝ_homoskedastic = σ̂²・Z'Z`が必要（`σ̂²`を掛けないと`Z'Z`単体は
 //! `S = n・Ŝ`の関係を満たさない）。`σ̂²`はstep-0残差`ê₀ = y - Xβ̂₀`から
 //! `σ̂²₀ = ê₀'ê₀/n`で計算する（`Robust`等が`ê₀`から`S`を構築するのと同じ「初期残差」を
 //! 使う設計、`OneStep`ではstep-0残差＝最終残差なので同じ値になる）。この
-//! スケーリングにより、`weight_type=Unadjusted`かつ`TwoStep`のHansen Jは
+//! スケーリングにより、`weight_type=Classical`かつ`TwoStep`のHansen Jは
 //! `two_sls.rs`のSargan統計量と数値的に一致する
-//! （`fit_computes_hansen_j_statistic_matching_two_sls_sargan_when_weight_type_is_unadjusted`
-//! で検証、点推定の`fit_matches_two_sls_point_estimate_when_weight_type_is_unadjusted`と
+//! （`fit_computes_hansen_j_statistic_matching_two_sls_sargan_when_weight_type_is_classical`
+//! で検証、点推定の`fit_matches_two_sls_point_estimate_when_weight_type_is_classical`と
 //! 対になる不変条件チェック）。
 //!
 //! ## 標準誤差・検定統計量（`cov_type`対応）
@@ -112,7 +112,7 @@
 //!
 //! **`weight_type`（点推定に使う重み）と`cov_type`（SE計算方法）は独立**（モジュール冒頭
 //! 「`GmmType`と点推定への影響」参照）なので、点推定に実際に使った
-//! 重み`W = S_used⁻¹`（`fit()`内の`s_used`、`OneStep`なら`unadjusted_s`）と、
+//! 重み`W = S_used⁻¹`（`fit()`内の`s_used`、`OneStep`なら`classical_s`）と、
 //! `cov_type`が指定するモーメント条件の分散`Ω̂`（`Z`ベース、l×l）は一般に一致しない。
 //! そのため、`weight_type=cov_type`相当（効率的GMM）のときに`Avar(β̂)=(X'ZΩ̂⁻¹Z'X)⁻¹`へ
 //! 潰せる特殊ケースを分岐させず、**常に一般形のサンドイッチ**を使う（ユーザー確認済み）:
@@ -127,7 +127,7 @@
 //! `Ω̂`は`cov_type`ごとに以下（`Z`・`l`を`two_sls.rs`の`X̂`・`k`に置き換えた同型の自己拡張。
 //! **点推定用の`robust_moment_covariance`/`cluster_moment_covariance`はそのまま使い回せない**
 //! （小標本補正が無いため、モジュール冒頭「Hansen J過剰識別検定」の教訓通りSE計算には
-//! 補正が必須）。`kernel_moment_covariance`のみ例外的にそのまま使い回す——`two_sls.rs`の
+//! 補正が必須）。`hac_moment_covariance`のみ例外的にそのまま使い回す——`two_sls.rs`の
 //! `hac_cov_params`もNewey-Westの重み付け以外に追加の小標本補正を持たないため、補正の
 //! 有無という観点では点推定用とSE用が最初から同じ計算になる）:
 //!
@@ -135,10 +135,10 @@
 //!   Hansen Jの`σ̂²₀`とは異なり、最終残差・`df_resid`補正を使う——2SLSの
 //!   `classical_cov_params`と同じ考え方だが、中心化の要否だけは異なる。2SLS/OLSは
 //!   一次条件（正規方程式）により定数項を含む限り常に`ē=0`が保証されるため中心化の
-//!   有無で結果が変わらないが、GMMの一次条件`X'ZWZ'ê=0`は`weight_type=Unadjusted`
+//!   有無で結果が変わらないが、GMMの一次条件`X'ZWZ'ê=0`は`weight_type=Classical`
 //!   以外では`ē=0`を保証しない（`X'ZW`による重み付き制約であり、`ē=(1/n)Σêᵢ`という
 //!   単純平均をゼロにする制約とは一般に一致しない）ため、非中心化SSRを使うと
-//!   `weight_type≠Unadjusted`のときのみ`σ̂²`が系統的にずれる（初版のバグ、
+//!   `weight_type≠Classical`のときのみ`σ̂²`が系統的にずれる（初版のバグ、
 //!   GMMクロスチェック実装中に発覚・修正。`linearmodels`の`HomoskedasticWeightMatrix`
 //!   が常に中心化する設計と実測突き合わせて判明）。
 //! - `hc0`〜`hc3`: `two_sls.rs`の`hc_cov_params`と同型（`X̂`→`Z`）。HC2/HC3のレバレッジは
@@ -155,7 +155,7 @@
 //!   機械的に`X̂`→`Z`・`k`→`l`を適用したのは誤りだった（`gmm_hc_omega`/`gmm_cluster_omega`
 //!   のdocコメント参照）。
 //! - `cluster`: `two_sls.rs`の`cluster_cov_params`と同型（`X̂`→`Z`、上記の通り補正は`k`）。
-//! - `hac`: 上記の通り`kernel_moment_covariance`をそのまま再利用。
+//! - `hac`: 上記の通り`hac_moment_covariance`をそのまま再利用。
 //!
 //! **検定分布はz（標準正規）**（`docs/spec/iv-spec.md`3.2節で確定済み、2-step efficient GMMの
 //! 漸近正規性が根拠）。`engine::inference`の分布非依存関数（`critical_value`/
@@ -174,8 +174,8 @@
 //!
 //! ## 2SLSとの共通化の判断
 //!
-//! **点推定の意味では、2SLSは`weight_type=Unadjusted`のGMMコアの特殊ケースとして
-//! 数値的に吸収できる**（上記`fit_matches_two_sls_point_estimate_when_weight_type_is_unadjusted`
+//! **点推定の意味では、2SLSは`weight_type=Classical`のGMMコアの特殊ケースとして
+//! 数値的に吸収できる**（上記`fit_matches_two_sls_point_estimate_when_weight_type_is_classical`
 //! で検証済み）。しかし、**`TwoSlsEstimator`の実装をこの`GmmEstimator`に委譲するリファクタリング
 //! はしない**（「無理をしない」方針）。理由:
 //!
@@ -183,7 +183,7 @@
 //!    独自に実装済みで安定稼働している。`GmmEstimator`は
 //!    上記「標準誤差・検定統計量（`cov_type`対応）」で独立に同等の推論統計量を実装した。
 //! 2. `GmmEstimator::fit`は`GmmType`（1段階・2段階・反復）に対応済みだが、2SLSが必要とするのは
-//!    `TwoStep { weight: Unadjusted }`（この場合`S=Z'Z`と
+//!    `TwoStep { weight: Classical }`（この場合`S=Z'Z`と
 //!    なり初期推定`β̂₀`と再推定`β̂₁`が数値的に同じ`β̂`になる、上記参照。実際には
 //!    `weight_type`を持たない`OneStep`でも同一の結果になる）1点のみであり、
 //!    2SLS呼び出し側がこの1点のためだけに`GmmEstimator`の汎用性
@@ -216,15 +216,15 @@ use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_g
 /// （モジュール冒頭のdocコメント参照）。
 #[derive(Debug, Clone, PartialEq)]
 pub enum WeightType {
-    /// 等分散前提（別名`homoskedastic`）。`W₁ ∝ (Z'Z)⁻¹`となり2SLSと数値的に一致する。
-    Unadjusted,
-    /// 不均一分散頑健（別名`heteroskedastic`）。
+    /// 等分散前提。`W₁ ∝ (Z'Z)⁻¹`となり2SLSと数値的に一致する。
+    Classical,
+    /// 不均一分散頑健。
     Robust,
     /// クラスター頑健。`groups`が`None`の場合は`CommonError::MissingClusterColumn`。
     Cluster { groups: Option<Vec<String>> },
     /// Newey-West（Bartlettカーネル）によるHAC型。`lags=None`なら`two_sls.rs`と同じ
     /// 経験則で自動計算する。`time_order=None`なら`IvInput`の行順を時系列順とみなす。
-    Kernel {
+    Hac {
         lags: Option<i64>,
         time_order: Option<Vec<f64>>,
     },
@@ -313,7 +313,7 @@ impl GmmEstimator {
     ///   以内に収束しなかった: `IvError::GmmNonConvergence`
     /// - 識別の順序条件`len(instruments) >= len(x_endog)`を満たさない:
     ///   `IvError::InsufficientInstruments`
-    /// - `TwoStep`/`Iterated`の`weight`が`Kernel`で`lags`が不正: `IvError::InvalidHacLags`
+    /// - `TwoStep`/`Iterated`の`weight`が`Hac`で`lags`が不正: `IvError::InvalidHacLags`
     /// - `TwoStep`/`Iterated`の`weight`が`Cluster`でグループキー未指定・クラスター数不足:
     ///   `IvError::Common(CommonError::MissingClusterColumn` /
     ///   `CommonError::InsufficientClusters)`
@@ -429,22 +429,22 @@ impl GmmEstimator {
         let beta0 = gmm_point_estimate(&z, &x, y, &ztz)?;
         let residuals0 = y - &x * &beta0;
 
-        // weight_type=UnadjustedのHansen J検定専用の重み行列`σ̂²₀・Z'Z`（モジュール冒頭の
+        // weight_type=ClassicalのHansen J検定専用の重み行列`σ̂²₀・Z'Z`（モジュール冒頭の
         // docコメント「Hansen J過剰識別検定」参照。`σ̂²`によるスケーリングは点推定には
         // 不要だがHansen Jには必須、ユーザー確認済み）。`σ̂²₀`はstep-0残差から計算する
         // （`OneStep`ではstep-0残差＝最終残差のため、この一箇所の計算で両方の
         // ケースをカバーできる）。
         let sigma2_0: f64 =
             (0..n).map(|i| (*residuals0.get(i, 0)).powi(2)).sum::<f64>() / (n as f64);
-        let unadjusted_s = Mat::from_fn(l, l, |i, j| sigma2_0 * (*ztz.get(i, j)));
+        let classical_s = Mat::from_fn(l, l, |i, j| sigma2_0 * (*ztz.get(i, j)));
 
         // 反復本体。1段階は1度も回らず打ち切り（`weight_type`を持たない）、2段階は2回目の
         // 推定まで、反復は収束するか`max_iter`回に達するまで回す（モジュール冒頭のdocコメント
         // 「`GmmType`と点推定への影響」「収束条件」参照）。`s_used`はHansen J検定（下記）に
-        // 使う重み行列で、ループが1度も回らない場合は常に`unadjusted_s`（σ̂²₀・Z'Z）を使う。
+        // 使う重み行列で、ループが1度も回らない場合は常に`classical_s`（σ̂²₀・Z'Z）を使う。
         let mut beta = beta0;
         let mut residuals = residuals0;
-        let mut s_used = unadjusted_s;
+        let mut s_used = classical_s;
         let mut n_iter: i64 = 1;
         // `Iterated`以外は収束判定自体を行わないため常にtrue。`Iterated`は
         // ループ内で実際に収束条件を満たした場合のみtrueに更新する（`max_iter>=3`のため
@@ -457,13 +457,13 @@ impl GmmEstimator {
         };
 
         if let Some(weight_type) = weight_type {
-            // Kernelのlags解決・時系列順序（`O(n log n)`のソートを含む）はweight_typeに対して
+            // Hacのlags解決・時系列順序（`O(n log n)`のソートを含む）はweight_typeに対して
             // 不変な前処理のため、ループの外で一度だけ計算し使い回す（ループ内で反復のたびに
             // 再計算すると、max_iterが大きいiterated GMMで無駄なコストが反復回数倍に
             // 膨らむ。rust-reviewerの指摘）。Clusterのgroups検証は`validate_weight_type`
             // （`fit()`冒頭）で既に1回行っているため、ループ内では再検証しない。
-            let kernel_precomputed = match &weight_type {
-                WeightType::Kernel { lags, time_order } => {
+            let hac_precomputed = match &weight_type {
+                WeightType::Hac { lags, time_order } => {
                     let lags = resolve_hac_lags(*lags, n)?;
                     let order = time_ordering(time_order.as_deref(), n);
                     Some((lags, order))
@@ -472,11 +472,11 @@ impl GmmEstimator {
             };
 
             while n_iter < max_steps {
-                // 点推定は正のスカラー倍不変のため`unadjusted_s`相当（σ̂²・Z'Z）を使っても
+                // 点推定は正のスカラー倍不変のため`classical_s`相当（σ̂²・Z'Z）を使っても
                 // `Z'Z`単体を使った場合と`β̂`は変わらない。Hansen Jにそのまま使い回せる
                 // よう、あらかじめ正しくスケーリングされたSを使う（`iv/CLAUDE.md`参照）。
                 let s_next = match &weight_type {
-                    WeightType::Unadjusted => {
+                    WeightType::Classical => {
                         let sigma2: f64 =
                             (0..n).map(|i| (*residuals.get(i, 0)).powi(2)).sum::<f64>()
                                 / (n as f64);
@@ -487,14 +487,14 @@ impl GmmEstimator {
                         let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
                         cluster_moment_covariance(&z, &residuals, n, l, groups)
                     }
-                    WeightType::Kernel { .. } => {
-                        // `kernel_precomputed`は`weight_type=Kernel`のとき（このアームに入る
+                    WeightType::Hac { .. } => {
+                        // `hac_precomputed`は`weight_type=Hac`のとき（このアームに入る
                         // ときは常に）ループ開始前にSomeとして構築済み（`weight_type`は
                         // ループ中不変のため、上記matchと同じ分岐に必ず入る）。
-                        let (lags, order) = kernel_precomputed
+                        let (lags, order) = hac_precomputed
                             .as_ref()
-                            .expect("kernel_precomputed is Some whenever weight_type is Kernel");
-                        kernel_moment_covariance(&z, &residuals, n, l, *lags, order)
+                            .expect("hac_precomputed is Some whenever weight_type is Hac");
+                        hac_moment_covariance(&z, &residuals, n, l, *lags, order)
                     }
                 };
                 let beta_next = gmm_point_estimate(&z, &x, y, &s_next)?;
@@ -530,7 +530,7 @@ impl GmmEstimator {
         // 除外操作変数のみという定義に対応）。丁度識別（自由度0）では`None`
         // （`docs/spec/iv-spec.md`1.2節・3.5節）。
         //
-        // `s_used`は`beta`計算時（`gmm_point_estimate`内の`llt`、または`unadjusted_s`
+        // `s_used`は`beta`計算時（`gmm_point_estimate`内の`llt`、または`classical_s`
         // 自体が正定値`Z'Z`の正のスカラー倍）で既に反転成功済み・正定値性が保証された
         // 行列のため、ここでの特異性は理論上到達不能（`two_sls.rs`の`xtx_inverse`と
         // 同じ防御的`Result`化）。
@@ -579,7 +579,7 @@ impl GmmEstimator {
 
         let omega_hat = match &cov_type {
             CovType::Classical => {
-                // 残差を中心化した標本分散を使う（`weight_type=Unadjusted`以外では
+                // 残差を中心化した標本分散を使う（`weight_type=Classical`以外では
                 // GMMの一次条件が`ē=0`を保証しないため、モジュール冒頭のdocコメント
                 // 「標準誤差・検定統計量」`classical`の項参照）。
                 let mean_residual: f64 =
@@ -598,10 +598,10 @@ impl GmmEstimator {
                 let lags = resolve_hac_lags(*lags, n)?;
                 let order = time_ordering(time_order.as_deref(), n);
                 // Newey-West重み付け以外の小標本補正を持たないため、点推定用の
-                // `kernel_moment_covariance`と計算式が一致する（モジュール冒頭の
+                // `hac_moment_covariance`と計算式が一致する（モジュール冒頭の
                 // docコメント参照。`robust_moment_covariance`/`cluster_moment_covariance`は
                 // 補正が無く使い回せないのと対照的）。
-                kernel_moment_covariance(&z, &residuals, n, l, lags, &order)
+                hac_moment_covariance(&z, &residuals, n, l, lags, &order)
             }
             CovType::Cluster { groups } => {
                 let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
@@ -840,7 +840,7 @@ fn gmm_coefficients_converged(prev: &Mat<f64>, next: &Mat<f64>, rtol: f64) -> bo
 /// `weight_type`自体の引数が妥当かどうかだけを検証する（`S`は構築しない）。
 ///
 /// `TwoStep`/`Iterated`の`weight_type`について、呼び出し元の設定ミス（`Cluster`指定なのに
-/// `groups`未指定、`Kernel`の`lags`が範囲外、`Cluster`でクラスター数が重み行列`S`の階数に
+/// `groups`未指定、`Hac`の`lags`が範囲外、`Cluster`でクラスター数が重み行列`S`の階数に
 /// 足りない等）を検出する。`OneStep`は`weight_type`を持たないため呼ばれない。
 /// `fit()`本体の`match`も`S`構築の過程で同じ検証を重ねて行う
 /// （冗長だが検証コスト自体は軽微で、各分岐を自己完結させる方を優先した）。
@@ -856,7 +856,7 @@ fn validate_weight_type(
     l: usize,
 ) -> Result<(), IvError> {
     match weight_type {
-        WeightType::Unadjusted | WeightType::Robust => {}
+        WeightType::Classical | WeightType::Robust => {}
         WeightType::Cluster { groups } => {
             let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
             let g = validate_cluster_groups(groups, n)?;
@@ -865,7 +865,7 @@ fn validate_weight_type(
                 return Err(IvError::InsufficientClustersForWeightMatrix { g, l });
             }
         }
-        WeightType::Kernel { lags, .. } => {
+        WeightType::Hac { lags, .. } => {
             resolve_hac_lags(*lags, n)?;
         }
     }
@@ -948,7 +948,7 @@ fn cluster_moment_covariance(
     s
 }
 
-/// `weight_type=Kernel`の`lags`（`Option<i64>`）を実際に使うラグ数（`usize`）に解決する
+/// `weight_type=Hac`の`lags`（`Option<i64>`）を実際に使うラグ数（`usize`）に解決する
 /// （`two_sls.rs`の`resolve_hac_lags`と同じ経験則。エラー型が`IvError`のため独立実装だが、
 /// `IvError::InvalidHacLags`自体は`two_sls.rs`のcov_type=Hacと共有する既存バリアント、
 /// `iv/common.rs`参照）。
@@ -964,7 +964,7 @@ fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, IvError> {
     }
 }
 
-/// `weight_type=Kernel`の`time_order`から、時系列の昇順に並べたときの行インデックス列を
+/// `weight_type=Hac`の`time_order`から、時系列の昇順に並べたときの行インデックス列を
 /// 求める（`two_sls.rs`の`time_ordering`と同型）。`None`の場合は`IvInput`の行順をそのまま
 /// 時系列順とみなす。
 ///
@@ -986,7 +986,7 @@ fn time_ordering(time_order: Option<&[f64]>, n: usize) -> Vec<usize> {
 /// `hac_cov_params`と同型（`Par::Seq`を明示指定する理由も同じ、`.claude/rules/
 /// rust-style.md`「パフォーマンス」参照）。設計行列が`Z`である点、小標本補正が無い点が
 /// `two_sls.rs`との違い（モジュール冒頭のdocコメント参照）。
-fn kernel_moment_covariance(
+fn hac_moment_covariance(
     z: &Mat<f64>,
     residuals: &Mat<f64>,
     n: usize,
@@ -1207,11 +1207,11 @@ mod tests {
     use crate::error::CommonError;
     use crate::linear::ols::CovType as OlsCovType;
 
-    /// 2SLSと同じデータ（`x_exog`に実変数を含む、過剰識別）で、`WeightType::Unadjusted`の
+    /// 2SLSと同じデータ（`x_exog`に実変数を含む、過剰識別）で、`WeightType::Classical`の
     /// GMM点推定が`TwoSlsEstimator`の点推定と厳密に一致することを確認する（モジュール冒頭の
     /// docコメント「2SLSとの共通化の判断」の根拠）。
     #[test]
-    fn fit_matches_two_sls_point_estimate_when_weight_type_is_unadjusted() {
+    fn fit_matches_two_sls_point_estimate_when_weight_type_is_classical() {
         let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
         let x_endog = vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0, 8.0, 7.0];
         let z1 = vec![3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0];
@@ -1236,7 +1236,7 @@ mod tests {
         let gmm = GmmEstimator::fit(
             build_input(),
             GmmType::TwoStep {
-                weight: WeightType::Unadjusted,
+                weight: WeightType::Classical,
             },
             true,
             CovType::Classical,
@@ -1283,7 +1283,7 @@ mod tests {
         let estimator = GmmEstimator::fit(
             input,
             GmmType::TwoStep {
-                weight: WeightType::Unadjusted,
+                weight: WeightType::Classical,
             },
             true,
             CovType::Classical,
@@ -1316,7 +1316,7 @@ mod tests {
         let result = GmmEstimator::fit(
             input,
             GmmType::TwoStep {
-                weight: WeightType::Unadjusted,
+                weight: WeightType::Classical,
             },
             true,
             CovType::Classical,
@@ -1355,7 +1355,7 @@ mod tests {
             let result = GmmEstimator::fit(
                 build_input(),
                 GmmType::Iterated {
-                    weight: WeightType::Unadjusted,
+                    weight: WeightType::Classical,
                     max_iter: invalid,
                     tol: 1e-6,
                 },
@@ -1490,7 +1490,7 @@ mod tests {
     /// （=2SLSの点推定）と一致する。`weight_type()`は`None`、`n_iter=1`、`converged=true`
     /// （モジュール冒頭のdocコメント参照）。
     #[test]
-    fn fit_one_step_has_no_weight_type_and_matches_unadjusted_two_step() {
+    fn fit_one_step_has_no_weight_type_and_matches_classical_two_step() {
         let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
         let build_input = || {
             IvInput::from_columns(
@@ -1520,11 +1520,11 @@ mod tests {
         assert_eq!(one_step.n_iter(), 1);
         assert!(one_step.converged());
 
-        // 2-step（weight_type=Unadjustedなら1-stepと数値的に同じはず、上記参照）とも一致する。
+        // 2-step（weight_type=Classicalなら1-stepと数値的に同じはず、上記参照）とも一致する。
         let two_step = GmmEstimator::fit(
             build_input(),
             GmmType::TwoStep {
-                weight: WeightType::Unadjusted,
+                weight: WeightType::Classical,
             },
             true,
             CovType::Classical,
@@ -1576,10 +1576,10 @@ mod tests {
         );
     }
 
-    /// 同様に2段階GMMで`weight_type=Kernel`の`lags`が範囲外なら
+    /// 同様に2段階GMMで`weight_type=Hac`の`lags`が範囲外なら
     /// `InvalidHacLags`になる。
     #[test]
-    fn fit_returns_invalid_hac_lags_error_when_two_step_gmm_has_invalid_kernel_weight_type() {
+    fn fit_returns_invalid_hac_lags_error_when_two_step_gmm_has_invalid_hac_weight_type() {
         let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
         let n = y.len();
         let input = IvInput::from_columns(
@@ -1598,7 +1598,7 @@ mod tests {
         let result = GmmEstimator::fit(
             input,
             GmmType::TwoStep {
-                weight: WeightType::Kernel {
+                weight: WeightType::Hac {
                     lags: Some(-1),
                     time_order: None,
                 },
@@ -1638,7 +1638,7 @@ mod tests {
         let result = GmmEstimator::fit(
             input,
             GmmType::TwoStep {
-                weight: WeightType::Unadjusted,
+                weight: WeightType::Classical,
             },
             true,
             CovType::Classical,
@@ -1727,11 +1727,11 @@ mod tests {
     }
 
     /// 過剰識別・不均一分散なデータで、`WeightType::Robust`の点推定が
-    /// `Unadjusted`（=2SLS）と異なることを確認する（`weight_type`が実際に点推定へ
+    /// `Classical`（=2SLS）と異なることを確認する（`weight_type`が実際に点推定へ
     /// 影響することの動作確認。手計算オラクルとの数値一致は
     /// `fit_computes_robust_weighted_estimate_matching_manual_formula`で検証する）。
     #[test]
-    fn fit_with_robust_weight_type_differs_from_unadjusted_when_heteroskedastic() {
+    fn fit_with_robust_weight_type_differs_from_classical_when_heteroskedastic() {
         let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
         let build_input = || {
             IvInput::from_columns(
@@ -1748,10 +1748,10 @@ mod tests {
             .unwrap()
         };
 
-        let unadjusted = GmmEstimator::fit(
+        let classical = GmmEstimator::fit(
             build_input(),
             GmmType::TwoStep {
-                weight: WeightType::Unadjusted,
+                weight: WeightType::Classical,
             },
             true,
             CovType::Classical,
@@ -1769,7 +1769,7 @@ mod tests {
         )
         .unwrap();
 
-        let diff = (*unadjusted.params().get(1, 0) - *robust.params().get(1, 0)).abs();
+        let diff = (*classical.params().get(1, 0) - *robust.params().get(1, 0)).abs();
         assert!(
             diff > 1e-4,
             "expected robust weighting to change the point estimate, diff={diff}"
@@ -2083,7 +2083,7 @@ mod tests {
         }
     }
 
-    /// `weight_type=Kernel`の`lags`が範囲外（負・n以上）なら`InvalidHacLags`。
+    /// `weight_type=Hac`の`lags`が範囲外（負・n以上）なら`InvalidHacLags`。
     #[test]
     fn fit_returns_invalid_hac_lags_error_when_out_of_range() {
         let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
@@ -2106,7 +2106,7 @@ mod tests {
         let result = GmmEstimator::fit(
             build_input(),
             GmmType::TwoStep {
-                weight: WeightType::Kernel {
+                weight: WeightType::Hac {
                     lags: Some(-1),
                     time_order: None,
                 },
@@ -2123,7 +2123,7 @@ mod tests {
         let result = GmmEstimator::fit(
             build_input(),
             GmmType::TwoStep {
-                weight: WeightType::Kernel {
+                weight: WeightType::Hac {
                     lags: Some(n as i64),
                     time_order: None,
                 },
@@ -2141,10 +2141,10 @@ mod tests {
         );
     }
 
-    /// `weight_type=Kernel`（`lags=0`）は`Robust`と一致するはず（HAC0=HC0と同じ関係、
+    /// `weight_type=Hac`（`lags=0`）は`Robust`と一致するはず（HAC0=HC0と同じ関係、
     /// `two_sls.rs`の`fit_hac_with_zero_lags_matches_hc0`と同型の検証）。
     #[test]
-    fn fit_kernel_with_zero_lags_matches_robust() {
+    fn fit_hac_with_zero_lags_matches_robust() {
         let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
         let build_input = || {
             IvInput::from_columns(
@@ -2171,10 +2171,10 @@ mod tests {
             0.95,
         )
         .unwrap();
-        let kernel = GmmEstimator::fit(
+        let hac = GmmEstimator::fit(
             build_input(),
             GmmType::TwoStep {
-                weight: WeightType::Kernel {
+                weight: WeightType::Hac {
                     lags: Some(0),
                     time_order: None,
                 },
@@ -2187,20 +2187,20 @@ mod tests {
 
         for j in 0..2 {
             assert!(
-                (*robust.params().get(j, 0) - *kernel.params().get(j, 0)).abs() < 1e-8,
-                "param {j}: robust={}, kernel={}",
+                (*robust.params().get(j, 0) - *hac.params().get(j, 0)).abs() < 1e-8,
+                "param {j}: robust={}, hac={}",
                 *robust.params().get(j, 0),
-                *kernel.params().get(j, 0)
+                *hac.params().get(j, 0)
             );
         }
     }
 
-    /// `weight_type=Kernel`（`lags=2`）の点推定を、`kernel_moment_covariance`（`matmul`
+    /// `weight_type=Hac`（`lags=2`）の点推定を、`hac_moment_covariance`（`matmul`
     /// ベース）とは独立に、素朴なループでBartlettカーネル重み付き和を手計算したオラクルと
-    /// 数値照合する（`fit_kernel_with_zero_lags_matches_robust`は`lags=0`（ラグ項ループが
+    /// 数値照合する（`fit_hac_with_zero_lags_matches_robust`は`lags=0`（ラグ項ループが
     /// 空になる自明ケース）のみで、ラグ重み付け本体は未検証だったため追加）。
     #[test]
-    fn fit_computes_kernel_weighted_estimate_matching_manual_formula_with_lags_two() {
+    fn fit_computes_hac_weighted_estimate_matching_manual_formula_with_lags_two() {
         let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
         let n = y.len();
         let input = IvInput::from_columns(
@@ -2218,7 +2218,7 @@ mod tests {
         let estimator = GmmEstimator::fit(
             input,
             GmmType::TwoStep {
-                weight: WeightType::Kernel {
+                weight: WeightType::Hac {
                     lags: Some(2),
                     time_order: None,
                 },
@@ -2254,7 +2254,7 @@ mod tests {
         let e0 = &y_mat - &x * &beta0;
 
         // Bartlettカーネル（lags=2、time_order無指定なので行順=時系列順）を、
-        // `kernel_moment_covariance`のmatmulベース実装とは別に、要素ごとの
+        // `hac_moment_covariance`のmatmulベース実装とは別に、要素ごとの
         // ループで素朴に計算する。
         let ze = Mat::from_fn(n, 3, |i, j| (*e0.get(i, 0)) * (*z.get(i, j)));
         let mut s = Mat::<f64>::zeros(3, 3);
@@ -2313,7 +2313,7 @@ mod tests {
     /// 数値的に一致するはず（`two_sls.rs`の
     /// `fit_computes_hac_std_errors_with_auto_lags_matching_explicit_lags`と同じ検証方針）。
     #[test]
-    fn fit_with_kernel_weight_type_and_auto_lags_matches_explicit_lags_two() {
+    fn fit_with_hac_weight_type_and_auto_lags_matches_explicit_lags_two() {
         let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
         let build_input = || {
             IvInput::from_columns(
@@ -2333,7 +2333,7 @@ mod tests {
         let auto_estimator = GmmEstimator::fit(
             build_input(),
             GmmType::TwoStep {
-                weight: WeightType::Kernel {
+                weight: WeightType::Hac {
                     lags: None,
                     time_order: None,
                 },
@@ -2346,7 +2346,7 @@ mod tests {
         let explicit_estimator = GmmEstimator::fit(
             build_input(),
             GmmType::TwoStep {
-                weight: WeightType::Kernel {
+                weight: WeightType::Hac {
                     lags: Some(2),
                     time_order: None,
                 },
@@ -2369,7 +2369,7 @@ mod tests {
     /// ラグ付きモーメント共分散を計算することを確認する（`two_sls.rs`の
     /// `fit_computes_hac_std_errors_respecting_time_order`と同じ検証方針）。
     #[test]
-    fn fit_with_kernel_weight_type_respects_time_order() {
+    fn fit_with_hac_weight_type_respects_time_order() {
         let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
         let n = y.len();
         let shuffle: Vec<usize> = vec![3, 1, 6, 0, 5, 2, 7, 4, 11, 9, 14, 8, 13, 10, 15, 12];
@@ -2395,7 +2395,7 @@ mod tests {
         let shuffled_estimator = GmmEstimator::fit(
             shuffled_input,
             GmmType::TwoStep {
-                weight: WeightType::Kernel {
+                weight: WeightType::Hac {
                     lags: Some(2),
                     time_order: Some(shuffled_time),
                 },
@@ -2421,7 +2421,7 @@ mod tests {
         let unshuffled_estimator = GmmEstimator::fit(
             unshuffled_input,
             GmmType::TwoStep {
-                weight: WeightType::Kernel {
+                weight: WeightType::Hac {
                     lags: Some(2),
                     time_order: None,
                 },
@@ -2552,7 +2552,7 @@ mod tests {
         let estimator = GmmEstimator::fit(
             input,
             GmmType::TwoStep {
-                weight: WeightType::Unadjusted,
+                weight: WeightType::Classical,
             },
             true,
             CovType::Classical,
@@ -2714,14 +2714,14 @@ mod tests {
         assert!((estimator.hansen_j_p_value().unwrap() - expected_p_value).abs() < 1e-8);
     }
 
-    /// `weight_type=Unadjusted`かつ`TwoStep`のHansen J統計量は、`two_sls.rs`の
+    /// `weight_type=Classical`かつ`TwoStep`のHansen J統計量は、`two_sls.rs`の
     /// Sargan統計量と数値的に一致するはず（`fit()`冒頭のdocコメント「Hansen J過剰識別検定」
-    /// 参照）。点推定側の`fit_matches_two_sls_point_estimate_when_weight_type_is_unadjusted`
+    /// 参照）。点推定側の`fit_matches_two_sls_point_estimate_when_weight_type_is_classical`
     /// と対になる不変条件チェック（同じデータセットを使う）。`GmmEstimator`単体の
     /// 手計算オラクルでは検出できなかった`σ̂²`スケーリング漏れ（rust-reviewerの指摘）を、
     /// 独立実装である`TwoSlsEstimator`との数値一致という形で検証する。
     #[test]
-    fn fit_computes_hansen_j_statistic_matching_two_sls_sargan_when_weight_type_is_unadjusted() {
+    fn fit_computes_hansen_j_statistic_matching_two_sls_sargan_when_weight_type_is_classical() {
         let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
         let x_endog = vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0, 8.0, 7.0];
         let z1 = vec![3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0];
@@ -2746,7 +2746,7 @@ mod tests {
         let gmm = GmmEstimator::fit(
             build_input(),
             GmmType::TwoStep {
-                weight: WeightType::Unadjusted,
+                weight: WeightType::Classical,
             },
             true,
             CovType::Classical,
@@ -2794,7 +2794,7 @@ mod tests {
             let result = GmmEstimator::fit(
                 build_input(),
                 GmmType::Iterated {
-                    weight: WeightType::Unadjusted,
+                    weight: WeightType::Classical,
                     max_iter: 3,
                     tol: invalid,
                 },
@@ -2886,12 +2886,12 @@ mod tests {
         assert_eq!(estimator.n_iter(), 3);
     }
 
-    /// `weight_type=Unadjusted`は点推定が正のスカラー倍不変のため、`gmm_tol`を
+    /// `weight_type=Classical`は点推定が正のスカラー倍不変のため、`gmm_tol`を
     /// 指定していても2回目のS再構築（`β̂₁`）は初期推定`β̂₀`と数値的に完全一致し
-    /// （`fit_matches_two_sls_point_estimate_when_weight_type_is_unadjusted`と同じ根拠）、
+    /// （`fit_matches_two_sls_point_estimate_when_weight_type_is_classical`と同じ根拠）、
     /// どんなに厳しい許容誤差でも常に`n_iter=2`で収束する。
     #[test]
-    fn fit_with_unadjusted_weight_type_always_converges_at_second_iteration() {
+    fn fit_with_classical_weight_type_always_converges_at_second_iteration() {
         let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
         let input = IvInput::from_columns(
             &y,
@@ -2909,7 +2909,7 @@ mod tests {
         let estimator = GmmEstimator::fit(
             input,
             GmmType::Iterated {
-                weight: WeightType::Unadjusted,
+                weight: WeightType::Classical,
                 max_iter: 10,
                 tol: 1e-300,
             },
@@ -2924,8 +2924,8 @@ mod tests {
 
     /// `Iterated`が`max_iter`回（上限）以内に収束せず、
     /// `raise_on_non_convergence=true`（既定）なら`IvError::GmmNonConvergence`。
-    /// `weight_type=Robust`は`Unadjusted`と点推定が異なる（既存テスト
-    /// `fit_with_robust_weight_type_differs_from_unadjusted_when_heteroskedastic`で
+    /// `weight_type=Robust`は`Classical`と点推定が異なる（既存テスト
+    /// `fit_with_robust_weight_type_differs_from_classical_when_heteroskedastic`で
     /// `diff > 1e-4`を確認済み）ため、極めて厳しい許容誤差（`rtol=1e-300`）と組み合わせれば
     /// `max_iter=3`（2回だけSを再構築）では収束しないことが決定的に保証できる。
     #[test]
@@ -3290,8 +3290,8 @@ mod tests {
 
     /// `cov_type=Hac`のSEを、Bartlettカーネル（lags=2）を要素ごとのループで素朴に
     /// 計算したオラクルと数値照合する。小標本補正が無いため、点推定用の
-    /// `kernel_moment_covariance`と同じ計算式になるはず（モジュール冒頭のdocコメント
-    /// 参照）——本テストは`kernel_moment_covariance`を呼ばず独立に再計算することで、
+    /// `hac_moment_covariance`と同じ計算式になるはず（モジュール冒頭のdocコメント
+    /// 参照）——本テストは`hac_moment_covariance`を呼ばず独立に再計算することで、
     /// その主張自体を検証する。
     #[test]
     fn fit_computes_hac_std_errors_matching_manual_sandwich_formula() {
@@ -3586,7 +3586,7 @@ mod tests {
         let estimator = GmmEstimator::fit(
             input,
             GmmType::TwoStep {
-                weight: WeightType::Unadjusted,
+                weight: WeightType::Classical,
             },
             true,
             CovType::Classical,
@@ -3712,7 +3712,7 @@ mod tests {
         let result = GmmEstimator::fit(
             input,
             GmmType::TwoStep {
-                weight: WeightType::Unadjusted,
+                weight: WeightType::Classical,
             },
             true,
             CovType::Classical,
@@ -3776,7 +3776,7 @@ mod tests {
         );
     }
 
-    /// `OneStep`（ループが一度も回らず`s_used=unadjusted_s=σ̂²₀・Z'Z`のまま）でも、
+    /// `OneStep`（ループが一度も回らず`s_used=classical_s=σ̂²₀・Z'Z`のまま）でも、
     /// `cov_type`（`Hc1`、非classicalで補正が効くケース）のSEが正しく計算されることを、
     /// 独立手計算オラクルと数値照合する。モジュール冒頭のdocコメント「標準誤差・検定統計量
     /// （cov_type対応）」が主張する「`s_used`の正のスカラー倍不変性によりcov_paramsは
@@ -3829,7 +3829,7 @@ mod tests {
             * (ztx.transpose() * &ztz_inv * &zty);
         let residuals = &y_mat - &x * &beta;
 
-        // s_used = unadjusted_s = σ̂²₀・Z'Z（step-0残差=最終残差、Hansen J用と同じ計算）。
+        // s_used = classical_s = σ̂²₀・Z'Z（step-0残差=最終残差、Hansen J用と同じ計算）。
         let sigma2_0: f64 =
             (0..n).map(|i| (*residuals.get(i, 0)).powi(2)).sum::<f64>() / (n as f64);
         let s_used = Mat::from_fn(l, l, |i, j| sigma2_0 * (*ztz.get(i, j)));
@@ -3865,7 +3865,7 @@ mod tests {
     }
     /// property-basedテスト。`two_sls.rs`の`mod proptests`と同じケース生成器
     /// （`common::proptest_support`）・許容誤差（`RTOL=1e-6`）・`prop_assume!`によるフルランク
-    /// 安全弁を使う。GMM固有の不変条件（`weight_type=Unadjusted`と2SLSの一致、`S`のスカラー倍
+    /// 安全弁を使う。GMM固有の不変条件（`weight_type=Classical`と2SLSの一致、`S`のスカラー倍
     /// に対する点推定の不変性、丁度識別での`W`への非依存）を検証する。
     mod proptests {
         use super::*;
@@ -3922,12 +3922,12 @@ mod tests {
         proptest! {
             #![proptest_config(ProptestConfig::with_cases(256))]
 
-            /// `weight_type=Unadjusted`のGMM点推定は2SLSの点推定と一致する（`W₁∝(Z'Z)⁻¹`）。
+            /// `weight_type=Classical`のGMM点推定は2SLSの点推定と一致する（`W₁∝(Z'Z)⁻¹`）。
             #[test]
             fn unadjusted_gmm_matches_two_sls_point_estimate(
                 case in iv_case_strategy(false),
             ) {
-                let gmm = fit_gmm(case.input().unwrap(), WeightType::Unadjusted, OlsCovType::Classical);
+                let gmm = fit_gmm(case.input().unwrap(), WeightType::Classical, OlsCovType::Classical);
                 let two_sls = TwoSlsEstimator::fit(case.input().unwrap(), OlsCovType::Classical, 0.95);
                 prop_assume!(gmm.is_ok() && two_sls.is_ok());
                 let (gmm, two_sls) = (gmm.unwrap(), two_sls.unwrap());
@@ -3980,12 +3980,12 @@ mod tests {
             fn just_identified_point_estimate_does_not_depend_on_weight_type(
                 case in iv_case_strategy(true),
             ) {
-                let unadjusted = fit_gmm(case.input().unwrap(), WeightType::Unadjusted, OlsCovType::Classical);
+                let classical = fit_gmm(case.input().unwrap(), WeightType::Classical, OlsCovType::Classical);
                 let robust = fit_gmm(case.input().unwrap(), WeightType::Robust, OlsCovType::Classical);
-                prop_assume!(unadjusted.is_ok() && robust.is_ok());
-                let (unadjusted, robust) = (unadjusted.unwrap(), robust.unwrap());
-                for j in 0..unadjusted.params().nrows() {
-                    assert_approx_eq(*robust.params().get(j, 0), *unadjusted.params().get(j, 0), &format!("beta[{j}]"));
+                prop_assume!(classical.is_ok() && robust.is_ok());
+                let (classical, robust) = (classical.unwrap(), robust.unwrap());
+                for j in 0..classical.params().nrows() {
+                    assert_approx_eq(*robust.params().get(j, 0), *classical.params().get(j, 0), &format!("beta[{j}]"));
                 }
             }
         }

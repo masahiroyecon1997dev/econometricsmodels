@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Breaking**: the test-statistic name is unified across all methods. `t_stats` (OLS / WLS / FE / RE), `z_stats` (Logit / Probit / Tobit) and `stats` (IV) are now `test_stats`, and the `coef_table()` keys `t_stat` / `z_stat` / `stat` are now `test_stat`. `marginal_effects()` rows use `test_stat` too. No aliases are kept
 - All Results classes gain `stat_dist` (`"t"` or `"normal"`) and `stat_df` (degrees of freedom of the t distribution, `None` for `"normal"`). `stat_df` is the value actually used, which can differ from `df_resid` (e.g. OLS / WLS / IV 2SLS with `cov_type="cluster"` use `G - 1`), so p-values can be recomputed from `test_stats`
 - **Breaking**: FE / RE: `cov_type="hac"` is renamed to `"dk"` (Driscoll-Kraay). FE / RE's `"hac"` was a different estimator from OLS / WLS / IV's Newey-West `"hac"`, so the same string pointed at two estimators. The value matches fixest's `"DK"` (case-insensitive) and pairs with `dk_bandwidth`. The engine enum variants `FeCovType::Hac` / `ReCovType::Hac` become `Dk`
+- **Breaking**: IV: `gmm_weight_type` values now use the same vocabulary as `cov_type`: `"unadjusted"` is now `"classical"` and `"kernel"` is now `"hac"` (`"robust"` and `"cluster"` are unchanged). The aliases `"homoskedastic"` / `"heteroskedastic"` are removed, and the default is `"classical"`. The engine `WeightType::Unadjusted` / `Kernel` variants become `Classical` / `Hac`
 
 ## [0.7.0] - 2026-09-22
 

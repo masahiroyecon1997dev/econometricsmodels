@@ -364,10 +364,10 @@ def run(
 # cov_type自体は`_COV_TYPE_MAP`をそのまま再利用できる、`run_gmm()`のモジュール
 # docコメント参照）。
 _WEIGHT_TYPE_MAP: dict[str, str] = {
-    "unadjusted": "unadjusted",
+    "classical": "unadjusted",
     "robust": "robust",
     "cluster": "clustered",
-    "kernel": "kernel",
+    "hac": "kernel",
 }
 
 
@@ -388,13 +388,13 @@ def run_gmm(
     ## `weight_type`の対応関係（実測して確定）
 
     `IVGMM`のコンストラクタ引数`weight_type`は`engine::iv::gmm::WeightType`と
-    同じ4値（`unadjusted`/`robust`/`kernel`は文字列そのまま、`cluster`だけ
-    `linearmodels`側は`clustered`）を取る。`_WEIGHT_TYPE_MAP`参照。
+    対応する4値（本実装の`classical`/`robust`/`cluster`/`hac`が、`linearmodels`側では
+    それぞれ`unadjusted`/`robust`/`clustered`/`kernel`）を取る。`_WEIGHT_TYPE_MAP`参照。
 
     ## `cov_type`/`debiased`の対応関係
 
     `run()`のモジュールdocコメントの表（`_COV_TYPE_MAP`）がGMMでもそのまま
-    使えることを実測確認済み（`baseline`シナリオ、`weight_type="unadjusted"`で
+    使えることを実測確認済み（`baseline`シナリオ、`weight_type="classical"`で
     `coef`/`se`が相対誤差1e-10程度以下で一致）。`hc2`/`hc3`が対象外な理由も
     `run()`と同じ（`IVGMMCovariance`が対応する`score_cov_estimator`を持たない）。
 
@@ -430,10 +430,10 @@ def run_gmm(
 
     `res.j_stat.stat`/`.pval`はカイ二乗検定として実装されており（`debiased`に
     連動しない）、本実装の`overid_statistic`/`overid_p_value`（Hansen J、
-    `gmm.rs`参照）とそのまま対応する。`weight_type="unadjusted"`のとき、
+    `gmm.rs`参照）とそのまま対応する。`weight_type="classical"`のとき、
     `res.j_stat.stat`が`run()`が返す`sargan_statistic`と機械精度で一致することも
     実測確認済み（本実装の`fit_computes_hansen_j_statistic_matching_two_sls_
-    sargan_when_weight_type_is_unadjusted`と同じ不変条件）。
+    sargan_when_weight_type_is_classical`と同じ不変条件）。
 
     ## Wu-Hausman検定
 
@@ -460,7 +460,7 @@ def run_gmm(
     weight_hac_lag_used = None
     if weight_type == "cluster":
         weight_config["clusters"] = pdf[cluster_col]
-    elif weight_type == "kernel":
+    elif weight_type == "hac":
         weight_hac_lag_used = (
             hac_lags if hac_lags is not None else hac_auto_lag(n)
         )
@@ -575,7 +575,7 @@ if __name__ == "__main__":
     parser.add_argument("--x-exog", nargs="*", default=["x1"])
     parser.add_argument("--x-endog", nargs="*", default=["endog1"])
     parser.add_argument("--instruments", nargs="*", default=["z1", "z2"])
-    parser.add_argument("--weight-type", default="unadjusted")
+    parser.add_argument("--weight-type", default="classical")
     parser.add_argument("--cov-type", default="classical")
     parser.add_argument("--cluster-col", default=None)
     parser.add_argument("--hac-lags", type=int, default=None)

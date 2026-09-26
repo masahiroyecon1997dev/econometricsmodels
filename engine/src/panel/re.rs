@@ -2416,4 +2416,227 @@ mod tests {
 
         assert_eq!(re_hausman_test(&fe, &beta_re, &cov_re), None);
     }
+
+    /// property-basedテスト。固定シナリオでは`σ_u²`・`T_i`・`cov_type`の組み合わせが
+    /// 限られるため、ランダムな不均衡パネルでREの不変条件（θの値域・`σ_u²=0`でのpooled OLS
+    /// への退化・行順序/ラベルへの不変性）を検証する。
+    mod proptests {
+        use super::*;
+        use proptest::collection;
+        use proptest::prelude::*;
+
+        const MAX_T: usize = 6;
+
+        #[derive(Debug, Clone)]
+        struct ReCase {
+            entity_idx: Vec<usize>,
+            n_entities: usize,
+            y: Vec<f64>,
+            x: Vec<Vec<f64>>,
+            /// 行の並べ替え用の乱数キー（長さ`n`）。
+            keys: Vec<u64>,
+        }
+
+        /// 不均衡パネル（entityごとに`T_i`が2..=6）。`has_effect=false`の場合はentity効果を
+        /// 持たないDGPになり、`σ_u²`が0に切り詰められる（Swamy-Aroraの`max(0)`）ケースが
+        /// 高頻度で現れる。
+        fn re_case_strategy() -> impl Strategy<Value = ReCase> {
+            (6..=9usize, 1..=2usize, any::<bool>())
+                .prop_flat_map(|(n_entities, k, has_effect)| {
+                    (
+                        Just(n_entities),
+                        Just(k),
+                        Just(has_effect),
+                        collection::vec(2..=MAX_T, n_entities),
+                    )
+                })
+                .prop_flat_map(|(n_entities, k, has_effect, sizes)| {
+                    let n: usize = sizes.iter().sum();
+                    (
+                        Just(n_entities),
+                        Just(has_effect),
+                        Just(sizes),
+                        collection::vec(collection::vec(-10.0f64..10.0, n), k),
+                        collection::vec(-5.0f64..5.0, n),
+                        collection::vec(-20.0f64..20.0, n_entities),
+                        collection::vec(any::<u64>(), n),
+                    )
+                })
+                .prop_map(|(n_entities, has_effect, sizes, x, noise, effect, keys)| {
+                    let mut entity_idx = Vec::new();
+                    for (i, &size) in sizes.iter().enumerate() {
+                        entity_idx.extend(std::iter::repeat_n(i, size));
+                    }
+                    let y: Vec<f64> = (0..noise.len())
+                        .map(|r| {
+                            let u = if has_effect {
+                                effect[entity_idx[r]]
+                            } else {
+                                0.0
+                            };
+                            x.iter().map(|c| c[r]).sum::<f64>() + u + noise[r]
+                        })
+                        .collect();
+                    ReCase {
+                        entity_idx,
+                        n_entities,
+                        y,
+                        x,
+                        keys,
+                    }
+                })
+        }
+
+        fn re_cov_strategy() -> impl Strategy<Value = ReCovType> {
+            prop_oneof![
+                Just(ReCovType::Classical),
+                Just(ReCovType::Hc1),
+                Just(ReCovType::Hc2),
+                Just(ReCovType::Hc3),
+                Just(ReCovType::Cluster { groups: None }),
+            ]
+        }
+
+        fn entity_labels(idx: &[usize]) -> Vec<String> {
+            idx.iter().map(|i| format!("e{i}")).collect()
+        }
+
+        fn re_input(y: &[f64], x: &[Vec<f64>], entity: &[String]) -> ReInput {
+            let names: Vec<String> = (0..x.len()).map(|j| format!("x{j}")).collect();
+            ReInput::from_columns(y, x, names, entity, None, "y".to_string()).unwrap()
+        }
+
+        /// 固定フィクスチャ比較より緩めた相対誤差（`ols.rs`/`fe.rs`のproptestと同じ方針）。
+        fn assert_approx_eq(actual: f64, expected: f64, msg: &str) {
+            let tol = 1e-6 * expected.abs().max(1.0);
+            assert!(
+                (actual - expected).abs() <= tol,
+                "{msg}: actual={actual}, expected={expected}, tol={tol}"
+            );
+        }
+
+        /// 係数（先頭が切片）と標準誤差を並べて取り出す。
+        fn params_and_se(est: &ReEstimator) -> (Vec<f64>, Vec<f64>) {
+            let n = est.estimator().params().nrows();
+            let params = (0..n)
+                .map(|j| *est.estimator().params().get(j, 0))
+                .collect();
+            let se = (0..n).map(|j| *est.std_errors().get(j, 0)).collect();
+            (params, se)
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            /// `compute_theta`の値域は、`σ_ε²>0`・`σ_u²>=0`・任意の`T_i>=1`で常に`[0, 1)`。
+            #[test]
+            fn compute_theta_is_within_unit_interval(
+                sizes in collection::vec(1..=20usize, 1..=8),
+                sigma2_eps in 1e-6f64..1e3,
+                sigma2_u in prop_oneof![Just(0.0), 0.0f64..1e3],
+            ) {
+                let mut entity = Vec::new();
+                for (i, &size) in sizes.iter().enumerate() {
+                    entity.extend(std::iter::repeat_n(format!("e{i}"), size));
+                }
+
+                let theta = compute_theta(&entity, sigma2_eps, sigma2_u);
+
+                prop_assert_eq!(theta.len(), sizes.len());
+                for (id, t) in &theta {
+                    prop_assert!((0.0..1.0).contains(t), "theta[{id}]={t}");
+                }
+            }
+
+            /// Swamy-Arora分散成分から実際に組み立てたθも`[0, 1)`に収まる。
+            #[test]
+            fn fitted_theta_is_within_unit_interval(case in re_case_strategy()) {
+                let entity = entity_labels(&case.entity_idx);
+                let input = re_input(&case.y, &case.x, &entity);
+                let vc = swamy_arora_variance_components(&input, 0.95);
+                prop_assume!(vc.is_ok());
+                let (sigma2_eps, sigma2_u, _) = vc.unwrap();
+                prop_assume!(sigma2_eps > 0.0);
+
+                let (theta, _, _) = quasi_demean_transform(&input, sigma2_eps, sigma2_u);
+
+                for (id, t) in &theta {
+                    prop_assert!((0.0..1.0).contains(t), "theta[{id}]={t}");
+                }
+            }
+
+            /// `σ_u²`が0に切り詰められたときREはpooled OLS（定数項あり）と一致する
+            /// （`θ_i=0`で準偏差変換が恒等になるため、係数もClassical SEも同じ）。
+            #[test]
+            fn matches_pooled_ols_when_sigma2_u_is_zero(case in re_case_strategy()) {
+                let entity = entity_labels(&case.entity_idx);
+                let vc = swamy_arora_variance_components(&re_input(&case.y, &case.x, &entity), 0.95);
+                prop_assume!(vc.is_ok());
+                prop_assume!(vc.unwrap().1 == 0.0);
+
+                let re = ReEstimator::fit(
+                    re_input(&case.y, &case.x, &entity),
+                    ReCovType::Classical,
+                    0.95,
+                );
+                prop_assume!(re.is_ok());
+                let (params, se) = params_and_se(&re.unwrap());
+
+                let names: Vec<String> = (0..case.x.len()).map(|j| format!("x{j}")).collect();
+                let ols_input =
+                    OlsInput::from_columns(&case.y, &case.x, names, true, "y".to_string()).unwrap();
+                let ols = OlsEstimator::fit(ols_input, CovType::Classical, 0.95);
+                prop_assume!(ols.is_ok());
+                let ols = ols.unwrap();
+
+                for j in 0..params.len() {
+                    assert_approx_eq(params[j], *ols.params().get(j, 0), &format!("param[{j}]"));
+                    assert_approx_eq(se[j], *ols.std_errors().get(j, 0), &format!("se[{j}]"));
+                }
+            }
+
+            /// 行の並べ替えとentityラベルの付け替えで、係数・標準誤差・ハウスマン統計量は
+            /// 変わらない。
+            #[test]
+            fn results_are_invariant_to_row_order_and_entity_relabeling(
+                case in re_case_strategy(),
+                cov in re_cov_strategy(),
+            ) {
+                let entity = entity_labels(&case.entity_idx);
+                let base = ReEstimator::fit(re_input(&case.y, &case.x, &entity), cov.clone(), 0.95);
+                prop_assume!(base.is_ok());
+                let base = base.unwrap();
+                let (params, se) = params_and_se(&base);
+
+                let n = case.y.len();
+                let mut order: Vec<usize> = (0..n).collect();
+                order.sort_by_key(|&r| case.keys[r]);
+                let y: Vec<f64> = order.iter().map(|&r| case.y[r]).collect();
+                let x: Vec<Vec<f64>> = case
+                    .x
+                    .iter()
+                    .map(|c| order.iter().map(|&r| c[r]).collect())
+                    .collect();
+                let entity2: Vec<String> = order
+                    .iter()
+                    .map(|&r| format!("z{}", case.n_entities - 1 - case.entity_idx[r]))
+                    .collect();
+
+                let permuted = ReEstimator::fit(re_input(&y, &x, &entity2), cov, 0.95);
+                prop_assume!(permuted.is_ok());
+                let permuted = permuted.unwrap();
+                let (params2, se2) = params_and_se(&permuted);
+
+                for j in 0..params.len() {
+                    assert_approx_eq(params2[j], params[j], &format!("param[{j}]"));
+                    assert_approx_eq(se2[j], se[j], &format!("se[{j}]"));
+                }
+                match (base.hausman_statistic(), permuted.hausman_statistic()) {
+                    (Some(a), Some(b)) => assert_approx_eq(b, a, "hausman_statistic"),
+                    (None, None) => {}
+                    (a, b) => prop_assert!(false, "hausman presence differs: {a:?} vs {b:?}"),
+                }
+            }
+        }
+    }
 }

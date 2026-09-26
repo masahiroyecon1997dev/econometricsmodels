@@ -123,3 +123,10 @@
 - FE/REで共有（`FeError`/`ReError`は作らない）。`CommonError` を `#[error(transparent)] Common(#[from] CommonError)` で包む（`LeastSquaresError`/`MleError`/`IvError` と同じ）。
 - `WithinRegressionFailed { #[source] source: LeastSquaresError }` は `#[from]` を使わず明示的に `.map_err` で包む（`CommonError` が2経路で `PanelError` になる曖昧さを避けるため。`IvError::FirstStageFailed` と同じ判断）。`FTestFailed { #[source] source: LeastSquaresError }`も同じ`LeastSquaresError`ラップだが、`OlsEstimator::fit`委譲の失敗ではなくFE独自のF検定（`wald_f_test`再利用）の失敗を表すため別バリアントにしている。
 - RE固有バリアント（between回帰の自由度不足、Hausman統計量の非正定値ケース等）は未定義。RE実装issueで計算コードを書く過程で追加する（`common.rs` モジュールdocコメントの「追加候補」参照）。
+
+## property-basedテスト（`mod proptests`）
+
+- FE（`fe.rs`）は`fit`レベルで「yへのentity/time定数加算」「行並べ替え＋entityラベル付け替え」「yスケール線形性」「LSDVオラクル（傾き・Classical SE）」を検証する。REは「θの値域`[0,1)`」「`σ_u²=0`でpooled OLSと一致」「行並べ替え＋ラベル付け替え」（ハウスマン統計量も含む）。ケース生成器はFE/REで別定義（FEは2-wayのためバランスパネル、REは不均衡パネル固定）。
+- **`quasi_demean_column`はFE・REの両方の土台**なので、バグ注入は`common.rs`側で行うと両方のプロパティを検証できる。ただし`y=Σx+ノイズ`のDGPでは「グループ平均を定数倍ずらす」ような注入は`y`と`x`で相殺して二次効果に埋もれ、LSDV/行順序系プロパティでは検出できない。注入は「観測単位で値を汚す」（`n>20`かつ値>5のときだけ+1e-3等）か「行順序依存にする」（グループのk番目の観測を和から除く）形にする。
+- `σ_u²=0`でのpooled OLS一致は、entity効果なしのDGPだとSwamy-Arora推定量の`max(0)`により約半数のケースで自然に成立するため、`prop_assume!(sigma2_u == 0.0)`で棄却しても`too many rejects`にならない。
+

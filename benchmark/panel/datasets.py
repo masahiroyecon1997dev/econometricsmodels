@@ -31,7 +31,7 @@ import sys
 import numpy as np
 import polars as pl
 
-from benchmark.common import validate_choice
+from benchmark.common import correlated_design_matrix, validate_choice
 from benchmark.common.dgp_constants import (
     AUTOCORRELATED_RHO,
     HETEROSKEDASTIC_SIGMA_BASE,
@@ -42,9 +42,15 @@ SCENARIOS = [
     "baseline",
     "small_panel",
     "unbalanced",
+    "high_variance",
     "heteroskedastic",
     "autocorrelated",
     "cross_sectionally_correlated",
+    "moderate_multicollinearity",
+    "high_condition_number",
+    "scale_variance_mild",
+    "many_regressors",
+    "outlier_regressor",
     "singleton_entity",
     "singleton_time",
     "unbalanced_two_way",
@@ -88,6 +94,31 @@ _UNBALANCED_DROP_PROB = 0.2
 # （固有誤差と同じスケール=1.0で、クロスセクション相関の寄与を無視できない
 # 大きさにする）。
 _CROSS_SECTIONAL_SHOCK_SD = 1.0
+
+# high_varianceシナリオの誤差項標準偏差（`benchmark/linear/datasets.py`と同じ値）。
+_HIGH_VARIANCE_ERROR_SD = 10.0
+
+# scale_variance_mildシナリオでのスケール差（`benchmark/linear/datasets.py`の
+# 同名シナリオと同じ比率、1e3程度）。特異にはならない悪条件の成功パスのため、
+# 数値比較の対象外の`scale_variance`（1e6/1e-3、`dgp_constants`参照）とは別の値。
+_SCALE_VARIANCE_MILD_X1_SCALE = 1e2
+_SCALE_VARIANCE_MILD_X2_SCALE = 1e-1
+
+# many_regressorsシナリオで固定する説明変数の数・列ごとのスケール差の範囲
+# （`benchmark/linear/datasets.py`の同名シナリオと同じ値）。
+_MANY_REGRESSORS_K = 20
+_MANY_REGRESSORS_LOG_SCALE_RANGE = (-1.0, 2.0)
+
+# outlier_regressorシナリオでx1に混入させる外れ値（Tukeyの汚染混合モデル、
+# `benchmark/linear/datasets.py`の同名シナリオと同じ値）。
+_OUTLIER_REGRESSOR_CONTAM_PROB = 0.05
+_OUTLIER_REGRESSOR_CONTAM_SCALE = 20.0
+
+
+def _require_min_k(scenario: str, k: int, minimum: int) -> None:
+    """シナリオが要求する`k`（説明変数の数）の下限を満たさなければ`ValueError`。"""
+    if k < minimum:
+        raise ValueError(f"{scenario} requires k >= {minimum}")
 
 
 def _entity_time_ids(
@@ -240,15 +271,42 @@ def generate_fe_dataset(
         n_entities, n_periods = _SMALL_N_ENTITIES, _SMALL_N_PERIODS
     elif scenario == "cross_sectionally_correlated":
         n_entities, n_periods = _DK_N_ENTITIES, _DK_N_PERIODS
+    elif scenario == "many_regressors":
+        k = _MANY_REGRESSORS_K
 
     if beta is None:
-        beta = rng.uniform(-3, 3, size=k)
+        if scenario == "many_regressors":
+            # 列取り違えバグを検出しやすくするため、係数の絶対値を列ごとに
+            # 意図的にずらす（`benchmark/linear/datasets.py`と同じ発想）。
+            magnitudes = 1.0 + 0.5 * np.arange(k)
+            signs = rng.choice([-1.0, 1.0], size=k)
+            beta = signs * magnitudes
+        else:
+            beta = rng.uniform(-3, 3, size=k)
 
     entity_ids, time_ids = _entity_time_ids(n_entities, n_periods)
     X, alpha, gamma, entity_idx, time_idx = _design_and_effects(
         rng, n_entities, n_periods, k
     )
     n = n_entities * n_periods
+
+    if scenario in ("moderate_multicollinearity", "high_condition_number"):
+        _require_min_k(scenario, k, 2)
+        # x1/x2の相関を持たせる悪条件シナリオに限り、他シナリオ共通の
+        # entity_latent相関trick（モジュールdoc参照）は適用しない
+        # （数値照合という目的自体には両立不要、ユーザー確認済み）。
+        X = correlated_design_matrix(rng, scenario, n, k)
+    elif scenario == "scale_variance_mild":
+        _require_min_k(scenario, k, 2)
+        X[:, 0] *= _SCALE_VARIANCE_MILD_X1_SCALE
+        X[:, 1] *= _SCALE_VARIANCE_MILD_X2_SCALE
+    elif scenario == "many_regressors":
+        col_scales = np.logspace(*_MANY_REGRESSORS_LOG_SCALE_RANGE, k)
+        X = X * col_scales
+    elif scenario == "outlier_regressor":
+        is_outlier = rng.uniform(size=n) < _OUTLIER_REGRESSOR_CONTAM_PROB
+        outlier_vals = rng.normal(0.0, _OUTLIER_REGRESSOR_CONTAM_SCALE, size=n)
+        X[:, 0] = np.where(is_outlier, outlier_vals, X[:, 0])
 
     if scenario == "autocorrelated":
         errors = _autocorrelated_errors(rng, n_entities, n_periods)
@@ -262,6 +320,8 @@ def generate_fe_dataset(
             + HETEROSKEDASTIC_SIGMA_SLOPE * np.abs(X[:, 0])
         )  # 分散がx1に依存
         errors = rng.normal(size=n) * sigma_i
+    elif scenario == "high_variance":
+        errors = rng.normal(0, _HIGH_VARIANCE_ERROR_SD, size=n)
     else:
         errors = rng.normal(size=n)
 

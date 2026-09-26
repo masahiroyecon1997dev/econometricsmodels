@@ -1587,3 +1587,28 @@
   `{NaN,inf}`の8ケース）を追加した。`tests/`配下1693件全通過・Ruffクリーンを
   確認済み。
 
+### 76. FE: fixestクロスチェックのclusterロバストSEで、`k`が大きい・クラスタ数`G`が小さいほどG/(G-1)補正差の実測乖離が拡大する定量的な依存関係が未調査
+
+- **対象**: [tests/panel/test_fe_crosscheck.py](../../../tests/panel/test_fe_crosscheck.py)、
+  [tests/_tolerances.py](../../../tests/_tolerances.py)「fe_crosscheck」、
+  [benchmark/panel/references/run_fixest_benchmark.R](../../../benchmark/panel/references/run_fixest_benchmark.R)
+- **内容**: fixestのStata流`G/(G-1)`小標本補正と本実装・linearmodelsの
+  `n/(n-extra_df-k)`補正の慣行差は既存ドキュメントに記載済み（baseline実測:
+  1-way相対誤差~1.8e-5・2-way相対誤差~0.21%）。Issue #349でFEに
+  `many_regressors`（k=20）・`cluster_imbalanced`（G=12、entityとは無関係な
+  専用クラスター列）シナリオを追加したところ、同じ系統差がこの2シナリオで
+  大きく増幅されることが判明した（1-way cluster se相対誤差実測:
+  `many_regressors`~1.9e-4、`cluster_imbalanced`~2.5e-3。いずれもbaseline
+  の1.8e-5より1桁〜2桁大きい）。`cluster_imbalanced`は`1/(G-1)`が
+  G=40→2.6%、G=12→9.1%と定性的にG依存で説明がつきそうだが、`many_regressors`
+  がk依存でどう増幅されるかの正確な数式・両者の複合効果は未調査のまま、
+  実測値にマージンを載せた暫定rtol（`rtol_cluster_high_k=3e-4`・
+  `rtol_cluster_small_g=4e-3`、`_tolerances.py`参照）で通している。
+- **気づいた経緯**: 2026-09-26、Issue #349（FE悪条件・高次元・クラスター
+  不均衡シナリオ追加）対応中。ユーザー確認済み（暫定rtolで通しつつ本項目に
+  事象を記録する方針）。
+- **状態**: 未対応。fixestの補正式（`vcov_cluster`のソース）を実地確認し、
+  `k`・`G`・`extra_df`から乖離量を理論的に予測できる式を導出した上で、
+  暫定rtolを実測値ベースの恒久的な計算式（または妥当な安全マージン）に
+  置き換える。
+

@@ -32,7 +32,10 @@ from benchmark.common import (
     WAGEPAN_Y,
     run_fixture_cli,
 )
-from benchmark.panel.fixtures.generate_fe_fixtures import NUMERIC_SCENARIOS
+from benchmark.panel.fixtures.generate_fe_fixtures import (
+    NUMERIC_SCENARIOS,
+    SCENARIO_X_COLS,
+)
 from benchmark.panel.references.linearmodels_ref import run_re
 
 # hc2/hc3はlinearmodels.RandomEffectsが提供しないため対象外（plmクロスチェック
@@ -63,7 +66,7 @@ def _run_re(scenario: str, cov_type: str) -> dict:
     # 呼び出し側のMultiIndex構築専用）。
     return run_re(
         scenario,
-        ["x1", "x2"],
+        SCENARIO_X_COLS.get(scenario, ["x1", "x2"]),
         cov_type,
         time_col="time",
         dataset_source="synthetic",

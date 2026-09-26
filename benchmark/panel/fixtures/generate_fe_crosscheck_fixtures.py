@@ -43,6 +43,8 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+import polars as pl
+
 from benchmark.common import (
     BENCHMARKS_DIR,
     DATA_DIR,
@@ -50,11 +52,13 @@ from benchmark.common import (
     WAGEPAN_TIME,
     WAGEPAN_X,
     WAGEPAN_Y,
+    imbalanced_cluster_groups,
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
 from benchmark.panel.fixtures.generate_fe_fixtures import (
     ONE_WAY_ONLY_SCENARIOS,
+    SCENARIO_X_COLS,
     TWO_WAY_SCENARIOS,
 )
 from benchmark.panel.references.r import run_fixest_r
@@ -70,15 +74,56 @@ WAGEPAN_COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster"]
 WAGEPAN_FORMULA_RHS = " + ".join(WAGEPAN_X)
 
 
-def _formula(effects_suffix: str) -> str:
-    return f"y ~ x1 + x2 | {effects_suffix}"
+def _formula(x_cols: list[str], effects_suffix: str) -> str:
+    return f"y ~ {' + '.join(x_cols)} | {effects_suffix}"
 
 
 def _run_effects(scenario: str, cov_type: str, *, two_way: bool) -> dict:
     csv_path = DATA_DIR / f"fe_{scenario}.csv"
-    formula = _formula("entity + time" if two_way else "entity")
+    x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
+    formula = _formula(x_cols, "entity + time" if two_way else "entity")
     cluster_col = "entity" if cov_type == "cluster" else None
     return run_fixest_r(csv_path, formula, cov_type, cluster_col=cluster_col)
+
+
+def _run_cluster_imbalanced_case(tmpdir: Path) -> dict:
+    """クラスター不均衡シナリオのfixestクロスチェック
+    （`generate_fe_fixtures.py::_run_cluster_imbalanced_case`と同じデータ・
+    同じ動的クラスター列生成方針）。"""
+    df = pl.read_csv(DATA_DIR / "fe_baseline_cluster_imbalanced.csv")
+    groups = imbalanced_cluster_groups(df.height)
+    df = df.with_columns(pl.Series("cluster_group", groups))
+    csv_path = tmpdir / "fe_baseline_cluster_imbalanced_with_cluster.csv"
+    df.write_csv(csv_path)
+    formula = _formula(["x1", "x2"], "entity")
+    return run_fixest_r(
+        csv_path, formula, "cluster", cluster_col="cluster_group"
+    )
+
+
+def _run_cluster_g2_case(tmpdir: Path) -> dict:
+    """クラスタ数境界（G=2、q=1でG>q）の成功パスのfixestクロスチェック
+    （`generate_fe_fixtures.py::_run_cluster_g2_case`と同じデータ・同じ動的
+    クラスター列生成方針）。"""
+    df = pl.read_csv(DATA_DIR / "fe_baseline_k1.csv")
+    groups = [str(i % 2) for i in range(df.height)]
+    df = df.with_columns(pl.Series("cluster_group", groups))
+    csv_path = tmpdir / "fe_baseline_k1_with_cluster.csv"
+    df.write_csv(csv_path)
+    formula = _formula(["x1"], "entity")
+    return run_fixest_r(
+        csv_path, formula, "cluster", cluster_col="cluster_group"
+    )
+
+
+def _run_boundary_df1_case(*, two_way: bool) -> dict:
+    """df_resid=1境界の成功パスのfixestクロスチェック
+    （`generate_fe_fixtures.py::_run_boundary_df1_case`と同じデータ）。"""
+    scenario = "baseline_df1_two_way" if two_way else "baseline_df1_one_way"
+    csv_path = DATA_DIR / f"fe_{scenario}.csv"
+    x_cols = ["x1", "x2", "x3"] if two_way else ["x1", "x2"]
+    formula = _formula(x_cols, "entity + time" if two_way else "entity")
+    return run_fixest_r(csv_path, formula, "classical")
 
 
 def _run_wagepan(csv_path: Path, cov_type: str, *, two_way: bool) -> dict:
@@ -108,6 +153,16 @@ def build_fixtures() -> dict:
 
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = Path(tmp)
+
+        fixtures["baseline"]["cluster_imbalanced"] = (
+            _run_cluster_imbalanced_case(tmpdir)
+        )
+        fixtures["baseline"]["cluster_g2"] = _run_cluster_g2_case(tmpdir)
+        fixtures["baseline_df1"] = {
+            "one_way": _run_boundary_df1_case(two_way=False),
+            "two_way": _run_boundary_df1_case(two_way=True),
+        }
+
         df = load_wooldridge("wagepan")
         csv_path = tmpdir / "wagepan.csv"
         df.write_csv(csv_path)
@@ -151,6 +206,12 @@ def build_fixtures() -> dict:
             "ない、run_fixest_benchmark.Rのコメント参照）。hacはこのフィクス"
             "チャに含まない（モジュールdoc「hacを含まない理由」）。wagepanは"
             "fe.jsonと同じmarried/union/expersq・T=8のためhac対象外も同様。"
+            "moderate_multicollinearity/high_condition_number/"
+            "scale_variance_mild/many_regressors/"
+            "outlier_regressor/high_variance・baseline.cluster_imbalanced・"
+            "baseline.cluster_g2・baseline_df1は追加済み（fe.jsonのnote・"
+            "generate_fe_fixtures.py参照、同じデータ・同じ動的クラスター列"
+            "生成方針）。"
         ),
     }
     return fixtures

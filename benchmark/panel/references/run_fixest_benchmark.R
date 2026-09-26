@@ -120,8 +120,14 @@ if (cov_type == "cluster") {
 
 coefs <- coef(summ)
 ses <- se(summ)
-t_stats <- summ$coeftable[, "t value"]
-p_values <- summ$coeftable[, "Pr(>|t|)"]
+# summ$coeftable[, col]は1行（説明変数1個）のとき行列添字の仕様で
+# rownamesが落ちる（coef()/se()はfixest専用アクセサのため影響を受けない）。
+# setNames()で明示的に名前を付け直す。
+t_stats <- setNames(summ$coeftable[, "t value"], rownames(summ$coeftable))
+p_values <- setNames(
+  summ$coeftable[, "Pr(>|t|)"],
+  rownames(summ$coeftable)
+)
 
 ci <- confint(summ)
 conf_lower <- setNames(ci[, 1], rownames(ci))

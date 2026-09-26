@@ -36,10 +36,17 @@ from _helpers import load_wooldridge_dataset
 from _tolerances import TOLERANCES
 from econometricsmodels import FE, FEOptions
 
-from benchmark.common import WAGEPAN_ENTITY, WAGEPAN_TIME, WAGEPAN_X, WAGEPAN_Y
+from benchmark.common import (
+    WAGEPAN_ENTITY,
+    WAGEPAN_TIME,
+    WAGEPAN_X,
+    WAGEPAN_Y,
+    imbalanced_cluster_groups,
+)
 from benchmark.panel.fixtures.generate_fe_fixtures import (
     COV_TYPES,
     ONE_WAY_ONLY_SCENARIOS,
+    SCENARIO_COV_TYPES,
     TWO_WAY_SCENARIOS,
     WAGEPAN_COV_TYPES,
 )
@@ -52,6 +59,26 @@ RTOL = TOLERANCES["fe_reference"]["rtol"]
 ATOL = TOLERANCES["fe_reference"]["atol"]
 
 ALL_SCENARIOS = ONE_WAY_ONLY_SCENARIOS + TWO_WAY_SCENARIOS
+
+# シナリオごとに検証するcov_type一覧を組み立てる（既定はCOV_TYPES、
+# many_regressorsのみhacを除く、`generate_fe_fixtures.py`のSCENARIO_COV_TYPES
+# 参照）。
+
+
+def _cov_types_for(scenario: str) -> list[str]:
+    return SCENARIO_COV_TYPES.get(scenario, COV_TYPES)
+
+
+ONE_WAY_CASES = [
+    (scenario, cov_type)
+    for scenario in ALL_SCENARIOS
+    for cov_type in _cov_types_for(scenario)
+]
+TWO_WAY_CASES = [
+    (scenario, cov_type)
+    for scenario in TWO_WAY_SCENARIOS
+    for cov_type in _cov_types_for(scenario)
+]
 
 
 @pytest.fixture(scope="module")
@@ -104,8 +131,7 @@ def _check_result(
 # ── 凍結フィクスチャとの数値照合（合成データ） ───────────────────────
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
-@pytest.mark.parametrize("scenario", ALL_SCENARIOS)
+@pytest.mark.parametrize("scenario, cov_type", ONE_WAY_CASES)
 def test_matches_linearmodels_one_way(fixtures, scenario, cov_type):
     """1-way HACは`time_col`（DK専用の時系列順序、`time`＝2-way構造とは独立の
     フィールド）が必要。フィクスチャ生成側（`linearmodels_ref.py`）は`time`
@@ -128,8 +154,7 @@ def test_matches_linearmodels_one_way(fixtures, scenario, cov_type):
     )
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
-@pytest.mark.parametrize("scenario", TWO_WAY_SCENARIOS)
+@pytest.mark.parametrize("scenario, cov_type", TWO_WAY_CASES)
 def test_matches_linearmodels_two_way(fixtures, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
@@ -140,6 +165,83 @@ def test_matches_linearmodels_two_way(fixtures, scenario, cov_type):
         res,
         fixtures[scenario]["two_way"][cov_type],
         f"{scenario}/two_way/{cov_type}",
+        check_r_squared_within=False,
+    )
+
+
+# ── 境界値・クラスター不均衡 ────────────────────────────────────
+
+
+def test_cluster_imbalanced_matches_linearmodels(fixtures):
+    """クラスター不均衡（サイズ[2,3,5,10,30,50]のタイル、entityとは無関係な
+    専用クラスター列）の数値照合。`fe_baseline_cluster_imbalanced.csv`
+    （entity=20×period=10のn=200、`benchmark/panel/freeze.py`参照）を使う。
+    クラスター列自体はCSVに含めず、テスト側で都度動的生成する
+    （`generate_fe_fixtures.py::_run_cluster_imbalanced_case`と同じ方針）。
+    """
+    df = pl.read_csv(DATA_DIR / "fe_baseline_cluster_imbalanced.csv")
+    groups = imbalanced_cluster_groups(df.height)
+    df = df.with_columns(pl.Series("cluster_group", groups))
+    options = FEOptions(cov_type="cluster", cluster_col="cluster_group")
+    res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+
+    _check_result(
+        res,
+        fixtures["baseline"]["cluster_imbalanced"],
+        "baseline/cluster_imbalanced",
+        check_r_squared_within=True,
+    )
+
+
+def test_cluster_g2_matches_linearmodels(fixtures):
+    """クラスタ数境界（G=2、q=1でG>q）の成功パス。`fe_baseline_k1.csv`
+    （k=1に絞ったbaseline）にentityとは無関係な2グループ（行番号%2）を
+    都度動的付与する（`generate_fe_fixtures.py::_run_cluster_g2_case`と
+    同じ方針）。`test_cluster_count_at_most_slopes_raises_validation_error`
+    （G<=q）とは別の、G>qぎりぎりで通る成功パスの数値照合。
+    """
+    df = pl.read_csv(DATA_DIR / "fe_baseline_k1.csv")
+    groups = [str(i % 2) for i in range(df.height)]
+    df = df.with_columns(pl.Series("cluster_group", groups))
+    options = FEOptions(cov_type="cluster", cluster_col="cluster_group")
+    res = FE(df, y="y", x=["x1"], entity="entity", options=options).fit()
+
+    _check_result(
+        res,
+        fixtures["baseline"]["cluster_g2"],
+        "baseline/cluster_g2",
+        check_r_squared_within=True,
+    )
+
+
+def test_boundary_df1_one_way_matches_linearmodels(fixtures):
+    """df_resid=1境界（1-way）の成功パス。entity=3×period=2・k=2、
+    df_resid=6-3-2=1（`benchmark/panel/freeze.py`参照）。"""
+    df = pl.read_csv(DATA_DIR / "fe_baseline_df1_one_way.csv")
+    options = FEOptions(cov_type="classical")
+    res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+
+    _check_result(
+        res,
+        fixtures["baseline_df1"]["one_way"],
+        "baseline_df1/one_way",
+        check_r_squared_within=True,
+    )
+
+
+def test_boundary_df1_two_way_matches_linearmodels(fixtures):
+    """df_resid=1境界（2-way）の成功パス。entity=3×period=3・k=3、
+    df_resid=9-(3+3+3-1)=1。"""
+    df = pl.read_csv(DATA_DIR / "fe_baseline_df1_two_way.csv")
+    options = FEOptions(cov_type="classical", time="time")
+    res = FE(
+        df, y="y", x=["x1", "x2", "x3"], entity="entity", options=options
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["baseline_df1"]["two_way"],
+        "baseline_df1/two_way",
         check_r_squared_within=False,
     )
 

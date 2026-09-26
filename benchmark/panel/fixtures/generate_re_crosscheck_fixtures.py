@@ -81,7 +81,10 @@ from benchmark.common import (
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
-from benchmark.panel.fixtures.generate_fe_fixtures import NUMERIC_SCENARIOS
+from benchmark.panel.fixtures.generate_fe_fixtures import (
+    NUMERIC_SCENARIOS,
+    SCENARIO_X_COLS,
+)
 from benchmark.panel.references.r import run_re_plm_r
 
 # hc2/hc3のみ対象（モジュールdoc「このフィクスチャだけが持つ統計量」参照）。
@@ -93,7 +96,9 @@ WAGEPAN_FORMULA = f"{WAGEPAN_Y} ~ {' + '.join(WAGEPAN_X)}"
 
 def _run_effects(scenario: str, cov_type: str) -> dict:
     csv_path = DATA_DIR / f"fe_{scenario}.csv"
-    return run_re_plm_r(csv_path, "y ~ x1 + x2", cov_type)
+    x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
+    formula = f"y ~ {' + '.join(x_cols)}"
+    return run_re_plm_r(csv_path, formula, cov_type)
 
 
 def _run_wagepan(csv_path: Path, cov_type: str) -> dict:

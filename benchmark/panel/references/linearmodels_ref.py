@@ -109,14 +109,26 @@ from benchmark.common.load_wooldridge import load as _load_wooldridge
 
 
 def _load_panel_dataset(
-    dataset_source: str, scenario: str
+    dataset_source: str,
+    scenario: str,
+    df_override: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, list[float] | None]:
     """FE/RE共通のデータ読み込み。
 
     RE専用の凍結データセットは無く、`dataset_source="synthetic"`は常にFEが
     凍結した`fe_{scenario}.csv`（`load_frozen_dataset("fe", scenario)`）を
     再利用する（モジュールdocstring参照）。
+
+    Args:
+        df_override: 指定があれば`dataset_source`/`scenario`を無視し、この
+            DataFrameをそのまま使う（クラスター不均衡シナリオ等、凍結CSVに
+            含めていない列をメモリ上でのみ付与したい場合。`benchmark/linear`
+            の`_run_cluster_case`が別スクリプトでstatsmodelsを直接呼ぶ形で
+            同じことをしているのに対し、こちらは`run()`本体を再利用できる
+            よう`_load_panel_dataset`側で吸収する）。
     """
+    if df_override is not None:
+        return df_override, None
     if dataset_source == "synthetic":
         return load_frozen_dataset("fe", scenario)
     if dataset_source == "wooldridge":
@@ -228,6 +240,7 @@ def run(
     confidence_level: float = 0.95,
     dataset_source: str = "synthetic",
     y_col: str = "y",
+    df_override: pl.DataFrame | None = None,
 ) -> dict:
     """`PanelOLS`でFEのベンチマーク値（係数・標準誤差・適合度統計量）を生成する。
 
@@ -257,10 +270,12 @@ def run(
         confidence_level: 信頼区間の信頼水準。
         dataset_source: "synthetic" または "wooldridge"。
         y_col: 被説明変数の列名。
+        df_override: 指定があれば`dataset`/`dataset_source`を無視しこの
+            DataFrameを使う（`_load_panel_dataset`のdocstring参照）。
     """
     from linearmodels.panel import PanelOLS
 
-    df, true_beta = _load_panel_dataset(dataset_source, dataset)
+    df, true_beta = _load_panel_dataset(dataset_source, dataset, df_override)
     pdf, n_entities, n_periods = _build_panel_index(df, entity_col, time_col)
 
     mod = PanelOLS(

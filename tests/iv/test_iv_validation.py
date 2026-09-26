@@ -737,7 +737,7 @@ def test_scale_variance_raises_computation_error(cov_type):
 
 def test_scale_variance_cluster_raises_computation_error():
     """`cluster`も上記`test_scale_variance_raises_computation_error`と同じ
-    backstopの対象。`cluster`は`cluster`が別途必要なため`COV_TYPES`
+    backstopの対象。`cov_type="cluster"`は`cluster`列の指定が別途必要なため`COV_TYPES`
     パラメトライズには含められず、専用テストとして確認する
     （OLS`test_ols_validation.py::test_scale_variance_cluster_raises_
     computation_error`・WLS`test_wls_validation.py`の同名テストと同じ理由）。

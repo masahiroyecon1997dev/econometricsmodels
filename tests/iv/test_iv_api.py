@@ -479,7 +479,7 @@ def test_gmm_weight_type_options_run(
 ):
     """`estimator="gmm"`の`gmm_weight_type`各値が成功パスで動作すること（数値照合は
     `test_iv_gmm_reference.py`）。`cluster`/`hac`は`cov_type`と同じ
-    `cluster`/`hac_lags`フィールドを共用する仕様
+    `cluster`フィールドと`hac_lags`フィールドを共用する仕様
     （`engine_pybind/src/iv/CLAUDE.md`参照）。
     """
     df = clustered_dataset if gmm_weight_type == "cluster" else iv_dataset

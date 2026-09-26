@@ -389,7 +389,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error(n_groups):
     `fit()`冒頭で`ValidationError`（`CommonError::InsufficientClustersForInference`）。
     G=2（G<q）とG=3（G==q、`rank(Ŝ)≤2<3`で依然特異）の両方を確認する。
     G>qでも悪条件で数値的にほぼ特異なケースは従来どおり`ComputationError`が
-    backstop（`cluster`は`cluster`が別途必要なため専用の
+    backstop（`cov_type="cluster"`は`cluster`列の指定が別途必要なため専用の
     `test_scale_variance_cluster_raises_computation_error`で確認、
     他のcov_typeは`test_scale_variance_raises_computation_error`）。
     """
@@ -441,7 +441,7 @@ def test_scale_variance_raises_computation_error(cov_type):
 def test_scale_variance_cluster_raises_computation_error():
     """`cluster`も上記`test_scale_variance_raises_computation_error`と同じ
     backstopの対象（`test_cluster_count_at_most_slopes_raises_validation_error`
-    のdocstring参照）。`cluster`は`cluster`が別途必要なため
+    のdocstring参照）。`cov_type="cluster"`は`cluster`列の指定が別途必要なため
     `COV_TYPES`パラメトライズには含められず、専用テストとして確認する
     （従来docstringの主張のみで自動テストが無かった非対称の解消）。
     均等な疑似グループ（行番号%10、

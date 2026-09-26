@@ -262,7 +262,7 @@ print(result.std_errors)  # {"const": ..., "endog1": ...}
 print(result.r_squared)
 ```
 
-`IVOptions.method` selects `"2sls"` (default) or `"gmm"`. `cov_type` supports the same range as [OLS](#switching-the-type-of-standard-error); for `method="gmm"`, a separate `weight_type` selects the weight matrix used for point estimation. See the [API Reference](api/iv.md) for the full list of options.
+`IVOptions.method` selects `"2sls"` (default) or `"gmm"`. `cov_type` supports the same range as [OLS](#switching-the-type-of-standard-error); for `method="gmm"`, a separate `gmm_weight_type` selects the weight matrix used for point estimation. See the [API Reference](api/iv.md) for the full list of options.
 
 ### Diagnostics and first-stage results
 

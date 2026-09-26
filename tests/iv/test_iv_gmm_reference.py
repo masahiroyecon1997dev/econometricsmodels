@@ -3,10 +3,10 @@
 
 `tests/fixtures/benchmarks/iv_gmm.json`（`benchmark/iv/fixtures/
 generate_iv_gmm_fixtures.py`で生成）を読み込み、10個の合成データシナリオ×
-classical/HC0/HC1/HAC（+クラスター、baselineのみ）を`weight_type="unadjusted"`
-固定で、加えてbaselineシナリオ×`cov_type="classical"`固定で他の`weight_type`
+classical/HC0/HC1/HAC（+クラスター、baselineのみ）を`gmm_weight_type="unadjusted"`
+固定で、加えてbaselineシナリオ×`cov_type="classical"`固定で他の`gmm_weight_type`
 （robust/cluster/kernel）を検証する（ユーザー確認済みの検証範囲。
-`weight_type`×`cov_type`の全組み合わせ（10シナリオ×4weight_type×6cov_type）は
+`gmm_weight_type`×`cov_type`の全組み合わせ（10シナリオ×4weight_type×6cov_type）は
 規模が大きすぎるため）。
 
 役割分担（OLS/WLS/Logit/Probit の `test_<手法>_*.py` と同じ4分割。
@@ -14,7 +14,7 @@ IV は主リファレンス数値照合のみ 2SLS/GMM で
 ファイルが分かれ、api/validation は 2SLS と共通）:
     - 主リファレンス（linearmodels `IVGMM`）との厳密な数値一致: このファイル
     - `method="2sls"`の同種テスト: `test_iv_reference.py`
-    - GMM固有の構造・API・オプション反映（`weight_type`×`cov_type`の独立性の構造
+    - GMM固有の構造・API・オプション反映（`gmm_weight_type`×`cov_type`の独立性の構造
       確認、収束等）: `test_iv_api.py`
     - `ValidationError`/`ComputationError` パス（GMM 固有含む）: `test_iv_validation.py`
 
@@ -119,7 +119,7 @@ def _check_result(
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
 
     # check_overid=False: gmm_iterations=1のHansen J（過剰識別検定）専用の抜け穴。
-    # weight_type="unadjusted"はSがZ'Zに固定され残差に依存しないため、係数・SEは
+    # gmm_weight_type="unadjusted"はSがZ'Zに固定され残差に依存しないため、係数・SEは
     # gmm_iterations=1/2/3で完全に一致する（実測確認済み）。本実装のHansen Jも
     # この不変性を保ち、gmm_iterations=1でもgmm_iterations>=2（2SLSのSarganと機械
     # 精度一致）と同じ値を返す（`gmm.rs`のσ̂²·Z'Zスケーリング設計、モジュールdoc
@@ -131,7 +131,7 @@ def _check_result(
     # ループの中で初めて残差から重み行列`wmat`を再構築するため、`iter_limit=1`
     # では一度もループが実行されず`wmat`が`(Z'Z/n)⁻¹`という生の初期値のまま
     # J統計量に使われる（σ̂²スケーリング無し）。一方、本実装は
-    # `weight_type=Unadjusted`のHansen Jに常にσ̂²スケーリング込みの重みを
+    # `gmm_weight_type=Unadjusted`のHansen Jに常にσ̂²スケーリング込みの重みを
     # 使う設計（ユーザー確認済み）のため、`iter_limit=1`固有の規約の違いに
     # よる原理的に一致しえない差異と判明した（バグではない）。
     # gmm_iterations=1のときはoverid_statistic/overid_p_valueの比較のみ除外する
@@ -171,7 +171,7 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
     instruments = INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
     df = pl.read_csv(DATA_DIR / f"iv_{scenario}.csv")
     options = IVOptions(
-        method="gmm", weight_type="unadjusted", cov_type=cov_type
+        method="gmm", gmm_weight_type="unadjusted", cov_type=cov_type
     )
     res = IV(
         df,
@@ -190,14 +190,14 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
 
 
 def test_cluster_matches_linearmodels(fixtures):
-    """クラスターロバストSE（`weight_type="unadjusted"`固定）。
+    """クラスターロバストSE（`gmm_weight_type="unadjusted"`固定）。
     `generate_iv_gmm_fixtures.py`と同じ疑似グループ（行番号%10）を再現する。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     df = with_cluster_groups(df, 10)
     options = IVOptions(
         method="gmm",
-        weight_type="unadjusted",
+        gmm_weight_type="unadjusted",
         cov_type="cluster",
         cluster_col="cluster_group",
     )
@@ -216,7 +216,7 @@ def test_cluster_matches_linearmodels(fixtures):
 
 
 def test_cluster_imbalanced_matches_linearmodels(fixtures):
-    """不均衡クラスタ（`weight_type="unadjusted"`固定、サイズ
+    """不均衡クラスタ（`gmm_weight_type="unadjusted"`固定、サイズ
     [2, 3, 5, 10, 30, 50]のタイル）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
@@ -224,7 +224,7 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
     df = df.with_columns(pl.Series("cluster_group", groups))
     options = IVOptions(
         method="gmm",
-        weight_type="unadjusted",
+        gmm_weight_type="unadjusted",
         cov_type="cluster",
         cluster_col="cluster_group",
     )
@@ -251,7 +251,7 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
     options = IVOptions(
-        method="gmm", weight_type="unadjusted", cov_type=cov_type
+        method="gmm", gmm_weight_type="unadjusted", cov_type=cov_type
     )
     res = IV(
         df,
@@ -270,14 +270,14 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
 
 
 def test_kernel_hac_matches_linearmodels(fixtures):
-    """`weight_type="kernel"`×`cov_type="hac"`の組み合わせ（実務上最も典型的な
-    「HACカーネル重み＋HAC標準誤差」の組み合わせ経路が、他の`weight_type`×
+    """`gmm_weight_type="kernel"`×`cov_type="hac"`の組み合わせ（実務上最も典型的な
+    「HACカーネル重み＋HAC標準誤差」の組み合わせ経路が、他の`gmm_weight_type`×
     `cov_type`の組み合わせと同様に独立して機能することを確認する。
     `test_other_weight_types_match_linearmodels`はcov_type="classical"固定のため
     この組み合わせを通らない（`testing-completeness-reviewer`指摘）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
-    options = IVOptions(method="gmm", weight_type="kernel", cov_type="hac")
+    options = IVOptions(method="gmm", gmm_weight_type="kernel", cov_type="hac")
     res = IV(
         df,
         y="y",
@@ -299,7 +299,7 @@ def test_gmm_iterations_matches_linearmodels(fixtures, n_iter):
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     options = IVOptions(
         method="gmm",
-        weight_type="unadjusted",
+        gmm_weight_type="unadjusted",
         cov_type="classical",
         gmm_iterations=n_iter,
     )
@@ -320,20 +320,20 @@ def test_gmm_iterations_matches_linearmodels(fixtures, n_iter):
     )
 
 
-@pytest.mark.parametrize("weight_type", ["robust", "cluster", "kernel"])
-def test_other_weight_types_match_linearmodels(fixtures, weight_type):
-    """`weight_type`（点推定の重み）が`cov_type`（SE計算方式、ここでは`classical`
+@pytest.mark.parametrize("gmm_weight_type", ["robust", "cluster", "kernel"])
+def test_other_weight_types_match_linearmodels(fixtures, gmm_weight_type):
+    """`gmm_weight_type`（点推定の重み）が`cov_type`（SE計算方式、ここでは`classical`
     固定）と独立な軸であることを、baselineシナリオで数値照合する
-    （`weight_type="unadjusted"`は`test_matches_linearmodels`で既に検証済み）。
+    （`gmm_weight_type="unadjusted"`は`test_matches_linearmodels`で既に検証済み）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     kwargs = {}
-    if weight_type == "cluster":
+    if gmm_weight_type == "cluster":
         df = with_cluster_groups(df, 10)
         kwargs["cluster_col"] = "cluster_group"
 
     options = IVOptions(
-        method="gmm", weight_type=weight_type, cov_type="classical", **kwargs
+        method="gmm", gmm_weight_type=gmm_weight_type, cov_type="classical", **kwargs
     )
     res = IV(
         df,
@@ -346,6 +346,6 @@ def test_other_weight_types_match_linearmodels(fixtures, weight_type):
 
     _check_result(
         res,
-        fixtures["baseline"][weight_type]["classical"],
-        f"baseline/{weight_type}/classical",
+        fixtures["baseline"][gmm_weight_type]["classical"],
+        f"baseline/{gmm_weight_type}/classical",
     )

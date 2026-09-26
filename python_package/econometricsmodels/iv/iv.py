@@ -93,7 +93,7 @@ class IV:
                 overlap, `x_endog` or `instruments` is empty,
                 insufficient observations, `confidence_level` out of
                 range, an unknown `cov_type` or (`method="gmm"` only)
-                `weight_type` string, or too few instruments for
+                `gmm_weight_type` string, or too few instruments for
                 identification). A subclass of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. a singular first- or second-stage
@@ -235,11 +235,11 @@ class IVResults:
         return self._raw.method
 
     @property
-    def weight_type(self) -> str | None:
+    def gmm_weight_type(self) -> str | None:
         """Weight matrix actually used for GMM point estimation
         (normalized to lowercase). Only meaningful for `method="gmm"`;
         always `None` for `method="2sls"`, which has no such concept."""
-        return self._raw.weight_type
+        return self._raw.gmm_weight_type
 
     @property
     def r_squared(self) -> float:

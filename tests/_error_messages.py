@@ -219,7 +219,7 @@ UNKNOWN_IV_METHOD = (
     "unknown method: '{method}'. Expected one of '2sls' or 'gmm'"
 )
 UNKNOWN_WEIGHT_TYPE = (
-    "unknown weight_type: '{other}'. Expected one of 'unadjusted' "
+    "unknown gmm_weight_type: '{other}'. Expected one of 'unadjusted' "
     "('homoskedastic'), 'robust' ('heteroskedastic'), 'cluster', or 'kernel'"
 )
 INSUFFICIENT_INSTRUMENTS = (
@@ -232,7 +232,7 @@ INVALID_GMM_ITERATIONS = (
 )
 INVALID_GMM_TOL = "gmm_tol must be a positive number, got {gmm_tol}"
 INSUFFICIENT_CLUSTERS_FOR_WEIGHT_MATRIX = (
-    "weight_type='cluster' requires at least l clusters (l+1 if exactly "
+    "gmm_weight_type='cluster' requires at least l clusters (l+1 if exactly "
     "identified) for the moment weight matrix: got g={g} clusters for l={l} "
     "instruments (including exogenous regressors), but the cluster moment "
     "covariance has rank at most g (g-1 if exactly identified), so it is "

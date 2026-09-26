@@ -490,15 +490,15 @@ def test_unknown_cov_type_raises(iv_dataset, cov_type):
         our_fit(iv_dataset, options=options)
 
 
-@pytest.mark.parametrize("weight_type", ["invalid", ""])
-def test_unknown_weight_type_raises(iv_dataset, weight_type):
-    """未知の`weight_type`（空文字列を含む）は`ValidationError`
+@pytest.mark.parametrize("gmm_weight_type", ["invalid", ""])
+def test_unknown_weight_type_raises(iv_dataset, gmm_weight_type):
+    """未知の`gmm_weight_type`（空文字列を含む）は`ValidationError`
     （テスト網羅性候補・項目46）。
     """
-    options = IVOptions(method="gmm", weight_type=weight_type)
+    options = IVOptions(method="gmm", gmm_weight_type=gmm_weight_type)
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_WEIGHT_TYPE, other=weight_type),
+        match=escaped(msgs.UNKNOWN_WEIGHT_TYPE, other=gmm_weight_type),
     ):
         our_fit(iv_dataset, options=options)
 
@@ -550,7 +550,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
     先に`FirstStageFailed`としてラップされる（`engine_pybind::fit()`が
     `compute_first_stage`を無条件に先に呼ぶため。`_error_messages.py`の
     `FIRST_STAGE_FAILED`のコメント参照）。
-    `weight_type="cluster"`の重み行列`S`（l×l）が`G<l`で特異になる別軸の問題
+    `gmm_weight_type="cluster"`の重み行列`S`（l×l）が`G<l`で特異になる別軸の問題
     とは区別する。
     """
     cluster = pl.Series(
@@ -705,7 +705,7 @@ def test_scale_variance_cluster_raises_computation_error():
 def test_gmm_cluster_weight_type_raises_validation_error_when_cluster_count_is_less_than_instrument_count(
     iv_dataset, gmm_iterations
 ):
-    """`method="gmm"`固有のValidationErrorパス。`weight_type="cluster"`の重み行列`S`
+    """`method="gmm"`固有のValidationErrorパス。`gmm_weight_type="cluster"`の重み行列`S`
     （l×l、`l`は全操作変数の数）はG個のランク1行列の和のため`rank(S)≤G`
     （`engine/src/iv/CLAUDE.md`「クラスター数Gと操作変数の数lの関係」参照）。
     `G=2 < l=3`（`x_exog=[]`・`instruments=["z1","z2"]`で`l=const+z1+z2=3`、過剰識別）
@@ -719,7 +719,7 @@ def test_gmm_cluster_weight_type_raises_validation_error_when_cluster_count_is_l
     )
     options = IVOptions(
         method="gmm",
-        weight_type="cluster",
+        gmm_weight_type="cluster",
         cluster_col="cluster_group",
         cov_type="classical",
         gmm_iterations=gmm_iterations,
@@ -747,7 +747,7 @@ def test_gmm_raise_on_non_convergence_true_raises_computation_error(
     """
     options = IVOptions(
         method="gmm",
-        weight_type="robust",
+        gmm_weight_type="robust",
         gmm_tol=1e-300,
         gmm_iterations=2,
     )

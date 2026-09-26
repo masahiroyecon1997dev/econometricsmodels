@@ -285,7 +285,7 @@ def test_nonrobust_is_alias_for_classical(iv_dataset, cov_type):
 
 
 @pytest.mark.parametrize(
-    "weight_type, expected",
+    "gmm_weight_type, expected",
     [
         ("UNADJUSTED", "unadjusted"),
         ("Unadjusted", "unadjusted"),
@@ -298,17 +298,17 @@ def test_nonrobust_is_alias_for_classical(iv_dataset, cov_type):
     ],
 )
 def test_weight_type_is_case_insensitive_and_aliased(
-    iv_dataset, weight_type, expected
+    iv_dataset, gmm_weight_type, expected
 ):
-    """`weight_type`が大文字小文字を区別しないこと、および`"homoskedastic"`/
+    """`gmm_weight_type`が大文字小文字を区別しないこと、および`"homoskedastic"`/
     `"heteroskedastic"`が`"unadjusted"`/`"robust"`のエイリアスであること
     （`engine_pybind`側の`parse_weight_type`と対になる、Python API境界での確認。
     `testing-completeness-reviewer`指摘）。
     """
-    options = IVOptions(method="gmm", weight_type=weight_type)
+    options = IVOptions(method="gmm", gmm_weight_type=gmm_weight_type)
     res = our_fit(iv_dataset, options=options)
 
-    canonical_options = IVOptions(method="gmm", weight_type=expected)
+    canonical_options = IVOptions(method="gmm", gmm_weight_type=expected)
     canonical_res = our_fit(iv_dataset, options=canonical_options)
     for name in res.param_names:
         assert res.params[name] == canonical_res.params[name], name
@@ -439,21 +439,21 @@ def test_include_intercept_false_allows_const_in_instruments():
 
 
 @pytest.mark.parametrize(
-    "weight_type", ["unadjusted", "robust", "cluster", "kernel"]
+    "gmm_weight_type", ["unadjusted", "robust", "cluster", "kernel"]
 )
 def test_gmm_weight_type_options_run(
-    iv_dataset, clustered_dataset, weight_type
+    iv_dataset, clustered_dataset, gmm_weight_type
 ):
-    """`method="gmm"`の`weight_type`各値が成功パスで動作すること（数値照合は
+    """`method="gmm"`の`gmm_weight_type`各値が成功パスで動作すること（数値照合は
     `test_iv_gmm_reference.py`）。`cluster`/`kernel`は`cov_type`と同じ
     `cluster_col`/`hac_lags`フィールドを共用する仕様
     （`engine_pybind/src/iv/CLAUDE.md`参照）。
     """
-    df = clustered_dataset if weight_type == "cluster" else iv_dataset
+    df = clustered_dataset if gmm_weight_type == "cluster" else iv_dataset
     kwargs = (
-        {"cluster_col": "cluster_group"} if weight_type == "cluster" else {}
+        {"cluster_col": "cluster_group"} if gmm_weight_type == "cluster" else {}
     )
-    options = IVOptions(method="gmm", weight_type=weight_type, **kwargs)
+    options = IVOptions(method="gmm", gmm_weight_type=gmm_weight_type, **kwargs)
     res = our_fit(df, options=options)
     assert res.converged
 
@@ -462,10 +462,10 @@ def test_gmm_weight_type_options_run(
 def test_gmm_cov_type_options_run_independently_of_weight_type(
     iv_dataset, clustered_dataset, cov_type
 ):
-    """`method="gmm"`で`cov_type`（SE計算方式）と`weight_type`（点推定に使う
+    """`method="gmm"`で`cov_type`（SE計算方式）と`gmm_weight_type`（点推定に使う
     重み行列、既定`unadjusted`のまま）が独立な軸であること
     （`engine_pybind/src/iv/common.rs`のモジュールdocコメント参照）を、
-    `weight_type`を固定したまま`cov_type`だけ変えても成功パスで動作する
+    `gmm_weight_type`を固定したまま`cov_type`だけ変えても成功パスで動作する
     ことで確認する。
     """
     df = clustered_dataset if cov_type == "cluster" else iv_dataset
@@ -486,19 +486,19 @@ def test_method_label(iv_dataset, method):
 
 
 @pytest.mark.parametrize(
-    "weight_type", ["unadjusted", "robust", "cluster", "kernel"]
+    "gmm_weight_type", ["unadjusted", "robust", "cluster", "kernel"]
 )
-def test_weight_type_label(iv_dataset, clustered_dataset, weight_type):
-    """`res.weight_type`が`method="gmm"`のとき指定した`weight_type`
+def test_weight_type_label(iv_dataset, clustered_dataset, gmm_weight_type):
+    """`res.gmm_weight_type`が`method="gmm"`のとき指定した`gmm_weight_type`
     （正規化済み小文字）を反映すること。
     """
-    df = clustered_dataset if weight_type == "cluster" else iv_dataset
+    df = clustered_dataset if gmm_weight_type == "cluster" else iv_dataset
     kwargs = (
-        {"cluster_col": "cluster_group"} if weight_type == "cluster" else {}
+        {"cluster_col": "cluster_group"} if gmm_weight_type == "cluster" else {}
     )
-    options = IVOptions(method="gmm", weight_type=weight_type, **kwargs)
+    options = IVOptions(method="gmm", gmm_weight_type=gmm_weight_type, **kwargs)
     res = our_fit(df, options=options)
-    assert res.weight_type == weight_type
+    assert res.gmm_weight_type == gmm_weight_type
 
 
 @pytest.mark.parametrize(
@@ -519,7 +519,7 @@ def test_method_is_case_insensitive(iv_dataset, method, expected_label):
 
 
 @pytest.mark.parametrize(
-    "weight_type, expected_label",
+    "gmm_weight_type, expected_label",
     [
         ("UNADJUSTED", "unadjusted"),
         ("Unadjusted", "unadjusted"),
@@ -528,7 +528,7 @@ def test_method_is_case_insensitive(iv_dataset, method, expected_label):
         ("CLUSTER", "cluster"),
         ("KERNEL", "kernel"),
         # エイリアス入力は`cov_type`の`"nonrobust"`と同じく正準名へは変換されず、
-        # 小文字化されたそのままの文字列がエコーされる（`IVResult.weight_type`の
+        # 小文字化されたそのままの文字列がエコーされる（`IVResult.gmm_weight_type`の
         # docコメント参照）。
         ("homoskedastic", "homoskedastic"),
         ("HOMOSKEDASTIC", "homoskedastic"),
@@ -536,35 +536,35 @@ def test_method_is_case_insensitive(iv_dataset, method, expected_label):
     ],
 )
 def test_weight_type_is_case_insensitive(
-    iv_dataset, clustered_dataset, weight_type, expected_label
+    iv_dataset, clustered_dataset, gmm_weight_type, expected_label
 ):
-    df = clustered_dataset if weight_type.lower() == "cluster" else iv_dataset
+    df = clustered_dataset if gmm_weight_type.lower() == "cluster" else iv_dataset
     kwargs = (
         {"cluster_col": "cluster_group"}
-        if weight_type.lower() == "cluster"
+        if gmm_weight_type.lower() == "cluster"
         else {}
     )
-    options = IVOptions(method="gmm", weight_type=weight_type, **kwargs)
+    options = IVOptions(method="gmm", gmm_weight_type=gmm_weight_type, **kwargs)
     res = our_fit(df, options=options)
-    assert res.weight_type == expected_label
+    assert res.gmm_weight_type == expected_label
 
 
 def test_weight_type_is_none_for_2sls(iv_dataset):
-    """`weight_type`はGMM専用の概念のため、`method="2sls"`では常に`None`
+    """`gmm_weight_type`はGMM専用の概念のため、`method="2sls"`では常に`None`
     であること。
     """
     res = our_fit(iv_dataset, options=IVOptions(method="2sls"))
-    assert res.weight_type is None
+    assert res.gmm_weight_type is None
 
 
 def test_weight_type_is_none_for_2sls_even_when_explicitly_set(iv_dataset):
-    """`method="2sls"`では`weight_type`を明示的に既定値以外にしても無視され、
-    `res.weight_type`は常に`None`であること。
+    """`method="2sls"`では`gmm_weight_type`を明示的に既定値以外にしても無視され、
+    `res.gmm_weight_type`は常に`None`であること。
     """
     res = our_fit(
-        iv_dataset, options=IVOptions(method="2sls", weight_type="cluster")
+        iv_dataset, options=IVOptions(method="2sls", gmm_weight_type="cluster")
     )
-    assert res.weight_type is None
+    assert res.gmm_weight_type is None
 
 
 def test_gmm_tol_stops_before_max_iterations(iv_dataset):
@@ -574,7 +574,7 @@ def test_gmm_tol_stops_before_max_iterations(iv_dataset):
     """
     options = IVOptions(
         method="gmm",
-        weight_type="robust",
+        gmm_weight_type="robust",
         gmm_tol=1e-4,
         gmm_iterations=10,
     )
@@ -593,7 +593,7 @@ def test_gmm_raise_on_non_convergence_false_returns_converged_false(
     """
     options = IVOptions(
         method="gmm",
-        weight_type="robust",
+        gmm_weight_type="robust",
         gmm_tol=1e-300,
         gmm_iterations=2,
         raise_on_non_convergence=False,

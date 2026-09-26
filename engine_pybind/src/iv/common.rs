@@ -35,13 +35,13 @@
 //! OlsEstimator)>`という`method`非依存の表現に置き換えた（`OlsEstimator → OLSResult`
 //! 変換は`linear::ols::ols_estimator_to_result`を再利用、抽出済み）。
 //!
-//! ## GMMの`weight_type`（`IVOptions.weight_type`/`cluster_col`/`hac_lags`/`time_col`）
+//! ## GMMの`gmm_weight_type`（`IVOptions.gmm_weight_type`/`cluster_col`/`hac_lags`/`time_col`）
 //!
-//! `weight_type`は`cov_type`とは独立の軸（点推定に使う重み行列の選択、`engine::iv::gmm`の
+//! `gmm_weight_type`は`cov_type`とは独立の軸（点推定に使う重み行列の選択、`engine::iv::gmm`の
 //! モジュールdocコメント参照）だが、`cluster_col`/`hac_lags`/`time_col`は`cov_type`と
 //! 共用する（`IVOptions`に別フィールドを増やさない設計、`parse_weight_type`参照）。
-//! `weight_type="cluster"`かつ`cov_type="cluster"`のように両軸が同じクラスター列を
-//! 参照する使い方を主に想定するが、`weight_type`と`cov_type`が異なる場合でも同じ列を
+//! `gmm_weight_type="cluster"`かつ`cov_type="cluster"`のように両軸が同じクラスター列を
+//! 参照する使い方を主に想定するが、`gmm_weight_type`と`cov_type`が異なる場合でも同じ列を
 //! 共用する（別々のクラスター変数を使い分けたいニーズが出てきたら別フィールド化を検討）。
 //!
 //! `wu_hausman_statistic`/`wu_hausman_p_value`は`method="gmm"`では常に`None`
@@ -134,8 +134,8 @@ pub struct IVOptions {
     pub method: String,
 
     /// Standard error type: one of "classical", "hc0" through "hc3", "hac", "cluster".
-    /// Case-insensitive. For `method="gmm"`, this is independent of `weight_type`
-    /// (the weight matrix used for point estimation, see `weight_type` below).
+    /// Case-insensitive. For `method="gmm"`, this is independent of `gmm_weight_type`
+    /// (the weight matrix used for point estimation, see `gmm_weight_type` below).
     #[pyo3(get, set)]
     pub cov_type: String,
 
@@ -168,9 +168,9 @@ pub struct IVOptions {
     /// "unadjusted" (alias "homoskedastic"), "robust" (alias "heteroskedastic"),
     /// "cluster", "kernel". Case-insensitive. Ignored when `method="2sls"`. "cluster"/"kernel"
     /// draw from the same `cluster_col`/`hac_lags`/`time_col` fields as `cov_type` (no separate
-    /// fields; see module docstring "GMMのweight_type").
+    /// fields; see module docstring "GMMのgmm_weight_type").
     #[pyo3(get, set)]
-    pub weight_type: String,
+    pub gmm_weight_type: String,
 
     /// Number of GMM iterations (`method="gmm"` only): 2 (default) for efficient
     /// two-step GMM, 1 for one-step GMM, 3+ for iterated GMM. Ignored when `method="2sls"`.
@@ -203,7 +203,7 @@ impl IVOptions {
         cluster_col = None,
         hac_lags = None,
         time_col = None,
-        weight_type = "unadjusted".to_string(),
+        gmm_weight_type = "unadjusted".to_string(),
         gmm_iterations = 2,
         gmm_tol = None,
         raise_on_non_convergence = true,
@@ -217,7 +217,7 @@ impl IVOptions {
         cluster_col: Option<String>,
         hac_lags: Option<i64>,
         time_col: Option<String>,
-        weight_type: String,
+        gmm_weight_type: String,
         gmm_iterations: i64,
         gmm_tol: Option<f64>,
         raise_on_non_convergence: bool,
@@ -230,7 +230,7 @@ impl IVOptions {
             cluster_col,
             hac_lags,
             time_col,
-            weight_type,
+            gmm_weight_type,
             gmm_iterations,
             gmm_tol,
             raise_on_non_convergence,
@@ -241,7 +241,7 @@ impl IVOptions {
         format!(
             "IVOptions(method={:?}, cov_type={:?}, include_intercept={}, \
              confidence_level={}, cluster_col={:?}, hac_lags={:?}, time_col={:?}, \
-             weight_type={:?}, gmm_iterations={}, gmm_tol={:?}, \
+             gmm_weight_type={:?}, gmm_iterations={}, gmm_tol={:?}, \
              raise_on_non_convergence={})",
             self.method,
             self.cov_type,
@@ -250,7 +250,7 @@ impl IVOptions {
             self.cluster_col,
             self.hac_lags,
             self.time_col,
-            self.weight_type,
+            self.gmm_weight_type,
             self.gmm_iterations,
             self.gmm_tol,
             self.raise_on_non_convergence,
@@ -347,7 +347,7 @@ pub struct IVResult {
     #[pyo3(get)]
     pub method: String,
     /// Weight matrix actually used for GMM point estimation (echoes
-    /// `IVOptions.weight_type`, normalized to lowercase; e.g. `"unadjusted"`,
+    /// `IVOptions.gmm_weight_type`, normalized to lowercase; e.g. `"unadjusted"`,
     /// `"robust"`, `"cluster"`, `"kernel"`). Like `cov_type`'s `"nonrobust"` alias,
     /// an alias input (`"homoskedastic"`/`"heteroskedastic"`) is echoed as-is rather
     /// than canonicalized to its primary name (`parse_weight_type` accepts both but
@@ -355,7 +355,7 @@ pub struct IVResult {
     /// `overid_statistic`/`wu_hausman_statistic`'s use of `None` for "not applicable to
     /// this method"); always `None` for `method="2sls"`, which has no such concept.
     #[pyo3(get)]
-    pub weight_type: Option<String>,
+    pub gmm_weight_type: Option<String>,
     #[pyo3(get)]
     pub f_statistic: f64,
     #[pyo3(get)]
@@ -428,25 +428,25 @@ impl IVResult {
     }
 }
 
-/// `IVOptions.weight_type`をパースし、該当するweight_typeのときのみ`cluster_col`/
+/// `IVOptions.gmm_weight_type`をパースし、該当するgmm_weight_typeのときのみ`cluster_col`/
 /// `hac_lags`/`time_col`を抽出したうえで`engine::iv::gmm::WeightType`を組み立てる
 /// （`method="gmm"`のみで使用、`cov_type`側の同種の関数は`linear::common::parse_cov_type`
 /// を共有しているのに対し、こちらは`WeightType`が`CovType`と異なる型のため独立実装）。
 ///
 /// `cluster_col`/`hac_lags`/`time_col`は`cov_type`と共用する（モジュールdocコメント
-/// 「GMMのweight_type」参照、`IVOptions`に別フィールドを増やさない設計）。
+/// 「GMMのgmm_weight_type」参照、`IVOptions`に別フィールドを増やさない設計）。
 ///
 /// 戻り値に正規化済み小文字文字列を含めるのは`linear::common::parse_cov_type`と同じ理由
-/// （`IVResult.weight_type`の構築時に`options.weight_type.to_lowercase()`を
+/// （`IVResult.gmm_weight_type`の構築時に`options.gmm_weight_type.to_lowercase()`を
 /// 再計算せずに済ませるため）。
 ///
 /// # Errors
-/// `weight_type`の文字列が既知の値のいずれでもない場合は`ValidationError`。それ以外
+/// `gmm_weight_type`の文字列が既知の値のいずれでもない場合は`ValidationError`。それ以外
 /// （列の抽出時に発覚する問題等）は`column_extraction`の責務で`ValidationError`。
 fn parse_weight_type(df: &DataFrame, options: &IVOptions) -> PyResult<(WeightType, String)> {
-    let weight_type_lower = options.weight_type.to_lowercase();
+    let weight_type_lower = options.gmm_weight_type.to_lowercase();
 
-    let weight_type = match weight_type_lower.as_str() {
+    let gmm_weight_type = match weight_type_lower.as_str() {
         "unadjusted" | "homoskedastic" => WeightType::Unadjusted,
         "robust" | "heteroskedastic" => WeightType::Robust,
         "cluster" => {
@@ -470,13 +470,13 @@ fn parse_weight_type(df: &DataFrame, options: &IVOptions) -> PyResult<(WeightTyp
         }
         other => {
             return Err(ValidationError::new_err(format!(
-                "unknown weight_type: '{other}'. Expected one of 'unadjusted' \
+                "unknown gmm_weight_type: '{other}'. Expected one of 'unadjusted' \
                  ('homoskedastic'), 'robust' ('heteroskedastic'), 'cluster', or 'kernel'"
             )));
         }
     };
 
-    Ok((weight_type, weight_type_lower))
+    Ok((gmm_weight_type, weight_type_lower))
 }
 
 /// Pythonから渡された `data` / `y` / `x_exog` / `x_endog` / `instruments` / `options` を
@@ -619,7 +619,7 @@ pub(crate) fn build_iv_input(
 /// # Errors
 /// - `build_iv_input`が返すエラー（列抽出・y/x_exog/x_endog/instrumentsの重複・
 ///   `"const"`列衝突・`method`/`cov_type`文字列の検証等）は`ValidationError`
-/// - `method="gmm"`で`weight_type`の文字列が不正: `ValidationError`（`parse_weight_type`参照）
+/// - `method="gmm"`で`gmm_weight_type`の文字列が不正: `ValidationError`（`parse_weight_type`参照）
 /// - `TwoSlsEstimator::fit`/`GmmEstimator::fit`/`compute_first_stage`が返す
 ///   `engine::iv::common::IvError`（識別の順序条件・第一段階回帰の失敗・`cov_type`起因の
 ///   エラー・GMM固有のエラー等）は`iv_error_to_pyerr`で変換
@@ -657,10 +657,10 @@ pub(crate) fn fit(
             .map_err(iv_error_to_pyerr)?;
 
     if method_lower == "gmm" {
-        let (weight_type, weight_type_lower) = parse_weight_type(&df, options)?;
+        let (gmm_weight_type, weight_type_lower) = parse_weight_type(&df, options)?;
         let estimator = GmmEstimator::fit(
             input,
-            weight_type,
+            gmm_weight_type,
             options.gmm_iterations,
             options.gmm_tol,
             options.raise_on_non_convergence,
@@ -686,7 +686,7 @@ pub(crate) fn fit(
             n_iter: estimator.n_iter(),
             cov_type: cov_type_lower,
             method: method_lower,
-            weight_type: Some(weight_type_lower),
+            gmm_weight_type: Some(weight_type_lower),
             f_statistic: estimator.f_statistic(),
             f_p_value: estimator.f_p_value(),
             r_squared: estimator.r_squared(),
@@ -722,9 +722,9 @@ pub(crate) fn fit(
         n_iter: 1,
         cov_type: cov_type_lower,
         method: method_lower,
-        // `weight_type`はGMM専用の概念のため`method="2sls"`では常に`None`
-        // （`IVResult.weight_type`のdocコメント参照）。
-        weight_type: None,
+        // `gmm_weight_type`はGMM専用の概念のため`method="2sls"`では常に`None`
+        // （`IVResult.gmm_weight_type`のdocコメント参照）。
+        gmm_weight_type: None,
         f_statistic: estimator.f_statistic(),
         f_p_value: estimator.f_p_value(),
         r_squared: estimator.r_squared(),

@@ -215,7 +215,7 @@ fitted = result.predict(target="expected_observed")
 
 # new_data (out-of-sample) works the same way as OLS/Logit/Probit
 new_data = pl.DataFrame({"x1": [1.0, 2.0]})
-predicted = result.predict(target="expected_observed", new_data=new_data)
+predicted = result.predict(new_data, target="expected_observed")
 ```
 
 `augment()` takes the same `target`/`new_data` arguments as `predict()`, but returns a polars DataFrame instead of a row-oriented list. Unlike Logit/Probit's fixed `"probability"` column, the appended column is named `"predicted_{target}"` (e.g. `"predicted_expected_observed"`), since `predict()`'s meaning depends on `target` — this also lets you call `augment()` once per `target` on the same DataFrame without a column name collision.
@@ -225,7 +225,7 @@ augmented = result.augment(target="expected_observed")
 print(augmented)  # original columns, plus "predicted_expected_observed"
 
 # Stack a second target onto the same DataFrame without a name collision
-augmented = result.augment(target="prob_uncensored", new_data=augmented)
+augmented = result.augment(augmented, target="prob_uncensored")
 ```
 
 ### Censoring fit check

@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - **Breaking**: IV: renamed the GMM-only option `IVOptions.weight_type` to `gmm_weight_type` (and the result property `IVResults.weight_type` likewise), matching the `gmm_` prefix of the other GMM-only options
+- **Breaking**: Tobit: `predict()`/`augment()` now take `new_data` as the first argument and `target` second (`predict(new_data=None, target="expected_observed")`), matching the other methods' `predict(new_data)`
 
 ## [0.7.0] - 2026-09-22
 

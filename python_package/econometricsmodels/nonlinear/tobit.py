@@ -289,12 +289,20 @@ class TobitResults:
 
     def predict(
         self,
-        target: str = "expected_observed",
         new_data: pl.DataFrame | None = None,
+        target: str = "expected_observed",
     ) -> list[dict[str, float]]:
         """Predicted values for `target`, on the training data or `new_data`.
 
         Args:
+            new_data: New data to predict on. Must contain columns with
+                the same names as the `x` columns passed at fit time
+                (matched by name; column order does not matter). If
+                `include_intercept=True` was used at fit time, the
+                constant column is added automatically and must not be
+                included here. If `None` (default), returns the
+                predicted values for the training data used in
+                `fit()`.
             target: Which quantity to predict. One of
                 `"expected_latent"` (`E[y*|x] = x'β`),
                 `"expected_observed"` (default; `E[y|x]`, the
@@ -304,14 +312,6 @@ class TobitResults:
                 Case-insensitive. Independent of `new_data`: the same
                 three targets are available whether predicting on the
                 training data or new data.
-            new_data: New data to predict on. Must contain columns with
-                the same names as the `x` columns passed at fit time
-                (matched by name; column order does not matter). If
-                `include_intercept=True` was used at fit time, the
-                constant column is added automatically and must not be
-                included here. If `None` (default), returns the
-                predicted values for the training data used in
-                `fit()`.
 
         Returns:
             Row-oriented predictions, one dict per observation. Each
@@ -323,13 +323,13 @@ class TobitResults:
                 column, or a column contains missing/NaN/infinite
                 values. A subclass of `ValueError`.
         """
-        raw = self._raw.predict(target, new_data)
+        raw = self._raw.predict(new_data, target)
         return [{"predicted": p} for p in raw]
 
     def augment(
         self,
-        target: str = "expected_observed",
         new_data: pl.DataFrame | None = None,
+        target: str = "expected_observed",
     ) -> pl.DataFrame:
         """Source data with the predicted values appended as a column.
 
@@ -349,10 +349,10 @@ class TobitResults:
         per `target` on the same DataFrame without a name collision.
 
         Args:
-            target: Same as `predict()`.
             new_data: Same as `predict()`. If `None` (default), returns
                 the training data used in `fit()` with the predicted
                 values appended.
+            target: Same as `predict()`.
 
         Returns:
             A polars DataFrame: the source data's columns plus
@@ -364,7 +364,7 @@ class TobitResults:
                 already has a column named `"predicted_{target}"`
                 (which would otherwise be silently overwritten).
         """
-        return self._raw.augment(target, new_data)
+        return self._raw.augment(new_data, target)
 
     def marginal_effects(
         self,

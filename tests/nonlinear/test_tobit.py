@@ -1287,3 +1287,18 @@ def test_cluster_col_with_null_raises(censored_dataset):
         match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name="grp"),
     ):
         Tobit(df, y="y", x=["x1", "x2"], options=options).fit()
+
+
+def test_predict_augment_take_new_data_as_first_positional_arg(
+    censored_dataset,
+):
+    """`predict`/`augment`の第1引数が`new_data`であること（他手法と同じ
+    `res.predict(new_df)`の書き方がそのまま通る）。
+    """
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
+
+    assert res.predict(new_data) == res.predict(new_data=new_data)
+    augmented = res.augment(new_data)
+    assert augmented.height == 2
+    assert "predicted_expected_observed" in augmented.columns

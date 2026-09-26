@@ -311,8 +311,8 @@ impl TobitResult {
     /// - A required `x` column is missing from `new_data`, cannot be cast to a
     ///   numeric type, or contains missing/NaN/infinite values: `ValidationError`
     ///   (same validation as `fit()`'s column extraction, via `extract_f64_column`).
-    #[pyo3(signature = (target="expected_observed".to_string(), new_data=None))]
-    fn predict(&self, target: String, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<f64>> {
+    #[pyo3(signature = (new_data=None, target="expected_observed".to_string()))]
+    fn predict(&self, new_data: Option<&Bound<'_, PyAny>>, target: String) -> PyResult<Vec<f64>> {
         let target = parse_marginal_effects_target(&target.to_lowercase())?;
         let Some(new_data) = new_data else {
             return Ok(self.estimator.predict(target));
@@ -340,11 +340,11 @@ impl TobitResult {
     ///   `ValidationError`.
     /// - The source data already has a column named `"predicted_{target}"`:
     ///   `ValidationError` (would otherwise silently overwrite it).
-    #[pyo3(signature = (target="expected_observed".to_string(), new_data=None))]
+    #[pyo3(signature = (new_data=None, target="expected_observed".to_string()))]
     fn augment(
         &self,
-        target: String,
         new_data: Option<&Bound<'_, PyAny>>,
+        target: String,
     ) -> PyResult<PyDataFrame> {
         let target_lower = target.to_lowercase();
         let target_enum = parse_marginal_effects_target(&target_lower)?;

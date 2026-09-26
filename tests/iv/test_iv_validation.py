@@ -610,14 +610,14 @@ def test_invalid_gmm_iterations_raises(iv_dataset, gmm_iterations):
         our_fit(iv_dataset, options=options)
 
 
-@pytest.mark.parametrize("gmm_convergence", [0.0, -1.0])
-def test_invalid_gmm_convergence_raises(iv_dataset, gmm_convergence):
-    options = IVOptions(method="gmm", gmm_convergence=gmm_convergence)
+@pytest.mark.parametrize("gmm_tol", [0.0, -1.0])
+def test_invalid_gmm_tol_raises(iv_dataset, gmm_tol):
+    options = IVOptions(method="gmm", gmm_tol=gmm_tol)
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.INVALID_GMM_CONVERGENCE,
-            gmm_convergence=msgs.rust_f64(gmm_convergence),
+            msgs.INVALID_GMM_TOL,
+            gmm_tol=msgs.rust_f64(gmm_tol),
         ),
     ):
         our_fit(iv_dataset, options=options)
@@ -741,14 +741,14 @@ def test_gmm_cluster_weight_type_raises_validation_error_when_cluster_count_is_l
 def test_gmm_raise_on_non_convergence_true_raises_computation_error(
     iv_dataset,
 ):
-    """厳しすぎる`gmm_convergence`で最大反復回数内に収束しない場合、既定
+    """厳しすぎる`gmm_tol`で最大反復回数内に収束しない場合、既定
     （`raise_on_non_convergence=True`）では`ComputationError`（`MleError.
     NonConvergence`と同じ分類、`engine_pybind/src/iv/common.rs`参照）。
     """
     options = IVOptions(
         method="gmm",
         weight_type="robust",
-        gmm_convergence=1e-300,
+        gmm_tol=1e-300,
         gmm_iterations=2,
     )
     with pytest.raises(ComputationError):

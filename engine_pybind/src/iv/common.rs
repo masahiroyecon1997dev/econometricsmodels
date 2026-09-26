@@ -101,7 +101,7 @@ pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
         IvError::InsufficientInstruments { .. }
         | IvError::InvalidHacLags { .. }
         | IvError::InvalidGmmIterations { .. }
-        | IvError::InvalidGmmConvergence { .. }
+        | IvError::InvalidGmmTol { .. }
         | IvError::InsufficientClustersForWeightMatrix { .. } => ValidationError::new_err(message),
         // `MleError::NonConvergence`（`nonlinear/common.rs`の`mle_error_to_pyerr`）と同じ
         // 分類: パラメータの不正ではなく、計算過程（反復推定）で発覚した問題のため
@@ -182,12 +182,12 @@ pub struct IVOptions {
     /// becomes the maximum number of iterations (safety valve) and iteration stops early once
     /// coefficients converge within this tolerance. Ignored when `method="2sls"`.
     #[pyo3(get, set)]
-    pub gmm_convergence: Option<f64>,
+    pub gmm_tol: Option<f64>,
 
     /// Whether to raise an error if GMM does not converge within `gmm_iterations` when
-    /// `gmm_convergence` is set (`method="gmm"` only). If `False`, returns the result with
+    /// `gmm_tol` is set (`method="gmm"` only). If `False`, returns the result with
     /// `converged=False` instead of raising. Ignored when `method="2sls"` or when
-    /// `gmm_convergence` is `None`.
+    /// `gmm_tol` is `None`.
     #[pyo3(get, set)]
     pub raise_on_non_convergence: bool,
 }
@@ -205,7 +205,7 @@ impl IVOptions {
         time_col = None,
         weight_type = "unadjusted".to_string(),
         gmm_iterations = 2,
-        gmm_convergence = None,
+        gmm_tol = None,
         raise_on_non_convergence = true,
     ))]
     #[allow(clippy::too_many_arguments)]
@@ -219,7 +219,7 @@ impl IVOptions {
         time_col: Option<String>,
         weight_type: String,
         gmm_iterations: i64,
-        gmm_convergence: Option<f64>,
+        gmm_tol: Option<f64>,
         raise_on_non_convergence: bool,
     ) -> Self {
         Self {
@@ -232,7 +232,7 @@ impl IVOptions {
             time_col,
             weight_type,
             gmm_iterations,
-            gmm_convergence,
+            gmm_tol,
             raise_on_non_convergence,
         }
     }
@@ -241,7 +241,7 @@ impl IVOptions {
         format!(
             "IVOptions(method={:?}, cov_type={:?}, include_intercept={}, \
              confidence_level={}, cluster_col={:?}, hac_lags={:?}, time_col={:?}, \
-             weight_type={:?}, gmm_iterations={}, gmm_convergence={:?}, \
+             weight_type={:?}, gmm_iterations={}, gmm_tol={:?}, \
              raise_on_non_convergence={})",
             self.method,
             self.cov_type,
@@ -252,7 +252,7 @@ impl IVOptions {
             self.time_col,
             self.weight_type,
             self.gmm_iterations,
-            self.gmm_convergence,
+            self.gmm_tol,
             self.raise_on_non_convergence,
         )
     }
@@ -329,15 +329,15 @@ pub struct IVResult {
     /// Whether GMM iteration converged (`method="gmm"` only). Always `true` for
     /// `method="2sls"` (2SLS is a closed-form, non-iterative estimator, so convergence is
     /// trivially satisfied — mirrors `GmmEstimator`'s own `gmm_iterations=1` convention,
-    /// `engine/src/iv/gmm.rs`参照). When `IVOptions.gmm_convergence` is `None` (fixed
+    /// `engine/src/iv/gmm.rs`参照). When `IVOptions.gmm_tol` is `None` (fixed
     /// iteration count, the default), always `true` — convergence is only actually checked
-    /// when `gmm_convergence` is set (`docs/spec/iv-spec.md` 3.3節).
+    /// when `gmm_tol` is set (`docs/spec/iv-spec.md` 3.3節).
     #[pyo3(get)]
     pub converged: bool,
     /// Number of GMM iterations actually run (`method="gmm"` only). Always `1` for
     /// `method="2sls"`.
     #[pyo3(get)]
-    pub n_iterations: i64,
+    pub n_iter: i64,
     /// Standard error type actually used (echoes `IVOptions.cov_type`, normalized to
     /// lowercase; e.g. `"classical"`, `"hc1"`, `"hac"`, `"cluster"`).
     #[pyo3(get)]
@@ -662,7 +662,7 @@ pub(crate) fn fit(
             input,
             weight_type,
             options.gmm_iterations,
-            options.gmm_convergence,
+            options.gmm_tol,
             options.raise_on_non_convergence,
             cov_type,
             options.confidence_level,
@@ -683,7 +683,7 @@ pub(crate) fn fit(
             df_resid: estimator.df_resid(),
             df_model: estimator.df_model(),
             converged: estimator.converged(),
-            n_iterations: estimator.n_iterations(),
+            n_iter: estimator.n_iter(),
             cov_type: cov_type_lower,
             method: method_lower,
             weight_type: Some(weight_type_lower),
@@ -716,10 +716,10 @@ pub(crate) fn fit(
         n_obs: estimator.nobs(),
         df_resid: estimator.df_resid(),
         df_model: estimator.df_model(),
-        // 2SLSは閉形式・非反復のため常に`converged=true`・`n_iterations=1`
+        // 2SLSは閉形式・非反復のため常に`converged=true`・`n_iter=1`
         // （`IVResult.converged`のdocコメント参照）。
         converged: true,
-        n_iterations: 1,
+        n_iter: 1,
         cov_type: cov_type_lower,
         method: method_lower,
         // `weight_type`はGMM専用の概念のため`method="2sls"`では常に`None`

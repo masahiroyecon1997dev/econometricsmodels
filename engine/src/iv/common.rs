@@ -101,18 +101,18 @@ pub enum IvError {
     /// `gmm_iterations`が1未満。
     ///
     /// 当初は1（1-step GMM）・2（2-step efficient GMM）の2値のみを許容していたが、
-    /// 後に3以上（iterated GMM）・収束条件（`gmm_convergence`）ベースの反復に一般化した
-    /// （`gmm_convergence`指定時は`gmm_iterations`が最大反復回数＝安全弁として働く、
+    /// 後に3以上（iterated GMM）・収束条件（`gmm_tol`）ベースの反復に一般化した
+    /// （`gmm_tol`指定時は`gmm_iterations`が最大反復回数＝安全弁として働く、
     /// `gmm.rs`の`fit()`参照）。いずれのモードでも1以上であることは共通の前提のため、
     /// この検証自体は残す。
     #[error("gmm_iterations must be a positive integer: got {gmm_iterations}")]
     InvalidGmmIterations { gmm_iterations: i64 },
 
-    /// `gmm_convergence`（`Some`のとき）が0以下。
+    /// `gmm_tol`（`Some`のとき）が0以下。
     ///
     /// 収束判定の許容誤差として意味を持たないため。
-    #[error("gmm_convergence must be a positive number, got {gmm_convergence}")]
-    InvalidGmmConvergence { gmm_convergence: f64 },
+    #[error("gmm_tol must be a positive number, got {gmm_tol}")]
+    InvalidGmmTol { gmm_tol: f64 },
 
     /// `method="gmm"`かつ`weight_type=Cluster`で、クラスター数`g`がモーメント条件の重み行列
     /// `S`（l×l、`l`は全操作変数`x_exog ++ instruments`の数）を非特異にするのに足りない。
@@ -131,7 +131,7 @@ pub enum IvError {
     )]
     InsufficientClustersForWeightMatrix { g: usize, l: usize },
 
-    /// `raise_on_non_convergence=true`（既定）かつ`gmm_convergence`指定時、`gmm_iterations`回
+    /// `raise_on_non_convergence=true`（既定）かつ`gmm_tol`指定時、`gmm_iterations`回
     /// （収束モードでの上限反復回数）以内に係数が収束しなかった。
     ///
     /// `nonlinear::common::MleError::NonConvergence`と同型のメッセージ・意味論

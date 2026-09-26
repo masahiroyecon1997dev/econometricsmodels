@@ -53,8 +53,8 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 | `time_col` | `str \| None` | `None` | `cov_type="hac"`時（`weight_type="kernel"`とも共用）の時系列順序列 |
 | `weight_type` | `str` | `"unadjusted"` | GMMの点推定に使う重み行列（`method="gmm"`のみ）: `"unadjusted"`（別名`"homoskedastic"`）/ `"robust"`（別名`"heteroskedastic"`）/ `"cluster"` / `"kernel"`。`method="2sls"`では無視 |
 | `gmm_iterations` | `int` | `2` | GMM反復回数（`method="gmm"`のみ）: `2`＝efficient two-step、`1`＝1-step、`3`以上＝iterated GMM |
-| `gmm_convergence` | `float \| None` | `None` | `Some`のとき`gmm_iterations`を「収束判定の上限反復回数（安全弁）」として扱う（併用方式） |
-| `raise_on_non_convergence` | `bool` | `True` | `gmm_convergence`設定時、収束しなければ`True`でエラー、`False`で`converged=False`のまま結果を返す |
+| `gmm_tol` | `float \| None` | `None` | `Some`のとき`gmm_iterations`を「収束判定の上限反復回数（安全弁）」として扱う（併用方式） |
+| `raise_on_non_convergence` | `bool` | `True` | `gmm_tol`設定時、収束しなければ`True`でエラー、`False`で`converged=False`のまま結果を返す |
 
 - **`cluster_col`/`hac_lags`/`time_col`は`cov_type`と`weight_type`（GMM）で共用する**
   （`IVOptions`に別フィールドを増やさない設計。異なるクラスター変数を使い分けたいニーズが
@@ -77,7 +77,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 
 `IVResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `stats` / `p_values` /
 `conf_lower` / `conf_upper` / `param_names` / `residuals` / `dep_var_name` / `n_obs` /
-`df_resid` / `df_model` / `converged` / `n_iterations` / `cov_type` / `method` / `weight_type` /
+`df_resid` / `df_model` / `converged` / `n_iter` / `cov_type` / `method` / `weight_type` /
 `f_statistic` / `f_p_value` / `r_squared` / `r_squared_adj` / `weak_instrument_f_statistics` /
 `overid_statistic` / `overid_p_value` / `wu_hausman_statistic` / `wu_hausman_p_value`。
 
@@ -91,9 +91,9 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   `Some(String)`（`IVOptions.weight_type`を正規化した小文字文字列。エイリアス入力
   （`"homoskedastic"`/`"heteroskedastic"`）は正規化されずそのままechoされる）、
   `method="2sls"`では概念自体が存在しないため常に`None`。
-- **`converged`/`n_iterations`**: `method="2sls"`では常に`converged=true`・`n_iterations=1`
+- **`converged`/`n_iter`**: `method="2sls"`では常に`converged=true`・`n_iter=1`
   （2SLSは閉形式・非反復のため）。`method="gmm"`では実際の反復回数・収束判定結果を返す
-  （`gmm_convergence=None`のときは固定回数モードのため常に`converged=true`）。
+  （`gmm_tol=None`のときは固定回数モードのため常に`converged=true`）。
 - **`n_entities`は含めない**（IVはパネル構造を前提としない）。
 - **`log_likelihood`/`aic`/`bic`は除外する**（2SLS/GMMは尤度ベースの推定法ではなく、
   Stataの`ivregress`もデフォルトでは出力しない。正規性を仮定した疑似尤度を計算して
@@ -175,20 +175,20 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   照合時は`debiased=True`を明示指定する必要がある）。GMM側は`linearmodels`の既定
   （`debiased=False`→z分布）と一致する。
 
-### 3.3 GMM反復（`gmm_iterations`/`gmm_convergence`）
+### 3.3 GMM反復（`gmm_iterations`/`gmm_tol`）
 
 - **用語**: 「1-step GMM」（`gmm_iterations=1`）は残差に基づく重みの再構築を一切行わず
   アドホックな`W₀=(Z'Z)⁻¹`のみで打ち切る推定（`weight_type`によらず常に2SLSと同じ
   結果）。「2-step efficient GMM」（`gmm_iterations=2`、既定）は「初期推定→残差からS構築
   →S⁻¹で再推定」の2段階手続き。`gmm_iterations`はこの反復を`while`ループでN回まで
   繰り返すだけの実装で、1-step/2-step/iterated間でアルゴリズムを分岐させる必要はない。
-- **`gmm_convergence`設定時**: `gmm_iterations`は「収束判定の上限反復回数（安全弁）」に
+- **`gmm_tol`設定時**: `gmm_iterations`は「収束判定の上限反復回数（安全弁）」に
   なる。収束判定は係数のelementwise・絶対誤差と相対誤差の併用（`tol = max(rtol * |前回値|,
   atol)`、`atol`は内部固定値`1e-8`）。全係数が満たして初めて収束とする。
 - **未収束時の挙動**: `raise_on_non_convergence=true`（既定）なら`IvError::
   GmmNonConvergence`（`ComputationError`）、`false`なら`converged=false`のまま結果を返す
   （MLEの`raise_on_non_convergence=false`→`converged=False`と同じ意味論）。
-- **`gmm_iterations=1`は比較対象となる前回推定値が無いため、`gmm_convergence`の指定有無に
+- **`gmm_iterations=1`は比較対象となる前回推定値が無いため、`gmm_tol`の指定有無に
   よらずトリビアルに`converged=true`**。
 - **`gmm_iterations=1`でも`weight_type`引数自体の妥当性は常に検証する**（点推定には
   影響しなくても、`Cluster`の`groups`未指定等の設定ミスは黙って成功させない）。
@@ -270,7 +270,7 @@ common.rs`）:
 | `IvError` | Python例外 |
 |---|---|
 | `Common(CommonError)` | `common_error_to_pyerr`に委譲 |
-| `InsufficientInstruments` / `InvalidHacLags` / `InvalidGmmIterations` / `InvalidGmmConvergence` / `InsufficientClustersForWeightMatrix` | `ValidationError` |
+| `InsufficientInstruments` / `InvalidHacLags` / `InvalidGmmIterations` / `InvalidGmmTol` / `InsufficientClustersForWeightMatrix` | `ValidationError` |
 | `GmmNonConvergence` | `ComputationError`（`MleError::NonConvergence`と同じ分類: パラメータの不正ではなく計算過程で発覚した問題） |
 | `FirstStageFailed` / `SecondStageFailed` / `HausmanRegressionFailed` | 内部の`LeastSquaresError`が`ComputationError`相当かどうかで`ComputationError`/`ValidationError`に分岐（`least_squares_error_is_computation_error`） |
 

@@ -30,12 +30,12 @@ def test_fit_succeeds_and_returns_iv_results(iv_dataset):
 
 def test_default_options_use_2sls_classical(iv_dataset):
     """`options`省略時は`IVOptions()`の既定値（method="2sls", classical）が
-    使われ、2SLSは常に`converged=True`/`n_iterations=1`（閉形式・非反復）。
+    使われ、2SLSは常に`converged=True`/`n_iter=1`（閉形式・非反復）。
     """
     res = our_fit(iv_dataset)
     assert res.cov_type == "classical"
     assert res.converged
-    assert res.n_iterations == 1
+    assert res.n_iter == 1
 
 
 def test_gmm_method_runs_and_converges(iv_dataset):
@@ -45,7 +45,7 @@ def test_gmm_method_runs_and_converges(iv_dataset):
     options = IVOptions(method="gmm")
     res = our_fit(iv_dataset, options=options)
     assert res.converged
-    assert res.n_iterations == 2
+    assert res.n_iter == 2
 
 
 def test_cluster_g2_boundary_succeeds_when_x_exog_is_empty():
@@ -567,26 +567,26 @@ def test_weight_type_is_none_for_2sls_even_when_explicitly_set(iv_dataset):
     assert res.weight_type is None
 
 
-def test_gmm_convergence_stops_before_max_iterations(iv_dataset):
-    """現実的な`gmm_convergence`を指定すると、`gmm_iterations`の上限に達する
-    前に収束判定を満たして反復を打ち切ること（`IVOptions.gmm_convergence`の
+def test_gmm_tol_stops_before_max_iterations(iv_dataset):
+    """現実的な`gmm_tol`を指定すると、`gmm_iterations`の上限に達する
+    前に収束判定を満たして反復を打ち切ること（`IVOptions.gmm_tol`の
     「早期収束」という主要な挙動、非収束のみを確認する既存テストと対になる）。
     """
     options = IVOptions(
         method="gmm",
         weight_type="robust",
-        gmm_convergence=1e-4,
+        gmm_tol=1e-4,
         gmm_iterations=10,
     )
     res = our_fit(iv_dataset, options=options)
     assert res.converged
-    assert res.n_iterations < 10
+    assert res.n_iter < 10
 
 
 def test_gmm_raise_on_non_convergence_false_returns_converged_false(
     iv_dataset,
 ):
-    """厳しすぎる`gmm_convergence`でも`raise_on_non_convergence=False`なら
+    """厳しすぎる`gmm_tol`でも`raise_on_non_convergence=False`なら
     例外を投げず`converged=False`を返す（例外を送出する既定挙動側は
     `test_iv_validation.py::test_gmm_raise_on_non_convergence_true_raises_
     computation_error`）。
@@ -594,10 +594,10 @@ def test_gmm_raise_on_non_convergence_false_returns_converged_false(
     options = IVOptions(
         method="gmm",
         weight_type="robust",
-        gmm_convergence=1e-300,
+        gmm_tol=1e-300,
         gmm_iterations=2,
         raise_on_non_convergence=False,
     )
     res = our_fit(iv_dataset, options=options)
     assert res.converged is False
-    assert res.n_iterations == 2
+    assert res.n_iter == 2

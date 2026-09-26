@@ -404,7 +404,7 @@ def run_gmm(
     （`iters`は1始まり）のため、既定の`iter_limit=2`では`tol`の値に関わらず
     必ず2回目のステップまで実行してから打ち切る（`tol`が効くのは
     `iter_limit>=3`のときのみ）。本実装の既定`gmm_iterations=2`
-    （`gmm_convergence=None`の固定反復モード）と一致するため、`tol`は
+    （`gmm_tol=None`の固定反復モード）と一致するため、`tol`は
     linearmodelsの既定値のまま渡さず気にしなくてよい。`iter_limit`に
     `gmm_iterations`をそのまま渡す。
 

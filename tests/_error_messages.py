@@ -230,9 +230,7 @@ INSUFFICIENT_INSTRUMENTS = (
 INVALID_GMM_ITERATIONS = (
     "gmm_iterations must be a positive integer: got {gmm_iterations}"
 )
-INVALID_GMM_CONVERGENCE = (
-    "gmm_convergence must be a positive number, got {gmm_convergence}"
-)
+INVALID_GMM_TOL = "gmm_tol must be a positive number, got {gmm_tol}"
 INSUFFICIENT_CLUSTERS_FOR_WEIGHT_MATRIX = (
     "weight_type='cluster' requires at least l clusters (l+1 if exactly "
     "identified) for the moment weight matrix: got g={g} clusters for l={l} "

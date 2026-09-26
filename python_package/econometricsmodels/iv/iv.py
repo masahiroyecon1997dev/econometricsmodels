@@ -210,7 +210,7 @@ class IVResults:
     def converged(self) -> bool:
         """Whether GMM iteration converged (`method="gmm"` only).
 
-        Only meaningful when `IVOptions.gmm_convergence` is set (fixed
+        Only meaningful when `IVOptions.gmm_tol` is set (fixed
         iteration count otherwise trivially satisfies convergence).
         Always `True` for `method="2sls"` (2SLS is a closed-form,
         non-iterative estimator).
@@ -218,10 +218,10 @@ class IVResults:
         return self._raw.converged
 
     @property
-    def n_iterations(self) -> int:
+    def n_iter(self) -> int:
         """Number of GMM iterations actually run (`method="gmm"`
         only). Always `1` for `method="2sls"`."""
-        return self._raw.n_iterations
+        return self._raw.n_iter
 
     @property
     def cov_type(self) -> str:

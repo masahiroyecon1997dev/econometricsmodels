@@ -701,17 +701,17 @@ def test_scale_variance_cluster_raises_computation_error():
         ).fit()
 
 
-def test_gmm_cluster_weight_type_raises_computation_error_when_cluster_count_is_less_than_instrument_count(
-    iv_dataset,
+@pytest.mark.parametrize("gmm_iterations", [1, 2])
+def test_gmm_cluster_weight_type_raises_validation_error_when_cluster_count_is_less_than_instrument_count(
+    iv_dataset, gmm_iterations
 ):
-    """`method="gmm"`固有のComputationErrorパス。`weight_type="cluster"`の重み行列`S`
+    """`method="gmm"`固有のValidationErrorパス。`weight_type="cluster"`の重み行列`S`
     （l×l、`l`は全操作変数の数）はG個のランク1行列の和のため`rank(S)≤G`
     （`engine/src/iv/CLAUDE.md`「クラスター数Gと操作変数の数lの関係」参照）。
-    `G=2 < l=3`（`x_exog=[]`・`instruments=["z1","z2"]`で`l=const+z1+z2=3`）だと
-    `S`が構造的に特異になり`ComputationError`（`gmm.rs`の第一段階とは別の、GMM
-    自体の重み行列反転経路。2SLS/GMM共通の第一段階回帰の特異性
-    （`test_perfect_multicollinearity_raises_computation_error`）とは
-    別のGMM固有の失敗パス）。
+    `G=2 < l=3`（`x_exog=[]`・`instruments=["z1","z2"]`で`l=const+z1+z2=3`、過剰識別）
+    だと`S`が構造的に特異になるため、`fit()`冒頭で`ValidationError`
+    （`IvError::InsufficientClustersForWeightMatrix`）として弾く。`gmm_iterations=1`
+    （`S`が点推定に使われない）でも常に検証する。
     """
     n = iv_dataset.height
     df = iv_dataset.with_columns(
@@ -722,8 +722,12 @@ def test_gmm_cluster_weight_type_raises_computation_error_when_cluster_count_is_
         weight_type="cluster",
         cluster_col="cluster_group",
         cov_type="classical",
+        gmm_iterations=gmm_iterations,
     )
-    with pytest.raises(ComputationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_WEIGHT_MATRIX, g=2, l=3),
+    ):
         IV(
             df,
             y="y",

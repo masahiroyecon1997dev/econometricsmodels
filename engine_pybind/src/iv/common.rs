@@ -101,7 +101,8 @@ pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
         IvError::InsufficientInstruments { .. }
         | IvError::InvalidHacLags { .. }
         | IvError::InvalidGmmIterations { .. }
-        | IvError::InvalidGmmConvergence { .. } => ValidationError::new_err(message),
+        | IvError::InvalidGmmConvergence { .. }
+        | IvError::InsufficientClustersForWeightMatrix { .. } => ValidationError::new_err(message),
         // `MleError::NonConvergence`（`nonlinear/common.rs`の`mle_error_to_pyerr`）と同じ
         // 分類: パラメータの不正ではなく、計算過程（反復推定）で発覚した問題のため
         // `ComputationError`（`engine/src/iv/CLAUDE.md`参照）。

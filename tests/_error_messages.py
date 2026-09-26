@@ -233,6 +233,13 @@ INVALID_GMM_ITERATIONS = (
 INVALID_GMM_CONVERGENCE = (
     "gmm_convergence must be a positive number, got {gmm_convergence}"
 )
+INSUFFICIENT_CLUSTERS_FOR_WEIGHT_MATRIX = (
+    "weight_type='cluster' requires at least l clusters (l+1 if exactly "
+    "identified) for the moment weight matrix: got g={g} clusters for l={l} "
+    "instruments (including exogenous regressors), but the cluster moment "
+    "covariance has rank at most g (g-1 if exactly identified), so it is "
+    "singular"
+)
 
 # ── panel系統固有（FE、engine/src/panel/common.rs・
 #    engine_pybind/src/panel/fe.rs） ─────────────────────────────────────

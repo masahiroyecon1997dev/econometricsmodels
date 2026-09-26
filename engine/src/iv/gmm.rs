@@ -307,16 +307,19 @@ impl GmmEstimator {
     /// - `weight_type=Cluster`でグループキー未指定・クラスター数不足:
     ///   `IvError::Common(CommonError::MissingClusterColumn` /
     ///   `CommonError::InsufficientClusters)`
-    /// - `Z'Z`または`X'WX`型のブレッド行列が（数値的に）特異:
+    /// - `weight_type=Cluster`でクラスター数`g`が全操作変数の数`l`に対して不足
+    ///   （過剰識別は`g < l`、丁度識別（`l == k`）は`g <= l`）:
+    ///   `IvError::InsufficientClustersForWeightMatrix`（重み行列`S`（l×l）が構造的に
+    ///   特異。`gmm_iterations`によらず常に検証する）
+    /// - `Z'Z`または`X'WX`型のブレッド行列が（数値的に）特異（上記の`g`と`l`の関係で
+    ///   事前に弾けない悪条件のbackstop）:
     ///   `IvError::Common(CommonError::ComputationFailed)`
     /// - `cov_type=Cluster`でグループキー未指定・クラスター数不足:
     ///   `IvError::Common(CommonError::MissingClusterColumn` /
     ///   `CommonError::InsufficientClusters)`
     /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
     ///   `IvError::Common(CommonError::InsufficientClustersForInference)`（`rank(Ŝ) ≤ g-1`
-    ///   のためロバストWald（χ²）検定の`q×q`部分行列が構造的に特異になる。
-    ///   `weight_type=Cluster`の重み行列`S`（l×l）が`G<l`で特異になる別軸の問題は
-    ///   従来どおり`ComputationFailed`のまま）
+    ///   のためロバストWald（χ²）検定の`q×q`部分行列が構造的に特異になる）
     /// - `cov_type=Hac`の`lags`が不正: `IvError::InvalidHacLags`
     #[allow(clippy::too_many_arguments)]
     pub fn fit(
@@ -373,8 +376,8 @@ impl GmmEstimator {
         // （`k - k_constant`）以下だと、ロバストWald（χ²）検定の`q×q`部分行列が構造的に
         // 特異になる（`rank(Ŝ) ≤ g - 1`、`two_sls.rs`/`ols.rs`と同型）。
         // `g`・`q`は入力だけから判定できるため、点推定・SE計算より前に弾く。
-        // `weight_type=Cluster`の重み行列`S`（l×l）が`G<l`で特異になる別軸の問題は
-        // ここでは対象外——`validate_weight_type`側は変更しない。
+        // `weight_type=Cluster`の重み行列`S`（l×l）の`G`と`l`の関係は別軸のため
+        // `validate_weight_type`側で検証する。
         if let CovType::Cluster {
             groups: Some(groups),
         } = &cov_type
@@ -387,7 +390,8 @@ impl GmmEstimator {
         // 場合）でも常に検証する。設定ミス（例: Cluster指定なのにgroups未指定）を
         // gmm_iterations次第で黙って見逃さないため（ユーザー確認済み、モジュール冒頭の
         // docコメント参照）。
-        validate_weight_type(&weight_type, n)?;
+        let l_instruments = input.k_exog() + input.instruments().ncols();
+        validate_weight_type(&weight_type, n, k, l_instruments)?;
 
         let x_exog_columns = mat_to_columns(input.x_exog());
 
@@ -823,15 +827,30 @@ fn gmm_coefficients_converged(prev: &Mat<f64>, next: &Mat<f64>, rtol: f64) -> bo
 ///
 /// `gmm_iterations=1`では`weight_type`が点推定に一切影響しないが（モジュール冒頭の
 /// docコメント参照）、それでも呼び出し元の設定ミス（`Cluster`指定なのに`groups`未指定、
-/// `Kernel`の`lags`が範囲外等）は黙って無視せず常にエラーにする（ユーザー確認済み）。
+/// `Kernel`の`lags`が範囲外、`Cluster`でクラスター数が重み行列`S`の階数に足りない等）は
+/// 黙って無視せず常にエラーにする（ユーザー確認済み）。
 /// `gmm_iterations=2`では`fit()`本体の`match`が`S`構築の過程で同じ検証を重ねて行う
 /// （冗長だが検証コスト自体は軽微で、各分岐を自己完結させる方を優先した）。
-fn validate_weight_type(weight_type: &WeightType, n: usize) -> Result<(), IvError> {
+///
+/// `k`は構造方程式の係数の数、`l`は全操作変数（`x_exog ++ instruments`）の数。
+/// `Cluster`の`S`（l×l）は`rank(S) ≤ G`で、丁度識別（`l == k`）では`Z'ê = 0`により
+/// `rank(S) ≤ G-1`となる。よって過剰識別は`G < l`、丁度識別は`G <= l`で構造的に特異に
+/// なるため`IvError::InsufficientClustersForWeightMatrix`で弾く。
+fn validate_weight_type(
+    weight_type: &WeightType,
+    n: usize,
+    k: usize,
+    l: usize,
+) -> Result<(), IvError> {
     match weight_type {
         WeightType::Unadjusted | WeightType::Robust => {}
         WeightType::Cluster { groups } => {
             let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-            validate_cluster_groups(groups, n)?;
+            let g = validate_cluster_groups(groups, n)?;
+            let exactly_identified = l == k;
+            if g < l || (exactly_identified && g == l) {
+                return Err(IvError::InsufficientClustersForWeightMatrix { g, l });
+            }
         }
         WeightType::Kernel { lags, .. } => {
             resolve_hac_lags(*lags, n)?;
@@ -1652,46 +1671,92 @@ mod tests {
         );
     }
 
-    /// クラスター頑健版の`S`（l×l）はG個のランク1行列の和のため`rank(S) <= G`となり、
-    /// `G < l`だと必然的に特異になる（`fit_computes_cluster_weighted_estimate_matching_
-    /// manual_formula`のdocコメント参照）。ここではl=3（const, z1, z2）に対しG=2しか
-    /// 与えず、この境界条件が実際に`ComputationFailed`として顕在化することを確認する。
-    #[test]
-    fn fit_returns_computation_error_when_cluster_count_is_less_than_instrument_count() {
+    /// `weight_type=Cluster`の重み行列`S`（l×l）のクラスター数`g`と全操作変数数`l`の
+    /// テスト用ヘルパー。`n_instruments`本の操作変数（`z1`のみ／`z1,z2`）で、
+    /// `g`個のクラスターに`i % g`で割り当てて`fit`し結果を返す。
+    fn fit_cluster_weighted(
+        n_instruments: usize,
+        g: usize,
+        gmm_iterations: i64,
+    ) -> Result<GmmEstimator, IvError> {
         let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
         let n = y.len();
-        let groups: Vec<String> = (0..n)
-            .map(|i| if i < n / 2 { "g0" } else { "g1" }.to_string())
-            .collect();
+        let groups: Vec<String> = (0..n).map(|i| format!("g{}", i % g)).collect();
+        let (instruments, names) = if n_instruments == 1 {
+            (vec![z1], vec!["z1".to_string()])
+        } else {
+            (vec![z1, z2], vec!["z1".to_string(), "z2".to_string()])
+        };
         let input = IvInput::from_columns(
             &y,
             &[],
             vec![],
             std::slice::from_ref(&x_endog),
             vec!["endog1".to_string()],
-            &[z1, z2],
-            vec!["z1".to_string(), "z2".to_string()],
+            &instruments,
+            names,
             true,
             "y".to_string(),
         )
         .unwrap();
-
-        let result = GmmEstimator::fit(
+        GmmEstimator::fit(
             input,
             WeightType::Cluster {
                 groups: Some(groups),
             },
-            2,
+            gmm_iterations,
             None,
             true,
             CovType::Classical,
             0.95,
-        );
+        )
+    }
+
+    /// 過剰識別（l=3: const, z1, z2、k=2）では`S`は`rank(S) <= G`のため`G < l`で構造的に
+    /// 特異になり、`fit()`冒頭で`InsufficientClustersForWeightMatrix`
+    /// （`ValidationError`）として弾く（従来は`ComputationFailed`。
+    /// `fit_computes_cluster_weighted_estimate_matching_manual_formula`のdocコメント参照）。
+    #[test]
+    fn fit_returns_insufficient_clusters_for_weight_matrix_when_overidentified_and_g_less_than_l() {
+        let result = fit_cluster_weighted(2, 2, 2);
         assert_eq!(
             result.unwrap_err(),
-            IvError::Common(CommonError::ComputationFailed(
-                "failed to invert GMM weight matrix S (Z'Z or moment covariance)".to_string()
-            ))
+            IvError::InsufficientClustersForWeightMatrix { g: 2, l: 3 }
+        );
+    }
+
+    /// 過剰識別では`G == l`はエラーにならない（`Z'ê = 0`が成り立たず`rank(S) <= G`が
+    /// 上限のため、`G == l`は非特異になりうる）。
+    #[test]
+    fn fit_succeeds_when_overidentified_and_g_equals_l() {
+        assert!(fit_cluster_weighted(2, 3, 2).is_ok());
+    }
+
+    /// 丁度識別（l=2: const, z1、k=2）では`Z'ê = 0`により`rank(S) <= G-1`のため、
+    /// `G == l`でも特異になり`InsufficientClustersForWeightMatrix`で弾く。
+    #[test]
+    fn fit_returns_insufficient_clusters_for_weight_matrix_when_just_identified_and_g_equals_l() {
+        let result = fit_cluster_weighted(1, 2, 2);
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::InsufficientClustersForWeightMatrix { g: 2, l: 2 }
+        );
+    }
+
+    /// 丁度識別でも`G > l`なら成功する（`G=l+1`が成功パスの境界）。
+    #[test]
+    fn fit_succeeds_when_just_identified_and_g_exceeds_l() {
+        assert!(fit_cluster_weighted(1, 3, 2).is_ok());
+    }
+
+    /// `gmm_iterations=1`（`S`が点推定に使われない）でも、`weight_type=Cluster`の`G`と`l`の
+    /// 関係は常に検証する（`validate_weight_type`の方針、ユーザー確認済み）。
+    #[test]
+    fn fit_returns_insufficient_clusters_for_weight_matrix_when_one_step_gmm() {
+        let result = fit_cluster_weighted(2, 2, 1);
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::InsufficientClustersForWeightMatrix { g: 2, l: 3 }
         );
     }
 

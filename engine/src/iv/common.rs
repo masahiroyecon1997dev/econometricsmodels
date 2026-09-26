@@ -114,6 +114,23 @@ pub enum IvError {
     #[error("gmm_convergence must be a positive number, got {gmm_convergence}")]
     InvalidGmmConvergence { gmm_convergence: f64 },
 
+    /// `method="gmm"`かつ`weight_type=Cluster`で、クラスター数`g`がモーメント条件の重み行列
+    /// `S`（l×l、`l`は全操作変数`x_exog ++ instruments`の数）を非特異にするのに足りない。
+    ///
+    /// `S = Σ_g S_g S_g'`はG個のランク1行列の和なので`rank(S) ≤ g`。丁度識別（`l == k`）の
+    /// ときは`Z'ê = 0`（`Σ_g S_g = 0`）が成り立つため`rank(S) ≤ g-1`となり、`g <= l`で
+    /// 特異になる。過剰識別（`l > k`）では`Z'ê = 0`が成り立たないため`g < l`で特異になる。
+    /// `cov_type=Cluster`の`CommonError::InsufficientClustersForInference`（係数共分散の
+    /// Wald部分行列、閾値は`q`）とは対象・閾値が異なる別軸のためGMM固有のバリアントとする。
+    /// `g`・`l`は入力だけから判定できるため、行列計算を待たず`fit()`冒頭で弾く。
+    #[error(
+        "weight_type='cluster' requires at least l clusters (l+1 if exactly identified) for \
+         the moment weight matrix: got g={g} clusters for l={l} instruments (including \
+         exogenous regressors), but the cluster moment covariance has rank at most g \
+         (g-1 if exactly identified), so it is singular"
+    )]
+    InsufficientClustersForWeightMatrix { g: usize, l: usize },
+
     /// `raise_on_non_convergence=true`（既定）かつ`gmm_convergence`指定時、`gmm_iterations`回
     /// （収束モードでの上限反復回数）以内に係数が収束しなかった。
     ///

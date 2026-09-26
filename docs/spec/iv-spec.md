@@ -155,8 +155,11 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   末尾`k_endog`列の部分行列は`rank(Ŝ) ≤ G-1 ≥ k_endog`なら計算可能なので`wu_hausman_*`を
   `None`へdegradeする（3.6節）。
 - **GMMの`weight_type="cluster"`の重み行列`S`（l×l、全操作変数の本数`l`）が`G<l`で
-  特異になる問題は別軸**（`cov_type=Cluster`の`G<=q`とは対象・閾値が異なる。現状
-  `ComputationError`、`ValidationError`への再分類は未着手）。
+  特異になる問題は別軸**（`cov_type=Cluster`の`G<=q`とは対象・閾値が異なる）。
+  過剰識別（`l>k`）は`G<l`、丁度識別（`l==k`）は`G<=l`（`Z'ê=0`により`rank(S)≤G-1`）で
+  `IvError::InsufficientClustersForWeightMatrix`＝`ValidationError`。`fit()`冒頭で
+  `gmm_iterations`によらず常に検証する（`gmm_iterations=1`でも`weight_type`の設定ミスは
+  見逃さない方針）。悪条件の`ComputationError`はbackstopとして残る。
 
 ### 3.2 検定分布
 
@@ -267,7 +270,7 @@ common.rs`）:
 | `IvError` | Python例外 |
 |---|---|
 | `Common(CommonError)` | `common_error_to_pyerr`に委譲 |
-| `InsufficientInstruments` / `InvalidHacLags` / `InvalidGmmIterations` / `InvalidGmmConvergence` | `ValidationError` |
+| `InsufficientInstruments` / `InvalidHacLags` / `InvalidGmmIterations` / `InvalidGmmConvergence` / `InsufficientClustersForWeightMatrix` | `ValidationError` |
 | `GmmNonConvergence` | `ComputationError`（`MleError::NonConvergence`と同じ分類: パラメータの不正ではなく計算過程で発覚した問題） |
 | `FirstStageFailed` / `SecondStageFailed` / `HausmanRegressionFailed` | 内部の`LeastSquaresError`が`ComputationError`相当かどうかで`ComputationError`/`ValidationError`に分岐（`least_squares_error_is_computation_error`） |
 
@@ -311,5 +314,3 @@ common.rs`）:
 - 複数内生変数の同時検定（Cragg-Donald統計量等）
 - Wu-Hausman検定のGMM対応（`method="gmm"`では常に`None`）
 - Wu-Hausman検定の変数ごとのサブセット検定（現状は内生変数全体のジョイント検定のみ）
-- GMMの`weight_type="cluster"`が`G<l`で特異になる場合の`ComputationError`→
-  `ValidationError`への再分類（未着手）

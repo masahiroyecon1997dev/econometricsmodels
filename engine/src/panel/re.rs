@@ -656,7 +656,7 @@ fn re_hausman_test(
 /// REの標準誤差計算方式（3.1節）。`FeCovType`と同じ「小さな固定選択肢の
 /// 公開enum」パターン（`docs/spec/panel-common.md`4.3節）だが、REは
 /// `extra_df`が常に`0`（`linearmodels.RandomEffects.fit()`のソースで確認済み）・
-/// v1がentity方向のみ（2-way REはスコープ外、`re-spec.md`5章）のためFEより単純。`FeCovType::Hac`の
+/// v1がentity方向のみ（2-way REはスコープ外、`re-spec.md`5章）のためFEより単純。`FeCovType::Dk`の
 /// ような`time`オーバーライドフィールドは持たない（RE自身が2-way構造を持たないため、
 /// FEが2-way FEとDKの時間粒度を分離するために追加したオーバーライドの必要性が無い。
 /// HAC計算には`ReInput::time()`をそのまま使う）。
@@ -678,8 +678,8 @@ pub enum ReCovType {
     Cluster { groups: Option<Vec<String>> },
     /// Driscoll-Kraay型パネルHAC（3.1節）。`bandwidth`が`None`なら
     /// `floor(4*(t/100)^(2/9))`（`t`はユニークな時点数）で自動計算する。時系列順序は
-    /// `ReInput::time()`を使う（`time`が`None`なら`PanelError::HacRequiresTime`）。
-    Hac { bandwidth: Option<i64> },
+    /// `ReInput::time()`を使う（`time`が`None`なら`PanelError::DkRequiresTime`）。
+    Dk { bandwidth: Option<i64> },
 }
 
 /// REの推定結果。Swamy-Arora分散成分推定→θ計算・準偏差変換
@@ -791,7 +791,7 @@ impl ReEstimator {
     ///   同じ相違）ため独自計算が必要。`groups`が`None`なら`input.entity()`を使う。
     /// - **HAC（Driscoll-Kraay）**: `linearmodels`の`cov_type="kernel"`と数値完全
     ///   一致を実地検証済み（バンド幅0・1の両方）。時系列順序は`input.time()`を使う
-    ///   （`None`なら`PanelError::HacRequiresTime`）。
+    ///   （`None`なら`PanelError::DkRequiresTime`）。
     ///
     /// t値・p値・信頼区間の自由度は`cov_type`によらず常に`df_resid`（3.3節、FEと同じ
     /// 方針——OLS自身のCluster特有の`n_groups-1`切替はREでは行わない）。
@@ -804,8 +804,8 @@ impl ReEstimator {
     /// - `cov_type=Cluster`でクラスター数が不足する場合は`CommonError::
     ///   InsufficientClusters`/`InsufficientClustersForInference`（`PanelError::
     ///   Common`経由）。
-    /// - `cov_type=Hac`で`time`が未指定の場合は`PanelError::HacRequiresTime`、
-    ///   `bandwidth`が不正な場合は`PanelError::InvalidHacBandwidth`。
+    /// - `cov_type=Dk`で`time`が未指定の場合は`PanelError::DkRequiresTime`、
+    ///   `bandwidth`が不正な場合は`PanelError::InvalidDkBandwidth`。
     pub fn fit(
         input: ReInput,
         cov_type: ReCovType,
@@ -908,8 +908,8 @@ impl ReEstimator {
                     0,
                 )
             }
-            ReCovType::Hac { bandwidth } => {
-                let time = input.time().ok_or(PanelError::HacRequiresTime)?;
+            ReCovType::Dk { bandwidth } => {
+                let time = input.time().ok_or(PanelError::DkRequiresTime)?;
                 let t_periods = count_unique(time);
                 let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
                 panel_driscoll_kraay_cov_params(
@@ -1832,7 +1832,7 @@ mod tests {
         )
         .unwrap();
 
-        let bw0 = ReEstimator::fit(input, ReCovType::Hac { bandwidth: Some(0) }, 0.95).unwrap();
+        let bw0 = ReEstimator::fit(input, ReCovType::Dk { bandwidth: Some(0) }, 0.95).unwrap();
         assert!((*bw0.std_errors().get(0, 0) - 0.067_914_104_766_400_82).abs() < 1e-9);
         assert!((*bw0.std_errors().get(1, 0) - 0.269_988_522_809_824_16).abs() < 1e-9);
 
@@ -1845,27 +1845,27 @@ mod tests {
             "y".into(),
         )
         .unwrap();
-        let bw1 = ReEstimator::fit(input2, ReCovType::Hac { bandwidth: Some(1) }, 0.95).unwrap();
+        let bw1 = ReEstimator::fit(input2, ReCovType::Dk { bandwidth: Some(1) }, 0.95).unwrap();
         assert!((*bw1.std_errors().get(0, 0) - 0.064_720_572_563_281_51).abs() < 1e-9);
         assert!((*bw1.std_errors().get(1, 0) - 0.169_194_290_229_382_48).abs() < 1e-9);
     }
 
     #[test]
     fn re_estimator_fit_hac_returns_error_when_time_is_none() {
-        // 1-way FEの`HacRequiresTime`と同型（`ReInput::time()`が`None`ならエラー）。
+        // 1-way FEの`DkRequiresTime`と同型（`ReInput::time()`が`None`ならエラー）。
         let re = ReEstimator::fit(
             cov_type_reference_input(),
-            ReCovType::Hac { bandwidth: None },
+            ReCovType::Dk { bandwidth: None },
             0.95,
         );
 
-        assert_eq!(re.unwrap_err(), PanelError::HacRequiresTime);
+        assert_eq!(re.unwrap_err(), PanelError::DkRequiresTime);
     }
 
     #[test]
     fn re_estimator_fit_hac_rejects_bandwidth_at_least_t_periods() {
         // rust-reviewer指摘: `fit()`のdocコメントに明記した
-        // `PanelError::InvalidHacBandwidth`の伝播経路が未テストだった
+        // `PanelError::InvalidDkBandwidth`の伝播経路が未テストだった
         // （`resolve_dk_bandwidth`自体はFE側のテストでカバー済みだが、RE経由の配線は
         // 別途確認する。`fe_estimator_fit_hac_rejects_bandwidth_at_least_t_periods`と
         // 同型）。t_periods=3（time∈{1,2,3}）に対しbandwidth=3（`>=t`）を指定する。
@@ -1883,11 +1883,11 @@ mod tests {
         )
         .unwrap();
 
-        let result = ReEstimator::fit(input, ReCovType::Hac { bandwidth: Some(3) }, 0.95);
+        let result = ReEstimator::fit(input, ReCovType::Dk { bandwidth: Some(3) }, 0.95);
 
         assert_eq!(
             result.unwrap_err(),
-            PanelError::InvalidHacBandwidth { bandwidth: 3, t: 3 }
+            PanelError::InvalidDkBandwidth { bandwidth: 3, t: 3 }
         );
     }
 

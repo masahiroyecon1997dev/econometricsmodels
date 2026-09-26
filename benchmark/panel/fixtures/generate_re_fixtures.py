@@ -40,9 +40,9 @@ from benchmark.panel.references.linearmodels_ref import run_re
 
 # hc2/hc3はlinearmodels.RandomEffectsが提供しないため対象外（plmクロスチェック
 # 側のみで検証する単一参照実装の例外、`linearmodels_ref.py`モジュールdoc
-# 「RE固有の相違点」参照）。hacはFEと同じくcross_sectionally_correlated
+# 「RE固有の相違点」参照）。dkはFEと同じくcross_sectionally_correlated
 # シナリオが本来の目的。
-COV_TYPES = ["classical", "hc1", "cluster", "hac"]
+COV_TYPES = ["classical", "hc1", "cluster", "dk"]
 
 # `NUMERIC_SCENARIOS`（unbalanced + baseline/small_panel/heteroskedastic/
 # autocorrelated/cross_sectionally_correlated）はFE（generate_fe_fixtures.py）
@@ -53,14 +53,14 @@ COV_TYPES = ["classical", "hc1", "cluster", "hac"]
 # unbalanced_two_way/zero_variance_regressorは含めない（FE同様
 # ValidationErrorパス専用、テストコード側で対応）。
 
-# 実データ（Wooldridge wagepan）。FEと同じ変数選定・hac対象外の理由
+# 実データ（Wooldridge wagepan）。FEと同じ変数選定・dk対象外の理由
 # （benchmark/common/constants.pyのWAGEPAN_X参照）。
 WAGEPAN_COV_TYPES = ["classical", "hc1", "cluster"]
 
 
 def _run_re(scenario: str, cov_type: str) -> dict:
     # `time_col`は常に実在の"time"列を渡す（`generate_fe_fixtures.py`と同じ
-    # 理由——不均衡パネルでcov_type="hac"のバンド幅・カーネル計算が不正確に
+    # 理由——不均衡パネルでcov_type="dk"のバンド幅・カーネル計算が不正確に
     # なることを避けるため）。`REOptions.time`自体は本フィクス
     # チャの対象外（RE.fit()自体はtimeを使わない、`time_col`はlinearmodels
     # 呼び出し側のMultiIndex構築専用）。
@@ -124,7 +124,7 @@ def build_fixtures() -> dict:
             "2026-09-20）。"
             "wagepan（Wooldridge、N=545人×T=8年、1980-1987、バランスパネル）は"
             "FEと同じ変数選定理由（benchmark/common/constants.pyのWAGEPAN_X"
-            "参照）。hacはwagepan（T=8）には適用しない（Driscoll-Kraay HACは"
+            "参照）。dkはwagepan（T=8）には適用しない（Driscoll-Kraay HACは"
             "20時点以上を推奨するため、合成データのcross_sectionally_"
             "correlatedシナリオ（T=25）でのみ数値照合する）。"
         ),

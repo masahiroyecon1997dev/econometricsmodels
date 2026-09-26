@@ -24,13 +24,13 @@ classical/hc1/hc2/hc3は本実装と機械精度で一致する（実測相対�
 では、この2つのグループで許容誤差を分けること（`.claude/rules/
 testing-policy.md`「許容誤差」参照）。
 
-## hacを含まない理由
+## dkを含まない理由
 
-`cov_type="hac"`（Driscoll-Kraay）はfixestの`vcov="DK"`の既定バンド幅公式・
+`cov_type="dk"`（Driscoll-Kraay）はfixestの`vcov="DK"`の既定バンド幅公式・
 小標本補正の慣行が本実装・linearmodelsと異なり、明示的にバンド幅を揃えても
-標準誤差が実用的な許容誤差でも一致しないことを実測確認済みのため、hacは
+標準誤差が実用的な許容誤差でも一致しないことを実測確認済みのため、dkは
 `linearmodels`のみを参照実装とする単一参照実装の例外として扱う（ユーザー
-確認済み）。このフィクスチャにはhacのキー自体が存在しない。
+確認済み）。このフィクスチャにはdkのキー自体が存在しない。
 
 使用例（リポジトリルートから）:
     python -m benchmark.panel.fixtures.generate_fe_crosscheck_fixtures
@@ -65,8 +65,8 @@ from benchmark.panel.references.r import run_fixest_r
 
 NUMERIC_SCENARIOS = ONE_WAY_ONLY_SCENARIOS + TWO_WAY_SCENARIOS
 
-# hc2/hc3はここでのみ検証する（fe.jsonのCOV_TYPESにclassical/hc1/cluster/hacの
-# 4つしか無い理由はgenerate_fe_fixtures.py参照）。hacはモジュールdoc「hacを
+# hc2/hc3はここでのみ検証する（fe.jsonのCOV_TYPESにclassical/hc1/cluster/dkの
+# 4つしか無い理由はgenerate_fe_fixtures.py参照）。dkはモジュールdoc「dkを
 # 含まない理由」の通り対象外。
 COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster"]
 
@@ -203,9 +203,9 @@ def build_fixtures() -> dict:
             "例外（モジュールdoc参照）。classical/hc1/hc2/hc3は本実装と機械"
             "精度で一致するが、clusterのみ小標本補正の慣行差により1-way相対"
             "誤差1.8e-5程度・2-way相対誤差0.2%程度の乖離が残る（実装バグでは"
-            "ない、run_fixest_benchmark.Rのコメント参照）。hacはこのフィクス"
-            "チャに含まない（モジュールdoc「hacを含まない理由」）。wagepanは"
-            "fe.jsonと同じmarried/union/expersq・T=8のためhac対象外も同様。"
+            "ない、run_fixest_benchmark.Rのコメント参照）。dkはこのフィクス"
+            "チャに含まない（モジュールdoc「dkを含まない理由」）。wagepanは"
+            "fe.jsonと同じmarried/union/expersq・T=8のためdk対象外も同様。"
             "moderate_multicollinearity/high_condition_number/"
             "scale_variance_mild/many_regressors/"
             "outlier_regressor/high_variance・baseline.cluster_imbalanced・"

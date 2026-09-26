@@ -32,15 +32,15 @@
 //!
 //! `FEOptions`は`time`（2-way FE構造の指定）と`time_col`（Driscoll-Kraay HAC専用の
 //! 時系列順序、`time`とは独立に指定できる）を分離しているが、`REOptions`にはこの分離が
-//! 無く`time`のみを持つ。理由: `engine::panel::re::ReCovType::Hac`は`FeCovType::Hac`と
+//! 無く`time`のみを持つ。理由: `engine::panel::re::ReCovType::Dk`は`FeCovType::Dk`と
 //! 異なり`time`オーバーライドフィールドを持たない（`engine::panel::re`モジュールdoc・
 //! `engine/src/panel/CLAUDE.md`「`cov_type`対応（`ReCovType`、3.1節・3.2節）」参照）。RE自身が2-way
 //! 構造を持たない（v1はentity方向のみ、`re-spec.md`5章）ため、FEのような「2-way FEの
 //! 固定効果構造に使う時点粒度」と「HACカーネルに使う時系列粒度」を分離する必要が無い——
 //! DK HAC計算は`ReInput::time()`をそのまま使う設計。`REOptions.time`は以下2つの用途を
 //! 1つのフィールドで兼ねる（`docs/spec/re-spec.md`3.7節）:
-//! - `cov_type="hac"`時のDriscoll-Kraay型パネルHACの時系列順序（`None`なら
-//!   `PanelError::HacRequiresTime`）
+//! - `cov_type="dk"`時のDriscoll-Kraay型パネルHACの時系列順序（`None`なら
+//!   `PanelError::DkRequiresTime`）
 //! - ハウスマン検定用の内部FE呼び出しの1-way/2-way選択（`Some`なら2-way FE、`None`なら
 //!   1-way FE。RE自身が2-wayをサポートしないこととは独立の判断、`re-spec.md`3.7節）
 //!
@@ -80,7 +80,7 @@ use crate::validation::{
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct REOptions {
-    /// Standard error type: one of "classical", "hc1", "hc2", "hc3", "cluster", "hac".
+    /// Standard error type: one of "classical", "hc1", "hc2", "hc3", "cluster", "dk".
     /// Case-insensitive. Unlike OLS/WLS/IV, "hc0" is **not** supported (no reference
     /// implementation offers it for panel/RE regressions; see the module docstring).
     #[pyo3(get, set)]
@@ -92,7 +92,7 @@ pub struct REOptions {
     pub confidence_level: f64,
 
     /// Column name of the time identifier. Serves two purposes (see the module
-    /// docstring): the Driscoll-Kraay HAC time ordering when `cov_type="hac"`, and the
+    /// docstring): the Driscoll-Kraay HAC time ordering when `cov_type="dk"`, and the
     /// one-way/two-way choice for the internal FE regression used by the Hausman test
     /// (`Some` requests two-way FE, `None` one-way). Unlike `FEOptions`, RE has no
     /// separate `time_col` field, since it never needs to decouple these two uses.
@@ -105,9 +105,9 @@ pub struct REOptions {
     #[pyo3(get, set)]
     pub cluster_col: Option<String>,
 
-    /// Bandwidth for Driscoll-Kraay HAC when `cov_type="hac"`. When `None`, computed
+    /// Bandwidth for Driscoll-Kraay HAC when `cov_type="dk"`. When `None`, computed
     /// automatically via `floor(4*(t/100)^(2/9))` (`t` = number of unique time periods).
-    /// Ignored when `cov_type` is not "hac".
+    /// Ignored when `cov_type` is not "dk".
     #[pyo3(get, set)]
     pub dk_bandwidth: Option<i64>,
 }
@@ -205,7 +205,7 @@ pub struct REResult {
     #[pyo3(get)]
     pub n_entities: usize,
     /// Standard error type actually used (echoes `REOptions.cov_type`, normalized to
-    /// lowercase; e.g. "classical", "hc1", "cluster", "hac").
+    /// lowercase; e.g. "classical", "hc1", "cluster", "dk").
     #[pyo3(get)]
     pub cov_type: String,
     #[pyo3(get)]
@@ -245,8 +245,8 @@ pub struct REResult {
 /// `REOptions.cov_type`をパースし、該当する`cov_type`のときのみ`cluster_col`を抽出した
 /// うえで`engine::panel::re::ReCovType`を組み立てる。
 ///
-/// `ReCovType::Hac`は`FeCovType::Hac`と異なり`time`オーバーライドフィールドを持たない
-/// （モジュールdoc「`REOptions`に`time_col`が無い理由」参照）ため、`cov_type="hac"`の
+/// `ReCovType::Dk`は`FeCovType::Dk`と異なり`time`オーバーライドフィールドを持たない
+/// （モジュールdoc「`REOptions`に`time_col`が無い理由」参照）ため、`cov_type="dk"`の
 /// 分岐でも追加の列抽出は不要——HAC計算は`ReEstimator::fit`内部で`ReInput::time()`を
 /// 直接使う。
 ///
@@ -270,7 +270,7 @@ fn parse_re_cov_type(df: &DataFrame, options: &REOptions) -> PyResult<(ReCovType
                 .transpose()?;
             ReCovType::Cluster { groups }
         }
-        "hac" => ReCovType::Hac {
+        "dk" => ReCovType::Dk {
             bandwidth: options.dk_bandwidth,
         },
         "hc0" => {
@@ -282,7 +282,7 @@ fn parse_re_cov_type(df: &DataFrame, options: &REOptions) -> PyResult<(ReCovType
         other => {
             return Err(ValidationError::new_err(format!(
                 "unknown cov_type: '{other}'. Expected one of 'classical', 'hc1' through \
-                 'hc3', 'cluster', or 'hac'"
+                 'hc3', 'cluster', or 'dk'"
             )));
         }
     };
@@ -639,11 +639,11 @@ mod tests {
 
     #[test]
     fn build_re_input_hac_uses_dk_bandwidth_and_no_time_override() {
-        // `ReCovType::Hac`は`FeCovType::Hac`と異なり`time`オーバーライドを持たない
+        // `ReCovType::Dk`は`FeCovType::Dk`と異なり`time`オーバーライドを持たない
         // （モジュールdoc「`REOptions`に`time_col`が無い理由」参照）。
         let df = well_formed_df();
         let mut options = default_options();
-        options.cov_type = "hac".to_string();
+        options.cov_type = "dk".to_string();
         options.dk_bandwidth = Some(2);
 
         let (_, cov_type, _) = build_re_input(
@@ -655,6 +655,6 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(cov_type, ReCovType::Hac { bandwidth: Some(2) });
+        assert_eq!(cov_type, ReCovType::Dk { bandwidth: Some(2) });
     }
 }

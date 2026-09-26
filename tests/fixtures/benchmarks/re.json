@@ -177,7 +177,7 @@
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     },
-    "hac": {
+    "dk": {
       "coef": {
         "const": 0.11933110988079672,
         "x1": 1.7795237785735103,
@@ -229,7 +229,7 @@
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
         "generated_at": "2026-09-26T01:38:01.001747+00:00",
-        "cov_type_requested": "hac",
+        "cov_type_requested": "dk",
         "cov_type_linearmodels": "kernel",
         "confidence_level": 0.95,
         "hac_bandwidth": 2,
@@ -415,7 +415,7 @@
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     },
-    "hac": {
+    "dk": {
       "coef": {
         "const": 0.05369691562980433,
         "x1": 1.717805414054935,
@@ -467,7 +467,7 @@
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
         "generated_at": "2026-09-26T01:38:01.131857+00:00",
-        "cov_type_requested": "hac",
+        "cov_type_requested": "dk",
         "cov_type_linearmodels": "kernel",
         "confidence_level": 0.95,
         "hac_bandwidth": 2,
@@ -653,7 +653,7 @@
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     },
-    "hac": {
+    "dk": {
       "coef": {
         "const": -0.3449924454299357,
         "x1": 2.656158114187345,
@@ -705,7 +705,7 @@
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
         "generated_at": "2026-09-26T01:38:01.296693+00:00",
-        "cov_type_requested": "hac",
+        "cov_type_requested": "dk",
         "cov_type_linearmodels": "kernel",
         "confidence_level": 0.95,
         "hac_bandwidth": 1,
@@ -891,7 +891,7 @@
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     },
-    "hac": {
+    "dk": {
       "coef": {
         "const": 0.05455694841341626,
         "x1": 1.9059315924621483,
@@ -943,7 +943,7 @@
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
         "generated_at": "2026-09-26T01:38:01.432149+00:00",
-        "cov_type_requested": "hac",
+        "cov_type_requested": "dk",
         "cov_type_linearmodels": "kernel",
         "confidence_level": 0.95,
         "hac_bandwidth": 2,
@@ -1129,7 +1129,7 @@
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     },
-    "hac": {
+    "dk": {
       "coef": {
         "const": -0.023212487787487655,
         "x1": 1.648436220581221,
@@ -1181,7 +1181,7 @@
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
         "generated_at": "2026-09-26T01:38:01.557289+00:00",
-        "cov_type_requested": "hac",
+        "cov_type_requested": "dk",
         "cov_type_linearmodels": "kernel",
         "confidence_level": 0.95,
         "hac_bandwidth": 2,
@@ -1367,7 +1367,7 @@
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     },
-    "hac": {
+    "dk": {
       "coef": {
         "const": -0.08017411408908891,
         "x1": 2.1210602048469362,
@@ -1419,7 +1419,7 @@
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
         "generated_at": "2026-09-26T01:38:01.687886+00:00",
-        "cov_type_requested": "hac",
+        "cov_type_requested": "dk",
         "cov_type_linearmodels": "kernel",
         "confidence_level": 0.95,
         "hac_bandwidth": 2,
@@ -1605,7 +1605,7 @@
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     },
-    "hac": {
+    "dk": {
       "coef": {
         "const": 0.11539973483256198,
         "x1": 1.6130393823484193,
@@ -1657,7 +1657,7 @@
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
         "generated_at": "2026-09-26T01:38:01.813836+00:00",
-        "cov_type_requested": "hac",
+        "cov_type_requested": "dk",
         "cov_type_linearmodels": "kernel",
         "confidence_level": 0.95,
         "hac_bandwidth": 2,
@@ -1843,7 +1843,7 @@
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     },
-    "hac": {
+    "dk": {
       "coef": {
         "const": 0.11539973483256209,
         "x1": 1.1605854551294799,
@@ -1895,7 +1895,7 @@
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
         "generated_at": "2026-09-26T01:38:01.938733+00:00",
-        "cov_type_requested": "hac",
+        "cov_type_requested": "dk",
         "cov_type_linearmodels": "kernel",
         "confidence_level": 0.95,
         "hac_bandwidth": 2,
@@ -2081,7 +2081,7 @@
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     },
-    "hac": {
+    "dk": {
       "coef": {
         "const": 0.05369691562980481,
         "x1": 1.6444769825629713,
@@ -2133,7 +2133,7 @@
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
         "generated_at": "2026-09-26T01:38:02.066414+00:00",
-        "cov_type_requested": "hac",
+        "cov_type_requested": "dk",
         "cov_type_linearmodels": "kernel",
         "confidence_level": 0.95,
         "hac_bandwidth": 2,
@@ -2805,7 +2805,7 @@
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     },
-    "hac": {
+    "dk": {
       "coef": {
         "const": 0.23443405679675253,
         "x1": -0.6546269547162793,
@@ -3019,7 +3019,7 @@
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
         "generated_at": "2026-09-26T01:38:02.230640+00:00",
-        "cov_type_requested": "hac",
+        "cov_type_requested": "dk",
         "cov_type_linearmodels": "kernel",
         "confidence_level": 0.95,
         "hac_bandwidth": 2,
@@ -3205,7 +3205,7 @@
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     },
-    "hac": {
+    "dk": {
       "coef": {
         "const": 0.13566133257069668,
         "x1": 1.6525409079729252,
@@ -3257,7 +3257,7 @@
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
         "generated_at": "2026-09-26T01:38:02.358370+00:00",
-        "cov_type_requested": "hac",
+        "cov_type_requested": "dk",
         "cov_type_linearmodels": "kernel",
         "confidence_level": 0.95,
         "hac_bandwidth": 2,
@@ -3443,7 +3443,7 @@
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     },
-    "hac": {
+    "dk": {
       "coef": {
         "const": -0.4803289521983946,
         "x1": 2.156376268425162,
@@ -3495,7 +3495,7 @@
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
         "generated_at": "2026-09-26T01:38:02.485662+00:00",
-        "cov_type_requested": "hac",
+        "cov_type_requested": "dk",
         "cov_type_linearmodels": "kernel",
         "confidence_level": 0.95,
         "hac_bandwidth": 2,

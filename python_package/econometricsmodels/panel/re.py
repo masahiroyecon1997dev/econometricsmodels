@@ -99,7 +99,7 @@ class RE:
                 used for the Hausman test, which falls back to `None`
                 on `hausman_statistic`/`hausman_p_value`/`hausman_df`
                 instead of failing `fit()`; see `REResults`'s
-                docstring), or a `cov_type="hac"` request with `time`
+                docstring), or a `cov_type="dk"` request with `time`
                 unset). A subclass of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. a singular quasi-demeaned design

@@ -11,11 +11,11 @@
 # 実装のため、engine/src/panel/CLAUDE.md「cov_type対応」参照）ため、
 # plm::vcovHC(method="white1", type="HC2"/"HC3")を唯一の参照実装とする。
 #
-# classical/hc1/cluster/hacはlinearmodelsのみで検証する（本スクリプトでは計算
+# classical/hc1/cluster/dkはlinearmodelsのみで検証する（本スクリプトでは計算
 # しない）——plmの変量効果分散成分推定（Swamy-Arora）がlinearmodelsと僅かに
 # 異なる実装のため、点推定自体が不均衡パネルで最大0.1%程度乖離することを実測
 # 確認済み（バランスパネルでは6桁程度で一致）。この乖離はHC2/HC3のクロス
-# チェック水準（1e-2）でしか意味を持たないため、classical/hc1/cluster/hacを
+# チェック水準（1e-2）でしか意味を持たないため、classical/hc1/cluster/dkを
 # この乖離込みで比較する動機が薄く対象外とする（ユーザー確認済み、
 # engine/src/panel/CLAUDE.md「cov_type対応」参照）。
 #

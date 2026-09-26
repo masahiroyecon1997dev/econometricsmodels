@@ -19,9 +19,9 @@ FE固有の内容のみを記載する。
 
   | フィールド | 型 | デフォルト | 説明 |
   |---|---|---|---|
-  | `cov_type` | `str` | `"cluster"` | `"classical"` / `"hc1"`〜`"hc3"` / `"cluster"` / `"hac"`（大小無視）。OLSと異なり`"hc0"`は非対応（`FeCovType` enum自体が持たない、専用エラーメッセージで弾く） |
+  | `cov_type` | `str` | `"cluster"` | `"classical"` / `"hc1"`〜`"hc3"` / `"cluster"` / `"dk"`（大小無視）。OLSと異なり`"hc0"`は非対応（`FeCovType` enum自体が持たない、専用エラーメッセージで弾く） |
   | `confidence_level` | `float` | `0.95` | |
-  | `time` | `str \| None` | `None` | `Some`なら2-way（entity+time）、`None`なら1-way。`cov_type="hac"`時のDK時系列順序としても使われる（`time_col`未指定の場合） |
+  | `time` | `str \| None` | `None` | `Some`なら2-way（entity+time）、`None`なら1-way。`cov_type="dk"`時のDK時系列順序としても使われる（`time_col`未指定の場合） |
   | `cluster_col` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名。省略時は`entity`をそのまま使う |
   | `time_col` | `str \| None` | `None` | DK HAC専用の時系列順序。`time`とは独立に指定でき、指定時は2-wayでも常にこちらが優先される |
   | `dk_bandwidth` | `int \| None` | `None` | DK HACのバンド幅（時点数`t`ベース、OLSの`hac_lags`とは意味が異なるため別名）。省略時は`floor(4*(t/100)^(2/9))`で自動計算 |
@@ -125,7 +125,7 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
 
 ### 3.3 `cov_type`対応
 
-`FeCovType` enum（`Classical`/`Hc1`/`Hc2`/`Hc3`/`Cluster{groups}`/`Hac{bandwidth, time}`）を
+`FeCovType` enum（`Classical`/`Hc1`/`Hc2`/`Hc3`/`Cluster{groups}`/`Dk{bandwidth, time}`）を
 `OlsEstimator`の`CovType`とは別に新設（HC0を含まない、無効な組み合わせを型で表現不可能にする
 設計）。`OlsEstimator`の既存cov_type計算式はそのまま流用できない——linearmodels/fixestの
 ソース確認・実地数値検証で判明した3点の相違:
@@ -148,22 +148,22 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
 クラスターのデフォルトはentity単位のまま**（`cluster_col`で上書き可能）。2-way clustering
 （entity+time同時）はv1スコープ外。
 
-**Driscoll-Kraay型パネルHAC（`FeCovType::Hac { bandwidth, time }`）**: `linearmodels.panel.
+**Driscoll-Kraay型パネルHAC（`FeCovType::Dk { bandwidth, time }`）**: `linearmodels.panel.
 covariance.DriscollKraay`のソース確認に基づく実装。
 
 1. **カーネルはv1でBartlett限定**（OLSの`CovType::Hac`と平仄を合わせる。Parzen/QSは未対応、
    4章参照）。
 2. **バンド幅**は`linearmodels`のデフォルトルール`floor(4*(t/100)^(2/9))`（`t`=ユニークな
    時点数、OLSの`hac_lags`が観測数`n`ベースなのと違う点に注意）。明示指定は`[0, t)`範囲検証
-   （`PanelError::InvalidHacBandwidth`）。
+   （`PanelError::InvalidDkBandwidth`）。
 3. **時系列順序は`time: Vec<String>`の辞書順とみなす**（ISO 8601日付・ゼロ埋め年度等、
    辞書順=時系列順になる形式で渡すことが呼び出し側の契約。`engine`側にこの契約の
    バリデーションは無い）。
-4. **1-way/2-way両対応**。1-way FEで`FeCovType::Hac`を指定したのに時系列順序が一切ない
-   （`time`も`time_col`も未指定）なら`PanelError::HacRequiresTime`。
+4. **1-way/2-way両対応**。1-way FEで`FeCovType::Dk`を指定したのに時系列順序が一切ない
+   （`time`も`time_col`も未指定）なら`PanelError::DkRequiresTime`。
 5. スケールは`(n/df_resid) × (X̃'X̃)⁻¹ Ŝ (X̃'X̃)⁻¹`（linearmodelsは`cov_type="kernel"`で常に
    `extra_df=neffects`かつデフォルト`debiased=True`のため、素直に`df_resid`と一致する）。
-6. **`FeCovType::Hac.time`による明示的な上書き**: `time`が`Some`（`FEOptions.time_col`由来）
+6. **`FeCovType::Dk.time`による明示的な上書き**: `time`が`Some`（`FEOptions.time_col`由来）
    なら`FeInput.time()`より優先してDK計算に使う（`time`未指定の1-way FEでもこれだけでDK HAC
    が成立する）。
 
@@ -214,7 +214,7 @@ demeanしたR²」を3種とも定義すると誤る）:
 
 | `PanelError` | Python例外 |
 |---|---|
-| `Common(...)` / `TwoWayRequiresTime` / `UnbalancedPanelForTwoWay` / `SingletonGroup` / `ZeroVarianceRegressor` / `InvalidHacBandwidth` / `HacRequiresTime` | `ValidationError` |
+| `Common(...)` / `TwoWayRequiresTime` / `UnbalancedPanelForTwoWay` / `SingletonGroup` / `ZeroVarianceRegressor` / `InvalidDkBandwidth` / `DkRequiresTime` | `ValidationError` |
 | `InsufficientDegreesOfFreedom` / `WithinRegressionFailed` / `FTestFailed` | `ComputationError` |
 
 `PanelError`はFE/REで共有し、`FeError`/`ReError`は個別に作らない。**engine側に新バリアントを

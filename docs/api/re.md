@@ -10,8 +10,8 @@ supports entity-direction random effects only; two-way RE is not implemented.
 
 `REOptions.cov_type` defaults to `"cluster"` (clustered on `entity`), the same departure from
 OLS's `"classical"` default that [FE](fe.md#standard-error-types) makes, and for the same
-reason. Supported values are `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"`, and `"hac"` —
-`"hc0"` is not supported. `"hac"` is the same Driscoll-Kraay panel estimator FE uses, ordered by
+reason. Supported values are `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"`, and `"dk"` —
+`"hc0"` is not supported. `"dk"` is the same Driscoll-Kraay panel estimator FE uses, ordered by
 `REOptions.time`; unlike `FEOptions`, there is no separate `time_col` since RE has no two-way
 structure to disambiguate from the HAC time granularity.
 

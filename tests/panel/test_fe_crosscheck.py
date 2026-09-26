@@ -23,13 +23,13 @@ classical/hc1/hc2/hc3はfixestと機械精度で一致する（実測相対誤�
 - **2-way FEのr_squared_within**: `linearmodels`自身がentityのみdemeanの
   別定義を使うため、fixestの`fitstat(m, "wr2")`のみで検証する。
 
-## hacを含まない理由
+## dkを含まない理由
 
-`cov_type="hac"`（Driscoll-Kraay）はfixestの`vcov="DK"`の既定バンド幅公式・
+`cov_type="dk"`（Driscoll-Kraay）はfixestの`vcov="DK"`の既定バンド幅公式・
 小標本補正の慣行が本実装・linearmodelsと異なり、明示的にバンド幅を揃えても
 標準誤差が実用的な許容誤差でも一致しないため、`linearmodels`のみを参照実装
 とする単一参照実装の例外として扱う（ユーザー確認済み）。
-`fe_crosscheck.json`にはhacのキー自体が存在しない。
+`fe_crosscheck.json`にはdkのキー自体が存在しない。
 
 役割分担:
     - 構造・API・`fixed_effects()`: `test_fe_api.py`

@@ -2,7 +2,7 @@
 
 `tests/fixtures/benchmarks/fe.json`（`benchmark/panel/fixtures/
 generate_fe_fixtures.py`で生成）を読み込み、合成データ6シナリオ×classical/
-hc1/cluster/hac × 1-way/2-way（`unbalanced`のみ1-way限定）で、係数・標準
+hc1/cluster/dk × 1-way/2-way（`unbalanced`のみ1-way限定）で、係数・標準
 誤差・検定統計量・適合度統計量を相対誤差1e-8で厳密比較する。Wooldridge実
 データ（wagepan）も同じフィクスチャ経由で検証する。
 
@@ -61,7 +61,7 @@ ATOL = TOLERANCES["fe_reference"]["atol"]
 ALL_SCENARIOS = ONE_WAY_ONLY_SCENARIOS + TWO_WAY_SCENARIOS
 
 # シナリオごとに検証するcov_type一覧を組み立てる（既定はCOV_TYPES、
-# many_regressorsのみhacを除く、`generate_fe_fixtures.py`のSCENARIO_COV_TYPES
+# many_regressorsのみdkを除く、`generate_fe_fixtures.py`のSCENARIO_COV_TYPES
 # 参照）。
 
 
@@ -144,7 +144,7 @@ def test_matches_linearmodels_one_way(fixtures, scenario, cov_type):
     """
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
-    kwargs = {"time_col": "time"} if cov_type == "hac" else {}
+    kwargs = {"time_col": "time"} if cov_type == "dk" else {}
     options = FEOptions(cov_type=cov_type, **kwargs)
     res = FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
 

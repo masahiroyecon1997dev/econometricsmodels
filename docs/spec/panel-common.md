@@ -21,7 +21,7 @@ Swamy-Arora分散成分推定の具体式、固定効果の復元等）は[`fe-s
     担保する。
   - **`FEOptions.time`と`FEOptions.time_col`は別物**: `time`は2-way FE（固定効果構造）を
     指定するbareフィールドで、`Some`なら常に2-way・`None`なら1-way。Driscoll-Kraay型HAC
-    （`cov_type="hac"`）専用の時系列順序は別フィールド`time_col`（`str | None`、
+    （`cov_type="dk"`）専用の時系列順序は別フィールド`time_col`（`str | None`、
     `OLSOptions.cluster_col`/`time_col`と同じ「補助列」命名規則）で指定する。1-way FE +
     DK HAC（`time`未指定だが時系列順序だけ要る）という組み合わせを表現するために導入した
     ——`time`の有無だけで1-way/2-wayを決める設計（ブールフラグ等の追加無し）にすると、
@@ -29,7 +29,7 @@ Swamy-Arora分散成分推定の具体式、固定効果の復元等）は[`fe-s
     **`time_col`は2-way（`time`指定あり）でも常に優先される**——「2-way FEの固定効果構造に
     使う時点粒度」と「DK HACカーネルに使う時系列粒度」が異なるケースにも対応するための設計。
     `time_col`未指定なら`time`（2-way）にフォールバックし、どちらも`None`なら（1-way FEで
-    `cov_type="hac"`のとき）`PanelError::HacRequiresTime`。engine側は`FeCovType::Hac {
+    `cov_type="dk"`のとき）`PanelError::DkRequiresTime`。engine側は`FeCovType::Dk {
     bandwidth, time: Option<Vec<String>> }`（`time`が優先の上書き値）として実装
     （`engine/src/panel/fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
 - **命名規則**: `entity`/`time`は**bareネーミング**（`_col`サフィックスなし）を採用する。
@@ -111,11 +111,11 @@ OLS（`OLSResult`、`engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
 
 ### 3.1 `cov_type`のサポート対象
 
-`classical` / `hc0`〜`hc3` / `cluster` / `hac`をすべて実装する予定だったが、**`hc0`は
+`classical` / `hc0`〜`hc3` / `cluster` / `dk`（当初の名前は`hac`。OLSの`hac`と別の推定量のため改名）をすべて実装する予定だったが、**`hc0`は
 スコープ外とすることが判明した**（linearmodels・fixestともにパネル/FE向けの`hc0`オプションが
 存在しないため、`FeCovType` enumは`Hc1`/`Hc2`/`Hc3`のみを持つ。詳細・数式は
 `engine/src/panel/fe.rs`モジュールdoc「`cov_type`対応」参照）。以下`hc0`を除く
-`classical`/`hc1`〜`hc3`/`cluster`/`hac`が実装対象。ただし**`hac`はOLSの実装を
+`classical`/`hc1`〜`hc3`/`cluster`/`dk`が実装対象。ただし**`dk`はOLSの`hac`の実装を
 そのまま流用しない**。OLSの`hac`はグローバルな時系列順序（`time_col`）に対する単純な
 Newey-West型HACだが、これをパネルにそのまま適用すると異なるエンティティの観測を単一の
 時系列カーネルに混ぜてしまい、経済学的に不正確になる。パネル用に**Driscoll-Kraay型の

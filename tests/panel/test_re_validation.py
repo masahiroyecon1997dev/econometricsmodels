@@ -364,7 +364,7 @@ def test_quasi_demeaned_regression_fails_when_sigma2_eps_is_zero():
 # ── ValidationError（オプション） ──────────────────────────────────
 
 
-@pytest.mark.parametrize("cov_type", ["invalid", ""])
+@pytest.mark.parametrize("cov_type", ["invalid", "", "hac"])
 def test_unknown_cov_type_raises(fe_dataset, cov_type):
     """`unknown cov_type`の文言はFEと一字一句同じ（`UNKNOWN_COV_TYPE_FE`を
     流用、`_error_messages.py`のコメント参照）。
@@ -398,22 +398,22 @@ def test_invalid_confidence_level_raises(fe_dataset, confidence_level):
         our_fit_re(fe_dataset, options=options)
 
 
-def test_hac_requires_time_raises(fe_dataset):
+def test_dk_requires_time_raises(fe_dataset):
     """`REOptions`には`FEOptions.time_col`に相当する分離フィールドが無く、
     `time`のみでHAC時系列順序を兼ねる（`engine_pybind/src/panel/re.rs`
     モジュールdoc「`REOptions`に`time_col`が無い理由」参照）。
     """
-    options = REOptions(cov_type="hac")
-    with pytest.raises(ValidationError, match=escaped(msgs.HAC_REQUIRES_TIME)):
+    options = REOptions(cov_type="dk")
+    with pytest.raises(ValidationError, match=escaped(msgs.DK_REQUIRES_TIME)):
         our_fit_re(fe_dataset, options=options)
 
 
 @pytest.mark.parametrize("dk_bandwidth", [-1, 6])  # t=6（fe_datasetの時点数）
-def test_invalid_hac_bandwidth_raises(fe_dataset, dk_bandwidth):
-    options = REOptions(cov_type="hac", time="time", dk_bandwidth=dk_bandwidth)
+def test_invalid_dk_bandwidth_raises(fe_dataset, dk_bandwidth):
+    options = REOptions(cov_type="dk", time="time", dk_bandwidth=dk_bandwidth)
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.INVALID_HAC_BANDWIDTH, bandwidth=dk_bandwidth, t=6),
+        match=escaped(msgs.INVALID_DK_BANDWIDTH, bandwidth=dk_bandwidth, t=6),
     ):
         our_fit_re(fe_dataset, options=options)
 

@@ -453,7 +453,7 @@ def test_zero_variance_after_demeaning_raises():
 # ── ValidationError（オプション） ──────────────────────────────────
 
 
-@pytest.mark.parametrize("cov_type", ["invalid", ""])
+@pytest.mark.parametrize("cov_type", ["invalid", "", "hac"])
 def test_unknown_cov_type_raises(fe_dataset, cov_type):
     options = FEOptions(cov_type=cov_type)
     with pytest.raises(
@@ -488,24 +488,24 @@ def test_invalid_confidence_level_raises(fe_dataset, confidence_level):
         our_fit(fe_dataset, options=options)
 
 
-def test_hac_requires_time_raises(fe_dataset):
-    """1-way（`time`未指定）で`cov_type="hac"`かつ`time_col`も未指定だと
-    `PanelError::HacRequiresTime`。
+def test_dk_requires_time_raises(fe_dataset):
+    """1-way（`time`未指定）で`cov_type="dk"`かつ`time_col`も未指定だと
+    `PanelError::DkRequiresTime`。
     """
-    options = FEOptions(cov_type="hac")
-    with pytest.raises(ValidationError, match=escaped(msgs.HAC_REQUIRES_TIME)):
+    options = FEOptions(cov_type="dk")
+    with pytest.raises(ValidationError, match=escaped(msgs.DK_REQUIRES_TIME)):
         our_fit(fe_dataset, options=options)
 
 
 @pytest.mark.parametrize("dk_bandwidth", [-1, 6])  # t=6（fe_datasetの時点数）
-def test_invalid_hac_bandwidth_raises(fe_dataset, dk_bandwidth):
+def test_invalid_dk_bandwidth_raises(fe_dataset, dk_bandwidth):
     """`dk_bandwidth`は`[0, t)`の範囲外（`t`=時点数、上限は`>=t`で無効）。"""
     options = FEOptions(
-        cov_type="hac", time_col="time", dk_bandwidth=dk_bandwidth
+        cov_type="dk", time_col="time", dk_bandwidth=dk_bandwidth
     )
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.INVALID_HAC_BANDWIDTH, bandwidth=dk_bandwidth, t=6),
+        match=escaped(msgs.INVALID_DK_BANDWIDTH, bandwidth=dk_bandwidth, t=6),
     ):
         our_fit(fe_dataset, options=options)
 

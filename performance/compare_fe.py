@@ -30,10 +30,10 @@ n=1,000 → n_entities=166 → 実際は996観測）。性能比較の目的は�
 ## cov_type の範囲
 
 `.claude/rules/testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」に
-従い、代表2点のみ計測する。FEの`classical`/`hc1`/`hc2`/`hc3`/`cluster`/`hac`を
-n_entities=16,666・n_periods=6・k=5で実測した結果、`hac`（Driscoll-Kraay）が
+従い、代表2点のみ計測する。FEの`classical`/`hc1`/`hc2`/`hc3`/`cluster`/`dk`を
+n_entities=16,666・n_periods=6・k=5で実測した結果、`dk`（Driscoll-Kraay）が
 最重量（中央値91.6ms、classicalの82.3msに対し+11%）だったため、`classical`と
-`hac`を採用する（OLS/WLS/IVと同じ組み合わせ）。DKのバンド幅は時点数`T`ベース
+`dk`を採用する（OLS/WLS/IVと同じ組み合わせ）。DKのバンド幅は時点数`T`ベース
 （`engine::panel::fe::resolve_dk_bandwidth`）であり、ハーネスの`ctx.hac_lags`は
 総観測数`n`ベース（Newey-West用）で基準が異なるため使わない——
 `hac_auto_lag(_N_PERIODS_FIXED)`をモジュール定数として別途計算し、engine・
@@ -51,17 +51,17 @@ n=n_sweep[-1]）だけ追加計測する（`default_method="one_way"`,
 
 ## k軸はclassicalのみ計測する（`k_sweep_cov_types`）
 
-DK HAC（`cov_type="hac"`）のバンド幅は時点数`T`ベース（`_N_PERIODS_FIXED=6`・
+DK HAC（`cov_type="dk"`）のバンド幅は時点数`T`ベース（`_N_PERIODS_FIXED=6`・
 バンド幅2）だが、k軸スイープの`k=20`（`k_sweep=(5, 20)`は全手法共通の既定値）で
 実測すると、F検定用の共分散行列の部分行列がほぼ特異になり
 `ComputationError`で失敗することが判明した（`T=6`に対して`k=20`は次元過多——
 DKの`S`行列はバンド幅内の時点ペアからの寄与の和で、実効ランクが時点数`T`に
-制約されるため）。RE（`compare_re.py`）は同じ`k=20`・`hac`で問題なく成功する
+制約されるため）。RE（`compare_re.py`）は同じ`k=20`・`dk`で問題なく成功する
 ——RE自身のF統計量はFEの`wald_f_test`（部分行列の反転）とは異なる定義
 （変換済みyの単純平均を基準にしたSST/SSR比較）を使うため、この特異性の
 影響を受けない（`docs/spec/re-spec.md`3.5節参照）。
 FEのみ`k_sweep_cov_types=("classical",)`でk軸のcov_typeをclassicalに絞る
-（n軸はk=5固定のため`hac`込みで問題なく計測できる。`_perf_harness.py`の
+（n軸はk=5固定のため`dk`込みで問題なく計測できる。`_perf_harness.py`の
 `PerfAdapter.k_sweep_cov_types`参照）。
 
 ## MultiIndex構築は計測区間の外（ハーネス拡張）
@@ -91,7 +91,7 @@ FEのみ`k_sweep_cov_types=("classical",)`でk軸のcov_typeをclassicalに絞�
     # 単体計測（デバッグ用）。一括実行と条件を揃えるにはスレッド数を1に固定する。
     RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \\
         python -m performance.compare_fe \\
-        --worker --library engine --cov-type hac --n 10000 --k 5 --method one_way
+        --worker --library engine --cov-type dk --n 10000 --k 5 --method one_way
 """
 
 from __future__ import annotations
@@ -150,9 +150,9 @@ def _fit_once_engine(ctx: FitContext):
         options = FEOptions(
             cov_type="classical", time=_TIME_COL if two_way else None
         )
-    elif ctx.cov_type == "hac":
+    elif ctx.cov_type == "dk":
         options = FEOptions(
-            cov_type="hac",
+            cov_type="dk",
             time=_TIME_COL if two_way else None,
             time_col=_TIME_COL,
             dk_bandwidth=_DK_BANDWIDTH,
@@ -176,7 +176,7 @@ def _fit_once_linearmodels(ctx: FitContext):
     )
     if ctx.cov_type == "classical":
         lm_cov_type, cov_config = "unadjusted", {"debiased": True}
-    elif ctx.cov_type == "hac":
+    elif ctx.cov_type == "dk":
         lm_cov_type, cov_config = (
             "kernel",
             {
@@ -216,7 +216,7 @@ FE_ADAPTER = PerfAdapter(
     method="fe",
     module="performance.compare_fe",
     libraries=("engine", "linearmodels"),
-    cov_types=("classical", "hac"),
+    cov_types=("classical", "dk"),
     reference_versions=lambda: {
         "linearmodels_version": linearmodels.__version__
     },

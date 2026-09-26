@@ -26,7 +26,7 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/panel/freeze.py`参
 | classical        | unadjusted             | |
 | hc1              | robust                 | |
 | cluster          | clustered              | `cluster_col`省略時は`entity`列を使う |
-| hac              | kernel (bartlett)      | Driscoll-Kraay相当（`panel_effects=True`は不要、`PanelOLS`が自動判定） |
+| dk               | kernel (bartlett)      | Driscoll-Kraay相当（`panel_effects=True`は不要、`PanelOLS`が自動判定） |
 
 **`hc2`/`hc3`は対象外**: `linearmodels.PanelOLS`はパネル向けの`HC2`/`HC3`を
 提供しない（`'unadjusted'/'robust'/'clustered'/'kernel'`のみ、指定すると
@@ -147,7 +147,7 @@ _COV_TYPE_MAP: dict[str, str] = {
     "classical": "unadjusted",
     "hc1": "robust",
     "cluster": "clustered",
-    "hac": "kernel",
+    "dk": "kernel",
 }
 
 
@@ -164,7 +164,7 @@ def _build_panel_index(
         # PanelOLS/RandomEffectsはMultiIndex(entity, time)を要求するため、
         # timeを使わない場合でもダミーの時点列（観測順の連番、エンティティ内で
         # 重複しない値）が要る。不均衡パネルではエンティティごとの観測数T_iが
-        # 異なりこのダミー順序が真の時点と対応しなくなる（cov_type="hac"の
+        # 異なりこのダミー順序が真の時点と対応しなくなる（cov_type="dk"の
         # バンド幅・カーネル計算が不正確になる）ため、`time_col`が実在する
         # データでは常にそちらを渡すこと（`generate_fe_fixtures.py`参照）。
         pdf = df.to_pandas()
@@ -213,7 +213,7 @@ def _build_cov_config(
         else:
             clusters = df[cluster_key].to_numpy()
         cov_config["clusters"] = pd.Series(clusters, index=pdf.index)
-    elif cov_type == "hac":
+    elif cov_type == "dk":
         t_for_bandwidth = (
             n_periods if n_periods is not None else df.height // n_entities
         )
@@ -248,13 +248,13 @@ def run(
         dataset: シナリオ名（`dataset_source="synthetic"`）またはWooldridge
             データセット名（`dataset_source="wooldridge"`）。
         x_cols: 説明変数の列名リスト。
-        cov_type: "classical" / "hc1" / "cluster" / "hac"（hc2/hc3は対象外、
+        cov_type: "classical" / "hc1" / "cluster" / "dk"（hc2/hc3は対象外、
             モジュールdocstring参照）。
         entity_col: エンティティ識別子の列名。
         time_col: 時点識別子の列名。**`two_way`とは独立**（本実装の`time`
             〔2-way構造〕と`time_col`〔HAC専用の時系列順序〕の分離と同じ
             発想、モジュールdoc「`cov_type`の対応関係」参照）。指定すれば
-            その列でMultiIndexの時点次元を構築し、`cov_type="hac"`の
+            その列でMultiIndexの時点次元を構築し、`cov_type="dk"`の
             カーネル計算・バンド幅の`t`にも使う。`None`なら観測順の連番
             （エンティティ内で重複しない値）をダミーで使う——`two_way=True`
             と`time_col=None`の組み合わせは意味を持たないため呼び出し側で
@@ -264,7 +264,7 @@ def run(
             としてのみ使われ、時点固定効果自体は推定しない）。
         cluster_col: `cov_type="cluster"`のときのクラスター列名。`None`なら
             `entity_col`を使う（本実装の既定挙動と同じ、3.2節）。
-        hac_bandwidth: `cov_type="hac"`のときのバンド幅。`None`なら
+        hac_bandwidth: `cov_type="dk"`のときのバンド幅。`None`なら
             `hac_auto_lag`（`floor(4*(t/100)^(2/9))`、`t`=時点数）で自動計算する
             （本実装の既定バンド幅式と同じ、`resolve_dk_bandwidth`参照）。
         confidence_level: 信頼区間の信頼水準。
@@ -376,14 +376,14 @@ def run_re(
         dataset: シナリオ名（`dataset_source="synthetic"`）またはWooldridge
             データセット名（`dataset_source="wooldridge"`）。
         x_cols: 説明変数の列名リスト。
-        cov_type: "classical" / "hc1" / "cluster" / "hac"（hc2/hc3は対象外、
+        cov_type: "classical" / "hc1" / "cluster" / "dk"（hc2/hc3は対象外、
             モジュールdocstring参照）。
         entity_col: エンティティ識別子の列名。
         time_col: 時点識別子の列名。`None`なら観測順の連番をダミーで使う
             （`run()`と同じ、`_build_panel_index`参照）。
         cluster_col: `cov_type="cluster"`のときのクラスター列名。`None`なら
             `entity_col`を使う。
-        hac_bandwidth: `cov_type="hac"`のときのバンド幅。`None`なら自動計算。
+        hac_bandwidth: `cov_type="dk"`のときのバンド幅。`None`なら自動計算。
         confidence_level: 信頼区間の信頼水準。
         dataset_source: "synthetic" または "wooldridge"。
         y_col: 被説明変数の列名。

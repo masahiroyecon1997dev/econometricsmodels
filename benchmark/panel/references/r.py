@@ -52,7 +52,7 @@ def run_fixest_r(
         formula: `feols`の固定効果構文込みの回帰式（例: "y ~ x1 + x2 | entity"、
             2-wayは"y ~ x1 + x2 | entity + time"）。
         cov_type: classical / hc1 / hc2 / hc3 / cluster
-            （hacは対象外、`run_fixest_benchmark.R`のモジュールコメント参照）。
+            （dkは対象外、`run_fixest_benchmark.R`のモジュールコメント参照）。
         cluster_col: `cov_type="cluster"`のときのクラスター列名。
     """
     extra: list[str] = []

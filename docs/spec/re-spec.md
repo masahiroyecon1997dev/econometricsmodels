@@ -19,13 +19,13 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
 
   | フィールド | 型 | デフォルト | 説明 |
   |---|---|---|---|
-  | `cov_type` | `str` | `"cluster"` | `"classical"` / `"hc1"`〜`"hc3"` / `"cluster"` / `"hac"`（大小無視）。`"hc0"`は非対応 |
+  | `cov_type` | `str` | `"cluster"` | `"classical"` / `"hc1"`〜`"hc3"` / `"cluster"` / `"dk"`（大小無視）。`"hc0"`は非対応 |
   | `confidence_level` | `float` | `0.95` | |
-  | `time` | `str \| None` | `None` | RE自身の準偏差変換はentity方向のみで`time`を使わないが、`cov_type="hac"`時のDK時系列順序、およびハウスマン検定用の内部FE呼び出しの1-way/2-way選択（`Some`なら2-way）を兼ねる |
+  | `time` | `str \| None` | `None` | RE自身の準偏差変換はentity方向のみで`time`を使わないが、`cov_type="dk"`時のDK時系列順序、およびハウスマン検定用の内部FE呼び出しの1-way/2-way選択（`Some`なら2-way）を兼ねる |
   | `cluster_col` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名。省略時は`entity`をそのまま使う |
   | `dk_bandwidth` | `int \| None` | `None` | DK HACのバンド幅。省略時は自動計算 |
 
-- **`FEOptions`と異なり`time_col`が無い**: `ReCovType::Hac`は`FeCovType::Hac`と違い`time`
+- **`FEOptions`と異なり`time_col`が無い**: `ReCovType::Dk`は`FeCovType::Dk`と違い`time`
   オーバーライドフィールドを持たない。REは2-way構造自体を持たないため、「2-way FEの固定効果
   構造」と「DK HACの時系列粒度」を分離する必要が無く、`REOptions.time`1フィールドで
   「HAC時系列順序」と「ハウスマン検定用内部FE呼び出しの1-way/2-way選択」を兼ねる。
@@ -148,7 +148,7 @@ FE実装時（`panel::fe`）のcov_type計算関数（`design_matrix_from_column
   type="HC2"/"HC3")`をクロスチェックに使う。`plm`は変量効果の分散成分推定法が
   `linearmodels`と僅かに異なる（点推定自体が僅かに違う）ため、Classical/HC1/Cluster/HAC
   ほどの精度ではなくクロスチェック水準で検証する（4章参照）。
-- `ReCovType::Cluster`の`q`（傾き係数の数、切片を除く）は`df_model - 1`。`ReCovType::Hac`は
+- `ReCovType::Cluster`の`q`（傾き係数の数、切片を除く）は`df_model - 1`。`ReCovType::Dk`は
   `time`オーバーライドフィールドを持たない（RE自身が2-way構造を持たないため）。
 
 ### 3.5 F統計量

@@ -20,10 +20,10 @@ effects require a balanced panel; an unbalanced panel with `time` set raises a
 a deliberate departure from [OLS's default](../getting-started.md#switching-the-type-of-standard-error),
 following the same convention as `fixest`: panel data almost always has within-entity serial
 correlation, and defaulting to a robust-but-not-clustered type would understate it. Supported
-values are `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"`, and `"hac"` — `"hc0"` is **not**
+values are `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"`, and `"dk"` — `"hc0"` is **not**
 supported (neither `linearmodels` nor `fixest` offer it for panel/FE models).
 
-`"hac"` is not the same Newey-West estimator as OLS's: it is a **Driscoll-Kraay** panel HAC
+`"dk"` is not the same Newey-West estimator as OLS's: it is a **Driscoll-Kraay** panel HAC
 estimator (`fixest`'s `vcov="DK"`, Stata's `xtscc`), which is robust to both cross-entity and
 within-entity correlation. Its time ordering comes from `FEOptions.time` by default, or from
 `FEOptions.time_col` when set (`time_col` always takes priority, letting the fixed effects

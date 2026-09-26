@@ -2,7 +2,7 @@
 
 `tests/fixtures/benchmarks/re.json`（`benchmark/panel/fixtures/
 generate_re_fixtures.py`で生成）を読み込み、合成データ6シナリオ×classical/
-hc1/cluster/hac で、係数・標準誤差・検定統計量・適合度統計量を相対誤差1e-8で
+hc1/cluster/dk で、係数・標準誤差・検定統計量・適合度統計量を相対誤差1e-8で
 厳密比較する。Wooldridge実データ（wagepan）も同じフィクスチャ経由で検証する。
 
 役割分担:
@@ -103,16 +103,16 @@ def _check_result(res, ref: dict, label: str) -> None:
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 @pytest.mark.parametrize("scenario", NUMERIC_SCENARIOS)
 def test_matches_linearmodels(fixtures, scenario, cov_type):
-    """`hac`は`time`（内部FE呼び出しの1-way/2-way選択とは無関係、`REOptions`
+    """`dk`は`time`（内部FE呼び出しの1-way/2-way選択とは無関係、`REOptions`
     には`time_col`が独立に無い。`FEOptions`と違い、REの`REOptions.time`は
-    HAC時系列順序と内部FE1-way/2-way選択を兼ねる1フィールドのため、`hac`
+    HAC時系列順序と内部FE1-way/2-way選択を兼ねる1フィールドのため、`dk`
     ケースでも常に`time="time"`を渡す。本フィクスチャの数値比較は`REOptions.
     time`の値に依存しない（係数・標準誤差はtimeを使わないため、
     `_re_helpers`・`engine/src/panel/CLAUDE.md`参照）。
     """
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
-    kwargs = {"time": "time"} if cov_type == "hac" else {}
+    kwargs = {"time": "time"} if cov_type == "dk" else {}
     options = REOptions(cov_type=cov_type, **kwargs)
     res = RE(df, y="y", x=x_cols, entity="entity", options=options).fit()
 

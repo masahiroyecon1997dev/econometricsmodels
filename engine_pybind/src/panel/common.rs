@@ -23,8 +23,8 @@ use crate::linear::common::least_squares_error_is_computation_error;
 /// - `Common`: `common_error_to_pyerr`へ委譲。
 /// - FE/RE固有のバリデーションエラー（`IdentifierDimensionMismatch`・
 ///   `InsufficientDegreesOfFreedom`・`SingletonGroup`・`UnbalancedPanelForTwoWay`・
-///   `ZeroVarianceAfterDemeaning`・`TwoWayRequiresTime`・`HacRequiresTime`・
-///   `InvalidHacBandwidth`）はいずれも入力・オプションの不正なので`ValidationError`。
+///   `ZeroVarianceAfterDemeaning`・`TwoWayRequiresTime`・`DkRequiresTime`・
+///   `InvalidDkBandwidth`）はいずれも入力・オプションの不正なので`ValidationError`。
 /// - `WithinRegressionFailed`・`FTestFailed`・`BetweenRegressionFailed`・
 ///   `QuasiDemeanedRegressionFailed`: 委譲先の`LeastSquaresError`の分類基準
 ///   （`least_squares_error_is_computation_error`）にそのまま従う。`IvError::
@@ -53,8 +53,8 @@ pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
         | PanelError::UnbalancedPanelForTwoWay { .. }
         | PanelError::ZeroVarianceAfterDemeaning { .. }
         | PanelError::TwoWayRequiresTime
-        | PanelError::HacRequiresTime
-        | PanelError::InvalidHacBandwidth { .. } => ValidationError::new_err(message),
+        | PanelError::DkRequiresTime
+        | PanelError::InvalidDkBandwidth { .. } => ValidationError::new_err(message),
         PanelError::WithinRegressionFailed { source }
         | PanelError::FTestFailed { source }
         | PanelError::BetweenRegressionFailed { source }

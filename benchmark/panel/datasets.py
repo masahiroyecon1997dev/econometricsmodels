@@ -202,7 +202,7 @@ def _cross_sectionally_correlated_errors(
     """時点tに共通のショック（全エンティティに同時に効く）+ 固有ノイズ。
 
     cluster(entity)はエンティティ内相関には頑健だがエンティティ間の同時点
-    相関には対応できず、Driscoll-Kraay HAC（`cov_type="hac"`）が必要になる
+    相関には対応できず、Driscoll-Kraay HAC（`cov_type="dk"`）が必要になる
     典型例（panel-common.md 3.1節の設計動機そのもの）。
     """
     common_shock = rng.normal(0.0, _CROSS_SECTIONAL_SHOCK_SD, size=n_periods)

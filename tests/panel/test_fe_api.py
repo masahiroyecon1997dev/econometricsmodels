@@ -144,15 +144,15 @@ def test_fixed_effects_two_way_structure(fe_dataset):
         ("HC2", "hc2"),
         ("hc3", "hc3"),
         ("Cluster", "cluster"),
-        ("HAC", "hac"),
+        ("DK", "dk"),
     ],
 )
 def test_cov_type_is_case_insensitive(fe_dataset, cov_type, expected_label):
-    """`hac`は`time`/`time_col`いずれか無いと`HacRequiresTime`になるため、
+    """`dk`は`time`/`time_col`いずれか無いと`DkRequiresTime`になるため、
     1-way維持のまま`time_col`だけ渡す（`test_fe_validation.py`
-    `test_hac_requires_time_raises`と対照）。
+    `test_dk_requires_time_raises`と対照）。
     """
-    kwargs = {"time_col": "time"} if expected_label == "hac" else {}
+    kwargs = {"time_col": "time"} if expected_label == "dk" else {}
     options = FEOptions(cov_type=cov_type, **kwargs)
     res = our_fit(fe_dataset, options=options)
     assert res.cov_type == expected_label
@@ -204,7 +204,7 @@ def test_dk_bandwidth_zero_succeeds(fe_dataset):
     """`dk_bandwidth=0`（ラグ項なし）も有効な範囲`[0, t)`として受理される
     （engine/src/panel/CLAUDE.md「Driscoll-Kraay型パネルHAC対応」参照）。
     """
-    options = FEOptions(cov_type="hac", time="time", dk_bandwidth=0)
+    options = FEOptions(cov_type="dk", time="time", dk_bandwidth=0)
     res = our_fit(fe_dataset, options=options)
     assert all(se > 0.0 for se in res.std_errors.values())
 

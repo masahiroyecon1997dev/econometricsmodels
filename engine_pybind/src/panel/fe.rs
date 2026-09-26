@@ -33,9 +33,9 @@
 //!
 //! `time`（bareネーミング）は2-way FE（entity + time FE）の指定に使う: `Some`なら2-way・
 //! `None`なら1-way。`time_col`（OLSの`cluster_col`/`time_col`と同じ「補助列」命名規則）は
-//! Driscoll-Kraay型HAC（`cov_type="hac"`）専用の時系列順序で、`time`とは独立に指定できる
+//! Driscoll-Kraay型HAC（`cov_type="dk"`）専用の時系列順序で、`time`とは独立に指定できる
 //! （ユーザー確認済み、2026-09-12）。**`time_col`が指定されていれば、2-way（`time`指定あり）
-//! でも常にこちらがDK計算に優先される**（`time`未指定なら`FeCovType::Hac.time`の上書きが
+//! でも常にこちらがDK計算に優先される**（`time`未指定なら`FeCovType::Dk.time`の上書きが
 //! `None`になり`FeInput.time()`——`time`から構築——にフォールバックする、`parse_fe_cov_type`
 //! 参照）。1-way FE + DK HAC（`time`未指定・`time_col`のみ指定）を表現するために導入した
 //! 設計（詳細な経緯・engine側の対応する変更は`engine/src/panel/fe.rs`モジュールdoc
@@ -50,7 +50,7 @@
 //! parse_iv_cov_type`という）別実装を持っていたが、`OLSOptions`/`IVOptions`が同名
 //! フィールドを持つ偶然の一致により後から`linear::common::parse_cov_type`へ統合された
 //! ——FEはこの一致が無く
-//! （`hc0`非対応・`Hac`の意味論がFE固有）、意図的に独立実装を維持している点でIVとは事情が
+//! （`hc0`非対応・`Dk`の意味論がFE固有）、意図的に独立実装を維持している点でIVとは事情が
 //! 異なる。
 //!
 //! ## `x`の空リストを許容しない
@@ -93,7 +93,7 @@ use crate::validation::{
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct FEOptions {
-    /// Standard error type: one of "classical", "hc1", "hc2", "hc3", "cluster", "hac".
+    /// Standard error type: one of "classical", "hc1", "hc2", "hc3", "cluster", "dk".
     /// Case-insensitive. Unlike OLS/WLS/IV, "hc0" is **not** supported (neither
     /// linearmodels nor fixest offer it for panel/FE regressions).
     #[pyo3(get, set)]
@@ -106,7 +106,7 @@ pub struct FEOptions {
 
     /// Column name of the time identifier. When set, requests two-way fixed effects
     /// (entity + time); when `None` (default), one-way (entity only). Also used as the
-    /// Driscoll-Kraay HAC time ordering when `cov_type="hac"`, unless `time_col` is set
+    /// Driscoll-Kraay HAC time ordering when `cov_type="dk"`, unless `time_col` is set
     /// (see `time_col`).
     #[pyo3(get, set)]
     pub time: Option<String>,
@@ -121,13 +121,13 @@ pub struct FEOptions {
     /// (`time` and `time_col` serve different purposes; see the module docstring). When
     /// set, always takes priority over `time` for the HAC computation (even with
     /// two-way effects). When `None`, falls back to `time`. Ignored when `cov_type` is
-    /// not "hac".
+    /// not "dk".
     #[pyo3(get, set)]
     pub time_col: Option<String>,
 
-    /// Bandwidth for Driscoll-Kraay HAC when `cov_type="hac"`. When `None`, computed
+    /// Bandwidth for Driscoll-Kraay HAC when `cov_type="dk"`. When `None`, computed
     /// automatically via `floor(4*(t/100)^(2/9))` (`t` = number of unique time periods).
-    /// Ignored when `cov_type` is not "hac".
+    /// Ignored when `cov_type` is not "dk".
     #[pyo3(get, set)]
     pub dk_bandwidth: Option<i64>,
 }
@@ -232,7 +232,7 @@ pub struct FEResult {
     #[pyo3(get)]
     pub n_entities: usize,
     /// Standard error type actually used (echoes `FEOptions.cov_type`, normalized to
-    /// lowercase; e.g. "classical", "hc1", "cluster", "hac").
+    /// lowercase; e.g. "classical", "hc1", "cluster", "dk").
     #[pyo3(get)]
     pub cov_type: String,
     #[pyo3(get)]
@@ -292,7 +292,7 @@ impl FEResult {
 /// 抽出したうえで`engine::panel::fe::FeCovType`を組み立てる。
 ///
 /// `linear::common::parse_cov_type`（OLS/WLS用）を流用しない理由はモジュールdoc
-/// 「`cov_type`の非対応値」参照（`hc0`が無い・`Hac`の`time`上書きがFE固有のため）。
+/// 「`cov_type`の非対応値」参照（`hc0`が無い・`Dk`の`time`上書きがFE固有のため）。
 ///
 /// # Errors
 /// `cov_type`の文字列が既知の値のいずれでもない場合は`ValidationError`（`hc0`は非対応の
@@ -314,9 +314,9 @@ fn parse_fe_cov_type(df: &DataFrame, options: &FEOptions) -> PyResult<(FeCovType
                 .transpose()?;
             FeCovType::Cluster { groups }
         }
-        "hac" => {
+        "dk" => {
             // `time_col`が優先（モジュールdoc「`FEOptions.time`と`FEOptions.time_col`は
-            // 別物」参照）。`None`なら`FeCovType::Hac.time`も`None`にし、engine側で
+            // 別物」参照）。`None`なら`FeCovType::Dk.time`も`None`にし、engine側で
             // `FeInput.time()`（`time`から構築）へのフォールバックに委ねる
             // （`engine::panel::fe`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
             let time = options
@@ -324,7 +324,7 @@ fn parse_fe_cov_type(df: &DataFrame, options: &FEOptions) -> PyResult<(FeCovType
                 .as_ref()
                 .map(|col_name| extract_group_key_column(df, col_name))
                 .transpose()?;
-            FeCovType::Hac {
+            FeCovType::Dk {
                 bandwidth: options.dk_bandwidth,
                 time,
             }
@@ -338,7 +338,7 @@ fn parse_fe_cov_type(df: &DataFrame, options: &FEOptions) -> PyResult<(FeCovType
         other => {
             return Err(ValidationError::new_err(format!(
                 "unknown cov_type: '{other}'. Expected one of 'classical', 'hc1' through \
-                 'hc3', 'cluster', or 'hac'"
+                 'hc3', 'cluster', or 'dk'"
             )));
         }
     };
@@ -699,7 +699,7 @@ mod tests {
         // （モジュールdoc「`FEOptions.time`と`FEOptions.time_col`は別物」参照）。
         let df = well_formed_df();
         let mut options = default_options();
-        options.cov_type = "hac".to_string();
+        options.cov_type = "dk".to_string();
         options.time_col = Some("t".to_string());
 
         let (input, effects, cov_type, _) = build_fe_input(
@@ -715,7 +715,7 @@ mod tests {
         assert_eq!(input.time(), None); // time_colはFeInput.timeには渡らない
         assert_eq!(
             cov_type,
-            FeCovType::Hac {
+            FeCovType::Dk {
                 bandwidth: None,
                 time: Some(vec![
                     "1".to_string(),
@@ -742,7 +742,7 @@ mod tests {
         )
         .unwrap();
         let mut options = default_options();
-        options.cov_type = "hac".to_string();
+        options.cov_type = "dk".to_string();
         options.time = Some("t".to_string());
         options.time_col = Some("t_fine".to_string());
 
@@ -760,7 +760,7 @@ mod tests {
         assert_eq!(input.time(), Some(expected_time.as_slice()));
         assert_eq!(
             cov_type,
-            FeCovType::Hac {
+            FeCovType::Dk {
                 bandwidth: None,
                 time: Some(vec![
                     "q1".to_string(),
@@ -776,7 +776,7 @@ mod tests {
     fn build_fe_input_hac_falls_back_to_time_when_time_col_is_not_set() {
         let df = well_formed_df();
         let mut options = default_options();
-        options.cov_type = "hac".to_string();
+        options.cov_type = "dk".to_string();
         options.time = Some("t".to_string());
 
         let (_, _, cov_type, _) = build_fe_input(
@@ -790,7 +790,7 @@ mod tests {
 
         assert_eq!(
             cov_type,
-            FeCovType::Hac {
+            FeCovType::Dk {
                 bandwidth: None,
                 time: None,
             },

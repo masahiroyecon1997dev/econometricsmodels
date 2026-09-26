@@ -249,9 +249,9 @@
 //! 持たず、呼び出し側が`FeCovType`を明示的に渡す（`cluster_col`省略時のentity自動
 //! 使用——`FeCovType::Cluster { groups: None }`——のみこのモジュールの責務）。
 //!
-//! ## Driscoll-Kraay型パネルHAC対応（`FeCovType::Hac`、3.1節）
+//! ## Driscoll-Kraay型パネルHAC対応（`FeCovType::Dk`、3.1節）
 //!
-//! OLSの`CovType::Hac`（グローバルな時系列順序に対する単純なNewey-West型）をそのまま
+//! OLSの`CovType::Dk`（グローバルな時系列順序に対する単純なNewey-West型）をそのまま
 //! 流用すると異なるエンティティの観測を単一の時系列カーネルに混ぜてしまい経済学的に
 //! 不正確になるため、別アルゴリズムとして実装する（3.1節）。以下は着手時に
 //! `linearmodels.panel.covariance.DriscollKraay`のソースコードを実地確認し、ユーザー
@@ -267,11 +267,11 @@
 //!   定義しているのを`n_obs - neffects - k = df_resid`（本モジュールの自由度調整と
 //!   同一）に整理したもの。HC1の`n/df_resid`補正と同根（`cov_type`対応節参照）。
 //! - **カーネル**: v1はBartlett（Newey-West）限定（`w_l = 1 - l/(bw+1)`）。OLSの
-//!   `CovType::Hac`もBartlett限定（`docs/spec/ols-spec.md`）であることと平仄を合わせる、
+//!   `CovType::Dk`もBartlett限定（`docs/spec/ols-spec.md`）であることと平仄を合わせる、
 //!   ユーザーとの相談で決定。Parzen・Quadratic-Spectralへの拡張は未着手。
-//! - **バンド幅**: `FeCovType::Hac { bandwidth: Option<i64>, .. }`。`Some(bw)`なら
+//! - **バンド幅**: `FeCovType::Dk { bandwidth: Option<i64>, .. }`。`Some(bw)`なら
 //!   `0 <= bw < t`（`t`=ユニークな時点数）を検証してそのまま使う
-//!   （`PanelError::InvalidHacBandwidth`）。`None`なら`floor(4*(t/100)^(2/9))`で自動計算
+//!   （`PanelError::InvalidDkBandwidth`）。`None`なら`floor(4*(t/100)^(2/9))`で自動計算
 //!   する（`resolve_dk_bandwidth`）——`linearmodels`の`DriscollKraay`のデフォルト
 //!   ルールと同一の式だが、**OLSの`hac_lags`が観測数`n`ベースなのに対しDKは時点数`t`
 //!   ベース**である点に注意（`linearmodels`もこのデフォルトルールでは`kernel_optimal_
@@ -288,21 +288,21 @@
 //!   （`fe_cluster_cov_params`と同じ「グループ間加算の順序依存を避ける」理由に加え、
 //!   `BTreeMap`のキー順序＝辞書順がそのまま時系列順になる一石二鳥の実装）。
 //! - **1-way/2-wayとも対応**（ユーザーとの相談で決定）。2-way FEは`within_transform_
-//!   two_way`が既に`time`必須を担保しているが、**1-way FEで`FeCovType::Hac`を指定した
-//!   のに`time`が`None`の場合は`PanelError::HacRequiresTime`**を返す（他のcov_typeは
+//!   two_way`が既に`time`必須を担保しているが、**1-way FEで`FeCovType::Dk`を指定した
+//!   のに`time`が`None`の場合は`PanelError::DkRequiresTime`**を返す（他のcov_typeは
 //!   1-way FEで`time`を要求しない）。
 //! - `Cluster`と異なり`extra_df`の条件分岐（`entity_nested_within_cluster`）は無い——
 //!   DKは常に`extra_df=neffects`（linearmodelsが`cov_type="kernel"`でこの分岐を
 //!   一切行わないため、上記スケールの導出参照）。
-//! - **`FeCovType::Hac.time`による明示的な時系列順序の上書き**: 元々は
+//! - **`FeCovType::Dk.time`による明示的な時系列順序の上書き**: 元々は
 //!   `bandwidth`のみを持つバリアントだったが、`engine_pybind`のFEOptions設計
 //!   で「2-way FEの`time`（固定効果構造）とDK HACの時系列順序を別の列に
 //!   したい」というユースケースが判明し（ユーザー承認済み、2026-09-12）、
-//!   `Hac { bandwidth, time: Option<Vec<String>> }`に拡張した。`time`が`Some`なら
+//!   `Dk { bandwidth, time: Option<Vec<String>> }`に拡張した。`time`が`Some`なら
 //!   `input.time()`より優先してこちらをDK計算に使う（1-way FEで`time`列を一切
 //!   指定していなくても、この`time`だけでDK HACが成立する）。`None`なら従来通り
 //!   `input.time()`にフォールバックする。`FeInput`自体は変更していない（`time`は
-//!   あくまで`FeCovType::Hac`が持つcov_type固有のオプションであり、パネル構造
+//!   あくまで`FeCovType::Dk`が持つcov_type固有のオプションであり、パネル構造
 //!   （2-wayの有無）とは独立に指定できる設計）。
 //!
 //! ## 固定効果自体（α_i）の復元（`fixed_effects()`、`fe-spec.md`3.5節）
@@ -530,7 +530,7 @@ pub enum FixedEffects {
 /// FEが対応する`cov_type`（3.1節・3.2節）。`OlsEstimator`の`CovType`を
 /// そのまま再利用しない理由はモジュールdoc「`cov_type`対応」参照——HC0を含まない、
 /// FE専用の閉じた選択肢にすることで「無効な組み合わせを型で表現不可能にする」設計に
-/// している（IVの`WeightType`と同じ判断）。`Hac`はOLSの`CovType::Hac`と異なるアルゴリズム
+/// している（IVの`WeightType`と同じ判断）。`Dk`はOLSの`CovType::Dk`と異なるアルゴリズム
 /// （Driscoll-Kraay型パネルHAC、モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FeCovType {
@@ -553,9 +553,9 @@ pub enum FeCovType {
     /// 優先してこちらを使う（2-way FEでも、`input.time()`とは別の時間粒度でDKカーネルを
     /// 適用したいケースに対応、ユーザー承認済み・`engine_pybind`の`FEOptions.time_col`が
     /// この経路に配線される想定）。`None`なら従来通り`input.time()`にフォールバックし、
-    /// それも`None`なら`PanelError::HacRequiresTime`（1-way FEで`time`列を一切指定しない
+    /// それも`None`なら`PanelError::DkRequiresTime`（1-way FEで`time`列を一切指定しない
     /// 場合）。
-    Hac {
+    Dk {
         bandwidth: Option<i64>,
         time: Option<Vec<String>>,
     },
@@ -774,7 +774,7 @@ impl FeEstimator {
                     extra_df,
                 )
             }
-            FeCovType::Hac {
+            FeCovType::Dk {
                 bandwidth,
                 time: hac_time,
             } => {
@@ -782,7 +782,7 @@ impl FeEstimator {
                 // より優先する（モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
                 let time: &[String] = match hac_time {
                     Some(t) => t,
-                    None => input.time().ok_or(PanelError::HacRequiresTime)?,
+                    None => input.time().ok_or(PanelError::DkRequiresTime)?,
                 };
                 let t_periods = count_unique(time);
                 let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
@@ -2994,7 +2994,7 @@ mod tests {
         let fe = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Hac {
+            FeCovType::Dk {
                 bandwidth: None,
                 time: None,
             },
@@ -3014,7 +3014,7 @@ mod tests {
 
     #[test]
     fn fe_estimator_fit_one_way_hac_uses_explicit_time_override_without_fe_input_time() {
-        // `FeCovType::Hac.time`（明示指定）は`FeInput.time()`を経由せずに
+        // `FeCovType::Dk.time`（明示指定）は`FeInput.time()`を経由せずに
         // DK HACを成立させられる（`engine_pybind`の`FEOptions.time_col`が1-way FE + DK HAC
         // の組み合わせをこの経路で配線する想定）。`FeInput::from_columns`には`time=None`を
         // 渡し、`fe_estimator_fit_one_way_hac_matches_linearmodels_default_bandwidth`と
@@ -3027,7 +3027,7 @@ mod tests {
         let fe = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Hac {
+            FeCovType::Dk {
                 bandwidth: None,
                 time: Some(time),
             },
@@ -3041,10 +3041,10 @@ mod tests {
 
     #[test]
     fn fe_estimator_fit_one_way_hac_time_override_takes_priority_over_fe_input_time() {
-        // `FeInput.time()`にも`time`があるが、`FeCovType::Hac.time`の明示指定がある場合は
+        // `FeInput.time()`にも`time`があるが、`FeCovType::Dk.time`の明示指定がある場合は
         // そちらが優先されることを確認する（モジュールdoc「Driscoll-Kraay型パネルHAC対応」
         // 参照）。`FeInput.time()`にわざと辞書順が異なる別のダミー時点列を渡し、それが
-        // 無視されて`FeCovType::Hac.time`の方の結果と一致することを確認する。
+        // 無視されて`FeCovType::Dk.time`の方の結果と一致することを確認する。
         let (entity, time, x, y) = fixest_reference_input();
         let dummy_time = strings(&["z", "z", "z", "z", "z", "z", "z", "z", "z", "z", "z", "z"]);
         let input = FeInput::from_columns(
@@ -3060,7 +3060,7 @@ mod tests {
         let fe = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Hac {
+            FeCovType::Dk {
                 bandwidth: None,
                 time: Some(time),
             },
@@ -3093,7 +3093,7 @@ mod tests {
         let fe = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Hac {
+            FeCovType::Dk {
                 bandwidth: Some(1),
                 time: None,
             },
@@ -3125,7 +3125,7 @@ mod tests {
         let fe = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Hac {
+            FeCovType::Dk {
                 bandwidth: Some(2),
                 time: None,
             },
@@ -3157,7 +3157,7 @@ mod tests {
         let fe = FeEstimator::fit(
             input,
             FeEffects::TwoWay,
-            FeCovType::Hac {
+            FeCovType::Dk {
                 bandwidth: None,
                 time: None,
             },
@@ -3193,7 +3193,7 @@ mod tests {
         let fe = FeEstimator::fit(
             input,
             FeEffects::TwoWay,
-            FeCovType::Hac {
+            FeCovType::Dk {
                 bandwidth: Some(2),
                 time: None,
             },
@@ -3231,7 +3231,7 @@ mod tests {
         let hac = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Hac {
+            FeCovType::Dk {
                 bandwidth: Some(0),
                 time: None,
             },
@@ -3289,7 +3289,7 @@ mod tests {
         let fe = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Hac {
+            FeCovType::Dk {
                 bandwidth: None,
                 time: None,
             },
@@ -3302,8 +3302,8 @@ mod tests {
 
     #[test]
     fn fe_estimator_fit_hac_one_way_requires_time() {
-        // 1-way FEで`time`未指定のまま`FeCovType::Hac`を指定すると
-        // `PanelError::HacRequiresTime`（2-way FEは`TwoWayRequiresTime`が既に必須化して
+        // 1-way FEで`time`未指定のまま`FeCovType::Dk`を指定すると
+        // `PanelError::DkRequiresTime`（2-way FEは`TwoWayRequiresTime`が既に必須化して
         // いるため、このエラーは1-way FE限定）。
         let (entity, _time, x, y) = fixest_reference_input();
         let input =
@@ -3313,14 +3313,14 @@ mod tests {
         let result = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Hac {
+            FeCovType::Dk {
                 bandwidth: None,
                 time: None,
             },
             0.95,
         );
 
-        assert_eq!(result.unwrap_err(), PanelError::HacRequiresTime);
+        assert_eq!(result.unwrap_err(), PanelError::DkRequiresTime);
     }
 
     #[test]
@@ -3341,7 +3341,7 @@ mod tests {
         let result = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Hac {
+            FeCovType::Dk {
                 bandwidth: Some(3),
                 time: None,
             },
@@ -3350,7 +3350,7 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            PanelError::InvalidHacBandwidth { bandwidth: 3, t: 3 }
+            PanelError::InvalidDkBandwidth { bandwidth: 3, t: 3 }
         );
     }
 
@@ -3370,7 +3370,7 @@ mod tests {
         let result = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Hac {
+            FeCovType::Dk {
                 bandwidth: Some(-1),
                 time: None,
             },
@@ -3379,7 +3379,7 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            PanelError::InvalidHacBandwidth {
+            PanelError::InvalidDkBandwidth {
                 bandwidth: -1,
                 t: 3
             }

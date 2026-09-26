@@ -37,15 +37,15 @@ from benchmark.panel.references.linearmodels_ref import run
 
 # hc2/hc3はlinearmodels.PanelOLSが提供しないため対象外（fixestクロスチェック
 # 側のみで検証する単一参照実装の例外、`linearmodels_ref.py`モジュールdoc
-# 参照）。hacはcross_sectionally_correlatedシナリオが本来の目的（他シナリオ
+# 参照）。dkはcross_sectionally_correlatedシナリオが本来の目的（他シナリオ
 # でも動くことの確認はできるが統計的な意味は薄い、OLSのHACと同じ扱い）。
-COV_TYPES = ["classical", "hc1", "cluster", "hac"]
+COV_TYPES = ["classical", "hc1", "cluster", "dk"]
 
 # many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ高次元シナリオ。
 # baseline既定のn_periods=6（Driscoll-Kraay HACがfixestドキュメント推奨の
 # 「20時点以上」を大きく下回る）との組み合わせで、HACの傾き係数共分散部分
 # 行列が数値的に特異になりComputationErrorになることを実測確認済み（ユーザー
-# 確認済み、hacをこのシナリオのcov_type検証から除外する）。
+# 確認済み、dkをこのシナリオのcov_type検証から除外する）。
 COV_TYPES_NO_HAC = ["classical", "hc1", "cluster"]
 
 # unbalancedは1-way専用（`fe-spec.md`3.1節: 2-way FEはバランスパネル必須、2-way要求時の
@@ -69,7 +69,7 @@ TWO_WAY_SCENARIOS = [
 
 NUMERIC_SCENARIOS = ONE_WAY_ONLY_SCENARIOS + TWO_WAY_SCENARIOS
 
-# シナリオ別のcov_type一覧（既定はCOV_TYPES、many_regressorsのみ上記の理由でhacを除く）。
+# シナリオ別のcov_type一覧（既定はCOV_TYPES、many_regressorsのみ上記の理由でdkを除く）。
 SCENARIO_COV_TYPES: dict[str, list[str]] = {
     "many_regressors": COV_TYPES_NO_HAC,
 }
@@ -80,7 +80,7 @@ SCENARIO_COV_TYPES: dict[str, list[str]] = {
 
 # 実データ（Wooldridge wagepan）。T=8年と短くDriscoll-Kraay HACの前提
 # （fixestドキュメントが20時点以上を推奨）を満たさないため対象外
-# （hacの数値照合は合成データのcross_sectionally_correlatedで十分カバーする）。
+# （dkの数値照合は合成データのcross_sectionally_correlatedで十分カバーする）。
 WAGEPAN_COV_TYPES = ["classical", "hc1", "cluster"]
 
 
@@ -92,7 +92,7 @@ SCENARIO_X_COLS: dict[str, list[str]] = {
 
 def _run_effects(scenario: str, cov_type: str, *, two_way: bool) -> dict:
     # `time_col`は常に実在の"time"列を渡す（`two_way`とは独立、
-    # `linearmodels_ref.py`モジュールdoc参照）。1-way + hacで観測順ダミーを
+    # `linearmodels_ref.py`モジュールdoc参照）。1-way + dkで観測順ダミーを
     # 使うと不均衡パネル（unbalancedシナリオ）でバンド幅・カーネル計算が
     # 不正確になるため（実測で発覚）。
     return run(
@@ -249,7 +249,7 @@ def build_fixtures() -> dict:
             "within変換で分散ゼロになり除外、exper自体も2-way FEでentity+time"
             "効果と完全共線になるため除外している"
             "（benchmark/common/constants.pyのWAGEPAN_X参照）。"
-            "hacはwagepan（T=8）には適用しない"
+            "dkはwagepan（T=8）には適用しない"
             "（Driscoll-Kraay HACはfixestドキュメントが20時点以上を推奨する"
             "ほど時点数に依存するため、合成データのcross_sectionally_"
             "correlatedシナリオ（T=25）でのみ数値照合する）。"
@@ -259,7 +259,7 @@ def build_fixtures() -> dict:
             "高次元・外れ値シナリオ（`benchmark/panel/datasets.py`参照）。"
             "many_regressorsのみn_periods=6（baseline既定）とk=20の組み合わせで"
             "Driscoll-Kraay HACの傾き係数共分散部分行列が数値的に特異になり"
-            "ComputationErrorになるため、cov_type検証からhacを除外している"
+            "ComputationErrorになるため、cov_type検証からdkを除外している"
             "（SCENARIO_COV_TYPES参照、ユーザー確認済み）。"
             "baseline.cluster_imbalancedはentityとは無関係な専用クラスター列"
             "（サイズ[2,3,5,10,30,50]のタイル）での数値照合。"

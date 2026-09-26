@@ -5,13 +5,13 @@
 # 独立した実装のため、testing-policy.mdの役割分担「R: 独立実装によるクロスチェック用」
 # に対応する。
 #
-# classical/hc1/hc2/hc3/clusterのみを対象とする。cov_type="hac"
+# classical/hc1/hc2/hc3/clusterのみを対象とする。cov_type="dk"
 # （Driscoll-Kraay）はfixestのvcov="DK"が既定バンド幅公式（n_t^0.25、
 # Newey-West 1987）・小標本補正の慣行（デフォルトで(N-1)/(N-K)*T/(T-1)倍）とも
 # 本実装・linearmodelsの式（floor(4*(T/100)^(2/9))、debiased補正）と異なり、
 # 明示的にバンド幅を揃えssc()の各種フラグを試しても標準誤差が1e-8はおろか
 # 実用的な緩和後の許容誤差でも一致しないことを実測確認済み（規約上の
-# 系統的な差、実装バグではない）。このためhacはlinearmodelsのみを参照実装と
+# 系統的な差、実装バグではない）。このためdkはlinearmodelsのみを参照実装と
 # する単一参照実装の例外として扱う（ユーザー確認済み、panel-common.md
 # 5.4節と同型）。
 #

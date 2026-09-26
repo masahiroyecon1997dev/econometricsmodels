@@ -190,14 +190,14 @@ def test_hausman_none_for_singleton_time_two_way():
         ("HC2", "hc2"),
         ("hc3", "hc3"),
         ("Cluster", "cluster"),
-        ("HAC", "hac"),
+        ("DK", "dk"),
     ],
 )
 def test_cov_type_is_case_insensitive(fe_dataset, cov_type, expected_label):
-    """`hac`は`time`が無いと`HacRequiresTime`になるため`time="time"`を渡す
-    （`test_re_validation.py::test_hac_requires_time_raises`と対照）。
+    """`dk`は`time`が無いと`DkRequiresTime`になるため`time="time"`を渡す
+    （`test_re_validation.py::test_dk_requires_time_raises`と対照）。
     """
-    kwargs = {"time": "time"} if expected_label == "hac" else {}
+    kwargs = {"time": "time"} if expected_label == "dk" else {}
     options = REOptions(cov_type=cov_type, **kwargs)
     res = our_fit_re(fe_dataset, options=options)
     assert res.cov_type == expected_label
@@ -252,7 +252,7 @@ def test_dk_bandwidth_zero_succeeds(fe_dataset):
     （`FEOptions`の同名テストと同じ、engine/src/panel/CLAUDE.md
     「Driscoll-Kraay型パネルHAC対応」参照）。
     """
-    options = REOptions(cov_type="hac", time="time", dk_bandwidth=0)
+    options = REOptions(cov_type="dk", time="time", dk_bandwidth=0)
     res = our_fit_re(fe_dataset, options=options)
     assert all(se > 0.0 for se in res.std_errors.values())
 

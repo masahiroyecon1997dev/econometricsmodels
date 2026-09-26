@@ -294,13 +294,13 @@ TWO_WAY_REQUIRES_TIME = (
 )
 
 # `PanelError::HacRequiresTime`（Driscoll-Kraay HAC、1-way限定で到達）。
-HAC_REQUIRES_TIME = (
+DK_REQUIRES_TIME = (
     "Driscoll-Kraay panel HAC requires the `time` option to be set"
 )
 
 # `PanelError::InvalidHacBandwidth`。`t`は時点数（観測数`n`ではない点に
 # 注意、OLSの`INVALID_HAC_LAGS`とは上限の意味が異なる）。
-INVALID_HAC_BANDWIDTH = (
+INVALID_DK_BANDWIDTH = (
     "bandwidth must be in the range [0, t): got {bandwidth}, t={t}"
 )
 
@@ -308,7 +308,7 @@ INVALID_HAC_BANDWIDTH = (
 # OLS/WLS/IVの`UNKNOWN_COV_TYPE_LINEAR`と異なりhc0を含まない一覧になる。
 UNKNOWN_COV_TYPE_FE = (
     "unknown cov_type: '{other}'. Expected one of 'classical', 'hc1' "
-    "through 'hc3', 'cluster', or 'hac'"
+    "through 'hc3', 'cluster', or 'dk'"
 )
 HC0_NOT_SUPPORTED_FE = (
     "cov_type='hc0' is not supported for FE (neither linearmodels nor "

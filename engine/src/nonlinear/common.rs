@@ -524,7 +524,7 @@ pub enum SolverType {
 }
 
 /// 標準誤差（係数分散共分散行列）の種別。文字列パース（Python文字列 → この型への変換、
-/// `"classical"`/`"nonrobust"`のエイリアス化を含む）は`engine_pybind`側の責務
+/// `"classical"`の文字列パースを含む）は`engine_pybind`側の責務
 /// （OLSの`CovType`と同じ設計。`.claude/rules/rust-style.md`参照）。
 ///
 /// Logit/Probit/Tobitで共通のバリアント（`docs/spec/nonlinear-common.md`3章）のため
@@ -535,7 +535,7 @@ pub enum SolverType {
 /// `groups`が`None`の場合、モデルの`fit()`は`CommonError::MissingClusterColumn`を返す）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CovType {
-    /// 観測情報行列（`"classical"`/`"nonrobust"`、既定）: `Σ = -H⁻¹`
+    /// 観測情報行列（`"classical"`、既定）: `Σ = -H⁻¹`
     Classical,
     /// OPG/BHHH（`"opg"`）: `Σ = (Σᵢ sᵢsᵢ')⁻¹`
     Opg,
@@ -2676,9 +2676,9 @@ pub fn destandardize_cov_params(cov_std: &Mat<f64>, scale: &ColumnScale) -> Mat<
 // 各行が観測`i`のスコアベクトル`sᵢ`）だけを受け取る（`docs/spec/nonlinear-common.md`
 // 3章参照）。
 //
-// `"classical"`/`"nonrobust"`は同じ計算（観測情報行列）のエイリアスのため、
+// `"classical"`は観測情報行列による計算のため、
 // engine側では区別せず`observed_information_cov_params`ひとつに統一する
-// （文字列パースの分岐はOLSの`"classical"`/`"nonrobust"`と同じくengine_pybind側の責務）。
+// （文字列パースの分岐はOLSの`"classical"`と同じくengine_pybind側の責務）。
 
 /// `-H`（Hessianの符号反転）のコレスキー分解による逆行列。
 ///
@@ -2715,7 +2715,7 @@ fn neg_hessian_inverse(hessian: &Mat<f64>, k: usize) -> Result<Mat<f64>, MleErro
     Ok(llt.solve(Mat::<f64>::identity(k, k)))
 }
 
-/// 観測情報行列による係数分散共分散行列（`cov_type="classical"`/`"nonrobust"`、既定）:
+/// 観測情報行列による係数分散共分散行列（`cov_type="classical"`、既定）:
 /// `Σ = -H⁻¹`。
 pub fn observed_information_cov_params(hessian: &Mat<f64>, k: usize) -> Result<Mat<f64>, MleError> {
     neg_hessian_inverse(hessian, k)

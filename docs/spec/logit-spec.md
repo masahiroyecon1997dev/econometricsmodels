@@ -20,7 +20,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
   | フィールド | 型 | デフォルト | 説明 |
   |---|---|---|---|
-  | `cov_type` | `str` | `"classical"` | `"classical"`（alias `"nonrobust"`）/ `"opg"` / `"hc0"` / `"hc1"` / `"cluster"`（大小無視） |
+  | `cov_type` | `str` | `"classical"` | `"classical"`/ `"opg"` / `"hc0"` / `"hc1"` / `"cluster"`（大小無視） |
   | `include_intercept` | `bool` | `True` | |
   | `confidence_level` | `float` | `0.95` | |
   | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名 |

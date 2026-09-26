@@ -283,27 +283,15 @@ def check_cov_type_is_case_insensitive(
     assert res.cov_type == expected_label
 
 
-def check_nonrobust_is_alias_for_classical(
-    dataset, estimator_cls, options_cls, cov_type
-):
-    """`"nonrobust"`が`"classical"`と同じ計算方法（標準誤差も一致）の
-    エイリアスであること（OLS/WLSの`test_nonrobust_is_alias_for_classical`と
-    同型）。
-    """
-    res = estimator_cls(
-        dataset,
-        y="y",
-        x=["x1", "x2"],
-        options=options_cls(cov_type=cov_type),
-    ).fit()
-    classical_res = estimator_cls(
-        dataset,
-        y="y",
-        x=["x1", "x2"],
-        options=options_cls(cov_type="classical"),
-    ).fit()
-    for name in res.param_names:
-        assert res.std_errors[name] == classical_res.std_errors[name], name
+def check_nonrobust_is_rejected(dataset, estimator_cls, options_cls, cov_type):
+    """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
+    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
+        estimator_cls(
+            dataset,
+            y="y",
+            x=["x1", "x2"],
+            options=options_cls(cov_type=cov_type),
+        ).fit()
 
 
 # ── test_<solver>_api.py: predict() ─────────────────────────────────

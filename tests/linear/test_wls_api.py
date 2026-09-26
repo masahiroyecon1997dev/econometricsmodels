@@ -24,6 +24,7 @@ from econometricsmodels import (
     OLS,
     WLS,
     OLSOptions,
+    ValidationError,
     WLSOptions,
     WLSResults,
 )
@@ -264,8 +265,6 @@ def test_cov_type_label(dataset):
         ("hc3", "hc3"),
         ("HAC", "hac"),
         ("Hac", "hac"),
-        ("nonrobust", "nonrobust"),
-        ("NONROBUST", "nonrobust"),
     ],
 )
 def test_cov_type_is_case_insensitive(dataset, cov_type, expected_label):
@@ -283,22 +282,16 @@ def test_cov_type_is_case_insensitive(dataset, cov_type, expected_label):
 
 
 @pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
-def test_nonrobust_is_alias_for_classical(dataset, cov_type):
-    """`"nonrobust"`が`"classical"`と同じ計算方法（標準誤差も一致）の
-    エイリアスであること（OLSと同じ検証）。
-    """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = WLSOptions(cov_type=cov_type)
-    res = WLS(
-        df, y="y", x=["x1", "x2"], weight="weight", options=options
-    ).fit()
-
-    classical_options = WLSOptions(cov_type="classical")
-    classical_res = WLS(
-        df, y="y", x=["x1", "x2"], weight="weight", options=classical_options
-    ).fit()
-    for name in res.param_names:
-        assert res.std_errors[name] == classical_res.std_errors[name], name
+def test_nonrobust_is_rejected(dataset, cov_type):
+    """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
+    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
+        WLS(
+            dataset.with_columns(pl.lit(1.0).alias("weight")),
+            y="y",
+            x=["x1", "x2"],
+            weight="weight",
+            options=WLSOptions(cov_type=cov_type),
+        ).fit()
 
 
 def test_confidence_level_changes_interval_width(dataset):

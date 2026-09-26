@@ -1153,8 +1153,6 @@ def test_cov_type_label(censored_dataset):
         ("HC0", "hc0"),
         ("Hc1", "hc1"),
         ("CLUSTER", "cluster"),
-        ("nonrobust", "nonrobust"),
-        ("NONROBUST", "nonrobust"),
     ],
 )
 def test_cov_type_is_case_insensitive(
@@ -1167,21 +1165,15 @@ def test_cov_type_is_case_insensitive(
 
 
 @pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
-def test_nonrobust_is_alias_for_classical(censored_dataset, cov_type):
-    res = Tobit(
-        censored_dataset,
-        y="y",
-        x=["x1", "x2"],
-        options=TobitOptions(cov_type=cov_type),
-    ).fit()
-    classical_res = Tobit(
-        censored_dataset,
-        y="y",
-        x=["x1", "x2"],
-        options=TobitOptions(cov_type="classical"),
-    ).fit()
-    for name in res.param_names:
-        assert res.std_errors[name] == classical_res.std_errors[name], name
+def test_nonrobust_is_rejected(censored_dataset, cov_type):
+    """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
+    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
+        Tobit(
+            censored_dataset,
+            y="y",
+            x=["x1", "x2"],
+            options=TobitOptions(cov_type=cov_type),
+        ).fit()
 
 
 def test_cluster_cov_type_requires_at_least_two_groups():

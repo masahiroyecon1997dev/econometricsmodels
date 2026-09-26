@@ -140,8 +140,6 @@ def test_method_is_case_insensitive(binary_dataset, solver, expected_label):
         ("HC0", "hc0"),
         ("Hc1", "hc1"),
         ("CLUSTER", "cluster"),
-        ("nonrobust", "nonrobust"),
-        ("NONROBUST", "nonrobust"),
     ],
 )
 def test_cov_type_is_case_insensitive(
@@ -153,8 +151,8 @@ def test_cov_type_is_case_insensitive(
 
 
 @pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
-def test_nonrobust_is_alias_for_classical(binary_dataset, cov_type):
-    _checks.check_nonrobust_is_alias_for_classical(
+def test_nonrobust_is_rejected(binary_dataset, cov_type):
+    _checks.check_nonrobust_is_rejected(
         binary_dataset, Logit, LogitOptions, cov_type
     )
 

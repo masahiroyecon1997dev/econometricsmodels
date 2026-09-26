@@ -96,7 +96,7 @@ pub(crate) fn parse_cov_type(
     cluster: &Option<String>,
 ) -> PyResult<CovType> {
     match cov_type_lower {
-        "classical" | "nonrobust" => Ok(CovType::Classical),
+        "classical" => Ok(CovType::Classical),
         "opg" => Ok(CovType::Opg),
         "hc0" => Ok(CovType::Hc0),
         "hc1" => Ok(CovType::Hc1),
@@ -108,7 +108,7 @@ pub(crate) fn parse_cov_type(
             Ok(CovType::Cluster { groups })
         }
         other => Err(ValidationError::new_err(format!(
-            "unknown cov_type: '{other}'. Expected one of 'classical' (or 'nonrobust'), \
+            "unknown cov_type: '{other}'. Expected one of 'classical', \
              'opg', 'hc0', 'hc1', or 'cluster'"
         ))),
     }

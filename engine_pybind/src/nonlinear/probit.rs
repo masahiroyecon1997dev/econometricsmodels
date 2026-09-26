@@ -54,7 +54,7 @@ use crate::validation::{validate_common_roles, validate_no_existing_column};
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct ProbitOptions {
-    /// Standard error type: one of "classical" (alias "nonrobust"), "opg", "hc0",
+    /// Standard error type: one of "classical", "opg", "hc0",
     /// "hc1", "cluster". Case-insensitive.
     #[pyo3(get, set)]
     pub cov_type: String,
@@ -766,27 +766,6 @@ mod tests {
                 panic!("expected Ok for cov_type={input}");
             };
             assert!(is_expected(&cov_type), "input={input}, got={cov_type:?}");
-        }
-    }
-
-    #[test]
-    fn build_probit_input_accepts_nonrobust_as_classical_alias() {
-        let df = well_formed_df();
-        for input in ["nonrobust", "NONROBUST", "NonRobust"] {
-            let mut options = default_options();
-            options.cov_type = input.to_string();
-            let Ok((_, cov_type, _)) = build_probit_input(
-                &df,
-                "y".to_string(),
-                vec!["x1".to_string(), "x2".to_string()],
-                &options,
-            ) else {
-                panic!("expected Ok for cov_type={input}");
-            };
-            assert!(
-                matches!(cov_type, EngineCovType::Classical),
-                "input={input}"
-            );
         }
     }
 }

@@ -29,7 +29,7 @@ import statsmodels.api as sm
 from _assertions import assert_close
 from _ols_helpers import our_fit, our_fit_cluster, sm_fit
 from _tolerances import TOLERANCES
-from econometricsmodels import OLS, OLSOptions
+from econometricsmodels import OLS, OLSOptions, ValidationError
 
 # predict() の statsmodels 照合も凍結フィクスチャ照合と同じ許容誤差
 # （`_tolerances.py` の "ols_reference"）で行う。`_assertions.assert_close`
@@ -150,8 +150,6 @@ def test_cov_type_label(dataset):
         ("hc3", "hc3"),
         ("HAC", "hac"),
         ("Hac", "hac"),
-        ("nonrobust", "nonrobust"),
-        ("NONROBUST", "nonrobust"),
     ],
 )
 def test_cov_type_is_case_insensitive(dataset, cov_type, expected_label):
@@ -167,14 +165,10 @@ def test_cov_type_is_case_insensitive(dataset, cov_type, expected_label):
 
 
 @pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
-def test_nonrobust_is_alias_for_classical(dataset, cov_type):
-    """`"nonrobust"`が`"classical"`と同じ計算方法（標準誤差も一致）の
-    エイリアスであること。
-    """
-    res = our_fit(dataset, cov_type)
-    classical_res = our_fit(dataset, "classical")
-    for name in res.param_names:
-        assert res.std_errors[name] == classical_res.std_errors[name], name
+def test_nonrobust_is_rejected(dataset, cov_type):
+    """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
+    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
+        our_fit(dataset, cov_type)
 
 
 def test_default_options_use_classical():

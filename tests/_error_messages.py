@@ -176,8 +176,8 @@ UNKNOWN_COV_TYPE_LINEAR = (
 # ── nonlinear系統固有（Logit/Probit/Tobit） ─────────────────────────────
 
 UNKNOWN_COV_TYPE_NONLINEAR = (
-    "unknown cov_type: '{other}'. Expected one of 'classical' (or "
-    "'nonrobust'), 'opg', 'hc0', 'hc1', or 'cluster'"
+    "unknown cov_type: '{other}'. Expected one of 'classical', 'opg', "
+    "'hc0', 'hc1', or 'cluster'"
 )
 UNKNOWN_METHOD_NONLINEAR = (
     "unknown solver: '{other}'. Expected one of 'newton', 'bfgs', or 'lbfgs'"

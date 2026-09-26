@@ -18,7 +18,7 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _iv_helpers import our_fit
-from econometricsmodels import IV, IVOptions, IVResults
+from econometricsmodels import IV, IVOptions, IVResults, ValidationError
 
 # ── 成功パス・結果型 ──────────────────────────────────────────────
 
@@ -294,8 +294,6 @@ def test_cluster_cov_type_label(clustered_dataset):
         ("HC2", "hc2"),
         ("hc3", "hc3"),
         ("HAC", "hac"),
-        ("nonrobust", "nonrobust"),
-        ("NONROBUST", "nonrobust"),
     ],
 )
 def test_cov_type_is_case_insensitive(iv_dataset, cov_type, expected_label):
@@ -310,16 +308,10 @@ def test_cov_type_is_case_insensitive(iv_dataset, cov_type, expected_label):
 
 
 @pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
-def test_nonrobust_is_alias_for_classical(iv_dataset, cov_type):
-    """`"nonrobust"`が`"classical"`と同じ計算方法（標準誤差も一致）のエイリアス
-    であること（OLS/WLS/Logit/Probitの同名テストと同型）。
-    """
-    res = our_fit(iv_dataset, options=IVOptions(cov_type=cov_type))
-    classical_res = our_fit(
-        iv_dataset, options=IVOptions(cov_type="classical")
-    )
-    for name in res.param_names:
-        assert res.std_errors[name] == classical_res.std_errors[name], name
+def test_nonrobust_is_rejected(iv_dataset, cov_type):
+    """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
+    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
+        our_fit(iv_dataset, options=IVOptions(cov_type=cov_type))
 
 
 @pytest.mark.parametrize(

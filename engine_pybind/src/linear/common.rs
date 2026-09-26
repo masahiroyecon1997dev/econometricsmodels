@@ -92,7 +92,7 @@ pub(crate) fn parse_cov_type(
     let cov_type_lower = cov_type.to_lowercase();
 
     let cov_type = match cov_type_lower.as_str() {
-        "classical" | "nonrobust" => EngineCovType::Classical,
+        "classical" => EngineCovType::Classical,
         "hc0" => EngineCovType::Hc0,
         "hc1" => EngineCovType::Hc1,
         "hc2" => EngineCovType::Hc2,
@@ -151,24 +151,6 @@ mod tests {
                 panic!("expected Ok for input={input}");
             };
             assert_eq!(normalized, expected, "input={input}");
-        }
-    }
-
-    #[test]
-    fn parse_cov_type_accepts_nonrobust_as_classical_alias() {
-        let df = DataFrame::empty();
-        for input in ["nonrobust", "NONROBUST", "NonRobust"] {
-            let Ok((cov_type, normalized)) = parse_cov_type(&df, input, None, None, None) else {
-                panic!("expected Ok for input={input}");
-            };
-            assert!(
-                matches!(cov_type, EngineCovType::Classical),
-                "input={input}"
-            );
-            // `parse_cov_type`のdocコメント通り、`*Result.cov_type`にはエイリアスでは
-            // なく小文字化した入力文字列（"nonrobust"）がそのまま格納される
-            // （"classical"に正規化はしない）。
-            assert_eq!(normalized, "nonrobust", "input={input}");
         }
     }
 

@@ -188,7 +188,7 @@ Hessianとする。いずれも標準化空間で`Σ_std`を計算した後、`d
 
 | `cov_type` | 式 |
 |---|---|
-| `classical`（別名`nonrobust`、既定） | 観測情報行列 `Σ = -H⁻¹` |
+| `classical`（既定） | 観測情報行列 `Σ = -H⁻¹` |
 | `opg` | outer product of gradients `Σ = (Σᵢ sᵢsᵢ')⁻¹`（BHHH） |
 | `hc0` | サンドイッチ型 `Σ = H⁻¹(Σᵢ sᵢsᵢ')H⁻¹`（misspecification-robust） |
 | `hc1` | `hc0`に小標本補正`n/(n-k)`を乗じる |

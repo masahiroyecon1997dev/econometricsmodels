@@ -137,7 +137,6 @@ dependencies = [
 [package.dev-dependencies]
 benchmark = [
     { name = "pyarrow" },
-    { name = "wooldridge" },
 ]
 dev = [
     { name = "maturin" },
@@ -153,16 +152,14 @@ test = [
     { name = "pytest" },
     { name = "ruff" },
     { name = "statsmodels" },
+    { name = "wooldridge" },
 ]
 
 [package.metadata]
 requires-dist = [{ name = "polars", specifier = "==1.44.2" }]
 
 [package.metadata.requires-dev]
-benchmark = [
-    { name = "pyarrow", specifier = "==25.0.1" },
-    { name = "wooldridge", specifier = "==0.5.0" },
-]
+benchmark = [{ name = "pyarrow", specifier = "==25.0.1" }]
 dev = [{ name = "maturin", specifier = "==1.15.0" }]
 docs = [
     { name = "mkdocs", specifier = "==1.6.1" },
@@ -175,6 +172,7 @@ test = [
     { name = "pytest", specifier = "==9.1.1" },
     { name = "ruff", specifier = "==0.16.7" },
     { name = "statsmodels", specifier = "==0.15.0" },
+    { name = "wooldridge", specifier = "==0.5.0" },
 ]
 
 [[package]]

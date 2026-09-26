@@ -77,7 +77,7 @@ Issue番号・内部管理ドキュメント（`refactoring-candidates.md`等）
 - フィクスチャの命名: 手法・シナリオ・cov_type等が分かる形にする（例: `ols.json`に、シナリオ×cov_typeをネストして持たせる。実例は`tests/fixtures/benchmarks/ols.json`参照）。
 - **フィクスチャを生成するスクリプトと、生成されたJSON自体は別の場所に置く**。生成スクリプトは`benchmark/<系統>/fixtures/generate_<手法名>_fixtures.py`（コード、`benchmark/`側で管理。系統ディレクトリ構成は`.claude/skills/reference-benchmark/SKILL.md`参照）、生成物は`tests/fixtures/benchmarks/<手法名>.json`（データ、テスト側で管理）。
 - **合成データセット自体も同様にCSVとしてtests側（`tests/fixtures/benchmarks/data/`）に固定する**（`benchmark/<系統>/freeze.py`で生成）。理由: ジェネレータ側のコードが将来変わっても、既に固定したフィクスチャJSONの期待値と無言で不整合にならないようにするため。
-  - **Wooldridgeデータセットはこの固定化の対象外**とする（`wooldridge`パッケージ自体はMITライセンスだが、同梱される実データの著作権は原典の教科書側にある可能性があり、フィルタ後の部分集合であってもMITライセンスの本リポジトリにCSVとして再配布してよいか未確認のため。ユーザー確認済み）。Wooldridgeデータは引き続き`load_wooldridge.py`経由で都度ロードし、`pytest.importorskip("wooldridge")`で任意扱いにする。
+  - **Wooldridgeデータセットはこの固定化の対象外**とする（`wooldridge`パッケージ自体はMITライセンスだが、同梱される実データの著作権は原典の教科書側にある可能性があり、フィルタ後の部分集合であってもMITライセンスの本リポジトリにCSVとして再配布してよいか未確認のため。ユーザー確認済み）。Wooldridgeデータは引き続き`load_wooldridge.py`経由で都度ロードする。`wooldridge`パッケージ自体はtest依存グループに含め標準CIで常にインストールする（実データはパッケージのwheel内に留まりリポジトリへ再配布するわけではないため、上記の再配布可否の制約とは無関係）。`pytest.importorskip("wooldridge")`は、test依存グループを経由しない実行環境向けの防御的フォールバックとして残す。
 - 各フィクスチャJSONには`_meta`フィールドを含め、少なくとも以下を記録する。
   - `generated_at`: 生成日時（ISO 8601）
   - リファレンス実装のバージョン（例: `statsmodels_version`）

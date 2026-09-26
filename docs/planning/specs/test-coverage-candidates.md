@@ -190,7 +190,30 @@
 - **気づいた経緯**: 2026-08-22、`tests/_helpers.py`解説後のユーザー指摘
   （`sys.path.insert`最小化の相談に付随して、CI側でWooldridgeテストが
   実行されない可能性を懸念）。
-- **状態**: 未対応（対応方針・優先度はユーザー判断待ち）
+- **状態**: 対応済み（2026-09-26）。ユーザーに(a)/(b)/(c)を提示したところ、
+  「CI環境でもwooldridgeをインストールしてテストを常時実行できないか」と
+  逆提案があり、調査の上これを採用した。`wooldridge`の依存は`pandas`のみで
+  （`uv.lock`確認済み）、`pandas`は`statsmodels`/`linearmodels`経由で既に
+  `test`グループに間接的に入っているため、`test`グループへ移動した際の
+  追加コストは`wooldridge`本体のwheel（約5.4MB、追加のネットワークアクセスも
+  通常のPyPI取得1回のみ）のみで、CI時間への影響は無視できるレベルと判断した。
+  「実データを再配布可否未確認のためCSVとして固定しない」というライセンス上の
+  制約（`testing-policy.md`）は実データのコミット禁止についての判断であり、
+  `wooldridge`パッケージ自体（wheel内に留まる）をどの依存グループで宣言するかとは
+  無関係なため、この制約と衝突しないことも確認した。`pyproject.toml`の
+  `wooldridge==0.5.0`を`benchmark`グループから`test`グループへ移動し
+  `uv.lock`を再生成、`tests/_helpers.py`の`wooldridge_loader`docstringと
+  `testing-policy.md`「合成データセット自体も...」の記述を「test依存グループに
+  含め標準CIで常にインストールする」という現状に合わせて更新した。
+  `pytest.importorskip("wooldridge")`自体は、test依存グループを経由しない
+  実行環境向けの防御的フォールバックとして残した（削除すると項目22が問題視した
+  「原因不明のskip」ではなく「原因不明のエラー」に変わるだけで根本解決にならない
+  ため、通常のCI/開発フローでは到達しない防御コードとして維持する判断）。
+  クリーンな`uv sync --locked --group test`後に`pytest tests`を実行し、
+  91件skipされていた状態から**1888件全て実行・全通過（skip 0件）**に
+  変わったことを実測で確認した。Ruffクリーンも確認済み（既存の無関係な
+  フォーマット崩れが`test_ols_reference.py`等4ファイルにあるが、今回の変更前から
+  存在するものでありスコープ外）。
 
 ### 23. `logit_crosscheck`/`probit_crosscheck`の基本`rtol`（2e-4）だけ、他の全エントリと違い実測根拠のコメントが無い
 

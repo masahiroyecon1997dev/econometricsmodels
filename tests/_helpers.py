@@ -9,10 +9,10 @@
   「テストの分離」参照。ユーザー確認済み）。
 - `separation_suspected_dataset`: 準完全分離データのDGP
   （`test_logit_validation.py`/`test_probit_validation.py`で完全に同一実装だった）。
-- `load_wooldridge_dataset`: Wooldridgeデータセットのロード（`wooldridge`
-  パッケージが無い環境ではskip）。`benchmark/load_wooldridge.py`の`load`を
-  呼ぶだけの`wooldridge.data(name)`→`pl.from_pandas`実装が、複数ファイルに
-  微妙に異なる書き方（直接呼び出し／`load_wooldridge.py`経由）で重複していた。
+- `load_wooldridge_dataset`: Wooldridgeデータセットのロード。`benchmark/
+  load_wooldridge.py`の`load`を呼ぶだけの`wooldridge.data(name)`→
+  `pl.from_pandas`実装が、複数ファイルに微妙に異なる書き方（直接呼び出し／
+  `load_wooldridge.py`経由）で重複していた。
 
 定数（`DATA_DIR`・`MROZ_X`）は`_constants.py`に分離済み
 （ファイル名が関数を示唆するのに定数も同居していたための整理）。
@@ -67,13 +67,14 @@ def separation_suspected_dataset() -> pl.DataFrame:
 
 
 def wooldridge_loader() -> Callable[[str], pl.DataFrame]:
-    """`wooldridge`パッケージ（benchmark依存グループ）が無い環境ではskipする。
+    """`wooldridge`パッケージ（test依存グループ）を使ってロード関数を返す。
 
-    tests本体はtest依存グループのみで完結させる方針（testing-policy.md、
-    CLAUDE.md 3章「benchmark/はtests/とは別ライフサイクル」）のため、実データ
-    クロスチェックのみ任意扱いにする。Wooldridgeデータはデータの再配布ライセンスが
-    未確認のためCSVとして固定せず（`benchmark/linear/freeze.py`のdocstring
-    参照）、都度ロードする。
+    `wooldridge`はtest依存グループに含まれ標準CIで常にインストールされるため、
+    通常はskipされない。`pytest.importorskip`は、想定外の理由でインストールが
+    欠けた環境（test依存グループを経由しないpytest実行等）向けの防御的フォール
+    バックとして残している。Wooldridgeデータはデータの再配布ライセンスが未確認
+    のためCSVとして固定せず（`benchmark/linear/freeze.py`のdocstring参照）、
+    都度ロードする。
 
     複数のデータセット名を扱うテスト（`pytest.mark.parametrize`でデータセット名を
     振る等）向けにロード関数自体を返す。1件だけロードする場合は

@@ -59,6 +59,14 @@ test = [
     # （`docs/spec/iv-spec.md`4章）。statsmodelsと同じ理由で`==`厳密固定。
     "linearmodels==7.0",
     "ruff==0.16.7",
+    # Wooldridge実データでのクロスチェックテスト用（tests/_helpers.pyの
+    # wooldridge_loader）。標準CIで確実に実行されるようbenchmarkグループから
+    # ここへ移した。依存はpandasのみで、statsmodels/linearmodels経由で既に
+    # 間接的に入っているため追加コストはwooldridge本体のwheelのみ。実データ
+    # 自体はこのパッケージのwheel内に留まりリポジトリへは再配布しないため、
+    # 下記benchmarkグループのpyarrow同様、ライセンス上の制約（実データをCSVとして
+    # 固定・再配布しない方針、testing-policy.md参照）とは無関係。
+    "wooldridge==0.5.0",
 ]
 # benchmark/ 配下のベンチマーク値生成・性能比較スクリプト専用（CLAUDE.md 3章
 # 「benchmark/はtests/とは別ライフサイクル」参照）。ci_python.ymlは使わない
@@ -69,7 +77,6 @@ benchmark = [
     # performance/compare_*.pyがpandasに変換してリファレンス実装に渡すため）。
     # pandas側は直接依存に含めない。
     "pyarrow==25.0.1",
-    "wooldridge==0.5.0",
 ]
 dev = [
     "maturin==1.15.0",

@@ -471,8 +471,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   良いと考える。
 - **気づいた経緯**: 2026-08-31、`tests/test_iv_crosscheck.py`解説時の
   ユーザー指摘、`grep`で確認。
-- **状態**: 未対応（`refactoring-candidates-2.md`項目51・79と統合して
-  対応するのが効率的、着手タイミングはユーザー判断待ち）
+- **状態**: 対応済み（2026-09-26調査。`tests/`・`benchmark/`・`engine`・`engine_pybind`・`python_package`に`#231`/`#227`/`Issue #`の経緯コメントは残存しておらず、過去の一斉削除で解消済み）
 
 ### 26. `test_iv_crosscheck.py`にGMMのRクロスチェックが無い件——v1時点では意図的な例外規定だったが、今後のGMM拡張（C統計量等）に合わせてテストも拡張予定
 
@@ -567,8 +566,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `test_logit_crosscheck.py`と同じ役割分担」）は有用な情報のため残す
   という、既存の方針をそのまま適用できる。
 - **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時に確認。
-- **状態**: 未対応（項目25・51・79とまとめて対応するのが効率的、
-  着手タイミングはユーザー判断待ち）
+- **状態**: 対応済み（2026-09-26調査。`tests/`・`benchmark/`・`engine`・`engine_pybind`・`python_package`に`#231`/`#227`/`Issue #`の経緯コメントは残存しておらず、過去の一斉削除で解消済み）
 
 ### 29. `rel=1e-4`という許容誤差がLogit/Probit/Tobitの`test_method_option_converges_to_same_params`に同一値で直書きされている（リポジトリ全体）
 

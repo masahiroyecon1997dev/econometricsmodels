@@ -45,7 +45,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **Claudeの所感**: フェーズ3で確立済みの方針（番号のみ削除し、テストの意図の
   説明は残す）をそのまま適用できる、小さいが典型的な候補。
 - **気づいた経緯**: 2026-08-22、`tests/linear/test_ols.py`解説中に発見。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
+- **状態**: 対応済み（2026-09-26調査。`tests/`・`benchmark/`・`engine`・`engine_pybind`・`python_package`に`#231`/`#227`/`Issue #`の経緯コメントは残存しておらず、過去の一斉削除で解消済み）
 
 ### 56. `test_ols.py`内で数値比較の書き方（生の`assert`+f-string／`pytest.approx`／`_assertions.assert_close`不使用）が混在
 
@@ -471,9 +471,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   自体はまだ適用していないため、コメント内容自体の整理は未対応のまま。
 - **気づいた経緯**: 2026-08-23、`tests/nonlinear/test_logit.py`解説後のユーザー指摘。
   2026-08-24、`tests/nonlinear/test_probit.py`解説時に適用範囲を確認・追記。
-- **状態**: 未対応（着手要否はユーザー判断待ち、項目51と統合可。項目95実装で
-  対応箇所が`_binary_choice_checks.py`1ファイルに集約されたため、対応時の
-  作業量は縮小済み）
+- **状態**: 対応済み（2026-09-26調査。`tests/`・`benchmark/`・`engine`・`engine_pybind`・`python_package`に`#231`/`#227`/`Issue #`の経緯コメントは残存しておらず、過去の一斉削除で解消済み）
 
 ### 81. `test_const_collision_with_include_intercept_raises`・`test_cluster_cov_type_requires_at_least_two_groups`のテストデータがOLS/WLS/Logitで似た内容を個別に手書きしている
 

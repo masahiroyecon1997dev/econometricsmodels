@@ -286,7 +286,7 @@ pub fn validate_binary_y(y: &Mat<f64>) -> Result<(), MleError> {
 }
 
 /// `max_iter`が0以下の場合にエラーを返す。
-pub fn validate_max_iter(max_iter: i64) -> Result<(), MleError> {
+fn validate_max_iter(max_iter: i64) -> Result<(), MleError> {
     if max_iter <= 0 {
         return Err(MleError::InvalidMaxIter { max_iter });
     }
@@ -294,7 +294,7 @@ pub fn validate_max_iter(max_iter: i64) -> Result<(), MleError> {
 }
 
 /// `tol`が0以下の場合にエラーを返す（[`MleError::InvalidTol`]のdocコメント参照）。
-pub fn validate_tol(tol: f64) -> Result<(), MleError> {
+fn validate_tol(tol: f64) -> Result<(), MleError> {
     if tol <= 0.0 {
         return Err(MleError::InvalidTol { tol });
     }
@@ -359,18 +359,45 @@ pub fn validate_cluster_cov_type(
     Ok(())
 }
 
-/// `fit()`冒頭で行う共通の入力検証（Logit/Probit）。検証順序:
-/// `confidence_level`→`max_iter`→`tol`→`y`の二値性→`k==0`→`n<=k`→
-/// `cov_type=Cluster`のグループ列（グループキー未指定・クラスター数2未満・
-/// クラスター数`g <= 傾き係数の数`）。元はLogit/Probitそれぞれの`fit()`に一字一句
-/// 同一のブロックとして重複していたため、こちらへ集約した。
+/// `fit()`冒頭で行う推定オプション（`MleFitOptions`由来のスカラー値）の検証。
+/// 検証順序: `confidence_level`→`max_iter`→`tol`。Logit/Probit/Tobitの3手法で
+/// 検証内容・順序が同一のため、[`validate_fit_preconditions`]（Logit/Probit）と
+/// Tobitの`fit()`の双方からこの関数を呼ぶ。データ（`y`・`k`・`cov_type`）に依存する
+/// 検証は手法ごとに閾値・要否が異なるため含めない（[`validate_fit_preconditions`]の
+/// docコメント参照）。
+pub fn validate_mle_options(
+    confidence_level: f64,
+    max_iter: i64,
+    tol: f64,
+) -> Result<(), MleError> {
+    validate_confidence_level(confidence_level)?;
+    validate_max_iter(max_iter)?;
+    validate_tol(tol)?;
+    Ok(())
+}
+
+/// `fit()`冒頭で行う共通の入力検証（Logit/Probit専用）。検証順序:
+/// [`validate_mle_options`]（`confidence_level`→`max_iter`→`tol`）→`y`の二値性→
+/// `k==0`→`n<=k`→`cov_type=Cluster`のグループ列（グループキー未指定・クラスター数
+/// 2未満・クラスター数`g <= 傾き係数の数`）。元はLogit/Probitそれぞれの`fit()`に
+/// 一字一句同一のブロックとして重複していたため、こちらへ集約した。
 ///
-/// Tobitの`fit()`（`confidence_level`/`cov_type`をまだ受け取らない時点）は
-/// この関数をそのまま呼べない（引数を揃えられない）ため、上記の各検証を個別の小関数
-/// （[`validate_max_iter`]等）に分割し、Tobitはそのうち必要な部分（`max_iter`/`tol`/
-/// [`validate_sufficient_observations`]/[`validate_cluster_cov_type`]）だけを個別に
-/// 呼ぶ。この関数自体はLogit/Probit向けに元の挙動をそのまま保つ
-/// ラッパーとして残す。
+/// Tobitの`fit()`はこの関数を呼ばず、[`validate_mle_options`]に続けて必要な検証を
+/// 個別に呼ぶ。Logit/Probitとの違いは次の通りで、いずれもこの関数を引数で分岐させる
+/// より個別に呼ぶ方が単純なため分けている:
+/// - `y`の二値性（[`validate_binary_y`]）: 被説明変数が連続値のため呼ばない
+/// - `k==0`（[`validate_has_regressors`]）: `logσ`が常に最適化パラメータに含まれるため
+///   対応するケースが生じず、呼ばない
+/// - `n<=k`（[`validate_sufficient_observations`]）: `k`ではなく総最適化パラメータ数
+///   `k+1`を渡す
+/// - `cov_type=Cluster`（[`validate_cluster_cov_type`]）: Logit/Probitと同じく傾き係数の数
+///   `k - usize::from(has_intercept)`を渡す（差異なし）
+/// - Tobit固有の検証として、非打ち切り観測が1件以上あること
+///   （`tobit.rs`の`validate_has_uncensored_observations`）を最後に追加で行う
+///
+/// Tobit固有の打ち切り境界の検証（境界指定自体の妥当性＝`MleError::InvalidCensoringBounds`、
+/// `y`と境界の整合性＝`MleError::YOutOfCensoringBounds`）は`fit()`ではなく
+/// `TobitInput::from_columns`で行う（`tobit.rs`冒頭のdocコメント参照）。
 ///
 /// 引数は検証順序に揃えている。`n`（観測数）は`y`から自明に求まる（`y.nrows()`）ため
 /// 引数に取らない。`k`と型が同じ`usize`の引数を並べると呼び出し側で取り違えても
@@ -386,9 +413,7 @@ pub fn validate_fit_preconditions(
     has_intercept: bool,
     cov_type: &CovType,
 ) -> Result<(), MleError> {
-    validate_confidence_level(confidence_level)?;
-    validate_max_iter(max_iter)?;
-    validate_tol(tol)?;
+    validate_mle_options(confidence_level, max_iter, tol)?;
     validate_binary_y(y)?;
 
     let n = y.nrows();
@@ -4126,6 +4151,39 @@ mod tests {
         assert_eq!(
             validate_binary_y(&y),
             Err(MleError::InvalidBinaryY { row: 0, value: 2.0 })
+        );
+    }
+
+    #[test]
+    fn validate_mle_options_ok_for_valid_inputs() {
+        assert_eq!(validate_mle_options(0.95, 100, 1e-8), Ok(()));
+    }
+
+    #[test]
+    fn validate_mle_options_returns_invalid_confidence_level_before_other_checks() {
+        // 3つとも不正な同時違反ケースで、検証順序通り`confidence_level`が先に返る。
+        assert_eq!(
+            validate_mle_options(1.5, 0, 0.0),
+            Err(CommonError::InvalidConfidenceLevel {
+                confidence_level: 1.5
+            }
+            .into())
+        );
+    }
+
+    #[test]
+    fn validate_mle_options_returns_invalid_max_iter_before_tol() {
+        assert_eq!(
+            validate_mle_options(0.95, 0, 0.0),
+            Err(MleError::InvalidMaxIter { max_iter: 0 })
+        );
+    }
+
+    #[test]
+    fn validate_mle_options_returns_invalid_tol_when_tol_is_not_positive() {
+        assert_eq!(
+            validate_mle_options(0.95, 100, 0.0),
+            Err(MleError::InvalidTol { tol: 0.0 })
         );
     }
 

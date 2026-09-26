@@ -114,7 +114,7 @@ use crate::nonlinear::common::{
     SeparationNormCheck, U_CLAMP, checked_design_matrix_qr, clamped_pdf_cdf, cluster_cov_params,
     column_means, column_medians, observed_information_cov_params, opg_cov_params,
     predict_new_data, run_solver, sandwich_cov_params, validate_cluster_cov_type,
-    validate_confidence_level, validate_max_iter, validate_sufficient_observations, validate_tol,
+    validate_confidence_level, validate_mle_options, validate_sufficient_observations,
 };
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::prelude::{Solve, SolveLstsq};
@@ -1310,6 +1310,10 @@ impl TobitEstimator {
     /// （`validate_sufficient_observations`のdocコメント参照）。
     /// Logit/Probitの`validate_has_regressors`（`k==0`検証）はTobitでは呼ばない
     /// （`logσ`が常に存在するため対応するケースが生じない、同関数のdocコメント参照）。
+    /// 推定オプションの検証は3手法共通の`validate_mle_options`を使い、Logit/Probit用の
+    /// `validate_fit_preconditions`は呼ばない（手法ごとの違いは同関数のdocコメント参照）。
+    /// 打ち切り境界の検証（`MleError::InvalidCensoringBounds`/`YOutOfCensoringBounds`）は
+    /// `fit()`ではなく`TobitInput::from_columns`で完了済み（モジュール冒頭のdocコメント参照）。
     ///
     /// ## `σ`のSE（デルタ法）
     ///
@@ -1361,9 +1365,7 @@ impl TobitEstimator {
         // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
         crate::parallelism::ensure_serial();
 
-        validate_confidence_level(confidence_level)?;
-        validate_max_iter(max_iter)?;
-        validate_tol(tol)?;
+        validate_mle_options(confidence_level, max_iter, tol)?;
 
         let n = input.nobs();
         let k = input.k();

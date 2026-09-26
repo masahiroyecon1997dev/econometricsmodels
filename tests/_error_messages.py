@@ -227,10 +227,19 @@ INSUFFICIENT_INSTRUMENTS = (
     "instrument(s) provided but {n_endog} endogenous regressor(s) require "
     "at least {n_endog} (order condition: len(instruments) >= len(x_endog))"
 )
-INVALID_GMM_ITERATIONS = (
-    "gmm_iterations must be a positive integer: got {gmm_iterations}"
+INVALID_GMM_MAX_ITER = (
+    "gmm_max_iter must be at least 3 (counting the initial estimate), got "
+    '{max_iter}; use gmm_type="two_step" for a two-step GMM'
 )
-INVALID_GMM_TOL = "gmm_tol must be a positive number, got {gmm_tol}"
+UNKNOWN_GMM_TYPE = (
+    "unknown gmm_type: '{other}'. Expected one of 'one_step', 'two_step', "
+    "or 'iterated'"
+)
+GMM_ITER_OPTIONS_WITH_NON_ITERATED_TYPE = (
+    "gmm_max_iter and gmm_tol can only be used with "
+    'gmm_type="iterated" (got gmm_type="{gmm_type}")'
+)
+INVALID_GMM_TOL = "gmm_tol must be a positive finite number, got {gmm_tol}"
 INSUFFICIENT_CLUSTERS_FOR_WEIGHT_MATRIX = (
     "gmm_weight_type='cluster' requires at least l clusters (l+1 if exactly "
     "identified) for the moment weight matrix: got g={g} clusters for l={l} "

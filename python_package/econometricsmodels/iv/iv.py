@@ -93,7 +93,9 @@ class IV:
                 overlap, `x_endog` or `instruments` is empty,
                 insufficient observations, `confidence_level` out of
                 range, an unknown `cov_type` or (`method="gmm"` only)
-                `gmm_weight_type` string, or too few instruments for
+                `gmm_type`/`gmm_weight_type` string, `gmm_max_iter`/
+                `gmm_tol` given with a `gmm_type` other than
+                `"iterated"`, or too few instruments for
                 identification). A subclass of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. a singular first- or second-stage
@@ -210,17 +212,19 @@ class IVResults:
     def converged(self) -> bool:
         """Whether GMM iteration converged (`method="gmm"` only).
 
-        Only meaningful when `IVOptions.gmm_tol` is set (fixed
-        iteration count otherwise trivially satisfies convergence).
-        Always `True` for `method="2sls"` (2SLS is a closed-form,
-        non-iterative estimator).
+        Only meaningful for `gmm_type="iterated"`; always `True` for
+        `"one_step"`/`"two_step"` (which never check convergence) and
+        for `method="2sls"` (2SLS is a closed-form, non-iterative
+        estimator).
         """
         return self._raw.converged
 
     @property
     def n_iter(self) -> int:
-        """Number of GMM iterations actually run (`method="gmm"`
-        only). Always `1` for `method="2sls"`."""
+        """Number of GMM estimations actually run, counting the initial
+        estimate (`method="gmm"` only): 1 for `"one_step"`, 2 for
+        `"two_step"`, at most `gmm_max_iter` for `"iterated"`. Always
+        `1` for `method="2sls"`."""
         return self._raw.n_iter
 
     @property
@@ -238,8 +242,17 @@ class IVResults:
     def gmm_weight_type(self) -> str | None:
         """Weight matrix actually used for GMM point estimation
         (normalized to lowercase). Only meaningful for `method="gmm"`;
-        always `None` for `method="2sls"`, which has no such concept."""
+        always `None` for `method="2sls"`, which has no such concept,
+        and for `gmm_type="one_step"`, which does not use a weight
+        type."""
         return self._raw.gmm_weight_type
+
+    @property
+    def gmm_type(self) -> str | None:
+        """GMM estimation type actually used (normalized to
+        lowercase): `"one_step"`, `"two_step"` or `"iterated"`. Always
+        `None` for `method="2sls"`."""
+        return self._raw.gmm_type
 
     @property
     def r_squared(self) -> float:

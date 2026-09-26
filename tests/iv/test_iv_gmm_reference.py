@@ -118,12 +118,12 @@ def _check_result(
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
 
-    # check_overid=False: gmm_iterations=1のHansen J（過剰識別検定）専用の抜け穴。
+    # check_overid=False: one_step（linearmodelsのiter_limit=1）のHansen J（過剰識別検定）専用の抜け穴。
     # gmm_weight_type="unadjusted"はSがZ'Zに固定され残差に依存しないため、係数・SEは
-    # gmm_iterations=1/2/3で完全に一致する（実測確認済み）。本実装のHansen Jも
-    # この不変性を保ち、gmm_iterations=1でもgmm_iterations>=2（2SLSのSarganと機械
+    # one_step/two_step/iterated（iter_limit=1/2/3）で完全に一致する（実測確認済み）。本実装のHansen Jも
+    # この不変性を保ち、one_stepでもtwo_step以降（2SLSのSarganと機械
     # 精度一致）と同じ値を返す（`gmm.rs`のσ̂²·Z'Zスケーリング設計、モジュールdoc
-    # コメント「Hansen Jのgmm_iterations=1...のSは...」参照）。しかしlinearmodelsの
+    # コメント「Hansen Jの1-step GMM...のSは...」参照）。しかしlinearmodelsの
     # `IVGMM.fit(iter_limit=1)`のj_statはこの不変性を持たず、iter_limit=2/3の値
     # （2SLSのSarganと一致）とは異なる値を返す（実測: 0.30086708530935663 vs
     # 0.32832429087644643）。原因判明済み（`linearmodels`ソース実機調査）:
@@ -134,7 +134,7 @@ def _check_result(
     # `gmm_weight_type=Unadjusted`のHansen Jに常にσ̂²スケーリング込みの重みを
     # 使う設計（ユーザー確認済み）のため、`iter_limit=1`固有の規約の違いに
     # よる原理的に一致しえない差異と判明した（バグではない）。
-    # gmm_iterations=1のときはoverid_statistic/overid_p_valueの比較のみ除外する
+    # one_stepのときはoverid_statistic/overid_p_valueの比較のみ除外する
     # （係数・SE等の他の統計量は引き続き比較する）。
     if check_overid:
         if ref["hansen_j_statistic"] is None:
@@ -290,9 +290,26 @@ def test_kernel_hac_matches_linearmodels(fixtures):
     _check_result(res, fixtures["kernel_hac"], "kernel_hac")
 
 
+# linearmodelsの`iter_limit`（初回推定を含む推定回数）ごとの対応する本実装の
+# オプション。固定回数の反復は公開APIから消えたため、`iter_limit=3`は
+# `gmm_type="iterated"`・`gmm_max_iter=3`に、収束しない極小の`gmm_tol`と
+# `raise_on_non_convergence=False`を組み合わせて再現する（係数が
+# 機械精度で先に収束していても、linearmodelsの3回目の推定値との差は
+# 許容誤差より十分小さい）。
+_GMM_TYPE_OPTIONS = {
+    1: {"gmm_type": "one_step"},
+    3: {
+        "gmm_type": "iterated",
+        "gmm_max_iter": 3,
+        "gmm_tol": 1e-300,
+        "raise_on_non_convergence": False,
+    },
+}
+
+
 @pytest.mark.parametrize("n_iter", [1, 3])
-def test_gmm_iterations_matches_linearmodels(fixtures, n_iter):
-    """`gmm_iterations`が既定値（2）以外（1: 1-step、3: iterated固定回数モード）
+def test_gmm_type_matches_linearmodels(fixtures, n_iter):
+    """`gmm_type`が既定値（`"two_step"`）以外（`"one_step"`・`"iterated"`）
     でも主リファレンスと一致することを確認する（`testing-completeness-reviewer`
     指摘）。
     """
@@ -301,7 +318,7 @@ def test_gmm_iterations_matches_linearmodels(fixtures, n_iter):
         method="gmm",
         gmm_weight_type="unadjusted",
         cov_type="classical",
-        gmm_iterations=n_iter,
+        **_GMM_TYPE_OPTIONS[n_iter],
     )
     res = IV(
         df,

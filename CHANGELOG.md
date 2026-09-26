@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Breaking**: Tobit: `predict()`/`augment()` now take `new_data` as the first argument and `target` second (`predict(new_data=None, target="expected_observed")`), matching the other methods' `predict(new_data)`
 - **Breaking**: OLS / WLS / IV: renamed `r_squared_adj` to `adj_r_squared` (result property, and the corresponding engine/pybind fields), matching the word order of `pseudo_r_squared`
 - **Breaking**: Logit / Probit / Tobit: the estimate key of `marginal_effects()` renamed from `dydx` to `effect` (and `MarginalEffectsResult.dydx` likewise); it corresponds to `dy/dx` in Stata's `margins, dydx(*)` and statsmodels
+- **Breaking**: IV: the GMM estimation type is now chosen by name instead of an iteration count. `IVOptions.gmm_iterations` is removed in favor of `gmm_type` (`"one_step"` / `"two_step"` (default) / `"iterated"`); `gmm_max_iter` (at least 3, counting the initial estimate; effective default 100) and `gmm_tol` (effective default 1e-6) apply only to `"iterated"` and raise `ValidationError` with the other types. `"one_step"` no longer accepts/validates `gmm_weight_type`. `IVResults` gains `gmm_type`
 
 ## [0.7.0] - 2026-09-22
 

@@ -51,10 +51,11 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 | `cluster_col` | `str \| None` | `None` | `cov_type="cluster"`時（`gmm_weight_type="cluster"`とも共用）のグループキー列名 |
 | `hac_lags` | `int \| None` | `None` | `cov_type="hac"`時（`gmm_weight_type="kernel"`とも共用）のラグ数。`None`なら自動計算 |
 | `time_col` | `str \| None` | `None` | `cov_type="hac"`時（`gmm_weight_type="kernel"`とも共用）の時系列順序列 |
-| `gmm_weight_type` | `str` | `"unadjusted"` | GMMの点推定に使う重み行列（`method="gmm"`のみ）: `"unadjusted"`（別名`"homoskedastic"`）/ `"robust"`（別名`"heteroskedastic"`）/ `"cluster"` / `"kernel"`。`method="2sls"`では無視 |
-| `gmm_iterations` | `int` | `2` | GMM反復回数（`method="gmm"`のみ）: `2`＝efficient two-step、`1`＝1-step、`3`以上＝iterated GMM |
-| `gmm_tol` | `float \| None` | `None` | `Some`のとき`gmm_iterations`を「収束判定の上限反復回数（安全弁）」として扱う（併用方式） |
-| `raise_on_non_convergence` | `bool` | `True` | `gmm_tol`設定時、収束しなければ`True`でエラー、`False`で`converged=False`のまま結果を返す |
+| `gmm_weight_type` | `str` | `"unadjusted"` | GMMの点推定に使う重み行列（`method="gmm"`のみ）: `"unadjusted"`（別名`"homoskedastic"`）/ `"robust"`（別名`"heteroskedastic"`）/ `"cluster"` / `"kernel"`。`method="2sls"`と`gmm_type="one_step"`では無視 |
+| `gmm_type` | `str` | `"two_step"` | GMMの推定方式（`method="gmm"`のみ）: `"one_step"`（1段階、重み`(Z'Z)⁻¹`のみ）/ `"two_step"`（2段階の効率的GMM）/ `"iterated"`（収束まで反復）。大文字小文字は区別しない |
+| `gmm_max_iter` | `int \| None` | `None` | `"iterated"`の最大推定回数（初回推定を含む、3以上）。`None`は実効既定値`100`。`"one_step"`/`"two_step"`で指定すると`ValidationError` |
+| `gmm_tol` | `float \| None` | `None` | `"iterated"`の収束許容誤差。`None`は実効既定値`1e-6`。`"one_step"`/`"two_step"`で指定すると`ValidationError` |
+| `raise_on_non_convergence` | `bool` | `True` | `gmm_type="iterated"`で収束しなければ`True`でエラー、`False`で`converged=False`のまま結果を返す。それ以外の`gmm_type`では無視 |
 
 - **`cluster_col`/`hac_lags`/`time_col`は`cov_type`と`gmm_weight_type`（GMM）で共用する**
   （`IVOptions`に別フィールドを増やさない設計。異なるクラスター変数を使い分けたいニーズが
@@ -67,7 +68,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 - **丁度識別（`len(instruments) == len(x_endog)`）では、GMMの点推定は`gmm_weight_type`に
   よらず2SLSと数値的に一致する**（GMMの一般的性質: モーメント条件を正確に0にできるため
   重み行列が点推定に影響しない）。共通GMM推定コアで自然に吸収され、特別な分岐は不要。
-- **2SLSはGMMの特殊ケース**（`gmm_weight_type="unadjusted"`、`gmm_iterations=1`）として点推定は
+- **2SLSはGMMの特殊ケース**（`gmm_weight_type="unadjusted"`、`gmm_type="one_step"`）として点推定は
   数値的に一致するが、実装（`TwoSlsEstimator`/`GmmEstimator`）は意図的に独立させている
   （`TwoSlsEstimator`は`cov_type`対応の推論統計量一式・Sargan・Wu-Hausmanを持つのに対し
   `GmmEstimator`はそれらを持たないため、委譲すると過剰設計になる）。
@@ -93,7 +94,9 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   `method="2sls"`では概念自体が存在しないため常に`None`。
 - **`converged`/`n_iter`**: `method="2sls"`では常に`converged=true`・`n_iter=1`
   （2SLSは閉形式・非反復のため）。`method="gmm"`では実際の反復回数・収束判定結果を返す
-  （`gmm_tol=None`のときは固定回数モードのため常に`converged=true`）。
+  （`gmm_type="iterated"`以外は収束判定を行わないため常に`converged=true`、`n_iter`は1・2）。
+- **`gmm_type`**: `method="gmm"`では実際に使った推定方式（小文字に正規化）、`method="2sls"`では常に`None`。
+  `gmm_type="one_step"`では`gmm_weight_type`は使われないため結果の`gmm_weight_type`も`None`。
 - **`n_entities`は含めない**（IVはパネル構造を前提としない）。
 - **`log_likelihood`/`aic`/`bic`は除外する**（2SLS/GMMは尤度ベースの推定法ではなく、
   Stataの`ivregress`もデフォルトでは出力しない。正規性を仮定した疑似尤度を計算して
@@ -158,8 +161,8 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   特異になる問題は別軸**（`cov_type=Cluster`の`G<=q`とは対象・閾値が異なる）。
   過剰識別（`l>k`）は`G<l`、丁度識別（`l==k`）は`G<=l`（`Z'ê=0`により`rank(S)≤G-1`）で
   `IvError::InsufficientClustersForWeightMatrix`＝`ValidationError`。`fit()`冒頭で
-  `gmm_iterations`によらず常に検証する（`gmm_iterations=1`でも`gmm_weight_type`の設定ミスは
-  見逃さない方針）。悪条件の`ComputationError`はbackstopとして残る。
+  `gmm_type="two_step"`/`"iterated"`のとき検証する（`"one_step"`は`gmm_weight_type`を
+  使わないため検証しない）。悪条件の`ComputationError`はbackstopとして残る。
 
 ### 3.2 検定分布
 
@@ -175,23 +178,35 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   照合時は`debiased=True`を明示指定する必要がある）。GMM側は`linearmodels`の既定
   （`debiased=False`→z分布）と一致する。
 
-### 3.3 GMM反復（`gmm_iterations`/`gmm_tol`）
+### 3.3 GMMの推定方式（`gmm_type`/`gmm_max_iter`/`gmm_tol`）
 
-- **用語**: 「1-step GMM」（`gmm_iterations=1`）は残差に基づく重みの再構築を一切行わず
-  アドホックな`W₀=(Z'Z)⁻¹`のみで打ち切る推定（`gmm_weight_type`によらず常に2SLSと同じ
-  結果）。「2-step efficient GMM」（`gmm_iterations=2`、既定）は「初期推定→残差からS構築
-  →S⁻¹で再推定」の2段階手続き。`gmm_iterations`はこの反復を`while`ループでN回まで
-  繰り返すだけの実装で、1-step/2-step/iterated間でアルゴリズムを分岐させる必要はない。
-- **`gmm_tol`設定時**: `gmm_iterations`は「収束判定の上限反復回数（安全弁）」に
-  なる。収束判定は係数のelementwise・絶対誤差と相対誤差の併用（`tol = max(rtol * |前回値|,
+- **用語**: 「1-step GMM」（`gmm_type="one_step"`）は残差に基づく重みの再構築を一切行わず
+  アドホックな`W₀=(Z'Z)⁻¹`のみで打ち切る推定（2SLSと同じ結果）。「2-step efficient GMM」
+  （`"two_step"`、既定）は「初期推定→残差からS構築→S⁻¹で再推定」の2段階手続き。
+  「反復GMM」（`"iterated"`）はこの手続きを収束するまで（または上限まで）繰り返す。
+  実装は「直前の残差からSを再構築→再推定」を`while`ループで繰り返すだけで、方式間で
+  アルゴリズムを分岐させる必要はない。
+- **選択肢を方式名にした理由**: 利用者が選びたいのは推定方式であり回数ではない。回数の整数で
+  表すと「2が2段階GMM」という対応を知らないと読めず、許容誤差の有無で意味が切り替わる。
+  将来CUEを足す場合も`gmm_type="cue"`を足すだけで済む。「ちょうどn回で打ち切る反復」は
+  実務上の需要がないため表現しない。
+- **`gmm_max_iter`/`gmm_tol`は`"iterated"`専用**: `"one_step"`/`"two_step"`で指定すると
+  `ValidationError`。`IVOptions`は既定値と明示指定を区別できないため既定値は`None`とし、
+  `"iterated"`のときだけ実効既定値（`gmm_max_iter=100`、`gmm_tol=1e-6`）に解決する。
+  `method="2sls"`のときは他のオプション同様に黙って無視する。
+- **`gmm_max_iter`は初回推定を含めて数え、3以上を必須とする**（linearmodelsの`iter_limit`と
+  同じ数え方）。上限2回の反復は「two_stepに収束判定を付けたもの」になり紛らわしいため、
+  2段階が欲しい場合は`gmm_type="two_step"`を使う（エラーメッセージでも案内する）。
+- **収束判定**: 係数のelementwise・絶対誤差と相対誤差の併用（`tol = max(rtol * |前回値|,
   atol)`、`atol`は内部固定値`1e-8`）。全係数が満たして初めて収束とする。
 - **未収束時の挙動**: `raise_on_non_convergence=true`（既定）なら`IvError::
   GmmNonConvergence`（`ComputationError`）、`false`なら`converged=false`のまま結果を返す
   （MLEの`raise_on_non_convergence=false`→`converged=False`と同じ意味論）。
-- **`gmm_iterations=1`は比較対象となる前回推定値が無いため、`gmm_tol`の指定有無に
-  よらずトリビアルに`converged=true`**。
-- **`gmm_iterations=1`でも`gmm_weight_type`引数自体の妥当性は常に検証する**（点推定には
-  影響しなくても、`Cluster`の`groups`未指定等の設定ミスは黙って成功させない）。
+  `raise_on_non_convergence`・`converged`が意味を持つのは`"iterated"`のときだけで、
+  `"one_step"`/`"two_step"`は常に`converged=true`、`n_iter`は実際の推定回数（1・2）。
+- **engine層の型**: 矛盾した組み合わせを型で表現できないよう、`GmmType::{OneStep,
+  TwoStep { weight }, Iterated { weight, max_iter, tol }}`のenumにし、`weight_type`も
+  バリアントに含める。`OneStep`は`weight_type`を持たない（検証もしない）。
 
 ### 3.4 弱操作変数診断（`weak_instrument_f_statistics`）
 
@@ -220,9 +235,9 @@ Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含�
 - **Hansen J検定**（`gmm.rs`）は点推定に使った重み行列`S`（`gmm_weight_type`依存）をそのまま
   流用するのが定義そのもの（`J=(Z'ê)'S⁻¹(Z'ê)`）。`S`は`n`で正規化していない生の和のため
   `n`で割ってはならない（標準形`J=n·ḡₙ'Ŝ⁻¹ḡₙ`に代入すると`n`は完全に相殺する）。
-  `gmm_iterations=1`・`gmm_weight_type=Unadjusted`時の`S`は`σ̂²・Z'Z`（`σ̂²`スケーリング必須、
+  `one_step`・`gmm_weight_type=Unadjusted`時の`S`は`σ̂²・Z'Z`（`σ̂²`スケーリング必須、
   Unadjusted以外の`Robust`/`Cluster`/`Kernel`と絶対スケールを揃えるため）。
-  `gmm_weight_type=Unadjusted`かつ`gmm_iterations=2`のHansen Jは2SLSのSargan統計量と数値的に
+  `gmm_weight_type=Unadjusted`かつ`two_step`のHansen Jは2SLSのSargan統計量と数値的に
   一致する。
 - どちらも計算失敗は`None`にせず`IvError`として伝播する（使う行列はいずれも点推定計算で
   既に反転成功済みの行列の再利用であり、理論上ここでの特異性は到達不能なため）。

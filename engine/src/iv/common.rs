@@ -98,20 +98,20 @@ pub enum IvError {
     #[error("hac_lags must be in the range [0, n): got {hac_lags}, n={n}")]
     InvalidHacLags { hac_lags: i64, n: usize },
 
-    /// `gmm_iterations`が1未満。
+    /// `gmm_type="iterated"`の`gmm_max_iter`が3未満。
     ///
-    /// 当初は1（1-step GMM）・2（2-step efficient GMM）の2値のみを許容していたが、
-    /// 後に3以上（iterated GMM）・収束条件（`gmm_tol`）ベースの反復に一般化した
-    /// （`gmm_tol`指定時は`gmm_iterations`が最大反復回数＝安全弁として働く、
-    /// `gmm.rs`の`fit()`参照）。いずれのモードでも1以上であることは共通の前提のため、
-    /// この検証自体は残す。
-    #[error("gmm_iterations must be a positive integer: got {gmm_iterations}")]
-    InvalidGmmIterations { gmm_iterations: i64 },
+    /// 上限を初回推定を含めて数えるため、2回以下の反復は2段階GMMに収束判定を付けただけに
+    /// なり紛らわしい。2段階が欲しい場合は`gmm_type="two_step"`を使う。
+    #[error(
+        "gmm_max_iter must be at least 3 (counting the initial estimate), got {max_iter}; \
+         use gmm_type=\"two_step\" for a two-step GMM"
+    )]
+    InvalidGmmMaxIter { max_iter: i64 },
 
-    /// `gmm_tol`（`Some`のとき）が0以下。
+    /// `gmm_type="iterated"`の`gmm_tol`が正の有限値でない（0以下・NaN・inf）。
     ///
     /// 収束判定の許容誤差として意味を持たないため。
-    #[error("gmm_tol must be a positive number, got {gmm_tol}")]
+    #[error("gmm_tol must be a positive finite number, got {gmm_tol}")]
     InvalidGmmTol { gmm_tol: f64 },
 
     /// `method="gmm"`かつ`gmm_weight_type=Cluster`で、クラスター数`g`がモーメント条件の重み行列
@@ -131,8 +131,8 @@ pub enum IvError {
     )]
     InsufficientClustersForWeightMatrix { g: usize, l: usize },
 
-    /// `raise_on_non_convergence=true`（既定）かつ`gmm_tol`指定時、`gmm_iterations`回
-    /// （収束モードでの上限反復回数）以内に係数が収束しなかった。
+    /// `raise_on_non_convergence=true`（既定）かつ`gmm_type="iterated"`で、`gmm_max_iter`回
+    /// （初回推定を含む上限回数）以内に係数が収束しなかった。
     ///
     /// `nonlinear::common::MleError::NonConvergence`と同型のメッセージ・意味論
     /// （`raise_on_non_convergence=false`にすると`converged=false`のまま結果を返す）。
@@ -143,7 +143,7 @@ pub enum IvError {
     /// この差は意図的と判断）。
     #[error(
         "GMM failed to converge after {n_iter} iterations. Set raise_on_non_convergence=False \
-         to receive the result anyway, or increase gmm_iterations"
+         to receive the result anyway, or increase gmm_max_iter"
     )]
     GmmNonConvergence { n_iter: usize },
 

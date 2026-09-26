@@ -53,7 +53,7 @@
 use std::collections::HashMap;
 
 use engine::iv::common::{IvError, IvInput, compute_first_stage};
-use engine::iv::gmm::{GmmEstimator, WeightType};
+use engine::iv::gmm::{GmmEstimator, GmmType, WeightType};
 use engine::iv::two_sls::TwoSlsEstimator;
 use engine::linear::ols::CovType as EngineCovType;
 use engine::linear::ols::OlsEstimator;
@@ -100,7 +100,7 @@ pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
         IvError::Common(common) => common_error_to_pyerr(common),
         IvError::InsufficientInstruments { .. }
         | IvError::InvalidHacLags { .. }
-        | IvError::InvalidGmmIterations { .. }
+        | IvError::InvalidGmmMaxIter { .. }
         | IvError::InvalidGmmTol { .. }
         | IvError::InsufficientClustersForWeightMatrix { .. } => ValidationError::new_err(message),
         // `MleError::NonConvergence`（`nonlinear/common.rs`の`mle_error_to_pyerr`）と同じ
@@ -166,28 +166,38 @@ pub struct IVOptions {
 
     /// Weight matrix used for GMM point estimation (`method="gmm"` only): one of
     /// "unadjusted" (alias "homoskedastic"), "robust" (alias "heteroskedastic"),
-    /// "cluster", "kernel". Case-insensitive. Ignored when `method="2sls"`. "cluster"/"kernel"
+    /// "cluster", "kernel". Case-insensitive. Ignored when `method="2sls"` or
+    /// `gmm_type="one_step"`. "cluster"/"kernel"
     /// draw from the same `cluster_col`/`hac_lags`/`time_col` fields as `cov_type` (no separate
     /// fields; see module docstring "GMMのgmm_weight_type").
     #[pyo3(get, set)]
     pub gmm_weight_type: String,
 
-    /// Number of GMM iterations (`method="gmm"` only): 2 (default) for efficient
-    /// two-step GMM, 1 for one-step GMM, 3+ for iterated GMM. Ignored when `method="2sls"`.
+    /// GMM estimation type (`method="gmm"` only): "one_step" (weight matrix `(Z'Z)^-1`
+    /// only), "two_step" (default, efficient two-step GMM), or "iterated" (repeat until
+    /// convergence). Case-insensitive. Ignored when `method="2sls"`. `gmm_weight_type` is
+    /// not used by "one_step".
     #[pyo3(get, set)]
-    pub gmm_iterations: i64,
+    pub gmm_type: String,
 
-    /// Convergence tolerance for GMM iteration (`method="gmm"` only). When `None` (default),
-    /// `gmm_iterations` is treated as a fixed iteration count. When set, `gmm_iterations`
-    /// becomes the maximum number of iterations (safety valve) and iteration stops early once
-    /// coefficients converge within this tolerance. Ignored when `method="2sls"`.
+    /// Maximum number of GMM estimations for `gmm_type="iterated"`, counting the initial
+    /// estimate; must be at least 3 (use `gmm_type="two_step"` for two steps). `None`
+    /// (default) means 100 for "iterated". Specifying it with "one_step"/"two_step" raises
+    /// `ValidationError`. Ignored when `method="2sls"`.
+    #[pyo3(get, set)]
+    pub gmm_max_iter: Option<i64>,
+
+    /// Convergence tolerance for `gmm_type="iterated"` (`method="gmm"` only): iteration stops
+    /// once every coefficient changes by less than this (relative/absolute mix). `None`
+    /// (default) means 1e-6 for "iterated". Specifying it with "one_step"/"two_step" raises
+    /// `ValidationError`. Ignored when `method="2sls"`.
     #[pyo3(get, set)]
     pub gmm_tol: Option<f64>,
 
-    /// Whether to raise an error if GMM does not converge within `gmm_iterations` when
-    /// `gmm_tol` is set (`method="gmm"` only). If `False`, returns the result with
-    /// `converged=False` instead of raising. Ignored when `method="2sls"` or when
-    /// `gmm_tol` is `None`.
+    /// Whether to raise an error if `gmm_type="iterated"` does not converge within
+    /// `gmm_max_iter`. If `False`, returns the result with `converged=False` instead of
+    /// raising. Ignored for `gmm_type="one_step"`/`"two_step"` (which never check
+    /// convergence) and when `method="2sls"`.
     #[pyo3(get, set)]
     pub raise_on_non_convergence: bool,
 }
@@ -204,7 +214,8 @@ impl IVOptions {
         hac_lags = None,
         time_col = None,
         gmm_weight_type = "unadjusted".to_string(),
-        gmm_iterations = 2,
+        gmm_type = "two_step".to_string(),
+        gmm_max_iter = None,
         gmm_tol = None,
         raise_on_non_convergence = true,
     ))]
@@ -218,7 +229,8 @@ impl IVOptions {
         hac_lags: Option<i64>,
         time_col: Option<String>,
         gmm_weight_type: String,
-        gmm_iterations: i64,
+        gmm_type: String,
+        gmm_max_iter: Option<i64>,
         gmm_tol: Option<f64>,
         raise_on_non_convergence: bool,
     ) -> Self {
@@ -231,7 +243,8 @@ impl IVOptions {
             hac_lags,
             time_col,
             gmm_weight_type,
-            gmm_iterations,
+            gmm_type,
+            gmm_max_iter,
             gmm_tol,
             raise_on_non_convergence,
         }
@@ -241,7 +254,7 @@ impl IVOptions {
         format!(
             "IVOptions(method={:?}, cov_type={:?}, include_intercept={}, \
              confidence_level={}, cluster_col={:?}, hac_lags={:?}, time_col={:?}, \
-             gmm_weight_type={:?}, gmm_iterations={}, gmm_tol={:?}, \
+             gmm_weight_type={:?}, gmm_type={:?}, gmm_max_iter={:?}, gmm_tol={:?}, \
              raise_on_non_convergence={})",
             self.method,
             self.cov_type,
@@ -251,7 +264,8 @@ impl IVOptions {
             self.hac_lags,
             self.time_col,
             self.gmm_weight_type,
-            self.gmm_iterations,
+            self.gmm_type,
+            self.gmm_max_iter,
             self.gmm_tol,
             self.raise_on_non_convergence,
         )
@@ -328,14 +342,14 @@ pub struct IVResult {
     pub df_model: usize,
     /// Whether GMM iteration converged (`method="gmm"` only). Always `true` for
     /// `method="2sls"` (2SLS is a closed-form, non-iterative estimator, so convergence is
-    /// trivially satisfied — mirrors `GmmEstimator`'s own `gmm_iterations=1` convention,
-    /// `engine/src/iv/gmm.rs`参照). When `IVOptions.gmm_tol` is `None` (fixed
-    /// iteration count, the default), always `true` — convergence is only actually checked
-    /// when `gmm_tol` is set (`docs/spec/iv-spec.md` 3.3節).
+    /// trivially satisfied). Also always `true` for `gmm_type="one_step"`/`"two_step"` —
+    /// convergence is only actually checked for `gmm_type="iterated"`
+    /// (`docs/spec/iv-spec.md` 3.3節).
     #[pyo3(get)]
     pub converged: bool,
-    /// Number of GMM iterations actually run (`method="gmm"` only). Always `1` for
-    /// `method="2sls"`.
+    /// Number of GMM estimations actually run, counting the initial estimate
+    /// (`method="gmm"` only): 1 for "one_step", 2 for "two_step", at most `gmm_max_iter`
+    /// for "iterated". Always `1` for `method="2sls"`.
     #[pyo3(get)]
     pub n_iter: i64,
     /// Standard error type actually used (echoes `IVOptions.cov_type`, normalized to
@@ -353,9 +367,14 @@ pub struct IVResult {
     /// than canonicalized to its primary name (`parse_weight_type` accepts both but
     /// does not rewrite the string). `Some` only for `method="gmm"` (mirrors
     /// `overid_statistic`/`wu_hausman_statistic`'s use of `None` for "not applicable to
-    /// this method"); always `None` for `method="2sls"`, which has no such concept.
+    /// this method"); always `None` for `method="2sls"`, which has no such concept, and
+    /// for `gmm_type="one_step"`, which does not use a weight type.
     #[pyo3(get)]
     pub gmm_weight_type: Option<String>,
+    /// GMM estimation type actually used (echoes `IVOptions.gmm_type`, normalized to
+    /// lowercase): `"one_step"`, `"two_step"` or `"iterated"`. `None` for `method="2sls"`.
+    #[pyo3(get)]
+    pub gmm_type: Option<String>,
     #[pyo3(get)]
     pub f_statistic: f64,
     #[pyo3(get)]
@@ -477,6 +496,70 @@ fn parse_weight_type(df: &DataFrame, options: &IVOptions) -> PyResult<(WeightTyp
     };
 
     Ok((gmm_weight_type, weight_type_lower))
+}
+
+/// `IVOptions.gmm_type`/`gmm_max_iter`/`gmm_tol`をパースして`engine::iv::gmm::GmmType`を
+/// 組み立てる（`method="gmm"`のみで使用）。
+///
+/// 戻り値は`(GmmType, 正規化済み小文字のgmm_type, 正規化済み小文字のgmm_weight_type)`。
+/// `"one_step"`は`gmm_weight_type`を使わない（検証もしない）ため3つ目は`None`。
+/// `gmm_max_iter`/`gmm_tol`の既定値は`None`で、`"iterated"`のときだけ実効既定値
+/// （`100`/`1e-6`）に解決する（`IVOptions`はpyclassで既定値と明示指定を区別できないため）。
+///
+/// # Errors
+/// - `gmm_type`が未知の値: `ValidationError`
+/// - `"one_step"`/`"two_step"`で`gmm_max_iter`/`gmm_tol`が指定された: `ValidationError`
+/// - `"iterated"`で`gmm_max_iter`が3未満（負値を含む）、`gmm_tol`が0以下:
+///   `IvError::InvalidGmmMaxIter`/`InvalidGmmTol`（engineの検証）
+/// - `"two_step"`/`"iterated"`で`gmm_weight_type`が未知の値: `ValidationError`
+fn parse_gmm_type(
+    df: &DataFrame,
+    options: &IVOptions,
+) -> PyResult<(GmmType, String, Option<String>)> {
+    const DEFAULT_MAX_ITER: usize = 100;
+    const DEFAULT_TOL: f64 = 1e-6;
+
+    let gmm_type_lower = options.gmm_type.to_lowercase();
+    match gmm_type_lower.as_str() {
+        "one_step" | "two_step" => {
+            if options.gmm_max_iter.is_some() || options.gmm_tol.is_some() {
+                return Err(ValidationError::new_err(format!(
+                    "gmm_max_iter and gmm_tol can only be used with gmm_type=\"iterated\" \
+                     (got gmm_type=\"{gmm_type_lower}\")"
+                )));
+            }
+            if gmm_type_lower == "one_step" {
+                return Ok((GmmType::OneStep, gmm_type_lower, None));
+            }
+            let (weight, weight_lower) = parse_weight_type(df, options)?;
+            Ok((
+                GmmType::TwoStep { weight },
+                gmm_type_lower,
+                Some(weight_lower),
+            ))
+        }
+        "iterated" => {
+            let (weight, weight_lower) = parse_weight_type(df, options)?;
+            let max_iter = match options.gmm_max_iter {
+                Some(v) => usize::try_from(v)
+                    .map_err(|_| iv_error_to_pyerr(IvError::InvalidGmmMaxIter { max_iter: v }))?,
+                None => DEFAULT_MAX_ITER,
+            };
+            let tol = options.gmm_tol.unwrap_or(DEFAULT_TOL);
+            Ok((
+                GmmType::Iterated {
+                    weight,
+                    max_iter,
+                    tol,
+                },
+                gmm_type_lower,
+                Some(weight_lower),
+            ))
+        }
+        other => Err(ValidationError::new_err(format!(
+            "unknown gmm_type: '{other}'. Expected one of 'one_step', 'two_step', or 'iterated'"
+        ))),
+    }
 }
 
 /// Pythonから渡された `data` / `y` / `x_exog` / `x_endog` / `instruments` / `options` を
@@ -619,7 +702,8 @@ pub(crate) fn build_iv_input(
 /// # Errors
 /// - `build_iv_input`が返すエラー（列抽出・y/x_exog/x_endog/instrumentsの重複・
 ///   `"const"`列衝突・`method`/`cov_type`文字列の検証等）は`ValidationError`
-/// - `method="gmm"`で`gmm_weight_type`の文字列が不正: `ValidationError`（`parse_weight_type`参照）
+/// - `method="gmm"`で`gmm_type`/`gmm_weight_type`の文字列が不正、または`gmm_type`と
+///   `gmm_max_iter`/`gmm_tol`の組み合わせが矛盾: `ValidationError`（`parse_gmm_type`参照）
 /// - `TwoSlsEstimator::fit`/`GmmEstimator::fit`/`compute_first_stage`が返す
 ///   `engine::iv::common::IvError`（識別の順序条件・第一段階回帰の失敗・`cov_type`起因の
 ///   エラー・GMM固有のエラー等）は`iv_error_to_pyerr`で変換
@@ -657,12 +741,10 @@ pub(crate) fn fit(
             .map_err(iv_error_to_pyerr)?;
 
     if method_lower == "gmm" {
-        let (gmm_weight_type, weight_type_lower) = parse_weight_type(&df, options)?;
+        let (gmm_type, gmm_type_lower, weight_type_lower) = parse_gmm_type(&df, options)?;
         let estimator = GmmEstimator::fit(
             input,
-            gmm_weight_type,
-            options.gmm_iterations,
-            options.gmm_tol,
+            gmm_type,
             options.raise_on_non_convergence,
             cov_type,
             options.confidence_level,
@@ -686,7 +768,8 @@ pub(crate) fn fit(
             n_iter: estimator.n_iter(),
             cov_type: cov_type_lower,
             method: method_lower,
-            gmm_weight_type: Some(weight_type_lower),
+            gmm_weight_type: weight_type_lower,
+            gmm_type: Some(gmm_type_lower),
             f_statistic: estimator.f_statistic(),
             f_p_value: estimator.f_p_value(),
             r_squared: estimator.r_squared(),
@@ -725,6 +808,7 @@ pub(crate) fn fit(
         // `gmm_weight_type`はGMM専用の概念のため`method="2sls"`では常に`None`
         // （`IVResult.gmm_weight_type`のdocコメント参照）。
         gmm_weight_type: None,
+        gmm_type: None,
         f_statistic: estimator.f_statistic(),
         f_p_value: estimator.f_p_value(),
         r_squared: estimator.r_squared(),
@@ -755,7 +839,8 @@ mod tests {
             None,
             None,
             "unadjusted".to_string(),
-            2,
+            "two_step".to_string(),
+            None,
             None,
             true,
         )

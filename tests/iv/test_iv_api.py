@@ -39,13 +39,51 @@ def test_default_options_use_2sls_classical(iv_dataset):
 
 
 def test_gmm_method_runs_and_converges(iv_dataset):
-    """`method="gmm"`の既定オプション（`gmm_iterations=2`、2-step efficient
-    GMM）が成功パスで動作すること。
+    """`method="gmm"`の既定オプション（`gmm_type="two_step"`、2-step
+    efficient GMM）が成功パスで動作すること。
     """
     options = IVOptions(method="gmm")
     res = our_fit(iv_dataset, options=options)
     assert res.converged
     assert res.n_iter == 2
+    assert res.gmm_type == "two_step"
+
+
+def test_gmm_one_step_has_no_weight_type_and_runs_once(iv_dataset):
+    """`gmm_type="one_step"`は`gmm_weight_type`を使わず（不正な値でも
+    検証しない）、`gmm_weight_type`は`None`、`n_iter=1`で常に収束扱い。
+    """
+    options = IVOptions(
+        method="gmm", gmm_type="one_step", gmm_weight_type="not-a-type"
+    )
+    res = our_fit(iv_dataset, options=options)
+    assert res.gmm_type == "one_step"
+    assert res.gmm_weight_type is None
+    assert res.n_iter == 1
+    assert res.converged
+
+
+def test_gmm_type_is_case_insensitive_and_echoed_lowercase(iv_dataset):
+    options = IVOptions(method="gmm", gmm_type="Two_Step")
+    assert our_fit(iv_dataset, options=options).gmm_type == "two_step"
+
+
+def test_gmm_iterated_uses_effective_defaults(iv_dataset):
+    """`gmm_max_iter`/`gmm_tol`が`None`（既定）でも`"iterated"`では
+    実効既定値（100 / 1e-6）で反復し、収束すること。
+    """
+    options = IVOptions(
+        method="gmm", gmm_type="iterated", gmm_weight_type="robust"
+    )
+    res = our_fit(iv_dataset, options=options)
+    assert res.gmm_type == "iterated"
+    assert res.converged
+    assert 3 <= res.n_iter <= 100
+
+
+def test_gmm_type_is_none_for_2sls(iv_dataset):
+    res = our_fit(iv_dataset, options=IVOptions(method="2sls"))
+    assert res.gmm_type is None
 
 
 def test_cluster_g2_boundary_succeeds_when_x_exog_is_empty():
@@ -582,15 +620,16 @@ def test_weight_type_is_none_for_2sls_even_when_explicitly_set(iv_dataset):
 
 
 def test_gmm_tol_stops_before_max_iterations(iv_dataset):
-    """現実的な`gmm_tol`を指定すると、`gmm_iterations`の上限に達する
+    """現実的な`gmm_tol`を指定すると、`gmm_max_iter`の上限に達する
     前に収束判定を満たして反復を打ち切ること（`IVOptions.gmm_tol`の
     「早期収束」という主要な挙動、非収束のみを確認する既存テストと対になる）。
     """
     options = IVOptions(
         method="gmm",
+        gmm_type="iterated",
         gmm_weight_type="robust",
         gmm_tol=1e-4,
-        gmm_iterations=10,
+        gmm_max_iter=10,
     )
     res = our_fit(iv_dataset, options=options)
     assert res.converged
@@ -607,11 +646,12 @@ def test_gmm_raise_on_non_convergence_false_returns_converged_false(
     """
     options = IVOptions(
         method="gmm",
+        gmm_type="iterated",
         gmm_weight_type="robust",
         gmm_tol=1e-300,
-        gmm_iterations=2,
+        gmm_max_iter=3,
         raise_on_non_convergence=False,
     )
     res = our_fit(iv_dataset, options=options)
     assert res.converged is False
-    assert res.n_iter == 2
+    assert res.n_iter == 3

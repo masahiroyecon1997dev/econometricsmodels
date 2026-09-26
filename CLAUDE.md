@@ -92,9 +92,17 @@ econometricsmodels/
 
 ## 5. Git運用
 
+個人開発のため、リリース単位のブランチに作業を直接コミットする運用とする。
+
 - **コミットメッセージ**: Conventional Commits（`feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `ci:` 等）
-- **ブランチ戦略**: feature branch + PR必須を基本とし、機能追加はフェーズ単位でブランチを切る（例: `phase1-ols`, `phase1-wls`）
-- **マージ**: CIがgreenであることに加え、内容を確認してからmergeする（自動セルフマージはしない）
+- **ブランチ構成**:
+  - `main`: 公開済み（PyPIリリース済み）の状態。タグ付けの対象。
+  - `dev`: mainへマージする前の検証用。リリース作業中に発生した緊急のバグ・脆弱性対応の受け皿、およびDependabotの更新PRの向け先。
+  - `release/vX.Y.Z`: 次リリース用の作業ブランチ。リリースごとに作成し、機能実装・単発のfix/CI変更・ドキュメント更新を含む通常の作業はここに直接コミットする（手法・フェーズ単位のfeature branchは切らない）。
+- **緊急対応**: 脆弱性等で`release/*`と切り離して`dev`へ先に反映したい場合のみ、`fix/<内容>`等の短命ブランチを切り、`dev`へのPRでマージする。`dev`に入った変更は`release/*`へ取り込む（`git merge origin/dev`）。
+- **保護設定**: `main`と`dev`へはローカルからの直pushを禁止し、pull request経由のみとする（ブランチ保護）。
+- **リリースの流れ**: `release/vX.Y.Z` → `dev`（PR）→ `main`（PR）→ タグpush（詳細は`.claude/skills/release-publish/SKILL.md`）。
+- **マージ**: CIがgreenであることに加え、内容を確認してからmergeする（自動セルフマージはしない）。
 
 ## 6. コーディング規約
 

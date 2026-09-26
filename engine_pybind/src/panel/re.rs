@@ -174,7 +174,14 @@ pub struct REResult {
     #[pyo3(get)]
     pub std_errors: Vec<f64>,
     #[pyo3(get)]
-    pub t_stats: Vec<f64>,
+    pub test_stats: Vec<f64>,
+    /// Distribution of `test_stats`: `"t"` or `"normal"`.
+    #[pyo3(get)]
+    pub stat_dist: String,
+    /// Degrees of freedom of the t distribution (`None` for `"normal"`). May differ from
+    /// `df_resid` (e.g. cluster-robust inference uses `G - 1`).
+    #[pyo3(get)]
+    pub stat_df: Option<i64>,
     #[pyo3(get)]
     pub p_values: Vec<f64>,
     #[pyo3(get)]
@@ -363,7 +370,7 @@ pub(crate) fn build_re_input(
 /// `aic`/`bic`もそのまま`estimator()`委譲でよい——REの`df_model`が`OlsInput::k()`と自動的に
 /// 一致する設計のため、`OlsEstimator`委譲時点で既に正しい値になっている
 /// （`engine/src/panel/CLAUDE.md`「`df_resid`/`df_model`（`re-spec.md`3.3節）」参照。FEの
-/// `aic`/`bic`のようなRE独自の再計算は不要）。`std_errors`/`t_stats`/`p_values`/
+/// `aic`/`bic`のようなRE独自の再計算は不要）。`std_errors`/`test_stats`/`p_values`/
 /// `conf_lower`/`conf_upper`/`df_resid`/`df_model`/`f_statistic`/`f_p_value`/
 /// `r_squared_within`/`r_squared_between`/`r_squared_overall`/`hausman_statistic`/
 /// `hausman_p_value`/`hausman_df`は`ReEstimator`自身のgetterから取得する（`cov_type`・
@@ -396,7 +403,9 @@ pub(crate) fn fit(
     Ok(REResult {
         params: mat_to_vec(ols.params()),
         std_errors: mat_to_vec(estimator.std_errors()),
-        t_stats: mat_to_vec(estimator.t_stats()),
+        test_stats: mat_to_vec(estimator.test_stats()),
+        stat_dist: estimator.stat_dist().name().to_string(),
+        stat_df: estimator.stat_dist().df().map(|df| df as i64),
         p_values: mat_to_vec(estimator.p_values()),
         conf_lower: mat_to_vec(estimator.conf_lower()),
         conf_upper: mat_to_vec(estimator.conf_upper()),

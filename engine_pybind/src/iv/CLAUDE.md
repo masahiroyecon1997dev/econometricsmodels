@@ -42,6 +42,6 @@ Logitと同じ2段階に分けた。
 - **`wu_hausman_statistic`/`wu_hausman_p_value`は`estimator="gmm"`では常に`None`**（`GmmEstimator`はWu-Hausman検定を実装しない）。`overid_statistic`/`overid_p_value`は`estimator="gmm"`では`GmmEstimator::hansen_j_statistic()`/`hansen_j_p_value()`から構築する（Hansen J検定、`estimator="2sls"`のSargan検定と対）。
 - **`IVResult`に`converged: bool`/`n_iter: i64`を追加**（rust-reviewerの指摘: `raise_on_non_convergence=False`を指定してもGMMが収束したかをPython側で確認する手段が元々無かった、`LogitResult`/`ProbitResult`の`converged`/`n_iter`と同じ位置づけ）。`estimator="2sls"`では常に`converged=true`・`n_iter=1`（2SLSは閉形式・非反復のため）。
 
-## `IVResult.stats`の命名（`t_stats`/`z_stats`ではない理由）
+## `IVResult.test_stats`と`stat_dist`/`stat_df`
 
-`IVResult`は`estimator="2sls"`（t分布）・`estimator="gmm"`（z分布、`docs/spec/iv-spec.md`3.2節）の両方で共有される単一の型のため、`OLSResult.t_stats`・`LogitResult.z_stats`のような分布固定の名前は使えない。`engine::inference::InferenceStat`が同じ理由で`stat`という分布非依存の名前を使っている前例に倣い、`stats`とした（ユーザー確認済み、`docs/spec/iv-spec.md`2章に反映済み）。GMM側は`GmmEstimator::z_stats()`から配線する（`engine/src/iv/gmm.rs`参照、z分布で確定済み）。
+`IVResult`は`estimator="2sls"`（t分布）・`estimator="gmm"`（z分布、`docs/spec/iv-spec.md`3.2節）の両方で共有される単一の型のため、統計量は全手法共通の名前`test_stats`とし、分布は`stat_dist`（`"t"`/`"normal"`）と`stat_df`（t分布の自由度、正規分布は`None`）で示す（他の手法のResultsと同じ形。IVを`IV2SLS`/`IVGMM`に分ける案や、`t_stats`/`z_stats`の両方を持たせて片方を`None`にする案は、推定量を変えただけで結果の形が変わるため不採用）。`stat_dist`/`stat_df`は`TwoSlsEstimator::stat_dist()`/`GmmEstimator::stat_dist()`（`engine::inference::StatDist`）から配線する。2SLSの`cov_type="cluster"`は`df_resid`ではなく`G-1`を使うため、`stat_df`は`df_resid`と一致するとは限らない。

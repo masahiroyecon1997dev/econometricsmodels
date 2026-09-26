@@ -61,7 +61,7 @@ def extract_full_fit_stats(model, confidence_level: float = 0.95) -> dict:
         confidence_level: 信頼区間の信頼水準。
 
     Returns:
-        `coef`/`se`/`t_stats`/`p_values`/`conf_int`/`r_squared`/
+        `coef`/`se`/`test_stats`/`p_values`/`conf_int`/`r_squared`/
         `adj_r_squared`/`f_statistic`/`f_p_value`/`aic`/`bic`/
         `log_likelihood`/`nobs`/`df_resid`を含む辞書（パラメータ名の
         "Intercept"→"const"正規化済み）。
@@ -71,7 +71,7 @@ def extract_full_fit_stats(model, confidence_level: float = 0.95) -> dict:
 
     raw: dict = {
         **extract_coef_se(model),
-        "t_stats": {
+        "test_stats": {
             str(k): float(v) for k, v in model.tvalues.to_dict().items()
         },
         "p_values": {
@@ -85,7 +85,7 @@ def extract_full_fit_stats(model, confidence_level: float = 0.95) -> dict:
     # patsy（formula API）由来の生の切片名"Intercept"を、生成時点で本実装の
     # "const"へ正規化する（Rクロスチェック側`normalize_names`と同じ処理を
     # 生成時に揃える）。
-    result = normalize_names(raw, stat_key="t_stats")
+    result = normalize_names(raw, stat_key="test_stats")
     result["r_squared"] = float(model.rsquared)
     result["adj_r_squared"] = float(model.rsquared_adj)
     result["f_statistic"] = float(model.fvalue)

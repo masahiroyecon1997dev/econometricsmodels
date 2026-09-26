@@ -33,7 +33,7 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
 ## 2. 結果構造体
 
 `OLSResult`（`#[pyclass]`、`skip_from_py_object`）が公開する配列＋名前リスト:
-`params` / `std_errors` / `t_stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` /
+`params` / `std_errors` / `test_stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` /
 `residuals` / `dep_var_name` / `n_obs` / `cov_type`（実際に使われた種別の小文字文字列） /
 `r_squared` / `adj_r_squared` / `f_statistic` / `f_p_value` / `log_likelihood` / `aic` / `bic`。
 
@@ -46,7 +46,7 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
 - `summary()`（テキスト整形）・DataFrame版の`coef_table()`/`conf_int()`は作らない
   （economiconのGUIエンジンという用途上、テキスト表示・対話的操作を前提にしないため）。
 - python_package層（`OLSResults`）:
-  - `params`/`std_errors`/`t_stats`/`p_values`/`conf_int`: 係数名→値の`dict`（O(1)取り出し用）。
+  - `params`/`std_errors`/`test_stats`/`p_values`/`conf_int`: 係数名→値の`dict`（O(1)取り出し用）。
   - `coef_table()`: 行指向`list[dict]`（REST APIレスポンスにそのまま使える形）。
   - `residuals`: `list[float]`をそのまま素通し。
 

@@ -135,7 +135,7 @@ def test_coef_table_structure(iv_dataset):
         "param",
         "coef",
         "std_err",
-        "stat",
+        "test_stat",
         "p_value",
         "conf_lower",
         "conf_upper",
@@ -161,7 +161,7 @@ def test_params_std_errors_stats_p_values_share_keys(iv_dataset):
 
     assert set(res.params.keys()) == expected_keys
     assert set(res.std_errors.keys()) == expected_keys
-    assert set(res.stats.keys()) == expected_keys
+    assert set(res.test_stats.keys()) == expected_keys
     assert set(res.p_values.keys()) == expected_keys
 
 

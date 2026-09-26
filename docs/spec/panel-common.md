@@ -65,7 +65,7 @@ OLS（`OLSResult`、`engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
 
 | フィールド | 由来 | 備考 |
 |---|---|---|
-| `params` / `std_errors` / `t_stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` | OLS共通 | 検定分布はt分布で統一（3.3節） |
+| `params` / `std_errors` / `test_stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` | OLS共通 | 検定分布はt分布で統一（3.3節） |
 | `residuals` / `dep_var_name` | OLS共通 | そのまま踏襲 |
 | `n_obs` | Logit由来の表記 | OLS/WLSも`n_obs`に統一済み |
 | `df_resid` / `df_model` | Logit由来、パネル向けに新規追加 | OLSには無いが、FEは自由度調整が`n - n_entities - k`という非自明な式になるため明示的に返す価値が高い |

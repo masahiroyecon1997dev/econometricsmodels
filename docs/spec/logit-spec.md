@@ -41,7 +41,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 ## 2. 結果構造体
 
-`LogitResult`（`#[pyclass]`）が公開する配列＋名前リスト: `params` / `std_errors` / `z_stats`
+`LogitResult`（`#[pyclass]`）が公開する配列＋名前リスト: `params` / `std_errors` / `test_stats`
 （**z検定**、t検定ではない） / `p_values` / `conf_lower` / `conf_upper` / `param_names` /
 `log_likelihood` / `log_likelihood_null` / `lr_statistic` / `lr_p_value` / `pseudo_r_squared`
 （McFadden） / `aic` / `bic` / `n_obs` / `df_model` / `df_resid` / `converged` / `n_iter` /
@@ -57,9 +57,9 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   ならないため、`lr_statistic`が負になったりp値が統計的に意味の薄い値になったりしうる
   （statsmodels準拠の仕様上の挙動）。`df_model==0`のとき`lr_p_value`はNaN。
 - `summary()`（テキスト整形）は作らない（OLSと同じ理由、`ols-spec.md`参照）。
-- python_package層（`LogitResults`）: `params`/`std_errors`/`z_stats`/`p_values`/`conf_int`は
-  係数名→値の`dict`。`coef_table()`は行指向`list[dict]`（キーは`param`/`coef`/`std_err`/`z_stat`
-  （`t_stat`ではない）/`p_value`/`conf_lower`/`conf_upper`）。
+- python_package層（`LogitResults`）: `params`/`std_errors`/`test_stats`/`p_values`/`conf_int`は
+  係数名→値の`dict`。`coef_table()`は行指向`list[dict]`（キーは`param`/`coef`/`std_err`/`test_stat`
+  （`test_stat`ではない）/`p_value`/`conf_lower`/`conf_upper`）。
 
 ## 3. 内部実装の計算仕様
 

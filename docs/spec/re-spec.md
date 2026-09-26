@@ -50,7 +50,7 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
 
 ## 2. 結果構造体
 
-`REResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `t_stats`（**t検定**） /
+`REResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `test_stats`（**t検定**） /
 `p_values` / `conf_lower` / `conf_upper` / `param_names`（`param_names[0]`は常に`"const"`） /
 `residuals` / `dep_var_name` / `n_obs` / `df_resid` / `df_model` / `n_entities` / `cov_type` /
 `f_statistic` / `f_p_value` / `log_likelihood` / `aic` / `bic` / `r_squared_within` /
@@ -63,7 +63,7 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
   `aic`/`bic`の扱いだけ異なる**: `params`/`param_names`/`residuals`/`dep_var_name`/`n_obs`/
   `log_likelihood`/`aic`/`bic`は`estimator()`からそのまま取得する——`ReEstimator`自身は
   `aic()`/`bic()`メソッドを持たない（REの`df_model`が`OlsInput::k()`と自動的に一致する設計
-  のため、FEのような独自再計算が不要、後述「`df_resid`」参照）。`std_errors`/`t_stats`/
+  のため、FEのような独自再計算が不要、後述「`df_resid`」参照）。`std_errors`/`test_stats`/
   `p_values`/`conf_lower`/`conf_upper`/`df_resid`/`df_model`/`f_statistic`/`f_p_value`/
   `r_squared_*`/`hausman_*`はRE自身のgetterから取得する。
 - **RE自身に`fixed_effects()`のような追加メソッドは無い**: ハウスマン検定は`fit()`内で
@@ -71,7 +71,7 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
   `fixed_effects()`のような別メソッド化は不要）。`REResult`に`estimator`のような非公開
   フィールドも無く、`#[derive(Clone)]`を問題なく維持できる。
 - `summary()`は実装しない。python_package層（`REResults`）の`coef_table()`はFEと同じキー
-  構成（`param`/`coef`/`std_err`/`t_stat`/`p_value`/`conf_lower`/`conf_upper`）。
+  構成（`param`/`coef`/`std_err`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`）。
 
 ## 3. 内部実装の計算仕様
 
@@ -116,7 +116,7 @@ R `plm`のデフォルト（`random.method="swar"`）・Python `linearmodels.Ran
 `OlsInput::k()`は`include_intercept`フラグの値に関わらず設計行列の実際の列数を返すため、
 `ReEstimator::fit`が`include_intercept=false`で変換済み定数列を手動追加していても、
 `estimator().input().k()`は`linearmodels`の`wx.shape[1]`（`df_resid = wy.shape[0] -
-wx.shape[1]`）と自動的に一致する。この副産物として`estimator().std_errors()`/`t_stats()`/
+wx.shape[1]`）と自動的に一致する。この副産物として`estimator().std_errors()`/`test_stats()`/
 `p_values()`/`conf_lower()`/`conf_upper()`/`aic()`/`bic()`は委譲した時点で既に正しいRE
 推定量になっている（`linearmodels.HomoskedasticCovariance`の`cov_type="unadjusted"`実装を
 確認済み）ため、FEのように`cov_params`を独自に作り直す必要は無い。
@@ -139,7 +139,7 @@ FE実装時（`panel::fe`）のcov_type計算関数（`design_matrix_from_column
 数式自体はFE実装時から変更しておらず、`extra_df`・レバレッジ配列を引数で受け取る汎用実装の
 ため呼び出し側（REは`extra_df=0`固定・`leverage_within`）を差し替えるだけで再利用できる。
 
-`ReEstimator`は`cov_type`に関わらず常に自前のフィールド（`std_errors`/`t_stats`/`p_values`/
+`ReEstimator`は`cov_type`に関わらず常に自前のフィールド（`std_errors`/`test_stats`/`p_values`/
 `conf_lower`/`conf_upper`/`cov_type`）を保持する（Classical/HC1のような「`OlsEstimator`
 委譲でも数値的に正しい」cov_typeであっても、Cluster/HACとの非対称なAPIを避けるため）。
 

@@ -121,7 +121,9 @@ def _check_result(
 ) -> None:
     _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
     _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
-    _assert_dict_close(res.z_stats, ref["z_stats"], f"{label}/z_stats")
+    _assert_dict_close(
+        res.test_stats, ref["test_stats"], f"{label}/test_stats"
+    )
     _assert_dict_close(
         res.p_values, ref["p_values"], f"{label}/p_values", atol=ATOL_P_VALUE
     )

@@ -2,11 +2,11 @@
 
 このファイルは `python_package/econometricsmodels/nonlinear/` 配下のファイルを読み書きするときだけ自動ロードされる。詳細は`docs/spec/nonlinear-common.md`6章・`docs/spec/logit-spec.md`・`docs/spec/probit-spec.md`・`docs/spec/tobit-spec.md`が正本。
 
-`probit.py`は`logit.py`と完全に同型のパターン（`Probit`/`ProbitResults`、フィールド・メソッド構成も同一。`z_stat`ベースの検定等、下記の各節はLogit/Probit共通で成り立つ）。`tobit.py`は同じ骨格を踏襲しつつ、以下の点でLogit/Probitと異なる（詳細は「Tobit固有の設計」節参照）。
+`probit.py`は`logit.py`と完全に同型のパターン（`Probit`/`ProbitResults`、フィールド・メソッド構成も同一。`test_stat`ベースの検定等、下記の各節はLogit/Probit共通で成り立つ）。`tobit.py`は同じ骨格を踏襲しつつ、以下の点でLogit/Probitと異なる（詳細は「Tobit固有の設計」節参照）。
 
 ## Tobit固有の設計
 
-- **`params`/`std_errors`/`z_stats`/`p_values`/`conf_int`は`"sigma"`（誤差項の標準偏差）を含む**: `engine_pybind`の`TobitResult`が`param_names`の末尾に`"sigma"`を付加して`(k+1)`長に統一しているため（`engine_pybind/src/nonlinear/tobit.rs`の`TobitResult`docコメント参照）、Python側もそのまま`dict(zip(param_names, ...))`すれば`"sigma"`が自然に含まれる。`coef_table()`も`"sigma"`の行を含む（R`summary.tobit`の`Log(scale)`行に相当）。`sigma: float`プロパティ（`params["sigma"]`と同値）も利便のため追加した。
+- **`params`/`std_errors`/`test_stats`/`p_values`/`conf_int`は`"sigma"`（誤差項の標準偏差）を含む**: `engine_pybind`の`TobitResult`が`param_names`の末尾に`"sigma"`を付加して`(k+1)`長に統一しているため（`engine_pybind/src/nonlinear/tobit.rs`の`TobitResult`docコメント参照）、Python側もそのまま`dict(zip(param_names, ...))`すれば`"sigma"`が自然に含まれる。`coef_table()`も`"sigma"`の行を含む（R`summary.tobit`の`Log(scale)`行に相当）。`sigma: float`プロパティ（`params["sigma"]`と同値）も利便のため追加した。
 - **`log_likelihood_null`/`lr_statistic`/`lr_p_value`/`pseudo_r_squared`は提供しない**。代わりに`wald_statistic`/`wald_p_value`（モデル全体の有意性検定）を提供する（`docs/spec/nonlinear-common.md`5章）。
 - **`pred_table()`の代わりに`censoring_fit_check()`**: `y`が連続変数のため分類の的中表は意味を持たない（`docs/spec/tobit-spec.md`3.6節）。返り値は`pred_table()`と同じ行指向`list[dict]`慣習に合わせ、`category`（`"lower"`/`"uncensored"`/`"upper"`のうち該当するもの）・`observed_rate`・`model_implied_rate`をキーに持つ（実装時の判断、`pred_table()`の`[{"actual":..., "predicted_0":...}]`という先例と同じ理由）。
 - **`predict()`/`marginal_effects()`に`target`引数**（`"expected_latent"`/`"expected_observed"`/`"prob_uncensored"`、既定`"expected_observed"`）を追加。`predict()`の返り値の行は単一キー`"predicted"`（Logitの`"probability"`に相当する汎用キー、複数の予測対象があるため対象非依存の名前にした）。
@@ -28,12 +28,12 @@
 ## 実装パターン
 
 - `Logit`/`LogitResults`（`Probit`/`ProbitResults`も同様）は`OLS`/`OLSResults`と同型（`data`/`y`/`x`/`options`を保持するだけのコンストラクタ、`fit()`呼び出し時に初めて`_lib.fit_logit`/`_lib.fit_probit`を呼ぶ。コンストラクタでは検証しない）。
-- `params`/`std_errors`/`z_stats`/`p_values`は係数名→値の`dict[str, float]`（O(1)取り出し用）。行指向で欲しい場合は`coef_table()`。
-- `coef_table()`のキーは`OLSResults.coef_table()`と同じ形状だが、`t_stat`ではなく`z_stat`（Logit/Probitは正規分布ベースのz検定、`docs/spec/nonlinear-common.md`4章）。
+- `params`/`std_errors`/`test_stats`/`p_values`は係数名→値の`dict[str, float]`（O(1)取り出し用）。行指向で欲しい場合は`coef_table()`。
+- `coef_table()`のキーは`OLSResults.coef_table()`と同じ形状で、統計量のキーも`test_stat`に統一している（Logit/Probitは正規分布ベースのz検定のため`stat_dist="normal"`・`stat_df=None`、`docs/spec/nonlinear-common.md`4章）。
 
 ## `marginal_effects()`/`pred_table()`のキー命名（混同注意）
 
-- `marginal_effects()`の行指向キー（`param`/`effect`/`std_err`/`z_stat`/`p_value`/`conf_lower`/`conf_upper`）は`coef_table()`と同じ統計量名（`effect`のみ限界効果固有。Stata/statsmodelsの`dy/dx`に相当）。ベンチマークのフィクスチャJSON（`margeff`）のキーも同名で揃えており、テストで読み替えない。
+- `marginal_effects()`の行指向キー（`param`/`effect`/`std_err`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`）は`coef_table()`と同じ統計量名（`effect`のみ限界効果固有。Stata/statsmodelsの`dy/dx`に相当）。ベンチマークのフィクスチャJSON（`margeff`）のキーも同名で揃えており、テストで読み替えない。
 - `pred_table()`の返り値形状（`[{"actual": 0, "predicted_0": .., "predicted_1": ..}, {"actual": 1, ...}]`という行指向`list[dict]`）は仕様書に明記が無く、`coef_table()`/`predict()`との一貫性（このプロジェクトの行指向`list[dict]`慣習）を優先した実装時の判断（ユーザー確認済み）。`_lib.LogitResult.pred_table()`自体は`Vec<Vec<f64>>`（`table[actual][predicted]`の2×2）を返すだけで、ラベル付けはこのモジュール側の責務。
 
 ## テスト

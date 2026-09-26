@@ -139,7 +139,14 @@ pub struct OLSResult {
     #[pyo3(get)]
     pub std_errors: Vec<f64>,
     #[pyo3(get)]
-    pub t_stats: Vec<f64>,
+    pub test_stats: Vec<f64>,
+    /// Distribution of `test_stats`: `"t"` or `"normal"`.
+    #[pyo3(get)]
+    pub stat_dist: String,
+    /// Degrees of freedom of the t distribution (`None` for `"normal"`). May differ from
+    /// `df_resid` (e.g. cluster-robust inference uses `G - 1`).
+    #[pyo3(get)]
+    pub stat_df: Option<i64>,
     #[pyo3(get)]
     pub p_values: Vec<f64>,
     #[pyo3(get)]
@@ -369,7 +376,9 @@ pub(crate) fn ols_estimator_to_result(
     OLSResult {
         params: mat_to_vec(estimator.params()),
         std_errors: mat_to_vec(estimator.std_errors()),
-        t_stats: mat_to_vec(estimator.t_stats()),
+        test_stats: mat_to_vec(estimator.test_stats()),
+        stat_dist: estimator.stat_dist().name().to_string(),
+        stat_df: estimator.stat_dist().df().map(|df| df as i64),
         p_values: mat_to_vec(estimator.p_values()),
         conf_lower: mat_to_vec(estimator.conf_lower()),
         conf_upper: mat_to_vec(estimator.conf_upper()),

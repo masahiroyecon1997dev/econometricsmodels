@@ -104,8 +104,8 @@ ses <- sqrt(diag(vc))
 df_resid <- df.residual(model)
 
 # t検定への変換（モジュールコメント「t検定への変換」参照）。
-t_stats <- coefs / ses
-p_values <- 2 * pt(-abs(t_stats), df = df_resid)
+test_stats <- coefs / ses
+p_values <- 2 * pt(-abs(test_stats), df = df_resid)
 crit <- qt(0.975, df = df_resid) # 95%信頼区間固定（run_fixest_benchmark.Rのconfint()既定と揃える）
 conf_lower <- coefs - crit * ses
 conf_upper <- coefs + crit * ses
@@ -117,7 +117,7 @@ library(jsonlite)
 result <- list(
   coef = as.list(coefs),
   se = as.list(ses),
-  t_stats = as.list(t_stats),
+  test_stats = as.list(test_stats),
   p_values = as.list(p_values),
   conf_int = mapply(
     function(lo, hi) list(lo, hi),

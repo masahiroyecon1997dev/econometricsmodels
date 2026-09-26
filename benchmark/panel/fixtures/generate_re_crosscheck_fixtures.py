@@ -158,7 +158,7 @@ def build_fixtures() -> dict:
             "（実測確認済み、実装バグではない）。テストコード側ではこのフィクス"
             "チャ全体をクロスチェック水準（1e-2程度）の緩い許容誤差で比較する"
             "こと（.claude/rules/testing-policy.md「許容誤差」参照）。t検定"
-            "（t_stats/p_values/conf_int）はplmの既定であるz検定（漸近正規"
+            "（test_stats/p_values/conf_int）はplmの既定であるz検定（漸近正規"
             "近似）ではなく、本実装と同じt(df_resid)分布の式でcoef/seから"
             "計算し直している（run_plm_benchmark.Rのコメント参照）。"
             "ハウスマン検定はv1のRE自身のentity方向のみ（1-way内部FE比較）に"

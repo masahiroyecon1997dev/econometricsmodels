@@ -18,7 +18,7 @@ use super::ols::{CovType, OlsEstimator, OlsInput};
 /// WLSの推定結果。
 ///
 /// `estimator()`が返す`OlsEstimator`本体は、`sqrt(weight)`で変換したデータに対する
-/// 計算結果であり、`params`/`std_errors`/`t_stats`/`p_values`/`conf_lower`/`conf_upper`/
+/// 計算結果であり、`params`/`std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper`/
 /// `f_statistic`/`f_p_value`はここから取得する（変換後データに対するOLSの計算式が
 /// そのまま正しいため。重みが全て1のときOLSと数値的に完全一致するのもこの型を経由する
 /// ためで、`docs/spec/wls-spec.md`「sqrt(w)変換」の構造的保証がそのまま成り立つ）。

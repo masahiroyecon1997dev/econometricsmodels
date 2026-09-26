@@ -87,7 +87,7 @@ def test_coef_table_structure(dataset):
         "param",
         "coef",
         "std_err",
-        "t_stat",
+        "test_stat",
         "p_value",
         "conf_lower",
         "conf_upper",
@@ -107,13 +107,13 @@ def test_conf_int_structure(dataset):
         assert lower < upper
 
 
-def test_params_std_errors_t_stats_p_values_share_keys(dataset):
+def test_params_std_errors_test_stats_p_values_share_keys(dataset):
     res = our_fit(dataset)
     expected_keys = {"const", "x1", "x2"}
 
     assert set(res.params.keys()) == expected_keys
     assert set(res.std_errors.keys()) == expected_keys
-    assert set(res.t_stats.keys()) == expected_keys
+    assert set(res.test_stats.keys()) == expected_keys
     assert set(res.p_values.keys()) == expected_keys
 
 

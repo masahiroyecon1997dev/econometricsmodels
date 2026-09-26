@@ -18,6 +18,8 @@ separate class; same policy as `OLSOptions`, see
 
 from __future__ import annotations
 
+from typing import Literal
+
 import polars as pl
 
 from .. import _lib
@@ -121,13 +123,27 @@ class LogitResults:
         return dict(zip(self._raw.param_names, self._raw.std_errors))
 
     @property
-    def z_stats(self) -> dict[str, float]:
+    def test_stats(self) -> dict[str, float]:
         """Coefficient name to z-statistic.
 
         Logit uses a z-test (standard normal), not a t-test (see
         `docs/spec/nonlinear-common.md` section 4).
         """
-        return dict(zip(self._raw.param_names, self._raw.z_stats))
+        return dict(zip(self._raw.param_names, self._raw.test_stats))
+
+    @property
+    def stat_dist(self) -> Literal["t", "normal"]:
+        """Distribution of `test_stats`: `"t"` (t-statistics) or
+        `"normal"` (z-statistics)."""
+        return self._raw.stat_dist
+
+    @property
+    def stat_df(self) -> int | None:
+        """Degrees of freedom of the t distribution behind `test_stats`,
+        or `None` when `stat_dist` is `"normal"`. May differ from
+        `df_resid` (e.g. cluster-robust inference uses `G - 1`), so use
+        this to recompute p-values from `test_stats`."""
+        return self._raw.stat_df
 
     @property
     def p_values(self) -> dict[str, float]:
@@ -221,12 +237,12 @@ class LogitResults:
         """Row-oriented summary table of the coefficients.
 
         Shaped to be usable almost as-is in a REST API response. Same
-        shape as `OLSResults.coef_table()` except `z_stat` in place of
-        `t_stat` (Logit uses a z-test rather than a t-test).
+        shape as `OLSResults.coef_table()`; `test_stat` is a z-statistic
+        here (see `stat_dist`).
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are
-            `param`, `coef`, `std_err`, `z_stat`, `p_value`,
+            `param`, `coef`, `std_err`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
         return [
@@ -234,7 +250,7 @@ class LogitResults:
                 "param": name,
                 "coef": coef,
                 "std_err": se,
-                "z_stat": z,
+                "test_stat": z,
                 "p_value": p,
                 "conf_lower": lower,
                 "conf_upper": upper,
@@ -243,7 +259,7 @@ class LogitResults:
                 self._raw.param_names,
                 self._raw.params,
                 self._raw.std_errors,
-                self._raw.z_stats,
+                self._raw.test_stats,
                 self._raw.p_values,
                 self._raw.conf_lower,
                 self._raw.conf_upper,
@@ -338,7 +354,7 @@ class LogitResults:
     def marginal_effects(
         self, at: str = "overall", confidence_level: float = 0.95
     ) -> list[dict[str, float | str]]:
-        """Marginal effects (`dy/dx`) with delta-solver standard errors.
+        """Marginal effects (`dy/dx`) with delta-method standard errors.
 
         Independent of the `confidence_level` used in `fit()` (may
         differ from it; see
@@ -356,8 +372,9 @@ class LogitResults:
         Returns:
             A list of dictionaries, one per explanatory variable
             (excluding the intercept). Keys are `param`, `effect`,
-            `std_err`, `z_stat`, `p_value`, `conf_lower`, `conf_upper` (see
-            `docs/spec/nonlinear-common.md` section 6). `effect` is
+            `std_err`, `test_stat`, `p_value`, `conf_lower`, `conf_upper` (see
+            `docs/spec/nonlinear-common.md` section 6). `test_stat` is
+            always a z-statistic (normal distribution). `effect` is
             the marginal effect estimate (corresponds to `dy/dx` in
             Stata's `margins, dydx(*)` and statsmodels).
 
@@ -372,7 +389,7 @@ class LogitResults:
                 "param": name,
                 "effect": effect,
                 "std_err": se,
-                "z_stat": z,
+                "test_stat": z,
                 "p_value": p,
                 "conf_lower": lower,
                 "conf_upper": upper,
@@ -381,7 +398,7 @@ class LogitResults:
                 raw.param_names,
                 raw.effect,
                 raw.std_errors,
-                raw.z_stats,
+                raw.test_stats,
                 raw.p_values,
                 raw.conf_lower,
                 raw.conf_upper,

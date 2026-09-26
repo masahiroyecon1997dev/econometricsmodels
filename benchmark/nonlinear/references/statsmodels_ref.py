@@ -78,7 +78,7 @@ def _margeff_frame(fit_result, at: str) -> dict:
         str(name): {
             "effect": float(row.iloc[0]),
             "std_err": float(row.iloc[1]),
-            "z_stat": float(row.iloc[2]),
+            "test_stat": float(row.iloc[2]),
             "p_value": float(row.iloc[3]),
             "conf_lower": float(row.iloc[4]),
             "conf_upper": float(row.iloc[5]),
@@ -146,7 +146,7 @@ def run(
         raw: dict = {
             "coef": dict(zip(param_names, params.tolist())),
             "se": dict(zip(param_names, se.tolist())),
-            "z_stats": dict(zip(param_names, z.tolist())),
+            "test_stats": dict(zip(param_names, z.tolist())),
             "p_values": dict(zip(param_names, p_values.tolist())),
             "conf_int": {
                 name: [float(lo), float(hi)]
@@ -155,7 +155,7 @@ def run(
         }
         # opgの限界効果はRクロスチェック（marginaleffects）側を正とするため
         # margeffはNoneのまま（fix_margeff=Falseで正規化対象から外す）。
-        result = normalize_names(raw, stat_key="z_stats")
+        result = normalize_names(raw, stat_key="test_stats")
         result["margeff"] = None
         model_for_stats = base
     else:
@@ -175,7 +175,7 @@ def run(
                 str(k): float(v) for k, v in fitted.params.to_dict().items()
             },
             "se": {str(k): float(v) for k, v in fitted.bse.to_dict().items()},
-            "z_stats": {
+            "test_stats": {
                 str(k): float(v) for k, v in fitted.tvalues.to_dict().items()
             },
             "p_values": {
@@ -191,7 +191,7 @@ def run(
         # 本実装の"const"へ正規化する（Rクロスチェック側`normalize_names`と
         # 同じ処理を生成時に揃える）。margeffの内側の
         # パラメータ名も同時に畳む（fix_margeff=True）。
-        result = normalize_names(raw, stat_key="z_stats", fix_margeff=True)
+        result = normalize_names(raw, stat_key="test_stats", fix_margeff=True)
         model_for_stats = fitted
 
     result["log_likelihood"] = float(model_for_stats.llf)

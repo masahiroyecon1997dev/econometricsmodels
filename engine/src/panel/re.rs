@@ -74,7 +74,7 @@
 //! で変換済み定数列を`x_all`に手動追加していても、`estimator().input().k()`は既に
 //! `linearmodels`の`wx.shape[1]`（`df_resid = wy.shape[0] - wx.shape[1]`とソースで確認済み）
 //! と一致する。FEのような自由度の再計算・独自の`cov_params`の作り直しは不要。この副産物として
-//! `estimator().std_errors()`/`t_stats()`/`p_values()`/`conf_lower()`/`conf_upper()`/
+//! `estimator().std_errors()`/`test_stats()`/`p_values()`/`conf_lower()`/`conf_upper()`/
 //! `aic()`/`bic()`は既にこの時点で正しいRE推定量になっている（`linearmodels.
 //! HomoskedasticCovariance`の`cov_type="unadjusted"`実装で`debiased=True`時
 //! `nobs_eff = nobs - nvar`となり`OlsEstimator`内部の`df_resid = n - k`と同じ値になる
@@ -686,7 +686,7 @@ pub enum ReCovType {
 /// →`OlsEstimator::fit`への委譲というパイプラインで
 /// `θ変換済み`データの係数推定（`β̂`）を求め、その上で`cov_type`別の標準誤差・t値・
 /// p値・信頼区間を計算する。`FeEstimator`と同型の構成——`OlsEstimator`
-/// 自身の`std_errors()`/`t_stats()`等は使わず、`ReEstimator`が常に自前で計算し直した
+/// 自身の`std_errors()`/`test_stats()`等は使わず、`ReEstimator`が常に自前で計算し直した
 /// 値を保持する（`estimator()`のdocコメント参照。ユーザー確認済み・2026-09-19、
 /// 「一部cov_typeだけ`estimator()`委譲・残りは独自計算」という非対称な設計を避けた）。
 ///
@@ -699,7 +699,7 @@ pub struct ReEstimator {
     /// `cov_type`別の標準誤差。
     std_errors: Mat<f64>,
     /// `cov_type`別のt統計量。
-    t_stats: Mat<f64>,
+    test_stats: Mat<f64>,
     /// `cov_type`別のp値（自由度は`cov_type`によらず常に`df_resid`、3.3節）。
     p_values: Mat<f64>,
     /// 信頼区間の下限。
@@ -928,7 +928,7 @@ impl ReEstimator {
         let t_crit = inference::critical_value(&t_dist, confidence_level);
 
         let mut std_errors = Mat::zeros(df_model, 1);
-        let mut t_stats = Mat::zeros(df_model, 1);
+        let mut test_stats = Mat::zeros(df_model, 1);
         let mut p_values = Mat::zeros(df_model, 1);
         let mut conf_lower = Mat::zeros(df_model, 1);
         let mut conf_upper = Mat::zeros(df_model, 1);
@@ -938,7 +938,7 @@ impl ReEstimator {
             let stat = inference::compute_inference_stat(&t_dist, coef, se, t_crit);
 
             *std_errors.get_mut(j, 0) = se;
-            *t_stats.get_mut(j, 0) = stat.stat;
+            *test_stats.get_mut(j, 0) = stat.stat;
             *p_values.get_mut(j, 0) = stat.p_value;
             *conf_lower.get_mut(j, 0) = stat.conf_low;
             *conf_upper.get_mut(j, 0) = stat.conf_high;
@@ -1080,7 +1080,7 @@ impl ReEstimator {
             estimator,
             cov_type,
             std_errors,
-            t_stats,
+            test_stats,
             p_values,
             conf_lower,
             conf_upper,
@@ -1111,7 +1111,7 @@ impl ReEstimator {
     /// `log_likelihood`（`SSR/n`のみに依存）に`k`（変換済み定数列を含む全列数）を
     /// 掛けるだけの式で`has_intercept`フラグに依存しない）。
     ///
-    /// **一方`estimator().std_errors()`/`t_stats()`/`p_values()`/`conf_lower()`/
+    /// **一方`estimator().std_errors()`/`test_stats()`/`p_values()`/`conf_lower()`/
     /// `conf_upper()`/`f_statistic()`/`f_p_value()`・`r_squared()`/`adj_r_squared()`は
     /// このオブジェクト単体では正しくない**——`OlsInput::from_columns`に
     /// `include_intercept=false`で渡している（モジュールdoc「`OlsEstimator`への委譲」）
@@ -1121,7 +1121,7 @@ impl ReEstimator {
     /// （`fit()`のdocコメント「`cov_type`対応」参照）、`ReCovType::Hc1`等の非Classicalな
     /// `cov_type`を指定して`ReEstimator::fit`を呼んでいても`estimator()`側は
     /// Classicalのままである。正しい標準誤差・検定統計量は`ReEstimator`自身の
-    /// `std_errors()`/`t_stats()`/`p_values()`/`conf_lower()`/`conf_upper()`
+    /// `std_errors()`/`test_stats()`/`p_values()`/`conf_lower()`/`conf_upper()`
     /// ・`f_statistic()`/`f_p_value()`を使うこと、正しい
     /// 適合度（`r_squared_within`/`between`/`overall`）は別途実装済み。
     pub fn estimator(&self) -> &OlsEstimator {
@@ -1139,8 +1139,13 @@ impl ReEstimator {
     }
 
     /// `cov_type`別のt統計量。
-    pub fn t_stats(&self) -> &Mat<f64> {
-        &self.t_stats
+    pub fn test_stats(&self) -> &Mat<f64> {
+        &self.test_stats
+    }
+
+    /// `test_stats`の従う分布（t分布、自由度は`df_resid`）。
+    pub fn stat_dist(&self) -> inference::StatDist {
+        inference::StatDist::T { df: self.df_resid }
     }
 
     /// `cov_type`別のp値（自由度は`cov_type`によらず常に`df_resid`、3.3節）。
@@ -1653,14 +1658,14 @@ mod tests {
         assert_eq!(re.df_model(), 2);
 
         // rust-reviewer指摘: `estimator()`のdocコメントで「`std_errors`/
-        // `t_stats`/`p_values`/`conf_lower`/`conf_upper`/`aic`/`bic`はこの時点で既に
+        // `test_stats`/`p_values`/`conf_lower`/`conf_upper`/`aic`/`bic`はこの時点で既に
         // 正しいRE推定量になっている」と主張しているため、`linearmodels.RandomEffects.
         // fit(cov_type="unadjusted")`の`std_errors`/`tstats`/`pvalues`/`conf_int()`・
         // `loglik`から手計算した`aic`/`bic`と実地数値照合する（`HomoskedasticCovariance`
         // が`debiased=True`時`nobs_eff = nobs - nvar`を使うことの検証、モジュールdoc
         // 「`OlsEstimator`への委譲」参照）。
         let expected_std_errors = [2.048_733_66, 0.404_536_75];
-        let expected_t_stats = [1.086_025_79, 3.461_355_59];
+        let expected_test_stats = [1.086_025_79, 3.461_355_59];
         let expected_p_values = [0.327_029_7, 0.018_016_02];
         let expected_conf_lower = [-3.041_459_93, 0.360_350_72];
         let expected_conf_upper = [7.491_415_12, 2.440_140_37];
@@ -1670,8 +1675,8 @@ mod tests {
                 "std_errors[{j}]"
             );
             assert!(
-                (*re.estimator().t_stats().get(j, 0) - expected_t_stats[j]).abs() < 1e-6,
-                "t_stats[{j}]"
+                (*re.estimator().test_stats().get(j, 0) - expected_test_stats[j]).abs() < 1e-6,
+                "test_stats[{j}]"
             );
             assert!(
                 (*re.estimator().p_values().get(j, 0) - expected_p_values[j]).abs() < 1e-6,
@@ -1688,7 +1693,7 @@ mod tests {
         }
         // rust-reviewer指摘: `ReCovType::Classical`は`estimator()`委譲
         // でも数値的に正しい（上記アサーション）が、`ReEstimator`自身は常に独自計算
-        // した`std_errors()`/`t_stats()`/`p_values()`/`conf_lower()`/`conf_upper()`を
+        // した`std_errors()`/`test_stats()`/`p_values()`/`conf_lower()`/`conf_upper()`を
         // 保持する設計にしたため（`fit()`のdocコメント「`ReEstimator`は常に自前の
         // フィールドを保持する」参照）、`panel_classical_cov_params`経由の値が
         // `estimator()`委譲の値と一致する（＝独立した2つの経路が同じ答えを出す）ことも
@@ -1699,8 +1704,8 @@ mod tests {
                 "re.std_errors[{j}]"
             );
             assert!(
-                (*re.t_stats().get(j, 0) - expected_t_stats[j]).abs() < 1e-6,
-                "re.t_stats[{j}]"
+                (*re.test_stats().get(j, 0) - expected_test_stats[j]).abs() < 1e-6,
+                "re.test_stats[{j}]"
             );
             assert!(
                 (*re.p_values().get(j, 0) - expected_p_values[j]).abs() < 1e-6,

@@ -169,7 +169,9 @@ def _check_result(
 
     _assert_dict_close(res.params, ref["coef"], f"{label}/coef", rtol=rtol)
     _assert_dict_close(res.std_errors, ref["se"], f"{label}/se", rtol=rtol)
-    _assert_dict_close(res.stats, ref["t_stats"], f"{label}/stats", rtol=rtol)
+    _assert_dict_close(
+        res.test_stats, ref["test_stats"], f"{label}/test_stats", rtol=rtol
+    )
     # p_valuesはf_p_valueと同じ理由（t分布の裾でp値が統計量の僅かな差を増幅する、
     # モジュールdocコメント参照）で絶対誤差フロアを使う。
     _assert_dict_close(

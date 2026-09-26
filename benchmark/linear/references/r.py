@@ -65,5 +65,5 @@ def run_lm_r(
 
     raw = run_r(_R_SCRIPT, csv_path, formula, cov_type, extra_args=extra)
     return normalize_names(
-        raw, stat_key="t_stats", scalar_keys=_LM_SCALAR_KEYS
+        raw, stat_key="test_stats", scalar_keys=_LM_SCALAR_KEYS
     )

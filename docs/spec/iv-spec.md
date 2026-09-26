@@ -76,16 +76,17 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 
 ## 2. 結果構造体
 
-`IVResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `stats` / `p_values` /
+`IVResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `test_stats` / `stat_dist` / `stat_df` / `p_values` /
 `conf_lower` / `conf_upper` / `param_names` / `residuals` / `dep_var_name` / `n_obs` /
 `df_resid` / `df_model` / `converged` / `n_iter` / `cov_type` / `estimator` / `gmm_weight_type` /
 `f_statistic` / `f_p_value` / `r_squared` / `adj_r_squared` / `weak_instrument_f_statistics` /
 `overid_statistic` / `overid_p_value` / `wu_hausman_statistic` / `wu_hausman_p_value`。
 
-- **`t_stats`ではなく`stats`という分布非依存の名前**: 1つの`IVResult`型を
-  `estimator="2sls"`（t分布）・`estimator="gmm"`（z分布）の両方が共有するため、`OLSResult.t_stats`・
-  `LogitResult.z_stats`のような分布固定の名前は使えない。`engine::inference::InferenceStat`が
-  同じ理由で`stat`という名前を使っている前例に倣った。
+- **`test_stats`と`stat_dist`/`stat_df`**: 1つの`IVResult`型を`estimator="2sls"`（t分布）・
+  `estimator="gmm"`（z分布）の両方が共有するため、統計量は全手法共通の`test_stats`とし、
+  分布は`stat_dist`（`"t"`/`"normal"`）と`stat_df`（t分布の自由度。正規分布は`None`）で示す。
+  2SLSの`cov_type="cluster"`は`df_resid`ではなく`G-1`を使うため、`stat_df`は実際に使った
+  自由度である（`df_resid`とは限らない）。
 - **`estimator`**: `IVOptions.estimator`を正規化した小文字文字列（`"2sls"`/`"gmm"`）。
   常に反映される。
 - **`gmm_weight_type`**: 型は`Option<String>`。`estimator="gmm"`のときだけ
@@ -117,8 +118,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 - 弱操作変数診断・過剰識別検定・Wu-Hausman検定はいずれも`fit()`の結果本体に含める
   （別メソッド化しない）。
 - `summary()`は実装しない。python_package層（`IVResults`）の`coef_table()`は行指向
-  `list[dict]`で、キーは`param`/`coef`/`std_err`/`stat`（`t_stat`/`z_stat`ではなく`stats`
-  プロパティと同じ理由）/`p_value`/`conf_lower`/`conf_upper`。
+  `list[dict]`で、キーは`param`/`coef`/`std_err`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`。
 
 ## 3. 内部実装の計算仕様
 

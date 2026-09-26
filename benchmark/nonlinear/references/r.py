@@ -55,7 +55,7 @@ def run_glm_r(
     raw = run_r(_R_SCRIPT, csv_path, formula, cov_type, extra_args=extra)
     return normalize_names(
         raw,
-        stat_key="z_stats",
+        stat_key="test_stats",
         scalar_keys=_GLM_SCALAR_KEYS,
         conf_from_low_high=True,
         fix_margeff=True,
@@ -105,7 +105,7 @@ def run_tobit_r(
         cluster_col: ``cov_type="cluster"`` のときのグループ列名。
 
     Returns:
-        ``coef`` / ``se`` / ``z_stats`` / ``p_values`` / ``conf_int``（切片名は
+        ``coef`` / ``se`` / ``test_stats`` / ``p_values`` / ``conf_int``（切片名は
         ``"const"`` へ、末尾に ``"sigma"`` を含む）と、スカラー統計量
         （``_TOBIT_SCALAR_KEYS``）、``margeff``（``[target][at][param]`` の3階層）、
         ``predict_head``（各 target の先頭10行の予測値）、``predict_new_data``
@@ -125,7 +125,7 @@ def run_tobit_r(
     # そのまま通す（限界効果の出力は切片を除外済みで名前畳み込み不要）。
     result = normalize_names(
         raw,
-        stat_key="z_stats",
+        stat_key="test_stats",
         scalar_keys=_TOBIT_SCALAR_KEYS,
         conf_from_low_high=True,
         fix_margeff=False,

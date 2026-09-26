@@ -118,7 +118,7 @@ if (cov_type == "classical") {
 coef_se <- extract_coef_se(model, vc, df_inference)
 coefs <- coef_se$coefs
 ses <- coef_se$ses
-t_stats <- coef_se$t_stats
+test_stats <- coef_se$test_stats
 p_values <- coef_se$p_values
 
 # 信頼区間（既定confidence_level=0.95、"--confidence-level="フラグで変更可）。
@@ -157,7 +157,7 @@ library(jsonlite)
 result <- list(
   coef = as.list(coefs),
   se = as.list(ses),
-  t_stats = as.list(t_stats),
+  test_stats = as.list(test_stats),
   p_values = as.list(p_values),
   conf_int = mapply(
     function(lo, hi) list(lo, hi),

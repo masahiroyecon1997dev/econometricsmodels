@@ -260,7 +260,7 @@ pub struct OlsEstimator {
     /// 標準誤差 (k, 1)
     std_errors: Mat<f64>,
     /// t統計量 (k, 1) = params / std_errors
-    t_stats: Mat<f64>,
+    test_stats: Mat<f64>,
     /// 両側p値 (k, 1)。t分布（自由度 n-k）に基づく
     p_values: Mat<f64>,
     /// 信頼区間の下限 (k, 1)
@@ -462,7 +462,7 @@ impl OlsEstimator {
             .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
         let t_crit = inference::critical_value(&t_dist, confidence_level);
 
-        let mut t_stats = Mat::zeros(k, 1);
+        let mut test_stats = Mat::zeros(k, 1);
         let mut p_values = Mat::zeros(k, 1);
         let mut conf_lower = Mat::zeros(k, 1);
         let mut conf_upper = Mat::zeros(k, 1);
@@ -472,7 +472,7 @@ impl OlsEstimator {
             let se = *std_errors.get(j, 0);
             let stat = inference::compute_inference_stat(&t_dist, coef, se, t_crit);
 
-            *t_stats.get_mut(j, 0) = stat.stat;
+            *test_stats.get_mut(j, 0) = stat.stat;
             *p_values.get_mut(j, 0) = stat.p_value;
             *conf_lower.get_mut(j, 0) = stat.conf_low;
             *conf_upper.get_mut(j, 0) = stat.conf_high;
@@ -510,7 +510,7 @@ impl OlsEstimator {
             params,
             residuals,
             std_errors,
-            t_stats,
+            test_stats,
             p_values,
             conf_lower,
             conf_upper,
@@ -552,8 +552,16 @@ impl OlsEstimator {
     }
 
     /// t統計量 (k, 1)
-    pub fn t_stats(&self) -> &Mat<f64> {
-        &self.t_stats
+    pub fn test_stats(&self) -> &Mat<f64> {
+        &self.test_stats
+    }
+
+    /// `test_stats`の従う分布（t分布、自由度は`df_inference`。`cov_type=Cluster`のときだけ
+    /// `df_resid`ではなく`G-1`になる）。
+    pub fn stat_dist(&self) -> inference::StatDist {
+        inference::StatDist::T {
+            df: self.df_inference,
+        }
     }
 
     /// 両側p値 (k, 1)
@@ -1488,7 +1496,7 @@ mod tests {
 
     /// `q=1`（末尾1列だけを対象）のとき、`F = t²`という標準的な恒等式
     /// （`wald_f_test`のdocコメント参照、1自由度のF検定は両側t検定と代数的に等価）により、
-    /// 既に個別に検証済みの`t_stats()`/`p_values()`（`fit()`本体が計算）と一致するはず。
+    /// 既に個別に検証済みの`test_stats()`/`p_values()`（`fit()`本体が計算）と一致するはず。
     #[test]
     fn wald_test_last_columns_matches_squared_t_statistic_for_single_column() {
         let y = vec![2.0, 4.0, 5.0, 4.0, 5.0, 7.0, 6.0];
@@ -1506,7 +1514,7 @@ mod tests {
 
         let (stat, p_value) = estimator.wald_test_last_columns(1).unwrap();
         let k = estimator.input().k();
-        let t_last = *estimator.t_stats().get(k - 1, 0);
+        let t_last = *estimator.test_stats().get(k - 1, 0);
         let p_last = *estimator.p_values().get(k - 1, 0);
         assert!((stat - t_last.powi(2)).abs() < 1e-10);
         assert!((p_value - p_last).abs() < 1e-10);
@@ -1539,7 +1547,7 @@ mod tests {
     /// 期待値はscipy.stats（`scipy.stats.t`、`ppf`/`cdf`）で独立に計算・検算済み
     /// （手計算: b0=2.2, b1=0.6, SSR=2.4, df=3, sigma2=0.8）。
     #[test]
-    fn fit_computes_classical_std_errors_t_stats_p_values_and_conf_int() {
+    fn fit_computes_classical_std_errors_test_stats_p_values_and_conf_int() {
         let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
         let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
         let input = OlsInput::from_columns(
@@ -1561,7 +1569,7 @@ mod tests {
         assert!((*se.get(0, 0) - 0.938_083_151_964_686).abs() < 1e-9);
         assert!((*se.get(1, 0) - 0.282_842_712_474_619).abs() < 1e-9);
 
-        let t = estimator.t_stats();
+        let t = estimator.test_stats();
         assert!((*t.get(0, 0) - 2.345_207_879_911_715).abs() < 1e-9);
         assert!((*t.get(1, 0) - 2.121_320_343_559_642_4).abs() < 1e-9);
 
@@ -1584,7 +1592,7 @@ mod tests {
     /// および`OlsEstimator::fit`のdocコメント参照
     /// （statsmodelsはHC0-3でuse_t=Falseが既定＝正規分布のため、素の既定値とは一致しない）。
     #[test]
-    fn fit_computes_hc_std_errors_t_stats_p_values_and_conf_int() {
+    fn fit_computes_hc_std_errors_test_stats_p_values_and_conf_int() {
         // (cov_type, [se_const, se_x1], [t_const, t_x1], [p_const, p_x1],
         //  [lower_const, lower_x1], [upper_const, upper_x1])
         #[allow(clippy::type_complexity)]
@@ -1645,8 +1653,8 @@ mod tests {
                     "std_errors mismatch: {msg}"
                 );
                 assert!(
-                    (*estimator.t_stats().get(j, 0) - t[j]).abs() < 1e-6,
-                    "t_stats mismatch: {msg}"
+                    (*estimator.test_stats().get(j, 0) - t[j]).abs() < 1e-6,
+                    "test_stats mismatch: {msg}"
                 );
                 assert!(
                     (*estimator.p_values().get(j, 0) - p[j]).abs() < 1e-6,
@@ -1691,7 +1699,7 @@ mod tests {
         assert!((*se.get(0, 0) - 0.659_090_282_131_361_7).abs() < 1e-6);
         assert!((*se.get(1, 0) - 0.164_924_225_024_705_7).abs() < 1e-6);
 
-        let t = estimator.t_stats();
+        let t = estimator.test_stats();
         assert!((*t.get(0, 0) - 3.337_934_209_689_228).abs() < 1e-6);
         assert!((*t.get(1, 0) - 3.638_034_375_545_013_5).abs() < 1e-6);
 
@@ -2014,7 +2022,7 @@ mod tests {
     /// （`sm.OLS(Y, X).fit(cov_type="cluster", cov_kwds={"groups": groups}, use_t=True)`。
     /// 小標本補正はstatsmodelsの既定`use_correction=True`のまま、明示指定はしていない）。
     #[test]
-    fn fit_computes_cluster_std_errors_t_stats_p_values_conf_int_and_f_test() {
+    fn fit_computes_cluster_std_errors_test_stats_p_values_conf_int_and_f_test() {
         let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
         let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
         let input = OlsInput::from_columns(
@@ -2042,7 +2050,7 @@ mod tests {
         assert!((*se.get(0, 0) - 0.785_196_366_097_886_8).abs() < 1e-6);
         assert!((*se.get(1, 0) - 0.230_940_107_675_849_05).abs() < 1e-6);
 
-        let t = estimator.t_stats();
+        let t = estimator.test_stats();
         assert!((*t.get(0, 0) - 2.801_846_894_596_724_5).abs() < 1e-6);
         assert!((*t.get(1, 0) - 2.598_076_211_353_332).abs() < 1e-6);
 

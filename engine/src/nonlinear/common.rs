@@ -657,7 +657,7 @@ pub struct MarginalEffects {
     /// デルタ法標準誤差
     std_errors: Vec<f64>,
     /// z統計量
-    z_stats: Vec<f64>,
+    test_stats: Vec<f64>,
     /// 両側p値
     p_values: Vec<f64>,
     /// 信頼区間の下限
@@ -677,7 +677,7 @@ impl MarginalEffects {
         param_names: Vec<String>,
         effect: Vec<f64>,
         std_errors: Vec<f64>,
-        z_stats: Vec<f64>,
+        test_stats: Vec<f64>,
         p_values: Vec<f64>,
         conf_lower: Vec<f64>,
         conf_upper: Vec<f64>,
@@ -698,9 +698,9 @@ impl MarginalEffects {
             "std_errors length must match param_names length"
         );
         debug_assert_eq!(
-            z_stats.len(),
+            test_stats.len(),
             n,
-            "z_stats length must match param_names length"
+            "test_stats length must match param_names length"
         );
         debug_assert_eq!(
             p_values.len(),
@@ -721,7 +721,7 @@ impl MarginalEffects {
             param_names,
             effect,
             std_errors,
-            z_stats,
+            test_stats,
             p_values,
             conf_lower,
             conf_upper,
@@ -744,8 +744,8 @@ impl MarginalEffects {
     }
 
     /// z統計量
-    pub fn z_stats(&self) -> &[f64] {
-        &self.z_stats
+    pub fn test_stats(&self) -> &[f64] {
+        &self.test_stats
     }
 
     /// 両側p値
@@ -837,7 +837,7 @@ pub fn marginal_effects_from_w_s(
     let mut out_param_names = Vec::with_capacity(k - k_constant);
     let mut out_effect = Vec::with_capacity(k - k_constant);
     let mut std_errors = Vec::with_capacity(k - k_constant);
-    let mut z_stats = Vec::with_capacity(k - k_constant);
+    let mut test_stats = Vec::with_capacity(k - k_constant);
     let mut p_values = Vec::with_capacity(k - k_constant);
     let mut conf_lower = Vec::with_capacity(k - k_constant);
     let mut conf_upper = Vec::with_capacity(k - k_constant);
@@ -856,7 +856,7 @@ pub fn marginal_effects_from_w_s(
         out_param_names.push(param_names[j].clone());
         out_effect.push(dydx_j);
         std_errors.push(se);
-        z_stats.push(stat.stat);
+        test_stats.push(stat.stat);
         p_values.push(stat.p_value);
         conf_lower.push(stat.conf_low);
         conf_upper.push(stat.conf_high);
@@ -866,7 +866,7 @@ pub fn marginal_effects_from_w_s(
         param_names: out_param_names,
         effect: out_effect,
         std_errors,
-        z_stats,
+        test_stats,
         p_values,
         conf_lower,
         conf_upper,
@@ -4964,7 +4964,7 @@ mod tests {
             assert!((effects.std_errors()[idx] - expected_se).abs() < 1e-9);
 
             let expected_z = dydx[j] / expected_se;
-            assert!((effects.z_stats()[idx] - expected_z).abs() < 1e-9);
+            assert!((effects.test_stats()[idx] - expected_z).abs() < 1e-9);
             let expected_p = 2.0 * (1.0 - normal.cdf(expected_z.abs()));
             assert!((effects.p_values()[idx] - expected_p).abs() < 1e-9);
             assert!(

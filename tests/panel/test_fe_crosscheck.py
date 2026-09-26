@@ -91,7 +91,7 @@ ALL_SCENARIOS = ONE_WAY_ONLY_SCENARIOS + TWO_WAY_SCENARIOS
 # （G=2、クラスタ数境界の成功パス専用の仮想シナリオ名、`_check_result`
 # 呼び出し時に明示的に渡す）はclusterのp_values/conf_intの非線形増幅が
 # さらに拡大し（実測最大絶対誤差: small_panel~0.40、baseline_cluster_g2
-# ~0.44）、他シナリオ向けの許容誤差では収まらない。coef/se/t_statsは
+# ~0.44）、他シナリオ向けの許容誤差では収まらない。coef/se/test_statsは
 # いずれのシナリオでも問題なく一致するため対象外にはせず、p_values/conf_int
 # の数値比較だけをスコープ外にする（`iv_crosscheck`の`rtol_hac_small_n`と
 # 同型の「小標本ケースは別枠」、`_tolerances.py`参照）。
@@ -158,7 +158,7 @@ def _check_result(
 
     `scenario`が`_SKIP_COV_TYPE_DEPENDENT_SCENARIOS`（G=5のsmall_panel、
     G=2のbaseline_cluster_g2）かつ`cov_type=="cluster"`のときは、G/(G-1)型
-    補正差の相対的な影響がクラスタ数に反比例して拡大し、se・t_stats・
+    補正差の相対的な影響がクラスタ数に反比例して拡大し、se・test_stats・
     p_values・conf_intのいずれも他シナリオ向けの許容誤差に収まらない
     （実測確認済み）ため、この組み合わせに限りcov_type依存の統計量の数値
     比較を丸ごとスキップする（coef/aic/bic/log_likelihood/r_squared_within
@@ -174,7 +174,7 @@ def _check_result(
     if not skip_cov_type_dependent:
         _assert_dict_close(res.std_errors, ref["se"], f"{label}/se", rtol=rtol)
         _assert_dict_close(
-            res.t_stats, ref["t_stats"], f"{label}/t_stats", rtol=rtol
+            res.test_stats, ref["test_stats"], f"{label}/test_stats", rtol=rtol
         )
         p_value_atol = ATOL_CLUSTER_P_VALUE if cov_type == "cluster" else ATOL
         for name, ref_p in ref["p_values"].items():

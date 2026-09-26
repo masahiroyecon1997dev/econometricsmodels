@@ -277,7 +277,7 @@ pub struct GmmEstimator {
     /// 標準誤差 (k, 1)。`cov_type`に応じたサンドイッチ型分散の対角成分の平方根。
     std_errors: Mat<f64>,
     /// z統計量 (k, 1) = params / std_errors（`docs/spec/iv-spec.md`3.2節、GMMはz分布）。
-    z_stats: Mat<f64>,
+    test_stats: Mat<f64>,
     /// 両側p値 (k, 1)。標準正規分布に基づく。
     p_values: Mat<f64>,
     conf_lower: Mat<f64>,
@@ -625,7 +625,7 @@ impl GmmEstimator {
             Normal::new(0.0, 1.0).map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
         let z_crit = inference::critical_value(&normal_dist, confidence_level);
 
-        let mut z_stats = Mat::<f64>::zeros(k, 1);
+        let mut test_stats = Mat::<f64>::zeros(k, 1);
         let mut p_values = Mat::<f64>::zeros(k, 1);
         let mut conf_lower = Mat::<f64>::zeros(k, 1);
         let mut conf_upper = Mat::<f64>::zeros(k, 1);
@@ -634,7 +634,7 @@ impl GmmEstimator {
             let se = *std_errors.get(j, 0);
             let stat = inference::compute_inference_stat(&normal_dist, coef, se, z_crit);
 
-            *z_stats.get_mut(j, 0) = stat.stat;
+            *test_stats.get_mut(j, 0) = stat.stat;
             *p_values.get_mut(j, 0) = stat.p_value;
             *conf_lower.get_mut(j, 0) = stat.conf_low;
             *conf_upper.get_mut(j, 0) = stat.conf_high;
@@ -669,7 +669,7 @@ impl GmmEstimator {
             k,
             cov_type,
             std_errors,
-            z_stats,
+            test_stats,
             p_values,
             conf_lower,
             conf_upper,
@@ -760,8 +760,13 @@ impl GmmEstimator {
     }
 
     /// z統計量 (k, 1)。
-    pub fn z_stats(&self) -> &Mat<f64> {
-        &self.z_stats
+    pub fn test_stats(&self) -> &Mat<f64> {
+        &self.test_stats
+    }
+
+    /// `test_stats`の従う分布（標準正規分布、自由度なし）。
+    pub fn stat_dist(&self) -> inference::StatDist {
+        inference::StatDist::Normal
     }
 
     /// 両側p値 (k, 1)。
@@ -3625,7 +3630,7 @@ mod tests {
 
         assert_eq!(estimator.cov_type(), &CovType::Hc1);
         assert_eq!(estimator.std_errors().nrows(), 2);
-        assert_eq!(estimator.z_stats().nrows(), 2);
+        assert_eq!(estimator.test_stats().nrows(), 2);
         assert_eq!(estimator.p_values().nrows(), 2);
         assert_eq!(estimator.conf_lower().nrows(), 2);
         assert_eq!(estimator.conf_upper().nrows(), 2);
@@ -3639,7 +3644,7 @@ mod tests {
             let coef = *estimator.params().get(j, 0);
             let se = *estimator.std_errors().get(j, 0);
             let expected_z = coef / se;
-            assert!((estimator.z_stats().get(j, 0) - expected_z).abs() < 1e-10);
+            assert!((estimator.test_stats().get(j, 0) - expected_z).abs() < 1e-10);
             assert!(*estimator.conf_lower().get(j, 0) < *estimator.conf_upper().get(j, 0));
         }
     }

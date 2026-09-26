@@ -1088,7 +1088,7 @@ fn marginal_effects_from_tobit_w_s(
     let mut out_param_names = Vec::with_capacity(k - k_constant);
     let mut out_dydx = Vec::with_capacity(k - k_constant);
     let mut std_errors = Vec::with_capacity(k - k_constant);
-    let mut z_stats = Vec::with_capacity(k - k_constant);
+    let mut test_stats = Vec::with_capacity(k - k_constant);
     let mut p_values = Vec::with_capacity(k - k_constant);
     let mut conf_lower = Vec::with_capacity(k - k_constant);
     let mut conf_upper = Vec::with_capacity(k - k_constant);
@@ -1107,7 +1107,7 @@ fn marginal_effects_from_tobit_w_s(
         out_param_names.push(param_names[j].clone());
         out_dydx.push(dydx[j]);
         std_errors.push(se);
-        z_stats.push(stat.stat);
+        test_stats.push(stat.stat);
         p_values.push(stat.p_value);
         conf_lower.push(stat.conf_low);
         conf_upper.push(stat.conf_high);
@@ -1117,7 +1117,7 @@ fn marginal_effects_from_tobit_w_s(
         out_param_names,
         out_dydx,
         std_errors,
-        z_stats,
+        test_stats,
         p_values,
         conf_lower,
         conf_upper,
@@ -1250,7 +1250,7 @@ pub struct TobitEstimator {
     /// `cov_params`の対角成分の平方根
     std_errors: Vec<f64>,
     /// z統計量（`k+1`）= `coef / std_errors`（`β∪{σ}`それぞれについて）
-    z_stats: Vec<f64>,
+    test_stats: Vec<f64>,
     /// 両側p値（`k+1`）。標準正規分布に基づく
     p_values: Vec<f64>,
     /// 信頼区間の下限（`k+1`）
@@ -1482,7 +1482,7 @@ impl TobitEstimator {
         let z_crit = inference::critical_value(&normal, confidence_level);
 
         let mut std_errors = vec![0.0; k + 1];
-        let mut z_stats = vec![0.0; k + 1];
+        let mut test_stats = vec![0.0; k + 1];
         let mut p_values = vec![0.0; k + 1];
         let mut conf_lower = vec![0.0; k + 1];
         let mut conf_upper = vec![0.0; k + 1];
@@ -1493,7 +1493,7 @@ impl TobitEstimator {
             let stat = inference::compute_inference_stat(&normal, coef, se, z_crit);
 
             std_errors[j] = se;
-            z_stats[j] = stat.stat;
+            test_stats[j] = stat.stat;
             p_values[j] = stat.p_value;
             conf_lower[j] = stat.conf_low;
             conf_upper[j] = stat.conf_high;
@@ -1527,7 +1527,7 @@ impl TobitEstimator {
             sigma,
             cov_params,
             std_errors,
-            z_stats,
+            test_stats,
             p_values,
             conf_lower,
             conf_upper,
@@ -1570,8 +1570,13 @@ impl TobitEstimator {
     }
 
     /// z統計量（`k+1`）
-    pub fn z_stats(&self) -> &[f64] {
-        &self.z_stats
+    pub fn test_stats(&self) -> &[f64] {
+        &self.test_stats
+    }
+
+    /// `test_stats`の従う分布（標準正規分布、自由度なし）。
+    pub fn stat_dist(&self) -> inference::StatDist {
+        inference::StatDist::Normal
     }
 
     /// 両側p値（`k+1`）
@@ -2483,11 +2488,11 @@ mod tests {
     /// 3.1〜3.3節の一般形の特殊ケース）。
     /// `σ`のデルタ法変換（ヤコビアン`diag(1,σ)`）を適用すると、この対角性はそのまま
     /// 保たれ`Var(σ̂)≈σ̂²Var(ŝ)=σ̂²/(2n)`・`Cov(β̂,σ̂)≈σ̂Cov(β̂,ŝ)=0`になる。
-    /// Logitの`fit_computes_std_errors_z_stats_p_values_and_ci_matching_closed_form_for_
+    /// Logitの`fit_computes_std_errors_test_stats_p_values_and_ci_matching_closed_form_for_
     /// intercept_only_model`と同じ設計（本体実装と同じ式を繰り返すのではなく、独立に
     /// 導出した閉じた形の解でSE・z値・p値・信頼区間を検算する）。
     #[test]
-    fn fit_computes_std_errors_z_stats_p_values_and_ci_matching_closed_form_for_intercept_only_uncensored_model()
+    fn fit_computes_std_errors_test_stats_p_values_and_ci_matching_closed_form_for_intercept_only_uncensored_model()
      {
         let y = vec![1.0, 2.0, 3.0, 4.0, 10.0];
         let input = intercept_only_uncensored_input(&y);
@@ -2533,7 +2538,7 @@ mod tests {
 
         let expected_z_beta = estimator.params()[0] / expected_se_beta;
         let expected_p_beta = 2.0 * (1.0 - normal.cdf(expected_z_beta.abs()));
-        assert!((estimator.z_stats()[0] - expected_z_beta).abs() < 1e-6);
+        assert!((estimator.test_stats()[0] - expected_z_beta).abs() < 1e-6);
         assert!((estimator.p_values()[0] - expected_p_beta).abs() < 1e-6);
         assert!(
             (estimator.conf_lower()[0] - (estimator.params()[0] - z_crit * expected_se_beta)).abs()
@@ -2546,7 +2551,7 @@ mod tests {
 
         let expected_z_sigma = estimator.sigma() / expected_se_sigma;
         let expected_p_sigma = 2.0 * (1.0 - normal.cdf(expected_z_sigma.abs()));
-        assert!((estimator.z_stats()[1] - expected_z_sigma).abs() < 1e-6);
+        assert!((estimator.test_stats()[1] - expected_z_sigma).abs() < 1e-6);
         assert!((estimator.p_values()[1] - expected_p_sigma).abs() < 1e-6);
         assert!(
             (estimator.conf_lower()[1] - (estimator.sigma() - z_crit * expected_se_sigma)).abs()
@@ -2660,7 +2665,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(estimator.df_model(), 1);
-        let z_slope = estimator.z_stats()[1];
+        let z_slope = estimator.test_stats()[1];
         assert!((estimator.wald_statistic() - z_slope.powi(2)).abs() < 1e-9);
 
         let chi2 = ChiSquared::new(1.0).unwrap();
@@ -2758,10 +2763,11 @@ mod tests {
         for (j, &coef) in coefs.iter().enumerate().take(k_plus_1) {
             let se = estimator.std_errors()[j];
             assert!((se - estimator.cov_params().get(j, j).sqrt()).abs() < 1e-9);
-            assert!((estimator.z_stats()[j] - coef / se).abs() < 1e-9);
+            assert!((estimator.test_stats()[j] - coef / se).abs() < 1e-9);
             assert!(
-                (estimator.p_values()[j] - 2.0 * (1.0 - normal.cdf(estimator.z_stats()[j].abs())))
-                    .abs()
+                (estimator.p_values()[j]
+                    - 2.0 * (1.0 - normal.cdf(estimator.test_stats()[j].abs())))
+                .abs()
                     < 1e-9
             );
             assert!((estimator.conf_lower()[j] - (coef - z_crit * se)).abs() < 1e-9);
@@ -3420,7 +3426,7 @@ mod tests {
         for (b, s) in base.std_errors().iter().zip(scaled.std_errors()) {
             assert!(rtol(s / c, *b), "se: base={b}, scaled/c={}", s / c);
         }
-        for (b, s) in base.z_stats().iter().zip(scaled.z_stats()) {
+        for (b, s) in base.test_stats().iter().zip(scaled.test_stats()) {
             assert!(rtol(*s, *b), "z: base={b}, scaled={s}");
         }
         assert!(

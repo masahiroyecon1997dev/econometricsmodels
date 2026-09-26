@@ -8,6 +8,37 @@
 
 use statrs::distribution::ContinuousCDF;
 
+/// 検定統計量の従う分布（`test_stats`がt統計量かz統計量か、および自由度）。
+///
+/// t分布なら自由度を持ち、正規分布なら持たない、という関係を型で保証する。
+/// 自由度は`df_resid`と一致するとは限らない（例: OLSの`cov_type=Cluster`は`G-1`）ため、
+/// 利用者が`test_stats`からp値・信頼区間を再計算できるよう、実際に使った値を保持する。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatDist {
+    /// t分布（自由度`df`）。
+    T { df: usize },
+    /// 標準正規分布。
+    Normal,
+}
+
+impl StatDist {
+    /// 分布名（`"t"`または`"normal"`）。
+    pub fn name(&self) -> &'static str {
+        match self {
+            StatDist::T { .. } => "t",
+            StatDist::Normal => "normal",
+        }
+    }
+
+    /// t分布のときの自由度。正規分布なら`None`。
+    pub fn df(&self) -> Option<usize> {
+        match self {
+            StatDist::T { df } => Some(*df),
+            StatDist::Normal => None,
+        }
+    }
+}
+
 /// 単一の係数に対する検定統計量（t統計量またはz統計量）。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct InferenceStat {

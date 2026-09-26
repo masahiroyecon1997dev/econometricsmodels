@@ -12,7 +12,7 @@
 
 ## Marginal effects
 
-`LogitResults.marginal_effects()` computes `dy/dx` with delta-solver standard errors, evaluated at `"overall"` (average marginal effects, the default), `"mean"`, or `"median"`. The constant term is excluded from the output. See [Getting Started](../getting-started.md#marginal-effects) for an example.
+`LogitResults.marginal_effects()` computes `dy/dx` with delta-method standard errors, evaluated at `"overall"` (average marginal effects, the default), `"mean"`, or `"median"`. The constant term is excluded from the output. See [Getting Started](../getting-started.md#marginal-effects) for an example.
 
 ::: econometricsmodels.Logit
     options:

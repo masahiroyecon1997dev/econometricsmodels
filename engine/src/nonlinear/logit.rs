@@ -362,7 +362,7 @@ pub struct LogitEstimator {
     /// 標準誤差（k, 元のスケール）。`cov_params`の対角成分の平方根
     std_errors: Vec<f64>,
     /// z統計量（k）= `params / std_errors`
-    z_stats: Vec<f64>,
+    test_stats: Vec<f64>,
     /// 両側p値（k）。標準正規分布に基づく
     p_values: Vec<f64>,
     /// 信頼区間の下限（k）
@@ -609,7 +609,7 @@ impl LogitEstimator {
         let z_crit = inference::critical_value(&normal, confidence_level);
 
         let mut std_errors = vec![0.0; k];
-        let mut z_stats = vec![0.0; k];
+        let mut test_stats = vec![0.0; k];
         let mut p_values = vec![0.0; k];
         let mut conf_lower = vec![0.0; k];
         let mut conf_upper = vec![0.0; k];
@@ -619,7 +619,7 @@ impl LogitEstimator {
             let stat = inference::compute_inference_stat(&normal, params[j], se, z_crit);
 
             std_errors[j] = se;
-            z_stats[j] = stat.stat;
+            test_stats[j] = stat.stat;
             p_values[j] = stat.p_value;
             conf_lower[j] = stat.conf_low;
             conf_upper[j] = stat.conf_high;
@@ -646,7 +646,7 @@ impl LogitEstimator {
             params,
             cov_params,
             std_errors,
-            z_stats,
+            test_stats,
             p_values,
             conf_lower,
             conf_upper,
@@ -685,8 +685,13 @@ impl LogitEstimator {
     }
 
     /// z統計量（k）
-    pub fn z_stats(&self) -> &[f64] {
-        &self.z_stats
+    pub fn test_stats(&self) -> &[f64] {
+        &self.test_stats
+    }
+
+    /// `test_stats`の従う分布（標準正規分布、自由度なし）。
+    pub fn stat_dist(&self) -> inference::StatDist {
+        inference::StatDist::Normal
     }
 
     /// 両側p値（k）
@@ -1159,7 +1164,7 @@ mod tests {
     /// `Var(θ̂) = -H⁻¹ = 1/(n*ȳ*(1-ȳ))`。z値・p値・信頼区間はこの分散から
     /// 標準正規分布（統計独立に`statrs::Normal`で検算）で導出できる。
     #[test]
-    fn fit_computes_std_errors_z_stats_p_values_and_ci_matching_closed_form_for_intercept_only_model()
+    fn fit_computes_std_errors_test_stats_p_values_and_ci_matching_closed_form_for_intercept_only_model()
      {
         let estimator = LogitEstimator::fit(
             intercept_only_input(),
@@ -1187,7 +1192,7 @@ mod tests {
         assert!((estimator.std_errors()[0] - expected_se).abs() < 1e-6);
 
         let expected_z = estimator.params()[0] / expected_se;
-        assert!((estimator.z_stats()[0] - expected_z).abs() < 1e-6);
+        assert!((estimator.test_stats()[0] - expected_z).abs() < 1e-6);
 
         // p値・信頼区間はstatrsのNormalで独立に検算する（本体実装と同じ計算式を
         // 繰り返すのではなく、標準正規分布の性質から直接導出する）。
@@ -1253,7 +1258,7 @@ mod tests {
         for j in 0..k {
             let se = estimator.std_errors()[j];
             assert!((se * se - *estimator.cov_params().get(j, j)).abs() < 1e-9);
-            assert!((estimator.z_stats()[j] - estimator.params()[j] / se).abs() < 1e-9);
+            assert!((estimator.test_stats()[j] - estimator.params()[j] / se).abs() < 1e-9);
             assert!(
                 (estimator.conf_upper()[j] - estimator.conf_lower()[j] - 2.0 * z_crit * se).abs()
                     < 1e-9
@@ -1612,7 +1617,7 @@ mod tests {
     /// 上のテストは均等サイズのグループのみを検証しているが、
     /// `testing-policy.md`が指摘する通り均等サイズのみのテストは実務で起こりやすい
     /// 偏った分布のグループサイズ（クラスター内の観測数がクラスターごとに異なる場合）
-    /// を見逃しうる。OLS側の対応するテスト（`fit_computes_cluster_std_errors_t_stats_
+    /// を見逃しうる。OLS側の対応するテスト（`fit_computes_cluster_std_errors_test_stats_
     /// p_values_conf_int_and_f_test`、2:3の不均衡）に倣い、3:1:1の不均衡なグループでも
     /// 同じ独立再計算の技法で検証する（`G=3 > q=2`）。
     #[test]
@@ -2598,8 +2603,8 @@ mod tests {
         let z_crit = normal.inverse_cdf(0.975);
         for idx in 0..2 {
             let se = effects.std_errors()[idx];
-            assert!((effects.z_stats()[idx] - effects.effect()[idx] / se).abs() < 1e-9);
-            let expected_p = 2.0 * (1.0 - normal.cdf(effects.z_stats()[idx].abs()));
+            assert!((effects.test_stats()[idx] - effects.effect()[idx] / se).abs() < 1e-9);
+            let expected_p = 2.0 * (1.0 - normal.cdf(effects.test_stats()[idx].abs()));
             assert!((effects.p_values()[idx] - expected_p).abs() < 1e-9);
             assert!(
                 (effects.conf_upper()[idx] - effects.conf_lower()[idx] - 2.0 * z_crit * se).abs()

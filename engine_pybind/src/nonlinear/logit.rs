@@ -206,7 +206,14 @@ pub struct LogitResult {
     #[pyo3(get)]
     pub std_errors: Vec<f64>,
     #[pyo3(get)]
-    pub z_stats: Vec<f64>,
+    pub test_stats: Vec<f64>,
+    /// Distribution of `test_stats`: `"t"` or `"normal"`.
+    #[pyo3(get)]
+    pub stat_dist: String,
+    /// Degrees of freedom of the t distribution (`None` for `"normal"`). May differ from
+    /// `df_resid` (e.g. cluster-robust inference uses `G - 1`).
+    #[pyo3(get)]
+    pub stat_df: Option<i64>,
     #[pyo3(get)]
     pub p_values: Vec<f64>,
     #[pyo3(get)]
@@ -339,7 +346,7 @@ impl LogitResult {
         mat_to_nested_vec(&self.estimator.pred_table(threshold))
     }
 
-    /// Marginal effects (`dy/dx`) with delta-solver standard errors.
+    /// Marginal effects (`dy/dx`) with delta-method standard errors.
     ///
     /// Independent of `fit()`'s `confidence_level` (re-evaluated here so callers can
     /// use a different confidence level without re-fitting). See
@@ -365,7 +372,7 @@ impl LogitResult {
             param_names: effects.param_names().to_vec(),
             effect: effects.effect().to_vec(),
             std_errors: effects.std_errors().to_vec(),
-            z_stats: effects.z_stats().to_vec(),
+            test_stats: effects.test_stats().to_vec(),
             p_values: effects.p_values().to_vec(),
             conf_lower: effects.conf_lower().to_vec(),
             conf_upper: effects.conf_upper().to_vec(),
@@ -449,7 +456,9 @@ pub(crate) fn fit(
     Ok(LogitResult {
         params: estimator.params().to_vec(),
         std_errors: estimator.std_errors().to_vec(),
-        z_stats: estimator.z_stats().to_vec(),
+        test_stats: estimator.test_stats().to_vec(),
+        stat_dist: estimator.stat_dist().name().to_string(),
+        stat_df: estimator.stat_dist().df().map(|df| df as i64),
         p_values: estimator.p_values().to_vec(),
         conf_lower: estimator.conf_lower().to_vec(),
         conf_upper: estimator.conf_upper().to_vec(),

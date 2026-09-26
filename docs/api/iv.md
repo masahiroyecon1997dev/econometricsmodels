@@ -1,6 +1,6 @@
 # IV
 
-`IV` estimates a linear model with endogenous regressors by two-stage least squares (2SLS) or generalized estimator of moments (GMM). Unlike [OLS](ols.md), independent variables are split into two lists — `x_exog` (exogenous) and `x_endog` (endogenous) — plus `instruments` (the excluded instruments, one per endogenous variable at minimum for identification). `IVOptions.estimator` (`"2sls"`, the default, or `"gmm"`) selects the estimator; a single `IV`/`IVResults` pair serves both.
+`IV` estimates a linear model with endogenous regressors by two-stage least squares (2SLS) or generalized method of moments (GMM). Unlike [OLS](ols.md), independent variables are split into two lists — `x_exog` (exogenous) and `x_endog` (endogenous) — plus `instruments` (the excluded instruments, one per endogenous variable at minimum for identification). `IVOptions.estimator` (`"2sls"`, the default, or `"gmm"`) selects the estimator; a single `IV`/`IVResults` pair serves both.
 
 ## Standard error types
 

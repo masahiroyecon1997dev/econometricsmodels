@@ -20,6 +20,8 @@ the `OLSResults`/`LogitResults` precedent).
 
 from __future__ import annotations
 
+from typing import Literal
+
 import polars as pl
 
 from .. import _lib
@@ -152,16 +154,27 @@ class IVResults:
         return dict(zip(self._raw.param_names, self._raw.std_errors))
 
     @property
-    def stats(self) -> dict[str, float]:
+    def test_stats(self) -> dict[str, float]:
         """Coefficient name to test statistic.
 
         t-statistic for `estimator="2sls"`, z-statistic for
-        `estimator="gmm"` — named generically (not `t_stats`/`z_stats`)
-        because `IVResults` is shared by both methods (mirrors the
-        `_lib.IVResult.stats` naming, `docs/spec/iv-spec.md`
-        section 2).
+        `estimator="gmm"`; `stat_dist` tells which.
         """
-        return dict(zip(self._raw.param_names, self._raw.stats))
+        return dict(zip(self._raw.param_names, self._raw.test_stats))
+
+    @property
+    def stat_dist(self) -> Literal["t", "normal"]:
+        """Distribution of `test_stats`: `"t"` for `estimator="2sls"`,
+        `"normal"` for `estimator="gmm"`."""
+        return self._raw.stat_dist
+
+    @property
+    def stat_df(self) -> int | None:
+        """Degrees of freedom of the t distribution behind `test_stats`,
+        or `None` when `stat_dist` is `"normal"`. May differ from
+        `df_resid` (e.g. cluster-robust inference uses `G - 1`), so use
+        this to recompute p-values from `test_stats`."""
+        return self._raw.stat_df
 
     @property
     def p_values(self) -> dict[str, float]:
@@ -349,8 +362,7 @@ class IVResults:
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are
-            `param`, `coef`, `std_err`, `stat` (see `stats` property
-            for why this is not `t_stat`/`z_stat`), `p_value`,
+            `param`, `coef`, `std_err`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
         return [
@@ -358,16 +370,16 @@ class IVResults:
                 "param": name,
                 "coef": coef,
                 "std_err": se,
-                "stat": stat,
+                "test_stat": test_stat,
                 "p_value": p,
                 "conf_lower": lower,
                 "conf_upper": upper,
             }
-            for name, coef, se, stat, p, lower, upper in zip(
+            for name, coef, se, test_stat, p, lower, upper in zip(
                 self._raw.param_names,
                 self._raw.params,
                 self._raw.std_errors,
-                self._raw.stats,
+                self._raw.test_stats,
                 self._raw.p_values,
                 self._raw.conf_lower,
                 self._raw.conf_upper,

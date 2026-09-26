@@ -23,7 +23,7 @@ iv_crosscheck.json）を生成するスクリプト。
   `benchmark/iv/references/run_ivreg.R`のモジュールコメント参照）。ただしcluster cov_typeのみ、
   ivreg側のWald検定がF分布の分母自由度にクラスター数を反映しない既知の制約により
   p値が一致しないため、統計量のみ比較しp値は対象外にする（ユーザー確認済み）。
-- **t_stats/p_values/conf_int**・**nobs/df_resid**:
+- **test_stats/p_values/conf_int**・**nobs/df_resid**:
   `coeftest()`/手計算の信頼区間・`nrow(df)`/`df_inference`から抽出し、全cov_type
   エントリに含める。
 
@@ -301,7 +301,7 @@ def build_fixtures() -> dict:
             "cov_typeのみ、ivreg側のWald検定がF分布の分母自由度にクラスター数を"
             "反映しない既知の制約により、wu_hausman_p_valueがnull（statisticのみ"
             "実測値、ユーザー確認済み）。"
-            "t_stats/p_values/conf_intはcoeftest()・手計算信頼区間から、"
+            "test_stats/p_values/conf_intはcoeftest()・手計算信頼区間から、"
             "nobs/df_residはnrow(df)・df_inferenceから抽出する。"
             "scale_variance_mildはscale_variance（x1*1e6, x2*1e-3、全cov_typeで"
             "ComputationError）より緩いスケール差（x1*1e2, x2*1e-1）の成功パス"

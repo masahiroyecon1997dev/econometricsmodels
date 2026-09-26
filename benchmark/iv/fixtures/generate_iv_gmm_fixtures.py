@@ -191,7 +191,7 @@ def build_fixtures() -> dict:
             "他のweight_type（robust/cluster/kernel）はweight_typeとcov_typeが"
             "独立な軸であることの確認が目的のため、baselineシナリオ×"
             "cov_type=classicalのみで検証する（ユーザー確認済み）。"
-            "z_stats/p_values/conf_int/f_statistic/f_p_valueは常にz分布・"
+            "test_stats/p_values/conf_int/f_statistic/f_p_valueは常にz分布・"
             "カイ二乗形式（qで割らない）で独自に計算し直した値（`gmm.rs`の設計、"
             "`run_gmm()`のモジュールdocコメント参照）。hansen_j_statistic/"
             "hansen_j_p_valueは過剰識別のときのみ値を持ち、丁度識別では`None`。"

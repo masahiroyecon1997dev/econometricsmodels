@@ -199,7 +199,7 @@ impl TobitOptions {
 /// section 5. `predict()` / `marginal_effects()` / `censoring_fit_check()` are provided as
 /// separate methods (not part of this struct's fields), matching section 6.
 ///
-/// `params`/`param_names`/`std_errors`/`z_stats`/`p_values`/`conf_lower`/`conf_upper` are all
+/// `params`/`param_names`/`std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper` are all
 /// `(k+1)`-length: `sigma` (the error term's standard deviation) is appended as the last
 /// element, with `param_names[-1] == "sigma"`. This differs from the underlying
 /// `engine::nonlinear::tobit::TobitEstimator`, where `params()` is `k`-length (`beta` only)
@@ -221,7 +221,14 @@ pub struct TobitResult {
     #[pyo3(get)]
     pub std_errors: Vec<f64>,
     #[pyo3(get)]
-    pub z_stats: Vec<f64>,
+    pub test_stats: Vec<f64>,
+    /// Distribution of `test_stats`: `"t"` or `"normal"`.
+    #[pyo3(get)]
+    pub stat_dist: String,
+    /// Degrees of freedom of the t distribution (`None` for `"normal"`). May differ from
+    /// `df_resid` (e.g. cluster-robust inference uses `G - 1`).
+    #[pyo3(get)]
+    pub stat_df: Option<i64>,
     #[pyo3(get)]
     pub p_values: Vec<f64>,
     #[pyo3(get)]
@@ -374,7 +381,7 @@ impl TobitResult {
         Ok(PyDataFrame(source))
     }
 
-    /// Marginal effects (`dy/dx`) with delta-solver standard errors.
+    /// Marginal effects (`dy/dx`) with delta-method standard errors.
     ///
     /// `target` selects the same three quantities as `predict()` (see its doc). Unlike
     /// Logit/Probit, this is an independent implementation (not the shared
@@ -412,7 +419,7 @@ impl TobitResult {
             param_names: effects.param_names().to_vec(),
             effect: effects.effect().to_vec(),
             std_errors: effects.std_errors().to_vec(),
-            z_stats: effects.z_stats().to_vec(),
+            test_stats: effects.test_stats().to_vec(),
             p_values: effects.p_values().to_vec(),
             conf_lower: effects.conf_lower().to_vec(),
             conf_upper: effects.conf_upper().to_vec(),
@@ -613,7 +620,9 @@ pub(crate) fn fit(
     Ok(TobitResult {
         params,
         std_errors: estimator.std_errors().to_vec(),
-        z_stats: estimator.z_stats().to_vec(),
+        test_stats: estimator.test_stats().to_vec(),
+        stat_dist: estimator.stat_dist().name().to_string(),
+        stat_df: estimator.stat_dist().df().map(|df| df as i64),
         p_values: estimator.p_values().to_vec(),
         conf_lower: estimator.conf_lower().to_vec(),
         conf_upper: estimator.conf_upper().to_vec(),

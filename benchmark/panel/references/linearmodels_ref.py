@@ -300,7 +300,7 @@ def run(
 
     coef = {k: float(v) for k, v in res.params.to_dict().items()}
     se = {k: float(v) for k, v in res.std_errors.to_dict().items()}
-    t_stats = {k: float(v) for k, v in res.tstats.to_dict().items()}
+    test_stats = {k: float(v) for k, v in res.tstats.to_dict().items()}
     p_values = {k: float(v) for k, v in res.pvalues.to_dict().items()}
     ci = res.conf_int(level=confidence_level)
     conf_int = {
@@ -310,7 +310,7 @@ def run(
     result: dict = {
         "coef": coef,
         "se": se,
-        "t_stats": t_stats,
+        "test_stats": test_stats,
         "p_values": p_values,
         "conf_int": conf_int,
         "n_obs": int(res.nobs),
@@ -414,7 +414,7 @@ def run_re(
 
     coef = {k: float(v) for k, v in res.params.to_dict().items()}
     se = {k: float(v) for k, v in res.std_errors.to_dict().items()}
-    t_stats = {k: float(v) for k, v in res.tstats.to_dict().items()}
+    test_stats = {k: float(v) for k, v in res.tstats.to_dict().items()}
     p_values = {k: float(v) for k, v in res.pvalues.to_dict().items()}
     ci = res.conf_int(level=confidence_level)
     conf_int = {
@@ -424,7 +424,7 @@ def run_re(
     result: dict = {
         "coef": coef,
         "se": se,
-        "t_stats": t_stats,
+        "test_stats": test_stats,
         "p_values": p_values,
         "conf_int": conf_int,
         "n_obs": int(res.nobs),

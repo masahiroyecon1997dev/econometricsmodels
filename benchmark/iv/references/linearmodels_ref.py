@@ -246,10 +246,10 @@ def run(
     df_resid = int(res.df_resid)
     alpha = 1.0 - confidence_level
     t_crit = float(scipy_stats.t.ppf(1 - alpha / 2, df_resid))
-    t_stats = {k: coef[k] / se[k] for k in coef}
+    test_stats = {k: coef[k] / se[k] for k in coef}
     p_values = {
         k: float(2 * (1 - scipy_stats.t.cdf(abs(v), df_resid)))
-        for k, v in t_stats.items()
+        for k, v in test_stats.items()
     }
     conf_int = {
         k: [coef[k] - t_crit * se[k], coef[k] + t_crit * se[k]] for k in coef
@@ -305,7 +305,7 @@ def run(
     result: dict = {
         "coef": coef,
         "se": se,
-        "t_stats": t_stats,
+        "test_stats": test_stats,
         "p_values": p_values,
         "conf_int": conf_int,
         "r_squared": float(res.rsquared),
@@ -495,10 +495,10 @@ def run_gmm(
     se = {_fix_name(k): float(v) for k, v in res.std_errors.to_dict().items()}
     alpha = 1.0 - confidence_level
     z_crit = float(scipy_stats.norm.ppf(1 - alpha / 2))
-    z_stats = {k: coef[k] / se[k] for k in coef}
+    test_stats = {k: coef[k] / se[k] for k in coef}
     p_values = {
         k: float(2 * (1 - scipy_stats.norm.cdf(abs(v))))
-        for k, v in z_stats.items()
+        for k, v in test_stats.items()
     }
     conf_int = {
         k: [coef[k] - z_crit * se[k], coef[k] + z_crit * se[k]] for k in coef
@@ -517,7 +517,7 @@ def run_gmm(
     result: dict = {
         "coef": coef,
         "se": se,
-        "z_stats": z_stats,
+        "test_stats": test_stats,
         "p_values": p_values,
         "conf_int": conf_int,
         "r_squared": float(res.rsquared),

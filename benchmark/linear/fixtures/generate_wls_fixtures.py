@@ -224,7 +224,7 @@ def build_fixtures() -> dict:
             "outlier_regressorはx1の5%を外れ値に置き換えた成功パス"
             "（OLSの同種ケース相当）。"
             "クラスター系（cluster/cluster_imbalanced/cluster_g2）は従来coef/se"
-            "のみだったが、t_stats/p_values/conf_int/r_squared等のフル統計量まで"
+            "のみだったが、test_stats/p_values/conf_int/r_squared等のフル統計量まで"
             "検証範囲を広げた（_run_cluster_caseがextract_full_fit_statsを"
             "使うよう変更、OLS側の横展開）。あわせて_run_cluster_caseに"
             "use_t=Trueが指定されていなかった不備を修正（cluster時に既定の"

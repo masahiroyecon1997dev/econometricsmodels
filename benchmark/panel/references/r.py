@@ -62,7 +62,7 @@ def run_fixest_r(
     raw = run_r(_R_SCRIPT, csv_path, formula, cov_type, extra_args=extra)
     return normalize_names(
         raw,
-        stat_key="t_stats",
+        stat_key="test_stats",
         scalar_keys=_FIXEST_SCALAR_KEYS,
         # FEに切片("(Intercept)"/"Intercept")は無いため、畳む対象名を空にする
         # （normalize_namesの既定はOLS/WLS向けの切片名エイリアス）。
@@ -100,5 +100,5 @@ def run_re_plm_r(
         extra_args=[entity_col, time_col],
     )
     return normalize_names(
-        raw, stat_key="t_stats", scalar_keys=_PLM_RE_SCALAR_KEYS
+        raw, stat_key="test_stats", scalar_keys=_PLM_RE_SCALAR_KEYS
     )

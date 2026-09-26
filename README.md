@@ -61,7 +61,7 @@ print(result.params)  # {"const": ..., "x1": ...}
 print(result.std_errors)  # {"const": ..., "x1": ...}
 print(result.r_squared)
 
-# Row-oriented parameter table (param/coef/std_err/t_stat/p_value/conf_lower/conf_upper).
+# Row-oriented parameter table (param/coef/std_err/test_stat/p_value/conf_lower/conf_upper).
 print(result.coef_table())
 
 # Overall-fit statistics.
@@ -83,7 +83,9 @@ df = pl.DataFrame(
 
 result = Logit(df, y="y", x=["x1"]).fit()
 
-print(result.coef_table())  # same shape as OLS, but z_stat instead of t_stat
+print(
+    result.coef_table()
+)  # same shape as OLS (test_stat is t for 2SLS, z for GMM; see stat_dist)
 print(result.aic, result.bic)
 
 # Likelihood-ratio test for overall significance (the Logit/Probit analogue

@@ -97,9 +97,9 @@ def check_margeff(
                 atol=atol,
             )
             assert_close(
-                row["z_stat"],
-                ref_stats["z_stat"],
-                f"{label}/{at}/{name}/z_stat",
+                row["test_stat"],
+                ref_stats["test_stat"],
+                f"{label}/{at}/{name}/test_stat",
                 rtol=rtol,
                 atol=atol,
             )

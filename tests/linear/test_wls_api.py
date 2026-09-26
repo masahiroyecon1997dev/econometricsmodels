@@ -82,7 +82,7 @@ def test_weight_one_matches_ols(dataset, option_kwargs):
     for name in ols_res.param_names:
         assert wls_res.params[name] == ols_res.params[name], name
         assert wls_res.std_errors[name] == ols_res.std_errors[name], name
-        assert wls_res.t_stats[name] == ols_res.t_stats[name], name
+        assert wls_res.test_stats[name] == ols_res.test_stats[name], name
         assert wls_res.p_values[name] == ols_res.p_values[name], name
         assert wls_res.conf_int[name] == ols_res.conf_int[name], name
 
@@ -194,7 +194,7 @@ def test_coef_table_structure(dataset):
         "param",
         "coef",
         "std_err",
-        "t_stat",
+        "test_stat",
         "p_value",
         "conf_lower",
         "conf_upper",
@@ -215,14 +215,14 @@ def test_conf_int_structure(dataset):
         assert lower < upper
 
 
-def test_params_std_errors_t_stats_p_values_share_keys(dataset):
+def test_params_std_errors_test_stats_p_values_share_keys(dataset):
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
     expected_keys = {"const", "x1", "x2"}
 
     assert set(res.params.keys()) == expected_keys
     assert set(res.std_errors.keys()) == expected_keys
-    assert set(res.t_stats.keys()) == expected_keys
+    assert set(res.test_stats.keys()) == expected_keys
     assert set(res.p_values.keys()) == expected_keys
 
 

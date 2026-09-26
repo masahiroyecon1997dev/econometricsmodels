@@ -21,6 +21,8 @@ affecting `OLSOptions`/OLS users.
 
 from __future__ import annotations
 
+from typing import Literal
+
 import polars as pl
 
 from .. import _lib
@@ -132,9 +134,24 @@ class WLSResults:
         return dict(zip(self._raw.param_names, self._raw.std_errors))
 
     @property
-    def t_stats(self) -> dict[str, float]:
-        """Coefficient name to t-statistic."""
-        return dict(zip(self._raw.param_names, self._raw.t_stats))
+    def test_stats(self) -> dict[str, float]:
+        """Coefficient name to test statistic (t-statistic; see
+        `stat_dist`)."""
+        return dict(zip(self._raw.param_names, self._raw.test_stats))
+
+    @property
+    def stat_dist(self) -> Literal["t", "normal"]:
+        """Distribution of `test_stats`: `"t"` (t-statistics) or
+        `"normal"` (z-statistics)."""
+        return self._raw.stat_dist
+
+    @property
+    def stat_df(self) -> int | None:
+        """Degrees of freedom of the t distribution behind `test_stats`,
+        or `None` when `stat_dist` is `"normal"`. May differ from
+        `df_resid` (e.g. cluster-robust inference uses `G - 1`), so use
+        this to recompute p-values from `test_stats`."""
+        return self._raw.stat_df
 
     @property
     def p_values(self) -> dict[str, float]:
@@ -219,7 +236,7 @@ class WLSResults:
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are
-            `param`, `coef`, `std_err`, `t_stat`, `p_value`,
+            `param`, `coef`, `std_err`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
         return [
@@ -227,7 +244,7 @@ class WLSResults:
                 "param": name,
                 "coef": coef,
                 "std_err": se,
-                "t_stat": t,
+                "test_stat": t,
                 "p_value": p,
                 "conf_lower": lower,
                 "conf_upper": upper,
@@ -236,7 +253,7 @@ class WLSResults:
                 self._raw.param_names,
                 self._raw.params,
                 self._raw.std_errors,
-                self._raw.t_stats,
+                self._raw.test_stats,
                 self._raw.p_values,
                 self._raw.conf_lower,
                 self._raw.conf_upper,

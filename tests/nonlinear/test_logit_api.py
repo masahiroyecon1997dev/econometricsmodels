@@ -54,8 +54,8 @@ def test_conf_int_structure(binary_dataset):
     _checks.check_conf_int_structure(binary_dataset, Logit)
 
 
-def test_params_std_errors_z_stats_p_values_share_keys(binary_dataset):
-    _checks.check_params_std_errors_z_stats_p_values_share_keys(
+def test_params_std_errors_test_stats_p_values_share_keys(binary_dataset):
+    _checks.check_params_std_errors_test_stats_p_values_share_keys(
         binary_dataset, Logit
     )
 

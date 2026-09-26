@@ -16,7 +16,7 @@ _INTERCEPT_ALIASES_DEFAULT = ("(Intercept)", "Intercept")
 def normalize_names(
     raw: dict,
     *,
-    stat_key: str = "t_stats",
+    stat_key: str = "test_stats",
     scalar_keys: Sequence[str] = (),
     intercept_aliases: Iterable[str] = _INTERCEPT_ALIASES_DEFAULT,
     conf_from_low_high: bool = False,
@@ -33,7 +33,7 @@ def normalize_names(
             キーのdict）と、`conf_int`（`conf_from_low_high=False`時）
             または`conf_low`/`conf_high`（`conf_from_low_high=True`時）を
             持つdict。
-        stat_key: 検定統計量のキー名（線形系"t_stats"、離散選択系"z_stats"）。
+        stat_key: 検定統計量のキー名（線形系"test_stats"、離散選択系"test_stats"）。
         scalar_keys: そのまま通す（名前正規化不要の）トップレベルのキー
             集合を出力したい順で渡す（aic/bic/log_likelihood/f_statistic
             等）。`raw`に存在しないキーを渡すと`KeyError`になるため、

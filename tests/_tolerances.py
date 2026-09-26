@@ -239,17 +239,17 @@ TOLERANCES: dict[str, dict[str, float]] = {
         "rtol_cluster_one_way": 5e-5,
         "rtol_cluster_two_way": 3e-3,
         "atol": ATOL_CROSSCHECK_FLOOR,
-        # p_values/conf_intはcoef/se/t_statsのようにcluster特有のズレ
+        # p_values/conf_intはcoef/se/test_statsのようにcluster特有のズレ
         # （G/(G-1)補正差）がそのまま相対誤差として伝播しない——p値はt統計量に
         # t分布のCDFという非線形変換をかけた値、信頼区間はt臨界値×seの積のため、
         # 僅かなSEの差が非線形に増幅されうる。実測最大絶対誤差（small_panel、
         # G=5という極端に少ないクラスタ数のケースを除く）はp_values~0.013・
         # conf_int~0.031で、それぞれマージンを載せた絶対誤差フロア。coef/se/
-        # t_statsは引き続きrtol_cluster_one_way/two_wayで厳しく検証するため、
+        # test_statsは引き続きrtol_cluster_one_way/two_wayで厳しく検証するため、
         # 実装バグはそちらで検出できる（p_values/conf_intだけの例外的な緩和）。
         # small_panel自体はG=5でこの増幅がさらに拡大する（実測最大絶対誤差
         # conf_int~0.40）ため、p_values/conf_intの数値比較はスコープ外とし
-        # coef/se/t_stats/aic/bic/r_squared_withinのみ検証する
+        # coef/se/test_stats/aic/bic/r_squared_withinのみ検証する
         # （`test_fe_crosscheck.py`参照、`iv_crosscheck`の`rtol_hac_small_n`と
         # 同型の「小標本ケースは別枠で扱う」判断）。
         "atol_cluster_p_value": 0.02,
@@ -282,7 +282,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # `benchmark/panel/fixtures/generate_re_crosscheck_fixtures.py`参照）。
     # plmの変量効果分散成分推定（Swamy-Arora）がlinearmodelsと僅かに異なる
     # 実装のため、点推定自体が不均衡パネルで乖離する（実測最大相対誤差:
-    # coef 0.18%・se 0.71%・t_stats 0.67%・p_values 0.56%・conf_int 1.05%、
+    # coef 0.18%・se 0.71%・test_stats 0.67%・p_values 0.56%・conf_int 1.05%、
     # baseline/wagepan等のバランスパネルでは機械精度で一致）。FEのfixest
     # クロスチェック（機械精度一致）とは精度の前提が異なるため、実測値に
     # マージンを載せた緩いRTOLを使う。

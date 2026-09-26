@@ -278,11 +278,10 @@ impl IVOptions {
 /// section 2. All array-valued fields (`params`, `std_errors`, etc.) share the same
 /// order as `param_names`.
 ///
-/// `stats` holds the t-statistics (`estimator="2sls"`) or z-statistics (`estimator="gmm"`),
-/// depending on which distribution the fitted model uses for inference
-/// (`docs/spec/iv-spec.md` 3.2節) — named generically rather than `t_stats`/`z_stats`
-/// because this single type is shared by both methods (mirrors the distribution-agnostic
-/// naming already used internally by `engine::inference::InferenceStat`).
+/// `test_stats` holds the t-statistics (`estimator="2sls"`) or z-statistics
+/// (`estimator="gmm"`), depending on which distribution the fitted model uses for inference
+/// (`docs/spec/iv-spec.md` 3.2節); `stat_dist`/`stat_df` say which distribution (and, for
+/// `"t"`, how many degrees of freedom) that is.
 ///
 /// `first_stage()`（内生変数ごとの第一段階回帰結果）はここにフィールドとして含めない。
 /// `fit()`の戻り値本体には含めず別メソッドとして公開する（`docs/spec/iv-spec.md`2章、
@@ -321,7 +320,14 @@ pub struct IVResult {
     #[pyo3(get)]
     pub std_errors: Vec<f64>,
     #[pyo3(get)]
-    pub stats: Vec<f64>,
+    pub test_stats: Vec<f64>,
+    /// Distribution of `test_stats`: `"t"` or `"normal"`.
+    #[pyo3(get)]
+    pub stat_dist: String,
+    /// Degrees of freedom of the t distribution (`None` for `"normal"`). May differ from
+    /// `df_resid` (e.g. cluster-robust inference uses `G - 1`).
+    #[pyo3(get)]
+    pub stat_df: Option<i64>,
     #[pyo3(get)]
     pub p_values: Vec<f64>,
     #[pyo3(get)]
@@ -754,7 +760,9 @@ pub(crate) fn fit(
         return Ok(IVResult {
             params: mat_to_vec(estimator.params()),
             std_errors: mat_to_vec(estimator.std_errors()),
-            stats: mat_to_vec(estimator.z_stats()),
+            test_stats: mat_to_vec(estimator.test_stats()),
+            stat_dist: estimator.stat_dist().name().to_string(),
+            stat_df: estimator.stat_dist().df().map(|df| df as i64),
             p_values: mat_to_vec(estimator.p_values()),
             conf_lower: mat_to_vec(estimator.conf_lower()),
             conf_upper: mat_to_vec(estimator.conf_upper()),
@@ -789,7 +797,9 @@ pub(crate) fn fit(
     Ok(IVResult {
         params: mat_to_vec(estimator.params()),
         std_errors: mat_to_vec(estimator.std_errors()),
-        stats: mat_to_vec(estimator.t_stats()),
+        test_stats: mat_to_vec(estimator.test_stats()),
+        stat_dist: estimator.stat_dist().name().to_string(),
+        stat_df: estimator.stat_dist().df().map(|df| df as i64),
         p_values: mat_to_vec(estimator.p_values()),
         conf_lower: mat_to_vec(estimator.conf_lower()),
         conf_upper: mat_to_vec(estimator.conf_upper()),

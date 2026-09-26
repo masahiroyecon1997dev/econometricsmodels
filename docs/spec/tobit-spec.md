@@ -51,7 +51,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 ## 2. 結果構造体
 
-`TobitResult`（`#[pyclass]`）が公開する配列＋名前リスト: `params` / `std_errors` / `z_stats`
+`TobitResult`（`#[pyclass]`）が公開する配列＋名前リスト: `params` / `std_errors` / `test_stats`
 （**z検定**） / `p_values` / `conf_lower` / `conf_upper` / `param_names` / `sigma` /
 `log_likelihood` / `aic` / `bic` / `wald_statistic` / `wald_p_value` / `n_obs` / `df_model` /
 `df_resid` / `converged` / `n_iter` / `cov_type` / `solver`（実際に使われたソルバーの小文字文字列）
@@ -60,7 +60,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 - **`σ`を含めた`k+1`長への統一**: engine層の`TobitEstimator`は`params()`が`k`長（`β`のみ）だが
   `std_errors()`等は`(k+1)`長（末尾が`σ`）という非対称設計（`cov_params`が`(β,σ)`空間の
   `(k+1)×(k+1)`行列のため）。engine_pybind層でこの非対称性を解消し、`params`/`param_names`/
-  `std_errors`/`z_stats`/`p_values`/`conf_lower`/`conf_upper`を全て`(k+1)`長に統一する
+  `std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper`を全て`(k+1)`長に統一する
   （`param_names`末尾に`"sigma"`、`params`末尾に`sigma()`の値を追加）。利便のため`sigma: f64`
   フィールド（`params[-1]`と同値）も持つ。`param_names`は`["const", <x...>, "sigma"]`。
 - **`log_likelihood_null` / `pseudo_r_squared`は提供しない**（Logit/Probitの`llnull`は
@@ -74,8 +74,8 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   差し引く）。`aic`/`bic`も総パラメータ数`k+1`を使う（`σ`は真に推定されたパラメータ）。
 - `cov_params`（`(k+1)×(k+1)`）はPython側に公開しないが、`predict()`/`marginal_effects()`/
   `censoring_fit_check()`用に非公開フィールド`estimator: TobitEstimator`として保持する。
-- python_package層（`TobitResults`）: `params`/`std_errors`/`z_stats`/`p_values`/`conf_int`は
-  係数名→値の`dict`。`coef_table()`は行指向`list[dict]`（`param`/`coef`/`std_err`/`z_stat`/
+- python_package層（`TobitResults`）: `params`/`std_errors`/`test_stats`/`p_values`/`conf_int`は
+  係数名→値の`dict`。`coef_table()`は行指向`list[dict]`（`param`/`coef`/`std_err`/`test_stat`/
   `p_value`/`conf_lower`/`conf_upper`）。`summary()`は作らない。
 
 ## 3. 内部実装の計算仕様

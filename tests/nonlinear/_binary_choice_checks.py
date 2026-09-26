@@ -74,7 +74,7 @@ def check_coef_table_structure(dataset, estimator_cls):
         "param",
         "coef",
         "std_err",
-        "z_stat",
+        "test_stat",
         "p_value",
         "conf_lower",
         "conf_upper",
@@ -92,14 +92,14 @@ def check_conf_int_structure(dataset, estimator_cls):
         assert lower < upper
 
 
-def check_params_std_errors_z_stats_p_values_share_keys(
+def check_params_std_errors_test_stats_p_values_share_keys(
     dataset, estimator_cls
 ):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
     expected_keys = {"const", "x1", "x2"}
     assert set(res.params.keys()) == expected_keys
     assert set(res.std_errors.keys()) == expected_keys
-    assert set(res.z_stats.keys()) == expected_keys
+    assert set(res.test_stats.keys()) == expected_keys
     assert set(res.p_values.keys()) == expected_keys
 
 
@@ -449,7 +449,7 @@ def check_marginal_effects_default_excludes_intercept(dataset, estimator_cls):
         "param",
         "effect",
         "std_err",
-        "z_stat",
+        "test_stat",
         "p_value",
         "conf_lower",
         "conf_upper",
@@ -1153,7 +1153,9 @@ def check_result(
 ) -> None:
     config.assert_dict_close(res.params, ref["coef"], f"{label}/coef")
     config.assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
-    config.assert_dict_close(res.z_stats, ref["z_stats"], f"{label}/z_stats")
+    config.assert_dict_close(
+        res.test_stats, ref["test_stats"], f"{label}/test_stats"
+    )
     config.assert_dict_close(
         res.p_values, ref["p_values"], f"{label}/p_values"
     )

@@ -21,7 +21,7 @@ IV は主リファレンス数値照合のみ 2SLS/GMM で
 Note:
     - `hc2`/`hc3`はlinearmodelsに対応する実装が無いため対象外
       （`iv_gmm.json`の`_meta.note`参照）。
-    - `z_stats`/`p_values`/`conf_int`/`f_statistic`/`f_p_value`は、本実装が
+    - `test_stats`/`p_values`/`conf_int`/`f_statistic`/`f_p_value`は、本実装が
       GMMで常にz分布・カイ二乗形式（qで割らない）を使う設計のため、フィクスチャ
       側も`linearmodels`の値をそのまま使わず独自に計算し直したもの
       （`run_gmm()`のモジュールdocコメント参照）。
@@ -100,7 +100,9 @@ def _check_result(
 ) -> None:
     _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
     _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
-    _assert_dict_close(res.stats, ref["z_stats"], f"{label}/stats")
+    _assert_dict_close(
+        res.test_stats, ref["test_stats"], f"{label}/test_stats"
+    )
     _assert_dict_close(res.p_values, ref["p_values"], f"{label}/p_values")
 
     for name, (ref_lower, ref_upper) in ref["conf_int"].items():

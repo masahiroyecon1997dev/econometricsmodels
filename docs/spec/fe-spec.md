@@ -57,7 +57,7 @@ FE固有の内容のみを記載する。
 
 ## 2. 結果構造体
 
-`FEResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `t_stats`（**t検定**） /
+`FEResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `test_stats`（**t検定**） /
 `p_values` / `conf_lower` / `conf_upper` / `param_names`（切片なし） / `residuals` /
 `dep_var_name` / `n_obs` / `df_resid` / `df_model` / `n_entities` / `cov_type` / `f_statistic` /
 `f_p_value` / `log_likelihood` / `aic` / `bic` / `r_squared_within` / `r_squared_between` /
@@ -68,7 +68,7 @@ FE固有の内容のみを記載する。
   計算する（`fit()`実装の一部）。
 - **`estimator()`（内部委譲した`OlsEstimator`）とFE自身のgetterの使い分け**: `params`/
   `param_names`/`residuals`/`dep_var_name`/`n_obs`/`log_likelihood`は`estimator()`から、
-  `std_errors`/`t_stats`/`p_values`/`conf_lower`/`conf_upper`/`df_model`/`df_resid`/
+  `std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper`/`df_model`/`df_resid`/
   `f_statistic`/`f_p_value`/`aic`/`bic`/`r_squared_*`はFE自身から取得する。後者はFEが
   `cov_type`・パネル自由度調整を反映して計算し直した値であり、`estimator()`側は常に
   `CovType::Classical`で委譲した内部OLSの生の値のため取り違えるとcov_type非対応の値を
@@ -79,9 +79,9 @@ FE固有の内容のみを記載する。
   `FeEstimator::fixed_effects()`を呼ぶ（`FeEstimator`は`Clone`未実装のため`FEResult`から
   `#[derive(Clone)]`は外している）。
 - `summary()`は実装しない（structured-data-only出力方針）。
-- python_package層（`FEResults`）: `params`/`std_errors`/`t_stats`/`p_values`/`conf_int`は
+- python_package層（`FEResults`）: `params`/`std_errors`/`test_stats`/`p_values`/`conf_int`は
   係数名→値の`dict`。`coef_table()`は行指向`list[dict]`（キーは`param`/`coef`/`std_err`/
-  `t_stat`/`p_value`/`conf_lower`/`conf_upper`、OLSと同じ）。
+  `test_stat`/`p_value`/`conf_lower`/`conf_upper`、OLSと同じ）。
 
 ## 3. 内部実装の計算仕様
 
@@ -234,7 +234,7 @@ demeanしたR²」を3種とも定義すると誤る）:
 - **2-wayの`r_squared_within`もRクロスチェック（`fixest`）のみ**（3.4節参照、`linearmodels`
   自身が2-wayでも常にentityのみdemeanという別定義のため）。
 - F統計量: `linearmodels`と直接比較（`cov_type="unadjusted"`）。k=1のケースは「1自由度の
-  F検定は両側t検定と代数的に等価」という恒等式（`f_statistic = t_stat²`）でHC1/HC2/HC3/
+  F検定は両側t検定と代数的に等価」という恒等式（`f_statistic = test_stat²`）でHC1/HC2/HC3/
   Cluster/HACを横断検証する。
 
 ## 5. 未実装・未対応

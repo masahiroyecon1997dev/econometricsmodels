@@ -133,12 +133,12 @@ def test_include_intercept_false_omits_const_and_converges(
     assert res.df_model == 2
 
 
-def test_params_std_errors_z_stats_p_values_share_keys(censored_dataset):
+def test_params_std_errors_test_stats_p_values_share_keys(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     expected_keys = {"const", "x1", "x2", "sigma"}
     assert set(res.params.keys()) == expected_keys
     assert set(res.std_errors.keys()) == expected_keys
-    assert set(res.z_stats.keys()) == expected_keys
+    assert set(res.test_stats.keys()) == expected_keys
     assert set(res.p_values.keys()) == expected_keys
 
 
@@ -171,7 +171,7 @@ def test_coef_table_structure(censored_dataset):
         "param",
         "coef",
         "std_err",
-        "z_stat",
+        "test_stat",
         "p_value",
         "conf_lower",
         "conf_upper",
@@ -449,7 +449,7 @@ def test_marginal_effects_default_excludes_intercept(censored_dataset):
         "param",
         "effect",
         "std_err",
-        "z_stat",
+        "test_stat",
         "p_value",
         "conf_lower",
         "conf_upper",

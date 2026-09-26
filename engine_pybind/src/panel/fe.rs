@@ -201,7 +201,14 @@ pub struct FEResult {
     #[pyo3(get)]
     pub std_errors: Vec<f64>,
     #[pyo3(get)]
-    pub t_stats: Vec<f64>,
+    pub test_stats: Vec<f64>,
+    /// Distribution of `test_stats`: `"t"` or `"normal"`.
+    #[pyo3(get)]
+    pub stat_dist: String,
+    /// Degrees of freedom of the t distribution (`None` for `"normal"`). May differ from
+    /// `df_resid` (e.g. cluster-robust inference uses `G - 1`).
+    #[pyo3(get)]
+    pub stat_df: Option<i64>,
     #[pyo3(get)]
     pub p_values: Vec<f64>,
     #[pyo3(get)]
@@ -425,7 +432,7 @@ pub(crate) fn build_fe_input(
 ///
 /// `params`/`param_names`/`residuals`/`dep_var_name`/`n_obs`/`log_likelihood`は
 /// `FeEstimator::estimator()`（内部で委譲した`OlsEstimator`）から取得する
-/// （`std_errors`/`t_stats`/`p_values`/`conf_lower`/`conf_upper`はFE自身が`cov_type`・
+/// （`std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper`はFE自身が`cov_type`・
 /// 自由度調整を反映して計算し直した値のため、`FeEstimator`自身のgetterを使う——
 /// `engine/src/panel/fe.rs`モジュールdoc「`OlsEstimator`への委譲」参照）。
 ///
@@ -454,7 +461,9 @@ pub(crate) fn fit(
     Ok(FEResult {
         params: mat_to_vec(ols.params()),
         std_errors: mat_to_vec(estimator.std_errors()),
-        t_stats: mat_to_vec(estimator.t_stats()),
+        test_stats: mat_to_vec(estimator.test_stats()),
+        stat_dist: estimator.stat_dist().name().to_string(),
+        stat_df: estimator.stat_dist().df().map(|df| df as i64),
         p_values: mat_to_vec(estimator.p_values()),
         conf_lower: mat_to_vec(estimator.conf_lower()),
         conf_upper: mat_to_vec(estimator.conf_upper()),

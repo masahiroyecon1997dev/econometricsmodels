@@ -150,7 +150,7 @@ def _check_margeff(
                 )
                 for key in (
                     "std_err",
-                    "z_stat",
+                    "test_stat",
                     "p_value",
                     "conf_lower",
                     "conf_upper",
@@ -290,9 +290,9 @@ def check_result(
         atol=atol,
     )
     assert_dict_close(
-        res.z_stats,
-        ref["z_stats"],
-        f"{label}/z_stats",
+        res.test_stats,
+        ref["test_stats"],
+        f"{label}/test_stats",
         rtol=rtol_inference,
         atol=atol,
     )

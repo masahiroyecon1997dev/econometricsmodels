@@ -130,7 +130,9 @@ def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
     _assert_scalar_close(
         res.f_p_value, ref["f_p_value"], f"{label}/f_p_value", rtol=rtol
     )
-    _assert_close(res.t_stats, ref["t_stats"], f"{label}/t_stats", rtol=rtol)
+    _assert_close(
+        res.test_stats, ref["test_stats"], f"{label}/test_stats", rtol=rtol
+    )
     _assert_close(
         res.p_values,
         ref["p_values"],

@@ -249,7 +249,7 @@ def build_fixtures() -> dict:
             "検証を主リファレンス側にも追加したもの。Wooldridge実データ側は"
             "Rクロスチェック側と同じくpredict()"
             "検証の対象外。クラスター系（cluster/cluster_imbalanced/cluster_g2/"
-            "wage1.cluster）は従来coef/seのみだったが、t_stats/p_values/"
+            "wage1.cluster）は従来coef/seのみだったが、test_stats/p_values/"
             "conf_int/r_squared等のフル統計量まで検証範囲を広げた"
             "（_run_cluster_case等がextract_full_fit_statsを使うよう変更）。"
             "あわせて_run_cluster_caseに"

@@ -15,7 +15,7 @@
   `ols-spec.md`「augment()」参照）。実装はRust側（`engine_pybind`、列名衝突を`ValidationError`
   として送出しやすいため）。Python側は`self._raw.augment(new_data)`を素通しするだけ。
 - `OLSOptions`（`WLSOptions`も同様）は独自クラスとして再定義せず、`_lib`からそのまま再輸出する。
-- `params`/`std_errors`/`t_stats`/`p_values`は係数名→値の`dict[str, float]`（O(1)取り出し用）。行指向で欲しい場合は`coef_table()`（`list[dict]`、REST APIレスポンスにそのまま使える形）を使う。DataFrameには変換しない（`augment()`を除く。上記参照）。
+- `params`/`std_errors`/`test_stats`/`p_values`は係数名→値の`dict[str, float]`（O(1)取り出し用）。行指向で欲しい場合は`coef_table()`（`list[dict]`、REST APIレスポンスにそのまま使える形）を使う。DataFrameには変換しない（`augment()`を除く。上記参照）。
 - `residuals`はそのまま`list[float]`を素通しする（polars Seriesへの変換等はしない）。
 
 ## 実装パターン

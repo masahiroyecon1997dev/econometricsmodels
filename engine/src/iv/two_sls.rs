@@ -39,10 +39,10 @@
 //! `second_stage: OlsEstimator`は`SECOND_STAGE_COV_TYPE`（`Classical`固定）で内部的に
 //! フィットするが、これは**係数`β̂`と設計行列`X̂`（`input().x()`）を得るためだけ**に使う
 //! （`Cluster`のようにクラスター列や十分なクラスター数を追加で要求せず、`β̂`計算に
-//! 無関係な失敗経路を作らないため）。`second_stage`自身の`std_errors()`/`t_stats()`等
+//! 無関係な失敗経路を作らないため）。`second_stage`自身の`std_errors()`/`test_stats()`等
 //! （ナイーブな第二段階OLSのSEで2SLSとして誤り）は`TwoSlsEstimator`の外部に公開しない。
 //! 呼び出し元が指定した`cov_type`を反映した正しいSE・F統計量等は、`TwoSlsEstimator`
-//! 自身のトップレベルフィールド（`std_errors()`/`t_stats()`/`f_statistic()`等）として
+//! 自身のトップレベルフィールド（`std_errors()`/`test_stats()`/`f_statistic()`等）として
 //! 独立に計算・保持する。
 //!
 //! ## 第一段階・第二段階での`cov_type`/`confidence_level`の扱い
@@ -102,12 +102,15 @@ pub struct TwoSlsEstimator {
     /// 標準誤差 (k, 1)。`cov_type`に応じたサンドイッチ型分散の対角成分の平方根。
     std_errors: Mat<f64>,
     /// t統計量 (k, 1) = params / std_errors（`docs/spec/iv-spec.md`3.2節、2SLSはt分布）。
-    t_stats: Mat<f64>,
+    test_stats: Mat<f64>,
     /// 両側p値 (k, 1)。t分布（自由度`df_inference`）に基づく
     p_values: Mat<f64>,
     conf_lower: Mat<f64>,
     conf_upper: Mat<f64>,
     df_resid: usize,
+    /// t検定・信頼区間・F検定に使った自由度。`cov_type=Cluster`のときだけ`G-1`
+    /// （`fit()`のコメント参照）で、それ以外は`df_resid`と一致する。
+    df_inference: usize,
     df_model: usize,
     r_squared: f64,
     adj_r_squared: f64,
@@ -320,7 +323,7 @@ impl TwoSlsEstimator {
             .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
         let t_crit = inference::critical_value(&t_dist, confidence_level);
 
-        let mut t_stats = Mat::<f64>::zeros(k, 1);
+        let mut test_stats = Mat::<f64>::zeros(k, 1);
         let mut p_values = Mat::<f64>::zeros(k, 1);
         let mut conf_lower = Mat::<f64>::zeros(k, 1);
         let mut conf_upper = Mat::<f64>::zeros(k, 1);
@@ -329,7 +332,7 @@ impl TwoSlsEstimator {
             let se = *std_errors.get(j, 0);
             let stat = inference::compute_inference_stat(&t_dist, coef, se, t_crit);
 
-            *t_stats.get_mut(j, 0) = stat.stat;
+            *test_stats.get_mut(j, 0) = stat.stat;
             *p_values.get_mut(j, 0) = stat.p_value;
             *conf_lower.get_mut(j, 0) = stat.conf_low;
             *conf_upper.get_mut(j, 0) = stat.conf_high;
@@ -482,11 +485,12 @@ impl TwoSlsEstimator {
             cov_type,
             residuals,
             std_errors,
-            t_stats,
+            test_stats,
             p_values,
             conf_lower,
             conf_upper,
             df_resid,
+            df_inference,
             df_model,
             r_squared,
             adj_r_squared,
@@ -541,8 +545,16 @@ impl TwoSlsEstimator {
     }
 
     /// t統計量 (k, 1)。
-    pub fn t_stats(&self) -> &Mat<f64> {
-        &self.t_stats
+    pub fn test_stats(&self) -> &Mat<f64> {
+        &self.test_stats
+    }
+
+    /// `test_stats`の従う分布（t分布、自由度は`df_inference`。`cov_type=Cluster`のときだけ
+    /// `df_resid`ではなく`G-1`になる）。
+    pub fn stat_dist(&self) -> inference::StatDist {
+        inference::StatDist::T {
+            df: self.df_inference,
+        }
     }
 
     /// 両側p値 (k, 1)。
@@ -977,7 +989,8 @@ mod tests {
                     < 1e-8
             );
             assert!(
-                (*estimator.t_stats().get(j, 0) - *ols_estimator.t_stats().get(j, 0)).abs() < 1e-8
+                (*estimator.test_stats().get(j, 0) - *ols_estimator.test_stats().get(j, 0)).abs()
+                    < 1e-8
             );
         }
         assert!((estimator.r_squared() - ols_estimator.r_squared()).abs() < 1e-8);

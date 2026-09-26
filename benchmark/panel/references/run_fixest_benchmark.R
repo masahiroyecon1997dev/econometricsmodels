@@ -123,7 +123,7 @@ ses <- se(summ)
 # summ$coeftable[, col]は1行（説明変数1個）のとき行列添字の仕様で
 # rownamesが落ちる（coef()/se()はfixest専用アクセサのため影響を受けない）。
 # setNames()で明示的に名前を付け直す。
-t_stats <- setNames(summ$coeftable[, "t value"], rownames(summ$coeftable))
+test_stats <- setNames(summ$coeftable[, "t value"], rownames(summ$coeftable))
 p_values <- setNames(
   summ$coeftable[, "Pr(>|t|)"],
   rownames(summ$coeftable)
@@ -148,7 +148,7 @@ library(jsonlite)
 result <- list(
   coef = as.list(coefs),
   se = as.list(ses),
-  t_stats = as.list(t_stats),
+  test_stats = as.list(test_stats),
   p_values = as.list(p_values),
   conf_int = mapply(
     function(lo, hi) list(lo, hi),

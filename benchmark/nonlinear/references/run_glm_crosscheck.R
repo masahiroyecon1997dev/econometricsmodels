@@ -186,7 +186,7 @@ format_margeff <- function(me_df) {
     out[[me_df$term[i]]] <- list(
       effect = me_df$estimate[i],
       std_err = me_df$std.error[i],
-      z_stat = me_df$statistic[i],
+      test_stat = me_df$statistic[i],
       p_value = me_df$p.value[i],
       conf_lower = me_df$conf.low[i],
       conf_upper = me_df$conf.high[i]
@@ -218,7 +218,7 @@ margeff <- list(
 result <- list(
   coef = as.list(coefs),
   se = as.list(ses),
-  z_stats = as.list(zs),
+  test_stats = as.list(zs),
   p_values = as.list(pvalues),
   conf_low = as.list(conf_low),
   conf_high = as.list(conf_high),

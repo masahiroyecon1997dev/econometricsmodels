@@ -6,12 +6,14 @@
 
 | 手法 | 検定分布 | 自由度 |
 |---|---|---|
-| OLS | t分布（`t_stats`/`f_statistic`） | `n - k` |
+| OLS | t分布（`test_stats`/`f_statistic`） | `n - k`（`cov_type="cluster"`は`G-1`） |
 | WLS | t分布 | `n - k`（OLSへの委譲実装のため同じ） |
-| 2SLS | t分布 | `df_resid` |
-| GMM | z分布・カイ二乗（`stats`/`f_statistic`） | なし（漸近正規性のみに依拠） |
-| Logit / Probit | z分布・カイ二乗（`z_stats`、`lr_statistic`） | なし（漸近正規性のみに依拠） |
+| 2SLS | t分布 | `df_resid`（`cov_type="cluster"`は`G-1`） |
+| GMM | z分布・カイ二乗（`test_stats`/`f_statistic`） | なし（漸近正規性のみに依拠） |
+| Logit / Probit | z分布・カイ二乗（`test_stats`、`lr_statistic`） | なし（漸近正規性のみに依拠） |
 | Tobit | 未確定（正式spec未作成、実装中。MLEベースのためLogit/Probitと同じz分布を継承する見込みだが本ドキュメントでは保留） | - |
+
+**結果への公開**: 全手法のResultsは、統計量を共通の名前`test_stats`（`coef_table()`のキーは`test_stat`）で返し、その分布を`stat_dist`（`"t"`/`"normal"`）、t分布の自由度を`stat_df`（正規分布は`None`）で示す。`stat_df`は実際にp値・信頼区間に使った自由度で、`df_resid`と一致するとは限らない（OLS/WLS/2SLSの`cov_type="cluster"`は`G-1`）。engine側は`engine::inference::StatDist::{T { df }, Normal}`で「t分布なら自由度がある、正規分布ならない」関係を型で保証する。`marginal_effects()`は常に正規分布で、返り値が`list[dict]`のため行ごとの`stat_dist`は持たない（docstringに明記）。
 
 **OLS/WLS/2SLSがt分布を使う理由**: 古典的仮定（誤差項が正規分布に従う等）の下では、係数の標準化統計量`(β̂-β)/ŝe`が**有限標本で厳密に**t分布に従う（コクランの定理）。この結果はサンプルサイズによらず成り立つ厳密な理論であり、`cov_type`（classical/HC系/cluster/hac）によらず一貫してt分布を採用する（`ols-spec.md`30行目、`iv-spec.md`3.2節、`panel-common.md`3.3節で同じ判断を踏襲）。
 
@@ -20,7 +22,7 @@
 ## 2. 他の統計ソフトウェアの既定値との違い
 
 - **statsmodels**: `cov_type`が`"nonrobust"`（classical相当）以外だと既定で`use_t=False`（正規分布）を使う。本プロジェクトは全`cov_type`でt分布に統一しているため、ベンチマーク照合時は`use_t=True`を明示指定する必要がある（`ols-spec.md`70-72行目）。
-- **linearmodels**: `debiased`という別軸の引数でt/F分布とz/カイ二乗分布が切り替わる（`fit(debiased=False)`が既定でz/カイ二乗、`True`でt/F）。本プロジェクトの2SLSは`cov_type`によらず常にt/F、GMMは常にz/カイ二乗という一貫した設計のため、ベンチマーク生成時は`coef`/`se`のみ`linearmodels`から借り、検定統計量（`t_stats`/`p_values`/`conf_int`/`f_statistic`）は自前でt分布・F分布を使って計算し直している（`benchmark/iv/references/linearmodels_ref.py`参照）。
+- **linearmodels**: `debiased`という別軸の引数でt/F分布とz/カイ二乗分布が切り替わる（`fit(debiased=False)`が既定でz/カイ二乗、`True`でt/F）。本プロジェクトの2SLSは`cov_type`によらず常にt/F、GMMは常にz/カイ二乗という一貫した設計のため、ベンチマーク生成時は`coef`/`se`のみ`linearmodels`から借り、検定統計量（`test_stats`/`p_values`/`conf_int`/`f_statistic`）は自前でt分布・F分布を使って計算し直している（`benchmark/iv/references/linearmodels_ref.py`参照）。
 - **R**（`sandwich`/`lmtest`、`glm`）: 個別の許容誤差・既定値の違いは各手法のspec（`ols-spec.md`のクラスター小標本補正等）を参照。
 
 ## 3. Stock-Yogoの弱操作変数F統計量

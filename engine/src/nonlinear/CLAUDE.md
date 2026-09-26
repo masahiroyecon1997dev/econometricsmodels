@@ -60,3 +60,9 @@
   - **窓`1e2·tol`は`tol`に比例するが、根拠の丸め誤差の床は`tol`に依存しない**（rust-reviewer指摘）。既定`tol`では一致するが、`tol`を大きくすると正常なline searchも上限到達で打ち切られうる。小さくすると停滞検出が効かない。コードは変えず、公開`tol` docstring（Logit/Probit/Tobit）と`docs/spec/nonlinear-common.md`1.3節に明記する方針（ユーザー判断）。
   - **Probitのnewtonも`n=1,000,000`で同じ丸め誤差の壁に当たる**（10反復でcost 155回、LMラダーの試行で浪費）。別問題として切り出し済み（本節の対処はbfgs/lbfgsのみ）。
   - **回帰ガード**: `common.rs`の`line_search_step_satisfies_wolfe_*`（条件判定を手計算で検証）・`is_near_convergence_target_is_true_only_below_stall_grad_factor_times_tol`（近傍ガードの境界）・`run_solver_quasi_newton_stops_at_noisy_cost_floor_near_gradient_target`（`NoisyCostFloorProblem`: 決定的なジッターを加えたコスト＋勾配の床で状況を模擬、評価回数`<60`を検証。停滞検出を無効化すると160回で失敗することを確認済み。ただし(2)の反復上限経路が先に効くため(1)は検出できない）・`quasi_newton_detects_stall_via_wolfe_recheck_when_line_search_terminates_abnormally`（`xtol=0.5`のline searchを`FaerBfgs`/`FaerLbfgs`に直接渡して反復上限より先に異常終了させ、(1)の経路だけで`stalled_at_optimum`が立つことを検証。Wolfe判定を常に真にする変異で失敗することを確認済み）。近傍ガード単体の統合テストは、既存のコスト変化判定が先に発火して切り分けられないため単体テストで代替した。
+
+## Tobitのproperty-basedテスト（`tobit.rs`の`mod proptests`）
+
+- 打ち切り境界は`censoring_strategy`で左（`lower=0`）・右（`upper=0`）・両側（`[-1,1]`）をランダムに選ぶ。`score_is_near_zero`・列順序不変・HC0≤HC1に加え、「`y`と境界を符号反転（`(l,u)→(-u,-l)`）すると係数は符号反転・`σ`とSEは不変」という鏡像対称性を検証する（左右の分岐が別コードパス`censored_contribution(direction)`を通るため、片側の符号・スケールのバグが顕在化する）。
+- 右打ち切り分岐のバグ注入（`zeta>1`かつ`direction<0`のときだけ`score_beta_coef`を1.05倍）は、既存の固定値テストでは検出されず、鏡像対称性と`score_is_near_zero`のproptestだけが失敗する。
+

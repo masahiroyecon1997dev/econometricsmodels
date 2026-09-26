@@ -1197,7 +1197,9 @@
   ケース戦略を追加する）案が考えられる。
 - **気づいた経緯**: 2026-09-13、Tobit proptest追加のrust-reviewerレビュー中に
   指摘。
-- **状態**: 未対応（ユーザー確認済み、今回は見送りと決定）。
+- **状態**: 対応済み（2026-09-26、[#230](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/230)）。
+  既存3プロパティを`censoring_strategy`（左/右/両側）で拡張し、鏡像対称性の
+  プロパティを1件追加した。
 
 ### 69. IV: `many_regressors`（高k）・`outlier_regressor`（外れ値）シナリオが未追加
 

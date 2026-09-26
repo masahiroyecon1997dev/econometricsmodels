@@ -5352,19 +5352,20 @@ mod tests {
     /// 対数尤度の差が定数項（θ非依存のヤコビアン項）のみであることから理論的に導ける
     /// （rust-reviewer確認済み）。
     ///
-    /// ケース生成は左打ち切り（`lower=0.0`固定、`upper`は打ち切りなし）のみを対象にする
-    /// （右打ち切り・両側打ち切りは`benchmark/nonlinear/datasets.py`の`TOBIT_SCENARIOS`
-    /// `right_censoring`/`interval_censoring`の固定フィクスチャで別途カバー済み、
-    /// rust-reviewer確認済み。property-basedテストとしての拡張は将来の検討課題として
-    /// 別途記録する）。`y* = β₀ + Σxⱼβⱼ + σε`（`ε`は標準正規、`u∈(1e-6, 1-1e-6)`の
-    /// 逆CDFでサンプリング）を計算し、`y*<lower`の観測を`lower`で打ち切る。
+    /// ケース生成は左打ち切り（`lower=0`のみ）・右打ち切り（`upper=0`のみ）・両側打ち切り
+    /// （`lower=-1`・`upper=1`）の3通りを`censoring_strategy`でランダムに選ぶ
+    /// （`censored_contribution`の`direction=-1.0`分岐や左右混在のデータセットも通る）。
+    /// `y* = β₀ + Σxⱼβⱼ + σε`（`ε`は標準正規、`u∈(1e-6, 1-1e-6)`の逆CDFでサンプリング）
+    /// を計算し、下限未満・上限超過の観測をそれぞれの境界値で打ち切る。
     ///
     /// 較正値（`n=k+30..=80`, `beta∈[-1,1]`, `sigma∈[0.5,2]`）は`PROPTEST_CASES=5000`
     /// （デフォルト256の約20倍）まで増やしても`NoUncensoredObservations`等による
     /// `prop_assume`棄却が原因の失敗（"too many global rejects"）を起こさないことを
     /// 実測済み（rust-reviewer確認）。
     ///
-    /// プロパティの有効性検証（バグ注入→検出確認→元に戻す）は3件とも実施済み:
+    /// プロパティの有効性検証（バグ注入→検出確認→元に戻す）は当初の3件について実施済み
+    /// （4件目の`negating_y_and_swapping_bounds_negates_coefficients_only`は右打ち切り・
+    /// 両側打ち切りへの拡張と同時に追加し、右打ち切り分岐へのバグ注入で検出を確認した）:
     /// `score_is_near_zero_at_converged_params`は`TobitProblem::gradient`の`grad[j]`
     /// 計算に定数オフセットを注入、`coefficients_and_se_are_invariant_to_column_order`は
     /// `TobitInput::from_columns`の`param_names`を逆順にするバグを注入、
@@ -5414,16 +5415,33 @@ mod tests {
         }
 
         /// 左打ち切りの下限（打ち切りなしのTobitの意味が薄れない程度に、真の`y*`分布の
-        /// 中心付近を狙う。上限は無し）。
+        /// 中心付近を狙う）。右打ち切りの上限はこの値と対称（`beta`の分布が0周りに対称な
+        /// ため、左・右で打ち切り割合が同程度になる）。
         const LOWER_BOUND: f64 = 0.0;
 
-        /// 真の`beta`・`sigma`から`y* = β₀+Σxⱼβⱼ+σε`を計算し、`lower`で左打ち切りする。
+        /// 打ち切り境界`(lower, upper)`。
+        type Bounds = (Option<f64>, Option<f64>);
+
+        /// 左打ち切り・右打ち切り・両側打ち切りをランダムに選ぶ。両側打ち切りの幅
+        /// （`[-1, 1]`）は、`NoUncensoredObservations`等の`prop_assume`棄却が過剰にならない
+        /// 程度に真の`y*`分布の中心付近を含める。
+        fn censoring_strategy() -> impl Strategy<Value = Bounds> {
+            prop_oneof![
+                Just((Some(LOWER_BOUND), None)),
+                Just((None, Some(LOWER_BOUND))),
+                Just((Some(-1.0), Some(1.0))),
+            ]
+        }
+
+        /// 真の`beta`・`sigma`から`y* = β₀+Σxⱼβⱼ+σε`を計算し、`bounds`で打ち切る
+        /// （下限未満は下限、上限超過は上限に置き換える）。
         fn simulate_y(
             n: usize,
             x_cols: &[Vec<f64>],
             beta: &[f64],
             sigma: f64,
             u: &[f64],
+            bounds: Bounds,
         ) -> Vec<f64> {
             let normal = Normal::standard();
             (0..n)
@@ -5433,11 +5451,17 @@ mod tests {
                         y_star += x_col[i] * beta[j + 1];
                     }
                     y_star += sigma * normal.inverse_cdf(u[i]);
-                    if y_star < LOWER_BOUND {
-                        LOWER_BOUND
-                    } else {
-                        y_star
+                    if let Some(lower) = bounds.0
+                        && y_star < lower
+                    {
+                        return lower;
                     }
+                    if let Some(upper) = bounds.1
+                        && y_star > upper
+                    {
+                        return upper;
+                    }
+                    y_star
                 })
                 .collect()
         }
@@ -5489,12 +5513,13 @@ mod tests {
             #[test]
             fn score_is_near_zero_at_converged_params(
                 (n, k, x_cols, beta, sigma, u, _keys) in tobit_case_strategy(),
+                bounds in censoring_strategy(),
                 method in method_strategy(),
             ) {
-                let y = simulate_y(n, &x_cols, &beta, sigma, &u);
+                let y = simulate_y(n, &x_cols, &beta, sigma, &u, bounds);
                 let names = x_names(k);
                 let input = TobitInput::from_columns(
-                    &y, &x_cols, names, true, "y".to_string(), Some(LOWER_BOUND), None,
+                    &y, &x_cols, names, true, "y".to_string(), bounds.0, bounds.1,
                 ).unwrap();
                 let result = TobitEstimator::fit(input, default_options(CovType::Classical, method));
                 prop_assume!(result.is_ok());
@@ -5521,12 +5546,13 @@ mod tests {
             fn coefficients_and_se_are_invariant_to_column_order(
                 (n, k, x_cols, beta, sigma, u, keys) in tobit_case_strategy()
                     .prop_filter("need >=2 columns to permute", |(_, k, _, _, _, _, _)| *k >= 2),
+                bounds in censoring_strategy(),
                 method in method_strategy(),
             ) {
-                let y = simulate_y(n, &x_cols, &beta, sigma, &u);
+                let y = simulate_y(n, &x_cols, &beta, sigma, &u, bounds);
                 let names = x_names(k);
                 let input1 = TobitInput::from_columns(
-                    &y, &x_cols, names.clone(), true, "y".to_string(), Some(LOWER_BOUND), None,
+                    &y, &x_cols, names.clone(), true, "y".to_string(), bounds.0, bounds.1,
                 ).unwrap();
                 let result1 = TobitEstimator::fit(input1, default_options(CovType::Classical, method));
                 prop_assume!(result1.is_ok());
@@ -5538,7 +5564,7 @@ mod tests {
                 let permuted_names: Vec<String> = order.iter().map(|&i| names[i].clone()).collect();
 
                 let input2 = TobitInput::from_columns(
-                    &y, &permuted_x, permuted_names, true, "y".to_string(), Some(LOWER_BOUND), None,
+                    &y, &permuted_x, permuted_names, true, "y".to_string(), bounds.0, bounds.1,
                 ).unwrap();
                 let result2 = TobitEstimator::fit(input2, default_options(CovType::Classical, method));
                 prop_assume!(result2.is_ok());
@@ -5562,19 +5588,20 @@ mod tests {
             #[test]
             fn hc0_std_errors_are_at_most_hc1_std_errors(
                 (n, k, x_cols, beta, sigma, u, _keys) in tobit_case_strategy(),
+                bounds in censoring_strategy(),
                 method in method_strategy(),
             ) {
-                let y = simulate_y(n, &x_cols, &beta, sigma, &u);
+                let y = simulate_y(n, &x_cols, &beta, sigma, &u, bounds);
                 let names = x_names(k);
                 let input1 = TobitInput::from_columns(
-                    &y, &x_cols, names.clone(), true, "y".to_string(), Some(LOWER_BOUND), None,
+                    &y, &x_cols, names.clone(), true, "y".to_string(), bounds.0, bounds.1,
                 ).unwrap();
                 let result1 = TobitEstimator::fit(input1, default_options(CovType::Hc0, method));
                 prop_assume!(result1.is_ok());
                 let est_hc0 = result1.unwrap();
 
                 let input2 = TobitInput::from_columns(
-                    &y, &x_cols, names, true, "y".to_string(), Some(LOWER_BOUND), None,
+                    &y, &x_cols, names, true, "y".to_string(), bounds.0, bounds.1,
                 ).unwrap();
                 let result2 = TobitEstimator::fit(input2, default_options(CovType::Hc1, method));
                 prop_assume!(result2.is_ok());
@@ -5586,6 +5613,43 @@ mod tests {
                         "HC0 se[{j}]={} should be <= HC1 se[{j}]={}",
                         est_hc0.std_errors()[j], est_hc1.std_errors()[j]
                     );
+                }
+            }
+
+            /// 鏡像対称性: `y`と境界を符号反転して`(lower, upper)`→`(-upper, -lower)`にすると
+            /// （`-y* = x(-β) + σ(-ε)`、`-ε`も標準正規）、係数は符号反転・`σ`と標準誤差は不変。
+            /// 左打ち切りと右打ち切りで別々のコード分岐（`censored_contribution`の
+            /// `direction`）を通るため、片方の分岐の符号・スケールのバグがここで顕在化する。
+            #[test]
+            fn negating_y_and_swapping_bounds_negates_coefficients_only(
+                (n, k, x_cols, beta, sigma, u, _keys) in tobit_case_strategy(),
+                bounds in censoring_strategy(),
+                method in method_strategy(),
+            ) {
+                let y = simulate_y(n, &x_cols, &beta, sigma, &u, bounds);
+                let names = x_names(k);
+                let input1 = TobitInput::from_columns(
+                    &y, &x_cols, names.clone(), true, "y".to_string(), bounds.0, bounds.1,
+                ).unwrap();
+                let result1 = TobitEstimator::fit(input1, default_options(CovType::Classical, method));
+                prop_assume!(result1.is_ok());
+                let est1 = result1.unwrap();
+
+                let y_neg: Vec<f64> = y.iter().map(|v| -v).collect();
+                let input2 = TobitInput::from_columns(
+                    &y_neg, &x_cols, names, true, "y".to_string(),
+                    bounds.1.map(|v| -v), bounds.0.map(|v| -v),
+                ).unwrap();
+                let result2 = TobitEstimator::fit(input2, default_options(CovType::Classical, method));
+                prop_assume!(result2.is_ok());
+                let est2 = result2.unwrap();
+
+                for j in 0..=k {
+                    assert_approx_eq(est2.params()[j], -est1.params()[j], &format!("param[{j}] under y negation"));
+                }
+                assert_approx_eq(est2.sigma(), est1.sigma(), "sigma under y negation");
+                for j in 0..=(k + 1) {
+                    assert_approx_eq(est2.std_errors()[j], est1.std_errors()[j], &format!("std_error[{j}] under y negation"));
                 }
             }
         }
@@ -5713,7 +5777,7 @@ mod tests {
             ];
             let n = 41;
 
-            let y = simulate_y(n, &x_cols, &beta, sigma, &u);
+            let y = simulate_y(n, &x_cols, &beta, sigma, &u, (Some(LOWER_BOUND), None));
             let names = x_names(1);
             let input = TobitInput::from_columns(
                 &y,

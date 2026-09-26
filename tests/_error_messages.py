@@ -37,6 +37,25 @@ def rust_f64(value: float) -> str:
     return repr(float(value)).removesuffix(".0")
 
 
+def fully_qualified_type_name(obj: object) -> str:
+    """pyo3の`PyType::fully_qualified_name()`と同じ規則で型名を組み立てる。
+
+    `NOT_A_POLARS_DATAFRAME`の`{type_name}`はRust側でこの関数
+    （`engine_pybind/src/column_extraction.rs`の`extract_dataframe`）を
+    使って組み立てているため、テスト側も同じ規則（`__module__`が
+    `"builtins"`/`"__main__"`のときは`__qualname__`のみ、それ以外は
+    `f"{{__module__}}.{{__qualname__}}"`）で期待値を作る。pandasの
+    `__module__`の値はバージョンによって異なりうる（例:
+    3.0系は`"pandas"`、古いバージョンは`"pandas.core.frame"`）ため、
+    ハードコードせずこの関数で実行時に計算する。
+    """
+    cls = type(obj)
+    module = cls.__module__
+    if module in ("builtins", "__main__"):
+        return cls.__qualname__
+    return f"{module}.{cls.__qualname__}"
+
+
 def rust_option_f64_debug(value: float | None) -> str:
     """RustのDebug（`{:?}`）での`Option<f64>`表示を模したフォーマット。
 
@@ -50,6 +69,23 @@ def rust_option_f64_debug(value: float | None) -> str:
 
 # ── column_extraction.rs（全系統共通） ──────────────────────────────
 #
+# extract_dataframe: `data`/`new_data`にpolars以外のDataFrame（pandas等）が
+# 渡された場合に使う（engine_pybind/src/column_extraction.rs）。
+# `param_name`は呼び出し側で"data"（fit系）または"new_data"（predict/augment）
+# を渡す。`type_name`はPythonオブジェクトの完全修飾クラス名
+# （`type(obj).__module__ + "." + type(obj).__qualname__`相当）。
+NOT_A_POLARS_DATAFRAME = (
+    "'{param_name}' must be a polars.DataFrame, got {type_name}"
+)
+# `type_name`が`"polars."`で始まる（渡されたオブジェクト自体は本物のpolars
+# DataFrameなのに抽出が失敗している）場合の文言。`pyo3`/`polars`/`pyo3-polars`
+# のバージョンの組み合わせによるABI不整合等でのみ発生しうるため、通常の
+# テスト環境では再現できず対応するテストは無い（`extract_dataframe`の
+# ロジックそのものはRust側で経路を確認済み）。
+DATAFRAME_EXTRACTION_FAILED = (
+    "failed to read '{param_name}' as a polars.DataFrame: {error}"
+)
+
 # extract_f64_column: y/x/weight/time_col の抽出で使う（engine_pybind/src/
 # column_extraction.rs:27-75）。
 

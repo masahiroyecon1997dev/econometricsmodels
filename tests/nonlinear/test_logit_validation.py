@@ -45,6 +45,10 @@ def test_missing_column_raises(binary_dataset):
     _checks.check_missing_column_raises(binary_dataset, Logit)
 
 
+def test_data_not_polars_raises(binary_dataset):
+    _checks.check_data_not_polars_raises(binary_dataset, Logit)
+
+
 def test_null_values_raise():
     _checks.check_null_values_raise(Logit)
 

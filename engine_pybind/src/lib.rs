@@ -7,8 +7,8 @@ mod panel;
 mod validation;
 
 use pyo3::prelude::*;
-use pyo3_polars::PyDataFrame;
 
+use column_extraction::extract_dataframe;
 use errors::{ComputationError, ValidationError};
 use iv::common::{IVOptions, IVResult};
 use linear::ols::{OLSOptions, OLSResult};
@@ -36,11 +36,12 @@ use panel::re::{REOptions, REResult};
 ///     Estimation options.
 #[pyfunction]
 fn fit_ols(
-    data: PyDataFrame,
+    data: &Bound<'_, PyAny>,
     y: String,
     x: Vec<String>,
     options: OLSOptions,
 ) -> PyResult<OLSResult> {
+    let data = extract_dataframe(data, "data")?;
     linear::ols::fit(data, y, x, &options)
 }
 
@@ -61,12 +62,13 @@ fn fit_ols(
 ///     Estimation options.
 #[pyfunction]
 fn fit_wls(
-    data: PyDataFrame,
+    data: &Bound<'_, PyAny>,
     y: String,
     x: Vec<String>,
     weight: String,
     options: WLSOptions,
 ) -> PyResult<WLSResult> {
+    let data = extract_dataframe(data, "data")?;
     linear::wls::fit(data, y, x, weight, &options)
 }
 
@@ -85,11 +87,12 @@ fn fit_wls(
 ///     Estimation options.
 #[pyfunction]
 fn fit_logit(
-    data: PyDataFrame,
+    data: &Bound<'_, PyAny>,
     y: String,
     x: Vec<String>,
     options: LogitOptions,
 ) -> PyResult<LogitResult> {
+    let data = extract_dataframe(data, "data")?;
     nonlinear::logit::fit(data, y, x, &options)
 }
 
@@ -108,11 +111,12 @@ fn fit_logit(
 ///     Estimation options.
 #[pyfunction]
 fn fit_probit(
-    data: PyDataFrame,
+    data: &Bound<'_, PyAny>,
     y: String,
     x: Vec<String>,
     options: ProbitOptions,
 ) -> PyResult<ProbitResult> {
+    let data = extract_dataframe(data, "data")?;
     nonlinear::probit::fit(data, y, x, &options)
 }
 
@@ -131,11 +135,12 @@ fn fit_probit(
 ///     Estimation options.
 #[pyfunction]
 fn fit_tobit(
-    data: PyDataFrame,
+    data: &Bound<'_, PyAny>,
     y: String,
     x: Vec<String>,
     options: TobitOptions,
 ) -> PyResult<TobitResult> {
+    let data = extract_dataframe(data, "data")?;
     nonlinear::tobit::fit(data, y, x, &options)
 }
 
@@ -159,13 +164,14 @@ fn fit_tobit(
 ///     implemented) or "gmm" (not yet implemented, raises `ValidationError`).
 #[pyfunction]
 fn fit_iv(
-    data: PyDataFrame,
+    data: &Bound<'_, PyAny>,
     y: String,
     x_exog: Vec<String>,
     x_endog: Vec<String>,
     instruments: Vec<String>,
     options: IVOptions,
 ) -> PyResult<IVResult> {
+    let data = extract_dataframe(data, "data")?;
     iv::common::fit(data, y, x_exog, x_endog, instruments, &options)
 }
 
@@ -187,12 +193,13 @@ fn fit_iv(
 ///     Estimation options.
 #[pyfunction]
 fn fit_fe(
-    data: PyDataFrame,
+    data: &Bound<'_, PyAny>,
     y: String,
     x: Vec<String>,
     entity: String,
     options: FEOptions,
 ) -> PyResult<FEResult> {
+    let data = extract_dataframe(data, "data")?;
     panel::fe::fit(data, y, x, entity, &options)
 }
 
@@ -214,12 +221,13 @@ fn fit_fe(
 ///     Estimation options.
 #[pyfunction]
 fn fit_re(
-    data: PyDataFrame,
+    data: &Bound<'_, PyAny>,
     y: String,
     x: Vec<String>,
     entity: String,
     options: REOptions,
 ) -> PyResult<REResult> {
+    let data = extract_dataframe(data, "data")?;
     panel::re::fit(data, y, x, entity, &options)
 }
 

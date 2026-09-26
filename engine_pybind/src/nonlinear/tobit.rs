@@ -37,7 +37,9 @@ use super::common::{
     MarginalEffectsResult, mle_error_to_pyerr, parse_cov_type, parse_marginal_effects_at,
     parse_method,
 };
-use crate::column_extraction::{extract_f64_column, extract_f64_columns, x_column_names};
+use crate::column_extraction::{
+    extract_dataframe, extract_f64_column, extract_f64_columns, x_column_names,
+};
 use crate::errors::ValidationError;
 use crate::validation::{validate_common_roles, validate_no_existing_column};
 
@@ -305,13 +307,13 @@ impl TobitResult {
     ///   numeric type, or contains missing/NaN/infinite values: `ValidationError`
     ///   (same validation as `fit()`'s column extraction, via `extract_f64_column`).
     #[pyo3(signature = (target="expected_observed".to_string(), new_data=None))]
-    fn predict(&self, target: String, new_data: Option<PyDataFrame>) -> PyResult<Vec<f64>> {
+    fn predict(&self, target: String, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<f64>> {
         let target = parse_marginal_effects_target(&target.to_lowercase())?;
         let Some(new_data) = new_data else {
             return Ok(self.estimator.predict(target));
         };
 
-        let df: DataFrame = new_data.into();
+        let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
         self.predict_for(target, &df)
     }
 
@@ -334,13 +336,17 @@ impl TobitResult {
     /// - The source data already has a column named `"predicted_{target}"`:
     ///   `ValidationError` (would otherwise silently overwrite it).
     #[pyo3(signature = (target="expected_observed".to_string(), new_data=None))]
-    fn augment(&self, target: String, new_data: Option<PyDataFrame>) -> PyResult<PyDataFrame> {
+    fn augment(
+        &self,
+        target: String,
+        new_data: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyDataFrame> {
         let target_lower = target.to_lowercase();
         let target_enum = parse_marginal_effects_target(&target_lower)?;
 
         let (mut source, predicted) = match new_data {
             Some(new_data) => {
-                let df: DataFrame = new_data.into();
+                let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
                 let predicted = self.predict_for(target_enum, &df)?;
                 (df, predicted)
             }

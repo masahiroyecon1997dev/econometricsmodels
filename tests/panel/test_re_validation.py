@@ -39,6 +39,7 @@ Note:
 from __future__ import annotations
 
 import _error_messages as msgs
+import pandas as pd
 import polars as pl
 import pytest
 from _constants import DATA_DIR
@@ -162,6 +163,26 @@ def test_x_empty_raises(fe_dataset):
 
 
 # ── ValidationError（列の存在・欠損値） ────────────────────────────
+
+
+def test_data_not_polars_raises():
+    """`data`にpolars以外のDataFrame（pandas等）を渡すと、内部実装
+    （`pyo3-polars`の`get_columns`呼び出し）が漏れた`AttributeError`ではなく
+    `ValidationError`になること（`test_ols_validation.py`と同じ検証。REには
+    `predict()`/`augment()`が無いため`data`のみ確認する）。
+    """
+    bad = pd.DataFrame(
+        {"y": [1.0, 2.0, 3.0], "x1": [1.0, 2.0, 3.0], "entity": [0, 0, 1]}
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME,
+            param_name="data",
+            type_name=msgs.fully_qualified_type_name(bad),
+        ),
+    ):
+        RE(bad, y="y", x=["x1"], entity="entity").fit()
 
 
 def test_missing_y_column_raises(fe_dataset):

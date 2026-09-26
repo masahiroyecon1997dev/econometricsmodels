@@ -17,7 +17,9 @@ use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
 use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
-use crate::column_extraction::{extract_f64_column, extract_f64_columns, x_column_names};
+use crate::column_extraction::{
+    extract_dataframe, extract_f64_column, extract_f64_columns, x_column_names,
+};
 use crate::errors::ValidationError;
 use crate::validation::{validate_common_roles, validate_no_existing_column};
 
@@ -233,12 +235,12 @@ impl OLSResult {
     ///   numeric type, or contains missing/NaN/infinite values: `ValidationError`
     ///   (same validation as `fit()`'s column extraction, via `extract_f64_column`).
     #[pyo3(signature = (new_data=None))]
-    fn predict(&self, new_data: Option<PyDataFrame>) -> PyResult<Vec<f64>> {
+    fn predict(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<f64>> {
         let Some(new_data) = new_data else {
             return Ok(self.fitted_values.clone());
         };
 
-        let df: DataFrame = new_data.into();
+        let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
         self.predict_for(&df)
     }
 
@@ -257,10 +259,10 @@ impl OLSResult {
     /// - `new_data=None` and this result has no cached training data (currently
     ///   only possible for `IVResult.first_stage()` results): `ValidationError`.
     #[pyo3(signature = (new_data=None))]
-    fn augment(&self, new_data: Option<PyDataFrame>) -> PyResult<PyDataFrame> {
+    fn augment(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<PyDataFrame> {
         let (mut source, predicted) = match new_data {
             Some(new_data) => {
-                let df: DataFrame = new_data.into();
+                let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
                 let predicted = self.predict_for(&df)?;
                 (df, predicted)
             }

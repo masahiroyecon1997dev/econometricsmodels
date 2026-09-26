@@ -29,7 +29,9 @@ use super::common::{
     MarginalEffectsResult, mat_to_nested_vec, mle_error_to_pyerr, parse_cov_type,
     parse_marginal_effects_at, parse_method,
 };
-use crate::column_extraction::{extract_f64_column, extract_f64_columns, x_column_names};
+use crate::column_extraction::{
+    extract_dataframe, extract_f64_column, extract_f64_columns, x_column_names,
+};
 use crate::validation::{validate_common_roles, validate_no_existing_column};
 
 /// Estimation options for Logit.
@@ -274,12 +276,12 @@ impl LogitResult {
     ///   numeric type, or contains missing/NaN/infinite values: `ValidationError`
     ///   (same validation as `fit()`'s column extraction, via `extract_f64_column`).
     #[pyo3(signature = (new_data=None))]
-    fn predict(&self, new_data: Option<PyDataFrame>) -> PyResult<Vec<f64>> {
+    fn predict(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<f64>> {
         let Some(new_data) = new_data else {
             return Ok(self.estimator.predict());
         };
 
-        let df: DataFrame = new_data.into();
+        let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
         self.predict_for(&df)
     }
 
@@ -296,10 +298,10 @@ impl LogitResult {
     /// - The source data already has a column named `"probability"`:
     ///   `ValidationError` (would otherwise silently overwrite it).
     #[pyo3(signature = (new_data=None))]
-    fn augment(&self, new_data: Option<PyDataFrame>) -> PyResult<PyDataFrame> {
+    fn augment(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<PyDataFrame> {
         let (mut source, probability) = match new_data {
             Some(new_data) => {
-                let df: DataFrame = new_data.into();
+                let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
                 let probability = self.predict_for(&df)?;
                 (df, probability)
             }

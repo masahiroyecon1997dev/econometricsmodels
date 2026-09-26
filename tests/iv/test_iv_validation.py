@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import _error_messages as msgs
+import pandas as pd
 import polars as pl
 import pytest
 from _constants import DATA_DIR
@@ -233,6 +234,40 @@ def test_missing_column_raises(iv_dataset):
             iv_dataset,
             y="y",
             x_exog=["nonexistent"],
+            x_endog=["endog1"],
+            instruments=["z1", "z2"],
+        ).fit()
+
+
+def test_data_not_polars_raises():
+    """`data`にpolars以外のDataFrame（pandas等）を渡すと、内部実装
+    （`pyo3-polars`の`get_columns`呼び出し）が漏れた`AttributeError`ではなく
+    `ValidationError`になること（`test_ols_validation.py`と同じ検証。
+    `IVResult`自体には`predict()`/`augment()`が無く、`first_stage()`が
+    返す`OLSResults`側の検証は`test_ols_validation.py`でカバー済みのため
+    `data`のみ確認する）。
+    """
+    bad = pd.DataFrame(
+        {
+            "y": [1.0, 2.0, 3.0],
+            "x1": [1.0, 2.0, 3.0],
+            "endog1": [1.0, 0.5, 1.5],
+            "z1": [0.1, 0.2, 0.3],
+            "z2": [0.3, 0.1, 0.2],
+        }
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME,
+            param_name="data",
+            type_name=msgs.fully_qualified_type_name(bad),
+        ),
+    ):
+        IV(
+            bad,
+            y="y",
+            x_exog=["x1"],
             x_endog=["endog1"],
             instruments=["z1", "z2"],
         ).fit()

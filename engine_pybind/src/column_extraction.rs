@@ -14,8 +14,47 @@
 
 use polars::prelude::*;
 use pyo3::prelude::*;
+use pyo3_polars::PyDataFrame;
 
 use crate::errors::ValidationError;
+
+/// Pythonオブジェクト`ob`をpolars DataFrameとして取り出す。
+///
+/// `PyDataFrame`の`FromPyObject`実装（`pyo3-polars`）は`get_columns`/`width`を
+/// 無条件に呼ぶだけで型検証を行わないため、polars以外のDataFrame（pandas等）を
+/// 渡すと内部実装が漏れた`AttributeError`がそのまま送出されてしまう
+/// （`ob.call_method0("get_columns")`がpandas.DataFrameには存在しないメソッドで
+/// 失敗するため）。この関数を経由することで、その失敗を`ValidationError`に
+/// 変換して隠蔽する。`data`/`new_data`いずれのパラメータもこの関数を通す
+/// （`#[pyfunction]`/`#[pymethods]`の引数型を`PyDataFrame`ではなく
+/// `Bound<'_, PyAny>`にし、関数本体の先頭でこれを呼ぶ設計にする必要がある。
+/// pyo3が引数抽出をパラメータの型から自動生成する関係上、`PyDataFrame`を
+/// 引数型のまま使うと関数本体に入る前に`FromPyObject`が走ってしまい、
+/// 本体内でこの変換を挟めないため）。
+pub fn extract_dataframe(ob: &Bound<'_, PyAny>, param_name: &str) -> PyResult<PyDataFrame> {
+    ob.extract::<PyDataFrame>().map_err(|err| {
+        let type_name = ob
+            .get_type()
+            .fully_qualified_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| "unknown type".to_string());
+        // `type_name`が実際に`polars.`で始まる場合、渡されたオブジェクト自体は
+        // 本物のpolars DataFrameなのに抽出が失敗している（`pyo3`/`polars`/
+        // `pyo3-polars`のバージョンの組み合わせによるABI不整合等、
+        // `.claude/rules/rust-style.md`「既知のリスク」参照）。この場合
+        // 「polars.DataFrameではない」という文言は事実に反し診断の妨げになる
+        // ため、握りつぶさず元のエラーを含めた別文言にする。
+        if type_name.starts_with("polars.") {
+            ValidationError::new_err(format!(
+                "failed to read '{param_name}' as a polars.DataFrame: {err}"
+            ))
+        } else {
+            ValidationError::new_err(format!(
+                "'{param_name}' must be a polars.DataFrame, got {type_name}"
+            ))
+        }
+    })
+}
 
 /// `df`から`name`列をf64のVecとして取り出す。
 ///

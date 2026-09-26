@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import _error_messages as msgs
+import pandas as pd
 import polars as pl
 import pytest
 from _constants import DATA_DIR
@@ -183,6 +184,51 @@ def test_missing_column_raises(dataset):
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
     ):
         WLS(df, y="y", x=["x1", "nonexistent"], weight="weight").fit()
+
+
+def test_data_not_polars_raises(dataset):
+    """`data`/`new_data`にpolars以外のDataFrame（pandas等）を渡すと、内部実装
+    （`pyo3-polars`の`get_columns`呼び出し）が漏れた`AttributeError`ではなく
+    `ValidationError`になること（`test_ols_validation.py`と同じ検証）。
+    """
+    bad = pd.DataFrame(
+        {
+            "y": [1.0, 2.0, 3.0],
+            "x1": [1.0, 2.0, 3.0],
+            "weight": [1.0, 1.0, 1.0],
+        }
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME,
+            param_name="data",
+            type_name=msgs.fully_qualified_type_name(bad),
+        ),
+    ):
+        WLS(bad, y="y", x=["x1"], weight="weight").fit()
+
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+    bad_new_data = pd.DataFrame({"x1": [1.0], "x2": [0.5]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME,
+            param_name="new_data",
+            type_name=msgs.fully_qualified_type_name(bad_new_data),
+        ),
+    ):
+        res.predict(bad_new_data)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME,
+            param_name="new_data",
+            type_name=msgs.fully_qualified_type_name(bad_new_data),
+        ),
+    ):
+        res.augment(bad_new_data)
 
 
 def test_y_empty_string_raises(dataset):

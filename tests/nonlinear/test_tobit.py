@@ -15,6 +15,7 @@ import math
 import random
 
 import _error_messages as msgs
+import pandas as pd
 import polars as pl
 import pytest
 from _constants import DATA_DIR
@@ -584,6 +585,44 @@ def test_missing_column_raises(censored_dataset):
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
     ):
         Tobit(censored_dataset, y="y", x=["does_not_exist"]).fit()
+
+
+def test_data_not_polars_raises(censored_dataset):
+    """`data`/`new_data`にpolars以外のDataFrame（pandas等）を渡すと、内部実装
+    （`pyo3-polars`の`get_columns`呼び出し）が漏れた`AttributeError`ではなく
+    `ValidationError`になること（`test_ols_validation.py`と同じ検証）。
+    """
+    bad = pd.DataFrame({"y": [0.0, 1.0, 2.0], "x1": [1.0, 2.0, 3.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME,
+            param_name="data",
+            type_name=msgs.fully_qualified_type_name(bad),
+        ),
+    ):
+        Tobit(bad, y="y", x=["x1"]).fit()
+
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    bad_new_data = pd.DataFrame({"x1": [1.0], "x2": [0.5]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME,
+            param_name="new_data",
+            type_name=msgs.fully_qualified_type_name(bad_new_data),
+        ),
+    ):
+        res.predict(new_data=bad_new_data)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME,
+            param_name="new_data",
+            type_name=msgs.fully_qualified_type_name(bad_new_data),
+        ),
+    ):
+        res.augment(new_data=bad_new_data)
 
 
 def test_null_values_raise():

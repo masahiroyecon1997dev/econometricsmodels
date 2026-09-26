@@ -292,8 +292,29 @@
   `refactoring-candidates-2.md`項目52（`test_ols.py`の役割の非対称性）の
   解消（`test_ols.py`から簡易数値比較を削る）の前提条件にもなる。
 - **気づいた経緯**: 2026-08-22、`tests/linear/test_ols.py`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち、`refactoring-candidates-2.md`
-  項目52と関連）
+- **状態**: 対応済み（OLS/WLS、2026-09-26）。ユーザー確認の上、`confidence_level`
+  も対象に含め・シナリオはbaselineのみ・Rクロスチェックも拡張・WLSも同時対応・
+  `statsmodels_ref.py::run()`の拡張可、という方針で実施した。
+  `include_intercept=False`（切片なし）・`confidence_level`非既定（0.90）の
+  双方を、baselineシナリオ×全cov_type（classical/HC0-3/cluster/HAC）の
+  組み合わせで凍結フィクスチャに追加した。`statsmodels_ref.py::run()`に
+  `include_intercept`引数を追加（`- 1`をformulaに付与する方式、Tobit実装の
+  `_tobit_fixtures.py::_run`を踏襲）、`_run_cluster_case`にも同引数と
+  `confidence_level`引数を追加。Rクロスチェック側は`include_intercept=False`
+  相当をformula文字列自体で表現（引数追加不要）、`confidence_level`は
+  `run_lm_crosscheck.R`に`--confidence-level=`フラグ（cov_type依存の位置引数
+  とは独立に抜き出す設計）を追加して対応した。
+  `tests/linear/test_ols_reference.py`・`test_wls_reference.py`にあった
+  ad-hocデータでのライブstatsmodels比較テスト（`test_include_intercept_
+  false_matches_statsmodels*`）は削除し、他オプションと同じ凍結フィクスチャ
+  経由の数値照合テストに置き換えた。`confidence_level`は幅の単調性のみの
+  相対比較（`test_ols_api.py`/`test_wls_api.py`の
+  `test_confidence_level_changes_interval_width`）は構造確認用として残しつつ、
+  具体的な数値の正しさを検証する凍結フィクスチャテストを新設した。
+  `test_ols_crosscheck.py`・`test_wls_crosscheck.py`にも同様にRとの数値照合
+  テストを追加（HACのみ小標本補正の慣習差により専用テストで緩い許容誤差を
+  使う、既存の`test_hac_matches_r`と同じ方針）。`tests/`配下1738件全通過・
+  Ruffクリーンを確認済み。
 
 ### 29. クラスターロバストSEが、どの検証層でも`baseline`シナリオでしか数値比較されていない（悪条件・境界シナリオとの組み合わせが未検証）
 

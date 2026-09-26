@@ -105,6 +105,10 @@ CLUSTER_ILL_CONDITIONED_SCENARIOS = [
     "moderate_multicollinearity",
 ]
 
+# generate_ols_fixtures.pyと同じ値・同じ理由（baselineシナリオのみで
+# COV_TYPES全種＋clusterと組み合わせて確認する。ユーザー確認済み）。
+CONFIDENCE_LEVEL_NON_DEFAULT = 0.90
+
 
 def _write_csv(df, tmpdir: Path, name: str) -> Path:
     path = tmpdir / f"{name}.csv"
@@ -192,6 +196,62 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
                 groups=[str(i % 2) for i in range(df_g2.height)],
                 suffix="_cluster_g2",
             )
+
+            # include_intercept=False（切片なし）。R側はformula自体に"- 1"を
+            # 付けるだけで表現できる。全cov_type（R_COV_TYPES + cluster）と
+            # 組み合わせて確認する（generate_ols_fixtures.pyの横展開）。
+            formula_no_intercept = f"{formula} - 1"
+            fixtures[scenario]["no_intercept"] = {}
+            for cov_type in R_COV_TYPES:
+                entry = {}
+                if cov_type == "hac":
+                    lag = hac_auto_lag(n)
+                    entry["r"] = run_lm_r(
+                        csv_path, formula_no_intercept, cov_type, hac_lag=lag
+                    )
+                    entry["hac_lag"] = lag
+                else:
+                    entry["r"] = run_lm_r(
+                        csv_path, formula_no_intercept, cov_type
+                    )
+                fixtures[scenario]["no_intercept"][cov_type] = entry
+            fixtures[scenario]["no_intercept"]["cluster"] = _run_cluster_case(
+                df, csv_path, formula_no_intercept, suffix="_no_intercept_cluster"
+            )
+
+            # confidence_level非既定（0.95以外）。全cov_type
+            # （R_COV_TYPES + cluster）と組み合わせて確認する
+            # （generate_ols_fixtures.pyの横展開）。
+            fixtures[scenario]["confidence_level"] = {}
+            for cov_type in R_COV_TYPES:
+                entry = {}
+                if cov_type == "hac":
+                    lag = hac_auto_lag(n)
+                    entry["r"] = run_lm_r(
+                        csv_path,
+                        formula,
+                        cov_type,
+                        hac_lag=lag,
+                        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+                    )
+                    entry["hac_lag"] = lag
+                else:
+                    entry["r"] = run_lm_r(
+                        csv_path,
+                        formula,
+                        cov_type,
+                        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+                    )
+                fixtures[scenario]["confidence_level"][cov_type] = entry
+            fixtures[scenario]["confidence_level"]["cluster"] = (
+                _run_cluster_case(
+                    df,
+                    csv_path,
+                    formula,
+                    suffix="_confidence_level_cluster",
+                    confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+                )
+            )
         elif scenario in CLUSTER_ILL_CONDITIONED_SCENARIOS:
             # 悪条件・多重共線性シナリオとクラスターの組み合わせでの数値的
             # 頑健性確認用（generate_ols_fixtures.pyと同じ理由）。均等な疑似グループ
@@ -209,15 +269,19 @@ def _run_cluster_case(
     formula: str,
     groups: list | None = None,
     suffix: str = "_cluster",
+    confidence_level: float = 0.95,
 ) -> dict:
     """クラスターロバストSEのcrosscheck。
 
     Args:
         df: 疑似グループを付与する対象データ。
         csv_path: 元データのCSVパス（グループ付きCSVの命名に使う）。
-        formula: 回帰式。
+        formula: 回帰式。`include_intercept=False`相当はformula自体に
+            "- 1"を付けて呼び出し側で表現する。
         groups: 各行のグループラベル。Noneなら既定（行番号%10、10均等グループ）。
         suffix: 一時CSVファイル名に付けるsuffix（呼び出しごとに衝突しないように）。
+        confidence_level: 信頼区間の信頼水準（既定0.95以外×クラスターの
+            組み合わせ確認用）。
     """
     n = df.height
     cluster_group = (
@@ -228,7 +292,11 @@ def _run_cluster_case(
     grouped.write_csv(tmp_path)
     return {
         "r": run_lm_r(
-            tmp_path, formula, "cluster", cluster_col="cluster_group"
+            tmp_path,
+            formula,
+            "cluster",
+            cluster_col="cluster_group",
+            confidence_level=confidence_level,
         )
     }
 
@@ -336,6 +404,14 @@ def build_fixtures() -> dict:
             "moderate_multicollinearityにもclusterエントリを追加（従来"
             "クラスター系はbaselineシナリオのみで、悪条件・多重共線性シナリオ"
             "との組み合わせが未検証だった。均等な疑似グループ（行番号%10）のみ）。"
+            "baseline.no_interceptはinclude_intercept=False（切片なし、"
+            "formulaに'- 1'を付与）をR_COV_TYPES全種＋clusterと組み合わせて"
+            "確認する（statsmodels主リファレンス側〔ols.json〕の横展開）。"
+            "baseline.confidence_levelはconfidence_level="
+            f"{CONFIDENCE_LEVEL_NON_DEFAULT}（既定0.95以外）をR_COV_TYPES"
+            "全種＋clusterと組み合わせて確認する（run_lm_crosscheck.R側に"
+            "'--confidence-level='フラグを追加して対応、同じくstatsmodels"
+            "主リファレンス側の横展開）。"
         ),
     }
     return fixtures

@@ -99,6 +99,14 @@ CLUSTER_ILL_CONDITIONED_SCENARIOS = [
     "moderate_multicollinearity",
 ]
 
+# include_intercept=False・confidence_level非既定の効果は、シナリオ依存では
+# なくオプションの配線自体の動作確認が目的のため（クラスター同様、
+# testing-policy.md「テスト用データセット」3.）、baselineシナリオのみで
+# 全cov_type（COV_TYPES + cluster）と組み合わせて確認する（ユーザー確認済み）。
+# 0.95（既定）・0.99/0.80（test_ols_api.pyの幅の単調性テストで使用済み）とは
+# 異なる値として0.90を選ぶ。
+CONFIDENCE_LEVEL_NON_DEFAULT = 0.90
+
 
 def build_fixtures() -> dict:
     fixtures: dict = {}
@@ -149,6 +157,45 @@ def build_fixtures() -> dict:
                 "説明変数1個（q=1）に絞っている（"
                 "3個だとG<=qでロバストWald検定の共分散行列が特異になりValidationError）。",
                 k1=True,
+            )
+
+            # include_intercept=False（切片なし）。全cov_type（COV_TYPES +
+            # cluster）と組み合わせて確認する（ユーザー確認済み）。
+            fixtures[scenario]["no_intercept"] = {
+                cov_type: run(
+                    dataset_source="synthetic",
+                    dataset=scenario,
+                    formula=None,
+                    cov_type=cov_type,
+                    include_intercept=False,
+                )
+                for cov_type in COV_TYPES
+            }
+            fixtures[scenario]["no_intercept"]["cluster"] = _run_cluster_case(
+                include_intercept=False,
+                note="include_intercept=False（切片なし）×クラスターロバストSEの"
+                "組み合わせ確認用。均等な疑似グループ（行番号%10）のみ。",
+            )
+
+            # confidence_level非既定（0.95以外）。全cov_type（COV_TYPES +
+            # cluster）と組み合わせて確認する。
+            fixtures[scenario]["confidence_level"] = {
+                cov_type: run(
+                    dataset_source="synthetic",
+                    dataset=scenario,
+                    formula=None,
+                    cov_type=cov_type,
+                    confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+                )
+                for cov_type in COV_TYPES
+            }
+            fixtures[scenario]["confidence_level"]["cluster"] = (
+                _run_cluster_case(
+                    confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+                    note=f"confidence_level={CONFIDENCE_LEVEL_NON_DEFAULT}"
+                    "（既定0.95以外）×クラスターロバストSEの組み合わせ確認用。"
+                    "均等な疑似グループ（行番号%10）のみ。",
+                )
             )
         elif scenario in CLUSTER_ILL_CONDITIONED_SCENARIOS:
             fixtures[scenario]["cluster"] = _run_cluster_case(
@@ -214,6 +261,15 @@ def build_fixtures() -> dict:
             "エントリを追加（従来クラスター系はbaselineシナリオのみで、"
             "悪条件・多重共線性シナリオとの組み合わせが未検証だった。"
             "均等な疑似グループ（行番号%10）のみ）。"
+            "baseline.no_interceptはinclude_intercept=False（切片なし）を"
+            "COV_TYPES全種＋clusterと組み合わせて確認する（従来ライブ"
+            "statsmodels比較〔ad-hocデータ1パターン〕のみだったものを、"
+            "他オプションと同じ凍結フィクスチャに統合）。"
+            "baseline.confidence_levelはconfidence_level="
+            f"{CONFIDENCE_LEVEL_NON_DEFAULT}（既定0.95以外）をCOV_TYPES全種＋"
+            "clusterと組み合わせて確認する（従来相対比較〔幅の広さの"
+            "単調性のみ〕だったものを、具体的な数値の正しさまで検証する"
+            "よう拡張）。"
         ),
     }
     return fixtures
@@ -224,6 +280,8 @@ def _run_cluster_case(
     note: str = "決め打ちの疑似グループ（行番号%10）。統計的な意味はなく、実装の動作確認用。",
     k1: bool = False,
     scenario: str = "baseline",
+    include_intercept: bool = True,
+    confidence_level: float = 0.95,
 ) -> dict:
     """クラスターロバストSE確認用に、疑似グループを付けて実行する。
 
@@ -234,6 +292,11 @@ def _run_cluster_case(
         scenario: 対象シナリオ名（`k1=True`のときは無視、常に
             `synthetic_baseline_k1.csv`を使う）。悪条件・多重共線性シナリオ
             とクラスターの組み合わせ確認用。
+        include_intercept: Falseならformulaに"- 1"を付けて切片を落とす
+            （`run()`と同じ方式。include_intercept=False×クラスターの
+            組み合わせ確認用）。
+        confidence_level: 信頼区間の信頼水準（既定0.95以外×クラスターの
+            組み合わせ確認用）。
     """
     import statsmodels.formula.api as smf
 
@@ -250,23 +313,26 @@ def _run_cluster_case(
 
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
     formula = "y ~ " + " + ".join(x_cols)
+    fit_formula = formula if include_intercept else f"{formula} - 1"
 
     # use_t=Trueが無いと既定で正規分布を使ってしまい、本プロジェクトのt分布
     # 統一方針・cluster時の自由度G-1（docs/spec/ols-spec.md「標準誤差」）と
     # 一致しなくなる（過去に発覚した抜け）。
-    model = smf.ols(formula=formula, data=pandas_df).fit(
+    model = smf.ols(formula=fit_formula, data=pandas_df).fit(
         cov_type="cluster",
         cov_kwds={"groups": pandas_df["_group"]},
         use_t=True,
     )
 
-    result = extract_full_fit_stats(model)
+    result = extract_full_fit_stats(model, confidence_level)
     result["_meta"] = {
         "reference": "statsmodels",
         "statsmodels_version": statsmodels.__version__,
         "generated_at": datetime.now(UTC).isoformat(),
         "note": note,
         "formula": formula,
+        "include_intercept": include_intercept,
+        "confidence_level": confidence_level,
     }
     return result
 

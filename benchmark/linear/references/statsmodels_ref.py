@@ -106,6 +106,7 @@ def run(
     cluster_col: str | None = None,
     confidence_level: float = 0.95,
     weight_col: str | None = None,
+    include_intercept: bool = True,
 ) -> dict:
     import statsmodels.formula.api as smf
 
@@ -126,6 +127,10 @@ def run(
     else:
         raise ValueError(f"unknown dataset_source: {dataset_source!r}")
 
+    # include_intercept=Falseのときformulaに"- 1"を付けて切片を落とす
+    # （benchmark/nonlinear/fixtures/_tobit_fixtures.py::_runと同じ方式）。
+    fit_formula = formula if include_intercept else f"{formula} - 1"
+
     sm_cov_type = {"classical": "nonrobust"}.get(
         cov_type.lower(), cov_type.lower()
     )
@@ -142,10 +147,10 @@ def run(
 
     if weight_col is not None:
         model = smf.wls(
-            formula=formula, data=pandas_df, weights=pandas_df[weight_col]
+            formula=fit_formula, data=pandas_df, weights=pandas_df[weight_col]
         ).fit(**fit_kwargs)
     else:
-        model = smf.ols(formula=formula, data=pandas_df).fit(**fit_kwargs)
+        model = smf.ols(formula=fit_formula, data=pandas_df).fit(**fit_kwargs)
 
     result = extract_full_fit_stats(model, confidence_level)
     if true_beta is not None:
@@ -161,6 +166,7 @@ def run(
         "cov_type_statsmodels": sm_cov_type,
         "confidence_level": confidence_level,
         "formula": formula,
+        "include_intercept": include_intercept,
         "weighted": weight_col is not None,
         "weight_col": weight_col,
     }
@@ -233,6 +239,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--weight-col", default=None, help="指定するとWLS（smf.wls）を使う"
     )
+    parser.add_argument(
+        "--no-intercept",
+        action="store_true",
+        help="指定するとinclude_intercept=False相当（formulaに'- 1'を付与）",
+    )
     args = parser.parse_args()
 
     output = run(
@@ -243,5 +254,6 @@ if __name__ == "__main__":
         args.cluster_col,
         args.confidence_level,
         args.weight_col,
+        include_intercept=not args.no_intercept,
     )
     print(json.dumps(output, indent=2))

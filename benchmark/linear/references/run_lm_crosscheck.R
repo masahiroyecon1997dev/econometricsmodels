@@ -18,10 +18,30 @@
 #   # （classical/hc0-3はarg4、cluster/hacはarg5）。省略時（引数なし or 空文字）はOLSと同じ。
 #   Rscript run_lm_crosscheck.R data.csv "y ~ x1 + x2 + x3" classical weight
 #   Rscript run_lm_crosscheck.R data.csv "y ~ x1 + x2 + x3" cluster cluster_col weight
+#
+#   # 信頼区間のconfidence_level（既定0.95）を変える場合は"--confidence-level="
+#   # フラグを任意の位置に追加する（cov_type固有の位置引数とは独立に抜き出すため）。
+#   # include_intercept=False相当はformula自体に"- 1"を付ける（例: "y ~ x1 - 1"）。
+#   Rscript run_lm_crosscheck.R data.csv "y ~ x1 + x2 + x3" classical --confidence-level=0.90
+#   Rscript run_lm_crosscheck.R data.csv "y ~ x1 + x2 + x3 - 1" classical
 
-args <- commandArgs(trailingOnly = TRUE)
+args_raw <- commandArgs(trailingOnly = TRUE)
+
+# "--confidence-level="フラグは、cluster_col/hac_lag/weight_colのようなcov_type
+# 依存の位置引数とは独立に、先に抜き出しておく（残りの引数の位置関係を崩さない
+# ため）。
+confidence_level <- 0.95
+cl_flag_pattern <- "^--confidence-level="
+cl_flag_idx <- grep(cl_flag_pattern, args_raw)
+if (length(cl_flag_idx) > 0) {
+  confidence_level <- as.numeric(sub(cl_flag_pattern, "", args_raw[cl_flag_idx[1]]))
+  args <- args_raw[-cl_flag_idx]
+} else {
+  args <- args_raw
+}
+
 if (length(args) < 2) {
-  stop("usage: Rscript run_lm_crosscheck.R <data.csv> <formula> [cov_type=classical] [arg4] [arg5]")
+  stop("usage: Rscript run_lm_crosscheck.R <data.csv> <formula> [cov_type=classical] [arg4] [arg5] [--confidence-level=X]")
 }
 data_path <- args[1]
 formula_str <- args[2]
@@ -101,10 +121,11 @@ ses <- coef_se$ses
 t_stats <- coef_se$t_stats
 p_values <- coef_se$p_values
 
-# 信頼区間（既定confidence_level=0.95固定。本実装・statsmodelsのcov_typeによらず
-# t分布を使う方針と揃え、上で計算したvc・df_inferenceベースのses・t臨界値から
-# 手計算する（baseのconfint(model)はclassicalのvcovしか使わないため使えない）。
-crit <- qt(0.975, df_inference)
+# 信頼区間（既定confidence_level=0.95、"--confidence-level="フラグで変更可）。
+# 本実装・statsmodelsのcov_typeによらずt分布を使う方針と揃え、上で計算した
+# vc・df_inferenceベースのses・t臨界値から手計算する（baseのconfint(model)は
+# classicalのvcovしか使わないため使えない）。
+crit <- qt(1 - (1 - confidence_level) / 2, df_inference)
 conf_lower <- coefs - crit * ses
 conf_upper <- coefs + crit * ses
 

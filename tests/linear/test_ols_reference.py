@@ -17,10 +17,14 @@
    `predict()`（学習データに対するfitted値、baselineシナリオのみout-of-sample
    predicted値）も同じフィクスチャ経由で検証する（従来Rクロスチェック側にしか
    無かったpredict()の網羅的検証を主リファレンス側にも追加した）。
+   `include_intercept=False`（切片なし）・`confidence_level`非既定も、
+   baselineシナリオのみで全cov_type（classical/HC0-3/cluster/HAC）と
+   組み合わせて同じフィクスチャ経由で検証する（従来はそれぞれライブ
+   statsmodels比較〔ad-hocデータ1パターン〕・相対比較〔幅の単調性のみ〕
+   だったものを、他オプションと同じ凍結フィクスチャでの数値照合に統合した）。
 2. **ライブ statsmodels との照合**: 共有 `dataset` フィクスチャ（n=100）で
-   毎回 statsmodels を実行し、係数・標準誤差・R²・F統計量・`include_intercept`
-   の扱いが一致することを確認する（凍結フィクスチャが対象にしない
-   `include_intercept=False` 等の分岐と、statsmodels の挙動変化そのものの検知）。
+   毎回 statsmodels を実行し、係数・標準誤差・R²・F統計量が一致することを
+   確認する（statsmodels の挙動変化そのものの検知が目的）。
 
 役割分担:
     - 構造・API・`predict()`/`augment()`（1データセットでのスモーク級照合含む）:
@@ -45,10 +49,8 @@ import json
 from functools import partial
 from pathlib import Path
 
-import numpy as np
 import polars as pl
 import pytest
-import statsmodels.api as sm
 from _assertions import assert_close, assert_dict_close
 from _assertions import rename_intercept as _rename
 from _constants import DATA_DIR
@@ -65,6 +67,7 @@ from econometricsmodels import OLS, OLSOptions
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.linear.constants import HAC_MAXLAGS, PREDICT_NEW_DATA
 from benchmark.linear.fixtures.generate_ols_fixtures import (
+    CONFIDENCE_LEVEL_NON_DEFAULT,
     COV_TYPES,
     WOOLDRIDGE_COV_TYPES,
     WOOLDRIDGE_DATASETS,
@@ -263,6 +266,96 @@ def test_cluster_ill_conditioned_matches_statsmodels(fixtures, scenario):
     _check_result(res, fixtures[scenario]["cluster"], f"{scenario}/cluster")
 
 
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+def test_no_intercept_matches_statsmodels(fixtures, cov_type):
+    """`include_intercept=False`（切片なし）が、cov_typeによらずstatsmodels
+    と一致すること（baselineシナリオ）。従来はライブstatsmodels比較
+    （ad-hocデータ1パターン）のみだったものを、他オプションと同じ凍結
+    フィクスチャでの数値照合に統合した。クラスターは
+    `test_no_intercept_cluster_matches_statsmodels`で別途確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
+    options = OLSOptions(
+        include_intercept=False, cov_type=cov_type, **kwargs
+    )
+    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    assert res.param_names == ["x1", "x2", "x3"]
+    _check_result(
+        res,
+        fixtures["baseline"]["no_intercept"][cov_type],
+        f"no_intercept/{cov_type}",
+    )
+
+
+def test_no_intercept_cluster_matches_statsmodels(fixtures):
+    """`include_intercept=False`（切片なし）×クラスターロバストSEの組み合わせ。
+
+    均等な疑似グループ（行番号%10）のみ（グルーピングパターン自体の網羅性は
+    `test_cluster_matches_statsmodels`等baselineシナリオで確認済み）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    df = with_cluster_groups(df, 10)
+    options = OLSOptions(
+        include_intercept=False, cov_type="cluster", cluster_col="cluster_group"
+    )
+    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    assert res.param_names == ["x1", "x2", "x3"]
+    _check_result(
+        res,
+        fixtures["baseline"]["no_intercept"]["cluster"],
+        "no_intercept/cluster",
+    )
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+def test_confidence_level_matches_statsmodels(fixtures, cov_type):
+    """confidence_level非既定が、cov_typeによらずstatsmodelsと一致すること
+    （baselineシナリオ）。従来は幅の広さの単調性のみの相対比較
+    （`test_ols_api.py::test_confidence_level_changes_interval_width`）
+    だったものを、具体的な数値の正しさまで検証するよう拡張した。クラスターは
+    `test_confidence_level_cluster_matches_statsmodels`で別途確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
+    options = OLSOptions(
+        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        cov_type=cov_type,
+        **kwargs,
+    )
+    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    _check_result(
+        res,
+        fixtures["baseline"]["confidence_level"][cov_type],
+        f"confidence_level/{cov_type}",
+    )
+
+
+def test_confidence_level_cluster_matches_statsmodels(fixtures):
+    """confidence_level非既定×クラスターロバストSEの組み合わせ。
+
+    均等な疑似グループ（行番号%10）のみ（グルーピングパターン自体の網羅性は
+    `test_cluster_matches_statsmodels`等baselineシナリオで確認済み）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    df = with_cluster_groups(df, 10)
+    options = OLSOptions(
+        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        cov_type="cluster",
+        cluster_col="cluster_group",
+    )
+    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    _check_result(
+        res,
+        fixtures["baseline"]["confidence_level"]["cluster"],
+        "confidence_level/cluster",
+    )
+
+
 # Wooldridge実データ用のy/x列構成。`generate_ols_fixtures.py`のformula文字列
 # （statsmodels側のフォーミュラAPI用）とは別に、本実装のy=str/x=list渡し
 # （CLAUDE.md 2章）用の構成をここで持つ（`test_ols_crosscheck.py`の
@@ -378,75 +471,3 @@ def test_f_statistic_match_statsmodels(dataset):
     our_res = our_fit(dataset)
 
     _assert_close(our_res.f_statistic, sm_res.fvalue, "f_statistic")
-
-
-def test_include_intercept_false_matches_statsmodels():
-    """`include_intercept=False`でstatsmodelsと一致すること（uncentered TSSのR²等）。"""
-    rng = np.random.default_rng(7)
-    n = 30
-    x1 = rng.normal(0.0, 1.0, n)
-    y = 2.0 * x1 + rng.normal(0.0, 0.5, n)
-    df = pl.DataFrame({"y": y, "x1": x1})
-
-    sm_res = sm.OLS(y, x1.reshape(-1, 1)).fit(use_t=True)  # 定数項なし
-    options = OLSOptions(include_intercept=False)
-    our_res = OLS(df, y="y", x=["x1"], options=options).fit()
-
-    assert our_res.param_names == ["x1"]
-    _assert_close(our_res.params["x1"], sm_res.params[0], "params/x1")
-    _assert_close(our_res.std_errors["x1"], sm_res.bse[0], "se/x1")
-    _assert_close(our_res.r_squared, sm_res.rsquared, "r_squared")
-
-
-@pytest.mark.parametrize(
-    "cov_type", ["classical", "hc0", "hc1", "hc2", "hc3", "cluster", "hac"]
-)
-def test_include_intercept_false_matches_statsmodels_robust_cov_types(
-    dataset, cov_type
-):
-    """`include_intercept=False`が、ロバスト系cov_type（HC0-3/cluster/HAC）でも
-    statsmodelsと一致すること。
-
-    上の`test_include_intercept_false_matches_statsmodels`はcov_typeを指定
-    しない（classical相当）比較のみだったため、include_intercept=Falseが
-    engine_pybind側のcov_type分岐ロジックとも独立に正しく配線されていることを
-    確認する（テスト網羅性レビューで判明した抜け）。
-    """
-    y = dataset["y"].to_numpy()
-    x = np.column_stack([dataset["x1"].to_numpy(), dataset["x2"].to_numpy()])
-
-    fit_kwargs: dict = {"use_t": True}
-    if cov_type == "cluster":
-        fit_kwargs["cov_type"] = "cluster"
-        fit_kwargs["cov_kwds"] = {"groups": dataset["cluster"].to_numpy()}
-    elif cov_type == "hac":
-        fit_kwargs["cov_type"] = "HAC"
-        fit_kwargs["cov_kwds"] = {"maxlags": 2}
-    elif cov_type != "classical":
-        fit_kwargs["cov_type"] = cov_type.upper()
-
-    sm_res = sm.OLS(y, x).fit(**fit_kwargs)  # 定数項なし
-
-    options = OLSOptions(
-        include_intercept=False,
-        cov_type=cov_type,
-        cluster_col="cluster" if cov_type == "cluster" else None,
-        hac_lags=2 if cov_type == "hac" else None,
-    )
-    our_res = OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
-
-    assert our_res.param_names == ["x1", "x2"]
-    for i, name in enumerate(["x1", "x2"]):
-        _assert_close(
-            our_res.params[name],
-            sm_res.params[i],
-            f"[{cov_type}] params/{name}",
-        )
-        _assert_close(
-            our_res.std_errors[name],
-            sm_res.bse[i],
-            f"[{cov_type}] se/{name}",
-        )
-    _assert_close(
-        our_res.r_squared, sm_res.rsquared, f"[{cov_type}] r_squared"
-    )

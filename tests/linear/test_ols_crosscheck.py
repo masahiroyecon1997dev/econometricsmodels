@@ -30,6 +30,11 @@ classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相�
 `predict(new_data)`（新規データの予測値、列順を入れ替えて列名マッチングも確認）を
 crosscheckする。
 
+`include_intercept=False`（切片なし）・`confidence_level`非既定は、baseline
+シナリオのみで全cov_type（classical/HC0-3/cluster/HAC）と組み合わせてRとも
+数値照合する（従来ライブstatsmodels比較・相対比較のみだったものを、他の
+オプションと同じ凍結フィクスチャでの厳密比較に統合）。
+
 Note:
     合成データはフィクスチャ生成時と同じ入力データを、`tests/fixtures/
     benchmarks/data/`に固定済みのCSV（`benchmark/linear/freeze.py`参照）から読む。
@@ -57,6 +62,9 @@ from econometricsmodels import OLS, OLSOptions
 
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.linear.constants import PREDICT_NEW_DATA
+from benchmark.linear.fixtures.generate_ols_crosscheck_fixtures import (
+    CONFIDENCE_LEVEL_NON_DEFAULT,
+)
 from benchmark.linear.fixtures.generate_ols_crosscheck_fixtures import (
     NUMERIC_SCENARIOS as SYNTHETIC_SCENARIOS,
 )
@@ -293,6 +301,111 @@ def test_hac_matches_r(crosscheck):
     _assert_close(res.params, ref["coef"], "hac/R coef")
     _assert_close(res.std_errors, ref["se"], "hac/R se", rtol=RTOL_HAC)
     _assert_fit_stats_close(res, ref, "hac/R", rtol=RTOL_HAC)
+
+
+# ── include_intercept=False・confidence_level非既定（凍結フィクスチャ、
+# baselineシナリオ） ─────────────────────────────────────────────
+# クラスターも含めるがHACのみ小標本補正の慣習差があるため専用テストで
+# RTOL_HACを使う（`test_hac_matches_r`と同じ方針）。
+NO_INTERCEPT_AND_CONFIDENCE_LEVEL_STRICT_COV_TYPES = [
+    *NON_HAC_COV_TYPES,
+    "cluster",
+]
+
+
+def _options_kwargs_for_cov_type(df: pl.DataFrame, cov_type: str):
+    """`cov_type="cluster"`のときのみ疑似グループ列を付け、
+    `cluster_col`を返す。それ以外は`cluster_col=None`。
+    """
+    if cov_type == "cluster":
+        return with_cluster_groups(df, 10), {"cluster_col": "cluster_group"}
+    return df, {"cluster_col": None}
+
+
+@pytest.mark.parametrize(
+    "cov_type", NO_INTERCEPT_AND_CONFIDENCE_LEVEL_STRICT_COV_TYPES
+)
+def test_no_intercept_matches_r(crosscheck, cov_type):
+    """`include_intercept=False`が、cov_typeによらずRとも一致すること
+    （baselineシナリオ、classical/HC0-3/cluster）。HACのみ小標本補正の慣習差
+    があるため`test_no_intercept_hac_matches_r`で別途確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    df, kwargs = _options_kwargs_for_cov_type(df, cov_type)
+    options = OLSOptions(include_intercept=False, cov_type=cov_type, **kwargs)
+    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = crosscheck["synthetic"]["baseline"]["no_intercept"][cov_type]["r"]
+    label = f"no_intercept/{cov_type}/R"
+    assert res.param_names == ["x1", "x2", "x3"]
+    _assert_close(res.params, ref["coef"], f"{label} coef")
+    _assert_close(res.std_errors, ref["se"], f"{label} se")
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
+
+
+def test_no_intercept_hac_matches_r(crosscheck):
+    """`include_intercept=False`のHAC標準誤差。フィクスチャ生成時の自動ラグ
+    （`hac_lag`）をそのまま使う（`test_hac_matches_r`と同じ方針）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    entry = crosscheck["synthetic"]["baseline"]["no_intercept"]["hac"]
+    options = OLSOptions(
+        include_intercept=False, cov_type="hac", hac_lags=entry["hac_lag"]
+    )
+    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = entry["r"]
+    label = "no_intercept/hac/R"
+    assert res.param_names == ["x1", "x2", "x3"]
+    _assert_close(res.params, ref["coef"], f"{label} coef")
+    _assert_close(res.std_errors, ref["se"], f"{label} se", rtol=RTOL_HAC)
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_HAC)
+
+
+@pytest.mark.parametrize(
+    "cov_type", NO_INTERCEPT_AND_CONFIDENCE_LEVEL_STRICT_COV_TYPES
+)
+def test_confidence_level_matches_r(crosscheck, cov_type):
+    """confidence_level非既定（`CONFIDENCE_LEVEL_NON_DEFAULT`）が、cov_type
+    によらずRとも一致すること（baselineシナリオ、classical/HC0-3/cluster）。
+    HACのみ`test_confidence_level_hac_matches_r`で別途確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    df, kwargs = _options_kwargs_for_cov_type(df, cov_type)
+    options = OLSOptions(
+        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        cov_type=cov_type,
+        **kwargs,
+    )
+    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = crosscheck["synthetic"]["baseline"]["confidence_level"][cov_type][
+        "r"
+    ]
+    label = f"confidence_level/{cov_type}/R"
+    _assert_close(res.params, ref["coef"], f"{label} coef")
+    _assert_close(res.std_errors, ref["se"], f"{label} se")
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
+
+
+def test_confidence_level_hac_matches_r(crosscheck):
+    """confidence_level非既定のHAC標準誤差。フィクスチャ生成時の自動ラグ
+    （`hac_lag`）をそのまま使う（`test_hac_matches_r`と同じ方針）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    entry = crosscheck["synthetic"]["baseline"]["confidence_level"]["hac"]
+    options = OLSOptions(
+        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        cov_type="hac",
+        hac_lags=entry["hac_lag"],
+    )
+    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = entry["r"]
+    label = "confidence_level/hac/R"
+    _assert_close(res.params, ref["coef"], f"{label} coef")
+    _assert_close(res.std_errors, ref["se"], f"{label} se", rtol=RTOL_HAC)
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_HAC)
 
 
 WOOLDRIDGE_DATASETS = {

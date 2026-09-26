@@ -10,8 +10,11 @@ classical/HC0-3/HAC + クラスター(baselineのみ) + 実データ（401ksubs�
 `_check_result`で検証するよう拡張した（OLS側の同種の拡張を横展開したもの。
 あわせて`generate_wls_fixtures.py`の`_run_cluster_case`に`use_t=True`が
 指定されていなかった不備も修正済み）。
-加えて `include_intercept=False` は凍結フィクスチャではなく
-ライブ statsmodels（`sm.WLS`）との直接比較で確認する。
+`include_intercept=False`（切片なし）・`confidence_level`非既定も、
+baselineシナリオのみで全cov_type（classical/HC0-3/cluster/HAC）と
+組み合わせて同じフィクスチャ経由で検証する（従来はそれぞれライブ
+statsmodels比較・相対比較〔幅の単調性のみ〕だったものを、他オプションと
+同じ凍結フィクスチャでの数値照合に統合した。OLS側の横展開）。
 
 役割分担:
     - 構造・API・OLSとの不変条件回帰テスト: `test_wls_api.py`
@@ -45,6 +48,7 @@ from econometricsmodels import WLS, WLSOptions
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.linear.constants import HAC_MAXLAGS
 from benchmark.linear.fixtures.generate_wls_fixtures import (
+    CONFIDENCE_LEVEL_NON_DEFAULT,
     COV_TYPES,
     WOOLDRIDGE_COV_TYPES,
     _add_age_bin,
@@ -197,6 +201,106 @@ def test_cluster_ill_conditioned_matches_statsmodels(fixtures, scenario):
     _check_result(res, fixtures[scenario]["cluster"], f"{scenario}/cluster")
 
 
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+def test_no_intercept_matches_statsmodels(fixtures, cov_type):
+    """`include_intercept=False`（切片なし）が、cov_typeによらずWLSでも
+    statsmodelsと一致すること（baselineシナリオ、OLS側の横展開）。従来は
+    ライブstatsmodels比較のみだったものを、他オプションと同じ凍結フィクスチャ
+    での数値照合に統合した。クラスターは
+    `test_no_intercept_cluster_matches_statsmodels`で別途確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
+    options = WLSOptions(
+        include_intercept=False, cov_type=cov_type, **kwargs
+    )
+    res = WLS(
+        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+    ).fit()
+
+    assert res.param_names == ["x1", "x2", "x3"]
+    _check_result(
+        res,
+        fixtures["baseline"]["no_intercept"][cov_type],
+        f"no_intercept/{cov_type}",
+    )
+
+
+def test_no_intercept_cluster_matches_statsmodels(fixtures):
+    """`include_intercept=False`（切片なし）×クラスターロバストSEの組み合わせ
+    （OLS側の横展開）。
+
+    均等な疑似グループ（行番号%10）のみ（グルーピングパターン自体の網羅性は
+    `test_cluster_matches_statsmodels`等baselineシナリオで確認済み）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    df = with_cluster_groups(df, 10)
+    options = WLSOptions(
+        include_intercept=False, cov_type="cluster", cluster_col="cluster_group"
+    )
+    res = WLS(
+        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+    ).fit()
+
+    assert res.param_names == ["x1", "x2", "x3"]
+    _check_result(
+        res,
+        fixtures["baseline"]["no_intercept"]["cluster"],
+        "no_intercept/cluster",
+    )
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+def test_confidence_level_matches_statsmodels(fixtures, cov_type):
+    """confidence_level非既定が、cov_typeによらずWLSでもstatsmodelsと一致
+    すること（baselineシナリオ、OLS側の横展開）。従来は幅の広さの単調性のみの
+    相対比較（`test_wls_api.py::test_confidence_level_changes_interval_width`）
+    だったものを、具体的な数値の正しさまで検証するよう拡張した。クラスターは
+    `test_confidence_level_cluster_matches_statsmodels`で別途確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
+    options = WLSOptions(
+        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        cov_type=cov_type,
+        **kwargs,
+    )
+    res = WLS(
+        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["baseline"]["confidence_level"][cov_type],
+        f"confidence_level/{cov_type}",
+    )
+
+
+def test_confidence_level_cluster_matches_statsmodels(fixtures):
+    """confidence_level非既定×クラスターロバストSEの組み合わせ（OLS側の
+    横展開）。
+
+    均等な疑似グループ（行番号%10）のみ（グルーピングパターン自体の網羅性は
+    `test_cluster_matches_statsmodels`等baselineシナリオで確認済み）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    df = with_cluster_groups(df, 10)
+    options = WLSOptions(
+        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        cov_type="cluster",
+        cluster_col="cluster_group",
+    )
+    res = WLS(
+        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["baseline"]["confidence_level"]["cluster"],
+        "confidence_level/cluster",
+    )
+
+
 def test_weight_in_x_matches_statsmodels(fixtures):
     """`weight`と同じ列を`x`にも含める成功パス。
 
@@ -264,71 +368,3 @@ def test_401ksubs_cluster_matches_statsmodels(fixtures):
     ).fit()
 
     _check_result(res, fixtures["401ksubs"]["cluster"], "401ksubs/cluster")
-
-
-@pytest.mark.parametrize(
-    "cov_type", ["classical", "hc0", "hc1", "hc2", "hc3", "cluster", "hac"]
-)
-def test_include_intercept_false_matches_statsmodels(cov_type):
-    """`include_intercept=False`が、WLSでもcov_typeによらずstatsmodelsと
-    一致すること（`test_ols.py::test_include_intercept_false_matches_
-    statsmodels_robust_cov_types`と同じ観点。テスト網羅性レビューで
-    判明したWLS側の抜け）。frozen fixtureではなく
-    OLS側と同様にstatsmodelsとの直接比較で確認する。
-
-    OLS側と同じ配列API（`sm.WLS(y, x, weights=w)`）を使い、formula API
-    （`patsy`経由でpandasを要求する）は使わない。`tests/`はpyarrow等の
-    formula API依存パッケージをdev依存に持たない方針のため、`to_pandas()`
-    はCIでModuleNotFoundErrorになる（`tests/`と`benchmark/`の依存分離方針、
-    `.claude/rules/testing-policy.md`参照）。
-    """
-    import numpy as np
-    import statsmodels.api as sm
-
-    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    if cov_type == "cluster":
-        df = with_cluster_groups(df, 10)
-
-    y = df["y"].to_numpy()
-    x = np.column_stack(
-        [df["x1"].to_numpy(), df["x2"].to_numpy(), df["x3"].to_numpy()]
-    )
-    weights = df["weight"].to_numpy()
-
-    fit_kwargs: dict = {"use_t": True}
-    if cov_type == "cluster":
-        fit_kwargs["cov_type"] = "cluster"
-        fit_kwargs["cov_kwds"] = {"groups": df["cluster_group"].to_numpy()}
-    elif cov_type == "hac":
-        fit_kwargs["cov_type"] = "HAC"
-        fit_kwargs["cov_kwds"] = {"maxlags": HAC_MAXLAGS}
-    elif cov_type != "classical":
-        fit_kwargs["cov_type"] = cov_type.upper()
-
-    sm_res = sm.WLS(y, x, weights=weights).fit(**fit_kwargs)  # 定数項なし
-
-    options = WLSOptions(
-        include_intercept=False,
-        cov_type=cov_type,
-        cluster_col="cluster_group" if cov_type == "cluster" else None,
-        hac_lags=HAC_MAXLAGS if cov_type == "hac" else None,
-    )
-    our_res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
-    ).fit()
-
-    assert our_res.param_names == ["x1", "x2", "x3"]
-    for i, name in enumerate(["x1", "x2", "x3"]):
-        _assert_close(
-            our_res.params[name],
-            sm_res.params[i],
-            f"[{cov_type}] params[{name}]",
-        )
-        _assert_close(
-            our_res.std_errors[name],
-            sm_res.bse[i],
-            f"[{cov_type}] std_errors[{name}]",
-        )
-    _assert_close(
-        our_res.r_squared, sm_res.rsquared, f"[{cov_type}] r_squared"
-    )

@@ -125,10 +125,11 @@
 //!     （OLS本体の`fit()`・`wald_test_last_columns`が使う既存のWald F検定を`pub(crate)`化
 //!     して再利用、サンドイッチ計算を複製しない。`.claude/rules/rust-style.md`
 //!     「全手法で共有するロジック」・`engine/src/linear/CLAUDE.md`の`wald_test_last_columns`
-//!     再利用方針と同じ判断）で`(k_constant=0, df_model=k, df_inference=df_resid)`を渡す。
-//!     分母自由度は`cov_type`によらず常にFEの`df_resid`
-//!     （OLS自身のCluster特有の`n_groups-1`切替はFEでは行わない、3.3節・上記「t値・p値・
-//!     信頼区間」と同じ方針）。`k=0`（説明変数無し）はOLSと同じくNaNを返す。
+//!     再利用方針と同じ判断）で`(k_constant=0, df_model=k, df_inference)`を渡す。
+//!     分母自由度`df_inference`は`cov_type=Cluster`のとき`G-1`、`Dk`のとき
+//!     `t_periods-1`、それ以外は`df_resid`（**OLS自身のCluster特有の
+//!     `n_groups-1`切替と同じパターンに揃えた**、上記「`cov_type`対応」節参照）。
+//!     `k=0`（説明変数無し）はOLSと同じくNaNを返す。
 //!   - **エラー**: `wald_f_test`の失敗（共分散部分行列が数値的にほぼ特異）は
 //!     `PanelError::FTestFailed { source }`として伝播する（`WithinRegressionFailed`とは
 //!     意味が異なる——`OlsEstimator::fit`自体は既に成功した後の、F検定固有の計算失敗
@@ -223,26 +224,37 @@
 //!      （`leverage_full`関数doc参照。fixestの`vcov="HC2"`/`"HC3"`と数値一致を
 //!      1-way・2-way双方で確認済み）。
 //! 3. **Clusterも独自に計算し直す**（`OlsEstimator`の`cluster_cov_params`は使わない）:
-//!    - OLSのcluster標準誤差は`(G/(G-1))×((n-1)/(n-k))`というStata流の小標本補正を
-//!      常に適用するが、**linearmodels（FEの主リファレンス）はこの`G/(G-1)`補正を
-//!      使わず、`n/(n-extra_df-k)`のみ**を使う（実地検証で確認: 同じデータで両者の
-//!      SEが0.575対0.520と食い違う）。FE独自の`fe_cluster_cov_params`はG/(G-1)補正
-//!      無しで実装する。
-//!    - **`extra_df`（FE分の自由度補正の要否）はcluster変数とFEの関係で変わる**
-//!      （linearmodelsの`_determine_df_adjustment`と数値一致を確認済み）:
-//!      - **1-way FEで、クラスター変数がentityと同じか、entityを包含するより粗い
-//!        分割**（`entity_nested_within_cluster`参照。各entityが単一のクラスターに
-//!        属する、が正確な条件）の場合は`extra_df=0`（追加補正なし、`cluster`
-//!        省略時のデフォルト——entityそのものを使う——は常にこの条件を満たす）。
-//!      - **それ以外**（1-way FEでentityと無関係なクラスター変数、または2-way FE）
-//!        は`extra_df=neffects`（他のcov_typeと同じ、常に自由度調整を適用）。
+//!    **【linearmodels方式からfixest方式へ変更】** 当初はlinearmodels
+//!    （旧FE主リファレンス）に合わせ`(G/(G-1))`補正を掛けず`n/(n-extra_df-k)`のみを
+//!    使っていたが、fixest（R）・Stata（`xtreg`/`reghdfe`）の利用者が期待する値と
+//!    一致しないと判明し、fixestの`ssc()`小標本補正（既定`K.adj=TRUE, K.fixef=
+//!    "nonnested", G.adj=TRUE, G.df="min", t.df="min"`）に合わせて置き換えた。
+//!    fixest 0.14.2のRソース（`fixest:::ssc_compute_K`）と実地数値実験（devcontainer内、
+//!    実装時）で確定した式:
+//!    - `panel_cluster_cov_params`の補正係数はOLSと同じ`(G/(G-1))×((n-1)/(n-K))`。
+//!      `G`はクラスター数（変更なし）。
+//!    - **`K`（`(n-1)/(n-K)`の分母）はFE固有のfixest型ロジック**（`fe_cluster_
+//!      k_correction`）で決める。クラスター変数がFEの各次元（1-wayはentity、2-wayは
+//!      entity+time）に「ネスト」しているか（各水準がクラスターの単一の値にしか
+//!      対応しないか、`fixef_dimension_nested_within_cluster`で判定）で場合分けする:
+//!      - 全FE次元がネスト（1-way・`cluster`省略時のデフォルトがこの既定ケース）:
+//!        `K = df_model - nested_size_sum + m`（`m`=FE次元数、`nested_size_sum`=
+//!        ネストした次元の生の水準数の合計）。具体例: 1-way・entity単位クラスター・
+//!        `n_entities=20`・`k=2`なら`K=22-20+1=3`。
+//!      - 一部の次元だけネスト（2-way FEで典型）: `K = df_model - (nested_size_sum -
+//!        count_nested)`。
+//!      - どの次元もネストしない（Stataの`xtreg,fe`型）: `K = df_model`
+//!        （固定効果ダミーをフルカウント）。
+//!      - 最後にfixest自身の安全弁`K = max(K, k+1)`を適用する。
 //!
-//! **t値・p値・信頼区間の自由度は`cov_type`によらず常に`df_resid`を使う**（3.3節・
-//! linearmodelsの`PanelResults.pvalues`/`conf_int`で確認済み）。OLS自身は
-//! `cov_type=Cluster`のときだけ検定の自由度を`n_groups - 1`に切り替えるが
-//! （`ols.rs`の`df_inference`）、**FEはこの切り替えを行わない**——`OlsEstimator`の
-//! cluster標準誤差の値自体をそのまま使う「no rescale」ケースでも、t値・p値・信頼区間は
-//! `FeEstimator`が`df_resid`で計算し直したものを使う。
+//!      詳細な導出・実地検証済みの具体例は`fe_cluster_k_correction`関数doc参照。
+//!
+//! **t値・p値・信頼区間・F検定の自由度（`df_inference`）は`cov_type=Cluster`のとき
+//! `G-1`、`Dk`のとき`t_periods-1`に切り替える**（fixestの`ssc()`既定`t.df="min"`、
+//! 。OLS自身が`cov_type=Cluster`のときだけ`n_groups-1`に切り替える
+//! （`ols.rs`の`df_inference`）のと同じパターンをClassical/HC1-3以外の全cov_typeに
+//! 広げたもの）。`df_resid`自体（σ̂²・調整済みR²・AIC/BIC）は`cov_type`によらず
+//! 常に元のパネル自由度調整済みの値のまま。
 //!
 //! `cov_type`のデフォルト（`"cluster"`、entity単位、3.2節）は`engine_pybind`層
 //! （`FEOptions`）の責務。`FeEstimator::fit`自体はデフォルトを
@@ -257,15 +269,20 @@
 //! `linearmodels.panel.covariance.DriscollKraay`のソースコードを実地確認し、ユーザー
 //! 承認済みの設計（2026-09-12）:
 //!
-//! - **式**: `Cov(β̂) = (n/df_resid) × (X̃'X̃)⁻¹ Ŝ (X̃'X̃)⁻¹`。
+//! - **式**: `Cov(β̂) = (t_periods/(t_periods-1)) × ((n-1)/(n-K)) × (X̃'X̃)⁻¹ Ŝ (X̃'X̃)⁻¹`
+//!   （**fixestの`vcov="DK"`（`ssc()`に従う）へ変更、旧`n/df_resid`
+//!   （linearmodels方式）から置き換え**）。
 //!   `Ŝ = Σ_t ξ_t ξ_t' + Σ_{l=1}^{bw} w_l (ξ_t ξ_{t-l}' + ξ_{t-l} ξ_t')`、
 //!   `ξ_t = Σ_{i: time_i=t} x̃_i ε̂_i`（時点`t`でのクロスセクション和、`k`次元ベクトル）。
 //!   `x̃`はwithin変換後の設計行列（他のcov_type同様、LSDV展開はしない）。
-//!   スケール`n/df_resid`は、linearmodelsが`cov_type="kernel"`（`extra_df=neffects`が
-//!   常に適用される——`_determine_df_adjustment`は`cov_type != "clustered"`なら常に
-//!   `True`を返す——かつデフォルト`debiased=True`）のとき`nobs/(nobs-extra_df-k)`と
-//!   定義しているのを`n_obs - neffects - k = df_resid`（本モジュールの自由度調整と
-//!   同一）に整理したもの。HC1の`n/df_resid`補正と同根（`cov_type`対応節参照）。
+//!   fixestのDKは`ssc()`の`K.fixef`既定が`"full"`（Clusterの`"nonnested"`と異なる）で、
+//!   実地数値実験（devcontainer内のfixest 0.14.2、実装時）で確認した通り
+//!   これはDKにクラスター変数という概念が無く（`ssc_compute_K`のネスト判定が発生
+//!   しない）常に`K = df_model`（フルカウント）になるためと理解できる。`t_periods`
+//!   （ユニークな時点数）を、cluster補正の`G`と同じ役割（`G/(G-1)`補正・推論の自由度
+//!   `G-1`）で使う（実地検証済み）。`t_periods < 2`は`resolve_dk_bandwidth`が
+//!   `PanelError::InsufficientDkPeriods`で拒否する（`G=1`のクラスターが拒否される
+//!   のと同じ理由、同エラーのdocコメント参照）。
 //! - **カーネル**: v1はBartlett（Newey-West）限定（`w_l = 1 - l/(bw+1)`）。OLSの
 //!   `CovType::Dk`もBartlett限定（`docs/spec/ols-spec.md`）であることと平仄を合わせる、
 //!   ユーザーとの相談で決定。Parzen・Quadratic-Spectralへの拡張は未着手。
@@ -291,9 +308,8 @@
 //!   two_way`が既に`time`必須を担保しているが、**1-way FEで`FeCovType::Dk`を指定した
 //!   のに`time`が`None`の場合は`PanelError::DkRequiresTime`**を返す（他のcov_typeは
 //!   1-way FEで`time`を要求しない）。
-//! - `Cluster`と異なり`extra_df`の条件分岐（`entity_nested_within_cluster`）は無い——
-//!   DKは常に`extra_df=neffects`（linearmodelsが`cov_type="kernel"`でこの分岐を
-//!   一切行わないため、上記スケールの導出参照）。
+//! - `Cluster`と異なり`fe_cluster_k_correction`のネスト判定は行わない——DKは常に
+//!   `K = df_model`（上記スケールの導出参照）。
 //! - **`FeCovType::Dk.time`による明示的な時系列順序の上書き**: 元々は
 //!   `bandwidth`のみを持つバリアントだったが、`engine_pybind`のFEOptions設計
 //!   で「2-way FEの`time`（固定効果構造）とDK HACの時系列順序を別の列に
@@ -575,7 +591,12 @@ pub struct FeEstimator {
     /// パネル自由度調整後のモデル自由度（`k + neffects`、`fe-spec.md`3.2節）。
     df_model: usize,
     /// パネル自由度調整後の残差自由度（`n - df_model`、`fe-spec.md`3.2節）。
+    /// `σ̂²`・調整済みR²・AIC/BICはこの値を使う。
     df_resid: usize,
+    /// t検定・信頼区間・F検定に使う自由度。`cov_type=Cluster`のとき`G-1`、`Dk`のとき
+    /// `t_periods-1`（fixestの`ssc()`既定`t.df="min"`）。それ以外
+    /// （Classical/HC1-3）は`df_resid`と同じ値。
+    df_inference: usize,
     /// `time`のユニーク数。2-wayのみ`Some`、1-wayは`None`（2-wayはバランスパネル必須の
     /// ため、各entityの観測数とも一致する）。
     n_periods: Option<usize>,
@@ -719,15 +740,27 @@ impl FeEstimator {
         let residuals: Vec<f64> = (0..n).map(|i| *estimator.residuals().get(i, 0)).collect();
         let ssr: f64 = residuals.iter().map(|r| r * r).sum();
 
-        let cov_params = match &cov_type {
-            FeCovType::Classical => panel_classical_cov_params(&xtx_inv, ssr, df_resid, k),
-            FeCovType::Hc1 => panel_hc_cov_params(
-                &x_mat,
-                &residuals,
-                &xtx_inv,
+        // `df_inference`はt検定・信頼区間・F検定に使う自由度。`cov_type=Cluster`のとき
+        // `G-1`、`Dk`のとき`t_periods-1`に切り替える（fixestの`ssc()`既定`t.df="min"`。
+        // それ以外（Classical/HC1-3）は引き続き`df_resid`のまま
+        // （`ols::fit_allowing_no_regressors`の`df_inference`と同じ切り替えパターン、
+        // ）。標準誤差のスケール計算に使う`K`（`fe_cluster_k_correction`）とは
+        // 別軸の値であることに注意。
+        let (cov_params, df_inference) = match &cov_type {
+            FeCovType::Classical => (
+                panel_classical_cov_params(&xtx_inv, ssr, df_resid, k),
                 df_resid,
-                None,
-                PanelHcVariant::Hc1,
+            ),
+            FeCovType::Hc1 => (
+                panel_hc_cov_params(
+                    &x_mat,
+                    &residuals,
+                    &xtx_inv,
+                    df_resid,
+                    None,
+                    PanelHcVariant::Hc1,
+                ),
+                df_resid,
             ),
             FeCovType::Hc2 | FeCovType::Hc3 => {
                 let h_within = leverage_within(&x_mat, &xtx_inv, n, k);
@@ -741,35 +774,42 @@ impl FeEstimator {
                 } else {
                     PanelHcVariant::Hc3
                 };
-                panel_hc_cov_params(
-                    &x_mat,
-                    &residuals,
-                    &xtx_inv,
+                (
+                    panel_hc_cov_params(
+                        &x_mat,
+                        &residuals,
+                        &xtx_inv,
+                        df_resid,
+                        Some(&h_full),
+                        variant,
+                    ),
                     df_resid,
-                    Some(&h_full),
-                    variant,
                 )
             }
             FeCovType::Cluster { groups } => {
                 let resolved_groups = groups.as_deref().unwrap_or(input.entity());
                 let n_groups = validate_cluster_groups(resolved_groups, n)?;
                 validate_cluster_count_covers_slopes(n_groups, k)?;
-                let extra_df = if effects == FeEffects::OneWay
-                    && entity_nested_within_cluster(input.entity(), resolved_groups)
-                {
-                    0
-                } else {
-                    neffects
-                };
-                panel_cluster_cov_params(
+                let k_correction = fe_cluster_k_correction(
+                    effects,
+                    input.entity(),
+                    input.time(),
+                    n_entities,
+                    n_periods,
+                    df_model,
+                    k,
+                    resolved_groups,
+                );
+                let cov = panel_cluster_cov_params(
                     &x_mat,
                     &residuals,
                     &xtx_inv,
                     n,
                     k,
                     resolved_groups,
-                    extra_df,
-                )
+                    k_correction,
+                );
+                (cov, n_groups - 1)
             }
             FeCovType::Dk {
                 bandwidth,
@@ -783,25 +823,29 @@ impl FeEstimator {
                 };
                 let t_periods = count_unique(time);
                 let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
-                panel_driscoll_kraay_cov_params(
-                    &x_mat, &residuals, &xtx_inv, time, df_resid, bw, t_periods,
-                )
+                // fixestのDKは`K.fixef="full"`が既定（クラスター変数が無くネスト判定自体が
+                // 発生しない、`fe_cluster_k_correction`のdocコメント参照）。`K=df_model`を
+                // そのまま使う。
+                let cov = panel_driscoll_kraay_cov_params(
+                    &x_mat, &residuals, &xtx_inv, time, df_model, bw, t_periods,
+                );
+                (cov, t_periods - 1)
             }
         };
 
-        // t値・p値・信頼区間の自由度は`cov_type`によらず常に`df_resid`（3.3節・
-        // モジュールdoc「`cov_type`対応」参照。OLS自身のCluster特有の`n_groups-1`切替は
-        // FEでは行わない）。上の`extra_df`（Clusterの標準誤差スケール計算にのみ使う、
-        // nested時は0）とは別軸の値であることに注意——`extra_df=0`のケースでも、
-        // 標準誤差のスケールは`n-k`ベースだがt検定の自由度は`df_resid`（`n-k-neffects`）の
-        // ままで、両者は意図的に異なる分母を使う。
-        //
-        // `StudentsT::new`は自由度が正でない場合に失敗するが、ここでは`n <= df_model`の
-        // 検証（関数冒頭）で`df_resid = n - df_model >= 1`が既に保証されているため
-        // 理論上到達不能（カバレッジ監査で判明、`xtx_inverse`と同じ
-        // 「保証済みの不変条件に対する防御的`Result`化」、`.claude/rules/rust-style.md`
-        // 「テスト」参照）。それでも`unwrap`はせず`Result`を返す契約を守る。
-        let t_dist = StudentsT::new(0.0, 1.0, df_resid as f64)
+        // `StudentsT::new`は自由度が正でない場合に失敗するが、`df_inference`は
+        // `df_resid >= 1`（関数冒頭の`n <= df_model`検証）・`n_groups - 1 >= 1`
+        // （`validate_cluster_count_covers_slopes`が`n_groups > k >= 0`を保証、
+        // すなわち`n_groups >= 1`）・`t_periods - 1 >= 1`（`resolve_dk_bandwidth`が
+        // `t_periods`に対する範囲検証を経由済み、`t_periods=1`の退化ケースは別途
+        // `fe_estimator_fit_one_way_hac_with_single_time_period_yields_zero_variance`が
+        // 示す通り標準誤差が0になるだけで`StudentsT::new`自体は失敗しない——
+        // `df=0`は`statrs`が拒否するため注意が必要だが、`t_periods=1`なら
+        // `t_periods-1=0`になり得る点は理論上のリスクとして残る。実際には`n_periods`が
+        // 1の1-way FEは通常`InsufficientDegreesOfFreedom`より先に弾かれないため、
+        // 呼び出し側が`t_periods>=2`を保証する構造にはなっていない）ため、
+        // 理論上到達可能な失敗経路として`Result`のまま扱う（`unwrap`はしない）。
+        let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
             .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
         let t_crit = inference::critical_value(&t_dist, confidence_level);
 
@@ -839,15 +883,16 @@ impl FeEstimator {
         let bic = -2.0 * log_likelihood + (n as f64).ln() * (df_model as f64);
 
         // F統計量（モジュールdoc「自由度調整」のF統計量節）: 傾き係数`k`個の
-        // 同時Wald検定。FEの`cov_params`（`cov_type`別、上で計算済み）・`df_resid`
-        // （panel自由度調整済み）を使う。`k_constant=0`（FEに切片は無い、上記
+        // 同時Wald検定。FEの`cov_params`（`cov_type`別、上で計算済み）・`df_inference`
+        // （`cov_type=Cluster`/`Dk`のときだけ`df_resid`から切り替わる、`ols::wald_f_test`の
+        // `df_inference`引数と同じ扱い）を使う。`k_constant=0`（FEに切片は無い、上記
         // `OlsInput::from_columns`呼び出しと同じ理由）。
         let (f_statistic, f_p_value) = if k == 0 {
             // 説明変数が無いモデル。検定対象が存在しないため`OlsEstimator::fit`同様NaN
             // （0除算を避ける）。
             (f64::NAN, f64::NAN)
         } else {
-            wald_f_test(estimator.params(), &cov_params, 0, k, df_resid)
+            wald_f_test(estimator.params(), &cov_params, 0, k, df_inference)
                 .map_err(|source| PanelError::FTestFailed { source })?
         };
 
@@ -858,6 +903,7 @@ impl FeEstimator {
             estimator,
             df_model,
             df_resid,
+            df_inference,
             n_periods,
             std_errors,
             test_stats,
@@ -914,6 +960,12 @@ impl FeEstimator {
         self.df_resid
     }
 
+    /// t検定・信頼区間・F検定に使う自由度（`cov_type=Cluster`のとき`G-1`、`Dk`のとき
+    /// `t_periods-1`、それ以外は`df_resid`と同じ）。
+    pub fn df_inference(&self) -> usize {
+        self.df_inference
+    }
+
     /// `time`のユニーク数（2-wayのみ`Some`、1-wayは`None`）。
     pub fn n_periods(&self) -> Option<usize> {
         self.n_periods
@@ -929,9 +981,11 @@ impl FeEstimator {
         &self.test_stats
     }
 
-    /// `test_stats`の従う分布（t分布、自由度は常に`df_resid`、`cov_type`によらない）。
+    /// `test_stats`の従う分布（t分布、自由度は`df_inference`）。
     pub fn stat_dist(&self) -> inference::StatDist {
-        inference::StatDist::T { df: self.df_resid }
+        inference::StatDist::T {
+            df: self.df_inference,
+        }
     }
 
     /// `cov_type`別に計算し直した両側p値（`(k, 1)`）。
@@ -987,10 +1041,10 @@ impl FeEstimator {
         self.f_p_value
     }
 
-    /// `f_statistic()`の自由度`(分子, 分母)` = `(k, df_resid)`。`k=0`でNaNのときは`None`。
+    /// `f_statistic()`の自由度`(分子, 分母)` = `(k, df_inference)`。`k=0`でNaNのときは`None`。
     pub fn f_df(&self) -> Option<(usize, usize)> {
         let k = self.estimator.input().k();
-        (k > 0).then_some((k, self.df_resid))
+        (k > 0).then_some((k, self.df_inference))
     }
 
     /// 固定効果自体（α_i、2-wayはγ_tも）を事後的に復元する（`fe-spec.md`3.5節）。
@@ -1078,20 +1132,123 @@ fn leverage_full(
     }
 }
 
-/// `entity`の各値が`cluster`上でちょうど1つの値にしか対応しないか（＝`cluster`が
-/// `entity`と同じか、`entity`を包含するより粗い分割か）を判定する
-/// （モジュールdoc「`cov_type`対応」のcluster自由度補正の条件参照）。
-fn entity_nested_within_cluster(entity: &[String], cluster: &[String]) -> bool {
+/// FE次元（`entity`または`time`）の各値が`cluster`上でちょうど1つの値にしか対応しないか
+/// （＝`cluster`がその次元と同じか、それを包含するより粗い分割か）を判定する
+/// （fixestの`ssc_compute_K`が言う「FEがクラスター変数にネストしている」の定義。
+/// `fe_cluster_k_correction`のdocコメント参照）。元は`entity_nested_within_cluster`
+/// という1-way専用の名前だったが、2-way FEでtime次元にも同じ判定を適用する必要が
+/// あるため汎用化した（ロジック自体は無変更）。
+fn fixef_dimension_nested_within_cluster(dim: &[String], cluster: &[String]) -> bool {
     let mut mapping: HashMap<&str, &str> = HashMap::new();
-    for (e, c) in entity.iter().zip(cluster) {
-        match mapping.get(e.as_str()) {
+    for (d, c) in dim.iter().zip(cluster) {
+        match mapping.get(d.as_str()) {
             Some(&existing) if existing != c.as_str() => return false,
             _ => {
-                mapping.insert(e.as_str(), c.as_str());
+                mapping.insert(d.as_str(), c.as_str());
             }
         }
     }
     true
+}
+
+/// fixestの`ssc_compute_K`（既定`K.fixef="nonnested"`・`K.exact=FALSE`）を移植した、
+/// cluster小標本補正の`K`（`panel_cluster_cov_params`の`(n-1)/(n-K)`の`K`）計算。
+///
+/// fixest 0.14.2のRソース（`Rscript -e 'cat(deparse(fixest:::ssc_compute_K), sep="\n")'`）と
+/// 実地数値実験（devcontainer内のfixest 0.14.2、実装時）で確定した式:
+///
+/// FE次元（1-wayは`entity`のみ、2-wayは`entity`+`time`）それぞれについて、その次元が
+/// クラスター変数に「ネスト」している（＝各水準がクラスターの単一の値にしか対応しない、
+/// `fixef_dimension_nested_within_cluster`で判定）かを調べ、ネストした次元の生の水準数
+/// （`n_entities`/`n_periods`、`df_model`に含まれる冗長性補正前の値）の合計を
+/// `nested_size_sum`、ネストした次元の数を`count_nested`、FE次元の総数を`m`（1か2）とする:
+///
+/// - `count_nested == 0`（どの次元もネストしていない、Stataの`xtreg,fe`型）:
+///   `K = df_model`（固定効果ダミーをフルカウント）
+/// - `count_nested == m`（全次元がネスト。1-way・cluster=entityがこの既定ケース）:
+///   `K = df_model - nested_size_sum + m`
+/// - それ以外（2-way FEで一部の次元だけネスト）:
+///   `K = df_model - (nested_size_sum - count_nested)`
+///
+/// 最後にfixest自身の安全弁`K = max(K, k + 1)`（`k`は傾き係数の数。Rソースの
+/// `K = max(K, length(object$coefficients) + 1)`）を適用する——fixestのRソースを
+/// 忠実に移植する方針（1章）のため実装しているが、**このプロジェクトの`FeEstimator::fit`が
+/// 保証する前提（`n_entities>=1`・2-wayなら`n_periods>=1`、および`df_model = k + neffects`の
+/// 定義）の下では、3分岐のどのケースでもこのフロアは実質的にno-op（`raw_k`が既に
+/// `k+1`以上）であることを代数的に確認済み**（rust-reviewerの指摘を受けて検算、
+/// ）:
+/// - `count_nested == m`（全次元ネスト）: `nested_size_sum`はネストした全次元の生サイズの
+///   合計で、`df_model`の`neffects`部分もちょうど同じ次元から`Σsize - (m-1)`として
+///   構成される（`neffects`の定義、モジュールdoc「自由度調整」参照）ため、
+///   `K = df_model - nested_size_sum + m = k + (Σsize - (m-1)) - Σsize + m = k + 1`が
+///   **恒等的に**成り立つ（1-way・2-way両次元ネストのどちらでも）。フロアと厳密に一致する
+///   だけで、フロアが値を持ち上げる場面ではない。
+/// - 部分ネスト・ネストなし（2-way限定）: ネストしていない側の次元の生サイズが
+///   `df_model`にそのまま残るため、`K`はその生サイズの分だけ`k+1`を上回る
+///   （`n_entities`/`n_periods`はいずれもパネルとして成立する以上`>=1`、実務上は
+///   ほぼ常に`>=2`）。
+///
+/// 上記のため、`fit()`経由の統合テストではこのフロアの分岐（`raw_k < k+1`になる入力）を
+/// 実際には構成できない。フロア自体の検証は`fe_cluster_k_correction`を直接呼ぶ
+/// ユニットテスト（`fe_cluster_k_correction_floor_is_a_no_op_under_realistic_inputs`）で、
+/// 上記の恒等式そのものを回帰ガードする（`.claude/rules/rust-style.md`「テスト」の
+/// 「理論上到達不能な経路は`Result`化しdocで理由を明記すればカバレッジ対象外でよい」
+/// 方針と同型——ここでは`Result`ではなく`usize`の恒等式だが、同じ考え方で
+/// 「なぜ到達しないか」を明記する）。
+///
+/// 具体例（実地検証済み）: 1-way FE（`n_entities=20`）・`cluster=entity`（既定）・
+/// `k=2`なら`df_model=22`・`nested_size_sum=20`・`count_nested=m=1`で`K=22-20+1=3`
+/// （`k+1=3`と一致、フロアはno-op）。
+#[allow(clippy::too_many_arguments)]
+fn fe_cluster_k_correction(
+    effects: FeEffects,
+    entity: &[String],
+    time: Option<&[String]>,
+    n_entities: usize,
+    n_periods: Option<usize>,
+    df_model: usize,
+    k: usize,
+    cluster: &[String],
+) -> usize {
+    let dims: Vec<(bool, usize)> = match effects {
+        FeEffects::OneWay => {
+            vec![(
+                fixef_dimension_nested_within_cluster(entity, cluster),
+                n_entities,
+            )]
+        }
+        FeEffects::TwoWay => {
+            let time =
+                time.expect("2-way FE always has `time` (validated by within_transform_two_way)");
+            let n_periods = n_periods.expect("2-way FE always has `n_periods`");
+            vec![
+                (
+                    fixef_dimension_nested_within_cluster(entity, cluster),
+                    n_entities,
+                ),
+                (
+                    fixef_dimension_nested_within_cluster(time, cluster),
+                    n_periods,
+                ),
+            ]
+        }
+    };
+    let m = dims.len();
+    let count_nested = dims.iter().filter(|(nested, _)| *nested).count();
+    let nested_size_sum: usize = dims
+        .iter()
+        .filter(|(nested, _)| *nested)
+        .map(|(_, size)| size)
+        .sum();
+
+    let raw_k: i64 = if count_nested == 0 {
+        df_model as i64
+    } else if count_nested == m {
+        df_model as i64 - nested_size_sum as i64 + m as i64
+    } else {
+        df_model as i64 - (nested_size_sum as i64 - count_nested as i64)
+    };
+    raw_k.max((k + 1) as i64) as usize
 }
 
 /// 固定効果の切片項を一切含めない残差`y_i - x_i'β̂`の1行分。
@@ -2029,6 +2186,14 @@ mod tests {
         assert_eq!(fe.input().nobs(), 4);
         assert_eq!(fe.input().dep_var_name(), "y");
         assert_eq!(fe.cov_type(), &FeCovType::Cluster { groups: None });
+        // `df_inference()`/`stat_dist()`（カバレッジ監査で判明した未検証の単純
+        // getter、新設）。`n_entities=2`が既定クラスターのため
+        // `df_inference = G-1 = 1`（`df_resid`の`n-df_model=4-3=1`とはこの
+        // データではたまたま同じ値になるが、由来は別——後続の
+        // `..._one_way_cluster_on_entity_matches_fixest_nested_k`等で
+        // `df_resid`と乖離するケースを別途確認済み）。
+        assert_eq!(fe.df_inference(), 1);
+        assert_eq!(fe.stat_dist(), inference::StatDist::T { df: 1 });
     }
 
     #[test]
@@ -2807,11 +2972,13 @@ mod tests {
     }
 
     #[test]
-    fn fe_estimator_fit_one_way_cluster_on_entity_matches_linearmodels_no_rescale() {
+    fn fe_estimator_fit_one_way_cluster_on_entity_matches_fixest_nested_k() {
         // 1-way FEでクラスター変数がentityと同じ（`groups: None`＝デフォルト）場合、
-        // linearmodelsの`cov_type="clustered", cluster_entity=True`と数値一致する
-        // （`extra_df=0`、FE分の自由度補正を追加しない「no rescale」ケース、
-        // モジュールdoc「`cov_type`対応」参照）。
+        // fixestの`feols(y~x|entity, cluster=~entity)`と数値一致する（`K.fixef=
+        // "nonnested"`の既定分岐、entity FEが全次元ネスト、`fe_cluster_k_correction`の
+        // docコメント参照。`K=df_model-n_entities+1=5-4+1=2`ではなく`K=k+1=2`——
+        // ここでは`k=1`なので`K=2`）。期待値はRで独立に計算・検算済み
+        // （`options(digits=16)`、実装時）。
         let (entity, _time, x, y) = fixest_reference_input();
         let input =
             FeInput::from_columns(&y, &[x], vec!["x".to_string()], &entity, None, "y".into())
@@ -2825,17 +2992,25 @@ mod tests {
         )
         .unwrap();
 
-        assert!((*fe.std_errors().get(0, 0) - 0.520_141_23).abs() < 1e-6);
-        assert!((*fe.test_stats().get(0, 0) - 2.696_917_08).abs() < 1e-6);
-        assert!((*fe.p_values().get(0, 0) - 0.030_776_03).abs() < 1e-6);
+        assert!((*fe.std_errors().get(0, 0) - 0.603_104_702_643_124_5).abs() < 1e-9);
+        assert!((*fe.test_stats().get(0, 0) - 2.325_927_441_172_424).abs() < 1e-6);
+        assert!((*fe.p_values().get(0, 0) - 0.102_527_902_595_719_5).abs() < 1e-6);
         assert!((fe.f_statistic() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
         assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
+        // `f_df()`（カバレッジ監査で判明した未検証の単純getter。分母自由度が
+        // `df_resid`から`df_inference`に変わったため、`df_resid`
+        // （`n-df_model=12-5=7`）とは異なる`df_inference`（`G-1=n_entities-1=3`）を
+        // 返すことを確認する）。
+        assert_eq!(fe.df_resid(), 7);
+        assert_eq!(fe.df_inference(), 3);
+        assert_eq!(fe.f_df(), Some((1, 3)));
     }
 
     #[test]
-    fn fe_estimator_fit_two_way_cluster_on_entity_matches_linearmodels_with_rescale() {
-        // 2-way FEはentityクラスターでも常に`extra_df=neffects`（linearmodelsの
-        // `_determine_df_adjustment`が1-way FE限定の例外のため、モジュールdoc参照）。
+    fn fe_estimator_fit_two_way_cluster_on_entity_matches_fixest_partially_nested_k() {
+        // 2-way FEでentityクラスターは、entity次元だけがネストしtime次元はネストしない
+        // 「部分ネスト」ケース（`fe_cluster_k_correction`のdocコメント参照）。
+        // fixestの`feols(y~x|entity+time, cluster=~entity)`と数値一致する。
         let (entity, time, x, y) = fixest_reference_input();
         let input = FeInput::from_columns(
             &y,
@@ -2855,18 +3030,19 @@ mod tests {
         )
         .unwrap();
 
-        assert!((*fe.std_errors().get(0, 0) - 0.181_639_74).abs() < 1e-6);
-        assert!((*fe.test_stats().get(0, 0) - 4.527_808_13).abs() < 1e-6);
-        assert!((*fe.p_values().get(0, 0) - 0.006_238_02).abs() < 1e-6);
+        assert!((*fe.std_errors().get(0, 0) - 0.158_754_475_018_330_4).abs() < 1e-9);
+        assert!((*fe.test_stats().get(0, 0) - 5.180_514_794_604_026).abs() < 1e-6);
+        assert!((*fe.p_values().get(0, 0) - 0.013_962_411_468_796_73).abs() < 1e-6);
         assert!((fe.f_statistic() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
         assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
-    fn fe_estimator_fit_one_way_cluster_on_non_nested_variable_matches_linearmodels_with_rescale() {
+    fn fe_estimator_fit_one_way_cluster_on_non_nested_variable_matches_fixest_full_k() {
         // 1-way FEでも、クラスター変数がentityと無関係（ここでは`time`）なら
-        // `extra_df=neffects`が適用される（`entity_nested_within_cluster`がfalseになる
-        // ケース）。
+        // どの次元もネストせず`K=df_model`（フルカウント、`fixef_dimension_nested_
+        // within_cluster`がfalseになるケース）。fixestの
+        // `feols(y~x|entity, cluster=~time)`と数値一致する。
         let (entity, time, x, y) = fixest_reference_input();
         let input =
             FeInput::from_columns(&y, &[x], vec!["x".to_string()], &entity, None, "y".into())
@@ -2880,35 +3056,88 @@ mod tests {
         )
         .unwrap();
 
-        assert!((*fe.std_errors().get(0, 0) - 0.098_124_15).abs() < 1e-6);
+        assert!((*fe.std_errors().get(0, 0) - 0.115_060_764_365_329_2).abs() < 1e-9);
         assert!((fe.f_statistic() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
         assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
-    fn entity_nested_within_cluster_true_for_default_entity_grouping() {
+    fn fixef_dimension_nested_within_cluster_true_for_default_entity_grouping() {
         let entity = strings(&["a", "a", "b", "b"]);
-        assert!(entity_nested_within_cluster(&entity, &entity));
+        assert!(fixef_dimension_nested_within_cluster(&entity, &entity));
     }
 
     #[test]
-    fn entity_nested_within_cluster_true_for_coarser_grouping() {
+    fn fixef_dimension_nested_within_cluster_true_for_coarser_grouping() {
         // stateはentityより粗い分割（a,b→east、c,d→west）で、各entityは単一のstateに
-        // 属するため「nested」と判定されるべき（linearmodelsの実測でも同じ挙動を確認済み、
+        // 属するため「nested」と判定されるべき（fixestの実測でも同じ挙動を確認済み、
         // モジュールdoc参照）。
         let entity = strings(&["a", "a", "b", "b", "c", "c", "d", "d"]);
         let state = strings(&[
             "east", "east", "east", "east", "west", "west", "west", "west",
         ]);
-        assert!(entity_nested_within_cluster(&entity, &state));
+        assert!(fixef_dimension_nested_within_cluster(&entity, &state));
     }
 
     #[test]
-    fn entity_nested_within_cluster_false_when_an_entity_spans_multiple_clusters() {
+    fn fixef_dimension_nested_within_cluster_false_when_an_entity_spans_multiple_clusters() {
         // entity "a" が異なる2つのクラスター（"1"と"2"）にまたがるため、nestedではない。
         let entity = strings(&["a", "a", "b", "b"]);
         let cluster = strings(&["1", "2", "1", "2"]);
-        assert!(!entity_nested_within_cluster(&entity, &cluster));
+        assert!(!fixef_dimension_nested_within_cluster(&entity, &cluster));
+    }
+
+    #[test]
+    fn fe_cluster_k_correction_floor_is_a_no_op_under_realistic_inputs() {
+        // `fit()`が保証する前提（`df_model = k + neffects`）の下では、フロア
+        // `K = max(K, k+1)`は常にno-op（`fe_cluster_k_correction`関数docの代数的
+        // 導出参照、rust-reviewer指摘を受けて追加）。1-way全ネストの現実的な入力で
+        // `K`がちょうど`k+1`に一致することを確認する。
+        let entity = strings(&["a", "a", "b", "b"]);
+        let k = 1;
+        let n_entities = 2;
+        let df_model = k + n_entities; // 実際のFeEstimator::fitと同じneffects=n_entitiesの関係
+        let k_correction = fe_cluster_k_correction(
+            FeEffects::OneWay,
+            &entity,
+            None,
+            n_entities,
+            None,
+            df_model,
+            k,
+            &entity,
+        );
+        assert_eq!(k_correction, k + 1);
+    }
+
+    #[test]
+    fn fe_cluster_k_correction_floor_engages_for_inconsistent_inputs() {
+        // フロア自体（`K = max(K, k+1)`）を直接検証する。`fit()`経由では`df_model`と
+        // `n_entities`が常に整合しているため到達不能な組み合わせ（`fe_cluster_k_
+        // correction`関数docの代数的導出参照）を、この関数を直接呼ぶことで意図的に
+        // 構成する: `df_model=2`・`n_entities=2`（1-way全ネスト）だと、整合していれば
+        // `df_model`は`k+n_entities=k+2`になるはずのところを`df_model=2`（`k=1`なら
+        // `k+n_entities=3`のはず）に矛盾させ、`raw_k = df_model - nested_size_sum + 1
+        // = 2 - 2 + 1 = 1`が`k+1=2`を下回る状況を作る。
+        let entity = strings(&["a", "a", "b", "b"]);
+        let k = 1;
+        let n_entities = 2;
+        let df_model = 2; // 本来のneffects=n_entities=2との整合を意図的に崩す
+        let k_correction = fe_cluster_k_correction(
+            FeEffects::OneWay,
+            &entity,
+            None,
+            n_entities,
+            None,
+            df_model,
+            k,
+            &entity,
+        );
+        assert_eq!(
+            k_correction,
+            k + 1,
+            "floor should clamp raw_k=1 up to k+1=2"
+        );
     }
 
     #[test]
@@ -2977,12 +3206,11 @@ mod tests {
     // ── Driscoll-Kraay型パネルHAC対応 ───────────────────────────────────────
 
     #[test]
-    fn fe_estimator_fit_one_way_hac_matches_linearmodels_default_bandwidth() {
-        // linearmodelsの`PanelOLS(y, x, entity_effects=True).fit(cov_type="kernel",
-        // kernel="bartlett", bandwidth=None, debiased=True)`と数値比較する
+    fn fe_estimator_fit_one_way_hac_matches_fixest_default_bandwidth() {
+        // fixestの`feols(y~x|entity, vcov="DK", panel.id=~entity+time)`と数値比較する
         // （5.1節、DKの主リファレンス）。n_periods=3のため既定バンド幅は
-        // `floor(4*(3/100)^(2/9))=1`（`resolve_dk_bandwidth`）。期待値はPythonで独立に
-        // 計算・検算済み（2026-09-12）。
+        // `floor(4*(3/100)^(2/9))=1`（`resolve_dk_bandwidth`）。期待値はRで独立に
+        // 計算・検算済み（`options(digits=16)`、実装時）。
         let (entity, time, x, y) = fixest_reference_input();
         let input = FeInput::from_columns(
             &y,
@@ -3006,11 +3234,11 @@ mod tests {
         .unwrap();
 
         assert!((*fe.estimator().params().get(0, 0) - 1.402_777_777_777_78).abs() < 1e-9);
-        assert!((*fe.std_errors().get(0, 0) - 0.096_177_633_971_081_66).abs() < 1e-9);
-        assert!((*fe.test_stats().get(0, 0) - 14.585_280_588_203_7).abs() < 1e-6);
-        assert!((*fe.p_values().get(0, 0) - 1.700_643_472_490_881_4e-6).abs() < 1e-9);
-        assert!((*fe.conf_lower().get(0, 0) - 1.175_353_812_028_944_4).abs() < 1e-6);
-        assert!((*fe.conf_upper().get(0, 0) - 1.630_201_743_526_611_8).abs() < 1e-6);
+        assert!((*fe.std_errors().get(0, 0) - 0.112_778_272_530_122_7).abs() < 1e-9);
+        assert!((*fe.test_stats().get(0, 0) - 12.438_369_078_610_43).abs() < 1e-6);
+        assert!((*fe.p_values().get(0, 0) - 0.006_401_580_635_206_468).abs() < 1e-9);
+        assert!((*fe.conf_lower().get(0, 0) - 0.917_532_035_619_617).abs() < 1e-6);
+        assert!((*fe.conf_upper().get(0, 0) - 1.888_023_519_935_939).abs() < 1e-6);
         assert!((fe.f_statistic() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
         assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
@@ -3020,7 +3248,7 @@ mod tests {
         // `FeCovType::Dk.time`（明示指定）は`FeInput.time()`を経由せずに
         // DK HACを成立させられる（`engine_pybind`の`FEOptions.dk_time`が1-way FE + DK HAC
         // の組み合わせをこの経路で配線する想定）。`FeInput::from_columns`には`time=None`を
-        // 渡し、`fe_estimator_fit_one_way_hac_matches_linearmodels_default_bandwidth`と
+        // 渡し、`fe_estimator_fit_one_way_hac_matches_fixest_default_bandwidth`と
         // 同じ結果になることを確認する（同じ`time`列を使っているため数値は完全一致する）。
         let (entity, time, x, y) = fixest_reference_input();
         let input =
@@ -3039,7 +3267,7 @@ mod tests {
         .unwrap();
 
         assert!((*fe.estimator().params().get(0, 0) - 1.402_777_777_777_78).abs() < 1e-9);
-        assert!((*fe.std_errors().get(0, 0) - 0.096_177_633_971_081_66).abs() < 1e-9);
+        assert!((*fe.std_errors().get(0, 0) - 0.112_778_272_530_122_7).abs() < 1e-9);
     }
 
     #[test]
@@ -3072,9 +3300,10 @@ mod tests {
         .unwrap();
 
         // `dummy_time`（全観測が同一時点）をそのまま使っていたら`t_periods=1`となり
-        // バンド幅・DK計算が全く異なる値になる。優先されている`time`（`t_periods=3`）を
-        // 使った場合の既知の値と一致することで、優先順位を確認する。
-        assert!((*fe.std_errors().get(0, 0) - 0.096_177_633_971_081_66).abs() < 1e-9);
+        // `resolve_dk_bandwidth`が`InsufficientDkPeriods`で拒否する（優先順位が
+        // 逆だった場合はこのテスト自体がエラーで失敗する）。優先されている`time`
+        // （`t_periods=3`）を使った場合の既知の値と一致することで、優先順位を確認する。
+        assert!((*fe.std_errors().get(0, 0) - 0.112_778_272_530_122_7).abs() < 1e-9);
     }
 
     #[test]
@@ -3104,16 +3333,37 @@ mod tests {
         )
         .unwrap();
 
-        assert!((*fe.std_errors().get(0, 0) - 0.096_177_633_971_081_66).abs() < 1e-9);
+        assert!((*fe.std_errors().get(0, 0) - 0.112_778_272_530_122_7).abs() < 1e-9);
     }
 
     #[test]
-    fn fe_estimator_fit_one_way_hac_with_bandwidth_two_matches_linearmodels() {
+    fn fe_estimator_fit_one_way_hac_with_bandwidth_two_scales_unchanged_kernel_by_new_correction() {
         // `bandwidth=Some(2)`（n_periods=3のため許容範囲`[0,3)`の上限）でラグ項ループ
         // （`for l in 1..=bandwidth`）が複数回（l=1,2）実行されるケースを検証する
         // （既定・`Some(1)`のテストはl=1の1回しか通らないため、rust-reviewer指摘。
         // `testing-policy.md`が警告する「ループ本体がテストで一度も複数回実行されない」
-        // 落とし穴と同型）。linearmodelsの`bandwidth=2`と数値比較する。
+        // 落とし穴と同型）。
+        //
+        // **fixestの`vcov=DK(2)`とは意図的に数値比較しない**（実装時に
+        // devcontainer内のfixest 0.14.2で実地確認・rust-reviewerが追加検証済み。
+        // fixestの内部C++実装（`cpp_driscoll_kraay`）を`.Call`経由で直接叩いて分解した
+        // 結果、不一致が起きるのは「`bandwidth>=2`全般」ではなく、**`bandwidth ==
+        // t_periods - 1`（許容範囲`[0, t_periods)`の上限ちょうど）のときに限られる**
+        // ことが判明した——T=5の合成データで`bandwidth=0..=3`（いずれも`< t_periods-1`）は
+        // 本実装と`cpp_driscoll_kraay`が完全一致し、`bandwidth=4`（`=t_periods-1`）の
+        // ときだけ`cpp_driscoll_kraay`が最後のラグ項（`l=bandwidth`）を落とした値に
+        // 一致した。本テストの`t_periods=3`・`bandwidth=2`はまさにこの境界ケース
+        // （`bandwidth=2=t_periods-1`）に該当する。原因はfixest側の独立した実装詳細
+        // （バンド幅が時点数の上限ちょうどのときに意図的に最終ラグ項を切り捨てる仕様か、
+        // C++実装のoff-by-oneか未確認）。この差はこの変更が扱う小標本補正
+        // （`G/(G-1)`・`K`・推論の自由度）とは無関係な、カーネル本体の項数の話のため、
+        // 本Issueのスコープ外として別途GitHub Issue化する（利用者が許容範囲の上限
+        // ちょうどを明示指定すると、fixestと一致しない実運用上の落とし穴になりうる）。
+        //
+        // このテスト自体は、変更していないカーネル計算（`bandwidth=1`の既定テストで
+        // fixestと一致確認済みの実装）に新しい小標本補正（`(t_periods/(t_periods-1))×
+        // ((n-1)/(n-K))`）が正しく適用されることを確認する回帰ガードとして残す
+        // （期待値は本実装自身の出力を固定しただけで、外部リファレンスとの照合ではない）。
         let (entity, time, x, y) = fixest_reference_input();
         let input = FeInput::from_columns(
             &y,
@@ -3136,16 +3386,17 @@ mod tests {
         )
         .unwrap();
 
-        assert!((*fe.std_errors().get(0, 0) - 0.078_528_709_299_106_49).abs() < 1e-9);
-        assert!((*fe.test_stats().get(0, 0) - 17.863_247_598_209_78).abs() < 1e-6);
-        assert!((*fe.p_values().get(0, 0) - 4.253_303_196_311_009e-7).abs() < 1e-9);
-        assert!((*fe.conf_lower().get(0, 0) - 1.217_086_887_322_831).abs() < 1e-6);
-        assert!((*fe.conf_upper().get(0, 0) - 1.588_468_668_232_725_1).abs() < 1e-6);
+        assert!((*fe.std_errors().get(0, 0) - 0.092_083_073_923_780_41).abs() < 1e-9);
+        assert!((*fe.test_stats().get(0, 0) - 15.233_828_737_503_853).abs() < 1e-6);
+        assert!((*fe.p_values().get(0, 0) - 0.004_281_399_881_913_783).abs() < 1e-9);
+        assert!((*fe.conf_lower().get(0, 0) - 1.006_576_288_395_902).abs() < 1e-6);
+        assert!((*fe.conf_upper().get(0, 0) - 1.798_979_267_159_653_4).abs() < 1e-6);
     }
 
     #[test]
-    fn fe_estimator_fit_two_way_hac_matches_linearmodels_default_bandwidth() {
-        // 同じデータでの2-way FE版（`entity_effects=True, time_effects=True`）。
+    fn fe_estimator_fit_two_way_hac_matches_fixest_default_bandwidth() {
+        // 同じデータでの2-way FE版（`entity+time`固定効果）。fixestの
+        // `feols(y~x|entity+time, vcov="DK", panel.id=~entity+time)`と数値比較する。
         let (entity, time, x, y) = fixest_reference_input();
         let input = FeInput::from_columns(
             &y,
@@ -3169,19 +3420,23 @@ mod tests {
         .unwrap();
 
         assert!((*fe.estimator().params().get(0, 0) - 0.822_429_906_542_056).abs() < 1e-9);
-        assert!((*fe.std_errors().get(0, 0) - 0.220_358_007_844_439_7).abs() < 1e-9);
-        assert!((*fe.test_stats().get(0, 0) - 3.732_244_244_659_559).abs() < 1e-6);
-        assert!((*fe.p_values().get(0, 0) - 0.013_539_553_831_729_556).abs() < 1e-9);
-        assert!((*fe.conf_lower().get(0, 0) - 0.255_981_614_240_134_77).abs() < 1e-6);
-        assert!((*fe.conf_upper().get(0, 0) - 1.388_878_198_843_977_3).abs() < 1e-6);
+        assert!((*fe.std_errors().get(0, 0) - 0.258_392_668_199_213_7).abs() < 1e-9);
+        assert!((*fe.test_stats().get(0, 0) - 3.182_868_586_302_089).abs() < 1e-6);
+        assert!((*fe.p_values().get(0, 0) - 0.086_146_397_773_918_86).abs() < 1e-9);
+        assert!((*fe.conf_lower().get(0, 0) - (-0.289_344_012_632_537_7)).abs() < 1e-6);
+        assert!((*fe.conf_upper().get(0, 0) - 1.934_203_825_716_65).abs() < 1e-6);
         assert!((fe.f_statistic() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
         assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
-    fn fe_estimator_fit_two_way_hac_with_bandwidth_two_matches_linearmodels() {
-        // 1-way版と同様、2-way FEでもラグ項ループが複数回（l=1,2）実行されるケースを
-        // 検証する（rust-reviewer指摘）。
+    fn fe_estimator_fit_two_way_hac_with_bandwidth_two_scales_unchanged_kernel_by_new_correction() {
+        // 1-way版（`fe_estimator_fit_one_way_hac_with_bandwidth_two_scales_unchanged_
+        // kernel_by_new_correction`）と同様、2-way FEでもラグ項ループが複数回（l=1,2）
+        // 実行されるケースを検証する（rust-reviewer指摘）。同テストのコメントの通り、
+        // `bandwidth == t_periods - 1`（ここでは`2 == 3 - 1`）という境界値はfixestの
+        // 生カーネルと一致しない独立した問題があるため、fixestとの数値比較はせず
+        // 回帰ガードとして期待値を固定する。
         let (entity, time, x, y) = fixest_reference_input();
         let input = FeInput::from_columns(
             &y,
@@ -3204,22 +3459,25 @@ mod tests {
         )
         .unwrap();
 
-        assert!((*fe.std_errors().get(0, 0) - 0.179_921_559_985_030_04).abs() < 1e-9);
-        assert!((*fe.test_stats().get(0, 0) - 4.571_046_997_427_571).abs() < 1e-6);
-        assert!((*fe.p_values().get(0, 0) - 0.005_996_174_969_207_235).abs() < 1e-9);
-        assert!((*fe.conf_lower().get(0, 0) - 0.359_926_812_605_188_3).abs() < 1e-6);
-        assert!((*fe.conf_upper().get(0, 0) - 1.284_933_000_478_924).abs() < 1e-6);
+        assert!((*fe.std_errors().get(0, 0) - 0.210_976_730_121_450_27).abs() < 1e-9);
+        assert!((*fe.test_stats().get(0, 0) - 3.898_201_977_386_883).abs() < 1e-6);
+        assert!((*fe.p_values().get(0, 0) - 0.059_950_140_715_886_67).abs() < 1e-9);
+        assert!((*fe.conf_lower().get(0, 0) - (-0.085_329_697_228_618_5)).abs() < 1e-6);
+        assert!((*fe.conf_upper().get(0, 0) - 1.730_189_510_312_731).abs() < 1e-6);
     }
 
     #[test]
     fn fe_estimator_fit_one_way_hac_with_zero_bandwidth_matches_cluster_on_non_nested_time() {
         // `bandwidth=Some(0)`はラグ項なし（`Ŝ = Ŝ₀`）に退化し、これは`time`でクラスター
         // した場合（`fe_estimator_fit_one_way_cluster_on_non_nested_variable_matches_
-        // linearmodels_with_rescale`と同じ`entity`/`time`）の`Ŝ`と数式的に同一になる
-        // （どちらも`Σ_t (Σ_{i:time_i=t} x̃_i ε̂_i)(...)'`で、`extra_df=neffects`のスケールも
-        // 一致する。モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。2つの独立した
-        // 実装（`fe_cluster_cov_params`と`fe_driscoll_kraay_cov_params`）が同じ値に収束する
-        // ことを確認する回帰ガード（OLSの`fit_hac_with_zero_lags_matches_hc0`と同型）。
+        // fixest_full_k`と同じ`entity`/`time`）の`Ŝ`と数式的に同一になる（どちらも
+        // `Σ_t (Σ_{i:time_i=t} x̃_i ε̂_i)(...)'`で、`K=df_model`（DKは常にフルカウント・
+        // clusterもこのケースではどの次元もネストしないためフルカウント）・`G=t_periods`
+        // （clusterの`G`も同じ`time`列のユニーク数）のスケールも一致する。モジュールdoc
+        // 「Driscoll-Kraay型パネルHAC対応」参照）。2つの独立した実装
+        // （`panel_cluster_cov_params`と`panel_driscoll_kraay_cov_params`）が同じ値に
+        // 収束することを確認する回帰ガード（OLSの`fit_hac_with_zero_lags_matches_hc0`と
+        // 同型）。
         let (entity, time, x, y) = fixest_reference_input();
         let input = FeInput::from_columns(
             &y,
@@ -3263,18 +3521,18 @@ mod tests {
     }
 
     #[test]
-    fn fe_estimator_fit_one_way_hac_with_single_time_period_yields_zero_variance() {
+    fn fe_estimator_fit_one_way_hac_with_single_time_period_is_rejected() {
         // `t_periods=1`（全観測が同一の`time`ラベル）という退化した境界ケース
         // （rust-reviewer指摘、`resolve_dk_bandwidth`のNone分岐が`bandwidth=t_periods`を
-        // 返しうる唯一のケース、`fe_driscoll_kraay_cov_params`関数doc参照）。
+        // 返しうる唯一のケース）。
         //
-        // このとき`ξ_t`は1個しかなく（`t=1`）、その値は全観測にわたる
-        // `Σ_i x̃_i ε̂_i = X̃'ε̂`——委譲先`OlsEstimator::fit`の正規方程式により厳密に
-        // ゼロベクトル——になるため、`Ŝ = ξ_1 ξ_1' = 0`、延いて標準誤差も厳密にゼロになる
-        // ことが線形代数から導出できる（外部リファレンス不要、`engine`内で完結する
-        // 数学的事実）。`l=bandwidth=t_periods`の空スライス処理
-        // （`xi.subrows(l, t_periods - l)` = `(t_periods, 0)`）がpanicしないことも
-        // 合わせて確認する。
+        // DKの小標本補正を`(t_periods/(t_periods-1))×((n-1)/(n-K))`
+        // （fixestの`ssc()`、`t_periods`をclusterの`G`と同じ役割で使う）に変更した結果、
+        // `t_periods=1`は`t_periods/(t_periods-1)=1/0`が発散し計算が成立しなくなった
+        // （クラスターの`G=1`が`validate_cluster_groups`で拒否されるのと同じ理由）。
+        // `resolve_dk_bandwidth`が`PanelError::InsufficientDkPeriods`で早期に拒否する
+        // （旧実装ではこのケースは標準誤差が数学的に厳密ゼロになる退化ケースとして
+        // 成功していたが、新しい補正式の下では未定義になるため仕様変更した）。
         let entity = strings(&["a", "a", "b", "b", "c", "c"]);
         let time = strings(&["1", "1", "1", "1", "1", "1"]);
         let y = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
@@ -3289,7 +3547,7 @@ mod tests {
         )
         .unwrap();
 
-        let fe = FeEstimator::fit(
+        let result = FeEstimator::fit(
             input,
             FeEffects::OneWay,
             FeCovType::Dk {
@@ -3297,10 +3555,12 @@ mod tests {
                 time: None,
             },
             0.95,
-        )
-        .unwrap();
+        );
 
-        assert!((*fe.std_errors().get(0, 0)).abs() < 1e-9);
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::InsufficientDkPeriods { t_periods: 1 }
+        );
     }
 
     #[test]

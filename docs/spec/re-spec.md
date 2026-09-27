@@ -147,8 +147,9 @@ wx.shape[1]`）と自動的に一致する。この副産物として`estimator(
 
 FE実装時（`panel::fe`）のcov_type計算関数（`design_matrix_from_columns`・`xtx_inverse`・
 `leverage_within`・分類/HC/cluster/DriscollKraay計算）は`common.rs`にFE/RE共有で移設済み——
-数式自体はFE実装時から変更しておらず、`extra_df`・レバレッジ配列を引数で受け取る汎用実装の
-ため呼び出し側（REは`extra_df=0`固定・`leverage_within`）を差し替えるだけで再利用できる。
+数式自体はFE実装時から変更しておらず、`k_correction`・レバレッジ配列を引数で受け取る汎用実装の
+ため呼び出し側（REは常に`k_correction=df_model`・`leverage_within`）を差し替えるだけで
+再利用できる。
 
 `ReEstimator`は`cov_type`に関わらず常に自前のフィールド（`std_errors`/`test_stats`/`p_values`/
 `conf_lower`/`conf_upper`/`cov_type`）を保持する（Classical/HC1のような「`OlsEstimator`
@@ -161,6 +162,19 @@ FE実装時（`panel::fe`）のcov_type計算関数（`design_matrix_from_column
   ほどの精度ではなくクロスチェック水準で検証する（4章参照）。
 - `ReCovType::Cluster`の`q`（傾き係数の数、切片を除く）は`df_model - 1`。`ReCovType::Dk`は
   `time`オーバーライドフィールドを持たない（RE自身が2-way構造を持たないため）。
+- **【linearmodels方式からfixest（R）・Stata型に変更】**: `Cluster`は当初
+  `linearmodels`/`plm`に合わせStata流`(G/(G-1))×((n-1)/(n-k))`補正を使わずに独自計算して
+  いたが、fixest・Stataの`xtreg,re vce(cluster)`利用者が期待する値と一致しないため変更した。
+  REは`extra_df`が常に`0`（固定効果ダミーが設計行列に無くFEのようなネスト判定が不要）
+  なため、`K`（`panel_cluster_cov_params`の`(n-1)/(n-K)`）は単純に`df_model`をそのまま
+  渡せばよい——`OlsEstimator`自身の`cluster_cov_params`と数式的に同一になる
+  （`plm::vcovHC(type="sss")`と同じ式）。`Dk`も同様にfixestの`vcov="DK"`に合わせ、
+  `K=df_model`・`G`相当は`t_periods`を使う補正に変更した（FEの`Dk`と同じ式、3.3節参照）。
+- **t検定・信頼区間の自由度（`df_inference`）は`cov_type=Cluster`のとき`G-1`、`Dk`のとき
+  `t_periods-1`に切り替える**（fixestの`ssc()`既定`t.df="min"`、FEと同じ
+  パターン）。それ以外（Classical/HC1-3）は`df_resid`のまま。**F統計量（3.5節）は
+  この切り替えの対象外**——`linearmodels`のSST/SSR方式をそのまま使うため`cov_type`
+  非依存で、サンドイッチ行列ベースの検定ではない。
 
 ### 3.5 F統計量
 
@@ -233,15 +247,20 @@ FEの`r_squared_between`/`r_squared_overall`をそのまま流用できず、RE�
   | `cluster` | `OlsEstimator`のCluster（`cluster`省略時はentity） | `vcovHC(method = "arellano", type = "sss")` |
   | `dk` | Driscoll-Kraay（`panel_driscoll_kraay_cov_params`を補助回帰に適用） | `vcovSCC(maxlag = dk_bandwidth, type = "HC1")` |
 
-  - **補正式の混在**: 補助回帰は`OlsEstimator`の補正式（Cluster: `G/(G-1)·(n-1)/(n-k)`、
-    Stata・R型）を使うため、RE本体のcluster標準誤差（`linearmodels`型の`n/(n-k)`のみ、3.1節）
-    とは補正式が異なる。同一の`REResult`内で混在するが、補助回帰はRE本体とは別の回帰
-    （説明変数`2k+1`個）で、違いは有限標本の補正のみ。
+  - **【補正式の混在を解消済み】**: 当初、補助回帰は`OlsEstimator`の補正式
+    （Cluster: `G/(G-1)·(n-1)/(n-k)`、Stata・R型）を使う一方、RE本体のcluster標準誤差は
+    `linearmodels`型の`n/(n-k)`のみだったため、同一の`REResult`内で補正式が混在していた
+    （当時の既知の制約）。RE本体のCluster/Dkもfixest（R）・Stata型
+    （`K=df_model`を使う`G/(G-1)·(n-1)/(n-K)`、3.4節参照）に揃えたため、この混在は
+    解消済み——補助回帰・RE本体のいずれもStata/fixest型の補正を使う（補助回帰は
+    RE本体とは別の回帰（説明変数`2k+1`個）である点は変わらない）。
   - **`cluster`にentity以外を指定した場合**: `plm`がクラスターにできるのはgroup/timeのみで
     リファレンスが無い。式自体はOLS本体の`CovType::Cluster`（statsmodelsで検証済み）と同じ
     ため計算して値を返す（`plm`との照合はentityクラスターのみ）。
   - **`dk`のバンド幅**: RE本体と同じ解決規則（`dk_bandwidth`、省略時
-    `floor(4*(T/100)^(2/9))`）。スケールは補助回帰の`n/df_resid`、Bartlett重みは同形。
+    `floor(4*(T/100)^(2/9))`）。スケールは補助回帰の`(t_periods/(t_periods-1))×
+    ((n-1)/(n-k_aux))`（RE本体のDkと同じfixest型補正に変更、Wald検定の分母自由度も
+    `t_periods-1`に揃える）、Bartlett重みは同形。
   - 統計量の定義（Wald統計量）は`cov_type`によらず一定で、Wu-Hausman（IV、F版）とは異なる。
   - DKは時点数`T`→∞の漸近論に基づくため、`T`が短いと検定サイズが歪みうる。
   - `cluster`（既定）ではクラスター数`G`が補助回帰の傾き係数の数`2k`を超える必要がある
@@ -268,11 +287,16 @@ pyerr`、FE/RE共有）を使う。RE固有の追加バリアントは`BetweenRe
 
 ## 4. テスト
 
-- Python主リファレンス: `linearmodels.RandomEffects`（`cov_type="unadjusted"`/`"clustered"`/
-  `"kernel"`等）。Rクロスチェック: `plm`（`model="random"`、
-  `benchmark/panel/run_plm_benchmark.R`）。
-- 許容誤差: Classical/HC1/Cluster/HACは`linearmodels`と相対誤差`1e-9`で数値完全一致。
-  HC2/HC3は`plm::vcovHC`とのクロスチェック水準（分散成分推定法が僅かに異なるため）。
+- Python主リファレンス: `linearmodels.RandomEffects`（点推定・`cov_type="unadjusted"`等）。
+  Rクロスチェック: `plm`（`model="random"`、`benchmark/panel/run_plm_benchmark.R`）。
+- **【例外】** `cov_type="cluster"`/`"dk"`の標準誤差・推論統計量は
+  `linearmodels`ではなく、Stata/R型の補正式に相当する参照値（`plm::vcovHC(type="sss")`等、
+  3.4節参照）を正とする（`linearmodels`独自の`extra_df`補正から変更したため）。
+  `classical`/`hc1`は引き続き`linearmodels`と数値一致で検証する。
+- 許容誤差: Classical/HC1は`linearmodels`と相対誤差`1e-9`で数値完全一致。Cluster/HACは
+  Stata/R型補正への手計算検算（本実装と同じ式の再計算のため独立検証としての効力は薄いが、
+  回帰ガードとして機能する）。HC2/HC3は`plm::vcovHC`とのクロスチェック水準（分散成分推定法が
+  僅かに異なるため）。
 - **ハウスマン検定は`plm::phtest(method = "aux", effect = "individual", vcov = ...)`のみを参照値と
   する例外規定**（`linearmodels`のソースに`hausman`という文字列が一切登場せず専用実装が
   無いことを確認済み。通常の「Python主リファレンス＋Rクロスチェック」の2系統検証の例外）。

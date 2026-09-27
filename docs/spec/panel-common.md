@@ -136,7 +136,13 @@ Newey-West型HACだが、これをパネルにそのまま適用すると異な�
 
 ### 3.3 検定分布
 
-**t分布**（OLS準拠）。自由度はFE/REそれぞれのパネル調整済み`df_resid`を使う。
+**t分布**（OLS準拠）。自由度（`df_inference`）は`classical`/`hc1`〜`hc3`のとき
+FE/REそれぞれのパネル調整済み`df_resid`を使うが、**`cluster`のとき`G-1`、`dk`のとき
+`t_periods-1`に切り替える**（fixestの`ssc()`既定`t.df="min"`に合わせた。
+OLS自身が`cov_type=Cluster`のときだけ`n_groups-1`に切り替える既存パターンを、
+FE/REのClassical/HC1-3以外の全cov_typeに広げたもの）。`df_resid`自体（σ̂²・
+調整済みR²・AIC/BIC等）は`cov_type`によらず常に元の値のまま。詳細な式は
+[`fe-spec.md`](./fe-spec.md)3.3節・[`re-spec.md`](./re-spec.md)3.4節参照。
 
 ## 4. 内部実装・共通化
 
@@ -204,9 +210,17 @@ OLSの計算をそのまま使わない（WLSがR²等を素のOLS計算のま�
 ### 5.1 Python主リファレンス
 
 **`linearmodels`をFE/RE共通の主リファレンスとする**（`PanelOLS`＝FE、`RandomEffects`＝RE）。
-`PanelOLS`の`cov_type="kernel"`でDriscoll-Kraay型SE（3章）の検証もカバーできる。
+点推定・パネル固有R²・AIC/BIC等はこの方針のまま。
 `pyfixest`は既存方針（`docs/spec/ols-spec.md`／`testing-policy.md`、HC2/HC3の実装バグにより
 精度検証には使わない）を踏襲し、性能比較（実行時間・メモリ）のみに使う。
+
+**【例外】** 標準誤差・推論統計量（`std_errors`/`test_stats`/`p_values`/
+`conf_lower`/`conf_upper`）については、`linearmodels`ではなくR（FEは`fixest`、REは
+`plm`・plm相当のStata型補正）を正とする。FE/REの`cluster`/`dk`の小標本補正を
+fixest（R）・Stata型に変更したため（`linearmodels`は独自の`n/(n-extra_df-k)`補正を
+使い、fixest・Stataの利用者が期待する値と一致しない）、この2つのcov_typeについては
+`linearmodels`との数値一致を意図的に崩している。`classical`/`hc1`〜`hc3`の標準誤差は
+引き続き`linearmodels`と数値一致する（変更なし）。
 
 ### 5.2 Rクロスチェックパッケージ
 

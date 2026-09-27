@@ -224,6 +224,17 @@ pub enum PanelError {
     #[error("bandwidth must be in the range [0, t): got {bandwidth}, t={t}")]
     InvalidDkBandwidth { bandwidth: i64, t: usize },
 
+    /// `FeCovType::Dk`/`ReCovType::Dk`でユニークな時点数`t_periods`が1しかない。
+    ///
+    /// fixestの`ssc()`小標本補正はDKの時点数`t_periods`を、clusterの
+    /// クラスター数`G`と同じ役割（`G/(G-1)`補正・推論の自由度`G-1`）で使う
+    /// （`panel_driscoll_kraay_cov_params`のdocコメント参照）。`t_periods=1`だと
+    /// `t_periods/(t_periods-1)`が`1/0`に発散し、クラスターの`G=1`が
+    /// `validate_cluster_groups`で拒否されるのと同じ理由で計算が成立しない
+    /// （`ols::validate_cluster_groups`の`G>=2`要求と同型の前提）。
+    #[error("Driscoll-Kraay panel HAC requires at least 2 unique time periods: got {t_periods}")]
+    InsufficientDkPeriods { t_periods: usize },
+
     /// within変換済みデータに対する最小二乗推定（`OlsEstimator::fit`への委譲、
     /// `panel-common.md`4.3節。WLSがOLSへ委譲するのと同型のパターン）が失敗した。
     ///
@@ -461,11 +472,14 @@ pub(crate) fn panel_hc_cov_params(
     xtx_inv * &psi_hat * xtx_inv
 }
 
-/// クラスターロバスト係数分散共分散行列（k×k）。`ols::cluster_cov_params`と同型の
-/// 構造だが、**Stata流の`(G/(G-1))×((n-1)/(n-k))`小標本補正を適用しない**
-/// （`linearmodels`との数値一致のため、`fe.rs`モジュールdoc「`cov_type`対応」参照）。
-/// 代わりに`n/(n-extra_df-k)`のみを使う（`extra_df`は呼び出し側が決める。FEは
-/// `entity_nested_within_cluster`の判定結果、REは常に`0`——モジュールdoc参照）。
+/// クラスターロバスト係数分散共分散行列（k×k）。`ols::cluster_cov_params`と同じ
+/// Stata流`(G/(G-1))×((n-1)/(n-K))`小標本補正を使う（fixest（R）・Stataの`xtreg`/
+/// `reghdfe`との数値一致のため、linearmodels方式`n/(n-extra_df-k)`から
+/// 変更した。`fe.rs`モジュールdoc「`cov_type`対応」参照）。`G`はこの関数が
+/// `groups`から数える（`ols::cluster_cov_params`と同じ）。`K`（`(n-1)/(n-K)`の分母）は
+/// 呼び出し側が決める`k_correction`引数で渡す——FEは固定効果ダミーとクラスター変数の
+/// ネスト関係で決まるfixest固有のK計算（`fe.rs`の`fe_cluster_k_correction`）、REは
+/// 単純に`df_model`（FEのような固定効果ダミーのネスト補正が不要、モジュールdoc参照）。
 pub(crate) fn panel_cluster_cov_params(
     x: &Mat<f64>,
     residuals: &[f64],
@@ -473,9 +487,10 @@ pub(crate) fn panel_cluster_cov_params(
     n: usize,
     k: usize,
     groups: &[String],
-    extra_df: usize,
+    k_correction: usize,
 ) -> Mat<f64> {
     let group_indices = group_indices_by_key(groups);
+    let n_groups = group_indices.len();
 
     let mut s_hat = Mat::<f64>::zeros(k, k);
     for indices in group_indices.values() {
@@ -493,8 +508,8 @@ pub(crate) fn panel_cluster_cov_params(
         }
     }
 
-    let df_resid_for_scale = n - extra_df - k;
-    let correction = n as f64 / df_resid_for_scale as f64;
+    let correction = (n_groups as f64 / (n_groups as f64 - 1.0))
+        * ((n as f64 - 1.0) / ((n - k_correction) as f64));
     let cov_uncorrected = xtx_inv * &s_hat * xtx_inv;
     Mat::from_fn(k, k, |i, j| correction * (*cov_uncorrected.get(i, j)))
 }
@@ -506,7 +521,15 @@ pub(crate) fn panel_cluster_cov_params(
 /// 場合は`linearmodels`の`DriscollKraay`と同じ経験則`floor(4*(t/100)^(2/9))`で自動計算する
 /// （`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照。OLSの`resolve_hac_lags`と
 /// 式の形は同じだが、観測数`n`ではなく時点数`t`が引数になる点が異なる）。
+///
+/// `t < 2`は`bandwidth`の値によらず`PanelError::InsufficientDkPeriods`で拒否する
+/// （fixest型の`G/(G-1)`相当補正を導入したことに伴う前提条件。同エラーの
+/// docコメント参照）。この関数がDK計算の全呼び出し経路（`fe.rs`/`re.rs`/
+/// `re_hausman_test`）の共通の入口になっているため、ここ一箇所で検証すれば足りる。
 pub(crate) fn resolve_dk_bandwidth(bandwidth: Option<i64>, t: usize) -> Result<usize, PanelError> {
+    if t < 2 {
+        return Err(PanelError::InsufficientDkPeriods { t_periods: t });
+    }
     match bandwidth {
         Some(bw) => {
             if bw < 0 || (bw as usize) >= t {
@@ -522,9 +545,15 @@ pub(crate) fn resolve_dk_bandwidth(bandwidth: Option<i64>, t: usize) -> Result<u
 ///
 /// `Ŝ = Σ_t ξ_t ξ_t' + Σ_{l=1}^{bandwidth} w_l (ξ_t ξ_{t-l}' + ξ_{t-l} ξ_t')`
 /// （Bartlett重み`w_l = 1 - l/(bandwidth+1)`、`fe.rs`モジュールdoc参照）をまず求め、
-/// 最後に`(n/df_resid) × (X̃'X̃)⁻¹ Ŝ (X̃'X̃)⁻¹`にスケールする。`t_periods`（ユニークな
-/// 時点数）は`resolve_dk_bandwidth`の呼び出しで既に計算済みの値を呼び出し元からそのまま
-/// 受け取る（`time_indices.len()`で二重計算しない）。
+/// 最後に`(t_periods/(t_periods-1)) × ((n-1)/(n-k_correction)) × (X̃'X̃)⁻¹ Ŝ (X̃'X̃)⁻¹`に
+/// スケールする（fixestの`vcov="DK"`との数値一致のため、
+/// linearmodels方式`n/df_resid`から変更した。fixestは時点数`t_periods`を
+/// クラスター数`G`相当として扱い、`K.fixef="full"`が既定（クラスター変数が無いため
+/// ネスト判定自体が発生しない）——`k_correction`は呼び出し側がFE/REそれぞれの
+/// `df_model`をそのまま渡す。`panel_cluster_cov_params`の`G/(G-1)×(n-1)/(n-K)`と
+/// 同型の式に、`G`を`t_periods`に置き換えたものと理解できる）。`t_periods`
+/// （ユニークな時点数）は`resolve_dk_bandwidth`の呼び出しで既に計算済みの値を
+/// 呼び出し元からそのまま受け取る（`time_indices.len()`で二重計算しない）。
 ///
 /// `time`を`group_indices_by_key`で集計して`ξ_t`（時点`t`でのクロスセクション和）を求める。
 /// キー順序（`String`の辞書順）がそのまま時系列順序とみなす規約（`fe.rs`モジュールdoc参照）と
@@ -542,7 +571,7 @@ pub(crate) fn panel_driscoll_kraay_cov_params(
     residuals: &[f64],
     xtx_inv: &Mat<f64>,
     time: &[String],
-    df_resid: usize,
+    k_correction: usize,
     bandwidth: usize,
     t_periods: usize,
 ) -> Mat<f64> {
@@ -575,7 +604,8 @@ pub(crate) fn panel_driscoll_kraay_cov_params(
         }
     }
 
-    let scale = n as f64 / df_resid as f64;
+    let scale = (t_periods as f64 / (t_periods as f64 - 1.0))
+        * ((n as f64 - 1.0) / ((n - k_correction) as f64));
     let cov_uncorrected = xtx_inv * &s_hat * xtx_inv;
     Mat::from_fn(k, k, |i, j| scale * (*cov_uncorrected.get(i, j)))
 }

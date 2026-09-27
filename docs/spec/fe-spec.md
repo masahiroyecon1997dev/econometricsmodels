@@ -116,14 +116,17 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
 - `n <= df_model`は`PanelError::InsufficientDegreesOfFreedom`。`neffects>=1`のため
   `df_model>k`が恒常的に成り立ち、`OlsEstimator::fit`自身の`n<=k`チェックより常に厳格
   （FE経由でOLS側の`InsufficientObservations`が発生することは構造的にない）。
-- t値・p値・信頼区間の自由度は`cov_type`によらず常に`df_resid`。AIC/BICは`log_likelihood`
+- **t値・p値・信頼区間・F検定の自由度（`df_inference`）は`cov_type=Cluster`のとき`G-1`、
+  `Dk`のとき`t_periods-1`に切り替える**（fixestの`ssc()`既定`t.df="min"`。
+  それ以外（Classical/HC1-3）は`df_resid`のまま）。AIC/BICは`log_likelihood`
   自体（`SSR/n`のみに依存しdf非依存）を`OlsEstimator::log_likelihood()`からそのまま再利用し、
-  ペナルティ項の乗数だけ`k`から`df_model`に差し替える。
+  ペナルティ項の乗数だけ`k`から`df_model`に差し替える（`df_resid`ベース、`df_inference`とは
+  無関係）。
 - **F統計量（`f_statistic`/`f_p_value`）**: 傾き係数`k`個が同時にゼロという帰無仮説のWald
   F検定（`linearmodels.PanelOLS.f_statistic`「H0: All parameters ex. constant are zero」と
   同じ定義。固定効果ダミー自体は検定対象に含めない——`fixest`の`fitstat(m, "f")`はFEダミーも
   含めたモデル全体のF検定で定義が異なるためクロスチェックに使わない）。`wald_f_test`
-  （OLS本体の関数を`pub(crate)`化して再利用）をFEの`cov_type`別`cov_params`・`df_resid`で
+  （OLS本体の関数を`pub(crate)`化して再利用）をFEの`cov_type`別`cov_params`・`df_inference`で
   呼ぶ形でサンドイッチ計算の複製を避ける（`k_constant=0`固定）。失敗は
   `PanelError::FTestFailed`。
 
@@ -139,37 +142,55 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
    レバレッジは、within変換後の設計行列ではなくLSDV相当のフルレバレッジ
    `h_ii_full = 1/T_entity(i) + h_ii_within`（1-wayは分割回帰＝Frisch-Waugh-Lovellのレバレッジ
    分解則、2-wayはさらに`+ 1/N_time(i) - 1/n`）を使う（fixestと数値一致確認済み）。
-3. **Clusterも独自計算**: OLSは`(G/(G-1))×((n-1)/(n-k))`というStata流の小標本補正を常に適用
-   するが、linearmodels（FEの主リファレンス）はこの補正を使わず`n/(n-extra_df-k)`のみを
-   使う。`extra_df`はcluster変数とFEの関係で決まる（linearmodelsの`_determine_df_adjustment`
-   と数値一致確認済み）: 1-way FEで「クラスター変数がentityと同じか、entityを包含するより
-   粗い分割」なら`extra_df=0`（`cluster`省略時のデフォルト、すなわちentity自体は常に
-   この条件を満たす）、それ以外（1-way FEでentityと無関係なクラスター変数、または2-way FE）
-   は`extra_df=neffects`。
+3. **Clusterも独自計算**（**【linearmodels方式からfixest方式へ変更】**）:
+   補正係数はOLSと同じ`(G/(G-1))×((n-1)/(n-K))`だが、**`K`（`(n-1)/(n-K)`の分母）は
+   fixestの`ssc()`小標本補正（既定`K.fixef="nonnested"`）に合わせたFE固有ロジック**
+   （`fe_cluster_k_correction`、`engine/src/panel/fe.rs`）で決める——linearmodelsが
+   使っていた単純な`extra_df`分岐（`n/(n-extra_df-k)`のみ、`G/(G-1)`補正なし）とは
+   異なる。fixest 0.14.2のRソース（`fixest:::ssc_compute_K`）と実地数値実験で確定した式:
+   FE次元（1-wayはentityのみ、2-wayはentity+time）それぞれについて、その次元が
+   クラスター変数に「ネスト」しているか（各水準がクラスターの単一の値にしか対応しないか）
+   で場合分けし、全次元がネスト（1-way・`cluster`省略時の既定ケース）なら
+   `K = df_model - nested_size_sum + m`（`m`=FE次元数、`nested_size_sum`=ネストした
+   次元の生の水準数の合計）、一部の次元だけネスト（2-way FEで典型）なら
+   `K = df_model - (nested_size_sum - count_nested)`、どの次元もネストしない
+   （Stataの`xtreg,fe`型）なら`K = df_model`（フルカウント）。最後にfixest自身の
+   安全弁`K = max(K, k+1)`を適用する。詳細な導出・具体例は`fe_cluster_k_correction`
+   関数doc参照。
 
 `cov_type`のデフォルト（`"cluster"`、entity単位）・`cluster`文字列パースは
 `engine_pybind`層の責務。`FeEstimator::fit`自体はデフォルトを持たない。**2-way FEでも
 クラスターのデフォルトはentity単位のまま**（`cluster`で上書き可能）。2-way clustering
 （entity+time同時）はv1スコープ外。
 
-**Driscoll-Kraay型パネルHAC（`FeCovType::Dk { bandwidth, time }`）**: `linearmodels.panel.
-covariance.DriscollKraay`のソース確認に基づく実装。
+**Driscoll-Kraay型パネルHAC（`FeCovType::Dk { bandwidth, time }`）**: カーネル本体
+（Bartlett重み・ラグ項の積算）は`linearmodels.panel.covariance.DriscollKraay`のソース
+確認に基づく実装のまま。**小標本補正のみfixestの`vcov="DK"`（`ssc()`に
+従う）に変更した**。
 
 1. **カーネルはv1でBartlett限定**（OLSの`CovType::Hac`と平仄を合わせる。Parzen/QSは未対応、
    4章参照）。
 2. **バンド幅**は`linearmodels`のデフォルトルール`floor(4*(t/100)^(2/9))`（`t`=ユニークな
    時点数、OLSの`hac_lags`が観測数`n`ベースなのと違う点に注意）。明示指定は`[0, t)`範囲検証
-   （`PanelError::InvalidDkBandwidth`）。
+   （`PanelError::InvalidDkBandwidth`）。`t<2`は`G=1`のクラスターと同じ理由
+   （`t/(t-1)`が発散する）で`PanelError::InsufficientDkPeriods`として拒否する。
 3. **時系列順序は`time: Vec<String>`の辞書順とみなす**（ISO 8601日付・ゼロ埋め年度等、
    辞書順=時系列順になる形式で渡すことが呼び出し側の契約。`engine`側にこの契約の
    バリデーションは無い）。
 4. **1-way/2-way両対応**。1-way FEで`FeCovType::Dk`を指定したのに時系列順序が一切ない
    （`time`も`dk_time`も未指定）なら`PanelError::DkRequiresTime`。
-5. スケールは`(n/df_resid) × (X̃'X̃)⁻¹ Ŝ (X̃'X̃)⁻¹`（linearmodelsは`cov_type="kernel"`で常に
-   `extra_df=neffects`かつデフォルト`debiased=True`のため、素直に`df_resid`と一致する）。
+5. **スケールは`(t_periods/(t_periods-1)) × ((n-1)/(n-K)) × (X̃'X̃)⁻¹ Ŝ (X̃'X̃)⁻¹`**
+   （fixestの`ssc()`は時点数`t_periods`をクラスターの`G`と同じ役割で使う。`K`は
+   fixestの既定`K.fixef="full"`——DKにはクラスター変数という概念が無くネスト判定
+   自体が発生しないため——により常に`K=df_model`）。
 6. **`FeCovType::Dk.time`による明示的な上書き**: `time`が`Some`（`FEOptions.dk_time`由来）
    なら`FeInput.time()`より優先してDK計算に使う（`time`未指定の1-way FEでもこれだけでDK HAC
    が成立する）。
+7. **既知の制約**: `bandwidth`が許容範囲`[0, t_periods)`の上限ちょうど（`bandwidth ==
+   t_periods - 1`）のとき、fixestの内部C++実装（`cpp_driscoll_kraay`）が最後のラグ項を
+   切り捨てるらしいことが実地確認で判明しており、本実装（標準的なBartlett核、最後の
+   ラグ項まで含める）とはこの境界値でのみ数値が一致しない（`bandwidth < t_periods - 1`
+   では一致する）。原因未特定のため別issueで追跡する。
 
 ### 3.4 パネル固有R²（`r_squared_within`/`between`/`overall`）
 
@@ -227,8 +248,14 @@ demeanしたR²」を3種とも定義すると誤る）:
 
 ## 4. テスト
 
-- Python主リファレンス: `linearmodels.PanelOLS`（`cov_type="unadjusted"`/`"clustered"`/
-  `"kernel"`等）。Rクロスチェック: `fixest`（`benchmark/panel/run_fixest_benchmark.R`）。
+- Python主リファレンス: `linearmodels.PanelOLS`（点推定・`cov_type="unadjusted"`/
+  パネル固有R²・AIC/BIC等）。Rクロスチェック: `fixest`（`benchmark/panel/
+  run_fixest_benchmark.R`）。
+- **【例外】** `cov_type="cluster"`/`"dk"`の標準誤差・推論統計量
+  （`std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper`）は`linearmodels`
+  ではなく`fixest`を正とする（3.3節参照、`linearmodels`独自の`extra_df`補正から
+  fixest・Stata型`G/(G-1)×(n-1)/(n-K)`補正に変更したため）。`classical`/`hc1`〜`hc3`は
+  引き続き`linearmodels`と数値一致で検証する。
 - 許容誤差: 相対誤差`1e-9`を基本（`.claude/rules/testing-policy.md`の基本方針`1e-8`より
   厳しく、実測で機械精度一致が確認できたため）。
 - **`aic`/`bic`はRクロスチェック（`fixest`）のみで検証する**: `linearmodels.PanelOLS`は
@@ -248,3 +275,5 @@ demeanしたR²」を3種とも定義すると誤る）:
   `ValidationError`にする）。
 - **2-way clustering（entity+time同時）**: v1スコープ外。
 - **Driscoll-Kraay HACのカーネル拡張**: Parzen/QSカーネルへの拡張は別issue。
+- **DKの`bandwidth == t_periods - 1`（許容範囲の上限ちょうど）でfixestと数値不一致**:
+  3.3節7.参照。原因未特定のため別issueで追跡する。

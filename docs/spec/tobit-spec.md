@@ -101,7 +101,9 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   異なる）。そこでは生のNewtonステップが降下方向ですらなくなるため、共有`FaerNewton`
   （`nonlinear/common.rs`）にLevenberg-Marquardt型の減衰ステップ`regularized_newton_step`を追加した:
   `H + λI`で`cost`が減少する候補が見つかるまで`λ`を段階的に増やす。大域凹な問題では`λ=0`の生の
-  ステップが常に最初の試行で受理されるため、Logit/Probitの既存の収束挙動と完全に一致する。
+  ステップが最初の試行で受理される（収束点近傍で予測減少量がコストの分解能以下になった反復は、
+  同じ生のステップをコスト比較なしで採る。[`nonlinear-common.md`](./nonlinear-common.md)1.2節）
+  ため、Logit/Probitの収束挙動はLM型減衰の有無によらない。
 
 ### 3.2 最適化・収束判定・病理ケース
 
@@ -127,22 +129,28 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     末尾行へ折り込んだもの、`TobitScaling::param_jacobian`）。
 - **収束判定`tol`の既定値`1e-6`**はLogit/Probitと同じ結論（通常データでは高精度一致、境界ケース
   のみ`tol`を明示的に締める運用）。
-  - **大標本での`tol`スケール問題と副次的な収束判定**: `terminate`の主判定
-    `l2_norm(gradient) < tol`は**総和勾配に対する絶対閾値**で観測数`n`でスケールしない。大 `n`
-    （実測で `n≳2·10⁵`、`β`の引き次第）では収束点近傍で勾配の丸め誤差の床が`tol`を上回り、
-    コスト関数が浮動小数点の底に達しても主判定が発火しないことがある。この状態で
-    `regularized_newton_step`が`MAX_LM_ATTEMPTS`回すべてコスト減少に失敗し、以前は誤って
-    `SingularHessian`（`ComputationError`）を返していた（`moderate_censoring, n=10⁶, seed=42` /
-    `n=2·10⁵, seed=1`で再現）。現在は`common.rs`共有の`FaerNewton`が、`λ=0`のHessianが可逆
-    （＝真に特異ではない）かつ次の3条件——(1) 生Newtonステップを1回進めても勾配ノルムが
-    減らない（`≥0.9·前反復`）、(2) 勾配ノルムが収束目標近傍（`<10⁴·tol`）、(3) **コスト関数
-    （負の対数尤度）のHessianが正定値**（`llt`成功＝内点最大の2階条件。`(β, logσ)`尤度は
-    大域凹でなく鞍点で `NoProgress` が返りうるため必須）——を確認して**収束扱い**にする
-    （`FaerNewton::stalled_at_optimum`、`RegularizedStep::NoProgress`。現在点をそのまま返し
-    生ステップは適用しない）。3条件が揃わなければ生ステップを適用して反復継続し、
-    `max_iter`到達で`NonConvergence`。Logit/Probitの大域凹な尤度ではこの経路（LMラダーの
-    全失敗）に入らないため挙動は不変。真の特異性（完全な多重共線性等、`λ=0`のHessianが
-    可逆でない）は従来どおり`SingularHessian`。
+  - **大標本での収束点近傍の扱い**: `terminate`の主判定`l2_norm(gradient) < tol`は**総和勾配に
+    対する絶対閾値**で観測数`n`でスケールしない。大 `n`（`moderate_censoring, n=10⁶, seed=42` /
+    `n=2·10⁵, seed=1`で再現）では、収束点近傍でNewtonステップによる真のコスト減少量がコストの
+    評価誤差を下回り、`regularized_newton_step`のコスト比較が丸め誤差の符号で決まっていた。
+    その結果、(i) 最初期の実装ではLMラダーが`MAX_LM_ATTEMPTS`回すべて失敗し、誤って
+    `SingularHessian`（`ComputationError`）を返していた。(ii) その対処として後述の停滞収束判定を
+    入れた後も、LMラダーがノイズで受理した不完全なステップで勾配が`≈36·tol`（`n=10⁶`）に
+    張り付き、反復とcost評価を浪費していた（11反復・約5秒）。当時はこの張り付きを「勾配の
+    丸め誤差の床」と解釈していたが誤りで、生のNewtonステップを適用すれば勾配は`≈2e-10`まで下がる。
+    現在はコスト（対数尤度の総和）を補償和で計算し、予測減少量がコストの分解能以下なら
+    コスト比較を省く（[`nonlinear-common.md`](./nonlinear-common.md)1.2節）ため、`n=10⁶`でも
+    6反復・約1.3〜1.5秒で勾配基準により収束する。
+  - **停滞収束判定（安全網）**: コスト比較でステップの良否を判定できなかったとき
+    （`RegularizedStep::NoProgress` / `BelowCostResolution`）、`common.rs`共有の`FaerNewton`は
+    次の3条件——(1) 生Newtonステップを1回進めても勾配ノルムが減らない（`≥0.9·前反復`）、
+    (2) 勾配ノルムが収束目標近傍（`<10⁴·tol`）、(3) **コスト関数（負の対数尤度）のHessianが
+    正定値**（`llt`成功＝内点最大の2階条件。`(β, logσ)`尤度は大域凹でなく鞍点でも可逆な
+    Hessianになりうるため必須）——を確認して**収束扱い**にする（`FaerNewton::stalled_at_optimum`。
+    現在点をそのまま返し生ステップは適用しない）。3条件が揃わなければ生ステップを適用して
+    反復継続し、`max_iter`到達で`NonConvergence`。勾配の評価誤差の床が本当に`tol`を上回る
+    ほど大きな標本向けの安全網で、上記の再現データでは現状発火しない。真の特異性（完全な
+    多重共線性等、`λ=0`のHessianが可逆でない）は従来どおり`SingularHessian`。
   - **`bfgs`/`lbfgs`は`tol`を観測数`n`で正規化した基準を使う（実装済み）**:
     `newton`は絶対閾値のまま（既定`tol=1e-6`、Tobitでも反復回数は`n`によらずほぼ一定でこの
     影響をほぼ無償で吸収する）だが、`bfgs`/`lbfgs`は観測あたり平均勾配基準（既定`tol=1e-8`）を

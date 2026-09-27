@@ -112,7 +112,7 @@ use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::nonlinear::common::{
     CovType, MarginalEffects, MarginalEffectsAt, MleError, MleFitOptions, SandwichVariant,
     SeparationNormCheck, U_CLAMP, checked_design_matrix_qr, clamped_pdf_cdf, cluster_cov_params,
-    column_means, column_medians, observed_information_cov_params, opg_cov_params,
+    column_means, column_medians, compensated_sum, observed_information_cov_params, opg_cov_params,
     predict_new_data, run_solver, sandwich_cov_params, validate_cluster_cov_type,
     validate_confidence_level, validate_mle_options, validate_sufficient_observations,
 };
@@ -482,9 +482,8 @@ impl CostFunction for TobitProblem {
     fn cost(&self, param: &Self::Param) -> Result<Self::Output, OptimizerError> {
         let n = self.x.nrows();
         let normal = Normal::standard();
-        let ll: f64 = (0..n)
-            .map(|i| self.contribution(i, param, &normal).log_lik)
-            .sum();
+        // 補償和（`compensated_sum`のdocコメント参照。大標本のNewtonのコスト比較のため）。
+        let ll = compensated_sum((0..n).map(|i| self.contribution(i, param, &normal).log_lik));
         Ok(-ll)
     }
 }
@@ -804,9 +803,8 @@ fn log_likelihood(
 ) -> f64 {
     let problem = TobitProblem::from_standardized(x.clone(), y.clone(), lower, upper);
     let normal = Normal::standard();
-    (0..x.nrows())
-        .map(|i| problem.contribution(i, params, &normal).log_lik)
-        .sum()
+    // `TobitProblem::cost`と同じ補償和にし、最適化で評価した値と適合度統計量の値を揃える。
+    compensated_sum((0..x.nrows()).map(|i| problem.contribution(i, params, &normal).log_lik))
 }
 
 /// モデル全体の有意性検定（切片以外の係数`β`が同時にゼロという帰無仮説のWald検定）。

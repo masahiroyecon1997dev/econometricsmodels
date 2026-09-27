@@ -68,7 +68,7 @@ use crate::inference;
 use crate::nonlinear::common::{
     CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
     MleError, MleFitOptions, SandwichVariant, SeparationNormCheck, U_CLAMP, clamped_pdf_cdf,
-    cluster_cov_params, column_means, column_medians, destandardize_cov_params,
+    cluster_cov_params, column_means, column_medians, compensated_sum, destandardize_cov_params,
     destandardize_params, goodness_of_fit, log_likelihood_null, marginal_effects_from_w_s,
     observed_information_cov_params, ols_based_initial_params, opg_cov_params, pred_table,
     predict_from_link, predict_new_data, run_solver, sandwich_cov_params, standardize_columns,
@@ -211,14 +211,13 @@ impl ProbitInput {
 fn log_likelihood(x: &Mat<f64>, y: &Mat<f64>, params: &[f64]) -> f64 {
     let normal = Normal::standard();
     let n = x.nrows();
-    (0..n)
-        .map(|i| {
-            let z: f64 = (0..x.ncols()).map(|j| *x.get(i, j) * params[j]).sum();
-            let q = 2.0 * (*y.get(i, 0)) - 1.0;
-            let (_, big_phi) = clamped_pdf_cdf(&normal, q * z);
-            big_phi.ln()
-        })
-        .sum()
+    // 補償和（`compensated_sum`のdocコメント参照。大標本のNewtonのコスト比較のため）。
+    compensated_sum((0..n).map(|i| {
+        let z: f64 = (0..x.ncols()).map(|j| *x.get(i, j) * params[j]).sum();
+        let q = 2.0 * (*y.get(i, 0)) - 1.0;
+        let (_, big_phi) = clamped_pdf_cdf(&normal, q * z);
+        big_phi.ln()
+    }))
 }
 
 /// 限界効果（`ProbitEstimator::marginal_effects`のdocコメント「数式（デルタ法）」参照）の

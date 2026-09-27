@@ -34,10 +34,11 @@ use crate::inference;
 use crate::nonlinear::common::{
     CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
     MleError, MleFitOptions, SandwichVariant, SeparationNormCheck, cluster_cov_params,
-    column_means, column_medians, destandardize_cov_params, destandardize_params, goodness_of_fit,
-    log_likelihood_null, marginal_effects_from_w_s, observed_information_cov_params,
-    ols_based_initial_params, opg_cov_params, pred_table, predict_from_link, predict_new_data,
-    run_solver, sandwich_cov_params, standardize_columns, validate_fit_preconditions,
+    column_means, column_medians, compensated_sum, destandardize_cov_params, destandardize_params,
+    goodness_of_fit, log_likelihood_null, marginal_effects_from_w_s,
+    observed_information_cov_params, ols_based_initial_params, opg_cov_params, pred_table,
+    predict_from_link, predict_new_data, run_solver, sandwich_cov_params, standardize_columns,
+    validate_fit_preconditions,
 };
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
@@ -187,14 +188,15 @@ fn logistic(z: f64) -> f64 {
 /// argminのトレイトが要求する`Result`型を経由する必要が無い内部専用の計算
 /// （適合度統計量向け、収束後のパラメータで1回だけ評価する）のため、独立した
 /// 関数として切り出している。
+///
+/// 総和は補償和（[`compensated_sum`]のdocコメント参照。素朴な逐次加算の丸め誤差が
+/// 大標本のNewtonのコスト比較を狂わせるため）。
 fn log_likelihood(x: &Mat<f64>, y: &Mat<f64>, params: &[f64]) -> f64 {
     let n = x.nrows();
-    (0..n)
-        .map(|i| {
-            let z: f64 = (0..x.ncols()).map(|j| *x.get(i, j) * params[j]).sum();
-            (*y.get(i, 0)) * z - softplus(z)
-        })
-        .sum()
+    compensated_sum((0..n).map(|i| {
+        let z: f64 = (0..x.ncols()).map(|j| *x.get(i, j) * params[j]).sum();
+        (*y.get(i, 0)) * z - softplus(z)
+    }))
 }
 
 /// 限界効果（`LogitEstimator::marginal_effects`のdocコメント「数式（デルタ法）」参照）の

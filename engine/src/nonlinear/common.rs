@@ -1505,6 +1505,49 @@ fn l2_norm(g: &[f64]) -> f64 {
     g.iter().map(|x| x * x).sum::<f64>().sqrt()
 }
 
+/// Neumaierの補償和（改良版Kahan和）。各加算で失われた下位ビットを補正項に蓄積し、
+/// 最後に足し戻す。誤差は項数`n`にほぼ依存せず、結果の数ULP程度に収まる。
+///
+/// **対数尤度の総和（`cost`）に使う理由**: `n`個の観測の対数尤度を素朴に逐次加算すると、
+/// 累積値（大標本では`|ℓ|≈4e5`）への加算ごとに丸め誤差が入り、合計で結果のULPの
+/// `O(√n)`倍（`n=1e6`で実測`≈1e-8`、ULPの約100倍）のノイズになる。収束点近傍では
+/// Newtonステップによる真のコスト減少量がこのノイズを下回り、`regularized_newton_step`
+/// の`cost(θ-Δθ) < cost(θ)`比較が符号の運任せになる（正しいステップを棄却し、LMラダーで
+/// 無意味な極小ステップを受理して反復とcost評価を浪費する）。補償和でノイズを
+/// ULP程度に抑え、コスト比較が意味を持つ範囲を広げる。ULPを下回る減少量は補償和でも
+/// 判定できないため、その領域は`regularized_newton_step`側で扱う
+/// （[`NEWTON_COST_RESOLUTION_FACTOR`]参照）。
+///
+/// 勾配・Hessianの総和は素朴な加算のままでよい: 勾配は収束点で0に近づくため累積値が
+/// 小さく丸め誤差も小さい（`n=1e6`のProbitでraw Newtonステップ後の勾配L2ノルム
+/// `≈2e-11`を実測）。Hessianはステップ方向を決めるだけで、多少の誤差は2次収束を損なわない。
+///
+/// **非有限値の扱いは素朴な和と同じ**: 項に`±∞`が含まれると補正項が`∞-∞=NaN`になるため、
+/// 和が非有限のときは補正項を足さずに和をそのまま返す（`-∞`を含む和は`-∞`、`NaN`を含む
+/// 和は`NaN`。Tobitの対数尤度の項は`σ`のアンダーフロー等で`-∞`になりうる）。
+pub(crate) fn compensated_sum<I>(values: I) -> f64
+where
+    I: IntoIterator<Item = f64>,
+{
+    let mut sum = 0.0_f64;
+    let mut compensation = 0.0_f64;
+    for value in values {
+        let t = sum + value;
+        // 絶対値の大きい方を基準に、`t`で失われた小さい方の下位ビットを回収する。
+        compensation += if sum.abs() >= value.abs() {
+            (sum - t) + value
+        } else {
+            (value - t) + sum
+        };
+        sum = t;
+    }
+    if sum.is_finite() {
+        sum + compensation
+    } else {
+        sum
+    }
+}
+
 /// argmin組み込みの`Newton`ソルバーは`H: ArgminInv<H>`（Hessianの逆行列）を要求するが、
 /// `argmin-math`の`vec`機能（`Vec<Vec<f64>>`向け）には`ArgminInv`の実装が存在しない
 /// （faer/nalgebra/ndarrayの行列型にしか実装されていない）ため使えない。Newton法は独自の
@@ -1512,8 +1555,10 @@ fn l2_norm(g: &[f64]) -> f64 {
 /// 特異性検出パターン）で行う（`docs/spec/nonlinear-common.md`1.2節参照）。
 struct FaerNewton {
     tol: f64,
-    /// `regularized_newton_step`が[`RegularizedStep::NoProgress`]を返し、かつ`next_iter`が
-    /// 「最適点に到達しこれ以上進めない」と判定したことを`terminate`へ伝えるフラグ。
+    /// `regularized_newton_step`が[`RegularizedStep::NoProgress`]または
+    /// [`RegularizedStep::BelowCostResolution`]を返し（コスト比較ではステップの良否を
+    /// 判定できなかった）、かつ`next_iter`が「最適点に到達しこれ以上進めない」と判定した
+    /// ことを`terminate`へ伝えるフラグ。
     ///
     /// 主たる収束判定（`terminate`の`l2_norm(gradient) < tol`）は**総和勾配に対する絶対
     /// 閾値**であり観測数`n`でスケールしない。大標本では収束点近傍で勾配の丸め誤差の床が
@@ -1550,14 +1595,15 @@ const INITIAL_LM_LAMBDA: f64 = 1e-3;
 const LM_LAMBDA_GROWTH: f64 = 4.0;
 
 /// [`RegularizedStep::NoProgress`]（LMラダーがコスト減少ステップを見つけられなかったが
-/// `λ=0`のHessianは可逆）を「最適点で停滞」と解釈するための条件その1:
+/// `λ=0`のHessianは可逆）・[`RegularizedStep::BelowCostResolution`]（予測減少量がコストの
+/// 分解能以下でコスト比較を省いた）を「最適点で停滞」と解釈するための条件その1:
 /// 勾配ノルムがこの反復で「実質的に減っていない」とみなす比。
 /// `‖g_new‖ ≥ NEWTON_STALL_GRAD_RATIO · ‖g_prev‖`のとき停滞とみなす。健全な二次収束では
 /// 勾配が反復ごとに桁で減る（実測でも停滞前は比≈0.01）ため、この条件は
 /// 停滞後（実測で連続する勾配ノルムの比≈0.93〜1.0）でしか満たされない。値`0.9`は
 /// その2つの領域の間で、停滞側に十分な余裕を持たせた閾値。
 const NEWTON_STALL_GRAD_RATIO: f64 = 0.9;
-/// `NoProgress`を「最適点で停滞」と解釈するための条件その2:
+/// `NoProgress`/`BelowCostResolution`を「最適点で停滞」と解釈するための条件その2:
 /// 収束点の勾配ノルムが収束目標`tol`のこの倍数未満であること。最適点から遠い場所での
 /// 停滞・発散（勾配ノルムが桁違いに大きい）を収束と誤判定しないためのガード。
 /// 実測での膠着点の勾配ノルムは`n=200_000`で約`1·tol`、`n=1_000_000`で約`36·tol`
@@ -1571,6 +1617,29 @@ const NEWTON_STALL_GRAD_RATIO: f64 = 0.9;
 /// （rust-reviewer指摘。より根本的にはNewton減少量`√(gᵀH⁻¹g)`のようなスケール不変な
 /// 停止基準への置き換えが望ましい。`docs/spec/nonlinear-common.md`9章）。
 const NEWTON_STALL_GRAD_FACTOR: f64 = 1e4;
+/// raw Newtonステップの予測コスト減少量`½gᵀH⁻¹g`（局所2次モデルでの減少量）が
+/// `NEWTON_COST_RESOLUTION_FACTOR · ε · |cost|`以下なら、コスト比較ではステップの良否を
+/// 判定できない（コストの評価値の分解能以下）とみなす
+/// （[`RegularizedStep::BelowCostResolution`]、`regularized_newton_step`のdocコメント参照）。
+///
+/// 値の根拠: 対数尤度の総和を補償和（[`compensated_sum`]）で計算すると、コストの評価誤差は
+/// 実測で1 ULP（`ε·|cost|`）程度になる（Logit/Probitの対数尤度の項は全て同符号のため。
+/// 項ごとの評価誤差の寄与も`ε·|cost|/√n`程度）。`10`はその誤差に対する余裕。これより
+/// 大きい予測減少量ではコスト比較が意味を持つため、従来どおりLMラダーで検証する。
+/// Tobitのように項の符号が混在し`|cost| ≪ Σ|ℓᵢ|`（強い相殺）になる場合は`ε·|cost|`が
+/// 実際の評価誤差を過小評価するが、その場合はこの分岐が発火しにくくなって従来の
+/// LMラダーに戻るだけで、安全側に倒れる。
+///
+/// コスト比較を省いてもよい理由（「予測減少量が小さい＝2次モデルが正確」ではない。
+/// 2次モデルの精度はステップ長で決まるため）:
+/// - (a) この分岐が発火するのはNewton減少量`δ² = gᵀH⁻¹g ≤ 2·NEWTON_COST_RESOLUTION_FACTOR·
+///   ε·|cost|`の領域だけで、`H`（＝情報行列）ノルムで測ったステップ長は`δ`以下、つまり
+///   各パラメータの標準誤差の`√(20ε|cost|)`倍程度（`|cost|=4e5`で約`4e-5`SE）に収まる。
+/// - (b) 採ったステップは無検証ではない。`FaerNewton::next_iter`がステップ後の勾配で判定し、
+///   `terminate`は勾配基準か停滞3条件でしか収束を宣言しないため、偽の収束は生じない。
+/// - (c) 悪いステップで`δ²`が閾値を超えれば、次反復では従来どおりLMラダーの検証に戻る
+///   （自己制限的）。
+const NEWTON_COST_RESOLUTION_FACTOR: f64 = 10.0;
 
 impl<O> Solver<O, NewtonState> for FaerNewton
 where
@@ -1636,12 +1705,16 @@ where
                     let next_grad = problem.gradient(&next)?;
                     (next, next_grad)
                 }
-                RegularizedStep::NoProgress(raw_candidate) => {
-                    // LMラダーがコストを減少させるステップを1つも見つけられなかった
-                    // （＝コスト関数が浮動小数点の底に到達）。ただし`λ=0`の
+                RegularizedStep::NoProgress(raw_candidate)
+                | RegularizedStep::BelowCostResolution(raw_candidate) => {
+                    // コスト比較ではraw Newtonステップの良否を判定できなかった
+                    // （`NoProgress`: LMラダーがコストを減少させるステップを1つも
+                    // 見つけられなかった。`BelowCostResolution`: 予測減少量がコストの
+                    // 評価値の分解能以下で、比較自体を省いた）。どちらも`λ=0`の
                     // Hessianは可逆なので、真に特異な問題（`SingularHessian`）ではない。
-                    // 次の3条件がそろったとき「最適点に到達しこれ以上進めない」とみなして
-                    // 収束を通知する（`terminate`のフォールバック）:
+                    // 代わりに勾配で判定し、次の3条件がそろったとき「最適点に到達し
+                    // これ以上進めない」とみなして収束を通知する（`terminate`の
+                    // フォールバック）:
                     //   (1) 生のNewtonステップを1回進めても勾配ノルムが実質的に減らない
                     //       （＝これ以上詰められない）。
                     //   (2) 勾配ノルムが収束目標`tol`の近傍にある（`NEWTON_STALL_GRAD_FACTOR`
@@ -1663,9 +1736,11 @@ where
                         self.stalled_at_optimum = true;
                         (param, grad)
                     } else {
-                        // まだ収束と断定できない（鞍点、または勾配がまだ目標から遠い等）。
-                        // 生のNewtonステップを適用して次反復へ進む。降下方向が最後まで
-                        // 見つからなければ`max_iter`到達で`NonConvergence`になる。
+                        // 生のNewtonステップを適用して次反復へ進む。収束点近傍の通常の
+                        // ケース（生ステップで勾配が桁で減る、条件(1)が偽）はここで
+                        // 勾配が`tol`を下回り、`terminate`の勾配基準で収束する。
+                        // 鞍点や勾配がまだ目標から遠い場合もここに来て、降下方向が
+                        // 最後まで見つからなければ`max_iter`到達で`NonConvergence`になる。
                         (raw_candidate, raw_grad)
                     }
                 }
@@ -1700,7 +1775,9 @@ where
 ///
 /// **導入経緯**: Logit/Probitのように尤度が大域凹（Hessianが半正定値）な
 /// 問題では、収束点に向かう正常な軌道上は`λ=0`の生のNewtonステップが最初の試行で
-/// 受理されるため、収束の挙動（反復回数・収束点）は変わらない。
+/// 受理される（収束点近傍の最後の1〜2反復は、下記の「予測減少量がコストの分解能以下の
+/// 場合」の分岐で同じ生のステップが比較なしに採られる）ため、収束の挙動（反復回数・
+/// 収束点）は変わらない。
 ///
 /// **設計行列が構造的に特異な入力（完全な多重共線性等）について**:
 /// Logit/Probit/Tobitの`fit()`は`run_solver`を呼ぶ前に`checked_design_matrix_qr`で
@@ -1728,6 +1805,17 @@ where
 /// `newton_step`が`MleError::SingularHessian`を返した場合（`λ`を加えても数値的に
 /// 特異なまま）は、そのまま次の`λ`を試す（即座にエラーを伝播しない）。
 ///
+/// **予測減少量がコストの分解能以下の場合（ラダーに入らない）**: Hessianが正定値で、
+/// raw Newtonステップの予測コスト減少量`½gᵀH⁻¹g`が
+/// [`NEWTON_COST_RESOLUTION_FACTOR`]`·ε·|cost|`以下なら、コスト比較もLMラダーも行わず
+/// [`RegularizedStep::BelowCostResolution`]を返す。収束点近傍（2次収束の最後の1〜2反復）
+/// ではNewtonステップによる真のコスト減少量がコストの評価誤差を下回り、
+/// `cost(θ-Δθ) < cost(θ)`の判定は丸め誤差の符号で決まる。この比較のままだと、
+/// 勾配を`tol`未満まで下げる正しいステップを棄却し、LMラダーを数十段進めて偶然
+/// コストが下がった無意味な極小ステップ（または不完全に正則化されたステップ）を受理し、
+/// 大標本でcost評価と反復を大幅に浪費する（Probit `n=1_000_000`で実測: 10反復・cost評価
+/// 155回。この分岐と補償和の導入後は5反復・各1回）。良否は呼び出し元が勾配で判定する。
+///
 /// **`MAX_LM_ATTEMPTS`回すべて失敗した場合の分岐**: `λ=0`（正則化前）の
 /// `newton_step`が成功していた（Hessianが数値的に可逆）かどうかで結果を分ける。
 /// - 可逆だった場合 → [`RegularizedStep::NoProgress`]。これは「Hessianは可逆だが、
@@ -1750,6 +1838,11 @@ enum RegularizedStep {
     /// オーダー）。`FaerNewton::next_iter`がこの候補で停滞条件を判定し、収束と判断した
     /// 場合は候補を適用せず現在点`θ`にとどまる。
     NoProgress(Vec<f64>),
+    /// Hessianが正定値で、raw Newtonステップの予測コスト減少量`½gᵀH⁻¹g`がコストの
+    /// 評価値の分解能（[`NEWTON_COST_RESOLUTION_FACTOR`]`·ε·|cost|`）以下のため、
+    /// コスト比較とLMラダーを省いた。中身は`NoProgress`と同じくraw Newtonステップを適用した
+    /// 候補`θ - H⁻¹g`で、`FaerNewton::next_iter`も`NoProgress`と同じ勾配ベースの判定で扱う。
+    BelowCostResolution(Vec<f64>),
 }
 
 fn regularized_newton_step<O>(
@@ -1772,9 +1865,20 @@ where
     // 可逆なら適用後のパラメータ`θ - H⁻¹g`も控える（`NoProgress`で返す候補。生の局所
     // 2次モデルの最良推定で、最適点との差は丸め誤差オーダー）。ループ初回（`λ=0`）は
     // この値を使い回し、`newton_step`の二重計算を避ける。
-    let raw_newton_candidate = newton_step(hessian, grad)
-        .ok()
-        .map(|step| apply_step(&step));
+    let raw_newton_step = newton_step(hessian, grad).ok();
+
+    // 予測減少量がコストの分解能以下なら、コスト比較は丸め誤差の符号を見ているだけになる
+    // （正しいステップを棄却し、LMラダーが無意味な極小ステップを偶然受理して反復とcost評価を
+    // 浪費する）。Hessianが正定値（局所2次モデルが凸）なら比較を省いてraw Newtonステップを
+    // 返し、良否の判定は呼び出し元が勾配で行う。
+    if let Some(step) = &raw_newton_step
+        && predicted_decrease_is_below_cost_resolution(grad, step, cost)
+        && cost_hessian_is_positive_definite(hessian)
+    {
+        return Ok(RegularizedStep::BelowCostResolution(apply_step(step)));
+    }
+
+    let raw_newton_candidate = raw_newton_step.map(|step| apply_step(&step));
 
     let mut lambda = 0.0_f64;
     for attempt in 0..MAX_LM_ATTEMPTS {
@@ -1816,11 +1920,30 @@ where
     }
 }
 
+/// raw Newtonステップ`Δθ = H⁻¹g`の予測コスト減少量`½gᵀΔθ`（局所2次モデル
+/// `cost(θ-Δθ) ≈ cost(θ) - gᵀΔθ + ½ΔθᵀHΔθ = cost(θ) - ½gᵀH⁻¹g`）が、コストの評価値の
+/// 分解能[`NEWTON_COST_RESOLUTION_FACTOR`]`·ε·|cost|`以下か。`cost`が非有限なら偽
+/// （分解能を定義できないため、従来のLMラダーに任せる）。
+///
+/// 予測減少量が負なら偽: Hessianが正定値なら理論上`gᵀH⁻¹g > 0`だが、悪条件なHessianでは
+/// 求解の丸め誤差で負になりうる（＝上り方向のステップ）。その場合は検証なしに採らず、
+/// 従来どおりLMラダーで検証する（rust-reviewer指摘）。
+fn predicted_decrease_is_below_cost_resolution(grad: &[f64], step: &[f64], cost: f64) -> bool {
+    if !cost.is_finite() {
+        return false;
+    }
+    let predicted_decrease = 0.5 * grad.iter().zip(step).map(|(g, s)| g * s).sum::<f64>();
+    (0.0..=NEWTON_COST_RESOLUTION_FACTOR * f64::EPSILON * cost.abs()).contains(&predicted_decrease)
+}
+
 /// コスト関数（負の対数尤度`-ℓ`）のHessianが正定値か（Cholesky分解`llt`が成功するか）。
 /// 真のMLE最大点＝`-ℓ`の最小点ではこれが正定値になる（内点最大の2階十分条件）。
 ///
-/// `FaerNewton::next_iter`が`RegularizedStep::NoProgress`を`stalled_at_optimum`（収束扱い）
-/// に昇格させる前の最終確認に使う（rust-reviewer指摘）。`newton_step`の
+/// `regularized_newton_step`が[`RegularizedStep::BelowCostResolution`]でコスト比較を
+/// 省く前提条件（局所2次モデルが凸で、raw Newtonステップが降下方向）にも使う。
+///
+/// `FaerNewton::next_iter`が`RegularizedStep::NoProgress`（または`BelowCostResolution`）を
+/// `stalled_at_optimum`（収束扱い）に昇格させる前の最終確認にも使う（rust-reviewer指摘）。`newton_step`の
 /// 列ピボットQRは可逆性（フルランク）しか見ないため、鞍点（可逆だが不定符号）でも
 /// `NoProgress`が返りうる。Tobitの`(β, logσ)`尤度は大域凹性が保証されない
 /// （`docs/spec/tobit-spec.md`3.1節）ため、勾配ノルムの小ささだけを根拠に収束と
@@ -3890,10 +4013,13 @@ mod tests {
 
     /// 大標本Newton収束判定の回帰テスト: 勾配ノルムが`tol`の床（`grad_floor > tol`）で下げ止まり、
     /// かつコスト関数が浮動小数点の底に達する問題で、`FaerNewton`が`SingularHessian`にも
-    /// `NonConvergence`にもならず**収束**する（`regularized_newton_step`が
-    /// `RegularizedStep::NoProgress`を返し、`next_iter`が勾配の停滞を確認して
-    /// `stalled_at_optimum`を立てる経路）。修正前は`regularized_newton_step`が
-    /// `MAX_LM_ATTEMPTS`回すべて失敗して`Err(MleError::SingularHessian)`を返していた。
+    /// `NonConvergence`にもならず**収束**する（予測減少量`≈1.25e-15`がコストの分解能
+    /// `≈2.2e-10`以下のため`regularized_newton_step`が`RegularizedStep::BelowCostResolution`を
+    /// 返し、`next_iter`が勾配の停滞を確認して`stalled_at_optimum`を立てる経路。LMラダー全段
+    /// 失敗の`NoProgress`経由の停滞収束は
+    /// `run_solver_newton_converges_via_stall_after_lm_ladder_exhausted`が担う）。
+    /// 停滞収束の導入前は`regularized_newton_step`が`MAX_LM_ATTEMPTS`回すべて失敗して
+    /// `Err(MleError::SingularHessian)`を返していた。
     #[test]
     fn run_solver_newton_converges_when_cost_hits_floating_point_floor_above_gradient_tol() {
         let output = run_solver(
@@ -4059,6 +4185,334 @@ mod tests {
             matches!(result, Err(MleError::NonConvergence { .. })),
             "{result:?}"
         );
+    }
+
+    /// 収束点近傍でコストの評価値に丸め誤差程度のノイズが乗る問題（大標本の対数尤度の総和の
+    /// 模擬）。コストは`COST_OFFSET + ½·H_TRUE·‖θ-target‖²`に`NoisyCostFloorProblem::jitter`
+    /// （振幅`1e-10`。`NEWTON_COST_RESOLUTION_FACTOR·ε·COST_OFFSET≈2.2e-10`未満）を加えたもの、
+    /// 勾配はノイズ無しで正確。`hessian`は真の値の`HESSIAN_SCALE`倍を返し、Newtonステップの
+    /// 誤差の縮小を毎反復`1-1/HESSIAN_SCALE`倍の1次収束にする。これにより、予測減少量が
+    /// コストのノイズを下回ってからも勾配が`tol`に届くまで複数反復が必要になり、コスト比較で
+    /// ステップを検証する実装ではLMラダーの空回りが毎反復起きる。
+    /// `cost_evaluations`は`cost`の呼び出し回数（`run_solver`が所有権を取るため`Rc`で共有）。
+    #[derive(Clone)]
+    struct NoisyCostExactGradientProblem {
+        target: Vec<f64>,
+        cost_evaluations: std::rc::Rc<Cell<u64>>,
+    }
+
+    impl NoisyCostExactGradientProblem {
+        const COST_OFFSET: f64 = 1.0e5;
+        const H_TRUE: f64 = 1.0e6;
+        const HESSIAN_SCALE: f64 = 1.5;
+
+        fn new() -> Self {
+            Self {
+                target: vec![2.0, -1.0],
+                cost_evaluations: std::rc::Rc::new(Cell::new(0)),
+            }
+        }
+    }
+
+    impl CostFunction for NoisyCostExactGradientProblem {
+        type Param = Vec<f64>;
+        type Output = f64;
+
+        fn cost(&self, param: &Self::Param) -> Result<Self::Output, OptimizerError> {
+            self.cost_evaluations.set(self.cost_evaluations.get() + 1);
+            let quadratic: f64 = param
+                .iter()
+                .zip(self.target.iter())
+                .map(|(p, t)| 0.5 * Self::H_TRUE * (p - t).powi(2))
+                .sum();
+            Ok(Self::COST_OFFSET + quadratic + NoisyCostFloorProblem::jitter(param))
+        }
+    }
+
+    impl Gradient for NoisyCostExactGradientProblem {
+        type Param = Vec<f64>;
+        type Gradient = Vec<f64>;
+
+        fn gradient(&self, param: &Self::Param) -> Result<Self::Gradient, OptimizerError> {
+            Ok(param
+                .iter()
+                .zip(self.target.iter())
+                .map(|(p, t)| Self::H_TRUE * (p - t))
+                .collect())
+        }
+    }
+
+    impl Hessian for NoisyCostExactGradientProblem {
+        type Param = Vec<f64>;
+        type Hessian = Vec<Vec<f64>>;
+
+        fn hessian(&self, _param: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
+            let h = Self::HESSIAN_SCALE * Self::H_TRUE;
+            Ok(vec![vec![h, 0.0], vec![0.0, h]])
+        }
+    }
+
+    /// 予測減少量がコストの分解能を下回った後は、コスト比較とLMラダーを省いてraw Newton
+    /// ステップを採り、勾配基準（`tol`）で**収束**する。cost評価は1反復あたりほぼ1回
+    /// （`next_iter`冒頭の現在点の評価）に収まる。`BelowCostResolution`の分岐を無効化すると、
+    /// ノイズに埋もれたコスト比較でraw ステップが棄却されLMラダーが空回りし、cost評価が
+    /// 150回超に膨れる（実測: 26反復で156回）。
+    #[test]
+    fn run_solver_newton_skips_cost_comparison_below_cost_resolution() {
+        let problem = NoisyCostExactGradientProblem::new();
+        let cost_evaluations = std::rc::Rc::clone(&problem.cost_evaluations);
+        let output = run_solver(
+            problem,
+            SolverType::Newton,
+            vec![0.0, 0.0],
+            100,
+            1e-6,
+            1,
+            true,
+            SeparationNormCheck::Disabled,
+        )
+        .unwrap();
+
+        assert!(output.converged, "{output:?}");
+        let grad = NoisyCostExactGradientProblem::new()
+            .gradient(&output.params)
+            .unwrap();
+        assert!(l2_norm(&grad) < 1e-6, "{grad:?}");
+        assert!(
+            cost_evaluations.get() <= 2 * output.n_iter as u64,
+            "{} cost evaluations in {} iterations",
+            cost_evaluations.get(),
+            output.n_iter
+        );
+    }
+
+    /// `regularized_newton_step`を直接検証するための、`cost`が常に同じ値を返す問題
+    /// （どのステップもコストを狭義に減少させない＝LMラダーは必ず全段失敗する）。
+    /// `evaluations`は`cost`の呼び出し回数。
+    struct ConstantCostProblem {
+        cost: f64,
+        evaluations: Cell<u64>,
+    }
+
+    impl CostFunction for ConstantCostProblem {
+        type Param = Vec<f64>;
+        type Output = f64;
+
+        fn cost(&self, _param: &Self::Param) -> Result<Self::Output, OptimizerError> {
+            self.evaluations.set(self.evaluations.get() + 1);
+            Ok(self.cost)
+        }
+    }
+
+    fn constant_cost_problem(cost: f64) -> Problem<ConstantCostProblem> {
+        Problem::new(ConstantCostProblem {
+            cost,
+            evaluations: Cell::new(0),
+        })
+    }
+
+    fn constant_cost_evaluations(problem: &mut Problem<ConstantCostProblem>) -> u64 {
+        problem.take_problem().map_or(0, |p| p.evaluations.get())
+    }
+
+    /// Hessianが正定値で予測減少量`½gᵀH⁻¹g`（ここでは`½·2·(1e-3)²/1e6=1e-12`）が
+    /// `NEWTON_COST_RESOLUTION_FACTOR·ε·|cost|`（`≈2.2e-10`）以下なら、costを1回も評価せずに
+    /// raw Newtonステップ`θ - H⁻¹g`を`BelowCostResolution`で返す。
+    #[test]
+    fn regularized_newton_step_returns_raw_step_without_cost_comparison_below_resolution() {
+        let mut problem = constant_cost_problem(1.0e5);
+        let param = [2.0, -1.0];
+        let grad = [1.0e-3, -1.0e-3];
+        let hessian = vec![vec![1.0e6, 0.0], vec![0.0, 1.0e6]];
+
+        let step = regularized_newton_step(&mut problem, &param, &grad, &hessian, 1.0e5).unwrap();
+
+        let RegularizedStep::BelowCostResolution(candidate) = step else {
+            panic!("expected BelowCostResolution");
+        };
+        assert!(
+            (candidate[0] - (2.0 - 1.0e-9)).abs() < 1e-15,
+            "{candidate:?}"
+        );
+        assert!(
+            (candidate[1] - (-1.0 + 1.0e-9)).abs() < 1e-15,
+            "{candidate:?}"
+        );
+        assert_eq!(constant_cost_evaluations(&mut problem), 0);
+    }
+
+    /// 予測減少量が分解能以下でも、Hessianが不定符号（鞍点）ならコスト比較を省かず、従来どおり
+    /// LMラダーで検証する（ここではコストが一定のため全段失敗して`NoProgress`になる）。
+    #[test]
+    fn regularized_newton_step_keeps_ladder_for_indefinite_hessian_below_resolution() {
+        let mut problem = constant_cost_problem(1.0e5);
+        let hessian = vec![vec![1.0e6, 0.0], vec![0.0, -1.0e6]];
+
+        let step =
+            regularized_newton_step(&mut problem, &[0.0, 0.0], &[1.0e-3, 0.0], &hessian, 1.0e5)
+                .unwrap();
+
+        assert!(matches!(step, RegularizedStep::NoProgress(_)));
+        assert_eq!(
+            constant_cost_evaluations(&mut problem),
+            MAX_LM_ATTEMPTS as u64
+        );
+    }
+
+    /// 予測減少量が分解能を上回る（ここでは`½·1²/1=0.5`）ならコスト比較が意味を持つため、
+    /// Hessianが正定値でも従来どおりLMラダーで検証する。
+    #[test]
+    fn regularized_newton_step_keeps_ladder_when_predicted_decrease_exceeds_resolution() {
+        let mut problem = constant_cost_problem(1.0e5);
+        let hessian = vec![vec![1.0]];
+
+        let step = regularized_newton_step(&mut problem, &[0.0], &[1.0], &hessian, 1.0e5).unwrap();
+
+        assert!(matches!(step, RegularizedStep::NoProgress(_)));
+        assert_eq!(
+            constant_cost_evaluations(&mut problem),
+            MAX_LM_ATTEMPTS as u64
+        );
+    }
+
+    #[test]
+    fn predicted_decrease_is_below_cost_resolution_compares_half_gtd_with_scaled_epsilon() {
+        let cost = 1.0e5;
+        let resolution = NEWTON_COST_RESOLUTION_FACTOR * f64::EPSILON * cost;
+        // `½gᵀΔθ = ½·2·resolution = resolution`（境界上は分解能以下とみなす）。
+        assert!(predicted_decrease_is_below_cost_resolution(
+            &[1.0],
+            &[2.0 * resolution],
+            cost
+        ));
+        assert!(!predicted_decrease_is_below_cost_resolution(
+            &[1.0],
+            &[4.0 * resolution],
+            cost
+        ));
+        // コストの符号によらず`|cost|`で比較する（負の対数尤度は負にもなりうる）。
+        assert!(predicted_decrease_is_below_cost_resolution(
+            &[1.0],
+            &[2.0 * resolution],
+            -cost
+        ));
+        // 非有限のコストでは分解能を定義できないため常に偽（LMラダーに任せる）。
+        assert!(!predicted_decrease_is_below_cost_resolution(
+            &[1.0],
+            &[0.0],
+            f64::INFINITY
+        ));
+        assert!(!predicted_decrease_is_below_cost_resolution(
+            &[1.0],
+            &[0.0],
+            f64::NAN
+        ));
+    }
+
+    /// 予測減少量が負（Hessianは正定値だが求解の丸め誤差で上り方向になった場合の模擬）なら、
+    /// 分解能以下でも検証なしに採らずLMラダーに回す。
+    #[test]
+    fn predicted_decrease_is_below_cost_resolution_is_false_for_negative_decrease() {
+        assert!(!predicted_decrease_is_below_cost_resolution(
+            &[1.0],
+            &[-1.0e-20],
+            1.0e5
+        ));
+    }
+
+    /// コストが一定値`0`（分解能の閾値も`0`になり`BelowCostResolution`に入らない）、Hessianは
+    /// 正定値、勾配は`tol < GRAD < NEWTON_STALL_GRAD_FACTOR·tol`で下げ止まる問題。
+    /// LMラダーが全段失敗して`NoProgress`になり、停滞3条件がそろうため`stalled_at_optimum`
+    /// 経由で**収束**する（`BelowCostResolution`の導入後は`FloatingPointFloorProblem`の
+    /// テストがこの経路を通らなくなったため、`NoProgress`経由の停滞収束を単独で押さえる）。
+    #[derive(Clone)]
+    struct FlatCostGradientFloorProblem;
+
+    impl FlatCostGradientFloorProblem {
+        const GRAD: f64 = 5.0e-5;
+    }
+
+    impl CostFunction for FlatCostGradientFloorProblem {
+        type Param = Vec<f64>;
+        type Output = f64;
+
+        fn cost(&self, _param: &Self::Param) -> Result<Self::Output, OptimizerError> {
+            Ok(0.0)
+        }
+    }
+
+    impl Gradient for FlatCostGradientFloorProblem {
+        type Param = Vec<f64>;
+        type Gradient = Vec<f64>;
+
+        fn gradient(&self, _param: &Self::Param) -> Result<Self::Gradient, OptimizerError> {
+            Ok(vec![Self::GRAD])
+        }
+    }
+
+    impl Hessian for FlatCostGradientFloorProblem {
+        type Param = Vec<f64>;
+        type Hessian = Vec<Vec<f64>>;
+
+        fn hessian(&self, _param: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
+            Ok(vec![vec![1.0]])
+        }
+    }
+
+    #[test]
+    fn run_solver_newton_converges_via_stall_after_lm_ladder_exhausted() {
+        let output = run_solver(
+            FlatCostGradientFloorProblem,
+            SolverType::Newton,
+            vec![0.0],
+            20,
+            1e-6,
+            1,
+            true,
+            SeparationNormCheck::Disabled,
+        )
+        .unwrap();
+
+        assert!(output.converged, "{output:?}");
+        // 停滞と判定した反復では生ステップを適用せず、現在点（初期値）にとどまる。
+        assert_eq!(output.params, vec![0.0]);
+        assert_eq!(output.n_iter, 1);
+    }
+
+    #[test]
+    fn compensated_sum_recovers_low_order_bits_lost_by_naive_summation() {
+        // 素朴な逐次加算では`1e16 + 1.0`で`1.0`が丸めにより失われ、結果は0になる。
+        let values = [1.0e16, 1.0, -1.0e16];
+        assert_eq!(values.iter().sum::<f64>(), 0.0);
+        assert_eq!(compensated_sum(values), 1.0);
+        // 小さい値が先に来る順序（`|value| > |sum|`の分岐）でも同じく回収できる。
+        assert_eq!(compensated_sum([1.0, 1.0e16, -1.0e16]), 1.0);
+        assert_eq!(compensated_sum(std::iter::empty()), 0.0);
+    }
+
+    /// 非有限値の扱いは素朴な和と同じ（補正項の`∞-∞=NaN`を持ち込まない）。
+    #[test]
+    fn compensated_sum_propagates_non_finite_values_like_naive_summation() {
+        assert_eq!(
+            compensated_sum([1.0, f64::NEG_INFINITY, 2.0]),
+            f64::NEG_INFINITY
+        );
+        assert_eq!(compensated_sum([f64::INFINITY, 1.0]), f64::INFINITY);
+        assert!(compensated_sum([f64::INFINITY, f64::NEG_INFINITY]).is_nan());
+        assert!(compensated_sum([1.0, f64::NAN]).is_nan());
+    }
+
+    #[test]
+    fn compensated_sum_of_many_terms_is_accurate_to_a_few_ulps() {
+        // `0.1`は2進で正確に表せないため、素朴な逐次加算では誤差が項数に応じて蓄積する。
+        // 補償和は正確な和`n·fl(0.1)`（`fl(0.1)`は`0.1`の倍精度表現）に数ULPで一致する。
+        let n = 1_000_000;
+        let exact = n as f64 * 0.1;
+        let naive: f64 = std::iter::repeat_n(0.1, n).sum();
+        let compensated = compensated_sum(std::iter::repeat_n(0.1, n));
+        let ulp = f64::EPSILON * exact;
+        assert!((compensated - exact).abs() <= 2.0 * ulp, "{compensated}");
+        assert!((naive - exact).abs() > 100.0 * ulp, "{naive}");
     }
 
     #[test]

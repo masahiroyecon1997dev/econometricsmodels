@@ -72,6 +72,18 @@
         ]
       }
     },
+    "hausman_dk_bandwidth": {
+      "0": {
+        "hausman_statistic": 89.1082549308872,
+        "hausman_df": 2,
+        "hausman_p_value": 4.47083143389394e-20
+      },
+      "2": {
+        "hausman_statistic": 107.965237370994,
+        "hausman_df": 2,
+        "hausman_p_value": 3.59456702697305e-24
+      }
+    },
     "hausman": {
       "classical": {
         "hausman_statistic": 16.7810115621968,
@@ -176,6 +188,18 @@
           -0.388514112107258,
           0.0205070892500206
         ]
+      }
+    },
+    "hausman_dk_bandwidth": {
+      "0": {
+        "hausman_statistic": 35.7572791184109,
+        "hausman_df": 2,
+        "hausman_p_value": 1.71951312646677e-08
+      },
+      "2": {
+        "hausman_statistic": 50.5915511846782,
+        "hausman_df": 2,
+        "hausman_p_value": 1.03319963668132e-11
       }
     },
     "hausman": {
@@ -494,6 +518,18 @@
           -0.395188033458946,
           0.00558957857400791
         ]
+      }
+    },
+    "hausman_dk_bandwidth": {
+      "0": {
+        "hausman_statistic": 47.1002067049183,
+        "hausman_df": 2,
+        "hausman_p_value": 5.91997763179253e-11
+      },
+      "2": {
+        "hausman_statistic": 75.0185749079378,
+        "hausman_df": 2,
+        "hausman_p_value": 5.12770980090516e-17
       }
     },
     "hausman": {
@@ -1675,10 +1711,10 @@
   },
   "_meta": {
     "method": "re",
-    "generated_at": "2026-09-27T04:58:45.340523+00:00",
+    "generated_at": "2026-09-27T05:23:00.983870+00:00",
     "reference": "plm (R)",
     "r_version": "4.5.3",
     "plm_version": "2.6.7",
-    "note": "hc2/hc3・ハウスマン検定は、linearmodelsが提供しない/実装を持たないためplmのみが参照値になる単一参照実装の例外（モジュールdoc参照）。plmの変量効果分散成分推定（Swamy-Arora）はlinearmodelsと僅かに異なる実装のため、点推定自体が不均衡パネルで最大0.1%程度乖離する（実測確認済み、実装バグではない）。テストコード側ではこのフィクスチャ全体をクロスチェック水準（1e-2程度）の緩い許容誤差で比較すること（.claude/rules/testing-policy.md「許容誤差」参照）。t検定（test_stats/p_values/conf_int）はplmの既定であるz検定（漸近正規近似）ではなく、本実装と同じt(df_resid)分布の式でcoef/seから計算し直している（run_plm_benchmark.Rのコメント参照）。ハウスマン検定はplm::phtest(method = \"aux\", effect = \"individual\", vcov = ...)（回帰ベース、常に1-way、RE本体のcov_typeに連動）の値で、\"hausman\"キー配下にcov_type別に持つ。不均衡パネルではSwamy-Arora分散成分の差でlinearmodels準拠の本実装と数％ずれる（本スクリプトのモジュールdoc参照）。wagepanはre.jsonと同じmarried/union/expersqを使用。"
+    "note": "hc2/hc3・ハウスマン検定は、linearmodelsが提供しない/実装を持たないためplmのみが参照値になる単一参照実装の例外（モジュールdoc参照）。plmの変量効果分散成分推定（Swamy-Arora）はlinearmodelsと僅かに異なる実装のため、点推定自体が不均衡パネルで最大0.1%程度乖離する（実測確認済み、実装バグではない）。テストコード側ではこのフィクスチャ全体をクロスチェック水準（1e-2程度）の緩い許容誤差で比較すること（.claude/rules/testing-policy.md「許容誤差」参照）。t検定（test_stats/p_values/conf_int）はplmの既定であるz検定（漸近正規近似）ではなく、本実装と同じt(df_resid)分布の式でcoef/seから計算し直している（run_plm_benchmark.Rのコメント参照）。ハウスマン検定はplm::phtest(method = \"aux\", effect = \"individual\", vcov = ...)（回帰ベース、常に1-way、RE本体のcov_typeに連動）の値で、\"hausman\"キー配下にcov_type別に持つ（dk_bandwidth明示指定は\"hausman_dk_bandwidth\"キー配下）。\"hausman\"の値がnullのエントリは、ロバスト共分散が構造的に特異で本実装のfit()がエラーになるケース（plmに参照値なし）。不均衡パネルではSwamy-Arora分散成分の差でlinearmodels準拠の本実装と数％ずれる（本スクリプトのモジュールdoc参照）。wagepanはre.jsonと同じmarried/union/expersqを使用。"
   }
 }

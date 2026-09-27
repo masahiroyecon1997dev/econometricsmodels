@@ -143,8 +143,8 @@
 //! `plm::phtest(method = "aux", effect = "individual")`相当、`re_hausman_test`private関数）。
 //! RE本体の回帰に渡した準偏差変換済みの`y*`を、定数項（**未変換の`1`**、`plm`と同じ扱いで
 //! 不均衡パネルではθ変換済み定数列を使う版と値が異なる）・準偏差変換済みの傾き`X*`・
-//! within変換済みの`X̃`にpooled OLS（classical共分散）で回帰し、`X̃`の係数`k`個が同時に
-//! ゼロというWald検定を行う。統計量は`k × F`、p値は`χ²_k.sf(stat)`、`hausman_df = k`。
+//! within変換済みの`X̃`にpooled OLSで回帰し、`X̃`の係数`k`個が同時に
+//! ゼロというWald検定を行う（共分散は下記「`cov_type`連動」）。統計量は`k × F`、p値は`χ²_k.sf(stat)`、`hausman_df = k`。
 //! 統計量は構造的に非負になるため、旧方式（`Var(β_FE) - Var(β_RE)`の二次形式）の
 //! 非正定値の問題・`abs()`による符号処理は存在しない。
 //!
@@ -161,11 +161,12 @@
 //!   **RE本体の標準誤差と補正式が混在する**: Cluster/Hc1の小標本補正は`OlsEstimator`
 //!   （Stata・R型の`G/(G-1)·(n-1)/(n-k)`等）であり、RE本体（linearmodels型）とは異なる。
 //!   補助回帰はRE本体とは別の回帰（説明変数`2k+1`個）で、違いは有限標本の補正のみ。
-//!   統計量は`cov_type`によらずWald統計量（`k × F`）。
+//!   統計量は`cov_type`によらずWald統計量（`k × F`）。DKは時点数`T`→∞の漸近論に
+//!   基づくため、`T`が短いと検定サイズが歪みうる。
 //! - **`None`になるのは比較対象の傾き係数が0個（`input.x()`が空）の場合のみ**。
 //!   補助回帰のランク落ち・クラスター数不足（`G <= 2k`）・DK/ロバスト共分散部分行列の
-//!   ほぼ特異性（DKは時点数`T`に対し検定対象`k`個が`T-1`以上）など、計算自体が成立しない場合は`PanelError::HausmanTestFailed`として
-//!   `fit()`全体を失敗させる（設計行列の多重共線性でエラーにするのと同じ方針）。
+//!   ほぼ特異性（DKは時点数`T`に対し検定対象`k`個が`T-1`以上）など、計算自体が成立しない
+//!   場合は`PanelError::HausmanTestFailed`として`fit()`全体を失敗させる（設計行列の多重共線性でエラーにするのと同じ方針）。
 //!   内部FE推定の失敗（singleton・時間不変変数等）は`swamy_arora_variance_components`が
 //!   先に失敗するためRE本体もErrになる。
 
@@ -617,7 +618,7 @@ pub(crate) fn quasi_demean_transform(
 /// 比較対象の傾き係数が0個なら`Ok(None)`（検定対象が無い）。補助回帰・Wald検定の失敗
 /// （ランク落ち・クラスター数不足・共分散部分行列のほぼ特異性等）は、計算自体が成立しない
 /// ため`PanelError::HausmanTestFailed`として伝播し`fit()`全体を失敗させる（設計行列の
-/// 多重共線性と同じ方針。モジュールdoc「`None`フォールバック」参照）。
+/// 多重共線性と同じ方針。モジュールdoc「`None`になるのは…」の項参照）。
 #[allow(clippy::too_many_arguments)]
 fn re_hausman_test(
     fe: &FeEstimator,
@@ -645,42 +646,47 @@ fn re_hausman_test(
     let aux_input = OlsInput::from_columns(y_star, &columns, names, true, dep_var_name.to_string())
         .map_err(to_err)?;
 
-    let f_stat = match cov_type {
-        ReCovType::Dk { bandwidth } => {
-            let aux = OlsEstimator::fit(aux_input, CovType::Classical, confidence_level)
-                .map_err(to_err)?;
-            let n = aux.input().nobs();
-            let k_aux = aux.input().k();
-            let df_resid = n - k_aux;
-            // `time`の有無・バンド幅はRE本体のDK計算（`fit()`）が先に検証済み。
-            let time = time.ok_or(PanelError::DkRequiresTime)?;
-            let t_periods = count_unique(time);
-            let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
-            let x_mat = aux.input().x();
-            let xtx_inv = xtx_inverse(x_mat, k_aux)?;
-            let residuals: Vec<f64> = (0..n).map(|i| *aux.residuals().get(i, 0)).collect();
-            let cov_params = panel_driscoll_kraay_cov_params(
-                x_mat, &residuals, &xtx_inv, time, df_resid, bw, t_periods,
-            );
-            wald_f_test(aux.params(), &cov_params, k_aux - k, k, df_resid)
-                .map_err(to_err)?
-                .0
-        }
-        _ => {
-            let ols_cov_type = match cov_type {
-                ReCovType::Classical => CovType::Classical,
-                ReCovType::Hc1 => CovType::Hc1,
-                ReCovType::Hc2 => CovType::Hc2,
-                ReCovType::Hc3 => CovType::Hc3,
-                ReCovType::Cluster { groups } => CovType::Cluster {
-                    groups: Some(groups.clone().unwrap_or_else(|| entity.to_vec())),
-                },
-                ReCovType::Dk { .. } => unreachable!("Dk is handled in the branch above"),
-            };
-            let aux =
-                OlsEstimator::fit(aux_input, ols_cov_type, confidence_level).map_err(to_err)?;
-            aux.wald_test_last_columns(k).map_err(to_err)?.0
-        }
+    // OLSの`CovType`にそのまま対応するcov_type。Dkは`OlsEstimator`のHAC（Newey-West）とは
+    // 別物のため`None`にして下の専用経路へ回す。
+    let ols_cov_type = match cov_type {
+        ReCovType::Classical => Some(CovType::Classical),
+        ReCovType::Hc1 => Some(CovType::Hc1),
+        ReCovType::Hc2 => Some(CovType::Hc2),
+        ReCovType::Hc3 => Some(CovType::Hc3),
+        ReCovType::Cluster { groups } => Some(CovType::Cluster {
+            groups: Some(groups.clone().unwrap_or_else(|| entity.to_vec())),
+        }),
+        ReCovType::Dk { .. } => None,
+    };
+
+    let f_stat = if let Some(ols_cov_type) = ols_cov_type {
+        let aux = OlsEstimator::fit(aux_input, ols_cov_type, confidence_level).map_err(to_err)?;
+        aux.wald_test_last_columns(k).map_err(to_err)?.0
+    } else {
+        // Dk: `params`・`residuals`はcov_typeによらないため、Classicalで当てはめた補助回帰から
+        // 得て、共分散だけDriscoll-Kraayで計算し直す。
+        let aux =
+            OlsEstimator::fit(aux_input, CovType::Classical, confidence_level).map_err(to_err)?;
+        let n = aux.input().nobs();
+        let k_aux = aux.input().k();
+        let df_resid = n - k_aux;
+        let bandwidth = match cov_type {
+            ReCovType::Dk { bandwidth } => *bandwidth,
+            _ => None,
+        };
+        // `time`の有無・バンド幅はRE本体のDK計算（`fit()`）が先に検証済み。
+        let time = time.ok_or(PanelError::DkRequiresTime)?;
+        let t_periods = count_unique(time);
+        let bw = resolve_dk_bandwidth(bandwidth, t_periods)?;
+        let x_mat = aux.input().x();
+        let xtx_inv = xtx_inverse(x_mat, k_aux)?;
+        let residuals: Vec<f64> = (0..n).map(|i| *aux.residuals().get(i, 0)).collect();
+        let cov_params = panel_driscoll_kraay_cov_params(
+            x_mat, &residuals, &xtx_inv, time, df_resid, bw, t_periods,
+        );
+        wald_f_test(aux.params(), &cov_params, k_aux - k, k, df_resid)
+            .map_err(to_err)?
+            .0
     };
 
     let stat = k as f64 * f_stat;
@@ -2525,6 +2531,27 @@ mod tests {
                 })
             }
         ));
+    }
+
+    #[test]
+    fn re_estimator_fit_hausman_dk_default_bandwidth_matches_auto_resolved_value() {
+        // `bandwidth: None`は`floor(4*(T/100)^(2/9))`（T=3で1）に解決され、
+        // 明示的に同じ値を渡した場合と一致する。
+        let time = strings(&["1", "2", "3", "1", "2", "1", "2", "3", "1", "2", "1", "2"]);
+        let auto = ReEstimator::fit(
+            hausman_two_slope_input(Some(&time)),
+            ReCovType::Dk { bandwidth: None },
+            0.95,
+        )
+        .unwrap();
+        let explicit = ReEstimator::fit(
+            hausman_two_slope_input(Some(&time)),
+            ReCovType::Dk { bandwidth: Some(1) },
+            0.95,
+        )
+        .unwrap();
+        assert_eq!(auto.hausman_statistic(), explicit.hausman_statistic());
+        assert_eq!(auto.hausman_p_value(), explicit.hausman_p_value());
     }
 
     #[test]

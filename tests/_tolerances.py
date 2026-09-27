@@ -298,7 +298,27 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # unbalancedシナリオのみ、plm/linearmodelsの分散成分（σ_u²）推定の
         # 差でθが変わり統計量に増幅されるため、専用に緩めたrtolを使う（test_re_crosscheck.pyの`_UNBALANCED_
         # HAUSMAN_SCENARIO`参照）。
-        "rtol_hausman_unbalanced": 0.15,
+        # cov_type別の実測最大相対誤差（統計量）: classical 1.3%・hc1〜hc3 1.5%・
+        # dk 1.5%・cluster 0.024%。クラスターはσ_uの差が相殺されやすく桁違いに小さい
+        # ため、一律に緩めず実測にマージンを載せて分ける。
+        "rtol_hausman_unbalanced": {
+            "classical": 0.03,
+            "hc1": 0.03,
+            "hc2": 0.03,
+            "hc3": 0.03,
+            "cluster": 1e-3,
+            "dk": 0.03,
+        },
+        # 同・p値。裾確率で統計量の差が増幅される（実測最大相対誤差: classical 11%・
+        # hc1 13%・hc2 13%・hc3 12%。cluster・dkは統計量と同水準）。
+        "rtol_hausman_p_value_unbalanced": {
+            "classical": 0.2,
+            "hc1": 0.2,
+            "hc2": 0.2,
+            "hc3": 0.2,
+            "cluster": 1e-2,
+            "dk": 1e-2,
+        },
         # high_condition_numberシナリオのdkのみ、悪条件の設計行列で補助回帰の
         # ロバスト共分散の丸め誤差が増幅され、機械精度から外れる（実測最大
         # 相対誤差1.2e-7にマージン。他のcov_type・シナリオは機械精度一致）。

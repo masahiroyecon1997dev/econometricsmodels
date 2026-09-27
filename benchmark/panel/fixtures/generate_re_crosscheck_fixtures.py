@@ -18,6 +18,7 @@
   持つ（`run_plm_hausman_benchmark.R`のモジュールコメントにplmのvcovとの
   対応を記載）。比較は常に1-wayで、`REOptions.time`の有無によらない。
   dkのバンド幅は`floor(4*(T/100)^(2/9))`を`maxlag`に明示的に渡す。
+  `dk_bandwidth`明示指定は`"hausman_dk_bandwidth"`キー配下（`{バンド幅: 値}`）。
   ロバスト共分散が構造的に特異になるケース（`_STRUCTURALLY_SINGULAR`）は`null`
   （本実装は`fit()`がエラーになる）。
 
@@ -89,6 +90,13 @@ WAGEPAN_COV_TYPES = ["hc2", "hc3"]
 HAUSMAN_COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster", "dk"]
 HAUSMAN_KEY = "hausman"
 
+# `dk_bandwidth`を明示指定した場合のハウスマン検定（`vcovSCC`の`maxlag`に対応）。
+# 自動選択（`_dk_bandwidth`）だけではT=6の合成シナリオで実質1に固定されるため、
+# 別のバンド幅でも一致することを確認する。
+HAUSMAN_DK_BANDWIDTH_KEY = "hausman_dk_bandwidth"
+HAUSMAN_DK_BANDWIDTHS = [0, 2]
+HAUSMAN_DK_BANDWIDTH_SCENARIOS = ["baseline", "autocorrelated", "unbalanced"]
+
 # 補助回帰の傾き係数`2k`個に対し、クラスター数G（cluster）・時点数T（dk）が少なく
 # ロバスト共分散`Ŝ`が`rank(Ŝ) <= G-1`（またはT）で構造的に特異になるケース。
 # 本実装は`fit()`がエラーにする（`re-spec.md`3.7節）。plmはdkでエラー、clusterでは
@@ -113,8 +121,10 @@ def _run_hausman(
     *,
     entity_col: str = "entity",
     time_col: str = "time",
+    maxlag: int | None = None,
 ) -> dict:
-    maxlag = _dk_bandwidth(csv_path, time_col) if cov_type == "dk" else None
+    if cov_type == "dk" and maxlag is None:
+        maxlag = _dk_bandwidth(csv_path, time_col)
     return run_re_hausman_plm_r(
         csv_path,
         formula,
@@ -155,6 +165,16 @@ def build_fixtures() -> dict:
         }
         csv_path = DATA_DIR / f"fe_{scenario}.csv"
         x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
+        if scenario in HAUSMAN_DK_BANDWIDTH_SCENARIOS:
+            fixtures[scenario][HAUSMAN_DK_BANDWIDTH_KEY] = {
+                str(bw): _run_hausman(
+                    csv_path,
+                    f"y ~ {' + '.join(x_cols)}",
+                    "dk",
+                    maxlag=bw,
+                )
+                for bw in HAUSMAN_DK_BANDWIDTHS
+            }
         fixtures[scenario][HAUSMAN_KEY] = {
             cov_type: (
                 None
@@ -219,7 +239,10 @@ def build_fixtures() -> dict:
             "計算し直している（run_plm_benchmark.Rのコメント参照）。"
             'ハウスマン検定はplm::phtest(method = "aux", effect = '
             '"individual", vcov = ...)（回帰ベース、常に1-way、RE本体の'
-            'cov_typeに連動）の値で、"hausman"キー配下にcov_type別に持つ。'
+            'cov_typeに連動）の値で、"hausman"キー配下にcov_type別に持つ'
+            '（dk_bandwidth明示指定は"hausman_dk_bandwidth"キー配下）。'
+            '"hausman"の値がnullのエントリは、ロバスト共分散が構造的に特異で'
+            "本実装のfit()がエラーになるケース（plmに参照値なし）。"
             "不均衡パネルではSwamy-Arora分散成分の差でlinearmodels準拠の"
             "本実装と数％ずれる（本スクリプトのモジュールdoc参照）。"
             "wagepanはre.jsonと同じmarried/union/expersqを使用。"

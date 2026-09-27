@@ -60,6 +60,9 @@ from benchmark.panel.fixtures.generate_fe_fixtures import NUMERIC_SCENARIOS
 from benchmark.panel.fixtures.generate_re_crosscheck_fixtures import (
     COV_TYPES,
     HAUSMAN_COV_TYPES,
+    HAUSMAN_DK_BANDWIDTH_KEY,
+    HAUSMAN_DK_BANDWIDTH_SCENARIOS,
+    HAUSMAN_DK_BANDWIDTHS,
     HAUSMAN_KEY,
 )
 
@@ -76,6 +79,9 @@ RTOL_HAUSMAN = TOLERANCES["re_crosscheck"]["rtol_hausman"]
 ATOL_HAUSMAN = TOLERANCES["re_crosscheck"]["atol_hausman"]
 RTOL_HAUSMAN_UNBALANCED = TOLERANCES["re_crosscheck"][
     "rtol_hausman_unbalanced"
+]  # cov_type別
+RTOL_HAUSMAN_P_VALUE_UNBALANCED = TOLERANCES["re_crosscheck"][
+    "rtol_hausman_p_value_unbalanced"
 ]
 RTOL_HAUSMAN_ILL_CONDITIONED = TOLERANCES["re_crosscheck"][
     "rtol_hausman_ill_conditioned"
@@ -113,10 +119,17 @@ def _check_result(res, ref: dict, label: str) -> None:
 
 
 def _check_hausman(
-    res, ref: dict, label: str, *, scenario: str | None = None
+    res,
+    ref: dict,
+    label: str,
+    *,
+    cov_type: str,
+    scenario: str | None = None,
 ) -> None:
+    rtol_p_value = None
     if scenario == _UNBALANCED_HAUSMAN_SCENARIO:
-        rtol_hausman = RTOL_HAUSMAN_UNBALANCED
+        rtol_hausman = RTOL_HAUSMAN_UNBALANCED[cov_type]
+        rtol_p_value = RTOL_HAUSMAN_P_VALUE_UNBALANCED[cov_type]
     elif scenario == _ILL_CONDITIONED_HAUSMAN_SCENARIO:
         rtol_hausman = RTOL_HAUSMAN_ILL_CONDITIONED
     else:
@@ -132,7 +145,7 @@ def _check_hausman(
         res.hausman_p_value,
         ref["hausman_p_value"],
         f"{label}/hausman_p_value",
-        rtol=rtol_hausman,
+        rtol=rtol_hausman if rtol_p_value is None else rtol_p_value,
         atol=ATOL_HAUSMAN_P_VALUE,
     )
     assert res.hausman_df == ref["hausman_df"], f"{label}/hausman_df"
@@ -205,7 +218,11 @@ def test_synthetic_hausman_matches_plm(crosscheck, scenario, cov_type):
         return
 
     _check_hausman(
-        model.fit(), ref, f"{scenario}/{cov_type}", scenario=scenario
+        model.fit(),
+        ref,
+        f"{scenario}/{cov_type}",
+        cov_type=cov_type,
+        scenario=scenario,
     )
 
 
@@ -225,4 +242,115 @@ def test_wagepan_hausman_matches_plm(crosscheck, cov_type):
         res,
         crosscheck["wagepan"][HAUSMAN_KEY][cov_type],
         f"wagepan/{cov_type}",
+        cov_type=cov_type,
     )
+
+
+@pytest.mark.parametrize("bandwidth", HAUSMAN_DK_BANDWIDTHS)
+@pytest.mark.parametrize("scenario", HAUSMAN_DK_BANDWIDTH_SCENARIOS)
+def test_hausman_dk_explicit_bandwidth_matches_plm(
+    crosscheck, scenario, bandwidth
+):
+    """`dk_bandwidth`を明示指定した場合も`vcovSCC(maxlag=bandwidth)`と一致する。"""
+    df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
+    res = RE(
+        df,
+        y="y",
+        x=["x1", "x2"],
+        entity="entity",
+        options=REOptions(cov_type="dk", time="time", dk_bandwidth=bandwidth),
+    ).fit()
+
+    _check_hausman(
+        res,
+        crosscheck[scenario][HAUSMAN_DK_BANDWIDTH_KEY][str(bandwidth)],
+        f"{scenario}/dk/bandwidth={bandwidth}",
+        cov_type="dk",
+        scenario=scenario,
+    )
+
+
+# ── plmにリファレンスが無いケース・失敗パスの最小再現 ──────────────────
+
+
+def test_hausman_cluster_with_non_entity_column():
+    """`cluster`にentity以外の列を指定できる（plmはgroup/timeしかクラスターに
+    できずリファレンスが無いため、entityと同値の別名列で一致・別のグルーピングで
+    不一致になることのみ確認する。数値の手計算検証はengineのテスト）。
+    """
+    df = pl.read_csv(DATA_DIR / "fe_baseline.csv").with_columns(
+        pl.col("entity").alias("entity_copy"),
+        (pl.col("entity").rank("dense") % 10).alias("group10"),
+    )
+
+    def fit(cluster: str | None):
+        return RE(
+            df,
+            y="y",
+            x=["x1", "x2"],
+            entity="entity",
+            options=REOptions(cov_type="cluster", cluster=cluster),
+        ).fit()
+
+    default = fit(None)
+    assert fit("entity_copy").hausman_statistic == pytest.approx(
+        default.hausman_statistic, rel=1e-12
+    )
+    other = fit("group10")
+    assert other.hausman_df == 2
+    assert other.hausman_statistic != default.hausman_statistic
+
+
+def _tiny_panel(n_entities: int, n_periods: int) -> pl.DataFrame:
+    import numpy as np
+
+    rng = np.random.default_rng(0)
+    n = n_entities * n_periods
+    return pl.DataFrame(
+        {
+            "entity": np.repeat(np.arange(n_entities), n_periods),
+            "time": np.tile(np.arange(n_periods), n_entities),
+            "x1": rng.normal(size=n),
+            "x2": rng.normal(size=n),
+            "y": rng.normal(size=n),
+        }
+    )
+
+
+def test_hausman_cluster_count_equal_to_auxiliary_slopes_raises():
+    """RE本体は`G=4 > q=2`で成功するが、補助回帰の傾き係数`2k=4`に対し
+    `G <= 2k`（境界ちょうど）のためfit()が`ValidationError`で失敗する。
+    """
+    df = _tiny_panel(n_entities=4, n_periods=6)
+    with pytest.raises(ValidationError, match="Hausman"):
+        RE(
+            df,
+            y="y",
+            x=["x1", "x2"],
+            entity="entity",
+            options=REOptions(cov_type="cluster"),
+        ).fit()
+    # G=5 > 2k=4なら成功する（境界の成功パス）。
+    ok = RE(
+        _tiny_panel(n_entities=5, n_periods=6),
+        y="y",
+        x=["x1", "x2"],
+        entity="entity",
+        options=REOptions(cov_type="cluster"),
+    ).fit()
+    assert ok.hausman_df == 2
+
+
+def test_hausman_dk_too_few_periods_raises():
+    """`T=2`ではDK共分散のrankが`T-1=1`で検定対象`k=2`個に足りず、
+    fit()が`ComputationError`で失敗する。
+    """
+    df = _tiny_panel(n_entities=20, n_periods=2)
+    with pytest.raises(ComputationError, match="Hausman"):
+        RE(
+            df,
+            y="y",
+            x=["x1", "x2"],
+            entity="entity",
+            options=REOptions(cov_type="dk", time="time", dk_bandwidth=0),
+        ).fit()

@@ -21,14 +21,14 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
   |---|---|---|---|
   | `cov_type` | `str` | `"cluster"` | `"classical"` / `"hc1"`〜`"hc3"` / `"cluster"` / `"dk"`（大小無視）。`"hc0"`は非対応 |
   | `confidence_level` | `float` | `0.95` | |
-  | `time` | `str \| None` | `None` | RE自身の準偏差変換はentity方向のみで`time`を使わないが、`cov_type="dk"`時のDK時系列順序、およびハウスマン検定用の内部FE呼び出しの1-way/2-way選択（`Some`なら2-way）を兼ねる |
+  | `time` | `str \| None` | `None` | `cov_type="dk"`時のDK時系列順序専用（`"dk"`では必須）。RE自身の準偏差変換・ハウスマン検定には使わない。`"dk"`以外で指定すると`ValidationError` |
   | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名。省略時は`entity`をそのまま使う。他の`cov_type`で指定すると`ValidationError` |
   | `dk_bandwidth` | `int \| None` | `None` | DK HACのバンド幅。省略時は自動計算。`cov_type="dk"`以外で指定すると`ValidationError` |
 
 - **`FEOptions`と異なり`dk_time`が無い**: `ReCovType::Dk`は`FeCovType::Dk`と違い`time`
   オーバーライドフィールドを持たない。REは2-way構造自体を持たないため、「2-way FEの固定効果
-  構造」と「DK HACの時系列粒度」を分離する必要が無く、`REOptions.time`1フィールドで
-  「HAC時系列順序」と「ハウスマン検定用内部FE呼び出しの1-way/2-way選択」を兼ねる。
+  構造」と「DK HACの時系列粒度」を分離する必要が無く、`REOptions.time`1フィールドが
+  「HAC時系列順序」専用になる（ハウスマン検定は常に1-way比較で`time`に依存しない、3.7節）。
 - **`x`は空リストを許容しない**: `x=[]`は「説明変数を一切投入しない、分散成分（σ_ε²・
   σ_u²、ICC）のみを推定するnullモデル」として単独で意味を持つ標準的なユースケース
   （マルチレベルモデルの"null model"）だが、他手法（FE・OLS/WLS/Logit/Probit/IV）
@@ -192,34 +192,33 @@ FEの`r_squared_between`/`r_squared_overall`をそのまま流用できず、RE�
 ### 3.7 ハウスマン検定
 
 `hausman_statistic`/`hausman_p_value`/`hausman_df`は`RE.fit()`内で自動計算され、`REResult`
-にのみ含まれる（`FEResult`には追加しない）。統計量そのものの計算は`engine::panel::common::
-hausman_statistic`（FE/RE共有関数、シグネチャ`(beta_fe, cov_fe, beta_re, cov_re) -> Result<
-(stat, df, p_value), CommonError>`）が担い、RE側から比較対象を組み立てて呼ぶ。
+にのみ含まれる（`FEResult`には追加しない）。**回帰ベース（補助回帰）版**（Wooldridge (2010)
+10.7.3節、`plm::phtest(method = "aux", effect = "individual")`相当）。
 
-- **v1はclassical Hausman検定のみ**（`cov_type`に依存しない、常にclassical前提での計算）。
-  `cov_type="cluster"`等でfitした場合でも、比較にはRE・FEともにclassical版の共分散行列で
-  計算し直す。
-- **内部FE呼び出しの1-way/2-way選択は`REOptions.time`の有無で決まる**（`Some`なら2-way、
-  `None`なら1-way）。RE自身がv1で2-wayをサポートしないこととは独立の判断。
-- **比較対象はFE/RE間で重なりのあるスロープ係数のみ**（REの切片は比較から除外する）。
-  内部FE呼び出しがRE自身の`x`/`entity`/`time`をそのまま使う設計にしたため、部分alignは
-  不要。
-- **FE推定が失敗した場合、`hausman_statistic`等を`None`にしたうえでRE本体の結果は正常に
-  返す**（RE推定自体は有効なため診断情報の欠落だけに留める）。`None`になる条件:
-  比較対象の傾き係数が0個（`x=[]`は拒否されるため通常発生しない）、内部FE推定の失敗
-  （例: 時間不変変数を含む場合の分散ゼロ検証エラー、または`time`ありの不均衡パネルでの
-  2-way FE推定失敗）、または`Var(β_FE)-Var(β_RE)`が数値的に特異な場合。
-- **符号の扱い**: 差行列`Var(β_FE)-Var(β_RE)`は理論上半正定値だが
-  有限標本では非正定値になり、二次形式`d'(Var(β_FE)-Var(β_RE))⁻¹d`が負になりうる。
-  `hausman_statistic`はこれに`abs()`を適用し非負値を返す——参照実装R `plm::phtest`
-  （`stat <- as.numeric(abs(t(dbeta) %*% solve(dvcov) %*% dbeta))`）に合わせた挙動。
-  当初の設計文書は「符号付きのまま返すのが`plm::phtest`と同じ挙動」としていたが、
-  `plm::phtest`のソース確認で`abs()`を無条件適用しており負の値を一切返さないことが
-  判明し、この記載は誤りだったと判明した（`benchmark/panel/fixtures/
-  generate_re_crosscheck_fixtures.py`モジュールdoc参照）。p値は`abs()`適用後の`stat`
-  から上側確率`χ²_df.sf(stat)`で計算する（`df`には常に比較したスロープ係数の数を使う）。
-  これにより`hausman_statistic`/`hausman_p_value`双方が`plm::phtest`の出力と直接
-  比較可能になる。
+- **方式**: 準偏差変換済みの`y*`を、定数項（**準偏差変換前の`1`**）・準偏差変換済みの傾き
+  `X*`・within変換済みの`X̃`にpooled OLS（classical共分散）で回帰し、`X̃`の係数`k`個が同時に
+  ゼロというWald検定を行う。統計量は`k × F`（χ²版、`plm`と一致させるため）、p値は
+  `χ²_k.sf(stat)`、`hausman_df = k`（傾き係数の数）。統計量は構造的に非負で、二次形式版の
+  `abs()`や非正定値の問題が生じない。バランスパネルでは共通σ²を使った古典的ハウスマン
+  検定と数値的に一致する。
+- **定数項の扱い**: `plm`は`reX`から定数列を除き補助回帰に未変換の`1`を足す。バランス
+  パネルでは`θ_i`が全個体共通のため変換済み定数列を使う版と同値だが、不均衡パネルでは
+  値が異なる。本実装は`plm`に合わせる。
+- **比較は常に1-way**（個体効果のみ、RE本体と同じ構造）。`X̃`はRE本体が分散成分推定に
+  使う1-way FEのwithin変換から得る。`REOptions.time`（`cov_type="dk"`専用）の有無・
+  `cov_type`の選択は結果に影響しない。2-wayのハウスマン検定は2-way REの実装時に
+  改めて検討する。
+- **classical固定（`cov_type`非連動）**: 補助回帰は常にclassical共分散を使う（帰無仮説の
+  もとでREが完全に効率的＝等分散・系列無相関を前提とする古典的ハウスマン検定）。RE本体の
+  `cov_type`既定は`"cluster"`だがハウスマン検定だけはclassicalである点に注意。robust版
+  （補助回帰にcluster-robust共分散を使う等）は別途検討する。
+- **`None`フォールバック**: 比較対象の傾き係数が0個（`x=[]`は拒否されるため通常発生
+  しない）、補助回帰のランク落ち、Wald検定の特異性。いずれも`hausman_statistic`等を
+  `None`にしたうえでRE本体の結果は正常に返す（診断情報の欠落だけに留める）。なお
+  時間不変変数・singleton entity等による内部1-way FE推定の失敗は、分散成分（σ_ε²）推定が
+  先に失敗するため`RE.fit()`自体が失敗する。
+- **旧実装（削除済み）**: `Var(β_FE)-Var(β_RE)`の二次形式に`abs()`を適用する版は、
+  非正定値の問題を隠す（負の二次形式が「大きな正の統計量」に化ける）ため置き換えた。
 
 ### 3.8 engine_pybind: エラー変換
 
@@ -235,11 +234,11 @@ pyerr`、FE/RE共有）を使う。RE固有の追加バリアントは`BetweenRe
   `benchmark/panel/run_plm_benchmark.R`）。
 - 許容誤差: Classical/HC1/Cluster/HACは`linearmodels`と相対誤差`1e-9`で数値完全一致。
   HC2/HC3は`plm::vcovHC`とのクロスチェック水準（分散成分推定法が僅かに異なるため）。
-- **ハウスマン検定は`plm::phtest`のみを参照値とする例外規定**（`linearmodels`のソースに
-  `hausman`という文字列が一切登場せず専用実装が無いことを確認済み。通常の「Python主
-  リファレンス＋Rクロスチェック」の2系統検証の例外）。`hausman_statistic`/
-  `hausman_p_value`ともに`abs()`適用後の値のため（3.7節）、`plm::phtest`の出力と
-  直接比較する。
+- **ハウスマン検定は`plm::phtest(method = "aux", effect = "individual")`のみを参照値と
+  する例外規定**（`linearmodels`のソースに`hausman`という文字列が一切登場せず専用実装が
+  無いことを確認済み。通常の「Python主リファレンス＋Rクロスチェック」の2系統検証の例外）。
+  バランスパネルでは機械精度で一致し、不均衡パネルではSwamy-Arora分散成分（σ_u²）の
+  推定式の差で数％ずれるため、シナリオ別の許容誤差で比較する（3.7節）。
 - `aic`/`bic`は`estimator()`（内部`OlsEstimator`）からそのまま取得するため、FEのような
   Rクロスチェック限定の例外は無く`linearmodels`と直接比較できる。
 

@@ -35,16 +35,16 @@
 # 5.3節）
 #
 # linearmodelsにはハウスマン検定の専用実装が無い（ソース確認済み）ため、本
-# スクリプトが唯一の参照実装になる。cov_typeに関わらず常にclassical Hausman
-# 検定（plm::phtestの既定、内部でwithin/random双方をclassicalで再フィットして
-# 比較）を計算し、出力に常に含める（本実装のReEstimator::fitも常にclassical
-# Hausmanのみ計算するため整合、`re-spec.md`3.7節）。
+# スクリプトが唯一の参照実装になる。回帰ベース（補助回帰、Wooldridge (2010)
+# 10.7.3節）の`phtest(method = "aux", effect = "individual")`を、cov_typeに
+# 関わらず常に計算し、出力に常に含める（本実装のReEstimator::fitも
+# 常に同じ方式・classical共分散のみ計算するため整合、`re-spec.md`3.7節）。
 #
-# v1のハウスマン検定ベンチマークは1-way（entity方向のみ、`ReOptions.time`
-# 未指定）に限定する——RE自身がv1でentity方向のみをサポートし（`re-spec.md`5章、2-way
-# REはスコープ外）、本スクリプトのphtest呼び出しもeffect="individual"（既定）
-# のみを使う（ユーザー確認済み・2026-09-20）。2-way内部FE呼び出し
-# （`ReOptions.time`指定時）のHausmanクロスチェックは別issueで検討する。
+# 比較は常に1-way（個体効果のみ）。`ReOptions.time`はDriscoll-Kraay HACの
+# 時系列順序専用でハウスマン検定に影響しないため、`time`の有無で参照値を
+# 分ける必要はない。なお`plm::phtest(method = "aux")`は補助回帰の定数項に
+# 準偏差変換前の`1`を使うため、不均衡パネルではθ変換済み定数列を使う版と値が
+# 異なる。本実装は`plm`の扱いに合わせている。
 #
 # ## AIC/BIC/log-likelihoodは対象外
 #
@@ -111,7 +111,12 @@ conf_lower <- coefs - crit * ses
 conf_upper <- coefs + crit * ses
 
 # ハウスマン検定（モジュールコメント参照、cov_typeに関わらず常に計算する）。
-ph <- phtest(as.formula(formula_str), data = pdf)
+ph <- phtest(
+  as.formula(formula_str),
+  data = pdf,
+  method = "aux",
+  effect = "individual"
+)
 
 library(jsonlite)
 result <- list(

@@ -100,9 +100,11 @@ FEの1段階目（データ抽出・pyclass定義）と同じ段階（`REOptions
 - **`REOptions`に`dk_time`が無い（`FEOptions`との相違点）**: `engine::panel::re::
   ReCovType::Dk`は`FeCovType::Dk`と異なり`time`オーバーライドフィールドを持たない
   （RE自身が2-way構造を持たないため、FEのような「2-way FEの固定効果構造」と「DK HACの
-  時系列粒度」を分離する必要が無い）。`REOptions.time`は1フィールドで「HAC時系列順序」と
-  「ハウスマン検定用内部FE呼び出しの1-way/2-way選択（`Some`なら2-way、`None`なら1-way、
-  `docs/spec/re-spec.md`3.7節）」を兼ねる。詳細は`panel/re.rs`モジュールdoc参照。
+  時系列粒度」を分離する必要が無い）。`REOptions.time`は「HAC時系列順序」専用
+  （ハウスマン検定は常に1-way比較で`time`に依存しない、`docs/spec/re-spec.md`3.7節）。
+  そのため`cov_type`が`"dk"`以外で`time`を指定すると`parse_re_cov_type`が`reject_unused_option`で
+  `ValidationError`にする（`cluster`/`dk_bandwidth`と同じ規則。`FEOptions.time`は2-wayの
+  指定として常に使われるため対象外）。詳細は`panel/re.rs`モジュールdoc参照。
 - **`x`の空リストを許容しない（ユーザー確認済み、2026-09-20）**: REで`x=[]`は「分散成分
   （ICC）のみを推定するnullモデル」として単独で意味を持つ標準的なユースケースだが、
   `panel-common.md`にこの点の明示的な決定が無かったため確認した。他手法（FE・

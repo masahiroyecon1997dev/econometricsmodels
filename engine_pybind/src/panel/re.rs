@@ -37,12 +37,12 @@
 //! `engine/src/panel/CLAUDE.md`「`cov_type`対応（`ReCovType`、3.1節・3.2節）」参照）。RE自身が2-way
 //! 構造を持たない（v1はentity方向のみ、`re-spec.md`5章）ため、FEのような「2-way FEの
 //! 固定効果構造に使う時点粒度」と「HACカーネルに使う時系列粒度」を分離する必要が無い——
-//! DK HAC計算は`ReInput::time()`をそのまま使う設計。`REOptions.time`は以下2つの用途を
-//! 1つのフィールドで兼ねる（`docs/spec/re-spec.md`3.7節）:
-//! - `cov_type="dk"`時のDriscoll-Kraay型パネルHACの時系列順序（`None`なら
-//!   `PanelError::DkRequiresTime`）
-//! - ハウスマン検定用の内部FE呼び出しの1-way/2-way選択（`Some`なら2-way FE、`None`なら
-//!   1-way FE。RE自身が2-wayをサポートしないこととは独立の判断、`re-spec.md`3.7節）
+//! DK HAC計算は`ReInput::time()`をそのまま使う設計。`REOptions.time`は
+//! `cov_type="dk"`時のDriscoll-Kraay型パネルHACの時系列順序（`None`なら
+//! `PanelError::DkRequiresTime`）専用で、ハウスマン検定（常に1-way比較、
+//! `re-spec.md`3.7節）には影響しない。`cov_type`が`"dk"`以外で`time`を指定すると
+//! 黙って無視されるため`ValidationError`にする（`parse_re_cov_type`、`FEOptions.time`は
+//! 2-wayの指定として常に使われるためこの規則の対象外）。
 //!
 //! ## `cov_type`の非対応値
 //!
@@ -92,11 +92,10 @@ pub struct REOptions {
     #[pyo3(get, set)]
     pub confidence_level: f64,
 
-    /// Column name of the time identifier. Serves two purposes (see the module
-    /// docstring): the Driscoll-Kraay HAC time ordering when `cov_type="dk"`, and the
-    /// one-way/two-way choice for the internal FE regression used by the Hausman test
-    /// (`Some` requests two-way FE, `None` one-way). Unlike `FEOptions`, RE has no
-    /// separate `dk_time` field, since it never needs to decouple these two uses.
+    /// Column name of the time identifier, used only as the Driscoll-Kraay HAC time
+    /// ordering when `cov_type="dk"` (required there). Specifying it with any other
+    /// `cov_type` raises `ValidationError`. It does not affect the Hausman test, which
+    /// always compares against one-way FE.
     #[pyo3(get, set)]
     pub time: Option<String>,
 
@@ -307,6 +306,12 @@ fn parse_re_cov_type(df: &DataFrame, options: &REOptions) -> PyResult<(ReCovType
         cov_type_lower == "dk",
         "cov_type=\"dk\"",
     )?;
+    reject_unused_option(
+        "time",
+        options.time.is_some(),
+        cov_type_lower == "dk",
+        "cov_type=\"dk\"",
+    )?;
 
     Ok((cov_type, cov_type_lower))
 }
@@ -316,9 +321,9 @@ fn parse_re_cov_type(df: &DataFrame, options: &REOptions) -> PyResult<(ReCovType
 /// `ReEstimator::fit`の呼び出し・`REResult`の構築は後続issueの`fit`関数が行う
 /// （モジュールdoc「実装フェーズの分割方針」参照）。
 ///
-/// `options.time`は無条件で抽出し`ReInput`に渡す（RE自身の準偏差変換ではtimeを
-/// 使わないが、内部FE呼び出し——ハウスマン検定用——の1-way/2-way選択とHAC計算に
-/// 使われるため、`FEOptions.time`と同じ「渡すだけ」の扱い）。
+/// `options.time`は抽出して`ReInput`に渡す（RE自身の準偏差変換とハウスマン検定では
+/// 使わず、`cov_type="dk"`のHAC計算だけが使う。`"dk"`以外で指定された場合は
+/// `parse_re_cov_type`が`ValidationError`にする）。
 ///
 /// # Errors
 /// - `x`が空リストの場合は`ValidationError`（モジュールdoc「`x`の空リストを許容しない」
@@ -355,7 +360,7 @@ pub(crate) fn build_re_input(
 
     let entity_slice = extract_group_key_column(df, &entity)?;
 
-    // ── `time`列の抽出（内部FE呼び出し・HAC用、モジュールdoc参照）───────────
+    // ── `time`列の抽出（DK HAC用、モジュールdoc参照）─────────────────────
     let time_slice: Option<Vec<String>> = options
         .time
         .as_ref()
@@ -502,10 +507,10 @@ mod tests {
 
     #[test]
     fn build_re_input_extracts_time_when_set() {
-        // `time`は無条件で`ReInput`に渡る（RE自身の準偏差変換では使わないが、内部FE呼び出し
-        // ・HAC用に保持される、モジュールdoc参照）。
+        // `time`は`cov_type="dk"`のとき`ReInput`に渡る（HACの時系列順序、モジュールdoc参照）。
         let df = well_formed_df();
         let mut options = default_options();
+        options.cov_type = "dk".to_string();
         options.time = Some("t".to_string());
 
         let (input, ..) = build_re_input(
@@ -519,6 +524,26 @@ mod tests {
 
         let expected_time = ["1", "2", "1", "2", "1", "2"].map(str::to_string);
         assert_eq!(input.time(), Some(expected_time.as_slice()));
+    }
+
+    #[test]
+    fn build_re_input_rejects_time_when_cov_type_is_not_dk() {
+        // `time`はDK HACの時系列順序専用（ハウスマン検定は常に1-way）。`cov_type`が"dk"以外だと
+        // 黙って無視されるため`ValidationError`にする。
+        let df = well_formed_df();
+        let mut options = default_options();
+        options.cov_type = "classical".to_string();
+        options.time = Some("t".to_string());
+
+        let result = build_re_input(
+            &df,
+            "y".to_string(),
+            vec!["x1".to_string()],
+            "id".to_string(),
+            &options,
+        );
+
+        assert!(result.is_err());
     }
 
     #[test]

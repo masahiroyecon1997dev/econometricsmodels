@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Breaking**: RE: the Hausman test (`hausman_statistic` / `hausman_p_value` / `hausman_df`) is now the regression-based (auxiliary regression) version, equivalent to `plm::phtest(method = "aux", effect = "individual")`, replacing the quadratic form whose sign was masked with `abs()`. The statistic is non-negative by construction, and the comparison is always against one-way FE: `REOptions.time` no longer switches it to two-way. Values change (identical to the classical Hausman test on balanced panels with a common σ²)
+- **Breaking**: RE: `REOptions.time` is now used only as the Driscoll-Kraay time ordering, so specifying it with a `cov_type` other than `"dk"` raises `ValidationError` (like `cluster` / `dk_bandwidth`)
 - **Breaking**: Logit / Probit / Tobit: the confidence-interval keys of `marginal_effects()` rows are renamed from `conf_low` / `conf_high` to `conf_lower` / `conf_upper`, matching `coef_table()`
 - **Breaking**: IV: renamed the result property `IVResults.n_iterations` to `n_iter` and the option `IVOptions.gmm_convergence` to `gmm_tol` (it is a convergence tolerance), matching Logit / Probit / Tobit's `n_iter` / `tol`
 - **Breaking**: IV: renamed the GMM-only option `IVOptions.weight_type` to `gmm_weight_type` (and the result property `IVResults.weight_type` likewise), matching the `gmm_` prefix of the other GMM-only options

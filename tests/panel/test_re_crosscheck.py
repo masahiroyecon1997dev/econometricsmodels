@@ -11,21 +11,17 @@ fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmod
   参照実装になる（`benchmark/panel/references/linearmodels_ref.py`
   モジュールdoc参照）。
 - **ハウスマン検定**（`hausman_statistic`/`hausman_p_value`/`hausman_df`）:
-  `linearmodels`に専用実装が無いため、`plm::phtest`が唯一の参照実装
-  （panel-common.md 5.3節）。v1は1-way（`REOptions.time`未指定の内部FE
-  呼び出し）限定で検証する（`generate_re_fixtures.py`の`_meta.note`・
-  `generate_re_crosscheck_fixtures.py`モジュールdoc参照）。
+  `linearmodels`に専用実装が無いため、`plm::phtest(method = "aux",
+  effect = "individual")`（回帰ベース）が唯一の参照実装（panel-common.md
+  5.3節）。比較は常に1-wayで`REOptions.time`の有無によらない
+  （`generate_re_crosscheck_fixtures.py`モジュールdoc参照）。
 
-## ハウスマン統計量の符号について（解決済み）
+## ハウスマン統計量の方式について
 
-`plm::phtest`（`plm:::phtest.panelmodel`）は`abs()`を無条件適用するため常に
-非負値を返す。本実装のengine（`engine::panel::common::hausman_statistic`）も
-これに合わせ`abs()`を適用するよう修正済みのため、
-`Var(β_FE)-Var(β_RE)`が有限標本で負定値になるケース（`small_panel`/
-`autocorrelated`等）でも`plm`と直接一致する非負値を返す。統計量・p値ともに
-`abs()`適用後の値同士の比較になるため、Python側で`abs()`を適用したり
-シナリオごとに比較をスキップしたりする必要はない。`df`は元々符号に
-関わらず常に一致する。
+補助回帰版は統計量が構造的に非負になるため符号処理は不要。`plm`は補助回帰の
+定数項に準偏差変換前の`1`を使い、本実装もこれに合わせている。バランスパネルでは
+機械精度で一致し、不均衡パネルではSwamy-Arora分散成分の差（σ_u²）で数％ずれる
+（`_UNBALANCED_HAUSMAN_SCENARIO`）。
 
 ## 許容誤差について
 
@@ -74,9 +70,9 @@ RTOL_HAUSMAN_UNBALANCED = TOLERANCES["re_crosscheck"][
 ]
 ATOL_HAUSMAN_P_VALUE = TOLERANCES["re_crosscheck"]["atol_hausman_p_value"]
 
-# `Var(β_RE)`自体がplm/linearmodelsの分散成分推定の差の影響を受け、
-# ハウスマン統計量への増幅がcoef/seよりさらに大きくなる（実測相対誤差6.9%、
-# モジュールdoc「許容誤差について」参照）唯一のシナリオ。
+# plm/linearmodelsの分散成分（σ_u²）推定の差でθが変わり、ハウスマン統計量への
+# 増幅がcoef/seよりさらに大きくなる唯一のシナリオ（モジュールdoc「許容誤差に
+# ついて」参照）。
 _UNBALANCED_HAUSMAN_SCENARIO = "unbalanced"
 
 

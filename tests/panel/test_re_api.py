@@ -128,54 +128,43 @@ def test_df_resid_and_df_model(fe_dataset):
 # ── ハウスマン検定（panel-common.md 2.4節・docs/spec/re-spec.md 3.7節） ──
 
 
-def test_hausman_present_for_one_way(fe_dataset):
-    """既定（`REOptions.time`未指定、内部FE比較が1-way）ではハウスマン検定が
-    計算される。
-    """
+def test_hausman_present(fe_dataset):
+    """ハウスマン検定（回帰ベース、常に1-way比較）が計算される。"""
     res = our_fit_re(fe_dataset)
     assert isinstance(res.hausman_statistic, float)
     assert isinstance(res.hausman_p_value, float)
     assert res.hausman_df == 2  # 傾き係数の数（x1, x2）
+    assert res.hausman_statistic >= 0.0
 
 
-def test_hausman_present_for_two_way_balanced_panel(fe_dataset):
-    """`REOptions.time`設定時（ハウスマン検定専用の内部FE比較が2-way）でも、
-    バランスパネル（singleton等の問題が無い`fe_dataset`）では2-way内部FE
-    比較自体が成功し、`hausman_*`が非`None`になる（`test_hausman_none_for_
-    singleton_time_two_way`の対照——2-way比較の「失敗パス」だけでなく
-    「成功パス」も構造的に確認する、testing-completeness-reviewer指摘で
-    追加）。数値の妥当性（linearmodels/plmとの照合）はv1のスコープ外
-    （`generate_re_fixtures.py`の`_meta.note`参照）のため、型・自由度のみ
-    確認する。
+def test_hausman_unaffected_by_time_and_cov_type(fe_dataset):
+    """`REOptions.time`（`cov_type="dk"`のHAC時系列順序専用）を渡しても、
+    ハウスマン検定は`time`なしのfitと完全に同じ値になる（比較は常に1-way、
+    classical固定）。`cov_type`の選択にも依存しない。
     """
-    options = REOptions(time="time")
-    res = our_fit_re(fe_dataset, options=options)
+    base = our_fit_re(fe_dataset)
+    with_time = our_fit_re(
+        fe_dataset, options=REOptions(cov_type="dk", time="time")
+    )
+    with_hc1 = our_fit_re(fe_dataset, options=REOptions(cov_type="hc1"))
+
+    for other in (with_time, with_hc1):
+        assert other.hausman_statistic == base.hausman_statistic
+        assert other.hausman_p_value == base.hausman_p_value
+        assert other.hausman_df == base.hausman_df
+
+
+def test_hausman_computed_with_singleton_time():
+    """singleton timeがあっても、ハウスマン検定は2-way FE比較を使わないため
+    計算される（`fe_singleton_time.csv`、`cov_type="dk"`で`time`を指定）。
+    """
+    df = pl.read_csv(DATA_DIR / "fe_singleton_time.csv")
+    options = REOptions(cov_type="dk", time="time")
+    res = RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
     assert isinstance(res.hausman_statistic, float)
     assert isinstance(res.hausman_p_value, float)
     assert res.hausman_df == 2
-
-
-def test_hausman_none_for_singleton_time_two_way():
-    """`REOptions.time`設定時（ハウスマン検定専用の内部FE比較が2-way）、
-    その2-way FE比較自体がsingleton timeで失敗すると`hausman_*`が`None`に
-    フォールバックする一方、RE本体の結果は正常に返る
-    （`fe_singleton_time.csv`、`REResults`クラスdocstring参照）。
-
-    singleton **entity**（`test_re_validation.py::test_singleton_entity_
-    raises`）とは対照的に、singleton **time**はσ_ε²推定用の内部1-way FE
-    呼び出し（timeを使わない）には影響しないため、`RE.fit()`自体は成功する
-    （モジュールdoc参照）。
-    """
-    df = pl.read_csv(DATA_DIR / "fe_singleton_time.csv")
-    options = REOptions(time="time")
-    res = RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
-
-    assert res.hausman_statistic is None
-    assert res.hausman_p_value is None
-    assert res.hausman_df is None
-    # RE本体の結果は正常（`None`にならない）。
-    assert res.params["x1"] is not None
 
 
 # ── オプションの反映 ──────────────────────────────────────────────
@@ -214,20 +203,16 @@ def test_confidence_level_affects_conf_int_width(fe_dataset):
 
 
 def test_time_option_does_not_affect_coefficients(fe_dataset):
-    """`REOptions.time`はハウスマン検定用の内部FE比較の1-way/2-way選択と
-    HAC時系列順序のみに使われ、RE自身の準偏差変換（entity方向のみ）には
-    影響しない（`engine/src/panel/CLAUDE.md`「RE」節参照。FEの`time`が
-    `df_model`を変えるのとは対照的）。
+    """`REOptions.time`は`cov_type="dk"`のHAC時系列順序にのみ使われ、係数・
+    ハウスマン検定・`df_model`には影響しない（`engine/src/panel/CLAUDE.md`
+    「RE」節参照。FEの`time`が`df_model`を変えるのとは対照的）。
     """
-    one_way = our_fit_re(fe_dataset)
-    two_way = our_fit_re(fe_dataset, options=REOptions(time="time"))
+    classical = our_fit_re(fe_dataset)
+    dk = our_fit_re(fe_dataset, options=REOptions(cov_type="dk", time="time"))
 
-    for name in one_way.param_names:
-        assert one_way.params[name] == pytest.approx(two_way.params[name])
-        assert one_way.std_errors[name] == pytest.approx(
-            two_way.std_errors[name]
-        )
-    assert one_way.df_model == two_way.df_model == 3
+    for name in classical.param_names:
+        assert classical.params[name] == pytest.approx(dk.params[name])
+    assert classical.df_model == dk.df_model == 3
 
 
 def test_cluster_defaults_to_entity(fe_dataset):

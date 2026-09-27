@@ -15,9 +15,9 @@
   （5.3節）。cov_typeに依存しない単一の統計量だが、`run_plm_benchmark.R`の
   呼び出しのたびに毎回計算されるため、hc2/hc3どちらのエントリにも同じ値が
   含まれる（`run_fixest_benchmark.R`がaic/bicを毎回含めるのと同じ設計）。
-  v1は1-way（`REOptions.time`未指定の内部FE呼び出し）限定で検証する
-  （`generate_re_fixtures.py`の`_meta.note`参照、ユーザー確認済み・
-  2026-09-20）。
+  回帰ベース（補助回帰）版の`plm::phtest(method = "aux", effect =
+  "individual")`を参照する。比較は常に1-wayで、`REOptions.time`の有無に
+  よらない。
 
 ## 許容誤差について
 
@@ -34,31 +34,16 @@ FEのfixestクロスチェックとは精度の前提が異なる。
 REのaic/bic/log_likelihoodの独立検証は現時点で行わない
 （`linearmodels_ref.py`モジュールdoc参照）。
 
-## `hausman_statistic`の符号について（解決済み）
+## `hausman_statistic`の方式について
 
-本フィクスチャ作成時（2026-09-20）に、当時の設計文書（`panel-common.md`
-`re-spec.md`3.7節・`engine/src/panel/CLAUDE.md`）の「本実装の`hausman_statistic`は差行列
-`Var(β_FE)-Var(β_RE)`が有限標本で非正定値になると負になりうるが、その場合も
-そのまま返す。これは`plm::phtest`と同じ挙動」という記載が誤りであることが
-判明した。`plm`の`phtest.panelmodel`（`plm:::phtest.panelmodel`）は
-
-```r
-stat <- as.numeric(abs(t(dbeta) %*% solve(dvcov) %*% dbeta))
-```
-
-と`abs()`を無条件に適用しており、`plm::phtest`は理論上も実装上も負の値を
-一切返さない。`small_panel`/`autocorrelated`シナリオ（差行列が負定値になる
-ケース）で実測したところ、当時のengineは負値（例: `-113.06`）を返す一方
-`plm`は同じ絶対値の正値（`113.06`）を返すことを確認した。`baseline`/
-`heteroskedastic`（差行列が正定値）では両者とも正値になるため偶然一致して
-見えていた。
-
-**このフィクスチャ自体には`plm`の実際の出力（常に非負）をそのまま記録して
-いる**（参照実装の値をありのまま記録するという本フィクスチャの役割上、正しい
-挙動）。engine側の`hausman_statistic`実装（`engine/src/panel/common.rs`）は
-`abs()`を適用するよう修正済みのため、現在は本フィクスチャの値と
-engineの出力を`abs()`無しで直接比較できる（`tests/panel/test_re_crosscheck.py`
-参照）。
+旧実装は`Var(β_FE)-Var(β_RE)`の二次形式（`plm::phtest`既定のchisq版）に
+`abs()`を適用していたが、非正定値の問題を隠すため、補助回帰版
+（`method = "aux"`）に置き換えた。統計量は構造的に非負になる。`plm`は補助回帰の
+定数項に準偏差変換前の`1`を使うため、不均衡パネルでは変換済み定数列を使う版と
+値が異なる（本実装は`plm`に合わせる）。またSwamy-Arora分散成分がlinearmodels
+準拠の本実装と`plm`とで不均衡パネルでは異なるため、統計量は不均衡パネルで
+数％ずれる（`tests/_tolerances.py`の`rtol_hausman_unbalanced`）。バランス
+パネルでは機械精度で一致する。
 
 使用例（リポジトリルートから）:
     python -m benchmark.panel.fixtures.generate_re_crosscheck_fixtures
@@ -161,15 +146,11 @@ def build_fixtures() -> dict:
             "（test_stats/p_values/conf_int）はplmの既定であるz検定（漸近正規"
             "近似）ではなく、本実装と同じt(df_resid)分布の式でcoef/seから"
             "計算し直している（run_plm_benchmark.Rのコメント参照）。"
-            "ハウスマン検定はv1のRE自身のentity方向のみ（1-way内部FE比較）に"
-            "限定して検証する（2-way内部FE比較のクロスチェックは別issueで検討、"
-            "ユーザー確認済み・2026-09-20）。wagepanはre.jsonと同じ"
-            "married/union/expersqを使用。"
-            "hausman_statisticはplm::phtestの実装（plm:::phtest.panelmodel）"
-            "がabs()を無条件適用するため常に非負。本実装のengineも"
-            "同様にabs()を適用するよう修正済みのため、abs()適用等の追加処理無しで"
-            "plmの出力と直接比較できる（docs/spec/re-spec.md 3.7節、本スクリプト"
-            "のモジュールdoc参照）。"
+            'ハウスマン検定はplm::phtest(method = "aux", effect = '
+            '"individual")（回帰ベース、常に1-way・classical共分散）の値。'
+            "不均衡パネルではSwamy-Arora分散成分の差でlinearmodels準拠の"
+            "本実装と数％ずれる（本スクリプトのモジュールdoc参照）。"
+            "wagepanはre.jsonと同じmarried/union/expersqを使用。"
         ),
     }
     return fixtures

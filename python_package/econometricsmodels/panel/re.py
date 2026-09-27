@@ -92,15 +92,12 @@ class RE:
                 NaN/infinity, `y`/`x`/`entity`/`time` overlap,
                 insufficient observations, `confidence_level` out of
                 range, an unknown `cov_type` (or `cov_type="hc0"`,
-                unsupported for RE), a singleton entity group (raised
-                by the internal one-way FE regression that RE's σ_ε²
-                estimation delegates to — unlike a singleton
-                encountered by the separate internal FE comparison
-                used for the Hausman test, which falls back to `None`
-                on `hausman_statistic`/`hausman_p_value`/`hausman_df`
-                instead of failing `fit()`; see `REResults`'s
-                docstring), or a `cov_type="dk"` request with `time`
-                unset). A subclass of `ValueError`.
+                unsupported for RE), `time` specified with a
+                `cov_type` other than `"dk"`, a singleton entity group
+                (raised by the internal one-way FE regression that
+                RE's σ_ε² estimation delegates to), or a
+                `cov_type="dk"` request with `time` unset). A subclass
+                of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. a singular quasi-demeaned design
                 matrix). A subclass of `RuntimeError`.
@@ -122,24 +119,23 @@ class REResults:
     side for why the quasi-demeaned constant column is named this
     way).
 
-    The Hausman test comparing RE against the equivalent FE
-    specification (`hausman_statistic`/`hausman_p_value`/`hausman_df`)
-    is computed automatically inside `fit()` and exposed directly as
-    properties here, rather than as a separate method like FE's
-    `fixed_effects()` (`panel-common.md` section 2.4). All three
-    are `None` when the internal FE comparison used for the Hausman
-    test is unavailable — in practice this only happens when
-    `REOptions.time` is set (requesting the two-way FE comparison,
-    `docs/spec/re-spec.md` section 3.7) and that two-way regression
-    itself fails (e.g. an unbalanced panel or a singleton time
-    period), or when `Var(β_FE) - Var(β_RE)` is numerically singular;
-    RE's own result is still returned normally in that case. This is
-    a narrower condition than it might appear: a failure in RE's
-    **own** (always one-way) internal FE call — used to estimate σ_ε², not
-    for the Hausman comparison — makes `fit()` itself raise instead
-    (e.g. a singleton entity, or a regressor with zero variance after
-    the one-way within-transformation), since that failure means
-    σ_ε² could not be estimated at all; see `RE.fit()`'s docstring.
+    The Hausman test (`hausman_statistic`/`hausman_p_value`/
+    `hausman_df`) is computed automatically inside `fit()` and exposed
+    directly as properties here, rather than as a separate method like
+    FE's `fixed_effects()` (`panel-common.md` section 2.4). It is the
+    regression-based (auxiliary regression) version (Wooldridge 2010,
+    section 10.7.3; equivalent to `plm::phtest(method = "aux",
+    effect = "individual")`), always comparing against one-way (entity)
+    fixed effects — the same structure as RE itself — regardless of
+    `REOptions.time`, and always using classical (non-robust)
+    covariance regardless of `cov_type`. All three are `None` only when
+    the auxiliary regression cannot be formed (no slope coefficients,
+    rank-deficient auxiliary design, or a singular Wald test); RE's own
+    result is still returned normally in that case. A failure in RE's
+    own internal one-way FE call (used to estimate σ_ε²) makes `fit()`
+    itself raise instead (e.g. a singleton entity, or a regressor with
+    zero variance after the one-way within-transformation); see
+    `RE.fit()`'s docstring.
 
     Args:
         raw: The estimation result object returned by `_lib.fit_re`
@@ -308,14 +304,17 @@ class REResults:
 
     @property
     def hausman_statistic(self) -> float | None:
-        """Classical Hausman test statistic comparing RE against the
-        equivalent FE specification. Computed with classical standard
-        errors regardless of `cov_type`. Always non-negative, matching
-        R's `plm::phtest` (the underlying quadratic form is negative
-        when the compared variance difference is indefinite in finite
-        samples; this is corrected by taking its absolute value, as
-        `plm::phtest` does unconditionally). `None` if the internal FE
-        comparison is unavailable (see the class docstring)."""
+        """Regression-based Hausman test statistic (chi-squared
+        version, `k × F` of the Wald test that the `k` within-transformed
+        slope regressors are jointly zero in the auxiliary regression of
+        the quasi-demeaned `y` on the quasi-demeaned regressors and the
+        within-transformed regressors). Always non-negative. The
+        comparison is always against one-way FE and uses classical
+        standard errors regardless of `cov_type` and `REOptions.time`.
+        For unbalanced panels the auxiliary regression's constant is
+        left untransformed, as in `plm::phtest`. `None` if the
+        auxiliary regression is unavailable (see the class
+        docstring)."""
         return self._raw.hausman_statistic
 
     @property

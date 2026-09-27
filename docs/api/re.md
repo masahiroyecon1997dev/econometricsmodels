@@ -18,18 +18,24 @@ structure to disambiguate from the HAC time granularity.
 ## The Hausman test
 
 `REResults` exposes `hausman_statistic`, `hausman_p_value`, and `hausman_df` directly as
-properties — computed automatically inside `fit()` by comparing RE against an internally
-estimated, equivalent FE specification, rather than requiring a separate call (unlike FE's
-[`fixed_effects()`](fe.md#recovering-the-fixed-effects)). The comparison always uses classical
-standard errors regardless of `REOptions.cov_type`. All three are `None` when the internal FE
-comparison is unavailable (e.g. `REOptions.time` requests a two-way FE comparison that itself
-fails on an unbalanced panel, or the comparison is numerically degenerate) — RE's own result is
-still returned normally in that case. See `REResults`'s docstring for the exact fallback
-conditions.
+properties — computed automatically inside `fit()`, rather than requiring a separate call
+(unlike FE's [`fixed_effects()`](fe.md#recovering-the-fixed-effects)).
 
-`hausman_statistic` is always non-negative — matching R's `plm::phtest`, which takes the absolute
-value of the underlying quadratic form unconditionally. In finite samples the difference matrix
-being compared can be indefinite, which would otherwise make the raw quadratic form negative.
+The test is the regression-based (auxiliary regression) version (Wooldridge 2010, section
+10.7.3; equivalent to R's `plm::phtest(method = "aux", effect = "individual")`): the
+quasi-demeaned `y` is regressed on a constant, the quasi-demeaned regressors and the
+within-transformed regressors, and the within-transformed coefficients are tested jointly for
+zero. Its properties:
+
+- The statistic is always non-negative (no indefinite variance-difference problem).
+- The comparison is always against **one-way** (entity) fixed effects, the same structure as RE
+  itself. `REOptions.time` is used only as the Driscoll-Kraay time ordering (`cov_type="dk"`)
+  and does not affect the test; specifying it with any other `cov_type` raises
+  `ValidationError`.
+- It always uses classical (non-robust) covariance regardless of `REOptions.cov_type`.
+- All three are `None` only when the auxiliary regression cannot be formed (no slope
+  coefficients, rank-deficient design, singular Wald test); RE's own result is still returned
+  normally. See `REResults`'s docstring.
 
 ## Panel R² and `df_resid`
 

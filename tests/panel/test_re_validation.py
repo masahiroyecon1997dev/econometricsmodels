@@ -30,10 +30,9 @@ Note:
     スケール差はすべて**この内部FE呼び出しが真っ先に失敗し`RE.fit()`自体が
     例外を送出する**（`REResults`クラスdocstring参照、`FeEstimator::fit`の
     失敗がそのまま伝播するため`WithinRegressionFailed`のメッセージ文言に
-    なる）。一方、ハウスマン検定専用の内部FE呼び出し（`REOptions.time`
-    設定時のみ2-way）が単独で失敗するケース（例: singleton time）は
-    `RE.fit()`自体は成功し`hausman_*`が`None`になるだけに留まる
-    （`test_re_api.py`参照）。
+    なる）。ハウスマン検定はこの1-way FE推定量を再利用するため、
+    単独で失敗するケースは無い（`hausman_*`が`None`になるのは傾き係数が
+    0個等、補助回帰が成立しない場合のみ）。
 """
 
 from __future__ import annotations
@@ -305,10 +304,7 @@ def test_cluster_null_values_raise():
 def test_singleton_entity_raises():
     """`fe_singleton_entity.csv`（entity "e00"のみ観測数1）は、σ_ε²推定が
     委譲する内部1-way FE推定で`PanelError::SingletonGroup`（entity側）を
-    誘発し、そのまま`RE.fit()`自体が失敗する（モジュールdoc参照。ハウスマン
-    検定専用の内部FE呼び出しが失敗して`None`にフォールバックする経路とは
-    別物、`test_re_api.py`の`test_hausman_none_for_singleton_time_two_way`
-    と対照）。
+    誘発し、そのまま`RE.fit()`自体が失敗する（モジュールdoc参照）。
     """
     df = pl.read_csv(DATA_DIR / "fe_singleton_entity.csv")
     with pytest.raises(
@@ -528,13 +524,16 @@ def test_computation_error_is_runtime_error():
         ("classical", "cluster", "entity", 'cov_type="cluster"'),
         ("dk", "cluster", "entity", 'cov_type="cluster"'),
         ("cluster", "dk_bandwidth", 2, 'cov_type="dk"'),
+        ("classical", "time", "time", 'cov_type="dk"'),
+        ("cluster", "time", "time", 'cov_type="dk"'),
     ],
 )
 def test_option_unused_by_cov_type_raises(
     fe_dataset, cov_type, option, value, condition
 ):
-    """選んだ`cov_type`で使われない`cluster`/`dk_bandwidth`が指定されたら
-    黙って無視せず`ValidationError`。
+    """選んだ`cov_type`で使われない`cluster`/`dk_bandwidth`/`time`が指定されたら
+    黙って無視せず`ValidationError`（`time`はDriscoll-Kraay HACの時系列順序専用で、
+    ハウスマン検定には影響しない）。
     """
     options = REOptions(cov_type=cov_type, **{option: value})
     with pytest.raises(

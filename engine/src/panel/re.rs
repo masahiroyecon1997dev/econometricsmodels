@@ -139,58 +139,45 @@
 //!
 //! ## ハウスマン検定（`hausman_statistic`/`hausman_p_value`/`hausman_df`、`re-spec.md`3.7節）
 //!
-//! `ReEstimator::fit`内部で、比較用にもう一度FE推定（`FeEstimator::fit`、
-//! `swamy_arora_variance_components`がσ_ε²用に呼ぶ内部1-way FE推定とは別の独立した
-//! 呼び出し）を実行し、`hausman_statistic`（`common.rs`）で比較する
-//! （`re_hausman_test`private関数）。
+//! 回帰ベース（補助回帰）のハウスマン検定（Wooldridge (2010) 10.7.3節、
+//! `plm::phtest(method = "aux", effect = "individual")`相当、`re_hausman_test`private関数）。
+//! RE本体の回帰に渡した準偏差変換済みの`y*`を、定数項（**未変換の`1`**、`plm`と同じ扱いで
+//! 不均衡パネルではθ変換済み定数列を使う版と値が異なる）・準偏差変換済みの傾き`X*`・
+//! within変換済みの`X̃`にpooled OLS（classical共分散）で回帰し、`X̃`の係数`k`個が同時に
+//! ゼロというWald検定を行う。統計量は`k × F`、p値は`χ²_k.sf(stat)`、`hausman_df = k`。
+//! 統計量は構造的に非負になるため、旧方式（`Var(β_FE) - Var(β_RE)`の二次形式）の
+//! 非正定値の問題・`abs()`による符号処理は存在しない。
 //!
-//! - **1-way/2-way選択（`ReInput`実装時に判明した曖昧さ、ユーザー確認済み、
-//!   2026-09-13）**: RE自身の準偏差変換はentity方向のみ（v1で2-way REはスコープ外）だが、
-//!   このHausman比較用の内部FE呼び出しは**`input.time()`が`Some`なら2-way FEを試みる**
-//!   （`None`なら1-way FE）——RE自身が2-wayをサポートしないこととは独立の判断
-//!   （`FEOptions.time`と同じ「`Some`なら2-way」というルールをそのまま踏襲、1.1節）。
-//! - **比較対象の係数align**: REが内部FE呼び出しに渡す`x`はRE自身の`x`と完全に同一の
-//!   列・順序（`ReInput::x()`/`x_names()`をそのまま渡す）ため、alignは「REの切片
-//!   （`params()`の先頭行/列）を除外するだけ」で済む——時間不変変数だけを選んで除外する
-//!   ような部分alignは行わない。REが時間不変変数を含む場合、内部FE推定は`fe-spec.md`1章の分散ゼロ
-//!   検証で（部分的にではなく）全体が失敗するため、次項の「内部FE推定失敗→None」に
-//!   自然に帰着する。
-//! - **v1はclassical Hausman検定のみ（`cov_type`非連動、`re-spec.md`3.7節）**: `ReEstimator::fit`に
-//!   `ReCovType::Hc1`等の非Classicalな`cov_type`を渡していても、Hausman比較には
-//!   `panel_classical_cov_params`で計算し直したclassical版の共分散行列を使う（内部FE呼び出し
-//!   も`FeCovType::Classical`固定）。ユーザーが選んだ`cov_type`別の`cov_params`
-//!   （`std_errors()`等の計算に使う値）とは別に、常にclassical版をこの用途のためだけに
-//!   計算する（`xtx_inv`・`ssr`・`df_resid`・`df_model`は`cov_type`の分岐に関わらず既に
-//!   手元にあるため、追加コストは`panel_classical_cov_params`の呼び出し1回のみ）。
-//! - **`None`フォールバック（完了条件、ユーザー確認済み・2026-09-20）**: 以下のいずれかが
-//!   発生した場合、`hausman_statistic`/`hausman_p_value`/`hausman_df`は`None`にし、
-//!   **RE本体の結果自体は正常に返す**（`ReEstimator::fit`全体を`Err`にしない）。
-//!   - 比較対象の傾き係数が0個（`input.x()`が空、`hausman_statistic`自体が
-//!     `k>=1`を要求するため）。
-//!   - 内部FE推定が失敗した場合（singleton検出・within変換後の分散ゼロ・2-wayの不均衡
-//!     パネル・自由度不足等、`FeEstimator::fit`が返しうる`PanelError`全般）。
-//!   - `hausman_statistic`自体が`Var(β_FE)-Var(β_RE)`の数値的特異性で
-//!     `CommonError::ComputationFailed`を返した場合——これは`re-spec.md`3.7節本文が明示していない
-//!     ケースだが、「内部FE推定失敗時はNoneにしてRE本体は正常に返す」という設計意図
-//!     （ハウスマン検定はRE本体の付随的な診断情報であり、その失敗がRE推定自体を
-//!     道連れにしてはならない）をそのまま延長し、同じ`None`フォールバックに含める
-//!     判断とした。
+//! - **比較は常に1-way**: `X̃`はRE本体と同じ個体効果構造の1-way FE
+//!   （`swamy_arora_variance_components`が返す`FeEstimator`）のwithin変換から得る。
+//!   `input.time()`の有無は結果に影響しない（`time`はDriscoll-Kraay HACの時系列順序専用）。
+//!   2-wayのハウスマン検定は2-way REの実装時に改めて検討する。
+//! - **classical固定（`cov_type`非連動）**: `ReEstimator::fit`に非Classicalな`cov_type`を
+//!   渡していても補助回帰は常にclassical共分散を使う（帰無仮説のもとでREが完全に効率的＝
+//!   等分散・系列無相関を前提とする古典的ハウスマン検定）。robust版は別途検討。
+//! - **`None`フォールバック**: 以下のいずれかの場合、`hausman_statistic`/`hausman_p_value`/
+//!   `hausman_df`は`None`にし、**RE本体の結果自体は正常に返す**（ハウスマン検定はRE本体の
+//!   付随的な診断情報であり、その失敗がRE推定自体を道連れにしてはならない）。
+//!   - 比較対象の傾き係数が0個（`input.x()`が空）。
+//!   - 内部FE推定が失敗した場合（singleton検出・時間不変変数による分散ゼロ・自由度不足等、
+//!     `swamy_arora_variance_components`自体が失敗するため、実際にはRE本体もErrになる）。
+//!   - 補助回帰のランク落ち、またはWald検定の特異性。
 
 use std::collections::BTreeMap;
 
 use faer::Mat;
-use statrs::distribution::{ContinuousCDF, FisherSnedecor, StudentsT};
+use statrs::distribution::{ChiSquared, ContinuousCDF, FisherSnedecor, StudentsT};
 
 use crate::error::CommonError;
 use crate::inference;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::panel::common::{
     PanelDimension, PanelError, PanelHcVariant, all_ones_theta, count_unique, group_indices_by_key,
-    hausman_statistic as compute_hausman_statistic, leverage_within, panel_classical_cov_params,
-    panel_cluster_cov_params, panel_driscoll_kraay_cov_params, panel_hc_cov_params,
-    quasi_demean_column, resolve_dk_bandwidth, xtx_inverse,
+    leverage_within, panel_classical_cov_params, panel_cluster_cov_params,
+    panel_driscoll_kraay_cov_params, panel_hc_cov_params, quasi_demean_column,
+    resolve_dk_bandwidth, xtx_inverse,
 };
-use crate::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput};
+use crate::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput, within_transform_one_way};
 use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
 /// REの被説明変数・説明変数・パネル識別子を保持する入力データ。
@@ -471,13 +458,10 @@ fn re_r_squared_overall(input: &ReInput, params: &Mat<f64>) -> f64 {
 /// 組み立てる実装はしない（委譲先の状態を信頼できるソースとして再利用する）。
 ///
 /// **戻り値に内部で構築した1-way`FeEstimator`（σ_ε²用）も含める（rust-reviewer指摘）**:
-/// `input.time()`が`None`のRE推定では、ハウスマン検定
-/// （`re_hausman_test`、`re-spec.md`3.7節）が必要とする内部FE呼び出しも1-way・`FeCovType::Classical`・
-/// 同じ`y`/`x`/`entity`/`confidence_level`で完全に一致するため、呼び出し側
-/// （`ReEstimator::fit`）がこの`FeEstimator`をそのまま再利用できる（同じFE推定を2回
-/// 計算する無駄を避ける）。`input.time()`が`Some`の場合はハウスマン検定側が2-way FEを
-/// 要求するため再利用できず、呼び出し側が別途2-way FEを計算する（`re_hausman_test`の
-/// docコメント参照）。
+/// ハウスマン検定（`re_hausman_test`、`re-spec.md`3.7節）のwithin変換済み`X̃`は
+/// この1-way FE推定量の入力から得られる（`time`の有無によらず常に1-way）ため、
+/// 呼び出し側（`ReEstimator::fit`）がそのまま再利用する（同じFE推定を2回計算する
+/// 無駄を避ける）。
 ///
 /// # Errors
 /// - 内部FE推定が失敗した場合（singleton・分散ゼロ説明変数・自由度不足等）は、その
@@ -607,50 +591,51 @@ pub(crate) fn quasi_demean_transform(
 
 /// ハウスマン検定（`re-spec.md`3.7節、モジュールdoc「ハウスマン検定」参照）。
 ///
-/// `fe`は呼び出し側（`ReEstimator::fit`）が用意した比較用のFE推定量——`input.time()`が
-/// `None`のときは`swamy_arora_variance_components`が返す1-way FE推定量をそのまま
-/// 再利用し（`input.time()`が`None`なら両者は同じ`y`/`x`/`entity`/`confidence_level`・
-/// `FeEffects::OneWay`・`FeCovType::Classical`で完全に一致するため、rust-reviewer指摘。
-/// 同一のFE推定を2回計算する無駄を避ける）、`Some`のときは呼び出し側が
-/// 別途2-way FEを計算して渡す（モジュールdoc「1-way/2-way選択」参照）。
+/// Wooldridge (2010) 10.7.3節の補助回帰版（`plm::phtest(method = "aux")`相当）:
+/// 準偏差変換済みの`y*`を、定数項（**未変換の`1`**）・準偏差変換済みの傾き`X*`・
+/// within変換済みの`X̃`にpooled OLS（classical共分散）で回帰し、`X̃`の係数`k`個が
+/// 同時にゼロというWald検定を行う。定数項をθ変換しない（変換済み定数列`1-θ_i`を使わない）
+/// のは`plm::phtest(method = "aux")`と同じ扱い。バランスパネルでは`θ_i`が全個体共通のため
+/// どちらでも同値だが、不均衡パネルでは値が異なる。統計量は`k × F`（`wald_test_last_columns`が返すF統計量を
+/// カイ二乗版に換算）、p値は`χ²_k.sf(stat)`。
 ///
-/// 比較対象の傾き係数が0個（`fe.estimator().params()`が空）、または
-/// `hausman_statistic`（`common.rs`）自体が`Var(β_FE)-Var(β_RE)`の数値的特異性で
-/// 失敗した場合は`None`を返す（呼び出し側でRE本体の結果と切り離してフォールバック
-/// できるようにするため、`Result`ではなく`Option`。モジュールdoc「`None`フォールバック」
-/// 参照）。
+/// `fe`は`swamy_arora_variance_components`が返した1-way FE推定量で、`X̃`は
+/// `within_transform_one_way(fe.input())`から得る。`y_star`/`x_star`はRE本体の
+/// 回帰に渡した準偏差変換済みの`y`と傾き`X`（変換済み定数列は含まない）そのもの。
 ///
-/// `beta_re`/`cov_re`は`ReEstimator::fit`が既に持っている切片込みの値
-/// （`estimator.params()`・classical版`cov_params`）をそのまま渡す想定——この関数内で
-/// 先頭行/列（切片）を除外して次元をFEに揃える。
+/// 比較対象の傾き係数が0個、補助回帰が失敗した場合（ランク落ち等）、Wald検定が失敗した
+/// 場合は`None`を返す（呼び出し側でRE本体の結果と切り離してフォールバックできるよう
+/// `Result`ではなく`Option`。モジュールdoc「`None`フォールバック」参照）。
 fn re_hausman_test(
     fe: &FeEstimator,
-    beta_re_with_intercept: &Mat<f64>,
-    cov_re_with_intercept: &Mat<f64>,
+    y_star: &[f64],
+    x_star: &[Vec<f64>],
+    x_star_names: &[String],
+    dep_var_name: &str,
+    confidence_level: f64,
 ) -> Option<(f64, usize, f64)> {
-    let k = fe.estimator().params().nrows();
+    let k = fe.input().x().len();
     if k == 0 {
         return None;
     }
 
-    let beta_fe: Vec<f64> = (0..k).map(|j| *fe.estimator().params().get(j, 0)).collect();
-    let cov_fe: Vec<Vec<f64>> = (0..k)
-        .map(|i| (0..k).map(|j| *fe.cov_params().get(i, j)).collect())
-        .collect();
+    let (_, x_within) = within_transform_one_way(fe.input());
+    let mut columns = x_star.to_vec();
+    columns.extend(x_within);
+    let mut names = x_star_names.to_vec();
+    names.extend(fe.input().x_names().iter().map(|n| format!("{n}_within")));
 
-    // REの切片（index 0）を除外して次元をFEに揃える（`re-spec.md`3.7節）。
-    let beta_re: Vec<f64> = (0..k)
-        .map(|j| *beta_re_with_intercept.get(j + 1, 0))
-        .collect();
-    let cov_re: Vec<Vec<f64>> = (0..k)
-        .map(|i| {
-            (0..k)
-                .map(|j| *cov_re_with_intercept.get(i + 1, j + 1))
-                .collect()
-        })
-        .collect();
+    let aux_input =
+        OlsInput::from_columns(y_star, &columns, names, true, dep_var_name.to_string()).ok()?;
+    let aux = OlsEstimator::fit(aux_input, CovType::Classical, confidence_level).ok()?;
+    let (f_stat, _) = aux.wald_test_last_columns(k).ok()?;
 
-    compute_hausman_statistic(&beta_fe, &cov_fe, &beta_re, &cov_re).ok()
+    let stat = k as f64 * f_stat;
+    if !stat.is_finite() {
+        return None;
+    }
+    let chi2 = ChiSquared::new(k as f64).ok()?;
+    Some((stat, k, chi2.sf(stat)))
 }
 
 /// REの標準誤差計算方式（3.1節）。`FeCovType`と同じ「小さな固定選択肢の
@@ -845,7 +830,7 @@ impl ReEstimator {
         let ols_input = OlsInput::from_columns(
             &y,
             &x_all,
-            param_names,
+            param_names.clone(),
             false,
             input.dep_var_name().to_string(),
         )
@@ -970,8 +955,7 @@ impl ReEstimator {
         // （`total_ss >= residual_ss`が保証される教科書的な入れ子モデル比較とは異なる、
         // 上記コメント参照）。`linearmodels`が主リファレンスのためこの挙動もそのまま
         // 踏襲し、クリップ・エラー化はしない（`linearmodels`自身の値と一致させることが
-        // 目的のため、`hausman_statistic`——`common.rs`、`plm::phtest`に合わせabs()を
-        // 適用する——とは参照実装が異なり判断も独立）。
+        // 目的のため）。
         let (f_statistic, f_p_value) = if df_model == 1 {
             // 傾き係数が無い（定数項のみ）モデル。検定対象が存在しないため`OlsEstimator::fit`
             // 自身の`df_model==0`分岐と同様NaN（0除算を避ける）。
@@ -1027,49 +1011,16 @@ impl ReEstimator {
             re_r_squared(&input, estimator.params(), df_model);
 
         // ハウスマン検定（`re-spec.md`3.7節、モジュールdoc「ハウスマン検定」参照）。
-        // Hausman比較にはユーザーが選んだ`cov_type`ではなく常にclassical版の`cov_params`を
-        // 使う（`cov_type`非連動）。`xtx_inv`・`ssr`・`df_resid`・`df_model`は上の
-        // `cov_type`分岐に関わらず既に手元にあるため、この呼び出し1回の追加コストのみ。
-        let classical_cov_params_for_hausman =
-            panel_classical_cov_params(&xtx_inv, ssr, df_resid, df_model);
-
-        // `input.time()`が`None`なら`swamy_arora_variance_components`が既に計算した
-        // 1-way FE推定量（`fe_for_sigma2_eps`）をそのまま比較に使う（`re_hausman_test`の
-        // docコメント「同一のFE推定を2回計算する無駄を避ける」参照）。`Some`なら
-        // ハウスマン比較は2-way FEが必要（モジュールdoc「1-way/2-way選択」参照）なので
-        // 別途計算し直す。
-        let hausman_result = if input.time().is_none() {
-            re_hausman_test(
-                &fe_for_sigma2_eps,
-                estimator.params(),
-                &classical_cov_params_for_hausman,
-            )
-        } else if input.x().is_empty() {
-            None
-        } else {
-            let fe_input = FeInput::from_columns(
-                input.y(),
-                input.x(),
-                input.x_names().to_vec(),
-                input.entity(),
-                input.time(),
-                input.dep_var_name().to_string(),
-            )
-            .expect(
-                "ReInput::from_columns already validated the same dimension contract \
-                 (y/x/entity/time lengths) that FeInput::from_columns requires",
-            );
-            FeEstimator::fit(
-                fe_input,
-                FeEffects::TwoWay,
-                FeCovType::Classical,
-                confidence_level,
-            )
-            .ok()
-            .and_then(|fe| {
-                re_hausman_test(&fe, estimator.params(), &classical_cov_params_for_hausman)
-            })
-        };
+        // 比較用の内部FEは`time`の有無によらず常に`swamy_arora_variance_components`が
+        // 返す1-way FE推定量（RE本体と同じ個体効果構造）を再利用する。
+        let hausman_result = re_hausman_test(
+            &fe_for_sigma2_eps,
+            &y,
+            &x_all[1..],
+            &param_names[1..],
+            input.dep_var_name(),
+            confidence_level,
+        );
         let (hausman_statistic, hausman_df, hausman_p_value) = match hausman_result {
             Some((stat, df, p_value)) => (Some(stat), Some(df), Some(p_value)),
             None => (None, None, None),
@@ -2218,188 +2169,149 @@ mod tests {
 
     // ── ハウスマン検定 ─────────────────────────────────────
 
-    #[test]
-    fn re_estimator_fit_hausman_matches_independent_fe_and_common_function() {
-        // `re_estimator_fit_matches_linearmodels_reference`と同じデータ
-        // （entity a: T=3, b: T=2, c: T=2、time無し→内部Hausman FE呼び出しは1-way）。
-        // 「ReEstimator::fit内部のHausman計算」と「独立にFeEstimator::fitを呼び、
-        // hausman_statistic（common.rs）を手動で呼ぶ計算」が一致することを確認する
-        // （2つの独立した経路が同じ答えを出す、`re.std_errors()`のClassical一致検証
-        // と同型の手法）。REは`cov_type=Classical`で明示的にfitしている
-        // ため、`re.std_errors()`自体が既にHausman比較に使うclassical版と一致する
-        // （モジュールdoc「v1はclassical Hausman検定のみ」参照）。
-        let re = ReEstimator::fit(cov_type_reference_input(), ReCovType::Classical, 0.95).unwrap();
-
-        let fe_input = FeInput::from_columns(
-            re.input().y(),
-            re.input().x(),
-            re.input().x_names().to_vec(),
-            re.input().entity(),
-            None,
-            re.input().dep_var_name().to_string(),
+    /// 5エンティティ・不均衡・傾き2個のデータ（`plm::phtest(method = "aux")`の参照値用）。
+    fn hausman_two_slope_input(time: Option<&[String]>) -> ReInput {
+        let entity = strings(&["a", "a", "a", "b", "b", "c", "c", "c", "d", "d", "e", "e"]);
+        let x1 = vec![1.0, 2.0, 4.0, 2.0, 3.0, 5.0, 6.0, 4.0, 3.0, 7.0, 2.0, 5.0];
+        let x2 = vec![2.0, 1.0, 5.0, 1.0, 4.0, 3.0, 2.0, 6.0, 5.0, 3.0, 4.0, 1.0];
+        let y = [3.0, 4.5, 7.0, 8.0, 9.2, 6.0, 10.1, 8.0, 5.0, 9.5, 4.0, 7.3];
+        ReInput::from_columns(
+            &y,
+            &[x1, x2],
+            vec!["x1".to_string(), "x2".to_string()],
+            &entity,
+            time,
+            "y".into(),
         )
-        .unwrap();
-        let fe = FeEstimator::fit(fe_input, FeEffects::OneWay, FeCovType::Classical, 0.95).unwrap();
-
-        let beta_fe = [*fe.estimator().params().get(0, 0)];
-        let cov_fe = vec![vec![
-            *fe.std_errors().get(0, 0) * *fe.std_errors().get(0, 0),
-        ]];
-        // REのparams()は[const, x1]の並びなので、切片（index 0）を除いたindex 1がx1。
-        let beta_re = [*re.estimator().params().get(1, 0)];
-        let cov_re = vec![vec![
-            *re.std_errors().get(1, 0) * *re.std_errors().get(1, 0),
-        ]];
-
-        let (expected_stat, expected_df, expected_p_value) =
-            compute_hausman_statistic(&beta_fe, &cov_fe, &beta_re, &cov_re).unwrap();
-
-        assert_eq!(re.hausman_df(), Some(expected_df));
-        assert!((re.hausman_statistic().unwrap() - expected_stat).abs() < 1e-9);
-        assert!((re.hausman_p_value().unwrap() - expected_p_value).abs() < 1e-9);
+        .unwrap()
     }
 
     #[test]
-    fn re_estimator_fit_hausman_computes_two_way_comparison_when_panel_is_balanced() {
-        // rust-reviewer指摘: `time`がSomeのときの内部Hausman FE呼び出し
-        // （2-way FE）は、下の`..._is_none_when_internal_two_way_fe_call_fails`で
-        // 「失敗してNoneになる」経路しかテストされていなかった。ここではバランス
-        // パネル（entity a/b/c×time 1/2/3の3x3、singleton・不均衡いずれも無し）にして、
-        // 2-way FEが実際に成功しHausman統計量が計算される経路
-        // （モジュールdoc「1-way/2-way選択」の`Some`分岐の成功側）を、
-        // 上のテストと同型の「独立経路との一致」で検証する。
-        let entity = strings(&["a", "a", "a", "b", "b", "b", "c", "c", "c"]);
-        let time = strings(&["1", "2", "3", "1", "2", "3", "1", "2", "3"]);
-        // entity効果・time効果に加法分離できない（entity×timeの交互作用を含む）よう
-        // 意図的に非対称な値にする——加法分離可能だと2-way within変換後にx1の分散が
-        // 厳密に0になり`ZeroVarianceAfterDemeaning`で失敗する（実際に最初の素朴な
-        // 等差数列パターンで踏んだ）。
-        let x1 = vec![1.0, 2.3, 3.7, 2.2, 3.1, 5.4, 1.4, 2.8, 4.3];
-        let y = [3.0, 5.4, 7.6, 6.1, 7.3, 10.2, 4.2, 5.5, 8.3];
+    fn re_estimator_fit_hausman_matches_plm_aux_on_balanced_panel() {
+        // バランスパネル（4エンティティ×3期間）ではSwamy-Arora分散成分が`plm`と一致し、
+        // 補助回帰の値も1e-9で一致する。R: `plm::phtest(y ~ x1 + x2, data, method = "aux")`
+        //   chisq = 0.076499376991569779, p = 0.96247259255247208, df = 2
+        let entity = strings(&["a", "a", "a", "b", "b", "b", "c", "c", "c", "d", "d", "d"]);
+        let x1 = vec![1.0, 2.0, 4.0, 2.0, 3.0, 5.0, 6.0, 4.0, 3.0, 7.0, 2.0, 5.0];
+        let x2 = vec![2.0, 1.0, 5.0, 1.0, 4.0, 3.0, 2.0, 6.0, 5.0, 3.0, 4.0, 1.0];
+        let y = [3.0, 4.5, 7.0, 8.0, 9.2, 6.0, 10.1, 8.0, 5.0, 9.5, 4.0, 7.3];
+        let input = ReInput::from_columns(
+            &y,
+            &[x1, x2],
+            vec!["x1".to_string(), "x2".to_string()],
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
 
-        let re = ReEstimator::fit(
-            ReInput::from_columns(
-                &y,
-                std::slice::from_ref(&x1),
-                vec!["x1".to_string()],
-                &entity,
-                Some(&time),
-                "y".into(),
-            )
-            .unwrap(),
+        let re = ReEstimator::fit(input, ReCovType::Classical, 0.95).unwrap();
+
+        assert_eq!(re.hausman_df(), Some(2));
+        assert!((re.hausman_statistic().unwrap() - 0.076_499_376_991_569_78).abs() < 1e-9);
+        assert!((re.hausman_p_value().unwrap() - 0.962_472_592_552_472_1).abs() < 1e-9);
+    }
+
+    #[test]
+    fn re_estimator_fit_hausman_is_close_to_plm_aux_on_unbalanced_panel() {
+        // 不均衡パネルでは`plm`と分散成分（σ_u²）の推定式が僅かに異なる（`linearmodels`準拠の
+
+        // R: `plm::phtest(y ~ x1 + x2, data, method = "aux")`
+        //   chisq = 0.60715047844214221, p = 0.73817434737945442, df = 2
+        let re =
+            ReEstimator::fit(hausman_two_slope_input(None), ReCovType::Classical, 0.95).unwrap();
+
+        assert_eq!(re.hausman_df(), Some(2));
+        assert!((re.hausman_statistic().unwrap() - 0.607_150_478_442_142_2).abs() < 5e-2);
+        assert!((re.hausman_p_value().unwrap() - 0.738_174_347_379_454_4).abs() < 5e-2);
+    }
+
+    #[test]
+    fn re_estimator_fit_hausman_matches_manual_auxiliary_regression() {
+        // 補助回帰の独立な手計算（`OlsEstimator`を直接使い、準偏差変換・within変換を
+        // 自前で組み立てる）との一致。単一傾き・不均衡パネル（`cov_type_reference_input`）。
+        let re = ReEstimator::fit(cov_type_reference_input(), ReCovType::Classical, 0.95).unwrap();
+        let input = re.input();
+        let (sigma2_eps, sigma2_u, _) = swamy_arora_variance_components(input, 0.95).unwrap();
+        let (_, y_star, x_star) = quasi_demean_transform(input, sigma2_eps, sigma2_u);
+        let x_within = quasi_demean_column(
+            &input.x()[0],
+            input.entity(),
+            &all_ones_theta(input.entity()),
+        );
+
+        let aux_input = OlsInput::from_columns(
+            &y_star,
+            &[x_star[0].clone(), x_within],
+            vec!["x1".to_string(), "x1_within".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let aux = OlsEstimator::fit(aux_input, CovType::Classical, 0.95).unwrap();
+        // 1自由度のWaldは`t²`（`wald_test_last_columns`のdocコメント参照）。
+        let t = *aux.test_stats().get(2, 0);
+        let expected_stat = t * t;
+        let expected_p = ChiSquared::new(1.0).unwrap().sf(expected_stat);
+
+        assert_eq!(re.hausman_df(), Some(1));
+        assert!((re.hausman_statistic().unwrap() - expected_stat).abs() < 1e-9);
+        assert!((re.hausman_p_value().unwrap() - expected_p).abs() < 1e-9);
+    }
+
+    #[test]
+    fn re_estimator_fit_hausman_is_invariant_to_time_and_cov_type() {
+        // `time`（DK HACの時系列順序）の有無、および`cov_type`の選択は、
+        // ハウスマン検定（常に1-way・classical固定）の結果を変えない。
+        let time = strings(&["1", "2", "3", "1", "2", "1", "2", "3", "1", "2", "1", "2"]);
+        let base =
+            ReEstimator::fit(hausman_two_slope_input(None), ReCovType::Classical, 0.95).unwrap();
+        let with_time = ReEstimator::fit(
+            hausman_two_slope_input(Some(&time)),
             ReCovType::Classical,
             0.95,
         )
         .unwrap();
-
-        let fe_input = FeInput::from_columns(
-            &y,
-            &[x1],
-            vec!["x1".to_string()],
-            &entity,
-            Some(&time),
-            "y".into(),
+        let with_dk = ReEstimator::fit(
+            hausman_two_slope_input(Some(&time)),
+            ReCovType::Dk { bandwidth: None },
+            0.95,
         )
         .unwrap();
-        let fe = FeEstimator::fit(fe_input, FeEffects::TwoWay, FeCovType::Classical, 0.95).unwrap();
+        let with_hc1 =
+            ReEstimator::fit(hausman_two_slope_input(None), ReCovType::Hc1, 0.95).unwrap();
 
-        let beta_fe = [*fe.estimator().params().get(0, 0)];
-        let cov_fe = vec![vec![
-            *fe.std_errors().get(0, 0) * *fe.std_errors().get(0, 0),
-        ]];
-        let beta_re = [*re.estimator().params().get(1, 0)];
-        let cov_re = vec![vec![
-            *re.std_errors().get(1, 0) * *re.std_errors().get(1, 0),
-        ]];
-
-        let (expected_stat, expected_df, expected_p_value) =
-            compute_hausman_statistic(&beta_fe, &cov_fe, &beta_re, &cov_re).unwrap();
-
-        assert_eq!(re.hausman_df(), Some(expected_df));
-        assert!((re.hausman_statistic().unwrap() - expected_stat).abs() < 1e-9);
-        assert!((re.hausman_p_value().unwrap() - expected_p_value).abs() < 1e-9);
-    }
-
-    #[test]
-    fn re_estimator_fit_hausman_is_none_when_internal_two_way_fe_call_fails() {
-        // `time`が指定されている（`REOptions.time`がSome）ため、Hausman比較用の内部
-        // FE呼び出しは2-way FEを試みる（モジュールdoc「1-way/2-way選択」参照）。
-        // ここでは意図的に不均衡パネル（entity=3・time=3のはずが(c,1)が重複し
-        // (c,2)・(c,3)が欠落）にして`FeEstimator::fit(TwoWay)`を失敗させる一方、
-        // RE自身のSwamy-Arora分散成分推定は1-way（`time`を使わない）なので、
-        // entity方向にsingletonが無い限り成功する（entity a/b/cとも観測数2以上）。
-        // これにより「内部FE推定失敗→Noneフォールバック、RE本体は正常に返る」
-        // （完了条件、モジュールdoc「`None`フォールバック」参照）を確認する。
-        let entity = strings(&["a", "a", "a", "b", "b", "b", "c", "c"]);
-        let time = strings(&["1", "2", "3", "1", "2", "3", "1", "1"]);
-        let x1 = vec![1.0, 2.0, 4.0, 2.0, 3.5, 5.0, 6.0, 9.0];
-        let y = [3.0, 4.0, 7.0, 8.0, 9.5, 10.0, 6.0, 12.0];
-        let input = ReInput::from_columns(
-            &y,
-            &[x1],
-            vec!["x1".to_string()],
-            &entity,
-            Some(&time),
-            "y".into(),
-        )
-        .unwrap();
-
-        let re = ReEstimator::fit(input, ReCovType::Classical, 0.95).unwrap();
-
-        assert_eq!(re.hausman_statistic(), None);
-        assert_eq!(re.hausman_p_value(), None);
-        assert_eq!(re.hausman_df(), None);
+        for other in [&with_time, &with_dk, &with_hc1] {
+            assert_eq!(other.hausman_statistic(), base.hausman_statistic());
+            assert_eq!(other.hausman_p_value(), base.hausman_p_value());
+            assert_eq!(other.hausman_df(), base.hausman_df());
+        }
     }
 
     #[test]
     fn re_estimator_fit_hausman_is_none_when_no_slope_regressors() {
-        // 比較対象の傾き係数が0個（`x=[]`、定数項のみのモデル）の場合、
-        // `hausman_statistic`（common.rs）自体が`k>=1`を要求してpanicするため、
-        // `re_hausman_test`はFE呼び出し自体を試みずNoneを返す（モジュールdoc
-        // 「`None`フォールバック」参照）。
-        let entity = strings(&["a", "a", "b", "b", "c", "c"]);
-        let y = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
-        let input = ReInput::from_columns(&y, &[], vec![], &entity, None, "y".into()).unwrap();
-
-        let re = ReEstimator::fit(input, ReCovType::Classical, 0.95).unwrap();
-
-        assert_eq!(re.hausman_statistic(), None);
-        assert_eq!(re.hausman_p_value(), None);
-        assert_eq!(re.hausman_df(), None);
-    }
-
-    #[test]
-    fn re_estimator_fit_hausman_is_none_when_time_is_some_and_no_slope_regressors() {
-        // `input.time()`が`Some`（2-way FE比較が要求される、モジュールdoc「1-way/2-way
-        // 選択」参照）でも、比較対象の傾き係数が0個（`x=[]`）の場合は内部2-way FE
-        // 呼び出し自体を試みずNoneを返す（`ReEstimator::fit`本体の
-        // `else if input.x().is_empty()`分岐、モジュールdoc「`None`フォールバック」
-        // 参照——`time`が`None`の場合の同型ケースは
-        // `re_estimator_fit_hausman_is_none_when_no_slope_regressors`で既にカバー済み）。
+        // 比較対象の傾き係数が0個（`x=[]`、定数項のみのモデル）の場合はNone
+        // （モジュールdoc「`None`フォールバック」参照）。`time`の有無によらない。
         let entity = strings(&["a", "a", "b", "b", "c", "c"]);
         let time = strings(&["1", "2", "1", "2", "1", "2"]);
         let y = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
-        let input =
-            ReInput::from_columns(&y, &[], vec![], &entity, Some(&time), "y".into()).unwrap();
 
-        let re = ReEstimator::fit(input, ReCovType::Classical, 0.95).unwrap();
+        for time in [None, Some(time.as_slice())] {
+            let input = ReInput::from_columns(&y, &[], vec![], &entity, time, "y".into()).unwrap();
+            let re = ReEstimator::fit(input, ReCovType::Classical, 0.95).unwrap();
 
-        assert_eq!(re.hausman_statistic(), None);
-        assert_eq!(re.hausman_p_value(), None);
-        assert_eq!(re.hausman_df(), None);
+            assert_eq!(re.hausman_statistic(), None);
+            assert_eq!(re.hausman_p_value(), None);
+            assert_eq!(re.hausman_df(), None);
+        }
     }
 
     #[test]
-    fn re_hausman_test_returns_none_when_variance_difference_is_singular() {
-        // rust-reviewer指摘: `hausman_statistic`（common.rs）自体が
-        // `Var(β_FE)-Var(β_RE)`の数値的特異性で`ComputationFailed`を返す場合の
-        // `None`フォールバック（ユーザー確認済み・2026-09-20、モジュールdoc
-        // 「`None`フォールバック」参照）は、内部FE推定自体は成功するため
-        // `ReEstimator::fit`を通した結合テストでは自然な入力から再現するのが難しい
-        // （`common.rs`の`hausman_statistic_errors_when_variance_diff_is_singular`と
-        // 同じ理由）。private関数`re_hausman_test`を直接呼び、FE推定量自身の
-        // beta/covをそのままRE側の値としても渡すことで、差行列を意図的に厳密な
-        // ゼロ行列（特異）にする。
+    fn re_hausman_test_returns_none_when_auxiliary_regression_is_rank_deficient() {
+        // 補助回帰のランク落ち→None（モジュールdoc「`None`フォールバック」参照）。
+        // `ReEstimator::fit`経由では内部FE推定・RE本体が先に失敗するため自然な入力から
+        // 再現しにくい。private関数`re_hausman_test`を直接呼び、準偏差変換済み側の
+        // 列にwithin変換済み`x1`と同一の列を含めて完全共線にする。
         let entity = strings(&["a", "a", "a", "b", "b", "c", "c"]);
         let x1 = vec![1.0, 2.0, 4.0, 2.0, 3.0, 5.0, 6.0];
         let y = [3.0, 4.0, 7.0, 8.0, 9.0, 6.0, 10.0];
@@ -2407,25 +2319,11 @@ mod tests {
             FeInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
                 .unwrap();
         let fe = FeEstimator::fit(fe_input, FeEffects::OneWay, FeCovType::Classical, 0.95).unwrap();
+        let (_, x_within) = within_transform_one_way(fe.input());
 
-        // REの切片込みの形式（index 0=切片、index 1=x1）に合わせる。切片自体の値は
-        // `re_hausman_test`が使わないため任意の値でよい。
-        let beta_re = Mat::from_fn(2, 1, |i, _| {
-            if i == 0 {
-                0.0
-            } else {
-                *fe.estimator().params().get(0, 0)
-            }
-        });
-        let cov_re = Mat::from_fn(2, 2, |i, j| {
-            if i == 0 || j == 0 {
-                0.0
-            } else {
-                *fe.cov_params().get(i - 1, j - 1)
-            }
-        });
+        let result = re_hausman_test(&fe, &y, &x_within, &["x1_star".to_string()], "y", 0.95);
 
-        assert_eq!(re_hausman_test(&fe, &beta_re, &cov_re), None);
+        assert_eq!(result, None);
     }
 
     /// property-basedテスト。固定シナリオでは`σ_u²`・`T_i`・`cov_type`の組み合わせが

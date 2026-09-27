@@ -32,16 +32,11 @@ FEと同じプロセスで実測選定した（`.claude/rules/testing-policy.md`
 この定数列追加も実務上は一度きりのデータ準備であり、MultiIndex構築と同じ理由で
 計測区間の外に置く。
 
-## 既知の限界: `cov_type`間でハウスマン内部FEの構造も変わる
+## `time`の扱い
 
-`REOptions.time`は「HACの時系列順序」と「ハウスマン検定用の内部FE呼び出しの
-1-way/2-way選択（`Some`なら2-way、`None`なら1-way）」を兼ねる
-（`engine_pybind/src/panel/re.rs`モジュールdoc参照）。そのため本スクリプトの
-`_fit_once_engine`は`cov_type="dk"`のときのみ`time=_TIME_COL`を渡すことになり、
-`classical`と`dk`の計測差には「cov_type自体の計算コスト差」に加え「内部
-ハウスマン用FEが1-way→2-wayに変わることによる追加コスト」が混入する（RE自身の
-設計上不可避な交絡で、回避策は無い。詳細は`docs/performance/re.md`「既知の
-限界」）。
+`REOptions.time`は`cov_type="dk"`のHAC時系列順序専用で、ハウスマン検定（常に1-way
+比較）には影響しない。`_fit_once_engine`は`cov_type="dk"`のときのみ
+`time=_TIME_COL`を渡す（`dk`以外で渡すと`ValidationError`）。
 
 2-way軸は無い（RE自体がv1で2-wayをスコープ外にしているため、`extra_methods=()`）。
 

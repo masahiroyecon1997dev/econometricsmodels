@@ -4,7 +4,7 @@
 
 ## 実装済み（現状）
 
-- `common.rs`: `PanelError`（FE/RE共有エラー型。`entity`/`time`の長さ不一致用`IdentifierDimensionMismatch`を追加）＋ `PanelDimension` enum ＋ `quasi_demean_column`（θパラメータ化した準偏差変換）＋ `hausman_statistic`（古典的ハウスマン検定の統計量）。
+- `common.rs`: `PanelError`（FE/RE共有エラー型。`entity`/`time`の長さ不一致用`IdentifierDimensionMismatch`を追加）＋ `PanelDimension` enum ＋ `quasi_demean_column`（θパラメータ化した準偏差変換）。
 - `fe.rs`: `FeInput`（入力データ型）。`y: Vec<f64>` / `x: Vec<Vec<f64>>` / `entity: Vec<String>` / `time: Option<Vec<String>>`等を保持する薄い入れ物で、`OlsInput`/`IvInput`と異なり`faer::Mat`は組み立てない（`quasi_demean_column`が列単位・`&[f64]`で動く設計のため、`fit()`実装が生の列をそのまま渡せる。詳細は`fe.rs`モジュールdoc）。`from_columns`は次元検証（`y`↔各`x`列・`y`↔`entity`・`y`↔`time`）のみ行う。
   - `within_transform_one_way`/`within_transform_two_way`（within変換）も実装済み。**2-wayは閉形式の二重デミーニング`ỹ_it = y_it - ȳ_i. - ȳ_.t + ȳ..`を直接計算せず、「entityでquasi-demean（θ=1）→ その結果をtimeでquasi-demean（θ=1）」という2段階の`quasi_demean_column`呼び出しで実装している**（バランスパネルでは数学的に閉形式と厳密に一致することを導出済み・rust-reviewerが独立検算のproptestで検証済み。導出は`fe.rs`モジュールdoc参照）。バランスパネル検証（`fe-spec.md`3.1節）は`validate_balanced_panel`（`fe.rs`内private）が担う: 単純な`n_obs == n_entities * n_periods`のカウント一致だけでは「あるペアの重複と別ペアの欠落が相殺する入力」を見逃すため、`(entity, time)`のユニークペア数が`n_obs`と一致すること（重複なし）も併せて検証する。`time`が未指定なら`PanelError::TwoWayRequiresTime`。
   - `validate_no_zero_variance_regressors`（分散ゼロ説明変数の検出、`fe-spec.md`1章）も実装済み。`within_transform_one_way`/`within_transform_two_way`どちらの出力にも使える1-way/2-way共通ロジックで、時間不変変数（1-way）・2-wayでtime FEと完全共線な「エンティティ間で変動しない列」を同じチェックで検出する。**閾値は絶対値ではなく相対値**（`.claude/rules/rust-style.md`「線形代数」の特異性判定の方針と同じ）: `column_is_zero_variance`（`fe.rs`内private）が、within変換後の列の標準偏差を「変換前の元の列の最大絶対値」×「観測数`n`」×`f64::EPSILON`と比較する。変換後の値自身をスケール基準にすると自己参照になり閾値が機能しなくなるため、変換前の値を基準にする（詳細な導出は`column_is_zero_variance`関数docコメント参照）。rust-reviewerレビュー済み（`assert_eq!`での列数・列長の内部契約チェック、n=0境界テストの追加を反映）。
@@ -72,16 +72,13 @@
     - **HC2/HC3の参照実装が無い**: `linearmodels`は`RandomEffects`・`PanelOLS`（FE）どちらも`_cov_estimators`に単一の"heteroskedastic"（HC1相当）しか持たず、HC2/HC3を提供していない（FEのHC2/HC3実装が実際には`fixest`を参照値にしていたのと同じ理由）。REは`plm::vcovHC(fit, method="white1", type="HC2"/"HC3")`をクロスチェックに使う（ユーザー確認済み）。`plm`は変量効果の分散成分推定法が`linearmodels`と僅かに異なる（点推定自体が僅かに違う）ため、Classical/HC1/Cluster/HACほどの精度（1e-9）ではなくクロスチェック水準（`re_estimator_fit_hc2_hc3_match_plm_reference`で1e-2）で検証する。
     - `ReCovType::Cluster`の`q`（傾き係数の数、切片を除く）は`df_model - 1`（OLS自身の`k - k_constant`と同じ規約）。`ReCovType::Dk`は`FeCovType::Dk`と異なり`time`オーバーライドフィールドを持たない（RE自身が2-way構造を持たずFEのような「2-way構造とDK時間粒度の分離」ニーズが無いため、`input.time()`を直接使う設計に単純化した）。
     - 検証は`linearmodels`（Classical/HC1/Cluster/HAC、いずれも1e-9で数値完全一致）・`plm`（HC2/HC3、上記の通りクロスチェック水準）。
-  - **ハウスマン検定（`hausman_statistic`/`hausman_p_value`/`hausman_df`、`re-spec.md`3.7節）も実装済み**: `ReEstimator::fit`内部で比較用にもう一度FE推定を実行し（`swamy_arora_variance_components`がσ_ε²用に呼ぶ内部1-way FE推定とは別の独立した呼び出し）、`hausman_statistic`（`common.rs`）で比較する（`re_hausman_test`private関数）。実装ノウハウは`re.rs`モジュールdoc「ハウスマン検定」に集約したため、ここでは再発見コストが高い決定事項のみ要約する。
-    - **内部FE呼び出しの1-way/2-way選択は`input.time()`の有無で決まる**（`Some`なら2-way、`None`なら1-way）。RE自身がv1で2-wayをサポートしないこととは独立の判断（`re-spec.md`3.7節、`ReInput`実装時に判明・ユーザー確認済み）。
-    - **比較対象の係数alignはREの切片を除外するだけで済む**: 内部FE呼び出しがRE自身の`x`/`x_names`/`entity`/`time`をそのまま使う設計にしたため、部分align（時間不変変数だけを選んで除外する等）は不要。REが時間不変変数を含む場合、内部FE推定は`fe-spec.md`1章の分散ゼロ検証で失敗し「内部FE推定失敗→None」に自然に帰着する。
-    - **`FeEstimator`に`cov_params()`（`pub(crate)`、`k×k`共分散行列）を新設した**: 既存の`std_errors()`等は対角成分（平方根）のみで、Hausman比較にはオフ対角成分も含む部分行列が必要なため。`FEResult`には含めない内部専用アクセサ（`fe.rs`のフィールドdoc参照）。
-    - **v1はclassical Hausman検定のみ（`cov_type`非連動）**: `ReEstimator::fit`にユーザーが選んだ`cov_type`（Hc1等）に関わらず、比較にはRE・FEともに`FeCovType::Classical`/`panel_classical_cov_params`で計算し直したclassical版の共分散行列を使う。REは`xtx_inv`・`ssr`・`df_resid`・`df_model`が`cov_type`分岐に関わらず既に手元にあるため、追加コストは`panel_classical_cov_params`の呼び出し1回のみ。
-    - **`None`フォールバックの範囲（ユーザー確認済み・2026-09-20）**: 「比較対象の傾き係数が0個」「内部FE推定の失敗」に加え、**`hausman_statistic`自体が`Var(β_FE)-Var(β_RE)`の数値的特異性で`CommonError::ComputationFailed`を返す場合も同じ`None`フォールバックに含める**（`re-spec.md`3.7節本文は前者2つしか明記していないが、「ハウスマン検定はRE本体の付随的な診断情報であり、その失敗がRE推定自体を道連れにしてはならない」という設計意図をそのまま延長した判断）。`ReEstimator::fit`自体がこれによって`Err`になることはない。
-    - テストは engine 単体テストのみ（当時の完了条件が「単体テストで基本的な数値検証」であり、Rクロスチェックのベンチマークフィクスチャ作成は別途のスコープ）: 「独立に`FeEstimator::fit`を呼び`hausman_statistic`を手動計算した値と一致するか」（1-way、`ReCovType::Classical`）・「`time`ありの不均衡パネルで内部2-way FE呼び出しが失敗し`None`になるがRE本体は成功するか」・「`x=[]`で比較対象が0個のとき`None`になるか」の3本（`re.rs`の「── ハウスマン検定 ──」節）。
+  - **ハウスマン検定（`hausman_statistic`/`hausman_p_value`/`hausman_df`、`re-spec.md`3.7節）は回帰ベース（補助回帰）版**: `re.rs`の`re_hausman_test`private関数。準偏差変換済み`y*`を、未変換の定数項・準偏差変換済み傾き`X*`・within変換済み`X̃`にpooled OLS（classical）で回帰し、`X̃`の`k`個が同時にゼロというWald検定（`k × F`、p値は`χ²_k.sf`）。実装ノウハウは`re.rs`モジュールdoc「ハウスマン検定」に集約したため、ここでは再発見コストが高い決定事項のみ要約する。
+    - **定数項は準偏差変換しない（`plm::phtest(method = "aux")`に合わせた、ユーザー確認済み）**: `plm`は`reX`から定数列を除いて補助回帰に素の`1`を足す。Wooldridgeの記述どおり変換済み定数列`1-θ_i`を使うと不均衡パネルで`plm`と値が異なる（バランスパネルでは`θ_i`が共通で同値）。engineテストでバランスパネルは`plm`と1e-9一致、不均衡はσ_u²推定式の差（linearmodels準拠の調和平均`t_bar`）で数％ずれるためクロスチェック水準で比較する。
+    - **比較は常に1-way**: `X̃`は`swamy_arora_variance_components`が返す1-way `FeEstimator`の入力を`within_transform_one_way`にかけて得る。`input.time()`の有無・`cov_type`の選択は結果に影響しない（`time`はDK HACの時系列順序専用）。旧実装の「`time`が`Some`なら2-way FE比較」「`abs()`付き二次形式`hausman_statistic`（`common.rs`）」は削除済み。統計量は構造的に非負で非正定値の問題が無い。
+    - **`None`フォールバック**: 「比較対象の傾き係数が0個」「補助回帰のランク落ち・Wald検定の特異性」。内部1-way FE推定の失敗は`swamy_arora_variance_components`が先に失敗しRE本体もErrになる。`ReEstimator::fit`自体が補助回帰の失敗で`Err`になることはない（ハウスマン検定はRE本体の付随的な診断情報）。
+    - テストは engine 単体テスト（`plm`参照値とのバランス/不均衡比較・独立手計算の補助回帰との一致・`time`/`cov_type`不変・`x=[]`の`None`・ランク落ちの`None`）と、`re_crosscheck.json`（`plm::phtest(method = "aux")`）。
 - **カバレッジ監査実施済み**: `cargo llvm-cov -p engine`でFE関連（`panel/fe.rs`・`panel/common.rs`）を計測し、OLS/Logit/Probitと同水準（region/function/line いずれも97〜99%台）であることを確認した。境界値・悪条件（singleton・不均衡2-way・分散ゼロ変数・悪条件設計行列＝完全多重共線性）は既存テストで網羅済み。残る未カバー箇所は全て「保証済みの不変条件に対する防御的`Result`化」（`xtx_inverse`のCholesky失敗、`OlsInput::from_columns`のDimensionMismatch、`StudentsT::new`の自由度不正——いずれも`fit()`内の事前バリデーションで到達不能なことをdocコメントで明記済み、`.claude/rules/rust-style.md`「テスト」節の許容パターン）と、テストのアサーション失敗メッセージ内の行（テスト成功時は実行されない）のみ。追加で`FeEstimator::input()`/`cov_type()`の単純getterが未検証だったため`fe_estimator_fit_exposes_input_and_cov_type_via_getters`（`ols::fit_exposes_input_cov_type_and_residuals_via_getters`と同型）を追加した。
 - **カバレッジ監査実施済み**: `cargo llvm-cov -p engine`でRE関連コード（`panel/re.rs`）を計測し、対応前の時点で既にFEのカバレッジ監査時と同水準（region 98.96%・line 99.46%・function 96.46%）だった。未カバー箇所を機能単位で精査し、以下2点のみ対応した（他はfe.rs同様「保証済みの不変条件に対する防御的`Result`化」で、既にdocコメント済みか本Issueで新たにコメントを追加したもの）。
-  - **実際にテスト可能だった唯一の欠落**: ハウスマン検定で`input.time()`が`Some`（内部2-way FE呼び出しが要求される）かつ比較対象の傾き係数が0個（`x=[]`）の場合、`ReEstimator::fit`は内部2-way FE呼び出し自体を試みず直後に`None`を返す（`else if input.x().is_empty()`分岐）。既存の`re_estimator_fit_hausman_is_none_when_no_slope_regressors`は`time=None`のケースしかカバーしていなかったため、`time=Some`版の`re_estimator_fit_hausman_is_none_when_time_is_some_and_no_slope_regressors`を追加した。
   - **docコメント追加のみで対応した2箇所**（テスト追加ではなく「なぜ到達不能か」の明記、`.claude/rules/rust-style.md`「テスト」節の方針）: (1) `swamy_arora_variance_components`のbetween回帰用`OlsInput::from_columns`のmap_err——`entity_means`が`y_means`・各`x_means`列を同じ`groups.values()`から1対1生成するため長さが必ず一致し`DimensionMismatch`に到達不能。(2) `ReEstimator::fit`のF統計量計算`FisherSnedecor::new`のmap_err——この分岐に入る時点で`num_df=df_model-1>=1`（`df_model==1`は手前の`if`で除外済み）・`df_resid=n-df_model>=1`（`OlsEstimator::fit`成功時点で保証済み、同関数内の`t_dist`と同じ根拠）のため理論上失敗しない。
   - 対応後のカバレッジはregion 99.02%・line 99.55%・function 96.49%（functionの%がFEよりやや低いのはREの総関数数がFEより少なく、同じ絶対数の未カバー関数でも%への影響が大きいため。残る4つの未カバー関数は全て上記と同型の理論上到達不能な`map_err`クロージャ）。
 
@@ -98,15 +95,6 @@
 - **`quasi_demean_column` はグループ平均（`ȳ_i.`）を返さない**（設計上のスコープ外）。**`fixed_effects()`（`fe-spec.md`3.5節）はこの関数を拡張せず実装済み**——`FeEstimator::fixed_effects()`は`fit()`が既に保持している`input`（変換前の元の`y`/`x`/`entity`/`time`）と`estimator().params()`から`slope_only_residual`/`group_residual_means`で都度再計算する（`quasi_demean_column`はwithin変換専用のまま据え置き）。σ_ε²再利用（`re-spec.md`3.2節、RE実装）で平均の保持が必要になったら、その時点で改めて検討する。
 - **契約違反（`entity`と列の長さ不一致・`theta`のキー欠け）は`assert!`/`expect`でpanic**（`Result`を返さない）。ユーザー入力起因ではなく`engine_pybind`〜`engine`間の内部契約違反のため、`validate_cluster_groups`の`assert_eq!`と同じ扱い。`hausman_statistic`のshape契約（`beta_fe`/`beta_re`同長・`cov`が`k×k`）も同様に`assert!`。
 
-- **`hausman_statistic` の設計（符号の扱いは後に修正されている。詳細は`docs/spec/re-spec.md`3.7節）**:
-  - 入力は `beta_*: &[f64]` / `cov_*: &[Vec<f64>]`（`newton_step` と同じ形。RE呼び出し側が `Mat` から一度変換）。戻り値 `Result<(stat, df, p_value), CommonError>`。
-  - **比較対象のalign（重なるスロープ係数のみ、REの切片・時間不変変数を除外）は呼び出し側（RE実装）の責務**。この関数は渡された `k` 個をそのまま使う。
-  - 差行列 `Var(β_FE) - Var(β_RE)` は対称だが有限標本で非正定値になりうるため、Choleskyではなく `col_piv_qr` + `solve_lstsq`（`newton_step` と同じ相対閾値・NaN明示チェックの特異性検出）。
-  - **二次形式が負でも`abs()`を適用して非負値を返す**（`plm::phtest`の`stat <- as.numeric(abs(t(dbeta) %*% solve(dvcov) %*% dbeta))`と同じ。`p_value`も`abs()`適用後の`stat`から計算する）。差行列が数値的に特異なときだけ `CommonError::ComputationFailed`。
-    **当初は符号付きのまま返す設計だった**（`stat<=0`なら`p_value==1.0`）が、`plm::phtest`のソース確認で「`plm`と同じ挙動」という当初の設計文書の記載が誤りと判明し、後に修正した——`plm`は理論上も実装上も負の値を一切返さない。再発見コスト削減のため明記: **符号に関する新たな設計判断をする際は、この節を更新した上で`docs/spec/re-spec.md`3.7節・`benchmark/panel/fixtures/generate_re_crosscheck_fixtures.py`・`tests/panel/test_re_crosscheck.py`の記載も揃って更新すること**（この4箇所の記載が一度食い違った経緯があるため）。
-  - **p値は `chi2.sf(stat)`（`1.0 - chi2.cdf(stat)` ではない）**。大きい `stat` で `cdf ≈ 1` になり小さいp値の相対精度が失われるのを避けるため（`sf` は正則化上側不完全ガンマを直接計算）。**`iv/gmm.rs` の Hansen J・Wald系は今も `1.0 - chi2.cdf` のまま**——一括で `sf` へ移行するかは別issue（このズレは意図的な暫定）。
-  - `df` には常に `k` を使う。差行列の実効ランクが `k` 未満のとき `stat` と `df` に不整合が生じうる（`plm::phtest` も同じ制約）。
-  - v1は classical Hausman のみ（`cov_type` 非依存）。robust版は将来issue。
 
 ## 踏んだ罠: between回帰でエンティティ平均が完全に一致すると`OlsEstimator::fit`が`StudentsT::cdf(NaN)`でパニックする（パネル固有R²の実装時に発見した、その対応範囲外の既存バグ）
 
@@ -122,7 +110,7 @@
 
 - FE/REで共有（`FeError`/`ReError`は作らない）。`CommonError` を `#[error(transparent)] Common(#[from] CommonError)` で包む（`LeastSquaresError`/`MleError`/`IvError` と同じ）。
 - `WithinRegressionFailed { #[source] source: LeastSquaresError }` は `#[from]` を使わず明示的に `.map_err` で包む（`CommonError` が2経路で `PanelError` になる曖昧さを避けるため。`IvError::FirstStageFailed` と同じ判断）。`FTestFailed { #[source] source: LeastSquaresError }`も同じ`LeastSquaresError`ラップだが、`OlsEstimator::fit`委譲の失敗ではなくFE独自のF検定（`wald_f_test`再利用）の失敗を表すため別バリアントにしている。
-- RE固有バリアント（between回帰の自由度不足、Hausman統計量の非正定値ケース等）は未定義。RE実装issueで計算コードを書く過程で追加する（`common.rs` モジュールdocコメントの「追加候補」参照）。
+- RE固有バリアント（between回帰の自由度不足等）は未定義。RE実装issueで計算コードを書く過程で追加する（`common.rs` モジュールdocコメントの「追加候補」参照）。
 
 ## property-basedテスト（`mod proptests`）
 

@@ -285,6 +285,55 @@ print(
 
 See the [API Reference](api/iv.md#diagnostics) for what each diagnostic tests and when it is `None`.
 
+## FE (fixed effects panel regression)
+
+`FE` estimates a one-way or two-way fixed effects (within) panel regression. Pass the entity (panel unit) identifier column via `entity`; enable two-way effects by also setting `FEOptions.time`.
+
+```python
+import polars as pl
+from econometricsmodels import FE
+
+df = pl.DataFrame(
+    {
+        "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        "x1": [2.0, 4.0, 1.0, 5.0, 3.0, 6.0],
+        "id": ["a", "a", "b", "b", "c", "c"],
+    }
+)
+
+result = FE(df, y="y", x=["x1"], entity="id").fit()
+
+print(result.params)  # {"x1": ...} — no intercept (within-transformed away)
+print(result.std_errors)
+print(result.r_squared_within)
+```
+
+`FEOptions.cov_type` defaults to `"cluster"` on `entity`; `"hc0"` is not supported for FE. See "Switching the type of standard error" above for the other choices, and the [API Reference](api/fe.md) for the full list of options, including two-way effects (`time`).
+
+`fixed_effects()` recovers the entity (and, for two-way, time) fixed effects post-hoc from the fitted coefficients:
+
+```python
+print(result.fixed_effects())  # {"a": ..., "b": ..., "c": ...} for one-way
+```
+
+FE has no `predict()`, `augment()`, or `summary()`.
+
+## RE (random effects panel regression)
+
+`RE` estimates a random effects (Swamy-Arora GLS) panel regression, entity-direction only (unlike FE, two-way random effects are out of scope). Unlike FE, RE has an intercept, and a Hausman test comparing against the equivalent one-way FE specification is computed automatically as part of `fit()`.
+
+```python
+from econometricsmodels import RE
+
+result = RE(df, y="y", x=["x1"], entity="id").fit()
+
+print(result.params)  # {"const": ..., "x1": ...}
+print(result.std_errors)
+print(result.hausman_statistic, result.hausman_p_value)
+```
+
+`REOptions.cov_type` has the same defaults and support as FE (`"cluster"` on `entity` by default; `"hc0"` unsupported). See the [API Reference](api/re.md) for the full list of options, including Driscoll-Kraay standard errors (`cov_type="dk"`, requires `time`). Like FE, RE has no `predict()`, `augment()`, or `summary()`.
+
 ## Error handling
 
 Invalid input or options (a missing column, missing values, etc.) raise `ValidationError` (a subclass of `ValueError`). Problems detected during computation (e.g. a singular design matrix) raise `ComputationError` (a subclass of `RuntimeError`).

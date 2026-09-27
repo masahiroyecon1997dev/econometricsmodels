@@ -144,11 +144,13 @@ for method-by-method details.
 
 ## Performance
 
-The computational core is written in Rust, so the aim is that the
-extensive validation above doesn't come at the cost of speed in practice —
-calling `fit()` should never be the bottleneck. Detailed benchmarks against
-statsmodels/linearmodels, and known performance limitations, are tracked in
-[`docs/performance/`](docs/performance/).
+The computational core is written in Rust, with the goal of keeping
+extensive validation from imposing an unacceptable performance cost.
+Speed remains an important design goal, especially for scripted workflows
+and larger datasets.
+
+Detailed benchmarks against statsmodels/linearmodels, along with known
+performance limitations, are tracked in [`docs/performance/`](docs/performance/).
 
 ## Installation
 

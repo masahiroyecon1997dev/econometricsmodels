@@ -6,7 +6,7 @@ iv_gmm.json）を生成するスクリプト。
 組み合わせで呼び出し、結果を1つのJSONにまとめて書き出す。
 
 2SLS用の`iv.json`/`generate_iv_fixtures.py`とは別ファイル・別スクリプトにしている
-理由: `IV`/`IVOptions`は`method="2sls"`/`"gmm"`を単一クラスで切り替える設計だが、
+理由: `IV`/`IVOptions`は`estimator="2sls"`/`"gmm"`を単一クラスで切り替える設計だが、
 GMM固有の`weight_type`軸（`cov_type`とは独立、`iv-spec.md`1.2節）がある分
 2SLSとフィクスチャの形状が異なるため、OLS/WLSと同じ「推定量ごとに別ファイル」の
 既存方針（`ols.json`/`wls.json`）に倣った（ユーザー確認済み）。
@@ -75,7 +75,7 @@ X_EXOG_BY_SCENARIO = {
 COV_TYPES = ["classical", "hc0", "hc1", "hac"]
 # `weight_type`と`cov_type`が独立な軸であることの確認用（baselineのみ）。
 OTHER_WEIGHT_TYPES = ["robust", "cluster", "hac"]
-# 1-step（gmm_iterations=1）・iterated GMM（3以上、固定回数モード）の成功パス確認用
+# 1-step（iter_limit=1）・iterated GMM（3以上、固定回数モード）の成功パス確認用
 # （既定値2以外）。
 GMM_ITERATIONS_SCENARIOS = [1, 3]
 
@@ -158,9 +158,9 @@ def build_fixtures() -> dict:
         cov_type="hac",
     )
 
-    # gmm_iterations: 1（1-step）・3以上（iterated、固定回数モード）の成功パス。
+    # iter_limit（linearmodels）: 1（one_step）・3（iterated、固定回数）の成功パス。
     # baselineシナリオ・weight_type='classical'・cov_type='classical'固定。
-    fixtures["gmm_iterations"] = {
+    fixtures["gmm_type"] = {
         n_iter: run_gmm(
             dataset="baseline",
             x_exog_cols=["x1"],
@@ -168,7 +168,7 @@ def build_fixtures() -> dict:
             instrument_cols=["z1", "z2"],
             weight_type="classical",
             cov_type="classical",
-            gmm_iterations=n_iter,
+            iter_limit=n_iter,
         )
         for n_iter in GMM_ITERATIONS_SCENARIOS
     }
@@ -203,7 +203,7 @@ def build_fixtures() -> dict:
             "benchmark/iv/datasets.pyの第一段階誤差vが内生変数ごとに独立になる"
             "よう修正した後のデータで生成（"
             "generate_iv_fixtures.pyの同名注記参照）。"
-            "hac_weight_hac_cov（weight_type='hac'×cov_type='hac'）・gmm_iterations"
+            "hac_weight_hac_cov（weight_type='hac'×cov_type='hac'）・gmm_type"
             "（1/3、既定値2以外の成功パス）も追加。"
         ),
     }

@@ -293,12 +293,12 @@ TWO_WAY_REQUIRES_TIME = (
     "two-way fixed effects requires the `time` option to be set"
 )
 
-# `PanelError::HacRequiresTime`（Driscoll-Kraay HAC、1-way限定で到達）。
+# `PanelError::DkRequiresTime`（Driscoll-Kraay HAC、1-way限定で到達）。
 DK_REQUIRES_TIME = (
     "Driscoll-Kraay panel HAC requires the `time` option to be set"
 )
 
-# `PanelError::InvalidHacBandwidth`。`t`は時点数（観測数`n`ではない点に
+# `PanelError::InvalidDkBandwidth`。`t`は時点数（観測数`n`ではない点に
 # 注意、OLSの`INVALID_HAC_LAGS`とは上限の意味が異なる）。
 INVALID_DK_BANDWIDTH = (
     "bandwidth must be in the range [0, t): got {bandwidth}, t={t}"

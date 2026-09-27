@@ -335,8 +335,8 @@ def test_gmm_type_matches_linearmodels(fixtures, n_iter):
 
     _check_result(
         res,
-        fixtures["gmm_iterations"][str(n_iter)],
-        f"gmm_iterations/{n_iter}",
+        fixtures["gmm_type"][str(n_iter)],
+        f"gmm_type/{n_iter}",
         check_overid=(n_iter != 1),
     )
 

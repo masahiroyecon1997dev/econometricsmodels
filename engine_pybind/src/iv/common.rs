@@ -604,7 +604,7 @@ fn parse_gmm_type(
 /// 戻り値に`estimator`のパース済み小文字文字列（`"2sls"`/`"gmm"`のいずれか）を含めるのは、
 /// `cov_type_lower`と同じ理由（`fit`が2SLS/GMMのどちらを呼ぶか分岐する際、ここでの妥当性
 /// チェックと同じ正規化ロジックを再実装せずに済ませるため。`Logit`の`build_logit_input`が
-/// `estimator`を`EngineMethod`にパースして返す設計と同じ考え方だが、IVには`TwoSlsEstimator`/
+/// `solver`を`SolverType`にパースして返す設計と同じ考え方だが、IVには`TwoSlsEstimator`/
 /// `GmmEstimator`を横断する共通enumが`engine`側に無いため、ここでは正規化済み文字列の
 /// まま返す）。
 ///

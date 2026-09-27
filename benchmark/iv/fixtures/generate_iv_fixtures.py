@@ -3,7 +3,7 @@
 
 `benchmark/iv/references/linearmodels_ref.py`（1回呼べば1ケース分の結果を返す
 汎用アダプタ）を全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つのJSONに
-まとめて書き出す。GMMは`method="gmm"`がまだPython側に配線されていないため対象外
+まとめて書き出す。GMMは`estimator="gmm"`がまだPython側に配線されていないため対象外
 （`linearmodels_ref.py`のモジュールdocstring参照）。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`iv.json`は
@@ -156,7 +156,7 @@ def build_fixtures() -> dict:
             "hc2/hc3はlinearmodelsに対応する実装が無いため対象外（`iv-spec.md`"
             "3.1節、`benchmark/iv/references/linearmodels_ref.py`のモジュール"
             "docstring参照）。"
-            "GMMは`method='gmm'`がまだPython側に配線されていないため対象外。"
+            "GMMは`estimator='gmm'`がまだPython側に配線されていないため対象外。"
             "wu_hausman_statisticはclassical/hc0/hc1/clusterで`res.wooldridge_"
             "regression`をqで割った値を基準とし機械精度で一致する（実測確認済み、"
             "`benchmark/iv/references/linearmodels_ref.py`のモジュールdocstring"

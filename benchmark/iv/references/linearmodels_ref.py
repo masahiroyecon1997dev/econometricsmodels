@@ -2,7 +2,7 @@
 診断統計量）を生成するスクリプト。
 
 IVの主リファレンス（`docs/spec/iv-spec.md`4章参照）。
-2SLSは`run()`、GMMは`run_gmm()`（`method="gmm"`のPython配線完了後に追加、
+2SLSは`run()`、GMMは`run_gmm()`（`estimator="gmm"`のPython配線完了後に追加、
 `run_gmm()`のモジュールdocコメント参照）。
 
 合成データは`benchmark/iv/datasets.py`を直接呼ばず、`tests/fixtures/
@@ -380,7 +380,7 @@ def run_gmm(
     cov_type: str,
     cluster: str | None = None,
     hac_lags: int | None = None,
-    gmm_iterations: int = 2,
+    iter_limit: int = 2,
     confidence_level: float = 0.95,
 ) -> dict:
     """`linearmodels.iv.IVGMM`でGMMのベンチマーク値を生成する（`run()`のGMM版）。
@@ -398,15 +398,15 @@ def run_gmm(
     `coef`/`se`が相対誤差1e-10程度以下で一致）。`hc2`/`hc3`が対象外な理由も
     `run()`と同じ（`IVGMMCovariance`が対応する`score_cov_estimator`を持たない）。
 
-    ## `gmm_iterations`と`iter_limit`/`tol`の対応関係
+    ## `iter_limit`と`iter_limit`/`tol`の対応関係
 
     `IVGMM.fit()`の反復ループは`while iters < iter_limit and norm > tol`
     （`iters`は1始まり）のため、既定の`iter_limit=2`では`tol`の値に関わらず
     必ず2回目のステップまで実行してから打ち切る（`tol`が効くのは
-    `iter_limit>=3`のときのみ）。本実装の既定`gmm_iterations=2`
+    `iter_limit>=3`のときのみ）。本実装の既定`gmm_type="two_step"`（`iter_limit=2`相当）
     （`gmm_tol=None`の固定反復モード）と一致するため、`tol`は
     linearmodelsの既定値のまま渡さず気にしなくてよい。`iter_limit`に
-    `gmm_iterations`をそのまま渡す。
+    `iter_limit`をそのまま渡す。
 
     ## 検定分布・F統計量の対応関係
 
@@ -483,9 +483,7 @@ def run_gmm(
         cov_config["kernel"] = "bartlett"
         cov_config["bandwidth"] = cov_hac_lag_used
 
-    res = mod.fit(
-        iter_limit=gmm_iterations, cov_type=lm_cov_type, **cov_config
-    )
+    res = mod.fit(iter_limit=iter_limit, cov_type=lm_cov_type, **cov_config)
 
     def _fix_name(name: str) -> str:
         return "const" if name == "Intercept" else name
@@ -559,7 +557,7 @@ def run_gmm(
         "cov_type_requested": cov_type,
         "cov_type_linearmodels": lm_cov_type,
         "debiased": debiased,
-        "gmm_iterations": gmm_iterations,
+        "iter_limit": iter_limit,
         "confidence_level": confidence_level,
         "formula": formula,
         "hac_lag": cov_hac_lag_used,
@@ -593,7 +591,7 @@ if __name__ == "__main__":
             args.cov_type,
             args.cluster,
             args.hac_lags,
-            args.gmm_iterations,
+            args.iter_limit,
             args.confidence_level,
         )
     else:

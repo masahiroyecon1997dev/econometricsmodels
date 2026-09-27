@@ -295,7 +295,7 @@ common.rs`）:
 | `IvError` | Python例外 |
 |---|---|
 | `Common(CommonError)` | `common_error_to_pyerr`に委譲 |
-| `InsufficientInstruments` / `InvalidHacLags` / `InvalidGmmIterations` / `InvalidGmmTol` / `InsufficientClustersForWeightMatrix` | `ValidationError` |
+| `InsufficientInstruments` / `InvalidHacLags` / `InvalidGmmMaxIter` / `InvalidGmmTol` / `InsufficientClustersForWeightMatrix` | `ValidationError` |
 | `GmmNonConvergence` | `ComputationError`（`MleError::NonConvergence`と同じ分類: パラメータの不正ではなく計算過程で発覚した問題） |
 | `FirstStageFailed` / `SecondStageFailed` / `HausmanRegressionFailed` | 内部の`LeastSquaresError`が`ComputationError`相当かどうかで`ComputationError`/`ValidationError`に分岐（`least_squares_error_is_computation_error`） |
 

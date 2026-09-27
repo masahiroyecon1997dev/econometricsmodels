@@ -1,6 +1,6 @@
 # econometricsmodels
 
-A Python API providing statistical and econometric analysis methods. It is primarily intended for use as the analysis engine for [economicon](https://github.com/masahiroyecon1997dev/economicon), a GUI application for data analysis, and its design prioritizes ease of embedding from scripts and programs (type completion, validation, dynamic construction).
+A Python API providing statistical and econometric analysis methods, designed for ease of embedding from scripts and programs (type completion, validation, dynamic construction).
 
 - The computational core is implemented in **Rust** and thinly bound to Python via **PyO3**.
 - Data input is restricted to **polars** DataFrames only, passed to the Rust side via **Arrow zero-copy**.

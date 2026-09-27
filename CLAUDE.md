@@ -11,7 +11,7 @@
 |---|---|
 | 名称 | econometricsmodels |
 | 目的 | 統計・計量経済学の分析手法を提供するPython API |
-| 用途 | 自作の分析GUIアプリ「economicon」のエンジンとして使用 |
+| 用途 | スクリプト・アプリケーションから呼び出して使う分析エンジン |
 | 技術スタック | Rust + PyO3（Python拡張） |
 | 線形代数クレート | faer（pure Rust、システムBLAS/LAPACK非依存） |
 | ライセンス | MIT License |
@@ -103,7 +103,7 @@ econometricsmodels/
 - **保護設定**: `main`と`dev`へはローカルからの直pushを禁止し、pull request経由のみとする（ブランチ保護）。
 - **リリースの流れ**: `release/vX.Y.Z` → `dev`（PR）→ `main`（PR）→ タグpush（詳細は`.claude/skills/release-publish/SKILL.md`）。
 - **マージ**: CIがgreenであることに加え、内容を確認してからmergeする（自動セルフマージはしない）。
-- **GitHub Issue**: リポジトリがpublicなため、英語で記述する（README・MkDocsと同様の理由）。
+- **GitHub Issue**: リポジトリがpublicなため、英語で記述する（README・MkDocsと同様の理由）。対象はIssue本文のみで、セッション内の会話・コミットメッセージは対象外（引き続き日本語）。
 
 ## 6. コーディング規約
 

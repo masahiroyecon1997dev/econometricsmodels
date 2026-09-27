@@ -6,8 +6,8 @@
 実行環境依存の実測値という性質は既存の `docs/performance/` と
 同じ。mkdocs nav には含めない（CLAUDE.md 9 章、他の `docs/performance/*.md` と同じ）。
 
-このパッケージは GUI アプリ economicon のエンジンであり、アプリ起動時に import
-するなら import 時間は起動 UX に直結する。手法が Phase 4〜6 で増える／BLP 用の
+GUI アプリ等に組み込まれ、アプリ起動時に import される使い方をする場合、
+import 時間は起動 UX に直結する。手法が Phase 4〜6 で増える／BLP 用の
 数値最適化ライブラリが入ると `.so` サイズ・import 時間ともじわじわ増える余地が
 あるため、ベースラインを固定して劣化を検知できるようにする。
 

@@ -6,7 +6,7 @@
 |---|---|
 | 名称 | econometricsmodels |
 | 目的 | 統計・計量経済学の分析手法を提供するPython API |
-| 用途 | 自作の分析GUIアプリ「economicon」のエンジンとして使用 |
+| 用途 | スクリプト・アプリケーションから呼び出して使う分析エンジン |
 | 技術スタック | Rust + PyO3（Python拡張） |
 | ライセンス | MIT License |
 | 公開先 | PyPI |

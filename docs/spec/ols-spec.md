@@ -49,7 +49,8 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
   `fit()`内のローカル変数として使い切っていた）が、`engine_pybind`側に公開する`OLSResult`
   には引き続き含めない。
 - `summary()`（テキスト整形）・DataFrame版の`coef_table()`/`conf_int()`は作らない
-  （economiconのGUIエンジンという用途上、テキスト表示・対話的操作を前提にしないため）。
+  （プログラムから呼び出して使う設計方針上、テキスト表示・対話的操作を前提に
+  しないため）。
 - python_package層（`OLSResults`）:
   - `params`/`std_errors`/`test_stats`/`p_values`/`conf_int`: 係数名→値の`dict`（O(1)取り出し用）。
   - `coef_table()`: 行指向`list[dict]`（REST APIレスポンスにそのまま使える形）。

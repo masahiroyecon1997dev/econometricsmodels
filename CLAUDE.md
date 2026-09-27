@@ -103,6 +103,7 @@ econometricsmodels/
 - **保護設定**: `main`と`dev`へはローカルからの直pushを禁止し、pull request経由のみとする（ブランチ保護）。
 - **リリースの流れ**: `release/vX.Y.Z` → `dev`（PR）→ `main`（PR）→ タグpush（詳細は`.claude/skills/release-publish/SKILL.md`）。
 - **マージ**: CIがgreenであることに加え、内容を確認してからmergeする（自動セルフマージはしない）。
+- **GitHub Issue**: リポジトリがpublicなため、英語で記述する（README・MkDocsと同様の理由）。
 
 ## 6. コーディング規約
 

@@ -50,12 +50,10 @@ def test_gmm_method_runs_and_converges(iv_dataset):
 
 
 def test_gmm_one_step_has_no_weight_type_and_runs_once(iv_dataset):
-    """`gmm_type="one_step"`は`gmm_weight_type`を使わず（不正な値でも
-    検証しない）、`gmm_weight_type`は`None`、`n_iter=1`で常に収束扱い。
+    """`gmm_type="one_step"`は`gmm_weight_type`を使わず、`gmm_weight_type`は
+    `None`、`n_iter=1`で常に収束扱い。
     """
-    options = IVOptions(
-        estimator="gmm", gmm_type="one_step", gmm_weight_type="not-a-type"
-    )
+    options = IVOptions(estimator="gmm", gmm_type="one_step")
     res = our_fit(iv_dataset, options=options)
     assert res.gmm_type == "one_step"
     assert res.gmm_weight_type is None
@@ -583,17 +581,6 @@ def test_weight_type_is_none_for_2sls(iv_dataset):
     であること。
     """
     res = our_fit(iv_dataset, options=IVOptions(estimator="2sls"))
-    assert res.gmm_weight_type is None
-
-
-def test_weight_type_is_none_for_2sls_even_when_explicitly_set(iv_dataset):
-    """`estimator="2sls"`では`gmm_weight_type`を明示的に既定値以外にしても無視され、
-    `res.gmm_weight_type`は常に`None`であること。
-    """
-    res = our_fit(
-        iv_dataset,
-        options=IVOptions(estimator="2sls", gmm_weight_type="cluster"),
-    )
     assert res.gmm_weight_type is None
 
 

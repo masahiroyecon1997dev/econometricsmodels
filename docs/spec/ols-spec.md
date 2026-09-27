@@ -20,9 +20,9 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
   | `cov_type` | `str` | `"classical"` | `"classical"` / `"hc0"`〜`"hc3"` / `"cluster"` / `"hac"`（大小無視） |
   | `include_intercept` | `bool` | `True` | `True`なら設計行列の先頭に定数列を自動追加する |
   | `confidence_level` | `float` | `0.95` | 信頼区間の信頼水準、`(0, 1)` |
-  | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名（`data`内の列） |
-  | `hac_lags` | `int \| None` | `None` | `cov_type="hac"`時のラグ数。`None`なら`L=floor(4*(n/100)^(2/9))`で自動計算 |
-  | `hac_time` | `str \| None` | `None` | `cov_type="hac"`時の時系列順序列。`None`なら`data`の行順を使用 |
+  | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名（`data`内の列）。他の`cov_type`で指定すると`ValidationError` |
+  | `hac_lags` | `int \| None` | `None` | `cov_type="hac"`時のラグ数。`None`なら`L=floor(4*(n/100)^(2/9))`で自動計算。他の`cov_type`で指定すると`ValidationError` |
+  | `hac_time` | `str \| None` | `None` | `cov_type="hac"`時の時系列順序列。`None`なら`data`の行順を使用。他の`cov_type`で指定すると`ValidationError` |
 
 - `include_intercept=True`のとき`x`に`"const"`列があるとエラー（自動追加する定数項と衝突）。
   `x`に自前の定数列を含める重複検出は行わず、生じる多重共線性は`SingularMatrix`に委ねる。

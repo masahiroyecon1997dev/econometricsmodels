@@ -74,7 +74,7 @@ pub struct ProbitOptions {
 
     /// Column name to use as the cluster group key when `cov_type="cluster"`.
     /// Refers to a column in `data` rather than being passed as a separate array.
-    /// Ignored when `cov_type` is not "cluster".
+    /// Specifying it with any other `cov_type` raises `ValidationError`.
     #[pyo3(get, set)]
     pub cluster: Option<String>,
 

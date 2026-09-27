@@ -82,19 +82,19 @@ pub struct WLSOptions {
 
     /// Column name to use as the cluster group key when `cov_type="cluster"`.
     /// Refers to a column in `data` rather than being passed as a separate array.
-    /// Ignored when `cov_type` is not "cluster".
+    /// Specifying it with any other `cov_type` raises `ValidationError`.
     #[pyo3(get, set)]
     pub cluster: Option<String>,
 
     /// Number of lags (bandwidth) for HAC (Newey-West) when `cov_type="hac"`.
     /// When `None`, computed automatically via `L = floor(4*(n/100)^(2/9))`.
-    /// Ignored when `cov_type` is not "hac".
+    /// Specifying it with any other `cov_type` raises `ValidationError`.
     #[pyo3(get, set)]
     pub hac_lags: Option<i64>,
 
     /// Column name giving the time order for HAC when `cov_type="hac"`.
     /// When `None`, the row order of `data` is treated as the time order.
-    /// Ignored when `cov_type` is not "hac".
+    /// Specifying it with any other `cov_type` raises `ValidationError`.
     #[pyo3(get, set)]
     pub hac_time: Option<String>,
 }

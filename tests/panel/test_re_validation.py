@@ -517,3 +517,28 @@ def test_validation_error_is_value_error():
 
 def test_computation_error_is_runtime_error():
     assert issubclass(ComputationError, RuntimeError)
+
+
+# ── ValidationError（使われないオプション） ─────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("cov_type", "option", "value", "condition"),
+    [
+        ("classical", "cluster", "entity", 'cov_type="cluster"'),
+        ("dk", "cluster", "entity", 'cov_type="cluster"'),
+        ("cluster", "dk_bandwidth", 2, 'cov_type="dk"'),
+    ],
+)
+def test_option_unused_by_cov_type_raises(
+    fe_dataset, cov_type, option, value, condition
+):
+    """選んだ`cov_type`で使われない`cluster`/`dk_bandwidth`が指定されたら
+    黙って無視せず`ValidationError`。
+    """
+    options = REOptions(cov_type=cov_type, **{option: value})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
+    ):
+        our_fit_re(fe_dataset, options=options)

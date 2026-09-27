@@ -229,11 +229,42 @@ fn duplicate_role_message(
     }
 }
 
+/// モード（`cov_type`・`estimator`・`gmm_type`等）で使われないオプションが明示指定された
+/// 場合に`ValidationError`にする。黙って無視すると、`cov_type="cluster"`の書き忘れで
+/// クラスター頑健でない標準誤差が返る等、利用者が誤りに気づけないため。
+///
+/// `is_set`はオプションが明示指定されたか、`is_used`は現在のモードでそのオプションが
+/// 使われるか、`condition`は使われる条件（`cov_type="cluster"`のようにそのままエラー
+/// メッセージへ埋め込む、修正方法として提示する文言）。
+pub fn reject_unused_option(
+    option: &str,
+    is_set: bool,
+    is_used: bool,
+    condition: &str,
+) -> PyResult<()> {
+    if is_set && !is_used {
+        return Err(ValidationError::new_err(format!(
+            "{option} is only used with {condition}, so it would be silently ignored; \
+             set {condition} or remove {option}"
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use polars::prelude::Column;
 
     use super::*;
+
+    #[test]
+    fn reject_unused_option_errors_only_when_set_and_unused() {
+        let cond = "cov_type=\"cluster\"";
+        assert!(reject_unused_option("cluster", true, false, cond).is_err());
+        assert!(reject_unused_option("cluster", true, true, cond).is_ok());
+        assert!(reject_unused_option("cluster", false, false, cond).is_ok());
+        assert!(reject_unused_option("cluster", false, true, cond).is_ok());
+    }
 
     #[test]
     fn validate_x_non_empty_ok_for_non_empty() {

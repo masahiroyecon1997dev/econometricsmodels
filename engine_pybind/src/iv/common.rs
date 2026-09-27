@@ -63,10 +63,10 @@ use pyo3_polars::PyDataFrame;
 
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
 use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
-use crate::linear::common::{least_squares_error_is_computation_error, mat_to_vec, parse_cov_type};
+use crate::linear::common::{build_cov_type, least_squares_error_is_computation_error, mat_to_vec};
 use crate::linear::ols::{OLSResult, ols_estimator_to_result};
 use crate::validation::{
-    RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
+    RoleValue, reject_unused_option, validate_no_const_collision, validate_no_duplicate_roles,
     validate_no_duplicate_within_role, validate_x_non_empty,
 };
 
@@ -149,57 +149,63 @@ pub struct IVOptions {
     #[pyo3(get, set)]
     pub confidence_level: f64,
 
-    /// Column name to use as the cluster group key when `cov_type="cluster"`.
-    /// Ignored when `cov_type` is not "cluster".
+    /// Column name to use as the cluster group key. Used by `cov_type="cluster"` and,
+    /// with `estimator="gmm"`, by `gmm_weight_type="cluster"` (also when
+    /// `cov_type` is not "cluster"). Specifying it when neither uses it raises
+    /// `ValidationError`.
     #[pyo3(get, set)]
     pub cluster: Option<String>,
 
-    /// Number of lags (bandwidth) for HAC (Newey-West) when `cov_type="hac"`.
-    /// When `None`, computed automatically. Ignored when `cov_type` is not "hac".
+    /// Number of lags (bandwidth) for HAC (Newey-West), used by `cov_type="hac"` and, with
+    /// `estimator="gmm"`, by `gmm_weight_type="hac"`. When `None`, computed automatically.
+    /// Specifying it when neither uses it raises `ValidationError`.
     #[pyo3(get, set)]
     pub hac_lags: Option<i64>,
 
-    /// Column name giving the time order for HAC when `cov_type="hac"`.
-    /// Ignored when `cov_type` is not "hac".
+    /// Column name giving the time order for HAC, used by `cov_type="hac"` and, with
+    /// `estimator="gmm"`, by `gmm_weight_type="hac"`. Specifying it when neither uses it
+    /// raises `ValidationError`.
     #[pyo3(get, set)]
     pub hac_time: Option<String>,
 
-    /// Weight matrix used for GMM point estimation (`estimator="gmm"` only): one of
-    /// "classical" (homoskedastic), "robust" (heteroskedasticity-robust), "cluster", "hac"
-    /// (Newey-West). Same vocabulary as `cov_type`. Case-insensitive. Ignored when
-    /// `estimator="2sls"` or `gmm_type="one_step"`. "cluster"/"hac" draw from the same
-    /// `cluster`/`hac_lags`/`hac_time` fields as `cov_type` (no separate fields; see
-    /// module docstring "GMMのgmm_weight_type").
+    /// Weight matrix used for GMM point estimation: one of "classical" (homoskedastic),
+    /// "robust" (heteroskedasticity-robust), "cluster", "hac" (Newey-West). Same vocabulary
+    /// as `cov_type`. Case-insensitive. `None` (default) means "classical" for
+    /// `gmm_type="two_step"`/`"iterated"`. Specifying it with `estimator="2sls"` or
+    /// `gmm_type="one_step"` (which does not use a weight matrix) raises `ValidationError`.
+    /// "cluster"/"hac" draw from the same `cluster`/`hac_lags`/`hac_time` fields as
+    /// `cov_type` (no separate fields; see module docstring "GMMのgmm_weight_type").
     #[pyo3(get, set)]
-    pub gmm_weight_type: String,
+    pub gmm_weight_type: Option<String>,
 
-    /// GMM estimation type (`estimator="gmm"` only): "one_step" (weight matrix `(Z'Z)^-1`
-    /// only), "two_step" (default, efficient two-step GMM), or "iterated" (repeat until
-    /// convergence). Case-insensitive. Ignored when `estimator="2sls"`. `gmm_weight_type` is
-    /// not used by "one_step".
+    /// GMM estimation type: "one_step" (weight matrix `(Z'Z)^-1` only), "two_step"
+    /// (efficient two-step GMM), or "iterated" (repeat until convergence).
+    /// Case-insensitive. `None` (default) means "two_step" for `estimator="gmm"`.
+    /// Specifying it with `estimator="2sls"` raises `ValidationError`.
     #[pyo3(get, set)]
-    pub gmm_type: String,
+    pub gmm_type: Option<String>,
 
     /// Maximum number of GMM estimations for `gmm_type="iterated"`, counting the initial
     /// estimate; must be at least 3 (use `gmm_type="two_step"` for two steps). `None`
-    /// (default) means 100 for "iterated". Specifying it with "one_step"/"two_step" raises
-    /// `ValidationError`. Ignored when `estimator="2sls"`.
+    /// (default) means 100. Specifying it with any other `gmm_type` or with
+    /// `estimator="2sls"` raises `ValidationError`.
     #[pyo3(get, set)]
     pub gmm_max_iter: Option<i64>,
 
-    /// Convergence tolerance for `gmm_type="iterated"` (`estimator="gmm"` only): iteration stops
-    /// once every coefficient changes by less than this (relative/absolute mix). `None`
-    /// (default) means 1e-6 for "iterated". Specifying it with "one_step"/"two_step" raises
-    /// `ValidationError`. Ignored when `estimator="2sls"`.
+    /// Convergence tolerance for `gmm_type="iterated"`: iteration stops once every
+    /// coefficient changes by less than this (relative/absolute mix). `None` (default)
+    /// means 1e-6. Specifying it with any other `gmm_type` or with `estimator="2sls"`
+    /// raises `ValidationError`.
     #[pyo3(get, set)]
     pub gmm_tol: Option<f64>,
 
     /// Whether to raise an error if `gmm_type="iterated"` does not converge within
     /// `gmm_max_iter`. If `False`, returns the result with `converged=False` instead of
-    /// raising. Ignored for `gmm_type="one_step"`/`"two_step"` (which never check
-    /// convergence) and when `estimator="2sls"`.
+    /// raising. `None` (default) means `True`. Specifying it with any other `gmm_type`
+    /// (which never checks convergence) or with `estimator="2sls"` raises
+    /// `ValidationError`.
     #[pyo3(get, set)]
-    pub raise_on_non_convergence: bool,
+    pub raise_on_non_convergence: Option<bool>,
 }
 
 #[pymethods]
@@ -213,11 +219,11 @@ impl IVOptions {
         cluster = None,
         hac_lags = None,
         hac_time = None,
-        gmm_weight_type = "classical".to_string(),
-        gmm_type = "two_step".to_string(),
+        gmm_weight_type = None,
+        gmm_type = None,
         gmm_max_iter = None,
         gmm_tol = None,
-        raise_on_non_convergence = true,
+        raise_on_non_convergence = None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -228,11 +234,11 @@ impl IVOptions {
         cluster: Option<String>,
         hac_lags: Option<i64>,
         hac_time: Option<String>,
-        gmm_weight_type: String,
-        gmm_type: String,
+        gmm_weight_type: Option<String>,
+        gmm_type: Option<String>,
         gmm_max_iter: Option<i64>,
         gmm_tol: Option<f64>,
-        raise_on_non_convergence: bool,
+        raise_on_non_convergence: Option<bool>,
     ) -> Self {
         Self {
             estimator,
@@ -255,7 +261,7 @@ impl IVOptions {
             "IVOptions(estimator={:?}, cov_type={:?}, include_intercept={}, \
              confidence_level={}, cluster={:?}, hac_lags={:?}, hac_time={:?}, \
              gmm_weight_type={:?}, gmm_type={:?}, gmm_max_iter={:?}, gmm_tol={:?}, \
-             raise_on_non_convergence={})",
+             raise_on_non_convergence={:?})",
             self.estimator,
             self.cov_type,
             self.include_intercept,
@@ -481,6 +487,107 @@ impl IVResult {
     }
 }
 
+/// `gmm_type`/`gmm_weight_type`の実効既定値（`IVOptions`の既定値は`None`のため、使われる
+/// モードでここに解決する）。
+const DEFAULT_GMM_TYPE: &str = "two_step";
+const DEFAULT_GMM_WEIGHT_TYPE: &str = "classical";
+
+/// 選んだ`estimator`/`gmm_type`/`cov_type`/`gmm_weight_type`では使われないオプションが
+/// 明示指定されていれば`ValidationError`にする（黙って無視すると`cov_type="cluster"`の
+/// 書き忘れ等に気づけないため）。
+///
+/// - `gmm_type`/`gmm_weight_type`/`gmm_max_iter`/`gmm_tol`/`raise_on_non_convergence`:
+///   `estimator="gmm"`のときのみ。さらに`gmm_weight_type`は`gmm_type`が
+///   `"two_step"`/`"iterated"`のとき、`gmm_max_iter`/`gmm_tol`/`raise_on_non_convergence`
+///   は`"iterated"`のときのみ使われる。
+/// - `cluster`/`hac_lags`/`hac_time`: `cov_type`と`gmm_weight_type`の両方から参照される
+///   ため、どちらか一方でも使えば有効（`gmm_weight_type`側は`estimator="gmm"`かつ
+///   `gmm_type`が`"two_step"`/`"iterated"`のときのみ）。
+///
+/// `gmm_type`/`gmm_weight_type`の文字列が未知の値の場合はここでは何も言わず、後段の
+/// `parse_gmm_type`/`parse_weight_type`の「unknown ...」エラーに委ねる（誤った値と
+/// 使われないオプションの二重指摘で本筋のエラーが埋もれないようにするため）。
+fn validate_iv_option_usage(options: &IVOptions, estimator_lower: &str) -> PyResult<()> {
+    let is_gmm = estimator_lower == "gmm";
+    let gmm_type_lower = options
+        .gmm_type
+        .as_deref()
+        .unwrap_or(DEFAULT_GMM_TYPE)
+        .to_lowercase();
+    let weight_lower = options
+        .gmm_weight_type
+        .as_deref()
+        .unwrap_or(DEFAULT_GMM_WEIGHT_TYPE)
+        .to_lowercase();
+    if is_gmm
+        && (!matches!(
+            gmm_type_lower.as_str(),
+            "one_step" | "two_step" | "iterated"
+        ) || (gmm_type_lower != "one_step"
+            && !matches!(
+                weight_lower.as_str(),
+                "classical" | "robust" | "cluster" | "hac"
+            )))
+    {
+        return Ok(());
+    }
+
+    let uses_weight = is_gmm && gmm_type_lower != "one_step";
+    let is_iterated = is_gmm && gmm_type_lower == "iterated";
+    const GMM: &str = "estimator=\"gmm\"";
+    const GMM_WEIGHTED: &str = "estimator=\"gmm\" with gmm_type=\"two_step\" or \"iterated\"";
+    const GMM_ITERATED: &str = "estimator=\"gmm\" with gmm_type=\"iterated\"";
+    reject_unused_option("gmm_type", options.gmm_type.is_some(), is_gmm, GMM)?;
+    reject_unused_option(
+        "gmm_weight_type",
+        options.gmm_weight_type.is_some(),
+        uses_weight,
+        GMM_WEIGHTED,
+    )?;
+    reject_unused_option(
+        "gmm_max_iter",
+        options.gmm_max_iter.is_some(),
+        is_iterated,
+        GMM_ITERATED,
+    )?;
+    reject_unused_option(
+        "gmm_tol",
+        options.gmm_tol.is_some(),
+        is_iterated,
+        GMM_ITERATED,
+    )?;
+    reject_unused_option(
+        "raise_on_non_convergence",
+        options.raise_on_non_convergence.is_some(),
+        is_iterated,
+        GMM_ITERATED,
+    )?;
+
+    let cov_type_lower = options.cov_type.to_lowercase();
+    reject_unused_option(
+        "cluster",
+        options.cluster.is_some(),
+        cov_type_lower == "cluster" || (uses_weight && weight_lower == "cluster"),
+        "cov_type=\"cluster\" (or gmm_weight_type=\"cluster\" with estimator=\"gmm\")",
+    )?;
+    let hac_used = cov_type_lower == "hac" || (uses_weight && weight_lower == "hac");
+    const HAC_CONDITION: &str =
+        "cov_type=\"hac\" (or gmm_weight_type=\"hac\" with estimator=\"gmm\")";
+    reject_unused_option(
+        "hac_lags",
+        options.hac_lags.is_some(),
+        hac_used,
+        HAC_CONDITION,
+    )?;
+    reject_unused_option(
+        "hac_time",
+        options.hac_time.is_some(),
+        hac_used,
+        HAC_CONDITION,
+    )?;
+    Ok(())
+}
+
 /// `IVOptions.gmm_weight_type`をパースし、該当するgmm_weight_typeのときのみ`cluster`/
 /// `hac_lags`/`hac_time`を抽出したうえで`engine::iv::gmm::WeightType`を組み立てる
 /// （`estimator="gmm"`のみで使用、`cov_type`側の同種の関数は`linear::common::parse_cov_type`
@@ -497,7 +604,11 @@ impl IVResult {
 /// `gmm_weight_type`の文字列が既知の値のいずれでもない場合は`ValidationError`。それ以外
 /// （列の抽出時に発覚する問題等）は`column_extraction`の責務で`ValidationError`。
 fn parse_weight_type(df: &DataFrame, options: &IVOptions) -> PyResult<(WeightType, String)> {
-    let weight_type_lower = options.gmm_weight_type.to_lowercase();
+    let weight_type_lower = options
+        .gmm_weight_type
+        .as_deref()
+        .unwrap_or(DEFAULT_GMM_WEIGHT_TYPE)
+        .to_lowercase();
 
     let gmm_weight_type = match weight_type_lower.as_str() {
         "classical" => WeightType::Classical,
@@ -537,12 +648,13 @@ fn parse_weight_type(df: &DataFrame, options: &IVOptions) -> PyResult<(WeightTyp
 ///
 /// 戻り値は`(GmmType, 正規化済み小文字のgmm_type, 正規化済み小文字のgmm_weight_type)`。
 /// `"one_step"`は`gmm_weight_type`を使わない（検証もしない）ため3つ目は`None`。
-/// `gmm_max_iter`/`gmm_tol`の既定値は`None`で、`"iterated"`のときだけ実効既定値
-/// （`100`/`1e-6`）に解決する（`IVOptions`はpyclassで既定値と明示指定を区別できないため）。
+/// `gmm_type`/`gmm_weight_type`/`gmm_max_iter`/`gmm_tol`の既定値は`None`で、使われる
+/// モードのときだけ実効既定値（`"two_step"`/`"classical"`/`100`/`1e-6`）に解決する
+/// （`IVOptions`はpyclassで既定値と明示指定を区別できないため）。使われないモードでの
+/// 明示指定は`validate_iv_option_usage`が事前に弾いている。
 ///
 /// # Errors
 /// - `gmm_type`が未知の値: `ValidationError`
-/// - `"one_step"`/`"two_step"`で`gmm_max_iter`/`gmm_tol`が指定された: `ValidationError`
 /// - `"iterated"`で`gmm_max_iter`が3未満（負値を含む）、`gmm_tol`が0以下:
 ///   `IvError::InvalidGmmMaxIter`/`InvalidGmmTol`（engineの検証）
 /// - `"two_step"`/`"iterated"`で`gmm_weight_type`が未知の値: `ValidationError`
@@ -553,15 +665,13 @@ fn parse_gmm_type(
     const DEFAULT_MAX_ITER: usize = 100;
     const DEFAULT_TOL: f64 = 1e-6;
 
-    let gmm_type_lower = options.gmm_type.to_lowercase();
+    let gmm_type_lower = options
+        .gmm_type
+        .as_deref()
+        .unwrap_or(DEFAULT_GMM_TYPE)
+        .to_lowercase();
     match gmm_type_lower.as_str() {
         "one_step" | "two_step" => {
-            if options.gmm_max_iter.is_some() || options.gmm_tol.is_some() {
-                return Err(ValidationError::new_err(format!(
-                    "gmm_max_iter and gmm_tol can only be used with gmm_type=\"iterated\" \
-                     (got gmm_type=\"{gmm_type_lower}\")"
-                )));
-            }
             if gmm_type_lower == "one_step" {
                 return Ok((GmmType::OneStep, gmm_type_lower, None));
             }
@@ -695,7 +805,8 @@ pub(crate) fn build_iv_input(
     }
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
-    let (cov_type, cov_type_lower) = parse_cov_type(
+    validate_iv_option_usage(options, &estimator_lower)?;
+    let (cov_type, cov_type_lower) = build_cov_type(
         df,
         &options.cov_type,
         options.cluster.as_deref(),
@@ -782,7 +893,7 @@ pub(crate) fn fit(
         let estimator = GmmEstimator::fit(
             input,
             gmm_type,
-            options.raise_on_non_convergence,
+            options.raise_on_non_convergence.unwrap_or(true),
             cov_type,
             options.confidence_level,
         )
@@ -895,11 +1006,11 @@ mod tests {
             None,
             None,
             None,
-            "classical".to_string(),
-            "two_step".to_string(),
             None,
             None,
-            true,
+            None,
+            None,
+            None,
         )
     }
 

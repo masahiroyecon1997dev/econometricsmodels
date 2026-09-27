@@ -20,6 +20,7 @@ use pyo3::{PyErr, PyResult};
 
 use crate::column_extraction::{extract_f64_column, extract_group_key_column};
 use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
+use crate::validation::reject_unused_option;
 
 /// `engine::linear::common::LeastSquaresError`をPython例外に変換する。
 ///
@@ -65,8 +66,12 @@ pub(crate) fn mat_to_vec(mat: &faer::Mat<f64>) -> Vec<f64> {
 /// 抽出したうえで`engine::linear::ols::CovType`を組み立てる（OLS/WLS/IV共通、
 /// `docs/spec/ols-spec.md`「標準誤差」参照）。
 ///
-/// `cluster`/`hac_time`が指定されていても、`cov_type`がcluster/hacでなければ無視する
-/// （該当しない分岐では列抽出自体を行わない、`match`の各アーム内で完結させている）。
+/// `cluster`/`hac_lags`/`hac_time`は、`cov_type`がcluster/hacでなければ使われない。
+/// その状態で指定されていれば`ValidationError`にする（黙って無視すると
+/// `cov_type="cluster"`の書き忘れに気づけないため）。IVは`gmm_weight_type`も同じ値を
+/// 使い`cov_type`単独では判定できないため、`build_iv_input`が自前で「どちらか一方でも
+/// 使えば有効」の検証を行い、この関数ではなく検証を含まない`build_cov_type`を呼ぶ。
+/// 該当する`cov_type`の分岐でのみ列抽出を行う（`match`の各アーム内で完結）。
 /// 戻り値の2つ目は`*Result.cov_type`にそのまま格納する小文字化済み文字列
 /// （呼び出し側で二重に`to_lowercase()`しないよう、ここでまとめて返す）。
 ///
@@ -80,9 +85,32 @@ pub(crate) fn mat_to_vec(mat: &faer::Mat<f64>) -> Vec<f64> {
 /// 共有する。
 ///
 /// # Errors
+/// `cluster`/`hac_lags`/`hac_time`が使われない`cov_type`で指定された場合、または
 /// `cov_type`の文字列が既知の値のいずれでもない場合は`ValidationError`。それ以外
 /// （列の抽出時に発覚する問題等）は`column_extraction`の責務で`ValidationError`。
 pub(crate) fn parse_cov_type(
+    df: &DataFrame,
+    cov_type: &str,
+    cluster: Option<&str>,
+    hac_lags: Option<i64>,
+    hac_time: Option<&str>,
+) -> PyResult<(EngineCovType, String)> {
+    let cov_type_lower = cov_type.to_lowercase();
+    let is_hac = cov_type_lower == "hac";
+    reject_unused_option(
+        "cluster",
+        cluster.is_some(),
+        cov_type_lower == "cluster",
+        "cov_type=\"cluster\"",
+    )?;
+    reject_unused_option("hac_lags", hac_lags.is_some(), is_hac, "cov_type=\"hac\"")?;
+    reject_unused_option("hac_time", hac_time.is_some(), is_hac, "cov_type=\"hac\"")?;
+    build_cov_type(df, cov_type, cluster, hac_lags, hac_time)
+}
+
+/// `parse_cov_type`から未使用オプションの検証を除いたもの（IVが`gmm_weight_type`と共用する
+/// `cluster`/`hac_*`を、自前の検証を済ませたうえで渡すための入口）。
+pub(crate) fn build_cov_type(
     df: &DataFrame,
     cov_type: &str,
     cluster: Option<&str>,

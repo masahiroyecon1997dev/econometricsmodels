@@ -48,14 +48,14 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 | `cov_type` | `str` | `"classical"` | `"classical"` / `"hc0"`〜`"hc3"` / `"cluster"` / `"hac"`（大小無視）。`estimator="gmm"`でも`gmm_weight_type`とは独立の軸（最終的な報告用SE計算） |
 | `include_intercept` | `bool` | `True` | `x_exog`側の設計行列にのみ定数列を自動追加する。`x_endog`/`instruments`には自動追加しない |
 | `confidence_level` | `float` | `0.95` | |
-| `cluster` | `str \| None` | `None` | `cov_type="cluster"`時（`gmm_weight_type="cluster"`とも共用）のグループキー列名 |
-| `hac_lags` | `int \| None` | `None` | `cov_type="hac"`時（`gmm_weight_type="hac"`とも共用）のラグ数。`None`なら自動計算 |
-| `hac_time` | `str \| None` | `None` | `cov_type="hac"`時（`gmm_weight_type="hac"`とも共用）の時系列順序列 |
-| `gmm_weight_type` | `str` | `"classical"` | GMMの点推定に使う重み行列（`estimator="gmm"`のみ）: `"classical"` / `"robust"` / `"cluster"` / `"hac"`（`cov_type`と同じ語彙。旧名`unadjusted`/`kernel`と別名`homoskedastic`/`heteroskedastic`は受け付けない）。`estimator="2sls"`と`gmm_type="one_step"`では無視 |
-| `gmm_type` | `str` | `"two_step"` | GMMの推定方式（`estimator="gmm"`のみ）: `"one_step"`（1段階、重み`(Z'Z)⁻¹`のみ）/ `"two_step"`（2段階の効率的GMM）/ `"iterated"`（収束まで反復）。大文字小文字は区別しない |
-| `gmm_max_iter` | `int \| None` | `None` | `"iterated"`の最大推定回数（初回推定を含む、3以上）。`None`は実効既定値`100`。`"one_step"`/`"two_step"`で指定すると`ValidationError` |
-| `gmm_tol` | `float \| None` | `None` | `"iterated"`の収束許容誤差。`None`は実効既定値`1e-6`。`"one_step"`/`"two_step"`で指定すると`ValidationError` |
-| `raise_on_non_convergence` | `bool` | `True` | `gmm_type="iterated"`で収束しなければ`True`でエラー、`False`で`converged=False`のまま結果を返す。それ以外の`gmm_type`では無視 |
+| `cluster` | `str \| None` | `None` | `cov_type="cluster"`時（`gmm_weight_type="cluster"`とも共用）のグループキー列名。どちらからも使われないモードで指定すると`ValidationError` |
+| `hac_lags` | `int \| None` | `None` | `cov_type="hac"`時（`gmm_weight_type="hac"`とも共用）のラグ数。`None`なら自動計算。どちらからも使われないモードで指定すると`ValidationError` |
+| `hac_time` | `str \| None` | `None` | `cov_type="hac"`時（`gmm_weight_type="hac"`とも共用）の時系列順序列。どちらからも使われないモードで指定すると`ValidationError` |
+| `gmm_weight_type` | `str \| None` | `None` | GMMの点推定に使う重み行列（`gmm_type="two_step"`/`"iterated"`のみ。`None`は実効既定値`"classical"`）: `"classical"` / `"robust"` / `"cluster"` / `"hac"`（`cov_type`と同じ語彙。旧名`unadjusted`/`kernel`と別名`homoskedastic`/`heteroskedastic`は受け付けない）。`estimator="2sls"`と`gmm_type="one_step"`で指定すると`ValidationError` |
+| `gmm_type` | `str \| None` | `None` | GMMの推定方式（`estimator="gmm"`のみ、`None`は実効既定値`"two_step"`。`estimator="2sls"`で指定すると`ValidationError`）: `"one_step"`（1段階、重み`(Z'Z)⁻¹`のみ）/ `"two_step"`（2段階の効率的GMM）/ `"iterated"`（収束まで反復）。大文字小文字は区別しない |
+| `gmm_max_iter` | `int \| None` | `None` | `"iterated"`の最大推定回数（初回推定を含む、3以上）。`None`は実効既定値`100`。`"one_step"`/`"two_step"`/`estimator="2sls"`で指定すると`ValidationError` |
+| `gmm_tol` | `float \| None` | `None` | `"iterated"`の収束許容誤差。`None`は実効既定値`1e-6`。`"one_step"`/`"two_step"`/`estimator="2sls"`で指定すると`ValidationError` |
+| `raise_on_non_convergence` | `bool \| None` | `None` | `gmm_type="iterated"`で収束しなければ`True`でエラー、`False`で`converged=False`のまま結果を返す。`None`は実効既定値`True`。それ以外の`gmm_type`・`estimator="2sls"`で指定すると`ValidationError` |
 
 - **`cluster`/`hac_lags`/`hac_time`は`cov_type`と`gmm_weight_type`（GMM）で共用する**
   （`IVOptions`に別フィールドを増やさない設計。異なるクラスター変数を使い分けたいニーズが
@@ -203,7 +203,15 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 - **`gmm_max_iter`/`gmm_tol`は`"iterated"`専用**: `"one_step"`/`"two_step"`で指定すると
   `ValidationError`。`IVOptions`は既定値と明示指定を区別できないため既定値は`None`とし、
   `"iterated"`のときだけ実効既定値（`gmm_max_iter=100`、`gmm_tol=1e-6`）に解決する。
-  `estimator="2sls"`のときは他のオプション同様に黙って無視する。
+  `estimator="2sls"`で指定しても`ValidationError`。
+- **選んだモードで使われないオプションは黙って無視せず`ValidationError`にする**:
+  `cov_type="cluster"`の書き忘れでclassicalの標準誤差が黙って返るのを防ぐため。
+  `gmm_type`/`gmm_weight_type`/`gmm_max_iter`/`gmm_tol`/`raise_on_non_convergence`は
+  `estimator="gmm"`のときのみ、`gmm_weight_type`はさらに`gmm_type`が`"two_step"`/
+  `"iterated"`のとき、`gmm_max_iter`/`gmm_tol`/`raise_on_non_convergence`は`"iterated"`
+  のときのみ有効。`cluster`/`hac_lags`/`hac_time`は`cov_type`と`gmm_weight_type`の
+  どちらか一方でも使えば有効。既定値が非`None`だったオプションは、指定有無を区別する
+  ため既定値を`None`にして使われるモードでのみ実効既定値に解決する。
 - **`gmm_max_iter`は初回推定を含めて数え、3以上を必須とする**（linearmodelsの`iter_limit`と
   同じ数え方）。上限2回の反復は「two_stepに収束判定を付けたもの」になり紛らわしいため、
   2段階が欲しい場合は`gmm_type="two_step"`を使う（エラーメッセージでも案内する）。

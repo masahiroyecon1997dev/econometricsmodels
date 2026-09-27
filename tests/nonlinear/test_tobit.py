@@ -1299,3 +1299,24 @@ def test_predict_augment_take_new_data_as_first_positional_arg(
     augmented = res.augment(new_data)
     assert augmented.height == 2
     assert "predicted_expected_observed" in augmented.columns
+
+
+@pytest.mark.parametrize("cov_type", ["classical", "opg", "hc0", "hc1"])
+def test_cluster_unused_by_cov_type_raises(censored_dataset, cov_type):
+    """`cov_type="cluster"`以外で`cluster`が指定されたら黙って無視せず
+    `ValidationError`。
+    """
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.UNUSED_OPTION,
+            option="cluster",
+            condition='cov_type="cluster"',
+        ),
+    ):
+        Tobit(
+            censored_dataset,
+            y="y",
+            x=["x1", "x2"],
+            options=TobitOptions(cov_type=cov_type, cluster="cluster"),
+        ).fit()

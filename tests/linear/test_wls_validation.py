@@ -599,3 +599,34 @@ def test_scale_variance_cluster_raises_computation_error():
         WLS(
             df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
         ).fit()
+
+
+# ── ValidationError（使われないオプション） ─────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("cov_type", "option", "value", "condition"),
+    [
+        ("classical", "cluster", "cluster", 'cov_type="cluster"'),
+        ("hc1", "cluster", "cluster", 'cov_type="cluster"'),
+        ("cluster", "hac_lags", 2, 'cov_type="hac"'),
+        ("classical", "hac_lags", 2, 'cov_type="hac"'),
+        ("cluster", "hac_time", "x1", 'cov_type="hac"'),
+    ],
+)
+def test_option_unused_by_cov_type_raises(
+    dataset, cov_type, option, value, condition
+):
+    """選んだ`cov_type`で使われない`cluster`/`hac_lags`/`hac_time`が指定
+    されたら黙って無視せず`ValidationError`（`cov_type="cluster"`の
+    書き忘れでclassicalの標準誤差が返るのを防ぐ）。
+    """
+    dataset = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    options = WLSOptions(cov_type=cov_type, **{option: value})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
+    ):
+        WLS(
+            dataset, y="y", x=["x1", "x2"], weight="weight", options=options
+        ).fit()

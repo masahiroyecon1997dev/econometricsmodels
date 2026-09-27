@@ -318,11 +318,19 @@ def test_gmm_type_matches_linearmodels(fixtures, n_iter):
     指摘）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
+    gmm_type_options = _GMM_TYPE_OPTIONS[n_iter]
+    # `one_step`は重み行列を使わないため`gmm_weight_type`は指定できない
+    # （指定するとValidationError）。
+    weight_options = (
+        {}
+        if gmm_type_options["gmm_type"] == "one_step"
+        else {"gmm_weight_type": "classical"}
+    )
     options = IVOptions(
         estimator="gmm",
-        gmm_weight_type="classical",
         cov_type="classical",
-        **_GMM_TYPE_OPTIONS[n_iter],
+        **weight_options,
+        **gmm_type_options,
     )
     res = IV(
         df,

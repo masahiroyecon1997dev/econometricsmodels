@@ -217,3 +217,9 @@ def test_separation_suspected_raises_computation_error_for_near_separation_data(
     _checks.check_separation_suspected_raises_computation_error_for_near_separation_data(
         Probit
     )
+
+
+def test_cluster_unused_by_cov_type_raises(binary_dataset):
+    _checks.check_cluster_unused_by_cov_type_raises(
+        binary_dataset, Probit, ProbitOptions
+    )

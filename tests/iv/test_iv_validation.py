@@ -635,28 +635,105 @@ def test_unknown_gmm_type_raises(iv_dataset):
         our_fit(iv_dataset, options=options)
 
 
-@pytest.mark.parametrize("gmm_type", ["one_step", "two_step"])
-@pytest.mark.parametrize(
-    "iter_options", [{"gmm_max_iter": 10}, {"gmm_tol": 1e-6}]
+_GMM = 'estimator="gmm"'
+_GMM_WEIGHTED = 'estimator="gmm" with gmm_type="two_step" or "iterated"'
+_GMM_ITERATED = 'estimator="gmm" with gmm_type="iterated"'
+_CLUSTER_CONDITION = (
+    'cov_type="cluster" (or gmm_weight_type="cluster" with estimator="gmm")'
 )
-def test_gmm_iter_options_with_non_iterated_type_raise(
-    iv_dataset, gmm_type, iter_options
+_HAC_CONDITION = (
+    'cov_type="hac" (or gmm_weight_type="hac" with estimator="gmm")'
+)
+
+
+@pytest.mark.parametrize(
+    ("estimator", "gmm_type", "option", "value", "condition"),
+    [
+        # estimator="2sls"ではGMM専用オプションは全て使われない
+        ("2sls", None, "gmm_type", "two_step", _GMM),
+        ("2sls", None, "gmm_weight_type", "robust", _GMM_WEIGHTED),
+        ("2sls", None, "gmm_max_iter", 10, _GMM_ITERATED),
+        ("2sls", None, "gmm_tol", 1e-6, _GMM_ITERATED),
+        ("2sls", None, "raise_on_non_convergence", False, _GMM_ITERATED),
+        # gmm_type="one_step"は重み行列を使わない
+        ("gmm", "one_step", "gmm_weight_type", "robust", _GMM_WEIGHTED),
+        # gmm_type="one_step"/"two_step"は反復しない
+        ("gmm", "one_step", "gmm_max_iter", 10, _GMM_ITERATED),
+        ("gmm", "two_step", "gmm_max_iter", 10, _GMM_ITERATED),
+        ("gmm", "one_step", "gmm_tol", 1e-6, _GMM_ITERATED),
+        ("gmm", "two_step", "gmm_tol", 1e-6, _GMM_ITERATED),
+        ("gmm", "one_step", "raise_on_non_convergence", False, _GMM_ITERATED),
+        ("gmm", "two_step", "raise_on_non_convergence", False, _GMM_ITERATED),
+    ],
+)
+def test_gmm_option_unused_by_mode_raises(
+    iv_dataset, estimator, gmm_type, option, value, condition
 ):
-    """`gmm_max_iter`/`gmm_tol`は`"iterated"`のときだけ使える。"""
-    options = IVOptions(estimator="gmm", gmm_type=gmm_type, **iter_options)
+    """選んだ`estimator`/`gmm_type`で使われないGMM専用オプションが指定
+    されたら黙って無視せず`ValidationError`。
+    """
+    kwargs = {} if gmm_type is None else {"gmm_type": gmm_type}
+    options = IVOptions(estimator=estimator, **kwargs, **{option: value})
     with pytest.raises(
         ValidationError,
-        match=escaped(
-            msgs.GMM_ITER_OPTIONS_WITH_NON_ITERATED_TYPE, gmm_type=gmm_type
-        ),
+        match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
     ):
         our_fit(iv_dataset, options=options)
 
 
-def test_gmm_iter_options_are_ignored_for_2sls(iv_dataset):
-    """`estimator="2sls"`ではGMM専用オプションが矛盾していても黙って無視する。"""
-    options = IVOptions(estimator="2sls", gmm_type="one_step", gmm_max_iter=10)
-    our_fit(iv_dataset, options=options)
+@pytest.mark.parametrize(
+    ("options_kwargs", "option", "condition"),
+    [
+        ({"cov_type": "classical"}, "cluster", _CLUSTER_CONDITION),
+        ({"cov_type": "hc1"}, "cluster", _CLUSTER_CONDITION),
+        # estimator="2sls"はgmm_weight_typeを使えず、cov_typeだけで判定される
+        (
+            {"estimator": "2sls", "cov_type": "classical"},
+            "cluster",
+            _CLUSTER_CONDITION,
+        ),
+        # gmm_type="one_step"はgmm_weight_typeを使わない
+        (
+            {"estimator": "gmm", "gmm_type": "one_step"},
+            "cluster",
+            _CLUSTER_CONDITION,
+        ),
+        # gmm_weight_typeが別の値なら使われない
+        (
+            {"estimator": "gmm", "gmm_weight_type": "robust"},
+            "cluster",
+            _CLUSTER_CONDITION,
+        ),
+        ({"cov_type": "cluster"}, "hac_lags", _HAC_CONDITION),
+        ({"cov_type": "cluster"}, "hac_time", _HAC_CONDITION),
+    ],
+)
+def test_cov_option_unused_by_mode_raises(
+    iv_dataset, options_kwargs, option, condition
+):
+    """`cluster`/`hac_lags`/`hac_time`は`cov_type`と`gmm_weight_type`の
+    どちらからも使われないときだけ`ValidationError`。
+    """
+    value = 2 if option == "hac_lags" else "x1"
+    options = IVOptions(**options_kwargs, **{option: value})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
+    ):
+        our_fit(iv_dataset, options=options)
+
+
+def test_cluster_used_only_by_gmm_weight_type_is_accepted(clustered_dataset):
+    """`cov_type`が`cluster`でなくても`gmm_weight_type="cluster"`が使う
+    ため、`cluster`の指定は有効（どちらか一方でも使えば有効）。
+    """
+    options = IVOptions(
+        estimator="gmm",
+        cov_type="classical",
+        gmm_weight_type="cluster",
+        cluster="cluster_group",
+    )
+    our_fit(clustered_dataset, options=options)
 
 
 @pytest.mark.parametrize("gmm_tol", [0.0, -1.0])

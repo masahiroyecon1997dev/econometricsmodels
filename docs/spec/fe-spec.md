@@ -22,9 +22,9 @@ FE固有の内容のみを記載する。
   | `cov_type` | `str` | `"cluster"` | `"classical"` / `"hc1"`〜`"hc3"` / `"cluster"` / `"dk"`（大小無視）。OLSと異なり`"hc0"`は非対応（`FeCovType` enum自体が持たない、専用エラーメッセージで弾く） |
   | `confidence_level` | `float` | `0.95` | |
   | `time` | `str \| None` | `None` | `Some`なら2-way（entity+time）、`None`なら1-way。`cov_type="dk"`時のDK時系列順序としても使われる（`dk_time`未指定の場合） |
-  | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名。省略時は`entity`をそのまま使う |
-  | `dk_time` | `str \| None` | `None` | DK HAC専用の時系列順序。`time`とは独立に指定でき、指定時は2-wayでも常にこちらが優先される |
-  | `dk_bandwidth` | `int \| None` | `None` | DK HACのバンド幅（時点数`t`ベース、OLSの`hac_lags`とは意味が異なるため別名）。省略時は`floor(4*(t/100)^(2/9))`で自動計算 |
+  | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名。省略時は`entity`をそのまま使う。他の`cov_type`で指定すると`ValidationError` |
+  | `dk_time` | `str \| None` | `None` | DK HAC専用の時系列順序。`time`とは独立に指定でき、指定時は2-wayでも常にこちらが優先される。`cov_type="dk"`以外で指定すると`ValidationError` |
+  | `dk_bandwidth` | `int \| None` | `None` | DK HACのバンド幅（時点数`t`ベース、OLSの`hac_lags`とは意味が異なるため別名）。省略時は`floor(4*(t/100)^(2/9))`で自動計算。`cov_type="dk"`以外で指定すると`ValidationError` |
 
 - **`include_intercept`は無い**: withinの変換で切片が構造的に消えるため、OLS/WLS/IVと異なり
   このオプション自体が意味を持たない（`FeEstimator::fit`は常に`include_intercept=false`で

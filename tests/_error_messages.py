@@ -235,9 +235,11 @@ UNKNOWN_GMM_TYPE = (
     "unknown gmm_type: '{other}'. Expected one of 'one_step', 'two_step', "
     "or 'iterated'"
 )
-GMM_ITER_OPTIONS_WITH_NON_ITERATED_TYPE = (
-    "gmm_max_iter and gmm_tol can only be used with "
-    'gmm_type="iterated" (got gmm_type="{gmm_type}")'
+# 選んだモードで使われないオプションが明示指定された場合の共通文言
+# （`engine_pybind/src/validation.rs`の`reject_unused_option`）。
+UNUSED_OPTION = (
+    "{option} is only used with {condition}, so it would be silently "
+    "ignored; set {condition} or remove {option}"
 )
 INVALID_GMM_TOL = "gmm_tol must be a positive finite number, got {gmm_tol}"
 INSUFFICIENT_CLUSTERS_FOR_WEIGHT_MATRIX = (

@@ -13,6 +13,7 @@ use pyo3::prelude::*;
 
 use crate::column_extraction::extract_group_key_column;
 use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
+use crate::validation::reject_unused_option;
 
 /// `engine::nonlinear::common::MleError`をPython例外に変換する。
 ///
@@ -78,8 +79,8 @@ pub struct MarginalEffectsResult {
 
 /// `cov_type`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::CovType`に
 /// パースする。`cov_type="cluster"`のときのみ`cluster`で指定された列を
-/// `extract_group_key_column`で抽出する（他のcov_typeでは無視する、OLSの
-/// `cluster`/`hac_time`の扱いと同じ方針）。
+/// `extract_group_key_column`で抽出する（他のcov_typeで`cluster`が指定されていれば
+/// `ValidationError`、OLSの`cluster`/`hac_*`の扱いと同じ方針）。
 ///
 /// Logit/Probit/Tobit共通（元は`logit.rs`/`probit.rs`/`tobit.rs`に
 /// バイト単位で完全一致するコードとして独立複製されていたが、`CovType`自体が
@@ -87,6 +88,7 @@ pub struct MarginalEffectsResult {
 ///
 /// # Errors
 /// - `cov_type`が既知の値のいずれでもない: `ValidationError`
+/// - `cov_type`が`"cluster"`でないのに`cluster`が指定された: `ValidationError`
 ///
 /// `cluster`未指定自体はここでは`ValidationError`にせず、`groups=None`のまま
 /// `engine`側の`CommonError::MissingClusterColumn`検証に委ねる（OLSの`fit()`と同じ役割分担）。
@@ -95,6 +97,12 @@ pub(crate) fn parse_cov_type(
     cov_type_lower: &str,
     cluster: &Option<String>,
 ) -> PyResult<CovType> {
+    reject_unused_option(
+        "cluster",
+        cluster.is_some(),
+        cov_type_lower == "cluster",
+        "cov_type=\"cluster\"",
+    )?;
     match cov_type_lower {
         "classical" => Ok(CovType::Classical),
         "opg" => Ok(CovType::Opg),

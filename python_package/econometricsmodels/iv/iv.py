@@ -95,9 +95,11 @@ class IV:
                 overlap, `x_endog` or `instruments` is empty,
                 insufficient observations, `confidence_level` out of
                 range, an unknown `cov_type` or (`estimator="gmm"` only)
-                `gmm_type`/`gmm_weight_type` string, `gmm_max_iter`/
-                `gmm_tol` given with a `gmm_type` other than
-                `"iterated"`, or too few instruments for
+                `gmm_type`/`gmm_weight_type` string, an option the
+                chosen `estimator`/`gmm_type`/`cov_type` does not
+                use (e.g. `cluster` without `cov_type="cluster"`,
+                `gmm_max_iter` with a `gmm_type` other than
+                `"iterated"`), or too few instruments for
                 identification). A subclass of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. a singular first- or second-stage

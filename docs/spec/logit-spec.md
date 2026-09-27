@@ -23,7 +23,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   | `cov_type` | `str` | `"classical"` | `"classical"`/ `"opg"` / `"hc0"` / `"hc1"` / `"cluster"`（大小無視） |
   | `include_intercept` | `bool` | `True` | |
   | `confidence_level` | `float` | `0.95` | |
-  | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名 |
+  | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名。他の`cov_type`で指定すると`ValidationError` |
   | `solver` | `str` | `"newton"` | `"newton"` / `"bfgs"` / `"lbfgs"`（大小無視） |
   | `max_iter` | `int` | `35` | 正整数、以下は`InvalidMaxIter` |
   | `tol` | `float` | `1e-6` | 勾配ノルム収束判定の閾値、以下は`InvalidTol` |

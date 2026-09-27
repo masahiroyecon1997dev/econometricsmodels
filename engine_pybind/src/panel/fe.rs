@@ -82,7 +82,8 @@ use crate::column_extraction::{extract_f64_column, extract_f64_columns, extract_
 use crate::errors::ValidationError;
 use crate::linear::common::mat_to_vec;
 use crate::validation::{
-    RoleValue, validate_no_duplicate_roles, validate_no_duplicate_within_role, validate_x_non_empty,
+    RoleValue, reject_unused_option, validate_no_duplicate_roles,
+    validate_no_duplicate_within_role, validate_x_non_empty,
 };
 
 /// Estimation options for FE (fixed effects panel regression).
@@ -112,22 +113,22 @@ pub struct FEOptions {
     pub time: Option<String>,
 
     /// Column name to use as the cluster group key when `cov_type="cluster"`. When
-    /// `None`, the `entity` argument's column is used automatically. Ignored when
-    /// `cov_type` is not "cluster".
+    /// `None`, the `entity` argument's column is used automatically. Specifying it with
+    /// any other `cov_type` raises `ValidationError`.
     #[pyo3(get, set)]
     pub cluster: Option<String>,
 
     /// Column name giving the time order for Driscoll-Kraay HAC, independent of `time`
     /// (`time` and `dk_time` serve different purposes; see the module docstring). When
     /// set, always takes priority over `time` for the HAC computation (even with
-    /// two-way effects). When `None`, falls back to `time`. Ignored when `cov_type` is
-    /// not "dk".
+    /// two-way effects). When `None`, falls back to `time`. Specifying it with any
+    /// other `cov_type` raises `ValidationError`.
     #[pyo3(get, set)]
     pub dk_time: Option<String>,
 
     /// Bandwidth for Driscoll-Kraay HAC when `cov_type="dk"`. When `None`, computed
     /// automatically via `floor(4*(t/100)^(2/9))` (`t` = number of unique time periods).
-    /// Ignored when `cov_type` is not "dk".
+    /// Specifying it with any other `cov_type` raises `ValidationError`.
     #[pyo3(get, set)]
     pub dk_bandwidth: Option<i64>,
 }
@@ -307,6 +308,25 @@ impl FEResult {
 /// （列の抽出時に発覚する問題等）は`column_extraction`の責務で`ValidationError`。
 fn parse_fe_cov_type(df: &DataFrame, options: &FEOptions) -> PyResult<(FeCovType, String)> {
     let cov_type_lower = options.cov_type.to_lowercase();
+    reject_unused_option(
+        "cluster",
+        options.cluster.is_some(),
+        cov_type_lower == "cluster",
+        "cov_type=\"cluster\"",
+    )?;
+    let is_dk = cov_type_lower == "dk";
+    reject_unused_option(
+        "dk_time",
+        options.dk_time.is_some(),
+        is_dk,
+        "cov_type=\"dk\"",
+    )?;
+    reject_unused_option(
+        "dk_bandwidth",
+        options.dk_bandwidth.is_some(),
+        is_dk,
+        "cov_type=\"dk\"",
+    )?;
 
     let cov_type = match cov_type_lower.as_str() {
         "classical" => FeCovType::Classical,

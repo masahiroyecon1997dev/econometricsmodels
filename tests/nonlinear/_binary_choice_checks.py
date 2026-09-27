@@ -1492,3 +1492,24 @@ def check_predict_with_include_intercept_false_and_x_named_const(
         z = coef_const * c + coef_x2 * x2
         expected = link(z)
         assert abs(row["probability"] - expected) < 1e-9, f"probability/{i}"
+
+
+def check_cluster_unused_by_cov_type_raises(
+    dataset, estimator_cls, options_cls
+):
+    """`cov_type="cluster"`以外で`cluster`が指定されたら黙って無視せず
+    `ValidationError`。
+    """
+    for cov_type in ["classical", "opg", "hc0", "hc1"]:
+        options = options_cls(cov_type=cov_type, cluster="cluster")
+        with pytest.raises(
+            ValidationError,
+            match=escaped(
+                msgs.UNUSED_OPTION,
+                option="cluster",
+                condition='cov_type="cluster"',
+            ),
+        ):
+            estimator_cls(
+                dataset, y="y", x=["x1", "x2"], options=options
+            ).fit()

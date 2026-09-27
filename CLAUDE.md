@@ -150,9 +150,10 @@ econometricsmodels/
 
 - 方針書: `docs/plan.md`（本リポジトリの正式な方針ドキュメント。実装フェーズ・手法の割り当てもここが正本）
 - 仕様書: `docs/spec/`（実装済みの手法ごとの数式・API仕様の正本。method非依存のCI/CD・セキュリティ運用ノートも
-  ここに置く、例: `ci-cd-notes.md`）、`docs/planning/specs/`（実装途中の手法の設計ノート・実装ノート）。
+  ここに置く、例: `ci-cd-notes.md`・`inference-conventions.md`）、`docs/planning/specs/`（実装途中の手法の設計ノート・実装ノート）。
   ある手法の実装が完了したら、その手法の仕様書は`docs/planning/specs/`から`docs/spec/`へ集約する
   （経緯は削除し理由のみ簡潔に記載、1ファイルにまとめる）。
+- 利用者向け横断ガイド: `docs/guide/`（mkdocsのnavに載せる英語の公開ページ）。現状は`inference-conventions.md`（手法別の検定分布・自由度、R/statsmodels/linearmodelsとの違い、診断統計量の読み方）。手法別の一覧表はこの公開ページを正本とし、`docs/spec/inference-conventions.md`には重複させず選択理由・ベンチマーク上の注意のみを置く。新手法の追加時は公開ページの表に1行追加する。
 - 性能比較記録: `docs/performance/<method>.md`（`performance/compare_<method>.py`の実測サマリー。数式・API仕様ではなく
   実行環境依存の実測値のため`docs/spec/`とは分ける）。生成JSONは`docs/performance/results/`（`.gitignore`対象）。
 

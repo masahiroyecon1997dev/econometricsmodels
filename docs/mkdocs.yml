@@ -7,6 +7,7 @@ repo_name: masahiroyecon1997dev/econometricsmodels
 # （デフォルトの"docs/mkdocs.yml相対docs/"にはしない）。docs/planning/・docs/spec/・
 # docs/plan.mdはビルド対象に含まれるがnavには載せない
 # （CLAUDE.md 10章「ソースとしては誰でも閲覧可能という前提で運用する」）。
+# 利用者向けの横断解説はdocs/guide/に置き、navに載せる。
 docs_dir: .
 site_dir: ../site
 
@@ -22,6 +23,8 @@ nav:
       - IV: api/iv.md
       - FE: api/fe.md
       - RE: api/re.md
+  - Guides:
+      - Inference conventions: guide/inference-conventions.md
 
 theme:
   name: material

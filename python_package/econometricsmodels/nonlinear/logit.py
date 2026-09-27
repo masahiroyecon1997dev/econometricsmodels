@@ -311,7 +311,7 @@ class LogitResults:
 
         Same `new_data` semantics as `predict()`, but returns a polars
         DataFrame (the training data, or `new_data` when given, plus a
-        new `"probability"` column) instead of a row-oriented list.
+        new `"predicted_probability"` column) instead of a row-oriented list.
         See `OLSResults.augment()` for the project's general policy on
         this DataFrame-returning exception.
 
@@ -322,11 +322,11 @@ class LogitResults:
 
         Returns:
             A polars DataFrame: the source data's columns plus
-            `"probability"`, in the same row order as the source.
+            `"predicted_probability"`, in the same row order as the source.
 
         Raises:
             ValidationError: Same as `predict()`, or the source data
-                already has a column named `"probability"` (which
+                already has a column named `"predicted_probability"` (which
                 would otherwise be silently overwritten).
         """
         return self._raw.augment(new_data)

@@ -102,7 +102,7 @@ MLEが`Φ(θ̂)=ȳ`を満たすため、この計算がリンク関数に依存�
 `predict(new_data=None)`は`p_i=Φ(x_i'θ)`をそのまま計算する（Logitの`Λ`を`Φ`に置き換えたのみ、
 out-of-sample対応も含めて設計は同一）。`pred_table`の計算本体はリンク関数を参照しないため
 `common.rs`の共有関数をそのまま使う（[`logit-spec.md`](./logit-spec.md)3.6節参照）。`pred_table`は
-in-sample限定のまま。`augment(new_data=None)`もLogitと完全に同一の設計（`"probability"`列）。
+in-sample限定のまま。`augment(new_data=None)`もLogitと完全に同一の設計（`"predicted_probability"`列）。
 
 ### 3.7 engine_pybind: エラー変換
 

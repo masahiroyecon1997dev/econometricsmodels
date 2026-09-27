@@ -135,11 +135,13 @@ for row in table:
     print(row["actual"], row["predicted_0"], row["predicted_1"])
 ```
 
-`LogitResults.augment()` takes the same `new_data` argument as `predict()`, but returns a polars DataFrame (the source data plus a new `"probability"` column) instead of a row-oriented list, mirroring `OLSResults.augment()`.
+`LogitResults.augment()` takes the same `new_data` argument as `predict()`, but returns a polars DataFrame (the source data plus a new `"predicted_probability"` column) instead of a row-oriented list, mirroring `OLSResults.augment()`.
 
 ```python
 augmented = result.augment(new_data)
-print(augmented)  # original `new_data` columns, plus a "probability" column
+print(
+    augmented
+)  # original `new_data` columns, plus a "predicted_probability" column
 ```
 
 ### Marginal effects
@@ -218,7 +220,7 @@ new_data = pl.DataFrame({"x1": [1.0, 2.0]})
 predicted = result.predict(new_data, target="expected_observed")
 ```
 
-`augment()` takes the same `target`/`new_data` arguments as `predict()`, but returns a polars DataFrame instead of a row-oriented list. Unlike Logit/Probit's fixed `"probability"` column, the appended column is named `"predicted_{target}"` (e.g. `"predicted_expected_observed"`), since `predict()`'s meaning depends on `target` — this also lets you call `augment()` once per `target` on the same DataFrame without a column name collision.
+`augment()` takes the same `target`/`new_data` arguments as `predict()`, but returns a polars DataFrame instead of a row-oriented list. Like Logit/Probit's `"predicted_probability"` column, the appended column has a `predicted_` prefix; here it is named `"predicted_{target}"` (e.g. `"predicted_expected_observed"`), since `predict()`'s meaning depends on `target` — this also lets you call `augment()` once per `target` on the same DataFrame without a column name collision.
 
 ```python
 augmented = result.augment(target="expected_observed")

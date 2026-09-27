@@ -293,16 +293,16 @@ impl ProbitResult {
     }
 
     /// The source data (training data, or `new_data` when given) with the predicted
-    /// probabilities appended as a new `"probability"` column.
+    /// probabilities appended as a new `"predicted_probability"` column.
     ///
     /// Same `new_data`/`include_intercept` semantics as `predict()`, but returns a
-    /// polars DataFrame (original columns plus `"probability"`, row order preserved)
+    /// polars DataFrame (original columns plus `"predicted_probability"`, row order preserved)
     /// instead of a bare list of floats (same design as `LogitResult::augment()`).
     ///
     /// # Errors
     /// - Same as `predict()`: a required `x` column missing from `new_data`,
     ///   non-numeric, or containing missing/NaN/infinite values: `ValidationError`.
-    /// - The source data already has a column named `"probability"`:
+    /// - The source data already has a column named `"predicted_probability"`:
     ///   `ValidationError` (would otherwise silently overwrite it).
     #[pyo3(signature = (new_data=None))]
     fn augment(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<PyDataFrame> {
@@ -315,12 +315,12 @@ impl ProbitResult {
             None => (self.training_data.clone(), self.estimator.predict()),
         };
 
-        validate_no_existing_column(&source, "probability")?;
+        validate_no_existing_column(&source, "predicted_probability")?;
 
         // `with_column`の唯一の失敗条件（`ShapeMismatch`）はここでは理論上到達不能
         // （`LogitResult::augment()`と同じ理由）。
         source
-            .with_column(Column::new("probability".into(), probability))
+            .with_column(Column::new("predicted_probability".into(), probability))
             .expect("probability.len() matches source.height() by construction");
         Ok(PyDataFrame(source))
     }

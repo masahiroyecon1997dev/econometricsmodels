@@ -361,8 +361,8 @@ class TobitResults:
         project's general policy on this DataFrame-returning
         exception.
 
-        Unlike Logit/Probit's fixed `"probability"` column, the
-        appended column here is named `"predicted_{target}"`, using
+        Like Logit/Probit's fixed `"predicted_probability"` column, the
+        appended column here has a `predicted_` prefix and is named `"predicted_{target}"`, using
         the lowercased `target` (e.g. `target="expected_observed"` or
         `target="Expected_Observed"` both produce
         `"predicted_expected_observed"`), since `predict()`'s meaning

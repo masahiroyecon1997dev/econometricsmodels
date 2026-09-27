@@ -361,7 +361,7 @@ def test_augment_different_targets_do_not_collide_on_same_dataframe(
     censored_dataset,
 ):
     """`predicted_{target}`という列名にした狙い（ユーザー確認済み）:
-    Logit/Probitのような固定名`"probability"`だと、複数の`target`を
+    Logit/Probitのような固定名`"predicted_probability"`だと、複数の`target`を
     同じDataFrameに積み上げようとした2回目の`augment()`呼び出しが列名衝突で
     失敗する。`target`依存の列名ならこれが起きない。
     """

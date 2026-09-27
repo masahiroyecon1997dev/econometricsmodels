@@ -23,7 +23,7 @@
 - `LogitOptions`/`ProbitOptions`は`_lib`からそのまま再輸出する（独自クラスとして再定義しない、`OLSOptions`と同じ方針）。
 - **`predict()`はLogit/Probit両方でout-of-sample（`new_data`引数）対応済み**: `OLS.predict(new_data=None)`と同じシグネチャ・同じ`None`セマンティクス。戻り値のキーは引き続き`"probability"`（`OLSResult.predict()`の`"predicted"`とは意味が異なるため、キー名は統一しない方針。再検討済み、変更なしと結論）。`pred_table()`のout-of-sample対応は別途トラッキング（引き続き未対応）。
 - **OLSからの類推による誤解対策（2026-09-13対応済み）**: `predict()`が確率を返しOLSのような点予測ではないことを、`logit.py`/`probit.py`の`predict()`docstring（Note節）・`docs/spec/logit-spec.md`3.6節・`docs/getting-started.md`に明記した。キー名の統一は行わない（上記の通り）。
-- **`augment(new_data=None)`はLogit/Probit両方に拡張済み（2026-09-13）**: `OLSResults.augment()`と同型（`predict()`と同じ`new_data`意味論、ソースデータに予測確率の列を1列付加したpolars DataFrameを返す）。列名は固定`"probability"`（`predict()`の戻り値キーと同じ）。`LogitResult`/`ProbitResult`は`fit()`時の元DataFrameを`training_data: DataFrame`として保持する（`engine_pybind/src/nonlinear/CLAUDE.md`参照）。
+- **`augment(new_data=None)`はLogit/Probit両方に拡張済み（2026-09-13）**: `OLSResults.augment()`と同型（`predict()`と同じ`new_data`意味論、ソースデータに予測確率の列を1列付加したpolars DataFrameを返す）。列名は固定`"predicted_probability"`（`predict()`の戻り値キー`"probability"`とは異なり、`predicted_`接頭辞でOLS/WLS/Tobitと揃えた）。`LogitResult`/`ProbitResult`は`fit()`時の元DataFrameを`training_data: DataFrame`として保持する（`engine_pybind/src/nonlinear/CLAUDE.md`参照）。
 
 ## 実装パターン
 

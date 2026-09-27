@@ -240,7 +240,7 @@ Tobit固有の差分:
   だけの薄いラッパー。`censoring_fit_check()`のout-of-sample対応は引き続き未対応（4章）。
 - **`augment(target="expected_observed", new_data=None)`は`predict()`と同じ`target`/`new_data`
   意味論**で、ソースデータに予測値の列を1列付加したpolars DataFrameを返す。
-  **列名はLogit/Probitの固定名`"probability"`とは異なり`"predicted_{target}"`**（例:
+  **列名は`predicted_`接頭辞で揃えた`"predicted_{target}"`（Logit/Probitは固定`"predicted_probability"`）**（例:
   `"predicted_expected_observed"`）にした。理由: Tobitは`target`によって`predict()`の意味が
   変わるため、固定名だと同じDataFrameに複数の`target`を積み上げようとした2回目の`augment()`が
   列名衝突で失敗する（`target`ごとに別の列名にすればこれを避けられる、ユーザー確認済み・提案）。

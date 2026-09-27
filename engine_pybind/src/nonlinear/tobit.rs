@@ -342,7 +342,7 @@ impl TobitResult {
     /// returns a polars DataFrame (original columns plus the predicted column, row
     /// order preserved) instead of a bare list of floats (same design as
     /// `LogitResult::augment()`). The column name is `target`-dependent
-    /// (unlike Logit/Probit's fixed `"probability"`) so that `augment()` can be
+    /// (unlike Logit/Probit's fixed `"predicted_probability"`) so that `augment()` can be
     /// called once per `target` on the same DataFrame without a name collision.
     ///
     /// # Errors

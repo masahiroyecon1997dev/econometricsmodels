@@ -335,7 +335,7 @@ def check_predict_new_data_returns_row_oriented_probabilities(
 def check_augment_none_returns_training_data_with_probability_column(
     dataset, estimator_cls
 ):
-    """`augment(new_data=None)`が、学習データの全列＋`"probability"`列を
+    """`augment(new_data=None)`が、学習データの全列＋`"predicted_probability"`列を
     持つDataFrameを、`predict()`と同じ予測確率・元データと同じ行順で
     返すこと。
     """
@@ -345,18 +345,18 @@ def check_augment_none_returns_training_data_with_probability_column(
 
     assert isinstance(augmented, pl.DataFrame)
     assert augmented.height == dataset.height
-    assert augmented.columns == [*dataset.columns, "probability"]
+    assert augmented.columns == [*dataset.columns, "predicted_probability"]
     for col in dataset.columns:
         assert augmented[col].to_list() == dataset[col].to_list()
 
     expected = [row["probability"] for row in res.predict()]
-    assert augmented["probability"].to_list() == expected
+    assert augmented["predicted_probability"].to_list() == expected
 
 
 def check_augment_new_data_returns_new_data_with_probability_column(
     dataset, estimator_cls
 ):
-    """`augment(new_data)`が、`new_data`の全列＋`"probability"`列を持つ
+    """`augment(new_data)`が、`new_data`の全列＋`"predicted_probability"`列を持つ
     DataFrameを、`predict(new_data)`と同じ予測確率で返すこと。
     """
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
@@ -366,10 +366,10 @@ def check_augment_new_data_returns_new_data_with_probability_column(
 
     assert isinstance(augmented, pl.DataFrame)
     assert augmented.height == 2
-    assert augmented.columns == ["x1", "x2", "probability"]
+    assert augmented.columns == ["x1", "x2", "predicted_probability"]
 
     expected = [row["probability"] for row in res.predict(new_data)]
-    assert augmented["probability"].to_list() == expected
+    assert augmented["predicted_probability"].to_list() == expected
 
 
 def check_augment_without_intercept_matches_predict(
@@ -392,12 +392,12 @@ def check_augment_without_intercept_matches_predict(
 
     augmented_none = res.augment()
     expected_none = [row["probability"] for row in res.predict()]
-    assert augmented_none["probability"].to_list() == expected_none
+    assert augmented_none["predicted_probability"].to_list() == expected_none
 
     new_data = pl.DataFrame({"x1": [10.0, 20.0]})
     augmented_new = res.augment(new_data)
     expected_new = [row["probability"] for row in res.predict(new_data)]
-    assert augmented_new["probability"].to_list() == expected_new
+    assert augmented_new["predicted_probability"].to_list() == expected_new
 
 
 # ── test_<solver>_api.py: pred_table() ──────────────────────────────
@@ -723,26 +723,32 @@ def check_predict_null_or_non_finite_values_raise(dataset, estimator_cls):
 
 
 def check_augment_column_collision_raises(dataset, estimator_cls):
-    """元データ（`new_data=None`）・`new_data`のいずれかに既に`"probability"`
+    """元データ（`new_data=None`）・`new_data`のいずれかに既に`"predicted_probability"`
     列がある場合`ValidationError`（黙って上書きしない、
     OLSの`test_augment_column_collision_raises`と同型）。
     """
     df_with_probability = dataset.with_columns(
-        pl.lit(0.0).alias("probability")
+        pl.lit(0.0).alias("predicted_probability")
     )
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.EXISTING_COLUMN_COLLISION, name="probability"),
+        match=escaped(
+            msgs.EXISTING_COLUMN_COLLISION, name="predicted_probability"
+        ),
     ):
         estimator_cls(
             df_with_probability, y="y", x=["x1", "x2"]
         ).fit().augment()
 
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
-    new_data = pl.DataFrame({"x1": [1.0], "x2": [0.5], "probability": [0.0]})
+    new_data = pl.DataFrame(
+        {"x1": [1.0], "x2": [0.5], "predicted_probability": [0.0]}
+    )
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.EXISTING_COLUMN_COLLISION, name="probability"),
+        match=escaped(
+            msgs.EXISTING_COLUMN_COLLISION, name="predicted_probability"
+        ),
     ):
         res.augment(new_data)
 

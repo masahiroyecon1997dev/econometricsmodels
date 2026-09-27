@@ -108,6 +108,11 @@ def check_n_obs_matches_dataset_size(dataset, estimator_cls):
     assert res.n_obs == dataset.height
 
 
+def check_dep_var_name(dataset, estimator_cls):
+    res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
+    assert res.dep_var_name == "y"
+
+
 def check_param_names_include_const_first(dataset, estimator_cls):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
     assert res.param_names == ["const", "x1", "x2"]

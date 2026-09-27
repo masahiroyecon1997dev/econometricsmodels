@@ -113,6 +113,11 @@ class ProbitResults:
         return self._raw.param_names
 
     @property
+    def dep_var_name(self) -> str:
+        """Column name of the dependent variable."""
+        return self._raw.dep_var_name
+
+    @property
     def params(self) -> dict[str, float]:
         """Coefficient name to coefficient value."""
         return dict(zip(self._raw.param_names, self._raw.params))

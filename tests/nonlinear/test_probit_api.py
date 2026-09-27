@@ -59,6 +59,10 @@ def test_n_obs_matches_dataset_size(binary_dataset):
     _checks.check_n_obs_matches_dataset_size(binary_dataset, Probit)
 
 
+def test_dep_var_name(binary_dataset):
+    _checks.check_dep_var_name(binary_dataset, Probit)
+
+
 def test_param_names_include_const_first(binary_dataset):
     _checks.check_param_names_include_const_first(binary_dataset, Probit)
 

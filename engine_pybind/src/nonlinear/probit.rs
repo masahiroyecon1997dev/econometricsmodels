@@ -218,6 +218,8 @@ pub struct ProbitResult {
     #[pyo3(get)]
     pub param_names: Vec<String>,
     #[pyo3(get)]
+    pub dep_var_name: String,
+    #[pyo3(get)]
     pub log_likelihood: f64,
     #[pyo3(get)]
     pub log_likelihood_null: f64,
@@ -452,6 +454,7 @@ pub(crate) fn fit(
         conf_lower: estimator.conf_lower().to_vec(),
         conf_upper: estimator.conf_upper().to_vec(),
         param_names: estimator.input().param_names().to_vec(),
+        dep_var_name: estimator.input().dep_var_name().to_string(),
         log_likelihood: estimator.log_likelihood(),
         log_likelihood_null: estimator.log_likelihood_null(),
         lr_statistic: estimator.lr_statistic(),

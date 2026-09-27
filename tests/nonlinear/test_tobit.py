@@ -161,6 +161,11 @@ def test_n_obs_matches_dataset_size(censored_dataset):
     assert res.n_obs == censored_dataset.height
 
 
+def test_dep_var_name(censored_dataset):
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    assert res.dep_var_name == "y"
+
+
 def test_coef_table_structure(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     table = res.coef_table()

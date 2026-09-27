@@ -237,6 +237,8 @@ pub struct TobitResult {
     pub conf_upper: Vec<f64>,
     #[pyo3(get)]
     pub param_names: Vec<String>,
+    #[pyo3(get)]
+    pub dep_var_name: String,
     /// Point estimate of `sigma` (the error term's standard deviation). Equal to
     /// `params[-1]`.
     #[pyo3(get)]
@@ -627,6 +629,7 @@ pub(crate) fn fit(
         conf_lower: estimator.conf_lower().to_vec(),
         conf_upper: estimator.conf_upper().to_vec(),
         param_names,
+        dep_var_name: estimator.input().dep_var_name().to_string(),
         sigma: estimator.sigma(),
         log_likelihood: estimator.log_likelihood(),
         aic: estimator.aic(),

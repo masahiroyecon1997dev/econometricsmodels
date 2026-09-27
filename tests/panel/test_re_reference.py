@@ -34,7 +34,12 @@ from _assertions import assert_close, assert_dict_close
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
 from _tolerances import TOLERANCES
-from econometricsmodels import RE, REOptions
+from econometricsmodels import (
+    RE,
+    ComputationError,
+    REOptions,
+    ValidationError,
+)
 
 from benchmark.common import WAGEPAN_ENTITY, WAGEPAN_X, WAGEPAN_Y
 from benchmark.panel.fixtures.generate_re_fixtures import (
@@ -100,6 +105,14 @@ def _check_result(res, ref: dict, label: str) -> None:
 # ── 凍結フィクスチャとの数値照合（合成データ） ───────────────────────
 
 
+# `many_regressors`（k=20、40エンティティ、T=6）: 補助回帰の傾き係数`2k=40`がクラスター数
+# G=40以下（cluster）、検定対象`k=20`が`T-1=5`超（dk）でハウスマン検定が成立しない。
+_HAUSMAN_SINGULAR_ERRORS = {
+    ("many_regressors", "cluster"): ValidationError,
+    ("many_regressors", "dk"): ComputationError,
+}
+
+
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 @pytest.mark.parametrize("scenario", NUMERIC_SCENARIOS)
 def test_matches_linearmodels(fixtures, scenario, cov_type):
@@ -114,9 +127,19 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
     x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
     kwargs = {"time": "time"} if cov_type == "dk" else {}
     options = REOptions(cov_type=cov_type, **kwargs)
-    res = RE(df, y="y", x=x_cols, entity="entity", options=options).fit()
+    model = RE(df, y="y", x=x_cols, entity="entity", options=options)
 
-    _check_result(res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}")
+    error = _HAUSMAN_SINGULAR_ERRORS.get((scenario, cov_type))
+    if error is not None:
+        # RE本体は成功する入力だが、ハウスマン検定の補助回帰のロバスト共分散が
+        # 構造的に特異になりfit()が失敗する（`re-spec.md`3.7節）。
+        with pytest.raises(error):
+            model.fit()
+        return
+
+    _check_result(
+        model.fit(), fixtures[scenario][cov_type], f"{scenario}/{cov_type}"
+    )
 
 
 # ── 凍結フィクスチャとの数値照合（実データ: Wooldridge wagepan） ───────

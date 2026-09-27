@@ -299,6 +299,10 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # 差でθが変わり統計量に増幅されるため、専用に緩めたrtolを使う（test_re_crosscheck.pyの`_UNBALANCED_
         # HAUSMAN_SCENARIO`参照）。
         "rtol_hausman_unbalanced": 0.15,
+        # high_condition_numberシナリオのdkのみ、悪条件の設計行列で補助回帰の
+        # ロバスト共分散の丸め誤差が増幅され、機械精度から外れる（実測最大
+        # 相対誤差1.2e-7にマージン。他のcov_type・シナリオは機械精度一致）。
+        "rtol_hausman_ill_conditioned": 1e-6,
         # ハウスマン検定のp値は裾確率がゼロ近傍に潰れるケースが多く、
         # unbalancedシナリオでは絶対誤差フロアで比較する
         # （実測最大絶対誤差1.5e-8にマージン、他のRクロスチェックの

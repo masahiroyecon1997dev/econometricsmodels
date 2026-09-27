@@ -94,11 +94,7 @@ OLS（`OLSResult`、`engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
 - **RE: ハウスマン検定は`fit()`内で自動計算**し、`REResult`に`hausman_statistic` /
   `hausman_p_value` / `hausman_df`として含める（詳細は[`re-spec.md`](./re-spec.md)3.7節）。
   - **回帰ベース（補助回帰）版**（`plm::phtest(method = "aux")`相当）で、比較は常に1-way。
-    v1は**classicalのみ**実装する（`cov_type`に依存しない）。`cov_type="cluster"`等で
-    fitした場合でも、ハウスマン検定自体はclassical前提のまま計算する（整合性の注記を
-    docstringに明記する）。
-  - 将来的に`cov_type`と連動するrobust版を追加できるよう、フィールド名・置き場所には
-    拡張余地を残す（v1では実装しない）。
+    補助回帰のWald検定の共分散はRE本体の`cov_type`に連動する（`re-spec.md`3.7節）。
   - 補助回帰が成立しない場合（傾き係数0個・ランク落ち等）は、`hausman_statistic`等を
     `None`にしたうえで、RE本体の結果は正常に返す（REの主要な結果自体は有効なため、
     診断情報の欠落だけに留める）。

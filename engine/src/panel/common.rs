@@ -42,6 +42,10 @@
 //!   加えたもの）への`OlsEstimator::fit(include_intercept=false)`委譲が失敗した場合。
 //!   `WithinRegressionFailed`（FEのwithin変換済みデータ）・`BetweenRegressionFailed`
 //!   （REのbetween回帰）とは対象が異なるため別バリアントにする（同じ判断の3件目）。
+//! - `HausmanTestFailed`: REのハウスマン検定（`re.rs`の`re_hausman_test`、`re-spec.md`3.7節）の
+//!   補助回帰または`cov_type`連動のWald検定が失敗した場合（補助回帰のランク落ち、
+//!   クラスター数`G`が補助回帰の傾き係数の数以下、共分散部分行列のほぼ特異性等）。
+//!   計算自体が成立しないケースのため`fit()`全体を失敗させる（設計行列の多重共線性と同じ扱い）。
 //!
 //! RE固有（`re-spec.md`）で追加のバリアントが必要になった場合は、FE/RE実装issueで実際に計算
 //! コードを書く過程で随時追加する（`LeastSquaresError`・`IvError`のdocコメントと同じ
@@ -270,6 +274,20 @@ pub enum PanelError {
     /// モジュールdoc参照）。
     #[error("quasi-demeaned least-squares estimation for random effects failed: {source}")]
     QuasiDemeanedRegressionFailed {
+        #[source]
+        source: LeastSquaresError,
+    },
+
+    /// REのハウスマン検定（`re-spec.md`3.7節）の補助回帰、または`cov_type`連動のWald検定が
+    /// 失敗した。
+    ///
+    /// 補助回帰のランク落ち、クラスター数`G`が補助回帰の傾き係数の数`2k`以下
+    /// （`CommonError::InsufficientClustersForInference`）、DK・ロバスト共分散部分行列の
+    /// ほぼ特異性（`CommonError::ComputationFailed`）等。ハウスマン検定はRE本体の付随的な
+    /// 診断情報だが、計算自体が成立しない場合は`None`で隠さずエラーにする
+    /// （設計行列の多重共線性でエラーにするのと同じ方針）。
+    #[error("Hausman test auxiliary regression failed: {source}")]
+    HausmanTestFailed {
         #[source]
         source: LeastSquaresError,
     },
@@ -880,6 +898,24 @@ mod tests {
         assert_eq!(
             err,
             PanelError::QuasiDemeanedRegressionFailed {
+                source: LeastSquaresError::SingularMatrix,
+            }
+        );
+    }
+
+    #[test]
+    fn hausman_test_failed_message_and_equality() {
+        let err = PanelError::HausmanTestFailed {
+            source: LeastSquaresError::SingularMatrix,
+        };
+        assert_eq!(
+            err.to_string(),
+            "Hausman test auxiliary regression failed: design matrix is singular \
+             (perfect multicollinearity detected)"
+        );
+        assert_eq!(
+            err,
+            PanelError::HausmanTestFailed {
                 source: LeastSquaresError::SingularMatrix,
             }
         );

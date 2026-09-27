@@ -48,11 +48,20 @@ from _assertions import assert_close, assert_dict_close
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
 from _tolerances import TOLERANCES
-from econometricsmodels import RE, REOptions
+from econometricsmodels import (
+    RE,
+    ComputationError,
+    REOptions,
+    ValidationError,
+)
 
 from benchmark.common import WAGEPAN_ENTITY, WAGEPAN_X, WAGEPAN_Y
 from benchmark.panel.fixtures.generate_fe_fixtures import NUMERIC_SCENARIOS
-from benchmark.panel.fixtures.generate_re_crosscheck_fixtures import COV_TYPES
+from benchmark.panel.fixtures.generate_re_crosscheck_fixtures import (
+    COV_TYPES,
+    HAUSMAN_COV_TYPES,
+    HAUSMAN_KEY,
+)
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[1]
@@ -68,12 +77,16 @@ ATOL_HAUSMAN = TOLERANCES["re_crosscheck"]["atol_hausman"]
 RTOL_HAUSMAN_UNBALANCED = TOLERANCES["re_crosscheck"][
     "rtol_hausman_unbalanced"
 ]
+RTOL_HAUSMAN_ILL_CONDITIONED = TOLERANCES["re_crosscheck"][
+    "rtol_hausman_ill_conditioned"
+]
 ATOL_HAUSMAN_P_VALUE = TOLERANCES["re_crosscheck"]["atol_hausman_p_value"]
 
 # plm/linearmodelsの分散成分（σ_u²）推定の差でθが変わり、ハウスマン統計量への
 # 増幅がcoef/seよりさらに大きくなる唯一のシナリオ（モジュールdoc「許容誤差に
 # ついて」参照）。
 _UNBALANCED_HAUSMAN_SCENARIO = "unbalanced"
+_ILL_CONDITIONED_HAUSMAN_SCENARIO = "high_condition_number"
 
 
 @pytest.fixture(scope="module")
@@ -85,9 +98,7 @@ _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
 _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
 
 
-def _check_result(
-    res, ref: dict, label: str, *, scenario: str | None = None
-) -> None:
+def _check_result(res, ref: dict, label: str) -> None:
     _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
     _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
     _assert_dict_close(
@@ -100,16 +111,16 @@ def _check_result(
         _assert_close(our_lower, ref_lower, f"{label}/conf_lower/{name}")
         _assert_close(our_upper, ref_upper, f"{label}/conf_upper/{name}")
 
-    # ハウスマン検定はcov_typeに依存しない単一の統計量（`ref`のhc2/hc3どちらの
-    # エントリにも同じ値が含まれる、`run_plm_benchmark.R`のモジュールコメント
-    # 参照）。engine側も`abs()`適用後の値を返すため（モジュールdoc参照）、
-    # `plm`の出力と直接比較できる。`df`はシナリオに関わらず常に一致するため
-    # 無条件で比較する。
-    rtol_hausman = (
-        RTOL_HAUSMAN_UNBALANCED
-        if scenario == _UNBALANCED_HAUSMAN_SCENARIO
-        else RTOL_HAUSMAN
-    )
+
+def _check_hausman(
+    res, ref: dict, label: str, *, scenario: str | None = None
+) -> None:
+    if scenario == _UNBALANCED_HAUSMAN_SCENARIO:
+        rtol_hausman = RTOL_HAUSMAN_UNBALANCED
+    elif scenario == _ILL_CONDITIONED_HAUSMAN_SCENARIO:
+        rtol_hausman = RTOL_HAUSMAN_ILL_CONDITIONED
+    else:
+        rtol_hausman = RTOL_HAUSMAN
     assert_close(
         res.hausman_statistic,
         ref["hausman_statistic"],
@@ -127,6 +138,13 @@ def _check_result(
     assert res.hausman_df == ref["hausman_df"], f"{label}/hausman_df"
 
 
+def _hausman_options(cov_type: str) -> REOptions:
+    # timeはdkのときだけ指定できる（REOptionsのバリデーション）。
+    if cov_type == "dk":
+        return REOptions(cov_type="dk", time="time")
+    return REOptions(cov_type=cov_type)
+
+
 # ── 凍結フィクスチャとの数値照合（合成データ） ───────────────────────
 
 
@@ -142,7 +160,6 @@ def test_synthetic_matches_plm(crosscheck, scenario, cov_type):
         res,
         crosscheck[scenario][cov_type],
         f"{scenario}/{cov_type}",
-        scenario=scenario,
     )
 
 
@@ -158,3 +175,54 @@ def test_wagepan_matches_plm(crosscheck, cov_type):
     ).fit()
 
     _check_result(res, crosscheck["wagepan"][cov_type], f"wagepan/{cov_type}")
+
+
+# ── ハウスマン検定（RE本体のcov_typeに連動、plm::phtest(method="aux", vcov=...)） ──
+
+
+@pytest.mark.parametrize("cov_type", HAUSMAN_COV_TYPES)
+@pytest.mark.parametrize("scenario", NUMERIC_SCENARIOS)
+def test_synthetic_hausman_matches_plm(crosscheck, scenario, cov_type):
+    df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
+    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    model = RE(
+        df,
+        y="y",
+        x=x_cols,
+        entity="entity",
+        options=_hausman_options(cov_type),
+    )
+    ref = crosscheck[scenario][HAUSMAN_KEY][cov_type]
+    if ref is None:
+        # ロバスト共分散が構造的に特異でplmに参照値が無いケース
+        # （`generate_re_crosscheck_fixtures.py`の`_STRUCTURALLY_SINGULAR`）。
+        # 本実装は`None`ではなくfit()がエラーになる（`re-spec.md`3.7節）。
+        expected = (
+            ValidationError if cov_type == "cluster" else ComputationError
+        )
+        with pytest.raises(expected):
+            model.fit()
+        return
+
+    _check_hausman(
+        model.fit(), ref, f"{scenario}/{cov_type}", scenario=scenario
+    )
+
+
+@pytest.mark.parametrize("cov_type", HAUSMAN_COV_TYPES)
+def test_wagepan_hausman_matches_plm(crosscheck, cov_type):
+    df = load_wooldridge_dataset("wagepan")
+    options = (
+        REOptions(cov_type="dk", time="year")
+        if cov_type == "dk"
+        else REOptions(cov_type=cov_type)
+    )
+    res = RE(
+        df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
+    ).fit()
+
+    _check_hausman(
+        res,
+        crosscheck["wagepan"][HAUSMAN_KEY][cov_type],
+        f"wagepan/{cov_type}",
+    )

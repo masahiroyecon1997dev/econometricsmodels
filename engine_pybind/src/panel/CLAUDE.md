@@ -43,7 +43,7 @@ panel/common.rs`の`panel_error_to_pyerr`側を更新し忘れ、`cargo build -p
 **`engine`側で新しいエラーバリアントを追加したら、必ず`engine_pybind/src/panel/
 common.rs`の`panel_error_to_pyerr`にも対応する分類（`ValidationError`/
 `ComputationError`のどちら側か）を追記すること**。`LeastSquaresError`をラップする
-バリアント（`WithinRegressionFailed`・`FTestFailed`・`BetweenRegressionFailed`）は
+バリアント（`WithinRegressionFailed`・`FTestFailed`・`BetweenRegressionFailed`・`HausmanTestFailed`）は
 分類ロジックが同じため同じ`match`アームにまとめられる（`least_squares_error_is_
 computation_error`に従うだけ）。他系統（`IvError`・`MleError`等）の`*_error_to_pyerr`
 でも同じ「網羅的match＋新バリアント追加時の更新漏れ」という罠が構造的にありうる。

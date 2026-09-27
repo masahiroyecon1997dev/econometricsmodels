@@ -34,10 +34,7 @@
           -0.322513192914977,
           0.0698508043232344
         ]
-      },
-      "hausman_statistic": 16.7810115621968,
-      "hausman_df": 2,
-      "hausman_p_value": 0.000227012430720619
+      }
     },
     "hc3": {
       "coef": {
@@ -73,10 +70,39 @@
           -0.324699133263659,
           0.0720367446719161
         ]
+      }
+    },
+    "hausman": {
+      "classical": {
+        "hausman_statistic": 16.7810115621968,
+        "hausman_df": 2,
+        "hausman_p_value": 0.000227012430720619
       },
-      "hausman_statistic": 16.7810115621968,
-      "hausman_df": 2,
-      "hausman_p_value": 0.000227012430720619
+      "hc1": {
+        "hausman_statistic": 16.3268647744207,
+        "hausman_df": 2,
+        "hausman_p_value": 0.000284882886357363
+      },
+      "hc2": {
+        "hausman_statistic": 16.1376809584773,
+        "hausman_df": 2,
+        "hausman_p_value": 0.000313146170121952
+      },
+      "hc3": {
+        "hausman_statistic": 15.5371991911219,
+        "hausman_df": 2,
+        "hausman_p_value": 0.000422804950343567
+      },
+      "cluster": {
+        "hausman_statistic": 22.9058708641416,
+        "hausman_df": 2,
+        "hausman_p_value": 1.06182596316647e-05
+      },
+      "dk": {
+        "hausman_statistic": 107.965237370994,
+        "hausman_df": 2,
+        "hausman_p_value": 3.59456702697305e-24
+      }
     }
   },
   "baseline": {
@@ -114,10 +140,7 @@
           -0.386512421946181,
           0.0185053990889437
         ]
-      },
-      "hausman_statistic": 29.7297896329007,
-      "hausman_df": 2,
-      "hausman_p_value": 3.50153286661472e-07
+      }
     },
     "hc3": {
       "coef": {
@@ -153,10 +176,39 @@
           -0.388514112107258,
           0.0205070892500206
         ]
+      }
+    },
+    "hausman": {
+      "classical": {
+        "hausman_statistic": 29.7297896329007,
+        "hausman_df": 2,
+        "hausman_p_value": 3.50153286661472e-07
       },
-      "hausman_statistic": 29.7297896329007,
-      "hausman_df": 2,
-      "hausman_p_value": 3.50153286661472e-07
+      "hc1": {
+        "hausman_statistic": 29.3233081829647,
+        "hausman_df": 2,
+        "hausman_p_value": 4.29066425726072e-07
+      },
+      "hc2": {
+        "hausman_statistic": 29.0417317794922,
+        "hausman_df": 2,
+        "hausman_p_value": 4.9393303296557e-07
+      },
+      "hc3": {
+        "hausman_statistic": 28.1600444783938,
+        "hausman_df": 2,
+        "hausman_p_value": 7.67580682526687e-07
+      },
+      "cluster": {
+        "hausman_statistic": 40.9462098062188,
+        "hausman_df": 2,
+        "hausman_p_value": 1.28423207645368e-09
+      },
+      "dk": {
+        "hausman_statistic": 50.5915511846782,
+        "hausman_df": 2,
+        "hausman_p_value": 1.03319963668132e-11
+      }
     }
   },
   "small_panel": {
@@ -194,10 +246,7 @@
           -2.7566833823149,
           0.149547781082989
         ]
-      },
-      "hausman_statistic": 34.4884018923412,
-      "hausman_df": 2,
-      "hausman_p_value": 3.24293828777796e-08
+      }
     },
     "hc3": {
       "coef": {
@@ -233,10 +282,39 @@
           -2.9352832942301,
           0.328147692998183
         ]
+      }
+    },
+    "hausman": {
+      "classical": {
+        "hausman_statistic": 34.4884018923412,
+        "hausman_df": 2,
+        "hausman_p_value": 3.24293828777796e-08
       },
-      "hausman_statistic": 34.4884018923412,
-      "hausman_df": 2,
-      "hausman_p_value": 3.24293828777796e-08
+      "hc1": {
+        "hausman_statistic": 45.8869480106453,
+        "hausman_df": 2,
+        "hausman_p_value": 1.08586502196203e-10
+      },
+      "hc2": {
+        "hausman_statistic": 44.064335627928,
+        "hausman_df": 2,
+        "hausman_p_value": 2.7011648772214e-10
+      },
+      "hc3": {
+        "hausman_statistic": 31.5527249482865,
+        "hausman_df": 2,
+        "hausman_p_value": 1.4073847245359e-07
+      },
+      "cluster": {
+        "hausman_statistic": 75.5725833478147,
+        "hausman_df": 2,
+        "hausman_p_value": 3.88706707123523e-17
+      },
+      "dk": {
+        "hausman_statistic": 64.7060999096174,
+        "hausman_df": 2,
+        "hausman_p_value": 8.8971094234466e-15
+      }
     }
   },
   "heteroskedastic": {
@@ -274,10 +352,7 @@
           -0.526920526920446,
           0.352507737233039
         ]
-      },
-      "hausman_statistic": 13.2296777852833,
-      "hausman_df": 2,
-      "hausman_p_value": 0.00134033071579018
+      }
     },
     "hc3": {
       "coef": {
@@ -313,10 +388,39 @@
           -0.532937323037804,
           0.358524533350397
         ]
+      }
+    },
+    "hausman": {
+      "classical": {
+        "hausman_statistic": 13.2296777852833,
+        "hausman_df": 2,
+        "hausman_p_value": 0.00134033071579018
       },
-      "hausman_statistic": 13.2296777852833,
-      "hausman_df": 2,
-      "hausman_p_value": 0.00134033071579018
+      "hc1": {
+        "hausman_statistic": 14.6420664798071,
+        "hausman_df": 2,
+        "hausman_p_value": 0.000661478392128434
+      },
+      "hc2": {
+        "hausman_statistic": 14.462247272766,
+        "hausman_df": 2,
+        "hausman_p_value": 0.000723707222351581
+      },
+      "hc3": {
+        "hausman_statistic": 13.9854624257398,
+        "hausman_df": 2,
+        "hausman_p_value": 0.000918534389687163
+      },
+      "cluster": {
+        "hausman_statistic": 19.3843309195486,
+        "hausman_df": 2,
+        "hausman_p_value": 6.17655087728267e-05
+      },
+      "dk": {
+        "hausman_statistic": 19.4514205202904,
+        "hausman_df": 2,
+        "hausman_p_value": 5.97279627086451e-05
+      }
     }
   },
   "autocorrelated": {
@@ -354,10 +458,7 @@
           -0.393091692463234,
           0.00349323757829659
         ]
-      },
-      "hausman_statistic": 23.6503927356939,
-      "hausman_df": 2,
-      "hausman_p_value": 7.31783259183658e-06
+      }
     },
     "hc3": {
       "coef": {
@@ -393,10 +494,39 @@
           -0.395188033458946,
           0.00558957857400791
         ]
+      }
+    },
+    "hausman": {
+      "classical": {
+        "hausman_statistic": 23.6503927356939,
+        "hausman_df": 2,
+        "hausman_p_value": 7.31783259183658e-06
       },
-      "hausman_statistic": 23.6503927356939,
-      "hausman_df": 2,
-      "hausman_p_value": 7.31783259183658e-06
+      "hc1": {
+        "hausman_statistic": 22.78160575778,
+        "hausman_df": 2,
+        "hausman_p_value": 1.12989260239624e-05
+      },
+      "hc2": {
+        "hausman_statistic": 22.5903945958574,
+        "hausman_df": 2,
+        "hausman_p_value": 1.24324906560946e-05
+      },
+      "hc3": {
+        "hausman_statistic": 21.931397786677,
+        "hausman_df": 2,
+        "hausman_p_value": 1.7284526246287e-05
+      },
+      "cluster": {
+        "hausman_statistic": 27.0964253040426,
+        "hausman_df": 2,
+        "hausman_p_value": 1.30642958150132e-06
+      },
+      "dk": {
+        "hausman_statistic": 75.0185749079378,
+        "hausman_df": 2,
+        "hausman_p_value": 5.12770980090516e-17
+      }
     }
   },
   "cross_sectionally_correlated": {
@@ -434,10 +564,7 @@
           -0.445784504672764,
           0.0952872985415041
         ]
-      },
-      "hausman_statistic": 24.2140420672703,
-      "hausman_df": 2,
-      "hausman_p_value": 5.52061641991682e-06
+      }
     },
     "hc3": {
       "coef": {
@@ -473,10 +600,39 @@
           -0.447540534084319,
           0.0970433279530591
         ]
+      }
+    },
+    "hausman": {
+      "classical": {
+        "hausman_statistic": 24.2140420672703,
+        "hausman_df": 2,
+        "hausman_p_value": 5.52061641991682e-06
       },
-      "hausman_statistic": 24.2140420672703,
-      "hausman_df": 2,
-      "hausman_p_value": 5.52061641991682e-06
+      "hc1": {
+        "hausman_statistic": 22.8111974301539,
+        "hausman_df": 2,
+        "hausman_p_value": 1.11329796504616e-05
+      },
+      "hc2": {
+        "hausman_statistic": 22.6976588138984,
+        "hausman_df": 2,
+        "hausman_p_value": 1.17832749746415e-05
+      },
+      "hc3": {
+        "hausman_statistic": 22.2824223981722,
+        "hausman_df": 2,
+        "hausman_p_value": 1.45021854517285e-05
+      },
+      "cluster": {
+        "hausman_statistic": 34.539391039976,
+        "hausman_df": 2,
+        "hausman_p_value": 3.16130597030761e-08
+      },
+      "dk": {
+        "hausman_statistic": 65.8942338047106,
+        "hausman_df": 2,
+        "hausman_p_value": 4.91189341915855e-15
+      }
     }
   },
   "moderate_multicollinearity": {
@@ -514,10 +670,7 @@
           -0.601104360568602,
           -0.0560950288369917
         ]
-      },
-      "hausman_statistic": 0.205018247057514,
-      "hausman_df": 2,
-      "hausman_p_value": 0.902569915092786
+      }
     },
     "hc3": {
       "coef": {
@@ -553,10 +706,39 @@
           -0.603719400471146,
           -0.0534799889344479
         ]
+      }
+    },
+    "hausman": {
+      "classical": {
+        "hausman_statistic": 0.205018247057514,
+        "hausman_df": 2,
+        "hausman_p_value": 0.902569915092786
       },
-      "hausman_statistic": 0.205018247057514,
-      "hausman_df": 2,
-      "hausman_p_value": 0.902569915092786
+      "hc1": {
+        "hausman_statistic": 0.221290186000395,
+        "hausman_df": 2,
+        "hausman_p_value": 0.895256425324874
+      },
+      "hc2": {
+        "hausman_statistic": 0.220392266308414,
+        "hausman_df": 2,
+        "hausman_p_value": 0.895658449751369
+      },
+      "hc3": {
+        "hausman_statistic": 0.214908520017454,
+        "hausman_df": 2,
+        "hausman_p_value": 0.89811760140257
+      },
+      "cluster": {
+        "hausman_statistic": 0.190066217494172,
+        "hausman_df": 2,
+        "hausman_p_value": 0.909342826768154
+      },
+      "dk": {
+        "hausman_statistic": 3.09862559934157,
+        "hausman_df": 2,
+        "hausman_p_value": 0.212393880832161
+      }
     }
   },
   "high_condition_number": {
@@ -594,10 +776,7 @@
           -3.46651765817695,
           3.71346680096533
         ]
-      },
-      "hausman_statistic": 0.205018247057518,
-      "hausman_df": 2,
-      "hausman_p_value": 0.902569915092784
+      }
     },
     "hc3": {
       "coef": {
@@ -633,10 +812,39 @@
           -3.50115896129599,
           3.74810810408438
         ]
+      }
+    },
+    "hausman": {
+      "classical": {
+        "hausman_statistic": 0.205018247057518,
+        "hausman_df": 2,
+        "hausman_p_value": 0.902569915092784
       },
-      "hausman_statistic": 0.205018247057518,
-      "hausman_df": 2,
-      "hausman_p_value": 0.902569915092784
+      "hc1": {
+        "hausman_statistic": 0.221290186018902,
+        "hausman_df": 2,
+        "hausman_p_value": 0.89525642531659
+      },
+      "hc2": {
+        "hausman_statistic": 0.220392266331564,
+        "hausman_df": 2,
+        "hausman_p_value": 0.895658449741002
+      },
+      "hc3": {
+        "hausman_statistic": 0.214908520038484,
+        "hausman_df": 2,
+        "hausman_p_value": 0.898117601393127
+      },
+      "cluster": {
+        "hausman_statistic": 0.19006621749785,
+        "hausman_df": 2,
+        "hausman_p_value": 0.909342826766482
+      },
+      "dk": {
+        "hausman_statistic": 3.09862560317605,
+        "hausman_df": 2,
+        "hausman_p_value": 0.212393880424951
+      }
     }
   },
   "scale_variance_mild": {
@@ -674,10 +882,7 @@
           -0.564559966072715,
           3.48561824427854
         ]
-      },
-      "hausman_statistic": 29.7297896329016,
-      "hausman_df": 2,
-      "hausman_p_value": 3.50153286661322e-07
+      }
     },
     "hc3": {
       "coef": {
@@ -713,10 +918,39 @@
           -0.584576867683484,
           3.50563514588931
         ]
+      }
+    },
+    "hausman": {
+      "classical": {
+        "hausman_statistic": 29.7297896329016,
+        "hausman_df": 2,
+        "hausman_p_value": 3.50153286661322e-07
       },
-      "hausman_statistic": 29.7297896329016,
-      "hausman_df": 2,
-      "hausman_p_value": 3.50153286661322e-07
+      "hc1": {
+        "hausman_statistic": 29.3233081829649,
+        "hausman_df": 2,
+        "hausman_p_value": 4.29066425726018e-07
+      },
+      "hc2": {
+        "hausman_statistic": 29.0417317794925,
+        "hausman_df": 2,
+        "hausman_p_value": 4.93933032965499e-07
+      },
+      "hc3": {
+        "hausman_statistic": 28.1600444783941,
+        "hausman_df": 2,
+        "hausman_p_value": 7.67580682526583e-07
+      },
+      "cluster": {
+        "hausman_statistic": 40.9462098062195,
+        "hausman_df": 2,
+        "hausman_p_value": 1.28423207645324e-09
+      },
+      "dk": {
+        "hausman_statistic": 50.591551184681,
+        "hausman_df": 2,
+        "hausman_p_value": 1.03319963667991e-11
+      }
     }
   },
   "many_regressors": {
@@ -898,10 +1132,7 @@
           -10.4998691226174,
           -10.4968188103512
         ]
-      },
-      "hausman_statistic": 51.3630268326404,
-      "hausman_df": 20,
-      "hausman_p_value": 0.000140918887079269
+      }
     },
     "hc3": {
       "coef": {
@@ -1081,10 +1312,31 @@
           -10.4999464909179,
           -10.4967414420508
         ]
+      }
+    },
+    "hausman": {
+      "classical": {
+        "hausman_statistic": 51.3630268326404,
+        "hausman_df": 20,
+        "hausman_p_value": 0.000140918887079269
       },
-      "hausman_statistic": 51.3630268326404,
-      "hausman_df": 20,
-      "hausman_p_value": 0.000140918887079269
+      "hc1": {
+        "hausman_statistic": 61.5224955248443,
+        "hausman_df": 20,
+        "hausman_p_value": 4.12897766046609e-06
+      },
+      "hc2": {
+        "hausman_statistic": 61.437273870352,
+        "hausman_df": 20,
+        "hausman_p_value": 4.25748062737496e-06
+      },
+      "hc3": {
+        "hausman_statistic": 50.8545783133454,
+        "hausman_df": 20,
+        "hausman_p_value": 0.000166919550889728
+      },
+      "cluster": null,
+      "dk": null
     }
   },
   "outlier_regressor": {
@@ -1122,10 +1374,7 @@
           -0.418977694971413,
           -0.0536706722169453
         ]
-      },
-      "hausman_statistic": 3.16571649809296,
-      "hausman_df": 2,
-      "hausman_p_value": 0.205387210641607
+      }
     },
     "hc3": {
       "coef": {
@@ -1161,10 +1410,39 @@
           -0.421148150963113,
           -0.0515002162252455
         ]
+      }
+    },
+    "hausman": {
+      "classical": {
+        "hausman_statistic": 3.16571649809296,
+        "hausman_df": 2,
+        "hausman_p_value": 0.205387210641607
       },
-      "hausman_statistic": 3.16571649809296,
-      "hausman_df": 2,
-      "hausman_p_value": 0.205387210641607
+      "hc1": {
+        "hausman_statistic": 2.84823240908383,
+        "hausman_df": 2,
+        "hausman_p_value": 0.240721117453342
+      },
+      "hc2": {
+        "hausman_statistic": 2.78520201946237,
+        "hausman_df": 2,
+        "hausman_p_value": 0.248428299139078
+      },
+      "hc3": {
+        "hausman_statistic": 2.66316825201908,
+        "hausman_df": 2,
+        "hausman_p_value": 0.264058627663028
+      },
+      "cluster": {
+        "hausman_statistic": 3.67226904041386,
+        "hausman_df": 2,
+        "hausman_p_value": 0.159432519708378
+      },
+      "dk": {
+        "hausman_statistic": 11.5468766367857,
+        "hausman_df": 2,
+        "hausman_p_value": 0.00310904921434439
+      }
     }
   },
   "high_variance": {
@@ -1202,10 +1480,7 @@
           -1.54649776857681,
           1.26390897679446
         ]
-      },
-      "hausman_statistic": 3.51631548917981,
-      "hausman_df": 2,
-      "hausman_p_value": 0.172362106535535
+      }
     },
     "hc3": {
       "coef": {
@@ -1241,10 +1516,39 @@
           -1.56227168723263,
           1.27968289545029
         ]
+      }
+    },
+    "hausman": {
+      "classical": {
+        "hausman_statistic": 3.51631548917981,
+        "hausman_df": 2,
+        "hausman_p_value": 0.172362106535535
       },
-      "hausman_statistic": 3.51631548917981,
-      "hausman_df": 2,
-      "hausman_p_value": 0.172362106535535
+      "hc1": {
+        "hausman_statistic": 3.68114120536745,
+        "hausman_df": 2,
+        "hausman_p_value": 0.158726830306923
+      },
+      "hc2": {
+        "hausman_statistic": 3.64475314772585,
+        "hausman_df": 2,
+        "hausman_p_value": 0.161641141975915
+      },
+      "hc3": {
+        "hausman_statistic": 3.53304628337027,
+        "hausman_df": 2,
+        "hausman_p_value": 0.170926243227021
+      },
+      "cluster": {
+        "hausman_statistic": 5.34474663422632,
+        "hausman_df": 2,
+        "hausman_p_value": 0.0690880626999157
+      },
+      "dk": {
+        "hausman_statistic": 12.9887284362971,
+        "hausman_df": 2,
+        "hausman_p_value": 0.00151193616935867
+      }
     }
   },
   "wagepan": {
@@ -1290,10 +1594,7 @@
           0.00283506819294083,
           0.00354837218212263
         ]
-      },
-      "hausman_statistic": 88.4941703178997,
-      "hausman_df": 3,
-      "hausman_p_value": 4.61274527849681e-19
+      }
     },
     "hc3": {
       "coef": {
@@ -1337,18 +1638,47 @@
           0.00283475100319386,
           0.0035486893718696
         ]
+      }
+    },
+    "hausman": {
+      "classical": {
+        "hausman_statistic": 88.4941703178997,
+        "hausman_df": 3,
+        "hausman_p_value": 4.61274527849681e-19
       },
-      "hausman_statistic": 88.4941703178997,
-      "hausman_df": 3,
-      "hausman_p_value": 4.61274527849681e-19
+      "hc1": {
+        "hausman_statistic": 112.155209029371,
+        "hausman_df": 3,
+        "hausman_p_value": 3.7711807114682e-24
+      },
+      "hc2": {
+        "hausman_statistic": 111.868207451918,
+        "hausman_df": 3,
+        "hausman_p_value": 4.34762660472083e-24
+      },
+      "hc3": {
+        "hausman_statistic": 111.401266063315,
+        "hausman_df": 3,
+        "hausman_p_value": 5.47967557534369e-24
+      },
+      "cluster": {
+        "hausman_statistic": 104.233358257826,
+        "hausman_df": 3,
+        "hausman_p_value": 1.91014114087889e-22
+      },
+      "dk": {
+        "hausman_statistic": 124.967136872077,
+        "hausman_df": 3,
+        "hausman_p_value": 6.56906374440931e-27
+      }
     }
   },
   "_meta": {
     "method": "re",
-    "generated_at": "2026-09-27T04:07:40.359405+00:00",
+    "generated_at": "2026-09-27T04:58:45.340523+00:00",
     "reference": "plm (R)",
     "r_version": "4.5.3",
     "plm_version": "2.6.7",
-    "note": "hc2/hc3・ハウスマン検定は、linearmodelsが提供しない/実装を持たないためplmのみが参照値になる単一参照実装の例外（モジュールdoc参照）。plmの変量効果分散成分推定（Swamy-Arora）はlinearmodelsと僅かに異なる実装のため、点推定自体が不均衡パネルで最大0.1%程度乖離する（実測確認済み、実装バグではない）。テストコード側ではこのフィクスチャ全体をクロスチェック水準（1e-2程度）の緩い許容誤差で比較すること（.claude/rules/testing-policy.md「許容誤差」参照）。t検定（test_stats/p_values/conf_int）はplmの既定であるz検定（漸近正規近似）ではなく、本実装と同じt(df_resid)分布の式でcoef/seから計算し直している（run_plm_benchmark.Rのコメント参照）。ハウスマン検定はplm::phtest(method = \"aux\", effect = \"individual\")（回帰ベース、常に1-way・classical共分散）の値。不均衡パネルではSwamy-Arora分散成分の差でlinearmodels準拠の本実装と数％ずれる（本スクリプトのモジュールdoc参照）。wagepanはre.jsonと同じmarried/union/expersqを使用。"
+    "note": "hc2/hc3・ハウスマン検定は、linearmodelsが提供しない/実装を持たないためplmのみが参照値になる単一参照実装の例外（モジュールdoc参照）。plmの変量効果分散成分推定（Swamy-Arora）はlinearmodelsと僅かに異なる実装のため、点推定自体が不均衡パネルで最大0.1%程度乖離する（実測確認済み、実装バグではない）。テストコード側ではこのフィクスチャ全体をクロスチェック水準（1e-2程度）の緩い許容誤差で比較すること（.claude/rules/testing-policy.md「許容誤差」参照）。t検定（test_stats/p_values/conf_int）はplmの既定であるz検定（漸近正規近似）ではなく、本実装と同じt(df_resid)分布の式でcoef/seから計算し直している（run_plm_benchmark.Rのコメント参照）。ハウスマン検定はplm::phtest(method = \"aux\", effect = \"individual\", vcov = ...)（回帰ベース、常に1-way、RE本体のcov_typeに連動）の値で、\"hausman\"キー配下にcov_type別に持つ。不均衡パネルではSwamy-Arora分散成分の差でlinearmodels準拠の本実装と数％ずれる（本スクリプトのモジュールdoc参照）。wagepanはre.jsonと同じmarried/union/expersqを使用。"
   }
 }

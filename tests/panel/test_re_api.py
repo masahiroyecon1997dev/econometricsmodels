@@ -137,21 +137,31 @@ def test_hausman_present(fe_dataset):
     assert res.hausman_statistic >= 0.0
 
 
-def test_hausman_unaffected_by_time_and_cov_type(fe_dataset):
-    """`REOptions.time`（`cov_type="dk"`のHAC時系列順序専用）を渡しても、
-    ハウスマン検定は`time`なしのfitと完全に同じ値になる（比較は常に1-way、
-    classical固定）。`cov_type`の選択にも依存しない。
+def test_hausman_follows_cov_type(fe_dataset):
+    """ハウスマン検定の補助回帰の共分散はRE本体の`cov_type`に連動する
+    （既定の`cluster`ならcluster-robust版）。`df`は`cov_type`によらず一定で、
+    各`cov_type`の統計量は互いに異なる（`re-spec.md`3.7節）。
     """
-    base = our_fit_re(fe_dataset)
-    with_time = our_fit_re(
-        fe_dataset, options=REOptions(cov_type="dk", time="time")
-    )
-    with_hc1 = our_fit_re(fe_dataset, options=REOptions(cov_type="hc1"))
+    options = {
+        "classical": REOptions(cov_type="classical"),
+        "hc1": REOptions(cov_type="hc1"),
+        "hc2": REOptions(cov_type="hc2"),
+        "hc3": REOptions(cov_type="hc3"),
+        "cluster": REOptions(cov_type="cluster"),
+        "dk": REOptions(cov_type="dk", time="time"),
+    }
+    results = {
+        name: our_fit_re(fe_dataset, options=opt)
+        for name, opt in options.items()
+    }
 
-    for other in (with_time, with_hc1):
-        assert other.hausman_statistic == base.hausman_statistic
-        assert other.hausman_p_value == base.hausman_p_value
-        assert other.hausman_df == base.hausman_df
+    default = our_fit_re(fe_dataset)
+    assert default.hausman_statistic == results["cluster"].hausman_statistic
+    for res in results.values():
+        assert res.hausman_df == 2
+        assert res.hausman_statistic >= 0.0
+    statistics = {res.hausman_statistic for res in results.values()}
+    assert len(statistics) == len(results)
 
 
 def test_hausman_computed_with_singleton_time():

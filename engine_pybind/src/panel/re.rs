@@ -232,8 +232,8 @@ pub struct REResult {
     #[pyo3(get)]
     pub r_squared_overall: f64,
     /// Classical Hausman test statistic comparing RE against the equivalent FE
-    /// specification (`docs/spec/re-spec.md` section 3.7). Computed with classical
-    /// standard errors regardless of `cov_type`. Always non-negative, matching R's
+    /// specification (`docs/spec/re-spec.md` section 3.7). The auxiliary Wald test's
+    /// covariance follows `cov_type`. Always non-negative, matching R's
     /// `plm::phtest` (the underlying quadratic form is negative when the compared
     /// variance difference is indefinite in finite samples; corrected by taking its
     /// absolute value, as `plm::phtest` does unconditionally). `None` if the internal

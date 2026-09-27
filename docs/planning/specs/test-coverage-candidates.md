@@ -1331,3 +1331,27 @@
 - **気づいた経緯**: 2026-09-26、Issue #423 A1対応後の他系統確認中。
 - **状態**: 未対応（B2の判断待ち）。B2で名称を確定した後、フィクスチャ・テストの読み替えの
   有無を合わせて見直す。
+
+### 79. RE: `high_condition_number`×`dk`のハウスマン統計量がplmと機械精度から外れる原因が未調査（許容誤差を専用に緩めて対処済み）
+
+- **対象**: [tests/_tolerances.py](../../../tests/_tolerances.py)（`re_crosscheck`の`rtol_hausman_ill_conditioned`）、
+  [tests/panel/test_re_crosscheck.py](../../../tests/panel/test_re_crosscheck.py)
+- **内容**: `plm::phtest(method = "aux", vcov = vcovSCC(...))`との照合で、`high_condition_number`×`dk`
+  のみ相対誤差1.2e-7（他のcov_type・シナリオは機械精度一致）。悪条件の設計行列での丸め誤差の増幅と
+  推測したが未検証。`vcovSCC`と`panel_driscoll_kraay_cov_params`の計算順序の差、補助回帰の
+  `xtx_inverse`（Cholesky）の条件数の影響などを切り分けて原因を特定する。
+- **気づいた経緯**: 2026-09-27、Issue #420（robust Hausman検定）のplm照合中。
+- **状態**: 未対応。暫定でシナリオ専用の`rtol_hausman_ill_conditioned = 1e-6`を設定済み。
+
+### 80. RE: `many_regressors`×`cluster`/`dk`の係数・標準誤差の数値照合が、ハウスマン検定の失敗に巻き込まれて失われている
+
+- **対象**: [tests/panel/test_re_reference.py](../../../tests/panel/test_re_reference.py)
+  （`_HAUSMAN_SINGULAR_ERRORS`）、[tests/panel/test_re_crosscheck.py](../../../tests/panel/test_re_crosscheck.py)
+- **内容**: ハウスマン検定の補助回帰のロバスト共分散が構造的に特異なとき`fit()`をエラーにする方針
+  （`re-spec.md`3.7節）にしたため、`many_regressors`（k=20、G=40、T=6）の`cluster`/`dk`は
+  RE本体が成功する入力でもfitが失敗し、linearmodelsとの係数・標準誤差の照合ができなくなった
+  （テストは代わりにエラー種別を確認）。高次元×cluster/dkのRE本体の照合が抜けているため、
+  クラスター数・時点数を増やした高次元シナリオの追加、または照合手段の別途検討が必要。
+- **気づいた経緯**: 2026-09-27、Issue #420。
+- **状態**: 未対応。
+

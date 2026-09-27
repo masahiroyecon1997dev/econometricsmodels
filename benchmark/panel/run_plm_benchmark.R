@@ -31,20 +31,10 @@
 # 自体が独立性を大きく損なうものではないと判断した**（AIC/BIC計算での前例
 # （run_lm_crosscheck.R等）と同型の対応）。
 #
-# ## ハウスマン検定（plm::phtestのみを参照値とする例外規定、panel-common.md
-# 5.3節）
+# ## ハウスマン検定は対象外
 #
-# linearmodelsにはハウスマン検定の専用実装が無い（ソース確認済み）ため、本
-# スクリプトが唯一の参照実装になる。回帰ベース（補助回帰、Wooldridge (2010)
-# 10.7.3節）の`phtest(method = "aux", effect = "individual")`を、cov_typeに
-# 関わらず常に計算し、出力に常に含める（本実装のReEstimator::fitも
-# 常に同じ方式・classical共分散のみ計算するため整合、`re-spec.md`3.7節）。
-#
-# 比較は常に1-way（個体効果のみ）。`ReOptions.time`はDriscoll-Kraay HACの
-# 時系列順序専用でハウスマン検定に影響しないため、`time`の有無で参照値を
-# 分ける必要はない。なお`plm::phtest(method = "aux")`は補助回帰の定数項に
-# 準偏差変換前の`1`を使うため、不均衡パネルではθ変換済み定数列を使う版と値が
-# 異なる。本実装は`plm`の扱いに合わせている。
+# ハウスマン検定は`cov_type`に連動するため、別スクリプト
+# `run_plm_hausman_benchmark.R`が担当する（本スクリプトはhc2/hc3の係数・標準誤差のみ）。
 #
 # ## AIC/BIC/log-likelihoodは対象外
 #
@@ -110,14 +100,6 @@ crit <- qt(0.975, df = df_resid) # 95%信頼区間固定（run_fixest_benchmark.
 conf_lower <- coefs - crit * ses
 conf_upper <- coefs + crit * ses
 
-# ハウスマン検定（モジュールコメント参照、cov_typeに関わらず常に計算する）。
-ph <- phtest(
-  as.formula(formula_str),
-  data = pdf,
-  method = "aux",
-  effect = "individual"
-)
-
 library(jsonlite)
 result <- list(
   coef = as.list(coefs),
@@ -129,9 +111,6 @@ result <- list(
     conf_lower,
     conf_upper,
     SIMPLIFY = FALSE
-  ),
-  hausman_statistic = as.numeric(ph$statistic),
-  hausman_df = as.numeric(ph$parameter),
-  hausman_p_value = as.numeric(ph$p.value)
+  )
 )
 cat(toJSON(result, auto_unbox = TRUE, digits = NA))

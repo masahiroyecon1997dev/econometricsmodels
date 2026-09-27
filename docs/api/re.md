@@ -32,10 +32,18 @@ zero. Its properties:
   itself. `REOptions.time` is used only as the Driscoll-Kraay time ordering (`cov_type="dk"`)
   and does not affect the test; specifying it with any other `cov_type` raises
   `ValidationError`.
-- It always uses classical (non-robust) covariance regardless of `REOptions.cov_type`.
-- All three are `None` only when the auxiliary regression cannot be formed (no slope
-  coefficients, rank-deficient design, singular Wald test); RE's own result is still returned
-  normally. See `REResults`'s docstring.
+- The Wald test uses the covariance matching `REOptions.cov_type` (classical, `hc1`–`hc3`,
+  `cluster`, or Driscoll-Kraay `dk`). With the default `cov_type="cluster"` this is the
+  cluster-robust Hausman test; use `cov_type="classical"` for the classical version, which
+  assumes RE is fully efficient under the null. The auxiliary regression uses `OLS`-style
+  small-sample corrections (Stata/R-style), which differ from the linearmodels-style
+  corrections behind RE's own standard errors.
+- All three are `None` only when there are no slope coefficients to compare. If the auxiliary
+  regression cannot be computed (rank-deficient design, or a robust covariance that is
+  structurally singular such as `cov_type="cluster"` with no more clusters than the `2k`
+  auxiliary slopes, or `"dk"` with too few periods), `fit()` raises `ValidationError` /
+  `ComputationError` instead, like a multicollinear design matrix. Use `cov_type="classical"`
+  or more clusters in that case. See `REResults`'s docstring.
 
 ## Panel R² and `df_resid`
 

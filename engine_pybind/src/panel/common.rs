@@ -26,7 +26,7 @@ use crate::linear::common::least_squares_error_is_computation_error;
 ///   `ZeroVarianceAfterDemeaning`・`TwoWayRequiresTime`・`DkRequiresTime`・
 ///   `InvalidDkBandwidth`）はいずれも入力・オプションの不正なので`ValidationError`。
 /// - `WithinRegressionFailed`・`FTestFailed`・`BetweenRegressionFailed`・
-///   `QuasiDemeanedRegressionFailed`: 委譲先の`LeastSquaresError`の分類基準
+///   `QuasiDemeanedRegressionFailed`・`HausmanTestFailed`: 委譲先の`LeastSquaresError`の分類基準
 ///   （`least_squares_error_is_computation_error`）にそのまま従う。`IvError::
 ///   SecondStageFailed`と同じ扱い。Pythonに渡すメッセージは`source.to_string()`ではなく
 ///   `PanelError`自身の`to_string()`（「within変換後の推定で失敗した」等の文脈を含む）を
@@ -58,7 +58,8 @@ pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
         PanelError::WithinRegressionFailed { source }
         | PanelError::FTestFailed { source }
         | PanelError::BetweenRegressionFailed { source }
-        | PanelError::QuasiDemeanedRegressionFailed { source } => {
+        | PanelError::QuasiDemeanedRegressionFailed { source }
+        | PanelError::HausmanTestFailed { source } => {
             if least_squares_error_is_computation_error(&source) {
                 ComputationError::new_err(message)
             } else {

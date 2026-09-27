@@ -27,14 +27,9 @@ _FIXEST_SCALAR_KEYS = (
 # 中身のみRE専用に更新済みで、ファイルの移動は行っていない）。
 _PLM_R_SCRIPT = Path(__file__).resolve().parents[1] / "run_plm_benchmark.R"
 
-# ハウスマン検定はcov_typeに依存しない単一の統計量だが、
-# run_plm_benchmark.Rはcov_type呼び出しのたびに毎回計算して含める
-# （run_fixest_benchmark.Rがaic/bicを毎回含めるのと同じ設計、
-# generate_re_crosscheck_fixtures.py参照）。
-_PLM_RE_SCALAR_KEYS = (
-    "hausman_statistic",
-    "hausman_df",
-    "hausman_p_value",
+# ハウスマン検定はRE本体のcov_typeに連動するため専用スクリプトで計算する。
+_PLM_HAUSMAN_R_SCRIPT = (
+    Path(__file__).resolve().parents[1] / "run_plm_hausman_benchmark.R"
 )
 
 
@@ -99,6 +94,38 @@ def run_re_plm_r(
         cov_type,
         extra_args=[entity_col, time_col],
     )
-    return normalize_names(
-        raw, stat_key="test_stats", scalar_keys=_PLM_RE_SCALAR_KEYS
+    return normalize_names(raw, stat_key="test_stats")
+
+
+def run_re_hausman_plm_r(
+    csv_path: Path,
+    formula: str,
+    cov_type: str,
+    *,
+    entity_col: str = "entity",
+    time_col: str = "time",
+    maxlag: int | None = None,
+) -> dict:
+    """`run_plm_hausman_benchmark.R`を呼び、`cov_type`に連動した
+    ハウスマン検定（`plm::phtest(method="aux", vcov=...)`）を得る。
+
+    Args:
+        csv_path: データCSV。
+        formula: `plm`の回帰式（例: "y ~ x1 + x2"）。
+        cov_type: classical / hc1 / hc2 / hc3 / cluster / dk。
+        entity_col: エンティティ識別子の列名。
+        time_col: 時点識別子の列名。
+        maxlag: `cov_type="dk"`のバンド幅（`vcovSCC`の`maxlag`）。
+    """
+    extra = [entity_col, time_col]
+    if cov_type == "dk":
+        if maxlag is None:
+            raise ValueError("maxlag is required for cov_type='dk'")
+        extra.append(str(maxlag))
+    return run_r(
+        _PLM_HAUSMAN_R_SCRIPT,
+        csv_path,
+        formula,
+        cov_type,
+        extra_args=extra,
     )

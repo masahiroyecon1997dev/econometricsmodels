@@ -127,11 +127,16 @@ class REResults:
     section 10.7.3; equivalent to `plm::phtest(method = "aux",
     effect = "individual")`), always comparing against one-way (entity)
     fixed effects — the same structure as RE itself — regardless of
-    `REOptions.time`, and always using classical (non-robust)
-    covariance regardless of `cov_type`. All three are `None` only when
-    the auxiliary regression cannot be formed (no slope coefficients,
-    rank-deficient auxiliary design, or a singular Wald test); RE's own
-    result is still returned normally in that case. A failure in RE's
+    `REOptions.time`. The Wald test's covariance follows `cov_type`
+    (the default `"cluster"` gives the cluster-robust Hausman test;
+    `"classical"` gives the classical version). The auxiliary
+    regression uses OLS-style small-sample corrections, which differ
+    from the RE standard errors'. All three are `None` only when
+    there are no slope coefficients to compare. If the auxiliary
+    regression cannot be computed (rank-deficient design, or a
+    structurally singular robust covariance such as too few clusters or
+    periods for the auxiliary slopes), `fit()` raises
+    `ValidationError`/`ComputationError`. A failure in RE's
     own internal one-way FE call (used to estimate σ_ε²) makes `fit()`
     itself raise instead (e.g. a singleton entity, or a regressor with
     zero variance after the one-way within-transformation); see
@@ -309,8 +314,11 @@ class REResults:
         slope regressors are jointly zero in the auxiliary regression of
         the quasi-demeaned `y` on the quasi-demeaned regressors and the
         within-transformed regressors). Always non-negative. The
-        comparison is always against one-way FE and uses classical
-        standard errors regardless of `cov_type` and `REOptions.time`.
+        comparison is always against one-way FE. The Wald test's
+        covariance follows `cov_type` (default `"cluster"` gives the
+        cluster-robust Hausman test; `"classical"` gives the classical
+        version). The auxiliary regression uses OLS-style small-sample
+        corrections, unlike the RE standard errors.
         For unbalanced panels the auxiliary regression's constant is
         left untransformed, as in `plm::phtest`. `None` if the
         auxiliary regression is unavailable (see the class

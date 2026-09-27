@@ -38,5 +38,5 @@
 
 ## 5. Hausman/Wu-Hausman検定
 
-- RE内蔵のHausman検定は回帰ベース（補助回帰）版でclassicalのみ（`cov_type`非依存、比較は常に1-way）。補助回帰にrobust共分散を使うrobust版は将来課題（`re-spec.md`3.7節）。
+- RE内蔵のHausman検定は回帰ベース（補助回帰）版で、Wald検定の共分散をRE本体の`cov_type`に連動させる（既定のclusterならrobust Hausman、比較は常に1-way）。補助回帰の小標本補正は`OlsEstimator`（Stata・R型）でRE本体（linearmodels型）と混在する。`plm::phtest(method = "aux", vcov = ...)`と一致を確認済み（`re-spec.md`3.7節）。
 - IVのWu-Hausman検定は`cov_type`に対応させる。ただし`hac`のみ`linearmodels`の`wooldridge_regression`と一致せず原因未特定のため`None`にする（`iv-spec.md`3.6節）。

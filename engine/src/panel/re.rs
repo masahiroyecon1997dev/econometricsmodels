@@ -152,16 +152,22 @@
 //!   （`swamy_arora_variance_components`が返す`FeEstimator`）のwithin変換から得る。
 //!   `input.time()`の有無は結果に影響しない（`time`はDriscoll-Kraay HACの時系列順序専用）。
 //!   2-wayのハウスマン検定は2-way REの実装時に改めて検討する。
-//! - **classical固定（`cov_type`非連動）**: `ReEstimator::fit`に非Classicalな`cov_type`を
-//!   渡していても補助回帰は常にclassical共分散を使う（帰無仮説のもとでREが完全に効率的＝
-//!   等分散・系列無相関を前提とする古典的ハウスマン検定）。robust版は別途検討。
-//! - **`None`フォールバック**: 以下のいずれかの場合、`hausman_statistic`/`hausman_p_value`/
-//!   `hausman_df`は`None`にし、**RE本体の結果自体は正常に返す**（ハウスマン検定はRE本体の
-//!   付随的な診断情報であり、その失敗がRE推定自体を道連れにしてはならない）。
-//!   - 比較対象の傾き係数が0個（`input.x()`が空）。
-//!   - 内部FE推定が失敗した場合（singleton検出・時間不変変数による分散ゼロ・自由度不足等、
-//!     `swamy_arora_variance_components`自体が失敗するため、実際にはRE本体もErrになる）。
-//!   - 補助回帰のランク落ち、またはWald検定の特異性。
+//! - **`cov_type`連動**: 補助回帰のWald検定の共分散はRE本体の`cov_type`に対応させる
+//!   （既定の`cluster`ならcluster-robust版のロバストHausman検定、`classical`なら
+//!   帰無仮説のもとでREが完全に効率的という前提の古典版）。専用オプションは設けない。
+//!   Classical/Hc1〜Hc3/Clusterは`OlsEstimator`の同名`CovType`（Clusterは`groups`が`None`なら
+//!   `entity`）、Dkは`panel_driscoll_kraay_cov_params`を補助回帰の設計行列・残差に適用する
+//!   （バンド幅はRE本体と同じ解決規則、スケールは補助回帰の`n/df_resid`）。
+//!   **RE本体の標準誤差と補正式が混在する**: Cluster/Hc1の小標本補正は`OlsEstimator`
+//!   （Stata・R型の`G/(G-1)·(n-1)/(n-k)`等）であり、RE本体（linearmodels型）とは異なる。
+//!   補助回帰はRE本体とは別の回帰（説明変数`2k+1`個）で、違いは有限標本の補正のみ。
+//!   統計量は`cov_type`によらずWald統計量（`k × F`）。
+//! - **`None`になるのは比較対象の傾き係数が0個（`input.x()`が空）の場合のみ**。
+//!   補助回帰のランク落ち・クラスター数不足（`G <= 2k`）・DK/ロバスト共分散部分行列の
+//!   ほぼ特異性（DKは時点数`T`に対し検定対象`k`個が`T-1`以上）など、計算自体が成立しない場合は`PanelError::HausmanTestFailed`として
+//!   `fit()`全体を失敗させる（設計行列の多重共線性でエラーにするのと同じ方針）。
+//!   内部FE推定の失敗（singleton・時間不変変数等）は`swamy_arora_variance_components`が
+//!   先に失敗するためRE本体もErrになる。
 
 use std::collections::BTreeMap;
 
@@ -170,7 +176,8 @@ use statrs::distribution::{ChiSquared, ContinuousCDF, FisherSnedecor, StudentsT}
 
 use crate::error::CommonError;
 use crate::inference;
-use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
+use crate::linear::common::LeastSquaresError;
+use crate::linear::ols::{CovType, OlsEstimator, OlsInput, wald_f_test};
 use crate::panel::common::{
     PanelDimension, PanelError, PanelHcVariant, all_ones_theta, count_unique, group_indices_by_key,
     leverage_within, panel_classical_cov_params, panel_cluster_cov_params,
@@ -593,30 +600,40 @@ pub(crate) fn quasi_demean_transform(
 ///
 /// Wooldridge (2010) 10.7.3節の補助回帰版（`plm::phtest(method = "aux")`相当）:
 /// 準偏差変換済みの`y*`を、定数項（**未変換の`1`**）・準偏差変換済みの傾き`X*`・
-/// within変換済みの`X̃`にpooled OLS（classical共分散）で回帰し、`X̃`の係数`k`個が
-/// 同時にゼロというWald検定を行う。定数項をθ変換しない（変換済み定数列`1-θ_i`を使わない）
+/// within変換済みの`X̃`にpooled OLSで回帰し、`X̃`の係数`k`個が同時にゼロという
+/// Wald検定を行う。定数項をθ変換しない（変換済み定数列`1-θ_i`を使わない）
 /// のは`plm::phtest(method = "aux")`と同じ扱い。バランスパネルでは`θ_i`が全個体共通のため
-/// どちらでも同値だが、不均衡パネルでは値が異なる。統計量は`k × F`（`wald_test_last_columns`が返すF統計量を
-/// カイ二乗版に換算）、p値は`χ²_k.sf(stat)`。
+/// どちらでも同値だが、不均衡パネルでは値が異なる。
+///
+/// 補助回帰の共分散はRE本体の`cov_type`に連動させる（Classical/Hc1〜Hc3/Clusterは
+/// `OlsEstimator`の同名`CovType`、Dkは`panel_driscoll_kraay_cov_params`を補助回帰の設計行列・
+/// 残差に適用。モジュールdoc「ハウスマン検定」参照）。統計量はWald統計量そのもの
+/// （`wald_test_last_columns`/`wald_f_test`が返すF統計量の`k`倍）、p値は`χ²_k.sf(stat)`。
 ///
 /// `fe`は`swamy_arora_variance_components`が返した1-way FE推定量で、`X̃`は
 /// `within_transform_one_way(fe.input())`から得る。`y_star`/`x_star`はRE本体の
 /// 回帰に渡した準偏差変換済みの`y`と傾き`X`（変換済み定数列は含まない）そのもの。
 ///
-/// 比較対象の傾き係数が0個、補助回帰が失敗した場合（ランク落ち等）、Wald検定が失敗した
-/// 場合は`None`を返す（呼び出し側でRE本体の結果と切り離してフォールバックできるよう
-/// `Result`ではなく`Option`。モジュールdoc「`None`フォールバック」参照）。
+/// 比較対象の傾き係数が0個なら`Ok(None)`（検定対象が無い）。補助回帰・Wald検定の失敗
+/// （ランク落ち・クラスター数不足・共分散部分行列のほぼ特異性等）は、計算自体が成立しない
+/// ため`PanelError::HausmanTestFailed`として伝播し`fit()`全体を失敗させる（設計行列の
+/// 多重共線性と同じ方針。モジュールdoc「`None`フォールバック」参照）。
+#[allow(clippy::too_many_arguments)]
 fn re_hausman_test(
     fe: &FeEstimator,
     y_star: &[f64],
     x_star: &[Vec<f64>],
     x_star_names: &[String],
     dep_var_name: &str,
+    cov_type: &ReCovType,
+    entity: &[String],
+    time: Option<&[String]>,
     confidence_level: f64,
-) -> Option<(f64, usize, f64)> {
+) -> Result<Option<(f64, usize, f64)>, PanelError> {
+    let to_err = |source| PanelError::HausmanTestFailed { source };
     let k = fe.input().x().len();
     if k == 0 {
-        return None;
+        return Ok(None);
     }
 
     let (_, x_within) = within_transform_one_way(fe.input());
@@ -625,17 +642,61 @@ fn re_hausman_test(
     let mut names = x_star_names.to_vec();
     names.extend(fe.input().x_names().iter().map(|n| format!("{n}_within")));
 
-    let aux_input =
-        OlsInput::from_columns(y_star, &columns, names, true, dep_var_name.to_string()).ok()?;
-    let aux = OlsEstimator::fit(aux_input, CovType::Classical, confidence_level).ok()?;
-    let (f_stat, _) = aux.wald_test_last_columns(k).ok()?;
+    let aux_input = OlsInput::from_columns(y_star, &columns, names, true, dep_var_name.to_string())
+        .map_err(to_err)?;
+
+    let f_stat = match cov_type {
+        ReCovType::Dk { bandwidth } => {
+            let aux = OlsEstimator::fit(aux_input, CovType::Classical, confidence_level)
+                .map_err(to_err)?;
+            let n = aux.input().nobs();
+            let k_aux = aux.input().k();
+            let df_resid = n - k_aux;
+            // `time`の有無・バンド幅はRE本体のDK計算（`fit()`）が先に検証済み。
+            let time = time.ok_or(PanelError::DkRequiresTime)?;
+            let t_periods = count_unique(time);
+            let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
+            let x_mat = aux.input().x();
+            let xtx_inv = xtx_inverse(x_mat, k_aux)?;
+            let residuals: Vec<f64> = (0..n).map(|i| *aux.residuals().get(i, 0)).collect();
+            let cov_params = panel_driscoll_kraay_cov_params(
+                x_mat, &residuals, &xtx_inv, time, df_resid, bw, t_periods,
+            );
+            wald_f_test(aux.params(), &cov_params, k_aux - k, k, df_resid)
+                .map_err(to_err)?
+                .0
+        }
+        _ => {
+            let ols_cov_type = match cov_type {
+                ReCovType::Classical => CovType::Classical,
+                ReCovType::Hc1 => CovType::Hc1,
+                ReCovType::Hc2 => CovType::Hc2,
+                ReCovType::Hc3 => CovType::Hc3,
+                ReCovType::Cluster { groups } => CovType::Cluster {
+                    groups: Some(groups.clone().unwrap_or_else(|| entity.to_vec())),
+                },
+                ReCovType::Dk { .. } => unreachable!("Dk is handled in the branch above"),
+            };
+            let aux =
+                OlsEstimator::fit(aux_input, ols_cov_type, confidence_level).map_err(to_err)?;
+            aux.wald_test_last_columns(k).map_err(to_err)?.0
+        }
+    };
 
     let stat = k as f64 * f_stat;
+    // `wald_f_test`が成功した時点でF統計量は有限（`ensure_well_conditioned_symmetric_matrix`
+    // 通過後の二次形式）、`k >= 1`で`ChiSquared::new`も失敗しないため、以下は防御的。
     if !stat.is_finite() {
-        return None;
+        return Err(to_err(LeastSquaresError::Common(
+            CommonError::ComputationFailed("Hausman Wald statistic is not finite".to_string()),
+        )));
     }
-    let chi2 = ChiSquared::new(k as f64).ok()?;
-    Some((stat, k, chi2.sf(stat)))
+    let chi2 = ChiSquared::new(k as f64).map_err(|e| {
+        to_err(LeastSquaresError::Common(CommonError::ComputationFailed(
+            e.to_string(),
+        )))
+    })?;
+    Ok(Some((stat, k, chi2.sf(stat))))
 }
 
 /// REの標準誤差計算方式（3.1節）。`FeCovType`と同じ「小さな固定選択肢の
@@ -1019,8 +1080,11 @@ impl ReEstimator {
             &x_all[1..],
             &param_names[1..],
             input.dep_var_name(),
+            &cov_type,
+            input.entity(),
+            input.time(),
             confidence_level,
-        );
+        )?;
         let (hausman_statistic, hausman_df, hausman_p_value) = match hausman_result {
             Some((stat, df, p_value)) => (Some(stat), Some(df), Some(p_value)),
             None => (None, None, None),
@@ -2260,9 +2324,8 @@ mod tests {
     }
 
     #[test]
-    fn re_estimator_fit_hausman_is_invariant_to_time_and_cov_type() {
-        // `time`（DK HACの時系列順序）の有無、および`cov_type`の選択は、
-        // ハウスマン検定（常に1-way・classical固定）の結果を変えない。
+    fn re_estimator_fit_hausman_classical_is_invariant_to_time() {
+        // `time`（DK HACの時系列順序専用）の有無は、常に1-wayのハウスマン検定の結果を変えない。
         let time = strings(&["1", "2", "3", "1", "2", "1", "2", "3", "1", "2", "1", "2"]);
         let base =
             ReEstimator::fit(hausman_two_slope_input(None), ReCovType::Classical, 0.95).unwrap();
@@ -2272,20 +2335,123 @@ mod tests {
             0.95,
         )
         .unwrap();
-        let with_dk = ReEstimator::fit(
-            hausman_two_slope_input(Some(&time)),
-            ReCovType::Dk { bandwidth: None },
+        assert_eq!(with_time.hausman_statistic(), base.hausman_statistic());
+        assert_eq!(with_time.hausman_p_value(), base.hausman_p_value());
+        assert_eq!(with_time.hausman_df(), base.hausman_df());
+    }
+
+    /// 補助回帰（`y*`を定数項・`X*`・`X̃`に回帰）を手で組み立てる。`hausman_two_slope_input`用。
+    fn manual_hausman_aux(input: &ReInput, cov_type: CovType) -> OlsEstimator {
+        let (sigma2_eps, sigma2_u, _) = swamy_arora_variance_components(input, 0.95).unwrap();
+        let (_, y_star, x_star) = quasi_demean_transform(input, sigma2_eps, sigma2_u);
+        let theta = all_ones_theta(input.entity());
+        let mut columns = x_star;
+        for col in input.x() {
+            columns.push(quasi_demean_column(col, input.entity(), &theta));
+        }
+        let names = ["x1", "x2", "x1_w", "x2_w"].map(String::from).to_vec();
+        let aux_input = OlsInput::from_columns(&y_star, &columns, names, true, "y".into()).unwrap();
+        OlsEstimator::fit(aux_input, cov_type, 0.95).unwrap()
+    }
+
+    #[test]
+    fn re_estimator_fit_hausman_follows_cov_type_for_ols_covariances() {
+        let entity = strings(&["a", "a", "a", "b", "b", "c", "c", "c", "d", "d", "e", "e"]);
+        let classical =
+            ReEstimator::fit(hausman_two_slope_input(None), ReCovType::Classical, 0.95).unwrap();
+        let cases = [
+            (ReCovType::Hc1, CovType::Hc1),
+            (ReCovType::Hc2, CovType::Hc2),
+            (ReCovType::Hc3, CovType::Hc3),
+            (
+                ReCovType::Cluster { groups: None },
+                CovType::Cluster {
+                    groups: Some(entity.clone()),
+                },
+            ),
+        ];
+        for (re_cov, ols_cov) in cases {
+            let label = format!("{re_cov:?}");
+            let re = ReEstimator::fit(hausman_two_slope_input(None), re_cov, 0.95).unwrap();
+            let aux = manual_hausman_aux(re.input(), ols_cov);
+            let (f_stat, _) = aux.wald_test_last_columns(2).unwrap();
+            let expected_stat = 2.0 * f_stat;
+            let expected_p = ChiSquared::new(2.0).unwrap().sf(expected_stat);
+
+            assert_eq!(re.hausman_df(), Some(2), "{label}");
+            assert!(
+                (re.hausman_statistic().unwrap() - expected_stat).abs() < 1e-9,
+                "{label}"
+            );
+            assert!(
+                (re.hausman_p_value().unwrap() - expected_p).abs() < 1e-9,
+                "{label}"
+            );
+            assert_ne!(
+                re.hausman_statistic(),
+                classical.hausman_statistic(),
+                "{label}"
+            );
+        }
+    }
+
+    #[test]
+    fn re_estimator_fit_hausman_cluster_uses_explicit_groups() {
+        // `groups`を明示するとentityではなくその列でクラスタリングする。
+        let groups = strings(&[
+            "g1", "g1", "g1", "g2", "g2", "g3", "g3", "g3", "g4", "g4", "g5", "g5",
+        ]);
+        let groups_by_obs = strings(&["1", "2", "3", "4", "5", "1", "2", "3", "4", "5", "1", "2"]);
+        let re = ReEstimator::fit(
+            hausman_two_slope_input(None),
+            ReCovType::Cluster {
+                groups: Some(groups_by_obs.clone()),
+            },
             0.95,
         )
         .unwrap();
-        let with_hc1 =
-            ReEstimator::fit(hausman_two_slope_input(None), ReCovType::Hc1, 0.95).unwrap();
+        let by_entity = ReEstimator::fit(
+            hausman_two_slope_input(None),
+            ReCovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        )
+        .unwrap();
+        let aux = manual_hausman_aux(
+            re.input(),
+            CovType::Cluster {
+                groups: Some(groups_by_obs),
+            },
+        );
+        let expected = 2.0 * aux.wald_test_last_columns(2).unwrap().0;
+        assert!((re.hausman_statistic().unwrap() - expected).abs() < 1e-9);
+        assert_ne!(re.hausman_statistic(), by_entity.hausman_statistic());
+    }
 
-        for other in [&with_time, &with_dk, &with_hc1] {
-            assert_eq!(other.hausman_statistic(), base.hausman_statistic());
-            assert_eq!(other.hausman_p_value(), base.hausman_p_value());
-            assert_eq!(other.hausman_df(), base.hausman_df());
-        }
+    #[test]
+    fn re_estimator_fit_hausman_dk_with_zero_bandwidth_equals_time_clustered_aux() {
+        // Dkのバンド幅0は、時点でクラスタリングした補助回帰（`n/(n-k)`スケール）と代数的に同値。
+        let time = strings(&["1", "2", "3", "1", "2", "1", "2", "3", "1", "2", "1", "2"]);
+        let re = ReEstimator::fit(
+            hausman_two_slope_input(Some(&time)),
+            ReCovType::Dk { bandwidth: Some(0) },
+            0.95,
+        )
+        .unwrap();
+        // 2-wayではないが`n/(n-k)`スケールの時点クラスターは`panel_cluster_cov_params`
+        // （`extra_df=0`）と一致するため、その経路で独立に検算する。
+        let aux = manual_hausman_aux(re.input(), CovType::Classical);
+        let x_mat = aux.input().x();
+        let n = aux.input().nobs();
+        let k_aux = aux.input().k();
+        let xtx_inv = xtx_inverse(x_mat, k_aux).unwrap();
+        let residuals: Vec<f64> = (0..n).map(|i| *aux.residuals().get(i, 0)).collect();
+        let cov = panel_cluster_cov_params(x_mat, &residuals, &xtx_inv, n, k_aux, &time, 0);
+        let (f_stat, _) = wald_f_test(aux.params(), &cov, k_aux - 2, 2, n - k_aux).unwrap();
+
+        assert_eq!(re.hausman_df(), Some(2));
+        assert!((re.hausman_statistic().unwrap() - 2.0 * f_stat).abs() < 1e-9);
     }
 
     #[test]
@@ -2321,9 +2487,60 @@ mod tests {
         let fe = FeEstimator::fit(fe_input, FeEffects::OneWay, FeCovType::Classical, 0.95).unwrap();
         let (_, x_within) = within_transform_one_way(fe.input());
 
-        let result = re_hausman_test(&fe, &y, &x_within, &["x1_star".to_string()], "y", 0.95);
+        let result = re_hausman_test(
+            &fe,
+            &y,
+            &x_within,
+            &["x1_star".to_string()],
+            "y",
+            &ReCovType::Classical,
+            &entity,
+            None,
+            0.95,
+        );
 
-        assert_eq!(result, None);
+        assert!(matches!(result, Err(PanelError::HausmanTestFailed { .. })));
+    }
+
+    #[test]
+    fn re_estimator_fit_hausman_returns_error_when_clusters_do_not_cover_auxiliary_slopes() {
+        // RE本体は`G=3 > q=2`で成功するが、補助回帰の傾き係数は`2k=4 >= G`のため
+        // ロバスト共分散が構造的に特異になり、`fit()`は`HausmanTestFailed`で失敗する。
+        let groups = strings(&[
+            "g1", "g1", "g1", "g2", "g2", "g3", "g3", "g3", "g1", "g2", "g3", "g3",
+        ]);
+        let result = ReEstimator::fit(
+            hausman_two_slope_input(None),
+            ReCovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        );
+        assert!(matches!(
+            result.unwrap_err(),
+            PanelError::HausmanTestFailed {
+                source: LeastSquaresError::Common(CommonError::InsufficientClustersForInference {
+                    g: 3,
+                    q: 4
+                })
+            }
+        ));
+    }
+
+    #[test]
+    fn re_estimator_fit_hausman_returns_error_when_dk_periods_are_too_few() {
+        // 時点数`T=2`ではDK共分散のrankが`T-1=1`で、検定対象の`X̃`係数`k=2`個の
+        // 部分行列が特異になる。
+        let time = strings(&["1", "2", "1", "2", "1", "2", "1", "2", "1", "2", "1", "2"]);
+        let result = ReEstimator::fit(
+            hausman_two_slope_input(Some(&time)),
+            ReCovType::Dk { bandwidth: Some(0) },
+            0.95,
+        );
+        assert!(matches!(
+            result.unwrap_err(),
+            PanelError::HausmanTestFailed { .. }
+        ));
     }
 
     /// property-basedテスト。固定シナリオでは`σ_u²`・`T_i`・`cov_type`の組み合わせが

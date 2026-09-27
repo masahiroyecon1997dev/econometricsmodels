@@ -235,7 +235,7 @@ MLEベースの非線形モデルは漸近理論が正規分布に基づいて�
 ## 5. Return共通コア項目
 
 - `params` / `std_errors` / `test_stats` / `p_values` / `conf_lower` / `conf_upper` /
-  `param_names`
+  `param_names` / `dep_var_name`
 - `log_likelihood`（llf）/ `log_likelihood_null`（切片のみモデルのllf）
 - `lr_statistic` / `lr_p_value`（尤度比検定、カイ二乗分布。OLSのF検定に相当する全体の
   有意性検定）

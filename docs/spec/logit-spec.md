@@ -43,7 +43,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 `LogitResult`（`#[pyclass]`）が公開する配列＋名前リスト: `params` / `std_errors` / `test_stats`
 （**z検定**、t検定ではない） / `p_values` / `conf_lower` / `conf_upper` / `param_names` /
-`log_likelihood` / `log_likelihood_null` / `lr_statistic` / `lr_p_value` / `pseudo_r_squared`
+`dep_var_name` / `log_likelihood` / `log_likelihood_null` / `lr_statistic` / `lr_p_value` / `pseudo_r_squared`
 （McFadden） / `aic` / `bic` / `n_obs` / `df_model` / `df_resid` / `converged` / `n_iter` /
 `cov_type`（実際に使われた種別の小文字文字列） / `solver`（実際に使われたソルバーの小文字文字列）。
 

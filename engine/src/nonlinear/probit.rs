@@ -2752,7 +2752,7 @@ mod tests {
         assert!(effects.effect().is_empty());
     }
 
-    /// `marginal_effects(at="overall")`の`dydx`を、実装の内部ヘルパー（`overall_w_and_s`/
+    /// `marginal_effects(at="overall")`の`effect`を、実装の内部ヘルパー（`overall_w_and_s`/
     /// `dydx_and_jacobian`）とは別に、定義式`dy/dx_j = (1/n)Σᵢφ(zᵢ)θⱼ`を`Normal::standard()`
     /// から直接計算する式で独立に再計算し、突き合わせる（`LogitEstimator`の対応する
     /// テストと同じ技法。標準誤差は`dydx_j`自体をfit済みパラメータの周りで数値微分した
@@ -2791,7 +2791,7 @@ mod tests {
             .unwrap();
         assert_eq!(effects.param_names(), ["x1".to_string(), "x2".to_string()]);
 
-        // dydxの独立再計算（`Normal::standard().pdf`から直接、`overall_w_and_s`とは別の式）
+        // effectの独立再計算（`Normal::standard().pdf`から直接、`overall_w_and_s`とは別の式）
         let normal = Normal::standard();
         let dydx_j = |params: &[f64], j: usize| -> f64 {
             (0..n)
@@ -2850,7 +2850,7 @@ mod tests {
 
     /// `at="mean"`は`at="overall"`と異なる代表点（標本平均）で評価するため、一般には
     /// 異なる値になる。実装がこの違いを正しく反映していること（`at`の分岐が機能して
-    /// いること）を確認する。`dydx`を`column_means`から独立に再計算した値とも突き合わせる。
+    /// いること）を確認する。`effect`を`column_means`から独立に再計算した値とも突き合わせる。
     #[test]
     fn marginal_effects_at_mean_differs_from_overall_and_matches_independent_recomputation() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
@@ -2898,7 +2898,7 @@ mod tests {
 
     /// `at="median"`が`at="mean"`/`at="overall"`と異なる代表点で評価されること
     /// （非対称なデータセットで平均・中央値が異なる値になるよう構成）、および
-    /// `dydx`を`column_medians`から独立に再計算した値と突き合わせる。
+    /// `effect`を`column_medians`から独立に再計算した値と突き合わせる。
     #[test]
     fn marginal_effects_at_median_differs_from_mean_and_overall_and_matches_independent_recomputation()
      {

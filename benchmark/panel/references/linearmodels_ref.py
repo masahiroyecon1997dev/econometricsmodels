@@ -252,7 +252,7 @@ def run(
             モジュールdocstring参照）。
         entity_col: エンティティ識別子の列名。
         time_col: 時点識別子の列名。**`two_way`とは独立**（本実装の`time`
-            〔2-way構造〕と`time_col`〔HAC専用の時系列順序〕の分離と同じ
+            〔2-way構造〕と`dk_time`〔DK専用の時系列順序〕の分離と同じ
             発想、モジュールdoc「`cov_type`の対応関係」参照）。指定すれば
             その列でMultiIndexの時点次元を構築し、`cov_type="dk"`の
             カーネル計算・バンド幅の`t`にも使う。`None`なら観測順の連番

@@ -61,7 +61,7 @@ ATOL = TOLERANCES["probit_crosscheck"]["atol"]
 
 # marginal_effects()のstd_err（デルタ法、ヤコビアン経由）は係数・標準誤差本体より
 # 数値ノイズが1桁大きいことを実測確認した（mroz/hc1/median付近で相対誤差~7e-4が
-# 最大）。dydx自体はRTOL=2e-4で十分（実測最大~2e-5）。
+# 最大）。effect自体はRTOL=2e-4で十分（実測最大~2e-5）。
 RTOL_MARGEFF_SE = TOLERANCES["probit_crosscheck"]["rtol_margeff_se"]
 
 # p値は標準正規分布CDFの裾で係数・zのわずかな数値差が増幅されるため、係数・SE本体

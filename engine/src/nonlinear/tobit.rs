@@ -4272,7 +4272,7 @@ mod tests {
             .unwrap();
         assert_eq!(effects.param_names(), ["x1".to_string()]);
 
-        // dydxの独立再計算: 各観測でE[y|x]を数値微分してx1の限界効果を求め、平均する
+        // effectの独立再計算: 各観測でE[y|x]を数値微分してx1の限界効果を求め、平均する
         // （`target_w_and_s`の`P(uncensored)*βⱼ`という閉形式は経由しない）。
         let h = 1e-6;
         let dydx_at_row = |params: &[f64], sigma: f64, i: usize| -> f64 {
@@ -4396,7 +4396,7 @@ mod tests {
     }
 
     /// `target="E[y|x]"`が右打ち切りのみのデータでも正しく計算できることを、
-    /// `expected_observed_closed_form`（右打ち切り分岐）で独立に再計算した`dydx`と
+    /// `expected_observed_closed_form`（右打ち切り分岐）で独立に再計算した`effect`と
     /// 突き合わせて検証する。
     #[test]
     fn fit_marginal_effects_expected_observed_matches_independent_recomputation_for_right_only_censoring()
@@ -4449,7 +4449,7 @@ mod tests {
     }
 
     /// `target="E[y|x]"`が両側打ち切りのデータでも正しく計算できることを、
-    /// `expected_observed_closed_form`（両側打ち切り分岐）で独立に再計算した`dydx`と
+    /// `expected_observed_closed_form`（両側打ち切り分岐）で独立に再計算した`effect`と
     /// 突き合わせて検証する。
     #[test]
     fn fit_marginal_effects_expected_observed_matches_independent_recomputation_for_two_sided_censoring()
@@ -4504,7 +4504,7 @@ mod tests {
 
     /// `target="P(uncensored)"`（左打ち切りのみ）を、`prob_uncensored_closed_form`を
     /// `mu`について数値微分した`dprob_uncensored_dmu_closed_form`×`βⱼ`という
-    /// （`target_w_and_s`の`ProbUncensored`分岐とは独立の）式で再計算し、dydx・標準誤差
+    /// （`target_w_and_s`の`ProbUncensored`分岐とは独立の）式で再計算し、effect・標準誤差
     /// 双方を突き合わせる。
     #[test]
     fn fit_marginal_effects_prob_uncensored_overall_matches_independently_recomputed_dydx_and_delta_method_se()
@@ -4628,7 +4628,7 @@ mod tests {
         );
         // x1の真の係数は正（+2相当）なので、右打ち切りのみでは非打ち切り確率の限界効果は
         // 負になるはず（xが増えるほど上側で打ち切られやすくなるため）。
-        assert!(effects.effect()[0] < 0.0, "dydx={}", effects.effect()[0]);
+        assert!(effects.effect()[0] < 0.0, "effect={}", effects.effect()[0]);
     }
 
     /// `target="P(uncensored)"`が両側打ち切りのデータでも正しく計算できることを検証する。

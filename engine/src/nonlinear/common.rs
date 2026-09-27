@@ -592,7 +592,7 @@ pub struct MleFitOptions {
 /// common.rs`に定義する（`SolverType`/`CovType`と同じ理由）。`w=∂p/∂z`相当のリンク関数の
 /// 微分（Logitなら`p(1-p)`、Probitなら`φ(z)`）の計算式のみモデルごとの実装
 /// （`logit.rs`等の`overall_w_and_s`/`at_point_w_and_s`）に置き、`w`・その勾配`s`から
-/// `dydx`・デルタ法標準誤差を求める部分は`w`/`s`の意味に依存しないためこのモジュールの
+/// `effect`（dy/dx）・デルタ法標準誤差を求める部分は`w`/`s`の意味に依存しないためこのモジュールの
 /// `marginal_effects_from_w_s`に共通化している（`dydx_and_jacobian`のdoc
 /// コメント参照）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4911,7 +4911,7 @@ mod tests {
     }
 
     /// `marginal_effects_from_w_s`をLogit/Probit双方のモデル固有計算とは独立に、
-    /// 合成した`(w,s)`から一連の統計量（`dydx`/デルタ法標準誤差/z値/p値/信頼区間）が
+    /// 合成した`(w,s)`から一連の統計量（`effect`/デルタ法標準誤差/z値/p値/信頼区間）が
     /// 定義式通り計算され、かつ定数項（先頭列、`has_intercept=true`）が正しく
     /// 出力から除外されることを検証する。
     #[test]

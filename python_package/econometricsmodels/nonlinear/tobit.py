@@ -243,6 +243,17 @@ class TobitResults:
         return self._raw.wald_p_value
 
     @property
+    def wald_dist(self) -> Literal["chi2"]:
+        """Distribution of `wald_statistic`: always `"chi2"` (chi-squared)."""
+        return self._raw.wald_dist
+
+    @property
+    def wald_df(self) -> int | None:
+        """Degrees of freedom of the chi-squared Wald test
+        (`wald_statistic`). `None` when there are no slope coefficients."""
+        return self._raw.wald_df
+
+    @property
     def converged(self) -> bool:
         """Whether the solver converged within `max_iter` iterations."""
         return self._raw.converged

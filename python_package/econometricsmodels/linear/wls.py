@@ -211,6 +211,30 @@ class WLSResults:
         return self._raw.f_p_value
 
     @property
+    def f_df_num(self) -> int | None:
+        """Numerator degrees of freedom of `f_statistic` (`None` when it
+        is NaN, i.e. there are no slope coefficients)."""
+        return self._raw.f_df_num
+
+    @property
+    def f_df_denom(self) -> int | None:
+        """Denominator degrees of freedom of `f_statistic` (`None` when it
+        is NaN). May differ from `df_resid`, so use this to recompute the
+        p-value from `f_statistic`."""
+        return self._raw.f_df_denom
+
+    @property
+    def df_resid(self) -> int:
+        """Residual degrees of freedom (`n - k`)."""
+        return self._raw.df_resid
+
+    @property
+    def df_model(self) -> int:
+        """Model degrees of freedom (number of slope coefficients,
+        excluding the intercept)."""
+        return self._raw.df_model
+
+    @property
     def log_likelihood(self) -> float:
         """Log-likelihood."""
         return self._raw.log_likelihood

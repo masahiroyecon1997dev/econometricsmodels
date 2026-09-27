@@ -278,15 +278,43 @@ class IVResults:
         return self._raw.adj_r_squared
 
     @property
-    def f_statistic(self) -> float:
-        """F-statistic (classical F-test when `cov_type="classical"`,
-        a robust Wald test otherwise)."""
-        return self._raw.f_statistic
+    def wald_statistic(self) -> float:
+        """Wald test statistic for all slope coefficients being zero.
+
+        For `estimator="2sls"` this is the F-type statistic (the Wald
+        statistic divided by the number of slope coefficients; the
+        counterpart of `OLSResults.f_statistic`, a classical F-test when
+        `cov_type="classical"`, a robust Wald test otherwise). For
+        `estimator="gmm"` it is the undivided Wald statistic, which
+        follows a chi-squared distribution. `wald_dist` tells which.
+        """
+        return self._raw.wald_statistic
 
     @property
-    def f_p_value(self) -> float:
-        """P-value of the F-statistic."""
-        return self._raw.f_p_value
+    def wald_p_value(self) -> float:
+        """P-value of `wald_statistic` (F or chi-squared, see
+        `wald_dist`)."""
+        return self._raw.wald_p_value
+
+    @property
+    def wald_dist(self) -> Literal["f", "chi2"]:
+        """Distribution of `wald_statistic`: `"f"` (F distribution) for
+        `estimator="2sls"`, `"chi2"` (chi-squared) for `estimator="gmm"`."""
+        return self._raw.wald_dist
+
+    @property
+    def wald_df_num(self) -> int | None:
+        """Numerator degrees of freedom of `wald_statistic` (the number of
+        slope coefficients; the only degrees of freedom for `"chi2"`).
+        `None` when there are no slope coefficients."""
+        return self._raw.wald_df_num
+
+    @property
+    def wald_df_denom(self) -> int | None:
+        """Denominator degrees of freedom of `wald_statistic` for `"f"`
+        (`df_resid`, or `G - 1` with cluster-robust inference). `None` for
+        `"chi2"` and when the statistic is NaN."""
+        return self._raw.wald_df_denom
 
     @property
     def weak_instrument_f_statistics(self) -> dict[str, float]:
@@ -302,6 +330,20 @@ class IVResults:
         `estimator="gmm"`; see `docs/spec/iv-spec.md` section 3.4.
         """
         return self._raw.weak_instrument_f_statistics
+
+    @property
+    def weak_instrument_f_df_num(self) -> int | None:
+        """Numerator degrees of freedom of the weak-instrument F
+        statistics (the number of excluded instruments; the same for
+        every endogenous variable)."""
+        return self._raw.weak_instrument_f_df_num
+
+    @property
+    def weak_instrument_f_df_denom(self) -> int | None:
+        """Denominator degrees of freedom of the weak-instrument F
+        statistics (residual degrees of freedom of the first-stage
+        regressions; the same for every endogenous variable)."""
+        return self._raw.weak_instrument_f_df_denom
 
     @property
     def overid_statistic(self) -> float | None:
@@ -321,6 +363,13 @@ class IVResults:
         Same conditions as `overid_statistic` for when this is `None`.
         """
         return self._raw.overid_p_value
+
+    @property
+    def overid_df(self) -> int | None:
+        """Degrees of freedom of the chi-squared overidentification test
+        (`len(instruments) - len(x_endog)`). `None` under the same
+        conditions as `overid_statistic`."""
+        return self._raw.overid_df
 
     @property
     def wu_hausman_statistic(self) -> float | None:
@@ -343,6 +392,19 @@ class IVResults:
         `docs/spec/iv-spec.md` section 3.6.
         """
         return self._raw.wu_hausman_statistic
+
+    @property
+    def wu_hausman_df_num(self) -> int | None:
+        """Numerator degrees of freedom of the Wu-Hausman F test (the
+        number of endogenous variables). `None` under the same conditions
+        as `wu_hausman_statistic`."""
+        return self._raw.wu_hausman_df_num
+
+    @property
+    def wu_hausman_df_denom(self) -> int | None:
+        """Denominator degrees of freedom of the Wu-Hausman F test.
+        `None` under the same conditions as `wu_hausman_statistic`."""
+        return self._raw.wu_hausman_df_denom
 
     @property
     def wu_hausman_p_value(self) -> float | None:

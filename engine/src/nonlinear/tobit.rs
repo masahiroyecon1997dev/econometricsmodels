@@ -1634,6 +1634,11 @@ impl TobitEstimator {
         self.wald_p_value
     }
 
+    /// Wald検定の自由度（χ²、`df_model`）。`df_model==0`でNaNのときは`None`。
+    pub fn wald_df(&self) -> Option<usize> {
+        (self.df_model() > 0).then_some(self.df_model())
+    }
+
     /// 収束したかどうか
     pub fn converged(&self) -> bool {
         self.converged

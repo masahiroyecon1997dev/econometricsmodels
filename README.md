@@ -65,7 +65,7 @@ print(result.r_squared)
 print(result.coef_table())
 
 # Overall-fit statistics.
-print(result.f_statistic, result.f_p_value)
+print(result.f_statistic, result.f_p_value, result.f_df_num, result.f_df_denom)
 print(result.aic, result.bic)
 ```
 

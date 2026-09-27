@@ -195,6 +195,19 @@ pub struct WLSResult {
     pub f_statistic: f64,
     #[pyo3(get)]
     pub f_p_value: f64,
+    /// Numerator degrees of freedom of `f_statistic` (`None` when it is NaN).
+    #[pyo3(get)]
+    pub f_df_num: Option<usize>,
+    /// Denominator degrees of freedom of `f_statistic` (`None` when it is NaN). May differ
+    /// from `df_resid` (e.g. OLS/WLS with cluster-robust inference uses `G - 1`).
+    #[pyo3(get)]
+    pub f_df_denom: Option<usize>,
+    /// Residual degrees of freedom (`n - k`).
+    #[pyo3(get)]
+    pub df_resid: usize,
+    /// Model degrees of freedom (number of slope coefficients, excluding the intercept).
+    #[pyo3(get)]
+    pub df_model: usize,
     #[pyo3(get)]
     pub log_likelihood: f64,
     #[pyo3(get)]
@@ -387,6 +400,10 @@ pub fn fit(
         adj_r_squared: wls_estimator.adj_r_squared(),
         f_statistic: estimator.f_statistic(),
         f_p_value: estimator.f_p_value(),
+        f_df_num: estimator.f_df().map(|(num, _)| num),
+        f_df_denom: estimator.f_df().map(|(_, denom)| denom),
+        df_resid: estimator.df_resid(),
+        df_model: estimator.df_model(),
         log_likelihood: wls_estimator.log_likelihood(),
         aic: wls_estimator.aic(),
         bic: wls_estimator.bic(),

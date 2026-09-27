@@ -263,6 +263,13 @@ pub struct TobitResult {
     /// degrees of freedom). `NaN` when `df_model == 0`.
     #[pyo3(get)]
     pub wald_p_value: f64,
+    /// Distribution of `wald_statistic`: always `"chi2"`.
+    #[pyo3(get)]
+    pub wald_dist: String,
+    /// Degrees of freedom of the chi-squared Wald test (`None` when there are no slope
+    /// coefficients).
+    #[pyo3(get)]
+    pub wald_df: Option<usize>,
     #[pyo3(get)]
     pub converged: bool,
     #[pyo3(get)]
@@ -639,6 +646,8 @@ pub(crate) fn fit(
         df_resid: estimator.df_resid(),
         wald_statistic: estimator.wald_statistic(),
         wald_p_value: estimator.wald_p_value(),
+        wald_dist: "chi2".to_string(),
+        wald_df: estimator.wald_df(),
         converged: estimator.converged(),
         n_iter: estimator.n_iter(),
         cov_type: options.cov_type.to_lowercase(),

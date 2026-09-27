@@ -42,7 +42,7 @@
 //! 無関係な失敗経路を作らないため）。`second_stage`自身の`std_errors()`/`test_stats()`等
 //! （ナイーブな第二段階OLSのSEで2SLSとして誤り）は`TwoSlsEstimator`の外部に公開しない。
 //! 呼び出し元が指定した`cov_type`を反映した正しいSE・F統計量等は、`TwoSlsEstimator`
-//! 自身のトップレベルフィールド（`std_errors()`/`test_stats()`/`f_statistic()`等）として
+//! 自身のトップレベルフィールド（`std_errors()`/`test_stats()`/`wald_statistic()`等）として
 //! 独立に計算・保持する。
 //!
 //! ## 第一段階・第二段階での`cov_type`/`confidence_level`の扱い
@@ -116,17 +116,21 @@ pub struct TwoSlsEstimator {
     adj_r_squared: f64,
     /// F統計量。`cov_type=Classical`なら古典的F検定、それ以外（HC0-3/HAC/cluster）は
     /// ロバストWald検定（OLSと同じ切り替えロジック、`docs/spec/iv-spec.md`2章）
-    f_statistic: f64,
-    f_p_value: f64,
+    wald_statistic: f64,
+    wald_p_value: f64,
     /// Wu-Hausman内生性検定（回帰ベース、`docs/spec/iv-spec.md`3.6節）の統計量。
     /// `x_endog=[]`（検定対象の内生変数が無い）、または拡張回帰が想定内の理由で推定不能
     /// （設計行列が特異・観測数不足、`fit()`のdocコメント参照）なら`None`。
     wu_hausman_statistic: Option<f64>,
     wu_hausman_p_value: Option<f64>,
+    /// Wu-Hausman検定のF分布の自由度`(分子, 分母)`。`wu_hausman_statistic`と同じ条件で`None`。
+    wu_hausman_df: Option<(usize, usize)>,
     /// Sargan過剰識別検定（`docs/spec/iv-spec.md`3.5節）の統計量。丁度識別
     /// （自由度`len(instruments) - len(x_endog)`が0）なら`None`。
     sargan_statistic: Option<f64>,
     sargan_p_value: Option<f64>,
+    /// Sargan検定のχ²分布の自由度`len(instruments) - len(x_endog)`。丁度識別なら`None`。
+    sargan_df: Option<usize>,
 }
 
 impl TwoSlsEstimator {
@@ -351,7 +355,7 @@ impl TwoSlsEstimator {
         let adj_r_squared = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
 
         let df_model = k - k_constant;
-        let (f_statistic, f_p_value) = if df_model == 0 {
+        let (wald_statistic, wald_p_value) = if df_model == 0 {
             // 説明変数が定数項のみ（傾き係数が無い）モデル。検定対象が存在しないため
             // OLSと同様NaNを返す（0除算を避ける）。
             (f64::NAN, f64::NAN)
@@ -390,8 +394,8 @@ impl TwoSlsEstimator {
         // 同じ「理論上到達不能だが`Result`で扱う」パターンで`IvError`として伝播する
         // （rust-reviewerの指摘: 広すぎる`Err(_)`キャッチは将来の実装バグを`None`で
         // 隠してしまうため、意図した失敗理由だけを明示的にマッチする）。
-        let (wu_hausman_statistic, wu_hausman_p_value) = if input.k_endog() == 0 {
-            (None, None)
+        let (wu_hausman_statistic, wu_hausman_p_value, wu_hausman_df) = if input.k_endog() == 0 {
+            (None, None, None)
         } else {
             // `x_exog_bare`（定数項を除いた素のx_exog）を使い、`OlsInput::from_columns`に
             // `input.has_intercept()`を渡して定数項を1回だけ正しく追加させる
@@ -409,7 +413,7 @@ impl TwoSlsEstimator {
                     .map(|(endog_name, _)| format!("{endog_name}_first_stage_resid")),
             );
 
-            let hausman_result: Result<(f64, f64), LeastSquaresError> = (|| {
+            let hausman_result: Result<(f64, f64, (usize, usize)), LeastSquaresError> = (|| {
                 let hausman_input = OlsInput::from_columns(
                     &y,
                     &hausman_columns,
@@ -419,11 +423,17 @@ impl TwoSlsEstimator {
                 )?;
                 let hausman_estimator =
                     OlsEstimator::fit(hausman_input, cov_type.clone(), confidence_level)?;
-                hausman_estimator.wald_test_last_columns(input.k_endog())
-            })();
+                let (stat, p_value) = hausman_estimator.wald_test_last_columns(input.k_endog())?;
+                Ok((
+                    stat,
+                    p_value,
+                    (input.k_endog(), hausman_estimator.df_inference()),
+                ))
+            })(
+            );
 
             match hausman_result {
-                Ok((stat, p_value)) => (Some(stat), Some(p_value)),
+                Ok((stat, p_value, df)) => (Some(stat), Some(p_value), Some(df)),
                 Err(LeastSquaresError::SingularMatrix)
                 | Err(LeastSquaresError::Common(CommonError::InsufficientObservations {
                     ..
@@ -431,7 +441,9 @@ impl TwoSlsEstimator {
                 | Err(LeastSquaresError::Common(CommonError::InsufficientClustersForInference {
                     ..
                 }))
-                | Err(LeastSquaresError::Common(CommonError::ComputationFailed(_))) => (None, None),
+                | Err(LeastSquaresError::Common(CommonError::ComputationFailed(_))) => {
+                    (None, None, None)
+                }
                 Err(source) => return Err(IvError::HausmanRegressionFailed { source }),
             }
         };
@@ -454,8 +466,8 @@ impl TwoSlsEstimator {
         // ここでの特異性は理論上到達不能（`xtx_inverse`と同じ防御的`Result`化）。
         let q = input.k_instruments();
         let l = instrument_columns.len();
-        let (sargan_statistic, sargan_p_value) = if q == input.k_endog() {
-            (None, None)
+        let (sargan_statistic, sargan_p_value, sargan_df) = if q == input.k_endog() {
+            (None, None, None)
         } else {
             let df = q - input.k_endog();
             let z = Mat::from_fn(n, l, |i, j| instrument_columns[j][i]);
@@ -475,7 +487,7 @@ impl TwoSlsEstimator {
             let chi2 = ChiSquared::new(df as f64)
                 .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
             let p_value = 1.0 - chi2.cdf(stat);
-            (Some(stat), Some(p_value))
+            (Some(stat), Some(p_value), Some(df))
         };
 
         Ok(Self {
@@ -494,12 +506,14 @@ impl TwoSlsEstimator {
             df_model,
             r_squared,
             adj_r_squared,
-            f_statistic,
-            f_p_value,
+            wald_statistic,
+            wald_p_value,
             wu_hausman_statistic,
             wu_hausman_p_value,
+            wu_hausman_df,
             sargan_statistic,
             sargan_p_value,
+            sargan_df,
         })
     }
 
@@ -593,13 +607,13 @@ impl TwoSlsEstimator {
     }
 
     /// F統計量。
-    pub fn f_statistic(&self) -> f64 {
-        self.f_statistic
+    pub fn wald_statistic(&self) -> f64 {
+        self.wald_statistic
     }
 
     /// F統計量のp値。
-    pub fn f_p_value(&self) -> f64 {
-        self.f_p_value
+    pub fn wald_p_value(&self) -> f64 {
+        self.wald_p_value
     }
 
     /// 内生変数ごとの第一段階回帰結果（`x_endog_names`と対応する順序）。
@@ -635,6 +649,21 @@ impl TwoSlsEstimator {
     /// Sargan過剰識別検定のp値。`sargan_statistic()`と同じ条件で`None`。
     pub fn sargan_p_value(&self) -> Option<f64> {
         self.sargan_p_value
+    }
+
+    /// Sargan検定の自由度（χ²）。`sargan_statistic()`と同じ条件で`None`。
+    pub fn sargan_df(&self) -> Option<usize> {
+        self.sargan_df
+    }
+
+    /// Wu-Hausman検定の自由度`(分子, 分母)`（F）。`wu_hausman_statistic()`と同じ条件で`None`。
+    pub fn wu_hausman_df(&self) -> Option<(usize, usize)> {
+        self.wu_hausman_df
+    }
+
+    /// `wald_statistic()`の自由度`(分子, 分母)`（F）。傾き係数が無くNaNのときは`None`。
+    pub fn wald_df(&self) -> Option<(usize, usize)> {
+        (self.df_model > 0).then_some((self.df_model, self.df_inference))
     }
 }
 
@@ -875,13 +904,13 @@ fn wald_f_test(
     let wald: f64 = (0..df_model)
         .map(|i| (*beta_slopes.get(i, 0)) * (*v_slopes_inv_beta.get(i, 0)))
         .sum();
-    let f_statistic = wald / (df_model as f64);
+    let wald_statistic = wald / (df_model as f64);
 
     let f_dist = FisherSnedecor::new(df_model as f64, df_inference as f64)
         .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
-    let f_p_value = 1.0 - f_dist.cdf(f_statistic);
+    let wald_p_value = 1.0 - f_dist.cdf(wald_statistic);
 
-    Ok((f_statistic, f_p_value))
+    Ok((wald_statistic, wald_p_value))
 }
 
 #[cfg(test)]
@@ -994,8 +1023,8 @@ mod tests {
             );
         }
         assert!((estimator.r_squared() - ols_estimator.r_squared()).abs() < 1e-8);
-        assert!((estimator.f_statistic() - ols_estimator.f_statistic()).abs() < 1e-8);
-        assert!((estimator.f_p_value() - ols_estimator.f_p_value()).abs() < 1e-8);
+        assert!((estimator.wald_statistic() - ols_estimator.f_statistic()).abs() < 1e-8);
+        assert!((estimator.wald_p_value() - ols_estimator.f_p_value()).abs() < 1e-8);
         for j in 0..2 {
             assert!(
                 (*estimator.p_values().get(j, 0) - *ols_estimator.p_values().get(j, 0)).abs()
@@ -1015,7 +1044,7 @@ mod tests {
     }
 
     /// 説明変数が定数項のみ（傾き係数が無い、`df_model=0`）の退化モデルでは、F検定の
-    /// 対象が存在しないため`f_statistic`/`f_p_value`は`NaN`になる（`ols.rs`の
+    /// 対象が存在しないため`wald_statistic`/`wald_p_value`は`NaN`になる（`ols.rs`の
     /// 同名の分岐と同じ0除算回避の扱い、モジュール冒頭のdocコメント参照）。
     #[test]
     fn fit_sets_f_statistic_and_f_p_value_to_nan_for_const_only_model() {
@@ -1035,8 +1064,8 @@ mod tests {
 
         let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
         assert_eq!(estimator.df_model(), 0);
-        assert!(estimator.f_statistic().is_nan());
-        assert!(estimator.f_p_value().is_nan());
+        assert!(estimator.wald_statistic().is_nan());
+        assert!(estimator.wald_p_value().is_nan());
     }
 
     #[test]
@@ -2103,7 +2132,7 @@ mod tests {
         );
 
         // `has_intercept=false`を渡していた旧版では、`first_stage()`が返す`r_squared`/
-        // `f_statistic`も定数項を傾き係数扱いした非中心化TSS・過大なqで静かに間違って
+        // `wald_statistic`も定数項を傾き係数扱いした非中心化TSS・過大なqで静かに間違って
         // いた（`engine/src/iv/CLAUDE.md`「修正済み」参照）。修正後は素の
         // `OlsEstimator::fit`と一致する。
         assert!((first_stage_estimator.r_squared() - expected.r_squared()).abs() < 1e-10);
@@ -2287,7 +2316,7 @@ mod tests {
         ));
     }
 
-    /// 正規方程式`β=(X'X)⁻¹X'y`を`faer`演算で直接解く、SUT（`partial_f_statistic`・
+    /// 正規方程式`β=(X'X)⁻¹X'y`を`faer`演算で直接解く、SUT（`partial_wald_statistic`・
     /// `OlsEstimator`）とは独立した最小限のOLSオラクル（SEや検定統計量は不要なため
     /// 点推定のみ）。
     fn manual_ols_beta(x: &Mat<f64>, y: &Mat<f64>) -> Mat<f64> {
@@ -2300,7 +2329,7 @@ mod tests {
             * &xty
     }
 
-    /// 弱操作変数診断（部分F統計量）が、`TwoSlsEstimator::fit`・`partial_f_statistic`
+    /// 弱操作変数診断（部分F統計量）が、`TwoSlsEstimator::fit`・`partial_wald_statistic`
     /// （SUT）とは独立に手計算したネストF検定のオラクルと数値一致することを確認する。
     /// `nontrivial_x_exog_columns()`（過剰識別、x_exog=[x1]・instruments=[z1,z2]）を使う。
     #[test]
@@ -2423,7 +2452,7 @@ mod tests {
     }
 
     /// `x_exog=[]`かつ`include_intercept=false`（制限モデルに回帰変数が1つも無い退化ケース、
-    /// `partial_f_statistic`の`x_exog_columns.is_empty()`分岐）でも計算できることを、
+    /// `partial_wald_statistic`の`x_exog_columns.is_empty()`分岐）でも計算できることを、
     /// 手計算したネストF検定のオラクル（制限モデルのSSRを`y_endog`自体の二乗和として
     /// 直接計算）と数値照合して確認する。
     #[test]

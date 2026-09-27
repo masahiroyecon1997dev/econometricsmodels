@@ -205,10 +205,13 @@ def _check_result(
         res.adj_r_squared, ref["adj_r_squared"], f"{label}/adj_r_squared"
     )
     _assert_close(
-        res.f_statistic, ref["f_statistic"], f"{label}/f_statistic", rtol=rtol
+        res.wald_statistic,
+        ref["f_statistic"],
+        f"{label}/f_statistic",
+        rtol=rtol,
     )
     _assert_p_value_close(
-        res.f_p_value, ref["f_p_value"], f"{label}/f_p_value", rtol=rtol
+        res.wald_p_value, ref["f_p_value"], f"{label}/f_p_value", rtol=rtol
     )
 
     _assert_dict_close(

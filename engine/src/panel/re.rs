@@ -1186,6 +1186,12 @@ impl ReEstimator {
         self.f_p_value
     }
 
+    /// `f_statistic()`の自由度`(分子, 分母)` = `(df_model - 1, df_resid)`。傾き係数が無く
+    /// NaNのときは`None`。
+    pub fn f_df(&self) -> Option<(usize, usize)> {
+        (self.df_model > 1).then_some((self.df_model - 1, self.df_resid))
+    }
+
     /// パネル固有R²（2.3節）。θ=1固定の通常のwithin変換での適合度
     /// （フィールドdoc「パネル固有R²」参照）。
     pub fn r_squared_within(&self) -> f64 {

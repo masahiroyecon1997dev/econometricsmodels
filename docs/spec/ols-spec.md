@@ -35,7 +35,12 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
 `OLSResult`（`#[pyclass]`、`skip_from_py_object`）が公開する配列＋名前リスト:
 `params` / `std_errors` / `test_stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` /
 `residuals` / `dep_var_name` / `n_obs` / `cov_type`（実際に使われた種別の小文字文字列） /
-`r_squared` / `adj_r_squared` / `f_statistic` / `f_p_value` / `log_likelihood` / `aic` / `bic`。
+`r_squared` / `adj_r_squared` / `f_statistic` / `f_p_value` / `f_df_num` / `f_df_denom` /
+`df_resid` / `df_model` / `log_likelihood` / `aic` / `bic`。
+
+- `df_resid = n - k`、`df_model`は定数項を除く傾き係数の数。`f_df_num = df_model`、`f_df_denom`は
+  検定に使った自由度（`df_resid`、`cov_type="cluster"`のときだけ`G-1`）。傾き係数が無く
+  `f_statistic`がNaNのときは`f_df_num`/`f_df_denom`も`None`。
 
 - `conf_int`は`conf_lower`/`conf_upper`の2配列に分割（engine内部表現・pyo3実装の簡潔さを優先）。
 - `k×kの分散共分散行列（cov_params）はPython側に公開しない`。`OlsEstimator`自体は非公開

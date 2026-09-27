@@ -992,6 +992,12 @@ impl FeEstimator {
         self.f_p_value
     }
 
+    /// `f_statistic()`の自由度`(分子, 分母)` = `(k, df_resid)`。`k=0`でNaNのときは`None`。
+    pub fn f_df(&self) -> Option<(usize, usize)> {
+        let k = self.estimator.input().k();
+        (k > 0).then_some((k, self.df_resid))
+    }
+
     /// 固定効果自体（α_i、2-wayはγ_tも）を事後的に復元する（`fe-spec.md`3.5節）。
     ///
     /// `fit()`の戻り値本体には含めない別メソッド（IVの`first_stage()`と同じ方針、

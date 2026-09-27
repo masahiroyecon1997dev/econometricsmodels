@@ -59,7 +59,7 @@ FE固有の内容のみを記載する。
 `FEResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `test_stats`（**t検定**） /
 `p_values` / `conf_lower` / `conf_upper` / `param_names`（切片なし） / `residuals` /
 `dep_var_name` / `n_obs` / `df_resid` / `df_model` / `n_entities` / `cov_type` / `f_statistic` /
-`f_p_value` / `log_likelihood` / `aic` / `bic` / `r_squared_within` / `r_squared_between` /
+`f_p_value` / `f_df_num` / `f_df_denom`（`(k, df_resid)`、`k=0`で`None`） / `log_likelihood` / `aic` / `bic` / `r_squared_within` / `r_squared_between` /
 `r_squared_overall`。
 
 - **`n_entities`はengine側にgetterが無い**: `FeEstimator`内部のprivateな`count_unique`のみで

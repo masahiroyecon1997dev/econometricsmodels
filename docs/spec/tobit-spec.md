@@ -53,7 +53,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 `TobitResult`（`#[pyclass]`）が公開する配列＋名前リスト: `params` / `std_errors` / `test_stats`
 （**z検定**） / `p_values` / `conf_lower` / `conf_upper` / `param_names` / `dep_var_name` / `sigma` /
-`log_likelihood` / `aic` / `bic` / `wald_statistic` / `wald_p_value` / `n_obs` / `df_model` /
+`log_likelihood` / `aic` / `bic` / `wald_statistic` / `wald_p_value` / `wald_dist`（常に`"chi2"`） / `wald_df`（`df_model==0`で`None`） / `n_obs` / `df_model` /
 `df_resid` / `converged` / `n_iter` / `cov_type` / `solver`（実際に使われたソルバーの小文字文字列）
 / `lower` / `upper`。
 

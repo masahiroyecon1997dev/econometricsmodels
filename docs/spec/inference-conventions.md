@@ -15,6 +15,8 @@
 
 **結果への公開**: 全手法のResultsは、統計量を共通の名前`test_stats`（`coef_table()`のキーは`test_stat`）で返し、その分布を`stat_dist`（`"t"`/`"normal"`）、t分布の自由度を`stat_df`（正規分布は`None`）で示す。`stat_df`は実際にp値・信頼区間に使った自由度で、`df_resid`と一致するとは限らない（OLS/WLS/2SLSの`cov_type="cluster"`は`G-1`）。engine側は`engine::inference::StatDist::{T { df }, Normal}`で「t分布なら自由度がある、正規分布ならない」関係を型で保証する。`marginal_effects()`は常に正規分布で、返り値が`list[dict]`のため行ごとの`stat_dist`は持たない（docstringに明記）。
 
+**検定統計量の自由度の公開**: p値を利用者が再計算できるよう、全検定統計量の自由度を公開する。F型は`f_df_num`/`f_df_denom`（OLS/WLS/FE/RE）、IV全体検定は`wald_df_num`/`wald_df_denom`（`wald_dist`が`"f"`/`"chi2"`、χ²のときは分母`None`）、Wu-Hausmanは`wu_hausman_df_num`/`wu_hausman_df_denom`、弱操作変数F統計量は`weak_instrument_f_df_num`/`weak_instrument_f_df_denom`、χ²型は`lr_df`（Logit/Probit）・`wald_df`（Tobit、`wald_dist="chi2"`）・`overid_df`（IV）・`hausman_df`（RE）。分母の自由度は`df_resid`と一致するとは限らない（OLS/WLS/2SLSの`cov_type="cluster"`は`G-1`）。統計量がNaN/`None`のときは自由度も`None`。名前から分布が一意に決まらない`wald_*`（IV・Tobit）だけ`*_dist`を持つ。
+
 **OLS/WLS/2SLSがt分布を使う理由**: 古典的仮定（誤差項が正規分布に従う等）の下では、係数の標準化統計量`(β̂-β)/ŝe`が**有限標本で厳密に**t分布に従う（コクランの定理）。この結果はサンプルサイズによらず成り立つ厳密な理論であり、`cov_type`（classical/HC系/cluster/hac）によらず一貫してt分布を採用する（`ols-spec.md`30行目、`iv-spec.md`3.2節、`panel-common.md`3.3節で同じ判断を踏襲）。
 
 **GMM/Logit/Probitがz分布を使う理由**: GMMの理論的正当化（Hansen 1982）およびMLEの漸近理論は、いずれもサンプルサイズが無限大に近づくときの漸近正規性のみに依拠しており、OLSの`n-k`に相当する自然な自由度・有限標本での厳密な分布の閉形式が存在しない。t分布を使うことは、存在しない有限標本の理論的裏付けを偽って主張することになるため、素直に漸近論が保証するz分布・カイ二乗分布を採用する（`iv-spec.md`3.2節、`nonlinear-common.md`4章）。statsmodels/R glmがいずれもz検定を標準とすることとも一致する。

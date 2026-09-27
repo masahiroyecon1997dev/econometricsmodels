@@ -379,9 +379,22 @@ pub struct IVResult {
     #[pyo3(get)]
     pub gmm_type: Option<String>,
     #[pyo3(get)]
-    pub f_statistic: f64,
+    pub wald_statistic: f64,
     #[pyo3(get)]
-    pub f_p_value: f64,
+    pub wald_p_value: f64,
+    /// Distribution of `wald_statistic`: `"f"` for `estimator="2sls"` (the Wald statistic
+    /// divided by the number of slope coefficients), `"chi2"` for `estimator="gmm"` (the
+    /// undivided Wald statistic).
+    #[pyo3(get)]
+    pub wald_dist: String,
+    /// Numerator degrees of freedom of `wald_statistic` (number of slope coefficients;
+    /// `None` when there are none and the statistic is NaN).
+    #[pyo3(get)]
+    pub wald_df_num: Option<usize>,
+    /// Denominator degrees of freedom of `wald_statistic` for `"f"` (`df_resid`, or `G - 1`
+    /// with cluster-robust inference). `None` for `"chi2"` and when the statistic is NaN.
+    #[pyo3(get)]
+    pub wald_df_denom: Option<usize>,
     #[pyo3(get)]
     pub r_squared: f64,
     #[pyo3(get)]
@@ -395,6 +408,14 @@ pub struct IVResult {
     /// (`engine::iv::common::compute_first_stage`, module docstring参照).
     #[pyo3(get)]
     pub weak_instrument_f_statistics: HashMap<String, f64>,
+    /// Numerator degrees of freedom of the weak-instrument F statistics (number of excluded
+    /// instruments; the same for every endogenous variable). `None` when `x_endog=[]`.
+    #[pyo3(get)]
+    pub weak_instrument_f_df_num: Option<usize>,
+    /// Denominator degrees of freedom of the weak-instrument F statistics (residual df of
+    /// the first-stage regressions; the same for every endogenous variable).
+    #[pyo3(get)]
+    pub weak_instrument_f_df_denom: Option<usize>,
     /// Overidentification test statistic: Sargan (`estimator="2sls"`) or Hansen J
     /// (`estimator="gmm"`). `None` when just-identified (`len(instruments) ==
     /// len(x_endog)`, degrees of freedom 0), per `docs/spec/iv-spec.md` 3.5節.
@@ -402,6 +423,10 @@ pub struct IVResult {
     pub overid_statistic: Option<f64>,
     #[pyo3(get)]
     pub overid_p_value: Option<f64>,
+    /// Degrees of freedom of the chi-squared overidentification test
+    /// (`len(instruments) - len(x_endog)`); `None` when just identified.
+    #[pyo3(get)]
+    pub overid_df: Option<usize>,
     /// Wu-Hausman endogeneity test statistic (joint test over all endogenous
     /// variables, regression-based / `wooldridge_regression` formulation,
     /// `docs/spec/iv-spec.md` 3.6節). Always computed under the `cov_type` passed to
@@ -418,6 +443,12 @@ pub struct IVResult {
     pub wu_hausman_statistic: Option<f64>,
     #[pyo3(get)]
     pub wu_hausman_p_value: Option<f64>,
+    /// Numerator degrees of freedom of the Wu-Hausman F test; `None` when it is `None`.
+    #[pyo3(get)]
+    pub wu_hausman_df_num: Option<usize>,
+    /// Denominator degrees of freedom of the Wu-Hausman F test; `None` when it is `None`.
+    #[pyo3(get)]
+    pub wu_hausman_df_denom: Option<usize>,
     /// `first_stage()`が読む。Python側には公開しない（`OLSResult`の`fitted_values`/
     /// `has_intercept`、`LogitResult`/`ProbitResult`の`estimator`と同じ位置づけ）。
     /// `estimator`非依存（`engine::iv::common::compute_first_stage`から構築、モジュール
@@ -742,6 +773,9 @@ pub(crate) fn fit(
     let (first_stage, weak_instrument_f_statistics) =
         compute_first_stage(&input, &cov_type, options.confidence_level)
             .map_err(iv_error_to_pyerr)?;
+    let weak_instrument_f_df = first_stage.first().map(|(_, first_stage_estimator)| {
+        (input.k_instruments(), first_stage_estimator.df_resid())
+    });
 
     if estimator_lower == "gmm" {
         let (gmm_type, gmm_type_lower, weight_type_lower) = parse_gmm_type(&df, options)?;
@@ -775,15 +809,23 @@ pub(crate) fn fit(
             estimator: estimator_lower,
             gmm_weight_type: weight_type_lower,
             gmm_type: Some(gmm_type_lower),
-            f_statistic: estimator.f_statistic(),
-            f_p_value: estimator.f_p_value(),
+            wald_statistic: estimator.wald_statistic(),
+            wald_p_value: estimator.wald_p_value(),
+            wald_dist: "chi2".to_string(),
+            wald_df_num: estimator.wald_df(),
+            wald_df_denom: None,
             r_squared: estimator.r_squared(),
             adj_r_squared: estimator.adj_r_squared(),
             weak_instrument_f_statistics: weak_instrument_f_statistics.into_iter().collect(),
             overid_statistic: estimator.hansen_j_statistic(),
             overid_p_value: estimator.hansen_j_p_value(),
+            overid_df: estimator.hansen_j_df(),
             wu_hausman_statistic: None,
             wu_hausman_p_value: None,
+            wu_hausman_df_num: None,
+            wu_hausman_df_denom: None,
+            weak_instrument_f_df_num: weak_instrument_f_df.map(|(num, _)| num),
+            weak_instrument_f_df_denom: weak_instrument_f_df.map(|(_, denom)| denom),
             first_stage,
         });
     }
@@ -816,15 +858,23 @@ pub(crate) fn fit(
         // （`IVResult.gmm_weight_type`のdocコメント参照）。
         gmm_weight_type: None,
         gmm_type: None,
-        f_statistic: estimator.f_statistic(),
-        f_p_value: estimator.f_p_value(),
+        wald_statistic: estimator.wald_statistic(),
+        wald_p_value: estimator.wald_p_value(),
+        wald_dist: "f".to_string(),
+        wald_df_num: estimator.wald_df().map(|(num, _)| num),
+        wald_df_denom: estimator.wald_df().map(|(_, denom)| denom),
         r_squared: estimator.r_squared(),
         adj_r_squared: estimator.adj_r_squared(),
         weak_instrument_f_statistics: weak_instrument_f_statistics.into_iter().collect(),
         overid_statistic: estimator.sargan_statistic(),
         overid_p_value: estimator.sargan_p_value(),
+        overid_df: estimator.sargan_df(),
         wu_hausman_statistic: estimator.wu_hausman_statistic(),
         wu_hausman_p_value: estimator.wu_hausman_p_value(),
+        wu_hausman_df_num: estimator.wu_hausman_df().map(|(num, _)| num),
+        wu_hausman_df_denom: estimator.wu_hausman_df().map(|(_, denom)| denom),
+        weak_instrument_f_df_num: weak_instrument_f_df.map(|(num, _)| num),
+        weak_instrument_f_df_denom: weak_instrument_f_df.map(|(_, denom)| denom),
         first_stage,
     })
 }

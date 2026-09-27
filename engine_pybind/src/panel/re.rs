@@ -212,6 +212,13 @@ pub struct REResult {
     pub f_statistic: f64,
     #[pyo3(get)]
     pub f_p_value: f64,
+    /// Numerator degrees of freedom of `f_statistic` (`None` when it is NaN).
+    #[pyo3(get)]
+    pub f_df_num: Option<usize>,
+    /// Denominator degrees of freedom of `f_statistic` (`None` when it is NaN). May differ
+    /// from `df_resid` (e.g. OLS/WLS with cluster-robust inference uses `G - 1`).
+    #[pyo3(get)]
+    pub f_df_denom: Option<usize>,
     #[pyo3(get)]
     pub log_likelihood: f64,
     #[pyo3(get)]
@@ -419,6 +426,8 @@ pub(crate) fn fit(
         cov_type: cov_type_lower,
         f_statistic: estimator.f_statistic(),
         f_p_value: estimator.f_p_value(),
+        f_df_num: estimator.f_df().map(|(num, _)| num),
+        f_df_denom: estimator.f_df().map(|(_, denom)| denom),
         log_likelihood: ols.log_likelihood(),
         aic: ols.aic(),
         bic: ols.bic(),

@@ -599,6 +599,28 @@ impl OlsEstimator {
         self.f_p_value
     }
 
+    /// 残差自由度 `n - k`。
+    pub fn df_resid(&self) -> usize {
+        self.input.nobs() - self.input.k()
+    }
+
+    /// モデルの自由度（定数項を除く傾き係数の数 `k - k_constant`）。
+    pub fn df_model(&self) -> usize {
+        self.input.k() - usize::from(self.input.has_intercept())
+    }
+
+    /// t検定・信頼区間・F検定に使った自由度（[`stat_dist`](Self::stat_dist)と同じ値）。
+    /// 通常は`df_resid()`だが`cov_type=Cluster`のときだけ`G-1`。
+    pub fn df_inference(&self) -> usize {
+        self.df_inference
+    }
+
+    /// F統計量の自由度`(分子, 分母)`。傾き係数が無く`f_statistic()`がNaNのときは`None`。
+    pub fn f_df(&self) -> Option<(usize, usize)> {
+        let df_model = self.df_model();
+        (df_model > 0).then_some((df_model, self.df_inference))
+    }
+
     /// 対数尤度
     pub fn log_likelihood(&self) -> f64 {
         self.log_likelihood

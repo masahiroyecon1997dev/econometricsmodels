@@ -739,6 +739,11 @@ impl LogitEstimator {
         self.lr_p_value
     }
 
+    /// 尤度比検定の自由度（χ²、`df_model`）。`df_model==0`でp値がNaNのときは`None`。
+    pub fn lr_df(&self) -> Option<usize> {
+        (self.df_model() > 0).then_some(self.df_model())
+    }
+
     /// McFadden疑似決定係数
     pub fn pseudo_r_squared(&self) -> f64 {
         self.pseudo_r_squared

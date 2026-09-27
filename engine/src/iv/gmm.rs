@@ -166,7 +166,7 @@
 //! （`docs/spec/iv-spec.md`2章で確定済み: 「GMMは3.2節でz分布と決定済みで古典的F検定の正当化が
 //! 無いため……常にWald版にする」）。`two_sls.rs`の`wald_f_test`と異なり`FisherSnedecor`
 //! ではなく`ChiSquared(df_model)`を使い、`df_model`で割らない（`linearmodels`の
-//! `debiased=False`のときの`f_statistic`と同じ規約、`run_linearmodels_benchmark.py`の
+//! `debiased=False`のときの`wald_statistic`と同じ規約、`run_linearmodels_benchmark.py`の
 //! モジュールdocstring参照）。
 //!
 //! `R²`/調整済み`R²`は2SLSと同じ式（`ssr`は最終残差`e = y - Xβ̂`から、`sst`は`y`の
@@ -288,13 +288,15 @@ pub struct GmmEstimator {
     adj_r_squared: f64,
     /// F統計量。常にロバストWald検定（χ²、`df_model`で割らない生の二次形式、
     /// モジュール冒頭のdocコメント参照）。
-    f_statistic: f64,
-    f_p_value: f64,
+    wald_statistic: f64,
+    wald_p_value: f64,
     /// Hansen J過剰識別検定（`docs/spec/iv-spec.md`3.5節）の統計量。丁度識別
     /// （自由度`len(instruments) - len(x_endog)`が0）なら`None`（モジュール冒頭の
     /// docコメント「Hansen J過剰識別検定」参照）。
     hansen_j_statistic: Option<f64>,
     hansen_j_p_value: Option<f64>,
+    /// Hansen J検定のχ²分布の自由度`len(instruments) - len(x_endog)`。丁度識別なら`None`。
+    hansen_j_df: Option<usize>,
 }
 
 impl GmmEstimator {
@@ -536,8 +538,8 @@ impl GmmEstimator {
         // 同じ防御的`Result`化）。
         let q = input.k_instruments();
         let k_endog = input.k_endog();
-        let (hansen_j_statistic, hansen_j_p_value) = if q == k_endog {
-            (None, None)
+        let (hansen_j_statistic, hansen_j_p_value, hansen_j_df) = if q == k_endog {
+            (None, None, None)
         } else {
             let df = q - k_endog;
             let zte = z.transpose() * &residuals;
@@ -555,7 +557,7 @@ impl GmmEstimator {
             let chi2 = ChiSquared::new(df as f64)
                 .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
             let p_value = 1.0 - chi2.cdf(stat);
-            (Some(stat), Some(p_value))
+            (Some(stat), Some(p_value), Some(df))
         };
 
         // ── ここから独立実装のサンドイッチ型SE計算（モジュール冒頭のdocコメント
@@ -649,7 +651,7 @@ impl GmmEstimator {
         let r_squared = 1.0 - ssr / sst;
         let adj_r_squared = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
 
-        let (f_statistic, f_p_value) = if df_model == 0 {
+        let (wald_statistic, wald_p_value) = if df_model == 0 {
             // 説明変数が定数項のみ（傾き係数が無い）モデル。検定対象が存在しないため
             // 2SLSと同様NaNを返す（0除算を避ける）。
             (f64::NAN, f64::NAN)
@@ -677,10 +679,11 @@ impl GmmEstimator {
             df_model,
             r_squared,
             adj_r_squared,
-            f_statistic,
-            f_p_value,
+            wald_statistic,
+            wald_p_value,
             hansen_j_statistic,
             hansen_j_p_value,
+            hansen_j_df,
         })
     }
 
@@ -744,7 +747,12 @@ impl GmmEstimator {
         self.hansen_j_statistic
     }
 
-    /// Hansen J過剰識別検定のp値。`hansen_j_statistic()`と同じ条件で`None`。
+    /// Hansen J検定の自由度（χ²）。`hansen_j_statistic()`と同じ条件で`None`。
+    pub fn hansen_j_df(&self) -> Option<usize> {
+        self.hansen_j_df
+    }
+
+    /// Hansen J検定のp値。`hansen_j_statistic()`と同じ条件で`None`。
     pub fn hansen_j_p_value(&self) -> Option<f64> {
         self.hansen_j_p_value
     }
@@ -806,13 +814,18 @@ impl GmmEstimator {
 
     /// F統計量。常にロバストWald検定（χ²、`df_model`で割らない生の二次形式、
     /// モジュール冒頭のdocコメント参照）。
-    pub fn f_statistic(&self) -> f64 {
-        self.f_statistic
+    pub fn wald_statistic(&self) -> f64 {
+        self.wald_statistic
     }
 
     /// F統計量のp値。
-    pub fn f_p_value(&self) -> f64 {
-        self.f_p_value
+    pub fn wald_p_value(&self) -> f64 {
+        self.wald_p_value
+    }
+
+    /// `wald_statistic()`の自由度（χ²）。傾き係数が無くNaNのときは`None`。分母の自由度は無い。
+    pub fn wald_df(&self) -> Option<usize> {
+        (self.df_model > 0).then_some(self.df_model)
     }
 }
 
@@ -3594,8 +3607,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(estimator.df_model(), 0);
-        assert!(estimator.f_statistic().is_nan());
-        assert!(estimator.f_p_value().is_nan());
+        assert!(estimator.wald_statistic().is_nan());
+        assert!(estimator.wald_p_value().is_nan());
     }
 
     /// `cov_type`対応で追加した各getterが期待通りの次元・値を返すことを確認する
@@ -3637,8 +3650,8 @@ mod tests {
         assert_eq!(estimator.df_resid(), n - 2);
         assert_eq!(estimator.df_model(), 1);
         assert!(estimator.r_squared() <= 1.0);
-        assert!(estimator.f_statistic() >= 0.0);
-        assert!((0.0..=1.0).contains(&estimator.f_p_value()));
+        assert!(estimator.wald_statistic() >= 0.0);
+        assert!((0.0..=1.0).contains(&estimator.wald_p_value()));
 
         for j in 0..2 {
             let coef = *estimator.params().get(j, 0);
@@ -3763,15 +3776,15 @@ mod tests {
         let expected_p = 1.0 - chi2.cdf(expected_wald);
 
         assert!(
-            (estimator.f_statistic() - expected_wald).abs() < 1e-8,
+            (estimator.wald_statistic() - expected_wald).abs() < 1e-8,
             "got {}, expected {}",
-            estimator.f_statistic(),
+            estimator.wald_statistic(),
             expected_wald
         );
         assert!(
-            (estimator.f_p_value() - expected_p).abs() < 1e-8,
+            (estimator.wald_p_value() - expected_p).abs() < 1e-8,
             "got {}, expected {}",
-            estimator.f_p_value(),
+            estimator.wald_p_value(),
             expected_p
         );
     }

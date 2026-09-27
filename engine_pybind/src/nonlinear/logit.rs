@@ -232,6 +232,10 @@ pub struct LogitResult {
     pub lr_statistic: f64,
     #[pyo3(get)]
     pub lr_p_value: f64,
+    /// Degrees of freedom of the chi-squared likelihood-ratio test (`None` when there are no
+    /// slope coefficients).
+    #[pyo3(get)]
+    pub lr_df: Option<usize>,
     #[pyo3(get)]
     pub pseudo_r_squared: f64,
     #[pyo3(get)]
@@ -470,6 +474,7 @@ pub(crate) fn fit(
         log_likelihood_null: estimator.log_likelihood_null(),
         lr_statistic: estimator.lr_statistic(),
         lr_p_value: estimator.lr_p_value(),
+        lr_df: estimator.lr_df(),
         pseudo_r_squared: estimator.pseudo_r_squared(),
         aic: estimator.aic(),
         bic: estimator.bic(),

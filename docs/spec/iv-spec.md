@@ -79,7 +79,9 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 `IVResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `test_stats` / `stat_dist` / `stat_df` / `p_values` /
 `conf_lower` / `conf_upper` / `param_names` / `residuals` / `dep_var_name` / `n_obs` /
 `df_resid` / `df_model` / `converged` / `n_iter` / `cov_type` / `estimator` / `gmm_weight_type` /
-`f_statistic` / `f_p_value` / `r_squared` / `adj_r_squared` / `weak_instrument_f_statistics` /
+`wald_statistic` / `wald_p_value` / `wald_dist` / `wald_df_num` / `wald_df_denom` /
+`r_squared` / `adj_r_squared` / `weak_instrument_f_statistics` / `weak_instrument_f_df_num` /
+`weak_instrument_f_df_denom` / `overid_df` / `wu_hausman_df_num` / `wu_hausman_df_denom` /
 `overid_statistic` / `overid_p_value` / `wu_hausman_statistic` / `wu_hausman_p_value`。
 
 - **`test_stats`と`stat_dist`/`stat_df`**: 1つの`IVResult`型を`estimator="2sls"`（t分布）・
@@ -104,10 +106,19 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   誤解させるため統計的な誠実さを優先して含めない）。
 - **`r_squared`/`adj_r_squared`はFE/REのような3分割はせず、OLSと同じ単一フィールド**
   （IVはパネルのwithin/between区別を持たない）。
-- **`f_statistic`/`f_p_value`はGMMでは常にロバストWald検定（χ²）**。OLSが`cov_type`が
-  HC系/clusterのときF検定をロバストWald検定に切り替える既存挙動をGMMにも一貫適用する
-  （GMMはz分布と決定済みで古典的F検定の正当化が無いため）。2SLSはOLSと同じ切り替え
-  ロジック（classical時はF検定、HC/cluster/hac時はロバストWald検定）。
+- **全体検定は`wald_statistic`/`wald_p_value`/`wald_dist`/`wald_df_num`/`wald_df_denom`**
+  （旧`f_statistic`/`f_p_value`）。2SLSはF型（Wald統計量を傾き係数の数で割ったもの、
+  `wald_dist="f"`、`wald_df_denom`は`df_resid`で`cov_type="cluster"`のときだけ`G-1`）、
+  GMMは割らないχ²型（`wald_dist="chi2"`、`wald_df_denom=None`）。どちらもWald検定なので
+  `wald`という名前が正確で、OLSの`f_statistic`に相当するのは2SLSの`wald_statistic`。
+  OLSが`cov_type`がHC系/clusterのときF検定をロバストWald検定に切り替える挙動は2SLSも
+  同じ、GMMは常にロバストWald（χ²）（GMMはz分布と決定済みで古典的F検定の正当化が無い
+  ため）。
+- **検定統計量の自由度**: `overid_df`（Sargan/Hansen J、χ²、`len(instruments) - len(x_endog)`、
+  丁度識別は`None`）、`wu_hausman_df_num`/`wu_hausman_df_denom`（F、分子は内生変数の数、
+  分母は拡張回帰の`df_inference`）、`weak_instrument_f_df_num`/`weak_instrument_f_df_denom`
+  （分子は除外操作変数の数、分母は第一段階回帰の残差自由度。内生変数ごとの辞書だが自由度は
+  共通のためスカラー）。統計量が`None`/NaNのときは自由度も`None`。
 - **`cov_params`（k×kの分散共分散行列）はPython側に公開しない**（OLSと同じ方針）。
 - **第一段階回帰結果は`first_stage()`という別メソッド**に切り出す（`fit()`の戻り値本体には
   含めない。非線形モデルの`marginal_effects()`分離方針を踏襲）。`first_stage() -> dict[str,

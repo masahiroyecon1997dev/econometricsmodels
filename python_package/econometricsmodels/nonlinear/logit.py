@@ -189,6 +189,12 @@ class LogitResults:
         return self._raw.lr_p_value
 
     @property
+    def lr_df(self) -> int | None:
+        """Degrees of freedom of the chi-squared likelihood-ratio test
+        (`lr_statistic`). `None` when there are no slope coefficients."""
+        return self._raw.lr_df
+
+    @property
     def pseudo_r_squared(self) -> float:
         """McFadden pseudo R-squared."""
         return self._raw.pseudo_r_squared

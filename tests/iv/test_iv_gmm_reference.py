@@ -115,8 +115,10 @@ def _check_result(
     _assert_close(
         res.adj_r_squared, ref["adj_r_squared"], f"{label}/adj_r_squared"
     )
-    _assert_close(res.f_statistic, ref["f_statistic"], f"{label}/f_statistic")
-    _assert_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")
+    _assert_close(
+        res.wald_statistic, ref["f_statistic"], f"{label}/f_statistic"
+    )
+    _assert_close(res.wald_p_value, ref["f_p_value"], f"{label}/f_p_value")
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
 

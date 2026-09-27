@@ -67,6 +67,7 @@ OLS（`OLSResult`、`engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
 | `n_obs` | Logit由来の表記 | OLS/WLSも`n_obs`に統一済み |
 | `df_resid` / `df_model` | Logit由来、パネル向けに新規追加 | OLSには無いが、FEは自由度調整が`n - n_entities - k`という非自明な式になるため明示的に返す価値が高い |
 | `n_entities` | 新規追加（FE/RE限定） | パネルユニット数。pyfixest/plmの前例に倣う |
+| `n_periods` | 新規追加（FEのみ） | 2-way FEの時点数（1-wayは`None`）。`fe-spec.md`2章参照 |
 | `cov_type` | OLS共通 | サポート対象は3.1節 |
 | `f_statistic` / `f_p_value` | OLS共通 | そのまま踏襲（ただしengine側の実装はOLSの単純な流用ではない。傾き係数`k`個の同時Wald検定をFE/RE独自の`cov_type`別`cov_params`・パネル自由度調整済み`df_resid`で行う） |
 | `log_likelihood` / `aic` / `bic` | OLS共通 | FE/REは最小二乗族で正規性下の尤度が定義できるため含める |

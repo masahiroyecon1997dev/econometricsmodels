@@ -101,6 +101,20 @@ def test_n_obs_dep_var_name_n_entities(fe_dataset):
     assert res.n_entities == fe_dataset["entity"].n_unique()
 
 
+def test_n_periods_is_none_for_one_way_and_unique_times_for_two_way(
+    fe_dataset,
+):
+    """1-wayは`None`、2-wayは`time`列のユニーク数。`dk_time`のみ指定した
+    1-wayでも`None`のまま。"""
+    assert our_fit(fe_dataset).n_periods is None
+    dk_one_way = our_fit(
+        fe_dataset, options=FEOptions(cov_type="dk", dk_time="time")
+    )
+    assert dk_one_way.n_periods is None
+    two_way = our_fit(fe_dataset, options=FEOptions(time="time"))
+    assert two_way.n_periods == fe_dataset["time"].n_unique()
+
+
 # ── fixed_effects()（追加メソッド、docs/spec/fe-spec.md 3.5節） ────────
 
 

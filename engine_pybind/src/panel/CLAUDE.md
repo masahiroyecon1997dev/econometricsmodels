@@ -14,6 +14,7 @@ FEはIVの「データ抽出・pyclass定義」→「engine呼び出し」→「
 
 `iv::common::fit`と同じ構成: `build_fe_input`で`FeInput`/`FeEffects`/`FeCovType`/`cov_type`（小文字正規化済み文字列）を得たあと、`FeEstimator::fit`を呼び、`FEResult`を組み立てて返す。
 
+- **`n_periods`はengine側のgetter（`FeEstimator::n_periods()`）をそのまま`FEResult.n_periods`に渡す**（2-wayのみ`Some`、1-wayは`None`）。`fit`内で計算済みの値を保持しただけで二重計算はしない。REには無い。
 - **`n_entities`はengine側にgetterが無い**ため（`FeEstimator`内部のprivateな`count_unique`を使うのみ、`FEResult`のスコープ節参照）、`FeInput::entity()`（`build_fe_input`が返す`input`から取得可能。`FeEstimator::fit`に`input`を所有権ごと渡す前に計算する必要がある）を`HashSet`に集めてユニーク数を数える形で`fit`内で独立に計算する。
 - **`FeEstimator::estimator()`（内部委譲した`OlsEstimator`）と`FeEstimator`自身のgetterを使い分ける**: `params`/`param_names`/`residuals`/`dep_var_name`/`n_obs`/`log_likelihood`は`estimator()`（`OlsEstimator::input()`経由で`param_names`/`dep_var_name`/`nobs`を取得）から、`std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper`/`df_model`/`df_resid`/`f_statistic`/`f_p_value`/`aic`/`bic`/`r_squared_*`は`FeEstimator`自身から取得する。後者はFEが`cov_type`・パネル自由度調整を反映して計算し直した値のため（`estimator()`側は常に`CovType::Classical`で委譲した内部OLSの生の値、`engine/src/panel/fe.rs`モジュールdoc「`OlsEstimator`への委譲」参照）、取り違えるとcov_type非対応の値を返してしまう。
 - **`fit`自体は`#[cfg(test)] mod tests`から直接呼べない**（`PyDataFrame`引数がGILを要求するため、`engine_pybind/src/nonlinear/CLAUDE.md`「テストの制約」に記録済みの既知の制約と同じ）。検証は`maturin develop`後のPythonからの数値照合で行った（IVの`iv/common.rs::fit`も同様、専用のRustユニットテストは追加していない）。

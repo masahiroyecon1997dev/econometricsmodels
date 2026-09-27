@@ -58,13 +58,18 @@ FE固有の内容のみを記載する。
 
 `FEResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `test_stats`（**t検定**） /
 `p_values` / `conf_lower` / `conf_upper` / `param_names`（切片なし） / `residuals` /
-`dep_var_name` / `n_obs` / `df_resid` / `df_model` / `n_entities` / `cov_type` / `f_statistic` /
+`dep_var_name` / `n_obs` / `df_resid` / `df_model` / `n_entities` / `n_periods`（2-wayのみ、1-wayは`None`） / `cov_type` / `f_statistic` /
 `f_p_value` / `f_df_num` / `f_df_denom`（`(k, df_resid)`、`k=0`で`None`） / `log_likelihood` / `aic` / `bic` / `r_squared_within` / `r_squared_between` /
 `r_squared_overall`。
 
 - **`n_entities`はengine側にgetterが無い**: `FeEstimator`内部のprivateな`count_unique`のみで
   外部公開されていないため、`engine_pybind`側で`FeInput::entity()`を`HashSet`に集めて独立に
   計算する（`fit()`実装の一部）。
+- **`n_periods`は`FeEstimator::n_periods()`（engine側getter）から取得する**: `fit`内で自由度
+  計算のために既に求めている`time`のユニーク数をそのまま保持して公開する（二重計算しない）。
+  2-wayのみ`Some`、1-way（`dk_time`のみ指定した場合を含む）は`None`。2-wayはバランスパネル
+  必須のため、ユニーク時点数と各entityの観測数は一致する（将来2-wayの不均衡パネルに対応する
+  場合は定義を再検討する）。REには追加しない（REの`time`は2-way構造ではないため）。
 - **`estimator()`（内部委譲した`OlsEstimator`）とFE自身のgetterの使い分け**: `params`/
   `param_names`/`residuals`/`dep_var_name`/`n_obs`/`log_likelihood`は`estimator()`から、
   `std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper`/`df_model`/`df_resid`/

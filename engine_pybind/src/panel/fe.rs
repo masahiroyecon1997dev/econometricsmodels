@@ -232,6 +232,11 @@ pub struct FEResult {
     /// pyfixest/plm precedent).
     #[pyo3(get)]
     pub n_entities: usize,
+    /// Number of unique time periods for two-way effects (`FEOptions.time` set); `None`
+    /// for one-way. Two-way requires a balanced panel, so this equals the number of
+    /// observations per entity.
+    #[pyo3(get)]
+    pub n_periods: Option<usize>,
     /// Standard error type actually used (echoes `FEOptions.cov_type`, normalized to
     /// lowercase; e.g. "classical", "hc1", "cluster", "dk").
     #[pyo3(get)]
@@ -502,6 +507,7 @@ pub(crate) fn fit(
         df_resid: estimator.df_resid(),
         df_model: estimator.df_model(),
         n_entities,
+        n_periods: estimator.n_periods(),
         cov_type: cov_type_lower,
         f_statistic: estimator.f_statistic(),
         f_p_value: estimator.f_p_value(),

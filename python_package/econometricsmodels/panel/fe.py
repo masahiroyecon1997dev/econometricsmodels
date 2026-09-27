@@ -216,6 +216,13 @@ class FEResults:
         return self._raw.n_entities
 
     @property
+    def n_periods(self) -> int | None:
+        """Number of unique time periods (two-way effects only; `None`
+        for one-way). Two-way requires a balanced panel, so this equals
+        the number of observations per entity."""
+        return self._raw.n_periods
+
+    @property
     def cov_type(self) -> str:
         """Standard error type actually used (normalized to lowercase)."""
         return self._raw.cov_type
@@ -317,11 +324,15 @@ class FEResults:
 
         One-way: `dict[str, float]` keyed by entity id. Two-way:
         `dict[str, dict[str, float]]` with top-level keys `"entity"`/
-        `"time"`. See `docs/spec/panel-common.md`
-        section 6.6 and `_lib.FEResult.fixed_effects`'s docstring for
+        `"time"`. See `docs/spec/fe-spec.md`
+        section 3.5 and `_lib.FEResult.fixed_effects`'s docstring for
         the exact formula, including the two-way normalization
-        convention (which does not always numerically match
-        `fixest::fixef()`).
+        convention. `α_i`/`γ_t` are not individually identified in the
+        two-way case, so `γ_t` of the lexicographically smallest time
+        value is fixed to 0 and `α_i` absorbs the overall level.
+        `fixest::fixef()` instead uses the first time value in
+        observation order as the reference, so the two match
+        numerically only when both choose the same reference period.
 
         Returns:
             The fixed effects, shaped as described above.

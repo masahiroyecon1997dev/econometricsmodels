@@ -576,6 +576,9 @@ pub struct FeEstimator {
     df_model: usize,
     /// パネル自由度調整後の残差自由度（`n - df_model`、`fe-spec.md`3.2節）。
     df_resid: usize,
+    /// `time`のユニーク数。2-wayのみ`Some`、1-wayは`None`（2-wayはバランスパネル必須の
+    /// ため、各entityの観測数とも一致する）。
+    n_periods: Option<usize>,
     std_errors: Mat<f64>,
     test_stats: Mat<f64>,
     p_values: Mat<f64>,
@@ -861,6 +864,7 @@ impl FeEstimator {
             estimator,
             df_model,
             df_resid,
+            n_periods,
             std_errors,
             test_stats,
             p_values,
@@ -922,6 +926,11 @@ impl FeEstimator {
     /// パネル自由度調整後の残差自由度（`n - df_model`、`fe-spec.md`3.2節）。
     pub fn df_resid(&self) -> usize {
         self.df_resid
+    }
+
+    /// `time`のユニーク数（2-wayのみ`Some`、1-wayは`None`）。
+    pub fn n_periods(&self) -> Option<usize> {
+        self.n_periods
     }
 
     /// `cov_type`別に計算し直した標準誤差（`(k, 1)`、`estimator().params()`と対応）。
@@ -2006,6 +2015,7 @@ mod tests {
         assert!((*fe.estimator().params().get(0, 0) - 2.0).abs() < 1e-9);
         assert_eq!(fe.effects(), FeEffects::OneWay);
         assert!(!fe.estimator().input().has_intercept());
+        assert_eq!(fe.n_periods(), None);
         for r in fe.estimator().residuals().col(0).iter() {
             assert!(r.abs() < 1e-9);
         }
@@ -2073,6 +2083,7 @@ mod tests {
         assert!((*fe.estimator().params().get(0, 0) - 0.5).abs() < 0.01);
         assert_eq!(fe.effects(), FeEffects::TwoWay);
         assert_eq!(fe.df_model(), 6);
+        assert_eq!(fe.n_periods(), Some(3));
         assert_eq!(fe.df_resid(), 3);
     }
 

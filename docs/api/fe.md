@@ -14,6 +14,8 @@ Whether the model is one-way (entity only) or two-way (entity + time) is control
 effects require a balanced panel; an unbalanced panel with `time` set raises a
 `ValidationError`. One-way fixed effects support unbalanced panels without restriction.
 
+`FEResults.n_periods` is the number of unique time periods for two-way effects and `None` for one-way.
+
 ## Standard error types
 
 `FEOptions.cov_type` defaults to `"cluster"` (clustered on `entity`) rather than `"classical"` —

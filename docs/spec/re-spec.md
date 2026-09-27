@@ -77,8 +77,9 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
 
 ### 3.1 分散成分の推定（Swamy-Arora法）
 
-R `plm`のデフォルト（`random.method="swar"`）・Python `linearmodels.RandomEffects`の実装、
-いずれもSwamy-Arora相当。
+Python `linearmodels.RandomEffects`の実装（Swamy-Arora）に準拠する。R `plm`の
+デフォルト（`random.method="swar"`）も同名だが、不均衡パネルでは別の推定量になる
+（下記「plmとの既知の実装差」）。
 
 - **σ_ε²（idiosyncratic variance）**: 内部1-way FE推定（`FeEstimator::fit(OneWay,
   Classical)`）のwithin回帰残差平方和／`FeEstimator::df_resid()`。
@@ -90,6 +91,16 @@ R `plm`のデフォルト（`random.method="swar"`）・Python `linearmodels.Ran
   推定が返す`df_resid()`（σ_ε²用）とbetween回帰が返す`nobs()-k()`（σ_u²用）をそのまま
   使えば`+1`/`-1`の手計算なしに自動的に一致する（乱数・手動データ複数ケースで
   `linearmodels.RandomEffects`との数値完全一致を実地検証済み）。
+- **plmとの既知の実装差（不均衡パネル）**: バランスパネルでは`plm`と分散成分が一致する
+  （機械精度）。不均衡パネルでは、`plm`は`dfcor=3`固定（他の値を指定すると
+  `dfcor should equal 3 for unbalanced panels`のエラーになり、オプションでは変更できない）で、
+  `T_i`のトレース項（`Σ T_i²`等）を含むモーメント方程式の連立を解いてσ_ε²・σ_u²を同時に
+  求める。本実装（linearmodels準拠）はbetween回帰のSSRと調和平均`t_bar`の単純な式でσ_u²を
+  求める。σ_ε²は両者で一致するが、σ_u²は不均衡で数％〜10％程度異なり、θ・係数・標準誤差・
+  ハウスマン統計量に伝播する（実測: 8個体・21観測でσ_u² 0.819対1.129）。plm側の
+  オプションで本実装の式を再現することはできない。本実装は`linearmodels`との
+  機械精度一致（Classical/HC1/Cluster/HAC）を優先し、plmの式は採用しない。plm互換の
+  推定法の提供は、具体的な要望が出た時点で改めて検討する。
 - linearmodelsが提供する`small_sample`補正（不均衡パネル向けのtraceベースの追加調整、
   デフォルト`False`）はv1では実装しない（linearmodelsのデフォルト挙動に合わせる）。
 

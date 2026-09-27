@@ -620,3 +620,15 @@ def test_gmm_raise_on_non_convergence_false_returns_converged_false(
     res = our_fit(iv_dataset, options=options)
     assert res.converged is False
     assert res.n_iter == 3
+
+
+def test_gmm_only_options_default_to_none():
+    """GMM専用オプションの既定値は`None`（指定有無を区別し、使われる
+    モードでのみ実効既定値に解決するため）。
+    """
+    options = IVOptions()
+    assert options.gmm_type is None
+    assert options.gmm_weight_type is None
+    assert options.gmm_max_iter is None
+    assert options.gmm_tol is None
+    assert options.raise_on_non_convergence is None

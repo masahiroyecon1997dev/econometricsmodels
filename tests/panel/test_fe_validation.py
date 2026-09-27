@@ -627,3 +627,18 @@ def test_option_unused_by_cov_type_raises(
         match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
     ):
         our_fit(fe_dataset, options=options)
+
+
+@pytest.mark.parametrize("cov_type", ["dk", "DK"])
+def test_dk_options_used_by_dk_are_accepted(fe_dataset, cov_type):
+    options = FEOptions(cov_type=cov_type, dk_time="time", dk_bandwidth=1)
+    our_fit(fe_dataset, options=options)
+
+
+def test_unknown_cov_type_is_reported_before_unused_option(fe_dataset):
+    options = FEOptions(cov_type="dkk", dk_bandwidth=1)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_COV_TYPE_FE, other="dkk"),
+    ):
+        our_fit(fe_dataset, options=options)

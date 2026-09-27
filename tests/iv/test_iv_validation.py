@@ -912,3 +912,45 @@ def test_first_stage_augment_none_raises_validation_error(iv_dataset):
     new_data = pl.DataFrame({"x1": [1.0], "z1": [0.5], "z2": [0.2]})
     augmented = first_stage.augment(new_data)
     assert augmented.columns == ["x1", "z1", "z2", "predicted"]
+
+
+@pytest.mark.parametrize(
+    "options_kwargs",
+    [
+        # gmm_weight_type="hac"だけがhac_*を使う（大文字小文字を問わない）
+        {
+            "estimator": "GMM",
+            "gmm_weight_type": "HAC",
+            "hac_lags": 2,
+            "hac_time": "x1",
+        },
+        # gmm_type="iterated"は重みと反復オプションの全てを使う
+        {
+            "estimator": "gmm",
+            "gmm_type": "ITERATED",
+            "gmm_weight_type": "robust",
+            "gmm_max_iter": 10,
+            "gmm_tol": 1e-3,
+            "raise_on_non_convergence": False,
+        },
+        # cov_typeだけがhac_*を使う
+        {"estimator": "2sls", "cov_type": "HAC", "hac_lags": 2},
+    ],
+)
+def test_options_used_by_mode_are_accepted(iv_dataset, options_kwargs):
+    our_fit(iv_dataset, options=IVOptions(**options_kwargs))
+
+
+@pytest.mark.parametrize(
+    "options_kwargs",
+    [
+        {"cov_type": "clusterr", "cluster": "x1"},
+        {"estimator": "gmm", "gmm_type": "bogus", "gmm_max_iter": 10},
+    ],
+)
+def test_unknown_value_is_reported_before_unused_option(
+    iv_dataset, options_kwargs
+):
+    """未知の値のエラーを優先し、未使用オプションの指摘で埋もれさせない。"""
+    with pytest.raises(ValidationError, match="unknown"):
+        our_fit(iv_dataset, options=IVOptions(**options_kwargs))

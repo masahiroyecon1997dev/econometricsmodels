@@ -95,6 +95,9 @@ pub(crate) fn parse_cov_type(
     hac_lags: Option<i64>,
     hac_time: Option<&str>,
 ) -> PyResult<(EngineCovType, String)> {
+    // 未知の`cov_type`は「unknown cov_type」を優先して報告する（先に未使用オプションを
+    // 指摘すると、typoの`cov_type`に対して`cluster`を消す方向へ誤誘導するため）。
+    let parsed = build_cov_type(df, cov_type, cluster, hac_lags, hac_time)?;
     let cov_type_lower = cov_type.to_lowercase();
     let is_hac = cov_type_lower == "hac";
     reject_unused_option(
@@ -105,7 +108,7 @@ pub(crate) fn parse_cov_type(
     )?;
     reject_unused_option("hac_lags", hac_lags.is_some(), is_hac, "cov_type=\"hac\"")?;
     reject_unused_option("hac_time", hac_time.is_some(), is_hac, "cov_type=\"hac\"")?;
-    build_cov_type(df, cov_type, cluster, hac_lags, hac_time)
+    Ok(parsed)
 }
 
 /// `parse_cov_type`から未使用オプションの検証を除いたもの（IVが`gmm_weight_type`と共用する

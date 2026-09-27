@@ -542,3 +542,9 @@ def test_option_unused_by_cov_type_raises(
         match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
     ):
         our_fit_re(fe_dataset, options=options)
+
+
+@pytest.mark.parametrize("cov_type", ["dk", "DK"])
+def test_dk_bandwidth_used_by_dk_is_accepted(fe_dataset, cov_type):
+    options = REOptions(cov_type=cov_type, time="time", dk_bandwidth=1)
+    our_fit_re(fe_dataset, options=options)

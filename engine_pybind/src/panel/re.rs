@@ -264,19 +264,6 @@ pub struct REResult {
 /// （`cluster`列の抽出時に発覚する問題等）は`column_extraction`の責務で`ValidationError`。
 fn parse_re_cov_type(df: &DataFrame, options: &REOptions) -> PyResult<(ReCovType, String)> {
     let cov_type_lower = options.cov_type.to_lowercase();
-    reject_unused_option(
-        "cluster",
-        options.cluster.is_some(),
-        cov_type_lower == "cluster",
-        "cov_type=\"cluster\"",
-    )?;
-    reject_unused_option(
-        "dk_bandwidth",
-        options.dk_bandwidth.is_some(),
-        cov_type_lower == "dk",
-        "cov_type=\"dk\"",
-    )?;
-
     let cov_type = match cov_type_lower.as_str() {
         "classical" => ReCovType::Classical,
         "hc1" => ReCovType::Hc1,
@@ -306,6 +293,20 @@ fn parse_re_cov_type(df: &DataFrame, options: &REOptions) -> PyResult<(ReCovType
             )));
         }
     };
+
+    // 未知の`cov_type`は「unknown cov_type」を優先して報告する（上のmatchが先）。
+    reject_unused_option(
+        "cluster",
+        options.cluster.is_some(),
+        cov_type_lower == "cluster",
+        "cov_type=\"cluster\"",
+    )?;
+    reject_unused_option(
+        "dk_bandwidth",
+        options.dk_bandwidth.is_some(),
+        cov_type_lower == "dk",
+        "cov_type=\"dk\"",
+    )?;
 
     Ok((cov_type, cov_type_lower))
 }

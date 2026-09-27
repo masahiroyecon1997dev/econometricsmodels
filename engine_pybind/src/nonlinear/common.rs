@@ -97,13 +97,7 @@ pub(crate) fn parse_cov_type(
     cov_type_lower: &str,
     cluster: &Option<String>,
 ) -> PyResult<CovType> {
-    reject_unused_option(
-        "cluster",
-        cluster.is_some(),
-        cov_type_lower == "cluster",
-        "cov_type=\"cluster\"",
-    )?;
-    match cov_type_lower {
+    let parsed = match cov_type_lower {
         "classical" => Ok(CovType::Classical),
         "opg" => Ok(CovType::Opg),
         "hc0" => Ok(CovType::Hc0),
@@ -119,7 +113,15 @@ pub(crate) fn parse_cov_type(
             "unknown cov_type: '{other}'. Expected one of 'classical', \
              'opg', 'hc0', 'hc1', or 'cluster'"
         ))),
-    }
+    }?;
+    // 未知の`cov_type`は「unknown cov_type」を優先して報告する（上のmatchが先）。
+    reject_unused_option(
+        "cluster",
+        cluster.is_some(),
+        cov_type_lower == "cluster",
+        "cov_type=\"cluster\"",
+    )?;
+    Ok(parsed)
 }
 
 /// `solver`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::SolverType`に

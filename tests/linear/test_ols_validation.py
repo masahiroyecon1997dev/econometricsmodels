@@ -499,3 +499,36 @@ def test_option_unused_by_cov_type_raises(
         match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
     ):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+
+@pytest.mark.parametrize(
+    ("cov_type", "kwargs"),
+    [
+        ("cluster", {"cluster": "cluster"}),
+        ("CLUSTER", {"cluster": "cluster"}),
+        ("hac", {"hac_lags": 2, "hac_time": "x1"}),
+        ("HAC", {"hac_lags": 2, "hac_time": "x1"}),
+    ],
+)
+def test_option_used_by_cov_type_is_accepted(dataset, cov_type, kwargs):
+    """使われる`cov_type`（大文字小文字を問わない）では指定を受理する。"""
+    options = OLSOptions(cov_type=cov_type, **kwargs)
+    OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+
+def test_option_unused_check_is_case_insensitive(dataset):
+    options = OLSOptions(cov_type="CLASSICAL", cluster="cluster")
+    with pytest.raises(ValidationError, match="only used with"):
+        OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+
+def test_unknown_cov_type_is_reported_before_unused_option(dataset):
+    """`cov_type`のtypoは、未使用オプションの指摘ではなく`unknown cov_type`で
+    報告する（`cluster`を消す方向へ誤誘導しない）。
+    """
+    options = OLSOptions(cov_type="clusterr", cluster="cluster")
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_COV_TYPE_LINEAR, other="clusterr"),
+    ):
+        OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()

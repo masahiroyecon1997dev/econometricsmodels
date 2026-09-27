@@ -508,6 +508,14 @@ const DEFAULT_GMM_WEIGHT_TYPE: &str = "classical";
 /// `parse_gmm_type`/`parse_weight_type`の「unknown ...」エラーに委ねる（誤った値と
 /// 使われないオプションの二重指摘で本筋のエラーが埋もれないようにするため）。
 fn validate_iv_option_usage(options: &IVOptions, estimator_lower: &str) -> PyResult<()> {
+    // 未知の`cov_type`は後段の「unknown cov_type」を優先して報告する。
+    let cov_type_lower = options.cov_type.to_lowercase();
+    if !matches!(
+        cov_type_lower.as_str(),
+        "classical" | "hc0" | "hc1" | "hc2" | "hc3" | "hac" | "cluster"
+    ) {
+        return Ok(());
+    }
     let is_gmm = estimator_lower == "gmm";
     let gmm_type_lower = options
         .gmm_type
@@ -563,7 +571,6 @@ fn validate_iv_option_usage(options: &IVOptions, estimator_lower: &str) -> PyRes
         GMM_ITERATED,
     )?;
 
-    let cov_type_lower = options.cov_type.to_lowercase();
     reject_unused_option(
         "cluster",
         options.cluster.is_some(),
@@ -1023,6 +1030,106 @@ mod tests {
             "z2" => [1.0, 3.0, 2.0, 5.0, 4.0, 6.0],
         )
         .unwrap()
+    }
+
+    /// `validate_iv_option_usage`の判定表（`Err`になる/ならない）。エラー文言そのものは
+    /// `PyErr`のDisplayがGILを要求するためpytest側（`test_iv_validation.py`）で確認する。
+    fn usage_is_ok(configure: impl FnOnce(&mut IVOptions), estimator: &str) -> bool {
+        let mut options = default_options();
+        options.estimator = estimator.to_string();
+        configure(&mut options);
+        validate_iv_option_usage(&options, estimator).is_ok()
+    }
+
+    #[test]
+    fn validate_iv_option_usage_rejects_gmm_options_for_2sls() {
+        assert!(!usage_is_ok(
+            |o| o.gmm_type = Some("two_step".into()),
+            "2sls"
+        ));
+        assert!(!usage_is_ok(|o| o.gmm_max_iter = Some(10), "2sls"));
+        assert!(usage_is_ok(|_| {}, "2sls"));
+    }
+
+    #[test]
+    fn validate_iv_option_usage_ties_options_to_gmm_type() {
+        let one_step = |o: &mut IVOptions| o.gmm_type = Some("one_step".into());
+        assert!(!usage_is_ok(
+            |o| {
+                one_step(o);
+                o.gmm_weight_type = Some("robust".into());
+            },
+            "gmm"
+        ));
+        assert!(!usage_is_ok(
+            |o| o.gmm_max_iter = Some(10),
+            "gmm" // 既定のgmm_type（two_step）は反復しない
+        ));
+        assert!(usage_is_ok(
+            |o| {
+                o.gmm_type = Some("iterated".into());
+                o.gmm_weight_type = Some("robust".into());
+                o.gmm_max_iter = Some(10);
+                o.gmm_tol = Some(1e-6);
+                o.raise_on_non_convergence = Some(false);
+            },
+            "gmm"
+        ));
+    }
+
+    #[test]
+    fn validate_iv_option_usage_shares_cluster_and_hac_options_between_cov_type_and_weight() {
+        // gmm_weight_typeだけがcluster/hac_*を使う（どちらか一方でも使えば有効）
+        assert!(usage_is_ok(
+            |o| {
+                o.gmm_weight_type = Some("cluster".into());
+                o.cluster = Some("g".into());
+            },
+            "gmm"
+        ));
+        assert!(usage_is_ok(
+            |o| {
+                o.gmm_weight_type = Some("hac".into());
+                o.hac_lags = Some(2);
+                o.hac_time = Some("t".into());
+            },
+            "gmm"
+        ));
+        // cov_typeだけが使う
+        assert!(usage_is_ok(
+            |o| {
+                o.cov_type = "HAC".into();
+                o.hac_lags = Some(2);
+            },
+            "2sls"
+        ));
+        // どちらも使わない（weightがhacなのにclusterを指定、2slsでweightは使えない）
+        assert!(!usage_is_ok(
+            |o| {
+                o.gmm_weight_type = Some("hac".into());
+                o.cluster = Some("g".into());
+            },
+            "gmm"
+        ));
+        assert!(!usage_is_ok(|o| o.cluster = Some("g".into()), "2sls"));
+    }
+
+    #[test]
+    fn validate_iv_option_usage_defers_unknown_values_to_later_parsing() {
+        assert!(usage_is_ok(
+            |o| {
+                o.gmm_type = Some("bogus".into());
+                o.gmm_max_iter = Some(10);
+            },
+            "gmm"
+        ));
+        assert!(usage_is_ok(
+            |o| {
+                o.cov_type = "bogus".into();
+                o.cluster = Some("g".into());
+            },
+            "2sls"
+        ));
     }
 
     #[test]

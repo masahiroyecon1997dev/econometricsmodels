@@ -1243,3 +1243,50 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   実際の挙動を仕様として確認してからdoc側を直すか実装側を直すか、ユーザー判断が要る。
 - **気づいた経緯**: 2026-09-26、`nonlinear/probit.rs`の`/explain-code`解説中。
 - **状態**: 未対応（挙動確認・方針はユーザー判断待ち）
+
+### 68. `engine/src/linear/ols.rs`の自由度に関するdocコメントが、Cluster時の`G-1`切り替えに追従していない
+
+- **対象**: [engine/src/linear/ols.rs:264](../../../engine/src/linear/ols.rs#L264)（`p_values`フィールド「t分布（自由度 n-k）」）、
+  [同:278](../../../engine/src/linear/ols.rs#L278)（`f_p_value`フィールド「自由度は`(k - k_constant, n - k)`」）、
+  [同:310](../../../engine/src/linear/ols.rs#L310)（`fit`のdoc「`cov_type`によらず…t分布（自由度n-k）を使う」）
+- **内容**: 実装では`cov_type=Cluster`のとき検定の自由度が`df_inference = G-1`になる（同ファイル413-454行、
+  `df_inference`フィールドのdocは正しく記載）。上記3箇所は`n-k`固定と読める記述のまま残っており、
+  ファイル内で記述が食い違っている。「通常`n-k`、Clusterのみ`G-1`」に揃えるのが自然。
+- **気づいた経緯**: 2026-10-02、`engine/src/linear/ols.rs`の`/explain-code`解説中。
+- **状態**: 未対応
+
+### 69. `engine/src/linear/ols.rs`のdocコメントが存在しないファイルを参照している（リンク切れ）＋モジュールdocが実態とずれている
+
+- **対象**: [engine/src/linear/ols.rs:314](../../../engine/src/linear/ols.rs#L314)（`benchmark/run_statsmodels_benchmark.py`）、
+  [同:852](../../../engine/src/linear/ols.rs#L852)（`docs/spec/ols-performance-notes.md`）、
+  [同:1](../../../engine/src/linear/ols.rs#L1)（モジュールdoc「OLSの入力データ…の型定義」）
+- **内容**: `benchmark/run_statsmodels_benchmark.py`は`benchmark/`の系統別再編（`benchmark/linear/...`）で、
+  `docs/spec/ols-performance-notes.md`は`docs/performance/ols.md`への移設で、いずれも現存しない。
+  また冒頭の`//!`は「入力データの型定義」とだけ書かれているが、実際はこのファイルが`OlsEstimator`
+  （推定本体・各種共分散行列・Wald検定・予測）の全実装を持っており、モジュールの説明として不足している。
+- **気づいた経緯**: 2026-10-02、`engine/src/linear/ols.rs`の`/explain-code`解説中。
+- **状態**: 未対応
+
+### 70. `engine/src/linear/CLAUDE.md`の`wald_test_last_columns`の説明「`CovType::Classical`固定」が実装と食い違う
+
+- **対象**: [engine/src/linear/CLAUDE.md](../../../engine/src/linear/CLAUDE.md)（「`OlsEstimator`は`cov_params`/`df_inference`を非公開フィールドとして保持する」項）、
+  [engine/src/iv/two_sls.rs:424-426](../../../engine/src/iv/two_sls.rs#L424-L426)
+- **内容**: CLAUDE.mdは`wald_test_last_columns`が「インスタンス自身の`cov_params`/`df_inference`
+  （＝`CovType::Classical`固定・`n-k`ベース）を前提」と書くが、唯一の呼び出し元であるWu-Hausman検定は
+  `OlsEstimator::fit(hausman_input, cov_type.clone(), ...)`とユーザー指定の`cov_type`で推定しており、
+  ロバスト共分散・Cluster時の`G-1`も使われうる。主旨（「外部で計算した`cov_params`を使いたいなら
+  `wald_f_test`を直接使う」）は正しいので、括弧内の「Classical固定・`n-k`ベース」だけを
+  「そのインスタンスの`cov_type`で計算済みの値」等に直せばよいと思われる。
+- **気づいた経緯**: 2026-10-02、`engine/src/linear/ols.rs`の`/explain-code`解説中に呼び出し元を確認して発覚。
+- **状態**: 未対応
+
+### 71. `hc_cov_params`が`Mat::from_fn`のセルごとに`match variant`と`expect`を評価している
+
+- **対象**: [engine/src/linear/ols.rs:774-791](../../../engine/src/linear/ols.rs#L774-L791)
+- **内容**: `scale_i`（行ごとのスケール係数）は列`j`に依存しないのに、`n×k`の全セルで`match variant`・
+  `leverage.as_ref().expect(...)`・`sqrt`を再評価している。先に`Vec<f64>`として`scale_i`を`n`個だけ計算し、
+  `from_fn`ではそれを掛けるだけにすれば、分岐・`expect`が1箇所にまとまり（`from_columns_impl`の
+  `sqrt_weights`事前計算と同じ形）、`expect`自体も`match`で`leverage`を束縛する形にすれば不要になる。
+  性能差は`O(nk)`の定数倍で、QR本体`O(nk²)`に比べ小さいため主目的は可読性・`expect`回避。
+- **気づいた経緯**: 2026-10-02、`engine/src/linear/ols.rs`の`/explain-code`解説中。
+- **状態**: 未対応（性能影響は要実測、着手要否はユーザー判断）

@@ -458,8 +458,8 @@ pub(crate) fn build_fe_input(
 /// `build_fe_input`で構築した`FeInput`に対して`engine::panel::fe::FeEstimator::fit`を
 /// 呼び出し、`FEResult`として返す。
 ///
-/// `n_entities`はengine側に対応するpublicなgetterが無いため（`FeEstimator`内部の
-/// privateな`count_unique`を使うのみ）、`FeInput::entity()`（`build_fe_input`が返す
+/// `n_entities`はengine側に対応するpublicなgetterが無いため（`FeInput`内部の
+/// privateなエンティティコードで数えるのみ）、`FeInput::entity()`（`build_fe_input`が返す
 /// `input`から取得可能）から独立に計算する（`engine_pybind/src/panel/CLAUDE.md`
 /// 「`FEResult`のスコープ」参照）。
 ///

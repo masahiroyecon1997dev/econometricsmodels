@@ -203,7 +203,7 @@
 //!     関数doc参照、2026-09-12）。
 //!   - どちらも`TSS <= 0`なら`0.0`を返す（`linearmodels`と同じガード）。
 //! - 新規ヘルパー（`fe.rs`内private）: `fe_r_squared_between`・`fe_r_squared_overall`
-//!   （`group_indices_by_key`をentity集計に再利用）。
+//!   （entity集計は`FeInput`のエンティティコード（`GroupCodes::group_indices`）を使う）。
 //!
 //! ## `cov_type`対応（`FeCovType`、3.1節・3.2節）
 //!
@@ -309,9 +309,9 @@
 //!   形式で`time`を渡すことが呼び出し側の契約——ゼロ埋めなしの数値文字列
 //!   （`"9"`より`"10"`が辞書順で先に来る等）は契約違反になるが、`engine`側でこれを
 //!   検出するバリデーションは現時点で未実装、`engine_pybind`層の検討課題）。
-//!   `panel_driscoll_kraay_cov_params`（`common.rs`）は`BTreeMap`で`time`をキーに集計する
-//!   （`panel_cluster_cov_params`と同じ「グループ間加算の順序依存を避ける」理由に加え、
-//!   `BTreeMap`のキー順序＝辞書順がそのまま時系列順になる一石二鳥の実装）。
+//!   `panel_driscoll_kraay_cov_params`（`common.rs`）は`time`の整数コード（`GroupCodes`）の
+//!   順に集計する。コードはキーの辞書順に振るため（`panel_cluster_cov_params`と同じ
+//!   「グループ間加算の順序を固定する」目的に加え）、コード順＝辞書順がそのまま時系列順になる。
 //! - **1-way/2-wayとも対応**（ユーザーとの相談で決定）。2-way FEは`within_transform_
 //!   two_way`が既に`time`必須を担保しているが、**1-way FEで`FeCovType::Dk`を指定した
 //!   のに`time`が`None`の場合は`PanelError::DkRequiresTime`**を返す（他のcov_typeは
@@ -385,13 +385,14 @@ use crate::error::CommonError;
 use crate::inference;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput, wald_f_test};
 use crate::panel::common::{
-    PanelDimension, PanelError, PanelHcVariant, all_ones_theta, count_unique,
-    design_matrix_from_columns, group_indices_by_key, leverage_within, panel_classical_cov_params,
-    panel_cluster_cov_params, panel_driscoll_kraay_cov_params, panel_hc_cov_params,
-    quasi_demean_column, resolve_dk_bandwidth, validate_dk_periods_cover_tested_coefficients,
-    xtx_inverse,
+    GroupCodes, PanelDimension, PanelError, PanelHcVariant, design_matrix_from_columns,
+    group_indices_by_key, leverage_within, panel_classical_cov_params, panel_cluster_cov_params,
+    panel_driscoll_kraay_cov_params, panel_hc_cov_params, quasi_demean_column,
+    resolve_dk_bandwidth, validate_cluster_group_codes,
+    validate_dk_periods_cover_tested_coefficients, xtx_inverse,
 };
-use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
+use crate::panel::re::ReInput;
+use crate::validation::validate_cluster_count_covers_slopes;
 
 /// FEの被説明変数・説明変数・パネル識別子を保持する入力データ。
 ///
@@ -413,6 +414,54 @@ pub struct FeInput {
     time: Option<Vec<String>>,
     /// 被説明変数名。
     dep_var_name: String,
+    /// `entity`の整数コード（構築時に一度だけ作る、`GroupCodes`のdocコメント参照）。
+    entity_codes: GroupCodes,
+    /// `time`の整数コード（`time`が`None`なら`None`）。
+    time_codes: Option<GroupCodes>,
+}
+
+/// `FeInput::from_columns`の次元検証（エラー条件は`from_columns`のdocコメント参照）。
+fn validate_input_dimensions(
+    y: &[f64],
+    x_columns: &[Vec<f64>],
+    x_names: &[String],
+    entity: &[String],
+    time: Option<&[String]>,
+) -> Result<(), PanelError> {
+    debug_assert_eq!(
+        x_columns.len(),
+        x_names.len(),
+        "x_columns and x_names must have the same length"
+    );
+
+    for col in x_columns {
+        if col.len() != y.len() {
+            return Err(CommonError::DimensionMismatch {
+                y_rows: y.len(),
+                x_rows: col.len(),
+            }
+            .into());
+        }
+    }
+
+    if entity.len() != y.len() {
+        return Err(PanelError::IdentifierDimensionMismatch {
+            dimension: PanelDimension::Entity,
+            y_rows: y.len(),
+            other_rows: entity.len(),
+        });
+    }
+
+    if let Some(time) = time
+        && time.len() != y.len()
+    {
+        return Err(PanelError::IdentifierDimensionMismatch {
+            dimension: PanelDimension::Time,
+            y_rows: y.len(),
+            other_rows: time.len(),
+        });
+    }
+    Ok(())
 }
 
 impl FeInput {
@@ -442,39 +491,7 @@ impl FeInput {
         time: Option<&[String]>,
         dep_var_name: String,
     ) -> Result<Self, PanelError> {
-        debug_assert_eq!(
-            x_columns.len(),
-            x_names.len(),
-            "x_columns and x_names must have the same length"
-        );
-
-        for col in x_columns {
-            if col.len() != y.len() {
-                return Err(CommonError::DimensionMismatch {
-                    y_rows: y.len(),
-                    x_rows: col.len(),
-                }
-                .into());
-            }
-        }
-
-        if entity.len() != y.len() {
-            return Err(PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Entity,
-                y_rows: y.len(),
-                other_rows: entity.len(),
-            });
-        }
-
-        if let Some(time) = time
-            && time.len() != y.len()
-        {
-            return Err(PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Time,
-                y_rows: y.len(),
-                other_rows: time.len(),
-            });
-        }
+        validate_input_dimensions(y, x_columns, &x_names, entity, time)?;
 
         Ok(Self {
             y: y.to_vec(),
@@ -483,7 +500,37 @@ impl FeInput {
             entity: entity.to_vec(),
             time: time.map(|t| t.to_vec()),
             dep_var_name,
+            entity_codes: GroupCodes::from_ids(entity),
+            time_codes: time.map(GroupCodes::from_ids),
         })
+    }
+
+    /// REの分散成分推定（`swamy_arora_variance_components`）用の1-way FE入力（`time`なし）を、
+    /// `ReInput`の`y`・`x`・`entity`から作る。`ReInput`が既に持つエンティティコードを
+    /// 再利用し作り直さない。`ReInput::from_columns`が同じ次元検証を済ませているため
+    /// 検証は不要で、`entity`とコードの対応も`ReInput`が保証する（別々の引数で受けて
+    /// 食い違う余地を作らない）。
+    pub(crate) fn from_re_input(input: &ReInput) -> Self {
+        Self {
+            y: input.y().to_vec(),
+            x: input.x().to_vec(),
+            x_names: input.x_names().to_vec(),
+            entity: input.entity().to_vec(),
+            time: None,
+            dep_var_name: input.dep_var_name().to_string(),
+            entity_codes: input.entity_codes().clone(),
+            time_codes: None,
+        }
+    }
+
+    /// `entity`の整数コード。
+    pub(crate) fn entity_codes(&self) -> &GroupCodes {
+        &self.entity_codes
+    }
+
+    /// `time`の整数コード（1-way FEで`time`が無ければ`None`）。
+    pub(crate) fn time_codes(&self) -> Option<&GroupCodes> {
+        self.time_codes.as_ref()
     }
 
     /// 被説明変数（長さ`n`）。
@@ -693,13 +740,18 @@ impl FeEstimator {
         };
 
         let n = input.nobs();
-        let n_entities = count_unique(input.entity());
+        let n_entities = input.entity_codes().n_groups();
         let n_periods = match effects {
             FeEffects::OneWay => None,
-            FeEffects::TwoWay => Some(count_unique(input.time().expect(
-                "2-way already validated `time` is present \
-                 (validate_no_singleton_groups_two_way/within_transform_two_way)",
-            ))),
+            FeEffects::TwoWay => Some(
+                input
+                    .time_codes()
+                    .expect(
+                        "2-way already validated `time` is present \
+                         (validate_no_singleton_groups_two_way/within_transform_two_way)",
+                    )
+                    .n_groups(),
+            ),
         };
         let k = input.x_names().len();
         // `neffects`: entityダミー・timeダミーの実効パラメータ数（`fe-spec.md`3.2節）。2-wayは両者の
@@ -807,7 +859,11 @@ impl FeEstimator {
             }
             FeCovType::Cluster { groups } => {
                 let resolved_groups = groups.as_deref().unwrap_or(input.entity());
-                let n_groups = validate_cluster_groups(resolved_groups, n)?;
+                // 既定（entityクラスター）は`FeInput`のコードを再利用し、明示指定の列だけ
+                // ここでコード化する。
+                let explicit_codes = groups.as_deref().map(GroupCodes::from_ids);
+                let group_codes = explicit_codes.as_ref().unwrap_or(input.entity_codes());
+                let n_groups = validate_cluster_group_codes(group_codes, n)?;
                 validate_cluster_count_covers_slopes(n_groups, k)?;
                 // 直前の`G > k`により、ここで`G=2`なら`k`は高々1。
                 if k >= 1
@@ -832,7 +888,7 @@ impl FeEstimator {
                     &xtx_inv,
                     n,
                     k,
-                    resolved_groups,
+                    group_codes,
                     k_correction,
                 );
                 (cov, n_groups - 1)
@@ -848,9 +904,8 @@ impl FeEstimator {
                     None => input.time().ok_or(PanelError::DkRequiresTime)?,
                 };
                 // `input.time()`は`FeInput::from_columns`が長さを検証済みだが、`hac_time`
-                // （公開APIの`FeCovType::Dk.time`）は未検証のため、Clusterの`groups`
-                // （`validate_cluster_groups`）と同じ水準でここで検証する。長さが合わないと
-                // 下の退化判定が`zip`で黙って切り詰められ、DK計算は範囲外アクセスになる。
+                // （公開APIの`FeCovType::Dk.time`）は未検証のため、ここで検証する。長さが
+                // 合わないと下の退化判定が`zip`で黙って切り詰められ、DK計算は範囲外アクセスになる。
                 if time.len() != n {
                     return Err(PanelError::IdentifierDimensionMismatch {
                         dimension: PanelDimension::Time,
@@ -858,7 +913,13 @@ impl FeEstimator {
                         other_rows: time.len(),
                     });
                 }
-                let t_periods = count_unique(time);
+                // `hac_time`があればここでコード化し、無ければ`FeInput`のコードを再利用する。
+                let override_codes = hac_time.as_deref().map(GroupCodes::from_ids);
+                let time_codes = match override_codes.as_ref() {
+                    Some(codes) => codes,
+                    None => input.time_codes().ok_or(PanelError::DkRequiresTime)?,
+                };
+                let t_periods = time_codes.n_groups();
                 let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
                 validate_dk_periods_cover_tested_coefficients(t_periods, k)?;
                 // 直前の`t_periods > k`により、ここで`t_periods=2`なら`k`は高々1。
@@ -870,7 +931,7 @@ impl FeEstimator {
                 // 発生しない、`fe_cluster_k_correction`のdocコメント参照）。`K=df_model`を
                 // そのまま使う。
                 let cov = panel_driscoll_kraay_cov_params(
-                    &x_mat, &residuals, &xtx_inv, time, df_model, bw, t_periods,
+                    &x_mat, &residuals, &xtx_inv, time_codes, df_model, bw, t_periods,
                 );
                 (cov, t_periods - 1)
             }
@@ -910,8 +971,12 @@ impl FeEstimator {
         // この定義と一致する（再計算不要）。between/overallはlinearmodelsの`_rsquared`と
         // 完全一致させるため、変換前の元の`y`/`x`から独立に計算し直す。
         let r_squared_within = estimator.r_squared();
-        let r_squared_between =
-            fe_r_squared_between(input.y(), input.x(), estimator.params(), input.entity());
+        let r_squared_between = fe_r_squared_between(
+            input.y(),
+            input.x(),
+            estimator.params(),
+            input.entity_codes(),
+        );
         let r_squared_overall = fe_r_squared_overall(input.y(), input.x(), estimator.params());
 
         // `log_likelihood`自体は`SSR/n`のみに依存しdf非依存の式のためそのまま再利用できる
@@ -1315,17 +1380,17 @@ fn slope_only_residual(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>, i: usize) -
 /// サポートしない**（CLAUDE.md 1.3節「見送り」）ため、この分岐が常に成立し
 /// `T_i`ベースの重みは実質的に到達不能——不均衡パネルで一度この重み付き版を実装し
 /// `linearmodels`と数値が食い違うことを発見して修正した経緯がある（実地検証、
-/// 2026-09-12）。`group_indices_by_key`でエンティティを集計する（`panel_cluster_cov_params`
+/// 2026-09-12）。エンティティコード（`GroupCodes`、辞書順）で集計する（`panel_cluster_cov_params`
 /// と同じ理由でグループ間加算の順序を固定する、モジュールdoc参照）。
 ///
 /// `TSS <= 0`（全エンティティ平均がゼロ等）なら`linearmodels`と同じく`0.0`を返す。
-fn fe_r_squared_between(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>, entity: &[String]) -> f64 {
+fn fe_r_squared_between(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>, entity: &GroupCodes) -> f64 {
     let k = x.len();
-    let entity_indices = group_indices_by_key(entity);
+    let entity_indices = entity.group_indices();
 
     let mut ssr = 0.0;
     let mut tss = 0.0;
-    for indices in entity_indices.values() {
+    for indices in entity_indices.iter() {
         let t_i = indices.len();
         let y_bar: f64 = indices.iter().map(|&i| y[i]).sum::<f64>() / t_i as f64;
         let fitted: f64 = (0..k)
@@ -1400,12 +1465,13 @@ fn overall_residual_mean(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>) -> f64 {
 ///
 /// 戻り値は`(y_transformed, x_transformed)`（元の列順を保持）。
 pub fn within_transform_one_way(input: &FeInput) -> (Vec<f64>, Vec<Vec<f64>>) {
-    let theta = all_ones_theta(input.entity());
-    let y = quasi_demean_column(input.y(), input.entity(), &theta);
+    let entity = input.entity_codes();
+    let theta = vec![1.0; entity.n_groups()];
+    let y = quasi_demean_column(input.y(), entity, &theta);
     let x = input
         .x()
         .iter()
-        .map(|col| quasi_demean_column(col, input.entity(), &theta))
+        .map(|col| quasi_demean_column(col, entity, &theta))
         .collect();
     (y, x)
 }
@@ -1423,19 +1489,24 @@ pub fn within_transform_two_way(input: &FeInput) -> Result<(Vec<f64>, Vec<Vec<f6
     let time = input.time().ok_or(PanelError::TwoWayRequiresTime)?;
     validate_balanced_panel(input.entity(), time)?;
 
-    let entity_theta = all_ones_theta(input.entity());
-    let y_entity_demeaned = quasi_demean_column(input.y(), input.entity(), &entity_theta);
+    let time_codes = input
+        .time_codes()
+        .expect("`time_codes` is present whenever `time` is (FeInput invariant)");
+
+    let entity = input.entity_codes();
+    let entity_theta = vec![1.0; entity.n_groups()];
+    let y_entity_demeaned = quasi_demean_column(input.y(), entity, &entity_theta);
     let x_entity_demeaned: Vec<Vec<f64>> = input
         .x()
         .iter()
-        .map(|col| quasi_demean_column(col, input.entity(), &entity_theta))
+        .map(|col| quasi_demean_column(col, entity, &entity_theta))
         .collect();
 
-    let time_theta = all_ones_theta(time);
-    let y = quasi_demean_column(&y_entity_demeaned, time, &time_theta);
+    let time_theta = vec![1.0; time_codes.n_groups()];
+    let y = quasi_demean_column(&y_entity_demeaned, time_codes, &time_theta);
     let x = x_entity_demeaned
         .iter()
-        .map(|col| quasi_demean_column(col, time, &time_theta))
+        .map(|col| quasi_demean_column(col, time_codes, &time_theta))
         .collect();
 
     Ok((y, x))
@@ -1448,7 +1519,7 @@ pub fn within_transform_two_way(input: &FeInput) -> Result<(Vec<f64>, Vec<Vec<f6
 /// entityに観測数1のグループが見つかった場合は`PanelError::SingletonGroup`
 /// （`dimension: PanelDimension::Entity`）。
 pub fn validate_no_singleton_groups_one_way(input: &FeInput) -> Result<(), PanelError> {
-    reject_singleton_group(PanelDimension::Entity, input.entity())
+    reject_singleton_group(PanelDimension::Entity, input.entity_codes())
 }
 
 /// 2-way FE向けのsingleton検出（`fe-spec.md`1章）。entity・time双方を対称に検出する
@@ -1466,8 +1537,8 @@ pub fn validate_no_singleton_groups_one_way(input: &FeInput) -> Result<(), Panel
 /// - entityまたはtimeに観測数1のグループが見つかった場合は`PanelError::SingletonGroup`
 ///   （該当する`dimension`を含む）
 pub fn validate_no_singleton_groups_two_way(input: &FeInput) -> Result<(), PanelError> {
-    let time = input.time().ok_or(PanelError::TwoWayRequiresTime)?;
-    reject_singleton_group(PanelDimension::Entity, input.entity())?;
+    let time = input.time_codes().ok_or(PanelError::TwoWayRequiresTime)?;
+    reject_singleton_group(PanelDimension::Entity, input.entity_codes())?;
     reject_singleton_group(PanelDimension::Time, time)
 }
 
@@ -1475,21 +1546,15 @@ pub fn validate_no_singleton_groups_two_way(input: &FeInput) -> Result<(), Panel
 /// `PanelError::SingletonGroup`を返す。
 ///
 /// 複数のsingletonグループが存在する場合は、観測順で最初に現れるグループのみを報告する
-/// （`validate_no_zero_variance_regressors`の「最初の1件を報告」方針と統一）。グループの
-/// 出現回数を数える集計自体はカーディナリティのみが目的で、グループ「間」の浮動小数点
-/// 加算順序に依存しないため`HashMap`でよい（`engine/src/panel/CLAUDE.md`「`quasi_demean_
-/// column`の内部集約は`HashMap`でよい」と同じ理由）。
-fn reject_singleton_group(dimension: PanelDimension, ids: &[String]) -> Result<(), PanelError> {
-    let mut counts: HashMap<&str, usize> = HashMap::new();
-    for id in ids {
-        *counts.entry(id.as_str()).or_insert(0) += 1;
-    }
-
-    for id in ids {
-        if counts[id.as_str()] == 1 {
+/// （`validate_no_zero_variance_regressors`の「最初の1件を報告」方針と統一）。観測数は
+/// `FeInput`の構築時に作ったコード（`GroupCodes::counts`）をそのまま使う。
+fn reject_singleton_group(dimension: PanelDimension, ids: &GroupCodes) -> Result<(), PanelError> {
+    // 観測順で最初に現れたsingletonを報告する（旧実装の`String`版と同じ選び方）。
+    for &c in ids.codes() {
+        if ids.counts()[c] == 1 {
             return Err(PanelError::SingletonGroup {
                 dimension,
-                group_id: id.clone(),
+                group_id: ids.keys()[c].clone(),
             });
         }
     }
@@ -1971,6 +2036,23 @@ mod tests {
     }
 
     #[test]
+    fn validate_no_singleton_groups_reports_first_singleton_in_observation_order() {
+        // singletonが"b"と"a"の2つ。観測順では"b"が先、コード順（辞書順）では"a"が先。
+        // 観測順で最初のもの（"b"）を報告する（整数コード化の前と同じ選び方）。
+        let y = [1.0, 2.0, 3.0, 4.0];
+        let entity = strings(&["b", "a", "c", "c"]);
+        let input = FeInput::from_columns(&y, &[], vec![], &entity, None, "y".into()).unwrap();
+
+        assert_eq!(
+            validate_no_singleton_groups_one_way(&input).unwrap_err(),
+            PanelError::SingletonGroup {
+                dimension: PanelDimension::Entity,
+                group_id: "b".to_string(),
+            }
+        );
+    }
+
+    #[test]
     fn validate_no_singleton_groups_one_way_accepts_no_singleton() {
         let y = [1.0, 2.0, 3.0, 4.0];
         let entity = strings(&["a", "a", "b", "b"]);
@@ -2074,7 +2156,10 @@ mod tests {
         // n=0境界（`validate_no_zero_variance_regressors_with_zero_observations_and_a_
         // regressor_succeeds`と同様の境界値テストの慣習に合わせる）。空配列にはsingleton
         // となりうる要素自体が存在しないため`Ok(())`になる。
-        assert_eq!(reject_singleton_group(PanelDimension::Entity, &[]), Ok(()));
+        assert_eq!(
+            reject_singleton_group(PanelDimension::Entity, &GroupCodes::from_ids(&[])),
+            Ok(())
+        );
     }
 
     #[test]

@@ -176,8 +176,6 @@
 //!   内部FE推定の失敗（singleton・時間不変変数等）は`swamy_arora_variance_components`が
 //!   先に失敗するためRE本体もErrになる。
 
-use std::collections::BTreeMap;
-
 use faer::Mat;
 use statrs::distribution::{ChiSquared, ContinuousCDF, FisherSnedecor, StudentsT};
 
@@ -186,13 +184,13 @@ use crate::inference;
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput, wald_f_test};
 use crate::panel::common::{
-    PanelDimension, PanelError, PanelHcVariant, count_unique, group_indices_by_key,
-    leverage_within, panel_classical_cov_params, panel_cluster_cov_params,
-    panel_driscoll_kraay_cov_params, panel_hc_cov_params, quasi_demean_column,
-    resolve_dk_bandwidth, validate_dk_periods_cover_tested_coefficients, xtx_inverse,
+    GroupCodes, PanelDimension, PanelError, PanelHcVariant, leverage_within,
+    panel_classical_cov_params, panel_cluster_cov_params, panel_driscoll_kraay_cov_params,
+    panel_hc_cov_params, quasi_demean_column, resolve_dk_bandwidth, validate_cluster_group_codes,
+    validate_dk_periods_cover_tested_coefficients, xtx_inverse,
 };
 use crate::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput};
-use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
+use crate::validation::validate_cluster_count_covers_slopes;
 
 /// REの被説明変数・説明変数・パネル識別子を保持する入力データ。
 ///
@@ -214,6 +212,10 @@ pub struct ReInput {
     time: Option<Vec<String>>,
     /// 被説明変数名。
     dep_var_name: String,
+    /// `entity`の整数コード（構築時に一度だけ作る、`GroupCodes`のdocコメント参照）。
+    entity_codes: GroupCodes,
+    /// `time`の整数コード（`time`が`None`なら`None`）。
+    time_codes: Option<GroupCodes>,
 }
 
 impl ReInput {
@@ -284,7 +286,19 @@ impl ReInput {
             entity: entity.to_vec(),
             time: time.map(|t| t.to_vec()),
             dep_var_name,
+            entity_codes: GroupCodes::from_ids(entity),
+            time_codes: time.map(GroupCodes::from_ids),
         })
+    }
+
+    /// `entity`の整数コード。
+    pub(crate) fn entity_codes(&self) -> &GroupCodes {
+        &self.entity_codes
+    }
+
+    /// `time`の整数コード（`time`が無ければ`None`）。
+    pub(crate) fn time_codes(&self) -> Option<&GroupCodes> {
+        self.time_codes.as_ref()
     }
 
     /// 被説明変数（長さ`n`）。
@@ -323,25 +337,26 @@ impl ReInput {
     }
 }
 
-/// エンティティ平均（between回帰用）。`group_indices_by_key`（`common.rs`にFE/RE共有として
-/// 移設済み）でエンティティを集計し、`y`/各`x`列のエンティティごとの単純平均と、
+/// エンティティ平均（between回帰用）。エンティティの整数コード（`GroupCodes::group_indices`）で
+/// 集計し、`y`/各`x`列のエンティティごとの単純平均と、
 /// 各エンティティの観測数`T_i`（`re-spec.md`3.1節の調和平均`t_bar`計算にも使うため、二重集計を避けて
 /// ここで一緒に返す）を返す。
 ///
-/// 戻り値の各`Vec`はエンティティのユニークID辞書順（`group_indices_by_key`のキー順）で
+/// 戻り値の各`Vec`はエンティティのユニークID辞書順（コード順）で
 /// 揃っている。entity IDの文字列自体は返さない（between回帰・`t_bar`計算のどちらも
 /// 数値だけで足りるため）。
 fn entity_means(
     y: &[f64],
     x: &[Vec<f64>],
-    entity: &[String],
+    entity: &GroupCodes,
 ) -> (Vec<f64>, Vec<Vec<f64>>, Vec<f64>) {
-    let groups = group_indices_by_key(entity);
+    let groups = entity.group_indices();
+    let n_groups = entity.n_groups();
     let k = x.len();
-    let mut y_means = Vec::with_capacity(groups.len());
-    let mut x_means: Vec<Vec<f64>> = vec![Vec::with_capacity(groups.len()); k];
-    let mut t = Vec::with_capacity(groups.len());
-    for indices in groups.values() {
+    let mut y_means = Vec::with_capacity(n_groups);
+    let mut x_means: Vec<Vec<f64>> = vec![Vec::with_capacity(n_groups); k];
+    let mut t = Vec::with_capacity(n_groups);
+    for indices in groups.iter() {
         let t_i = indices.len() as f64;
         y_means.push(indices.iter().map(|&i| y[i]).sum::<f64>() / t_i);
         for (j, x_means_j) in x_means.iter_mut().enumerate() {
@@ -397,8 +412,7 @@ fn re_r_squared(
 /// within変換済みの`y`・`x`は、内部1-way FE推定（`fe`）が`OlsEstimator`へ委譲した入力
 /// （`fe.estimator().input()`、切片なし）をそのまま使う。`fe`はRE本体と同じ`y`・`x`・
 /// `entity`に`within_transform_one_way`を適用済みのため、ここで変換し直すのと
-/// ビット単位で同じ値になる（大標本ではwithin変換1回がエンティティ文字列の集計で
-/// 支配的なコストになるため再計算しない）。
+/// ビット単位で同じ値になる（同じ変換を二度計算しないため再利用する）。
 fn re_r_squared_within(fe: &FeEstimator, params: &Mat<f64>) -> f64 {
     debug_assert_within_reuse_contract(fe);
     let y = fe.estimator().input().y();
@@ -429,7 +443,7 @@ fn re_r_squared_within(fe: &FeEstimator, params: &Mat<f64>) -> f64 {
 /// で計算する。FEの`fe_r_squared_between`と異なり、当てはめ値に切片`β0`を含める
 /// （モジュールdoc参照）。
 fn re_r_squared_between(input: &ReInput, params: &Mat<f64>) -> f64 {
-    let (y_means, x_means, _t) = entity_means(input.y(), input.x(), input.entity());
+    let (y_means, x_means, _t) = entity_means(input.y(), input.x(), input.entity_codes());
     let n_entities = y_means.len();
     let k = x_means.len();
 
@@ -519,18 +533,7 @@ pub(crate) fn swamy_arora_variance_components(
     crate::parallelism::ensure_serial();
 
     // σ_ε²: 内部1-way FE推定のwithin回帰残差を再利用する（`re-spec.md`3.2節）。
-    let fe_input = FeInput::from_columns(
-        input.y(),
-        input.x(),
-        input.x_names().to_vec(),
-        input.entity(),
-        None,
-        input.dep_var_name().to_string(),
-    )
-    .expect(
-        "ReInput::from_columns already validated the same dimension contract \
-         (y/x/entity lengths) that FeInput::from_columns requires",
-    );
+    let fe_input = FeInput::from_re_input(input);
     let fe = FeEstimator::fit(
         fe_input,
         FeEffects::OneWay,
@@ -548,7 +551,7 @@ pub(crate) fn swamy_arora_variance_components(
     let sigma2_eps = ssr_within / fe.df_resid() as f64;
 
     // σ_u²: between回帰（エンティティ平均、切片あり）。
-    let (y_means, x_means, t) = entity_means(input.y(), input.x(), input.entity());
+    let (y_means, x_means, t) = entity_means(input.y(), input.x(), input.entity_codes());
     let n_entities = y_means.len();
 
     // `OlsInput::from_columns`が返しうる`LeastSquaresError::Common(DimensionMismatch)`は
@@ -587,19 +590,19 @@ pub(crate) fn swamy_arora_variance_components(
 /// θ（準偏差変換の重み）を計算する（`re-spec.md`3.2節）。
 ///
 /// `θ_i = 1 - sqrt(σ_ε² / (T_i・σ_u² + σ_ε²))`。`T_i`はエンティティ`i`の観測数
-/// （`group_indices_by_key`で集計する）。不均衡パネルもこの式で無条件にサポートする
+/// （エンティティの整数コードの観測数`counts()`を使う）。不均衡パネルもこの式で無条件にサポートする
 /// （`T_i`が式に直接入るため、教科書レベルで不均衡対応済み。`re-spec.md`3.2節）。
 ///
 /// `σ_ε²`/`σ_u²`の値域は検証しない（`quasi_demean_column`が`θ`の値域を検証しないのと
 /// 同じ設計判断——呼び出し側が`swamy_arora_variance_components`の戻り値を渡す限り
 /// `σ_ε²>0`・`σ_u²>=0`は保証されるが、この関数自体はその前提を強制しない）。
-fn compute_theta(entity: &[String], sigma2_eps: f64, sigma2_u: f64) -> BTreeMap<String, f64> {
-    group_indices_by_key(entity)
-        .into_iter()
-        .map(|(id, indices)| {
-            let t_i = indices.len() as f64;
-            let theta_i = 1.0 - (sigma2_eps / (t_i * sigma2_u + sigma2_eps)).sqrt();
-            (id.to_string(), theta_i)
+fn compute_theta(entity: &GroupCodes, sigma2_eps: f64, sigma2_u: f64) -> Vec<f64> {
+    entity
+        .counts()
+        .iter()
+        .map(|&count| {
+            let t_i = count as f64;
+            1.0 - (sigma2_eps / (t_i * sigma2_u + sigma2_eps)).sqrt()
         })
         .collect()
 }
@@ -617,13 +620,14 @@ pub(crate) fn quasi_demean_transform(
     input: &ReInput,
     sigma2_eps: f64,
     sigma2_u: f64,
-) -> (BTreeMap<String, f64>, Vec<f64>, Vec<Vec<f64>>) {
-    let theta = compute_theta(input.entity(), sigma2_eps, sigma2_u);
-    let y = quasi_demean_column(input.y(), input.entity(), &theta);
+) -> (Vec<f64>, Vec<f64>, Vec<Vec<f64>>) {
+    let entity = input.entity_codes();
+    let theta = compute_theta(entity, sigma2_eps, sigma2_u);
+    let y = quasi_demean_column(input.y(), entity, &theta);
     let x = input
         .x()
         .iter()
-        .map(|col| quasi_demean_column(col, input.entity(), &theta))
+        .map(|col| quasi_demean_column(col, entity, &theta))
         .collect();
     (theta, y, x)
 }
@@ -645,8 +649,7 @@ pub(crate) fn quasi_demean_transform(
 /// `fe`は`swamy_arora_variance_components`が返した1-way FE推定量で、`X̃`は
 /// その推定が`OlsEstimator`へ委譲したwithin変換済み設計行列（`fe.estimator().input().x()`）を
 /// 再利用する。`fe`は1-way・`time`なしで`within_transform_one_way(fe.input())`を適用済みの
-/// ため、変換し直すのとビット単位で同じ値になる（大標本ではwithin変換1回がエンティティ
-/// 文字列の集計で支配的なコストになるため再計算しない）。`y_star`/`x_star`はRE本体の
+/// ため、変換し直すのとビット単位で同じ値になる（同じ変換を二度計算しないため再利用する）。`y_star`/`x_star`はRE本体の
 /// 回帰に渡した準偏差変換済みの`y`と傾き`X`（変換済み定数列は含まない）そのもの。
 ///
 /// 比較対象の傾き係数が0個なら`Ok(None)`（検定対象が無い）。補助回帰・Wald検定の失敗
@@ -662,7 +665,7 @@ fn re_hausman_test(
     dep_var_name: &str,
     cov_type: &ReCovType,
     entity: &[String],
-    time: Option<&[String]>,
+    time: Option<&GroupCodes>,
     confidence_level: f64,
 ) -> Result<Option<(f64, usize, f64)>, PanelError> {
     let to_err = |source| PanelError::HausmanTestFailed { source };
@@ -720,7 +723,7 @@ fn re_hausman_test(
         // `time`の有無・バンド幅・`T > k`（`validate_dk_periods_cover_tested_coefficients`）は
         // RE本体のDK計算（`fit()`）が先に検証済みのため、ここでは再検証しない。
         let time = time.ok_or(PanelError::DkRequiresTime)?;
-        let t_periods = count_unique(time);
+        let t_periods = time.n_groups();
         let bw = resolve_dk_bandwidth(bandwidth, t_periods)?;
         let x_mat = aux.input().x();
         let xtx_inv = xtx_inverse(x_mat, k_aux)?;
@@ -945,7 +948,7 @@ impl ReEstimator {
         // `include_intercept=true`は使えない——それだと変換されない生の`1.0`列に
         // なってしまう）。
         let const_column = vec![1.0; input.nobs()];
-        let const_transformed = quasi_demean_column(&const_column, input.entity(), &theta);
+        let const_transformed = quasi_demean_column(&const_column, input.entity_codes(), &theta);
 
         let mut x_all = Vec::with_capacity(x.len() + 1);
         x_all.push(const_transformed);
@@ -1023,8 +1026,11 @@ impl ReEstimator {
                 )
             }
             ReCovType::Cluster { groups } => {
-                let resolved_groups = groups.as_deref().unwrap_or(input.entity());
-                let n_groups = validate_cluster_groups(resolved_groups, n)?;
+                // 既定（entityクラスター）は`ReInput`のコードを再利用し、明示指定の列だけ
+                // ここでコード化する。
+                let explicit_codes = groups.as_deref().map(GroupCodes::from_ids);
+                let group_codes = explicit_codes.as_ref().unwrap_or(input.entity_codes());
+                let n_groups = validate_cluster_group_codes(group_codes, n)?;
                 // `q`（傾き係数の数、切片を除く）は`df_model - 1`（`ols::fit`の
                 // `k - k_constant`と同じ規約、`estimator()`のdocコメント参照）。
                 validate_cluster_count_covers_slopes(n_groups, df_model - 1)?;
@@ -1038,14 +1044,14 @@ impl ReEstimator {
                     &xtx_inv,
                     n,
                     df_model,
-                    resolved_groups,
+                    group_codes,
                     df_model,
                 );
                 (cov, n_groups - 1)
             }
             ReCovType::Dk { bandwidth } => {
-                let time = input.time().ok_or(PanelError::DkRequiresTime)?;
-                let t_periods = count_unique(time);
+                let time = input.time_codes().ok_or(PanelError::DkRequiresTime)?;
+                let t_periods = time.n_groups();
                 let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
                 // RE本体は共分散を反転しない（F統計量はSST/SSR型）が、ハウスマン検定が
                 // 同じ時点構造のDKで`X̃`の傾き`k = df_model - 1`個を同時検定するため、
@@ -1180,7 +1186,7 @@ impl ReEstimator {
             input.dep_var_name(),
             &cov_type,
             input.entity(),
-            input.time(),
+            input.time_codes(),
             confidence_level,
         )?;
         let (hausman_statistic, hausman_df, hausman_p_value) = match hausman_result {
@@ -1350,7 +1356,6 @@ impl ReEstimator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::panel::common::all_ones_theta;
     use crate::panel::fe::within_transform_one_way;
 
     fn strings(values: &[&str]) -> Vec<String> {
@@ -1645,11 +1650,11 @@ mod tests {
         let sigma2_eps = 0.064_516_129_032_258_03;
         let sigma2_u = 7.429_453_144_752_303;
 
-        let theta = compute_theta(&entity, sigma2_eps, sigma2_u);
+        let theta = compute_theta(&GroupCodes::from_ids(&entity), sigma2_eps, sigma2_u);
 
-        assert!((theta["a"] - 0.946_276_110_063_922_5).abs() < 1e-12);
-        assert!((theta["b"] - 0.934_249_367_520_359).abs() < 1e-12);
-        assert!((theta["c"] - 0.907_214_909_247_309_4).abs() < 1e-12);
+        assert!((theta[0] - 0.946_276_110_063_922_5).abs() < 1e-12);
+        assert!((theta[1] - 0.934_249_367_520_359).abs() < 1e-12);
+        assert!((theta[2] - 0.907_214_909_247_309_4).abs() < 1e-12);
     }
 
     #[test]
@@ -1658,11 +1663,11 @@ mod tests {
         // θ = 1 - sqrt(1/3)を確認する（手計算で検算可能な境界値）。
         let entity = strings(&["a", "a", "b", "b"]);
 
-        let theta = compute_theta(&entity, 1.0, 1.0);
+        let theta = compute_theta(&GroupCodes::from_ids(&entity), 1.0, 1.0);
 
         let expected = 1.0 - (1.0_f64 / 3.0).sqrt();
-        assert!((theta["a"] - expected).abs() < 1e-12);
-        assert!((theta["b"] - expected).abs() < 1e-12);
+        assert!((theta[0] - expected).abs() < 1e-12);
+        assert!((theta[1] - expected).abs() < 1e-12);
     }
 
     #[test]
@@ -1675,10 +1680,10 @@ mod tests {
         // 固定しておく。
         let entity = strings(&["a", "a", "b", "b", "b"]);
 
-        let theta = compute_theta(&entity, 2.5, 0.0);
+        let theta = compute_theta(&GroupCodes::from_ids(&entity), 2.5, 0.0);
 
-        assert_eq!(theta["a"], 0.0);
-        assert_eq!(theta["b"], 0.0);
+        assert_eq!(theta[0], 0.0);
+        assert_eq!(theta[1], 0.0);
     }
 
     #[test]
@@ -1698,7 +1703,7 @@ mod tests {
 
         let (theta, y_t, x_t) = quasi_demean_transform(&input, sigma2_eps, sigma2_u);
 
-        assert!((theta["a"] - 0.946_276_110_063_922_5).abs() < 1e-12);
+        assert!((theta[0] - 0.946_276_110_063_922_5).abs() < 1e-12);
 
         let expected_y = [
             -1.415_955_180_298_305_5,
@@ -2456,11 +2461,8 @@ mod tests {
         let input = re.input();
         let (sigma2_eps, sigma2_u, _) = swamy_arora_variance_components(input, 0.95).unwrap();
         let (_, y_star, x_star) = quasi_demean_transform(input, sigma2_eps, sigma2_u);
-        let x_within = quasi_demean_column(
-            &input.x()[0],
-            input.entity(),
-            &all_ones_theta(input.entity()),
-        );
+        let entity = GroupCodes::from_ids(input.entity());
+        let x_within = quasi_demean_column(&input.x()[0], &entity, &vec![1.0; entity.n_groups()]);
 
         let aux_input = OlsInput::from_columns(
             &y_star,
@@ -2502,10 +2504,11 @@ mod tests {
     fn manual_hausman_aux(input: &ReInput, cov_type: CovType) -> OlsEstimator {
         let (sigma2_eps, sigma2_u, _) = swamy_arora_variance_components(input, 0.95).unwrap();
         let (_, y_star, x_star) = quasi_demean_transform(input, sigma2_eps, sigma2_u);
-        let theta = all_ones_theta(input.entity());
+        let entity = GroupCodes::from_ids(input.entity());
+        let theta = vec![1.0; entity.n_groups()];
         let mut columns = x_star;
         for col in input.x() {
-            columns.push(quasi_demean_column(col, input.entity(), &theta));
+            columns.push(quasi_demean_column(col, &entity, &theta));
         }
         let names = ["x1", "x2", "x1_w", "x2_w"].map(String::from).to_vec();
         let aux_input = OlsInput::from_columns(&y_star, &columns, names, true, "y".into()).unwrap();
@@ -2619,8 +2622,10 @@ mod tests {
         let k_aux = aux.input().k();
         let xtx_inv = xtx_inverse(x_mat, k_aux).unwrap();
         let residuals: Vec<f64> = (0..n).map(|i| *aux.residuals().get(i, 0)).collect();
-        let cov = panel_cluster_cov_params(x_mat, &residuals, &xtx_inv, n, k_aux, &time, k_aux);
-        let t_periods = count_unique(&time);
+        let time_codes = GroupCodes::from_ids(&time);
+        let cov =
+            panel_cluster_cov_params(x_mat, &residuals, &xtx_inv, n, k_aux, &time_codes, k_aux);
+        let t_periods = time_codes.n_groups();
         let (f_stat, _) = wald_f_test(aux.params(), &cov, k_aux - 2, 2, t_periods - 1).unwrap();
 
         assert_eq!(re.hausman_df(), Some(2));
@@ -2862,10 +2867,10 @@ mod tests {
                     entity.extend(std::iter::repeat_n(format!("e{i}"), size));
                 }
 
-                let theta = compute_theta(&entity, sigma2_eps, sigma2_u);
+                let theta = compute_theta(&GroupCodes::from_ids(&entity), sigma2_eps, sigma2_u);
 
                 prop_assert_eq!(theta.len(), sizes.len());
-                for (id, t) in &theta {
+                for (id, t) in theta.iter().enumerate() {
                     prop_assert!((0.0..1.0).contains(t), "theta[{id}]={t}");
                 }
             }
@@ -2882,7 +2887,7 @@ mod tests {
 
                 let (theta, _, _) = quasi_demean_transform(&input, sigma2_eps, sigma2_u);
 
-                for (id, t) in &theta {
+                for (id, t) in theta.iter().enumerate() {
                     prop_assert!((0.0..1.0).contains(t), "theta[{id}]={t}");
                 }
             }

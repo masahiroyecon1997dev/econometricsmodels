@@ -62,8 +62,8 @@ FE固有の内容のみを記載する。
 `f_p_value` / `f_df_num` / `f_df_denom`（`(k, df_resid)`、`k=0`で`None`） / `log_likelihood` / `aic` / `bic` / `r_squared_within` / `r_squared_between` /
 `r_squared_overall`。
 
-- **`n_entities`はengine側にgetterが無い**: `FeEstimator`内部のprivateな`count_unique`のみで
-  外部公開されていないため、`engine_pybind`側で`FeInput::entity()`を`HashSet`に集めて独立に
+- **`n_entities`はengine側にgetterが無い**: `FeInput`内部のprivateなエンティティコード
+  （`GroupCodes`）でのみ数えており外部公開されていないため、`engine_pybind`側で`FeInput::entity()`を`HashSet`に集めて独立に
   計算する（`fit()`実装の一部）。
 - **`n_periods`は`FeEstimator::n_periods()`（engine側getter）から取得する**: `fit`内で自由度
   計算のために既に求めている`time`のユニーク数をそのまま保持して公開する（二重計算しない）。

@@ -57,7 +57,7 @@
 //! コードを書く過程で随時追加する（`LeastSquaresError`・`IvError`のdocコメントと同じ
 //! 「土台を用意し、必要になった時点で足す」方針）。
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 use faer::prelude::Solve;
@@ -390,39 +390,149 @@ pub(crate) fn group_indices_by_key(ids: &[String]) -> BTreeMap<&str, Vec<usize>>
     indices
 }
 
-/// `ids`のユニークID数を数える（`n_entities`/`n_periods`のカウント）。純粋な
-/// カーディナリティ集計のため`HashSet`でよい（`group_indices_by_key`と異なりグループ間の
-/// 加算順序に依存する計算が無いため反復順序非依存）。`group_indices_by_key`と同じ理由で
-/// FE/RE間の共有ロジックとしてここに移設した。
-pub(crate) fn count_unique(ids: &[String]) -> usize {
-    ids.iter().collect::<HashSet<_>>().len()
+/// パネル識別子（entity・time・クラスター列等、同一性だけが意味を持つ`String`列）を、
+/// 整数コードに一度だけ変換したもの。
+///
+/// within変換・準偏差変換・グループ平均・クラスター/DKの集計は、行ごとに「どのグループか」を
+/// 引く処理を列ごと・統計量ごとに繰り返す。`String`をキーにしたハッシュ表・`BTreeMap`で毎回
+/// 引き直すと、大標本（n=1,000,000・エンティティ166,666）では1列あたり約0.2秒かかり、FE/REの
+/// 計算時間の大半を占めていた（QR分解よりはるかに重い）。`FeInput`/`ReInput`の構築時に一度だけ
+/// コード化して保持し、以降はコードで配列を直接引く（1列あたり数ms）。
+///
+/// **コードはキーの辞書順（`String`の`Ord`、旧実装の`BTreeMap<&str, _>`の反復順と同じ）に
+/// 振る**。グループ間の加算順（クラスターの`Σ_g S_g S_g'`等）・between回帰の行順・DKの時点順
+/// （辞書順＝時系列順の規約、`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）を
+/// 旧実装と同じに保ち、結果をビット単位で変えないため。グループ内の行は観測順に積む
+/// （`group_indices`の安定な計数ソート）。
+///
+/// `engine`クレート内部専用（`FeInput`/`ReInput`の公開APIは引き続き`String`列で受け取る）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GroupCodes {
+    /// 各行のグループコード（長さ`n`、値は`0..n_groups`）。
+    codes: Vec<usize>,
+    /// グループごとの観測数（長さ`n_groups`、コード順）。
+    counts: Vec<usize>,
+    /// グループのキー（長さ`n_groups`、コード順＝辞書順）。
+    keys: Vec<String>,
 }
 
-/// `ids`に現れる全ユニークIDに`θ=1.0`を割り当てた`BTreeMap`を作る。
-///
-/// `quasi_demean_column`の`theta`引数はエンティティID→θ_iの対応（`&BTreeMap<String,
-/// f64>`）を要求するが、θ=1固定の通常のwithin変換（FEのwithin変換そのもの、REの
-/// `r_squared_within`計算——`docs/spec/re-spec.md`3.2節「FEはθ=1の特殊ケース」。
-/// `linearmodels`の`_rsquared`のWithinセクションはRE/FEどちらのモデルでも共通してθ=1の
-/// FE型within変換を使う、という点も参照）で毎回同じ組み立てが必要になるため、FE/RE共有
-/// ロジックとしてここに置く（`group_indices_by_key`/`count_unique`と同じ理由。最初は
-/// FE専用としてFE→common.rsへ移設し、後にREの`r_squared_within`計算でも同じ組み立てが
-/// 必要になったため改めて共有ロジックとして整理した）。
-///
-/// 先に`HashSet`でユニークなIDへ絞り込んでから`String`を複製する（`ids.iter().map(|id|
-/// (id.clone(), 1.0)).collect()`のように観測順のまま素朴に`collect`すると、`BTreeMap`の
-/// 重複キーは値のみ上書きされキー自体は複製されたまま即破棄されるため、観測数`n`分の
-/// ヒープ確保が発生してしまう。rust-reviewer指摘、ユニークID数分のみ複製するよう修正済み）。
-pub(crate) fn all_ones_theta(ids: &[String]) -> BTreeMap<String, f64> {
-    ids.iter()
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .map(|id| (id.clone(), 1.0))
-        .collect()
+impl GroupCodes {
+    /// `ids`を辞書順の整数コードに変換する。ハッシュは`ids`全体に1回、ソートはユニークな
+    /// キー（`n_groups`個）にだけ行う。
+    pub(crate) fn from_ids(ids: &[String]) -> Self {
+        // 1. 出現順の仮コード（ハッシュ1回/行）。
+        let mut first_seen: HashMap<&str, usize> = HashMap::new();
+        let mut unique: Vec<&str> = Vec::new();
+        let provisional: Vec<usize> = ids
+            .iter()
+            .map(|id| {
+                *first_seen.entry(id.as_str()).or_insert_with(|| {
+                    unique.push(id.as_str());
+                    unique.len() - 1
+                })
+            })
+            .collect();
+
+        // 2. ユニークなキーだけを辞書順に並べ、仮コード→辞書順コードの対応を作る。
+        let mut order: Vec<usize> = (0..unique.len()).collect();
+        order.sort_unstable_by(|&a, &b| unique[a].cmp(unique[b]));
+        let mut rank = vec![0; unique.len()];
+        for (r, &provisional_code) in order.iter().enumerate() {
+            rank[provisional_code] = r;
+        }
+
+        let codes: Vec<usize> = provisional.iter().map(|&c| rank[c]).collect();
+        let mut counts = vec![0; unique.len()];
+        for &c in &codes {
+            counts[c] += 1;
+        }
+        let keys = order.iter().map(|&c| unique[c].to_string()).collect();
+        Self {
+            codes,
+            counts,
+            keys,
+        }
+    }
+
+    /// 各行のグループコード（長さ`n`）。
+    pub(crate) fn codes(&self) -> &[usize] {
+        &self.codes
+    }
+
+    /// グループごとの観測数（コード順）。
+    pub(crate) fn counts(&self) -> &[usize] {
+        &self.counts
+    }
+
+    /// グループのキー（コード順＝辞書順）。
+    pub(crate) fn keys(&self) -> &[String] {
+        &self.keys
+    }
+
+    /// ユニークなグループ数。
+    pub(crate) fn n_groups(&self) -> usize {
+        self.counts.len()
+    }
+
+    /// 行数`n`。
+    pub(crate) fn nobs(&self) -> usize {
+        self.codes.len()
+    }
+
+    /// グループごとの行インデックス（コード順、グループ内は観測順）。旧実装の
+    /// `group_indices_by_key(ids).values()`と同じ順序・同じ中身を、計数ソートで`O(n)`で作る。
+    pub(crate) fn group_indices(&self) -> GroupIndices {
+        let mut offsets = Vec::with_capacity(self.counts.len() + 1);
+        offsets.push(0);
+        for &count in &self.counts {
+            offsets.push(offsets[offsets.len() - 1] + count);
+        }
+        let mut next = offsets[..self.counts.len()].to_vec();
+        let mut indices = vec![0; self.codes.len()];
+        for (i, &c) in self.codes.iter().enumerate() {
+            indices[next[c]] = i;
+            next[c] += 1;
+        }
+        GroupIndices { offsets, indices }
+    }
+}
+
+/// `validate_cluster_groups`（OLS等と共有、`String`列を受ける）と同じ検証をコードで行う
+/// （クラスター数`G`を返し、`G < 2`なら`CommonError::InsufficientClusters`）。FE/REの
+/// クラスター列は`GroupCodes`にしてあるため、文字列を数え直さない。
+pub(crate) fn validate_cluster_group_codes(
+    groups: &GroupCodes,
+    n: usize,
+) -> Result<usize, CommonError> {
+    debug_assert_eq!(
+        groups.nobs(),
+        n,
+        "groups length must match nobs (engine_pybind contract)"
+    );
+    let g = groups.n_groups();
+    if g < 2 {
+        return Err(CommonError::InsufficientClusters { g });
+    }
+    Ok(g)
+}
+
+/// `GroupCodes::group_indices`の結果（CSR形式: グループ`g`の行は
+/// `indices[offsets[g]..offsets[g+1]]`）。グループごとに`Vec`を確保しないため、グループ数が
+/// 多い（エンティティ166,666等）ときも確保は2回で済む。
+pub(crate) struct GroupIndices {
+    offsets: Vec<usize>,
+    indices: Vec<usize>,
+}
+
+impl GroupIndices {
+    /// グループごとの行インデックスをコード順に返す。
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &[usize]> {
+        self.offsets.windows(2).map(|w| &self.indices[w[0]..w[1]])
+    }
 }
 
 /// FE/RE共有のcov_type計算ヘルパー（元は`fe.rs`の`fe_*_cov_params`をFE→common.rsへ移設。
-/// `group_indices_by_key`/`count_unique`/`all_ones_theta`と同じ
+/// `group_indices_by_key`と同じ
 /// 「FE専用で書いたが後にREでも同じ数式が必要と判明したため共有ロジックとして移設した」
 /// 経緯）。**数式自体はFE実装時のまま変更していない**——移設したのは
 /// 呼び出し側（`fe.rs`/`re.rs`）が渡す`df_resid`・`extra_df`・レバレッジの値がFE/REで
@@ -550,14 +660,14 @@ pub(crate) fn panel_cluster_cov_params(
     xtx_inv: &Mat<f64>,
     n: usize,
     k: usize,
-    groups: &[String],
+    groups: &GroupCodes,
     k_correction: usize,
 ) -> Mat<f64> {
-    let group_indices = group_indices_by_key(groups);
-    let n_groups = group_indices.len();
+    let group_indices = groups.group_indices();
+    let n_groups = groups.n_groups();
 
     let mut s_hat = Mat::<f64>::zeros(k, k);
-    for indices in group_indices.values() {
+    for indices in group_indices.iter() {
         let mut s_g = vec![0.0_f64; k];
         for &i in indices {
             let e = residuals[i];
@@ -637,7 +747,7 @@ pub(crate) fn validate_dk_periods_cover_tested_coefficients(
 /// （ユニークな時点数）は`resolve_dk_bandwidth`の呼び出しで既に計算済みの値を
 /// 呼び出し元からそのまま受け取る（`time_indices.len()`で二重計算しない）。
 ///
-/// `time`を`group_indices_by_key`で集計して`ξ_t`（時点`t`でのクロスセクション和）を求める。
+/// `time`のコード（`GroupCodes`、辞書順＝時系列順）で集計して`ξ_t`（時点`t`でのクロスセクション和）を求める。
 /// キー順序（`String`の辞書順）がそのまま時系列順序とみなす規約（`fe.rs`モジュールdoc参照）と
 /// 一致することを利用している。
 ///
@@ -652,17 +762,18 @@ pub(crate) fn panel_driscoll_kraay_cov_params(
     x: &Mat<f64>,
     residuals: &[f64],
     xtx_inv: &Mat<f64>,
-    time: &[String],
+    time: &GroupCodes,
     k_correction: usize,
     bandwidth: usize,
     t_periods: usize,
 ) -> Mat<f64> {
     let n = x.nrows();
     let k = x.ncols();
-    let time_indices = group_indices_by_key(time);
+    debug_assert_eq!(time.n_groups(), t_periods);
+    let time_indices = time.group_indices();
 
     let mut xi = Mat::<f64>::zeros(t_periods, k);
-    for (row, indices) in time_indices.values().enumerate() {
+    for (row, indices) in time_indices.iter().enumerate() {
         for &i in indices {
             let e = residuals[i];
             for col in 0..k {
@@ -716,15 +827,15 @@ pub(crate) fn panel_driscoll_kraay_cov_params(
 ///
 /// # 引数
 /// - `col`: 変換対象の列（長さ`n`、行はパネルの観測順）。
-/// - `entity`: 各行のエンティティID（長さ`n`）。「グループの同一性だけが意味を持つ列」の
-///   ため文字列で扱う（`.claude/rules/rust-style.md`「Python境界でのデータ受け渡し」）。
-/// - `theta`: エンティティID → `θ_i`の対応。`entity`に現れる全IDをキーに持つこと。
+/// - `entity`: 各行のエンティティ（`FeInput`/`ReInput`が構築時に一度だけ作った整数コード、
+///   `GroupCodes`のdocコメント参照）。2-way FEの時点方向の変換では時点のコードを渡す。
+/// - `theta`: `θ_i`をコード順（`entity.keys()`の並び）に並べたもの（長さ`n_groups`）。
 ///
 /// # 前提（呼び出し側の契約、`engine`内部でのみ使用）
-/// - `entity.len() == col.len()`。`engine_pybind`の列抽出が保証する
-///   （`validate_cluster_groups`の`groups.len() == n`契約と同じ位置づけ）。
-/// - `theta`は`entity`の全ユニークIDをキーに持つ。RE/FEの`fit()`は同じ`entity`列から
-///   `theta`を組み立てるため、欠けは内部実装バグでしか起こり得ない。
+/// - `entity.nobs() == col.len()`。`FeInput`/`ReInput`が`y`・`x`と同じ長さの`entity`から
+///   コードを作るため、違反は内部実装バグでしか起こり得ない。
+/// - `theta.len() == entity.n_groups()`。RE/FEの`fit()`は同じ`entity`のコードから
+///   `theta`を組み立てる。
 /// - `col`は欠損値・非有限値を含まない（`engine`は常にクリーンな値を受け取る前提）。
 ///
 /// 契約違反時は`assert!`/`expect`でpanicする（`Result`は返さない）。ユーザー入力起因の
@@ -737,47 +848,39 @@ pub(crate) fn panel_driscoll_kraay_cov_params(
 /// 必要になった場合は、その時点で改めて検討する。
 ///
 /// # Panics
-/// - `entity.len() != col.len()`
-/// - `theta`に`entity`内のいずれかのIDが無い
-pub fn quasi_demean_column(
-    col: &[f64],
-    entity: &[String],
-    theta: &BTreeMap<String, f64>,
-) -> Vec<f64> {
+/// - `entity.nobs() != col.len()`
+/// - `theta.len() != entity.n_groups()`
+pub(crate) fn quasi_demean_column(col: &[f64], entity: &GroupCodes, theta: &[f64]) -> Vec<f64> {
     assert_eq!(
-        entity.len(),
+        entity.nobs(),
         col.len(),
-        "entity length must match column length (engine_pybind contract)"
+        "entity length must match column length (FeInput/ReInput contract)"
+    );
+    assert_eq!(
+        theta.len(),
+        entity.n_groups(),
+        "theta must have one value per entity group"
     );
 
-    // エンティティごとに (合計, 件数) を集約する。ここは`HashMap`でよい（`cluster_cov_params`
-    // の`BTreeMap`必須とは事情が異なる）: あるエンティティの和は観測順（＝入力行の固定順）に
-    // 積まれ、各行の変換結果もそのエンティティの和だけに依存する。エンティティ「間」を
-    // またぐ加算（`Σ_g S_g S_g'`のようにグループ順序が浮動小数点丸めに効く演算）は無いため、
-    // 反復順序に関わらずビット単位で決定的。`HashMap`にすることで集約・引き当てが
-    // O(n log G) → O(n)（G = エンティティ数）になる（rust-reviewer指摘）。
-    let mut sums: HashMap<&str, (f64, usize)> = HashMap::new();
-    for (value, id) in col.iter().zip(entity.iter()) {
-        let entry = sums.entry(id.as_str()).or_insert((0.0, 0));
-        entry.0 += *value;
-        entry.1 += 1;
+    // エンティティごとの和を観測順に積む（エンティティ「間」をまたぐ加算は無いため、
+    // コードの振り方によらずビット単位で決定的。旧実装の`String`キーの`HashMap`集約と
+    // 同じ加算順・同じ演算で、結果もビット単位で同じ）。
+    let mut sums = vec![0.0_f64; entity.n_groups()];
+    for (value, &c) in col.iter().zip(entity.codes()) {
+        sums[c] += *value;
     }
 
     // エンティティ単位で `θ_i · ȳ_i.`（各行から引く量）を先に求めておく。
-    let shift_by_entity: HashMap<&str, f64> = sums
+    let shift: Vec<f64> = sums
         .iter()
-        .map(|(id, (sum, count))| {
-            let mean = sum / *count as f64;
-            let theta_i = *theta
-                .get(*id)
-                .expect("theta must contain every entity id present in `entity`");
-            (*id, theta_i * mean)
-        })
+        .zip(entity.counts())
+        .zip(theta)
+        .map(|((sum, &count), &theta_i)| theta_i * (sum / count as f64))
         .collect();
 
     col.iter()
-        .zip(entity.iter())
-        .map(|(value, id)| value - shift_by_entity[id.as_str()])
+        .zip(entity.codes())
+        .map(|(value, &c)| value - shift[c])
         .collect()
 }
 
@@ -1073,15 +1176,85 @@ mod tests {
         );
     }
 
-    // ── quasi_demean_column ────────────────────────────────────────────────
+    // ── GroupCodes ─────────────────────────────────────────────────────────
 
-    /// `["a", "a", "b", "b", "b"]`のエンティティ列を作るヘルパ。
-    fn entities(ids: &[&str]) -> Vec<String> {
-        ids.iter().map(|s| s.to_string()).collect()
+    #[test]
+    fn group_codes_assigns_codes_in_key_order_not_appearance_order() {
+        // 出現順は "b", "a", "c" だが、コードは辞書順（旧`BTreeMap`の反復順）に振る。
+        let codes = entities(&["b", "a", "b", "c", "a", "b"]);
+        assert_eq!(codes.keys(), ["a", "b", "c"]);
+        assert_eq!(codes.codes(), [1, 0, 1, 2, 0, 1]);
+        assert_eq!(codes.counts(), [2, 3, 1]);
+        assert_eq!(codes.n_groups(), 3);
+        assert_eq!(codes.nobs(), 6);
     }
 
-    fn theta_map(pairs: &[(&str, f64)]) -> BTreeMap<String, f64> {
-        pairs.iter().map(|(k, v)| (k.to_string(), *v)).collect()
+    #[test]
+    fn group_codes_uses_string_byte_order_like_btreemap() {
+        // 数値文字列も`String`の辞書順（"10" < "9"）。DKの時系列順序の規約と同じ。
+        let ids: Vec<String> = ["9", "10", "2"].iter().map(|s| s.to_string()).collect();
+        let codes = GroupCodes::from_ids(&ids);
+        let btree_order: Vec<&str> = group_indices_by_key(&ids).keys().copied().collect();
+        assert_eq!(codes.keys(), btree_order.as_slice());
+    }
+
+    #[test]
+    fn group_indices_matches_group_indices_by_key() {
+        // コード順・グループ内の観測順とも旧実装の`group_indices_by_key`と同じ。
+        let ids: Vec<String> = ["b", "a", "b", "c", "a", "b"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let expected: Vec<Vec<usize>> = group_indices_by_key(&ids).into_values().collect();
+        let actual: Vec<Vec<usize>> = GroupCodes::from_ids(&ids)
+            .group_indices()
+            .iter()
+            .map(<[usize]>::to_vec)
+            .collect();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn group_codes_handles_empty_input() {
+        let codes = GroupCodes::from_ids(&[]);
+        assert_eq!(codes.n_groups(), 0);
+        assert_eq!(codes.nobs(), 0);
+        assert_eq!(codes.group_indices().iter().count(), 0);
+    }
+
+    #[test]
+    fn validate_cluster_group_codes_rejects_single_cluster() {
+        assert_eq!(
+            validate_cluster_group_codes(&entities(&["a", "a"]), 2),
+            Err(CommonError::InsufficientClusters { g: 1 })
+        );
+        assert_eq!(
+            validate_cluster_group_codes(&entities(&["a", "b"]), 2),
+            Ok(2)
+        );
+    }
+
+    // ── quasi_demean_column ────────────────────────────────────────────────
+
+    /// `["a", "a", "b", "b", "b"]`のエンティティ列から整数コードを作るヘルパ。
+    fn entities(ids: &[&str]) -> GroupCodes {
+        let ids: Vec<String> = ids.iter().map(|s| s.to_string()).collect();
+        GroupCodes::from_ids(&ids)
+    }
+
+    /// エンティティID→θの組を、`entity`のコード順（キーの辞書順）の`Vec`に並べるヘルパ。
+    fn theta_for(entity: &GroupCodes, pairs: &[(&str, f64)]) -> Vec<f64> {
+        entity
+            .keys()
+            .iter()
+            .map(|key| {
+                pairs
+                    .iter()
+                    .find(|(k, _)| k == key)
+                    .map(|(_, v)| *v)
+                    .expect("test helper: theta pair for every key")
+            })
+            .collect()
     }
 
     #[test]
@@ -1090,7 +1263,7 @@ mod tests {
         // a: mean = (10 + 20) / 2 = 15、b: mean = (3 + 6 + 9) / 3 = 6。
         let entity = entities(&["a", "a", "b", "b", "b"]);
         let col = [10.0, 20.0, 3.0, 6.0, 9.0];
-        let theta = theta_map(&[("a", 1.0), ("b", 1.0)]);
+        let theta = theta_for(&entity, &[("a", 1.0), ("b", 1.0)]);
 
         let out = quasi_demean_column(&col, &entity, &theta);
 
@@ -1105,7 +1278,7 @@ mod tests {
         // θ_i = 0.0 なら何も引かない（プーリングOLS相当）。
         let entity = entities(&["a", "a", "b", "b"]);
         let col = [1.5, -2.0, 7.0, 0.25];
-        let theta = theta_map(&[("a", 0.0), ("b", 0.0)]);
+        let theta = theta_for(&entity, &[("a", 0.0), ("b", 0.0)]);
 
         let out = quasi_demean_column(&col, &entity, &theta);
 
@@ -1119,7 +1292,7 @@ mod tests {
         // b: mean = 6、 θ_b = 1.0 → 引く量 6.0
         let entity = entities(&["a", "a", "b", "b", "b"]);
         let col = [10.0, 20.0, 3.0, 6.0, 9.0];
-        let theta = theta_map(&[("a", 0.5), ("b", 1.0)]);
+        let theta = theta_for(&entity, &[("a", 0.5), ("b", 1.0)]);
 
         let out = quasi_demean_column(&col, &entity, &theta);
 
@@ -1134,7 +1307,7 @@ mod tests {
         // b: mean = (2 + 4 + 6) / 3 = 4.0。
         let entity = entities(&["a", "b", "b", "b"]);
         let col = [4.0, 2.0, 4.0, 6.0];
-        let theta = theta_map(&[("a", 1.0), ("b", 1.0)]);
+        let theta = theta_for(&entity, &[("a", 1.0), ("b", 1.0)]);
 
         let out = quasi_demean_column(&col, &entity, &theta);
 
@@ -1147,7 +1320,7 @@ mod tests {
         // 行ごとに所属エンティティの平均を引く。出力長・行順は入力どおり。
         let entity = entities(&["x", "y", "x", "y", "x"]);
         let col = [1.0, 100.0, 2.0, 200.0, 3.0];
-        let theta = theta_map(&[("x", 1.0), ("y", 1.0)]);
+        let theta = theta_for(&entity, &[("x", 1.0), ("y", 1.0)]);
 
         let out = quasi_demean_column(&col, &entity, &theta);
 
@@ -1160,16 +1333,16 @@ mod tests {
     fn quasi_demean_column_panics_on_length_mismatch() {
         let entity = entities(&["a", "b"]);
         let col = [1.0, 2.0, 3.0];
-        let theta = theta_map(&[("a", 1.0), ("b", 1.0)]);
+        let theta = theta_for(&entity, &[("a", 1.0), ("b", 1.0)]);
         let _ = quasi_demean_column(&col, &entity, &theta);
     }
 
     #[test]
-    #[should_panic(expected = "theta must contain every entity id")]
-    fn quasi_demean_column_panics_when_theta_missing_an_entity() {
+    #[should_panic(expected = "theta must have one value per entity group")]
+    fn quasi_demean_column_panics_when_theta_length_differs_from_groups() {
         let entity = entities(&["a", "a", "b"]);
         let col = [1.0, 2.0, 3.0];
-        let theta = theta_map(&[("a", 1.0)]); // "b" が欠けている
+        let theta = vec![1.0]; // "b" の分が欠けている
         let _ = quasi_demean_column(&col, &entity, &theta);
     }
 
@@ -1180,7 +1353,7 @@ mod tests {
         // `fe-spec.md`1章の分散ゼロ検証・`fe-spec.md`1章のsingleton検証は消費側 fe.rs の責務）。
         let entity = entities(&["a", "a", "a", "a"]);
         let col = [3.0, 5.0, 7.0, 9.0]; // mean = 6.0
-        let theta = theta_map(&[("a", 1.0)]);
+        let theta = theta_for(&entity, &[("a", 1.0)]);
 
         let out = quasi_demean_column(&col, &entity, &theta);
 
@@ -1197,7 +1370,7 @@ mod tests {
         // b: mean = 20、θ_b =  2.0 → 引く量 40   → col[i] - 40
         let entity = entities(&["a", "a", "b", "b"]);
         let col = [8.0, 12.0, 15.0, 25.0];
-        let theta = theta_map(&[("a", -0.5), ("b", 2.0)]);
+        let theta = theta_for(&entity, &[("a", -0.5), ("b", 2.0)]);
 
         let out = quasi_demean_column(&col, &entity, &theta);
 

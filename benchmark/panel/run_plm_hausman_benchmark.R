@@ -11,9 +11,10 @@
 # - classical: vcovなし（補助回帰のclassical Wald）
 # - hc1/hc2/hc3: `vcovHC(method = "white1", type = "HC1"/"HC2"/"HC3")`
 # - cluster: `vcovHC(method = "arellano", type = "sss")`
-#   （`G/(G-1) * (nT-1)/(nT-k)`。本実装が補助回帰に使うOLSの`CovType::Cluster`と同式。
-#   RE本体のcluster標準誤差はlinearmodels型の補正で、この点は異なる）
-# - dk: `vcovSCC(maxlag = <bandwidth>, type = "HC1")`（`n/df_resid`補正、Bartlett重み）
+#   （`G/(G-1) * (nT-1)/(nT-k)`。本実装が補助回帰に使うOLSの`CovType::Cluster`と
+#   同式で、RE本体のcluster標準誤差の補正とも同じStata・R型）
+# - dk: `vcovSCC(maxlag = <bandwidth>, type = "sss")`（`T/(T-1) * (nT-1)/(nT-k)`補正、
+#   Bartlett重み。RE本体のDKの補正とも同じ）
 #
 # 比較は常に1-way。`cluster`はentityクラスターのみ（plmはgroup/timeしか
 # クラスターにできず、entity以外の列にはリファレンスが無い）。
@@ -53,7 +54,7 @@ if (cov_type == "classical") {
     stop("dk requires maxlag as the 6th argument")
   }
   maxlag <- as.integer(args[6])
-  vc <- function(x) vcovSCC(x, maxlag = maxlag, type = "HC1")
+  vc <- function(x) vcovSCC(x, maxlag = maxlag, type = "sss")
 } else {
   stop(paste("unknown cov_type:", cov_type))
 }

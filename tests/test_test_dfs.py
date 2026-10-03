@@ -56,6 +56,7 @@ def df() -> pl.DataFrame:
             "endog": endog,
             "w": rng.uniform(0.5, 2.0, size=N),
             "entity": entity,
+            "time": np.tile(np.arange(N_PERIODS), N_ENTITIES),
         }
     )
 
@@ -107,19 +108,37 @@ def test_wls_df_resid_df_model_and_f_dfs(df):
 
 
 def test_fe_f_dfs(df):
-    res = FE(df, y="y", x=["x1", "x2"], entity="entity").fit()
-    assert (res.f_df_num, res.f_df_denom) == (2, res.df_resid)
-    assert _f_p(res.f_statistic, 2, res.df_resid) == pytest.approx(
-        res.f_p_value, rel=1e-8
-    )
-    cluster = FE(
+    """FEのF検定の分母自由度は`t`検定と同じ`df_inference`（classicalは
+    `df_resid`、clusterは`G-1`、dkは`T-1`）。"""
+    classical = FE(
         df,
         y="y",
         x=["x1", "x2"],
         entity="entity",
-        options=FEOptions(cov_type="cluster"),
+        options=FEOptions(cov_type="classical"),
     ).fit()
-    assert cluster.f_df_denom == cluster.df_resid
+    assert (classical.f_df_num, classical.f_df_denom) == (
+        2,
+        classical.df_resid,
+    )
+    assert _f_p(classical.f_statistic, 2, classical.df_resid) == pytest.approx(
+        classical.f_p_value, rel=1e-8
+    )
+
+    cluster = FE(df, y="y", x=["x1", "x2"], entity="entity").fit()
+    assert (cluster.f_df_num, cluster.f_df_denom) == (2, N_ENTITIES - 1)
+    assert _f_p(cluster.f_statistic, 2, N_ENTITIES - 1) == pytest.approx(
+        cluster.f_p_value, rel=1e-8
+    )
+
+    dk = FE(
+        df,
+        y="y",
+        x=["x1", "x2"],
+        entity="entity",
+        options=FEOptions(cov_type="dk", dk_time="time"),
+    ).fit()
+    assert (dk.f_df_num, dk.f_df_denom) == (2, N_PERIODS - 1)
 
 
 def test_re_f_dfs_and_hausman_df(df):

@@ -51,7 +51,7 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:00.906545+00:00",
+        "generated_at": "2026-10-03T05:25:06.107639+00:00",
         "cov_type_requested": "classical",
         "cov_type_linearmodels": "unadjusted",
         "confidence_level": 0.95,
@@ -110,129 +110,11 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:00.937908+00:00",
+        "generated_at": "2026-10-03T05:25:06.135600+00:00",
         "cov_type_requested": "hc1",
         "cov_type_linearmodels": "robust",
         "confidence_level": 0.95,
         "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "cluster": {
-      "coef": {
-        "const": 0.11933110988079672,
-        "x1": 1.7795237785735103,
-        "x2": -0.12610262857318286
-      },
-      "se": {
-        "const": 0.1963679614812707,
-        "x1": 0.0999866311767566,
-        "x2": 0.11394288205063152
-      },
-      "test_stats": {
-        "const": 0.6076913411976238,
-        "x1": 17.797617117709105,
-        "x2": -1.106717912551554
-      },
-      "p_values": {
-        "const": 0.544110293033119,
-        "x1": 0.0,
-        "x2": 0.26980057644500643
-      },
-      "conf_int": {
-        "const": [
-          -0.2679843683516547,
-          0.5066465881132481
-        ],
-        "x1": [
-          1.5823104980620106,
-          1.97673705908501
-        ],
-        "x2": [
-          -0.3508431693402335,
-          0.0986379121938678
-        ]
-      },
-      "n_obs": 195,
-      "df_resid": 192,
-      "df_model": 3,
-      "n_entities": 40,
-      "f_statistic": 174.31778112073516,
-      "f_p_value": 0.0,
-      "r_squared_within": 0.6405001622801709,
-      "r_squared_between": 0.6560411271668456,
-      "r_squared_overall": 0.652722609455776,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:00.971267+00:00",
-        "cov_type_requested": "cluster",
-        "cov_type_linearmodels": "clustered",
-        "confidence_level": 0.95,
-        "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "dk": {
-      "coef": {
-        "const": 0.11933110988079672,
-        "x1": 1.7795237785735103,
-        "x2": -0.12610262857318286
-      },
-      "se": {
-        "const": 0.6080059170681235,
-        "x1": 0.03398417586342131,
-        "x2": 0.03712445160803206
-      },
-      "test_stats": {
-        "const": 0.19626636276210183,
-        "x1": 52.36330537263054,
-        "x2": -3.396753975105182
-      },
-      "p_values": {
-        "const": 0.8446092665846603,
-        "x1": 0.0,
-        "x2": 0.0008288217450285185
-      },
-      "conf_int": {
-        "const": [
-          -1.0798976276434817,
-          1.3185598474050753
-        ],
-        "x1": [
-          1.7124935093402465,
-          1.8465540478067741
-        ],
-        "x2": [
-          -0.19932676666688035,
-          -0.05287849047948537
-        ]
-      },
-      "n_obs": 195,
-      "df_resid": 192,
-      "df_model": 3,
-      "n_entities": 40,
-      "f_statistic": 174.31778112073516,
-      "f_p_value": 0.0,
-      "r_squared_within": 0.6405001622801709,
-      "r_squared_between": 0.6560411271668456,
-      "r_squared_overall": 0.652722609455776,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.001747+00:00",
-        "cov_type_requested": "dk",
-        "cov_type_linearmodels": "kernel",
-        "confidence_level": 0.95,
-        "hac_bandwidth": 2,
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     }
@@ -289,7 +171,7 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.032860+00:00",
+        "generated_at": "2026-10-03T05:25:06.164601+00:00",
         "cov_type_requested": "classical",
         "cov_type_linearmodels": "unadjusted",
         "confidence_level": 0.95,
@@ -348,129 +230,11 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.066042+00:00",
+        "generated_at": "2026-10-03T05:25:06.193839+00:00",
         "cov_type_requested": "hc1",
         "cov_type_linearmodels": "robust",
         "confidence_level": 0.95,
         "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "cluster": {
-      "coef": {
-        "const": 0.05369691562980433,
-        "x1": 1.717805414054935,
-        "x2": -0.18400351142861895
-      },
-      "se": {
-        "const": 0.20608364102255286,
-        "x1": 0.08331751740361375,
-        "x2": 0.09315122561649944
-      },
-      "test_stats": {
-        "const": 0.26055884573549426,
-        "x1": 20.617578002635355,
-        "x2": -1.9753203482920925
-      },
-      "p_values": {
-        "const": 0.7946589753943987,
-        "x1": 0.0,
-        "x2": 0.049392186356120193
-      },
-      "conf_int": {
-        "const": [
-          -0.35229280533601093,
-          0.4596866365956196
-        ],
-        "x1": [
-          1.5536679042826003,
-          1.8819429238272698
-        ],
-        "x2": [
-          -0.36751366249164114,
-          -0.0004933603655967733
-        ]
-      },
-      "n_obs": 240,
-      "df_resid": 237,
-      "df_model": 3,
-      "n_entities": 40,
-      "f_statistic": 183.69343065068836,
-      "f_p_value": 0.0,
-      "r_squared_within": 0.5899851972413936,
-      "r_squared_between": 0.6557873979398816,
-      "r_squared_overall": 0.62909496477827,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.100822+00:00",
-        "cov_type_requested": "cluster",
-        "cov_type_linearmodels": "clustered",
-        "confidence_level": 0.95,
-        "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "dk": {
-      "coef": {
-        "const": 0.05369691562980433,
-        "x1": 1.717805414054935,
-        "x2": -0.18400351142861895
-      },
-      "se": {
-        "const": 0.6904767402047163,
-        "x1": 0.036781445097653215,
-        "x2": 0.06119804773836953
-      },
-      "test_stats": {
-        "const": 0.07776788485863258,
-        "x1": 46.703043055927594,
-        "x2": -3.0066892364812103
-      },
-      "p_values": {
-        "const": 0.9380783086762299,
-        "x1": 0.0,
-        "x2": 0.0029254530560032244
-      },
-      "conf_int": {
-        "const": [
-          -1.3065588411986613,
-          1.41395267245827
-        ],
-        "x1": [
-          1.6453450840752182,
-          1.7902657440346519
-        ],
-        "x2": [
-          -0.30456513486302966,
-          -0.06344188799420826
-        ]
-      },
-      "n_obs": 240,
-      "df_resid": 237,
-      "df_model": 3,
-      "n_entities": 40,
-      "f_statistic": 183.69343065068836,
-      "f_p_value": 0.0,
-      "r_squared_within": 0.5899851972413936,
-      "r_squared_between": 0.6557873979398816,
-      "r_squared_overall": 0.62909496477827,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.131857+00:00",
-        "cov_type_requested": "dk",
-        "cov_type_linearmodels": "kernel",
-        "confidence_level": 0.95,
-        "hac_bandwidth": 2,
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     }
@@ -527,7 +291,7 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.161700+00:00",
+        "generated_at": "2026-10-03T05:25:06.220099+00:00",
         "cov_type_requested": "classical",
         "cov_type_linearmodels": "unadjusted",
         "confidence_level": 0.95,
@@ -586,129 +350,11 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.190125+00:00",
+        "generated_at": "2026-10-03T05:25:06.246527+00:00",
         "cov_type_requested": "hc1",
         "cov_type_linearmodels": "robust",
         "confidence_level": 0.95,
         "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "cluster": {
-      "coef": {
-        "const": -0.3449924454299357,
-        "x1": 2.656158114187345,
-        "x2": -1.3035678006159561
-      },
-      "se": {
-        "const": 0.44245771151295155,
-        "x1": 0.42484470905231353,
-        "x2": 0.35859422321289186
-      },
-      "test_stats": {
-        "const": -0.7797184599862875,
-        "x1": 6.252068244211739,
-        "x2": -3.635216956191868
-      },
-      "p_values": {
-        "const": 0.446276910179652,
-        "x1": 8.763239458753347e-06,
-        "x2": 0.002046337953540478
-      },
-      "conf_int": {
-        "const": [
-          -1.27849661771244,
-          0.5885117268525687
-        ],
-        "x1": [
-          1.7598141288687112,
-          3.5525020995059786
-        ],
-        "x2": [
-          -2.0601354788715525,
-          -0.5470001223603597
-        ]
-      },
-      "n_obs": 20,
-      "df_resid": 17,
-      "df_model": 3,
-      "n_entities": 5,
-      "f_statistic": 31.282197433054435,
-      "f_p_value": 2.0077347561153758e-06,
-      "r_squared_within": 0.12842703564019742,
-      "r_squared_between": 0.9170790226080543,
-      "r_squared_overall": 0.7863365890156315,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.267828+00:00",
-        "cov_type_requested": "cluster",
-        "cov_type_linearmodels": "clustered",
-        "confidence_level": 0.95,
-        "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "dk": {
-      "coef": {
-        "const": -0.3449924454299357,
-        "x1": 2.656158114187345,
-        "x2": -1.3035678006159561
-      },
-      "se": {
-        "const": 0.26797601642394114,
-        "x1": 0.4039588765335453,
-        "x2": 0.5590802602535746
-      },
-      "test_stats": {
-        "const": -1.287400454838293,
-        "x1": 6.575318104110962,
-        "x2": -2.331629093870555
-      },
-      "p_values": {
-        "const": 0.2152067134986153,
-        "x1": 4.718945219694959e-06,
-        "x2": 0.03227855398076662
-      },
-      "conf_int": {
-        "const": [
-          -0.9103724193668832,
-          0.22038752850701182
-        ],
-        "x1": [
-          1.8038793836728262,
-          3.5084368447018637
-        ],
-        "x2": [
-          -2.4831240429580523,
-          -0.12401155827386012
-        ]
-      },
-      "n_obs": 20,
-      "df_resid": 17,
-      "df_model": 3,
-      "n_entities": 5,
-      "f_statistic": 31.282197433054435,
-      "f_p_value": 2.0077347561153758e-06,
-      "r_squared_within": 0.12842703564019742,
-      "r_squared_between": 0.9170790226080543,
-      "r_squared_overall": 0.7863365890156315,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.296693+00:00",
-        "cov_type_requested": "dk",
-        "cov_type_linearmodels": "kernel",
-        "confidence_level": 0.95,
-        "hac_bandwidth": 1,
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     }
@@ -765,7 +411,7 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.327939+00:00",
+        "generated_at": "2026-10-03T05:25:06.275237+00:00",
         "cov_type_requested": "classical",
         "cov_type_linearmodels": "unadjusted",
         "confidence_level": 0.95,
@@ -824,129 +470,11 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.359787+00:00",
+        "generated_at": "2026-10-03T05:25:06.305540+00:00",
         "cov_type_requested": "hc1",
         "cov_type_linearmodels": "robust",
         "confidence_level": 0.95,
         "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "cluster": {
-      "coef": {
-        "const": 0.05455694841341626,
-        "x1": 1.9059315924621483,
-        "x2": -0.08720639484370406
-      },
-      "se": {
-        "const": 0.251727326762028,
-        "x1": 0.3081379794129682,
-        "x2": 0.18589893353547135
-      },
-      "test_stats": {
-        "const": 0.2167303372072592,
-        "x1": 6.185318655276207,
-        "x2": -0.4691064826741688
-      },
-      "p_values": {
-        "const": 0.8286049482117135,
-        "x1": 2.6944351194657656e-09,
-        "x2": 0.6394247686591572
-      },
-      "conf_int": {
-        "const": [
-          -0.44135192938247925,
-          0.5504658262093117
-        ],
-        "x1": [
-          1.2988923745013659,
-          2.5129708104229307
-        ],
-        "x2": [
-          -0.4534317574169965,
-          0.27901896772958834
-        ]
-      },
-      "n_obs": 240,
-      "df_resid": 237,
-      "df_model": 3,
-      "n_entities": 40,
-      "f_statistic": 51.31689138912958,
-      "f_p_value": 0.0,
-      "r_squared_within": 0.18467509327105058,
-      "r_squared_between": 0.569674501100595,
-      "r_squared_overall": 0.3345896443599615,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.402812+00:00",
-        "cov_type_requested": "cluster",
-        "cov_type_linearmodels": "clustered",
-        "confidence_level": 0.95,
-        "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "dk": {
-      "coef": {
-        "const": 0.05455694841341626,
-        "x1": 1.9059315924621483,
-        "x2": -0.08720639484370406
-      },
-      "se": {
-        "const": 0.45719859148996045,
-        "x1": 0.153587487136468,
-        "x2": 0.1333120102558359
-      },
-      "test_stats": {
-        "const": 0.11932877622308743,
-        "x1": 12.40941972550576,
-        "x2": -0.6541525754232372
-      },
-      "p_values": {
-        "const": 0.9051159726540376,
-        "x1": 0.0,
-        "x2": 0.5136477625396596
-      },
-      "conf_int": {
-        "const": [
-          -0.8461352543444902,
-          0.9552491511713228
-        ],
-        "x1": [
-          1.60336055510576,
-          2.2085026298185366
-        ],
-        "x2": [
-          -0.34983425592286516,
-          0.175421466235457
-        ]
-      },
-      "n_obs": 240,
-      "df_resid": 237,
-      "df_model": 3,
-      "n_entities": 40,
-      "f_statistic": 51.31689138912958,
-      "f_p_value": 0.0,
-      "r_squared_within": 0.18467509327105058,
-      "r_squared_between": 0.569674501100595,
-      "r_squared_overall": 0.3345896443599615,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.432149+00:00",
-        "cov_type_requested": "dk",
-        "cov_type_linearmodels": "kernel",
-        "confidence_level": 0.95,
-        "hac_bandwidth": 2,
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     }
@@ -1003,7 +531,7 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.463039+00:00",
+        "generated_at": "2026-10-03T05:25:06.334267+00:00",
         "cov_type_requested": "classical",
         "cov_type_linearmodels": "unadjusted",
         "confidence_level": 0.95,
@@ -1062,129 +590,11 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.492372+00:00",
+        "generated_at": "2026-10-03T05:25:06.364112+00:00",
         "cov_type_requested": "hc1",
         "cov_type_linearmodels": "robust",
         "confidence_level": 0.95,
         "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "cluster": {
-      "coef": {
-        "const": -0.023212487787487655,
-        "x1": 1.648436220581221,
-        "x2": -0.1947992274424688
-      },
-      "se": {
-        "const": 0.25993283531388217,
-        "x1": 0.08097436663688704,
-        "x2": 0.1195715050030737
-      },
-      "test_stats": {
-        "const": -0.08930186815166076,
-        "x1": 20.357506814141512,
-        "x2": -1.6291442299522891
-      },
-      "p_values": {
-        "const": 0.9289174280705859,
-        "x1": 0.0,
-        "x2": 0.10461092036269126
-      },
-      "conf_int": {
-        "const": [
-          -0.5352864144481074,
-          0.48886143887313216
-        ],
-        "x1": [
-          1.4889147740793334,
-          1.8079576670831088
-        ],
-        "x2": [
-          -0.4303579632586123,
-          0.040759508373674674
-        ]
-      },
-      "n_obs": 240,
-      "df_resid": 237,
-      "df_model": 3,
-      "n_entities": 40,
-      "f_statistic": 177.14911101292748,
-      "f_p_value": 0.0,
-      "r_squared_within": 0.6098378250246846,
-      "r_squared_between": 0.5584091427395581,
-      "r_squared_overall": 0.5761695260921451,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.526078+00:00",
-        "cov_type_requested": "cluster",
-        "cov_type_linearmodels": "clustered",
-        "confidence_level": 0.95,
-        "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "dk": {
-      "coef": {
-        "const": -0.023212487787487655,
-        "x1": 1.648436220581221,
-        "x2": -0.1947992274424688
-      },
-      "se": {
-        "const": 0.8664012455372049,
-        "x1": 0.040183390048713505,
-        "x2": 0.048779489286893477
-      },
-      "test_stats": {
-        "const": -0.026791844895253984,
-        "x1": 41.022826062780055,
-        "x2": -3.993465907294959
-      },
-      "p_values": {
-        "const": 0.978648303204968,
-        "x1": 0.0,
-        "x2": 8.690671150923812e-05
-      },
-      "conf_int": {
-        "const": [
-          -1.7300437441393235,
-          1.683618768564348
-        ],
-        "x1": [
-          1.5692739773658444,
-          1.7275984637965978
-        ],
-        "x2": [
-          -0.29089599255287174,
-          -0.09870246233206588
-        ]
-      },
-      "n_obs": 240,
-      "df_resid": 237,
-      "df_model": 3,
-      "n_entities": 40,
-      "f_statistic": 177.14911101292748,
-      "f_p_value": 0.0,
-      "r_squared_within": 0.6098378250246846,
-      "r_squared_between": 0.5584091427395581,
-      "r_squared_overall": 0.5761695260921451,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.557289+00:00",
-        "cov_type_requested": "dk",
-        "cov_type_linearmodels": "kernel",
-        "confidence_level": 0.95,
-        "hac_bandwidth": 2,
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     }
@@ -1241,7 +651,7 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.590673+00:00",
+        "generated_at": "2026-10-03T05:25:06.396231+00:00",
         "cov_type_requested": "classical",
         "cov_type_linearmodels": "unadjusted",
         "confidence_level": 0.95,
@@ -1300,129 +710,11 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.620272+00:00",
+        "generated_at": "2026-10-03T05:25:06.426265+00:00",
         "cov_type_requested": "hc1",
         "cov_type_linearmodels": "robust",
         "confidence_level": 0.95,
         "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "cluster": {
-      "coef": {
-        "const": -0.08017411408908891,
-        "x1": 2.1210602048469362,
-        "x2": -0.17524860306562998
-      },
-      "se": {
-        "const": 0.3214663183119478,
-        "x1": 0.12933707079993675,
-        "x2": 0.16801749128002122
-      },
-      "test_stats": {
-        "const": -0.2494012887884843,
-        "x1": 16.39947612643763,
-        "x2": -1.0430378511815608
-      },
-      "p_values": {
-        "const": 0.8031880403003124,
-        "x1": 0.0,
-        "x2": 0.29760811121568276
-      },
-      "conf_int": {
-        "const": [
-          -0.7122931071234913,
-          0.5519448789453134
-        ],
-        "x1": [
-          1.866736767836843,
-          2.3753836418570295
-        ],
-        "x2": [
-          -0.5056317298510347,
-          0.15513452371977468
-        ]
-      },
-      "n_obs": 375,
-      "df_resid": 372,
-      "df_model": 3,
-      "n_entities": 15,
-      "f_statistic": 119.66158181423384,
-      "f_p_value": 0.0,
-      "r_squared_within": 0.3007959142446276,
-      "r_squared_between": 0.7515928179803636,
-      "r_squared_overall": 0.472258529783532,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.655755+00:00",
-        "cov_type_requested": "cluster",
-        "cov_type_linearmodels": "clustered",
-        "confidence_level": 0.95,
-        "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "dk": {
-      "coef": {
-        "const": -0.08017411408908891,
-        "x1": 2.1210602048469362,
-        "x2": -0.17524860306562998
-      },
-      "se": {
-        "const": 1.1136484538651745,
-        "x1": 0.12205449740397657,
-        "x2": 0.1231365693004038
-      },
-      "test_stats": {
-        "const": -0.07199230045246874,
-        "x1": 17.3779766412592,
-        "x2": -1.4232051782934907
-      },
-      "p_values": {
-        "const": 0.942646725046228,
-        "x1": 0.0,
-        "x2": 0.15551478660179052
-      },
-      "conf_int": {
-        "const": [
-          -2.2700095623193413,
-          2.1096613341411636
-        ],
-        "x1": [
-          1.8810569398098407,
-          2.361063469884032
-        ],
-        "x2": [
-          -0.4173796126239935,
-          0.06688240649273353
-        ]
-      },
-      "n_obs": 375,
-      "df_resid": 372,
-      "df_model": 3,
-      "n_entities": 15,
-      "f_statistic": 119.66158181423384,
-      "f_p_value": 0.0,
-      "r_squared_within": 0.3007959142446276,
-      "r_squared_between": 0.7515928179803636,
-      "r_squared_overall": 0.472258529783532,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.687886+00:00",
-        "cov_type_requested": "dk",
-        "cov_type_linearmodels": "kernel",
-        "confidence_level": 0.95,
-        "hac_bandwidth": 2,
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     }
@@ -1479,7 +771,7 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.716749+00:00",
+        "generated_at": "2026-10-03T05:25:06.454004+00:00",
         "cov_type_requested": "classical",
         "cov_type_linearmodels": "unadjusted",
         "confidence_level": 0.95,
@@ -1538,129 +830,11 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.748015+00:00",
+        "generated_at": "2026-10-03T05:25:06.483184+00:00",
         "cov_type_requested": "hc1",
         "cov_type_linearmodels": "robust",
         "confidence_level": 0.95,
         "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "cluster": {
-      "coef": {
-        "const": 0.11539973483256198,
-        "x1": 1.6130393823484193,
-        "x2": -0.3285996947027969
-      },
-      "se": {
-        "const": 0.2108572895571847,
-        "x1": 0.1269397470525936,
-        "x2": 0.11338138526482135
-      },
-      "test_stats": {
-        "const": 0.5472883345646226,
-        "x1": 12.707126174436963,
-        "x2": -2.898180278317264
-      },
-      "p_values": {
-        "const": 0.5846956412574293,
-        "x1": 0.0,
-        "x2": 0.004105195521970195
-      },
-      "conf_int": {
-        "const": [
-          -0.2999941883637057,
-          0.5307936580288297
-        ],
-        "x1": [
-          1.3629650327802565,
-          1.863113731916582
-        ],
-        "x2": [
-          -0.5519637460073102,
-          -0.10523564339828348
-        ]
-      },
-      "n_obs": 240,
-      "df_resid": 237,
-      "df_model": 3,
-      "n_entities": 40,
-      "f_statistic": 131.54563144332744,
-      "f_p_value": 0.0,
-      "r_squared_within": 0.5593560610049066,
-      "r_squared_between": 0.20765726278680918,
-      "r_squared_overall": 0.4087635534456677,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.782307+00:00",
-        "cov_type_requested": "cluster",
-        "cov_type_linearmodels": "clustered",
-        "confidence_level": 0.95,
-        "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "dk": {
-      "coef": {
-        "const": 0.11539973483256198,
-        "x1": 1.6130393823484193,
-        "x2": -0.3285996947027969
-      },
-      "se": {
-        "const": 0.9290593328317432,
-        "x1": 0.12856640816344114,
-        "x2": 0.14254167247433977
-      },
-      "test_stats": {
-        "const": 0.12421137246512262,
-        "x1": 12.546351767857038,
-        "x2": -2.30528861489226
-      },
-      "p_values": {
-        "const": 0.901253201329113,
-        "x1": 0.0,
-        "x2": 0.022015079392990744
-      },
-      "conf_int": {
-        "const": [
-          -1.7148694579354762,
-          1.9456689276006
-        ],
-        "x1": [
-          1.3597604713350973,
-          1.8663182933617413
-        ],
-        "x2": [
-          -0.6094102119603251,
-          -0.047789177445268616
-        ]
-      },
-      "n_obs": 240,
-      "df_resid": 237,
-      "df_model": 3,
-      "n_entities": 40,
-      "f_statistic": 131.54563144332744,
-      "f_p_value": 0.0,
-      "r_squared_within": 0.5593560610049066,
-      "r_squared_between": 0.20765726278680918,
-      "r_squared_overall": 0.4087635534456677,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.813836+00:00",
-        "cov_type_requested": "dk",
-        "cov_type_linearmodels": "kernel",
-        "confidence_level": 0.95,
-        "hac_bandwidth": 2,
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     }
@@ -1717,7 +891,7 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.843920+00:00",
+        "generated_at": "2026-10-03T05:25:06.513956+00:00",
         "cov_type_requested": "classical",
         "cov_type_linearmodels": "unadjusted",
         "confidence_level": 0.95,
@@ -1776,129 +950,11 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.873544+00:00",
+        "generated_at": "2026-10-03T05:25:06.541858+00:00",
         "cov_type_requested": "hc1",
         "cov_type_linearmodels": "robust",
         "confidence_level": 0.95,
         "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "cluster": {
-      "coef": {
-        "const": 0.11539973483256209,
-        "x1": 1.1605854551294799,
-        "x2": 0.12347457139421746
-      },
-      "se": {
-        "const": 0.21085728955718466,
-        "x1": 1.59827659284256,
-        "x2": 1.5845383037410028
-      },
-      "test_stats": {
-        "const": 0.5472883345646231,
-        "x1": 0.7261480649387229,
-        "x2": 0.07792463653463041
-      },
-      "p_values": {
-        "const": 0.5846956412574293,
-        "x1": 0.4684645139493555,
-        "x2": 0.937953750373336
-      },
-      "conf_int": {
-        "const": [
-          -0.29999418836370556,
-          0.5307936580288297
-        ],
-        "x1": [
-          -1.988057808036343,
-          4.309228718295302
-        ],
-        "x2": [
-          -2.998103932379672,
-          3.2450530751681073
-        ]
-      },
-      "n_obs": 240,
-      "df_resid": 237,
-      "df_model": 3,
-      "n_entities": 40,
-      "f_statistic": 103.31760754622488,
-      "f_p_value": 0.0,
-      "r_squared_within": 0.4985698771242283,
-      "r_squared_between": 0.18051269963393612,
-      "r_squared_overall": 0.35489631495244756,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.907189+00:00",
-        "cov_type_requested": "cluster",
-        "cov_type_linearmodels": "clustered",
-        "confidence_level": 0.95,
-        "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "dk": {
-      "coef": {
-        "const": 0.11539973483256209,
-        "x1": 1.1605854551294799,
-        "x2": 0.12347457139421746
-      },
-      "se": {
-        "const": 0.9290593328317435,
-        "x1": 1.8139795021283323,
-        "x2": 1.8279405154740624
-      },
-      "test_stats": {
-        "const": 0.1242113724651227,
-        "x1": 0.6398007550624312,
-        "x2": 0.06754846251777251
-      },
-      "p_values": {
-        "const": 0.901253201329113,
-        "x1": 0.52292012802834,
-        "x2": 0.9462020337292207
-      },
-      "conf_int": {
-        "const": [
-          -1.7148694579354762,
-          1.9456689276006005
-        ],
-        "x1": [
-          -2.412997718443213,
-          4.734168628702173
-        ],
-        "x2": [
-          -3.477612133679129,
-          3.724561276467564
-        ]
-      },
-      "n_obs": 240,
-      "df_resid": 237,
-      "df_model": 3,
-      "n_entities": 40,
-      "f_statistic": 103.31760754622488,
-      "f_p_value": 0.0,
-      "r_squared_within": 0.4985698771242283,
-      "r_squared_between": 0.18051269963393612,
-      "r_squared_overall": 0.35489631495244756,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.938733+00:00",
-        "cov_type_requested": "dk",
-        "cov_type_linearmodels": "kernel",
-        "confidence_level": 0.95,
-        "hac_bandwidth": 2,
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     }
@@ -1955,7 +1011,7 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.969112+00:00",
+        "generated_at": "2026-10-03T05:25:06.570763+00:00",
         "cov_type_requested": "classical",
         "cov_type_linearmodels": "unadjusted",
         "confidence_level": 0.95,
@@ -2014,129 +1070,11 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:01.999750+00:00",
+        "generated_at": "2026-10-03T05:25:06.599091+00:00",
         "cov_type_requested": "hc1",
         "cov_type_linearmodels": "robust",
         "confidence_level": 0.95,
         "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "cluster": {
-      "coef": {
-        "const": 0.05369691562980481,
-        "x1": 1.6444769825629713,
-        "x2": 1.4605291391029913
-      },
-      "se": {
-        "const": 0.20608364102255414,
-        "x1": 0.0008331751740361305,
-        "x2": 0.9315122561649916
-      },
-      "test_stats": {
-        "const": 0.260558845735495,
-        "x1": 1973.746978797593,
-        "x2": 1.5679118867592217
-      },
-      "p_values": {
-        "const": 0.7946589753943978,
-        "x1": 0.0,
-        "x2": 0.11823586022142396
-      },
-      "conf_int": {
-        "const": [
-          -0.352292805336013,
-          0.45968663659562264
-        ],
-        "x1": [
-          1.642835607465248,
-          1.6461183576606946
-        ],
-        "x2": [
-          -0.3745723715272249,
-          3.2956306497332077
-        ]
-      },
-      "n_obs": 240,
-      "df_resid": 237,
-      "df_model": 3,
-      "n_entities": 40,
-      "f_statistic": 1680070.406274475,
-      "f_p_value": 0.0,
-      "r_squared_within": 0.9999387917205472,
-      "r_squared_between": 0.9998627785145633,
-      "r_squared_overall": 0.9999118613632002,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:02.034320+00:00",
-        "cov_type_requested": "cluster",
-        "cov_type_linearmodels": "clustered",
-        "confidence_level": 0.95,
-        "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "dk": {
-      "coef": {
-        "const": 0.05369691562980481,
-        "x1": 1.6444769825629713,
-        "x2": 1.4605291391029913
-      },
-      "se": {
-        "const": 0.6904767402047108,
-        "x1": 0.0003678144509765866,
-        "x2": 0.6119804773836801
-      },
-      "test_stats": {
-        "const": 0.07776788485863388,
-        "x1": 4470.941743035679,
-        "x2": 2.386561652010535
-      },
-      "p_values": {
-        "const": 0.9380783086762288,
-        "x1": 0.0,
-        "x2": 0.017792396906144203
-      },
-      "conf_int": {
-        "const": [
-          -1.3065588411986502,
-          1.4139526724582598
-        ],
-        "x1": [
-          1.643752379263174,
-          1.6452015858627684
-        ],
-        "x2": [
-          0.2549129047589145,
-          2.666145373447068
-        ]
-      },
-      "n_obs": 240,
-      "df_resid": 237,
-      "df_model": 3,
-      "n_entities": 40,
-      "f_statistic": 1680070.406274475,
-      "f_p_value": 0.0,
-      "r_squared_within": 0.9999387917205472,
-      "r_squared_between": 0.9998627785145633,
-      "r_squared_overall": 0.9999118613632002,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:02.066414+00:00",
-        "cov_type_requested": "dk",
-        "cov_type_linearmodels": "kernel",
-        "confidence_level": 0.95,
-        "hac_bandwidth": 2,
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     }
@@ -2355,7 +1293,7 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:02.109374+00:00",
+        "generated_at": "2026-10-03T05:25:06.672306+00:00",
         "cov_type_requested": "classical",
         "cov_type_linearmodels": "unadjusted",
         "confidence_level": 0.95,
@@ -2576,453 +1514,11 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:02.148695+00:00",
+        "generated_at": "2026-10-03T05:25:06.709244+00:00",
         "cov_type_requested": "hc1",
         "cov_type_linearmodels": "robust",
         "confidence_level": 0.95,
         "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "cluster": {
-      "coef": {
-        "const": 0.23443405679675253,
-        "x1": -0.6546269547162793,
-        "x2": 2.630459994137649,
-        "x3": 2.0443065867911003,
-        "x4": -2.1572304151543125,
-        "x5": -3.003089660859334,
-        "x6": 3.55162791023471,
-        "x7": -3.865464655364614,
-        "x8": 4.587324571250365,
-        "x9": -4.973597650777769,
-        "x10": -5.4766619903357725,
-        "x11": 5.999289384708895,
-        "x12": 6.510732003339382,
-        "x13": 6.995592780857112,
-        "x14": 7.491090041472687,
-        "x15": 7.998040847537724,
-        "x16": 8.50285658341105,
-        "x17": 9.002799997694515,
-        "x18": -9.497104836479801,
-        "x19": 10.00094189240881,
-        "x20": -10.498343966484326
-      },
-      "se": {
-        "const": 0.19926038273256622,
-        "x1": 0.6916475698613848,
-        "x2": 0.48406348817841627,
-        "x3": 0.3914165931327334,
-        "x4": 0.25961256962567864,
-        "x5": 0.13129024822221205,
-        "x6": 0.09868351384287812,
-        "x7": 0.06570509189276065,
-        "x8": 0.07002563312500731,
-        "x9": 0.03239729381480635,
-        "x10": 0.020325705077460895,
-        "x11": 0.017722932845119777,
-        "x12": 0.013261864488286614,
-        "x13": 0.007946886924338668,
-        "x14": 0.005886412931437303,
-        "x15": 0.004351147878263393,
-        "x16": 0.003924356624915273,
-        "x17": 0.0022508200864380214,
-        "x18": 0.00138143824514131,
-        "x19": 0.0012998191013993063,
-        "x20": 0.0008293694685675773
-      },
-      "test_stats": {
-        "const": 1.1765211608139587,
-        "x1": -0.9464747412435428,
-        "x2": 5.434121883549526,
-        "x3": 5.222840887835981,
-        "x4": -8.309422067909527,
-        "x5": -22.873668848401667,
-        "x6": 35.99008357048919,
-        "x7": -58.83051897520455,
-        "x8": 65.50921950339576,
-        "x9": -153.51892288314264,
-        "x10": -269.4451173754766,
-        "x11": 338.50432302240944,
-        "x12": 490.93639956055273,
-        "x13": 880.2934844123604,
-        "x14": 1272.606955836441,
-        "x15": 1838.1450300718943,
-        "x16": 2166.688044972118,
-        "x17": 3999.7865897587885,
-        "x18": -6874.795069473644,
-        "x19": 7694.102880656549,
-        "x20": -12658.223342385936
-      },
-      "p_values": {
-        "const": 0.24066391309102597,
-        "x1": 0.344949632416339,
-        "x2": 1.4620687505129126e-07,
-        "x3": 4.092421235224464e-07,
-        "x4": 9.992007221626409e-15,
-        "x5": 0.0,
-        "x6": 0.0,
-        "x7": 0.0,
-        "x8": 0.0,
-        "x9": 0.0,
-        "x10": 0.0,
-        "x11": 0.0,
-        "x12": 0.0,
-        "x13": 0.0,
-        "x14": 0.0,
-        "x15": 0.0,
-        "x16": 0.0,
-        "x17": 0.0,
-        "x18": 0.0,
-        "x19": 0.0,
-        "x20": 0.0
-      },
-      "conf_int": {
-        "const": [
-          -0.15827933797397611,
-          0.6271474515674812
-        ],
-        "x1": [
-          -2.017764279960395,
-          0.7085103705278366
-        ],
-        "x2": [
-          1.676440870415282,
-          3.5844791178600164
-        ],
-        "x3": [
-          1.2728810934201773,
-          2.8157320801620234
-        ],
-        "x4": [
-          -2.6688892413831433,
-          -1.6455715889254816
-        ],
-        "x5": [
-          -3.26184375122378,
-          -2.744335570494888
-        ],
-        "x6": [
-          3.357136977327318,
-          3.7461188431421024
-        ],
-        "x7": [
-          -3.9949598883711674,
-          -3.7359694223580604
-        ],
-        "x8": [
-          4.449314176367205,
-          4.725334966133525
-        ],
-        "x9": [
-          -5.037448031174122,
-          -4.909747270381416
-        ],
-        "x10": [
-          -5.5167210152789865,
-          -5.4366029653925585
-        ],
-        "x11": [
-          5.964360047389284,
-          6.034218722028506
-        ],
-        "x12": [
-          6.4845947865341005,
-          6.536869220144664
-        ],
-        "x13": [
-          6.979930616110069,
-          7.011254945604154
-        ],
-        "x14": [
-          7.479488772953447,
-          7.502691309991928
-        ],
-        "x15": [
-          7.989465364388544,
-          8.006616330686905
-        ],
-        "x16": [
-          8.495122244094189,
-          8.510590922727912
-        ],
-        "x17": [
-          8.998363956846648,
-          9.007236038542382
-        ],
-        "x18": [
-          -9.499827451459637,
-          -9.494382221499965
-        ],
-        "x19": [
-          9.998380136956479,
-          10.00350364786114
-        ],
-        "x20": [
-          -10.49997853375281,
-          -10.496709399215842
-        ]
-      },
-      "n_obs": 240,
-      "df_resid": 219,
-      "df_model": 21,
-      "n_entities": 40,
-      "f_statistic": 18393421.68796121,
-      "f_p_value": 0.0,
-      "r_squared_within": 0.9999995468860114,
-      "r_squared_between": 0.999996079698333,
-      "r_squared_overall": 0.9999988911369113,
-      "true_beta": [
-        -1.0,
-        1.5,
-        2.0,
-        -2.5,
-        -3.0,
-        3.5,
-        -4.0,
-        4.5,
-        -5.0,
-        -5.5,
-        6.0,
-        6.5,
-        7.0,
-        7.5,
-        8.0,
-        8.5,
-        9.0,
-        -9.5,
-        10.0,
-        -10.5
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:02.190788+00:00",
-        "cov_type_requested": "cluster",
-        "cov_type_linearmodels": "clustered",
-        "confidence_level": 0.95,
-        "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "dk": {
-      "coef": {
-        "const": 0.23443405679675253,
-        "x1": -0.6546269547162793,
-        "x2": 2.630459994137649,
-        "x3": 2.0443065867911003,
-        "x4": -2.1572304151543125,
-        "x5": -3.003089660859334,
-        "x6": 3.55162791023471,
-        "x7": -3.865464655364614,
-        "x8": 4.587324571250365,
-        "x9": -4.973597650777769,
-        "x10": -5.4766619903357725,
-        "x11": 5.999289384708895,
-        "x12": 6.510732003339382,
-        "x13": 6.995592780857112,
-        "x14": 7.491090041472687,
-        "x15": 7.998040847537724,
-        "x16": 8.50285658341105,
-        "x17": 9.002799997694515,
-        "x18": -9.497104836479801,
-        "x19": 10.00094189240881,
-        "x20": -10.498343966484326
-      },
-      "se": {
-        "const": 0.11992640271125105,
-        "x1": 0.3494216399448725,
-        "x2": 0.3009765034090856,
-        "x3": 0.3565687836135897,
-        "x4": 0.21246406561074688,
-        "x5": 0.11583149852160074,
-        "x6": 0.05291417248294031,
-        "x7": 0.11305188314697888,
-        "x8": 0.02299686760936331,
-        "x9": 0.018877898840393696,
-        "x10": 0.016280349093918744,
-        "x11": 0.0159655587394463,
-        "x12": 0.014791137800192242,
-        "x13": 0.005882900576463357,
-        "x14": 0.012971990443121945,
-        "x15": 0.0033041744577787455,
-        "x16": 0.0011376708449292044,
-        "x17": 0.002756974914416498,
-        "x18": 0.0004987162520597034,
-        "x19": 0.000525239753359749,
-        "x20": 0.00046207046996008
-      },
-      "test_stats": {
-        "const": 1.954816049650081,
-        "x1": -1.873458537998844,
-        "x2": 8.739751988421311,
-        "x3": 5.733274141593103,
-        "x4": -10.153389510612826,
-        "x5": -25.926364582940327,
-        "x6": 67.12054150293602,
-        "x7": -34.191952825227325,
-        "x8": 199.47606122594752,
-        "x9": -263.4613996413409,
-        "x10": -336.3970857591432,
-        "x11": 375.7644491255027,
-        "x12": 440.1779018822177,
-        "x13": 1189.140066185289,
-        "x14": 577.4819272584833,
-        "x15": 2420.5867304338594,
-        "x16": 7473.916222174236,
-        "x17": 3265.4631533344655,
-        "x18": -19043.102760851805,
-        "x19": 19040.71774544249,
-        "x20": -22720.222669480085
-      },
-      "p_values": {
-        "const": 0.05187724813420225,
-        "x1": 0.06233707458858495,
-        "x2": 6.661338147750939e-16,
-        "x3": 3.242660273627962e-08,
-        "x4": 0.0,
-        "x5": 0.0,
-        "x6": 0.0,
-        "x7": 0.0,
-        "x8": 0.0,
-        "x9": 0.0,
-        "x10": 0.0,
-        "x11": 0.0,
-        "x12": 0.0,
-        "x13": 0.0,
-        "x14": 0.0,
-        "x15": 0.0,
-        "x16": 0.0,
-        "x17": 0.0,
-        "x18": 0.0,
-        "x19": 0.0,
-        "x20": 0.0
-      },
-      "conf_int": {
-        "const": [
-          -0.0019235376508448254,
-          0.47079165124434985
-        ],
-        "x1": [
-          -1.3432864692032958,
-          0.03403255977073716
-        ],
-        "x2": [
-          2.037278837004962,
-          3.2236411512703365
-        ],
-        "x3": [
-          1.3415610858447327,
-          2.747052087737468
-        ],
-        "x4": [
-          -2.575966359191775,
-          -1.7384944711168497
-        ],
-        "x5": [
-          -3.2313767914067553,
-          -2.774802530311913
-        ],
-        "x6": [
-          3.4473417293979054,
-          3.655914091071515
-        ],
-        "x7": [
-          -4.088273566032322,
-          -3.642655744696905
-        ],
-        "x8": [
-          4.542001071294595,
-          4.632648071206135
-        ],
-        "x9": [
-          -5.0108032590280525,
-          -4.936392042527486
-        ],
-        "x10": [
-          -5.508748203726752,
-          -5.444575776944793
-        ],
-        "x11": [
-          5.967823577577557,
-          6.030755191840233
-        ],
-        "x12": [
-          6.481580810019478,
-          6.539883196659286
-        ],
-        "x13": [
-          6.983998434681523,
-          7.0071871270327
-        ],
-        "x14": [
-          7.465524124485119,
-          7.516655958460255
-        ],
-        "x15": [
-          7.991528797573579,
-          8.004552897501869
-        ],
-        "x16": [
-          8.500614398720261,
-          8.50509876810184
-        ],
-        "x17": [
-          8.997366398887314,
-          9.008233596501716
-        ],
-        "x18": [
-          -9.498087734081862,
-          -9.49612193887774
-        ],
-        "x19": [
-          9.999906720821855,
-          10.001977063995763
-        ],
-        "x20": [
-          -10.499254640550053,
-          -10.497433292418599
-        ]
-      },
-      "n_obs": 240,
-      "df_resid": 219,
-      "df_model": 21,
-      "n_entities": 40,
-      "f_statistic": 18393421.68796121,
-      "f_p_value": 0.0,
-      "r_squared_within": 0.9999995468860114,
-      "r_squared_between": 0.999996079698333,
-      "r_squared_overall": 0.9999988911369113,
-      "true_beta": [
-        -1.0,
-        1.5,
-        2.0,
-        -2.5,
-        -3.0,
-        3.5,
-        -4.0,
-        4.5,
-        -5.0,
-        -5.5,
-        6.0,
-        6.5,
-        7.0,
-        7.5,
-        8.0,
-        8.5,
-        9.0,
-        -9.5,
-        10.0,
-        -10.5
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:02.230640+00:00",
-        "cov_type_requested": "dk",
-        "cov_type_linearmodels": "kernel",
-        "confidence_level": 0.95,
-        "hac_bandwidth": 2,
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     }
@@ -3079,7 +1575,7 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:02.261204+00:00",
+        "generated_at": "2026-10-03T05:25:06.739221+00:00",
         "cov_type_requested": "classical",
         "cov_type_linearmodels": "unadjusted",
         "confidence_level": 0.95,
@@ -3138,129 +1634,11 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:02.291876+00:00",
+        "generated_at": "2026-10-03T05:25:06.777379+00:00",
         "cov_type_requested": "hc1",
         "cov_type_linearmodels": "robust",
         "confidence_level": 0.95,
         "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "cluster": {
-      "coef": {
-        "const": 0.13566133257069668,
-        "x1": 1.6525409079729252,
-        "x2": -0.23632418359417956
-      },
-      "se": {
-        "const": 0.21943791746719193,
-        "x1": 0.017975337885364536,
-        "x2": 0.11091910817387036
-      },
-      "test_stats": {
-        "const": 0.6182219287192212,
-        "x1": 91.9337883110625,
-        "x2": -2.1305993844066204
-      },
-      "p_values": {
-        "const": 0.5370227113055019,
-        "x1": 0.0,
-        "x2": 0.03415224828715102
-      },
-      "conf_int": {
-        "const": [
-          -0.29663663363262416,
-          0.5679592987740175
-        ],
-        "x1": [
-          1.6171290607436404,
-          1.68795275520221
-        ],
-        "x2": [
-          -0.4548374899092529,
-          -0.017810877279106213
-        ]
-      },
-      "n_obs": 240,
-      "df_resid": 237,
-      "df_model": 3,
-      "n_entities": 40,
-      "f_statistic": 7710.491078562253,
-      "f_p_value": 0.0,
-      "r_squared_within": 0.9869673148549111,
-      "r_squared_between": 0.9252739131446681,
-      "r_squared_overall": 0.9726889220332432,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:02.325583+00:00",
-        "cov_type_requested": "cluster",
-        "cov_type_linearmodels": "clustered",
-        "confidence_level": 0.95,
-        "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "dk": {
-      "coef": {
-        "const": 0.13566133257069668,
-        "x1": 1.6525409079729252,
-        "x2": -0.23632418359417956
-      },
-      "se": {
-        "const": 0.8151467012568278,
-        "x1": 0.0037605655383109184,
-        "x2": 0.07093756454797716
-      },
-      "test_stats": {
-        "const": 0.16642566590961883,
-        "x1": 439.43946492557984,
-        "x2": -3.331439204320957
-      },
-      "p_values": {
-        "const": 0.8679638724466967,
-        "x1": 0.0,
-        "x2": 0.001002096723208279
-      },
-      "conf_int": {
-        "const": [
-          -1.4701972409065043,
-          1.7415199060478974
-        ],
-        "x1": [
-          1.6451325035697566,
-          1.6599493123760938
-        ],
-        "x2": [
-          -0.37607288899324626,
-          -0.09657547819511286
-        ]
-      },
-      "n_obs": 240,
-      "df_resid": 237,
-      "df_model": 3,
-      "n_entities": 40,
-      "f_statistic": 7710.491078562253,
-      "f_p_value": 0.0,
-      "r_squared_within": 0.9869673148549111,
-      "r_squared_between": 0.9252739131446681,
-      "r_squared_overall": 0.9726889220332432,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:02.358370+00:00",
-        "cov_type_requested": "dk",
-        "cov_type_linearmodels": "kernel",
-        "confidence_level": 0.95,
-        "hac_bandwidth": 2,
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     }
@@ -3317,7 +1695,7 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:02.389149+00:00",
+        "generated_at": "2026-10-03T05:25:06.813011+00:00",
         "cov_type_requested": "classical",
         "cov_type_linearmodels": "unadjusted",
         "confidence_level": 0.95,
@@ -3376,129 +1754,11 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:02.420545+00:00",
+        "generated_at": "2026-10-03T05:25:06.847867+00:00",
         "cov_type_requested": "hc1",
         "cov_type_linearmodels": "robust",
         "confidence_level": 0.95,
         "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "cluster": {
-      "coef": {
-        "const": -0.4803289521983946,
-        "x1": 2.156376268425162,
-        "x2": -0.14129439589117196
-      },
-      "se": {
-        "const": 0.6341979194930409,
-        "x1": 0.6599012156821501,
-        "x2": 0.6543507485803531
-      },
-      "test_stats": {
-        "const": -0.7573802080308862,
-        "x1": 3.26772586135651,
-        "x2": -0.21593067051228604
-      },
-      "p_values": {
-        "const": 0.4495744532975481,
-        "x1": 0.001244864239217991,
-        "x2": 0.8292275162536511
-      },
-      "conf_int": {
-        "const": [
-          -1.7297140809476634,
-          0.7690561765508741
-        ],
-        "x1": [
-          0.856355029036834,
-          3.45639750781349
-        ],
-        "x2": [
-          -1.4303810818200047,
-          1.147792290037661
-        ]
-      },
-      "n_obs": 240,
-      "df_resid": 237,
-      "df_model": 3,
-      "n_entities": 40,
-      "f_statistic": 6.499991656975753,
-      "f_p_value": 0.00178562973548968,
-      "r_squared_within": 0.01585206058492894,
-      "r_squared_between": 0.21675364762367744,
-      "r_squared_overall": 0.05199993672649994,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:02.454517+00:00",
-        "cov_type_requested": "cluster",
-        "cov_type_linearmodels": "clustered",
-        "confidence_level": 0.95,
-        "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "dk": {
-      "coef": {
-        "const": -0.4803289521983946,
-        "x1": 2.156376268425162,
-        "x2": -0.14129439589117196
-      },
-      "se": {
-        "const": 0.660843717638425,
-        "x1": 0.28697458779785456,
-        "x2": 0.5215611169521087
-      },
-      "test_stats": {
-        "const": -0.7268419739464067,
-        "x1": 7.514171498502569,
-        "x2": -0.27090669012457463
-      },
-      "p_values": {
-        "const": 0.46804007071224185,
-        "x1": 1.1677325773007396e-12,
-        "x2": 0.786698591550802
-      },
-      "conf_int": {
-        "const": [
-          -1.7822069430704364,
-          0.821549038673647
-        ],
-        "x1": [
-          1.5910294400877265,
-          2.7217230967625974
-        ],
-        "x2": [
-          -1.1687823191797204,
-          0.8861935273973766
-        ]
-      },
-      "n_obs": 240,
-      "df_resid": 237,
-      "df_model": 3,
-      "n_entities": 40,
-      "f_statistic": 6.499991656975753,
-      "f_p_value": 0.00178562973548968,
-      "r_squared_within": 0.01585206058492894,
-      "r_squared_between": 0.21675364762367744,
-      "r_squared_overall": 0.05199993672649994,
-      "true_beta": [
-        1.64373629133578,
-        -0.3667293614876863
-      ],
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:02.485662+00:00",
-        "cov_type_requested": "dk",
-        "cov_type_linearmodels": "kernel",
-        "confidence_level": 0.95,
-        "hac_bandwidth": 2,
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
       }
     }
@@ -3559,7 +1819,7 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:02.539282+00:00",
+        "generated_at": "2026-10-03T05:25:06.905422+00:00",
         "cov_type_requested": "classical",
         "cov_type_linearmodels": "unadjusted",
         "confidence_level": 0.95,
@@ -3622,72 +1882,9 @@
       "_meta": {
         "reference": "linearmodels",
         "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:02.582552+00:00",
+        "generated_at": "2026-10-03T05:25:06.959310+00:00",
         "cov_type_requested": "hc1",
         "cov_type_linearmodels": "robust",
-        "confidence_level": 0.95,
-        "hac_bandwidth": null,
-        "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
-      }
-    },
-    "cluster": {
-      "coef": {
-        "const": 1.405208142353912,
-        "married": 0.13155515683824903,
-        "union": 0.10345076388066518,
-        "expersq": 0.0031917201875317574
-      },
-      "se": {
-        "const": 0.021021293806574547,
-        "married": 0.019966346404729787,
-        "union": 0.02184784852550455,
-        "expersq": 0.00023625496615179285
-      },
-      "test_stats": {
-        "const": 66.84689131334171,
-        "married": 6.5888447576510645,
-        "union": 4.7350549762325445,
-        "expersq": 13.509642736911148
-      },
-      "p_values": {
-        "const": 0.0,
-        "married": 4.959743726828947e-11,
-        "union": 2.2595342756837056e-06,
-        "expersq": 0.0
-      },
-      "conf_int": {
-        "const": [
-          1.3639957122911481,
-          1.4464205724166759
-        ],
-        "married": [
-          0.09241096036845377,
-          0.1706993533080443
-        ],
-        "union": [
-          0.06061786607407968,
-          0.14628366168725068
-        ],
-        "expersq": [
-          0.0027285402634461037,
-          0.003654900111617411
-        ]
-      },
-      "n_obs": 4360,
-      "df_resid": 4356,
-      "df_model": 4,
-      "n_entities": 545,
-      "f_statistic": 186.99957350122625,
-      "f_p_value": 0.0,
-      "r_squared_within": 0.13455343954726018,
-      "r_squared_between": -0.03672347149721733,
-      "r_squared_overall": 0.04251400143557893,
-      "_meta": {
-        "reference": "linearmodels",
-        "linearmodels_version": "7.0",
-        "generated_at": "2026-09-26T01:38:02.630835+00:00",
-        "cov_type_requested": "cluster",
-        "cov_type_linearmodels": "clustered",
         "confidence_level": 0.95,
         "hac_bandwidth": null,
         "note": "aic/bicはlinearmodels.RandomEffectsが提供しないためこのフィクスチャに含まない（PanelOLSと同じ理由）。hc2/hc3も同じ理由で対象外——generate_re_crosscheck_fixtures.py（plm）のみで検証する単一参照実装の例外。ハウスマン検定はlinearmodelsに専用実装が無いため本フィクスチャに含まず、plm::phtestのみを参照値とする（panel-common.md5.3節、generate_re_crosscheck_fixtures.py参照）。"
@@ -3696,9 +1893,9 @@
   },
   "_meta": {
     "method": "re",
-    "generated_at": "2026-09-26T01:38:02.630981+00:00",
+    "generated_at": "2026-10-03T05:25:06.959472+00:00",
     "primary_reference": "linearmodels",
     "linearmodels_version": "7.0",
-    "note": "合成データはFE（tests/fixtures/benchmarks/data/fe_*.csv）と同じ固定済みCSVを再利用する（RE専用のデータセット生成・凍結コードは追加しない、ユーザー確認済み・2026-09-20。benchmark/linear系統でOLS/WLSがprefix\"synthetic\"を共有する前例と同型）。singleton_entity/singleton_time/unbalanced_two_way/zero_variance_regressorシナリオはここに含まない（いずれもFE同様ValidationErrorの発生確認のみ、テストコード側で対応）。hc2/hc3はlinearmodels.RandomEffectsが提供しないため対象外（generate_re_crosscheck_fixtures.pyのplmクロスチェックのみで検証する単一参照実装の例外）。aic/bicも同じ理由でlinearmodelsに無く、かつplmのmodel=\"random\"もlogLik()未対応のため、REのaic/bic/log_likelihoodは独立検証していない（式自体の正しさはOLS本体のテストで別途担保、linearmodels_ref.pyモジュールdoc参照）。ハウスマン検定（hausman_statistic/hausman_p_value/hausman_df）はlinearmodelsに専用実装が無いため本フィクスチャに含まない——plm::phtestのみを参照値とする例外としてgenerate_re_crosscheck_fixtures.json側にのみ含める（panel-common.md5.3節）。v1のハウスマン検定ベンチマークは1-way（REOptions.time未指定の内部FE呼び出し）に限定する（RE自身がv1でentity方向のみをサポートするため、`re-spec.md`5章。2-way内部FE呼び出しのクロスチェックは別issueで検討、ユーザー確認済み・2026-09-20）。wagepan（Wooldridge、N=545人×T=8年、1980-1987、バランスパネル）はFEと同じ変数選定理由（benchmark/common/constants.pyのWAGEPAN_X参照）。hacはwagepan（T=8）には適用しない（Driscoll-Kraay HACは20時点以上を推奨するため、合成データのcross_sectionally_correlatedシナリオ（T=25）でのみ数値照合する）。"
+    "note": "合成データはFE（tests/fixtures/benchmarks/data/fe_*.csv）と同じ固定済みCSVを再利用する（RE専用のデータセット生成・凍結コードは追加しない、ユーザー確認済み・2026-09-20。benchmark/linear系統でOLS/WLSがprefix\"synthetic\"を共有する前例と同型）。singleton_entity/singleton_time/unbalanced_two_way/zero_variance_regressorシナリオはここに含まない（いずれもFE同様ValidationErrorの発生確認のみ、テストコード側で対応）。hc2/hc3はlinearmodels.RandomEffectsが提供しないため対象外（generate_re_crosscheck_fixtures.pyのplmクロスチェックのみで検証する単一参照実装の例外）。cluster/dkは本実装の小標本補正がStata・R型に変わりlinearmodelsと一致しないため同様にplmのみで検証する。aic/bicも同じ理由でlinearmodelsに無く、かつplmのmodel=\"random\"もlogLik()未対応のため、REのaic/bic/log_likelihoodは独立検証していない（式自体の正しさはOLS本体のテストで別途担保、linearmodels_ref.pyモジュールdoc参照）。ハウスマン検定（hausman_statistic/hausman_p_value/hausman_df）はlinearmodelsに専用実装が無いため本フィクスチャに含まない——plm::phtestのみを参照値とする例外としてgenerate_re_crosscheck_fixtures.json側にのみ含める（panel-common.md5.3節）。v1のハウスマン検定ベンチマークは1-way（REOptions.time未指定の内部FE呼び出し）に限定する（RE自身がv1でentity方向のみをサポートするため、`re-spec.md`5章。2-way内部FE呼び出しのクロスチェックは別issueで検討、ユーザー確認済み・2026-09-20）。wagepan（Wooldridge、N=545人×T=8年、1980-1987、バランスパネル）はFEと同じ変数選定理由（benchmark/common/constants.pyのWAGEPAN_X参照）。"
   }
 }

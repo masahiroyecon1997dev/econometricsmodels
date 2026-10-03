@@ -1,7 +1,7 @@
 """FEのテストフィクスチャ（tests/fixtures/benchmarks/fe.json）を生成する。
 
 `benchmark/panel/references/linearmodels_ref.py`（1回呼べば1ケース分の結果を
-返す汎用アダプタ）を全シナリオ×全cov_type×1-way/2-wayの組み合わせで呼び出し、
+返す汎用アダプタ）を全シナリオ×classical/hc1×1-way/2-wayの組み合わせで呼び出し、
 結果を1つのJSONにまとめて書き出す。
 
 このスクリプト自体は`benchmark/`側に置く（ベンチマーク生成ツールの一部）。
@@ -21,32 +21,25 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import linearmodels
-import polars as pl
 
 from benchmark.common import (
     BENCHMARKS_DIR,
-    DATA_DIR,
     WAGEPAN_ENTITY,
     WAGEPAN_TIME,
     WAGEPAN_X,
     WAGEPAN_Y,
-    imbalanced_cluster_groups,
     run_fixture_cli,
 )
 from benchmark.panel.references.linearmodels_ref import run
 
-# hc2/hc3はlinearmodels.PanelOLSが提供しないため対象外（fixestクロスチェック
-# 側のみで検証する単一参照実装の例外、`linearmodels_ref.py`モジュールdoc
-# 参照）。dkはcross_sectionally_correlatedシナリオが本来の目的（他シナリオ
-# でも動くことの確認はできるが統計的な意味は薄い、OLSのHACと同じ扱い）。
-COV_TYPES = ["classical", "hc1", "cluster", "dk"]
-
-# many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ高次元シナリオ。
-# baseline既定のn_periods=6（Driscoll-Kraay HACがfixestドキュメント推奨の
-# 「20時点以上」を大きく下回る）との組み合わせで、HACの傾き係数共分散部分
-# 行列が数値的に特異になりComputationErrorになることを実測確認済み（ユーザー
-# 確認済み、dkをこのシナリオのcov_type検証から除外する）。
-COV_TYPES_NO_HAC = ["classical", "hc1", "cluster"]
+# classical/hc1のみlinearmodelsと比較する。hc2/hc3はlinearmodels.PanelOLSが
+# 提供しないため対象外（fixestクロスチェック側のみで検証する単一参照実装の例外、
+# `linearmodels_ref.py`モジュールdoc参照）。cluster/dkは本実装の小標本補正が
+# fixest・Stata型（`G/(G-1)·(n-1)/(n-K)`、t分布の自由度`G-1`/`T-1`）に変わり
+# linearmodelsの`n/(n-extra_df-k)`とは一致しなくなったため、linearmodelsでは
+# なくfixestのみで検証する（`generate_fe_crosscheck_fixtures.py`、
+# `docs/spec/fe-spec.md`4章）。
+COV_TYPES = ["classical", "hc1"]
 
 # unbalancedは1-way専用（`fe-spec.md`3.1節: 2-way FEはバランスパネル必須、2-way要求時の
 # ValidationErrorはunbalanced_two_wayシナリオで別途確認する。数値比較対象外）。
@@ -69,19 +62,12 @@ TWO_WAY_SCENARIOS = [
 
 NUMERIC_SCENARIOS = ONE_WAY_ONLY_SCENARIOS + TWO_WAY_SCENARIOS
 
-# シナリオ別のcov_type一覧（既定はCOV_TYPES、many_regressorsのみ上記の理由でdkを除く）。
-SCENARIO_COV_TYPES: dict[str, list[str]] = {
-    "many_regressors": COV_TYPES_NO_HAC,
-}
-
 # singleton_entity/singleton_time/unbalanced_two_way/zero_variance_regressorは
 # ここに含まない（いずれもValidationErrorの発生確認のみ、testing-policy.md
 # 「テストの3系統」参照。テストコード側で対応）。
 
-# 実データ（Wooldridge wagepan）。T=8年と短くDriscoll-Kraay HACの前提
-# （fixestドキュメントが20時点以上を推奨）を満たさないため対象外
-# （dkの数値照合は合成データのcross_sectionally_correlatedで十分カバーする）。
-WAGEPAN_COV_TYPES = ["classical", "hc1", "cluster"]
+# 実データ（Wooldridge wagepan）。
+WAGEPAN_COV_TYPES = ["classical", "hc1"]
 
 
 # many_regressorsのみx1..x20（他シナリオはx1, x2の既定）。
@@ -105,58 +91,6 @@ def _run_effects(scenario: str, cov_type: str, *, two_way: bool) -> dict:
     )
 
 
-def _run_cluster_imbalanced_case() -> dict:
-    """クラスター不均衡シナリオ（`fe_baseline_cluster_imbalanced.csv`、
-    entity=20×period=10のn=200データ）の数値照合。
-
-    entityとは無関係な専用クラスター列（サイズ[2,3,5,10,30,50]のタイル、
-    `testing-policy.md`「テスト用データセット」3.）をCSVには含めず、ここで
-    都度動的生成する（`benchmark/linear/fixtures/generate_ols_fixtures.py`の
-    `_run_cluster_case`と同じ方針）。`entity_nested_within_cluster=false`側の
-    `extra_df`分岐（`engine/src/panel/CLAUDE.md`「cov_type対応」参照）を
-    意図的に踏む。
-    """
-    df = pl.read_csv(DATA_DIR / "fe_baseline_cluster_imbalanced.csv")
-    groups = imbalanced_cluster_groups(df.height)
-    df = df.with_columns(pl.Series("cluster_group", groups))
-    return run(
-        "baseline_cluster_imbalanced",
-        ["x1", "x2"],
-        "cluster",
-        entity_col="entity",
-        time_col="time",
-        two_way=False,
-        cluster="cluster_group",
-        dataset_source="synthetic",
-        df_override=df,
-    )
-
-
-def _run_cluster_g2_case() -> dict:
-    """クラスタ数境界（G=2、q=1でG>q）の成功パス確認用
-    （`fe_baseline_k1.csv`、k=1に絞ったbaseline、`benchmark/panel/freeze.py`
-    参照）。`test_ols_reference.py::test_cluster_g2_matches_statsmodels`と
-    同型: 説明変数1個（q=1）に絞ることで、既定のG=40（entity）ではなく
-    entityとは無関係な2グループ（G=2）でもロバストWald検定のq×q部分行列が
-    特異にならない（`G<=q`ならValidationError、testing-policy.md
-    「グループ数が境界値に近いケース」参照）。
-    """
-    df = pl.read_csv(DATA_DIR / "fe_baseline_k1.csv")
-    groups = [str(i % 2) for i in range(df.height)]
-    df = df.with_columns(pl.Series("cluster_group", groups))
-    return run(
-        "baseline_k1",
-        ["x1"],
-        "cluster",
-        entity_col="entity",
-        time_col="time",
-        two_way=False,
-        cluster="cluster_group",
-        dataset_source="synthetic",
-        df_override=df,
-    )
-
-
 def _run_boundary_df1_case(*, two_way: bool) -> dict:
     """df_resid=1境界の成功パス（1-way/2-wayでそれぞれ別データ、
     `benchmark/panel/freeze.py`参照）。"""
@@ -176,20 +110,18 @@ def build_fixtures() -> dict:
     fixtures: dict = {}
 
     for scenario in NUMERIC_SCENARIOS:
-        cov_types = SCENARIO_COV_TYPES.get(scenario, COV_TYPES)
-        fixtures[scenario] = {"one_way": {}}
-        for cov_type in cov_types:
-            fixtures[scenario]["one_way"][cov_type] = _run_effects(
-                scenario, cov_type, two_way=False
-            )
+        fixtures[scenario] = {
+            "one_way": {
+                cov_type: _run_effects(scenario, cov_type, two_way=False)
+                for cov_type in COV_TYPES
+            }
+        }
         if scenario in TWO_WAY_SCENARIOS:
             fixtures[scenario]["two_way"] = {
                 cov_type: _run_effects(scenario, cov_type, two_way=True)
-                for cov_type in cov_types
+                for cov_type in COV_TYPES
             }
 
-    fixtures["baseline"]["cluster_imbalanced"] = _run_cluster_imbalanced_case()
-    fixtures["baseline"]["cluster_g2"] = _run_cluster_g2_case()
     fixtures["baseline_df1"] = {
         "one_way": _run_boundary_df1_case(two_way=False),
         "two_way": _run_boundary_df1_case(two_way=True),
@@ -249,29 +181,13 @@ def build_fixtures() -> dict:
             "within変換で分散ゼロになり除外、exper自体も2-way FEでentity+time"
             "効果と完全共線になるため除外している"
             "（benchmark/common/constants.pyのWAGEPAN_X参照）。"
-            "dkはwagepan（T=8）には適用しない"
-            "（Driscoll-Kraay HACはfixestドキュメントが20時点以上を推奨する"
-            "ほど時点数に依存するため、合成データのcross_sectionally_"
-            "correlatedシナリオ（T=25）でのみ数値照合する）。"
+            "cluster/dkはここに含まない（本実装の小標本補正がfixest・Stata型に"
+            "変わりlinearmodelsとは一致しないため、fixestクロスチェックのみで"
+            "検証する、モジュールdoc・COV_TYPESのコメント参照）。"
             "moderate_multicollinearity/high_condition_number/"
             "scale_variance_mild/many_regressors/"
             "outlier_regressor/high_varianceは悪条件・"
             "高次元・外れ値シナリオ（`benchmark/panel/datasets.py`参照）。"
-            "many_regressorsのみn_periods=6（baseline既定）とk=20の組み合わせで"
-            "Driscoll-Kraay HACの傾き係数共分散部分行列が数値的に特異になり"
-            "ComputationErrorになるため、cov_type検証からdkを除外している"
-            "（SCENARIO_COV_TYPES参照、ユーザー確認済み）。"
-            "baseline.cluster_imbalancedはentityとは無関係な専用クラスター列"
-            "（サイズ[2,3,5,10,30,50]のタイル）での数値照合。"
-            "fe_baseline_cluster_imbalanced.csv（entity=20×period=10のn=200、"
-            "imbalanced_cluster_groupsが100の倍数のnを要求するためbaseline本体"
-            "〔n=240〕とは別データ）を使い、クラスター列自体はCSVに含めず"
-            "都度動的生成する（generate_ols_fixtures.pyの_run_cluster_caseと"
-            "同じ方針）。"
-            "baseline.cluster_g2はクラスタ数境界（G=2、q=1でG>q）の成功パス。"
-            "fe_baseline_k1.csv（k=1に絞ったbaseline）にentityとは無関係な"
-            "2グループ（行番号%2）を都度動的付与する"
-            "（generate_ols_fixtures.pyのcluster_g2ケースと同じ方針）。"
             "baseline_df1は自由度ちょうど1の境界成功パス。1-way"
             "（entity=3×period=2、k=2、df_resid=6-3-2=1）と2-way"
             "（entity=3×period=3、k=3、df_resid=9-(3+3+3-1)=1）で別データ"

@@ -5,15 +5,20 @@
 # 独立した実装のため、testing-policy.mdの役割分担「R: 独立実装によるクロスチェック用」
 # に対応する。
 #
-# classical/hc1/hc2/hc3/clusterのみを対象とする。cov_type="dk"
-# （Driscoll-Kraay）はfixestのvcov="DK"が既定バンド幅公式（n_t^0.25、
-# Newey-West 1987）・小標本補正の慣行（デフォルトで(N-1)/(N-K)*T/(T-1)倍）とも
-# 本実装・linearmodelsの式（floor(4*(T/100)^(2/9))、debiased補正）と異なり、
-# 明示的にバンド幅を揃えssc()の各種フラグを試しても標準誤差が1e-8はおろか
-# 実用的な緩和後の許容誤差でも一致しないことを実測確認済み（規約上の
-# 系統的な差、実装バグではない）。このためdkはlinearmodelsのみを参照実装と
-# する単一参照実装の例外として扱う（ユーザー確認済み、panel-common.md
-# 5.4節と同型）。
+# classical/hc1/hc2/hc3/cluster/dkを対象とする。標準誤差の小標本補正は
+# fixestの`ssc()`既定値のまま使う（`ssc`を上書きしない）。本実装のFEが
+# fixestの既定（cluster: `K.fixef="nonnested"`・`G.adj=TRUE`・`t.df="min"`、
+# hc1〜hc3/dk: `K.fixef="full"`、DKは`G`の代わりに時点数）に合わせて実装して
+# いるため（`docs/spec/fe-spec.md`3.3節）、1-way・2-wayとも全cov_typeで機械精度
+# （相対誤差1e-14程度）で一致する。t検定・信頼区間の自由度も同じ`ssc()`既定
+# （clusterで`G-1`、DKで`T-1`）に従うため、`summary(vcov=)`・`confint()`の値を
+# そのまま使える。
+#
+# dk（Driscoll-Kraay）はfixestの既定バンド幅（`n_t^0.25`）が本実装の既定
+# （`floor(4*(T/100)^(2/9))`）と異なるため、バンド幅（lag）を第4引数で明示的に
+# 渡し、時点列を第5引数で渡す。`lag == T-1`（許容範囲の上限ちょうど）では
+# fixestの内部実装が最後のラグ項を切り捨てるらしく本実装と一致しないため
+# （`fe-spec.md`3.3節の既知の制約）、`lag < T-1`で使うこと。
 #
 # aic/bicはlinearmodels.PanelOLSが提供しないため、このスクリプト
 # （fixest::AIC()/BIC()、本実装と同じ式に数値一致することを
@@ -48,12 +53,15 @@
 #
 #   # 2-way FE（entity + time）、cluster
 #   Rscript run_fixest_benchmark.R data.csv "y ~ x1 + x2 | entity + time" cluster entity
+#
+#   # 1-way FE、Driscoll-Kraay（バンド幅2、時点列time）
+#   Rscript run_fixest_benchmark.R data.csv "y ~ x1 + x2 | entity" dk 2 time
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 3) {
   stop(
     "usage: Rscript run_fixest_benchmark.R <data.csv> <formula with | fe> ",
-    "<cov_type> [cluster]"
+    "<cov_type> [cluster | lag time (dk)]"
   )
 }
 data_path <- args[1]
@@ -68,31 +76,8 @@ suppressMessages(library(fixest))
 
 model <- feols(as.formula(formula_str), data = df)
 
-# fixestのvcov指定文字列（classical以外はvcov()呼び出しに使うキーワードまたは
-# 片側formula）。classical/hc1/hc2/hc3は既定のsscで本実装と機械精度で一致する
-# ことを実測確認済み（1-way・2-way双方、相対誤差1e-14程度）。
-#
-# clusterのみ既定sscでは一致しない（実測確認済み）: fixestの既定
-# `ssc(K.adj=TRUE, K.fixef="nonnested", G.adj=TRUE, ...)`のうち、
-# `G.adj`（クラスタ数によるG/(G-1)補正、Stata流）は本実装・linearmodelsが
-# 採用しない補正（`engine/src/panel/CLAUDE.md`「cov_type対応」参照、OLSの
-# clusterとは異なりFEはこの補正を使わない）のため`G.adj=FALSE`が必要。
-# さらに`K.fixef`（固定効果の自由度カウント方法）は1-way/2-wayで最適な値が
-# 異なることも実測で判明した:
-#   - 1-way（クラスター変数=entity=FE次元自体）: 既定の"nonnested"のままで
-#     相対誤差1.8e-5程度まで一致する（本実装の`entity_nested_within_cluster`
-#     判定によるextra_df=0と、fixestの"nonnested"判定が同じ状況を指すため）。
-#   - 2-way（entity+time FE、entityでクラスター）: "nonnested"のままだと
-#     相対誤差9%超とかなり乖離する。"full"に切り替えると相対誤差0.2%程度まで
-#     縮む（本実装のextra_df=n_entities+n_periods-1相当のカウントに
-#     fixestの"full"が近いため）が、それでも1-way程の精度は出ない
-#     （fixestの"full"はentity/time間の定数項重複による"-1"補正を持たない
-#     ため、と推測される）。
-# このためclusterのみ、他のcov_typeより緩い許容誤差（実測値に基づき
-# フィクスチャ生成側・テストコード側で個別に設定すること、
-# `.claude/rules/testing-policy.md`「許容誤差」参照）で比較する。
-n_fe_terms <- length(strsplit(trimws(strsplit(formula_str, "\\|")[[1]][2]), "\\+")[[1]])
-
+# fixestのvcov指定（classical以外はvcov()呼び出しに使うキーワードまたは
+# 片側formula）。小標本補正は`ssc()`既定（モジュールコメント参照）。
 if (cov_type == "classical") {
   vc <- "iid"
 } else if (cov_type %in% c("hc1", "hc2", "hc3")) {
@@ -103,20 +88,16 @@ if (cov_type == "classical") {
   }
   cluster <- args[4]
   vc <- as.formula(paste0("~", cluster))
+} else if (cov_type == "dk") {
+  if (length(args) < 5) {
+    stop("dk requires <lag> as arg4 and <time> as arg5")
+  }
+  vc <- as.formula(paste0("DK(", as.integer(args[4]), ") ~ ", args[5]))
 } else {
   stop(paste("unknown cov_type (or unsupported for R crosscheck):", cov_type))
 }
 
-if (cov_type == "cluster") {
-  k_fixef <- if (n_fe_terms >= 2) "full" else "nonnested"
-  summ <- summary(
-    model,
-    vcov = vc,
-    ssc = ssc(G.adj = FALSE, K.fixef = k_fixef)
-  )
-} else {
-  summ <- summary(model, vcov = vc)
-}
+summ <- summary(model, vcov = vc)
 
 coefs <- coef(summ)
 ses <- se(summ)

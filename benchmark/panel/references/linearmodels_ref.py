@@ -28,6 +28,13 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/panel/freeze.py`参
 | cluster          | clustered              | `cluster`省略時は`entity`列を使う |
 | dk               | kernel (bartlett)      | Driscoll-Kraay相当（`panel_effects=True`は不要、`PanelOLS`が自動判定） |
 
+**`cluster`/`dk`はフィクスチャ生成の対象外**: 本実装のFE/REのcluster・dkは
+小標本補正と推論の自由度をfixest・Stata型（`G/(G-1)·(n-1)/(n-K)`、t分布の
+自由度`G-1`/`T-1`）に変更したため、linearmodels（`n/(n-extra_df-k)`、自由度は
+常に`df_resid`）とは一致しない。この2つはFEが`fixest`、REが`plm`のみで検証する
+（`generate_fe_crosscheck_fixtures.py`・`generate_re_crosscheck_fixtures.py`）。
+下表の対応自体は、linearmodels側の値を単発で確認する用途（CLI）のために残している。
+
 **`hc2`/`hc3`は対象外**: `linearmodels.PanelOLS`はパネル向けの`HC2`/`HC3`を
 提供しない（`'unadjusted'/'robust'/'clustered'/'kernel'`のみ、指定すると
 `Unknown covariance estimator type`で失敗することを実測確認済み）。この2つは

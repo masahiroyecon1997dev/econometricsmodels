@@ -1,16 +1,23 @@
 """RE の主リファレンス（linearmodels）との数値照合。
 
 `tests/fixtures/benchmarks/re.json`（`benchmark/panel/fixtures/
-generate_re_fixtures.py`で生成）を読み込み、合成データ6シナリオ×classical/
-hc1/cluster/dk で、係数・標準誤差・検定統計量・適合度統計量を相対誤差1e-8で
+generate_re_fixtures.py`で生成）を読み込み、合成データの全シナリオ×
+classical/hc1 で、係数・標準誤差・検定統計量・適合度統計量を相対誤差1e-8で
 厳密比較する。Wooldridge実データ（wagepan）も同じフィクスチャ経由で検証する。
+
+## cluster/dkを含まない理由
+
+本実装のcluster・dkの標準誤差は、小標本補正と推論の自由度（clusterで`G-1`、
+dkで`T-1`）をStata・R型に合わせており、linearmodels（`n/(n-k)`、自由度は
+常に`df_resid`）とは一致しない（`docs/spec/re-spec.md`3.4節・4章）。この2つは
+`test_re_crosscheck.py`のplmだけで検証する。
 
 役割分担:
     - 構造・API: `test_re_api.py`
     - `ValidationError`/`ComputationError` パス: `test_re_validation.py`
     - 主リファレンス（linearmodels）との数値照合: このファイル
-    - 独立実装（R: plm）とのクロスチェック（hc2/hc3・ハウスマン検定）:
-      `test_re_crosscheck.py`
+    - 独立実装（R: plm）とのクロスチェック（hc2/hc3・cluster/dk・
+      ハウスマン検定）: `test_re_crosscheck.py`
 
 Note:
     フィクスチャ生成時と同じ入力データを、`tests/fixtures/benchmarks/data/`に
@@ -34,11 +41,7 @@ from _assertions import assert_close, assert_dict_close
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
 from _tolerances import TOLERANCES
-from econometricsmodels import (
-    RE,
-    REOptions,
-    ValidationError,
-)
+from econometricsmodels import RE, REOptions
 
 from benchmark.common import WAGEPAN_ENTITY, WAGEPAN_X, WAGEPAN_Y
 from benchmark.panel.fixtures.generate_re_fixtures import (
@@ -104,41 +107,15 @@ def _check_result(res, ref: dict, label: str) -> None:
 # ── 凍結フィクスチャとの数値照合（合成データ） ───────────────────────
 
 
-# `many_regressors`（k=20、40エンティティ、T=6）: 補助回帰の傾き係数`2k=40`がクラスター数
-# G=40以下（cluster）、検定対象`k=20`が`T-1=5`超（dk）でハウスマン検定が成立しない。
-_HAUSMAN_SINGULAR_ERRORS = {
-    ("many_regressors", "cluster"): ValidationError,
-    ("many_regressors", "dk"): ValidationError,
-}
-
-
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 @pytest.mark.parametrize("scenario", NUMERIC_SCENARIOS)
 def test_matches_linearmodels(fixtures, scenario, cov_type):
-    """`dk`は`time`（内部FE呼び出しの1-way/2-way選択とは無関係、`REOptions`
-    には`dk_time`が独立に無い。`FEOptions`と違い、REの`REOptions.time`は
-    HAC時系列順序と内部FE1-way/2-way選択を兼ねる1フィールドのため、`dk`
-    ケースでも常に`time="time"`を渡す。本フィクスチャの数値比較は`REOptions.
-    time`の値に依存しない（係数・標準誤差はtimeを使わないため、
-    `_re_helpers`・`engine/src/panel/CLAUDE.md`参照）。
-    """
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
-    kwargs = {"time": "time"} if cov_type == "dk" else {}
-    options = REOptions(cov_type=cov_type, **kwargs)
-    model = RE(df, y="y", x=x_cols, entity="entity", options=options)
+    options = REOptions(cov_type=cov_type)
+    res = RE(df, y="y", x=x_cols, entity="entity", options=options).fit()
 
-    error = _HAUSMAN_SINGULAR_ERRORS.get((scenario, cov_type))
-    if error is not None:
-        # RE本体は成功する入力だが、ハウスマン検定の補助回帰のロバスト共分散が
-        # 構造的に特異になりfit()が失敗する（`re-spec.md`3.7節）。
-        with pytest.raises(error):
-            model.fit()
-        return
-
-    _check_result(
-        model.fit(), fixtures[scenario][cov_type], f"{scenario}/{cov_type}"
-    )
+    _check_result(res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}")
 
 
 # ── 凍結フィクスチャとの数値照合（実データ: Wooldridge wagepan） ───────

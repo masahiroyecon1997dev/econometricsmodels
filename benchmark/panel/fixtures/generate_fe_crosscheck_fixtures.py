@@ -14,23 +14,20 @@
   別定義を使うため、fixestの`fitstat(m, "wr2")`のみで検証する（1-wayは
   `fe.json`側のlinearmodelsの値とも一致するはずの回帰ガードとして機能する）。
 
-## classical/hc1/hc2/hc3とclusterで許容誤差が異なる理由
+## cluster/dkはfixestが唯一の参照実装
 
-classical/hc1/hc2/hc3は本実装と機械精度で一致する（実測相対誤差1e-14程度）。
-**clusterのみ**、fixestの小標本補正の既定慣行（Stata流のG/(G-1)補正）が
-本実装・linearmodelsと異なるため、`ssc(G.adj=FALSE, ...)`で調整してもなお
-1-way相対誤差1.8e-5程度・2-way相対誤差0.2%程度の乖離が残る（規約上の系統的な
-差、実装バグではない。`run_fixest_benchmark.R`のコメント参照）。テストコード側
-では、この2つのグループで許容誤差を分けること（`.claude/rules/
-testing-policy.md`「許容誤差」参照）。
+本実装のcluster・dk（Driscoll-Kraay）の標準誤差は、小標本補正と推論の自由度
+（clusterで`G-1`、dkで`T-1`）をfixestの`ssc()`既定に合わせている
+（`docs/spec/fe-spec.md`3.3節）ため、`linearmodels`（`n/(n-extra_df-k)`）とは
+一致しない。`fe.json`にはclassical/hc1のみを持たせ、cluster/dkはこのフィクス
+チャのfixestだけで検証する。fixestの既定`ssc()`のまま、1-way・2-wayとも全
+cov_typeで本実装と機械精度（実測相対誤差1e-14程度）で一致する。
 
-## dkを含まない理由
-
-`cov_type="dk"`（Driscoll-Kraay）はfixestの`vcov="DK"`の既定バンド幅公式・
-小標本補正の慣行が本実装・linearmodelsと異なり、明示的にバンド幅を揃えても
-標準誤差が実用的な許容誤差でも一致しないことを実測確認済みのため、dkは
-`linearmodels`のみを参照実装とする単一参照実装の例外として扱う（ユーザー
-確認済み）。このフィクスチャにはdkのキー自体が存在しない。
+dkはfixestの既定バンド幅（`n_t^0.25`）が本実装の既定
+（`floor(4*(T/100)^(2/9))`）と異なるため、本実装の既定式で求めたバンド幅を
+`DK(lag)`に明示的に渡す。`many_regressors`（k=20、T=6）はk>T-1で同時検定の
+部分行列が構造的に特異になり本実装が`ValidationError`にするため、dkの対象外
+（`SCENARIO_COV_TYPES`）。wagepan（T=8）は`fe.json`と同じ理由でdk対象外。
 
 使用例（リポジトリルートから）:
     python -m benchmark.panel.fixtures.generate_fe_crosscheck_fixtures
@@ -61,15 +58,23 @@ from benchmark.panel.fixtures.generate_fe_fixtures import (
     SCENARIO_X_COLS,
     TWO_WAY_SCENARIOS,
 )
-from benchmark.panel.references.r import run_fixest_r
+from benchmark.panel.references.r import default_dk_bandwidth, run_fixest_r
 
 NUMERIC_SCENARIOS = ONE_WAY_ONLY_SCENARIOS + TWO_WAY_SCENARIOS
 
-# hc2/hc3はここでのみ検証する（fe.jsonのCOV_TYPESにclassical/hc1/cluster/dkの
-# 4つしか無い理由はgenerate_fe_fixtures.py参照）。dkはモジュールdoc「dkを
-# 含まない理由」の通り対象外。
-COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster"]
+# hc2/hc3はここでのみ検証する（fe.jsonのCOV_TYPESはclassical/hc1のみ）。
+# cluster/dkもモジュールdoc「cluster/dkはfixestが唯一の参照実装」の通りここ
+# でのみ検証する。
+COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster", "dk"]
 
+# many_regressors（k=20、T=6）はk>T-1のためdkの同時検定が構造的に特異
+# （本実装は`ValidationError`、モジュールdoc参照）。
+SCENARIO_COV_TYPES: dict[str, list[str]] = {
+    "many_regressors": [c for c in COV_TYPES if c != "dk"],
+}
+
+# wagepan（T=8）はfe.jsonと同じ理由でdkを対象外にする（`fe.json`の
+# generate_fe_fixtures.py参照）。
 WAGEPAN_COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster"]
 WAGEPAN_FORMULA_RHS = " + ".join(WAGEPAN_X)
 
@@ -83,13 +88,21 @@ def _run_effects(scenario: str, cov_type: str, *, two_way: bool) -> dict:
     x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
     formula = _formula(x_cols, "entity + time" if two_way else "entity")
     cluster = "entity" if cov_type == "cluster" else None
-    return run_fixest_r(csv_path, formula, cov_type, cluster=cluster)
+    dk_lag = default_dk_bandwidth(csv_path) if cov_type == "dk" else None
+    return run_fixest_r(
+        csv_path, formula, cov_type, cluster=cluster, dk_lag=dk_lag
+    )
 
 
 def _run_cluster_imbalanced_case(tmpdir: Path) -> dict:
-    """クラスター不均衡シナリオのfixestクロスチェック
-    （`generate_fe_fixtures.py::_run_cluster_imbalanced_case`と同じデータ・
-    同じ動的クラスター列生成方針）。"""
+    """クラスター不均衡シナリオ（`fe_baseline_cluster_imbalanced.csv`、
+    entity=20×period=10のn=200）のfixestクロスチェック。
+
+    entityとは無関係な専用クラスター列（サイズ[2,3,5,10,30,50]のタイル、
+    `testing-policy.md`「テスト用データセット」3.）をCSVには含めず、ここで
+    都度動的生成する。fixestの`K.fixef="nonnested"`がentityをネストと見なさない
+    （クラスター変数がentityと無関係）側の分岐を踏む。
+    """
     df = pl.read_csv(DATA_DIR / "fe_baseline_cluster_imbalanced.csv")
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
@@ -100,9 +113,14 @@ def _run_cluster_imbalanced_case(tmpdir: Path) -> dict:
 
 
 def _run_cluster_g2_case(tmpdir: Path) -> dict:
-    """クラスタ数境界（G=2、q=1でG>q）の成功パスのfixestクロスチェック
-    （`generate_fe_fixtures.py::_run_cluster_g2_case`と同じデータ・同じ動的
-    クラスター列生成方針）。"""
+    """クラスタ数境界（G=2、q=1でG>q）の成功パスのfixestクロスチェック。
+
+    `fe_baseline_k1.csv`（k=1に絞ったbaseline）にentityとは無関係な2グループ
+    （行番号%2）を都度動的付与する。説明変数1個（q=1）に絞ることで、既定の
+    G=40（entity）ではなくG=2でもロバストWald検定の`q×q`部分行列が特異に
+    ならない（`G<=q`なら`ValidationError`、`testing-policy.md`「グループ数が
+    境界値に近いケース」参照）。
+    """
     df = pl.read_csv(DATA_DIR / "fe_baseline_k1.csv")
     groups = [str(i % 2) for i in range(df.height)]
     df = df.with_columns(pl.Series("cluster_group", groups))
@@ -135,16 +153,17 @@ def build_fixtures() -> dict:
     fixtures: dict = {}
 
     for scenario in NUMERIC_SCENARIOS:
+        cov_types = SCENARIO_COV_TYPES.get(scenario, COV_TYPES)
         fixtures[scenario] = {
             "one_way": {
                 cov_type: _run_effects(scenario, cov_type, two_way=False)
-                for cov_type in COV_TYPES
+                for cov_type in cov_types
             }
         }
         if scenario in TWO_WAY_SCENARIOS:
             fixtures[scenario]["two_way"] = {
                 cov_type: _run_effects(scenario, cov_type, two_way=True)
-                for cov_type in COV_TYPES
+                for cov_type in cov_types
             }
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -196,18 +215,20 @@ def build_fixtures() -> dict:
         "note": (
             "hc2/hc3・aic/bic・2-way FEのr_squared_withinは、linearmodelsが"
             "提供しない/別定義のためfixestのみが参照値になる単一参照実装の"
-            "例外（モジュールdoc参照）。classical/hc1/hc2/hc3は本実装と機械"
-            "精度で一致するが、clusterのみ小標本補正の慣行差により1-way相対"
-            "誤差1.8e-5程度・2-way相対誤差0.2%程度の乖離が残る（実装バグでは"
-            "ない、run_fixest_benchmark.Rのコメント参照）。dkはこのフィクス"
-            "チャに含まない（モジュールdoc「dkを含まない理由」）。wagepanは"
-            "fe.jsonと同じmarried/union/expersq・T=8のためdk対象外も同様。"
+            "例外（モジュールdoc参照）。cluster/dkも、本実装の小標本補正が"
+            "fixestのssc()既定（cluster: K.fixef=nonnested・G/(G-1)補正・"
+            "t分布の自由度G-1、dk: K.fixef=full・G相当は時点数・自由度T-1）に"
+            "合わせてあり、linearmodelsとは一致しないためfixestのみが"
+            "参照値になる。全cov_typeで本実装と機械精度で一致する。"
+            "dkのバンド幅は本実装の既定floor(4*(T/100)^(2/9))を明示的に"
+            "DK(lag)に渡している（fixestの既定n_t^0.25とは異なる）。"
+            "many_regressorsはk>T-1のためdkを含まない。wagepanは"
+            "fe.jsonと同じmarried/union/expersq・T=8のためdk対象外。"
             "moderate_multicollinearity/high_condition_number/"
             "scale_variance_mild/many_regressors/"
             "outlier_regressor/high_variance・baseline.cluster_imbalanced・"
-            "baseline.cluster_g2・baseline_df1は追加済み（fe.jsonのnote・"
-            "generate_fe_fixtures.py参照、同じデータ・同じ動的クラスター列"
-            "生成方針）。"
+            "baseline.cluster_g2・baseline_df1は、同じ固定済みCSV・同じ動的"
+            "クラスター列生成方針で追加している。"
         ),
     }
     return fixtures

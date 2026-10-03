@@ -10,6 +10,12 @@
 - **hc2/hc3**: `linearmodels.RandomEffects`が提供しないため、plmを唯一の
   参照実装として係数・標準誤差を検証する（`linearmodels_ref.py`モジュールdoc
   参照）。
+- **cluster/dk**: 本実装の小標本補正がStata・R型（`G/(G-1)·(n-1)/(n-K)`、dkは
+  `G`の代わりに時点数、t分布の自由度は`G-1`/`T-1`）に変わりlinearmodels
+  （`n/(n-k)`）とは一致しないため、plm（clusterは`vcovHC(method="arellano",
+  type="sss")`、dkは`vcovSCC(maxlag=, type="sss")`）を唯一の参照実装として
+  係数・標準誤差を検証する。dkのバンド幅は本実装の既定式で求めた値を明示的に
+  `maxlag`へ渡す。
 - **ハウスマン検定**（`hausman_statistic`/`hausman_p_value`/`hausman_df`）:
   linearmodelsに専用実装が無いため、`plm::phtest(method = "aux",
   effect = "individual", vcov = ...)`を唯一の参照実装とする（5.3節）。
@@ -62,8 +68,6 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-import polars as pl
-
 from benchmark.common import (
     BENCHMARKS_DIR,
     DATA_DIR,
@@ -78,12 +82,26 @@ from benchmark.panel.fixtures.generate_fe_fixtures import (
     NUMERIC_SCENARIOS,
     SCENARIO_X_COLS,
 )
-from benchmark.panel.references.r import run_re_hausman_plm_r, run_re_plm_r
+from benchmark.panel.references.r import (
+    default_dk_bandwidth,
+    run_re_hausman_plm_r,
+    run_re_plm_r,
+)
 
-# hc2/hc3のみ対象（モジュールdoc「このフィクスチャだけが持つ統計量」参照）。
-COV_TYPES = ["hc2", "hc3"]
+# hc2/hc3/cluster/dkが対象（モジュールdoc「このフィクスチャだけが持つ統計量」
+# 参照）。classical/hc1はre.jsonのlinearmodelsで検証する。
+COV_TYPES = ["hc2", "hc3", "cluster", "dk"]
 
-WAGEPAN_COV_TYPES = ["hc2", "hc3"]
+# many_regressors（k=20、40エンティティ、T=6）はcluster（補助回帰の傾き係数
+# `2k=40`がG=40以下）・dk（検定対象`k=20`がT-1=5超）でハウスマン検定の
+# ロバスト共分散が構造的に特異になり、RE本体も`fit()`が`ValidationError`で
+# 失敗するため、cluster/dkの標準誤差の対象外にする（`_STRUCTURALLY_SINGULAR`）。
+SCENARIO_COV_TYPES: dict[str, list[str]] = {
+    "many_regressors": ["hc2", "hc3"],
+}
+
+# wagepan（T=8）はdkを対象外にする（re.jsonと同様、短いTでのDKは対象外）。
+WAGEPAN_COV_TYPES = ["hc2", "hc3", "cluster"]
 
 # ハウスマン検定はRE本体のcov_typeに連動するため、全cov_typeを対象にする
 # （モジュールdoc「ハウスマン検定」参照）。
@@ -107,13 +125,6 @@ _STRUCTURALLY_SINGULAR = {
 }
 
 
-def _dk_bandwidth(csv_path: Path, time_col: str) -> int:
-    """`bandwidth=None`時の本実装の自動選択`floor(4*(T/100)^(2/9))`（Tはユニークな
-    時点数）。`vcovSCC`の`maxlag`に明示的に渡す（`vcovSCC`の既定とは異なる）。"""
-    t_periods = pl.read_csv(csv_path)[time_col].n_unique()
-    return int(4 * (t_periods / 100) ** (2 / 9))
-
-
 def _run_hausman(
     csv_path: Path,
     formula: str,
@@ -124,7 +135,7 @@ def _run_hausman(
     maxlag: int | None = None,
 ) -> dict:
     if cov_type == "dk" and maxlag is None:
-        maxlag = _dk_bandwidth(csv_path, time_col)
+        maxlag = default_dk_bandwidth(csv_path, time_col)
     return run_re_hausman_plm_r(
         csv_path,
         formula,
@@ -142,7 +153,8 @@ def _run_effects(scenario: str, cov_type: str) -> dict:
     csv_path = DATA_DIR / f"fe_{scenario}.csv"
     x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
     formula = f"y ~ {' + '.join(x_cols)}"
-    return run_re_plm_r(csv_path, formula, cov_type)
+    maxlag = default_dk_bandwidth(csv_path) if cov_type == "dk" else None
+    return run_re_plm_r(csv_path, formula, cov_type, maxlag=maxlag)
 
 
 def _run_wagepan(csv_path: Path, cov_type: str) -> dict:
@@ -161,7 +173,7 @@ def build_fixtures() -> dict:
     for scenario in NUMERIC_SCENARIOS:
         fixtures[scenario] = {
             cov_type: _run_effects(scenario, cov_type)
-            for cov_type in COV_TYPES
+            for cov_type in SCENARIO_COV_TYPES.get(scenario, COV_TYPES)
         }
         csv_path = DATA_DIR / f"fe_{scenario}.csv"
         x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
@@ -229,14 +241,22 @@ def build_fixtures() -> dict:
         "note": (
             "hc2/hc3・ハウスマン検定は、linearmodelsが提供しない/実装を持たない"
             "ためplmのみが参照値になる単一参照実装の例外（モジュールdoc参照）。"
+            "cluster/dkも、本実装の小標本補正がStata・R型に変わりlinearmodelsと"
+            "一致しないためplm（vcovHC(method=arellano, type=sss)・"
+            "vcovSCC(maxlag=, type=sss)）のみが参照値になる。dkのバンド幅は"
+            "本実装の既定floor(4*(T/100)^(2/9))を明示的にmaxlagに渡している。"
+            "many_regressorsはcluster/dkのロバスト共分散が構造的に特異で"
+            "本実装のfit()がエラーになるため含めない。"
+            "wagepan（T=8）はdkを含めない。"
             "plmの変量効果分散成分推定（Swamy-Arora）はlinearmodelsと僅かに"
             "異なる実装のため、点推定自体が不均衡パネルで最大0.1%程度乖離する"
             "（実測確認済み、実装バグではない）。テストコード側ではこのフィクス"
             "チャ全体をクロスチェック水準（1e-2程度）の緩い許容誤差で比較する"
             "こと（.claude/rules/testing-policy.md「許容誤差」参照）。t検定"
             "（test_stats/p_values/conf_int）はplmの既定であるz検定（漸近正規"
-            "近似）ではなく、本実装と同じt(df_resid)分布の式でcoef/seから"
-            "計算し直している（run_plm_benchmark.Rのコメント参照）。"
+            "近似）ではなく、本実装と同じt分布（hc2/hc3はdf_resid、clusterはG-1、"
+            "dkはT-1）の式でcoef/seから計算し直している"
+            "（run_plm_benchmark.Rのコメント参照）。"
             'ハウスマン検定はplm::phtest(method = "aux", effect = '
             '"individual", vcov = ...)（回帰ベース、常に1-way、RE本体の'
             'cov_typeに連動）の値で、"hausman"キー配下にcov_type別に持つ'

@@ -1,8 +1,8 @@
 """全手法共通の`stat_dist`/`stat_df`（`test_stats`の分布と自由度）のテスト。
 
 `test_stats`の名前と分布情報が手法によらず同じ形で取れること、および`stat_df`が
-実際に使われた自由度（`df_resid`とは限らない。OLSの`cov_type="cluster"`は`G-1`）
-であることを確認する。各手法の数値検証は手法ごとのreference/crosscheckテストが担う。
+実際に使われた自由度（`df_resid`とは限らない。OLS・FE・RE・2SLSの
+`cov_type="cluster"`は`G-1`、FE・REの`cov_type="dk"`は`T-1`）であることを確認する。各手法の数値検証は手法ごとのreference/crosscheckテストが担う。
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from econometricsmodels import (
     Logit,
     OLSOptions,
     Probit,
+    REOptions,
     Tobit,
     TobitOptions,
 )
@@ -86,22 +87,41 @@ def test_wls_uses_t_with_residual_df(df):
     _check_t(res, N - 3)
 
 
-def test_fe_uses_t_with_panel_residual_df(df):
-    res = FE(df, y="y", x=["x1", "x2"], entity="entity").fit()
+def test_fe_classical_uses_t_with_panel_residual_df(df):
+    options = FEOptions(cov_type="classical")
+    res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
     _check_t(res, res.df_resid)
     assert res.stat_df == N - N_ENTITIES - 2
 
 
-def test_fe_cluster_df_equals_df_resid(df):
-    """FEは`cov_type`によらず自由度に`df_resid`を使う（OLSと異なる）。"""
-    options = FEOptions(cov_type="cluster")
+def test_fe_cluster_uses_g_minus_one_df(df):
+    """FEの既定`cov_type`は`"cluster"`（entity単位）で、自由度は`G-1`。"""
+    res = FE(df, y="y", x=["x1", "x2"], entity="entity").fit()
+    _check_t(res, N_ENTITIES - 1)
+
+
+def test_fe_dk_uses_t_minus_one_df(df):
+    options = FEOptions(cov_type="dk", dk_time="time")
     res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+    _check_t(res, N_PERIODS - 1)
+
+
+def test_re_classical_uses_t_with_residual_df(df):
+    options = REOptions(cov_type="classical")
+    res = RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
     _check_t(res, res.df_resid)
 
 
-def test_re_uses_t_with_residual_df(df):
+def test_re_cluster_uses_g_minus_one_df(df):
+    """REの既定`cov_type`は`"cluster"`（entity単位）で、自由度は`G-1`。"""
     res = RE(df, y="y", x=["x1", "x2"], entity="entity").fit()
-    _check_t(res, res.df_resid)
+    _check_t(res, N_ENTITIES - 1)
+
+
+def test_re_dk_uses_t_minus_one_df(df):
+    options = REOptions(cov_type="dk", time="time")
+    res = RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+    _check_t(res, N_PERIODS - 1)
 
 
 @pytest.mark.parametrize(

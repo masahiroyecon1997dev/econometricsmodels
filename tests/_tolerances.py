@@ -63,7 +63,8 @@ TOLERANCES: dict[str, dict[str, float]] = {
     },
     # FEの主リファレンスはlinearmodels.PanelOLS。within変換後の閉形式解の
     # ためOLS/WLS/IVと同じ機械精度一致（実測相対誤差1e-14程度、classical/
-    # hc1/cluster/hac・1-way/2-way全て）。ただし2-way FEの`r_squared_within`
+    # hc1・1-way/2-way全て。cluster/dkは小標本補正がfixest型でlinearmodelsと
+    # 一致しないためfixestクロスチェックのみ）。ただし2-way FEの`r_squared_within`
     # のみ、linearmodels自身がentityのみdemeanの別定義を使うため対象外
     # （テストコード側でこのフィールドの比較自体をスキップすること、
     # `benchmark/panel/references/linearmodels_ref.py`モジュールdoc参照）。
@@ -73,7 +74,8 @@ TOLERANCES: dict[str, dict[str, float]] = {
     },
     # REの主リファレンスはlinearmodels.RandomEffects。閉形式のGLS変換のため
     # OLS/WLS/IV/FEと同じ機械精度一致（実測相対誤差1e-9〜1e-14程度、
-    # classical/hc1/cluster/hac全て、engineの実出力と直接突き合わせて確認済み）。
+    # classical/hc1、engineの実出力と直接突き合わせて確認済み。cluster/dkは
+    # 小標本補正がStata・R型でlinearmodelsと一致しないためplmクロスチェックのみ）。
     "re_reference": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,
@@ -227,58 +229,17 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # p値の裾での増幅（実測最大絶対誤差~2.9e-5、mroz）。logitの3e-5と近い値。
         "atol_p_value": 5e-5,
     },
-    # FEのRクロスチェックはfixest。classical/hc1/hc2/hc3は機械精度一致
-    # （実測相対誤差1e-14程度、1-way/2-way双方）のためrtol_strictを適用。
-    # clusterのみfixestの小標本補正慣行（Stata流G/(G-1)補正）が本実装・
-    # linearmodelsと異なり、`ssc(G.adj=FALSE, K.fixef=...)`で調整しても
-    # 1-way実測相対誤差~1.8e-5・2-way実測相対誤差~0.21%が残る（実装バグ
-    # ではなく規約差、`benchmark/panel/references/run_fixest_benchmark.R`
+    # FEのRクロスチェックはfixest。classical/hc1/hc2/hc3/cluster/dkとも、fixestの
+    # `ssc()`既定に本実装の小標本補正・推論の自由度を合わせてあるため、1-way/
+    # 2-way双方で機械精度一致（実測相対誤差1e-14程度、p値・信頼区間を含む）。
+    # cov_typeによる緩和は不要（`benchmark/panel/references/run_fixest_benchmark.R`
     # 参照）。
     "fe_crosscheck": {
-        "rtol_strict": RTOL_MACHINE_PRECISION,
-        "rtol_cluster_one_way": 5e-5,
-        "rtol_cluster_two_way": 3e-3,
+        "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_CROSSCHECK_FLOOR,
-        # p_values/conf_intはcoef/se/test_statsのようにcluster特有のズレ
-        # （G/(G-1)補正差）がそのまま相対誤差として伝播しない——p値はt統計量に
-        # t分布のCDFという非線形変換をかけた値、信頼区間はt臨界値×seの積のため、
-        # 僅かなSEの差が非線形に増幅されうる。実測最大絶対誤差（small_panel、
-        # G=5という極端に少ないクラスタ数のケースを除く）はp_values~0.013・
-        # conf_int~0.031で、それぞれマージンを載せた絶対誤差フロア。coef/se/
-        # test_statsは引き続きrtol_cluster_one_way/two_wayで厳しく検証するため、
-        # 実装バグはそちらで検出できる（p_values/conf_intだけの例外的な緩和）。
-        # small_panel自体はG=5でこの増幅がさらに拡大する（実測最大絶対誤差
-        # conf_int~0.40）ため、p_values/conf_intの数値比較はスコープ外とし
-        # coef/se/test_stats/aic/bic/r_squared_withinのみ検証する
-        # （`test_fe_crosscheck.py`参照、`iv_crosscheck`の`rtol_hac_small_n`と
-        # 同型の「小標本ケースは別枠で扱う」判断）。
-        "atol_cluster_p_value": 0.02,
-        "atol_cluster_conf_int": 0.04,
-        # scale_variance_mild（1-way/2-way）・high_variance（2-way）・
-        # high_condition_number（1-way/2-way）専用の緩和値（実測最大絶対誤差
-        # 0.0831）。cluster特有のG/(G-1)補正差自体は他シナリオと同水準
-        # （2-way相対誤差~0.21%）だが、絶対スケールの大きいシナリオ
-        # （scale_variance_mildのx2縮小・high_varianceの誤差項拡大・
-        # high_condition_numberの強い多重共線性によるSE膨張）でSE自体の
-        # 絶対値が大きく、非線形増幅後の絶対誤差もそれに比例して拡大するため
-        # （実装バグではなくスケール由来）。他シナリオの検出力を弱めないよう、
-        # 既定値は据え置きこの3シナリオのみ個別に緩める（`rtol_cluster_high_k`/
-        # `_small_g`と同じ「シナリオ限定」方式、testing-policy.md「一律に
-        # 緩めると本来検出できるはずのバグを見逃す」を踏まえた判断）。
-        "atol_cluster_conf_int_large_scale": 0.1,
-        # many_regressors（k=20）・cluster_imbalanced（G=12）専用の暫定rtol。
-        # 既定のrtol_cluster_one_way（5e-5、G=40・k=2のbaseline実測値ベース）
-        # では、この2シナリオのcluster se相対誤差（実測: many_regressors~
-        # 1.9e-4、cluster_imbalanced~2.5e-3）をカバーできない。両者とも
-        # kが大きい/Gが小さいほどfixestのStata流G/(G-1)補正と本実装の補正式の
-        # 乖離が拡大するという既知の系統差（モジュールdoc参照）と整合する
-        # 挙動だが、正確な依存関係（k依存・G依存の定量的な式）は未調査のため、
-        # 実測値にマージンを載せた暫定値を置く（原因調査は別途トラッキング）。
-        "rtol_cluster_high_k": 3e-4,
-        "rtol_cluster_small_g": 4e-3,
     },
-    # REのRクロスチェックはplm（hc2/hc3のみ、ハウスマン検定も含む単一参照
-    # 実装の例外、`benchmark/panel/run_plm_benchmark.R`・
+    # REのRクロスチェックはplm（hc2/hc3・cluster/dk、ハウスマン検定も含む
+    # 単一参照実装の例外、`benchmark/panel/run_plm_benchmark.R`・
     # `benchmark/panel/fixtures/generate_re_crosscheck_fixtures.py`参照）。
     # plmの変量効果分散成分推定（Swamy-Arora）がlinearmodelsと僅かに異なる
     # 実装のため、点推定自体が不均衡パネルで乖離する（実測最大相対誤差:
@@ -288,6 +249,16 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # マージンを載せた緩いRTOLを使う。
     "re_crosscheck": {
         "rtol": 2e-2,
+        # バランスパネルでは分散成分推定の差が無く機械精度一致するため、
+        # unbalancedシナリオ以外はこちらで厳密に比較する（cluster/dkの
+        # `G/(G-1)`・`T/(T-1)`補正は標準誤差に1%前後しか効かず、`rtol`の
+        # ような緩い許容誤差では補正式の取り違えを検出できない）。
+        "rtol_balanced": RTOL_MACHINE_PRECISION,
+        # unbalancedのdkのみ、分散成分の差がカーネルの積算を通じて標準誤差に
+        # 約0.9%出て、t分布の自由度`T-1=5`の裾でp値・信頼区間にさらに増幅される
+        # （実測最大相対誤差: se 0.9%・p値 2.7%・conf_int 3.7%）。hc2/hc3
+        # （conf_int 1.1%）・clusterはこれより小さく`rtol`（2e-2）に収まる。
+        "rtol_unbalanced_dk": 5e-2,
         "atol": ATOL_CROSSCHECK_FLOOR,
         # ハウスマン検定: 回帰ベース（補助回帰）版の
         # `plm::phtest(method = "aux", effect = "individual")`と比較する

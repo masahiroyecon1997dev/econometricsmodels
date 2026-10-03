@@ -38,11 +38,14 @@ from benchmark.panel.fixtures.generate_fe_fixtures import (
 )
 from benchmark.panel.references.linearmodels_ref import run_re
 
-# hc2/hc3はlinearmodels.RandomEffectsが提供しないため対象外（plmクロスチェック
-# 側のみで検証する単一参照実装の例外、`linearmodels_ref.py`モジュールdoc
-# 「RE固有の相違点」参照）。dkはFEと同じくcross_sectionally_correlated
-# シナリオが本来の目的。
-COV_TYPES = ["classical", "hc1", "cluster", "dk"]
+# classical/hc1のみlinearmodelsと比較する。hc2/hc3はlinearmodels.RandomEffectsが
+# 提供しないため対象外（plmクロスチェック側のみで検証する単一参照実装の例外、
+# `linearmodels_ref.py`モジュールdoc「RE固有の相違点」参照）。cluster/dkは
+# 本実装の小標本補正がStata・R型（`G/(G-1)·(n-1)/(n-K)`、t分布の自由度
+# `G-1`/`T-1`）に変わりlinearmodelsの`n/(n-k)`とは一致しなくなったため、
+# plmのみで検証する（`generate_re_crosscheck_fixtures.py`、
+# `docs/spec/re-spec.md`4章）。
+COV_TYPES = ["classical", "hc1"]
 
 # `NUMERIC_SCENARIOS`（unbalanced + baseline/small_panel/heteroskedastic/
 # autocorrelated/cross_sectionally_correlated）はFE（generate_fe_fixtures.py）
@@ -53,17 +56,14 @@ COV_TYPES = ["classical", "hc1", "cluster", "dk"]
 # unbalanced_two_way/zero_variance_regressorは含めない（FE同様
 # ValidationErrorパス専用、テストコード側で対応）。
 
-# 実データ（Wooldridge wagepan）。FEと同じ変数選定・dk対象外の理由
+# 実データ（Wooldridge wagepan）。FEと同じ変数選定
 # （benchmark/common/constants.pyのWAGEPAN_X参照）。
-WAGEPAN_COV_TYPES = ["classical", "hc1", "cluster"]
+WAGEPAN_COV_TYPES = ["classical", "hc1"]
 
 
 def _run_re(scenario: str, cov_type: str) -> dict:
-    # `time_col`は常に実在の"time"列を渡す（`generate_fe_fixtures.py`と同じ
-    # 理由——不均衡パネルでcov_type="dk"のバンド幅・カーネル計算が不正確に
-    # なることを避けるため）。`REOptions.time`自体は本フィクス
-    # チャの対象外（RE.fit()自体はtimeを使わない、`time_col`はlinearmodels
-    # 呼び出し側のMultiIndex構築専用）。
+    # `time_col`は常に実在の"time"列を渡す（linearmodels呼び出し側の
+    # MultiIndex構築専用、RE.fit()自体はtimeを使わない）。
     return run_re(
         scenario,
         SCENARIO_X_COLS.get(scenario, ["x1", "x2"]),
@@ -109,7 +109,9 @@ def build_fixtures() -> dict:
             "ValidationErrorの発生確認のみ、テストコード側で対応）。"
             "hc2/hc3はlinearmodels.RandomEffectsが提供しないため対象外"
             "（generate_re_crosscheck_fixtures.pyのplmクロスチェックのみで"
-            "検証する単一参照実装の例外）。aic/bicも同じ理由でlinearmodelsに"
+            "検証する単一参照実装の例外）。cluster/dkは本実装の小標本補正が"
+            "Stata・R型に変わりlinearmodelsと一致しないため同様にplmのみで"
+            "検証する。aic/bicも同じ理由でlinearmodelsに"
             '無く、かつplmのmodel="random"もlogLik()未対応のため、REの'
             "aic/bic/log_likelihoodは独立検証していない（式自体の正しさは"
             "OLS本体のテストで別途担保、linearmodels_ref.pyモジュールdoc参照）。"
@@ -124,9 +126,7 @@ def build_fixtures() -> dict:
             "2026-09-20）。"
             "wagepan（Wooldridge、N=545人×T=8年、1980-1987、バランスパネル）は"
             "FEと同じ変数選定理由（benchmark/common/constants.pyのWAGEPAN_X"
-            "参照）。dkはwagepan（T=8）には適用しない（Driscoll-Kraay HACは"
-            "20時点以上を推奨するため、合成データのcross_sectionally_"
-            "correlatedシナリオ（T=25）でのみ数値照合する）。"
+            "参照）。"
         ),
     }
     return fixtures

@@ -1,6 +1,7 @@
 """RE の独立実装（R: plm）とのクロスチェックテスト。
 
-主リファレンス（linearmodels）との厳密比較は`test_re_reference.py`で行う。
+主リファレンス（linearmodels）との厳密比較（classical/hc1）は
+`test_re_reference.py`で行う。
 ここでは`tests/fixtures/benchmarks/re_crosscheck.json`（`benchmark/panel/
 fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmodelsとは
 独立した実装（R: plm）との一致を確認する。
@@ -10,6 +11,11 @@ fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmod
 - **hc2/hc3**: `linearmodels.RandomEffects`が提供しないため、plmが唯一の
   参照実装になる（`benchmark/panel/references/linearmodels_ref.py`
   モジュールdoc参照）。
+- **cluster/dk**: 本実装の小標本補正がStata・R型（`G/(G-1)·(n-1)/(n-K)`、dkは
+  `G`の代わりに時点数、t分布の自由度は`G-1`/`T-1`）で、linearmodels
+  （`n/(n-k)`）とは一致しないため、plm（cluster: `vcovHC(method="arellano",
+  type="sss")`、dk: `vcovSCC(maxlag=, type="sss")`）が唯一の参照実装になる。
+  `test_re_reference.py`はclassical/hc1のみをlinearmodelsと比較する。
 - **ハウスマン検定**（`hausman_statistic`/`hausman_p_value`/`hausman_df`）:
   `linearmodels`に専用実装が無いため、`plm::phtest(method = "aux",
   effect = "individual")`（回帰ベース）が唯一の参照実装（panel-common.md
@@ -25,15 +31,20 @@ fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmod
 
 ## 許容誤差について
 
-plmの変量効果分散成分推定（Swamy-Arora）がlinearmodelsと僅かに異なる実装の
-ため、係数・標準誤差自体が不均衡パネルで最大1%程度乖離する（バランスパネル
-では機械精度一致）。`_tolerances.py`の`re_crosscheck`参照。
+plmの変量効果分散成分推定（Swamy-Arora）がlinearmodels準拠の本実装と不均衡
+パネルで僅かに異なるため、`unbalanced`シナリオのみ係数・標準誤差が最大1%程度
+乖離する（`_tolerances.py`の`re_crosscheck`の`rtol`）。バランスパネルでは
+機械精度で一致するため、それ以外のシナリオは`rtol_balanced`で厳密に比較する
+（cluster・dkの`G/(G-1)`・`T/(T-1)`補正は標準誤差に1%前後しか効かず、緩い
+許容誤差では補正式の取り違えを検出できないため、バランスパネルを緩めない）。
 
 役割分担:
     - 構造・API: `test_re_api.py`
     - `ValidationError`/`ComputationError` パス: `test_re_validation.py`
-    - 主リファレンス（linearmodels）との数値照合: `test_re_reference.py`
-    - 独立実装（R: plm）とのクロスチェック: このファイル
+    - 主リファレンス（linearmodels、classical/hc1）との数値照合:
+      `test_re_reference.py`
+    - 独立実装（R: plm）とのクロスチェック（hc2/hc3・cluster/dk・
+      ハウスマン検定）: このファイル
 """
 
 from __future__ import annotations
@@ -65,6 +76,8 @@ from benchmark.panel.fixtures.generate_re_crosscheck_fixtures import (
     HAUSMAN_DK_BANDWIDTH_SCENARIOS,
     HAUSMAN_DK_BANDWIDTHS,
     HAUSMAN_KEY,
+    SCENARIO_COV_TYPES,
+    WAGEPAN_COV_TYPES,
 )
 
 FIXTURE_PATH = (
@@ -75,6 +88,8 @@ FIXTURE_PATH = (
 )
 
 RTOL = TOLERANCES["re_crosscheck"]["rtol"]
+RTOL_BALANCED = TOLERANCES["re_crosscheck"]["rtol_balanced"]
+RTOL_UNBALANCED_DK = TOLERANCES["re_crosscheck"]["rtol_unbalanced_dk"]
 ATOL = TOLERANCES["re_crosscheck"]["atol"]
 RTOL_HAUSMAN = TOLERANCES["re_crosscheck"]["rtol_hausman"]
 ATOL_HAUSMAN = TOLERANCES["re_crosscheck"]["atol_hausman"]
@@ -101,22 +116,42 @@ def crosscheck() -> dict:
     return json.loads(FIXTURE_PATH.read_text())
 
 
-_assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
-_assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
+_assert_close = partial(assert_close, atol=ATOL)
+_assert_dict_close = partial(assert_dict_close, atol=ATOL)
 
 
-def _check_result(res, ref: dict, label: str) -> None:
-    _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
-    _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
+ALL_CASES = [
+    (scenario, cov_type)
+    for scenario in NUMERIC_SCENARIOS
+    for cov_type in SCENARIO_COV_TYPES.get(scenario, COV_TYPES)
+]
+
+
+def _rtol_for(scenario: str, cov_type: str) -> float:
+    """不均衡パネルのみSwamy-Arora分散成分の差を許容する（モジュールdoc参照）。"""
+    if scenario != _UNBALANCED_HAUSMAN_SCENARIO:
+        return RTOL_BALANCED
+    return RTOL_UNBALANCED_DK if cov_type == "dk" else RTOL
+
+
+def _check_result(res, ref: dict, label: str, *, rtol: float) -> None:
+    _assert_dict_close(res.params, ref["coef"], f"{label}/coef", rtol=rtol)
+    _assert_dict_close(res.std_errors, ref["se"], f"{label}/se", rtol=rtol)
     _assert_dict_close(
-        res.test_stats, ref["test_stats"], f"{label}/test_stats"
+        res.test_stats, ref["test_stats"], f"{label}/test_stats", rtol=rtol
     )
-    _assert_dict_close(res.p_values, ref["p_values"], f"{label}/p_values")
+    _assert_dict_close(
+        res.p_values, ref["p_values"], f"{label}/p_values", rtol=rtol
+    )
 
     for name, (ref_lower, ref_upper) in ref["conf_int"].items():
         our_lower, our_upper = res.conf_int[name]
-        _assert_close(our_lower, ref_lower, f"{label}/conf_lower/{name}")
-        _assert_close(our_upper, ref_upper, f"{label}/conf_upper/{name}")
+        _assert_close(
+            our_lower, ref_lower, f"{label}/conf_lower/{name}", rtol=rtol
+        )
+        _assert_close(
+            our_upper, ref_upper, f"{label}/conf_upper/{name}", rtol=rtol
+        )
 
 
 def _check_hausman(
@@ -152,35 +187,60 @@ def _check_hausman(
     assert res.hausman_df == ref["hausman_df"], f"{label}/hausman_df"
 
 
-def _hausman_options(cov_type: str) -> REOptions:
+# ── 凍結フィクスチャとの数値照合（合成データ） ───────────────────────
+
+
+def _re_options(cov_type: str) -> REOptions:
     # timeはdkのときだけ指定できる（REOptionsのバリデーション）。
     if cov_type == "dk":
         return REOptions(cov_type="dk", time="time")
     return REOptions(cov_type=cov_type)
 
 
-# ── 凍結フィクスチャとの数値照合（合成データ） ───────────────────────
-
-
-@pytest.mark.parametrize("cov_type", COV_TYPES)
-@pytest.mark.parametrize("scenario", NUMERIC_SCENARIOS)
+@pytest.mark.parametrize("scenario, cov_type", ALL_CASES)
 def test_synthetic_matches_plm(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
-    options = REOptions(cov_type=cov_type)
-    res = RE(df, y="y", x=x_cols, entity="entity", options=options).fit()
+    res = RE(
+        df,
+        y="y",
+        x=x_cols,
+        entity="entity",
+        options=_re_options(cov_type),
+    ).fit()
 
     _check_result(
         res,
         crosscheck[scenario][cov_type],
         f"{scenario}/{cov_type}",
+        rtol=_rtol_for(scenario, cov_type),
     )
+
+
+@pytest.mark.parametrize("cov_type", ["cluster", "dk"])
+def test_many_regressors_cluster_dk_raise_validation_error(cov_type):
+    """`many_regressors`（k=20、40エンティティ、T=6）はRE本体は成功する入力
+    だが、ハウスマン検定の補助回帰のロバスト共分散が構造的に特異になり
+    `fit()`が失敗する（cluster: 補助回帰の傾き係数`2k=40`がG=40以下、dk:
+    検定対象`k=20`が`T-1=5`超。`re-spec.md`3.7節）。このためplmの標準誤差
+    クロスチェックの対象外（`SCENARIO_COV_TYPES`）で、失敗パスのみ確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "fe_many_regressors.csv")
+    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    with pytest.raises(ValidationError):
+        RE(
+            df,
+            y="y",
+            x=x_cols,
+            entity="entity",
+            options=_re_options(cov_type),
+        ).fit()
 
 
 # ── 凍結フィクスチャとの数値照合（実データ: Wooldridge wagepan） ───────
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", WAGEPAN_COV_TYPES)
 def test_wagepan_matches_plm(crosscheck, cov_type):
     df = load_wooldridge_dataset("wagepan")
     options = REOptions(cov_type=cov_type)
@@ -188,7 +248,12 @@ def test_wagepan_matches_plm(crosscheck, cov_type):
         df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
     ).fit()
 
-    _check_result(res, crosscheck["wagepan"][cov_type], f"wagepan/{cov_type}")
+    _check_result(
+        res,
+        crosscheck["wagepan"][cov_type],
+        f"wagepan/{cov_type}",
+        rtol=RTOL_BALANCED,
+    )
 
 
 # ── ハウスマン検定（RE本体のcov_typeに連動、plm::phtest(method="aux", vcov=...)） ──
@@ -204,7 +269,7 @@ def test_synthetic_hausman_matches_plm(crosscheck, scenario, cov_type):
         y="y",
         x=x_cols,
         entity="entity",
-        options=_hausman_options(cov_type),
+        options=_re_options(cov_type),
     )
     ref = crosscheck[scenario][HAUSMAN_KEY][cov_type]
     if ref is None:

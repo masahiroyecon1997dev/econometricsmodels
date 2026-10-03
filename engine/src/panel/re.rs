@@ -163,11 +163,17 @@
 //!   同じものを共有）・`panel_driscoll_kraay_cov_params`で補助回帰の設計行列・残差から計算する
 //!   （`OlsEstimator`のクラスター共分散は`String`列で毎回グループ化し直すため避ける。
 //!   `panel_cluster_cov_params`は同じ補正式・同じ加算順で、結果は`OlsEstimator`経由と
-//!   ビット単位で一致する）。Dkのバンド幅はRE本体と同じ解決規則。スケールはRE本体・FEのDKと同じfixest型の
-//!   `T/(T-1)·(n-1)/(n-K)`、Wald検定の分母自由度は`t_periods-1`）。小標本補正の式は
-//!   RE本体と同じ形（Cluster/Hc1は`OlsEstimator`のStata・R型`G/(G-1)·(n-1)/(n-K)`・
-//!   `n/(n-K)`で、RE本体の`panel_cluster_cov_params`/`panel_hc_cov_params`と同式）。
-//!   違いは`K`が補助回帰の説明変数の数`2k+1`になる点のみ（補助回帰はRE本体とは別の回帰）。
+//!   ビット単位で一致する）。
+//!   Dkのバンド幅はRE本体と同じ解決規則で、スケールはRE本体・FEのDKと同じfixest型の
+//!   `T/(T-1)·(n-1)/(n-K)`、Wald検定の分母自由度は`t_periods-1`。小標本補正の式はRE本体と
+//!   同じ形（Clusterは`G/(G-1)·(n-1)/(n-K)`、Hc1は`n/(n-K)`で、RE本体の
+//!   `panel_cluster_cov_params`/`panel_hc_cov_params`と同式）で、違いは`K`が補助回帰の
+//!   説明変数の数`2k+1`になる点のみ（補助回帰はRE本体とは別の回帰）。
+//!   旧実装（`OlsEstimator`のClusterを経由）との違い: 旧は補助回帰全体（`2k`係数）の
+//!   クラスターロバストF検定を内部で必ず計算し、その`2k×2k`部分行列がほぼ特異なら
+//!   失敗していた。新はClassicalで当てはめるため、ロバストに検定するのは対象の`k×k`
+//!   ブロックだけで、`2k`側が極端に悪条件でも`k×k`ブロックが良条件なら成功する
+//!   （通常入力の結果は一致する）。
 //!   統計量は`cov_type`によらずWald統計量（`k × F`）。DKは時点数`T`→∞の漸近論に
 //!   基づくため、`T`が短いと検定サイズが歪みうる。
 //! - **`None`になるのは比較対象の傾き係数が0個（`input.x()`が空）の場合のみ**。
@@ -678,8 +684,9 @@ fn hausman_aux_wald_f(
 /// 補助回帰の共分散はRE本体の`cov_type`に連動させる（Classical/Hc1〜Hc3は`OlsEstimator`の
 /// 同名`CovType`、Cluster/Dkは`panel_cluster_cov_params`/`panel_driscoll_kraay_cov_params`を
 /// 補助回帰の設計行列・残差に適用。モジュールdoc「ハウスマン検定」参照）。`cluster_codes`は
-/// RE本体の共分散で使うクラスター列のコード（`groups`が`None`なら`entity`のコード）。統計量はWald統計量そのもの
-/// （`wald_test_last_columns`/`wald_f_test`が返すF統計量の`k`倍）、p値は`χ²_k.sf(stat)`。
+/// RE本体の共分散で使うクラスター列のコード（`groups`が`None`なら`entity`のコード）。
+/// 統計量はWald統計量そのもの（`wald_test_last_columns`/`wald_f_test`が返すF統計量の`k`倍）、
+/// p値は`χ²_k.sf(stat)`。
 ///
 /// `fe`は`swamy_arora_variance_components`が返した1-way FE推定量で、`X̃`は
 /// その推定が`OlsEstimator`へ委譲したwithin変換済み設計行列（`fe.estimator().input().x()`）を
@@ -1418,6 +1425,7 @@ mod tests {
         assert_eq!(input.time(), None);
         assert_eq!(input.dep_var_name(), "y");
         assert_eq!(input.nobs(), 4);
+        assert_eq!(input.n_entities(), 2);
     }
 
     #[test]
@@ -2663,15 +2671,12 @@ mod tests {
             let expected_stat = 2.0 * f_stat;
             let expected_p = ChiSquared::new(2.0).unwrap().sf(expected_stat);
 
+            // `OlsEstimator`経由の補助回帰とビット単位で一致する（Clusterは`OlsEstimator`の
+            // `String`列グループ化ではなく整数コードの`panel_cluster_cov_params`を使うが、
+            // 補正式・加算順は同じ）。
             assert_eq!(re.hausman_df(), Some(2), "{label}");
-            assert!(
-                (re.hausman_statistic().unwrap() - expected_stat).abs() < 1e-9,
-                "{label}"
-            );
-            assert!(
-                (re.hausman_p_value().unwrap() - expected_p).abs() < 1e-9,
-                "{label}"
-            );
+            assert_eq!(re.hausman_statistic(), Some(expected_stat), "{label}");
+            assert_eq!(re.hausman_p_value(), Some(expected_p), "{label}");
             assert_ne!(
                 re.hausman_statistic(),
                 classical.hausman_statistic(),
@@ -2710,7 +2715,7 @@ mod tests {
             },
         );
         let expected = 2.0 * aux.wald_test_last_columns(2).unwrap().0;
-        assert!((re.hausman_statistic().unwrap() - expected).abs() < 1e-9);
+        assert_eq!(re.hausman_statistic(), Some(expected));
         assert_ne!(re.hausman_statistic(), by_entity.hausman_statistic());
     }
 

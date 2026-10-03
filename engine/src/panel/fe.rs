@@ -1661,6 +1661,11 @@ fn column_is_zero_variance(original: &[f64], transformed: &[f64]) -> bool {
 /// `entity.nobs() == time.nobs()`は`FeInput::from_columns`が既に保証している契約
 /// （呼び出し側は常に同じ`FeInput`からこの2つを渡す）。
 fn validate_balanced_panel(entity: &GroupCodes, time: &GroupCodes) -> Result<(), PanelError> {
+    debug_assert_eq!(
+        entity.nobs(),
+        time.nobs(),
+        "entity and time must have the same length (FeInput contract)"
+    );
     let n_obs = entity.nobs();
     let n_entities = entity.n_groups();
     let n_periods = time.n_groups();
@@ -1772,6 +1777,7 @@ mod tests {
         assert_eq!(input.time(), None);
         assert_eq!(input.dep_var_name(), "y");
         assert_eq!(input.nobs(), 4);
+        assert_eq!(input.n_entities(), 2);
     }
 
     #[test]
@@ -3245,6 +3251,66 @@ mod tests {
         assert!((*fe.std_errors().get(0, 0) - 0.115_060_764_365_329_2).abs() < 1e-9);
         assert!((fe.f_statistic() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
         assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn leverage_full_one_way_uses_each_rows_entity_size_for_unbalanced_unordered_rows() {
+        // 行がエンティティ順に並んでおらず、T_i（a=3・b=2・c=1）が不均衡。各行は自分の
+        // エンティティの観測数`T_i`で引かれなければならない（行番号やコード順で引くと外れる）。
+        let entity = codes(&["b", "a", "c", "a", "b", "a"]);
+        let h_within = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
+        let sizes = [2.0, 3.0, 1.0, 3.0, 2.0, 3.0];
+
+        let h_full = leverage_full(&h_within, &entity, None, 6);
+
+        for i in 0..6 {
+            assert!(
+                (h_full[i] - (1.0 / sizes[i] + h_within[i])).abs() < 1e-15,
+                "row {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn leverage_full_two_way_uses_entity_and_time_sizes_for_unbalanced_unordered_rows() {
+        // entity（a=3・b=2・c=1）とtime（t1=4・t2=1・t3=1）で行ごとの観測数が異なる。
+        // `1/T_i + 1/N_t - 1/n + h`のentityとtimeの取り違えも検出できる。
+        let entity = codes(&["b", "a", "c", "a", "b", "a"]);
+        let time = codes(&["t1", "t1", "t2", "t3", "t1", "t1"]);
+        let h_within = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
+        let entity_sizes = [2.0, 3.0, 1.0, 3.0, 2.0, 3.0];
+        let time_sizes = [4.0, 4.0, 1.0, 1.0, 4.0, 4.0];
+
+        let h_full = leverage_full(&h_within, &entity, Some(&time), 6);
+
+        for i in 0..6 {
+            let expected = 1.0 / entity_sizes[i] + 1.0 / time_sizes[i] - 1.0 / 6.0 + h_within[i];
+            assert!((h_full[i] - expected).abs() < 1e-15, "row {i}");
+        }
+    }
+
+    #[test]
+    fn validate_balanced_panel_accepts_shuffled_rows_when_entities_and_periods_differ() {
+        // 3エンティティ×2時点（n_entities != n_periods）で、行を観測順に並べていない。
+        let entity = codes(&["c", "a", "b", "a", "c", "b"]);
+        let time = codes(&["2", "1", "2", "2", "1", "1"]);
+        assert_eq!(validate_balanced_panel(&entity, &time), Ok(()));
+    }
+
+    #[test]
+    fn validate_balanced_panel_rejects_duplicate_pair_offsetting_a_missing_one() {
+        // 3×2。(a,1)が重複し(a,2)が欠落するが、n_obs=6=3*2で件数は一致してしまう。
+        let entity = codes(&["a", "a", "b", "b", "c", "c"]);
+        let time = codes(&["1", "1", "1", "2", "1", "2"]);
+        assert_eq!(
+            validate_balanced_panel(&entity, &time),
+            Err(PanelError::UnbalancedPanelForTwoWay {
+                n_obs: 6,
+                n_entities: 3,
+                n_periods: 2,
+                expected: 6,
+            })
+        );
     }
 
     #[test]

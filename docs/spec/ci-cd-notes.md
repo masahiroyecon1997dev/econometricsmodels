@@ -46,10 +46,27 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
   `wheels-linux-<target>-<libc>`（`publish-pypi`は`wheels-*`パターンで全て回収）。
   追加wheelの動作確認（import・推定のスモークテスト）は行わない（macOS/Windowsも同様にビルドのみ）。
 - **`cd_docs.yml`**: mkdocsドキュメントのGitHub Pagesへの自動デプロイ。
-- **`dependabot.yml`**（`cargo`・`uv`・`github-actions`の3エコシステム）: `"pip"`ではなく
+- **`dependabot.yml`**（`cargo`・`uv`・`github-actions`・`docker`・`devcontainers`の5エコシステム。
+  `docker`は`.devcontainer/Dockerfile`のベースイメージ、`devcontainers`は`devcontainer.json`の
+  featureと`devcontainer-lock.json`が対象）: `"pip"`ではなく
   **`"uv"`エコシステム**を採用（uv専用の`package-ecosystem`。`test`/`benchmark`/`dev`/`docs`
   全依存グループが更新対象になる）。`cargo audit`/`pip-audit`（CI実行時点のロックファイル検証）と
   Dependabot（レジストリの継続監視・PR自動生成）は補完関係で、統合・置き換えはしない。
+- **`check_r_updates.yml`**（毎週月曜 + `workflow_dispatch`）: DependabotがCRANを扱えないため、
+  `.devcontainer/Dockerfile`で`remotes::install_version()`によりピン留めしたRパッケージと
+  R本体の更新を確認する（ロジックは標準ライブラリのみの`.github/scripts/check_r_updates.py`）。
+  - Rパッケージ: Dockerfileのピン留め版 vs CRAN `src/contrib/PACKAGES`の最新版。版比較は
+    `-`と`.`を同値に扱う（Rの規則。`0.6.8`＝`0.6-8`）。
+  - R本体: APT（`bookworm-cran40`）の索引に最新版しか載らず、版を固定できない。そのため
+    基準を「フィクスチャJSONの`_meta.r_version`の最大値（凍結値の生成に使ったR）」とし、
+    APT索引の`r-base`最新版と比較する。
+  - 更新があれば固定タイトルのIssue（`dependencies`/`setup`/`testing`ラベル）を自動起票し、
+    未クローズの同名Issueがあれば本文を更新する。すべて最新になれば自動クローズする。
+    Dependabotの`cooldown`相当の待機は設けていない（通知のみで、更新は人が判断するため）。
+  - 更新時の手順: Dockerfileの版を上げ → devcontainer再構築 →
+    `python -m benchmark.regenerate_all --fixtures-only` → フィクスチャ差分確認・`pytest tests`。
+    メジャー更新は数値が変わりうる（例: marginaleffects 1.0.0はデルタ法の`std_err`の数値微分が
+    変わり、旧版との相対差が最大1.8e-3動いた）ため、機械的にマージしない。
 - **`benchmark_performance.yml`**: `performance/compare_<method>.py`（手法非依存の
   計測ハーネス `performance/_perf_harness.py`＋手法固有アダプタ）を手法ごとの
   matrixジョブ（`method: [ols, wls, ...]`、`fail-fast: false`）で定期実行

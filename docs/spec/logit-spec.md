@@ -37,7 +37,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   `k==0`（`include_intercept=false`かつ`x`が空、`n<=k`チェックをすり抜けうる病的な入力）は別途
   `NoRegressors { n }`で検証する。
 - `include_intercept=True`のとき`x`に`"const"`列があるとエラー（OLSと同じ、自動追加する定数項と衝突）。
-  欠損値（NaN/無限大）は常にエラー。
+  欠損値（null・NaN/無限大）は常にエラー（方針は[`docs/guide/validation.md`](../guide/validation.md)）。
 
 ## 2. 結果構造体
 

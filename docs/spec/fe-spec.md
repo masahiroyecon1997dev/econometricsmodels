@@ -51,7 +51,7 @@ FE固有の内容のみを記載する。
 - **within変換後に分散ゼロになる説明変数は`ValidationError`**（`validate_no_zero_variance_
   regressors`。時間不変変数（1-way）・2-wayでtime FEと完全共線な列を同じロジックで検出する。
   閾値は絶対値ではなく相対値: 変換前の元の列の最大絶対値×観測数×`f64::EPSILON`と比較する）。
-- 欠損値（NaN/無限大）は常にエラー。`include_intercept`が無いため`"const"`列との衝突検証も
+- 欠損値（null・NaN/無限大）は常にエラー（方針は[`docs/guide/validation.md`](../guide/validation.md)）。`include_intercept`が無いため`"const"`列との衝突検証も
   無い。
 
 ## 2. 結果構造体

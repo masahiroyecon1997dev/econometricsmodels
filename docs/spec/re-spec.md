@@ -46,7 +46,7 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
 - between回帰は切片+傾き`k`個で`k+1`パラメータのため`n_entities > k+1`が必要（`n_entities <=
   k+1`だと`PanelError::BetweenRegressionFailed`。`linearmodels`自身も`n_entities=k+1`ちょうど
   で`ZeroDivisionError`になることを実地確認済み）。
-- 欠損値（NaN/無限大）は常にエラー。
+- 欠損値（null・NaN/無限大）は常にエラー（方針は[`docs/guide/validation.md`](../guide/validation.md)）。
 
 ## 2. 結果構造体
 

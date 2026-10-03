@@ -26,7 +26,7 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
 
 - `include_intercept=True`のとき`x`に`"const"`列があるとエラー（自動追加する定数項と衝突）。
   `x`に自前の定数列を含める重複検出は行わず、生じる多重共線性は`SingularMatrix`に委ねる。
-- 欠損値（NaN/無限大）は常にエラー。listwise deletionはしない。
+- 欠損値（null・NaN/無限大）は常にエラー。listwise deletionはしない。理由と全手法共通のエラー条件は公開ページ[`docs/guide/validation.md`](../guide/validation.md)を参照。
 - 検定分布は**t分布**（正規分布ではない）。`cov_type`がHC系/clusterでもF検定はロバストWald検定に切り替える。
 - `confidence_level`は`fit()`時に一度だけ使用し、結果に固定して含める（再計算用の可変引数は提供しない）。
 

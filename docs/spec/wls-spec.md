@@ -27,8 +27,7 @@ WLS（Weighted Least Squares）の確定済み仕様。`engine/src/linear/wls.rs
 - 重みはanalytic weight（分散の逆数に比例、正規化不要）。frequency weight/probability weightは
   対象外。
 - **重みの検証**: 0以下（0を含む）・NaN・無限大は常にエラー（`ValidationError`）とし、該当観測を
-  自動的に落とすことはしない（OLSの欠損値ポリシーと同じ考え方、[`ols-spec.md`](./ols-spec.md)
-  「API引数」）。NaN/Infは既存の`column_extraction::extract_f64_column`が`weight`列にも適用される
+  自動的に落とすことはしない（欠損値ポリシーと同じ考え方、[`docs/guide/validation.md`](../guide/validation.md)）。NaN/Infは既存の`column_extraction::extract_f64_column`が`weight`列にも適用される
   ことで検出されるため、追加実装が必要なのは0以下の値の検証のみ。ゼロ重みの許容（観測除外の手段
   としての活用）は将来の別issue。
 - `weight`は`y`と重複してはならない（`weight == y`はエラー）。`y`を独立変数としても使うのと

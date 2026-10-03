@@ -336,6 +336,8 @@ print(result.hausman_statistic, result.hausman_p_value)
 
 ## Error handling
 
+See [Validation and errors](guide/validation.md) for the design philosophy and the full list of situations that raise each error.
+
 Invalid input or options (a missing column, missing values, etc.) raise `ValidationError` (a subclass of `ValueError`). Problems detected during computation (e.g. a singular design matrix) raise `ComputationError` (a subclass of `RuntimeError`).
 
 ```python

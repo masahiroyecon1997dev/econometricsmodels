@@ -161,6 +161,7 @@ econometricsmodels/
 - **公開ページ（mkdocs nav掲載・英語）の運用ルール**: 検証と性能は、手法が増えたら公開ページにも反映する。
   - `docs/guide/verification.md`: 手法×リファレンス（主・独立クロスチェック）・比較する統計量・許容誤差（`tests/_tolerances.py`が正）・実データ・単一リファレンスの例外。新手法のテスト作成（`/test-new`）の完了条件に含める。
   - `docs/guide/performance.md`（概要・既知の課題・計測条件は手書き、先頭のサマリー表は生成ブロック）と`docs/guide/performance-results.md`（全表、全体が生成物）: **数値は`benchmark_performance.yml`のCI計測値を正とする**（devcontainerの単発計測は使わない）。リリース準備時（`/release`）にリリースブランチで手動実行し、artifactから`python -m performance.render_docs_results`で再生成する。手法を足すときは`benchmark_performance.yml`のmatrixに加えれば、次回の再生成で自動的にページへ現れる。
+  - `docs/guide/validation.md`: バリデーションの設計思想（欠損値を自動除外しない理由等）と、`ValidationError`/`ComputationError`が出る状況の分類。手法固有のチェック（新しい列引数・オプションの検証、手法固有の`ComputationError`）を追加したら、該当する分類表に1行足す。欠損値・共線列等の共通方針は各手法specに複製せず、このページを参照する。
   - 検証・性能の結果表は日本語ノートや`docs/spec/`に重複させない（公開ページが正本）。
 
 ## 14. 実装・テスト・ベンチマーク作成・仕様検討時の確認方針

@@ -72,7 +72,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   数値的に一致するが、実装（`TwoSlsEstimator`/`GmmEstimator`）は意図的に独立させている
   （`TwoSlsEstimator`は`cov_type`対応の推論統計量一式・Sargan・Wu-Hausmanを持つのに対し
   `GmmEstimator`はそれらを持たないため、委譲すると過剰設計になる）。
-- 欠損値（NaN/無限大）は常にエラー。
+- 欠損値（null・NaN/無限大）は常にエラー（方針は[`docs/guide/validation.md`](../guide/validation.md)）。
 
 ## 2. 結果構造体
 

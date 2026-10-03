@@ -36,6 +36,7 @@ $ARGUMENTS
 
 5. **公開ページへの反映**
    - `docs/guide/verification.md`（英語・mkdocsのnav掲載）に、対象手法の行を追加・更新する: 手法×リファレンス表、「What is compared」表、許容誤差の表（`tests/_tolerances.py`の実測値と一致させる）、実データ表。単一リファレンスなど独立クロスチェックの無い統計量は「Not compared against a second reference」に書く。
+   - 手法固有のバリデーション（新しい列引数・オプションの検証）や`ComputationError`の原因を追加した場合は、`docs/guide/validation.md`の分類表（Method-specific／`ComputationError`）に反映する。
    - `docs/guide/inference-conventions.md`の手法別の表に1行追加する（`docs/spec/inference-conventions.md`には重複させない）。
    - 許容誤差・リファレンスの食い違い（spec・コード・公開ページ）に気づいたら独自判断で埋めず、先にユーザーへ確認する（CLAUDE.md 14章）。
 

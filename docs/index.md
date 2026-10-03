@@ -18,8 +18,9 @@ Currently implemented: OLS (Ordinary Least Squares), WLS (Weighted Least Squares
 
 More methods, with a growing focus on causal inference, are planned as the project expands.
 
-## Verification and performance
+## Guides
 
 - [Verification](guide/verification.md): the reference implementations each method is checked against, and the tolerances used.
+- [Validation and errors](guide/validation.md): why invalid input is rejected instead of repaired (for example, missing values are never dropped), and when each error is raised.
 - [Inference conventions](guide/inference-conventions.md): which test distributions and degrees of freedom each method uses, and where they differ from R, statsmodels and linearmodels.
 - [Performance](guide/performance.md): how execution time and memory compare with statsmodels and linearmodels, with [full results](guide/performance-results.md) per method.

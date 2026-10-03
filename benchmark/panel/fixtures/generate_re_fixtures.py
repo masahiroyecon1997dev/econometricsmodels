@@ -127,6 +127,10 @@ def build_fixtures() -> dict:
             "wagepan（Wooldridge、N=545人×T=8年、1980-1987、バランスパネル）は"
             "FEと同じ変数選定理由（benchmark/common/constants.pyのWAGEPAN_X"
             "参照）。"
+            "f_statistic/f_p_valueはlinearmodelsのres.f_statistic_robust"
+            "（cov_typeに連動するWald二次形式）。res.f_statistic（変換済みyの"
+            "単純平均を基準にしたSST/SSR方式、cov_type非依存）は不均衡パネルで"
+            "本実装と一致せず極端な不均衡では負値になるため使わない。"
         ),
     }
     return fixtures

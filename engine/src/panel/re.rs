@@ -827,7 +827,7 @@ pub struct ReEstimator {
     df_model: usize,
     /// 傾き係数`df_model - 1`個（定数項を除く）が同時にゼロという帰無仮説のF検定
     /// （2.1節）。`estimator().f_statistic()`とは異なりREの切片を正しく
-    /// 除外している（`fit()`のdocコメント「F統計量」参照）。
+    /// 除外している（モジュールdoc「F統計量」参照）。
     f_statistic: f64,
     /// `f_statistic()`のp値。
     f_p_value: f64,
@@ -929,6 +929,9 @@ impl ReEstimator {
     ///   `PanelError::InvalidDkBandwidth`、時点数がハウスマン検定の対象数`k`以下なら
     ///   `PanelError::InsufficientDkPeriodsForInference`。
     /// - ハウスマン検定の補助回帰・Wald検定が失敗した場合は`PanelError::HausmanTestFailed`。
+    /// - F統計量のWald検定が失敗した場合（傾き係数の共分散部分行列が数値的にほぼ特異）は
+    ///   `PanelError::FTestFailed`（backstop。`Cluster`/`Dk`の構造的な特異性は上の事前検証で
+    ///   弾かれるため、通常は傾き係数間の極端なスケール差等でのみ起こる）。
     pub fn fit(
         input: ReInput,
         cov_type: ReCovType,
@@ -1054,9 +1057,12 @@ impl ReEstimator {
                 let time = input.time_codes().ok_or(PanelError::DkRequiresTime)?;
                 let t_periods = time.n_groups();
                 let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
-                // RE本体のF統計量も傾き`k = df_model - 1`個を同時検定するが、ハウスマン検定が
-                // 同じ時点構造のDKで`X̃`の傾き`k = df_model - 1`個を同時検定するため、
-                // 補助回帰を待たずここで弾く（Clusterアームの`q`と同じ規約）。
+                // F統計量（傾き`q = df_model - 1`個の同時検定、分母自由度`t_periods - 1`）と
+                // ハウスマン検定（同じ時点構造のDKで`X̃`の傾き`q`個を同時検定）は、ともに
+                // `t_periods > q`が成り立たないと共分散部分行列が特異になる。
+                // 補助回帰・`wald_f_test`を待たずここで弾く（Clusterアームの`q`と同じ規約。
+                // `wald_f_test`が`FisherSnedecor::new`に渡す自由度が`>= q >= 1`になる前提も
+                // この事前検証に依存する）。
                 validate_dk_periods_cover_tested_coefficients(t_periods, df_model - 1)?;
                 // FEのDKと同じくfixestは`K.fixef="full"`が既定（クラスター変数が無く
                 // ネスト判定自体が発生しない）ため`K=df_model`をそのまま使う。
@@ -2103,10 +2109,13 @@ mod tests {
     }
 
     #[test]
-    fn re_estimator_fit_f_statistic_is_non_negative_for_extremely_unbalanced_panel() {
-        // `linearmodels`のSST/SSR方式のF統計量は、極端に不均衡なパネルで負値になる
-        // （このデータでは`linearmodels`が-0.6837を返す）が、Wald二次形式（モジュールdoc
-        // 「F統計量」）は`V`が正定値である限り負値にならない回帰ガード。
+    fn re_estimator_fit_f_statistic_is_wald_form_for_extremely_unbalanced_panel() {
+        // `linearmodels`のSST/SSR方式のF統計量はこのデータ（極端に不均衡なパネル）で
+        // -0.6837と負値になる。本実装のWald二次形式（モジュールdoc「F統計量」）は
+        // 傾き係数が1個のとき`f_statistic = test_stat²`（1自由度のF検定と両側t検定の
+        // 代数的等価）になる。旧SST/SSR実装に戻すと負値になりこの恒等式が崩れるため、
+        // その回帰ガードとして恒等式を固定する（`plm`との数値照合は分散成分の推定差が
+        // 小標本で大きく効くためPython側の許容誤差付きテストで行う）。
         // T_i={2, 2, 15}という極端に不均衡なパネル（`linearmodels`でのランダム探索で
         // 発見、乱数シード固定・実地検証済み）。
         let entity = strings(&[
@@ -2163,9 +2172,10 @@ mod tests {
 
         assert_eq!(re.df_resid(), 17);
         assert_eq!(re.df_model(), 2);
-        assert!(re.f_statistic() > 0.0);
-        assert!((re.f_statistic() - re.test_stats().get(1, 0).powi(2)).abs() < 1e-9);
-        assert!((re.f_p_value() - *re.p_values().get(1, 0)).abs() < 1e-9);
+        let t = *re.test_stats().get(1, 0);
+        assert!((re.f_statistic() - t * t).abs() < 1e-9 * (1.0 + t * t));
+        let p_value = *re.p_values().get(1, 0);
+        assert!((re.f_p_value() - p_value).abs() < 1e-9 * p_value.max(1e-300));
         assert!(re.f_p_value() > 0.0 && re.f_p_value() < 1.0);
     }
 
@@ -2383,6 +2393,31 @@ mod tests {
             "y".into(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn re_estimator_fit_f_statistic_with_two_slopes_matches_wald_test_last_columns_for_classical() {
+        // 傾き係数が2個（q=2）のとき、`cov_params`の部分行列の非対角要素と
+        // `k_constant + j`の列オフセットが効く（`f = t²`の恒等式が使えるq=1では
+        // 検証できない）。`Classical`では`estimator()`（準偏差変換済みデータへの
+        // `CovType::Classical`のOLS）の`cov_params`がRE自身の`cov_params`と一致する
+        // ため、`OlsEstimator::wald_test_last_columns(q)`（末尾`q`列＝傾き係数の
+        // 同時Wald検定、`fit()`が使う経路とは別の呼び出し）と一致するはず。
+        let input = hausman_two_slope_input(None);
+        let re = ReEstimator::fit(input, ReCovType::Classical, 0.95).unwrap();
+        assert_eq!(re.df_model(), 3);
+
+        let (expected_f, expected_p) = re.estimator().wald_test_last_columns(2).unwrap();
+        assert!((re.f_statistic() - expected_f).abs() < 1e-9 * expected_f.abs());
+        assert!((re.f_p_value() - expected_p).abs() < 1e-9);
+        // 非対角要素を無視した（独立な2つのt²の平均）値とは異なる（q=2の部分行列が
+        // 実際に使われていることの確認）。
+        let t1 = *re.test_stats().get(1, 0);
+        let t2 = *re.test_stats().get(2, 0);
+        assert!((re.f_statistic() - (t1 * t1 + t2 * t2) / 2.0).abs() > 1e-6);
+
+        assert_eq!(re.f_df(), Some((2, re.df_inference())));
+        assert_eq!(re.df_inference(), re.df_resid());
     }
 
     #[test]

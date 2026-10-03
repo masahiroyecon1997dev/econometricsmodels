@@ -1,7 +1,8 @@
 """RE の独立実装（R: plm）とのクロスチェックテスト。
 
 主リファレンス（linearmodels）との厳密比較（classical/hc1）は
-`test_re_reference.py`で行う。
+`test_re_reference.py`で行う。classical/hc1もこのファイルのplmで独立に検証する
+（全統計量。F統計量はこのファイルが全cov_typeの独立リファレンス）。
 ここでは`tests/fixtures/benchmarks/re_crosscheck.json`（`benchmark/panel/
 fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmodelsとは
 独立した実装（R: plm）との一致を確認する。
@@ -16,6 +17,9 @@ fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmod
   （`n/(n-k)`）とは一致しないため、plm（cluster: `vcovHC(method="arellano",
   type="sss")`、dk: `vcovSCC(maxlag=, type="sss")`）が唯一の参照実装になる。
   `test_re_reference.py`はclassical/hc1のみをlinearmodelsと比較する。
+- **f_statistic/f_p_value（全cov_type）**: `plm::pwaldtest(test = "F",
+  vcov = ...)`の統計量（p値はt検定と同じ分母自由度から再計算）。linearmodelsの
+  `f_statistic_robust`はclassical/hc1しか持たない。
 - **ハウスマン検定**（`hausman_statistic`/`hausman_p_value`/`hausman_df`）:
   `linearmodels`に専用実装が無いため、`plm::phtest(method = "aux",
   effect = "individual")`（回帰ベース）が唯一の参照実装（panel-common.md

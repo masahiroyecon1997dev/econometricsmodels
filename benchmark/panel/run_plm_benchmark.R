@@ -5,7 +5,7 @@
 # run_re()）とは独立した実装のため、testing-policy.mdの役割分担「R: 独立実装に
 # よるクロスチェック用」に対応する。
 #
-# ## 対象はhc2/hc3/cluster/dk（classical/hc1はlinearmodelsのみで検証する）
+# ## 対象は全cov_type（classical/hc1はlinearmodelsでも検証するが、独立実装としてplmでも検証する）
 #
 # - hc2/hc3: linearmodels.RandomEffectsが提供しない（PanelOLSと同じ
 #   `_cov_estimators`実装、engine/src/panel/CLAUDE.md「cov_type対応」参照）ため、
@@ -28,7 +28,10 @@
 #   推定値を使うため、不均衡パネルでは本実装とSwamy-Arora分散成分の差が出る
 #   （バランスパネルで比較すること）。
 #
-# classical/hc1はlinearmodelsのみで検証する（本スクリプトでは計算しない）。
+# classical（`vcov(model)`、plmの古典的分散共分散行列）・hc1（`vcovHC(method="white1",
+# type="HC1")`、`n/(n-K)`補正）もplmで計算する。バランスパネルでは本実装と機械精度で
+# 一致する（実測確認済み）。hc1は`linearmodels`の"robust"とも同じ式。
+#
 # plmの変量効果分散成分推定（Swamy-Arora）がlinearmodelsと僅かに異なる実装の
 # ため、点推定自体が不均衡パネルで最大0.1%程度乖離することを実測確認済み
 # （バランスパネルでは6桁程度で一致）。この乖離のためplm側の値は不均衡パネルで
@@ -56,7 +59,8 @@
 # `re-spec.md`3.5節）ため、t検定と同じ`vc`を渡す。plmは変量効果で既定が
 # `Chisq`検定のため`test = "F"`を明示する。**p値は`pwaldtest`自身の`p.value`
 # ではなく、統計量と上記のt検定と同じ分母自由度`t_df`から`pf()`で計算し直す**
-# （`pwaldtest`の分母自由度は`vcov`の種類で決まる実装で、本実装の規約
+# （`pwaldtest`は`vcov`に`cluster`属性があるときだけ分母自由度を調整し、無いとき
+# は`df.residual`のまま——その旨の警告が出ることを実測確認済み。本実装の規約
 # （clusterは`G-1`・dkは`T-1`・それ以外は`df_resid`）と一致する保証がないため、
 # 統計量だけをplmの値として使う）。
 #
@@ -117,7 +121,13 @@ n_periods <- length(unique(df[[time_col]]))
 df_resid <- df.residual(model)
 
 # cov_typeごとのvcovとt分布の自由度（モジュールコメント参照）。
-if (cov_type == "hc2") {
+if (cov_type == "classical") {
+  vc <- vcov(model)
+  t_df <- df_resid
+} else if (cov_type == "hc1") {
+  vc <- vcovHC(model, method = "white1", type = "HC1")
+  t_df <- df_resid
+} else if (cov_type == "hc2") {
   vc <- vcovHC(model, method = "white1", type = "HC2")
   t_df <- df_resid
 } else if (cov_type == "hc3") {
@@ -161,7 +171,9 @@ conf_lower <- coefs - crit * ses
 conf_upper <- coefs + crit * ses
 
 # F統計量（上記コメント参照）。`vc`は上のcov_typeごとの分散共分散行列。
-wald_f <- pwaldtest(model, test = "F", vcov = vc)
+# pwaldtestは`vcov`に`cluster`属性が無いと分母自由度を`df.residual`のままにする
+# （その旨の警告を出す）。p値は下で`t_df`から計算し直すためこの警告は無視する。
+wald_f <- suppressWarnings(pwaldtest(model, test = "F", vcov = vc))
 f_df_num <- as.numeric(wald_f$parameter[1])
 f_p_value_val <- pf(wald_f$statistic, f_df_num, t_df, lower.tail = FALSE)
 

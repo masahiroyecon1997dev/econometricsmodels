@@ -189,8 +189,8 @@ class REResults:
     def stat_df(self) -> int | None:
         """Degrees of freedom of the t distribution behind `test_stats`,
         or `None` when `stat_dist` is `"normal"`. May differ from
-        `df_resid` (e.g. cluster-robust inference uses `G - 1`), so use
-        this to recompute p-values from `test_stats`."""
+        `df_resid` (cluster-robust inference uses `G - 1`, Driscoll-Kraay
+        `T - 1`), so use this to recompute p-values from `test_stats`."""
         return self._raw.stat_df
 
     @property
@@ -250,13 +250,10 @@ class REResults:
     @property
     def f_statistic(self) -> float:
         """F-statistic for the joint significance of the slope
-        coefficients, excluding the intercept. As for FE, this is a Wald
-        test that follows `cov_type` (it uses the robust covariance
-        matrix and the same degrees of freedom as the t-tests, see
-        `f_df_denom`). It is the Wald quadratic form used by
-        `plm::pwaldtest`, so it is never negative, unlike the
-        sum-of-squares version of `linearmodels.RandomEffects`. It is
-        `NaN` when there are no slope coefficients (`df_model == 1`)."""
+        coefficients, excluding the intercept (classical F-test when
+        `cov_type="classical"`, a robust Wald test otherwise; the
+        degrees of freedom follow `cov_type`, see `f_df_denom`). `NaN`
+        when there are no slope coefficients (`df_model == 1`)."""
         return self._raw.f_statistic
 
     @property
@@ -273,9 +270,10 @@ class REResults:
     @property
     def f_df_denom(self) -> int | None:
         """Denominator degrees of freedom of `f_statistic` (`None` when it
-        is NaN). Equal to `stat_df`: `G - 1` for `cov_type="cluster"`,
-        `t_periods - 1` for `"dk"` and `df_resid` otherwise. Use this to
-        recompute the p-value from `f_statistic`."""
+        is NaN). Follows `cov_type` like the t-tests (`G - 1` for
+        `cov_type="cluster"`, `T - 1` for `"dk"`, `df_resid` otherwise),
+        so it equals `stat_df` whenever `f_statistic` is not NaN. Use this
+        to recompute the p-value from `f_statistic`."""
         return self._raw.f_df_denom
 
     @property

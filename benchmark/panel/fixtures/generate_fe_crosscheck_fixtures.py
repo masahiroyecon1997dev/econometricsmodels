@@ -83,6 +83,9 @@ SCENARIO_COV_TYPES: dict[str, list[str]] = {
 WAGEPAN_COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster"]
 WAGEPAN_FORMULA_RHS = " + ".join(WAGEPAN_X)
 
+# df_resid=1境界で追加検証するロバスト系cov_type（classicalは別キーで既存）。
+ROBUST_BOUNDARY_COV_TYPES = ["hc1", "hc2", "hc3"]
+
 
 def _formula(x_cols: list[str], effects_suffix: str) -> str:
     return f"y ~ {' + '.join(x_cols)} | {effects_suffix}"
@@ -135,14 +138,58 @@ def _run_cluster_g2_case(tmpdir: Path) -> dict:
     return run_fixest_r(csv_path, formula, "cluster", cluster="cluster_group")
 
 
-def _run_boundary_df1_case(*, two_way: bool) -> dict:
+def _run_cluster_g3_two_slopes_case(tmpdir: Path) -> dict:
+    """クラスター数`G = q+1`（q=2、分母自由度`G-1 = q = 2`）の境界の
+    fixestクロスチェック。
+
+    fixestの`wald()`は分母自由度を`max(df2, df1 + 1)`に切り上げるため、`G-1 <= q`の
+    境界では`summary`のt検定と食い違う自由度を使う（`run_fixest_benchmark.R`参照）。
+    `cluster_g2`（q=1）とは別に、q>=2でも本実装の`F(q, G-1)`がfixestの統計量と
+    一致し、p値が`G-1`で計算されていることを確認する。`fe_baseline.csv`（k=2）に
+    entityとは無関係な3グループ（行番号%3）を都度動的付与する。
+    """
+    df = pl.read_csv(DATA_DIR / "fe_baseline.csv")
+    groups = [str(i % 3) for i in range(df.height)]
+    df = df.with_columns(pl.Series("cluster_group", groups))
+    csv_path = tmpdir / "fe_baseline_with_cluster_g3.csv"
+    df.write_csv(csv_path)
+    formula = _formula(["x1", "x2"], "entity")
+    return run_fixest_r(csv_path, formula, "cluster", cluster="cluster_group")
+
+
+def _dk_three_periods_frame() -> pl.DataFrame:
+    """`fe_baseline.csv`の先頭3時点だけを残した、dkの`T = q+1`（q=2）境界用
+    データ。生成側・テスト側で同じ絞り込みを共有する。"""
+    df = pl.read_csv(DATA_DIR / "fe_baseline.csv")
+    first_three = sorted(df["time"].unique().to_list())[:3]
+    return df.filter(pl.col("time").is_in(first_three))
+
+
+def _run_dk_three_periods_case(tmpdir: Path) -> dict:
+    """Driscoll-Kraayの時点数`T = q+1`（q=2、分母自由度`T-1 = q = 2`）の境界の
+    fixestクロスチェック（cluster側の`G = q+1`と同じ趣旨、`wald()`の分母自由度の
+    切り上げが効く境界）。バンド幅は本実装の既定式（T=3で1）を明示する。"""
+    csv_path = tmpdir / "fe_baseline_three_periods.csv"
+    _dk_three_periods_frame().write_csv(csv_path)
+    formula = _formula(["x1", "x2"], "entity")
+    return run_fixest_r(
+        csv_path,
+        formula,
+        "dk",
+        dk_lag=default_dk_bandwidth(csv_path),
+    )
+
+
+def _run_boundary_df1_case(
+    *, two_way: bool, cov_type: str = "classical"
+) -> dict:
     """df_resid=1境界の成功パスのfixestクロスチェック
     （`generate_fe_fixtures.py::_run_boundary_df1_case`と同じデータ）。"""
     scenario = "baseline_df1_two_way" if two_way else "baseline_df1_one_way"
     csv_path = DATA_DIR / f"fe_{scenario}.csv"
     x_cols = ["x1", "x2", "x3"] if two_way else ["x1", "x2"]
     formula = _formula(x_cols, "entity + time" if two_way else "entity")
-    return run_fixest_r(csv_path, formula, "classical")
+    return run_fixest_r(csv_path, formula, cov_type)
 
 
 def _run_wagepan(csv_path: Path, cov_type: str, *, two_way: bool) -> dict:
@@ -178,9 +225,29 @@ def build_fixtures() -> dict:
             _run_cluster_imbalanced_case(tmpdir)
         )
         fixtures["baseline"]["cluster_g2"] = _run_cluster_g2_case(tmpdir)
+        fixtures["baseline"]["cluster_g3_two_slopes"] = (
+            _run_cluster_g3_two_slopes_case(tmpdir)
+        )
+        fixtures["baseline"]["dk_three_periods"] = _run_dk_three_periods_case(
+            tmpdir
+        )
         fixtures["baseline_df1"] = {
             "one_way": _run_boundary_df1_case(two_way=False),
             "two_way": _run_boundary_df1_case(two_way=True),
+            # df_resid=1ではhc1〜hc3も`wald()`の分母自由度の切り上げ
+            # （`df_resid <= q`）が効く境界になる。
+            "one_way_robust": {
+                cov_type: _run_boundary_df1_case(
+                    two_way=False, cov_type=cov_type
+                )
+                for cov_type in ROBUST_BOUNDARY_COV_TYPES
+            },
+            "two_way_robust": {
+                cov_type: _run_boundary_df1_case(
+                    two_way=True, cov_type=cov_type
+                )
+                for cov_type in ROBUST_BOUNDARY_COV_TYPES
+            },
         }
 
         df = load_wooldridge("wagepan")
@@ -225,6 +292,14 @@ def build_fixtures() -> dict:
             "t分布の自由度G-1、dk: K.fixef=full・G相当は時点数・自由度T-1）に"
             "合わせてあり、linearmodelsとは一致しないためfixestのみが"
             "参照値になる。全cov_typeで本実装と機械精度で一致する。"
+            "f_statistic/f_p_valueは全cov_type・1-way/2-wayでfixest::wald"
+            "(keep=全傾き係数, vcov=同じvcov)の統計量（fitstat(m, 'f')は固定効果"
+            "ダミーも検定に含む別定義のため使わない）。p値はwald()が分母自由度を"
+            "max(df2, df1+1)に切り上げる（G-1<=q・T-1<=q・df_resid<=qの境界でt検定と"
+            "食い違う）ため使わず、統計量とdegrees_freedom(model, 't', vcov)から"
+            "pf()で計算し直している。その境界はbaseline.cluster_g2（q=1）・"
+            "baseline.cluster_g3_two_slopes（G=q+1、q=2）・baseline.dk_three_periods"
+            "（T=q+1、q=2）・baseline_df1.*_robust（df_resid=1のhc1-hc3）が踏む。"
             "dkのバンド幅は本実装の既定floor(4*(T/100)^(2/9))を明示的に"
             "DK(lag)に渡している（fixestの既定n_t^0.25とは異なる）。"
             "many_regressorsはk>T-1のためdkを含まない。wagepanは"

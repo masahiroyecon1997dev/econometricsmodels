@@ -70,9 +70,11 @@ from benchmark.common import (
 from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
     COV_TYPES,
     ONE_WAY_ONLY_SCENARIOS,
+    ROBUST_BOUNDARY_COV_TYPES,
     SCENARIO_COV_TYPES,
     TWO_WAY_SCENARIOS,
     WAGEPAN_COV_TYPES,
+    _dk_three_periods_frame,
 )
 
 FIXTURE_PATH = (
@@ -234,6 +236,59 @@ def test_cluster_g2_matches_fixest(crosscheck):
         crosscheck["baseline"]["cluster_g2"],
         "baseline/cluster_g2",
     )
+
+
+def test_cluster_g3_two_slopes_matches_fixest(crosscheck):
+    """クラスター数`G = q+1`（q=2、分母自由度`G-1 = q`）の境界。fixestの
+    `wald()`が分母自由度を`max(df2, df1+1)`に切り上げる境界で、本実装の
+    `F(q, G-1)`のp値が正しいことを確認する（`cluster_g2`はq=1）。"""
+    df = pl.read_csv(DATA_DIR / "fe_baseline.csv")
+    groups = [str(i % 3) for i in range(df.height)]
+    df = df.with_columns(pl.Series("cluster_group", groups))
+    options = FEOptions(cov_type="cluster", cluster="cluster_group")
+    res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+
+    assert (res.f_df_num, res.f_df_denom) == (2, 2)
+    _check_result(
+        res,
+        crosscheck["baseline"]["cluster_g3_two_slopes"],
+        "baseline/cluster_g3_two_slopes",
+    )
+
+
+def test_dk_three_periods_matches_fixest(crosscheck):
+    """Driscoll-Kraayの時点数`T = q+1`（q=2、分母自由度`T-1 = q`）の境界。"""
+    df = _dk_three_periods_frame()
+    options = FEOptions(cov_type="dk", dk_time="time")
+    res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+
+    assert (res.f_df_num, res.f_df_denom) == (2, 2)
+    _check_result(
+        res,
+        crosscheck["baseline"]["dk_three_periods"],
+        "baseline/dk_three_periods",
+    )
+
+
+@pytest.mark.parametrize("cov_type", ROBUST_BOUNDARY_COV_TYPES)
+@pytest.mark.parametrize("two_way", [False, True])
+def test_boundary_df1_robust_matches_fixest(crosscheck, cov_type, two_way):
+    """df_resid=1境界のhc1〜hc3（`df_resid <= q`でfixestの`wald()`の分母自由度
+    切り上げが効く）。"""
+    if two_way:
+        df = pl.read_csv(DATA_DIR / "fe_baseline_df1_two_way.csv")
+        x = ["x1", "x2", "x3"]
+        options = FEOptions(cov_type=cov_type, time="time")
+        ref = crosscheck["baseline_df1"]["two_way_robust"][cov_type]
+    else:
+        df = pl.read_csv(DATA_DIR / "fe_baseline_df1_one_way.csv")
+        x = ["x1", "x2"]
+        options = FEOptions(cov_type=cov_type)
+        ref = crosscheck["baseline_df1"]["one_way_robust"][cov_type]
+    res = FE(df, y="y", x=x, entity="entity", options=options).fit()
+
+    assert res.f_df_denom == 1
+    _check_result(res, ref, f"baseline_df1/{two_way}/{cov_type}")
 
 
 def test_boundary_df1_one_way_matches_fixest(crosscheck):

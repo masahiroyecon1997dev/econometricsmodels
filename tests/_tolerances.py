@@ -238,7 +238,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_CROSSCHECK_FLOOR,
     },
-    # REのRクロスチェックはplm（hc2/hc3・cluster/dk、ハウスマン検定も含む
+    # REのRクロスチェックはplm（全cov_type、hc2/hc3・cluster/dkとハウスマン検定は
     # 単一参照実装の例外、`benchmark/panel/run_plm_benchmark.R`・
     # `benchmark/panel/fixtures/generate_re_crosscheck_fixtures.py`参照）。
     # plmの変量効果分散成分推定（Swamy-Arora）がlinearmodelsと僅かに異なる
@@ -261,10 +261,13 @@ TOLERANCES: dict[str, dict[str, float]] = {
         "rtol_unbalanced_coef": 5e-3,
         # F統計量（`plm::pwaldtest(test="F", vcov=...)`、cov_type連動のWald検定）:
         # 分散成分の差が係数とseの両方に効いてWald二次形式に現れる。cov_type別の実測
-        # 最大相対誤差: hc2 8.7e-4・hc3 8.5e-4・cluster 1.3e-3・dk 6.7e-3
+        # 最大相対誤差: classical 3.0e-4・hc1 8.8e-4・hc2 8.7e-4・hc3 8.5e-4・
+        # cluster 1.3e-3・dk 6.7e-3
         # （dkはseと同様`T-1=5`の短い時系列で増幅される）。実測の2〜3倍のマージンを
         # 載せる。自由度や補正式の取り違え（`G/(G-1)`欠落など約1%以上）は検出できる幅。
         "rtol_unbalanced_f": {
+            "classical": 1e-3,
+            "hc1": 2e-3,
             "hc2": 2e-3,
             "hc3": 2e-3,
             "cluster": 4e-3,
@@ -273,7 +276,10 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # se・t・p値・信頼区間（実測最大相対誤差）: cluster 2.9e-3（conf_int）・
         # hc2/hc3 1.1e-2（conf_int）・dk 3.7e-2（conf_int、se 0.9%がt分布の
         # 自由度`T-1=5`の裾でp値・信頼区間に増幅される）。
+        # classical・hc1（実測最大相対誤差: se 0.71%・conf_int 1.06%）も同水準。
         "rtol_unbalanced": {
+            "classical": 2e-2,
+            "hc1": 2e-2,
             "hc2": 2e-2,
             "hc3": 2e-2,
             "cluster": 5e-3,

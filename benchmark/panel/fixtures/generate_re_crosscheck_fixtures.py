@@ -111,20 +111,21 @@ from benchmark.panel.references.r import (
     run_re_plm_r,
 )
 
-# hc2/hc3/cluster/dkが対象（モジュールdoc「このフィクスチャだけが持つ統計量」
-# 参照）。classical/hc1はre.jsonのlinearmodelsで検証する。
-COV_TYPES = ["hc2", "hc3", "cluster", "dk"]
+# 全cov_typeが対象。hc2/hc3/cluster/dkはplmだけが参照実装（モジュールdoc
+# 「このフィクスチャだけが持つ統計量」参照）。classical/hc1はre.jsonのlinearmodelsでも
+# 検証するが、独立実装（plm）でも全統計量を検証する（F統計量を含む）。
+COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster", "dk"]
 
 # many_regressors（k=20、40エンティティ、T=6）はcluster（補助回帰の傾き係数
 # `2k=40`がG=40以下）・dk（検定対象`k=20`がT-1=5超）でハウスマン検定の
 # ロバスト共分散が構造的に特異になり、RE本体も`fit()`が`ValidationError`で
 # 失敗するため、cluster/dkの標準誤差の対象外にする（`_STRUCTURALLY_SINGULAR`）。
 SCENARIO_COV_TYPES: dict[str, list[str]] = {
-    "many_regressors": ["hc2", "hc3"],
+    "many_regressors": ["classical", "hc1", "hc2", "hc3"],
 }
 
 # wagepan（T=8）はdkを対象外にする（re.jsonと同様、短いTでのDKは対象外）。
-WAGEPAN_COV_TYPES = ["hc2", "hc3", "cluster"]
+WAGEPAN_COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster"]
 
 # ハウスマン検定はRE本体のcov_typeに連動するため、全cov_typeを対象にする
 # （モジュールdoc「ハウスマン検定」参照）。
@@ -323,6 +324,12 @@ def build_fixtures() -> dict:
             "近似）ではなく、本実装と同じt分布（hc2/hc3はdf_resid、clusterはG-1、"
             "dkはT-1）の式でcoef/seから計算し直している"
             "（run_plm_benchmark.Rのコメント参照）。"
+            "classical/hc1もplmで計算する（linearmodelsでも検証済みだが独立実装でも"
+            "全統計量を検証）。f_statistic/f_p_valueは全cov_typeでplm::pwaldtest"
+            '(test="F", vcov=同じvcov)の統計量（FEと同じくcov_typeに連動する'
+            "Wald検定）、p値は統計量とt検定と同じ分母自由度からpf()で計算し直している"
+            "（pwaldtestは分母自由度をvcovのcluster属性が無いとdf.residualのままに"
+            "するため）。"
             'ハウスマン検定はplm::phtest(method = "aux", effect = '
             '"individual", vcov = ...)（回帰ベース、常に1-way、RE本体の'
             'cov_typeに連動）の値で、"hausman"キー配下にcov_type別に持つ'

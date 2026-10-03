@@ -215,8 +215,9 @@ pub struct REResult {
     /// Numerator degrees of freedom of `f_statistic` (`None` when it is NaN).
     #[pyo3(get)]
     pub f_df_num: Option<usize>,
-    /// Denominator degrees of freedom of `f_statistic` (`None` when it is NaN). May differ
-    /// from `df_resid` (e.g. OLS/WLS with cluster-robust inference uses `G - 1`).
+    /// Denominator degrees of freedom of `f_statistic` (`None` when it is NaN). Follows
+    /// `cov_type` like the t-tests (`G - 1` for cluster, `T - 1` for Driscoll-Kraay,
+    /// `df_resid` otherwise).
     #[pyo3(get)]
     pub f_df_denom: Option<usize>,
     #[pyo3(get)]

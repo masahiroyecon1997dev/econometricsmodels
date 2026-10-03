@@ -4,6 +4,10 @@
   "service": "dev",
   "workspaceFolder": "/workspaces/econometricsmodels",
   "remoteUser": "vscode",
+  "forwardPorts": [8000],
+  "portsAttributes": {
+    "8000": { "label": "mkdocs serve", "onAutoForward": "notify" }
+  },
   "customizations": {
     "vscode": {
       "extensions": [

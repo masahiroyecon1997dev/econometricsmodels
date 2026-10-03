@@ -299,10 +299,17 @@ pyerr`、FE/RE共有）を使う。RE固有の追加バリアントは`BetweenRe
   dkは`T-1`）で計算し直す（この自由度の選択自体は本実装と同じ規約の手計算で、独立検証が
   及ぶのは補正係数込みの標準誤差まで）。`classical`/`hc1`は引き続き`linearmodels`と数値一致で
   検証する。
+  `cluster`にentity以外の列を指定する場合は、`plm::vcovHC`がgroup/timeしかクラスターに
+  できないため、`plm`の準偏差変換済み設計行列・応答に`lm` + `sandwich::vcovCL(type = "HC1",
+  cadjust = TRUE)`を当てた値を参照値にする（entityクラスターでは`vcovHC(arellano, sss)`と
+  機械精度で一致を確認済み）。クラスター不均衡（サイズ[2,3,5,10,30,50]）と、境界の成功パス
+  （ハウスマン検定の補助回帰が`G > 2k`を要するため`k=1`・`G=3`）を持つ。
 - 許容誤差: Classical/HC1は`linearmodels`と相対誤差`1e-9`で数値完全一致。Cluster/HAC・
   HC2/HC3の`plm`クロスチェックは、バランスパネルでは機械精度で一致する（`1e-8`）。不均衡
-  パネルのみ分散成分推定（Swamy-Arora）が`plm`とlinearmodels準拠の本実装で僅かに異なるため
-  緩める（`2e-2`、dkのみ`5e-2`。`tests/_tolerances.py`の`re_crosscheck`参照）。
+  パネルのみ分散成分推定（Swamy-Arora）が`plm`とlinearmodels準拠の本実装で僅かに異なるため、
+  統計量・cov_type別に実測へマージンを載せて緩める（係数`5e-3`、se・t・p値・信頼区間は
+  cluster `5e-3`・hc2/hc3 `2e-2`・dk `5e-2`。`tests/_tolerances.py`の`re_crosscheck`参照。
+  一律に緩めるとclusterの`G/(G-1)`欠落（seに約1.3%）を見逃すため分けている）。
 - **ハウスマン検定は`plm::phtest(method = "aux", effect = "individual", vcov = ...)`のみを参照値と
   する例外規定**（`linearmodels`のソースに`hausman`という文字列が一切登場せず専用実装が
   無いことを確認済み。通常の「Python主リファレンス＋Rクロスチェック」の2系統検証の例外）。

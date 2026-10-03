@@ -1,8 +1,8 @@
 """panel系統（FE/RE）の R（fixest/plm）クロスチェック呼び出し。
 
-`run_fixest_benchmark.R`（FE）・`run_plm_benchmark.R`（RE）
-それぞれの位置引数の契約をここで組み立て、共通の
-`benchmark.common.reference.r`に渡す。
+`run_fixest_benchmark.R`（FE）・`run_plm_fe_benchmark.R`（FEの第2リファレンス、
+plm）・`run_plm_benchmark.R`（RE）それぞれの位置引数の契約をここで組み立て、
+共通の`benchmark.common.reference.r`に渡す。
 """
 
 from __future__ import annotations
@@ -29,10 +29,19 @@ _FIXEST_SCALAR_KEYS = (
 
 _PLM_SCALAR_KEYS = ("f_statistic", "f_p_value")
 
+# FEのcluster/dkの第2リファレンス（plmのwithin）。fixest用スクリプトと同じ
+# `references/`直下に置く。
+_PLM_FE_R_SCRIPT = Path(__file__).resolve().parent / "run_plm_fe_benchmark.R"
+
 # `benchmark/panel/run_plm_benchmark.R`は`references/`直下ではなく
 # `benchmark/panel/`直下に置いたまま（既存スタブのパスを踏襲。
 # 中身のみRE専用に更新済みで、ファイルの移動は行っていない）。
 _PLM_R_SCRIPT = Path(__file__).resolve().parents[1] / "run_plm_benchmark.R"
+
+# plmのRE準偏差変換済みデータの書き出し（statsmodelsクロスチェック用）。
+_PLM_RE_EXPORT_R_SCRIPT = (
+    Path(__file__).resolve().parent / "export_plm_re_transformed.R"
+)
 
 # ハウスマン検定はRE本体のcov_typeに連動するため専用スクリプトで計算する。
 _PLM_HAUSMAN_R_SCRIPT = (
@@ -86,6 +95,47 @@ def run_fixest_r(
         scalar_keys=_FIXEST_SCALAR_KEYS,
         # FEに切片("(Intercept)"/"Intercept")は無いため、畳む対象名を空にする
         # （normalize_namesの既定はOLS/WLS向けの切片名エイリアス）。
+        intercept_aliases=(),
+    )
+
+
+def run_fe_plm_r(
+    csv_path: Path,
+    formula: str,
+    cov_type: str,
+    *,
+    entity_col: str = "entity",
+    time_col: str = "time",
+    maxlag: int | None = None,
+) -> dict:
+    """`run_plm_fe_benchmark.R`を呼び、FE（1-way within）のcluster/dkを
+    plm＋sandwichで計算する（fixestとは別実装の第2リファレンス）。
+
+    対象は1-way FEの`cluster`（entityクラスター）と`dk`のみ（スクリプト
+    モジュールコメント参照）。
+
+    Args:
+        csv_path: データCSV。
+        formula: `plm`の回帰式（固定効果構文なし、例: "y ~ x1 + x2"）。
+        cov_type: "cluster" / "dk"。
+        entity_col: エンティティ識別子の列名。
+        time_col: 時点識別子の列名。
+        maxlag: `cov_type="dk"`のバンド幅（`vcovSCC`の`maxlag`、`DK(lag)`の
+            lagと同じ意味）。
+    """
+    extra = [entity_col, time_col]
+    if cov_type == "dk":
+        if maxlag is None:
+            raise ValueError("maxlag is required for cov_type='dk'")
+        extra.append(str(maxlag))
+    raw = run_r(
+        _PLM_FE_R_SCRIPT, csv_path, formula, cov_type, extra_args=extra
+    )
+    return normalize_names(
+        raw,
+        stat_key="test_stats",
+        scalar_keys=_PLM_SCALAR_KEYS,
+        # FEに切片は無い（run_fixest_rと同じ）。
         intercept_aliases=(),
     )
 
@@ -160,4 +210,30 @@ def run_re_hausman_plm_r(
         formula,
         cov_type,
         extra_args=extra,
+    )
+
+
+def export_re_transformed_r(
+    csv_path: Path,
+    formula: str,
+    *,
+    entity_col: str = "entity",
+    time_col: str = "time",
+) -> dict:
+    """`export_plm_re_transformed.R`を呼び、plmの変量効果モデルが使う
+    準偏差変換済みの応答`y`・設計行列`x`（列名→値、切片は`"(Intercept)"`）・
+    エンティティ列`entity`を得る。
+
+    Args:
+        csv_path: データCSV。
+        formula: `plm`の回帰式（例: "y ~ x1 + x2"）。
+        entity_col: エンティティ識別子の列名。
+        time_col: 時点識別子の列名。
+    """
+    return run_r(
+        _PLM_RE_EXPORT_R_SCRIPT,
+        csv_path,
+        formula,
+        "export",
+        extra_args=[entity_col, time_col],
     )

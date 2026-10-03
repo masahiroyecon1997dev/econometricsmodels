@@ -208,7 +208,9 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
    t_periods - 1`）のとき、fixestの内部C++実装（`cpp_driscoll_kraay`）が最後のラグ項を
    切り捨てるらしいことが実地確認で判明しており、本実装（標準的なBartlett核、最後の
    ラグ項まで含める）とはこの境界値でのみ数値が一致しない（`bandwidth < t_periods - 1`
-   では一致する）。原因未特定のため別issueで追跡する。
+   では一致する）。原因未特定のため別issueで追跡する。なお`plm::vcovSCC(maxlag = T-1)`は
+   最後のラグ項を落とさず、補正係数を除いて本実装と一致する（第2リファレンスとして
+   `fe_plm_crosscheck.json`が検証する）。
 
 ### 3.4 パネル固有R²（`r_squared_within`/`between`/`overall`）
 

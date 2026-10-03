@@ -245,6 +245,32 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # f_p_value、p=2e-138）。
         "rtol_p_value": 1e-6,
     },
+    # FEのcluster/dkの第2リファレンス（plmのwithin＋sandwich、
+    # `benchmark/panel/references/run_plm_fe_benchmark.R`・
+    # `benchmark/panel/fixtures/generate_fe_plm_crosscheck_fixtures.py`参照）。
+    # fixestと同じ小標本補正・自由度を別実装から再現するため、バランス・不均衡
+    # パネルとも機械精度で一致する。実測最大相対誤差: coef 7.5e-13・se 3.8e-13・
+    # p値 1.5e-11・F統計量 5.3e-11（high_condition_number/cluster）・F p値 9.2e-10
+    # （many_regressors/cluster、p値が裾のため統計量の丸め誤差が増幅される）。
+    # `rtol_p_value`はF p値の実測に余裕を載せた値（`fe_crosscheck`と同じ値）。
+    "fe_plm_crosscheck": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_CROSSCHECK_FLOOR,
+        "atol_p_value": 0.0,
+        "rtol_p_value": 1e-6,
+    },
+    # REのcluster（t検定の自由度`G-1`）のstatsmodelsクロスチェック。plmの準偏差変換
+    # 済みデータにstatsmodelsのOLS（cluster、use_t=True）を当てるため、バランス
+    # パネルでは本実装と機械精度で一致する（`benchmark/panel/references/
+    # statsmodels_ref.py`参照）。実測最大相対誤差: coef 2.4e-13・se 4.1e-13・
+    # p値 6.0e-12。p値は絶対誤差の下限なしの相対誤差のみで比較する。
+    # `rtol_p_value`はF p値の裾での増幅に備え`fe_crosscheck`と揃えた値。
+    "re_statsmodels_cluster": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_CROSSCHECK_FLOOR,
+        "atol_p_value": 0.0,
+        "rtol_p_value": 1e-6,
+    },
     # REのRクロスチェックはplm（全cov_type、hc2/hc3・cluster/dkとハウスマン検定は
     # 単一参照実装の例外、`benchmark/panel/run_plm_benchmark.R`・
     # `benchmark/panel/fixtures/generate_re_crosscheck_fixtures.py`参照）。

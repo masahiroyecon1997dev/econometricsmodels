@@ -307,7 +307,10 @@ pyerr`、FE/RE共有）を使う。RE固有の追加バリアントは`BetweenRe
   本実装の既定式`floor(4*(T/100)^(2/9))`で求めた値を明示的に渡す）で、`plm`はz検定のため
   t統計量・p値・信頼区間は`plm`の標準誤差から本実装と同じt分布（自由度clusterは`G-1`、
   dkは`T-1`）で計算し直す（この自由度の選択自体は本実装と同じ規約の手計算で、独立検証が
-  及ぶのは補正係数込みの標準誤差まで）。`classical`/`hc1`は引き続き`linearmodels`と数値一致で
+  及ぶのは補正係数込みの標準誤差まで）。clusterの`G-1`のみ、plmの準偏差変換済みデータに
+  statsmodelsのクラスターロバストOLS（`use_t=True`）を当てた値でも検証する
+  （`re_statsmodels_cluster.json`、バランスパネルのみ）。dkの`T-1`はstatsmodelsに
+  同じ規約がなく第2リファレンスがない。`classical`/`hc1`は引き続き`linearmodels`と数値一致で
   検証する。
   `cluster`にentity以外の列を指定する場合は、`plm::vcovHC`がgroup/timeしかクラスターに
   できないため、`plm`の準偏差変換済み設計行列・応答に`lm` + `sandwich::vcovCL(type = "HC1",

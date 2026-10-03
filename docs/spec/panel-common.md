@@ -241,6 +241,19 @@ REは`plm`）のみ）。
 - **FE**: `fixest`（`benchmark/panel/`配下の`run_fixest_benchmark.R`）。`fixest`自体は
   `.devcontainer/Dockerfile`に既にインストール済み。`hc2`/`hc3`・`cluster`・`dk`は
   `fixest`の`ssc()`既定のまま機械精度で一致する。
+- **FEの第2リファレンス**: 1-way FEの`cluster`（entityクラスター）・`dk`は`plm`
+  （`model = "within"`）＋`sandwich`でも検証する（`benchmark/panel/references/
+  run_plm_fe_benchmark.R`）。clusterはplmのwithin変換後データへの定数項付き`lm`に
+  `sandwich::vcovCL(type = "HC1", cadjust = TRUE)`を当てる（`K = k+1`、手計算の補正
+  係数なし）。dkは`plm::vcovSCC(type = "HC0")`にfixestの補正`T/(T-1)·(n-1)/(n-k-G)`を
+  手計算で掛けるため、plmが検証するのはカーネル・バンド幅の規約までで補正係数は
+  fixestのみが独立に検証する。2-way・entity以外のクラスター列はplmが扱えずfixestのみ。
+  fixestが一致しない`bandwidth == t_periods - 1`はplmのみが参照値になる。
+- **REのclusterの自由度`G-1`**: plmの準偏差変換済みデータにstatsmodelsの
+  `OLS(...).fit(cov_type="cluster", use_t=True)`を当て、標準誤差・p値・信頼区間・
+  自由度をstatsmodelsにネイティブに計算させて検証する（`benchmark/panel/references/
+  statsmodels_ref.py`、バランスパネルのみ）。DKの`T-1`はstatsmodelsに同じ規約がなく
+  第2リファレンスがない。
 
 ### 5.3 ハウスマン検定の参照値（例外規定）
 

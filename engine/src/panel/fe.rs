@@ -372,11 +372,11 @@
 //! - 新規ヘルパー（`fe.rs`内private）: `slope_only_residual`（`fe_r_squared_overall`と共有、
 //!   「元の`y`/`x`に`β̂`だけを当てはめた残差」の定義を一箇所に集約。`fe_r_squared_between`は
 //!   エンティティ平均に集約してから当てはめるため行の単位が異なり共有しない、関数doc参照）・
-//!   `group_residual_means`（`group_indices_by_key`を再利用し、グループごとの
+//!   `group_residual_means`（エンティティ・時点のコードでグループ化し、グループごとの
 //!   `slope_only_residual`平均を求める）・`overall_residual_mean`（全観測平均、2-way正規化の
 //!   大域平均`E`に使う）。
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
 
 use faer::Mat;
 use statrs::distribution::StudentsT;
@@ -386,7 +386,7 @@ use crate::inference;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput, wald_f_test};
 use crate::panel::common::{
     GroupCodes, PanelDimension, PanelError, PanelHcVariant, design_matrix_from_columns,
-    group_indices_by_key, leverage_within, panel_classical_cov_params, panel_cluster_cov_params,
+    leverage_within, panel_classical_cov_params, panel_cluster_cov_params,
     panel_driscoll_kraay_cov_params, panel_hc_cov_params, quasi_demean_column,
     resolve_dk_bandwidth, validate_cluster_group_codes,
     validate_dk_periods_cover_tested_coefficients, xtx_inverse,
@@ -528,6 +528,11 @@ impl FeInput {
         &self.entity_codes
     }
 
+    /// ユニークなエンティティ数。
+    pub fn n_entities(&self) -> usize {
+        self.entity_codes.n_groups()
+    }
+
     /// `time`の整数コード（1-way FEで`time`が無ければ`None`）。
     pub(crate) fn time_codes(&self) -> Option<&GroupCodes> {
         self.time_codes.as_ref()
@@ -585,8 +590,8 @@ pub enum FeEffects {
 ///
 /// `BTreeMap<String, f64>`（ID→効果）を使う理由: `fe-spec.md`3.5節のPython API形状
 /// （1-wayは`dict[str, float]`、2-wayは`dict[str, dict[str, float]]`）にそのまま対応でき、
-/// かつ`group_indices_by_key`と同じくキー順序が決定的になる（`HashMap`だとプロセスごとの
-/// ハッシュシードで反復順序が変わりうる、他のグループ集約と同じ理由）。
+/// かつキー順序が決定的になる（`HashMap`だとプロセスごとのハッシュシードで反復順序が
+/// 変わりうる、他のグループ集約と同じ理由）。
 #[derive(Debug, Clone, PartialEq)]
 pub enum FixedEffects {
     /// エンティティID → α_i。
@@ -837,9 +842,9 @@ impl FeEstimator {
                 let h_within = leverage_within(&x_mat, &xtx_inv, n, k);
                 let time_for_leverage = match effects {
                     FeEffects::OneWay => None,
-                    FeEffects::TwoWay => input.time(),
+                    FeEffects::TwoWay => input.time_codes(),
                 };
-                let h_full = leverage_full(&h_within, input.entity(), time_for_leverage, n);
+                let h_full = leverage_full(&h_within, input.entity_codes(), time_for_leverage, n);
                 let variant = if matches!(cov_type, FeCovType::Hc2) {
                     PanelHcVariant::Hc2
                 } else {
@@ -858,7 +863,6 @@ impl FeEstimator {
                 )
             }
             FeCovType::Cluster { groups } => {
-                let resolved_groups = groups.as_deref().unwrap_or(input.entity());
                 // 既定（entityクラスター）は`FeInput`のコードを再利用し、明示指定の列だけ
                 // ここでコード化する。
                 let explicit_codes = groups.as_deref().map(GroupCodes::from_ids);
@@ -868,19 +872,19 @@ impl FeEstimator {
                 // 直前の`G > k`により、ここで`G=2`なら`k`は高々1。
                 if k >= 1
                     && n_groups == 2
-                    && two_group_split_is_degenerate(effects, &input, resolved_groups)
+                    && two_group_split_is_degenerate(effects, &input, group_codes)
                 {
                     return Err(PanelError::DegenerateClusterTwoGroups);
                 }
                 let k_correction = fe_cluster_k_correction(
                     effects,
-                    input.entity(),
-                    input.time(),
+                    input.entity_codes(),
+                    input.time_codes(),
                     n_entities,
                     n_periods,
                     df_model,
                     k,
-                    resolved_groups,
+                    group_codes,
                 );
                 let cov = panel_cluster_cov_params(
                     &x_mat,
@@ -923,7 +927,9 @@ impl FeEstimator {
                 let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
                 validate_dk_periods_cover_tested_coefficients(t_periods, k)?;
                 // 直前の`t_periods > k`により、ここで`t_periods=2`なら`k`は高々1。
-                if k >= 1 && t_periods == 2 && two_group_split_is_degenerate(effects, &input, time)
+                if k >= 1
+                    && t_periods == 2
+                    && two_group_split_is_degenerate(effects, &input, time_codes)
                 {
                     return Err(PanelError::DegenerateDkTwoPeriods);
                 }
@@ -931,7 +937,7 @@ impl FeEstimator {
                 // 発生しない、`fe_cluster_k_correction`のdocコメント参照）。`K=df_model`を
                 // そのまま使う。
                 let cov = panel_driscoll_kraay_cov_params(
-                    &x_mat, &residuals, &xtx_inv, time_codes, df_model, bw, t_periods,
+                    &x_mat, &residuals, &xtx_inv, time_codes, df_model, bw,
                 );
                 (cov, t_periods - 1)
             }
@@ -1163,15 +1169,18 @@ impl FeEstimator {
         let params = self.estimator.params();
 
         match self.effects {
-            FeEffects::OneWay => {
-                FixedEffects::OneWay(group_residual_means(y, x, params, self.input.entity()))
-            }
+            FeEffects::OneWay => FixedEffects::OneWay(group_residual_means(
+                y,
+                x,
+                params,
+                self.input.entity_codes(),
+            )),
             FeEffects::TwoWay => {
-                let time = self.input.time().expect(
+                let time = self.input.time_codes().expect(
                     "2-way already validated `time` is present \
                      (validate_no_singleton_groups_two_way/within_transform_two_way)",
                 );
-                let entity_means = group_residual_means(y, x, params, self.input.entity());
+                let entity_means = group_residual_means(y, x, params, self.input.entity_codes());
                 let time_means = group_residual_means(y, x, params, time);
                 let overall_mean = overall_residual_mean(y, x, params);
                 // `time_means`は`BTreeMap`（辞書順）のため`first_key_value()`が辞書順で
@@ -1196,37 +1205,32 @@ impl FeEstimator {
     }
 }
 
-/// `ids`の各値の出現回数（グループサイズ）を数える。
-fn group_sizes(ids: &[String]) -> HashMap<&str, usize> {
-    let mut counts = HashMap::new();
-    for id in ids {
-        *counts.entry(id.as_str()).or_insert(0) += 1;
-    }
-    counts
-}
-
 /// LSDV相当のフルレバレッジ`h_ii_full`（HC2/HC3用、モジュールdoc「`cov_type`対応」の
 /// 導出参照）。分割回帰（Frisch-Waugh-Lovell）のレバレッジ分解則により、固定効果ダミーを
 /// 明示的に含めた設計行列でのレバレッジは、ダミーのみの回帰のレバレッジ（`1/T_i`、
 /// 2-wayはさらに`1/N_t - 1/n`）とwithin変換後のレバレッジ（`h_within`）の和になる
 /// （fixestの`vcov="HC2"`/`"HC3"`と数値一致を1-way・2-way双方で確認済み）。
+///
+/// グループサイズ`T_i`/`N_t`はコードの`counts()`から引く。
 fn leverage_full(
     h_within: &[f64],
-    entity: &[String],
-    time: Option<&[String]>,
+    entity: &GroupCodes,
+    time: Option<&GroupCodes>,
     n: usize,
 ) -> Vec<f64> {
-    let entity_sizes = group_sizes(entity);
+    let entity_codes = entity.codes();
+    let entity_sizes = entity.counts();
     match time {
         None => (0..n)
-            .map(|i| 1.0 / (entity_sizes[entity[i].as_str()] as f64) + h_within[i])
+            .map(|i| 1.0 / (entity_sizes[entity_codes[i]] as f64) + h_within[i])
             .collect(),
         Some(time) => {
-            let time_sizes = group_sizes(time);
+            let time_codes = time.codes();
+            let time_sizes = time.counts();
             (0..n)
                 .map(|i| {
-                    1.0 / (entity_sizes[entity[i].as_str()] as f64)
-                        + 1.0 / (time_sizes[time[i].as_str()] as f64)
+                    1.0 / (entity_sizes[entity_codes[i]] as f64)
+                        + 1.0 / (time_sizes[time_codes[i]] as f64)
                         - 1.0 / (n as f64)
                         + h_within[i]
                 })
@@ -1241,14 +1245,14 @@ fn leverage_full(
 /// `fe_cluster_k_correction`のdocコメント参照）。元は`entity_nested_within_cluster`
 /// という1-way専用の名前だったが、2-way FEでtime次元にも同じ判定を適用する必要が
 /// あるため汎用化した（ロジック自体は無変更）。
-fn fixef_dimension_nested_within_cluster(dim: &[String], cluster: &[String]) -> bool {
-    let mut mapping: HashMap<&str, &str> = HashMap::new();
-    for (d, c) in dim.iter().zip(cluster) {
-        match mapping.get(d.as_str()) {
-            Some(&existing) if existing != c.as_str() => return false,
-            _ => {
-                mapping.insert(d.as_str(), c.as_str());
-            }
+fn fixef_dimension_nested_within_cluster(dim: &GroupCodes, cluster: &GroupCodes) -> bool {
+    // FE次元の各水準が最初に対応したクラスターコード（未出現は`usize::MAX`）。
+    let mut mapping = vec![usize::MAX; dim.n_groups()];
+    for (&d, &c) in dim.codes().iter().zip(cluster.codes()) {
+        if mapping[d] == usize::MAX {
+            mapping[d] = c;
+        } else if mapping[d] != c {
+            return false;
         }
     }
     true
@@ -1305,13 +1309,13 @@ fn fixef_dimension_nested_within_cluster(dim: &[String], cluster: &[String]) -> 
 #[allow(clippy::too_many_arguments)]
 fn fe_cluster_k_correction(
     effects: FeEffects,
-    entity: &[String],
-    time: Option<&[String]>,
+    entity: &GroupCodes,
+    time: Option<&GroupCodes>,
     n_entities: usize,
     n_periods: Option<usize>,
     df_model: usize,
     k: usize,
-    cluster: &[String],
+    cluster: &GroupCodes,
 ) -> usize {
     let dims: Vec<(bool, usize)> = match effects {
         FeEffects::OneWay => {
@@ -1429,24 +1433,26 @@ fn fe_r_squared_overall(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>) -> f64 {
     if tss > 0.0 { 1.0 - ssr / tss } else { 0.0 }
 }
 
-/// `ids`でグループ化した`slope_only_residual`の平均（`E_i`/`E_t`）。
-/// `group_indices_by_key`でグループを集計する（キー順序＝辞書順が決定的、他の
-/// グループ集約と同じ理由）。`fixed_effects`が1-way・2-wayのentity/time双方で使う。
+/// `ids`のコードでグループ化した`slope_only_residual`の平均（`E_i`/`E_t`）。
+/// コードは辞書順のため、キー順序は`BTreeMap`の反復順（他のグループ集約と同じ理由で
+/// 決定的）と一致し、グループ内の加算順は観測順になる。`fixed_effects`が1-way・2-wayの
+/// entity/time双方で使う。
 fn group_residual_means(
     y: &[f64],
     x: &[Vec<f64>],
     params: &Mat<f64>,
-    ids: &[String],
+    ids: &GroupCodes,
 ) -> BTreeMap<String, f64> {
-    group_indices_by_key(ids)
-        .into_iter()
-        .map(|(id, indices)| {
+    ids.keys()
+        .iter()
+        .zip(ids.group_indices().iter())
+        .map(|(key, indices)| {
             let mean = indices
                 .iter()
                 .map(|&i| slope_only_residual(y, x, params, i))
                 .sum::<f64>()
                 / indices.len() as f64;
-            (id.to_string(), mean)
+            (key.clone(), mean)
         })
         .collect()
 }
@@ -1486,14 +1492,10 @@ pub fn within_transform_one_way(input: &FeInput) -> (Vec<f64>, Vec<Vec<f64>>) {
 /// - `input.time()`が`None`の場合は`PanelError::TwoWayRequiresTime`
 /// - バランスパネルでない場合は`PanelError::UnbalancedPanelForTwoWay`
 pub fn within_transform_two_way(input: &FeInput) -> Result<(Vec<f64>, Vec<Vec<f64>>), PanelError> {
-    let time = input.time().ok_or(PanelError::TwoWayRequiresTime)?;
-    validate_balanced_panel(input.entity(), time)?;
-
-    let time_codes = input
-        .time_codes()
-        .expect("`time_codes` is present whenever `time` is (FeInput invariant)");
-
+    let time_codes = input.time_codes().ok_or(PanelError::TwoWayRequiresTime)?;
     let entity = input.entity_codes();
+    validate_balanced_panel(entity, time_codes)?;
+
     let entity_theta = vec![1.0; entity.n_groups()];
     let y_entity_demeaned = quasi_demean_column(input.y(), entity, &entity_theta);
     let x_entity_demeaned: Vec<Vec<f64>> = input
@@ -1647,32 +1649,39 @@ fn column_is_zero_variance(original: &[f64], transformed: &[f64]) -> bool {
 /// 観測数カウントの一致（`n_obs == n_entities * n_periods`）だけでは不十分
 /// （`PanelError::UnbalancedPanelForTwoWay`のdocコメント参照: あるペアの重複と別ペアの
 /// 欠落が相殺してカウントだけ一致する入力がありうる）。代わりに、`(entity, time)`
-/// ペアが重複なく（`unique_pairs.len() == n_obs`）、かつ`n_obs == n_entities *
-/// n_periods`であることを検証する。ペア集合は`entity × time`の全組合せグリッド
-/// （サイズ`n_entities * n_periods`）の部分集合であるため、重複が無く要素数がグリッドの
-/// サイズと一致すれば、部分集合が全体（＝全組合せが埋まっている）と一致することが
-/// 数学的に保証される。
+/// ペアが重複なく、かつ`n_obs == n_entities * n_periods`であることを検証する。
+/// ペア集合は`entity × time`の全組合せグリッド（サイズ`n_entities * n_periods`）の
+/// 部分集合であるため、重複が無く要素数がグリッドのサイズと一致すれば、部分集合が全体
+/// （＝全組合せが埋まっている）と一致することが数学的に保証される。
 ///
-/// `entity.len() == time.len()`は`FeInput::from_columns`が既に保証している契約
+/// `n_obs != n_entities * n_periods`ならその時点で不均衡（ペアの重複判定は不要）。一致する
+/// ときだけ、グリッドのセル（`entity`コード×`n_periods`+`time`コード）を一度ずつ埋めて
+/// 重複を検出する（`n_obs`個の`bool`）。
+///
+/// `entity.nobs() == time.nobs()`は`FeInput::from_columns`が既に保証している契約
 /// （呼び出し側は常に同じ`FeInput`からこの2つを渡す）。
-fn validate_balanced_panel(entity: &[String], time: &[String]) -> Result<(), PanelError> {
-    let n_obs = entity.len();
-    let n_entities = entity.iter().collect::<HashSet<_>>().len();
-    let n_periods = time.iter().collect::<HashSet<_>>().len();
-    let unique_pairs: HashSet<(&str, &str)> = entity
-        .iter()
-        .zip(time.iter())
-        .map(|(e, t)| (e.as_str(), t.as_str()))
-        .collect();
+fn validate_balanced_panel(entity: &GroupCodes, time: &GroupCodes) -> Result<(), PanelError> {
+    let n_obs = entity.nobs();
+    let n_entities = entity.n_groups();
+    let n_periods = time.n_groups();
     let expected = n_entities * n_periods;
+    let unbalanced = || PanelError::UnbalancedPanelForTwoWay {
+        n_obs,
+        n_entities,
+        n_periods,
+        expected,
+    };
 
-    if unique_pairs.len() != n_obs || n_obs != expected {
-        return Err(PanelError::UnbalancedPanelForTwoWay {
-            n_obs,
-            n_entities,
-            n_periods,
-            expected,
-        });
+    if n_obs != expected {
+        return Err(unbalanced());
+    }
+    let mut filled = vec![false; expected];
+    for (&e, &t) in entity.codes().iter().zip(time.codes()) {
+        let cell = &mut filled[e * n_periods + t];
+        if *cell {
+            return Err(unbalanced());
+        }
+        *cell = true;
     }
     Ok(())
 }
@@ -1687,11 +1696,11 @@ fn validate_balanced_panel(entity: &[String], time: &[String]) -> Result<(), Pan
 /// 正規方程式でスコアの和はゼロのため、両方ゼロになる。entity方向（2時点のパネルを
 /// timeでクラスタリング等）だけでなく、2-wayではtime方向（エンティティ2つのパネルを
 /// entityでクラスタリング——Clusterの既定——等）も同じ構造になる。
-fn two_group_split_is_degenerate(effects: FeEffects, input: &FeInput, groups: &[String]) -> bool {
-    if every_level_splits_once_across_two_groups(input.entity(), groups) {
+fn two_group_split_is_degenerate(effects: FeEffects, input: &FeInput, groups: &GroupCodes) -> bool {
+    if every_level_splits_once_across_two_groups(input.entity_codes(), groups) {
         return true;
     }
-    match (effects, input.time()) {
+    match (effects, input.time_codes()) {
         (FeEffects::TwoWay, Some(time)) => every_level_splits_once_across_two_groups(time, groups),
         _ => false,
     }
@@ -1701,31 +1710,30 @@ fn two_group_split_is_degenerate(effects: FeEffects, input: &FeInput, groups: &[
 /// （`groups`のユニーク数が2の前提で呼ぶ。このとき各水準が2グループに1観測ずつ）。
 /// 1水準でも3観測以上・同じグループに2観測・1観測があれば`false`。
 ///
-/// `levels.len() == groups.len()`は呼び出し側の契約（`FeInput`の列と、
-/// `validate_cluster_groups`済みのクラスター列、または`fit()`のDkアームで長さを検証済みの
-/// DK時点列）。
-fn every_level_splits_once_across_two_groups(levels: &[String], groups: &[String]) -> bool {
+/// `levels.nobs() == groups.nobs()`は呼び出し側の契約（`FeInput`のコードと、
+/// `validate_cluster_group_codes`済みのクラスター列のコード、または`fit()`のDkアームで
+/// 長さを検証済みのDK時点列のコード）。
+fn every_level_splits_once_across_two_groups(levels: &GroupCodes, groups: &GroupCodes) -> bool {
     debug_assert_eq!(
-        levels.len(),
-        groups.len(),
+        levels.nobs(),
+        groups.nobs(),
         "levels and groups must have the same length (caller contract)"
     );
-    // 水準ごとに（最初の観測のグループ、観測数）を持つ。
-    let mut seen: HashMap<&str, (&str, usize)> = HashMap::new();
-    for (e, g) in levels.iter().zip(groups) {
-        match seen.get_mut(e.as_str()) {
-            None => {
-                seen.insert(e.as_str(), (g.as_str(), 1));
+    // 水準ごとの（最初の観測のグループコード、観測数）。`levels`のコードは全水準が
+    // 少なくとも1回現れるため、最後の`all`は未出現の水準を考慮しなくてよい。
+    let mut first_group = vec![usize::MAX; levels.n_groups()];
+    let mut count = vec![0_usize; levels.n_groups()];
+    for (&level, &group) in levels.codes().iter().zip(groups.codes()) {
+        match count[level] {
+            0 => {
+                first_group[level] = group;
+                count[level] = 1;
             }
-            Some((first, count)) => {
-                if *count >= 2 || *first == g.as_str() {
-                    return false;
-                }
-                *count += 1;
-            }
+            seen if seen >= 2 || first_group[level] == group => return false,
+            _ => count[level] += 1,
         }
     }
-    seen.values().all(|&(_, count)| count == 2)
+    count.iter().all(|&c| c == 2)
 }
 
 #[cfg(test)]
@@ -1735,6 +1743,10 @@ mod tests {
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn codes(values: &[&str]) -> GroupCodes {
+        GroupCodes::from_ids(&strings(values))
     }
 
     #[test]
@@ -3237,7 +3249,7 @@ mod tests {
 
     #[test]
     fn fixef_dimension_nested_within_cluster_true_for_default_entity_grouping() {
-        let entity = strings(&["a", "a", "b", "b"]);
+        let entity = codes(&["a", "a", "b", "b"]);
         assert!(fixef_dimension_nested_within_cluster(&entity, &entity));
     }
 
@@ -3246,8 +3258,8 @@ mod tests {
         // stateはentityより粗い分割（a,b→east、c,d→west）で、各entityは単一のstateに
         // 属するため「nested」と判定されるべき（fixestの実測でも同じ挙動を確認済み、
         // モジュールdoc参照）。
-        let entity = strings(&["a", "a", "b", "b", "c", "c", "d", "d"]);
-        let state = strings(&[
+        let entity = codes(&["a", "a", "b", "b", "c", "c", "d", "d"]);
+        let state = codes(&[
             "east", "east", "east", "east", "west", "west", "west", "west",
         ]);
         assert!(fixef_dimension_nested_within_cluster(&entity, &state));
@@ -3256,8 +3268,8 @@ mod tests {
     #[test]
     fn fixef_dimension_nested_within_cluster_false_when_an_entity_spans_multiple_clusters() {
         // entity "a" が異なる2つのクラスター（"1"と"2"）にまたがるため、nestedではない。
-        let entity = strings(&["a", "a", "b", "b"]);
-        let cluster = strings(&["1", "2", "1", "2"]);
+        let entity = codes(&["a", "a", "b", "b"]);
+        let cluster = codes(&["1", "2", "1", "2"]);
         assert!(!fixef_dimension_nested_within_cluster(&entity, &cluster));
     }
 
@@ -3267,7 +3279,7 @@ mod tests {
         // `K = max(K, k+1)`は常にno-op（`fe_cluster_k_correction`関数docの代数的
         // 導出参照、rust-reviewer指摘を受けて追加）。1-way全ネストの現実的な入力で
         // `K`がちょうど`k+1`に一致することを確認する。
-        let entity = strings(&["a", "a", "b", "b"]);
+        let entity = codes(&["a", "a", "b", "b"]);
         let k = 1;
         let n_entities = 2;
         let df_model = k + n_entities; // 実際のFeEstimator::fitと同じneffects=n_entitiesの関係
@@ -3293,7 +3305,7 @@ mod tests {
         // `df_model`は`k+n_entities=k+2`になるはずのところを`df_model=2`（`k=1`なら
         // `k+n_entities=3`のはず）に矛盾させ、`raw_k = df_model - nested_size_sum + 1
         // = 2 - 2 + 1 = 1`が`k+1=2`を下回る状況を作る。
-        let entity = strings(&["a", "a", "b", "b"]);
+        let entity = codes(&["a", "a", "b", "b"]);
         let k = 1;
         let n_entities = 2;
         let df_model = 2; // 本来のneffects=n_entities=2との整合を意図的に崩す
@@ -4044,25 +4056,25 @@ mod tests {
 
     #[test]
     fn every_level_splits_once_across_two_groups_detects_pattern() {
-        let entity = strings(&["a", "a", "b", "b"]);
+        let entity = codes(&["a", "a", "b", "b"]);
         assert!(every_level_splits_once_across_two_groups(
             &entity,
-            &strings(&["1", "2", "2", "1"])
+            &codes(&["1", "2", "2", "1"])
         ));
         // 同じグループに2観測。
         assert!(!every_level_splits_once_across_two_groups(
             &entity,
-            &strings(&["1", "1", "1", "2"])
+            &codes(&["1", "1", "1", "2"])
         ));
         // 3観測のエンティティ。
         assert!(!every_level_splits_once_across_two_groups(
-            &strings(&["a", "a", "a", "b", "b"]),
-            &strings(&["1", "2", "1", "1", "2"])
+            &codes(&["a", "a", "a", "b", "b"]),
+            &codes(&["1", "2", "1", "1", "2"])
         ));
         // 1観測のエンティティ（singletonは通常`fit()`が先に弾く）。
         assert!(!every_level_splits_once_across_two_groups(
-            &strings(&["a", "a", "b"]),
-            &strings(&["1", "2", "1"])
+            &codes(&["a", "a", "b"]),
+            &codes(&["1", "2", "1"])
         ));
     }
 

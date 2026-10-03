@@ -69,7 +69,7 @@
 //! （OLS自身も`engine::linear::ols::OlsEstimator::fit`自体はk=0をpanicなく受理するが
 //! Python APIの`validate_x_non_empty`が弾く、という既存の非対称性と同じ構図）。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use engine::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput, FixedEffects};
 use polars::prelude::DataFrame;
@@ -458,10 +458,8 @@ pub(crate) fn build_fe_input(
 /// `build_fe_input`で構築した`FeInput`に対して`engine::panel::fe::FeEstimator::fit`を
 /// 呼び出し、`FEResult`として返す。
 ///
-/// `n_entities`はengine側に対応するpublicなgetterが無いため（`FeInput`内部の
-/// privateなエンティティコードで数えるのみ）、`FeInput::entity()`（`build_fe_input`が返す
-/// `input`から取得可能）から独立に計算する（`engine_pybind/src/panel/CLAUDE.md`
-/// 「`FEResult`のスコープ」参照）。
+/// `n_entities`は`FeEstimator::input().n_entities()`（`FeInput`が構築時に一度だけ作った
+/// エンティティコードのユニーク数）から取得する。
 ///
 /// `params`/`param_names`/`residuals`/`dep_var_name`/`n_obs`/`log_likelihood`は
 /// `FeEstimator::estimator()`（内部で委譲した`OlsEstimator`）から取得する
@@ -485,8 +483,6 @@ pub(crate) fn fit(
     let df: DataFrame = data.into();
     let (input, effects, cov_type, cov_type_lower) = build_fe_input(&df, y, x, entity, options)?;
 
-    let n_entities = input.entity().iter().collect::<HashSet<_>>().len();
-
     let estimator = FeEstimator::fit(input, effects, cov_type, options.confidence_level)
         .map_err(panel_error_to_pyerr)?;
     let ols = estimator.estimator();
@@ -506,7 +502,7 @@ pub(crate) fn fit(
         n_obs: ols.input().nobs(),
         df_resid: estimator.df_resid(),
         df_model: estimator.df_model(),
-        n_entities,
+        n_entities: estimator.input().n_entities(),
         n_periods: estimator.n_periods(),
         cov_type: cov_type_lower,
         f_statistic: estimator.f_statistic(),

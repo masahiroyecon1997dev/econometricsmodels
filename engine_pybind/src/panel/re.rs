@@ -57,8 +57,6 @@
 //! 決定が無く、他手法（OLS/WLS/Logit/Probit/IV/FE）と一貫させる方針をユーザーが
 //! 選択した。nullモデル・ICC推定のサポートは別途検討する。
 
-use std::collections::HashSet;
-
 use engine::panel::re::{ReCovType, ReEstimator, ReInput};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
@@ -387,9 +385,8 @@ pub(crate) fn build_re_input(
 /// `build_re_input`で構築した`ReInput`に対して`engine::panel::re::ReEstimator::fit`を
 /// 呼び出し、`REResult`として返す。
 ///
-/// `n_entities`はengine側に対応するpublicなgetterが無いため（`FeEstimator`と同じ事情、
-/// `engine_pybind/src/panel/CLAUDE.md`「`FEResult`のスコープ」参照）、`ReInput::entity()`
-/// （`build_re_input`が返す`input`から取得可能）から独立に計算する。
+/// `n_entities`は`ReEstimator::input().n_entities()`（`ReInput`が構築時に一度だけ作った
+/// エンティティコードのユニーク数）から取得する。
 ///
 /// `params`/`param_names`/`residuals`/`dep_var_name`/`n_obs`/`log_likelihood`/`aic`/`bic`は
 /// `ReEstimator::estimator()`（内部で委譲した`OlsEstimator`）から取得する。FEと異なり
@@ -420,8 +417,6 @@ pub(crate) fn fit(
     let df: DataFrame = data.into();
     let (input, cov_type, cov_type_lower) = build_re_input(&df, y, x, entity, options)?;
 
-    let n_entities = input.entity().iter().collect::<HashSet<_>>().len();
-
     let estimator = ReEstimator::fit(input, cov_type, options.confidence_level)
         .map_err(panel_error_to_pyerr)?;
     let ols = estimator.estimator();
@@ -441,7 +436,7 @@ pub(crate) fn fit(
         n_obs: ols.input().nobs(),
         df_resid: estimator.df_resid(),
         df_model: estimator.df_model(),
-        n_entities,
+        n_entities: estimator.input().n_entities(),
         cov_type: cov_type_lower,
         f_statistic: estimator.f_statistic(),
         f_p_value: estimator.f_p_value(),

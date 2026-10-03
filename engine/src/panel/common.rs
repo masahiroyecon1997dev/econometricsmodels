@@ -58,7 +58,7 @@
 //! コードを書く過程で随時追加する（`LeastSquaresError`・`IvError`のdocコメントと同じ
 //! 「土台を用意し、必要になった時点で足す」方針）。
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::fmt;
 
 use faer::prelude::Solve;
@@ -369,28 +369,6 @@ pub enum PanelError {
     },
 }
 
-/// `ids`の値ごとに観測インデックスをまとめる（`BTreeMap`のキー＝`ids`の辞書順）。
-///
-/// 元々`fe.rs`にFE専用のprivate関数として実装していたが、後にRE（Swamy-Arora分散成分推定）
-/// のbetween回帰（エンティティ平均の集計）でも同じグルーピングが必要になったため、
-/// FE/RE間で共有するロジックとしてこちらに移設した
-/// （`.claude/rules/rust-style.md`「系統内で共有するロジックは`<系統>/common.rsに置く`」）。
-/// `pub(crate)`にする理由: `engine`クレート内部（`fe.rs`・`re.rs`）専用のヘルパーで、
-/// `engine_pybind`や`engine`クレート外には公開しない内部実装詳細のため。
-///
-/// `BTreeMap`を使う理由: `HashMap`だと反復順序がプロセスごとのハッシュシードに依存し、
-/// グループ間加算（`Σ_g S_g S_g'`等）の順序・延いては浮動小数点丸め誤差が実行のたびに
-/// 変わりうる。FE側ではこれに加え、DKの時点集計でキー順序（`String`の辞書順）がそのまま
-/// 時系列順序とみなす規約（`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）とも
-/// 一致するという二重の意味を持つ。
-pub(crate) fn group_indices_by_key(ids: &[String]) -> BTreeMap<&str, Vec<usize>> {
-    let mut indices: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
-    for (i, id) in ids.iter().enumerate() {
-        indices.entry(id.as_str()).or_default().push(i);
-    }
-    indices
-}
-
 /// パネル識別子（entity・time・クラスター列等、同一性だけが意味を持つ`String`列）を、
 /// 整数コードに一度だけ変換したもの。
 ///
@@ -424,7 +402,7 @@ impl GroupCodes {
         // 1. 出現順の仮コード（ハッシュ1回/行）。
         let mut first_seen: HashMap<&str, usize> = HashMap::new();
         let mut unique: Vec<&str> = Vec::new();
-        let provisional: Vec<usize> = ids
+        let mut codes: Vec<usize> = ids
             .iter()
             .map(|id| {
                 *first_seen.entry(id.as_str()).or_insert_with(|| {
@@ -442,7 +420,10 @@ impl GroupCodes {
             rank[provisional_code] = r;
         }
 
-        let codes: Vec<usize> = provisional.iter().map(|&c| rank[c]).collect();
+        // 仮コードをその場で辞書順コードに置き換える（別の`Vec`を確保しない）。
+        for c in &mut codes {
+            *c = rank[*c];
+        }
         let mut counts = vec![0; unique.len()];
         for &c in &codes {
             counts[c] += 1;
@@ -481,7 +462,8 @@ impl GroupCodes {
     }
 
     /// グループごとの行インデックス（コード順、グループ内は観測順）。旧実装の
-    /// `group_indices_by_key(ids).values()`と同じ順序・同じ中身を、計数ソートで`O(n)`で作る。
+    /// `String`キーの`BTreeMap`でまとめたもの（キー順＝辞書順、グループ内は観測順）と同じ
+    /// 順序・同じ中身を、計数ソートで`O(n)`で作る。
     pub(crate) fn group_indices(&self) -> GroupIndices {
         let mut offsets = Vec::with_capacity(self.counts.len() + 1);
         offsets.push(0);
@@ -533,7 +515,6 @@ impl GroupIndices {
 }
 
 /// FE/RE共有のcov_type計算ヘルパー（元は`fe.rs`の`fe_*_cov_params`をFE→common.rsへ移設。
-/// `group_indices_by_key`と同じ
 /// 「FE専用で書いたが後にREでも同じ数式が必要と判明したため共有ロジックとして移設した」
 /// 経緯）。**数式自体はFE実装時のまま変更していない**——移設したのは
 /// 呼び出し側（`fe.rs`/`re.rs`）が渡す`df_resid`・`extra_df`・レバレッジの値がFE/REで
@@ -744,9 +725,7 @@ pub(crate) fn validate_dk_periods_cover_tested_coefficients(
 /// クラスター数`G`相当として扱い、`K.fixef="full"`が既定（クラスター変数が無いため
 /// ネスト判定自体が発生しない）——`k_correction`は呼び出し側がFE/REそれぞれの
 /// `df_model`をそのまま渡す。`panel_cluster_cov_params`の`G/(G-1)×(n-1)/(n-K)`と
-/// 同型の式に、`G`を`t_periods`に置き換えたものと理解できる）。`t_periods`
-/// （ユニークな時点数）は`resolve_dk_bandwidth`の呼び出しで既に計算済みの値を
-/// 呼び出し元からそのまま受け取る（`time_indices.len()`で二重計算しない）。
+/// 同型の式に、`G`を`t_periods`（`time`のユニークな時点数）に置き換えたものと理解できる）。
 ///
 /// `time`のコード（`GroupCodes`、辞書順＝時系列順）で集計して`ξ_t`（時点`t`でのクロスセクション和）を求める。
 /// キー順序（`String`の辞書順）がそのまま時系列順序とみなす規約（`fe.rs`モジュールdoc参照）と
@@ -766,11 +745,10 @@ pub(crate) fn panel_driscoll_kraay_cov_params(
     time: &GroupCodes,
     k_correction: usize,
     bandwidth: usize,
-    t_periods: usize,
 ) -> Mat<f64> {
     let n = x.nrows();
     let k = x.ncols();
-    debug_assert_eq!(time.n_groups(), t_periods);
+    let t_periods = time.n_groups();
     let time_indices = time.group_indices();
 
     let mut xi = Mat::<f64>::zeros(t_periods, k);
@@ -887,7 +865,20 @@ pub(crate) fn quasi_demean_column(col: &[f64], entity: &GroupCodes, theta: &[f64
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
+
+    /// `ids`の値ごとに観測インデックスをまとめる（`BTreeMap`のキー＝`ids`の辞書順）。
+    /// `GroupCodes`導入前の実装で、`GroupCodes`のコード順・グループ内の観測順が
+    /// これと一致することを確かめるテストのオラクルとしてだけ残している。
+    fn group_indices_by_key(ids: &[String]) -> BTreeMap<&str, Vec<usize>> {
+        let mut indices: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+        for (i, id) in ids.iter().enumerate() {
+            indices.entry(id.as_str()).or_default().push(i);
+        }
+        indices
+    }
 
     #[test]
     fn panel_dimension_displays_lowercase_name() {
@@ -1197,6 +1188,54 @@ mod tests {
         let codes = GroupCodes::from_ids(&ids);
         let btree_order: Vec<&str> = group_indices_by_key(&ids).keys().copied().collect();
         assert_eq!(codes.keys(), btree_order.as_slice());
+    }
+
+    mod group_codes_proptests {
+        use proptest::collection;
+        use proptest::prelude::*;
+
+        use super::*;
+
+        /// ASCII・数値文字列（`"10" < "9"`の辞書順）・マルチバイト（UTF-8のバイト順と
+        /// コードポイント順が一致する）・空文字列を混ぜたラベル。
+        fn label() -> impl Strategy<Value = String> {
+            prop_oneof![
+                "[a-cA-C]{1,3}",
+                (0u32..120).prop_map(|n| n.to_string()),
+                prop::sample::select(vec![
+                    "東京", "大阪", "京都", "é", "e", "z", "Z", "", "😀", "ab"
+                ])
+                .prop_map(String::from),
+            ]
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            /// `GroupCodes`が、旧実装（`String`キーの`BTreeMap`）と同じキー順・同じ観測数・
+            /// 同じグループ内の観測順になる。コードは各行のキーに対応する。
+            #[test]
+            fn group_codes_agree_with_btreemap_grouping(
+                ids in collection::vec(label(), 1..80),
+            ) {
+                let codes = GroupCodes::from_ids(&ids);
+                let oracle = group_indices_by_key(&ids);
+
+                let oracle_keys: Vec<&str> = oracle.keys().copied().collect();
+                prop_assert_eq!(codes.keys(), oracle_keys.as_slice());
+                prop_assert_eq!(codes.nobs(), ids.len());
+                prop_assert_eq!(codes.n_groups(), oracle.len());
+                for (i, id) in ids.iter().enumerate() {
+                    prop_assert_eq!(&codes.keys()[codes.codes()[i]], id);
+                }
+                let expected_counts: Vec<usize> = oracle.values().map(Vec::len).collect();
+                prop_assert_eq!(codes.counts(), expected_counts.as_slice());
+                let actual: Vec<Vec<usize>> =
+                    codes.group_indices().iter().map(<[usize]>::to_vec).collect();
+                let expected: Vec<Vec<usize>> = oracle.into_values().collect();
+                prop_assert_eq!(actual, expected);
+            }
+        }
     }
 
     #[test]

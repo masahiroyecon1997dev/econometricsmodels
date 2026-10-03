@@ -21,8 +21,8 @@ Every estimator is compared numerically against established reference implementa
 | Tobit | R `AER::tobit` | R `censReg` |
 | IV, 2SLS | linearmodels `IV2SLS` | R `ivreg` + `sandwich` / `lmtest` |
 | IV, GMM | linearmodels `IVGMM` | none (`ivreg` has no GMM) |
-| FE | linearmodels `PanelOLS` (classical, HC1); R `fixest` (cluster, Driscoll–Kraay) | R `fixest` |
-| RE | linearmodels `RandomEffects` (classical, HC1); R `plm` (cluster, Driscoll–Kraay) | R `plm` |
+| FE | linearmodels `PanelOLS` (classical, HC1); R `fixest` (cluster, Driscoll–Kraay, and the F statistic for every `cov_type`) | R `fixest` |
+| RE | linearmodels `RandomEffects` (classical, HC1); R `plm` (cluster, Driscoll–Kraay, and the F statistic) | R `plm` |
 
 Versions used to generate the reference values: statsmodels 0.15.0, linearmodels 7.0, R 4.5.3 with sandwich 3.1.3, lmtest 0.9.40, fixest 0.14.2, plm 2.6.7, ivreg 0.6.8, AER 1.2-15, censReg 0.5-38 and marginaleffects 0.32.0.
 
@@ -63,11 +63,18 @@ Agreement is checked as `|ours - reference| <= max(rtol · |reference|, atol)`.
 | Tobit | `1e-8` (measured about `2e-9`) | `5e-8` for HC0 / HC1 on a badly conditioned design; `1e-4` for standard errors on the real-data example, limited by `censReg`'s convergence. The strict comparison on that data is against `AER::tobit`. |
 | IV (2SLS) | `1e-8` | HAC `1e-2` (`0.1` for a 40-observation sample); Wu-Hausman under HAC `2e-2`. These are small-sample convention differences. |
 | FE | `1e-8` (every `cov_type`, including cluster and Driscoll–Kraay; measured about `1e-14`) | none. |
-| RE | `1e-8` on balanced panels | Unbalanced panel, because plm and linearmodels estimate the Swamy–Arora variance components slightly differently: coefficients `5e-3`; standard errors, test statistics, p-values and confidence intervals `5e-3` for cluster, `2e-2` for HC2/HC3 and `5e-2` for Driscoll–Kraay (measured up to about 0.3 %, 1.1 % and 3.7 %). The tolerance is set per statistic so that a missing `G/(G-1)` correction (about 1.3 % in the cluster standard error) is still detected. |
+| RE | `1e-8` on balanced panels | Unbalanced panel, because plm and linearmodels estimate the Swamy–Arora variance components slightly differently: coefficients `5e-3`; F statistic `1e-3` (measured up to about 0.03 %); standard errors, test statistics, p-values and confidence intervals `5e-3` for cluster, `2e-2` for HC2/HC3 and `5e-2` for Driscoll–Kraay (measured up to about 0.3 %, 1.1 % and 3.7 %). The tolerance is set per statistic so that a missing `G/(G-1)` correction (about 1.3 % in the cluster standard error) is still detected. |
 
 ### FE and RE: cluster and Driscoll–Kraay standard errors
 
 Point estimates and the classical and HC1 standard errors agree with linearmodels to machine precision. For `cov_type="cluster"` and `cov_type="dk"`, FE and RE deliberately use the small-sample corrections and degrees of freedom of fixest, Stata and plm rather than those of linearmodels (see [Inference conventions](inference-conventions.md#differences-from-other-packages)), so linearmodels is not a numerical reference for these two types. They are compared with R instead: FE against `fixest` with its default `ssc()` (every statistic, including p-values and confidence intervals, agrees to machine precision), RE against `plm::vcovHC(method = "arellano", type = "sss")` for cluster and `plm::vcovSCC(type = "sss")` for Driscoll–Kraay. RE with a cluster column other than the entity is compared against `lm` plus `sandwich::vcovCL` on plm's quasi-demeaned data, because plm can only cluster by entity or time. The Driscoll–Kraay bandwidth is passed to the reference explicitly, because neither fixest nor plm uses the same default rule. plm reports z statistics, so its t statistics, p-values and confidence intervals are recomputed from its standard errors with the t distribution (`G - 1` degrees of freedom for cluster, `t_periods - 1` for Driscoll–Kraay).
+
+### FE and RE: F statistic
+
+The F statistic tests that all slope coefficients are jointly zero (the constant and the fixed effects are not tested). FE and RE are checked against R for every `cov_type`, and the two methods are different:
+
+- **FE** is a Wald test that follows `cov_type`, with `G - 1` denominator degrees of freedom for cluster and `t_periods - 1` for Driscoll–Kraay. It is compared with `fixest::wald(keep = <slopes>, vcov = <same vcov>)` for classical, HC1, HC2, HC3, cluster and Driscoll–Kraay, one-way and two-way, and agrees to machine precision. `fixest::fitstat(m, "f")` is not used because it also tests the fixed-effect dummies. The p-value is recomputed from the fixest statistic and the degrees of freedom of the t tests, because `wald()` raises the denominator degrees of freedom to at least the numerator degrees of freedom plus one (this only matters with two clusters or one residual degree of freedom). classical and HC1 are also compared with linearmodels.
+- **RE** is the Wald quadratic form of `plm::pwaldtest(test = "F")` with the classical covariance matrix, and does not depend on `cov_type`. It agrees with plm to machine precision on balanced panels. On an unbalanced panel the Swamy–Arora variance components differ slightly (see above), which moves the statistic by up to about 0.03 %. On balanced panels it also agrees with linearmodels. It is not compared with linearmodels on unbalanced panels, because linearmodels' F statistic is based on the sums of squares of the transformed data and can be **negative** for very unbalanced panels, while the Wald form cannot.
 
 ## Not compared against a second reference
 
@@ -75,7 +82,7 @@ Point estimates and the classical and HC1 standard errors agree with linearmodel
 - **Probit and R's `glm`.** For a non-canonical link, R's `glm` covariance uses the expected information matrix, which differs from the observed information used here by 2–3 % (classical) and up to 8 % (HC0 / HC1). The cross-check therefore builds the observed-information covariance explicitly, checked against `numDeriv::hessian`. Logit is unaffected.
 - **statsmodels gaps for Logit and Probit.** statsmodels returns HC0 for `hc1` (no `n/(n-k)` correction) and cannot compute OPG marginal effects, so R is the only reference for those two.
 - **IV GMM** is checked against linearmodels only. **IV HC2/HC3** is checked against `ivreg` only, because linearmodels has no equivalent.
-- **FE:** AIC, BIC and log-likelihood are checked against fixest only (linearmodels does not provide them), and so are HC2 / HC3, cluster, Driscoll–Kraay and the two-way within R² (linearmodels has no HC2 / HC3, uses different small-sample corrections for cluster and Driscoll–Kraay, and uses a different within R² definition for two-way FE). Between / overall R² and the F statistic are checked against linearmodels only.
+- **FE:** AIC, BIC and log-likelihood are checked against fixest only (linearmodels does not provide them), and so are HC2 / HC3, cluster, Driscoll–Kraay and the two-way within R² (linearmodels has no HC2 / HC3, uses different small-sample corrections for cluster and Driscoll–Kraay, and uses a different within R² definition for two-way FE). Between / overall R² are checked against linearmodels only.
 - **RE:** AIC, BIC and log-likelihood have no independent reference and rely on the OLS tests of the underlying computation. HC2 / HC3, cluster, Driscoll–Kraay and the Hausman test (the regression-based version, always compared with one-way FE) are checked against plm only.
 
 ## Test data

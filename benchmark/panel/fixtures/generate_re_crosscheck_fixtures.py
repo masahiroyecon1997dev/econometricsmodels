@@ -41,6 +41,14 @@
 （`q=1`で`G>q`）に相当する境界は`k=1`・`G=3`（`G = 2k+1`）になる。
 分散成分はplm推定のため、バランスパネルで比較すること。
 
+## F統計量（f_statistic/f_p_value）
+
+`plm::pwaldtest(test = "F")`（Wald二次形式）を、`cov_type`によらず全エントリに
+同じ値で持つ（本実装のREのF統計量は`cov_type`非依存、`re-spec.md`3.5節）。
+バランスパネルでは`linearmodels`のSST/SSR方式とも一致するが、不均衡パネルでは
+一致せず`linearmodels`は負値にもなりうるため、`re.json`側の`linearmodels`比較は
+不均衡シナリオを対象にしない（`tests/panel/test_re_reference.py`）。
+
 ## 許容誤差について
 
 plmの変量効果分散成分推定（Swamy-Arora）はlinearmodelsと僅かに異なる実装の

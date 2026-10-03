@@ -95,6 +95,7 @@ FIXTURE_PATH = (
 
 RTOL_BALANCED = TOLERANCES["re_crosscheck"]["rtol_balanced"]
 RTOL_UNBALANCED_COEF = TOLERANCES["re_crosscheck"]["rtol_unbalanced_coef"]
+RTOL_UNBALANCED_F = TOLERANCES["re_crosscheck"]["rtol_unbalanced_f"]
 RTOL_UNBALANCED = TOLERANCES["re_crosscheck"]["rtol_unbalanced"]  # cov_type別
 ATOL = TOLERANCES["re_crosscheck"]["atol"]
 RTOL_HAUSMAN = TOLERANCES["re_crosscheck"]["rtol_hausman"]
@@ -133,6 +134,13 @@ ALL_CASES = [
 ]
 
 
+def _f_rtol_for(scenario: str) -> float:
+    """F統計量のrtol。不均衡パネルのみ分散成分の差を許容する（cov_type非依存）。"""
+    if scenario != _UNBALANCED_HAUSMAN_SCENARIO:
+        return RTOL_BALANCED
+    return RTOL_UNBALANCED_F
+
+
 def _rtols_for(scenario: str, cov_type: str) -> tuple[float, float]:
     """(係数のrtol, se・t・p値・信頼区間のrtol)。不均衡パネルのみSwamy-Arora
     分散成分の差を統計量・cov_type別に許容する（モジュールdoc参照）。"""
@@ -142,9 +150,16 @@ def _rtols_for(scenario: str, cov_type: str) -> tuple[float, float]:
 
 
 def _check_result(
-    res, ref: dict, label: str, *, rtol: float, coef_rtol: float | None = None
+    res,
+    ref: dict,
+    label: str,
+    *,
+    rtol: float,
+    coef_rtol: float | None = None,
+    f_rtol: float | None = None,
 ) -> None:
     coef_rtol = rtol if coef_rtol is None else coef_rtol
+    f_rtol = rtol if f_rtol is None else f_rtol
     _assert_dict_close(
         res.params, ref["coef"], f"{label}/coef", rtol=coef_rtol
     )
@@ -164,6 +179,18 @@ def _check_result(
         _assert_close(
             our_upper, ref_upper, f"{label}/conf_upper/{name}", rtol=rtol
         )
+
+    # F統計量はcov_typeに依存しない（plm::pwaldtestのvcov既定）ため、
+    # どのcov_typeの参照値にも同じ値が入っている。
+    _assert_close(
+        res.f_statistic,
+        ref["f_statistic"],
+        f"{label}/f_statistic",
+        rtol=f_rtol,
+    )
+    _assert_close(
+        res.f_p_value, ref["f_p_value"], f"{label}/f_p_value", rtol=f_rtol
+    )
 
 
 def _check_hausman(
@@ -228,6 +255,7 @@ def test_synthetic_matches_plm(crosscheck, scenario, cov_type):
         f"{scenario}/{cov_type}",
         rtol=rtol,
         coef_rtol=coef_rtol,
+        f_rtol=_f_rtol_for(scenario),
     )
 
 

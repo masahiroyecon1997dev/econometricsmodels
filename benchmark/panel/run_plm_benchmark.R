@@ -49,6 +49,14 @@
 # 同型の対応）。ただしclusterの`G-1`・dkの`T-1`という自由度の選択自体は本実装と
 # 同じ規約の手計算であり、plmが検証してくれるのはse（補正係数込み）まで。
 #
+# ## F統計量（`f_statistic`/`f_p_value`）
+#
+# `pwaldtest(model, test = "F")`（傾き係数が同時にゼロというWald二次形式、
+# `vcov`既定＝plm自身の古典的分散共分散行列）を使う。**`cov_type`によらず
+# 同じ値**（本実装のREのF統計量は`cov_type`非依存、`re-spec.md`3.5節）なので、
+# どの`cov_type`の出力にも同じ値が入る。plmは変量効果で既定が`Chisq`検定のため
+# `test = "F"`を明示する（分母自由度は`df.residual`）。
+#
 # ## ハウスマン検定は対象外
 #
 # ハウスマン検定は`cov_type`に連動するため、別スクリプト
@@ -149,6 +157,9 @@ crit <- qt(0.975, df = t_df) # 95%信頼区間固定（run_fixest_benchmark.Rの
 conf_lower <- coefs - crit * ses
 conf_upper <- coefs + crit * ses
 
+# F統計量は`cov_type`非依存（`vcov`引数なし）。
+wald_f <- pwaldtest(model, test = "F")
+
 library(jsonlite)
 result <- list(
   coef = as.list(coefs),
@@ -160,6 +171,8 @@ result <- list(
     conf_lower,
     conf_upper,
     SIMPLIFY = FALSE
-  )
+  ),
+  f_statistic = unname(wald_f$statistic),
+  f_p_value = unname(wald_f$p.value)
 )
 cat(toJSON(result, auto_unbox = TRUE, digits = NA))

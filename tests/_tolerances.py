@@ -259,6 +259,10 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # 約0.5%）を見逃すため、統計量・cov_type別に実測へマージンを載せる。
         # 係数（cov_type非依存、実測最大1.8e-3）。
         "rtol_unbalanced_coef": 5e-3,
+        # F統計量（`plm::pwaldtest(test="F")`、cov_type非依存）: 係数と同じ分散成分の
+        # 差がWald二次形式に効くが、係数のずれが相殺方向に働き小さい（実測最大
+        # 3.0e-4）。自由度の取り違え（`n-k`と`n-k-1`で約0.5%）は検出できる幅に抑える。
+        "rtol_unbalanced_f": 1e-3,
         # se・t・p値・信頼区間（実測最大相対誤差）: cluster 2.9e-3（conf_int）・
         # hc2/hc3 1.1e-2（conf_int）・dk 3.7e-2（conf_int、se 0.9%がt分布の
         # 自由度`T-1=5`の裾でp値・信頼区間に増幅される）。

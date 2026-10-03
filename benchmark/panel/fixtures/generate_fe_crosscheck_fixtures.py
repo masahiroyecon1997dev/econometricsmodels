@@ -10,6 +10,11 @@
 - **hc2/hc3**: `linearmodels.PanelOLS`が提供しないため、fixestを唯一の参照
   実装として係数・標準誤差を検証する（`linearmodels_ref.py`モジュールdoc参照）。
 - **aic/bic**: `linearmodels.PanelOLS`が提供しないため、fixestのみで検証する。
+- **f_statistic/f_p_value（全cov_type）**: `fixest::wald()`（傾き係数が同時にゼロの
+  ロバストWald検定）。linearmodelsと比較できるのはclassical/hc1のみのため、
+  cluster/dk/hc2/hc3・2-wayはこの参照値だけが独立検証になる
+  （`run_fixest_benchmark.R`参照。p値は`wald()`の分母自由度の切り上げを避け、
+  t検定と同じ自由度から計算し直している）。
 - **2-way FEのr_squared_within**: `linearmodels`自身がentityのみdemeanの
   別定義を使うため、fixestの`fitstat(m, "wr2")`のみで検証する（1-wayは
   `fe.json`側のlinearmodelsの値とも一致するはずの回帰ガードとして機能する）。

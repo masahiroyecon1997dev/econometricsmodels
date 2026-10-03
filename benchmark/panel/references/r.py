@@ -23,7 +23,11 @@ _FIXEST_SCALAR_KEYS = (
     "bic",
     "log_likelihood",
     "r_squared_within",
+    "f_statistic",
+    "f_p_value",
 )
+
+_PLM_SCALAR_KEYS = ("f_statistic", "f_p_value")
 
 # `benchmark/panel/run_plm_benchmark.R`は`references/`直下ではなく
 # `benchmark/panel/`直下に置いたまま（既存スタブのパスを踏襲。
@@ -120,7 +124,9 @@ def run_re_plm_r(
     elif cov_type == "cluster" and cluster_col is not None:
         extra.append(cluster_col)
     raw = run_r(_PLM_R_SCRIPT, csv_path, formula, cov_type, extra_args=extra)
-    return normalize_names(raw, stat_key="test_stats")
+    return normalize_names(
+        raw, stat_key="test_stats", scalar_keys=_PLM_SCALAR_KEYS
+    )
 
 
 def run_re_hausman_plm_r(

@@ -24,6 +24,10 @@
   参照）。
 - **cluster/dk**: 上記の通り、fixestのみで検証する。
 - **aic/bic/log_likelihood**: `linearmodels.PanelOLS`が提供しないため、fixestのみで検証する。
+- **f_statistic/f_p_value（全cov_type・1-way/2-way）**: linearmodelsはclassical/hc1
+  しか比較できないため、`fixest::wald()`で全cov_typeを検証する（p値は`wald()`の
+  分母自由度の切り上げを避け、t検定と同じ自由度で計算し直す。
+  `run_fixest_benchmark.R`参照）。
 - **2-way FEのr_squared_within**: `linearmodels`自身がentityのみdemeanの
   別定義を使うため、fixestの`fitstat(m, "wr2")`のみで検証する。
 
@@ -127,6 +131,8 @@ def _check_result(res, ref: dict, label: str) -> None:
         _assert_close(our_lower, ref_lower, f"{label}/conf_lower/{name}")
         _assert_close(our_upper, ref_upper, f"{label}/conf_upper/{name}")
 
+    _assert_close(res.f_statistic, ref["f_statistic"], f"{label}/f_statistic")
+    _assert_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")
     _assert_close(res.aic, ref["aic"], f"{label}/aic")
     _assert_close(res.bic, ref["bic"], f"{label}/bic")
     _assert_close(

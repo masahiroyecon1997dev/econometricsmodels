@@ -33,11 +33,14 @@
 # r_squared_between/r_squared_overallはfixestに対応する概念が無いため
 # このスクリプトには含めない（linearmodelsのみで検証、5.4節）。
 #
-# f_statisticはfixestのfitstat(m, "f")を使わない
-# （固定効果ダミー自体も検定対象に含めるモデル全体のF検定で、本実装・
-# linearmodelsの「傾き係数のみのWald検定」とは定義が異なるため、
-# engine/src/panel/CLAUDE.md「F統計量」参照）。このスクリプトの出力にも
-# f_statistic/f_p_valueは含めない。
+# f_statistic/f_p_valueはfixestのfitstat(m, "f")ではなく`wald()`で求める
+# （fitstat(m, "f")は固定効果ダミー自体も検定対象に含めるモデル全体のF検定で、
+# 本実装・linearmodelsの「傾き係数のみのWald検定」とは定義が異なるため、
+# engine/src/panel/CLAUDE.md「F統計量」参照）。`wald(model, keep = <全傾き係数>,
+# vcov = <cov_typeと同じvcov>)`は傾き係数が同時にゼロという帰無仮説の
+# ロバストWald検定で、分母自由度は`vcov`が`cluster`のとき`G-1`・`dk`のとき
+# `T-1`・それ以外は`df_resid`（fixestの既定、本実装のFEの規約と同じ）。
+# linearmodelsと異なり全cov_type・1-way/2-wayで本実装と比較できる。
 #
 # 事前準備: fixest・jsonlite（.devcontainer/Dockerfileに導入済み）
 #
@@ -125,6 +128,30 @@ log_likelihood_val <- as.numeric(logLik(model))
 # 一致を別途確認する（両者一致するはずの回帰ガードとして機能する）。
 r_squared_within_val <- as.numeric(fitstat(model, "wr2")[[1]])
 
+# 全傾き係数が同時にゼロというWald F検定。`keep`は正規表現のため係数名を
+# 完全一致に直す（I(x^2)等の特殊文字をエスケープする）。
+slope_names <- names(coef(model))
+keep_regex <- paste0(
+  "^",
+  gsub("([][{}()+*^$|\\\\?.])", "\\\\\\1", slope_names),
+  "$"
+)
+# 統計量（Wald二次形式 / 傾き係数の数）はfixestの値をそのまま使う。p値は
+# `wald()`自身の`p`ではなく、統計量と`degrees_freedom(model, "t", vcov = vc)`
+# （`summary(model, vcov = vc)`のt検定と同じ分母自由度。clusterは`G-1`・dkは`T-1`・
+# それ以外は`df_resid`）から`pf()`で計算し直す。`wald()`は分母自由度を
+# `max(df2, df1 + 1)`に切り上げる実装で、`G-1 <= q`や`df_resid <= q`の境界
+# （クラスター数G=2、df_resid=1等、fixest 0.14.2で実測確認）では`summary`のt検定
+# と食い違う分母自由度を使うため。通常は両者が一致する（それ以外のケースで
+# `wald()`の`p`と一致することを確認済み）。
+wald_res <- wald(model, keep = keep_regex, vcov = vc, print = FALSE)
+f_p_value_val <- pf(
+  wald_res$stat,
+  wald_res$df1,
+  degrees_freedom(model, "t", vcov = vc),
+  lower.tail = FALSE
+)
+
 library(jsonlite)
 result <- list(
   coef = as.list(coefs),
@@ -140,6 +167,8 @@ result <- list(
   aic = aic_val,
   bic = bic_val,
   log_likelihood = log_likelihood_val,
-  r_squared_within = r_squared_within_val
+  r_squared_within = r_squared_within_val,
+  f_statistic = unname(wald_res$stat),
+  f_p_value = unname(f_p_value_val)
 )
 cat(toJSON(result, auto_unbox = TRUE, digits = NA))

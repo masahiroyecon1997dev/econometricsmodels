@@ -173,35 +173,40 @@ FE実装時（`panel::fe`）のcov_type計算関数（`design_matrix_from_column
 - **t検定・信頼区間の自由度（`df_inference`）は`cov_type=Cluster`のとき`G-1`、`Dk`のとき
   `t_periods-1`に切り替える**（fixestの`ssc()`既定`t.df="min"`、FEと同じ
   パターン）。それ以外（Classical/HC1-3）は`df_resid`のまま。**F統計量（3.5節）は
-  この切り替えの対象外**——`linearmodels`のSST/SSR方式をそのまま使うため`cov_type`
-  非依存で、サンドイッチ行列ベースの検定ではない。
+  この切り替えの対象外**——`plm::pwaldtest`と同じく`CovType::Classical`の共分散による
+  Wald検定のため`cov_type`非依存で、分母自由度は常に`df_resid`。
 
 ### 3.5 F統計量
 
-傾き係数`df_model - 1`個（定数項を除く）が同時にゼロという帰無仮説の検定。
+傾き係数`df_model - 1`個（定数項を除く）が同時にゼロという帰無仮説のWald F検定
+（`F = β'V⁻¹β / q`、`q = df_model - 1`、`F(q, df_resid)`）。**定義は
+`plm::pwaldtest(test = "F")`と同じWald二次形式**で、`estimator()`（準偏差変換済みデータへの
+`CovType::Classical`のOLS）の`cov_params`の傾き係数部分行列を
+`OlsEstimator::wald_test_last_columns(q)`で検定する。傾き係数が0個（`df_model==1`）なら
+NaN。失敗（共分散部分行列のほぼ特異性）は`PanelError::FTestFailed`。
 
-**分母自由度`f_df_denom`は`cov_type`によらず常に`df_resid`**（t検定・信頼区間の`stat_df`は
-`cluster`で`G-1`、`dk`で`T-1`に切り替わるため、この2つの`cov_type`では`stat_df != f_df_denom`に
-なる。FEのF検定がサンドイッチ共分散と`df_inference`を使うのとは異なる。不整合ではなく仕様）。
-`tests/test_test_dfs.py`が全`cov_type`で固定している。
+**分母自由度`f_df_denom`と統計量は`cov_type`によらず常に同じ（`df_resid`、古典共分散）**
+（t検定・信頼区間の`stat_df`は`cluster`で`G-1`、`dk`で`T-1`に切り替わるため、この2つの
+`cov_type`では`stat_df != f_df_denom`になる。FEのF検定がロバスト共分散と`df_inference`を
+使うのとは異なる。不整合ではなく仕様）。`tests/test_test_dfs.py`が全`cov_type`で固定している。
 
-**`wald_test_last_columns`（`cov_params`の部分行列を反転するWald検定、FEの`wald_f_test`
-再利用と同型の発想）は使えない**: 不均衡パネル（θ_iがエンティティごとに異なる）データで
-`linearmodels.RandomEffects.fit().f_statistic`と数値が一致しない。原因は`linearmodels`の
-`_PanelModelBase._f_statistic`のソース確認で判明——「定数項を除く」際の比較対象
+**`linearmodels`のSST/SSR方式ではなくplm定義を採用した理由**: `linearmodels.RandomEffects.
+fit().f_statistic`（`_PanelModelBase._f_statistic`）は、「定数項を除く」際の比較対象
 （`weps_const`）を、実際にモデルに含まれる変換済み定数列（`1-θ_i`、エンティティごとに
-異なる）ではなく**変換済みyの単純平均**（`y - mean(y)`）で計算している。この定義は、
-定数列が全観測で同一の値（バランスパネルでθが全エンティティ共通）でない限りWald検定
-（部分行列反転）とは一致しない。`linearmodels`が主リファレンスのため、`ReEstimator::fit`は
-この定義（変換済みyの単純平均を基準にした古典的SST/SSR比較）を直接実装している。
+異なる）ではなく**変換済みyの単純平均**（`y - mean(y)`）で計算する。このため教科書的な
+入れ子モデル比較（`total_ss >= residual_ss`）の保証が無く、**極端に不均衡なパネル
+（`T_i`の差が大きい）で負値になる**（`linearmodels`自身でも実地確認済み、T_i={2,2,15}等）。
+Wald二次形式は`V`が正定値である限り負値にならず、FEのF統計量（Wald検定）とも揃う。
+バランスパネル（`θ`が全エンティティ共通）では両定義が一致し、不均衡パネルでは一致しない。
 
-- `residual_ss<=0.0`（完全な当てはめ）なら`linearmodels`と同じくF統計量を`0.0`とする。
-  傾き係数が0個（`df_model==1`）ならNaN。
-- **F統計量は負値になりうる**（`linearmodels`自身でも極端な不均衡パネルで実地確認済み）。
-  `total_ss`（変換済みyの単純平均基準）は実際にモデルに含まれる変換済み定数列に対する
-  直交性を持たないため、教科書的な入れ子モデル比較（`total_ss >= residual_ss`保証）とは
-  異なり`total_ss < residual_ss`になりうる。
-- 検証は`linearmodels`（`cov_type="unadjusted"`）の`f_statistic`と直接数値比較。
+- 検証は`plm::pwaldtest(test = "F")`との数値比較（`tests/panel/test_re_crosscheck.py`）。
+  バランスパネルは機械精度で一致する。不均衡パネルは`plm`と本実装のSwamy-Arora分散成分の
+  推定差（`θ`の差）で最大3e-4の相対誤差が出るため専用の許容誤差を使う（`tests/_tolerances.py`）。
+  バランスパネルは`linearmodels`の`f_statistic`とも機械精度で一致するため
+  （`tests/panel/test_re_reference.py`）、二重に検証される。不均衡パネルは定義が異なるため
+  `linearmodels`とは比較しない。
+- 傾き係数が1個のケースは「1自由度のF検定は両側t検定と代数的に等価」
+  （`f_statistic = test_stat²`）をエンジンの単体テストで固定している。
 
 ### 3.6 パネル固有R²
 
@@ -215,8 +220,8 @@ FEの`r_squared_between`/`r_squared_overall`をそのまま流用できず、RE�
 
 `r_squared_within`はFEと同じ定義（θ=1固定の通常のwithin変換、REの`θ_i`とは無関係）。
 `linearmodels`の早期リターン（`has_constant`かつ傾き係数0個なら3種とも`0.0`）に倣い、
-`df_model==1`なら3種とも`0.0`とする。`r_squared_between`が負値になりうる（`f_statistic`と
-同型の性質）ことも実地確認済み。検証は`linearmodels`（`cov_type="unadjusted"`）の
+`df_model==1`なら3種とも`0.0`とする。`r_squared_between`が負値になりうる（`linearmodels`のSST/SSR方式のF統計量と
+同型の性質。F統計量自体は3.5節のWald形式で負値にならない）ことも実地確認済み。検証は`linearmodels`（`cov_type="unadjusted"`）の
 `rsquared_within`/`rsquared_between`/`rsquared_overall`と直接数値比較。
 
 ### 3.7 ハウスマン検定

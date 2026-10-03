@@ -125,7 +125,8 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
 - **F統計量（`f_statistic`/`f_p_value`）**: 傾き係数`k`個が同時にゼロという帰無仮説のWald
   F検定（`linearmodels.PanelOLS.f_statistic`「H0: All parameters ex. constant are zero」と
   同じ定義。固定効果ダミー自体は検定対象に含めない——`fixest`の`fitstat(m, "f")`はFEダミーも
-  含めたモデル全体のF検定で定義が異なるためクロスチェックに使わない）。`wald_f_test`
+  含めたモデル全体のF検定で定義が異なるためクロスチェックに使わず、同じ傾き係数のみの検定である
+  `fixest::wald()`を使う）。`wald_f_test`
   （OLS本体の関数を`pub(crate)`化して再利用）をFEの`cov_type`別`cov_params`・`df_inference`で
   呼ぶ形でサンドイッチ計算の複製を避ける（`k_constant=0`固定）。失敗は
   `PanelError::FTestFailed`。
@@ -284,7 +285,13 @@ demeanしたR²」を3種とも定義すると誤る）:
   （ハウスマン検定と同型）。
 - **2-wayの`r_squared_within`もRクロスチェック（`fixest`）のみ**（3.4節参照、`linearmodels`
   自身が2-wayでも常にentityのみdemeanという別定義のため）。
-- F統計量: `linearmodels`と直接比較（`cov_type="unadjusted"`）。k=1のケースは「1自由度の
+- F統計量: `linearmodels`と直接比較（`cov_type="unadjusted"`・HC1相当）。加えて
+  `fixest::wald(m, keep = <全傾き係数>, vcov = <cov_typeと同じ>)`と、全`cov_type`
+  （classical/HC1/HC2/HC3/cluster/dk）×1-way・2-wayで機械精度の一致を確認する
+  （`tests/panel/test_fe_crosscheck.py`）。p値はfixestの統計量と`summary`のt検定と同じ分母自由度
+  （`degrees_freedom(model, "t", vcov)`）から`pf()`で計算し直す——`wald()`は分母自由度を
+  `max(df2, df1 + 1)`に切り上げるため、`G-1 <= q`・`df_resid <= q`の境界（G=2、df_resid=1等）で
+  t検定と食い違う自由度を使うため（fixest 0.14.2で確認）。k=1のケースは「1自由度の
   F検定は両側t検定と代数的に等価」という恒等式（`f_statistic = test_stat²`）でHC1/HC2/HC3/
   Cluster/HACを横断検証する。
 

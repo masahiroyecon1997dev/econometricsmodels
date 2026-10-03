@@ -284,7 +284,7 @@ def test_fe_dk_f_denominator_is_t_minus_one(df, options, n_periods):
     ],
 )
 def test_re_f_denominator_is_df_resid_for_every_cov_type(df, options):
-    """REのF統計量（SST/SSR方式）は`cov_type`に依存しないため、分母自由度は
+    """REのF統計量（古典共分散のWald検定）は`cov_type`に依存しないため、分母自由度は
     常に`df_resid`。一方`stat_df`（t検定・信頼区間）は`cluster`で`G-1`、`dk`で
     `T-1`に切り替わるので、この2つは`cluster`/`dk`で食い違う（不整合ではなく仕様）。
     """

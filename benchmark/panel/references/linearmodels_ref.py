@@ -77,10 +77,12 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/panel/freeze.py`参
    `re-spec.md`5章）。
 3. **`f_statistic`は`res.f_statistic`（cov_type非依存、homoskedastic固定）を
    使う**（FEの`res.f_statistic_robust`とは異なる）——`engine::panel::re::
-   ReEstimator`のF統計量は`cov_type`に連動しない独自定義（変換済みyの単純
-   平均を基準にしたSST/SSR比較、`wald_test_last_columns`を再利用しない、
-   `docs/spec/re-spec.md`3.5節参照）を採用している
-   ため。
+   ReEstimator`のF統計量は`cov_type`に連動しない独自定義（`plm::pwaldtest`と同じ
+   Wald二次形式、`docs/spec/re-spec.md`3.5節参照）を採用しているため。
+   `linearmodels`の`res.f_statistic`は変換済みyの単純平均を基準にしたSST/SSR方式で、
+   バランスパネルでは本実装と一致するが不均衡パネルでは一致しない（極端な不均衡では
+   負値にもなる）ため、テスト側は不均衡シナリオの`f_statistic`/`f_p_value`を
+   このリファレンスと比較せず、plmのクロスチェックで検証する。
 4. **`aic`/`bic`を結果に含めない**: `linearmodels.RandomEffects`も`PanelOLS`と
    同じ`_cov_estimators`実装のため`aic`/`bic`属性を持たない（実測確認済み）。
    FEと異なり、この2つを検証する独立したRクロスチェックも用意していない——
@@ -440,7 +442,8 @@ def run_re(
         "n_entities": n_entities,
         # REのF統計量はcov_type非依存（homoskedastic固定）の定義を使う
         # （モジュールdocstring「RE固有の相違点」3参照、FEの
-        # `f_statistic_robust`とは異なることに注意）。
+        # `f_statistic_robust`とは異なることに注意）。不均衡パネルでは本実装
+        # （plm型のWald二次形式）と一致しない。
         "f_statistic": float(res.f_statistic.stat),
         "f_p_value": float(res.f_statistic.pval),
         "r_squared_within": float(res.rsquared_within),

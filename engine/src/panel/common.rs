@@ -32,8 +32,9 @@
 //!   とき、within変換によりスコアが恒等的にゼロになり共分散がゼロに退化する
 //! - `WithinRegressionFailed`: within変換済みデータの最小二乗推定委譲の失敗
 //!   （`panel-common.md`4.3節）
-//! - `FTestFailed`: F統計量（`fe.rs`モジュールdoc「自由度調整」のF統計量節）の
-//!   Wald検定（`crate::linear::ols::wald_f_test`）が失敗した場合。`WithinRegressionFailed`と
+//! - `FTestFailed`: F統計量（`fe.rs`モジュールdoc「自由度調整」のF統計量節、REは
+//!   `re.rs`モジュールdoc「F統計量」）のWald検定（`crate::linear::ols::wald_f_test`）が
+//!   失敗した場合。`WithinRegressionFailed`と
 //!   意味が異なる（`OlsEstimator::fit`自体は既に成功した後の、F検定固有の共分散部分行列の
 //!   ほぼ特異性というbackstopのみ、`ols.rs`の`wald_f_test`docコメント参照）ため別バリアントに
 //!   分離した（`IvError::FirstStageFailed`が`WithinRegressionFailed`と同じ`LeastSquaresError`

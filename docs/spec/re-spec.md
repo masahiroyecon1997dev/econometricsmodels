@@ -180,6 +180,11 @@ FE実装時（`panel::fe`）のcov_type計算関数（`design_matrix_from_column
 
 傾き係数`df_model - 1`個（定数項を除く）が同時にゼロという帰無仮説の検定。
 
+**分母自由度`f_df_denom`は`cov_type`によらず常に`df_resid`**（t検定・信頼区間の`stat_df`は
+`cluster`で`G-1`、`dk`で`T-1`に切り替わるため、この2つの`cov_type`では`stat_df != f_df_denom`に
+なる。FEのF検定がサンドイッチ共分散と`df_inference`を使うのとは異なる。不整合ではなく仕様）。
+`tests/test_test_dfs.py`が全`cov_type`で固定している。
+
 **`wald_test_last_columns`（`cov_params`の部分行列を反転するWald検定、FEの`wald_f_test`
 再利用と同型の発想）は使えない**: 不均衡パネル（θ_iがエンティティごとに異なる）データで
 `linearmodels.RandomEffects.fit().f_statistic`と数値が一致しない。原因は`linearmodels`の

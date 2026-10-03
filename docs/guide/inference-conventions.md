@@ -9,7 +9,7 @@ This page summarizes which reference distribution each method uses for its test 
 | OLS | t | F (`f_statistic`) | `n - k`; `G - 1` with `cov_type="cluster"` |
 | WLS | t | F | same as OLS |
 | FE | t | F | `df_resid` (`n - n_entities - k` for one-way) for `classical`/`hc1`-`hc3`; `G - 1` with `cov_type="cluster"`; `t_periods - 1` with `cov_type="dk"` |
-| RE | t | F | `df_resid` (`n - k`) for `classical`/`hc1`-`hc3`; `G - 1` with `cov_type="cluster"`; `t_periods - 1` with `cov_type="dk"` |
+| RE | t | F | `df_resid` (`n - k`) for `classical`/`hc1`-`hc3`; `G - 1` with `cov_type="cluster"`; `t_periods - 1` with `cov_type="dk"`. The F statistic does not depend on `cov_type`: `f_df_denom` is always `df_resid` |
 | IV, `estimator="2sls"` | t | F (`wald_dist="f"`) | `df_resid`; `G - 1` with `cov_type="cluster"` |
 | IV, `estimator="gmm"` | normal | chi-squared (`wald_dist="chi2"`) | none |
 | Logit / Probit | normal | likelihood-ratio chi-squared (`lr_statistic`, `lr_df`) | none |

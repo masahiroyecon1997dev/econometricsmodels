@@ -20,7 +20,7 @@ convention as FE (`fixest`'s `ssc()` defaults; `plm::vcovHC(type = "sss")` for `
 `"cluster"` scales by `G/(G-1) · (n-1)/(n-K)` and uses `G - 1` degrees of freedom, `"dk"` uses
 `T/(T-1)` with `T` = number of time periods in place of `G` and `T - 1` degrees of freedom, and
 the other types use `df_resid`. These differ from `linearmodels`, which does not apply the
-`G/(G-1)` factor. The F statistic is the exception: it does not depend on `cov_type`. See
+`G/(G-1)` factor. The F statistic is the exception: it does not depend on `cov_type`, so `f_df_denom` is always `df_resid` even when `stat_df` is `G - 1` or `T - 1`. See
 [Inference conventions](../guide/inference-conventions.md) for the full table.
 
 ## The Hausman test

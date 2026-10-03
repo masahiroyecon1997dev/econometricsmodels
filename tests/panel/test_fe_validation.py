@@ -591,6 +591,87 @@ def test_dk_periods_at_most_slopes_raises_validation_error():
         ).fit()
 
 
+_TWO_PERIOD_PANEL = {
+    "y": [3.0, 4.5, 7.0, 8.0, 9.2, 6.0, 10.1, 8.0],
+    "x": [1.0, 3.0, 2.0, 5.0, 4.0, 4.5, 0.0, 2.0],
+    "entity": ["a", "a", "b", "b", "c", "c", "d", "d"],
+    "time": ["1", "2"] * 4,
+}
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        (
+            FEOptions(cov_type="dk", dk_time="time", dk_bandwidth=0),
+            msgs.DEGENERATE_DK_TWO_PERIODS,
+        ),
+        (
+            FEOptions(cov_type="dk", time="time", dk_bandwidth=0),
+            msgs.DEGENERATE_DK_TWO_PERIODS,
+        ),
+        (
+            FEOptions(cov_type="cluster", cluster="time"),
+            msgs.DEGENERATE_CLUSTER_TWO_GROUPS,
+        ),
+    ],
+    ids=["dk-one_way", "dk-two_way", "cluster_by_time"],
+)
+def test_two_group_split_degeneracy_raises_validation_error(options, message):
+    """2時点のパネルで全エンティティが各時点に1観測ずつだと、within変換で
+    時点（クラスター）スコアが恒等的にゼロになり、DK・timeクラスターの
+    共分散がゼロに退化する（`PanelError::DegenerateDkTwoPeriods`/
+    `DegenerateClusterTwoGroups`）。`t > k`・`G > k`の検証は`k=1`で通るため
+    別に弾く。
+    """
+    df = pl.DataFrame(_TWO_PERIOD_PANEL)
+    with pytest.raises(ValidationError, match=escaped(message)):
+        FE(df, y="y", x=["x"], entity="entity", options=options).fit()
+
+
+def test_two_way_two_entity_default_cluster_raises_validation_error():
+    """2-way FEのwithin変換は各時点内でも和をゼロにするため、エンティティ
+    2つのパネルを既定のentityクラスタリングで推定すると、全時点が2クラスターに
+    1観測ずつになりクラスタースコアが恒等的にゼロになる（time方向の退化）。
+    """
+    df = pl.DataFrame(
+        {
+            "y": [3.0, 4.5, 7.0, 8.0, 9.2, 6.0, 10.1, 8.0, 5.0, 9.5],
+            "x": [1.0, 3.0, 2.0, 5.0, 4.0, 2.0, 1.0, 4.0, 3.0, 6.0],
+            "entity": ["a"] * 5 + ["b"] * 5,
+            "time": ["1", "2", "3", "4", "5"] * 2,
+        }
+    )
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.DEGENERATE_CLUSTER_TWO_GROUPS)
+    ):
+        FE(
+            df, y="y", x=["x"], entity="entity", options=FEOptions(time="time")
+        ).fit()
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        FEOptions(cov_type="dk", dk_time="time", dk_bandwidth=0),
+        FEOptions(cov_type="cluster", cluster="time"),
+    ],
+    ids=["dk", "cluster_by_time"],
+)
+def test_two_group_split_with_broken_pattern_is_accepted(options):
+    """1エンティティでも同じ時点に2観測あれば退化しない（不均衡な1-way）。"""
+    df = pl.concat(
+        [
+            pl.DataFrame(_TWO_PERIOD_PANEL),
+            pl.DataFrame(
+                {"y": [5.0], "x": [2.5], "entity": ["a"], "time": ["1"]}
+            ),
+        ]
+    )
+    res = FE(df, y="y", x=["x"], entity="entity", options=options).fit()
+    assert res.std_errors["x"] > 1e-8
+
+
 # ── ComputationError ──────────────────────────────────────────────
 
 

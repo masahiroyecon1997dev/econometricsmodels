@@ -316,6 +316,25 @@ INSUFFICIENT_DK_PERIODS_FOR_INFERENCE = (
     "singular when t_periods <= q"
 )
 
+# `PanelError::DegenerateDkTwoPeriods` / `DegenerateClusterTwoGroups`（FEのみ）。
+DEGENERATE_DK_TWO_PERIODS = (
+    "cov_type='dk' with 2 unique time periods is degenerate for fixed "
+    "effects when every entity (or, with two-way effects, every time period) "
+    "is observed exactly once in each of the two periods: the within "
+    "transformation makes the two per-period scores equal, and they sum to "
+    "zero, so the Driscoll-Kraay covariance is identically zero. Use more "
+    "time periods or another cov_type"
+)
+DEGENERATE_CLUSTER_TWO_GROUPS = (
+    "cov_type='cluster' with 2 clusters is degenerate for fixed effects when "
+    "every entity (or, with two-way effects, every time period) is observed "
+    "exactly once in each cluster (e.g. clustering by time with 2 periods, "
+    "or by entity with 2 entities and two-way effects): the within "
+    "transformation makes the two cluster scores equal, and they sum to "
+    "zero, so the cluster-robust covariance is identically zero. Use more "
+    "clusters or another cov_type"
+)
+
 # FE用cov_type文字列パース（engine_pybind/src/panel/fe.rs::parse_fe_cov_type）。
 # OLS/WLS/IVの`UNKNOWN_COV_TYPE_LINEAR`と異なりhc0を含まない一覧になる。
 UNKNOWN_COV_TYPE_FE = (

@@ -136,7 +136,12 @@
 //!     のため別バリアントにする、`common.rs`のdocコメント参照）。rankの上界から入力だけで
 //!     構造的な特異性が判定できる入力（Clusterの`G <= k`、Dkの`t_periods <= k`）は
 //!     共分散計算の前に`InsufficientClustersForInference`/
-//!     `PanelError::InsufficientDkPeriodsForInference`で弾く。それ以外（スケール差等による
+//!     `PanelError::InsufficientDkPeriodsForInference`で弾く。2グループ（Clusterの`G=2`・
+//!     Dkの`t_periods=2`）で全エンティティ（2-wayでは全時点でも）が各グループに1観測ずつの
+//!     場合はwithin変換で
+//!     スコアが恒等的にゼロになるため、`DegenerateClusterTwoGroups`/
+//!     `DegenerateDkTwoPeriods`で弾く（`two_group_split_is_degenerate`。2-wayではtime方向の
+//!     同じ構造——エンティティ2つのパネル等——も対象）。それ以外（スケール差等による
 //!     数値的な悪条件）は`FTestFailed`がbackstopになる。
 //!   - **検証**: 主リファレンス`linearmodels`の`PanelOLS.fit().f_statistic`
 //!     （`cov_type="unadjusted"`）と数値比較する。`k=1`（`fixest_reference_input`を使う
@@ -656,7 +661,10 @@ impl FeEstimator {
     /// - `cov_type=Dk`で時系列順序が無い場合は`PanelError::DkRequiresTime`、時点数が2未満なら
     ///   `PanelError::InsufficientDkPeriods`、`bandwidth`が不正なら
     ///   `PanelError::InvalidDkBandwidth`、時点数が傾き係数の数以下なら
-    ///   `PanelError::InsufficientDkPeriodsForInference`
+    ///   `PanelError::InsufficientDkPeriodsForInference`、時点数が2で全エンティティ（2-wayでは
+    ///   全時点でも）が2時点に1観測ずつなら`PanelError::DegenerateDkTwoPeriods`
+    /// - `cov_type=Cluster`でクラスター数が2で全エンティティ（2-wayでは全時点でも）が
+    ///   2クラスターに1観測ずつなら`PanelError::DegenerateClusterTwoGroups`
     /// - 委譲先の`OlsEstimator::fit`が失敗した場合（観測数不足・特異行列等）は
     ///   `PanelError::WithinRegressionFailed`
     /// - F検定の共分散部分行列が数値的にほぼ特異な場合は`PanelError::FTestFailed`
@@ -800,6 +808,13 @@ impl FeEstimator {
                 let resolved_groups = groups.as_deref().unwrap_or(input.entity());
                 let n_groups = validate_cluster_groups(resolved_groups, n)?;
                 validate_cluster_count_covers_slopes(n_groups, k)?;
+                // 直前の`G > k`により、ここで`G=2`なら`k`は高々1。
+                if k >= 1
+                    && n_groups == 2
+                    && two_group_split_is_degenerate(effects, &input, resolved_groups)
+                {
+                    return Err(PanelError::DegenerateClusterTwoGroups);
+                }
                 let k_correction = fe_cluster_k_correction(
                     effects,
                     input.entity(),
@@ -834,6 +849,11 @@ impl FeEstimator {
                 let t_periods = count_unique(time);
                 let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
                 validate_dk_periods_cover_tested_coefficients(t_periods, k)?;
+                // 直前の`t_periods > k`により、ここで`t_periods=2`なら`k`は高々1。
+                if k >= 1 && t_periods == 2 && two_group_split_is_degenerate(effects, &input, time)
+                {
+                    return Err(PanelError::DegenerateDkTwoPeriods);
+                }
                 // fixestのDKは`K.fixef="full"`が既定（クラスター変数が無くネスト判定自体が
                 // 発生しない、`fe_cluster_k_correction`のdocコメント参照）。`K=df_model`を
                 // そのまま使う。
@@ -1583,6 +1603,57 @@ fn validate_balanced_panel(entity: &[String], time: &[String]) -> Result<(), Pan
         });
     }
     Ok(())
+}
+
+/// ユニーク数2の`groups`（Clusterのクラスター列・Dkの時点列）について、within変換後の
+/// グループスコアが恒等的にゼロになるか（`PanelError::DegenerateDkTwoPeriods`/
+/// `DegenerateClusterTwoGroups`の判定）。
+///
+/// within変換は吸収した各FE次元の水準内で和をゼロにする（1-wayはentity、2-wayは
+/// entityとtimeの両方）。ある次元の全水準がちょうど2観測で2グループに1つずつ分かれると、
+/// 各水準の2観測で`x̃`・`ẽ`が符号反転し、両グループに同じ寄与が入ってスコアが等しくなる。
+/// 正規方程式でスコアの和はゼロのため、両方ゼロになる。entity方向（2時点のパネルを
+/// timeでクラスタリング等）だけでなく、2-wayではtime方向（エンティティ2つのパネルを
+/// entityでクラスタリング——Clusterの既定——等）も同じ構造になる。
+fn two_group_split_is_degenerate(effects: FeEffects, input: &FeInput, groups: &[String]) -> bool {
+    if every_level_splits_once_across_two_groups(input.entity(), groups) {
+        return true;
+    }
+    match (effects, input.time()) {
+        (FeEffects::TwoWay, Some(time)) => every_level_splits_once_across_two_groups(time, groups),
+        _ => false,
+    }
+}
+
+/// `levels`の全水準がちょうど2観測を持ち、その2観測の`groups`ラベルが異なるか
+/// （`groups`のユニーク数が2の前提で呼ぶ。このとき各水準が2グループに1観測ずつ）。
+/// 1水準でも3観測以上・同じグループに2観測・1観測があれば`false`。
+///
+/// `levels.len() == groups.len()`は呼び出し側の契約（`FeInput`の列と、
+/// `validate_cluster_groups`済みのクラスター列、または`engine_pybind`が同じDataFrameから
+/// 取り出す`Dk.time`）。
+fn every_level_splits_once_across_two_groups(levels: &[String], groups: &[String]) -> bool {
+    debug_assert_eq!(
+        levels.len(),
+        groups.len(),
+        "levels and groups must have the same length (caller contract)"
+    );
+    // 水準ごとに（最初の観測のグループ、観測数）を持つ。
+    let mut seen: HashMap<&str, (&str, usize)> = HashMap::new();
+    for (e, g) in levels.iter().zip(groups) {
+        match seen.get_mut(e.as_str()) {
+            None => {
+                seen.insert(e.as_str(), (g.as_str(), 1));
+            }
+            Some((first, count)) => {
+                if *count >= 2 || *first == g.as_str() {
+                    return false;
+                }
+                *count += 1;
+            }
+        }
+    }
+    seen.values().all(|&(_, count)| count == 2)
 }
 
 #[cfg(test)]
@@ -3653,6 +3724,254 @@ mod tests {
             result.unwrap_err(),
             PanelError::InsufficientDkPeriodsForInference { t_periods: 3, q: 3 }
         );
+    }
+
+    /// 4エンティティ×2期間・`k=1`（`k = 0`なら説明変数なし）。`break_pattern`なら
+    /// エンティティ`a`に時点`1`の観測を1つ足し（不均衡な1-way）、「全エンティティが
+    /// 2時点に1観測ずつ」のパターンを崩す。
+    fn two_period_input(k: usize, break_pattern: bool) -> (FeInput, Vec<String>) {
+        let mut entity = strings(&["a", "a", "b", "b", "c", "c", "d", "d"]);
+        let mut time = strings(&["1", "2", "1", "2", "1", "2", "1", "2"]);
+        let mut x = vec![1.0, 3.0, 2.0, 5.0, 4.0, 4.5, 0.0, 2.0];
+        let mut y = vec![3.0, 4.5, 7.0, 8.0, 9.2, 6.0, 10.1, 8.0];
+        if break_pattern {
+            entity.push("a".to_string());
+            time.push("1".to_string());
+            x.push(2.5);
+            y.push(5.0);
+        }
+        let (columns, names) = if k == 0 {
+            (vec![], vec![])
+        } else {
+            (vec![x], vec!["x".to_string()])
+        };
+        let input =
+            FeInput::from_columns(&y, &columns, names, &entity, Some(&time), "y".into()).unwrap();
+        (input, time)
+    }
+
+    fn dk_bandwidth_zero() -> FeCovType {
+        FeCovType::Dk {
+            bandwidth: Some(0),
+            time: None,
+        }
+    }
+
+    #[test]
+    fn fe_estimator_fit_hac_rejects_degenerate_two_period_panel() {
+        // 全エンティティが2時点に1観測ずつだと、within変換で時点スコアが`h_1 = h_2 = 0`に
+        // 退化しDK共分散が恒等的にゼロになる（`k=1`でも`t > q`の検証は通ってしまう）。
+        let (input, _) = two_period_input(1, false);
+        let result = FeEstimator::fit(input, FeEffects::OneWay, dk_bandwidth_zero(), 0.95);
+        assert_eq!(result.unwrap_err(), PanelError::DegenerateDkTwoPeriods);
+    }
+
+    #[test]
+    fn fe_estimator_fit_hac_rejects_degenerate_two_period_panel_two_way() {
+        // 2-way（バランスパネルの二重デミーニング）でもエンティティ内の和がゼロになり同じ退化。
+        let (input, _) = two_period_input(1, false);
+        let result = FeEstimator::fit(input, FeEffects::TwoWay, dk_bandwidth_zero(), 0.95);
+        assert_eq!(result.unwrap_err(), PanelError::DegenerateDkTwoPeriods);
+    }
+
+    #[test]
+    fn fe_estimator_fit_cluster_rejects_degenerate_two_group_split() {
+        // 2時点のパネルを`time`でクラスタリング（`G=2 > k=1`の検証は通る）すると、
+        // DKと同じ理由でクラスタースコアが恒等的にゼロになる。
+        let (input, time) = two_period_input(1, false);
+        let result = FeEstimator::fit(
+            input,
+            FeEffects::OneWay,
+            FeCovType::Cluster { groups: Some(time) },
+            0.95,
+        );
+        assert_eq!(result.unwrap_err(), PanelError::DegenerateClusterTwoGroups);
+    }
+
+    #[test]
+    fn fe_estimator_fit_two_group_split_is_accepted_when_pattern_is_broken() {
+        // 1エンティティでも同じ時点に2観測あればスコアは退化せず、標準誤差は正で有限。
+        let (input, time) = two_period_input(1, true);
+        let dk = FeEstimator::fit(input, FeEffects::OneWay, dk_bandwidth_zero(), 0.95).unwrap();
+        assert!(*dk.std_errors().get(0, 0) > 1e-8);
+        assert!(dk.f_statistic().is_finite());
+
+        let (input, _) = two_period_input(1, true);
+        let cluster = FeEstimator::fit(
+            input,
+            FeEffects::OneWay,
+            FeCovType::Cluster { groups: Some(time) },
+            0.95,
+        )
+        .unwrap();
+        assert!(*cluster.std_errors().get(0, 0) > 1e-8);
+    }
+
+    #[test]
+    fn fe_estimator_fit_hac_two_period_panel_without_regressors_is_accepted() {
+        // `k=0`（固定効果のみ）は標準誤差・F検定を計算しないため退化を問題にしない。
+        let (input, _) = two_period_input(0, false);
+        assert!(FeEstimator::fit(input, FeEffects::OneWay, dk_bandwidth_zero(), 0.95).is_ok());
+    }
+
+    /// 4エンティティ×2観測・`k=1`の1-way FE入力で、入力の`time`列を`time`で与える
+    /// （`Dk.time`上書きの経路を検証するため、時点ラベルの分け方だけを変えられるようにする）。
+    fn four_by_two_input(time: &[&str]) -> FeInput {
+        let entity = strings(&["a", "a", "b", "b", "c", "c", "d", "d"]);
+        let x = vec![1.0, 3.0, 2.0, 5.0, 4.0, 4.5, 0.0, 2.0];
+        let y = [3.0, 4.5, 7.0, 8.0, 9.2, 6.0, 10.1, 8.0];
+        FeInput::from_columns(
+            &y,
+            &[x],
+            vec!["x".to_string()],
+            &entity,
+            Some(&strings(time)),
+            "y".into(),
+        )
+        .unwrap()
+    }
+
+    /// 3時点に分かれるが各エンティティ2観測のラベル（`t_periods=3`、退化しない）。
+    const THREE_PERIOD_LABELS: [&str; 8] = ["1", "2", "2", "3", "3", "1", "1", "2"];
+    const TWO_PERIOD_LABELS: [&str; 8] = ["1", "2", "1", "2", "1", "2", "1", "2"];
+
+    #[test]
+    fn fe_estimator_fit_hac_uses_resolved_dk_time_for_degeneracy_check() {
+        // 入力の`time`は3時点だが、`Dk.time`上書きが2時点の退化パターン→拒否。
+        let result = FeEstimator::fit(
+            four_by_two_input(&THREE_PERIOD_LABELS),
+            FeEffects::OneWay,
+            FeCovType::Dk {
+                bandwidth: Some(0),
+                time: Some(strings(&TWO_PERIOD_LABELS)),
+            },
+            0.95,
+        );
+        assert_eq!(result.unwrap_err(), PanelError::DegenerateDkTwoPeriods);
+
+        // 逆に入力の`time`が2時点の退化パターンでも、上書きが3時点なら通す。
+        let fe = FeEstimator::fit(
+            four_by_two_input(&TWO_PERIOD_LABELS),
+            FeEffects::OneWay,
+            FeCovType::Dk {
+                bandwidth: Some(0),
+                time: Some(strings(&THREE_PERIOD_LABELS)),
+            },
+            0.95,
+        )
+        .unwrap();
+        assert!(*fe.std_errors().get(0, 0) > 1e-8);
+    }
+
+    #[test]
+    fn fe_estimator_fit_cluster_rejects_degenerate_split_by_non_time_column() {
+        // `time`以外の任意のクラスター列でも、全エンティティが2クラスターに1観測ずつなら退化。
+        let groups = strings(&["g2", "g1", "g1", "g2", "g2", "g1", "g1", "g2"]);
+        let result = FeEstimator::fit(
+            four_by_two_input(&THREE_PERIOD_LABELS),
+            FeEffects::OneWay,
+            FeCovType::Cluster {
+                groups: Some(groups),
+            },
+            0.95,
+        );
+        assert_eq!(result.unwrap_err(), PanelError::DegenerateClusterTwoGroups);
+    }
+
+    #[test]
+    fn fe_estimator_fit_cluster_two_group_split_without_regressors_is_accepted() {
+        // `k=0`は標準誤差・F検定を計算しないため、Clusterでも退化を問題にしない。
+        let (input, time) = two_period_input(0, false);
+        let result = FeEstimator::fit(
+            input,
+            FeEffects::OneWay,
+            FeCovType::Cluster { groups: Some(time) },
+            0.95,
+        );
+        assert!(result.is_ok());
+    }
+
+    /// エンティティ2つ×5時点・`k=1`。2-wayではtime方向の各水準（時点）が2観測になる。
+    fn two_entity_input() -> FeInput {
+        let entity = strings(&["a", "a", "a", "a", "a", "b", "b", "b", "b", "b"]);
+        let time = strings(&["1", "2", "3", "4", "5", "1", "2", "3", "4", "5"]);
+        let x = vec![1.0, 3.0, 2.0, 5.0, 4.0, 2.0, 1.0, 4.0, 3.0, 6.0];
+        let y = [3.0, 4.5, 7.0, 8.0, 9.2, 6.0, 10.1, 8.0, 5.0, 9.5];
+        FeInput::from_columns(
+            &y,
+            &[x],
+            vec!["x".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn fe_estimator_fit_two_way_cluster_by_entity_rejects_two_entity_panel() {
+        // 2-wayのwithin変換は各時点内でも和をゼロにするため、エンティティ2つのパネルを
+        // entityでクラスタリング（`groups: None`＝既定）すると、全時点が2クラスターに
+        // 1観測ずつになりクラスタースコアが恒等的にゼロになる（time方向の退化）。
+        let result = FeEstimator::fit(
+            two_entity_input(),
+            FeEffects::TwoWay,
+            FeCovType::Cluster { groups: None },
+            0.95,
+        );
+        assert_eq!(result.unwrap_err(), PanelError::DegenerateClusterTwoGroups);
+    }
+
+    #[test]
+    fn fe_estimator_fit_two_way_hac_rejects_two_entity_split_override() {
+        // 同じtime方向の退化は、`Dk.time`にentityと同じ分け方の2水準列を渡した場合にも起きる。
+        let result = FeEstimator::fit(
+            two_entity_input(),
+            FeEffects::TwoWay,
+            FeCovType::Dk {
+                bandwidth: Some(0),
+                time: Some(strings(&["p", "p", "p", "p", "p", "q", "q", "q", "q", "q"])),
+            },
+            0.95,
+        );
+        assert_eq!(result.unwrap_err(), PanelError::DegenerateDkTwoPeriods);
+    }
+
+    #[test]
+    fn fe_estimator_fit_one_way_cluster_by_entity_accepts_two_entity_panel() {
+        // 1-wayはtime方向に和をゼロにしないため、同じデータのentityクラスタリングは退化しない。
+        let fe = FeEstimator::fit(
+            two_entity_input(),
+            FeEffects::OneWay,
+            FeCovType::Cluster { groups: None },
+            0.95,
+        )
+        .unwrap();
+        assert!(*fe.std_errors().get(0, 0) > 1e-8);
+    }
+
+    #[test]
+    fn every_level_splits_once_across_two_groups_detects_pattern() {
+        let entity = strings(&["a", "a", "b", "b"]);
+        assert!(every_level_splits_once_across_two_groups(
+            &entity,
+            &strings(&["1", "2", "2", "1"])
+        ));
+        // 同じグループに2観測。
+        assert!(!every_level_splits_once_across_two_groups(
+            &entity,
+            &strings(&["1", "1", "1", "2"])
+        ));
+        // 3観測のエンティティ。
+        assert!(!every_level_splits_once_across_two_groups(
+            &strings(&["a", "a", "a", "b", "b"]),
+            &strings(&["1", "2", "1", "1", "2"])
+        ));
+        // 1観測のエンティティ（singletonは通常`fit()`が先に弾く）。
+        assert!(!every_level_splits_once_across_two_groups(
+            &strings(&["a", "a", "b"]),
+            &strings(&["1", "2", "1"])
+        ));
     }
 
     #[test]

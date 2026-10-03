@@ -27,6 +27,9 @@
 //! - `InsufficientDkPeriodsForInference`: DK指定時に時点数`t`が同時Wald検定の対象係数の
 //!   数`q`以下（`rank(S) ≤ t-1`のため検定の部分行列が構造的に特異。
 //!   `CommonError::InsufficientClustersForInference`のDK版）
+//! - `DegenerateDkTwoPeriods`/`DegenerateClusterTwoGroups`: FEで時点数（DK）・クラスター数が
+//!   2かつ吸収したFE次元（entity、2-wayではtimeも）のいずれかで全水準が2グループに1観測ずつの
+//!   とき、within変換によりスコアが恒等的にゼロになり共分散がゼロに退化する
 //! - `WithinRegressionFailed`: within変換済みデータの最小二乗推定委譲の失敗
 //!   （`panel-common.md`4.3節）
 //! - `FTestFailed`: F統計量（`fe.rs`モジュールdoc「自由度調整」のF統計量節）の
@@ -255,6 +258,45 @@ pub enum PanelError {
          t_periods-1, so the q×q Wald submatrix is singular when t_periods <= q"
     )]
     InsufficientDkPeriodsForInference { t_periods: usize, q: usize },
+
+    /// FEで`FeCovType::Dk`の時点数が2、かつ吸収したFE次元（常にentity、2-wayではtimeも）の
+    /// いずれかで全水準がその2時点に1観測ずつ（傾き係数`k >= 1`のとき）。
+    ///
+    /// within変換は吸収した各次元の水準内で和をゼロにするため、そうした水準の2観測で
+    /// `x̃`・`ẽ`が符号反転し（entity方向の例: `x̃_i1 = -x̃_i2`・`ẽ_i1 = -ẽ_i2`）、
+    /// 時点スコアは`h_1 = h_2`。2-wayのtime方向は、エンティティ2つのパネルで`Dk.time`に
+    /// entityと同じ分け方の列を渡した場合に起きる。正規方程式の
+    /// `h_1 + h_2 = 0`と合わせて`h_1 = h_2 = 0`、DK共分散は恒等的にゼロになる
+    /// （`InsufficientDkPeriodsForInference`の`rank(S) ≤ t-1 = 1`よりさらに強い退化で、
+    /// `k = 1`でも成立しない）。数値的な特異性判定では`1×1`行列を検出できず、
+    /// 約`1e-16`の標準誤差と巨大なF統計量を黙って返していたため入力から弾く。
+    /// 1水準でもこのパターンを崩せば退化しない（その場合は通す）。
+    /// REは残差がwithin変換されないため対象外。
+    #[error(
+        "cov_type='dk' with 2 unique time periods is degenerate for fixed effects when every \
+         entity (or, with two-way effects, every time period) is observed exactly once in each \
+         of the two periods: the within transformation makes the two per-period scores equal, \
+         and they sum to zero, so the Driscoll-Kraay covariance is identically zero. Use more \
+         time periods or another cov_type"
+    )]
+    DegenerateDkTwoPeriods,
+
+    /// FEで`FeCovType::Cluster`のクラスター数が2、かつ吸収したFE次元（常にentity、2-wayでは
+    /// timeも）のいずれかで全水準が2つのクラスターに1観測ずつ（傾き係数`k >= 1`のとき）。
+    /// 典型例は2時点のパネルを`time`でクラスタリング（entity方向）と、2-way FEでエンティティ
+    /// 2つのパネルをentityでクラスタリング——Clusterの既定——（time方向）。
+    ///
+    /// `DegenerateDkTwoPeriods`と同じ理由でクラスタースコアが`s_1 = s_2 = 0`となり、
+    /// クラスターロバスト共分散が恒等的にゼロになる。
+    #[error(
+        "cov_type='cluster' with 2 clusters is degenerate for fixed effects when every entity \
+         (or, with two-way effects, every time period) is observed exactly once in each cluster \
+         (e.g. clustering by time with 2 periods, or by entity with 2 entities and two-way \
+         effects): the within transformation makes the two cluster scores equal, and they sum \
+         to zero, so the cluster-robust covariance is identically zero. Use more clusters or \
+         another cov_type"
+    )]
+    DegenerateClusterTwoGroups,
 
     /// within変換済みデータに対する最小二乗推定（`OlsEstimator::fit`への委譲、
     /// `panel-common.md`4.3節。WLSがOLSへ委譲するのと同型のパターン）が失敗した。
@@ -751,6 +793,16 @@ mod tests {
 
     #[test]
     fn panel_error_messages_are_human_readable() {
+        assert!(
+            PanelError::DegenerateDkTwoPeriods
+                .to_string()
+                .starts_with("cov_type='dk' with 2 unique time periods is degenerate")
+        );
+        assert!(
+            PanelError::DegenerateClusterTwoGroups
+                .to_string()
+                .starts_with("cov_type='cluster' with 2 clusters is degenerate")
+        );
         assert_eq!(
             PanelError::InsufficientDkPeriodsForInference {
                 t_periods: 6,

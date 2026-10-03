@@ -29,6 +29,8 @@ use crate::linear::common::least_squares_error_is_computation_error;
 ///   `InsufficientDkPeriodsForInference`は追加。`InvalidDkBandwidth`と同じ「DKのバンド幅・
 ///   時点数に関する入力不正」という分類のため同じ`match`アームに含める。後者は
 ///   クラスター版の`InsufficientClustersForInference`が`ValidationError`なのと揃える）。
+///   `DegenerateDkTwoPeriods`・`DegenerateClusterTwoGroups`も入力（パネル構造と時点・
+///   クラスター列）だけから判定できる退化のため同じアームに含める。
 /// - `WithinRegressionFailed`・`FTestFailed`・`BetweenRegressionFailed`・
 ///   `QuasiDemeanedRegressionFailed`・`HausmanTestFailed`: 委譲先の`LeastSquaresError`の分類基準
 ///   （`least_squares_error_is_computation_error`）にそのまま従う。`IvError::
@@ -60,7 +62,9 @@ pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
         | PanelError::DkRequiresTime
         | PanelError::InvalidDkBandwidth { .. }
         | PanelError::InsufficientDkPeriods { .. }
-        | PanelError::InsufficientDkPeriodsForInference { .. } => ValidationError::new_err(message),
+        | PanelError::InsufficientDkPeriodsForInference { .. }
+        | PanelError::DegenerateDkTwoPeriods
+        | PanelError::DegenerateClusterTwoGroups => ValidationError::new_err(message),
         PanelError::WithinRegressionFailed { source }
         | PanelError::FTestFailed { source }
         | PanelError::BetweenRegressionFailed { source }

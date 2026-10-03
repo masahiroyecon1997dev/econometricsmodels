@@ -28,14 +28,26 @@
   ロバスト共分散が構造的に特異になるケース（`_STRUCTURALLY_SINGULAR`）は`null`
   （本実装は`fit()`がエラーになる）。
 
+## entity以外の列でクラスターするケース
+
+`cluster`に`entity`以外の列を指定する場合は、plmの`vcovHC`がgroup/timeしか
+クラスターにできないため、plmの準偏差変換済み設計行列・応答に`lm` +
+`sandwich::vcovCL(type = "HC1", cadjust = TRUE)`を当てた値を参照値にする
+（`run_plm_benchmark.R`モジュールコメント参照。entityクラスターでは
+`vcovHC(arellano, sss)`と機械精度で一致する）。クラスター不均衡
+（`baseline.cluster_imbalanced`、サイズ[2,3,5,10,30,50]のタイル）と、
+クラスター数の境界の成功パス（`baseline.cluster_g3`）を持つ。REはハウスマン検定の
+補助回帰の傾き係数`2k`に対しクラスター数`G > 2k`が必要なため、FEの`G=2`
+（`q=1`で`G>q`）に相当する境界は`k=1`・`G=3`（`G = 2k+1`）になる。
+分散成分はplm推定のため、バランスパネルで比較すること。
+
 ## 許容誤差について
 
 plmの変量効果分散成分推定（Swamy-Arora）はlinearmodelsと僅かに異なる実装の
-ため、点推定自体が不均衡パネルで最大0.1%程度乖離することを実測確認済み
-（バランスパネルでは6桁程度で一致）。このため本フィクスチャの数値はテスト
-コード側でクロスチェック水準（1e-2程度、`.claude/rules/testing-policy.md`
-「許容誤差」参照）の緩い許容誤差で比較すること——本実装と機械精度で一致する
-FEのfixestクロスチェックとは精度の前提が異なる。
+ため、点推定自体が不均衡パネルで最大0.2%程度乖離することを実測確認済み
+（バランスパネルでは機械精度で一致）。このためテストコード側では、バランス
+パネルを機械精度、不均衡パネル（`unbalanced`）のみ統計量・cov_type別に緩めた
+許容誤差で比較する（`tests/_tolerances.py`の`re_crosscheck`参照）。
 
 ## aic/bic/log_likelihoodを含まない理由
 
@@ -68,6 +80,8 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+import polars as pl
+
 from benchmark.common import (
     BENCHMARKS_DIR,
     DATA_DIR,
@@ -75,6 +89,7 @@ from benchmark.common import (
     WAGEPAN_TIME,
     WAGEPAN_X,
     WAGEPAN_Y,
+    imbalanced_cluster_groups,
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
@@ -157,6 +172,26 @@ def _run_effects(scenario: str, cov_type: str) -> dict:
     return run_re_plm_r(csv_path, formula, cov_type, maxlag=maxlag)
 
 
+def _run_cluster_case(
+    tmpdir: Path,
+    csv_name: str,
+    x_cols: list[str],
+    groups: list[str],
+) -> dict:
+    """entity以外のクラスター列（`cluster_group`）を都度動的付与して
+    plmの準偏差変換済みデータ + `vcovCL`の参照値を得る。"""
+    df = pl.read_csv(DATA_DIR / csv_name)
+    df = df.with_columns(pl.Series("cluster_group", groups))
+    csv_path = tmpdir / f"re_{csv_name}"
+    df.write_csv(csv_path)
+    return run_re_plm_r(
+        csv_path,
+        f"y ~ {' + '.join(x_cols)}",
+        "cluster",
+        cluster_col="cluster_group",
+    )
+
+
 def _run_wagepan(csv_path: Path, cov_type: str) -> dict:
     return run_re_plm_r(
         csv_path,
@@ -200,6 +235,24 @@ def build_fixtures() -> dict:
 
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = Path(tmp)
+
+        n_imbalanced = pl.read_csv(
+            DATA_DIR / "fe_baseline_cluster_imbalanced.csv"
+        ).height
+        fixtures["baseline"]["cluster_imbalanced"] = _run_cluster_case(
+            tmpdir,
+            "fe_baseline_cluster_imbalanced.csv",
+            ["x1", "x2"],
+            imbalanced_cluster_groups(n_imbalanced),
+        )
+        n_k1 = pl.read_csv(DATA_DIR / "fe_baseline_k1.csv").height
+        fixtures["baseline"]["cluster_g3"] = _run_cluster_case(
+            tmpdir,
+            "fe_baseline_k1.csv",
+            ["x1"],
+            [str(i % 3) for i in range(n_k1)],
+        )
+
         df = load_wooldridge("wagepan")
         csv_path = tmpdir / "wagepan.csv"
         df.write_csv(csv_path)
@@ -248,11 +301,16 @@ def build_fixtures() -> dict:
             "many_regressorsはcluster/dkのロバスト共分散が構造的に特異で"
             "本実装のfit()がエラーになるため含めない。"
             "wagepan（T=8）はdkを含めない。"
+            "baseline.cluster_imbalanced（サイズ[2,3,5,10,30,50]のタイル）・"
+            "baseline.cluster_g3（k=1、G=3=2k+1の境界成功パス）は、cluster列が"
+            "entity以外のケースで、plmの準偏差変換済みデータにlm+"
+            "sandwich::vcovCL(HC1, cadjust)を当てた値（クラスター列は"
+            "都度動的付与、バランスパネルのみ）。"
             "plmの変量効果分散成分推定（Swamy-Arora）はlinearmodelsと僅かに"
-            "異なる実装のため、点推定自体が不均衡パネルで最大0.1%程度乖離する"
-            "（実測確認済み、実装バグではない）。テストコード側ではこのフィクス"
-            "チャ全体をクロスチェック水準（1e-2程度）の緩い許容誤差で比較する"
-            "こと（.claude/rules/testing-policy.md「許容誤差」参照）。t検定"
+            "異なる実装のため、点推定自体が不均衡パネルで最大0.2%程度乖離する"
+            "（実測確認済み、実装バグではない）。テストコード側ではバランス"
+            "パネルを機械精度、unbalancedのみ統計量・cov_type別に緩めた許容誤差"
+            "で比較すること（tests/_tolerances.pyのre_crosscheck参照）。t検定"
             "（test_stats/p_values/conf_int）はplmの既定であるz検定（漸近正規"
             "近似）ではなく、本実装と同じt分布（hc2/hc3はdf_resid、clusterはG-1、"
             "dkはT-1）の式でcoef/seから計算し直している"

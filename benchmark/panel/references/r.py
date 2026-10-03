@@ -94,6 +94,7 @@ def run_re_plm_r(
     entity_col: str = "entity",
     time_col: str = "time",
     maxlag: int | None = None,
+    cluster_col: str | None = None,
 ) -> dict:
     """`run_plm_benchmark.R`を呼び、係数・標準誤差・ハウスマン検定を得る（RE専用）。
 
@@ -108,12 +109,16 @@ def run_re_plm_r(
         entity_col: エンティティ識別子の列名。
         time_col: 時点識別子の列名。
         maxlag: `cov_type="dk"`のバンド幅（`vcovSCC`の`maxlag`）。
+        cluster_col: `cov_type="cluster"`でentity以外の列をクラスターに
+            使う場合の列名（省略時はentityクラスター）。
     """
     extra = [entity_col, time_col]
     if cov_type == "dk":
         if maxlag is None:
             raise ValueError("maxlag is required for cov_type='dk'")
         extra.append(str(maxlag))
+    elif cov_type == "cluster" and cluster_col is not None:
+        extra.append(cluster_col)
     raw = run_r(_PLM_R_SCRIPT, csv_path, formula, cov_type, extra_args=extra)
     return normalize_names(raw, stat_key="test_stats")
 

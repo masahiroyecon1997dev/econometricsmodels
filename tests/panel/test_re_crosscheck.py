@@ -33,7 +33,8 @@ fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmod
 
 plmの変量効果分散成分推定（Swamy-Arora）がlinearmodels準拠の本実装と不均衡
 パネルで僅かに異なるため、`unbalanced`シナリオのみ係数・標準誤差が最大1%程度
-乖離する（`_tolerances.py`の`re_crosscheck`の`rtol`）。バランスパネルでは
+乖離する。許容誤差は一律ではなく、統計量・cov_type別に実測へマージンを載せる
+（`_tolerances.py`の`re_crosscheck`の`rtol_unbalanced*`）。バランスパネルでは
 機械精度で一致するため、それ以外のシナリオは`rtol_balanced`で厳密に比較する
 （cluster・dkの`G/(G-1)`・`T/(T-1)`補正は標準誤差に1%前後しか効かず、緩い
 許容誤差では補正式の取り違えを検出できないため、バランスパネルを緩めない）。
@@ -67,7 +68,12 @@ from econometricsmodels import (
     ValidationError,
 )
 
-from benchmark.common import WAGEPAN_ENTITY, WAGEPAN_X, WAGEPAN_Y
+from benchmark.common import (
+    WAGEPAN_ENTITY,
+    WAGEPAN_X,
+    WAGEPAN_Y,
+    imbalanced_cluster_groups,
+)
 from benchmark.panel.fixtures.generate_fe_fixtures import NUMERIC_SCENARIOS
 from benchmark.panel.fixtures.generate_re_crosscheck_fixtures import (
     COV_TYPES,
@@ -87,9 +93,9 @@ FIXTURE_PATH = (
     / "re_crosscheck.json"
 )
 
-RTOL = TOLERANCES["re_crosscheck"]["rtol"]
 RTOL_BALANCED = TOLERANCES["re_crosscheck"]["rtol_balanced"]
-RTOL_UNBALANCED_DK = TOLERANCES["re_crosscheck"]["rtol_unbalanced_dk"]
+RTOL_UNBALANCED_COEF = TOLERANCES["re_crosscheck"]["rtol_unbalanced_coef"]
+RTOL_UNBALANCED = TOLERANCES["re_crosscheck"]["rtol_unbalanced"]  # cov_type別
 ATOL = TOLERANCES["re_crosscheck"]["atol"]
 RTOL_HAUSMAN = TOLERANCES["re_crosscheck"]["rtol_hausman"]
 ATOL_HAUSMAN = TOLERANCES["re_crosscheck"]["atol_hausman"]
@@ -127,15 +133,21 @@ ALL_CASES = [
 ]
 
 
-def _rtol_for(scenario: str, cov_type: str) -> float:
-    """不均衡パネルのみSwamy-Arora分散成分の差を許容する（モジュールdoc参照）。"""
+def _rtols_for(scenario: str, cov_type: str) -> tuple[float, float]:
+    """(係数のrtol, se・t・p値・信頼区間のrtol)。不均衡パネルのみSwamy-Arora
+    分散成分の差を統計量・cov_type別に許容する（モジュールdoc参照）。"""
     if scenario != _UNBALANCED_HAUSMAN_SCENARIO:
-        return RTOL_BALANCED
-    return RTOL_UNBALANCED_DK if cov_type == "dk" else RTOL
+        return RTOL_BALANCED, RTOL_BALANCED
+    return RTOL_UNBALANCED_COEF, RTOL_UNBALANCED[cov_type]
 
 
-def _check_result(res, ref: dict, label: str, *, rtol: float) -> None:
-    _assert_dict_close(res.params, ref["coef"], f"{label}/coef", rtol=rtol)
+def _check_result(
+    res, ref: dict, label: str, *, rtol: float, coef_rtol: float | None = None
+) -> None:
+    coef_rtol = rtol if coef_rtol is None else coef_rtol
+    _assert_dict_close(
+        res.params, ref["coef"], f"{label}/coef", rtol=coef_rtol
+    )
     _assert_dict_close(res.std_errors, ref["se"], f"{label}/se", rtol=rtol)
     _assert_dict_close(
         res.test_stats, ref["test_stats"], f"{label}/test_stats", rtol=rtol
@@ -209,11 +221,13 @@ def test_synthetic_matches_plm(crosscheck, scenario, cov_type):
         options=_re_options(cov_type),
     ).fit()
 
+    coef_rtol, rtol = _rtols_for(scenario, cov_type)
     _check_result(
         res,
         crosscheck[scenario][cov_type],
         f"{scenario}/{cov_type}",
-        rtol=_rtol_for(scenario, cov_type),
+        rtol=rtol,
+        coef_rtol=coef_rtol,
     )
 
 
@@ -235,6 +249,60 @@ def test_many_regressors_cluster_dk_raise_validation_error(cov_type):
             entity="entity",
             options=_re_options(cov_type),
         ).fit()
+
+
+def _fit_with_cluster_column(csv_name: str, x_cols: list[str], groups):
+    df = pl.read_csv(DATA_DIR / csv_name).with_columns(
+        pl.Series("cluster_group", groups)
+    )
+    return RE(
+        df,
+        y="y",
+        x=x_cols,
+        entity="entity",
+        options=REOptions(cov_type="cluster", cluster="cluster_group"),
+    ).fit()
+
+
+def test_cluster_imbalanced_matches_plm_based_reference(crosscheck):
+    """クラスター不均衡（サイズ[2,3,5,10,30,50]のタイル、entityとは無関係な
+    専用クラスター列）。plmはgroup/timeしかクラスターにできないため、参照値は
+    plmの準偏差変換済みデータに`lm` + `sandwich::vcovCL`を当てたもの
+    （`run_plm_benchmark.R`モジュールコメント参照）。`stat_df`はentity数ではなく
+    クラスター数`G-1`になる。バランスパネルのため機械精度で比較する。
+    """
+    n = pl.read_csv(DATA_DIR / "fe_baseline_cluster_imbalanced.csv").height
+    groups = imbalanced_cluster_groups(n)
+    res = _fit_with_cluster_column(
+        "fe_baseline_cluster_imbalanced.csv", ["x1", "x2"], groups
+    )
+
+    _check_result(
+        res,
+        crosscheck["baseline"]["cluster_imbalanced"],
+        "baseline/cluster_imbalanced",
+        rtol=RTOL_BALANCED,
+    )
+    assert res.stat_df == len(set(groups)) - 1
+
+
+def test_cluster_g3_boundary_matches_plm_based_reference(crosscheck):
+    """クラスター数の境界の成功パス。REはハウスマン検定の補助回帰の傾き係数
+    `2k`に対し`G > 2k`が必要なため、`k=1`・`G=3`（`G = 2k+1`）が最小の成功パス
+    （`G=2`は`test_hausman_cluster_count_equal_to_auxiliary_slopes_raises`系の
+    `ValidationError`）。
+    """
+    n = pl.read_csv(DATA_DIR / "fe_baseline_k1.csv").height
+    groups = [str(i % 3) for i in range(n)]
+    res = _fit_with_cluster_column("fe_baseline_k1.csv", ["x1"], groups)
+
+    _check_result(
+        res,
+        crosscheck["baseline"]["cluster_g3"],
+        "baseline/cluster_g3",
+        rtol=RTOL_BALANCED,
+    )
+    assert res.stat_df == 2
 
 
 # ── 凍結フィクスチャとの数値照合（実データ: Wooldridge wagepan） ───────

@@ -377,6 +377,70 @@
         "hausman_df": 2,
         "hausman_p_value": 6.40986289813902e-10
       }
+    },
+    "cluster_imbalanced": {
+      "coef": {
+        "const": 0.127771684948334,
+        "x1": 1.81421798577401,
+        "x2": -0.383428344609113
+      },
+      "se": {
+        "const": 0.308863001484174,
+        "x1": 0.147464938729971,
+        "x2": 0.138689008863728
+      },
+      "test_stats": {
+        "const": 0.413684009850176,
+        "x1": 12.3027073513122,
+        "x2": -2.76466280746053
+      },
+      "p_values": {
+        "const": 0.687056234473444,
+        "x1": 9.00111080106336e-08,
+        "x2": 0.0184017921412182
+      },
+      "conf_int": {
+        "const": [
+          -0.552031197819695,
+          0.807574567716363
+        ],
+        "x1": [
+          1.48964984399552,
+          2.1387861275525
+        ],
+        "x2": [
+          -0.688680794985996,
+          -0.07817589423223
+        ]
+      }
+    },
+    "cluster_g3": {
+      "coef": {
+        "const": 0.051197720912191,
+        "x1": 1.70818120833268
+      },
+      "se": {
+        "const": 0.661459831987152,
+        "x1": 0.0204403750297026
+      },
+      "test_stats": {
+        "const": 0.0774011034931377,
+        "x1": 83.5689759043295
+      },
+      "p_values": {
+        "const": 0.945350943325347,
+        "x1": 0.000143158313223967
+      },
+      "conf_int": {
+        "const": [
+          -2.79483423080695,
+          2.89722967263133
+        ],
+        "x1": [
+          1.62023337291402,
+          1.79612904375133
+        ]
+      }
     }
   },
   "small_panel": {
@@ -2547,10 +2611,10 @@
   },
   "_meta": {
     "method": "re",
-    "generated_at": "2026-10-03T05:24:41.837064+00:00",
+    "generated_at": "2026-10-03T05:50:13.799387+00:00",
     "reference": "plm (R)",
     "r_version": "4.5.3",
     "plm_version": "2.6.7",
-    "note": "hc2/hc3・ハウスマン検定は、linearmodelsが提供しない/実装を持たないためplmのみが参照値になる単一参照実装の例外（モジュールdoc参照）。cluster/dkも、本実装の小標本補正がStata・R型に変わりlinearmodelsと一致しないためplm（vcovHC(method=arellano, type=sss)・vcovSCC(maxlag=, type=sss)）のみが参照値になる。dkのバンド幅は本実装の既定floor(4*(T/100)^(2/9))を明示的にmaxlagに渡している。many_regressorsはcluster/dkのロバスト共分散が構造的に特異で本実装のfit()がエラーになるため含めない。wagepan（T=8）はdkを含めない。plmの変量効果分散成分推定（Swamy-Arora）はlinearmodelsと僅かに異なる実装のため、点推定自体が不均衡パネルで最大0.1%程度乖離する（実測確認済み、実装バグではない）。テストコード側ではこのフィクスチャ全体をクロスチェック水準（1e-2程度）の緩い許容誤差で比較すること（.claude/rules/testing-policy.md「許容誤差」参照）。t検定（test_stats/p_values/conf_int）はplmの既定であるz検定（漸近正規近似）ではなく、本実装と同じt分布（hc2/hc3はdf_resid、clusterはG-1、dkはT-1）の式でcoef/seから計算し直している（run_plm_benchmark.Rのコメント参照）。ハウスマン検定はplm::phtest(method = \"aux\", effect = \"individual\", vcov = ...)（回帰ベース、常に1-way、RE本体のcov_typeに連動）の値で、\"hausman\"キー配下にcov_type別に持つ（dk_bandwidth明示指定は\"hausman_dk_bandwidth\"キー配下）。\"hausman\"の値がnullのエントリは、ロバスト共分散が構造的に特異で本実装のfit()がエラーになるケース（plmに参照値なし）。不均衡パネルではSwamy-Arora分散成分の差でlinearmodels準拠の本実装と数％ずれる（本スクリプトのモジュールdoc参照）。wagepanはre.jsonと同じmarried/union/expersqを使用。"
+    "note": "hc2/hc3・ハウスマン検定は、linearmodelsが提供しない/実装を持たないためplmのみが参照値になる単一参照実装の例外（モジュールdoc参照）。cluster/dkも、本実装の小標本補正がStata・R型に変わりlinearmodelsと一致しないためplm（vcovHC(method=arellano, type=sss)・vcovSCC(maxlag=, type=sss)）のみが参照値になる。dkのバンド幅は本実装の既定floor(4*(T/100)^(2/9))を明示的にmaxlagに渡している。many_regressorsはcluster/dkのロバスト共分散が構造的に特異で本実装のfit()がエラーになるため含めない。wagepan（T=8）はdkを含めない。baseline.cluster_imbalanced（サイズ[2,3,5,10,30,50]のタイル）・baseline.cluster_g3（k=1、G=3=2k+1の境界成功パス）は、cluster列がentity以外のケースで、plmの準偏差変換済みデータにlm+sandwich::vcovCL(HC1, cadjust)を当てた値（クラスター列は都度動的付与、バランスパネルのみ）。plmの変量効果分散成分推定（Swamy-Arora）はlinearmodelsと僅かに異なる実装のため、点推定自体が不均衡パネルで最大0.2%程度乖離する（実測確認済み、実装バグではない）。テストコード側ではバランスパネルを機械精度、unbalancedのみ統計量・cov_type別に緩めた許容誤差で比較すること（tests/_tolerances.pyのre_crosscheck参照）。t検定（test_stats/p_values/conf_int）はplmの既定であるz検定（漸近正規近似）ではなく、本実装と同じt分布（hc2/hc3はdf_resid、clusterはG-1、dkはT-1）の式でcoef/seから計算し直している（run_plm_benchmark.Rのコメント参照）。ハウスマン検定はplm::phtest(method = \"aux\", effect = \"individual\", vcov = ...)（回帰ベース、常に1-way、RE本体のcov_typeに連動）の値で、\"hausman\"キー配下にcov_type別に持つ（dk_bandwidth明示指定は\"hausman_dk_bandwidth\"キー配下）。\"hausman\"の値がnullのエントリは、ロバスト共分散が構造的に特異で本実装のfit()がエラーになるケース（plmに参照値なし）。不均衡パネルではSwamy-Arora分散成分の差でlinearmodels準拠の本実装と数％ずれる（本スクリプトのモジュールdoc参照）。wagepanはre.jsonと同じmarried/union/expersqを使用。"
   }
 }

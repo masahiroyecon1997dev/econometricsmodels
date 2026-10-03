@@ -18,8 +18,15 @@
 #   `vcovSCC(maxlag=<bandwidth>, type="sss")`と機械精度で一致する（バランス
 #   パネル、実測確認済み）。dkのバンド幅は本実装の既定`floor(4*(T/100)^(2/9))`
 #   を呼び出し側が第6引数で明示する（`vcovSCC`の既定とは異なる）。
-#   clusterはentityクラスターのみ（plmはgroup/timeしかクラスターにできず、
-#   entity以外にはリファレンスが無い）。
+#   clusterは既定ではentityクラスター。plmはgroup/timeしかクラスターにできない
+#   ため、entity以外の列でクラスターする場合（第6引数にクラスター列名）は、
+#   plmの変量効果モデルが使う準偏差変換済みの設計行列・応答（`model.matrix()`・
+#   `pmodel.response()`）に対して`lm` + `sandwich::vcovCL(type = "HC1",
+#   cadjust = TRUE)`（OLSクロスチェック`run_lm_crosscheck.R`と同じStata・R型補正
+#   `G/(G-1)·(n-1)/(n-K)`）を当てる。entityクラスターではこの経路が
+#   `vcovHC(arellano, sss)`と一致することを確認済み。θ（分散成分）はplm側の
+#   推定値を使うため、不均衡パネルでは本実装とSwamy-Arora分散成分の差が出る
+#   （バランスパネルで比較すること）。
 #
 # classical/hc1はlinearmodelsのみで検証する（本スクリプトでは計算しない）。
 # plmの変量効果分散成分推定（Swamy-Arora）がlinearmodelsと僅かに異なる実装の
@@ -63,13 +70,14 @@
 #   Rscript run_plm_benchmark.R data.csv "lwage ~ married + union + expersq" hc3 nr year
 #   Rscript run_plm_benchmark.R data.csv "y ~ x1 + x2" cluster entity time
 #   Rscript run_plm_benchmark.R data.csv "y ~ x1 + x2" dk entity time 2
+#   Rscript run_plm_benchmark.R data.csv "y ~ x1 + x2" cluster entity time cluster_group
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 5) {
   stop(
     "usage: Rscript run_plm_benchmark.R <data.csv> <formula> ",
     "<cov_type: hc2|hc3|cluster|dk> <entity_col> <time_col> ",
-    "[maxlag (dk only)]"
+    "[maxlag (dk) | cluster_col (cluster)]"
   )
 }
 data_path <- args[1]
@@ -83,6 +91,7 @@ time_col <- args[5]
 df <- read.csv(data_path, check.names = FALSE)
 
 suppressMessages(library(plm))
+suppressMessages(library(sandwich))
 pdf <- pdata.frame(df, index = c(entity_col, time_col))
 
 model <- plm(
@@ -103,9 +112,20 @@ if (cov_type == "hc2") {
 } else if (cov_type == "hc3") {
   vc <- vcovHC(model, method = "white1", type = "HC3")
   t_df <- df_resid
-} else if (cov_type == "cluster") {
+} else if (cov_type == "cluster" && length(args) < 6) {
   vc <- vcovHC(model, method = "arellano", type = "sss")
   t_df <- n_groups - 1
+} else if (cov_type == "cluster") {
+  # entity以外の列でクラスター（モジュールコメント参照）。
+  cluster_vec <- setNames(df[[args[6]]], rownames(pdf))
+  X <- model.matrix(model)
+  y_star <- pmodel.response(model)
+  lm_fit <- lm(y_star ~ 0 + X)
+  cluster_ids <- cluster_vec[rownames(X)]
+  vc <- vcovCL(lm_fit, cluster = cluster_ids, type = "HC1", cadjust = TRUE)
+  # lmの係数名（"X(Intercept)"等）をplmの係数名に戻す。
+  dimnames(vc) <- list(names(coef(model)), names(coef(model)))
+  t_df <- length(unique(cluster_ids)) - 1
 } else if (cov_type == "dk") {
   if (length(args) < 6) {
     stop("dk requires maxlag as the 6th argument")

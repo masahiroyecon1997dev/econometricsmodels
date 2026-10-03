@@ -248,17 +248,26 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # クロスチェック（機械精度一致）とは精度の前提が異なるため、実測値に
     # マージンを載せた緩いRTOLを使う。
     "re_crosscheck": {
-        "rtol": 2e-2,
         # バランスパネルでは分散成分推定の差が無く機械精度一致するため、
         # unbalancedシナリオ以外はこちらで厳密に比較する（cluster/dkの
         # `G/(G-1)`・`T/(T-1)`補正は標準誤差に1%前後しか効かず、`rtol`の
         # ような緩い許容誤差では補正式の取り違えを検出できない）。
         "rtol_balanced": RTOL_MACHINE_PRECISION,
-        # unbalancedのdkのみ、分散成分の差がカーネルの積算を通じて標準誤差に
-        # 約0.9%出て、t分布の自由度`T-1=5`の裾でp値・信頼区間にさらに増幅される
-        # （実測最大相対誤差: se 0.9%・p値 2.7%・conf_int 3.7%）。hc2/hc3
-        # （conf_int 1.1%）・clusterはこれより小さく`rtol`（2e-2）に収まる。
-        "rtol_unbalanced_dk": 5e-2,
+        # unbalancedシナリオのみ、plmとlinearmodels準拠の本実装のSwamy-Arora分散成分の
+        # 差で点推定が約0.18%、標準誤差等がcov_typeに応じてずれる。一律に緩めると
+        # 補正式の取り違え（clusterの`G/(G-1)`欠落はseに約1.3%、`(n-1)/(n-K)`は
+        # 約0.5%）を見逃すため、統計量・cov_type別に実測へマージンを載せる。
+        # 係数（cov_type非依存、実測最大1.8e-3）。
+        "rtol_unbalanced_coef": 5e-3,
+        # se・t・p値・信頼区間（実測最大相対誤差）: cluster 2.9e-3（conf_int）・
+        # hc2/hc3 1.1e-2（conf_int）・dk 3.7e-2（conf_int、se 0.9%がt分布の
+        # 自由度`T-1=5`の裾でp値・信頼区間に増幅される）。
+        "rtol_unbalanced": {
+            "hc2": 2e-2,
+            "hc3": 2e-2,
+            "cluster": 5e-3,
+            "dk": 5e-2,
+        },
         "atol": ATOL_CROSSCHECK_FLOOR,
         # ハウスマン検定: 回帰ベース（補助回帰）版の
         # `plm::phtest(method = "aux", effect = "individual")`と比較する

@@ -22,7 +22,7 @@
 
 - **statsmodels**: `cov_type`が`"nonrobust"`以外だと既定で`use_t=False`になる。ベンチマーク照合時は`use_t=True`を明示指定する（`ols-spec.md`3.2節）。
 - **linearmodels（IV）**: `debiased`で分布が切り替わる（`debiased=False`が既定でz/χ²）。2SLSのベンチマーク生成では`coef`/`se`のみ`linearmodels`から借り、`test_stats`/`p_values`/`conf_int`/`f_statistic`は自前でt/F分布を使って計算し直している（`benchmark/iv/references/linearmodels_ref.py`のモジュールdocstringが正本）。
-- **R**: `benchmark/*/references/*.R`が各パッケージの出力をJSON化する。公開ページに書いたR各パッケージの分布は、公開ページ作成時にスクリプトで実測して確認した（sandwich 3.1.3・lmtest 0.9.40・fixest 0.14.2・plm 2.6.7・ivreg 0.6.8・AER 1.2.15、R 4.5.3）。パッケージのメジャー更新時は再確認する。特に`plm`は`summary()`の列名が`t-value`でもp値は正規分布から計算される（`within`/`random`とも実測で確認）ため、列名から分布を推測しない。
+- **R**: `benchmark/*/references/*.R`が各パッケージの出力をJSON化する。公開ページに書いたR各パッケージの分布は、公開ページ作成時にスクリプトで実測して確認した（sandwich 3.1.3・lmtest 0.9.40・fixest 0.14.2・plm 2.6.7・ivreg 0.6.8・AER 1.2.17、R 4.5.3）。パッケージのメジャー更新時は再確認する。特に`plm`は`summary()`の列名が`t-value`でもp値は正規分布から計算される（`within`/`random`とも実測で確認）ため、列名から分布を推測しない。
 
 ## 3. Stock-Yogoの弱操作変数F統計量（v1スコープの判断）
 

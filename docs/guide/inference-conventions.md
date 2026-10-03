@@ -27,7 +27,7 @@ This page summarizes which reference distribution each method uses for its test 
 
 ## Differences from other packages
 
-The defaults below were checked against R 4.5.3 (sandwich 3.1.3, lmtest 0.9.40, fixest 0.14.2, plm 2.6.7, ivreg 0.6.8, AER 1.2.15), statsmodels 0.15.0 and linearmodels 7.0.
+The defaults below were checked against R 4.5.3 (sandwich 3.1.3, lmtest 0.9.40, fixest 0.14.2, plm 2.6.7, ivreg 0.6.8, AER 1.2.17), statsmodels 0.15.0 and linearmodels 7.0.
 
 ### R
 

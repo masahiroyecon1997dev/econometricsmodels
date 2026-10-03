@@ -32,6 +32,12 @@ N_ENTITIES = 20
 N_PERIODS = 10
 N = N_ENTITIES * N_PERIODS
 N_GROUPS = 7
+N_COARSE = N_ENTITIES // 4
+N_PERIODS_COARSE = N_PERIODS // 2
+FE_DF_RESID_ONE_WAY = N - N_ENTITIES - 2
+# 2-way: df_model = k + n_entities + n_periods - 1
+FE_DF_RESID_TWO_WAY = N - (2 + N_ENTITIES + N_PERIODS - 1)
+RE_DF_RESID = N - 3
 
 
 @pytest.fixture(scope="module")
@@ -61,6 +67,10 @@ def df() -> pl.DataFrame:
             "time": np.tile(np.arange(N_PERIODS), N_ENTITIES),
             # entityと入れ子にならないクラスター列（G=7）
             "grp": np.arange(N) % N_GROUPS,
+            # entityを束ねる入れ子のクラスター列（G=5）と、時点を2つずつ束ねた
+            # 列（T=5。`time`のT=10と区別してdkの時点数を確認する）
+            "coarse": entity // 4,
+            "time5": np.tile(np.arange(N_PERIODS), N_ENTITIES) // 2,
         }
     )
 
@@ -143,6 +153,9 @@ def test_fe_f_dfs(df):
         options=FEOptions(cov_type="dk", dk_time="time"),
     ).fit()
     assert (dk.f_df_num, dk.f_df_denom) == (2, N_PERIODS - 1)
+    assert _f_p(dk.f_statistic, 2, N_PERIODS - 1) == pytest.approx(
+        dk.f_p_value, rel=1e-8
+    )
 
 
 def test_re_f_dfs_and_hausman_df(df):
@@ -180,18 +193,29 @@ def _re(df, **options):
 @pytest.mark.parametrize("cov_type", ["hc1", "hc2", "hc3"])
 def test_fe_hc_f_denominator_is_df_resid(df, cov_type, two_way):
     res = _fe(df, cov_type=cov_type, two_way=two_way)
-    assert (res.f_df_num, res.f_df_denom) == (2, res.df_resid)
-    assert _f_p(res.f_statistic, 2, res.df_resid) == pytest.approx(
+    expected = FE_DF_RESID_TWO_WAY if two_way else FE_DF_RESID_ONE_WAY
+    assert res.df_resid == expected
+    assert (res.f_df_num, res.f_df_denom) == (2, expected)
+    assert _f_p(res.f_statistic, 2, expected) == pytest.approx(
         res.f_p_value, rel=1e-8
     )
 
 
 def test_fe_two_way_f_dfs_follow_cov_type(df):
     classical = _fe(df, cov_type="classical", two_way=True)
-    assert classical.f_df_denom == classical.df_resid
+    assert (classical.f_df_num, classical.f_df_denom) == (
+        2,
+        FE_DF_RESID_TWO_WAY,
+    )
+    assert _f_p(
+        classical.f_statistic, 2, FE_DF_RESID_TWO_WAY
+    ) == pytest.approx(classical.f_p_value, rel=1e-8)
 
     cluster = _fe(df, cov_type="cluster", two_way=True)
-    assert cluster.f_df_denom == N_ENTITIES - 1
+    assert (cluster.f_df_num, cluster.f_df_denom) == (2, N_ENTITIES - 1)
+    assert _f_p(cluster.f_statistic, 2, N_ENTITIES - 1) == pytest.approx(
+        cluster.f_p_value, rel=1e-8
+    )
 
     dk = _fe(df, cov_type="dk", two_way=True)
     assert (dk.f_df_num, dk.f_df_denom) == (2, N_PERIODS - 1)
@@ -201,10 +225,45 @@ def test_fe_two_way_f_dfs_follow_cov_type(df):
 
 
 @pytest.mark.parametrize("two_way", [False, True])
-def test_fe_non_entity_cluster_f_denominator_is_g_minus_one(df, two_way):
-    res = _fe(df, cov_type="cluster", cluster="grp", two_way=two_way)
-    assert (res.f_df_num, res.f_df_denom) == (2, N_GROUPS - 1)
-    assert _f_p(res.f_statistic, 2, N_GROUPS - 1) == pytest.approx(
+@pytest.mark.parametrize(
+    ("cluster", "n_clusters"),
+    [
+        ("entity", N_ENTITIES),
+        ("grp", N_GROUPS),
+        ("coarse", N_COARSE),
+        ("time", N_PERIODS),
+    ],
+)
+def test_fe_cluster_f_denominator_is_g_minus_one(
+    df, cluster, n_clusters, two_way
+):
+    """F検定の分母自由度も、`cluster`列のクラスター数`G`で`G-1`になる。"""
+    res = _fe(df, cov_type="cluster", cluster=cluster, two_way=two_way)
+    assert (res.f_df_num, res.f_df_denom) == (2, n_clusters - 1)
+    assert _f_p(res.f_statistic, 2, n_clusters - 1) == pytest.approx(
+        res.f_p_value, rel=1e-8
+    )
+
+
+@pytest.mark.parametrize(
+    ("options", "n_periods"),
+    [
+        pytest.param({"dk_time": "time"}, N_PERIODS, id="1way-dk_time"),
+        pytest.param({"time": "time"}, N_PERIODS, id="2way-time"),
+        pytest.param(
+            {"dk_time": "time5"}, N_PERIODS_COARSE, id="1way-dk_time-coarse"
+        ),
+        pytest.param(
+            {"time": "time", "dk_time": "time5"},
+            N_PERIODS_COARSE,
+            id="2way-dk_time-overrides-time",
+        ),
+    ],
+)
+def test_fe_dk_f_denominator_is_t_minus_one(df, options, n_periods):
+    res = _fe(df, cov_type="dk", **options)
+    assert (res.f_df_num, res.f_df_denom) == (2, n_periods - 1)
+    assert _f_p(res.f_statistic, 2, n_periods - 1) == pytest.approx(
         res.f_p_value, rel=1e-8
     )
 
@@ -218,7 +277,10 @@ def test_fe_non_entity_cluster_f_denominator_is_g_minus_one(df, two_way):
         {"cov_type": "hc3"},
         {"cov_type": "cluster"},
         {"cov_type": "cluster", "cluster": "grp"},
+        {"cov_type": "cluster", "cluster": "coarse"},
+        {"cov_type": "cluster", "cluster": "time"},
         {"cov_type": "dk", "time": "time"},
+        {"cov_type": "dk", "time": "time5"},
     ],
 )
 def test_re_f_denominator_is_df_resid_for_every_cov_type(df, options):
@@ -227,8 +289,9 @@ def test_re_f_denominator_is_df_resid_for_every_cov_type(df, options):
     `T-1`に切り替わるので、この2つは`cluster`/`dk`で食い違う（不整合ではなく仕様）。
     """
     res = _re(df, **options)
-    assert (res.f_df_num, res.f_df_denom) == (2, res.df_resid)
-    assert _f_p(res.f_statistic, 2, res.df_resid) == pytest.approx(
+    assert res.df_resid == RE_DF_RESID
+    assert (res.f_df_num, res.f_df_denom) == (2, RE_DF_RESID)
+    assert _f_p(res.f_statistic, 2, RE_DF_RESID) == pytest.approx(
         res.f_p_value, rel=1e-8
     )
 
@@ -253,6 +316,70 @@ def test_re_stat_df_differs_from_f_df_denom_under_cluster_and_dk(df):
     )
     dk = _re(df, cov_type="dk", time="time")
     assert (dk.stat_df, dk.f_df_denom) == (N_PERIODS - 1, dk.df_resid)
+
+
+# --- 不均衡パネル・不均衡クラスター --------------------------------------------
+# 時点を欠かせ（時点0は全entityで欠測、entityごとに観測数が異なる）、クラスターの
+# サイズも偏らせる。期待値は実装を呼ばずデータから直接数える。2-way FEは均衡パネル
+# 前提のため、不均衡側は1-way FEとREのみ。
+
+
+@pytest.fixture(scope="module")
+def df_unbalanced(df) -> pl.DataFrame:
+    rng = np.random.default_rng(426)
+    sub = df.filter(
+        (pl.col("time") >= 1) & (pl.col("time") < 4 + (pl.col("entity") % 6))
+    )
+    grp = rng.choice(
+        6, size=sub.height, p=[0.03, 0.05, 0.07, 0.10, 0.25, 0.50]
+    )
+    assert len(set(grp.tolist())) == 6
+    entity = sub["entity"].to_numpy()
+    coarse = np.select(
+        [entity < 10, entity < 14, entity < 17, entity < 19], [0, 1, 2, 3], 4
+    )
+    return sub.with_columns(
+        pl.Series("grp_u", grp), pl.Series("coarse_u", coarse)
+    )
+
+
+@pytest.mark.parametrize("cov_type", ["classical", "hc1", "hc2", "hc3"])
+def test_unbalanced_fe_re_f_denominator_is_df_resid(df_unbalanced, cov_type):
+    n = df_unbalanced.height
+    n_entities = df_unbalanced["entity"].n_unique()
+    fe = _fe(df_unbalanced, cov_type=cov_type)
+    assert fe.f_df_denom == n - n_entities - 2
+    assert _f_p(fe.f_statistic, 2, fe.f_df_denom) == pytest.approx(
+        fe.f_p_value, rel=1e-8
+    )
+    re = _re(df_unbalanced, cov_type=cov_type)
+    assert re.f_df_denom == n - 3
+
+
+@pytest.mark.parametrize("cluster", ["entity", "grp_u", "coarse_u"])
+def test_unbalanced_fe_cluster_f_denominator_is_g_minus_one(
+    df_unbalanced, cluster
+):
+    g = df_unbalanced[cluster].n_unique()
+    fe = _fe(df_unbalanced, cov_type="cluster", cluster=cluster)
+    assert (fe.f_df_num, fe.f_df_denom) == (2, g - 1)
+    assert _f_p(fe.f_statistic, 2, g - 1) == pytest.approx(
+        fe.f_p_value, rel=1e-8
+    )
+    # REのFは`cov_type`に依存せず`df_resid`のまま
+    re = _re(df_unbalanced, cov_type="cluster", cluster=cluster)
+    assert re.f_df_denom == df_unbalanced.height - 3
+
+
+def test_unbalanced_dk_f_denominator_uses_observed_periods(df_unbalanced):
+    t = df_unbalanced["time"].n_unique()
+    fe = _fe(df_unbalanced, cov_type="dk", dk_time="time")
+    assert fe.f_df_denom == t - 1
+    assert _f_p(fe.f_statistic, 2, t - 1) == pytest.approx(
+        fe.f_p_value, rel=1e-8
+    )
+    re = _re(df_unbalanced, cov_type="dk", time="time")
+    assert re.f_df_denom == df_unbalanced.height - 3
 
 
 @pytest.mark.parametrize("model", [Logit, Probit])

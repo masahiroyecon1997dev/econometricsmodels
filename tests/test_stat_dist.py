@@ -32,6 +32,7 @@ N_PERIODS = 10
 N = N_ENTITIES * N_PERIODS
 N_GROUPS = 7
 N_COARSE = N_ENTITIES // 4
+N_PERIODS_COARSE = N_PERIODS // 2
 
 
 @pytest.fixture(scope="module")
@@ -64,6 +65,10 @@ def df() -> pl.DataFrame:
             # 異なる値になるようにして、自由度の取り違えを区別できる。
             "grp": np.arange(N) % N_GROUPS,
             "coarse": entity // 4,
+            # 時点を2つずつ束ねた列（T=5）。`time`（T=10）と別のTを持つので、
+            # dkの時点数`T-1`と`cluster="time"`の`G-1`（どちらも`time`だと9）を
+            # 区別できる。
+            "time5": time // 2,
         }
     )
 
@@ -72,6 +77,11 @@ def _check_t(res, df_expected: int) -> None:
     assert res.stat_dist == "t"
     assert res.stat_df == df_expected
     assert set(res.test_stats) == set(res.params)
+    # p値も`stat_df`のt分布から再計算できる（`stat_df`の値だけでなく、
+    # 実際にp値の計算へその自由度が使われていることまで固定する）。
+    for name, t in res.test_stats.items():
+        p = 2.0 * sps.t.sf(abs(t), res.stat_df)
+        assert p == pytest.approx(res.p_values[name], rel=1e-8)
 
 
 def _check_normal(res) -> None:
@@ -266,53 +276,157 @@ class TestNonEntityCluster:
         _check_t(res, n_clusters - 1)
 
 
-def test_fe_two_way_dk_uses_t_minus_one_df(df):
-    res = _fe(df, cov_type="dk", two_way=True)
-    _check_t(res, N_PERIODS - 1)
-
-
 @pytest.mark.parametrize(
-    "make",
+    ("options", "n_periods"),
     [
+        pytest.param({"dk_time": "time"}, N_PERIODS, id="1way-dk_time"),
+        pytest.param({"time": "time"}, N_PERIODS, id="2way-time"),
         pytest.param(
-            lambda d: _fe(d, cov_type="cluster", cluster="grp"), id="fe"
+            {"dk_time": "time5"}, N_PERIODS_COARSE, id="1way-dk_time-coarse"
         ),
         pytest.param(
-            lambda d: _re(d, cov_type="cluster", cluster="grp"), id="re"
+            {"time": "time", "dk_time": "time5"},
+            N_PERIODS_COARSE,
+            id="2way-dk_time-overrides-time",
         ),
     ],
 )
-def test_non_entity_cluster_p_values_follow_stat_df(df, make):
-    """p値が`stat_df = G-1`のt分布から再計算できること（`df_resid`や
-    entity数ベースの自由度では一致しない）。"""
-    res = make(df)
-    assert res.stat_df == N_GROUPS - 1
-    for name, t in res.test_stats.items():
-        p = 2.0 * sps.t.sf(abs(t), res.stat_df)
-        assert p == pytest.approx(res.p_values[name], rel=1e-8)
+def test_fe_dk_uses_t_minus_one_of_the_dk_time_column(df, options, n_periods):
+    """dkの`T`は`dk_time`（無ければ`time`）列のユニーク数。2-wayで`dk_time`を
+    併せて指定した場合は`dk_time`が優先される。"""
+    res = _fe(df, cov_type="dk", **options)
+    _check_t(res, n_periods - 1)
+
+
+@pytest.mark.parametrize(
+    ("time", "n_periods"),
+    [("time", N_PERIODS), ("time5", N_PERIODS_COARSE)],
+)
+def test_re_dk_uses_t_minus_one_of_the_time_column(df, time, n_periods):
+    res = _re(df, cov_type="dk", time=time)
+    _check_t(res, n_periods - 1)
 
 
 @pytest.mark.parametrize("confidence_level", [0.90, 0.99])
 @pytest.mark.parametrize(
-    ("kind", "options"),
+    ("kind", "options", "expected_df"),
     [
-        ("fe", {"cov_type": "cluster"}),
-        ("fe", {"cov_type": "cluster", "cluster": "grp"}),
-        ("fe", {"cov_type": "dk", "dk_time": "time"}),
-        ("re", {"cov_type": "cluster"}),
-        ("re", {"cov_type": "cluster", "cluster": "grp"}),
-        ("re", {"cov_type": "dk", "time": "time"}),
+        ("fe", {"cov_type": "classical"}, FE_DF_RESID_ONE_WAY),
+        ("fe", {"cov_type": "hc3"}, FE_DF_RESID_ONE_WAY),
+        (
+            "fe",
+            {"cov_type": "classical", "two_way": True},
+            FE_DF_RESID_TWO_WAY,
+        ),
+        ("fe", {"cov_type": "hc2", "two_way": True}, FE_DF_RESID_TWO_WAY),
+        ("fe", {"cov_type": "cluster"}, N_ENTITIES - 1),
+        ("fe", {"cov_type": "cluster", "cluster": "grp"}, N_GROUPS - 1),
+        ("fe", {"cov_type": "cluster", "cluster": "coarse"}, N_COARSE - 1),
+        ("fe", {"cov_type": "cluster", "cluster": "time"}, N_PERIODS - 1),
+        (
+            "fe",
+            {"cov_type": "cluster", "cluster": "grp", "two_way": True},
+            N_GROUPS - 1,
+        ),
+        (
+            "fe",
+            {"cov_type": "dk", "dk_time": "time5"},
+            N_PERIODS_COARSE - 1,
+        ),
+        ("fe", {"cov_type": "dk", "two_way": True}, N_PERIODS - 1),
+        ("re", {"cov_type": "classical"}, RE_DF_RESID),
+        ("re", {"cov_type": "hc1"}, RE_DF_RESID),
+        ("re", {"cov_type": "cluster"}, N_ENTITIES - 1),
+        ("re", {"cov_type": "cluster", "cluster": "grp"}, N_GROUPS - 1),
+        ("re", {"cov_type": "cluster", "cluster": "coarse"}, N_COARSE - 1),
+        ("re", {"cov_type": "cluster", "cluster": "time"}, N_PERIODS - 1),
+        ("re", {"cov_type": "dk", "time": "time5"}, N_PERIODS_COARSE - 1),
     ],
 )
 def test_confidence_interval_uses_stat_df_critical_value(
-    df, kind, options, confidence_level
+    df, kind, options, expected_df, confidence_level
 ):
     """信頼区間の臨界値が`stat_df`のt分布の両側`confidence_level`点であること
-    （既定の0.95以外でも`G-1`/`T-1`が使われる）。"""
+    （既定の0.95以外でも`df_resid`/`G-1`/`T-1`が使われる）。`stat_df`自体の値も
+    期待値と照合する。"""
     make = _fe if kind == "fe" else _re
     res = make(df, confidence_level=confidence_level, **options)
+    assert res.stat_df == expected_df
     crit = sps.t.ppf(0.5 + confidence_level / 2.0, res.stat_df)
     for row in res.coef_table():
         half = crit * row["std_err"]
         assert row["conf_lower"] == pytest.approx(row["coef"] - half, rel=1e-8)
         assert row["conf_upper"] == pytest.approx(row["coef"] + half, rel=1e-8)
+
+
+# --- 不均衡パネル・不均衡クラスター --------------------------------------------
+#
+# 完全バランスのパネルでは`n_entities`・`T`・`n/G`が揃うため、取り違えても
+# 気づきにくい。ここでは時点を欠かせ（entityごとに観測数が異なり、時点0は
+# 全entityで欠測）、クラスターもサイズを偏らせる。期待値は実装を呼ばず
+# データから直接数える。2-way FEは均衡パネルが前提（不均衡は`ValidationError`）
+# なので、不均衡側は1-way FEとREのみ。
+
+
+@pytest.fixture(scope="module")
+def df_unbalanced(df) -> pl.DataFrame:
+    rng = np.random.default_rng(424)
+    keep = (pl.col("time") >= 1) & (
+        pl.col("time") < 4 + (pl.col("entity") % 6)
+    )
+    sub = df.filter(keep)
+    n = sub.height
+    # 非入れ子で偏ったクラスター（6群、サイズは概ね3%〜50%）
+    grp = rng.choice(6, size=n, p=[0.03, 0.05, 0.07, 0.10, 0.25, 0.50])
+    assert len(set(grp.tolist())) == 6
+    entity = sub["entity"].to_numpy()
+    # entityを束ねる入れ子で偏ったクラスター（サイズ10/4/3/2/1 entity）
+    coarse = np.select(
+        [entity < 10, entity < 14, entity < 17, entity < 19], [0, 1, 2, 3], 4
+    )
+    return sub.with_columns(
+        pl.Series("grp_u", grp), pl.Series("coarse_u", coarse)
+    )
+
+
+def _unbalanced_counts(data: pl.DataFrame) -> dict[str, int]:
+    return {
+        "n": data.height,
+        "entities": data["entity"].n_unique(),
+        "periods": data["time"].n_unique(),
+    }
+
+
+def test_unbalanced_fixture_is_actually_unbalanced(df_unbalanced):
+    c = _unbalanced_counts(df_unbalanced)
+    sizes = df_unbalanced.group_by("entity").len()["len"]
+    assert sizes.n_unique() > 1
+    assert c["periods"] == 8  # 時点0は全entityで欠測
+    assert c["n"] < N
+    assert c["periods"] not in (N_PERIODS, c["entities"])
+
+
+@pytest.mark.parametrize("cov_type", ["classical", "hc1", "hc2", "hc3"])
+def test_unbalanced_non_cluster_cov_types_use_residual_df(
+    df_unbalanced, cov_type
+):
+    c = _unbalanced_counts(df_unbalanced)
+    fe = _fe(df_unbalanced, cov_type=cov_type)
+    _check_t(fe, c["n"] - c["entities"] - 2)
+    re = _re(df_unbalanced, cov_type=cov_type)
+    _check_t(re, c["n"] - 3)
+
+
+@pytest.mark.parametrize("cluster", ["entity", "grp_u", "coarse_u"])
+def test_unbalanced_cluster_uses_g_minus_one_df(df_unbalanced, cluster):
+    g = df_unbalanced[cluster].n_unique()
+    _check_t(_fe(df_unbalanced, cov_type="cluster", cluster=cluster), g - 1)
+    _check_t(_re(df_unbalanced, cov_type="cluster", cluster=cluster), g - 1)
+
+
+def test_unbalanced_dk_uses_observed_number_of_periods(df_unbalanced):
+    """欠測時点があるパネルでは、dkの`T`は期間の幅ではなく実際に観測された
+    ユニークな時点数。"""
+    t = df_unbalanced["time"].n_unique()
+    _check_t(_fe(df_unbalanced, cov_type="dk", dk_time="time"), t - 1)
+    _check_t(_re(df_unbalanced, cov_type="dk", time="time"), t - 1)

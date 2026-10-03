@@ -2,7 +2,7 @@
 
 # Performance results
 
-Measured at release **v0.8.0** (commit `ffb29d8`) by the *Benchmark (performance)* workflow on GitHub Actions (`ubuntu-latest`, shared runner; [run 37091347255](https://github.com/masahiroyecon1997dev/econometricsmodels/actions/runs/37091347255)). Each point is the median of 3 runs after one warm-up run, with the linear-algebra backends pinned to one thread and the extension built in release mode. See [Performance](performance.md) for how to read these numbers.
+Measured at release **v0.8.0** (commit `5a42c7d`) by the *Benchmark (performance)* workflow on GitHub Actions (`ubuntu-latest`, shared runner; [run 37156409506](https://github.com/masahiroyecon1997dev/econometricsmodels/actions/runs/37156409506)). Each point is the median of 3 runs after one warm-up run, with the linear-algebra backends pinned to one thread and the extension built in release mode. See [Performance](performance.md) for how to read these numbers.
 
 ## OLS
 
@@ -16,19 +16,19 @@ Time in seconds (median) / peak RSS in MB.
 
 | n | econometricsmodels | statsmodels |
 |---|---|---|
-| 1,000 | 0.0001s / 80.6MB | 0.0062s / 245.5MB |
-| 10,000 | 0.0009s / 81.8MB | 0.0082s / 225.7MB |
-| 100,000 | 0.0061s / 100.5MB | 0.0219s / 258.7MB |
-| 1,000,000 | 0.0586s / 299.7MB | 0.1669s / 544.5MB |
+| 1,000 | 0.0001s / 80.2MB | 0.0094s / 242.9MB |
+| 10,000 | 0.0010s / 81.8MB | 0.0118s / 223.7MB |
+| 100,000 | 0.0107s / 100.2MB | 0.0295s / 256.3MB |
+| 1,000,000 | 0.0817s / 299.2MB | 0.2246s / 542.4MB |
 
 #### hac
 
 | n | econometricsmodels | statsmodels |
 |---|---|---|
-| 1,000 | 0.0001s / 80.1MB | 0.0066s / 233.5MB |
-| 10,000 | 0.0015s / 82.5MB | 0.0094s / 226.8MB |
-| 100,000 | 0.0163s / 105.2MB | 0.0447s / 263.3MB |
-| 1,000,000 | 0.1645s / 345.5MB | 0.7258s / 630.2MB |
+| 1,000 | 0.0001s / 79.5MB | 0.0100s / 230.3MB |
+| 10,000 | 0.0016s / 82.1MB | 0.0147s / 224.4MB |
+| 100,000 | 0.0204s / 106.7MB | 0.0602s / 261.1MB |
+| 1,000,000 | 0.2269s / 345.3MB | 0.9443s / 627.7MB |
 
 ### k-axis (n=10,000)
 
@@ -38,15 +38,15 @@ Time in seconds (median).
 
 | k | econometricsmodels | statsmodels |
 |---|---|---|
-| 5 | 0.0009s | 0.0081s |
-| 20 | 0.0031s | 0.0249s |
+| 5 | 0.0010s | 0.0118s |
+| 20 | 0.0034s | 0.0368s |
 
 #### hac
 
 | k | econometricsmodels | statsmodels |
 |---|---|---|
-| 5 | 0.0012s | 0.0094s |
-| 20 | 0.0060s | 0.0323s |
+| 5 | 0.0016s | 0.0145s |
+| 20 | 0.0087s | 0.0443s |
 
 ## WLS
 
@@ -60,19 +60,19 @@ Time in seconds (median) / peak RSS in MB.
 
 | n | econometricsmodels | statsmodels |
 |---|---|---|
-| 1,000 | 0.0001s / 80.4MB | 0.0046s / 245.7MB |
-| 10,000 | 0.0009s / 82.1MB | 0.0062s / 226.2MB |
-| 100,000 | 0.0086s / 102.3MB | 0.0166s / 258.8MB |
-| 1,000,000 | 0.0639s / 315.1MB | 0.1466s / 590.1MB |
+| 1,000 | 0.0001s / 80.2MB | 0.0097s / 243.1MB |
+| 10,000 | 0.0011s / 82.1MB | 0.0122s / 224.0MB |
+| 100,000 | 0.0137s / 103.8MB | 0.0296s / 256.3MB |
+| 1,000,000 | 0.1029s / 314.6MB | 0.2338s / 587.9MB |
 
 #### hac
 
 | n | econometricsmodels | statsmodels |
 |---|---|---|
-| 1,000 | 0.0001s / 80.0MB | 0.0048s / 232.7MB |
-| 10,000 | 0.0009s / 82.7MB | 0.0071s / 227.1MB |
-| 100,000 | 0.0130s / 108.7MB | 0.0342s / 268.1MB |
-| 1,000,000 | 0.1567s / 360.7MB | 0.6351s / 645.5MB |
+| 1,000 | 0.0002s / 79.6MB | 0.0100s / 230.5MB |
+| 10,000 | 0.0018s / 82.4MB | 0.0141s / 224.7MB |
+| 100,000 | 0.0242s / 106.4MB | 0.0598s / 265.6MB |
+| 1,000,000 | 0.2505s / 360.4MB | 0.9591s / 643.1MB |
 
 ### k-axis (n=10,000)
 
@@ -82,15 +82,15 @@ Time in seconds (median).
 
 | k | econometricsmodels | statsmodels |
 |---|---|---|
-| 5 | 0.0009s | 0.0061s |
-| 20 | 0.0025s | 0.0164s |
+| 5 | 0.0011s | 0.0120s |
+| 20 | 0.0040s | 0.0349s |
 
 #### hac
 
 | k | econometricsmodels | statsmodels |
 |---|---|---|
-| 5 | 0.0010s | 0.0073s |
-| 20 | 0.0051s | 0.0228s |
+| 5 | 0.0018s | 0.0142s |
+| 20 | 0.0082s | 0.0445s |
 
 ## Logit
 
@@ -104,19 +104,19 @@ Time in seconds (median) / peak RSS in MB.
 
 | n | econometricsmodels | statsmodels |
 |---|---|---|
-| 1,000 | 0.0007s / 149.8MB | 0.0140s / 255.0MB |
-| 10,000 | 0.0072s / 151.6MB | 0.0258s / 240.1MB |
-| 100,000 | 0.0733s / 175.3MB | 0.1339s / 266.0MB |
-| 1,000,000 | 0.7391s / 413.7MB | 1.3950s / 511.5MB |
+| 1,000 | 0.0005s / 150.4MB | 0.0088s / 258.7MB |
+| 10,000 | 0.0056s / 152.1MB | 0.0135s / 242.7MB |
+| 100,000 | 0.0616s / 175.0MB | 0.0572s / 271.0MB |
+| 1,000,000 | 0.5874s / 370.1MB | 0.5986s / 527.4MB |
 
 #### cluster
 
 | n | econometricsmodels | statsmodels |
 |---|---|---|
-| 1,000 | 0.0010s / 150.5MB | 0.0141s / 245.0MB |
-| 10,000 | 0.0103s / 154.0MB | 0.0267s / 240.5MB |
-| 100,000 | 0.1010s / 187.5MB | 0.1359s / 267.9MB |
-| 1,000,000 | 1.0160s / 454.5MB | 1.4890s / 511.0MB |
+| 1,000 | 0.0008s / 151.2MB | 0.0089s / 251.3MB |
+| 10,000 | 0.0080s / 154.5MB | 0.0151s / 243.1MB |
+| 100,000 | 0.0807s / 188.1MB | 0.0630s / 271.4MB |
+| 1,000,000 | 0.8068s / 462.8MB | 0.6613s / 521.7MB |
 
 ### k-axis (n=10,000)
 
@@ -126,15 +126,15 @@ Time in seconds (median).
 
 | k | econometricsmodels | statsmodels |
 |---|---|---|
-| 5 | 0.0079s | 0.0257s |
-| 20 | 0.0340s | 0.0543s |
+| 5 | 0.0062s | 0.0139s |
+| 20 | 0.0242s | 0.0336s |
 
 #### cluster
 
 | k | econometricsmodels | statsmodels |
 |---|---|---|
-| 5 | 0.0102s | 0.0270s |
-| 20 | 0.0421s | 0.0553s |
+| 5 | 0.0081s | 0.0144s |
+| 20 | 0.0306s | 0.0344s |
 
 ### Variants (cov_type=classical, k=5, n=1,000,000)
 
@@ -142,8 +142,8 @@ Time in seconds (median). The default variant (`newton`) is the matching row of 
 
 | variant | econometricsmodels | statsmodels |
 |---|---|---|
-| bfgs | 0.7225s | 1.4855s |
-| lbfgs | 0.7741s | 1.3982s |
+| bfgs | 0.5708s | 0.6289s |
+| lbfgs | 0.6113s | 0.5762s |
 
 ## Probit
 
@@ -157,19 +157,19 @@ Time in seconds (median) / peak RSS in MB. Rows for n=200,000, 1,000,000 are mea
 
 | n | econometricsmodels | statsmodels |
 |---|---|---|
-| 1,000 | 0.0011s / 150.5MB | 0.0096s / 258.5MB |
-| 10,000 | 0.0118s / 152.0MB | 0.0192s / 242.3MB |
-| 100,000 | 0.1146s / 172.8MB | 0.1379s / 271.2MB |
-| 200,000 | 0.2321s / 199.9MB | - |
-| 1,000,000 | 1.1449s / 402.1MB | - |
+| 1,000 | 0.0014s / 150.2MB | 0.0149s / 247.4MB |
+| 10,000 | 0.0144s / 151.8MB | 0.0309s / 240.8MB |
+| 100,000 | 0.1401s / 174.5MB | 0.1901s / 266.2MB |
+| 200,000 | 0.2836s / 199.5MB | - |
+| 1,000,000 | 1.3905s / 409.2MB | - |
 
 #### cluster
 
 | n | econometricsmodels | statsmodels |
 |---|---|---|
-| 1,000 | 0.0014s / 151.2MB | 0.0097s / 248.7MB |
-| 10,000 | 0.0148s / 154.6MB | 0.0195s / 243.1MB |
-| 100,000 | 0.1499s / 186.2MB | 0.1451s / 271.3MB |
+| 1,000 | 0.0018s / 150.8MB | 0.0148s / 245.5MB |
+| 10,000 | 0.0184s / 154.2MB | 0.0317s / 240.4MB |
+| 100,000 | 0.1820s / 187.8MB | 0.2028s / 268.0MB |
 
 ### k-axis (n=10,000)
 
@@ -179,15 +179,15 @@ Time in seconds (median).
 
 | k | econometricsmodels | statsmodels |
 |---|---|---|
-| 5 | 0.0117s | 0.0193s |
-| 20 | 0.0339s | 0.0399s |
+| 5 | 0.0144s | 0.0304s |
+| 20 | 0.0395s | 0.0595s |
 
 #### cluster
 
 | k | econometricsmodels | statsmodels |
 |---|---|---|
-| 5 | 0.0150s | 0.0193s |
-| 20 | 0.0449s | 0.0412s |
+| 5 | 0.0186s | 0.0320s |
+| 20 | 0.0536s | 0.0618s |
 
 ### Variants (cov_type=classical, k=5, n=100,000)
 
@@ -195,8 +195,8 @@ Time in seconds (median). The default variant (`newton`) is the matching row of 
 
 | variant | econometricsmodels | statsmodels |
 |---|---|---|
-| bfgs | 0.1657s | 0.1389s |
-| lbfgs | 0.1347s | 0.1291s |
+| bfgs | 0.2130s | 0.1986s |
+| lbfgs | 0.1715s | 0.1841s |
 
 ## Tobit
 
@@ -210,19 +210,19 @@ Time in seconds (median) / peak RSS in MB. Rows for n=200,000, 1,000,000 are mea
 
 | n | econometricsmodels |
 |---|---|
-| 1,000 | 0.0020s / 150.7MB |
-| 10,000 | 0.0183s / 152.6MB |
-| 100,000 | 0.2168s / 172.7MB |
-| 200,000 | 0.4241s / 201.5MB |
-| 1,000,000 | 2.1595s / 390.9MB |
+| 1,000 | 0.0020s / 150.6MB |
+| 10,000 | 0.0189s / 152.2MB |
+| 100,000 | 0.2137s / 176.4MB |
+| 200,000 | 0.4305s / 196.8MB |
+| 1,000,000 | 2.1524s / 400.4MB |
 
 #### cluster
 
 | n | econometricsmodels |
 |---|---|
-| 1,000 | 0.0024s / 151.2MB |
-| 10,000 | 0.0230s / 154.5MB |
-| 100,000 | 0.2529s / 188.7MB |
+| 1,000 | 0.0024s / 151.3MB |
+| 10,000 | 0.0232s / 154.8MB |
+| 100,000 | 0.2547s / 184.5MB |
 
 ### k-axis (n=10,000)
 
@@ -232,15 +232,15 @@ Time in seconds (median).
 
 | k | econometricsmodels |
 |---|---|
-| 5 | 0.0184s |
-| 20 | 0.0712s |
+| 5 | 0.0193s |
+| 20 | 0.0715s |
 
 #### cluster
 
 | k | econometricsmodels |
 |---|---|
-| 5 | 0.0234s |
-| 20 | 0.0833s |
+| 5 | 0.0235s |
+| 20 | 0.0841s |
 
 ### Variants (cov_type=classical, k=5, n=100,000)
 
@@ -248,7 +248,7 @@ Time in seconds (median). The default variant (`newton`) is the matching row of 
 
 | variant | econometricsmodels |
 |---|---|
-| lbfgs | 0.1914s |
+| lbfgs | 0.1937s |
 
 ## IV
 
@@ -262,19 +262,19 @@ Time in seconds (median) / peak RSS in MB.
 
 | n | econometricsmodels | linearmodels |
 |---|---|---|
-| 1,000 | 0.0006s / 218.9MB | 0.0522s / 223.3MB |
-| 10,000 | 0.0057s / 227.0MB | 0.1750s / 255.6MB |
-| 100,000 | 0.0534s / 304.7MB | 1.4362s / 594.1MB |
-| 1,000,000 | 0.5216s / 1093.9MB | 14.6751s / 3952.5MB |
+| 1,000 | 0.0005s / 219.0MB | 0.0562s / 223.5MB |
+| 10,000 | 0.0059s / 226.9MB | 0.1782s / 255.4MB |
+| 100,000 | 0.0514s / 305.2MB | 1.4354s / 594.2MB |
+| 1,000,000 | 0.4983s / 1101.6MB | 14.7670s / 3952.8MB |
 
 #### hac
 
 | n | econometricsmodels | linearmodels |
 |---|---|---|
-| 1,000 | 0.0007s / 218.9MB | 0.0521s / 223.0MB |
-| 10,000 | 0.0086s / 227.4MB | 0.1758s / 254.8MB |
-| 100,000 | 0.0915s / 311.8MB | 1.4266s / 594.6MB |
-| 1,000,000 | 1.1675s / 1154.8MB | 15.3787s / 3952.9MB |
+| 1,000 | 0.0007s / 219.0MB | 0.0519s / 223.1MB |
+| 10,000 | 0.0086s / 227.5MB | 0.1801s / 255.1MB |
+| 100,000 | 0.0901s / 310.8MB | 1.4738s / 594.6MB |
+| 1,000,000 | 1.1949s / 1162.2MB | 15.4124s / 3952.4MB |
 
 ### k-axis (n=10,000)
 
@@ -284,15 +284,15 @@ Time in seconds (median).
 
 | k | econometricsmodels | linearmodels |
 |---|---|---|
-| 5 | 0.0058s | 0.1762s |
-| 20 | 0.0215s | 0.3156s |
+| 5 | 0.0060s | 0.1800s |
+| 20 | 0.0229s | 0.3210s |
 
 #### hac
 
 | k | econometricsmodels | linearmodels |
 |---|---|---|
-| 5 | 0.0087s | 0.1788s |
-| 20 | 0.0367s | 0.3296s |
+| 5 | 0.0090s | 0.1838s |
+| 20 | 0.0364s | 0.3299s |
 
 ### Variants (cov_type=classical, k=5, n=1,000,000)
 
@@ -300,7 +300,7 @@ Time in seconds (median). The default variant (`2sls`) is the matching row of th
 
 | variant | econometricsmodels | linearmodels |
 |---|---|---|
-| gmm | 0.2636s | 11.1756s |
+| gmm | 0.2524s | 11.1790s |
 
 ## FE
 
@@ -314,19 +314,19 @@ Time in seconds (median) / peak RSS in MB.
 
 | n | econometricsmodels | linearmodels |
 |---|---|---|
-| 1,000 | 0.0009s / 217.9MB | 0.0336s / 229.5MB |
-| 10,000 | 0.0095s / 220.7MB | 0.0630s / 240.4MB |
-| 100,000 | 0.1129s / 255.0MB | 0.3839s / 318.5MB |
-| 1,000,000 | 1.6362s / 572.7MB | 3.5529s / 945.9MB |
+| 1,000 | 0.0004s / 218.4MB | 0.0326s / 230.3MB |
+| 10,000 | 0.0032s / 221.5MB | 0.0608s / 240.8MB |
+| 100,000 | 0.0369s / 262.4MB | 0.3702s / 319.0MB |
+| 1,000,000 | 0.3965s / 599.0MB | 3.7882s / 943.2MB |
 
 #### dk
 
 | n | econometricsmodels | linearmodels |
 |---|---|---|
-| 1,000 | 0.0010s / 217.6MB | 0.0347s / 228.4MB |
-| 10,000 | 0.0105s / 221.4MB | 0.0610s / 240.6MB |
-| 100,000 | 0.1259s / 264.1MB | 0.3762s / 319.2MB |
-| 1,000,000 | 1.6675s / 634.8MB | 3.5605s / 948.0MB |
+| 1,000 | 0.0005s / 218.1MB | 0.0346s / 228.7MB |
+| 10,000 | 0.0041s / 221.9MB | 0.0610s / 240.9MB |
+| 100,000 | 0.0452s / 268.1MB | 0.3775s / 317.5MB |
+| 1,000,000 | 0.4874s / 660.7MB | 3.7707s / 943.6MB |
 
 ### k-axis (n=10,000)
 
@@ -336,8 +336,8 @@ Time in seconds (median).
 
 | k | econometricsmodels | linearmodels |
 |---|---|---|
-| 5 | 0.0101s | 0.0626s |
-| 20 | 0.0258s | 0.1032s |
+| 5 | 0.0034s | 0.0603s |
+| 20 | 0.0097s | 0.0996s |
 
 ### Variants (cov_type=classical, k=5, n=1,000,000)
 
@@ -345,7 +345,7 @@ Time in seconds (median). The default variant (`one_way`) is the matching row of
 
 | variant | econometricsmodels | linearmodels |
 |---|---|---|
-| two_way | 2.1858s | 4.7855s |
+| two_way | 0.5328s | 5.1417s |
 
 ## RE
 
@@ -359,19 +359,19 @@ Time in seconds (median) / peak RSS in MB.
 
 | n | econometricsmodels | linearmodels |
 |---|---|---|
-| 1,000 | 0.0030s / 218.1MB | 0.0405s / 229.5MB |
-| 10,000 | 0.0332s / 224.5MB | 0.0838s / 242.3MB |
-| 100,000 | 0.3939s / 299.5MB | 0.5397s / 343.6MB |
-| 1,000,000 | 6.3024s / 1012.6MB | 5.2547s / 1258.4MB |
+| 1,000 | 0.0006s / 218.8MB | 0.0434s / 229.6MB |
+| 10,000 | 0.0054s / 224.8MB | 0.0853s / 242.1MB |
+| 100,000 | 0.0597s / 299.9MB | 0.5243s / 347.1MB |
+| 1,000,000 | 0.5447s / 1023.1MB | 5.1234s / 1258.1MB |
 
 #### dk
 
 | n | econometricsmodels | linearmodels |
 |---|---|---|
-| 1,000 | 0.0033s / 218.2MB | 0.0415s / 228.2MB |
-| 10,000 | 0.0340s / 225.1MB | 0.0845s / 242.3MB |
-| 100,000 | 0.4123s / 305.8MB | 0.5165s / 345.0MB |
-| 1,000,000 | 6.2983s / 1060.9MB | 5.2321s / 1257.4MB |
+| 1,000 | 0.0008s / 218.8MB | 0.0438s / 228.5MB |
+| 10,000 | 0.0069s / 225.6MB | 0.0846s / 242.5MB |
+| 100,000 | 0.0710s / 306.3MB | 0.5053s / 345.6MB |
+| 1,000,000 | 0.6762s / 1087.1MB | 5.1571s / 1257.2MB |
 
 ### k-axis (n=10,000)
 
@@ -381,15 +381,5 @@ Time in seconds (median).
 
 | k | econometricsmodels | linearmodels |
 |---|---|---|
-| 5 | 0.0326s | 0.0829s |
-| 20 | 0.0906s | 0.1144s |
-
-#### dk
-
-| k | econometricsmodels | linearmodels |
-|---|---|---|
-| 5 | 0.0339s | 0.0826s |
-
-!!! warning
-
-    k=20 with cov_type=dk (n=10,000) failed with ComputationError (Hausman auxiliary regression: near-singular covariance submatrix), so that point is missing.
+| 5 | 0.0054s | 0.0864s |
+| 20 | 0.0166s | 0.1168s |

@@ -469,6 +469,32 @@ def test_cluster_count_at_most_slopes_raises_validation_error():
         RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
 
+def test_dk_periods_at_most_hausman_slopes_raises_validation_error():
+    """時点数t(=2)がハウスマン検定の対象数q(=k=2)以下は`ValidationError`
+    （`PanelError::InsufficientDkPeriodsForInference`）。DK共分散のrankは
+    `t-1`以下のため検定の部分行列が構造的に特異になる。RE本体は共分散を
+    反転しないが、`fit()`は常にハウスマン検定を計算するため入力から弾く。
+    データは`test_cluster_count_at_most_slopes_raises_validation_error`と同じ。
+    """
+    df = pl.DataFrame(
+        {
+            "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 9.0],
+            "x1": [1.0, 3.0, 2.0, 6.0, 4.0, 10.0, 5.0, 8.0],
+            "x2": [2.0, 5.0, 1.0, 9.0, 3.0, 7.0, 6.0, 4.0],
+            "entity": ["a", "a", "b", "b", "c", "c", "d", "d"],
+            "time": ["1", "2", "1", "2", "1", "2", "1", "2"],
+        }
+    )
+    options = REOptions(cov_type="dk", time="time", dk_bandwidth=0)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE, t_periods=2, q=2
+        ),
+    ):
+        RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+
+
 # ── ComputationError ──────────────────────────────────────────────
 
 

@@ -96,7 +96,11 @@ class FE:
                 unsupported for FE), an unbalanced panel with two-way
                 effects, a singleton entity/time group, or an
                 explanatory variable with zero variance after the
-                within transformation). A subclass of `ValueError`.
+                within transformation, or `cov_type="dk"` with no more
+                unique time periods than regressors: the
+                Driscoll-Kraay covariance has rank at most T-1, so the
+                slope F-test cannot be computed). A subclass of
+                `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. a singular within-transformed design
                 matrix). A subclass of `RuntimeError`.

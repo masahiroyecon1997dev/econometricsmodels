@@ -18,7 +18,7 @@
 - **`time`**: `REOptions.time`は`cov_type="dk"`のHAC時系列順序専用（ハウスマン検定は常に1-way比較で影響を受けない）。本スクリプトは`cov_type="dk"`のときのみ`time`を渡す。
 - **2-way軸なし**: REはv1で2-wayをスコープ外にしているため（`extra_methods=()`）、FEと異なりmethod軸は無い。
 - **計測範囲の対称性**: engine（`ReEstimator::fit`）は係数・標準誤差と同じ`.fit()`の中でパネル固有R²・F統計量まで常に一括計算する。linearmodelsの`PanelResults`は遅延評価プロパティのため、`.fit()`直後に`params`/`std_errors`/`tstats`/`pvalues`/`rsquared_within`/`rsquared_between`/`rsquared_overall`/`f_statistic.stat`へ明示アクセスして確定させる（`f_statistic`はcov_type非依存のhomoskedastic固定——FEの`f_statistic_robust`とは異なり、engineの`ReEstimator`のF統計量自体がcov_typeに連動しない独自定義のため）。`aic`/`bic`はlinearmodelsが提供しないため対称性を取る対象に含めない。
-- **スイープ軸**: n軸（k=5固定、n=1,000〜1,000,000）、k軸（n=10,000固定、k=5・20、classical/hac両方）。
+- **スイープ軸**: n軸（k=5固定、n=1,000〜1,000,000）、k軸（n=10,000固定、k=5・20、classicalのみ。理由は「既知の限界」参照）。
 
 ## 考察（結果表の外に残す、機構・経緯の記録）
 
@@ -28,7 +28,7 @@
 
 ## 既知の限界
 
-- **k=20・dkはengineで`ComputationError`になる（未解決）**: ハウスマン検定を補助回帰版にした変更（FE/REの`cov_type="hac"`を`dk`へ改名した後）以降、n_periods=6に対しk=20では補助回帰（傾き`2k`本）のDriscoll-Kraay共分散部分行列がほぼ特異になり、`fit()`が「Hausman test auxiliary regression failed」で失敗する。`compare_re.py`のk軸は`cov_types`（classical・dk）を両方回すため、このk=20・dkの点でjobが失敗する（FEのk軸はclassicalのみで回避済み）。公開ページには、この点を欠損として明記して載せている。
+- **k軸はclassicalのみ（`k_sweep_cov_types=("classical",)`、FEと同じ）**: `fit()`が常に計算するハウスマン検定は`X̃`の`k`個を同時Wald検定するが、Driscoll-Kraay共分散のrankは`T-1`以下（時点ごとのスコアの和が正規方程式でゼロになるため）。n_periods=6に対しk=20では検定の部分行列が構造的に特異になるため、engineは`fit()`冒頭で`ValidationError`（`PanelError::InsufficientDkPeriodsForInference`）を返す。以前はこれが補助回帰の数値的な特異性判定で`ComputationError`になり、k軸でdkも回していた`compare_re.py`のjobが失敗していた。
 - **n=1,000,000での run-to-run 分散が大きい**: 2回のフルスイープでlinearmodelsのclassical/hacの大小関係が変わらないことは確認したが、絶対値は±20%程度変動した（classical 8.25s/10.21s）。計測は開発コンテナ上の少数回のスイープ（`repeats=3`の中央値）であり、大標本での環境ノイズ（メモリ確保・GC等）を排除しきれていない。
 - その他は`ols.md`「既知の限界」と共通。
 

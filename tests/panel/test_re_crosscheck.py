@@ -42,15 +42,16 @@ import json
 from functools import partial
 from pathlib import Path
 
+import _error_messages as msgs
 import polars as pl
 import pytest
 from _assertions import assert_close, assert_dict_close
 from _constants import DATA_DIR
+from _error_messages import escaped
 from _helpers import load_wooldridge_dataset
 from _tolerances import TOLERANCES
 from econometricsmodels import (
     RE,
-    ComputationError,
     REOptions,
     ValidationError,
 )
@@ -209,11 +210,9 @@ def test_synthetic_hausman_matches_plm(crosscheck, scenario, cov_type):
     if ref is None:
         # ロバスト共分散が構造的に特異でplmに参照値が無いケース
         # （`generate_re_crosscheck_fixtures.py`の`_STRUCTURALLY_SINGULAR`）。
-        # 本実装は`None`ではなくfit()がエラーになる（`re-spec.md`3.7節）。
-        expected = (
-            ValidationError if cov_type == "cluster" else ComputationError
-        )
-        with pytest.raises(expected):
+        # 本実装は`None`ではなくfit()が入力から判定できる`ValidationError`に
+        # なる（cluster: `G <= 2k`、dk: `T <= k`。`re-spec.md`3.7節）。
+        with pytest.raises(ValidationError):
             model.fit()
         return
 
@@ -343,10 +342,15 @@ def test_hausman_cluster_count_equal_to_auxiliary_slopes_raises():
 
 def test_hausman_dk_too_few_periods_raises():
     """`T=2`ではDK共分散のrankが`T-1=1`で検定対象`k=2`個に足りず、
-    fit()が`ComputationError`で失敗する。
+    fit()が補助回帰を待たず`ValidationError`で失敗する。
     """
     df = _tiny_panel(n_entities=20, n_periods=2)
-    with pytest.raises(ComputationError, match="Hausman"):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE, t_periods=2, q=2
+        ),
+    ):
         RE(
             df,
             y="y",

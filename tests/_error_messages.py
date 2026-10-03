@@ -306,6 +306,16 @@ INVALID_DK_BANDWIDTH = (
     "bandwidth must be in the range [0, t): got {bandwidth}, t={t}"
 )
 
+# `PanelError::InsufficientDkPeriodsForInference`（`INSUFFICIENT_CLUSTERS_FOR_
+# INFERENCE`のDK版。`q`はFEでは傾き係数のF検定、REではハウスマン検定の対象数）。
+INSUFFICIENT_DK_PERIODS_FOR_INFERENCE = (
+    "cov_type='dk' requires more unique time periods than jointly tested "
+    "coefficients: got t_periods={t_periods} for q={q} coefficient(s) (the "
+    "slope F-test for FE, the Hausman test for RE), but the Driscoll-Kraay "
+    "covariance has rank at most t_periods-1, so the q×q Wald submatrix is "
+    "singular when t_periods <= q"
+)
+
 # FE用cov_type文字列パース（engine_pybind/src/panel/fe.rs::parse_fe_cov_type）。
 # OLS/WLS/IVの`UNKNOWN_COV_TYPE_LINEAR`と異なりhc0を含まない一覧になる。
 UNKNOWN_COV_TYPE_FE = (

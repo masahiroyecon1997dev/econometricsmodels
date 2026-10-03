@@ -174,6 +174,11 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
    時点数、OLSの`hac_lags`が観測数`n`ベースなのと違う点に注意）。明示指定は`[0, t)`範囲検証
    （`PanelError::InvalidDkBandwidth`）。`t<2`は`G=1`のクラスターと同じ理由
    （`t/(t-1)`が発散する）で`PanelError::InsufficientDkPeriods`として拒否する。
+   また`t <= k`（時点数が傾き係数の数以下）も`PanelError::InsufficientDkPeriodsForInference`
+   として拒否する: `Ŝ`は時点ごとのスコア`h_t = Σ_i x̃_it·ẽ_it`の外積（とラグ項）の和で、
+   正規方程式`Σ_t h_t = X̃'ẽ = 0`により`rank(Ŝ) ≤ t-1`となり、F検定の`k×k`部分行列が
+   構造的に特異になるため（クラスターの`G <= k`と同じ構造。数値的な特異性判定に任せると
+   丸め誤差次第で巨大な無意味な統計量を返しうるため、入力から事前に判定する）。
 3. **時系列順序は`time: Vec<String>`の辞書順とみなす**（ISO 8601日付・ゼロ埋め年度等、
    辞書順=時系列順になる形式で渡すことが呼び出し側の契約。`engine`側にこの契約の
    バリデーションは無い）。

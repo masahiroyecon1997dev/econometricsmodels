@@ -24,10 +24,11 @@ use crate::linear::common::least_squares_error_is_computation_error;
 /// - FE/RE固有のバリデーションエラー（`IdentifierDimensionMismatch`・
 ///   `InsufficientDegreesOfFreedom`・`SingletonGroup`・`UnbalancedPanelForTwoWay`・
 ///   `ZeroVarianceAfterDemeaning`・`TwoWayRequiresTime`・`DkRequiresTime`・
-///   `InvalidDkBandwidth`・`InsufficientDkPeriods`）はいずれも入力・オプションの
-///   不正なので`ValidationError`（`InsufficientDkPeriods`は追加。
-///   `InvalidDkBandwidth`と同じ「DKのバンド幅・時点数に関する入力不正」という
-///   分類のため同じ`match`アームに含める）。
+///   `InvalidDkBandwidth`・`InsufficientDkPeriods`・`InsufficientDkPeriodsForInference`）は
+///   いずれも入力・オプションの不正なので`ValidationError`（`InsufficientDkPeriods`・
+///   `InsufficientDkPeriodsForInference`は追加。`InvalidDkBandwidth`と同じ「DKのバンド幅・
+///   時点数に関する入力不正」という分類のため同じ`match`アームに含める。後者は
+///   クラスター版の`InsufficientClustersForInference`が`ValidationError`なのと揃える）。
 /// - `WithinRegressionFailed`・`FTestFailed`・`BetweenRegressionFailed`・
 ///   `QuasiDemeanedRegressionFailed`・`HausmanTestFailed`: 委譲先の`LeastSquaresError`の分類基準
 ///   （`least_squares_error_is_computation_error`）にそのまま従う。`IvError::
@@ -58,7 +59,8 @@ pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
         | PanelError::TwoWayRequiresTime
         | PanelError::DkRequiresTime
         | PanelError::InvalidDkBandwidth { .. }
-        | PanelError::InsufficientDkPeriods { .. } => ValidationError::new_err(message),
+        | PanelError::InsufficientDkPeriods { .. }
+        | PanelError::InsufficientDkPeriodsForInference { .. } => ValidationError::new_err(message),
         PanelError::WithinRegressionFailed { source }
         | PanelError::FTestFailed { source }
         | PanelError::BetweenRegressionFailed { source }

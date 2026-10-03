@@ -165,8 +165,13 @@
 //!   基づくため、`T`が短いと検定サイズが歪みうる。
 //! - **`None`になるのは比較対象の傾き係数が0個（`input.x()`が空）の場合のみ**。
 //!   補助回帰のランク落ち・クラスター数不足（`G <= 2k`）・DK/ロバスト共分散部分行列の
-//!   ほぼ特異性（DKは時点数`T`に対し検定対象`k`個が`T-1`以上）など、計算自体が成立しない
+//!   ほぼ特異性など、計算自体が成立しない
 //!   場合は`PanelError::HausmanTestFailed`として`fit()`全体を失敗させる（設計行列の多重共線性でエラーにするのと同じ方針）。
+//!   DKの時点数不足（`T <= k`）だけは入力から判定できるため、補助回帰の前に`fit()`のDkアームが
+//!   `PanelError::InsufficientDkPeriodsForInference`で弾く: DK共分散のrankは`T-1`以下で、
+//!   `X̃`の`k×k`ブロックが構造的に特異になる。数値的な特異性判定に任せると、理論上0の固有値に
+//!   乗る丸め誤差が閾値（`k·ε·λ_max`）を超えた場合に巨大な無意味な統計量を黙って返していた
+//!   （`T=6`・`k=6`で約3回に2回すり抜けることを実測）。
 //!   内部FE推定の失敗（singleton・時間不変変数等）は`swamy_arora_variance_components`が
 //!   先に失敗するためRE本体もErrになる。
 
@@ -183,7 +188,7 @@ use crate::panel::common::{
     PanelDimension, PanelError, PanelHcVariant, all_ones_theta, count_unique, group_indices_by_key,
     leverage_within, panel_classical_cov_params, panel_cluster_cov_params,
     panel_driscoll_kraay_cov_params, panel_hc_cov_params, quasi_demean_column,
-    resolve_dk_bandwidth, xtx_inverse,
+    resolve_dk_bandwidth, validate_dk_periods_cover_tested_coefficients, xtx_inverse,
 };
 use crate::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput, within_transform_one_way};
 use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
@@ -875,8 +880,11 @@ impl ReEstimator {
     /// - `cov_type=Cluster`でクラスター数が不足する場合は`CommonError::
     ///   InsufficientClusters`/`InsufficientClustersForInference`（`PanelError::
     ///   Common`経由）。
-    /// - `cov_type=Dk`で`time`が未指定の場合は`PanelError::DkRequiresTime`、
-    ///   `bandwidth`が不正な場合は`PanelError::InvalidDkBandwidth`。
+    /// - `cov_type=Dk`で`time`が未指定の場合は`PanelError::DkRequiresTime`、時点数が2未満なら
+    ///   `PanelError::InsufficientDkPeriods`、`bandwidth`が不正な場合は
+    ///   `PanelError::InvalidDkBandwidth`、時点数がハウスマン検定の対象数`k`以下なら
+    ///   `PanelError::InsufficientDkPeriodsForInference`。
+    /// - ハウスマン検定の補助回帰・Wald検定が失敗した場合は`PanelError::HausmanTestFailed`。
     pub fn fit(
         input: ReInput,
         cov_type: ReCovType,
@@ -999,6 +1007,10 @@ impl ReEstimator {
                 let time = input.time().ok_or(PanelError::DkRequiresTime)?;
                 let t_periods = count_unique(time);
                 let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
+                // RE本体は共分散を反転しない（F統計量はSST/SSR型）が、ハウスマン検定が
+                // 同じ時点構造のDKで`X̃`の傾き`k = df_model - 1`個を同時検定するため、
+                // 補助回帰を待たずここで弾く（Clusterアームの`q`と同じ規約）。
+                validate_dk_periods_cover_tested_coefficients(t_periods, df_model - 1)?;
                 // FEのDKと同じくfixestは`K.fixef="full"`が既定（クラスター変数が無く
                 // ネスト判定自体が発生しない）ため`K=df_model`をそのまま使う。
                 let cov = panel_driscoll_kraay_cov_params(
@@ -2627,19 +2639,21 @@ mod tests {
     }
 
     #[test]
-    fn re_estimator_fit_hausman_returns_error_when_dk_periods_are_too_few() {
-        // 時点数`T=2`ではDK共分散のrankが`T-1=1`で、検定対象の`X̃`係数`k=2`個の
-        // 部分行列が特異になる。
+    fn re_estimator_fit_returns_error_when_dk_periods_do_not_cover_hausman_slopes() {
+        // 時点数`T=2`ではDK共分散のrankが`T-1=1`で、ハウスマン検定の`X̃`係数`k=2`個の
+        // 部分行列が構造的に特異になる。補助回帰の数値的な特異性判定を待たず、入力から
+        // 判定できる`InsufficientDkPeriodsForInference`で弾く（`T=3 > k=2`で成功する
+        // 境界は`re_estimator_fit_hausman_dk_default_bandwidth_matches_auto_resolved_value`）。
         let time = strings(&["1", "2", "1", "2", "1", "2", "1", "2", "1", "2", "1", "2"]);
         let result = ReEstimator::fit(
             hausman_two_slope_input(Some(&time)),
             ReCovType::Dk { bandwidth: Some(0) },
             0.95,
         );
-        assert!(matches!(
+        assert_eq!(
             result.unwrap_err(),
-            PanelError::HausmanTestFailed { .. }
-        ));
+            PanelError::InsufficientDkPeriodsForInference { t_periods: 2, q: 2 }
+        );
     }
 
     /// property-basedテスト。固定シナリオでは`σ_u²`・`T_i`・`cov_type`の組み合わせが

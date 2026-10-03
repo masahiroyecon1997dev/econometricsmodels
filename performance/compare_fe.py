@@ -51,17 +51,16 @@ n=n_sweep[-1]）だけ追加計測する（`default_method="one_way"`,
 
 ## k軸はclassicalのみ計測する（`k_sweep_cov_types`）
 
-DK HAC（`cov_type="dk"`）のバンド幅は時点数`T`ベース（`_N_PERIODS_FIXED=6`・
-バンド幅2）だが、k軸スイープの`k=20`（`k_sweep=(5, 20)`は全手法共通の既定値）で
-実測すると、F検定用の共分散行列の部分行列がほぼ特異になり
-`ComputationError`で失敗することが判明した（`T=6`に対して`k=20`は次元過多——
-DKの`S`行列はバンド幅内の時点ペアからの寄与の和で、実効ランクが時点数`T`に
-制約されるため）。RE（`compare_re.py`）は同じ`k=20`・`dk`で問題なく成功する
-——RE自身のF統計量はFEの`wald_f_test`（部分行列の反転）とは異なる定義
-（変換済みyの単純平均を基準にしたSST/SSR比較）を使うため、この特異性の
-影響を受けない（`docs/spec/re-spec.md`3.5節参照）。
-FEのみ`k_sweep_cov_types=("classical",)`でk軸のcov_typeをclassicalに絞る
-（n軸はk=5固定のため`dk`込みで問題なく計測できる。`_perf_harness.py`の
+k軸スイープの`k=20`（`k_sweep=(5, 20)`は全手法共通の既定値）は
+`T=6`（`_N_PERIODS_FIXED`）に対して次元過多で、engineは`ValidationError`
+（`PanelError::InsufficientDkPeriodsForInference`）で`fit()`を拒否する——DKの
+`S`行列は時点ごとのスコアの外積の和でrankが`T-1`以下のため、F検定の`k×k`
+部分行列が`k >= T`で構造的に特異になる。REもハウスマン検定（`X̃`の`k`個の
+同時Wald検定）が同じ制約を受けるため、同じ設定にしている（`compare_re.py`）。
+`k_sweep_cov_types=("classical",)`でk軸のcov_typeをclassicalに絞る
+（n軸はk=5固定のため`dk`込みで計測できる。ただし`k=5 < T=6`の境界ちょうどに
+依存しており、`n_sweep_fixed_k`を6以上にするか`_N_PERIODS_FIXED`を5以下にすると
+n軸のdkも同じ`ValidationError`で失敗する。`_perf_harness.py`の
 `PerfAdapter.k_sweep_cov_types`参照）。
 
 ## MultiIndex構築は計測区間の外（ハーネス拡張）

@@ -24,6 +24,9 @@
 //! - `InvalidDkBandwidth`: `FeCovType::Dk`の明示的な`bandwidth`が`[0, t)`の範囲外
 //!   （`t`はユニークな時点数。`LeastSquaresError::InvalidHacLags`と同型だが
 //!   上限が観測数`n`ではなく時点数`t`）
+//! - `InsufficientDkPeriodsForInference`: DK指定時に時点数`t`が同時Wald検定の対象係数の
+//!   数`q`以下（`rank(S) ≤ t-1`のため検定の部分行列が構造的に特異。
+//!   `CommonError::InsufficientClustersForInference`のDK版）
 //! - `WithinRegressionFailed`: within変換済みデータの最小二乗推定委譲の失敗
 //!   （`panel-common.md`4.3節）
 //! - `FTestFailed`: F統計量（`fe.rs`モジュールdoc「自由度調整」のF統計量節）の
@@ -235,6 +238,24 @@ pub enum PanelError {
     #[error("Driscoll-Kraay panel HAC requires at least 2 unique time periods: got {t_periods}")]
     InsufficientDkPeriods { t_periods: usize },
 
+    /// `FeCovType::Dk`/`ReCovType::Dk`で、ユニークな時点数`t_periods`が同時Wald検定の
+    /// 対象となる係数の数`q`以下（FEは傾き係数のF検定、REはハウスマン検定の`X̃`ブロック）。
+    ///
+    /// DKの`S`行列は時点ごとのスコア`h_t = Σ_i x_it·e_it`の外積（とそのラグ項）の和で
+    /// `{h_1, …, h_T}`の張る空間に収まり、正規方程式`Σ_t h_t = X'e = 0`により
+    /// `rank(S) ≤ t_periods - 1`。`t_periods <= q`だと検定の`q×q`部分行列が構造的に
+    /// 特異になる（`CommonError::InsufficientClustersForInference`の`g <= q`と同じ構造）。
+    /// 数値的な特異性判定（`ensure_well_conditioned_symmetric_matrix`）任せにすると、
+    /// 理論上0の固有値に乗る丸め誤差が閾値を超えた場合に巨大な無意味な統計量を
+    /// 黙って返しうるため、入力だけから判定できるこの条件を行列計算の前に弾く。
+    #[error(
+        "cov_type='dk' requires more unique time periods than jointly tested coefficients: \
+         got t_periods={t_periods} for q={q} coefficient(s) (the slope F-test for FE, the \
+         Hausman test for RE), but the Driscoll-Kraay covariance has rank at most \
+         t_periods-1, so the q×q Wald submatrix is singular when t_periods <= q"
+    )]
+    InsufficientDkPeriodsForInference { t_periods: usize, q: usize },
+
     /// within変換済みデータに対する最小二乗推定（`OlsEstimator::fit`への委譲、
     /// `panel-common.md`4.3節。WLSがOLSへ委譲するのと同型のパターン）が失敗した。
     ///
@@ -294,7 +315,8 @@ pub enum PanelError {
     ///
     /// 補助回帰のランク落ち、クラスター数`G`が補助回帰の傾き係数の数`2k`以下
     /// （`CommonError::InsufficientClustersForInference`）、DK・ロバスト共分散部分行列の
-    /// ほぼ特異性（`CommonError::ComputationFailed`）等。ハウスマン検定はRE本体の付随的な
+    /// ほぼ特異性（`CommonError::ComputationFailed`）等。DKの時点数不足（`T <= k`）は
+    /// これに包まず、補助回帰の前に`InsufficientDkPeriodsForInference`で弾く。ハウスマン検定はRE本体の付随的な
     /// 診断情報だが、計算自体が成立しない場合は`None`で隠さずエラーにする
     /// （設計行列の多重共線性でエラーにするのと同じ方針）。
     #[error("Hausman test auxiliary regression failed: {source}")]
@@ -541,6 +563,24 @@ pub(crate) fn resolve_dk_bandwidth(bandwidth: Option<i64>, t: usize) -> Result<u
     }
 }
 
+/// DKで同時Wald検定の対象となる係数の数`q`が、時点数`t_periods`で支えられることを
+/// 検証する（`t_periods > q`）。理由は`PanelError::InsufficientDkPeriodsForInference`の
+/// docコメント参照（`validate_cluster_count_covers_slopes`のDK版）。
+///
+/// `t_periods > q`でも係数間の悪条件で部分行列が数値的にほぼ特異になるケースは
+/// 事前判定できないため、`wald_f_test`内の`ensure_well_conditioned_symmetric_matrix`が
+/// backstopとして残る。`resolve_dk_bandwidth`（`t_periods >= 2`を保証）の後に呼ぶ前提で、
+/// そのとき`q == 0`（検定対象なし）は常に`Ok`。
+pub(crate) fn validate_dk_periods_cover_tested_coefficients(
+    t_periods: usize,
+    q: usize,
+) -> Result<(), PanelError> {
+    if t_periods <= q {
+        return Err(PanelError::InsufficientDkPeriodsForInference { t_periods, q });
+    }
+    Ok(())
+}
+
 /// Driscoll-Kraay型パネルHAC共分散行列（k×k）。
 ///
 /// `Ŝ = Σ_t ξ_t ξ_t' + Σ_{l=1}^{bandwidth} w_l (ξ_t ξ_{t-l}' + ξ_{t-l} ξ_t')`
@@ -712,6 +752,17 @@ mod tests {
     #[test]
     fn panel_error_messages_are_human_readable() {
         assert_eq!(
+            PanelError::InsufficientDkPeriodsForInference {
+                t_periods: 6,
+                q: 20
+            }
+            .to_string(),
+            "cov_type='dk' requires more unique time periods than jointly tested coefficients: \
+             got t_periods=6 for q=20 coefficient(s) (the slope F-test for FE, the Hausman test \
+             for RE), but the Driscoll-Kraay covariance has rank at most t_periods-1, so the q×q \
+             Wald submatrix is singular when t_periods <= q"
+        );
+        assert_eq!(
             PanelError::IdentifierDimensionMismatch {
                 dimension: PanelDimension::Entity,
                 y_rows: 10,
@@ -808,6 +859,25 @@ mod tests {
             PanelError::Common(CommonError::InsufficientClusters { g: 1 }).to_string(),
             "cov_type='cluster' requires at least 2 clusters, got 1"
         );
+    }
+
+    #[test]
+    fn validate_dk_periods_cover_tested_coefficients_rejects_t_at_or_below_q() {
+        // `rank(S) ≤ t-1`のため`t > q`が必要。`t == q`が境界（拒否）、`t == q + 1`は通す。
+        assert_eq!(
+            validate_dk_periods_cover_tested_coefficients(6, 6),
+            Err(PanelError::InsufficientDkPeriodsForInference { t_periods: 6, q: 6 })
+        );
+        assert_eq!(
+            validate_dk_periods_cover_tested_coefficients(6, 20),
+            Err(PanelError::InsufficientDkPeriodsForInference {
+                t_periods: 6,
+                q: 20
+            })
+        );
+        assert_eq!(validate_dk_periods_cover_tested_coefficients(6, 5), Ok(()));
+        // 検定対象なし（FEの固定効果のみモデル）は常に通す。
+        assert_eq!(validate_dk_periods_cover_tested_coefficients(2, 0), Ok(()));
     }
 
     #[test]

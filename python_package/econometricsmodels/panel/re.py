@@ -95,9 +95,12 @@ class RE:
                 unsupported for RE), `time` specified with a
                 `cov_type` other than `"dk"`, a singleton entity group
                 (raised by the internal one-way FE regression that
-                RE's σ_ε² estimation delegates to), or a
-                `cov_type="dk"` request with `time` unset). A subclass
-                of `ValueError`.
+                RE's σ_ε² estimation delegates to), a
+                `cov_type="dk"` request with `time` unset, or
+                `cov_type="dk"` with no more unique time periods than
+                regressors: the Driscoll-Kraay covariance has rank at
+                most T-1, so the Hausman test cannot be computed). A
+                subclass of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. a singular quasi-demeaned design
                 matrix). A subclass of `RuntimeError`.

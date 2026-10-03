@@ -40,6 +40,15 @@ FEと同じプロセスで実測選定した（`.claude/rules/testing-policy.md`
 
 2-way軸は無い（RE自体がv1で2-wayをスコープ外にしているため、`extra_methods=()`）。
 
+## k軸はclassicalのみ計測する（`k_sweep_cov_types`）
+
+FE（`compare_fe.py`の同名節）と同じ理由で、k軸のcov_typeをclassicalに絞る。
+RE本体の標準誤差は`dk`でも`k=20`・`T=6`で計算できるが、`fit()`が常に計算する
+ハウスマン検定は`X̃`の`k`個を同時Wald検定するため、DK共分散のrank（`T-1`以下）が
+`k`に足りず、engineは`ValidationError`
+（`PanelError::InsufficientDkPeriodsForInference`）で`fit()`を拒否する。
+n軸のdkが`k=5 < T=6`の境界ちょうどに依存している点もFEと同じ。
+
 ## 計測範囲の対称性
 
 `engine`（`ReEstimator::fit`）は係数・標準誤差と同じ`.fit()`の中でパネル固有R²・
@@ -171,6 +180,7 @@ RE_ADAPTER = PerfAdapter(
     module="performance.compare_re",
     libraries=("engine", "linearmodels"),
     cov_types=("classical", "dk"),
+    k_sweep_cov_types=("classical",),
     reference_versions=lambda: {
         "linearmodels_version": linearmodels.__version__
     },

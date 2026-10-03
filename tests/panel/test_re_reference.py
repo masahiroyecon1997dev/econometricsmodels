@@ -36,7 +36,6 @@ from _helpers import load_wooldridge_dataset
 from _tolerances import TOLERANCES
 from econometricsmodels import (
     RE,
-    ComputationError,
     REOptions,
     ValidationError,
 )
@@ -109,7 +108,7 @@ def _check_result(res, ref: dict, label: str) -> None:
 # G=40以下（cluster）、検定対象`k=20`が`T-1=5`超（dk）でハウスマン検定が成立しない。
 _HAUSMAN_SINGULAR_ERRORS = {
     ("many_regressors", "cluster"): ValidationError,
-    ("many_regressors", "dk"): ComputationError,
+    ("many_regressors", "dk"): ValidationError,
 }
 
 

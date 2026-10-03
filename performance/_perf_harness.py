@@ -202,10 +202,10 @@ class PerfAdapter:
             method 軸には影響しない。`libraries=("engine",)` の手法では指定不要。
         k_sweep_cov_types: k 軸スイープでのみ使う cov_type の部分集合。`None`
             なら `cov_types` をそのまま使う。`k_sweep_libraries` と同じ発想だが
-            対象が cov_type（`FE` の Driscoll-Kraay HAC は時点数 T ベースの
-            バンド幅を使うため、k 軸で k を増やすと T に対して次元過多になり
-            共分散行列が特異になる——`performance/compare_fe.py` 参照）。n 軸・
-            method 軸には影響しない。
+            対象が cov_type（FE/RE の Driscoll-Kraay HAC は共分散の rank が
+            時点数 T-1 以下のため、k 軸で k >= T にすると同時検定の部分行列が
+            構造的に特異になり engine が `ValidationError` で拒否する——
+            `performance/compare_fe.py` 参照）。n 軸・method 軸には影響しない。
         n_sweep_engine_only: n 軸に追加する engine 単独計測点の n の刻み。大 n を
             全 cov_type で回すと高コスト（またはリファレンス実装が大 n で計測不能）
             だが、engine の大標本での健全性（収束すること・実行時間）は回帰検知

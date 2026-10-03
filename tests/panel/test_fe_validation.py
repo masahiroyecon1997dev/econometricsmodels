@@ -557,6 +557,40 @@ def test_cluster_count_at_most_slopes_raises_validation_error():
         FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
 
+def test_dk_periods_at_most_slopes_raises_validation_error():
+    """時点数t(=3)がF検定の傾き係数の数q(=k=3)以下は`ValidationError`
+    （`PanelError::InsufficientDkPeriodsForInference`）。DK共分散のrankは
+    `t-1`以下のため検定の部分行列が構造的に特異になる（クラスター版の
+    `g <= q`と同じ構造）。`t=2`は1-way FEのwithin変換で時点スコアが
+    恒等的にゼロに退化するため使わない（engineユニットテスト
+    `fe_estimator_fit_hac_rejects_periods_not_covering_slopes`と同じデータ）。
+    """
+    df = pl.DataFrame(
+        {
+            "y": [3.0, 4.5, 7.0, 8.0, 9.2, 6.0, 10.1, 8.0, 5.0, 9.5, 4.0, 7.3],
+            "x1": [1.0, 3.0, 2.0, 5.0, 4.0, 6.0, 0.0, 2.0, 1.0, 3.0, 7.0, 4.0],
+            "x2": [2.0, 1.0, 4.0, 0.0, 3.0, 1.0, 5.0, 2.0, 6.0, 1.0, 1.0, 3.0],
+            "x3": [4.0, 2.0, 1.0, 3.0, 3.0, 5.0, 2.0, 6.0, 3.0, 0.0, 4.0, 2.0],
+            "entity": ["a"] * 3 + ["b"] * 3 + ["c"] * 3 + ["d"] * 3,
+            "time": ["1", "2", "3"] * 4,
+        }
+    )
+    options = FEOptions(cov_type="dk", dk_time="time", dk_bandwidth=0)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE, t_periods=3, q=3
+        ),
+    ):
+        FE(
+            df,
+            y="y",
+            x=["x1", "x2", "x3"],
+            entity="entity",
+            options=options,
+        ).fit()
+
+
 # ── ComputationError ──────────────────────────────────────────────
 
 

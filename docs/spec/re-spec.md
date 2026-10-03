@@ -270,8 +270,9 @@ FEの`r_squared_between`/`r_squared_overall`をそのまま流用できず、RE�
   `hausman_*`を`None`にせず`RE.fit()`が失敗する（設計行列の多重共線性でエラーにするのと
   同じ方針）。ロバスト共分散が構造的に特異になる場合が典型で、`cluster`ではクラスター数`G`が
   補助回帰の傾き係数の数`2k`以下（`ValidationError`、OLSの`InsufficientClustersForInference`と
-  同じ事前検証）、`dk`では時点数`T`に対し検定対象の`k`個が`T-1`以上（`ComputationError`、
-  共分散部分行列のほぼ特異性）。RE本体は成功する入力でも、`cov_type="cluster"`（既定）で
+  同じ事前検証）、`dk`では時点数`T`が検定対象の`k`個以下（`T <= k`、`ValidationError`。
+  DK共分散のrankは`T-1`以下のため。FEのF検定と同じ事前検証
+  `PanelError::InsufficientDkPeriodsForInference`）。RE本体は成功する入力でも、`cov_type="cluster"`（既定）で
   `G <= 2k`の場合はfitが失敗するため、`cov_type="classical"`等を指定するか
   クラスター数を増やす。時間不変変数・singleton entity等による内部1-way FE推定の失敗は、
   分散成分（σ_ε²）推定が先に失敗するため`RE.fit()`自体が失敗する。

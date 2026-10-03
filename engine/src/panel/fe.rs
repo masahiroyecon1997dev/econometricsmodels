@@ -133,7 +133,11 @@
 //!   - **エラー**: `wald_f_test`の失敗（共分散部分行列が数値的にほぼ特異）は
 //!     `PanelError::FTestFailed { source }`として伝播する（`WithinRegressionFailed`とは
 //!     意味が異なる——`OlsEstimator::fit`自体は既に成功した後の、F検定固有の計算失敗
-//!     のため別バリアントにする、`common.rs`のdocコメント参照）。
+//!     のため別バリアントにする、`common.rs`のdocコメント参照）。rankの上界から入力だけで
+//!     構造的な特異性が判定できる入力（Clusterの`G <= k`、Dkの`t_periods <= k`）は
+//!     共分散計算の前に`InsufficientClustersForInference`/
+//!     `PanelError::InsufficientDkPeriodsForInference`で弾く。それ以外（スケール差等による
+//!     数値的な悪条件）は`FTestFailed`がbackstopになる。
 //!   - **検証**: 主リファレンス`linearmodels`の`PanelOLS.fit().f_statistic`
 //!     （`cov_type="unadjusted"`）と数値比較する。`k=1`（`fixest_reference_input`を使う
 //!     既存テスト）では「1自由度のF検定は両側t検定と代数的に等価」
@@ -380,7 +384,8 @@ use crate::panel::common::{
     PanelDimension, PanelError, PanelHcVariant, all_ones_theta, count_unique,
     design_matrix_from_columns, group_indices_by_key, leverage_within, panel_classical_cov_params,
     panel_cluster_cov_params, panel_driscoll_kraay_cov_params, panel_hc_cov_params,
-    quasi_demean_column, resolve_dk_bandwidth, xtx_inverse,
+    quasi_demean_column, resolve_dk_bandwidth, validate_dk_periods_cover_tested_coefficients,
+    xtx_inverse,
 };
 use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
@@ -648,8 +653,13 @@ impl FeEstimator {
     /// - `cov_type=Cluster`でクラスター数が2未満・傾き係数の数以下の場合は
     ///   `PanelError::Common`（`CommonError::InsufficientClusters`/
     ///   `InsufficientClustersForInference`）
+    /// - `cov_type=Dk`で時系列順序が無い場合は`PanelError::DkRequiresTime`、時点数が2未満なら
+    ///   `PanelError::InsufficientDkPeriods`、`bandwidth`が不正なら
+    ///   `PanelError::InvalidDkBandwidth`、時点数が傾き係数の数以下なら
+    ///   `PanelError::InsufficientDkPeriodsForInference`
     /// - 委譲先の`OlsEstimator::fit`が失敗した場合（観測数不足・特異行列等）は
     ///   `PanelError::WithinRegressionFailed`
+    /// - F検定の共分散部分行列が数値的にほぼ特異な場合は`PanelError::FTestFailed`
     pub fn fit(
         input: FeInput,
         effects: FeEffects,
@@ -823,6 +833,7 @@ impl FeEstimator {
                 };
                 let t_periods = count_unique(time);
                 let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
+                validate_dk_periods_cover_tested_coefficients(t_periods, k)?;
                 // fixestのDKは`K.fixef="full"`が既定（クラスター変数が無くネスト判定自体が
                 // 発生しない、`fe_cluster_k_correction`のdocコメント参照）。`K=df_model`を
                 // そのまま使う。
@@ -3560,6 +3571,87 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             PanelError::InsufficientDkPeriods { t_periods: 1 }
+        );
+    }
+
+    /// 4エンティティ×3期間の1-way FE入力（説明変数は`x1`〜`x3`の先頭`k`個）。DKの
+    /// `t_periods=3`に対し`k=3`（拒否）と`k=2`（成功）の境界を作るため。`T=2`は使わない:
+    /// 1-wayのwithin変換では`x̃_i1 = -x̃_i2`・`ẽ_i1 = -ẽ_i2`となり時点スコアが
+    /// `h_1 = h_2 = 0`に退化する（`rank(S) = 0`）ため、`t <= q`の規則を検証する入力として不適。
+    fn three_period_input(k: usize, time: Option<&[String]>) -> FeInput {
+        let entity = strings(&["a", "a", "a", "b", "b", "b", "c", "c", "c", "d", "d", "d"]);
+        let columns = [
+            vec![1.0, 3.0, 2.0, 5.0, 4.0, 6.0, 0.0, 2.0, 1.0, 3.0, 7.0, 4.0],
+            vec![2.0, 1.0, 4.0, 0.0, 3.0, 1.0, 5.0, 2.0, 6.0, 1.0, 1.0, 3.0],
+            vec![4.0, 2.0, 1.0, 3.0, 3.0, 5.0, 2.0, 6.0, 3.0, 0.0, 4.0, 2.0],
+        ];
+        let y = [3.0, 4.5, 7.0, 8.0, 9.2, 6.0, 10.1, 8.0, 5.0, 9.5, 4.0, 7.3];
+        let names = ["x1", "x2", "x3"]
+            .iter()
+            .take(k)
+            .map(|n| n.to_string())
+            .collect();
+        FeInput::from_columns(&y, &columns[..k], names, &entity, time, "y".into()).unwrap()
+    }
+
+    fn three_period_time() -> Vec<String> {
+        strings(&["1", "2", "3", "1", "2", "3", "1", "2", "3", "1", "2", "3"])
+    }
+
+    #[test]
+    fn fe_estimator_fit_hac_rejects_periods_not_covering_slopes() {
+        // `t_periods=3`ではDK共分散のrankが`t-1=2`以下で、F検定の傾き`k=3`個の部分行列が
+        // 構造的に特異になる。`wald_f_test`の数値的な特異性判定を待たず弾く。
+        let time = three_period_time();
+        let result = FeEstimator::fit(
+            three_period_input(3, Some(&time)),
+            FeEffects::OneWay,
+            FeCovType::Dk {
+                bandwidth: Some(0),
+                time: None,
+            },
+            0.95,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::InsufficientDkPeriodsForInference { t_periods: 3, q: 3 }
+        );
+    }
+
+    #[test]
+    fn fe_estimator_fit_hac_accepts_periods_one_above_slopes() {
+        // 境界の成功パス: `t_periods=3 > k=2`。
+        let time = three_period_time();
+        let fe = FeEstimator::fit(
+            three_period_input(2, Some(&time)),
+            FeEffects::OneWay,
+            FeCovType::Dk {
+                bandwidth: Some(0),
+                time: None,
+            },
+            0.95,
+        )
+        .unwrap();
+        assert!(fe.f_statistic().is_finite());
+        assert!((0..2).all(|j| *fe.std_errors().get(j, 0) > 0.0));
+    }
+
+    #[test]
+    fn fe_estimator_fit_hac_counts_periods_from_time_override() {
+        // `FeCovType::Dk.time`の上書きがあれば、時点数はその列で数える（入力の`time`が
+        // `None`の1-way FEでも同じ判定になる）。
+        let result = FeEstimator::fit(
+            three_period_input(3, None),
+            FeEffects::OneWay,
+            FeCovType::Dk {
+                bandwidth: Some(0),
+                time: Some(three_period_time()),
+            },
+            0.95,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::InsufficientDkPeriodsForInference { t_periods: 3, q: 3 }
         );
     }
 

@@ -22,6 +22,7 @@ from econometricsmodels import (
     Logit,
     OLSOptions,
     Probit,
+    REOptions,
     Tobit,
     TobitOptions,
 )
@@ -30,6 +31,7 @@ from scipy import stats as sps
 N_ENTITIES = 20
 N_PERIODS = 10
 N = N_ENTITIES * N_PERIODS
+N_GROUPS = 7
 
 
 @pytest.fixture(scope="module")
@@ -57,6 +59,8 @@ def df() -> pl.DataFrame:
             "w": rng.uniform(0.5, 2.0, size=N),
             "entity": entity,
             "time": np.tile(np.arange(N_PERIODS), N_ENTITIES),
+            # entityと入れ子にならないクラスター列（G=7）
+            "grp": np.arange(N) % N_GROUPS,
         }
     )
 
@@ -148,6 +152,107 @@ def test_re_f_dfs_and_hausman_df(df):
         res.f_p_value, rel=1e-8
     )
     assert res.hausman_df == 2
+
+
+def _fe(df, *, two_way=False, **options):
+    if two_way:
+        options["time"] = "time"
+    return FE(
+        df,
+        y="y",
+        x=["x1", "x2"],
+        entity="entity",
+        options=FEOptions(**options),
+    ).fit()
+
+
+def _re(df, **options):
+    return RE(
+        df,
+        y="y",
+        x=["x1", "x2"],
+        entity="entity",
+        options=REOptions(**options),
+    ).fit()
+
+
+@pytest.mark.parametrize("two_way", [False, True])
+@pytest.mark.parametrize("cov_type", ["hc1", "hc2", "hc3"])
+def test_fe_hc_f_denominator_is_df_resid(df, cov_type, two_way):
+    res = _fe(df, cov_type=cov_type, two_way=two_way)
+    assert (res.f_df_num, res.f_df_denom) == (2, res.df_resid)
+    assert _f_p(res.f_statistic, 2, res.df_resid) == pytest.approx(
+        res.f_p_value, rel=1e-8
+    )
+
+
+def test_fe_two_way_f_dfs_follow_cov_type(df):
+    classical = _fe(df, cov_type="classical", two_way=True)
+    assert classical.f_df_denom == classical.df_resid
+
+    cluster = _fe(df, cov_type="cluster", two_way=True)
+    assert cluster.f_df_denom == N_ENTITIES - 1
+
+    dk = _fe(df, cov_type="dk", two_way=True)
+    assert (dk.f_df_num, dk.f_df_denom) == (2, N_PERIODS - 1)
+    assert _f_p(dk.f_statistic, 2, N_PERIODS - 1) == pytest.approx(
+        dk.f_p_value, rel=1e-8
+    )
+
+
+@pytest.mark.parametrize("two_way", [False, True])
+def test_fe_non_entity_cluster_f_denominator_is_g_minus_one(df, two_way):
+    res = _fe(df, cov_type="cluster", cluster="grp", two_way=two_way)
+    assert (res.f_df_num, res.f_df_denom) == (2, N_GROUPS - 1)
+    assert _f_p(res.f_statistic, 2, N_GROUPS - 1) == pytest.approx(
+        res.f_p_value, rel=1e-8
+    )
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"cov_type": "classical"},
+        {"cov_type": "hc1"},
+        {"cov_type": "hc2"},
+        {"cov_type": "hc3"},
+        {"cov_type": "cluster"},
+        {"cov_type": "cluster", "cluster": "grp"},
+        {"cov_type": "dk", "time": "time"},
+    ],
+)
+def test_re_f_denominator_is_df_resid_for_every_cov_type(df, options):
+    """REのF統計量（SST/SSR方式）は`cov_type`に依存しないため、分母自由度は
+    常に`df_resid`。一方`stat_df`（t検定・信頼区間）は`cluster`で`G-1`、`dk`で
+    `T-1`に切り替わるので、この2つは`cluster`/`dk`で食い違う（不整合ではなく仕様）。
+    """
+    res = _re(df, **options)
+    assert (res.f_df_num, res.f_df_denom) == (2, res.df_resid)
+    assert _f_p(res.f_statistic, 2, res.df_resid) == pytest.approx(
+        res.f_p_value, rel=1e-8
+    )
+
+
+def test_re_f_statistic_does_not_depend_on_cov_type(df):
+    base = _re(df, cov_type="classical")
+    for options in (
+        {"cov_type": "hc1"},
+        {"cov_type": "cluster", "cluster": "grp"},
+        {"cov_type": "dk", "time": "time"},
+    ):
+        res = _re(df, **options)
+        assert res.f_statistic == pytest.approx(base.f_statistic, rel=1e-12)
+        assert res.f_p_value == pytest.approx(base.f_p_value, rel=1e-12)
+
+
+def test_re_stat_df_differs_from_f_df_denom_under_cluster_and_dk(df):
+    cluster = _re(df, cov_type="cluster", cluster="grp")
+    assert (cluster.stat_df, cluster.f_df_denom) == (
+        N_GROUPS - 1,
+        cluster.df_resid,
+    )
+    dk = _re(df, cov_type="dk", time="time")
+    assert (dk.stat_df, dk.f_df_denom) == (N_PERIODS - 1, dk.df_resid)
 
 
 @pytest.mark.parametrize("model", [Logit, Probit])

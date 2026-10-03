@@ -25,10 +25,13 @@ from econometricsmodels import (
     Tobit,
     TobitOptions,
 )
+from scipy import stats as sps
 
 N_ENTITIES = 20
 N_PERIODS = 10
 N = N_ENTITIES * N_PERIODS
+N_GROUPS = 7
+N_COARSE = N_ENTITIES // 4
 
 
 @pytest.fixture(scope="module")
@@ -55,6 +58,12 @@ def df() -> pl.DataFrame:
             "w": rng.uniform(0.5, 2.0, size=N),
             "entity": entity,
             "time": time,
+            # entityとは別軸のクラスター列。`grp`はentityと入れ子にならない
+            # （G=7、entity内で値が変わる）、`coarse`はentityを束ねる入れ子
+            # （G=5）。どちらもGがentity数・時点数・`df_resid`のいずれとも
+            # 異なる値になるようにして、自由度の取り違えを区別できる。
+            "grp": np.arange(N) % N_GROUPS,
+            "coarse": entity // 4,
         }
     )
 
@@ -180,3 +189,130 @@ def test_test_stats_are_consistent_with_stat_df_for_t_dist(df):
     for name, t in res.test_stats.items():
         p = 2.0 * sps.t.sf(abs(t), res.stat_df)
         assert p == pytest.approx(res.p_values[name], rel=1e-8)
+
+
+# --- FE/REの`stat_df`を`cov_type`ごとに網羅する --------------------------------
+#
+# `stat_df`は`cluster`のとき`G-1`、`dk`のとき`T-1`（時点数）、それ以外
+# （`classical`/`hc1`〜`hc3`）は`df_resid`。`G`は`cluster`列のクラスター数で、
+# 既定（`cluster`省略）ではentity数だが、他の列を指定すればそのクラスター数になる。
+
+FE_DF_RESID_ONE_WAY = N - N_ENTITIES - 2
+# 2-way: df_model = k + n_entities + n_periods - 1
+FE_DF_RESID_TWO_WAY = N - (2 + N_ENTITIES + N_PERIODS - 1)
+RE_DF_RESID = N - 3
+
+
+def _fe(df, *, two_way=False, **options):
+    if two_way:
+        options["time"] = "time"
+    return FE(
+        df,
+        y="y",
+        x=["x1", "x2"],
+        entity="entity",
+        options=FEOptions(**options),
+    ).fit()
+
+
+def _re(df, **options):
+    return RE(
+        df,
+        y="y",
+        x=["x1", "x2"],
+        entity="entity",
+        options=REOptions(**options),
+    ).fit()
+
+
+@pytest.mark.parametrize("two_way", [False, True])
+@pytest.mark.parametrize("cov_type", ["classical", "hc1", "hc2", "hc3"])
+def test_fe_non_cluster_cov_types_use_residual_df(df, cov_type, two_way):
+    res = _fe(df, cov_type=cov_type, two_way=two_way)
+    expected = FE_DF_RESID_TWO_WAY if two_way else FE_DF_RESID_ONE_WAY
+    assert res.df_resid == expected
+    _check_t(res, expected)
+
+
+@pytest.mark.parametrize("cov_type", ["classical", "hc1", "hc2", "hc3"])
+def test_re_non_cluster_cov_types_use_residual_df(df, cov_type):
+    res = _re(df, cov_type=cov_type)
+    assert res.df_resid == RE_DF_RESID
+    _check_t(res, RE_DF_RESID)
+
+
+@pytest.mark.parametrize(
+    ("cluster", "n_clusters"),
+    [
+        ("entity", N_ENTITIES),
+        ("grp", N_GROUPS),
+        ("coarse", N_COARSE),
+        ("time", N_PERIODS),
+    ],
+)
+class TestNonEntityCluster:
+    """`cluster`に指定した列のクラスター数`G`で`G-1`になる（entity数ではない）。"""
+
+    def test_fe_one_way(self, df, cluster, n_clusters):
+        res = _fe(df, cov_type="cluster", cluster=cluster)
+        _check_t(res, n_clusters - 1)
+
+    def test_fe_two_way(self, df, cluster, n_clusters):
+        res = _fe(df, cov_type="cluster", cluster=cluster, two_way=True)
+        _check_t(res, n_clusters - 1)
+
+    def test_re(self, df, cluster, n_clusters):
+        res = _re(df, cov_type="cluster", cluster=cluster)
+        _check_t(res, n_clusters - 1)
+
+
+def test_fe_two_way_dk_uses_t_minus_one_df(df):
+    res = _fe(df, cov_type="dk", two_way=True)
+    _check_t(res, N_PERIODS - 1)
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        pytest.param(
+            lambda d: _fe(d, cov_type="cluster", cluster="grp"), id="fe"
+        ),
+        pytest.param(
+            lambda d: _re(d, cov_type="cluster", cluster="grp"), id="re"
+        ),
+    ],
+)
+def test_non_entity_cluster_p_values_follow_stat_df(df, make):
+    """p値が`stat_df = G-1`のt分布から再計算できること（`df_resid`や
+    entity数ベースの自由度では一致しない）。"""
+    res = make(df)
+    assert res.stat_df == N_GROUPS - 1
+    for name, t in res.test_stats.items():
+        p = 2.0 * sps.t.sf(abs(t), res.stat_df)
+        assert p == pytest.approx(res.p_values[name], rel=1e-8)
+
+
+@pytest.mark.parametrize("confidence_level", [0.90, 0.99])
+@pytest.mark.parametrize(
+    ("kind", "options"),
+    [
+        ("fe", {"cov_type": "cluster"}),
+        ("fe", {"cov_type": "cluster", "cluster": "grp"}),
+        ("fe", {"cov_type": "dk", "dk_time": "time"}),
+        ("re", {"cov_type": "cluster"}),
+        ("re", {"cov_type": "cluster", "cluster": "grp"}),
+        ("re", {"cov_type": "dk", "time": "time"}),
+    ],
+)
+def test_confidence_interval_uses_stat_df_critical_value(
+    df, kind, options, confidence_level
+):
+    """信頼区間の臨界値が`stat_df`のt分布の両側`confidence_level`点であること
+    （既定の0.95以外でも`G-1`/`T-1`が使われる）。"""
+    make = _fe if kind == "fe" else _re
+    res = make(df, confidence_level=confidence_level, **options)
+    crit = sps.t.ppf(0.5 + confidence_level / 2.0, res.stat_df)
+    for row in res.coef_table():
+        half = crit * row["std_err"]
+        assert row["conf_lower"] == pytest.approx(row["coef"] - half, rel=1e-8)
+        assert row["conf_upper"] == pytest.approx(row["coef"] + half, rel=1e-8)

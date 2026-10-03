@@ -55,13 +55,14 @@ plmの変量効果分散成分推定（Swamy-Arora）がlinearmodels準拠の本
 from __future__ import annotations
 
 import json
+import math
 from functools import partial
 from pathlib import Path
 
 import _error_messages as msgs
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close
+from _assertions import assert_close, assert_dict_close, rename_intercept
 from _constants import DATA_DIR
 from _error_messages import escaped
 from _helpers import load_wooldridge_dataset
@@ -104,6 +105,8 @@ RTOL_UNBALANCED_F = TOLERANCES["re_crosscheck"][
 ]  # cov_type別
 RTOL_UNBALANCED = TOLERANCES["re_crosscheck"]["rtol_unbalanced"]  # cov_type別
 ATOL = TOLERANCES["re_crosscheck"]["atol"]
+RTOL_P_VALUE = TOLERANCES["re_crosscheck"]["rtol_p_value"]
+P_LOG10_UNBALANCED = TOLERANCES["re_crosscheck"]["p_value_log10_unbalanced"]
 RTOL_HAUSMAN = TOLERANCES["re_crosscheck"]["rtol_hausman"]
 ATOL_HAUSMAN = TOLERANCES["re_crosscheck"]["atol_hausman"]
 RTOL_HAUSMAN_UNBALANCED = TOLERANCES["re_crosscheck"][
@@ -131,6 +134,31 @@ def crosscheck() -> dict:
 
 _assert_close = partial(assert_close, atol=ATOL)
 _assert_dict_close = partial(assert_dict_close, atol=ATOL)
+
+
+def _assert_p_close(
+    ours: float, ref: float, label: str, *, balanced: bool
+) -> None:
+    """p値の比較。絶対誤差の下限を設けない（下限があると、参照値が1e-8未満の
+    裾のp値が0.0でも通ってしまう）。
+
+    バランスパネルは相対誤差のみで比較する。不均衡パネルはSwamy-Arora分散成分の
+    差で統計量が数％ずれ、裾のp値は相対誤差では桁違いにずれる（統計量の0.1%の
+    差が`exp(-F)`型に増幅される）ため、常用対数の差で比較する
+    （0.0への潰れやオーダーの取り違えは検出できる）。
+    """
+    if balanced:
+        assert_close(ours, ref, label, rtol=RTOL_P_VALUE, atol=0.0)
+        return
+    if ref == 0.0:
+        assert ours == 0.0, f"{label}: ours={ours!r}, ref=0.0"
+        return
+    assert ours > 0.0, f"{label}: ours={ours!r} underflowed, ref={ref!r}"
+    diff = abs(math.log10(ours / ref))
+    assert diff <= P_LOG10_UNBALANCED, (
+        f"{label}: ours={ours!r}, ref={ref!r}, |log10 ratio|={diff!r} "
+        f"> {P_LOG10_UNBALANCED}"
+    )
 
 
 ALL_CASES = [
@@ -163,6 +191,7 @@ def _check_result(
     rtol: float,
     coef_rtol: float | None = None,
     f_rtol: float | None = None,
+    balanced: bool = True,
 ) -> None:
     coef_rtol = rtol if coef_rtol is None else coef_rtol
     f_rtol = rtol if f_rtol is None else f_rtol
@@ -173,9 +202,13 @@ def _check_result(
     _assert_dict_close(
         res.test_stats, ref["test_stats"], f"{label}/test_stats", rtol=rtol
     )
-    _assert_dict_close(
-        res.p_values, ref["p_values"], f"{label}/p_values", rtol=rtol
-    )
+    for name, p_ref in ref["p_values"].items():
+        _assert_p_close(
+            res.p_values[rename_intercept(name)],
+            p_ref,
+            f"{label}/p_values/{name}",
+            balanced=balanced,
+        )
 
     for name, (ref_lower, ref_upper) in ref["conf_int"].items():
         our_lower, our_upper = res.conf_int[name]
@@ -194,8 +227,11 @@ def _check_result(
         f"{label}/f_statistic",
         rtol=f_rtol,
     )
-    _assert_close(
-        res.f_p_value, ref["f_p_value"], f"{label}/f_p_value", rtol=f_rtol
+    _assert_p_close(
+        res.f_p_value,
+        ref["f_p_value"],
+        f"{label}/f_p_value",
+        balanced=balanced,
     )
 
 
@@ -262,6 +298,7 @@ def test_synthetic_matches_plm(crosscheck, scenario, cov_type):
         rtol=rtol,
         coef_rtol=coef_rtol,
         f_rtol=_f_rtol_for(scenario, cov_type),
+        balanced=scenario != _UNBALANCED_HAUSMAN_SCENARIO,
     )
 
 

@@ -497,7 +497,7 @@ pub fn goodness_of_fit(
     } else {
         let chi2 = ChiSquared::new(df_model as f64)
             .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
-        1.0 - chi2.cdf(lr_statistic)
+        chi2.sf(lr_statistic)
     };
 
     Ok(GoodnessOfFit {

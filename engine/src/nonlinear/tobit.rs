@@ -861,7 +861,7 @@ fn wald_chi2_test(
 
     let chi2 = ChiSquared::new(df_model as f64)
         .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
-    let wald_p_value = 1.0 - chi2.cdf(wald_statistic);
+    let wald_p_value = chi2.sf(wald_statistic);
 
     Ok((wald_statistic, wald_p_value))
 }
@@ -1854,6 +1854,17 @@ mod tests {
     use super::*;
     use crate::nonlinear::common::SolverType;
     use statrs::distribution::{Continuous, ContinuousCDF};
+
+    #[test]
+    fn wald_chi2_test_keeps_precision_in_the_far_tail() {
+        // `1.0 - cdf`では裾でp値が0.0に潰れる。傾き3個（`β=(10, 10, 10)`、`V=I`）で
+        // wald=300。R: `pchisq(300, 3, lower.tail = FALSE)` = 9.94875834632771e-65。
+        let params = [0.0, 10.0, 10.0, 10.0];
+        let cov = Mat::from_fn(4, 4, |i, j| if i == j { 1.0 } else { 0.0 });
+        let (wald, p) = wald_chi2_test(&params, &cov, 1, 3).unwrap();
+        assert!((wald - 300.0).abs() < 1e-9);
+        assert!((p / 9.948_758_346_327_71e-65 - 1.0).abs() < 1e-8);
+    }
 
     #[test]
     fn from_columns_with_intercept_prepends_const_column() {

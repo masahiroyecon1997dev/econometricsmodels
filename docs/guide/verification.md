@@ -44,6 +44,8 @@ Standard-error types are covered per method: classical, HC0–HC3, HAC, cluster,
 
 Agreement is checked as `|ours - reference| <= max(rtol · |reference|, atol)`.
 
+For the FE and RE cross-checks (coefficient and F-statistic p-values) the absolute floor `atol` is not applied: with a floor, a tail p-value below it (for example `1e-40`) would pass even if it were returned as `0`. FE p-values are compared by relative error only (`1e-6`, measured up to `3e-8` because the tail amplifies rounding errors in the statistic). RE p-values are compared the same way on balanced panels; on an unbalanced panel, where the statistics themselves differ by up to 0.7 % (see below), they are compared on the base-10 logarithm (within `0.1`, measured below `0.03`).
+
 ### Against the primary reference
 
 | Method | rtol | atol | Notes |

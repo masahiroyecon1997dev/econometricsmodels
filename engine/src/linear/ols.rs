@@ -1056,7 +1056,7 @@ pub(crate) fn wald_f_test(
 
     let f_dist = FisherSnedecor::new(df_model as f64, df_inference as f64)
         .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
-    let f_p_value = 1.0 - f_dist.cdf(f_statistic);
+    let f_p_value = f_dist.sf(f_statistic);
 
     Ok((f_statistic, f_p_value))
 }
@@ -1064,6 +1064,25 @@ pub(crate) fn wald_f_test(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wald_f_test_keeps_precision_in_the_far_tail() {
+        // `1.0 - cdf`では裾でp値が0.0に潰れる。単一の傾き（`β=10`、`V=1`）ならF=100、
+        // R: `pf(100, 1, 100, lower.tail = FALSE)` = 9.90168898459409e-17。
+        let params = Mat::from_fn(1, 1, |_, _| 10.0);
+        let cov = Mat::from_fn(1, 1, |_, _| 1.0);
+        let (f, p) = wald_f_test(&params, &cov, 0, 1, 100).unwrap();
+        assert!((f - 100.0).abs() < 1e-12);
+        assert!((p / 9.901_688_984_594_09e-17 - 1.0).abs() < 1e-8);
+
+        // 傾き3個（`β=(10, 20, 30)`、`V=I`）: wald=1400、F=1400/3、F(3, 60)。
+        // R: `pf(1400/3, 3, 60, lower.tail = FALSE)` = 1.59046502043898e-41
+        let params3 = Mat::from_fn(3, 1, |i, _| (i as f64 + 1.0) * 10.0);
+        let cov3 = Mat::from_fn(3, 3, |i, j| if i == j { 1.0 } else { 0.0 });
+        let (f3, p3) = wald_f_test(&params3, &cov3, 0, 3, 60).unwrap();
+        assert!((f3 - 1400.0 / 3.0).abs() < 1e-9);
+        assert!((p3 / 1.590_465_020_438_98e-41 - 1.0).abs() < 1e-8);
+    }
 
     #[test]
     fn from_columns_with_intercept_prepends_const_column() {

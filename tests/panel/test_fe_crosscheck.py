@@ -86,6 +86,8 @@ FIXTURE_PATH = (
 
 RTOL = TOLERANCES["fe_crosscheck"]["rtol"]
 ATOL = TOLERANCES["fe_crosscheck"]["atol"]
+ATOL_P_VALUE = TOLERANCES["fe_crosscheck"]["atol_p_value"]
+RTOL_P_VALUE = TOLERANCES["fe_crosscheck"]["rtol_p_value"]
 
 ALL_SCENARIOS = ONE_WAY_ONLY_SCENARIOS + TWO_WAY_SCENARIOS
 
@@ -113,6 +115,12 @@ def crosscheck() -> dict:
 
 _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
 _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
+# p値は絶対誤差の下限を設けず相対誤差だけで比較する（下限があると、参照値が
+# 1e-8未満の裾のp値が0.0でも通ってしまう）。
+_assert_p_close = partial(assert_close, rtol=RTOL_P_VALUE, atol=ATOL_P_VALUE)
+_assert_p_dict_close = partial(
+    assert_dict_close, rtol=RTOL_P_VALUE, atol=ATOL_P_VALUE
+)
 
 
 def _check_result(res, ref: dict, label: str) -> None:
@@ -127,14 +135,14 @@ def _check_result(res, ref: dict, label: str) -> None:
     _assert_dict_close(
         res.test_stats, ref["test_stats"], f"{label}/test_stats"
     )
-    _assert_dict_close(res.p_values, ref["p_values"], f"{label}/p_values")
+    _assert_p_dict_close(res.p_values, ref["p_values"], f"{label}/p_values")
     for name, (ref_lower, ref_upper) in ref["conf_int"].items():
         our_lower, our_upper = res.conf_int[name]
         _assert_close(our_lower, ref_lower, f"{label}/conf_lower/{name}")
         _assert_close(our_upper, ref_upper, f"{label}/conf_upper/{name}")
 
     _assert_close(res.f_statistic, ref["f_statistic"], f"{label}/f_statistic")
-    _assert_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")
+    _assert_p_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")
     _assert_close(res.aic, ref["aic"], f"{label}/aic")
     _assert_close(res.bic, ref["bic"], f"{label}/bic")
     _assert_close(

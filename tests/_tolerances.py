@@ -237,6 +237,13 @@ TOLERANCES: dict[str, dict[str, float]] = {
     "fe_crosscheck": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_CROSSCHECK_FLOOR,
+        # p値（係数・F統計量）は絶対誤差の下限なしの相対誤差のみで比較する。
+        # 裾のp値（1e-40等）が0.0に潰れる実装を検出するため。
+        "atol_p_value": 0.0,
+        # 裾のp値は統計量の丸め誤差（1e-13程度）が`exp(-F)`型に増幅されるため、
+        # 統計量より緩い（実測最大相対誤差2.6e-8、many_regressors/two_way/cluster/
+        # f_p_value、p=2e-138）。
+        "rtol_p_value": 1e-6,
     },
     # REのRクロスチェックはplm（全cov_type、hc2/hc3・cluster/dkとハウスマン検定は
     # 単一参照実装の例外、`benchmark/panel/run_plm_benchmark.R`・
@@ -286,6 +293,12 @@ TOLERANCES: dict[str, dict[str, float]] = {
             "dk": 5e-2,
         },
         "atol": ATOL_CROSSCHECK_FLOOR,
+        # p値（係数・F統計量）は絶対誤差の下限なし。バランスパネルは相対誤差、
+        # 不均衡パネルは常用対数の差（`test_re_crosscheck.py`の`_assert_p_close`参照）。
+        "rtol_p_value": 1e-6,
+        # 不均衡パネルの実測最大|log10(ours/ref)|は0.03未満（係数・F統計量のp値
+        # 全体、約1e-48〜1e-9の裾を含む）。約3倍のマージン。
+        "p_value_log10_unbalanced": 0.1,
         # ハウスマン検定: 回帰ベース（補助回帰）版の
         # `plm::phtest(method = "aux", effect = "individual")`と比較する
         # （`generate_re_crosscheck_fixtures.py`モジュールdoc参照）。

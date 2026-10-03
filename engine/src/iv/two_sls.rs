@@ -486,7 +486,7 @@ impl TwoSlsEstimator {
             let stat = quad / sigma2;
             let chi2 = ChiSquared::new(df as f64)
                 .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
-            let p_value = 1.0 - chi2.cdf(stat);
+            let p_value = chi2.sf(stat);
             (Some(stat), Some(p_value), Some(df))
         };
 
@@ -908,7 +908,7 @@ fn wald_f_test(
 
     let f_dist = FisherSnedecor::new(df_model as f64, df_inference as f64)
         .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
-    let wald_p_value = 1.0 - f_dist.cdf(wald_statistic);
+    let wald_p_value = f_dist.sf(wald_statistic);
 
     Ok((wald_statistic, wald_p_value))
 }

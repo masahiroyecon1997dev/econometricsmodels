@@ -556,7 +556,7 @@ impl GmmEstimator {
                 .sum();
             let chi2 = ChiSquared::new(df as f64)
                 .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
-            let p_value = 1.0 - chi2.cdf(stat);
+            let p_value = chi2.sf(stat);
             (Some(stat), Some(p_value), Some(df))
         };
 
@@ -1209,7 +1209,7 @@ fn gmm_wald_chi2_test(
 
     let chi2 = ChiSquared::new(df_model as f64)
         .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
-    let p_value = 1.0 - chi2.cdf(wald);
+    let p_value = chi2.sf(wald);
 
     Ok((wald, p_value))
 }

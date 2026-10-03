@@ -85,7 +85,8 @@ where
     let p_value = if stat.is_nan() {
         f64::NAN
     } else {
-        2.0 * (1.0 - dist.cdf(stat.abs()))
+        // `1.0 - cdf`は裾でcdfが1.0に丸められp値が0になるため、生存関数`sf`を使う。
+        2.0 * dist.sf(stat.abs())
     };
     InferenceStat {
         stat,
@@ -99,6 +100,24 @@ where
 mod tests {
     use super::*;
     use statrs::distribution::{Normal, StudentsT};
+
+    #[test]
+    fn compute_inference_stat_keeps_precision_in_the_far_tail() {
+        // `1.0 - cdf`では裾でcdfが1.0に丸められp値が0.0になる（相対誤差が劣化する）ため
+        // 生存関数`sf`を使う。R: `2*pt(-40, 20)` = 1.45746965543107e-20、
+        // `2*pnorm(-20)` = 5.50724823721247e-89。
+        let t_dist = StudentsT::new(0.0, 1.0, 20.0).unwrap();
+        let crit = critical_value(&t_dist, 0.95);
+        let t_result = compute_inference_stat(&t_dist, 40.0, 1.0, crit);
+        assert!((t_result.p_value / 1.457_469_655_431_07e-20 - 1.0).abs() < 1e-8);
+        // 符号が負でも対称（`stat.abs()`を使う）。
+        let t_neg = compute_inference_stat(&t_dist, -40.0, 1.0, crit);
+        assert!((t_neg.p_value / t_result.p_value - 1.0).abs() < 1e-12);
+
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        let z_result = compute_inference_stat(&normal, 20.0, 1.0, critical_value(&normal, 0.95));
+        assert!((z_result.p_value / 5.507_248_237_212_47e-89 - 1.0).abs() < 1e-8);
+    }
 
     #[test]
     fn critical_value_matches_known_normal_quantile() {

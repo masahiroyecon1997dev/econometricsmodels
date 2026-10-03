@@ -129,9 +129,9 @@
 //!   （θ=1）を使う。定数列もθ=1でdemeanされると恒等的に全ゼロ列になるため
 //!   （`quasi_demean_column`の`θ_i=1`は`ȳ_i.`を引くだけ、定数列のエンティティ平均は
 //!   常に1）、`wx @ params`の切片項の寄与は自動的に消える——傾き係数だけを
-//!   θ=1変換済み`x`に当てはめれば良い。共有ヘルパー`all_ones_theta`
-//!   （`common.rs`、元はFE専用だったが本Issueで共有ロジックとして移設）で
-//!   `quasi_demean_column`用のθマップを組み立てる。
+//!   θ=1変換済み`x`に当てはめれば良い。θ=1変換（within変換）済みの`y`・`x`は
+//!   分散成分推定の内部1-way FE推定が既に計算しているため、それを再利用する
+//!   （`re_r_squared_within`のdocコメント参照）。
 //! - `linearmodels`の`_rsquared`は`has_constant and exog.nvar==1`（傾き係数が0個）なら
 //!   3種とも`0.0`を即座に返す早期リターンを持つ。RE側もこれに倣い`df_model==1`なら
 //!   3種とも`0.0`とする（`f_statistic`のNaN分岐とは異なる扱いなので注意）。
@@ -185,12 +185,12 @@ use crate::inference;
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput, wald_f_test};
 use crate::panel::common::{
-    PanelDimension, PanelError, PanelHcVariant, all_ones_theta, count_unique, group_indices_by_key,
+    PanelDimension, PanelError, PanelHcVariant, count_unique, group_indices_by_key,
     leverage_within, panel_classical_cov_params, panel_cluster_cov_params,
     panel_driscoll_kraay_cov_params, panel_hc_cov_params, quasi_demean_column,
     resolve_dk_bandwidth, validate_dk_periods_cover_tested_coefficients, xtx_inverse,
 };
-use crate::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput, within_transform_one_way};
+use crate::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput};
 use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
 /// REの被説明変数・説明変数・パネル識別子を保持する入力データ。
@@ -351,19 +351,37 @@ fn entity_means(
     (y_means, x_means, t)
 }
 
+/// `re_r_squared_within`/`re_hausman_test`が内部FE推定のwithin変換済みデータを再利用する
+/// 前提（`fe`は1-way・`time`なし・切片なしで、`OlsEstimator`への入力が
+/// `within_transform_one_way(fe.input())`の全列そのもの）をdebugビルドで確認する。
+/// `swamy_arora_variance_components`を変更して（2-way化・重み付け・共線列の自動除外等）
+/// この前提が崩れた場合に、ビット単位で同値という再利用の根拠が黙って壊れないようにする。
+fn debug_assert_within_reuse_contract(fe: &FeEstimator) {
+    debug_assert_eq!(fe.effects(), FeEffects::OneWay);
+    debug_assert!(fe.input().time().is_none());
+    debug_assert!(!fe.estimator().input().has_intercept());
+    debug_assert_eq!(fe.estimator().input().k(), fe.input().x().len());
+}
+
 /// パネル固有R²（`r_squared_within`/`between`/`overall`、2.3節）を計算する。
 /// `df_model==1`（傾き係数0個）なら`linearmodels`の早期リターンに倣い3種とも`0.0`
 /// （モジュールdoc「パネル固有R²」参照）。それ以外は`re_r_squared_within`/
 /// `re_r_squared_between`/`re_r_squared_overall`をそれぞれ計算する。
 ///
 /// `params`は`estimator().params()`（先頭が切片`β0`、以降が`input.x_names()`と同じ並びの
-/// 傾き係数）をそのまま渡す想定。
-fn re_r_squared(input: &ReInput, params: &Mat<f64>, df_model: usize) -> (f64, f64, f64) {
+/// 傾き係数）をそのまま渡す想定。`fe`は`swamy_arora_variance_components`が返した1-way FE
+/// 推定量（`re_r_squared_within`がwithin変換済みの`y`・`x`を再利用する）。
+fn re_r_squared(
+    input: &ReInput,
+    fe: &FeEstimator,
+    params: &Mat<f64>,
+    df_model: usize,
+) -> (f64, f64, f64) {
     if df_model == 1 {
         return (0.0, 0.0, 0.0);
     }
     (
-        re_r_squared_within(input, params),
+        re_r_squared_within(fe, params),
         re_r_squared_between(input, params),
         re_r_squared_overall(input, params),
     )
@@ -374,24 +392,31 @@ fn re_r_squared(input: &ReInput, params: &Mat<f64>, df_model: usize) -> (f64, f6
 /// 傾き係数`β_j`（`params`の先頭`β0`を除く）だけを当てはめた残差平方和/全平方和で
 /// 計算する。定数列自体はθ=1変換すると恒等的に全ゼロ列になるため明示的には組み立てない
 /// （切片項の寄与は自動的に消える）。
-fn re_r_squared_within(input: &ReInput, params: &Mat<f64>) -> f64 {
-    let theta = all_ones_theta(input.entity());
-    let y = quasi_demean_column(input.y(), input.entity(), &theta);
-    let x: Vec<Vec<f64>> = input
-        .x()
-        .iter()
-        .map(|col| quasi_demean_column(col, input.entity(), &theta))
-        .collect();
-
-    let n = y.len();
-    let k = x.len();
+///
+/// within変換済みの`y`・`x`は、内部1-way FE推定（`fe`）が`OlsEstimator`へ委譲した入力
+/// （`fe.estimator().input()`、切片なし）をそのまま使う。`fe`はRE本体と同じ`y`・`x`・
+/// `entity`に`within_transform_one_way`を適用済みのため、ここで変換し直すのと
+/// ビット単位で同じ値になる（大標本ではwithin変換1回がエンティティ文字列の集計で
+/// 支配的なコストになるため再計算しない）。
+fn re_r_squared_within(fe: &FeEstimator, params: &Mat<f64>) -> f64 {
+    debug_assert_within_reuse_contract(fe);
+    let y = fe.estimator().input().y();
+    let x = fe.estimator().input().x();
+    debug_assert_eq!(
+        x.ncols() + 1,
+        params.nrows(),
+        "params must be [β0, slopes in the same order as the within-transformed x]"
+    );
+    let n = y.nrows();
+    let k = x.ncols();
     let mut ssr = 0.0;
     let mut tss = 0.0;
     for i in 0..n {
-        let fitted: f64 = (0..k).map(|j| x[j][i] * *params.get(j + 1, 0)).sum();
-        let resid = y[i] - fitted;
+        let fitted: f64 = (0..k).map(|j| *x.get(i, j) * *params.get(j + 1, 0)).sum();
+        let y_i = *y.get(i, 0);
+        let resid = y_i - fitted;
         ssr += resid * resid;
-        tss += y[i] * y[i];
+        tss += y_i * y_i;
     }
     if tss > 0.0 { 1.0 - ssr / tss } else { 0.0 }
 }
@@ -617,7 +642,10 @@ pub(crate) fn quasi_demean_transform(
 /// （`wald_test_last_columns`/`wald_f_test`が返すF統計量の`k`倍）、p値は`χ²_k.sf(stat)`。
 ///
 /// `fe`は`swamy_arora_variance_components`が返した1-way FE推定量で、`X̃`は
-/// `within_transform_one_way(fe.input())`から得る。`y_star`/`x_star`はRE本体の
+/// その推定が`OlsEstimator`へ委譲したwithin変換済み設計行列（`fe.estimator().input().x()`）を
+/// 再利用する。`fe`は1-way・`time`なしで`within_transform_one_way(fe.input())`を適用済みの
+/// ため、変換し直すのとビット単位で同じ値になる（大標本ではwithin変換1回がエンティティ
+/// 文字列の集計で支配的なコストになるため再計算しない）。`y_star`/`x_star`はRE本体の
 /// 回帰に渡した準偏差変換済みの`y`と傾き`X`（変換済み定数列は含まない）そのもの。
 ///
 /// 比較対象の傾き係数が0個なら`Ok(None)`（検定対象が無い）。補助回帰・Wald検定の失敗
@@ -642,11 +670,21 @@ fn re_hausman_test(
         return Ok(None);
     }
 
-    let (_, x_within) = within_transform_one_way(fe.input());
+    // `X̃`は内部FE推定が`OlsEstimator`へ委譲したwithin変換済み設計行列（切片なし、
+    // `fe.estimator().input().x()`）から取り出す。`within_transform_one_way(fe.input())`で
+    // 変換し直すのとビット単位で同じ値（関数docコメント参照）。
+    debug_assert_within_reuse_contract(fe);
+    let x_within_mat = fe.estimator().input().x();
+    debug_assert_eq!(x_within_mat.ncols(), k);
     let mut columns = x_star.to_vec();
-    columns.extend(x_within);
+    columns.extend((0..k).map(|j| x_within_mat.col_as_slice(j).to_vec()));
     let mut names = x_star_names.to_vec();
-    names.extend(fe.input().x_names().iter().map(|n| format!("{n}_within")));
+    names.extend(
+        fe.input()
+            .x_names()
+            .iter()
+            .map(|name| format!("{name}_within")),
+    );
 
     let aux_input = OlsInput::from_columns(y_star, &columns, names, true, dep_var_name.to_string())
         .map_err(to_err)?;
@@ -1127,7 +1165,7 @@ impl ReEstimator {
         // パネル固有R²（2.3節）。`input`はこの後`Self`に格納するため、
         // ムーブ前にここで計算する。
         let (r_squared_within, r_squared_between, r_squared_overall) =
-            re_r_squared(&input, estimator.params(), df_model);
+            re_r_squared(&input, &fe_for_sigma2_eps, estimator.params(), df_model);
 
         // ハウスマン検定（`re-spec.md`3.7節、モジュールdoc「ハウスマン検定」参照）。
         // 比較用の内部FEは`time`の有無によらず常に`swamy_arora_variance_components`が
@@ -1310,6 +1348,8 @@ impl ReEstimator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::panel::common::all_ones_theta;
+    use crate::panel::fe::within_transform_one_way;
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|s| s.to_string()).collect()
@@ -2378,6 +2418,35 @@ mod tests {
     }
 
     #[test]
+    fn re_estimator_fit_r_squared_within_matches_fresh_within_transform_exactly() {
+        // `re_r_squared_within`は内部FEのwithin変換済み`y`・`x`を再利用する。RE本体の入力に
+        // within変換をかけ直して計算した値とビット単位で一致する（不均衡パネル・2傾き）。
+        let re =
+            ReEstimator::fit(hausman_two_slope_input(None), ReCovType::Classical, 0.95).unwrap();
+        let input = re.input();
+        let fe_input = FeInput::from_columns(
+            input.y(),
+            input.x(),
+            input.x_names().to_vec(),
+            input.entity(),
+            None,
+            "y".into(),
+        )
+        .unwrap();
+        let (y_w, x_w) = within_transform_one_way(&fe_input);
+        let params = re.estimator().params();
+        let (mut ssr, mut tss) = (0.0, 0.0);
+        for i in 0..y_w.len() {
+            let fitted: f64 = (0..x_w.len())
+                .map(|j| x_w[j][i] * *params.get(j + 1, 0))
+                .sum();
+            ssr += (y_w[i] - fitted) * (y_w[i] - fitted);
+            tss += y_w[i] * y_w[i];
+        }
+        assert_eq!(re.r_squared_within(), 1.0 - ssr / tss);
+    }
+
+    #[test]
     fn re_estimator_fit_hausman_matches_manual_auxiliary_regression() {
         // 補助回帰の独立な手計算（`OlsEstimator`を直接使い、準偏差変換・within変換を
         // 自前で組み立てる）との一致。単一傾き・不均衡パネル（`cov_type_reference_input`）。
@@ -2439,6 +2508,18 @@ mod tests {
         let names = ["x1", "x2", "x1_w", "x2_w"].map(String::from).to_vec();
         let aux_input = OlsInput::from_columns(&y_star, &columns, names, true, "y".into()).unwrap();
         OlsEstimator::fit(aux_input, cov_type, 0.95).unwrap()
+    }
+
+    #[test]
+    fn re_estimator_fit_hausman_matches_fresh_within_transform_exactly() {
+        // `re_hausman_test`の`X̃`は内部FEのwithin変換済み設計行列を再利用する。RE本体の入力に
+        // within変換をかけ直して組んだ補助回帰（`manual_hausman_aux`、列順も同じ）と
+        // ビット単位で一致する（不均衡パネル・2傾き）。
+        let re =
+            ReEstimator::fit(hausman_two_slope_input(None), ReCovType::Classical, 0.95).unwrap();
+        let aux = manual_hausman_aux(re.input(), CovType::Classical);
+        let (f_stat, _) = aux.wald_test_last_columns(2).unwrap();
+        assert_eq!(re.hausman_statistic(), Some(2.0 * f_stat));
     }
 
     #[test]

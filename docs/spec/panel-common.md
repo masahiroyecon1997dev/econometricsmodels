@@ -32,6 +32,16 @@ Swamy-Arora分散成分推定の具体式、固定効果の復元等）は[`fe-s
     `cov_type="dk"`のとき）`PanelError::DkRequiresTime`。engine側は`FeCovType::Dk {
     bandwidth, time: Option<Vec<String>> }`（`time`が優先の上書き値）として実装
     （`engine/src/panel/fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
+- **`time`を`Options`に置く理由（トップレベル引数に昇格しない）**:
+  - `time`の意味がFEとREで異なる。FEでは2-way固定効果の構造指定だが、REでは`cov_type="dk"`の
+    時系列順序専用でRE自身の変換・ハウスマン検定には使わない。「パネル構造を定義する列名」という
+    共通の役割を持たないため、トップレベル引数にするとREでは意味の異なる（または`cov_type`次第で
+    無効になる）引数になる。
+  - `cluster`/`dk_time`（OLS/IVでは`hac_time`）等の補助列も、列名を取るが`Options`に置く既存規則と
+    整合する。
+  - 将来の高次元FE（3つ以上のFE次元）では、必須の`entity`以外の次元は`Options`側に並べる想定で、
+    その場合`time`は「追加FE次元の1つ」として`Options`に置く現行設計と矛盾しない。
+    今トップレベルへ昇格させると高次元FE導入時に再度移すことになる。
 - **命名規則**: 列名を受け取る引数は`entity`/`time`/`cluster`/`dk_time`のいずれも**`_col`サフィックスを
   付けない**（`y`/`x`/`weight`と同じ規約）。`dk_time`はDriscoll-Kraay型HACの時系列順序で、
   `cov_type`の値`"dk"`を接頭辞にした名前（OLS/WLS/IVの`hac_time`と対応）。

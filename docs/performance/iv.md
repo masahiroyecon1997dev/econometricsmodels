@@ -4,7 +4,9 @@
 
 再実行可能なスクリプトは`performance/compare_iv.py`（手法非依存の計測ハーネス`performance/_perf_harness.py` ＋ IV固有アダプタ、コミット対象）。生の計測結果JSONはコミットしない（`.gitignore`の`docs/performance/results/*.json`参照）。
 
-比較対象は linearmodels 単体（README「Verification accuracy」表の primary reference。`benchmark/iv/references/linearmodels_ref.py`と同じ主リファレンス）。2SLSは`linearmodels.iv.IV2SLS`、GMMは`linearmodels.iv.IVGMM`に対応させる。
+比較対象は linearmodels 単体（[検証ページ](../guide/verification.md)の primary reference。`benchmark/iv/references/linearmodels_ref.py`と同じ主リファレンス）。2SLSは`linearmodels.iv.IV2SLS`、GMMは`linearmodels.iv.IVGMM`に対応させる。
+
+> **役割分担**: 計測結果の表と性能特性の解釈は、公開ページ（英語。CIの計測値から生成）の[Performance](../guide/performance.md)・[Performance results](../guide/performance-results.md)に置く。このノートは計測方法論・設計判断・既知の限界・今後の検討を記録する。
 
 ## 計測方法
 
@@ -16,51 +18,11 @@
 - **計測範囲の対称性**: engine は係数・標準誤差と同じ `.fit()` の中で R²・調整済みR²・F統計量・過剰識別検定・弱操作変数F統計量・Wu-Hausman検定・第一段階回帰まで**常に一括計算**する。linearmodels の `IVResults` はこれらを遅延評価にしており、特に `first_stage.diagnostics` は**第一段階回帰をフル再fitする**（OLS の `rsquared`、Logit の `llnull` と同じ位置づけ）。`_fit_once_linearmodels` は `.fit()` 直後に `params`/`std_errors`/`tstats`/`pvalues`/`rsquared`/`rsquared_adj`/`f_statistic`/`first_stage.diagnostics`（2SLS は加えて `sargan`・`wu_hausman()`、GMM は `j_stat`）へ明示アクセスし、engine と同じ処理範囲で計測する。
 - **スイープ軸**: n軸（k=5固定、n=1,000〜1,000,000）、k軸（n=10,000固定、k=5・20）、method軸（下記）。
 
-## 結果: n軸（k=5固定）
+## 考察（結果表の外に残す、機構・経緯の記録）
 
-実行時間（秒、中央値）/ ピークRSS（MB）。devcontainer（12論理コア、シングルスレッド固定）、`repeats=3`、method=2sls。
-
-| n | engine | linearmodels |
-|---|---|---|
-| **classical** | | |
-| 1,000 | 0.0009 / 212 | 0.0403 / 216 |
-| 10,000 | 0.0079 / 220 | 0.1326 / 250 |
-| 100,000 | 0.0833 / 302 | 1.1774 / 589 |
-| 1,000,000 | 1.5143 / 1097 | 17.1606 / 3949 |
-| **hac** | | |
-| 1,000 | 0.0031 / 212 | 0.0748 / 216 |
-| 10,000 | 0.0141 / 221 | 0.1842 / 250 |
-| 100,000 | 0.1853 / 310 | 1.5186 / 589 |
-| 1,000,000 | 2.3971 / 1158 | 17.3030 / 3949 |
-
-## 結果: k軸（n=10,000固定）
-
-実行時間（秒、中央値）。method=2sls。
-
-| k | engine | linearmodels |
-|---|---|---|
-| **classical** | | |
-| 5 | 0.0082 | 0.3187 |
-| 20 | 0.0316 | 0.2783 |
-| **hac** | | |
-| 5 | 0.0114 | 0.1764 |
-| 20 | 0.0441 | 0.3447 |
-
-## 結果: method軸（cov_type=classical, k=5, n=1,000,000固定）
-
-実行時間（秒、中央値）。2sls は「結果: n軸」classical の n=1,000,000 行（engine 1.5143 / linearmodels 17.1606）を参照。
-
-| method | engine | linearmodels |
-|---|---|---|
-| gmm | 0.4880 | 12.2041 |
-
-## 考察
-
-- **classical（2SLS）**: 全nでengineがlinearmodelsより大幅に高速（n=1,000,000で約11倍、1.51s vs 17.16s、n=100,000で約14倍）。差がOLS/WLS（約2倍）より大きいのは、対称化で linearmodels 側に `first_stage.diagnostics`（第一段階のフル再fit）を含めているため。n=1,000,000 で linearmodels の内訳を実測すると、係数・標準誤差・R²・F統計量・Sargan・Wu-Hausman までで約5.2s、`first_stage.diagnostics` 追加で約16.4s。**この再fitを除いても engine（1.51s）は linearmodels コア（5.2s）の約3.4倍速い**（engine は第一段階を2SLS本体で1回通すだけで弱操作変数Fまで得るため、再fitのコストが実質ゼロ）。
-- **hac（2SLS）**: engineが全nで約7〜9倍速い（n=1,000,000で2.40s vs 17.30s）。linearmodels 側は `first_stage.diagnostics`（classicalで再fit）が支配的なため、classical→hac で linearmodels の総時間はほぼ変わらない（17.16s→17.30s）。engine 側は hac 本体（bartlett kernel の三重ループ）の分だけ増える（1.51s→2.40s）。
+- **OLS/WLSより差が大きい理由**: 対称化で linearmodels 側に `first_stage.diagnostics`（第一段階のフル再fit）を含めているため。n=1,000,000 で linearmodels の内訳を実測すると、係数・標準誤差・R²・F統計量・Sargan・Wu-Hausman までで約5.2s、`first_stage.diagnostics` 追加で約16.4s。**この再fitを除いても engine（1.51s）は linearmodels コア（5.2s）の約3.4倍速い**（engine は第一段階を2SLS本体で1回通すだけで弱操作変数Fまで得るため、再fitのコストが実質ゼロ）。
 - **メモリはengineが大幅に軽い**: n=1,000,000 で engine 約1.1GB に対し linearmodels 約3.9GB（約3.6倍）。linearmodels は patsy/pandas が構造式・第一段階の設計行列を複数回フルに構築するため、大規模nでメモリが伸びる。engine は Arrow ゼロコピーで polars をそのまま受け取り、内部行列も faer で必要分のみ確保する。
 - **method軸: GMM も engine が大幅に速い**: 代表点（classical, k=5, n=1,000,000）で engine 0.49s vs linearmodels 12.20s（約25倍）。engine の GMM（2ステップ）は 2SLS より速い（0.49s vs 1.51s）— 過剰識別が2本と軽く、かつ第一段階診断の再計算が無いため。
-- **kスケーリング（2SLS）**: classical k=5→20 で engine 約3.9倍（0.0082s→0.0316s）。linearmodels は n=10,000 だと固定オーバーヘッド（formula 解釈・第一段階再fit）が支配的で k=5/20 の差が出ない（0.32s / 0.28s、計測ノイズの範囲）。hac も engine 約3.9倍（0.0114s→0.0441s）で、OLS/Logit と同じく engine の k 方向の伸びがやや急な傾向。絶対値は小さい。
 
 ## 既知の限界
 
@@ -81,5 +43,5 @@ uv run python -m performance.render_performance_summary \
 ## 今後の検討事項
 
 - **engineのマルチスレッド線形代数の不安定性**: OLSと共通。
-- **kスケーリング**（上記「考察」参照）: OLS/Logit と共通の傾向。IV は第一段階＋構造式で行列演算が2段になるぶん、k方向の実装効率を見る価値がある。
+- **kスケーリング**（公開ページの結果表参照）: OLS/Logit と共通の傾向。IV は第一段階＋構造式で行列演算が2段になるぶん、k方向の実装効率を見る価値がある。
 - **releaseビルドでの再計測が前提**: 改善見込みの見積もりは、debugビルドの数値（誤り）ではなく本ドキュメントのreleaseビルド数値を基準にすること。

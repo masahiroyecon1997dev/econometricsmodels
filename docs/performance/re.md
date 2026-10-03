@@ -4,7 +4,9 @@
 
 再実行可能なスクリプトは`performance/compare_re.py`（手法非依存の計測ハーネス`performance/_perf_harness.py` ＋ RE固有アダプタ、コミット対象）。生の計測結果JSONはコミットしない（`.gitignore`の`docs/performance/results/*.json`参照）。
 
-比較対象は linearmodels 単体（README「Verification accuracy」表の primary reference。`benchmark/panel/references/linearmodels_ref.py`と同じ主リファレンス）。`linearmodels.panel.RandomEffects`に対応させる。
+比較対象は linearmodels 単体（[検証ページ](../guide/verification.md)の primary reference。`benchmark/panel/references/linearmodels_ref.py`と同じ主リファレンス）。`linearmodels.panel.RandomEffects`に対応させる。
+
+> **役割分担**: 計測結果の表と性能特性の解釈は、公開ページ（英語。CIの計測値から生成）の[Performance](../guide/performance.md)・[Performance results](../guide/performance-results.md)に置く。このノートは計測方法論・設計判断・既知の限界・今後の検討を記録する。
 
 ## 計測方法
 
@@ -18,46 +20,15 @@
 - **計測範囲の対称性**: engine（`ReEstimator::fit`）は係数・標準誤差と同じ`.fit()`の中でパネル固有R²・F統計量まで常に一括計算する。linearmodelsの`PanelResults`は遅延評価プロパティのため、`.fit()`直後に`params`/`std_errors`/`tstats`/`pvalues`/`rsquared_within`/`rsquared_between`/`rsquared_overall`/`f_statistic.stat`へ明示アクセスして確定させる（`f_statistic`はcov_type非依存のhomoskedastic固定——FEの`f_statistic_robust`とは異なり、engineの`ReEstimator`のF統計量自体がcov_typeに連動しない独自定義のため）。`aic`/`bic`はlinearmodelsが提供しないため対称性を取る対象に含めない。
 - **スイープ軸**: n軸（k=5固定、n=1,000〜1,000,000）、k軸（n=10,000固定、k=5・20、classical/hac両方）。
 
-## 結果: n軸（k=5固定）
+## 考察（結果表の外に残す、機構・経緯の記録）
 
-実行時間（秒、中央値）/ ピークRSS（MB）。devcontainer（12論理コア、シングルスレッド固定）、`repeats=3`。
-
-| n | engine | linearmodels |
-|---|---|---|
-| **classical** | | |
-| 1,000 | 0.0017 / 212 | 0.0320 / 217 |
-| 10,000 | 0.0171 / 215 | 0.0630 / 231 |
-| 100,000 | 0.2160 / 270 | 0.4877 / 333 |
-| 1,000,000 | 4.2359 / 779 | 8.2486 / 1242 |
-| **hac** | | |
-| 1,000 | 0.0028 / 211 | 0.0348 / 217 |
-| 10,000 | 0.0315 / 218 | 0.0883 / 231 |
-| 100,000 | 0.4453 / 299 | 0.5129 / 332 |
-| 1,000,000 | 6.9812 / 1079 | 4.9498 / 1242 |
-
-## 結果: k軸（n=10,000固定）
-
-実行時間（秒、中央値）。
-
-| k | engine | linearmodels |
-|---|---|---|
-| **classical** | | |
-| 5 | 0.0166 | 0.0765 |
-| 20 | 0.0434 | 0.1104 |
-| **hac** | | |
-| 5 | 0.0293 | 0.0624 |
-| 20 | 0.0648 | 0.0910 |
-
-## 考察
-
-- **classical**: 全nでengineがlinearmodelsより高速（n=1,000,000で約1.9倍、4.24s vs 8.25s）。RE自体はFEと異なりSwamy-Arora分散成分推定（内部1-way FE＋between回帰）とハウスマン検定用の内部FE呼び出しを含むため、FE単体（`fe.md`）よりも絶対値は大きい（n=1,000,000でFE classical 1.58s、RE classical 4.24s）。
-- **hac**: engineはn=1,000,000でclassicalの約1.6倍（4.24s→6.98s）——「内部ハウスマン用FEが1-way→2-wayに変わる」交絡（上記「計測方法」参照）を含むぶん、FE単体のclassical→hac増分（ほぼゼロ）より明確に大きい。
-- **n=1,000,000でlinearmodelsのclassicalがhacより遅いという直感に反する結果**: 2回のフルスイープでいずれも同じ傾向を確認した（classical 8.25s/10.21s、hac 4.95s/5.80s）。単発ノイズではなく再現する挙動だが、原因は`linearmodels.RandomEffects`の`cov_type="unadjusted"`（`HomoskedasticCovariance`）と`"kernel"`（`DriscollKraay`)の内部実装の違いに起因すると見られ、本ドキュメントの範囲では特定していない（`linearmodels`側の実装詳細のため、engine側の問題ではない）。n=1,000,000でのrun-to-run分散が他のn・他手法より大きい点に注意（下記「既知の限界」）。
-- **メモリはengineが軽い**: n=1,000,000でengine約779〜1079MBに対しlinearmodels約1242MB。
-- **kスケーリング**: classical k=5→20でengine約2.6倍（0.0166s→0.0434s）、linearmodels約1.4倍（0.0765s→0.1104s）。hacも同様の傾向（engine約2.2倍、linearmodels約1.5倍）。RE自身のk=20・hacはFEと異なり`ComputationError`にならず正常に計測できる（下記「既知の限界」、`fe.md`参照）。
+- **FEより重い理由**: RE自体はFEと異なりSwamy-Arora分散成分推定（内部1-way FE＋between回帰）とハウスマン検定用の内部FE呼び出しを含むため、FE単体（`fe.md`）よりも絶対値は大きい。
+- **hacがclassicalより重い理由**: 「内部ハウスマン用FEが1-way→2-wayに変わる」交絡（上記「計測方法」参照）を含むぶん、FE単体のclassical→hac増分（ほぼゼロ）より明確に大きい。
+- **devcontainerで観測された、n=1,000,000でlinearmodelsのclassicalがhacより遅いという直感に反する結果**: devcontainerの2回のフルスイープでいずれも同じ傾向だった（classical 8.25s/10.21s、hac 4.95s/5.80s。CIの計測では再現していない）。原因は`linearmodels.RandomEffects`の`cov_type="unadjusted"`（`HomoskedasticCovariance`）と`"kernel"`（`DriscollKraay`)の内部実装の違いに起因すると見られ、本ドキュメントの範囲では特定していない（`linearmodels`側の実装詳細のため、engine側の問題ではない）。
 
 ## 既知の限界
 
+- **k=20・dkはengineで`ComputationError`になる（未解決）**: ハウスマン検定を補助回帰版にした変更（FE/REの`cov_type="hac"`を`dk`へ改名した後）以降、n_periods=6に対しk=20では補助回帰（傾き`2k`本）のDriscoll-Kraay共分散部分行列がほぼ特異になり、`fit()`が「Hausman test auxiliary regression failed」で失敗する。`compare_re.py`のk軸は`cov_types`（classical・dk）を両方回すため、このk=20・dkの点でjobが失敗する（FEのk軸はclassicalのみで回避済み）。公開ページには、この点を欠損として明記して載せている。
 - **n=1,000,000での run-to-run 分散が大きい**: 2回のフルスイープでlinearmodelsのclassical/hacの大小関係が変わらないことは確認したが、絶対値は±20%程度変動した（classical 8.25s/10.21s）。計測は開発コンテナ上の少数回のスイープ（`repeats=3`の中央値）であり、大標本での環境ノイズ（メモリ確保・GC等）を排除しきれていない。
 - その他は`ols.md`「既知の限界」と共通。
 

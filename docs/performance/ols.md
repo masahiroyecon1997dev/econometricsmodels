@@ -4,7 +4,9 @@
 
 再実行可能なスクリプトは`performance/compare_ols.py`（手法非依存の計測ハーネス`performance/_perf_harness.py` ＋ OLS固有アダプタ、コミット対象）。生の計測結果JSONはコミットしない（`.gitignore`の`docs/performance/results/*.json`参照。実行環境依存で再現性が低いため）。
 
-比較対象を statsmodels 単体に絞っている（README「Verification accuracy」表の primary reference を性能比較でも踏襲）。以前は pyfixest とも比較していたが、正確性検証に使わない実装を性能比較のためだけに依存させる意味が薄いため廃止した（過去の pyfixest 込みの数値は git 履歴の本ファイル旧版を参照）。
+比較対象を statsmodels 単体に絞っている（[検証ページ](../guide/verification.md)の primary reference を性能比較でも踏襲）。以前は pyfixest とも比較していたが、正確性検証に使わない実装を性能比較のためだけに依存させる意味が薄いため廃止した（過去の pyfixest 込みの数値は git 履歴の本ファイル旧版を参照）。
+
+> **役割分担**: 計測結果の表と性能特性の解釈は、公開ページ（英語。CIの計測値から生成）の[Performance](../guide/performance.md)・[Performance results](../guide/performance-results.md)に置く。このノートは計測方法論・設計判断・既知の限界・今後の検討を記録する。
 
 ## 最重要の教訓: engineは必ずreleaseビルドで計測する
 
@@ -25,44 +27,6 @@
 - **サブプロセス隔離**: 1計測点＝1サブプロセス。同一プロセス内で連続測定するとアロケータが解放済みメモリを保持したままになり後続の計測のRSSが汚染されるため
 - **変換コスト除外**: polars→pandas変換（`df.to_pandas()`）は計測区間の外で1回だけ実施し、各試行で使い回す（リファレンス実装本体の処理ではないため）。engine側はArrowゼロコピーでpolarsをそのまま渡す
 - **スイープ軸**: n軸（k=5固定、n=1,000〜1,000,000）、k軸（n=10,000固定、k=5・20）
-
-## 結果: n軸（k=5固定）
-
-実行時間（秒、中央値）/ ピークRSS（MB）。devcontainer（12論理コア、シングルスレッド固定）、`repeats=3`。
-
-| n | engine | statsmodels |
-|---|---|---|
-| **classical** | | |
-| 1,000 | 0.0001 / 158 | 0.0062 / 203 |
-| 10,000 | 0.0011 / 160 | 0.0080 / 205 |
-| 100,000 | 0.0123 / 183 | 0.0281 / 238 |
-| 1,000,000 | 0.1388 / 402 | 0.2675 / 518 |
-| **HAC** | | |
-| 1,000 | 0.0001 / 158 | 0.0074 / 204 |
-| 10,000 | 0.0016 / 160 | 0.0110 / 207 |
-| 100,000 | 0.0218 / 192 | 0.0653 / 243 |
-| 1,000,000 | 0.3593 / 440 | 1.1911 / 612 |
-
-## 結果: k軸（n=10,000固定）
-
-実行時間（秒、中央値）。
-
-| k | engine | statsmodels |
-|---|---|---|
-| **classical** | | |
-| 5 | 0.0014 | 0.0115 |
-| 20 | 0.0043 | 0.0294 |
-| **HAC** | | |
-| 5 | 0.0016 | 0.0108 |
-| 20 | 0.0123 | 0.0361 |
-
-## 考察
-
-- **classical**: 全nでengineがstatsmodelsより高速。n=1,000,000でengineはstatsmodelsの約1.9倍（0.139s vs 0.268s）、n=100,000で約2.3倍速い。小規模nではstatsmodels側のPython/formula/pandasオーバーヘッドが支配的で、engineは1ミリ秒未満に収まる。適合度統計量一式の計算を両者に含めた対称な計測でもこの差は変わらない。
-- **HAC**: engineが全nで一貫して約3倍速い（n=1,000,000で0.36s vs 1.19s、n=100,000で0.022s vs 0.065s）。以前の pyfixest 込みの計測では n=1,000,000 で3者ほぼ互角だったが、シングルスレッド固定・対称計測にした結果、engine優位がはっきり出た。
-- **HACのkスケーリングに気になる点が残る**: n=10,000固定でk=5→20に増やすと、engineは0.0016s→0.0123s（**約7.7倍**）、statsmodelsは0.0108s→0.0361s（**約3.3倍**）。classical（engine約3.1倍 / statsmodels約2.6倍）と比べ、HACだけengineのk方向の伸びがリファレンスより急。Newey-West計算のk方向の計算量・実装に余地がある可能性（下記「今後の検討事項」）。
-- **メモリはengineが一貫して軽い**: 全cov_type・全nでengineのピークRSSが小さい（n=1,000,000でengine 402〜440MB、statsmodels 518〜612MB）。小〜中規模nではengineが約158〜192MB、statsmodelsが約203〜243MBで、statsmodels側のimport一式（pandas等）の基礎コストの差が出ている。
-- **小規模n（1,000）でPyO3/Arrow変換オーバーヘッドは支配的にならない**: classicalでengine 0.0001s（1ミリ秒未満）とstatsmodelsより桁で高速。「小規模では変換オーバーヘッドが支配的で遅くなる」という当初の懸念は当てはまらなかった。
 
 ## 既知の限界
 
@@ -125,5 +89,4 @@ uv run python -m performance.render_performance_summary \
 ## 今後の検討事項
 
 - **engineのマルチスレッド線形代数の不安定性（対応済み）**: 上記「既知の限界」参照。faerのグローバル並列度を`Par::Seq`固定にして解消した。残課題は「WSL2固有か native 多コア Linux でも同程度か」の切り分け（優先度低）。
-- **HACのkスケーリング**（上記「考察」参照）: engineのNewey-West計算（`hac_cov_params`）のk方向の計算量・実装を見る価値がある。
 - **releaseビルドでの再計測が前提**: 改善見込みの見積もりは、debugビルドの数値（誤り）ではなく本ドキュメントのreleaseビルド数値を基準にすること。

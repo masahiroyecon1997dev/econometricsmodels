@@ -61,8 +61,9 @@ CLAUDE.md（特に1章・7章）、`.claude/rules/python-style.md`、`.claude/ru
 
 ### 5. ドキュメント整合
 
-- `docs/performance/<method>.md` が存在し、「計測方法」「結果（n軸/k軸/method軸）」「考察」「既知の限界」「再現方法」が揃っているか。
-- 結果の数値が実走出力（`render_performance_summary` の出力）由来か。捏造・古い値の放置がないか（`generated_at` と本文の日付、`_meta` のバージョンと pyproject のピンが一致するか）。
+- `docs/performance/<method>.md`（日本語の開発ノート）が存在し、「計測方法」「既知の限界」「再現方法」が揃っているか。結果表・数値中心の考察はここに置かない（公開ページ側が正本。置くと二重管理になる）。
+- **公開ページへの反映**: 新手法・新しい軸/cov_typeが `docs/guide/performance-results.md`（`performance.render_docs_results` で CI の artifact から生成。手書きしない）に現れる構成になっているか（`benchmark_performance.yml` の matrix に手法がある＝生成対象に入る）。`docs/guide/performance.md` の手書き部分（既知の課題・計測条件）が新手法の事情に追随しているか。
+- 公開ページ・ノートの数値が実走出力（CI の artifact）由来か。捏造・古い値の放置がないか（`_meta` のバージョンと pyproject のピンが一致するか）。
 - スクリプトの docstring / コメントと doc「既知の限界」が食い違っていないか。
 - 生の結果 JSON（`docs/performance/results/<method>.json`）が `.gitignore` 対象でコミットされていないか。
 - `benchmark_performance.yml` の matrix に手法が追加されているか。リファレンス実装の追加依存（R 等）が必要なら workflow のセットアップ手順が追随しているか。
@@ -72,6 +73,7 @@ CLAUDE.md（特に1章・7章）、`.claude/rules/python-style.md`、`.claude/ru
 - 追加・変更が**既存の全手法（ols/wls/logit/probit/iv/tobit …）で挙動不変**か（新フィールドは `None` デフォルト・後方互換、`_meta` の新キーは任意扱い）。
 - サブプロセス隔離・release 検知・1スレッド固定・中央値という中核の不変条件を弱めていないか。
 - `render_performance_summary` が `_meta` の欠けたキー（古い JSON）に対して壊れないか（`.get(...)` で防御されているか）。
+- `render_docs_results`（公開ページ用の英語生成）が、`render_performance_summary` の部品を流用している点を壊していないか（見出しの階層・表の列名・`_meta` のキー）。`_meta` に新しいキーを足した場合、公開ページの生成も追随しているか。
 
 ## 手順
 

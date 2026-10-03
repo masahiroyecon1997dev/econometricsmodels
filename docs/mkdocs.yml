@@ -25,6 +25,9 @@ nav:
       - RE: api/re.md
   - Guides:
       - Inference conventions: guide/inference-conventions.md
+      - Verification: guide/verification.md
+      - Performance: guide/performance.md
+      - Performance results: guide/performance-results.md
 
 theme:
   name: material

@@ -11,6 +11,8 @@
 >
 > このため **Tobit について「CLAUDE.md 1章 の Rust 高速化を裏付けるライブの相対比較」は他5手法と非対称で、定量根拠は 2026-09 の凍結スナップショットに依存する**。かつその ~80〜200x は「Rust vs Python」に「解析的スコア／ヘッシアン vs 有限差分」の寄与が混ざった値で、**クリーンな Rust 化単独の高速化率として引用しない**こと（アーカイブ節「考察（当時）」参照）。将来インプロセス計測できる保守されたネイティブ Tobit 実装が現れた場合はライブ比較を再検討する。
 
+> **役割分担**: 計測結果の表と性能特性の解釈は、公開ページ（英語。CIの計測値から生成）の[Performance](../guide/performance.md)・[Performance results](../guide/performance-results.md)に置く。このノートは計測方法論・設計判断・既知の限界・今後の検討を記録する。
+
 ## 計測方法（現行）
 
 `docs/performance/ols.md`「最重要の教訓」「計測方法」・`probit.md` と共通（release ビルド必須・`tracemalloc` 不採用・サブプロセス隔離・スレッド数を1に固定・ウォームアップ1回＋`repeats` 回の中央値）。Tobit 固有の点は以下。
@@ -31,10 +33,10 @@
 - **n=200,000 は n スケーリングのデータ点＋安価な早期警告**。guard が回す seed=42 では再現しない（破綻していたのは seed=1）。
 - **この guard の限界**（深いカバレッジは「今後の検討事項」の凍結フィクスチャ + `AER::tobit` に委ねる）: (1) **単一 seed（42）**——`run_cli` の `--seed` はレポート全体で1つのため、このバグが示した seed 感度は検査できない。(2) **捕捉できるのは再発時の「例外」のみ**——この修正が持ち込みうる silently-wrong な収束（非最適点で収束宣言）は、finite な結果さえ返れば `check=True` を通る。(3) **発火はリリース単位**——`benchmark_performance.yml` はタグ push（`v*`）+ `workflow_dispatch` のみで、solver 回帰がリリースブランチにマージされても次のタグまで捕捉されない。
 
-## 結果（engine 単独）
+## 結果
 
-- **正の出力**: `benchmark_performance.yml` がタグ push（`v*`）ごとに `compare_tobit.py` → `render_performance_summary.py` を回した job summary。共有ランナーのため数値はぶれる（`ols.md`「計測方法」と同じ前提）。
-- **代表値**: 下記「[アーカイブ]」節の各表の **engine 列**（n=1,000〜1,000,000、k=5・20、newton / lbfgs）。py4etrics 撤去は engine 側の計算経路に影響しないため、engine 側が変わらない限りこれらが現行の代表値。要点: n=100,000・classical・newton で ~0.15s / ~244MB、n スケーリングは概ね線形、lbfgs は newton の ~3.2x（`_check_method_ratios` の上限 5x 内）、n=1,000,000 も `n_iter=11` で正しい最適点へ収束（過去のHessian特異バグは解消済み）。
+計測値は公開ページの[Performance results](../guide/performance-results.md)を参照（`benchmark_performance.yml`のCI計測値から生成）。engine 単独の計測で、py4etrics 撤去前の相対比較は末尾の凍結アーカイブを参照。
+
 - **1スレッド固定の解釈**: engine のマルチスレッド線形代数が多コア機・負荷下で不安定になる問題（対応済み）のため本計測は1スレッドに固定しており、数値は「シングルスレッドでの計算コア効率」。多コアでの実利用の性能特性とは別軸（`ols.md`「既知の限界」と共通）。
 
 ## 再現方法

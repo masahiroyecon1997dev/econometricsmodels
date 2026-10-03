@@ -69,8 +69,9 @@ econometricsmodels/
 │
 ├── docs/                          # MkDocs（GitHub Pages公開）
 │   ├── mkdocs.yml
+│   ├── guide/                     # 利用者向けの英語の公開ページ（navに掲載。推論の慣習・検証・性能。詳細は13章）
 │   ├── spec/                      # 実装済み手法の数式・API仕様の正本（詳細は13章）
-│   ├── performance/               # 手法別の性能比較記録（performance/compare_<method>.pyの実測。<method>.md＋results/にJSON）
+│   ├── performance/               # 手法別の性能比較の開発ノート（日本語。計測方法論・既知の限界。結果表は公開ページ側。results/にJSON）
 │   └── planning/                  # plan.md・実装途中の設計ノート（詳細は9章）
 │
 └── .github/workflows/
@@ -155,8 +156,12 @@ econometricsmodels/
   ある手法の実装が完了したら、その手法の仕様書は`docs/planning/specs/`から`docs/spec/`へ集約する
   （経緯は削除し理由のみ簡潔に記載、1ファイルにまとめる）。
 - 利用者向け横断ガイド: `docs/guide/`（mkdocsのnavに載せる英語の公開ページ）。現状は`inference-conventions.md`（手法別の検定分布・自由度、R/statsmodels/linearmodelsとの違い、診断統計量の読み方）。手法別の一覧表はこの公開ページを正本とし、`docs/spec/inference-conventions.md`には重複させず選択理由・ベンチマーク上の注意のみを置く。新手法の追加時は公開ページの表に1行追加する。
-- 性能比較記録: `docs/performance/<method>.md`（`performance/compare_<method>.py`の実測サマリー。数式・API仕様ではなく
-  実行環境依存の実測値のため`docs/spec/`とは分ける）。生成JSONは`docs/performance/results/`（`.gitignore`対象）。
+- 性能比較記録: `docs/performance/<method>.md`（`performance/compare_<method>.py`の計測方法論・設計判断・既知の限界・今後の検討を残す日本語の開発ノート。
+  計測結果の表は置かない）。生成JSONは`docs/performance/results/`（`.gitignore`対象）。
+- **公開ページ（mkdocs nav掲載・英語）の運用ルール**: 検証と性能は、手法が増えたら公開ページにも反映する。
+  - `docs/guide/verification.md`: 手法×リファレンス（主・独立クロスチェック）・比較する統計量・許容誤差（`tests/_tolerances.py`が正）・実データ・単一リファレンスの例外。新手法のテスト作成（`/test-new`）の完了条件に含める。
+  - `docs/guide/performance.md`（概要・既知の課題・計測条件は手書き、先頭のサマリー表は生成ブロック）と`docs/guide/performance-results.md`（全表、全体が生成物）: **数値は`benchmark_performance.yml`のCI計測値を正とする**（devcontainerの単発計測は使わない）。リリース準備時（`/release`）にリリースブランチで手動実行し、artifactから`python -m performance.render_docs_results`で再生成する。手法を足すときは`benchmark_performance.yml`のmatrixに加えれば、次回の再生成で自動的にページへ現れる。
+  - 検証・性能の結果表は日本語ノートや`docs/spec/`に重複させない（公開ページが正本）。
 
 ## 14. 実装・テスト・ベンチマーク作成・仕様検討時の確認方針
 

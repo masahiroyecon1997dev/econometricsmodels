@@ -139,7 +139,9 @@ different statistical conventions, such as small-sample corrections, the
 differences are documented and the comparison criteria are adjusted
 accordingly.
 
-See the [inference conventions guide](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/inference-conventions/)
+See the [verification page](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/verification/)
+for the reference implementations and tolerances used for each method, and the
+[inference conventions guide](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/inference-conventions/)
 for method-by-method details.
 
 ## Performance
@@ -149,8 +151,12 @@ extensive validation from imposing an unacceptable performance cost.
 Speed remains an important design goal, especially for scripted workflows
 and larger datasets.
 
-Detailed benchmarks against statsmodels/linearmodels, along with known
-performance limitations, are tracked in [`docs/performance/`](docs/performance/).
+Execution time and memory are compared against statsmodels and linearmodels
+for every implemented method. See the
+[performance page](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/performance/)
+for a summary and known limitations, and the
+[full results](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/performance-results/)
+per method.
 
 ## Installation
 

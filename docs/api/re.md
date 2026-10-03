@@ -15,6 +15,14 @@ reason. Supported values are `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster
 `REOptions.time`; unlike `FEOptions`, there is no separate `dk_time` since RE has no two-way
 structure to disambiguate from the HAC time granularity.
 
+The small-sample corrections and the degrees of freedom of the t tests follow the same Stata/R
+convention as FE (`fixest`'s `ssc()` defaults; `plm::vcovHC(type = "sss")` for `"cluster"`):
+`"cluster"` scales by `G/(G-1) · (n-1)/(n-K)` and uses `G - 1` degrees of freedom, `"dk"` uses
+`T/(T-1)` with `T` = number of time periods in place of `G` and `T - 1` degrees of freedom, and
+the other types use `df_resid`. These differ from `linearmodels`, which does not apply the
+`G/(G-1)` factor. The F statistic is the exception: it does not depend on `cov_type`. See
+[Inference conventions](../guide/inference-conventions.md) for the full table.
+
 ## The Hausman test
 
 `REResults` exposes `hausman_statistic`, `hausman_p_value`, and `hausman_df` directly as
@@ -35,9 +43,8 @@ zero. Its properties:
 - The Wald test uses the covariance matching `REOptions.cov_type` (classical, `hc1`–`hc3`,
   `cluster`, or Driscoll-Kraay `dk`). With the default `cov_type="cluster"` this is the
   cluster-robust Hausman test; use `cov_type="classical"` for the classical version, which
-  assumes RE is fully efficient under the null. The auxiliary regression uses `OLS`-style
-  small-sample corrections (Stata/R-style), which differ from the linearmodels-style
-  corrections behind RE's own standard errors.
+  assumes RE is fully efficient under the null. The auxiliary regression uses the same
+  Stata/R-style small-sample corrections as RE's own standard errors.
 - All three are `None` only when there are no slope coefficients to compare. If the auxiliary
   regression cannot be computed (rank-deficient design, or a robust covariance that is
   structurally singular such as `cov_type="cluster"` with no more clusters than the `2k`

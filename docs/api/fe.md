@@ -33,6 +33,13 @@ structure and the HAC kernel use different time granularities). `FEOptions.dk_ba
 the kernel bandwidth explicitly; when omitted it is chosen automatically from the number of
 unique time periods.
 
+The small-sample corrections and the degrees of freedom of the t and F tests follow `fixest`'s
+`ssc()` defaults: `"cluster"` scales by `G/(G-1) · (n-1)/(n-K)` and uses `G - 1` degrees of
+freedom (`G` = number of clusters), `"dk"` uses `T/(T-1)` with `T` = number of time periods in
+place of `G` and `T - 1` degrees of freedom, and the other types use `df_resid`. These differ
+from `linearmodels`, which does not apply the `G/(G-1)` factor. See
+[Inference conventions](../guide/inference-conventions.md) for the full table.
+
 ## Panel R²
 
 `FEResults` reports three separate R² values instead of OLS's single `r_squared`/`adj_r_squared`

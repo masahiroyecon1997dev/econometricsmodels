@@ -172,23 +172,20 @@ FE実装時（`panel::fe`）のcov_type計算関数（`design_matrix_from_column
   `K=df_model`・`G`相当は`t_periods`を使う補正に変更した（FEの`Dk`と同じ式、3.3節参照）。
 - **t検定・信頼区間の自由度（`df_inference`）は`cov_type=Cluster`のとき`G-1`、`Dk`のとき
   `t_periods-1`に切り替える**（fixestの`ssc()`既定`t.df="min"`、FEと同じ
-  パターン）。それ以外（Classical/HC1-3）は`df_resid`のまま。**F統計量（3.5節）は
-  この切り替えの対象外**——`plm::pwaldtest`と同じく`CovType::Classical`の共分散による
-  Wald検定のため`cov_type`非依存で、分母自由度は常に`df_resid`。
+  パターン）。それ以外（Classical/HC1-3）は`df_resid`のまま。**F統計量（3.5節）も
+  同じ`cov_params`・`df_inference`のWald検定**（FEと同じ）。
 
 ### 3.5 F統計量
 
 傾き係数`df_model - 1`個（定数項を除く）が同時にゼロという帰無仮説のWald F検定
-（`F = β'V⁻¹β / q`、`q = df_model - 1`、`F(q, df_resid)`）。**定義は
-`plm::pwaldtest(test = "F")`と同じWald二次形式**で、`estimator()`（準偏差変換済みデータへの
-`CovType::Classical`のOLS）の`cov_params`の傾き係数部分行列を
-`OlsEstimator::wald_test_last_columns(q)`で検定する。傾き係数が0個（`df_model==1`）なら
+（`F = β'V⁻¹β / q`、`q = df_model - 1`）。**FEと同じく`cov_type`に連動する**: `cov_type`別に
+計算した`cov_params`（3.4節）の傾き係数部分行列を`wald_f_test`（OLS本体の検定の再利用、
+サンドイッチ計算を複製しない）で検定し、分母自由度`f_df_denom`は`df_inference`
+（`cluster`で`G-1`、`dk`で`t_periods-1`、それ以外は`df_resid`）で、t検定・信頼区間の
+`stat_df`と常に一致する（`tests/test_test_dfs.py`が全`cov_type`で固定している）。`classical`のとき
+`plm::pwaldtest(test = "F")`の既定（古典的分散共分散行列・`df.residual`）、ロバストの
+ときは`pwaldtest(test = "F", vcov = ...)`の統計量と一致する。傾き係数が0個（`df_model==1`）なら
 NaN。失敗（共分散部分行列のほぼ特異性）は`PanelError::FTestFailed`。
-
-**分母自由度`f_df_denom`と統計量は`cov_type`によらず常に同じ（`df_resid`、古典共分散）**
-（t検定・信頼区間の`stat_df`は`cluster`で`G-1`、`dk`で`T-1`に切り替わるため、この2つの
-`cov_type`では`stat_df != f_df_denom`になる。FEのF検定がロバスト共分散と`df_inference`を
-使うのとは異なる。不整合ではなく仕様）。`tests/test_test_dfs.py`が全`cov_type`で固定している。
 
 **`linearmodels`のSST/SSR方式ではなくplm定義を採用した理由**: `linearmodels.RandomEffects.
 fit().f_statistic`（`_PanelModelBase._f_statistic`）は、「定数項を除く」際の比較対象
@@ -199,14 +196,17 @@ fit().f_statistic`（`_PanelModelBase._f_statistic`）は、「定数項を除�
 Wald二次形式は`V`が正定値である限り負値にならず、FEのF統計量（Wald検定）とも揃う。
 バランスパネル（`θ`が全エンティティ共通）では両定義が一致し、不均衡パネルでは一致しない。
 
-- 検証は`plm::pwaldtest(test = "F")`との数値比較（`tests/panel/test_re_crosscheck.py`）。
-  バランスパネルは機械精度で一致する。不均衡パネルは`plm`と本実装のSwamy-Arora分散成分の
-  推定差（`θ`の差）で最大3e-4の相対誤差が出るため専用の許容誤差を使う（`tests/_tolerances.py`）。
-  バランスパネルは`linearmodels`の`f_statistic`とも機械精度で一致するため
-  （`tests/panel/test_re_reference.py`）、二重に検証される。不均衡パネルは定義が異なるため
-  `linearmodels`とは比較しない。
+- 検証は`plm::pwaldtest(test = "F", vcov = ...)`の統計量（hc2/hc3/cluster/dk、
+  `tests/panel/test_re_crosscheck.py`）と`linearmodels`の`f_statistic_robust`
+  （classical/hc1、`tests/panel/test_re_reference.py`）との数値比較。バランスパネルは機械精度で
+  一致する。`linearmodels`の`f_statistic_robust`は不均衡パネルでも機械精度で一致する
+  （点推定が一致するため）。`plm`との不均衡パネルは、Swamy-Arora分散成分の推定差
+  （`θ`の差）で`cov_type`別に最大約0.1〜0.7%の差が出るため専用の許容誤差を使う
+  （`tests/_tolerances.py`の`re_crosscheck.rtol_unbalanced_f`）。
+  `linearmodels`の`res.f_statistic`（SST/SSR方式、`cov_type`非依存）はバランスパネルの
+  classicalでのみ一致するため比較に使わない。
 - 傾き係数が1個のケースは「1自由度のF検定は両側t検定と代数的に等価」
-  （`f_statistic = test_stat²`）をエンジンの単体テストで固定している。
+  （`f_statistic = test_stat²`）を全`cov_type`でエンジンの単体テストが固定している。
 
 ### 3.6 パネル固有R²
 

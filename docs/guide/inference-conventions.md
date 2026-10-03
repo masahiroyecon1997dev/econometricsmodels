@@ -9,7 +9,7 @@ This page summarizes which reference distribution each method uses for its test 
 | OLS | t | F (`f_statistic`) | `n - k`; `G - 1` with `cov_type="cluster"` |
 | WLS | t | F | same as OLS |
 | FE | t | F | `df_resid` (`n - n_entities - k` for one-way) for `classical`/`hc1`-`hc3`; `G - 1` with `cov_type="cluster"`; `t_periods - 1` with `cov_type="dk"` |
-| RE | t | F | `df_resid` (`n - k`) for `classical`/`hc1`-`hc3`; `G - 1` with `cov_type="cluster"`; `t_periods - 1` with `cov_type="dk"`. The F statistic is a Wald test with the classical covariance matrix and does not depend on `cov_type`: `f_df_denom` is always `df_resid` |
+| RE | t | F | `df_resid` (`n - k`) for `classical`/`hc1`-`hc3`; `G - 1` with `cov_type="cluster"`; `t_periods - 1` with `cov_type="dk"`. The F statistic is the same Wald test as FE (it follows `cov_type`), so `f_df_denom` equals the degrees of freedom of the t tests |
 | IV, `estimator="2sls"` | t | F (`wald_dist="f"`) | `df_resid`; `G - 1` with `cov_type="cluster"` |
 | IV, `estimator="gmm"` | normal | chi-squared (`wald_dist="chi2"`) | none |
 | Logit / Probit | normal | likelihood-ratio chi-squared (`lr_statistic`, `lr_df`) | none |
@@ -51,7 +51,7 @@ The defaults below were checked against R 4.5.3 (sandwich 3.1.3, lmtest 0.9.40, 
 ### linearmodels
 
 - **IV (`IV2SLS`, `IVGMM`)**: `fit(debiased=False)` is the default, which reports normal and chi-squared statistics. econometricsmodels 2SLS always reports t and F (equivalent to `debiased=True`); GMM always reports normal and chi-squared (equivalent to `debiased=False`).
-- **Panel (`PanelOLS`, `RandomEffects`)**: `fit(debiased=True)` is the default, which reports t and F, consistent with FE and RE here. Point estimates and the `classical`/`hc1`-`hc3` standard errors still match linearmodels' `PanelOLS`/`RandomEffects`. The `cluster` and `dk` standard errors and their degrees of freedom no longer match linearmodels: FE/RE switched to fixest (R) / Stata-style small-sample corrections (`G/(G-1)·(n-1)/(n-K)`) instead of linearmodels' `n/(n-extra_df-k)`, because that is what fixest, `xtreg` and `reghdfe` users expect. See `docs/spec/fe-spec.md` / `docs/spec/re-spec.md` for the exact formulas. The RE F statistic is the Wald quadratic form of `plm::pwaldtest(test = "F")`, not linearmodels' sum-of-squares version: the two agree on balanced panels but differ on unbalanced ones, where linearmodels' value can even be negative.
+- **Panel (`PanelOLS`, `RandomEffects`)**: `fit(debiased=True)` is the default, which reports t and F, consistent with FE and RE here. Point estimates and the `classical`/`hc1`-`hc3` standard errors still match linearmodels' `PanelOLS`/`RandomEffects`. The `cluster` and `dk` standard errors and their degrees of freedom no longer match linearmodels: FE/RE switched to fixest (R) / Stata-style small-sample corrections (`G/(G-1)·(n-1)/(n-K)`) instead of linearmodels' `n/(n-extra_df-k)`, because that is what fixest, `xtreg` and `reghdfe` users expect. See `docs/spec/fe-spec.md` / `docs/spec/re-spec.md` for the exact formulas. The RE F statistic is the Wald quadratic form (the same as `plm::pwaldtest(test = "F", vcov = ...)` and linearmodels' `f_statistic_robust`), not linearmodels' `f_statistic`, which is a sum-of-squares version that ignores `cov_type`: the two agree only for the classical covariance on balanced panels, and linearmodels' value can even be negative on very unbalanced panels.
 
 ## Weak instruments
 

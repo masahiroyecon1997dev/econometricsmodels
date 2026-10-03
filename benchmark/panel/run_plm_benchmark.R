@@ -51,11 +51,14 @@
 #
 # ## F統計量（`f_statistic`/`f_p_value`）
 #
-# `pwaldtest(model, test = "F")`（傾き係数が同時にゼロというWald二次形式、
-# `vcov`既定＝plm自身の古典的分散共分散行列）を使う。**`cov_type`によらず
-# 同じ値**（本実装のREのF統計量は`cov_type`非依存、`re-spec.md`3.5節）なので、
-# どの`cov_type`の出力にも同じ値が入る。plmは変量効果で既定が`Chisq`検定のため
-# `test = "F"`を明示する（分母自由度は`df.residual`）。
+# `pwaldtest(model, test = "F", vcov = vc)`（傾き係数が同時にゼロというWald
+# 二次形式`β'V⁻¹β/q`）。本実装のREのF統計量は`cov_type`に連動する（FEと同じ、
+# `re-spec.md`3.5節）ため、t検定と同じ`vc`を渡す。plmは変量効果で既定が
+# `Chisq`検定のため`test = "F"`を明示する。**p値は`pwaldtest`自身の`p.value`
+# ではなく、統計量と上記のt検定と同じ分母自由度`t_df`から`pf()`で計算し直す**
+# （`pwaldtest`の分母自由度は`vcov`の種類で決まる実装で、本実装の規約
+# （clusterは`G-1`・dkは`T-1`・それ以外は`df_resid`）と一致する保証がないため、
+# 統計量だけをplmの値として使う）。
 #
 # ## ハウスマン検定は対象外
 #
@@ -157,8 +160,10 @@ crit <- qt(0.975, df = t_df) # 95%信頼区間固定（run_fixest_benchmark.Rの
 conf_lower <- coefs - crit * ses
 conf_upper <- coefs + crit * ses
 
-# F統計量は`cov_type`非依存（`vcov`引数なし）。
-wald_f <- pwaldtest(model, test = "F")
+# F統計量（上記コメント参照）。`vc`は上のcov_typeごとの分散共分散行列。
+wald_f <- pwaldtest(model, test = "F", vcov = vc)
+f_df_num <- as.numeric(wald_f$parameter[1])
+f_p_value_val <- pf(wald_f$statistic, f_df_num, t_df, lower.tail = FALSE)
 
 library(jsonlite)
 result <- list(
@@ -173,6 +178,6 @@ result <- list(
     SIMPLIFY = FALSE
   ),
   f_statistic = unname(wald_f$statistic),
-  f_p_value = unname(wald_f$p.value)
+  f_p_value = unname(f_p_value_val)
 )
 cat(toJSON(result, auto_unbox = TRUE, digits = NA))

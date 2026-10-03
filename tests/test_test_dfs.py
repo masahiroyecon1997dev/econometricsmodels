@@ -159,9 +159,10 @@ def test_fe_f_dfs(df):
 
 
 def test_re_f_dfs_and_hausman_df(df):
+    # 既定の`cov_type`は`cluster`（entityクラスター）なので分母自由度は`G-1`。
     res = RE(df, y="y", x=["x1", "x2"], entity="entity").fit()
-    assert (res.f_df_num, res.f_df_denom) == (2, res.df_resid)
-    assert _f_p(res.f_statistic, 2, res.df_resid) == pytest.approx(
+    assert (res.f_df_num, res.f_df_denom) == (2, N_ENTITIES - 1)
+    assert _f_p(res.f_statistic, 2, N_ENTITIES - 1) == pytest.approx(
         res.f_p_value, rel=1e-8
     )
     assert res.hausman_df == 2
@@ -269,34 +270,36 @@ def test_fe_dk_f_denominator_is_t_minus_one(df, options, n_periods):
 
 
 @pytest.mark.parametrize(
-    "options",
+    ("options", "expected_df_denom"),
     [
-        {"cov_type": "classical"},
-        {"cov_type": "hc1"},
-        {"cov_type": "hc2"},
-        {"cov_type": "hc3"},
-        {"cov_type": "cluster"},
-        {"cov_type": "cluster", "cluster": "grp"},
-        {"cov_type": "cluster", "cluster": "coarse"},
-        {"cov_type": "cluster", "cluster": "time"},
-        {"cov_type": "dk", "time": "time"},
-        {"cov_type": "dk", "time": "time5"},
+        ({"cov_type": "classical"}, RE_DF_RESID),
+        ({"cov_type": "hc1"}, RE_DF_RESID),
+        ({"cov_type": "hc2"}, RE_DF_RESID),
+        ({"cov_type": "hc3"}, RE_DF_RESID),
+        ({"cov_type": "cluster"}, N_ENTITIES - 1),
+        ({"cov_type": "cluster", "cluster": "grp"}, N_GROUPS - 1),
+        ({"cov_type": "cluster", "cluster": "coarse"}, N_COARSE - 1),
+        ({"cov_type": "cluster", "cluster": "time"}, N_PERIODS - 1),
+        ({"cov_type": "dk", "time": "time"}, N_PERIODS - 1),
+        ({"cov_type": "dk", "time": "time5"}, N_PERIODS_COARSE - 1),
     ],
 )
-def test_re_f_denominator_is_df_resid_for_every_cov_type(df, options):
-    """REのF統計量（古典共分散のWald検定）は`cov_type`に依存しないため、分母自由度は
-    常に`df_resid`。一方`stat_df`（t検定・信頼区間）は`cluster`で`G-1`、`dk`で
-    `T-1`に切り替わるので、この2つは`cluster`/`dk`で食い違う（不整合ではなく仕様）。
-    """
+def test_re_f_denominator_follows_cov_type(df, options, expected_df_denom):
+    """REのF統計量はFEと同じく`cov_type`に連動するWald検定で、分母自由度は
+    `cluster`で`G-1`、`dk`で`T-1`、それ以外は`df_resid`。t検定・信頼区間の
+    `stat_df`と常に一致する。"""
     res = _re(df, **options)
     assert res.df_resid == RE_DF_RESID
-    assert (res.f_df_num, res.f_df_denom) == (2, RE_DF_RESID)
-    assert _f_p(res.f_statistic, 2, RE_DF_RESID) == pytest.approx(
+    assert (res.f_df_num, res.f_df_denom) == (2, expected_df_denom)
+    assert res.f_df_denom == res.stat_df
+    assert _f_p(res.f_statistic, 2, expected_df_denom) == pytest.approx(
         res.f_p_value, rel=1e-8
     )
 
 
-def test_re_f_statistic_does_not_depend_on_cov_type(df):
+def test_re_f_statistic_depends_on_cov_type(df):
+    """`classical`以外はロバスト共分散のWald検定のため、F統計量が`classical`と
+    異なる（`cov_type`に連動していることの確認）。"""
     base = _re(df, cov_type="classical")
     for options in (
         {"cov_type": "hc1"},
@@ -304,18 +307,7 @@ def test_re_f_statistic_does_not_depend_on_cov_type(df):
         {"cov_type": "dk", "time": "time"},
     ):
         res = _re(df, **options)
-        assert res.f_statistic == pytest.approx(base.f_statistic, rel=1e-12)
-        assert res.f_p_value == pytest.approx(base.f_p_value, rel=1e-12)
-
-
-def test_re_stat_df_differs_from_f_df_denom_under_cluster_and_dk(df):
-    cluster = _re(df, cov_type="cluster", cluster="grp")
-    assert (cluster.stat_df, cluster.f_df_denom) == (
-        N_GROUPS - 1,
-        cluster.df_resid,
-    )
-    dk = _re(df, cov_type="dk", time="time")
-    assert (dk.stat_df, dk.f_df_denom) == (N_PERIODS - 1, dk.df_resid)
+        assert res.f_statistic != pytest.approx(base.f_statistic, rel=1e-6)
 
 
 # --- 不均衡パネル・不均衡クラスター --------------------------------------------
@@ -366,9 +358,11 @@ def test_unbalanced_fe_cluster_f_denominator_is_g_minus_one(
     assert _f_p(fe.f_statistic, 2, g - 1) == pytest.approx(
         fe.f_p_value, rel=1e-8
     )
-    # REのFは`cov_type`に依存せず`df_resid`のまま
     re = _re(df_unbalanced, cov_type="cluster", cluster=cluster)
-    assert re.f_df_denom == df_unbalanced.height - 3
+    assert (re.f_df_num, re.f_df_denom) == (2, g - 1)
+    assert _f_p(re.f_statistic, 2, g - 1) == pytest.approx(
+        re.f_p_value, rel=1e-8
+    )
 
 
 def test_unbalanced_dk_f_denominator_uses_observed_periods(df_unbalanced):
@@ -379,7 +373,10 @@ def test_unbalanced_dk_f_denominator_uses_observed_periods(df_unbalanced):
         fe.f_p_value, rel=1e-8
     )
     re = _re(df_unbalanced, cov_type="dk", time="time")
-    assert re.f_df_denom == df_unbalanced.height - 3
+    assert re.f_df_denom == t - 1
+    assert _f_p(re.f_statistic, 2, t - 1) == pytest.approx(
+        re.f_p_value, rel=1e-8
+    )
 
 
 @pytest.mark.parametrize("model", [Logit, Probit])

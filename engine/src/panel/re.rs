@@ -86,11 +86,12 @@
 //! （`has_intercept()==false`扱いになり変換済み定数項も検定に含めてしまう）誤りのため、
 //! `ReEstimator`独自に計算し直す。
 //!
-//! **定義は`plm::pwaldtest(test="F")`と同じWald二次形式**（傾き係数`q = df_model - 1`個が
-//! 同時にゼロという帰無仮説、`F = β'V⁻¹β / q`、`F(q, df_resid)`）。`estimator()`
-//! （準偏差変換済みデータへの`CovType::Classical`のOLS）の`cov_params`の傾き係数部分行列を
-//! `OlsEstimator::wald_test_last_columns(q)`（`wald_f_test`）で検定する。F統計量は
-//! RE自身の`cov_type`に依存しない（`f_df_denom`は常に`df_resid`、FEと異なる点）。
+//! **定義は`plm::pwaldtest(test="F", vcov=...)`と同じWald二次形式**（傾き係数
+//! `q = df_model - 1`個が同時にゼロという帰無仮説、`F = β'V⁻¹β / q`）。FEと同じく
+//! **RE自身の`cov_type`に連動する**: `cov_type`別に計算した`cov_params`の傾き係数部分行列を
+//! `wald_f_test`で検定し、分母自由度（`f_df()`の第2要素）は`df_inference`
+//! （`Cluster`のとき`G-1`、`Dk`のとき`t_periods-1`、それ以外は`df_resid`）。
+//! `Classical`のとき`plm::pwaldtest`の既定（古典的分散共分散行列、`df.residual`）と一致する。
 //!
 //! **当初は`linearmodels.RandomEffects.fit().f_statistic`（変換済みyの単純平均を基準にした
 //! 古典的SST/SSR比較）に合わせていたが、plm定義に変更した**。`linearmodels`の
@@ -98,9 +99,9 @@
 //! 変換済み定数列（`1-θ_i`、エンティティごとに異なる）ではなく単純平均で構成するため、
 //! 教科書的な入れ子モデル比較（`total_ss >= residual_ss`）の保証が無く、極端な不均衡
 //! パネル（`T_i`の差が大きい）で**負値になる**（`linearmodels`自身でも実地確認済み）。
-//! Wald二次形式は`V`が正定値である限り負値にならない。バランスパネルでは`θ`が全
-//! エンティティで共通になり両定義は一致する（`plm`・`linearmodels`の両方と機械精度で
-//! 一致することを確認済み）が、不均衡パネルでは異なる。傾き係数が0個（`df_model==1`）なら
+//! Wald二次形式は`V`が正定値である限り負値にならない。`Classical`のバランスパネルでは
+//! `θ`が全エンティティで共通になり両定義は一致する（`plm`・`linearmodels`の両方と
+//! 機械精度で一致することを確認済み）が、不均衡パネルでは異なる。傾き係数が0個（`df_model==1`）なら
 //! OLS/FE同様NaN。
 //!
 //! ## パネル固有R²（`r_squared_within`/`between`/`overall`、2.3節）
@@ -912,9 +913,8 @@ impl ReEstimator {
     /// `G-1`、`Dk`のとき`t_periods-1`に切り替える**（fixestの`ssc()`既定
     /// `t.df="min"`、FEと同じパターン）。`df_resid`自体は`cov_type`に
     /// よらず常に`n-df_model`のまま。**RE自身のF統計量（`f_statistic()`/
-    /// `f_p_value()`）はこの切り替えの対象外**——`plm::pwaldtest`と同じく
-    /// `CovType::Classical`の共分散行列によるWald検定（モジュールdoc「F統計量」参照）で、
-    /// `cov_type`に依存せず分母自由度は常に`df_resid`。
+    /// `f_p_value()`）もFEと同じく`cov_type`に連動し、分母自由度は`df_inference`
+    /// （`f_df()`、モジュールdoc「F統計量」参照）。
     ///
     /// # Errors
     /// - Swamy-Arora分散成分推定が失敗した場合（内部FE推定のsingleton検出・分散ゼロ・
@@ -1054,7 +1054,7 @@ impl ReEstimator {
                 let time = input.time_codes().ok_or(PanelError::DkRequiresTime)?;
                 let t_periods = time.n_groups();
                 let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
-                // RE本体のF統計量は`cov_type`非依存のClassical Wald検定だが、ハウスマン検定が
+                // RE本体のF統計量も傾き`k = df_model - 1`個を同時検定するが、ハウスマン検定が
                 // 同じ時点構造のDKで`X̃`の傾き`k = df_model - 1`個を同時検定するため、
                 // 補助回帰を待たずここで弾く（Clusterアームの`q`と同じ規約）。
                 validate_dk_periods_cover_tested_coefficients(t_periods, df_model - 1)?;
@@ -1096,12 +1096,14 @@ impl ReEstimator {
         }
 
         // F統計量（2.1節）: 傾き係数`df_model - 1`個（定数項を除く）が同時にゼロという
-        // 帰無仮説のWald F検定（`plm::pwaldtest(test="F")`と同じ二次形式`β'V⁻¹β/q`）。
-        // `estimator().f_statistic()`は`include_intercept=false`で委譲しているため定数項も
-        // 検定に含めてしまい誤りだが、`wald_test_last_columns`は設計行列の末尾`q`列
-        // （先頭の変換済み定数列を除く傾き係数）だけを`estimator()`の`cov_params`
-        // （`CovType::Classical`、RE自身の`cov_type`とは無関係）の部分行列で検定するため
-        // 正しい。Wald二次形式（`V`が正定値）のため負値にならない
+        // 帰無仮説のWald F検定（`β'V⁻¹β/q`、`plm::pwaldtest(test="F", vcov=...)`と同じ二次形式）。
+        // FEの`FeEstimator::fit`と同じく、`cov_type`別に計算し直した`cov_params`
+        // （上で計算済み）・`df_inference`（`Cluster`のとき`G-1`、`Dk`のとき`t_periods-1`、
+        // それ以外は`df_resid`）を`wald_f_test`に渡す（サンドイッチ計算を複製しない）。
+        // `estimator().f_statistic()`/`wald_test_last_columns`は`CovType::Classical`の
+        // 内部OLSの共分散・`df_resid`ベースのため、RE自身の`cov_type`を反映できず使わない。
+        // 先頭列が変換済み定数項なので`k_constant=1`、検定対象は傾き`df_model - 1`個。
+        // Wald二次形式（`V`が正定値）のため負値にならない
         // （`linearmodels`のSST/SSR方式は極端な不均衡パネルで負値になる、モジュールdoc
         // 「F統計量」参照）。
         let (f_statistic, f_p_value) = if df_model == 1 {
@@ -1109,9 +1111,14 @@ impl ReEstimator {
             // 自身の`df_model==0`分岐と同様NaN（0除算を避ける）。
             (f64::NAN, f64::NAN)
         } else {
-            estimator
-                .wald_test_last_columns(df_model - 1)
-                .map_err(|source| PanelError::FTestFailed { source })?
+            wald_f_test(
+                estimator.params(),
+                &cov_params,
+                1,
+                df_model - 1,
+                df_inference,
+            )
+            .map_err(|source| PanelError::FTestFailed { source })?
         };
 
         // パネル固有R²（2.3節）。`input`はこの後`Self`に格納するため、
@@ -1258,10 +1265,10 @@ impl ReEstimator {
         self.f_p_value
     }
 
-    /// `f_statistic()`の自由度`(分子, 分母)` = `(df_model - 1, df_resid)`。傾き係数が無く
+    /// `f_statistic()`の自由度`(分子, 分母)` = `(df_model - 1, df_inference)`。傾き係数が無く
     /// NaNのときは`None`。
     pub fn f_df(&self) -> Option<(usize, usize)> {
-        (self.df_model > 1).then_some((self.df_model - 1, self.df_resid))
+        (self.df_model > 1).then_some((self.df_model - 1, self.df_inference))
     }
 
     /// パネル固有R²（2.3節）。θ=1固定の通常のwithin変換での適合度
@@ -1950,6 +1957,53 @@ mod tests {
         let bw1 = ReEstimator::fit(input2, ReCovType::Dk { bandwidth: Some(1) }, 0.95).unwrap();
         assert!((*bw1.std_errors().get(0, 0) - 0.073_386_231_305_208_44).abs() < 1e-9);
         assert!((*bw1.std_errors().get(1, 0) - 0.191_848_292_228_156_4).abs() < 1e-9);
+    }
+
+    #[test]
+    fn re_estimator_fit_f_statistic_follows_cov_type_and_matches_squared_t_statistic() {
+        // F統計量（2.1節）は`cov_type`別に計算し直した`cov_params`・`df_inference`の
+        // Wald検定のため、傾き係数が1個（q=1）のこのデータでは「1自由度のF検定は
+        // 両側t検定と代数的に等価」（`f_statistic = test_stat²`、`f_p_value = p_value`）が
+        // 全`cov_type`で成り立つ。`cov_type`別の`cov_params`・分母自由度が正しく
+        // `wald_f_test`に渡っているかの回帰ガード（FEの同名の恒等式チェックと同じ）。
+        let entity = strings(&["a", "a", "a", "b", "b", "c", "c"]);
+        let time = strings(&["1", "2", "3", "1", "2", "1", "2"]);
+        let x1 = vec![1.0, 2.0, 4.0, 2.0, 3.0, 5.0, 6.0];
+        let y = [3.0, 4.0, 7.0, 8.0, 9.0, 6.0, 10.0];
+        let input = || {
+            ReInput::from_columns(
+                &y,
+                std::slice::from_ref(&x1),
+                vec!["x1".to_string()],
+                &entity,
+                Some(&time),
+                "y".into(),
+            )
+            .unwrap()
+        };
+
+        // 各`cov_type`の期待分母自由度: Clusterは`G-1=2`、Dkは`t_periods-1=2`、
+        // それ以外は`df_resid = n - df_model = 5`。
+        let cases = [
+            (ReCovType::Classical, 5),
+            (ReCovType::Hc1, 5),
+            (ReCovType::Hc2, 5),
+            (ReCovType::Hc3, 5),
+            (ReCovType::Cluster { groups: None }, 2),
+            (ReCovType::Dk { bandwidth: Some(1) }, 2),
+        ];
+        for (cov_type, expected_df_denom) in cases {
+            let label = format!("{cov_type:?}");
+            let re = ReEstimator::fit(input(), cov_type, 0.95).unwrap();
+            let t = *re.test_stats().get(1, 0);
+            assert!((re.f_statistic() - t * t).abs() < 1e-9, "{label}");
+            assert!(
+                (re.f_p_value() - *re.p_values().get(1, 0)).abs() < 1e-9,
+                "{label}"
+            );
+            assert_eq!(re.f_df(), Some((1, expected_df_denom)), "{label}");
+            assert_eq!(re.df_resid(), 5, "{label}");
+        }
     }
 
     #[test]

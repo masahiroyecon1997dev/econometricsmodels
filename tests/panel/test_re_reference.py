@@ -67,17 +67,7 @@ _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
 _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
 
 
-# 不均衡パネルではF統計量をlinearmodelsと比較しない。REのF統計量は`plm::pwaldtest`
-# と同じWald二次形式（`docs/spec/re-spec.md`3.5節）で、linearmodelsのSST/SSR方式とは
-# θ_iがエンティティごとに異なるときに値が一致しない（極端な不均衡では
-# linearmodels側が負値になる）。バランスパネルでは両定義が一致するため
-# 機械精度で比較し、不均衡パネルは`test_re_crosscheck.py`のplmで検証する。
-_UNBALANCED_SCENARIO = "unbalanced"
-
-
-def _check_result(
-    res, ref: dict, label: str, *, compare_f_statistic: bool = True
-) -> None:
+def _check_result(res, ref: dict, label: str) -> None:
     _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
     _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
     _assert_dict_close(
@@ -95,11 +85,10 @@ def _check_result(
     assert res.df_model == ref["df_model"], f"{label}/df_model"
     assert res.n_entities == ref["n_entities"], f"{label}/n_entities"
 
-    if compare_f_statistic:
-        _assert_close(
-            res.f_statistic, ref["f_statistic"], f"{label}/f_statistic"
-        )
-        _assert_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")
+    # `f_statistic_robust`（cov_type連動のWald二次形式）と比較する。
+    # classical/hc1ともに不均衡パネルでも機械精度で一致する。
+    _assert_close(res.f_statistic, ref["f_statistic"], f"{label}/f_statistic")
+    _assert_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")
     _assert_close(
         res.r_squared_within,
         ref["r_squared_within"],
@@ -128,12 +117,7 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
     options = REOptions(cov_type=cov_type)
     res = RE(df, y="y", x=x_cols, entity="entity", options=options).fit()
 
-    _check_result(
-        res,
-        fixtures[scenario][cov_type],
-        f"{scenario}/{cov_type}",
-        compare_f_statistic=scenario != _UNBALANCED_SCENARIO,
-    )
+    _check_result(res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}")
 
 
 # ── 凍結フィクスチャとの数値照合（実データ: Wooldridge wagepan） ───────

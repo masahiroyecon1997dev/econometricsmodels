@@ -95,7 +95,9 @@ FIXTURE_PATH = (
 
 RTOL_BALANCED = TOLERANCES["re_crosscheck"]["rtol_balanced"]
 RTOL_UNBALANCED_COEF = TOLERANCES["re_crosscheck"]["rtol_unbalanced_coef"]
-RTOL_UNBALANCED_F = TOLERANCES["re_crosscheck"]["rtol_unbalanced_f"]
+RTOL_UNBALANCED_F = TOLERANCES["re_crosscheck"][
+    "rtol_unbalanced_f"
+]  # cov_type別
 RTOL_UNBALANCED = TOLERANCES["re_crosscheck"]["rtol_unbalanced"]  # cov_type別
 ATOL = TOLERANCES["re_crosscheck"]["atol"]
 RTOL_HAUSMAN = TOLERANCES["re_crosscheck"]["rtol_hausman"]
@@ -134,11 +136,11 @@ ALL_CASES = [
 ]
 
 
-def _f_rtol_for(scenario: str) -> float:
-    """F統計量のrtol。不均衡パネルのみ分散成分の差を許容する（cov_type非依存）。"""
+def _f_rtol_for(scenario: str, cov_type: str) -> float:
+    """F統計量のrtol。不均衡パネルのみ分散成分の差をcov_type別に許容する。"""
     if scenario != _UNBALANCED_HAUSMAN_SCENARIO:
         return RTOL_BALANCED
-    return RTOL_UNBALANCED_F
+    return RTOL_UNBALANCED_F[cov_type]
 
 
 def _rtols_for(scenario: str, cov_type: str) -> tuple[float, float]:
@@ -180,8 +182,8 @@ def _check_result(
             our_upper, ref_upper, f"{label}/conf_upper/{name}", rtol=rtol
         )
 
-    # F統計量はcov_typeに依存しない（plm::pwaldtestのvcov既定）ため、
-    # どのcov_typeの参照値にも同じ値が入っている。
+    # F統計量はcov_typeに連動するWald検定（plm::pwaldtest(vcov=...)の統計量と
+    # t検定と同じ分母自由度から計算したp値）。
     _assert_close(
         res.f_statistic,
         ref["f_statistic"],
@@ -255,7 +257,7 @@ def test_synthetic_matches_plm(crosscheck, scenario, cov_type):
         f"{scenario}/{cov_type}",
         rtol=rtol,
         coef_rtol=coef_rtol,
-        f_rtol=_f_rtol_for(scenario),
+        f_rtol=_f_rtol_for(scenario, cov_type),
     )
 
 

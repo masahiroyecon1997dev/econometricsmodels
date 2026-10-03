@@ -43,11 +43,11 @@
 
 ## F統計量（f_statistic/f_p_value）
 
-`plm::pwaldtest(test = "F")`（Wald二次形式）を、`cov_type`によらず全エントリに
-同じ値で持つ（本実装のREのF統計量は`cov_type`非依存、`re-spec.md`3.5節）。
-バランスパネルでは`linearmodels`のSST/SSR方式とも一致するが、不均衡パネルでは
-一致せず`linearmodels`は負値にもなりうるため、`re.json`側の`linearmodels`比較は
-不均衡シナリオを対象にしない（`tests/panel/test_re_reference.py`）。
+`plm::pwaldtest(test = "F", vcov = <cov_typeと同じvcov>)`の統計量（Wald二次形式）を
+各エントリに持つ（本実装のREのF統計量はFEと同じく`cov_type`に連動する、
+`re-spec.md`3.5節）。p値は統計量とt検定と同じ分母自由度から`pf()`で再計算した値。
+classical/hc1は`re.json`側の`linearmodels`の`f_statistic_robust`で検証する
+（`res.f_statistic`はSST/SSR方式でcov_type非依存・不均衡パネルで不一致のため使わない）。
 
 ## 許容誤差について
 

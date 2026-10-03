@@ -250,15 +250,13 @@ class REResults:
     @property
     def f_statistic(self) -> float:
         """F-statistic for the joint significance of the slope
-        coefficients, excluding the intercept. Unlike FE, this is
-        **not** a `cov_type`-dependent Wald test: it always compares
-        the residual sum of squares against a total sum of squares
-        computed from the simple mean of the quasi-demeaned dependent
-        variable, following `linearmodels.RandomEffects`'s definition
-        (see `engine::panel::re::ReEstimator::fit`'s docstring on the
-        Rust side for the derivation). As a consequence it can be
-        negative for extremely unbalanced panels, and is `NaN` when
-        there are no slope coefficients (`df_model == 1`)."""
+        coefficients, excluding the intercept. As for FE, this is a Wald
+        test that follows `cov_type` (it uses the robust covariance
+        matrix and the same degrees of freedom as the t-tests, see
+        `f_df_denom`). It is the Wald quadratic form used by
+        `plm::pwaldtest`, so it is never negative, unlike the
+        sum-of-squares version of `linearmodels.RandomEffects`. It is
+        `NaN` when there are no slope coefficients (`df_model == 1`)."""
         return self._raw.f_statistic
 
     @property
@@ -275,8 +273,9 @@ class REResults:
     @property
     def f_df_denom(self) -> int | None:
         """Denominator degrees of freedom of `f_statistic` (`None` when it
-        is NaN). May differ from `df_resid`, so use this to recompute the
-        p-value from `f_statistic`."""
+        is NaN). Equal to `stat_df`: `G - 1` for `cov_type="cluster"`,
+        `t_periods - 1` for `"dk"` and `df_resid` otherwise. Use this to
+        recompute the p-value from `f_statistic`."""
         return self._raw.f_df_denom
 
     @property

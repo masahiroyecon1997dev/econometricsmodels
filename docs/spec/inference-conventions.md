@@ -10,7 +10,7 @@
 
 **GMM/Logit/Probit/Tobitがz分布を使う理由**: GMMの理論的正当化（Hansen 1982）およびMLEの漸近理論は、いずれもサンプルサイズが無限大に近づくときの漸近正規性のみに依拠しており、OLSの`n-k`に相当する自然な自由度・有限標本での厳密な分布の閉形式が存在しない。t分布を使うことは、存在しない有限標本の理論的裏付けを偽って主張することになるため、素直に漸近論が保証するz分布・カイ二乗分布を採用する（`iv-spec.md`3.2節、`nonlinear-common.md`4章）。Tobitも同じMLEベースのため同様に標準正規分布・Wald χ²（`tobit-spec.md`）。
 
-**クラスター時の自由度**: OLS/WLS/2SLSの`cov_type="cluster"`はp値・信頼区間の自由度を`G-1`にする（`ols-spec.md`3.2節）。FE/REも`cov_type="cluster"`では`G-1`（`G`は`cluster`列のクラスター数。既定のentityでなくても同様）、`cov_type="dk"`では`t_periods-1`、それ以外は`df_resid`（`fe-spec.md`3.2節、`re-spec.md`3.3節）。`fixest::feols(cluster=)`の`ssc()`既定`t.df="min"`と一致する。ただしREのF統計量だけは`cov_type`に依存しない（SST/SSR方式）ため、`f_df_denom`は常に`df_resid`で、`cluster`/`dk`では`stat_df`と食い違う（`re-spec.md`3.5節）。
+**クラスター時の自由度**: OLS/WLS/2SLSの`cov_type="cluster"`はp値・信頼区間の自由度を`G-1`にする（`ols-spec.md`3.2節）。FE/REも`cov_type="cluster"`では`G-1`（`G`は`cluster`列のクラスター数。既定のentityでなくても同様）、`cov_type="dk"`では`t_periods-1`、それ以外は`df_resid`（`fe-spec.md`3.2節、`re-spec.md`3.3節）。`fixest::feols(cluster=)`の`ssc()`既定`t.df="min"`と一致する。FE/REのF統計量も同じ`cov_type`別の共分散・自由度のWald検定のため、`f_df_denom`は`stat_df`と一致する（`fe-spec.md`3.2節、`re-spec.md`3.5節）。
 
 **engine側の型**: `engine::inference::StatDist::{T { df }, Normal}`で「t分布なら自由度がある、正規分布ならない」関係を型で保証する。Python側の`stat_dist`/`stat_df`はその写像。`marginal_effects()`は常に正規分布で、返り値が`list[dict]`のため行ごとの`stat_dist`は持たない（docstringに明記）。
 

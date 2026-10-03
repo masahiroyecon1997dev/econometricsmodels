@@ -291,13 +291,18 @@ pyerr`、FE/RE共有）を使う。RE固有の追加バリアントは`BetweenRe
 - Python主リファレンス: `linearmodels.RandomEffects`（点推定・`cov_type="unadjusted"`等）。
   Rクロスチェック: `plm`（`model="random"`、`benchmark/panel/run_plm_benchmark.R`）。
 - **【例外】** `cov_type="cluster"`/`"dk"`の標準誤差・推論統計量は
-  `linearmodels`ではなく、Stata/R型の補正式に相当する参照値（`plm::vcovHC(type="sss")`等、
-  3.4節参照）を正とする（`linearmodels`独自の`extra_df`補正から変更したため）。
-  `classical`/`hc1`は引き続き`linearmodels`と数値一致で検証する。
-- 許容誤差: Classical/HC1は`linearmodels`と相対誤差`1e-9`で数値完全一致。Cluster/HACは
-  Stata/R型補正への手計算検算（本実装と同じ式の再計算のため独立検証としての効力は薄いが、
-  回帰ガードとして機能する）。HC2/HC3は`plm::vcovHC`とのクロスチェック水準（分散成分推定法が
-  僅かに異なるため）。
+  `linearmodels`ではなく`plm`を正とする（`linearmodels`独自の`n/(n-k)`補正から
+  Stata・R型の補正（3.4節参照）に変更したため）。参照値は`plm::vcovHC(method = "arellano",
+  type = "sss")`（cluster）・`plm::vcovSCC(maxlag = <bandwidth>, type = "sss")`（dk。バンド幅は
+  本実装の既定式`floor(4*(T/100)^(2/9))`で求めた値を明示的に渡す）で、`plm`はz検定のため
+  t統計量・p値・信頼区間は`plm`の標準誤差から本実装と同じt分布（自由度clusterは`G-1`、
+  dkは`T-1`）で計算し直す（この自由度の選択自体は本実装と同じ規約の手計算で、独立検証が
+  及ぶのは補正係数込みの標準誤差まで）。`classical`/`hc1`は引き続き`linearmodels`と数値一致で
+  検証する。
+- 許容誤差: Classical/HC1は`linearmodels`と相対誤差`1e-9`で数値完全一致。Cluster/HAC・
+  HC2/HC3の`plm`クロスチェックは、バランスパネルでは機械精度で一致する（`1e-8`）。不均衡
+  パネルのみ分散成分推定（Swamy-Arora）が`plm`とlinearmodels準拠の本実装で僅かに異なるため
+  緩める（`2e-2`、dkのみ`5e-2`。`tests/_tolerances.py`の`re_crosscheck`参照）。
 - **ハウスマン検定は`plm::phtest(method = "aux", effect = "individual", vcov = ...)`のみを参照値と
   する例外規定**（`linearmodels`のソースに`hausman`という文字列が一切登場せず専用実装が
   無いことを確認済み。通常の「Python主リファレンス＋Rクロスチェック」の2系統検証の例外）。

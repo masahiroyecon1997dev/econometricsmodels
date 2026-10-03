@@ -271,8 +271,11 @@ demeanしたR²」を3種とも定義すると誤る）:
 - **【例外】** `cov_type="cluster"`/`"dk"`の標準誤差・推論統計量
   （`std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper`）は`linearmodels`
   ではなく`fixest`を正とする（3.3節参照、`linearmodels`独自の`extra_df`補正から
-  fixest・Stata型`G/(G-1)×(n-1)/(n-K)`補正に変更したため）。`classical`/`hc1`〜`hc3`は
-  引き続き`linearmodels`と数値一致で検証する。
+  fixest・Stata型`G/(G-1)×(n-1)/(n-K)`補正に変更したため）。fixestの`ssc()`既定のまま
+  1-way・2-wayとも機械精度で一致する（p値・信頼区間を含む）。DKはfixestの既定バンド幅が
+  本実装と異なるため、本実装の既定式`floor(4*(T/100)^(2/9))`で求めた値を`DK(lag)`へ明示的に
+  渡す。`linearmodels`との比較は`classical`（`unadjusted`）・`hc1`（`robust`）のみ、
+  `hc2`/`hc3`は`linearmodels`に無いためfixestのみ。
 - 許容誤差: 相対誤差`1e-9`を基本（`.claude/rules/testing-policy.md`の基本方針`1e-8`より
   厳しく、実測で機械精度一致が確認できたため）。
 - **`aic`/`bic`はRクロスチェック（`fixest`）のみで検証する**: `linearmodels.PanelOLS`は

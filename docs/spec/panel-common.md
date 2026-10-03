@@ -219,14 +219,18 @@ OLSの計算をそのまま使わない（WLSがR²等を素のOLS計算のま�
 `plm`・plm相当のStata型補正）を正とする。FE/REの`cluster`/`dk`の小標本補正を
 fixest（R）・Stata型に変更したため（`linearmodels`は独自の`n/(n-extra_df-k)`補正を
 使い、fixest・Stataの利用者が期待する値と一致しない）、この2つのcov_typeについては
-`linearmodels`との数値一致を意図的に崩している。`classical`/`hc1`〜`hc3`の標準誤差は
-引き続き`linearmodels`と数値一致する（変更なし）。
+`linearmodels`との数値一致を意図的に崩している。`classical`/`hc1`の標準誤差は
+引き続き`linearmodels`と数値一致する（変更なし。`hc2`/`hc3`は`linearmodels`に無くR（FEは`fixest`、
+REは`plm`）のみ）。
 
 ### 5.2 Rクロスチェックパッケージ
 
-- **RE**: `plm`（`model = "random"`）。
+- **RE**: `plm`（`model = "random"`）。`hc2`/`hc3`・`cluster`（`vcovHC(method = "arellano",
+  type = "sss")`）・`dk`（`vcovSCC(type = "sss")`）の標準誤差を検証する（`benchmark/panel/`配下の
+  `run_plm_benchmark.R`）。
 - **FE**: `fixest`（`benchmark/panel/`配下の`run_fixest_benchmark.R`）。`fixest`自体は
-  `.devcontainer/Dockerfile`に既にインストール済み。
+  `.devcontainer/Dockerfile`に既にインストール済み。`hc2`/`hc3`・`cluster`・`dk`は
+  `fixest`の`ssc()`既定のまま機械精度で一致する。
 
 ### 5.3 ハウスマン検定の参照値（例外規定）
 

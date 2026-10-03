@@ -40,11 +40,14 @@ import 時間は起動 UX に直結する。手法が Phase 4〜6 で増える�
 
 ### wheel / `.so` サイズ（`measure_wheel_size.py`）
 
-- リリース時はどのみち全プラットフォームの wheel をビルド済み。そのサイズを
+- リリース時はどのみち全プラットフォーム（Linux は manylinux/musllinux ×
+  x86_64/aarch64 の 4 種を含む）の wheel をビルド済み。そのサイズを
   ジョブサマリーに Markdown 表で出すだけ（**追加ビルドコストゼロ**）。
-- **fail させない**（リリースを止めない）。linux x86_64 wheel の展開後サイズが
+- **fail させない**（リリースを止めない）。linux x86_64 manylinux wheel の展開後サイズが
   下記「サイズ記録」表の最新行比 +10% を超えたときだけ `::warning::`
   アノテーションを出す（スクリプトが本ファイルの表をパースして基準値を得る）。
+  musllinux・aarch64 は記録のみ（`.so` サイズが libc・アーキテクチャで変わるため
+  基準を混ぜない）。
 - `.so` サイズは OS で変わり Python 版ではほぼ不変。記録は linux x86_64 を
   代表値として下表に**手動で**追記する（`docs/performance/<method>.md` の
   「手動でのローカル実測サマリー」運用と同じ。タグ push は detached HEAD で

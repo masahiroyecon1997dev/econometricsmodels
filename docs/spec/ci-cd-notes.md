@@ -27,17 +27,24 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
   - `engine_pybind-lint`ジョブ: `cargo fmt -p engine_pybind --check` →
     `cargo clippy -p engine_pybind --all-targets -- -D warnings`。
   - `pip-audit`ジョブ（Python 3.12固定）: `test`グループのみ対象。
-- **`cd_release.yml`**（Linux/macOS/Windows向けwheelビルド、タグpush（`v*`）+
+- **`cd_release.yml`**（Linux（manylinux/musllinux × x86_64/aarch64の4種）/macOS/Windows向けwheelビルド、タグpush（`v*`）+
   `workflow_dispatch`のみ。PR毎には回さない）: ビルド対象Pythonは
   `-i python3.12 -i python3.13 -i python3.14`を明示指定（`--find-interpreter`は未サポート
   バージョンまで検出するため不採用）。各ビルドジョブは`Build wheels`直後に
   **wheelサイズ記録ステップ**（`python -m performance.measure_wheel_size dist`）
   を持つ。ビルド済みwheelのサイズ（圧縮/展開後/うち`.so`|`.pyd`）を
   ジョブサマリーにMarkdown表で出すだけで、**リリースはゲートしない**。linux
-  x86_64ジョブのみ`--baseline docs/performance/package-health.md --warn-pct 10`を
+  x86_64 manylinuxジョブのみ`--baseline docs/performance/package-health.md --warn-pct 10`を
   渡し、展開後サイズが同ファイルの最新記録行比+10%超なら`::warning::`を出す
   （failはしない）。記録の追記は手動（タグpushはdetached HEADでCIからの
   auto-commitが脆いため。`docs/performance/package-health.md`参照）。
+  `linux`ジョブは4要素のmatrix（manylinux x86_64 / musllinux x86_64 / manylinux aarch64 /
+  musllinux aarch64）。aarch64はQEMUではなく**ネイティブARMランナー（`ubuntu-24.04-arm`、
+  publicリポジトリは無料）**でビルドする（polars一式を含む大きな`.so`のリリースビルドは
+  エミュレーション下では極端に遅くなるため）。musllinuxは`manylinux: musllinux_1_2`。
+  `fail-fast: false`で1要素の失敗が他をキャンセルしない。artifact名は
+  `wheels-linux-<target>-<libc>`（`publish-pypi`は`wheels-*`パターンで全て回収）。
+  追加wheelの動作確認（import・推定のスモークテスト）は行わない（macOS/Windowsも同様にビルドのみ）。
 - **`cd_docs.yml`**: mkdocsドキュメントのGitHub Pagesへの自動デプロイ。
 - **`dependabot.yml`**（`cargo`・`uv`・`github-actions`の3エコシステム）: `"pip"`ではなく
   **`"uv"`エコシステム**を採用（uv専用の`package-ecosystem`。`test`/`benchmark`/`dev`/`docs`
@@ -72,8 +79,9 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
   デバッグ/テストビルドで測る（`.so`が大きくdlopenコストは悲観側に出るため
   ガードとして安全側。ベースライン値は「デバッグビルドの上限値」）。
 - **wheel/`.so`サイズ**（`performance/measure_wheel_size.py`）: `cd_release.yml`の
-  各ビルドジョブで**記録のみ**（ゲートしない）。linux x86_64を代表値として、
-  展開後サイズが`package-health.md`の最新記録比+10%超なら`::warning::`。記録表への
+  各ビルドジョブで**記録のみ**（ゲートしない）。linux x86_64 manylinuxを代表値として、
+  展開後サイズが`package-health.md`の最新記録比+10%超なら`::warning::`（musllinux・aarch64は
+  `.so`サイズが異なるため記録のみで、基準は混ぜない）。記録表への
   追記は手動。
 - **別issue候補**（本監視のスコープ外）: `[profile.release]`に`strip = true`
   （即−11MB）、`lto`/`codegen-units`/`panic = "abort"`。数値性能への影響を

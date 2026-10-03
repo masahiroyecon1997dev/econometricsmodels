@@ -40,7 +40,7 @@
 
 ## 5. 対象プラットフォーム・Pythonバージョン
 
-- OS: Linux（manylinux）, macOS（Apple Silicon / Intel）, Windows
+- OS: Linux（manylinux / musllinux、x86_64 / aarch64の4種）, macOS（Apple Silicon / Intel）, Windows（x64）
 - Python: **3.12以上**
 
 ## 6. ドキュメント

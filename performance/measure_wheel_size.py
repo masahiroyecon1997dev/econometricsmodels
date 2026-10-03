@@ -50,11 +50,13 @@ class WheelSizes:
     ext_module_bytes: int
 
     @property
-    def is_linux_x86_64(self) -> bool:
-        """linux x86_64（manylinux/musllinux）wheel かどうか。"""
-        return "x86_64" in self.name and (
-            "manylinux" in self.name or "musllinux" in self.name
-        )
+    def is_manylinux_x86_64(self) -> bool:
+        """linux x86_64 manylinux wheel かどうか（musllinux・aarch64 は除く）。
+
+        `.so` サイズは libc・アーキテクチャで変わるため、回帰 warning の基準
+        （package-health.md）は manylinux x86_64 に限る。
+        """
+        return "x86_64" in self.name and "manylinux" in self.name
 
 
 def _format_mib(num_bytes: int) -> str:
@@ -105,8 +107,8 @@ def render_table(wheels: list[WheelSizes]) -> str:
         )
     lines.append("")
     lines.append(
-        "記録のみ（リリースをゲートしない）。linux x86_64 を代表値として "
-        "`docs/performance/package-health.md` に手動で追記する。"
+        "記録のみ（リリースをゲートしない）。linux x86_64 manylinux を"
+        "代表値として `docs/performance/package-health.md` に手動で追記する。"
     )
     lines.append("")
     return "\n".join(lines)
@@ -142,11 +144,11 @@ def parse_baseline_uncompressed_mib(md_path: Path) -> float | None:
 def _emit_warning_if_regressed(
     wheels: list[WheelSizes], baseline_path: Path | None, warn_pct: float
 ) -> None:
-    """linux x86_64 wheel の展開後サイズが基準比 +warn_pct% 超なら警告を出す。"""
+    """manylinux x86_64 wheel の展開後サイズが基準比 +warn_pct% 超なら警告。"""
     if baseline_path is None:
         return
-    linux_wheels = [w for w in wheels if w.is_linux_x86_64]
-    if not linux_wheels:
+    manylinux_wheels = [w for w in wheels if w.is_manylinux_x86_64]
+    if not manylinux_wheels:
         return
     baseline_mib = parse_baseline_uncompressed_mib(baseline_path)
     if baseline_mib is None or baseline_mib <= 0:
@@ -156,15 +158,16 @@ def _emit_warning_if_regressed(
         )
         return
     # 複数 Python バージョン分あるため悲観側（最大）で比較する。
-    current_mib = max(w.uncompressed_bytes for w in linux_wheels) / _MIB
+    current_mib = max(w.uncompressed_bytes for w in manylinux_wheels) / _MIB
     delta_pct = (current_mib - baseline_mib) / baseline_mib * 100.0
     print(
-        f"linux x86_64 展開後サイズ: {current_mib:.1f} MB "
+        f"linux x86_64 manylinux 展開後サイズ: {current_mib:.1f} MB "
         f"(記録 {baseline_mib:.1f} MB, {delta_pct:+.1f}%)"
     )
     if delta_pct > warn_pct:
         print(
-            f"::warning title=package size regression::linux x86_64 wheel の "
+            f"::warning title=package size regression::"
+            f"linux x86_64 manylinux wheel の "
             f"展開後サイズが直近記録比 {delta_pct:+.1f}%（{baseline_mib:.1f} "
             f"MB → {current_mib:.1f} MB、閾値 +{warn_pct:g}%）。"
             "別 issue（[profile.release] の strip 等）の検討時期かもしれません。"

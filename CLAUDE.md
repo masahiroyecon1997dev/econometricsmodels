@@ -139,7 +139,7 @@ econometricsmodels/
 
 ## 11. 対象プラットフォーム・Pythonバージョン
 
-- OS: Linux（manylinux）, macOS（Apple Silicon / Intel）, Windows
+- OS: Linux（manylinux / musllinux、x86_64 / aarch64の4種）, macOS（Apple Silicon / Intel）, Windows（x64）
 - Python: **3.12以上**。CIでのビルド・テスト対象は **3.12 / 3.13 / 3.14** の3バージョン。開発環境（devcontainer）は3.14を使用。
 
 ## 12. 今後の検討事項（未確定）

@@ -138,7 +138,13 @@ if (cov_type == "classical") {
   t_df <- n_groups - 1
 } else if (cov_type == "cluster") {
   # entity以外の列でクラスター（モジュールコメント参照）。
-  cluster_vec <- setNames(df[[args[6]]], rownames(pdf))
+  # `pdata.frame`は行をentity・時点でソートし行名を"entity-time"にするため、
+  # 元データの"entity-time"キーでクラスター列と対応づける（行順が崩れた入力でも
+  # 取り違えない）。
+  cluster_vec <- setNames(
+    df[[args[6]]],
+    paste(df[[entity_col]], df[[time_col]], sep = "-")
+  )
   X <- model.matrix(model)
   y_star <- pmodel.response(model)
   lm_fit <- lm(y_star ~ 0 + X)

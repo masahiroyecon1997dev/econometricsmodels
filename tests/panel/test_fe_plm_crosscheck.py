@@ -12,9 +12,17 @@
 
 1-way FEの`cluster`（entityクラスター）と`dk`のみ。plmは2-wayのwithinに対する
 クラスター・SCC共分散行列を持たず、クラスター列もgroup/timeしか指定できない
-ため、2-way・entity以外のクラスター列・クラスタ数境界はfixest側だけが参照値に
-なる（`test_fe_crosscheck.py`）。比較する統計量は係数・標準誤差・t統計量・
-p値・信頼区間・F統計量・F p値（AIC/BIC等はplmが提供しない）。
+ため、2-way・entity以外のクラスター列（その`G=q+1`等の境界を含む）はfixest側
+だけが参照値になる（`test_fe_crosscheck.py`）。比較する統計量は係数・標準誤差・
+t統計量・p値・信頼区間・F統計量・F p値・within R²（AIC/BIC等はplmが提供しない）。
+
+## 境界ケース
+
+fixest側（`test_fe_crosscheck.py`）の境界ケースのうちplmで再現できるものを持つ:
+クラスター数`G = q+1`・`G = 2`（plmのクラスターはentity単位のため先頭3・2
+entityに絞って作る）、dkの`T = q+1`、dkのバンド幅0・1、entityあたりの観測数が
+偏った不均衡（クラスターサイズの偏りの代用）。いずれもplm側で`wald()`のような
+分母自由度の切り上げはなく、手計算した自由度`G-1`/`T-1`で比較する。
 
 ## 独立性の限界
 
@@ -59,10 +67,15 @@ from benchmark.common import (
     WAGEPAN_Y,
 )
 from benchmark.panel.fixtures.generate_fe_plm_crosscheck_fixtures import (
+    EXPLICIT_BANDWIDTH_SCENARIOS,
+    EXPLICIT_BANDWIDTHS,
     MAX_BANDWIDTH_SCENARIOS,
     NUMERIC_SCENARIOS,
     WAGEPAN_COV_TYPES,
     _cov_types_for,
+    dk_three_periods_frame,
+    first_entities_frame,
+    skewed_entity_sizes_frame,
 )
 
 FIXTURE_PATH = (
@@ -123,6 +136,12 @@ def _check_result(
 
     _assert_close(res.f_statistic, ref["f_statistic"], f"{label}/f_statistic")
     _assert_p_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")
+    # within R²はcov_typeに依存しない（plmのsummary(model)$r.squared）。
+    _assert_close(
+        res.r_squared_within,
+        ref["r_squared_within"],
+        f"{label}/r_squared_within",
+    )
 
 
 def _expected_df(
@@ -134,8 +153,12 @@ def _expected_df(
     return df["time"].n_unique() - 1
 
 
-def _fit(scenario: str, cov_type: str, *, dk_bandwidth: int | None = None):
-    df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
+def _fit_frame(
+    df: pl.DataFrame,
+    cov_type: str,
+    *,
+    dk_bandwidth: int | None = None,
+):
     x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
     if cov_type == "dk":
         options = FEOptions(
@@ -144,6 +167,11 @@ def _fit(scenario: str, cov_type: str, *, dk_bandwidth: int | None = None):
     else:
         options = FEOptions(cov_type=cov_type)
     return FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
+
+
+def _fit(scenario: str, cov_type: str, *, dk_bandwidth: int | None = None):
+    df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
+    return _fit_frame(df, cov_type, dk_bandwidth=dk_bandwidth)
 
 
 # ── 凍結フィクスチャとの数値照合（合成データ） ───────────────────────
@@ -176,6 +204,86 @@ def test_dk_max_bandwidth_matches_plm(crosscheck, scenario):
         f"{scenario}/one_way/dk_max_bandwidth",
         expected_df=n_periods - 1,
         n_slopes=df.width - 3,
+    )
+
+
+# ── dkのバンド幅を既定値以外で明示指定（0, 1） ─────────────────────────
+
+
+@pytest.mark.parametrize("bandwidth", EXPLICIT_BANDWIDTHS)
+@pytest.mark.parametrize("scenario", EXPLICIT_BANDWIDTH_SCENARIOS)
+def test_dk_explicit_bandwidth_matches_plm(crosscheck, scenario, bandwidth):
+    df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
+    res = _fit_frame(df, "dk", dk_bandwidth=bandwidth)
+
+    _check_result(
+        res,
+        crosscheck["dk_explicit_bandwidth"][scenario][str(bandwidth)],
+        f"{scenario}/one_way/dk_bandwidth_{bandwidth}",
+        expected_df=df["time"].n_unique() - 1,
+        n_slopes=df.width - 3,
+    )
+
+
+# ── 境界ケース（fixestの境界のうちplmで再現できるもの） ──────────────────
+
+
+def test_dk_three_periods_matches_plm(crosscheck):
+    """Driscoll-Kraayの時点数`T = q+1`（q=2、分母自由度`T-1 = q`）の境界。"""
+    df = dk_three_periods_frame()
+    res = _fit_frame(df, "dk")
+
+    _check_result(
+        res,
+        crosscheck["boundary"]["dk_three_periods"],
+        "boundary/dk_three_periods",
+        expected_df=2,
+        n_slopes=2,
+    )
+
+
+def test_cluster_g3_two_slopes_matches_plm(crosscheck):
+    """クラスター数`G = q+1`（q=2、分母自由度`G-1 = q`）の境界。plmのクラスターは
+    entity単位のため、先頭3 entityだけ残して作る。"""
+    df = first_entities_frame("fe_baseline.csv", 3)
+    res = _fit_frame(df, "cluster")
+
+    _check_result(
+        res,
+        crosscheck["boundary"]["cluster_g3_two_slopes"],
+        "boundary/cluster_g3_two_slopes",
+        expected_df=2,
+        n_slopes=2,
+    )
+
+
+def test_cluster_g2_matches_plm(crosscheck):
+    """クラスタ数境界（G=2、q=1でG>q）。先頭2 entityだけ残して作る。"""
+    df = first_entities_frame("fe_baseline_k1.csv", 2)
+    res = _fit_frame(df, "cluster")
+
+    _check_result(
+        res,
+        crosscheck["boundary"]["cluster_g2"],
+        "boundary/cluster_g2",
+        expected_df=1,
+        n_slopes=1,
+    )
+
+
+def test_skewed_entity_sizes_cluster_matches_plm(crosscheck):
+    """entityあたりの観測数が偏った（先頭[2,3,5,10]期を循環）不均衡パネルの
+    entityクラスター。plmは非entityのクラスター列を扱えないため、クラスター
+    サイズの偏りはentityの観測数の偏りで代用する。"""
+    df = skewed_entity_sizes_frame()
+    res = _fit_frame(df, "cluster")
+
+    _check_result(
+        res,
+        crosscheck["boundary"]["skewed_entity_sizes"],
+        "boundary/skewed_entity_sizes",
+        expected_df=df["entity"].n_unique() - 1,
+        n_slopes=2,
     )
 
 

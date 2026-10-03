@@ -43,14 +43,24 @@ model <- plm(
 
 X <- model.matrix(model)
 y_star <- as.numeric(pmodel.response(model))
-entity_ids <- df[[entity_col]][match(rownames(X), rownames(pdf))]
+# 準偏差変換済みの各行に対応する元データの行番号（1始まり）。entity以外の
+# クラスター列を呼び出し側で当てるために出力する。`pdata.frame`は行を
+# entity・時点でソートし、行名を"entity-time"にする。そのため`pdf`内の位置では
+# なく、元データの"entity-time"キーで対応づける（ソート済みの入力では位置と
+# 一致するが、行順が崩れた入力では一致しない）。
+source_row <- match(
+  rownames(X),
+  paste(df[[entity_col]], df[[time_col]], sep = "-")
+)
+entity_ids <- df[[entity_col]][source_row]
 
 library(jsonlite)
 cat(toJSON(
   list(
     y = y_star,
     x = as.list(as.data.frame(X, check.names = FALSE)),
-    entity = as.character(entity_ids)
+    entity = as.character(entity_ids),
+    source_row = source_row
   ),
   auto_unbox = TRUE,
   digits = NA

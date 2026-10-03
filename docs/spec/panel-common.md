@@ -249,10 +249,16 @@ REは`plm`）のみ）。
   手計算で掛けるため、plmが検証するのはカーネル・バンド幅の規約までで補正係数は
   fixestのみが独立に検証する。2-way・entity以外のクラスター列はplmが扱えずfixestのみ。
   fixestが一致しない`bandwidth == t_periods - 1`はplmのみが参照値になる。
+  fixestの境界ケースのうち、`G = q+1`・`G = 2`（先頭3・2 entityへの絞り込み）、
+  `T = q+1`のdk、dkのバンド幅0・1、entityあたりの観測数の偏り（[2,3,5,10]期）も
+  plmで検証する。plmは非entityのクラスター列を扱えないため、`G = q+1`・`G = 2`・観測数の
+  偏りはクラスター列を使うfixestの同名ケースとはデータが異なる（dkの`T = q+1`は同一
+  データ）。within R²もplmと比較する。
 - **REのclusterの自由度`G-1`**: plmの準偏差変換済みデータにstatsmodelsの
   `OLS(...).fit(cov_type="cluster", use_t=True)`を当て、標準誤差・p値・信頼区間・
   自由度をstatsmodelsにネイティブに計算させて検証する（`benchmark/panel/references/
-  statsmodels_ref.py`、バランスパネルのみ）。DKの`T-1`はstatsmodelsに同じ規約がなく
+  statsmodels_ref.py`、バランスパネルのみ）。entity以外のクラスター列（サイズ
+  [2,3,5,10,30,50]のタイル、k=1・G=3の境界）も同じ経路で検証する。DKの`T-1`はstatsmodelsに同じ規約がなく
   第2リファレンスがない。
 
 ### 5.3 ハウスマン検定の参照値（例外規定）

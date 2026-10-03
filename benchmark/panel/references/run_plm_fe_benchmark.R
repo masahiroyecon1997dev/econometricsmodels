@@ -42,6 +42,7 @@
 # plmの既定はz検定のため、t統計量・p値・信頼区間は係数と標準誤差から
 # t分布（clusterで`G-1`、dkで`T-1`、本実装・fixestの規約）で計算し直す。この
 # 自由度はfixestと同じ規約の手計算で、plmが検証するのは標準誤差まで。
+# within R²は`summary(model)$r.squared`（cov_typeに依存しない）。
 # F統計量は`pwaldtest(model, test = "F", vcov = vc)`の統計量（傾き係数が同時に
 # ゼロというWald二次形式）で、p値は同じt分布の自由度から`pf()`で計算し直す
 # （`run_plm_benchmark.R`と同じ理由）。
@@ -116,6 +117,10 @@ wald_f <- suppressWarnings(pwaldtest(model, test = "F", vcov = vc))
 f_df_num <- as.numeric(wald_f$parameter[1])
 f_p_value_val <- pf(wald_f$statistic, f_df_num, t_df, lower.tail = FALSE)
 
+# within R²（cov_typeに依存しない）。plmのwithinモデルのR²は、withinで変換した
+# 応答に対する決定係数で、本実装・fixestの`wr2`と同じ定義（1-wayのみ）。
+r2_within <- unname(summary(model)$r.squared["rsq"])
+
 library(jsonlite)
 result <- list(
   coef = as.list(coefs),
@@ -129,6 +134,7 @@ result <- list(
     SIMPLIFY = FALSE
   ),
   f_statistic = unname(wald_f$statistic),
-  f_p_value = unname(f_p_value_val)
+  f_p_value = unname(f_p_value_val),
+  r_squared_within = r2_within
 )
 cat(toJSON(result, auto_unbox = TRUE, digits = NA))

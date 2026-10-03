@@ -14,7 +14,8 @@
 
 ## 検証範囲
 
-バランスパネルの`cov_type="cluster"`（entityクラスター）のみ。分散成分はplm
+バランスパネルの`cov_type="cluster"`のみ（entityクラスターに加え、entity以外の
+クラスター列による境界ケース: 不均衡サイズ・G=3）。分散成分はplm
 推定のため、不均衡パネルは対象外。DK（Driscoll-Kraay）の自由度`T-1`は
 statsmodelsが同じ規約を持たず（`hac-groupsum`の`df_resid_inference`は`T-1`に
 ならない）、第2リファレンスがない（`docs/guide/verification.md`参照）。
@@ -42,6 +43,9 @@ from econometricsmodels import RE, REOptions
 from benchmark.common import WAGEPAN_ENTITY, WAGEPAN_X, WAGEPAN_Y
 from benchmark.panel.fixtures.generate_re_statsmodels_cluster_fixtures import (
     SCENARIOS,
+    cluster_g3_groups,
+    cluster_imbalanced_groups,
+    shuffled_cluster_imbalanced_frame,
 )
 
 FIXTURE_PATH = (
@@ -111,6 +115,70 @@ def test_synthetic_cluster_matches_statsmodels(reference, scenario):
         reference[scenario],
         df["entity"].n_unique(),
         f"{scenario}/cluster",
+    )
+
+
+def _fit_with_cluster_column(csv_name: str, x_cols: list[str], groups):
+    df = pl.read_csv(DATA_DIR / csv_name).with_columns(
+        pl.Series("cluster_group", groups)
+    )
+    return RE(
+        df,
+        y="y",
+        x=x_cols,
+        entity="entity",
+        options=REOptions(cov_type="cluster", cluster="cluster_group"),
+    ).fit()
+
+
+def test_cluster_imbalanced_matches_statsmodels(reference):
+    """クラスター不均衡（サイズ[2,3,5,10,30,50]のタイル、entityとは無関係な
+    専用クラスター列、G=12）。自由度はentity数ではなくクラスター数`G-1`。"""
+    groups = cluster_imbalanced_groups()
+    res = _fit_with_cluster_column(
+        "fe_baseline_cluster_imbalanced.csv", ["x1", "x2"], groups
+    )
+
+    _check(
+        res,
+        reference["boundary"]["cluster_imbalanced"],
+        len(set(groups)),
+        "boundary/cluster_imbalanced",
+    )
+
+
+def test_cluster_imbalanced_shuffled_rows_matches_statsmodels(reference):
+    """`cluster_imbalanced`と同じデータを、行順をシャッフルして与える。
+    ソート済みの入力では参照側の行対応づけ（`source_row`）の取り違えを検出
+    できないため、行順が崩れた入力でも本実装とstatsmodelsが一致することを
+    確認する。"""
+    df = shuffled_cluster_imbalanced_frame()
+    res = RE(
+        df,
+        y="y",
+        x=["x1", "x2"],
+        entity="entity",
+        options=REOptions(cov_type="cluster", cluster="cluster_group"),
+    ).fit()
+
+    _check(
+        res,
+        reference["boundary"]["cluster_imbalanced_shuffled"],
+        df["cluster_group"].n_unique(),
+        "boundary/cluster_imbalanced_shuffled",
+    )
+
+
+def test_cluster_g3_boundary_matches_statsmodels(reference):
+    """クラスター数の境界の成功パス（k=1、G=3、自由度2）。"""
+    groups = cluster_g3_groups()
+    res = _fit_with_cluster_column("fe_baseline_k1.csv", ["x1"], groups)
+
+    _check(
+        res,
+        reference["boundary"]["cluster_g3"],
+        len(set(groups)),
+        "boundary/cluster_g3",
     )
 
 

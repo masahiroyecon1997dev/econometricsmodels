@@ -12,6 +12,8 @@ statsmodelsが同じ規約を持たない（`hac-groupsum`の`df_resid_inference
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
@@ -20,11 +22,16 @@ _INTERCEPT_PLM = "(Intercept)"
 _INTERCEPT = "const"
 
 
-def run_re_cluster(transformed: dict) -> dict:
+def run_re_cluster(
+    transformed: dict, groups: Sequence[object] | None = None
+) -> dict:
     """plmの準偏差変換済みデータにOLS＋クラスターロバスト（t分布）を当てる。
 
     Args:
-        transformed: `export_re_transformed_r`の戻り値（`y`・`x`・`entity`）。
+        transformed: `export_re_transformed_r`の戻り値（`y`・`x`・`entity`・
+            `source_row`）。
+        groups: 元データの行順に並んだクラスター列。省略時はentityでクラスター
+            する。`transformed["source_row"]`で準偏差変換済みの行に対応づける。
 
     Returns:
         `coef`/`se`/`test_stats`/`p_values`/`conf_int`（本実装の名前規約、
@@ -37,7 +44,15 @@ def run_re_cluster(transformed: dict) -> dict:
     ]
     x = pd.DataFrame(dict(zip(names, transformed["x"].values(), strict=True)))
     y = np.asarray(transformed["y"], dtype=float)
-    groups = pd.factorize(pd.Series(transformed["entity"]))[0]
+    if groups is None:
+        cluster_ids = transformed["entity"]
+    else:
+        rows = transformed["source_row"]
+        # 変換済みの行が元データの行の置換になっていること（対応づけの前提）。
+        if sorted(rows) != list(range(1, len(groups) + 1)):
+            raise ValueError("source_row is not a permutation of input rows")
+        cluster_ids = [groups[i - 1] for i in rows]
+    groups = pd.factorize(pd.Series(cluster_ids))[0]
 
     res = sm.OLS(y, x).fit(
         cov_type="cluster", cov_kwds={"groups": groups}, use_t=True

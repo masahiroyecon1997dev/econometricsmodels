@@ -29,6 +29,9 @@ _FIXEST_SCALAR_KEYS = (
 
 _PLM_SCALAR_KEYS = ("f_statistic", "f_p_value")
 
+# FEの第2リファレンス（plm within）はwithin R²も持つ。
+_PLM_FE_SCALAR_KEYS = (*_PLM_SCALAR_KEYS, "r_squared_within")
+
 # FEのcluster/dkの第2リファレンス（plmのwithin）。fixest用スクリプトと同じ
 # `references/`直下に置く。
 _PLM_FE_R_SCRIPT = Path(__file__).resolve().parent / "run_plm_fe_benchmark.R"
@@ -134,7 +137,7 @@ def run_fe_plm_r(
     return normalize_names(
         raw,
         stat_key="test_stats",
-        scalar_keys=_PLM_SCALAR_KEYS,
+        scalar_keys=_PLM_FE_SCALAR_KEYS,
         # FEに切片は無い（run_fixest_rと同じ）。
         intercept_aliases=(),
     )
@@ -222,7 +225,8 @@ def export_re_transformed_r(
 ) -> dict:
     """`export_plm_re_transformed.R`を呼び、plmの変量効果モデルが使う
     準偏差変換済みの応答`y`・設計行列`x`（列名→値、切片は`"(Intercept)"`）・
-    エンティティ列`entity`を得る。
+    エンティティ列`entity`・各行に対応する元データの行番号`source_row`
+    （1始まり）を得る。
 
     Args:
         csv_path: データCSV。

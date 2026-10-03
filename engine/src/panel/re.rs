@@ -157,10 +157,11 @@
 //!   帰無仮説のもとでREが完全に効率的という前提の古典版）。専用オプションは設けない。
 //!   Classical/Hc1〜Hc3/Clusterは`OlsEstimator`の同名`CovType`（Clusterは`groups`が`None`なら
 //!   `entity`）、Dkは`panel_driscoll_kraay_cov_params`を補助回帰の設計行列・残差に適用する
-//!   （バンド幅はRE本体と同じ解決規則、スケールは補助回帰の`n/df_resid`）。
-//!   **RE本体の標準誤差と補正式が混在する**: Cluster/Hc1の小標本補正は`OlsEstimator`
-//!   （Stata・R型の`G/(G-1)·(n-1)/(n-k)`等）であり、RE本体（linearmodels型）とは異なる。
-//!   補助回帰はRE本体とは別の回帰（説明変数`2k+1`個）で、違いは有限標本の補正のみ。
+//!   （バンド幅はRE本体と同じ解決規則。スケールはRE本体・FEのDKと同じfixest型の
+//!   `T/(T-1)·(n-1)/(n-K)`、Wald検定の分母自由度は`t_periods-1`）。小標本補正の式は
+//!   RE本体と同じ形（Cluster/Hc1は`OlsEstimator`のStata・R型`G/(G-1)·(n-1)/(n-K)`・
+//!   `n/(n-K)`で、RE本体の`panel_cluster_cov_params`/`panel_hc_cov_params`と同式）。
+//!   違いは`K`が補助回帰の説明変数の数`2k+1`になる点のみ（補助回帰はRE本体とは別の回帰）。
 //!   統計量は`cov_type`によらずWald統計量（`k × F`）。DKは時点数`T`→∞の漸近論に
 //!   基づくため、`T`が短いと検定サイズが歪みうる。
 //! - **`None`になるのは比較対象の傾き係数が0個（`input.x()`が空）の場合のみ**。
@@ -716,7 +717,8 @@ fn re_hausman_test(
             ReCovType::Dk { bandwidth } => *bandwidth,
             _ => None,
         };
-        // `time`の有無・バンド幅はRE本体のDK計算（`fit()`）が先に検証済み。
+        // `time`の有無・バンド幅・`T > k`（`validate_dk_periods_cover_tested_coefficients`）は
+        // RE本体のDK計算（`fit()`）が先に検証済みのため、ここでは再検証しない。
         let time = time.ok_or(PanelError::DkRequiresTime)?;
         let t_periods = count_unique(time);
         let bw = resolve_dk_bandwidth(bandwidth, t_periods)?;

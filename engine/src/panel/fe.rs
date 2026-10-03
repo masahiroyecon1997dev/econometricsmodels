@@ -138,8 +138,7 @@
 //!     共分散計算の前に`InsufficientClustersForInference`/
 //!     `PanelError::InsufficientDkPeriodsForInference`で弾く。2グループ（Clusterの`G=2`・
 //!     Dkの`t_periods=2`）で全エンティティ（2-wayでは全時点でも）が各グループに1観測ずつの
-//!     場合はwithin変換で
-//!     スコアが恒等的にゼロになるため、`DegenerateClusterTwoGroups`/
+//!     場合はwithin変換でスコアが恒等的にゼロになるため、`DegenerateClusterTwoGroups`/
 //!     `DegenerateDkTwoPeriods`で弾く（`two_group_split_is_degenerate`。2-wayではtime方向の
 //!     同じ構造——エンティティ2つのパネル等——も対象）。それ以外（スケール差等による
 //!     数値的な悪条件）は`FTestFailed`がbackstopになる。
@@ -310,8 +309,8 @@
 //!   形式で`time`を渡すことが呼び出し側の契約——ゼロ埋めなしの数値文字列
 //!   （`"9"`より`"10"`が辞書順で先に来る等）は契約違反になるが、`engine`側でこれを
 //!   検出するバリデーションは現時点で未実装、`engine_pybind`層の検討課題）。
-//!   `fe_driscoll_kraay_cov_params`は`BTreeMap`で`time`をキーに集計する
-//!   （`fe_cluster_cov_params`と同じ「グループ間加算の順序依存を避ける」理由に加え、
+//!   `panel_driscoll_kraay_cov_params`（`common.rs`）は`BTreeMap`で`time`をキーに集計する
+//!   （`panel_cluster_cov_params`と同じ「グループ間加算の順序依存を避ける」理由に加え、
 //!   `BTreeMap`のキー順序＝辞書順がそのまま時系列順になる一石二鳥の実装）。
 //! - **1-way/2-wayとも対応**（ユーザーとの相談で決定）。2-way FEは`within_transform_
 //!   two_way`が既に`time`必須を担保しているが、**1-way FEで`FeCovType::Dk`を指定した
@@ -658,6 +657,8 @@ impl FeEstimator {
     /// - `cov_type=Cluster`でクラスター数が2未満・傾き係数の数以下の場合は
     ///   `PanelError::Common`（`CommonError::InsufficientClusters`/
     ///   `InsufficientClustersForInference`）
+    /// - `cov_type=Dk`の`time`上書き列の長さが観測数と異なる場合は
+    ///   `PanelError::IdentifierDimensionMismatch`
     /// - `cov_type=Dk`で時系列順序が無い場合は`PanelError::DkRequiresTime`、時点数が2未満なら
     ///   `PanelError::InsufficientDkPeriods`、`bandwidth`が不正なら
     ///   `PanelError::InvalidDkBandwidth`、時点数が傾き係数の数以下なら
@@ -846,6 +847,17 @@ impl FeEstimator {
                     Some(t) => t,
                     None => input.time().ok_or(PanelError::DkRequiresTime)?,
                 };
+                // `input.time()`は`FeInput::from_columns`が長さを検証済みだが、`hac_time`
+                // （公開APIの`FeCovType::Dk.time`）は未検証のため、Clusterの`groups`
+                // （`validate_cluster_groups`）と同じ水準でここで検証する。長さが合わないと
+                // 下の退化判定が`zip`で黙って切り詰められ、DK計算は範囲外アクセスになる。
+                if time.len() != n {
+                    return Err(PanelError::IdentifierDimensionMismatch {
+                        dimension: PanelDimension::Time,
+                        y_rows: n,
+                        other_rows: time.len(),
+                    });
+                }
                 let t_periods = count_unique(time);
                 let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
                 validate_dk_periods_cover_tested_coefficients(t_periods, k)?;
@@ -866,16 +878,11 @@ impl FeEstimator {
 
         // `StudentsT::new`は自由度が正でない場合に失敗するが、`df_inference`は
         // `df_resid >= 1`（関数冒頭の`n <= df_model`検証）・`n_groups - 1 >= 1`
-        // （`validate_cluster_count_covers_slopes`が`n_groups > k >= 0`を保証、
-        // すなわち`n_groups >= 1`）・`t_periods - 1 >= 1`（`resolve_dk_bandwidth`が
-        // `t_periods`に対する範囲検証を経由済み、`t_periods=1`の退化ケースは別途
-        // `fe_estimator_fit_one_way_hac_with_single_time_period_yields_zero_variance`が
-        // 示す通り標準誤差が0になるだけで`StudentsT::new`自体は失敗しない——
-        // `df=0`は`statrs`が拒否するため注意が必要だが、`t_periods=1`なら
-        // `t_periods-1=0`になり得る点は理論上のリスクとして残る。実際には`n_periods`が
-        // 1の1-way FEは通常`InsufficientDegreesOfFreedom`より先に弾かれないため、
-        // 呼び出し側が`t_periods>=2`を保証する構造にはなっていない）ため、
-        // 理論上到達可能な失敗経路として`Result`のまま扱う（`unwrap`はしない）。
+        // （`validate_cluster_groups`が`n_groups >= 2`を保証）・`t_periods - 1 >= 1`
+        // （`resolve_dk_bandwidth`が`PanelError::InsufficientDkPeriods`で`t_periods < 2`を
+        // 拒否済み、`fe_estimator_fit_one_way_hac_with_single_time_period_is_rejected`参照）の
+        // いずれかであり理論上到達不能（`ReEstimator::fit`と同じ「保証済みの不変条件に対する
+        // 防御的`Result`化」、`.claude/rules/rust-style.md`「テスト」参照）。
         let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
             .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
         let t_crit = inference::critical_value(&t_dist, confidence_level);
@@ -1308,7 +1315,7 @@ fn slope_only_residual(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>, i: usize) -
 /// サポートしない**（CLAUDE.md 1.3節「見送り」）ため、この分岐が常に成立し
 /// `T_i`ベースの重みは実質的に到達不能——不均衡パネルで一度この重み付き版を実装し
 /// `linearmodels`と数値が食い違うことを発見して修正した経緯がある（実地検証、
-/// 2026-09-12）。`group_indices_by_key`でエンティティを集計する（`fe_cluster_cov_params`
+/// 2026-09-12）。`group_indices_by_key`でエンティティを集計する（`panel_cluster_cov_params`
 /// と同じ理由でグループ間加算の順序を固定する、モジュールdoc参照）。
 ///
 /// `TSS <= 0`（全エンティティ平均がゼロ等）なら`linearmodels`と同じく`0.0`を返す。
@@ -1630,8 +1637,8 @@ fn two_group_split_is_degenerate(effects: FeEffects, input: &FeInput, groups: &[
 /// 1水準でも3観測以上・同じグループに2観測・1観測があれば`false`。
 ///
 /// `levels.len() == groups.len()`は呼び出し側の契約（`FeInput`の列と、
-/// `validate_cluster_groups`済みのクラスター列、または`engine_pybind`が同じDataFrameから
-/// 取り出す`Dk.time`）。
+/// `validate_cluster_groups`済みのクラスター列、または`fit()`のDkアームで長さを検証済みの
+/// DK時点列）。
 fn every_level_splits_once_across_two_groups(levels: &[String], groups: &[String]) -> bool {
     debug_assert_eq!(
         levels.len(),
@@ -3972,6 +3979,34 @@ mod tests {
             &strings(&["a", "a", "b"]),
             &strings(&["1", "2", "1"])
         ));
+    }
+
+    #[test]
+    fn fe_estimator_fit_hac_rejects_time_override_with_wrong_length() {
+        // `FeCovType::Dk.time`の上書き列は`FeInput`の検証を通らないため、`fit()`が長さを
+        // 検証する（Clusterの`groups`と同じ水準）。
+        let (entity, time, x, y) = fixest_reference_input();
+        let n = y.len();
+        let input =
+            FeInput::from_columns(&y, &[x], vec!["x".to_string()], &entity, None, "y".into())
+                .unwrap();
+        let result = FeEstimator::fit(
+            input,
+            FeEffects::OneWay,
+            FeCovType::Dk {
+                bandwidth: Some(0),
+                time: Some(time[..n - 1].to_vec()),
+            },
+            0.95,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Time,
+                y_rows: n,
+                other_rows: n - 1,
+            }
+        );
     }
 
     #[test]

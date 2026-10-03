@@ -10459,7 +10459,8 @@
     "purpose": "statsmodels主リファレンス（ols.json）とは独立した実装（R: lm + sandwich/lmtest）によるクロスチェック用。係数・標準誤差・t値・p値・信頼区間・R²・調整済みR²・AIC・BIC・対数尤度・F統計量・F検定p値を含む（信頼区間はconfidence_level=0.95固定で計算）。classical/HC0-3/clusterは厳密比較、HACのみ緩い許容誤差での比較を想定する（testing-policy.md参照）",
     "generated_at": "2026-09-26T00:12:19.102540+00:00",
     "r_version": "4.5.3",
-    "statsmodels_version": "0.15.0",
+    "sandwich_version": "3.1.3",
+    "lmtest_version": "0.9.40",
     "note": "perfect_multicollinearityシナリオはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。HACはR側のみ（explicit lagを本実装の自動ラグ式に合わせて指定）。clusterはR側のみ確認。baselineシナリオで均等疑似グループ（行番号%10）に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2（cluster_g2）、wage1の実カテゴリ列region（northcen/south/westダミーから合成、基準カテゴリnortheast）を含む（グルーピングパターンのバリエーションはbaselineシナリオのみ、他シナリオは均等疑似グループ1パターンのみ、後述）。パラメータ名は全ソースで切片を'const'に正規化済み。pyfixestとの比較は正確性検証から除外（性能比較専用）。high_condition_number/baseline_df1は境界値・悪条件ケース。scale_varianceはここに含まない。傾き係数の同時共分散部分行列の条件数が倍精度の限界を超え、本実装・RのSolve()の双方が全cov_typeで計算不能（エラー）になるため（perfect_multicollinearityと同様、ComputationErrorの発生確認のみテストコード側で対応）。many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ高次元シナリオ（generate_ols_fixtures.pyと同じ理由）。outlier_regressorはx1の5%を外れ値に置き換えた成功パス（generate_ols_fixtures.pyと同じ理由）。high_condition_number/moderate_multicollinearityにもclusterエントリを追加（従来クラスター系はbaselineシナリオのみで、悪条件・多重共線性シナリオとの組み合わせが未検証だった。均等な疑似グループ（行番号%10）のみ）。baseline.no_interceptはinclude_intercept=False（切片なし、formulaに'- 1'を付与）をR_COV_TYPES全種＋clusterと組み合わせて確認する（statsmodels主リファレンス側〔ols.json〕の横展開）。baseline.confidence_levelはconfidence_level=0.9（既定0.95以外）をR_COV_TYPES全種＋clusterと組み合わせて確認する（run_lm_crosscheck.R側に'--confidence-level='フラグを追加して対応、同じくstatsmodels主リファレンス側の横展開）。"
   }
 }

@@ -113,9 +113,10 @@ in-sample限定のまま。`augment(new_data=None)`もLogitと完全に同一の
 
 - 許容誤差はLogitと同じ基本方針（statsmodels主リファレンス`RTOL=1e-8`、Rクロスチェック
   `RTOL=2e-4`）。個別に緩めた項目もLogitと同種の性質: 限界効果`std_err`（`RTOL=1e-3`）・p値
-  （`ATOL=5e-5`）に加え、Wooldridge実データ（`mroz`）のクラスターロバストSE（`cluster="city"`、
-  G=2）は`RTOL=2e-3`（合成データのクラスターケースより大きいが、実データ・クラスタ数境界・相関の
-  強い説明変数が重なる境界的なケースのため）。
+  （`ATOL=5e-5`）のみ（`tests/_tolerances.py`の`probit_crosscheck`）。Wooldridge実データ（`mroz`）の
+  クラスターロバストSE（`cluster="city"`、G=2）は`G<=q`でクラスターロバスト共分散が退化し
+  `ValidationError`になるため成功パスのフィクスチャを持たず、許容誤差も設けない
+  （`test_probit_validation.py`でエラーを確認）。
 - **`cov_type="hc1"`/`"opg"`の既知の欠落はLogitと同様**（statsmodelsのdiscrete modelでの非対応、
   対処もRを主リファレンスにする点まで同じ、[`logit-spec.md`](./logit-spec.md)3.8節参照）。
 - **Rの`glm()`既定共分散が非正準リンクで「期待情報行列」を返す問題（重要）**: Rの`glm()`の

@@ -36,8 +36,8 @@ fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmod
 ## 許容誤差について
 
 plmの変量効果分散成分推定（Swamy-Arora）がlinearmodels準拠の本実装と不均衡
-パネルで僅かに異なるため、`unbalanced`シナリオのみ係数・標準誤差が最大1%程度
-乖離する。許容誤差は一律ではなく、統計量・cov_type別に実測へマージンを載せる
+パネルで僅かに異なるため、`unbalanced`シナリオのみ、係数が最大0.18%、標準誤差・
+信頼区間等がcov_typeに応じて最大1%台（dkの信頼区間は3.7%）乖離する。許容誤差は一律ではなく、統計量・cov_type別に実測へマージンを載せる
 （`_tolerances.py`の`re_crosscheck`の`rtol_unbalanced*`）。バランスパネルでは
 機械精度で一致するため、それ以外のシナリオは`rtol_balanced`で厳密に比較する
 （cluster・dkの`G/(G-1)`・`T/(T-1)`補正は標準誤差に1%前後しか効かず、緩い

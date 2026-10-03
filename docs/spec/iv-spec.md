@@ -317,17 +317,20 @@ common.rs`）:
   `cluster`/`hac`の`vcov`を`coeftest()`経由でそのまま使える。`summary(model,
   diagnostics=TRUE)`は`vcov.`に行列を渡すと常にclassical（iid）vcovにフォールバックする
   仕様のため、`weak_instrument_f_statistics`/`overid_statistic`（設計自体が常にclassical）
-  はcov_typeによらず一律クロスチェックできるが、`wu_hausman_statistic`はclassical
-  cov_typeのときのみ`ivreg`側でクロスチェックする（hc0/hc1/clusterは`linearmodels`側の
-  クロスチェックに委ねる）。
+  はcov_typeによらず一律クロスチェックできる。`wu_hausman_statistic`/`wu_hausman_p_value`も
+  `summary(diagnostics=TRUE, vcov.=<関数>)`でcov_type別のロバスト共分散を診断表に反映できるため、
+  全cov_typeでクロスチェックする（`benchmark/iv/references/run_ivreg.R`参照）。ただしclusterの
+  p値のみ、`ivreg`のWald検定がF分布の分母自由度にクラスター数を反映しないため一致せず、統計量のみ
+  比較する。
 - **GMMのRクロスチェックは例外的に省略する**（`ivreg`が対応していないため）。
   「Python主リファレンス＋Rクロスチェック」の2系統検証の例外であることをテスト実装時に
   明記する（RE のハウスマン検定と同型の例外規定）。
-- **許容誤差**: 相対誤差1e-8を基本。`classical`/`hc0`〜`hc1`/`cluster`/`hac`は
+- **許容誤差**: 相対誤差1e-8＋絶対誤差フロア1e-10（`tests/_tolerances.py`の`iv_reference`）を
+  基本。`classical`/`hc0`〜`hc1`/`cluster`/`hac`は
   `linearmodels`と(`cov_type`, `debiased`)の対応（`classical`↔(`unadjusted`,
   `debiased=True`)、`hc0`↔(`robust`, `debiased=False`)、`hc1`↔(`robust`,
   `debiased=True`)、`cluster`↔(`clustered`, `debiased=True`)、`hac`↔(`kernel`(bartlett),
-  `debiased=False`)）で`coef`/`se`が相対誤差1e-10以下（実質機械精度）で一致する。`hc2`/
+  `debiased=False`)）で`coef`/`se`が実質機械精度（実測1e-10以下）で一致する。`hc2`/
   `hc3`は`linearmodels`では検証できない（`linearmodels.iv.covariance`にhc2/hc3相当が
   無い）ため、R `ivreg`+`sandwich::vcovHC(type="HC2"/"HC3")`で検証する。`f_p_value`は
   浮動小数点アンダーフローに近い極小値（1e-9〜1e-12オーダー）のケースで相対誤差比較が

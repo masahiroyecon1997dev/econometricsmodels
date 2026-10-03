@@ -62,9 +62,9 @@ FE固有の内容のみを記載する。
 `f_p_value` / `f_df_num` / `f_df_denom`（`(k, df_resid)`、`k=0`で`None`） / `log_likelihood` / `aic` / `bic` / `r_squared_within` / `r_squared_between` /
 `r_squared_overall`。
 
-- **`n_entities`はengine側にgetterが無い**: `FeInput`内部のprivateなエンティティコード
-  （`GroupCodes`）でのみ数えており外部公開されていないため、`engine_pybind`側で`FeInput::entity()`を`HashSet`に集めて独立に
-  計算する（`fit()`実装の一部）。
+- **`n_entities`は`FeInput::n_entities()`（engine側getter）から取得する**: `FeInput`が構築時に
+  一度だけ作ったエンティティコード（`GroupCodes`）のユニーク数をそのまま使い、`engine_pybind`側で
+  数え直さない。
 - **`n_periods`は`FeEstimator::n_periods()`（engine側getter）から取得する**: `fit`内で自由度
   計算のために既に求めている`time`のユニーク数をそのまま保持して公開する（二重計算しない）。
   2-wayのみ`Some`、1-way（`dk_time`のみ指定した場合を含む）は`None`。2-wayはバランスパネル
@@ -277,8 +277,9 @@ demeanしたR²」を3種とも定義すると誤る）:
   本実装と異なるため、本実装の既定式`floor(4*(T/100)^(2/9))`で求めた値を`DK(lag)`へ明示的に
   渡す。`linearmodels`との比較は`classical`（`unadjusted`）・`hc1`（`robust`）のみ、
   `hc2`/`hc3`は`linearmodels`に無いためfixestのみ。
-- 許容誤差: 相対誤差`1e-9`を基本（`.claude/rules/testing-policy.md`の基本方針`1e-8`より
-  厳しく、実測で機械精度一致が確認できたため）。
+- 許容誤差: 相対誤差`1e-8`（`tests/_tolerances.py`の`fe_reference`・`fe_crosscheck`、
+  `.claude/rules/testing-policy.md`の基本方針通り）。実測の一致は`1e-14`程度で、許容誤差は
+  それにマージンを載せた基本値のまま。
 - **`aic`/`bic`はRクロスチェック（`fixest`）のみで検証する**: `linearmodels.PanelOLS`は
   `aic`/`bic`を一切提供しないため（`rsquared_within`/`between`/`overall`/`inclusive`・
   `loglik`のみ）、通常の「Python主リファレンス＋Rクロスチェック」の2系統検証の例外

@@ -281,10 +281,10 @@ Tobit固有の差分:
 
 - **主リファレンス**: R `AER::tobit`（`survival::survreg`エンジン）。`survreg`は内部で`(β, log σ)`を
   独自のNewton-Raphsonで最適化するが、本実装との一致は実測で係数 ~3e-9・標準誤差 ~1e-9・対数尤度
-  ~1e-12 と`RTOL=1e-8`を満たす（Logit/Probitのstatsmodels比較を踏襲）。
+  ~1e-12 と`rtol=1e-8`（`tobit_reference`、`atol=1e-9`）を満たす（Logit/Probitのstatsmodels比較を踏襲）。
 - **交差検証**: R `censReg`（`maxLik`エンジン）。`survreg`と`maxLik`は最適化実装が完全に独立。
   `censReg`側の`maxLik`収束を`reltol=1e-14 / gradtol=1e-10`まで詰めた上で、合成シナリオは点推定・
-  SE・限界効果とも ~2e-9 で一致し`RTOL=1e-8`。実測乖離に基づき個別に緩めた項目
+  SE・限界効果とも ~2e-9 で一致し`rtol=1e-8`（`tobit_crosscheck`）。実測乖離に基づき個別に緩めた項目
   （`tests/_tolerances.py`）:
   - `high_condition_number`（x1,x2 相関 0.999）の hc0/hc1: SE・z・信頼区間・限界効果SEが ~1.9e-8
     まで増幅するため`5e-8`。
@@ -293,7 +293,9 @@ Tobit固有の差分:
     予測値・打ち切り適合度は ~3e-9 で一致。engineと`survreg`は同データで ~3e-10 一致するため
     `censReg`側の収束限界であって本実装の問題ではない）。
   - `solver="bfgs"/"lbfgs"`: `newton`と異なる最適化経路でリファレンス（solver非依存）から僅かに
-    ずれた点に収束するため全フィールド`1e-7`（予測値で最大 ~2.2e-8）。
+    ずれた点に収束するため全フィールドに緩めた`rtol_solver`を使う。`tobit_crosscheck`は`1e-7`
+    （実測は変わらず）、主リファレンス`tobit_reference`は`2e-7`（`FaerLbfgs`導入後、
+    `predict/expected_latent`の1点が実測1.055e-7で`1e-7`を超えたため）。
 - **手計算箇所のformula非依存検証**（主・交差ともR実装で第三者三角測量が効かないため、
   `.claude/rules/testing-policy.md`「リファレンス実装」2.）: `run_tobit_crosscheck.R`内で
   `stopifnot`により以下を検証する — スコア（`estfun`）↔ Tobit対数尤度の`numDeriv::grad`、

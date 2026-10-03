@@ -38,7 +38,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
-import statsmodels
 
 from benchmark.common import (
     BENCHMARKS_DIR,
@@ -333,6 +332,15 @@ def build_fixtures() -> dict:
         text=True,
         check=True,
     ).stdout
+    sandwich_version, lmtest_version = (
+        subprocess.run(
+            ["Rscript", "-e", f'cat(as.character(packageVersion("{pkg}")))'],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        for pkg in ("sandwich", "lmtest")
+    )
 
     fixtures["_meta"] = {
         "method": "wls",
@@ -346,7 +354,8 @@ def build_fixtures() -> dict:
         ),
         "generated_at": datetime.now(UTC).isoformat(),
         "r_version": r_version,
-        "statsmodels_version": statsmodels.__version__,
+        "sandwich_version": sandwich_version,
+        "lmtest_version": lmtest_version,
         "note": (
             "perfect_multicollinearity・scale_varianceシナリオはここに含まない"
             "（いずれもComputationErrorの発生確認のみ、テストコード側で対応。"

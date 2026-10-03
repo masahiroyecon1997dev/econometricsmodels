@@ -2,7 +2,7 @@
 
 `tests/fixtures/benchmarks/logit.json`（`benchmark/nonlinear/fixtures/
 generate_logit_fixtures.py`で生成）を読み込み、真のlogit DGPによる合成データ
-シナリオ×classical/opg/hc0 + クラスター(baseline・mrozの実データ両方) +
+シナリオ×classical/opg/hc0 + クラスター(baseline・均等/不均衡グループ) +
 Wooldridge実データ（mroz）で、係数・標準誤差・検定統計量・適合度統計量・
 限界効果を相対誤差1e-8で厳密比較する
 （`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。

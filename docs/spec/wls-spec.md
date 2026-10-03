@@ -151,8 +151,8 @@ OLSの`augment()`（`ols-spec.md`「augment()」）と完全に同じ設計・�
 
 ### 3.7 テスト
 
-- 許容誤差: classical/HC0-3/clusterはOLSと同じ`RTOL_STRICT=1e-8`（Rとの実測でほぼ機械精度）。
-  **HACのみOLSより緩い`RTOL_HAC=5e-2`**（OLSは1e-2。実測最大相対誤差約4.3%、重み付けによる
+- 許容誤差: classical/HC0-3/clusterはOLSと同じ`rtol_strict=1e-8`（`tests/_tolerances.py`の`wls_crosscheck`）（Rとの実測でほぼ機械精度）。
+  **HACのみOLSより緩い`rtol_hac=5e-2`**（OLSは1e-2。実測最大相対誤差約4.3%、重み付けによる
   小標本補正の慣習差の増幅が原因と推測、未調査）。
 - 実データセット: `401ksubs`（`fsize==1`の単身世帯サブサンプル、n=2017）、Wooldridge Example
   8.5・8.6と同じ変数構成`nettfa ~ inc + incsq + age + agesq + male + e401k`、重みは`1/inc`

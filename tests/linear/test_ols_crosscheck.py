@@ -42,8 +42,8 @@ Note:
     乱数を使わない）のみ、引き続き`benchmark/linear/datasets.py`を直接呼ぶ。
     Wooldridgeデータは`load_wooldridge.py`経由で都度ロードする（データの再配布
     ライセンスが未確認のためCSVとして固定しない。`benchmark/linear/freeze.py`のdocstring
-    参照）。`wooldridge`パッケージ（benchmark依存グループ）が無い環境では、
-    Wooldridgeクロスチェックのみ任意扱いにする。
+    参照）。`wooldridge`パッケージ（test依存グループ）が無い環境では、
+    Wooldridgeクロスチェックのみ`pytest.importorskip`でskipする。
 """
 
 from __future__ import annotations

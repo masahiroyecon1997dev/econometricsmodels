@@ -52,8 +52,9 @@ classical/hc1は`re.json`側の`linearmodels`の`f_statistic_robust`で検証す
 ## 許容誤差について
 
 plmの変量効果分散成分推定（Swamy-Arora）はlinearmodelsと僅かに異なる実装の
-ため、点推定自体が不均衡パネルで最大0.2%程度乖離することを実測確認済み
-（バランスパネルでは機械精度で一致）。このためテストコード側では、バランス
+ため、点推定が不均衡パネルで最大0.18%、標準誤差・信頼区間等がcov_typeに応じて
+最大1%台（dkの信頼区間は3.7%）乖離することを実測確認済み（バランスパネルでは
+機械精度で一致）。このためテストコード側では、バランス
 パネルを機械精度、不均衡パネル（`unbalanced`）のみ統計量・cov_type別に緩めた
 許容誤差で比較する（`tests/_tolerances.py`の`re_crosscheck`参照）。
 
@@ -316,7 +317,8 @@ def build_fixtures() -> dict:
             "sandwich::vcovCL(HC1, cadjust)を当てた値（クラスター列は"
             "都度動的付与、バランスパネルのみ）。"
             "plmの変量効果分散成分推定（Swamy-Arora）はlinearmodelsと僅かに"
-            "異なる実装のため、点推定自体が不均衡パネルで最大0.2%程度乖離する"
+            "異なる実装のため、不均衡パネルで点推定が最大0.18%、標準誤差・信頼区間等が"
+            "cov_typeに応じて最大1%台（dkの信頼区間は3.7%）乖離する"
             "（実測確認済み、実装バグではない）。テストコード側ではバランス"
             "パネルを機械精度、unbalancedのみ統計量・cov_type別に緩めた許容誤差"
             "で比較すること（tests/_tolerances.pyのre_crosscheck参照）。t検定"

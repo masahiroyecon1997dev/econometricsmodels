@@ -314,7 +314,8 @@ pyerr`、FE/RE共有）を使う。RE固有の追加バリアントは`BetweenRe
   cadjust = TRUE)`を当てた値を参照値にする（entityクラスターでは`vcovHC(arellano, sss)`と
   機械精度で一致を確認済み）。クラスター不均衡（サイズ[2,3,5,10,30,50]）と、境界の成功パス
   （ハウスマン検定の補助回帰が`G > 2k`を要するため`k=1`・`G=3`）を持つ。
-- 許容誤差: Classical/HC1は`linearmodels`と相対誤差`1e-9`で数値完全一致。Cluster/HAC・
+- 許容誤差: Classical/HC1は`linearmodels`と相対誤差`1e-8`（`tests/_tolerances.py`の
+  `re_reference`。実測は`1e-9`〜`1e-14`程度）で数値完全一致。Cluster/DK・
   HC2/HC3の`plm`クロスチェックは、バランスパネルでは機械精度で一致する（`1e-8`）。不均衡
   パネルのみ分散成分推定（Swamy-Arora）が`plm`とlinearmodels準拠の本実装で僅かに異なるため、
   統計量・cov_type別に実測へマージンを載せて緩める（係数`5e-3`、se・t・p値・信頼区間は

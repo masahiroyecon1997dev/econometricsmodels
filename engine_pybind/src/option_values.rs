@@ -22,11 +22,17 @@ use pyo3::types::PyBool;
 
 use crate::column_extraction::type_name_of;
 
-/// `ob`が`bool`なら`TypeError`にする（`bool`は`int`のサブクラスで標準の抽出を通ってしまう）。
+/// `ob`が真偽値（Pythonの`bool`、またはNumPyの`numpy.bool_`）なら`TypeError`にする。
+///
+/// `bool`は`int`のサブクラスで標準の抽出を通ってしまう。`numpy.bool_`は`bool`のサブクラス
+/// ではなく、整数としては`__index__`が無いため拒否されるが、実数としては`__float__`経由で
+/// 通ってしまう（`tol=np.True_`が`1.0`になる）ため、型名で明示的に拒否する。NumPyを
+/// importせずに済むよう、型の完全修飾名（NumPy 2は`numpy.bool`、1系は`numpy.bool_`）で判定する。
 fn reject_bool(ob: &Bound<'_, PyAny>, name: &str, expected: &str) -> PyResult<()> {
-    if ob.is_instance_of::<PyBool>() {
+    let type_name = type_name_of(ob);
+    if ob.is_instance_of::<PyBool>() || matches!(type_name.as_str(), "numpy.bool" | "numpy.bool_") {
         return Err(PyTypeError::new_err(format!(
-            "'{name}' must be {expected}, got bool"
+            "'{name}' must be {expected}, got {type_name}"
         )));
     }
     Ok(())

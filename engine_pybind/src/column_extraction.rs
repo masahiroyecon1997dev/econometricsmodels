@@ -8,7 +8,7 @@
 //! 両方を検出する必要がある。
 //!
 //! 【polarsのバージョン依存に関する注意（検証・修正済み）】
-//! polars 0.54.4での実ビルドを確認済み。当初の草案から2点修正した:
+//! polars 0.55.2での実ビルドを確認済み（0.54.4でも同様）。当初の草案から2点修正した:
 //! `ChunkedArray`の`.rechunk()`が`Cow<'_, ChunkedArray<T>>`を返すようになった影響で
 //! （`IntoIterator`が実装されなくなったため）、値の取り出しは`.into_iter()`ではなく
 //! `.iter()`（`ChunkedArray::iter`メソッド）を使う。
@@ -285,7 +285,7 @@ pub fn x_column_names(
 /// 共通ユーティリティとしてここに集約した。
 ///
 /// # Errors
-/// 各列につき`extract_f64_column`と同じ（列が存在しない・数値型にキャストできない・
+/// 各列につき`extract_f64_column`と同じ（列が存在しない・数値として使えないdtype・
 /// 欠損値/NaN/無限大を含む場合に`ValidationError`）。最初にエラーになった列で打ち切る。
 pub fn extract_f64_columns(df: &DataFrame, names: &[String]) -> PyResult<Vec<Vec<f64>>> {
     names
@@ -306,8 +306,11 @@ enum KeyRole {
 /// `dtype`がキー列として使えるかを検査し、そうでなければ`ValidationError`にする。
 ///
 /// 整数・浮動小数・文字列・Categorical/Enumは両方の役割で許可する。Booleanと`Date`は
-/// 同一性のキーで、`Date`/`Datetime`は時点のキーで許可する（`Datetime`の文字列表現は
-/// 桁数が固定のため辞書順が時系列順に一致する）。`Null`型は後続の欠損値チェックに回す。
+/// 同一性のキーで、`Date`/`Datetime`は時点のキーで許可する。タイムゾーンなしの`Datetime`は
+/// 文字列表現の桁数が固定のため辞書順が時系列順に一致するが、タイムゾーン付きは文字列に
+/// UTCオフセットが付き、夏時間の終了で重複する1時間などで順序が実時刻と逆になりうる
+/// （時点の順序をdtypeの値順で扱う変更で解消する。`accepted-data.md`「Order of time
+/// periods」参照）。`Null`型は後続の欠損値チェックに回す。
 fn check_key_dtype(name: &str, dtype: &DataType, role: KeyRole) -> PyResult<()> {
     let common = dtype.is_integer()
         || dtype.is_float()

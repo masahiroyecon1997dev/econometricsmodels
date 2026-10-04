@@ -8,7 +8,7 @@ mod validation;
 
 use pyo3::prelude::*;
 
-use column_extraction::extract_dataframe;
+use column_extraction::{extract_column_list, extract_column_name, extract_dataframe};
 use errors::{ComputationError, ValidationError};
 use iv::common::{IVOptions, IVResult};
 use linear::ols::{OLSOptions, OLSResult};
@@ -37,11 +37,13 @@ use panel::re::{REOptions, REResult};
 #[pyfunction]
 fn fit_ols(
     data: &Bound<'_, PyAny>,
-    y: String,
-    x: Vec<String>,
+    y: &Bound<'_, PyAny>,
+    x: &Bound<'_, PyAny>,
     options: OLSOptions,
 ) -> PyResult<OLSResult> {
     let data = extract_dataframe(data, "data")?;
+    let y = extract_column_name(y, "y")?;
+    let x = extract_column_list(x, "x")?;
     linear::ols::fit(data, y, x, &options)
 }
 
@@ -63,12 +65,15 @@ fn fit_ols(
 #[pyfunction]
 fn fit_wls(
     data: &Bound<'_, PyAny>,
-    y: String,
-    x: Vec<String>,
-    weight: String,
+    y: &Bound<'_, PyAny>,
+    x: &Bound<'_, PyAny>,
+    weight: &Bound<'_, PyAny>,
     options: WLSOptions,
 ) -> PyResult<WLSResult> {
     let data = extract_dataframe(data, "data")?;
+    let y = extract_column_name(y, "y")?;
+    let x = extract_column_list(x, "x")?;
+    let weight = extract_column_name(weight, "weight")?;
     linear::wls::fit(data, y, x, weight, &options)
 }
 
@@ -88,11 +93,13 @@ fn fit_wls(
 #[pyfunction]
 fn fit_logit(
     data: &Bound<'_, PyAny>,
-    y: String,
-    x: Vec<String>,
+    y: &Bound<'_, PyAny>,
+    x: &Bound<'_, PyAny>,
     options: LogitOptions,
 ) -> PyResult<LogitResult> {
     let data = extract_dataframe(data, "data")?;
+    let y = extract_column_name(y, "y")?;
+    let x = extract_column_list(x, "x")?;
     nonlinear::logit::fit(data, y, x, &options)
 }
 
@@ -112,11 +119,13 @@ fn fit_logit(
 #[pyfunction]
 fn fit_probit(
     data: &Bound<'_, PyAny>,
-    y: String,
-    x: Vec<String>,
+    y: &Bound<'_, PyAny>,
+    x: &Bound<'_, PyAny>,
     options: ProbitOptions,
 ) -> PyResult<ProbitResult> {
     let data = extract_dataframe(data, "data")?;
+    let y = extract_column_name(y, "y")?;
+    let x = extract_column_list(x, "x")?;
     nonlinear::probit::fit(data, y, x, &options)
 }
 
@@ -136,11 +145,13 @@ fn fit_probit(
 #[pyfunction]
 fn fit_tobit(
     data: &Bound<'_, PyAny>,
-    y: String,
-    x: Vec<String>,
+    y: &Bound<'_, PyAny>,
+    x: &Bound<'_, PyAny>,
     options: TobitOptions,
 ) -> PyResult<TobitResult> {
     let data = extract_dataframe(data, "data")?;
+    let y = extract_column_name(y, "y")?;
+    let x = extract_column_list(x, "x")?;
     nonlinear::tobit::fit(data, y, x, &options)
 }
 
@@ -164,13 +175,17 @@ fn fit_tobit(
 #[pyfunction]
 fn fit_iv(
     data: &Bound<'_, PyAny>,
-    y: String,
-    x_exog: Vec<String>,
-    x_endog: Vec<String>,
-    instruments: Vec<String>,
+    y: &Bound<'_, PyAny>,
+    x_exog: &Bound<'_, PyAny>,
+    x_endog: &Bound<'_, PyAny>,
+    instruments: &Bound<'_, PyAny>,
     options: IVOptions,
 ) -> PyResult<IVResult> {
     let data = extract_dataframe(data, "data")?;
+    let y = extract_column_name(y, "y")?;
+    let x_exog = extract_column_list(x_exog, "x_exog")?;
+    let x_endog = extract_column_list(x_endog, "x_endog")?;
+    let instruments = extract_column_list(instruments, "instruments")?;
     iv::common::fit(data, y, x_exog, x_endog, instruments, &options)
 }
 
@@ -193,12 +208,15 @@ fn fit_iv(
 #[pyfunction]
 fn fit_fe(
     data: &Bound<'_, PyAny>,
-    y: String,
-    x: Vec<String>,
-    entity: String,
+    y: &Bound<'_, PyAny>,
+    x: &Bound<'_, PyAny>,
+    entity: &Bound<'_, PyAny>,
     options: FEOptions,
 ) -> PyResult<FEResult> {
     let data = extract_dataframe(data, "data")?;
+    let y = extract_column_name(y, "y")?;
+    let x = extract_column_list(x, "x")?;
+    let entity = extract_column_name(entity, "entity")?;
     panel::fe::fit(data, y, x, entity, &options)
 }
 
@@ -221,12 +239,15 @@ fn fit_fe(
 #[pyfunction]
 fn fit_re(
     data: &Bound<'_, PyAny>,
-    y: String,
-    x: Vec<String>,
-    entity: String,
+    y: &Bound<'_, PyAny>,
+    x: &Bound<'_, PyAny>,
+    entity: &Bound<'_, PyAny>,
     options: REOptions,
 ) -> PyResult<REResult> {
     let data = extract_dataframe(data, "data")?;
+    let y = extract_column_name(y, "y")?;
+    let x = extract_column_list(x, "x")?;
+    let entity = extract_column_name(entity, "entity")?;
     panel::re::fit(data, y, x, entity, &options)
 }
 

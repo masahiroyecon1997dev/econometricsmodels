@@ -14,7 +14,9 @@
 //! `.iter()`（`ChunkedArray::iter`メソッド）を使う。
 
 use polars::prelude::*;
+use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
+use pyo3::types::PyList;
 use pyo3_polars::PyDataFrame;
 
 use crate::errors::ValidationError;
@@ -45,11 +47,7 @@ pub fn extract_dataframe(ob: &Bound<'_, PyAny>, param_name: &str) -> PyResult<Py
                 "failed to read '{param_name}' as a polars.DataFrame: {err}"
             ));
         }
-        let type_name = ob
-            .get_type()
-            .fully_qualified_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| "unknown type".to_string());
+        let type_name = type_name_of(ob);
         let hint = if is_instance_of_polars(ob, "LazyFrame") {
             "; call .collect() first"
         } else {
@@ -59,6 +57,60 @@ pub fn extract_dataframe(ob: &Bound<'_, PyAny>, param_name: &str) -> PyResult<Py
             "'{param_name}' must be a polars.DataFrame, got {type_name}{hint}"
         ))
     })
+}
+
+/// `ob`の型の完全修飾名（`str`・`pandas.core.frame.DataFrame`等）。エラーメッセージ用。
+fn type_name_of(ob: &Bound<'_, PyAny>) -> String {
+    ob.get_type()
+        .fully_qualified_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| "unknown type".to_string())
+}
+
+/// 単一の列名を受け取る引数（`y`・`entity`・`weight`等）を`String`として取り出す。
+///
+/// 型の誤りは`ValueError`系の`ValidationError`ではなく、Pythonの慣習どおり`TypeError`に
+/// する。PyO3の標準の引数抽出は引数名を含まないメッセージになるため、`#[pyfunction]`の
+/// 引数型を`&Bound<PyAny>`にしてこの関数で取り出す（`extract_dataframe`と同じ構成）。
+///
+/// # Errors
+/// `str`でなければ`TypeError`（引数名・実際の型を含む）。
+pub fn extract_column_name(ob: &Bound<'_, PyAny>, param_name: &str) -> PyResult<String> {
+    ob.extract::<String>().map_err(|_| {
+        PyTypeError::new_err(format!(
+            "'{param_name}' must be a str column name, got {}",
+            type_name_of(ob)
+        ))
+    })
+}
+
+/// 列名のリストを受け取る引数（`x`・`x_exog`・`x_endog`・`instruments`）を`Vec<String>`として
+/// 取り出す。`list`のみを受け付ける（`str`・tuple・`polars.Series`等は`TypeError`）。
+///
+/// `x="x1"`のように`str`を渡す誤りが最も多いため、期待する形（`x=["x1"]`）を
+/// メッセージで示す。
+///
+/// # Errors
+/// - `list`でなければ`TypeError`
+/// - 要素に`str`以外があれば`TypeError`（要素の位置を含む）
+pub fn extract_column_list(ob: &Bound<'_, PyAny>, param_name: &str) -> PyResult<Vec<String>> {
+    let list = ob.cast::<PyList>().map_err(|_| {
+        PyTypeError::new_err(format!(
+            "'{param_name}' must be a list of column names (e.g. {param_name}=[\"x1\"]), got {}",
+            type_name_of(ob)
+        ))
+    })?;
+    list.iter()
+        .enumerate()
+        .map(|(i, item)| {
+            item.extract::<String>().map_err(|_| {
+                PyTypeError::new_err(format!(
+                    "'{param_name}[{i}]' must be a str column name, got {}",
+                    type_name_of(&item)
+                ))
+            })
+        })
+        .collect()
 }
 
 /// `ob`が`polars.<class_name>`のインスタンスか（サブクラスを含む）。`polars`を読み込めない、

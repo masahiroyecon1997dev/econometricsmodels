@@ -78,7 +78,9 @@ use pyo3::types::PyDict;
 use pyo3_polars::PyDataFrame;
 
 use super::common::panel_error_to_pyerr;
-use crate::column_extraction::{extract_f64_column, extract_f64_columns, extract_group_key_column};
+use crate::column_extraction::{
+    extract_f64_column, extract_f64_columns, extract_group_key_column, extract_time_key_column,
+};
 use crate::errors::ValidationError;
 use crate::linear::common::mat_to_vec;
 use crate::validation::{
@@ -334,7 +336,7 @@ fn parse_fe_cov_type(df: &DataFrame, options: &FEOptions) -> PyResult<(FeCovType
             let time = options
                 .dk_time
                 .as_ref()
-                .map(|col_name| extract_group_key_column(df, col_name))
+                .map(|col_name| extract_time_key_column(df, col_name))
                 .transpose()?;
             FeCovType::Dk {
                 bandwidth: options.dk_bandwidth,
@@ -430,7 +432,7 @@ pub(crate) fn build_fe_input(
     let time_slice: Option<Vec<String>> = options
         .time
         .as_ref()
-        .map(|col_name| extract_group_key_column(df, col_name))
+        .map(|col_name| extract_time_key_column(df, col_name))
         .transpose()?;
     let effects = if time_slice.is_some() {
         FeEffects::TwoWay

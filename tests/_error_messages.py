@@ -115,6 +115,20 @@ COLUMN_UNSUPPORTED_ORDER_DTYPE = (
     "column; use an integer, float, Date or Datetime column"
 )
 
+# キー列のdtypeが許可外の場合。`entity`・`cluster`（同一性だけのキー）と
+# `time`・`dk_time`（時点のキー）で許可するdtypeが異なる。`{dtype}`の呼び名は
+# `COLUMN_UNSUPPORTED_NUMERIC_DTYPE`と同じ。
+COLUMN_UNSUPPORTED_IDENTITY_DTYPE = (
+    "column '{name}' has dtype {dtype}, which cannot be used as a group "
+    "identifier column; use an integer, float, string, categorical, boolean "
+    "or Date column"
+)
+COLUMN_UNSUPPORTED_TIME_DTYPE = (
+    "column '{name}' has dtype {dtype}, which cannot be used as a time "
+    "column; use an integer, float, string, categorical, Date or Datetime "
+    "column"
+)
+
 # extract_group_key_column: cluster の抽出で使う（同ファイル86-111行）。
 # 列が存在しない場合のメッセージは extract_f64_column と同文言だが、欠損値の
 # メッセージはグループキー列専用の短い文言になる点に注意。

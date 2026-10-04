@@ -73,6 +73,8 @@ enum NumericRole {
 fn dtype_label(dtype: &DataType) -> String {
     match dtype {
         DataType::String => "String".to_string(),
+        DataType::Boolean => "Boolean".to_string(),
+        DataType::Decimal(..) => "Decimal".to_string(),
         DataType::Binary => "Binary".to_string(),
         DataType::Date => "Date".to_string(),
         DataType::Time => "Time".to_string(),
@@ -226,7 +228,51 @@ pub fn extract_f64_columns(df: &DataFrame, names: &[String]) -> PyResult<Vec<Vec
         .collect()
 }
 
-/// `df`から`name`列を、クラスターのグループキーとして文字列のVecで取り出す。
+/// キー列（グループの同一性や時点を表す列）の使われ方。許可するdtypeが異なる。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KeyRole {
+    /// グループの同一性だけが意味を持つ列（`entity`・`cluster`）。
+    Identity,
+    /// 時点を表す列（FE/REの`time`・`dk_time`）。
+    Time,
+}
+
+/// `dtype`がキー列として使えるかを検査し、そうでなければ`ValidationError`にする。
+///
+/// 整数・浮動小数・文字列・Categorical/Enumは両方の役割で許可する。Booleanと`Date`は
+/// 同一性のキーで、`Date`/`Datetime`は時点のキーで許可する（`Datetime`の文字列表現は
+/// 桁数が固定のため辞書順が時系列順に一致する）。`Null`型は後続の欠損値チェックに回す。
+fn check_key_dtype(name: &str, dtype: &DataType, role: KeyRole) -> PyResult<()> {
+    let common = dtype.is_integer()
+        || dtype.is_float()
+        || dtype.is_null()
+        || matches!(
+            dtype,
+            DataType::String | DataType::Categorical(..) | DataType::Enum(..)
+        );
+    let by_role = match role {
+        KeyRole::Identity => matches!(dtype, DataType::Boolean | DataType::Date),
+        KeyRole::Time => matches!(dtype, DataType::Date | DataType::Datetime(..)),
+    };
+    if common || by_role {
+        return Ok(());
+    }
+    let label = dtype_label(dtype);
+    let message = match role {
+        KeyRole::Identity => format!(
+            "column '{name}' has dtype {label}, which cannot be used as a group identifier \
+             column; use an integer, float, string, categorical, boolean or Date column"
+        ),
+        KeyRole::Time => format!(
+            "column '{name}' has dtype {label}, which cannot be used as a time column; \
+             use an integer, float, string, categorical, Date or Datetime column"
+        ),
+    };
+    Err(ValidationError::new_err(message))
+}
+
+/// `df`から`name`列を、同一性だけが意味を持つグループキー（`entity`・`cluster`）として
+/// 文字列のVecで取り出す。
 ///
 /// クラスター変数は整数IDとは限らない（州名・産業コード・企業ID等の文字列/
 /// カテゴリカル変数であることが多い）ため、値そのものではなく「グループの
@@ -234,16 +280,43 @@ pub fn extract_f64_columns(df: &DataFrame, names: &[String]) -> PyResult<Vec<Vec
 ///
 /// # Errors（すべて`ValidationError`）
 /// - 列が存在しない
+/// - キーとして使えないdtype（`List`・`Struct`・`Time`・`Duration`・`Decimal`等）
 /// - 欠損値を含む
+/// - 浮動小数の列にNaN・無限大を含む（数値列と同じく自動では扱わない）
 pub fn extract_group_key_column(df: &DataFrame, name: &str) -> PyResult<Vec<String>> {
+    extract_key_column(df, name, KeyRole::Identity)
+}
+
+/// `df`から`name`列を、時点を表すキー（FE/REの`time`・`dk_time`）として文字列のVecで
+/// 取り出す。
+///
+/// [`extract_group_key_column`]と同じく文字列表現で扱い、許可するdtypeが異なる
+/// （`Boolean`を除き`Datetime`を許可する）。時点の順序は文字列の辞書順で決まる点に注意
+/// （`Date`・`Datetime`と桁数の揃った値は時系列順に一致する）。
+///
+/// # Errors
+/// [`extract_group_key_column`]と同じ（許可するdtypeだけが異なる）。
+pub fn extract_time_key_column(df: &DataFrame, name: &str) -> PyResult<Vec<String>> {
+    extract_key_column(df, name, KeyRole::Time)
+}
+
+fn extract_key_column(df: &DataFrame, name: &str, role: KeyRole) -> PyResult<Vec<String>> {
     let series = df.column(name).map_err(|_| {
         ValidationError::new_err(format!("column '{name}' does not exist in the data"))
     })?;
+
+    check_key_dtype(name, series.dtype(), role)?;
 
     if series.null_count() > 0 {
         return Err(ValidationError::new_err(format!(
             "column '{name}' contains missing values"
         )));
+    }
+
+    // 浮動小数のキーのNaN・無限大は、nullと違い`null_count`に現れず、文字列化すると
+    // `"NaN"`という1つのグループになってしまう。数値列と同じく拒否する。
+    if series.dtype().is_float() {
+        reject_non_finite(name, series)?;
     }
 
     // Utf8にキャストして文字列表現で比較する（元の型が数値・カテゴリカルでもよい）。
@@ -260,6 +333,28 @@ pub fn extract_group_key_column(df: &DataFrame, name: &str) -> PyResult<Vec<Stri
         .iter()
         .map(|v| v.expect("null_countチェック済み").to_string())
         .collect())
+}
+
+/// 浮動小数の列に非有限値（NaN・無限大）があれば、最初の1件を`ValidationError`にする。
+fn reject_non_finite(name: &str, series: &Column) -> PyResult<()> {
+    let as_f64 = series
+        .cast(&DataType::Float64)
+        .map_err(|e| ValidationError::new_err(format!("failed to convert column '{name}': {e}")))?;
+    let ca = as_f64
+        .f64()
+        .map_err(|e| ValidationError::new_err(format!("failed to convert column '{name}': {e}")))?;
+    if let Some((row, bad_value)) = ca
+        .iter()
+        .enumerate()
+        .find_map(|(row, v)| v.filter(|v| !v.is_finite()).map(|v| (row, v)))
+    {
+        return Err(ValidationError::new_err(format!(
+            "column '{name}' contains a non-finite value ({bad_value}) at row {row}. NaN and \
+             infinite values are not handled automatically; please impute or remove them \
+             before calling this function"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -288,6 +383,65 @@ mod tests {
         // Tobitの`param_names`が末尾に`"sigma"`を持つケースを想定。
         let param_names = names(&["const", "x1", "x2", "sigma"]);
         assert_eq!(x_column_names(&param_names, true, 1), &param_names[1..3]);
+    }
+
+    #[test]
+    fn check_key_dtype_accepts_identity_and_time_dtypes_per_role() {
+        let both = [
+            DataType::Int32,
+            DataType::UInt8,
+            DataType::Float64,
+            DataType::String,
+            DataType::Null,
+        ];
+        for dtype in &both {
+            for role in [KeyRole::Identity, KeyRole::Time] {
+                assert!(check_key_dtype("k", dtype, role).is_ok(), "{dtype}");
+            }
+        }
+        // BooleanとDateは同一性のキーだけ、Datetimeは時点のキーだけ。
+        assert!(check_key_dtype("k", &DataType::Boolean, KeyRole::Identity).is_ok());
+        assert!(check_key_dtype("k", &DataType::Boolean, KeyRole::Time).is_err());
+        assert!(check_key_dtype("k", &DataType::Date, KeyRole::Identity).is_ok());
+        assert!(check_key_dtype("k", &DataType::Date, KeyRole::Time).is_ok());
+        let datetime = DataType::Datetime(TimeUnit::Microseconds, None);
+        assert!(check_key_dtype("k", &datetime, KeyRole::Identity).is_err());
+        assert!(check_key_dtype("k", &datetime, KeyRole::Time).is_ok());
+    }
+
+    #[test]
+    fn check_key_dtype_rejects_unusable_dtypes() {
+        let rejected = [
+            DataType::Time,
+            DataType::Duration(TimeUnit::Microseconds),
+            DataType::Decimal(18, 2),
+            DataType::Binary,
+            DataType::List(Box::new(DataType::Int64)),
+        ];
+        for dtype in &rejected {
+            for role in [KeyRole::Identity, KeyRole::Time] {
+                assert!(check_key_dtype("k", dtype, role).is_err(), "{dtype}");
+            }
+        }
+    }
+
+    #[test]
+    fn extract_group_key_column_rejects_nan_and_infinity_in_float_keys() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let df = df!("k" => [1.0, bad, 2.0]).unwrap();
+
+            assert!(extract_group_key_column(&df, "k").is_err(), "{bad}");
+            assert!(extract_time_key_column(&df, "k").is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn extract_group_key_column_accepts_finite_float_keys() {
+        let df = df!("k" => [1.0, 2.0, 1.0]).unwrap();
+
+        let keys = extract_group_key_column(&df, "k").unwrap();
+
+        assert_eq!(keys, vec!["1.0", "2.0", "1.0"]);
     }
 
     fn numeric_dtypes() -> Vec<DataType> {

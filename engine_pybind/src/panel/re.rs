@@ -63,7 +63,9 @@ use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
 use super::common::panel_error_to_pyerr;
-use crate::column_extraction::{extract_f64_column, extract_f64_columns, extract_group_key_column};
+use crate::column_extraction::{
+    extract_f64_column, extract_f64_columns, extract_group_key_column, extract_time_key_column,
+};
 use crate::errors::ValidationError;
 use crate::linear::common::mat_to_vec;
 use crate::validation::{
@@ -362,7 +364,7 @@ pub(crate) fn build_re_input(
     let time_slice: Option<Vec<String>> = options
         .time
         .as_ref()
-        .map(|col_name| extract_group_key_column(df, col_name))
+        .map(|col_name| extract_time_key_column(df, col_name))
         .transpose()?;
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────

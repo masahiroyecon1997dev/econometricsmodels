@@ -16,10 +16,13 @@ from econometricsmodels import (
     FE,
     IV,
     OLS,
+    RE,
     WLS,
+    FEOptions,
     IVOptions,
     Logit,
     OLSOptions,
+    REOptions,
     ValidationError,
 )
 
@@ -377,3 +380,223 @@ def test_all_null_column_reports_missing_values(base):
         match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=N),
     ):
         OLS(df, y="y", x=["x1"]).fit()
+
+
+# ── キー列（entity / cluster / time / dk_time）のdtype ─────────────────
+
+# 同一性だけのキー（`entity`・`cluster`）に使えないdtypeと、メッセージ中の呼び名。
+UNSUPPORTED_IDENTITY_DTYPES = [
+    (pl.Datetime, "Datetime"),
+    (pl.Duration, "Duration"),
+    (pl.Time, "Time"),
+    (pl.Decimal(18, 0), "Decimal"),
+    (pl.Binary, "Binary"),
+    (pl.List(pl.Int64), "List"),
+    (pl.Array(pl.Int64, 2), "Array"),
+    (pl.Struct({"a": pl.Int64}), "Struct"),
+]
+
+# 時点のキー（`time`・`dk_time`）に使えないdtype。
+UNSUPPORTED_TIME_DTYPES = [
+    (pl.Boolean, "Boolean"),
+    *[item for item in UNSUPPORTED_IDENTITY_DTYPES if item[1] != "Datetime"],
+]
+
+
+@pytest.fixture(scope="module")
+def panel(base) -> pl.DataFrame:
+    """10エンティティ×6期の均衡パネル（`entity`・`t`は整数）。"""
+    return base.with_columns(
+        (pl.int_range(pl.len()) // 6).alias("entity"),
+        (pl.int_range(pl.len()) % 6).alias("t"),
+        (pl.int_range(pl.len()) % 10).alias("cluster"),
+    )
+
+
+@pytest.mark.parametrize(
+    ("dtype", "label"),
+    UNSUPPORTED_IDENTITY_DTYPES,
+    ids=[x[1] for x in UNSUPPORTED_IDENTITY_DTYPES],
+)
+def test_unsupported_dtype_as_cluster_raises(panel, dtype, label):
+    """`cluster`に使えないdtypeを渡すと、dtype名入りの`ValidationError`。"""
+    df = panel.with_columns(_unused_column(dtype).alias("cluster"))
+    options = OLSOptions(cov_type="cluster", cluster="cluster")
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_IDENTITY_DTYPE,
+            name="cluster",
+            dtype=label,
+        ),
+    ):
+        OLS(df, y="y", x=["x1"], options=options).fit()
+
+
+@pytest.mark.parametrize(
+    ("dtype", "label"),
+    UNSUPPORTED_IDENTITY_DTYPES,
+    ids=[x[1] for x in UNSUPPORTED_IDENTITY_DTYPES],
+)
+def test_unsupported_dtype_as_entity_raises(panel, dtype, label):
+    """`entity`に使えないdtypeを渡すと、dtype名入りの`ValidationError`。"""
+    df = panel.with_columns(_unused_column(dtype).alias("entity"))
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_IDENTITY_DTYPE,
+            name="entity",
+            dtype=label,
+        ),
+    ):
+        FE(df, y="y", x=["x1"], entity="entity").fit()
+
+
+@pytest.mark.parametrize(
+    ("dtype", "label"),
+    UNSUPPORTED_TIME_DTYPES,
+    ids=[x[1] for x in UNSUPPORTED_TIME_DTYPES],
+)
+@pytest.mark.parametrize("column", ["time", "dk_time"])
+def test_unsupported_dtype_as_time_raises(panel, dtype, label, column):
+    """`time`・`dk_time`に使えないdtypeを渡すと、時点列用のメッセージで拒否する。"""
+    df = panel.with_columns(_unused_column(dtype).alias("t"))
+    options = (
+        FEOptions(time="t")
+        if column == "time"
+        else FEOptions(cov_type="dk", dk_time="t")
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_TIME_DTYPE, name="t", dtype=label
+        ),
+    ):
+        FE(df, y="y", x=["x1"], entity="entity", options=options).fit()
+
+
+def test_re_time_rejects_unsupported_dtype(panel):
+    """REの`time`（DK用）も同じ検査を通る。"""
+    df = panel.with_columns(_unused_column(pl.Boolean).alias("t"))
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_TIME_DTYPE, name="t", dtype="Boolean"
+        ),
+    ):
+        RE(
+            df,
+            y="y",
+            x=["x1"],
+            entity="entity",
+            options=REOptions(cov_type="dk", time="t"),
+        ).fit()
+
+
+@pytest.mark.parametrize(
+    "dtype",
+    [pl.Int8, pl.UInt16, pl.Int64, pl.Float64, pl.String, pl.Categorical],
+    ids=str,
+)
+def test_supported_dtypes_as_cluster_give_the_same_result(panel, dtype):
+    """整数・浮動小数・文字列・カテゴリのクラスター列は、同じグループなら同じ結果になる。"""
+    options = OLSOptions(cov_type="cluster", cluster="cluster")
+    expected = OLS(panel, y="y", x=["x1"], options=options).fit()
+
+    keyed = panel.with_columns(
+        pl.col("cluster").cast(pl.String).cast(dtype)
+        if dtype == pl.Categorical
+        else pl.col("cluster").cast(dtype)
+    )
+    result = OLS(keyed, y="y", x=["x1"], options=options).fit()
+
+    assert result.std_errors == expected.std_errors
+
+
+def test_boolean_and_date_clusters_are_supported(panel):
+    """`Boolean`と`Date`は同一性だけのキーとして使える。"""
+    options = OLSOptions(cov_type="cluster", cluster="cluster")
+    three_groups = panel.with_columns((pl.col("cluster") % 3).alias("cluster"))
+    expected = OLS(three_groups, y="y", x=["x1"], options=options).fit()
+    as_date = three_groups.with_columns(
+        pl.col("cluster").cast(pl.Int32).cast(pl.Date)
+    )
+    assert (
+        OLS(as_date, y="y", x=["x1"], options=options).fit().std_errors
+        == expected.std_errors
+    )
+
+    two_groups = panel.with_columns(
+        (pl.col("cluster") % 2 == 0).alias("cluster")
+    )
+    result = OLS(two_groups, y="y", x=["x1"], options=options).fit()
+    assert result.n_obs == N
+
+
+@pytest.mark.parametrize("dtype", [pl.Date, pl.Datetime], ids=str)
+def test_date_and_datetime_are_supported_as_time(panel, dtype):
+    """`Date`/`Datetime`の時点列は、同じ順序の整数の時点と同じ結果になる。"""
+    options_int = FEOptions(cov_type="dk", dk_time="t")
+    expected = FE(
+        panel, y="y", x=["x1"], entity="entity", options=options_int
+    ).fit()
+
+    dated = panel.with_columns(pl.col("t").cast(pl.Int64).cast(dtype))
+    result = FE(
+        dated, y="y", x=["x1"], entity="entity", options=options_int
+    ).fit()
+
+    assert result.std_errors == expected.std_errors
+
+
+@pytest.mark.parametrize(
+    ("bad", "shown"),
+    [
+        (float("nan"), "NaN"),
+        (float("inf"), "inf"),
+        (float("-inf"), "-inf"),
+    ],
+)
+@pytest.mark.parametrize("role", ["entity", "cluster", "time", "dk_time"])
+def test_non_finite_float_key_raises(panel, bad, shown, role):
+    """浮動小数のキー列のNaN・無限大は、数値列と同じメッセージで拒否する。"""
+    column = {"entity": "entity", "cluster": "cluster"}.get(role, "t")
+    keyed = panel.with_columns(
+        panel[column].cast(pl.Float64).scatter(2, bad).alias(column)
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name=column, value=shown, row=2
+        ),
+    ):
+        if role == "cluster":
+            OLS(
+                keyed,
+                y="y",
+                x=["x1"],
+                options=OLSOptions(cov_type="cluster", cluster="cluster"),
+            ).fit()
+        elif role == "entity":
+            FE(keyed, y="y", x=["x1"], entity="entity").fit()
+        elif role == "time":
+            FE(
+                keyed,
+                y="y",
+                x=["x1"],
+                entity="entity",
+                options=FEOptions(time="t"),
+            ).fit()
+        else:
+            FE(
+                keyed,
+                y="y",
+                x=["x1"],
+                entity="entity",
+                options=FEOptions(cov_type="dk", dk_time="t"),
+            ).fit()

@@ -38,6 +38,12 @@ ATOL_CROSSCHECK_FLOOR = 1e-8
 """独立実装（R）とのクロスチェック全手法（OLS/WLS/IV/Logit/Probit）共通の
 絶対誤差フロア。"""
 
+ATOL_LOGIT_PROBIT_CROSSCHECK = 1e-12
+"""Logit/Probitのクロスチェック専用の絶対誤差フロア。rtol=1e-6まで締めたため、
+共通の`ATOL_CROSSCHECK_FLOOR`（1e-8）のままだと`|ref|<1e-2`の項目（mrozの
+age/exper、scale_varianceのx1等）が絶対誤差1e-8で判定されrtolが効かなくなる。
+純粋な相対誤差で比較するため、丸め誤差程度のフロアに下げる。"""
+
 TOLERANCES: dict[str, dict[str, float]] = {
     # --- 主リファレンス（statsmodels/linearmodels）との数値比較 ---
     # 相対誤差1e-8が基本方針。ATOLは0近傍の値（p値のアンダーフロー等）向けの
@@ -211,28 +217,32 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # （`benchmark/nonlinear/references/run_glm_crosscheck.R`参照）。既定の
     # epsilon=1e-8だと`sandwich::estfun()`が1反復前の作業重みを使い、ロバストSEの
     # 参照値に~3e-5のノイズが乗るため。限界効果もmarginaleffectsの有限差分の
-    # 刻み幅(eps=1e-6)を解析解に合わせてある。これにより係数・SE・信頼区間・限界効果
-    # （effect/std_err）とも実測最大相対誤差は~5e-8以下（Logit。係数~1e-10、
-    # SE~3e-8、限界効果std_err~5e-8）。基本rtolはその約19倍のマージン。
+    # 刻み幅を変数ごとに標準偏差の1e-5倍にして解析解に合わせてある。
+    # atolは`ATOL_LOGIT_PROBIT_CROSSCHECK`（1e-12）で、`|ref|`が小さい項目も
+    # 純粋な相対誤差で比較する。以下の実測最大相対誤差は、atolを無視した全項目の値。
+    # Logit: 係数~4e-10、SE~3.6e-8、z~3.1e-8、conf_int~5.9e-8、限界効果effect~1.5e-9・
+    # std_err~2.9e-8。基本rtol=1e-6は最大値（conf_int）の約17倍のマージン。
     "logit_crosscheck": {
         "rtol": 1e-6,
-        "atol": ATOL_CROSSCHECK_FLOOR,
-        # p値は正規分布CDFの裾で係数・zの数値差が増幅される。rtolで収まらずatolが
-        # 必要になる実測最大絶対誤差~5.5e-9（baseline/opg/x1。ATOL_CROSSCHECK_FLOOR
-        # =1e-8の範囲内）。裾での増幅に備えたマージンとして1e-7を置く。
+        "atol": ATOL_LOGIT_PROBIT_CROSSCHECK,
+        # p値は正規分布CDFの裾で係数・zの数値差が増幅され、相対誤差は~1.2e-6
+        # （baseline/opg/x2）に達する。rtolで収まらずatolが必要になる実測最大絶対誤差
+        # ~5.5e-9（baseline/opg/x1）の約18倍のマージンとして1e-7を置く。
         "atol_p_value": 1e-7,
     },
-    # Logitと同じ生成方針。実測最大相対誤差は係数~5e-8・SE~3e-8・限界効果std_err
-    # ~6e-8（基本rtolの約16倍のマージン）。
+    # Logitと同じ生成方針。実測最大相対誤差は係数~4.9e-8、SE~1.2e-7
+    # （mroz/hc0/nwifeinc）、z~1.35e-7（mroz/opg/nwifeinc）、限界効果effect~5e-8・
+    # std_err~1.2e-7。基本rtol=1e-6は最大値の約7倍のマージン。
     "probit_crosscheck": {
         "rtol": 1e-6,
-        "atol": ATOL_CROSSCHECK_FLOOR,
+        "atol": ATOL_LOGIT_PROBIT_CROSSCHECK,
         # conf_intのみ、下限（または上限）が0に近いケースで絶対誤差が相対誤差に増幅
         # される（実測最大相対誤差~1.8e-6、small_n/hc1/x2の下限-0.0083、絶対誤差
-        # 1.5e-8。SEは1.4e-8、係数は4.6e-9）。
+        # 1.5e-8。SEは1.4e-8、係数は4.6e-9）。約5.5倍のマージン。
         "rtol_conf_int": 1e-5,
-        # p値の裾での増幅。rtolで収まらずatolが必要になる実測最大絶対誤差~1.8e-8
-        # （mroz/opg/kidsge6）。
+        # p値の裾での増幅（相対誤差は~3.8e-6、baseline/opg/x3）。rtolで収まらず
+        # atolが必要になる実測最大絶対誤差~1.8e-8（mroz/opg/kidsge6）の約5.7倍の
+        # マージンとして1e-7を置く。
         "atol_p_value": 1e-7,
     },
     # FEのRクロスチェックはfixest。classical/hc1/hc2/hc3/cluster/dkとも、fixestの

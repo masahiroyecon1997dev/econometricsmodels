@@ -28,7 +28,7 @@ Note:
     精度は出ない。ただしR側の参照値は`glm()`の収束判定と`marginaleffects`の
     数値微分の刻み幅を厳しくして生成しており（`benchmark/nonlinear/references/
     run_glm_crosscheck.R`参照）、基本方針はLogitと同じRTOL=1e-6（実測最大相対誤差
-    ~6e-8に対するマージン）。信頼区間（0に近い境界での増幅）とp値のみ個別の
+    ~1.4e-7に対するマージン。ATOLは1e-12で純粋な相対誤差比較）。信頼区間（0に近い境界での増幅）とp値のみ個別の
     許容誤差を設定している（根拠は`tests/_tolerances.py`の`probit_crosscheck`の
     コメント参照。`testing-policy.md`「許容誤差」の方針通り）。
 """

@@ -128,15 +128,14 @@ bread_obs <- observed_bread(model, link)
 # Logit側のクロスチェック値が気づかれずに壊れることを防ぐ（testing-completeness-
 # reviewerの指摘）。probitでは一致しないため、logitのときのみ検証する。
 #
-# tolerance=1e-3（理論上の完全一致からすると緩め）: near_separationシナリオ
-# （500件中161件のfitted probabilityが浮動小数点上ちょうど0/1に潰れる強い準分離
-# ケース）では、IRLS内部の期待情報行列と直接計算する観測情報行列が数値精度の
-# 限界で理論値からずれ、Frobeniusノルムの相対誤差が実測で最大約1.7e-4に達する。
-# 計算式そのものの誤りではなく浮動小数点精度損失のため、実測値に対して約6倍の
-# マージンを持つ1e-3まで緩めても、将来計算式が本当に壊れた場合（通常は桁違いの
-# 乖離になる）の検知能力は保つ。
+# tolerance=1e-6: glm()をepsilon=1e-14で収束させているため、正準リンクの
+# logitでは期待情報行列と観測情報行列は浮動小数点精度の範囲で一致する
+# （Frobeniusノルムの相対誤差の実測最大~2.5e-8、near_separation（500件中161件の
+# fitted probabilityが浮動小数点上ちょうど0/1に潰れる強い準分離ケース）でも~1.6e-8）。
+# 計算式そのものが壊れた場合は通常桁違いの乖離になるため、約40倍のマージンを持つ
+# 1e-6でも検知能力は保てる。
 if (link == "logit") {
-  stopifnot(isTRUE(all.equal(bread_obs, bread(model), tolerance = 1e-3)))
+  stopifnot(isTRUE(all.equal(bread_obs, bread(model), tolerance = 1e-6)))
 }
 
 if (cov_type == "classical") {
@@ -220,26 +219,43 @@ format_margeff <- function(me_df) {
 # 中央値」（nonlinear-common.md6章「限界効果」節）と評価点がずれる
 # （ベンチマーク作成時に実機確認済み、mrozデータでdydxが大きくずれた）。
 # FUN_numeric/FUN_integerを両方明示することで全列を統一的に生の平均・中央値にする。
-# eps: `slopes()`/`avg_slopes()`は有限差分で限界効果を数値微分する。既定の刻み幅の
-# ままだと、勾配が急なケース（near_separationのx1平均点でdydx~7.2）で解析解
-# （β·p(1-p)）に対し相対誤差~7e-6のずれが出る（効果の点推定・標準誤差の双方。
-# `numderiv=`引数は効果の刻み幅に影響しない）。eps=1e-6で解析解と~1e-11、
-# 標準誤差も本実装と~1e-8で一致する。
-margeff_eps <- 1e-6
+# eps: `slopes()`/`avg_slopes()`は有限差分で限界効果を数値微分し、刻み幅`eps`は
+# 変数の単位そのもの（変数のスケールに依存しない絶対値）として使われる。既定の
+# 刻み幅のままだと、勾配が急なケース（near_separationのx1平均点でdydx~7.2）で
+# 解析解（β·p(1-p)）に対し相対誤差~7e-6、eps=1e-6の固定値でも、x1が1e6スケールの
+# scale_varianceでは相対誤差~5e-5ずれる（丸め誤差と打ち切り誤差の釣り合う刻み幅が
+# 変数のスケールに比例するため）。このため変数ごとに標準偏差の1e-5倍の刻み幅で
+# 呼び出す（全シナリオ・全変数で解析解と~1e-11、標準誤差も本実装と~1e-8で一致する。
+# `numderiv=`引数は効果の刻み幅に影響しない）。
+margeff_vars <- setdiff(names(coef(model)), "(Intercept)")
+margeff_eps <- function(v) 1e-5 * sd(df[[v]])
+margeff_by_var <- function(call_fun) {
+  do.call(rbind, lapply(margeff_vars, function(v) {
+    call_fun(v, margeff_eps(v))
+  }))
+}
 margeff <- list(
-  overall = format_margeff(avg_slopes(model, vcov = vc, eps = margeff_eps)),
-  mean = format_margeff(slopes(
-    model,
-    newdata = datagrid(model = model, FUN_numeric = mean, FUN_integer = mean),
-    vcov = vc,
-    eps = margeff_eps
-  )),
-  median = format_margeff(slopes(
-    model,
-    newdata = datagrid(model = model, FUN_numeric = median, FUN_integer = median),
-    vcov = vc,
-    eps = margeff_eps
-  ))
+  overall = format_margeff(margeff_by_var(function(v, eps) {
+    avg_slopes(model, variables = v, vcov = vc, eps = eps)
+  })),
+  mean = format_margeff(margeff_by_var(function(v, eps) {
+    slopes(
+      model,
+      variables = v,
+      newdata = datagrid(model = model, FUN_numeric = mean, FUN_integer = mean),
+      vcov = vc,
+      eps = eps
+    )
+  })),
+  median = format_margeff(margeff_by_var(function(v, eps) {
+    slopes(
+      model,
+      variables = v,
+      newdata = datagrid(model = model, FUN_numeric = median, FUN_integer = median),
+      vcov = vc,
+      eps = eps
+    )
+  }))
 )
 
 result <- list(

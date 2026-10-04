@@ -15,8 +15,8 @@ Note:
     どちらも反復最適化のため、OLSの閉形式解同士の比較（機械精度一致）ほどの
     精度は出ない。ただしR側の参照値は`glm()`の収束判定と`marginaleffects`の
     数値微分の刻み幅を厳しくして生成しており（`benchmark/nonlinear/references/
-    run_glm_crosscheck.R`参照）、基本方針はRTOL=1e-6（実測最大相対誤差~5e-8に対する
-    マージン）。p値のみ裾での増幅に備えた個別のATOLを設定している
+    run_glm_crosscheck.R`参照）、基本方針はRTOL=1e-6（実測最大相対誤差~6e-8に対する
+    マージン。ATOLは1e-12で純粋な相対誤差比較）。p値のみ裾での増幅に備えた個別のATOLを設定している
     （根拠は`tests/_tolerances.py`の`logit_crosscheck`のコメント参照。
     `testing-policy.md`「許容誤差」の方針通り）。
 """

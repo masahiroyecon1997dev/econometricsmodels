@@ -67,6 +67,9 @@ use crate::column_extraction::{
 use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
 use crate::linear::common::{build_cov_type, least_squares_error_is_computation_error, mat_to_vec};
 use crate::linear::ols::{OLSResult, ols_estimator_to_result};
+use crate::option_values::{
+    extract_strict_float, extract_strict_opt_float, extract_strict_opt_int,
+};
 use crate::validation::{
     RoleValue, reject_unused_option, validate_no_const_collision, validate_no_duplicate_roles,
     validate_no_duplicate_within_role, validate_x_non_empty,
@@ -148,7 +151,7 @@ pub struct IVOptions {
 
     /// Confidence level for confidence intervals, in the range (0, 1).
     /// Defaults to 0.95 (a 95% confidence interval).
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub confidence_level: f64,
 
     /// Column name to use as the cluster group key. Used by `cov_type="cluster"` and,
@@ -161,7 +164,7 @@ pub struct IVOptions {
     /// Number of lags (bandwidth) for HAC (Newey-West), used by `cov_type="hac"` and, with
     /// `estimator="gmm"`, by `gmm_weight_type="hac"`. When `None`, computed automatically.
     /// Specifying it when neither uses it raises `ValidationError`.
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub hac_lags: Option<i64>,
 
     /// Column name giving the time order for HAC, used by `cov_type="hac"` and, with
@@ -191,14 +194,14 @@ pub struct IVOptions {
     /// estimate; must be at least 3 (use `gmm_type="two_step"` for two steps). `None`
     /// (default) means 100. Specifying it with any other `gmm_type` or with
     /// `estimator="2sls"` raises `ValidationError`.
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub gmm_max_iter: Option<i64>,
 
     /// Convergence tolerance for `gmm_type="iterated"`: iteration stops once every
     /// coefficient changes by less than this (relative/absolute mix). `None` (default)
     /// means 1e-6. Specifying it with any other `gmm_type` or with `estimator="2sls"`
     /// raises `ValidationError`.
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub gmm_tol: Option<f64>,
 
     /// Whether to raise an error if `gmm_type="iterated"` does not converge within
@@ -232,14 +235,14 @@ impl IVOptions {
         estimator: String,
         cov_type: String,
         include_intercept: bool,
-        confidence_level: f64,
+        #[pyo3(from_py_with = crate::option_values::confidence_level_arg)] confidence_level: f64,
         cluster: Option<String>,
-        hac_lags: Option<i64>,
+        #[pyo3(from_py_with = crate::option_values::hac_lags_arg)] hac_lags: Option<i64>,
         hac_time: Option<String>,
         gmm_weight_type: Option<String>,
         gmm_type: Option<String>,
-        gmm_max_iter: Option<i64>,
-        gmm_tol: Option<f64>,
+        #[pyo3(from_py_with = crate::option_values::gmm_max_iter_arg)] gmm_max_iter: Option<i64>,
+        #[pyo3(from_py_with = crate::option_values::gmm_tol_arg)] gmm_tol: Option<f64>,
         raise_on_non_convergence: Option<bool>,
     ) -> Self {
         Self {
@@ -256,6 +259,30 @@ impl IVOptions {
             gmm_tol,
             raise_on_non_convergence,
         }
+    }
+
+    #[setter]
+    fn set_confidence_level(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.confidence_level = extract_strict_float(value, "confidence_level")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_hac_lags(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.hac_lags = extract_strict_opt_int(value, "hac_lags")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_gmm_max_iter(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.gmm_max_iter = extract_strict_opt_int(value, "gmm_max_iter")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_gmm_tol(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.gmm_tol = extract_strict_opt_float(value, "gmm_tol")?;
+        Ok(())
     }
 
     fn __repr__(&self) -> String {

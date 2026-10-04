@@ -83,6 +83,7 @@ use crate::column_extraction::{
 };
 use crate::errors::ValidationError;
 use crate::linear::common::mat_to_vec;
+use crate::option_values::{extract_strict_float, extract_strict_opt_int};
 use crate::validation::{
     RoleValue, reject_unused_option, validate_no_duplicate_roles,
     validate_no_duplicate_within_role, validate_x_non_empty,
@@ -104,7 +105,7 @@ pub struct FEOptions {
 
     /// Confidence level for confidence intervals, in the range (0, 1).
     /// Defaults to 0.95 (a 95% confidence interval).
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub confidence_level: f64,
 
     /// Column name of the time identifier. When set, requests two-way fixed effects
@@ -131,7 +132,7 @@ pub struct FEOptions {
     /// Bandwidth for Driscoll-Kraay HAC when `cov_type="dk"`. When `None`, computed
     /// automatically via `floor(4*(t/100)^(2/9))` (`t` = number of unique time periods).
     /// Specifying it with any other `cov_type` raises `ValidationError`.
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub dk_bandwidth: Option<i64>,
 }
 
@@ -149,11 +150,11 @@ impl FEOptions {
     #[allow(clippy::too_many_arguments)]
     fn new(
         cov_type: String,
-        confidence_level: f64,
+        #[pyo3(from_py_with = crate::option_values::confidence_level_arg)] confidence_level: f64,
         time: Option<String>,
         cluster: Option<String>,
         dk_time: Option<String>,
-        dk_bandwidth: Option<i64>,
+        #[pyo3(from_py_with = crate::option_values::dk_bandwidth_arg)] dk_bandwidth: Option<i64>,
     ) -> Self {
         Self {
             cov_type,
@@ -163,6 +164,18 @@ impl FEOptions {
             dk_time,
             dk_bandwidth,
         }
+    }
+
+    #[setter]
+    fn set_confidence_level(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.confidence_level = extract_strict_float(value, "confidence_level")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_dk_bandwidth(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.dk_bandwidth = extract_strict_opt_int(value, "dk_bandwidth")?;
+        Ok(())
     }
 
     fn __repr__(&self) -> String {

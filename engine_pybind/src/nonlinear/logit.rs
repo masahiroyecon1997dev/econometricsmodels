@@ -34,6 +34,7 @@ use super::common::{
 use crate::column_extraction::{
     extract_dataframe, extract_f64_column, extract_f64_columns, x_column_names,
 };
+use crate::option_values::{extract_strict_float, extract_strict_int};
 use crate::validation::{validate_common_roles, validate_no_existing_column};
 
 /// Estimation options for Logit.
@@ -69,7 +70,7 @@ pub struct LogitOptions {
 
     /// Confidence level for confidence intervals, in the range (0, 1).
     /// Defaults to 0.95 (a 95% confidence interval).
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub confidence_level: f64,
 
     /// Column name to use as the cluster group key when `cov_type="cluster"`.
@@ -84,7 +85,7 @@ pub struct LogitOptions {
     pub solver: String,
 
     /// Maximum number of solver iterations.
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub max_iter: i64,
 
     /// Convergence tolerance. For `solver="newton"`, an absolute threshold on
@@ -105,7 +106,7 @@ pub struct LogitOptions {
     /// resolved once, at construction time. Changing `solver` afterwards via
     /// the setter does not re-resolve `tol` — set both together (or set `tol`
     /// explicitly) if you change `solver` after construction.
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub tol: f64,
 
     /// If true (default), raise `ComputationError` when the solver fails to
@@ -132,11 +133,11 @@ impl LogitOptions {
     fn new(
         cov_type: String,
         include_intercept: bool,
-        confidence_level: f64,
+        #[pyo3(from_py_with = crate::option_values::confidence_level_arg)] confidence_level: f64,
         cluster: Option<String>,
         solver: String,
-        max_iter: i64,
-        tol: Option<f64>,
+        #[pyo3(from_py_with = crate::option_values::max_iter_arg)] max_iter: i64,
+        #[pyo3(from_py_with = crate::option_values::tol_arg)] tol: Option<f64>,
         raise_on_non_convergence: bool,
     ) -> Self {
         // `tol`の既定値は`solver`依存（`tol`フィールドのdocコメント参照）。`newton`は
@@ -159,6 +160,24 @@ impl LogitOptions {
             tol,
             raise_on_non_convergence,
         }
+    }
+
+    #[setter]
+    fn set_confidence_level(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.confidence_level = extract_strict_float(value, "confidence_level")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_max_iter(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.max_iter = extract_strict_int(value, "max_iter")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_tol(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.tol = extract_strict_float(value, "tol")?;
+        Ok(())
     }
 
     fn __repr__(&self) -> String {

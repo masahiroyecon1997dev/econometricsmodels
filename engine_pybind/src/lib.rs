@@ -3,6 +3,7 @@ mod errors;
 mod iv;
 mod linear;
 mod nonlinear;
+mod option_values;
 mod panel;
 mod validation;
 

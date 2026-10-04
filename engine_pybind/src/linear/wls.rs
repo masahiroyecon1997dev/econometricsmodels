@@ -24,6 +24,7 @@ use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
 use crate::column_extraction::{
     extract_dataframe, extract_f64_column, extract_f64_columns, x_column_names,
 };
+use crate::option_values::{extract_strict_float, extract_strict_opt_int};
 use crate::validation::{
     RoleValue, validate_common_roles, validate_no_duplicate_roles, validate_no_existing_column,
 };
@@ -77,7 +78,7 @@ pub struct WLSOptions {
     /// Confidence level for confidence intervals, in the range (0, 1).
     /// Defaults to 0.95 (a 95% confidence interval). Named `confidence_level` rather
     /// than `alpha` to avoid confusion with the significance level (the 0.05 side).
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub confidence_level: f64,
 
     /// Column name to use as the cluster group key when `cov_type="cluster"`.
@@ -89,7 +90,7 @@ pub struct WLSOptions {
     /// Number of lags (bandwidth) for HAC (Newey-West) when `cov_type="hac"`.
     /// When `None`, computed automatically via `L = floor(4*(n/100)^(2/9))`.
     /// Specifying it with any other `cov_type` raises `ValidationError`.
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub hac_lags: Option<i64>,
 
     /// Column name giving the time order for HAC when `cov_type="hac"`.
@@ -114,9 +115,9 @@ impl WLSOptions {
     fn new(
         cov_type: String,
         include_intercept: bool,
-        confidence_level: f64,
+        #[pyo3(from_py_with = crate::option_values::confidence_level_arg)] confidence_level: f64,
         cluster: Option<String>,
-        hac_lags: Option<i64>,
+        #[pyo3(from_py_with = crate::option_values::hac_lags_arg)] hac_lags: Option<i64>,
         hac_time: Option<String>,
     ) -> Self {
         Self {
@@ -127,6 +128,18 @@ impl WLSOptions {
             hac_lags,
             hac_time,
         }
+    }
+
+    #[setter]
+    fn set_confidence_level(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.confidence_level = extract_strict_float(value, "confidence_level")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_hac_lags(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.hac_lags = extract_strict_opt_int(value, "hac_lags")?;
+        Ok(())
     }
 
     fn __repr__(&self) -> String {

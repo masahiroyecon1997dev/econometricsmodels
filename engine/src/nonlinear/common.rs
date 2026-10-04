@@ -56,10 +56,11 @@ pub enum MleError {
     #[error("max_iter must be a positive integer, got {max_iter}")]
     InvalidMaxIter { max_iter: i64 },
 
-    /// `tol`が0以下。勾配ノルムに基づく収束判定`‖∇ℓ(θ)‖ < tol`が理論上満たされないため、
-    /// 常に`max_iter`まで反復して`NonConvergence`（または`converged=false`）になる
-    /// （`InvalidMaxIter`と同じ形の早期バリデーション）。
-    #[error("tol must be a positive number, got {tol}")]
+    /// `tol`が0以下、またはNaN・無限大。勾配ノルムに基づく収束判定`‖∇ℓ(θ)‖ < tol`が
+    /// 理論上満たされない（NaNは常に偽、`0`以下は到達不能）ため、常に`max_iter`まで反復して
+    /// `NonConvergence`（または`converged=false`）になる（`InvalidMaxIter`と同じ形の
+    /// 早期バリデーション）。
+    #[error("tol must be a positive finite number, got {tol}")]
     InvalidTol { tol: f64 },
 
     /// Hessianが特異で逆行列が計算できない。Newton法のステップ求解中（収束前の任意の点）、
@@ -293,9 +294,11 @@ fn validate_max_iter(max_iter: i64) -> Result<(), MleError> {
     Ok(())
 }
 
-/// `tol`が0以下の場合にエラーを返す（[`MleError::InvalidTol`]のdocコメント参照）。
+/// `tol`が0以下、またはNaN・無限大の場合にエラーを返す（[`MleError::InvalidTol`]のdocコメント
+/// 参照）。肯定形の条件を`!`で囲み、NaNを自動的に弾く（`l <= 0.0`のような否定形の直接比較は
+/// NaNに対して常に`false`になりすり抜ける）。
 fn validate_tol(tol: f64) -> Result<(), MleError> {
-    if tol <= 0.0 {
+    if !(tol.is_finite() && tol > 0.0) {
         return Err(MleError::InvalidTol { tol });
     }
     Ok(())
@@ -5074,6 +5077,19 @@ mod tests {
             validate_mle_options(0.95, 100, 0.0),
             Err(MleError::InvalidTol { tol: 0.0 })
         );
+    }
+
+    #[test]
+    fn validate_mle_options_returns_invalid_tol_for_nan_and_infinity() {
+        for tol in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(
+                matches!(
+                    validate_mle_options(0.95, 100, tol),
+                    Err(MleError::InvalidTol { .. })
+                ),
+                "tol={tol}"
+            );
+        }
     }
 
     #[test]

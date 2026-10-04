@@ -207,7 +207,7 @@ UNKNOWN_COV_TYPE_NONLINEAR = (
 UNKNOWN_METHOD_NONLINEAR = (
     "unknown solver: '{other}'. Expected one of 'newton', 'bfgs', or 'lbfgs'"
 )
-INVALID_TOL = "tol must be a positive number, got {tol}"
+INVALID_TOL = "tol must be a positive finite number, got {tol}"
 INVALID_MAX_ITER = "max_iter must be a positive integer, got {max_iter}"
 INVALID_BINARY_Y = (
     "y at row {row} must be coded as 0.0 or 1.0 (binary outcome), got {value}"

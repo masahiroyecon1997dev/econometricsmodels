@@ -60,7 +60,7 @@ pub fn extract_dataframe(ob: &Bound<'_, PyAny>, param_name: &str) -> PyResult<Py
 }
 
 /// `ob`の型の完全修飾名（`str`・`pandas.core.frame.DataFrame`等）。エラーメッセージ用。
-fn type_name_of(ob: &Bound<'_, PyAny>) -> String {
+pub(crate) fn type_name_of(ob: &Bound<'_, PyAny>) -> String {
     ob.get_type()
         .fully_qualified_name()
         .map(|n| n.to_string_lossy().into_owned())

@@ -252,15 +252,15 @@ def test_predict_missing_column_raises(censored_dataset):
 
 
 def test_predict_non_numeric_dtype_raises(censored_dataset):
-    """`test_non_numeric_dtype_raises`と同じ理由でnull経由の
-    `COLUMN_HAS_MISSING_VALUES`になる。
-    """
+    """`test_non_numeric_dtype_raises`と同じdtypeのメッセージになる。"""
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     new_data = pl.DataFrame({"x1": ["a", "b"], "x2": [1.0, 2.0]})
 
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=2),
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="x1", dtype="String"
+        ),
     ):
         res.predict(new_data=new_data)
 
@@ -683,13 +683,15 @@ def test_non_finite_values_raise(bad):
 
 
 def test_non_numeric_dtype_raises():
-    """文字列を数値キャストするとnullになるため`COLUMN_HAS_MISSING_VALUES`経路
-    になる（`test_ols_validation.py::test_non_numeric_dtype_raises`参照）。
+    """文字列列は、dtypeの時点で`ValidationError`
+    （`test_ols_validation.py::test_non_numeric_dtype_raises`参照）。
     """
     df = pl.DataFrame({"y": ["a", "b", "c"], "x1": [1.0, 2.0, 3.0]})
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=3),
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="y", dtype="String"
+        ),
     ):
         Tobit(df, y="y", x=["x1"]).fit()
 

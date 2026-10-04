@@ -2,15 +2,26 @@
 
 polarsの数値dtype（小さい整数型・`Float16`・`Int128`・`Decimal`）が、推定に使わない列に
 含まれていても`fit()`を壊さないこと、`x`・`y`として`Float64`列と同じ結果で使えることを
-確認する。dtypeごとの許可・拒否の方針は`docs/guide/accepted-data.md`が正本。
+確認する。数値として使えないdtype（文字列・日付・時刻等）は`ValidationError`になる。dtypeごとの許可・拒否の方針は`docs/guide/accepted-data.md`が正本。
 """
 
 from __future__ import annotations
 
+import _error_messages as msgs
 import numpy as np
 import polars as pl
 import pytest
-from econometricsmodels import FE, OLS, Logit
+from _error_messages import escaped
+from econometricsmodels import (
+    FE,
+    IV,
+    OLS,
+    WLS,
+    IVOptions,
+    Logit,
+    OLSOptions,
+    ValidationError,
+)
 
 N = 60
 
@@ -182,3 +193,187 @@ def test_boolean_y_is_usable_for_logit():
         df.with_columns(pl.col("y").cast(pl.Float64)), y="y", x=["x1"]
     ).fit()
     assert result.params == expected.params
+
+
+# 数値として使えないdtypeと、メッセージに出るdtype名。
+NON_NUMERIC_DTYPES = [
+    (pl.String, "String"),
+    (pl.Categorical, "Categorical"),
+    (pl.Enum(["a", "b"]), "Enum"),
+    (pl.Date, "Date"),
+    (pl.Datetime, "Datetime"),
+    (pl.Duration, "Duration"),
+    (pl.Time, "Time"),
+    (pl.Binary, "Binary"),
+    (pl.List(pl.Int64), "List"),
+    (pl.Array(pl.Int64, 2), "Array"),
+    (pl.Struct({"a": pl.Int64}), "Struct"),
+]
+
+
+def _non_numeric_column(name: str, dtype: pl.DataType) -> pl.Series:
+    """数値として使えないdtypeの列（`n`行）を作る。"""
+    if dtype == pl.Enum(["a", "b"]):
+        return pl.Series(name, ["a", "b"] * (N // 2), dtype=dtype)
+    return _unused_column(dtype).alias(name)
+
+
+@pytest.mark.parametrize(
+    ("dtype", "label"),
+    NON_NUMERIC_DTYPES,
+    ids=[x[1] for x in NON_NUMERIC_DTYPES],
+)
+@pytest.mark.parametrize("role", ["x", "y"])
+def test_non_numeric_dtype_raises_for_numeric_role(base, dtype, label, role):
+    """数値として使えないdtypeを`x`・`y`に使うと、dtype名入りの`ValidationError`。"""
+    df = base.with_columns(
+        _non_numeric_column(role if role == "y" else "x1", dtype)
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE,
+            name="y" if role == "y" else "x1",
+            dtype=label,
+        ),
+    ):
+        OLS(df, y="y", x=["x1", "x2"]).fit()
+
+
+def test_numeric_looking_strings_are_rejected(base):
+    """`"1.0"`のような数値に見える文字列も、黙って数値化せず拒否する。"""
+    df = base.with_columns(
+        pl.col("x1").cast(pl.Float64).cast(pl.String).alias("x1")
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="x1", dtype="String"
+        ),
+    ):
+        OLS(df, y="y", x=["x1", "x2"]).fit()
+
+
+def test_string_y_is_rejected_for_logit(base):
+    """Logitの`y`に`"0"`/`"1"`の文字列を渡しても拒否する。"""
+    df = pl.DataFrame(
+        {"y": ["0", "1"] * (N // 2), "x1": base["x1"].cast(pl.Float64)}
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="y", dtype="String"
+        ),
+    ):
+        Logit(df, y="y", x=["x1"]).fit()
+
+
+def test_non_numeric_weight_is_rejected(base):
+    """WLSの重み列が文字列のときも拒否する。"""
+    df = base.with_columns(pl.lit("1").alias("w"))
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="w", dtype="String"
+        ),
+    ):
+        WLS(df, y="y", x=["x1"], weight="w").fit()
+
+
+def test_non_numeric_instrument_is_rejected(base):
+    """IVの操作変数が日付型のときも拒否する。"""
+    df = base.with_columns(
+        pl.Series("z", [0] * N, dtype=pl.Int32).cast(pl.Date)
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="z", dtype="Date"
+        ),
+    ):
+        IV(df, y="y", x_exog=["x2"], x_endog=["x1"], instruments=["z"]).fit()
+
+
+@pytest.mark.parametrize("dtype", [pl.Date, pl.Datetime], ids=str)
+def test_hac_time_accepts_date_and_datetime_in_the_same_order(base, dtype):
+    """`hac_time`は順序だけに使われるため、`Date`/`Datetime`でも整数の時点と同じ結果になる。"""
+    rng = np.random.default_rng(3)
+    order = rng.permutation(N)
+    base = base.with_columns(pl.Series("t_int", order, dtype=pl.Int32))
+    options = OLSOptions(cov_type="hac", hac_lags=2, hac_time="t")
+
+    as_int = base.with_columns(pl.col("t_int").alias("t"))
+    as_date = base.with_columns(
+        pl.col("t_int").cast(pl.Int64).cast(dtype).alias("t")
+    )
+
+    expected = OLS(as_int, y="y", x=["x1"], options=options).fit()
+    result = OLS(as_date, y="y", x=["x1"], options=options).fit()
+
+    assert result.std_errors == expected.std_errors
+
+
+def test_hac_time_accepts_date_for_iv(base):
+    """IVの`hac_time`（GMMとは別の抽出経路）でも`Date`を受け付ける。"""
+    rng = np.random.default_rng(4)
+    z = rng.integers(0, 100, N)
+    base = base.with_columns(
+        pl.Series("z", z),
+        pl.Series("t_int", rng.permutation(N), dtype=pl.Int32),
+    )
+    options = IVOptions(cov_type="hac", hac_lags=2, hac_time="t")
+
+    def fit(df):
+        return IV(
+            df,
+            y="y",
+            x_exog=["x2"],
+            x_endog=["x1"],
+            instruments=["z"],
+            options=options,
+        ).fit()
+
+    as_int = base.with_columns(pl.col("t_int").alias("t"))
+    as_date = base.with_columns(pl.col("t_int").cast(pl.Date).alias("t"))
+
+    assert fit(as_date).std_errors == fit(as_int).std_errors
+
+
+@pytest.mark.parametrize(
+    ("dtype", "label"),
+    [
+        (pl.String, "String"),
+        (pl.Time, "Time"),
+        (pl.Duration, "Duration"),
+        (pl.Categorical, "Categorical"),
+    ],
+    ids=["String", "Time", "Duration", "Categorical"],
+)
+def test_hac_time_rejects_non_orderable_dtypes(base, dtype, label):
+    """`hac_time`に文字列・時刻・期間・カテゴリを使うと、時点列用のメッセージで拒否する。"""
+    df = base.with_columns(_non_numeric_column("t", dtype))
+    options = OLSOptions(cov_type="hac", hac_lags=2, hac_time="t")
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_ORDER_DTYPE, name="t", dtype=label
+        ),
+    ):
+        OLS(df, y="y", x=["x1"], options=options).fit()
+
+
+def test_all_null_column_reports_missing_values(base):
+    """全値が欠損の列（`Null`型）は、dtypeではなく欠損値として報告する。"""
+    df = base.with_columns(pl.Series("x1", [None] * N, dtype=pl.Null))
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=N),
+    ):
+        OLS(df, y="y", x=["x1"]).fit()

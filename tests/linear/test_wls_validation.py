@@ -334,8 +334,7 @@ def test_non_finite_values_raise():
 
 
 def test_non_numeric_dtype_raises():
-    """`y`が非数値型の場合`ValidationError`（OLSと同じ検証。文字列を数値
-    キャストするとnullになるため`COLUMN_HAS_MISSING_VALUES`経路になる、
+    """`y`が非数値型の場合`ValidationError`（OLSと同じ検証、
     `test_ols_validation.py::test_non_numeric_dtype_raises`参照）。
     """
     df = pl.DataFrame(
@@ -343,7 +342,9 @@ def test_non_numeric_dtype_raises():
     )
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=3),
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="y", dtype="String"
+        ),
     ):
         WLS(df, y="y", x=["x1"], weight="weight").fit()
 
@@ -369,7 +370,7 @@ def test_predict_missing_column_raises(dataset):
 
 def test_predict_non_numeric_dtype_raises(dataset):
     """`test_ols_validation.py::test_predict_non_numeric_dtype_raises`と
-    同じ理由でnull経由の`COLUMN_HAS_MISSING_VALUES`になる。
+    同じdtypeのメッセージになる。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
@@ -377,7 +378,9 @@ def test_predict_non_numeric_dtype_raises(dataset):
 
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=2),
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="x1", dtype="String"
+        ),
     ):
         res.predict(new_data)
 

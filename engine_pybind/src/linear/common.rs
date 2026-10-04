@@ -18,7 +18,7 @@ use engine::linear::ols::CovType as EngineCovType;
 use polars::prelude::DataFrame;
 use pyo3::{PyErr, PyResult};
 
-use crate::column_extraction::{extract_f64_column, extract_group_key_column};
+use crate::column_extraction::{extract_group_key_column, extract_ordering_f64_column};
 use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
 use crate::validation::reject_unused_option;
 
@@ -130,7 +130,7 @@ pub(crate) fn build_cov_type(
         "hc3" => EngineCovType::Hc3,
         "hac" => {
             let time_order = hac_time
-                .map(|col_name| extract_f64_column(df, col_name))
+                .map(|col_name| extract_ordering_f64_column(df, col_name))
                 .transpose()?;
             EngineCovType::Hac {
                 lags: hac_lags,

@@ -57,18 +57,99 @@ pub fn extract_dataframe(ob: &Bound<'_, PyAny>, param_name: &str) -> PyResult<Py
     })
 }
 
+/// f64として取り出す列の使われ方。使われ方によって許可するdtypeが異なる。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NumericRole {
+    /// 値そのものを計算に使う列（`y`・`x`・重み・操作変数等）。
+    Value,
+    /// 行の並び順を決めるだけに使う列（HACの`hac_time`）。値の大小関係だけが意味を持つため、
+    /// f64に変換しても順序が保たれる`Date`/`Datetime`も許可する。
+    Ordering,
+}
+
+/// エラーメッセージ用のdtype名。Pythonの`pl.String`等と同じ呼び名にする
+/// （polarsのDisplayは`str`・`cat`等の略称になるため）。内部パラメータ（時間単位・
+/// 内側の型等）は含めない。
+fn dtype_label(dtype: &DataType) -> String {
+    match dtype {
+        DataType::String => "String".to_string(),
+        DataType::Binary => "Binary".to_string(),
+        DataType::Date => "Date".to_string(),
+        DataType::Time => "Time".to_string(),
+        DataType::Datetime(..) => "Datetime".to_string(),
+        DataType::Duration(..) => "Duration".to_string(),
+        DataType::Categorical(..) => "Categorical".to_string(),
+        DataType::Enum(..) => "Enum".to_string(),
+        DataType::List(_) => "List".to_string(),
+        DataType::Array(..) => "Array".to_string(),
+        DataType::Struct(_) => "Struct".to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// `dtype`がf64に変換して使える数値の列かを検査し、そうでなければ`ValidationError`にする。
+///
+/// 整数・浮動小数・Boolean（`True`=1）・Decimalを許可する。文字列・日付・時刻・カテゴリ等は
+/// キャストで黙って数値になったり欠損値扱いになったりして意図が判定できないため拒否する。
+/// `Null`型（全値が欠損の列）は後続の欠損値チェックで「欠損値を含む」と報告させるため通す。
+fn check_numeric_dtype(name: &str, dtype: &DataType, role: NumericRole) -> PyResult<()> {
+    let is_numeric = dtype.is_integer()
+        || dtype.is_float()
+        || dtype.is_decimal()
+        || dtype.is_bool()
+        || dtype.is_null();
+    let is_ordering_extra = matches!(dtype, DataType::Date | DataType::Datetime(..));
+    if is_numeric || (role == NumericRole::Ordering && is_ordering_extra) {
+        return Ok(());
+    }
+    let label = dtype_label(dtype);
+    let message = match role {
+        NumericRole::Value => format!(
+            "column '{name}' has dtype {label}, which cannot be used as a numeric column; \
+             use an integer, float, boolean or decimal column (cast it first if it holds numbers)"
+        ),
+        NumericRole::Ordering => format!(
+            "column '{name}' has dtype {label}, which cannot be used as a time-order column; \
+             use an integer, float, Date or Datetime column"
+        ),
+    };
+    Err(ValidationError::new_err(message))
+}
+
 /// `df`から`name`列をf64のVecとして取り出す。
+///
+/// 数値として使う列（`y`・`x`・重み・操作変数等）用。整数・浮動小数・Boolean・Decimalのみを
+/// 受け付ける（`check_numeric_dtype`）。行の並び順だけに使う列は[`extract_ordering_f64_column`]。
 ///
 /// # Errors（すべて`ValidationError`）
 /// - 列が存在しない
-/// - 数値型にキャストできない
+/// - 数値として使えないdtype（文字列・日付・時刻・カテゴリ等）
 /// - 欠損値（null）を含む
 /// - NaN・無限大（infinity）を含む
 pub fn extract_f64_column(df: &DataFrame, name: &str) -> PyResult<Vec<f64>> {
+    extract_f64_column_for(df, name, NumericRole::Value)
+}
+
+/// `df`から`name`列を、行の並び順を決めるための値としてf64のVecで取り出す（HACの`hac_time`）。
+///
+/// [`extract_f64_column`]の許可dtypeに加えて`Date`/`Datetime`を受け付ける。f64への変換は
+/// 単調なので順序が保たれ、エンジン側は値の大小関係だけを使う（間隔は使わない）。
+///
+/// # Errors
+/// [`extract_f64_column`]と同じ（許可するdtypeだけが異なる）。
+pub fn extract_ordering_f64_column(df: &DataFrame, name: &str) -> PyResult<Vec<f64>> {
+    extract_f64_column_for(df, name, NumericRole::Ordering)
+}
+
+fn extract_f64_column_for(df: &DataFrame, name: &str, role: NumericRole) -> PyResult<Vec<f64>> {
     let series = df.column(name).map_err(|_| {
         ValidationError::new_err(format!("column '{name}' does not exist in the data"))
     })?;
 
+    check_numeric_dtype(name, series.dtype(), role)?;
+
+    // 許可したdtypeはすべてf64にキャストできるため、ここでの失敗は想定していない
+    // （防御的に`ValidationError`へ変換する）。
     let series = series.cast(&DataType::Float64).map_err(|e| {
         ValidationError::new_err(format!(
             "column '{name}' could not be cast to a numeric type (f64): {e}"
@@ -207,6 +288,94 @@ mod tests {
         // Tobitの`param_names`が末尾に`"sigma"`を持つケースを想定。
         let param_names = names(&["const", "x1", "x2", "sigma"]);
         assert_eq!(x_column_names(&param_names, true, 1), &param_names[1..3]);
+    }
+
+    fn numeric_dtypes() -> Vec<DataType> {
+        vec![
+            DataType::Int8,
+            DataType::Int16,
+            DataType::Int32,
+            DataType::Int64,
+            DataType::Int128,
+            DataType::UInt8,
+            DataType::UInt16,
+            DataType::UInt32,
+            DataType::UInt64,
+            DataType::Float32,
+            DataType::Float64,
+            DataType::Boolean,
+            DataType::Decimal(18, 2),
+            DataType::Null,
+        ]
+    }
+
+    #[test]
+    fn check_numeric_dtype_accepts_numeric_dtypes_for_both_roles() {
+        for dtype in numeric_dtypes() {
+            for role in [NumericRole::Value, NumericRole::Ordering] {
+                assert!(
+                    check_numeric_dtype("x", &dtype, role).is_ok(),
+                    "{dtype} should be accepted"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn check_numeric_dtype_rejects_non_numeric_dtypes_for_value_role() {
+        let rejected = [
+            DataType::String,
+            DataType::Binary,
+            DataType::Date,
+            DataType::Time,
+            DataType::Datetime(TimeUnit::Microseconds, None),
+            DataType::Duration(TimeUnit::Microseconds),
+            DataType::List(Box::new(DataType::Int64)),
+        ];
+        for dtype in rejected {
+            assert!(
+                check_numeric_dtype("x", &dtype, NumericRole::Value).is_err(),
+                "{dtype} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn check_numeric_dtype_accepts_date_and_datetime_only_for_ordering_role() {
+        let date_like = [
+            DataType::Date,
+            DataType::Datetime(TimeUnit::Microseconds, None),
+        ];
+        for dtype in &date_like {
+            assert!(check_numeric_dtype("t", dtype, NumericRole::Ordering).is_ok());
+            assert!(check_numeric_dtype("t", dtype, NumericRole::Value).is_err());
+        }
+        // 時刻・期間・文字列は順序用でも拒否する。
+        for dtype in [
+            DataType::Time,
+            DataType::Duration(TimeUnit::Microseconds),
+            DataType::String,
+        ] {
+            assert!(check_numeric_dtype("t", &dtype, NumericRole::Ordering).is_err());
+        }
+    }
+
+    #[test]
+    fn extract_f64_column_rejects_string_column_even_if_values_look_numeric() {
+        let df = df!("a" => ["1.0", "2.0"]).unwrap();
+
+        assert!(extract_f64_column(&df, "a").is_err());
+    }
+
+    #[test]
+    fn extract_ordering_f64_column_keeps_date_order() {
+        let mut df = df!("t" => [3_i32, 1, 2]).unwrap();
+        let date = df.column("t").unwrap().cast(&DataType::Date).unwrap();
+        df.with_column(date).unwrap();
+
+        let values = extract_ordering_f64_column(&df, "t").unwrap();
+
+        assert_eq!(values, vec![3.0, 1.0, 2.0]);
     }
 
     #[test]

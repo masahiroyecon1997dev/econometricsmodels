@@ -637,15 +637,15 @@ def check_non_finite_values_raise(estimator_cls):
 
 
 def check_non_numeric_dtype_raises(estimator_cls):
-    """数値/文字列型にキャストできない列は`ValidationError`（OLSの
-    `test_non_numeric_dtype_raises`と同型）。文字列を
-    数値キャストするとnullになるため`COLUMN_HAS_MISSING_VALUES`経路になる
-    （`test_ols_validation.py::test_non_numeric_dtype_raises`参照）。
+    """文字列列は、dtypeの時点で`ValidationError`（OLSの
+    `test_non_numeric_dtype_raises`と同型）。
     """
     df = pl.DataFrame({"y": ["a", "b", "c"], "x1": [1.0, 2.0, 3.0]})
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=3),
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="y", dtype="String"
+        ),
     ):
         estimator_cls(df, y="y", x=["x1"]).fit()
 
@@ -689,15 +689,15 @@ def check_predict_missing_column_raises(dataset, estimator_cls):
 
 
 def check_predict_non_numeric_dtype_raises(dataset, estimator_cls):
-    """`check_non_numeric_dtype_raises`と同じ理由でnull経由の
-    `COLUMN_HAS_MISSING_VALUES`になる。
-    """
+    """`check_non_numeric_dtype_raises`と同じdtypeのメッセージになる。"""
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
     new_data = pl.DataFrame({"x1": ["a", "b"], "x2": [1.0, 2.0]})
 
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=2),
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="x1", dtype="String"
+        ),
     ):
         res.predict(new_data)
 

@@ -120,17 +120,15 @@ def test_non_finite_values_raise():
 
 
 def test_non_numeric_dtype_raises():
-    """数値にキャストできない文字列は`ValidationError`。
-
-    polarsの`cast(Float64)`は数値として解釈できない文字列を（キャスト自体の
-    エラーではなく）nullに変換するため、`COLUMN_NOT_CASTABLE_TO_NUMERIC`
-    ではなく後続の欠損値チェック（`COLUMN_HAS_MISSING_VALUES`）の経路を通る
-    （実測確認済み）。
+    """文字列列は、値が数値として読めなくてもdtypeの時点で`ValidationError`
+    （欠損値のメッセージではなく、dtypeを指摘するメッセージになる）。
     """
     df = pl.DataFrame({"y": ["a", "b", "c"], "x1": [1.0, 2.0, 3.0]})
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=3),
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="y", dtype="String"
+        ),
     ):
         OLS(df, y="y", x=["x1"]).fit()
 
@@ -313,15 +311,17 @@ def test_predict_missing_column_raises(dataset):
 
 
 def test_predict_non_numeric_dtype_raises(dataset):
-    """`test_non_numeric_dtype_raises`と同じ理由でnull経由の
-    `COLUMN_HAS_MISSING_VALUES`になる。
+    """`predict()`の`new_data`の列が数値でない（文字列）場合も、`fit()`と同じ
+    dtypeのメッセージで`ValidationError`になる。
     """
     res = our_fit(dataset)
     new_data = pl.DataFrame({"x1": ["a", "b"], "x2": [1.0, 2.0]})
 
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=2),
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="x1", dtype="String"
+        ),
     ):
         res.predict(new_data)
 

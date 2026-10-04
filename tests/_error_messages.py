@@ -100,13 +100,19 @@ COLUMN_HAS_NON_FINITE_VALUE = (
     "NaN and infinite values are not handled automatically; please impute "
     "or remove them before calling this function"
 )
-# `Series.cast(Float64)`自体が失敗する場合のメッセージ。polarsは数値として
-# 解釈できない文字列（`"a"`等）を非strictキャストでnullに変換するため、通常の
-# 非数値文字列テストはこの分岐ではなく`COLUMN_HAS_MISSING_VALUES`を通る
-# （実測確認済み、tests/linear/test_ols_validation.py::test_non_numeric_dtype_raises
-# 参照）。この分岐が実際にテストで踏まれるケースは現状無い。
-COLUMN_NOT_CASTABLE_TO_NUMERIC = (
-    "column '{name}' could not be cast to a numeric type (f64):"
+# 数値として使う列（y/x/weight/x_exog/x_endog/instruments）のdtypeが許可外の場合。
+# `{dtype}`はPythonの`pl.String`等と同じ呼び名（`String`・`Date`・`Categorical`等、
+# 時間単位や内側の型は含まない）。`Null`型は後続の欠損値チェックに回るため
+# このメッセージにならない。
+COLUMN_UNSUPPORTED_NUMERIC_DTYPE = (
+    "column '{name}' has dtype {dtype}, which cannot be used as a numeric "
+    "column; use an integer, float, boolean or decimal column (cast it first "
+    "if it holds numbers)"
+)
+# 行の並び順だけに使う列（HACの`hac_time`）のdtypeが許可外の場合。
+COLUMN_UNSUPPORTED_ORDER_DTYPE = (
+    "column '{name}' has dtype {dtype}, which cannot be used as a time-order "
+    "column; use an integer, float, Date or Datetime column"
 )
 
 # extract_group_key_column: cluster の抽出で使う（同ファイル86-111行）。

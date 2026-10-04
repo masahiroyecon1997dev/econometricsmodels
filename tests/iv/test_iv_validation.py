@@ -348,11 +348,9 @@ def test_non_finite_values_raise(bad_col, value, display):
 
 @pytest.mark.parametrize("bad_col", ["y", "x1", "endog1", "z1"])
 def test_non_numeric_dtype_raises(bad_col):
-    """数値/文字列型にキャストできない列は`ValidationError`。`y`列だけでなく
+    """文字列列は、dtypeの時点で`ValidationError`。`y`列だけでなく
     `x_exog`/`x_endog`/`instruments`側の列でも検証する（`test_null_values_raise`
-    と同じ理由）。文字列4件が全て数値キャストでnullになる
-    ため`COLUMN_HAS_MISSING_VALUES`経路（`count=4`）になる
-    （`test_ols_validation.py::test_non_numeric_dtype_raises`参照）。
+    と同じ理由。`test_ols_validation.py::test_non_numeric_dtype_raises`参照）。
     """
     values: dict[str, list] = {
         "y": [1.0, 2.0, 3.0, 4.0],
@@ -364,7 +362,11 @@ def test_non_numeric_dtype_raises(bad_col):
     df = pl.DataFrame(values)
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name=bad_col, count=4),
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE,
+            name=bad_col,
+            dtype="String",
+        ),
     ):
         IV(
             df, y="y", x_exog=["x1"], x_endog=["endog1"], instruments=["z1"]

@@ -76,7 +76,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_polars::PyDataFrame;
 
-use super::common::panel_error_to_pyerr;
+use super::common::{panel_error_to_pyerr, validate_dk_time_role};
 use crate::column_extraction::{
     extract_f64_column, extract_f64_columns, extract_group_key_column, extract_time_keys,
 };
@@ -130,8 +130,9 @@ pub struct FEOptions {
     /// docstring). Required when `cov_type="dk"`, in one-way and two-way models alike:
     /// leaving it unset raises `ValidationError`, and `time` is not used instead. With
     /// two-way effects the HAC may use a different time granularity from the fixed
-    /// effects. Specifying it with any other `cov_type` raises `ValidationError`. The
-    /// periods are ordered by the values of the column (see `time`).
+    /// effects. It may not be the same column as `y` or `entity` (`ValidationError`), but
+    /// may be one of the regressors or the same column as `time`. Specifying it with any
+    /// other `cov_type` raises `ValidationError`. The periods are ordered by the values of the column (see `time`).
     #[pyo3(get)]
     pub dk_time: Option<String>,
 
@@ -473,6 +474,7 @@ pub(crate) fn build_fe_input(
     roles.push(("x", RoleValue::Multi(&x)));
     validate_no_duplicate_roles(&roles)?;
     validate_no_duplicate_within_role("x", &x)?;
+    validate_dk_time_role(&y, &entity, options.dk_time.as_deref())?;
 
     // ── y/x/entity列の抽出 ─────────────────────────────────────────────
     let y_slice = extract_f64_column(df, &y)?;
@@ -844,6 +846,35 @@ mod tests {
                 ),
             }
         );
+    }
+
+    #[test]
+    fn build_fe_input_dk_time_may_equal_time_or_x_but_not_y_or_entity() {
+        // 固定効果と同じ時間粒度(`dk_time == time`)や、`x`との重複は正当な使い方。
+        // `y`・`entity`と同じ列だけ拒否する(`validate_dk_time_role`参照)。
+        let df = well_formed_df();
+        let cases = [
+            (Some("t"), "t", vec!["x1"], true),
+            (None, "x1", vec!["x1"], true),
+            (None, "y", vec!["x1"], false),
+            (None, "id", vec!["x1"], false),
+        ];
+        for (time, dk_time, x, ok) in cases {
+            let mut options = default_options();
+            options.cov_type = "dk".to_string();
+            options.time = time.map(str::to_string);
+            options.dk_time = Some(dk_time.to_string());
+
+            let result = build_fe_input(
+                &df,
+                "y".to_string(),
+                x.iter().map(|c| c.to_string()).collect(),
+                "id".to_string(),
+                &options,
+            );
+
+            assert_eq!(result.is_ok(), ok, "time={time:?} dk_time={dk_time}");
+        }
     }
 
     #[test]

@@ -92,7 +92,8 @@ class RE:
                 builtin exception, not a `ValidationError`.
             ValidationError: The input or options are invalid (`x` is
                 empty, a column is missing, contains missing values or
-                NaN/infinity, `y`/`x`/`entity`/`dk_time` overlap,
+                NaN/infinity, `y`/`x`/`entity` overlap, `dk_time` equal to
+                `y` or `entity`,
                 insufficient observations, `confidence_level` out of
                 range, an unknown `cov_type` (or `cov_type="hc0"`,
                 unsupported for RE), `dk_time` specified with a

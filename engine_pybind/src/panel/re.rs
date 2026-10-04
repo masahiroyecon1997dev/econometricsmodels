@@ -59,7 +59,7 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
-use super::common::panel_error_to_pyerr;
+use super::common::{panel_error_to_pyerr, validate_dk_time_role};
 use crate::column_extraction::{
     extract_f64_column, extract_f64_columns, extract_group_key_column, extract_time_keys,
 };
@@ -94,7 +94,9 @@ pub struct REOptions {
 
     /// Column name that defines the time periods of the Driscoll-Kraay HAC when
     /// `cov_type="dk"` (required there, as in `FEOptions.dk_time`). Specifying it with any other
-    /// `cov_type` raises `ValidationError`. It does not affect the Hausman test, which
+    /// `cov_type` raises `ValidationError`. It may not be the same column as `y` or
+    /// `entity` (`ValidationError`), but may be one of the regressors. It does not affect
+    /// the Hausman test, which
     /// always compares against one-way FE. The periods are ordered by the values of the
     /// column: numerically for integers and floats, chronologically for `Date` and
     /// `Datetime`, in the order of the categories for `Enum`, and alphabetically for
@@ -379,12 +381,11 @@ pub(crate) fn build_re_input(
         ("y", RoleValue::Single(&y)),
         ("entity", RoleValue::Single(&entity)),
     ];
-    if let Some(dk_time) = &options.dk_time {
-        roles.push(("dk_time", RoleValue::Single(dk_time)));
-    }
     roles.push(("x", RoleValue::Multi(&x)));
     validate_no_duplicate_roles(&roles)?;
     validate_no_duplicate_within_role("x", &x)?;
+    // `dk_time`は`y`・`entity`との重複だけ拒否する（`x`との重複は許可、`validate_dk_time_role`参照）。
+    validate_dk_time_role(&y, &entity, options.dk_time.as_deref())?;
 
     // ── y/x/entity列の抽出 ─────────────────────────────────────────────
     let y_slice = extract_f64_column(df, &y)?;
@@ -612,19 +613,41 @@ mod tests {
     }
 
     #[test]
-    fn build_re_input_returns_error_when_x_overlaps_dk_time() {
+    fn build_re_input_allows_x_to_overlap_dk_time() {
+        // 年トレンドを説明変数に入れつつDKの時点にも使う、等は正当な使い方
+        // （`validate_dk_time_role`参照）。
         let df = well_formed_df();
         let mut options = default_options();
-        options.dk_time = Some("t".to_string());
+        options.cov_type = "dk".to_string();
+        options.dk_time = Some("x1".to_string());
 
         let result = build_re_input(
             &df,
             "y".to_string(),
-            vec!["x1".to_string(), "t".to_string()],
+            vec!["x1".to_string()],
             "id".to_string(),
             &options,
         );
-        assert!(result.is_err());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn build_re_input_rejects_dk_time_that_is_y_or_entity() {
+        let df = well_formed_df();
+        for column in ["y", "id"] {
+            let mut options = default_options();
+            options.cov_type = "dk".to_string();
+            options.dk_time = Some(column.to_string());
+
+            let result = build_re_input(
+                &df,
+                "y".to_string(),
+                vec!["x1".to_string()],
+                "id".to_string(),
+                &options,
+            );
+            assert!(result.is_err(), "dk_time={column}");
+        }
     }
 
     #[test]

@@ -124,24 +124,18 @@ def test_entity_overlaps_dk_time_raises(fe_dataset):
         ).fit()
 
 
-def test_dk_time_overlaps_x_raises(fe_dataset):
-    options = REOptions(dk_time="time")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
-            col="time",
-            single_role="dk_time",
-            multi_role="x",
-        ),
-    ):
-        RE(
-            fe_dataset,
-            y="y",
-            x=["time", "x2"],
-            entity="entity",
-            options=options,
-        ).fit()
+def test_dk_time_may_overlap_x(fe_dataset):
+    """`dk_time`と`x`の重複は許可する（年トレンドを説明変数に入れつつ
+    DKの時点にも使う、等は正当な使い方）。拒否するのは`y`・`entity`との重複だけ。
+    """
+    options = REOptions(cov_type="dk", dk_time="x2")
+    RE(
+        fe_dataset,
+        y="y",
+        x=["x1", "x2"],
+        entity="entity",
+        options=options,
+    ).fit()
 
 
 def test_duplicate_within_x_raises(fe_dataset):

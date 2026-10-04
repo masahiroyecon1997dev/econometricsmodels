@@ -123,6 +123,42 @@ def test_entity_overlaps_time_raises(fe_dataset):
         ).fit()
 
 
+@pytest.mark.parametrize(
+    ("column", "earlier_role"), [("y", "y"), ("entity", "entity")]
+)
+def test_dk_time_overlaps_y_or_entity_raises(fe_dataset, column, earlier_role):
+    """`dk_time`が`y`・`entity`と同じ列だと、DKの時点構造が意味を成さない。"""
+    options = FEOptions(cov_type="dk", dk_time=column)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.ROLE_OVERLAP_SINGLE_EQUALS_SINGLE,
+            col=column,
+            later_role="dk_time",
+            earlier_role=earlier_role,
+        ),
+    ):
+        FE(
+            fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
+        ).fit()
+
+
+@pytest.mark.parametrize(
+    ("time", "x"),
+    [
+        # 固定効果と同じ時間粒度のDK（典型的な使い方）
+        ("time", ["x1", "x2"]),
+        # `x`との重複は許可する（年トレンドを説明変数に入れつつDKの時点にも使う、等）
+        (None, ["x1", "x2"]),
+    ],
+    ids=["dk_time_equals_time", "dk_time_in_x"],
+)
+def test_dk_time_may_equal_time_or_overlap_x(fe_dataset, time, x):
+    dk_time = "time" if time else "x2"
+    options = FEOptions(cov_type="dk", time=time, dk_time=dk_time)
+    FE(fe_dataset, y="y", x=x, entity="entity", options=options).fit()
+
+
 def test_time_overlaps_x_raises(fe_dataset):
     options = FEOptions(time="time")
     with pytest.raises(

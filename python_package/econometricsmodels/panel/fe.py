@@ -341,8 +341,10 @@ class FEResults:
         section 3.5 and `_lib.FEResult.fixed_effects`'s docstring for
         the exact formula, including the two-way normalization
         convention. `α_i`/`γ_t` are not individually identified in the
-        two-way case, so `γ_t` of the lexicographically smallest time
-        value is fixed to 0 and `α_i` absorbs the overall level.
+        two-way case, so `γ_t` of the first period in time order (the
+        order of the values of the time column) is fixed to 0 and
+        `α_i` absorbs the overall level. The `"time"` dictionary lists
+        the periods in time order.
         `fixest::fixef()` instead uses the first time value in
         observation order as the reference, so the two match
         numerically only when both choose the same reference period.

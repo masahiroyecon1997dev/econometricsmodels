@@ -44,11 +44,22 @@ Numeric values are converted to 64-bit floating point before the estimation. Flo
 
 The conversion is silent. If the exact value matters, check the range of your data before estimating.
 
-Group identity and time period columns are compared by their text form, so only equality matters (the order of time periods is covered next). Floats are accepted but must be finite: a NaN or an infinite value in a float column of any of these roles is an error, as it is for numeric values. Because the comparison is on the text form, `0.0` and `-0.0` are different groups. If such values can occur in a float key, convert the column to an integer or a string first.
+Group identity and time period columns are compared by their text form, so only equality matters for a group identity. A time period also has an order, which comes from the values of the column rather than from the text (see the next section). Floats are accepted but must be finite: a NaN or an infinite value in a float column of any of these roles is an error, as it is for numeric values. Because the comparison is on the text form, `0.0` and `-0.0` are different groups. If such values can occur in a float key, convert the column to an integer or a string first.
 
 ## Order of time periods
 
-For `cov_type="dk"` (Driscoll–Kraay) in FE and RE, the order of the periods is taken from the sort order of the time labels **as text**. `Date` and `Datetime` columns, ISO 8601 strings and zero-padded labels sort as intended. Integer labels with different numbers of digits do not: `1, 2, ..., 12` sort as `1, 10, 11, 12, 2, ...`, which changes the standard errors without any error. The same applies to the other types that are sorted by their text: the labels of an `Enum` or a `Categorical` are sorted alphabetically, not in the order the type defines. Until this is changed, give the time column a form whose text order is the time order, for example a `Date`, a `Datetime` without a time zone, or integers zero-padded in a string column. This does not affect the point estimates, other `cov_type` values, or `hac_time` (which is read as a number).
+For `cov_type="dk"` (Driscoll–Kraay) in FE and RE, the periods must be put in time order. The order comes from the values of the time column, not from the text of the labels, so integers with different numbers of digits (`1, 2, ..., 12`), negative numbers and decimals are ordered correctly:
+
+| Dtype of the time column | Order of the periods |
+|---|---|
+| Integers, floats | Numeric, ascending |
+| `Date`, `Datetime` (no time zone) | Chronological |
+| `Enum` | The order of the categories in the type, not alphabetical |
+| `String`, `Categorical` | Alphabetical (by the bytes of the text) |
+
+A string or a `Categorical` has no time order of its own, so its labels are sorted as text: `"9"` comes after `"10"`, and `"Q10"` comes right after `"Q1"`. If your periods are strings, use labels whose text order is the time order (ISO 8601 dates, zero-padded numbers), or use an `Enum` with the categories listed in time order. The row order of the data does not matter.
+
+The same order applies to the two-way fixed effects returned by `fixed_effects()`: the `"time"` dictionary lists the periods in time order, and the first period is the reference with an effect of 0.
 
 ## Argument types
 

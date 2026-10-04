@@ -56,7 +56,12 @@ import polars as pl
 import pytest
 from _assertions import assert_close, assert_dict_close
 from _constants import DATA_DIR
-from _helpers import with_cluster_groups, wooldridge_loader
+from _helpers import (
+    ROW_TIME,
+    with_cluster_groups,
+    with_row_time,
+    wooldridge_loader,
+)
 from _tolerances import TOLERANCES
 from econometricsmodels import OLS, OLSOptions
 
@@ -159,7 +164,7 @@ def test_synthetic_matches_r(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
     options = OLSOptions(cov_type=cov_type)
-    res = OLS(df, y="y", x=x_cols, options=options).fit()
+    res = OLS(with_row_time(df), y="y", x=x_cols, options=options).fit()
 
     ref = crosscheck["synthetic"][scenario][cov_type]["r"]
     label = f"{scenario}/{cov_type}/R"
@@ -173,7 +178,7 @@ def test_predict_none_matches_r_fitted_values(crosscheck, scenario):
     """`predict(new_data=None)`（学習データに対する予測値）がRの`fitted()`と一致すること。"""
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
-    res = OLS(df, y="y", x=x_cols).fit()
+    res = OLS(with_row_time(df), y="y", x=x_cols).fit()
 
     predicted = [row["predicted"] for row in res.predict()]
     ref = crosscheck["synthetic"][scenario]["predict"]["fitted"]
@@ -191,7 +196,7 @@ def test_predict_new_data_matches_r(crosscheck):
     合わせて確認する）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    res = OLS(df, y="y", x=["x1", "x2", "x3"]).fit()
+    res = OLS(with_row_time(df), y="y", x=["x1", "x2", "x3"]).fit()
 
     new_data = pl.DataFrame(
         {
@@ -217,7 +222,9 @@ def test_cluster_matches_r(crosscheck):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, 10)
     options = OLSOptions(cov_type="cluster", cluster="cluster_group")
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["cluster"]["r"]
     _assert_close(res.params, ref["coef"], "cluster/R coef")
@@ -235,7 +242,9 @@ def test_cluster_imbalanced_matches_r(crosscheck):
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
     options = OLSOptions(cov_type="cluster", cluster="cluster_group")
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["cluster_imbalanced"]["r"]
     _assert_close(res.params, ref["coef"], "cluster_imbalanced/R coef")
@@ -255,7 +264,7 @@ def test_cluster_g2_matches_r(crosscheck):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
     df = with_cluster_groups(df, 2)
     options = OLSOptions(cov_type="cluster", cluster="cluster_group")
-    res = OLS(df, y="y", x=["x1"], options=options).fit()
+    res = OLS(with_row_time(df), y="y", x=["x1"], options=options).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["cluster_g2"]["r"]
     _assert_close(res.params, ref["coef"], "cluster_g2/R coef")
@@ -277,7 +286,9 @@ def test_cluster_ill_conditioned_matches_r(crosscheck, scenario):
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     df = with_cluster_groups(df, 10)
     options = OLSOptions(cov_type="cluster", cluster="cluster_group")
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
 
     ref = crosscheck["synthetic"][scenario]["cluster"]["r"]
     label = f"{scenario}/cluster/R"
@@ -293,8 +304,12 @@ def test_hac_matches_r(crosscheck):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_autocorrelated.csv")
     entry = crosscheck["synthetic"]["autocorrelated"]["hac"]
-    options = OLSOptions(cov_type="hac", hac_lags=entry["hac_lag"])
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    options = OLSOptions(
+        cov_type="hac", hac_lags=entry["hac_lag"], hac_time=ROW_TIME
+    )
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
 
     ref = entry["r"]
     # 係数（coef）・AIC・BIC・対数尤度はcov_typeに依存しない通常のOLS推定値の
@@ -335,7 +350,9 @@ def test_no_intercept_matches_r(crosscheck, cov_type):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df, kwargs = _options_kwargs_for_cov_type(df, cov_type)
     options = OLSOptions(include_intercept=False, cov_type=cov_type, **kwargs)
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["no_intercept"][cov_type]["r"]
     label = f"no_intercept/{cov_type}/R"
@@ -352,9 +369,14 @@ def test_no_intercept_hac_matches_r(crosscheck):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     entry = crosscheck["synthetic"]["baseline"]["no_intercept"]["hac"]
     options = OLSOptions(
-        include_intercept=False, cov_type="hac", hac_lags=entry["hac_lag"]
+        include_intercept=False,
+        cov_type="hac",
+        hac_lags=entry["hac_lag"],
+        hac_time=ROW_TIME,
     )
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
 
     ref = entry["r"]
     label = "no_intercept/hac/R"
@@ -379,7 +401,9 @@ def test_confidence_level_matches_r(crosscheck, cov_type):
         cov_type=cov_type,
         **kwargs,
     )
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["confidence_level"][cov_type][
         "r"
@@ -400,8 +424,11 @@ def test_confidence_level_hac_matches_r(crosscheck):
         confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
         cov_type="hac",
         hac_lags=entry["hac_lag"],
+        hac_time=ROW_TIME,
     )
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
 
     ref = entry["r"]
     label = "confidence_level/hac/R"
@@ -432,7 +459,7 @@ def test_wooldridge_matches_r(
     y, x = WOOLDRIDGE_DATASETS[dataset_name]
     df = load_wooldridge(dataset_name)
     options = OLSOptions(cov_type=cov_type)
-    res = OLS(df, y=y, x=x, options=options).fit()
+    res = OLS(with_row_time(df), y=y, x=x, options=options).fit()
 
     ref = crosscheck["wooldridge"][dataset_name][cov_type]["r"]
     label = f"{dataset_name}/{cov_type}/R"
@@ -463,7 +490,10 @@ def test_wooldridge_wage1_region_cluster_matches_r(
     df = df.with_columns(region)
     options = OLSOptions(cov_type="cluster", cluster="region")
     res = OLS(
-        df, y="lwage", x=["educ", "exper", "tenure"], options=options
+        with_row_time(df),
+        y="lwage",
+        x=["educ", "exper", "tenure"],
+        options=options,
     ).fit()
 
     ref = crosscheck["wooldridge"]["wage1"]["cluster"]["r"]

@@ -111,6 +111,26 @@ pub(crate) fn parse_cov_type(
     Ok(parsed)
 }
 
+/// HAC（`cov_type="hac"`・IV GMMの`gmm_weight_type="hac"`）の時間順序列`hac_time`が
+/// 指定されていることを確かめ、その列名を返す。`setting`は`hac_time`を要求している設定名
+/// （エラーメッセージ用）。
+///
+/// 行順を時間順とみなす暗黙の既定は置かない。データが時間順に並んでいなくてもエラーに
+/// ならず、時系列順のHACに見える誤った結果が黙って返るため、時間順は常に列で明示させる。
+///
+/// # Errors
+/// `hac_time`が未指定なら`ValidationError`。
+pub(crate) fn require_hac_time<'a>(hac_time: Option<&'a str>, setting: &str) -> PyResult<&'a str> {
+    hac_time.ok_or_else(|| {
+        ValidationError::new_err(format!(
+            "{setting}='hac' requires the `hac_time` option: the column that gives the time \
+             order of the observations (the row order of the data is not assumed to be the \
+             time order; add an explicit index column such as `df.with_row_index(\"t\")` if \
+             the rows are already in time order)"
+        ))
+    })
+}
+
 /// `parse_cov_type`から未使用オプションの検証を除いたもの（IVが`gmm_weight_type`と共用する
 /// `cluster`/`hac_*`を、自前の検証を済ませたうえで渡すための入口）。
 pub(crate) fn build_cov_type(
@@ -129,12 +149,10 @@ pub(crate) fn build_cov_type(
         "hc2" => EngineCovType::Hc2,
         "hc3" => EngineCovType::Hc3,
         "hac" => {
-            let time_order = hac_time
-                .map(|col_name| extract_time_order_ranks(df, col_name))
-                .transpose()?;
+            let col_name = require_hac_time(hac_time, "cov_type")?;
             EngineCovType::Hac {
                 lags: hac_lags,
-                time_order,
+                time_order: Some(extract_time_order_ranks(df, col_name)?),
             }
         }
         "cluster" => {
@@ -157,6 +175,7 @@ pub(crate) fn build_cov_type(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use polars::df;
 
     /// `unwrap()`/`expect()`は使わない：`PyErr`の`Debug`実装（`unwrap()`失敗時の
     /// panicメッセージ生成に使われる）はGIL取得を要求し、GIL未初期化のこのテスト
@@ -166,7 +185,7 @@ mod tests {
     /// 触れないため安全）。
     #[test]
     fn parse_cov_type_is_case_insensitive() {
-        let df = DataFrame::empty();
+        let df = df!("t" => [1.0, 2.0, 3.0]).unwrap();
         for (input, expected) in [
             ("classical", "classical"),
             ("CLASSICAL", "classical"),
@@ -178,11 +197,21 @@ mod tests {
             ("CLUSTER", "cluster"),
             ("Hac", "hac"),
         ] {
-            let Ok((_, normalized)) = parse_cov_type(&df, input, None, None, None) else {
+            // HACは時間順序列(`hac_time`)が必須。他のcov_typeでは使われない。
+            let hac_time = (expected == "hac").then_some("t");
+            let Ok((_, normalized)) = parse_cov_type(&df, input, None, None, hac_time) else {
                 panic!("expected Ok for input={input}");
             };
             assert_eq!(normalized, expected, "input={input}");
         }
+    }
+
+    #[test]
+    fn parse_cov_type_requires_hac_time_for_hac() {
+        // 行順を時間順とみなす暗黙の既定は置かない(`require_hac_time`参照)。
+        let df = df!("t" => [1.0, 2.0, 3.0]).unwrap();
+        assert!(parse_cov_type(&df, "hac", None, None, None).is_err());
+        assert!(parse_cov_type(&df, "hac", None, Some(1), Some("t")).is_ok());
     }
 
     #[test]

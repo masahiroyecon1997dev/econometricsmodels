@@ -61,7 +61,12 @@ import pytest
 from _assertions import assert_close, assert_dict_close
 from _assertions import rename_intercept as _rename
 from _constants import DATA_DIR
-from _helpers import load_wooldridge_dataset, with_cluster_groups
+from _helpers import (
+    hac_time_for,
+    load_wooldridge_dataset,
+    with_cluster_groups,
+    with_row_time,
+)
 from _tolerances import TOLERANCES
 from econometricsmodels import IV, IVOptions
 
@@ -178,9 +183,9 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
     x_exog = X_EXOG_BY_SCENARIO.get(scenario, ["x1"])
     instruments = INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
     df = pl.read_csv(DATA_DIR / f"iv_{scenario}.csv")
-    options = IVOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=x_exog,
         x_endog=["endog1"],
@@ -200,7 +205,7 @@ def test_cluster_matches_linearmodels(fixtures):
     df = with_cluster_groups(df, 10)
     options = IVOptions(cov_type="cluster", cluster="cluster_group")
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=["x1"],
         x_endog=["endog1"],
@@ -224,7 +229,7 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
     df = df.with_columns(pl.Series("cluster_group", groups))
     options = IVOptions(cov_type="cluster", cluster="cluster_group")
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=["x1"],
         x_endog=["endog1"],
@@ -248,7 +253,7 @@ def test_cluster_g2_matches_linearmodels(fixtures):
     df = df.with_columns((pl.int_range(pl.len()) % 2).alias("cluster_group"))
     options = IVOptions(cov_type="cluster", cluster="cluster_group")
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=[],
         x_endog=["endog1"],
@@ -269,9 +274,9 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
     確認する（`testing-completeness-reviewer`指摘のmust fix）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
-    options = IVOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=["x1"],
         x_endog=["endog1", "endog2"],
@@ -291,9 +296,9 @@ def test_card_matches_linearmodels(fixtures, cov_type):
     検証がIV系統に無かった（`testing-completeness-reviewer`指摘のshould fix）。
     """
     df = load_wooldridge_dataset("card")
-    options = IVOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
     res = IV(
-        df,
+        with_row_time(df),
         y="lwage",
         x_exog=CARD_X_EXOG,
         x_endog=["educ"],
@@ -314,9 +319,9 @@ def test_df1_matches_linearmodels(fixtures, cov_type):
     （`_check_result`のref Noneスキップ、`benchmark/iv/references/linearmodels_ref.py`参照）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_df1.csv")
-    options = IVOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=[],
         x_endog=["endog1"],

@@ -91,7 +91,10 @@ def _fit_once_engine(ctx: FitContext):
         options = IVOptions(estimator=ctx.method, cov_type="classical")
     elif ctx.cov_type == "hac":
         options = IVOptions(
-            estimator=ctx.method, cov_type="hac", hac_lags=ctx.hac_lags
+            estimator=ctx.method,
+            cov_type="hac",
+            hac_lags=ctx.hac_lags,
+            hac_time=ctx.hac_time,
         )
     else:
         raise ValueError(f"unknown cov_type: {ctx.cov_type!r}")

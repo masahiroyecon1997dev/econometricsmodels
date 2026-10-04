@@ -17,6 +17,10 @@
   離れた1組のみ同値）とその最初の同値の行の組。OLS/WLS/IVのバリデーション
   テストで共有する。
 
+- `ROW_TIME` / `with_row_time` / `hac_time_for`: HACの時間順序列`hac_time`は必須（行順を
+  暗黙に使わない）なので、行順をそのまま時間順として使うテストが、行番号の列を明示的に
+  足して`hac_time`に渡すための共通部品。
+
 定数（`DATA_DIR`・`MROZ_X`）は`_constants.py`に分離済み
 （ファイル名が関数を示唆するのに定数も同居していたための整理）。
 """
@@ -28,6 +32,27 @@ from collections.abc import Callable
 import numpy as np
 import polars as pl
 import pytest
+
+# 行順をそのまま時間順として使うHACテスト用の、行番号の列名。
+ROW_TIME = "row_time"
+
+
+def with_row_time(df: pl.DataFrame) -> pl.DataFrame:
+    """行番号（0始まり）の列`ROW_TIME`を足す。`hac_time=ROW_TIME`と組み合わせて、
+    データの行順を時間順として使う（statsmodels等の行順HACとの照合用）。
+    """
+    return df.with_columns(pl.int_range(pl.len()).alias(ROW_TIME))
+
+
+def hac_time_for(*settings: str) -> dict[str, str]:
+    """`settings`（`cov_type`や`gmm_weight_type`の値）のどれかがHACなら
+    `{"hac_time": ROW_TIME}`、そうでなければ空dict（`hac_time`は使われないと
+    `ValidationError`になるため、HACのときだけ渡す）。
+    """
+    if any(setting.lower() == "hac" for setting in settings):
+        return {"hac_time": ROW_TIME}
+    return {}
+
 
 # 同値を含む時点列を作るpolars式と、最初に報告される同値の行の組（0始まり）。
 # 行順に黙ってフォールバックして時系列順のHACに見えてしまう入力の代表。

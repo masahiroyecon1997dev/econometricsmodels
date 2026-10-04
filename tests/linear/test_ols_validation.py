@@ -15,7 +15,12 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_messages import escaped
-from _helpers import TIED_TIME_COLUMNS, with_cluster_groups
+from _helpers import (
+    ROW_TIME,
+    TIED_TIME_COLUMNS,
+    with_cluster_groups,
+    with_row_time,
+)
 from _ols_helpers import our_fit
 from econometricsmodels import (
     OLS,
@@ -333,12 +338,14 @@ def test_invalid_confidence_level_raises(dataset, confidence_level):
 )  # 100 == dataset の n_obs（上限側境界）
 def test_invalid_hac_lags_raises(dataset, hac_lags):
     """`hac_lags`が`[0, n)`の範囲外の場合`ValidationError`。"""
-    options = OLSOptions(cov_type="hac", hac_lags=hac_lags)
+    options = OLSOptions(cov_type="hac", hac_lags=hac_lags, hac_time=ROW_TIME)
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.INVALID_HAC_LAGS, hac_lags=hac_lags, n=100),
     ):
-        OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+        OLS(
+            with_row_time(dataset), y="y", x=["x1", "x2"], options=options
+        ).fit()
 
 
 # ── ValidationError（predict()） ──────────────────────────────────
@@ -476,10 +483,16 @@ def test_scale_variance_raises_computation_error(cov_type):
     perfect_multicollinearityと同様、数値比較はせずエラーパスのみ確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
-    kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
+    kwargs = (
+        {"hac_lags": HAC_MAXLAGS, "hac_time": ROW_TIME}
+        if cov_type == "hac"
+        else {}
+    )
     options = OLSOptions(cov_type=cov_type, **kwargs)
     with pytest.raises(ComputationError):
-        OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+        OLS(
+            with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+        ).fit()
 
 
 def test_scale_variance_cluster_raises_computation_error():
@@ -558,6 +571,20 @@ def test_option_used_by_cov_type_is_accepted(dataset, cov_type, kwargs):
     """使われる`cov_type`（大文字小文字を問わない）では指定を受理する。"""
     options = OLSOptions(cov_type=cov_type, **kwargs)
     OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+
+@pytest.mark.parametrize("cov_type", ["hac", "HAC"])
+def test_hac_requires_hac_time(dataset, cov_type):
+    """`cov_type="hac"`で`hac_time`が未指定だと`ValidationError`。行順を時間順と
+    みなす暗黙の既定は置かない（時間順に並んでいないデータでも、時系列順のHACに
+    見える誤った結果が黙って返るのを防ぐ）。
+    """
+    options = OLSOptions(cov_type=cov_type, hac_lags=2)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.HAC_REQUIRES_HAC_TIME, setting="cov_type"),
+    ):
+        OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
 @pytest.mark.parametrize(("time_expr", "rows"), TIED_TIME_COLUMNS)

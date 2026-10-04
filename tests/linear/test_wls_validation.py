@@ -16,7 +16,12 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_messages import escaped
-from _helpers import TIED_TIME_COLUMNS, with_cluster_groups
+from _helpers import (
+    ROW_TIME,
+    TIED_TIME_COLUMNS,
+    with_cluster_groups,
+    with_row_time,
+)
 from econometricsmodels import (
     WLS,
     ComputationError,
@@ -526,8 +531,8 @@ def test_invalid_hac_lags_raises(dataset, hac_lags):
     """`hac_lags`が`[0, n)`の範囲外の場合`ValidationError`（OLSと同じ検証、
     共通化された経路）。
     """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = WLSOptions(cov_type="hac", hac_lags=hac_lags)
+    df = with_row_time(dataset).with_columns(pl.lit(1.0).alias("weight"))
+    options = WLSOptions(cov_type="hac", hac_lags=hac_lags, hac_time=ROW_TIME)
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.INVALID_HAC_LAGS, hac_lags=hac_lags, n=100),
@@ -577,11 +582,19 @@ def test_scale_variance_raises_computation_error(cov_type):
     数値比較はせずエラーパスのみ確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
-    kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
+    kwargs = (
+        {"hac_lags": HAC_MAXLAGS, "hac_time": ROW_TIME}
+        if cov_type == "hac"
+        else {}
+    )
     options = WLSOptions(cov_type=cov_type, **kwargs)
     with pytest.raises(ComputationError):
         WLS(
-            df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+            with_row_time(df),
+            y="y",
+            x=["x1", "x2", "x3"],
+            weight="weight",
+            options=options,
         ).fit()
 
 
@@ -633,6 +646,18 @@ def test_option_unused_by_cov_type_raises(
         WLS(
             dataset, y="y", x=["x1", "x2"], weight="weight", options=options
         ).fit()
+
+
+@pytest.mark.parametrize("cov_type", ["hac", "HAC"])
+def test_hac_requires_hac_time(dataset, cov_type):
+    """`cov_type="hac"`で`hac_time`が未指定だと`ValidationError`（OLSと同じ）。"""
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    options = WLSOptions(cov_type=cov_type, hac_lags=2)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.HAC_REQUIRES_HAC_TIME, setting="cov_type"),
+    ):
+        WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 
 
 @pytest.mark.parametrize(("time_expr", "rows"), TIED_TIME_COLUMNS)

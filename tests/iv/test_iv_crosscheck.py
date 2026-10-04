@@ -66,7 +66,12 @@ import polars as pl
 import pytest
 from _assertions import assert_close, assert_dict_close
 from _constants import DATA_DIR
-from _helpers import load_wooldridge_dataset, with_cluster_groups
+from _helpers import (
+    hac_time_for,
+    load_wooldridge_dataset,
+    with_cluster_groups,
+    with_row_time,
+)
 from _tolerances import TOLERANCES
 from econometricsmodels import IV, IVOptions
 
@@ -278,9 +283,9 @@ def test_synthetic_matches_r(crosscheck, scenario, cov_type):
     x_exog = X_EXOG_BY_SCENARIO.get(scenario, ["x1"])
     instruments = INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
     df = pl.read_csv(DATA_DIR / f"iv_{scenario}.csv")
-    options = IVOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=x_exog,
         x_endog=["endog1"],
@@ -313,7 +318,7 @@ def test_cluster_matches_r(crosscheck):
     df = with_cluster_groups(df, 10)
     options = IVOptions(cov_type="cluster", cluster="cluster_group")
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=["x1"],
         x_endog=["endog1"],
@@ -339,7 +344,7 @@ def test_cluster_g2_matches_r(crosscheck):
     df = df.with_columns((pl.int_range(pl.len()) % 2).alias("cluster_group"))
     options = IVOptions(cov_type="cluster", cluster="cluster_group")
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=[],
         x_endog=["endog1"],
@@ -363,9 +368,9 @@ def test_multi_endog_matches_r(crosscheck, cov_type):
     （`test_iv_reference.py`の同名テストと同じ理由）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
-    options = IVOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=["x1"],
         x_endog=["endog1", "endog2"],
@@ -394,9 +399,9 @@ def test_df1_matches_r(crosscheck, cov_type):
     （モジュールdocコメント参照）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_df1.csv")
-    options = IVOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=[],
         x_endog=["endog1"],
@@ -415,9 +420,9 @@ def test_card_matches_r(crosscheck_wooldridge, cov_type):
     同じ理由。
     """
     df = load_wooldridge_dataset("card")
-    options = IVOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
     res = IV(
-        df,
+        with_row_time(df),
         y="lwage",
         x_exog=CARD_X_EXOG,
         x_endog=["educ"],
@@ -441,7 +446,7 @@ def test_cluster_imbalanced_matches_r(crosscheck):
     df = df.with_columns(pl.Series("cluster_group", groups))
     options = IVOptions(cov_type="cluster", cluster="cluster_group")
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=["x1"],
         x_endog=["endog1"],

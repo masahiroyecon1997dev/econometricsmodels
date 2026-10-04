@@ -65,7 +65,9 @@ use crate::column_extraction::{
     extract_f64_column, extract_group_key_column, extract_time_order_ranks,
 };
 use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
-use crate::linear::common::{build_cov_type, least_squares_error_is_computation_error, mat_to_vec};
+use crate::linear::common::{
+    build_cov_type, least_squares_error_is_computation_error, mat_to_vec, require_hac_time,
+};
 use crate::linear::ols::{OLSResult, ols_estimator_to_result};
 use crate::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_float,
@@ -697,14 +699,10 @@ fn parse_weight_type(df: &DataFrame, options: &IVOptions) -> PyResult<(WeightTyp
             WeightType::Cluster { groups }
         }
         "hac" => {
-            let time_order = options
-                .hac_time
-                .as_ref()
-                .map(|col_name| extract_time_order_ranks(df, col_name))
-                .transpose()?;
+            let col_name = require_hac_time(options.hac_time.as_deref(), "gmm_weight_type")?;
             WeightType::Hac {
                 lags: options.hac_lags,
-                time_order,
+                time_order: Some(extract_time_order_ranks(df, col_name)?),
             }
         }
         other => {

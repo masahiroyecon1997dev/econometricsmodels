@@ -38,6 +38,11 @@ result = OLS(df, y="y", x=["x1"], options=options).fit()
 # Cluster-robust standard errors (specify a column name from data)
 options = OLSOptions(cov_type="cluster", cluster="group_id")
 result = OLS(df, y="y", x=["x1"], options=options).fit()
+
+# HAC (Newey-West) standard errors: name the column that gives the time order.
+# The row order is never assumed, so add an index column if the rows are already sorted.
+options = OLSOptions(cov_type="hac", hac_time="period")
+result = OLS(df, y="y", x=["x1"], options=options).fit()
 ```
 
 See the [API Reference](api/ols.md) for the full list of available options.

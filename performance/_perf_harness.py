@@ -103,6 +103,10 @@ _SINGLE_THREAD_ENV = {
 }
 
 
+# HACの時間順序列として、ハーネスが全手法の計測用DataFrameに足す行番号の列名。
+HAC_TIME_COL = "hac_time_index"
+
+
 @dataclass(frozen=True)
 class FitContext:
     """`PerfAdapter.fit_once` に渡す、手法によらず固定のシグネチャ。
@@ -117,6 +121,10 @@ class FitContext:
         y_col: 被説明変数の列名。
         cov_type: 計測対象の分散推定タイプ。
         hac_lags: `hac_auto_lag(n)` の値。cov_type が HAC 以外なら無視してよい。
+        hac_time: HAC の時間順序列名（`HAC_TIME_COL`）。ハーネスが計測区間の外で
+            行番号の列として `df` に足す（`hac_time` は必須で行順を暗黙には使わない
+            ため。リファレンス実装は行順をそのまま時間順として使うので、同じ順序）。
+            cov_type が HAC 以外なら無視してよい。
         cluster: クラスターロバスト用のグループ列名。使わない手法・
             cov_type では `None`。
         weight_col: WLS の重み列名。重みを使わない手法（OLS/Logit 等）では
@@ -134,6 +142,7 @@ class FitContext:
     y_col: str
     cov_type: str
     hac_lags: int
+    hac_time: str
     cluster: str | None
     weight_col: str | None
     method: str
@@ -283,7 +292,9 @@ def _worker(
     repeats: int,
     method: str = "newton",
 ) -> dict:
-    df = adapter.build_dataframe(n, k, seed)
+    df = adapter.build_dataframe(n, k, seed).with_columns(
+        pl.int_range(pl.len()).alias(HAC_TIME_COL)
+    )
     x_cols = [f"x{j + 1}" for j in range(k)]
     pandas_df = None if library == "engine" else adapter.build_pandas_df(df)
     ctx = FitContext(
@@ -294,6 +305,7 @@ def _worker(
         y_col="y",
         cov_type=cov_type,
         hac_lags=hac_auto_lag(n),
+        hac_time=HAC_TIME_COL,
         cluster=adapter.cluster,
         weight_col=adapter.weight_col,
         method=method,

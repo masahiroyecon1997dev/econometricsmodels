@@ -58,6 +58,8 @@ def df() -> pl.DataFrame:
             "z2": x1 + rng.normal(0.0, 1.0, N),
             "w": np.ones(N),
             "entity": np.arange(N) // 6,
+            # HACの時間順序列（行順を明示する。`hac_time`は必須）
+            "row": np.arange(N),
             "t": np.arange(N) % 6,
         }
     )
@@ -352,7 +354,9 @@ def test_huge_hac_lags_is_validation_error_not_overflow(df, cls, huge, how):
     """`hac_lags`が`i64`に収まらなくても`OverflowError`ではなく、範囲検査の
     `ValidationError`（メッセージには丸めた`i64`の端の値が出る）。
     """
-    options = _with_value(cls, "hac_lags", huge, how, cov_type="hac")
+    options = _with_value(
+        cls, "hac_lags", huge, how, cov_type="hac", hac_time="row"
+    )
 
     with pytest.raises(
         ValidationError,
@@ -591,7 +595,12 @@ def test_numpy_numbers_are_accepted():
 def test_numpy_uint64_beyond_i64_is_validation_error(df, how):
     """`i64`を超える`numpy.uint64`も`OverflowError`ではなく`ValidationError`。"""
     options = _with_value(
-        OLSOptions, "hac_lags", np.uint64(2**63 + 5), how, cov_type="hac"
+        OLSOptions,
+        "hac_lags",
+        np.uint64(2**63 + 5),
+        how,
+        cov_type="hac",
+        hac_time="row",
     )
 
     with pytest.raises(

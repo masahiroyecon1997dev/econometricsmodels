@@ -20,7 +20,7 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_messages import escaped
-from _helpers import TIED_TIME_COLUMNS
+from _helpers import ROW_TIME, TIED_TIME_COLUMNS, hac_time_for, with_row_time
 from _iv_helpers import our_fit
 from econometricsmodels import (
     IV,
@@ -593,7 +593,7 @@ def test_invalid_confidence_level_raises(iv_dataset, confidence_level):
 @pytest.mark.parametrize("hac_lags", [-1, 500])  # 500 == iv_dataset の n_obs
 def test_invalid_hac_lags_raises(iv_dataset, hac_lags):
     """`hac_lags`が`[0, n)`の範囲外の場合`ValidationError`。"""
-    options = IVOptions(cov_type="hac", hac_lags=hac_lags)
+    options = IVOptions(cov_type="hac", hac_lags=hac_lags, hac_time=ROW_TIME)
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.INVALID_HAC_LAGS, hac_lags=hac_lags, n=500),
@@ -803,10 +803,10 @@ def test_scale_variance_raises_computation_error(cov_type):
     せずエラーパスのみ確認する（`_reference.py` から移設）。
     """
     df = pl.read_csv(DATA_DIR / "iv_scale_variance.csv")
-    options = IVOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
     with pytest.raises(ComputationError):
         IV(
-            df,
+            with_row_time(df),
             y="y",
             x_exog=["x1", "x2"],
             x_endog=["endog1"],
@@ -937,7 +937,12 @@ def test_first_stage_augment_none_raises_validation_error(iv_dataset):
             "raise_on_non_convergence": False,
         },
         # cov_typeだけがhac_*を使う
-        {"estimator": "2sls", "cov_type": "HAC", "hac_lags": 2},
+        {
+            "estimator": "2sls",
+            "cov_type": "HAC",
+            "hac_lags": 2,
+            "hac_time": "x1",
+        },
     ],
 )
 def test_options_used_by_mode_are_accepted(iv_dataset, options_kwargs):
@@ -1014,3 +1019,51 @@ def test_hac_time_with_tied_values_raises(
         ),
     ):
         our_fit(df, options=options)
+
+
+@pytest.mark.parametrize(
+    ("options_kwargs", "setting"),
+    [
+        pytest.param({"cov_type": "hac"}, "cov_type", id="2sls_cov_type"),
+        pytest.param(
+            {"estimator": "gmm", "cov_type": "hac"}, "cov_type", id="gmm_cov"
+        ),
+        pytest.param(
+            {"estimator": "gmm", "gmm_weight_type": "hac"},
+            "gmm_weight_type",
+            id="gmm_weight_type",
+        ),
+        pytest.param(
+            {
+                "estimator": "gmm",
+                "gmm_type": "iterated",
+                "gmm_weight_type": "HAC",
+            },
+            "gmm_weight_type",
+            id="gmm_iterated_weight_type",
+        ),
+    ],
+)
+def test_hac_requires_hac_time(iv_dataset, options_kwargs, setting):
+    """HAC（`cov_type="hac"`、GMMの`gmm_weight_type="hac"`）で`hac_time`が未指定だと
+    `ValidationError`。`hac_time`は`cov_type`と`gmm_weight_type`で共用するが、
+    どちらが要求しているかをメッセージで示す。
+    """
+    options = IVOptions(hac_lags=2, **options_kwargs)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.HAC_REQUIRES_HAC_TIME, setting=setting),
+    ):
+        our_fit(iv_dataset, options=options)
+
+
+def test_gmm_one_step_with_hac_cov_type_requires_hac_time(iv_dataset):
+    """`gmm_type="one_step"`は重み行列を使わないが、`cov_type="hac"`が`hac_time`を
+    要求する。
+    """
+    options = IVOptions(estimator="gmm", gmm_type="one_step", cov_type="hac")
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.HAC_REQUIRES_HAC_TIME, setting="cov_type"),
+    ):
+        our_fit(iv_dataset, options=options)

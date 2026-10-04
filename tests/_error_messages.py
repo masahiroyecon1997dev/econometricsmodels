@@ -120,6 +120,15 @@ COLUMN_UNSUPPORTED_ORDER_DTYPE = (
     "column; use an integer, float, Date or Datetime column"
 )
 
+# HAC(`cov_type="hac"`・IV GMMの`gmm_weight_type="hac"`)で`hac_time`が未指定の場合。
+# 行順を時間順とみなす暗黙の既定は置かない。`{setting}`は`hac_time`を要求している設定名
+# (`cov_type`または`gmm_weight_type`)。
+HAC_REQUIRES_HAC_TIME = (
+    "{setting}='hac' requires the `hac_time` option: the column that gives the "
+    "time order of the observations (the row order of the data is not assumed "
+    'to be the time order; add an explicit index column such as `df.with_row_index("t")` '
+    "if the rows are already in time order)"
+)
 # 行の並び順だけに使う列（HACの`hac_time`）に同じ値が複数ある場合。順序が定まらないため、
 # エンジンが行順で黙って並べる前にここで拒否する。`{first}`/`{second}`は同値の最初の
 # 2行（0始まりの行番号）。

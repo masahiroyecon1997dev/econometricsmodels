@@ -46,7 +46,7 @@
 
 ## `cov_type`固有の追加列
 
-`cluster`/`hac_time`の抽出は該当する`cov_type`のときのみ行う。無関係な列を誤って要求してエラーにしないこと。
+`cluster`/`hac_time`の抽出は該当する`cov_type`のときのみ行う。無関係な列を誤って要求してエラーにしないこと。**`cov_type="hac"`では`hac_time`が必須**（`require_hac_time`、未指定は`ValidationError`）。行順を時間順とみなす暗黙の既定は置かない（データが時系列順でなくても時系列順のHACに見える結果が黙って返るため）。engineの`CovType::Hac.time_order`は`Option`のままで、`engine_pybind`が常に`Some`で渡す。IVの`gmm_weight_type="hac"`も同じ関数を使う。
 
 ## `WLSOptions`（`OLSOptions`とは独立したpyclass）
 

@@ -54,7 +54,12 @@ import pytest
 from _assertions import assert_close, assert_dict_close
 from _assertions import rename_intercept as _rename
 from _constants import DATA_DIR
-from _helpers import with_cluster_groups, wooldridge_loader
+from _helpers import (
+    ROW_TIME,
+    with_cluster_groups,
+    with_row_time,
+    wooldridge_loader,
+)
 from _ols_helpers import (
     our_fit,
     our_fit_cluster,
@@ -140,9 +145,13 @@ def _check_result(res, ref: dict, label: str) -> None:
 def test_matches_statsmodels(fixtures, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
-    kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
+    kwargs = (
+        {"hac_lags": HAC_MAXLAGS, "hac_time": ROW_TIME}
+        if cov_type == "hac"
+        else {}
+    )
     options = OLSOptions(cov_type=cov_type, **kwargs)
-    res = OLS(df, y="y", x=x_cols, options=options).fit()
+    res = OLS(with_row_time(df), y="y", x=x_cols, options=options).fit()
 
     _check_result(res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}")
 
@@ -157,7 +166,7 @@ def test_predict_none_matches_frozen_statsmodels(fixtures, scenario):
     """
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
-    res = OLS(df, y="y", x=x_cols, options=OLSOptions()).fit()
+    res = OLS(with_row_time(df), y="y", x=x_cols, options=OLSOptions()).fit()
 
     predicted = [row["predicted"] for row in res.predict()]
     ref = fixtures[scenario]["predict"]["fitted"]
@@ -176,7 +185,9 @@ def test_predict_new_data_matches_frozen_statsmodels(fixtures):
     `test_predict_new_data_matches_r`と同じ発想）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=OLSOptions()).fit()
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=OLSOptions()
+    ).fit()
 
     new_data = pl.DataFrame(
         {
@@ -206,7 +217,9 @@ def test_cluster_matches_statsmodels(fixtures):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, 10)
     options = OLSOptions(cov_type="cluster", cluster="cluster_group")
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
 
     _check_result(res, fixtures["baseline"]["cluster"], "cluster")
 
@@ -222,7 +235,9 @@ def test_cluster_imbalanced_matches_statsmodels(fixtures):
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
     options = OLSOptions(cov_type="cluster", cluster="cluster_group")
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
 
     _check_result(
         res, fixtures["baseline"]["cluster_imbalanced"], "cluster_imbalanced"
@@ -242,7 +257,7 @@ def test_cluster_g2_matches_statsmodels(fixtures):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
     df = with_cluster_groups(df, 2)
     options = OLSOptions(cov_type="cluster", cluster="cluster_group")
-    res = OLS(df, y="y", x=["x1"], options=options).fit()
+    res = OLS(with_row_time(df), y="y", x=["x1"], options=options).fit()
 
     _check_result(res, fixtures["baseline"]["cluster_g2"], "cluster_g2")
 
@@ -263,7 +278,9 @@ def test_cluster_ill_conditioned_matches_statsmodels(fixtures, scenario):
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     df = with_cluster_groups(df, 10)
     options = OLSOptions(cov_type="cluster", cluster="cluster_group")
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
 
     _check_result(res, fixtures[scenario]["cluster"], f"{scenario}/cluster")
 
@@ -277,9 +294,15 @@ def test_no_intercept_matches_statsmodels(fixtures, cov_type):
     `test_no_intercept_cluster_matches_statsmodels`で別途確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
+    kwargs = (
+        {"hac_lags": HAC_MAXLAGS, "hac_time": ROW_TIME}
+        if cov_type == "hac"
+        else {}
+    )
     options = OLSOptions(include_intercept=False, cov_type=cov_type, **kwargs)
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
 
     assert res.param_names == ["x1", "x2", "x3"]
     _check_result(
@@ -302,7 +325,9 @@ def test_no_intercept_cluster_matches_statsmodels(fixtures):
         cov_type="cluster",
         cluster="cluster_group",
     )
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
 
     assert res.param_names == ["x1", "x2", "x3"]
     _check_result(
@@ -321,13 +346,19 @@ def test_confidence_level_matches_statsmodels(fixtures, cov_type):
     `test_confidence_level_cluster_matches_statsmodels`で別途確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
+    kwargs = (
+        {"hac_lags": HAC_MAXLAGS, "hac_time": ROW_TIME}
+        if cov_type == "hac"
+        else {}
+    )
     options = OLSOptions(
         confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
         cov_type=cov_type,
         **kwargs,
     )
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
 
     _check_result(
         res,
@@ -349,7 +380,9 @@ def test_confidence_level_cluster_matches_statsmodels(fixtures):
         cov_type="cluster",
         cluster="cluster_group",
     )
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
 
     _check_result(
         res,
@@ -385,7 +418,7 @@ def test_wooldridge_matches_statsmodels(
     y, x = WOOLDRIDGE_Y_X[dataset_name]
     df = load_wooldridge(dataset_name)
     options = OLSOptions(cov_type=cov_type)
-    res = OLS(df, y=y, x=x, options=options).fit()
+    res = OLS(with_row_time(df), y=y, x=x, options=options).fit()
 
     _check_result(
         res, fixtures[dataset_name][cov_type], f"{dataset_name}/{cov_type}"
@@ -416,7 +449,10 @@ def test_wooldridge_wage1_region_cluster_matches_statsmodels(
     df = df.with_columns(region)
     options = OLSOptions(cov_type="cluster", cluster="region")
     res = OLS(
-        df, y="lwage", x=["educ", "exper", "tenure"], options=options
+        with_row_time(df),
+        y="lwage",
+        x=["educ", "exper", "tenure"],
+        options=options,
     ).fit()
 
     _check_result(res, fixtures["wage1"]["cluster"], "wage1/cluster(region)")

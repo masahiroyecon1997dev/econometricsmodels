@@ -41,7 +41,12 @@ import pytest
 from _assertions import assert_close, assert_dict_close
 from _assertions import rename_intercept as _rename
 from _constants import DATA_DIR
-from _helpers import load_wooldridge_dataset, with_cluster_groups
+from _helpers import (
+    ROW_TIME,
+    load_wooldridge_dataset,
+    with_cluster_groups,
+    with_row_time,
+)
 from _tolerances import TOLERANCES
 from econometricsmodels import WLS, WLSOptions
 
@@ -118,9 +123,15 @@ def _check_result(res, ref: dict, label: str) -> None:
 def test_matches_statsmodels(fixtures, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
-    kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
+    kwargs = (
+        {"hac_lags": HAC_MAXLAGS, "hac_time": ROW_TIME}
+        if cov_type == "hac"
+        else {}
+    )
     options = WLSOptions(cov_type=cov_type, **kwargs)
-    res = WLS(df, y="y", x=x_cols, weight="weight", options=options).fit()
+    res = WLS(
+        with_row_time(df), y="y", x=x_cols, weight="weight", options=options
+    ).fit()
 
     _check_result(res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}")
 
@@ -136,7 +147,11 @@ def test_cluster_matches_statsmodels(fixtures):
     df = with_cluster_groups(df, 10)
     options = WLSOptions(cov_type="cluster", cluster="cluster_group")
     res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
     ).fit()
 
     _check_result(res, fixtures["baseline"]["cluster"], "cluster")
@@ -154,7 +169,11 @@ def test_cluster_imbalanced_matches_statsmodels(fixtures):
     df = df.with_columns(pl.Series("cluster_group", groups))
     options = WLSOptions(cov_type="cluster", cluster="cluster_group")
     res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
     ).fit()
 
     _check_result(
@@ -174,7 +193,9 @@ def test_cluster_g2_matches_statsmodels(fixtures):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
     df = with_cluster_groups(df, 2)
     options = WLSOptions(cov_type="cluster", cluster="cluster_group")
-    res = WLS(df, y="y", x=["x1"], weight="weight", options=options).fit()
+    res = WLS(
+        with_row_time(df), y="y", x=["x1"], weight="weight", options=options
+    ).fit()
 
     _check_result(res, fixtures["baseline"]["cluster_g2"], "cluster_g2")
 
@@ -197,7 +218,11 @@ def test_cluster_ill_conditioned_matches_statsmodels(fixtures, scenario):
     df = with_cluster_groups(df, 10)
     options = WLSOptions(cov_type="cluster", cluster="cluster_group")
     res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
     ).fit()
 
     _check_result(res, fixtures[scenario]["cluster"], f"{scenario}/cluster")
@@ -212,10 +237,18 @@ def test_no_intercept_matches_statsmodels(fixtures, cov_type):
     `test_no_intercept_cluster_matches_statsmodels`で別途確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
+    kwargs = (
+        {"hac_lags": HAC_MAXLAGS, "hac_time": ROW_TIME}
+        if cov_type == "hac"
+        else {}
+    )
     options = WLSOptions(include_intercept=False, cov_type=cov_type, **kwargs)
     res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
     ).fit()
 
     assert res.param_names == ["x1", "x2", "x3"]
@@ -241,7 +274,11 @@ def test_no_intercept_cluster_matches_statsmodels(fixtures):
         cluster="cluster_group",
     )
     res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
     ).fit()
 
     assert res.param_names == ["x1", "x2", "x3"]
@@ -261,14 +298,22 @@ def test_confidence_level_matches_statsmodels(fixtures, cov_type):
     `test_confidence_level_cluster_matches_statsmodels`で別途確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
+    kwargs = (
+        {"hac_lags": HAC_MAXLAGS, "hac_time": ROW_TIME}
+        if cov_type == "hac"
+        else {}
+    )
     options = WLSOptions(
         confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
         cov_type=cov_type,
         **kwargs,
     )
     res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
     ).fit()
 
     _check_result(
@@ -293,7 +338,11 @@ def test_confidence_level_cluster_matches_statsmodels(fixtures):
         cluster="cluster_group",
     )
     res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
     ).fit()
 
     _check_result(
@@ -313,7 +362,7 @@ def test_weight_in_x_matches_statsmodels(fixtures):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     options = WLSOptions(cov_type="classical")
     res = WLS(
-        df,
+        with_row_time(df),
         y="y",
         x=["x1", "x2", "x3", "weight"],
         weight="weight",
@@ -339,7 +388,7 @@ def test_401ksubs_matches_statsmodels(fixtures, cov_type):
     options = WLSOptions(cov_type=cov_type)
 
     res = WLS(
-        df,
+        with_row_time(df),
         y="nettfa",
         x=["inc", "incsq", "age", "agesq", "male", "e401k"],
         weight="inv_inc",
@@ -362,7 +411,7 @@ def test_401ksubs_cluster_matches_statsmodels(fixtures):
     options = WLSOptions(cov_type="cluster", cluster="age_bin")
 
     res = WLS(
-        df,
+        with_row_time(df),
         y="nettfa",
         x=["inc", "incsq", "age", "agesq", "male", "e401k"],
         weight="inv_inc",

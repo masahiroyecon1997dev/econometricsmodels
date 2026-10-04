@@ -22,6 +22,7 @@ from _dtype_helpers import (
     unused_column,
 )
 from _error_messages import escaped
+from _helpers import ROW_TIME, with_row_time
 from econometricsmodels import (
     FE,
     IV,
@@ -821,11 +822,13 @@ def test_hac_time_matches_row_order_hac_on_sorted_rows(
     shuffled_time_frame, method, time_expr
 ):
     """行をシャッフルして`hac_time`を渡した結果は、時点で事前に並べ替えて
-    `hac_time`なし（行順）で当てた結果と一致する。順位化の方向や対応が
+    行番号を時間順（`ROW_TIME`）として当てた結果と一致する。順位化の方向や対応が
     間違っていると、整数版との比較（自己整合）では見逃すため、独立に確かめる。
     """
     frame = shuffled_time_frame.with_columns(time_expr.alias("t"))
-    expected = HAC_FITS[method](frame.sort("t"), hac_time=None)
+    expected = HAC_FITS[method](
+        with_row_time(frame.sort("t")), hac_time=ROW_TIME
+    )
 
     result = HAC_FITS[method](frame)
 

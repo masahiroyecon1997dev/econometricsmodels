@@ -42,7 +42,9 @@ pub enum CovType {
         /// ラグ数（バンド幅）。`None`なら経験則 `L = floor(4*(n/100)^(2/9))` で自動計算する
         /// （`docs/spec/ols-spec.md`「標準誤差」のHAC参照）。
         lags: Option<i64>,
-        /// 時系列順序。`None`なら`OlsInput`の行順をそのまま時系列順とみなす。`Some`の場合、
+        /// 時系列順序。`None`なら`OlsInput`の行順をそのまま時系列順とみなす（engineを直接使う
+        /// 場合の既定。`engine_pybind`は行順を暗黙に使わず、`hac_time`を必須にして常に`Some`で
+        /// 渡す）。`Some`の場合、
         /// `OlsInput`の行と対応する長さnの配列で、この値の昇順でラグ付き自己共分散を計算する
         /// （同3.3節）。値そのものの単位・意味（期間番号・UNIX時刻等）は問わない。
         time_order: Option<Vec<f64>>,
@@ -823,7 +825,8 @@ fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, LeastSquaresEr
 
 /// `CovType::Hac`の`time_order`から、時系列の昇順に並べたときの行インデックス列を求める。
 ///
-/// `None`（`hac_time`未指定）の場合は`OlsInput`の行順をそのまま時系列順とみなし、恒等順序
+/// `None`の場合は`OlsInput`の行順をそのまま時系列順とみなし（engineを直接使う場合の既定。
+/// `engine_pybind`は`hac_time`を必須にして常に`Some`で渡す）、恒等順序
 /// `[0, 1, ..., n-1]`を返す。
 ///
 /// `partial_cmp().unwrap()`について: `time_order`の値はNaN/無限大を含まないことが

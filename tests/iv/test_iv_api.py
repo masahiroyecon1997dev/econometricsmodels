@@ -17,6 +17,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 from _constants import DATA_DIR
+from _helpers import ROW_TIME, hac_time_for
 from _iv_helpers import our_fit
 from econometricsmodels import IV, IVOptions, IVResults, ValidationError
 
@@ -271,7 +272,7 @@ def test_wu_hausman_degrades_to_none_when_cluster_count_at_most_augmented_slopes
 
 def test_cov_type_label(iv_dataset):
     for cov_type in ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]:
-        options = IVOptions(cov_type=cov_type)
+        options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
         res = our_fit(iv_dataset, options=options)
         assert res.cov_type == cov_type
 
@@ -300,7 +301,7 @@ def test_cov_type_is_case_insensitive(iv_dataset, cov_type, expected_label):
     OLS/WLS/Logit/Probitの`test_cov_type_is_case_insensitive`と同型、
     `testing-completeness-reviewer`指摘）。
     """
-    options = IVOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
     res = our_fit(iv_dataset, options=options)
     assert res.cov_type == expected_label
 
@@ -309,7 +310,10 @@ def test_cov_type_is_case_insensitive(iv_dataset, cov_type, expected_label):
 def test_nonrobust_is_rejected(iv_dataset, cov_type):
     """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
     with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
-        our_fit(iv_dataset, options=IVOptions(cov_type=cov_type))
+        our_fit(
+            iv_dataset,
+            options=IVOptions(cov_type=cov_type, **hac_time_for(cov_type)),
+        )
 
 
 @pytest.mark.parametrize(
@@ -328,10 +332,16 @@ def test_weight_type_matches_canonical_result_regardless_of_case(
     （`engine_pybind`側の`parse_weight_type`と対になる、Python API境界での確認。
     `testing-completeness-reviewer`指摘）。
     """
-    options = IVOptions(estimator="gmm", gmm_weight_type=gmm_weight_type)
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type=gmm_weight_type,
+        **hac_time_for(gmm_weight_type),
+    )
     res = our_fit(iv_dataset, options=options)
 
-    canonical_options = IVOptions(estimator="gmm", gmm_weight_type=expected)
+    canonical_options = IVOptions(
+        estimator="gmm", gmm_weight_type=expected, **hac_time_for(expected)
+    )
     canonical_res = our_fit(iv_dataset, options=canonical_options)
     for name in res.param_names:
         assert res.params[name] == canonical_res.params[name], name
@@ -349,7 +359,7 @@ def test_confidence_level_changes_interval_width(iv_dataset):
 
 def test_hac_auto_lags_runs_and_returns_finite_std_errors(iv_dataset):
     """`hac_lags`省略時（`None`、自動計算式）でもエラーなく動作すること。"""
-    options = IVOptions(cov_type="hac")
+    options = IVOptions(cov_type="hac", hac_time=ROW_TIME)
     res = our_fit(iv_dataset, options=options)
     assert res.cov_type == "hac"
     for se in res.std_errors.values():
@@ -366,9 +376,10 @@ def test_hac_time_reorders_rows_before_computing_lags():
             "y": [2.0, 4.0, 5.0, 4.0, 5.0, 6.0, 5.0, 7.0],
             "endog1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
             "z1": [1.5, 2.5, 2.0, 4.5, 3.0, 5.5, 6.0, 7.5],
+            "time": [float(i) for i in range(8)],
         }
     )
-    ordered_options = IVOptions(cov_type="hac", hac_lags=1)
+    ordered_options = IVOptions(cov_type="hac", hac_lags=1, hac_time="time")
     ordered_res = IV(
         ordered_df,
         y="y",
@@ -477,7 +488,10 @@ def test_gmm_weight_type_options_run(
         {"cluster": "cluster_group"} if gmm_weight_type == "cluster" else {}
     )
     options = IVOptions(
-        estimator="gmm", gmm_weight_type=gmm_weight_type, **kwargs
+        estimator="gmm",
+        gmm_weight_type=gmm_weight_type,
+        **kwargs,
+        **hac_time_for(gmm_weight_type),
     )
     res = our_fit(df, options=options)
     assert res.converged
@@ -495,7 +509,9 @@ def test_gmm_cov_type_options_run_independently_of_weight_type(
     """
     df = clustered_dataset if cov_type == "cluster" else iv_dataset
     kwargs = {"cluster": "cluster_group"} if cov_type == "cluster" else {}
-    options = IVOptions(estimator="gmm", cov_type=cov_type, **kwargs)
+    options = IVOptions(
+        estimator="gmm", cov_type=cov_type, **kwargs, **hac_time_for(cov_type)
+    )
     res = our_fit(df, options=options)
     assert res.cov_type == cov_type
     assert res.converged
@@ -522,7 +538,10 @@ def test_weight_type_label(iv_dataset, clustered_dataset, gmm_weight_type):
         {"cluster": "cluster_group"} if gmm_weight_type == "cluster" else {}
     )
     options = IVOptions(
-        estimator="gmm", gmm_weight_type=gmm_weight_type, **kwargs
+        estimator="gmm",
+        gmm_weight_type=gmm_weight_type,
+        **kwargs,
+        **hac_time_for(gmm_weight_type),
     )
     res = our_fit(df, options=options)
     assert res.gmm_weight_type == gmm_weight_type
@@ -570,7 +589,10 @@ def test_weight_type_is_case_insensitive(
         else {}
     )
     options = IVOptions(
-        estimator="gmm", gmm_weight_type=gmm_weight_type, **kwargs
+        estimator="gmm",
+        gmm_weight_type=gmm_weight_type,
+        **kwargs,
+        **hac_time_for(gmm_weight_type),
     )
     res = our_fit(df, options=options)
     assert res.gmm_weight_type == expected_label

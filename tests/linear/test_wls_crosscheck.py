@@ -40,7 +40,12 @@ import polars as pl
 import pytest
 from _assertions import assert_close, assert_dict_close
 from _constants import DATA_DIR
-from _helpers import load_wooldridge_dataset, with_cluster_groups
+from _helpers import (
+    ROW_TIME,
+    load_wooldridge_dataset,
+    with_cluster_groups,
+    with_row_time,
+)
 from _tolerances import TOLERANCES
 from econometricsmodels import WLS, WLSOptions
 
@@ -136,7 +141,9 @@ def test_synthetic_matches_r(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
     options = WLSOptions(cov_type=cov_type)
-    res = WLS(df, y="y", x=x_cols, weight="weight", options=options).fit()
+    res = WLS(
+        with_row_time(df), y="y", x=x_cols, weight="weight", options=options
+    ).fit()
 
     ref = crosscheck["synthetic"][scenario][cov_type]["r"]
     label = f"{scenario}/{cov_type}/R"
@@ -153,7 +160,11 @@ def test_cluster_matches_r(crosscheck):
     df = with_cluster_groups(df, 10)
     options = WLSOptions(cov_type="cluster", cluster="cluster_group")
     res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
     ).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["cluster"]["r"]
@@ -174,7 +185,11 @@ def test_cluster_imbalanced_matches_r(crosscheck):
     df = df.with_columns(pl.Series("cluster_group", groups))
     options = WLSOptions(cov_type="cluster", cluster="cluster_group")
     res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
     ).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["cluster_imbalanced"]["r"]
@@ -195,7 +210,9 @@ def test_cluster_g2_matches_r(crosscheck):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
     df = with_cluster_groups(df, 2)
     options = WLSOptions(cov_type="cluster", cluster="cluster_group")
-    res = WLS(df, y="y", x=["x1"], weight="weight", options=options).fit()
+    res = WLS(
+        with_row_time(df), y="y", x=["x1"], weight="weight", options=options
+    ).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["cluster_g2"]["r"]
     _assert_close(res.params, ref["coef"], "cluster_g2/R coef")
@@ -219,7 +236,11 @@ def test_cluster_ill_conditioned_matches_r(crosscheck, scenario):
     df = with_cluster_groups(df, 10)
     options = WLSOptions(cov_type="cluster", cluster="cluster_group")
     res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
     ).fit()
 
     ref = crosscheck["synthetic"][scenario]["cluster"]["r"]
@@ -239,7 +260,7 @@ def test_weight_in_x_matches_r(crosscheck):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     options = WLSOptions(cov_type="classical")
     res = WLS(
-        df,
+        with_row_time(df),
         y="y",
         x=["x1", "x2", "x3", "weight"],
         weight="weight",
@@ -259,9 +280,15 @@ def test_hac_matches_r(crosscheck):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_autocorrelated.csv")
     entry = crosscheck["synthetic"]["autocorrelated"]["hac"]
-    options = WLSOptions(cov_type="hac", hac_lags=entry["hac_lag"])
+    options = WLSOptions(
+        cov_type="hac", hac_lags=entry["hac_lag"], hac_time=ROW_TIME
+    )
     res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
     ).fit()
 
     ref = entry["r"]
@@ -301,7 +328,11 @@ def test_no_intercept_matches_r(crosscheck, cov_type):
     df, kwargs = _options_kwargs_for_cov_type(df, cov_type)
     options = WLSOptions(include_intercept=False, cov_type=cov_type, **kwargs)
     res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
     ).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["no_intercept"][cov_type]["r"]
@@ -319,10 +350,17 @@ def test_no_intercept_hac_matches_r(crosscheck):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     entry = crosscheck["synthetic"]["baseline"]["no_intercept"]["hac"]
     options = WLSOptions(
-        include_intercept=False, cov_type="hac", hac_lags=entry["hac_lag"]
+        include_intercept=False,
+        cov_type="hac",
+        hac_lags=entry["hac_lag"],
+        hac_time=ROW_TIME,
     )
     res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
     ).fit()
 
     ref = entry["r"]
@@ -350,7 +388,11 @@ def test_confidence_level_matches_r(crosscheck, cov_type):
         **kwargs,
     )
     res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
     ).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["confidence_level"][cov_type][
@@ -372,9 +414,14 @@ def test_confidence_level_hac_matches_r(crosscheck):
         confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
         cov_type="hac",
         hac_lags=entry["hac_lag"],
+        hac_time=ROW_TIME,
     )
     res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
     ).fit()
 
     ref = entry["r"]
@@ -396,7 +443,7 @@ def test_401ksubs_matches_r(crosscheck, cov_type):
     options = WLSOptions(cov_type=cov_type)
 
     res = WLS(
-        df,
+        with_row_time(df),
         y="nettfa",
         x=["inc", "incsq", "age", "agesq", "male", "e401k"],
         weight="inv_inc",
@@ -422,7 +469,7 @@ def test_401ksubs_cluster_matches_r(crosscheck):
     options = WLSOptions(cov_type="cluster", cluster="age_bin")
 
     res = WLS(
-        df,
+        with_row_time(df),
         y="nettfa",
         x=["inc", "incsq", "age", "agesq", "male", "e401k"],
         weight="inv_inc",

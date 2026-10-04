@@ -27,6 +27,7 @@ import polars as pl
 import pytest
 import statsmodels.api as sm
 from _assertions import assert_close
+from _helpers import ROW_TIME, hac_time_for, with_row_time
 from _ols_helpers import our_fit, our_fit_cluster, sm_fit
 from _tolerances import TOLERANCES
 from econometricsmodels import OLS, OLSOptions, ValidationError
@@ -45,8 +46,10 @@ _assert_close = partial(
 
 def test_hac_runs_and_returns_finite_std_errors(dataset):
     """HACが（statsmodelsとの数値照合なしで）エラーなく動作すること。"""
-    options = OLSOptions(cov_type="hac", hac_lags=2)
-    res = OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+    options = OLSOptions(cov_type="hac", hac_lags=2, hac_time=ROW_TIME)
+    res = OLS(
+        with_row_time(dataset), y="y", x=["x1", "x2"], options=options
+    ).fit()
 
     assert res.cov_type == "hac"
     for se in res.std_errors.values():
@@ -60,8 +63,11 @@ def test_hac_auto_lags_runs_and_returns_finite_std_errors(dataset):
     明示していたため、`None`がPython→Rustに正しく伝播する経路は
     未検証だった）。
     """
-    options = OLSOptions(cov_type="hac")  # hac_lags省略 = 自動計算
-    res = OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+    # hac_lags省略 = 自動計算
+    options = OLSOptions(cov_type="hac", hac_time=ROW_TIME)
+    res = OLS(
+        with_row_time(dataset), y="y", x=["x1", "x2"], options=options
+    ).fit()
 
     assert res.cov_type == "hac"
     for se in res.std_errors.values():
@@ -159,8 +165,10 @@ def test_cov_type_is_case_insensitive(dataset, cov_type, expected_label):
     `hac_lags`省略時の自動計算式で成功パスを確認する
     （テスト網羅性候補・項目35）。
     """
-    options = OLSOptions(cov_type=cov_type)
-    res = OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+    options = OLSOptions(cov_type=cov_type, **hac_time_for(cov_type))
+    res = OLS(
+        with_row_time(dataset), y="y", x=["x1", "x2"], options=options
+    ).fit()
     assert res.cov_type == expected_label
 
 
@@ -213,9 +221,13 @@ def test_hac_time_reorders_rows_before_computing_lags():
     Python API境界から検証する。
     """
     ordered_df = pl.DataFrame(
-        {"y": [2.0, 4.0, 5.0, 4.0, 5.0], "x1": [1.0, 2.0, 3.0, 4.0, 5.0]}
+        {
+            "y": [2.0, 4.0, 5.0, 4.0, 5.0],
+            "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "time": [1.0, 2.0, 3.0, 4.0, 5.0],
+        }
     )
-    ordered_options = OLSOptions(cov_type="hac", hac_lags=1)
+    ordered_options = OLSOptions(cov_type="hac", hac_lags=1, hac_time="time")
     ordered_res = OLS(
         ordered_df, y="y", x=["x1"], options=ordered_options
     ).fit()

@@ -19,6 +19,7 @@ from functools import partial
 import polars as pl
 import pytest
 from _assertions import assert_close
+from _helpers import ROW_TIME, hac_time_for, with_row_time
 from _tolerances import TOLERANCES
 from econometricsmodels import (
     OLS,
@@ -273,8 +274,8 @@ def test_cov_type_is_case_insensitive(dataset, cov_type, expected_label):
     HACは`hac_lags`省略時の自動計算式で成功パスを確認する
     （テスト網羅性候補・項目35）。
     """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = WLSOptions(cov_type=cov_type)
+    df = with_row_time(dataset).with_columns(pl.lit(1.0).alias("weight"))
+    options = WLSOptions(cov_type=cov_type, **hac_time_for(cov_type))
     res = WLS(
         df, y="y", x=["x1", "x2"], weight="weight", options=options
     ).fit()
@@ -326,8 +327,9 @@ def test_hac_auto_lags_runs_and_returns_finite_std_errors(dataset):
     経由で`hac_lags`を明示していなかったが、`cov_type="hac"`自体のテストは
     無かった）。
     """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = WLSOptions(cov_type="hac")  # hac_lags省略 = 自動計算
+    df = with_row_time(dataset).with_columns(pl.lit(1.0).alias("weight"))
+    # hac_lags省略 = 自動計算
+    options = WLSOptions(cov_type="hac", hac_time=ROW_TIME)
     res = WLS(
         df, y="y", x=["x1", "x2"], weight="weight", options=options
     ).fit()
@@ -346,10 +348,11 @@ def test_hac_time_reorders_rows_before_computing_lags():
         {
             "y": [2.0, 4.0, 5.0, 4.0, 5.0],
             "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "time": [1.0, 2.0, 3.0, 4.0, 5.0],
             "weight": [1.0] * 5,
         }
     )
-    ordered_options = WLSOptions(cov_type="hac", hac_lags=1)
+    ordered_options = WLSOptions(cov_type="hac", hac_lags=1, hac_time="time")
     ordered_res = WLS(
         ordered_df, y="y", x=["x1"], weight="weight", options=ordered_options
     ).fit()

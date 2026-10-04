@@ -22,7 +22,7 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
   | `confidence_level` | `float` | `0.95` | 信頼区間の信頼水準、`(0, 1)` |
   | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名（`data`内の列）。他の`cov_type`で指定すると`ValidationError` |
   | `hac_lags` | `int \| None` | `None` | `cov_type="hac"`時のラグ数。`None`なら`L=floor(4*(n/100)^(2/9))`で自動計算。他の`cov_type`で指定すると`ValidationError` |
-  | `hac_time` | `str \| None` | `None` | `cov_type="hac"`時の時系列順序列。`None`なら`data`の行順を使用。列の値は全行で互いに異なること（同値が1組でもあれば`ValidationError`）。他の`cov_type`で指定すると`ValidationError` |
+  | `hac_time` | `str \| None` | `None` | `cov_type="hac"`時の時系列順序列（**必須**。未指定は`ValidationError`）。列の値は全行で互いに異なること（同値が1組でもあれば`ValidationError`）。他の`cov_type`で指定すると`ValidationError` |
 
 - `include_intercept=True`のとき`x`に`"const"`列があるとエラー（自動追加する定数項と衝突）。
   `x`に自前の定数列を含める重複検出は行わず、生じる多重共線性は`SingularMatrix`に委ねる。
@@ -97,7 +97,12 @@ $$
 - ラグ数`L`: `hac_lags`指定時はその値（`0 <= L < n`を検証）、未指定時は経験則
   `L = floor(4*(n/100)^(2/9))`で自動計算（EViews等でも使われるデータ非依存の式。完全な
   データ依存の自動バンド幅選択は主リファレンスのstatsmodelsに同等機能がなく未実装）。
-- `hac_time`未指定なら`data`の行順を時系列順とみなす。指定時は昇順ソートしたインデックスで
+- `hac_time`は必須（未指定は`ValidationError`）。行順を時系列順とみなす暗黙の既定は置かない:
+  データが時系列順に並んでいなくてもエラーにならず、時系列順のHACに見える誤った結果が黙って
+  返るため、時間順は常に列で明示させる（行順がそのまま時間順なら、`df.with_row_index("t")`
+  等で行番号の列を足して渡す。statsmodelsやRの`sandwich`は行順を使い時点列を取らない、
+  意図的な差）。`engine`の`CovType::Hac.time_order`は`Option`のまま（`None`なら行順、engineを
+  直接使う場合の既定）で、`engine_pybind`が常に`Some`で渡す。昇順ソートしたインデックスで
   ラグ付き自己共分散を計算する（`OlsInput`自体は並べ替えない。Python側に返す残差配列と
   元DataFrameの行対応を保つため）。
 - `hac_time`の値は全行で互いに異なることを要求する。同値があると順序が定まらず、engineの

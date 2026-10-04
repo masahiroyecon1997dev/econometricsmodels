@@ -50,7 +50,7 @@ import pytest
 from _assertions import assert_close, assert_dict_close
 from _assertions import rename_intercept as _rename
 from _constants import DATA_DIR
-from _helpers import with_cluster_groups
+from _helpers import ROW_TIME, hac_time_for, with_cluster_groups, with_row_time
 from _tolerances import TOLERANCES
 from econometricsmodels import IV, IVOptions
 
@@ -175,10 +175,13 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
     instruments = INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
     df = pl.read_csv(DATA_DIR / f"iv_{scenario}.csv")
     options = IVOptions(
-        estimator="gmm", gmm_weight_type="classical", cov_type=cov_type
+        estimator="gmm",
+        gmm_weight_type="classical",
+        cov_type=cov_type,
+        **hac_time_for(cov_type),
     )
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=x_exog,
         x_endog=["endog1"],
@@ -206,7 +209,7 @@ def test_cluster_matches_linearmodels(fixtures):
         cluster="cluster_group",
     )
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=["x1"],
         x_endog=["endog1"],
@@ -233,7 +236,7 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
         cluster="cluster_group",
     )
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=["x1"],
         x_endog=["endog1"],
@@ -255,10 +258,13 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
     options = IVOptions(
-        estimator="gmm", gmm_weight_type="classical", cov_type=cov_type
+        estimator="gmm",
+        gmm_weight_type="classical",
+        cov_type=cov_type,
+        **hac_time_for(cov_type),
     )
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=["x1"],
         x_endog=["endog1", "endog2"],
@@ -281,9 +287,14 @@ def test_hac_weight_hac_cov_matches_linearmodels(fixtures):
     この組み合わせを通らない（`testing-completeness-reviewer`指摘）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
-    options = IVOptions(estimator="gmm", gmm_weight_type="hac", cov_type="hac")
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type="hac",
+        cov_type="hac",
+        hac_time=ROW_TIME,
+    )
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=["x1"],
         x_endog=["endog1"],
@@ -333,7 +344,7 @@ def test_gmm_type_matches_linearmodels(fixtures, n_iter):
         **gmm_type_options,
     )
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=["x1"],
         x_endog=["endog1"],
@@ -366,9 +377,10 @@ def test_other_weight_types_match_linearmodels(fixtures, gmm_weight_type):
         gmm_weight_type=gmm_weight_type,
         cov_type="classical",
         **kwargs,
+        **hac_time_for(gmm_weight_type),
     )
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=["x1"],
         x_endog=["endog1"],

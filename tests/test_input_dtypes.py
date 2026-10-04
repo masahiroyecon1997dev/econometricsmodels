@@ -570,11 +570,37 @@ def test_hac_time_accepts_orderable_dtypes_with_the_same_order(
 
 @pytest.mark.parametrize("method", list(HAC_FITS))
 @pytest.mark.parametrize(
+    "dtype",
+    [pl.Int64, pl.Datetime("ns"), pl.Datetime("ns", "UTC")],
+    ids=str,
+)
+def test_hac_time_keeps_order_of_values_that_collapse_in_float64(
+    shuffled_time_frame, method, dtype
+):
+    """2^53を超える整数・ナノ秒の`Datetime`で、f64に変換すると同値に潰れる
+    ほど近い時点でも、元のdtypeで順序づけるので重複とは見なされず、
+    小さな整数の時点と同じ結果になる。
+    """
+    base = 1_700_000_000_000_000_000
+    assert float(base + 1) == float(base + 2)  # 前提: f64では区別できない
+    expected = HAC_FITS[method](shuffled_time_frame)
+    shifted = shuffled_time_frame.with_columns(
+        (pl.col("t") + base).cast(pl.Int64).cast(dtype).alias("t")
+    )
+
+    result = HAC_FITS[method](shifted)
+
+    assert result.std_errors == expected.std_errors
+
+
+@pytest.mark.parametrize("method", list(HAC_FITS))
+@pytest.mark.parametrize(
     ("dtype", "label"),
     [
         (pl.String, "String"),
         (pl.Categorical, "Categorical"),
         (pl.Enum(["a", "b"]), "Enum"),
+        (pl.Boolean, "Boolean"),
         (pl.Time, "Time"),
         (pl.Duration, "Duration"),
         (pl.Binary, "Binary"),

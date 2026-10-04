@@ -13,6 +13,9 @@
   load_wooldridge.py`の`load`を呼ぶだけの`wooldridge.data(name)`→
   `pl.from_pandas`実装が、複数ファイルに微妙に異なる書き方（直接呼び出し／
   `load_wooldridge.py`経由）で重複していた。
+- `TIED_TIME_COLUMNS`: `hac_time`に同値を含む時点列（全値同一・各値2回・
+  離れた1組のみ同値）とその最初の同値の行の組。OLS/WLS/IVのバリデーション
+  テストで共有する。
 
 定数（`DATA_DIR`・`MROZ_X`）は`_constants.py`に分離済み
 （ファイル名が関数を示唆するのに定数も同居していたための整理）。
@@ -25,6 +28,21 @@ from collections.abc import Callable
 import numpy as np
 import polars as pl
 import pytest
+
+# 同値を含む時点列を作るpolars式と、最初に報告される同値の行の組（0始まり）。
+# 行順に黙ってフォールバックして時系列順のHACに見えてしまう入力の代表。
+TIED_TIME_COLUMNS = [
+    pytest.param(pl.lit(1), (0, 1), id="all_identical"),
+    pytest.param(pl.int_range(pl.len()) // 2, (0, 1), id="each_twice"),
+    # 行0と行2だけが同値。間に別の値を挟んでも、行順ではなく値で重複を見つける。
+    pytest.param(
+        pl.when(pl.int_range(pl.len()) == 2)
+        .then(0)
+        .otherwise(pl.int_range(pl.len())),
+        (0, 2),
+        id="one_pair_not_adjacent",
+    ),
+]
 
 
 def with_cluster_groups(

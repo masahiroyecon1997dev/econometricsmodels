@@ -766,7 +766,8 @@ fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, IvError> {
 ///
 /// `partial_cmp().unwrap()`について: `time_order`の値はNaN/無限大を含まないことが
 /// `engine_pybind::column_extraction`側で既に保証されている前提（`ols.rs`の
-/// `time_ordering`と同じ理由）。
+/// `time_ordering`と同じ理由）。値が互いに異なる（同値は`ValidationError`で弾かれ、
+/// 昇順の位置＝順位で渡される）ことも同様に前提で、この関数自身は同値を検出しない。
 fn time_ordering(time_order: Option<&[f64]>, n: usize) -> Vec<usize> {
     match time_order {
         Some(values) => {

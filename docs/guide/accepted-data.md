@@ -18,9 +18,9 @@ A column is read in one of four roles, and each role accepts different dtypes. A
 | Numeric value | `y`, `x`, `weight`, `x_exog`, `x_endog`, `instruments` | Integers (`Int8` to `Int128`, `UInt8` to `UInt64`), floats (`Float16`, `Float32`, `Float64`), `Boolean`, `Decimal` |
 | Group identity | `entity`, `cluster` | Integers, floats, `String`, `Categorical`, `Enum`, `Boolean`, `Date`, `Datetime` (no time zone) |
 | Time period (panel) | `time`, `dk_time` | Integers, floats, `String`, `Categorical`, `Enum`, `Date`, `Datetime` (no time zone) |
-| Time order (HAC) | `hac_time` | The numeric dtypes above, `Date`, `Datetime` (with or without a time zone) |
+| Time order (HAC) | `hac_time` | Integers, floats, `Decimal`, `Date`, `Datetime` (with or without a time zone). Not `Boolean`, which has at most two distinct values |
 
-Not accepted in a numeric role: `String`, `Categorical`, `Enum`, `Date`, `Datetime`, `Time`, `Duration`, `Binary`, `List`, `Array`, `Struct`. Also not accepted as a group identity or a time period: `Time`, `Duration`, `Decimal`, `Binary`, `List`, `Array`, `Struct`. A `Datetime` with a time zone is rejected as a group identity or a time period, with a message that says how to remove the zone: convert it to the zone you want to keep, then call `.dt.replace_time_zone(None)`. (`hac_time` is read as a number and accepts a time zone.) A column of the `Null` dtype (every value is missing) is reported as containing missing values, not as a dtype problem.
+Not accepted in a numeric role: `String`, `Categorical`, `Enum`, `Date`, `Datetime`, `Time`, `Duration`, `Binary`, `List`, `Array`, `Struct`. Also not accepted as a group identity or a time period: `Time`, `Duration`, `Decimal`, `Binary`, `List`, `Array`, `Struct`. A `Datetime` with a time zone is rejected as a group identity or a time period, with a message that says how to remove the zone: convert it to the zone you want to keep, then call `.dt.replace_time_zone(None)`. (`hac_time` accepts a time zone, and is compared in its own dtype rather than converted to a float; see [Order of observations for HAC](#order-of-observations-for-hac).) A column of the `Null` dtype (every value is missing) is reported as containing missing values, not as a dtype problem.
 
 If the numbers you want to use are stored as strings or as dates, convert them yourself so that the intent is explicit:
 
@@ -84,3 +84,11 @@ Numeric options are checked the same way, both when the options object is create
 
 - [Validation and errors](validation.md): the errors raised for missing values, sample size and options, and what is not checked.
 - [Inference conventions](inference-conventions.md): the distributions and degrees of freedom behind the reported statistics.
+
+## Order of observations for HAC
+
+For `cov_type="hac"` in OLS, WLS and IV, and for `gmm_weight_type="hac"` in IV, the autocovariances are computed in time order. Without `hac_time` the row order of the data is the time order. With `hac_time`, the observations are sorted by that column, and only the order of its values is used, not the gaps between them.
+
+Every value of `hac_time` must be different. If two rows share a value, their order is undefined, so the call raises a `ValidationError` that names the first two such rows. It does so for a constant column and for a column where only one pair repeats, instead of resolving the tie by row order and returning an estimate that looks time-ordered. If your data has several observations per time point, as in a panel, use FE or RE with `cov_type="dk"` (where observations at the same time are expected); otherwise make the values distinct or leave `hac_time` out to use the row order.
+
+The column is compared in its own dtype, so the conversion to a 64-bit float described above does not apply to it: large integers and nanosecond `Datetime` values keep their exact order.

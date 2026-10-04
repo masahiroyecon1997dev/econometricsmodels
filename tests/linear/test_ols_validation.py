@@ -15,7 +15,7 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_messages import escaped
-from _helpers import with_cluster_groups
+from _helpers import TIED_TIME_COLUMNS, with_cluster_groups
 from _ols_helpers import our_fit
 from econometricsmodels import (
     OLS,
@@ -558,6 +558,26 @@ def test_option_used_by_cov_type_is_accepted(dataset, cov_type, kwargs):
     """使われる`cov_type`（大文字小文字を問わない）では指定を受理する。"""
     options = OLSOptions(cov_type=cov_type, **kwargs)
     OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+
+@pytest.mark.parametrize(("time_expr", "rows"), TIED_TIME_COLUMNS)
+def test_hac_time_with_tied_values_raises(dataset, time_expr, rows):
+    """`hac_time`に同じ値が1組でもあれば`ValidationError`にする。時点の順序が
+    定まらず、行順に黙ってフォールバックした結果を時系列順のHACとして
+    返してしまうため。
+    """
+    df = dataset.with_columns(time_expr.alias("t"))
+    options = OLSOptions(cov_type="hac", hac_lags=2, hac_time="t")
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_TIED_TIME_ORDER,
+            name="t",
+            first=rows[0],
+            second=rows[1],
+        ),
+    ):
+        OLS(df, y="y", x=["x1", "x2"], options=options).fit()
 
 
 def test_option_unused_check_is_case_insensitive(dataset):

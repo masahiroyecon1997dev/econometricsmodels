@@ -50,7 +50,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 | `confidence_level` | `float` | `0.95` | |
 | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時（`gmm_weight_type="cluster"`とも共用）のグループキー列名。どちらからも使われないモードで指定すると`ValidationError` |
 | `hac_lags` | `int \| None` | `None` | `cov_type="hac"`時（`gmm_weight_type="hac"`とも共用）のラグ数。`None`なら自動計算。どちらからも使われないモードで指定すると`ValidationError` |
-| `hac_time` | `str \| None` | `None` | `cov_type="hac"`時（`gmm_weight_type="hac"`とも共用）の時系列順序列。どちらからも使われないモードで指定すると`ValidationError` |
+| `hac_time` | `str \| None` | `None` | `cov_type="hac"`時（`gmm_weight_type="hac"`とも共用）の時系列順序列（値は全行で互いに異なること。同値があれば`ValidationError`、`ols-spec.md`「標準誤差」のHAC参照）。どちらからも使われないモードで指定すると`ValidationError` |
 | `gmm_weight_type` | `str \| None` | `None` | GMMの点推定に使う重み行列（`gmm_type="two_step"`/`"iterated"`のみ。`None`は実効既定値`"classical"`）: `"classical"` / `"robust"` / `"cluster"` / `"hac"`（`cov_type`と同じ語彙。旧名`unadjusted`/`kernel`と別名`homoskedastic`/`heteroskedastic`は受け付けない）。`estimator="2sls"`と`gmm_type="one_step"`で指定すると`ValidationError` |
 | `gmm_type` | `str \| None` | `None` | GMMの推定方式（`estimator="gmm"`のみ、`None`は実効既定値`"two_step"`。`estimator="2sls"`で指定すると`ValidationError`）: `"one_step"`（1段階、重み`(Z'Z)⁻¹`のみ）/ `"two_step"`（2段階の効率的GMM）/ `"iterated"`（収束まで反復）。大文字小文字は区別しない |
 | `gmm_max_iter` | `int \| None` | `None` | `"iterated"`の最大推定回数（初回推定を含む、3以上10000以下）。`None`は実効既定値`100`。`"one_step"`/`"two_step"`/`estimator="2sls"`で指定すると`ValidationError` |

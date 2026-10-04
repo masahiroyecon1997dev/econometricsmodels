@@ -120,6 +120,16 @@ COLUMN_UNSUPPORTED_ORDER_DTYPE = (
     "column; use an integer, float, Date or Datetime column"
 )
 
+# 行の並び順だけに使う列（HACの`hac_time`）に同じ値が複数ある場合。順序が定まらないため、
+# エンジンが行順で黙って並べる前にここで拒否する。`{first}`/`{second}`は同値の最初の
+# 2行（0始まりの行番号）。
+COLUMN_HAS_TIED_TIME_ORDER = (
+    "column '{name}' has the same value at rows {first} and {second}. A "
+    "time-order column must give every observation a distinct value, because "
+    "tied observations cannot be put in time order; make the values distinct, "
+    "or omit the time-order option to use the row order of the data"
+)
+
 # キー列のdtypeが許可外の場合。`entity`・`cluster`（同一性だけのキー）と
 # `time`・`dk_time`（時点のキー）で許可するdtypeが異なる。`{dtype}`の呼び名は
 # `COLUMN_UNSUPPORTED_NUMERIC_DTYPE`と同じ。

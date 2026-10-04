@@ -62,7 +62,7 @@ use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
 use crate::column_extraction::{
-    extract_f64_column, extract_group_key_column, extract_ordering_f64_column,
+    extract_f64_column, extract_group_key_column, extract_time_order_ranks,
 };
 use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
 use crate::linear::common::{build_cov_type, least_squares_error_is_computation_error, mat_to_vec};
@@ -700,7 +700,7 @@ fn parse_weight_type(df: &DataFrame, options: &IVOptions) -> PyResult<(WeightTyp
             let time_order = options
                 .hac_time
                 .as_ref()
-                .map(|col_name| extract_ordering_f64_column(df, col_name))
+                .map(|col_name| extract_time_order_ranks(df, col_name))
                 .transpose()?;
             WeightType::Hac {
                 lags: options.hac_lags,
@@ -1551,12 +1551,12 @@ mod tests {
     }
 
     #[test]
-    fn build_iv_input_extracts_time_order_when_cov_type_is_hac() {
+    fn build_iv_input_passes_time_order_ranks_when_cov_type_is_hac() {
         let df = df!(
             "y" => [1.0, 2.0, 3.0, 4.0],
             "endog1" => [4.0, 3.0, 2.0, 1.0],
             "z1" => [2.0, 1.0, 4.0, 3.0],
-            "t" => [1.0, 2.0, 3.0, 4.0],
+            "t" => [30.0, 10.0, 40.0, 20.0],
         )
         .unwrap();
         let mut options = default_options();
@@ -1578,7 +1578,8 @@ mod tests {
             cov_type,
             EngineCovType::Hac {
                 lags: Some(1),
-                time_order: Some(vec![1.0, 2.0, 3.0, 4.0]),
+                // 値ではなく昇順の位置（順位）をエンジンに渡す。
+                time_order: Some(vec![2.0, 0.0, 3.0, 1.0]),
             }
         );
     }

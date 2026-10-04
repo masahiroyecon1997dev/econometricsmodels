@@ -20,6 +20,7 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_messages import escaped
+from _helpers import TIED_TIME_COLUMNS
 from _iv_helpers import our_fit
 from econometricsmodels import (
     IV,
@@ -956,3 +957,38 @@ def test_unknown_value_is_reported_before_unused_option(
     """未知の値のエラーを優先し、未使用オプションの指摘で埋もれさせない。"""
     with pytest.raises(ValidationError, match="unknown"):
         our_fit(iv_dataset, options=IVOptions(**options_kwargs))
+
+
+@pytest.mark.parametrize(
+    "options_kwargs",
+    [
+        pytest.param({"cov_type": "hac"}, id="2sls_cov_type"),
+        pytest.param(
+            {"estimator": "gmm", "cov_type": "hac"}, id="gmm_cov_type"
+        ),
+        pytest.param(
+            {"estimator": "gmm", "gmm_weight_type": "hac"},
+            id="gmm_weight_type",
+        ),
+    ],
+)
+@pytest.mark.parametrize(("time_expr", "rows"), TIED_TIME_COLUMNS)
+def test_hac_time_with_tied_values_raises(
+    iv_dataset, options_kwargs, time_expr, rows
+):
+    """`hac_time`に同じ値が1組でもあれば`ValidationError`にする。2SLS・GMMの
+    `cov_type="hac"`と、GMMの重み行列（`gmm_weight_type="hac"`、別の抽出経路）の
+    どちらでも、時点の順序が定まらないまま行順にフォールバックしない。
+    """
+    df = iv_dataset.with_columns(time_expr.alias("t"))
+    options = IVOptions(hac_lags=2, hac_time="t", **options_kwargs)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_TIED_TIME_ORDER,
+            name="t",
+            first=rows[0],
+            second=rows[1],
+        ),
+    ):
+        our_fit(df, options=options)

@@ -22,7 +22,7 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
   | `confidence_level` | `float` | `0.95` | 信頼区間の信頼水準、`(0, 1)` |
   | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名（`data`内の列）。他の`cov_type`で指定すると`ValidationError` |
   | `hac_lags` | `int \| None` | `None` | `cov_type="hac"`時のラグ数。`None`なら`L=floor(4*(n/100)^(2/9))`で自動計算。他の`cov_type`で指定すると`ValidationError` |
-  | `hac_time` | `str \| None` | `None` | `cov_type="hac"`時の時系列順序列。`None`なら`data`の行順を使用。他の`cov_type`で指定すると`ValidationError` |
+  | `hac_time` | `str \| None` | `None` | `cov_type="hac"`時の時系列順序列。`None`なら`data`の行順を使用。列の値は全行で互いに異なること（同値が1組でもあれば`ValidationError`）。他の`cov_type`で指定すると`ValidationError` |
 
 - `include_intercept=True`のとき`x`に`"const"`列があるとエラー（自動追加する定数項と衝突）。
   `x`に自前の定数列を含める重複検出は行わず、生じる多重共線性は`SingularMatrix`に委ねる。
@@ -100,6 +100,13 @@ $$
 - `hac_time`未指定なら`data`の行順を時系列順とみなす。指定時は昇順ソートしたインデックスで
   ラグ付き自己共分散を計算する（`OlsInput`自体は並べ替えない。Python側に返す残差配列と
   元DataFrameの行対応を保つため）。
+- `hac_time`の値は全行で互いに異なることを要求する。同値があると順序が定まらず、engineの
+  ソートは同値の行を行順で黙って並べてしまい、時系列順のHACに見える結果を返すため、
+  `engine_pybind`が`ValidationError`にする（全値同一も同じ）。比較は元のdtypeの値で行い
+  （整数・`Date`・`Datetime`・`Decimal`は物理表現の`i128`、浮動小数は値。`Boolean`は値が2種類しかなく
+  順序が定まらないため、dtypeの時点で拒否する）、engineには
+  値ではなく昇順の位置（順位）を渡す。f64へ変換すると2^53超の整数やナノ秒の`Datetime`が
+  同値に潰れて、この検査をすり抜けるため。
 - **パフォーマンス上の罠**: `k×k`という小さい出力サイズの行列積で、faer既定の並列実行は
   ディスパッチオーバーヘッドが計算本体を上回り逐次より遅くなる（実測n=10,000,k=2で6倍悪化）。
   `hac_cov_params`内でのみ`Par::Seq`を明示指定して回避している。他手法で同様の小さい行列の

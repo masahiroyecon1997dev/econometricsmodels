@@ -132,7 +132,7 @@ enum NumericRole {
     /// 値そのものを計算に使う列（`y`・`x`・重み・操作変数等）。
     Value,
     /// 行の並び順を決めるだけに使う列（HACの`hac_time`）。値の大小関係だけが意味を持つため、
-    /// f64に変換しても順序が保たれる`Date`/`Datetime`も許可する。
+    /// 順序が保たれる`Date`/`Datetime`も許可する。
     Ordering,
 }
 
@@ -164,13 +164,16 @@ fn dtype_label(dtype: &DataType) -> String {
 /// キャストで黙って数値になったり欠損値扱いになったりして意図が判定できないため拒否する。
 /// `Null`型（全値が欠損の列）は後続の欠損値チェックで「欠損値を含む」と報告させるため通す。
 fn check_numeric_dtype(name: &str, dtype: &DataType, role: NumericRole) -> PyResult<()> {
+    let is_ordering = role == NumericRole::Ordering;
+    // `Boolean`は値が2種類しかなく、3行以上では必ず同値ができて順序が定まらないため、
+    // 順序づけの列としては拒否する。
     let is_numeric = dtype.is_integer()
         || dtype.is_float()
         || dtype.is_decimal()
-        || dtype.is_bool()
+        || (dtype.is_bool() && !is_ordering)
         || dtype.is_null();
     let is_ordering_extra = matches!(dtype, DataType::Date | DataType::Datetime(..));
-    if is_numeric || (role == NumericRole::Ordering && is_ordering_extra) {
+    if is_numeric || (is_ordering && is_ordering_extra) {
         return Ok(());
     }
     let label = dtype_label(dtype);
@@ -190,7 +193,7 @@ fn check_numeric_dtype(name: &str, dtype: &DataType, role: NumericRole) -> PyRes
 /// `df`から`name`列をf64のVecとして取り出す。
 ///
 /// 数値として使う列（`y`・`x`・重み・操作変数等）用。整数・浮動小数・Boolean・Decimalのみを
-/// 受け付ける（`check_numeric_dtype`）。行の並び順だけに使う列は[`extract_ordering_f64_column`]。
+/// 受け付ける（`check_numeric_dtype`）。行の並び順だけに使う列は[`extract_time_order_ranks`]。
 ///
 /// # Errors（すべて`ValidationError`）
 /// - 列が存在しない
@@ -198,27 +201,75 @@ fn check_numeric_dtype(name: &str, dtype: &DataType, role: NumericRole) -> PyRes
 /// - 欠損値（null）を含む
 /// - NaN・無限大（infinity）を含む
 pub fn extract_f64_column(df: &DataFrame, name: &str) -> PyResult<Vec<f64>> {
-    extract_f64_column_for(df, name, NumericRole::Value)
-}
-
-/// `df`から`name`列を、行の並び順を決めるための値としてf64のVecで取り出す（HACの`hac_time`）。
-///
-/// [`extract_f64_column`]の許可dtypeに加えて`Date`/`Datetime`を受け付ける。f64への変換は
-/// 単調なので順序が保たれ、エンジン側は値の大小関係だけを使う（間隔は使わない）。
-///
-/// # Errors
-/// [`extract_f64_column`]と同じ（許可するdtypeだけが異なる）。
-pub fn extract_ordering_f64_column(df: &DataFrame, name: &str) -> PyResult<Vec<f64>> {
-    extract_f64_column_for(df, name, NumericRole::Ordering)
-}
-
-fn extract_f64_column_for(df: &DataFrame, name: &str, role: NumericRole) -> PyResult<Vec<f64>> {
     let series = df.column(name).map_err(|_| {
         ValidationError::new_err(format!("column '{name}' does not exist in the data"))
     })?;
 
-    check_numeric_dtype(name, series.dtype(), role)?;
+    check_numeric_dtype(name, series.dtype(), NumericRole::Value)?;
+    cast_to_finite_f64_values(name, series)
+}
 
+/// `df`から`name`列を、行の並び順を決めるための**順位**のVecで取り出す（HACの`hac_time`）。
+///
+/// 戻り値の`i`番目は、列の値を昇順に並べたときの`i`行目の位置（0始まり、`f64`）。エンジンは
+/// 値の大小関係だけを使うため、値そのものではなく順位を渡す。f64への変換で値が潰れる
+/// 整数（2^53超）・ナノ秒の`Datetime`でも、元のdtypeのまま比較するので順序が保たれる。
+///
+/// 値が1組でも重複する（全値が同一の列を含む）と順序が定まらない。エンジンは
+/// 同値を行順で黙って並べてしまうため、ここで`ValidationError`にする。
+///
+/// 整数・`Date`・`Datetime`・`Decimal`は物理表現（`Int128`）で、浮動小数は
+/// 値で比較する（`-0.0`と`0.0`は同値）。許可するdtypeは`check_numeric_dtype`の
+/// `NumericRole::Ordering`（`extract_f64_column`の許可dtypeに`Date`/`Datetime`を加えたもの）。
+///
+/// # Errors（すべて`ValidationError`）
+/// - 列が存在しない
+/// - 順序づけに使えないdtype（文字列・時刻・カテゴリ等）
+/// - 欠損値（null）を含む
+/// - 浮動小数の列にNaN・無限大を含む
+/// - 値が重複する
+pub fn extract_time_order_ranks(df: &DataFrame, name: &str) -> PyResult<Vec<f64>> {
+    let series = df.column(name).map_err(|_| {
+        ValidationError::new_err(format!("column '{name}' does not exist in the data"))
+    })?;
+    let dtype = series.dtype();
+
+    check_numeric_dtype(name, dtype, NumericRole::Ordering)?;
+
+    if dtype.is_float() {
+        let values = cast_to_finite_f64_values(name, series)?;
+        return strict_ranks(name, &values);
+    }
+
+    reject_missing_values(name, series.null_count())?;
+    // 整数は値そのもの、`Date`は日数、`Datetime`は時間単位ごとの経過時間、`Decimal`は
+    // 同一列で共通のスケールを掛けた整数が物理表現になっており、その大小がそのまま順序になる（`extract_time_keys`と同じ。タイムゾーンの有無は順序に影響しない）。
+    let as_i128 = series
+        .to_physical_repr()
+        .cast(&DataType::Int128)
+        .map_err(|e| time_order_error(name, e))?;
+    let values: Vec<i128> = as_i128
+        .i128()
+        .map_err(|e| time_order_error(name, e))?
+        .iter()
+        .map(|v| v.expect("null_countチェック済み"))
+        .collect();
+    strict_ranks(name, &values)
+}
+
+/// 欠損値（null）が1つでもあれば`ValidationError`にする。
+fn reject_missing_values(name: &str, null_count: usize) -> PyResult<()> {
+    if null_count > 0 {
+        return Err(ValidationError::new_err(format!(
+            "column '{name}' contains {null_count} missing value(s). Missing values are not \
+             handled automatically; please impute or remove them before calling this function"
+        )));
+    }
+    Ok(())
+}
+
+/// dtype検査済みの`series`を、欠損値・NaN・無限大が無いことを確かめたうえでf64のVecにする。
+fn cast_to_finite_f64_values(name: &str, series: &Column) -> PyResult<Vec<f64>> {
     // 許可したdtypeはすべてf64にキャストできるため、ここでの失敗は想定していない
     // （防御的に`ValidationError`へ変換する）。
     let series = series.cast(&DataType::Float64).map_err(|e| {
@@ -231,13 +282,7 @@ fn extract_f64_column_for(df: &DataFrame, name: &str, role: NumericRole) -> PyRe
         .f64()
         .map_err(|e| ValidationError::new_err(format!("failed to convert column '{name}': {e}")))?;
 
-    if ca.null_count() > 0 {
-        return Err(ValidationError::new_err(format!(
-            "column '{name}' contains {} missing value(s). Missing values are not handled \
-             automatically; please impute or remove them before calling this function",
-            ca.null_count()
-        )));
-    }
+    reject_missing_values(name, ca.null_count())?;
 
     // rechunk: 複数チャンクに分かれている場合に単一チャンクへ統合する。
     // 既に単一チャンクの場合は実質コピーが発生しない（安価な操作）。
@@ -264,6 +309,49 @@ fn extract_f64_column_for(df: &DataFrame, name: &str, role: NumericRole) -> PyRe
     }
 
     Ok(values)
+}
+
+/// `values`の昇順での位置（0始まり）を行ごとに返す。値が重複すれば`ValidationError`。
+fn strict_ranks<T: PartialOrd>(name: &str, values: &[T]) -> PyResult<Vec<f64>> {
+    rank_distinct_values(values).map_err(|(first, second)| {
+        ValidationError::new_err(format!(
+            "column '{name}' has the same value at rows {first} and {second}. A time-order \
+             column must give every observation a distinct value, because tied observations \
+             cannot be put in time order; make the values distinct, or omit the time-order \
+             option to use the row order of the data"
+        ))
+    })
+}
+
+/// `values`の昇順での位置（0始まり）を行ごとに返す。同値の組があれば、同値の行のうち
+/// 行番号が最も小さい行と、その同値グループの次の行の組を`Err`で返す（「最初に重複した
+/// 2行」。値の大小ではなく行の並びで決まる）。
+///
+/// `values`はNaNを含まない前提（呼び出し元が検査済み）。同値の行は安定ソートで行番号の
+/// 昇順に隣り合うため、報告する行の組は決定的になる。
+fn rank_distinct_values<T: PartialOrd>(values: &[T]) -> Result<Vec<f64>, (usize, usize)> {
+    let mut order: Vec<usize> = (0..values.len()).collect();
+    order.sort_by(|&a, &b| {
+        values[a]
+            .partial_cmp(&values[b])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // ソート後の隣接同値のうち、先頭の行番号が最小のもの（同値グループごとの最初の2行の
+    // 中で、行の並びでもっとも早く現れる組）を選ぶ。
+    if let Some(pair) = order
+        .windows(2)
+        .filter(|w| values[w[0]] == values[w[1]])
+        .min_by_key(|w| w[0])
+    {
+        return Err((pair[0], pair[1]));
+    }
+
+    let mut ranks = vec![0.0; values.len()];
+    for (rank, &row) in order.iter().enumerate() {
+        ranks[row] = rank as f64;
+    }
+    Ok(ranks)
 }
 
 /// `param_names`から`x`列名部分を取り出す。`has_intercept`時は先頭の`"const"`、
@@ -703,7 +791,6 @@ mod tests {
             DataType::UInt64,
             DataType::Float32,
             DataType::Float64,
-            DataType::Boolean,
             DataType::Decimal(18, 2),
             DataType::Null,
         ]
@@ -719,6 +806,13 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn check_numeric_dtype_accepts_boolean_only_for_value_role() {
+        // 順序づけの列としては、値が2種類しかなく順序が定まらないため拒否する。
+        assert!(check_numeric_dtype("x", &DataType::Boolean, NumericRole::Value).is_ok());
+        assert!(check_numeric_dtype("x", &DataType::Boolean, NumericRole::Ordering).is_err());
     }
 
     #[test]
@@ -767,15 +861,140 @@ mod tests {
         assert!(extract_f64_column(&df, "a").is_err());
     }
 
+    /// `values`を`dtype`にキャストした`t`列だけを持つ`DataFrame`。
+    fn frame_with_t_as(values: Vec<i64>, dtype: DataType) -> DataFrame {
+        let mut df = DataFrame::new(values.len(), vec![Column::new("t".into(), values)]).unwrap();
+        let cast = df.column("t").unwrap().cast(&dtype).unwrap();
+        df.with_column(cast).unwrap();
+        df
+    }
+
     #[test]
-    fn extract_ordering_f64_column_keeps_date_order() {
-        let mut df = df!("t" => [3_i32, 1, 2]).unwrap();
-        let date = df.column("t").unwrap().cast(&DataType::Date).unwrap();
-        df.with_column(date).unwrap();
+    fn extract_time_order_ranks_returns_positions_in_ascending_order() {
+        let df = frame_with_t_as(vec![30_i64, 10, 20], DataType::Int64);
 
-        let values = extract_ordering_f64_column(&df, "t").unwrap();
+        let ranks = extract_time_order_ranks(&df, "t").unwrap();
 
-        assert_eq!(values, vec![3.0, 1.0, 2.0]);
+        assert_eq!(ranks, vec![2.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn extract_time_order_ranks_keeps_date_order() {
+        let df = frame_with_t_as(vec![3, 1, 2], DataType::Date);
+
+        let ranks = extract_time_order_ranks(&df, "t").unwrap();
+
+        assert_eq!(ranks, vec![2.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn extract_time_order_ranks_orders_floats_and_decimals_and_small_ints() {
+        for dtype in [
+            DataType::Float32,
+            DataType::Float64,
+            DataType::Decimal(18, 0),
+            DataType::UInt8,
+            DataType::Int128,
+        ] {
+            let df = frame_with_t_as(vec![5_i64, 1, 3], dtype.clone());
+
+            let ranks = extract_time_order_ranks(&df, "t").unwrap();
+
+            assert_eq!(ranks, vec![2.0, 0.0, 1.0], "{dtype}");
+        }
+    }
+
+    #[test]
+    fn extract_time_order_ranks_distinguishes_values_that_collapse_in_f64() {
+        // 2^53を超える整数・ナノ秒の`Datetime`はf64に変換すると隣り合う値が同値になるが、
+        // 元のdtypeで比較するので順序が保たれ、重複とも見なされない。
+        let base = 1_700_000_000_000_000_000_i64;
+        let values = vec![base + 2, base, base + 1];
+        assert_eq!(values[1] as f64, values[2] as f64, "前提: f64では潰れる");
+        for dtype in [
+            DataType::Int64,
+            DataType::Datetime(TimeUnit::Nanoseconds, None),
+        ] {
+            let df = frame_with_t_as(values.clone(), dtype.clone());
+
+            let ranks = extract_time_order_ranks(&df, "t").unwrap();
+
+            assert_eq!(ranks, vec![2.0, 0.0, 1.0], "{dtype}");
+        }
+    }
+
+    #[test]
+    fn extract_time_order_ranks_rejects_duplicates_in_every_orderable_dtype() {
+        for dtype in [
+            DataType::Int64,
+            DataType::UInt64,
+            DataType::Float32,
+            DataType::Float64,
+            DataType::Decimal(18, 0),
+            DataType::Decimal(18, 2),
+            DataType::Date,
+            DataType::Datetime(TimeUnit::Microseconds, None),
+        ] {
+            // 行0と行2が同値（間に別の値を挟む）。
+            let df = frame_with_t_as(vec![4, 9, 4, 7], dtype.clone());
+
+            assert!(extract_time_order_ranks(&df, "t").is_err(), "{dtype}");
+        }
+    }
+
+    #[test]
+    fn rank_distinct_values_reports_the_first_tied_pair_by_row_order() {
+        assert_eq!(rank_distinct_values(&[4, 9, 4, 7]), Err((0, 2)));
+        // 値が最小の同値グループ（行2・3）ではなく、行番号が最も早い組（行0・1）を報告する。
+        assert_eq!(rank_distinct_values(&[9, 9, 1, 1]), Err((0, 1)));
+        assert_eq!(rank_distinct_values(&[1, 5, 9, 9, 5]), Err((1, 4)));
+        // 3つ組の同値は先頭の2行を報告する。
+        assert_eq!(rank_distinct_values(&[5.0, 1.0, 5.0, 5.0]), Err((0, 2)));
+        assert_eq!(rank_distinct_values(&[4, 9, 2]), Ok(vec![1.0, 2.0, 0.0]));
+        assert_eq!(rank_distinct_values::<i128>(&[]), Ok(vec![]));
+    }
+
+    #[test]
+    fn extract_time_order_ranks_rejects_fully_tied_columns() {
+        let tied = frame_with_t_as(vec![1_i64; 5], DataType::Int64);
+        assert!(extract_time_order_ranks(&tied, "t").is_err());
+    }
+
+    #[test]
+    fn extract_time_order_ranks_rejects_boolean_columns_by_dtype() {
+        let boolean = frame_with_t_as(vec![0_i64, 1], DataType::Boolean);
+        assert!(extract_time_order_ranks(&boolean, "t").is_err());
+    }
+
+    #[test]
+    fn extract_time_order_ranks_treats_negative_zero_as_tied_with_zero() {
+        let df = DataFrame::new(2, vec![Column::new("t".into(), vec![0.0_f64, -0.0])]).unwrap();
+
+        assert!(extract_time_order_ranks(&df, "t").is_err());
+    }
+
+    #[test]
+    fn extract_time_order_ranks_rejects_missing_and_non_finite_values() {
+        let with_null = DataFrame::new(
+            3,
+            vec![Column::new("t".into(), vec![Some(1_i64), None, Some(3)])],
+        )
+        .unwrap();
+        assert!(extract_time_order_ranks(&with_null, "t").is_err());
+
+        let with_nan = DataFrame::new(
+            3,
+            vec![Column::new("t".into(), vec![1.0_f64, f64::NAN, 3.0])],
+        )
+        .unwrap();
+        assert!(extract_time_order_ranks(&with_nan, "t").is_err());
+    }
+
+    #[test]
+    fn extract_time_order_ranks_rejects_non_orderable_dtype_and_missing_column() {
+        let strings = df!("t" => ["a", "b"]).unwrap();
+        assert!(extract_time_order_ranks(&strings, "t").is_err());
+        assert!(extract_time_order_ranks(&strings, "absent").is_err());
     }
 
     #[test]

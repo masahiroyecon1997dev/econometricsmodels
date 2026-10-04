@@ -16,7 +16,7 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_messages import escaped
-from _helpers import with_cluster_groups
+from _helpers import TIED_TIME_COLUMNS, with_cluster_groups
 from econometricsmodels import (
     WLS,
     ComputationError,
@@ -633,3 +633,24 @@ def test_option_unused_by_cov_type_raises(
         WLS(
             dataset, y="y", x=["x1", "x2"], weight="weight", options=options
         ).fit()
+
+
+@pytest.mark.parametrize(("time_expr", "rows"), TIED_TIME_COLUMNS)
+def test_hac_time_with_tied_values_raises(dataset, time_expr, rows):
+    """`hac_time`に同じ値が1組でもあれば`ValidationError`にする（時点の順序が
+    定まらず、行順に黙ってフォールバックするのを防ぐ）。
+    """
+    df = dataset.with_columns(
+        time_expr.alias("t"), pl.lit(1.0).alias("weight")
+    )
+    options = WLSOptions(cov_type="hac", hac_lags=2, hac_time="t")
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_TIED_TIME_ORDER,
+            name="t",
+            first=rows[0],
+            second=rows[1],
+        ),
+    ):
+        WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()

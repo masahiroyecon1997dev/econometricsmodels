@@ -829,6 +829,9 @@ fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, LeastSquaresEr
 /// `partial_cmp().unwrap()`について: `time_order`の値はNaN/無限大を含まないことが
 /// `engine_pybind::column_extraction`側で既に保証されている前提（本関数は`engine`の
 /// 責務境界の内側であり、クリーンな値しか受け取らない。モジュール冒頭のdocコメント参照）。
+/// 同様に、値が互いに異なる（`engine_pybind`が昇順の位置＝順位に変換済みで、同値は
+/// `ValidationError`として弾かれている）ことも前提にする。この関数自身は同値を検出せず、
+/// 同値があれば安定ソートにより行順で並べるだけ。
 fn time_ordering(time_order: Option<&[f64]>, n: usize) -> Vec<usize> {
     match time_order {
         Some(values) => {

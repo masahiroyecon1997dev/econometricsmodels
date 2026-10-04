@@ -117,7 +117,13 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
   有効化していない。`cargo build`のログに一度もコンパイルが出現せず、`cargo tree -p object_store`
   も空を返すことを確認済み）。`cargo audit`は機能フラグを考慮せず`Cargo.lock`を丸ごとスキャンする
   ため、実際にコンパイルされない依存でも警告に含まれる。
-- **`bincode`/`paste`（unmaintained警告）**: それぞれ`polars`/`faer`待ち。
+- **`bincode`（RUSTSEC-2025-0141、unmaintained）**: 経路は`polars-utils`のserde機能（optional依存）。
+  `cargo tree`は空で実際にはビルドされない。`polars-utils`が`bincode`を`<3`で要求するため`polars`の新版待ち。
+- **`paste`（RUSTSEC-2024-0436、unmaintained）**: 経路は`faer → gemm/pulp`と`argmin`の2系統。
+  proc-macroとして**実際にビルドされる**が、コンパイル時のみで実行時には含まれない。
+  `faer`・`argmin`の両方が`paste`を外すまで解消できない。
+- **`event-listener`（RUSTSEC-2026-0221、unsound）**: 経路は`polars-lazy → polars-stream → async-channel`
+  （ビルドされない）。パッチ版5.4.2へ`Cargo.lock`を更新して解消済みのため、ignore listには登録しない。
 
 ## 参照
 

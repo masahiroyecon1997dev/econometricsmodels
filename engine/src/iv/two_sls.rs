@@ -302,7 +302,7 @@ impl TwoSlsEstimator {
             ),
             CovType::Hac { lags, time_order } => {
                 let lags = resolve_hac_lags(*lags, n)?;
-                let order = time_ordering(time_order.as_deref(), n);
+                let order = time_ordering(time_order, n);
                 (
                     hac_cov_params(x_hat, &residuals, &xtx_inv, n, k, lags, &order),
                     df_resid,
@@ -761,22 +761,17 @@ fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, IvError> {
 }
 
 /// `CovType::Hac`の`time_order`から、時系列の昇順に並べたときの行インデックス列を求める
-/// （`ols.rs`の`time_ordering`と同型）。`None`の場合は`IvInput`の行順をそのまま時系列順と
-/// みなす（engineを直接使う場合の既定。`engine_pybind`は常に`Some`で渡す）。
+/// （`ols.rs`の`time_ordering`と同型）。
 ///
 /// `partial_cmp().unwrap()`について: `time_order`の値はNaN/無限大を含まないことが
 /// `engine_pybind::column_extraction`側で既に保証されている前提（`ols.rs`の
 /// `time_ordering`と同じ理由）。値が互いに異なる（同値は`ValidationError`で弾かれ、
 /// 昇順の位置＝順位で渡される）ことも同様に前提で、この関数自身は同値を検出しない。
-fn time_ordering(time_order: Option<&[f64]>, n: usize) -> Vec<usize> {
-    match time_order {
-        Some(values) => {
-            let mut order: Vec<usize> = (0..n).collect();
-            order.sort_by(|&a, &b| values[a].partial_cmp(&values[b]).unwrap());
-            order
-        }
-        None => (0..n).collect(),
-    }
+fn time_ordering(time_order: &[f64], n: usize) -> Vec<usize> {
+    debug_assert_eq!(time_order.len(), n);
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&a, &b| time_order[a].partial_cmp(&time_order[b]).unwrap());
+    order
 }
 
 /// Newey-West HACの係数分散共分散行列: `(X̂'X̂)⁻¹Ŝ(X̂'X̂)⁻¹`（k×k）。数式・実装方針は
@@ -918,6 +913,7 @@ fn wald_f_test(
 mod tests {
     use super::*;
     use crate::error::CommonError;
+    use crate::linear::common::row_time_order;
 
     /// 丁度識別（`len(instruments) == len(x_endog)`）の閉形式解と数値照合するテストデータ。
     ///
@@ -1792,7 +1788,7 @@ mod tests {
             nontrivial_x_exog_input(),
             CovType::Hac {
                 lags: Some(0),
-                time_order: None,
+                time_order: row_time_order(8),
             },
             0.95,
         )
@@ -1818,7 +1814,7 @@ mod tests {
             nontrivial_x_exog_input(),
             CovType::Hac {
                 lags: Some(2),
-                time_order: None,
+                time_order: row_time_order(8),
             },
             0.95,
         )
@@ -1841,7 +1837,7 @@ mod tests {
             nontrivial_x_exog_input(),
             CovType::Hac {
                 lags: None,
-                time_order: None,
+                time_order: row_time_order(8),
             },
             0.95,
         )
@@ -1850,7 +1846,7 @@ mod tests {
             nontrivial_x_exog_input(),
             CovType::Hac {
                 lags: Some(2),
-                time_order: None,
+                time_order: row_time_order(8),
             },
             0.95,
         )
@@ -1900,7 +1896,7 @@ mod tests {
             shuffled_input,
             CovType::Hac {
                 lags: Some(2),
-                time_order: Some(shuffled_time),
+                time_order: shuffled_time,
             },
             0.95,
         )
@@ -1910,7 +1906,7 @@ mod tests {
             nontrivial_x_exog_input(),
             CovType::Hac {
                 lags: Some(2),
-                time_order: None,
+                time_order: row_time_order(8),
             },
             0.95,
         )
@@ -1955,7 +1951,7 @@ mod tests {
             x_endog_empty_input(),
             CovType::Hac {
                 lags: Some(-1),
-                time_order: None,
+                time_order: row_time_order(5),
             },
             0.95,
         );

@@ -703,7 +703,7 @@ fn parse_weight_type(df: &DataFrame, options: &IVOptions) -> PyResult<(WeightTyp
             let col_name = require_hac_time(options.hac_time.as_deref(), "gmm_weight_type")?;
             WeightType::Hac {
                 lags: options.hac_lags,
-                time_order: Some(extract_time_order_ranks(df, col_name)?),
+                time_order: extract_time_order_ranks(df, col_name)?,
             }
         }
         other => {
@@ -1567,7 +1567,7 @@ mod tests {
             weight_type,
             WeightType::Hac {
                 lags: Some(1),
-                time_order: Some(vec![2.0, 0.0, 3.0, 1.0]),
+                time_order: vec![2.0, 0.0, 3.0, 1.0],
             }
         );
     }
@@ -1621,7 +1621,7 @@ mod tests {
             EngineCovType::Hac {
                 lags: Some(1),
                 // 値ではなく昇順の位置（順位）をエンジンに渡す。
-                time_order: Some(vec![2.0, 0.0, 3.0, 1.0]),
+                time_order: vec![2.0, 0.0, 3.0, 1.0],
             }
         );
     }

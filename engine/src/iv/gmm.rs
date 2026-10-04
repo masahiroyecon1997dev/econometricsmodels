@@ -224,11 +224,11 @@ pub enum WeightType {
     /// クラスター頑健。`groups`が`None`の場合は`CommonError::MissingClusterColumn`。
     Cluster { groups: Option<Vec<String>> },
     /// Newey-West（Bartlettカーネル）によるHAC型。`lags=None`なら`two_sls.rs`と同じ
-    /// 経験則で自動計算する。`time_order=None`なら`IvInput`の行順を時系列順とみなす（engineを直接使う
-    /// 場合の既定。`engine_pybind`は`hac_time`を必須にして常に`Some`で渡す）。
+    /// 経験則で自動計算する。`time_order`は`IvInput`の行と対応する長さnの配列で、この値の昇順を
+    /// 時系列順とする（必須。行順を暗黙に時系列順とみなす既定は置かない）。
     Hac {
         lags: Option<i64>,
-        time_order: Option<Vec<f64>>,
+        time_order: Vec<f64>,
     },
 }
 
@@ -469,7 +469,7 @@ impl GmmEstimator {
             let hac_precomputed = match &weight_type {
                 WeightType::Hac { lags, time_order } => {
                     let lags = resolve_hac_lags(*lags, n)?;
-                    let order = time_ordering(time_order.as_deref(), n);
+                    let order = time_ordering(time_order, n);
                     Some((lags, order))
                 }
                 _ => None,
@@ -600,7 +600,7 @@ impl GmmEstimator {
             CovType::Hc3 => gmm_hc_omega(&z, &residuals, &ztz, n, k, l, HcVariant::Hc3)?,
             CovType::Hac { lags, time_order } => {
                 let lags = resolve_hac_lags(*lags, n)?;
-                let order = time_ordering(time_order.as_deref(), n);
+                let order = time_ordering(time_order, n);
                 // Newey-West重み付け以外の小標本補正を持たないため、点推定用の
                 // `hac_moment_covariance`と計算式が一致する（モジュール冒頭の
                 // docコメント参照。`robust_moment_covariance`/`cluster_moment_covariance`は
@@ -980,22 +980,17 @@ fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, IvError> {
 }
 
 /// `weight_type=Hac`の`time_order`から、時系列の昇順に並べたときの行インデックス列を
-/// 求める（`two_sls.rs`の`time_ordering`と同型）。`None`の場合は`IvInput`の行順をそのまま
-/// 時系列順とみなす（engineを直接使う場合の既定。`engine_pybind`は常に`Some`で渡す）。
+/// 求める（`two_sls.rs`の`time_ordering`と同型）。
 ///
 /// `partial_cmp().unwrap()`について: `time_order`の値はNaN/無限大を含まないことが
 /// `engine_pybind::column_extraction`側で既に保証されている前提（`two_sls.rs`の
 /// `time_ordering`と同じ理由）。値が互いに異なる（同値は`ValidationError`で弾かれ、
 /// 昇順の位置＝順位で渡される）ことも同様に前提で、この関数自身は同値を検出しない。
-fn time_ordering(time_order: Option<&[f64]>, n: usize) -> Vec<usize> {
-    match time_order {
-        Some(values) => {
-            let mut order: Vec<usize> = (0..n).collect();
-            order.sort_by(|&a, &b| values[a].partial_cmp(&values[b]).unwrap());
-            order
-        }
-        None => (0..n).collect(),
-    }
+fn time_ordering(time_order: &[f64], n: usize) -> Vec<usize> {
+    debug_assert_eq!(time_order.len(), n);
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&a, &b| time_order[a].partial_cmp(&time_order[b]).unwrap());
+    order
 }
 
 /// Newey-West（Bartlettカーネル）によるモーメント分散共分散行列: `two_sls.rs`の
@@ -1221,6 +1216,7 @@ fn gmm_wald_chi2_test(
 mod tests {
     use super::*;
     use crate::error::CommonError;
+    use crate::linear::common::row_time_order;
     use crate::linear::ols::CovType as OlsCovType;
 
     /// 2SLSと同じデータ（`x_exog`に実変数を含む、過剰識別）で、`WeightType::Classical`の
@@ -1616,7 +1612,7 @@ mod tests {
             GmmType::TwoStep {
                 weight: WeightType::Hac {
                     lags: Some(-1),
-                    time_order: None,
+                    time_order: row_time_order(n),
                 },
             },
             true,
@@ -2124,7 +2120,7 @@ mod tests {
             GmmType::TwoStep {
                 weight: WeightType::Hac {
                     lags: Some(-1),
-                    time_order: None,
+                    time_order: row_time_order(n),
                 },
             },
             true,
@@ -2141,7 +2137,7 @@ mod tests {
             GmmType::TwoStep {
                 weight: WeightType::Hac {
                     lags: Some(n as i64),
-                    time_order: None,
+                    time_order: row_time_order(n),
                 },
             },
             true,
@@ -2192,7 +2188,7 @@ mod tests {
             GmmType::TwoStep {
                 weight: WeightType::Hac {
                     lags: Some(0),
-                    time_order: None,
+                    time_order: row_time_order(16),
                 },
             },
             true,
@@ -2236,7 +2232,7 @@ mod tests {
             GmmType::TwoStep {
                 weight: WeightType::Hac {
                     lags: Some(2),
-                    time_order: None,
+                    time_order: row_time_order(n),
                 },
             },
             true,
@@ -2351,7 +2347,7 @@ mod tests {
             GmmType::TwoStep {
                 weight: WeightType::Hac {
                     lags: None,
-                    time_order: None,
+                    time_order: row_time_order(16),
                 },
             },
             true,
@@ -2364,7 +2360,7 @@ mod tests {
             GmmType::TwoStep {
                 weight: WeightType::Hac {
                     lags: Some(2),
-                    time_order: None,
+                    time_order: row_time_order(16),
                 },
             },
             true,
@@ -2413,7 +2409,7 @@ mod tests {
             GmmType::TwoStep {
                 weight: WeightType::Hac {
                     lags: Some(2),
-                    time_order: Some(shuffled_time),
+                    time_order: shuffled_time,
                 },
             },
             true,
@@ -2439,7 +2435,7 @@ mod tests {
             GmmType::TwoStep {
                 weight: WeightType::Hac {
                     lags: Some(2),
-                    time_order: None,
+                    time_order: row_time_order(n),
                 },
             },
             true,
@@ -3336,7 +3332,7 @@ mod tests {
             true,
             CovType::Hac {
                 lags: Some(2),
-                time_order: None,
+                time_order: row_time_order(n),
             },
             0.95,
         )
@@ -3569,7 +3565,7 @@ mod tests {
             true,
             CovType::Hac {
                 lags: Some(-1),
-                time_order: None,
+                time_order: row_time_order(n),
             },
             0.95,
         );

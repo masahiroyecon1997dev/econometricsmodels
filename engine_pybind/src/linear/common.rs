@@ -152,7 +152,7 @@ pub(crate) fn build_cov_type(
             let col_name = require_hac_time(hac_time, "cov_type")?;
             EngineCovType::Hac {
                 lags: hac_lags,
-                time_order: Some(extract_time_order_ranks(df, col_name)?),
+                time_order: extract_time_order_ranks(df, col_name)?,
             }
         }
         "cluster" => {
@@ -215,15 +215,15 @@ mod tests {
     }
 
     #[test]
-    fn parse_cov_type_always_passes_time_order_for_hac() {
-        // engineの`time_order: Option`は`None`(行順)を許すが、pybindは常に`Some`で渡す。
+    fn parse_cov_type_passes_time_order_ranks_for_hac() {
+        // engineの`time_order`は必須。pybindは`hac_time`の順位を渡す。
         let df = df!("t" => [30.0, 10.0, 20.0]).unwrap();
         let Ok((cov_type, _)) = parse_cov_type(&df, "hac", None, Some(1), Some("t")) else {
             panic!("expected Ok");
         };
         assert!(matches!(
             cov_type,
-            EngineCovType::Hac { lags: Some(1), time_order: Some(ref ranks) }
+            EngineCovType::Hac { lags: Some(1), time_order: ref ranks }
                 if *ranks == vec![2.0, 0.0, 1.0]
         ));
     }

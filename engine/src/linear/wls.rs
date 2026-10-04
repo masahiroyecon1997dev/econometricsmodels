@@ -212,6 +212,7 @@ fn original_scale_fitted_and_residuals(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::linear::common::row_time_order;
 
     #[test]
     fn fit_with_all_weights_one_matches_ols() {
@@ -449,7 +450,7 @@ mod tests {
             CovType::Hc3,
             CovType::Hac {
                 lags: Some(1),
-                time_order: None,
+                time_order: row_time_order(6),
             },
             CovType::Cluster {
                 groups: Some(clusters.clone()),

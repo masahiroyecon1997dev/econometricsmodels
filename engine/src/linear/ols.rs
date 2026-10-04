@@ -42,11 +42,10 @@ pub enum CovType {
         /// ラグ数（バンド幅）。`None`なら経験則 `L = floor(4*(n/100)^(2/9))` で自動計算する
         /// （`docs/spec/ols-spec.md`「標準誤差」のHAC参照）。
         lags: Option<i64>,
-        /// 時系列順序。`None`なら`OlsInput`の行順をそのまま時系列順とみなす（engineを直接使う
-        /// 場合の既定。`engine_pybind`は行順を暗黙に使わず、`hac_time`を必須にして常に`Some`で
-        /// 渡す）。`Some`の場合は`OlsInput`の行と対応する長さnの配列で、この値の昇順で
-        /// ラグ付き自己共分散を計算する（同3.3節）。値そのものの単位・意味（期間番号・UNIX時刻等）は問わない。
-        time_order: Option<Vec<f64>>,
+        /// 時系列順序。`OlsInput`の行と対応する長さnの配列で、この値の昇順でラグ付き自己共分散を
+        /// 計算する（同3.3節）。必須: 行順を暗黙に時系列順とみなす既定は置かない（`engine_pybind`は
+        /// `hac_time`を必須にして順位を渡す）。値そのものの単位・意味（期間番号・UNIX時刻等）は問わない。
+        time_order: Vec<f64>,
     },
     /// クラスターロバスト標準誤差（Stata方式の小標本補正込み。常に補正を適用し、
     /// 無効化するオプションは設けない。`docs/spec/ols-spec.md`
@@ -437,7 +436,7 @@ impl OlsEstimator {
             ),
             CovType::Hac { lags, time_order } => {
                 let lags = resolve_hac_lags(*lags, n)?;
-                let order = time_ordering(time_order.as_deref(), n);
+                let order = time_ordering(time_order, n);
                 (
                     hac_cov_params(input.x(), &residuals, &xtx_inv, n, k, lags, &order),
                     df_resid,
@@ -824,25 +823,17 @@ fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, LeastSquaresEr
 
 /// `CovType::Hac`の`time_order`から、時系列の昇順に並べたときの行インデックス列を求める。
 ///
-/// `None`の場合は`OlsInput`の行順をそのまま時系列順とみなし（engineを直接使う場合の既定。
-/// `engine_pybind`は`hac_time`を必須にして常に`Some`で渡す）、恒等順序
-/// `[0, 1, ..., n-1]`を返す。
-///
 /// `partial_cmp().unwrap()`について: `time_order`の値はNaN/無限大を含まないことが
 /// `engine_pybind::column_extraction`側で既に保証されている前提（本関数は`engine`の
 /// 責務境界の内側であり、クリーンな値しか受け取らない。モジュール冒頭のdocコメント参照）。
 /// 同様に、値が互いに異なる（`engine_pybind`が昇順の位置＝順位に変換済みで、同値は
 /// `ValidationError`として弾かれている）ことも前提にする。この関数自身は同値を検出せず、
 /// 同値があれば安定ソートにより行順で並べるだけ。
-fn time_ordering(time_order: Option<&[f64]>, n: usize) -> Vec<usize> {
-    match time_order {
-        Some(values) => {
-            let mut order: Vec<usize> = (0..n).collect();
-            order.sort_by(|&a, &b| values[a].partial_cmp(&values[b]).unwrap());
-            order
-        }
-        None => (0..n).collect(),
-    }
+fn time_ordering(time_order: &[f64], n: usize) -> Vec<usize> {
+    debug_assert_eq!(time_order.len(), n);
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&a, &b| time_order[a].partial_cmp(&time_order[b]).unwrap());
+    order
 }
 
 /// Newey-West HACの係数分散共分散行列: `(X'X)⁻¹Ŝ(X'X)⁻¹`（k×k）。
@@ -1069,6 +1060,7 @@ pub(crate) fn wald_f_test(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::linear::common::row_time_order;
 
     #[test]
     fn wald_f_test_keeps_precision_in_the_far_tail() {
@@ -1737,7 +1729,7 @@ mod tests {
 
         let cov_type = CovType::Hac {
             lags: Some(1),
-            time_order: None,
+            time_order: row_time_order(5),
         };
         let estimator = OlsEstimator::fit(input, cov_type, 0.95).unwrap();
 
@@ -1779,7 +1771,7 @@ mod tests {
 
         let cov_type = CovType::Hac {
             lags: None,
-            time_order: None,
+            time_order: row_time_order(5),
         };
         let estimator = OlsEstimator::fit(input, cov_type, 0.95).unwrap();
 
@@ -1812,7 +1804,7 @@ mod tests {
 
         let cov_type = CovType::Hac {
             lags: Some(1),
-            time_order: Some(shuffled_time),
+            time_order: shuffled_time,
         };
         let estimator = OlsEstimator::fit(input, cov_type, 0.95).unwrap();
 
@@ -1836,7 +1828,7 @@ mod tests {
 
         let cov_type = CovType::Hac {
             lags: Some(-1),
-            time_order: None,
+            time_order: row_time_order(5),
         };
         let result = OlsEstimator::fit(input, cov_type, 0.95);
 
@@ -1863,7 +1855,7 @@ mod tests {
 
         let cov_type = CovType::Hac {
             lags: Some(5),
-            time_order: None,
+            time_order: row_time_order(5),
         };
         let result = OlsEstimator::fit(input, cov_type, 0.95);
 
@@ -1888,7 +1880,7 @@ mod tests {
 
         let cov_type = CovType::Hac {
             lags: Some(4), // n - 1、許容される最大値
-            time_order: None,
+            time_order: row_time_order(5),
         };
         let result = OlsEstimator::fit(input, cov_type, 0.95);
 
@@ -1944,7 +1936,7 @@ mod tests {
             input_hac,
             CovType::Hac {
                 lags: Some(0),
-                time_order: None,
+                time_order: row_time_order(6),
             },
             0.95,
         )
@@ -2056,7 +2048,7 @@ mod tests {
         .unwrap();
         let cov_type_hac = CovType::Hac {
             lags: Some(1),
-            time_order: None,
+            time_order: row_time_order(5),
         };
         let estimator_hac = OlsEstimator::fit(input_hac, cov_type_hac, 0.95).unwrap();
         assert!((estimator_hac.f_statistic() - 13.235_294_117_647_193).abs() < 1e-6);

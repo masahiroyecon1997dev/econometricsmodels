@@ -101,8 +101,8 @@ $$
   データが時系列順に並んでいなくてもエラーにならず、時系列順のHACに見える誤った結果が黙って
   返るため、時間順は常に列で明示させる（行順がそのまま時間順なら、`df.with_row_index("t")`
   等で行番号の列を足して渡す。statsmodelsやRの`sandwich`は行順を使い時点列を取らない、
-  意図的な差）。`engine`の`CovType::Hac.time_order`は`Option`のまま（`None`なら行順、engineを
-  直接使う場合の既定）で、`engine_pybind`が常に`Some`で渡す。昇順ソートしたインデックスで
+  意図的な差）。`engine`の`CovType::Hac.time_order`も`Option`ではなく必須の`Vec<f64>`で、
+  行順を既定とする経路はengineにも無い。昇順ソートしたインデックスで
   ラグ付き自己共分散を計算する（`OlsInput`自体は並べ替えない。Python側に返す残差配列と
   元DataFrameの行対応を保つため）。
 - `hac_time`の値は全行で互いに異なることを要求する。同値があると順序が定まらず、engineの

@@ -54,3 +54,9 @@ pub enum LeastSquaresError {
     #[error("design matrix is singular (perfect multicollinearity detected)")]
     SingularMatrix,
 }
+
+/// テスト用の`time_order`: 行順をそのまま時系列順とする`[0.0, 1.0, ..., n-1]`。
+#[cfg(test)]
+pub(crate) fn row_time_order(n: usize) -> Vec<f64> {
+    (0..n).map(|i| i as f64).collect()
+}

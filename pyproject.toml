@@ -5,14 +5,14 @@ build-backend = "maturin"
 [project]
 name = "econometricsmodels"
 version = "0.7.0"
-description = "A programmatic Python API for econometrics and causal inference"
+description = "Econometric estimators for scripts, pipelines, and apps, numerically verified against statsmodels, linearmodels, and R"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [
     { name = "masahiroyecon1997dev", email = "masahiroyecon1997dev@gmail.com" },
 ]
-keywords = ["econometrics", "causal-inference", "statistics", "regression", "ols", "polars"]
+keywords = ["econometrics", "statistics", "regression", "ols", "logit", "probit", "tobit", "instrumental-variables", "panel-data", "polars"]
 dependencies = [
     "polars==1.44.2",
 ]

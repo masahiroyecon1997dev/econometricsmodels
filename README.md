@@ -3,7 +3,7 @@
 [![CI (engine)](https://github.com/masahiroyecon1997dev/econometricsmodels/actions/workflows/ci_engine.yml/badge.svg)](https://github.com/masahiroyecon1997dev/econometricsmodels/actions/workflows/ci_engine.yml)
 [![CI (python)](https://github.com/masahiroyecon1997dev/econometricsmodels/actions/workflows/ci_python.yml/badge.svg)](https://github.com/masahiroyecon1997dev/econometricsmodels/actions/workflows/ci_python.yml)
 [![Docs](https://github.com/masahiroyecon1997dev/econometricsmodels/actions/workflows/cd_docs.yml/badge.svg)](https://masahiroyecon1997dev.github.io/econometricsmodels/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/masahiroyecon1997dev/econometricsmodels/blob/main/LICENSE)
 
 ## What is econometricsmodels?
 
@@ -38,10 +38,10 @@
   [Numerical verification](#numerical-verification)).
 - **Performance as a design goal** — Strict validation should not come at
   the cost of speed. The Rust core is designed to be competitive in speed
-  and memory with the packages it is verified against, and every
-  implemented method is benchmarked (against those packages wherever a
-  comparable implementation exists), with results published as measured,
-  including cases where it is not faster (see
+  and memory with the packages it is verified against, and representative
+  cases of each implemented method are benchmarked (against those packages
+  wherever a comparable implementation exists), with results published as
+  measured, including cases where it is not faster (see
   [Performance](#performance)).
 
 ## Is this for you?
@@ -54,9 +54,10 @@
   repaired — missing values, collinear columns, and unusable options raise
   an error (see
   [Validation and errors](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/validation/)).
-- Wanting estimates you can trace to established implementations — every
-  estimator is compared against statsmodels, linearmodels, or R, with the
-  comparisons published (see [Numerical verification](#numerical-verification)).
+- Needing to confirm that results match statsmodels, R, or linearmodels —
+  for example when migrating an existing analysis, or when you have to show
+  how your numbers were checked (see
+  [Numerical verification](#numerical-verification)).
 - Projects that use more than one method over time — the same interface
   covers linear, discrete-choice, IV, and panel models today, with more on
   the way (see [Implemented models](#implemented-models)).
@@ -68,6 +69,16 @@
 - You prefer R-style formula syntax (`y ~ x1 + x2`).
 - You need the broader diagnostics and edge-case coverage of
   long-established tools like statsmodels and the R ecosystem.
+
+## Installation
+
+```bash
+pip install econometricsmodels
+```
+
+Requires Python 3.12 or later. The computational core is pure Rust
+(no system BLAS/LAPACK dependency), with prebuilt wheels for Linux,
+macOS, and Windows.
 
 ## Quickstart
 
@@ -98,17 +109,20 @@ for name, model in [("OLS", OLS), ("Logit", Logit), ("Probit", Probit)]:
 
 Results expose their values as ordinary Python data structures, including
 dictionaries for parameter values and row-oriented data from
-`coef_table()`:
+`coef_table()`. The output below is for the last model in the Quickstart
+(Probit), rounded:
 
 ```python
 result.params
-# {"const": 0.42, "x1": 1.87}
+# {"const": 0.32, "x1": 1.04, "x2": -0.87}
 
 result.coef_table()
 # [
-#     {"param": "const", "coef": 0.42, "std_err": 0.11,
-#      "test_stat": 3.8, "p_value": 0.0002, ...},
-#     {"param": "x1", "coef": 1.87, "std_err": 0.23, ...},
+#     {"param": "const", "coef": 0.32, "std_err": 0.07,
+#      "test_stat": 4.46, "p_value": 8e-06,
+#      "conf_lower": 0.18, "conf_upper": 0.46},
+#     {"param": "x1", "coef": 1.04, "std_err": 0.09, ...},
+#     {"param": "x2", "coef": -0.87, "std_err": 0.09, ...},
 # ]
 ```
 
@@ -179,14 +193,13 @@ Currently implemented:
 - IV (2SLS, GMM)
 - FE (fixed effects), RE (random effects)
 
-Planned next are causal inference designs such as difference-in-differences
-and regression discontinuity, followed by structural microeconometric
-methods as the project expands. The order may change.
+More methods are planned, including further discrete-choice models and
+causal inference designs. What is planned or in progress, and in what
+order, is tracked in
+[GitHub Issues](https://github.com/masahiroyecon1997dev/econometricsmodels/issues).
 
 See the [documentation](https://masahiroyecon1997dev.github.io/econometricsmodels/)
-for usage details on each method, and
-[GitHub Issues](https://github.com/masahiroyecon1997dev/econometricsmodels/issues)
-for the current status of planned and in-progress work.
+for usage details on each method.
 
 ## Numerical Verification
 
@@ -194,10 +207,9 @@ Every estimator is compared numerically against established reference
 implementations before it is considered done. For each method, a primary
 reference whose statistical conventions match is chosen, and where one
 exists an independent implementation (mostly R) is used as a cross-check.
-The comparison covers every reported statistic, not only coefficients and
-standard errors: test statistics, p-values, confidence intervals, fit
-statistics (R², log-likelihood, AIC/BIC), model tests, and marginal effects
-where applicable, for each supported covariance type.
+The comparison covers the main reported statistics — coefficients, standard
+errors, test statistics, p-values, confidence intervals, fit statistics, and
+model tests — for each supported covariance type.
 
 | Method | Primary reference | Independent cross-check | Relative tolerance (primary / cross-check) |
 |---|---|---|---|
@@ -208,57 +220,84 @@ where applicable, for each supported covariance type.
 | Tobit | R `AER::tobit` | R `censReg` | 1e-8 / 1e-8 |
 | IV (2SLS) | linearmodels `IV2SLS` | R `ivreg` + `sandwich`/`lmtest` | 1e-8 / 1e-8 (HAC: 1e-2) |
 | IV (GMM) | linearmodels `IVGMM` | none (`ivreg` has no GMM) | 1e-8 / none |
-| FE | linearmodels `PanelOLS`, R `fixest` | R `fixest`, R `plm` | 1e-8 / 1e-8 |
-| RE | linearmodels `RandomEffects`, R `plm` | R `plm`, statsmodels `OLS` | 1e-8 / 1e-8 (unbalanced panels: 5e-3 to 5e-2) |
+| FE<sup>1</sup> | linearmodels `PanelOLS`, R `fixest` | R `fixest`, R `plm` | 1e-8 / 1e-8 |
+| RE<sup>1</sup> | linearmodels `RandomEffects`, R `plm` | R `plm`, statsmodels `OLS` | 1e-8 / 1e-8 (unbalanced panels: 5e-3 to 5e-2) |
 
-- **Primary tolerance.** The relative tolerance is 1e-8 for every method,
-  with a tiny absolute floor for values near zero. For closed-form
-  estimators (OLS, WLS, IV, FE, RE) the measured agreement is about 1e-14.
-- **Looser tolerances have a reason.** Values in parentheses and the
-  Logit/Probit cross-check are looser because the reference packages use
-  different small-sample or HAC conventions, or because both sides are
-  iterative optimizers. Each is documented and applied to that statistic
-  only; tolerances are never loosened across the board.
-- **Discrepancies are investigated, not accepted.** Where implementations
-  use different statistical conventions, the difference is documented and
-  the comparison is adjusted for that statistic only.
-- **Single-reference cases are stated.** Where only one reference exists
-  (for example Tobit has no non-R reference), the verification page says so.
+<sup>1</sup> For FE and RE, linearmodels covers only classical and HC1
+standard errors. Its cluster and Driscoll–Kraay standard errors use
+different small-sample corrections, so R (`fixest`, `plm`) is the primary
+reference for those. Which implementation checks which statistic is
+detailed on the verification page.
+
+- **Tolerance.** The relative tolerance against the primary reference is
+  1e-8 for every method (with a tiny absolute floor for values near zero);
+  for closed-form estimators the measured agreement is about 1e-14. Looser
+  values (in parentheses, and the Logit/Probit cross-check) come from
+  documented differences, such as HAC small-sample conventions, both sides
+  being iterative optimizers, or plm and linearmodels estimating the
+  Swamy–Arora variance components slightly differently on unbalanced
+  panels. The full list of tolerances and the reasons are on the
+  verification page.
+- **Single-reference cases.** Some methods have only one reference. For
+  example, IV (GMM) is checked against linearmodels only, because `ivreg`
+  has no GMM. These cases are listed on the verification page.
 - **Reproducible and continuous.** Reference values are generated once from
   pinned package versions and stored in the repository, and the comparisons
   run in CI on every pull request on Python 3.12, 3.13 and 3.14. The Rust
   engine also has its own unit and property-based tests.
 
-See the [verification page](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/verification/)
-for the full tolerances, the statistics compared, the test data, and the
-cases without a second reference, and the
-[inference conventions guide](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/inference-conventions/)
-for method-by-method details on test distributions and degrees of freedom.
+For the statistics compared, the test data, tolerances, and the cases
+without a second reference, see the
+[verification page](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/verification/).
+Test distributions and degrees of freedom for each method are in the
+[inference conventions guide](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/inference-conventions/).
 
 ## Performance
 
-The computational core is written in Rust, with the goal of keeping
-extensive validation from imposing an unacceptable performance cost.
-Speed remains an important design goal, especially for scripted workflows
-and larger datasets.
+The computational core is written in Rust. Speed and memory are measured for
+each implemented method at representative settings (sample size, number of
+regressors, and one or two standard-error types), not for every option
+combination.
+
+Time for one `fit()` call at 1,000,000 observations, with 5 regressors and
+classical standard errors:
+
+| Method | `fit()` time |
+|---|---|
+| OLS | 0.08 s |
+| WLS | 0.10 s |
+| Logit | 0.59 s |
+| Probit | 1.4 s |
+| Tobit | 2.2 s |
+| IV (2SLS) | 0.50 s |
+| FE | 0.40 s |
+| RE | 0.54 s |
 
 Execution time and memory are compared against statsmodels and linearmodels
-wherever a comparable Python implementation exists, and the results are
-tabulated per method. See the
+wherever a comparable Python implementation exists. Some examples at the
+same sample size (reference time divided by ours):
+
+- OLS: about 2.7x faster than statsmodels.
+- IV (2SLS): about 30x faster than linearmodels.
+- FE: about 10x faster than linearmodels.
+- Logit: on par with statsmodels (about 1.0x), and about 0.8x, i.e. slower,
+  with clustered standard errors.
+- Tobit has no Python implementation to compare against, so only its own
+  time is shown.
+
+Peak memory is lower in the largest cases measured too: IV (2SLS) peaks at
+about 1.1 GB against about 4.0 GB for linearmodels, and OLS at about 0.30 GB
+against about 0.54 GB for statsmodels (whole-process peak, including the
+Python interpreter).
+
+Times are single-threaded, end-to-end measurements from CI on shared
+runners, so absolute values vary from run to run; the comparison between
+two packages within a run is the meaningful part. See the
 [performance page](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/performance/)
-for a summary and known limitations, and the
+for the current numbers, measurement conditions, and known limitations, and
+the
 [full results](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/performance-results/)
 per method.
-
-## Installation
-
-```bash
-pip install econometricsmodels
-```
-
-Requires Python 3.12 or later. The computational core is pure Rust
-(no system BLAS/LAPACK dependency), with prebuilt wheels for Linux,
-macOS, and Windows.
 
 ## Limitations / Disclaimer
 
@@ -277,5 +316,5 @@ not just major ones.
 - [Documentation](https://masahiroyecon1997dev.github.io/econometricsmodels/) — usage guides and full API reference
 - [PyPI](https://pypi.org/project/econometricsmodels/)
 - [GitHub Issues](https://github.com/masahiroyecon1997dev/econometricsmodels/issues) — bug reports, feature requests, roadmap status
-- [Changelog](CHANGELOG.md)
-- [License](LICENSE) — MIT
+- [Changelog](https://github.com/masahiroyecon1997dev/econometricsmodels/blob/main/CHANGELOG.md)
+- [License](https://github.com/masahiroyecon1997dev/econometricsmodels/blob/main/LICENSE) — MIT

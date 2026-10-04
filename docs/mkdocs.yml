@@ -1,5 +1,5 @@
 site_name: econometricsmodels
-site_description: A programmatic Python API for econometrics and causal inference
+site_description: Econometric estimators for scripts, pipelines, and apps, numerically verified against statsmodels, linearmodels, and R
 repo_url: https://github.com/masahiroyecon1997dev/econometricsmodels
 repo_name: masahiroyecon1997dev/econometricsmodels
 

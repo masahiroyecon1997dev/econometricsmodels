@@ -6,8 +6,7 @@ classical/HC0/HC1/HAC（+クラスター、baselineのみ）で、係数・標�
 検定統計量・適合度統計量・診断統計量を相対誤差1e-8で厳密比較する
 （`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。
 
-役割分担（OLS/WLS/Logit/Probit の `test_<手法>_*.py` と同じ4分割、
-`refactoring-candidates-2.md` 項目68）:
+役割分担（OLS/WLS/Logit/Probit の `test_<手法>_*.py` と同じ4分割）:
     - 成功パスの構造・API・オプション反映: `test_iv_api.py`
     - `ValidationError`/`ComputationError` パス: `test_iv_validation.py`
     - 主リファレンス（linearmodels）との厳密な数値一致: このファイル（2SLS）
@@ -15,8 +14,8 @@ classical/HC0/HC1/HAC（+クラスター、baselineのみ）で、係数・標�
     - 独立実装（R `ivreg`）とのクロスチェック: `test_iv_crosscheck.py`
 
 Note:
-    - `method="gmm"`はこのフィクスチャの対象外（フィクスチャ生成時点で
-      `method="gmm"`がまだPython側に配線されていなかったため、
+    - `estimator="gmm"`はこのフィクスチャの対象外（フィクスチャ生成時点で
+      `estimator="gmm"`がまだPython側に配線されていなかったため、
       `benchmark/iv/fixtures/generate_iv_fixtures.py`のモジュールdoc
       コメント参照）。GMMのlinearmodels（`IVGMM`）クロスチェックは
       別途フィクスチャ生成からやり直す必要がある。
@@ -24,7 +23,7 @@ Note:
       hc2/hc3相当の実装を持たないため、`iv.json`の`_meta.note`参照）。ただし
       「参照実装が無い」わけではない——R `ivreg`+`sandwich::vcovHC`では検証可能なことを
       実機確認済みで、`test_iv_crosscheck.py`が独立にクロスチェックする
-      （`iv-spec.md`3.1節、`refactoring-candidates.md`項目12）。`engine`側の
+      （`iv-spec.md`3.1節）。`engine`側の
       Rust単体テスト
       （`two_sls.rs`の`fit_computes_hc2_std_errors_matching_manual_sandwich_formula`
       等、独立な素朴ループでの手計算とのクロスチェック）は数式レベルの細粒度回帰確認と
@@ -34,7 +33,7 @@ Note:
       予定、`benchmark/iv/references/linearmodels_ref.py`のモジュールdocコメント参照）。
       本実装側は`hac`でも値を返す（`None`にはならない）ため、`ref`が`None`の
       ときは比較をスキップするだけで、本実装側の値が`None`であることは
-      要求しない。df1（自由度1境界、Issue #235）は逆にaugmented regressionが
+      要求しない。df1（自由度1境界）は逆にaugmented regressionが
       saturated（残差自由度0）になるため全cov_typeでフィクスチャが`None`に
       なり、本実装側も同じ理由でNoneを返す（`engine/src/iv/CLAUDE.md`
       「Wu-Hausmanの拡張回帰が想定内の理由で失敗した場合」参照）。
@@ -62,7 +61,12 @@ import pytest
 from _assertions import assert_close, assert_dict_close
 from _assertions import rename_intercept as _rename
 from _constants import DATA_DIR
-from _helpers import load_wooldridge_dataset, with_cluster_groups
+from _helpers import (
+    hac_time_for,
+    load_wooldridge_dataset,
+    with_cluster_groups,
+    with_row_time,
+)
 from _tolerances import TOLERANCES
 from econometricsmodels import IV, IVOptions
 
@@ -111,7 +115,9 @@ _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
 def _check_result(res, ref: dict, label: str) -> None:
     _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
     _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
-    _assert_dict_close(res.stats, ref["t_stats"], f"{label}/stats")
+    _assert_dict_close(
+        res.test_stats, ref["test_stats"], f"{label}/test_stats"
+    )
     _assert_dict_close(res.p_values, ref["p_values"], f"{label}/p_values")
 
     for name, (ref_lower, ref_upper) in ref["conf_int"].items():
@@ -122,10 +128,12 @@ def _check_result(res, ref: dict, label: str) -> None:
 
     _assert_close(res.r_squared, ref["r_squared"], f"{label}/r_squared")
     _assert_close(
-        res.r_squared_adj, ref["r_squared_adj"], f"{label}/r_squared_adj"
+        res.adj_r_squared, ref["adj_r_squared"], f"{label}/adj_r_squared"
     )
-    _assert_close(res.f_statistic, ref["f_statistic"], f"{label}/f_statistic")
-    _assert_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")
+    _assert_close(
+        res.wald_statistic, ref["f_statistic"], f"{label}/f_statistic"
+    )
+    _assert_close(res.wald_p_value, ref["f_p_value"], f"{label}/f_p_value")
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
 
@@ -175,9 +183,9 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
     x_exog = X_EXOG_BY_SCENARIO.get(scenario, ["x1"])
     instruments = INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
     df = pl.read_csv(DATA_DIR / f"iv_{scenario}.csv")
-    options = IVOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=x_exog,
         x_endog=["endog1"],
@@ -195,9 +203,9 @@ def test_cluster_matches_linearmodels(fixtures):
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     df = with_cluster_groups(df, 10)
-    options = IVOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = IVOptions(cov_type="cluster", cluster="cluster_group")
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=["x1"],
         x_endog=["endog1"],
@@ -219,9 +227,9 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
-    options = IVOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = IVOptions(cov_type="cluster", cluster="cluster_group")
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=["x1"],
         x_endog=["endog1"],
@@ -237,15 +245,15 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
 def test_cluster_g2_matches_linearmodels(fixtures):
     """クラスタ数境界（G=2ちょうど）の成功パス。`x_exog=[]`・`instruments`1本・
     行番号%2の疑似グループ（`engine/src/iv/CLAUDE.md`「修正済み」の再現条件と
-    同じ、Issue #231フェーズ4でフィクスチャ化。以前は構造確認
+    同じ、フィクスチャ化した。以前は構造確認
     （`test_iv_api.py::test_cluster_g2_boundary_succeeds_when_x_exog_is_empty`）
     のみでリファレンス実装との数値照合が無かった）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_g2.csv")
     df = df.with_columns((pl.int_range(pl.len()) % 2).alias("cluster_group"))
-    options = IVOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = IVOptions(cov_type="cluster", cluster="cluster_group")
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=[],
         x_endog=["endog1"],
@@ -263,13 +271,12 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
     """複数内生変数（`x_endog=["endog1", "endog2"]`）の成功パス。
     `weak_instrument_f_statistics`・`overid_statistic`（Sargan、過剰識別）・
     `wu_hausman_statistic`（複数内生変数のジョイント検定）が正しく機能することを
-    確認する（`testing-completeness-reviewer`指摘のmust fix、Issue #231
-    フェーズ4）。
+    確認する（`testing-completeness-reviewer`指摘のmust fix）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
-    options = IVOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=["x1"],
         x_endog=["endog1", "endog2"],
@@ -286,13 +293,12 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
 def test_card_matches_linearmodels(fixtures, cov_type):
     """実データセット（Wooldridge card、Card 1995の大学近接操作変数による教育の
     収益率推定）。`testing-policy.md`「テスト用データセット」2.が要求する実データ
-    検証がIV系統に無かった（`testing-completeness-reviewer`指摘のshould fix、
-    Issue #231フェーズ4）。
+    検証がIV系統に無かった（`testing-completeness-reviewer`指摘のshould fix）。
     """
     df = load_wooldridge_dataset("card")
-    options = IVOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
     res = IV(
-        df,
+        with_row_time(df),
         y="lwage",
         x_exog=CARD_X_EXOG,
         x_endog=["educ"],
@@ -307,15 +313,15 @@ def test_card_matches_linearmodels(fixtures, cov_type):
 def test_df1_matches_linearmodels(fixtures, cov_type):
     """自由度1境界（df_resid=1ちょうど）の成功パス。`x_exog=[]`・
     `x_endog=['endog1']`・`instruments=['z1']`（丁度識別、n=3）。境界値・
-    悪条件シナリオの一環（Issue #235、`testing-policy.md`「テスト用データセット」）。
+    悪条件シナリオの一環（`testing-policy.md`「テスト用データセット」）。
     augmented regressionがsaturated（残差自由度0）になるため
     `wu_hausman_statistic`/`wu_hausman_p_value`は全cov_typeで`None`になる
     （`_check_result`のref Noneスキップ、`benchmark/iv/references/linearmodels_ref.py`参照）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_df1.csv")
-    options = IVOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
     res = IV(
-        df,
+        with_row_time(df),
         y="y",
         x_exog=[],
         x_endog=["endog1"],

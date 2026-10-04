@@ -36,9 +36,9 @@
 
 これらは元々OLS/WLS/Logitの`fit`/`build_logit_input`にメッセージ文言まで重複して実装されていたが、`engine_pybind/src/validation.rs`（クレート直下、`column_extraction.rs`と同じ位置づけ）に集約した: `validate_x_non_empty`/`validate_no_duplicate_x`/`validate_no_const_collision`/`validate_no_duplicate_roles`（`y`/`weight`等の単一列名ロール間の重複、`roles: &[(&str, &str)]`のペアリストを受け取る汎用関数。ただし`x`のように複数列を取るロール、例えば将来のIVの`instrument`には未対応、着手時に再検討が要る）。**新しい手法を実装する際も、この4関数を呼び出す形にし、同様のチェックを独自実装しないこと。**
 
-`confidence_level`の範囲チェック・`cov_type="cluster"`なのに`cluster_col`未指定、といった`engine`側が既に検知する項目は`engine_pybind`側で重複チェックしない（`LeastSquaresError`のバリアント一覧は`ols-spec.md`「engine/engine_pybind間のデータ受け渡し・エラー変換」の対応表を参照）。
+`confidence_level`の範囲チェック・`cov_type="cluster"`なのに`cluster`未指定、といった`engine`側が既に検知する項目は`engine_pybind`側で重複チェックしない（`LeastSquaresError`のバリアント一覧は`ols-spec.md`「engine/engine_pybind間のデータ受け渡し・エラー変換」の対応表を参照）。
 
-行数不一致チェック（`y`/`x`/`weight`/`cluster_col`/`time_col`の間で行数が食い違っていないかの検証）は、同一DataFrameから抽出する限り理論上到達不能（polarsのDataFrameは全列同じ長さであることを型の不変条件として強制するため）と判明し、全て削除した。**新しい手法でも同種のチェックを追加しないこと。**
+行数不一致チェック（`y`/`x`/`weight`/`cluster`/`hac_time`の間で行数が食い違っていないかの検証）は、同一DataFrameから抽出する限り理論上到達不能（polarsのDataFrameは全列同じ長さであることを型の不変条件として強制するため）と判明し、全て削除した。**新しい手法でも同種のチェックを追加しないこと。**
 
 ## エラー変換
 
@@ -46,10 +46,10 @@
 
 ## `cov_type`固有の追加列
 
-`cluster_col`/`time_col`の抽出は該当する`cov_type`のときのみ行う。無関係な列を誤って要求してエラーにしないこと。
+`cluster`/`hac_time`の抽出は該当する`cov_type`のときのみ行う。無関係な列を誤って要求してエラーにしないこと。**`cov_type="hac"`では`hac_time`が必須**（`require_hac_time`、未指定は`ValidationError`）。行順を時間順とみなす暗黙の既定は置かない（データが時系列順でなくても時系列順のHACに見える結果が黙って返るため）。engineの`CovType::Hac.time_order`（IVの`WeightType::Hac`も）は`Option`ではなく必須の`Vec<f64>`で、`engine_pybind`が`hac_time`の順位を渡す（`None`＝行順の経路はengineにも無い）。IVの`gmm_weight_type="hac"`も同じ関数を使う。
 
 ## `WLSOptions`（`OLSOptions`とは独立したpyclass）
 
-`WLS`は当初専用の`WLSOptions`を持たず`OLSOptions`をそのまま再利用していたが（`WLSResult`は元から独立型だったのと非対称だった）、ユーザビリティ向上のため`WLSOptions`を新設した。フィールド構成は`OLSOptions`と完全に同一（`cov_type`/`include_intercept`/`confidence_level`/`cluster_col`/`hac_lags`/`time_col`、既定値・意味論とも同じ、`docs/spec/wls-spec.md`「API引数」参照）。このフィールド重複は意図的で共通base構造体には切り出さない（`engine_pybind/src/nonlinear/CLAUDE.md`「`LogitOptions`/`ProbitOptions`/`TobitOptions`のフィールド重複は意図的」節と同じ理由。`IVOptions`が`OLSOptions`と同種のフィールドを独立再定義している既存precedentとの一貫性、PyO3のpyclassコンストラクタがフラットなkwargs surface前提であること）。
+`WLS`は当初専用の`WLSOptions`を持たず`OLSOptions`をそのまま再利用していたが（`WLSResult`は元から独立型だったのと非対称だった）、ユーザビリティ向上のため`WLSOptions`を新設した。フィールド構成は`OLSOptions`と完全に同一（`cov_type`/`include_intercept`/`confidence_level`/`cluster`/`hac_lags`/`hac_time`、既定値・意味論とも同じ、`docs/spec/wls-spec.md`「API引数」参照）。このフィールド重複は意図的で共通base構造体には切り出さない（`engine_pybind/src/nonlinear/CLAUDE.md`「`LogitOptions`/`ProbitOptions`/`TobitOptions`のフィールド重複は意図的」節と同じ理由。`IVOptions`が`OLSOptions`と同種のフィールドを独立再定義している既存precedentとの一貫性、PyO3のpyclassコンストラクタがフラットなkwargs surface前提であること）。
 
-`parse_cov_type`（`linear/common.rs`）はこの新設に伴い、`&OLSOptions`ではなく`cov_type: &str, cluster_col: Option<&str>, hac_lags: Option<i64>, time_col: Option<&str>`という個々のフィールド値を引数に取る形に一般化した（`nonlinear::common::parse_cov_type`が最初から個々の値を取っているのと同じ設計）。`OLSOptions`/`WLSOptions`どちらの`fit`関数も、呼び出し側で`&options.cov_type`等を展開して渡す。
+`parse_cov_type`（`linear/common.rs`）はこの新設に伴い、`&OLSOptions`ではなく`cov_type: &str, cluster: Option<&str>, hac_lags: Option<i64>, hac_time: Option<&str>`という個々のフィールド値を引数に取る形に一般化した（`nonlinear::common::parse_cov_type`が最初から個々の値を取っているのと同じ設計）。`OLSOptions`/`WLSOptions`どちらの`fit`関数も、呼び出し側で`&options.cov_type`等を展開して渡す。

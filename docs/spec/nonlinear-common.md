@@ -23,9 +23,9 @@ Logit/Probit/Tobit（最尤推定ベースの非線形モデル）が共有す�
   （`run_solver`関数の内部）でのみ`Vec<Vec<f64>>`⇔`faer::Mat`の変換を行う（k×kで
   パラメータ数は小さくコストは無視できる）。
 
-### 1.2 ソルバー（`method`）
+### 1.2 ソルバー（`solver`）
 
-`method`引数を公開する。値は`"newton"`（既定）/`"bfgs"`/`"lbfgs"`（statsmodelsの`method`
+`solver`引数を公開する。値は`"newton"`（既定）/`"bfgs"`/`"lbfgs"`（statsmodelsの`method`
 引数の値に揃えた文字列、大小無視）。3手法いずれも解析的スコアが書け、Newton-Raphsonを
 既定にできる（statsmodelsの既定とも一致）。BFGS/L-BFGSはHessian計算が重い・不安定な
 ケースのフォールバックとして用意する。Nelder-Mead/SANN等の勾配不要法はv1では対象外。
@@ -38,6 +38,28 @@ Logit/Probit/Tobit（最尤推定ベースの非線形モデル）が共有す�
   `argmin-math`の`vec`機能には`ArgminInv`の実装が存在しない。Newtonステップの求解
   （`H·Δθ = g`）はfaerの列ピボットQR（`col_piv_qr`、OLSの`ensure_full_rank`と同じ相対閾値
   での特異性検出）で行う。特異なら`MleError::SingularHessian`。
+  - **ステップの検証（LM型減衰）**: `regularized_newton_step`は`H + λI`で`cost`が狭義に減少する
+    候補が見つかるまで`λ`を`0→1e-3→×4→…`（最大40段）と増やす（Tobitの不定符号Hessian対策、
+    [`tobit-spec.md`](./tobit-spec.md)3.1節）。
+  - **予測減少量がコストの分解能以下なら比較を省く**: Hessianが正定値（`llt`成功）で、生の
+    Newtonステップの予測減少量`½gᵀH⁻¹g`が`10·ε·|cost|`（`NEWTON_COST_RESOLUTION_FACTOR`）以下の
+    ときは、コスト比較とLMラダーを行わずに生のステップを返し（`RegularizedStep::BelowCostResolution`）、
+    良否は`next_iter`がステップ後の勾配で判定する（1.3節「大標本Newtonの副次収束判定」）。
+    収束点近傍（2次収束の最後の1〜2反復）では真のコスト減少量がコストの評価誤差を下回り、
+    `cost`の比較が丸め誤差の符号で決まるため。比較を続けると、勾配を`tol`未満に下げる正しい
+    ステップを棄却し、LMラダーがノイズで受理した極小ステップ・不完全に正則化されたステップで
+    反復とcost評価を浪費する（実測: Probit `n=1,000,000`で10反復・cost評価155回・約6.7秒 →
+    導入後5反復・約0.9秒、statsmodelsと同程度）。検証を省いても安全な理由: (a) 発火するのは
+    Newton減少量`gᵀH⁻¹g ≤ 20ε|cost|`の領域だけで、ステップ長は各パラメータの標準誤差の
+    `√(20ε|cost|)`倍程度（`|cost|=4e5`で約`4e-5`SE）に収まる、(b) 収束の宣言は勾配基準か
+    停滞3条件に限られ偽の収束は生じない、(c) 悪いステップで減少量が閾値を超えれば次反復で
+    LMラダーの検証に戻る。予測減少量が負（悪条件Hessianの求解誤差）の場合はLMラダーに回す。
+  - **コスト（対数尤度の総和）は補償和で計算する**: Logit/Probit/Tobitの`cost`・適合度統計量用の
+    対数尤度は、Neumaierの補償和（`compensated_sum`）で総和を取る。素朴な逐次加算では累積値への
+    加算ごとの丸め誤差が`O(√n)`倍に積み上がり（`n=1e6`で`≈1e-8`、ULPの約100倍）、上記の
+    分解能判定（約1 ULPの評価誤差を前提にした`10·ε·|cost|`）が成り立たない。勾配・Hessianの
+    総和は素朴な加算のまま（収束点で勾配の累積値が小さく、丸め誤差が問題にならない）。
+    **新しいMLE手法の`cost`も補償和で書く**こと。
 - **BFGS**: 組み込みBFGSの初期逆Hessーは単位行列（スケール`O(1)`）固定で、尤度Hessianの
   スケール（`O(n)`、観測数`n`個のスコアの和）との乖離が`n`が大きいほど開き、line searchが
   1反復あたり多数の関数評価を消費する（実測: n=1,000,000でnewton 0.65s・組み込みbfgs
@@ -61,7 +83,7 @@ Logit/Probit/Tobit（最尤推定ベースの非線形モデル）が共有す�
   勾配の評価回数に総枠`(max_iter + 1) * 2000`を設ける。枠を使い切ると
   `MleError::EvaluationBudgetExceeded`。
 
-**収束点のHessian評価**: `method`の3分岐で`Executor::run()`実行後、最終パラメータで
+**収束点のHessian評価**: `solver`の3分岐で`Executor::run()`実行後、最終パラメータで
 Hessianを1回評価し直す（Newtonの最後のイテレーションで計算済みのものを使い回さない。
 3手法で同じコードパスにできるため）。BFGS/L-BFGSの内部近似逆Hessianは使い回さず、
 `cov_type="classical"`（観測情報行列）には常に解析的Hessianを使う。
@@ -78,8 +100,8 @@ Hessianとして扱う（`Σ_classical = -H⁻¹`が成り立つ前提と一致�
 
 | フィールド | 型 | デフォルト | 説明 |
 |---|---|---|---|
-| `max_iter` | `int` | `35` | 最大反復回数。`method`に関わらず単一の値（statsmodelsもdiscreteモデルで`method`に依らず`maxiter=35`を一律適用） |
-| `tol` | `float \| None` | `None` | 勾配ノルム収束判定の閾値。`None`時は`method`により既定値が異なる（下記） |
+| `max_iter` | `int` | `35` | 最大反復回数。`solver`に関わらず単一の値（statsmodelsもdiscreteモデルで`method`に依らず`maxiter=35`を一律適用） |
+| `tol` | `float \| None` | `None` | 勾配ノルム収束判定の閾値。`None`時は`solver`により既定値が異なる（下記） |
 | `raise_on_non_convergence` | `bool` | `True` | `True`なら`max_iter`到達時に`ComputationError`。`False`なら最終反復時点のパラメータを`converged=False`として返す |
 
 **Return**: `converged: bool` / `n_iter: int`。
@@ -88,7 +110,7 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
 プロジェクトは**デフォルトで厳格（例外を投げる）**とする。未収束の結果をそれと知らず
 使ってしまうリスクを避けるため。
 
-**判定基準・既定値は`method`により異なる**:
+**判定基準・既定値は`solver`により異なる**:
 
 - **`newton`**: 総和勾配に対する絶対閾値`‖∇ℓ(θ)‖ < tol`。既定`tol=1e-6`。2次収束のため
   観測数`n`が増えても追加反復はごく僅かで済む。
@@ -104,12 +126,47 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
   （`newton`は2次収束による高精度前提でテストが組まれているため、正規化で実効閾値が
   `n`倍緩むと精度マージンを食いつぶす）。
 - **大標本Newtonの副次収束判定**: `tol`は総和勾配に対する絶対閾値でスケールしないため、
-  大標本ではコスト関数が浮動小数点の底に達しても勾配ノルム基準が発火しないことがある。
-  LMラダー（正則化）が全失敗し、かつ`λ=0`のHessianが可逆（真に特異ではない）な場合、
+  勾配の評価誤差の床が`tol`を上回るほど大きな標本では、勾配ノルム基準が発火しないことが
+  ありうる。コスト比較でステップの良否を判定できなかった場合（LMラダーが全失敗し`λ=0`の
+  Hessianが可逆＝`RegularizedStep::NoProgress`、または予測減少量がコストの分解能以下で比較を
+  省いた＝`BelowCostResolution`、1.2節）、生のNewtonステップ後の勾配で判定する。
   (1) 勾配の停滞（前反復比`≥0.9`）・(2) 収束目標近傍（`<1e4・tol`）・(3) コストHessianの
-  正定値性（鞍点除外）の3条件が揃えば収束扱いにする（`stalled_at_optimum`）。Logit/Probitは
-  尤度が大域凹でこの経路に入らず挙動不変（Tobitで顕在化、[`tobit-spec.md`](./tobit-spec.md)
-  3.2節参照）。
+  正定値性（鞍点除外）の3条件が揃えば、現在点にとどまって収束扱いにする（`stalled_at_optimum`）。
+  揃わなければ生のステップを適用して反復を続ける（収束点近傍の通常のケースは、生のステップで
+  勾配が桁で減り、次の`terminate`で勾配基準により収束する）。
+  **実データではこの停滞収束は現状安全網**: 導入時にTobit `n=1,000,000`で「勾配の床≈`36·tol`」と
+  記録していた張り付きは、コストの素朴な逐次和の丸め誤差で生のステップが棄却され、LMラダーが
+  ノイズで受理した不完全なステップの結果で、真の勾配の床ではなかった（生のステップを適用すれば
+  勾配は`≈2e-10`まで下がる）。補償和と`BelowCostResolution`の導入後は、Probit/Tobit
+  `n=1,000,000`とも生のステップで勾配基準に到達する。
+- **`bfgs`/`lbfgs`の副次収束判定（line searchの停滞）**: 収束点近傍では1ステップあたりの
+  コスト減少量（`≈‖g‖²/2H`）がコスト（`n`個の対数尤度の和）の丸め誤差と同程度まで小さくなり、
+  line searchが十分減少条件を正しく判定できなくなる。到達可能な勾配ノルムの下限（`√(2Hδ)`、
+  `H`・丸め誤差`δ`とも`O(n)`）は正規化後の実効閾値`tol·n`とほぼ同じ大きさのため、勾配ノルム
+  基準に届くかはデータ次第になる（この状況の実測はコストを素朴な逐次和で計算していた時点の
+  もので`δ`はULPの約100倍あった。現在は補償和で`δ`が約1 ULPまで下がり、Probit
+  `n=1,000,000`のbfgsは約2.1秒→約1.6秒、lbfgsは約1.8秒→約1.2秒に短縮した）。argminの`MoreThuenteLineSearch`は異常終了（区間幅の下限
+  到達・丸め誤差で進めない等）も正常終了と区別せず返すため、次の2つで停滞を検出し、勾配ノルムが
+  収束目標の近傍（`<1e2·tol·n`、`QUASI_NEWTON_STALL_GRAD_FACTOR`）にある場合に限り収束扱いに
+  する（`stalled_at_optimum`。scipyの`fmin_bfgs`がline search失敗を「precision loss」として
+  打ち切るのと同じ発想）:
+  1. line searchが受理したステップがstrong Wolfe条件（`c1=1e-4`・`c2=0.9`）を実際に満たすかを
+     再判定し、満たさなければ停滞とみなす（`line_search_step_satisfies_wolfe`）。
+  2. 収束目標の近傍ではline searchの反復上限を`10`に絞り（`NEAR_TARGET_LINE_SEARCH_MAX_ITERS`）、
+     上限到達は打ち切り時点の試行点を採用せず直前の反復点で停滞とみなす。区間幅が`xtol`まで
+     縮むまで諦めない失敗したline searchは、1回で約90回（cost＋勾配）の評価を消費していたため。
+
+  近傍以外での一時的なline search失敗は従来どおり反復を継続する。**窓（`1e2·tol·n`）は`tol`に
+  比例する**一方、根拠となる丸め誤差の床（`≈1e-8·n`程度）は`tol`に依存しない。既定`tol=1e-8`では
+  両者が一致するが、`tol`を大きくすると窓も広がり床に届く前の正常なline searchでも上限到達で
+  打ち切られうる。逆に`tol`を小さくすると停滞検出が効かず従来の遅さに戻る。コードは変えず、
+  公開の`tol`のdocstringにこの挙動を明記する方針とした（ユーザー判断）。Probit
+  （`generate_binary_choice_dataset("baseline", link="probit", k=5, seed=42)`）の実測で、
+  `n=1,000,000`はbfgs 43秒→約2秒・lbfgs 47秒→約2秒、`n=100,000`のlbfgsは3.0秒→約0.18秒に
+  短縮し、statsmodelsの同solverと同程度になった。line searchの前に予測減少量`-gᵀd`を
+  コストの丸め誤差の水準と比べて打ち切る案も試したが、近似Hessianが粗い局面で`gᵀd`が
+  達成可能な減少量を過小評価して早く止まり、Tobitの`bfgs`参照比較テストが精度不足で
+  失敗したため不採用とした。
 
 **スケール依存への対処（標準化）**: 説明変数のスケールが異なると勾配の絶対閾値の妥当性が
 崩れるため、`nonlinear/common.rs`の`standardize_columns`/`destandardize_params`で
@@ -120,10 +177,10 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
 
 ### 1.4 設計行列のランクチェック・初期値
 
-**多重共線性の検出は`fit()`冒頭の列ピボットQRランクチェックに一本化**: `method`に関わらず、
+**多重共線性の検出は`fit()`冒頭の列ピボットQRランクチェックに一本化**: `solver`に関わらず、
 `run_solver`を呼ぶ前に`nonlinear::common::checked_design_matrix_qr(x_std)`を必ず通し、
 ランク落ちを`MleError::SingularDesignMatrix`（`ComputationError`）で弾く。旧来のゼロベクトル
-初期値では検出経路が`method`ごとに分かれ（newtonは`newton_step`内QR、bfgs/lbfgsは収束後の
+初期値では検出経路が`solver`ごとに分かれ（newtonは`newton_step`内QR、bfgs/lbfgsは収束後の
 `observed_information_cov_params`）、bfgs/lbfgsのみ検出漏れする構造的リスクがあった。
 
 Logit/Probitはこの列ピボットQR解（標準化空間のLPM最小二乗解）を、nullモデル
@@ -141,7 +198,7 @@ Tobit固有のバリアント（打ち切り境界の検証等）も同じ`MleEr
 
 | バリアント | Python例外 | 由来 |
 |---|---|---|
-| `Common(CommonError)` | `ValidationError`（大半）/ケースによる | `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/`MissingClusterColumn`/`InsufficientClusters`/`InsufficientClustersForInference`/`NoRegressors`/`ComputationFailed`。系統横断で重複するバリアントは`CommonError`（`engine::error`）に切り出し、`MleError`は`#[error(transparent)] Common(#[from] CommonError)`で包む |
+| `Common(CommonError)` | `ComputationFailed`のみ`ComputationError`、他は`ValidationError` | `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/`MissingClusterColumn`/`InsufficientClusters`/`InsufficientClustersForInference`/`NoRegressors`/`ComputationFailed`。系統横断で重複するバリアントは`CommonError`（`engine::error`）に切り出し、`MleError`は`#[error(transparent)] Common(#[from] CommonError)`で包む |
 | `InvalidMaxIter` / `InvalidTol` | `ValidationError` | `max_iter<=0`等 |
 | `NonConvergence { n_iter }` | `ComputationError` | `raise_on_non_convergence=true`かつ`max_iter`到達 |
 | `SingularDesignMatrix` | `ComputationError` | 最適化前の列ピボットQRランクチェックでのランク落ち（1.4節） |
@@ -162,7 +219,7 @@ Hessianとする。いずれも標準化空間で`Σ_std`を計算した後、`d
 
 | `cov_type` | 式 |
 |---|---|
-| `classical`（別名`nonrobust`、既定） | 観測情報行列 `Σ = -H⁻¹` |
+| `classical`（既定） | 観測情報行列 `Σ = -H⁻¹` |
 | `opg` | outer product of gradients `Σ = (Σᵢ sᵢsᵢ')⁻¹`（BHHH） |
 | `hc0` | サンドイッチ型 `Σ = H⁻¹(Σᵢ sᵢsᵢ')H⁻¹`（misspecification-robust） |
 | `hc1` | `hc0`に小標本補正`n/(n-k)`を乗じる |
@@ -180,7 +237,7 @@ Hessianとする。いずれも標準化空間で`Σ_std`を計算した後、`d
   のため、OLSの`cov_type=Cluster`時の自由度切り替え（`n-k`→`G-1`）に相当する処理が不要。
   分散共分散行列のスケーリング（`correction`）だけ気にすればよい。
 - **クラスター数`G`は傾き係数の数`q`（`k - k_constant`）より多くなければならない**
-  （`G <= q`は`InsufficientClustersForInference`、`ValidationError`、Issue #289）。
+  （`G <= q`は`InsufficientClustersForInference`、`ValidationError`）。
   クラスターロバスト共分散`Ŝ`はクラスター寄与スコアの総和がゼロ（MLEの一次条件
   `Σᵢsᵢ=0`）のため`rank(Ŝ) ≤ G-1`で、`G<=q`だと退化する。Logit/Probitは全体検定がLR
   （`q×q`部分行列の反転を要求しない）だが、退化した共分散から読んだSEを黙って返すのは
@@ -191,7 +248,7 @@ Hessianとする。いずれも標準化空間で`Σ_std`を計算した後、`d
   に集約済み）。反復最適化の無駄を避けるため、この検証は全手法`fit()`冒頭・最適化実行前に
   行う（OLS/WLSも閉形式解だが位置を統一）。
 - **特異性検出は固有値分解ベースの相対閾値判定を経由する**: 非ピボットCholesky分解の失敗
-  だけでは構造的な特異性・悪条件を確実には検出できない（`method=Bfgs`/`Lbfgs`は
+  だけでは構造的な特異性・悪条件を確実には検出できない（`solver=Bfgs`/`Lbfgs`は
   `newton_step`のピボット付きQRを経由しないため顕在化した）。`ensure_well_conditioned_
   symmetric_matrix`（`engine/src/linear_algebra.rs`、`SelfAdjointEigen`ベース、OLSの
   `wald_f_test`用実装を系統横断で共有）をCholesky分解の前に呼び、エラー時は
@@ -208,8 +265,8 @@ MLEベースの非線形モデルは漸近理論が正規分布に基づいて�
 
 ## 5. Return共通コア項目
 
-- `params` / `std_errors` / `z_stats` / `p_values` / `conf_lower` / `conf_upper` /
-  `param_names`
+- `params` / `std_errors` / `test_stats` / `p_values` / `conf_lower` / `conf_upper` /
+  `param_names` / `dep_var_name`
 - `log_likelihood`（llf）/ `log_likelihood_null`（切片のみモデルのllf）
 - `lr_statistic` / `lr_p_value`（尤度比検定、カイ二乗分布。OLSのF検定に相当する全体の
   有意性検定）
@@ -236,7 +293,7 @@ MLEベースの非線形モデルは漸近理論が正規分布に基づいて�
 - `marginal_effects(at="overall" | "mean" | "median", ...)`: 限界効果。既定は`at="overall"`
   （AME、average marginal effects）。標準誤差はデルタ法で計算し、`fit()`時の`cov_params`を
   再利用する（再最適化不要）。Return形式は`coef_table`と同じ行指向
-  （`dydx`/`std_err`/`z`/`p_value`/`conf_low`/`conf_high`）。「見る/見ない」を切り替える
+  （`effect`/`std_err`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`。`effect`以外は`coef_table`と同名）。「見る/見ない」を切り替える
   フラグは設けない（可変なのは`at`のみ）。
 - `predict()`: 予測確率（Logit/Probit）。
 - `pred_table()`: 分類の的中表（閾値依存のため、コアのReturnには含めない。Logit/Probit
@@ -298,5 +355,10 @@ MLEベースの非線形モデルは漸近理論が正規分布に基づいて�
 - `start_params`（ユーザー指定初期値）
 - Tobitの尤度比検定（LR statistic/p-value）の追加実装（v1では`wald_statistic`のみ）
 - `NEWTON_STALL_GRAD_FACTOR`（1.3節の副次収束判定が使う絶対閾値）を、スケール不変な
-  Newton減少量`√(gᵀH⁻¹g)`ベースの停止基準に置き換える検討（スコープ超で保留）
+  Newton減少量`√(gᵀH⁻¹g)`ベースの停止基準に置き換える検討（スコープ超で保留）。
+  1.2節の`BelowCostResolution`（Newton減少量がコストの分解能以下ならコスト比較を省く）は
+  この方向への部分的な一歩で、「コスト比較を省くか」の判定にはNewton減少量を使うようになった。
+  ただし停止の判定そのものは勾配基準と停滞3条件のままで、Newton減少量で打ち切ると
+  パラメータ誤差が約`√(ε|cost|/n)`（`≈1e-8`）残り`RTOL=1e-8`の精度検証テストに余裕がないため、
+  停止基準としての置き換えは行っていない
 - 手法固有の未実装・既知の限界（分離検出の較正等）は各手法のspec4章を参照

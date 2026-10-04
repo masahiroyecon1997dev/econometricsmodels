@@ -18,8 +18,9 @@ use engine::linear::ols::CovType as EngineCovType;
 use polars::prelude::DataFrame;
 use pyo3::{PyErr, PyResult};
 
-use crate::column_extraction::{extract_f64_column, extract_group_key_column};
+use crate::column_extraction::{extract_group_key_column, extract_time_order_ranks};
 use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
+use crate::validation::reject_unused_option;
 
 /// `engine::linear::common::LeastSquaresError`をPython例外に変換する。
 ///
@@ -61,12 +62,16 @@ pub(crate) fn mat_to_vec(mat: &faer::Mat<f64>) -> Vec<f64> {
     (0..mat.nrows()).map(|i| *mat.get(i, 0)).collect()
 }
 
-/// `cov_type`文字列をパースし、該当する`cov_type`のときのみ`cluster_col`/`time_col`を
+/// `cov_type`文字列をパースし、該当する`cov_type`のときのみ`cluster`/`hac_time`を
 /// 抽出したうえで`engine::linear::ols::CovType`を組み立てる（OLS/WLS/IV共通、
 /// `docs/spec/ols-spec.md`「標準誤差」参照）。
 ///
-/// `cluster_col`/`time_col`が指定されていても、`cov_type`がcluster/hacでなければ無視する
-/// （該当しない分岐では列抽出自体を行わない、`match`の各アーム内で完結させている）。
+/// `cluster`/`hac_lags`/`hac_time`は、`cov_type`がcluster/hacでなければ使われない。
+/// その状態で指定されていれば`ValidationError`にする（黙って無視すると
+/// `cov_type="cluster"`の書き忘れに気づけないため）。IVは`gmm_weight_type`も同じ値を
+/// 使い`cov_type`単独では判定できないため、`build_iv_input`が自前で「どちらか一方でも
+/// 使えば有効」の検証を行い、この関数ではなく検証を含まない`build_cov_type`を呼ぶ。
+/// 該当する`cov_type`の分岐でのみ列抽出を行う（`match`の各アーム内で完結）。
 /// 戻り値の2つ目は`*Result.cov_type`にそのまま格納する小文字化済み文字列
 /// （呼び出し側で二重に`to_lowercase()`しないよう、ここでまとめて返す）。
 ///
@@ -75,39 +80,83 @@ pub(crate) fn mat_to_vec(mat: &faer::Mat<f64>) -> Vec<f64> {
 /// 独立した2つの型がこの関数を共有する必要が生じたため（`nonlinear::common::
 /// parse_cov_type`が最初から個々の値を引数に取っているのと同じ設計。以前は`WLSOptions`が
 /// 無く`OLSOptions`をそのまま再利用していたため、`&OLSOptions`を直接受け取っていた）。
-/// 同じ理由で`IVOptions`も同名フィールド（`cov_type`/`cluster_col`/`hac_lags`/`time_col`）を
+/// 同じ理由で`IVOptions`も同名フィールド（`cov_type`/`cluster`/`hac_lags`/`hac_time`）を
 /// 持つため、`iv::common::parse_iv_cov_type`という重複実装を廃止しこの関数をそのまま
-/// 共有する（`docs/planning/specs/refactoring-candidates.md`項目58）。
+/// 共有する。
 ///
 /// # Errors
+/// `cluster`/`hac_lags`/`hac_time`が使われない`cov_type`で指定された場合、または
 /// `cov_type`の文字列が既知の値のいずれでもない場合は`ValidationError`。それ以外
 /// （列の抽出時に発覚する問題等）は`column_extraction`の責務で`ValidationError`。
 pub(crate) fn parse_cov_type(
     df: &DataFrame,
     cov_type: &str,
-    cluster_col: Option<&str>,
+    cluster: Option<&str>,
     hac_lags: Option<i64>,
-    time_col: Option<&str>,
+    hac_time: Option<&str>,
+) -> PyResult<(EngineCovType, String)> {
+    // 未知の`cov_type`は「unknown cov_type」を優先して報告する（先に未使用オプションを
+    // 指摘すると、typoの`cov_type`に対して`cluster`を消す方向へ誤誘導するため）。
+    let parsed = build_cov_type(df, cov_type, cluster, hac_lags, hac_time)?;
+    let cov_type_lower = cov_type.to_lowercase();
+    let is_hac = cov_type_lower == "hac";
+    reject_unused_option(
+        "cluster",
+        cluster.is_some(),
+        cov_type_lower == "cluster",
+        "cov_type=\"cluster\"",
+    )?;
+    reject_unused_option("hac_lags", hac_lags.is_some(), is_hac, "cov_type=\"hac\"")?;
+    reject_unused_option("hac_time", hac_time.is_some(), is_hac, "cov_type=\"hac\"")?;
+    Ok(parsed)
+}
+
+/// HAC（`cov_type="hac"`・IV GMMの`gmm_weight_type="hac"`）の時間順序列`hac_time`が
+/// 指定されていることを確かめ、その列名を返す。`setting`は`hac_time`を要求している設定名
+/// （エラーメッセージ用）。
+///
+/// 行順を時間順とみなす暗黙の既定は置かない。データが時間順に並んでいなくてもエラーに
+/// ならず、時系列順のHACに見える誤った結果が黙って返るため、時間順は常に列で明示させる。
+///
+/// # Errors
+/// `hac_time`が未指定なら`ValidationError`。
+pub(crate) fn require_hac_time<'a>(hac_time: Option<&'a str>, setting: &str) -> PyResult<&'a str> {
+    hac_time.ok_or_else(|| {
+        ValidationError::new_err(format!(
+            "{setting}='hac' requires the `hac_time` option: the column that gives the time \
+             order of the observations (the row order of the data is not assumed to be the \
+             time order; add an explicit index column such as `df.with_row_index(\"t\")` if \
+             the rows are already in time order)"
+        ))
+    })
+}
+
+/// `parse_cov_type`から未使用オプションの検証を除いたもの（IVが`gmm_weight_type`と共用する
+/// `cluster`/`hac_*`を、自前の検証を済ませたうえで渡すための入口）。
+pub(crate) fn build_cov_type(
+    df: &DataFrame,
+    cov_type: &str,
+    cluster: Option<&str>,
+    hac_lags: Option<i64>,
+    hac_time: Option<&str>,
 ) -> PyResult<(EngineCovType, String)> {
     let cov_type_lower = cov_type.to_lowercase();
 
     let cov_type = match cov_type_lower.as_str() {
-        "classical" | "nonrobust" => EngineCovType::Classical,
+        "classical" => EngineCovType::Classical,
         "hc0" => EngineCovType::Hc0,
         "hc1" => EngineCovType::Hc1,
         "hc2" => EngineCovType::Hc2,
         "hc3" => EngineCovType::Hc3,
         "hac" => {
-            let time_order = time_col
-                .map(|col_name| extract_f64_column(df, col_name))
-                .transpose()?;
+            let col_name = require_hac_time(hac_time, "cov_type")?;
             EngineCovType::Hac {
                 lags: hac_lags,
-                time_order,
+                time_order: extract_time_order_ranks(df, col_name)?,
             }
         }
         "cluster" => {
-            let groups = cluster_col
+            let groups = cluster
                 .map(|col_name| extract_group_key_column(df, col_name))
                 .transpose()?;
             EngineCovType::Cluster { groups }
@@ -126,6 +175,7 @@ pub(crate) fn parse_cov_type(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use polars::df;
 
     /// `unwrap()`/`expect()`は使わない：`PyErr`の`Debug`実装（`unwrap()`失敗時の
     /// panicメッセージ生成に使われる）はGIL取得を要求し、GIL未初期化のこのテスト
@@ -135,7 +185,7 @@ mod tests {
     /// 触れないため安全）。
     #[test]
     fn parse_cov_type_is_case_insensitive() {
-        let df = DataFrame::empty();
+        let df = df!("t" => [1.0, 2.0, 3.0]).unwrap();
         for (input, expected) in [
             ("classical", "classical"),
             ("CLASSICAL", "classical"),
@@ -147,7 +197,9 @@ mod tests {
             ("CLUSTER", "cluster"),
             ("Hac", "hac"),
         ] {
-            let Ok((_, normalized)) = parse_cov_type(&df, input, None, None, None) else {
+            // HACは時間順序列(`hac_time`)が必須。他のcov_typeでは使われない。
+            let hac_time = (expected == "hac").then_some("t");
+            let Ok((_, normalized)) = parse_cov_type(&df, input, None, None, hac_time) else {
                 panic!("expected Ok for input={input}");
             };
             assert_eq!(normalized, expected, "input={input}");
@@ -155,21 +207,31 @@ mod tests {
     }
 
     #[test]
-    fn parse_cov_type_accepts_nonrobust_as_classical_alias() {
-        let df = DataFrame::empty();
-        for input in ["nonrobust", "NONROBUST", "NonRobust"] {
-            let Ok((cov_type, normalized)) = parse_cov_type(&df, input, None, None, None) else {
-                panic!("expected Ok for input={input}");
-            };
-            assert!(
-                matches!(cov_type, EngineCovType::Classical),
-                "input={input}"
-            );
-            // `parse_cov_type`のdocコメント通り、`*Result.cov_type`にはエイリアスでは
-            // なく小文字化した入力文字列（"nonrobust"）がそのまま格納される
-            // （"classical"に正規化はしない）。
-            assert_eq!(normalized, "nonrobust", "input={input}");
-        }
+    fn parse_cov_type_requires_hac_time_for_hac() {
+        // 行順を時間順とみなす暗黙の既定は置かない(`require_hac_time`参照)。
+        let df = df!("t" => [1.0, 2.0, 3.0]).unwrap();
+        assert!(parse_cov_type(&df, "hac", None, None, None).is_err());
+        assert!(parse_cov_type(&df, "hac", None, Some(1), Some("t")).is_ok());
+    }
+
+    #[test]
+    fn parse_cov_type_passes_time_order_ranks_for_hac() {
+        // engineの`time_order`は必須。pybindは`hac_time`の順位を渡す。
+        let df = df!("t" => [30.0, 10.0, 20.0]).unwrap();
+        let Ok((cov_type, _)) = parse_cov_type(&df, "hac", None, Some(1), Some("t")) else {
+            panic!("expected Ok");
+        };
+        assert!(matches!(
+            cov_type,
+            EngineCovType::Hac { lags: Some(1), time_order: ref ranks }
+                if *ranks == vec![2.0, 0.0, 1.0]
+        ));
+    }
+
+    #[test]
+    fn require_hac_time_returns_column_name_or_errors() {
+        assert!(matches!(require_hac_time(Some("t"), "cov_type"), Ok("t")));
+        assert!(require_hac_time(None, "cov_type").is_err());
     }
 
     #[test]

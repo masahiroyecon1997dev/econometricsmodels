@@ -43,11 +43,11 @@
 #   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" classical logit
 #   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" opg probit
 #   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" hc0 logit
-#   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" cluster logit cluster_col
+#   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" cluster logit cluster
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 2) {
-  stop("usage: Rscript run_glm_crosscheck.R <data.csv> <formula> [cov_type=classical] [link=logit] [cluster_col]")
+  stop("usage: Rscript run_glm_crosscheck.R <data.csv> <formula> [cov_type=classical] [link=logit] [cluster]")
 }
 data_path <- args[1]
 formula_str <- args[2]
@@ -66,7 +66,21 @@ library(lmtest)
 library(marginaleffects)
 library(jsonlite)
 
-model <- glm(as.formula(formula_str), data = df, family = binomial(link = link))
+# 収束判定を既定（epsilon=1e-8）より厳しくする: `sandwich::estfun()`は`glm()`が
+# 最終反復の1つ前の係数で計算した作業重みを使うため、既定のままだとスコア寄与が
+# 最終係数のスコアとずれ、hc0/hc1/opgの標準誤差（とそれを使う限界効果の標準誤差・
+# 信頼区間）に相対誤差~3e-5程度の参照側ノイズが乗る（mrozで実測。係数・classicalは
+# 影響なし）。epsilon=1e-14では~4e-10まで下がる。
+glm_control <- glm.control(epsilon = 1e-14, maxit = 100)
+model <- glm(
+  as.formula(formula_str),
+  data = df,
+  family = binomial(link = link),
+  control = glm_control
+)
+if (!model$converged) {
+  stop("glm() did not converge with epsilon=1e-14")
+}
 
 # 観測情報行列（真の対数尤度のHessian）の重みを、本実装（nonlinear/probit.rs・
 # logit.rs）と同じ解析式で計算する（上記docコメント参照）。
@@ -114,15 +128,14 @@ bread_obs <- observed_bread(model, link)
 # Logit側のクロスチェック値が気づかれずに壊れることを防ぐ（testing-completeness-
 # reviewerの指摘）。probitでは一致しないため、logitのときのみ検証する。
 #
-# tolerance=1e-3（理論上の完全一致からすると緩め）: near_separationシナリオ
-# （500件中161件のfitted probabilityが浮動小数点上ちょうど0/1に潰れる強い準分離
-# ケース）では、IRLS内部の期待情報行列と直接計算する観測情報行列が数値精度の
-# 限界で理論値からずれ、Frobeniusノルムの相対誤差が実測で最大約1.7e-4に達する。
-# 計算式そのものの誤りではなく浮動小数点精度損失のため、実測値に対して約6倍の
-# マージンを持つ1e-3まで緩めても、将来計算式が本当に壊れた場合（通常は桁違いの
-# 乖離になる）の検知能力は保つ。
+# tolerance=1e-6: glm()をepsilon=1e-14で収束させているため、正準リンクの
+# logitでは期待情報行列と観測情報行列は浮動小数点精度の範囲で一致する
+# （Frobeniusノルムの相対誤差の実測最大~2.5e-8、near_separation（500件中161件の
+# fitted probabilityが浮動小数点上ちょうど0/1に潰れる強い準分離ケース）でも~1.6e-8）。
+# 計算式そのものが壊れた場合は通常桁違いの乖離になるため、約40倍のマージンを持つ
+# 1e-6でも検知能力は保てる。
 if (link == "logit") {
-  stopifnot(isTRUE(all.equal(bread_obs, bread(model), tolerance = 1e-3)))
+  stopifnot(isTRUE(all.equal(bread_obs, bread(model), tolerance = 1e-6)))
 }
 
 if (cov_type == "classical") {
@@ -137,11 +150,11 @@ if (cov_type == "classical") {
   vc <- sandwich(model, bread. = bread_obs, meat. = meat)
 } else if (cov_type == "cluster") {
   if (length(args) < 5) {
-    stop("cluster requires <cluster_col> as arg5")
+    stop("cluster requires <cluster> as arg5")
   }
-  cluster_col <- args[5]
+  cluster <- args[5]
   # cadjust=TRUE: G/(G-1)の小標本補正（linear/references/run_lm_crosscheck.Rと同じ方針）。
-  meat <- meatCL(model, cluster = df[[cluster_col]], type = "HC1", cadjust = TRUE)
+  meat <- meatCL(model, cluster = df[[cluster]], type = "HC1", cadjust = TRUE)
   vc <- sandwich(model, bread. = bread_obs, meat. = meat)
 } else {
   stop(paste("unknown cov_type:", cov_type))
@@ -170,7 +183,12 @@ names(conf_high) <- rownames(ct)
 # 本実装・statsmodelsと同じ式（k=回帰係数の数のみ）に一致することを
 # ベンチマーク作成時に実測確認済み（OLSのガウス分布族k+1慣習とは異なる）。
 y_name <- all.vars(as.formula(formula_str))[1]
-null_model <- glm(as.formula(paste(y_name, "~ 1")), data = df, family = binomial(link = link))
+null_model <- glm(
+  as.formula(paste(y_name, "~ 1")),
+  data = df,
+  family = binomial(link = link),
+  control = glm_control
+)
 ll <- as.numeric(logLik(model))
 ll_null <- as.numeric(logLik(null_model))
 k_params <- length(coef(model))
@@ -184,12 +202,12 @@ format_margeff <- function(me_df) {
   out <- list()
   for (i in seq_len(nrow(me_df))) {
     out[[me_df$term[i]]] <- list(
-      dydx = me_df$estimate[i],
-      se = me_df$std.error[i],
-      z = me_df$statistic[i],
+      effect = me_df$estimate[i],
+      std_err = me_df$std.error[i],
+      test_stat = me_df$statistic[i],
       p_value = me_df$p.value[i],
-      conf_low = me_df$conf.low[i],
-      conf_high = me_df$conf.high[i]
+      conf_lower = me_df$conf.low[i],
+      conf_upper = me_df$conf.high[i]
     )
   }
   out
@@ -201,24 +219,49 @@ format_margeff <- function(me_df) {
 # 中央値」（nonlinear-common.md6章「限界効果」節）と評価点がずれる
 # （ベンチマーク作成時に実機確認済み、mrozデータでdydxが大きくずれた）。
 # FUN_numeric/FUN_integerを両方明示することで全列を統一的に生の平均・中央値にする。
+# eps: `slopes()`/`avg_slopes()`は有限差分で限界効果を数値微分し、刻み幅`eps`は
+# 変数の単位そのもの（変数のスケールに依存しない絶対値）として使われる。既定の
+# 刻み幅のままだと、勾配が急なケース（near_separationのx1平均点でdydx~7.2）で
+# 解析解（β·p(1-p)）に対し相対誤差~7e-6、eps=1e-6の固定値でも、x1が1e6スケールの
+# scale_varianceでは相対誤差~5e-5ずれる（丸め誤差と打ち切り誤差の釣り合う刻み幅が
+# 変数のスケールに比例するため）。このため変数ごとに標準偏差の1e-5倍の刻み幅で
+# 呼び出す（全シナリオ・全変数で解析解と~1e-11、標準誤差も本実装と~1e-8で一致する。
+# `numderiv=`引数は効果の刻み幅に影響しない）。
+margeff_vars <- setdiff(names(coef(model)), "(Intercept)")
+margeff_eps <- function(v) 1e-5 * sd(df[[v]])
+margeff_by_var <- function(call_fun) {
+  do.call(rbind, lapply(margeff_vars, function(v) {
+    call_fun(v, margeff_eps(v))
+  }))
+}
 margeff <- list(
-  overall = format_margeff(avg_slopes(model, vcov = vc)),
-  mean = format_margeff(slopes(
-    model,
-    newdata = datagrid(model = model, FUN_numeric = mean, FUN_integer = mean),
-    vcov = vc
-  )),
-  median = format_margeff(slopes(
-    model,
-    newdata = datagrid(model = model, FUN_numeric = median, FUN_integer = median),
-    vcov = vc
-  ))
+  overall = format_margeff(margeff_by_var(function(v, eps) {
+    avg_slopes(model, variables = v, vcov = vc, eps = eps)
+  })),
+  mean = format_margeff(margeff_by_var(function(v, eps) {
+    slopes(
+      model,
+      variables = v,
+      newdata = datagrid(model = model, FUN_numeric = mean, FUN_integer = mean),
+      vcov = vc,
+      eps = eps
+    )
+  })),
+  median = format_margeff(margeff_by_var(function(v, eps) {
+    slopes(
+      model,
+      variables = v,
+      newdata = datagrid(model = model, FUN_numeric = median, FUN_integer = median),
+      vcov = vc,
+      eps = eps
+    )
+  }))
 )
 
 result <- list(
   coef = as.list(coefs),
   se = as.list(ses),
-  z_stats = as.list(zs),
+  test_stats = as.list(zs),
   p_values = as.list(pvalues),
   conf_low = as.list(conf_low),
   conf_high = as.list(conf_high),

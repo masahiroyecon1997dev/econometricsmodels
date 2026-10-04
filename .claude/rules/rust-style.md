@@ -31,13 +31,11 @@ paths:
 - **英語にする**: 例外・バリデーションメッセージ（`ValidationError`/`ComputationError`等、Pythonユーザーに表示される文字列）、公開API（`#[pyclass]` / `#[pyfunction]`）に付ける`///`docコメント（PyO3経由でPythonの`__doc__`になり、`help()`やIDE補完でユーザーに見えるため）。
 - **`#[pyclass]`には`module`属性を明示する**（例: `#[pyclass(module = "econometricsmodels._lib")]`）。PyO3のデフォルトでは`__module__ == "builtins"`になり、mkdocs（mkdocstrings/griffe）がPython側の再エクスポート（`_lib` → `python_package`側モジュール）を解決できず`AliasResolutionError`でドキュメントビルドが失敗する。
 - **日本語のままでよい**: 非公開関数・非公開型（`#[pyclass]`/`#[pyfunction]`が付いていないもの）の`///`/`//!`コメント、実装の背景説明、TODOコメント等の開発者向けの記述。GitHub Issue・CLAUDE.md・rules等の開発ドキュメントは対象外（日本語のまま）。
-- 理由: `econometricsmodels`はeconomicon専用ではなくPyPI公開の独立パッケージであり、Pythonエコシステムの慣習（pandas/numpy/polars等）に合わせる。economicon側はi18nで独自にローカライズするため、例外はクラス（`ValidationError`/`ComputationError`）で分岐する設計になっており、メッセージ文字列の言語はeconomicon側のi18nに機能的な影響を与えない。
+- 理由: 因果推論・計量経済学の手法を幅広いユーザーに届けるためのPyPI公開の独立パッケージであり、Pythonエコシステムの慣習（pandas/numpy/polars等）に合わせる。例外はクラス（`ValidationError`/`ComputationError`）で分岐する設計のため、メッセージ文字列自体の言語は、呼び出し側で独自にi18n・エラーメッセージのローカライズを行う場合の妨げにならない。
 
 ## コメント運用
 
-- **GitHub Issue番号をコメントの由来説明に埋め込まない**: 実装経緯としてのIssue番号（例:「Issue #175で追加」）はgit log/git blame・GitHub側で常に追跡可能なため、コメント内に埋め込む必然性がなく、リポジトリ移行時の参照切れリスクや長期的なノイズになる。過去形の由来説明からはIssue番号を削除し、そこに書かれている理由（なぜそう実装したか）の文章だけを残す。
-  - 例外: `docs/spec/`等の設計ドキュメントの節番号への参照（ファイル名込みで現存する節を指すもの）は、単なる経緯ではなく「今後も同期すべき生きた契約」であるため残してよい。Issue番号と節番号が併記されている場合は、Issue番号部分のみ削除し節番号は残す。
-  - 複数のIssueにまたがる変更履歴（例:「最初はAのみ対応、後にBまで一般化」）で、その経緯自体（なぜ設計を変更したか）が非自明な価値を持つ場合は、Issue番号を使わず時系列を平易な文章で要約する。単なる経緯の記録に過ぎない場合は削除する。
+Issue番号・内部管理ドキュメント（`refactoring-candidates.md`等）への参照可否は、CLAUDE.md 6章「コメント・ドキュメントでの参照方針」に準じる（`engine`/`engine_pybind`固有の追加規約はない）。
 
 ## 責務分離
 
@@ -59,7 +57,7 @@ paths:
 ## Python境界でのデータ受け渡し（engine_pybind）
 
 - polars DataFrameの受け取りには**pyo3-polars**（`PyDataFrame`）を使う。
-- **既知のリスク**: `pyo3-polars`の単体リポジトリ（`pola-rs/pyo3-polars`）は2025年7月にアーカイブ済みで、本体`pola-rs/polars`リポジトリに統合されている。crates.io版`pyo3-polars`とpolars本体リポジトリ内のバージョンにズレがあり、`pyo3`自体のバージョンとの組み合わせでビルドが失敗する事例が報告されている（2026年1月時点）。現在は`engine_pybind/Cargo.toml`で`pyo3-polars = "=0.28.0"`（`pyo3 = "=0.29.2"`・`polars = "=0.55.2"`と組み合わせ）に固定して`cargo build`が通ることを確認済み（詳細は同ファイルのコメント・Issue #49参照）。バージョンを上げる際は同様の確認を行うこと。詰まる場合は、`pyo3-polars`を経由せずpolars本体のArrow C Data Interface相当の機能を薄く自前で使う代替案を検討する。
+- **既知のリスク**: `pyo3-polars`の単体リポジトリ（`pola-rs/pyo3-polars`）は2025年7月にアーカイブ済みで、本体`pola-rs/polars`リポジトリに統合されている。crates.io版`pyo3-polars`とpolars本体リポジトリ内のバージョンにズレがあり、`pyo3`自体のバージョンとの組み合わせでビルドが失敗する事例が報告されている（2026年1月時点）。現在は`engine_pybind/Cargo.toml`で`pyo3-polars = "=0.28.0"`（`pyo3 = "=0.29.2"`・`polars = "=0.55.2"`と組み合わせ）に固定して`cargo build`が通ることを確認済み（詳細は同ファイルのコメント参照）。バージョンを上げる際は同様の確認を行うこと。詰まる場合は、`pyo3-polars`を経由せずpolars本体のArrow C Data Interface相当の機能を薄く自前で使う代替案を検討する。
 - `engine`はpolars/PyO3を一切知らない設計を維持する（責務分離の原則通り）。`polars DataFrame → faer::Mat<f64>`の変換は2段階に分かれる。
   1. `engine_pybind`: polars DataFrameから列ごとに`Vec<f64>`へ抽出する（`column_extraction::extract_f64_column`）。
   2. `engine`: 抽出済みの列（`&[f64]`/`&[Vec<f64>]`）から`faer::Mat`を組み立てる（例: `engine::linear::ols::OlsInput::from_columns`）。切片列の自動追加等、設計行列の組み立てに関わるロジックはここに置く（「計算ロジックをengine_pybindに書かない」原則、`docs/spec/ols-spec.md`参照）。
@@ -88,7 +86,7 @@ paths:
 
 - Arrowのゼロコピー原則（CLAUDE.md 2章）を壊す不要な`clone`・コピーを避ける。
 - 大きなデータに対する計算量・メモリ使用量に注意する。
-- **faerのグローバル並列度は`Par::Seq`固定（Issue #283）**: `faer`は`rayon` feature既定ONで、グローバル並列度の既定が`Par::Rayon(0)`（全論理コア）。`col_piv_qr`/行列積/Choleskyの高レベルAPIは全て`get_global_parallelism()`を参照するため、放置すると全線形代数が暗黙に全コア並列で走る。OLS/WLS/IV等の設計行列はtall-skinny（n大・k小）中心で、この形の暗黙並列化は高速化せず多コア機・負荷下でシングルスレッド比20〜200倍遅く不安定になることを実測（#283。classical n=1,000,000 で全コア＋背景負荷下 中央値24.9秒→対策後0.39秒、無負荷でも0.24秒→0.14秒＋分散1/14）。`engine::parallelism::ensure_serial()`（`faer::set_global_parallelism(Par::Seq)`を呼ぶだけの冪等関数）を全`Estimator::fit()`冒頭と`engine_pybind`の`#[pymodule]`初期化で呼び、faerを常に逐次にする。**新しい手法の`fit()`を追加したら`ensure_serial()`呼び出しを忘れない**（`engine/src/linear/CLAUDE.md`「faerのグローバル並列度」・各系統CLAUDE.md参照）。並列化はグローバル設定に頼らず、実測で有効な箇所だけ`Par::Rayon`（スレッド数指定は`Par::rayon(n)`、`n=0`で現在のrayonスレッド数に解決）を対象APIへ明示的に渡してopt-inする。
+- **faerのグローバル並列度は`Par::Seq`固定**: `faer`は`rayon` feature既定ONで、グローバル並列度の既定が`Par::Rayon(0)`（全論理コア）。`col_piv_qr`/行列積/Choleskyの高レベルAPIは全て`get_global_parallelism()`を参照するため、放置すると全線形代数が暗黙に全コア並列で走る。OLS/WLS/IV等の設計行列はtall-skinny（n大・k小）中心で、この形の暗黙並列化は高速化せず多コア機・負荷下でシングルスレッド比20〜200倍遅く不安定になることを実測（classical n=1,000,000 で全コア＋背景負荷下 中央値24.9秒→対策後0.39秒、無負荷でも0.24秒→0.14秒＋分散1/14）。`engine::parallelism::ensure_serial()`（`faer::set_global_parallelism(Par::Seq)`を呼ぶだけの冪等関数）を全`Estimator::fit()`冒頭と`engine_pybind`の`#[pymodule]`初期化で呼び、faerを常に逐次にする。**新しい手法の`fit()`を追加したら`ensure_serial()`呼び出しを忘れない**（`engine/src/linear/CLAUDE.md`「faerのグローバル並列度」・各系統CLAUDE.md参照）。並列化はグローバル設定に頼らず、実測で有効な箇所だけ`Par::Rayon`（スレッド数指定は`Par::rayon(n)`、`n=0`で現在のrayonスレッド数に解決）を対象APIへ明示的に渡してopt-inする。
 - **並列化（`rayon`）の採用検討**: 現時点で`rayon`はどのクレートの直接の依存にも含まれていない（`faer`が内部依存として持つのみ、上記のとおりグローバルには`Par::Seq`で無効化）。以下のような「独立した単位の処理を大量に繰り返す」箇所は将来の候補になりうるが、**採用するかどうかは実測してから決める**（`hac_cov_params`で`Par::Seq`を明示指定した教訓——k×kの小さい出力サイズではfaer既定の並列ディスパッチのオーバーヘッドが計算本体を上回り逐次より遅くなった、実測n=10,000,k=2で6倍悪化——と同じ姿勢。並列化＝常に速いとは限らない）。
   - **MLEベースの手法**（Logit/Probit/Tobit等）の`CostFunction`/`Gradient`/`Hessian`・観測ごとのスコア計算: Newton/BFGS/L-BFGSの反復ごとに観測数`n`に比例する和を取る処理が繰り返し呼ばれるため、`n`が大きいデータセットでは最適化全体の支配的なコストになりうる（`engine/src/nonlinear/logit.rs`の`LogitProblem`が該当。Probit/Tobitも同型の構造になる見込み）。
   - **パネルデータ（FE/RE）の個体（グループ）ごとの計算、クラスターロバストSEのクラスターごとの計算**。ただしOLSの`cluster_cov_params`は計算量がO(G·k²)（`G`はクラスター数、通常`n`よりずっと小さい）で実測上ボトルネックにならないことを確認済み（`docs/spec/ols-spec.md`「パフォーマンス」）。クラスター数`G`が非常に大きいケース等、前提が変わる場合は再検討する。
@@ -102,5 +100,5 @@ paths:
 - 純粋ロジックの単体テストは、対応するソースファイル内の `#[cfg(test)] mod tests`（同じファイルの末尾。`cargo test -p engine`で実行）に置く（対象コードと同じファイルにあることでリファクタリング時の追従漏れを防げるため、OLS実装で一貫してこの方式を採用している）。
 - 許容誤差等のテスト方針の詳細は `testing-policy.md` を参照。
 - **カバレッジの現実的な目標**: `cargo llvm-cov -p engine`で計測する。100%は目指さず、既に検証済みの不変条件（特異性検出済みの行列のCholesky分解、事前検証済みの自由度によるt分布/F分布の構築等）に対する防御的な`Result`化（`unwrap`/`expect`を避けるため`Result`を返すが、実際にはその不変条件により失敗し得ない`map_err`分岐）はカバレッジ対象外として許容する。対象外にする場合は、その箇所のdocコメントに「なぜ理論上到達不能か」を明記すること（`engine::linear::ols`の`xtx_inverse`・`wald_f_test`等を参照）。
-- **`cargo llvm-cov -p engine report`（テスト実行を伴わない`report`サブコマンド）は直前に生成済みのプロファイルをそのまま再表示するだけで、その間に追加・変更したテストを反映しない**（Issue #168で実際に踏んだ罠: テスト追加後に`report --show-missing-lines`だけ再実行し、数値が全く変わらないことに気づかず古い欠落行リストを見続けるところだった）。テスト追加・変更後にカバレッジを再計測する際は、`report`ではなく`cargo llvm-cov -p engine`（引数無し、または`--show-missing-lines`等のオプション付き）本体を再実行し、テストの再ビルド・再実行から行うこと。
-- **カバレッジの数値（%）だけでなく`--show-missing-lines`の欠落行を機能単位で読むこと**: HAC/Kernelラグ付き共分散のように、`lags`のデフォルト分岐（`None`）や明示的な正のラグ値での重み付けループ本体が一度もテストで通っていなくても、他の分岐（`lags=Some(0)`等の退化ケースのみ）が厚くテストされていると全体のカバレッジ%は高く出てしまう（Issue #168で発覚: `iv/two_sls.rs`のNewey-West重み付けループが`lags>=1`で一度も実行されていなかったが、モジュール全体は96%台だった）。%だけで「十分」と判断せず、欠落行が計算ロジックの中核（分岐・ループ本体）かdocコメント済みの防御的`Result`化か`assert!`メッセージ引数（後述）かを個別に確認する。
+- **`cargo llvm-cov -p engine report`（テスト実行を伴わない`report`サブコマンド）は直前に生成済みのプロファイルをそのまま再表示するだけで、その間に追加・変更したテストを反映しない**（実際に踏んだ罠: テスト追加後に`report --show-missing-lines`だけ再実行し、数値が全く変わらないことに気づかず古い欠落行リストを見続けるところだった）。テスト追加・変更後にカバレッジを再計測する際は、`report`ではなく`cargo llvm-cov -p engine`（引数無し、または`--show-missing-lines`等のオプション付き）本体を再実行し、テストの再ビルド・再実行から行うこと。
+- **カバレッジの数値（%）だけでなく`--show-missing-lines`の欠落行を機能単位で読むこと**: HAC/Kernelラグ付き共分散のように、`lags`のデフォルト分岐（`None`）や明示的な正のラグ値での重み付けループ本体が一度もテストで通っていなくても、他の分岐（`lags=Some(0)`等の退化ケースのみ）が厚くテストされていると全体のカバレッジ%は高く出てしまう（実際に発覚した例: `iv/two_sls.rs`のNewey-West重み付けループが`lags>=1`で一度も実行されていなかったが、モジュール全体は96%台だった）。%だけで「十分」と判断せず、欠落行が計算ロジックの中核（分岐・ループ本体）かdocコメント済みの防御的`Result`化か`assert!`メッセージ引数（後述）かを個別に確認する。

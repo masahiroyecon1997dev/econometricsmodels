@@ -9,8 +9,6 @@
       "Read(./.pytest_cache/**)",
       "Read(./.ruff_cache/**)",
       "Read(./site/**)",
-      "Read(./.github/agents/**)",
-      "Read(./.github/instructions/**)",
       "Read(./about.hbs)",
       "Read(./LICENSE)",
       "Read(./THIRD-PARTY-LICENSES.html)",

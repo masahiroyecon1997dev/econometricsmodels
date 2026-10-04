@@ -1,0 +1,67 @@
+name: Check R updates
+
+# DependabotはCRAN（Rパッケージ）を扱えないため、.devcontainer/Dockerfileでピン留めした
+# Rパッケージと、R本体の更新をここで定期確認する（詳細は docs/spec/ci-cd-notes.md）。
+# 更新があればIssueを自動起票（既存の未クローズIssueがあれば本文を更新）し、
+# すべて最新になったら自動でクローズする。
+on:
+  schedule:
+    - cron: "0 0 * * 1" # 毎週月曜 00:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: check-r-updates
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check pinned R packages and R itself
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE_TITLE: "devcontainer: R package/R updates available"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # 更新ありのとき終了コード1でreport.mdを書き出す（2以上はスクリプト自体の異常）。
+      - name: Compare pinned versions with CRAN
+        id: check
+        run: |
+          set +e
+          python .github/scripts/check_r_updates.py --output report.md
+          code=$?
+          set -e
+          if [ "$code" -gt 1 ]; then
+            exit "$code"
+          fi
+          echo "outdated=$code" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update the tracking issue
+        if: steps.check.outputs.outdated == '1'
+        run: |
+          number=$(gh issue list --state open --label dependencies \
+            --json number,title \
+            --jq "map(select(.title == env.ISSUE_TITLE)) | .[0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue edit "$number" --body-file report.md
+            echo "Updated issue #$number" >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh issue create --title "$ISSUE_TITLE" \
+              --label dependencies --label setup --label testing \
+              --body-file report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Close the tracking issue when everything is up to date
+        if: steps.check.outputs.outdated == '0'
+        run: |
+          number=$(gh issue list --state open --label dependencies \
+            --json number,title \
+            --jq "map(select(.title == env.ISSUE_TITLE)) | .[0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue close "$number" \
+              --comment "All pinned R packages and R itself are up to date."
+          fi

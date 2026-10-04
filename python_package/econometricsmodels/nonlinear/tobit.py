@@ -26,6 +26,8 @@ continuous, so a classification table is not meaningful).
 
 from __future__ import annotations
 
+from typing import Literal
+
 import polars as pl
 
 from .. import _lib
@@ -74,13 +76,16 @@ class Tobit:
             The estimation results.
 
         Raises:
+            TypeError: An argument has the wrong type (for example
+                `x` is a string instead of a list of column names). A
+                builtin exception, not a `ValidationError`.
             ValidationError: The input or options are invalid (a
                 column is missing, contains missing values or
                 NaN/infinity, `y` is outside the censoring bounds,
                 the censoring bounds themselves are invalid,
                 insufficient observations, no uncensored observations,
                 `confidence_level` out of range, an unknown
-                `cov_type`/`method` string, an `x` column named
+                `cov_type`/`solver` string, an `x` column named
                 `"const"`/`"sigma"`, etc.). A subclass of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. non-convergence, a singular
@@ -129,6 +134,11 @@ class TobitResults:
         return self._raw.param_names
 
     @property
+    def dep_var_name(self) -> str:
+        """Column name of the dependent variable."""
+        return self._raw.dep_var_name
+
+    @property
     def params(self) -> dict[str, float]:
         """Coefficient name to coefficient value (includes `"sigma"`)."""
         return dict(zip(self._raw.param_names, self._raw.params))
@@ -139,13 +149,27 @@ class TobitResults:
         return dict(zip(self._raw.param_names, self._raw.std_errors))
 
     @property
-    def z_stats(self) -> dict[str, float]:
+    def test_stats(self) -> dict[str, float]:
         """Coefficient name to z-statistic (includes `"sigma"`).
 
         Tobit uses a z-test (standard normal), not a t-test (see
         `docs/spec/nonlinear-common.md` section 4).
         """
-        return dict(zip(self._raw.param_names, self._raw.z_stats))
+        return dict(zip(self._raw.param_names, self._raw.test_stats))
+
+    @property
+    def stat_dist(self) -> Literal["t", "normal"]:
+        """Distribution of `test_stats`: `"t"` (t-statistics) or
+        `"normal"` (z-statistics)."""
+        return self._raw.stat_dist
+
+    @property
+    def stat_df(self) -> int | None:
+        """Degrees of freedom of the t distribution behind `test_stats`,
+        or `None` when `stat_dist` is `"normal"`. May differ from
+        `df_resid` (e.g. cluster-robust inference uses `G - 1`), so use
+        this to recompute p-values from `test_stats`."""
+        return self._raw.stat_df
 
     @property
     def p_values(self) -> dict[str, float]:
@@ -222,6 +246,17 @@ class TobitResults:
         return self._raw.wald_p_value
 
     @property
+    def wald_dist(self) -> Literal["chi2"]:
+        """Distribution of `wald_statistic`: always `"chi2"` (chi-squared)."""
+        return self._raw.wald_dist
+
+    @property
+    def wald_df(self) -> int | None:
+        """Degrees of freedom of the chi-squared Wald test
+        (`wald_statistic`). `None` when there are no slope coefficients."""
+        return self._raw.wald_df
+
+    @property
     def converged(self) -> bool:
         """Whether the solver converged within `max_iter` iterations."""
         return self._raw.converged
@@ -237,9 +272,9 @@ class TobitResults:
         return self._raw.cov_type
 
     @property
-    def method(self) -> str:
+    def solver(self) -> str:
         """Optimization solver actually used (normalized to lowercase)."""
-        return self._raw.method
+        return self._raw.solver
 
     @property
     def lower(self) -> float | None:
@@ -263,7 +298,7 @@ class TobitResults:
 
         Returns:
             A list of dictionaries, one per coefficient (including
-            `"sigma"`). Keys are `param`, `coef`, `std_err`, `z_stat`,
+            `"sigma"`). Keys are `param`, `coef`, `std_err`, `test_stat`,
             `p_value`, `conf_lower`, `conf_upper`.
         """
         return [
@@ -271,7 +306,7 @@ class TobitResults:
                 "param": name,
                 "coef": coef,
                 "std_err": se,
-                "z_stat": z,
+                "test_stat": z,
                 "p_value": p,
                 "conf_lower": lower,
                 "conf_upper": upper,
@@ -280,7 +315,7 @@ class TobitResults:
                 self._raw.param_names,
                 self._raw.params,
                 self._raw.std_errors,
-                self._raw.z_stats,
+                self._raw.test_stats,
                 self._raw.p_values,
                 self._raw.conf_lower,
                 self._raw.conf_upper,
@@ -289,12 +324,20 @@ class TobitResults:
 
     def predict(
         self,
-        target: str = "expected_observed",
         new_data: pl.DataFrame | None = None,
+        target: str = "expected_observed",
     ) -> list[dict[str, float]]:
         """Predicted values for `target`, on the training data or `new_data`.
 
         Args:
+            new_data: New data to predict on. Must contain columns with
+                the same names as the `x` columns passed at fit time
+                (matched by name; column order does not matter). If
+                `include_intercept=True` was used at fit time, the
+                constant column is added automatically and must not be
+                included here. If `None` (default), returns the
+                predicted values for the training data used in
+                `fit()`.
             target: Which quantity to predict. One of
                 `"expected_latent"` (`E[y*|x] = x'β`),
                 `"expected_observed"` (default; `E[y|x]`, the
@@ -304,14 +347,6 @@ class TobitResults:
                 Case-insensitive. Independent of `new_data`: the same
                 three targets are available whether predicting on the
                 training data or new data.
-            new_data: New data to predict on. Must contain columns with
-                the same names as the `x` columns passed at fit time
-                (matched by name; column order does not matter). If
-                `include_intercept=True` was used at fit time, the
-                constant column is added automatically and must not be
-                included here. If `None` (default), returns the
-                predicted values for the training data used in
-                `fit()`.
 
         Returns:
             Row-oriented predictions, one dict per observation. Each
@@ -323,13 +358,13 @@ class TobitResults:
                 column, or a column contains missing/NaN/infinite
                 values. A subclass of `ValueError`.
         """
-        raw = self._raw.predict(target, new_data)
+        raw = self._raw.predict(new_data, target)
         return [{"predicted": p} for p in raw]
 
     def augment(
         self,
-        target: str = "expected_observed",
         new_data: pl.DataFrame | None = None,
+        target: str = "expected_observed",
     ) -> pl.DataFrame:
         """Source data with the predicted values appended as a column.
 
@@ -340,8 +375,8 @@ class TobitResults:
         project's general policy on this DataFrame-returning
         exception.
 
-        Unlike Logit/Probit's fixed `"probability"` column, the
-        appended column here is named `"predicted_{target}"`, using
+        Like Logit/Probit's fixed `"predicted_probability"` column, the
+        appended column here has a `predicted_` prefix and is named `"predicted_{target}"`, using
         the lowercased `target` (e.g. `target="expected_observed"` or
         `target="Expected_Observed"` both produce
         `"predicted_expected_observed"`), since `predict()`'s meaning
@@ -349,10 +384,10 @@ class TobitResults:
         per `target` on the same DataFrame without a name collision.
 
         Args:
-            target: Same as `predict()`.
             new_data: Same as `predict()`. If `None` (default), returns
                 the training data used in `fit()` with the predicted
                 values appended.
+            target: Same as `predict()`.
 
         Returns:
             A polars DataFrame: the source data's columns plus
@@ -364,7 +399,7 @@ class TobitResults:
                 already has a column named `"predicted_{target}"`
                 (which would otherwise be silently overwritten).
         """
-        return self._raw.augment(target, new_data)
+        return self._raw.augment(new_data, target)
 
     def marginal_effects(
         self,
@@ -376,8 +411,8 @@ class TobitResults:
 
         Unlike Logit/Probit, this is Tobit's own implementation (not
         the shared `dydx_and_jacobian` pattern) because the formula
-        differs per `target` (`docs/spec/nonlinear-common.md` section 6,
-        Issue #211's conclusion). Independent of the `confidence_level`
+        differs per `target` (see `docs/spec/nonlinear-common.md`
+        section 6). Independent of the `confidence_level`
         used in `fit()` (may differ from it). The constant term
         (intercept) is excluded from the output.
 
@@ -393,9 +428,12 @@ class TobitResults:
 
         Returns:
             A list of dictionaries, one per explanatory variable
-            (excluding the intercept). Keys are `param`, `dydx`,
-            `std_err`, `z`, `p_value`, `conf_low`, `conf_high` (see
-            `docs/spec/nonlinear-common.md` section 6).
+            (excluding the intercept). Keys are `param`, `effect`,
+            `std_err`, `test_stat`, `p_value`, `conf_lower`, `conf_upper` (see
+            `docs/spec/nonlinear-common.md` section 6). `test_stat` is
+            always a z-statistic (normal distribution). `effect` is
+            the marginal effect estimate (corresponds to `dy/dx` in
+            Stata's `margins, dydx(*)` and statsmodels).
 
         Raises:
             ValidationError: `at` is not one of `"overall"`, `"mean"`,
@@ -407,18 +445,18 @@ class TobitResults:
         return [
             {
                 "param": name,
-                "dydx": dydx,
+                "effect": effect,
                 "std_err": se,
-                "z": z,
+                "test_stat": z,
                 "p_value": p,
-                "conf_low": lower,
-                "conf_high": upper,
+                "conf_lower": lower,
+                "conf_upper": upper,
             }
-            for name, dydx, se, z, p, lower, upper in zip(
+            for name, effect, se, z, p, lower, upper in zip(
                 raw.param_names,
-                raw.dydx,
+                raw.effect,
                 raw.std_errors,
-                raw.z_stats,
+                raw.test_stats,
                 raw.p_values,
                 raw.conf_lower,
                 raw.conf_upper,

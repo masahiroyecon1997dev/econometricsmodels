@@ -27,7 +27,7 @@ use crate::error::CommonError;
 /// （`.claude/rules/rust-style.md`「エラーハンドリング」参照）。バリアントと
 /// Python例外の対応は`docs/spec/ols-spec.md`の表を参照。
 ///
-/// 【スコープの注意】欠損値（null）・`time_col`の数値キャスト失敗等、polarsの
+/// 【スコープの注意】欠損値（null）・`hac_time`の順序づけ失敗（同値）等、polarsの
 /// 列データそのものに起因する検証は`engine_pybind::column_extraction`の責務であり、
 /// ここには含めない（`engine`は`&[f64]`等、既にクリーンな値しか受け取らない前提）。
 /// 正規方程式ソルバー実装等の後続issueで必要になった場合はバリアントを随時追加する。
@@ -53,4 +53,10 @@ pub enum LeastSquaresError {
     /// 設計行列が特異（完全な多重共線性等）。
     #[error("design matrix is singular (perfect multicollinearity detected)")]
     SingularMatrix,
+}
+
+/// テスト用の`time_order`: 行順をそのまま時系列順とする`[0.0, 1.0, ..., n-1]`。
+#[cfg(test)]
+pub(crate) fn row_time_order(n: usize) -> Vec<f64> {
+    (0..n).map(|i| i as f64).collect()
 }

@@ -19,18 +19,28 @@ from functools import partial
 import polars as pl
 import pytest
 from _assertions import assert_close
+from _helpers import (
+    HAC_AUTO_LAG_SAMPLE_SIZES,
+    ROW_TIME,
+    hac_lag_frame,
+    hac_time_for,
+    with_row_time,
+)
 from _tolerances import TOLERANCES
 from econometricsmodels import (
     OLS,
     WLS,
     OLSOptions,
+    ValidationError,
     WLSOptions,
     WLSResults,
 )
 
+from benchmark.common import hac_auto_lag
+
 # predict()のstatsmodels照合は主リファレンス照合と同じ許容誤差
 # （`_tolerances.py`の"wls_reference"）で行う（`test_ols_api.py`と同じ方針、
-# `refactoring-candidates-2.md`項目53/56「独自の絶対誤差定数は持たない」）。
+# 独自の絶対誤差定数は持たない）。
 _assert_close = partial(
     assert_close,
     rtol=TOLERANCES["wls_reference"]["rtol"],
@@ -48,7 +58,7 @@ _assert_close = partial(
     [
         {},
         {"cov_type": "hc3"},
-        {"cov_type": "cluster", "cluster_col": "cluster"},
+        {"cov_type": "cluster", "cluster": "cluster"},
         {"include_intercept": False},
     ],
 )
@@ -62,8 +72,8 @@ def test_weight_one_matches_ols(dataset, option_kwargs):
     等に由来する浮動小数点誤差レベルの差が生じうる（`engine/src/linear/wls.rs`
     の対応するRust単体テストで確認済みの挙動）。
 
-    `OLSOptions`/`WLSOptions`はフィールド構成が同一の独立クラス（Issue #308）
-    のため、同じ`option_kwargs`からそれぞれ構築して`OLS`/`WLS`に渡す。
+    `OLSOptions`/`WLSOptions`はフィールド構成が同一の独立クラスのため、
+    同じ`option_kwargs`からそれぞれ構築して`OLS`/`WLS`に渡す。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
 
@@ -82,7 +92,7 @@ def test_weight_one_matches_ols(dataset, option_kwargs):
     for name in ols_res.param_names:
         assert wls_res.params[name] == ols_res.params[name], name
         assert wls_res.std_errors[name] == ols_res.std_errors[name], name
-        assert wls_res.t_stats[name] == ols_res.t_stats[name], name
+        assert wls_res.test_stats[name] == ols_res.test_stats[name], name
         assert wls_res.p_values[name] == ols_res.p_values[name], name
         assert wls_res.conf_int[name] == ols_res.conf_int[name], name
 
@@ -93,7 +103,7 @@ def test_weight_one_matches_ols(dataset, option_kwargs):
     assert wls_res.cov_type == ols_res.cov_type
 
     assert abs(wls_res.r_squared - ols_res.r_squared) < 1e-9
-    assert abs(wls_res.r_squared_adj - ols_res.r_squared_adj) < 1e-9
+    assert abs(wls_res.adj_r_squared - ols_res.adj_r_squared) < 1e-9
     assert abs(wls_res.log_likelihood - ols_res.log_likelihood) < 1e-9
     assert abs(wls_res.aic - ols_res.aic) < 1e-9
     assert abs(wls_res.bic - ols_res.bic) < 1e-9
@@ -120,7 +130,7 @@ def test_weight_one_matches_ols_coef_table(dataset):
 
 def test_weight_one_matches_ols_predict(dataset):
     """重み=1のとき、`predict()`（学習データ・新規データいずれも）が
-    OLSの`predict()`と一致すること（Issue #132: 予測値は重みに関与しない、
+    OLSの`predict()`と一致すること（予測値は重みに関与しない、
     という設計の帰結を確認する）。
 
     学習データ（`new_data=None`）の計算経路自体はwls.rs（手動ループ、
@@ -194,7 +204,7 @@ def test_coef_table_structure(dataset):
         "param",
         "coef",
         "std_err",
-        "t_stat",
+        "test_stat",
         "p_value",
         "conf_lower",
         "conf_upper",
@@ -215,14 +225,14 @@ def test_conf_int_structure(dataset):
         assert lower < upper
 
 
-def test_params_std_errors_t_stats_p_values_share_keys(dataset):
+def test_params_std_errors_test_stats_p_values_share_keys(dataset):
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
     expected_keys = {"const", "x1", "x2"}
 
     assert set(res.params.keys()) == expected_keys
     assert set(res.std_errors.keys()) == expected_keys
-    assert set(res.t_stats.keys()) == expected_keys
+    assert set(res.test_stats.keys()) == expected_keys
     assert set(res.p_values.keys()) == expected_keys
 
 
@@ -246,7 +256,7 @@ def test_cov_type_label(dataset):
         ).fit()
         assert res.cov_type == cov_type
 
-    cluster_options = WLSOptions(cov_type="cluster", cluster_col="cluster")
+    cluster_options = WLSOptions(cov_type="cluster", cluster="cluster")
     cluster_res = WLS(
         df, y="y", x=["x1", "x2"], weight="weight", options=cluster_options
     ).fit()
@@ -264,8 +274,6 @@ def test_cov_type_label(dataset):
         ("hc3", "hc3"),
         ("HAC", "hac"),
         ("Hac", "hac"),
-        ("nonrobust", "nonrobust"),
-        ("NONROBUST", "nonrobust"),
     ],
 )
 def test_cov_type_is_case_insensitive(dataset, cov_type, expected_label):
@@ -274,8 +282,8 @@ def test_cov_type_is_case_insensitive(dataset, cov_type, expected_label):
     HACは`hac_lags`省略時の自動計算式で成功パスを確認する
     （テスト網羅性候補・項目35）。
     """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = WLSOptions(cov_type=cov_type)
+    df = with_row_time(dataset).with_columns(pl.lit(1.0).alias("weight"))
+    options = WLSOptions(cov_type=cov_type, **hac_time_for(cov_type))
     res = WLS(
         df, y="y", x=["x1", "x2"], weight="weight", options=options
     ).fit()
@@ -283,22 +291,16 @@ def test_cov_type_is_case_insensitive(dataset, cov_type, expected_label):
 
 
 @pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
-def test_nonrobust_is_alias_for_classical(dataset, cov_type):
-    """`"nonrobust"`が`"classical"`と同じ計算方法（標準誤差も一致）の
-    エイリアスであること（OLSと同じ検証）。
-    """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = WLSOptions(cov_type=cov_type)
-    res = WLS(
-        df, y="y", x=["x1", "x2"], weight="weight", options=options
-    ).fit()
-
-    classical_options = WLSOptions(cov_type="classical")
-    classical_res = WLS(
-        df, y="y", x=["x1", "x2"], weight="weight", options=classical_options
-    ).fit()
-    for name in res.param_names:
-        assert res.std_errors[name] == classical_res.std_errors[name], name
+def test_nonrobust_is_rejected(dataset, cov_type):
+    """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
+    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
+        WLS(
+            dataset.with_columns(pl.lit(1.0).alias("weight")),
+            y="y",
+            x=["x1", "x2"],
+            weight="weight",
+            options=WLSOptions(cov_type=cov_type),
+        ).fit()
 
 
 def test_confidence_level_changes_interval_width(dataset):
@@ -333,8 +335,9 @@ def test_hac_auto_lags_runs_and_returns_finite_std_errors(dataset):
     経由で`hac_lags`を明示していなかったが、`cov_type="hac"`自体のテストは
     無かった）。
     """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    options = WLSOptions(cov_type="hac")  # hac_lags省略 = 自動計算
+    df = with_row_time(dataset).with_columns(pl.lit(1.0).alias("weight"))
+    # hac_lags省略 = 自動計算
+    options = WLSOptions(cov_type="hac", hac_time=ROW_TIME)
     res = WLS(
         df, y="y", x=["x1", "x2"], weight="weight", options=options
     ).fit()
@@ -344,8 +347,8 @@ def test_hac_auto_lags_runs_and_returns_finite_std_errors(dataset):
         assert se > 0.0
 
 
-def test_hac_time_col_reorders_rows_before_computing_lags():
-    """`time_col`を指定すると、DataFrameの行順に関わらず時系列順で
+def test_hac_time_reorders_rows_before_computing_lags():
+    """`hac_time`を指定すると、DataFrameの行順に関わらず時系列順で
     ラグ付き自己共分散を計算すること（OLSと同じ検証データ・観点、重み=1で
     OLSと同じ結果になることを利用する）。
     """
@@ -353,10 +356,11 @@ def test_hac_time_col_reorders_rows_before_computing_lags():
         {
             "y": [2.0, 4.0, 5.0, 4.0, 5.0],
             "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "time": [1.0, 2.0, 3.0, 4.0, 5.0],
             "weight": [1.0] * 5,
         }
     )
-    ordered_options = WLSOptions(cov_type="hac", hac_lags=1)
+    ordered_options = WLSOptions(cov_type="hac", hac_lags=1, hac_time="time")
     ordered_res = WLS(
         ordered_df, y="y", x=["x1"], weight="weight", options=ordered_options
     ).fit()
@@ -369,7 +373,7 @@ def test_hac_time_col_reorders_rows_before_computing_lags():
             "weight": [1.0] * 5,
         }
     )
-    shuffled_options = WLSOptions(cov_type="hac", hac_lags=1, time_col="time")
+    shuffled_options = WLSOptions(cov_type="hac", hac_lags=1, hac_time="time")
     shuffled_res = WLS(
         shuffled_df,
         y="y",
@@ -454,7 +458,7 @@ def test_predict_new_data_matches_statsmodels(dataset):
 
 def test_predict_returns_predicted_key_only(dataset):
     """`predict()`の各行が`"predicted"`という1つのキーのみを持つこと
-    （Issue #309: `"fitted"`固定は統計学的に不正確なため`"predicted"`に統一）。
+    （`"fitted"`固定は統計学的に不正確なため`"predicted"`に統一）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
@@ -547,3 +551,31 @@ def test_augment_without_intercept_matches_predict():
     augmented_new = res.augment(new_data)
     expected_new = [row["predicted"] for row in res.predict(new_data)]
     assert augmented_new["predicted"].to_list() == expected_new
+
+
+# ── HACの実使用ラグ数（hac_lags_used）─────────────────────────────
+
+
+@pytest.mark.parametrize("n", HAC_AUTO_LAG_SAMPLE_SIZES)
+def test_hac_lags_used_matches_python_auto_lag_formula(n):
+    """`hac_lags`省略時の`hac_lags_used`が、Python側の独立実装
+    （`benchmark.common.hac_auto_lag`）と複数の標本サイズで一致すること。
+    """
+    options = WLSOptions(cov_type="hac", hac_time=ROW_TIME)
+    res = WLS(
+        hac_lag_frame(n),
+        y="y",
+        x=["x1", "x2"],
+        weight="weight",
+        options=options,
+    ).fit()
+    assert res.hac_lags_used == hac_auto_lag(n)
+
+
+def test_hac_lags_used_echoes_explicit_hac_lags_and_is_none_unless_hac():
+    df = hac_lag_frame(50)
+    kwargs = {"y": "y", "x": ["x1", "x2"], "weight": "weight"}
+    hac = WLSOptions(cov_type="hac", hac_lags=3, hac_time=ROW_TIME)
+    assert WLS(df, options=hac, **kwargs).fit().hac_lags_used == 3
+    hc1 = WLSOptions(cov_type="hc1")
+    assert WLS(df, options=hc1, **kwargs).fit().hac_lags_used is None

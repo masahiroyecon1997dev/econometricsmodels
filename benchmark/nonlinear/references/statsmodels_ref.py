@@ -54,7 +54,7 @@ get_robustcov_results`は`HC1`指定時に`getattr(self, "cov_HC1", None)`でモ
     python -m benchmark.nonlinear.references.statsmodels_ref --model logit \\
         --dataset-source wooldridge --dataset mroz \\
         --formula "inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6" \\
-        --cov-type cluster --cluster-col city
+        --cov-type cluster --cluster city
 """
 
 from __future__ import annotations
@@ -76,12 +76,12 @@ def _margeff_frame(fit_result, at: str) -> dict:
     sf = fit_result.get_margeff(at=at).summary_frame()
     return {
         str(name): {
-            "dydx": float(row.iloc[0]),
-            "se": float(row.iloc[1]),
-            "z": float(row.iloc[2]),
+            "effect": float(row.iloc[0]),
+            "std_err": float(row.iloc[1]),
+            "test_stat": float(row.iloc[2]),
             "p_value": float(row.iloc[3]),
-            "conf_low": float(row.iloc[4]),
-            "conf_high": float(row.iloc[5]),
+            "conf_lower": float(row.iloc[4]),
+            "conf_upper": float(row.iloc[5]),
         }
         for name, row in sf.iterrows()
     }
@@ -95,7 +95,7 @@ def run(
     dataset: str,
     formula: str | None,
     cov_type: str,
-    cluster_col: str | None = None,
+    cluster: str | None = None,
     confidence_level: float = 0.95,
     model: str = "logit",
     method: str = "newton",
@@ -146,7 +146,7 @@ def run(
         raw: dict = {
             "coef": dict(zip(param_names, params.tolist())),
             "se": dict(zip(param_names, se.tolist())),
-            "z_stats": dict(zip(param_names, z.tolist())),
+            "test_stats": dict(zip(param_names, z.tolist())),
             "p_values": dict(zip(param_names, p_values.tolist())),
             "conf_int": {
                 name: [float(lo), float(hi)]
@@ -155,7 +155,7 @@ def run(
         }
         # opgの限界効果はRクロスチェック（marginaleffects）側を正とするため
         # margeffはNoneのまま（fix_margeff=Falseで正規化対象から外す）。
-        result = normalize_names(raw, stat_key="z_stats")
+        result = normalize_names(raw, stat_key="test_stats")
         result["margeff"] = None
         model_for_stats = base
     else:
@@ -164,7 +164,7 @@ def run(
         )
         fit_kwargs: dict = {"cov_type": sm_cov_type, "method": method}
         if sm_cov_type == "cluster":
-            fit_kwargs["cov_kwds"] = {"groups": pandas_df[cluster_col]}
+            fit_kwargs["cov_kwds"] = {"groups": pandas_df[cluster]}
 
         sm_model = smf_fit(formula=formula, data=pandas_df)
         fitted = sm_model.fit(disp=0, **fit_kwargs)
@@ -175,7 +175,7 @@ def run(
                 str(k): float(v) for k, v in fitted.params.to_dict().items()
             },
             "se": {str(k): float(v) for k, v in fitted.bse.to_dict().items()},
-            "z_stats": {
+            "test_stats": {
                 str(k): float(v) for k, v in fitted.tvalues.to_dict().items()
             },
             "p_values": {
@@ -189,10 +189,9 @@ def run(
         }
         # patsy（formula API）由来の生の切片名"Intercept"を、生成時点で
         # 本実装の"const"へ正規化する（Rクロスチェック側`normalize_names`と
-        # 同じ処理を生成時に揃える。`docs/planning/specs/
-        # refactoring-issue231-progress.md`項目63参照）。margeffの内側の
+        # 同じ処理を生成時に揃える）。margeffの内側の
         # パラメータ名も同時に畳む（fix_margeff=True）。
-        result = normalize_names(raw, stat_key="z_stats", fix_margeff=True)
+        result = normalize_names(raw, stat_key="test_stats", fix_margeff=True)
         model_for_stats = fitted
 
     result["log_likelihood"] = float(model_for_stats.llf)
@@ -246,7 +245,7 @@ if __name__ == "__main__":
         "--formula", default=None, help="省略時はsyntheticのy,x列から自動生成"
     )
     parser.add_argument("--cov-type", default="classical")
-    parser.add_argument("--cluster-col", default=None)
+    parser.add_argument("--cluster", default=None)
     parser.add_argument("--confidence-level", type=float, default=0.95)
     parser.add_argument("--method", default="newton")
     args = parser.parse_args()
@@ -256,7 +255,7 @@ if __name__ == "__main__":
         args.dataset,
         args.formula,
         args.cov_type,
-        args.cluster_col,
+        args.cluster,
         args.confidence_level,
         args.model,
         args.method,

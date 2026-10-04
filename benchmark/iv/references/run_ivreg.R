@@ -42,7 +42,7 @@
 # 高精度で一致するがp値は一致しない（実測: G=10のケースでstatistic=112.32は
 # 完全一致、p値はR側8.5e-24 vs 本実装2.2e-06——G-1=9で計算するとRのstatisticから
 # 本実装のp値が再現できることを確認済み）。このためcluster cov_typeのみ
-# `wu_hausman_p_value`をクロスチェック対象から除外する（`gmm_iterations=1`の
+# `wu_hausman_p_value`をクロスチェック対象から除外する（`gmm_type="one_step"`の
 # Hansen J除外と同型のパターン、ユーザー確認済み）。
 #
 # 事前準備: install.packages(c("ivreg", "sandwich", "lmtest", "jsonlite"))
@@ -50,7 +50,7 @@
 # 使用例:
 #   Rscript run_ivreg.R data.csv "y ~ x1 + endog1 | x1 + z1 + z2" classical
 #   Rscript run_ivreg.R data.csv "y ~ x1 + endog1 | x1 + z1 + z2" hc0
-#   Rscript run_ivreg.R data.csv "y ~ x1 + endog1 | x1 + z1 + z2" cluster cluster_col
+#   Rscript run_ivreg.R data.csv "y ~ x1 + endog1 | x1 + z1 + z2" cluster cluster
 #   Rscript run_ivreg.R data.csv "y ~ x1 + endog1 | x1 + z1 + z2" hac 2   # hac_lag=2
 #
 # 注: 弱操作変数F統計量は内生変数名をキーにしたdictとして返す（本実装の
@@ -60,7 +60,7 @@
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 2) {
-  stop("usage: Rscript run_ivreg.R <data.csv> <formula> [cov_type=classical] [cluster_col|hac_lag]")
+  stop("usage: Rscript run_ivreg.R <data.csv> <formula> [cov_type=classical] [cluster|hac_lag]")
 }
 data_path <- args[1]
 formula_str <- args[2]
@@ -94,14 +94,14 @@ if (cov_type == "classical") {
   vcov_fn <- function(m) vcovHC(m, type = toupper(cov_type))
 } else if (cov_type == "cluster") {
   if (length(args) < 4) {
-    stop("cluster requires <cluster_col> as arg4")
+    stop("cluster requires <cluster> as arg4")
   }
-  cluster_col <- args[4]
+  cluster <- args[4]
   # cadjust=TRUE: G/(G-1)の小標本補正（OLS/WLSクロスチェックと同じ方針）。
   vcov_fn <- function(m) {
-    vcovCL(m, cluster = df[[cluster_col]], type = "HC1", cadjust = TRUE)
+    vcovCL(m, cluster = df[[cluster]], type = "HC1", cadjust = TRUE)
   }
-  df_inference <- length(unique(df[[cluster_col]])) - 1
+  df_inference <- length(unique(df[[cluster]])) - 1
 } else if (cov_type == "hac") {
   if (length(args) < 4 || is.na(as.integer(args[4]))) {
     stop("hac requires <hac_lag> (integer) as arg4")
@@ -116,7 +116,7 @@ vc <- vcov_fn(model)
 coef_se <- extract_coef_se(model, vc, df_inference)
 coefs <- coef_se$coefs
 ses <- coef_se$ses
-t_stats <- coef_se$t_stats
+test_stats <- coef_se$test_stats
 p_values <- coef_se$p_values
 
 # 信頼区間（既定confidence_level=0.95固定、../../linear/references/run_lm_crosscheck.Rと同じ
@@ -135,7 +135,7 @@ df_resid_val <- df.residual(model)
 
 s <- summary(model)
 r_squared_val <- s$r.squared
-r_squared_adj_val <- s$adj.r.squared
+adj_r_squared_val <- s$adj.r.squared
 
 # ロバストWald検定（本実装のIV版wald_f_testと同じ定義。特異な場合の扱い・
 # NUMERIC_SCENARIOSからの除外方針はwald_f_test()のコメント参照）。
@@ -200,7 +200,7 @@ if (is.null(diag_table_wu)) {
 result <- list(
   coef = as.list(coefs),
   se = as.list(ses),
-  t_stats = as.list(t_stats),
+  test_stats = as.list(test_stats),
   p_values = as.list(p_values),
   conf_int = mapply(
     function(lo, hi) list(lo, hi),
@@ -211,7 +211,7 @@ result <- list(
   nobs = n_obs_val,
   df_resid = df_resid_val,
   r_squared = r_squared_val,
-  r_squared_adj = r_squared_adj_val,
+  adj_r_squared = adj_r_squared_val,
   f_statistic = f_statistic_val,
   f_p_value = f_p_value_val,
   weak_instrument_f = weak_instrument_f_val,

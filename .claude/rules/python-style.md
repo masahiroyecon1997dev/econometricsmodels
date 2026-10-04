@@ -14,6 +14,10 @@ paths:
 - **docstringは英語にする**（モジュール・クラス・関数・メソッド・プロパティの`"""docstring"""`全て）。`rust-style.md`「言語方針」が`engine_pybind`の`#[pyclass]`/`#[pyfunction]`のdocコメント（PyO3経由でPythonの`__doc__`になるもの）を英語にする方針と揃え、mkdocs（mkdocstrings）で同じページにレンダリングされるRust側・Python側のdocstringで言語が混在しないようにする（発覚した不整合の是正）。PyPI公開の独立パッケージであり、Pythonエコシステムの慣習（pandas/numpy/polars等）に合わせる、という`rust-style.md`と同じ理由。
 - **日本語のままでよい**: docstring以外の非公開実装コメント（実装の背景説明、設計判断の理由、TODOコメント等）。`rust-style.md`と同じ区別。
 
+## コメント運用
+
+Issue番号・内部管理ドキュメント（`refactoring-candidates.md`等）への参照可否は、CLAUDE.md 6章「コメント・ドキュメントでの参照方針」に準じる（`python_package`固有の追加規約はない）。
+
 ## Lint / フォーマット
 
 - Ruffの **line-length は79（PEP8標準）**。

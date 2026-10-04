@@ -6,12 +6,10 @@
 と同型）。成功パスの構造・API・オプション反映は `test_probit_api.py`、
 主リファレンス（statsmodels）との数値照合は `test_probit_reference.py`、
 R クロスチェックは `test_probit_crosscheck.py`（OLS/WLS の
-`test_<手法>_validation.py` 等と同じ4分割、`refactoring-candidates-2.md`
-項目68）。
+`test_<手法>_validation.py` 等と同じ4分割）。
 
 テスト本体は `Logit`/`Probit` で完全に重複するため
-`_binary_choice_checks.py` に集約し（`refactoring-candidates-2.md` 項目95）、
-このファイルは薄いラッパーに保つ。
+`_binary_choice_checks.py` に集約し、このファイルは薄いラッパーに保つ。
 """
 
 from __future__ import annotations
@@ -47,8 +45,16 @@ def test_missing_column_raises(binary_dataset):
     _checks.check_missing_column_raises(binary_dataset, Probit)
 
 
+def test_data_not_polars_raises(binary_dataset):
+    _checks.check_data_not_polars_raises(binary_dataset, Probit)
+
+
 def test_null_values_raise():
     _checks.check_null_values_raise(Probit)
+
+
+def test_non_finite_values_raise():
+    _checks.check_non_finite_values_raise(Probit)
 
 
 def test_non_numeric_dtype_raises():
@@ -102,10 +108,10 @@ def test_unknown_cov_type_raises(binary_dataset, cov_type):
     )
 
 
-@pytest.mark.parametrize("method", ["bogus", ""])
-def test_unknown_method_raises(binary_dataset, method):
+@pytest.mark.parametrize("solver", ["bogus", ""])
+def test_unknown_solver_raises(binary_dataset, solver):
     _checks.check_unknown_method_raises(
-        binary_dataset, Probit, ProbitOptions, method
+        binary_dataset, Probit, ProbitOptions, solver
     )
 
 
@@ -154,8 +160,8 @@ def test_cluster_without_col_raises(binary_dataset):
     )
 
 
-def test_cluster_col_nonexistent_column_raises(binary_dataset):
-    _checks.check_cluster_col_nonexistent_column_raises(
+def test_cluster_nonexistent_column_raises(binary_dataset):
+    _checks.check_cluster_nonexistent_column_raises(
         binary_dataset, Probit, ProbitOptions
     )
 
@@ -178,24 +184,24 @@ def test_marginal_effects_confidence_level_out_of_range_raises(
 # ── ComputationError ──────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
-def test_perfect_multicollinearity_raises_computation_error(method):
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_perfect_multicollinearity_raises_computation_error(solver):
     _checks.check_perfect_multicollinearity_raises_computation_error(
-        Probit, "probit", ProbitOptions, method
+        Probit, "probit", ProbitOptions, solver
     )
 
 
-@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
-def test_complete_separation_raises_computation_error(method):
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_complete_separation_raises_computation_error(solver):
     _checks.check_complete_separation_raises_computation_error(
-        Probit, "probit", ProbitOptions, method
+        Probit, "probit", ProbitOptions, solver
     )
 
 
-@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
-def test_complete_separation_with_raise_on_non_convergence_false(method):
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_complete_separation_with_raise_on_non_convergence_false(solver):
     _checks.check_complete_separation_with_raise_on_non_convergence_false(
-        Probit, "probit", ProbitOptions, method
+        Probit, "probit", ProbitOptions, solver
     )
 
 
@@ -210,4 +216,10 @@ def test_non_convergence_raises_computation_error_with_tiny_max_iter(
 def test_separation_suspected_raises_computation_error_for_near_separation_data():
     _checks.check_separation_suspected_raises_computation_error_for_near_separation_data(
         Probit
+    )
+
+
+def test_cluster_unused_by_cov_type_raises(binary_dataset):
+    _checks.check_cluster_unused_by_cov_type_raises(
+        binary_dataset, Probit, ProbitOptions
     )

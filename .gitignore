@@ -26,8 +26,8 @@ python_package/econometricsmodels/*.pyd
 /site/
 
 # performance/compare_<method>.py が生成する生のベンチマーク結果JSON（実行環境依存で
-# 再現性が低く、サマリーは docs/performance/ 配下のMarkdownに記録するためコミット不要。
-# Issue #28参照）。出力先は docs/performance/results/<method>.json。
+# 再現性が低く、サマリーは docs/performance/ 配下のMarkdownに記録するためコミット不要）。
+# 出力先は docs/performance/results/<method>.json。
 docs/performance/results/*.json
 # benchmark_performance.ymlがリポジトリルートに書き出す一時結果（CIではartifactに
 # アップロードするのみ、ローカルで走らせた場合の取り込み事故防止）。

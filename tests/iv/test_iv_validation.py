@@ -6,7 +6,7 @@
 オプション反映は `test_iv_api.py`、主リファレンス（linearmodels）との数値照合は
 `test_iv_reference.py`（2SLS）・`test_iv_gmm_reference.py`（GMM）、R クロスチェックは
 `test_iv_crosscheck.py`（OLS/WLS/Logit/Probit の `test_<手法>_validation.py` 等と
-同じ4分割、`refactoring-candidates-2.md` 項目68）。
+同じ4分割）。
 
 `iv_dataset` フィクスチャと `our_fit` ヘルパーは `tests/iv/conftest.py`／
 `tests/iv/_iv_helpers.py`。
@@ -15,10 +15,12 @@
 from __future__ import annotations
 
 import _error_messages as msgs
+import pandas as pd
 import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_messages import escaped
+from _helpers import ROW_TIME, TIED_TIME_COLUMNS, hac_time_for, with_row_time
 from _iv_helpers import our_fit
 from econometricsmodels import (
     IV,
@@ -170,13 +172,13 @@ def test_const_collision_with_include_intercept_raises():
 
 
 def test_const_collision_in_x_endog_with_include_intercept_raises():
-    """Issue #305: `x_exog`だけでなく`x_endog`に`"const"`という列名を含めた
+    """`x_exog`だけでなく`x_endog`に`"const"`という列名を含めた
     場合も、自動追加される定数項と衝突し`ValidationError`になること。
 
     修正前は`fit()`自体は成功していたが、構造方程式本体の`param_names`が
     `['const', 'x1', 'const']`という重複を持つことになり、`res.params`辞書
     （`dict(zip(param_names, params))`）構築時の後勝ちにより真の切片係数が
-    サイレントに失われていた（Issue #305背景参照）。
+    サイレントに失われていた（前項のテストの背景参照）。
     """
     df = pl.DataFrame(
         {
@@ -195,12 +197,12 @@ def test_const_collision_in_x_endog_with_include_intercept_raises():
 
 
 def test_const_collision_in_instruments_with_include_intercept_raises():
-    """Issue #305: `instruments`に`"const"`という列名を含めた場合も、自動
+    """`instruments`に`"const"`という列名を含めた場合も、自動
     追加される定数項と衝突し`ValidationError`になること。
 
     修正前は`fit()`自体は成功していたが、`first_stage()[endog名].param_names`
     に`"const"`が2回出現し、`OlsResults.params`構築時の後勝ちにより真の切片
-    係数が操作変数の係数でサイレントに上書きされていた（Issue #305背景参照）。
+    係数が操作変数の係数でサイレントに上書きされていた（前々項のテストの背景参照）。
     """
     df = pl.DataFrame(
         {
@@ -238,6 +240,40 @@ def test_missing_column_raises(iv_dataset):
         ).fit()
 
 
+def test_data_not_polars_raises():
+    """`data`にpolars以外のDataFrame（pandas等）を渡すと、内部実装
+    （`pyo3-polars`の`get_columns`呼び出し）が漏れた`AttributeError`ではなく
+    `ValidationError`になること（`test_ols_validation.py`と同じ検証。
+    `IVResult`自体には`predict()`/`augment()`が無く、`first_stage()`が
+    返す`OLSResults`側の検証は`test_ols_validation.py`でカバー済みのため
+    `data`のみ確認する）。
+    """
+    bad = pd.DataFrame(
+        {
+            "y": [1.0, 2.0, 3.0],
+            "x1": [1.0, 2.0, 3.0],
+            "endog1": [1.0, 0.5, 1.5],
+            "z1": [0.1, 0.2, 0.3],
+            "z2": [0.3, 0.1, 0.2],
+        }
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME,
+            param_name="data",
+            type_name=msgs.fully_qualified_type_name(bad),
+        ),
+    ):
+        IV(
+            bad,
+            y="y",
+            x_exog=["x1"],
+            x_endog=["endog1"],
+            instruments=["z1", "z2"],
+        ).fit()
+
+
 def test_y_empty_string_raises(iv_dataset):
     """`y`に空文字列を渡した場合`ValidationError`
     （`test_ols_validation.py::test_y_empty_string_raises`参照）。
@@ -258,7 +294,7 @@ def test_y_empty_string_raises(iv_dataset):
 def test_null_values_raise(bad_col):
     """欠損値は`column_extraction`の責務で`ValidationError`。`y`列だけでなく
     `x_exog`/`x_endog`/`instruments`側の列でも検証する（`testing-completeness-
-    reviewer`指摘、Issue #231フェーズ4）。
+    reviewer`指摘）。
     """
     values: dict[str, list[float | None]] = {
         "y": [1.0, 2.0, 3.0, 4.0],
@@ -277,13 +313,45 @@ def test_null_values_raise(bad_col):
         ).fit()
 
 
+@pytest.mark.parametrize(
+    "value, display",
+    [(float("nan"), "NaN"), (float("inf"), "inf")],
+    ids=["nan", "inf"],
+)
+@pytest.mark.parametrize("bad_col", ["y", "x1", "endog1", "z1"])
+def test_non_finite_values_raise(bad_col, value, display):
+    """NaN・無限大は`column_extraction.rs`内でnull（`test_null_values_raise`）
+    とは別ロジックのため個別に確認する。`y`列だけでなく`x_exog`/`x_endog`/
+    `instruments`側の列でも検証する（`test_null_values_raise`と同じ理由。
+    IVにも同型のテストを追加、IVには`predict()`が無いため比較対象は無い）。
+    """
+    values: dict[str, list[float]] = {
+        "y": [1.0, 2.0, 3.0, 4.0],
+        "x1": [0.5, 1.5, 2.5, 3.5],
+        "endog1": [2.0, 1.0, 4.0, 3.0],
+        "z1": [1.0, 3.0, 2.0, 4.0],
+    }
+    values[bad_col] = [values[bad_col][0], value, *values[bad_col][2:]]
+    df = pl.DataFrame(values)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE,
+            name=bad_col,
+            value=display,
+            row=1,
+        ),
+    ):
+        IV(
+            df, y="y", x_exog=["x1"], x_endog=["endog1"], instruments=["z1"]
+        ).fit()
+
+
 @pytest.mark.parametrize("bad_col", ["y", "x1", "endog1", "z1"])
 def test_non_numeric_dtype_raises(bad_col):
-    """数値/文字列型にキャストできない列は`ValidationError`。`y`列だけでなく
+    """文字列列は、dtypeの時点で`ValidationError`。`y`列だけでなく
     `x_exog`/`x_endog`/`instruments`側の列でも検証する（`test_null_values_raise`
-    と同じ理由、Issue #231フェーズ4）。文字列4件が全て数値キャストでnullになる
-    ため`COLUMN_HAS_MISSING_VALUES`経路（`count=4`）になる
-    （`test_ols_validation.py::test_non_numeric_dtype_raises`参照）。
+    と同じ理由。`test_ols_validation.py::test_non_numeric_dtype_raises`参照）。
     """
     values: dict[str, list] = {
         "y": [1.0, 2.0, 3.0, 4.0],
@@ -295,7 +363,11 @@ def test_non_numeric_dtype_raises(bad_col):
     df = pl.DataFrame(values)
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name=bad_col, count=4),
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE,
+            name=bad_col,
+            dtype="String",
+        ),
     ):
         IV(
             df, y="y", x_exog=["x1"], x_endog=["endog1"], instruments=["z1"]
@@ -309,8 +381,7 @@ def test_insufficient_observations_raises(iv_dataset):
     ではなく第一段階回帰（`endog1 ~ x_exog(x1) + instruments(z1, z2)`、
     k=4: const, x1, z1, z2）。`engine_pybind::fit()`が弱操作変数診断のため
     `compute_first_stage`を`TwoSlsEstimator::fit`より先に無条件で呼ぶため
-    （`_error_messages.py`の`FIRST_STAGE_FAILED`のコメント、
-    `test-coverage-candidates.md`項目31参照）。
+    （`_error_messages.py`の`FIRST_STAGE_FAILED`のコメント参照）。
     """
     df = iv_dataset.head(2)  # n=2、第一段階回帰はk=4（const, x1, z1, z2）
     with pytest.raises(
@@ -328,9 +399,10 @@ def test_insufficient_instruments_raises(iv_dataset):
     """識別の順序条件`len(instruments) >= len(x_endog)`を満たさない場合
     `ValidationError`（`IvError::InsufficientInstruments`）。
 
-    `x_endog`・`instruments`のどちらも1要素以上（Issue #306の空リスト検証には
-    引っかからない）だが、`instruments`の数が`x_endog`に足りない組み合わせにする
-    必要がある（`test-coverage-candidates.md`項目52、Issue #306対応時に必須の修正）。
+    `x_endog`・`instruments`のどちらも1要素以上（`test_x_endog_empty_raises`・
+    `test_instruments_empty_raises`の空リスト検証には引っかからない）だが、
+    `instruments`の数が`x_endog`に足りない組み合わせにする必要がある
+    （空リスト検証対応時に必須の修正）。
     """
     with pytest.raises(
         ValidationError,
@@ -355,7 +427,7 @@ def test_insufficient_instruments_raises(iv_dataset):
     ],
 )
 def test_x_endog_empty_raises(iv_dataset, x_endog, instruments):
-    """`x_endog`が空リストの場合`ValidationError`（Issue #306）。
+    """`x_endog`が空リストの場合`ValidationError`。
 
     旧仕様では`x_endog=[]`・`instruments=[]`は実質OLSとして成功していたが、
     「そもそもIVを使用すること自体が誤り」と判断し弾く方向にした
@@ -375,7 +447,7 @@ def test_x_endog_empty_raises(iv_dataset, x_endog, instruments):
 
 
 def test_instruments_empty_raises(iv_dataset):
-    """`instruments`が空リストの場合`ValidationError`（Issue #306）。
+    """`instruments`が空リストの場合`ValidationError`。
 
     `x_endog`は非空にする（空だと`test_x_endog_empty_raises`の`x_endog`側の
     バリデーションが先に発火してしまうため）。
@@ -395,15 +467,15 @@ def test_instruments_empty_raises(iv_dataset):
 # ── ValidationError（オプション） ──────────────────────────────────
 
 
-@pytest.mark.parametrize("method", ["invalid", ""])
-def test_unknown_method_raises(iv_dataset, method):
-    """未知の`method`（空文字列を含む）は`ValidationError`（テスト網羅性
+@pytest.mark.parametrize("estimator", ["invalid", ""])
+def test_unknown_estimator_raises(iv_dataset, estimator):
+    """未知の`estimator`（空文字列を含む）は`ValidationError`（テスト網羅性
     候補・項目46）。
     """
-    options = IVOptions(method=method)
+    options = IVOptions(estimator=estimator)
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_IV_METHOD, method=method),
+        match=escaped(msgs.UNKNOWN_IV_ESTIMATOR, estimator=estimator),
     ):
         our_fit(iv_dataset, options=options)
 
@@ -421,15 +493,15 @@ def test_unknown_cov_type_raises(iv_dataset, cov_type):
         our_fit(iv_dataset, options=options)
 
 
-@pytest.mark.parametrize("weight_type", ["invalid", ""])
-def test_unknown_weight_type_raises(iv_dataset, weight_type):
-    """未知の`weight_type`（空文字列を含む）は`ValidationError`
+@pytest.mark.parametrize("gmm_weight_type", ["invalid", ""])
+def test_unknown_weight_type_raises(iv_dataset, gmm_weight_type):
+    """未知の`gmm_weight_type`（空文字列を含む）は`ValidationError`
     （テスト網羅性候補・項目46）。
     """
-    options = IVOptions(method="gmm", weight_type=weight_type)
+    options = IVOptions(estimator="gmm", gmm_weight_type=gmm_weight_type)
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_WEIGHT_TYPE, other=weight_type),
+        match=escaped(msgs.UNKNOWN_WEIGHT_TYPE, other=gmm_weight_type),
     ):
         our_fit(iv_dataset, options=options)
 
@@ -442,11 +514,11 @@ def test_cluster_without_col_raises(iv_dataset):
         our_fit(iv_dataset, options=options)
 
 
-def test_cluster_col_nonexistent_column_raises(iv_dataset):
-    """`cluster_col`が実在しない列名を指すと`ValidationError`（OLS/WLS/Logit/
-    Probitと同じ理由、Issue #231フェーズ4）。
+def test_cluster_nonexistent_column_raises(iv_dataset):
+    """`cluster`が実在しない列名を指すと`ValidationError`（OLS/WLS/Logit/
+    Probitと同じ理由）。
     """
-    options = IVOptions(cov_type="cluster", cluster_col="does_not_exist")
+    options = IVOptions(cov_type="cluster", cluster="does_not_exist")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
@@ -457,21 +529,21 @@ def test_cluster_col_nonexistent_column_raises(iv_dataset):
 def test_insufficient_clusters_raises(iv_dataset):
     """クラスターが1種類しかない場合`ValidationError`。"""
     df = iv_dataset.with_columns(pl.lit(0).alias("single_cluster"))
-    options = IVOptions(cov_type="cluster", cluster_col="single_cluster")
+    options = IVOptions(cov_type="cluster", cluster="single_cluster")
     with pytest.raises(
         ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
     ):
         our_fit(df, options=options)
 
 
-@pytest.mark.parametrize("method", ["2sls", "gmm"])
+@pytest.mark.parametrize("estimator", ["2sls", "gmm"])
 def test_cluster_count_at_most_slopes_raises_validation_error(
-    iv_dataset, method
+    iv_dataset, estimator
 ):
     """`cov_type="cluster"`でクラスター数G≤構造方程式の傾き係数の数q
     （`our_fit`既定は`x_exog=["x1"]`・`x_endog=["endog1"]`で`q=2`、ここで
     `G=2 == q=2`）は`ValidationError`
-    （`CommonError::InsufficientClustersForInference`、Issue #289）。
+    （`CommonError::InsufficientClustersForInference`）。
 
     `rank(Ŝ)≤G-1`のためG≤qでロバストWald/F（χ²）検定のq×q部分行列が構造的に
     特異になる。ドキュメント上は「2SLS/GMMともに`fit()`冒頭で構造方程式のqを
@@ -480,16 +552,16 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
     （`endog1 ~ x_exog(x1) + instruments(z1, z2)`、q=3: x1, z1, z2）の同種チェックが
     先に`FirstStageFailed`としてラップされる（`engine_pybind::fit()`が
     `compute_first_stage`を無条件に先に呼ぶため。`_error_messages.py`の
-    `FIRST_STAGE_FAILED`のコメント、`test-coverage-candidates.md`項目31参照）。
-    `weight_type="cluster"`の重み行列`S`（l×l）が`G<l`で特異になる別軸の問題
-    （Issue #290）とは区別する。
+    `FIRST_STAGE_FAILED`のコメント参照）。
+    `gmm_weight_type="cluster"`の重み行列`S`（l×l）が`G<l`で特異になる別軸の問題
+    とは区別する。
     """
     cluster = pl.Series(
         "cluster_group", [i % 2 for i in range(iv_dataset.height)]
     )
     df = iv_dataset.with_columns(cluster)
     options = IVOptions(
-        method=method, cov_type="cluster", cluster_col="cluster_group"
+        estimator=estimator, cov_type="cluster", cluster="cluster_group"
     )
     with pytest.raises(
         ValidationError,
@@ -521,7 +593,7 @@ def test_invalid_confidence_level_raises(iv_dataset, confidence_level):
 @pytest.mark.parametrize("hac_lags", [-1, 500])  # 500 == iv_dataset の n_obs
 def test_invalid_hac_lags_raises(iv_dataset, hac_lags):
     """`hac_lags`が`[0, n)`の範囲外の場合`ValidationError`。"""
-    options = IVOptions(cov_type="hac", hac_lags=hac_lags)
+    options = IVOptions(cov_type="hac", hac_lags=hac_lags, hac_time=ROW_TIME)
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.INVALID_HAC_LAGS, hac_lags=hac_lags, n=500),
@@ -529,27 +601,168 @@ def test_invalid_hac_lags_raises(iv_dataset, hac_lags):
         our_fit(iv_dataset, options=options)
 
 
-@pytest.mark.parametrize("gmm_iterations", [0, -1])
-def test_invalid_gmm_iterations_raises(iv_dataset, gmm_iterations):
-    options = IVOptions(method="gmm", gmm_iterations=gmm_iterations)
+@pytest.mark.parametrize(
+    "gmm_weight_type",
+    ["unadjusted", "homoskedastic", "heteroskedastic", "kernel", "invalid"],
+)
+def test_unknown_gmm_weight_type_raises(iv_dataset, gmm_weight_type):
+    """旧名（`unadjusted`/`kernel`）と別名（`homoskedastic`/`heteroskedastic`）は
+    受け付けない（`cov_type`と同じ語彙`classical`/`hac`に統一済み）。
+    """
+    options = IVOptions(estimator="gmm", gmm_weight_type=gmm_weight_type)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_WEIGHT_TYPE, other=gmm_weight_type),
+    ):
+        our_fit(iv_dataset, options=options)
+
+
+@pytest.mark.parametrize("gmm_max_iter", [-1, 0, 1, 2])
+def test_invalid_gmm_max_iter_raises(iv_dataset, gmm_max_iter):
+    options = IVOptions(
+        estimator="gmm", gmm_type="iterated", gmm_max_iter=gmm_max_iter
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INVALID_GMM_MAX_ITER, max_iter=gmm_max_iter),
+    ):
+        our_fit(iv_dataset, options=options)
+
+
+def test_unknown_gmm_type_raises(iv_dataset):
+    options = IVOptions(estimator="gmm", gmm_type="three_step")
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_GMM_TYPE, other="three_step"),
+    ):
+        our_fit(iv_dataset, options=options)
+
+
+_GMM = 'estimator="gmm"'
+_GMM_WEIGHTED = 'estimator="gmm" with gmm_type="two_step" or "iterated"'
+_GMM_ITERATED = 'estimator="gmm" with gmm_type="iterated"'
+_CLUSTER_CONDITION = (
+    'cov_type="cluster" (or gmm_weight_type="cluster" with estimator="gmm")'
+)
+_HAC_CONDITION = (
+    'cov_type="hac" (or gmm_weight_type="hac" with estimator="gmm")'
+)
+
+
+@pytest.mark.parametrize(
+    ("estimator", "gmm_type", "option", "value", "condition"),
+    [
+        # estimator="2sls"ではGMM専用オプションは全て使われない
+        ("2sls", None, "gmm_type", "two_step", _GMM),
+        ("2sls", None, "gmm_weight_type", "robust", _GMM_WEIGHTED),
+        ("2sls", None, "gmm_max_iter", 10, _GMM_ITERATED),
+        ("2sls", None, "gmm_tol", 1e-6, _GMM_ITERATED),
+        ("2sls", None, "raise_on_non_convergence", False, _GMM_ITERATED),
+        # gmm_type="one_step"は重み行列を使わない
+        ("gmm", "one_step", "gmm_weight_type", "robust", _GMM_WEIGHTED),
+        # gmm_type="one_step"/"two_step"は反復しない
+        ("gmm", "one_step", "gmm_max_iter", 10, _GMM_ITERATED),
+        ("gmm", "two_step", "gmm_max_iter", 10, _GMM_ITERATED),
+        ("gmm", "one_step", "gmm_tol", 1e-6, _GMM_ITERATED),
+        ("gmm", "two_step", "gmm_tol", 1e-6, _GMM_ITERATED),
+        ("gmm", "one_step", "raise_on_non_convergence", False, _GMM_ITERATED),
+        ("gmm", "two_step", "raise_on_non_convergence", False, _GMM_ITERATED),
+    ],
+)
+def test_gmm_option_unused_by_mode_raises(
+    iv_dataset, estimator, gmm_type, option, value, condition
+):
+    """選んだ`estimator`/`gmm_type`で使われないGMM専用オプションが指定
+    されたら黙って無視せず`ValidationError`。
+    """
+    kwargs = {} if gmm_type is None else {"gmm_type": gmm_type}
+    options = IVOptions(estimator=estimator, **kwargs, **{option: value})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
+    ):
+        our_fit(iv_dataset, options=options)
+
+
+@pytest.mark.parametrize(
+    ("options_kwargs", "option", "condition"),
+    [
+        ({"cov_type": "classical"}, "cluster", _CLUSTER_CONDITION),
+        ({"cov_type": "hc1"}, "cluster", _CLUSTER_CONDITION),
+        # estimator="2sls"はgmm_weight_typeを使えず、cov_typeだけで判定される
+        (
+            {"estimator": "2sls", "cov_type": "classical"},
+            "cluster",
+            _CLUSTER_CONDITION,
+        ),
+        # gmm_type="one_step"はgmm_weight_typeを使わない
+        (
+            {"estimator": "gmm", "gmm_type": "one_step"},
+            "cluster",
+            _CLUSTER_CONDITION,
+        ),
+        # gmm_weight_typeが別の値なら使われない
+        (
+            {"estimator": "gmm", "gmm_weight_type": "robust"},
+            "cluster",
+            _CLUSTER_CONDITION,
+        ),
+        ({"cov_type": "cluster"}, "hac_lags", _HAC_CONDITION),
+        ({"cov_type": "cluster"}, "hac_time", _HAC_CONDITION),
+    ],
+)
+def test_cov_option_unused_by_mode_raises(
+    iv_dataset, options_kwargs, option, condition
+):
+    """`cluster`/`hac_lags`/`hac_time`は`cov_type`と`gmm_weight_type`の
+    どちらからも使われないときだけ`ValidationError`。
+    """
+    value = 2 if option == "hac_lags" else "x1"
+    options = IVOptions(**options_kwargs, **{option: value})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
+    ):
+        our_fit(iv_dataset, options=options)
+
+
+def test_cluster_used_only_by_gmm_weight_type_is_accepted(clustered_dataset):
+    """`cov_type`が`cluster`でなくても`gmm_weight_type="cluster"`が使う
+    ため、`cluster`の指定は有効（どちらか一方でも使えば有効）。
+    """
+    options = IVOptions(
+        estimator="gmm",
+        cov_type="classical",
+        gmm_weight_type="cluster",
+        cluster="cluster_group",
+    )
+    our_fit(clustered_dataset, options=options)
+
+
+@pytest.mark.parametrize("gmm_tol", [0.0, -1.0])
+def test_invalid_gmm_tol_raises(iv_dataset, gmm_tol):
+    options = IVOptions(estimator="gmm", gmm_type="iterated", gmm_tol=gmm_tol)
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.INVALID_GMM_ITERATIONS, gmm_iterations=gmm_iterations
+            msgs.INVALID_GMM_TOL,
+            gmm_tol=msgs.rust_f64(gmm_tol),
         ),
     ):
         our_fit(iv_dataset, options=options)
 
 
-@pytest.mark.parametrize("gmm_convergence", [0.0, -1.0])
-def test_invalid_gmm_convergence_raises(iv_dataset, gmm_convergence):
-    options = IVOptions(method="gmm", gmm_convergence=gmm_convergence)
+@pytest.mark.parametrize(
+    ("gmm_tol", "shown"), [(float("nan"), "NaN"), (float("inf"), "inf")]
+)
+def test_non_finite_gmm_tol_raises(iv_dataset, gmm_tol, shown):
+    """NaN/infの`gmm_tol`は収束判定として無意味なため、常に未収束になる前に
+    `ValidationError`で弾く。
+    """
+    options = IVOptions(estimator="gmm", gmm_type="iterated", gmm_tol=gmm_tol)
     with pytest.raises(
         ValidationError,
-        match=escaped(
-            msgs.INVALID_GMM_CONVERGENCE,
-            gmm_convergence=msgs.rust_f64(gmm_convergence),
-        ),
+        match=escaped(msgs.INVALID_GMM_TOL, gmm_tol=shown),
     ):
         our_fit(iv_dataset, options=options)
 
@@ -566,8 +779,7 @@ def test_perfect_multicollinearity_raises_computation_error():
     以前は手書きの極小 df（`x2 = 2*x1`）による
     `test_singular_first_stage_design_matrix_raises_computation_error` も
     併存していたが、同じ経路の確認で追加検証が無かったため、固定済みベンチマーク
-    CSV を使うこのテストへ一本化した（`refactoring-candidates-2.md` 項目54、
-    OLS の同名テストと同じ整理）。
+    CSV を使うこのテストへ一本化した（OLS の同名テストと同じ整理）。
     """
     df = pl.read_csv(DATA_DIR / "iv_perfect_multicollinearity.csv")
     with pytest.raises(ComputationError):
@@ -591,7 +803,37 @@ def test_scale_variance_raises_computation_error(cov_type):
     せずエラーパスのみ確認する（`_reference.py` から移設）。
     """
     df = pl.read_csv(DATA_DIR / "iv_scale_variance.csv")
-    options = IVOptions(cov_type=cov_type)
+    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
+    with pytest.raises(ComputationError):
+        IV(
+            with_row_time(df),
+            y="y",
+            x_exog=["x1", "x2"],
+            x_endog=["endog1"],
+            instruments=["z1", "z2"],
+            options=options,
+        ).fit()
+
+
+def test_scale_variance_cluster_raises_computation_error():
+    """`cluster`も上記`test_scale_variance_raises_computation_error`と同じ
+    backstopの対象。`cov_type="cluster"`は`cluster`列の指定が別途必要なため`COV_TYPES`
+    パラメトライズには含められず、専用テストとして確認する
+    （OLS`test_ols_validation.py::test_scale_variance_cluster_raises_
+    computation_error`・WLS`test_wls_validation.py`の同名テストと同じ理由）。
+    均等な疑似グループ（行番号%10、
+    `G=10`、各グループ50件）を使う——第一段階回帰の`q`（`x_exog`2列+
+    `instruments`2列=4）より十分大きく、
+    `test_cluster_count_at_most_slopes_raises_validation_error`が
+    確認するクラスター数不足の`ValidationError`（第一段階の`q=3`〔`x_exog`
+    〔x1〕+`instruments`〔z1,z2〕〕相当）ではなく、傾き係数の共分散部分行列の
+    条件数超過による`ComputationError`（第一段階回帰の`FirstStageFailed`）が
+    発生することを確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_scale_variance.csv")
+    cluster = pl.Series("cluster_group", [i % 10 for i in range(df.height)])
+    df = df.with_columns(cluster)
+    options = IVOptions(cov_type="cluster", cluster="cluster_group")
     with pytest.raises(ComputationError):
         IV(
             df,
@@ -603,29 +845,33 @@ def test_scale_variance_raises_computation_error(cov_type):
         ).fit()
 
 
-def test_gmm_cluster_weight_type_raises_computation_error_when_cluster_count_is_less_than_instrument_count(
-    iv_dataset,
+@pytest.mark.parametrize("gmm_type", ["two_step", "iterated"])
+def test_gmm_cluster_weight_type_raises_validation_error_when_cluster_count_is_less_than_instrument_count(
+    iv_dataset, gmm_type
 ):
-    """`method="gmm"`固有のComputationErrorパス。`weight_type="cluster"`の重み行列`S`
+    """`estimator="gmm"`固有のValidationErrorパス。`gmm_weight_type="cluster"`の重み行列`S`
     （l×l、`l`は全操作変数の数）はG個のランク1行列の和のため`rank(S)≤G`
     （`engine/src/iv/CLAUDE.md`「クラスター数Gと操作変数の数lの関係」参照）。
-    `G=2 < l=3`（`x_exog=[]`・`instruments=["z1","z2"]`で`l=const+z1+z2=3`）だと
-    `S`が構造的に特異になり`ComputationError`（`gmm.rs`の第一段階とは別の、GMM
-    自体の重み行列反転経路。2SLS/GMM共通の第一段階回帰の特異性
-    （`test_perfect_multicollinearity_raises_computation_error`）とは
-    別のGMM固有の失敗パス）。
+    `G=2 < l=3`（`x_exog=[]`・`instruments=["z1","z2"]`で`l=const+z1+z2=3`、過剰識別）
+    だと`S`が構造的に特異になるため、`fit()`冒頭で`ValidationError`
+    （`IvError::InsufficientClustersForWeightMatrix`）として弾く。`gmm_type="one_step"`
+    は`gmm_weight_type`を使わないため検証しない。
     """
     n = iv_dataset.height
     df = iv_dataset.with_columns(
         (pl.int_range(pl.len()) < n // 2).cast(pl.Int64).alias("cluster_group")
     )
     options = IVOptions(
-        method="gmm",
-        weight_type="cluster",
-        cluster_col="cluster_group",
+        estimator="gmm",
+        gmm_weight_type="cluster",
+        cluster="cluster_group",
         cov_type="classical",
+        gmm_type=gmm_type,
     )
-    with pytest.raises(ComputationError):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_WEIGHT_MATRIX, g=2, l=3),
+    ):
         IV(
             df,
             y="y",
@@ -639,15 +885,16 @@ def test_gmm_cluster_weight_type_raises_computation_error_when_cluster_count_is_
 def test_gmm_raise_on_non_convergence_true_raises_computation_error(
     iv_dataset,
 ):
-    """厳しすぎる`gmm_convergence`で最大反復回数内に収束しない場合、既定
+    """厳しすぎる`gmm_tol`で最大反復回数内に収束しない場合、既定
     （`raise_on_non_convergence=True`）では`ComputationError`（`MleError.
     NonConvergence`と同じ分類、`engine_pybind/src/iv/common.rs`参照）。
     """
     options = IVOptions(
-        method="gmm",
-        weight_type="robust",
-        gmm_convergence=1e-300,
-        gmm_iterations=2,
+        estimator="gmm",
+        gmm_type="iterated",
+        gmm_weight_type="robust",
+        gmm_tol=1e-300,
+        gmm_max_iter=3,
     )
     with pytest.raises(ComputationError):
         our_fit(iv_dataset, options=options)
@@ -657,7 +904,7 @@ def test_first_stage_augment_none_raises_validation_error(iv_dataset):
     """`first_stage()`が返す`OLSResults`は、各内生変数の第一段階回帰専用に
     構築され単一のソースDataFrameを持たないため、`augment(new_data=None)`は
     `ValidationError`（`new_data`を指定した呼び出しは通常どおり動作する、
-    `docs/spec/ols-spec.md`「augment()」参照、Issue #295）。
+    `docs/spec/ols-spec.md`「augment()」参照）。
     """
     res = our_fit(iv_dataset)
     first_stage = res.first_stage()["endog1"]
@@ -668,3 +915,163 @@ def test_first_stage_augment_none_raises_validation_error(iv_dataset):
     new_data = pl.DataFrame({"x1": [1.0], "z1": [0.5], "z2": [0.2]})
     augmented = first_stage.augment(new_data)
     assert augmented.columns == ["x1", "z1", "z2", "predicted"]
+
+
+@pytest.mark.parametrize(
+    "options_kwargs",
+    [
+        # gmm_weight_type="hac"だけがhac_*を使う（大文字小文字を問わない）
+        {
+            "estimator": "GMM",
+            "gmm_weight_type": "HAC",
+            "hac_lags": 2,
+            "hac_time": "x1",
+        },
+        # gmm_type="iterated"は重みと反復オプションの全てを使う
+        {
+            "estimator": "gmm",
+            "gmm_type": "ITERATED",
+            "gmm_weight_type": "robust",
+            "gmm_max_iter": 10,
+            "gmm_tol": 1e-3,
+            "raise_on_non_convergence": False,
+        },
+        # cov_typeだけがhac_*を使う
+        {
+            "estimator": "2sls",
+            "cov_type": "HAC",
+            "hac_lags": 2,
+            "hac_time": "x1",
+        },
+    ],
+)
+def test_options_used_by_mode_are_accepted(iv_dataset, options_kwargs):
+    our_fit(iv_dataset, options=IVOptions(**options_kwargs))
+
+
+@pytest.mark.parametrize(
+    "options_kwargs",
+    [
+        {"cov_type": "clusterr", "cluster": "x1"},
+        {"estimator": "gmm", "gmm_type": "bogus", "gmm_max_iter": 10},
+    ],
+)
+def test_unknown_value_is_reported_before_unused_option(
+    iv_dataset, options_kwargs
+):
+    """未知の値のエラーを優先し、未使用オプションの指摘で埋もれさせない。"""
+    with pytest.raises(ValidationError, match="unknown"):
+        our_fit(iv_dataset, options=IVOptions(**options_kwargs))
+
+
+@pytest.mark.parametrize(
+    "options_kwargs",
+    [
+        pytest.param({"cov_type": "hac"}, id="2sls_cov_type"),
+        pytest.param(
+            {"estimator": "gmm", "cov_type": "hac"}, id="gmm_cov_type"
+        ),
+        pytest.param(
+            {"estimator": "gmm", "gmm_weight_type": "hac"},
+            id="gmm_weight_type",
+        ),
+        # `gmm_type`ごとに重み行列を組み立てる箇所が異なる
+        pytest.param(
+            {
+                "estimator": "gmm",
+                "gmm_type": "iterated",
+                "gmm_weight_type": "hac",
+            },
+            id="gmm_iterated_weight_type",
+        ),
+        pytest.param(
+            {"estimator": "gmm", "gmm_type": "one_step", "cov_type": "hac"},
+            id="gmm_one_step_cov_type",
+        ),
+        # 同じ列が`cov_type`と`gmm_weight_type`の両方から読まれる
+        pytest.param(
+            {
+                "estimator": "gmm",
+                "cov_type": "hac",
+                "gmm_weight_type": "hac",
+            },
+            id="gmm_cov_type_and_weight_type",
+        ),
+    ],
+)
+@pytest.mark.parametrize(("time_expr", "rows"), TIED_TIME_COLUMNS)
+def test_hac_time_with_tied_values_raises(
+    iv_dataset, options_kwargs, time_expr, rows
+):
+    """`hac_time`に同じ値が1組でもあれば`ValidationError`にする。2SLS・GMMの
+    `cov_type="hac"`と、GMMの重み行列（`gmm_weight_type="hac"`、別の抽出経路）の
+    どちらでも、時点の順序が定まらないまま行順にフォールバックしない。
+    """
+    df = iv_dataset.with_columns(time_expr.alias("t"))
+    options = IVOptions(hac_lags=2, hac_time="t", **options_kwargs)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_TIED_TIME_ORDER,
+            name="t",
+            first=rows[0],
+            second=rows[1],
+        ),
+    ):
+        our_fit(df, options=options)
+
+
+@pytest.mark.parametrize(
+    ("options_kwargs", "setting"),
+    [
+        pytest.param({"cov_type": "hac"}, "cov_type", id="2sls_cov_type"),
+        pytest.param(
+            {"estimator": "gmm", "cov_type": "hac"}, "cov_type", id="gmm_cov"
+        ),
+        pytest.param(
+            {"cov_type": "HAC"}, "cov_type", id="2sls_cov_type_uppercase"
+        ),
+        pytest.param(
+            {"estimator": "gmm", "cov_type": "hac", "gmm_weight_type": "hac"},
+            "cov_type",
+            id="both_missing_reports_cov_type_first",
+        ),
+        pytest.param(
+            {"estimator": "gmm", "gmm_weight_type": "hac"},
+            "gmm_weight_type",
+            id="gmm_weight_type",
+        ),
+        pytest.param(
+            {
+                "estimator": "gmm",
+                "gmm_type": "iterated",
+                "gmm_weight_type": "HAC",
+            },
+            "gmm_weight_type",
+            id="gmm_iterated_weight_type",
+        ),
+    ],
+)
+def test_hac_requires_hac_time(iv_dataset, options_kwargs, setting):
+    """HAC（`cov_type="hac"`、GMMの`gmm_weight_type="hac"`）で`hac_time`が未指定だと
+    `ValidationError`。`hac_time`は`cov_type`と`gmm_weight_type`で共用するが、
+    どちらが要求しているかをメッセージで示す。
+    """
+    options = IVOptions(hac_lags=2, **options_kwargs)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.HAC_REQUIRES_HAC_TIME, setting=setting),
+    ):
+        our_fit(iv_dataset, options=options)
+
+
+def test_gmm_one_step_with_hac_cov_type_requires_hac_time(iv_dataset):
+    """`gmm_type="one_step"`は重み行列を使わないが、`cov_type="hac"`が`hac_time`を
+    要求する。
+    """
+    options = IVOptions(estimator="gmm", gmm_type="one_step", cov_type="hac")
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.HAC_REQUIRES_HAC_TIME, setting="cov_type"),
+    ):
+        our_fit(iv_dataset, options=options)

@@ -18,12 +18,12 @@ use super::ols::{CovType, OlsEstimator, OlsInput};
 /// WLSの推定結果。
 ///
 /// `estimator()`が返す`OlsEstimator`本体は、`sqrt(weight)`で変換したデータに対する
-/// 計算結果であり、`params`/`std_errors`/`t_stats`/`p_values`/`conf_lower`/`conf_upper`/
+/// 計算結果であり、`params`/`std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper`/
 /// `f_statistic`/`f_p_value`はここから取得する（変換後データに対するOLSの計算式が
 /// そのまま正しいため。重みが全て1のときOLSと数値的に完全一致するのもこの型を経由する
 /// ためで、`docs/spec/wls-spec.md`「sqrt(w)変換」の構造的保証がそのまま成り立つ）。
 ///
-/// 一方`r_squared`/`r_squared_adj`/`log_likelihood`/`aic`/`bic`は`estimator()`側の値を
+/// 一方`r_squared`/`adj_r_squared`/`log_likelihood`/`aic`/`bic`は`estimator()`側の値を
 /// 使わず、この型が元の（変換前の）`y`・`weights`から計算し直した値を使う（モジュール
 /// 冒頭のdocコメント参照）。
 ///
@@ -38,7 +38,7 @@ pub struct WlsEstimator {
     /// 元スケール（unweighted）の残差 `y_i - x_i'β̂`
     residuals: Vec<f64>,
     r_squared: f64,
-    r_squared_adj: f64,
+    adj_r_squared: f64,
     log_likelihood: f64,
     aic: f64,
     bic: f64,
@@ -77,7 +77,7 @@ impl WlsEstimator {
         let estimator = OlsEstimator::fit(input, cov_type, confidence_level)?;
         let (fitted_values, residuals) =
             original_scale_fitted_and_residuals(y, x_columns, include_intercept, &estimator);
-        let (r_squared, r_squared_adj, log_likelihood, aic, bic) =
+        let (r_squared, adj_r_squared, log_likelihood, aic, bic) =
             weighted_fit_statistics(y, weights, &residuals, &estimator);
 
         Ok(Self {
@@ -85,7 +85,7 @@ impl WlsEstimator {
             fitted_values,
             residuals,
             r_squared,
-            r_squared_adj,
+            adj_r_squared,
             log_likelihood,
             aic,
             bic,
@@ -94,7 +94,7 @@ impl WlsEstimator {
 
     /// 変換後データ（重み付き）に対する`OlsEstimator`本体。
     ///
-    /// `r_squared`/`r_squared_adj`/`log_likelihood`/`aic`/`bic`はここではなく
+    /// `r_squared`/`adj_r_squared`/`log_likelihood`/`aic`/`bic`はここではなく
     /// `WlsEstimator`自身のメソッドを使うこと（型ドキュメント参照）。
     pub fn estimator(&self) -> &OlsEstimator {
         &self.estimator
@@ -117,8 +117,8 @@ impl WlsEstimator {
     }
 
     /// 自由度調整済み決定係数。
-    pub fn r_squared_adj(&self) -> f64 {
-        self.r_squared_adj
+    pub fn adj_r_squared(&self) -> f64 {
+        self.adj_r_squared
     }
 
     /// 対数尤度（`sqrt(weight)`変換のヤコビアン補正込み）。
@@ -169,7 +169,7 @@ fn weighted_fit_statistics(
     };
 
     let r_squared = 1.0 - ssr / sst;
-    let r_squared_adj = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
+    let adj_r_squared = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
 
     // statsmodels WLS.loglikeと同じ導出（変換後データに対するOLSの対数尤度に、
     // sqrt(weight)変換のヤコビアン補正項 +0.5*Σlog(w_i) を加える）。
@@ -180,7 +180,7 @@ fn weighted_fit_statistics(
     let aic = -2.0 * log_likelihood + 2.0 * (k as f64);
     let bic = -2.0 * log_likelihood + (n as f64).ln() * (k as f64);
 
-    (r_squared, r_squared_adj, log_likelihood, aic, bic)
+    (r_squared, adj_r_squared, log_likelihood, aic, bic)
 }
 
 /// 元の（重み変換前の）`y`・`x_columns`と推定済みの係数から、元スケールの予測値
@@ -212,6 +212,7 @@ fn original_scale_fitted_and_residuals(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::linear::common::row_time_order;
 
     #[test]
     fn fit_with_all_weights_one_matches_ols() {
@@ -256,14 +257,14 @@ mod tests {
         assert_eq!(wls.estimator().f_statistic(), ols.f_statistic());
         assert_eq!(wls.estimator().f_p_value(), ols.f_p_value());
 
-        // r_squared/r_squared_adj/log_likelihood/aic/bicはWlsEstimator側の（元スケールの
+        // r_squared/adj_r_squared/log_likelihood/aic/bicはWlsEstimator側の（元スケールの
         // y・weightsから計算し直した）値を使う。重みが全て1なら重み付き平均=単純平均、
         // ヤコビアン補正項0.5*Σlog(1)=0となり、OLSと完全一致するはず
         // （WlsEstimator側での再計算が必要な理由はモジュール冒頭のdocコメント参照）。
         // weights=1でも、重み付き平均（Σw*y/Σw）と単純平均（Σy/n）は数学的には同じ値だが
         // 浮動小数点の加算順序が異なるため、完全な==ではなく丸め誤差レベルで比較する。
         assert!((wls.r_squared() - ols.r_squared()).abs() < 1e-12);
-        assert!((wls.r_squared_adj() - ols.r_squared_adj()).abs() < 1e-12);
+        assert!((wls.adj_r_squared() - ols.adj_r_squared()).abs() < 1e-12);
         assert!((wls.log_likelihood() - ols.log_likelihood()).abs() < 1e-9);
         assert!((wls.aic() - ols.aic()).abs() < 1e-9);
         assert!((wls.bic() - ols.bic()).abs() < 1e-9);
@@ -330,7 +331,7 @@ mod tests {
         assert!((*wls.estimator().std_errors().get(0, 0) - 0.824_058_49).abs() < 1e-6);
         assert!((*wls.estimator().std_errors().get(1, 0) - 0.227_478_42).abs() < 1e-6);
         assert!((wls.r_squared() - 0.453_603_574_100_183_8).abs() < 1e-9);
-        assert!((wls.r_squared_adj() - 0.271_471_432_133_578_5).abs() < 1e-9);
+        assert!((wls.adj_r_squared() - 0.271_471_432_133_578_5).abs() < 1e-9);
         assert!((wls.log_likelihood() - (-4.694_800_450_440_493)).abs() < 1e-9);
         assert!((wls.aic() - 13.389_600_900_880_986).abs() < 1e-9);
         assert!((wls.bic() - 12.608_476_725_749_187).abs() < 1e-9);
@@ -449,7 +450,7 @@ mod tests {
             CovType::Hc3,
             CovType::Hac {
                 lags: Some(1),
-                time_order: None,
+                time_order: row_time_order(6),
             },
             CovType::Cluster {
                 groups: Some(clusters.clone()),
@@ -612,7 +613,7 @@ mod tests {
         use proptest::collection;
         use proptest::prelude::*;
 
-        // OLSのMAX_K拡張（test-coverage-candidates.md項目2）と揃えた値。
+        // OLSのMAX_K拡張と揃えた値。
         const MAX_K: usize = 20;
 
         /// `wls_case_strategy`が生成するタプル: `(n, k, y, x_cols, weights, keys)`。
@@ -717,7 +718,7 @@ mod tests {
                     );
                 }
                 assert_approx_eq(wls.r_squared(), ols.r_squared(), "r_squared");
-                assert_approx_eq(wls.r_squared_adj(), ols.r_squared_adj(), "r_squared_adj");
+                assert_approx_eq(wls.adj_r_squared(), ols.adj_r_squared(), "adj_r_squared");
                 assert_approx_eq(wls.log_likelihood(), ols.log_likelihood(), "log_likelihood");
                 assert_approx_eq(wls.aic(), ols.aic(), "aic");
                 assert_approx_eq(wls.bic(), ols.bic(), "bic");

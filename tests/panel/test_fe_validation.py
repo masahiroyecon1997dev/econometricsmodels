@@ -16,7 +16,7 @@ n_periods=6）は`tests/panel/conftest.py`、`our_fit`ヘルパー（既定
 
 Note:
     `MISSING_CLUSTER_COLUMN`（OLS/WLS/IVが持つ「`cov_type='cluster'`なのに
-    クラスター列が一切無い」エラー）はFEには存在しない。`cluster_col=None`
+    クラスター列が一切無い」エラー）はFEには存在しない。`cluster=None`
     は常に`entity`引数の列に自動フォールバックするため、この失敗経路が
     構造的に到達不能（`engine_pybind/src/panel/fe.rs::parse_fe_cov_type`
     参照）。
@@ -29,6 +29,7 @@ Note:
 from __future__ import annotations
 
 import _error_messages as msgs
+import pandas as pd
 import polars as pl
 import pytest
 from _constants import DATA_DIR
@@ -122,6 +123,42 @@ def test_entity_overlaps_time_raises(fe_dataset):
         ).fit()
 
 
+@pytest.mark.parametrize(
+    ("column", "earlier_role"), [("y", "y"), ("entity", "entity")]
+)
+def test_dk_time_overlaps_y_or_entity_raises(fe_dataset, column, earlier_role):
+    """`dk_time`が`y`・`entity`と同じ列だと、DKの時点構造が意味を成さない。"""
+    options = FEOptions(cov_type="dk", dk_time=column)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.ROLE_OVERLAP_SINGLE_EQUALS_SINGLE,
+            col=column,
+            later_role="dk_time",
+            earlier_role=earlier_role,
+        ),
+    ):
+        FE(
+            fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
+        ).fit()
+
+
+@pytest.mark.parametrize(
+    ("time", "x"),
+    [
+        # 固定効果と同じ時間粒度のDK（典型的な使い方）
+        ("time", ["x1", "x2"]),
+        # `x`との重複は許可する（年トレンドを説明変数に入れつつDKの時点にも使う、等）
+        (None, ["x1", "x2"]),
+    ],
+    ids=["dk_time_equals_time", "dk_time_in_x"],
+)
+def test_dk_time_may_equal_time_or_overlap_x(fe_dataset, time, x):
+    dk_time = "time" if time else "x2"
+    options = FEOptions(cov_type="dk", time=time, dk_time=dk_time)
+    FE(fe_dataset, y="y", x=x, entity="entity", options=options).fit()
+
+
 def test_time_overlaps_x_raises(fe_dataset):
     options = FEOptions(time="time")
     with pytest.raises(
@@ -151,7 +188,7 @@ def test_duplicate_within_x_raises(fe_dataset):
 
 
 def test_x_empty_raises(fe_dataset):
-    """v1では固定効果のみのモデル（`x=[]`）を許容していたが、Issue #320で
+    """v1では固定効果のみのモデル（`x=[]`）を許容していたが、
     他手法と同じ`validate_x_non_empty`を適用する方針に変更した
     （`engine_pybind/src/panel/fe.rs`モジュールdoc参照）。
     """
@@ -160,6 +197,26 @@ def test_x_empty_raises(fe_dataset):
 
 
 # ── ValidationError（列の存在・欠損値） ────────────────────────────
+
+
+def test_data_not_polars_raises():
+    """`data`にpolars以外のDataFrame（pandas等）を渡すと、内部実装
+    （`pyo3-polars`の`get_columns`呼び出し）が漏れた`AttributeError`ではなく
+    `ValidationError`になること（`test_ols_validation.py`と同じ検証。FEには
+    `predict()`/`augment()`が無いため`data`のみ確認する）。
+    """
+    bad = pd.DataFrame(
+        {"y": [1.0, 2.0, 3.0], "x1": [1.0, 2.0, 3.0], "entity": [0, 0, 1]}
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME,
+            param_name="data",
+            type_name=msgs.fully_qualified_type_name(bad),
+        ),
+    ):
+        FE(bad, y="y", x=["x1"], entity="entity").fit()
 
 
 def test_missing_y_column_raises(fe_dataset):
@@ -265,8 +322,8 @@ def test_group_key_column_null_values_raise(bad_col):
         FE(df, y="y", x=["x1"], entity="entity", options=options).fit()
 
 
-def test_cluster_col_null_values_raise():
-    """`cluster_col`（`extract_group_key_column`経由）の欠損値も`entity`/
+def test_cluster_null_values_raise():
+    """`cluster`（`extract_group_key_column`経由）の欠損値も`entity`/
     `time`と同じ`GROUP_KEY_COLUMN_HAS_MISSING_VALUES`。
     """
     df = pl.DataFrame(
@@ -277,7 +334,7 @@ def test_cluster_col_null_values_raise():
             "state": ["x", None, "y", "y", "x", "y"],
         }
     )
-    options = FEOptions(cov_type="cluster", cluster_col="state")
+    options = FEOptions(cov_type="cluster", cluster="state")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name="state"),
@@ -432,7 +489,7 @@ def test_zero_variance_after_demeaning_raises():
 # ── ValidationError（オプション） ──────────────────────────────────
 
 
-@pytest.mark.parametrize("cov_type", ["invalid", ""])
+@pytest.mark.parametrize("cov_type", ["invalid", "", "hac"])
 def test_unknown_cov_type_raises(fe_dataset, cov_type):
     options = FEOptions(cov_type=cov_type)
     with pytest.raises(
@@ -467,30 +524,35 @@ def test_invalid_confidence_level_raises(fe_dataset, confidence_level):
         our_fit(fe_dataset, options=options)
 
 
-def test_hac_requires_time_raises(fe_dataset):
-    """1-way（`time`未指定）で`cov_type="hac"`かつ`time_col`も未指定だと
-    `PanelError::HacRequiresTime`。
+@pytest.mark.parametrize(
+    "time", [None, "time"], ids=["one_way", "two_way_time_not_borrowed"]
+)
+def test_dk_requires_dk_time_raises(fe_dataset, time):
+    """`cov_type="dk"`で`dk_time`が未指定だと`ValidationError`。2-way FEの`time`が
+    あっても、それをDKの時点列として借用しない（どの列が時点かを明示させる）。
     """
-    options = FEOptions(cov_type="hac")
-    with pytest.raises(ValidationError, match=escaped(msgs.HAC_REQUIRES_TIME)):
-        our_fit(fe_dataset, options=options)
-
-
-@pytest.mark.parametrize("dk_bandwidth", [-1, 6])  # t=6（fe_datasetの時点数）
-def test_invalid_hac_bandwidth_raises(fe_dataset, dk_bandwidth):
-    """`dk_bandwidth`は`[0, t)`の範囲外（`t`=時点数、上限は`>=t`で無効）。"""
-    options = FEOptions(
-        cov_type="hac", time_col="time", dk_bandwidth=dk_bandwidth
-    )
+    options = FEOptions(cov_type="dk", time=time)
     with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.INVALID_HAC_BANDWIDTH, bandwidth=dk_bandwidth, t=6),
+        ValidationError, match=escaped(msgs.FE_DK_REQUIRES_DK_TIME)
     ):
         our_fit(fe_dataset, options=options)
 
 
-def test_cluster_col_nonexistent_column_raises(fe_dataset):
-    options = FEOptions(cov_type="cluster", cluster_col="does_not_exist")
+@pytest.mark.parametrize("dk_bandwidth", [-1, 6])  # t=6（fe_datasetの時点数）
+def test_invalid_dk_bandwidth_raises(fe_dataset, dk_bandwidth):
+    """`dk_bandwidth`は`[0, t)`の範囲外（`t`=時点数、上限は`>=t`で無効）。"""
+    options = FEOptions(
+        cov_type="dk", dk_time="time", dk_bandwidth=dk_bandwidth
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INVALID_DK_BANDWIDTH, bandwidth=dk_bandwidth, t=6),
+    ):
+        our_fit(fe_dataset, options=options)
+
+
+def test_cluster_nonexistent_column_raises(fe_dataset):
+    options = FEOptions(cov_type="cluster", cluster="does_not_exist")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
@@ -501,7 +563,7 @@ def test_cluster_col_nonexistent_column_raises(fe_dataset):
 def test_insufficient_clusters_raises(fe_dataset):
     """クラスターが1種類しかない場合`CommonError::InsufficientClusters`。"""
     df = fe_dataset.with_columns(pl.lit(0).alias("single_cluster"))
-    options = FEOptions(cov_type="cluster", cluster_col="single_cluster")
+    options = FEOptions(cov_type="cluster", cluster="single_cluster")
     with pytest.raises(
         ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
     ):
@@ -511,9 +573,9 @@ def test_insufficient_clusters_raises(fe_dataset):
 def test_cluster_count_at_most_slopes_raises_validation_error():
     """クラスター数G(=2)が傾き係数の数q(=k=2)以下は`ValidationError`
     （`CommonError::InsufficientClustersForInference`）。デフォルトの
-    entityクラスタリング・明示`cluster_col`のどちらでも同じ
+    entityクラスタリング・明示`cluster`のどちらでも同じ
     `validate_cluster_count_covers_slopes`が働く
-    （`engine/src/panel/fe.rs`）ため、明示`cluster_col`側で確認する。
+    （`engine/src/panel/fe.rs`）ため、明示`cluster`側で確認する。
 
     engineユニットテスト
     `fe_estimator_fit_cluster_propagates_insufficient_clusters_for_inference_error`
@@ -528,12 +590,129 @@ def test_cluster_count_at_most_slopes_raises_validation_error():
             "cluster_group": ["1", "1", "1", "2", "2", "2"],
         }
     )
-    options = FEOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = FEOptions(cov_type="cluster", cluster="cluster_group")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=2),
     ):
         FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+
+
+def test_dk_periods_at_most_slopes_raises_validation_error():
+    """時点数t(=3)がF検定の傾き係数の数q(=k=3)以下は`ValidationError`
+    （`PanelError::InsufficientDkPeriodsForInference`）。DK共分散のrankは
+    `t-1`以下のため検定の部分行列が構造的に特異になる（クラスター版の
+    `g <= q`と同じ構造）。`t=2`は1-way FEのwithin変換で時点スコアが
+    恒等的にゼロに退化するため使わない（engineユニットテスト
+    `fe_estimator_fit_hac_rejects_periods_not_covering_slopes`と同じデータ）。
+    """
+    df = pl.DataFrame(
+        {
+            "y": [3.0, 4.5, 7.0, 8.0, 9.2, 6.0, 10.1, 8.0, 5.0, 9.5, 4.0, 7.3],
+            "x1": [1.0, 3.0, 2.0, 5.0, 4.0, 6.0, 0.0, 2.0, 1.0, 3.0, 7.0, 4.0],
+            "x2": [2.0, 1.0, 4.0, 0.0, 3.0, 1.0, 5.0, 2.0, 6.0, 1.0, 1.0, 3.0],
+            "x3": [4.0, 2.0, 1.0, 3.0, 3.0, 5.0, 2.0, 6.0, 3.0, 0.0, 4.0, 2.0],
+            "entity": ["a"] * 3 + ["b"] * 3 + ["c"] * 3 + ["d"] * 3,
+            "time": ["1", "2", "3"] * 4,
+        }
+    )
+    options = FEOptions(cov_type="dk", dk_time="time", dk_bandwidth=0)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE, t_periods=3, q=3
+        ),
+    ):
+        FE(
+            df,
+            y="y",
+            x=["x1", "x2", "x3"],
+            entity="entity",
+            options=options,
+        ).fit()
+
+
+_TWO_PERIOD_PANEL = {
+    "y": [3.0, 4.5, 7.0, 8.0, 9.2, 6.0, 10.1, 8.0],
+    "x": [1.0, 3.0, 2.0, 5.0, 4.0, 4.5, 0.0, 2.0],
+    "entity": ["a", "a", "b", "b", "c", "c", "d", "d"],
+    "time": ["1", "2"] * 4,
+}
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        (
+            FEOptions(cov_type="dk", dk_time="time", dk_bandwidth=0),
+            msgs.DEGENERATE_DK_TWO_PERIODS,
+        ),
+        (
+            FEOptions(
+                cov_type="dk", time="time", dk_time="time", dk_bandwidth=0
+            ),
+            msgs.DEGENERATE_DK_TWO_PERIODS,
+        ),
+        (
+            FEOptions(cov_type="cluster", cluster="time"),
+            msgs.DEGENERATE_CLUSTER_TWO_GROUPS,
+        ),
+    ],
+    ids=["dk-one_way", "dk-two_way", "cluster_by_time"],
+)
+def test_two_group_split_degeneracy_raises_validation_error(options, message):
+    """2時点のパネルで全エンティティが各時点に1観測ずつだと、within変換で
+    時点（クラスター）スコアが恒等的にゼロになり、DK・timeクラスターの
+    共分散がゼロに退化する（`PanelError::DegenerateDkTwoPeriods`/
+    `DegenerateClusterTwoGroups`）。`t > k`・`G > k`の検証は`k=1`で通るため
+    別に弾く。
+    """
+    df = pl.DataFrame(_TWO_PERIOD_PANEL)
+    with pytest.raises(ValidationError, match=escaped(message)):
+        FE(df, y="y", x=["x"], entity="entity", options=options).fit()
+
+
+def test_two_way_two_entity_default_cluster_raises_validation_error():
+    """2-way FEのwithin変換は各時点内でも和をゼロにするため、エンティティ
+    2つのパネルを既定のentityクラスタリングで推定すると、全時点が2クラスターに
+    1観測ずつになりクラスタースコアが恒等的にゼロになる（time方向の退化）。
+    """
+    df = pl.DataFrame(
+        {
+            "y": [3.0, 4.5, 7.0, 8.0, 9.2, 6.0, 10.1, 8.0, 5.0, 9.5],
+            "x": [1.0, 3.0, 2.0, 5.0, 4.0, 2.0, 1.0, 4.0, 3.0, 6.0],
+            "entity": ["a"] * 5 + ["b"] * 5,
+            "time": ["1", "2", "3", "4", "5"] * 2,
+        }
+    )
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.DEGENERATE_CLUSTER_TWO_GROUPS)
+    ):
+        FE(
+            df, y="y", x=["x"], entity="entity", options=FEOptions(time="time")
+        ).fit()
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        FEOptions(cov_type="dk", dk_time="time", dk_bandwidth=0),
+        FEOptions(cov_type="cluster", cluster="time"),
+    ],
+    ids=["dk", "cluster_by_time"],
+)
+def test_two_group_split_with_broken_pattern_is_accepted(options):
+    """1エンティティでも同じ時点に2観測あれば退化しない（不均衡な1-way）。"""
+    df = pl.concat(
+        [
+            pl.DataFrame(_TWO_PERIOD_PANEL),
+            pl.DataFrame(
+                {"y": [5.0], "x": [2.5], "entity": ["a"], "time": ["1"]}
+            ),
+        ]
+    )
+    res = FE(df, y="y", x=["x"], entity="entity", options=options).fit()
+    assert res.std_errors["x"] > 1e-8
 
 
 # ── ComputationError ──────────────────────────────────────────────
@@ -580,3 +759,46 @@ def test_validation_error_is_value_error():
 
 def test_computation_error_is_runtime_error():
     assert issubclass(ComputationError, RuntimeError)
+
+
+# ── ValidationError（使われないオプション） ─────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("cov_type", "option", "value", "condition"),
+    [
+        ("classical", "cluster", "entity", 'cov_type="cluster"'),
+        ("dk", "cluster", "entity", 'cov_type="cluster"'),
+        ("classical", "dk_time", "time", 'cov_type="dk"'),
+        ("cluster", "dk_bandwidth", 2, 'cov_type="dk"'),
+    ],
+)
+def test_option_unused_by_cov_type_raises(
+    fe_dataset, cov_type, option, value, condition
+):
+    """選んだ`cov_type`で使われない`cluster`/`dk_time`/`dk_bandwidth`が
+    指定されたら黙って無視せず`ValidationError`。
+    """
+    # dkは時点列(`dk_time`)が必須なので、他のオプションの検証だけを見るため添える。
+    extra = {"dk_time": "time"} if cov_type == "dk" else {}
+    options = FEOptions(cov_type=cov_type, **extra, **{option: value})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
+    ):
+        our_fit(fe_dataset, options=options)
+
+
+@pytest.mark.parametrize("cov_type", ["dk", "DK"])
+def test_dk_options_used_by_dk_are_accepted(fe_dataset, cov_type):
+    options = FEOptions(cov_type=cov_type, dk_time="time", dk_bandwidth=1)
+    our_fit(fe_dataset, options=options)
+
+
+def test_unknown_cov_type_is_reported_before_unused_option(fe_dataset):
+    options = FEOptions(cov_type="dkk", dk_bandwidth=1)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_COV_TYPE_FE, other="dkk"),
+    ):
+        our_fit(fe_dataset, options=options)

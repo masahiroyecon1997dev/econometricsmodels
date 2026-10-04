@@ -2,13 +2,12 @@
 
 `tests/fixtures/benchmarks/probit.json`（`benchmark/nonlinear/fixtures/
 generate_probit_fixtures.py`で生成）を読み込み、真のprobit DGPによる合成データ
-シナリオ×classical/opg/hc0 + クラスター(baseline・mrozの実データ両方) +
+シナリオ×classical/opg/hc0 + クラスター(baseline・均等/不均衡グループ) +
 Wooldridge実データ（mroz）で、係数・標準誤差・検定統計量・適合度統計量・
 限界効果を相対誤差1e-8で厳密比較する（`test_logit_reference.py`と完全に同型。
 `.claude/rules/testing-policy.md`「許容誤差」の基本方針）。
 
-役割分担（OLS/WLS の `test_<手法>_*.py` と同じ4分割、
-`refactoring-candidates-2.md` 項目68）:
+役割分担（OLS/WLS の `test_<手法>_*.py` と同じ4分割）:
     - 成功パスの構造・API・オプション反映・predict 等: `test_probit_api.py`
     - `ValidationError`/`ComputationError` パス: `test_probit_validation.py`
     - 主リファレンス（statsmodels）との厳密な数値一致: このファイル
@@ -29,9 +28,8 @@ Note:
     ため、opgのmarginal_effects()数値比較は`test_probit_crosscheck.py`のみで行う。
 
 テスト本体は `Logit`/`Probit` で完全に重複するため
-`_binary_choice_checks.py` に集約し（`refactoring-candidates-2.md` 項目95）、
-このファイルは手法ごとの設定（`BinaryChoiceReferenceConfig`）を組み立てて
-渡す薄いラッパーに保つ。
+`_binary_choice_checks.py` に集約し、このファイルは手法ごとの設定
+（`BinaryChoiceReferenceConfig`）を組み立てて渡す薄いラッパーに保つ。
 """
 
 from __future__ import annotations
@@ -73,10 +71,10 @@ CONFIG = _checks.BinaryChoiceReferenceConfig(
     cov_types=["classical", "opg", "hc0"],
     rtol=TOLERANCES["probit_reference"]["rtol"],
     atol=TOLERANCES["probit_reference"]["atol"],
-    # method="bfgs"/"lbfgs"はnewtonと異なる最適化経路で収束するため、既定の
+    # solver="bfgs"/"lbfgs"はnewtonと異なる最適化経路で収束するため、既定の
     # RTOLより緩めた許容誤差を使う（tests/_tolerances.py参照、
     # test_logit_reference.pyと同じ方針）。
-    rtol_method=TOLERANCES["probit_reference"]["rtol_method"],
+    rtol_solver=TOLERANCES["probit_reference"]["rtol_solver"],
     near_separation_tol=1e-8,
 )
 
@@ -103,9 +101,9 @@ def test_cluster_imbalanced_matches_statsmodels(fixtures):
     _checks.check_cluster_imbalanced_matches_statsmodels(CONFIG, fixtures)
 
 
-@pytest.mark.parametrize("method", ["bfgs", "lbfgs"])
-def test_method_matches_statsmodels(fixtures, method):
-    _checks.check_method_matches_statsmodels(CONFIG, fixtures, method)
+@pytest.mark.parametrize("solver", ["bfgs", "lbfgs"])
+def test_solver_matches_statsmodels(fixtures, solver):
+    _checks.check_solver_matches_statsmodels(CONFIG, fixtures, solver)
 
 
 @pytest.mark.parametrize("cov_type", CONFIG.cov_types)

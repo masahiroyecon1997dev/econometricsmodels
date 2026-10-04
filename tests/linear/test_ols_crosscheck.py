@@ -30,6 +30,11 @@ classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相�
 `predict(new_data)`（新規データの予測値、列順を入れ替えて列名マッチングも確認）を
 crosscheckする。
 
+`include_intercept=False`（切片なし）・`confidence_level`非既定は、baseline
+シナリオのみで全cov_type（classical/HC0-3/cluster/HAC）と組み合わせてRとも
+数値照合する（従来ライブstatsmodels比較・相対比較のみだったものを、他の
+オプションと同じ凍結フィクスチャでの厳密比較に統合）。
+
 Note:
     合成データはフィクスチャ生成時と同じ入力データを、`tests/fixtures/
     benchmarks/data/`に固定済みのCSV（`benchmark/linear/freeze.py`参照）から読む。
@@ -37,8 +42,8 @@ Note:
     乱数を使わない）のみ、引き続き`benchmark/linear/datasets.py`を直接呼ぶ。
     Wooldridgeデータは`load_wooldridge.py`経由で都度ロードする（データの再配布
     ライセンスが未確認のためCSVとして固定しない。`benchmark/linear/freeze.py`のdocstring
-    参照）。`wooldridge`パッケージ（benchmark依存グループ）が無い環境では、
-    Wooldridgeクロスチェックのみ任意扱いにする。
+    参照）。`wooldridge`パッケージ（test依存グループ）が無い環境では、
+    Wooldridgeクロスチェックのみ`pytest.importorskip`でskipする。
 """
 
 from __future__ import annotations
@@ -51,12 +56,20 @@ import polars as pl
 import pytest
 from _assertions import assert_close, assert_dict_close
 from _constants import DATA_DIR
-from _helpers import with_cluster_groups, wooldridge_loader
+from _helpers import (
+    ROW_TIME,
+    with_cluster_groups,
+    with_row_time,
+    wooldridge_loader,
+)
 from _tolerances import TOLERANCES
 from econometricsmodels import OLS, OLSOptions
 
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.linear.constants import PREDICT_NEW_DATA
+from benchmark.linear.fixtures.generate_ols_crosscheck_fixtures import (
+    CONFIDENCE_LEVEL_NON_DEFAULT,
+)
 from benchmark.linear.fixtures.generate_ols_crosscheck_fixtures import (
     NUMERIC_SCENARIOS as SYNTHETIC_SCENARIOS,
 )
@@ -109,7 +122,7 @@ def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
     """
     _assert_scalar_close(res.r_squared, ref["r_squared"], f"{label}/r_squared")
     _assert_scalar_close(
-        res.r_squared_adj, ref["r_squared_adj"], f"{label}/r_squared_adj"
+        res.adj_r_squared, ref["adj_r_squared"], f"{label}/adj_r_squared"
     )
     _assert_scalar_close(res.aic, ref["aic"], f"{label}/aic")
     _assert_scalar_close(res.bic, ref["bic"], f"{label}/bic")
@@ -122,7 +135,9 @@ def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
     _assert_scalar_close(
         res.f_p_value, ref["f_p_value"], f"{label}/f_p_value", rtol=rtol
     )
-    _assert_close(res.t_stats, ref["t_stats"], f"{label}/t_stats", rtol=rtol)
+    _assert_close(
+        res.test_stats, ref["test_stats"], f"{label}/test_stats", rtol=rtol
+    )
     _assert_close(
         res.p_values,
         ref["p_values"],
@@ -149,7 +164,7 @@ def test_synthetic_matches_r(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
     options = OLSOptions(cov_type=cov_type)
-    res = OLS(df, y="y", x=x_cols, options=options).fit()
+    res = OLS(with_row_time(df), y="y", x=x_cols, options=options).fit()
 
     ref = crosscheck["synthetic"][scenario][cov_type]["r"]
     label = f"{scenario}/{cov_type}/R"
@@ -163,7 +178,7 @@ def test_predict_none_matches_r_fitted_values(crosscheck, scenario):
     """`predict(new_data=None)`（学習データに対する予測値）がRの`fitted()`と一致すること。"""
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
-    res = OLS(df, y="y", x=x_cols).fit()
+    res = OLS(with_row_time(df), y="y", x=x_cols).fit()
 
     predicted = [row["predicted"] for row in res.predict()]
     ref = crosscheck["synthetic"][scenario]["predict"]["fitted"]
@@ -181,7 +196,7 @@ def test_predict_new_data_matches_r(crosscheck):
     合わせて確認する）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    res = OLS(df, y="y", x=["x1", "x2", "x3"]).fit()
+    res = OLS(with_row_time(df), y="y", x=["x1", "x2", "x3"]).fit()
 
     new_data = pl.DataFrame(
         {
@@ -206,8 +221,10 @@ def test_cluster_matches_r(crosscheck):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, 10)
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    options = OLSOptions(cov_type="cluster", cluster="cluster_group")
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["cluster"]["r"]
     _assert_close(res.params, ref["coef"], "cluster/R coef")
@@ -224,8 +241,10 @@ def test_cluster_imbalanced_matches_r(crosscheck):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    options = OLSOptions(cov_type="cluster", cluster="cluster_group")
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["cluster_imbalanced"]["r"]
     _assert_close(res.params, ref["coef"], "cluster_imbalanced/R coef")
@@ -240,12 +259,12 @@ def test_cluster_g2_matches_r(crosscheck):
     `rank(Ŝ)≤G-1`のためロバストWald検定のq×q部分行列が構造的に特異になり、
     `fit()`冒頭のバリデーションが`ValidationError`で弾く（成功パスにならない。
     `test_ols_validation.py::test_cluster_count_at_most_slopes_raises_validation_error`
-    参照、Issue #289）。
+    参照）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
     df = with_cluster_groups(df, 2)
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
-    res = OLS(df, y="y", x=["x1"], options=options).fit()
+    options = OLSOptions(cov_type="cluster", cluster="cluster_group")
+    res = OLS(with_row_time(df), y="y", x=["x1"], options=options).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["cluster_g2"]["r"]
     _assert_close(res.params, ref["coef"], "cluster_g2/R coef")
@@ -262,13 +281,14 @@ def test_cluster_ill_conditioned_matches_r(crosscheck, scenario):
     クラスターは従来`baseline`シナリオのみで、他のcov_typeでは全シナリオ検証
     済みの悪条件・多重共線性との組み合わせが未検証だった。均等な疑似グループ
     （行番号%10）のみ確認する（グルーピングパターン自体の網羅性は
-    `test_cluster_matches_r`等`baseline`シナリオで確認済み、
-    test-coverage-candidates.md項目29）。
+    `test_cluster_matches_r`等`baseline`シナリオで確認済み）。
     """
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     df = with_cluster_groups(df, 10)
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    options = OLSOptions(cov_type="cluster", cluster="cluster_group")
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
 
     ref = crosscheck["synthetic"][scenario]["cluster"]["r"]
     label = f"{scenario}/cluster/R"
@@ -284,8 +304,12 @@ def test_hac_matches_r(crosscheck):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_autocorrelated.csv")
     entry = crosscheck["synthetic"]["autocorrelated"]["hac"]
-    options = OLSOptions(cov_type="hac", hac_lags=entry["hac_lag"])
-    res = OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    options = OLSOptions(
+        cov_type="hac", hac_lags=entry["hac_lag"], hac_time=ROW_TIME
+    )
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
 
     ref = entry["r"]
     # 係数（coef）・AIC・BIC・対数尤度はcov_typeに依存しない通常のOLS推定値の
@@ -294,6 +318,123 @@ def test_hac_matches_r(crosscheck):
     _assert_close(res.params, ref["coef"], "hac/R coef")
     _assert_close(res.std_errors, ref["se"], "hac/R se", rtol=RTOL_HAC)
     _assert_fit_stats_close(res, ref, "hac/R", rtol=RTOL_HAC)
+
+
+# ── include_intercept=False・confidence_level非既定（凍結フィクスチャ、
+# baselineシナリオ） ─────────────────────────────────────────────
+# クラスターも含めるがHACのみ小標本補正の慣習差があるため専用テストで
+# RTOL_HACを使う（`test_hac_matches_r`と同じ方針）。
+NO_INTERCEPT_AND_CONFIDENCE_LEVEL_STRICT_COV_TYPES = [
+    *NON_HAC_COV_TYPES,
+    "cluster",
+]
+
+
+def _options_kwargs_for_cov_type(df: pl.DataFrame, cov_type: str):
+    """`cov_type="cluster"`のときのみ疑似グループ列を付け、
+    `cluster`を返す。それ以外は`cluster=None`。
+    """
+    if cov_type == "cluster":
+        return with_cluster_groups(df, 10), {"cluster": "cluster_group"}
+    return df, {"cluster": None}
+
+
+@pytest.mark.parametrize(
+    "cov_type", NO_INTERCEPT_AND_CONFIDENCE_LEVEL_STRICT_COV_TYPES
+)
+def test_no_intercept_matches_r(crosscheck, cov_type):
+    """`include_intercept=False`が、cov_typeによらずRとも一致すること
+    （baselineシナリオ、classical/HC0-3/cluster）。HACのみ小標本補正の慣習差
+    があるため`test_no_intercept_hac_matches_r`で別途確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    df, kwargs = _options_kwargs_for_cov_type(df, cov_type)
+    options = OLSOptions(include_intercept=False, cov_type=cov_type, **kwargs)
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
+
+    ref = crosscheck["synthetic"]["baseline"]["no_intercept"][cov_type]["r"]
+    label = f"no_intercept/{cov_type}/R"
+    assert res.param_names == ["x1", "x2", "x3"]
+    _assert_close(res.params, ref["coef"], f"{label} coef")
+    _assert_close(res.std_errors, ref["se"], f"{label} se")
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
+
+
+def test_no_intercept_hac_matches_r(crosscheck):
+    """`include_intercept=False`のHAC標準誤差。フィクスチャ生成時の自動ラグ
+    （`hac_lag`）をそのまま使う（`test_hac_matches_r`と同じ方針）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    entry = crosscheck["synthetic"]["baseline"]["no_intercept"]["hac"]
+    options = OLSOptions(
+        include_intercept=False,
+        cov_type="hac",
+        hac_lags=entry["hac_lag"],
+        hac_time=ROW_TIME,
+    )
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
+
+    ref = entry["r"]
+    label = "no_intercept/hac/R"
+    assert res.param_names == ["x1", "x2", "x3"]
+    _assert_close(res.params, ref["coef"], f"{label} coef")
+    _assert_close(res.std_errors, ref["se"], f"{label} se", rtol=RTOL_HAC)
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_HAC)
+
+
+@pytest.mark.parametrize(
+    "cov_type", NO_INTERCEPT_AND_CONFIDENCE_LEVEL_STRICT_COV_TYPES
+)
+def test_confidence_level_matches_r(crosscheck, cov_type):
+    """confidence_level非既定（`CONFIDENCE_LEVEL_NON_DEFAULT`）が、cov_type
+    によらずRとも一致すること（baselineシナリオ、classical/HC0-3/cluster）。
+    HACのみ`test_confidence_level_hac_matches_r`で別途確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    df, kwargs = _options_kwargs_for_cov_type(df, cov_type)
+    options = OLSOptions(
+        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        cov_type=cov_type,
+        **kwargs,
+    )
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
+
+    ref = crosscheck["synthetic"]["baseline"]["confidence_level"][cov_type][
+        "r"
+    ]
+    label = f"confidence_level/{cov_type}/R"
+    _assert_close(res.params, ref["coef"], f"{label} coef")
+    _assert_close(res.std_errors, ref["se"], f"{label} se")
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
+
+
+def test_confidence_level_hac_matches_r(crosscheck):
+    """confidence_level非既定のHAC標準誤差。フィクスチャ生成時の自動ラグ
+    （`hac_lag`）をそのまま使う（`test_hac_matches_r`と同じ方針）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    entry = crosscheck["synthetic"]["baseline"]["confidence_level"]["hac"]
+    options = OLSOptions(
+        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        cov_type="hac",
+        hac_lags=entry["hac_lag"],
+        hac_time=ROW_TIME,
+    )
+    res = OLS(
+        with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
+
+    ref = entry["r"]
+    label = "confidence_level/hac/R"
+    _assert_close(res.params, ref["coef"], f"{label} coef")
+    _assert_close(res.std_errors, ref["se"], f"{label} se", rtol=RTOL_HAC)
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_HAC)
 
 
 WOOLDRIDGE_DATASETS = {
@@ -318,7 +459,7 @@ def test_wooldridge_matches_r(
     y, x = WOOLDRIDGE_DATASETS[dataset_name]
     df = load_wooldridge(dataset_name)
     options = OLSOptions(cov_type=cov_type)
-    res = OLS(df, y=y, x=x, options=options).fit()
+    res = OLS(with_row_time(df), y=y, x=x, options=options).fit()
 
     ref = crosscheck["wooldridge"][dataset_name][cov_type]["r"]
     label = f"{dataset_name}/{cov_type}/R"
@@ -347,9 +488,12 @@ def test_wooldridge_wage1_region_cluster_matches_r(
         .alias("region")
     )
     df = df.with_columns(region)
-    options = OLSOptions(cov_type="cluster", cluster_col="region")
+    options = OLSOptions(cov_type="cluster", cluster="region")
     res = OLS(
-        df, y="lwage", x=["educ", "exper", "tenure"], options=options
+        with_row_time(df),
+        y="lwage",
+        x=["educ", "exper", "tenure"],
+        options=options,
     ).fit()
 
     ref = crosscheck["wooldridge"]["wage1"]["cluster"]["r"]

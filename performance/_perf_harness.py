@@ -40,10 +40,10 @@
   Newey-West計算そのものの性能差を見るため。
 - **スレッド数を1に固定する**: `_run_isolated()` がワーカーサブプロセスの環境変数で
   engine・リファレンス実装（numpy/BLAS）とも1スレッドに固定する
-  （`_SINGLE_THREAD_ENV`）。engine 側は Issue #283 対応で faer のグローバル並列度を
+  （`_SINGLE_THREAD_ENV`）。engine 側は faer のグローバル並列度を
   常時 `Par::Seq` にした（`engine::parallelism::ensure_serial`）ため
   `RAYON_NUM_THREADS` は実質効かないが、リファレンス実装と対称（両者とも逐次）に
-  するため環境変数の設定は維持している。#283 以前は engine の classical
+  するため環境変数の設定は維持している。対応前は engine の classical
   n=1,000,000 が全コア並列＋負荷下で中央値24.9秒（単一スレッド比 約190倍）に
   膨れ上がる現象があった（`docs/performance/ols.md`「既知の限界」）。単一スレッドに
   揃えることで「Rustコアの計算効率 vs Python+BLAS」という比較の主目的を、
@@ -58,7 +58,7 @@
 - 単一スレッド固定のため、線形代数バックエンドのマルチスレッド化による高速化は
   この比較には現れない（多コアでの実利用の性能特性とは別軸）。ただし engine の
   設計行列は tall-skinny 中心で faer の暗黙並列化はそもそも高速化せず逆効果だった
-  ため、グローバル並列度を `Par::Seq` に固定済み（Issue #283、対応済み）。
+  ため、グローバル並列度を `Par::Seq` に固定済み（対応済み）。
   リファレンス実装（statsmodels/numpy）も同じ形状ではマルチスレッドで悪化する
   ことを実測で確認済み（`docs/performance/ols.md`「マルチスレッド環境での挙動」）。
 """
@@ -103,6 +103,10 @@ _SINGLE_THREAD_ENV = {
 }
 
 
+# HACの時間順序列として、ハーネスが全手法の計測用DataFrameに足す行番号の列名。
+HAC_TIME_COL = "hac_time_index"
+
+
 @dataclass(frozen=True)
 class FitContext:
     """`PerfAdapter.fit_once` に渡す、手法によらず固定のシグネチャ。
@@ -117,7 +121,11 @@ class FitContext:
         y_col: 被説明変数の列名。
         cov_type: 計測対象の分散推定タイプ。
         hac_lags: `hac_auto_lag(n)` の値。cov_type が HAC 以外なら無視してよい。
-        cluster_col: クラスターロバスト用のグループ列名。使わない手法・
+        hac_time: HAC の時間順序列名（`HAC_TIME_COL`）。ハーネスが計測区間の外で
+            行番号の列として `df` に足す（`hac_time` は必須で行順を暗黙には使わない
+            ため。リファレンス実装は行順をそのまま時間順として使うので、同じ順序）。
+            cov_type が HAC 以外なら無視してよい。
+        cluster: クラスターロバスト用のグループ列名。使わない手法・
             cov_type では `None`。
         weight_col: WLS の重み列名。重みを使わない手法（OLS/Logit 等）では
             `None`。
@@ -134,7 +142,8 @@ class FitContext:
     y_col: str
     cov_type: str
     hac_lags: int
-    cluster_col: str | None
+    hac_time: str
+    cluster: str | None
     weight_col: str | None
     method: str
 
@@ -155,7 +164,7 @@ class PerfAdapter:
             （"performance.compare_ols"）。1計測点をサブプロセスで再実行する際の
             `python -m <module> --worker ...` の呼び出し先。
         libraries: 計測対象ライブラリ。先頭は必ず "engine"。以降は
-            README「Verification accuracy」表の primary reference
+            `docs/guide/verification.md` のリファレンス表の primary reference
             （OLS/WLS/Logit/Probit: "statsmodels"、IV: "linearmodels"）。
             インプロセス計測できるリファレンス実装が無い手法は `("engine",)` の
             単独指定でよい（Tobit: 主リファレンスの R `AER::tobit` は共通ハーネス
@@ -184,7 +193,7 @@ class PerfAdapter:
             統計量まで常に一括計算するため、揃えないと不公平な比較になる）。
         n_sweep / n_sweep_fixed_k: n 軸スイープの n の刻みと、その際固定する k。
         k_sweep / k_sweep_fixed_n: k 軸スイープの k の刻みと、その際固定する n。
-        cluster_col: `FitContext.cluster_col` に渡す列名。cluster を計測しない
+        cluster: `FitContext.cluster` に渡す列名。cluster を計測しない
             手法では `None` のまま。
         weight_col: `FitContext.weight_col` に渡す列名。WLS のみ設定する
             （`build_dataframe` がその列を含む DataFrame を返す前提）。
@@ -202,17 +211,17 @@ class PerfAdapter:
             method 軸には影響しない。`libraries=("engine",)` の手法では指定不要。
         k_sweep_cov_types: k 軸スイープでのみ使う cov_type の部分集合。`None`
             なら `cov_types` をそのまま使う。`k_sweep_libraries` と同じ発想だが
-            対象が cov_type（`FE` の Driscoll-Kraay HAC は時点数 T ベースの
-            バンド幅を使うため、k 軸で k を増やすと T に対して次元過多になり
-            共分散行列が特異になる——`performance/compare_fe.py` 参照）。n 軸・
-            method 軸には影響しない。
+            対象が cov_type（FE/RE の Driscoll-Kraay HAC は共分散の rank が
+            時点数 T-1 以下のため、k 軸で k >= T にすると同時検定の部分行列が
+            構造的に特異になり engine が `ValidationError` で拒否する——
+            `performance/compare_fe.py` 参照）。n 軸・method 軸には影響しない。
         n_sweep_engine_only: n 軸に追加する engine 単独計測点の n の刻み。大 n を
             全 cov_type で回すと高コスト（またはリファレンス実装が大 n で計測不能）
             だが、engine の大標本での健全性（収束すること・実行時間）は回帰検知
             したい場合に使う。cov_type は `cov_types[0]`（最も軽いもの）のみ・
             method は `default_method` のみ・library は engine のみ。`_run_isolated`
             は `check=True` なので、engine の `.fit()` が例外を投げれば benchmark
-            ジョブが失敗する（例: Tobit で Issue #291 の大標本 Hessian 特異エラーが
+            ジョブが失敗する（例: Tobit で大標本 Hessian 特異エラーが
             再発した場合）。空なら追加なし。
         check_report: `report dict -> list[str]`。全スイープ完了後に呼ばれ、
             返した文字列は `_meta["warnings"]` に格納されて job summary に
@@ -243,7 +252,7 @@ class PerfAdapter:
     k_sweep_fixed_n: int = 10_000
     k_sweep_libraries: Sequence[str] | None = None
     k_sweep_cov_types: Sequence[str] | None = None
-    cluster_col: str | None = None
+    cluster: str | None = None
     weight_col: str | None = None
     default_method: str = "newton"
     extra_methods: Sequence[str] = ()
@@ -283,7 +292,9 @@ def _worker(
     repeats: int,
     method: str = "newton",
 ) -> dict:
-    df = adapter.build_dataframe(n, k, seed)
+    df = adapter.build_dataframe(n, k, seed).with_columns(
+        pl.int_range(pl.len()).alias(HAC_TIME_COL)
+    )
     x_cols = [f"x{j + 1}" for j in range(k)]
     pandas_df = None if library == "engine" else adapter.build_pandas_df(df)
     ctx = FitContext(
@@ -294,7 +305,8 @@ def _worker(
         y_col="y",
         cov_type=cov_type,
         hac_lags=hac_auto_lag(n),
-        cluster_col=adapter.cluster_col,
+        hac_time=HAC_TIME_COL,
+        cluster=adapter.cluster,
         weight_col=adapter.weight_col,
         method=method,
     )

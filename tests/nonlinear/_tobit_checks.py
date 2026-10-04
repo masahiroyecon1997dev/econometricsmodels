@@ -7,16 +7,15 @@
 の構造が完全に同一。推定器（`Tobit`）・入力データ・検証フィールドも共通なため、
 テスト本体をこのモジュールに集約し、2ファイルはフィクスチャパスと許容誤差
 （`tests/_tolerances.py`）だけを渡す薄いラッパーにする（Logit/Probit の
-`_binary_choice_checks.py` と同じ rootless import の仕組み、
-`refactoring-candidates-2.md` 項目95）。
+`_binary_choice_checks.py` と同じ rootless import の仕組み）。
 
 検証対象フィールド:
     係数・標準誤差・z値・p値・信頼区間（末尾に `sigma` を含む）・`sigma` プロパティ・
     対数尤度・AIC・BIC・全体 Wald 統計量/ p値・`n_obs`/`df_model`/`df_resid`・
     限界効果（`expected_latent`/`expected_observed`/`prob_uncensored` ×
     `overall`/`mean`/`median`）・予測値（`predict()` の3対象、フィクスチャに固定した
-    先頭行分）・新規データ（out-of-sample）予測値（`predict(new_data=...)` の3対象、
-    Issue #131）・打ち切り適合度（`censoring_fit_check()`）。
+    先頭行分）・新規データ（out-of-sample）予測値（`predict(new_data=...)` の3対象）・
+    打ち切り適合度（`censoring_fit_check()`）。
 """
 
 from __future__ import annotations
@@ -81,16 +80,16 @@ def build_fit(scenario: str, cov_key: str, ref: dict):
         groups = _CLUSTER_GROUP_BUILDERS[cov_key](df.height)
         df = df.with_columns(pl.Series("cluster_group", groups))
         opts["cov_type"] = "cluster"
-        opts["cluster_col"] = "cluster_group"
+        opts["cluster"] = "cluster_group"
     else:
         opts["cov_type"] = cov_key
 
     return Tobit(df, y=y, x=ref["x_cols"], options=TobitOptions(**opts)).fit()
 
 
-def build_method_fit(method: str, ref: dict):
-    """`method`（bfgs/lbfgs）ケース。リファレンスは method 非依存のため baseline 相当
-    シナリオ・classical で `method` だけ替えて推定する（`_tobit_fixtures.py` 参照）。"""
+def build_method_fit(solver: str, ref: dict):
+    """`solver`（bfgs/lbfgs）ケース。リファレンスは solver 非依存のため baseline 相当
+    シナリオ・classical で `solver` だけ替えて推定する（`_tobit_fixtures.py` 参照）。"""
     df, _ = _load_dataset(BASELINE_SCENARIO)
     lower, upper = ref["censoring_bounds"]
     return Tobit(
@@ -98,7 +97,7 @@ def build_method_fit(method: str, ref: dict):
         y="y",
         x=ref["x_cols"],
         options=TobitOptions(
-            method=method, cov_type="classical", lower=lower, upper=upper
+            solver=solver, cov_type="classical", lower=lower, upper=upper
         ),
     ).fit()
 
@@ -143,23 +142,23 @@ def _check_margeff(
                 row = rows[name]  # 限界効果は切片を除外済み（rename 不要）
                 lbl = f"{label}/margeff/{target}/{at}/{name}"
                 assert_close(
-                    row["dydx"],
-                    ref_stats["dydx"],
-                    f"{lbl}/dydx",
+                    row["effect"],
+                    ref_stats["effect"],
+                    f"{lbl}/effect",
                     rtol=rtol_point,
                     atol=atol,
                 )
-                for our_key, ref_key in (
-                    ("std_err", "se"),
-                    ("z", "z"),
-                    ("p_value", "p_value"),
-                    ("conf_low", "conf_low"),
-                    ("conf_high", "conf_high"),
+                for key in (
+                    "std_err",
+                    "test_stat",
+                    "p_value",
+                    "conf_lower",
+                    "conf_upper",
                 ):
                     assert_close(
-                        row[our_key],
-                        ref_stats[ref_key],
-                        f"{lbl}/{our_key}",
+                        row[key],
+                        ref_stats[key],
+                        f"{lbl}/{key}",
                         rtol=rtol_se,
                         atol=atol,
                     )
@@ -191,7 +190,7 @@ def _check_predict_new_data(
     rtol: float,
     atol: float,
 ) -> None:
-    """新規データ（out-of-sample）に対する`predict()`の数値照合（Issue #131）。
+    """新規データ（out-of-sample）に対する`predict()`の数値照合。
 
     `ref_new_x`（`run_tobit_crosscheck.R`が学習データの各スロープ列の
     「平均±1標準偏差」から組み立てた2行の新規x値）をそのまま`new_data`として渡し、
@@ -251,7 +250,7 @@ def check_result(
 
     許容誤差は3種類に分ける（`tests/_tolerances.py` の tobit_* エントリ参照）:
         - ``rtol_point``  : 点推定・尤度系（係数・sigma・対数尤度・AIC・BIC・
-          限界効果 dydx・予測値・打ち切り適合度）。基本は 1e-8。
+          限界効果・予測値・打ち切り適合度）。基本は 1e-8。
         - ``rtol_inference``: 分散に依存する量（標準誤差・z値・p値・Wald 統計量・
           限界効果の SE/z/p/信頼区間）。悪条件シナリオ・mroz で個別に緩める。
         - ``rtol_conf_int`` : 係数の信頼区間端点（0 近傍で相対誤差が増幅するため
@@ -291,9 +290,9 @@ def check_result(
         atol=atol,
     )
     assert_dict_close(
-        res.z_stats,
-        ref["z_stats"],
-        f"{label}/z_stats",
+        res.test_stats,
+        ref["test_stats"],
+        f"{label}/test_stats",
         rtol=rtol_inference,
         atol=atol,
     )

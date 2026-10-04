@@ -7,12 +7,13 @@
 //! `LeastSquaresError`と共有する6種のバリデーションエラー）は`crate::errors::
 //! common_error_to_pyerr`に委譲する（系統ごとに同じ判定ロジックを重複させない）。
 
-use engine::nonlinear::common::{CovType, MarginalEffectsAt, Method, MleError};
+use engine::nonlinear::common::{CovType, MarginalEffectsAt, MleError, SolverType};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
 use crate::column_extraction::extract_group_key_column;
 use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
+use crate::validation::reject_unused_option;
 
 /// `engine::nonlinear::common::MleError`をPython例外に変換する。
 ///
@@ -63,11 +64,11 @@ pub struct MarginalEffectsResult {
     #[pyo3(get)]
     pub param_names: Vec<String>,
     #[pyo3(get)]
-    pub dydx: Vec<f64>,
+    pub effect: Vec<f64>,
     #[pyo3(get)]
     pub std_errors: Vec<f64>,
     #[pyo3(get)]
-    pub z_stats: Vec<f64>,
+    pub test_stats: Vec<f64>,
     #[pyo3(get)]
     pub p_values: Vec<f64>,
     #[pyo3(get)]
@@ -77,9 +78,9 @@ pub struct MarginalEffectsResult {
 }
 
 /// `cov_type`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::CovType`に
-/// パースする。`cov_type="cluster"`のときのみ`cluster_col`で指定された列を
-/// `extract_group_key_column`で抽出する（他のcov_typeでは無視する、OLSの
-/// `cluster_col`/`time_col`の扱いと同じ方針）。
+/// パースする。`cov_type="cluster"`のときのみ`cluster`で指定された列を
+/// `extract_group_key_column`で抽出する（他のcov_typeで`cluster`が指定されていれば
+/// `ValidationError`、OLSの`cluster`/`hac_*`の扱いと同じ方針）。
 ///
 /// Logit/Probit/Tobit共通（元は`logit.rs`/`probit.rs`/`tobit.rs`に
 /// バイト単位で完全一致するコードとして独立複製されていたが、`CovType`自体が
@@ -87,45 +88,54 @@ pub struct MarginalEffectsResult {
 ///
 /// # Errors
 /// - `cov_type`が既知の値のいずれでもない: `ValidationError`
+/// - `cov_type`が`"cluster"`でないのに`cluster`が指定された: `ValidationError`
 ///
-/// `cluster_col`未指定自体はここでは`ValidationError`にせず、`groups=None`のまま
+/// `cluster`未指定自体はここでは`ValidationError`にせず、`groups=None`のまま
 /// `engine`側の`CommonError::MissingClusterColumn`検証に委ねる（OLSの`fit()`と同じ役割分担）。
 pub(crate) fn parse_cov_type(
     df: &DataFrame,
     cov_type_lower: &str,
-    cluster_col: &Option<String>,
+    cluster: &Option<String>,
 ) -> PyResult<CovType> {
-    match cov_type_lower {
-        "classical" | "nonrobust" => Ok(CovType::Classical),
+    let parsed = match cov_type_lower {
+        "classical" => Ok(CovType::Classical),
         "opg" => Ok(CovType::Opg),
         "hc0" => Ok(CovType::Hc0),
         "hc1" => Ok(CovType::Hc1),
         "cluster" => {
-            let groups = cluster_col
+            let groups = cluster
                 .as_ref()
                 .map(|col_name| extract_group_key_column(df, col_name))
                 .transpose()?;
             Ok(CovType::Cluster { groups })
         }
         other => Err(ValidationError::new_err(format!(
-            "unknown cov_type: '{other}'. Expected one of 'classical' (or 'nonrobust'), \
+            "unknown cov_type: '{other}'. Expected one of 'classical', \
              'opg', 'hc0', 'hc1', or 'cluster'"
         ))),
-    }
+    }?;
+    // 未知の`cov_type`は「unknown cov_type」を優先して報告する（上のmatchが先）。
+    reject_unused_option(
+        "cluster",
+        cluster.is_some(),
+        cov_type_lower == "cluster",
+        "cov_type=\"cluster\"",
+    )?;
+    Ok(parsed)
 }
 
-/// `method`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::Method`に
+/// `solver`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::SolverType`に
 /// パースする。Logit/Probit/Tobit共通（`parse_cov_type`と同じ理由でここに集約）。
 ///
 /// # Errors
-/// `method`が既知の値のいずれでもない: `ValidationError`
-pub(crate) fn parse_method(method_lower: &str) -> PyResult<Method> {
-    match method_lower {
-        "newton" => Ok(Method::Newton),
-        "bfgs" => Ok(Method::Bfgs),
-        "lbfgs" => Ok(Method::Lbfgs),
+/// `solver`が既知の値のいずれでもない: `ValidationError`
+pub(crate) fn parse_solver_type(solver_lower: &str) -> PyResult<SolverType> {
+    match solver_lower {
+        "newton" => Ok(SolverType::Newton),
+        "bfgs" => Ok(SolverType::Bfgs),
+        "lbfgs" => Ok(SolverType::Lbfgs),
         other => Err(ValidationError::new_err(format!(
-            "unknown method: '{other}'. Expected one of 'newton', 'bfgs', or 'lbfgs'"
+            "unknown solver: '{other}'. Expected one of 'newton', 'bfgs', or 'lbfgs'"
         ))),
     }
 }
@@ -167,7 +177,7 @@ mod tests {
     }
 
     // `parse_marginal_effects_at`自体は渡された文字列をそのまま照合する（`parse_cov_type`/
-    // `parse_method`と同じ設計）。大文字小文字を区別しない処理は呼び出し側
+    // `parse_solver_type`と同じ設計）。大文字小文字を区別しない処理は呼び出し側
     // （`LogitResult::marginal_effects`/`ProbitResult::marginal_effects`）が
     // `.to_lowercase()`してから渡すことで実現するため、ここでは小文字化済みの入力を渡す。
     #[test]

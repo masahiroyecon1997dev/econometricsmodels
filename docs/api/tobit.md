@@ -10,7 +10,7 @@
 
 ## Standard error types
 
-`TobitOptions.cov_type` supports `"classical"` (observed-information / Hessian-based), `"opg"` (outer product of gradients), `"hc0"`, `"hc1"`, and `"cluster"` (requires `cluster_col`). As with [Logit](logit.md#standard-error-types), HC2/HC3 and HAC are not available. Internally the optimizer works in `(β, log σ)` space; the reported covariance is transformed to `(β, σ)` space so that `TobitResults.std_errors` includes a standard error for `sigma` alongside the coefficients. `param_names` is `["const", <x…>, "sigma"]`.
+`TobitOptions.cov_type` supports `"classical"` (observed-information / Hessian-based), `"opg"` (outer product of gradients), `"hc0"`, `"hc1"`, and `"cluster"` (requires `cluster`). As with [Logit](logit.md#standard-error-types), HC2/HC3 and HAC are not available. Internally the optimizer works in `(β, log σ)` space; the reported covariance is transformed to `(β, σ)` space so that `TobitResults.std_errors` includes a standard error for `sigma` alongside the coefficients. `param_names` is `["const", <x…>, "sigma"]`.
 
 ## Overall significance test
 
@@ -18,7 +18,7 @@
 
 ## Solver options
 
-`TobitOptions.method` selects the optimization algorithm: `"newton"` (default, Newton-Raphson with a Levenberg-Marquardt damped step for the indefinite-Hessian regions specific to the `(β, log σ)` likelihood), `"bfgs"`, or `"lbfgs"`. All three converge to the same maximum-likelihood estimate. `max_iter` and `tol` control the iteration limit and the gradient-norm convergence threshold. When the solver does not converge within `max_iter` iterations, a `ComputationError` is raised unless `raise_on_non_convergence=False`, in which case `TobitResults.converged` is `False` instead.
+`TobitOptions.solver` selects the optimization algorithm: `"newton"` (default, Newton-Raphson with a Levenberg-Marquardt damped step for the indefinite-Hessian regions specific to the `(β, log σ)` likelihood), `"bfgs"`, or `"lbfgs"`. All three converge to the same maximum-likelihood estimate. `max_iter` and `tol` control the iteration limit and the gradient-norm convergence threshold. When the solver does not converge within `max_iter` iterations, a `ComputationError` is raised unless `raise_on_non_convergence=False`, in which case `TobitResults.converged` is `False` instead.
 
 ## Marginal effects and predictions
 

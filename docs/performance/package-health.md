@@ -2,12 +2,12 @@
 
 `benchmark/` と `performance/` が**手法ごとの数値精度・推定速度**をカバーするのに
 対し、このファイルは**パッケージとしての健全性**——`pip install` 時のインストール
-容量と `import econometricsmodels` の所要時間——のベースラインと記録を扱う
-（Issue #278）。実行環境依存の実測値という性質は既存の `docs/performance/` と
+容量と `import econometricsmodels` の所要時間——のベースラインと記録を扱う。
+実行環境依存の実測値という性質は既存の `docs/performance/` と
 同じ。mkdocs nav には含めない（CLAUDE.md 9 章、他の `docs/performance/*.md` と同じ）。
 
-このパッケージは GUI アプリ economicon のエンジンであり、アプリ起動時に import
-するなら import 時間は起動 UX に直結する。手法が Phase 4〜6 で増える／BLP 用の
+GUI アプリ等に組み込まれ、アプリ起動時に import される使い方をする場合、
+import 時間は起動 UX に直結する。手法が Phase 4〜6 で増える／BLP 用の
 数値最適化ライブラリが入ると `.so` サイズ・import 時間ともじわじわ増える余地が
 あるため、ベースラインを固定して劣化を検知できるようにする。
 
@@ -40,11 +40,14 @@
 
 ### wheel / `.so` サイズ（`measure_wheel_size.py`）
 
-- リリース時はどのみち全プラットフォームの wheel をビルド済み。そのサイズを
+- リリース時はどのみち全プラットフォーム（Linux は manylinux/musllinux ×
+  x86_64/aarch64 の 4 種を含む）の wheel をビルド済み。そのサイズを
   ジョブサマリーに Markdown 表で出すだけ（**追加ビルドコストゼロ**）。
-- **fail させない**（リリースを止めない）。linux x86_64 wheel の展開後サイズが
+- **fail させない**（リリースを止めない）。linux x86_64 manylinux wheel の展開後サイズが
   下記「サイズ記録」表の最新行比 +10% を超えたときだけ `::warning::`
   アノテーションを出す（スクリプトが本ファイルの表をパースして基準値を得る）。
+  musllinux・aarch64 は記録のみ（`.so` サイズが libc・アーキテクチャで変わるため
+  基準を混ぜない）。
 - `.so` サイズは OS で変わり Python 版ではほぼ不変。記録は linux x86_64 を
   代表値として下表に**手動で**追記する（`docs/performance/<method>.md` の
   「手動でのローカル実測サマリー」運用と同じ。タグ push は detached HEAD で
@@ -55,7 +58,7 @@
 
 ## ベースライン実測（devcontainer / Python 3.14 / x86_64 / FS キャッシュ温）
 
-Issue #278 起票時の実測（wheel は `0.5.0`, cp314 manylinux_2_34 x86_64）。
+当初計測時の実測（wheel は `0.5.0`, cp314 manylinux_2_34 x86_64）。
 
 ### インストール容量
 

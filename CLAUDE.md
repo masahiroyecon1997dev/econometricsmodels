@@ -11,7 +11,7 @@
 |---|---|
 | 名称 | econometricsmodels |
 | 目的 | 統計・計量経済学の分析手法を提供するPython API |
-| 用途 | 自作の分析GUIアプリ「economicon」のエンジンとして使用 |
+| 用途 | スクリプト・アプリケーションから呼び出して使う分析エンジン |
 | 技術スタック | Rust + PyO3（Python拡張） |
 | 線形代数クレート | faer（pure Rust、システムBLAS/LAPACK非依存） |
 | ライセンス | MIT License |
@@ -69,8 +69,9 @@ econometricsmodels/
 │
 ├── docs/                          # MkDocs（GitHub Pages公開）
 │   ├── mkdocs.yml
+│   ├── guide/                     # 利用者向けの英語の公開ページ（navに掲載。受け付けるデータ・バリデーション・推論の慣習・検証・性能。詳細は13章）
 │   ├── spec/                      # 実装済み手法の数式・API仕様の正本（詳細は13章）
-│   ├── performance/               # 手法別の性能比較記録（performance/compare_<method>.pyの実測。<method>.md＋results/にJSON）
+│   ├── performance/               # 手法別の性能比較の開発ノート（日本語。計測方法論・既知の限界。結果表は公開ページ側。results/にJSON）
 │   └── planning/                  # plan.md・実装途中の設計ノート（詳細は9章）
 │
 └── .github/workflows/
@@ -92,17 +93,28 @@ econometricsmodels/
 
 ## 5. Git運用
 
+個人開発のため、リリース単位のブランチに作業を直接コミットする運用とする。
+
 - **コミットメッセージ**: Conventional Commits（`feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `ci:` 等）
-- **ブランチ戦略**: feature branch + PR必須を基本とし、機能追加はフェーズ単位でブランチを切る（例: `phase1-ols`, `phase1-wls`）
-- **マージ**: CIがgreenであることに加え、内容を確認してからmergeする（自動セルフマージはしない）
+- **ブランチ構成**:
+  - `main`: 公開済み（PyPIリリース済み）の状態。タグ付けの対象。
+  - `dev`: mainへマージする前の検証用。リリース作業中に発生した緊急のバグ・脆弱性対応の受け皿、およびDependabotの更新PRの向け先。
+  - `release/vX.Y.Z`: 次リリース用の作業ブランチ。リリースごとに作成し、機能実装・単発のfix/CI変更・ドキュメント更新を含む通常の作業はここに直接コミットする（手法・フェーズ単位のfeature branchは切らない）。
+- **緊急対応**: 脆弱性等で`release/*`と切り離して`dev`へ先に反映したい場合のみ、`fix/<内容>`等の短命ブランチを切り、`dev`へのPRでマージする。`dev`に入った変更は`release/*`へ取り込む（`git merge origin/dev`）。
+- **保護設定**: `main`と`dev`へはローカルからの直pushを禁止し、pull request経由のみとする（ブランチ保護）。
+- **リリースの流れ**: `release/vX.Y.Z` → `dev`（PR）→ `main`（PR）→ タグpush（詳細は`.claude/skills/release-publish/SKILL.md`）。
+- **マージ**: CIがgreenであることに加え、内容を確認してからmergeする（自動セルフマージはしない）。
+- **GitHub Issue**: リポジトリがpublicなため、英語で記述する（README・MkDocsと同様の理由）。対象はIssue本文のみで、セッション内の会話・コミットメッセージは対象外（引き続き日本語）。
 
 ## 6. コーディング規約
 
 詳細は `.claude/rules/rust-style.md`（engine/engine_pybind配下で自動ロード）、`.claude/rules/python-style.md`（python_package配下で自動ロード）を参照。要点: Rustはthiserror+PyErr変換・unwrap/expect回避、Pythonは型ヒント＋Googleスタイルdocstring必須・Ruff line-length=79。
 
+**コメント・ドキュメントでの参照方針**: GitHub Issue番号、および`docs/planning/specs/`配下（`refactoring-candidates.md`・`test-coverage-candidates.md`・各手法の設計ノート・進捗記録等、項目の追加・変更・削除が起こりうる内部管理ドキュメント。13章参照）への参照は、コード（Rust/Python問わず）・`Cargo.toml`等の設定ファイル・仕様書・各CLAUDE.md（ネストCLAUDE.md含む）のコメント/説明文に書き込まない。git log/GitHub側で常に追跡可能な経緯を重複記録する必然性がなく、かつ内部ドキュメントは変更・削除されうるためリンク切れ・文脈不明のノイズになる。一方、`docs/spec/`配下（実装済み手法の正式仕様書、13章参照）の節への参照は、今後も同期すべき生きた契約であるため許可する（例:「詳細は`docs/spec/ols-spec.md`「テスト」参照」）。過去形の由来説明からIssue番号を削除する際は、そこに書かれている理由（なぜそう実装したか）の文章は残す。複数Issueにまたがる経緯で、その変遷自体が非自明な価値を持つ場合はIssue番号を使わず平易な文章で要約し、単なる経緯の記録に過ぎない場合は削除する。
+
 ## 7. テスト方針
 
-詳細は `.claude/rules/testing-policy.md`（tests配下で自動ロード）を参照。要点: pyfixest/Rとの数値比較で検証、許容誤差は相対誤差1e-8を基本（手法により例外あり）、engineの単体テストはソース内`mod tests`、`tests/`はpytestに分離。
+詳細は `.claude/rules/testing-policy.md`（tests配下で自動ロード）を参照。要点: statsmodels/linearmodels/Rとの数値比較で検証（pyfixestは性能比較専用）、許容誤差は相対誤差1e-8を基本（手法により例外あり）、engineの単体テストはソース内`mod tests`、`tests/`はpytestに分離。
 
 ## 8. バージョニング・CI/CD
 
@@ -120,14 +132,14 @@ econometricsmodels/
 ## 10. 開発環境
 
 - `.devcontainer/`（`devcontainer.json` / `Dockerfile` / `docker-compose.yml`）で開発環境を統一。
-- ベースイメージ: `python:3.14-slim-bookworm`。Rust（stable、clippy/rustfmt/llvm-tools）、uv、R（fixest/plm/ivreg/jsonlite、`benchmark/`のベンチマーク生成用）を導入済み。**旧経緯**: `ivreg`は当初`Dockerfile`が`install.packages()`でインストールを試みていたが実際には失敗し導入されていなかった（Issue #171で発覚。依存先`car`→`MatrixModels`が`Matrix>=1.6.0`（→R>=4.4）を要求するが、Debian bookworm標準のr-baseは4.2.2固定でこれを満たせなかった。`install.packages()`はベクタの一部が失敗してもRUNコマンド自体は成功扱いになるため、ビルドは通ってしまいこの状態に気づきにくかった）。CRAN公式のDebian向けAPTリポジトリ（`bookworm-cran40`、実体は最新のRリリースを追従）を追加してR 4.6.1系に更新し解消した。IVのRクロスチェック（`ivreg`）に着手する際は、コンテナ再構築後に`ivreg`が実際に導入されているか（`Rscript -e 'library(ivreg)'`等）を確認してから進める。
+- ベースイメージ: `python:3.14-slim-bookworm`。Rust（stable、clippy/rustfmt/llvm-tools）、uv、R（fixest/plm/ivreg/AER/censReg/marginaleffects等、`benchmark/`のベンチマーク生成用。Rパッケージは`Dockerfile`で`remotes::install_version()`によりバージョンをピン留めし、新版の有無は`check_r_updates.yml`が週次で確認してIssueで通知する）を導入済み。**旧経緯**: `ivreg`は当初`Dockerfile`が`install.packages()`でインストールを試みていたが実際には失敗し導入されていなかった（依存先`car`→`MatrixModels`が`Matrix>=1.6.0`（→R>=4.4）を要求するが、Debian bookworm標準のr-baseは4.2.2固定でこれを満たせなかった。`install.packages()`はベクタの一部が失敗してもRUNコマンド自体は成功扱いになるため、ビルドは通ってしまいこの状態に気づきにくかった）。CRAN公式のDebian向けAPTリポジトリ（`bookworm-cran40`、実体は最新のRリリースを追従）を追加してR 4.x系（執筆時点で4.5.3）に更新し解消した。IVのRクロスチェック（`ivreg`）に着手する際は、コンテナ再構築後に`ivreg`が実際に導入されているか（`Rscript -e 'library(ivreg)'`等）を確認してから進める。
 - Claude Code CLIはdevcontainer.jsonの`ghcr.io/anthropics/devcontainer-features/claude-code`featureで導入（Dockerfile側での重複インストールはしない）。`gh`（GitHub CLI）は`ghcr.io/devcontainers/features/github-cli`featureで導入（`/cicd`等のコマンドが前提とするため）。
-- **トークン消費を抑えるための除外設定**: `.claude/settings.json`の`permissions.deny`/`ask`で、lockファイル・`target/`・`.venv/`・ベンチマークのフィクスチャJSON・GitHub Copilot用設定（`.github/agents/` `.github/instructions/`、メンテナンスが最新に追いついていない可能性があるため）等を除外している。
+- **トークン消費を抑えるための除外設定**: `.claude/settings.json`の`permissions.deny`/`ask`で、lockファイル・`target/`・`.venv/`・ベンチマークのフィクスチャJSON等を除外している。
 - 詳細は`.claude/settings.json`を参照。
 
 ## 11. 対象プラットフォーム・Pythonバージョン
 
-- OS: Linux（manylinux）, macOS（Apple Silicon / Intel）, Windows
+- OS: Linux（manylinux / musllinux、x86_64 / aarch64の4種）, macOS（Apple Silicon / Intel）, Windows（x64）
 - Python: **3.12以上**。CIでのビルド・テスト対象は **3.12 / 3.13 / 3.14** の3バージョン。開発環境（devcontainer）は3.14を使用。
 
 ## 12. 今後の検討事項（未確定）
@@ -140,11 +152,18 @@ econometricsmodels/
 
 - 方針書: `docs/plan.md`（本リポジトリの正式な方針ドキュメント。実装フェーズ・手法の割り当てもここが正本）
 - 仕様書: `docs/spec/`（実装済みの手法ごとの数式・API仕様の正本。method非依存のCI/CD・セキュリティ運用ノートも
-  ここに置く、例: `ci-cd-notes.md`）、`docs/planning/specs/`（実装途中の手法の設計ノート・実装ノート）。
+  ここに置く、例: `ci-cd-notes.md`・`inference-conventions.md`）、`docs/planning/specs/`（実装途中の手法の設計ノート・実装ノート）。
   ある手法の実装が完了したら、その手法の仕様書は`docs/planning/specs/`から`docs/spec/`へ集約する
   （経緯は削除し理由のみ簡潔に記載、1ファイルにまとめる）。
-- 性能比較記録: `docs/performance/<method>.md`（`performance/compare_<method>.py`の実測サマリー。数式・API仕様ではなく
-  実行環境依存の実測値のため`docs/spec/`とは分ける）。生成JSONは`docs/performance/results/`（`.gitignore`対象）。
+- 利用者向け横断ガイド: `docs/guide/`（mkdocsのnavに載せる英語の公開ページ）。現状は`inference-conventions.md`（手法別の検定分布・自由度、R/statsmodels/linearmodelsとの違い、診断統計量の読み方）。手法別の一覧表はこの公開ページを正本とし、`docs/spec/inference-conventions.md`には重複させず選択理由・ベンチマーク上の注意のみを置く。新手法の追加時は公開ページの表に1行追加する。
+- 性能比較記録: `docs/performance/<method>.md`（`performance/compare_<method>.py`の計測方法論・設計判断・既知の限界・今後の検討を残す日本語の開発ノート。
+  計測結果の表は置かない）。生成JSONは`docs/performance/results/`（`.gitignore`対象）。
+- **公開ページ（mkdocs nav掲載・英語）の運用ルール**: 検証と性能は、手法が増えたら公開ページにも反映する。
+  - `docs/guide/verification.md`: 手法×リファレンス（主・独立クロスチェック）・比較する統計量・許容誤差（`tests/_tolerances.py`が正）・実データ・単一リファレンスの例外。新手法のテスト作成（`/test-new`）の完了条件に含める。
+  - `docs/guide/performance.md`（概要・既知の課題・計測条件は手書き、先頭のサマリー表は生成ブロック）と`docs/guide/performance-results.md`（全表、全体が生成物）: **数値は`benchmark_performance.yml`のCI計測値を正とする**（devcontainerの単発計測は使わない）。リリース準備時（`/release`）にリリースブランチで手動実行し、artifactから`python -m performance.render_docs_results`で再生成する。`README.md`「Performance」節の表・例にも同じ数値を丸めて転記しているため、再生成のたびに合わせて更新する（手順は`/release`）。手法を足すときは`benchmark_performance.yml`のmatrixに加えれば、次回の再生成で自動的にページへ現れる。
+  - `docs/guide/accepted-data.md`: 受け付ける入力（polarsの`DataFrame`のみ）・列の役割ごとに許可するdtype・値の変換と精度・引数の型（`TypeError`との分担）。許可するdtypeの表は`engine_pybind/src/column_extraction.rs`のdtype検査が正で、検査を変更したらこの表を同時に更新する（許可・拒否の方針を各手法specに複製しない）。
+  - `docs/guide/validation.md`: バリデーションの設計思想（欠損値を自動除外しない理由等）と、`ValidationError`/`ComputationError`が出る状況の分類。手法固有のチェック（新しい列引数・オプションの検証、手法固有の`ComputationError`）を追加したら、該当する分類表に1行足す。欠損値・共線列等の共通方針は各手法specに複製せず、このページを参照する。
+  - 検証・性能の結果表は日本語ノートや`docs/spec/`に重複させない（公開ページが正本）。
 
 ## 14. 実装・テスト・ベンチマーク作成・仕様検討時の確認方針
 

@@ -17,7 +17,10 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _fe_helpers import our_fit
+from _helpers import HAC_AUTO_LAG_SAMPLE_SIZES, hac_lag_panel_frame
 from econometricsmodels import FE, FEOptions, FEResults
+
+from benchmark.common import hac_auto_lag
 
 # ── 成功パス・結果型 ──────────────────────────────────────────────
 
@@ -64,7 +67,7 @@ def test_coef_table_structure(fe_dataset):
         "param",
         "coef",
         "std_err",
-        "t_stat",
+        "test_stat",
         "p_value",
         "conf_lower",
         "conf_upper",
@@ -84,13 +87,13 @@ def test_conf_int_structure(fe_dataset):
         assert lower < upper
 
 
-def test_params_std_errors_t_stats_p_values_share_keys(fe_dataset):
+def test_params_std_errors_test_stats_p_values_share_keys(fe_dataset):
     res = our_fit(fe_dataset)
     expected_keys = {"x1", "x2"}
 
     assert set(res.params.keys()) == expected_keys
     assert set(res.std_errors.keys()) == expected_keys
-    assert set(res.t_stats.keys()) == expected_keys
+    assert set(res.test_stats.keys()) == expected_keys
     assert set(res.p_values.keys()) == expected_keys
 
 
@@ -99,6 +102,20 @@ def test_n_obs_dep_var_name_n_entities(fe_dataset):
     assert res.n_obs == fe_dataset.height
     assert res.dep_var_name == "y"
     assert res.n_entities == fe_dataset["entity"].n_unique()
+
+
+def test_n_periods_is_none_for_one_way_and_unique_times_for_two_way(
+    fe_dataset,
+):
+    """1-wayは`None`、2-wayは`time`列のユニーク数。`dk_time`のみ指定した
+    1-wayでも`None`のまま。"""
+    assert our_fit(fe_dataset).n_periods is None
+    dk_one_way = our_fit(
+        fe_dataset, options=FEOptions(cov_type="dk", dk_time="time")
+    )
+    assert dk_one_way.n_periods is None
+    two_way = our_fit(fe_dataset, options=FEOptions(time="time"))
+    assert two_way.n_periods == fe_dataset["time"].n_unique()
 
 
 # ── fixed_effects()（追加メソッド、docs/spec/fe-spec.md 3.5節） ────────
@@ -144,15 +161,15 @@ def test_fixed_effects_two_way_structure(fe_dataset):
         ("HC2", "hc2"),
         ("hc3", "hc3"),
         ("Cluster", "cluster"),
-        ("HAC", "hac"),
+        ("DK", "dk"),
     ],
 )
 def test_cov_type_is_case_insensitive(fe_dataset, cov_type, expected_label):
-    """`hac`は`time`/`time_col`いずれか無いと`HacRequiresTime`になるため、
-    1-way維持のまま`time_col`だけ渡す（`test_fe_validation.py`
-    `test_hac_requires_time_raises`と対照）。
+    """`dk`は`dk_time`が無いと`ValidationError`になるため、
+    1-way維持のまま`dk_time`だけ渡す（`test_fe_validation.py`
+    `test_dk_requires_dk_time_raises`と対照）。
     """
-    kwargs = {"time_col": "time"} if expected_label == "hac" else {}
+    kwargs = {"dk_time": "time"} if expected_label == "dk" else {}
     options = FEOptions(cov_type=cov_type, **kwargs)
     res = our_fit(fe_dataset, options=options)
     assert res.cov_type == expected_label
@@ -183,15 +200,15 @@ def test_time_option_switches_one_way_two_way(fe_dataset):
     assert two_way.df_model == n_entities + n_periods - 1 + 2
 
 
-def test_cluster_col_defaults_to_entity(fe_dataset):
-    """`cluster_col`省略時は`entity`引数の列を自動的にクラスターキーとして
-    使う（3.2節）。明示的に`cluster_col="entity"`を渡した場合と同じ結果に
+def test_cluster_defaults_to_entity(fe_dataset):
+    """`cluster`省略時は`entity`引数の列を自動的にクラスターキーとして
+    使う（3.2節）。明示的に`cluster="entity"`を渡した場合と同じ結果に
     なることで確認する。
     """
     default_res = our_fit(fe_dataset, options=FEOptions(cov_type="cluster"))
     explicit_res = our_fit(
         fe_dataset,
-        options=FEOptions(cov_type="cluster", cluster_col="entity"),
+        options=FEOptions(cov_type="cluster", cluster="entity"),
     )
 
     for name in default_res.param_names:
@@ -204,7 +221,9 @@ def test_dk_bandwidth_zero_succeeds(fe_dataset):
     """`dk_bandwidth=0`（ラグ項なし）も有効な範囲`[0, t)`として受理される
     （engine/src/panel/CLAUDE.md「Driscoll-Kraay型パネルHAC対応」参照）。
     """
-    options = FEOptions(cov_type="hac", time="time", dk_bandwidth=0)
+    options = FEOptions(
+        cov_type="dk", time="time", dk_time="time", dk_bandwidth=0
+    )
     res = our_fit(fe_dataset, options=options)
     assert all(se > 0.0 for se in res.std_errors.values())
 
@@ -242,3 +261,34 @@ def test_cluster_se_exceeds_classical_under_serial_correlation():
     classical_variance_sum = sum(se**2 for se in classical.std_errors.values())
     clustered_variance_sum = sum(se**2 for se in clustered.std_errors.values())
     assert clustered_variance_sum > classical_variance_sum
+
+
+# ── Driscoll-Kraayバンド幅の実使用値（dk_bandwidth_used）─────────────
+
+
+@pytest.mark.parametrize("n_periods", HAC_AUTO_LAG_SAMPLE_SIZES)
+def test_dk_bandwidth_used_matches_python_auto_lag_formula(n_periods):
+    """`dk_bandwidth`省略時の`dk_bandwidth_used`が、時点数`t`に対する
+    Python側の独立実装（`benchmark.common.hac_auto_lag`、OLSのHACと
+    同じ式を`n`ではなく`t`に適用）と一致すること。
+    """
+    df = hac_lag_panel_frame(n_periods)
+    options = FEOptions(cov_type="dk", dk_time="time")
+    res = our_fit(df, options=options)
+    assert res.dk_bandwidth_used == hac_auto_lag(n_periods)
+
+
+@pytest.mark.parametrize("dk_bandwidth", [0, 2, 5])
+def test_dk_bandwidth_used_echoes_explicit_dk_bandwidth(dk_bandwidth):
+    df = hac_lag_panel_frame(10)
+    options = FEOptions(
+        cov_type="dk", dk_time="time", dk_bandwidth=dk_bandwidth
+    )
+    assert our_fit(df, options=options).dk_bandwidth_used == dk_bandwidth
+
+
+@pytest.mark.parametrize("cov_type", ["classical", "hc1", "cluster"])
+def test_dk_bandwidth_used_is_none_unless_dk(cov_type):
+    df = hac_lag_panel_frame(10)
+    res = our_fit(df, options=FEOptions(cov_type=cov_type))
+    assert res.dk_bandwidth_used is None

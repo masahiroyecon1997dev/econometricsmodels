@@ -20,7 +20,7 @@ Note:
           悪条件下で2つの独立最適化器の解の僅差が分散系で ~1.9e-8 まで増幅する。
         - `mroz`（`hours` 生スケール）の SE・z・Wald・信頼区間・限界効果 SE:
           `censReg` の maxLik が生スケール悪条件データで `survreg` ほど収束が詰まらず
-          ~1e-7〜1.4e-6 乖離する（点推定は ~3e-9 で一致。engine と主リファレンス
+          ~1e-7〜3e-5 乖離する（点推定は ~3e-9 で一致。engine と主リファレンス
           `survreg` は同データで ~3e-10 一致するため `censReg` 側の収束限界）。
 """
 
@@ -56,7 +56,7 @@ def _tolerances(scenario: str) -> dict:
 
 
 def _method_tolerances() -> dict:
-    rtol = _TOL["rtol_method"]
+    rtol = _TOL["rtol_solver"]
     return {
         "rtol_point": rtol,
         "rtol_inference": rtol,
@@ -87,11 +87,11 @@ def test_cluster_matches_censreg(fixtures, cov_key):
     )
 
 
-@pytest.mark.parametrize("method", _checks.METHODS)
-def test_method_matches_censreg(fixtures, method):
-    ref = fixtures["method"][method]
-    res = _checks.build_method_fit(method, ref)
-    _checks.check_result(res, ref, f"method/{method}", **_method_tolerances())
+@pytest.mark.parametrize("solver", _checks.METHODS)
+def test_method_matches_censreg(fixtures, solver):
+    ref = fixtures["solver"][solver]
+    res = _checks.build_method_fit(solver, ref)
+    _checks.check_result(res, ref, f"solver/{solver}", **_method_tolerances())
 
 
 @pytest.mark.parametrize("cov_type", _checks.COV_TYPES)

@@ -18,6 +18,8 @@ separate class; same policy as `LogitOptions`, see
 
 from __future__ import annotations
 
+from typing import Literal
+
 import polars as pl
 
 from .. import _lib
@@ -65,11 +67,14 @@ class Probit:
             The estimation results.
 
         Raises:
+            TypeError: An argument has the wrong type (for example
+                `x` is a string instead of a list of column names). A
+                builtin exception, not a `ValidationError`.
             ValidationError: The input or options are invalid (a
                 column is missing, contains missing values or
                 NaN/infinity, `y` contains a value other than 0.0/1.0,
                 insufficient observations, `confidence_level` out of
-                range, an unknown `cov_type`/`method` string, etc.).
+                range, an unknown `cov_type`/`solver` string, etc.).
                 A subclass of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. non-convergence, a singular
@@ -111,6 +116,11 @@ class ProbitResults:
         return self._raw.param_names
 
     @property
+    def dep_var_name(self) -> str:
+        """Column name of the dependent variable."""
+        return self._raw.dep_var_name
+
+    @property
     def params(self) -> dict[str, float]:
         """Coefficient name to coefficient value."""
         return dict(zip(self._raw.param_names, self._raw.params))
@@ -121,13 +131,27 @@ class ProbitResults:
         return dict(zip(self._raw.param_names, self._raw.std_errors))
 
     @property
-    def z_stats(self) -> dict[str, float]:
+    def test_stats(self) -> dict[str, float]:
         """Coefficient name to z-statistic.
 
         Probit uses a z-test (standard normal), not a t-test (see
         `docs/spec/nonlinear-common.md` section 4).
         """
-        return dict(zip(self._raw.param_names, self._raw.z_stats))
+        return dict(zip(self._raw.param_names, self._raw.test_stats))
+
+    @property
+    def stat_dist(self) -> Literal["t", "normal"]:
+        """Distribution of `test_stats`: `"t"` (t-statistics) or
+        `"normal"` (z-statistics)."""
+        return self._raw.stat_dist
+
+    @property
+    def stat_df(self) -> int | None:
+        """Degrees of freedom of the t distribution behind `test_stats`,
+        or `None` when `stat_dist` is `"normal"`. May differ from
+        `df_resid` (e.g. cluster-robust inference uses `G - 1`), so use
+        this to recompute p-values from `test_stats`."""
+        return self._raw.stat_df
 
     @property
     def p_values(self) -> dict[str, float]:
@@ -166,6 +190,12 @@ class ProbitResults:
     def lr_p_value(self) -> float:
         """P-value of the likelihood-ratio test (chi-squared distribution)."""
         return self._raw.lr_p_value
+
+    @property
+    def lr_df(self) -> int | None:
+        """Degrees of freedom of the chi-squared likelihood-ratio test
+        (`lr_statistic`). `None` when there are no slope coefficients."""
+        return self._raw.lr_df
 
     @property
     def pseudo_r_squared(self) -> float:
@@ -213,20 +243,20 @@ class ProbitResults:
         return self._raw.cov_type
 
     @property
-    def method(self) -> str:
+    def solver(self) -> str:
         """Optimization solver actually used (normalized to lowercase)."""
-        return self._raw.method
+        return self._raw.solver
 
     def coef_table(self) -> list[dict[str, float | str]]:
         """Row-oriented summary table of the coefficients.
 
         Shaped to be usable almost as-is in a REST API response. Same
-        shape as `OLSResults.coef_table()` except `z_stat` in place of
-        `t_stat` (Probit uses a z-test rather than a t-test).
+        shape as `OLSResults.coef_table()`; `test_stat` is a z-statistic
+        here (see `stat_dist`).
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are
-            `param`, `coef`, `std_err`, `z_stat`, `p_value`,
+            `param`, `coef`, `std_err`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
         return [
@@ -234,7 +264,7 @@ class ProbitResults:
                 "param": name,
                 "coef": coef,
                 "std_err": se,
-                "z_stat": z,
+                "test_stat": z,
                 "p_value": p,
                 "conf_lower": lower,
                 "conf_upper": upper,
@@ -243,7 +273,7 @@ class ProbitResults:
                 self._raw.param_names,
                 self._raw.params,
                 self._raw.std_errors,
-                self._raw.z_stats,
+                self._raw.test_stats,
                 self._raw.p_values,
                 self._raw.conf_lower,
                 self._raw.conf_upper,
@@ -290,7 +320,7 @@ class ProbitResults:
 
         Same `new_data` semantics as `predict()`, but returns a polars
         DataFrame (the training data, or `new_data` when given, plus a
-        new `"probability"` column) instead of a row-oriented list.
+        new `"predicted_probability"` column) instead of a row-oriented list.
         See `OLSResults.augment()` for the project's general policy on
         this DataFrame-returning exception.
 
@@ -301,11 +331,11 @@ class ProbitResults:
 
         Returns:
             A polars DataFrame: the source data's columns plus
-            `"probability"`, in the same row order as the source.
+            `"predicted_probability"`, in the same row order as the source.
 
         Raises:
             ValidationError: Same as `predict()`, or the source data
-                already has a column named `"probability"` (which
+                already has a column named `"predicted_probability"` (which
                 would otherwise be silently overwritten).
         """
         return self._raw.augment(new_data)
@@ -317,7 +347,7 @@ class ProbitResults:
         class depends on `threshold` (matches statsmodels'
         `BinaryResults.pred_table(threshold)`). Unlike `predict()`,
         out-of-sample data (a `new_data` argument) is not yet
-        supported (tracked separately, see Issue #322).
+        supported (tracked separately).
 
         Args:
             threshold: Probability threshold above which an
@@ -355,9 +385,12 @@ class ProbitResults:
 
         Returns:
             A list of dictionaries, one per explanatory variable
-            (excluding the intercept). Keys are `param`, `dydx`,
-            `std_err`, `z`, `p_value`, `conf_low`, `conf_high` (see
-            `docs/spec/nonlinear-common.md` section 6).
+            (excluding the intercept). Keys are `param`, `effect`,
+            `std_err`, `test_stat`, `p_value`, `conf_lower`, `conf_upper` (see
+            `docs/spec/nonlinear-common.md` section 6). `test_stat` is
+            always a z-statistic (normal distribution). `effect` is
+            the marginal effect estimate (corresponds to `dy/dx` in
+            Stata's `margins, dydx(*)` and statsmodels).
 
         Raises:
             ValidationError: `at` is not one of `"overall"`, `"mean"`,
@@ -368,18 +401,18 @@ class ProbitResults:
         return [
             {
                 "param": name,
-                "dydx": dydx,
+                "effect": effect,
                 "std_err": se,
-                "z": z,
+                "test_stat": z,
                 "p_value": p,
-                "conf_low": lower,
-                "conf_high": upper,
+                "conf_lower": lower,
+                "conf_upper": upper,
             }
-            for name, dydx, se, z, p, lower, upper in zip(
+            for name, effect, se, z, p, lower, upper in zip(
                 raw.param_names,
-                raw.dydx,
+                raw.effect,
                 raw.std_errors,
-                raw.z_stats,
+                raw.test_stats,
                 raw.p_values,
                 raw.conf_lower,
                 raw.conf_upper,

@@ -42,10 +42,10 @@ pub enum CovType {
         /// ラグ数（バンド幅）。`None`なら経験則 `L = floor(4*(n/100)^(2/9))` で自動計算する
         /// （`docs/spec/ols-spec.md`「標準誤差」のHAC参照）。
         lags: Option<i64>,
-        /// 時系列順序。`None`なら`OlsInput`の行順をそのまま時系列順とみなす。`Some`の場合、
-        /// `OlsInput`の行と対応する長さnの配列で、この値の昇順でラグ付き自己共分散を計算する
-        /// （同3.3節）。値そのものの単位・意味（期間番号・UNIX時刻等）は問わない。
-        time_order: Option<Vec<f64>>,
+        /// 時系列順序。`OlsInput`の行と対応する長さnの配列で、この値の昇順でラグ付き自己共分散を
+        /// 計算する（同3.3節）。必須: 行順を暗黙に時系列順とみなす既定は置かない（`engine_pybind`は
+        /// `hac_time`を必須にして順位を渡す）。値そのものの単位・意味（期間番号・UNIX時刻等）は問わない。
+        time_order: Vec<f64>,
     },
     /// クラスターロバスト標準誤差（Stata方式の小標本補正込み。常に補正を適用し、
     /// 無効化するオプションは設けない。`docs/spec/ols-spec.md`
@@ -54,7 +54,7 @@ pub enum CovType {
         /// クラスターのグループキー。`OlsInput`の行と対応する長さnの配列。
         /// `None`の場合、`OlsEstimator::fit`は`CommonError::MissingClusterColumn`を返す
         /// （`hac_lags: Option<i64>`と同じ設計パターンで、値の妥当性検証を`engine`内で
-        /// 行うため`Option`にしている。`engine_pybind`側で`cluster_col`未指定を
+        /// 行うため`Option`にしている。`engine_pybind`側で`cluster`未指定を
         /// 事前に弾かない）。
         groups: Option<Vec<String>>,
     },
@@ -260,7 +260,7 @@ pub struct OlsEstimator {
     /// 標準誤差 (k, 1)
     std_errors: Mat<f64>,
     /// t統計量 (k, 1) = params / std_errors
-    t_stats: Mat<f64>,
+    test_stats: Mat<f64>,
     /// 両側p値 (k, 1)。t分布（自由度 n-k）に基づく
     p_values: Mat<f64>,
     /// 信頼区間の下限 (k, 1)
@@ -270,7 +270,7 @@ pub struct OlsEstimator {
     /// 決定係数（`include_intercept`に応じてcentered/uncentered TSSを切り替える）
     r_squared: f64,
     /// 自由度調整済み決定係数
-    r_squared_adj: f64,
+    adj_r_squared: f64,
     /// F統計量。`cov_type=Classical`なら古典的F検定、それ以外（HC0-3/HAC）は
     /// `cov_params`を使ったロバストWald検定（`docs/spec/ols-spec.md`
     /// 「適合度統計量」参照）
@@ -291,6 +291,10 @@ pub struct OlsEstimator {
     /// ときだけ`G-1`になる（`fit()`のdocコメント「df_inference」参照）。`cov_params`と
     /// 同じ理由で保持している。
     df_inference: usize,
+    /// `cov_type=Hac`のとき、実際に使われたラグ数（`hac_lags`明示指定、または`None`なら
+    /// 経験則による自動計算の結果）。`CovType::Hac`の`lags`はユーザー指定値のまま
+    /// 変更しないため別フィールドで保持する。`Hac`以外では`None`。
+    hac_lags_used: Option<usize>,
 }
 
 impl OlsEstimator {
@@ -416,6 +420,7 @@ impl OlsEstimator {
         // 慣行でもある。`df_resid`自体は分散推定量`σ̂²`・調整済みR²・AIC/BIC等では
         // 引き続き`n-k`のまま使う。`docs/spec/ols-spec.md`
         // 「標準誤差」のクラスター参照）。
+        let mut hac_lags_used = None;
         let (cov_params, df_inference) = match &cov_type {
             CovType::Classical => (classical_cov_params(sigma2, &xtx_inv, k), df_resid),
             CovType::Hc0 => (
@@ -436,7 +441,8 @@ impl OlsEstimator {
             ),
             CovType::Hac { lags, time_order } => {
                 let lags = resolve_hac_lags(*lags, n)?;
-                let order = time_ordering(time_order.as_deref(), n);
+                hac_lags_used = Some(lags);
+                let order = time_ordering(time_order, n);
                 (
                     hac_cov_params(input.x(), &residuals, &xtx_inv, n, k, lags, &order),
                     df_resid,
@@ -462,7 +468,7 @@ impl OlsEstimator {
             .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
         let t_crit = inference::critical_value(&t_dist, confidence_level);
 
-        let mut t_stats = Mat::zeros(k, 1);
+        let mut test_stats = Mat::zeros(k, 1);
         let mut p_values = Mat::zeros(k, 1);
         let mut conf_lower = Mat::zeros(k, 1);
         let mut conf_upper = Mat::zeros(k, 1);
@@ -472,7 +478,7 @@ impl OlsEstimator {
             let se = *std_errors.get(j, 0);
             let stat = inference::compute_inference_stat(&t_dist, coef, se, t_crit);
 
-            *t_stats.get_mut(j, 0) = stat.stat;
+            *test_stats.get_mut(j, 0) = stat.stat;
             *p_values.get_mut(j, 0) = stat.p_value;
             *conf_lower.get_mut(j, 0) = stat.conf_low;
             *conf_upper.get_mut(j, 0) = stat.conf_high;
@@ -488,7 +494,7 @@ impl OlsEstimator {
             (0..n).map(|i| (*input.y().get(i, 0)).powi(2)).sum()
         };
         let r_squared = 1.0 - ssr / sst;
-        let r_squared_adj = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
+        let adj_r_squared = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
 
         let log_likelihood =
             -(n as f64 / 2.0) * ((2.0 * std::f64::consts::PI).ln() + (ssr / n as f64).ln() + 1.0);
@@ -510,12 +516,12 @@ impl OlsEstimator {
             params,
             residuals,
             std_errors,
-            t_stats,
+            test_stats,
             p_values,
             conf_lower,
             conf_upper,
             r_squared,
-            r_squared_adj,
+            adj_r_squared,
             f_statistic,
             f_p_value,
             log_likelihood,
@@ -523,6 +529,7 @@ impl OlsEstimator {
             bic,
             cov_params,
             df_inference,
+            hac_lags_used,
         })
     }
 
@@ -552,8 +559,16 @@ impl OlsEstimator {
     }
 
     /// t統計量 (k, 1)
-    pub fn t_stats(&self) -> &Mat<f64> {
-        &self.t_stats
+    pub fn test_stats(&self) -> &Mat<f64> {
+        &self.test_stats
+    }
+
+    /// `test_stats`の従う分布（t分布、自由度は`df_inference`。`cov_type=Cluster`のときだけ
+    /// `df_resid`ではなく`G-1`になる）。
+    pub fn stat_dist(&self) -> inference::StatDist {
+        inference::StatDist::T {
+            df: self.df_inference,
+        }
     }
 
     /// 両側p値 (k, 1)
@@ -577,8 +592,8 @@ impl OlsEstimator {
     }
 
     /// 自由度調整済み決定係数
-    pub fn r_squared_adj(&self) -> f64 {
-        self.r_squared_adj
+    pub fn adj_r_squared(&self) -> f64 {
+        self.adj_r_squared
     }
 
     /// F統計量
@@ -589,6 +604,34 @@ impl OlsEstimator {
     /// F統計量のp値
     pub fn f_p_value(&self) -> f64 {
         self.f_p_value
+    }
+
+    /// 残差自由度 `n - k`。
+    pub fn df_resid(&self) -> usize {
+        self.input.nobs() - self.input.k()
+    }
+
+    /// モデルの自由度（定数項を除く傾き係数の数 `k - k_constant`）。
+    pub fn df_model(&self) -> usize {
+        self.input.k() - usize::from(self.input.has_intercept())
+    }
+
+    /// t検定・信頼区間・F検定に使った自由度（[`stat_dist`](Self::stat_dist)と同じ値）。
+    /// 通常は`df_resid()`だが`cov_type=Cluster`のときだけ`G-1`。
+    pub fn df_inference(&self) -> usize {
+        self.df_inference
+    }
+
+    /// `cov_type=Hac`のとき、実際に使われたラグ数（`hac_lags`の明示指定値、または
+    /// 未指定時に経験則で自動計算した値）。`Hac`以外は`None`。
+    pub fn hac_lags_used(&self) -> Option<usize> {
+        self.hac_lags_used
+    }
+
+    /// F統計量の自由度`(分子, 分母)`。傾き係数が無く`f_statistic()`がNaNのときは`None`。
+    pub fn f_df(&self) -> Option<(usize, usize)> {
+        let df_model = self.df_model();
+        (df_model > 0).then_some((df_model, self.df_inference))
     }
 
     /// 対数尤度
@@ -793,21 +836,17 @@ fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, LeastSquaresEr
 
 /// `CovType::Hac`の`time_order`から、時系列の昇順に並べたときの行インデックス列を求める。
 ///
-/// `None`（`time_col`未指定）の場合は`OlsInput`の行順をそのまま時系列順とみなし、恒等順序
-/// `[0, 1, ..., n-1]`を返す。
-///
 /// `partial_cmp().unwrap()`について: `time_order`の値はNaN/無限大を含まないことが
 /// `engine_pybind::column_extraction`側で既に保証されている前提（本関数は`engine`の
 /// 責務境界の内側であり、クリーンな値しか受け取らない。モジュール冒頭のdocコメント参照）。
-fn time_ordering(time_order: Option<&[f64]>, n: usize) -> Vec<usize> {
-    match time_order {
-        Some(values) => {
-            let mut order: Vec<usize> = (0..n).collect();
-            order.sort_by(|&a, &b| values[a].partial_cmp(&values[b]).unwrap());
-            order
-        }
-        None => (0..n).collect(),
-    }
+/// 同様に、値が互いに異なる（`engine_pybind`が昇順の位置＝順位に変換済みで、同値は
+/// `ValidationError`として弾かれている）ことも前提にする。この関数自身は同値を検出せず、
+/// 同値があれば安定ソートにより行順で並べるだけ。
+fn time_ordering(time_order: &[f64], n: usize) -> Vec<usize> {
+    debug_assert_eq!(time_order.len(), n);
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&a, &b| time_order[a].partial_cmp(&time_order[b]).unwrap());
+    order
 }
 
 /// Newey-West HACの係数分散共分散行列: `(X'X)⁻¹Ŝ(X'X)⁻¹`（k×k）。
@@ -1026,7 +1065,7 @@ pub(crate) fn wald_f_test(
 
     let f_dist = FisherSnedecor::new(df_model as f64, df_inference as f64)
         .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
-    let f_p_value = 1.0 - f_dist.cdf(f_statistic);
+    let f_p_value = f_dist.sf(f_statistic);
 
     Ok((f_statistic, f_p_value))
 }
@@ -1034,6 +1073,26 @@ pub(crate) fn wald_f_test(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::linear::common::row_time_order;
+
+    #[test]
+    fn wald_f_test_keeps_precision_in_the_far_tail() {
+        // `1.0 - cdf`では裾でp値が0.0に潰れる。単一の傾き（`β=10`、`V=1`）ならF=100、
+        // R: `pf(100, 1, 100, lower.tail = FALSE)` = 9.90168898459409e-17。
+        let params = Mat::from_fn(1, 1, |_, _| 10.0);
+        let cov = Mat::from_fn(1, 1, |_, _| 1.0);
+        let (f, p) = wald_f_test(&params, &cov, 0, 1, 100).unwrap();
+        assert!((f - 100.0).abs() < 1e-12);
+        assert!((p / 9.901_688_984_594_09e-17 - 1.0).abs() < 1e-8);
+
+        // 傾き3個（`β=(10, 20, 30)`、`V=I`）: wald=1400、F=1400/3、F(3, 60)。
+        // R: `pf(1400/3, 3, 60, lower.tail = FALSE)` = 1.59046502043898e-41
+        let params3 = Mat::from_fn(3, 1, |i, _| (i as f64 + 1.0) * 10.0);
+        let cov3 = Mat::from_fn(3, 3, |i, j| if i == j { 1.0 } else { 0.0 });
+        let (f3, p3) = wald_f_test(&params3, &cov3, 0, 3, 60).unwrap();
+        assert!((f3 - 1400.0 / 3.0).abs() < 1e-9);
+        assert!((p3 / 1.590_465_020_438_98e-41 - 1.0).abs() < 1e-8);
+    }
 
     #[test]
     fn from_columns_with_intercept_prepends_const_column() {
@@ -1448,7 +1507,7 @@ mod tests {
         // グローバル並列度を `Par::Seq` へ引き戻すことの回帰ガード（linear 系統代表）。
         // 別テストが既に `Seq` にしている可能性があるため、まず `Rayon` に戻してから
         // `fit()` を通す。ここで扱う設計行列は極小なので、この一時的な `Rayon` 設定が
-        // #283 の病理（大標本 tall-skinny での不安定化）を招くことはない。
+        // その病理（大標本 tall-skinny での不安定化）を招くことはない。
         faer::set_global_parallelism(faer::Par::rayon(0));
 
         let y = vec![2.0, 4.0, 5.0, 4.0, 5.0, 7.0, 6.0];
@@ -1488,7 +1547,7 @@ mod tests {
 
     /// `q=1`（末尾1列だけを対象）のとき、`F = t²`という標準的な恒等式
     /// （`wald_f_test`のdocコメント参照、1自由度のF検定は両側t検定と代数的に等価）により、
-    /// 既に個別に検証済みの`t_stats()`/`p_values()`（`fit()`本体が計算）と一致するはず。
+    /// 既に個別に検証済みの`test_stats()`/`p_values()`（`fit()`本体が計算）と一致するはず。
     #[test]
     fn wald_test_last_columns_matches_squared_t_statistic_for_single_column() {
         let y = vec![2.0, 4.0, 5.0, 4.0, 5.0, 7.0, 6.0];
@@ -1506,7 +1565,7 @@ mod tests {
 
         let (stat, p_value) = estimator.wald_test_last_columns(1).unwrap();
         let k = estimator.input().k();
-        let t_last = *estimator.t_stats().get(k - 1, 0);
+        let t_last = *estimator.test_stats().get(k - 1, 0);
         let p_last = *estimator.p_values().get(k - 1, 0);
         assert!((stat - t_last.powi(2)).abs() < 1e-10);
         assert!((p_value - p_last).abs() < 1e-10);
@@ -1539,7 +1598,7 @@ mod tests {
     /// 期待値はscipy.stats（`scipy.stats.t`、`ppf`/`cdf`）で独立に計算・検算済み
     /// （手計算: b0=2.2, b1=0.6, SSR=2.4, df=3, sigma2=0.8）。
     #[test]
-    fn fit_computes_classical_std_errors_t_stats_p_values_and_conf_int() {
+    fn fit_computes_classical_std_errors_test_stats_p_values_and_conf_int() {
         let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
         let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
         let input = OlsInput::from_columns(
@@ -1561,7 +1620,7 @@ mod tests {
         assert!((*se.get(0, 0) - 0.938_083_151_964_686).abs() < 1e-9);
         assert!((*se.get(1, 0) - 0.282_842_712_474_619).abs() < 1e-9);
 
-        let t = estimator.t_stats();
+        let t = estimator.test_stats();
         assert!((*t.get(0, 0) - 2.345_207_879_911_715).abs() < 1e-9);
         assert!((*t.get(1, 0) - 2.121_320_343_559_642_4).abs() < 1e-9);
 
@@ -1584,7 +1643,7 @@ mod tests {
     /// および`OlsEstimator::fit`のdocコメント参照
     /// （statsmodelsはHC0-3でuse_t=Falseが既定＝正規分布のため、素の既定値とは一致しない）。
     #[test]
-    fn fit_computes_hc_std_errors_t_stats_p_values_and_conf_int() {
+    fn fit_computes_hc_std_errors_test_stats_p_values_and_conf_int() {
         // (cov_type, [se_const, se_x1], [t_const, t_x1], [p_const, p_x1],
         //  [lower_const, lower_x1], [upper_const, upper_x1])
         #[allow(clippy::type_complexity)]
@@ -1645,8 +1704,8 @@ mod tests {
                     "std_errors mismatch: {msg}"
                 );
                 assert!(
-                    (*estimator.t_stats().get(j, 0) - t[j]).abs() < 1e-6,
-                    "t_stats mismatch: {msg}"
+                    (*estimator.test_stats().get(j, 0) - t[j]).abs() < 1e-6,
+                    "test_stats mismatch: {msg}"
                 );
                 assert!(
                     (*estimator.p_values().get(j, 0) - p[j]).abs() < 1e-6,
@@ -1683,7 +1742,7 @@ mod tests {
 
         let cov_type = CovType::Hac {
             lags: Some(1),
-            time_order: None,
+            time_order: row_time_order(5),
         };
         let estimator = OlsEstimator::fit(input, cov_type, 0.95).unwrap();
 
@@ -1691,7 +1750,7 @@ mod tests {
         assert!((*se.get(0, 0) - 0.659_090_282_131_361_7).abs() < 1e-6);
         assert!((*se.get(1, 0) - 0.164_924_225_024_705_7).abs() < 1e-6);
 
-        let t = estimator.t_stats();
+        let t = estimator.test_stats();
         assert!((*t.get(0, 0) - 3.337_934_209_689_228).abs() < 1e-6);
         assert!((*t.get(1, 0) - 3.638_034_375_545_013_5).abs() < 1e-6);
 
@@ -1725,13 +1784,63 @@ mod tests {
 
         let cov_type = CovType::Hac {
             lags: None,
-            time_order: None,
+            time_order: row_time_order(5),
         };
         let estimator = OlsEstimator::fit(input, cov_type, 0.95).unwrap();
 
         let se = estimator.std_errors();
         assert!((*se.get(0, 0) - 0.577_350_269_189_624_1).abs() < 1e-6);
         assert!((*se.get(1, 0) - 0.164_924_225_024_705_75).abs() < 1e-6);
+    }
+
+    /// `n`行の単純回帰（`y = x + (i % 7)`）を`cov_type`で推定し`hac_lags_used`を返す補助関数。
+    fn hac_lags_used_for(n: usize, cov_type: CovType) -> Option<usize> {
+        let x: Vec<f64> = (0..n).map(|i| i as f64).collect();
+        let y: Vec<f64> = (0..n).map(|i| i as f64 + (i % 7) as f64).collect();
+        let input = OlsInput::from_columns(&y, &[x], vec!["x1".to_string()], true, "y".to_string())
+            .unwrap();
+        OlsEstimator::fit(input, cov_type, 0.95)
+            .unwrap()
+            .hac_lags_used()
+    }
+
+    /// `hac_lags`未指定（`None`）なら経験則`floor(4*(n/100)^(2/9))`で解決した値が
+    /// `hac_lags_used()`に入る。`n=5`→2、`n=100`→4（`(n/100)^(2/9)=1`ちょうど）、
+    /// `n=1000`→6（`4*10^(2/9)≈6.67`）。
+    #[test]
+    fn hac_lags_used_returns_auto_selected_lags_when_lags_is_none() {
+        for (n, expected) in [(5, 2), (100, 4), (1000, 6)] {
+            let cov_type = CovType::Hac {
+                lags: None,
+                time_order: row_time_order(n),
+            };
+            assert_eq!(hac_lags_used_for(n, cov_type), Some(expected), "n={n}");
+        }
+    }
+
+    /// `hac_lags`を明示指定した場合は、自動計算値（`n=100`なら4）ではなく指定値が入る。
+    #[test]
+    fn hac_lags_used_returns_explicit_lags_when_specified() {
+        for lags in [0, 3, 10] {
+            let cov_type = CovType::Hac {
+                lags: Some(lags),
+                time_order: row_time_order(100),
+            };
+            assert_eq!(
+                hac_lags_used_for(100, cov_type),
+                Some(lags as usize),
+                "lags={lags}"
+            );
+        }
+    }
+
+    /// `cov_type`がHac以外なら`None`。
+    #[test]
+    fn hac_lags_used_is_none_for_non_hac_cov_types() {
+        for cov_type in [CovType::Classical, CovType::Hc0, CovType::Hc3] {
+            let label = format!("{cov_type:?}");
+            assert_eq!(hac_lags_used_for(20, cov_type), None, "{label}");
+        }
     }
 
     /// `time_order`を指定した場合、行順がシャッフルされていても時系列順に並べ替えてから
@@ -1758,7 +1867,7 @@ mod tests {
 
         let cov_type = CovType::Hac {
             lags: Some(1),
-            time_order: Some(shuffled_time),
+            time_order: shuffled_time,
         };
         let estimator = OlsEstimator::fit(input, cov_type, 0.95).unwrap();
 
@@ -1782,7 +1891,7 @@ mod tests {
 
         let cov_type = CovType::Hac {
             lags: Some(-1),
-            time_order: None,
+            time_order: row_time_order(5),
         };
         let result = OlsEstimator::fit(input, cov_type, 0.95);
 
@@ -1809,7 +1918,7 @@ mod tests {
 
         let cov_type = CovType::Hac {
             lags: Some(5),
-            time_order: None,
+            time_order: row_time_order(5),
         };
         let result = OlsEstimator::fit(input, cov_type, 0.95);
 
@@ -1834,7 +1943,7 @@ mod tests {
 
         let cov_type = CovType::Hac {
             lags: Some(4), // n - 1、許容される最大値
-            time_order: None,
+            time_order: row_time_order(5),
         };
         let result = OlsEstimator::fit(input, cov_type, 0.95);
 
@@ -1890,7 +1999,7 @@ mod tests {
             input_hac,
             CovType::Hac {
                 lags: Some(0),
-                time_order: None,
+                time_order: row_time_order(6),
             },
             0.95,
         )
@@ -1936,7 +2045,7 @@ mod tests {
         let estimator = OlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
 
         assert!((estimator.r_squared() - 0.599_999_999_999_999_9).abs() < 1e-9);
-        assert!((estimator.r_squared_adj() - 0.466_666_666_666_666_56).abs() < 1e-9);
+        assert!((estimator.adj_r_squared() - 0.466_666_666_666_666_56).abs() < 1e-9);
         assert!((estimator.log_likelihood() - (-5.259_769_728_322_863)).abs() < 1e-9);
         assert!((estimator.aic() - 14.519_539_456_645_726).abs() < 1e-9);
         assert!((estimator.bic() - 13.738_415_281_513_927).abs() < 1e-9);
@@ -1963,7 +2072,7 @@ mod tests {
         let estimator = OlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
 
         assert!((estimator.r_squared() - 0.920_930_232_558_139_5).abs() < 1e-9);
-        assert!((estimator.r_squared_adj() - 0.901_162_790_697_674_5).abs() < 1e-9);
+        assert!((estimator.adj_r_squared() - 0.901_162_790_697_674_5).abs() < 1e-9);
         assert!((estimator.log_likelihood() - (-7.863_404_415_393_264)).abs() < 1e-9);
         assert!((estimator.aic() - 17.726_808_830_786_528).abs() < 1e-9);
         assert!((estimator.bic() - 17.336_246_743_220_627).abs() < 1e-9);
@@ -2002,7 +2111,7 @@ mod tests {
         .unwrap();
         let cov_type_hac = CovType::Hac {
             lags: Some(1),
-            time_order: None,
+            time_order: row_time_order(5),
         };
         let estimator_hac = OlsEstimator::fit(input_hac, cov_type_hac, 0.95).unwrap();
         assert!((estimator_hac.f_statistic() - 13.235_294_117_647_193).abs() < 1e-6);
@@ -2014,7 +2123,7 @@ mod tests {
     /// （`sm.OLS(Y, X).fit(cov_type="cluster", cov_kwds={"groups": groups}, use_t=True)`。
     /// 小標本補正はstatsmodelsの既定`use_correction=True`のまま、明示指定はしていない）。
     #[test]
-    fn fit_computes_cluster_std_errors_t_stats_p_values_conf_int_and_f_test() {
+    fn fit_computes_cluster_std_errors_test_stats_p_values_conf_int_and_f_test() {
         let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
         let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
         let input = OlsInput::from_columns(
@@ -2042,7 +2151,7 @@ mod tests {
         assert!((*se.get(0, 0) - 0.785_196_366_097_886_8).abs() < 1e-6);
         assert!((*se.get(1, 0) - 0.230_940_107_675_849_05).abs() < 1e-6);
 
-        let t = estimator.t_stats();
+        let t = estimator.test_stats();
         assert!((*t.get(0, 0) - 2.801_846_894_596_724_5).abs() < 1e-6);
         assert!((*t.get(1, 0) - 2.598_076_211_353_332).abs() < 1e-6);
 
@@ -2387,7 +2496,7 @@ mod tests {
         /// 境界事例等）のみを除外する（「ランダムに生成する設計行列は
         /// SingularMatrixにならない範囲に制約する」という方針に対応）。
         /// `MAX_K=20`（旧4）はbenchmarkの高次元シナリオ`many_regressors`と揃えた値
-        /// （test-coverage-candidates.md項目2、列数依存バグ・高kでの数値的挙動の検証）。
+        /// （列数依存バグ・高kでの数値的挙動の検証）。
         /// `k`が最大でも`n-k>=10`のマージンは保たれる。
         ///
         /// `keys`は列順序入れ替えテスト専用の補助データ（他のプロパティでは未使用）。

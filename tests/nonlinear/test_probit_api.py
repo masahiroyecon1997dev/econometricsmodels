@@ -6,15 +6,13 @@
 ことを確認する（`test_logit_api.py` と同型）。`ValidationError`/
 `ComputationError` パスは `test_probit_validation.py`、主リファレンス
 （statsmodels）との数値照合は `test_probit_reference.py`、R クロスチェックは
-`test_probit_crosscheck.py`（OLS/WLS の `test_<手法>_api.py` 等と同じ4分割、
-`refactoring-candidates-2.md` 項目68）。
+`test_probit_crosscheck.py`（OLS/WLS の `test_<手法>_api.py` 等と同じ4分割）。
 
 `binary_dataset` フィクスチャ（`dataset` の y を中央値で0/1化）は conftest.py で
 Logit/Probit 共通定義。
 
 テスト本体は `Logit`/`Probit` で完全に重複するため
-`_binary_choice_checks.py` に集約し（`refactoring-candidates-2.md` 項目95）、
-このファイルは薄いラッパーに保つ。
+`_binary_choice_checks.py` に集約し、このファイルは薄いラッパーに保つ。
 """
 
 from __future__ import annotations
@@ -51,8 +49,8 @@ def test_conf_int_structure(binary_dataset):
     _checks.check_conf_int_structure(binary_dataset, Probit)
 
 
-def test_params_std_errors_z_stats_p_values_share_keys(binary_dataset):
-    _checks.check_params_std_errors_z_stats_p_values_share_keys(
+def test_params_std_errors_test_stats_p_values_share_keys(binary_dataset):
+    _checks.check_params_std_errors_test_stats_p_values_share_keys(
         binary_dataset, Probit
     )
 
@@ -61,21 +59,25 @@ def test_n_obs_matches_dataset_size(binary_dataset):
     _checks.check_n_obs_matches_dataset_size(binary_dataset, Probit)
 
 
+def test_dep_var_name(binary_dataset):
+    _checks.check_dep_var_name(binary_dataset, Probit)
+
+
 def test_param_names_include_const_first(binary_dataset):
     _checks.check_param_names_include_const_first(binary_dataset, Probit)
 
 
 # ── オプションの反映 ──────────────────────────────────────────────
 #
-# cov_type 以外の ProbitOptions フィールド（method・include_intercept・
+# cov_type 以外の ProbitOptions フィールド（solver・include_intercept・
 # confidence_level・raise_on_non_convergence）が、engine_pybind 側の
 # 文字列パース・列抽出・分岐ロジックを経て正しく反映されることを確認する。
 
 
-@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
-def test_method_option_converges_to_same_params(binary_dataset, method):
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_method_option_converges_to_same_params(binary_dataset, solver):
     _checks.check_method_option_converges_to_same_params(
-        binary_dataset, Probit, ProbitOptions, method
+        binary_dataset, Probit, ProbitOptions, solver
     )
 
 
@@ -111,7 +113,7 @@ def test_method_label(binary_dataset):
 
 
 @pytest.mark.parametrize(
-    "method, expected_label",
+    "solver, expected_label",
     [
         ("NEWTON", "newton"),
         ("Newton", "newton"),
@@ -121,9 +123,9 @@ def test_method_label(binary_dataset):
         ("Lbfgs", "lbfgs"),
     ],
 )
-def test_method_is_case_insensitive(binary_dataset, method, expected_label):
+def test_method_is_case_insensitive(binary_dataset, solver, expected_label):
     _checks.check_method_is_case_insensitive(
-        binary_dataset, Probit, ProbitOptions, method, expected_label
+        binary_dataset, Probit, ProbitOptions, solver, expected_label
     )
 
 
@@ -137,8 +139,6 @@ def test_method_is_case_insensitive(binary_dataset, method, expected_label):
         ("HC0", "hc0"),
         ("Hc1", "hc1"),
         ("CLUSTER", "cluster"),
-        ("nonrobust", "nonrobust"),
-        ("NONROBUST", "nonrobust"),
     ],
 )
 def test_cov_type_is_case_insensitive(
@@ -150,8 +150,8 @@ def test_cov_type_is_case_insensitive(
 
 
 @pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
-def test_nonrobust_is_alias_for_classical(binary_dataset, cov_type):
-    _checks.check_nonrobust_is_alias_for_classical(
+def test_nonrobust_is_rejected(binary_dataset, cov_type):
+    _checks.check_nonrobust_is_rejected(
         binary_dataset, Probit, ProbitOptions, cov_type
     )
 

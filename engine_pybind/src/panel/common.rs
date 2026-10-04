@@ -7,10 +7,31 @@
 //! common_error_to_pyerr`に委譲する（系統ごとに同じ判定ロジックを重複させない）。
 
 use engine::panel::common::PanelError;
-use pyo3::PyErr;
+use pyo3::{PyErr, PyResult};
 
 use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
 use crate::linear::common::least_squares_error_is_computation_error;
+use crate::validation::{RoleValue, validate_no_duplicate_roles};
+
+/// `dk_time`（Driscoll-Kraay HACの時点列、FE/RE共通）が`y`・`entity`と同じ列でないことを
+/// 検証する。
+///
+/// `dk_time`が`y`や`entity`と同じ列だと、時点が数値の`y`の値や個体IDそのものになり、
+/// DKの時点構造が意味を成さない（`dk_time == entity`は全個体が単一時点ずつになる退化入力）。
+/// 一方、`x`との重複は許可する（年トレンドを説明変数に入れつつDKの時点にも使う、等は
+/// 正当な使い方）。FEの`time`（2-way固定効果の時間次元）との重複も許可する（固定効果と
+/// DKで同じ時間粒度を使うのが典型）。そのため`validate_no_duplicate_roles`に渡す
+/// ロールを`y`・`entity`・`dk_time`だけに絞り、`x`・`time`は含めない。
+pub(crate) fn validate_dk_time_role(y: &str, entity: &str, dk_time: Option<&str>) -> PyResult<()> {
+    let Some(dk_time) = dk_time else {
+        return Ok(());
+    };
+    validate_no_duplicate_roles(&[
+        ("y", RoleValue::Single(y)),
+        ("entity", RoleValue::Single(entity)),
+        ("dk_time", RoleValue::Single(dk_time)),
+    ])
+}
 
 /// `engine::panel::common::PanelError`をPython例外に変換する。
 ///
@@ -23,10 +44,16 @@ use crate::linear::common::least_squares_error_is_computation_error;
 /// - `Common`: `common_error_to_pyerr`へ委譲。
 /// - FE/RE固有のバリデーションエラー（`IdentifierDimensionMismatch`・
 ///   `InsufficientDegreesOfFreedom`・`SingletonGroup`・`UnbalancedPanelForTwoWay`・
-///   `ZeroVarianceAfterDemeaning`・`TwoWayRequiresTime`・`HacRequiresTime`・
-///   `InvalidHacBandwidth`）はいずれも入力・オプションの不正なので`ValidationError`。
+///   `ZeroVarianceAfterDemeaning`・`TwoWayRequiresTime`・`DkRequiresTime`・
+///   `InvalidDkBandwidth`・`InsufficientDkPeriods`・`InsufficientDkPeriodsForInference`）は
+///   いずれも入力・オプションの不正なので`ValidationError`（`InsufficientDkPeriods`・
+///   `InsufficientDkPeriodsForInference`は追加。`InvalidDkBandwidth`と同じ「DKのバンド幅・
+///   時点数に関する入力不正」という分類のため同じ`match`アームに含める。後者は
+///   クラスター版の`InsufficientClustersForInference`が`ValidationError`なのと揃える）。
+///   `DegenerateDkTwoPeriods`・`DegenerateClusterTwoGroups`も入力（パネル構造と時点・
+///   クラスター列）だけから判定できる退化のため同じアームに含める。
 /// - `WithinRegressionFailed`・`FTestFailed`・`BetweenRegressionFailed`・
-///   `QuasiDemeanedRegressionFailed`: 委譲先の`LeastSquaresError`の分類基準
+///   `QuasiDemeanedRegressionFailed`・`HausmanTestFailed`: 委譲先の`LeastSquaresError`の分類基準
 ///   （`least_squares_error_is_computation_error`）にそのまま従う。`IvError::
 ///   SecondStageFailed`と同じ扱い。Pythonに渡すメッセージは`source.to_string()`ではなく
 ///   `PanelError`自身の`to_string()`（「within変換後の推定で失敗した」等の文脈を含む）を
@@ -53,12 +80,17 @@ pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
         | PanelError::UnbalancedPanelForTwoWay { .. }
         | PanelError::ZeroVarianceAfterDemeaning { .. }
         | PanelError::TwoWayRequiresTime
-        | PanelError::HacRequiresTime
-        | PanelError::InvalidHacBandwidth { .. } => ValidationError::new_err(message),
+        | PanelError::DkRequiresTime
+        | PanelError::InvalidDkBandwidth { .. }
+        | PanelError::InsufficientDkPeriods { .. }
+        | PanelError::InsufficientDkPeriodsForInference { .. }
+        | PanelError::DegenerateDkTwoPeriods
+        | PanelError::DegenerateClusterTwoGroups => ValidationError::new_err(message),
         PanelError::WithinRegressionFailed { source }
         | PanelError::FTestFailed { source }
         | PanelError::BetweenRegressionFailed { source }
-        | PanelError::QuasiDemeanedRegressionFailed { source } => {
+        | PanelError::QuasiDemeanedRegressionFailed { source }
+        | PanelError::HausmanTestFailed { source } => {
             if least_squares_error_is_computation_error(&source) {
                 ComputationError::new_err(message)
             } else {

@@ -8,7 +8,7 @@ FE/RE共通のPython主リファレンス（`docs/spec/panel-common.md`
 合成データは`benchmark/panel/datasets.py`を直接呼ばず、`tests/fixtures/
 benchmarks/data/`に固定済みのCSVを読む（`benchmark/panel/freeze.py`参照。
 `benchmark/linear/references/statsmodels_ref.py`と同じ理由）。**RE専用の
-合成データセット・凍結コードは追加していない**——RE（Issue #203）はFEが既に
+合成データセット・凍結コードは追加していない**——REはFEが既に
 凍結済みの`fe_*.csv`をそのまま再利用する（ユーザー確認済み・2026-09-20。
 `benchmark/linear`系統でOLS/WLSがprefix"synthetic"を共有する前例と同型）。
 
@@ -25,8 +25,15 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/panel/freeze.py`参
 |---|---|---|
 | classical        | unadjusted             | |
 | hc1              | robust                 | |
-| cluster          | clustered              | `cluster_col`省略時は`entity`列を使う |
-| hac              | kernel (bartlett)      | Driscoll-Kraay相当（`panel_effects=True`は不要、`PanelOLS`が自動判定） |
+| cluster          | clustered              | `cluster`省略時は`entity`列を使う |
+| dk               | kernel (bartlett)      | Driscoll-Kraay相当（`panel_effects=True`は不要、`PanelOLS`が自動判定） |
+
+**`cluster`/`dk`はフィクスチャ生成の対象外**: 本実装のFE/REのcluster・dkは
+小標本補正と推論の自由度をfixest・Stata型（`G/(G-1)·(n-1)/(n-K)`、t分布の
+自由度`G-1`/`T-1`）に変更したため、linearmodels（`n/(n-extra_df-k)`、自由度は
+常に`df_resid`）とは一致しない。この2つはFEが`fixest`、REが`plm`のみで検証する
+（`generate_fe_crosscheck_fixtures.py`・`generate_re_crosscheck_fixtures.py`）。
+下表の対応自体は、linearmodels側の値を単発で確認する用途（CLI）のために残している。
 
 **`hc2`/`hc3`は対象外**: `linearmodels.PanelOLS`はパネル向けの`HC2`/`HC3`を
 提供しない（`'unadjusted'/'robust'/'clustered'/'kernel'`のみ、指定すると
@@ -68,20 +75,20 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/panel/freeze.py`参
    なってしまう）。呼び出し側で`exog`に`"const"`列（すべて1.0）を追加する。
 2. **`two_way`引数が無い**: REは常にentity方向のみ（v1は2-way REがスコープ外、
    `re-spec.md`5章）。
-3. **`f_statistic`は`res.f_statistic`（cov_type非依存、homoskedastic固定）を
-   使う**（FEの`res.f_statistic_robust`とは異なる）——`engine::panel::re::
-   ReEstimator`のF統計量は`cov_type`に連動しない独自定義（変換済みyの単純
-   平均を基準にしたSST/SSR比較、`wald_test_last_columns`を再利用しない、
-   `engine/src/panel/CLAUDE.md`「F統計量（Issue #337）」参照）を採用している
-   ため。
+3. **`f_statistic`は`res.f_statistic_robust`を使う**（FEと同じ）——
+   `engine::panel::re::ReEstimator`のF統計量は`cov_type`に連動する
+   Wald二次形式（`plm::pwaldtest`と同じ、`docs/spec/re-spec.md`3.5節）のため。
+   `res.f_statistic`（cov_type非依存、変換済みyの単純平均を基準にしたSST/SSR方式）は
+   バランスパネルでは一致するが、不均衡パネルでは一致せず極端な不均衡では負値にも
+   なるため使わない。`f_statistic_robust`はclassical/hc1ともに不均衡パネルでも本実装と
+   機械精度で一致する（実測確認済み）。
 4. **`aic`/`bic`を結果に含めない**: `linearmodels.RandomEffects`も`PanelOLS`と
    同じ`_cov_estimators`実装のため`aic`/`bic`属性を持たない（実測確認済み）。
    FEと異なり、この2つを検証する独立したRクロスチェックも用意していない——
    `plm`の`model="random"`オブジェクトは`logLik()`未対応（実測確認済み、
    `"no applicable method for 'logLik'"`）なため。REのaic/bic/log_likelihood
-   自体はOLS委譲による計算式（`engine/src/panel/CLAUDE.md`「df_resid/
-   df_model（Issue #196）」参照）で、この式自体の正しさはOLS本体のテストで
-   別途担保されている。
+   自体はOLS委譲による計算式（`docs/spec/re-spec.md`3.3節参照）で、この式自体の
+   正しさはOLS本体のテストで別途担保されている。
 
 `hc2`/`hc3`はFEと同じ理由（`linearmodels`が提供しない）で対象外——REは
 `plm::vcovHC(method="white1", type="HC2"/"HC3")`を唯一の参照実装とする
@@ -110,14 +117,26 @@ from benchmark.common.load_wooldridge import load as _load_wooldridge
 
 
 def _load_panel_dataset(
-    dataset_source: str, scenario: str
+    dataset_source: str,
+    scenario: str,
+    df_override: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, list[float] | None]:
     """FE/RE共通のデータ読み込み。
 
     RE専用の凍結データセットは無く、`dataset_source="synthetic"`は常にFEが
     凍結した`fe_{scenario}.csv`（`load_frozen_dataset("fe", scenario)`）を
     再利用する（モジュールdocstring参照）。
+
+    Args:
+        df_override: 指定があれば`dataset_source`/`scenario`を無視し、この
+            DataFrameをそのまま使う（クラスター不均衡シナリオ等、凍結CSVに
+            含めていない列をメモリ上でのみ付与したい場合。`benchmark/linear`
+            の`_run_cluster_case`が別スクリプトでstatsmodelsを直接呼ぶ形で
+            同じことをしているのに対し、こちらは`run()`本体を再利用できる
+            よう`_load_panel_dataset`側で吸収する）。
     """
+    if df_override is not None:
+        return df_override, None
     if dataset_source == "synthetic":
         return load_frozen_dataset("fe", scenario)
     if dataset_source == "wooldridge":
@@ -131,12 +150,12 @@ def _load_panel_dataset(
 # engine cov_type -> linearmodels cov_type。モジュールdocstring参照。
 # debiasedは常にTrue（panel-common.md 3.3節）。FE/RE共通
 # （`RandomEffects`も`PanelOLS`と同じ`_cov_estimators`実装、
-# engine/src/panel/CLAUDE.md「cov_type対応（Issue #197）」参照）。
+# engine/src/panel/CLAUDE.md「cov_type対応」参照）。
 _COV_TYPE_MAP: dict[str, str] = {
     "classical": "unadjusted",
     "hc1": "robust",
     "cluster": "clustered",
-    "hac": "kernel",
+    "dk": "kernel",
 }
 
 
@@ -153,7 +172,7 @@ def _build_panel_index(
         # PanelOLS/RandomEffectsはMultiIndex(entity, time)を要求するため、
         # timeを使わない場合でもダミーの時点列（観測順の連番、エンティティ内で
         # 重複しない値）が要る。不均衡パネルではエンティティごとの観測数T_iが
-        # 異なりこのダミー順序が真の時点と対応しなくなる（cov_type="hac"の
+        # 異なりこのダミー順序が真の時点と対応しなくなる（cov_type="dk"の
         # バンド幅・カーネル計算が不正確になる）ため、`time_col`が実在する
         # データでは常にそちらを渡すこと（`generate_fe_fixtures.py`参照）。
         pdf = df.to_pandas()
@@ -182,7 +201,7 @@ def _build_cov_config(
     df: pl.DataFrame,
     pdf: pd.DataFrame,
     entity_col: str,
-    cluster_col: str | None,
+    cluster: str | None,
     hac_bandwidth: int | None,
     n_entities: int,
     n_periods: int | None,
@@ -196,13 +215,13 @@ def _build_cov_config(
     cov_config: dict = {"debiased": True}
     hac_bandwidth_used = None
     if cov_type == "cluster":
-        cluster_key = cluster_col or entity_col
+        cluster_key = cluster or entity_col
         if cluster_key == entity_col:
             clusters = pdf.index.get_level_values(entity_col)
         else:
             clusters = df[cluster_key].to_numpy()
         cov_config["clusters"] = pd.Series(clusters, index=pdf.index)
-    elif cov_type == "hac":
+    elif cov_type == "dk":
         t_for_bandwidth = (
             n_periods if n_periods is not None else df.height // n_entities
         )
@@ -224,11 +243,12 @@ def run(
     entity_col: str = "entity",
     time_col: str | None = None,
     two_way: bool = False,
-    cluster_col: str | None = None,
+    cluster: str | None = None,
     hac_bandwidth: int | None = None,
     confidence_level: float = 0.95,
     dataset_source: str = "synthetic",
     y_col: str = "y",
+    df_override: pl.DataFrame | None = None,
 ) -> dict:
     """`PanelOLS`でFEのベンチマーク値（係数・標準誤差・適合度統計量）を生成する。
 
@@ -236,13 +256,13 @@ def run(
         dataset: シナリオ名（`dataset_source="synthetic"`）またはWooldridge
             データセット名（`dataset_source="wooldridge"`）。
         x_cols: 説明変数の列名リスト。
-        cov_type: "classical" / "hc1" / "cluster" / "hac"（hc2/hc3は対象外、
+        cov_type: "classical" / "hc1" / "cluster" / "dk"（hc2/hc3は対象外、
             モジュールdocstring参照）。
         entity_col: エンティティ識別子の列名。
         time_col: 時点識別子の列名。**`two_way`とは独立**（本実装の`time`
-            〔2-way構造〕と`time_col`〔HAC専用の時系列順序〕の分離と同じ
+            〔2-way構造〕と`dk_time`〔DK専用の時系列順序〕の分離と同じ
             発想、モジュールdoc「`cov_type`の対応関係」参照）。指定すれば
-            その列でMultiIndexの時点次元を構築し、`cov_type="hac"`の
+            その列でMultiIndexの時点次元を構築し、`cov_type="dk"`の
             カーネル計算・バンド幅の`t`にも使う。`None`なら観測順の連番
             （エンティティ内で重複しない値）をダミーで使う——`two_way=True`
             と`time_col=None`の組み合わせは意味を持たないため呼び出し側で
@@ -250,18 +270,20 @@ def run(
         two_way: `True`なら`time_effects=True`（2-way FE）、`False`なら
             `time_effects=False`（1-way FE、`time_col`はHAC等の時点情報
             としてのみ使われ、時点固定効果自体は推定しない）。
-        cluster_col: `cov_type="cluster"`のときのクラスター列名。`None`なら
+        cluster: `cov_type="cluster"`のときのクラスター列名。`None`なら
             `entity_col`を使う（本実装の既定挙動と同じ、3.2節）。
-        hac_bandwidth: `cov_type="hac"`のときのバンド幅。`None`なら
+        hac_bandwidth: `cov_type="dk"`のときのバンド幅。`None`なら
             `hac_auto_lag`（`floor(4*(t/100)^(2/9))`、`t`=時点数）で自動計算する
             （本実装の既定バンド幅式と同じ、`resolve_dk_bandwidth`参照）。
         confidence_level: 信頼区間の信頼水準。
         dataset_source: "synthetic" または "wooldridge"。
         y_col: 被説明変数の列名。
+        df_override: 指定があれば`dataset`/`dataset_source`を無視しこの
+            DataFrameを使う（`_load_panel_dataset`のdocstring参照）。
     """
     from linearmodels.panel import PanelOLS
 
-    df, true_beta = _load_panel_dataset(dataset_source, dataset)
+    df, true_beta = _load_panel_dataset(dataset_source, dataset, df_override)
     pdf, n_entities, n_periods = _build_panel_index(df, entity_col, time_col)
 
     mod = PanelOLS(
@@ -276,7 +298,7 @@ def run(
         df=df,
         pdf=pdf,
         entity_col=entity_col,
-        cluster_col=cluster_col,
+        cluster=cluster,
         hac_bandwidth=hac_bandwidth,
         n_entities=n_entities,
         n_periods=n_periods,
@@ -286,7 +308,7 @@ def run(
 
     coef = {k: float(v) for k, v in res.params.to_dict().items()}
     se = {k: float(v) for k, v in res.std_errors.to_dict().items()}
-    t_stats = {k: float(v) for k, v in res.tstats.to_dict().items()}
+    test_stats = {k: float(v) for k, v in res.tstats.to_dict().items()}
     p_values = {k: float(v) for k, v in res.pvalues.to_dict().items()}
     ci = res.conf_int(level=confidence_level)
     conf_int = {
@@ -296,7 +318,7 @@ def run(
     result: dict = {
         "coef": coef,
         "se": se,
-        "t_stats": t_stats,
+        "test_stats": test_stats,
         "p_values": p_values,
         "conf_int": conf_int,
         "n_obs": int(res.nobs),
@@ -346,7 +368,7 @@ def run_re(
     *,
     entity_col: str = "entity",
     time_col: str | None = None,
-    cluster_col: str | None = None,
+    cluster: str | None = None,
     hac_bandwidth: int | None = None,
     confidence_level: float = 0.95,
     dataset_source: str = "synthetic",
@@ -362,14 +384,14 @@ def run_re(
         dataset: シナリオ名（`dataset_source="synthetic"`）またはWooldridge
             データセット名（`dataset_source="wooldridge"`）。
         x_cols: 説明変数の列名リスト。
-        cov_type: "classical" / "hc1" / "cluster" / "hac"（hc2/hc3は対象外、
+        cov_type: "classical" / "hc1" / "cluster" / "dk"（hc2/hc3は対象外、
             モジュールdocstring参照）。
         entity_col: エンティティ識別子の列名。
         time_col: 時点識別子の列名。`None`なら観測順の連番をダミーで使う
             （`run()`と同じ、`_build_panel_index`参照）。
-        cluster_col: `cov_type="cluster"`のときのクラスター列名。`None`なら
+        cluster: `cov_type="cluster"`のときのクラスター列名。`None`なら
             `entity_col`を使う。
-        hac_bandwidth: `cov_type="hac"`のときのバンド幅。`None`なら自動計算。
+        hac_bandwidth: `cov_type="dk"`のときのバンド幅。`None`なら自動計算。
         confidence_level: 信頼区間の信頼水準。
         dataset_source: "synthetic" または "wooldridge"。
         y_col: 被説明変数の列名。
@@ -390,7 +412,7 @@ def run_re(
         df=df,
         pdf=pdf,
         entity_col=entity_col,
-        cluster_col=cluster_col,
+        cluster=cluster,
         hac_bandwidth=hac_bandwidth,
         n_entities=n_entities,
         n_periods=n_periods,
@@ -400,7 +422,7 @@ def run_re(
 
     coef = {k: float(v) for k, v in res.params.to_dict().items()}
     se = {k: float(v) for k, v in res.std_errors.to_dict().items()}
-    t_stats = {k: float(v) for k, v in res.tstats.to_dict().items()}
+    test_stats = {k: float(v) for k, v in res.tstats.to_dict().items()}
     p_values = {k: float(v) for k, v in res.pvalues.to_dict().items()}
     ci = res.conf_int(level=confidence_level)
     conf_int = {
@@ -410,18 +432,17 @@ def run_re(
     result: dict = {
         "coef": coef,
         "se": se,
-        "t_stats": t_stats,
+        "test_stats": test_stats,
         "p_values": p_values,
         "conf_int": conf_int,
         "n_obs": int(res.nobs),
         "df_resid": int(res.df_resid),
         "df_model": int(res.df_model),
         "n_entities": n_entities,
-        # REのF統計量はcov_type非依存（homoskedastic固定）の定義を使う
-        # （モジュールdocstring「RE固有の相違点」3参照、FEの
-        # `f_statistic_robust`とは異なることに注意）。
-        "f_statistic": float(res.f_statistic.stat),
-        "f_p_value": float(res.f_statistic.pval),
+        # REのF統計量は`cov_type`に連動するWald二次形式のため
+        # `f_statistic_robust`を使う（モジュールdocstring「RE固有の相違点」3参照）。
+        "f_statistic": float(res.f_statistic_robust.stat),
+        "f_p_value": float(res.f_statistic_robust.pval),
         "r_squared_within": float(res.rsquared_within),
         "r_squared_between": float(res.rsquared_between),
         "r_squared_overall": float(res.rsquared_overall),
@@ -461,7 +482,7 @@ if __name__ == "__main__":
     parser.add_argument("--entity-col", default="entity")
     parser.add_argument("--time-col", default=None)
     parser.add_argument("--two-way", action="store_true")
-    parser.add_argument("--cluster-col", default=None)
+    parser.add_argument("--cluster", default=None)
     parser.add_argument("--hac-bandwidth", type=int, default=None)
     parser.add_argument("--confidence-level", type=float, default=0.95)
     parser.add_argument("--dataset-source", default="synthetic")
@@ -475,7 +496,7 @@ if __name__ == "__main__":
         entity_col=args.entity_col,
         time_col=args.time_col,
         two_way=args.two_way,
-        cluster_col=args.cluster_col,
+        cluster=args.cluster,
         hac_bandwidth=args.hac_bandwidth,
         confidence_level=args.confidence_level,
         dataset_source=args.dataset_source,

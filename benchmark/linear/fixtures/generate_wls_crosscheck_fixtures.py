@@ -38,7 +38,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
-import statsmodels
 
 from benchmark.common import (
     BENCHMARKS_DIR,
@@ -67,14 +66,25 @@ NUMERIC_SCENARIOS = [
     # n=k+1（自由度1ちょうど）の成功パス（OLSの同種ケース相当）。
     "baseline_df1",
     # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス
-    # （OLSの同種ケース相当、test-coverage-candidates.md項目2）。
+    # （OLSの同種ケース相当）。
     "many_regressors",
-    # x1の5%を外れ値に置き換えた成功パス（OLSの同種ケース相当、
-    # test-coverage-candidates.md項目67）。
+    # x1の5%を外れ値に置き換えた成功パス（OLSの同種ケース相当）。
     "outlier_regressor",
 ]
 
 R_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
+
+# 悪条件・多重共線性シナリオとクラスターロバストSEの組み合わせでの数値的
+# 頑健性確認用（generate_ols_crosscheck_fixtures.pyと同じリスト・同じ理由、
+# OLS側の横展開）。
+CLUSTER_ILL_CONDITIONED_SCENARIOS = [
+    "high_condition_number",
+    "moderate_multicollinearity",
+]
+
+# generate_ols_crosscheck_fixtures.pyと同じ値・同じ理由（baselineシナリオ
+# のみでR_COV_TYPES全種＋clusterと組み合わせて確認する。ユーザー確認済み）。
+CONFIDENCE_LEVEL_NON_DEFAULT = 0.90
 
 
 def _write_csv(df, tmpdir: Path, name: str) -> Path:
@@ -140,7 +150,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
                 groups=[str(i % 2) for i in range(df_g2.height)],
                 suffix="_cluster_g2",
             )
-            # `weight`と同じ列を`x`にも含める成功パス（Issue #277）。
+            # `weight`と同じ列を`x`にも含める成功パス。
             # 列名の重複が許容されることの数値的な確認が目的で、cov_type間の
             # 挙動差を検証する趣旨ではないためclassicalのみ
             # （generate_wls_fixtures.pyと同じ方針）。
@@ -153,6 +163,80 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
                 )
             }
 
+            # include_intercept=False（切片なし）。R側はformula自体に"- 1"を
+            # 付けるだけで表現できる。全cov_type（R_COV_TYPES + cluster）と
+            # 組み合わせて確認する（OLS側の横展開）。
+            formula_no_intercept = f"{formula} - 1"
+            fixtures[scenario]["no_intercept"] = {}
+            for cov_type in R_COV_TYPES:
+                entry = {}
+                if cov_type == "hac":
+                    lag = hac_auto_lag(n)
+                    entry["r"] = run_lm_r(
+                        csv_path,
+                        formula_no_intercept,
+                        cov_type,
+                        hac_lag=lag,
+                        weight_col=WEIGHT_COLUMN_NAME,
+                    )
+                    entry["hac_lag"] = lag
+                else:
+                    entry["r"] = run_lm_r(
+                        csv_path,
+                        formula_no_intercept,
+                        cov_type,
+                        weight_col=WEIGHT_COLUMN_NAME,
+                    )
+                fixtures[scenario]["no_intercept"][cov_type] = entry
+            fixtures[scenario]["no_intercept"]["cluster"] = _run_cluster_case(
+                df,
+                csv_path,
+                formula_no_intercept,
+                suffix="_no_intercept_cluster",
+            )
+
+            # confidence_level非既定（0.95以外）。全cov_type
+            # （R_COV_TYPES + cluster）と組み合わせて確認する（OLS側の横展開）。
+            fixtures[scenario]["confidence_level"] = {}
+            for cov_type in R_COV_TYPES:
+                entry = {}
+                if cov_type == "hac":
+                    lag = hac_auto_lag(n)
+                    entry["r"] = run_lm_r(
+                        csv_path,
+                        formula,
+                        cov_type,
+                        hac_lag=lag,
+                        weight_col=WEIGHT_COLUMN_NAME,
+                        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+                    )
+                    entry["hac_lag"] = lag
+                else:
+                    entry["r"] = run_lm_r(
+                        csv_path,
+                        formula,
+                        cov_type,
+                        weight_col=WEIGHT_COLUMN_NAME,
+                        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+                    )
+                fixtures[scenario]["confidence_level"][cov_type] = entry
+            fixtures[scenario]["confidence_level"]["cluster"] = (
+                _run_cluster_case(
+                    df,
+                    csv_path,
+                    formula,
+                    suffix="_confidence_level_cluster",
+                    confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+                )
+            )
+        elif scenario in CLUSTER_ILL_CONDITIONED_SCENARIOS:
+            # 悪条件・多重共線性シナリオとクラスターの組み合わせでの数値的
+            # 頑健性確認用（generate_ols_crosscheck_fixtures.pyと同じ理由）。
+            # 均等な疑似グループ（行番号%10）のみ。
+            fixtures[scenario]["cluster"] = _run_cluster_case(
+                df, csv_path, formula
+            )
+
     return fixtures
 
 
@@ -162,15 +246,19 @@ def _run_cluster_case(
     formula: str,
     groups: list | None = None,
     suffix: str = "_cluster",
+    confidence_level: float = 0.95,
 ) -> dict:
     """クラスターロバストSEのcrosscheck。
 
     Args:
         df: 疑似グループを付与する対象データ。
         csv_path: 元データのCSVパス（グループ付きCSVの命名に使う）。
-        formula: 回帰式。
+        formula: 回帰式。`include_intercept=False`相当はformula自体に
+            "- 1"を付けて呼び出し側で表現する。
         groups: 各行のグループラベル。Noneなら既定（行番号%10、10均等グループ）。
         suffix: 一時CSVファイル名に付けるsuffix（呼び出しごとに衝突しないように）。
+        confidence_level: 信頼区間の信頼水準（既定0.95以外×クラスターの
+            組み合わせ確認用）。
     """
     n = df.height
     cluster_group = (
@@ -184,8 +272,9 @@ def _run_cluster_case(
             tmp_path,
             formula,
             "cluster",
-            cluster_col="cluster_group",
+            cluster="cluster_group",
             weight_col=WEIGHT_COLUMN_NAME,
+            confidence_level=confidence_level,
         )
     }
 
@@ -222,7 +311,7 @@ def build_401ksubs_fixture(tmpdir: Path) -> dict:
             csv_path_clustered,
             formula,
             "cluster",
-            cluster_col="age_bin",
+            cluster="age_bin",
             weight_col="inv_inc",
         )
     }
@@ -243,6 +332,15 @@ def build_fixtures() -> dict:
         text=True,
         check=True,
     ).stdout
+    sandwich_version, lmtest_version = (
+        subprocess.run(
+            ["Rscript", "-e", f'cat(as.character(packageVersion("{pkg}")))'],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        for pkg in ("sandwich", "lmtest")
+    )
 
     fixtures["_meta"] = {
         "method": "wls",
@@ -256,7 +354,8 @@ def build_fixtures() -> dict:
         ),
         "generated_at": datetime.now(UTC).isoformat(),
         "r_version": r_version,
-        "statsmodels_version": statsmodels.__version__,
+        "sandwich_version": sandwich_version,
+        "lmtest_version": lmtest_version,
         "note": (
             "perfect_multicollinearity・scale_varianceシナリオはここに含まない"
             "（いずれもComputationErrorの発生確認のみ、テストコード側で対応。"
@@ -264,24 +363,38 @@ def build_fixtures() -> dict:
             "共分散部分行列が全cov_typeで数値的にほぼ特異になる、"
             "WLSでも実測確認済み）。"
             "HACはR側のみ（explicit lagを本実装の自動ラグ式に合わせて指定）。"
-            "clusterはbaselineシナリオのみ、疑似グループ（行番号%10）に加え、"
-            "不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2"
-            "（cluster_g2）をR側のみ確認（OLSの同種ケース相当）。"
+            "clusterはR側のみ確認。baselineシナリオで疑似グループ（行番号%10）"
+            "に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2"
+            "（cluster_g2）を含む（OLSの同種ケース相当。グルーピングパターンの"
+            "バリエーションはbaselineシナリオのみ、他シナリオは均等疑似グループ"
+            "1パターンのみ、後述）。"
             "high_condition_number/baseline_df1は境界値・悪条件ケース"
-            "（OLSの同種ケース相当）。"
-            "baseline.weight_in_xは、weightと同じ列をxにも含める成功パス"
-            "（Issue #277）。classicalのみ（cov_type間の挙動差の検証が"
+            "（OLSの同種ケース相当）。high_condition_number/"
+            "moderate_multicollinearityにもclusterエントリを追加（従来"
+            "クラスター系はbaselineシナリオのみで、悪条件・多重共線性シナリオ"
+            "との組み合わせが未検証だった。均等な疑似グループ（行番号%10）のみ。"
+            "OLS側の横展開）。"
+            "baseline.weight_in_xは、weightと同じ列をxにも含める成功パス。"
+            "classicalのみ（cov_type間の挙動差の検証が"
             "目的ではないため）。"
             "many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ"
-            "高次元シナリオ（OLSの同種ケース相当、test-coverage-candidates.md"
-            "項目2）。outlier_regressorはx1の5%を外れ値に置き換えた成功パス"
-            "（OLSの同種ケース相当、test-coverage-candidates.md項目67）。"
+            "高次元シナリオ（OLSの同種ケース相当）。"
+            "outlier_regressorはx1の5%を外れ値に置き換えた成功パス"
+            "（OLSの同種ケース相当）。"
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
             "重みは合成データセットの'weight'列。401ksubsはinv_inc（1/inc）。"
             "401ksubsはclassical/HC0-3（HACは時系列順が無いため対象外）に加え、"
             "ageの分位ビン（8分位、generate_wls_fixtures._add_age_bin）を"
             "疑似的なクラスター列としたクラスターロバストSEも含む。"
             "pyfixestとの比較は正確性検証から除外（性能比較専用）。"
+            "baseline.no_interceptはinclude_intercept=False（切片なし、"
+            "formulaに'- 1'を付与）をR_COV_TYPES全種＋clusterと組み合わせて"
+            "確認する（statsmodels主リファレンス側〔wls.json〕・OLS側の横展開）。"
+            "baseline.confidence_levelはconfidence_level="
+            f"{CONFIDENCE_LEVEL_NON_DEFAULT}（既定0.95以外）をR_COV_TYPES"
+            "全種＋clusterと組み合わせて確認する（run_lm_crosscheck.R側の"
+            "'--confidence-level='フラグを利用、同じくstatsmodels主リファレンス"
+            "側・OLS側の横展開）。"
         ),
     }
     return fixtures

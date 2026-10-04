@@ -6,8 +6,7 @@
 見送った——OLS〜IV/IV-GMM の6手法すべて軽量な共有ヘルパー（本関数・
 `benchmark.linear.references.r.run_lm_r`・`benchmark.common.reference.r` の
 `run_r`/`normalize_names`・`extract_coef_se`）で移行でき、dataclass Spec 層を
-足す必要が生じなかったため（rule of three 未達）。経緯は
-`docs/planning/specs/refactoring-issue231-progress.md`「Initiative A」節。
+足す必要が生じなかったため（rule of three 未達）。
 """
 
 from __future__ import annotations

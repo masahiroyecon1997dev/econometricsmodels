@@ -2,14 +2,14 @@
 
 IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two_sls.rs`/`gmm.rs`、共通基盤は
 `engine/src/iv/common.rs`）・`engine_pybind/src/iv/common.rs`・
-`python_package/econometricsmodels/iv/iv.py`として実装済み。`method="2sls"`/`method="gmm"`を
+`python_package/econometricsmodels/iv/iv.py`として実装済み。`estimator="2sls"`/`estimator="gmm"`を
 単一の`IV`/`IVResults`ペアで扱う設計のため、本ドキュメントは2SLS/GMM両方を扱う。
 
 ## 1. API引数
 
 3層構成: `IV(data, y, x_exog, x_endog, instruments, options).fit() -> IVResults`
 （python_package）→ `fit_iv(data, y, x_exog, x_endog, instruments, options) -> IVResult`
-（engine_pybind）→ `TwoSlsEstimator::fit` / `GmmEstimator::fit`（engine、`IVOptions.method`で
+（engine_pybind）→ `TwoSlsEstimator::fit` / `GmmEstimator::fit`（engine、`IVOptions.estimator`で
 振り分け）。
 
 ### 1.1 `y` / `x_exog` / `x_endog` / `instruments`
@@ -24,7 +24,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   過剰識別検定の自由度が`len(instruments) - len(x_endog)`とそのまま一致し、`x_exog`分を
   差し引く補正が不要になる。
 - `x_exog`は空リストを許容する（内生変数のみのモデルも成立するため）。**`x_endog`/
-  `instruments`はいずれも独立に最低1要素を要求し、空リストは`ValidationError`**（Issue #306）。
+  `instruments`はいずれも独立に最低1要素を要求し、空リストは`ValidationError`**。
   `x_endog=[]`は実質OLSと等価な退化ケースであり「そもそもIVを使用すること自体が誤り」と
   判断し、`OLS`への切り替えなしにそのまま`IV`に渡せる利便性よりも誤用防止を優先した。
   `x_endog`/`instruments`は独立に検証するため、「操作変数はあるが対応する内生変数が無い」
@@ -35,7 +35,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   - `y`/`x_exog`/`x_endog`/`instruments`間の重複列名は`ValidationError`。
   - 各ロール内部（`x_exog`/`x_endog`/`instruments`それぞれ）の重複列名も`ValidationError`。
   - `include_intercept=True`のとき、`x_exog`だけでなく`x_endog`/`instruments`のいずれかに
-    `"const"`列が含まれていても`ValidationError`（Issue #305）。`x_exog`側でのみ自動追加
+    `"const"`列が含まれていても`ValidationError`。`x_exog`側でのみ自動追加
     される切片列と、構造方程式本体・`first_stage()`双方の`param_names`が衝突し、
     `dict(zip(param_names, params))`構築時に真の切片係数が後勝ちでサイレントに
     上書きされるため、衝突源が`x_endog`/`instruments`側でも同じ実害が生じる。
@@ -44,78 +44,97 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 
 | フィールド | 型 | デフォルト | 説明 |
 |---|---|---|---|
-| `method` | `str` | `"2sls"` | `"2sls"` / `"gmm"`（大小無視） |
-| `cov_type` | `str` | `"classical"` | `"classical"` / `"hc0"`〜`"hc3"` / `"cluster"` / `"hac"`（大小無視）。`method="gmm"`でも`weight_type`とは独立の軸（最終的な報告用SE計算） |
+| `estimator` | `str` | `"2sls"` | `"2sls"` / `"gmm"`（大小無視） |
+| `cov_type` | `str` | `"classical"` | `"classical"` / `"hc0"`〜`"hc3"` / `"cluster"` / `"hac"`（大小無視）。`estimator="gmm"`でも`gmm_weight_type`とは独立の軸（最終的な報告用SE計算） |
 | `include_intercept` | `bool` | `True` | `x_exog`側の設計行列にのみ定数列を自動追加する。`x_endog`/`instruments`には自動追加しない |
 | `confidence_level` | `float` | `0.95` | |
-| `cluster_col` | `str \| None` | `None` | `cov_type="cluster"`時（`weight_type="cluster"`とも共用）のグループキー列名 |
-| `hac_lags` | `int \| None` | `None` | `cov_type="hac"`時（`weight_type="kernel"`とも共用）のラグ数。`None`なら自動計算 |
-| `time_col` | `str \| None` | `None` | `cov_type="hac"`時（`weight_type="kernel"`とも共用）の時系列順序列 |
-| `weight_type` | `str` | `"unadjusted"` | GMMの点推定に使う重み行列（`method="gmm"`のみ）: `"unadjusted"`（別名`"homoskedastic"`）/ `"robust"`（別名`"heteroskedastic"`）/ `"cluster"` / `"kernel"`。`method="2sls"`では無視 |
-| `gmm_iterations` | `int` | `2` | GMM反復回数（`method="gmm"`のみ）: `2`＝efficient two-step、`1`＝1-step、`3`以上＝iterated GMM |
-| `gmm_convergence` | `float \| None` | `None` | `Some`のとき`gmm_iterations`を「収束判定の上限反復回数（安全弁）」として扱う（併用方式） |
-| `raise_on_non_convergence` | `bool` | `True` | `gmm_convergence`設定時、収束しなければ`True`でエラー、`False`で`converged=False`のまま結果を返す |
+| `cluster` | `str \| None` | `None` | `cov_type="cluster"`時（`gmm_weight_type="cluster"`とも共用）のグループキー列名。どちらからも使われないモードで指定すると`ValidationError` |
+| `hac_lags` | `int \| None` | `None` | `cov_type="hac"`時（`gmm_weight_type="hac"`とも共用）のラグ数。`None`なら自動計算。どちらからも使われないモードで指定すると`ValidationError` |
+| `hac_time` | `str \| None` | `None` | `cov_type="hac"`時（`gmm_weight_type="hac"`とも共用）の時系列順序列（**どちらかがHACなら必須**、未指定は`ValidationError`。値は全行で互いに異なること。同値があれば`ValidationError`、`ols-spec.md`「標準誤差」のHAC参照）。どちらからも使われないモードで指定すると`ValidationError` |
+| `gmm_weight_type` | `str \| None` | `None` | GMMの点推定に使う重み行列（`gmm_type="two_step"`/`"iterated"`のみ。`None`は実効既定値`"classical"`）: `"classical"` / `"robust"` / `"cluster"` / `"hac"`（`cov_type`と同じ語彙。旧名`unadjusted`/`kernel`と別名`homoskedastic`/`heteroskedastic`は受け付けない）。`estimator="2sls"`と`gmm_type="one_step"`で指定すると`ValidationError` |
+| `gmm_type` | `str \| None` | `None` | GMMの推定方式（`estimator="gmm"`のみ、`None`は実効既定値`"two_step"`。`estimator="2sls"`で指定すると`ValidationError`）: `"one_step"`（1段階、重み`(Z'Z)⁻¹`のみ）/ `"two_step"`（2段階の効率的GMM）/ `"iterated"`（収束まで反復）。大文字小文字は区別しない |
+| `gmm_max_iter` | `int \| None` | `None` | `"iterated"`の最大推定回数（初回推定を含む、3以上10000以下）。`None`は実効既定値`100`。`"one_step"`/`"two_step"`/`estimator="2sls"`で指定すると`ValidationError` |
+| `gmm_tol` | `float \| None` | `None` | `"iterated"`の収束許容誤差。`None`は実効既定値`1e-6`。`"one_step"`/`"two_step"`/`estimator="2sls"`で指定すると`ValidationError` |
+| `raise_on_non_convergence` | `bool \| None` | `None` | `gmm_type="iterated"`で収束しなければ`True`でエラー、`False`で`converged=False`のまま結果を返す。`None`は実効既定値`True`。それ以外の`gmm_type`・`estimator="2sls"`で指定すると`ValidationError` |
 
-- **`cluster_col`/`hac_lags`/`time_col`は`cov_type`と`weight_type`（GMM）で共用する**
+- **`cluster`/`hac_lags`/`hac_time`は`cov_type`と`gmm_weight_type`（GMM）で共用する**
   （`IVOptions`に別フィールドを増やさない設計。異なるクラスター変数を使い分けたいニーズが
   出てきたら別フィールド化を検討）。
-- **`weight_type`（GMMの点推定に使う重み行列）と`cov_type`（最終的な報告用SE計算）を
+- **`gmm_weight_type`（GMMの点推定に使う重み行列）と`cov_type`（最終的な報告用SE計算）を
   分離する**（`linearmodels.IVGMM`と同じ構造）。GMMは他のモデルと異なり`cov_type`相当の
   選択（重み行列の仮定する誤差構造）が点推定自体に影響するため、この分離をしないと
   「SEを変えたら係数も変わる」という他モデルには無い挙動を`cov_type`の名の下に隠すことに
   なり紛らわしい。
-- **丁度識別（`len(instruments) == len(x_endog)`）では、GMMの点推定は`weight_type`に
+- **丁度識別（`len(instruments) == len(x_endog)`）では、GMMの点推定は`gmm_weight_type`に
   よらず2SLSと数値的に一致する**（GMMの一般的性質: モーメント条件を正確に0にできるため
   重み行列が点推定に影響しない）。共通GMM推定コアで自然に吸収され、特別な分岐は不要。
-- **2SLSはGMMの特殊ケース**（`weight_type="unadjusted"`、`gmm_iterations=1`）として点推定は
+- **2SLSはGMMの特殊ケース**（`gmm_weight_type="classical"`、`gmm_type="one_step"`）として点推定は
   数値的に一致するが、実装（`TwoSlsEstimator`/`GmmEstimator`）は意図的に独立させている
   （`TwoSlsEstimator`は`cov_type`対応の推論統計量一式・Sargan・Wu-Hausmanを持つのに対し
   `GmmEstimator`はそれらを持たないため、委譲すると過剰設計になる）。
-- 欠損値（NaN/無限大）は常にエラー。
+- 欠損値（null・NaN/無限大）は常にエラー（方針は[`docs/guide/validation.md`](../guide/validation.md)）。
 
 ## 2. 結果構造体
 
-`IVResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `stats` / `p_values` /
+`IVResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `test_stats` / `stat_dist` / `stat_df` / `p_values` /
 `conf_lower` / `conf_upper` / `param_names` / `residuals` / `dep_var_name` / `n_obs` /
-`df_resid` / `df_model` / `converged` / `n_iterations` / `cov_type` / `method` / `weight_type` /
-`f_statistic` / `f_p_value` / `r_squared` / `r_squared_adj` / `weak_instrument_f_statistics` /
+`df_resid` / `df_model` / `converged` / `n_iter` / `cov_type` / `hac_lags_used` / `estimator` / `gmm_weight_type` /
+`wald_statistic` / `wald_p_value` / `wald_dist` / `wald_df_num` / `wald_df_denom` /
+`r_squared` / `adj_r_squared` / `weak_instrument_f_statistics` / `weak_instrument_f_df_num` /
+`weak_instrument_f_df_denom` / `overid_df` / `wu_hausman_df_num` / `wu_hausman_df_denom` /
 `overid_statistic` / `overid_p_value` / `wu_hausman_statistic` / `wu_hausman_p_value`。
 
-- **`t_stats`ではなく`stats`という分布非依存の名前**（Issue #159）: 1つの`IVResult`型を
-  `method="2sls"`（t分布）・`method="gmm"`（z分布）の両方が共有するため、`OLSResult.t_stats`・
-  `LogitResult.z_stats`のような分布固定の名前は使えない。`engine::inference::InferenceStat`が
-  同じ理由で`stat`という名前を使っている前例に倣った。
-- **`method`**（Issue #307）: `IVOptions.method`を正規化した小文字文字列（`"2sls"`/`"gmm"`）。
+- **`test_stats`と`stat_dist`/`stat_df`**: 1つの`IVResult`型を`estimator="2sls"`（t分布）・
+  `estimator="gmm"`（z分布）の両方が共有するため、統計量は全手法共通の`test_stats`とし、
+  分布は`stat_dist`（`"t"`/`"normal"`）と`stat_df`（t分布の自由度。正規分布は`None`）で示す。
+  2SLSの`cov_type="cluster"`は`df_resid`ではなく`G-1`を使うため、`stat_df`は実際に使った
+  自由度である（`df_resid`とは限らない）。
+- **`hac_lags_used`**: 実際に使われたHACラグ数（`hac_lags`明示指定ならその値、未指定なら経験則
+  `floor(4*(n/100)^(2/9))`の自動計算値）。`cov_type="hac"`、または`estimator="gmm"`かつ
+  `gmm_type`が`two_step`/`iterated`で`gmm_weight_type="hac"`のとき`Some`、それ以外は`None`
+  （`hac_lags`は`cov_type`と`gmm_weight_type`で共用のため、両方がHacでも値は同じ。engine層では
+  両者のラグが異なる場合`cov_type`側を優先する）。`first_stage()`の各`OLSResult`も同じ`cov_type`で
+  推定されるため、HACなら同じ値を持つ。
+- **`estimator`**: `IVOptions.estimator`を正規化した小文字文字列（`"2sls"`/`"gmm"`）。
   常に反映される。
-- **`weight_type`**（Issue #307）: 型は`Option<String>`。`method="gmm"`のときだけ
-  `Some(String)`（`IVOptions.weight_type`を正規化した小文字文字列。エイリアス入力
-  （`"homoskedastic"`/`"heteroskedastic"`）は正規化されずそのままechoされる）、
-  `method="2sls"`では概念自体が存在しないため常に`None`。
-- **`converged`/`n_iterations`**: `method="2sls"`では常に`converged=true`・`n_iterations=1`
-  （2SLSは閉形式・非反復のため）。`method="gmm"`では実際の反復回数・収束判定結果を返す
-  （`gmm_convergence=None`のときは固定回数モードのため常に`converged=true`）。
+- **`gmm_weight_type`**: 型は`Option<String>`。`estimator="gmm"`のときだけ
+  `Some(String)`（`IVOptions.gmm_weight_type`を正規化した小文字文字列）、
+  `estimator="2sls"`では概念自体が存在しないため常に`None`。
+- **`converged`/`n_iter`**: `estimator="2sls"`では常に`converged=true`・`n_iter=1`
+  （2SLSは閉形式・非反復のため）。`estimator="gmm"`では実際の反復回数・収束判定結果を返す
+  （`gmm_type="iterated"`以外は収束判定を行わないため常に`converged=true`、`n_iter`は1・2）。
+- **`gmm_type`**: `estimator="gmm"`では実際に使った推定方式（小文字に正規化）、`estimator="2sls"`では常に`None`。
+  `gmm_type="one_step"`では`gmm_weight_type`は使われないため結果の`gmm_weight_type`も`None`。
 - **`n_entities`は含めない**（IVはパネル構造を前提としない）。
 - **`log_likelihood`/`aic`/`bic`は除外する**（2SLS/GMMは尤度ベースの推定法ではなく、
   Stataの`ivregress`もデフォルトでは出力しない。正規性を仮定した疑似尤度を計算して
   OLS/FE/REと同じフィールド名で返すと、異なる推定基準の値を同列に比較できるかのように
   誤解させるため統計的な誠実さを優先して含めない）。
-- **`r_squared`/`r_squared_adj`はFE/REのような3分割はせず、OLSと同じ単一フィールド**
+- **`r_squared`/`adj_r_squared`はFE/REのような3分割はせず、OLSと同じ単一フィールド**
   （IVはパネルのwithin/between区別を持たない）。
-- **`f_statistic`/`f_p_value`はGMMでは常にロバストWald検定（χ²）**。OLSが`cov_type`が
-  HC系/clusterのときF検定をロバストWald検定に切り替える既存挙動をGMMにも一貫適用する
-  （GMMはz分布と決定済みで古典的F検定の正当化が無いため）。2SLSはOLSと同じ切り替え
-  ロジック（classical時はF検定、HC/cluster/hac時はロバストWald検定）。
+- **全体検定は`wald_statistic`/`wald_p_value`/`wald_dist`/`wald_df_num`/`wald_df_denom`**
+  （旧`f_statistic`/`f_p_value`）。2SLSはF型（Wald統計量を傾き係数の数で割ったもの、
+  `wald_dist="f"`、`wald_df_denom`は`df_resid`で`cov_type="cluster"`のときだけ`G-1`）、
+  GMMは割らないχ²型（`wald_dist="chi2"`、`wald_df_denom=None`）。どちらもWald検定なので
+  `wald`という名前が正確で、OLSの`f_statistic`に相当するのは2SLSの`wald_statistic`。
+  OLSが`cov_type`がHC系/clusterのときF検定をロバストWald検定に切り替える挙動は2SLSも
+  同じ、GMMは常にロバストWald（χ²）（GMMはz分布と決定済みで古典的F検定の正当化が無い
+  ため）。
+- **検定統計量の自由度**: `overid_df`（Sargan/Hansen J、χ²、`len(instruments) - len(x_endog)`、
+  丁度識別は`None`）、`wu_hausman_df_num`/`wu_hausman_df_denom`（F、分子は内生変数の数、
+  分母は拡張回帰の`df_inference`）、`weak_instrument_f_df_num`/`weak_instrument_f_df_denom`
+  （分子は除外操作変数の数、分母は第一段階回帰の残差自由度。内生変数ごとの辞書だが自由度は
+  共通のためスカラー）。統計量が`None`/NaNのときは自由度も`None`。
 - **`cov_params`（k×kの分散共分散行列）はPython側に公開しない**（OLSと同じ方針）。
 - **第一段階回帰結果は`first_stage()`という別メソッド**に切り出す（`fit()`の戻り値本体には
   含めない。非線形モデルの`marginal_effects()`分離方針を踏襲）。`first_stage() -> dict[str,
   OLSResults]`。キーは`x_endog`の変数名、値は既存の`OLSResults`型（新規のIV専用型は
-  作らない）。第一段階回帰は`x_endog[i] ~ x_exog + instruments`、`method`によらず同じ
+  作らない）。第一段階回帰は`x_endog[i] ~ x_exog + instruments`、`estimator`によらず同じ
   （`engine::iv::common::compute_first_stage`を共有）。
 - 弱操作変数診断・過剰識別検定・Wu-Hausman検定はいずれも`fit()`の結果本体に含める
   （別メソッド化しない）。
 - `summary()`は実装しない。python_package層（`IVResults`）の`coef_table()`は行指向
-  `list[dict]`で、キーは`param`/`coef`/`std_err`/`stat`（`t_stat`/`z_stat`ではなく`stats`
-  プロパティと同じ理由）/`p_value`/`conf_lower`/`conf_upper`。
+  `list[dict]`で、キーは`param`/`coef`/`std_err`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`。
 
 ## 3. 内部実装の計算仕様
 
@@ -135,11 +154,11 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   （`gmm.rs`）も同じ理由で2SLS側と独立に実装している（`iv/CLAUDE.md`「2SLSとGMMの独立実装
   方針」参照）。
 - **GMMのSEサンドイッチは常に一般形**: `Avar(β̂) = B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`
-  （`B=X'ZWZ'X`、`W=S_used⁻¹`は点推定に実際に使った重み）。`weight_type`と`cov_type`は
+  （`B=X'ZWZ'X`、`W=S_used⁻¹`は点推定に実際に使った重み）。`gmm_weight_type`と`cov_type`は
   独立な選択のため一般に一致せず、「効率的GMM」の特殊ケースでも`B⁻¹`のみへの簡略化分岐は
   しない（実装が単一経路になり単純）。
 - **HC2/HC3のレバレッジ補正**: `hc2_cov_params`/`hc3_cov_params`は`h_ii = x̂_i'(X'PzX)^-1 x̂_i`
-  （`X̂`ベース、実際の設計行列に対して直接計算する）。GMMの`weight_type`にはHC2/HC3相当の
+  （`X̂`ベース、実際の設計行列に対して直接計算する）。GMMの`gmm_weight_type`にはHC2/HC3相当の
   区分が無い（成分ごとに異なるレバレッジ補正はGMMの重み行列のスカラー不変性の議論と
   相性が悪いため）。
 - **クラスター系の小標本補正は構造方程式のパラメータ数`k`に対して適用する**（操作変数の
@@ -147,16 +166,19 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   消費した数（`k`）」を混同しないよう区別する。
 - **`cov_type="cluster"`はクラスター数`G`が構造方程式の傾き係数の数`q`（`k - k_constant`）
   より多くなければならない**（`G <= q`は`CommonError::InsufficientClustersForInference`＝
-  `ValidationError`、Issue #289。`rank(Ŝ) ≤ G-1`のためロバストWald/F（χ²）検定の`q×q`
+  `ValidationError`。`rank(Ŝ) ≤ G-1`のためロバストWald/F（χ²）検定の`q×q`
   部分行列が構造的に特異。`fit()`冒頭で構造方程式の`q`を使って弾く。第一段階・第二段階
   回帰の`OlsEstimator::fit`内でも同じ検証が走るが、そちらは`FirstStageFailed`/
   `SecondStageFailed`にラップされるため区別される）。OLS/WLS/Tobit/Logit/Probit/IVで横断
   統一。Wu-Hausman拡張回帰は`q_aug = q + k_endog`で`G <= q_aug`になりうるが、実際に使う
   末尾`k_endog`列の部分行列は`rank(Ŝ) ≤ G-1 ≥ k_endog`なら計算可能なので`wu_hausman_*`を
   `None`へdegradeする（3.6節）。
-- **GMMの`weight_type="cluster"`の重み行列`S`（l×l、全操作変数の本数`l`）が`G<l`で
-  特異になる問題は別軸**（`cov_type=Cluster`の`G<=q`とは対象・閾値が異なる。現状
-  `ComputationError`、`ValidationError`への再分類はIssue #290で未着手）。
+- **GMMの`gmm_weight_type="cluster"`の重み行列`S`（l×l、全操作変数の本数`l`）が`G<l`で
+  特異になる問題は別軸**（`cov_type=Cluster`の`G<=q`とは対象・閾値が異なる）。
+  過剰識別（`l>k`）は`G<l`、丁度識別（`l==k`）は`G<=l`（`Z'ê=0`により`rank(S)≤G-1`）で
+  `IvError::InsufficientClustersForWeightMatrix`＝`ValidationError`。`fit()`冒頭で
+  `gmm_type="two_step"`/`"iterated"`のとき検証する（`"one_step"`は`gmm_weight_type`を
+  使わないため検証しない）。悪条件の`ComputationError`はbackstopとして残る。
 
 ### 3.2 検定分布
 
@@ -172,23 +194,44 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   照合時は`debiased=True`を明示指定する必要がある）。GMM側は`linearmodels`の既定
   （`debiased=False`→z分布）と一致する。
 
-### 3.3 GMM反復（`gmm_iterations`/`gmm_convergence`）
+### 3.3 GMMの推定方式（`gmm_type`/`gmm_max_iter`/`gmm_tol`）
 
-- **用語**: 「1-step GMM」（`gmm_iterations=1`）は残差に基づく重みの再構築を一切行わず
-  アドホックな`W₀=(Z'Z)⁻¹`のみで打ち切る推定（`weight_type`によらず常に2SLSと同じ
-  結果）。「2-step efficient GMM」（`gmm_iterations=2`、既定）は「初期推定→残差からS構築
-  →S⁻¹で再推定」の2段階手続き。`gmm_iterations`はこの反復を`while`ループでN回まで
-  繰り返すだけの実装で、1-step/2-step/iterated間でアルゴリズムを分岐させる必要はない。
-- **`gmm_convergence`設定時**: `gmm_iterations`は「収束判定の上限反復回数（安全弁）」に
-  なる。収束判定は係数のelementwise・絶対誤差と相対誤差の併用（`tol = max(rtol * |前回値|,
+- **用語**: 「1-step GMM」（`gmm_type="one_step"`）は残差に基づく重みの再構築を一切行わず
+  アドホックな`W₀=(Z'Z)⁻¹`のみで打ち切る推定（2SLSと同じ結果）。「2-step efficient GMM」
+  （`"two_step"`、既定）は「初期推定→残差からS構築→S⁻¹で再推定」の2段階手続き。
+  「反復GMM」（`"iterated"`）はこの手続きを収束するまで（または上限まで）繰り返す。
+  実装は「直前の残差からSを再構築→再推定」を`while`ループで繰り返すだけで、方式間で
+  アルゴリズムを分岐させる必要はない。
+- **選択肢を方式名にした理由**: 利用者が選びたいのは推定方式であり回数ではない。回数の整数で
+  表すと「2が2段階GMM」という対応を知らないと読めず、許容誤差の有無で意味が切り替わる。
+  将来CUEを足す場合も`gmm_type="cue"`を足すだけで済む。「ちょうどn回で打ち切る反復」は
+  実務上の需要がないため表現しない。
+- **`gmm_max_iter`/`gmm_tol`は`"iterated"`専用**: `"one_step"`/`"two_step"`で指定すると
+  `ValidationError`。`IVOptions`は既定値と明示指定を区別できないため既定値は`None`とし、
+  `"iterated"`のときだけ実効既定値（`gmm_max_iter=100`、`gmm_tol=1e-6`）に解決する。
+  `estimator="2sls"`で指定しても`ValidationError`。
+- **選んだモードで使われないオプションは黙って無視せず`ValidationError`にする**:
+  `cov_type="cluster"`の書き忘れでclassicalの標準誤差が黙って返るのを防ぐため。
+  `gmm_type`/`gmm_weight_type`/`gmm_max_iter`/`gmm_tol`/`raise_on_non_convergence`は
+  `estimator="gmm"`のときのみ、`gmm_weight_type`はさらに`gmm_type`が`"two_step"`/
+  `"iterated"`のとき、`gmm_max_iter`/`gmm_tol`/`raise_on_non_convergence`は`"iterated"`
+  のときのみ有効。`cluster`/`hac_lags`/`hac_time`は`cov_type`と`gmm_weight_type`の
+  どちらか一方でも使えば有効。既定値が非`None`だったオプションは、指定有無を区別する
+  ため既定値を`None`にして使われるモードでのみ実効既定値に解決する。
+- **`gmm_max_iter`は初回推定を含めて数え、3以上10000以下を必須とする**（linearmodelsの`iter_limit`と
+  同じ数え方。上限は`max_iter`と共通の`MAX_ITER_LIMIT`で、収束しない問題が実質的に終わらなく
+  なるのを防ぐ）。上限2回の反復は「two_stepに収束判定を付けたもの」になり紛らわしいため、
+  2段階が欲しい場合は`gmm_type="two_step"`を使う（エラーメッセージでも案内する）。
+- **収束判定**: 係数のelementwise・絶対誤差と相対誤差の併用（`tol = max(rtol * |前回値|,
   atol)`、`atol`は内部固定値`1e-8`）。全係数が満たして初めて収束とする。
 - **未収束時の挙動**: `raise_on_non_convergence=true`（既定）なら`IvError::
   GmmNonConvergence`（`ComputationError`）、`false`なら`converged=false`のまま結果を返す
   （MLEの`raise_on_non_convergence=false`→`converged=False`と同じ意味論）。
-- **`gmm_iterations=1`は比較対象となる前回推定値が無いため、`gmm_convergence`の指定有無に
-  よらずトリビアルに`converged=true`**。
-- **`gmm_iterations=1`でも`weight_type`引数自体の妥当性は常に検証する**（点推定には
-  影響しなくても、`Cluster`の`groups`未指定等の設定ミスは黙って成功させない）。
+  `raise_on_non_convergence`・`converged`が意味を持つのは`"iterated"`のときだけで、
+  `"one_step"`/`"two_step"`は常に`converged=true`、`n_iter`は実際の推定回数（1・2）。
+- **engine層の型**: 矛盾した組み合わせを型で表現できないよう、`GmmType::{OneStep,
+  TwoStep { weight }, Iterated { weight, max_iter, tol }}`のenumにし、`weight_type`も
+  バリアントに含める。`OneStep`は`weight_type`を持たない（検証もしない）。
 
 ### 3.4 弱操作変数診断（`weak_instrument_f_statistics`）
 
@@ -196,10 +239,10 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   （`linearmodels.iv.results.FirstStageResults.diagnostics`と同じ方式）。`first_stage()`が
   返す`OLSResults.f_statistic`（x_exog込みの全回帰係数に対する検定）とは別物。
 - 内生変数ごとに計算し`dict[str, float]`で`fit()`の主結果に含める。
-- **常に等分散前提、`cov_type`には依存しない**（Issue #163）。理由: (1) Stock-Yogoの臨界値
+- **常に等分散前提、`cov_type`には依存しない**。理由: (1) Stock-Yogoの臨界値
   表自体が等分散前提でキャリブレーションされている（v1では臨界値照合はしないが意味合いは
   引き継ぐ）、(2) `OlsEstimator`が係数の分散共分散行列全体を公開していないため。
-  `method="2sls"`/`method="gmm"`ともに同じ計算方式（`engine::iv::common::
+  `estimator="2sls"`/`estimator="gmm"`ともに同じ計算方式（`engine::iv::common::
   compute_first_stage`を共有）。
 - **v1のスコープ**: 生の部分F統計量のみ返す。Stock-Yogo臨界値テーブルとの照合（弱操作変数の
   合否判定）・複数内生変数の同時検定（Cragg-Donald統計量等）はv1スコープ外。
@@ -214,12 +257,12 @@ Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含�
 - **Sargan検定**（`two_sls.rs`）は常に古典的（`e'Z(Z'Z)⁻¹Z'e/σ̂²`、`σ̂²=e'e/n`）な計算式を
   使い`cov_type`には依存しない（定義自体が等分散前提の検定であり、不均一分散に頑健な版が
   欲しい場合はGMM＋Hansen Jを使うのが標準的な使い分けのため）。
-- **Hansen J検定**（`gmm.rs`）は点推定に使った重み行列`S`（`weight_type`依存）をそのまま
+- **Hansen J検定**（`gmm.rs`）は点推定に使った重み行列`S`（`gmm_weight_type`依存）をそのまま
   流用するのが定義そのもの（`J=(Z'ê)'S⁻¹(Z'ê)`）。`S`は`n`で正規化していない生の和のため
   `n`で割ってはならない（標準形`J=n·ḡₙ'Ŝ⁻¹ḡₙ`に代入すると`n`は完全に相殺する）。
-  `gmm_iterations=1`・`weight_type=Unadjusted`時の`S`は`σ̂²・Z'Z`（`σ̂²`スケーリング必須、
-  Unadjusted以外の`Robust`/`Cluster`/`Kernel`と絶対スケールを揃えるため）。
-  `weight_type=Unadjusted`かつ`gmm_iterations=2`のHansen Jは2SLSのSargan統計量と数値的に
+  `one_step`・`gmm_weight_type=Classical`時の`S`は`σ̂²・Z'Z`（`σ̂²`スケーリング必須、
+  Classical以外の`Robust`/`Cluster`/`Hac`と絶対スケールを揃えるため）。
+  `gmm_weight_type=Classical`かつ`two_step`のHansen Jは2SLSのSargan統計量と数値的に
   一致する。
 - どちらも計算失敗は`None`にせず`IvError`として伝播する（使う行列はいずれも点推定計算で
   既に反転成功済みの行列の再利用であり、理論上ここでの特異性は到達不能なため）。
@@ -230,12 +273,12 @@ Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含�
 有意性を検定する方式**（`linearmodels.iv.results.IVResults.wooldridge_regression`相当）で
 実装する（SSR差に基づく古典公式の`wu_hausman`とは別物）。
 
-- **`fit()`に渡された`cov_type`に対応させる**（弱操作変数診断とは対照的な判断、Issue #164）。
+- **`fit()`に渡された`cov_type`に対応させる**（弱操作変数診断とは対照的な判断）。
   `linearmodels`の`wooldridge_regression`が「fit時と同じcovarianceでのWald検定」という
   仕様のため。
 - `fit()`の結果本体に含める（内生変数全体のジョイント検定のみ、変数ごとのサブセット検定は
   v1スコープ外）。
-- **`method="gmm"`では常に`None`**（`GmmEstimator`はWu-Hausman検定を実装しない）。
+- **`estimator="gmm"`では常に`None`**（`GmmEstimator`はWu-Hausman検定を実装しない）。
 - **想定内の理由で失敗した場合は`fit()`全体を失敗させず`None`にする**（`FirstStageFailed`/
   `SecondStageFailed`の"all-or-nothing"方針とは意図的に異なる）。想定内の理由は2つ:
   (1) 第一段階残差の分散がゼロ（操作変数が内生変数を完全予測する退化ケース）で拡張回帰の
@@ -250,9 +293,9 @@ Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含�
 
 - 各内生変数`x_endog[i]`について`x_endog[i] ~ x_exog + instruments`を通常のOLSで推定
   （`OlsEstimator → OLSResult`変換は`linear::ols::ols_estimator_to_result`を再利用）。
-- `method`によらず`engine::iv::common::compute_first_stage`から構築する共通ロジック
+- `estimator`によらず`engine::iv::common::compute_first_stage`から構築する共通ロジック
   （GMMでも2SLSと同じ診断情報を提供する）。
-- **`method="2sls"`では第一段階回帰が二重計算になる**（`fit`が明示的に1回、
+- **`estimator="2sls"`では第一段階回帰が二重計算になる**（`fit`が明示的に1回、
   `TwoSlsEstimator::fit`が内部でもう1回）。`OlsEstimator`が`Clone`未実装のため
   `TwoSlsEstimator::first_stage_estimators()`の借用結果を`IVResult`へ所有権ごと移せず、
   OLS自体が軽量という前提で許容した設計判断。
@@ -267,7 +310,7 @@ common.rs`）:
 | `IvError` | Python例外 |
 |---|---|
 | `Common(CommonError)` | `common_error_to_pyerr`に委譲 |
-| `InsufficientInstruments` / `InvalidHacLags` / `InvalidGmmIterations` / `InvalidGmmConvergence` | `ValidationError` |
+| `InsufficientInstruments` / `InvalidHacLags` / `InvalidGmmMaxIter` / `InvalidGmmTol` / `InsufficientClustersForWeightMatrix` | `ValidationError` |
 | `GmmNonConvergence` | `ComputationError`（`MleError::NonConvergence`と同じ分類: パラメータの不正ではなく計算過程で発覚した問題） |
 | `FirstStageFailed` / `SecondStageFailed` / `HausmanRegressionFailed` | 内部の`LeastSquaresError`が`ComputationError`相当かどうかで`ComputationError`/`ValidationError`に分岐（`least_squares_error_is_computation_error`） |
 
@@ -281,17 +324,20 @@ common.rs`）:
   `cluster`/`hac`の`vcov`を`coeftest()`経由でそのまま使える。`summary(model,
   diagnostics=TRUE)`は`vcov.`に行列を渡すと常にclassical（iid）vcovにフォールバックする
   仕様のため、`weak_instrument_f_statistics`/`overid_statistic`（設計自体が常にclassical）
-  はcov_typeによらず一律クロスチェックできるが、`wu_hausman_statistic`はclassical
-  cov_typeのときのみ`ivreg`側でクロスチェックする（hc0/hc1/clusterは`linearmodels`側の
-  クロスチェックに委ねる）。
+  はcov_typeによらず一律クロスチェックできる。`wu_hausman_statistic`/`wu_hausman_p_value`も
+  `summary(diagnostics=TRUE, vcov.=<関数>)`でcov_type別のロバスト共分散を診断表に反映できるため、
+  全cov_typeでクロスチェックする（`benchmark/iv/references/run_ivreg.R`参照）。ただしclusterの
+  p値のみ、`ivreg`のWald検定がF分布の分母自由度にクラスター数を反映しないため一致せず、統計量のみ
+  比較する。
 - **GMMのRクロスチェックは例外的に省略する**（`ivreg`が対応していないため）。
   「Python主リファレンス＋Rクロスチェック」の2系統検証の例外であることをテスト実装時に
   明記する（RE のハウスマン検定と同型の例外規定）。
-- **許容誤差**: 相対誤差1e-8を基本。`classical`/`hc0`〜`hc1`/`cluster`/`hac`は
+- **許容誤差**: 相対誤差1e-8＋絶対誤差フロア1e-10（`tests/_tolerances.py`の`iv_reference`）を
+  基本。`classical`/`hc0`〜`hc1`/`cluster`/`hac`は
   `linearmodels`と(`cov_type`, `debiased`)の対応（`classical`↔(`unadjusted`,
   `debiased=True`)、`hc0`↔(`robust`, `debiased=False`)、`hc1`↔(`robust`,
   `debiased=True`)、`cluster`↔(`clustered`, `debiased=True`)、`hac`↔(`kernel`(bartlett),
-  `debiased=False`)）で`coef`/`se`が相対誤差1e-10以下（実質機械精度）で一致する。`hc2`/
+  `debiased=False`)）で`coef`/`se`が実質機械精度（実測1e-10以下）で一致する。`hc2`/
   `hc3`は`linearmodels`では検証できない（`linearmodels.iv.covariance`にhc2/hc3相当が
   無い）ため、R `ivreg`+`sandwich::vcovHC(type="HC2"/"HC3")`で検証する。`f_p_value`は
   浮動小数点アンダーフローに近い極小値（1e-9〜1e-12オーダー）のケースで相対誤差比較が
@@ -309,7 +355,5 @@ common.rs`）:
 
 - Stock-Yogo臨界値テーブルとの照合（弱操作変数の合否判定）
 - 複数内生変数の同時検定（Cragg-Donald統計量等）
-- Wu-Hausman検定のGMM対応（`method="gmm"`では常に`None`）
+- Wu-Hausman検定のGMM対応（`estimator="gmm"`では常に`None`）
 - Wu-Hausman検定の変数ごとのサブセット検定（現状は内生変数全体のジョイント検定のみ）
-- GMMの`weight_type="cluster"`が`G<l`で特異になる場合の`ComputationError`→
-  `ValidationError`への再分類（Issue #290、未着手）

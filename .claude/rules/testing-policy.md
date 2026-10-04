@@ -8,6 +8,10 @@ paths:
 
 このファイルは `tests/` 配下で作業する際に自動的に読み込まれる。
 
+## コメント運用
+
+Issue番号・内部管理ドキュメント（`refactoring-candidates.md`等）への参照可否は、CLAUDE.md 6章「コメント・ドキュメントでの参照方針」に準じる（`tests`/`benchmark`固有の追加規約はない）。
+
 ## テストの分離
 
 - `engine`の純粋ロジックの単体テストは、対象コードと同じファイル内の`#[cfg(test)] mod tests`に置く（`cargo test -p engine`）。
@@ -29,7 +33,7 @@ paths:
        `numDeriv::hessian()`による数値微分Hessianとの一致を別途確認済み）。
     3. 1・2のどちらも現実的でない場合は、その旨と理由をクロスチェックスクリプトのコメントに明記し、独立性が限定的であることを認識した上で使う。
   - 上記の対策が特に重要になるのは、**主リファレンス自体がクロスチェックと同系統（例: 両方ともR実装）で、独立した第三者実装による三角測量が効かない手法**（例: Tobitは主リファレンスがR `AER::tobit`、クロスチェックもR `censReg`）。statsmodels等の独立した主リファレンスが別途存在する手法（OLS/WLS/Logit/Probit/IV等）では、本実装とRクロスチェックに共通の誤解があっても、独立に実装された主リファレンスとは一致しない可能性が高く、実質的な三角測量として機能する。
-- **pyfixest**（Python）: OLSの正確性検証には使わない。fixest（R）本体のソースを確認したところ、pyfixest（Python、v0.60.0時点）のHC2/HC3標準誤差はfixestの設計ではなく**pyfixest自身の実装バグ**（HC1用の`N/(N-k)`小標本補正をHC2/HC3にも誤って適用）により系統的に乖離することが判明したため。性能比較（実行時間・メモリ）でのみ使う。固定効果が絡むPhase4（FE/RE）以降での正確性検証における採否は、その時点のfixest/pyfixestのソースを個別に確認して判断する（本項の結論をOLS以外に自動的に適用しない）。
+- **pyfixest**（Python）: OLSの正確性検証には使わない。fixest（R）本体のソースを確認したところ、pyfixest（Python、v0.60.0時点）のHC2/HC3標準誤差はfixestの設計ではなく**pyfixest自身の実装バグ**（HC1用の`N/(N-k)`小標本補正をHC2/HC3にも誤って適用）により系統的に乖離することが判明したため。性能比較（実行時間・メモリ）でのみ使う。FE/REの正確性検証にも使っていない（linearmodelsとR `fixest`/`plm`を使う。詳細は`docs/guide/verification.md`参照）。
 
 ## テスト用データセット
 
@@ -47,7 +51,7 @@ paths:
    - **説明変数の外れ値・裾の重い分布**: 少数の観測（実装例では5%）だけが極端な値を持つ設計行列（高レバレッジ行）での数値的頑健性を検証する。Tukeyの汚染混合モデル（`(1-p)*N(0,1) + p*N(0,scale²)`）等で実現する。高次元シナリオと異なり、少数の観測のみが極端な場合はMLE系でも分離を誘発しにくい（`benchmark/linear`・`benchmark/nonlinear`の`outlier_regressor`実装ノート参照）。
 2. **実データセット**: Wooldridgeデータセット等の教科書的実データ。真の係数と比較できないため、リファレンス実装との一致のみで検証する。
 3. **グループ/クラスター単位の分散推定（クラスターロバストSE等）を持つ手法**: 均等サイズの疑似グループだけでなく、不均衡なグループサイズ（例: `[2, 3, 5, 10, 30, 50]`のように偏らせる）、グループ数が境界値に近いケース（最小グループ数ちょうど、その外側の失敗パス）、実データでのグループ列も検証する。均等サイズの疑似グループのみのテストは、実務でバグが出やすい分布の偏りを見逃す。
-   - **境界値ケースでは「クラスタ数G」と「傾き係数の数q（`k - k_constant`）」の関係に注意する**（OLSの実装過程で判明、Issue #289で`ValidationError`に統一）。クラスターロバスト共分散はクラスター寄与スコアの総和がゼロ（正規方程式・MLEの一次条件）のため`rank(Ŝ) ≤ G - 1`であり、ロバストWald/F検定が使う`q×q`部分行列は`G <= q`のとき構造的に特異になる。`G`・`q`は入力だけから判定できるため、`fit()`冒頭で`ValidationError`（`InsufficientClustersForInference`）として弾く（OLS/WLS/Tobit/Logit/Probit/IV横断）。「クラスタ数境界の成功パス」を作る際は`G > q`（**厳密不等号**、`G = q`ちょうども特異）を保つ。`ValidationError`パスのテストは`G <= q`で書く。`G > q`かつ悪条件（極端なスケール差等）で`q×q`部分行列が数値的にほぼ特異になるケースは`ComputationError`がbackstop（別テスト1本）。詳細は`docs/spec/ols-spec.md`「標準誤差」のクラスター参照。
+   - **境界値ケースでは「クラスタ数G」と「傾き係数の数q（`k - k_constant`）」の関係に注意する**（OLSの実装過程で判明し`ValidationError`に統一した）。クラスターロバスト共分散はクラスター寄与スコアの総和がゼロ（正規方程式・MLEの一次条件）のため`rank(Ŝ) ≤ G - 1`であり、ロバストWald/F検定が使う`q×q`部分行列は`G <= q`のとき構造的に特異になる。`G`・`q`は入力だけから判定できるため、`fit()`冒頭で`ValidationError`（`InsufficientClustersForInference`）として弾く（OLS/WLS/Tobit/Logit/Probit/IV横断）。「クラスタ数境界の成功パス」を作る際は`G > q`（**厳密不等号**、`G = q`ちょうども特異）を保つ。`ValidationError`パスのテストは`G <= q`で書く。`G > q`かつ悪条件（極端なスケール差等）で`q×q`部分行列が数値的にほぼ特異になるケースは`ComputationError`がbackstop（別テスト1本）。詳細は`docs/spec/ols-spec.md`「標準誤差」のクラスター参照。
 
 ## テストの3系統
 
@@ -73,7 +77,7 @@ paths:
 - フィクスチャの命名: 手法・シナリオ・cov_type等が分かる形にする（例: `ols.json`に、シナリオ×cov_typeをネストして持たせる。実例は`tests/fixtures/benchmarks/ols.json`参照）。
 - **フィクスチャを生成するスクリプトと、生成されたJSON自体は別の場所に置く**。生成スクリプトは`benchmark/<系統>/fixtures/generate_<手法名>_fixtures.py`（コード、`benchmark/`側で管理。系統ディレクトリ構成は`.claude/skills/reference-benchmark/SKILL.md`参照）、生成物は`tests/fixtures/benchmarks/<手法名>.json`（データ、テスト側で管理）。
 - **合成データセット自体も同様にCSVとしてtests側（`tests/fixtures/benchmarks/data/`）に固定する**（`benchmark/<系統>/freeze.py`で生成）。理由: ジェネレータ側のコードが将来変わっても、既に固定したフィクスチャJSONの期待値と無言で不整合にならないようにするため。
-  - **Wooldridgeデータセットはこの固定化の対象外**とする（`wooldridge`パッケージ自体はMITライセンスだが、同梱される実データの著作権は原典の教科書側にある可能性があり、フィルタ後の部分集合であってもMITライセンスの本リポジトリにCSVとして再配布してよいか未確認のため。ユーザー確認済み）。Wooldridgeデータは引き続き`load_wooldridge.py`経由で都度ロードし、`pytest.importorskip("wooldridge")`で任意扱いにする。
+  - **Wooldridgeデータセットはこの固定化の対象外**とする（`wooldridge`パッケージ自体はMITライセンスだが、同梱される実データの著作権は原典の教科書側にある可能性があり、フィルタ後の部分集合であってもMITライセンスの本リポジトリにCSVとして再配布してよいか未確認のため。ユーザー確認済み）。Wooldridgeデータは引き続き`load_wooldridge.py`経由で都度ロードする。`wooldridge`パッケージ自体はtest依存グループに含め標準CIで常にインストールする（実データはパッケージのwheel内に留まりリポジトリへ再配布するわけではないため、上記の再配布可否の制約とは無関係）。`pytest.importorskip("wooldridge")`は、test依存グループを経由しない実行環境向けの防御的フォールバックとして残す。
 - 各フィクスチャJSONには`_meta`フィールドを含め、少なくとも以下を記録する。
   - `generated_at`: 生成日時（ISO 8601）
   - リファレンス実装のバージョン（例: `statsmodels_version`）

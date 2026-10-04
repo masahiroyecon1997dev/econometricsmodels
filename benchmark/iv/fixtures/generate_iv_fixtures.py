@@ -3,7 +3,7 @@
 
 `benchmark/iv/references/linearmodels_ref.py`（1回呼べば1ケース分の結果を返す
 汎用アダプタ）を全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つのJSONに
-まとめて書き出す。GMMは`method="gmm"`がまだPython側に配線されていないため対象外
+まとめて書き出す。GMMは`estimator="gmm"`がまだPython側に配線されていないため対象外
 （`linearmodels_ref.py`のモジュールdocstring参照）。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`iv.json`は
@@ -48,7 +48,7 @@ NUMERIC_SCENARIOS = [
     # scale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）より
     # 緩いスケール差（x1*1e2, x2*1e-1）の成功パス。faer等の数値計算
     # ライブラリ依存部分の将来の精度リグレッションを検知する
-    # （test-coverage-candidates.md項目11、OLSのscale_variance_mildと同じ発想、
+    # （OLSのscale_variance_mildと同じ発想、
     # ユーザー確認済み）。
     "scale_variance_mild",
 ]
@@ -156,7 +156,7 @@ def build_fixtures() -> dict:
             "hc2/hc3はlinearmodelsに対応する実装が無いため対象外（`iv-spec.md`"
             "3.1節、`benchmark/iv/references/linearmodels_ref.py`のモジュール"
             "docstring参照）。"
-            "GMMは`method='gmm'`がまだPython側に配線されていないため対象外。"
+            "GMMは`estimator='gmm'`がまだPython側に配線されていないため対象外。"
             "wu_hausman_statisticはclassical/hc0/hc1/clusterで`res.wooldridge_"
             "regression`をqで割った値を基準とし機械精度で一致する（実測確認済み、"
             "`benchmark/iv/references/linearmodels_ref.py`のモジュールdocstring"
@@ -172,7 +172,7 @@ def build_fixtures() -> dict:
             "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
             "scale_variance_mildはscale_variance（x1*1e6, x2*1e-3、"
             "全cov_typeでComputationError）より緩いスケール差（x1*1e2, x2*1e-1）"
-            "の成功パス（test-coverage-candidates.md項目11、OLSの"
+            "の成功パス（OLSの"
             "scale_variance_mildと同じ発想）。"
             "cluster_g2（G=2境界の成功パス）は、`engine/src/iv/CLAUDE.md`"
             "「修正済み」に記録の`k_constant`取り違えバグの修正後にフィクスチャ化"
@@ -217,7 +217,7 @@ def _run_cluster_case(dataset: str, groups: list | None = None) -> dict:
             x_endog_cols=["endog1"],
             instrument_cols=["z1", "z2"],
             cov_type="cluster",
-            cluster_col="cluster_group",
+            cluster="cluster_group",
         )
     finally:
         tmp_path.unlink()
@@ -242,7 +242,7 @@ def _run_cluster_g2_case() -> dict:
             x_endog_cols=["endog1"],
             instrument_cols=["z1"],
             cov_type="cluster",
-            cluster_col="cluster_group",
+            cluster="cluster_group",
         )
     finally:
         tmp_path.unlink()

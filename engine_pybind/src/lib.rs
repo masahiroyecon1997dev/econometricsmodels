@@ -3,12 +3,13 @@ mod errors;
 mod iv;
 mod linear;
 mod nonlinear;
+mod option_values;
 mod panel;
 mod validation;
 
 use pyo3::prelude::*;
-use pyo3_polars::PyDataFrame;
 
+use column_extraction::{extract_column_list, extract_column_name, extract_dataframe};
 use errors::{ComputationError, ValidationError};
 use iv::common::{IVOptions, IVResult};
 use linear::ols::{OLSOptions, OLSResult};
@@ -36,11 +37,14 @@ use panel::re::{REOptions, REResult};
 ///     Estimation options.
 #[pyfunction]
 fn fit_ols(
-    data: PyDataFrame,
-    y: String,
-    x: Vec<String>,
+    data: &Bound<'_, PyAny>,
+    y: &Bound<'_, PyAny>,
+    x: &Bound<'_, PyAny>,
     options: OLSOptions,
 ) -> PyResult<OLSResult> {
+    let data = extract_dataframe(data, "data")?;
+    let y = extract_column_name(y, "y")?;
+    let x = extract_column_list(x, "x")?;
     linear::ols::fit(data, y, x, &options)
 }
 
@@ -61,12 +65,16 @@ fn fit_ols(
 ///     Estimation options.
 #[pyfunction]
 fn fit_wls(
-    data: PyDataFrame,
-    y: String,
-    x: Vec<String>,
-    weight: String,
+    data: &Bound<'_, PyAny>,
+    y: &Bound<'_, PyAny>,
+    x: &Bound<'_, PyAny>,
+    weight: &Bound<'_, PyAny>,
     options: WLSOptions,
 ) -> PyResult<WLSResult> {
+    let data = extract_dataframe(data, "data")?;
+    let y = extract_column_name(y, "y")?;
+    let x = extract_column_list(x, "x")?;
+    let weight = extract_column_name(weight, "weight")?;
     linear::wls::fit(data, y, x, weight, &options)
 }
 
@@ -85,11 +93,14 @@ fn fit_wls(
 ///     Estimation options.
 #[pyfunction]
 fn fit_logit(
-    data: PyDataFrame,
-    y: String,
-    x: Vec<String>,
+    data: &Bound<'_, PyAny>,
+    y: &Bound<'_, PyAny>,
+    x: &Bound<'_, PyAny>,
     options: LogitOptions,
 ) -> PyResult<LogitResult> {
+    let data = extract_dataframe(data, "data")?;
+    let y = extract_column_name(y, "y")?;
+    let x = extract_column_list(x, "x")?;
     nonlinear::logit::fit(data, y, x, &options)
 }
 
@@ -108,11 +119,14 @@ fn fit_logit(
 ///     Estimation options.
 #[pyfunction]
 fn fit_probit(
-    data: PyDataFrame,
-    y: String,
-    x: Vec<String>,
+    data: &Bound<'_, PyAny>,
+    y: &Bound<'_, PyAny>,
+    x: &Bound<'_, PyAny>,
     options: ProbitOptions,
 ) -> PyResult<ProbitResult> {
+    let data = extract_dataframe(data, "data")?;
+    let y = extract_column_name(y, "y")?;
+    let x = extract_column_list(x, "x")?;
     nonlinear::probit::fit(data, y, x, &options)
 }
 
@@ -131,11 +145,14 @@ fn fit_probit(
 ///     Estimation options.
 #[pyfunction]
 fn fit_tobit(
-    data: PyDataFrame,
-    y: String,
-    x: Vec<String>,
+    data: &Bound<'_, PyAny>,
+    y: &Bound<'_, PyAny>,
+    x: &Bound<'_, PyAny>,
     options: TobitOptions,
 ) -> PyResult<TobitResult> {
+    let data = extract_dataframe(data, "data")?;
+    let y = extract_column_name(y, "y")?;
+    let x = extract_column_list(x, "x")?;
     nonlinear::tobit::fit(data, y, x, &options)
 }
 
@@ -155,17 +172,21 @@ fn fit_tobit(
 /// instruments : list[str]
 ///     Column names of the excluded instruments (must not overlap with `x_exog`).
 /// options : IVOptions
-///     Estimation options. `options.method` selects "2sls" (the only method currently
-///     implemented) or "gmm" (not yet implemented, raises `ValidationError`).
+///     Estimation options. `options.estimator` selects "2sls" (default) or "gmm".
 #[pyfunction]
 fn fit_iv(
-    data: PyDataFrame,
-    y: String,
-    x_exog: Vec<String>,
-    x_endog: Vec<String>,
-    instruments: Vec<String>,
+    data: &Bound<'_, PyAny>,
+    y: &Bound<'_, PyAny>,
+    x_exog: &Bound<'_, PyAny>,
+    x_endog: &Bound<'_, PyAny>,
+    instruments: &Bound<'_, PyAny>,
     options: IVOptions,
 ) -> PyResult<IVResult> {
+    let data = extract_dataframe(data, "data")?;
+    let y = extract_column_name(y, "y")?;
+    let x_exog = extract_column_list(x_exog, "x_exog")?;
+    let x_endog = extract_column_list(x_endog, "x_endog")?;
+    let instruments = extract_column_list(instruments, "instruments")?;
     iv::common::fit(data, y, x_exog, x_endog, instruments, &options)
 }
 
@@ -187,12 +208,16 @@ fn fit_iv(
 ///     Estimation options.
 #[pyfunction]
 fn fit_fe(
-    data: PyDataFrame,
-    y: String,
-    x: Vec<String>,
-    entity: String,
+    data: &Bound<'_, PyAny>,
+    y: &Bound<'_, PyAny>,
+    x: &Bound<'_, PyAny>,
+    entity: &Bound<'_, PyAny>,
     options: FEOptions,
 ) -> PyResult<FEResult> {
+    let data = extract_dataframe(data, "data")?;
+    let y = extract_column_name(y, "y")?;
+    let x = extract_column_list(x, "x")?;
+    let entity = extract_column_name(entity, "entity")?;
     panel::fe::fit(data, y, x, entity, &options)
 }
 
@@ -214,12 +239,16 @@ fn fit_fe(
 ///     Estimation options.
 #[pyfunction]
 fn fit_re(
-    data: PyDataFrame,
-    y: String,
-    x: Vec<String>,
-    entity: String,
+    data: &Bound<'_, PyAny>,
+    y: &Bound<'_, PyAny>,
+    x: &Bound<'_, PyAny>,
+    entity: &Bound<'_, PyAny>,
     options: REOptions,
 ) -> PyResult<REResult> {
+    let data = extract_dataframe(data, "data")?;
+    let y = extract_column_name(y, "y")?;
+    let x = extract_column_list(x, "x")?;
+    let entity = extract_column_name(entity, "entity")?;
     panel::re::fit(data, y, x, entity, &options)
 }
 

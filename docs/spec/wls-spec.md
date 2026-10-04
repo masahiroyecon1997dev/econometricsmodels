@@ -12,11 +12,11 @@ WLS（Weighted Least Squares）の確定済み仕様。`engine/src/linear/wls.rs
 `OlsInput::from_columns_weighted` + 既存`OlsEstimator::fit`（engine、無変更で再利用）。
 
 - `weight: str`は`y`/`x`と同格の**必須のトップレベル引数**（`WLSOptions`側には置かない）。
-  理由: `cluster_col`/`time_col`は`cov_type`に応じた条件付き・デフォルトありの「推定方法の設定」
+  理由: `cluster`/`hac_time`は`cov_type`に応じた条件付き・デフォルトありの「推定方法の設定」
   だが、`weight`はモデルそのものを規定する必須データであり、性質が異なる。この分類はFE
   （`entity_id`）・IV（`instruments`）等、今後の必須データ列にも適用する。
-- 専用の`WLSOptions`型を新設し（Issue #308、2026-09-12）、`OLSOptions`と完全に同一のフィールド
-  構成（`cov_type`/`include_intercept`/`confidence_level`/`cluster_col`/`hac_lags`/`time_col`、
+- 専用の`WLSOptions`型を新設し（2026-09-12）、`OLSOptions`と完全に同一のフィールド
+  構成（`cov_type`/`include_intercept`/`confidence_level`/`cluster`/`hac_lags`/`hac_time`、
   意味論もOLSと完全に同じ）を持つ独立したpyclassとして実装する。当初は専用型を新設せず
   `OLSOptions`をそのまま再利用していたが、`WLSResult`が元から独立型だったのと非対称だった
   ことと、将来WLS固有のオプションが必要になった際に`OLSOptions`/OLS利用者へ影響を与えずに
@@ -27,14 +27,13 @@ WLS（Weighted Least Squares）の確定済み仕様。`engine/src/linear/wls.rs
 - 重みはanalytic weight（分散の逆数に比例、正規化不要）。frequency weight/probability weightは
   対象外。
 - **重みの検証**: 0以下（0を含む）・NaN・無限大は常にエラー（`ValidationError`）とし、該当観測を
-  自動的に落とすことはしない（OLSの欠損値ポリシーと同じ考え方、[`ols-spec.md`](./ols-spec.md)
-  「API引数」）。NaN/Infは既存の`column_extraction::extract_f64_column`が`weight`列にも適用される
+  自動的に落とすことはしない（欠損値ポリシーと同じ考え方、[`docs/guide/validation.md`](../guide/validation.md)）。NaN/Infは既存の`column_extraction::extract_f64_column`が`weight`列にも適用される
   ことで検出されるため、追加実装が必要なのは0以下の値の検証のみ。ゼロ重みの許容（観測除外の手段
   としての活用）は将来の別issue。
 - `weight`は`y`と重複してはならない（`weight == y`はエラー）。`y`を独立変数としても使うのと
   同型の致命的な問題のため。一方`x.contains(weight)`は許容する（重みに使った列を説明変数
   としても含める実務上の利用例があるため、例: 人口規模で重み付けしつつ人口規模自体を
-  説明変数として含める。Issue #277）。`include_intercept=True`時の`"const"`列衝突チェック等、
+  説明変数として含める）。`include_intercept=True`時の`"const"`列衝突チェック等、
   OLSの検証はそのまま踏襲する。
 
 ## 2. 結果構造体
@@ -43,6 +42,8 @@ WLS（Weighted Least Squares）の確定済み仕様。`engine/src/linear/wls.rs
 型としては別に定義する（重み付き残差等、WLS固有フィールドが将来追加される可能性があり、
 `OLSResult`との乖離リスクをOptions（共有）より高く見積もったため）。
 
+- `hac_lags_used`（`cov_type="hac"`のとき実際に使われたラグ数、他は`None`）は`OLSResult`と同じ
+  意味（`ols-spec.md`「結果構造体」参照）。`WlsEstimator`が内部で保持する`OlsEstimator`の値をそのまま使う。
 - `residuals`は**元スケール（unweighted）の残差** `ε_i = y_i - x_i'β̂`を公開する（statsmodelsの
   `.resid`相当）。理由: 残差プロット等の診断用途では元スケールの方が直感的で、OLSの`residuals`
   とも定義が揃う。重み付き残差（`.wresid`相当、`ε̃_i = sqrt(w_i)ε_i`）はPhase1では公開しない。
@@ -83,19 +84,19 @@ statsmodelsの`WLS`も内部的に同じ変換方式`wexog=sqrt(weights)*exog`�
 
 - HC0の$\hat\Psi=\sum_i\tilde\varepsilon_i^2\tilde x_i\tilde x_i^\top=\sum_i w_i^2\hat\varepsilon_i^2 x_i x_i^\top$
   のように、重みが2乗で効く（残差と設計行列の両方に$\sqrt{w_i}$がかかるため）。
-- クラスターのグループ分け自体（`cluster_col`によるグルーピング）は重み変換の影響を受けない
+- クラスターのグループ分け自体（`cluster`によるグルーピング）は重み変換の影響を受けない
   （グループ内で合計する対象が変換後の値になるだけ）。小標本補正・自由度の扱いもOLSと同じ。
-  クラスター数`G <= 傾き係数の数q`は`InsufficientClustersForInference`（`ValidationError`、
-  Issue #289）——`WlsEstimator::fit`は変換後データで`OlsEstimator::fit`に委譲するため、
+  クラスター数`G <= 傾き係数の数q`は`InsufficientClustersForInference`（`ValidationError`）
+  ——`WlsEstimator::fit`は変換後データで`OlsEstimator::fit`に委譲するため、
   この検証もOLS実装（`ols-spec.md`「`G ≤ q`の境界」）をそのまま継承する。
-- HAC・cluster・時間順序（`time_col`）を含め、ラグ選択式・小標本補正・自由度切替はすべて
+- HAC・cluster・時間順序（`hac_time`）を含め、ラグ選択式・小標本補正・自由度切替はすべて
   観測数`n`・クラスター数`G`のみに依存し重みには依存しないため、OLSと同じ式・同じオプションを
   そのまま使う。
 
 ### 3.4 適合度統計量（OLSと異なり要注意）
 
 `f_statistic`・`f_p_value`・係数・標準誤差・t値・p値・信頼区間は変換後データへの代入のままで
-正しい。一方、**`r_squared`・`r_squared_adj`・`log_likelihood`（→`aic`/`bic`）は変換後データに
+正しい。一方、**`r_squared`・`adj_r_squared`・`log_likelihood`（→`aic`/`bic`）は変換後データに
 OLSの計算式をそのまま適用するだけでは誤りになる**（statsmodelsとのクロスチェックで、R²相対誤差
 0.2〜1%程度、対数尤度に加法的なずれが実際に発生することを確認済み）。
 
@@ -121,7 +122,7 @@ $$
 `weighted_fit_statistics`関数を`WlsEstimator`に持たせている（`residuals`と同じ「WLS固有の後処理を
 `WlsEstimator`層に置く」パターン）。
 
-### 3.5 `predict()`（Issue #132）
+### 3.5 `predict()`
 
 `WLSResults.predict(new_data: pl.DataFrame | None = None) -> list[dict[str, float]]`。
 OLSの`predict()`（`ols-spec.md`「predict()」）と完全に同じ設計・シグネチャを適用する。
@@ -130,7 +131,7 @@ OLSの`predict()`（`ols-spec.md`「predict()」）と完全に同じ設計・�
   存在しない: 予測値は常に$\hat y_i = x_i'\hat\beta$（元スケール）であり、これは`residuals`
   （`ε_i = y_i - x_i'\hat\beta$、上記「結果構造体」参照）と対をなす値そのもの。`new_data=None`
   （学習データ）でも`new_data`指定時（新規データ、out-of-sample）でも同じ式を使うため、
-  Issue #132が挙げていた「学習データに対する予測値は変換後（重み付き）データではなく元スケールを
+  当初挙げていた「学習データに対する予測値は変換後（重み付き）データではなく元スケールを
   返すべきか」という論点は、実装してみると「そもそも重み付きの版という選択肢が存在しない」
   ことが分かり解消した。
 - **実装**: `WlsEstimator`に`fitted_values`フィールド（`residuals`と同じ`fit()`時点で計算する
@@ -139,9 +140,9 @@ OLSの`predict()`（`ols-spec.md`「predict()」）と完全に同じ設計・�
   純粋関数、係数と設計行列だけから予測値を計算し重みの概念を持たない）をそのまま再利用する
   （`WlsEstimator`が内部で`OlsEstimator`をラップする設計のため、この関数はWLS/OLSのどちらで
   推定した係数にも同じように使える）。
-- 戻り値のキー名は`"predicted"`（OLSと統一、Issue #309）。
+- 戻り値のキー名は`"predicted"`（OLSと統一）。
 
-### 3.6 `augment()`（Issue #295）
+### 3.6 `augment()`
 
 `WLSResults.augment(new_data: pl.DataFrame | None = None) -> pl.DataFrame`。
 OLSの`augment()`（`ols-spec.md`「augment()」）と完全に同じ設計・シグネチャを適用する。
@@ -151,8 +152,8 @@ OLSの`augment()`（`ols-spec.md`「augment()」）と完全に同じ設計・�
 
 ### 3.7 テスト
 
-- 許容誤差: classical/HC0-3/clusterはOLSと同じ`RTOL_STRICT=1e-8`（Rとの実測でほぼ機械精度）。
-  **HACのみOLSより緩い`RTOL_HAC=5e-2`**（OLSは1e-2。実測最大相対誤差約4.3%、重み付けによる
+- 許容誤差: classical/HC0-3/clusterはOLSと同じ`rtol_strict=1e-8`（`tests/_tolerances.py`の`wls_crosscheck`）（Rとの実測でほぼ機械精度）。
+  **HACのみOLSより緩い`rtol_hac=5e-2`**（OLSは1e-2。実測最大相対誤差約4.3%、重み付けによる
   小標本補正の慣習差の増幅が原因と推測、未調査）。
 - 実データセット: `401ksubs`（`fsize==1`の単身世帯サブサンプル、n=2017）、Wooldridge Example
   8.5・8.6と同じ変数構成`nettfa ~ inc + incsq + age + agesq + male + e401k`、重みは`1/inc`
@@ -163,4 +164,4 @@ OLSの`augment()`（`ols-spec.md`「augment()」）と完全に同じ設計・�
   WLS用の追加実装は不要だった。
 - `tests/linear/` の4ファイル分担（`test_wls_api.py`／`test_wls_validation.py`／
   `test_wls_reference.py`〔statsmodels主リファレンス〕／`test_wls_crosscheck.py`〔Rクロスチェック〕）
-  は OLS と同じ（`refactoring-candidates-2.md`項目68）。
+  は OLS と同じ。

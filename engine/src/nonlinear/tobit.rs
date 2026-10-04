@@ -112,9 +112,9 @@ use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::nonlinear::common::{
     CovType, MarginalEffects, MarginalEffectsAt, MleError, MleFitOptions, SandwichVariant,
     SeparationNormCheck, U_CLAMP, checked_design_matrix_qr, clamped_pdf_cdf, cluster_cov_params,
-    column_means, column_medians, observed_information_cov_params, opg_cov_params,
+    column_means, column_medians, compensated_sum, observed_information_cov_params, opg_cov_params,
     predict_new_data, run_solver, sandwich_cov_params, validate_cluster_cov_type,
-    validate_confidence_level, validate_max_iter, validate_sufficient_observations, validate_tol,
+    validate_confidence_level, validate_mle_options, validate_sufficient_observations,
 };
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::prelude::{Solve, SolveLstsq};
@@ -482,9 +482,8 @@ impl CostFunction for TobitProblem {
     fn cost(&self, param: &Self::Param) -> Result<Self::Output, OptimizerError> {
         let n = self.x.nrows();
         let normal = Normal::standard();
-        let ll: f64 = (0..n)
-            .map(|i| self.contribution(i, param, &normal).log_lik)
-            .sum();
+        // 補償和（`compensated_sum`のdocコメント参照。大標本のNewtonのコスト比較のため）。
+        let ll = compensated_sum((0..n).map(|i| self.contribution(i, param, &normal).log_lik));
         Ok(-ll)
     }
 }
@@ -804,9 +803,8 @@ fn log_likelihood(
 ) -> f64 {
     let problem = TobitProblem::from_standardized(x.clone(), y.clone(), lower, upper);
     let normal = Normal::standard();
-    (0..x.nrows())
-        .map(|i| problem.contribution(i, params, &normal).log_lik)
-        .sum()
+    // `TobitProblem::cost`と同じ補償和にし、最適化で評価した値と適合度統計量の値を揃える。
+    compensated_sum((0..x.nrows()).map(|i| problem.contribution(i, params, &normal).log_lik))
 }
 
 /// モデル全体の有意性検定（切片以外の係数`β`が同時にゼロという帰無仮説のWald検定）。
@@ -863,7 +861,7 @@ fn wald_chi2_test(
 
     let chi2 = ChiSquared::new(df_model as f64)
         .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
-    let wald_p_value = 1.0 - chi2.cdf(wald_statistic);
+    let wald_p_value = chi2.sf(wald_statistic);
 
     Ok((wald_statistic, wald_p_value))
 }
@@ -1088,7 +1086,7 @@ fn marginal_effects_from_tobit_w_s(
     let mut out_param_names = Vec::with_capacity(k - k_constant);
     let mut out_dydx = Vec::with_capacity(k - k_constant);
     let mut std_errors = Vec::with_capacity(k - k_constant);
-    let mut z_stats = Vec::with_capacity(k - k_constant);
+    let mut test_stats = Vec::with_capacity(k - k_constant);
     let mut p_values = Vec::with_capacity(k - k_constant);
     let mut conf_lower = Vec::with_capacity(k - k_constant);
     let mut conf_upper = Vec::with_capacity(k - k_constant);
@@ -1107,7 +1105,7 @@ fn marginal_effects_from_tobit_w_s(
         out_param_names.push(param_names[j].clone());
         out_dydx.push(dydx[j]);
         std_errors.push(se);
-        z_stats.push(stat.stat);
+        test_stats.push(stat.stat);
         p_values.push(stat.p_value);
         conf_lower.push(stat.conf_low);
         conf_upper.push(stat.conf_high);
@@ -1117,7 +1115,7 @@ fn marginal_effects_from_tobit_w_s(
         out_param_names,
         out_dydx,
         std_errors,
-        z_stats,
+        test_stats,
         p_values,
         conf_lower,
         conf_upper,
@@ -1250,7 +1248,7 @@ pub struct TobitEstimator {
     /// `cov_params`の対角成分の平方根
     std_errors: Vec<f64>,
     /// z統計量（`k+1`）= `coef / std_errors`（`β∪{σ}`それぞれについて）
-    z_stats: Vec<f64>,
+    test_stats: Vec<f64>,
     /// 両側p値（`k+1`）。標準正規分布に基づく
     p_values: Vec<f64>,
     /// 信頼区間の下限（`k+1`）
@@ -1281,7 +1279,7 @@ pub struct TobitEstimator {
 }
 
 impl TobitEstimator {
-    /// `method`（Newton-Raphson/BFGS/L-BFGS）で負の対数尤度を最小化し、Tobitの係数`β`・
+    /// `solver`（Newton-Raphson/BFGS/L-BFGS）で負の対数尤度を最小化し、Tobitの係数`β`・
     /// 誤差項の標準偏差`σ`を推定する。
     ///
     /// 内部最適化パラメータは`(β, s=logσ)`という`k+1`次元ベクトル（モジュール冒頭の
@@ -1310,6 +1308,10 @@ impl TobitEstimator {
     /// （`validate_sufficient_observations`のdocコメント参照）。
     /// Logit/Probitの`validate_has_regressors`（`k==0`検証）はTobitでは呼ばない
     /// （`logσ`が常に存在するため対応するケースが生じない、同関数のdocコメント参照）。
+    /// 推定オプションの検証は3手法共通の`validate_mle_options`を使い、Logit/Probit用の
+    /// `validate_fit_preconditions`は呼ばない（手法ごとの違いは同関数のdocコメント参照）。
+    /// 打ち切り境界の検証（`MleError::InvalidCensoringBounds`/`YOutOfCensoringBounds`）は
+    /// `fit()`ではなく`TobitInput::from_columns`で完了済み（モジュール冒頭のdocコメント参照）。
     ///
     /// ## `σ`のSE（デルタ法）
     ///
@@ -1337,7 +1339,7 @@ impl TobitEstimator {
     /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
     ///   `CommonError::InsufficientClustersForInference`（`rank(Ŝ) ≤ g - 1`のため全体
     ///   Wald検定の`q×q`部分行列が構造的に特異。従来は`wald_chi2_test`内の
-    ///   `ComputationFailed`だったものを`fit()`冒頭のバリデーションへ前倒し、#287）
+    ///   `ComputationFailed`だったものを`fit()`冒頭のバリデーションへ前倒し）
     /// - OLS初期値計算時に`x`が特異（完全な多重共線性等）: `MleError::SingularDesignMatrix`
     ///   （`ols_initial_params`参照）
     /// - `raise_on_non_convergence=true`かつ`max_iter`回で未収束: `MleError::NonConvergence`
@@ -1350,7 +1352,7 @@ impl TobitEstimator {
     ///   スキップし`wald_statistic`/`wald_p_value`はNaNになる）
     pub fn fit(input: TobitInput, options: MleFitOptions) -> Result<Self, MleError> {
         let MleFitOptions {
-            method,
+            solver,
             max_iter,
             tol,
             raise_on_non_convergence,
@@ -1361,9 +1363,7 @@ impl TobitEstimator {
         // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
         crate::parallelism::ensure_serial();
 
-        validate_confidence_level(confidence_level)?;
-        validate_max_iter(max_iter)?;
-        validate_tol(tol)?;
+        validate_mle_options(confidence_level, max_iter, tol)?;
 
         let n = input.nobs();
         let k = input.k();
@@ -1394,7 +1394,7 @@ impl TobitEstimator {
 
         let output = run_solver(
             problem,
-            method,
+            solver,
             initial_params,
             max_iter as u64,
             tol,
@@ -1480,7 +1480,7 @@ impl TobitEstimator {
         let z_crit = inference::critical_value(&normal, confidence_level);
 
         let mut std_errors = vec![0.0; k + 1];
-        let mut z_stats = vec![0.0; k + 1];
+        let mut test_stats = vec![0.0; k + 1];
         let mut p_values = vec![0.0; k + 1];
         let mut conf_lower = vec![0.0; k + 1];
         let mut conf_upper = vec![0.0; k + 1];
@@ -1491,7 +1491,7 @@ impl TobitEstimator {
             let stat = inference::compute_inference_stat(&normal, coef, se, z_crit);
 
             std_errors[j] = se;
-            z_stats[j] = stat.stat;
+            test_stats[j] = stat.stat;
             p_values[j] = stat.p_value;
             conf_lower[j] = stat.conf_low;
             conf_upper[j] = stat.conf_high;
@@ -1525,7 +1525,7 @@ impl TobitEstimator {
             sigma,
             cov_params,
             std_errors,
-            z_stats,
+            test_stats,
             p_values,
             conf_lower,
             conf_upper,
@@ -1568,8 +1568,13 @@ impl TobitEstimator {
     }
 
     /// z統計量（`k+1`）
-    pub fn z_stats(&self) -> &[f64] {
-        &self.z_stats
+    pub fn test_stats(&self) -> &[f64] {
+        &self.test_stats
+    }
+
+    /// `test_stats`の従う分布（標準正規分布、自由度なし）。
+    pub fn stat_dist(&self) -> inference::StatDist {
+        inference::StatDist::Normal
     }
 
     /// 両側p値（`k+1`）
@@ -1625,6 +1630,11 @@ impl TobitEstimator {
     /// Wald検定のp値（`df_model==0`のときNaN）
     pub fn wald_p_value(&self) -> f64 {
         self.wald_p_value
+    }
+
+    /// Wald検定の自由度（χ²、`df_model`）。`df_model==0`でNaNのときは`None`。
+    pub fn wald_df(&self) -> Option<usize> {
+        (self.df_model() > 0).then_some(self.df_model())
     }
 
     /// 収束したかどうか
@@ -1715,7 +1725,7 @@ impl TobitEstimator {
     ///
     /// 新規データでの予測（out-of-sample）は`predict_new_data`。デフォルト
     /// （`target`省略時の`E[y|x]`、`docs/spec/nonlinear-common.md`
-    /// 6章）はPython層（engine_pybind）の責務（`Method`/`CovType`等と同じ設計、
+    /// 6章）はPython層（engine_pybind）の責務（`SolverType`/`CovType`等と同じ設計、
     /// `.claude/rules/rust-style.md`参照）。
     pub fn predict(&self, target: MarginalEffectsTarget) -> Vec<f64> {
         let x = self.input.x();
@@ -1842,8 +1852,19 @@ impl TobitEstimator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nonlinear::common::Method;
+    use crate::nonlinear::common::SolverType;
     use statrs::distribution::{Continuous, ContinuousCDF};
+
+    #[test]
+    fn wald_chi2_test_keeps_precision_in_the_far_tail() {
+        // `1.0 - cdf`では裾でp値が0.0に潰れる。傾き3個（`β=(10, 10, 10)`、`V=I`）で
+        // wald=300。R: `pchisq(300, 3, lower.tail = FALSE)` = 9.94875834632771e-65。
+        let params = [0.0, 10.0, 10.0, 10.0];
+        let cov = Mat::from_fn(4, 4, |i, j| if i == j { 1.0 } else { 0.0 });
+        let (wald, p) = wald_chi2_test(&params, &cov, 1, 3).unwrap();
+        assert!((wald - 300.0).abs() < 1e-9);
+        assert!((p / 9.948_758_346_327_71e-65 - 1.0).abs() < 1e-8);
+    }
 
     #[test]
     fn from_columns_with_intercept_prepends_const_column() {
@@ -2448,7 +2469,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2481,11 +2502,11 @@ mod tests {
     /// 3.1〜3.3節の一般形の特殊ケース）。
     /// `σ`のデルタ法変換（ヤコビアン`diag(1,σ)`）を適用すると、この対角性はそのまま
     /// 保たれ`Var(σ̂)≈σ̂²Var(ŝ)=σ̂²/(2n)`・`Cov(β̂,σ̂)≈σ̂Cov(β̂,ŝ)=0`になる。
-    /// Logitの`fit_computes_std_errors_z_stats_p_values_and_ci_matching_closed_form_for_
+    /// Logitの`fit_computes_std_errors_test_stats_p_values_and_ci_matching_closed_form_for_
     /// intercept_only_model`と同じ設計（本体実装と同じ式を繰り返すのではなく、独立に
     /// 導出した閉じた形の解でSE・z値・p値・信頼区間を検算する）。
     #[test]
-    fn fit_computes_std_errors_z_stats_p_values_and_ci_matching_closed_form_for_intercept_only_uncensored_model()
+    fn fit_computes_std_errors_test_stats_p_values_and_ci_matching_closed_form_for_intercept_only_uncensored_model()
      {
         let y = vec![1.0, 2.0, 3.0, 4.0, 10.0];
         let input = intercept_only_uncensored_input(&y);
@@ -2501,7 +2522,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2531,7 +2552,7 @@ mod tests {
 
         let expected_z_beta = estimator.params()[0] / expected_se_beta;
         let expected_p_beta = 2.0 * (1.0 - normal.cdf(expected_z_beta.abs()));
-        assert!((estimator.z_stats()[0] - expected_z_beta).abs() < 1e-6);
+        assert!((estimator.test_stats()[0] - expected_z_beta).abs() < 1e-6);
         assert!((estimator.p_values()[0] - expected_p_beta).abs() < 1e-6);
         assert!(
             (estimator.conf_lower()[0] - (estimator.params()[0] - z_crit * expected_se_beta)).abs()
@@ -2544,7 +2565,7 @@ mod tests {
 
         let expected_z_sigma = estimator.sigma() / expected_se_sigma;
         let expected_p_sigma = 2.0 * (1.0 - normal.cdf(expected_z_sigma.abs()));
-        assert!((estimator.z_stats()[1] - expected_z_sigma).abs() < 1e-6);
+        assert!((estimator.test_stats()[1] - expected_z_sigma).abs() < 1e-6);
         assert!((estimator.p_values()[1] - expected_p_sigma).abs() < 1e-6);
         assert!(
             (estimator.conf_lower()[1] - (estimator.sigma() - z_crit * expected_se_sigma)).abs()
@@ -2580,7 +2601,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2608,7 +2629,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             multivariate_censored_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2647,7 +2668,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2658,7 +2679,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(estimator.df_model(), 1);
-        let z_slope = estimator.z_stats()[1];
+        let z_slope = estimator.test_stats()[1];
         assert!((estimator.wald_statistic() - z_slope.powi(2)).abs() < 1e-9);
 
         let chi2 = ChiSquared::new(1.0).unwrap();
@@ -2695,7 +2716,7 @@ mod tests {
         let result = TobitEstimator::fit(
             multivariate_censored_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2723,7 +2744,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2756,10 +2777,11 @@ mod tests {
         for (j, &coef) in coefs.iter().enumerate().take(k_plus_1) {
             let se = estimator.std_errors()[j];
             assert!((se - estimator.cov_params().get(j, j).sqrt()).abs() < 1e-9);
-            assert!((estimator.z_stats()[j] - coef / se).abs() < 1e-9);
+            assert!((estimator.test_stats()[j] - coef / se).abs() < 1e-9);
             assert!(
-                (estimator.p_values()[j] - 2.0 * (1.0 - normal.cdf(estimator.z_stats()[j].abs())))
-                    .abs()
+                (estimator.p_values()[j]
+                    - 2.0 * (1.0 - normal.cdf(estimator.test_stats()[j].abs())))
+                .abs()
                     < 1e-9
             );
             assert!((estimator.conf_lower()[j] - (coef - z_crit * se)).abs() < 1e-9);
@@ -2783,7 +2805,7 @@ mod tests {
         let result = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 1,
                 tol: 1e-12,
                 raise_on_non_convergence: false,
@@ -2801,7 +2823,7 @@ mod tests {
     /// `SingularHessian`エラー伝播を検証しているが、`sandwich_cov_params`（`Hc0`/`Hc1`）も
     /// 内部で同じHessianの逆行列計算を行うため、同じ打ち切り点で同じエラーが伝播する
     /// はず。Logit/Probitの`fit_returns_singular_design_matrix_error_for_perfectly_
-    /// collinear_design_matrix`（#279で`method`×`cov_type`を1テストに集約）と同じ
+    /// collinear_design_matrix`（`solver`×`cov_type`を1テストに集約）と同じ
     /// 「cov_type分岐ごとのエラー伝播`?`」のギャップパターンを
     /// Tobitでも確認する（`cargo llvm-cov`で発覚）。
     #[test]
@@ -2811,7 +2833,7 @@ mod tests {
             let result = TobitEstimator::fit(
                 censored_regression_input(),
                 MleFitOptions {
-                    method: Method::Newton,
+                    solver: SolverType::Newton,
                     max_iter: 1,
                     tol: 1e-12,
                     raise_on_non_convergence: false,
@@ -2844,7 +2866,7 @@ mod tests {
         let result = TobitEstimator::fit(
             censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 1,
                 tol: 1e-12,
                 raise_on_non_convergence: false,
@@ -2899,7 +2921,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2936,7 +2958,7 @@ mod tests {
         let result = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2958,7 +2980,7 @@ mod tests {
         let result = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 0,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2978,7 +3000,7 @@ mod tests {
         let result = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 0.0,
                 raise_on_non_convergence: true,
@@ -2997,7 +3019,7 @@ mod tests {
         let result = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -3053,7 +3075,7 @@ mod tests {
         let result = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -3099,7 +3121,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -3125,7 +3147,7 @@ mod tests {
         let newton = TobitEstimator::fit(
             censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -3135,11 +3157,11 @@ mod tests {
         )
         .unwrap();
 
-        for method in [Method::Bfgs, Method::Lbfgs] {
+        for solver in [SolverType::Bfgs, SolverType::Lbfgs] {
             let estimator = TobitEstimator::fit(
                 censored_regression_input(),
                 MleFitOptions {
-                    method,
+                    solver,
                     max_iter: 200,
                     tol: 1e-8,
                     raise_on_non_convergence: true,
@@ -3148,14 +3170,14 @@ mod tests {
                 },
             )
             .unwrap();
-            assert!(estimator.converged(), "method={:?}", method);
+            assert!(estimator.converged(), "solver={:?}", solver);
             for (a, b) in estimator.params().iter().zip(newton.params()) {
-                assert!((a - b).abs() < 1e-3, "method={:?}, a={a}, b={b}", method);
+                assert!((a - b).abs() < 1e-3, "solver={:?}, a={a}, b={b}", solver);
             }
             assert!(
                 (estimator.sigma() - newton.sigma()).abs() < 1e-3,
-                "method={:?}, sigma={}, newton_sigma={}",
-                method,
+                "solver={:?}, sigma={}, newton_sigma={}",
+                solver,
                 estimator.sigma(),
                 newton.sigma()
             );
@@ -3190,7 +3212,7 @@ mod tests {
         let newton = TobitEstimator::fit(
             make_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -3201,11 +3223,11 @@ mod tests {
         .unwrap();
         assert!(newton.converged());
 
-        for method in [Method::Bfgs, Method::Lbfgs] {
+        for solver in [SolverType::Bfgs, SolverType::Lbfgs] {
             let estimator = TobitEstimator::fit(
                 make_input(),
                 MleFitOptions {
-                    method,
+                    solver,
                     max_iter: 200,
                     tol: 1e-8,
                     raise_on_non_convergence: true,
@@ -3214,14 +3236,14 @@ mod tests {
                 },
             )
             .unwrap();
-            assert!(estimator.converged(), "method={:?}", method);
+            assert!(estimator.converged(), "solver={:?}", solver);
             for (a, b) in estimator.params().iter().zip(newton.params()) {
-                assert!((a - b).abs() < 1e-3, "method={:?}, a={a}, b={b}", method);
+                assert!((a - b).abs() < 1e-3, "solver={:?}, a={a}, b={b}", solver);
             }
             assert!(
                 (estimator.sigma() - newton.sigma()).abs() < 1e-3,
-                "method={:?}, sigma={}, newton_sigma={}",
-                method,
+                "solver={:?}, sigma={}, newton_sigma={}",
+                solver,
                 estimator.sigma(),
                 newton.sigma()
             );
@@ -3389,7 +3411,7 @@ mod tests {
             TobitEstimator::fit(
                 make(y, lower),
                 MleFitOptions {
-                    method: Method::Newton,
+                    solver: SolverType::Newton,
                     max_iter: 100,
                     tol: 1e-8,
                     raise_on_non_convergence: true,
@@ -3418,7 +3440,7 @@ mod tests {
         for (b, s) in base.std_errors().iter().zip(scaled.std_errors()) {
             assert!(rtol(s / c, *b), "se: base={b}, scaled/c={}", s / c);
         }
-        for (b, s) in base.z_stats().iter().zip(scaled.z_stats()) {
+        for (b, s) in base.test_stats().iter().zip(scaled.test_stats()) {
             assert!(rtol(*s, *b), "z: base={b}, scaled={s}");
         }
         assert!(
@@ -3474,7 +3496,7 @@ mod tests {
         let est = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -3485,7 +3507,7 @@ mod tests {
         .unwrap();
 
         assert!(est.converged());
-        // 傾きは真値 40 の近傍（打ち切り＋ノイズがあるため緩め）。#286以前は`y`の
+        // 傾きは真値 40 の近傍（打ち切り＋ノイズがあるため緩め）。以前は`y`の
         // 大スケールで`SeparationSuspected`が誤発火し`.unwrap()`がpanicしていた
         // （現在はTobitがこの事後チェックを通らないため）。
         assert!(
@@ -3502,7 +3524,7 @@ mod tests {
         let result = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 1,
                 tol: 1e-12,
                 raise_on_non_convergence: true,
@@ -3522,7 +3544,7 @@ mod tests {
     ///
     /// `fit()`は`run_solver`に`SeparationNormCheck::Disabled`を渡すため、標準化
     /// パラメータノルム基準の(準)完全分離事後チェックを通らない。これを
-    /// `SeparationNormCheck::Enabled`へ戻す回帰が入っても、#286以降の`TobitScaling`が
+    /// `SeparationNormCheck::Enabled`へ戻す回帰が入っても、その後の`TobitScaling`が
     /// 標準化ノルムを閾値以下に保つため`SeparationSuspected`は発火せず——この失敗モードが
     /// `NonConvergence`であること自体を、Tobitの分離の現れ方の正本として固定する
     /// （`SeparationSuspected`と`NonConvergence`はどちらも`ComputationError`にマップ
@@ -3560,7 +3582,7 @@ mod tests {
         let result = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -3588,7 +3610,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 3,
                 tol: 1e-12,
                 raise_on_non_convergence: false,
@@ -3692,7 +3714,7 @@ mod tests {
         let classical = TobitEstimator::fit(
             multivariate_censored_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -3724,7 +3746,7 @@ mod tests {
             let estimator = TobitEstimator::fit(
                 multivariate_censored_input(),
                 MleFitOptions {
-                    method: Method::Newton,
+                    solver: SolverType::Newton,
                     max_iter: 100,
                     tol: 1e-8,
                     raise_on_non_convergence: true,
@@ -3737,7 +3759,7 @@ mod tests {
         }
     }
 
-    /// `method`（`bfgs`/`lbfgs`）と`cov_type`（`Opg`/`Hc0`/`Hc1`）の組み合わせが正しく
+    /// `solver`（`bfgs`/`lbfgs`）と`cov_type`（`Opg`/`Hc0`/`Hc1`）の組み合わせが正しく
     /// 機能することを確認する（Logitの`fit_non_classical_cov_types_work_with_bfgs_and_
     /// lbfgs`と同じ理由。`scores_std`の評価は収束点のパラメータにのみ依存し最適化
     /// アルゴリズムの種類に依存しない設計のため、`newton`で計算した`cov_params`
@@ -3776,7 +3798,7 @@ mod tests {
             let newton = TobitEstimator::fit(
                 multivariate_censored_input(),
                 MleFitOptions {
-                    method: Method::Newton,
+                    solver: SolverType::Newton,
                     max_iter: 100,
                     tol: 1e-8,
                     raise_on_non_convergence: true,
@@ -3786,11 +3808,11 @@ mod tests {
             )
             .unwrap();
 
-            for method in [Method::Bfgs, Method::Lbfgs] {
+            for solver in [SolverType::Bfgs, SolverType::Lbfgs] {
                 let estimator = TobitEstimator::fit(
                     multivariate_censored_input(),
                     MleFitOptions {
-                        method,
+                        solver,
                         max_iter: 300,
                         tol: 1e-8,
                         raise_on_non_convergence: true,
@@ -3799,7 +3821,7 @@ mod tests {
                     },
                 )
                 .unwrap();
-                assert!(estimator.converged(), "cov_type={cov_type:?}, {method:?}");
+                assert!(estimator.converged(), "cov_type={cov_type:?}, {solver:?}");
                 assert_cov_params_close(
                     estimator.cov_params(),
                     newton.cov_params(),
@@ -3838,7 +3860,7 @@ mod tests {
         let classical = TobitEstimator::fit(
             censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -3857,7 +3879,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -3895,7 +3917,7 @@ mod tests {
         let classical = TobitEstimator::fit(
             censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -3914,7 +3936,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -3933,7 +3955,7 @@ mod tests {
         let result = TobitEstimator::fit(
             multivariate_censored_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -3953,7 +3975,7 @@ mod tests {
         let result = TobitEstimator::fit(
             multivariate_censored_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -4004,7 +4026,7 @@ mod tests {
         let result = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -4132,7 +4154,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             intercept_only_uncensored_input(&[1.0, 2.0, 3.0, 4.0]),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -4150,7 +4172,7 @@ mod tests {
             )
             .unwrap();
         assert!(effects.param_names().is_empty());
-        assert!(effects.dydx().is_empty());
+        assert!(effects.effect().is_empty());
     }
 
     #[test]
@@ -4158,7 +4180,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -4191,7 +4213,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             multivariate_censored_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -4211,7 +4233,7 @@ mod tests {
                 .unwrap();
             assert_eq!(effects.param_names(), ["x1".to_string(), "x2".to_string()]);
             for (idx, j) in (1..3).enumerate() {
-                assert!((effects.dydx()[idx] - estimator.params()[j]).abs() < 1e-12);
+                assert!((effects.effect()[idx] - estimator.params()[j]).abs() < 1e-12);
                 assert!(
                     (effects.std_errors()[idx] - estimator.std_errors()[j]).abs() < 1e-9,
                     "at={at:?}, idx={idx}, actual={}, expected={}",
@@ -4235,7 +4257,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -4259,7 +4281,7 @@ mod tests {
             .unwrap();
         assert_eq!(effects.param_names(), ["x1".to_string()]);
 
-        // dydxの独立再計算: 各観測でE[y|x]を数値微分してx1の限界効果を求め、平均する
+        // effectの独立再計算: 各観測でE[y|x]を数値微分してx1の限界効果を求め、平均する
         // （`target_w_and_s`の`P(uncensored)*βⱼ`という閉形式は経由しない）。
         let h = 1e-6;
         let dydx_at_row = |params: &[f64], sigma: f64, i: usize| -> f64 {
@@ -4275,9 +4297,9 @@ mod tests {
         let params = estimator.params();
         let sigma = estimator.sigma();
         assert!(
-            (effects.dydx()[0] - dydx_ame(params, sigma)).abs() < 1e-6,
+            (effects.effect()[0] - dydx_ame(params, sigma)).abs() < 1e-6,
             "actual={}, expected={}",
-            effects.dydx()[0],
+            effects.effect()[0],
             dydx_ame(params, sigma)
         );
 
@@ -4293,9 +4315,9 @@ mod tests {
             .sum::<f64>()
             / (n as f64);
         assert!(
-            (effects.dydx()[0] - expected_dydx_exact).abs() < 1e-9,
+            (effects.effect()[0] - expected_dydx_exact).abs() < 1e-9,
             "actual={}, expected={expected_dydx_exact}",
-            effects.dydx()[0]
+            effects.effect()[0]
         );
 
         // 標準誤差の独立検証: `dydx_ame`をfit済み`(β,σ)`の周りで数値微分してヤコビアン行を
@@ -4333,7 +4355,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -4365,8 +4387,8 @@ mod tests {
             )
             .unwrap();
 
-        assert!((overall.dydx()[0] - at_mean.dydx()[0]).abs() > 1e-9);
-        assert!((at_mean.dydx()[0] - at_median.dydx()[0]).abs() < 1e-12);
+        assert!((overall.effect()[0] - at_mean.effect()[0]).abs() > 1e-9);
+        assert!((at_mean.effect()[0] - at_median.effect()[0]).abs() < 1e-12);
 
         // x1の平均・中央値がともに4.5（[1..8]の対称なデータのため）であることを利用し、
         // `expected_observed_closed_form`から独立に再計算したdydxと突き合わせる。
@@ -4379,11 +4401,11 @@ mod tests {
         let expected_dydx = (expected_observed_closed_form(mu(4.5 + h), sigma, lower, upper)
             - expected_observed_closed_form(mu(4.5 - h), sigma, lower, upper))
             / (2.0 * h);
-        assert!((at_mean.dydx()[0] - expected_dydx).abs() < 1e-6);
+        assert!((at_mean.effect()[0] - expected_dydx).abs() < 1e-6);
     }
 
     /// `target="E[y|x]"`が右打ち切りのみのデータでも正しく計算できることを、
-    /// `expected_observed_closed_form`（右打ち切り分岐）で独立に再計算した`dydx`と
+    /// `expected_observed_closed_form`（右打ち切り分岐）で独立に再計算した`effect`と
     /// 突き合わせて検証する。
     #[test]
     fn fit_marginal_effects_expected_observed_matches_independent_recomputation_for_right_only_censoring()
@@ -4391,7 +4413,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             right_censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -4429,14 +4451,14 @@ mod tests {
             / (n as f64);
 
         assert!(
-            (effects.dydx()[0] - expected_dydx).abs() < 1e-6,
+            (effects.effect()[0] - expected_dydx).abs() < 1e-6,
             "actual={}, expected={expected_dydx}",
-            effects.dydx()[0]
+            effects.effect()[0]
         );
     }
 
     /// `target="E[y|x]"`が両側打ち切りのデータでも正しく計算できることを、
-    /// `expected_observed_closed_form`（両側打ち切り分岐）で独立に再計算した`dydx`と
+    /// `expected_observed_closed_form`（両側打ち切り分岐）で独立に再計算した`effect`と
     /// 突き合わせて検証する。
     #[test]
     fn fit_marginal_effects_expected_observed_matches_independent_recomputation_for_two_sided_censoring()
@@ -4444,7 +4466,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             two_sided_censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -4483,15 +4505,15 @@ mod tests {
             / (n as f64);
 
         assert!(
-            (effects.dydx()[0] - expected_dydx).abs() < 1e-6,
+            (effects.effect()[0] - expected_dydx).abs() < 1e-6,
             "actual={}, expected={expected_dydx}",
-            effects.dydx()[0]
+            effects.effect()[0]
         );
     }
 
     /// `target="P(uncensored)"`（左打ち切りのみ）を、`prob_uncensored_closed_form`を
     /// `mu`について数値微分した`dprob_uncensored_dmu_closed_form`×`βⱼ`という
-    /// （`target_w_and_s`の`ProbUncensored`分岐とは独立の）式で再計算し、dydx・標準誤差
+    /// （`target_w_and_s`の`ProbUncensored`分岐とは独立の）式で再計算し、effect・標準誤差
     /// 双方を突き合わせる。
     #[test]
     fn fit_marginal_effects_prob_uncensored_overall_matches_independently_recomputed_dydx_and_delta_method_se()
@@ -4499,7 +4521,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -4534,9 +4556,9 @@ mod tests {
         let params = estimator.params();
         let sigma = estimator.sigma();
         assert!(
-            (effects.dydx()[0] - dydx_ame(params, sigma)).abs() < 1e-9,
+            (effects.effect()[0] - dydx_ame(params, sigma)).abs() < 1e-9,
             "actual={}, expected={}",
-            effects.dydx()[0],
+            effects.effect()[0],
             dydx_ame(params, sigma)
         );
 
@@ -4576,7 +4598,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             right_censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -4609,13 +4631,13 @@ mod tests {
             / (n as f64);
 
         assert!(
-            (effects.dydx()[0] - expected_dydx).abs() < 1e-9,
+            (effects.effect()[0] - expected_dydx).abs() < 1e-9,
             "actual={}, expected={expected_dydx}",
-            effects.dydx()[0]
+            effects.effect()[0]
         );
         // x1の真の係数は正（+2相当）なので、右打ち切りのみでは非打ち切り確率の限界効果は
         // 負になるはず（xが増えるほど上側で打ち切られやすくなるため）。
-        assert!(effects.dydx()[0] < 0.0, "dydx={}", effects.dydx()[0]);
+        assert!(effects.effect()[0] < 0.0, "effect={}", effects.effect()[0]);
     }
 
     /// `target="P(uncensored)"`が両側打ち切りのデータでも正しく計算できることを検証する。
@@ -4625,7 +4647,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             two_sided_censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -4658,9 +4680,9 @@ mod tests {
             / (n as f64);
 
         assert!(
-            (effects.dydx()[0] - expected_dydx).abs() < 1e-9,
+            (effects.effect()[0] - expected_dydx).abs() < 1e-9,
             "actual={}, expected={expected_dydx}",
-            effects.dydx()[0]
+            effects.effect()[0]
         );
     }
 
@@ -4671,7 +4693,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -4702,7 +4724,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -4747,7 +4769,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             right_censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -4784,7 +4806,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             two_sided_censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -4824,7 +4846,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -4882,7 +4904,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             right_censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -4925,7 +4947,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             two_sided_censored_regression_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -5004,7 +5026,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             multivariate_censored_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -5043,7 +5065,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             multivariate_censored_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -5099,7 +5121,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -5139,7 +5161,7 @@ mod tests {
         let estimator = TobitEstimator::fit(
             multivariate_censored_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -5199,7 +5221,7 @@ mod tests {
         let result = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -5237,7 +5259,7 @@ mod tests {
         let result = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -5274,7 +5296,7 @@ mod tests {
         let result = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -5315,7 +5337,7 @@ mod tests {
         let result = TobitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 100,
                 tol: 1e-8,
                 raise_on_non_convergence: false,
@@ -5350,19 +5372,20 @@ mod tests {
     /// 対数尤度の差が定数項（θ非依存のヤコビアン項）のみであることから理論的に導ける
     /// （rust-reviewer確認済み）。
     ///
-    /// ケース生成は左打ち切り（`lower=0.0`固定、`upper`は打ち切りなし）のみを対象にする
-    /// （右打ち切り・両側打ち切りは`benchmark/nonlinear/datasets.py`の`TOBIT_SCENARIOS`
-    /// `right_censoring`/`interval_censoring`の固定フィクスチャで別途カバー済み、
-    /// rust-reviewer確認済み。property-basedテストとしての拡張は将来の検討課題として
-    /// 別途記録する）。`y* = β₀ + Σxⱼβⱼ + σε`（`ε`は標準正規、`u∈(1e-6, 1-1e-6)`の
-    /// 逆CDFでサンプリング）を計算し、`y*<lower`の観測を`lower`で打ち切る。
+    /// ケース生成は左打ち切り（`lower=0`のみ）・右打ち切り（`upper=0`のみ）・両側打ち切り
+    /// （`lower=-1`・`upper=1`）の3通りを`censoring_strategy`でランダムに選ぶ
+    /// （`censored_contribution`の`direction=-1.0`分岐や左右混在のデータセットも通る）。
+    /// `y* = β₀ + Σxⱼβⱼ + σε`（`ε`は標準正規、`u∈(1e-6, 1-1e-6)`の逆CDFでサンプリング）
+    /// を計算し、下限未満・上限超過の観測をそれぞれの境界値で打ち切る。
     ///
     /// 較正値（`n=k+30..=80`, `beta∈[-1,1]`, `sigma∈[0.5,2]`）は`PROPTEST_CASES=5000`
     /// （デフォルト256の約20倍）まで増やしても`NoUncensoredObservations`等による
     /// `prop_assume`棄却が原因の失敗（"too many global rejects"）を起こさないことを
     /// 実測済み（rust-reviewer確認）。
     ///
-    /// プロパティの有効性検証（バグ注入→検出確認→元に戻す）は3件とも実施済み:
+    /// プロパティの有効性検証（バグ注入→検出確認→元に戻す）は当初の3件について実施済み
+    /// （4件目の`negating_y_and_swapping_bounds_negates_coefficients_only`は右打ち切り・
+    /// 両側打ち切りへの拡張と同時に追加し、右打ち切り分岐へのバグ注入で検出を確認した）:
     /// `score_is_near_zero_at_converged_params`は`TobitProblem::gradient`の`grad[j]`
     /// 計算に定数オフセットを注入、`coefficients_and_se_are_invariant_to_column_order`は
     /// `TobitInput::from_columns`の`param_names`を逆順にするバグを注入、
@@ -5412,16 +5435,33 @@ mod tests {
         }
 
         /// 左打ち切りの下限（打ち切りなしのTobitの意味が薄れない程度に、真の`y*`分布の
-        /// 中心付近を狙う。上限は無し）。
+        /// 中心付近を狙う）。右打ち切りの上限はこの値と対称（`beta`の分布が0周りに対称な
+        /// ため、左・右で打ち切り割合が同程度になる）。
         const LOWER_BOUND: f64 = 0.0;
 
-        /// 真の`beta`・`sigma`から`y* = β₀+Σxⱼβⱼ+σε`を計算し、`lower`で左打ち切りする。
+        /// 打ち切り境界`(lower, upper)`。
+        type Bounds = (Option<f64>, Option<f64>);
+
+        /// 左打ち切り・右打ち切り・両側打ち切りをランダムに選ぶ。両側打ち切りの幅
+        /// （`[-1, 1]`）は、`NoUncensoredObservations`等の`prop_assume`棄却が過剰にならない
+        /// 程度に真の`y*`分布の中心付近を含める。
+        fn censoring_strategy() -> impl Strategy<Value = Bounds> {
+            prop_oneof![
+                Just((Some(LOWER_BOUND), None)),
+                Just((None, Some(LOWER_BOUND))),
+                Just((Some(-1.0), Some(1.0))),
+            ]
+        }
+
+        /// 真の`beta`・`sigma`から`y* = β₀+Σxⱼβⱼ+σε`を計算し、`bounds`で打ち切る
+        /// （下限未満は下限、上限超過は上限に置き換える）。
         fn simulate_y(
             n: usize,
             x_cols: &[Vec<f64>],
             beta: &[f64],
             sigma: f64,
             u: &[f64],
+            bounds: Bounds,
         ) -> Vec<f64> {
             let normal = Normal::standard();
             (0..n)
@@ -5431,25 +5471,31 @@ mod tests {
                         y_star += x_col[i] * beta[j + 1];
                     }
                     y_star += sigma * normal.inverse_cdf(u[i]);
-                    if y_star < LOWER_BOUND {
-                        LOWER_BOUND
-                    } else {
-                        y_star
+                    if let Some(lower) = bounds.0
+                        && y_star < lower
+                    {
+                        return lower;
                     }
+                    if let Some(upper) = bounds.1
+                        && y_star > upper
+                    {
+                        return upper;
+                    }
+                    y_star
                 })
                 .collect()
         }
 
-        /// `method`ごとの`tol`既定値の解決は`logit.rs`/`probit.rs`の`default_options`と
+        /// `solver`ごとの`tol`既定値の解決は`logit.rs`/`probit.rs`の`default_options`と
         /// 同じ（`docs/spec/tobit-spec.md`、Logit/Probitと共有する`run_solver`のため
         /// 同じ意味論）。
-        fn default_options(cov_type: CovType, method: Method) -> MleFitOptions {
-            let tol = match method {
-                Method::Newton => 1e-6,
-                Method::Bfgs | Method::Lbfgs => 1e-8,
+        fn default_options(cov_type: CovType, solver: SolverType) -> MleFitOptions {
+            let tol = match solver {
+                SolverType::Newton => 1e-6,
+                SolverType::Bfgs | SolverType::Lbfgs => 1e-8,
             };
             MleFitOptions {
-                method,
+                solver,
                 max_iter: 50,
                 tol,
                 raise_on_non_convergence: true,
@@ -5458,11 +5504,11 @@ mod tests {
             }
         }
 
-        fn method_strategy() -> impl Strategy<Value = Method> {
+        fn solver_strategy() -> impl Strategy<Value = SolverType> {
             prop_oneof![
-                Just(Method::Newton),
-                Just(Method::Bfgs),
-                Just(Method::Lbfgs),
+                Just(SolverType::Newton),
+                Just(SolverType::Bfgs),
+                Just(SolverType::Lbfgs),
             ]
         }
 
@@ -5487,14 +5533,15 @@ mod tests {
             #[test]
             fn score_is_near_zero_at_converged_params(
                 (n, k, x_cols, beta, sigma, u, _keys) in tobit_case_strategy(),
-                method in method_strategy(),
+                bounds in censoring_strategy(),
+                solver in solver_strategy(),
             ) {
-                let y = simulate_y(n, &x_cols, &beta, sigma, &u);
+                let y = simulate_y(n, &x_cols, &beta, sigma, &u, bounds);
                 let names = x_names(k);
                 let input = TobitInput::from_columns(
-                    &y, &x_cols, names, true, "y".to_string(), Some(LOWER_BOUND), None,
+                    &y, &x_cols, names, true, "y".to_string(), bounds.0, bounds.1,
                 ).unwrap();
-                let result = TobitEstimator::fit(input, default_options(CovType::Classical, method));
+                let result = TobitEstimator::fit(input, default_options(CovType::Classical, solver));
                 prop_assume!(result.is_ok());
                 let est = result.unwrap();
 
@@ -5507,7 +5554,7 @@ mod tests {
                     let score: f64 = (0..n).map(|i| *scores.get(i, j)).sum();
                     prop_assert!(
                         score.abs() <= 1e-4,
-                        "score[{j}] should be ~0, got {score} (method={method:?})"
+                        "score[{j}] should be ~0, got {score} (solver={solver:?})"
                     );
                 }
             }
@@ -5519,14 +5566,15 @@ mod tests {
             fn coefficients_and_se_are_invariant_to_column_order(
                 (n, k, x_cols, beta, sigma, u, keys) in tobit_case_strategy()
                     .prop_filter("need >=2 columns to permute", |(_, k, _, _, _, _, _)| *k >= 2),
-                method in method_strategy(),
+                bounds in censoring_strategy(),
+                solver in solver_strategy(),
             ) {
-                let y = simulate_y(n, &x_cols, &beta, sigma, &u);
+                let y = simulate_y(n, &x_cols, &beta, sigma, &u, bounds);
                 let names = x_names(k);
                 let input1 = TobitInput::from_columns(
-                    &y, &x_cols, names.clone(), true, "y".to_string(), Some(LOWER_BOUND), None,
+                    &y, &x_cols, names.clone(), true, "y".to_string(), bounds.0, bounds.1,
                 ).unwrap();
-                let result1 = TobitEstimator::fit(input1, default_options(CovType::Classical, method));
+                let result1 = TobitEstimator::fit(input1, default_options(CovType::Classical, solver));
                 prop_assume!(result1.is_ok());
                 let est1 = result1.unwrap();
 
@@ -5536,9 +5584,9 @@ mod tests {
                 let permuted_names: Vec<String> = order.iter().map(|&i| names[i].clone()).collect();
 
                 let input2 = TobitInput::from_columns(
-                    &y, &permuted_x, permuted_names, true, "y".to_string(), Some(LOWER_BOUND), None,
+                    &y, &permuted_x, permuted_names, true, "y".to_string(), bounds.0, bounds.1,
                 ).unwrap();
-                let result2 = TobitEstimator::fit(input2, default_options(CovType::Classical, method));
+                let result2 = TobitEstimator::fit(input2, default_options(CovType::Classical, solver));
                 prop_assume!(result2.is_ok());
                 let est2 = result2.unwrap();
 
@@ -5560,21 +5608,22 @@ mod tests {
             #[test]
             fn hc0_std_errors_are_at_most_hc1_std_errors(
                 (n, k, x_cols, beta, sigma, u, _keys) in tobit_case_strategy(),
-                method in method_strategy(),
+                bounds in censoring_strategy(),
+                solver in solver_strategy(),
             ) {
-                let y = simulate_y(n, &x_cols, &beta, sigma, &u);
+                let y = simulate_y(n, &x_cols, &beta, sigma, &u, bounds);
                 let names = x_names(k);
                 let input1 = TobitInput::from_columns(
-                    &y, &x_cols, names.clone(), true, "y".to_string(), Some(LOWER_BOUND), None,
+                    &y, &x_cols, names.clone(), true, "y".to_string(), bounds.0, bounds.1,
                 ).unwrap();
-                let result1 = TobitEstimator::fit(input1, default_options(CovType::Hc0, method));
+                let result1 = TobitEstimator::fit(input1, default_options(CovType::Hc0, solver));
                 prop_assume!(result1.is_ok());
                 let est_hc0 = result1.unwrap();
 
                 let input2 = TobitInput::from_columns(
-                    &y, &x_cols, names, true, "y".to_string(), Some(LOWER_BOUND), None,
+                    &y, &x_cols, names, true, "y".to_string(), bounds.0, bounds.1,
                 ).unwrap();
-                let result2 = TobitEstimator::fit(input2, default_options(CovType::Hc1, method));
+                let result2 = TobitEstimator::fit(input2, default_options(CovType::Hc1, solver));
                 prop_assume!(result2.is_ok());
                 let est_hc1 = result2.unwrap();
 
@@ -5586,22 +5635,59 @@ mod tests {
                     );
                 }
             }
+
+            /// 鏡像対称性: `y`と境界を符号反転して`(lower, upper)`→`(-upper, -lower)`にすると
+            /// （`-y* = x(-β) + σ(-ε)`、`-ε`も標準正規）、係数は符号反転・`σ`と標準誤差は不変。
+            /// 左打ち切りと右打ち切りで別々のコード分岐（`censored_contribution`の
+            /// `direction`）を通るため、片方の分岐の符号・スケールのバグがここで顕在化する。
+            #[test]
+            fn negating_y_and_swapping_bounds_negates_coefficients_only(
+                (n, k, x_cols, beta, sigma, u, _keys) in tobit_case_strategy(),
+                bounds in censoring_strategy(),
+                solver in solver_strategy(),
+            ) {
+                let y = simulate_y(n, &x_cols, &beta, sigma, &u, bounds);
+                let names = x_names(k);
+                let input1 = TobitInput::from_columns(
+                    &y, &x_cols, names.clone(), true, "y".to_string(), bounds.0, bounds.1,
+                ).unwrap();
+                let result1 = TobitEstimator::fit(input1, default_options(CovType::Classical, solver));
+                prop_assume!(result1.is_ok());
+                let est1 = result1.unwrap();
+
+                let y_neg: Vec<f64> = y.iter().map(|v| -v).collect();
+                let input2 = TobitInput::from_columns(
+                    &y_neg, &x_cols, names, true, "y".to_string(),
+                    bounds.1.map(|v| -v), bounds.0.map(|v| -v),
+                ).unwrap();
+                let result2 = TobitEstimator::fit(input2, default_options(CovType::Classical, solver));
+                prop_assume!(result2.is_ok());
+                let est2 = result2.unwrap();
+
+                for j in 0..=k {
+                    assert_approx_eq(est2.params()[j], -est1.params()[j], &format!("param[{j}] under y negation"));
+                }
+                assert_approx_eq(est2.sigma(), est1.sigma(), "sigma under y negation");
+                for j in 0..=(k + 1) {
+                    assert_approx_eq(est2.std_errors()[j], est1.std_errors()[j], &format!("std_error[{j}] under y negation"));
+                }
+            }
         }
 
-        /// （#342のPhase 2、実際の退化ケースの特定）で捕捉した具体的な
+        /// （Phase 2、実際の退化ケースの特定）で捕捉した具体的な
         /// 入力の1つを固定値化した回帰テスト。
         ///
-        /// **調査方法**: `#342`のPhase 1（評価回数バジェット方式）導入後は、line
+        /// **調査方法**: Phase 1（評価回数バジェット方式）導入後は、line
         /// searchの暴走が数秒程度の有限時間で`Err`に変換されるようになったため、
         /// `kill`前提の外部タイムアウト無しで大量試行を安全に回せることを利用し、
-        /// `tobit_case_strategy()`・`method_strategy()`を`TestRunner`で直接
+        /// `tobit_case_strategy()`・`solver_strategy()`を`TestRunner`で直接
         /// サンプリングして30万回試行する使い捨ての探索ハーネスを一時的に実装し
         /// 実行した（コミット履歴には残さず、本テストのみを結果として残す）。
         ///
-        /// **判明した事実（#344当時）**: 30万試行中8件が`MleError::EvaluationBudgetExceeded`
-        /// 相当のエラー（`Method::Lbfgs`は当時のargmin組み込みLBFGSの`SolverExit`経由で
+        /// **判明した事実（当時）**: 30万試行中8件が`MleError::EvaluationBudgetExceeded`
+        /// 相当のエラー（`SolverType::Lbfgs`は当時のargmin組み込みLBFGSの`SolverExit`経由で
         /// 同じメッセージを含む`ComputationFailed`になっていた）を引き起こした。**8件
-        /// 全てが`method=Lbfgs`**で、`method=Bfgs`・`method=Newton`は1件もヒットしな
+        /// 全てが`solver=Lbfgs`**で、`solver=Bfgs`・`solver=Newton`は1件もヒットしな
         /// かった。打ち切り割合（`n_uncensored/n`）は0.38〜0.80、`n`は41〜75、`k`は
         /// 1〜3、`sigma`は0.53〜1.85とヒット全体に幅広く分布しており、「極端な打ち切り・
         /// 特定の狭いパラメータ域が必要」という仮説は支持されなかった（8件中7件は
@@ -5609,7 +5695,7 @@ mod tests {
         /// `LBFGS`固有の何か（limited-memory two-loop recursionの初期スケーリング等）に
         /// 起因すると推測されていたが、真因の特定は後続の調査に持ち越された。
         ///
-        /// **判明した実際の原因と解消（本テストの現在の主眼）**: `Method::Lbfgs`
+        /// **判明した実際の原因と解消（本テストの現在の主眼）**: `SolverType::Lbfgs`
         /// を`FaerLbfgs`（`FaerBfgs`と同型のself-scaling初期化を持つ自前実装）に置き換えた
         /// 結果、この入力は**もはや退化せず正常に収束する**（実測: `n_iter=11`、
         /// `converged=true`）。`FaerBfgs`で既に確立していた「1回目の
@@ -5711,7 +5797,7 @@ mod tests {
             ];
             let n = 41;
 
-            let y = simulate_y(n, &x_cols, &beta, sigma, &u);
+            let y = simulate_y(n, &x_cols, &beta, sigma, &u, (Some(LOWER_BOUND), None));
             let names = x_names(1);
             let input = TobitInput::from_columns(
                 &y,
@@ -5725,8 +5811,10 @@ mod tests {
             .unwrap();
 
             let start = std::time::Instant::now();
-            let result =
-                TobitEstimator::fit(input, default_options(CovType::Classical, Method::Lbfgs));
+            let result = TobitEstimator::fit(
+                input,
+                default_options(CovType::Classical, SolverType::Lbfgs),
+            );
             let elapsed = start.elapsed();
 
             assert!(

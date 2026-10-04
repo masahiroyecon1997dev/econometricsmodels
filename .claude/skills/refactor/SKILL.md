@@ -1,6 +1,6 @@
 ---
 name: refactor
-description: 実装済みのコード・コメント・ディレクトリ構造・ドキュメント（README/CLAUDE.md/仕様書）を対象に、ユーザー指定の範囲・方針でリファクタリングの計画提示から適用まで一括で行う（Issue #231）
+description: 実装済みのコード・コメント・ディレクトリ構造・ドキュメント（README/CLAUDE.md/仕様書）を対象に、ユーザー指定の範囲・方針でリファクタリングの計画提示から適用まで一括で行う
 argument-hint: "[対象範囲と方針（例: engine/src/iv/ の重複ロジック共通化、docs配下のIssue番号言及の整理等）]"
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git mv:*), Bash(git rm:*), Bash(git add:*), Bash(cargo build:*), Bash(cargo test:*), Bash(cargo clippy:*), Bash(cargo fmt:*), Bash(pytest:*), Bash(ruff check:*), Bash(ruff format:*)
 ---
@@ -19,11 +19,11 @@ allowed-tools: Read, Write, Edit, Grep, Glob, Bash(git status:*), Bash(git diff:
 
 $ARGUMENTS
 
-## 観点（Issue #231 4章）
+## 観点
 
 1. **重複ロジックの共通化**
    呼び出し箇所の性質上、分離したままが適切な場合は無理に共通化しない（IV実装時の
-   crate横断共通基盤切り出し〔Issue #152〜#154〕と同じ判断基準）。
+   crate横断共通基盤切り出しと同じ判断基準）。
 2. **パフォーマンス劣化箇所の指摘・修正**
    不要な`clone`・非効率なループ等。深い規約チェックは`rust-reviewer`/`python-reviewer`に
    委ねてよい（対象ファイルを明示して`/review-rust`・`/review-python`を呼び出す）。
@@ -67,8 +67,7 @@ $ARGUMENTS
      場合、CLAUDE.md 13章の方針（完了した手法の仕様書は`docs/spec/`へ集約）に沿っているかも
      合わせて確認する。
    - **ロジックの挙動を変える変更（バグ修正含む）はこのスキルの範囲外**。気づいた場合は
-     指摘に留め、対応要否を別途ユーザーに確認する（`engine/`層は特に慎重に扱う、
-     Issue #231フェーズ7の方針）。
+     指摘に留め、対応要否を別途ユーザーに確認する（`engine/`層は特に慎重に扱う）。
 
 5. **検証**
    変更した層に応じて`cargo test` / `pytest`を実行し、デグレがないか確認する。

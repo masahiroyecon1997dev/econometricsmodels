@@ -1,5 +1,5 @@
 site_name: econometricsmodels
-site_description: A Python API providing statistical and econometric analysis methods
+site_description: Econometric estimators for scripts, pipelines, and apps, numerically verified against statsmodels, linearmodels, and R
 repo_url: https://github.com/masahiroyecon1997dev/econometricsmodels
 repo_name: masahiroyecon1997dev/econometricsmodels
 
@@ -7,6 +7,7 @@ repo_name: masahiroyecon1997dev/econometricsmodels
 # （デフォルトの"docs/mkdocs.yml相対docs/"にはしない）。docs/planning/・docs/spec/・
 # docs/plan.mdはビルド対象に含まれるがnavには載せない
 # （CLAUDE.md 10章「ソースとしては誰でも閲覧可能という前提で運用する」）。
+# 利用者向けの横断解説はdocs/guide/に置き、navに載せる。
 docs_dir: .
 site_dir: ../site
 
@@ -22,6 +23,13 @@ nav:
       - IV: api/iv.md
       - FE: api/fe.md
       - RE: api/re.md
+  - Guides:
+      - Accepted data: guide/accepted-data.md
+      - Validation and errors: guide/validation.md
+      - Inference conventions: guide/inference-conventions.md
+      - Verification: guide/verification.md
+      - Performance: guide/performance.md
+      - Performance results: guide/performance-results.md
 
 theme:
   name: material

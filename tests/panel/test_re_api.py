@@ -18,8 +18,11 @@ import math
 import polars as pl
 import pytest
 from _constants import DATA_DIR
+from _helpers import HAC_AUTO_LAG_SAMPLE_SIZES, hac_lag_panel_frame
 from _re_helpers import our_fit_re
 from econometricsmodels import RE, REOptions, REResults
+
+from benchmark.common import hac_auto_lag
 
 # ── 成功パス・結果型 ──────────────────────────────────────────────
 
@@ -78,7 +81,7 @@ def test_coef_table_structure(fe_dataset):
         "param",
         "coef",
         "std_err",
-        "t_stat",
+        "test_stat",
         "p_value",
         "conf_lower",
         "conf_upper",
@@ -98,13 +101,13 @@ def test_conf_int_structure(fe_dataset):
         assert lower < upper
 
 
-def test_params_std_errors_t_stats_p_values_share_keys(fe_dataset):
+def test_params_std_errors_test_stats_p_values_share_keys(fe_dataset):
     res = our_fit_re(fe_dataset)
     expected_keys = {"const", "x1", "x2"}
 
     assert set(res.params.keys()) == expected_keys
     assert set(res.std_errors.keys()) == expected_keys
-    assert set(res.t_stats.keys()) == expected_keys
+    assert set(res.test_stats.keys()) == expected_keys
     assert set(res.p_values.keys()) == expected_keys
 
 
@@ -128,54 +131,53 @@ def test_df_resid_and_df_model(fe_dataset):
 # ── ハウスマン検定（panel-common.md 2.4節・docs/spec/re-spec.md 3.7節） ──
 
 
-def test_hausman_present_for_one_way(fe_dataset):
-    """既定（`REOptions.time`未指定、内部FE比較が1-way）ではハウスマン検定が
-    計算される。
-    """
+def test_hausman_present(fe_dataset):
+    """ハウスマン検定（回帰ベース、常に1-way比較）が計算される。"""
     res = our_fit_re(fe_dataset)
     assert isinstance(res.hausman_statistic, float)
     assert isinstance(res.hausman_p_value, float)
     assert res.hausman_df == 2  # 傾き係数の数（x1, x2）
+    assert res.hausman_statistic >= 0.0
 
 
-def test_hausman_present_for_two_way_balanced_panel(fe_dataset):
-    """`REOptions.time`設定時（ハウスマン検定専用の内部FE比較が2-way）でも、
-    バランスパネル（singleton等の問題が無い`fe_dataset`）では2-way内部FE
-    比較自体が成功し、`hausman_*`が非`None`になる（`test_hausman_none_for_
-    singleton_time_two_way`の対照——2-way比較の「失敗パス」だけでなく
-    「成功パス」も構造的に確認する、testing-completeness-reviewer指摘で
-    追加）。数値の妥当性（linearmodels/plmとの照合）はv1のスコープ外
-    （`generate_re_fixtures.py`の`_meta.note`参照）のため、型・自由度のみ
-    確認する。
+def test_hausman_follows_cov_type(fe_dataset):
+    """ハウスマン検定の補助回帰の共分散はRE本体の`cov_type`に連動する
+    （既定の`cluster`ならcluster-robust版）。`df`は`cov_type`によらず一定で、
+    各`cov_type`の統計量は互いに異なる（`re-spec.md`3.7節）。
     """
-    options = REOptions(time="time")
-    res = our_fit_re(fe_dataset, options=options)
+    options = {
+        "classical": REOptions(cov_type="classical"),
+        "hc1": REOptions(cov_type="hc1"),
+        "hc2": REOptions(cov_type="hc2"),
+        "hc3": REOptions(cov_type="hc3"),
+        "cluster": REOptions(cov_type="cluster"),
+        "dk": REOptions(cov_type="dk", dk_time="time"),
+    }
+    results = {
+        name: our_fit_re(fe_dataset, options=opt)
+        for name, opt in options.items()
+    }
+
+    default = our_fit_re(fe_dataset)
+    assert default.hausman_statistic == results["cluster"].hausman_statistic
+    for res in results.values():
+        assert res.hausman_df == 2
+        assert res.hausman_statistic >= 0.0
+    statistics = {res.hausman_statistic for res in results.values()}
+    assert len(statistics) == len(results)
+
+
+def test_hausman_computed_with_singleton_time():
+    """singleton timeがあっても、ハウスマン検定は2-way FE比較を使わないため
+    計算される（`fe_singleton_time.csv`、`cov_type="dk"`で`time`を指定）。
+    """
+    df = pl.read_csv(DATA_DIR / "fe_singleton_time.csv")
+    options = REOptions(cov_type="dk", dk_time="time")
+    res = RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
     assert isinstance(res.hausman_statistic, float)
     assert isinstance(res.hausman_p_value, float)
     assert res.hausman_df == 2
-
-
-def test_hausman_none_for_singleton_time_two_way():
-    """`REOptions.time`設定時（ハウスマン検定専用の内部FE比較が2-way）、
-    その2-way FE比較自体がsingleton timeで失敗すると`hausman_*`が`None`に
-    フォールバックする一方、RE本体の結果は正常に返る
-    （`fe_singleton_time.csv`、`REResults`クラスdocstring参照）。
-
-    singleton **entity**（`test_re_validation.py::test_singleton_entity_
-    raises`）とは対照的に、singleton **time**はσ_ε²推定用の内部1-way FE
-    呼び出し（timeを使わない）には影響しないため、`RE.fit()`自体は成功する
-    （モジュールdoc参照）。
-    """
-    df = pl.read_csv(DATA_DIR / "fe_singleton_time.csv")
-    options = REOptions(time="time")
-    res = RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
-
-    assert res.hausman_statistic is None
-    assert res.hausman_p_value is None
-    assert res.hausman_df is None
-    # RE本体の結果は正常（`None`にならない）。
-    assert res.params["x1"] is not None
 
 
 # ── オプションの反映 ──────────────────────────────────────────────
@@ -190,14 +192,14 @@ def test_hausman_none_for_singleton_time_two_way():
         ("HC2", "hc2"),
         ("hc3", "hc3"),
         ("Cluster", "cluster"),
-        ("HAC", "hac"),
+        ("DK", "dk"),
     ],
 )
 def test_cov_type_is_case_insensitive(fe_dataset, cov_type, expected_label):
-    """`hac`は`time`が無いと`HacRequiresTime`になるため`time="time"`を渡す
-    （`test_re_validation.py::test_hac_requires_time_raises`と対照）。
+    """`dk`は`dk_time`が無いと`DkRequiresTime`になるため`dk_time="time"`を渡す
+    （`test_re_validation.py::test_dk_requires_dk_time_raises`と対照）。
     """
-    kwargs = {"time": "time"} if expected_label == "hac" else {}
+    kwargs = {"dk_time": "time"} if expected_label == "dk" else {}
     options = REOptions(cov_type=cov_type, **kwargs)
     res = our_fit_re(fe_dataset, options=options)
     assert res.cov_type == expected_label
@@ -214,31 +216,29 @@ def test_confidence_level_affects_conf_int_width(fe_dataset):
 
 
 def test_time_option_does_not_affect_coefficients(fe_dataset):
-    """`REOptions.time`はハウスマン検定用の内部FE比較の1-way/2-way選択と
-    HAC時系列順序のみに使われ、RE自身の準偏差変換（entity方向のみ）には
-    影響しない（`engine/src/panel/CLAUDE.md`「RE」節参照。FEの`time`が
-    `df_model`を変えるのとは対照的）。
+    """`REOptions.dk_time`は`cov_type="dk"`のHAC時点列にのみ使われ、係数・
+    ハウスマン検定・`df_model`には影響しない（`engine/src/panel/CLAUDE.md`
+    「RE」節参照。FEの`time`が`df_model`を変えるのとは対照的）。
     """
-    one_way = our_fit_re(fe_dataset)
-    two_way = our_fit_re(fe_dataset, options=REOptions(time="time"))
+    classical = our_fit_re(fe_dataset)
+    dk = our_fit_re(
+        fe_dataset, options=REOptions(cov_type="dk", dk_time="time")
+    )
 
-    for name in one_way.param_names:
-        assert one_way.params[name] == pytest.approx(two_way.params[name])
-        assert one_way.std_errors[name] == pytest.approx(
-            two_way.std_errors[name]
-        )
-    assert one_way.df_model == two_way.df_model == 3
+    for name in classical.param_names:
+        assert classical.params[name] == pytest.approx(dk.params[name])
+    assert classical.df_model == dk.df_model == 3
 
 
-def test_cluster_col_defaults_to_entity(fe_dataset):
-    """`cluster_col`省略時は`entity`引数の列を自動的にクラスターキーとして
-    使う（3.2節）。明示的に`cluster_col="entity"`を渡した場合と同じ結果に
+def test_cluster_defaults_to_entity(fe_dataset):
+    """`cluster`省略時は`entity`引数の列を自動的にクラスターキーとして
+    使う（3.2節）。明示的に`cluster="entity"`を渡した場合と同じ結果に
     なることで確認する。
     """
     default_res = our_fit_re(fe_dataset, options=REOptions(cov_type="cluster"))
     explicit_res = our_fit_re(
         fe_dataset,
-        options=REOptions(cov_type="cluster", cluster_col="entity"),
+        options=REOptions(cov_type="cluster", cluster="entity"),
     )
 
     for name in default_res.param_names:
@@ -252,7 +252,7 @@ def test_dk_bandwidth_zero_succeeds(fe_dataset):
     （`FEOptions`の同名テストと同じ、engine/src/panel/CLAUDE.md
     「Driscoll-Kraay型パネルHAC対応」参照）。
     """
-    options = REOptions(cov_type="hac", time="time", dk_bandwidth=0)
+    options = REOptions(cov_type="dk", dk_time="time", dk_bandwidth=0)
     res = our_fit_re(fe_dataset, options=options)
     assert all(se > 0.0 for se in res.std_errors.values())
 
@@ -286,3 +286,34 @@ def test_cluster_se_exceeds_classical_under_serial_correlation():
     classical_variance_sum = sum(se**2 for se in classical.std_errors.values())
     clustered_variance_sum = sum(se**2 for se in clustered.std_errors.values())
     assert clustered_variance_sum > classical_variance_sum
+
+
+# ── Driscoll-Kraayバンド幅の実使用値（dk_bandwidth_used）─────────────
+
+
+@pytest.mark.parametrize("n_periods", HAC_AUTO_LAG_SAMPLE_SIZES)
+def test_dk_bandwidth_used_matches_python_auto_lag_formula(n_periods):
+    """`dk_bandwidth`省略時の`dk_bandwidth_used`が、時点数`t`に対する
+    Python側の独立実装（`benchmark.common.hac_auto_lag`、OLSのHACと
+    同じ式を`n`ではなく`t`に適用）と一致すること。
+    """
+    df = hac_lag_panel_frame(n_periods)
+    options = REOptions(cov_type="dk", dk_time="time")
+    res = our_fit_re(df, options=options)
+    assert res.dk_bandwidth_used == hac_auto_lag(n_periods)
+
+
+@pytest.mark.parametrize("dk_bandwidth", [0, 2, 5])
+def test_dk_bandwidth_used_echoes_explicit_dk_bandwidth(dk_bandwidth):
+    df = hac_lag_panel_frame(10)
+    options = REOptions(
+        cov_type="dk", dk_time="time", dk_bandwidth=dk_bandwidth
+    )
+    assert our_fit_re(df, options=options).dk_bandwidth_used == dk_bandwidth
+
+
+@pytest.mark.parametrize("cov_type", ["classical", "hc1", "cluster"])
+def test_dk_bandwidth_used_is_none_unless_dk(cov_type):
+    df = hac_lag_panel_frame(10)
+    res = our_fit_re(df, options=REOptions(cov_type=cov_type))
+    assert res.dk_bandwidth_used is None

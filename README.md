@@ -3,34 +3,72 @@
 [![CI (engine)](https://github.com/masahiroyecon1997dev/econometricsmodels/actions/workflows/ci_engine.yml/badge.svg)](https://github.com/masahiroyecon1997dev/econometricsmodels/actions/workflows/ci_engine.yml)
 [![CI (python)](https://github.com/masahiroyecon1997dev/econometricsmodels/actions/workflows/ci_python.yml/badge.svg)](https://github.com/masahiroyecon1997dev/econometricsmodels/actions/workflows/ci_python.yml)
 [![Docs](https://github.com/masahiroyecon1997dev/econometricsmodels/actions/workflows/cd_docs.yml/badge.svg)](https://masahiroyecon1997dev.github.io/econometricsmodels/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/masahiroyecon1997dev/econometricsmodels/blob/main/LICENSE)
 
-A Python API providing statistical and econometric analysis methods.[^origin] Its design prioritizes ease of embedding from scripts and programs (type completion, validation, dynamic construction).
+## What is econometricsmodels?
 
-- The computational core is implemented in **Rust** and thinly bound to Python via **PyO3**.
-- Data input is restricted to **polars** DataFrames only, passed to the Rust side via **Arrow zero-copy**.
-- Formula-string parsing (e.g. `y ~ x1 + x2`) is not used. The dependent variable is passed as a single column name (`str`), independent variables as a list of column names (`list[str]`), and estimation options as an instance of a dedicated class.
+**econometricsmodels** is a Python package of econometric estimators built for embedding in scripts, pipelines, and apps. It rejects invalid input rather than silently dropping or repairing it, and returns result objects that are easy to work with directly and can also be exported as JSON-ready data. Every estimator is numerically checked against established reference implementations such as statsmodels, linearmodels, and R, and the comparisons are published.
+
+## Key Design Principles
+
+- **Consistent API** — Models follow a consistent interface: a DataFrame, a
+  `y` column, a list of `x` columns, and an options object in; a `.fit()`
+  call out. Moving from OLS to Logit, IV, or panel models doesn't mean
+  learning a new interface.
+- **Programmatic specification and results** — Models are defined with
+  explicit arguments and an options object, not a formula string. Results
+  come back as Python objects (`.params`, `.std_errors`, `.p_values`,
+  `.conf_int`), not formatted text, so they are easy to build, inspect, and
+  feed into other code. Coefficient tables (`coef_table()`) are plain lists
+  of dicts that can be passed straight to polars or `json.dumps`.
+- **Explicit validation** — Invalid input is rejected rather than silently
+  dropped or repaired. Missing values, collinear columns, degenerate
+  groups, and options that would have no effect raise an error instead of
+  being quietly handled (see
+  [Validation and errors](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/validation/)).
+- **Modern dataframe workflow** — Built for [polars](https://pola.rs/),
+  with data passed to the Rust core through Arrow, avoiding unnecessary
+  conversions and copies.
+- **Verified against established packages** — statsmodels, linearmodels,
+  and the R ecosystem are mature yardsticks, and building after them means
+  every estimator can be tested against them from the start. Each estimator
+  is compared against at least one reference implementation, the
+  comparisons run in CI on every pull request, and differences in
+  conventions (such as small-sample corrections) are documented (see
+  [Numerical verification](#numerical-verification)).
+- **Performance as a design goal** — Strict validation should not come at
+  the cost of speed. The Rust core is designed to be competitive in speed
+  and memory with the packages it is verified against, and representative
+  cases of each implemented method are benchmarked (against those packages
+  wherever a comparable implementation exists), with results published as
+  measured, including cases where it is not faster (see
+  [Performance](#performance)).
 
 ## Is this for you?
 
 **Good fit:**
 
-- Calling estimation methods from scripts, pipelines, or GUI apps — the `str`/`list[str]` + options-object API (see above) is built for programmatic construction, not interactive formula-writing.
-- Exploratory or experimental analysis, where you value having validation (see [Verification accuracy](#verification-accuracy) below) but don't need the full breadth of diagnostics a mature package offers.
-- Environments where a pure-Rust computational core (no system BLAS/LAPACK dependency) simplifies installation.
-- Working with large datasets, where the **polars + Arrow zero-copy** handoff to the Rust core (see above) avoids the extra data copy that pandas/numpy-conversion-based wrappers typically incur.
-- Projects that will lean on more than one econometric method over time — the roadmap covers a broad range (see [Implementation status](#implementation-status)), all under one consistent API.
+- Calling estimation methods from scripts, pipelines, or apps — the API is
+  built for programmatic construction, not interactive formula-writing.
+- Wanting invalid input to fail loudly instead of being silently dropped or
+  repaired — missing values, collinear columns, and unusable options raise
+  an error (see
+  [Validation and errors](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/validation/)).
+- Needing to confirm that results match statsmodels, R, or linearmodels —
+  for example when migrating an existing analysis, or when you have to show
+  how your numbers were checked (see
+  [Numerical verification](#numerical-verification)).
+- Projects that use more than one method over time — the same interface
+  covers linear, discrete-choice, IV, and panel models today, with more on
+  the way (see [Implemented models](#implemented-models)).
+- Already working in polars, where handing data to the Rust core through
+  Arrow avoids unnecessary conversion overhead.
 
 **Probably not a good fit:**
 
-- Published research or other work where correctness has to be beyond question — see the disclaimer below.
-- Workflows built around R-style formula syntax (`y ~ x1 + x2`); this is a deliberate design choice (see above), not a missing feature, and isn't planned.
-- Use cases that need the long tail of diagnostics, edge-case handling, and model types that statsmodels/R packages have accumulated over years of real-world use.
-- Cases where you only ever need a single method, or where install footprint is tight — this package bundles everything into one Rust-compiled extension by design, so it's not the leanest choice if you don't need the breadth.
-
-## Disclaimer
-
-This is a solo-maintained, pre-1.0 project. Estimates are checked against statsmodels/R reference implementations (see [Verification accuracy](#verification-accuracy)), but it has not had the years of community scrutiny and edge-case hardening that established packages have. **If you're using this for an important decision — an academic paper or otherwise — we strongly recommend double-checking against a trusted, established package such as [statsmodels](https://www.statsmodels.org/) or an R equivalent.**
+- You prefer R-style formula syntax (`y ~ x1 + x2`).
+- You need the broader diagnostics and edge-case coverage of
+  long-established tools like statsmodels and the R ecosystem.
 
 ## Installation
 
@@ -38,136 +76,245 @@ This is a solo-maintained, pre-1.0 project. Estimates are checked against statsm
 pip install econometricsmodels
 ```
 
-Requires Python 3.12 or later.
+Requires Python 3.12 or later. The computational core is pure Rust
+(no system BLAS/LAPACK dependency), with prebuilt wheels for Linux,
+macOS, and Windows.
 
 ## Quickstart
 
-### OLS
-
 ```python
+import random
+
 import polars as pl
-from econometricsmodels import OLS
+from econometricsmodels import OLS, Logit, Probit
 
-df = pl.DataFrame(
-    {
-        "y": [2.1, 3.9, 6.2, 8.1, 9.8],
-        "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
-    }
-)
+# Simulated data with a binary outcome.
+random.seed(0)
+n = 500
+x1 = [random.gauss(0, 1) for _ in range(n)]
+x2 = [random.gauss(0, 1) for _ in range(n)]
+y = [int(0.3 + a - 0.8 * b + random.gauss(0, 1) > 0) for a, b in zip(x1, x2)]
+df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
 
-result = OLS(df, y="y", x=["x1"]).fit()
-
-print(result.params)  # {"const": ..., "x1": ...}
-print(result.std_errors)  # {"const": ..., "x1": ...}
-print(result.r_squared)
-
-# Row-oriented parameter table (param/coef/std_err/t_stat/p_value/conf_lower/conf_upper).
-print(result.coef_table())
-
-# Overall-fit statistics.
-print(result.f_statistic, result.f_p_value)
-print(result.aic, result.bic)
+# The same call shape for every model. Since y is binary, OLS here is a
+# linear probability model.
+for name, model in [("OLS", OLS), ("Logit", Logit), ("Probit", Probit)]:
+    result = model(df, y="y", x=["x1", "x2"]).fit()
+    print(name)
+    print(result.params)
+    print(result.std_errors)
 ```
 
-### Logit
+## Programmatic Results & Reporting
+
+Results expose their values as ordinary Python data structures, including
+dictionaries for parameter values and row-oriented data from
+`coef_table()`. The output below is for the last model in the Quickstart
+(Probit), rounded:
 
 ```python
-from econometricsmodels import Logit
+result.params
+# {"const": 0.32, "x1": 1.04, "x2": -0.87}
 
-df = pl.DataFrame(
-    {
-        "y": [0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0],
-        "x1": [1.0, 1.5, 2.0, 2.5, 3.0, 3.2, 3.8, 4.0, 4.5, 5.0],
-    }
-)
-
-result = Logit(df, y="y", x=["x1"]).fit()
-
-print(result.coef_table())  # same shape as OLS, but z_stat instead of t_stat
-print(result.aic, result.bic)
-
-# Likelihood-ratio test for overall significance (the Logit/Probit analogue
-# of OLS's F-statistic), plus McFadden pseudo R-squared.
-print(result.lr_statistic, result.lr_p_value)
-print(result.pseudo_r_squared)
+result.coef_table()
+# [
+#     {"param": "const", "coef": 0.32, "std_err": 0.07,
+#      "test_stat": 4.46, "p_value": 8e-06,
+#      "conf_lower": 0.18, "conf_upper": 0.46},
+#     {"param": "x1", "coef": 1.04, "std_err": 0.09, ...},
+#     {"param": "x2", "coef": -0.87, "std_err": 0.09, ...},
+# ]
 ```
 
-`Probit` has the same API shape as `Logit` (drop-in replacement).
+There is no formatted text to parse. `coef_table()` is shaped so it can
+be passed directly into a Polars DataFrame, a JSON API response, or an
+automated reporting workflow:
 
-For more details — including how to switch to heteroskedasticity-robust standard errors (HC0-HC3), cluster-robust standard errors, HAC (Newey-West) standard errors, and Logit/Probit-specific features (marginal effects, classification tables) — see the [documentation site](https://masahiroyecon1997dev.github.io/econometricsmodels/getting-started/). The full documentation, including the API reference, is published at [https://masahiroyecon1997dev.github.io/econometricsmodels/](https://masahiroyecon1997dev.github.io/econometricsmodels/).
+```python
+import json
 
-## Implementation status
+import polars as pl
 
-Implemented: **OLS** (Ordinary Least Squares), **WLS** (Weighted Least Squares), **Logit**, **Probit**, **IV** (2SLS/GMM), **Tobit**.
+pl.DataFrame(result.coef_table())
 
-Planned next, in this order (full roadmap: [#276](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/276)):
+json.dumps(result.coef_table())
+```
 
-1. **FE** (Fixed Effects)
-2. **RE** (Random Effects)
-3. **Fixed-Effects IV**
-4. **GLS** (Generalized Least Squares)
-5. **DID & event study** (basic two-period / two-way fixed-effects form)
-6. **Multinomial Logit**
-7. **Ordered Logit**
-8. **Ordered Probit**
-9. **BLP** (Random Coefficient Logit)
-10. **PPML** (Poisson Pseudo-Maximum-Likelihood)
-11. **Heckman** (two-step / Heckit)
+## Input Validation
 
-**Quantile Regression** is also a confirmed target, though its position in the sequence is not yet fixed.
+Invalid input is rejected instead of being silently dropped or repaired.
+A `ValidationError` means the input or an option cannot be used as given;
+a `ComputationError` means the inputs are acceptable on their face but the
+numerical computation fails. Two examples, using the `df` from the
+Quickstart:
 
-During the `0.x.x` pre-release period, breaking changes may occur even in minor version bumps.
+**Missing values are never dropped.** A null, NaN, or infinite value in any
+column the model uses raises an error, so the number of observations never
+changes without you choosing it.
 
-## Verification accuracy
+```python
+df_missing = df.with_columns(
+    pl.when(pl.int_range(pl.len()) == 3)
+    .then(None)
+    .otherwise(pl.col("x1"))
+    .alias("x1")
+)
+OLS(df_missing, y="y", x=["x1", "x2"]).fit()
+# ValidationError: column 'x1' contains 1 missing value(s). Missing values are
+# not handled automatically; please impute or remove them before calling this
+# function
+```
 
-Estimates for each implemented method (coefficients, standard errors, confidence intervals, AIC, BIC, log-likelihood, and the model's overall-significance test — F-statistic/p-value for OLS/WLS, likelihood-ratio statistic/p-value for Logit/Probit — plus R²/adjusted R² for OLS/WLS and McFadden pseudo R² for Logit/Probit) are verified by numerical comparison against reference implementations. In addition to a primary reference, an independent implementation is used as a cross-check.
+**Collinear columns are never removed.** A perfectly collinear design raises
+an error instead of being estimated on a reduced set of regressors.
 
-| Method | `cov_type` | Primary reference | Independent cross-check |
+```python
+df_collinear = df.with_columns((pl.col("x1") * 2).alias("x1_double"))
+OLS(df_collinear, y="y", x=["x1", "x1_double"]).fit()
+# ComputationError: design matrix is singular (perfect multicollinearity
+# detected)
+```
+
+Options are checked in the same spirit: for example, passing `cluster`
+while `cov_type` is not `"cluster"` raises an error instead of being
+ignored. The exception class is the stable interface; the message text may
+change between versions. See
+[Validation and errors](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/validation/)
+for what raises which error and what is deliberately not checked, and
+[Accepted data](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/accepted-data/)
+for the accepted input and column types.
+
+## Implemented Models
+
+Currently implemented:
+
+- OLS, WLS
+- Logit, Probit, Tobit
+- IV (2SLS, GMM)
+- FE (fixed effects), RE (random effects)
+
+More methods are planned, including further discrete-choice models and
+causal inference designs. What is planned or in progress, and in what
+order, is tracked in
+[GitHub Issues](https://github.com/masahiroyecon1997dev/econometricsmodels/issues).
+
+See the [documentation](https://masahiroyecon1997dev.github.io/econometricsmodels/)
+for usage details on each method.
+
+## Numerical Verification
+
+Every estimator is compared numerically against established reference
+implementations before it is considered done. For each method, a primary
+reference whose statistical conventions match is chosen, and where one
+exists an independent implementation (mostly R) is used as a cross-check.
+The comparison covers the main reported statistics — coefficients, standard
+errors, test statistics, p-values, confidence intervals, fit statistics, and
+model tests — for each supported covariance type.
+
+| Method | Primary reference | Independent cross-check | Relative tolerance (primary / cross-check) |
 |---|---|---|---|
-| OLS / WLS | classical / HC0-3 / cluster | statsmodels (relative tolerance 1e-8) | R (`lm`/`lm(weights=)` + `sandwich`/`lmtest`, relative tolerance 1e-8) |
-| OLS / WLS | HAC (Newey-West) | statsmodels (relative tolerance 1e-8) | R (relative tolerance 1e-2 for OLS, 5e-2 for WLS — looser due to differing small-sample correction conventions) |
-| Logit / Probit | classical / OPG / HC0 / cluster | statsmodels (relative tolerance 1e-8) | R (`glm` + `sandwich`/`marginaleffects`, relative tolerance ~2e-4 — looser due to differing optimizer convergence) |
-| Logit / Probit | HC1 | R (`glm` + `sandwich`, relative tolerance ~2e-4) — used as the primary reference here, since statsmodels' discrete-choice models omit the `n/(n-k)` small-sample correction for HC1 | — |
-| IV (2SLS) | classical / HC0-HC1 / cluster | linearmodels (relative tolerance 1e-8) | R (`ivreg` + `sandwich`/`lmtest`, relative tolerance 1e-8) |
-| IV (2SLS) | HAC (Newey-West) | linearmodels (relative tolerance 1e-8) | R (relative tolerance 1e-2, loosened to 1e-1 for a small-`n` scenario) |
-| IV (2SLS / GMM) | HC2/HC3 | Verified against a manually-derived sandwich formula only (no cross-implementation reference: linearmodels has no HC2/HC3 for IV, and `ivreg` has no established leverage formula for it) | — |
-| IV (GMM) | classical / HC0-HC1 / cluster / HAC | linearmodels `IVGMM` (relative tolerance 1e-8) | — (`ivreg` does not support GMM) |
+| OLS | statsmodels `OLS` | R `lm` + `sandwich`/`lmtest` | 1e-8 / 1e-8 (HAC: 1e-2) |
+| WLS | statsmodels `WLS` | R `lm(weights=)` + `sandwich`/`lmtest` | 1e-8 / 1e-8 (HAC: 5e-2) |
+| Logit | statsmodels `Logit` | R `glm` + `sandwich`, `marginaleffects` | 1e-8 / 2e-4 |
+| Probit | statsmodels `Probit` | R `glm` + `sandwich`, `marginaleffects` | 1e-8 / 2e-4 |
+| Tobit | R `AER::tobit` | R `censReg` | 1e-8 / 1e-8 |
+| IV (2SLS) | linearmodels `IV2SLS` | R `ivreg` + `sandwich`/`lmtest` | 1e-8 / 1e-8 (HAC: 1e-2) |
+| IV (GMM) | linearmodels `IVGMM` | none (`ivreg` has no GMM) | 1e-8 / none |
+| FE<sup>1</sup> | linearmodels `PanelOLS`, R `fixest` | R `fixest`, R `plm` | 1e-8 / 1e-8 |
+| RE<sup>1</sup> | linearmodels `RandomEffects`, R `plm` | R `plm`, statsmodels `OLS` | 1e-8 / 1e-8 (unbalanced panels: 5e-3 to 5e-2) |
+
+<sup>1</sup> For FE and RE, linearmodels covers only classical and HC1
+standard errors. Its cluster and Driscoll–Kraay standard errors use
+different small-sample corrections, so R (`fixest`, `plm`) is the primary
+reference for those. Which implementation checks which statistic is
+detailed on the verification page.
+
+- **Tolerance.** The relative tolerance against the primary reference is
+  1e-8 for every method (with a tiny absolute floor for values near zero);
+  for closed-form estimators the measured agreement is about 1e-14. Looser
+  values (in parentheses, and the Logit/Probit cross-check) come from
+  documented differences, such as HAC small-sample conventions, both sides
+  being iterative optimizers, or plm and linearmodels estimating the
+  Swamy–Arora variance components slightly differently on unbalanced
+  panels. The full list of tolerances and the reasons are on the
+  verification page.
+- **Single-reference cases.** Some methods have only one reference. For
+  example, IV (GMM) is checked against linearmodels only, because `ivreg`
+  has no GMM. These cases are listed on the verification page.
+- **Reproducible and continuous.** Reference values are generated once from
+  pinned package versions and stored in the repository, and the comparisons
+  run in CI on every pull request on Python 3.12, 3.13 and 3.14. The Rust
+  engine also has its own unit and property-based tests.
+
+For the statistics compared, the test data, tolerances, and the cases
+without a second reference, see the
+[verification page](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/verification/).
+Test distributions and degrees of freedom for each method are in the
+[inference conventions guide](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/inference-conventions/).
 
 ## Performance
 
-The computational core is written in Rust, so the aim is that calling `fit()` is never the bottleneck. The figures below are end-to-end `Model(...).fit()` wall-clock times — including the polars → Arrow zero-copy handoff, the PyO3 boundary, and the full set of fit statistics each method computes — not just the linear-algebra kernel.
+The computational core is written in Rust. Speed and memory are measured for
+each implemented method at representative settings (sample size, number of
+regressors, and one or two standard-error types), not for every option
+combination.
 
-**Measurement setup.** Development container (`.devcontainer/`, Python 3.14), release build (`maturin develop --release`), linear-algebra backend **pinned to a single thread** (see [Known performance issues](#known-performance-issues) below), one warm-up run discarded, median of 3 repeats. This is a single local sweep on one machine — treat the numbers as indicative, not as a rigorous benchmark. The same scripts run in CI on tag pushes (`.github/workflows/benchmark_performance.yml`, shared runners) where the numbers vary more. Measured 2026-09-06 on the `release/v0.6.0` branch.
+Time for one `fit()` call at 1,000,000 observations, with 5 regressors and
+classical standard errors:
 
-**Median `fit()` time in seconds** — `cov_type="classical"`, 5 regressors, default optimizer:
+| Method | `fit()` time |
+|---|---|
+| OLS | 0.07 s |
+| WLS | 0.10 s |
+| Logit | 0.70 s |
+| Probit | 0.81 s |
+| Tobit | 1.3 s |
+| IV (2SLS) | 0.49 s |
+| FE | 0.20 s |
+| RE | 0.62 s |
 
-| Method | n = 1,000 | n = 10,000 | n = 100,000 | n = 1,000,000 |
-|---|---|---|---|---|
-| OLS | 0.0001 | 0.0011 | 0.012 | 0.14 |
-| WLS | 0.0001 | 0.0012 | 0.014 | 0.16 |
-| Logit | 0.0005 | 0.0050 | 0.051 | 0.65 |
-| Probit | 0.0018 | 0.011 | 0.12 | —&nbsp;<sup>1</sup> |
-| IV (2SLS) | 0.0009 | 0.0079 | 0.083 | 1.5 |
-| Tobit&nbsp;<sup>2</sup> | 0.0011 | 0.014 | 0.15 | —&nbsp;<sup>1</sup> |
+Execution time and memory are compared against statsmodels and linearmodels
+wherever a comparable Python implementation exists. Some examples at the
+same sample size (reference time divided by ours):
 
-<sup>1</sup> Probit and Tobit currently stop at n = 100,000 — see [Known performance issues](#known-performance-issues).
-<sup>2</sup> Tobit is newly implemented; its large-n behavior is still being hardened (see [Known performance issues](#known-performance-issues)).
+- OLS: about 3.0x faster than statsmodels.
+- IV (2SLS): about 30x faster than linearmodels.
+- FE: about 11x faster than linearmodels.
+- Logit: about 1.4x faster than statsmodels, and about 1.1x with clustered
+  standard errors.
+- Tobit has no Python implementation to compare against, so only its own
+  time is shown.
 
-Peak resident memory is roughly 160–260 MB at n ≤ 100,000 for every method, growing with n (about 400 MB for OLS/WLS and 1.1 GB for IV at n = 1,000,000).
+Peak memory is lower in the largest cases measured too: IV (2SLS) peaks at
+about 1.1 GB against about 4.0 GB for linearmodels, and OLS at about 0.32 GB
+against about 0.57 GB for statsmodels (whole-process peak, including the
+Python interpreter).
 
-Per-method detail — n- and k-axis sweeps, every `cov_type`, the non-default optimizers, and a side-by-side comparison against statsmodels / linearmodels (Tobit is engine-only) — is in [`docs/performance/`](docs/performance/). Reproduce with `python -m performance.compare_<method> --repeats 3`.
+Times are single-threaded, end-to-end measurements from CI on shared
+runners, so absolute values vary from run to run; the comparison between
+two packages within a run is the meaningful part. See the
+[performance page](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/performance/)
+for the current numbers, measurement conditions, and known limitations, and
+the
+[full results](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/performance-results/)
+per method.
 
-### Known performance issues
+## Limitations / Disclaimer
 
-All of the following are engine-side and under investigation.
+This is a solo-maintained, pre-1.0 project. It has not yet undergone
+the years of community scrutiny and extensive edge-case testing that
+established tools such as statsmodels and the R ecosystem have. See
+[Numerical verification](#numerical-verification) for how estimates are
+checked. For published research or other important analyses, we recommend
+cross-checking results against a trusted, established package.
 
-- **Multi-threaded linear algebra is unstable under load** ([#283](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/283)). Under contention on a many-core machine the pure-Rust linear-algebra backend can slow down by 20x or more, so every measurement above pins it to a single thread; multi-core speedup is not reflected here.
-- **Non-default optimizers are slow for Logit / Probit / Tobit** ([#285](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/285)). The default Newton–Raphson is fine; selecting `method="bfgs"` or `"lbfgs"` is currently several times to ~40x slower.
-- **Tobit `method="bfgs"` diverges at n ≥ 10,000** ([#292](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/292)) with a line-search NaN/Inf error. Use the default Newton, or L-BFGS.
-- **Probit / Tobit Newton Hessian goes singular at large n** ([#284](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/284) Probit, [#291](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/291) Tobit) for some datasets — this is why the table above stops at n = 100,000 for those two. The statsmodels / R reference implementations converge on the same data.
+Before 1.0, breaking changes may be introduced in minor version releases,
+not just major ones.
 
-## License
+## Documentation / Links
 
-[MIT License](LICENSE)
-
-[^origin]: econometricsmodels began as the analysis engine for [economicon](https://github.com/masahiroyecon1997dev/economicon), a GUI application for data analysis. That project's development is currently paused while the author's focus is on this package.
+- [Documentation](https://masahiroyecon1997dev.github.io/econometricsmodels/) — usage guides and full API reference
+- [PyPI](https://pypi.org/project/econometricsmodels/)
+- [GitHub Issues](https://github.com/masahiroyecon1997dev/econometricsmodels/issues) — bug reports, feature requests, roadmap status
+- [Changelog](https://github.com/masahiroyecon1997dev/econometricsmodels/blob/main/CHANGELOG.md)
+- [License](https://github.com/masahiroyecon1997dev/econometricsmodels/blob/main/LICENSE) — MIT

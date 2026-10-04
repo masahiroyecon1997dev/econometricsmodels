@@ -20,9 +20,9 @@ FE/RE共通のPython主リファレンス`linearmodels.panel.RandomEffects`と�
 
 FEと同じプロセスで実測選定した（`.claude/rules/testing-policy.md`「パフォーマンス
 比較（ベンチマーク）の方法論」）。n_entities=16,666・n_periods=6・k=5で
-`classical`/`hc1`/`hc2`/`hc3`/`cluster`/`hac`を実測した結果、`hac`が最重量
+`classical`/`hc1`/`hc2`/`hc3`/`cluster`/`dk`を実測した結果、`dk`が最重量
 （中央値318.5ms、classicalの212.0msに対し+50%）だったため、FEと同じく
-`classical`と`hac`を採用する。
+`classical`と`dk`を採用する。
 
 ## `RandomEffects`の切片（`build_pandas_df`での定数列追加）
 
@@ -32,18 +32,22 @@ FEと同じプロセスで実測選定した（`.claude/rules/testing-policy.md`
 この定数列追加も実務上は一度きりのデータ準備であり、MultiIndex構築と同じ理由で
 計測区間の外に置く。
 
-## 既知の限界: `cov_type`間でハウスマン内部FEの構造も変わる
+## `dk_time`の扱い
 
-`REOptions.time`は「HACの時系列順序」と「ハウスマン検定用の内部FE呼び出しの
-1-way/2-way選択（`Some`なら2-way、`None`なら1-way）」を兼ねる
-（`engine_pybind/src/panel/re.rs`モジュールdoc参照）。そのため本スクリプトの
-`_fit_once_engine`は`cov_type="hac"`のときのみ`time=_TIME_COL`を渡すことになり、
-`classical`と`hac`の計測差には「cov_type自体の計算コスト差」に加え「内部
-ハウスマン用FEが1-way→2-wayに変わることによる追加コスト」が混入する（RE自身の
-設計上不可避な交絡で、回避策は無い。詳細は`docs/performance/re.md`「既知の
-限界」）。
+`REOptions.dk_time`は`cov_type="dk"`のHAC時点列専用（必須）で、ハウスマン検定（常に1-way
+比較）には影響しない。`_fit_once_engine`は`cov_type="dk"`のときのみ
+`dk_time=_TIME_COL`を渡す（`dk`以外で渡すと`ValidationError`）。
 
 2-way軸は無い（RE自体がv1で2-wayをスコープ外にしているため、`extra_methods=()`）。
+
+## k軸はclassicalのみ計測する（`k_sweep_cov_types`）
+
+FE（`compare_fe.py`の同名節）と同じ理由で、k軸のcov_typeをclassicalに絞る。
+RE本体の標準誤差は`dk`でも`k=20`・`T=6`で計算できるが、`fit()`が常に計算する
+ハウスマン検定は`X̃`の`k`個を同時Wald検定するため、DK共分散のrank（`T-1`以下）が
+`k`に足りず、engineは`ValidationError`
+（`PanelError::InsufficientDkPeriodsForInference`）で`fit()`を拒否する。
+n軸のdkが`k=5 < T=6`の境界ちょうどに依存している点もFEと同じ。
 
 ## 計測範囲の対称性
 
@@ -63,7 +67,7 @@ linearmodels_ref.py`の`run_re()`と同じ理由）。`aic`/`bic`はlinearmodels
     # 単体計測（デバッグ用）。一括実行と条件を揃えるにはスレッド数を1に固定する。
     RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \\
         python -m performance.compare_re \\
-        --worker --library engine --cov-type hac --n 10000 --k 5
+        --worker --library engine --cov-type dk --n 10000 --k 5
 """
 
 from __future__ import annotations
@@ -116,9 +120,9 @@ def _fit_once_engine(ctx: FitContext):
 
     if ctx.cov_type == "classical":
         options = REOptions(cov_type="classical")
-    elif ctx.cov_type == "hac":
+    elif ctx.cov_type == "dk":
         options = REOptions(
-            cov_type="hac", time=_TIME_COL, dk_bandwidth=_DK_BANDWIDTH
+            cov_type="dk", dk_time=_TIME_COL, dk_bandwidth=_DK_BANDWIDTH
         )
     else:
         raise ValueError(f"unknown cov_type: {ctx.cov_type!r}")
@@ -135,7 +139,7 @@ def _fit_once_linearmodels(ctx: FitContext):
     )
     if ctx.cov_type == "classical":
         lm_cov_type, cov_config = "unadjusted", {"debiased": True}
-    elif ctx.cov_type == "hac":
+    elif ctx.cov_type == "dk":
         lm_cov_type, cov_config = (
             "kernel",
             {
@@ -175,7 +179,8 @@ RE_ADAPTER = PerfAdapter(
     method="re",
     module="performance.compare_re",
     libraries=("engine", "linearmodels"),
-    cov_types=("classical", "hac"),
+    cov_types=("classical", "dk"),
+    k_sweep_cov_types=("classical",),
     reference_versions=lambda: {
         "linearmodels_version": linearmodels.__version__
     },

@@ -17,8 +17,13 @@ use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
 use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
-use crate::column_extraction::{extract_f64_column, extract_f64_columns, x_column_names};
+use crate::column_extraction::{
+    extract_dataframe, extract_f64_column, extract_f64_columns, x_column_names,
+};
 use crate::errors::ValidationError;
+use crate::option_values::{
+    extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
+};
 use crate::validation::{validate_common_roles, validate_no_existing_column};
 
 /// Estimation options for OLS.
@@ -36,7 +41,7 @@ use crate::validation::{validate_common_roles, validate_no_existing_column};
 pub struct OLSOptions {
     /// Standard error type: one of "classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster".
     /// Case-insensitive.
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub cov_type: String,
 
     /// Whether the engine should automatically add an intercept column.
@@ -49,26 +54,27 @@ pub struct OLSOptions {
     /// Confidence level for confidence intervals, in the range (0, 1).
     /// Defaults to 0.95 (a 95% confidence interval). Named `confidence_level` rather
     /// than `alpha` to avoid confusion with the significance level (the 0.05 side).
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub confidence_level: f64,
 
     /// Column name to use as the cluster group key when `cov_type="cluster"`.
     /// Refers to a column in `data` rather than being passed as a separate array.
-    /// Ignored when `cov_type` is not "cluster".
-    #[pyo3(get, set)]
-    pub cluster_col: Option<String>,
+    /// Specifying it with any other `cov_type` raises `ValidationError`.
+    #[pyo3(get)]
+    pub cluster: Option<String>,
 
     /// Number of lags (bandwidth) for HAC (Newey-West) when `cov_type="hac"`.
     /// When `None`, computed automatically via `L = floor(4*(n/100)^(2/9))`.
-    /// Ignored when `cov_type` is not "hac".
-    #[pyo3(get, set)]
+    /// Specifying it with any other `cov_type` raises `ValidationError`.
+    #[pyo3(get)]
     pub hac_lags: Option<i64>,
 
-    /// Column name giving the time order for HAC when `cov_type="hac"`.
-    /// When `None`, the row order of `data` is treated as the time order.
-    /// Ignored when `cov_type` is not "hac".
-    #[pyo3(get, set)]
-    pub time_col: Option<String>,
+    /// Column name giving the time order for HAC. Required when
+    /// `cov_type="hac"` (omitting it raises `ValidationError`): the row order
+    /// of `data` is never assumed to be the time order. Specifying it with
+    /// any other `cov_type` raises `ValidationError`.
+    #[pyo3(get)]
+    pub hac_time: Option<String>,
 }
 
 #[pymethods]
@@ -78,39 +84,69 @@ impl OLSOptions {
         cov_type = "classical".to_string(),
         include_intercept = true,
         confidence_level = 0.95,
-        cluster_col = None,
+        cluster = None,
         hac_lags = None,
-        time_col = None,
+        hac_time = None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
-        cov_type: String,
+        #[pyo3(from_py_with = crate::option_values::cov_type_arg)] cov_type: String,
         include_intercept: bool,
-        confidence_level: f64,
-        cluster_col: Option<String>,
-        hac_lags: Option<i64>,
-        time_col: Option<String>,
+        #[pyo3(from_py_with = crate::option_values::confidence_level_arg)] confidence_level: f64,
+        #[pyo3(from_py_with = crate::option_values::cluster_arg)] cluster: Option<String>,
+        #[pyo3(from_py_with = crate::option_values::hac_lags_arg)] hac_lags: Option<i64>,
+        #[pyo3(from_py_with = crate::option_values::hac_time_arg)] hac_time: Option<String>,
     ) -> Self {
         Self {
             cov_type,
             include_intercept,
             confidence_level,
-            cluster_col,
+            cluster,
             hac_lags,
-            time_col,
+            hac_time,
         }
+    }
+
+    #[setter]
+    fn set_confidence_level(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.confidence_level = extract_strict_float(value, "confidence_level")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_hac_lags(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.hac_lags = extract_strict_opt_int(value, "hac_lags")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_cov_type(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.cov_type = extract_strict_text(value, "cov_type")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_cluster(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.cluster = extract_strict_opt_column(value, "cluster")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_hac_time(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.hac_time = extract_strict_opt_column(value, "hac_time")?;
+        Ok(())
     }
 
     fn __repr__(&self) -> String {
         format!(
             "OLSOptions(cov_type={:?}, include_intercept={}, confidence_level={}, \
-             cluster_col={:?}, hac_lags={:?}, time_col={:?})",
+             cluster={:?}, hac_lags={:?}, hac_time={:?})",
             self.cov_type,
             self.include_intercept,
             self.confidence_level,
-            self.cluster_col,
+            self.cluster,
             self.hac_lags,
-            self.time_col
+            self.hac_time
         )
     }
 }
@@ -137,7 +173,14 @@ pub struct OLSResult {
     #[pyo3(get)]
     pub std_errors: Vec<f64>,
     #[pyo3(get)]
-    pub t_stats: Vec<f64>,
+    pub test_stats: Vec<f64>,
+    /// Distribution of `test_stats`: `"t"` or `"normal"`.
+    #[pyo3(get)]
+    pub stat_dist: String,
+    /// Degrees of freedom of the t distribution (`None` for `"normal"`). May differ from
+    /// `df_resid` (e.g. cluster-robust inference uses `G - 1`).
+    #[pyo3(get)]
+    pub stat_df: Option<i64>,
     #[pyo3(get)]
     pub p_values: Vec<f64>,
     #[pyo3(get)]
@@ -156,14 +199,32 @@ pub struct OLSResult {
     /// lowercase; e.g. `"classical"`, `"hc1"`, `"hac"`, `"cluster"`).
     #[pyo3(get)]
     pub cov_type: String,
+    /// Number of HAC (Newey-West) lags actually used: the explicit `hac_lags` if given,
+    /// otherwise the value chosen automatically, `floor(4 * (n / 100) ^ (2 / 9))`.
+    /// `None` unless `cov_type="hac"`.
+    #[pyo3(get)]
+    pub hac_lags_used: Option<i64>,
     #[pyo3(get)]
     pub r_squared: f64,
     #[pyo3(get)]
-    pub r_squared_adj: f64,
+    pub adj_r_squared: f64,
     #[pyo3(get)]
     pub f_statistic: f64,
     #[pyo3(get)]
     pub f_p_value: f64,
+    /// Numerator degrees of freedom of `f_statistic` (`None` when it is NaN).
+    #[pyo3(get)]
+    pub f_df_num: Option<usize>,
+    /// Denominator degrees of freedom of `f_statistic` (`None` when it is NaN). May differ
+    /// from `df_resid` (e.g. OLS/WLS with cluster-robust inference uses `G - 1`).
+    #[pyo3(get)]
+    pub f_df_denom: Option<usize>,
+    /// Residual degrees of freedom (`n - k`).
+    #[pyo3(get)]
+    pub df_resid: usize,
+    /// Model degrees of freedom (number of slope coefficients, excluding the intercept).
+    #[pyo3(get)]
+    pub df_model: usize,
     #[pyo3(get)]
     pub log_likelihood: f64,
     #[pyo3(get)]
@@ -233,12 +294,12 @@ impl OLSResult {
     ///   numeric type, or contains missing/NaN/infinite values: `ValidationError`
     ///   (same validation as `fit()`'s column extraction, via `extract_f64_column`).
     #[pyo3(signature = (new_data=None))]
-    fn predict(&self, new_data: Option<PyDataFrame>) -> PyResult<Vec<f64>> {
+    fn predict(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<f64>> {
         let Some(new_data) = new_data else {
             return Ok(self.fitted_values.clone());
         };
 
-        let df: DataFrame = new_data.into();
+        let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
         self.predict_for(&df)
     }
 
@@ -257,10 +318,10 @@ impl OLSResult {
     /// - `new_data=None` and this result has no cached training data (currently
     ///   only possible for `IVResult.first_stage()` results): `ValidationError`.
     #[pyo3(signature = (new_data=None))]
-    fn augment(&self, new_data: Option<PyDataFrame>) -> PyResult<PyDataFrame> {
+    fn augment(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<PyDataFrame> {
         let (mut source, predicted) = match new_data {
             Some(new_data) => {
-                let df: DataFrame = new_data.into();
+                let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
                 let predicted = self.predict_for(&df)?;
                 (df, predicted)
             }
@@ -327,9 +388,9 @@ pub fn fit(
     let (cov_type, cov_type_lower) = parse_cov_type(
         &df,
         &options.cov_type,
-        options.cluster_col.as_deref(),
+        options.cluster.as_deref(),
         options.hac_lags,
-        options.time_col.as_deref(),
+        options.hac_time.as_deref(),
     )?;
 
     let input = OlsInput::from_columns(&y_slice, &x_slices, x, options.include_intercept, y)
@@ -367,7 +428,9 @@ pub(crate) fn ols_estimator_to_result(
     OLSResult {
         params: mat_to_vec(estimator.params()),
         std_errors: mat_to_vec(estimator.std_errors()),
-        t_stats: mat_to_vec(estimator.t_stats()),
+        test_stats: mat_to_vec(estimator.test_stats()),
+        stat_dist: estimator.stat_dist().name().to_string(),
+        stat_df: estimator.stat_dist().df().map(|df| df as i64),
         p_values: mat_to_vec(estimator.p_values()),
         conf_lower: mat_to_vec(estimator.conf_lower()),
         conf_upper: mat_to_vec(estimator.conf_upper()),
@@ -376,10 +439,15 @@ pub(crate) fn ols_estimator_to_result(
         dep_var_name: estimator.input().dep_var_name().to_string(),
         n_obs: estimator.input().nobs(),
         cov_type: cov_type_lower,
+        hac_lags_used: estimator.hac_lags_used().map(|lags| lags as i64),
         r_squared: estimator.r_squared(),
-        r_squared_adj: estimator.r_squared_adj(),
+        adj_r_squared: estimator.adj_r_squared(),
         f_statistic: estimator.f_statistic(),
         f_p_value: estimator.f_p_value(),
+        f_df_num: estimator.f_df().map(|(num, _)| num),
+        f_df_denom: estimator.f_df().map(|(_, denom)| denom),
+        df_resid: estimator.df_resid(),
+        df_model: estimator.df_model(),
         log_likelihood: estimator.log_likelihood(),
         aic: estimator.aic(),
         bic: estimator.bic(),

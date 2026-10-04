@@ -22,6 +22,8 @@ the `OLSResults`/`FEResults` precedent).
 
 from __future__ import annotations
 
+from typing import Literal
+
 import polars as pl
 
 from .. import _lib
@@ -85,20 +87,24 @@ class RE:
             The estimation results.
 
         Raises:
+            TypeError: An argument has the wrong type (for example
+                `x` is a string instead of a list of column names). A
+                builtin exception, not a `ValidationError`.
             ValidationError: The input or options are invalid (`x` is
                 empty, a column is missing, contains missing values or
-                NaN/infinity, `y`/`x`/`entity`/`time` overlap,
+                NaN/infinity, `y`/`x`/`entity` overlap, `dk_time` equal to
+                `y` or `entity`,
                 insufficient observations, `confidence_level` out of
                 range, an unknown `cov_type` (or `cov_type="hc0"`,
-                unsupported for RE), a singleton entity group (raised
-                by the internal one-way FE regression that RE's σ_ε²
-                estimation delegates to — unlike a singleton
-                encountered by the separate internal FE comparison
-                used for the Hausman test, which falls back to `None`
-                on `hausman_statistic`/`hausman_p_value`/`hausman_df`
-                instead of failing `fit()`; see `REResults`'s
-                docstring), or a `cov_type="hac"` request with `time`
-                unset). A subclass of `ValueError`.
+                unsupported for RE), `dk_time` specified with a
+                `cov_type` other than `"dk"`, a singleton entity group
+                (raised by the internal one-way FE regression that
+                RE's σ_ε² estimation delegates to), a
+                `cov_type="dk"` request with `dk_time` unset, or
+                `cov_type="dk"` with no more unique time periods than
+                regressors: the Driscoll-Kraay covariance has rank at
+                most T-1, so the Hausman test cannot be computed). A
+                subclass of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. a singular quasi-demeaned design
                 matrix). A subclass of `RuntimeError`.
@@ -120,24 +126,28 @@ class REResults:
     side for why the quasi-demeaned constant column is named this
     way).
 
-    The Hausman test comparing RE against the equivalent FE
-    specification (`hausman_statistic`/`hausman_p_value`/`hausman_df`)
-    is computed automatically inside `fit()` and exposed directly as
-    properties here, rather than as a separate method like FE's
-    `fixed_effects()` (`panel-common.md` section 2.4). All three
-    are `None` when the internal FE comparison used for the Hausman
-    test is unavailable — in practice this only happens when
-    `REOptions.time` is set (requesting the two-way FE comparison,
-    `docs/spec/re-spec.md` section 3.7) and that two-way regression
-    itself fails (e.g. an unbalanced panel or a singleton time
-    period), or when `Var(β_FE) - Var(β_RE)` is numerically singular;
-    RE's own result is still returned normally in that case. This is
-    a narrower condition than it might appear: a failure in RE's
-    **own** (always one-way) internal FE call — used to estimate σ_ε², not
-    for the Hausman comparison — makes `fit()` itself raise instead
-    (e.g. a singleton entity, or a regressor with zero variance after
-    the one-way within-transformation), since that failure means
-    σ_ε² could not be estimated at all; see `RE.fit()`'s docstring.
+    The Hausman test (`hausman_statistic`/`hausman_p_value`/
+    `hausman_df`) is computed automatically inside `fit()` and exposed
+    directly as properties here, rather than as a separate method like
+    FE's `fixed_effects()` (`panel-common.md` section 2.4). It is the
+    regression-based (auxiliary regression) version (Wooldridge 2010,
+    section 10.7.3; equivalent to `plm::phtest(method = "aux",
+    effect = "individual")`), always comparing against one-way (entity)
+    fixed effects — the same structure as RE itself — regardless of
+    `REOptions.dk_time`. The Wald test's covariance follows `cov_type`
+    (the default `"cluster"` gives the cluster-robust Hausman test;
+    `"classical"` gives the classical version). The auxiliary
+    regression uses OLS-style small-sample corrections, which differ
+    from the RE standard errors'. All three are `None` only when
+    there are no slope coefficients to compare. If the auxiliary
+    regression cannot be computed (rank-deficient design, or a
+    structurally singular robust covariance such as too few clusters or
+    periods for the auxiliary slopes), `fit()` raises
+    `ValidationError`/`ComputationError`. A failure in RE's
+    own internal one-way FE call (used to estimate σ_ε²) makes `fit()`
+    itself raise instead (e.g. a singleton entity, or a regressor with
+    zero variance after the one-way within-transformation); see
+    `RE.fit()`'s docstring.
 
     Args:
         raw: The estimation result object returned by `_lib.fit_re`
@@ -168,9 +178,24 @@ class REResults:
         return dict(zip(self._raw.param_names, self._raw.std_errors))
 
     @property
-    def t_stats(self) -> dict[str, float]:
-        """Coefficient name to t-statistic."""
-        return dict(zip(self._raw.param_names, self._raw.t_stats))
+    def test_stats(self) -> dict[str, float]:
+        """Coefficient name to test statistic (t-statistic; see
+        `stat_dist`)."""
+        return dict(zip(self._raw.param_names, self._raw.test_stats))
+
+    @property
+    def stat_dist(self) -> Literal["t", "normal"]:
+        """Distribution of `test_stats`: `"t"` (t-statistics) or
+        `"normal"` (z-statistics)."""
+        return self._raw.stat_dist
+
+    @property
+    def stat_df(self) -> int | None:
+        """Degrees of freedom of the t distribution behind `test_stats`,
+        or `None` when `stat_dist` is `"normal"`. May differ from
+        `df_resid` (cluster-robust inference uses `G - 1`, Driscoll-Kraay
+        `T - 1`), so use this to recompute p-values from `test_stats`."""
+        return self._raw.stat_df
 
     @property
     def p_values(self) -> dict[str, float]:
@@ -227,23 +252,42 @@ class REResults:
         return self._raw.cov_type
 
     @property
+    def dk_bandwidth_used(self) -> int | None:
+        """Driscoll-Kraay bandwidth actually used: the explicit
+        `dk_bandwidth` if given, otherwise the value chosen automatically,
+        `floor(4 * (t / 100) ** (2 / 9))` where `t` is the number of
+        unique time periods in `REOptions.dk_time`. `None` unless
+        `cov_type="dk"`."""
+        return self._raw.dk_bandwidth_used
+
+    @property
     def f_statistic(self) -> float:
         """F-statistic for the joint significance of the slope
-        coefficients, excluding the intercept. Unlike FE, this is
-        **not** a `cov_type`-dependent Wald test: it always compares
-        the residual sum of squares against a total sum of squares
-        computed from the simple mean of the quasi-demeaned dependent
-        variable, following `linearmodels.RandomEffects`'s definition
-        (see `engine::panel::re::ReEstimator::fit`'s docstring on the
-        Rust side for the derivation). As a consequence it can be
-        negative for extremely unbalanced panels, and is `NaN` when
-        there are no slope coefficients (`df_model == 1`)."""
+        coefficients, excluding the intercept (classical F-test when
+        `cov_type="classical"`, a robust Wald test otherwise; the
+        degrees of freedom follow `cov_type`, see `f_df_denom`). `NaN`
+        when there are no slope coefficients (`df_model == 1`)."""
         return self._raw.f_statistic
 
     @property
     def f_p_value(self) -> float:
         """P-value of the F-statistic."""
         return self._raw.f_p_value
+
+    @property
+    def f_df_num(self) -> int | None:
+        """Numerator degrees of freedom of `f_statistic` (`None` when it
+        is NaN, i.e. there are no slope coefficients)."""
+        return self._raw.f_df_num
+
+    @property
+    def f_df_denom(self) -> int | None:
+        """Denominator degrees of freedom of `f_statistic` (`None` when it
+        is NaN). Follows `cov_type` like the t-tests (`G - 1` for
+        `cov_type="cluster"`, `T - 1` for `"dk"`, `df_resid` otherwise),
+        so it equals `stat_df` whenever `f_statistic` is not NaN. Use this
+        to recompute the p-value from `f_statistic`."""
+        return self._raw.f_df_denom
 
     @property
     def log_likelihood(self) -> float:
@@ -278,14 +322,20 @@ class REResults:
 
     @property
     def hausman_statistic(self) -> float | None:
-        """Classical Hausman test statistic comparing RE against the
-        equivalent FE specification. Computed with classical standard
-        errors regardless of `cov_type`. Always non-negative, matching
-        R's `plm::phtest` (the underlying quadratic form is negative
-        when the compared variance difference is indefinite in finite
-        samples; this is corrected by taking its absolute value, as
-        `plm::phtest` does unconditionally). `None` if the internal FE
-        comparison is unavailable (see the class docstring)."""
+        """Regression-based Hausman test statistic (chi-squared
+        version, `k × F` of the Wald test that the `k` within-transformed
+        slope regressors are jointly zero in the auxiliary regression of
+        the quasi-demeaned `y` on the quasi-demeaned regressors and the
+        within-transformed regressors). Always non-negative. The
+        comparison is always against one-way FE. The Wald test's
+        covariance follows `cov_type` (default `"cluster"` gives the
+        cluster-robust Hausman test; `"classical"` gives the classical
+        version). The auxiliary regression uses OLS-style small-sample
+        corrections, unlike the RE standard errors.
+        For unbalanced panels the auxiliary regression's constant is
+        left untransformed, as in `plm::phtest`. `None` if the
+        auxiliary regression is unavailable (see the class
+        docstring)."""
         return self._raw.hausman_statistic
 
     @property
@@ -312,7 +362,7 @@ class REResults:
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are
-            `param`, `coef`, `std_err`, `t_stat`, `p_value`,
+            `param`, `coef`, `std_err`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
         return [
@@ -320,7 +370,7 @@ class REResults:
                 "param": name,
                 "coef": coef,
                 "std_err": se,
-                "t_stat": t,
+                "test_stat": t,
                 "p_value": p,
                 "conf_lower": lower,
                 "conf_upper": upper,
@@ -329,7 +379,7 @@ class REResults:
                 self._raw.param_names,
                 self._raw.params,
                 self._raw.std_errors,
-                self._raw.t_stats,
+                self._raw.test_stats,
                 self._raw.p_values,
                 self._raw.conf_lower,
                 self._raw.conf_upper,

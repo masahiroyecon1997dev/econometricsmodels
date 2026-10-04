@@ -1,4 +1,5 @@
-"""Top-level package for `econometricsmodels`, the analysis engine for economicon.
+"""Top-level package for `econometricsmodels`, a programmatic Python API
+for econometric analysis.
 
 Exposes a Python API that accepts polars DataFrames, as a thin wrapper
 around the native extension (`econometricsmodels._lib`) built by
@@ -46,4 +47,4 @@ __all__ = [
     "WLSResults",
 ]
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"

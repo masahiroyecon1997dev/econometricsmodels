@@ -59,7 +59,9 @@ _FIXTURE_MODULES = [
     "benchmark.nonlinear.fixtures.generate_tobit_crosscheck_fixtures",
     "benchmark.iv.fixtures.generate_iv_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_fe_crosscheck_fixtures",
+    "benchmark.panel.fixtures.generate_fe_plm_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_re_crosscheck_fixtures",
+    "benchmark.panel.fixtures.generate_re_statsmodels_cluster_fixtures",
 ]
 
 

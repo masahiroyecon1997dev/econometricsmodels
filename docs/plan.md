@@ -29,9 +29,9 @@
 「基礎から積み上げる」順に段階実装する。一度にすべて実装せず、フェーズ／タスク単位で細分化して進める。
 
 1. **Phase 1（基礎回帰）**: OLS, 区分回帰, WLS
-2. **Phase 2（一般化・離散選択）**: GLS, Logit, Probit, Tobit
-3. **Phase 3（操作変数）**: IV（2SLS, GMM）
-4. **Phase 4（パネルデータ）**: FE（固定効果）, RE（変量効果）
+2. **Phase 2（一般化・離散選択）**: GLS, Logit, Probit, Tobit, 多項ロジット, 順序ロジット・プロビット
+3. **Phase 3（操作変数）**: IV（2SLS, GMM）, 弱操作変数診断, GMMのC統計量
+4. **Phase 4（パネルデータ）**: FE（固定効果）, RE（変量効果）, FE-2SLS（FE-IV）, FE-GMM
 5. **Phase 5（因果推論）**: DID, RDD
 6. **Phase 6（IO手法）**: ロジット, Nested Logit, Random Coefficient Logit, シングルエージェントモデル, 静学ゲーム, 動学ゲーム
 7. **Phase 7（後回し・時系列）**: ARCH, GARCH, VAR

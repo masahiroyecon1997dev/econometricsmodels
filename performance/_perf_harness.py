@@ -164,7 +164,7 @@ class PerfAdapter:
             （"performance.compare_ols"）。1計測点をサブプロセスで再実行する際の
             `python -m <module> --worker ...` の呼び出し先。
         libraries: 計測対象ライブラリ。先頭は必ず "engine"。以降は
-            README「Verification accuracy」表の primary reference
+            `docs/guide/verification.md` のリファレンス表の primary reference
             （OLS/WLS/Logit/Probit: "statsmodels"、IV: "linearmodels"）。
             インプロセス計測できるリファレンス実装が無い手法は `("engine",)` の
             単独指定でよい（Tobit: 主リファレンスの R `AER::tobit` は共通ハーネス

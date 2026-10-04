@@ -16,7 +16,7 @@ $ARGUMENTS
 ## 手順
 
 1. **リファレンス実装の選定**
-   - 対象手法に応じて、**pyfixest**（固定効果推定等）または該当する**Rパッケージ**（fixest, plm, AER, ivreg等）を選定する。
+   - 対象手法に応じて、主リファレンス（**statsmodels** / **linearmodels**）と、独立クロスチェック用の**Rパッケージ**（fixest, plm, AER, ivreg等）を選定する。pyfixestは精度検証には使わない（`.claude/rules/testing-policy.md`「リファレンス実装」参照）。
    - 選定理由をユーザーに提示する。
 
 2. **ベンチマーク値の作成**
@@ -42,7 +42,7 @@ $ARGUMENTS
 
 ## 完了条件
 
-- pyfixest/Rとの比較テストが`tests/`に存在する
+- リファレンス実装（statsmodels/linearmodels/R）との比較テストが`tests/`に存在する
 - 許容誤差とその根拠がコードコメントに明記されている
 - `docs/guide/verification.md`と`docs/guide/inference-conventions.md`に対象手法が反映されている
 - 性能比較（`performance/compare_<method>.py`）を追加した場合は、`benchmark_performance.yml`のmatrixに手法を足す（公開ページ`docs/guide/performance-results.md`は次回リリース時にCIのartifactから自動生成されるため手書きしない。`docs/guide/performance.md`の手書き部分に新手法固有の注意があれば追記する）

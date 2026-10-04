@@ -5,9 +5,9 @@ Every estimator is compared numerically against established reference implementa
 ## How verification works
 
 - **Primary reference.** For each statistic a primary reference implementation is chosen, the one whose conventions match the ones used here. Results are compared at a relative tolerance of `1e-8` unless a documented reason requires a looser value.
-- **Independent cross-check.** Where available, a second, independent implementation (mostly R) is compared as well. It covers every reported statistic, not only coefficients and standard errors, so a bug in the primary reference or a shared misunderstanding is not silently inherited.
+- **Independent cross-check.** Where available, a second, independent implementation (mostly R) is compared as well. It covers the main reported statistics, not only coefficients and standard errors, so a bug in the primary reference or a shared misunderstanding is not silently inherited. Statistics without an independent reference are listed under [Not compared against a second reference](#not-compared-against-a-second-reference).
 - **Frozen reference values.** Reference values are generated once from the pinned reference packages and stored as JSON files in the repository. The test suite compares against these files, so R and the reference packages are not needed to run the tests, and a new release of a reference package cannot change a result unnoticed.
-- **Discrepancies are investigated, not accepted.** When two implementations use different statistical conventions, such as small-sample corrections, the difference is documented (see [Inference conventions](inference-conventions.md)) and the comparison is adjusted for that statistic only. Tolerances are never loosened across the board.
+- **Convention differences are documented.** When two implementations use different statistical conventions, such as small-sample corrections, the difference is documented (see [Inference conventions](inference-conventions.md)) and the comparison is adjusted for that statistic only.
 - **Continuous integration.** The comparisons run on every pull request in the *CI (python)* workflow on Python 3.12, 3.13 and 3.14, and the Rust engine's own unit and property-based tests run in *CI (engine)*.
 
 ## Reference implementations
@@ -60,8 +60,8 @@ For the FE and RE cross-checks (coefficient and F-statistic p-values) the absolu
 |---|---|---|
 | OLS | `1e-8` (classical, HC0–HC3, cluster; measured about `1e-14`) | HAC `1e-2` (measured about 0.4 %): R's Newey–West small-sample, pre-whitening and adjustment conventions differ. p-values use an absolute tolerance of `1e-6`. |
 | WLS | `1e-8` | HAC `5e-2` (measured at most about 4.3 %). p-values use an absolute tolerance of `1e-6`. |
-| Logit | `2e-4` (measured about `1e-4`) | Both sides are iterative optimizers. Marginal-effect standard errors `5e-3` (delta method, measured `1.8e-3`). |
-| Probit | `2e-4` | Marginal-effect standard errors `1e-3`. |
+| Logit | `2e-4` (measured about `1.4e-4`) | Both sides are iterative optimizers. Marginal-effect standard errors `2e-4` (delta method, measured `8.3e-5`). |
+| Probit | `2e-4` (measured about `9e-5`) | Marginal-effect standard errors `2e-4` (delta method, measured `5.5e-5`). |
 | Tobit | `1e-8` (measured about `2e-9`) | `5e-8` for HC0 / HC1 on a badly conditioned design; `1e-4` for standard errors on the real-data example, limited by `censReg`'s convergence. The strict comparison on that data is against `AER::tobit`. |
 | IV (2SLS) | `1e-8` | HAC `1e-2` (`0.1` for a 40-observation sample); Wu-Hausman under HAC `2e-2`. These are small-sample convention differences. |
 | FE | `1e-8` (every `cov_type`, including cluster and Driscoll–Kraay; measured about `1e-14`) | none. The plm second reference for one-way cluster and Driscoll–Kraay uses the same `1e-8` (measured up to `5e-11` for the F statistic and `8e-13` for coefficients and standard errors); p-values `1e-6` relative, measured up to `9e-10` in the far tail. |
@@ -89,7 +89,7 @@ The F statistic tests that all slope coefficients are jointly zero (the constant
 
 ## Not compared against a second reference
 
-- **Tobit has no non-R reference.** Primary and cross-check are both R implementations (`survreg` and `maxLik`). The hand-written parts of the cross-check script (the Jacobian from log σ to σ, the HC1 correction, the marginal effects) are verified against numerical derivatives and an independent implementation of the closed-form expressions.
+- **Tobit: both references are R packages.** Primary and cross-check are both R implementations (`survreg` and `maxLik`). The hand-written parts of the cross-check script (the Jacobian from log σ to σ, the HC1 correction, the marginal effects) are verified against numerical derivatives and an independent implementation of the closed-form expressions.
 - **Probit and R's `glm`.** For a non-canonical link, R's `glm` covariance uses the expected information matrix, which differs from the observed information used here by 2–3 % (classical) and up to 8 % (HC0 / HC1). The cross-check therefore builds the observed-information covariance explicitly, checked against `numDeriv::hessian`. Logit is unaffected.
 - **statsmodels gaps for Logit and Probit.** statsmodels returns HC0 for `hc1` (no `n/(n-k)` correction) and cannot compute OPG marginal effects, so R is the only reference for those two.
 - **IV GMM** is checked against linearmodels only. **IV HC2/HC3** is checked against `ivreg` only, because linearmodels has no equivalent.

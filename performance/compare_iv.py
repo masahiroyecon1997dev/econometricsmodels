@@ -11,7 +11,7 @@ CLAUDE.md 1章「計算コアはRustで実装し高速化」の狙いを定量�
 
 ## リファレンス実装
 
-README「Verification accuracy」の primary reference に従い linearmodels のみと
+公開ページ（`docs/guide/verification.md`）の primary reference に従い linearmodels のみと
 比較する（`benchmark/iv/references/linearmodels_ref.py` と同じ主リファレンス）。
 2SLS は `linearmodels.iv.IV2SLS`、GMM は `linearmodels.iv.IVGMM` に対応させる
 （engine cov_type ↔ linearmodels の対応は `linearmodels_ref.py` の `_COV_TYPE_MAP`

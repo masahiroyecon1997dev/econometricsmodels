@@ -51,3 +51,4 @@ $ARGUMENTS （patch/minor/major、または明示的なバージョン番号）
 3. `uv run python -m performance.render_docs_results <一時ディレクトリ> --tag vX.Y.Z --commit <sha> --run-id <run-id> --results-page docs/guide/performance-results.md --overview-page docs/guide/performance.md`で再生成する。
 4. 差分を確認する。以前の版から大きく悪化した点（例: 速度比が1を割った手法、実行時間が桁で変わった点）があれば、`docs/guide/performance.md`の「Known limitations」と`docs/performance/<method>.md`（日本語ノート）の「既知の限界」に反映する。解消した課題は削除する。共有ランナーのノイズ（±数十%）と区別する。
 5. `docs/guide/performance.md`の手書き部分に埋め込んだ数値（RE・Logit/Probitの倍率、サマリー表の条件の説明等）が、再生成後の表と食い違っていないか確認して直す。
+6. `README.md`の「Performance」節（手法別の`fit()`時間の表、倍率の例、ピークメモリの例）を、再生成後のサマリー表の値（n=1,000,000、classical）に合わせて直す。有効数字2桁程度に丸めて転記し、比較対象の手法・向き（速い／遅い）が変わっていないかも確認する。

@@ -1,6 +1,6 @@
 ---
 name: reference-benchmark
-description: statsmodels（主）・Rパッケージ（クロスチェック）・pyfixest（FE系）と、合成データセット/Wooldridgeデータセットを使って推定手法のベンチマーク値を生成し、tests/fixtures/benchmarks/にJSONとして固定する。新しい推定手法のテスト作成（/test-new）の一部として使用する。
+description: statsmodels/linearmodels（主）・Rパッケージ（クロスチェック）と、合成データセット/Wooldridgeデータセットを使って推定手法のベンチマーク値を生成し、tests/fixtures/benchmarks/にJSONとして固定する。新しい推定手法のテスト作成（/test-new）の一部として使用する。
 argument-hint: "[手法名]"
 allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
 ---
@@ -15,7 +15,7 @@ allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
 
 - **statsmodels**: 主リファレンス。classical/HC0-3/cluster/HAC、AIC/BIC/log-likelihood、ロバストWald検定まで一貫して対応
 - **R（lm + sandwich/lmtest）**: 独立実装によるクロスチェック。新しい統計量・cov_type追加時はstatsmodelsとRの一致を先に確認してからフィクスチャを固定する。対象は係数・標準誤差に限らない。R²・AIC・BIC・対数尤度・F統計量・F検定p値等、公開する統計量は全てcrosscheckする（`testing-policy.md`「リファレンス実装」参照）
-- **pyfixest**: OLSの正確性検証には使わない（HC2/HC3にpyfixest自身の実装バグによる系統的乖離があるため、詳細は`testing-policy.md`「リファレンス実装」参照）。性能比較専用。固定効果が絡むPhase4（FE/RE）以降での採否はその時点で個別に判断する
+- **pyfixest**: OLSの正確性検証には使わない（HC2/HC3にpyfixest自身の実装バグによる系統的乖離があるため、詳細は`testing-policy.md`「リファレンス実装」参照）。性能比較専用。固定効果が絡むFE/REの正確性検証にも使わない（linearmodelsとR `fixest`/`plm`を使う。詳細は`docs/guide/verification.md`参照）
 - **statsmodels discrete model（Logit等）固有の既知の欠落**（Probit実装時も要確認）: `cov_type="hc1"`はOLS/GLMと異なり小標本補正が未実装でHC0と同一値になる（Rが正リファレンス）。`cov_type="opg"`はネイティブ非対応（"cov_type not recognized"）で`model.score_obs(params)`から手計算が必要、かつ`opg`の限界効果（`get_margeff()`）はfit済み結果へのcov_params事後上書きが効かないためstatsmodels側では算出不可（R `marginaleffects`の`vcov=`引数を使う）。詳細は`docs/spec/logit-spec.md`「テスト」参照
 
 ## `benchmark/` ディレクトリの構成（動作確認済み）
@@ -39,7 +39,7 @@ allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
 - `benchmark/regenerate_all.py`（root）: 合成データCSV＋全フィクスチャJSONの一括再生成オーケストレータ（3系統の`freeze.py`＋11個の`generate_*_fixtures.py`を`python -m`で順に実行）。`--datasets-only`（CSVのみ、Rscript不要）／`--fixtures-only`。新しいシナリオ・データセットを追加した場合のみ再実行する（自動追従はしない）。
 - `performance/`（リポジトリ直下、`benchmark/`の外）: リファレンス実装との**性能比較**（正確性検証とは別軸、`testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」参照）。pytest無関係で性質が違うため分離している。
   - `_perf_harness.py`: 手法非依存の計測ハーネス（サブプロセス隔離・ウォームアップ＋中央値・ピークRSS・releaseビルド検知・n/kスイープ・レポート組み立て・CLI）。手法固有の「変わる部分」は`PerfAdapter`（データ生成・ライブラリ別`fit_once`・cov_type・軸の刻み・リファレンス実装バージョン）にまとめて`run_cli()`に渡す。
-  - `compare_<method>.py`: 手法ごとの薄いアダプタ＋`__main__`。`compare_ols.py`・`compare_wls.py`・`compare_logit.py`・`compare_probit.py`・`compare_iv.py`（`.github/workflows/benchmark_performance.yml`の`method`matrixから定期実行）が実装例。比較対象はREADME「Verification accuracy」表のprimary reference単体（OLS/WLS/Logit/Probit: statsmodels、IV: linearmodels。pyfixestは使わない）。cov_typeは代表2点（最軽classical＋最重、実装時に軽く実測して選定）のみ。リファレンス実装がネイティブ非対応の条件（Logit/ProbitのOPG、IVのGMM×hac等）は対称計測できない・病的に遅いため性能比較の対象から外す。`default_method`（IVの2sls等）と`extra_methods`（method軸で代表点のみ計測、Logit/Probitのbfgs/lbfgs・IVのgmm）で method 別計測を表現する。
+  - `compare_<method>.py`: 手法ごとの薄いアダプタ＋`__main__`。`compare_ols.py`・`compare_wls.py`・`compare_logit.py`・`compare_probit.py`・`compare_iv.py`（`.github/workflows/benchmark_performance.yml`の`method`matrixから定期実行）が実装例。比較対象は`docs/guide/verification.md`のリファレンス表のprimary reference単体（OLS/WLS/Logit/Probit: statsmodels、IV: linearmodels。pyfixestは使わない）。cov_typeは代表2点（最軽classical＋最重、実装時に軽く実測して選定）のみ。リファレンス実装がネイティブ非対応の条件（Logit/ProbitのOPG、IVのGMM×hac等）は対称計測できない・病的に遅いため性能比較の対象から外す。`default_method`（IVの2sls等）と`extra_methods`（method軸で代表点のみ計測、Logit/Probitのbfgs/lbfgs・IVのgmm）で method 別計測を表現する。
   - `render_performance_summary.py`: 結果JSON→job summary用Markdown整形（手法名・cov_type・ライブラリは`_meta`から読むため手法非依存）。
 - `benchmark/<系統>/references/`（(b) リファレンスアダプタ層）: 「凍結df＋spec＋cov_type→結果dict」に純化したアダプタと、それが呼ぶ`.R`本体。
   - `statsmodels_ref.py`（`linear`/`nonlinear`、statsmodelsが主リファレンスの系統）: 主リファレンス。1回呼べば1ケース分の結果を返す。`linear`は`--weight-col`指定でWLS（`smf.wls`）にも対応、`nonlinear`は`--model logit`/`--model probit`で切り替える。**ライブラリ名（`statsmodels`）と同名にすると`sys.path`経由で衝突するため`_ref`サフィックス付き**（旧`run_statsmodels_benchmark.py`同名衝突バグの再発防止）。

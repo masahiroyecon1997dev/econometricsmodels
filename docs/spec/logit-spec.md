@@ -263,9 +263,11 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 - 許容誤差: statsmodels主リファレンス（`test_logit_reference.py`）は`RTOL=1e-8`。Rクロスチェック
   （`test_logit_crosscheck.py`、反復最適化同士の比較のため機械精度一致は期待できない）は
-  `RTOL=2e-4`を基本としつつ、限界効果の`std_err`（デルタ法、`RTOL=2e-4`）・p値（標準正規分布CDFの
-  裾での増幅、`ATOL=2e-5`）・`near_separation`シナリオの信頼区間（`RTOL=6e-4`）は実測に基づき
-  個別の値を設定している。
+  `RTOL=1e-6`（係数・SE・信頼区間・限界効果の`effect`/`std_err`で共通、実測最大~5e-8）を基本とし、
+  p値（標準正規分布CDFの裾での増幅）のみ`ATOL=1e-7`を設定している。R側の参照値は
+  `glm()`の収束判定を`epsilon=1e-14`に厳しくし（既定の1e-8だと`sandwich::estfun()`が1反復前の
+  作業重みを使い、ロバストSEの参照値に~3e-5のノイズが乗る）、`marginaleffects`の有限差分の
+  刻み幅を`eps=1e-6`にして生成する（`benchmark/nonlinear/references/run_glm_crosscheck.R`）。
 - **statsmodelsのdiscrete modelにおける既知の欠落**: `cov_type="hc1"`は`LogitResults`に
   `cov_HC1`が未定義のためstatsmodelsが暗黙に`hc0`と同じ値を返す（Rの`n/(n-k)`補正版とは一致しない）。
   このためRを主リファレンスとし、`test_logit_reference.py`は`hc1`を検証対象から除外する。

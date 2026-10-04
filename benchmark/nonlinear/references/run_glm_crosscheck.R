@@ -66,7 +66,21 @@ library(lmtest)
 library(marginaleffects)
 library(jsonlite)
 
-model <- glm(as.formula(formula_str), data = df, family = binomial(link = link))
+# 収束判定を既定（epsilon=1e-8）より厳しくする: `sandwich::estfun()`は`glm()`が
+# 最終反復の1つ前の係数で計算した作業重みを使うため、既定のままだとスコア寄与が
+# 最終係数のスコアとずれ、hc0/hc1/opgの標準誤差（とそれを使う限界効果の標準誤差・
+# 信頼区間）に相対誤差~3e-5程度の参照側ノイズが乗る（mrozで実測。係数・classicalは
+# 影響なし）。epsilon=1e-14では~4e-10まで下がる。
+glm_control <- glm.control(epsilon = 1e-14, maxit = 100)
+model <- glm(
+  as.formula(formula_str),
+  data = df,
+  family = binomial(link = link),
+  control = glm_control
+)
+if (!model$converged) {
+  stop("glm() did not converge with epsilon=1e-14")
+}
 
 # 観測情報行列（真の対数尤度のHessian）の重みを、本実装（nonlinear/probit.rs・
 # logit.rs）と同じ解析式で計算する（上記docコメント参照）。
@@ -170,7 +184,12 @@ names(conf_high) <- rownames(ct)
 # 本実装・statsmodelsと同じ式（k=回帰係数の数のみ）に一致することを
 # ベンチマーク作成時に実測確認済み（OLSのガウス分布族k+1慣習とは異なる）。
 y_name <- all.vars(as.formula(formula_str))[1]
-null_model <- glm(as.formula(paste(y_name, "~ 1")), data = df, family = binomial(link = link))
+null_model <- glm(
+  as.formula(paste(y_name, "~ 1")),
+  data = df,
+  family = binomial(link = link),
+  control = glm_control
+)
 ll <- as.numeric(logLik(model))
 ll_null <- as.numeric(logLik(null_model))
 k_params <- length(coef(model))
@@ -201,17 +220,25 @@ format_margeff <- function(me_df) {
 # 中央値」（nonlinear-common.md6章「限界効果」節）と評価点がずれる
 # （ベンチマーク作成時に実機確認済み、mrozデータでdydxが大きくずれた）。
 # FUN_numeric/FUN_integerを両方明示することで全列を統一的に生の平均・中央値にする。
+# eps: `slopes()`/`avg_slopes()`は有限差分で限界効果を数値微分する。既定の刻み幅の
+# ままだと、勾配が急なケース（near_separationのx1平均点でdydx~7.2）で解析解
+# （β·p(1-p)）に対し相対誤差~7e-6のずれが出る（効果の点推定・標準誤差の双方。
+# `numderiv=`引数は効果の刻み幅に影響しない）。eps=1e-6で解析解と~1e-11、
+# 標準誤差も本実装と~1e-8で一致する。
+margeff_eps <- 1e-6
 margeff <- list(
-  overall = format_margeff(avg_slopes(model, vcov = vc)),
+  overall = format_margeff(avg_slopes(model, vcov = vc, eps = margeff_eps)),
   mean = format_margeff(slopes(
     model,
     newdata = datagrid(model = model, FUN_numeric = mean, FUN_integer = mean),
-    vcov = vc
+    vcov = vc,
+    eps = margeff_eps
   )),
   median = format_margeff(slopes(
     model,
     newdata = datagrid(model = model, FUN_numeric = median, FUN_integer = median),
-    vcov = vc
+    vcov = vc,
+    eps = margeff_eps
   ))
 )
 

@@ -25,11 +25,12 @@ Note:
     許容誤差はOLSのRクロスチェック（classical/HC0-3/clusterで機械精度一致）より
     緩い。ProbitはRのglm（IRLS/Fisher scoring）と本実装（Newton/BFGS/L-BFGS）が
     どちらも反復最適化のため、OLSの閉形式解同士の比較（機械精度一致）ほどの
-    精度は出ない。基本方針はRTOL=2e-4（Logitと同じ基本方針、実測最大相対誤差は
-    Logitよりやや小さい~9e-5）。統計量ごとに実測値が
-    大きく異なるものはさらに個別の許容誤差を設定している（限界効果のstd_err・
-    p値。根拠はコード中の各定数の直前コメント参照。
-    `testing-policy.md`「許容誤差」の方針通り）。
+    精度は出ない。ただしR側の参照値は`glm()`の収束判定と`marginaleffects`の
+    数値微分の刻み幅を厳しくして生成しており（`benchmark/nonlinear/references/
+    run_glm_crosscheck.R`参照）、基本方針はLogitと同じRTOL=1e-6（実測最大相対誤差
+    ~6e-8に対するマージン）。信頼区間（0に近い境界での増幅）とp値のみ個別の
+    許容誤差を設定している（根拠は`tests/_tolerances.py`の`probit_crosscheck`の
+    コメント参照。`testing-policy.md`「許容誤差」の方針通り）。
 """
 
 from __future__ import annotations
@@ -59,12 +60,12 @@ FIXTURE_PATH = (
 RTOL = TOLERANCES["probit_crosscheck"]["rtol"]
 ATOL = TOLERANCES["probit_crosscheck"]["atol"]
 
-# marginal_effects()のstd_err（デルタ法、ヤコビアン経由）は実測最大相対誤差~5.5e-5
-# （mroz/opg/mean/age）。effect自体の実測最大は~2e-5。
-RTOL_MARGEFF_SE = TOLERANCES["probit_crosscheck"]["rtol_margeff_se"]
+# conf_intは下限（または上限）が0に近いと絶対誤差が相対誤差に増幅されるため、
+# 係数・SE本体より緩いRTOLを使う（実測最大相対誤差~1.8e-6、small_n/hc1/x2の下限）。
+RTOL_CONF_INT = TOLERANCES["probit_crosscheck"]["rtol_conf_int"]
 
 # p値は標準正規分布CDFの裾で係数・zのわずかな数値差が増幅されるため、係数・SE本体
-# より緩いATOLが必要（rtolで収まらない実測最大絶対誤差~4.4e-7、mroz/hc1/expersq）。
+# より緩いATOLを置く（rtolで収まらない実測最大絶対誤差~1.8e-8、mroz/opg/kidsge6）。
 ATOL_P_VALUE = TOLERANCES["probit_crosscheck"]["atol_p_value"]
 
 COV_TYPES = ["classical", "opg", "hc0", "hc1"]
@@ -121,13 +122,10 @@ def _check_margeff(res, ref_margeff: dict, label: str) -> None:
                 row["std_err"],
                 ref_stats["std_err"],
                 f"{label}/{at}/{name}/std_err",
-                rtol=RTOL_MARGEFF_SE,
             )
 
 
-def _check_result(
-    res, ref: dict, label: str, conf_int_rtol: float = RTOL
-) -> None:
+def _check_result(res, ref: dict, label: str) -> None:
     _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
     _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
     _assert_dict_close(
@@ -142,13 +140,13 @@ def _check_result(
             our_lower,
             ref_lower,
             f"{label}/conf_lower/{name}",
-            rtol=conf_int_rtol,
+            rtol=RTOL_CONF_INT,
         )
         _assert_close(
             our_upper,
             ref_upper,
             f"{label}/conf_upper/{name}",
-            rtol=conf_int_rtol,
+            rtol=RTOL_CONF_INT,
         )
     for field in (
         "log_likelihood",

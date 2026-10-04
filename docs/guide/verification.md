@@ -60,8 +60,8 @@ For the FE and RE cross-checks (coefficient and F-statistic p-values) the absolu
 |---|---|---|
 | OLS | `1e-8` (classical, HC0–HC3, cluster; measured about `1e-14`) | HAC `1e-2` (measured about 0.4 %): R's Newey–West small-sample, pre-whitening and adjustment conventions differ. p-values use an absolute tolerance of `1e-6`. |
 | WLS | `1e-8` | HAC `5e-2` (measured at most about 4.3 %). p-values use an absolute tolerance of `1e-6`. |
-| Logit | `2e-4` (measured about `1.4e-4`) | Both sides are iterative optimizers. Marginal-effect standard errors `2e-4` (delta method, measured `8.3e-5`). |
-| Probit | `2e-4` (measured about `9e-5`) | Marginal-effect standard errors `2e-4` (delta method, measured `5.5e-5`). |
+| Logit | `1e-6` (measured about `5e-8`, including marginal effects and their standard errors) | Both sides are iterative optimizers. p-values use an absolute tolerance of `1e-7`. |
+| Probit | `1e-6` (measured about `6e-8`, including marginal effects and their standard errors) | Confidence intervals `1e-5` (measured up to `1.8e-6`, because a bound close to zero amplifies a tiny absolute error). p-values use an absolute tolerance of `1e-7`. |
 | Tobit | `1e-8` (measured about `2e-9`) | `5e-8` for HC0 / HC1 on a badly conditioned design; `1e-4` for standard errors on the real-data example, limited by `censReg`'s convergence. The strict comparison on that data is against `AER::tobit`. |
 | IV (2SLS) | `1e-8` | HAC `1e-2` (`0.1` for a 40-observation sample); Wu-Hausman under HAC `2e-2`. These are small-sample convention differences. |
 | FE | `1e-8` (every `cov_type`, including cluster and Driscoll–Kraay; measured about `1e-14`) | none. The plm second reference for one-way cluster and Driscoll–Kraay uses the same `1e-8` (measured up to `5e-11` for the F statistic and `8e-13` for coefficients and standard errors); p-values `1e-6` relative, measured up to `9e-10` in the far tail. |

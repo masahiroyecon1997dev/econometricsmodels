@@ -207,28 +207,33 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # 専用に緩めた相対誤差（両方で共用、実測最大値にマージン）。
         "rtol_hac_wu_hausman_small_n": 0.2,
     },
+    # Rのglm()は収束判定を厳しく（epsilon=1e-14）して参照値を生成している
+    # （`benchmark/nonlinear/references/run_glm_crosscheck.R`参照）。既定の
+    # epsilon=1e-8だと`sandwich::estfun()`が1反復前の作業重みを使い、ロバストSEの
+    # 参照値に~3e-5のノイズが乗るため。限界効果もmarginaleffectsの有限差分の
+    # 刻み幅(eps=1e-6)を解析解に合わせてある。これにより係数・SE・信頼区間・限界効果
+    # （effect/std_err）とも実測最大相対誤差は~5e-8以下（Logit。係数~1e-10、
+    # SE~3e-8、限界効果std_err~5e-8）。基本rtolはその約19倍のマージン。
     "logit_crosscheck": {
-        "rtol": 2e-4,
+        "rtol": 1e-6,
         "atol": ATOL_CROSSCHECK_FLOOR,
-        # marginal_effects()のstd_err（デルタ法）の実測最大相対誤差~8.3e-5
-        # （near_separation/opg/mean/x1）。基本のrtolと同じ値にそろえた。
-        "rtol_margeff_se": 2e-4,
-        # p値は正規分布CDFの裾で係数・zの数値差が増幅される。rtolで収まらず
-        # atolが必要になる実測最大絶対誤差~8.4e-6（near_separation/opg/x2）。
-        "atol_p_value": 2e-5,
-        # near_separation（準完全分離の境界ケース）のconf_intのみ、係数・SE本体
-        # より数値ノイズが大きい（実測最大相対誤差~4.05e-4、opg/x2）。
-        "rtol_near_separation_conf_int": 6e-4,
+        # p値は正規分布CDFの裾で係数・zの数値差が増幅される。rtolで収まらずatolが
+        # 必要になる実測最大絶対誤差~5.5e-9（baseline/opg/x1。ATOL_CROSSCHECK_FLOOR
+        # =1e-8の範囲内）。裾での増幅に備えたマージンとして1e-7を置く。
+        "atol_p_value": 1e-7,
     },
+    # Logitと同じ生成方針。実測最大相対誤差は係数~5e-8・SE~3e-8・限界効果std_err
+    # ~6e-8（基本rtolの約16倍のマージン）。
     "probit_crosscheck": {
-        "rtol": 2e-4,
+        "rtol": 1e-6,
         "atol": ATOL_CROSSCHECK_FLOOR,
-        # marginal_effects()のstd_errの実測最大相対誤差~5.5e-5（mroz/opg/mean/age）。
-        # 基本のrtolと同じ値にそろえた。
-        "rtol_margeff_se": 2e-4,
-        # p値の裾での増幅。rtolで収まらずatolが必要になる実測最大絶対誤差~4.4e-7
-        # （mroz/hc1/expersq）。
-        "atol_p_value": 2e-6,
+        # conf_intのみ、下限（または上限）が0に近いケースで絶対誤差が相対誤差に増幅
+        # される（実測最大相対誤差~1.8e-6、small_n/hc1/x2の下限-0.0083、絶対誤差
+        # 1.5e-8。SEは1.4e-8、係数は4.6e-9）。
+        "rtol_conf_int": 1e-5,
+        # p値の裾での増幅。rtolで収まらずatolが必要になる実測最大絶対誤差~1.8e-8
+        # （mroz/opg/kidsge6）。
+        "atol_p_value": 1e-7,
     },
     # FEのRクロスチェックはfixest。classical/hc1/hc2/hc3/cluster/dkとも、fixestの
     # `ssc()`既定に本実装の小標本補正・推論の自由度を合わせてあるため、1-way/

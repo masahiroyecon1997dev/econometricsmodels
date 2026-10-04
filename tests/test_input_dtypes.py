@@ -504,24 +504,53 @@ def test_decimal_with_scale_keeps_its_value(roles_frame):
 
 # ── hac_time（順序だけに使う数値列） ────────────────────────────────
 
+# 手法/経路名 → `fit()`（時点列は既定で`t`。`hac_time=None`なら行順）。IVは
+# 2SLSの`cov_type`と、GMMの`cov_type`・重み行列（`gmm_weight_type`）の3経路を持つ
+# （`hac_time`の抽出は`cov_type`側と`gmm_weight_type`側で別の関数）。
 HAC_FITS = {
-    "OLS": lambda d: OLS(
-        d, "y", ["x1"], OLSOptions(cov_type="hac", hac_lags=2, hac_time="t")
+    "OLS": lambda d, hac_time="t": OLS(
+        d,
+        "y",
+        ["x1"],
+        OLSOptions(cov_type="hac", hac_lags=2, hac_time=hac_time),
     ).fit(),
-    "WLS": lambda d: WLS(
+    "WLS": lambda d, hac_time="t": WLS(
         d,
         "y",
         ["x1"],
         "w",
-        WLSOptions(cov_type="hac", hac_lags=2, hac_time="t"),
+        WLSOptions(cov_type="hac", hac_lags=2, hac_time=hac_time),
     ).fit(),
-    "IV": lambda d: IV(
+    "IV": lambda d, hac_time="t": IV(
         d,
         "y",
         ["x2"],
         ["x1"],
         ["z", "z2"],
-        IVOptions(cov_type="hac", hac_lags=2, hac_time="t"),
+        IVOptions(cov_type="hac", hac_lags=2, hac_time=hac_time),
+    ).fit(),
+    "IV-GMM-cov": lambda d, hac_time="t": IV(
+        d,
+        "y",
+        ["x2"],
+        ["x1"],
+        ["z", "z2"],
+        IVOptions(
+            estimator="gmm", cov_type="hac", hac_lags=2, hac_time=hac_time
+        ),
+    ).fit(),
+    "IV-GMM-weight": lambda d, hac_time="t": IV(
+        d,
+        "y",
+        ["x2"],
+        ["x1"],
+        ["z", "z2"],
+        IVOptions(
+            estimator="gmm",
+            gmm_weight_type="hac",
+            hac_lags=2,
+            hac_time=hac_time,
+        ),
     ).fit(),
 }
 
@@ -622,3 +651,183 @@ def test_hac_time_rejects_non_orderable_dtypes_for_every_method(
         ),
     ):
         HAC_FITS[method](df)
+
+
+# ── hac_timeの列そのものの検証（存在・欠損・NaN/inf） ─────────────────
+
+
+@pytest.mark.parametrize("method", list(HAC_FITS))
+def test_hac_time_missing_column_raises(shuffled_time_frame, method):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="absent"),
+    ):
+        HAC_FITS[method](shuffled_time_frame, hac_time="absent")
+
+
+@pytest.mark.parametrize("method", list(HAC_FITS))
+def test_hac_time_all_null_column_reports_missing_values(
+    shuffled_time_frame, method
+):
+    """全値が欠損の列（`Null`型）は、dtypeではなく欠損値として報告する。"""
+    df = shuffled_time_frame.with_columns(
+        pl.Series("t", [None] * N, dtype=pl.Null)
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="t", count=N),
+    ):
+        HAC_FITS[method](df)
+
+
+@pytest.mark.parametrize("method", list(HAC_FITS))
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        pl.Int8,
+        pl.UInt64,
+        pl.Float32,
+        pl.Float64,
+        pl.Decimal(18, 0),
+        pl.Date,
+        pl.Datetime,
+        pl.Datetime("ns", "UTC"),
+    ],
+    ids=str,
+)
+def test_hac_time_null_value_raises(shuffled_time_frame, method, dtype):
+    """欠損値を1つ含む`hac_time`は、整数・浮動小数・Decimal・日付時刻のどれでも
+    拒否する（浮動小数とそれ以外は別の抽出経路）。
+    """
+    values = [None if i == 5 else i for i in range(N)]
+    df = shuffled_time_frame.with_columns(
+        pl.Series("t", values, dtype=pl.Int64).cast(dtype)
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="t", count=1),
+    ):
+        HAC_FITS[method](df)
+
+
+@pytest.mark.parametrize("method", list(HAC_FITS))
+@pytest.mark.parametrize(
+    "dtype", [pl.Float64, pl.Float32, pl.Float16], ids=str
+)
+@pytest.mark.parametrize(
+    ("bad", "shown"),
+    [
+        (float("nan"), "NaN"),
+        (float("inf"), "inf"),
+        (float("-inf"), "-inf"),
+    ],
+)
+def test_hac_time_non_finite_value_raises(
+    shuffled_time_frame, method, dtype, bad, shown
+):
+    df = shuffled_time_frame.with_columns(
+        pl.Series("t", np.arange(N), dtype=pl.Int64)
+        .cast(dtype)
+        .scatter(3, bad)
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="t", value=shown, row=3
+        ),
+    ):
+        HAC_FITS[method](df)
+
+
+# ── hac_timeの重複（dtype・精度を問わず拒否する） ───────────────────
+
+
+@pytest.mark.parametrize("method", list(HAC_FITS))
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        pl.Float64,
+        pl.Float32,
+        pl.Decimal(18, 0),
+        pl.Date,
+        pl.Datetime,
+        pl.Datetime("us", "UTC"),
+    ],
+    ids=str,
+)
+def test_hac_time_tied_values_raise_for_every_orderable_dtype(
+    shuffled_time_frame, method, dtype
+):
+    """同値を含む`hac_time`は、浮動小数・Decimal・日付時刻でも拒否する。"""
+    ties = (pl.int_range(pl.len()) // 2).cast(pl.Int64).cast(dtype)
+    df = shuffled_time_frame.with_columns(ties.alias("t"))
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_TIED_TIME_ORDER, name="t", first=0, second=1
+        ),
+    ):
+        HAC_FITS[method](df)
+
+
+@pytest.mark.parametrize("method", list(HAC_FITS))
+@pytest.mark.parametrize(
+    "dtype",
+    [pl.Int64, pl.Datetime("ns"), pl.Datetime("ns", "UTC")],
+    ids=str,
+)
+def test_hac_time_tied_values_beyond_float64_precision_raise(
+    shuffled_time_frame, method, dtype
+):
+    """2^53を超える値でも、本当に同値の行は拒否する（f64に変換して比べると
+    近い値が潰れる領域で、見逃しも誤検出もしない）。行3と行5だけが同値。
+    """
+    base = 1_700_000_000_000_000_000
+    row = pl.int_range(pl.len())
+    ties = (
+        pl.when(row == 5).then(base + 3).otherwise(base + row).cast(pl.Int64)
+    )
+    df = shuffled_time_frame.with_columns(ties.cast(dtype).alias("t"))
+
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_TIED_TIME_ORDER, name="t", first=3, second=5
+        ),
+    ):
+        HAC_FITS[method](df)
+
+
+# ── 順位化の独立した検証（ソート済みデータの行順HACと一致する） ────────
+
+
+@pytest.mark.parametrize("method", list(HAC_FITS))
+@pytest.mark.parametrize(
+    "time_expr",
+    [
+        pytest.param(pl.col("t"), id="int"),
+        # 非整数・負値の時点（順序だけが意味を持つ）
+        pytest.param(pl.col("t") * 0.37 - 11.1, id="float"),
+        pytest.param(
+            (pl.col("t") - 30).cast(pl.Datetime("us")), id="datetime_negative"
+        ),
+    ],
+)
+def test_hac_time_matches_row_order_hac_on_sorted_rows(
+    shuffled_time_frame, method, time_expr
+):
+    """行をシャッフルして`hac_time`を渡した結果は、時点で事前に並べ替えて
+    `hac_time`なし（行順）で当てた結果と一致する。順位化の方向や対応が
+    間違っていると、整数版との比較（自己整合）では見逃すため、独立に確かめる。
+    """
+    frame = shuffled_time_frame.with_columns(time_expr.alias("t"))
+    expected = HAC_FITS[method](frame.sort("t"), hac_time=None)
+
+    result = HAC_FITS[method](frame)
+
+    for name, value in expected.std_errors.items():
+        assert result.std_errors[name] == pytest.approx(value, rel=1e-9)

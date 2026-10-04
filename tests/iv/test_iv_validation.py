@@ -970,6 +970,28 @@ def test_unknown_value_is_reported_before_unused_option(
             {"estimator": "gmm", "gmm_weight_type": "hac"},
             id="gmm_weight_type",
         ),
+        # `gmm_type`ごとに重み行列を組み立てる箇所が異なる
+        pytest.param(
+            {
+                "estimator": "gmm",
+                "gmm_type": "iterated",
+                "gmm_weight_type": "hac",
+            },
+            id="gmm_iterated_weight_type",
+        ),
+        pytest.param(
+            {"estimator": "gmm", "gmm_type": "one_step", "cov_type": "hac"},
+            id="gmm_one_step_cov_type",
+        ),
+        # 同じ列が`cov_type`と`gmm_weight_type`の両方から読まれる
+        pytest.param(
+            {
+                "estimator": "gmm",
+                "cov_type": "hac",
+                "gmm_weight_type": "hac",
+            },
+            id="gmm_cov_type_and_weight_type",
+        ),
     ],
 )
 @pytest.mark.parametrize(("time_expr", "rows"), TIED_TIME_COLUMNS)

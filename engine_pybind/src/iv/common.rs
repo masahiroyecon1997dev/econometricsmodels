@@ -1551,6 +1551,40 @@ mod tests {
     }
 
     #[test]
+    fn parse_weight_type_passes_time_order_ranks_for_hac_weight() {
+        let df = df!("t" => [30.0, 10.0, 40.0, 20.0]).unwrap();
+        let mut options = default_options();
+        options.estimator = "gmm".to_string();
+        options.gmm_weight_type = Some("hac".to_string());
+        options.hac_time = Some("t".to_string());
+        options.hac_lags = Some(1);
+
+        let Ok((weight_type, normalized)) = parse_weight_type(&df, &options) else {
+            panic!("expected Ok");
+        };
+
+        assert_eq!(normalized, "hac");
+        assert_eq!(
+            weight_type,
+            WeightType::Hac {
+                lags: Some(1),
+                time_order: Some(vec![2.0, 0.0, 3.0, 1.0]),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_weight_type_rejects_tied_hac_time() {
+        let df = df!("t" => [1.0, 2.0, 1.0]).unwrap();
+        let mut options = default_options();
+        options.estimator = "gmm".to_string();
+        options.gmm_weight_type = Some("hac".to_string());
+        options.hac_time = Some("t".to_string());
+
+        assert!(parse_weight_type(&df, &options).is_err());
+    }
+
+    #[test]
     fn build_iv_input_passes_time_order_ranks_when_cov_type_is_hac() {
         let df = df!(
             "y" => [1.0, 2.0, 3.0, 4.0],

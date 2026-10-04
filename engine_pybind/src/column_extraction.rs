@@ -991,6 +991,56 @@ mod tests {
     }
 
     #[test]
+    fn extract_time_order_ranks_rejects_null_in_every_orderable_dtype() {
+        // 浮動小数とそれ以外は別の抽出経路（キャスト後に検査するか、元のdtypeで検査するか）。
+        for dtype in [
+            DataType::Int8,
+            DataType::UInt64,
+            DataType::Float32,
+            DataType::Float64,
+            DataType::Decimal(18, 2),
+            DataType::Date,
+            DataType::Datetime(TimeUnit::Nanoseconds, None),
+        ] {
+            let mut df = DataFrame::new(
+                3,
+                vec![Column::new("t".into(), vec![Some(1_i64), None, Some(3)])],
+            )
+            .unwrap();
+            let cast = df.column("t").unwrap().cast(&dtype).unwrap();
+            df.with_column(cast).unwrap();
+
+            assert!(extract_time_order_ranks(&df, "t").is_err(), "{dtype}");
+        }
+    }
+
+    #[test]
+    fn extract_time_order_ranks_rejects_all_null_column_and_infinity() {
+        let all_null = DataFrame::new(
+            2,
+            vec![
+                Column::new_empty("t".into(), &DataType::Null)
+                    .extend_constant(AnyValue::Null, 2)
+                    .unwrap(),
+            ],
+        )
+        .unwrap();
+        assert!(extract_time_order_ranks(&all_null, "t").is_err());
+
+        for bad in [f64::INFINITY, f64::NEG_INFINITY] {
+            for dtype in [DataType::Float32, DataType::Float64] {
+                let mut df =
+                    DataFrame::new(3, vec![Column::new("t".into(), vec![1.0_f64, bad, 3.0])])
+                        .unwrap();
+                let cast = df.column("t").unwrap().cast(&dtype).unwrap();
+                df.with_column(cast).unwrap();
+
+                assert!(extract_time_order_ranks(&df, "t").is_err(), "{dtype} {bad}");
+            }
+        }
+    }
+
+    #[test]
     fn extract_time_order_ranks_rejects_non_orderable_dtype_and_missing_column() {
         let strings = df!("t" => ["a", "b"]).unwrap();
         assert!(extract_time_order_ranks(&strings, "t").is_err());

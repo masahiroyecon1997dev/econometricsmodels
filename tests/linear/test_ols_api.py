@@ -209,7 +209,7 @@ def test_hac_time_reorders_rows_before_computing_lags():
     `fit_computes_hac_std_errors_respecting_time_order`と同一（時系列順で
     x=[1..5], y=[2,4,5,4,5]をtime順=[3,1,5,2,4]にシャッフルして入力し、
     `hac_time`無指定・時系列順の入力と同じ結果になることを確認する）。
-    engine_pybindの`hac_time`列抽出（`extract_f64_column`）を
+    engine_pybindの`hac_time`列抽出（`extract_time_order_ranks`）を
     Python API境界から検証する。
     """
     ordered_df = pl.DataFrame(

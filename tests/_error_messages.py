@@ -399,7 +399,8 @@ HC0_NOT_SUPPORTED_RE = (
 # 第一段階回帰由来の`ValidationError`（`InsufficientObservations`・
 # `InsufficientClustersForInference`等）は常にこのラッパー経由で観測される。
 # 構造方程式自身のqを使う`TwoSlsEstimator::fit`/`GmmEstimator::fit`冒頭の同種
-# 事前チェックはPython APIからは実質到達不能（第一段階のqは
-# 識別条件`instruments>=x_endog`により常に構造方程式のq以上のため、第一段階側の
-# チェックが必ず先に発火する）。修正は別Issueで検討。
+# 事前チェック（観測数・クラスター数）はPython APIからは到達不能（第一段階の
+# 回帰変数の数は識別条件`instruments>=x_endog`により常に構造方程式以上のため、
+# 第一段階側のチェックが必ず先に発火する。2SLS/GMM・classical/clusterで
+# n・Gを下げて確認済み）。これらのチェックはengineの単体テストで確認している。
 FIRST_STAGE_FAILED = "first stage regression for endogenous variable '{endog_name}' failed: {source}"

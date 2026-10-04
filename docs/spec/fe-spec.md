@@ -264,8 +264,9 @@ demeanしたR²」を3種とも定義すると誤る）:
 
 | `PanelError` | Python例外 |
 |---|---|
-| `Common(...)` / `TwoWayRequiresTime` / `UnbalancedPanelForTwoWay` / `SingletonGroup` / `ZeroVarianceRegressor` / `InvalidDkBandwidth` / `DkRequiresTime` | `ValidationError` |
-| `InsufficientDegreesOfFreedom` / `WithinRegressionFailed` / `FTestFailed` | `ComputationError` |
+| `Common(CommonError)` | `common_error_to_pyerr`に委譲（`ComputationFailed`のみ`ComputationError`、他は`ValidationError`） |
+| `IdentifierDimensionMismatch` / `InsufficientDegreesOfFreedom` / `SingletonGroup` / `UnbalancedPanelForTwoWay` / `ZeroVarianceAfterDemeaning` / `TwoWayRequiresTime` / `DkRequiresTime` / `InvalidDkBandwidth` / `InsufficientDkPeriods` / `InsufficientDkPeriodsForInference` / `DegenerateDkTwoPeriods` / `DegenerateClusterTwoGroups` | `ValidationError`（入力・オプション・パネル構造だけから判定できる不正） |
+| `WithinRegressionFailed` / `FTestFailed`（RE: `BetweenRegressionFailed` / `QuasiDemeanedRegressionFailed` / `HausmanTestFailed`） | 内側の`LeastSquaresError`に従う（`SingularMatrix`・`Common(ComputationFailed)`なら`ComputationError`、それ以外は`ValidationError`。`least_squares_error_is_computation_error`）。メッセージは`PanelError`自身の文脈付き文言 |
 
 `PanelError`はFE/REで共有し、`FeError`/`ReError`は個別に作らない。**engine側に新バリアントを
 追加したら`panel_error_to_pyerr`の網羅的`match`も必ず更新すること**（更新漏れは

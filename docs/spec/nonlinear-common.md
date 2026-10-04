@@ -198,7 +198,7 @@ Tobit固有のバリアント（打ち切り境界の検証等）も同じ`MleEr
 
 | バリアント | Python例外 | 由来 |
 |---|---|---|
-| `Common(CommonError)` | `ValidationError`（大半）/ケースによる | `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/`MissingClusterColumn`/`InsufficientClusters`/`InsufficientClustersForInference`/`NoRegressors`/`ComputationFailed`。系統横断で重複するバリアントは`CommonError`（`engine::error`）に切り出し、`MleError`は`#[error(transparent)] Common(#[from] CommonError)`で包む |
+| `Common(CommonError)` | `ComputationFailed`のみ`ComputationError`、他は`ValidationError` | `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/`MissingClusterColumn`/`InsufficientClusters`/`InsufficientClustersForInference`/`NoRegressors`/`ComputationFailed`。系統横断で重複するバリアントは`CommonError`（`engine::error`）に切り出し、`MleError`は`#[error(transparent)] Common(#[from] CommonError)`で包む |
 | `InvalidMaxIter` / `InvalidTol` | `ValidationError` | `max_iter<=0`等 |
 | `NonConvergence { n_iter }` | `ComputationError` | `raise_on_non_convergence=true`かつ`max_iter`到達 |
 | `SingularDesignMatrix` | `ComputationError` | 最適化前の列ピボットQRランクチェックでのランク落ち（1.4節） |

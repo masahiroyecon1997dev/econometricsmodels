@@ -270,7 +270,7 @@ Tobit固有の差分:
 
 | `MleError` | Python例外 |
 |---|---|
-| `Common(NoUncensoredObservations)` / `InvalidCensoringBounds` / `YOutOfCensoringBounds` | `ValidationError` |
+| `NoUncensoredObservations` / `InvalidCensoringBounds` / `YOutOfCensoringBounds` | `ValidationError` |
 
 - `predict()`/`marginal_effects()`の`target`引数のPython文字列は`"expected_latent"` /
   `"expected_observed"` / `"prob_uncensored"`（Rust enum名のsnake_case版。`at`のような単語1つの

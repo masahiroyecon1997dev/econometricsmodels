@@ -294,7 +294,9 @@ FEの`r_squared_between`/`r_squared_overall`をそのまま流用できず、RE�
 `fe-spec.md`「engine_pybind: エラー変換」と同じ`PanelError` → `PyErr`変換（`panel_error_to_
 pyerr`、FE/RE共有）を使う。RE固有の追加バリアントは`BetweenRegressionFailed`（between回帰の
 失敗）・`QuasiDemeanedRegressionFailed`（最終的な準偏差変換後の委譲回帰の失敗）で、いずれも
-`ComputationError`に分類される。
+FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類に従う（特異行列等なら
+`ComputationError`、それ以外は`ValidationError`）。例えばbetween回帰は`n_entities <= k + 1`
+だと内側が観測数不足になり`ValidationError`になる。
 
 ## 4. テスト
 

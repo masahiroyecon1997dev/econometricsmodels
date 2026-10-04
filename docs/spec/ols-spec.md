@@ -206,6 +206,7 @@ $$
   | `LeastSquaresError` | Python例外 |
   |---|---|
   | `Common(DimensionMismatch \| InsufficientObservations \| MissingClusterColumn \| InvalidConfidenceLevel \| InsufficientClusters \| InsufficientClustersForInference \| NoRegressors)` | `ValidationError` |
+  | `WeightDimensionMismatch \| NonPositiveWeight`（WLS） | `ValidationError` |
   | `InvalidHacLags` | `ValidationError` |
   | `SingularMatrix` | `ComputationError` |
   | `Common(ComputationFailed)` | `ComputationError` |

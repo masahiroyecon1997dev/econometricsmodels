@@ -1065,7 +1065,8 @@ def check_non_convergence_raises_computation_error_with_tiny_max_iter(
     （既定）で`ComputationError`（engine側の`NonConvergence`）。
 
     完全分離等の病理的なデータは`NonConvergence`ではなく専用の
-    `SeparationSuspected`（`ComputationError`のサブタイプ、
+    `SeparationSuspected`（engineの`MleError`の別バリアント。Pythonでは
+    `NonConvergence`と同じ`ComputationError`で、例外クラスでは区別できない。
     `check_separation_suspected_raises_computation_error_for_near_separation_data`
     参照）を返すため、`NonConvergence`自体の発生確認には使えない。そのため
     `NonConvergence`の発生確認は、専用データセットに頼らずmax_iterを

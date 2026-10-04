@@ -254,7 +254,8 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 | `MleError` | Python例外 |
 |---|---|
-| `Common(InsufficientObservations \| InvalidConfidenceLevel \| MissingClusterColumn \| InsufficientClusters \| InsufficientClustersForInference \| NoRegressors)` | `ValidationError` |
+| `Common(DimensionMismatch \| InsufficientObservations \| InvalidConfidenceLevel \| MissingClusterColumn \| InsufficientClusters \| InsufficientClustersForInference \| NoRegressors)` | `ValidationError` |
+| `Common(ComputationFailed)` | `ComputationError` |
 | `InvalidMaxIter` / `InvalidTol` / `InvalidBinaryY` | `ValidationError` |
 | `NonConvergence` / `SingularDesignMatrix` / `SingularHessian` / `SingularOpgMatrix` / `SeparationSuspected` / `EvaluationBudgetExceeded` | `ComputationError` |
 

@@ -84,7 +84,7 @@ def _run(
     engine: str,
     lower: float | None,
     upper: float | None,
-    cluster_col: str | None = None,
+    cluster: str | None = None,
     include_intercept: bool = True,
 ) -> dict:
     """`run_tobit_r` を呼び、テスト側が `TobitOptions` を復元できる情報
@@ -102,7 +102,7 @@ def _run(
         engine=engine,
         lower=lower,
         upper=upper,
-        cluster_col=cluster_col,
+        cluster=cluster,
     )
     result["censoring_bounds"] = [lower, upper]
     result["x_cols"] = x_cols
@@ -128,7 +128,7 @@ def _cluster_case(
     特異にならないよう `formula` を `y ~ x1`（`q=1 < G=2`）に絞る
     （testing-policy.md「テスト用データセット」3.、OLS の cluster_g2 と同じ理由。
     `q=3` のままでは `G <= q` で `fit()` 冒頭のバリデーションが `ValidationError`
-    ＝`InsufficientClustersForInference` になる、Issue #289）。
+    ＝`InsufficientClustersForInference` になる）。
     """
     n = base_df.height
     cluster_group = (
@@ -144,7 +144,7 @@ def _cluster_case(
         engine=engine,
         lower=lower,
         upper=upper,
-        cluster_col="cluster_group",
+        cluster="cluster_group",
     )
 
 
@@ -223,7 +223,7 @@ def build(engine: str) -> dict:
             lower=base_lower,
             upper=base_upper,
         )
-        fixtures["method"] = {method: method_ref for method in METHODS}
+        fixtures["solver"] = {method: method_ref for method in METHODS}
 
         # include_intercept=False（切片なし）。baseline 相当シナリオで per-scenario と
         # 同じ 4 cov_type を回す（切片なし経路がロバスト共分散でも一致することの確認、
@@ -255,7 +255,7 @@ def build(engine: str) -> dict:
                 upper=None,
             )
         # NOTE: mroz の `city`（G=2）クラスターロバスト SE の成功パスフィクスチャは
-        # Issue #289 / #287 で削除した。`TOBIT_MROZ_FORMULA` は RHS 7 変数で
+        # 削除した。`TOBIT_MROZ_FORMULA` は RHS 7 変数で
         # `G=2 <= q=7` のため、`rank(Ŝ) <= G-1` で全体 Wald 検定の `7×7` 部分行列が
         # 構造的に特異になり、`fit()` 冒頭のバリデーションが `ValidationError`
         # （`InsufficientClustersForInference`）で弾く。エラーパスは
@@ -301,11 +301,11 @@ def build(engine: str) -> dict:
             "（ComputationError の発生確認のみ、test_tobit.py で凍結 CSV に対して確認）。"
             "cluster は合成データ（moderate_censoring、均等疑似グループ・不均衡グループ・"
             "G=2 境界）を含む。`G <= q`（傾き係数の数）のケース（旧 mroz/city、"
-            "G=2・q=7）は ValidationError になるため成功パスフィクスチャを持たない"
-            "（Issue #289 / #287）。method（bfgs/lbfgs）はリファレンスが method 非依存の"
+            "G=2・q=7）は ValidationError になるため成功パスフィクスチャを持たない。"
+            "method（bfgs/lbfgs）はリファレンスが method 非依存の"
             "ため baseline 相当・classical の値を共有する。no_intercept"
             "（include_intercept=False）は baseline 相当・4 cov_type の切片なしフィット。"
-            "mroz（hours 生スケール、Example 17.2）は Issue #286 修正後 engine で"
+            "mroz（hours 生スケール、Example 17.2）は engine 側の修正により"
             "フィットでき、非クラスターの4 cov_type で数値照合する（G<=q のため"
             "クラスターケースは持たない、上記）。censReg 交差検証は生スケール mroz で "
             "maxLik の収束が survreg ほど詰まらず標準誤差系で相対 ~1e-7 乖離するため、"

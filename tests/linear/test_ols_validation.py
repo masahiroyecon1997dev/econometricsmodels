@@ -10,11 +10,17 @@ R クロスチェックは `test_ols_crosscheck.py`。
 from __future__ import annotations
 
 import _error_messages as msgs
+import pandas as pd
 import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_messages import escaped
-from _helpers import with_cluster_groups
+from _helpers import (
+    ROW_TIME,
+    TIED_TIME_COLUMNS,
+    with_cluster_groups,
+    with_row_time,
+)
 from _ols_helpers import our_fit
 from econometricsmodels import (
     OLS,
@@ -49,12 +55,19 @@ def test_y_empty_string_raises(dataset):
 
 
 def test_null_values_raise():
-    df = pl.DataFrame({"y": [1.0, None, 3.0], "x1": [1.0, 2.0, 3.0]})
+    df_y = pl.DataFrame({"y": [1.0, None, 3.0], "x1": [1.0, 2.0, 3.0]})
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=1),
     ):
-        OLS(df, y="y", x=["x1"]).fit()
+        OLS(df_y, y="y", x=["x1"]).fit()
+
+    df_x = pl.DataFrame({"y": [1.0, 2.0, 3.0], "x1": [1.0, None, 3.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    ):
+        OLS(df_x, y="y", x=["x1"]).fit()
 
 
 def test_non_finite_values_raise():
@@ -62,8 +75,11 @@ def test_non_finite_values_raise():
 
     null（`test_null_values_raise`）とNaN/無限大は`column_extraction.rs`内で
     別ロジックのため個別に確認する（テスト網羅性レビューで判明した抜け）。
+    `x`側も`y`側と同じ`extract_f64_column`を通るため対称に確認する
+    （predict()側の`test_predict_null_or_non_finite_values_raise`との
+    非対称を解消）。
     """
-    df_nan = pl.DataFrame(
+    df_y_nan = pl.DataFrame(
         {"y": [1.0, float("nan"), 3.0], "x1": [1.0, 2.0, 3.0]}
     )
     with pytest.raises(
@@ -72,9 +88,9 @@ def test_non_finite_values_raise():
             msgs.COLUMN_HAS_NON_FINITE_VALUE, name="y", value="NaN", row=1
         ),
     ):
-        OLS(df_nan, y="y", x=["x1"]).fit()
+        OLS(df_y_nan, y="y", x=["x1"]).fit()
 
-    df_inf = pl.DataFrame(
+    df_y_inf = pl.DataFrame(
         {"y": [1.0, float("inf"), 3.0], "x1": [1.0, 2.0, 3.0]}
     )
     with pytest.raises(
@@ -83,21 +99,41 @@ def test_non_finite_values_raise():
             msgs.COLUMN_HAS_NON_FINITE_VALUE, name="y", value="inf", row=1
         ),
     ):
-        OLS(df_inf, y="y", x=["x1"]).fit()
+        OLS(df_y_inf, y="y", x=["x1"]).fit()
+
+    df_x_nan = pl.DataFrame(
+        {"y": [1.0, 2.0, 3.0], "x1": [1.0, float("nan"), 3.0]}
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="NaN", row=1
+        ),
+    ):
+        OLS(df_x_nan, y="y", x=["x1"]).fit()
+
+    df_x_inf = pl.DataFrame(
+        {"y": [1.0, 2.0, 3.0], "x1": [1.0, float("inf"), 3.0]}
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="inf", row=1
+        ),
+    ):
+        OLS(df_x_inf, y="y", x=["x1"]).fit()
 
 
 def test_non_numeric_dtype_raises():
-    """数値にキャストできない文字列は`ValidationError`。
-
-    polarsの`cast(Float64)`は数値として解釈できない文字列を（キャスト自体の
-    エラーではなく）nullに変換するため、`COLUMN_NOT_CASTABLE_TO_NUMERIC`
-    ではなく後続の欠損値チェック（`COLUMN_HAS_MISSING_VALUES`）の経路を通る
-    （実測確認済み）。
+    """文字列列は、値が数値として読めなくてもdtypeの時点で`ValidationError`
+    （欠損値のメッセージではなく、dtypeを指摘するメッセージになる）。
     """
     df = pl.DataFrame({"y": ["a", "b", "c"], "x1": [1.0, 2.0, 3.0]})
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=3),
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="y", dtype="String"
+        ),
     ):
         OLS(df, y="y", x=["x1"]).fit()
 
@@ -153,6 +189,88 @@ def test_insufficient_observations_raises(dataset):
         OLS(df, y="y", x=["x1", "x2"]).fit()
 
 
+def test_data_not_polars_raises(dataset):
+    """`data`/`new_data`にpolars以外のDataFrame（pandas等）を渡すと、内部実装
+    （`pyo3-polars`の`get_columns`呼び出し）が漏れた`AttributeError`ではなく
+    `ValidationError`になること。
+    """
+    bad = pd.DataFrame({"y": [1.0, 2.0, 3.0], "x1": [1.0, 2.0, 3.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME,
+            param_name="data",
+            type_name=msgs.fully_qualified_type_name(bad),
+        ),
+    ):
+        OLS(bad, y="y", x=["x1"]).fit()
+
+    res = our_fit(dataset)
+    bad_new_data = pd.DataFrame({"x1": [1.0], "x2": [0.5]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME,
+            param_name="new_data",
+            type_name=msgs.fully_qualified_type_name(bad_new_data),
+        ),
+    ):
+        res.predict(bad_new_data)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME,
+            param_name="new_data",
+            type_name=msgs.fully_qualified_type_name(bad_new_data),
+        ),
+    ):
+        res.augment(bad_new_data)
+
+
+def test_lazyframe_data_raises_with_collect_hint(dataset):
+    """`LazyFrame`は内部実装が漏れたメッセージではなく、`.collect()`の案内付きの
+    `ValidationError`になること（`data`・`new_data`とも）。
+    """
+    lazy = pl.DataFrame({"y": [1.0, 2.0, 3.0], "x1": [1.0, 2.0, 3.0]}).lazy()
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME_LAZY,
+            param_name="data",
+            type_name=msgs.fully_qualified_type_name(lazy),
+        ),
+    ):
+        OLS(lazy, y="y", x=["x1"]).fit()
+
+    res = our_fit(dataset)
+    lazy_new = pl.DataFrame({"x1": [1.0], "x2": [0.5]}).lazy()
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME_LAZY,
+            param_name="new_data",
+            type_name=msgs.fully_qualified_type_name(lazy_new),
+        ),
+    ):
+        res.predict(lazy_new)
+
+
+def test_series_data_raises(dataset):
+    """`polars.Series`も、内部実装が漏れたメッセージではなく通常の
+    「DataFrameではない」`ValidationError`になること。
+    """
+    series = pl.Series("y", [1.0, 2.0, 3.0])
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME,
+            param_name="data",
+            type_name=msgs.fully_qualified_type_name(series),
+        ),
+    ):
+        OLS(series, y="y", x=["x1"]).fit()
+
+
 # ── ValidationError（オプション） ──────────────────────────────────
 
 
@@ -178,12 +296,12 @@ def test_cluster_without_col_raises(dataset):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
-def test_cluster_col_nonexistent_column_raises(dataset):
-    """`cluster_col`が実在しない列名を指すと`ValidationError`
+def test_cluster_nonexistent_column_raises(dataset):
+    """`cluster`が実在しない列名を指すと`ValidationError`
     （`column_extraction`の責務、既存の欠落を確認するテストが無かった、
-    `testing-completeness-reviewer`指摘、Issue #231フェーズ4）。
+    `testing-completeness-reviewer`指摘）。
     """
-    options = OLSOptions(cov_type="cluster", cluster_col="does_not_exist")
+    options = OLSOptions(cov_type="cluster", cluster="does_not_exist")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
@@ -194,7 +312,7 @@ def test_cluster_col_nonexistent_column_raises(dataset):
 def test_insufficient_clusters_raises(dataset):
     """クラスターが1種類しかない場合`ValidationError`。"""
     df = dataset.with_columns(pl.lit(0).alias("single_cluster"))
-    options = OLSOptions(cov_type="cluster", cluster_col="single_cluster")
+    options = OLSOptions(cov_type="cluster", cluster="single_cluster")
     with pytest.raises(
         ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
     ):
@@ -220,12 +338,14 @@ def test_invalid_confidence_level_raises(dataset, confidence_level):
 )  # 100 == dataset の n_obs（上限側境界）
 def test_invalid_hac_lags_raises(dataset, hac_lags):
     """`hac_lags`が`[0, n)`の範囲外の場合`ValidationError`。"""
-    options = OLSOptions(cov_type="hac", hac_lags=hac_lags)
+    options = OLSOptions(cov_type="hac", hac_lags=hac_lags, hac_time=ROW_TIME)
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.INVALID_HAC_LAGS, hac_lags=hac_lags, n=100),
     ):
-        OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+        OLS(
+            with_row_time(dataset), y="y", x=["x1", "x2"], options=options
+        ).fit()
 
 
 # ── ValidationError（predict()） ──────────────────────────────────
@@ -242,15 +362,17 @@ def test_predict_missing_column_raises(dataset):
 
 
 def test_predict_non_numeric_dtype_raises(dataset):
-    """`test_non_numeric_dtype_raises`と同じ理由でnull経由の
-    `COLUMN_HAS_MISSING_VALUES`になる。
+    """`predict()`の`new_data`の列が数値でない（文字列）場合も、`fit()`と同じ
+    dtypeのメッセージで`ValidationError`になる。
     """
     res = our_fit(dataset)
     new_data = pl.DataFrame({"x1": ["a", "b"], "x2": [1.0, 2.0]})
 
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=2),
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="x1", dtype="String"
+        ),
     ):
         res.predict(new_data)
 
@@ -277,7 +399,7 @@ def test_predict_null_or_non_finite_values_raise(dataset):
 
 def test_augment_column_collision_raises(dataset):
     """元データ（`new_data=None`）・`new_data`のいずれかに既に`"predicted"`列が
-    ある場合`ValidationError`（黙って上書きしない、Issue #295）。
+    ある場合`ValidationError`（黙って上書きしない）。
     """
     df_with_predicted = dataset.with_columns(pl.lit(0.0).alias("predicted"))
     with pytest.raises(
@@ -310,7 +432,7 @@ def test_augment_missing_column_raises(dataset):
 
 @pytest.mark.parametrize("n_groups", [2, 3])
 def test_cluster_count_at_most_slopes_raises_validation_error(n_groups):
-    """クラスター数G≤傾き係数の数q（ここでq=3）は`ValidationError`（Issue #289）。
+    """クラスター数G≤傾き係数の数q（ここでq=3）は`ValidationError`。
 
     クラスターロバスト共分散はクラスター寄与スコアの総和がゼロ（正規方程式
     `X'e=0`）で`rank(Ŝ)≤G-1`のため、G≤qだとロバストWald/F検定のq×q部分行列が
@@ -318,14 +440,13 @@ def test_cluster_count_at_most_slopes_raises_validation_error(n_groups):
     `fit()`冒頭で`ValidationError`（`CommonError::InsufficientClustersForInference`）。
     G=2（G<q）とG=3（G==q、`rank(Ŝ)≤2<3`で依然特異）の両方を確認する。
     G>qでも悪条件で数値的にほぼ特異なケースは従来どおり`ComputationError`が
-    backstop（`cluster`は`cluster_col`が別途必要なため専用の
+    backstop（`cov_type="cluster"`は`cluster`列の指定が別途必要なため専用の
     `test_scale_variance_cluster_raises_computation_error`で確認、
-    他のcov_typeは`test_scale_variance_raises_computation_error`。
-    test-coverage-candidates.md項目73）。
+    他のcov_typeは`test_scale_variance_raises_computation_error`）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, n_groups)
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = OLSOptions(cov_type="cluster", cluster="cluster_group")
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -345,8 +466,7 @@ def test_perfect_multicollinearity_raises_computation_error():
 
     以前は手書きの極小 df（`x2 = 2*x1`）による `test_singular_matrix_raises_
     computation_error` も併存していたが、同じ経路の確認で追加検証が無かったため、
-    固定済みベンチマーク CSV を使うこのテストへ一本化した
-    （`refactoring-candidates-2.md` 項目54）。
+    固定済みベンチマーク CSV を使うこのテストへ一本化した。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_perfect_multicollinearity.csv")
     with pytest.raises(ComputationError):
@@ -363,26 +483,32 @@ def test_scale_variance_raises_computation_error(cov_type):
     perfect_multicollinearityと同様、数値比較はせずエラーパスのみ確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
-    kwargs = {"hac_lags": HAC_MAXLAGS} if cov_type == "hac" else {}
+    kwargs = (
+        {"hac_lags": HAC_MAXLAGS, "hac_time": ROW_TIME}
+        if cov_type == "hac"
+        else {}
+    )
     options = OLSOptions(cov_type=cov_type, **kwargs)
     with pytest.raises(ComputationError):
-        OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+        OLS(
+            with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+        ).fit()
 
 
 def test_scale_variance_cluster_raises_computation_error():
     """`cluster`も上記`test_scale_variance_raises_computation_error`と同じ
     backstopの対象（`test_cluster_count_at_most_slopes_raises_validation_error`
-    のdocstring参照）。`cluster`は`cluster_col`が別途必要なため
+    のdocstring参照）。`cov_type="cluster"`は`cluster`列の指定が別途必要なため
     `COV_TYPES`パラメトライズには含められず、専用テストとして確認する
-    （`test-coverage-candidates.md`項目73。従来docstringの主張のみで
-    自動テストが無かった非対称の解消）。均等な疑似グループ（行番号%10、
+    （従来docstringの主張のみで自動テストが無かった非対称の解消）。
+    均等な疑似グループ（行番号%10、
     `G=10>q=3`）を使い、クラスター数不足による`ValidationError`
-    （Issue #289）ではなく、傾き係数の共分散部分行列の条件数超過による
+    ではなく、傾き係数の共分散部分行列の条件数超過による
     `ComputationError`が発生することを確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
     df = with_cluster_groups(df, 10)
-    options = OLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = OLSOptions(cov_type="cluster", cluster="cluster_group")
     with pytest.raises(ComputationError):
         OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
@@ -402,3 +528,100 @@ def test_validation_error_is_value_error():
 def test_computation_error_is_runtime_error():
     """ComputationErrorがRuntimeErrorのサブクラスであること。"""
     assert issubclass(ComputationError, RuntimeError)
+
+
+# ── ValidationError（使われないオプション） ─────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("cov_type", "option", "value", "condition"),
+    [
+        ("classical", "cluster", "cluster", 'cov_type="cluster"'),
+        ("hc1", "cluster", "cluster", 'cov_type="cluster"'),
+        ("cluster", "hac_lags", 2, 'cov_type="hac"'),
+        ("classical", "hac_lags", 2, 'cov_type="hac"'),
+        ("cluster", "hac_time", "x1", 'cov_type="hac"'),
+        ("classical", "hac_time", "x1", 'cov_type="hac"'),
+        ("hc1", "hac_time", "x1", 'cov_type="hac"'),
+    ],
+)
+def test_option_unused_by_cov_type_raises(
+    dataset, cov_type, option, value, condition
+):
+    """選んだ`cov_type`で使われない`cluster`/`hac_lags`/`hac_time`が指定
+    されたら黙って無視せず`ValidationError`（`cov_type="cluster"`の
+    書き忘れでclassicalの標準誤差が返るのを防ぐ）。
+    """
+    options = OLSOptions(cov_type=cov_type, **{option: value})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
+    ):
+        OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+
+@pytest.mark.parametrize(
+    ("cov_type", "kwargs"),
+    [
+        ("cluster", {"cluster": "cluster"}),
+        ("CLUSTER", {"cluster": "cluster"}),
+        ("hac", {"hac_lags": 2, "hac_time": "x1"}),
+        ("HAC", {"hac_lags": 2, "hac_time": "x1"}),
+    ],
+)
+def test_option_used_by_cov_type_is_accepted(dataset, cov_type, kwargs):
+    """使われる`cov_type`（大文字小文字を問わない）では指定を受理する。"""
+    options = OLSOptions(cov_type=cov_type, **kwargs)
+    OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+
+@pytest.mark.parametrize("cov_type", ["hac", "HAC"])
+def test_hac_requires_hac_time(dataset, cov_type):
+    """`cov_type="hac"`で`hac_time`が未指定だと`ValidationError`。行順を時間順と
+    みなす暗黙の既定は置かない（時間順に並んでいないデータでも、時系列順のHACに
+    見える誤った結果が黙って返るのを防ぐ）。
+    """
+    options = OLSOptions(cov_type=cov_type, hac_lags=2)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.HAC_REQUIRES_HAC_TIME, setting="cov_type"),
+    ):
+        OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+
+@pytest.mark.parametrize(("time_expr", "rows"), TIED_TIME_COLUMNS)
+def test_hac_time_with_tied_values_raises(dataset, time_expr, rows):
+    """`hac_time`に同じ値が1組でもあれば`ValidationError`にする。時点の順序が
+    定まらず、行順に黙ってフォールバックした結果を時系列順のHACとして
+    返してしまうため。
+    """
+    df = dataset.with_columns(time_expr.alias("t"))
+    options = OLSOptions(cov_type="hac", hac_lags=2, hac_time="t")
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_TIED_TIME_ORDER,
+            name="t",
+            first=rows[0],
+            second=rows[1],
+        ),
+    ):
+        OLS(df, y="y", x=["x1", "x2"], options=options).fit()
+
+
+def test_option_unused_check_is_case_insensitive(dataset):
+    options = OLSOptions(cov_type="CLASSICAL", cluster="cluster")
+    with pytest.raises(ValidationError, match="only used with"):
+        OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+
+def test_unknown_cov_type_is_reported_before_unused_option(dataset):
+    """`cov_type`のtypoは、未使用オプションの指摘ではなく`unknown cov_type`で
+    報告する（`cluster`を消す方向へ誤誘導しない）。
+    """
+    options = OLSOptions(cov_type="clusterr", cluster="cluster")
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNKNOWN_COV_TYPE_LINEAR, other="clusterr"),
+    ):
+        OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()

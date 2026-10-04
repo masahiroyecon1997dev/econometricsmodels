@@ -36,9 +36,16 @@ options = OLSOptions(cov_type="hc1")
 result = OLS(df, y="y", x=["x1"], options=options).fit()
 
 # Cluster-robust standard errors (specify a column name from data)
-options = OLSOptions(cov_type="cluster", cluster_col="group_id")
+options = OLSOptions(cov_type="cluster", cluster="group_id")
+result = OLS(df, y="y", x=["x1"], options=options).fit()
+
+# HAC (Newey-West) standard errors: name the column that gives the time order.
+# The row order is never assumed, so add an index column if the rows are already sorted.
+options = OLSOptions(cov_type="hac", hac_time="period")
 result = OLS(df, y="y", x=["x1"], options=options).fit()
 ```
+
+When `hac_lags` is omitted, the number of lags is chosen automatically as `floor(4 * (n / 100) ** (2 / 9))`. The lag count actually used (the explicit `hac_lags` or the automatic value) is available as `result.hac_lags_used`, which is `None` for any other `cov_type`.
 
 See the [API Reference](api/ols.md) for the full list of available options.
 
@@ -116,7 +123,7 @@ print(result.std_errors)  # {"const": ..., "x1": ...}
 print(result.pseudo_r_squared)
 ```
 
-`LogitOptions` supports `cov_type` (`"classical"`, `"opg"`, `"hc0"`, `"hc1"`, or `"cluster"`) and `method` (`"newton"`, `"bfgs"`, or `"lbfgs"`); see the [API Reference](api/logit.md) for the full list of options.
+`LogitOptions` supports `cov_type` (`"classical"`, `"opg"`, `"hc0"`, `"hc1"`, or `"cluster"`) and `solver` (`"newton"`, `"bfgs"`, or `"lbfgs"`); see the [API Reference](api/logit.md) for the full list of options.
 
 ### Predicted values and classification table
 
@@ -135,11 +142,13 @@ for row in table:
     print(row["actual"], row["predicted_0"], row["predicted_1"])
 ```
 
-`LogitResults.augment()` takes the same `new_data` argument as `predict()`, but returns a polars DataFrame (the source data plus a new `"probability"` column) instead of a row-oriented list, mirroring `OLSResults.augment()`.
+`LogitResults.augment()` takes the same `new_data` argument as `predict()`, but returns a polars DataFrame (the source data plus a new `"predicted_probability"` column) instead of a row-oriented list, mirroring `OLSResults.augment()`.
 
 ```python
 augmented = result.augment(new_data)
-print(augmented)  # original `new_data` columns, plus a "probability" column
+print(
+    augmented
+)  # original `new_data` columns, plus a "predicted_probability" column
 ```
 
 ### Marginal effects
@@ -148,7 +157,7 @@ print(augmented)  # original `new_data` columns, plus a "probability" column
 
 ```python
 for row in result.marginal_effects():
-    print(row["param"], row["dydx"], row["std_err"], row["p_value"])
+    print(row["param"], row["effect"], row["std_err"], row["p_value"])
 
 # Marginal effects evaluated at the mean of the explanatory variables
 mean_effects = result.marginal_effects(at="mean")
@@ -176,7 +185,7 @@ print(result.std_errors)  # {"const": ..., "x1": ...}
 print(result.pseudo_r_squared)
 ```
 
-`ProbitOptions` supports the same `cov_type` and `method` choices as `LogitOptions`; see the [API Reference](api/probit.md) for the full list of options. `ProbitResults.predict()`, `augment()`, `pred_table()`, and `marginal_effects()` work exactly like their [Logit](#predicted-values-and-classification-table) counterparts (substitute `Probit`/`ProbitOptions` for `Logit`/`LogitOptions` in the examples above).
+`ProbitOptions` supports the same `cov_type` and `solver` choices as `LogitOptions`; see the [API Reference](api/probit.md) for the full list of options. `ProbitResults.predict()`, `augment()`, `pred_table()`, and `marginal_effects()` work exactly like their [Logit](#predicted-values-and-classification-table) counterparts (substitute `Probit`/`ProbitOptions` for `Logit`/`LogitOptions` in the examples above).
 
 ## Tobit (censored regression)
 
@@ -208,24 +217,24 @@ print(result.wald_statistic, result.wald_p_value)
 
 ```python
 for row in result.marginal_effects(target="expected_observed"):
-    print(row["param"], row["dydx"], row["std_err"])
+    print(row["param"], row["effect"], row["std_err"])
 
 # predict() returns a list of {"predicted": ...} dicts
 fitted = result.predict(target="expected_observed")
 
 # new_data (out-of-sample) works the same way as OLS/Logit/Probit
 new_data = pl.DataFrame({"x1": [1.0, 2.0]})
-predicted = result.predict(target="expected_observed", new_data=new_data)
+predicted = result.predict(new_data, target="expected_observed")
 ```
 
-`augment()` takes the same `target`/`new_data` arguments as `predict()`, but returns a polars DataFrame instead of a row-oriented list. Unlike Logit/Probit's fixed `"probability"` column, the appended column is named `"predicted_{target}"` (e.g. `"predicted_expected_observed"`), since `predict()`'s meaning depends on `target` — this also lets you call `augment()` once per `target` on the same DataFrame without a column name collision.
+`augment()` takes the same `target`/`new_data` arguments as `predict()`, but returns a polars DataFrame instead of a row-oriented list. Like Logit/Probit's `"predicted_probability"` column, the appended column has a `predicted_` prefix; here it is named `"predicted_{target}"` (e.g. `"predicted_expected_observed"`), since `predict()`'s meaning depends on `target` — this also lets you call `augment()` once per `target` on the same DataFrame without a column name collision.
 
 ```python
 augmented = result.augment(target="expected_observed")
 print(augmented)  # original columns, plus "predicted_expected_observed"
 
 # Stack a second target onto the same DataFrame without a name collision
-augmented = result.augment(target="prob_uncensored", new_data=augmented)
+augmented = result.augment(augmented, target="prob_uncensored")
 ```
 
 ### Censoring fit check
@@ -262,7 +271,7 @@ print(result.std_errors)  # {"const": ..., "endog1": ...}
 print(result.r_squared)
 ```
 
-`IVOptions.method` selects `"2sls"` (default) or `"gmm"`. `cov_type` supports the same range as [OLS](#switching-the-type-of-standard-error); for `method="gmm"`, a separate `weight_type` selects the weight matrix used for point estimation. See the [API Reference](api/iv.md) for the full list of options.
+`IVOptions.estimator` selects `"2sls"` (default) or `"gmm"`. `cov_type` supports the same range as [OLS](#switching-the-type-of-standard-error); for `estimator="gmm"`, a separate `gmm_weight_type` selects the weight matrix used for point estimation. See the [API Reference](api/iv.md) for the full list of options.
 
 ### Diagnostics and first-stage results
 
@@ -273,7 +282,7 @@ print(
 )  # None, None (just-identified)
 print(
     result.wu_hausman_statistic, result.wu_hausman_p_value
-)  # method="2sls" only
+)  # estimator="2sls" only
 
 first_stage = result.first_stage()
 print(
@@ -283,7 +292,58 @@ print(
 
 See the [API Reference](api/iv.md#diagnostics) for what each diagnostic tests and when it is `None`.
 
+## FE (fixed effects panel regression)
+
+`FE` estimates a one-way or two-way fixed effects (within) panel regression. Pass the entity (panel unit) identifier column via `entity`; enable two-way effects by also setting `FEOptions.time`.
+
+```python
+import polars as pl
+from econometricsmodels import FE
+
+df = pl.DataFrame(
+    {
+        "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        "x1": [2.0, 4.0, 1.0, 5.0, 3.0, 6.0],
+        "id": ["a", "a", "b", "b", "c", "c"],
+    }
+)
+
+result = FE(df, y="y", x=["x1"], entity="id").fit()
+
+print(result.params)  # {"x1": ...} — no intercept (within-transformed away)
+print(result.std_errors)
+print(result.r_squared_within)
+```
+
+`FEOptions.cov_type` defaults to `"cluster"` on `entity`; `"hc0"` is not supported for FE. See "Switching the type of standard error" above for the other choices, and the [API Reference](api/fe.md) for the full list of options, including two-way effects (`time`).
+
+`fixed_effects()` recovers the entity (and, for two-way, time) fixed effects post-hoc from the fitted coefficients:
+
+```python
+print(result.fixed_effects())  # {"a": ..., "b": ..., "c": ...} for one-way
+```
+
+FE has no `predict()`, `augment()`, or `summary()`.
+
+## RE (random effects panel regression)
+
+`RE` estimates a random effects (Swamy-Arora GLS) panel regression, entity-direction only (unlike FE, two-way random effects are out of scope). Unlike FE, RE has an intercept, and a Hausman test comparing against the equivalent one-way FE specification is computed automatically as part of `fit()`.
+
+```python
+from econometricsmodels import RE
+
+result = RE(df, y="y", x=["x1"], entity="id").fit()
+
+print(result.params)  # {"const": ..., "x1": ...}
+print(result.std_errors)
+print(result.hausman_statistic, result.hausman_p_value)
+```
+
+`REOptions.cov_type` has the same defaults and support as FE (`"cluster"` on `entity` by default; `"hc0"` unsupported). See the [API Reference](api/re.md) for the full list of options, including Driscoll-Kraay standard errors (`cov_type="dk"`, requires `dk_time`). Like FE, RE has no `predict()`, `augment()`, or `summary()`.
+
 ## Error handling
+
+See [Validation and errors](guide/validation.md) for the design philosophy and the full list of situations that raise each error.
 
 Invalid input or options (a missing column, missing values, etc.) raise `ValidationError` (a subclass of `ValueError`). Problems detected during computation (e.g. a singular design matrix) raise `ComputationError` (a subclass of `RuntimeError`).
 

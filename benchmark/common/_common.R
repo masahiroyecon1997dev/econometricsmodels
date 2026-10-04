@@ -10,13 +10,13 @@ extract_coef_se <- function(model, vc, df_inference) {
   ct <- coeftest(model, vcov = vc, df = df_inference)
   coefs <- ct[, 1]
   ses <- ct[, 2]
-  t_stats <- ct[, 3]
+  test_stats <- ct[, 3]
   p_values <- ct[, 4]
   names(coefs) <- rownames(ct)
   names(ses) <- rownames(ct)
-  names(t_stats) <- rownames(ct)
+  names(test_stats) <- rownames(ct)
   names(p_values) <- rownames(ct)
-  list(coefs = coefs, ses = ses, t_stats = t_stats, p_values = p_values)
+  list(coefs = coefs, ses = ses, test_stats = test_stats, p_values = p_values)
 }
 
 # ロバストWald F検定（本実装のwald_f_testと同じ定義: 傾き係数の同時共分散

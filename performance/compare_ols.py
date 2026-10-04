@@ -54,7 +54,9 @@ def _fit_once_engine(ctx: FitContext):
     if ctx.cov_type == "classical":
         options = OLSOptions(cov_type="classical")
     elif ctx.cov_type == "hac":
-        options = OLSOptions(cov_type="hac", hac_lags=ctx.hac_lags)
+        options = OLSOptions(
+            cov_type="hac", hac_lags=ctx.hac_lags, hac_time=ctx.hac_time
+        )
     else:
         raise ValueError(f"unknown cov_type: {ctx.cov_type!r}")
     return OLS(ctx.df, y=ctx.y_col, x=ctx.x_cols, options=options).fit()

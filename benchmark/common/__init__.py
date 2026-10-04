@@ -1,7 +1,6 @@
 """系統（linear/nonlinear/iv）をまたいで使う共通ヘルパー。
 
-Initiative A で関心事ごとにサブモジュールへ分割した
-（経緯は `docs/planning/specs/refactoring-issue231-progress.md`「Initiative A」節）。利用側が
+関心事ごとにサブモジュールへ分割した。利用側が
 `from benchmark.common import DATA_DIR` のように書けるよう、公開 API をここで
 re-export する（サブモジュール構成が変わっても利用側の import は変わらない）。
 

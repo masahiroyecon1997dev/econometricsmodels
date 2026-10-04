@@ -39,10 +39,10 @@
 //! `second_stage: OlsEstimator`は`SECOND_STAGE_COV_TYPE`（`Classical`固定）で内部的に
 //! フィットするが、これは**係数`β̂`と設計行列`X̂`（`input().x()`）を得るためだけ**に使う
 //! （`Cluster`のようにクラスター列や十分なクラスター数を追加で要求せず、`β̂`計算に
-//! 無関係な失敗経路を作らないため）。`second_stage`自身の`std_errors()`/`t_stats()`等
+//! 無関係な失敗経路を作らないため）。`second_stage`自身の`std_errors()`/`test_stats()`等
 //! （ナイーブな第二段階OLSのSEで2SLSとして誤り）は`TwoSlsEstimator`の外部に公開しない。
 //! 呼び出し元が指定した`cov_type`を反映した正しいSE・F統計量等は、`TwoSlsEstimator`
-//! 自身のトップレベルフィールド（`std_errors()`/`t_stats()`/`f_statistic()`等）として
+//! 自身のトップレベルフィールド（`std_errors()`/`test_stats()`/`wald_statistic()`等）として
 //! 独立に計算・保持する。
 //!
 //! ## 第一段階・第二段階での`cov_type`/`confidence_level`の扱い
@@ -102,28 +102,39 @@ pub struct TwoSlsEstimator {
     /// 標準誤差 (k, 1)。`cov_type`に応じたサンドイッチ型分散の対角成分の平方根。
     std_errors: Mat<f64>,
     /// t統計量 (k, 1) = params / std_errors（`docs/spec/iv-spec.md`3.2節、2SLSはt分布）。
-    t_stats: Mat<f64>,
+    test_stats: Mat<f64>,
     /// 両側p値 (k, 1)。t分布（自由度`df_inference`）に基づく
     p_values: Mat<f64>,
     conf_lower: Mat<f64>,
     conf_upper: Mat<f64>,
     df_resid: usize,
+    /// t検定・信頼区間・F検定に使った自由度。`cov_type=Cluster`のときだけ`G-1`
+    /// （`fit()`のコメント参照）で、それ以外は`df_resid`と一致する。
+    df_inference: usize,
+    /// `cov_type=Hac`のとき、実際に使われたラグ数（`hac_lags`の明示指定値、または未指定時に
+    /// 経験則で自動計算した値）。`CovType::Hac`の`lags`はユーザー指定値のまま変更しない
+    /// ため別フィールドで保持する。`Hac`以外では`None`。
+    hac_lags_used: Option<usize>,
     df_model: usize,
     r_squared: f64,
-    r_squared_adj: f64,
+    adj_r_squared: f64,
     /// F統計量。`cov_type=Classical`なら古典的F検定、それ以外（HC0-3/HAC/cluster）は
     /// ロバストWald検定（OLSと同じ切り替えロジック、`docs/spec/iv-spec.md`2章）
-    f_statistic: f64,
-    f_p_value: f64,
+    wald_statistic: f64,
+    wald_p_value: f64,
     /// Wu-Hausman内生性検定（回帰ベース、`docs/spec/iv-spec.md`3.6節）の統計量。
     /// `x_endog=[]`（検定対象の内生変数が無い）、または拡張回帰が想定内の理由で推定不能
     /// （設計行列が特異・観測数不足、`fit()`のdocコメント参照）なら`None`。
     wu_hausman_statistic: Option<f64>,
     wu_hausman_p_value: Option<f64>,
+    /// Wu-Hausman検定のF分布の自由度`(分子, 分母)`。`wu_hausman_statistic`と同じ条件で`None`。
+    wu_hausman_df: Option<(usize, usize)>,
     /// Sargan過剰識別検定（`docs/spec/iv-spec.md`3.5節）の統計量。丁度識別
     /// （自由度`len(instruments) - len(x_endog)`が0）なら`None`。
     sargan_statistic: Option<f64>,
     sargan_p_value: Option<f64>,
+    /// Sargan検定のχ²分布の自由度`len(instruments) - len(x_endog)`。丁度識別なら`None`。
+    sargan_df: Option<usize>,
 }
 
 impl TwoSlsEstimator {
@@ -216,7 +227,7 @@ impl TwoSlsEstimator {
         // 第一段階回帰・弱操作変数診断（部分F統計量、docs/spec/iv-spec.md 3.4節）は
         // 2SLS/GMM間で共有するロジック（`common::compute_first_stage`、`iv/CLAUDE.md`
         // 「2SLSとGMMの独立実装方針」参照——GMM自体は第一段階回帰を必要としないが、
-        // `engine_pybind`が`method="gmm"`でも同じ診断情報を独立に提供するために使う）。
+        // `engine_pybind`が`estimator="gmm"`でも同じ診断情報を独立に提供するために使う）。
         let (first_stage, weak_instrument_f_statistics) =
             compute_first_stage(&input, &cov_type, confidence_level)?;
         let x_endog_hat_columns: Vec<Vec<f64>> = first_stage
@@ -272,6 +283,7 @@ impl TwoSlsEstimator {
 
         // `df_inference`はt検定・信頼区間・F検定に使う自由度。`cov_type=Cluster`のときだけ
         // `G-1`に切り替える（OLSと同じ慣行、`ols.rs`の`fit()`docコメント参照）。
+        let mut hac_lags_used = None;
         let (cov_params, df_inference) = match &cov_type {
             CovType::Classical => {
                 let sigma2 = ssr / (df_resid as f64);
@@ -295,7 +307,8 @@ impl TwoSlsEstimator {
             ),
             CovType::Hac { lags, time_order } => {
                 let lags = resolve_hac_lags(*lags, n)?;
-                let order = time_ordering(time_order.as_deref(), n);
+                hac_lags_used = Some(lags);
+                let order = time_ordering(time_order, n);
                 (
                     hac_cov_params(x_hat, &residuals, &xtx_inv, n, k, lags, &order),
                     df_resid,
@@ -320,7 +333,7 @@ impl TwoSlsEstimator {
             .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
         let t_crit = inference::critical_value(&t_dist, confidence_level);
 
-        let mut t_stats = Mat::<f64>::zeros(k, 1);
+        let mut test_stats = Mat::<f64>::zeros(k, 1);
         let mut p_values = Mat::<f64>::zeros(k, 1);
         let mut conf_lower = Mat::<f64>::zeros(k, 1);
         let mut conf_upper = Mat::<f64>::zeros(k, 1);
@@ -329,7 +342,7 @@ impl TwoSlsEstimator {
             let se = *std_errors.get(j, 0);
             let stat = inference::compute_inference_stat(&t_dist, coef, se, t_crit);
 
-            *t_stats.get_mut(j, 0) = stat.stat;
+            *test_stats.get_mut(j, 0) = stat.stat;
             *p_values.get_mut(j, 0) = stat.p_value;
             *conf_lower.get_mut(j, 0) = stat.conf_low;
             *conf_upper.get_mut(j, 0) = stat.conf_high;
@@ -345,10 +358,10 @@ impl TwoSlsEstimator {
             (0..n).map(|i| (*input.y().get(i, 0)).powi(2)).sum()
         };
         let r_squared = 1.0 - ssr / sst;
-        let r_squared_adj = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
+        let adj_r_squared = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
 
         let df_model = k - k_constant;
-        let (f_statistic, f_p_value) = if df_model == 0 {
+        let (wald_statistic, wald_p_value) = if df_model == 0 {
             // 説明変数が定数項のみ（傾き係数が無い）モデル。検定対象が存在しないため
             // OLSと同様NaNを返す（0除算を避ける）。
             (f64::NAN, f64::NAN)
@@ -360,7 +373,7 @@ impl TwoSlsEstimator {
         // `y ~ x_exog + x_endog`に第一段階残差を追加回帰し（`linearmodels`の
         // `wooldridge_regression`相当）、追加した残差係数のジョイント有意性を
         // `fit()`に渡された`cov_type`と同じcov_typeでのロバストWald検定（F統計量）で
-        // 調べる（弱操作変数診断#163とは異なり、cov_typeに追従させる設計をユーザー確認済み。
+        // 調べる（弱操作変数診断とは異なり、cov_typeに追従させる設計をユーザー確認済み。
         // `engine/src/iv/CLAUDE.md`参照）。`x_endog=[]`なら検定対象が無いため`None`。
         //
         // 拡張回帰は元の第二段階（k_exog+k_endog列）より内生変数の数だけ列が多い
@@ -387,8 +400,8 @@ impl TwoSlsEstimator {
         // 同じ「理論上到達不能だが`Result`で扱う」パターンで`IvError`として伝播する
         // （rust-reviewerの指摘: 広すぎる`Err(_)`キャッチは将来の実装バグを`None`で
         // 隠してしまうため、意図した失敗理由だけを明示的にマッチする）。
-        let (wu_hausman_statistic, wu_hausman_p_value) = if input.k_endog() == 0 {
-            (None, None)
+        let (wu_hausman_statistic, wu_hausman_p_value, wu_hausman_df) = if input.k_endog() == 0 {
+            (None, None, None)
         } else {
             // `x_exog_bare`（定数項を除いた素のx_exog）を使い、`OlsInput::from_columns`に
             // `input.has_intercept()`を渡して定数項を1回だけ正しく追加させる
@@ -406,7 +419,7 @@ impl TwoSlsEstimator {
                     .map(|(endog_name, _)| format!("{endog_name}_first_stage_resid")),
             );
 
-            let hausman_result: Result<(f64, f64), LeastSquaresError> = (|| {
+            let hausman_result: Result<(f64, f64, (usize, usize)), LeastSquaresError> = (|| {
                 let hausman_input = OlsInput::from_columns(
                     &y,
                     &hausman_columns,
@@ -416,11 +429,17 @@ impl TwoSlsEstimator {
                 )?;
                 let hausman_estimator =
                     OlsEstimator::fit(hausman_input, cov_type.clone(), confidence_level)?;
-                hausman_estimator.wald_test_last_columns(input.k_endog())
-            })();
+                let (stat, p_value) = hausman_estimator.wald_test_last_columns(input.k_endog())?;
+                Ok((
+                    stat,
+                    p_value,
+                    (input.k_endog(), hausman_estimator.df_inference()),
+                ))
+            })(
+            );
 
             match hausman_result {
-                Ok((stat, p_value)) => (Some(stat), Some(p_value)),
+                Ok((stat, p_value, df)) => (Some(stat), Some(p_value), Some(df)),
                 Err(LeastSquaresError::SingularMatrix)
                 | Err(LeastSquaresError::Common(CommonError::InsufficientObservations {
                     ..
@@ -428,7 +447,9 @@ impl TwoSlsEstimator {
                 | Err(LeastSquaresError::Common(CommonError::InsufficientClustersForInference {
                     ..
                 }))
-                | Err(LeastSquaresError::Common(CommonError::ComputationFailed(_))) => (None, None),
+                | Err(LeastSquaresError::Common(CommonError::ComputationFailed(_))) => {
+                    (None, None, None)
+                }
                 Err(source) => return Err(IvError::HausmanRegressionFailed { source }),
             }
         };
@@ -441,8 +462,8 @@ impl TwoSlsEstimator {
         // 検証済みのため常に0以上）。丁度識別（自由度0）では`None`（`docs/spec/iv-spec.md`
         // 1.2節・3.5節）。
         //
-        // **常に等分散（古典的）前提で計算し、`cov_type`には依存しない**（弱操作変数診断
-        // #163と同じ判断だが、こちらはユーザー確認を要さない: Sargan検定はその定義自体が
+        // **常に等分散（古典的）前提で計算し、`cov_type`には依存しない**（弱操作変数診断と
+        // 同じ判断だが、こちらはユーザー確認を要さない: Sargan検定はその定義自体が
         // 等分散前提の検定であり、不均一分散に頑健な版が欲しい場合はGMM＋Hansen J検定
         // （`gmm.rs`）を使うのが標準的な使い分けのため、`engine/src/iv/CLAUDE.md`参照）。
         //
@@ -451,8 +472,8 @@ impl TwoSlsEstimator {
         // ここでの特異性は理論上到達不能（`xtx_inverse`と同じ防御的`Result`化）。
         let q = input.k_instruments();
         let l = instrument_columns.len();
-        let (sargan_statistic, sargan_p_value) = if q == input.k_endog() {
-            (None, None)
+        let (sargan_statistic, sargan_p_value, sargan_df) = if q == input.k_endog() {
+            (None, None, None)
         } else {
             let df = q - input.k_endog();
             let z = Mat::from_fn(n, l, |i, j| instrument_columns[j][i]);
@@ -471,8 +492,8 @@ impl TwoSlsEstimator {
             let stat = quad / sigma2;
             let chi2 = ChiSquared::new(df as f64)
                 .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
-            let p_value = 1.0 - chi2.cdf(stat);
-            (Some(stat), Some(p_value))
+            let p_value = chi2.sf(stat);
+            (Some(stat), Some(p_value), Some(df))
         };
 
         Ok(Self {
@@ -482,20 +503,24 @@ impl TwoSlsEstimator {
             cov_type,
             residuals,
             std_errors,
-            t_stats,
+            test_stats,
             p_values,
             conf_lower,
             conf_upper,
             df_resid,
+            df_inference,
+            hac_lags_used,
             df_model,
             r_squared,
-            r_squared_adj,
-            f_statistic,
-            f_p_value,
+            adj_r_squared,
+            wald_statistic,
+            wald_p_value,
             wu_hausman_statistic,
             wu_hausman_p_value,
+            wu_hausman_df,
             sargan_statistic,
             sargan_p_value,
+            sargan_df,
         })
     }
 
@@ -529,6 +554,12 @@ impl TwoSlsEstimator {
         &self.cov_type
     }
 
+    /// `cov_type=Hac`のとき、実際に使われたラグ数（`hac_lags`の明示指定値、または
+    /// 未指定時に経験則で自動計算した値）。`Hac`以外は`None`。
+    pub fn hac_lags_used(&self) -> Option<usize> {
+        self.hac_lags_used
+    }
+
     /// 構造残差 `e = y - Xβ̂`（n, 1）。モジュール冒頭のdocコメント参照
     /// （第二段階回帰自身の残差`y - X̂β̂`ではない）。
     pub fn residuals(&self) -> &Mat<f64> {
@@ -541,8 +572,16 @@ impl TwoSlsEstimator {
     }
 
     /// t統計量 (k, 1)。
-    pub fn t_stats(&self) -> &Mat<f64> {
-        &self.t_stats
+    pub fn test_stats(&self) -> &Mat<f64> {
+        &self.test_stats
+    }
+
+    /// `test_stats`の従う分布（t分布、自由度は`df_inference`。`cov_type=Cluster`のときだけ
+    /// `df_resid`ではなく`G-1`になる）。
+    pub fn stat_dist(&self) -> inference::StatDist {
+        inference::StatDist::T {
+            df: self.df_inference,
+        }
     }
 
     /// 両側p値 (k, 1)。
@@ -576,18 +615,18 @@ impl TwoSlsEstimator {
     }
 
     /// 自由度調整済み決定係数。
-    pub fn r_squared_adj(&self) -> f64 {
-        self.r_squared_adj
+    pub fn adj_r_squared(&self) -> f64 {
+        self.adj_r_squared
     }
 
     /// F統計量。
-    pub fn f_statistic(&self) -> f64 {
-        self.f_statistic
+    pub fn wald_statistic(&self) -> f64 {
+        self.wald_statistic
     }
 
     /// F統計量のp値。
-    pub fn f_p_value(&self) -> f64 {
-        self.f_p_value
+    pub fn wald_p_value(&self) -> f64 {
+        self.wald_p_value
     }
 
     /// 内生変数ごとの第一段階回帰結果（`x_endog_names`と対応する順序）。
@@ -623,6 +662,21 @@ impl TwoSlsEstimator {
     /// Sargan過剰識別検定のp値。`sargan_statistic()`と同じ条件で`None`。
     pub fn sargan_p_value(&self) -> Option<f64> {
         self.sargan_p_value
+    }
+
+    /// Sargan検定の自由度（χ²）。`sargan_statistic()`と同じ条件で`None`。
+    pub fn sargan_df(&self) -> Option<usize> {
+        self.sargan_df
+    }
+
+    /// Wu-Hausman検定の自由度`(分子, 分母)`（F）。`wu_hausman_statistic()`と同じ条件で`None`。
+    pub fn wu_hausman_df(&self) -> Option<(usize, usize)> {
+        self.wu_hausman_df
+    }
+
+    /// `wald_statistic()`の自由度`(分子, 分母)`（F）。傾き係数が無くNaNのときは`None`。
+    pub fn wald_df(&self) -> Option<(usize, usize)> {
+        (self.df_model > 0).then_some((self.df_model, self.df_inference))
     }
 }
 
@@ -720,21 +774,17 @@ fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, IvError> {
 }
 
 /// `CovType::Hac`の`time_order`から、時系列の昇順に並べたときの行インデックス列を求める
-/// （`ols.rs`の`time_ordering`と同型）。`None`の場合は`IvInput`の行順をそのまま時系列順と
-/// みなす。
+/// （`ols.rs`の`time_ordering`と同型）。
 ///
 /// `partial_cmp().unwrap()`について: `time_order`の値はNaN/無限大を含まないことが
 /// `engine_pybind::column_extraction`側で既に保証されている前提（`ols.rs`の
-/// `time_ordering`と同じ理由）。
-fn time_ordering(time_order: Option<&[f64]>, n: usize) -> Vec<usize> {
-    match time_order {
-        Some(values) => {
-            let mut order: Vec<usize> = (0..n).collect();
-            order.sort_by(|&a, &b| values[a].partial_cmp(&values[b]).unwrap());
-            order
-        }
-        None => (0..n).collect(),
-    }
+/// `time_ordering`と同じ理由）。値が互いに異なる（同値は`ValidationError`で弾かれ、
+/// 昇順の位置＝順位で渡される）ことも同様に前提で、この関数自身は同値を検出しない。
+fn time_ordering(time_order: &[f64], n: usize) -> Vec<usize> {
+    debug_assert_eq!(time_order.len(), n);
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&a, &b| time_order[a].partial_cmp(&time_order[b]).unwrap());
+    order
 }
 
 /// Newey-West HACの係数分散共分散行列: `(X̂'X̂)⁻¹Ŝ(X̂'X̂)⁻¹`（k×k）。数式・実装方針は
@@ -863,19 +913,20 @@ fn wald_f_test(
     let wald: f64 = (0..df_model)
         .map(|i| (*beta_slopes.get(i, 0)) * (*v_slopes_inv_beta.get(i, 0)))
         .sum();
-    let f_statistic = wald / (df_model as f64);
+    let wald_statistic = wald / (df_model as f64);
 
     let f_dist = FisherSnedecor::new(df_model as f64, df_inference as f64)
         .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
-    let f_p_value = 1.0 - f_dist.cdf(f_statistic);
+    let wald_p_value = f_dist.sf(wald_statistic);
 
-    Ok((f_statistic, f_p_value))
+    Ok((wald_statistic, wald_p_value))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::error::CommonError;
+    use crate::linear::common::row_time_order;
 
     /// 丁度識別（`len(instruments) == len(x_endog)`）の閉形式解と数値照合するテストデータ。
     ///
@@ -918,7 +969,7 @@ mod tests {
         // `fit()` 冒頭の `crate::parallelism::ensure_serial()` が faer の
         // グローバル並列度を `Par::Seq` へ引き戻すことの回帰ガード（iv 系統代表）。
         // 別テストが `Seq` にしている可能性があるため、まず `Rayon` に戻してから通す。
-        // 設計行列は極小なので一時的な `Rayon` 設定は #283 の病理を招かない。
+        // 設計行列は極小なので一時的な `Rayon` 設定は病理を招かない。
         faer::set_global_parallelism(faer::Par::rayon(0));
 
         let (y, x_endog, z) = perfectly_predicted_endog_data();
@@ -977,12 +1028,13 @@ mod tests {
                     < 1e-8
             );
             assert!(
-                (*estimator.t_stats().get(j, 0) - *ols_estimator.t_stats().get(j, 0)).abs() < 1e-8
+                (*estimator.test_stats().get(j, 0) - *ols_estimator.test_stats().get(j, 0)).abs()
+                    < 1e-8
             );
         }
         assert!((estimator.r_squared() - ols_estimator.r_squared()).abs() < 1e-8);
-        assert!((estimator.f_statistic() - ols_estimator.f_statistic()).abs() < 1e-8);
-        assert!((estimator.f_p_value() - ols_estimator.f_p_value()).abs() < 1e-8);
+        assert!((estimator.wald_statistic() - ols_estimator.f_statistic()).abs() < 1e-8);
+        assert!((estimator.wald_p_value() - ols_estimator.f_p_value()).abs() < 1e-8);
         for j in 0..2 {
             assert!(
                 (*estimator.p_values().get(j, 0) - *ols_estimator.p_values().get(j, 0)).abs()
@@ -1002,7 +1054,7 @@ mod tests {
     }
 
     /// 説明変数が定数項のみ（傾き係数が無い、`df_model=0`）の退化モデルでは、F検定の
-    /// 対象が存在しないため`f_statistic`/`f_p_value`は`NaN`になる（`ols.rs`の
+    /// 対象が存在しないため`wald_statistic`/`wald_p_value`は`NaN`になる（`ols.rs`の
     /// 同名の分岐と同じ0除算回避の扱い、モジュール冒頭のdocコメント参照）。
     #[test]
     fn fit_sets_f_statistic_and_f_p_value_to_nan_for_const_only_model() {
@@ -1022,8 +1074,8 @@ mod tests {
 
         let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
         assert_eq!(estimator.df_model(), 0);
-        assert!(estimator.f_statistic().is_nan());
-        assert!(estimator.f_p_value().is_nan());
+        assert!(estimator.wald_statistic().is_nan());
+        assert!(estimator.wald_p_value().is_nan());
     }
 
     #[test]
@@ -1172,17 +1224,13 @@ mod tests {
         assert!((estimator.sargan_p_value().unwrap() - expected_p_value).abs() < 1e-8);
     }
 
-    /// 呼び出し元が指定した`cov_type`は第一段階（`first_stage_estimators()`で公開する
-    /// `OlsEstimator`）にそのまま反映され、第二段階には反映されない（常に`Classical`）
-    /// ことを確認する（モジュール冒頭のdocコメント「第一段階・第二段階での`cov_type`/
-    /// `confidence_level`の扱い」参照）。`second_stage`は非公開フィールドだが、この
-    /// テストは同一モジュールの子モジュールのため直接参照できる。
     /// 呼び出し元が指定した`cov_type`は第一段階（`OlsEstimator`委譲）・第二段階
-    /// （`TwoSlsEstimator`自身が独立に計算する正しいSE）の両方に反映される。
-    /// 内部実装専用の`second_stage`フィールド自身の委譲フィットだけは
-    /// 常に`Classical`のまま（モジュール冒頭のdocコメント「`second_stage`フィールドの
-    /// 位置づけ」参照。`second_stage`は非公開フィールドだが、このテストは同一モジュールの
-    /// 子モジュールのため直接参照できる）。
+    /// （`TwoSlsEstimator`自身が独立に計算する正しいSE）の両方に反映される
+    /// （モジュール冒頭のdocコメント「第一段階・第二段階での`cov_type`/
+    /// `confidence_level`の扱い」参照）。内部実装専用の`second_stage`フィールド自身の
+    /// 委譲フィットだけは常に`Classical`のまま（モジュール冒頭のdocコメント
+    /// 「`second_stage`フィールドの位置づけ」参照）。`second_stage`は非公開フィールド
+    /// だが、このテストは同一モジュールの子モジュールのため直接参照できる。
     #[test]
     fn fit_uses_caller_provided_cov_type_for_first_stage_and_second_stage_se() {
         let y = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
@@ -1651,8 +1699,8 @@ mod tests {
     /// `manual_hc2_std_errors`と同一の式）通りに計算されていることを固定する、
     /// 数式レベルの細粒度回帰確認。真に独立した参照実装（R `ivreg`+
     /// `sandwich::vcovHC(type="HC2"/"HC3")`）との数値一致は
-    /// `tests/iv/test_iv_crosscheck.py`で別途検証済み（`refactoring-candidates.md`
-    /// 項目12。`linearmodels`は引き続きhc2/hc3非対応のため対象外）。
+    /// `tests/iv/test_iv_crosscheck.py`で別途検証済み
+    /// （`linearmodels`は引き続きhc2/hc3非対応のため対象外）。
     #[test]
     fn fit_computes_hc2_std_errors_matching_manual_sandwich_formula() {
         let estimator =
@@ -1753,7 +1801,7 @@ mod tests {
             nontrivial_x_exog_input(),
             CovType::Hac {
                 lags: Some(0),
-                time_order: None,
+                time_order: row_time_order(8),
             },
             0.95,
         )
@@ -1779,7 +1827,7 @@ mod tests {
             nontrivial_x_exog_input(),
             CovType::Hac {
                 lags: Some(2),
-                time_order: None,
+                time_order: row_time_order(8),
             },
             0.95,
         )
@@ -1802,7 +1850,7 @@ mod tests {
             nontrivial_x_exog_input(),
             CovType::Hac {
                 lags: None,
-                time_order: None,
+                time_order: row_time_order(8),
             },
             0.95,
         )
@@ -1811,7 +1859,7 @@ mod tests {
             nontrivial_x_exog_input(),
             CovType::Hac {
                 lags: Some(2),
-                time_order: None,
+                time_order: row_time_order(8),
             },
             0.95,
         )
@@ -1825,6 +1873,33 @@ mod tests {
                     < 1e-8
             );
         }
+    }
+
+    /// `hac_lags_used()`: `lags=None`なら経験則（`n=8`→2）、明示指定ならその値、Hac以外は
+    /// `None`。第一段階のOLSも同じ`cov_type`で推定されるため同じ値になる。
+    #[test]
+    fn hac_lags_used_reflects_resolved_lags() {
+        let fit = |cov_type: CovType| {
+            TwoSlsEstimator::fit(nontrivial_x_exog_input(), cov_type, 0.95).unwrap()
+        };
+
+        let auto = fit(CovType::Hac {
+            lags: None,
+            time_order: row_time_order(8),
+        });
+        assert_eq!(auto.hac_lags_used(), Some(2));
+        for (_, first_stage) in auto.first_stage_estimators() {
+            assert_eq!(first_stage.hac_lags_used(), Some(2));
+        }
+
+        let explicit = fit(CovType::Hac {
+            lags: Some(3),
+            time_order: row_time_order(8),
+        });
+        assert_eq!(explicit.hac_lags_used(), Some(3));
+
+        assert_eq!(fit(CovType::Classical).hac_lags_used(), None);
+        assert_eq!(fit(CovType::Hc1).hac_lags_used(), None);
     }
 
     /// `time_order`を指定した場合、行順がシャッフルされていても時系列順に並べ替えてから
@@ -1861,7 +1936,7 @@ mod tests {
             shuffled_input,
             CovType::Hac {
                 lags: Some(2),
-                time_order: Some(shuffled_time),
+                time_order: shuffled_time,
             },
             0.95,
         )
@@ -1871,7 +1946,7 @@ mod tests {
             nontrivial_x_exog_input(),
             CovType::Hac {
                 lags: Some(2),
-                time_order: None,
+                time_order: row_time_order(8),
             },
             0.95,
         )
@@ -1916,7 +1991,7 @@ mod tests {
             x_endog_empty_input(),
             CovType::Hac {
                 lags: Some(-1),
-                time_order: None,
+                time_order: row_time_order(5),
             },
             0.95,
         );
@@ -2094,14 +2169,14 @@ mod tests {
         );
 
         // `has_intercept=false`を渡していた旧版では、`first_stage()`が返す`r_squared`/
-        // `f_statistic`も定数項を傾き係数扱いした非中心化TSS・過大なqで静かに間違って
+        // `wald_statistic`も定数項を傾き係数扱いした非中心化TSS・過大なqで静かに間違って
         // いた（`engine/src/iv/CLAUDE.md`「修正済み」参照）。修正後は素の
         // `OlsEstimator::fit`と一致する。
         assert!((first_stage_estimator.r_squared() - expected.r_squared()).abs() < 1e-10);
         assert!((first_stage_estimator.f_statistic() - expected.f_statistic()).abs() < 1e-8);
     }
 
-    /// `r_squared`/`r_squared_adj`/`df_resid`/`df_model`を、構造残差のSSR・元の`y`のTSSから
+    /// `r_squared`/`adj_r_squared`/`df_resid`/`df_model`を、構造残差のSSR・元の`y`のTSSから
     /// 素朴な式で独立計算し照合する。
     #[test]
     fn fit_computes_r_squared_matching_manual_formula() {
@@ -2117,11 +2192,11 @@ mod tests {
         let sst: f64 = y.iter().map(|v| (v - y_mean).powi(2)).sum();
         let expected_r_squared = 1.0 - ssr / sst;
         let expected_df_resid = n - k;
-        let expected_r_squared_adj =
+        let expected_adj_r_squared =
             1.0 - ((n - 1) as f64 / expected_df_resid as f64) * (1.0 - expected_r_squared);
 
         assert!((estimator.r_squared() - expected_r_squared).abs() < 1e-8);
-        assert!((estimator.r_squared_adj() - expected_r_squared_adj).abs() < 1e-8);
+        assert!((estimator.adj_r_squared() - expected_adj_r_squared).abs() < 1e-8);
         assert_eq!(estimator.df_resid(), expected_df_resid);
         assert_eq!(estimator.df_model(), k - 1);
     }
@@ -2278,7 +2353,7 @@ mod tests {
         ));
     }
 
-    /// 正規方程式`β=(X'X)⁻¹X'y`を`faer`演算で直接解く、SUT（`partial_f_statistic`・
+    /// 正規方程式`β=(X'X)⁻¹X'y`を`faer`演算で直接解く、SUT（`partial_wald_statistic`・
     /// `OlsEstimator`）とは独立した最小限のOLSオラクル（SEや検定統計量は不要なため
     /// 点推定のみ）。
     fn manual_ols_beta(x: &Mat<f64>, y: &Mat<f64>) -> Mat<f64> {
@@ -2291,7 +2366,7 @@ mod tests {
             * &xty
     }
 
-    /// 弱操作変数診断（部分F統計量）が、`TwoSlsEstimator::fit`・`partial_f_statistic`
+    /// 弱操作変数診断（部分F統計量）が、`TwoSlsEstimator::fit`・`partial_wald_statistic`
     /// （SUT）とは独立に手計算したネストF検定のオラクルと数値一致することを確認する。
     /// `nontrivial_x_exog_columns()`（過剰識別、x_exog=[x1]・instruments=[z1,z2]）を使う。
     #[test]
@@ -2414,7 +2489,7 @@ mod tests {
     }
 
     /// `x_exog=[]`かつ`include_intercept=false`（制限モデルに回帰変数が1つも無い退化ケース、
-    /// `partial_f_statistic`の`x_exog_columns.is_empty()`分岐）でも計算できることを、
+    /// `partial_wald_statistic`の`x_exog_columns.is_empty()`分岐）でも計算できることを、
     /// 手計算したネストF検定のオラクル（制限モデルのSSRを`y_endog`自体の二乗和として
     /// 直接計算）と数値照合して確認する。
     #[test]
@@ -2678,7 +2753,7 @@ mod tests {
         );
     }
 
-    /// 弱操作変数診断（#163）とは異なり、Wu-Hausman検定は`fit()`に渡された`cov_type`に
+    /// 弱操作変数診断とは異なり、Wu-Hausman検定は`fit()`に渡された`cov_type`に
     /// 追従する設計（ユーザー確認済み）。同じデータで`cov_type`を変えると統計量が変わる
     /// ことを確認し、この設計が実際に反映されていることを固定する。
     #[test]
@@ -2761,5 +2836,154 @@ mod tests {
             endogenous_stat > exogenous_stat,
             "endogenous_stat={endogenous_stat}, exogenous_stat={exogenous_stat}"
         );
+    }
+    /// property-basedテスト。`ols.rs`の`mod proptests`と同型の設計（配置・許容誤差`RTOL=1e-6`・
+    /// `prop_assume!`によるフルランク安全弁）だが、IV固有の不変条件（操作変数の張る空間のみへの
+    /// 依存・丁度識別の閉形式解）を検証する。ケース生成は`common::proptest_support`。
+    mod proptests {
+        use super::*;
+        use crate::iv::common::proptest_support::{assert_approx_eq, iv_case_strategy};
+        use proptest::prelude::*;
+        use std::collections::HashMap;
+
+        fn by_name(est: &TwoSlsEstimator) -> HashMap<String, (f64, f64)> {
+            est.param_names()
+                .iter()
+                .enumerate()
+                .map(|(i, name)| {
+                    (
+                        name.clone(),
+                        (*est.params().get(i, 0), *est.std_errors().get(i, 0)),
+                    )
+                })
+                .collect()
+        }
+
+        /// 部分ピボット付きガウス消去で`a * x = b`（`a`は`m x m`）を解く。`gmm_point_estimate`等の
+        /// 実装コード（Cholesky）とは独立な経路で閉形式解のオラクルを作るための自前実装。
+        fn solve_linear_system(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Option<Vec<f64>> {
+            let m = b.len();
+            for col in 0..m {
+                let pivot = (col..m)
+                    .max_by(|&r1, &r2| a[r1][col].abs().partial_cmp(&a[r2][col].abs()).unwrap())?;
+                if a[pivot][col].abs() < 1e-10 {
+                    return None;
+                }
+                a.swap(col, pivot);
+                b.swap(col, pivot);
+                for row in (col + 1)..m {
+                    let f = a[row][col] / a[col][col];
+                    let pivot_row = a[col].clone();
+                    for (target, src) in a[row][col..].iter_mut().zip(&pivot_row[col..]) {
+                        *target -= f * src;
+                    }
+                    b[row] -= f * b[col];
+                }
+            }
+            let mut x = vec![0.0; m];
+            for row in (0..m).rev() {
+                let tail: f64 = ((row + 1)..m).map(|c| a[row][c] * x[c]).sum();
+                x[row] = (b[row] - tail) / a[row][row];
+            }
+            Some(x)
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            /// `x_exog`の列順序を入れ替えても、名前で対応付けた係数・SEは変わらない。
+            #[test]
+            fn coefficients_and_se_are_invariant_to_x_exog_column_order(
+                case in iv_case_strategy(false),
+                use_hc1 in any::<bool>(),
+            ) {
+                let cov = || if use_hc1 { CovType::Hc1 } else { CovType::Classical };
+                let base = TwoSlsEstimator::fit(case.input().unwrap(), cov(), 0.95);
+                let permuted = case
+                    .build_input(&case.shuffled_order(), &case.z, &case.y)
+                    .map(|input| TwoSlsEstimator::fit(input, cov(), 0.95));
+                prop_assume!(base.is_ok());
+                prop_assume!(permuted.as_ref().is_ok_and(|r| r.is_ok()));
+                let (base, permuted) = (by_name(&base.unwrap()), by_name(&permuted.unwrap().unwrap()));
+                for (name, (beta, se)) in &base {
+                    let (p_beta, p_se) = permuted[name];
+                    assert_approx_eq(p_beta, *beta, &format!("beta[{name}]"));
+                    assert_approx_eq(p_se, *se, &format!("se[{name}]"));
+                }
+            }
+
+            /// 操作変数を可逆な線形変換（単位上三角行列）で置き換えても、2SLSの点推定・SEは
+            /// 変わらない（第一段階の射影は操作変数の張る空間にのみ依存するため）。
+            #[test]
+            fn estimates_are_invariant_to_invertible_instrument_transform(
+                case in iv_case_strategy(false),
+            ) {
+                let base = TwoSlsEstimator::fit(case.input().unwrap(), CovType::Classical, 0.95);
+                let mixed_z = case.mixed_instruments();
+                let mixed = case
+                    .build_input(&case.identity_order(), &mixed_z, &case.y)
+                    .map(|input| TwoSlsEstimator::fit(input, CovType::Classical, 0.95));
+                prop_assume!(base.is_ok());
+                prop_assume!(mixed.as_ref().is_ok_and(|r| r.is_ok()));
+                let (base, mixed) = (base.unwrap(), mixed.unwrap().unwrap());
+                for j in 0..base.params().nrows() {
+                    assert_approx_eq(*mixed.params().get(j, 0), *base.params().get(j, 0), &format!("beta[{j}]"));
+                    assert_approx_eq(*mixed.std_errors().get(j, 0), *base.std_errors().get(j, 0), &format!("se[{j}]"));
+                }
+            }
+
+            /// 丁度識別（`len(z) == len(x_endog)`）では、2SLSの点推定は閉形式の操作変数推定量
+            /// `(Z'X)⁻¹Z'y`（`Z=[const, x_exog, z]`、`X=[const, x_exog, x_endog]`）と一致する。
+            #[test]
+            fn just_identified_matches_closed_form_iv_estimator(
+                case in iv_case_strategy(true),
+            ) {
+                let est = TwoSlsEstimator::fit(case.input().unwrap(), CovType::Classical, 0.95);
+                prop_assume!(est.is_ok());
+                let est = est.unwrap();
+
+                let n = case.nobs();
+                let ones = vec![1.0; n];
+                let regressors: Vec<&Vec<f64>> = std::iter::once(&ones)
+                    .chain(case.x_exog.iter())
+                    .chain(case.x_endog.iter())
+                    .collect();
+                let instruments: Vec<&Vec<f64>> = std::iter::once(&ones)
+                    .chain(case.x_exog.iter())
+                    .chain(case.z.iter())
+                    .collect();
+                let dot = |a: &Vec<f64>, b: &Vec<f64>| -> f64 { a.iter().zip(b).map(|(x, y)| x * y).sum() };
+                let zx: Vec<Vec<f64>> = instruments
+                    .iter()
+                    .map(|zc| regressors.iter().map(|xc| dot(zc, xc)).collect())
+                    .collect();
+                let zy: Vec<f64> = instruments.iter().map(|zc| dot(zc, &case.y)).collect();
+                let solved = solve_linear_system(zx, zy);
+                prop_assume!(solved.is_some());
+                for (j, expected) in solved.unwrap().iter().enumerate() {
+                    assert_approx_eq(*est.params().get(j, 0), *expected, &format!("beta[{j}]"));
+                }
+            }
+
+            /// `y`を定数倍すると係数も同じ定数倍になる（SEは`|c|`倍）。
+            #[test]
+            fn coefficients_scale_linearly_with_y(
+                case in iv_case_strategy(false),
+                c in prop_oneof![-10.0f64..-0.1, 0.1f64..10.0],
+            ) {
+                let scaled_y: Vec<f64> = case.y.iter().map(|v| c * v).collect();
+                let base = TwoSlsEstimator::fit(case.input().unwrap(), CovType::Classical, 0.95);
+                let scaled = case
+                    .build_input(&case.identity_order(), &case.z, &scaled_y)
+                    .map(|input| TwoSlsEstimator::fit(input, CovType::Classical, 0.95));
+                prop_assume!(base.is_ok());
+                prop_assume!(scaled.as_ref().is_ok_and(|r| r.is_ok()));
+                let (base, scaled) = (base.unwrap(), scaled.unwrap().unwrap());
+                for j in 0..base.params().nrows() {
+                    assert_approx_eq(*scaled.params().get(j, 0), c * *base.params().get(j, 0), &format!("beta[{j}]"));
+                    assert_approx_eq(*scaled.std_errors().get(j, 0), c.abs() * *base.std_errors().get(j, 0), &format!("se[{j}]"));
+                }
+            }
+        }
     }
 }

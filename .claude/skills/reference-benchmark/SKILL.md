@@ -1,6 +1,6 @@
 ---
 name: reference-benchmark
-description: statsmodels（主）・Rパッケージ（クロスチェック）・pyfixest（FE系）と、合成データセット/Wooldridgeデータセットを使って推定手法のベンチマーク値を生成し、tests/fixtures/benchmarks/にJSONとして固定する。新しい推定手法のテスト作成（/test-new）の一部として使用する。
+description: statsmodels/linearmodels（主）・Rパッケージ（クロスチェック）と、合成データセット/Wooldridgeデータセットを使って推定手法のベンチマーク値を生成し、tests/fixtures/benchmarks/にJSONとして固定する。新しい推定手法のテスト作成（/test-new）の一部として使用する。
 argument-hint: "[手法名]"
 allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
 ---
@@ -15,12 +15,12 @@ allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
 
 - **statsmodels**: 主リファレンス。classical/HC0-3/cluster/HAC、AIC/BIC/log-likelihood、ロバストWald検定まで一貫して対応
 - **R（lm + sandwich/lmtest）**: 独立実装によるクロスチェック。新しい統計量・cov_type追加時はstatsmodelsとRの一致を先に確認してからフィクスチャを固定する。対象は係数・標準誤差に限らない。R²・AIC・BIC・対数尤度・F統計量・F検定p値等、公開する統計量は全てcrosscheckする（`testing-policy.md`「リファレンス実装」参照）
-- **pyfixest**: OLSの正確性検証には使わない（HC2/HC3にpyfixest自身の実装バグによる系統的乖離があるため、詳細は`testing-policy.md`「リファレンス実装」参照）。性能比較専用。固定効果が絡むPhase4（FE/RE）以降での採否はその時点で個別に判断する
+- **pyfixest**: OLSの正確性検証には使わない（HC2/HC3にpyfixest自身の実装バグによる系統的乖離があるため、詳細は`testing-policy.md`「リファレンス実装」参照）。性能比較専用。固定効果が絡むFE/REの正確性検証にも使わない（linearmodelsとR `fixest`/`plm`を使う。詳細は`docs/guide/verification.md`参照）
 - **statsmodels discrete model（Logit等）固有の既知の欠落**（Probit実装時も要確認）: `cov_type="hc1"`はOLS/GLMと異なり小標本補正が未実装でHC0と同一値になる（Rが正リファレンス）。`cov_type="opg"`はネイティブ非対応（"cov_type not recognized"）で`model.score_obs(params)`から手計算が必要、かつ`opg`の限界効果（`get_margeff()`）はfit済み結果へのcov_params事後上書きが効かないためstatsmodels側では算出不可（R `marginaleffects`の`vcov=`引数を使う）。詳細は`docs/spec/logit-spec.md`「テスト」参照
 
 ## `benchmark/` ディレクトリの構成（動作確認済み）
 
-`benchmark/` は `__init__.py` を持つ Python パッケージ（Initiative A、経緯は `docs/planning/specs/refactoring-issue231-progress.md`「Initiative A」節）。import はすべてドット表記（`from benchmark.common import ...` 等）、スクリプト実行は**リポジトリルートから `python -m benchmark.<...>`**（各ディレクトリへ `cd` して `python foo.py` は不可）。
+`benchmark/` は `__init__.py` を持つ Python パッケージ。import はすべてドット表記（`from benchmark.common import ...` 等）、スクリプト実行は**リポジトリルートから `python -m benchmark.<...>`**（各ディレクトリへ `cd` して `python foo.py` は不可）。
 
 `engine`/`engine_pybind`と同じ系統（family）単位でディレクトリを分けている（`linear`=OLS/WLS/GLS、`panel`=FE/RE、`iv`=IV、`nonlinear`=Logit/Probit/Tobit等）。系統をまたいで使う汎用ヘルパーは`benchmark/common/`に集約。1手法は(a)データセット層＝`datasets.py`、(b)リファレンスアダプタ層＝`references/`、(c)フィクスチャドライバ層＝`fixtures/generate_*_fixtures.py`の3つに分ける。
 
@@ -37,12 +37,12 @@ allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
 - `benchmark/<系統>/datasets.py`（(a) データセット層）: 合成データセットのDGP（`generate_*` 関数・`SCENARIOS`）とCSV凍結（`freeze.py`から呼ばれる）。`linear`は7シナリオ（baseline, small_n, high_variance, heteroskedastic, autocorrelated, moderate_multicollinearity, perfect_multicollinearity）、`nonlinear`は`generate_binary_choice_dataset(scenario, link="logit"|"probit", ...)`（`link`引数でLogit/Probit共用）、`iv`は識別構造（操作変数×内生変数×構造誤差）を組み込んだ専用シナリオ。
 - `benchmark/<系統>/freeze.py`: 各系統の合成データセットを`tests/fixtures/benchmarks/data/`にCSVとして**固定**する。フィクスチャ生成・pytest実行時はこのCSVを読むだけ（ジェネレータを直接呼ばない）。理由: ジェネレータ側のコードが将来変わっても、固定済みフィクスチャJSONの期待値と無言で不整合にならないようにするため。
 - `benchmark/regenerate_all.py`（root）: 合成データCSV＋全フィクスチャJSONの一括再生成オーケストレータ（3系統の`freeze.py`＋11個の`generate_*_fixtures.py`を`python -m`で順に実行）。`--datasets-only`（CSVのみ、Rscript不要）／`--fixtures-only`。新しいシナリオ・データセットを追加した場合のみ再実行する（自動追従はしない）。
-- `performance/`（リポジトリ直下、`benchmark/`の外）: リファレンス実装との**性能比較**（正確性検証とは別軸、`testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」参照）。pytest無関係で性質が違うため分離している（Initiative A で分離）。
+- `performance/`（リポジトリ直下、`benchmark/`の外）: リファレンス実装との**性能比較**（正確性検証とは別軸、`testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」参照）。pytest無関係で性質が違うため分離している。
   - `_perf_harness.py`: 手法非依存の計測ハーネス（サブプロセス隔離・ウォームアップ＋中央値・ピークRSS・releaseビルド検知・n/kスイープ・レポート組み立て・CLI）。手法固有の「変わる部分」は`PerfAdapter`（データ生成・ライブラリ別`fit_once`・cov_type・軸の刻み・リファレンス実装バージョン）にまとめて`run_cli()`に渡す。
-  - `compare_<method>.py`: 手法ごとの薄いアダプタ＋`__main__`。`compare_ols.py`・`compare_wls.py`・`compare_logit.py`・`compare_probit.py`・`compare_iv.py`（`.github/workflows/benchmark_performance.yml`の`method`matrixから定期実行）が実装例。比較対象はREADME「Verification accuracy」表のprimary reference単体（OLS/WLS/Logit/Probit: statsmodels、IV: linearmodels。pyfixestは使わない）。cov_typeは代表2点（最軽classical＋最重、実装時に軽く実測して選定）のみ。リファレンス実装がネイティブ非対応の条件（Logit/ProbitのOPG、IVのGMM×hac等）は対称計測できない・病的に遅いため性能比較の対象から外す。`default_method`（IVの2sls等）と`extra_methods`（method軸で代表点のみ計測、Logit/Probitのbfgs/lbfgs・IVのgmm）で method 別計測を表現する。
+  - `compare_<method>.py`: 手法ごとの薄いアダプタ＋`__main__`。`compare_ols.py`・`compare_wls.py`・`compare_logit.py`・`compare_probit.py`・`compare_iv.py`（`.github/workflows/benchmark_performance.yml`の`method`matrixから定期実行）が実装例。比較対象は`docs/guide/verification.md`のリファレンス表のprimary reference単体（OLS/WLS/Logit/Probit: statsmodels、IV: linearmodels。pyfixestは使わない）。cov_typeは代表2点（最軽classical＋最重、実装時に軽く実測して選定）のみ。リファレンス実装がネイティブ非対応の条件（Logit/ProbitのOPG、IVのGMM×hac等）は対称計測できない・病的に遅いため性能比較の対象から外す。`default_method`（IVの2sls等）と`extra_methods`（method軸で代表点のみ計測、Logit/Probitのbfgs/lbfgs・IVのgmm）で method 別計測を表現する。
   - `render_performance_summary.py`: 結果JSON→job summary用Markdown整形（手法名・cov_type・ライブラリは`_meta`から読むため手法非依存）。
 - `benchmark/<系統>/references/`（(b) リファレンスアダプタ層）: 「凍結df＋spec＋cov_type→結果dict」に純化したアダプタと、それが呼ぶ`.R`本体。
-  - `statsmodels_ref.py`（`linear`/`nonlinear`、statsmodelsが主リファレンスの系統）: 主リファレンス。1回呼べば1ケース分の結果を返す。`linear`は`--weight-col`指定でWLS（`smf.wls`）にも対応、`nonlinear`は`--model logit`/`--model probit`で切り替える。**ライブラリ名（`statsmodels`）と同名にすると`sys.path`経由で衝突するため`_ref`サフィックス付き**（旧`run_statsmodels_benchmark.py`同名衝突バグの再発防止、`refactoring-issue231-progress.md`）。
+  - `statsmodels_ref.py`（`linear`/`nonlinear`、statsmodelsが主リファレンスの系統）: 主リファレンス。1回呼べば1ケース分の結果を返す。`linear`は`--weight-col`指定でWLS（`smf.wls`）にも対応、`nonlinear`は`--model logit`/`--model probit`で切り替える。**ライブラリ名（`statsmodels`）と同名にすると`sys.path`経由で衝突するため`_ref`サフィックス付き**（旧`run_statsmodels_benchmark.py`同名衝突バグの再発防止）。
   - `linearmodels_ref.py`（`iv`、主リファレンスがlinearmodelsのため）: 2SLSは`run()`、GMMは`run_gmm()`（同ファイル）。
   - `r.py`（各系統）: `common/reference/r.py`の`run_r`/`normalize_names`を呼ぶ薄い系統別ラッパー（`run_lm_r`/`run_glm_r`/`run_ivreg_r`）。
 - `benchmark/<系統>/fixtures/generate_<手法名>_fixtures.py`（(c) フィクスチャドライバ層）: 対象手法の全シナリオ×全オプション＋特殊ケースを回し、`tests/fixtures/benchmarks/<手法名>.json`へ書き出す。生成スクリプト（`benchmark/`側）と生成物（`tests/`側）を分けている（`testing-policy.md`「ベンチマーク値のフィクスチャ化」参照）。`__main__`は`run_fixture_cli`、`coef`/`se`抽出は`extract_coef_se`、Rクロスチェック呼び出しは`references/r.py`の薄いラッパー経由で共通化。`linear/fixtures/generate_ols_fixtures.py`（statsmodels主リファレンス）・`generate_ols_crosscheck_fixtures.py`（Rクロスチェック）が実装例。手法ごとに別ファイル（`generate_logit_fixtures.py`/`generate_probit_fixtures.py`等）。
@@ -51,7 +51,7 @@ allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
   - `benchmark/linear/references/run_lm_predict_crosscheck.R`: `predict()`のクロスチェック用。
   - `benchmark/panel/run_plm_benchmark.R`: plmパッケージ。未検証（Phase4着手時に確認）。
   - `benchmark/iv/references/run_ivreg.R`: ivreg/AERパッケージによる2SLSクロスチェック。動作検証済み、正式なクロスチェックとして使用中。
-  - `benchmark/nonlinear/references/run_glm_crosscheck.R`: base R `glm` + sandwich（HC0/HC1/cluster）+ 手計算OPG（`sandwich::estfun()`のスコア寄与から`Σ=(Σsᵢsᵢ')⁻¹`）+ `marginaleffects`パッケージ（限界効果、`vcov=`引数でカスタム共分散行列を直接渡す）によるLogit/Probitクロスチェック。第4引数`link`（`logit`/`probit`）で切り替える。動作検証済み、正式なクロスチェックとして使用中。**注意（重要、Probit追加時に発覚）**: `classical`/`hc0`/`hc1`/`cluster`は`glm()`の既定`vcov()`/`vcovHC()`/`vcovCL()`（IRLS/Fisher scoringの期待情報行列ベース）をそのまま使わず、本実装と同じ解析式（`λᵢ(λᵢ+zᵢ)`等）で観測情報行列を手計算したものを`sandwich(bread.=...)`に渡す。Logit（binomial族の正準リンク）は期待情報行列と観測情報行列が理論上一致するため影響が無いが、Probit（非正準リンク）は一致せず、素の`vcov()`を使うと最大約8%の乖離が生じることが実測で発覚した（詳細は`docs/spec/probit-spec.md`参照）。**注意**: `marginaleffects::datagrid()`/`slopes(newdata="mean"|"median")`のショートカット文字列は、整数のみの数値列を`FUN_integer`（既定`round(mean(x))`）で丸めてしまい、本実装・statsmodelsの「生の標本平均・中央値」の定義とずれる。`datagrid(FUN_numeric=mean, FUN_integer=mean)`のように両方明示すること（`docs/spec/logit-spec.md`「テスト」参照）。
+  - `benchmark/nonlinear/references/run_glm_crosscheck.R`: base R `glm` + sandwich（HC0/HC1/cluster）+ 手計算OPG（`sandwich::estfun()`のスコア寄与から`Σ=(Σsᵢsᵢ')⁻¹`）+ `marginaleffects`パッケージ（限界効果、`vcov=`引数でカスタム共分散行列を直接渡す）によるLogit/Probitクロスチェック。第4引数`link`（`logit`/`probit`）で切り替える。動作検証済み、正式なクロスチェックとして使用中。**注意（重要、Probit追加時に発覚）**: `classical`/`hc0`/`hc1`/`cluster`は`glm()`の既定`vcov()`/`vcovHC()`/`vcovCL()`（IRLS/Fisher scoringの期待情報行列ベース）をそのまま使わず、本実装と同じ解析式（`λᵢ(λᵢ+zᵢ)`等）で観測情報行列を手計算したものを`sandwich(bread.=...)`に渡す。Logit（binomial族の正準リンク）は期待情報行列と観測情報行列が理論上一致するため影響が無いが、Probit（非正準リンク）は一致せず、素の`vcov()`を使うと最大約8%の乖離が生じることが実測で発覚した（詳細は`docs/spec/probit-spec.md`参照）。**注意**: `glm()`の収束判定は`epsilon=1e-14`に厳しくする（既定の1e-8だと`sandwich::estfun()`が1反復前の作業重みを使い、hc0/hc1/opgの標準誤差の参照値に相対誤差~3e-5のノイズが乗る）。`slopes()`/`avg_slopes()`は変数ごとに`eps=1e-5*sd(x)`を指定して呼ぶ（`eps`は変数の単位そのものの絶対刻み幅で、既定や固定値だと勾配の急なケース・変数スケールの大きいケースで限界効果が解析解から~7e-6〜5e-5ずれる。`numderiv=`は効果の刻み幅に効かない）。**注意**: `marginaleffects::datagrid()`/`slopes(newdata="mean"|"median")`のショートカット文字列は、整数のみの数値列を`FUN_integer`（既定`round(mean(x))`）で丸めてしまい、本実装・statsmodelsの「生の標本平均・中央値」の定義とずれる。`datagrid(FUN_numeric=mean, FUN_integer=mean)`のように両方明示すること（`docs/spec/logit-spec.md`「テスト」参照）。
   - 注意: `read.csv()`はデフォルトで列名を`make.names()`により書き換える（例: `_group`→`X_group`）。クラスター列等を渡す場合は影響を受けるため、各スクリプトとも`check.names = FALSE`を指定している。
 - **pyfixestのHC2/HC3に関する既知の差異**: pyfixest自身の実装バグ（HC1用の小標本補正をHC2/HC3にも誤って適用）による系統的乖離があり、OLSの正確性検証からは除外し性能比較専用とする。詳細は`testing-policy.md`「リファレンス実装」・`docs/spec/ols-spec.md`「テスト」参照。
 

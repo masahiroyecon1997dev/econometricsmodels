@@ -44,7 +44,7 @@
 //! ともに0にアンダーフローし`0.0/0.0`のNaNになる（実装時にrust-reviewerの
 //! レビューで判明。`Logit`の`logistic`/`softplus`が有限の`z`ではどれだけ極端でも
 //! 絶対にNaNを産まない設計だったのとは異なる、Probit固有のリスク）。既定手法の
-//! `Method::Newton`（`FaerNewton`）はline searchなしで`gradient`/`hessian`を直接
+//! `SolverType::Newton`（`FaerNewton`）はline searchなしで`gradient`/`hessian`を直接
 //! 使うため、Logitで実際に問題になった「(準)完全分離データでの収束判定誤検知」
 //! （勾配ノルムのアンダーフロー、`docs/spec/logit-spec.md`3.2節参照）よりも
 //! 緩い条件でこのNaN汚染に到達しうる。
@@ -68,7 +68,7 @@ use crate::inference;
 use crate::nonlinear::common::{
     CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
     MleError, MleFitOptions, SandwichVariant, SeparationNormCheck, U_CLAMP, clamped_pdf_cdf,
-    cluster_cov_params, column_means, column_medians, destandardize_cov_params,
+    cluster_cov_params, column_means, column_medians, compensated_sum, destandardize_cov_params,
     destandardize_params, goodness_of_fit, log_likelihood_null, marginal_effects_from_w_s,
     observed_information_cov_params, ols_based_initial_params, opg_cov_params, pred_table,
     predict_from_link, predict_new_data, run_solver, sandwich_cov_params, standardize_columns,
@@ -211,14 +211,13 @@ impl ProbitInput {
 fn log_likelihood(x: &Mat<f64>, y: &Mat<f64>, params: &[f64]) -> f64 {
     let normal = Normal::standard();
     let n = x.nrows();
-    (0..n)
-        .map(|i| {
-            let z: f64 = (0..x.ncols()).map(|j| *x.get(i, j) * params[j]).sum();
-            let q = 2.0 * (*y.get(i, 0)) - 1.0;
-            let (_, big_phi) = clamped_pdf_cdf(&normal, q * z);
-            big_phi.ln()
-        })
-        .sum()
+    // 補償和（`compensated_sum`のdocコメント参照。大標本のNewtonのコスト比較のため）。
+    compensated_sum((0..n).map(|i| {
+        let z: f64 = (0..x.ncols()).map(|j| *x.get(i, j) * params[j]).sum();
+        let q = 2.0 * (*y.get(i, 0)) - 1.0;
+        let (_, big_phi) = clamped_pdf_cdf(&normal, q * z);
+        big_phi.ln()
+    }))
 }
 
 /// 限界効果（`ProbitEstimator::marginal_effects`のdocコメント「数式（デルタ法）」参照）の
@@ -429,7 +428,7 @@ pub struct ProbitEstimator {
     /// 標準誤差（k, 元のスケール）。`cov_params`の対角成分の平方根
     std_errors: Vec<f64>,
     /// z統計量（k）= `params / std_errors`
-    z_stats: Vec<f64>,
+    test_stats: Vec<f64>,
     /// 両側p値（k）。標準正規分布に基づく
     p_values: Vec<f64>,
     /// 信頼区間の下限（k）
@@ -480,11 +479,11 @@ pub struct ProbitEstimator {
 }
 
 impl ProbitEstimator {
-    /// `method`（Newton-Raphson/BFGS/L-BFGS）で負の対数尤度を最小化し、Probitの係数・
+    /// `solver`（Newton-Raphson/BFGS/L-BFGS）で負の対数尤度を最小化し、Probitの係数・
     /// 観測情報行列によるSE・z値・p値・信頼区間を推定する。`LogitEstimator::fit`
-    /// （骨格実装＋method分岐＋SE計算）と同じ設計・スコープ。
+    /// （骨格実装＋solver分岐＋SE計算）と同じ設計・スコープ。
     ///
-    /// `method`の選択に関わらず、収束点でのHessian評価（SE計算用）は常に解析的に行う
+    /// `solver`の選択に関わらず、収束点でのHessian評価（SE計算用）は常に解析的に行う
     /// （`run_solver`の実装方針、`docs/spec/nonlinear-common.md`1.2節参照）。
     /// BFGS/L-BFGSが最適化中に内部で保持する近似Hessianは
     /// 使い回さない。
@@ -493,7 +492,7 @@ impl ProbitEstimator {
     /// スケール補正（`p̄=ȳ`での `1/φ(Φ⁻¹(p̄))` 倍＋切片補正）を施したもの
     /// （`ols_based_initial_params`。`LogitEstimator::fit`と同じ設計で、
     /// 従来のゼロベクトルから変更）。前段で`standardize_columns`後の設計行列を列ピボットQR
-    /// しランク落ちを検出する（`checked_design_matrix_qr`、`method`によらず単一経路で
+    /// しランク落ちを検出する（`checked_design_matrix_qr`、`solver`によらず単一経路で
     /// `SingularDesignMatrix`）。`start_params`によるユーザー指定初期値は引き続き未対応。
     ///
     /// 設計行列は`standardize_columns`で内部的に標準化してから最適化し、収束後の
@@ -532,7 +531,7 @@ impl ProbitEstimator {
     /// - `k`（定数項を含む説明変数の数）が0（定数項も説明変数も無い）: `CommonError::NoRegressors`
     /// - 観測数`n`が`k`以下: `CommonError::InsufficientObservations`
     /// - 設計行列がランク落ち（完全な多重共線性等）: `MleError::SingularDesignMatrix`
-    ///   （最適化前の列ピボットQRランクチェックで`method`によらず検出）
+    ///   （最適化前の列ピボットQRランクチェックで`solver`によらず検出）
     /// - `raise_on_non_convergence=true`かつ`max_iter`回で未収束: `MleError::NonConvergence`
     /// - 収束点（または`raise_on_non_convergence=false`時の打ち切り点）のHessianが特異:
     ///   `MleError::SingularHessian`（ランク落ちは前段で`SingularDesignMatrix`として弾くため、
@@ -546,7 +545,7 @@ impl ProbitEstimator {
     ///   新規制約）
     pub fn fit(input: ProbitInput, options: MleFitOptions) -> Result<Self, MleError> {
         let MleFitOptions {
-            method,
+            solver,
             max_iter,
             tol,
             raise_on_non_convergence,
@@ -570,9 +569,9 @@ impl ProbitEstimator {
         )?;
 
         let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
-        // `method`に関わらず、標準化空間でLPMのIRLS 1ステップ相当を初期値（warm start）に
+        // `solver`に関わらず、標準化空間でLPMのIRLS 1ステップ相当を初期値（warm start）に
         // する（`ols_based_initial_params`）。前段の列ピボットQRランクチェックにより、
-        // 完全な多重共線性は`method`によらず単一経路で`SingularDesignMatrix`として検出される
+        // 完全な多重共線性は`solver`によらず単一経路で`SingularDesignMatrix`として検出される
         // （Logitと同じ経緯・同じ設計）。
         let initial_params = {
             let normal = Normal::standard();
@@ -604,7 +603,7 @@ impl ProbitEstimator {
 
         let output = run_solver(
             problem,
-            method,
+            solver,
             initial_params,
             max_iter as u64,
             tol,
@@ -673,7 +672,7 @@ impl ProbitEstimator {
         let z_crit = inference::critical_value(&normal, confidence_level);
 
         let mut std_errors = vec![0.0; k];
-        let mut z_stats = vec![0.0; k];
+        let mut test_stats = vec![0.0; k];
         let mut p_values = vec![0.0; k];
         let mut conf_lower = vec![0.0; k];
         let mut conf_upper = vec![0.0; k];
@@ -683,7 +682,7 @@ impl ProbitEstimator {
             let stat = inference::compute_inference_stat(&normal, params[j], se, z_crit);
 
             std_errors[j] = se;
-            z_stats[j] = stat.stat;
+            test_stats[j] = stat.stat;
             p_values[j] = stat.p_value;
             conf_lower[j] = stat.conf_low;
             conf_upper[j] = stat.conf_high;
@@ -710,7 +709,7 @@ impl ProbitEstimator {
             params,
             cov_params,
             std_errors,
-            z_stats,
+            test_stats,
             p_values,
             conf_lower,
             conf_upper,
@@ -744,8 +743,13 @@ impl ProbitEstimator {
     }
 
     /// z統計量（k）
-    pub fn z_stats(&self) -> &[f64] {
-        &self.z_stats
+    pub fn test_stats(&self) -> &[f64] {
+        &self.test_stats
+    }
+
+    /// `test_stats`の従う分布（標準正規分布、自由度なし）。
+    pub fn stat_dist(&self) -> inference::StatDist {
+        inference::StatDist::Normal
     }
 
     /// 両側p値（k）
@@ -796,6 +800,11 @@ impl ProbitEstimator {
     /// 尤度比検定のp値（`df_model==0`のときNaN）
     pub fn lr_p_value(&self) -> f64 {
         self.lr_p_value
+    }
+
+    /// 尤度比検定の自由度（χ²、`df_model`）。`df_model==0`でp値がNaNのときは`None`。
+    pub fn lr_df(&self) -> Option<usize> {
+        (self.df_model() > 0).then_some(self.df_model())
     }
 
     /// McFadden疑似決定係数
@@ -934,7 +943,7 @@ impl ProbitEstimator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nonlinear::common::{Method, dydx_and_jacobian};
+    use crate::nonlinear::common::{SolverType, dydx_and_jacobian};
     use statrs::distribution::ChiSquared;
 
     #[test]
@@ -1183,7 +1192,7 @@ mod tests {
         // 上の`cost_gradient_hessian_stay_finite_for_extreme_linear_predictor`と
         // 同じデータ（切片のみ、z=1000）を使う。y=[1,0]の2件はどちらも同じ`z=1000`を
         // 共有するが、y=0の観測はq=-1でqz=-1000（大きく負、誤分類）となり、
-        // これがまさに#316の再現条件。修正前はh[0][0]が約-8177（Issueの手計算
+        // これがまさに再現条件。修正前はh[0][0]が約-8177（手計算
         // 概算値≈-8064と整合）だったことを確認済み（バグ注入により再現）。
         let y = vec![1.0, 0.0];
         let input = ProbitInput::from_columns(&y, &[], vec![], true, "y".to_string()).unwrap();
@@ -1199,7 +1208,7 @@ mod tests {
     }
 
     /// `U_CLAMP`領域での`cost()`/`gradient()`の数学的非整合（`docs/spec/probit-spec.md`
-    /// 4章に未検証リスクとして記載されていた項目、`test-coverage-candidates.md`項目9）が
+    /// 4章に未検証リスクとして記載されていた項目）が
     /// 実際にBFGS/L-BFGSのline searchを壊すかを、near-separationデータ（真の有限MLEは
     /// 存在するが収束点付近でも一部観測の`|u|`が`U_CLAMP`を大きく超える設計）で検証する。
     ///
@@ -1316,7 +1325,7 @@ mod tests {
             })
             .unwrap();
 
-        let run = |method: Method| {
+        let run = |solver: SolverType| {
             let inner = ProbitProblem::from_standardized(x_std.clone(), input.y().clone());
             let tracker = Rc::new(Cell::new(0.0_f64));
             let problem = Instrumented {
@@ -1325,7 +1334,7 @@ mod tests {
             };
             let output = run_solver(
                 problem,
-                method,
+                solver,
                 initial_params.clone(),
                 200,
                 1e-6,
@@ -1334,13 +1343,13 @@ mod tests {
                 SeparationNormCheck::Enabled,
             )
             .unwrap();
-            assert!(output.converged, "{method:?} did not converge");
+            assert!(output.converged, "{solver:?} did not converge");
             (destandardize_params(&output.params, &scale), tracker.get())
         };
 
-        let (newton_params, newton_max_u) = run(Method::Newton);
-        let (bfgs_params, bfgs_max_u) = run(Method::Bfgs);
-        let (lbfgs_params, lbfgs_max_u) = run(Method::Lbfgs);
+        let (newton_params, newton_max_u) = run(SolverType::Newton);
+        let (bfgs_params, bfgs_max_u) = run(SolverType::Bfgs);
+        let (lbfgs_params, lbfgs_max_u) = run(SolverType::Lbfgs);
 
         // このテストが検証したいのは「U_CLAMPを超える領域を実際に通過してもbfgs/lbfgsが
         // 壊れない」ことであり、通過しなければテストの主張自体が空虚になる（rust-reviewer
@@ -1374,7 +1383,7 @@ mod tests {
 
     /// `SEPARATION_PARAM_NORM_THRESHOLD=100.0`（`nonlinear/common.rs`、Logitの実測に
     /// 基づく較正値）がProbitでも同程度に機能するかを検証する一連のテスト
-    /// （`test-coverage-candidates.md`項目10、`docs/spec/probit-spec.md`4章）。
+    /// （`docs/spec/probit-spec.md`4章）。
     ///
     /// `logit.rs`の`near_separation_input_with_beta1`と同型の設計（`beta=[0,beta1,0.5]`、
     /// 同じLCG・同じ`n=200`・同じ`x1`/`x2`分布）だが、リンク関数のみ`Normal::cdf`に
@@ -1426,15 +1435,15 @@ mod tests {
         // 実測で確認済みの最小反復回数（`SeparationSuspected`が発火するまでの
         // `n_iter`）: newton=22・bfgs=28・lbfgs=26（`logit.rs`の同名テストと同じ考え方、
         // 手法ごとに実測値+数回分の余裕を持たせる）。
-        for (method, max_iter) in [
-            (Method::Newton, 25),
-            (Method::Bfgs, 32),
-            (Method::Lbfgs, 30),
+        for (solver, max_iter) in [
+            (SolverType::Newton, 25),
+            (SolverType::Bfgs, 32),
+            (SolverType::Lbfgs, 30),
         ] {
             let result = ProbitEstimator::fit(
                 near_separation_input(),
                 MleFitOptions {
-                    method,
+                    solver,
                     max_iter,
                     tol: 1e-6,
                     raise_on_non_convergence: true,
@@ -1444,8 +1453,8 @@ mod tests {
             );
             assert!(
                 matches!(result, Err(MleError::SeparationSuspected { .. })),
-                "method={:?}, result={:?}",
-                method,
+                "solver={:?}, result={:?}",
+                solver,
                 result
             );
         }
@@ -1456,7 +1465,7 @@ mod tests {
         let estimator = ProbitEstimator::fit(
             near_separation_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: false,
@@ -1475,11 +1484,11 @@ mod tests {
     /// 保証する。
     #[test]
     fn fit_converges_normally_for_mild_near_separation_data_across_all_methods() {
-        for method in [Method::Newton, Method::Bfgs, Method::Lbfgs] {
+        for solver in [SolverType::Newton, SolverType::Bfgs, SolverType::Lbfgs] {
             let result = ProbitEstimator::fit(
                 near_separation_input_with_beta1(20.0),
                 MleFitOptions {
-                    method,
+                    solver,
                     max_iter: 35,
                     tol: 1e-6,
                     raise_on_non_convergence: true,
@@ -1487,8 +1496,8 @@ mod tests {
                     confidence_level: 0.95,
                 },
             );
-            assert!(result.is_ok(), "method={:?}, result={:?}", method, result);
-            assert!(result.unwrap().converged(), "method={:?}", method);
+            assert!(result.is_ok(), "solver={:?}, result={:?}", solver, result);
+            assert!(result.unwrap().converged(), "solver={:?}", solver);
         }
     }
 
@@ -1507,7 +1516,7 @@ mod tests {
         let estimator = ProbitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -1540,12 +1549,12 @@ mod tests {
     /// `Var(θ̂) = H(θ̂)⁻¹ = ȳ(1-ȳ)/(n*φ(θ̂)²)`。z値・p値・信頼区間はこの分散から
     /// 標準正規分布（独立に`statrs::Normal`で検算）で導出できる。
     #[test]
-    fn fit_computes_std_errors_z_stats_p_values_and_ci_matching_closed_form_for_intercept_only_model()
+    fn fit_computes_std_errors_test_stats_p_values_and_ci_matching_closed_form_for_intercept_only_model()
      {
         let estimator = ProbitEstimator::fit(
             intercept_only_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -1569,7 +1578,7 @@ mod tests {
         assert!((estimator.std_errors()[0] - expected_se).abs() < 1e-6);
 
         let expected_z = estimator.params()[0] / expected_se;
-        assert!((estimator.z_stats()[0] - expected_z).abs() < 1e-6);
+        assert!((estimator.test_stats()[0] - expected_z).abs() < 1e-6);
 
         // p値・信頼区間はstatrsのNormalで独立に検算する（本体実装と同じ計算式を
         // 繰り返すのではなく、標準正規分布の性質から直接導出する）。
@@ -1605,7 +1614,7 @@ mod tests {
         let estimator = ProbitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -1635,7 +1644,7 @@ mod tests {
         for j in 0..k {
             let se = estimator.std_errors()[j];
             assert!((se * se - *estimator.cov_params().get(j, j)).abs() < 1e-9);
-            assert!((estimator.z_stats()[j] - estimator.params()[j] / se).abs() < 1e-9);
+            assert!((estimator.test_stats()[j] - estimator.params()[j] / se).abs() < 1e-9);
             assert!(
                 (estimator.conf_upper()[j] - estimator.conf_lower()[j] - 2.0 * z_crit * se).abs()
                     < 1e-9
@@ -1652,7 +1661,7 @@ mod tests {
         let estimator = ProbitEstimator::fit(
             intercept_only_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -1703,7 +1712,7 @@ mod tests {
         let estimator = ProbitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -1774,7 +1783,7 @@ mod tests {
         let estimator = ProbitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -1827,7 +1836,7 @@ mod tests {
         let classical = ProbitEstimator::fit(
             make_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -1879,7 +1888,7 @@ mod tests {
             let estimator = ProbitEstimator::fit(
                 make_input(),
                 MleFitOptions {
-                    method: Method::Newton,
+                    solver: SolverType::Newton,
                     max_iter: 35,
                     tol: 1e-8,
                     raise_on_non_convergence: true,
@@ -1934,7 +1943,7 @@ mod tests {
         let classical = ProbitEstimator::fit(
             make_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -1969,7 +1978,7 @@ mod tests {
         let estimator = ProbitEstimator::fit(
             make_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2026,7 +2035,7 @@ mod tests {
         let classical = ProbitEstimator::fit(
             make_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2061,7 +2070,7 @@ mod tests {
         let estimator = ProbitEstimator::fit(
             make_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2100,7 +2109,7 @@ mod tests {
         let result = ProbitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2132,7 +2141,7 @@ mod tests {
         let result = ProbitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2177,7 +2186,7 @@ mod tests {
         let result = ProbitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2194,9 +2203,9 @@ mod tests {
         );
     }
 
-    /// `method`（`bfgs`/`lbfgs`）と`cov_type`（`Opg`/`Hc0`/`Hc1`/`Cluster`）の組み合わせが
-    /// 正しく機能することを確認する（Logitの対応するテストと同じ理由: `method`横断が
-    /// `CovType::Classical`のみ、`cov_type`横断が`Method::Newton`のみのテストでは、
+    /// `solver`（`bfgs`/`lbfgs`）と`cov_type`（`Opg`/`Hc0`/`Hc1`/`Cluster`）の組み合わせが
+    /// 正しく機能することを確認する（Logitの対応するテストと同じ理由: `solver`横断が
+    /// `CovType::Classical`のみ、`cov_type`横断が`SolverType::Newton`のみのテストでは、
     /// 両方を同時に変える組み合わせが未検証になる）。`scores_std`の評価は収束点の
     /// パラメータにのみ依存し最適化アルゴリズムの種類に依存しない設計のため、
     /// `newton`で計算した`cov_params`（既に上のテストで正しさを検証済み）と
@@ -2235,7 +2244,7 @@ mod tests {
             let newton = ProbitEstimator::fit(
                 make_input(),
                 MleFitOptions {
-                    method: Method::Newton,
+                    solver: SolverType::Newton,
                     max_iter: 35,
                     tol: 1e-8,
                     raise_on_non_convergence: true,
@@ -2245,11 +2254,11 @@ mod tests {
             )
             .unwrap();
 
-            for method in [Method::Bfgs, Method::Lbfgs] {
+            for solver in [SolverType::Bfgs, SolverType::Lbfgs] {
                 let estimator = ProbitEstimator::fit(
                     make_input(),
                     MleFitOptions {
-                        method,
+                        solver,
                         max_iter: 200,
                         tol: 1e-8,
                         raise_on_non_convergence: true,
@@ -2263,7 +2272,7 @@ mod tests {
                     estimator.converged(),
                     "cov_type={:?}, {:?}",
                     cov_type,
-                    method
+                    solver
                 );
                 for i in 0..k {
                     for j in 0..k {
@@ -2271,9 +2280,9 @@ mod tests {
                             (*estimator.cov_params().get(i, j) - *newton.cov_params().get(i, j))
                                 .abs()
                                 < 1e-4,
-                            "cov_type={:?}, method={:?}, ({i},{j}): actual={}, newton={}",
+                            "cov_type={:?}, solver={:?}, ({i},{j}): actual={}, newton={}",
                             cov_type,
-                            method,
+                            solver,
                             *estimator.cov_params().get(i, j),
                             *newton.cov_params().get(i, j)
                         );
@@ -2290,11 +2299,11 @@ mod tests {
         let y_bar: f64 = 4.0 / 7.0;
         let expected = Normal::standard().inverse_cdf(y_bar);
 
-        for method in [Method::Bfgs, Method::Lbfgs] {
+        for solver in [SolverType::Bfgs, SolverType::Lbfgs] {
             let estimator = ProbitEstimator::fit(
                 intercept_only_input(),
                 MleFitOptions {
-                    method,
+                    solver,
                     max_iter: 100,
                     tol: 1e-6,
                     raise_on_non_convergence: true,
@@ -2304,11 +2313,11 @@ mod tests {
             )
             .unwrap();
 
-            assert!(estimator.converged(), "{:?}", method);
+            assert!(estimator.converged(), "{:?}", solver);
             assert!(
                 (estimator.params()[0] - expected).abs() < 1e-4,
-                "method={:?}, params={:?}, expected={}",
-                method,
+                "solver={:?}, params={:?}, expected={}",
+                solver,
                 estimator.params(),
                 expected
             );
@@ -2340,7 +2349,7 @@ mod tests {
         let newton = ProbitEstimator::fit(
             make_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2351,11 +2360,11 @@ mod tests {
         .unwrap();
         assert!(newton.converged());
 
-        for method in [Method::Bfgs, Method::Lbfgs] {
+        for solver in [SolverType::Bfgs, SolverType::Lbfgs] {
             let estimator = ProbitEstimator::fit(
                 make_input(),
                 MleFitOptions {
-                    method,
+                    solver,
                     max_iter: 200,
                     tol: 1e-8,
                     raise_on_non_convergence: true,
@@ -2365,12 +2374,12 @@ mod tests {
             )
             .unwrap();
 
-            assert!(estimator.converged(), "{:?}", method);
+            assert!(estimator.converged(), "{:?}", solver);
             for j in 0..2 {
                 assert!(
                     (estimator.params()[j] - newton.params()[j]).abs() < 1e-4,
-                    "method={:?}, j={j}, params={:?}, newton_params={:?}",
-                    method,
+                    "solver={:?}, j={j}, params={:?}, newton_params={:?}",
+                    solver,
                     estimator.params(),
                     newton.params()
                 );
@@ -2383,7 +2392,7 @@ mod tests {
         let result = ProbitEstimator::fit(
             intercept_only_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -2404,7 +2413,7 @@ mod tests {
         let result = ProbitEstimator::fit(
             intercept_only_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 0,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -2424,7 +2433,7 @@ mod tests {
             let result = ProbitEstimator::fit(
                 intercept_only_input(),
                 MleFitOptions {
-                    method: Method::Newton,
+                    solver: SolverType::Newton,
                     max_iter: 35,
                     tol,
                     raise_on_non_convergence: true,
@@ -2443,7 +2452,7 @@ mod tests {
         let result = ProbitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -2470,7 +2479,7 @@ mod tests {
         let result = ProbitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -2500,7 +2509,7 @@ mod tests {
         let result = ProbitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -2515,20 +2524,19 @@ mod tests {
     }
 
     /// 完全な多重共線性（`x2 = 2·x1`）の設計行列は、`fit()`冒頭の列ピボットQR
-    /// ランクチェック（`nonlinear::common::checked_design_matrix_qr`）で`method`・
+    /// ランクチェック（`nonlinear::common::checked_design_matrix_qr`）で`solver`・
     /// `cov_type`に関わらず単一経路で`SingularDesignMatrix`として弾かれる
     /// （`LogitEstimator`の対応するテストと同じ設計・同じ経緯）。
     ///
-    /// 前段QRへの一本化で`method`依存の検出漏れバグクラスを構造的に排除したため、
-    /// `method`×`cov_type`を網羅していた旧5テスト（`..._with_bfgs_and_lbfgs` /
+    /// 前段QRへの一本化で`solver`依存の検出漏れバグクラスを構造的に排除したため、
+    /// `solver`×`cov_type`を網羅していた旧5テスト（`..._with_bfgs_and_lbfgs` /
     /// `..._with_hc0_and_hc1` / `fit_returns_singular_opg_matrix_error_...` /
-    /// `..._with_cluster`）を本1テストへ集約した。`x2`は`x1`から生成する
-    /// （`refactoring-candidates-2.md`項目82）。
+    /// `..._with_cluster`）を本1テストへ集約した。`x2`は`x1`から生成する。
     ///
     /// 旧5テストが検証していた「`fit()`の各`cov_type`分岐での`SingularHessian`/
     /// `SingularOpgMatrix`の`?`伝播」経路のカバレッジは、`common.rs`の関数レベルテストと
     /// `tobit.rs`の`fit()`レベルテスト（`cov_params`計算は3手法で同一コード）が担う
-    /// （`LogitEstimator`の対応するテストのdocコメント参照、#279レビューで確認）。
+    /// （`LogitEstimator`の対応するテストのdocコメント参照、レビューで確認）。
     ///
     /// `Cluster`は`G=3 > q=2`にして`fit()`冒頭の`InsufficientClustersForInference`
     /// （`G <= q`）より手前を通す。
@@ -2544,7 +2552,7 @@ mod tests {
             "g3".to_string(),
         ];
 
-        for method in [Method::Newton, Method::Bfgs, Method::Lbfgs] {
+        for solver in [SolverType::Newton, SolverType::Bfgs, SolverType::Lbfgs] {
             for cov_type in [
                 CovType::Classical,
                 CovType::Hc0,
@@ -2566,7 +2574,7 @@ mod tests {
                 let result = ProbitEstimator::fit(
                     input,
                     MleFitOptions {
-                        method,
+                        solver,
                         max_iter: 100,
                         tol: 1e-6,
                         raise_on_non_convergence: true,
@@ -2576,7 +2584,7 @@ mod tests {
                 );
                 assert!(
                     matches!(result, Err(MleError::SingularDesignMatrix)),
-                    "method={method:?}, cov_type={cov_type:?}, result={result:?}"
+                    "solver={solver:?}, cov_type={cov_type:?}, result={result:?}"
                 );
             }
         }
@@ -2605,7 +2613,7 @@ mod tests {
         let result = ProbitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 1,
                 tol: 1e-12,
                 raise_on_non_convergence: true,
@@ -2636,7 +2644,7 @@ mod tests {
         let estimator = ProbitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 1,
                 tol: 1e-12,
                 raise_on_non_convergence: false,
@@ -2726,7 +2734,7 @@ mod tests {
         let estimator = ProbitEstimator::fit(
             intercept_only_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -2740,10 +2748,10 @@ mod tests {
             .marginal_effects(MarginalEffectsAt::Overall, 0.95)
             .unwrap();
         assert!(effects.param_names().is_empty());
-        assert!(effects.dydx().is_empty());
+        assert!(effects.effect().is_empty());
     }
 
-    /// `marginal_effects(at="overall")`の`dydx`を、実装の内部ヘルパー（`overall_w_and_s`/
+    /// `marginal_effects(at="overall")`の`effect`を、実装の内部ヘルパー（`overall_w_and_s`/
     /// `dydx_and_jacobian`）とは別に、定義式`dy/dx_j = (1/n)Σᵢφ(zᵢ)θⱼ`を`Normal::standard()`
     /// から直接計算する式で独立に再計算し、突き合わせる（`LogitEstimator`の対応する
     /// テストと同じ技法。標準誤差は`dydx_j`自体をfit済みパラメータの周りで数値微分した
@@ -2764,7 +2772,7 @@ mod tests {
         let estimator = ProbitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2782,7 +2790,7 @@ mod tests {
             .unwrap();
         assert_eq!(effects.param_names(), ["x1".to_string(), "x2".to_string()]);
 
-        // dydxの独立再計算（`Normal::standard().pdf`から直接、`overall_w_and_s`とは別の式）
+        // effectの独立再計算（`Normal::standard().pdf`から直接、`overall_w_and_s`とは別の式）
         let normal = Normal::standard();
         let dydx_j = |params: &[f64], j: usize| -> f64 {
             (0..n)
@@ -2796,7 +2804,7 @@ mod tests {
         };
         let params = estimator.params();
         for (idx, j) in (1..k).enumerate() {
-            assert!((effects.dydx()[idx] - dydx_j(params, j)).abs() < 1e-9);
+            assert!((effects.effect()[idx] - dydx_j(params, j)).abs() < 1e-9);
         }
 
         // 標準誤差の独立検証: `dydx_j`をfit済みパラメータの周りで数値微分して
@@ -2829,8 +2837,8 @@ mod tests {
         let z_crit = normal.inverse_cdf(0.975);
         for idx in 0..2 {
             let se = effects.std_errors()[idx];
-            assert!((effects.z_stats()[idx] - effects.dydx()[idx] / se).abs() < 1e-9);
-            let expected_p = 2.0 * (1.0 - normal.cdf(effects.z_stats()[idx].abs()));
+            assert!((effects.test_stats()[idx] - effects.effect()[idx] / se).abs() < 1e-9);
+            let expected_p = 2.0 * (1.0 - normal.cdf(effects.test_stats()[idx].abs()));
             assert!((effects.p_values()[idx] - expected_p).abs() < 1e-9);
             assert!(
                 (effects.conf_upper()[idx] - effects.conf_lower()[idx] - 2.0 * z_crit * se).abs()
@@ -2841,7 +2849,7 @@ mod tests {
 
     /// `at="mean"`は`at="overall"`と異なる代表点（標本平均）で評価するため、一般には
     /// 異なる値になる。実装がこの違いを正しく反映していること（`at`の分岐が機能して
-    /// いること）を確認する。`dydx`を`column_means`から独立に再計算した値とも突き合わせる。
+    /// いること）を確認する。`effect`を`column_means`から独立に再計算した値とも突き合わせる。
     #[test]
     fn marginal_effects_at_mean_differs_from_overall_and_matches_independent_recomputation() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
@@ -2858,7 +2866,7 @@ mod tests {
         let estimator = ProbitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2875,7 +2883,7 @@ mod tests {
             .marginal_effects(MarginalEffectsAt::Mean, 0.95)
             .unwrap();
 
-        assert!((overall.dydx()[0] - at_mean.dydx()[0]).abs() > 1e-9);
+        assert!((overall.effect()[0] - at_mean.effect()[0]).abs() > 1e-9);
 
         // 独立再計算: x̄=[1, 25, 1]（定数項1、x1の平均25、x2の平均1）でφ(z̄)を評価
         let params = estimator.params();
@@ -2883,13 +2891,13 @@ mod tests {
         let z_bar: f64 = (0..3).map(|m| x_bar[m] * params[m]).sum();
         let w = Normal::standard().pdf(z_bar);
         for (idx, j) in (1..3).enumerate() {
-            assert!((at_mean.dydx()[idx] - w * params[j]).abs() < 1e-9);
+            assert!((at_mean.effect()[idx] - w * params[j]).abs() < 1e-9);
         }
     }
 
     /// `at="median"`が`at="mean"`/`at="overall"`と異なる代表点で評価されること
     /// （非対称なデータセットで平均・中央値が異なる値になるよう構成）、および
-    /// `dydx`を`column_medians`から独立に再計算した値と突き合わせる。
+    /// `effect`を`column_medians`から独立に再計算した値と突き合わせる。
     #[test]
     fn marginal_effects_at_median_differs_from_mean_and_overall_and_matches_independent_recomputation()
      {
@@ -2911,7 +2919,7 @@ mod tests {
         let estimator = ProbitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -2931,8 +2939,8 @@ mod tests {
             .marginal_effects(MarginalEffectsAt::Median, 0.95)
             .unwrap();
 
-        assert!((at_median.dydx()[0] - at_mean.dydx()[0]).abs() > 1e-9);
-        assert!((at_median.dydx()[0] - overall.dydx()[0]).abs() > 1e-9);
+        assert!((at_median.effect()[0] - at_mean.effect()[0]).abs() > 1e-9);
+        assert!((at_median.effect()[0] - overall.effect()[0]).abs() > 1e-9);
 
         // 独立再計算: x̄=[1, 30, 2]（定数項1、x1の中央値30、x2の中央値2）でφ(z̄)を評価
         let params = estimator.params();
@@ -2940,7 +2948,7 @@ mod tests {
         let z_bar: f64 = (0..3).map(|m| x_bar[m] * params[m]).sum();
         let w = Normal::standard().pdf(z_bar);
         for (idx, j) in (1..3).enumerate() {
-            assert!((at_median.dydx()[idx] - w * params[j]).abs() < 1e-9);
+            assert!((at_median.effect()[idx] - w * params[j]).abs() < 1e-9);
         }
     }
 
@@ -2949,7 +2957,7 @@ mod tests {
         let estimator = ProbitEstimator::fit(
             intercept_only_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -2976,7 +2984,7 @@ mod tests {
         let estimator = ProbitEstimator::fit(
             intercept_only_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -3013,7 +3021,7 @@ mod tests {
         let estimator = ProbitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -3054,7 +3062,7 @@ mod tests {
         let estimator = ProbitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -3096,7 +3104,7 @@ mod tests {
         let estimator = ProbitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -3128,7 +3136,7 @@ mod tests {
         let estimator = ProbitEstimator::fit(
             intercept_only_input(),
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-6,
                 raise_on_non_convergence: true,
@@ -3173,7 +3181,7 @@ mod tests {
         let estimator = ProbitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -3229,7 +3237,7 @@ mod tests {
         let estimator = ProbitEstimator::fit(
             input,
             MleFitOptions {
-                method: Method::Newton,
+                solver: SolverType::Newton,
                 max_iter: 35,
                 tol: 1e-8,
                 raise_on_non_convergence: true,
@@ -3256,7 +3264,7 @@ mod tests {
     }
 
     /// property-basedテスト。`logit.rs`の`mod proptests`と同型の設計（ケース生成・
-    /// `method_strategy`・許容誤差較正）だが、`score_is_near_zero_at_converged_params`
+    /// `solver_strategy`・許容誤差較正）だが、`score_is_near_zero_at_converged_params`
     /// のスコア計算式はLogitの`Σᵢ(yᵢ-pᵢ)xᵢ`をそのまま移植せず、Probit固有の
     /// `Σᵢλᵢxᵢ`（`ProbitProblem::gradient`と同じ一般化残差、プロパティ本体のdoc
     /// コメント参照）に置き換えている。それ以外の不変条件の理論的根拠・較正方針の
@@ -3277,7 +3285,7 @@ mod tests {
         use proptest::prelude::*;
 
         // logit.rsと同じ理由でMAX_Kは小さく保つ（高kはbenchmarkのmany_regressors
-        // シナリオでカバー、test-coverage-candidates.md項目2）。
+        // シナリオでカバー）。
         const MAX_K: usize = 4;
 
         /// `probit_case_strategy`が生成するタプル: `(n, k, x_cols, beta, u, keys)`。
@@ -3323,16 +3331,16 @@ mod tests {
                 .collect()
         }
 
-        /// `method`ごとの`tol`既定値の解決は`logit.rs`の`default_options`と同じ
+        /// `solver`ごとの`tol`既定値の解決は`logit.rs`の`default_options`と同じ
         /// （`docs/spec/probit-spec.md`3.2節、Logitと共有する`run_solver`のため
         /// 同じ意味論）。
-        fn default_options(cov_type: CovType, method: Method) -> MleFitOptions {
-            let tol = match method {
-                Method::Newton => 1e-6,
-                Method::Bfgs | Method::Lbfgs => 1e-8,
+        fn default_options(cov_type: CovType, solver: SolverType) -> MleFitOptions {
+            let tol = match solver {
+                SolverType::Newton => 1e-6,
+                SolverType::Bfgs | SolverType::Lbfgs => 1e-8,
             };
             MleFitOptions {
-                method,
+                solver,
                 max_iter: 50,
                 tol,
                 raise_on_non_convergence: true,
@@ -3341,11 +3349,11 @@ mod tests {
             }
         }
 
-        fn method_strategy() -> impl Strategy<Value = Method> {
+        fn solver_strategy() -> impl Strategy<Value = SolverType> {
             prop_oneof![
-                Just(Method::Newton),
-                Just(Method::Bfgs),
-                Just(Method::Lbfgs),
+                Just(SolverType::Newton),
+                Just(SolverType::Bfgs),
+                Just(SolverType::Lbfgs),
             ]
         }
 
@@ -3379,12 +3387,12 @@ mod tests {
             #[test]
             fn score_is_near_zero_at_converged_params(
                 (n, k, x_cols, beta, u, _keys) in probit_case_strategy(),
-                method in method_strategy(),
+                solver in solver_strategy(),
             ) {
                 let y = simulate_y(n, &x_cols, &beta, &u);
                 let names = x_names(k);
                 let input = ProbitInput::from_columns(&y, &x_cols, names, true, "y".to_string()).unwrap();
-                let result = ProbitEstimator::fit(input, default_options(CovType::Classical, method));
+                let result = ProbitEstimator::fit(input, default_options(CovType::Classical, solver));
                 prop_assume!(result.is_ok());
                 let est = result.unwrap();
 
@@ -3403,7 +3411,7 @@ mod tests {
                         .sum();
                     prop_assert!(
                         score.abs() <= 1e-4,
-                        "score[{j}] should be ~0, got {score} (method={method:?})"
+                        "score[{j}] should be ~0, got {score} (solver={solver:?})"
                     );
                 }
             }
@@ -3413,12 +3421,12 @@ mod tests {
             fn coefficients_and_se_are_invariant_to_column_order(
                 (n, k, x_cols, beta, u, keys) in probit_case_strategy()
                     .prop_filter("need >=2 columns to permute", |(_, k, _, _, _, _)| *k >= 2),
-                method in method_strategy(),
+                solver in solver_strategy(),
             ) {
                 let y = simulate_y(n, &x_cols, &beta, &u);
                 let names = x_names(k);
                 let input1 = ProbitInput::from_columns(&y, &x_cols, names.clone(), true, "y".to_string()).unwrap();
-                let result1 = ProbitEstimator::fit(input1, default_options(CovType::Classical, method));
+                let result1 = ProbitEstimator::fit(input1, default_options(CovType::Classical, solver));
                 prop_assume!(result1.is_ok());
                 let est1 = result1.unwrap();
 
@@ -3428,7 +3436,7 @@ mod tests {
                 let permuted_names: Vec<String> = order.iter().map(|&i| names[i].clone()).collect();
 
                 let input2 = ProbitInput::from_columns(&y, &permuted_x, permuted_names, true, "y".to_string()).unwrap();
-                let result2 = ProbitEstimator::fit(input2, default_options(CovType::Classical, method));
+                let result2 = ProbitEstimator::fit(input2, default_options(CovType::Classical, solver));
                 prop_assume!(result2.is_ok());
                 let est2 = result2.unwrap();
 
@@ -3448,17 +3456,17 @@ mod tests {
             #[test]
             fn hc0_std_errors_are_at_most_hc1_std_errors(
                 (n, k, x_cols, beta, u, _keys) in probit_case_strategy(),
-                method in method_strategy(),
+                solver in solver_strategy(),
             ) {
                 let y = simulate_y(n, &x_cols, &beta, &u);
                 let names = x_names(k);
                 let input1 = ProbitInput::from_columns(&y, &x_cols, names.clone(), true, "y".to_string()).unwrap();
-                let result1 = ProbitEstimator::fit(input1, default_options(CovType::Hc0, method));
+                let result1 = ProbitEstimator::fit(input1, default_options(CovType::Hc0, solver));
                 prop_assume!(result1.is_ok());
                 let est_hc0 = result1.unwrap();
 
                 let input2 = ProbitInput::from_columns(&y, &x_cols, names, true, "y".to_string()).unwrap();
-                let result2 = ProbitEstimator::fit(input2, default_options(CovType::Hc1, method));
+                let result2 = ProbitEstimator::fit(input2, default_options(CovType::Hc1, solver));
                 prop_assume!(result2.is_ok());
                 let est_hc1 = result2.unwrap();
 

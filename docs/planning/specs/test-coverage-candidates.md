@@ -154,44 +154,6 @@
   （C統計量Issue #249と関連するが別の論点として指摘）。
 - **状態**: 未対応（[#256](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/256)で検討中）
 
-### 22. Wooldridge実データを使う全テストが標準CI（`ci_python.yml`）で無条件にskipされ、skip自体が検出されない
-
-- **対象**: [pyproject.toml:67-73](../../../pyproject.toml#L67-L73)（`wooldridge==0.5.0`が
-  `benchmark`依存グループにあり`test`グループには無い）・
-  [.github/workflows/ci_python.yml:44-51](../../../.github/workflows/ci_python.yml#L44-L51)
-  （`uv sync --locked --group test`→`pytest tests`、`benchmark`グループは
-  インストールしない）・[tests/_helpers.py:89](../../../tests/_helpers.py#L89)
-  （`pytest.importorskip("wooldridge")`）
-- **内容**: ユーザー指摘（2026-08-22）。`wooldridge`パッケージは`test`依存
-  グループではなく`benchmark`依存グループにのみ含まれているため、標準CI
-  ワークフロー（`ci_python.yml`、push/PR時に毎回走る）は`wooldridge`を
-  インストールしない。このため`tests/_helpers.py`の`wooldridge_loader`/
-  `load_wooldridge_dataset`を使う全てのWooldridge実データテスト
-  （`test_ols_crosscheck.py`のwage1/gpa2、`test_wls_*.py`の401ksubs、
-  `test_logit_*.py`/`test_probit_*.py`のmroz、`test_iv_*.py`のcard等、多数）は、
-  `pytest.importorskip("wooldridge")`により**標準CIでは常にskipされる**。
-  `pyproject.toml`のコメントには「`wooldridge`パッケージ自体はMITライセンス
-  だが、同梱される実データの著作権は原典教科書側にある可能性があり、
-  再配布してよいか未確認のため都度ロードする」という意図的な設計判断が
-  書かれているが、その代償として実データクロスチェックが標準CIでは一度も
-  実行されないという副作用が生じている。
-  加えて`ci_python.yml`の`pytest`ステップは`-rs`（skip理由の一覧表示）や
-  skip数のしきい値チェックを設定しておらず、pytestのデフォルト出力
-  （サマリー行に`N skipped`と出るのみ）に頼っているため、Wooldridge関連の
-  skipが増減してもCIログを注意深く読まない限り気づけない。
-- **Claudeの所感**: 実データの再配布可否が未確認という制約自体は`benchmark/`
-  freeze対象外の判断（`testing-policy.md`）と整合しており妥当だが、
-  「CIで実行されないテストがある」という事実そのものが常時可視化されていない
-  点は改善の余地がある。対応案としては、(a) CIワークフローで`pytest`に
-  `-rs`を付けてskip理由を必ずログへ出す、(b) skip件数が既知の想定値
-  （Wooldridge関連テストの件数）と一致することを確認するステップを足す、
-  (c) 別途`wooldridge`込みの任意ジョブ（`workflow_dispatch`等）を用意し
-  定期的に実行する、等が考えられるが、いずれもユーザー判断が必要。
-- **気づいた経緯**: 2026-08-22、`tests/_helpers.py`解説後のユーザー指摘
-  （`sys.path.insert`最小化の相談に付随して、CI側でWooldridgeテストが
-  実行されない可能性を懸念）。
-- **状態**: 未対応（対応方針・優先度はユーザー判断待ち）
-
 ### 23. `logit_crosscheck`/`probit_crosscheck`の基本`rtol`（2e-4）だけ、他の全エントリと違い実測根拠のコメントが無い
 
 - **対象**: [tests/_tolerances.py:87-89](../../../tests/_tolerances.py#L87-L89)
@@ -265,92 +227,6 @@
 - **気づいた経緯**: 2026-08-22、`tests/linear/test_ols.py`解説後のユーザー指摘。
 - **状態**: 未対応（設計判断待ち、`refactoring-candidates-2.md`項目6と関連）
 
-### 27. `include_intercept=False`・`confidence_level`オプションの効果が、frozen JSON数値照合（fixturesパイプライン）で検証されていない
-
-- **対象**: [benchmark/linear/datasets.py](../../../benchmark/linear/datasets.py)・
-  [benchmark/linear/fixtures/generate_ols_fixtures.py](../../../benchmark/linear/fixtures/generate_ols_fixtures.py)
-  （どちらにも`include_intercept`・`confidence_level`という文字列が0件）
-- **内容**: ユーザー指摘（2026-08-22）を受けて確認。`OLSOptions`の主要な
-  フィールドのうち、`include_intercept=False`（切片なし回帰）と
-  `confidence_level`（既定0.95以外の信頼水準）は、`tests/linear/test_ols.py`内の
-  即席データによる簡易statsmodels比較でのみ検証されており、
-  `test_ols_fixtures.py`のfrozen JSON数値照合パイプラインには一度も
-  登場しない。なお`conf_int`自体（既定95%信頼区間の値）は
-  [tests/linear/test_ols_fixtures.py:85-87](../../../tests/linear/test_ols_fixtures.py#L85-L87)
-  で既に数値照合済み（冗長ではなく既存カバレッジ）だが、
-  `confidence_level`を変更したときの効果は
-  [tests/linear/test_ols.py:353-374](../../../tests/linear/test_ols.py#L353-L374)
-  `test_confidence_level_changes_interval_width`が相対比較
-  （狭くなる/広くなる）のみで、具体的な数値の正しさまでは見ていない。
-  `test_predict_new_data_without_intercept_matches_statsmodels`
-  （[tests/linear/test_ols.py:570-588](../../../tests/linear/test_ols.py#L570-L588)）も同様に
-  即席データのみでの検証。
-- **Claudeの所感**: `testing-policy.md`が要求する「全てのオプションの組み合わせで
-  リファレンス実装と統計量が一致することを確認する」の対象漏れだと考える。
-  `include_intercept=False`のシナリオを`benchmark/linear/datasets.py`に追加し、
-  `generate_ols_fixtures.py`側でcov_type全種と組み合わせて数値照合すれば、
-  `refactoring-candidates-2.md`項目52（`test_ols.py`の役割の非対称性）の
-  解消（`test_ols.py`から簡易数値比較を削る）の前提条件にもなる。
-- **気づいた経緯**: 2026-08-22、`tests/linear/test_ols.py`解説後のユーザー指摘。
-- **状態**: 未対応（着手要否はユーザー判断待ち、`refactoring-candidates-2.md`
-  項目52と関連）
-
-### 29. クラスターロバストSEが、どの検証層でも`baseline`シナリオでしか数値比較されていない（悪条件・境界シナリオとの組み合わせが未検証）
-
-- **対象**: [benchmark/linear/fixtures/generate_ols_fixtures.py:76-92](../../../benchmark/linear/fixtures/generate_ols_fixtures.py#L76-L92)
-  （`if scenario == "baseline":`ブロック内でのみクラスターケースを生成）、
-  `tests/linear/test_ols_fixtures.py`のクラスター系4テスト（`scenario`の
-  `parametrize`無し、`synthetic_baseline.csv`/`synthetic_baseline_k1.csv`
-  固定）、`tests/linear/test_ols_crosscheck.py`の同名クラスター系テスト（同じく
-  `scenario`の`parametrize`無し）、`engine/src/linear/ols.rs`のクラスター
-  単体テスト（`fit_computes_cluster_std_errors_...`等、リファレンス実装との
-  数値比較を伴わない純粋ロジック検証のみ）
-- **内容**: ユーザー指摘（2026-08-23）。「クラスターロバストSEは
-  シナリオ依存ではなくグルーピングの動作確認が目的」という設計コメント
-  （[generate_ols_fixtures.py:76](../../../benchmark/linear/fixtures/generate_ols_fixtures.py#L76)）
-  に基づき、クラスター系テストは`baseline`（良条件・標準的なn）以外の
-  シナリオでは一度も数値照合されていないことを、Python fixtures層・R
-  crosscheck層・Rust単体テスト層の3層全てで確認した。しかしクラスター
-  ロバスト共分散`Ŝ=(X'X)⁻¹(Σ_g X_g'e_ge_g'X_g)(X'X)⁻¹`は`(X'X)⁻¹`を
-  他のcov_type（classical/HC0-3/HAC）と共有しており、`high_condition_number`
-  （悪条件設計行列）や`baseline_df1`（自由度1境界）のような、他のcov_typeでは
-  全シナリオで検証している悪条件・境界ケースとクラスターの組み合わせでの
-  数値的挙動は未検証のまま。
-- **Claudeの所感**: 「クラスターSEの計算式自体はシナリオに依存しない」という
-  設計コメントの主張は、疑似グループの割り当て方（均等/不均衡/G境界）に
-  関しては正しいが、「シナリオ由来の設計行列の条件（悪条件・自由度境界等）が
-  クラスター計算の数値安定性に影響しないか」までは検証していない別の論点。
-  `engine/src/linear/CLAUDE.md`に記録されている「G=qちょうどの境界でも
-  データの配置次第では特異になりうる」という既知の罠（Tobit実装時に実測発覚）
-  を踏まえると、悪条件シナリオ×クラスターの組み合わせで同様の未知の
-  数値的落とし穴が無いとは言い切れない。最低限`high_condition_number`または
-  `moderate_multicollinearity`のいずれか1シナリオでクラスターケースを
-  追加し、数値照合できることを確認するのが妥当と考える。
-- **気づいた経緯**: 2026-08-23、`tests/linear/test_ols_fixtures.py`解説中の
-  ユーザー指摘（「clusterに関してはシナリオごとで検証する必要はないのか、
-  精度漏れの可能性が残ることは避けたい」）を受けて3層を確認。
-- **状態**: 対応済み（OLS、2026-09-21）。`high_condition_number`・
-  `moderate_multicollinearity`の両シナリオ（「いずれか1シナリオ」という
-  所感に対し、より手厚くする方針でユーザー確認の上、両方追加）に、
-  均等な疑似グループ（行番号%10）のみのクラスターケースを追加した。
-  `benchmark/linear/fixtures/generate_ols_fixtures.py`の`_run_cluster_case`が
-  `scenario`引数を取れるよう拡張、`generate_ols_crosscheck_fixtures.py`にも
-  同様の`CLUSTER_ILL_CONDITIONED_SCENARIOS`定数と分岐を追加。
-  `tests/linear/test_ols_reference.py::test_cluster_ill_conditioned_matches_
-  statsmodels`・`tests/linear/test_ols_crosscheck.py::test_cluster_ill_
-  conditioned_matches_r`を追加し、Python fixtures層・Rクロスチェック層の
-  両方で悪条件・多重共線性シナリオとクラスターの組み合わせが数値的に
-  問題なく計算できることを確認した（Rust単体テスト層はリファレンス実装との
-  数値比較を目的としないため対象外のまま）。`tests/`配下1675件全通過・
-  Ruffクリーンを確認済み。WLS側（`generate_wls_fixtures.py`等）は同じ
-  ギャップが存在するが、ユーザー判断によりこの場では対応せず
-  [Issue #351](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/351)
-  として切り出した（他手法〔IV/Logit/Probit等〕への横展開要否も同Issueで
-  検討）。2026-09-21、項目17対応時に`testing-completeness-reviewer`が項目28と
-  合わせて再指摘（predict()同様、クラスター系の検証網羅性を先に手厚くした
-  Rクロスチェック側に主リファレンス側を追いつかせる、という同型の対応が
-  必要という指摘）。
-
 ### 30. `time_col`が存在しない列名を指した場合の`ValidationError`テストが無い（`cluster_col`には対になるテストがある）
 
 - **対象**: [tests/linear/test_ols.py:166-173](../../../tests/linear/test_ols.py#L166-L173)
@@ -376,34 +252,6 @@
   バリデーション網羅性を確認中に発見。
 - **状態**: 未対応（着手要否はユーザー判断待ち、修正は保留）
 
-### 31. `fit()`本体（`y`/`x`列）でNaN・無限大を含む場合のテストが無い（`predict()`側にはある）
-
-- **対象**: [tests/linear/test_ols.py:181-184](../../../tests/linear/test_ols.py#L181-L184)
-  （`test_null_values_raise`、null値のみ）と対比した
-  [tests/linear/test_ols.py:651-660](../../../tests/linear/test_ols.py#L651-L660)
-  （`test_predict_null_or_non_finite_values_raise`、`predict()`の`new_data`は
-  nullと`float("inf")`の両方をテスト済み）。実装は
-  [engine_pybind/src/column_extraction.rs:65-72](../../../engine_pybind/src/column_extraction.rs#L65-L72)
-  （`extract_f64_column`、コメント「polarsの`null_count()`はNaN/無限大を
-  検出しない...別途スキャンする必要がある」の通り、null検証とNaN/Inf検証は
-  別ロジック）。
-- **内容**: ユーザー依頼（2026-08-23）を受けて`test_ols.py`のバリデーション
-  網羅性を確認中に発見。`fit()`が受け取る`y`/`x`列（学習データ本体）は
-  null値のテストのみで、NaN・無限大（`float("inf")`/`float("nan")`）を
-  含む場合のテストが無い。同じ`extract_f64_column`関数を使う`predict()`の
-  `new_data`側には両方のテストがあるのと非対称。
-- **Claudeの所感**: null検証とNaN/Inf検証は`extract_f64_column`内で
-  別々のスキャン（`null_count()`とその後の`is_finite()`ループ）のため、
-  片方だけ通っても他方が壊れていることに気づけない構造。`predict()`側に
-  ある`test_predict_null_or_non_finite_values_raise`と対になる
-  `fit()`側のテストを追加するのが妥当。
-- **気づいた経緯**: 2026-08-23、ユーザー依頼により`test_ols.py`の
-  バリデーション網羅性を確認中に発見。
-- **状態**: 未対応（着手要否はユーザー判断待ち、修正は保留）。2026-09-21、
-  項目17対応のレビューで`testing-completeness-reviewer`が項目32と合わせて
-  再指摘（`predict()`側は既にカバー済みのため、`fit()`側との非対称が
-  残っている旨）。
-
 ### 32. `y`列自体が存在しない場合・`cluster_col`にNull値を含む場合の専用テストが無い（低優先度、同一コードパスの既存テストで実質カバー済み）
 
 - **対象**: [tests/linear/test_ols.py:176-178](../../../tests/linear/test_ols.py#L176-L178)
@@ -421,16 +269,17 @@
   バリデーション網羅性を確認中に発見。
 - **状態**: 未対応（優先度低、着手要否はユーザー判断待ち、修正は保留）。
   2026-09-21、項目17対応のレビューで`testing-completeness-reviewer`が
-  項目31と合わせて再指摘（`fit()`側バリデーションの非対称パターンの一例として）。
+  再指摘（`fit()`側バリデーションの非対称パターンの一例として）。
 
-### 34. `test_wls.py`にもOLSと同型のバリデーション抜けがある（`y`列自体の欠落・`fit()`本体のNaN/無限大・空文字列の列名）
+### 34. `test_wls_validation.py`にもOLSと同型のバリデーション抜けがある（`y`列自体の欠落・`fit()`本体のNaN/無限大・空文字列の列名）
 
-- **対象**: [tests/linear/test_wls.py:218-225](../../../tests/linear/test_wls.py#L218-L225)
+- **対象**: [tests/linear/test_wls_validation.py:175](../../../tests/linear/test_wls_validation.py#L175)
   （`test_missing_column_raises`、`x`側のみ`x=["x1", "nonexistent"]`、`y`側の
-  欠落は未テスト）・[tests/linear/test_wls.py:228-236](../../../tests/linear/test_wls.py#L228-L236)
-  （`test_null_values_raise`、null値のみ、NaN・無限大は未テスト。`weight`列は
-  `test_nan_weight_raises`/`test_null_weight_raises`で既に分割済みなのと
-  対照的）
+  欠落は未テスト）・[tests/linear/test_wls_validation.py:199](../../../tests/linear/test_wls_validation.py#L199)
+  （`test_null_values_raise`）・[tests/linear/test_wls_validation.py:222](../../../tests/linear/test_wls_validation.py#L222)
+  （`test_non_finite_values_raise`、対応済み後の現状）。当時の対象ファイル名は
+  `test_wls.py`だったが、その後`test_wls_validation.py`等に分割された
+  （項目自体の内容は変わらない）。
 - **内容**: ユーザー依頼（2026-08-23）を受けて`test_wls.py`のバリデーション
   網羅性を確認したところ、項目30〜32（`test_ols.py`）と同型の抜けが存在した。
   (1) `y`が存在しない列名の場合の専用テストが無い。(2) `fit()`本体の`y`/`x`
@@ -443,7 +292,12 @@
   既存分としては未対応のまま残っている。
 - **気づいた経緯**: 2026-08-23、`tests/linear/test_wls.py`解説後のユーザー指摘を
   受けた確認。
-- **状態**: 未対応（着手要否はユーザー判断待ち。(3)は優先度低）
+- **状態**: (2)は対応済み（WLS、2026-09-23）。OLS側と同じ形で、
+  `test_null_values_raise`に`x1`列のnullケースを追加し、新規
+  `test_non_finite_values_raise`（`y`/`x1`×NaN/無限大の4ケース）を追加した。
+  42件全通過・Ruffクリーンを確認済み。(1)・(3)は未対応のまま
+  （優先度低、着手要否はユーザー判断待ち。OLS側の項目32も同じ状態で
+  対称性は保たれている）。
 
 ### 36. WLSのHACクロスチェックで、statsmodels側とR側が異なるラグ値でNewey-West公式を検証しており、同一設定が両方の独立実装から検証されていない
 
@@ -1183,7 +1037,13 @@
 - **気づいた経緯**: 2026-08-31、`tests/nonlinear/test_tobit.py`解説時のユーザー
   指摘。
 - **状態**: 未対応（項目32・39・40と統合して対応するのが効率的、
-  着手要否はユーザー判断待ち）
+  着手要否はユーザー判断待ち）。2026-09-23追記: Logit/Probit/IV横断調査で
+  `test_null_values_raise`/`test_non_finite_values_raise`の`x`側
+  （2番目の箇条書き）は現状のコードで既に`x1`をカバーしており
+  解消済みと判明（v0.6.0リリース時点、2026-09-06、Tobit実装時から
+  既に対称に実装されていた）。`y`列欠落専用テスト（項目32相当）・
+  `marginal_effects`の`confidence_level`境界値parametrize（項目39相当）は
+  未対応のまま残っている。
 
 ### 64. HACの自動ラグ選択式（`L = floor(4*(n/100)^(2/9))`）がRust実装とPython実装（`benchmark/common/dgp.py`の`hac_auto_lag`）で一致することを直接検証するテストが無い（IV 2SLS/GMMは特に、Rust内の自己整合性チェックのみ）
 
@@ -1229,9 +1089,12 @@
 - **気づいた経緯**: 2026-09-05、`HAC_MAXLAGS`（`benchmark/linear/constants.py`）の
   設計を巡るユーザーとの議論中に、IV側の自動ラグ選択式の一致がどこまで
   検証されているかを確認した過程で判明。
-- **状態**: 未対応（記録のみ、着手要否はユーザー判断待ち）。ラグ数を結果に
-  含める案は別途**Issue #282**として発行済み（これが実現すれば、本項目の
-  直接クロス言語検証テストも結果を介して書けるようになる）。
+- **状態**: 対応済み（2026-10-04、[#282](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/282)）。
+  実際に使われたラグ数を結果に露出させ（OLS/WLS/IVは`hac_lags_used`、FE/REのDKは
+  `dk_bandwidth_used`）、`tests/linear/test_ols_api.py`・`test_wls_api.py`・
+  `tests/iv/test_iv_api.py`・`tests/panel/test_fe_api.py`・`test_re_api.py`が複数の標本サイズ
+  （境界`n=51200`を含む）で`benchmark.common.hac_auto_lag`と直接比較する形で解消した
+  （上記「Claudeの所感」の標準誤差比較案ではなく、結果を介した直接比較を採用）。
 
 ### 65. IV: クラスター数`G<=q`の構造方程式向け事前チェック（Issue #289）が、Python APIからは実質到達不能
 
@@ -1337,7 +1200,9 @@
   ケース戦略を追加する）案が考えられる。
 - **気づいた経緯**: 2026-09-13、Tobit proptest追加のrust-reviewerレビュー中に
   指摘。
-- **状態**: 未対応（ユーザー確認済み、今回は見送りと決定）。
+- **状態**: 対応済み（2026-09-26、[#230](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/230)）。
+  既存3プロパティを`censoring_strategy`（左/右/両側）で拡張し、鏡像対称性の
+  プロパティを1件追加した。
 
 ### 69. IV: `many_regressors`（高k）・`outlier_regressor`（外れ値）シナリオが未追加
 
@@ -1416,68 +1281,80 @@
   testing-completeness-reviewerレビュー。
 - **状態**: 未対応（実害無しのため優先度低、着手要否はユーザー判断待ち）
 
-### 73. OLS: `test_scale_variance_raises_computation_error`のcov_typeパラメトライズに`cluster`が含まれておらず、docstringの「全cov_typeでbackstop」という主張が未検証
+### 76. FE: fixestクロスチェックのclusterロバストSEで、`k`が大きい・クラスタ数`G`が小さいほどG/(G-1)補正差の実測乖離が拡大する定量的な依存関係が未調査
 
-- **対象**: `tests/linear/test_ols_validation.py`の
-  `test_cluster_count_at_most_slopes_raises_validation_error`のdocstring
-  （「`G>q`でも悪条件で数値的にほぼ特異なケースは`test_scale_variance_raises_
-  computation_error`がbackstop」と明記）と、実際の
-  `test_scale_variance_raises_computation_error`の実装
-  （`@pytest.mark.parametrize("cov_type", COV_TYPES)`、
-  `COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]`で
-  `cluster`を含まない）
-- **内容**: `testing-completeness-reviewer`の指摘（2026-09-21、項目29の
-  レビュー中）。docstringは「全cov_typeでbackstopされる」と主張しているが、
-  実装上`cov_type="cluster"`はこの`ComputationError`backstopテストで
-  一度も実行されていない。手動で`scale_variance`データセット＋
-  `cov_type="cluster"`（`G=10>q=3`）を実行したところ実際には
-  `ComputationError`が正しく発生することを確認できたが、これは自動テストで
-  検証されておらず、docstringの主張と実装が食い違っている状態。
-  項目29でクラスター×悪条件シナリオの成功パス側を拡充したのに対し、
-  こちらは同じ組み合わせのエラーパス側（`ComputationError`backstop）の
-  対称漏れであり、項目29と直接関連する。
-- **Claudeの所感**: `test_scale_variance_raises_computation_error`の
-  `cov_type`パラメトライズに`cluster`を追加する形が自然だが、`cluster`は
-  `cluster_col`パラメータが別途必要なため、既存の`COV_TYPES`パラメトライズに
-  単純に含めることはできず、別テスト（または条件分岐）が必要になる。
-- **気づいた経緯**: 2026-09-21、項目29（クラスターロバストSEの悪条件・
-  多重共線性シナリオとの組み合わせ追加）対応の`testing-completeness-reviewer`
-  レビューで発見。
-- **状態**: 対応済み（2026-09-21）。`tests/linear/test_ols_validation.py`に
-  `test_scale_variance_cluster_raises_computation_error`を専用テストとして
-  追加（`cluster_col`が必要なため既存の`COV_TYPES`パラメトライズには
-  含めず、均等な疑似グループ`G=10>q=3`で`ComputationError`が発生することを
-  確認）。`test_cluster_count_at_most_slopes_raises_validation_error`の
-  docstringも新テスト名を指すよう更新した。`tests/`配下1676件全通過・
-  Ruffクリーンを確認済み。
+- **対象**: [tests/panel/test_fe_crosscheck.py](../../../tests/panel/test_fe_crosscheck.py)、
+  [tests/_tolerances.py](../../../tests/_tolerances.py)「fe_crosscheck」、
+  [benchmark/panel/references/run_fixest_benchmark.R](../../../benchmark/panel/references/run_fixest_benchmark.R)
+- **内容**: fixestのStata流`G/(G-1)`小標本補正と本実装・linearmodelsの
+  `n/(n-extra_df-k)`補正の慣行差は既存ドキュメントに記載済み（baseline実測:
+  1-way相対誤差~1.8e-5・2-way相対誤差~0.21%）。Issue #349でFEに
+  `many_regressors`（k=20）・`cluster_imbalanced`（G=12、entityとは無関係な
+  専用クラスター列）シナリオを追加したところ、同じ系統差がこの2シナリオで
+  大きく増幅されることが判明した（1-way cluster se相対誤差実測:
+  `many_regressors`~1.9e-4、`cluster_imbalanced`~2.5e-3。いずれもbaseline
+  の1.8e-5より1桁〜2桁大きい）。`cluster_imbalanced`は`1/(G-1)`が
+  G=40→2.6%、G=12→9.1%と定性的にG依存で説明がつきそうだが、`many_regressors`
+  がk依存でどう増幅されるかの正確な数式・両者の複合効果は未調査のまま、
+  実測値にマージンを載せた暫定rtol（`rtol_cluster_high_k=3e-4`・
+  `rtol_cluster_small_g=4e-3`、`_tolerances.py`参照）で通している。
+- **気づいた経緯**: 2026-09-26、Issue #349（FE悪条件・高次元・クラスター
+  不均衡シナリオ追加）対応中。ユーザー確認済み（暫定rtolで通しつつ本項目に
+  事象を記録する方針）。
+- **状態**: 未対応。fixestの補正式（`vcov_cluster`のソース）を実地確認し、
+  `k`・`G`・`extra_df`から乖離量を理論的に予測できる式を導出した上で、
+  暫定rtolを実測値ベースの恒久的な計算式（または妥当な安全マージン）に
+  置き換える。
 
-### 74. WLS/IVにも項目73と同型の構造的ギャップがある（`test_scale_variance_raises_computation_error`のcov_typeパラメトライズに`cluster`が無い。ただしOLSと異なりdocstringの虚偽記載は伴わない）
 
-- **対象**: `tests/linear/test_wls_validation.py`（`COV_TYPES`は
-  `generate_wls_fixtures.py`由来、`classical/hc0/hc1/hc2/hc3/hac`のみで
-  `cluster`を含まない）、`tests/iv/test_iv_validation.py`
-  （`COV_TYPES = ["classical", "hc0", "hc1", "hac"]`をファイル内で独自定義、
-  同じく`cluster`を含まない）。いずれも`test_scale_variance_raises_
-  computation_error`相当のテストに`cluster`専用backstopが無い。
-- **内容**: `testing-completeness-reviewer`の指摘（2026-09-21、項目73対応の
-  レビュー中）。項目73と全く同型の構造（`cov_type="cluster"`は
-  `cluster_col`が別途必要なため既存の`COV_TYPES`パラメトライズに単純に
-  含められず、backstopテストが存在しない）がWLS・IVにも現存する。
-  ただしOLSの元の問題（docstringが「全cov_typeでbackstop」と誤って主張して
-  いた）とは異なり、WLS・IVの該当docstring（
-  `test_cluster_count_at_most_slopes_raises_validation_error`相当）は
-  そのような虚偽の主張をしていないため、**虚偽記載ではなく単なる未検証
-  カバレッジの欠落**（重要度はOLSのケースより一段低い）。
-  対照的に`tests/panel/test_fe_validation.py`・`tests/panel/test_re_
-  validation.py`は`COV_TYPES`に`cluster`を含めた上で`cluster_col`省略時に
-  entityへフォールバックする実装特性を利用しており、既にこのギャップを
-  回避できていることを実行確認済み（`cluster`含む5ケース全通過）。
-- **Claudeの所感**: 項目73と同じ形（専用テスト追加、`cluster_col`は
-  `with_cluster_groups`等の既存ヘルパーでG十分大きく設定）で対応できる。
-  IVは`COV_TYPES`がファイル内独自定義なので、まず`cluster`を含むかどうか
-  含め既存の`ValidationError`側テスト（クラスタ数境界）の構成を確認してから
-  着手するのが安全。
-- **気づいた経緯**: 2026-09-21、項目73（OLSの`cluster`×`scale_variance`
-  backstopテスト追加）対応の`testing-completeness-reviewer`レビューで発見。
-- **状態**: 未対応（着手要否はユーザー判断待ち）
+### 77. フィクスチャの係数側キー（`coef`/`se`）とAPIの名前（`params`/`std_errors`）が全系統で食い違っており、テスト側で読み替えている
+
+- **対象**: `tests/fixtures/benchmarks/*.json`（ols/wls/iv/iv_gmm/fe/re/logit/probit/tobit と各`*_crosscheck.json`）、
+  [benchmark/](../../../benchmark/)配下の各リファレンスアダプタ・`normalize.py`、
+  `tests/`配下の`ref["coef"]`/`ref["se"]`を読むテスト全般
+- **内容**: 各手法のAPIは`params`/`std_errors`/`t_stats`（または`z_stats`）/`p_values`/`conf_int`
+  だが、フィクスチャは`coef`/`se`/`t_stats`（または`z_stats`）/`p_values`/`conf_int`
+  （`coef`/`se`のみ名前が異なる）。テストは`_assert_dict_close(res.std_errors, ref["se"], ...)`の
+  ように読み替えている。限界効果側（`margeff`）は`std_err`/`z_stat`/`conf_lower`/`conf_upper`に
+  揃え済みだが、係数側は未着手。全系統のフィクスチャ再生成を伴うため、公開API命名の整理とは
+  切り離して扱った。
+- **気づいた経緯**: 2026-09-26、Issue #423 A1（`marginal_effects()`のキー統一）対応後の他系統確認中。
+- **状態**: 未対応。揃える場合は`coef`→`params`、`se`→`std_errors`とし、生成側アダプタ・
+  `normalize.py`・全系統の再生成・テスト側の参照を一括で更新する（要ユーザー判断）。
+
+### 78. IVのAPI名（`stats`/`stat`）とフィクスチャ名（`t_stats`/`z_stats`）が食い違っている
+
+- **対象**: [python_package/econometricsmodels/iv/iv.py](../../../python_package/econometricsmodels/iv/iv.py)
+  （`IvResults.stats`・`coef_table()`の`stat`キー）、`tests/fixtures/benchmarks/iv*.json`、
+  `tests/iv/`配下のテスト
+- **内容**: IVのAPIは、2SLSがt統計量・GMMがz統計量になるため汎用名`stats`/`stat`にしているが、
+  フィクスチャは`t_stats`（2SLS）/`z_stats`（GMM）。テストは`res.stats`を`ref["z_stats"]`と
+  照合している。名前自体の見直しはIssue #423 B2（`stats`→`test_stats`等）で扱うため、
+  B2の結論次第でAPI側・フィクスチャ側のどちらに揃えるかが変わる。
+- **気づいた経緯**: 2026-09-26、Issue #423 A1対応後の他系統確認中。
+- **状態**: 未対応（B2の判断待ち）。B2で名称を確定した後、フィクスチャ・テストの読み替えの
+  有無を合わせて見直す。
+
+### 79. RE: `high_condition_number`×`dk`のハウスマン統計量がplmと機械精度から外れる原因が未調査（許容誤差を専用に緩めて対処済み）
+
+- **対象**: [tests/_tolerances.py](../../../tests/_tolerances.py)（`re_crosscheck`の`rtol_hausman_ill_conditioned`）、
+  [tests/panel/test_re_crosscheck.py](../../../tests/panel/test_re_crosscheck.py)
+- **内容**: `plm::phtest(method = "aux", vcov = vcovSCC(...))`との照合で、`high_condition_number`×`dk`
+  のみ相対誤差1.2e-7（他のcov_type・シナリオは機械精度一致）。悪条件の設計行列での丸め誤差の増幅と
+  推測したが未検証。`vcovSCC`と`panel_driscoll_kraay_cov_params`の計算順序の差、補助回帰の
+  `xtx_inverse`（Cholesky）の条件数の影響などを切り分けて原因を特定する。
+- **気づいた経緯**: 2026-09-27、Issue #420（robust Hausman検定）のplm照合中。
+- **状態**: 未対応。暫定でシナリオ専用の`rtol_hausman_ill_conditioned = 1e-6`を設定済み。
+
+### 80. RE: `many_regressors`×`cluster`/`dk`の係数・標準誤差の数値照合が、ハウスマン検定の失敗に巻き込まれて失われている
+
+- **対象**: [tests/panel/test_re_reference.py](../../../tests/panel/test_re_reference.py)
+  （`_HAUSMAN_SINGULAR_ERRORS`）、[tests/panel/test_re_crosscheck.py](../../../tests/panel/test_re_crosscheck.py)
+- **内容**: ハウスマン検定の補助回帰のロバスト共分散が構造的に特異なとき`fit()`をエラーにする方針
+  （`re-spec.md`3.7節）にしたため、`many_regressors`（k=20、G=40、T=6）の`cluster`/`dk`は
+  RE本体が成功する入力でもfitが失敗し、linearmodelsとの係数・標準誤差の照合ができなくなった
+  （テストは代わりにエラー種別を確認）。高次元×cluster/dkのRE本体の照合が抜けているため、
+  クラスター数・時点数を増やした高次元シナリオの追加、または照合手段の別途検討が必要。
+- **気づいた経緯**: 2026-09-27、Issue #420。
+- **状態**: 未対応。
 

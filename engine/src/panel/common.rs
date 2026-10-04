@@ -18,16 +18,23 @@
 //! - `UnbalancedPanelForTwoWay`: 2-way FEのバランスパネル必須（`fe-spec.md`1章）
 //! - `ZeroVarianceAfterDemeaning`: within変換後に分散ゼロの説明変数（`fe-spec.md`1章）
 //! - `TwoWayRequiresTime`: 2-way FE指定時の`time`必須（`panel-common.md`1.1節）
-//! - `HacRequiresTime`: Driscoll-Kraay型パネルHAC（`FeCovType::Hac`）指定時の`time`必須
-//!   （`panel-common.md`3.1節。2-way FEは`TwoWayRequiresTime`で既に
-//!   必須化されているため、1-way FEでのみ発生しうる）
-//! - `InvalidHacBandwidth`: `FeCovType::Hac`の明示的な`bandwidth`が`[0, t)`の範囲外
+//! - `DkRequiresTime`: REでDriscoll-Kraay型パネルHAC（`ReCovType::Dk`）を指定したのに時点列
+//!   （`REOptions.dk_time`由来の`ReInput::time()`）が無い（`panel-common.md`3.1節。FEは
+//!   `FeCovType::Dk.time`が型で必須のため発生しない）
+//! - `InvalidDkBandwidth`: `FeCovType::Dk`の明示的な`bandwidth`が`[0, t)`の範囲外
 //!   （`t`はユニークな時点数。`LeastSquaresError::InvalidHacLags`と同型だが
 //!   上限が観測数`n`ではなく時点数`t`）
+//! - `InsufficientDkPeriodsForInference`: DK指定時に時点数`t`が同時Wald検定の対象係数の
+//!   数`q`以下（`rank(S) ≤ t-1`のため検定の部分行列が構造的に特異。
+//!   `CommonError::InsufficientClustersForInference`のDK版）
+//! - `DegenerateDkTwoPeriods`/`DegenerateClusterTwoGroups`: FEで時点数（DK）・クラスター数が
+//!   2かつ吸収したFE次元（entity、2-wayではtimeも）のいずれかで全水準が2グループに1観測ずつの
+//!   とき、within変換によりスコアが恒等的にゼロになり共分散がゼロに退化する
 //! - `WithinRegressionFailed`: within変換済みデータの最小二乗推定委譲の失敗
 //!   （`panel-common.md`4.3節）
-//! - `FTestFailed`: F統計量（`fe.rs`モジュールdoc「自由度調整」のF統計量節）の
-//!   Wald検定（`crate::linear::ols::wald_f_test`）が失敗した場合。`WithinRegressionFailed`と
+//! - `FTestFailed`: F統計量（`fe.rs`モジュールdoc「自由度調整」のF統計量節、REは
+//!   `re.rs`モジュールdoc「F統計量」）のWald検定（`crate::linear::ols::wald_f_test`）が
+//!   失敗した場合。`WithinRegressionFailed`と
 //!   意味が異なる（`OlsEstimator::fit`自体は既に成功した後の、F検定固有の共分散部分行列の
 //!   ほぼ特異性というbackstopのみ、`ols.rs`の`wald_f_test`docコメント参照）ため別バリアントに
 //!   分離した（`IvError::FirstStageFailed`が`WithinRegressionFailed`と同じ`LeastSquaresError`
@@ -42,23 +49,21 @@
 //!   加えたもの）への`OlsEstimator::fit(include_intercept=false)`委譲が失敗した場合。
 //!   `WithinRegressionFailed`（FEのwithin変換済みデータ）・`BetweenRegressionFailed`
 //!   （REのbetween回帰）とは対象が異なるため別バリアントにする（同じ判断の3件目）。
+//! - `HausmanTestFailed`: REのハウスマン検定（`re.rs`の`re_hausman_test`、`re-spec.md`3.7節）の
+//!   補助回帰または`cov_type`連動のWald検定が失敗した場合（補助回帰のランク落ち、
+//!   クラスター数`G`が補助回帰の傾き係数の数以下、共分散部分行列のほぼ特異性等）。
+//!   計算自体が成立しないケースのため`fit()`全体を失敗させる（設計行列の多重共線性と同じ扱い）。
 //!
 //! RE固有（`re-spec.md`）で追加のバリアントが必要になった場合は、FE/RE実装issueで実際に計算
 //! コードを書く過程で随時追加する（`LeastSquaresError`・`IvError`のdocコメントと同じ
 //! 「土台を用意し、必要になった時点で足す」方針）。
-//! ハウスマン統計量（`hausman_statistic`）は
-//! `CommonError`を返す（`ensure_well_conditioned_symmetric_matrix`等の共通ヘルパーに
-//! 揃える）。`cov_fe - cov_re`が有限標本で非正定値になり二次形式が負になるケースは
-//! `abs()`を適用して非負値にする（R `plm::phtest`と同じ挙動——`plm`は`abs()`を無条件
-//! 適用し理論上も実装上も負の値を返さない）。差行列が数値的に特異なときだけ
-//! `CommonError::ComputationFailed`。
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::fmt;
 
-use faer::prelude::{Solve, SolveLstsq};
+use faer::prelude::Solve;
 use faer::{Mat, Side};
-use statrs::distribution::{ChiSquared, ContinuousCDF};
 use thiserror::Error;
 
 use crate::error::CommonError;
@@ -201,31 +206,97 @@ pub enum PanelError {
     /// 2-way FE（entity + time FE）を要求したのに`time`列が指定されていない。
     ///
     /// `time`は`FEOptions`内の`Option`フィールドで、2-way指定時のみ実質必須になる
-    /// 「条件付き必須」パターン（`panel-common.md`1.1節。`OLSOptions.cluster_col`が
+    /// 「条件付き必須」パターン（`panel-common.md`1.1節。`OLSOptions.cluster`が
     /// `cov_type="cluster"`のときだけ必須になるのと同型）。未指定時のバリデーション
     /// エラーとしてここで担保する。
     #[error("two-way fixed effects requires the `time` option to be set")]
     TwoWayRequiresTime,
 
-    /// Driscoll-Kraay型パネルHAC（`FeCovType::Hac`、3.1節）を指定したのに
-    /// `time`列が指定されていない。
+    /// REでDriscoll-Kraay型パネルHAC（`ReCovType::Dk`、3.1節）を指定したのに、時点列
+    /// （`ReInput::time()`、`REOptions.dk_time`由来）が指定されていない。
     ///
-    /// DKは時点ごとにクロスセクション和を取ってからHACカーネルを適用するため`time`が
-    /// 必須（`TwoWayRequiresTime`と同型の「条件付き必須」パターン）。2-way FEは
-    /// `within_transform_two_way`/`validate_no_singleton_groups_two_way`の時点で既に
-    /// `TwoWayRequiresTime`により`time`必須が担保されているため、このエラーは1-way FEで
-    /// `FeCovType::Hac`を指定した場合にのみ発生しうる。
-    #[error("Driscoll-Kraay panel HAC requires the `time` option to be set")]
-    HacRequiresTime,
+    /// DKは時点ごとにクロスセクション和を取ってからHACカーネルを適用するため時点列が必須
+    /// （`TwoWayRequiresTime`と同型の「条件付き必須」パターン）。FEの`FeCovType::Dk`は型で
+    /// 時点列（`time: TimeKeys`）を必須にしているため、このエラーはREでのみ発生する。
+    #[error("Driscoll-Kraay panel HAC requires the `dk_time` option to be set")]
+    DkRequiresTime,
 
-    /// `FeCovType::Hac`の明示的な`bandwidth`が`[0, t)`の範囲外（`t`はユニークな時点数）。
+    /// `FeCovType::Dk`の明示的な`bandwidth`が`[0, t)`の範囲外（`t`はユニークな時点数）。
     ///
     /// `LeastSquaresError::InvalidHacLags`と同型のバリデーションだが、上限が観測数`n`
     /// ではなく時点数`t`になる点が異なる（DKのバンド幅は「時点のラグ」であり「観測の
     /// ラグ」ではないため、`engine/src/panel/CLAUDE.md`「Driscoll-Kraay型パネルHAC対応」
     /// 参照）。
     #[error("bandwidth must be in the range [0, t): got {bandwidth}, t={t}")]
-    InvalidHacBandwidth { bandwidth: i64, t: usize },
+    InvalidDkBandwidth { bandwidth: i64, t: usize },
+
+    /// `FeCovType::Dk`/`ReCovType::Dk`でユニークな時点数`t_periods`が1しかない。
+    ///
+    /// fixestの`ssc()`小標本補正はDKの時点数`t_periods`を、clusterの
+    /// クラスター数`G`と同じ役割（`G/(G-1)`補正・推論の自由度`G-1`）で使う
+    /// （`panel_driscoll_kraay_cov_params`のdocコメント参照）。`t_periods=1`だと
+    /// `t_periods/(t_periods-1)`が`1/0`に発散し、クラスターの`G=1`が
+    /// `validate_cluster_groups`で拒否されるのと同じ理由で計算が成立しない
+    /// （`ols::validate_cluster_groups`の`G>=2`要求と同型の前提）。
+    #[error("Driscoll-Kraay panel HAC requires at least 2 unique time periods: got {t_periods}")]
+    InsufficientDkPeriods { t_periods: usize },
+
+    /// `FeCovType::Dk`/`ReCovType::Dk`で、ユニークな時点数`t_periods`が同時Wald検定の
+    /// 対象となる係数の数`q`以下（FEは傾き係数のF検定、REはハウスマン検定の`X̃`ブロック）。
+    ///
+    /// DKの`S`行列は時点ごとのスコア`h_t = Σ_i x_it·e_it`の外積（とそのラグ項）の和で
+    /// `{h_1, …, h_T}`の張る空間に収まり、正規方程式`Σ_t h_t = X'e = 0`により
+    /// `rank(S) ≤ t_periods - 1`。`t_periods <= q`だと検定の`q×q`部分行列が構造的に
+    /// 特異になる（`CommonError::InsufficientClustersForInference`の`g <= q`と同じ構造）。
+    /// 数値的な特異性判定（`ensure_well_conditioned_symmetric_matrix`）任せにすると、
+    /// 理論上0の固有値に乗る丸め誤差が閾値を超えた場合に巨大な無意味な統計量を
+    /// 黙って返しうるため、入力だけから判定できるこの条件を行列計算の前に弾く。
+    #[error(
+        "cov_type='dk' requires more unique time periods than jointly tested coefficients: \
+         got t_periods={t_periods} for q={q} coefficient(s) (the slope F-test for FE, the \
+         Hausman test for RE), but the Driscoll-Kraay covariance has rank at most \
+         t_periods-1, so the q×q Wald submatrix is singular when t_periods <= q"
+    )]
+    InsufficientDkPeriodsForInference { t_periods: usize, q: usize },
+
+    /// FEで`FeCovType::Dk`の時点数が2、かつ吸収したFE次元（常にentity、2-wayではtimeも）の
+    /// いずれかで全水準がその2時点に1観測ずつ（傾き係数`k >= 1`のとき）。
+    ///
+    /// within変換は吸収した各次元の水準内で和をゼロにするため、そうした水準の2観測で
+    /// `x̃`・`ẽ`が符号反転し（entity方向の例: `x̃_i1 = -x̃_i2`・`ẽ_i1 = -ẽ_i2`）、
+    /// 時点スコアは`h_1 = h_2`。2-wayのtime方向は、エンティティ2つのパネルで`Dk.time`に
+    /// entityと同じ分け方の列を渡した場合に起きる。正規方程式の
+    /// `h_1 + h_2 = 0`と合わせて`h_1 = h_2 = 0`、DK共分散は恒等的にゼロになる
+    /// （`InsufficientDkPeriodsForInference`の`rank(S) ≤ t-1 = 1`よりさらに強い退化で、
+    /// `k = 1`でも成立しない）。数値的な特異性判定では`1×1`行列を検出できず、
+    /// 約`1e-16`の標準誤差と巨大なF統計量を黙って返していたため入力から弾く。
+    /// 1水準でもこのパターンを崩せば退化しない（その場合は通す）。
+    /// REは残差がwithin変換されないため対象外。
+    #[error(
+        "cov_type='dk' with 2 unique time periods is degenerate for fixed effects when every \
+         entity (or, with two-way effects, every time period) is observed exactly once in each \
+         of the two periods: the within transformation makes the two per-period scores equal, \
+         and they sum to zero, so the Driscoll-Kraay covariance is identically zero. Use more \
+         time periods or another cov_type"
+    )]
+    DegenerateDkTwoPeriods,
+
+    /// FEで`FeCovType::Cluster`のクラスター数が2、かつ吸収したFE次元（常にentity、2-wayでは
+    /// timeも）のいずれかで全水準が2つのクラスターに1観測ずつ（傾き係数`k >= 1`のとき）。
+    /// 典型例は2時点のパネルを`time`でクラスタリング（entity方向）と、2-way FEでエンティティ
+    /// 2つのパネルをentityでクラスタリング——Clusterの既定——（time方向）。
+    ///
+    /// `DegenerateDkTwoPeriods`と同じ理由でクラスタースコアが`s_1 = s_2 = 0`となり、
+    /// クラスターロバスト共分散が恒等的にゼロになる。
+    #[error(
+        "cov_type='cluster' with 2 clusters is degenerate for fixed effects when every entity \
+         (or, with two-way effects, every time period) is observed exactly once in each cluster \
+         (e.g. clustering by time with 2 periods, or by entity with 2 entities and two-way \
+         effects): the within transformation makes the two cluster scores equal, and they sum \
+         to zero, so the cluster-robust covariance is identically zero. Use more clusters or \
+         another cov_type"
+    )]
+    DegenerateClusterTwoGroups,
 
     /// within変換済みデータに対する最小二乗推定（`OlsEstimator::fit`への委譲、
     /// `panel-common.md`4.3節。WLSがOLSへ委譲するのと同型のパターン）が失敗した。
@@ -280,63 +351,275 @@ pub enum PanelError {
         #[source]
         source: LeastSquaresError,
     },
+
+    /// REのハウスマン検定（`re-spec.md`3.7節）の補助回帰、または`cov_type`連動のWald検定が
+    /// 失敗した。
+    ///
+    /// 補助回帰のランク落ち、クラスター数`G`が補助回帰の傾き係数の数`2k`以下
+    /// （`CommonError::InsufficientClustersForInference`）、DK・ロバスト共分散部分行列の
+    /// ほぼ特異性（`CommonError::ComputationFailed`）等。DKの時点数不足（`T <= k`）は
+    /// これに包まず、補助回帰の前に`InsufficientDkPeriodsForInference`で弾く。ハウスマン検定はRE本体の付随的な
+    /// 診断情報だが、計算自体が成立しない場合は`None`で隠さずエラーにする
+    /// （設計行列の多重共線性でエラーにするのと同じ方針）。
+    #[error("Hausman test auxiliary regression failed: {source}")]
+    HausmanTestFailed {
+        #[source]
+        source: LeastSquaresError,
+    },
 }
 
-/// `ids`の値ごとに観測インデックスをまとめる（`BTreeMap`のキー＝`ids`の辞書順）。
+/// パネル識別子（entity・time・クラスター列等、同一性だけが意味を持つ`String`列）を、
+/// 整数コードに一度だけ変換したもの。
 ///
-/// 元々`fe.rs`にFE専用のprivate関数として実装していたが、後にRE（Swamy-Arora分散成分推定）
-/// のbetween回帰（エンティティ平均の集計）でも同じグルーピングが必要になったため、
-/// FE/RE間で共有するロジックとしてこちらに移設した
-/// （`.claude/rules/rust-style.md`「系統内で共有するロジックは`<系統>/common.rsに置く`」）。
-/// `pub(crate)`にする理由: `engine`クレート内部（`fe.rs`・`re.rs`）専用のヘルパーで、
-/// `engine_pybind`や`engine`クレート外には公開しない内部実装詳細のため。
+/// within変換・準偏差変換・グループ平均・クラスター/DKの集計は、行ごとに「どのグループか」を
+/// 引く処理を列ごと・統計量ごとに繰り返す。`String`をキーにしたハッシュ表・`BTreeMap`で毎回
+/// 引き直すと、大標本（n=1,000,000・エンティティ166,666）では1列あたり約0.2秒かかり、FE/REの
+/// 計算時間の大半を占めていた（QR分解よりはるかに重い）。`FeInput`/`ReInput`の構築時に一度だけ
+/// コード化して保持し、以降はコードで配列を直接引く（1列あたり数ms）。
 ///
-/// `BTreeMap`を使う理由: `HashMap`だと反復順序がプロセスごとのハッシュシードに依存し、
-/// グループ間加算（`Σ_g S_g S_g'`等）の順序・延いては浮動小数点丸め誤差が実行のたびに
-/// 変わりうる。FE側ではこれに加え、DKの時点集計でキー順序（`String`の辞書順）がそのまま
-/// 時系列順序とみなす規約（`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）とも
-/// 一致するという二重の意味を持つ。
-pub(crate) fn group_indices_by_key(ids: &[String]) -> BTreeMap<&str, Vec<usize>> {
-    let mut indices: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
-    for (i, id) in ids.iter().enumerate() {
-        indices.entry(id.as_str()).or_default().push(i);
+/// **コードの順序は、`from_ids`ではキーの辞書順（`String`の`Ord`、旧実装の
+/// `BTreeMap<&str, _>`の反復順と同じ）にする**。グループ間の加算順（クラスターの
+/// `Σ_g S_g S_g'`等）・between回帰の行順を旧実装と同じに保ち、結果をビット単位で
+/// 変えないため。時点だけは、DKの時系列順序が値の順序で決まる必要があるため、
+/// `TimeKeys`が`from_ids_ordered`で値の順序のコードを振る（`TimeKeys`のdoc参照）。
+/// グループ内の行は観測順に積む（`group_indices`の安定な計数ソート）。
+///
+/// `engine`クレート内部専用（`FeInput`/`ReInput`の公開APIは引き続き`String`列で受け取る）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GroupCodes {
+    /// 各行のグループコード（長さ`n`、値は`0..n_groups`）。
+    codes: Vec<usize>,
+    /// グループごとの観測数（長さ`n_groups`、コード順）。
+    counts: Vec<usize>,
+    /// グループのキー（長さ`n_groups`、コード順）。
+    keys: Vec<String>,
+}
+
+impl GroupCodes {
+    /// `ids`を辞書順の整数コードに変換する。ハッシュは`ids`全体に1回、ソートはユニークな
+    /// キー（`n_groups`個）にだけ行う。
+    pub(crate) fn from_ids(ids: &[String]) -> Self {
+        Self::from_ids_ordered(ids, |_, _| Ordering::Equal)
     }
-    indices
+
+    /// `ids`を整数コードに変換する。コードの順序は`compare_rows`（各キーが最初に現れた行の
+    /// インデックス2つを比べる）で決め、同順位は`String`の辞書順で決める。`from_ids`は
+    /// `compare_rows`が常に`Equal`の場合（辞書順のみ）にあたる。
+    ///
+    /// 同じキーの行は同じ順序づけの値を持つこと（`TimeKeys`の各コンストラクタが保証する）。
+    /// 異なるキーが同順位になるのは、値としては等しい別表記（浮動小数点の`0.0`と`-0.0`等）
+    /// だけで、その2つの順序はキーの辞書順で行の並びに依らず決まる。
+    pub(crate) fn from_ids_ordered(
+        ids: &[String],
+        compare_rows: impl Fn(usize, usize) -> Ordering,
+    ) -> Self {
+        // 1. 出現順の仮コード（ハッシュ1回/行）。キーごとに最初に現れた行も控える。
+        let mut first_seen: HashMap<&str, usize> = HashMap::new();
+        let mut unique: Vec<&str> = Vec::new();
+        let mut first_row: Vec<usize> = Vec::new();
+        let mut codes: Vec<usize> = ids
+            .iter()
+            .enumerate()
+            .map(|(row, id)| {
+                *first_seen.entry(id.as_str()).or_insert_with(|| {
+                    unique.push(id.as_str());
+                    first_row.push(row);
+                    unique.len() - 1
+                })
+            })
+            .collect();
+
+        // 2. ユニークなキーだけを並べ、仮コード→順序づけコードの対応を作る。
+        let mut order: Vec<usize> = (0..unique.len()).collect();
+        order.sort_unstable_by(|&a, &b| {
+            compare_rows(first_row[a], first_row[b]).then_with(|| unique[a].cmp(unique[b]))
+        });
+        let mut rank = vec![0; unique.len()];
+        for (r, &provisional_code) in order.iter().enumerate() {
+            rank[provisional_code] = r;
+        }
+
+        // 仮コードをその場で順序づけコードに置き換える（別の`Vec`を確保しない）。
+        for c in &mut codes {
+            *c = rank[*c];
+        }
+        let mut counts = vec![0; unique.len()];
+        for &c in &codes {
+            counts[c] += 1;
+        }
+        let keys = order.iter().map(|&c| unique[c].to_string()).collect();
+        Self {
+            codes,
+            counts,
+            keys,
+        }
+    }
+
+    /// 各行のグループコード（長さ`n`）。
+    pub(crate) fn codes(&self) -> &[usize] {
+        &self.codes
+    }
+
+    /// グループごとの観測数（コード順）。
+    pub(crate) fn counts(&self) -> &[usize] {
+        &self.counts
+    }
+
+    /// グループのキー（コード順）。
+    pub(crate) fn keys(&self) -> &[String] {
+        &self.keys
+    }
+
+    /// ユニークなグループ数。
+    pub(crate) fn n_groups(&self) -> usize {
+        self.counts.len()
+    }
+
+    /// 行数`n`。
+    pub(crate) fn nobs(&self) -> usize {
+        self.codes.len()
+    }
+
+    /// グループごとの行インデックス（コード順、グループ内は観測順）。旧実装の
+    /// `String`キーの`BTreeMap`でまとめたもの（キー順＝辞書順、グループ内は観測順）と同じ
+    /// 順序・同じ中身を、計数ソートで`O(n)`で作る。
+    pub(crate) fn group_indices(&self) -> GroupIndices {
+        let mut offsets = Vec::with_capacity(self.counts.len() + 1);
+        offsets.push(0);
+        for &count in &self.counts {
+            offsets.push(offsets[offsets.len() - 1] + count);
+        }
+        let mut next = offsets[..self.counts.len()].to_vec();
+        let mut indices = vec![0; self.codes.len()];
+        for (i, &c) in self.codes.iter().enumerate() {
+            indices[next[c]] = i;
+            next[c] += 1;
+        }
+        GroupIndices { offsets, indices }
+    }
 }
 
-/// `ids`のユニークID数を数える（`n_entities`/`n_periods`のカウント）。純粋な
-/// カーディナリティ集計のため`HashSet`でよい（`group_indices_by_key`と異なりグループ間の
-/// 加算順序に依存する計算が無いため反復順序非依存）。`group_indices_by_key`と同じ理由で
-/// FE/RE間の共有ロジックとしてここに移設した。
-pub(crate) fn count_unique(ids: &[String]) -> usize {
-    ids.iter().collect::<HashSet<_>>().len()
+/// 時点列のラベルと、その時間順を表すコード。FE/REが時点の順序を使う
+/// 計算（Driscoll-Kraay型HAC・2-way FEの`fixed_effects()`の基準時点とキー順）に渡す。
+///
+/// 時点の順序は**ラベルの文字列ではなく列の値の順序**で決める（整数・浮動小数点は数値順、
+/// 日付・日時は時系列順、`Enum`はカテゴリ定義順）。文字列の辞書順では`1, 10, 11, 2, ...`の
+/// ように並んで時点の対応がずれ、DKの標準誤差が黙って変わる。値の順序をどう取るかは
+/// `engine_pybind`が列のdtypeから決め、コンストラクタで渡す。ラベル自体（`String`）は
+/// 同一性の判定と`fixed_effects()`のキーに使う。
+///
+/// ユニークな時点は1つのコードに対応し、コードは0から時点の昇順に振る。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TimeKeys {
+    /// 各行の時点ラベル（長さ`n`）。
+    ids: Vec<String>,
+    /// `ids`のコード（時間順）。
+    codes: GroupCodes,
 }
 
-/// `ids`に現れる全ユニークIDに`θ=1.0`を割り当てた`BTreeMap`を作る。
-///
-/// `quasi_demean_column`の`theta`引数はエンティティID→θ_iの対応（`&BTreeMap<String,
-/// f64>`）を要求するが、θ=1固定の通常のwithin変換（FEのwithin変換そのもの、REの
-/// `r_squared_within`計算——`docs/spec/re-spec.md`3.2節「FEはθ=1の特殊ケース」。
-/// `linearmodels`の`_rsquared`のWithinセクションはRE/FEどちらのモデルでも共通してθ=1の
-/// FE型within変換を使う、という点も参照）で毎回同じ組み立てが必要になるため、FE/RE共有
-/// ロジックとしてここに置く（`group_indices_by_key`/`count_unique`と同じ理由。最初は
-/// FE専用としてFE→common.rsへ移設し、後にREの`r_squared_within`計算でも同じ組み立てが
-/// 必要になったため改めて共有ロジックとして整理した）。
-///
-/// 先に`HashSet`でユニークなIDへ絞り込んでから`String`を複製する（`ids.iter().map(|id|
-/// (id.clone(), 1.0)).collect()`のように観測順のまま素朴に`collect`すると、`BTreeMap`の
-/// 重複キーは値のみ上書きされキー自体は複製されたまま即破棄されるため、観測数`n`分の
-/// ヒープ確保が発生してしまう。rust-reviewer指摘、ユニークID数分のみ複製するよう修正済み）。
-pub(crate) fn all_ones_theta(ids: &[String]) -> BTreeMap<String, f64> {
-    ids.iter()
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .map(|id| (id.clone(), 1.0))
-        .collect()
+impl TimeKeys {
+    /// ラベルの辞書順を時間順とみなす（ISO 8601の日付・ゼロ埋めした年月等、辞書順が時間順と
+    /// 一致するラベル向け）。`FeInput::from_columns`/`ReInput::from_columns`はこの順序を使う。
+    pub fn lexicographic(ids: Vec<String>) -> Self {
+        let codes = GroupCodes::from_ids(&ids);
+        Self { ids, codes }
+    }
+
+    /// 各行の整数値`values`の昇順を時間順にする（整数列・日付・日時・`Enum`の物理順序）。
+    ///
+    /// # Errors
+    /// `values`の長さが`ids`と一致しない場合は`PanelError::IdentifierDimensionMismatch`
+    /// （`engine_pybind`が同じ列から作る限り起こり得ない契約違反に対する防御）。
+    pub fn by_integer(ids: Vec<String>, values: &[i128]) -> Result<Self, PanelError> {
+        check_key_lengths(&ids, values.len())?;
+        let codes = GroupCodes::from_ids_ordered(&ids, |a, b| values[a].cmp(&values[b]));
+        Ok(Self { ids, codes })
+    }
+
+    /// 各行の浮動小数点値`values`の昇順（`f64::total_cmp`）を時間順にする。有限値であること
+    /// （NaN・無限大は`engine_pybind`が列の抽出時に拒否する）。
+    ///
+    /// # Errors
+    /// `values`の長さが`ids`と一致しない場合は`PanelError::IdentifierDimensionMismatch`。
+    pub fn by_float(ids: Vec<String>, values: &[f64]) -> Result<Self, PanelError> {
+        check_key_lengths(&ids, values.len())?;
+        let codes = GroupCodes::from_ids_ordered(&ids, |a, b| values[a].total_cmp(&values[b]));
+        Ok(Self { ids, codes })
+    }
+
+    /// 各行の時点ラベル（長さ`n`）。
+    pub fn ids(&self) -> &[String] {
+        &self.ids
+    }
+
+    /// 時点ラベルのコード（時間順）。
+    pub(crate) fn codes(&self) -> &GroupCodes {
+        &self.codes
+    }
+
+    /// 行数`n`。
+    pub fn len(&self) -> usize {
+        self.ids.len()
+    }
+
+    /// 行数が0か。
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty()
+    }
+
+    /// ユニークな時点のラベルを時間順に並べたもの。
+    pub fn periods(&self) -> &[String] {
+        self.codes.keys()
+    }
+}
+
+/// `TimeKeys`のコンストラクタが、ラベルと順序づけの値の長さを検証する。
+fn check_key_lengths(ids: &[String], values: usize) -> Result<(), PanelError> {
+    if ids.len() != values {
+        return Err(PanelError::IdentifierDimensionMismatch {
+            dimension: PanelDimension::Time,
+            y_rows: ids.len(),
+            other_rows: values,
+        });
+    }
+    Ok(())
+}
+
+/// `validate_cluster_groups`（OLS等と共有、`String`列を受ける）と同じ検証をコードで行う
+/// （クラスター数`G`を返し、`G < 2`なら`CommonError::InsufficientClusters`）。FE/REの
+/// クラスター列は`GroupCodes`にしてあるため、文字列を数え直さない。
+pub(crate) fn validate_cluster_group_codes(
+    groups: &GroupCodes,
+    n: usize,
+) -> Result<usize, CommonError> {
+    debug_assert_eq!(
+        groups.nobs(),
+        n,
+        "groups length must match nobs (engine_pybind contract)"
+    );
+    let g = groups.n_groups();
+    if g < 2 {
+        return Err(CommonError::InsufficientClusters { g });
+    }
+    Ok(g)
+}
+
+/// `GroupCodes::group_indices`の結果（CSR形式: グループ`g`の行は
+/// `indices[offsets[g]..offsets[g+1]]`）。グループごとに`Vec`を確保しないため、グループ数が
+/// 多い（エンティティ166,666等）ときも確保は2回で済む。
+pub(crate) struct GroupIndices {
+    offsets: Vec<usize>,
+    indices: Vec<usize>,
+}
+
+impl GroupIndices {
+    /// グループごとの行インデックスをコード順に返す。
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &[usize]> {
+        self.offsets.windows(2).map(|w| &self.indices[w[0]..w[1]])
+    }
 }
 
 /// FE/RE共有のcov_type計算ヘルパー（元は`fe.rs`の`fe_*_cov_params`をFE→common.rsへ移設。
-/// `group_indices_by_key`/`count_unique`/`all_ones_theta`と同じ
 /// 「FE専用で書いたが後にREでも同じ数式が必要と判明したため共有ロジックとして移設した」
 /// 経緯）。**数式自体はFE実装時のまま変更していない**——移設したのは
 /// 呼び出し側（`fe.rs`/`re.rs`）が渡す`df_resid`・`extra_df`・レバレッジの値がFE/REで
@@ -450,24 +733,28 @@ pub(crate) fn panel_hc_cov_params(
     xtx_inv * &psi_hat * xtx_inv
 }
 
-/// クラスターロバスト係数分散共分散行列（k×k）。`ols::cluster_cov_params`と同型の
-/// 構造だが、**Stata流の`(G/(G-1))×((n-1)/(n-k))`小標本補正を適用しない**
-/// （`linearmodels`との数値一致のため、`fe.rs`モジュールdoc「`cov_type`対応」参照）。
-/// 代わりに`n/(n-extra_df-k)`のみを使う（`extra_df`は呼び出し側が決める。FEは
-/// `entity_nested_within_cluster`の判定結果、REは常に`0`——モジュールdoc参照）。
+/// クラスターロバスト係数分散共分散行列（k×k）。`ols::cluster_cov_params`と同じ
+/// Stata流`(G/(G-1))×((n-1)/(n-K))`小標本補正を使う（fixest（R）・Stataの`xtreg`/
+/// `reghdfe`との数値一致のため、linearmodels方式`n/(n-extra_df-k)`から
+/// 変更した。`fe.rs`モジュールdoc「`cov_type`対応」参照）。`G`はこの関数が
+/// `groups`から数える（`ols::cluster_cov_params`と同じ）。`K`（`(n-1)/(n-K)`の分母）は
+/// 呼び出し側が決める`k_correction`引数で渡す——FEは固定効果ダミーとクラスター変数の
+/// ネスト関係で決まるfixest固有のK計算（`fe.rs`の`fe_cluster_k_correction`）、REは
+/// 単純に`df_model`（FEのような固定効果ダミーのネスト補正が不要、モジュールdoc参照）。
 pub(crate) fn panel_cluster_cov_params(
     x: &Mat<f64>,
     residuals: &[f64],
     xtx_inv: &Mat<f64>,
     n: usize,
     k: usize,
-    groups: &[String],
-    extra_df: usize,
+    groups: &GroupCodes,
+    k_correction: usize,
 ) -> Mat<f64> {
-    let group_indices = group_indices_by_key(groups);
+    let group_indices = groups.group_indices();
+    let n_groups = groups.n_groups();
 
     let mut s_hat = Mat::<f64>::zeros(k, k);
-    for indices in group_indices.values() {
+    for indices in group_indices.iter() {
         let mut s_g = vec![0.0_f64; k];
         for &i in indices {
             let e = residuals[i];
@@ -482,24 +769,32 @@ pub(crate) fn panel_cluster_cov_params(
         }
     }
 
-    let df_resid_for_scale = n - extra_df - k;
-    let correction = n as f64 / df_resid_for_scale as f64;
+    let correction = (n_groups as f64 / (n_groups as f64 - 1.0))
+        * ((n as f64 - 1.0) / ((n - k_correction) as f64));
     let cov_uncorrected = xtx_inv * &s_hat * xtx_inv;
     Mat::from_fn(k, k, |i, j| correction * (*cov_uncorrected.get(i, j)))
 }
 
-/// `FeCovType::Hac`/`ReCovType::Hac`の`bandwidth`（`Option<i64>`）を実際に使う
+/// `FeCovType::Dk`/`ReCovType::Dk`の`bandwidth`（`Option<i64>`）を実際に使う
 /// バンド幅（`usize`）に解決する。
 ///
 /// `Some(bw)`の場合は`0 <= bw < t`を検証してそのまま使う（`t`はユニークな時点数）。`None`の
 /// 場合は`linearmodels`の`DriscollKraay`と同じ経験則`floor(4*(t/100)^(2/9))`で自動計算する
 /// （`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照。OLSの`resolve_hac_lags`と
 /// 式の形は同じだが、観測数`n`ではなく時点数`t`が引数になる点が異なる）。
+///
+/// `t < 2`は`bandwidth`の値によらず`PanelError::InsufficientDkPeriods`で拒否する
+/// （fixest型の`G/(G-1)`相当補正を導入したことに伴う前提条件。同エラーの
+/// docコメント参照）。この関数がDK計算の全呼び出し経路（`fe.rs`/`re.rs`/
+/// `re_hausman_test`）の共通の入口になっているため、ここ一箇所で検証すれば足りる。
 pub(crate) fn resolve_dk_bandwidth(bandwidth: Option<i64>, t: usize) -> Result<usize, PanelError> {
+    if t < 2 {
+        return Err(PanelError::InsufficientDkPeriods { t_periods: t });
+    }
     match bandwidth {
         Some(bw) => {
             if bw < 0 || (bw as usize) >= t {
-                return Err(PanelError::InvalidHacBandwidth { bandwidth: bw, t });
+                return Err(PanelError::InvalidDkBandwidth { bandwidth: bw, t });
             }
             Ok(bw as usize)
         }
@@ -507,17 +802,38 @@ pub(crate) fn resolve_dk_bandwidth(bandwidth: Option<i64>, t: usize) -> Result<u
     }
 }
 
+/// DKで同時Wald検定の対象となる係数の数`q`が、時点数`t_periods`で支えられることを
+/// 検証する（`t_periods > q`）。理由は`PanelError::InsufficientDkPeriodsForInference`の
+/// docコメント参照（`validate_cluster_count_covers_slopes`のDK版）。
+///
+/// `t_periods > q`でも係数間の悪条件で部分行列が数値的にほぼ特異になるケースは
+/// 事前判定できないため、`wald_f_test`内の`ensure_well_conditioned_symmetric_matrix`が
+/// backstopとして残る。`resolve_dk_bandwidth`（`t_periods >= 2`を保証）の後に呼ぶ前提で、
+/// そのとき`q == 0`（検定対象なし）は常に`Ok`。
+pub(crate) fn validate_dk_periods_cover_tested_coefficients(
+    t_periods: usize,
+    q: usize,
+) -> Result<(), PanelError> {
+    if t_periods <= q {
+        return Err(PanelError::InsufficientDkPeriodsForInference { t_periods, q });
+    }
+    Ok(())
+}
+
 /// Driscoll-Kraay型パネルHAC共分散行列（k×k）。
 ///
 /// `Ŝ = Σ_t ξ_t ξ_t' + Σ_{l=1}^{bandwidth} w_l (ξ_t ξ_{t-l}' + ξ_{t-l} ξ_t')`
 /// （Bartlett重み`w_l = 1 - l/(bandwidth+1)`、`fe.rs`モジュールdoc参照）をまず求め、
-/// 最後に`(n/df_resid) × (X̃'X̃)⁻¹ Ŝ (X̃'X̃)⁻¹`にスケールする。`t_periods`（ユニークな
-/// 時点数）は`resolve_dk_bandwidth`の呼び出しで既に計算済みの値を呼び出し元からそのまま
-/// 受け取る（`time_indices.len()`で二重計算しない）。
+/// 最後に`(t_periods/(t_periods-1)) × ((n-1)/(n-k_correction)) × (X̃'X̃)⁻¹ Ŝ (X̃'X̃)⁻¹`に
+/// スケールする（fixestの`vcov="DK"`との数値一致のため、
+/// linearmodels方式`n/df_resid`から変更した。fixestは時点数`t_periods`を
+/// クラスター数`G`相当として扱い、`K.fixef="full"`が既定（クラスター変数が無いため
+/// ネスト判定自体が発生しない）——`k_correction`は呼び出し側がFE/REそれぞれの
+/// `df_model`をそのまま渡す。`panel_cluster_cov_params`の`G/(G-1)×(n-1)/(n-K)`と
+/// 同型の式に、`G`を`t_periods`（`time`のユニークな時点数）に置き換えたものと理解できる）。
 ///
-/// `time`を`group_indices_by_key`で集計して`ξ_t`（時点`t`でのクロスセクション和）を求める。
-/// キー順序（`String`の辞書順）がそのまま時系列順序とみなす規約（`fe.rs`モジュールdoc参照）と
-/// 一致することを利用している。
+/// `time`のコード（`GroupCodes`、コード順＝時系列順、`TimeKeys`のdoc参照）で集計して
+/// `ξ_t`（時点`t`でのクロスセクション和）を求める。
 ///
 /// **`bandwidth <= t_periods`（狭義の`<`ではない）が呼び出し元の`resolve_dk_bandwidth`から
 /// 保証される**（詳細は`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
@@ -530,17 +846,17 @@ pub(crate) fn panel_driscoll_kraay_cov_params(
     x: &Mat<f64>,
     residuals: &[f64],
     xtx_inv: &Mat<f64>,
-    time: &[String],
-    df_resid: usize,
+    time: &GroupCodes,
+    k_correction: usize,
     bandwidth: usize,
-    t_periods: usize,
 ) -> Mat<f64> {
     let n = x.nrows();
     let k = x.ncols();
-    let time_indices = group_indices_by_key(time);
+    let t_periods = time.n_groups();
+    let time_indices = time.group_indices();
 
     let mut xi = Mat::<f64>::zeros(t_periods, k);
-    for (row, indices) in time_indices.values().enumerate() {
+    for (row, indices) in time_indices.iter().enumerate() {
         for &i in indices {
             let e = residuals[i];
             for col in 0..k {
@@ -564,7 +880,8 @@ pub(crate) fn panel_driscoll_kraay_cov_params(
         }
     }
 
-    let scale = n as f64 / df_resid as f64;
+    let scale = (t_periods as f64 / (t_periods as f64 - 1.0))
+        * ((n as f64 - 1.0) / ((n - k_correction) as f64));
     let cov_uncorrected = xtx_inv * &s_hat * xtx_inv;
     Mat::from_fn(k, k, |i, j| scale * (*cov_uncorrected.get(i, j)))
 }
@@ -593,15 +910,15 @@ pub(crate) fn panel_driscoll_kraay_cov_params(
 ///
 /// # 引数
 /// - `col`: 変換対象の列（長さ`n`、行はパネルの観測順）。
-/// - `entity`: 各行のエンティティID（長さ`n`）。「グループの同一性だけが意味を持つ列」の
-///   ため文字列で扱う（`.claude/rules/rust-style.md`「Python境界でのデータ受け渡し」）。
-/// - `theta`: エンティティID → `θ_i`の対応。`entity`に現れる全IDをキーに持つこと。
+/// - `entity`: 各行のエンティティ（`FeInput`/`ReInput`が構築時に一度だけ作った整数コード、
+///   `GroupCodes`のdocコメント参照）。2-way FEの時点方向の変換では時点のコードを渡す。
+/// - `theta`: `θ_i`をコード順（`entity.keys()`の並び）に並べたもの（長さ`n_groups`）。
 ///
 /// # 前提（呼び出し側の契約、`engine`内部でのみ使用）
-/// - `entity.len() == col.len()`。`engine_pybind`の列抽出が保証する
-///   （`validate_cluster_groups`の`groups.len() == n`契約と同じ位置づけ）。
-/// - `theta`は`entity`の全ユニークIDをキーに持つ。RE/FEの`fit()`は同じ`entity`列から
-///   `theta`を組み立てるため、欠けは内部実装バグでしか起こり得ない。
+/// - `entity.nobs() == col.len()`。`FeInput`/`ReInput`が`y`・`x`と同じ長さの`entity`から
+///   コードを作るため、違反は内部実装バグでしか起こり得ない。
+/// - `theta.len() == entity.n_groups()`。RE/FEの`fit()`は同じ`entity`のコードから
+///   `theta`を組み立てる。
 /// - `col`は欠損値・非有限値を含まない（`engine`は常にクリーンな値を受け取る前提）。
 ///
 /// 契約違反時は`assert!`/`expect`でpanicする（`Result`は返さない）。ユーザー入力起因の
@@ -614,164 +931,58 @@ pub(crate) fn panel_driscoll_kraay_cov_params(
 /// 必要になった場合は、その時点で改めて検討する。
 ///
 /// # Panics
-/// - `entity.len() != col.len()`
-/// - `theta`に`entity`内のいずれかのIDが無い
-pub fn quasi_demean_column(
-    col: &[f64],
-    entity: &[String],
-    theta: &BTreeMap<String, f64>,
-) -> Vec<f64> {
+/// - `entity.nobs() != col.len()`
+/// - `theta.len() != entity.n_groups()`
+pub(crate) fn quasi_demean_column(col: &[f64], entity: &GroupCodes, theta: &[f64]) -> Vec<f64> {
     assert_eq!(
-        entity.len(),
+        entity.nobs(),
         col.len(),
-        "entity length must match column length (engine_pybind contract)"
+        "entity length must match column length (FeInput/ReInput contract)"
+    );
+    assert_eq!(
+        theta.len(),
+        entity.n_groups(),
+        "theta must have one value per entity group"
     );
 
-    // エンティティごとに (合計, 件数) を集約する。ここは`HashMap`でよい（`cluster_cov_params`
-    // の`BTreeMap`必須とは事情が異なる）: あるエンティティの和は観測順（＝入力行の固定順）に
-    // 積まれ、各行の変換結果もそのエンティティの和だけに依存する。エンティティ「間」を
-    // またぐ加算（`Σ_g S_g S_g'`のようにグループ順序が浮動小数点丸めに効く演算）は無いため、
-    // 反復順序に関わらずビット単位で決定的。`HashMap`にすることで集約・引き当てが
-    // O(n log G) → O(n)（G = エンティティ数）になる（rust-reviewer指摘）。
-    let mut sums: HashMap<&str, (f64, usize)> = HashMap::new();
-    for (value, id) in col.iter().zip(entity.iter()) {
-        let entry = sums.entry(id.as_str()).or_insert((0.0, 0));
-        entry.0 += *value;
-        entry.1 += 1;
+    // エンティティごとの和を観測順に積む（エンティティ「間」をまたぐ加算は無いため、
+    // コードの振り方によらずビット単位で決定的。旧実装の`String`キーの`HashMap`集約と
+    // 同じ加算順・同じ演算で、結果もビット単位で同じ）。
+    let mut sums = vec![0.0_f64; entity.n_groups()];
+    for (value, &c) in col.iter().zip(entity.codes()) {
+        sums[c] += *value;
     }
 
     // エンティティ単位で `θ_i · ȳ_i.`（各行から引く量）を先に求めておく。
-    let shift_by_entity: HashMap<&str, f64> = sums
+    let shift: Vec<f64> = sums
         .iter()
-        .map(|(id, (sum, count))| {
-            let mean = sum / *count as f64;
-            let theta_i = *theta
-                .get(*id)
-                .expect("theta must contain every entity id present in `entity`");
-            (*id, theta_i * mean)
-        })
+        .zip(entity.counts())
+        .zip(theta)
+        .map(|((sum, &count), &theta_i)| theta_i * (sum / count as f64))
         .collect();
 
     col.iter()
-        .zip(entity.iter())
-        .map(|(value, id)| value - shift_by_entity[id.as_str()])
+        .zip(entity.codes())
+        .map(|(value, &c)| value - shift[c])
         .collect()
-}
-
-/// 古典的ハウスマン検定の統計量・自由度・p値を計算する。
-///
-/// ```text
-/// H = (β_FE - β_RE)' [Var(β_FE) - Var(β_RE)]⁻¹ (β_FE - β_RE)
-/// ```
-///
-/// 帰無仮説 H0: 個体効果と説明変数が無相関（＝REが一致推定量）。棄却されればFEを使う。
-/// `H` は自由度 `k`（比較する係数の数）のカイ二乗分布に漸近的に従う。
-///
-/// `docs/spec/re-spec.md` 3.7節:
-/// - **v1は classical Hausman のみ**（`cov_type`に依存せず、常にclassical SE前提で計算）。
-///   呼び出し側（RE実装）は`cov_type="cluster"`等でfitした場合でも、この関数には
-///   classical前提の`cov_fe`/`cov_re`を渡す。
-/// - **比較対象はFE/RE間で重なりのあるスロープ係数のみ**。FEには切片が無いため、
-///   RE側の切片・時間不変変数の係数は呼び出し側で除外し、対応する順序に揃えた
-///   `beta_fe`/`beta_re`（同じ長さ`k`）と、その`k×k`部分共分散行列`cov_fe`/`cov_re`を
-///   渡す（このalignは同3.7節の通り呼び出し側の責務）。
-///
-/// # 戻り値
-/// `(stat, df, p_value)`。`df == beta_fe.len()`、`p_value` は自由度 `df` のカイ二乗分布の
-/// 上側確率 `χ²_df.sf(stat)`（＝ `1 - cdf`。`stat` が大きく H0 を強く棄却する場合に
-/// `1.0 - cdf(stat)` だと生じる桁落ちを避けるため、`statrs` の `sf`——正則化上側不完全
-/// ガンマの直接計算——を使う。`iv/gmm.rs` 等の既存箇所は `1.0 - cdf` のままで、一括移行は
-/// 別issue）。
-///
-/// **`Var(β_FE) - Var(β_RE)`は理論上は半正定値だが、有限標本では非正定値になりうる**
-/// （二次形式 `d'(Var(β_FE)-Var(β_RE))⁻¹d` が負になりうる）。参照実装 R `plm::phtest`
-/// （`stat <- as.numeric(abs(t(dbeta) %*% solve(dvcov) %*% dbeta))`）に合わせ、
-/// **`stat`には`abs()`を適用してから返す**。`p_value`もこの`abs()`適用後の
-/// `stat`から計算するため、`plm::phtest`のp値と直接比較できる。
-///
-/// 以前は符号付きのまま返す設計だった（`stat<=0`なら`sf`により`p_value==1.0`）が、
-/// `plm::phtest`のソース確認により「`plm`と同じ挙動」という当初の設計文書の記載が
-/// 誤りだったことが判明し修正した——`plm`は理論上も実装上も負の値を一切返さない。
-///
-/// `df` には常に `k`（渡された係数の数）を使う。`Var(β_FE) - Var(β_RE)` が閾値は通過するが
-/// 実効ランクが `k` 未満のとき、`stat` と `df` に不整合が生じうる（R `plm::phtest` も同じ
-/// 制約）。
-///
-/// # Errors
-/// `Var(β_FE) - Var(β_RE)`が数値的に特異（`col_piv_qr`のR対角成分が相対閾値以下、
-/// またはNaN）で逆行列が計算できない場合に`CommonError::ComputationFailed`。
-/// `ChiSquared::new`の失敗（`df`が非正、`k >= 1`のため理論上到達不能）も同じ。
-///
-/// # Panics
-/// 呼び出し側の契約違反時（`engine`内部でのみ使用、`validate_cluster_groups`と同じ扱い）:
-/// - `beta_fe.len() != beta_re.len()`、または長さが0
-/// - `cov_fe`/`cov_re`が`k×k`でない
-pub fn hausman_statistic(
-    beta_fe: &[f64],
-    cov_fe: &[Vec<f64>],
-    beta_re: &[f64],
-    cov_re: &[Vec<f64>],
-) -> Result<(f64, usize, f64), CommonError> {
-    let k = beta_fe.len();
-    assert_eq!(
-        k,
-        beta_re.len(),
-        "beta_fe and beta_re must have the same length (caller aligns overlapping slopes)"
-    );
-    assert!(
-        k >= 1,
-        "hausman_statistic requires at least one compared coefficient"
-    );
-    assert!(
-        cov_fe.len() == k && cov_fe.iter().all(|row| row.len() == k),
-        "cov_fe must be a k x k matrix matching beta_fe"
-    );
-    assert!(
-        cov_re.len() == k && cov_re.iter().all(|row| row.len() == k),
-        "cov_re must be a k x k matrix matching beta_re"
-    );
-
-    let d = Mat::from_fn(k, 1, |i, _| beta_fe[i] - beta_re[i]);
-    let cov_diff = Mat::from_fn(k, k, |i, j| cov_fe[i][j] - cov_re[i][j]);
-
-    // `cov_diff`は対称だが（有限標本では）正定値とは限らないため、Choleskyではなく
-    // 列ピボットQRで解く（`nonlinear::common::newton_step`と同じ方針・同じ相対閾値での
-    // 特異性検出。NaNは`diag <= threshold`をすり抜けるため明示的にチェックする）。
-    let qr = cov_diff.col_piv_qr();
-    let r = qr.thin_R();
-    let max_abs_diag = (0..k).map(|i| (*r.get(i, i)).abs()).fold(0.0_f64, f64::max);
-    let threshold = (k as f64) * f64::EPSILON * max_abs_diag;
-    for i in 0..k {
-        let diag = (*r.get(i, i)).abs();
-        if diag.is_nan() || diag <= threshold {
-            return Err(CommonError::ComputationFailed(
-                "the Hausman variance difference Var(beta_FE) - Var(beta_RE) is singular \
-                 and cannot be inverted"
-                    .to_string(),
-            ));
-        }
-    }
-
-    let z = qr.solve_lstsq(&d);
-    let raw_stat: f64 = (0..k).map(|i| (*d.get(i, 0)) * (*z.get(i, 0))).sum();
-    // `Var(β_FE) - Var(β_RE)`が有限標本で非正定値になると二次形式が負になりうる。
-    // `plm::phtest`（`stat <- as.numeric(abs(t(dbeta) %*% solve(dvcov) %*% dbeta))`）に
-    // 合わせ`abs()`を適用する。
-    let stat = raw_stat.abs();
-
-    let chi2 =
-        ChiSquared::new(k as f64).map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
-    // `1.0 - chi2.cdf(stat)` ではなく `sf`（正則化上側不完全ガンマの直接計算）を使う。
-    // 大きい `stat` で `cdf ≈ 1` になり小さいp値の相対精度が失われるのを避けるため。
-    // `stat <= 0` では `sf` も `1.0` を返すので、統計量が負のときの挙動は変わらない。
-    let p_value = chi2.sf(stat);
-
-    Ok((stat, k, p_value))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
+
+    /// `ids`の値ごとに観測インデックスをまとめる（`BTreeMap`のキー＝`ids`の辞書順）。
+    /// `GroupCodes`導入前の実装で、`GroupCodes`のコード順・グループ内の観測順が
+    /// これと一致することを確かめるテストのオラクルとしてだけ残している。
+    fn group_indices_by_key(ids: &[String]) -> BTreeMap<&str, Vec<usize>> {
+        let mut indices: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+        for (i, id) in ids.iter().enumerate() {
+            indices.entry(id.as_str()).or_default().push(i);
+        }
+        indices
+    }
 
     #[test]
     fn panel_dimension_displays_lowercase_name() {
@@ -781,6 +992,27 @@ mod tests {
 
     #[test]
     fn panel_error_messages_are_human_readable() {
+        assert!(
+            PanelError::DegenerateDkTwoPeriods
+                .to_string()
+                .starts_with("cov_type='dk' with 2 unique time periods is degenerate")
+        );
+        assert!(
+            PanelError::DegenerateClusterTwoGroups
+                .to_string()
+                .starts_with("cov_type='cluster' with 2 clusters is degenerate")
+        );
+        assert_eq!(
+            PanelError::InsufficientDkPeriodsForInference {
+                t_periods: 6,
+                q: 20
+            }
+            .to_string(),
+            "cov_type='dk' requires more unique time periods than jointly tested coefficients: \
+             got t_periods=6 for q=20 coefficient(s) (the slope F-test for FE, the Hausman test \
+             for RE), but the Driscoll-Kraay covariance has rank at most t_periods-1, so the q×q \
+             Wald submatrix is singular when t_periods <= q"
+        );
         assert_eq!(
             PanelError::IdentifierDimensionMismatch {
                 dimension: PanelDimension::Entity,
@@ -878,6 +1110,25 @@ mod tests {
             PanelError::Common(CommonError::InsufficientClusters { g: 1 }).to_string(),
             "cov_type='cluster' requires at least 2 clusters, got 1"
         );
+    }
+
+    #[test]
+    fn validate_dk_periods_cover_tested_coefficients_rejects_t_at_or_below_q() {
+        // `rank(S) ≤ t-1`のため`t > q`が必要。`t == q`が境界（拒否）、`t == q + 1`は通す。
+        assert_eq!(
+            validate_dk_periods_cover_tested_coefficients(6, 6),
+            Err(PanelError::InsufficientDkPeriodsForInference { t_periods: 6, q: 6 })
+        );
+        assert_eq!(
+            validate_dk_periods_cover_tested_coefficients(6, 20),
+            Err(PanelError::InsufficientDkPeriodsForInference {
+                t_periods: 6,
+                q: 20
+            })
+        );
+        assert_eq!(validate_dk_periods_cover_tested_coefficients(6, 5), Ok(()));
+        // 検定対象なし（FEの固定効果のみモデル）は常に通す。
+        assert_eq!(validate_dk_periods_cover_tested_coefficients(2, 0), Ok(()));
     }
 
     #[test]
@@ -1003,15 +1254,224 @@ mod tests {
         );
     }
 
-    // ── quasi_demean_column ────────────────────────────────────────────────
-
-    /// `["a", "a", "b", "b", "b"]`のエンティティ列を作るヘルパ。
-    fn entities(ids: &[&str]) -> Vec<String> {
-        ids.iter().map(|s| s.to_string()).collect()
+    #[test]
+    fn hausman_test_failed_message_and_equality() {
+        let err = PanelError::HausmanTestFailed {
+            source: LeastSquaresError::SingularMatrix,
+        };
+        assert_eq!(
+            err.to_string(),
+            "Hausman test auxiliary regression failed: design matrix is singular \
+             (perfect multicollinearity detected)"
+        );
+        assert_eq!(
+            err,
+            PanelError::HausmanTestFailed {
+                source: LeastSquaresError::SingularMatrix,
+            }
+        );
     }
 
-    fn theta_map(pairs: &[(&str, f64)]) -> BTreeMap<String, f64> {
-        pairs.iter().map(|(k, v)| (k.to_string(), *v)).collect()
+    // ── GroupCodes ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn group_codes_assigns_codes_in_key_order_not_appearance_order() {
+        // 出現順は "b", "a", "c" だが、コードは辞書順（旧`BTreeMap`の反復順）に振る。
+        let codes = entities(&["b", "a", "b", "c", "a", "b"]);
+        assert_eq!(codes.keys(), ["a", "b", "c"]);
+        assert_eq!(codes.codes(), [1, 0, 1, 2, 0, 1]);
+        assert_eq!(codes.counts(), [2, 3, 1]);
+        assert_eq!(codes.n_groups(), 3);
+        assert_eq!(codes.nobs(), 6);
+    }
+
+    #[test]
+    fn group_codes_uses_string_byte_order_like_btreemap() {
+        // 数値文字列も`String`の辞書順（"10" < "9"）。DKの時系列順序の規約と同じ。
+        let ids: Vec<String> = ["9", "10", "2"].iter().map(|s| s.to_string()).collect();
+        let codes = GroupCodes::from_ids(&ids);
+        let btree_order: Vec<&str> = group_indices_by_key(&ids).keys().copied().collect();
+        assert_eq!(codes.keys(), btree_order.as_slice());
+    }
+
+    // ── TimeKeys ───────────────────────────────────────────────────────────
+
+    fn labels(values: &[&str]) -> Vec<String> {
+        values.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn time_keys_by_integer_orders_periods_numerically_not_lexicographically() {
+        // 辞書順なら "10" < "2" < "9"。値の順序では 2 < 9 < 10。
+        let keys = TimeKeys::by_integer(labels(&["9", "10", "2", "9"]), &[9, 10, 2, 9]).unwrap();
+        assert_eq!(keys.periods(), ["2", "9", "10"]);
+        assert_eq!(keys.codes().codes(), [1, 2, 0, 1]);
+        assert_eq!(keys.ids(), ["9", "10", "2", "9"]);
+        assert_eq!(keys.len(), 4);
+    }
+
+    #[test]
+    fn time_keys_by_integer_orders_negative_values() {
+        let keys = TimeKeys::by_integer(labels(&["-1", "-10", "3"]), &[-1, -10, 3]).unwrap();
+        assert_eq!(keys.periods(), ["-10", "-1", "3"]);
+    }
+
+    #[test]
+    fn time_keys_by_float_orders_periods_numerically() {
+        let keys = TimeKeys::by_float(
+            labels(&["1.5", "-0.5", "10.0", "2.5"]),
+            &[1.5, -0.5, 10.0, 2.5],
+        )
+        .unwrap();
+        assert_eq!(keys.periods(), ["-0.5", "1.5", "2.5", "10.0"]);
+    }
+
+    #[test]
+    fn time_keys_by_float_breaks_ties_between_equal_values_by_label() {
+        // `0.0`と`-0.0`は値としては等しいが別のラベル。順序は行の並びに依らずラベルの辞書順
+        // （"-0.0" < "0.0"）で決まる。
+        let forward =
+            TimeKeys::by_float(labels(&["0.0", "-0.0", "1.0"]), &[0.0, -0.0, 1.0]).unwrap();
+        let backward =
+            TimeKeys::by_float(labels(&["1.0", "-0.0", "0.0"]), &[1.0, -0.0, 0.0]).unwrap();
+        assert_eq!(forward.periods(), ["-0.0", "0.0", "1.0"]);
+        assert_eq!(backward.periods(), ["-0.0", "0.0", "1.0"]);
+    }
+
+    #[test]
+    fn time_keys_lexicographic_matches_group_codes_from_ids() {
+        let ids = labels(&["b", "a", "c", "a"]);
+        let keys = TimeKeys::lexicographic(ids.clone());
+        assert_eq!(keys.codes(), &GroupCodes::from_ids(&ids));
+        assert_eq!(keys.periods(), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn time_keys_rejects_values_of_a_different_length() {
+        let err = TimeKeys::by_integer(labels(&["1", "2"]), &[1]).unwrap_err();
+        assert_eq!(
+            err,
+            PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Time,
+                y_rows: 2,
+                other_rows: 1,
+            }
+        );
+        assert!(TimeKeys::by_float(labels(&["1"]), &[1.0, 2.0]).is_err());
+    }
+
+    #[test]
+    fn time_keys_accepts_empty_input() {
+        let keys = TimeKeys::by_integer(vec![], &[]).unwrap();
+        assert!(keys.is_empty());
+        assert!(keys.periods().is_empty());
+    }
+
+    mod group_codes_proptests {
+        use proptest::collection;
+        use proptest::prelude::*;
+
+        use super::*;
+
+        /// ASCII・数値文字列（`"10" < "9"`の辞書順）・マルチバイト（UTF-8のバイト順と
+        /// コードポイント順が一致する）・空文字列を混ぜたラベル。
+        fn label() -> impl Strategy<Value = String> {
+            prop_oneof![
+                "[a-cA-C]{1,3}",
+                (0u32..120).prop_map(|n| n.to_string()),
+                prop::sample::select(vec![
+                    "東京", "大阪", "京都", "é", "e", "z", "Z", "", "😀", "ab"
+                ])
+                .prop_map(String::from),
+            ]
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            /// `GroupCodes`が、旧実装（`String`キーの`BTreeMap`）と同じキー順・同じ観測数・
+            /// 同じグループ内の観測順になる。コードは各行のキーに対応する。
+            #[test]
+            fn group_codes_agree_with_btreemap_grouping(
+                ids in collection::vec(label(), 1..80),
+            ) {
+                let codes = GroupCodes::from_ids(&ids);
+                let oracle = group_indices_by_key(&ids);
+
+                let oracle_keys: Vec<&str> = oracle.keys().copied().collect();
+                prop_assert_eq!(codes.keys(), oracle_keys.as_slice());
+                prop_assert_eq!(codes.nobs(), ids.len());
+                prop_assert_eq!(codes.n_groups(), oracle.len());
+                for (i, id) in ids.iter().enumerate() {
+                    prop_assert_eq!(&codes.keys()[codes.codes()[i]], id);
+                }
+                let expected_counts: Vec<usize> = oracle.values().map(Vec::len).collect();
+                prop_assert_eq!(codes.counts(), expected_counts.as_slice());
+                let actual: Vec<Vec<usize>> =
+                    codes.group_indices().iter().map(<[usize]>::to_vec).collect();
+                let expected: Vec<Vec<usize>> = oracle.into_values().collect();
+                prop_assert_eq!(actual, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn group_indices_matches_group_indices_by_key() {
+        // コード順・グループ内の観測順とも旧実装の`group_indices_by_key`と同じ。
+        let ids: Vec<String> = ["b", "a", "b", "c", "a", "b"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let expected: Vec<Vec<usize>> = group_indices_by_key(&ids).into_values().collect();
+        let actual: Vec<Vec<usize>> = GroupCodes::from_ids(&ids)
+            .group_indices()
+            .iter()
+            .map(<[usize]>::to_vec)
+            .collect();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn group_codes_handles_empty_input() {
+        let codes = GroupCodes::from_ids(&[]);
+        assert_eq!(codes.n_groups(), 0);
+        assert_eq!(codes.nobs(), 0);
+        assert_eq!(codes.group_indices().iter().count(), 0);
+    }
+
+    #[test]
+    fn validate_cluster_group_codes_rejects_single_cluster() {
+        assert_eq!(
+            validate_cluster_group_codes(&entities(&["a", "a"]), 2),
+            Err(CommonError::InsufficientClusters { g: 1 })
+        );
+        assert_eq!(
+            validate_cluster_group_codes(&entities(&["a", "b"]), 2),
+            Ok(2)
+        );
+    }
+
+    // ── quasi_demean_column ────────────────────────────────────────────────
+
+    /// `["a", "a", "b", "b", "b"]`のエンティティ列から整数コードを作るヘルパ。
+    fn entities(ids: &[&str]) -> GroupCodes {
+        let ids: Vec<String> = ids.iter().map(|s| s.to_string()).collect();
+        GroupCodes::from_ids(&ids)
+    }
+
+    /// エンティティID→θの組を、`entity`のコード順（キーの辞書順）の`Vec`に並べるヘルパ。
+    fn theta_for(entity: &GroupCodes, pairs: &[(&str, f64)]) -> Vec<f64> {
+        entity
+            .keys()
+            .iter()
+            .map(|key| {
+                pairs
+                    .iter()
+                    .find(|(k, _)| k == key)
+                    .map(|(_, v)| *v)
+                    .expect("test helper: theta pair for every key")
+            })
+            .collect()
     }
 
     #[test]
@@ -1020,7 +1480,7 @@ mod tests {
         // a: mean = (10 + 20) / 2 = 15、b: mean = (3 + 6 + 9) / 3 = 6。
         let entity = entities(&["a", "a", "b", "b", "b"]);
         let col = [10.0, 20.0, 3.0, 6.0, 9.0];
-        let theta = theta_map(&[("a", 1.0), ("b", 1.0)]);
+        let theta = theta_for(&entity, &[("a", 1.0), ("b", 1.0)]);
 
         let out = quasi_demean_column(&col, &entity, &theta);
 
@@ -1035,7 +1495,7 @@ mod tests {
         // θ_i = 0.0 なら何も引かない（プーリングOLS相当）。
         let entity = entities(&["a", "a", "b", "b"]);
         let col = [1.5, -2.0, 7.0, 0.25];
-        let theta = theta_map(&[("a", 0.0), ("b", 0.0)]);
+        let theta = theta_for(&entity, &[("a", 0.0), ("b", 0.0)]);
 
         let out = quasi_demean_column(&col, &entity, &theta);
 
@@ -1049,7 +1509,7 @@ mod tests {
         // b: mean = 6、 θ_b = 1.0 → 引く量 6.0
         let entity = entities(&["a", "a", "b", "b", "b"]);
         let col = [10.0, 20.0, 3.0, 6.0, 9.0];
-        let theta = theta_map(&[("a", 0.5), ("b", 1.0)]);
+        let theta = theta_for(&entity, &[("a", 0.5), ("b", 1.0)]);
 
         let out = quasi_demean_column(&col, &entity, &theta);
 
@@ -1064,7 +1524,7 @@ mod tests {
         // b: mean = (2 + 4 + 6) / 3 = 4.0。
         let entity = entities(&["a", "b", "b", "b"]);
         let col = [4.0, 2.0, 4.0, 6.0];
-        let theta = theta_map(&[("a", 1.0), ("b", 1.0)]);
+        let theta = theta_for(&entity, &[("a", 1.0), ("b", 1.0)]);
 
         let out = quasi_demean_column(&col, &entity, &theta);
 
@@ -1077,7 +1537,7 @@ mod tests {
         // 行ごとに所属エンティティの平均を引く。出力長・行順は入力どおり。
         let entity = entities(&["x", "y", "x", "y", "x"]);
         let col = [1.0, 100.0, 2.0, 200.0, 3.0];
-        let theta = theta_map(&[("x", 1.0), ("y", 1.0)]);
+        let theta = theta_for(&entity, &[("x", 1.0), ("y", 1.0)]);
 
         let out = quasi_demean_column(&col, &entity, &theta);
 
@@ -1090,16 +1550,16 @@ mod tests {
     fn quasi_demean_column_panics_on_length_mismatch() {
         let entity = entities(&["a", "b"]);
         let col = [1.0, 2.0, 3.0];
-        let theta = theta_map(&[("a", 1.0), ("b", 1.0)]);
+        let theta = theta_for(&entity, &[("a", 1.0), ("b", 1.0)]);
         let _ = quasi_demean_column(&col, &entity, &theta);
     }
 
     #[test]
-    #[should_panic(expected = "theta must contain every entity id")]
-    fn quasi_demean_column_panics_when_theta_missing_an_entity() {
+    #[should_panic(expected = "theta must have one value per entity group")]
+    fn quasi_demean_column_panics_when_theta_length_differs_from_groups() {
         let entity = entities(&["a", "a", "b"]);
         let col = [1.0, 2.0, 3.0];
-        let theta = theta_map(&[("a", 1.0)]); // "b" が欠けている
+        let theta = vec![1.0]; // "b" の分が欠けている
         let _ = quasi_demean_column(&col, &entity, &theta);
     }
 
@@ -1110,7 +1570,7 @@ mod tests {
         // `fe-spec.md`1章の分散ゼロ検証・`fe-spec.md`1章のsingleton検証は消費側 fe.rs の責務）。
         let entity = entities(&["a", "a", "a", "a"]);
         let col = [3.0, 5.0, 7.0, 9.0]; // mean = 6.0
-        let theta = theta_map(&[("a", 1.0)]);
+        let theta = theta_for(&entity, &[("a", 1.0)]);
 
         let out = quasi_demean_column(&col, &entity, &theta);
 
@@ -1127,155 +1587,10 @@ mod tests {
         // b: mean = 20、θ_b =  2.0 → 引く量 40   → col[i] - 40
         let entity = entities(&["a", "a", "b", "b"]);
         let col = [8.0, 12.0, 15.0, 25.0];
-        let theta = theta_map(&[("a", -0.5), ("b", 2.0)]);
+        let theta = theta_for(&entity, &[("a", -0.5), ("b", 2.0)]);
 
         let out = quasi_demean_column(&col, &entity, &theta);
 
         assert_eq!(out, vec![13.0, 17.0, -25.0, -15.0]);
-    }
-
-    // ── hausman_statistic ─────────────────────────────────────────────────
-
-    #[test]
-    fn hausman_statistic_is_zero_when_estimates_coincide() {
-        // β_FE == β_RE → d = 0 → H = 0、df = k、p_value = 1.0（H0を棄却しない）。
-        let beta_fe = [1.0, 2.0];
-        let beta_re = [1.0, 2.0];
-        let cov_fe = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
-        let cov_re = vec![vec![0.5, 0.0], vec![0.0, 0.5]];
-
-        let (stat, df, p_value) = hausman_statistic(&beta_fe, &cov_fe, &beta_re, &cov_re).unwrap();
-
-        assert_eq!(stat, 0.0);
-        assert_eq!(df, 2);
-        assert_eq!(p_value, 1.0);
-    }
-
-    #[test]
-    fn hausman_statistic_rejects_h0_for_large_divergent_estimates() {
-        // d = [1, -1]、cov_diff = diag(0.1, 0.1) → inv = diag(10, 10)。
-        // H = 10·1² + 10·(-1)² = 20。df = 2。
-        // χ²_2 の上側確率は閉形式 sf(x) = exp(-x/2) なので p = exp(-10) ≈ 4.5400e-5。
-        // `sf` を使うことでこの小さいp値が相対精度を保って得られる（`1 - cdf` だと
-        // cdf ≈ 1 で桁落ちする）。
-        let beta_fe = [2.0, -1.0];
-        let beta_re = [1.0, 0.0];
-        let cov_fe = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
-        let cov_re = vec![vec![0.9, 0.0], vec![0.0, 0.9]];
-
-        let (stat, df, p_value) = hausman_statistic(&beta_fe, &cov_fe, &beta_re, &cov_re).unwrap();
-
-        assert!((stat - 20.0).abs() < 1e-10, "stat = {stat}");
-        assert_eq!(df, 2);
-        // `sf` を直接使っていること（`1 - cdf` へ退行していないこと）: 返された `stat` に
-        // 対する χ²_2 の `sf` とビット単位で一致する（`1.0 - cdf(stat)` なら一致しない）。
-        assert_eq!(p_value, ChiSquared::new(2.0).unwrap().sf(stat));
-        // 数値の正しさ: χ²_2 の上側確率は閉形式 exp(-x/2) なので p ≈ exp(-10) ≈ 4.54e-5。
-        assert!(
-            (p_value - (-10.0_f64).exp()).abs() < 1e-12,
-            "p_value = {p_value}"
-        );
-    }
-
-    #[test]
-    fn hausman_statistic_full_quadratic_form_with_off_diagonal_covariance() {
-        // cov_diff = [[1.0, 0.5], [0.5, 1.0]] → inv = (4/3)·[[1, -0.5], [-0.5, 1]]。
-        // d = [1, 1] なので H = inv の全要素和 = 4/3。
-        let beta_fe = [3.0, 4.0];
-        let beta_re = [2.0, 3.0];
-        let cov_fe = vec![vec![2.0, 0.5], vec![0.5, 2.0]];
-        let cov_re = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
-
-        let (stat, df, _p_value) = hausman_statistic(&beta_fe, &cov_fe, &beta_re, &cov_re).unwrap();
-
-        assert!((stat - 4.0 / 3.0).abs() < 1e-10, "stat = {stat}");
-        assert_eq!(df, 2);
-    }
-
-    #[test]
-    fn hausman_statistic_single_coefficient() {
-        // k = 1: d = 2、cov_diff = [[1.0]] → H = 2·1·2 = 4。df = 1。χ²_1 の p ≈ 0.0455。
-        let (stat, df, p_value) =
-            hausman_statistic(&[3.0], &[vec![2.0]], &[1.0], &[vec![1.0]]).unwrap();
-
-        assert!((stat - 4.0).abs() < 1e-10, "stat = {stat}");
-        assert_eq!(df, 1);
-        assert!(
-            (p_value - 0.045_500_263_9).abs() < 1e-6,
-            "p_value = {p_value}"
-        );
-    }
-
-    #[test]
-    fn hausman_statistic_takes_absolute_value_when_variance_diff_is_indefinite() {
-        // cov_diff = [[-1.0, 0.0], [0.0, 0.5]]（非正定値だが可逆）→ inv = [[-1, 0], [0, 2]]。
-        // d = [1, 0] → 二次形式 = -1·1² = -1。有限標本でのPSD仮定崩れ。plm::phtest と
-        // 同じく abs() を適用し stat = 1.0 を返す。
-        let beta_fe = [2.0, 5.0];
-        let beta_re = [1.0, 5.0];
-        let cov_fe = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
-        let cov_re = vec![vec![2.0, 0.0], vec![0.0, 0.5]];
-
-        let (stat, df, p_value) = hausman_statistic(&beta_fe, &cov_fe, &beta_re, &cov_re).unwrap();
-
-        assert!((stat - 1.0).abs() < 1e-10, "stat = {stat}");
-        assert_eq!(df, 2);
-        assert!(
-            (p_value - ChiSquared::new(2.0).unwrap().sf(1.0)).abs() < 1e-12,
-            "p_value = {p_value}"
-        );
-    }
-
-    #[test]
-    fn hausman_statistic_errors_when_variance_diff_is_singular() {
-        // cov_fe == cov_re → cov_diff = 0 → 特異で逆行列が計算できない。
-        let beta_fe = [2.0, 1.0];
-        let beta_re = [1.0, 0.0];
-        let cov = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
-
-        let result = hausman_statistic(&beta_fe, &cov, &beta_re, &cov);
-
-        assert!(matches!(result, Err(CommonError::ComputationFailed(_))));
-    }
-
-    #[test]
-    #[should_panic(expected = "same length")]
-    fn hausman_statistic_panics_on_beta_length_mismatch() {
-        let _ = hausman_statistic(
-            &[1.0, 2.0],
-            &[vec![1.0, 0.0], vec![0.0, 1.0]],
-            &[1.0],
-            &[vec![1.0]],
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "at least one compared coefficient")]
-    fn hausman_statistic_panics_on_empty_beta() {
-        let _ = hausman_statistic(&[], &[], &[], &[]);
-    }
-
-    #[test]
-    #[should_panic(expected = "cov_fe must be a k x k matrix")]
-    fn hausman_statistic_panics_when_cov_fe_is_not_k_by_k() {
-        // k = 2 だが cov_fe が 1x1。
-        let _ = hausman_statistic(
-            &[1.0, 2.0],
-            &[vec![1.0]],
-            &[0.5, 1.0],
-            &[vec![1.0, 0.0], vec![0.0, 1.0]],
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "cov_re must be a k x k matrix")]
-    fn hausman_statistic_panics_when_cov_re_row_length_is_wrong() {
-        // k = 2、cov_re の行数は 2 だが 1 行の長さが 1。
-        let _ = hausman_statistic(
-            &[1.0, 2.0],
-            &[vec![1.0, 0.0], vec![0.0, 1.0]],
-            &[0.5, 1.0],
-            &[vec![1.0, 0.0], vec![0.0]],
-        );
     }
 }

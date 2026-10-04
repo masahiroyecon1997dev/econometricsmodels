@@ -52,7 +52,7 @@ jobs:
       - name: maturin develop
         run: uv run --locked --group test maturin develop
 
-      # パッケージ健全性（Issue #278）: import 時間の回帰ゲート。直前の
+      # パッケージ健全性: import 時間の回帰ゲート。直前の
       # maturin develop でビルドしたデバッグ拡張をそのまま使う（追加ビルド無し・
       # 実行数秒）。判定値は `import econometricsmodels` − `import polars` の差分で、
       # polars 分（import 時間の約 98%）を相殺し自前ラッパー + `_lib` の dlopen/init

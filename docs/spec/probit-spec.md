@@ -17,7 +17,7 @@ Probit固有の差分のみを記載する。
 
 ## 2. 結果構造体
 
-`ProbitResult`はフィールド構成が`LogitResult`と同一（`params`/`std_errors`/`z_stats`/.../`cov_type`/`method`）。
+`ProbitResult`はフィールド構成が`LogitResult`と同一（`params`/`std_errors`/`test_stats`/.../`cov_type`/`solver`）。
 `df_model=k-1`固定・`log_likelihood_null`の非入れ子性等、[`logit-spec.md`](./logit-spec.md)2章の設計
 判断をそのまま踏襲する。
 
@@ -45,12 +45,12 @@ Probit固有の差分のみを記載する。
 
 ### 3.2 最適化・収束判定
 
-`LogitEstimator::fit`と同じ設計（標準化空間での最適化、`method`に関わらず収束点のHessianを解析的に
+`LogitEstimator::fit`と同じ設計（標準化空間での最適化、`solver`に関わらず収束点のHessianを解析的に
 評価、`SeparationSuspected`による完全分離下のアンダーフロー対策を共有）。近似解析解
 （切片のみモデル、`Φ(θ̂)=ȳ`すなわち`θ̂=Φ⁻¹(ȳ)`）で検証している。
 
 初期値（warm start）・設計行列のランクチェックもLogitと共通（[`logit-spec.md`](./logit-spec.md)
-3.2節、Issue #279）。`method`に依らず最適化前に標準化空間の設計行列を列ピボットQRしてランク落ちを
+3.2節）。`solver`に依らず最適化前に標準化空間の設計行列を列ピボットQRしてランク落ちを
 `SingularDesignMatrix`で弾き、そのLPM最小二乗解にprobitのIRLS 1ステップ相当のスケール補正を施す
 （`w = φ(Φ⁻¹(p̄))`、`η₀ = Φ⁻¹(p̄)`）。切片のみモデルではこの初期値がそのまま厳密な近似解析解
 `Φ⁻¹(ȳ)`になる。従来のゼロベクトル初期値から変更（収束先・クロスチェック数値は不変）。
@@ -61,19 +61,19 @@ Probit固有の差分のみを記載する。
 速く飽和するため、Logitの`beta1=20`ではなく`beta1=10`を採用）。
 
 `tol`の意味論（`newton`は総和勾配に対する絶対閾値、`bfgs`/`lbfgs`は観測数`n`で正規化した
-「観測あたり平均勾配」基準、既定値は`newton`が`1e-6`・`bfgs`/`lbfgs`が`1e-8`、Issue #285で
+「観測あたり平均勾配」基準、既定値は`newton`が`1e-6`・`bfgs`/`lbfgs`が`1e-8`で
 実装済み）は`run_solver`共通の性質で、Probitも同様に該当する。詳細・実測値・小標本での
 精度検証テストへの影響は[`logit-spec.md`](./logit-spec.md)3.2節を参照。
 
-`bfgs`/`lbfgs`のline searchの評価回数バジェット（`BudgetedProblem`、Issue #342）も`run_solver`
+`bfgs`/`lbfgs`のline searchの評価回数バジェット（`BudgetedProblem`）も`run_solver`
 共通で、Probitも同様に保護される。詳細は[`logit-spec.md`](./logit-spec.md)3.2節を参照。
 
 ### 3.3 標準誤差
 
 `CovType`（`Classical`/`Opg`/`Hc0`/`Hc1`/`Cluster`）・計算式・エラー型（`SingularDesignMatrix`
 ＝最適化前のランクチェック／`SingularHessian`/`SingularOpgMatrix`/`MissingClusterColumn`/
-`InsufficientClusters`/`InsufficientClustersForInference`＝クラスター数`G <= 傾き係数の数q`、
-Issue #289）は[`logit-spec.md`](./logit-spec.md)
+`InsufficientClusters`/`InsufficientClustersForInference`＝クラスター数`G <= 傾き係数の数q`）は
+[`logit-spec.md`](./logit-spec.md)
 3.3節と共通（`opg_cov_params`/`sandwich_cov_params`/`cluster_cov_params`を共有インフラとしてそのまま
 再利用、Probit固有の新規計算は無い）。
 
@@ -102,8 +102,7 @@ MLEが`Φ(θ̂)=ȳ`を満たすため、この計算がリンク関数に依存�
 `predict(new_data=None)`は`p_i=Φ(x_i'θ)`をそのまま計算する（Logitの`Λ`を`Φ`に置き換えたのみ、
 out-of-sample対応も含めて設計は同一）。`pred_table`の計算本体はリンク関数を参照しないため
 `common.rs`の共有関数をそのまま使う（[`logit-spec.md`](./logit-spec.md)3.6節参照）。`pred_table`は
-in-sample限定のまま。`augment(new_data=None)`もLogitと完全に同一の設計（`"probability"`列、
-Issue #322項目4）。
+in-sample限定のまま。`augment(new_data=None)`もLogitと完全に同一の設計（`"predicted_probability"`列）。
 
 ### 3.7 engine_pybind: エラー変換
 
@@ -113,10 +112,12 @@ Issue #322項目4）。
 ### 3.8 テスト
 
 - 許容誤差はLogitと同じ基本方針（statsmodels主リファレンス`RTOL=1e-8`、Rクロスチェック
-  `RTOL=2e-4`）。個別に緩めた項目もLogitと同種の性質: 限界効果`std_err`（`RTOL=1e-3`）・p値
-  （`ATOL=5e-5`）に加え、Wooldridge実データ（`mroz`）のクラスターロバストSE（`cluster_col="city"`、
-  G=2）は`RTOL=2e-3`（合成データのクラスターケースより大きいが、実データ・クラスタ数境界・相関の
-  強い説明変数が重なる境界的なケースのため）。
+  `RTOL=1e-6`、`ATOL=1e-12`、実測最大~1.4e-7。R側参照値の生成方針もLogitと同じ）。個別の値を設定した項目:
+  信頼区間（下限/上限が0に近い境界での増幅、`RTOL=1e-5`、実測最大~1.8e-6）・p値（`ATOL=1e-7`）のみ
+  （`tests/_tolerances.py`の`probit_crosscheck`）。Wooldridge実データ（`mroz`）の
+  クラスターロバストSE（`cluster="city"`、G=2）は`G<=q`でクラスターロバスト共分散が退化し
+  `ValidationError`になるため成功パスのフィクスチャを持たず、許容誤差も設けない
+  （`test_probit_validation.py`でエラーを確認）。
 - **`cov_type="hc1"`/`"opg"`の既知の欠落はLogitと同様**（statsmodelsのdiscrete modelでの非対応、
   対処もRを主リファレンスにする点まで同じ、[`logit-spec.md`](./logit-spec.md)3.8節参照）。
 - **Rの`glm()`既定共分散が非正準リンクで「期待情報行列」を返す問題（重要）**: Rの`glm()`の
@@ -135,14 +136,14 @@ Issue #322項目4）。
 
 - `predict()`のout-of-sample対応は実装済み（Logitと同じ、[`logit-spec.md`](./logit-spec.md)4章）。
   `pred_table()`のout-of-sample対応は引き続き未実装。
-- `augment()`は実装済み（Logitと同じ、Issue #322項目4、3.6参照）。
+- `augment()`は実装済み（Logitと同じ、3.6参照）。
 - `start_params`（ユーザー指定初期値）
-- **`U_CLAMP`とNewton法（line searchなし）の相互作用は対応済み（Issue #316、
-  2026-09-13）**: `ProbitProblem::hessian`が使うHessianの重み`w=λᵢ(λᵢ+zᵢ)`は、
+- **`U_CLAMP`とNewton法（line searchなし）の相互作用は対応済み（2026-09-13）**:
+  `ProbitProblem::hessian`が使うHessianの重み`w=λᵢ(λᵢ+zᵢ)`は、
   以前は`λᵢ`（`clamped_pdf_cdf`でクランプ済みの引数から計算）と生の（非クランプの）
   `zᵢ`を混在させていた。この非対称性により、`|z|>U_CLAMP`かつ誤分類（`qᵢzᵢ`が
   大きく負）の観測で`w`が**負**になりうる（`λᵢ(λᵢ+zᵢ)>0`という大域凹性の前提が
-  数値的に破れる）ことをIssue #284の調査時（2026-09-12）に数値実験で確認していた。
+  数値的に破れる）ことを調査時（2026-09-12）に数値実験で確認していた。
   修正として、`linear_predictor_and_residual`が返す`zᵢ`を`λᵢ`と同じクランプ済み
   引数から`z̃ᵢ = qᵢ·clamp(qᵢzᵢ, -U_CLAMP, U_CLAMP)`として再構成し、`hessian`は
   この`z̃ᵢ`を使うように変更した。修正前は既存の境界値テストのデータ（切片のみ、
@@ -173,7 +174,7 @@ Issue #322項目4）。
   同程度に機能することを実測で確認済み（実害なし、2026-09-13）**: Probitはリンク関数の
   テイルの減衰特性がLogitと異なるため、同じ閾値がProbitでも適切かは未較正だった。
   この事後チェック（`run_solver`の`separation_norm_check: SeparationNormCheck`）は
-  `y∈{0,1}`のLogit/Probitのみ`Enabled`で、Tobitは`Disabled`（Issue #288）。
+  `y∈{0,1}`のLogit/Probitのみ`Enabled`で、Tobitは`Disabled`。
   - **実測内容**: 同一の`x1`/`x2`分布・同一の疑似乱数seedで、リンク関数のみ変えて
     分離度合い（`beta1`）を段階的に強めながら、収束点の標準化パラメータL2ノルムを
     比較した。既存のcalibration値での成功パス（probit `beta1=10`→norm≈7.5、logit

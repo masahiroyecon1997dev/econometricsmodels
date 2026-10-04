@@ -41,6 +41,7 @@ use thiserror::Error;
 use crate::error::CommonError;
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
+use crate::validation::MAX_ITER_LIMIT;
 
 /// 2SLS/GMMの計算過程で発生しうるエラー。
 ///
@@ -98,24 +99,42 @@ pub enum IvError {
     #[error("hac_lags must be in the range [0, n): got {hac_lags}, n={n}")]
     InvalidHacLags { hac_lags: i64, n: usize },
 
-    /// `gmm_iterations`が1未満。
+    /// `gmm_type="iterated"`の`gmm_max_iter`が3未満。
     ///
-    /// 当初は1（1-step GMM）・2（2-step efficient GMM）の2値のみを許容していたが、
-    /// 後に3以上（iterated GMM）・収束条件（`gmm_convergence`）ベースの反復に一般化した
-    /// （`gmm_convergence`指定時は`gmm_iterations`が最大反復回数＝安全弁として働く、
-    /// `gmm.rs`の`fit()`参照）。いずれのモードでも1以上であることは共通の前提のため、
-    /// この検証自体は残す。
-    #[error("gmm_iterations must be a positive integer: got {gmm_iterations}")]
-    InvalidGmmIterations { gmm_iterations: i64 },
+    /// 上限を初回推定を含めて数えるため、2回以下の反復は2段階GMMに収束判定を付けただけに
+    /// なり紛らわしい。2段階が欲しい場合は`gmm_type="two_step"`を使う。
+    #[error(
+        "gmm_max_iter must be an integer between 3 (counting the initial estimate) and {}, \
+         got {max_iter}; for fewer than 3 use gmm_type=\"two_step\" for a two-step GMM",
+        MAX_ITER_LIMIT
+    )]
+    InvalidGmmMaxIter { max_iter: i64 },
 
-    /// `gmm_convergence`（`Some`のとき）が0以下。
+    /// `gmm_type="iterated"`の`gmm_tol`が正の有限値でない（0以下・NaN・inf）。
     ///
     /// 収束判定の許容誤差として意味を持たないため。
-    #[error("gmm_convergence must be a positive number, got {gmm_convergence}")]
-    InvalidGmmConvergence { gmm_convergence: f64 },
+    #[error("gmm_tol must be a positive finite number, got {gmm_tol}")]
+    InvalidGmmTol { gmm_tol: f64 },
 
-    /// `raise_on_non_convergence=true`（既定）かつ`gmm_convergence`指定時、`gmm_iterations`回
-    /// （収束モードでの上限反復回数）以内に係数が収束しなかった。
+    /// `estimator="gmm"`かつ`gmm_weight_type=Cluster`で、クラスター数`g`がモーメント条件の重み行列
+    /// `S`（l×l、`l`は全操作変数`x_exog ++ instruments`の数）を非特異にするのに足りない。
+    ///
+    /// `S = Σ_g S_g S_g'`はG個のランク1行列の和なので`rank(S) ≤ g`。丁度識別（`l == k`）の
+    /// ときは`Z'ê = 0`（`Σ_g S_g = 0`）が成り立つため`rank(S) ≤ g-1`となり、`g <= l`で
+    /// 特異になる。過剰識別（`l > k`）では`Z'ê = 0`が成り立たないため`g < l`で特異になる。
+    /// `cov_type=Cluster`の`CommonError::InsufficientClustersForInference`（係数共分散の
+    /// Wald部分行列、閾値は`q`）とは対象・閾値が異なる別軸のためGMM固有のバリアントとする。
+    /// `g`・`l`は入力だけから判定できるため、行列計算を待たず`fit()`冒頭で弾く。
+    #[error(
+        "gmm_weight_type='cluster' requires at least l clusters (l+1 if exactly identified) for \
+         the moment weight matrix: got g={g} clusters for l={l} instruments (including \
+         exogenous regressors), but the cluster moment covariance has rank at most g \
+         (g-1 if exactly identified), so it is singular"
+    )]
+    InsufficientClustersForWeightMatrix { g: usize, l: usize },
+
+    /// `raise_on_non_convergence=true`（既定）かつ`gmm_type="iterated"`で、`gmm_max_iter`回
+    /// （初回推定を含む上限回数）以内に係数が収束しなかった。
     ///
     /// `nonlinear::common::MleError::NonConvergence`と同型のメッセージ・意味論
     /// （`raise_on_non_convergence=false`にすると`converged=false`のまま結果を返す）。
@@ -126,7 +145,7 @@ pub enum IvError {
     /// この差は意図的と判断）。
     #[error(
         "GMM failed to converge after {n_iter} iterations. Set raise_on_non_convergence=False \
-         to receive the result anyway, or increase gmm_iterations"
+         to receive the result anyway, or increase gmm_max_iter"
     )]
     GmmNonConvergence { n_iter: usize },
 
@@ -407,11 +426,11 @@ pub type FirstStageResult = (Vec<(String, OlsEstimator)>, Vec<(String, f64)>);
 /// （部分F統計量、`iv-spec.md`3.4節）を計算する。
 ///
 /// `TwoSlsEstimator::fit`（`two_sls.rs`、第二段階の予測値`x̂_endog`を得るために内部で
-/// 使う）・`engine_pybind`の`fit`（`method="gmm"`でも同じ診断情報を独立に提供するため、
+/// 使う）・`engine_pybind`の`fit`（`estimator="gmm"`でも同じ診断情報を独立に提供するため、
 /// `GmmEstimator`を経由せず直接呼ぶ）の両方から使う、2SLS/GMM間で真に共有されるロジック
 /// （`iv/CLAUDE.md`「2SLSとGMMの独立実装方針」参照——GMMはモーメント条件`Z'(y-Xβ)=0`を
 /// 直接解くため点推定自体には第一段階回帰を必要としないが、第一段階回帰・弱操作変数診断
-/// 自体は`method`に依存しない、素の（第二段階の推定方式によらない）診断情報のため、
+/// 自体は`estimator`に依存しない、素の（第二段階の推定方式によらない）診断情報のため、
 /// SEサンドイッチ計算（2SLS/GMMで数式が異なるため独立実装が必要）とは性質が異なる）。
 ///
 /// `cov_type`は第一段階`OlsEstimator::fit`にそのまま渡す（`two_sls.rs`の`fit()`冒頭
@@ -571,6 +590,167 @@ fn partial_f_statistic(
         };
 
     Ok(((ssr_r - ssr_u) / (q as f64)) / (ssr_u / (df_u as f64)))
+}
+
+/// `two_sls.rs`/`gmm.rs`の`mod proptests`が共有する、property-basedテスト用のケース生成器と
+/// 補助関数。`ols.rs`の`mod proptests`は手法ごとに生成器を持つが、IVは2SLSとGMMで同一の
+/// データ構造（内生変数・操作変数・構造誤差）を要するため、ここに一本化して二重定義を避ける。
+#[cfg(test)]
+pub(crate) mod proptest_support {
+    use super::*;
+    use proptest::collection;
+    use proptest::prelude::*;
+
+    const MAX_K_EXOG: usize = 3;
+    const MAX_K_ENDOG: usize = 2;
+    const MAX_EXTRA_INSTRUMENTS: usize = 2;
+
+    /// ランダム生成したIVデータ一式。`x_endog`は`z`（操作変数）の正の重み付き和＋第一段階誤差
+    /// で作るため、操作変数は事実上常に関連性を持ち（`SingularMatrix`にならない）、識別条件
+    /// `len(z) >= len(x_endog)`もstrategy側で保証される。
+    #[derive(Debug, Clone)]
+    pub(crate) struct IvCase {
+        pub(crate) y: Vec<f64>,
+        pub(crate) x_exog: Vec<Vec<f64>>,
+        pub(crate) x_endog: Vec<Vec<f64>>,
+        pub(crate) z: Vec<Vec<f64>>,
+        /// `x_exog`の列順序を入れ替えるための乱数キー（`x_exog`と同じ長さ）。
+        pub(crate) keys: Vec<u64>,
+        /// 操作変数の単位上三角変換に使う係数（`z.len() * z.len()`個、`[-1, 1)`）。
+        pub(crate) mix: Vec<f64>,
+    }
+
+    /// `just_identified=true`なら`len(z) == len(x_endog)`（丁度識別）、`false`なら過剰識別
+    /// （`len(z)`が`len(x_endog)`以上`+MAX_EXTRA_INSTRUMENTS`以下）も含めて生成する。
+    pub(crate) fn iv_case_strategy(just_identified: bool) -> impl Strategy<Value = IvCase> {
+        let max_extra = if just_identified {
+            0
+        } else {
+            MAX_EXTRA_INSTRUMENTS
+        };
+        (1..=MAX_K_EXOG, 1..=MAX_K_ENDOG, 0..=max_extra, 40..=80usize)
+            .prop_flat_map(|(k_exog, k_endog, extra, n)| {
+                let k_z = k_endog + extra;
+                (
+                    collection::vec(collection::vec(-10.0f64..10.0, n), k_exog),
+                    collection::vec(collection::vec(-10.0f64..10.0, n), k_z),
+                    collection::vec(collection::vec(-10.0f64..10.0, n), k_endog),
+                    collection::vec(-10.0f64..10.0, n),
+                    collection::vec(0.5f64..2.0, k_endog * k_z),
+                    collection::vec(any::<u64>(), k_exog),
+                    collection::vec(-1.0f64..1.0, k_z * k_z),
+                )
+            })
+            .prop_map(|(x_exog, z, v, u, w, keys, mix)| {
+                let n = u.len();
+                let k_z = z.len();
+                let x_endog: Vec<Vec<f64>> = v
+                    .iter()
+                    .enumerate()
+                    .map(|(j, vj)| {
+                        (0..n)
+                            .map(|i| {
+                                let signal: f64 = (0..k_z).map(|m| w[j * k_z + m] * z[m][i]).sum();
+                                signal + vj[i]
+                            })
+                            .collect()
+                    })
+                    .collect();
+                let y: Vec<f64> = (0..n)
+                    .map(|i| {
+                        let exog: f64 = x_exog.iter().map(|c| c[i]).sum();
+                        let endog: f64 = x_endog.iter().map(|c| c[i]).sum();
+                        1.0 + exog + endog + u[i]
+                    })
+                    .collect();
+                IvCase {
+                    y,
+                    x_exog,
+                    x_endog,
+                    z,
+                    keys,
+                    mix,
+                }
+            })
+    }
+
+    impl IvCase {
+        pub(crate) fn nobs(&self) -> usize {
+            self.y.len()
+        }
+
+        /// 元の`x_exog`列インデックスを`keys`の昇順に並べ替えた順序（`keys`が全て等しい場合は
+        /// 恒等順）。
+        pub(crate) fn shuffled_order(&self) -> Vec<usize> {
+            let mut order: Vec<usize> = (0..self.x_exog.len()).collect();
+            order.sort_by_key(|&j| self.keys[j]);
+            order
+        }
+
+        pub(crate) fn identity_order(&self) -> Vec<usize> {
+            (0..self.x_exog.len()).collect()
+        }
+
+        /// 操作変数`z_j`を`z_j + Σ_{m>j} mix[j,m] * z_m`に置き換えた列（単位上三角行列を右から
+        /// 掛けるので必ず可逆で、`z`の張る空間は変わらない）。
+        pub(crate) fn mixed_instruments(&self) -> Vec<Vec<f64>> {
+            let k_z = self.z.len();
+            (0..k_z)
+                .map(|j| {
+                    (0..self.nobs())
+                        .map(|i| {
+                            self.z[j][i]
+                                + ((j + 1)..k_z)
+                                    .map(|m| self.mix[j * k_z + m] * self.z[m][i])
+                                    .sum::<f64>()
+                        })
+                        .collect()
+                })
+                .collect()
+        }
+
+        /// `x_exog`を`order`の順に、操作変数を`instruments`に差し替え、`y`を`y`に差し替えた
+        /// `IvInput`を作る（切片あり）。列名は元のインデックスに紐づく（`x{j}`/`d{j}`/`z{j}`）
+        /// ため、順序を変えても名前で係数を突き合わせられる。
+        pub(crate) fn build_input(
+            &self,
+            order: &[usize],
+            instruments: &[Vec<f64>],
+            y: &[f64],
+        ) -> Result<IvInput, IvError> {
+            let x_exog: Vec<Vec<f64>> = order.iter().map(|&j| self.x_exog[j].clone()).collect();
+            let x_exog_names: Vec<String> = order.iter().map(|&j| format!("x{j}")).collect();
+            let x_endog_names: Vec<String> =
+                (0..self.x_endog.len()).map(|j| format!("d{j}")).collect();
+            let z_names: Vec<String> = (0..instruments.len()).map(|j| format!("z{j}")).collect();
+            IvInput::from_columns(
+                y,
+                &x_exog,
+                x_exog_names,
+                &self.x_endog,
+                x_endog_names,
+                instruments,
+                z_names,
+                true,
+                "y".to_string(),
+            )
+        }
+
+        /// 元の順序・元の`z`・元の`y`での`IvInput`。
+        pub(crate) fn input(&self) -> Result<IvInput, IvError> {
+            self.build_input(&self.identity_order(), &self.z, &self.y)
+        }
+    }
+
+    /// 相対誤差ベース＋絶対誤差フロア（`ols.rs`の`assert_approx_eq`と同じ`RTOL=1e-6`）。
+    pub(crate) fn assert_approx_eq(actual: f64, expected: f64, msg: &str) {
+        let tol = 1e-6 * expected.abs().max(1.0);
+        let diff = (actual - expected).abs();
+        assert!(
+            diff <= tol,
+            "{msg}: actual={actual}, expected={expected}, diff={diff}, tol={tol}"
+        );
+    }
 }
 
 #[cfg(test)]

@@ -20,33 +20,42 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
   | `cov_type` | `str` | `"classical"` | `"classical"` / `"hc0"`〜`"hc3"` / `"cluster"` / `"hac"`（大小無視） |
   | `include_intercept` | `bool` | `True` | `True`なら設計行列の先頭に定数列を自動追加する |
   | `confidence_level` | `float` | `0.95` | 信頼区間の信頼水準、`(0, 1)` |
-  | `cluster_col` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名（`data`内の列） |
-  | `hac_lags` | `int \| None` | `None` | `cov_type="hac"`時のラグ数。`None`なら`L=floor(4*(n/100)^(2/9))`で自動計算 |
-  | `time_col` | `str \| None` | `None` | `cov_type="hac"`時の時系列順序列。`None`なら`data`の行順を使用 |
+  | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名（`data`内の列）。他の`cov_type`で指定すると`ValidationError` |
+  | `hac_lags` | `int \| None` | `None` | `cov_type="hac"`時のラグ数。`None`なら`L=floor(4*(n/100)^(2/9))`で自動計算。他の`cov_type`で指定すると`ValidationError` |
+  | `hac_time` | `str \| None` | `None` | `cov_type="hac"`時の時系列順序列（**必須**。未指定は`ValidationError`）。列の値は全行で互いに異なること（同値が1組でもあれば`ValidationError`）。他の`cov_type`で指定すると`ValidationError` |
 
 - `include_intercept=True`のとき`x`に`"const"`列があるとエラー（自動追加する定数項と衝突）。
   `x`に自前の定数列を含める重複検出は行わず、生じる多重共線性は`SingularMatrix`に委ねる。
-- 欠損値（NaN/無限大）は常にエラー。listwise deletionはしない。
+- 欠損値（null・NaN/無限大）は常にエラー。listwise deletionはしない。理由と全手法共通のエラー条件は公開ページ[`docs/guide/validation.md`](../guide/validation.md)を参照。
 - 検定分布は**t分布**（正規分布ではない）。`cov_type`がHC系/clusterでもF検定はロバストWald検定に切り替える。
 - `confidence_level`は`fit()`時に一度だけ使用し、結果に固定して含める（再計算用の可変引数は提供しない）。
 
 ## 2. 結果構造体
 
 `OLSResult`（`#[pyclass]`、`skip_from_py_object`）が公開する配列＋名前リスト:
-`params` / `std_errors` / `t_stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` /
-`residuals` / `dep_var_name` / `n_obs` / `cov_type`（実際に使われた種別の小文字文字列） /
-`r_squared` / `r_squared_adj` / `f_statistic` / `f_p_value` / `log_likelihood` / `aic` / `bic`。
+`params` / `std_errors` / `test_stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` /
+`residuals` / `dep_var_name` / `n_obs` / `cov_type`（実際に使われた種別の小文字文字列） / `hac_lags_used` /
+`r_squared` / `adj_r_squared` / `f_statistic` / `f_p_value` / `f_df_num` / `f_df_denom` /
+`df_resid` / `df_model` / `log_likelihood` / `aic` / `bic`。
 
+- `df_resid = n - k`、`df_model`は定数項を除く傾き係数の数。`f_df_num = df_model`、`f_df_denom`は
+  検定に使った自由度（`df_resid`、`cov_type="cluster"`のときだけ`G-1`）。傾き係数が無く
+  `f_statistic`がNaNのときは`f_df_num`/`f_df_denom`も`None`。
+
+- `hac_lags_used`: `cov_type="hac"`のとき実際に使われたラグ数`L`（`hac_lags`明示指定ならその値、
+  未指定なら経験則で自動計算した値。engineの`resolve_hac_lags`の戻り値をそのまま保持する）。
+  `hac`以外は`None`。入力`hac_lags`（`None`のまま）とは別フィールドで、ユーザー指定値は書き換えない。
 - `conf_int`は`conf_lower`/`conf_upper`の2配列に分割（engine内部表現・pyo3実装の簡潔さを優先）。
 - `k×kの分散共分散行列（cov_params）はPython側に公開しない`。`OlsEstimator`自体は非公開
   フィールドとして保持する（クレート内の他系統からの部分Wald検定の再利用のため、
-  `engine/src/linear/CLAUDE.md`参照。Issue #164でIVのWu-Hausman検定用に追加するまでは
+  `engine/src/linear/CLAUDE.md`参照。IVのWu-Hausman検定用に追加するまでは
   `fit()`内のローカル変数として使い切っていた）が、`engine_pybind`側に公開する`OLSResult`
   には引き続き含めない。
 - `summary()`（テキスト整形）・DataFrame版の`coef_table()`/`conf_int()`は作らない
-  （economiconのGUIエンジンという用途上、テキスト表示・対話的操作を前提にしないため）。
+  （プログラムから呼び出して使う設計方針上、テキスト表示・対話的操作を前提に
+  しないため）。
 - python_package層（`OLSResults`）:
-  - `params`/`std_errors`/`t_stats`/`p_values`/`conf_int`: 係数名→値の`dict`（O(1)取り出し用）。
+  - `params`/`std_errors`/`test_stats`/`p_values`/`conf_int`: 係数名→値の`dict`（O(1)取り出し用）。
   - `coef_table()`: 行指向`list[dict]`（REST APIレスポンスにそのまま使える形）。
   - `residuals`: `list[float]`をそのまま素通し。
 
@@ -91,9 +100,21 @@ $$
 - ラグ数`L`: `hac_lags`指定時はその値（`0 <= L < n`を検証）、未指定時は経験則
   `L = floor(4*(n/100)^(2/9))`で自動計算（EViews等でも使われるデータ非依存の式。完全な
   データ依存の自動バンド幅選択は主リファレンスのstatsmodelsに同等機能がなく未実装）。
-- `time_col`未指定なら`data`の行順を時系列順とみなす。指定時は昇順ソートしたインデックスで
+- `hac_time`は必須（未指定は`ValidationError`）。行順を時系列順とみなす暗黙の既定は置かない:
+  データが時系列順に並んでいなくてもエラーにならず、時系列順のHACに見える誤った結果が黙って
+  返るため、時間順は常に列で明示させる（行順がそのまま時間順なら、`df.with_row_index("t")`
+  等で行番号の列を足して渡す。statsmodelsやRの`sandwich`は行順を使い時点列を取らない、
+  意図的な差）。`engine`の`CovType::Hac.time_order`も`Option`ではなく必須の`Vec<f64>`で、
+  行順を既定とする経路はengineにも無い。昇順ソートしたインデックスで
   ラグ付き自己共分散を計算する（`OlsInput`自体は並べ替えない。Python側に返す残差配列と
   元DataFrameの行対応を保つため）。
+- `hac_time`の値は全行で互いに異なることを要求する。同値があると順序が定まらず、engineの
+  ソートは同値の行を行順で黙って並べてしまい、時系列順のHACに見える結果を返すため、
+  `engine_pybind`が`ValidationError`にする（全値同一も同じ）。比較は元のdtypeの値で行い
+  （整数・`Date`・`Datetime`・`Decimal`は物理表現の`i128`、浮動小数は値。`Boolean`は値が2種類しかなく
+  順序が定まらないため、dtypeの時点で拒否する）、engineには
+  値ではなく昇順の位置（順位）を渡す。f64へ変換すると2^53超の整数やナノ秒の`Datetime`が
+  同値に潰れて、この検査をすり抜けるため。
 - **パフォーマンス上の罠**: `k×k`という小さい出力サイズの行列積で、faer既定の並列実行は
   ディスパッチオーバーヘッドが計算本体を上回り逐次より遅くなる（実測n=10,000,k=2で6倍悪化）。
   `hac_cov_params`内でのみ`Par::Seq`を明示指定して回避している。他手法で同様の小さい行列の
@@ -111,7 +132,7 @@ $$
 - t検定・信頼区間・F検定の自由度は`cov_type="cluster"`のときのみ`n-k`ではなく**`G-1`**に切り替える
   （statsmodelsの既定`df_correction=True`、計量経済学の標準的慣行）。`df_resid`自体（σ̂²・調整済み
   R²・AIC/BIC）は常に`n-k`のまま。
-- **`G ≤ q`の境界（`ValidationError`、Issue #289）**: $\hat S = \sum_g S_g S_g'$は、クラスター
+- **`G ≤ q`の境界（`ValidationError`）**: $\hat S = \sum_g S_g S_g'$は、クラスター
   寄与スコアの総和がゼロ（正規方程式$X'e = 0$）になるため`rank(Ŝ) ≤ G - 1`。F検定が使う`q×q`
   （`q = k - k_constant` = 傾き係数の数）部分行列は`G ≤ q`のとき構造的に特異になる（`G = q`
   ちょうども数学的には常に特異。`rank(Ŝ) ≤ G`という緩い上限で考えると`G = q`は「境界」に見えるが、
@@ -153,7 +174,7 @@ $$
   信頼区間・予測区間を追加する場合にキーを追加できる形にするため）。キー名は`"predicted"`
   （学習データ・新規データいずれの場合も同じキー。当初`"fitted"`固定だったが、
   new_data指定時（out-of-sample）に対して統計学の慣習上不正確という指摘を受け、
-  Issue #309で`"predicted"`に統一した。統計学の慣習では学習データに対する予測を
+  `"predicted"`に統一した。統計学の慣習では学習データに対する予測を
   「fitted values」、新規データに対する予測を「predicted values」と呼び分けるが、
   本APIは`new_data`の有無で戻り値の型・構造を変えない設計方針のため、キー名も
   呼び分けず`"predicted"`で統一する）。
@@ -163,7 +184,7 @@ $$
 - エラーハンドリングは列不足・型不一致・NaN/無限大とも既存の`ValidationError`の枠組みをそのまま使う
   （専用のエラーバリアントは新設しない）。
 
-### 3.5 `augment()`（Issue #295）
+### 3.5 `augment()`
 
 - `OLSResults.augment(new_data: pl.DataFrame | None = None) -> pl.DataFrame`。
   `new_data`の意味・エラーハンドリングは`predict()`と完全に同じ。戻り値が
@@ -193,13 +214,14 @@ $$
   （`column_extraction::extract_f64_column`）→`engine`（`OlsInput::from_columns`）が
   `faer::Mat`を組み立てる。この2回のコピー自体は許容する（QR分解本体のコストに対して無視できる）。
 - `engine`はpolars/PyO3を知らない。列名が要る検証（`y`/`x`重複、`"const"`衝突、`x`空リスト）は
-  `engine_pybind`側の責務。`confidence_level`範囲・`cluster_col`未指定は`engine`側が検知するため
+  `engine_pybind`側の責務。`confidence_level`範囲・`cluster`未指定は`engine`側が検知するため
   `engine_pybind`側で重複チェックしない。
 - `engine::linear::common::LeastSquaresError` → `PyErr`対応表:
 
   | `LeastSquaresError` | Python例外 |
   |---|---|
   | `Common(DimensionMismatch \| InsufficientObservations \| MissingClusterColumn \| InvalidConfidenceLevel \| InsufficientClusters \| InsufficientClustersForInference \| NoRegressors)` | `ValidationError` |
+  | `WeightDimensionMismatch \| NonPositiveWeight`（WLS） | `ValidationError` |
   | `InvalidHacLags` | `ValidationError` |
   | `SingularMatrix` | `ComputationError` |
   | `Common(ComputationFailed)` | `ComputationError` |
@@ -207,27 +229,30 @@ $$
   `impl From<LeastSquaresError> for PyErr`は書けない（`LeastSquaresError`・`PyErr`ともこのクレート
   外定義の型でorphan ruleに抵触）。関数`least_squares_error_to_pyerr`として実装し
   `.map_err(...)?`で変換する。
-- バージョン固定: `pyo3=0.29.2` / `polars=0.55.2` / `pyo3-polars=0.28.0`（すべて`=`固定、Issue #49で更新）。
+- バージョン固定: `pyo3=0.29.2` / `polars=0.55.2` / `pyo3-polars=0.28.0`（すべて`=`固定）。
   `pyo3-polars=0.28.0`が`pyo3="^0.29"`・`polars="^0.55.1"`を要求するための組み合わせ。互換性は数字ではなく
   `pyo3-polars`が使う`polars_ffi::version_0`という安定版FFIプロトコルで担保される。
 
 ### 3.7 テスト
 
-- 許容誤差: classical/HC0-3/cluster/係数はRとの実測で相対誤差1e-14程度のため`RTOL_STRICT=1e-8`。
-  HACはRとの`prewhite`/`adjust`慣習差により実測0.4%程度のため`RTOL_HAC=1e-2`。
-- `tests/linear/` に4ファイルで役割分担する（`refactoring-candidates-2.md`項目68）:
+- 許容誤差: classical/HC0-3/cluster/係数はRとの実測で相対誤差1e-14程度のため`rtol_strict=1e-8`（`tests/_tolerances.py`の`ols_crosscheck`）。
+  HACはRとの`prewhite`/`adjust`慣習差により実測0.4%程度のため`rtol_hac=1e-2`。
+- `tests/linear/` に4ファイルで役割分担する:
   `test_ols_api.py`（成功パスの構造・API・オプション反映・`predict()`/`augment()`）/
   `test_ols_validation.py`（`ValidationError`/`ComputationError`パス）/
   `test_ols_reference.py`（statsmodels主リファレンスとの数値照合、`ols.json`＋ライブ照合）/
   `test_ols_crosscheck.py`（R独立実装、`ols_crosscheck.json`）。一般的なテスト方針は
   `.claude/rules/testing-policy.md`を参照。
+- `hac_lags_used`（自動選択ラグ数）は、`tests/linear/test_ols_api.py`が複数の標本サイズ
+  （境界`n=51200`を含む）でPython側の独立実装`benchmark.common.hac_auto_lag`と直接比較する
+  （Rust側`resolve_hac_lags`との式の一致の直接検証。WLS・IV・FE/REのDKも各`*_api.py`で同様）。
 - pyfixestはOLSの正確性検証には使わない（HC2/HC3にHC1用の小標本補正を誤って適用する既知の
   実装バグがあるため）。性能比較専用（[`../performance/ols.md`](../performance/ols.md)）。
 - 実データセット: `wage1`（`lwage ~ educ + exper + tenure`）・
   `gpa2`（`colgpa ~ sat + hsperc + tothrs`）のWooldridgeデータセット2つ、
   classical/HC0-3で主リファレンス（statsmodels、`test_ols_reference.py`）・
   独立実装（R、`test_ols_crosscheck.py`）の両方と照合する（従来Rクロスチェック側にしか
-  無かった実データ検証をstatsmodels側にも追加、test-coverage-candidates.md項目13・33）。
+  無かった実データ検証をstatsmodels側にも追加）。
   `wage1`はさらに地域ダミー（northcen/south/west、基準northeast）から合成したregion列
   でのクラスターロバストSE（実データでのグループ列、4グループ・不均衡サイズ）も両方で検証する。
 - `engine`側は上記の固定シナリオ単体テストに加え、property-basedテスト（`proptest`、
@@ -241,7 +266,7 @@ $$
   （`test_cluster_std_error_exceeds_classical_under_true_intra_cluster_correlation`）。
   既存のクラスター系テストは誤差i.i.d.なデータに疑似グループラベルを後付けしたもので、
   「クラスターロバストSEが真のクラスター内相関がある状況で意図通り機能するか」は未検証
-  だった（旧test-coverage-candidates.md項目12）。説明変数・誤差の両方にクラスター内相関を
+  だった。説明変数・誤差の両方にクラスター内相関を
   持たせたMoulton型DGPを使い、クラスターSEが古典的SEより明確に大きくなることを確認する
   （seed固定、実測レンジに対し十分なマージンを持たせた閾値で判定）。リファレンス実装との
   数値比較ではなく本実装内で完結した健全性チェックのため、`freeze.py`の固定CSVパイプラインは
@@ -254,7 +279,7 @@ classical/HC1/clusterはstatsmodels/pyfixest以上に高速、HACも大規模デ
 メモリはengineが一貫して最小。詳細な実測データは[`../performance/ols.md`](../performance/ols.md)参照。
 faerのグローバル並列度は`engine::parallelism::ensure_serial()`で常時`Par::Seq`に固定
 している（tall-skinnyな設計行列では暗黙の全コア並列化が高速化せず、多コア機・負荷下で
-不安定になったため。Issue #283、`engine/src/linear/CLAUDE.md`「faerのグローバル並列度」）。
+不安定になったため。`engine/src/linear/CLAUDE.md`「faerのグローバル並列度」）。
 
 ## 4. 未実装・未対応
 

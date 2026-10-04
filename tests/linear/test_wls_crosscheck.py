@@ -18,6 +18,10 @@ F統計量・F検定p値も検証する（`test_ols_crosscheck.py`と同じ方�
 HAC/autocorrelatedで裾確率がゼロ近傍に潰れるため絶対誤差フロア（`ATOL_P_VALUE`）
 で比較する。
 
+`include_intercept=False`（切片なし）・`confidence_level`非既定は、baseline
+シナリオのみで全cov_type（classical/HC0-3/cluster/HAC）と組み合わせてRとも
+数値照合する（`test_ols_crosscheck.py`と同じ方針の横展開）。
+
 Note:
     合成データはフィクスチャ生成時と同じ入力データを、`tests/
     fixtures/benchmarks/data/`に固定済みのCSVから読む（重み列`weight`も
@@ -36,16 +40,22 @@ import polars as pl
 import pytest
 from _assertions import assert_close, assert_dict_close
 from _constants import DATA_DIR
-from _helpers import load_wooldridge_dataset, with_cluster_groups
+from _helpers import (
+    ROW_TIME,
+    load_wooldridge_dataset,
+    with_cluster_groups,
+    with_row_time,
+)
 from _tolerances import TOLERANCES
 from econometricsmodels import WLS, WLSOptions
 
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.linear.fixtures.generate_wls_crosscheck_fixtures import (
-    NUMERIC_SCENARIOS as SYNTHETIC_SCENARIOS,
+    CONFIDENCE_LEVEL_NON_DEFAULT,
+    WOOLDRIDGE_COV_TYPES,
 )
 from benchmark.linear.fixtures.generate_wls_crosscheck_fixtures import (
-    WOOLDRIDGE_COV_TYPES,
+    NUMERIC_SCENARIOS as SYNTHETIC_SCENARIOS,
 )
 from benchmark.linear.fixtures.generate_wls_fixtures import _add_age_bin
 
@@ -89,7 +99,7 @@ def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
     """
     _assert_scalar_close(res.r_squared, ref["r_squared"], f"{label}/r_squared")
     _assert_scalar_close(
-        res.r_squared_adj, ref["r_squared_adj"], f"{label}/r_squared_adj"
+        res.adj_r_squared, ref["adj_r_squared"], f"{label}/adj_r_squared"
     )
     _assert_scalar_close(res.aic, ref["aic"], f"{label}/aic")
     _assert_scalar_close(res.bic, ref["bic"], f"{label}/bic")
@@ -102,7 +112,9 @@ def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
     _assert_scalar_close(
         res.f_p_value, ref["f_p_value"], f"{label}/f_p_value", rtol=rtol
     )
-    _assert_close(res.t_stats, ref["t_stats"], f"{label}/t_stats", rtol=rtol)
+    _assert_close(
+        res.test_stats, ref["test_stats"], f"{label}/test_stats", rtol=rtol
+    )
     _assert_close(
         res.p_values,
         ref["p_values"],
@@ -129,7 +141,9 @@ def test_synthetic_matches_r(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
     options = WLSOptions(cov_type=cov_type)
-    res = WLS(df, y="y", x=x_cols, weight="weight", options=options).fit()
+    res = WLS(
+        with_row_time(df), y="y", x=x_cols, weight="weight", options=options
+    ).fit()
 
     ref = crosscheck["synthetic"][scenario][cov_type]["r"]
     label = f"{scenario}/{cov_type}/R"
@@ -144,9 +158,13 @@ def test_cluster_matches_r(crosscheck):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, 10)
-    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = WLSOptions(cov_type="cluster", cluster="cluster_group")
     res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
     ).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["cluster"]["r"]
@@ -165,9 +183,13 @@ def test_cluster_imbalanced_matches_r(crosscheck):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     groups = imbalanced_cluster_groups(df.height)
     df = df.with_columns(pl.Series("cluster_group", groups))
-    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = WLSOptions(cov_type="cluster", cluster="cluster_group")
     res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
     ).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["cluster_imbalanced"]["r"]
@@ -183,12 +205,14 @@ def test_cluster_g2_matches_r(crosscheck):
     `rank(Ŝ)≤G-1`のためロバストWald検定のq×q部分行列が構造的に特異になり、
     `fit()`冒頭のバリデーションが`ValidationError`で弾く（成功パスにならない。
     `test_wls_validation.py::test_cluster_count_at_most_slopes_raises_validation_error`
-    参照、Issue #289）。
+    参照）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
     df = with_cluster_groups(df, 2)
-    options = WLSOptions(cov_type="cluster", cluster_col="cluster_group")
-    res = WLS(df, y="y", x=["x1"], weight="weight", options=options).fit()
+    options = WLSOptions(cov_type="cluster", cluster="cluster_group")
+    res = WLS(
+        with_row_time(df), y="y", x=["x1"], weight="weight", options=options
+    ).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["cluster_g2"]["r"]
     _assert_close(res.params, ref["coef"], "cluster_g2/R coef")
@@ -196,8 +220,38 @@ def test_cluster_g2_matches_r(crosscheck):
     _assert_fit_stats_close(res, ref, "cluster_g2/R", rtol=RTOL_STRICT)
 
 
+@pytest.mark.parametrize(
+    "scenario", ["high_condition_number", "moderate_multicollinearity"]
+)
+def test_cluster_ill_conditioned_matches_r(crosscheck, scenario):
+    """悪条件・多重共線性シナリオとクラスターロバストSEの組み合わせ（OLSの
+    同種ケース相当）。
+
+    クラスターは従来`baseline`シナリオのみで、他のcov_typeでは全シナリオ検証
+    済みの悪条件・多重共線性との組み合わせが未検証だった。均等な疑似グループ
+    （行番号%10）のみ確認する（グルーピングパターン自体の網羅性は
+    `test_cluster_matches_r`等`baseline`シナリオで確認済み）。
+    """
+    df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
+    df = with_cluster_groups(df, 10)
+    options = WLSOptions(cov_type="cluster", cluster="cluster_group")
+    res = WLS(
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
+    ).fit()
+
+    ref = crosscheck["synthetic"][scenario]["cluster"]["r"]
+    label = f"{scenario}/cluster/R"
+    _assert_close(res.params, ref["coef"], f"{label} coef")
+    _assert_close(res.std_errors, ref["se"], f"{label} se")
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
+
+
 def test_weight_in_x_matches_r(crosscheck):
-    """`weight`と同じ列を`x`にも含める成功パス（Issue #277）。
+    """`weight`と同じ列を`x`にも含める成功パス。
 
     列名の重複が許容されることの数値的な確認が目的で、cov_type間の
     挙動差を検証する趣旨ではないためclassicalのみ
@@ -206,7 +260,7 @@ def test_weight_in_x_matches_r(crosscheck):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     options = WLSOptions(cov_type="classical")
     res = WLS(
-        df,
+        with_row_time(df),
         y="y",
         x=["x1", "x2", "x3", "weight"],
         weight="weight",
@@ -226,15 +280,155 @@ def test_hac_matches_r(crosscheck):
     """
     df = pl.read_csv(DATA_DIR / "synthetic_autocorrelated.csv")
     entry = crosscheck["synthetic"]["autocorrelated"]["hac"]
-    options = WLSOptions(cov_type="hac", hac_lags=entry["hac_lag"])
+    options = WLSOptions(
+        cov_type="hac", hac_lags=entry["hac_lag"], hac_time=ROW_TIME
+    )
     res = WLS(
-        df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
     ).fit()
 
     ref = entry["r"]
     _assert_close(res.params, ref["coef"], "hac/R coef")
     _assert_close(res.std_errors, ref["se"], "hac/R se", rtol=RTOL_HAC)
     _assert_fit_stats_close(res, ref, "hac/R", rtol=RTOL_HAC)
+
+
+# ── include_intercept=False・confidence_level非既定（凍結フィクスチャ、
+# baselineシナリオ、OLS側の横展開） ──────────────────────────────
+# クラスターも含めるがHACのみ小標本補正の慣習差があるため専用テストで
+# RTOL_HACを使う（`test_hac_matches_r`と同じ方針）。
+NO_INTERCEPT_AND_CONFIDENCE_LEVEL_STRICT_COV_TYPES = [
+    *NON_HAC_COV_TYPES,
+    "cluster",
+]
+
+
+def _options_kwargs_for_cov_type(df: pl.DataFrame, cov_type: str):
+    """`cov_type="cluster"`のときのみ疑似グループ列を付け、
+    `cluster`を返す。それ以外は`cluster=None`。
+    """
+    if cov_type == "cluster":
+        return with_cluster_groups(df, 10), {"cluster": "cluster_group"}
+    return df, {"cluster": None}
+
+
+@pytest.mark.parametrize(
+    "cov_type", NO_INTERCEPT_AND_CONFIDENCE_LEVEL_STRICT_COV_TYPES
+)
+def test_no_intercept_matches_r(crosscheck, cov_type):
+    """`include_intercept=False`が、cov_typeによらずWLSでもRと一致すること
+    （baselineシナリオ、classical/HC0-3/cluster、OLS側の横展開）。HACのみ
+    `test_no_intercept_hac_matches_r`で別途確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    df, kwargs = _options_kwargs_for_cov_type(df, cov_type)
+    options = WLSOptions(include_intercept=False, cov_type=cov_type, **kwargs)
+    res = WLS(
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
+    ).fit()
+
+    ref = crosscheck["synthetic"]["baseline"]["no_intercept"][cov_type]["r"]
+    label = f"no_intercept/{cov_type}/R"
+    assert res.param_names == ["x1", "x2", "x3"]
+    _assert_close(res.params, ref["coef"], f"{label} coef")
+    _assert_close(res.std_errors, ref["se"], f"{label} se")
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
+
+
+def test_no_intercept_hac_matches_r(crosscheck):
+    """`include_intercept=False`のHAC標準誤差。フィクスチャ生成時の自動ラグ
+    （`hac_lag`）をそのまま使う（`test_hac_matches_r`と同じ方針）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    entry = crosscheck["synthetic"]["baseline"]["no_intercept"]["hac"]
+    options = WLSOptions(
+        include_intercept=False,
+        cov_type="hac",
+        hac_lags=entry["hac_lag"],
+        hac_time=ROW_TIME,
+    )
+    res = WLS(
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
+    ).fit()
+
+    ref = entry["r"]
+    label = "no_intercept/hac/R"
+    assert res.param_names == ["x1", "x2", "x3"]
+    _assert_close(res.params, ref["coef"], f"{label} coef")
+    _assert_close(res.std_errors, ref["se"], f"{label} se", rtol=RTOL_HAC)
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_HAC)
+
+
+@pytest.mark.parametrize(
+    "cov_type", NO_INTERCEPT_AND_CONFIDENCE_LEVEL_STRICT_COV_TYPES
+)
+def test_confidence_level_matches_r(crosscheck, cov_type):
+    """confidence_level非既定（`CONFIDENCE_LEVEL_NON_DEFAULT`）が、cov_type
+    によらずWLSでもRと一致すること（baselineシナリオ、classical/HC0-3/
+    cluster、OLS側の横展開）。HACのみ`test_confidence_level_hac_matches_r`
+    で別途確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    df, kwargs = _options_kwargs_for_cov_type(df, cov_type)
+    options = WLSOptions(
+        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        cov_type=cov_type,
+        **kwargs,
+    )
+    res = WLS(
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
+    ).fit()
+
+    ref = crosscheck["synthetic"]["baseline"]["confidence_level"][cov_type][
+        "r"
+    ]
+    label = f"confidence_level/{cov_type}/R"
+    _assert_close(res.params, ref["coef"], f"{label} coef")
+    _assert_close(res.std_errors, ref["se"], f"{label} se")
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
+
+
+def test_confidence_level_hac_matches_r(crosscheck):
+    """confidence_level非既定のHAC標準誤差。フィクスチャ生成時の自動ラグ
+    （`hac_lag`）をそのまま使う（`test_hac_matches_r`と同じ方針）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    entry = crosscheck["synthetic"]["baseline"]["confidence_level"]["hac"]
+    options = WLSOptions(
+        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        cov_type="hac",
+        hac_lags=entry["hac_lag"],
+        hac_time=ROW_TIME,
+    )
+    res = WLS(
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
+    ).fit()
+
+    ref = entry["r"]
+    label = "confidence_level/hac/R"
+    _assert_close(res.params, ref["coef"], f"{label} coef")
+    _assert_close(res.std_errors, ref["se"], f"{label} se", rtol=RTOL_HAC)
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_HAC)
 
 
 @pytest.mark.parametrize("cov_type", WOOLDRIDGE_COV_TYPES)
@@ -249,7 +443,7 @@ def test_401ksubs_matches_r(crosscheck, cov_type):
     options = WLSOptions(cov_type=cov_type)
 
     res = WLS(
-        df,
+        with_row_time(df),
         y="nettfa",
         x=["inc", "incsq", "age", "agesq", "male", "e401k"],
         weight="inv_inc",
@@ -272,10 +466,10 @@ def test_401ksubs_cluster_matches_r(crosscheck):
     df = load_wooldridge_dataset("401ksubs").filter(pl.col("fsize") == 1)
     df = df.with_columns((1.0 / pl.col("inc")).alias("inv_inc"))
     df = _add_age_bin(df)
-    options = WLSOptions(cov_type="cluster", cluster_col="age_bin")
+    options = WLSOptions(cov_type="cluster", cluster="age_bin")
 
     res = WLS(
-        df,
+        with_row_time(df),
         y="nettfa",
         x=["inc", "incsq", "age", "agesq", "male", "e401k"],
         weight="inv_inc",

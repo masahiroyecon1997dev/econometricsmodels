@@ -29,8 +29,7 @@ python -m benchmark.regenerate_all --datasets-only    # 全系統CSVのみ（Rsc
 
 各系統は `datasets.py`（DGP）／`freeze.py`（CSV凍結）／`references/`（リファレンス
 実装アダプタ・`.R`）／`fixtures/`（`generate_*_fixtures.py`）で構成。系統をまたぐ
-共通ヘルパーは `benchmark/common/` に集約。パッケージ化（Initiative A）の経緯は
-[`docs/planning/specs/refactoring-issue231-progress.md`](../docs/planning/specs/refactoring-issue231-progress.md)「Initiative A」節。
+共通ヘルパーは `benchmark/common/` に集約しています。
 
 ## ライセンスに関する注記
 

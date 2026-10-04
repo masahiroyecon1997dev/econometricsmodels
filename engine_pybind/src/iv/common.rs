@@ -2,8 +2,8 @@
 //!
 //! `.claude/rules/rust-style.md`「ファイル・ディレクトリ構成」: 系統内で共有するロジックは
 //! `<系統>/common.rs`に置く（`engine_pybind/src/linear/common.rs`と同じ位置づけ）。
-//! `IVOptions`/`IVResult`/`build_iv_input`は2SLS/GMMどちらの`method`でも共有する
-//! （`fit_iv`という単一エントリポイントの背後で`method`により推定方式を切り替える設計、
+//! `IVOptions`/`IVResult`/`build_iv_input`は2SLS/GMMどちらの`estimator`でも共有する
+//! （`fit_iv`という単一エントリポイントの背後で`estimator`により推定方式を切り替える設計、
 //! `docs/spec/iv-spec.md`1.2節）ため、系統内共有ロジックの
 //! 置き場所という位置づけに素直に合致する（`two_sls.rs`/`gmm.rs`のような手法ごとの
 //! ファイル分割はしない）。
@@ -15,45 +15,45 @@
 //!
 //! `IVOptions`/`IVResult`のpyclass定義・`build_iv_input`→`TwoSlsEstimator::fit`
 //! への配線→弱操作変数診断・Wu-Hausman・Sargan→`first_stage()`の順に段階実装した。
-//! **`method="gmm"`は当初`GmmEstimator`（engine側）が点推定のみのスコープだったため
+//! **`estimator="gmm"`は当初`GmmEstimator`（engine側）が点推定のみのスコープだったため
 //! 長らく`ValidationError`で弾いていたが、GMM側のcov_type対応（完了条件だったが
 //! 実装漏れだったことが発覚、`gmm.rs`参照）を実装したうえで、本ファイルでも
-//! 実際に配線した**（`fit_iv`から両`method`を呼び分ける）。
+//! 実際に配線した**（`fit_iv`から両`estimator`を呼び分ける）。
 //!
-//! ## `first_stage()`/`weak_instrument_f_statistics`は`method`に依存しない共通ロジック
+//! ## `first_stage()`/`weak_instrument_f_statistics`は`estimator`に依存しない共通ロジック
 //!
 //! 第一段階回帰（`x_endog[j] ~ x_exog + instruments`）・弱操作変数診断（部分F統計量）は、
 //! `engine::iv::common::compute_first_stage`（2SLS/GMM間で共有、`engine/src/iv/CLAUDE.md`
-//! 参照）を`fit`が`method`によらず常に呼ぶことで、GMMでも2SLSと同じ診断情報を提供する
+//! 参照）を`fit`が`estimator`によらず常に呼ぶことで、GMMでも2SLSと同じ診断情報を提供する
 //! （ユーザー確認済み）。`TwoSlsEstimator::fit`は内部でも同じ関数を呼ぶため、
-//! `method="2sls"`では第一段階回帰が二重計算になるが、OLS自体が軽量なため許容する
+//! `estimator="2sls"`では第一段階回帰が二重計算になるが、OLS自体が軽量なため許容する
 //! （`GmmEstimator`のように第一段階回帰を必要としない推定器に合わせて`IVResult`側を
 //! 単純にする方を優先した設計判断）。
 //!
 //! `IVResult`は元々`estimator: TwoSlsEstimator`という2SLS専用の非公開フィールドで
 //! `first_stage()`を実装していたが、GMM配線にあたり`first_stage: Vec<(String,
-//! OlsEstimator)>`という`method`非依存の表現に置き換えた（`OlsEstimator → OLSResult`
+//! OlsEstimator)>`という`estimator`非依存の表現に置き換えた（`OlsEstimator → OLSResult`
 //! 変換は`linear::ols::ols_estimator_to_result`を再利用、抽出済み）。
 //!
-//! ## GMMの`weight_type`（`IVOptions.weight_type`/`cluster_col`/`hac_lags`/`time_col`）
+//! ## GMMの`gmm_weight_type`（`IVOptions.gmm_weight_type`/`cluster`/`hac_lags`/`hac_time`）
 //!
-//! `weight_type`は`cov_type`とは独立の軸（点推定に使う重み行列の選択、`engine::iv::gmm`の
-//! モジュールdocコメント参照）だが、`cluster_col`/`hac_lags`/`time_col`は`cov_type`と
+//! `gmm_weight_type`は`cov_type`とは独立の軸（点推定に使う重み行列の選択、`engine::iv::gmm`の
+//! モジュールdocコメント参照）だが、`cluster`/`hac_lags`/`hac_time`は`cov_type`と
 //! 共用する（`IVOptions`に別フィールドを増やさない設計、`parse_weight_type`参照）。
-//! `weight_type="cluster"`かつ`cov_type="cluster"`のように両軸が同じクラスター列を
-//! 参照する使い方を主に想定するが、`weight_type`と`cov_type`が異なる場合でも同じ列を
+//! `gmm_weight_type="cluster"`かつ`cov_type="cluster"`のように両軸が同じクラスター列を
+//! 参照する使い方を主に想定するが、`gmm_weight_type`と`cov_type`が異なる場合でも同じ列を
 //! 共用する（別々のクラスター変数を使い分けたいニーズが出てきたら別フィールド化を検討）。
 //!
-//! `wu_hausman_statistic`/`wu_hausman_p_value`は`method="gmm"`では常に`None`
+//! `wu_hausman_statistic`/`wu_hausman_p_value`は`estimator="gmm"`では常に`None`
 //! （`GmmEstimator`はWu-Hausman検定を持たない、`docs/spec/iv-spec.md`3.6節はTwoSlsEstimator
-//! のみのスコープ）。`overid_statistic`/`overid_p_value`は`method="gmm"`では
+//! のみのスコープ）。`overid_statistic`/`overid_p_value`は`estimator="gmm"`では
 //! `GmmEstimator::hansen_j_statistic()`/`hansen_j_p_value()`から配線する
-//! （`method="2sls"`のSargan検定と同じ`Option<f64>`同士の代入）。
+//! （`estimator="2sls"`のSargan検定と同じ`Option<f64>`同士の代入）。
 
 use std::collections::HashMap;
 
 use engine::iv::common::{IvError, IvInput, compute_first_stage};
-use engine::iv::gmm::{GmmEstimator, WeightType};
+use engine::iv::gmm::{GmmEstimator, GmmType, WeightType};
 use engine::iv::two_sls::TwoSlsEstimator;
 use engine::linear::ols::CovType as EngineCovType;
 use engine::linear::ols::OlsEstimator;
@@ -61,12 +61,20 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
-use crate::column_extraction::{extract_f64_column, extract_group_key_column};
+use crate::column_extraction::{
+    extract_f64_column, extract_group_key_column, extract_time_order_ranks,
+};
 use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
-use crate::linear::common::{least_squares_error_is_computation_error, mat_to_vec, parse_cov_type};
+use crate::linear::common::{
+    build_cov_type, least_squares_error_is_computation_error, mat_to_vec, require_hac_time,
+};
 use crate::linear::ols::{OLSResult, ols_estimator_to_result};
+use crate::option_values::{
+    extract_strict_float, extract_strict_opt_column, extract_strict_opt_float,
+    extract_strict_opt_int, extract_strict_opt_text, extract_strict_text,
+};
 use crate::validation::{
-    RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
+    RoleValue, reject_unused_option, validate_no_const_collision, validate_no_duplicate_roles,
     validate_no_duplicate_within_role, validate_x_non_empty,
 };
 
@@ -100,8 +108,9 @@ pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
         IvError::Common(common) => common_error_to_pyerr(common),
         IvError::InsufficientInstruments { .. }
         | IvError::InvalidHacLags { .. }
-        | IvError::InvalidGmmIterations { .. }
-        | IvError::InvalidGmmConvergence { .. } => ValidationError::new_err(message),
+        | IvError::InvalidGmmMaxIter { .. }
+        | IvError::InvalidGmmTol { .. }
+        | IvError::InsufficientClustersForWeightMatrix { .. } => ValidationError::new_err(message),
         // `MleError::NonConvergence`（`nonlinear/common.rs`の`mle_error_to_pyerr`）と同じ
         // 分類: パラメータの不正ではなく、計算過程（反復推定）で発覚した問題のため
         // `ComputationError`（`engine/src/iv/CLAUDE.md`参照）。
@@ -122,20 +131,20 @@ pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
 ///
 /// See `docs/spec/iv-spec.md` for the rationale behind each field's
 /// meaning and default value. A single `IVOptions`/`fit_iv` pair serves both
-/// estimation methods; fields that apply to only one method are documented as such.
+/// estimation methods; fields that apply to only one estimator are documented as such.
 // module/from_py_objectの理由は`OLSOptions`/`LogitOptions`と同じ
 // （`engine_pybind/src/linear/ols.rs`のコメント参照）。
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct IVOptions {
-    /// Estimation method: "2sls" (default) or "gmm". Case-insensitive.
-    #[pyo3(get, set)]
-    pub method: String,
+    /// Estimation estimator: "2sls" (default) or "gmm". Case-insensitive.
+    #[pyo3(get)]
+    pub estimator: String,
 
     /// Standard error type: one of "classical", "hc0" through "hc3", "hac", "cluster".
-    /// Case-insensitive. For `method="gmm"`, this is independent of `weight_type`
-    /// (the weight matrix used for point estimation, see `weight_type` below).
-    #[pyo3(get, set)]
+    /// Case-insensitive. For `estimator="gmm"`, this is independent of `gmm_weight_type`
+    /// (the weight matrix used for point estimation, see `gmm_weight_type` below).
+    #[pyo3(get)]
     pub cov_type: String,
 
     /// Whether the engine should automatically add an intercept column to `x_exog`.
@@ -145,113 +154,196 @@ pub struct IVOptions {
 
     /// Confidence level for confidence intervals, in the range (0, 1).
     /// Defaults to 0.95 (a 95% confidence interval).
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub confidence_level: f64,
 
-    /// Column name to use as the cluster group key when `cov_type="cluster"`.
-    /// Ignored when `cov_type` is not "cluster".
-    #[pyo3(get, set)]
-    pub cluster_col: Option<String>,
+    /// Column name to use as the cluster group key. Used by `cov_type="cluster"` and,
+    /// with `estimator="gmm"`, by `gmm_weight_type="cluster"` (also when
+    /// `cov_type` is not "cluster"). Specifying it when neither uses it raises
+    /// `ValidationError`.
+    #[pyo3(get)]
+    pub cluster: Option<String>,
 
-    /// Number of lags (bandwidth) for HAC (Newey-West) when `cov_type="hac"`.
-    /// When `None`, computed automatically. Ignored when `cov_type` is not "hac".
-    #[pyo3(get, set)]
+    /// Number of lags (bandwidth) for HAC (Newey-West), used by `cov_type="hac"` and, with
+    /// `estimator="gmm"`, by `gmm_weight_type="hac"`. When `None`, computed automatically.
+    /// Specifying it when neither uses it raises `ValidationError`.
+    #[pyo3(get)]
     pub hac_lags: Option<i64>,
 
-    /// Column name giving the time order for HAC when `cov_type="hac"`.
-    /// Ignored when `cov_type` is not "hac".
-    #[pyo3(get, set)]
-    pub time_col: Option<String>,
+    /// Column name giving the time order for HAC, used by `cov_type="hac"` and, with
+    /// `estimator="gmm"`, by `gmm_weight_type="hac"`. Required when either is "hac"
+    /// (omitting it raises `ValidationError`): the row order of the data is never assumed
+    /// to be the time order. Specifying it when neither uses it raises `ValidationError`.
+    #[pyo3(get)]
+    pub hac_time: Option<String>,
 
-    /// Weight matrix used for GMM point estimation (`method="gmm"` only): one of
-    /// "unadjusted" (alias "homoskedastic"), "robust" (alias "heteroskedastic"),
-    /// "cluster", "kernel". Case-insensitive. Ignored when `method="2sls"`. "cluster"/"kernel"
-    /// draw from the same `cluster_col`/`hac_lags`/`time_col` fields as `cov_type` (no separate
-    /// fields; see module docstring "GMMのweight_type").
-    #[pyo3(get, set)]
-    pub weight_type: String,
+    /// Weight matrix used for GMM point estimation: one of "classical" (homoskedastic),
+    /// "robust" (heteroskedasticity-robust), "cluster", "hac" (Newey-West). Same vocabulary
+    /// as `cov_type`. Case-insensitive. `None` (default) means "classical" for
+    /// `gmm_type="two_step"`/`"iterated"`. Specifying it with `estimator="2sls"` or
+    /// `gmm_type="one_step"` (which does not use a weight matrix) raises `ValidationError`.
+    /// "cluster"/"hac" draw from the same `cluster`/`hac_lags`/`hac_time` fields as
+    /// `cov_type` (no separate fields; see module docstring "GMMのgmm_weight_type").
+    #[pyo3(get)]
+    pub gmm_weight_type: Option<String>,
 
-    /// Number of GMM iterations (`method="gmm"` only): 2 (default) for efficient
-    /// two-step GMM, 1 for one-step GMM, 3+ for iterated GMM. Ignored when `method="2sls"`.
-    #[pyo3(get, set)]
-    pub gmm_iterations: i64,
+    /// GMM estimation type: "one_step" (weight matrix `(Z'Z)^-1` only), "two_step"
+    /// (efficient two-step GMM), or "iterated" (repeat until convergence).
+    /// Case-insensitive. `None` (default) means "two_step" for `estimator="gmm"`.
+    /// Specifying it with `estimator="2sls"` raises `ValidationError`.
+    #[pyo3(get)]
+    pub gmm_type: Option<String>,
 
-    /// Convergence tolerance for GMM iteration (`method="gmm"` only). When `None` (default),
-    /// `gmm_iterations` is treated as a fixed iteration count. When set, `gmm_iterations`
-    /// becomes the maximum number of iterations (safety valve) and iteration stops early once
-    /// coefficients converge within this tolerance. Ignored when `method="2sls"`.
-    #[pyo3(get, set)]
-    pub gmm_convergence: Option<f64>,
+    /// Maximum number of GMM estimations for `gmm_type="iterated"`, counting the initial
+    /// estimate; an integer from 3 to 10,000 (use `gmm_type="two_step"` for two steps).
+    /// `None` (default) means 100. Specifying it with any other `gmm_type` or with
+    /// `estimator="2sls"` raises `ValidationError`.
+    #[pyo3(get)]
+    pub gmm_max_iter: Option<i64>,
 
-    /// Whether to raise an error if GMM does not converge within `gmm_iterations` when
-    /// `gmm_convergence` is set (`method="gmm"` only). If `False`, returns the result with
-    /// `converged=False` instead of raising. Ignored when `method="2sls"` or when
-    /// `gmm_convergence` is `None`.
+    /// Convergence tolerance for `gmm_type="iterated"`: iteration stops once every
+    /// coefficient changes by less than this (relative/absolute mix). `None` (default)
+    /// means 1e-6. Specifying it with any other `gmm_type` or with `estimator="2sls"`
+    /// raises `ValidationError`.
+    #[pyo3(get)]
+    pub gmm_tol: Option<f64>,
+
+    /// Whether to raise an error if `gmm_type="iterated"` does not converge within
+    /// `gmm_max_iter`. If `False`, returns the result with `converged=False` instead of
+    /// raising. `None` (default) means `True`. Specifying it with any other `gmm_type`
+    /// (which never checks convergence) or with `estimator="2sls"` raises
+    /// `ValidationError`.
     #[pyo3(get, set)]
-    pub raise_on_non_convergence: bool,
+    pub raise_on_non_convergence: Option<bool>,
 }
 
 #[pymethods]
 impl IVOptions {
     #[new]
     #[pyo3(signature = (
-        method = "2sls".to_string(),
+        estimator = "2sls".to_string(),
         cov_type = "classical".to_string(),
         include_intercept = true,
         confidence_level = 0.95,
-        cluster_col = None,
+        cluster = None,
         hac_lags = None,
-        time_col = None,
-        weight_type = "unadjusted".to_string(),
-        gmm_iterations = 2,
-        gmm_convergence = None,
-        raise_on_non_convergence = true,
+        hac_time = None,
+        gmm_weight_type = None,
+        gmm_type = None,
+        gmm_max_iter = None,
+        gmm_tol = None,
+        raise_on_non_convergence = None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
-        method: String,
-        cov_type: String,
+        #[pyo3(from_py_with = crate::option_values::estimator_arg)] estimator: String,
+        #[pyo3(from_py_with = crate::option_values::cov_type_arg)] cov_type: String,
         include_intercept: bool,
-        confidence_level: f64,
-        cluster_col: Option<String>,
-        hac_lags: Option<i64>,
-        time_col: Option<String>,
-        weight_type: String,
-        gmm_iterations: i64,
-        gmm_convergence: Option<f64>,
-        raise_on_non_convergence: bool,
+        #[pyo3(from_py_with = crate::option_values::confidence_level_arg)] confidence_level: f64,
+        #[pyo3(from_py_with = crate::option_values::cluster_arg)] cluster: Option<String>,
+        #[pyo3(from_py_with = crate::option_values::hac_lags_arg)] hac_lags: Option<i64>,
+        #[pyo3(from_py_with = crate::option_values::hac_time_arg)] hac_time: Option<String>,
+        #[pyo3(from_py_with = crate::option_values::gmm_weight_type_arg)] gmm_weight_type: Option<
+            String,
+        >,
+        #[pyo3(from_py_with = crate::option_values::gmm_type_arg)] gmm_type: Option<String>,
+        #[pyo3(from_py_with = crate::option_values::gmm_max_iter_arg)] gmm_max_iter: Option<i64>,
+        #[pyo3(from_py_with = crate::option_values::gmm_tol_arg)] gmm_tol: Option<f64>,
+        raise_on_non_convergence: Option<bool>,
     ) -> Self {
         Self {
-            method,
+            estimator,
             cov_type,
             include_intercept,
             confidence_level,
-            cluster_col,
+            cluster,
             hac_lags,
-            time_col,
-            weight_type,
-            gmm_iterations,
-            gmm_convergence,
+            hac_time,
+            gmm_weight_type,
+            gmm_type,
+            gmm_max_iter,
+            gmm_tol,
             raise_on_non_convergence,
         }
     }
 
+    #[setter]
+    fn set_confidence_level(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.confidence_level = extract_strict_float(value, "confidence_level")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_hac_lags(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.hac_lags = extract_strict_opt_int(value, "hac_lags")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_gmm_max_iter(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.gmm_max_iter = extract_strict_opt_int(value, "gmm_max_iter")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_gmm_tol(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.gmm_tol = extract_strict_opt_float(value, "gmm_tol")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_estimator(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.estimator = extract_strict_text(value, "estimator")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_cov_type(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.cov_type = extract_strict_text(value, "cov_type")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_cluster(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.cluster = extract_strict_opt_column(value, "cluster")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_hac_time(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.hac_time = extract_strict_opt_column(value, "hac_time")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_gmm_weight_type(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.gmm_weight_type = extract_strict_opt_text(value, "gmm_weight_type")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_gmm_type(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.gmm_type = extract_strict_opt_text(value, "gmm_type")?;
+        Ok(())
+    }
+
     fn __repr__(&self) -> String {
         format!(
-            "IVOptions(method={:?}, cov_type={:?}, include_intercept={}, \
-             confidence_level={}, cluster_col={:?}, hac_lags={:?}, time_col={:?}, \
-             weight_type={:?}, gmm_iterations={}, gmm_convergence={:?}, \
-             raise_on_non_convergence={})",
-            self.method,
+            "IVOptions(estimator={:?}, cov_type={:?}, include_intercept={}, \
+             confidence_level={}, cluster={:?}, hac_lags={:?}, hac_time={:?}, \
+             gmm_weight_type={:?}, gmm_type={:?}, gmm_max_iter={:?}, gmm_tol={:?}, \
+             raise_on_non_convergence={:?})",
+            self.estimator,
             self.cov_type,
             self.include_intercept,
             self.confidence_level,
-            self.cluster_col,
+            self.cluster,
             self.hac_lags,
-            self.time_col,
-            self.weight_type,
-            self.gmm_iterations,
-            self.gmm_convergence,
+            self.hac_time,
+            self.gmm_weight_type,
+            self.gmm_type,
+            self.gmm_max_iter,
+            self.gmm_tol,
             self.raise_on_non_convergence,
         )
     }
@@ -263,34 +355,33 @@ impl IVOptions {
 /// section 2. All array-valued fields (`params`, `std_errors`, etc.) share the same
 /// order as `param_names`.
 ///
-/// `stats` holds the t-statistics (`method="2sls"`) or z-statistics (`method="gmm"`),
-/// depending on which distribution the fitted model uses for inference
-/// (`docs/spec/iv-spec.md` 3.2節) — named generically rather than `t_stats`/`z_stats`
-/// because this single type is shared by both methods (mirrors the distribution-agnostic
-/// naming already used internally by `engine::inference::InferenceStat`).
+/// `test_stats` holds the t-statistics (`estimator="2sls"`) or z-statistics
+/// (`estimator="gmm"`), depending on which distribution the fitted model uses for inference
+/// (`docs/spec/iv-spec.md` 3.2節); `stat_dist`/`stat_df` say which distribution (and, for
+/// `"t"`, how many degrees of freedom) that is.
 ///
 /// `first_stage()`（内生変数ごとの第一段階回帰結果）はここにフィールドとして含めない。
 /// `fit()`の戻り値本体には含めず別メソッドとして公開する（`docs/spec/iv-spec.md`2章、
 /// 実装済み）。`predict()`/`marginal_effects()`用に`LogitResult`/
 /// `ProbitResult`が推定量そのものを非公開フィールド`estimator`として保持するのと同じ
-/// パターンだが、`IVResult`は`method`（2sls/gmm）非依存の非公開フィールド`first_stage:
+/// パターンだが、`IVResult`は`estimator`（2sls/gmm）非依存の非公開フィールド`first_stage:
 /// Vec<(String, OlsEstimator)>`から`first_stage()`をオンデマンドに構築する（下記
 /// `first_stage`フィールド参照。当初は`estimator: TwoSlsEstimator`という2sls専用の
-/// フィールドだったが、GMM配線時にmethod非依存の表現へ置き換えた——`engine::iv::common::
-/// compute_first_stage`が`method`によらず同じ第一段階回帰を計算するため、`fit`の
+/// フィールドだったが、GMM配線時にestimator非依存の表現へ置き換えた——`engine::iv::common::
+/// compute_first_stage`が`estimator`によらず同じ第一段階回帰を計算するため、`fit`の
 /// 呼び出し元でこの表現に詰め替えるだけで済む）。
 ///
 /// `fit_iv` (`fit` in this file) constructs and returns it. The core fields above are
-/// populated by `TwoSlsEstimator` (`method="2sls"`) or `GmmEstimator` (`method="gmm"`).
+/// populated by `TwoSlsEstimator` (`estimator="2sls"`) or `GmmEstimator` (`estimator="gmm"`).
 /// `weak_instrument_f_statistics`/`first_stage` are populated from `engine::iv::common::
-/// compute_first_stage`, independent of `method` (module docstring参照).
+/// compute_first_stage`, independent of `estimator` (module docstring参照).
 /// `wu_hausman_statistic`/`wu_hausman_p_value` are populated from `TwoSlsEstimator::
-/// wu_hausman_statistic()`/`wu_hausman_p_value()` for `method="2sls"`;
-/// always `None` for `method="gmm"` (`GmmEstimator` has no Wu-Hausman test).
+/// wu_hausman_statistic()`/`wu_hausman_p_value()` for `estimator="2sls"`;
+/// always `None` for `estimator="gmm"` (`GmmEstimator` has no Wu-Hausman test).
 /// `overid_statistic`/`overid_p_value` are populated from `TwoSlsEstimator::
-/// sargan_statistic()`/`sargan_p_value()` (Sargan test, `method="2sls"`) or
+/// sargan_statistic()`/`sargan_p_value()` (Sargan test, `estimator="2sls"`) or
 /// `GmmEstimator::hansen_j_statistic()`/`hansen_j_p_value()` (Hansen J test,
-/// `method="gmm"`).
+/// `estimator="gmm"`).
 // `IVResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`IVOptions`の`from_py_object`とは
 // 対照的、`OLSResult`/`LogitResult`と同じ理由）。
@@ -306,7 +397,14 @@ pub struct IVResult {
     #[pyo3(get)]
     pub std_errors: Vec<f64>,
     #[pyo3(get)]
-    pub stats: Vec<f64>,
+    pub test_stats: Vec<f64>,
+    /// Distribution of `test_stats`: `"t"` or `"normal"`.
+    #[pyo3(get)]
+    pub stat_dist: String,
+    /// Degrees of freedom of the t distribution (`None` for `"normal"`). May differ from
+    /// `df_resid` (e.g. cluster-robust inference uses `G - 1`).
+    #[pyo3(get)]
+    pub stat_df: Option<i64>,
     #[pyo3(get)]
     pub p_values: Vec<f64>,
     #[pyo3(get)]
@@ -325,60 +423,94 @@ pub struct IVResult {
     pub df_resid: usize,
     #[pyo3(get)]
     pub df_model: usize,
-    /// Whether GMM iteration converged (`method="gmm"` only). Always `true` for
-    /// `method="2sls"` (2SLS is a closed-form, non-iterative estimator, so convergence is
-    /// trivially satisfied — mirrors `GmmEstimator`'s own `gmm_iterations=1` convention,
-    /// `engine/src/iv/gmm.rs`参照). When `IVOptions.gmm_convergence` is `None` (fixed
-    /// iteration count, the default), always `true` — convergence is only actually checked
-    /// when `gmm_convergence` is set (`docs/spec/iv-spec.md` 3.3節).
+    /// Whether GMM iteration converged (`estimator="gmm"` only). Always `true` for
+    /// `estimator="2sls"` (2SLS is a closed-form, non-iterative estimator, so convergence is
+    /// trivially satisfied). Also always `true` for `gmm_type="one_step"`/`"two_step"` —
+    /// convergence is only actually checked for `gmm_type="iterated"`
+    /// (`docs/spec/iv-spec.md` 3.3節).
     #[pyo3(get)]
     pub converged: bool,
-    /// Number of GMM iterations actually run (`method="gmm"` only). Always `1` for
-    /// `method="2sls"`.
+    /// Number of GMM estimations actually run, counting the initial estimate
+    /// (`estimator="gmm"` only): 1 for "one_step", 2 for "two_step", at most `gmm_max_iter`
+    /// for "iterated". Always `1` for `estimator="2sls"`.
     #[pyo3(get)]
-    pub n_iterations: i64,
+    pub n_iter: i64,
     /// Standard error type actually used (echoes `IVOptions.cov_type`, normalized to
     /// lowercase; e.g. `"classical"`, `"hc1"`, `"hac"`, `"cluster"`).
     #[pyo3(get)]
     pub cov_type: String,
-    /// Estimation method actually used (echoes `IVOptions.method`, normalized to
+    /// Number of HAC (Newey-West) lags actually used: the explicit `hac_lags` if given,
+    /// otherwise the value chosen automatically, `floor(4 * (n / 100) ^ (2 / 9))`. `Some` when
+    /// `cov_type="hac"` or, with `estimator="gmm"` and `gmm_type` `"two_step"`/`"iterated"`,
+    /// `gmm_weight_type="hac"` (both share `hac_lags`, so the value is the same); `None`
+    /// otherwise.
+    #[pyo3(get)]
+    pub hac_lags_used: Option<i64>,
+    /// Estimator actually used (echoes `IVOptions.estimator`, normalized to
     /// lowercase): `"2sls"` or `"gmm"`.
     #[pyo3(get)]
-    pub method: String,
+    pub estimator: String,
     /// Weight matrix actually used for GMM point estimation (echoes
-    /// `IVOptions.weight_type`, normalized to lowercase; e.g. `"unadjusted"`,
-    /// `"robust"`, `"cluster"`, `"kernel"`). Like `cov_type`'s `"nonrobust"` alias,
-    /// an alias input (`"homoskedastic"`/`"heteroskedastic"`) is echoed as-is rather
-    /// than canonicalized to its primary name (`parse_weight_type` accepts both but
-    /// does not rewrite the string). `Some` only for `method="gmm"` (mirrors
+    /// `IVOptions.gmm_weight_type`, normalized to lowercase; e.g. `"classical"`,
+    /// `"robust"`, `"cluster"`, `"hac"`). `Some` only for `estimator="gmm"` (mirrors
     /// `overid_statistic`/`wu_hausman_statistic`'s use of `None` for "not applicable to
-    /// this method"); always `None` for `method="2sls"`, which has no such concept.
+    /// this estimator"); always `None` for `estimator="2sls"`, which has no such concept, and
+    /// for `gmm_type="one_step"`, which does not use a weight type.
     #[pyo3(get)]
-    pub weight_type: Option<String>,
+    pub gmm_weight_type: Option<String>,
+    /// GMM estimation type actually used (echoes `IVOptions.gmm_type`, normalized to
+    /// lowercase): `"one_step"`, `"two_step"` or `"iterated"`. `None` for `estimator="2sls"`.
     #[pyo3(get)]
-    pub f_statistic: f64,
+    pub gmm_type: Option<String>,
     #[pyo3(get)]
-    pub f_p_value: f64,
+    pub wald_statistic: f64,
+    #[pyo3(get)]
+    pub wald_p_value: f64,
+    /// Distribution of `wald_statistic`: `"f"` for `estimator="2sls"` (the Wald statistic
+    /// divided by the number of slope coefficients), `"chi2"` for `estimator="gmm"` (the
+    /// undivided Wald statistic).
+    #[pyo3(get)]
+    pub wald_dist: String,
+    /// Numerator degrees of freedom of `wald_statistic` (number of slope coefficients;
+    /// `None` when there are none and the statistic is NaN).
+    #[pyo3(get)]
+    pub wald_df_num: Option<usize>,
+    /// Denominator degrees of freedom of `wald_statistic` for `"f"` (`df_resid`, or `G - 1`
+    /// with cluster-robust inference). `None` for `"chi2"` and when the statistic is NaN.
+    #[pyo3(get)]
+    pub wald_df_denom: Option<usize>,
     #[pyo3(get)]
     pub r_squared: f64,
     #[pyo3(get)]
-    pub r_squared_adj: f64,
+    pub adj_r_squared: f64,
     /// Weak-instrument diagnostic: the partial F-statistic for each endogenous
     /// variable (keyed by variable name), testing the excluded instruments' joint
     /// significance after partialling out `x_exog` (`docs/spec/iv-spec.md` 3.4節).
     /// **Not** the same as the plain F-statistic of the corresponding regression in
     /// `first_stage()`, which includes `x_exog`'s contribution too. Empty when
-    /// `x_endog=[]`. Computed the same way for both `method="2sls"` and `method="gmm"`
+    /// `x_endog=[]`. Computed the same way for both `estimator="2sls"` and `estimator="gmm"`
     /// (`engine::iv::common::compute_first_stage`, module docstring参照).
     #[pyo3(get)]
     pub weak_instrument_f_statistics: HashMap<String, f64>,
-    /// Overidentification test statistic: Sargan (`method="2sls"`) or Hansen J
-    /// (`method="gmm"`). `None` when just-identified (`len(instruments) ==
+    /// Numerator degrees of freedom of the weak-instrument F statistics (number of excluded
+    /// instruments; the same for every endogenous variable). `None` when `x_endog=[]`.
+    #[pyo3(get)]
+    pub weak_instrument_f_df_num: Option<usize>,
+    /// Denominator degrees of freedom of the weak-instrument F statistics (residual df of
+    /// the first-stage regressions; the same for every endogenous variable).
+    #[pyo3(get)]
+    pub weak_instrument_f_df_denom: Option<usize>,
+    /// Overidentification test statistic: Sargan (`estimator="2sls"`) or Hansen J
+    /// (`estimator="gmm"`). `None` when just-identified (`len(instruments) ==
     /// len(x_endog)`, degrees of freedom 0), per `docs/spec/iv-spec.md` 3.5節.
     #[pyo3(get)]
     pub overid_statistic: Option<f64>,
     #[pyo3(get)]
     pub overid_p_value: Option<f64>,
+    /// Degrees of freedom of the chi-squared overidentification test
+    /// (`len(instruments) - len(x_endog)`); `None` when just identified.
+    #[pyo3(get)]
+    pub overid_df: Option<usize>,
     /// Wu-Hausman endogeneity test statistic (joint test over all endogenous
     /// variables, regression-based / `wooldridge_regression` formulation,
     /// `docs/spec/iv-spec.md` 3.6節). Always computed under the `cov_type` passed to
@@ -389,15 +521,21 @@ pub struct IVResult {
     /// estimated (e.g. the first-stage residual has zero variance, or there are too
     /// few observations for the extra residual columns) — neither case fails `fit()`
     /// itself, since the other results remain valid. **Always `None` for
-    /// `method="gmm"`** (`GmmEstimator` does not implement this test; `docs/spec/iv-spec.md`
+    /// `estimator="gmm"`** (`GmmEstimator` does not implement this test; `docs/spec/iv-spec.md`
     /// 3.6節's implementation is `TwoSlsEstimator`-only).
     #[pyo3(get)]
     pub wu_hausman_statistic: Option<f64>,
     #[pyo3(get)]
     pub wu_hausman_p_value: Option<f64>,
+    /// Numerator degrees of freedom of the Wu-Hausman F test; `None` when it is `None`.
+    #[pyo3(get)]
+    pub wu_hausman_df_num: Option<usize>,
+    /// Denominator degrees of freedom of the Wu-Hausman F test; `None` when it is `None`.
+    #[pyo3(get)]
+    pub wu_hausman_df_denom: Option<usize>,
     /// `first_stage()`が読む。Python側には公開しない（`OLSResult`の`fitted_values`/
     /// `has_intercept`、`LogitResult`/`ProbitResult`の`estimator`と同じ位置づけ）。
-    /// `method`非依存（`engine::iv::common::compute_first_stage`から構築、モジュール
+    /// `estimator`非依存（`engine::iv::common::compute_first_stage`から構築、モジュール
     /// docコメント参照）。
     first_stage: Vec<(String, OlsEstimator)>,
 }
@@ -412,7 +550,7 @@ impl IVResult {
     /// result type is needed (`docs/spec/iv-spec.md` 2章). Its `f_statistic`/`f_p_value`
     /// include `x_exog`'s contribution and are **not** the weak-instrument partial
     /// F-statistic (`weak_instrument_f_statistics`, computed separately).
-    /// Computed the same way for both `method="2sls"` and `method="gmm"` (module
+    /// Computed the same way for both `estimator="2sls"` and `estimator="gmm"` (module
     /// docstring参照).
     fn first_stage(&self) -> HashMap<String, OLSResult> {
         self.first_stage
@@ -427,55 +565,226 @@ impl IVResult {
     }
 }
 
-/// `IVOptions.weight_type`をパースし、該当するweight_typeのときのみ`cluster_col`/
-/// `hac_lags`/`time_col`を抽出したうえで`engine::iv::gmm::WeightType`を組み立てる
-/// （`method="gmm"`のみで使用、`cov_type`側の同種の関数は`linear::common::parse_cov_type`
+/// `gmm_type`/`gmm_weight_type`の実効既定値（`IVOptions`の既定値は`None`のため、使われる
+/// モードでここに解決する）。
+const DEFAULT_GMM_TYPE: &str = "two_step";
+const DEFAULT_GMM_WEIGHT_TYPE: &str = "classical";
+
+/// 選んだ`estimator`/`gmm_type`/`cov_type`/`gmm_weight_type`では使われないオプションが
+/// 明示指定されていれば`ValidationError`にする（黙って無視すると`cov_type="cluster"`の
+/// 書き忘れ等に気づけないため）。
+///
+/// - `gmm_type`/`gmm_weight_type`/`gmm_max_iter`/`gmm_tol`/`raise_on_non_convergence`:
+///   `estimator="gmm"`のときのみ。さらに`gmm_weight_type`は`gmm_type`が
+///   `"two_step"`/`"iterated"`のとき、`gmm_max_iter`/`gmm_tol`/`raise_on_non_convergence`
+///   は`"iterated"`のときのみ使われる。
+/// - `cluster`/`hac_lags`/`hac_time`: `cov_type`と`gmm_weight_type`の両方から参照される
+///   ため、どちらか一方でも使えば有効（`gmm_weight_type`側は`estimator="gmm"`かつ
+///   `gmm_type`が`"two_step"`/`"iterated"`のときのみ）。
+///
+/// `gmm_type`/`gmm_weight_type`の文字列が未知の値の場合はここでは何も言わず、後段の
+/// `parse_gmm_type`/`parse_weight_type`の「unknown ...」エラーに委ねる（誤った値と
+/// 使われないオプションの二重指摘で本筋のエラーが埋もれないようにするため）。
+fn validate_iv_option_usage(options: &IVOptions, estimator_lower: &str) -> PyResult<()> {
+    // 未知の`cov_type`は後段の「unknown cov_type」を優先して報告する。
+    let cov_type_lower = options.cov_type.to_lowercase();
+    if !matches!(
+        cov_type_lower.as_str(),
+        "classical" | "hc0" | "hc1" | "hc2" | "hc3" | "hac" | "cluster"
+    ) {
+        return Ok(());
+    }
+    let is_gmm = estimator_lower == "gmm";
+    let gmm_type_lower = options
+        .gmm_type
+        .as_deref()
+        .unwrap_or(DEFAULT_GMM_TYPE)
+        .to_lowercase();
+    let weight_lower = options
+        .gmm_weight_type
+        .as_deref()
+        .unwrap_or(DEFAULT_GMM_WEIGHT_TYPE)
+        .to_lowercase();
+    if is_gmm
+        && (!matches!(
+            gmm_type_lower.as_str(),
+            "one_step" | "two_step" | "iterated"
+        ) || (gmm_type_lower != "one_step"
+            && !matches!(
+                weight_lower.as_str(),
+                "classical" | "robust" | "cluster" | "hac"
+            )))
+    {
+        return Ok(());
+    }
+
+    let uses_weight = is_gmm && gmm_type_lower != "one_step";
+    let is_iterated = is_gmm && gmm_type_lower == "iterated";
+    const GMM: &str = "estimator=\"gmm\"";
+    const GMM_WEIGHTED: &str = "estimator=\"gmm\" with gmm_type=\"two_step\" or \"iterated\"";
+    const GMM_ITERATED: &str = "estimator=\"gmm\" with gmm_type=\"iterated\"";
+    reject_unused_option("gmm_type", options.gmm_type.is_some(), is_gmm, GMM)?;
+    reject_unused_option(
+        "gmm_weight_type",
+        options.gmm_weight_type.is_some(),
+        uses_weight,
+        GMM_WEIGHTED,
+    )?;
+    reject_unused_option(
+        "gmm_max_iter",
+        options.gmm_max_iter.is_some(),
+        is_iterated,
+        GMM_ITERATED,
+    )?;
+    reject_unused_option(
+        "gmm_tol",
+        options.gmm_tol.is_some(),
+        is_iterated,
+        GMM_ITERATED,
+    )?;
+    reject_unused_option(
+        "raise_on_non_convergence",
+        options.raise_on_non_convergence.is_some(),
+        is_iterated,
+        GMM_ITERATED,
+    )?;
+
+    reject_unused_option(
+        "cluster",
+        options.cluster.is_some(),
+        cov_type_lower == "cluster" || (uses_weight && weight_lower == "cluster"),
+        "cov_type=\"cluster\" (or gmm_weight_type=\"cluster\" with estimator=\"gmm\")",
+    )?;
+    let hac_used = cov_type_lower == "hac" || (uses_weight && weight_lower == "hac");
+    const HAC_CONDITION: &str =
+        "cov_type=\"hac\" (or gmm_weight_type=\"hac\" with estimator=\"gmm\")";
+    reject_unused_option(
+        "hac_lags",
+        options.hac_lags.is_some(),
+        hac_used,
+        HAC_CONDITION,
+    )?;
+    reject_unused_option(
+        "hac_time",
+        options.hac_time.is_some(),
+        hac_used,
+        HAC_CONDITION,
+    )?;
+    Ok(())
+}
+
+/// `IVOptions.gmm_weight_type`をパースし、該当するgmm_weight_typeのときのみ`cluster`/
+/// `hac_lags`/`hac_time`を抽出したうえで`engine::iv::gmm::WeightType`を組み立てる
+/// （`estimator="gmm"`のみで使用、`cov_type`側の同種の関数は`linear::common::parse_cov_type`
 /// を共有しているのに対し、こちらは`WeightType`が`CovType`と異なる型のため独立実装）。
 ///
-/// `cluster_col`/`hac_lags`/`time_col`は`cov_type`と共用する（モジュールdocコメント
-/// 「GMMのweight_type」参照、`IVOptions`に別フィールドを増やさない設計）。
+/// `cluster`/`hac_lags`/`hac_time`は`cov_type`と共用する（モジュールdocコメント
+/// 「GMMのgmm_weight_type」参照、`IVOptions`に別フィールドを増やさない設計）。
 ///
 /// 戻り値に正規化済み小文字文字列を含めるのは`linear::common::parse_cov_type`と同じ理由
-/// （`IVResult.weight_type`の構築時に`options.weight_type.to_lowercase()`を
+/// （`IVResult.gmm_weight_type`の構築時に`options.gmm_weight_type.to_lowercase()`を
 /// 再計算せずに済ませるため）。
 ///
 /// # Errors
-/// `weight_type`の文字列が既知の値のいずれでもない場合は`ValidationError`。それ以外
+/// `gmm_weight_type`の文字列が既知の値のいずれでもない場合は`ValidationError`。それ以外
 /// （列の抽出時に発覚する問題等）は`column_extraction`の責務で`ValidationError`。
 fn parse_weight_type(df: &DataFrame, options: &IVOptions) -> PyResult<(WeightType, String)> {
-    let weight_type_lower = options.weight_type.to_lowercase();
+    let weight_type_lower = options
+        .gmm_weight_type
+        .as_deref()
+        .unwrap_or(DEFAULT_GMM_WEIGHT_TYPE)
+        .to_lowercase();
 
-    let weight_type = match weight_type_lower.as_str() {
-        "unadjusted" | "homoskedastic" => WeightType::Unadjusted,
-        "robust" | "heteroskedastic" => WeightType::Robust,
+    let gmm_weight_type = match weight_type_lower.as_str() {
+        "classical" => WeightType::Classical,
+        "robust" => WeightType::Robust,
         "cluster" => {
             let groups = options
-                .cluster_col
+                .cluster
                 .as_ref()
                 .map(|col_name| extract_group_key_column(df, col_name))
                 .transpose()?;
             WeightType::Cluster { groups }
         }
-        "kernel" => {
-            let time_order = options
-                .time_col
-                .as_ref()
-                .map(|col_name| extract_f64_column(df, col_name))
-                .transpose()?;
-            WeightType::Kernel {
+        "hac" => {
+            let col_name = require_hac_time(options.hac_time.as_deref(), "gmm_weight_type")?;
+            WeightType::Hac {
                 lags: options.hac_lags,
-                time_order,
+                time_order: extract_time_order_ranks(df, col_name)?,
             }
         }
         other => {
             return Err(ValidationError::new_err(format!(
-                "unknown weight_type: '{other}'. Expected one of 'unadjusted' \
-                 ('homoskedastic'), 'robust' ('heteroskedastic'), 'cluster', or 'kernel'"
+                "unknown gmm_weight_type: '{other}'. Expected one of 'classical', \
+                 'robust', 'cluster', or 'hac'"
             )));
         }
     };
 
-    Ok((weight_type, weight_type_lower))
+    Ok((gmm_weight_type, weight_type_lower))
+}
+
+/// `IVOptions.gmm_type`/`gmm_max_iter`/`gmm_tol`をパースして`engine::iv::gmm::GmmType`を
+/// 組み立てる（`estimator="gmm"`のみで使用）。
+///
+/// 戻り値は`(GmmType, 正規化済み小文字のgmm_type, 正規化済み小文字のgmm_weight_type)`。
+/// `"one_step"`は`gmm_weight_type`を使わない（検証もしない）ため3つ目は`None`。
+/// `gmm_type`/`gmm_weight_type`/`gmm_max_iter`/`gmm_tol`の既定値は`None`で、使われる
+/// モードのときだけ実効既定値（`"two_step"`/`"classical"`/`100`/`1e-6`）に解決する
+/// （`IVOptions`はpyclassで既定値と明示指定を区別できないため）。使われないモードでの
+/// 明示指定は`validate_iv_option_usage`が事前に弾いている。
+///
+/// # Errors
+/// - `gmm_type`が未知の値: `ValidationError`
+/// - `"iterated"`で`gmm_max_iter`が3未満（負値を含む）、`gmm_tol`が0以下:
+///   `IvError::InvalidGmmMaxIter`/`InvalidGmmTol`（engineの検証）
+/// - `"two_step"`/`"iterated"`で`gmm_weight_type`が未知の値: `ValidationError`
+fn parse_gmm_type(
+    df: &DataFrame,
+    options: &IVOptions,
+) -> PyResult<(GmmType, String, Option<String>)> {
+    const DEFAULT_MAX_ITER: usize = 100;
+    const DEFAULT_TOL: f64 = 1e-6;
+
+    let gmm_type_lower = options
+        .gmm_type
+        .as_deref()
+        .unwrap_or(DEFAULT_GMM_TYPE)
+        .to_lowercase();
+    match gmm_type_lower.as_str() {
+        "one_step" | "two_step" => {
+            if gmm_type_lower == "one_step" {
+                return Ok((GmmType::OneStep, gmm_type_lower, None));
+            }
+            let (weight, weight_lower) = parse_weight_type(df, options)?;
+            Ok((
+                GmmType::TwoStep { weight },
+                gmm_type_lower,
+                Some(weight_lower),
+            ))
+        }
+        "iterated" => {
+            let (weight, weight_lower) = parse_weight_type(df, options)?;
+            let max_iter = match options.gmm_max_iter {
+                Some(v) => usize::try_from(v)
+                    .map_err(|_| iv_error_to_pyerr(IvError::InvalidGmmMaxIter { max_iter: v }))?,
+                None => DEFAULT_MAX_ITER,
+            };
+            let tol = options.gmm_tol.unwrap_or(DEFAULT_TOL);
+            Ok((
+                GmmType::Iterated {
+                    weight,
+                    max_iter,
+                    tol,
+                },
+                gmm_type_lower,
+                Some(weight_lower),
+            ))
+        }
+        other => Err(ValidationError::new_err(format!(
+            "unknown gmm_type: '{other}'. Expected one of 'one_step', 'two_step', or 'iterated'"
+        ))),
+    }
 }
 
 /// Pythonから渡された `data` / `y` / `x_exog` / `x_endog` / `instruments` / `options` を
@@ -483,10 +792,10 @@ fn parse_weight_type(df: &DataFrame, options: &IVOptions) -> PyResult<(WeightTyp
 /// `TwoSlsEstimator::fit`/`GmmEstimator::fit`の呼び出し・`IVResult`の構築は`fit`
 /// （本ファイル）が行う。
 ///
-/// 戻り値に`method`のパース済み小文字文字列（`"2sls"`/`"gmm"`のいずれか）を含めるのは、
+/// 戻り値に`estimator`のパース済み小文字文字列（`"2sls"`/`"gmm"`のいずれか）を含めるのは、
 /// `cov_type_lower`と同じ理由（`fit`が2SLS/GMMのどちらを呼ぶか分岐する際、ここでの妥当性
 /// チェックと同じ正規化ロジックを再実装せずに済ませるため。`Logit`の`build_logit_input`が
-/// `method`を`EngineMethod`にパースして返す設計と同じ考え方だが、IVには`TwoSlsEstimator`/
+/// `solver`を`SolverType`にパースして返す設計と同じ考え方だが、IVには`TwoSlsEstimator`/
 /// `GmmEstimator`を横断する共通enumが`engine`側に無いため、ここでは正規化済み文字列の
 /// まま返す）。
 ///
@@ -498,7 +807,7 @@ fn parse_weight_type(df: &DataFrame, options: &IVOptions) -> PyResult<(WeightTyp
 ///   `"const"`列との衝突（`x_exog`だけでなく全ロールが対象）、
 ///   `x_endog`/`instruments`が空リストの場合（`x_exog`は対象外）は
 ///   ここ（受け口）の責務で`ValidationError`
-/// - `method`の文字列が`"2sls"`/`"gmm"`のいずれでもない場合は`ValidationError`
+/// - `estimator`の文字列が`"2sls"`/`"gmm"`のいずれでもない場合は`ValidationError`
 /// - `cov_type`の文字列が不正な場合は`ValidationError`（`linear::common::parse_cov_type`参照）
 /// - それ以外（行数不一致等）は`engine::iv::common::IvError`から`iv_error_to_pyerr`で変換
 ///   （`IvInput::from_columns`はこの時点では識別可能性を検証しないため、
@@ -511,11 +820,11 @@ pub(crate) fn build_iv_input(
     instruments: Vec<String>,
     options: &IVOptions,
 ) -> PyResult<(IvInput, EngineCovType, String, String)> {
-    let method_lower = options.method.to_lowercase();
-    if method_lower != "2sls" && method_lower != "gmm" {
+    let estimator_lower = options.estimator.to_lowercase();
+    if estimator_lower != "2sls" && estimator_lower != "gmm" {
         return Err(ValidationError::new_err(format!(
-            "unknown method: '{}'. Expected one of '2sls' or 'gmm'",
-            options.method
+            "unknown estimator: '{}'. Expected one of '2sls' or 'gmm'",
+            options.estimator
         )));
     }
 
@@ -577,12 +886,13 @@ pub(crate) fn build_iv_input(
     }
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
-    let (cov_type, cov_type_lower) = parse_cov_type(
+    validate_iv_option_usage(options, &estimator_lower)?;
+    let (cov_type, cov_type_lower) = build_cov_type(
         df,
         &options.cov_type,
-        options.cluster_col.as_deref(),
+        options.cluster.as_deref(),
         options.hac_lags,
-        options.time_col.as_deref(),
+        options.hac_time.as_deref(),
     )?;
 
     let input = IvInput::from_columns(
@@ -598,27 +908,28 @@ pub(crate) fn build_iv_input(
     )
     .map_err(iv_error_to_pyerr)?;
 
-    Ok((input, cov_type, cov_type_lower, method_lower))
+    Ok((input, cov_type, cov_type_lower, estimator_lower))
 }
 
 /// Pythonから渡された `data` / `y` / `x_exog` / `x_endog` / `instruments` / `options` を
-/// 検証し、`build_iv_input`で構築した`IvInput`に対して`method`に応じた推定
+/// 検証し、`build_iv_input`で構築した`IvInput`に対して`estimator`に応じた推定
 /// （`TwoSlsEstimator::fit`または`GmmEstimator::fit`）を呼び出し、`IVResult`として返す。
 ///
-/// `first_stage`/`weak_instrument_f_statistics`は`method`によらず`engine::iv::common::
+/// `first_stage`/`weak_instrument_f_statistics`は`estimator`によらず`engine::iv::common::
 /// compute_first_stage`（`IVResult`のdocコメント・モジュールdocコメント「`first_stage()`/
-/// `weak_instrument_f_statistics`は`method`に依存しない共通ロジック」参照）から構築する。
-/// `overid_statistic`/`overid_p_value`は`method="2sls"`では`TwoSlsEstimator::
-/// sargan_statistic()`/`sargan_p_value()`（Sargan検定）、`method="gmm"`では
+/// `weak_instrument_f_statistics`は`estimator`に依存しない共通ロジック」参照）から構築する。
+/// `overid_statistic`/`overid_p_value`は`estimator="2sls"`では`TwoSlsEstimator::
+/// sargan_statistic()`/`sargan_p_value()`（Sargan検定）、`estimator="gmm"`では
 /// `GmmEstimator::hansen_j_statistic()`/`hansen_j_p_value()`（Hansen J検定）から構築する。
-/// `wu_hausman_statistic`/`wu_hausman_p_value`は`method="2sls"`では`TwoSlsEstimator::
-/// wu_hausman_statistic()`/`wu_hausman_p_value()`、`method="gmm"`では
+/// `wu_hausman_statistic`/`wu_hausman_p_value`は`estimator="2sls"`では`TwoSlsEstimator::
+/// wu_hausman_statistic()`/`wu_hausman_p_value()`、`estimator="gmm"`では
 /// 常に`None`（`GmmEstimator`は実装しない、モジュールdocコメント参照）。
 ///
 /// # Errors
 /// - `build_iv_input`が返すエラー（列抽出・y/x_exog/x_endog/instrumentsの重複・
-///   `"const"`列衝突・`method`/`cov_type`文字列の検証等）は`ValidationError`
-/// - `method="gmm"`で`weight_type`の文字列が不正: `ValidationError`（`parse_weight_type`参照）
+///   `"const"`列衝突・`estimator`/`cov_type`文字列の検証等）は`ValidationError`
+/// - `estimator="gmm"`で`gmm_type`/`gmm_weight_type`の文字列が不正、または`gmm_type`と
+///   `gmm_max_iter`/`gmm_tol`の組み合わせが矛盾: `ValidationError`（`parse_gmm_type`参照）
 /// - `TwoSlsEstimator::fit`/`GmmEstimator::fit`/`compute_first_stage`が返す
 ///   `engine::iv::common::IvError`（識別の順序条件・第一段階回帰の失敗・`cov_type`起因の
 ///   エラー・GMM固有のエラー等）は`iv_error_to_pyerr`で変換
@@ -631,7 +942,7 @@ pub(crate) fn fit(
     options: &IVOptions,
 ) -> PyResult<IVResult> {
     let df: DataFrame = data.into();
-    let (input, cov_type, cov_type_lower, method_lower) =
+    let (input, cov_type, cov_type_lower, estimator_lower) =
         build_iv_input(&df, y, x_exog, x_endog, instruments, options)?;
 
     // 識別の順序条件（`TwoSlsEstimator::fit`/`GmmEstimator::fit`のいずれも冒頭で検証する
@@ -649,20 +960,21 @@ pub(crate) fn fit(
         }));
     }
 
-    // 第一段階回帰・弱操作変数診断は`method`によらず共通（モジュールdocコメント参照）。
-    // `input`は下でmethodごとの推定器に移動するため、参照のみで済むこの呼び出しを先に行う。
+    // 第一段階回帰・弱操作変数診断は`estimator`によらず共通（モジュールdocコメント参照）。
+    // `input`は下でestimatorごとの推定器に移動するため、参照のみで済むこの呼び出しを先に行う。
     let (first_stage, weak_instrument_f_statistics) =
         compute_first_stage(&input, &cov_type, options.confidence_level)
             .map_err(iv_error_to_pyerr)?;
+    let weak_instrument_f_df = first_stage.first().map(|(_, first_stage_estimator)| {
+        (input.k_instruments(), first_stage_estimator.df_resid())
+    });
 
-    if method_lower == "gmm" {
-        let (weight_type, weight_type_lower) = parse_weight_type(&df, options)?;
+    if estimator_lower == "gmm" {
+        let (gmm_type, gmm_type_lower, weight_type_lower) = parse_gmm_type(&df, options)?;
         let estimator = GmmEstimator::fit(
             input,
-            weight_type,
-            options.gmm_iterations,
-            options.gmm_convergence,
-            options.raise_on_non_convergence,
+            gmm_type,
+            options.raise_on_non_convergence.unwrap_or(true),
             cov_type,
             options.confidence_level,
         )
@@ -671,7 +983,9 @@ pub(crate) fn fit(
         return Ok(IVResult {
             params: mat_to_vec(estimator.params()),
             std_errors: mat_to_vec(estimator.std_errors()),
-            stats: mat_to_vec(estimator.z_stats()),
+            test_stats: mat_to_vec(estimator.test_stats()),
+            stat_dist: estimator.stat_dist().name().to_string(),
+            stat_df: estimator.stat_dist().df().map(|df| df as i64),
             p_values: mat_to_vec(estimator.p_values()),
             conf_lower: mat_to_vec(estimator.conf_lower()),
             conf_upper: mat_to_vec(estimator.conf_upper()),
@@ -682,19 +996,29 @@ pub(crate) fn fit(
             df_resid: estimator.df_resid(),
             df_model: estimator.df_model(),
             converged: estimator.converged(),
-            n_iterations: estimator.n_iterations(),
+            n_iter: estimator.n_iter(),
             cov_type: cov_type_lower,
-            method: method_lower,
-            weight_type: Some(weight_type_lower),
-            f_statistic: estimator.f_statistic(),
-            f_p_value: estimator.f_p_value(),
+            hac_lags_used: estimator.hac_lags_used().map(|lags| lags as i64),
+            estimator: estimator_lower,
+            gmm_weight_type: weight_type_lower,
+            gmm_type: Some(gmm_type_lower),
+            wald_statistic: estimator.wald_statistic(),
+            wald_p_value: estimator.wald_p_value(),
+            wald_dist: "chi2".to_string(),
+            wald_df_num: estimator.wald_df(),
+            wald_df_denom: None,
             r_squared: estimator.r_squared(),
-            r_squared_adj: estimator.r_squared_adj(),
+            adj_r_squared: estimator.adj_r_squared(),
             weak_instrument_f_statistics: weak_instrument_f_statistics.into_iter().collect(),
             overid_statistic: estimator.hansen_j_statistic(),
             overid_p_value: estimator.hansen_j_p_value(),
+            overid_df: estimator.hansen_j_df(),
             wu_hausman_statistic: None,
             wu_hausman_p_value: None,
+            wu_hausman_df_num: None,
+            wu_hausman_df_denom: None,
+            weak_instrument_f_df_num: weak_instrument_f_df.map(|(num, _)| num),
+            weak_instrument_f_df_denom: weak_instrument_f_df.map(|(_, denom)| denom),
             first_stage,
         });
     }
@@ -705,7 +1029,9 @@ pub(crate) fn fit(
     Ok(IVResult {
         params: mat_to_vec(estimator.params()),
         std_errors: mat_to_vec(estimator.std_errors()),
-        stats: mat_to_vec(estimator.t_stats()),
+        test_stats: mat_to_vec(estimator.test_stats()),
+        stat_dist: estimator.stat_dist().name().to_string(),
+        stat_df: estimator.stat_dist().df().map(|df| df as i64),
         p_values: mat_to_vec(estimator.p_values()),
         conf_lower: mat_to_vec(estimator.conf_lower()),
         conf_upper: mat_to_vec(estimator.conf_upper()),
@@ -715,24 +1041,34 @@ pub(crate) fn fit(
         n_obs: estimator.nobs(),
         df_resid: estimator.df_resid(),
         df_model: estimator.df_model(),
-        // 2SLSは閉形式・非反復のため常に`converged=true`・`n_iterations=1`
+        // 2SLSは閉形式・非反復のため常に`converged=true`・`n_iter=1`
         // （`IVResult.converged`のdocコメント参照）。
         converged: true,
-        n_iterations: 1,
+        n_iter: 1,
         cov_type: cov_type_lower,
-        method: method_lower,
-        // `weight_type`はGMM専用の概念のため`method="2sls"`では常に`None`
-        // （`IVResult.weight_type`のdocコメント参照）。
-        weight_type: None,
-        f_statistic: estimator.f_statistic(),
-        f_p_value: estimator.f_p_value(),
+        hac_lags_used: estimator.hac_lags_used().map(|lags| lags as i64),
+        estimator: estimator_lower,
+        // `gmm_weight_type`はGMM専用の概念のため`estimator="2sls"`では常に`None`
+        // （`IVResult.gmm_weight_type`のdocコメント参照）。
+        gmm_weight_type: None,
+        gmm_type: None,
+        wald_statistic: estimator.wald_statistic(),
+        wald_p_value: estimator.wald_p_value(),
+        wald_dist: "f".to_string(),
+        wald_df_num: estimator.wald_df().map(|(num, _)| num),
+        wald_df_denom: estimator.wald_df().map(|(_, denom)| denom),
         r_squared: estimator.r_squared(),
-        r_squared_adj: estimator.r_squared_adj(),
+        adj_r_squared: estimator.adj_r_squared(),
         weak_instrument_f_statistics: weak_instrument_f_statistics.into_iter().collect(),
         overid_statistic: estimator.sargan_statistic(),
         overid_p_value: estimator.sargan_p_value(),
+        overid_df: estimator.sargan_df(),
         wu_hausman_statistic: estimator.wu_hausman_statistic(),
         wu_hausman_p_value: estimator.wu_hausman_p_value(),
+        wu_hausman_df_num: estimator.wu_hausman_df().map(|(num, _)| num),
+        wu_hausman_df_denom: estimator.wu_hausman_df().map(|(_, denom)| denom),
+        weak_instrument_f_df_num: weak_instrument_f_df.map(|(num, _)| num),
+        weak_instrument_f_df_denom: weak_instrument_f_df.map(|(_, denom)| denom),
         first_stage,
     })
 }
@@ -742,7 +1078,7 @@ mod tests {
     use super::*;
     use polars::df;
 
-    /// `build_iv_input`のテスト全体で使う既定の`IVOptions`（`method="2sls"`・
+    /// `build_iv_input`のテスト全体で使う既定の`IVOptions`（`estimator="2sls"`・
     /// `cov_type="classical"`・`include_intercept=true`）。フィールドごとに上書きして使う。
     fn default_options() -> IVOptions {
         IVOptions::new(
@@ -753,10 +1089,11 @@ mod tests {
             None,
             None,
             None,
-            "unadjusted".to_string(),
-            2,
             None,
-            true,
+            None,
+            None,
+            None,
+            None,
         )
     }
 
@@ -771,12 +1108,112 @@ mod tests {
         .unwrap()
     }
 
+    /// `validate_iv_option_usage`の判定表（`Err`になる/ならない）。エラー文言そのものは
+    /// `PyErr`のDisplayがGILを要求するためpytest側（`test_iv_validation.py`）で確認する。
+    fn usage_is_ok(configure: impl FnOnce(&mut IVOptions), estimator: &str) -> bool {
+        let mut options = default_options();
+        options.estimator = estimator.to_string();
+        configure(&mut options);
+        validate_iv_option_usage(&options, estimator).is_ok()
+    }
+
+    #[test]
+    fn validate_iv_option_usage_rejects_gmm_options_for_2sls() {
+        assert!(!usage_is_ok(
+            |o| o.gmm_type = Some("two_step".into()),
+            "2sls"
+        ));
+        assert!(!usage_is_ok(|o| o.gmm_max_iter = Some(10), "2sls"));
+        assert!(usage_is_ok(|_| {}, "2sls"));
+    }
+
+    #[test]
+    fn validate_iv_option_usage_ties_options_to_gmm_type() {
+        let one_step = |o: &mut IVOptions| o.gmm_type = Some("one_step".into());
+        assert!(!usage_is_ok(
+            |o| {
+                one_step(o);
+                o.gmm_weight_type = Some("robust".into());
+            },
+            "gmm"
+        ));
+        assert!(!usage_is_ok(
+            |o| o.gmm_max_iter = Some(10),
+            "gmm" // 既定のgmm_type（two_step）は反復しない
+        ));
+        assert!(usage_is_ok(
+            |o| {
+                o.gmm_type = Some("iterated".into());
+                o.gmm_weight_type = Some("robust".into());
+                o.gmm_max_iter = Some(10);
+                o.gmm_tol = Some(1e-6);
+                o.raise_on_non_convergence = Some(false);
+            },
+            "gmm"
+        ));
+    }
+
+    #[test]
+    fn validate_iv_option_usage_shares_cluster_and_hac_options_between_cov_type_and_weight() {
+        // gmm_weight_typeだけがcluster/hac_*を使う（どちらか一方でも使えば有効）
+        assert!(usage_is_ok(
+            |o| {
+                o.gmm_weight_type = Some("cluster".into());
+                o.cluster = Some("g".into());
+            },
+            "gmm"
+        ));
+        assert!(usage_is_ok(
+            |o| {
+                o.gmm_weight_type = Some("hac".into());
+                o.hac_lags = Some(2);
+                o.hac_time = Some("t".into());
+            },
+            "gmm"
+        ));
+        // cov_typeだけが使う
+        assert!(usage_is_ok(
+            |o| {
+                o.cov_type = "HAC".into();
+                o.hac_lags = Some(2);
+            },
+            "2sls"
+        ));
+        // どちらも使わない（weightがhacなのにclusterを指定、2slsでweightは使えない）
+        assert!(!usage_is_ok(
+            |o| {
+                o.gmm_weight_type = Some("hac".into());
+                o.cluster = Some("g".into());
+            },
+            "gmm"
+        ));
+        assert!(!usage_is_ok(|o| o.cluster = Some("g".into()), "2sls"));
+    }
+
+    #[test]
+    fn validate_iv_option_usage_defers_unknown_values_to_later_parsing() {
+        assert!(usage_is_ok(
+            |o| {
+                o.gmm_type = Some("bogus".into());
+                o.gmm_max_iter = Some(10);
+            },
+            "gmm"
+        ));
+        assert!(usage_is_ok(
+            |o| {
+                o.cov_type = "bogus".into();
+                o.cluster = Some("g".into());
+            },
+            "2sls"
+        ));
+    }
+
     #[test]
     fn build_iv_input_succeeds_for_well_formed_data() {
         let df = well_formed_df();
         let options = default_options();
 
-        let (input, cov_type, cov_type_lower, method_lower) = build_iv_input(
+        let (input, cov_type, cov_type_lower, estimator_lower) = build_iv_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
@@ -792,7 +1229,7 @@ mod tests {
         assert_eq!(input.k_instruments(), 2);
         assert_eq!(cov_type, EngineCovType::Classical);
         assert_eq!(cov_type_lower, "classical");
-        assert_eq!(method_lower, "2sls");
+        assert_eq!(estimator_lower, "2sls");
     }
 
     #[test]
@@ -870,7 +1307,7 @@ mod tests {
     fn build_iv_input_returns_error_for_unknown_method() {
         let df = well_formed_df();
         let mut options = default_options();
-        options.method = "3sls".to_string();
+        options.estimator = "3sls".to_string();
 
         let result = build_iv_input(
             &df,
@@ -887,9 +1324,9 @@ mod tests {
     fn build_iv_input_succeeds_for_gmm_method() {
         let df = well_formed_df();
         let mut options = default_options();
-        options.method = "GMM".to_string(); // 大文字小文字を区別しないことも確認
+        options.estimator = "GMM".to_string(); // 大文字小文字を区別しないことも確認
 
-        let (_, _, _, method_lower) = build_iv_input(
+        let (_, _, _, estimator_lower) = build_iv_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
@@ -898,7 +1335,7 @@ mod tests {
             &options,
         )
         .unwrap();
-        assert_eq!(method_lower, "gmm");
+        assert_eq!(estimator_lower, "gmm");
     }
 
     #[test]
@@ -1096,7 +1533,7 @@ mod tests {
         .unwrap();
         let mut options = default_options();
         options.cov_type = "cluster".to_string();
-        options.cluster_col = Some("group".to_string());
+        options.cluster = Some("group".to_string());
 
         let (_, cov_type, ..) = build_iv_input(
             &df,
@@ -1122,17 +1559,60 @@ mod tests {
     }
 
     #[test]
-    fn build_iv_input_extracts_time_order_when_cov_type_is_hac() {
+    fn parse_weight_type_passes_time_order_ranks_for_hac_weight() {
+        let df = df!("t" => [30.0, 10.0, 40.0, 20.0]).unwrap();
+        let mut options = default_options();
+        options.estimator = "gmm".to_string();
+        options.gmm_weight_type = Some("hac".to_string());
+        options.hac_time = Some("t".to_string());
+        options.hac_lags = Some(1);
+
+        let Ok((weight_type, normalized)) = parse_weight_type(&df, &options) else {
+            panic!("expected Ok");
+        };
+
+        assert_eq!(normalized, "hac");
+        assert_eq!(
+            weight_type,
+            WeightType::Hac {
+                lags: Some(1),
+                time_order: vec![2.0, 0.0, 3.0, 1.0],
+            }
+        );
+    }
+
+    #[test]
+    fn parse_weight_type_requires_hac_time_for_hac_weight() {
+        let df = df!("t" => [1.0, 2.0, 3.0]).unwrap();
+        let mut options = default_options();
+        options.estimator = "gmm".to_string();
+        options.gmm_weight_type = Some("hac".to_string());
+        assert!(parse_weight_type(&df, &options).is_err());
+    }
+
+    #[test]
+    fn parse_weight_type_rejects_tied_hac_time() {
+        let df = df!("t" => [1.0, 2.0, 1.0]).unwrap();
+        let mut options = default_options();
+        options.estimator = "gmm".to_string();
+        options.gmm_weight_type = Some("hac".to_string());
+        options.hac_time = Some("t".to_string());
+
+        assert!(parse_weight_type(&df, &options).is_err());
+    }
+
+    #[test]
+    fn build_iv_input_passes_time_order_ranks_when_cov_type_is_hac() {
         let df = df!(
             "y" => [1.0, 2.0, 3.0, 4.0],
             "endog1" => [4.0, 3.0, 2.0, 1.0],
             "z1" => [2.0, 1.0, 4.0, 3.0],
-            "t" => [1.0, 2.0, 3.0, 4.0],
+            "t" => [30.0, 10.0, 40.0, 20.0],
         )
         .unwrap();
         let mut options = default_options();
         options.cov_type = "hac".to_string();
-        options.time_col = Some("t".to_string());
+        options.hac_time = Some("t".to_string());
         options.hac_lags = Some(1);
 
         let (_, cov_type, ..) = build_iv_input(
@@ -1149,7 +1629,8 @@ mod tests {
             cov_type,
             EngineCovType::Hac {
                 lags: Some(1),
-                time_order: Some(vec![1.0, 2.0, 3.0, 4.0]),
+                // 値ではなく昇順の位置（順位）をエンジンに渡す。
+                time_order: vec![2.0, 0.0, 3.0, 1.0],
             }
         );
     }

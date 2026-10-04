@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 
+import _error_messages as msgs
 import numpy as np
 import polars as pl
 import pytest
@@ -121,12 +122,31 @@ def _msg_list(name: str, got: str) -> str:
     )
 
 
+def _msg_name(name: str, got: str) -> str:
+    return re.escape(f"'{name}' must be a str column name, got {got}")
+
+
+def _assert_type_error_at_fit(build, match):
+    """構築は成功し（何も検査しない）、`fit()`が`TypeError`を送出する。
+
+    値の検証と同じく、列名引数の型の検証も`fit()`で行う。`ValidationError`
+    ではなく組み込みの`TypeError`であることも確認する。
+    """
+    model = build()  # 構築時には例外にならない
+    with pytest.raises(TypeError, match=match) as info:
+        model.fit()
+    assert not isinstance(info.value, ValidationError)
+
+
+SERIES = pl.Series(["x1"])
+
+
 @pytest.mark.parametrize(
     ("value", "got"),
     [
         ("x1", "str"),
         (("x1",), "tuple"),
-        (pl.Series(["x1"]), "polars.series.series.Series"),
+        (SERIES, msgs.fully_qualified_type_name(SERIES)),
         (None, "NoneType"),
         ({"x1"}, "set"),
     ],
@@ -136,10 +156,9 @@ def test_x_must_be_a_list(df, x_method, value, got):
     """`x`が`list`でないと、引数名・期待する形・実際の型を含む`TypeError`になる。"""
     builder, arg_name = x_method
 
-    with pytest.raises(TypeError, match=_msg_list(arg_name, got)) as info:
-        builder(df, x=value).fit()
-
-    assert not isinstance(info.value, ValidationError)
+    _assert_type_error_at_fit(
+        lambda: builder(df, x=value), _msg_list(arg_name, got)
+    )
 
 
 @pytest.mark.parametrize(
@@ -156,55 +175,86 @@ def test_x_elements_must_be_str(df, x_method, value, position, got):
     """`x`の要素が`str`でないと、要素の位置を含む`TypeError`になる。"""
     builder, arg_name = x_method
 
-    with pytest.raises(
-        TypeError,
-        match=re.escape(
+    _assert_type_error_at_fit(
+        lambda: builder(df, x=value),
+        re.escape(
             f"'{arg_name}[{position}]' must be a str column name, got {got}"
         ),
-    ):
-        builder(df, x=value).fit()
+    )
+
+
+# 列名を受け取る単一の`str`引数: `y`（全手法）、`entity`（FE・RE）、`weight`（WLS）。
+BAD_NAMES = [
+    (["y"], "list"),
+    (None, "NoneType"),
+    (1, "int"),
+    (b"y", "bytes"),
+]
 
 
 @pytest.mark.parametrize(
-    ("value", "got"),
-    [(["y"], "list"), (None, "NoneType"), (1, "int"), (b"y", "bytes")],
-    ids=["list", "none", "int", "bytes"],
+    ("value", "got"), BAD_NAMES, ids=[x[1] for x in BAD_NAMES]
 )
 def test_y_must_be_a_str(df, x_method, value, got):
     """`y`が`str`でないと、引数名と実際の型を含む`TypeError`になる。"""
     builder, _ = x_method
 
-    with pytest.raises(
-        TypeError,
-        match=re.escape(f"'y' must be a str column name, got {got}"),
-    ):
-        builder(df, y=value).fit()
-
-
-@pytest.mark.parametrize("builder", [_build_fe, _build_re], ids=["FE", "RE"])
-def test_entity_must_be_a_str(df, builder):
-    with pytest.raises(
-        TypeError,
-        match=re.escape("'entity' must be a str column name, got list"),
-    ):
-        builder(df, entity=["entity"]).fit()
-
-
-def test_weight_must_be_a_str(df):
-    with pytest.raises(
-        TypeError,
-        match=re.escape("'weight' must be a str column name, got list"),
-    ):
-        _build_wls(df, weight=["w"]).fit()
+    _assert_type_error_at_fit(
+        lambda: builder(df, y=value), _msg_name("y", got)
+    )
 
 
 @pytest.mark.parametrize(
-    "name", ["x_endog", "instruments"], ids=["x_endog", "instruments"]
+    ("value", "got"), BAD_NAMES, ids=[x[1] for x in BAD_NAMES]
 )
-def test_iv_column_lists_must_be_lists(df, name):
+@pytest.mark.parametrize("builder", [_build_fe, _build_re], ids=["FE", "RE"])
+def test_entity_must_be_a_str(df, builder, value, got):
+    _assert_type_error_at_fit(
+        lambda: builder(df, entity=value), _msg_name("entity", got)
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "got"), BAD_NAMES, ids=[x[1] for x in BAD_NAMES]
+)
+def test_weight_must_be_a_str(df, value, got):
+    _assert_type_error_at_fit(
+        lambda: _build_wls(df, weight=value), _msg_name("weight", got)
+    )
+
+
+@pytest.mark.parametrize("name", ["x_endog", "instruments"])
+@pytest.mark.parametrize(
+    ("value", "got"),
+    [
+        ("z", "str"),
+        (("z",), "tuple"),
+        (SERIES, msgs.fully_qualified_type_name(SERIES)),
+        (None, "NoneType"),
+        ({"z"}, "set"),
+    ],
+    ids=["str", "tuple", "polars_series", "none", "set"],
+)
+def test_iv_column_lists_must_be_lists(df, name, value, got):
     """IVの`x_endog`・`instruments`も`list`のみを受け付ける。"""
-    with pytest.raises(TypeError, match=_msg_list(name, "str")):
-        _build_iv(df, **{name: "z"}).fit()
+    _assert_type_error_at_fit(
+        lambda: _build_iv(df, **{name: value}), _msg_list(name, got)
+    )
+
+
+@pytest.mark.parametrize("name", ["x_endog", "instruments"])
+@pytest.mark.parametrize(
+    ("value", "position", "got"),
+    [([1], 0, "int"), (["z", 2.5], 1, "float"), ([b"z"], 0, "bytes")],
+    ids=["int", "float_second", "bytes"],
+)
+def test_iv_column_list_elements_must_be_str(df, name, value, position, got):
+    _assert_type_error_at_fit(
+        lambda: _build_iv(df, **{name: value}),
+        re.escape(
+            f"'{name}[{position}]' must be a str column name, got {got}"
+        ),
+    )
 
 
 def test_list_arguments_still_work(df):

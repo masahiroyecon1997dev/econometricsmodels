@@ -196,7 +196,7 @@ use crate::inference;
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput, wald_f_test};
 use crate::panel::common::{
-    GroupCodes, PanelDimension, PanelError, PanelHcVariant, leverage_within,
+    GroupCodes, PanelDimension, PanelError, PanelHcVariant, TimeKeys, leverage_within,
     panel_classical_cov_params, panel_cluster_cov_params, panel_driscoll_kraay_cov_params,
     panel_hc_cov_params, quasi_demean_column, resolve_dk_bandwidth, validate_cluster_group_codes,
     validate_dk_periods_cover_tested_coefficients, xtx_inverse,
@@ -219,15 +219,13 @@ pub struct ReInput {
     x_names: Vec<String>,
     /// 各行のエンティティID（長さ`n`）。
     entity: Vec<String>,
-    /// 各行の時点ID（長さ`n`）。RE自身の準偏差変換では使わない（モジュールdoc参照）が、
-    /// 内部FE呼び出し（ハウスマン検定用）に`entity`と同一の扱いで保持する。
-    time: Option<Vec<String>>,
+    /// 各行の時点ラベルと、その時間順のコード（長さ`n`）。RE自身の準偏差変換では使わない
+    /// （モジュールdoc参照）が、DKの時系列順序と内部FE呼び出し（ハウスマン検定用）に使う。
+    time: Option<TimeKeys>,
     /// 被説明変数名。
     dep_var_name: String,
     /// `entity`の整数コード（構築時に一度だけ作る、`GroupCodes`のdocコメント参照）。
     entity_codes: GroupCodes,
-    /// `time`の整数コード（`time`が`None`なら`None`）。
-    time_codes: Option<GroupCodes>,
 }
 
 impl ReInput {
@@ -257,6 +255,33 @@ impl ReInput {
         time: Option<&[String]>,
         dep_var_name: String,
     ) -> Result<Self, PanelError> {
+        Self::from_columns_ordered(
+            y,
+            x_columns,
+            x_names,
+            entity,
+            time.map(|t| TimeKeys::lexicographic(t.to_vec())),
+            dep_var_name,
+        )
+    }
+
+    /// `from_columns`の`time`を、順序を持つ`TimeKeys`で受け取る版。時点の順序をラベルの
+    /// 辞書順ではなく列の値の順序にしたい場合（整数・日付等）に使う（`FeInput::
+    /// from_columns_ordered`と同じ）。
+    ///
+    /// # Errors
+    /// `from_columns`と同じ。
+    ///
+    /// # パニックについて
+    /// `from_columns`と同じ。
+    pub fn from_columns_ordered(
+        y: &[f64],
+        x_columns: &[Vec<f64>],
+        x_names: Vec<String>,
+        entity: &[String],
+        time: Option<TimeKeys>,
+        dep_var_name: String,
+    ) -> Result<Self, PanelError> {
         debug_assert_eq!(
             x_columns.len(),
             x_names.len(),
@@ -281,7 +306,7 @@ impl ReInput {
             });
         }
 
-        if let Some(time) = time
+        if let Some(time) = &time
             && time.len() != y.len()
         {
             return Err(PanelError::IdentifierDimensionMismatch {
@@ -296,10 +321,9 @@ impl ReInput {
             x: x_columns.to_vec(),
             x_names,
             entity: entity.to_vec(),
-            time: time.map(|t| t.to_vec()),
+            time,
             dep_var_name,
             entity_codes: GroupCodes::from_ids(entity),
-            time_codes: time.map(GroupCodes::from_ids),
         })
     }
 
@@ -315,7 +339,7 @@ impl ReInput {
 
     /// `time`の整数コード（`time`が無ければ`None`）。
     pub(crate) fn time_codes(&self) -> Option<&GroupCodes> {
-        self.time_codes.as_ref()
+        self.time.as_ref().map(TimeKeys::codes)
     }
 
     /// 被説明変数（長さ`n`）。
@@ -340,7 +364,7 @@ impl ReInput {
 
     /// 各行の時点ID（長さ`n`）。未指定なら`None`。
     pub fn time(&self) -> Option<&[String]> {
-        self.time.as_deref()
+        self.time.as_ref().map(TimeKeys::ids)
     }
 
     /// 被説明変数名。
@@ -2106,6 +2130,61 @@ mod tests {
         );
 
         assert_eq!(re.unwrap_err(), PanelError::DkRequiresTime);
+    }
+
+    #[test]
+    fn re_estimator_fit_dk_follows_the_value_order_of_integer_periods() {
+        // 4エンティティ×12時点。時点を整数の値の順序で並べた結果は、ゼロ埋めして辞書順が
+        // 時間順になるラベルでの結果と一致し、ゼロ埋めなしの辞書順（`1, 10, 11, 2, ...`）とは
+        // 異なる。
+        let (n_entities, n_periods) = (4usize, 12usize);
+        let mut shock = vec![0.0; n_periods];
+        for t in 1..n_periods {
+            shock[t] = 0.8 * shock[t - 1] + (((t * 37) % 11) as f64 - 5.0) / 5.0;
+        }
+        let (mut y, mut x, mut entity, mut period) = (vec![], vec![], vec![], vec![]);
+        for e in 0..n_entities {
+            for (t, &shock_t) in shock.iter().enumerate() {
+                let xi = ((e * 7 + t * 13) % 17) as f64 / 3.0;
+                let noise = ((e * 5 + t * 3) % 7) as f64 / 7.0 + 0.3 * e as f64;
+                y.push(1.0 + 0.5 * xi + shock_t + noise);
+                x.push(xi);
+                entity.push(format!("e{e}"));
+                period.push(t);
+            }
+        }
+        let fit = |time: TimeKeys| {
+            let input = ReInput::from_columns_ordered(
+                &y,
+                &[x.clone()],
+                vec!["x".into()],
+                &entity,
+                Some(time),
+                "y".into(),
+            )
+            .unwrap();
+            let re = ReEstimator::fit(input, ReCovType::Dk { bandwidth: Some(3) }, 0.95).unwrap();
+            *re.std_errors().get(1, 0)
+        };
+        let values: Vec<i128> = period.iter().map(|&t| t as i128).collect();
+        let by_value = |label: &dyn Fn(usize) -> String| {
+            TimeKeys::by_integer(period.iter().map(|&t| label(t)).collect(), &values).unwrap()
+        };
+
+        let expected = fit(by_value(&|t| format!("{t:03}")));
+        let numeric = fit(by_value(&|t| t.to_string()));
+        let lexicographic = fit(TimeKeys::lexicographic(
+            period.iter().map(|t| t.to_string()).collect(),
+        ));
+
+        assert!(
+            (numeric - expected).abs() < 1e-12,
+            "numeric {numeric} vs padded {expected}"
+        );
+        assert!(
+            (lexicographic - expected).abs() > 1e-6,
+            "the lexicographic order of unpadded labels must differ: {lexicographic} vs {expected}"
+        );
     }
 
     #[test]

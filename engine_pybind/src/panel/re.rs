@@ -57,6 +57,7 @@
 //! 決定が無く、他手法（OLS/WLS/Logit/Probit/IV/FE）と一貫させる方針をユーザーが
 //! 選択した。nullモデル・ICC推定のサポートは別途検討する。
 
+use engine::panel::common::TimeKeys;
 use engine::panel::re::{ReCovType, ReEstimator, ReInput};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
@@ -64,7 +65,7 @@ use pyo3_polars::PyDataFrame;
 
 use super::common::panel_error_to_pyerr;
 use crate::column_extraction::{
-    extract_f64_column, extract_f64_columns, extract_group_key_column, extract_time_key_column,
+    extract_f64_column, extract_f64_columns, extract_group_key_column, extract_time_keys,
 };
 use crate::errors::ValidationError;
 use crate::linear::common::mat_to_vec;
@@ -98,9 +99,10 @@ pub struct REOptions {
     /// Column name of the time identifier, used only as the Driscoll-Kraay HAC time
     /// ordering when `cov_type="dk"` (required there). Specifying it with any other
     /// `cov_type` raises `ValidationError`. It does not affect the Hausman test, which
-    /// always compares against one-way FE. The periods are sorted by the text form of
-    /// the labels, so integer labels with different numbers of digits (`1, 2, ..., 12`)
-    /// sort as text; use a `Date` column or zero-padded labels.
+    /// always compares against one-way FE. The periods are ordered by the values of the
+    /// column: numerically for integers and floats, chronologically for `Date` and
+    /// `Datetime`, in the order of the categories for `Enum`, and alphabetically for
+    /// strings and `Categorical`.
     #[pyo3(get)]
     pub time: Option<String>,
 
@@ -396,24 +398,17 @@ pub(crate) fn build_re_input(
     let entity_slice = extract_group_key_column(df, &entity)?;
 
     // ── `time`列の抽出（DK HAC用、モジュールdoc参照）─────────────────────
-    let time_slice: Option<Vec<String>> = options
+    let time_keys: Option<TimeKeys> = options
         .time
         .as_ref()
-        .map(|col_name| extract_time_key_column(df, col_name))
+        .map(|col_name| extract_time_keys(df, col_name))
         .transpose()?;
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
     let (cov_type, cov_type_lower) = parse_re_cov_type(df, options)?;
 
-    let input = ReInput::from_columns(
-        &y_slice,
-        &x_slices,
-        x,
-        &entity_slice,
-        time_slice.as_deref(),
-        y,
-    )
-    .map_err(panel_error_to_pyerr)?;
+    let input = ReInput::from_columns_ordered(&y_slice, &x_slices, x, &entity_slice, time_keys, y)
+        .map_err(panel_error_to_pyerr)?;
 
     Ok((input, cov_type, cov_type_lower))
 }

@@ -58,6 +58,7 @@
 //! コードを書く過程で随時追加する（`LeastSquaresError`・`IvError`のdocコメントと同じ
 //! 「土台を用意し、必要になった時点で足す」方針）。
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -378,11 +379,12 @@ pub enum PanelError {
 /// 計算時間の大半を占めていた（QR分解よりはるかに重い）。`FeInput`/`ReInput`の構築時に一度だけ
 /// コード化して保持し、以降はコードで配列を直接引く（1列あたり数ms）。
 ///
-/// **コードはキーの辞書順（`String`の`Ord`、旧実装の`BTreeMap<&str, _>`の反復順と同じ）に
-/// 振る**。グループ間の加算順（クラスターの`Σ_g S_g S_g'`等）・between回帰の行順・DKの時点順
-/// （辞書順＝時系列順の規約、`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）を
-/// 旧実装と同じに保ち、結果をビット単位で変えないため。グループ内の行は観測順に積む
-/// （`group_indices`の安定な計数ソート）。
+/// **コードの順序は、`from_ids`ではキーの辞書順（`String`の`Ord`、旧実装の
+/// `BTreeMap<&str, _>`の反復順と同じ）にする**。グループ間の加算順（クラスターの
+/// `Σ_g S_g S_g'`等）・between回帰の行順を旧実装と同じに保ち、結果をビット単位で
+/// 変えないため。時点だけは、DKの時系列順序が値の順序で決まる必要があるため、
+/// `TimeKeys`が`from_ids_ordered`で値の順序のコードを振る（`TimeKeys`のdoc参照）。
+/// グループ内の行は観測順に積む（`group_indices`の安定な計数ソート）。
 ///
 /// `engine`クレート内部専用（`FeInput`/`ReInput`の公開APIは引き続き`String`列で受け取る）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -391,7 +393,7 @@ pub(crate) struct GroupCodes {
     codes: Vec<usize>,
     /// グループごとの観測数（長さ`n_groups`、コード順）。
     counts: Vec<usize>,
-    /// グループのキー（長さ`n_groups`、コード順＝辞書順）。
+    /// グループのキー（長さ`n_groups`、コード順）。
     keys: Vec<String>,
 }
 
@@ -399,28 +401,47 @@ impl GroupCodes {
     /// `ids`を辞書順の整数コードに変換する。ハッシュは`ids`全体に1回、ソートはユニークな
     /// キー（`n_groups`個）にだけ行う。
     pub(crate) fn from_ids(ids: &[String]) -> Self {
-        // 1. 出現順の仮コード（ハッシュ1回/行）。
+        Self::from_ids_ordered(ids, |_, _| Ordering::Equal)
+    }
+
+    /// `ids`を整数コードに変換する。コードの順序は`compare_rows`（各キーが最初に現れた行の
+    /// インデックス2つを比べる）で決め、同順位は`String`の辞書順で決める。`from_ids`は
+    /// `compare_rows`が常に`Equal`の場合（辞書順のみ）にあたる。
+    ///
+    /// 同じキーの行は同じ順序づけの値を持つこと（`TimeKeys`の各コンストラクタが保証する）。
+    /// 異なるキーが同順位になるのは、値としては等しい別表記（浮動小数点の`0.0`と`-0.0`等）
+    /// だけで、その2つの順序はキーの辞書順で行の並びに依らず決まる。
+    pub(crate) fn from_ids_ordered(
+        ids: &[String],
+        compare_rows: impl Fn(usize, usize) -> Ordering,
+    ) -> Self {
+        // 1. 出現順の仮コード（ハッシュ1回/行）。キーごとに最初に現れた行も控える。
         let mut first_seen: HashMap<&str, usize> = HashMap::new();
         let mut unique: Vec<&str> = Vec::new();
+        let mut first_row: Vec<usize> = Vec::new();
         let mut codes: Vec<usize> = ids
             .iter()
-            .map(|id| {
+            .enumerate()
+            .map(|(row, id)| {
                 *first_seen.entry(id.as_str()).or_insert_with(|| {
                     unique.push(id.as_str());
+                    first_row.push(row);
                     unique.len() - 1
                 })
             })
             .collect();
 
-        // 2. ユニークなキーだけを辞書順に並べ、仮コード→辞書順コードの対応を作る。
+        // 2. ユニークなキーだけを並べ、仮コード→順序づけコードの対応を作る。
         let mut order: Vec<usize> = (0..unique.len()).collect();
-        order.sort_unstable_by(|&a, &b| unique[a].cmp(unique[b]));
+        order.sort_unstable_by(|&a, &b| {
+            compare_rows(first_row[a], first_row[b]).then_with(|| unique[a].cmp(unique[b]))
+        });
         let mut rank = vec![0; unique.len()];
         for (r, &provisional_code) in order.iter().enumerate() {
             rank[provisional_code] = r;
         }
 
-        // 仮コードをその場で辞書順コードに置き換える（別の`Vec`を確保しない）。
+        // 仮コードをその場で順序づけコードに置き換える（別の`Vec`を確保しない）。
         for c in &mut codes {
             *c = rank[*c];
         }
@@ -446,7 +467,7 @@ impl GroupCodes {
         &self.counts
     }
 
-    /// グループのキー（コード順＝辞書順）。
+    /// グループのキー（コード順）。
     pub(crate) fn keys(&self) -> &[String] {
         &self.keys
     }
@@ -478,6 +499,92 @@ impl GroupCodes {
         }
         GroupIndices { offsets, indices }
     }
+}
+
+/// 時点列のラベルと、その時間順を表すコード。FE/REが時点の順序を使う
+/// 計算（Driscoll-Kraay型HAC・2-way FEの`fixed_effects()`の基準時点とキー順）に渡す。
+///
+/// 時点の順序は**ラベルの文字列ではなく列の値の順序**で決める（整数・浮動小数点は数値順、
+/// 日付・日時は時系列順、`Enum`はカテゴリ定義順）。文字列の辞書順では`1, 10, 11, 2, ...`の
+/// ように並んで時点の対応がずれ、DKの標準誤差が黙って変わる。値の順序をどう取るかは
+/// `engine_pybind`が列のdtypeから決め、コンストラクタで渡す。ラベル自体（`String`）は
+/// 同一性の判定と`fixed_effects()`のキーに使う。
+///
+/// ユニークな時点は1つのコードに対応し、コードは0から時点の昇順に振る。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TimeKeys {
+    /// 各行の時点ラベル（長さ`n`）。
+    ids: Vec<String>,
+    /// `ids`のコード（時間順）。
+    codes: GroupCodes,
+}
+
+impl TimeKeys {
+    /// ラベルの辞書順を時間順とみなす（ISO 8601の日付・ゼロ埋めした年月等、辞書順が時間順と
+    /// 一致するラベル向け）。`FeInput::from_columns`/`ReInput::from_columns`はこの順序を使う。
+    pub fn lexicographic(ids: Vec<String>) -> Self {
+        let codes = GroupCodes::from_ids(&ids);
+        Self { ids, codes }
+    }
+
+    /// 各行の整数値`values`の昇順を時間順にする（整数列・日付・日時・`Enum`の物理順序）。
+    ///
+    /// # Errors
+    /// `values`の長さが`ids`と一致しない場合は`PanelError::IdentifierDimensionMismatch`
+    /// （`engine_pybind`が同じ列から作る限り起こり得ない契約違反に対する防御）。
+    pub fn by_integer(ids: Vec<String>, values: &[i128]) -> Result<Self, PanelError> {
+        check_key_lengths(&ids, values.len())?;
+        let codes = GroupCodes::from_ids_ordered(&ids, |a, b| values[a].cmp(&values[b]));
+        Ok(Self { ids, codes })
+    }
+
+    /// 各行の浮動小数点値`values`の昇順（`f64::total_cmp`）を時間順にする。有限値であること
+    /// （NaN・無限大は`engine_pybind`が列の抽出時に拒否する）。
+    ///
+    /// # Errors
+    /// `values`の長さが`ids`と一致しない場合は`PanelError::IdentifierDimensionMismatch`。
+    pub fn by_float(ids: Vec<String>, values: &[f64]) -> Result<Self, PanelError> {
+        check_key_lengths(&ids, values.len())?;
+        let codes = GroupCodes::from_ids_ordered(&ids, |a, b| values[a].total_cmp(&values[b]));
+        Ok(Self { ids, codes })
+    }
+
+    /// 各行の時点ラベル（長さ`n`）。
+    pub fn ids(&self) -> &[String] {
+        &self.ids
+    }
+
+    /// 時点ラベルのコード（時間順）。
+    pub(crate) fn codes(&self) -> &GroupCodes {
+        &self.codes
+    }
+
+    /// 行数`n`。
+    pub fn len(&self) -> usize {
+        self.ids.len()
+    }
+
+    /// 行数が0か。
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty()
+    }
+
+    /// ユニークな時点のラベルを時間順に並べたもの。
+    pub fn periods(&self) -> &[String] {
+        self.codes.keys()
+    }
+}
+
+/// `TimeKeys`のコンストラクタが、ラベルと順序づけの値の長さを検証する。
+fn check_key_lengths(ids: &[String], values: usize) -> Result<(), PanelError> {
+    if ids.len() != values {
+        return Err(PanelError::IdentifierDimensionMismatch {
+            dimension: PanelDimension::Time,
+            y_rows: ids.len(),
+            other_rows: values,
+        });
+    }
+    Ok(())
 }
 
 /// `validate_cluster_groups`（OLS等と共有、`String`列を受ける）と同じ検証をコードで行う
@@ -727,9 +834,8 @@ pub(crate) fn validate_dk_periods_cover_tested_coefficients(
 /// `df_model`をそのまま渡す。`panel_cluster_cov_params`の`G/(G-1)×(n-1)/(n-K)`と
 /// 同型の式に、`G`を`t_periods`（`time`のユニークな時点数）に置き換えたものと理解できる）。
 ///
-/// `time`のコード（`GroupCodes`、辞書順＝時系列順）で集計して`ξ_t`（時点`t`でのクロスセクション和）を求める。
-/// キー順序（`String`の辞書順）がそのまま時系列順序とみなす規約（`fe.rs`モジュールdoc参照）と
-/// 一致することを利用している。
+/// `time`のコード（`GroupCodes`、コード順＝時系列順、`TimeKeys`のdoc参照）で集計して
+/// `ξ_t`（時点`t`でのクロスセクション和）を求める。
 ///
 /// **`bandwidth <= t_periods`（狭義の`<`ではない）が呼び出し元の`resolve_dk_bandwidth`から
 /// 保証される**（詳細は`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
@@ -1188,6 +1294,79 @@ mod tests {
         let codes = GroupCodes::from_ids(&ids);
         let btree_order: Vec<&str> = group_indices_by_key(&ids).keys().copied().collect();
         assert_eq!(codes.keys(), btree_order.as_slice());
+    }
+
+    // ── TimeKeys ───────────────────────────────────────────────────────────
+
+    fn labels(values: &[&str]) -> Vec<String> {
+        values.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn time_keys_by_integer_orders_periods_numerically_not_lexicographically() {
+        // 辞書順なら "10" < "2" < "9"。値の順序では 2 < 9 < 10。
+        let keys = TimeKeys::by_integer(labels(&["9", "10", "2", "9"]), &[9, 10, 2, 9]).unwrap();
+        assert_eq!(keys.periods(), ["2", "9", "10"]);
+        assert_eq!(keys.codes().codes(), [1, 2, 0, 1]);
+        assert_eq!(keys.ids(), ["9", "10", "2", "9"]);
+        assert_eq!(keys.len(), 4);
+    }
+
+    #[test]
+    fn time_keys_by_integer_orders_negative_values() {
+        let keys = TimeKeys::by_integer(labels(&["-1", "-10", "3"]), &[-1, -10, 3]).unwrap();
+        assert_eq!(keys.periods(), ["-10", "-1", "3"]);
+    }
+
+    #[test]
+    fn time_keys_by_float_orders_periods_numerically() {
+        let keys = TimeKeys::by_float(
+            labels(&["1.5", "-0.5", "10.0", "2.5"]),
+            &[1.5, -0.5, 10.0, 2.5],
+        )
+        .unwrap();
+        assert_eq!(keys.periods(), ["-0.5", "1.5", "2.5", "10.0"]);
+    }
+
+    #[test]
+    fn time_keys_by_float_breaks_ties_between_equal_values_by_label() {
+        // `0.0`と`-0.0`は値としては等しいが別のラベル。順序は行の並びに依らずラベルの辞書順
+        // （"-0.0" < "0.0"）で決まる。
+        let forward =
+            TimeKeys::by_float(labels(&["0.0", "-0.0", "1.0"]), &[0.0, -0.0, 1.0]).unwrap();
+        let backward =
+            TimeKeys::by_float(labels(&["1.0", "-0.0", "0.0"]), &[1.0, -0.0, 0.0]).unwrap();
+        assert_eq!(forward.periods(), ["-0.0", "0.0", "1.0"]);
+        assert_eq!(backward.periods(), ["-0.0", "0.0", "1.0"]);
+    }
+
+    #[test]
+    fn time_keys_lexicographic_matches_group_codes_from_ids() {
+        let ids = labels(&["b", "a", "c", "a"]);
+        let keys = TimeKeys::lexicographic(ids.clone());
+        assert_eq!(keys.codes(), &GroupCodes::from_ids(&ids));
+        assert_eq!(keys.periods(), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn time_keys_rejects_values_of_a_different_length() {
+        let err = TimeKeys::by_integer(labels(&["1", "2"]), &[1]).unwrap_err();
+        assert_eq!(
+            err,
+            PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Time,
+                y_rows: 2,
+                other_rows: 1,
+            }
+        );
+        assert!(TimeKeys::by_float(labels(&["1"]), &[1.0, 2.0]).is_err());
+    }
+
+    #[test]
+    fn time_keys_accepts_empty_input() {
+        let keys = TimeKeys::by_integer(vec![], &[]).unwrap();
+        assert!(keys.is_empty());
+        assert!(keys.periods().is_empty());
     }
 
     mod group_codes_proptests {

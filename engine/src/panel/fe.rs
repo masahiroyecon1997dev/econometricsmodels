@@ -301,17 +301,17 @@
 //!   ルールと同一の式だが、**OLSの`hac_lags`が観測数`n`ベースなのに対しDKは時点数`t`
 //!   ベース**である点に注意（`linearmodels`もこのデフォルトルールでは`kernel_optimal_
 //!   bandwidth`——データ依存の自動選択——を使わず、決定的な式のみを使う）。
-//! - **時系列順序**: `time: Vec<String>`は同一性だけが意味を持つグルーピングキー
-//!   （entityと同じ設計、`.claude/rules/rust-style.md`「Python境界でのデータ受け渡し」）
-//!   で時系列順序の情報を持たないが、DKのカーネル集計はξ_tを時系列順に並べてラグを
-//!   取る必要がある。**`time`の辞書順（`String`の`Ord`）を時系列順とみなす**
-//!   （ユーザーとの相談で決定。ISO 8601日付・ゼロ埋め年度等、辞書順=時系列順になる
-//!   形式で`time`を渡すことが呼び出し側の契約——ゼロ埋めなしの数値文字列
-//!   （`"9"`より`"10"`が辞書順で先に来る等）は契約違反になるが、`engine`側でこれを
-//!   検出するバリデーションは現時点で未実装、`engine_pybind`層の検討課題）。
+//! - **時系列順序**: DKのカーネル集計はξ_tを時系列順に並べてラグを取る必要がある。
+//!   `time`は`TimeKeys`（`common.rs`）で受け取り、時点のラベル（同一性の判定と
+//!   `fixed_effects()`のキー）と**時間順のコード**を持つ。順序は文字列の辞書順ではなく
+//!   列の値の順序（整数・浮動小数は数値順、日付・日時は時系列順、`Enum`は定義順）で、
+//!   どの順序にするかは呼び出し側（`engine_pybind`が列のdtypeから決める）が
+//!   `TimeKeys`のコンストラクタで指定する。辞書順は`1, 10, 11, 2, ...`のように時間順と
+//!   ずれて標準誤差が黙って変わるため使わない。`TimeKeys::lexicographic`（と
+//!   `FeInput::from_columns`）はラベルの辞書順を時間順とみなす簡便版で、ISO 8601の日付や
+//!   ゼロ埋めした年月等、辞書順が時間順と一致するラベル向け。
 //!   `panel_driscoll_kraay_cov_params`（`common.rs`）は`time`の整数コード（`GroupCodes`）の
-//!   順に集計する。コードはキーの辞書順に振るため（`panel_cluster_cov_params`と同じ
-//!   「グループ間加算の順序を固定する」目的に加え）、コード順＝辞書順がそのまま時系列順になる。
+//!   順に集計するため、コード順がそのまま時系列順になる。
 //! - **1-way/2-wayとも対応**（ユーザーとの相談で決定）。2-way FEは`within_transform_
 //!   two_way`が既に`time`必須を担保しているが、**1-way FEで`FeCovType::Dk`を指定した
 //!   のに`time`が`None`の場合は`PanelError::DkRequiresTime`**を返す（他のcov_typeは
@@ -322,7 +322,7 @@
 //!   `bandwidth`のみを持つバリアントだったが、`engine_pybind`のFEOptions設計
 //!   で「2-way FEの`time`（固定効果構造）とDK HACの時系列順序を別の列に
 //!   したい」というユースケースが判明し（ユーザー承認済み、2026-09-12）、
-//!   `Dk { bandwidth, time: Option<Vec<String>> }`に拡張した。`time`が`Some`なら
+//!   `Dk { bandwidth, time: Option<TimeKeys> }`に拡張した。`time`が`Some`なら
 //!   `input.time()`より優先してこちらをDK計算に使う（1-way FEで`time`列を一切
 //!   指定していなくても、この`time`だけでDK HACが成立する）。`None`なら従来通り
 //!   `input.time()`にフォールバックする。`FeInput`自体は変更していない（`time`は
@@ -348,8 +348,9 @@
 //!   両方に二重計上されるバグになる（`α_i + γ_t`が正しい合成効果より大域平均ぶん
 //!   大きくなる）。**採用した正規化: 基準時点を`γ_{t_ref} = 0`に固定し、`α_i`に大域的な
 //!   水準を吸収させる方式**（`fixest::fixef()`と同型の「片方のFEダミーの参照水準を0にする」
-//!   考え方）。`t_ref`には`time`の辞書順で最初の値を使う（DKの時系列順序規約、モジュールdoc
-//!   「Driscoll-Kraay型パネルHAC対応」と同じ規約——入力の観測順に依存しない決定的な選び方）:
+//!   考え方）。`t_ref`には`time`の時間順で最初の値を使う（DKの時系列順序と同じ`TimeKeys`の
+//!   順序、モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照——入力の観測順に依存しない
+//!   決定的な選び方）。`fixed_effects()`の`time`は時間順の`Vec`で返す:
 //!   - `E_i = ȳ_i. - x̄_i.'β̂`（entityの残差平均）、`E_t = ȳ_.t - x̄_.t'β̂`（timeの残差平均）、
 //!     `E = ȳ.. - x̄..'β̂`（全体の残差平均）とすると、`α_i = E_i - E + E_{t_ref}`、
 //!     `γ_t = E_t - E_{t_ref}`。導出: バランスパネルの2-way ANOVA恒等式
@@ -357,13 +358,13 @@
 //!     `c = E - E_{t_ref}`が定まり、`α_i = E_i - c`、`γ_t = E_t - E + c`から上式が出る。
 //!   - **`fixest::fixef()`との数値一致は`t_ref`の選び方が一致する入力でのみ成立する**
 //!     （着手時に発見、ユーザー承認済み、2026-09-12）: `fixest`自身の基準時点選択は
-//!     `time`列の辞書順ではなく**観測順で最初に現れた値**に見える（実地検証: 同じ
+//!     `time`列の時間順ではなく**観測順で最初に現れた値**に見える（実地検証: 同じ
 //!     `{entity, time}`ペア集合でも行の並び順を変えると`fixef()`が選ぶ基準時点が変わる
 //!     ことを確認）。2-wayの正規化はどの`t_ref`を選んでも数学的に等価（`α_i`・`γ_t`の
 //!     分解が変わるだけで`α_i+γ_t+x_it'β̂`自体は不変）なため、**本実装は`fixest`の
-//!     観測順依存の挙動を再現せず、`time`の辞書順という決定的な規約を優先する**
+//!     観測順依存の挙動を再現せず、`time`の時間順という決定的な規約を優先する**
 //!     （ユーザーとの相談で決定）。テストで使う`fixest_reference_input`は観測順の最初の
-//!     時点と辞書順で最小の時点が一致する構成のため、その入力に限り`fixest::feols(y ~ x |
+//!     時点と時間順で最初の時点が一致する構成のため、その入力に限り`fixest::feols(y ~ x |
 //!     entity + time)`の`fixef()`と数値完全一致する
 //!     （`fe_estimator_fit_two_way_fixed_effects_matches_fixest_reference`）。
 //!   - 代替案（`α_i`・`γ_t`をともに大域平均からの偏差にする対称正規化）は、`fe-spec.md`3.5節のAPI
@@ -385,7 +386,7 @@ use crate::error::CommonError;
 use crate::inference;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput, wald_f_test};
 use crate::panel::common::{
-    GroupCodes, PanelDimension, PanelError, PanelHcVariant, design_matrix_from_columns,
+    GroupCodes, PanelDimension, PanelError, PanelHcVariant, TimeKeys, design_matrix_from_columns,
     leverage_within, panel_classical_cov_params, panel_cluster_cov_params,
     panel_driscoll_kraay_cov_params, panel_hc_cov_params, quasi_demean_column,
     resolve_dk_bandwidth, validate_cluster_group_codes,
@@ -409,15 +410,14 @@ pub struct FeInput {
     x_names: Vec<String>,
     /// 各行のエンティティID（長さ`n`）。
     entity: Vec<String>,
-    /// 各行の時点ID（長さ`n`）。2-way FE（entity + time FE）を指定しない場合は`None`
-    /// （`panel-common.md`1.1節: `time`は`FEOptions`内の条件付き必須オプション）。
-    time: Option<Vec<String>>,
+    /// 各行の時点ラベルと、その時間順のコード（長さ`n`）。2-way FE（entity + time FE）を
+    /// 指定しない場合は`None`（`panel-common.md`1.1節: `time`は`FEOptions`内の条件付き
+    /// 必須オプション）。
+    time: Option<TimeKeys>,
     /// 被説明変数名。
     dep_var_name: String,
     /// `entity`の整数コード（構築時に一度だけ作る、`GroupCodes`のdocコメント参照）。
     entity_codes: GroupCodes,
-    /// `time`の整数コード（`time`が`None`なら`None`）。
-    time_codes: Option<GroupCodes>,
 }
 
 /// `FeInput::from_columns`の次元検証（エラー条件は`from_columns`のdocコメント参照）。
@@ -491,17 +491,46 @@ impl FeInput {
         time: Option<&[String]>,
         dep_var_name: String,
     ) -> Result<Self, PanelError> {
-        validate_input_dimensions(y, x_columns, &x_names, entity, time)?;
+        Self::from_columns_ordered(
+            y,
+            x_columns,
+            x_names,
+            entity,
+            time.map(|t| TimeKeys::lexicographic(t.to_vec())),
+            dep_var_name,
+        )
+    }
+
+    /// `from_columns`の`time`を、順序を持つ`TimeKeys`で受け取る版。時点の順序を
+    /// ラベルの辞書順ではなく列の値の順序にしたい場合（整数・日付等）は、こちらを使う
+    /// （`TimeKeys`のdoc参照）。`from_columns`はラベルの辞書順を時間順とみなす簡便版。
+    ///
+    /// # Errors
+    /// `from_columns`と同じ。
+    pub fn from_columns_ordered(
+        y: &[f64],
+        x_columns: &[Vec<f64>],
+        x_names: Vec<String>,
+        entity: &[String],
+        time: Option<TimeKeys>,
+        dep_var_name: String,
+    ) -> Result<Self, PanelError> {
+        validate_input_dimensions(
+            y,
+            x_columns,
+            &x_names,
+            entity,
+            time.as_ref().map(TimeKeys::ids),
+        )?;
 
         Ok(Self {
             y: y.to_vec(),
             x: x_columns.to_vec(),
             x_names,
             entity: entity.to_vec(),
-            time: time.map(|t| t.to_vec()),
+            time,
             dep_var_name,
             entity_codes: GroupCodes::from_ids(entity),
-            time_codes: time.map(GroupCodes::from_ids),
         })
     }
 
@@ -519,7 +548,6 @@ impl FeInput {
             time: None,
             dep_var_name: input.dep_var_name().to_string(),
             entity_codes: input.entity_codes().clone(),
-            time_codes: None,
         }
     }
 
@@ -535,7 +563,7 @@ impl FeInput {
 
     /// `time`の整数コード（1-way FEで`time`が無ければ`None`）。
     pub(crate) fn time_codes(&self) -> Option<&GroupCodes> {
-        self.time_codes.as_ref()
+        self.time.as_ref().map(TimeKeys::codes)
     }
 
     /// 被説明変数（長さ`n`）。
@@ -560,7 +588,7 @@ impl FeInput {
 
     /// 各行の時点ID（長さ`n`）。1-way FEでは`None`。
     pub fn time(&self) -> Option<&[String]> {
-        self.time.as_deref()
+        self.time.as_ref().map(TimeKeys::ids)
     }
 
     /// 被説明変数名。
@@ -600,7 +628,9 @@ pub enum FixedEffects {
     /// `"entity"`/`"time"`に対応）。
     TwoWay {
         entity: BTreeMap<String, f64>,
-        time: BTreeMap<String, f64>,
+        /// 時点ID → γ_t。**時点の昇順**（値の順序、`TimeKeys`のdoc参照）に並べ、先頭の
+        /// 時点が基準（`γ=0`）。文字列の辞書順ではないため`BTreeMap`にしない。
+        time: Vec<(String, f64)>,
     },
 }
 
@@ -634,7 +664,7 @@ pub enum FeCovType {
     /// 場合）。
     Dk {
         bandwidth: Option<i64>,
-        time: Option<Vec<String>>,
+        time: Option<TimeKeys>,
     },
 }
 
@@ -904,7 +934,7 @@ impl FeEstimator {
                 // `hac_time`（`FEOptions.dk_time`経由の明示指定）があれば`input.time()`
                 // より優先する（モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
                 let time: &[String] = match hac_time {
-                    Some(t) => t,
+                    Some(t) => t.ids(),
                     None => input.time().ok_or(PanelError::DkRequiresTime)?,
                 };
                 // `input.time()`は`FeInput::from_columns`が長さを検証済みだが、`hac_time`
@@ -917,10 +947,9 @@ impl FeEstimator {
                         other_rows: time.len(),
                     });
                 }
-                // `hac_time`があればここでコード化し、無ければ`FeInput`のコードを再利用する。
-                let override_codes = hac_time.as_deref().map(GroupCodes::from_ids);
-                let time_codes = match override_codes.as_ref() {
-                    Some(codes) => codes,
+                // `hac_time`があればそのコード（時間順）を使い、無ければ`FeInput`のコードを使う。
+                let time_codes = match hac_time {
+                    Some(t) => t.codes(),
                     None => input.time_codes().ok_or(PanelError::DkRequiresTime)?,
                 };
                 let t_periods = time_codes.n_groups();
@@ -1160,21 +1189,21 @@ impl FeEstimator {
     ///
     /// `fit()`の戻り値本体には含めない別メソッド（IVの`first_stage()`と同じ方針、
     /// モジュールdoc「固定効果自体（α_i）の復元」参照）。2-wayは正規化に任意性があるため
-    /// `time`の辞書順で最初の時点を基準に`γ_{t_ref}=0`とする規約を採用している（同モジュール
+    /// `time`の時間順で最初の時点を基準に`γ_{t_ref}=0`とする規約を採用している（同モジュール
     /// doc参照。`fixest::fixef()`とは基準時点の選び方の前提が異なるため、数値一致は
-    /// 観測順の最初の時点と辞書順で最小の時点が一致する入力に限られる）。
+    /// 観測順の最初の時点と時間順で最初の時点が一致する入力に限られる）。2-wayの`time`は
+    /// 時間順の`Vec`で返す。
     pub fn fixed_effects(&self) -> FixedEffects {
         let y = self.input.y();
         let x = self.input.x();
         let params = self.estimator.params();
 
         match self.effects {
-            FeEffects::OneWay => FixedEffects::OneWay(group_residual_means(
-                y,
-                x,
-                params,
-                self.input.entity_codes(),
-            )),
+            FeEffects::OneWay => FixedEffects::OneWay(
+                group_residual_means(y, x, params, self.input.entity_codes())
+                    .into_iter()
+                    .collect(),
+            ),
             FeEffects::TwoWay => {
                 let time = self.input.time_codes().expect(
                     "2-way already validated `time` is present \
@@ -1183,12 +1212,12 @@ impl FeEstimator {
                 let entity_means = group_residual_means(y, x, params, self.input.entity_codes());
                 let time_means = group_residual_means(y, x, params, time);
                 let overall_mean = overall_residual_mean(y, x, params);
-                // `time_means`は`BTreeMap`（辞書順）のため`first_key_value()`が辞書順で
-                // 最初の時点（DKの時系列順序規約と同じ、モジュールdoc参照）。2-way FEは
-                // `n>=1`が`InsufficientDegreesOfFreedom`検証で既に保証されているため、
-                // `time_means`は必ず1件以上のキーを持つ。
-                let (_, &reference_value) = time_means
-                    .first_key_value()
+                // `time_means`は時点の昇順（コード順）のため`first()`が最初の時点（DKの
+                // 時系列順序と同じ、モジュールdoc参照）。2-way FEは`n>=1`が
+                // `InsufficientDegreesOfFreedom`検証で既に保証されているため、`time_means`は
+                // 必ず1件以上の要素を持つ。
+                let &(_, reference_value) = time_means
+                    .first()
                     .expect("2-way FE guarantees at least one time period (df_resid check)");
 
                 let entity = entity_means
@@ -1433,16 +1462,16 @@ fn fe_r_squared_overall(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>) -> f64 {
     if tss > 0.0 { 1.0 - ssr / tss } else { 0.0 }
 }
 
-/// `ids`のコードでグループ化した`slope_only_residual`の平均（`E_i`/`E_t`）。
-/// コードは辞書順のため、キー順序は`BTreeMap`の反復順（他のグループ集約と同じ理由で
-/// 決定的）と一致し、グループ内の加算順は観測順になる。`fixed_effects`が1-way・2-wayの
-/// entity/time双方で使う。
+/// `ids`のコードでグループ化した`slope_only_residual`の平均（`E_i`/`E_t`）を、コード順の
+/// `(キー, 平均)`で返す。entityはコードが辞書順、timeは時点の昇順で、どちらも順序が
+/// 決定的（他のグループ集約と同じ理由）。グループ内の加算順は観測順になる。
+/// `fixed_effects`が1-way・2-wayのentity/time双方で使う。
 fn group_residual_means(
     y: &[f64],
     x: &[Vec<f64>],
     params: &Mat<f64>,
     ids: &GroupCodes,
-) -> BTreeMap<String, f64> {
+) -> Vec<(String, f64)> {
     ids.keys()
         .iter()
         .zip(ids.group_indices().iter())
@@ -1748,6 +1777,16 @@ mod tests {
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// 辞書順の`TimeKeys`（`FeCovType::Dk.time`に渡す）。
+    fn lex_time(values: &[&str]) -> TimeKeys {
+        TimeKeys::lexicographic(strings(values))
+    }
+
+    /// 時点効果（時点の昇順の`Vec`）を、ラベルで引ける`BTreeMap`にする。
+    fn by_label(effects: Vec<(String, f64)>) -> BTreeMap<String, f64> {
+        effects.into_iter().collect()
     }
 
     fn codes(values: &[&str]) -> GroupCodes {
@@ -2932,6 +2971,7 @@ mod tests {
         let FixedEffects::TwoWay { entity, time } = fe.fixed_effects() else {
             panic!("2-way FE must return FixedEffects::TwoWay");
         };
+        let time = by_label(time);
         assert!((entity["a"] - 3.373_831_775_700_935).abs() < 1e-9);
         assert!((entity["b"] - 1.336_448_598_130_841).abs() < 1e-9);
         assert!((entity["c"] - 5.277_258_566_978_194).abs() < 1e-9);
@@ -2969,6 +3009,7 @@ mod tests {
         else {
             panic!("2-way FE must return FixedEffects::TwoWay");
         };
+        let time_effects = by_label(time_effects);
 
         for i in 0..y.len() {
             let predicted = beta * x[i]
@@ -3049,6 +3090,7 @@ mod tests {
         let FixedEffects::TwoWay { entity, time } = fe.fixed_effects() else {
             panic!("2-way FE must return FixedEffects::TwoWay");
         };
+        let time = by_label(time);
         assert_eq!(time["10"], 0.0); // 辞書順で"10" < "9"のため基準はこちら
         assert!((time["9"] - (-3.0)).abs() < 1e-12);
         assert!((entity["e1"] - 3.5).abs() < 1e-12);
@@ -3512,7 +3554,7 @@ mod tests {
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: None,
-                time: Some(time),
+                time: Some(TimeKeys::lexicographic(time)),
             },
             0.95,
         )
@@ -3545,7 +3587,7 @@ mod tests {
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: None,
-                time: Some(time),
+                time: Some(TimeKeys::lexicographic(time)),
             },
             0.95,
         )
@@ -3886,7 +3928,7 @@ mod tests {
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: Some(0),
-                time: Some(three_period_time()),
+                time: Some(TimeKeys::lexicographic(three_period_time())),
             },
             0.95,
         );
@@ -4013,7 +4055,7 @@ mod tests {
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: Some(0),
-                time: Some(strings(&TWO_PERIOD_LABELS)),
+                time: Some(lex_time(&TWO_PERIOD_LABELS)),
             },
             0.95,
         );
@@ -4025,7 +4067,7 @@ mod tests {
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: Some(0),
-                time: Some(strings(&THREE_PERIOD_LABELS)),
+                time: Some(lex_time(&THREE_PERIOD_LABELS)),
             },
             0.95,
         )
@@ -4100,7 +4142,9 @@ mod tests {
             FeEffects::TwoWay,
             FeCovType::Dk {
                 bandwidth: Some(0),
-                time: Some(strings(&["p", "p", "p", "p", "p", "q", "q", "q", "q", "q"])),
+                time: Some(lex_time(&[
+                    "p", "p", "p", "p", "p", "q", "q", "q", "q", "q",
+                ])),
             },
             0.95,
         );
@@ -4158,7 +4202,7 @@ mod tests {
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: Some(0),
-                time: Some(time[..n - 1].to_vec()),
+                time: Some(TimeKeys::lexicographic(time[..n - 1].to_vec())),
             },
             0.95,
         );
@@ -4667,6 +4711,175 @@ mod tests {
                 assert_all_approx_eq(&params, &ols_params, "params");
                 assert_all_approx_eq(&se, &ols_se, "se");
             }
+        }
+    }
+
+    // ── 時点の順序（`TimeKeys`） ───────────────────────────────────────────
+
+    /// 4エンティティ×12時点の疑似データ（時点共通の自己相関ショックを持つ）。戻り値は
+    /// `(y, x, entity, period)`で、`period`は各行の時点番号`0..12`。
+    fn dk_panel_12() -> (Vec<f64>, Vec<f64>, Vec<String>, Vec<usize>) {
+        let (n_entities, n_periods) = (4usize, 12usize);
+        let mut shock = vec![0.0; n_periods];
+        for t in 1..n_periods {
+            shock[t] = 0.8 * shock[t - 1] + (((t * 37) % 11) as f64 - 5.0) / 5.0;
+        }
+        let (mut y, mut x, mut entity, mut period) = (vec![], vec![], vec![], vec![]);
+        for e in 0..n_entities {
+            for (t, &shock_t) in shock.iter().enumerate() {
+                let xi = ((e * 7 + t * 13) % 17) as f64 / 3.0;
+                let noise = ((e * 5 + t * 3) % 7) as f64 / 7.0;
+                y.push(1.0 + 0.5 * xi + shock_t + noise);
+                x.push(xi);
+                entity.push(format!("e{e}"));
+                period.push(t);
+            }
+        }
+        (y, x, entity, period)
+    }
+
+    /// `dk_panel_12`の時点番号を`labels`で文字列にした`TimeKeys`（整数の値の順序）。
+    fn integer_time_keys(period: &[usize], labels: impl Fn(usize) -> String) -> TimeKeys {
+        let ids = period.iter().map(|&t| labels(t)).collect();
+        let values: Vec<i128> = period.iter().map(|&t| t as i128).collect();
+        TimeKeys::by_integer(ids, &values).unwrap()
+    }
+
+    fn dk_std_error(time: TimeKeys, rows: Option<&[usize]>) -> f64 {
+        let (y, x, entity, period) = dk_panel_12();
+        let rows: Vec<usize> = rows.map_or_else(|| (0..y.len()).collect(), |r| r.to_vec());
+        let pick = |v: &[f64]| rows.iter().map(|&i| v[i]).collect::<Vec<_>>();
+        let entity: Vec<String> = rows.iter().map(|&i| entity[i].clone()).collect();
+        let _ = period;
+        let input = FeInput::from_columns(
+            &pick(&y),
+            &[pick(&x)],
+            vec!["x".into()],
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+        let fe = FeEstimator::fit(
+            input,
+            FeEffects::OneWay,
+            FeCovType::Dk {
+                bandwidth: Some(3),
+                time: Some(time),
+            },
+            0.95,
+        )
+        .unwrap();
+        *fe.std_errors().get(0, 0)
+    }
+
+    #[test]
+    fn dk_standard_errors_follow_the_value_order_of_integer_periods() {
+        let (_, _, _, period) = dk_panel_12();
+        // 辞書順が時間順と一致するゼロ埋めラベル（基準）。
+        let padded = integer_time_keys(&period, |t| format!("{t:03}"));
+        // ゼロ埋めなしの整数ラベルを、数値順で並べる。
+        let numeric = integer_time_keys(&period, |t| t.to_string());
+        // ゼロ埋めなしのラベルを辞書順で並べる（`1, 10, 11, 2, ...`、誤った順序）。
+        let lexicographic = TimeKeys::lexicographic(period.iter().map(|t| t.to_string()).collect());
+
+        let expected = dk_std_error(padded, None);
+        let got = dk_std_error(numeric, None);
+        let wrong = dk_std_error(lexicographic, None);
+
+        assert!(
+            (got - expected).abs() < 1e-12,
+            "numeric {got} vs padded {expected}"
+        );
+        assert!(
+            (wrong - expected).abs() > 1e-6,
+            "the lexicographic order of unpadded labels must differ: {wrong} vs {expected}"
+        );
+    }
+
+    #[test]
+    fn dk_standard_errors_do_not_depend_on_row_order() {
+        let (_, _, _, period) = dk_panel_12();
+        let n = period.len();
+        let reversed: Vec<usize> = (0..n).rev().collect();
+        let shuffled: Vec<usize> = (0..n).map(|i| (i * 7 + 3) % n).collect();
+        assert_eq!(
+            {
+                let mut s = shuffled.clone();
+                s.sort();
+                s
+            },
+            (0..n).collect::<Vec<_>>(),
+            "the shuffle must be a permutation"
+        );
+        let keys = |rows: &[usize]| {
+            let p: Vec<usize> = rows.iter().map(|&i| period[i]).collect();
+            integer_time_keys(&p, |t| t.to_string())
+        };
+
+        let base = dk_std_error(keys(&(0..n).collect::<Vec<_>>()), None);
+        for rows in [&reversed, &shuffled] {
+            let got = dk_std_error(keys(rows), Some(rows));
+            assert!((got - base).abs() < 1e-12, "{got} vs {base}");
+        }
+    }
+
+    #[test]
+    fn fixed_effects_two_way_orders_periods_by_value_and_uses_the_first_as_reference() {
+        let (y, x, entity, period) = dk_panel_12();
+        let time = integer_time_keys(&period, |t| t.to_string());
+        let input = FeInput::from_columns_ordered(
+            &y,
+            &[x],
+            vec!["x".into()],
+            &entity,
+            Some(time),
+            "y".into(),
+        )
+        .unwrap();
+        let fe = FeEstimator::fit(input, FeEffects::TwoWay, FeCovType::Classical, 0.95).unwrap();
+
+        let FixedEffects::TwoWay { time, .. } = fe.fixed_effects() else {
+            panic!("2-way FE must return FixedEffects::TwoWay");
+        };
+        let labels: Vec<&str> = time.iter().map(|(label, _)| label.as_str()).collect();
+        assert_eq!(
+            labels,
+            ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"]
+        );
+        assert_eq!(time[0].1, 0.0, "the first period is the reference");
+    }
+
+    #[test]
+    fn fixed_effects_two_way_values_do_not_depend_on_the_labels_of_the_same_order() {
+        let (y, x, entity, period) = dk_panel_12();
+        let run = |labels: &dyn Fn(usize) -> String| {
+            let input = FeInput::from_columns_ordered(
+                &y,
+                std::slice::from_ref(&x),
+                vec!["x".into()],
+                &entity,
+                Some(integer_time_keys(&period, labels)),
+                "y".into(),
+            )
+            .unwrap();
+            let fe =
+                FeEstimator::fit(input, FeEffects::TwoWay, FeCovType::Classical, 0.95).unwrap();
+            let FixedEffects::TwoWay { entity, time } = fe.fixed_effects() else {
+                panic!("2-way FE must return FixedEffects::TwoWay");
+            };
+            (entity, time.into_iter().map(|(_, v)| v).collect::<Vec<_>>())
+        };
+
+        let (entity_a, time_a) = run(&|t| t.to_string());
+        let (entity_b, time_b) = run(&|t| format!("{t:03}"));
+
+        assert_eq!(time_a.len(), time_b.len());
+        for (a, b) in time_a.iter().zip(&time_b) {
+            assert!((a - b).abs() < 1e-12);
+        }
+        for (id, a) in &entity_a {
+            assert!((a - entity_b[id]).abs() < 1e-12);
         }
     }
 }

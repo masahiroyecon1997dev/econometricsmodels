@@ -69,8 +69,7 @@
 //! （OLS自身も`engine::linear::ols::OlsEstimator::fit`自体はk=0をpanicなく受理するが
 //! Python APIの`validate_x_non_empty`が弾く、という既存の非対称性と同じ構図）。
 
-use std::collections::HashMap;
-
+use engine::panel::common::TimeKeys;
 use engine::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput, FixedEffects};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
@@ -79,7 +78,7 @@ use pyo3_polars::PyDataFrame;
 
 use super::common::panel_error_to_pyerr;
 use crate::column_extraction::{
-    extract_f64_column, extract_f64_columns, extract_group_key_column, extract_time_key_column,
+    extract_f64_column, extract_f64_columns, extract_group_key_column, extract_time_keys,
 };
 use crate::errors::ValidationError;
 use crate::linear::common::mat_to_vec;
@@ -113,9 +112,9 @@ pub struct FEOptions {
     /// Column name of the time identifier. When set, requests two-way fixed effects
     /// (entity + time); when `None` (default), one-way (entity only). Also used as the
     /// Driscoll-Kraay HAC time ordering when `cov_type="dk"`, unless `dk_time` is set
-    /// (see `dk_time`). For the HAC ordering the periods are sorted by the text form of
-    /// the labels, so integer labels with different numbers of digits (`1, 2, ..., 12`)
-    /// sort as text; use a `Date` column or zero-padded labels.
+    /// (see `dk_time`). The periods are ordered by the values of the column: numerically
+    /// for integers and floats, chronologically for `Date` and `Datetime`, in the order
+    /// of the categories for `Enum`, and alphabetically for strings and `Categorical`.
     #[pyo3(get)]
     pub time: Option<String>,
 
@@ -129,8 +128,8 @@ pub struct FEOptions {
     /// (`time` and `dk_time` serve different purposes; see the module docstring). When
     /// set, always takes priority over `time` for the HAC computation (even with
     /// two-way effects). When `None`, falls back to `time`. Specifying it with any
-    /// other `cov_type` raises `ValidationError`. The periods are sorted by the text
-    /// form of the labels (see `time`).
+    /// other `cov_type` raises `ValidationError`. The periods are ordered by the values
+    /// of the column (see `time`).
     #[pyo3(get)]
     pub dk_time: Option<String>,
 
@@ -327,19 +326,27 @@ impl FEResult {
     /// Two-way normalization: `α_i`/`γ_t` are not individually identified (adding a
     /// constant to one and subtracting it from the other leaves `α_i + γ_t`, and
     /// therefore the fitted values, unchanged). This implementation fixes the
-    /// reference time period to `γ_{t_ref} = 0`, where `t_ref` is the lexicographically
-    /// smallest value of the time identifier — a deterministic convention independent
-    /// of row order. `fixest::fixef()` instead uses the time value that appears first
-    /// in observation order, so numerical agreement with `fixest` for two-way effects
+    /// reference time period to `γ_{t_ref} = 0`, where `t_ref` is the first period in
+    /// time order (the order of the values of the time column: numeric for integer and
+    /// float columns, chronological for `Date`/`Datetime`, the category order for
+    /// `Enum`, alphabetical for strings and `Categorical`) — a deterministic convention
+    /// independent of row order. The `"time"` dictionary lists the periods in the same
+    /// order. `fixest::fixef()` instead uses the time value that appears first in
+    /// observation order, so numerical agreement with `fixest` for two-way effects
     /// only holds when those two choices of `t_ref` coincide for the given data.
     fn fixed_effects(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
         match self.estimator.fixed_effects() {
             FixedEffects::OneWay(effects) => Ok(effects.into_pyobject(py)?.unbind()),
             FixedEffects::TwoWay { entity, time } => {
-                let mut outer = HashMap::with_capacity(2);
-                outer.insert("entity", entity);
-                outer.insert("time", time);
-                Ok(outer.into_pyobject(py)?.unbind())
+                // 時点は時間順に並べた`dict`にする（Pythonの`dict`は挿入順を保つ）。
+                let time_effects = PyDict::new(py);
+                for (period, effect) in time {
+                    time_effects.set_item(period, effect)?;
+                }
+                let outer = PyDict::new(py);
+                outer.set_item("entity", entity)?;
+                outer.set_item("time", time_effects)?;
+                Ok(outer.unbind())
             }
         }
     }
@@ -378,7 +385,7 @@ fn parse_fe_cov_type(df: &DataFrame, options: &FEOptions) -> PyResult<(FeCovType
             let time = options
                 .dk_time
                 .as_ref()
-                .map(|col_name| extract_time_key_column(df, col_name))
+                .map(|col_name| extract_time_keys(df, col_name))
                 .transpose()?;
             FeCovType::Dk {
                 bandwidth: options.dk_bandwidth,
@@ -471,12 +478,12 @@ pub(crate) fn build_fe_input(
     let entity_slice = extract_group_key_column(df, &entity)?;
 
     // ── `time`列の抽出（2-way FEを指定した場合のみ）───────────────────────
-    let time_slice: Option<Vec<String>> = options
+    let time_keys: Option<TimeKeys> = options
         .time
         .as_ref()
-        .map(|col_name| extract_time_key_column(df, col_name))
+        .map(|col_name| extract_time_keys(df, col_name))
         .transpose()?;
-    let effects = if time_slice.is_some() {
+    let effects = if time_keys.is_some() {
         FeEffects::TwoWay
     } else {
         FeEffects::OneWay
@@ -485,15 +492,8 @@ pub(crate) fn build_fe_input(
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
     let (cov_type, cov_type_lower) = parse_fe_cov_type(df, options)?;
 
-    let input = FeInput::from_columns(
-        &y_slice,
-        &x_slices,
-        x,
-        &entity_slice,
-        time_slice.as_deref(),
-        y,
-    )
-    .map_err(panel_error_to_pyerr)?;
+    let input = FeInput::from_columns_ordered(&y_slice, &x_slices, x, &entity_slice, time_keys, y)
+        .map_err(panel_error_to_pyerr)?;
 
     Ok((input, effects, cov_type, cov_type_lower))
 }
@@ -793,14 +793,13 @@ mod tests {
             cov_type,
             FeCovType::Dk {
                 bandwidth: None,
-                time: Some(vec![
-                    "1".to_string(),
-                    "2".to_string(),
-                    "1".to_string(),
-                    "2".to_string(),
-                    "1".to_string(),
-                    "2".to_string(),
-                ]),
+                time: Some(
+                    TimeKeys::by_integer(
+                        ["1", "2", "1", "2", "1", "2"].map(str::to_string).to_vec(),
+                        &[1, 2, 1, 2, 1, 2]
+                    )
+                    .unwrap()
+                ),
             }
         );
     }
@@ -838,12 +837,9 @@ mod tests {
             cov_type,
             FeCovType::Dk {
                 bandwidth: None,
-                time: Some(vec![
-                    "q1".to_string(),
-                    "q2".to_string(),
-                    "q1".to_string(),
-                    "q2".to_string(),
-                ]),
+                time: Some(TimeKeys::lexicographic(
+                    ["q1", "q2", "q1", "q2"].map(str::to_string).to_vec()
+                )),
             }
         );
     }

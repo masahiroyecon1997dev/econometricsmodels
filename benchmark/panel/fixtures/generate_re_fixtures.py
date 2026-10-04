@@ -120,7 +120,7 @@ def build_fixtures() -> dict:
             "plm::phtestのみを参照値とする例外として"
             "generate_re_crosscheck_fixtures.json側にのみ含める"
             "（panel-common.md5.3節）。v1のハウスマン検定ベンチマークは"
-            "1-way（REOptions.time未指定の内部FE呼び出し）に限定する"
+            "1-way（REOptions.dk_time未指定の内部FE呼び出し）に限定する"
             "（RE自身がv1でentity方向のみをサポートするため、`re-spec.md`5章。2-way内部"
             "FE呼び出しのクロスチェックは別issueで検討、ユーザー確認済み・"
             "2026-09-20）。"

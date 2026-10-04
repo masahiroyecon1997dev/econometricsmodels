@@ -138,7 +138,7 @@ def test_re_cluster_uses_g_minus_one_df(df):
 
 
 def test_re_dk_uses_t_minus_one_df(df):
-    options = REOptions(cov_type="dk", time="time")
+    options = REOptions(cov_type="dk", dk_time="time")
     res = RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
     _check_t(res, N_PERIODS - 1)
 
@@ -280,7 +280,9 @@ class TestNonEntityCluster:
     ("options", "n_periods"),
     [
         pytest.param({"dk_time": "time"}, N_PERIODS, id="1way-dk_time"),
-        pytest.param({"time": "time"}, N_PERIODS, id="2way-time"),
+        pytest.param(
+            {"time": "time", "dk_time": "time"}, N_PERIODS, id="2way-dk_time"
+        ),
         pytest.param(
             {"dk_time": "time5"}, N_PERIODS_COARSE, id="1way-dk_time-coarse"
         ),
@@ -292,8 +294,8 @@ class TestNonEntityCluster:
     ],
 )
 def test_fe_dk_uses_t_minus_one_of_the_dk_time_column(df, options, n_periods):
-    """dkの`T`は`dk_time`（無ければ`time`）列のユニーク数。2-wayで`dk_time`を
-    併せて指定した場合は`dk_time`が優先される。"""
+    """dkの`T`は`dk_time`列のユニーク数。2-wayでも固定効果の`time`ではなく
+    `dk_time`が使われる。"""
     res = _fe(df, cov_type="dk", **options)
     _check_t(res, n_periods - 1)
 
@@ -303,7 +305,7 @@ def test_fe_dk_uses_t_minus_one_of_the_dk_time_column(df, options, n_periods):
     [("time", N_PERIODS), ("time5", N_PERIODS_COARSE)],
 )
 def test_re_dk_uses_t_minus_one_of_the_time_column(df, time, n_periods):
-    res = _re(df, cov_type="dk", time=time)
+    res = _re(df, cov_type="dk", dk_time=time)
     _check_t(res, n_periods - 1)
 
 
@@ -333,14 +335,18 @@ def test_re_dk_uses_t_minus_one_of_the_time_column(df, time, n_periods):
             {"cov_type": "dk", "dk_time": "time5"},
             N_PERIODS_COARSE - 1,
         ),
-        ("fe", {"cov_type": "dk", "two_way": True}, N_PERIODS - 1),
+        (
+            "fe",
+            {"cov_type": "dk", "dk_time": "time", "two_way": True},
+            N_PERIODS - 1,
+        ),
         ("re", {"cov_type": "classical"}, RE_DF_RESID),
         ("re", {"cov_type": "hc1"}, RE_DF_RESID),
         ("re", {"cov_type": "cluster"}, N_ENTITIES - 1),
         ("re", {"cov_type": "cluster", "cluster": "grp"}, N_GROUPS - 1),
         ("re", {"cov_type": "cluster", "cluster": "coarse"}, N_COARSE - 1),
         ("re", {"cov_type": "cluster", "cluster": "time"}, N_PERIODS - 1),
-        ("re", {"cov_type": "dk", "time": "time5"}, N_PERIODS_COARSE - 1),
+        ("re", {"cov_type": "dk", "dk_time": "time5"}, N_PERIODS_COARSE - 1),
     ],
 )
 def test_confidence_interval_uses_stat_df_critical_value(
@@ -429,4 +435,4 @@ def test_unbalanced_dk_uses_observed_number_of_periods(df_unbalanced):
     ユニークな時点数。"""
     t = df_unbalanced["time"].n_unique()
     _check_t(_fe(df_unbalanced, cov_type="dk", dk_time="time"), t - 1)
-    _check_t(_re(df_unbalanced, cov_type="dk", time="time"), t - 1)
+    _check_t(_re(df_unbalanced, cov_type="dk", dk_time="time"), t - 1)

@@ -157,12 +157,11 @@ def _check_result(res, ref: dict, label: str) -> None:
 
 
 def _options(cov_type: str, *, two_way: bool) -> FEOptions:
-    """`dk`は1-wayのとき時系列順序（`dk_time`）が別途必要。"""
-    if two_way:
-        return FEOptions(cov_type=cov_type, time="time")
+    """`dk`は1-way・2-wayとも時点列（`dk_time`）を明示する必要がある。"""
+    kwargs = {"time": "time"} if two_way else {}
     if cov_type == "dk":
-        return FEOptions(cov_type="dk", dk_time="time")
-    return FEOptions(cov_type=cov_type)
+        kwargs["dk_time"] = "time"
+    return FEOptions(cov_type=cov_type, **kwargs)
 
 
 # ── 凍結フィクスチャとの数値照合（合成データ） ───────────────────────

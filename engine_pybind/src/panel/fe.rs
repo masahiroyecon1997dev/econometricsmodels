@@ -33,13 +33,13 @@
 //!
 //! `time`（bareネーミング）は2-way FE（entity + time FE）の指定に使う: `Some`なら2-way・
 //! `None`なら1-way。`dk_time`（`cov_type="dk"`の値を接頭辞にした命名）は
-//! Driscoll-Kraay型HAC（`cov_type="dk"`）専用の時系列順序で、`time`とは独立に指定できる
-//! （ユーザー確認済み、2026-09-12）。**`dk_time`が指定されていれば、2-way（`time`指定あり）
-//! でも常にこちらがDK計算に優先される**（`time`未指定なら`FeCovType::Dk.time`の上書きが
-//! `None`になり`FeInput.time()`——`time`から構築——にフォールバックする、`parse_fe_cov_type`
-//! 参照）。1-way FE + DK HAC（`time`未指定・`dk_time`のみ指定）を表現するために導入した
-//! 設計（詳細な経緯・engine側の対応する変更は`engine/src/panel/fe.rs`モジュールdoc
-//! 「Driscoll-Kraay型パネルHAC対応」参照）。
+//! Driscoll-Kraay型HAC（`cov_type="dk"`）専用の時点列で、`time`とは独立に指定できる
+//! （ユーザー確認済み、2026-09-12）。**`cov_type="dk"`では`dk_time`が必須**で、`time`
+//! （2-way FEの固定効果の時間次元）を暗黙に借用しない（どの列がDKの時点かを明示させ、
+//! 意図と違う列が選ばれても気づけない状況を避けるため。`dk_time`未指定は
+//! `ValidationError`、`parse_fe_cov_type`参照）。2-wayでも`dk_time`が常にDK計算に使われ、
+//! `time`と別の時間粒度（四半期の固定効果に年次のDK等）も指定できる（詳細な経緯・engine側の
+//! 対応する変更は`engine/src/panel/fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
 //!
 //! ## `cov_type`の非対応値
 //!
@@ -110,11 +110,12 @@ pub struct FEOptions {
     pub confidence_level: f64,
 
     /// Column name of the time identifier. When set, requests two-way fixed effects
-    /// (entity + time); when `None` (default), one-way (entity only). Also used as the
-    /// Driscoll-Kraay HAC time ordering when `cov_type="dk"`, unless `dk_time` is set
-    /// (see `dk_time`). The periods are ordered by the values of the column: numerically
-    /// for integers and floats, chronologically for `Date` and `Datetime`, in the order
-    /// of the categories for `Enum`, and alphabetically for strings and `Categorical`.
+    /// (entity + time); when `None` (default), one-way (entity only). It only defines the
+    /// fixed-effects structure: it is never used as the Driscoll-Kraay time periods (set
+    /// `dk_time` for that). The periods are ordered by the values of the column:
+    /// numerically for integers and floats, chronologically for `Date` and `Datetime`, in
+    /// the order of the categories for `Enum`, and alphabetically for strings and
+    /// `Categorical`.
     #[pyo3(get)]
     pub time: Option<String>,
 
@@ -124,12 +125,13 @@ pub struct FEOptions {
     #[pyo3(get)]
     pub cluster: Option<String>,
 
-    /// Column name giving the time order for Driscoll-Kraay HAC, independent of `time`
-    /// (`time` and `dk_time` serve different purposes; see the module docstring). When
-    /// set, always takes priority over `time` for the HAC computation (even with
-    /// two-way effects). When `None`, falls back to `time`. Specifying it with any
-    /// other `cov_type` raises `ValidationError`. The periods are ordered by the values
-    /// of the column (see `time`).
+    /// Column name that defines the time periods of the Driscoll-Kraay HAC, independent
+    /// of `time` (`time` and `dk_time` serve different purposes; see the module
+    /// docstring). Required when `cov_type="dk"`, in one-way and two-way models alike:
+    /// leaving it unset raises `ValidationError`, and `time` is not used instead. With
+    /// two-way effects the HAC may use a different time granularity from the fixed
+    /// effects. Specifying it with any other `cov_type` raises `ValidationError`. The
+    /// periods are ordered by the values of the column (see `time`).
     #[pyo3(get)]
     pub dk_time: Option<String>,
 
@@ -378,15 +380,17 @@ fn parse_fe_cov_type(df: &DataFrame, options: &FEOptions) -> PyResult<(FeCovType
             FeCovType::Cluster { groups }
         }
         "dk" => {
-            // `dk_time`が優先（モジュールdoc「`FEOptions.time`と`FEOptions.dk_time`は
-            // 別物」参照）。`None`なら`FeCovType::Dk.time`も`None`にし、engine側で
-            // `FeInput.time()`（`time`から構築）へのフォールバックに委ねる
-            // （`engine::panel::fe`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
-            let time = options
-                .dk_time
-                .as_ref()
-                .map(|col_name| extract_time_keys(df, col_name))
-                .transpose()?;
+            // DKの時点列は`dk_time`で明示する（必須）。2-way FEの`time`（固定効果構造）を
+            // 暗黙に借用すると、意図と違う列が選ばれても気づけないため
+            // （モジュールdoc「`FEOptions.time`と`FEOptions.dk_time`は別物」参照）。
+            let Some(dk_time) = options.dk_time.as_ref() else {
+                return Err(ValidationError::new_err(
+                    "cov_type='dk' requires the `dk_time` option: the column that defines \
+                     the time periods of the Driscoll-Kraay estimator (it is not taken from \
+                     `time`, which only sets the two-way fixed effects)",
+                ));
+            };
+            let time = extract_time_keys(df, dk_time)?;
             FeCovType::Dk {
                 bandwidth: options.dk_bandwidth,
                 time,
@@ -793,21 +797,19 @@ mod tests {
             cov_type,
             FeCovType::Dk {
                 bandwidth: None,
-                time: Some(
-                    TimeKeys::by_integer(
-                        ["1", "2", "1", "2", "1", "2"].map(str::to_string).to_vec(),
-                        &[1, 2, 1, 2, 1, 2]
-                    )
-                    .unwrap()
-                ),
+                time: TimeKeys::by_integer(
+                    ["1", "2", "1", "2", "1", "2"].map(str::to_string).to_vec(),
+                    &[1, 2, 1, 2, 1, 2]
+                )
+                .unwrap(),
             }
         );
     }
 
     #[test]
-    fn build_fe_input_hac_prefers_dk_time_over_time_when_both_set() {
-        // 2-way（`time`指定あり）でも`dk_time`が優先されることを確認する
-        // （モジュールdoc参照）。
+    fn build_fe_input_hac_uses_dk_time_independently_of_time_when_both_set() {
+        // 2-way（`time`指定あり）でもDKの時点列は`dk_time`だけから決まり、`FeInput.time()`
+        // （固定効果の時間次元）とは独立であることを確認する（モジュールdoc参照）。
         let df = df!(
             "y" => [1.0, 2.0, 3.0, 4.0],
             "x1" => [2.0, 4.0, 1.0, 5.0],
@@ -837,36 +839,32 @@ mod tests {
             cov_type,
             FeCovType::Dk {
                 bandwidth: None,
-                time: Some(TimeKeys::lexicographic(
+                time: TimeKeys::lexicographic(
                     ["q1", "q2", "q1", "q2"].map(str::to_string).to_vec()
-                )),
+                ),
             }
         );
     }
 
     #[test]
-    fn build_fe_input_hac_falls_back_to_time_when_dk_time_is_not_set() {
+    fn build_fe_input_dk_requires_dk_time_even_when_time_is_set() {
+        // `time`（2-wayの固定効果の時間次元）はDKの時点列に借用されない。`dk_time`なしは
+        // 1-way・2-wayとも`ValidationError`（モジュールdoc参照）。
         let df = well_formed_df();
-        let mut options = default_options();
-        options.cov_type = "dk".to_string();
-        options.time = Some("t".to_string());
+        for time in [None, Some("t".to_string())] {
+            let mut options = default_options();
+            options.cov_type = "dk".to_string();
+            options.time = time;
 
-        let (_, _, cov_type, _) = build_fe_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string()],
-            "id".to_string(),
-            &options,
-        )
-        .unwrap();
+            let result = build_fe_input(
+                &df,
+                "y".to_string(),
+                vec!["x1".to_string()],
+                "id".to_string(),
+                &options,
+            );
 
-        assert_eq!(
-            cov_type,
-            FeCovType::Dk {
-                bandwidth: None,
-                time: None,
-            },
-            "dk_time未指定時はNone（engine側でFeInput.time()にフォールバック）"
-        );
+            assert!(result.is_err());
+        }
     }
 }

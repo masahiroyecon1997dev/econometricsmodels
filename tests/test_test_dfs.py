@@ -218,7 +218,7 @@ def test_fe_two_way_f_dfs_follow_cov_type(df):
         cluster.f_p_value, rel=1e-8
     )
 
-    dk = _fe(df, cov_type="dk", two_way=True)
+    dk = _fe(df, cov_type="dk", dk_time="time", two_way=True)
     assert (dk.f_df_num, dk.f_df_denom) == (2, N_PERIODS - 1)
     assert _f_p(dk.f_statistic, 2, N_PERIODS - 1) == pytest.approx(
         dk.f_p_value, rel=1e-8
@@ -250,7 +250,9 @@ def test_fe_cluster_f_denominator_is_g_minus_one(
     ("options", "n_periods"),
     [
         pytest.param({"dk_time": "time"}, N_PERIODS, id="1way-dk_time"),
-        pytest.param({"time": "time"}, N_PERIODS, id="2way-time"),
+        pytest.param(
+            {"time": "time", "dk_time": "time"}, N_PERIODS, id="2way-dk_time"
+        ),
         pytest.param(
             {"dk_time": "time5"}, N_PERIODS_COARSE, id="1way-dk_time-coarse"
         ),
@@ -280,8 +282,8 @@ def test_fe_dk_f_denominator_is_t_minus_one(df, options, n_periods):
         ({"cov_type": "cluster", "cluster": "grp"}, N_GROUPS - 1),
         ({"cov_type": "cluster", "cluster": "coarse"}, N_COARSE - 1),
         ({"cov_type": "cluster", "cluster": "time"}, N_PERIODS - 1),
-        ({"cov_type": "dk", "time": "time"}, N_PERIODS - 1),
-        ({"cov_type": "dk", "time": "time5"}, N_PERIODS_COARSE - 1),
+        ({"cov_type": "dk", "dk_time": "time"}, N_PERIODS - 1),
+        ({"cov_type": "dk", "dk_time": "time5"}, N_PERIODS_COARSE - 1),
     ],
 )
 def test_re_f_denominator_follows_cov_type(df, options, expected_df_denom):
@@ -304,7 +306,7 @@ def test_re_f_statistic_depends_on_cov_type(df):
     for options in (
         {"cov_type": "hc1"},
         {"cov_type": "cluster", "cluster": "grp"},
-        {"cov_type": "dk", "time": "time"},
+        {"cov_type": "dk", "dk_time": "time"},
     ):
         res = _re(df, **options)
         assert res.f_statistic != pytest.approx(base.f_statistic, rel=1e-6)
@@ -372,7 +374,7 @@ def test_unbalanced_dk_f_denominator_uses_observed_periods(df_unbalanced):
     assert _f_p(fe.f_statistic, 2, t - 1) == pytest.approx(
         fe.f_p_value, rel=1e-8
     )
-    re = _re(df_unbalanced, cov_type="dk", time="time")
+    re = _re(df_unbalanced, cov_type="dk", dk_time="time")
     assert re.f_df_denom == t - 1
     assert _f_p(re.f_statistic, 2, t - 1) == pytest.approx(
         re.f_p_value, rel=1e-8

@@ -488,12 +488,17 @@ def test_invalid_confidence_level_raises(fe_dataset, confidence_level):
         our_fit(fe_dataset, options=options)
 
 
-def test_dk_requires_time_raises(fe_dataset):
-    """1-way（`time`未指定）で`cov_type="dk"`かつ`dk_time`も未指定だと
-    `PanelError::DkRequiresTime`。
+@pytest.mark.parametrize(
+    "time", [None, "time"], ids=["one_way", "two_way_time_not_borrowed"]
+)
+def test_dk_requires_dk_time_raises(fe_dataset, time):
+    """`cov_type="dk"`で`dk_time`が未指定だと`ValidationError`。2-way FEの`time`が
+    あっても、それをDKの時点列として借用しない（どの列が時点かを明示させる）。
     """
-    options = FEOptions(cov_type="dk")
-    with pytest.raises(ValidationError, match=escaped(msgs.DK_REQUIRES_TIME)):
+    options = FEOptions(cov_type="dk", time=time)
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.FE_DK_REQUIRES_DK_TIME)
+    ):
         our_fit(fe_dataset, options=options)
 
 
@@ -607,7 +612,9 @@ _TWO_PERIOD_PANEL = {
             msgs.DEGENERATE_DK_TWO_PERIODS,
         ),
         (
-            FEOptions(cov_type="dk", time="time", dk_bandwidth=0),
+            FEOptions(
+                cov_type="dk", time="time", dk_time="time", dk_bandwidth=0
+            ),
             msgs.DEGENERATE_DK_TWO_PERIODS,
         ),
         (
@@ -736,7 +743,9 @@ def test_option_unused_by_cov_type_raises(
     """選んだ`cov_type`で使われない`cluster`/`dk_time`/`dk_bandwidth`が
     指定されたら黙って無視せず`ValidationError`。
     """
-    options = FEOptions(cov_type=cov_type, **{option: value})
+    # dkは時点列(`dk_time`)が必須なので、他のオプションの検証だけを見るため添える。
+    extra = {"dk_time": "time"} if cov_type == "dk" else {}
+    options = FEOptions(cov_type=cov_type, **extra, **{option: value})
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),

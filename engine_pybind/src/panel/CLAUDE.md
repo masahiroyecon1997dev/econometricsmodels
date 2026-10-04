@@ -81,7 +81,7 @@ dead_code扱いの間も呼び出しグラフ経由で到達可能だった）�
   `params`/`residuals`/`df_resid`/`df_model`/`std_errors`/`test_stats`/`p_values`/
   `conf_lower`/`conf_upper`が期待値と完全一致することを確認済み。加えて`x=[]`・未知の
   `cov_type`・`cov_type="hc0"`・singletonエンティティ・`cov_type="cluster"`
-  （`cluster`指定）・`cov_type="dk"`で`time`未指定（`DkRequiresTime`）の各エラー
+  （`cluster`指定）・`cov_type="dk"`で`dk_time`未指定（FEは`ValidationError`、REは`DkRequiresTime`）の各エラー
   経路が`ValidationError`として正しく変換されることも確認済み。`fit`自体はFEと同じ理由
   （`PyDataFrame`がGILを要求）で`#[cfg(test)] mod tests`から直接呼べないため、専用の
   Rustユニットテストは追加していない。
@@ -96,14 +96,15 @@ FEの1段階目（データ抽出・pyclass定義）と同じ段階（`REOptions
 （`ReInput`/`ReEstimator`/`ReCovType`）はハウスマン検定の実装時点で既に完成済みだった
 ため、本対応は`engine_pybind`層のみのスコープ。
 
-- **`REOptions`に`dk_time`が無い（`FEOptions`との相違点）**: `engine::panel::re::
-  ReCovType::Dk`は`FeCovType::Dk`と異なり`time`オーバーライドフィールドを持たない
-  （RE自身が2-way構造を持たないため、FEのような「2-way FEの固定効果構造」と「DK HACの
-  時系列粒度」を分離する必要が無い）。`REOptions.time`は「HAC時系列順序」専用
-  （ハウスマン検定は常に1-way比較で`time`に依存しない、`docs/spec/re-spec.md`3.7節）。
-  そのため`cov_type`が`"dk"`以外で`time`を指定すると`parse_re_cov_type`が`reject_unused_option`で
-  `ValidationError`にする（`cluster`/`dk_bandwidth`と同じ規則。`FEOptions.time`は2-wayの
-  指定として常に使われるため対象外）。詳細は`panel/re.rs`モジュールdoc参照。
+- **`REOptions.dk_time`（`FEOptions.dk_time`と同名・同じ意味）**: DKの時点列は`dk_time`で
+  受け取る（`cov_type="dk"`では必須、未指定は`PanelError::DkRequiresTime`）。`time`という
+  名前のオプションは持たない——RE自身は2-way構造を持たない（v1はentity方向のみ）ため、FEの
+  `time`（2-way固定効果の時間次元）に相当するものが無く、`time`と呼ぶと誤解を招くため。
+  将来2-way REを実装するときはFEと同じ意味の`time`を改めて導入する。`dk_time`は
+  `ReInput::time()`に渡る（ハウスマン検定は常に1-way比較で`dk_time`に依存しない、
+  `docs/spec/re-spec.md`3.7節）。`cov_type`が`"dk"`以外で`dk_time`を指定すると
+  `parse_re_cov_type`が`reject_unused_option`で`ValidationError`にする（`cluster`/
+  `dk_bandwidth`と同じ規則）。詳細は`panel/re.rs`モジュールdoc参照。
 - **`x`の空リストを許容しない（ユーザー確認済み、2026-09-20）**: REで`x=[]`は「分散成分
   （ICC）のみを推定するnullモデル」として単独で意味を持つ標準的なユースケースだが、
   `panel-common.md`にこの点の明示的な決定が無かったため確認した。他手法（FE・
@@ -111,7 +112,7 @@ FEの1段階目（データ抽出・pyclass定義）と同じ段階（`REOptions
   選択した。nullモデル・ICC推定のサポート自体は別途検討する。
 - **`cov_type`は`FEOptions`と同じ集合**（`classical`/`hc1`〜`hc3`/`cluster`/`hac`、`hc0`は
   非対応）。`parse_re_cov_type`は`parse_fe_cov_type`とほぼ同型だが、上記の通り`hac`分岐で
-  `dk_time`相当の追加列抽出が不要な点だけが異なる。
+  `dk_time`はengineの`ReCovType`ではなく`ReInput`に渡す点だけが異なる。
 - **`REResult`に`estimator`のような非公開フィールドは無い**: `FEResult`は`fixed_effects()`
   用に`FeEstimator`本体を保持する必要があったが、REのハウスマン検定
   （`hausman_statistic`/`hausman_p_value`/`hausman_df`）は`fit()`内で計算済みの値を
@@ -132,14 +133,14 @@ FEの1段階目（データ抽出・pyclass定義）と同じ段階（`REOptions
 - **`cov_type`のデフォルトは`"cluster"`**（entity単位）。OLS/WLS/IVの`"classical"`から意図的に逸脱する（`panel-common.md`3.2節、fixestの前例）。
 - **`cov_type`は`hc0`を受け付けない**: `engine::panel::fe::FeCovType`enum自体が`Hc0`を持たない（スコープ外と判明済み、`engine/src/panel/CLAUDE.md`参照）。`parse_fe_cov_type`は`"hc0"`を専用のエラーメッセージで明示的に弾く（他の未知の値と区別する——`hc0`はOLS/WLS/IVでは有効な値のため、ユーザーが混同しやすいと判断した）。
 - **`time`と`dk_time`は別フィールド（重要な設計判断）**: `time`（bareネーミング、`panel-common.md`1.1節の既存方針通り）は2-way FE（entity+time）の指定に使う——`Some`なら2-way、`None`なら1-way。`dk_time`（OLSの`cluster`/`dk_time`と同じ「補助列」命名規則、新規）はDriscoll-Kraay HAC（`cov_type="dk"`）専用の時系列順序で、`time`とは独立に指定できる。
-  - **経緯**: 当初「`time`の有無だけで1-way/2-wayを決める」案を検討したが、DK HAC（`cov_type="dk"`）は1-way FEでも`time`列を要求する（既存のengineテスト`fe_estimator_fit_hac_one_way_requires_time`）ため、「`time`指定=常に2-way」にすると1-way FE + DK HACという組み合わせを表現できなくなることが判明した（ユーザーとの相談で発見）。ユーザーからは「`time_effects: bool`のような追加フラグは、変数を指定すれば1-way/2-wayが分かるはずなので冗長」という指摘があり、OLSの`dk_time`（HAC専用の補助列という既存の命名規則）を踏襲する分離案を採用した（ユーザー確認済み、2026-09-12）。
-  - **優先順位**: `dk_time`が指定されていれば、**2-way（`time`指定あり）でも常に`dk_time`が優先**される（`parse_fe_cov_type`）。「2-way FEの固定効果構造に使う時点粒度」と「DK HACカーネルに使う時系列粒度」が異なるケース（例: 固定効果は年単位、HACカーネルは四半期単位）に対応するための設計（ユーザーの追加提案、確認済み）。`dk_time`未指定なら`time`にフォールバックし、どちらも`None`（1-way FEで`dk_time`も未指定）なら`PanelError::DkRequiresTime`。
-  - **`dk_time`は`FeInput.time`には一切渡らない**: `FeInput::from_columns`の`time`引数には常に`options.time`由来の値のみを渡す（2-way判定・within変換用）。`dk_time`は`FeCovType::Dk { time: Option<Vec<String>> }`（下記）に直接渡す、別経路。
+  - **経緯**: 当初「`time`の有無だけで1-way/2-wayを決める」案を検討したが、DK HAC（`cov_type="dk"`）は1-way FEでも時点列を要求するため、「`time`指定=常に2-way」にすると1-way FE + DK HACという組み合わせを表現できなくなることが判明した（ユーザーとの相談で発見）。ユーザーからは「`time_effects: bool`のような追加フラグは、変数を指定すれば1-way/2-wayが分かるはずなので冗長」という指摘があり、OLSの`dk_time`（HAC専用の補助列という既存の命名規則）を踏襲する分離案を採用した（ユーザー確認済み、2026-09-12）。
+  - **`cov_type="dk"`では`dk_time`が必須で、`time`にフォールバックしない**（`parse_fe_cov_type`、未指定は`ValidationError`。1-way・2-wayとも同じ）。当初は`dk_time`未指定なら2-wayの`time`を暗黙に借用していたが、どの列がDKの時点かを利用者が明示しない設計は、意図と違う列が選ばれても気づけないため廃止した（ユーザー確認済み）。`dk_time`は2-wayでも常にDK計算に使われ、「2-way FEの固定効果構造に使う時点粒度」と「DK HACカーネルに使う時系列粒度」が異なるケース（例: 固定効果は四半期、HACは年次）にも対応する。
+  - **`dk_time`は`FeInput.time`には一切渡らない**: `FeInput::from_columns`の`time`引数には常に`options.time`由来の値のみを渡す（2-way判定・within変換用）。`dk_time`は`FeCovType::Dk { time: TimeKeys }`（下記、必須）に直接渡す、別経路。
 - **`dk_bandwidth`**（Driscoll-Kraay HACのバンド幅）: OLS/WLS/IVの`hac_lags`と同じ役割だが、DKはNewey-West（観測数`n`ベース）と計算式・意味が異なる（`engine::panel::fe::FeCovType::Dk`の`bandwidth`は時点数`t`ベース）ため、意図的に別名にした（ユーザー確認済み、2026-09-12）。
 
 ## engine側の変更（`FeCovType::Dk`の拡張に伴うもの）
 
-`FEOptions.dk_time`（HAC専用の時系列順序を`time`とは独立に指定したい）を受けるため、`engine::panel::fe::FeCovType::Dk`を`{ bandwidth: Option<i64> }`から`{ bandwidth: Option<i64>, time: Option<Vec<String>> }`に拡張した（`FeInput`自体は変更していない）。`time`が`Some`なら`input.time()`より優先してDK計算に使う。詳細な設計判断・導出は`engine/src/panel/fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」・`engine/src/panel/CLAUDE.md`参照。
+`FEOptions.dk_time`（HAC専用の時点列を`time`とは独立に指定したい）を受けるため、`engine::panel::fe::FeCovType::Dk`は`{ bandwidth: Option<i64>, time: TimeKeys }`（`time`は必須。当初の`Option`から、`input.time()`への暗黙のフォールバックを廃止して必須にした）。`FeInput`自体は変更していない。詳細な設計判断・導出は`engine/src/panel/fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」・`engine/src/panel/CLAUDE.md`参照。
 
 ## `FEResult`のスコープ（実装完結時点）
 

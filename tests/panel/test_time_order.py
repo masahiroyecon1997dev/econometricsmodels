@@ -90,7 +90,7 @@ def _x_columns(df: pl.DataFrame) -> list[str]:
 
 def _fit_fe(df: pl.DataFrame, column: str, *, two_way: bool):
     options = (
-        FEOptions(cov_type="dk", time=column)
+        FEOptions(cov_type="dk", time=column, dk_time=column)
         if two_way
         else FEOptions(cov_type="dk", dk_time=column)
     )
@@ -98,7 +98,7 @@ def _fit_fe(df: pl.DataFrame, column: str, *, two_way: bool):
 
 
 def _fit_re(df: pl.DataFrame, column: str):
-    options = REOptions(cov_type="dk", time=column)
+    options = REOptions(cov_type="dk", dk_time=column)
     return RE(df, "y", _x_columns(df), "entity", options).fit()
 
 

@@ -21,9 +21,9 @@ FE固有の内容のみを記載する。
   |---|---|---|---|
   | `cov_type` | `str` | `"cluster"` | `"classical"` / `"hc1"`〜`"hc3"` / `"cluster"` / `"dk"`（大小無視）。OLSと異なり`"hc0"`は非対応（`FeCovType` enum自体が持たない、専用エラーメッセージで弾く） |
   | `confidence_level` | `float` | `0.95` | |
-  | `time` | `str \| None` | `None` | `Some`なら2-way（entity+time）、`None`なら1-way。`cov_type="dk"`時のDK時系列順序としても使われる（`dk_time`未指定の場合） |
+  | `time` | `str \| None` | `None` | `Some`なら2-way（entity+time）、`None`なら1-way。固定効果の構造専用で、`cov_type="dk"`の時点列としては使われない（`dk_time`を指定する） |
   | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名。省略時は`entity`をそのまま使う。他の`cov_type`で指定すると`ValidationError` |
-  | `dk_time` | `str \| None` | `None` | DK HAC専用の時系列順序。`time`とは独立に指定でき、指定時は2-wayでも常にこちらが優先される。`cov_type="dk"`以外で指定すると`ValidationError` |
+  | `dk_time` | `str \| None` | `None` | DK HACの時点列（`cov_type="dk"`では必須、未指定は1-way・2-wayとも`ValidationError`）。`time`とは独立で、2-wayでも常にこちらがDK計算に使われる（固定効果は四半期、DKは年次、等も指定できる）。`cov_type="dk"`以外で指定すると`ValidationError` |
   | `dk_bandwidth` | `int \| None` | `None` | DK HACのバンド幅（時点数`t`ベース、OLSの`hac_lags`とは意味が異なるため別名）。省略時は`floor(4*(t/100)^(2/9))`で自動計算。`cov_type="dk"`以外で指定すると`ValidationError` |
 
 - **`include_intercept`は無い**: withinの変換で切片が構造的に消えるため、OLS/WLS/IVと異なり
@@ -202,15 +202,17 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
    辞書順。`engine_pybind`が列のdtypeから時間順のコードを作り、`engine`には時点のラベルと
    時間順のコード（`TimeKeys`）で渡す。辞書順を使うと、ゼロ埋めのない整数
    （`1, 10, 11, 2, ...`）等でラグ項が別の時点同士を組み合わせ、標準誤差が黙って変わる。
-4. **1-way/2-way両対応**。1-way FEで`FeCovType::Dk`を指定したのに時系列順序が一切ない
-   （`time`も`dk_time`も未指定）なら`PanelError::DkRequiresTime`。
+4. **1-way/2-way両対応**。DKの時点列は`dk_time`（engineでは`FeCovType::Dk.time`）として
+   常に明示的に受け取る。未指定は`ValidationError`（`engine_pybind`が弾く）。2-wayの`time`は
+   借用しない。
 5. **スケールは`(t_periods/(t_periods-1)) × ((n-1)/(n-K)) × (X̃'X̃)⁻¹ Ŝ (X̃'X̃)⁻¹`**
    （fixestの`ssc()`は時点数`t_periods`をクラスターの`G`と同じ役割で使う。`K`は
    fixestの既定`K.fixef="full"`——DKにはクラスター変数という概念が無くネスト判定
    自体が発生しないため——により常に`K=df_model`）。
-6. **`FeCovType::Dk.time`による明示的な上書き**: `time`が`Some`（`FEOptions.dk_time`由来）
-   なら`FeInput.time()`より優先してDK計算に使う（`time`未指定の1-way FEでもこれだけでDK HAC
-   が成立する）。
+6. **`FeCovType::Dk.time`は必須で、`FeInput.time()`にはフォールバックしない**: 当初は
+   `Option`で、`None`なら2-wayの`time`を暗黙に借用していたが、どの列がDKの時点かを利用者が
+   明示しない設計は、意図と違う列が選ばれても気づけないため廃止した。`FeInput.time()`は
+   2-wayの固定効果の時間次元専用で、DKの時点列とは独立。
 7. **既知の制約**: `bandwidth`が許容範囲`[0, t_periods)`の上限ちょうど（`bandwidth ==
    t_periods - 1`）のとき、fixestの内部C++実装（`cpp_driscoll_kraay`）が最後のラグ項を
    切り捨てるらしいことが実地確認で判明しており、本実装（標準的なBartlett核、最後の

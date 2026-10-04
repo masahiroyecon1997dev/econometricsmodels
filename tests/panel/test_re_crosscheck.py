@@ -23,7 +23,7 @@ fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmod
 - **ハウスマン検定**（`hausman_statistic`/`hausman_p_value`/`hausman_df`）:
   `linearmodels`に専用実装が無いため、`plm::phtest(method = "aux",
   effect = "individual")`（回帰ベース）が唯一の参照実装（panel-common.md
-  5.3節）。比較は常に1-wayで`REOptions.time`の有無によらない
+  5.3節）。比較は常に1-wayで`REOptions.dk_time`の有無によらない
   （`generate_re_crosscheck_fixtures.py`モジュールdoc参照）。
 
 ## ハウスマン統計量の方式について
@@ -274,7 +274,7 @@ def _check_hausman(
 def _re_options(cov_type: str) -> REOptions:
     # timeはdkのときだけ指定できる（REOptionsのバリデーション）。
     if cov_type == "dk":
-        return REOptions(cov_type="dk", time="time")
+        return REOptions(cov_type="dk", dk_time="time")
     return REOptions(cov_type=cov_type)
 
 
@@ -433,7 +433,7 @@ def test_synthetic_hausman_matches_plm(crosscheck, scenario, cov_type):
 def test_wagepan_hausman_matches_plm(crosscheck, cov_type):
     df = load_wooldridge_dataset("wagepan")
     options = (
-        REOptions(cov_type="dk", time="year")
+        REOptions(cov_type="dk", dk_time="year")
         if cov_type == "dk"
         else REOptions(cov_type=cov_type)
     )
@@ -461,7 +461,9 @@ def test_hausman_dk_explicit_bandwidth_matches_plm(
         y="y",
         x=["x1", "x2"],
         entity="entity",
-        options=REOptions(cov_type="dk", time="time", dk_bandwidth=bandwidth),
+        options=REOptions(
+            cov_type="dk", dk_time="time", dk_bandwidth=bandwidth
+        ),
     ).fit()
 
     _check_hausman(
@@ -560,5 +562,5 @@ def test_hausman_dk_too_few_periods_raises():
             y="y",
             x=["x1", "x2"],
             entity="entity",
-            options=REOptions(cov_type="dk", time="time", dk_bandwidth=0),
+            options=REOptions(cov_type="dk", dk_time="time", dk_bandwidth=0),
         ).fit()

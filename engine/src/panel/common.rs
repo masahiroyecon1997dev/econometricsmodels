@@ -18,9 +18,9 @@
 //! - `UnbalancedPanelForTwoWay`: 2-way FEのバランスパネル必須（`fe-spec.md`1章）
 //! - `ZeroVarianceAfterDemeaning`: within変換後に分散ゼロの説明変数（`fe-spec.md`1章）
 //! - `TwoWayRequiresTime`: 2-way FE指定時の`time`必須（`panel-common.md`1.1節）
-//! - `DkRequiresTime`: Driscoll-Kraay型パネルHAC（`FeCovType::Dk`）指定時の`time`必須
-//!   （`panel-common.md`3.1節。2-way FEは`TwoWayRequiresTime`で既に
-//!   必須化されているため、1-way FEでのみ発生しうる）
+//! - `DkRequiresTime`: REでDriscoll-Kraay型パネルHAC（`ReCovType::Dk`）を指定したのに時点列
+//!   （`REOptions.dk_time`由来の`ReInput::time()`）が無い（`panel-common.md`3.1節。FEは
+//!   `FeCovType::Dk.time`が型で必須のため発生しない）
 //! - `InvalidDkBandwidth`: `FeCovType::Dk`の明示的な`bandwidth`が`[0, t)`の範囲外
 //!   （`t`はユニークな時点数。`LeastSquaresError::InvalidHacLags`と同型だが
 //!   上限が観測数`n`ではなく時点数`t`）
@@ -212,15 +212,13 @@ pub enum PanelError {
     #[error("two-way fixed effects requires the `time` option to be set")]
     TwoWayRequiresTime,
 
-    /// Driscoll-Kraay型パネルHAC（`FeCovType::Dk`、3.1節）を指定したのに
-    /// `time`列が指定されていない。
+    /// REでDriscoll-Kraay型パネルHAC（`ReCovType::Dk`、3.1節）を指定したのに、時点列
+    /// （`ReInput::time()`、`REOptions.dk_time`由来）が指定されていない。
     ///
-    /// DKは時点ごとにクロスセクション和を取ってからHACカーネルを適用するため`time`が
-    /// 必須（`TwoWayRequiresTime`と同型の「条件付き必須」パターン）。2-way FEは
-    /// `within_transform_two_way`/`validate_no_singleton_groups_two_way`の時点で既に
-    /// `TwoWayRequiresTime`により`time`必須が担保されているため、このエラーは1-way FEで
-    /// `FeCovType::Dk`を指定した場合にのみ発生しうる。
-    #[error("Driscoll-Kraay panel HAC requires the `time` option to be set")]
+    /// DKは時点ごとにクロスセクション和を取ってからHACカーネルを適用するため時点列が必須
+    /// （`TwoWayRequiresTime`と同型の「条件付き必須」パターン）。FEの`FeCovType::Dk`は型で
+    /// 時点列（`time: TimeKeys`）を必須にしているため、このエラーはREでのみ発生する。
+    #[error("Driscoll-Kraay panel HAC requires the `dk_time` option to be set")]
     DkRequiresTime,
 
     /// `FeCovType::Dk`の明示的な`bandwidth`が`[0, t)`の範囲外（`t`はユニークな時点数）。

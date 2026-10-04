@@ -369,11 +369,7 @@ def test_huge_hac_lags_is_validation_error_not_overflow(df, cls, huge, how):
 @pytest.mark.parametrize("huge", [2**70, -(2**70)], ids=["+2^70", "-2^70"])
 @pytest.mark.parametrize("cls", [FEOptions, REOptions], ids=["FE", "RE"])
 def test_huge_dk_bandwidth_is_validation_error(df, cls, huge, how):
-    kwargs = (
-        {"cov_type": "dk", "dk_time": "t"}
-        if cls is FEOptions
-        else {"cov_type": "dk", "time": "t"}
-    )
+    kwargs = {"cov_type": "dk", "dk_time": "t"}
     options = _with_value(cls, "dk_bandwidth", huge, how, **kwargs)
 
     with pytest.raises(
@@ -638,7 +634,7 @@ STRING_FIELDS = [
     (FEOptions, "cluster", "column", True),
     (FEOptions, "dk_time", "column", True),
     (REOptions, "cov_type", "text", False),
-    (REOptions, "time", "column", True),
+    (REOptions, "dk_time", "column", True),
     (REOptions, "cluster", "column", True),
 ]
 STRING_IDS = [f"{c.__name__}.{n}" for c, n, _, _ in STRING_FIELDS]

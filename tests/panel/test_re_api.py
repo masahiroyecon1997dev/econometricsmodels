@@ -148,7 +148,7 @@ def test_hausman_follows_cov_type(fe_dataset):
         "hc2": REOptions(cov_type="hc2"),
         "hc3": REOptions(cov_type="hc3"),
         "cluster": REOptions(cov_type="cluster"),
-        "dk": REOptions(cov_type="dk", time="time"),
+        "dk": REOptions(cov_type="dk", dk_time="time"),
     }
     results = {
         name: our_fit_re(fe_dataset, options=opt)
@@ -169,7 +169,7 @@ def test_hausman_computed_with_singleton_time():
     計算される（`fe_singleton_time.csv`、`cov_type="dk"`で`time`を指定）。
     """
     df = pl.read_csv(DATA_DIR / "fe_singleton_time.csv")
-    options = REOptions(cov_type="dk", time="time")
+    options = REOptions(cov_type="dk", dk_time="time")
     res = RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
     assert isinstance(res.hausman_statistic, float)
@@ -193,10 +193,10 @@ def test_hausman_computed_with_singleton_time():
     ],
 )
 def test_cov_type_is_case_insensitive(fe_dataset, cov_type, expected_label):
-    """`dk`は`time`が無いと`DkRequiresTime`になるため`time="time"`を渡す
-    （`test_re_validation.py::test_dk_requires_time_raises`と対照）。
+    """`dk`は`dk_time`が無いと`DkRequiresTime`になるため`dk_time="time"`を渡す
+    （`test_re_validation.py::test_dk_requires_dk_time_raises`と対照）。
     """
-    kwargs = {"time": "time"} if expected_label == "dk" else {}
+    kwargs = {"dk_time": "time"} if expected_label == "dk" else {}
     options = REOptions(cov_type=cov_type, **kwargs)
     res = our_fit_re(fe_dataset, options=options)
     assert res.cov_type == expected_label
@@ -213,12 +213,14 @@ def test_confidence_level_affects_conf_int_width(fe_dataset):
 
 
 def test_time_option_does_not_affect_coefficients(fe_dataset):
-    """`REOptions.time`は`cov_type="dk"`のHAC時系列順序にのみ使われ、係数・
+    """`REOptions.dk_time`は`cov_type="dk"`のHAC時点列にのみ使われ、係数・
     ハウスマン検定・`df_model`には影響しない（`engine/src/panel/CLAUDE.md`
     「RE」節参照。FEの`time`が`df_model`を変えるのとは対照的）。
     """
     classical = our_fit_re(fe_dataset)
-    dk = our_fit_re(fe_dataset, options=REOptions(cov_type="dk", time="time"))
+    dk = our_fit_re(
+        fe_dataset, options=REOptions(cov_type="dk", dk_time="time")
+    )
 
     for name in classical.param_names:
         assert classical.params[name] == pytest.approx(dk.params[name])
@@ -247,7 +249,7 @@ def test_dk_bandwidth_zero_succeeds(fe_dataset):
     （`FEOptions`の同名テストと同じ、engine/src/panel/CLAUDE.md
     「Driscoll-Kraay型パネルHAC対応」参照）。
     """
-    options = REOptions(cov_type="dk", time="time", dk_bandwidth=0)
+    options = REOptions(cov_type="dk", dk_time="time", dk_bandwidth=0)
     res = our_fit_re(fe_dataset, options=options)
     assert all(se > 0.0 for se in res.std_errors.values())
 

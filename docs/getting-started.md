@@ -332,7 +332,7 @@ print(result.std_errors)
 print(result.hausman_statistic, result.hausman_p_value)
 ```
 
-`REOptions.cov_type` has the same defaults and support as FE (`"cluster"` on `entity` by default; `"hc0"` unsupported). See the [API Reference](api/re.md) for the full list of options, including Driscoll-Kraay standard errors (`cov_type="dk"`, requires `time`). Like FE, RE has no `predict()`, `augment()`, or `summary()`.
+`REOptions.cov_type` has the same defaults and support as FE (`"cluster"` on `entity` by default; `"hc0"` unsupported). See the [API Reference](api/re.md) for the full list of options, including Driscoll-Kraay standard errors (`cov_type="dk"`, requires `dk_time`). Like FE, RE has no `predict()`, `augment()`, or `summary()`.
 
 ## Error handling
 

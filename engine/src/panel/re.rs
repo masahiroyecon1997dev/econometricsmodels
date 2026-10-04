@@ -16,7 +16,7 @@
 //! `RE.fit()`が内部でFE推定を実行してハウスマン検定の比較対象を得る際
 //! （2.4節）、「`entity`/`time`/`x`はRE呼び出し時と同一の指定を使う」ため——つまり
 //! `ReInput`から`FeInput`相当のデータを組み立て直す際に、`time`を`ReInput`が
-//! 既に保持していれば再抽出が不要になる（`REOptions.time`、1.1節）。この内部FE呼び出し
+//! 既に保持していれば再抽出が不要になる（`REOptions.dk_time`、1.1節）。この内部FE呼び出し
 //! ロジック自体は、`ReInput`自体の実装スコープ外（`ReEstimator`側で扱う）。
 //!
 //! ## Swamy-Arora分散成分推定（`swamy_arora_variance_components`、`re-spec.md`3.1節）

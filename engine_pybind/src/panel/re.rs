@@ -28,21 +28,17 @@
 //! `fixed_effects()`段階（`fixed_effects()`メソッド）に相当する3段目は存在しない。
 //! 本対応でこの系統の実装は完結する。
 //!
-//! ## `REOptions`に`dk_time`が無い理由（`FEOptions`との相違点）
+//! ## `REOptions.dk_time`（`FEOptions.dk_time`と同名・同じ意味）
 //!
-//! `FEOptions`は`time`（2-way FE構造の指定）と`dk_time`（Driscoll-Kraay HAC専用の
-//! 時系列順序、`time`とは独立に指定できる）を分離しているが、`REOptions`にはこの分離が
-//! 無く`time`のみを持つ。理由: `engine::panel::re::ReCovType::Dk`は`FeCovType::Dk`と
-//! 異なり`time`オーバーライドフィールドを持たない（`engine::panel::re`モジュールdoc・
-//! `engine/src/panel/CLAUDE.md`「`cov_type`対応（`ReCovType`、3.1節・3.2節）」参照）。RE自身が2-way
-//! 構造を持たない（v1はentity方向のみ、`re-spec.md`5章）ため、FEのような「2-way FEの
-//! 固定効果構造に使う時点粒度」と「HACカーネルに使う時系列粒度」を分離する必要が無い——
-//! DK HAC計算は`ReInput::time()`をそのまま使う設計。`REOptions.time`は
-//! `cov_type="dk"`時のDriscoll-Kraay型パネルHACの時系列順序（`None`なら
-//! `PanelError::DkRequiresTime`）専用で、ハウスマン検定（常に1-way比較、
-//! `re-spec.md`3.7節）には影響しない。`cov_type`が`"dk"`以外で`time`を指定すると
-//! 黙って無視されるため`ValidationError`にする（`parse_re_cov_type`、`FEOptions.time`は
-//! 2-wayの指定として常に使われるためこの規則の対象外）。
+//! `REOptions`はDriscoll-Kraay型パネルHAC（`cov_type="dk"`）の時点列を`dk_time`で受け取る
+//! （`FEOptions.dk_time`と同じ名前・同じ意味。`cov_type="dk"`では必須）。`time`という名前の
+//! オプションは持たない: RE自身は2-way構造を持たない（v1はentity方向のみ、`re-spec.md`5章）
+//! ため、FEの`time`（2-way固定効果の時間次元）に相当するものが無く、`time`と呼ぶと
+//! 「固定効果の時間次元」と誤解されるため。将来2-way REを実装するときは、FEと同じ意味の
+//! `time`を改めて導入する。`dk_time`は`engine::panel::re::ReInput::time()`に渡り、DK HAC計算が
+//! それを使う（`None`なら`PanelError::DkRequiresTime`）。ハウスマン検定（常に1-way比較、
+//! `re-spec.md`3.7節）には影響しない。`cov_type`が`"dk"`以外で`dk_time`を指定すると黙って
+//! 無視されるため`ValidationError`にする（`parse_re_cov_type`）。
 //!
 //! ## `cov_type`の非対応値
 //!
@@ -96,15 +92,15 @@ pub struct REOptions {
     #[pyo3(get)]
     pub confidence_level: f64,
 
-    /// Column name of the time identifier, used only as the Driscoll-Kraay HAC time
-    /// ordering when `cov_type="dk"` (required there). Specifying it with any other
+    /// Column name that defines the time periods of the Driscoll-Kraay HAC when
+    /// `cov_type="dk"` (required there, as in `FEOptions.dk_time`). Specifying it with any other
     /// `cov_type` raises `ValidationError`. It does not affect the Hausman test, which
     /// always compares against one-way FE. The periods are ordered by the values of the
     /// column: numerically for integers and floats, chronologically for `Date` and
     /// `Datetime`, in the order of the categories for `Enum`, and alphabetically for
     /// strings and `Categorical`.
     #[pyo3(get)]
-    pub time: Option<String>,
+    pub dk_time: Option<String>,
 
     /// Column name to use as the cluster group key when `cov_type="cluster"`. When
     /// `None`, the `entity` argument's column is used automatically. Specifying it with
@@ -125,21 +121,21 @@ impl REOptions {
     #[pyo3(signature = (
         cov_type = "cluster".to_string(),
         confidence_level = 0.95,
-        time = None,
+        dk_time = None,
         cluster = None,
         dk_bandwidth = None,
     ))]
     fn new(
         #[pyo3(from_py_with = crate::option_values::cov_type_arg)] cov_type: String,
         #[pyo3(from_py_with = crate::option_values::confidence_level_arg)] confidence_level: f64,
-        #[pyo3(from_py_with = crate::option_values::time_arg)] time: Option<String>,
+        #[pyo3(from_py_with = crate::option_values::dk_time_arg)] dk_time: Option<String>,
         #[pyo3(from_py_with = crate::option_values::cluster_arg)] cluster: Option<String>,
         #[pyo3(from_py_with = crate::option_values::dk_bandwidth_arg)] dk_bandwidth: Option<i64>,
     ) -> Self {
         Self {
             cov_type,
             confidence_level,
-            time,
+            dk_time,
             cluster,
             dk_bandwidth,
         }
@@ -164,8 +160,8 @@ impl REOptions {
     }
 
     #[setter]
-    fn set_time(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
-        self.time = extract_strict_opt_column(value, "time")?;
+    fn set_dk_time(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.dk_time = extract_strict_opt_column(value, "dk_time")?;
         Ok(())
     }
 
@@ -177,9 +173,9 @@ impl REOptions {
 
     fn __repr__(&self) -> String {
         format!(
-            "REOptions(cov_type={:?}, confidence_level={}, time={:?}, cluster={:?}, \
+            "REOptions(cov_type={:?}, confidence_level={}, dk_time={:?}, cluster={:?}, \
              dk_bandwidth={:?})",
-            self.cov_type, self.confidence_level, self.time, self.cluster, self.dk_bandwidth
+            self.cov_type, self.confidence_level, self.dk_time, self.cluster, self.dk_bandwidth
         )
     }
 }
@@ -289,10 +285,10 @@ pub struct REResult {
 /// `REOptions.cov_type`をパースし、該当する`cov_type`のときのみ`cluster`を抽出した
 /// うえで`engine::panel::re::ReCovType`を組み立てる。
 ///
-/// `ReCovType::Dk`は`FeCovType::Dk`と異なり`time`オーバーライドフィールドを持たない
-/// （モジュールdoc「`REOptions`に`dk_time`が無い理由」参照）ため、`cov_type="dk"`の
-/// 分岐でも追加の列抽出は不要——HAC計算は`ReEstimator::fit`内部で`ReInput::time()`を
-/// 直接使う。
+/// `ReCovType::Dk`は`FeCovType::Dk`と異なり時点列のフィールドを持たない（`dk_time`は
+/// `build_re_input`が`ReInput`に渡す。モジュールdoc「`REOptions.dk_time`」参照）ため、
+/// `cov_type="dk"`の分岐でも追加の列抽出は不要——HAC計算は`ReEstimator::fit`内部で
+/// `ReInput::time()`を直接使う。
 ///
 /// # Errors
 /// `cov_type`の文字列が既知の値のいずれでもない場合は`ValidationError`（`hc0`は非対応の
@@ -344,8 +340,8 @@ fn parse_re_cov_type(df: &DataFrame, options: &REOptions) -> PyResult<(ReCovType
         "cov_type=\"dk\"",
     )?;
     reject_unused_option(
-        "time",
-        options.time.is_some(),
+        "dk_time",
+        options.dk_time.is_some(),
         cov_type_lower == "dk",
         "cov_type=\"dk\"",
     )?;
@@ -358,18 +354,18 @@ fn parse_re_cov_type(df: &DataFrame, options: &REOptions) -> PyResult<(ReCovType
 /// `ReEstimator::fit`の呼び出し・`REResult`の構築は後続issueの`fit`関数が行う
 /// （モジュールdoc「実装フェーズの分割方針」参照）。
 ///
-/// `options.time`は抽出して`ReInput`に渡す（RE自身の準偏差変換とハウスマン検定では
+/// `options.dk_time`は抽出して`ReInput`に渡す（RE自身の準偏差変換とハウスマン検定では
 /// 使わず、`cov_type="dk"`のHAC計算だけが使う。`"dk"`以外で指定された場合は
 /// `parse_re_cov_type`が`ValidationError`にする）。
 ///
 /// # Errors
 /// - `x`が空リストの場合は`ValidationError`（モジュールdoc「`x`の空リストを許容しない」
-///   参照）。`y`/`entity`/`time`/`x`間の重複・`x`内部の重複も同じく`validation.rs`の
+///   参照）。`y`/`entity`/`dk_time`/`x`間の重複・`x`内部の重複も同じく`validation.rs`の
 ///   責務で`ValidationError`
 /// - 列の抽出時に発覚する問題（列が存在しない、数値/文字列型にキャストできない、
 ///   欠損値・NaN・無限大を含む等）は`column_extraction`の責務で`ValidationError`
 /// - `cov_type`の文字列が不正な場合は`ValidationError`（`parse_re_cov_type`参照）
-/// - それ以外（`y`/`entity`/`time`間の行数不一致等）は`engine::panel::common::PanelError`
+/// - それ以外（`y`/`entity`/`dk_time`間の行数不一致等）は`engine::panel::common::PanelError`
 ///   から`panel_error_to_pyerr`で変換
 pub(crate) fn build_re_input(
     df: &DataFrame,
@@ -383,8 +379,8 @@ pub(crate) fn build_re_input(
         ("y", RoleValue::Single(&y)),
         ("entity", RoleValue::Single(&entity)),
     ];
-    if let Some(time) = &options.time {
-        roles.push(("time", RoleValue::Single(time)));
+    if let Some(dk_time) = &options.dk_time {
+        roles.push(("dk_time", RoleValue::Single(dk_time)));
     }
     roles.push(("x", RoleValue::Multi(&x)));
     validate_no_duplicate_roles(&roles)?;
@@ -397,9 +393,9 @@ pub(crate) fn build_re_input(
 
     let entity_slice = extract_group_key_column(df, &entity)?;
 
-    // ── `time`列の抽出（DK HAC用、モジュールdoc参照）─────────────────────
+    // ── `dk_time`列の抽出（DK HAC用、モジュールdoc参照）──────────────────
     let time_keys: Option<TimeKeys> = options
-        .time
+        .dk_time
         .as_ref()
         .map(|col_name| extract_time_keys(df, col_name))
         .transpose()?;
@@ -433,7 +429,7 @@ pub(crate) fn build_re_input(
 /// なる、`FeEstimator`と同じ理由）。
 ///
 /// # Errors
-/// - `build_re_input`が返すエラー（列抽出・y/x/entity/timeの重複・`cov_type`文字列の
+/// - `build_re_input`が返すエラー（列抽出・y/x/entity/dk_timeの重複・`cov_type`文字列の
 ///   検証等）は`ValidationError`
 /// - `ReEstimator::fit`が返す`engine::panel::common::PanelError`（Swamy-Arora分散成分
 ///   推定の失敗——内部FE推定のsingleton検出・分散ゼロ・自由度不足、between回帰の失敗——、
@@ -492,7 +488,7 @@ mod tests {
     use polars::df;
 
     /// `build_re_input`のテスト全体で使う既定の`REOptions`（`cov_type="cluster"`・
-    /// `time=None`）。フィールドごとに上書きして使う。
+    /// `dk_time=None`）。フィールドごとに上書きして使う。
     fn default_options() -> REOptions {
         REOptions::new("cluster".to_string(), 0.95, None, None, None)
     }
@@ -533,12 +529,12 @@ mod tests {
     }
 
     #[test]
-    fn build_re_input_extracts_time_when_set() {
-        // `time`は`cov_type="dk"`のとき`ReInput`に渡る（HACの時系列順序、モジュールdoc参照）。
+    fn build_re_input_extracts_dk_time_when_set() {
+        // `dk_time`は`cov_type="dk"`のとき`ReInput`に渡る（HACの時系列順序、モジュールdoc参照）。
         let df = well_formed_df();
         let mut options = default_options();
         options.cov_type = "dk".to_string();
-        options.time = Some("t".to_string());
+        options.dk_time = Some("t".to_string());
 
         let (input, ..) = build_re_input(
             &df,
@@ -554,13 +550,13 @@ mod tests {
     }
 
     #[test]
-    fn build_re_input_rejects_time_when_cov_type_is_not_dk() {
-        // `time`はDK HACの時系列順序専用（ハウスマン検定は常に1-way）。`cov_type`が"dk"以外だと
+    fn build_re_input_rejects_dk_time_when_cov_type_is_not_dk() {
+        // `dk_time`はDK HACの時系列順序専用（ハウスマン検定は常に1-way）。`cov_type`が"dk"以外だと
         // 黙って無視されるため`ValidationError`にする。
         let df = well_formed_df();
         let mut options = default_options();
         options.cov_type = "classical".to_string();
-        options.time = Some("t".to_string());
+        options.dk_time = Some("t".to_string());
 
         let result = build_re_input(
             &df,
@@ -616,10 +612,10 @@ mod tests {
     }
 
     #[test]
-    fn build_re_input_returns_error_when_x_overlaps_time() {
+    fn build_re_input_returns_error_when_x_overlaps_dk_time() {
         let df = well_formed_df();
         let mut options = default_options();
-        options.time = Some("t".to_string());
+        options.dk_time = Some("t".to_string());
 
         let result = build_re_input(
             &df,
@@ -713,9 +709,9 @@ mod tests {
     }
 
     #[test]
-    fn build_re_input_hac_uses_dk_bandwidth_and_no_time_override() {
-        // `ReCovType::Dk`は`FeCovType::Dk`と異なり`time`オーバーライドを持たない
-        // （モジュールdoc「`REOptions`に`dk_time`が無い理由」参照）。
+    fn build_re_input_dk_uses_bandwidth_without_extra_column_extraction() {
+        // `ReCovType::Dk`は`FeCovType::Dk`と異なり時点列のフィールドを持たない
+        // （`dk_time`は`ReInput`に渡る、モジュールdoc「`REOptions.dk_time`」参照）。
         let df = well_formed_df();
         let mut options = default_options();
         options.cov_type = "dk".to_string();

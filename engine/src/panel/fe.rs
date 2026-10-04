@@ -312,22 +312,16 @@
 //!   ゼロ埋めした年月等、辞書順が時間順と一致するラベル向け。
 //!   `panel_driscoll_kraay_cov_params`（`common.rs`）は`time`の整数コード（`GroupCodes`）の
 //!   順に集計するため、コード順がそのまま時系列順になる。
-//! - **1-way/2-wayとも対応**（ユーザーとの相談で決定）。2-way FEは`within_transform_
-//!   two_way`が既に`time`必須を担保しているが、**1-way FEで`FeCovType::Dk`を指定した
-//!   のに`time`が`None`の場合は`PanelError::DkRequiresTime`**を返す（他のcov_typeは
-//!   1-way FEで`time`を要求しない）。
+//! - **1-way/2-wayとも対応**（ユーザーとの相談で決定）。DKの時点列は`FeCovType::Dk.time`
+//!   として常に明示的に受け取る（必須。1-way/2-wayのどちらでも同じ）。
 //! - `Cluster`と異なり`fe_cluster_k_correction`のネスト判定は行わない——DKは常に
 //!   `K = df_model`（上記スケールの導出参照）。
-//! - **`FeCovType::Dk.time`による明示的な時系列順序の上書き**: 元々は
-//!   `bandwidth`のみを持つバリアントだったが、`engine_pybind`のFEOptions設計
-//!   で「2-way FEの`time`（固定効果構造）とDK HACの時系列順序を別の列に
-//!   したい」というユースケースが判明し（ユーザー承認済み、2026-09-12）、
-//!   `Dk { bandwidth, time: Option<TimeKeys> }`に拡張した。`time`が`Some`なら
-//!   `input.time()`より優先してこちらをDK計算に使う（1-way FEで`time`列を一切
-//!   指定していなくても、この`time`だけでDK HACが成立する）。`None`なら従来通り
-//!   `input.time()`にフォールバックする。`FeInput`自体は変更していない（`time`は
-//!   あくまで`FeCovType::Dk`が持つcov_type固有のオプションであり、パネル構造
-//!   （2-wayの有無）とは独立に指定できる設計）。
+//! - **`FeCovType::Dk.time`は必須で、`FeInput.time()`にはフォールバックしない**: 当初は
+//!   `Option<TimeKeys>`で、`None`なら2-way FEの`FeInput.time()`を暗黙に借用していたが、
+//!   どの列がDKの時点かを呼び出し側が明示しない設計は、意図と違う列が選ばれても気づけない
+//!   ため廃止した（`engine_pybind`の`FEOptions.dk_time`が`cov_type="dk"`で必須）。
+//!   `FeInput.time()`は2-way FEの固定効果の時間次元専用で、DK HACの時系列順序とは独立
+//!   （2-wayで`time`と別の時間粒度のDKを使うこともできる）。
 //!
 //! ## 固定効果自体（α_i）の復元（`fixed_effects()`、`fe-spec.md`3.5節）
 //!
@@ -656,15 +650,14 @@ pub enum FeCovType {
     /// `floor(4*(t/100)^(2/9))`（`t`はユニークな時点数）で自動計算する（モジュールdoc
     /// 「Driscoll-Kraay型パネルHAC対応」参照）。
     ///
-    /// `time`: `Some`なら、DK計算の時系列順序として`input.time()`より
-    /// 優先してこちらを使う（2-way FEでも、`input.time()`とは別の時間粒度でDKカーネルを
-    /// 適用したいケースに対応、ユーザー承認済み・`engine_pybind`の`FEOptions.dk_time`が
-    /// この経路に配線される想定）。`None`なら従来通り`input.time()`にフォールバックし、
-    /// それも`None`なら`PanelError::DkRequiresTime`（1-way FEで`time`列を一切指定しない
-    /// 場合）。
+    /// `time`: DK計算の時点ラベルと時間順のコード（必須）。2-way FEの固定効果の時間次元
+    /// （`input.time()`）とは独立で、DKカーネルを適用する時間粒度を呼び出し側が明示する
+    /// （`engine_pybind`の`FEOptions.dk_time`が配線される）。`input.time()`へのフォール
+    /// バックはしない——どの列が時点かを暗黙に借用すると、意図と違う列が選ばれても気づけない
+    /// ため。
     Dk {
         bandwidth: Option<i64>,
-        time: Option<TimeKeys>,
+        time: TimeKeys,
     },
 }
 
@@ -739,9 +732,9 @@ impl FeEstimator {
     /// - `cov_type=Cluster`でクラスター数が2未満・傾き係数の数以下の場合は
     ///   `PanelError::Common`（`CommonError::InsufficientClusters`/
     ///   `InsufficientClustersForInference`）
-    /// - `cov_type=Dk`の`time`上書き列の長さが観測数と異なる場合は
+    /// - `cov_type=Dk`の`time`（DKの時点列）の長さが観測数と異なる場合は
     ///   `PanelError::IdentifierDimensionMismatch`
-    /// - `cov_type=Dk`で時系列順序が無い場合は`PanelError::DkRequiresTime`、時点数が2未満なら
+    /// - `cov_type=Dk`で時点数が2未満なら
     ///   `PanelError::InsufficientDkPeriods`、`bandwidth`が不正なら
     ///   `PanelError::InvalidDkBandwidth`、時点数が傾き係数の数以下なら
     ///   `PanelError::InsufficientDkPeriodsForInference`、時点数が2で全エンティティ（2-wayでは
@@ -929,15 +922,10 @@ impl FeEstimator {
             }
             FeCovType::Dk {
                 bandwidth,
-                time: hac_time,
+                time: dk_time,
             } => {
-                // `hac_time`（`FEOptions.dk_time`経由の明示指定）があれば`input.time()`
-                // より優先する（モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
-                let time: &[String] = match hac_time {
-                    Some(t) => t.ids(),
-                    None => input.time().ok_or(PanelError::DkRequiresTime)?,
-                };
-                // `input.time()`は`FeInput::from_columns`が長さを検証済みだが、`hac_time`
+                let time: &[String] = dk_time.ids();
+                // `FeInput::from_columns`は`entity`・`y`等との長さを検証済みだが、`dk_time`
                 // （公開APIの`FeCovType::Dk.time`）は未検証のため、ここで検証する。長さが
                 // 合わないと下の退化判定が`zip`で黙って切り詰められ、DK計算は範囲外アクセスになる。
                 if time.len() != n {
@@ -947,11 +935,7 @@ impl FeEstimator {
                         other_rows: time.len(),
                     });
                 }
-                // `hac_time`があればそのコード（時間順）を使い、無ければ`FeInput`のコードを使う。
-                let time_codes = match hac_time {
-                    Some(t) => t.codes(),
-                    None => input.time_codes().ok_or(PanelError::DkRequiresTime)?,
-                };
+                let time_codes = dk_time.codes();
                 let t_periods = time_codes.n_groups();
                 let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
                 validate_dk_periods_cover_tested_coefficients(t_periods, k)?;
@@ -3516,12 +3500,13 @@ mod tests {
         )
         .unwrap();
 
+        let dk_time = dk_time_from(&input);
         let fe = FeEstimator::fit(
             input,
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: None,
-                time: None,
+                time: dk_time,
             },
             0.95,
         )
@@ -3554,7 +3539,7 @@ mod tests {
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: None,
-                time: Some(TimeKeys::lexicographic(time)),
+                time: TimeKeys::lexicographic(time),
             },
             0.95,
         )
@@ -3565,11 +3550,12 @@ mod tests {
     }
 
     #[test]
-    fn fe_estimator_fit_one_way_hac_time_override_takes_priority_over_fe_input_time() {
-        // `FeInput.time()`にも`time`があるが、`FeCovType::Dk.time`の明示指定がある場合は
-        // そちらが優先されることを確認する（モジュールdoc「Driscoll-Kraay型パネルHAC対応」
-        // 参照）。`FeInput.time()`にわざと辞書順が異なる別のダミー時点列を渡し、それが
-        // 無視されて`FeCovType::Dk.time`の方の結果と一致することを確認する。
+    fn fe_estimator_fit_one_way_hac_ignores_fe_input_time() {
+        // `FeInput.time()`にも`time`があっても、DKの時点列は`FeCovType::Dk.time`だけから
+        // 決まる（`FeInput.time()`は2-wayの固定効果の時間次元専用、モジュールdoc
+        // 「Driscoll-Kraay型パネルHAC対応」参照）ことを確認する。`FeInput.time()`にわざと
+        // 全観測が同一のダミー時点列を渡し、それが無視されて`FeCovType::Dk.time`の方の結果と
+        // 一致することを確認する。
         let (entity, time, x, y) = fixest_reference_input();
         let dummy_time = strings(&["z", "z", "z", "z", "z", "z", "z", "z", "z", "z", "z", "z"]);
         let input = FeInput::from_columns(
@@ -3587,7 +3573,7 @@ mod tests {
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: None,
-                time: Some(TimeKeys::lexicographic(time)),
+                time: TimeKeys::lexicographic(time),
             },
             0.95,
         )
@@ -3595,7 +3581,7 @@ mod tests {
 
         // `dummy_time`（全観測が同一時点）をそのまま使っていたら`t_periods=1`となり
         // `resolve_dk_bandwidth`が`InsufficientDkPeriods`で拒否する（優先順位が
-        // 逆だった場合はこのテスト自体がエラーで失敗する）。優先されている`time`
+        // 逆だった場合はこのテスト自体がエラーで失敗する）。使われている`time`
         // （`t_periods=3`）を使った場合の既知の値と一致することで、優先順位を確認する。
         assert!((*fe.std_errors().get(0, 0) - 0.112_778_272_530_122_7).abs() < 1e-9);
     }
@@ -3616,12 +3602,13 @@ mod tests {
         )
         .unwrap();
 
+        let dk_time = dk_time_from(&input);
         let fe = FeEstimator::fit(
             input,
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: Some(1),
-                time: None,
+                time: dk_time,
             },
             0.95,
         )
@@ -3669,12 +3656,13 @@ mod tests {
         )
         .unwrap();
 
+        let dk_time = dk_time_from(&input);
         let fe = FeEstimator::fit(
             input,
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: Some(2),
-                time: None,
+                time: dk_time,
             },
             0.95,
         )
@@ -3702,12 +3690,13 @@ mod tests {
         )
         .unwrap();
 
+        let dk_time = dk_time_from(&input);
         let fe = FeEstimator::fit(
             input,
             FeEffects::TwoWay,
             FeCovType::Dk {
                 bandwidth: None,
-                time: None,
+                time: dk_time,
             },
             0.95,
         )
@@ -3742,12 +3731,13 @@ mod tests {
         )
         .unwrap();
 
+        let dk_time = dk_time_from(&input);
         let fe = FeEstimator::fit(
             input,
             FeEffects::TwoWay,
             FeCovType::Dk {
                 bandwidth: Some(2),
-                time: None,
+                time: dk_time,
             },
             0.95,
         )
@@ -3783,12 +3773,13 @@ mod tests {
         )
         .unwrap();
 
+        let dk_time = dk_time_from(&input);
         let hac = FeEstimator::fit(
             input,
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: Some(0),
-                time: None,
+                time: dk_time,
             },
             0.95,
         )
@@ -3841,12 +3832,13 @@ mod tests {
         )
         .unwrap();
 
+        let dk_time = dk_time_from(&input);
         let result = FeEstimator::fit(
             input,
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: None,
-                time: None,
+                time: dk_time,
             },
             0.95,
         );
@@ -3886,12 +3878,13 @@ mod tests {
         // `t_periods=3`ではDK共分散のrankが`t-1=2`以下で、F検定の傾き`k=3`個の部分行列が
         // 構造的に特異になる。`wald_f_test`の数値的な特異性判定を待たず弾く。
         let time = three_period_time();
+        let dk_time = TimeKeys::lexicographic(time.clone());
         let result = FeEstimator::fit(
             three_period_input(3, Some(&time)),
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: Some(0),
-                time: None,
+                time: dk_time,
             },
             0.95,
         );
@@ -3905,12 +3898,13 @@ mod tests {
     fn fe_estimator_fit_hac_accepts_periods_one_above_slopes() {
         // 境界の成功パス: `t_periods=3 > k=2`。
         let time = three_period_time();
+        let dk_time = TimeKeys::lexicographic(time.clone());
         let fe = FeEstimator::fit(
             three_period_input(2, Some(&time)),
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: Some(0),
-                time: None,
+                time: dk_time,
             },
             0.95,
         )
@@ -3928,7 +3922,7 @@ mod tests {
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: Some(0),
-                time: Some(TimeKeys::lexicographic(three_period_time())),
+                time: TimeKeys::lexicographic(three_period_time()),
             },
             0.95,
         );
@@ -3962,10 +3956,18 @@ mod tests {
         (input, time)
     }
 
-    fn dk_bandwidth_zero() -> FeCovType {
+    /// `input`が持つ時点（ラベルの辞書順）を、DKの時点列としてそのまま渡す。
+    fn dk_time_from(input: &FeInput) -> TimeKeys {
+        let Some(time) = input.time() else {
+            panic!("test input must have a time column");
+        };
+        TimeKeys::lexicographic(time.to_vec())
+    }
+
+    fn dk_bandwidth_zero(input: &FeInput) -> FeCovType {
         FeCovType::Dk {
             bandwidth: Some(0),
-            time: None,
+            time: dk_time_from(input),
         }
     }
 
@@ -3974,7 +3976,8 @@ mod tests {
         // 全エンティティが2時点に1観測ずつだと、within変換で時点スコアが`h_1 = h_2 = 0`に
         // 退化しDK共分散が恒等的にゼロになる（`k=1`でも`t > q`の検証は通ってしまう）。
         let (input, _) = two_period_input(1, false);
-        let result = FeEstimator::fit(input, FeEffects::OneWay, dk_bandwidth_zero(), 0.95);
+        let dk_cov = dk_bandwidth_zero(&input);
+        let result = FeEstimator::fit(input, FeEffects::OneWay, dk_cov, 0.95);
         assert_eq!(result.unwrap_err(), PanelError::DegenerateDkTwoPeriods);
     }
 
@@ -3982,7 +3985,8 @@ mod tests {
     fn fe_estimator_fit_hac_rejects_degenerate_two_period_panel_two_way() {
         // 2-way（バランスパネルの二重デミーニング）でもエンティティ内の和がゼロになり同じ退化。
         let (input, _) = two_period_input(1, false);
-        let result = FeEstimator::fit(input, FeEffects::TwoWay, dk_bandwidth_zero(), 0.95);
+        let dk_cov = dk_bandwidth_zero(&input);
+        let result = FeEstimator::fit(input, FeEffects::TwoWay, dk_cov, 0.95);
         assert_eq!(result.unwrap_err(), PanelError::DegenerateDkTwoPeriods);
     }
 
@@ -4004,7 +4008,8 @@ mod tests {
     fn fe_estimator_fit_two_group_split_is_accepted_when_pattern_is_broken() {
         // 1エンティティでも同じ時点に2観測あればスコアは退化せず、標準誤差は正で有限。
         let (input, time) = two_period_input(1, true);
-        let dk = FeEstimator::fit(input, FeEffects::OneWay, dk_bandwidth_zero(), 0.95).unwrap();
+        let dk_cov = dk_bandwidth_zero(&input);
+        let dk = FeEstimator::fit(input, FeEffects::OneWay, dk_cov, 0.95).unwrap();
         assert!(*dk.std_errors().get(0, 0) > 1e-8);
         assert!(dk.f_statistic().is_finite());
 
@@ -4023,7 +4028,8 @@ mod tests {
     fn fe_estimator_fit_hac_two_period_panel_without_regressors_is_accepted() {
         // `k=0`（固定効果のみ）は標準誤差・F検定を計算しないため退化を問題にしない。
         let (input, _) = two_period_input(0, false);
-        assert!(FeEstimator::fit(input, FeEffects::OneWay, dk_bandwidth_zero(), 0.95).is_ok());
+        let dk_cov = dk_bandwidth_zero(&input);
+        assert!(FeEstimator::fit(input, FeEffects::OneWay, dk_cov, 0.95).is_ok());
     }
 
     /// 4エンティティ×2観測・`k=1`の1-way FE入力で、入力の`time`列を`time`で与える
@@ -4055,7 +4061,7 @@ mod tests {
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: Some(0),
-                time: Some(lex_time(&TWO_PERIOD_LABELS)),
+                time: lex_time(&TWO_PERIOD_LABELS),
             },
             0.95,
         );
@@ -4067,7 +4073,7 @@ mod tests {
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: Some(0),
-                time: Some(lex_time(&THREE_PERIOD_LABELS)),
+                time: lex_time(&THREE_PERIOD_LABELS),
             },
             0.95,
         )
@@ -4142,9 +4148,7 @@ mod tests {
             FeEffects::TwoWay,
             FeCovType::Dk {
                 bandwidth: Some(0),
-                time: Some(lex_time(&[
-                    "p", "p", "p", "p", "p", "q", "q", "q", "q", "q",
-                ])),
+                time: lex_time(&["p", "p", "p", "p", "p", "q", "q", "q", "q", "q"]),
             },
             0.95,
         );
@@ -4202,7 +4206,7 @@ mod tests {
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: Some(0),
-                time: Some(TimeKeys::lexicographic(time[..n - 1].to_vec())),
+                time: TimeKeys::lexicographic(time[..n - 1].to_vec()),
             },
             0.95,
         );
@@ -4214,29 +4218,6 @@ mod tests {
                 other_rows: n - 1,
             }
         );
-    }
-
-    #[test]
-    fn fe_estimator_fit_hac_one_way_requires_time() {
-        // 1-way FEで`time`未指定のまま`FeCovType::Dk`を指定すると
-        // `PanelError::DkRequiresTime`（2-way FEは`TwoWayRequiresTime`が既に必須化して
-        // いるため、このエラーは1-way FE限定）。
-        let (entity, _time, x, y) = fixest_reference_input();
-        let input =
-            FeInput::from_columns(&y, &[x], vec!["x".to_string()], &entity, None, "y".into())
-                .unwrap();
-
-        let result = FeEstimator::fit(
-            input,
-            FeEffects::OneWay,
-            FeCovType::Dk {
-                bandwidth: None,
-                time: None,
-            },
-            0.95,
-        );
-
-        assert_eq!(result.unwrap_err(), PanelError::DkRequiresTime);
     }
 
     #[test]
@@ -4254,12 +4235,13 @@ mod tests {
         )
         .unwrap();
 
+        let dk_time = dk_time_from(&input);
         let result = FeEstimator::fit(
             input,
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: Some(3),
-                time: None,
+                time: dk_time,
             },
             0.95,
         );
@@ -4283,12 +4265,13 @@ mod tests {
         )
         .unwrap();
 
+        let dk_time = dk_time_from(&input);
         let result = FeEstimator::fit(
             input,
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: Some(-1),
-                time: None,
+                time: dk_time,
             },
             0.95,
         );
@@ -4765,7 +4748,7 @@ mod tests {
             FeEffects::OneWay,
             FeCovType::Dk {
                 bandwidth: Some(3),
-                time: Some(time),
+                time,
             },
             0.95,
         )

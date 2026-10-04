@@ -92,14 +92,14 @@ class RE:
                 builtin exception, not a `ValidationError`.
             ValidationError: The input or options are invalid (`x` is
                 empty, a column is missing, contains missing values or
-                NaN/infinity, `y`/`x`/`entity`/`time` overlap,
+                NaN/infinity, `y`/`x`/`entity`/`dk_time` overlap,
                 insufficient observations, `confidence_level` out of
                 range, an unknown `cov_type` (or `cov_type="hc0"`,
-                unsupported for RE), `time` specified with a
+                unsupported for RE), `dk_time` specified with a
                 `cov_type` other than `"dk"`, a singleton entity group
                 (raised by the internal one-way FE regression that
                 RE's σ_ε² estimation delegates to), a
-                `cov_type="dk"` request with `time` unset, or
+                `cov_type="dk"` request with `dk_time` unset, or
                 `cov_type="dk"` with no more unique time periods than
                 regressors: the Driscoll-Kraay covariance has rank at
                 most T-1, so the Hausman test cannot be computed). A
@@ -133,7 +133,7 @@ class REResults:
     section 10.7.3; equivalent to `plm::phtest(method = "aux",
     effect = "individual")`), always comparing against one-way (entity)
     fixed effects — the same structure as RE itself — regardless of
-    `REOptions.time`. The Wald test's covariance follows `cov_type`
+    `REOptions.dk_time`. The Wald test's covariance follows `cov_type`
     (the default `"cluster"` gives the cluster-robust Hausman test;
     `"classical"` gives the classical version). The auxiliary
     regression uses OLS-style small-sample corrections, which differ

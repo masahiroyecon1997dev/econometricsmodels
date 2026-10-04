@@ -91,7 +91,7 @@ A wrong argument *type*, as opposed to a wrong value, raises the built-in `TypeE
 | IV | Fewer instruments than endogenous regressors (the order condition). `x_endog` or `instruments` is empty. GMM options are set for an estimator that does not use them, or are out of range (`gmm_max_iter` outside 3 to 10,000, or `gmm_tol` not a positive finite number). With `gmm_weight_type="cluster"`, there are too few clusters for the weight matrix. |
 | FE | A singleton entity, or in a two-way model a singleton time period. A two-way model on an unbalanced panel, or without `time`. A regressor with no within-variation (constant over time within every entity). Too few degrees of freedom. |
 | RE | With `cov_type="cluster"`, too few clusters for the Hausman auxiliary regression. |
-| FE, RE | `cov_type="dk"` without a time column, with an invalid `dk_bandwidth`, with too few time periods for the number of coefficients tested, or with a degenerate two-period structure. |
+| FE, RE | `cov_type="dk"` without `dk_time` (FE does not borrow `time` for it), with an invalid `dk_bandwidth`, with too few time periods for the number of coefficients tested, or with a degenerate two-period structure. |
 
 ## When `ComputationError` is raised
 

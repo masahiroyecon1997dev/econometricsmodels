@@ -22,7 +22,7 @@
   補助回帰のWald検定はRE本体の`cov_type`に連動するため、各シナリオの
   `"hausman"`キー配下に全cov_type（classical/hc1/hc2/hc3/cluster/dk）の値を
   持つ（`run_plm_hausman_benchmark.R`のモジュールコメントにplmのvcovとの
-  対応を記載）。比較は常に1-wayで、`REOptions.time`の有無によらない。
+  対応を記載）。比較は常に1-wayで、`REOptions.dk_time`の有無によらない。
   dkのバンド幅は`floor(4*(T/100)^(2/9))`を`maxlag`に明示的に渡す。
   `dk_bandwidth`明示指定は`"hausman_dk_bandwidth"`キー配下（`{バンド幅: 値}`）。
   ロバスト共分散が構造的に特異になるケース（`_STRUCTURALLY_SINGULAR`）は`null`

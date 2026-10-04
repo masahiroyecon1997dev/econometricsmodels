@@ -11,9 +11,9 @@ supports entity-direction random effects only; two-way RE is not implemented.
 `REOptions.cov_type` defaults to `"cluster"` (clustered on `entity`), the same departure from
 OLS's `"classical"` default that [FE](fe.md#standard-error-types) makes, and for the same
 reason. Supported values are `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"`, and `"dk"` —
-`"hc0"` is not supported. `"dk"` is the same Driscoll-Kraay panel estimator FE uses, ordered by
-`REOptions.time`; unlike `FEOptions`, there is no separate `dk_time` since RE has no two-way
-structure to disambiguate from the HAC time granularity.
+`"hc0"` is not supported. `"dk"` is the same Driscoll-Kraay panel estimator FE uses, and it
+requires `REOptions.dk_time`, the column that defines the time periods (the same option as
+`FEOptions.dk_time`). RE has no `time` option, since it has no two-way structure.
 
 The small-sample corrections and the degrees of freedom of the t tests follow the same Stata/R
 convention as FE (`fixest`'s `ssc()` defaults; `plm::vcovHC(type = "sss")` for `"cluster"`):
@@ -37,7 +37,7 @@ zero. Its properties:
 
 - The statistic is always non-negative (no indefinite variance-difference problem).
 - The comparison is always against **one-way** (entity) fixed effects, the same structure as RE
-  itself. `REOptions.time` is used only as the Driscoll-Kraay time ordering (`cov_type="dk"`)
+  itself. `REOptions.dk_time` is used only as the Driscoll-Kraay time periods (`cov_type="dk"`)
   and does not affect the test; specifying it with any other `cov_type` raises
   `ValidationError`.
 - The Wald test uses the covariance matching `REOptions.cov_type` (classical, `hc1`–`hc3`,

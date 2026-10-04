@@ -91,15 +91,15 @@ def test_entity_overlaps_x_raises(fe_dataset):
         RE(fe_dataset, y="y", x=["entity", "x2"], entity="entity").fit()
 
 
-def test_y_overlaps_time_raises(fe_dataset):
-    """`time`ロールは`REOptions.time`設定時のみ存在する。"""
-    options = REOptions(time="y")
+def test_y_overlaps_dk_time_raises(fe_dataset):
+    """`dk_time`ロールは`REOptions.dk_time`設定時のみ存在する。"""
+    options = REOptions(dk_time="y")
     with pytest.raises(
         ValidationError,
         match=escaped(
             msgs.ROLE_OVERLAP_SINGLE_EQUALS_SINGLE,
             col="y",
-            later_role="time",
+            later_role="dk_time",
             earlier_role="y",
         ),
     ):
@@ -108,14 +108,14 @@ def test_y_overlaps_time_raises(fe_dataset):
         ).fit()
 
 
-def test_entity_overlaps_time_raises(fe_dataset):
-    options = REOptions(time="entity")
+def test_entity_overlaps_dk_time_raises(fe_dataset):
+    options = REOptions(dk_time="entity")
     with pytest.raises(
         ValidationError,
         match=escaped(
             msgs.ROLE_OVERLAP_SINGLE_EQUALS_SINGLE,
             col="entity",
-            later_role="time",
+            later_role="dk_time",
             earlier_role="entity",
         ),
     ):
@@ -124,14 +124,14 @@ def test_entity_overlaps_time_raises(fe_dataset):
         ).fit()
 
 
-def test_time_overlaps_x_raises(fe_dataset):
-    options = REOptions(time="time")
+def test_dk_time_overlaps_x_raises(fe_dataset):
+    options = REOptions(dk_time="time")
     with pytest.raises(
         ValidationError,
         match=escaped(
             msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
             col="time",
-            single_role="time",
+            single_role="dk_time",
             multi_role="x",
         ),
     ):
@@ -208,8 +208,8 @@ def test_missing_entity_column_raises(fe_dataset):
         RE(fe_dataset, y="y", x=["x1", "x2"], entity="nonexistent").fit()
 
 
-def test_missing_time_column_raises(fe_dataset):
-    options = REOptions(time="nonexistent")
+def test_missing_dk_time_column_raises(fe_dataset):
+    options = REOptions(dk_time="nonexistent")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
@@ -273,7 +273,7 @@ def test_group_key_column_null_values_raise(bad_col):
     }
     values[bad_col][1] = None
     df = pl.DataFrame(values)
-    options = REOptions(time="time")
+    options = REOptions(dk_time="time")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name=bad_col),
@@ -394,10 +394,10 @@ def test_invalid_confidence_level_raises(fe_dataset, confidence_level):
         our_fit_re(fe_dataset, options=options)
 
 
-def test_dk_requires_time_raises(fe_dataset):
-    """`REOptions`には`FEOptions.dk_time`に相当する分離フィールドが無く、
-    `time`のみでHAC時系列順序を兼ねる（`engine_pybind/src/panel/re.rs`
-    モジュールdoc「`REOptions`に`dk_time`が無い理由」参照）。
+def test_dk_requires_dk_time_raises(fe_dataset):
+    """`cov_type="dk"`で`dk_time`が未指定だと`ValidationError`
+    （`FEOptions.dk_time`と同じ名前・同じ意味、`engine_pybind/src/panel/re.rs`
+    モジュールdoc「`REOptions.dk_time`」参照）。
     """
     options = REOptions(cov_type="dk")
     with pytest.raises(ValidationError, match=escaped(msgs.DK_REQUIRES_TIME)):
@@ -406,7 +406,9 @@ def test_dk_requires_time_raises(fe_dataset):
 
 @pytest.mark.parametrize("dk_bandwidth", [-1, 6])  # t=6（fe_datasetの時点数）
 def test_invalid_dk_bandwidth_raises(fe_dataset, dk_bandwidth):
-    options = REOptions(cov_type="dk", time="time", dk_bandwidth=dk_bandwidth)
+    options = REOptions(
+        cov_type="dk", dk_time="time", dk_bandwidth=dk_bandwidth
+    )
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.INVALID_DK_BANDWIDTH, bandwidth=dk_bandwidth, t=6),
@@ -485,7 +487,7 @@ def test_dk_periods_at_most_hausman_slopes_raises_validation_error():
             "time": ["1", "2", "1", "2", "1", "2", "1", "2"],
         }
     )
-    options = REOptions(cov_type="dk", time="time", dk_bandwidth=0)
+    options = REOptions(cov_type="dk", dk_time="time", dk_bandwidth=0)
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -550,18 +552,20 @@ def test_computation_error_is_runtime_error():
         ("classical", "cluster", "entity", 'cov_type="cluster"'),
         ("dk", "cluster", "entity", 'cov_type="cluster"'),
         ("cluster", "dk_bandwidth", 2, 'cov_type="dk"'),
-        ("classical", "time", "time", 'cov_type="dk"'),
-        ("cluster", "time", "time", 'cov_type="dk"'),
+        ("classical", "dk_time", "time", 'cov_type="dk"'),
+        ("cluster", "dk_time", "time", 'cov_type="dk"'),
     ],
 )
 def test_option_unused_by_cov_type_raises(
     fe_dataset, cov_type, option, value, condition
 ):
-    """選んだ`cov_type`で使われない`cluster`/`dk_bandwidth`/`time`が指定されたら
-    黙って無視せず`ValidationError`（`time`はDriscoll-Kraay HACの時系列順序専用で、
+    """選んだ`cov_type`で使われない`cluster`/`dk_bandwidth`/`dk_time`が指定されたら
+    黙って無視せず`ValidationError`（`dk_time`はDriscoll-Kraay HACの時点列専用で、
     ハウスマン検定には影響しない）。
     """
-    options = REOptions(cov_type=cov_type, **{option: value})
+    # dkは時点列(`dk_time`)が必須なので、他のオプションの検証だけを見るため添える。
+    extra = {"dk_time": "time"} if cov_type == "dk" else {}
+    options = REOptions(cov_type=cov_type, **extra, **{option: value})
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
@@ -571,5 +575,5 @@ def test_option_unused_by_cov_type_raises(
 
 @pytest.mark.parametrize("cov_type", ["dk", "DK"])
 def test_dk_bandwidth_used_by_dk_is_accepted(fe_dataset, cov_type):
-    options = REOptions(cov_type=cov_type, time="time", dk_bandwidth=1)
+    options = REOptions(cov_type=cov_type, dk_time="time", dk_bandwidth=1)
     our_fit_re(fe_dataset, options=options)

@@ -32,11 +32,11 @@ FEと同じプロセスで実測選定した（`.claude/rules/testing-policy.md`
 この定数列追加も実務上は一度きりのデータ準備であり、MultiIndex構築と同じ理由で
 計測区間の外に置く。
 
-## `time`の扱い
+## `dk_time`の扱い
 
-`REOptions.time`は`cov_type="dk"`のHAC時系列順序専用で、ハウスマン検定（常に1-way
+`REOptions.dk_time`は`cov_type="dk"`のHAC時点列専用（必須）で、ハウスマン検定（常に1-way
 比較）には影響しない。`_fit_once_engine`は`cov_type="dk"`のときのみ
-`time=_TIME_COL`を渡す（`dk`以外で渡すと`ValidationError`）。
+`dk_time=_TIME_COL`を渡す（`dk`以外で渡すと`ValidationError`）。
 
 2-way軸は無い（RE自体がv1で2-wayをスコープ外にしているため、`extra_methods=()`）。
 
@@ -122,7 +122,7 @@ def _fit_once_engine(ctx: FitContext):
         options = REOptions(cov_type="classical")
     elif ctx.cov_type == "dk":
         options = REOptions(
-            cov_type="dk", time=_TIME_COL, dk_bandwidth=_DK_BANDWIDTH
+            cov_type="dk", dk_time=_TIME_COL, dk_bandwidth=_DK_BANDWIDTH
         )
     else:
         raise ValueError(f"unknown cov_type: {ctx.cov_type!r}")

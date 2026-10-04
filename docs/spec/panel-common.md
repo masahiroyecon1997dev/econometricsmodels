@@ -13,25 +13,28 @@ Swamy-Arora分散成分推定の具体式、固定効果の復元等）は[`fe-s
 - `y: str`、`x: list[str]`はOLSと同じ。
 - `entity: str`（エンティティID列名）は**独立の必須引数**とする。FE/REいずれもパネル構造が
   無ければモデルとして成立しないため、`y`/`x`と同格に扱う。
-- `time`（時点ID列名）は必須ではないため`Options`内に置く（`FEOptions.time` /
-  `REOptions.time`、`str | None`、デフォルト`None`）。
+- `time`（時点ID列名）は必須ではないため`Options`内に置く（`FEOptions.time`、
+  `str | None`、デフォルト`None`）。REは2-way構造を持たないため`time`オプション自体が無く、
+  DKの時点列は`REOptions.dk_time`で受け取る（下記）。
   - FEの2-way（entity + time FE）を指定する場合は`time`が実質的に必須になるが、これは
     `OLSOptions.cluster`が`cov_type="cluster"`のときのみ必須になるのと同じ「条件付き必須」
     パターンであり、`Options`に置くという判断自体は変えない。未指定時のバリデーションエラーで
     担保する。
   - **`FEOptions.time`と`FEOptions.dk_time`は別物**: `time`は2-way FE（固定効果構造）を
     指定するbareフィールドで、`Some`なら常に2-way・`None`なら1-way。Driscoll-Kraay型HAC
-    （`cov_type="dk"`）専用の時系列順序は別フィールド`dk_time`（`str | None`、
-    `cov_type`の値`"dk"`を接頭辞にした命名）で指定する。1-way FE +
-    DK HAC（`time`未指定だが時系列順序だけ要る）という組み合わせを表現するために導入した
-    ——`time`の有無だけで1-way/2-wayを決める設計（ブールフラグ等の追加無し）にすると、
-    時系列順序と2-way構造を1つの`time`フィールドに詰め込めなくなるため分離が必要になった。
-    **`dk_time`は2-way（`time`指定あり）でも常に優先される**——「2-way FEの固定効果構造に
-    使う時点粒度」と「DK HACカーネルに使う時系列粒度」が異なるケースにも対応するための設計。
-    `dk_time`未指定なら`time`（2-way）にフォールバックし、どちらも`None`なら（1-way FEで
-    `cov_type="dk"`のとき）`PanelError::DkRequiresTime`。engine側は`FeCovType::Dk {
-    bandwidth, time: Option<Vec<String>> }`（`time`が優先の上書き値）として実装
-    （`engine/src/panel/fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
+    （`cov_type="dk"`）の時点列は別フィールド`dk_time`（`str | None`、`cov_type`の値`"dk"`を
+    接頭辞にした命名）で指定する。1-way FE + DK HAC（`time`未指定だが時点列だけ要る）という
+    組み合わせを表現するために導入した——`time`の有無だけで1-way/2-wayを決める設計（ブール
+    フラグ等の追加無し）にすると、DKの時点列と2-way構造を1つの`time`フィールドに詰め込めなく
+    なるため分離が必要になった。**`cov_type="dk"`では`dk_time`が必須で、`time`を暗黙に借用
+    しない**（未指定は`ValidationError`、1-way・2-wayとも同じ）。どの列がDKの時点かを利用者が
+    明示しない設計は、意図と違う列が選ばれても気づけないため。`dk_time`は2-wayでも常にDK計算に
+    使われ、「2-way FEの固定効果構造に使う時点粒度」と「DK HACカーネルに使う時系列粒度」が
+    異なるケースにも対応する。engine側は`FeCovType::Dk { bandwidth, time: TimeKeys }`
+    （`time`は必須）として実装（`engine/src/panel/fe.rs`モジュールdoc「Driscoll-Kraay型
+    パネルHAC対応」参照）。**REは同名・同じ意味の`REOptions.dk_time`を持つ**（`time`という名前の
+    オプションは持たない。REは2-way構造を持たず、FEの`time`に相当するものが無いため。将来
+    2-way REを実装するときは、FEと同じ意味の`time`を改めて導入する）。
 - **`time`を`Options`に置く理由（トップレベル引数に昇格しない）**:
   - `time`の意味がFEとREで異なる。FEでは2-way固定効果の構造指定だが、REでは`cov_type="dk"`の
     時系列順序専用でRE自身の変換・ハウスマン検定には使わない。「パネル構造を定義する列名」という

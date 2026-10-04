@@ -21,14 +21,15 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
   |---|---|---|---|
   | `cov_type` | `str` | `"cluster"` | `"classical"` / `"hc1"`〜`"hc3"` / `"cluster"` / `"dk"`（大小無視）。`"hc0"`は非対応 |
   | `confidence_level` | `float` | `0.95` | |
-  | `time` | `str \| None` | `None` | `cov_type="dk"`時のDK時系列順序専用（`"dk"`では必須）。RE自身の準偏差変換・ハウスマン検定には使わない。`"dk"`以外で指定すると`ValidationError` |
+  | `dk_time` | `str \| None` | `None` | `cov_type="dk"`時のDK時点列（`FEOptions.dk_time`と同名・同じ意味。`"dk"`では必須）。RE自身の準偏差変換・ハウスマン検定には使わない。`"dk"`以外で指定すると`ValidationError` |
   | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名。省略時は`entity`をそのまま使う。他の`cov_type`で指定すると`ValidationError` |
   | `dk_bandwidth` | `int \| None` | `None` | DK HACのバンド幅。省略時は自動計算。`cov_type="dk"`以外で指定すると`ValidationError` |
 
-- **`FEOptions`と異なり`dk_time`が無い**: `ReCovType::Dk`は`FeCovType::Dk`と違い`time`
-  オーバーライドフィールドを持たない。REは2-way構造自体を持たないため、「2-way FEの固定効果
-  構造」と「DK HACの時系列粒度」を分離する必要が無く、`REOptions.time`1フィールドが
-  「HAC時系列順序」専用になる（ハウスマン検定は常に1-way比較で`time`に依存しない、3.7節）。
+- **`FEOptions.dk_time`と同名・同じ意味の`dk_time`を持つ。`time`という名前のオプションは
+  持たない**: REは2-way構造自体を持たず、FEの`time`（2-way固定効果の時間次元）に相当する
+  ものが無いため、`time`と呼ぶと誤解を招く。DKの時点列は`REOptions.dk_time`の1フィールドで
+  受け取る（ハウスマン検定は常に1-way比較で`dk_time`に依存しない、3.7節）。将来2-way REを
+  実装するときは、FEと同じ意味の`time`を改めて導入する。
 - **`x`は空リストを許容しない**: `x=[]`は「説明変数を一切投入しない、分散成分（σ_ε²・
   σ_u²、ICC）のみを推定するnullモデル」として単独で意味を持つ標準的なユースケース
   （マルチレベルモデルの"null model"）だが、他手法（FE・OLS/WLS/Logit/Probit/IV）
@@ -241,8 +242,8 @@ FEの`r_squared_between`/`r_squared_overall`をそのまま流用できず、RE�
   パネルでは`θ_i`が全個体共通のため変換済み定数列を使う版と同値だが、不均衡パネルでは
   値が異なる。本実装は`plm`に合わせる。
 - **比較は常に1-way**（個体効果のみ、RE本体と同じ構造）。`X̃`はRE本体が分散成分推定に
-  使う1-way FEのwithin変換から得る。`REOptions.time`（`cov_type="dk"`専用）の有無は
-  結果に影響しない（`time`は`cov_type="dk"`の時系列順序にのみ使う）。2-wayのハウスマン検定は2-way REの実装時に
+  使う1-way FEのwithin変換から得る。`REOptions.dk_time`（`cov_type="dk"`専用）の有無は
+  結果に影響しない（`dk_time`は`cov_type="dk"`の時点列にのみ使う）。2-wayのハウスマン検定は2-way REの実装時に
   改めて検討する。
 - **`cov_type`連動**: 補助回帰のWald検定の共分散はRE本体の`cov_type`に対応させる
   （専用オプションは設けない）。既定の`cov_type="cluster"`ではcluster-robust版（Wooldridgeの

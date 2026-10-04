@@ -341,9 +341,15 @@ TWO_WAY_REQUIRES_TIME = (
     "two-way fixed effects requires the `time` option to be set"
 )
 
-# `PanelError::DkRequiresTime`（Driscoll-Kraay HAC、1-way限定で到達）。
+# RE: `PanelError::DkRequiresTime`（`cov_type="dk"`で`dk_time`が未指定）。
 DK_REQUIRES_TIME = (
-    "Driscoll-Kraay panel HAC requires the `time` option to be set"
+    "Driscoll-Kraay panel HAC requires the `dk_time` option to be set"
+)
+# FE: `cov_type="dk"`で`dk_time`が未指定（`time`は借用されない。1-way・2-wayとも）。
+FE_DK_REQUIRES_DK_TIME = (
+    "cov_type='dk' requires the `dk_time` option: the column that defines the "
+    "time periods of the Driscoll-Kraay estimator (it is not taken from "
+    "`time`, which only sets the two-way fixed effects)"
 )
 
 # `PanelError::InvalidDkBandwidth`。`t`は時点数（観測数`n`ではない点に

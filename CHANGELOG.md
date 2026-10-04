@@ -5,8 +5,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-04
+
+Input-validation and API-consistency release. No new estimation method is added: accepted input types and option values are now checked strictly, names are unified across methods, and FE / RE inference follows fixest / plm conventions. Many changes are breaking (permitted during the `0.x.x` pre-release period).
+
+### Added
+
+- OLS / WLS / IV results expose `hac_lags_used`, the lag count actually used by `cov_type="hac"` (automatic or explicit); FE / RE results expose `dk_bandwidth_used` for `cov_type="dk"`. For IV GMM, the value is set when either `cov_type` or `gmm_weight_type` is `"hac"` (`cov_type` wins when both are and they differ)
+- `FEResults.n_periods`
+- polars columns of dtype Int8 / Int16 / UInt8 / UInt16 / Float16 / Int128 / Decimal / Struct / Array can now be passed in a `DataFrame` (before, such a column made the conversion fail even when unused, and Decimal / Int128 panicked); `to_dummies()` output (UInt8) is accepted. The release-build extension module grows from 34.6 MB to 43.5 MB
+- Timezone-naive `Datetime` is accepted for identity keys (`entity`, `cluster`)
+- Linux aarch64 and musllinux (x86_64 / aarch64) wheels
+- Public docs pages: accepted data, validation, verification, and performance
+
 ### Changed
 
+- **Breaking**: columns used as numbers (`y`, `x`, weights, instruments) must be integer, float, Boolean or Decimal. Before, every column was cast to Float64 unconditionally, so strings that look numeric were silently converted, unreadable strings were reported as missing values, and Date / Duration passed as days / microseconds. Other dtypes now raise `ValidationError` naming the dtype (`hac_time` additionally accepts Date / Datetime, since it only orders rows)
+- **Breaking**: key columns are checked by dtype: `entity` / `cluster` accept integer, float, string, Categorical / Enum, Boolean and Date; `time` / `dk_time` accept integer, float, string, Categorical / Enum, Date and Datetime. Others (Time, Duration, Decimal, List, Struct, ...) raise `ValidationError`. NaN / infinity in a float key column is rejected (it used to form one `"NaN"` group). Timezone-aware `Datetime` key columns are rejected with a hint (`replace_time_zone(None)`)
+- **Breaking**: column-name arguments (`y`, `x`, `entity`, `weight`, `x_exog`, `x_endog`, `instruments`) raise `TypeError` naming the argument, the expected form and the actual type when malformed; lists must be `list` (`str`, `tuple` and `polars.Series` are rejected). String options (`cluster`, `hac_time`, `time`, `dk_time`, `cov_type`, `solver`, `estimator`, `gmm_weight_type`, `gmm_type`) raise `TypeError` the same way, both in the constructor and on attribute assignment
+- **Breaking**: numeric options (`confidence_level`, `hac_lags`, `max_iter`, `tol`, `lower`, `upper`, `gmm_max_iter`, `gmm_tol`, `dk_bandwidth`) raise `TypeError` for `bool`, strings, `None` where not allowed, and floats given to integer options (before, `hac_lags=True` was accepted as 1); integers beyond the i64 range raise `ValidationError` instead of `OverflowError`. Logit / Probit / Tobit `tol` of NaN / infinity is now `ValidationError`
+- **Breaking**: `max_iter` and `gmm_max_iter` have an upper limit of 10,000 (`max_iter` 1–10,000, `gmm_max_iter` 3–10,000); larger values raise `ValidationError`
+- **Breaking**: FE / RE: the Driscoll-Kraay time order is now the order of the column's values (integers, Date, Datetime and floats by value, Enum by category order), not the lexicographic order of the labels. Before, un-padded integer periods (`1, 10, 11, 2, ...`), negative numbers and decimals paired the wrong periods in the lag terms and changed the standard errors without an error. Two-way FE `fixed_effects()` now returns the time effects in time order with the first period as the baseline (`γ = 0`), so with 10 or more integer periods the baseline and the entity-effect constant change (predictions are unchanged)
+- **Breaking**: FE / RE: the small-sample correction of cluster and Driscoll-Kraay standard errors now follows fixest / Stata (`G/(G-1) × (n-1)/(n-K)`) instead of linearmodels (no `G/(G-1)`), and the inference degrees of freedom follow `cov_type` (`G - 1` for cluster, `T - 1` for dk). Standard errors, test statistics and p-values change for these `cov_type`s
+- **Breaking**: RE: `f_statistic` is now a Wald test that follows the fit's `cov_type`, like FE (denominator degrees of freedom `G - 1` for cluster, `T - 1` for dk, `df_resid` otherwise), verified against `plm::pwaldtest`
 - **Breaking**: RE: the Hausman test's Wald test on the auxiliary regression now follows the RE fit's `cov_type` (classical / `hc1`–`hc3` / `cluster` / `dk`) instead of always using classical covariance. With the default `cov_type="cluster"` it is now the cluster-robust Hausman test; use `cov_type="classical"` for the previous values. Verified against `plm::phtest(method = "aux", vcov = ...)`. The auxiliary regression uses OLS-style (Stata/R) small-sample corrections, which differ from RE's linearmodels-style standard errors. When the auxiliary regression cannot be computed (e.g. `cov_type="cluster"` with no more clusters than the `2k` auxiliary slopes, or `"dk"` with too few periods), `fit()` now raises `ValidationError` / `ComputationError` instead of the Hausman fields being `None` (they are `None` only when there are no slope coefficients)
 - **Breaking**: RE: the Hausman test (`hausman_statistic` / `hausman_p_value` / `hausman_df`) is now the regression-based (auxiliary regression) version, equivalent to `plm::phtest(method = "aux", effect = "individual")`, replacing the quadratic form whose sign was masked with `abs()`. The statistic is non-negative by construction, and the comparison is always against one-way FE: `REOptions.time` no longer switches it to two-way. Values change (identical to the classical Hausman test on balanced panels with a common σ²)
 - **Breaking**: RE: `REOptions.time` is renamed to `REOptions.dk_time`, matching `FEOptions.dk_time`. RE has no two-way structure, so a `time` option had nothing to mean there; it was only the Driscoll-Kraay time ordering. It is used only with `cov_type="dk"` (where it is required), so specifying it with another `cov_type` raises `ValidationError` (like `cluster` / `dk_bandwidth`). A `time` option will be introduced again, with the same meaning as in FE, when two-way RE is implemented
@@ -33,6 +54,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Breaking**: OLS / WLS / IV: `hac_time` must now give every observation a distinct value. A column with any repeated value (including a constant column) raises `ValidationError` naming the first two rows that share a value, instead of silently falling back to the row order for the tied rows and returning what looked like a time-ordered HAC estimate. The column is now ordered in its own dtype rather than after a conversion to a float, so integers beyond 2^53 and nanosecond `Datetime` values that differ by less than a float can resolve keep their order instead of being treated as tied. A `Boolean` `hac_time` column is rejected by dtype. Results for columns that were already distinct are unchanged
 - **Breaking**: FE: `cov_type="dk"` now requires `dk_time`, in one-way and two-way models alike. Before, an unset `dk_time` silently fell back to `time` (the two-way fixed-effects column), so the user never stated which column defines the Driscoll-Kraay periods. `time` now only sets the fixed-effects structure. The engine's `FeCovType::Dk.time` is a required `TimeKeys` instead of an `Option`. The error for a missing `dk_time` also now names `dk_time`, where it used to say the `time` option was required. In FE and RE alike, `dk_time` may not be the same column as `y` or `entity` (`ValidationError`); it may be the same as `x` (RE used to reject a `time` that was also in `x`) and, in FE, the same as `time`
 - **Breaking**: OLS / WLS / IV: `hac_time` is now required for `cov_type="hac"` (and IV's `gmm_weight_type="hac"`); leaving it out raises `ValidationError`. Before, the row order of the data was silently taken as the time order, so data not sorted by time gave a wrong estimate that looked time-ordered. If the rows are already in time order, add an index column (for example `df.with_row_index("t")`) and pass its name. statsmodels and R's `sandwich` use the row order and take no time column, so this differs from them on purpose
+
+### Fixed
+
+- p-values are computed from the survival function instead of `1 - cdf` (t / normal, Wald F, 2SLS / GMM Wald / Sargan / J, Tobit Wald, Logit / Probit LR), so tail p-values no longer collapse to 0
+- FE / RE: `cov_type="dk"` with a number of periods not larger than the number of jointly tested coefficients (FE slope F-test, RE Hausman test), and FE with two periods (dk) or two clusters (cluster) in which every level of an absorbed dimension has one observation per group, now raise `ValidationError`. Before, these returned a near-zero standard error and a huge F statistic, or `ComputationError`
+- FE: the length of the `dk_time` override column is validated against the number of observations
+- IV: GMM with `gmm_weight_type="cluster"` and fewer clusters than instruments is now `ValidationError` up front instead of `ComputationError`
+- Passing a non-polars object (pandas `DataFrame`, `LazyFrame`, `Series`) now raises `ValidationError` with a clear message (with a `.collect()` hint for `LazyFrame`) instead of an `AttributeError` that leaked internals
+- Logit / Probit / Tobit: large-sample Newton no longer stalls near the optimum because of rounding error in the log-likelihood sum (compensated summation; Probit n=1e6 from 10 iterations / 6.7 s to 5 iterations / 0.9 s), and BFGS / L-BFGS terminate when the line search stagnates near the optimum (Probit n=1e6 BFGS 43 s to 2.1 s, L-BFGS 47 s to 1.9 s)
+
+### Performance
+
+- FE / RE: entity and time identifiers are converted to integer codes once instead of grouping by string keys in every step. At n=1,000,000, k=5 (local A/B): RE about 3.7–4.4 s to 0.9–1.1 s, FE about 1.5–2.2 s to 0.25–0.30 s. RE's within R² and Hausman test also reuse the inner FE's within transformation. Results are bit-identical
 
 ## [0.7.0] - 2026-09-22
 
@@ -185,7 +219,8 @@ Initial release. Only OLS (Ordinary Least Squares) from Phase 1 (basic regressio
 - Python API taking a polars DataFrame as input (`OLS` / `OLSOptions` / `OlsResults`)
 - Rust computational core (`engine`) and PyO3 bindings (`engine_pybind`)
 
-[Unreleased]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/masahiroyecon1997dev/econometricsmodels/compare/v0.4.0...v0.5.0

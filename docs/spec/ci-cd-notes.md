@@ -13,6 +13,9 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
   - `audit`ジョブ: workspace全体の`Cargo.lock`を`cargo-audit`で検証する。`rustsec/audit-check`
     アクションは不採用（`cargo audit --json`の出力にANSI制御文字が混ざると`JSON.parse()`が
     失敗する既知の不具合が長期未解決のため）。テキスト出力のまま`cargo audit`を直接実行する。
+    `cargo-audit`はバージョンを固定する（サプライチェーン攻撃対策）。devcontainerの
+    `.devcontainer/Dockerfile`（`ARG CARGO_AUDIT_VERSION`、`cargo install --locked`でソースビルド）と
+    `ci_engine.yml`の`tool: cargo-audit@<版>`は同じ版に揃える。
 - **`ci_python.yml`**（`python_package`/`engine_pybind`の品質検証、3ジョブ、
   `python_package/**`・`engine_pybind/**`・`pyproject.toml`・`uv.lock`・`tests/**`を
   トリガー。`engine/**`は含めない）:

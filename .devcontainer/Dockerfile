@@ -133,7 +133,17 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 
 ENV PATH="${CARGO_HOME}/bin:${PATH}"
 
-RUN cargo install cargo-llvm-cov --locked
+# サプライチェーン攻撃対策として、cargo経由で入れる開発ツールはバージョンを固定し、
+# ソースからビルドする（`--locked`でツール自身の依存もそのクレートのCargo.lockで固定）。
+# cargo-auditのバージョンはCIの`ci_engine.yml`（`tool: cargo-audit@...`）と揃えること。
+ARG CARGO_AUDIT_VERSION=0.22.2
+ARG CARGO_ABOUT_VERSION=0.9.2
+ARG CARGO_LLVM_COV_VERSION=0.9.1
+
+RUN cargo install --locked \
+        cargo-audit@${CARGO_AUDIT_VERSION} \
+        cargo-about@${CARGO_ABOUT_VERSION} \
+        cargo-llvm-cov@${CARGO_LLVM_COV_VERSION}
 
 # -------------------------
 # uv インストール (Python パッケージ管理)

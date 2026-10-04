@@ -57,7 +57,8 @@ jobs:
       # アクションを介さず`cargo audit`をテキスト出力のまま直接実行する。
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         with:
-          tool: cargo-audit
+          # バージョンは.devcontainer/DockerfileのCARGO_AUDIT_VERSIONと揃える
+          tool: cargo-audit@0.22.2
 
       - name: cargo audit
         run: cargo audit

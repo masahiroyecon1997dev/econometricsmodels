@@ -29,8 +29,10 @@ Note:
       等、独立な素朴ループでの手計算とのクロスチェック）は数式レベルの細粒度回帰確認と
       して引き続き有効。
     - `wu_hausman_statistic`はcov_type="hac"のときlinearmodels側との対応式が
-      不明なためフィクスチャ自体が`None`（原因未特定、次セッションで別途調査
-      予定、`benchmark/iv/references/linearmodels_ref.py`のモジュールdocコメント参照）。
+      不明なためフィクスチャ自体が`None`（`linearmodels`側で一致しない原因は
+      未特定、`benchmark/iv/references/linearmodels_ref.py`のモジュールdocコメント参照）。
+      `hac`を含む全cov_typeの値自体は、独立実装のR `ivreg`を使う
+      `test_iv_crosscheck.py`で検証している。
       本実装側は`hac`でも値を返す（`None`にはならない）ため、`ref`が`None`の
       ときは比較をスキップするだけで、本実装側の値が`None`であることは
       要求しない。df1（自由度1境界）は逆にaugmented regressionが

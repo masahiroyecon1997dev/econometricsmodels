@@ -1,4 +1,5 @@
-//! OLSの入力データ（被説明変数・設計行列）の型定義。
+//! OLSの入力データ（被説明変数・設計行列）の型定義と、推定本体（`OlsEstimator`）。
+//! 推定本体は各種共分散行列（classical/HC0-3/HAC/cluster）・Wald検定・予測までを持つ。
 //!
 //! `engine`はpolars/PyO3を一切知らない（`.claude/rules/rust-style.md`「責務分離」参照）。
 //! `engine_pybind`はpolars DataFrameから列ごとに`Vec<f64>`を抽出するところまでを担い
@@ -261,7 +262,7 @@ pub struct OlsEstimator {
     std_errors: Mat<f64>,
     /// t統計量 (k, 1) = params / std_errors
     test_stats: Mat<f64>,
-    /// 両側p値 (k, 1)。t分布（自由度 n-k）に基づく
+    /// 両側p値 (k, 1)。t分布（自由度`df_inference`。通常`n-k`、`cov_type=Cluster`のときだけ`G-1`）に基づく
     p_values: Mat<f64>,
     /// 信頼区間の下限 (k, 1)
     conf_lower: Mat<f64>,
@@ -275,7 +276,8 @@ pub struct OlsEstimator {
     /// `cov_params`を使ったロバストWald検定（`docs/spec/ols-spec.md`
     /// 「適合度統計量」参照）
     f_statistic: f64,
-    /// F統計量のp値（F分布、自由度は`(k - k_constant, n - k)`）
+    /// F統計量のp値（F分布、自由度は`(k - k_constant, df_inference)`。`df_inference`は
+    /// 通常`n - k`、`cov_type=Cluster`のときだけ`G-1`）
     f_p_value: f64,
     /// 対数尤度（正規分布を仮定した最尤推定量ベース。`σ̂²`は`SSR/n`であり、
     /// classical標準誤差の不偏推定量`SSR/(n-k)`とは異なる点に注意）
@@ -311,11 +313,12 @@ impl OlsEstimator {
     /// `confidence_level`は`fit`実行時に一度だけ使用し、信頼区間に固定して含める
     /// （`docs/spec/ols-spec.md`「API引数」参照。実行時可変引数にはしない）。
     ///
-    /// `cov_type`によらず、p値・信頼区間の算出にはt分布（自由度n-k）を使う。
+    /// `cov_type`によらず、p値・信頼区間の算出にはt分布を使う（自由度は通常n-k、
+    /// `cov_type=Cluster`のときだけ`G-1`。上記の`df_inference`）。
     /// 主リファレンスのstatsmodelsはHC0-3で正規分布を既定とするが（`use_t=False`）、
     /// 本プロジェクトはt分布で統一する方針（`docs/spec/ols-spec.md`
     /// 「標準誤差」）。ベンチマーク生成側
-    /// （`benchmark/run_statsmodels_benchmark.py`）は`use_t=True`を明示指定して合わせている。
+    /// （`benchmark/linear/references/statsmodels_ref.py`）は`use_t=True`を明示指定して合わせている。
     ///
     /// F統計量も同じ方針で、`cov_type`によらず単一のWald検定の式
     /// `F = (β_slopes' Σ⁻¹ β_slopes) / q`（`Σ`は切片以外の係数に対応する`cov_params`の
@@ -858,7 +861,7 @@ fn time_ordering(time_order: &[f64], n: usize) -> Vec<usize> {
 /// 残差でスケールした行列`Xe`（`Xe[t,a] = ε̂_t・x_t[a]`、`order`の時系列順）を使うと、
 /// `Ŝ₀ = Xe'Xe`、`Ŝ_l = Xe[l:,:]'Xe[:n-l,:]`という行列積に落とし込める（`Ŝ_l'`は転置を
 /// 取るだけで再計算不要）。手書きの三重ループ（ラグ×観測×`k²`）よりfaerの行列積を使う方が
-/// 大幅に高速（実測値は`docs/spec/ols-performance-notes.md`参照）。
+/// 大幅に高速（計測方法論は`docs/performance/ols.md`、実測値は`docs/guide/performance-results.md`参照）。
 ///
 /// **`Par::Seq`を明示指定する理由**: `Ŝ_l`の行列積はラグの数だけ繰り返し呼ぶことになるが、
 /// 1回あたりの行列積は`k×k`という小さい出力サイズのため、faer既定の並列実行（グローバル

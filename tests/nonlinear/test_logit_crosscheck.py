@@ -13,7 +13,7 @@ Note:
     許容誤差はOLSのRクロスチェック（classical/HC0-3/clusterで機械精度一致）より
     緩い。LogitはRのglm（IRLS/Fisher scoring）と本実装（Newton/BFGS/L-BFGS）が
     どちらも反復最適化のため、OLSの閉形式解同士の比較（機械精度一致）ほどの
-    精度は出ない。基本方針はRTOL=2e-4（実測最大相対誤差~9.5e-5に対するマージン）。
+    精度は出ない。基本方針はRTOL=2e-4（実測最大相対誤差~1.4e-4に対するマージン）。
     統計量ごとに実測値が大きく異なるものはさらに個別の許容誤差を設定している
     （限界効果のstd_err・p値・near_separationの信頼区間。根拠はコード中の
     各定数の直前コメント参照。`testing-policy.md`「許容誤差」の方針通り）。
@@ -46,13 +46,13 @@ FIXTURE_PATH = (
 RTOL = TOLERANCES["logit_crosscheck"]["rtol"]
 ATOL = TOLERANCES["logit_crosscheck"]["atol"]
 
-# marginal_effects()のstd_err（デルタ法、ヤコビアン経由）は係数・標準誤差本体より
-# 数値ノイズが1桁大きいことを実測確認した（mroz/opg/median/ageで相対誤差~1.8e-3が
-# 最大）。effect自体はRTOL=2e-4で十分（実測最大~6.6e-6）。
+# marginal_effects()のstd_err（デルタ法、ヤコビアン経由）は実測最大相対誤差~8.3e-5
+# （near_separation/opg/mean/x1）。effect自体の実測最大は~6.6e-6。
 RTOL_MARGEFF_SE = TOLERANCES["logit_crosscheck"]["rtol_margeff_se"]
 
 # p値は標準正規分布CDFの裾で係数・zのわずかな数値差が増幅されるため、係数・SE本体
-# より緩いATOLが必要（実測最大絶対誤差~1.19e-5、near_separation/classical/const）。
+# より緩いATOLが必要（rtolで収まらない実測最大絶対誤差~8.4e-6、
+# near_separation/opg/x2）。
 ATOL_P_VALUE = TOLERANCES["logit_crosscheck"]["atol_p_value"]
 
 # near_separation（準完全分離の境界ケース）のconf_intは、係数・SE本体より数値ノイズが

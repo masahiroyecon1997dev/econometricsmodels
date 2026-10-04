@@ -26,7 +26,7 @@ Note:
     緩い。ProbitはRのglm（IRLS/Fisher scoring）と本実装（Newton/BFGS/L-BFGS）が
     どちらも反復最適化のため、OLSの閉形式解同士の比較（機械精度一致）ほどの
     精度は出ない。基本方針はRTOL=2e-4（Logitと同じ基本方針、実測最大相対誤差は
-    Logitより小さい~9e-6程度だが同じ基本方針を踏襲）。統計量ごとに実測値が
+    Logitよりやや小さい~9e-5）。統計量ごとに実測値が
     大きく異なるものはさらに個別の許容誤差を設定している（限界効果のstd_err・
     p値。根拠はコード中の各定数の直前コメント参照。
     `testing-policy.md`「許容誤差」の方針通り）。
@@ -59,13 +59,12 @@ FIXTURE_PATH = (
 RTOL = TOLERANCES["probit_crosscheck"]["rtol"]
 ATOL = TOLERANCES["probit_crosscheck"]["atol"]
 
-# marginal_effects()のstd_err（デルタ法、ヤコビアン経由）は係数・標準誤差本体より
-# 数値ノイズが1桁大きいことを実測確認した（mroz/hc1/median付近で相対誤差~7e-4が
-# 最大）。effect自体はRTOL=2e-4で十分（実測最大~2e-5）。
+# marginal_effects()のstd_err（デルタ法、ヤコビアン経由）は実測最大相対誤差~5.5e-5
+# （mroz/opg/mean/age）。effect自体の実測最大は~2e-5。
 RTOL_MARGEFF_SE = TOLERANCES["probit_crosscheck"]["rtol_margeff_se"]
 
 # p値は標準正規分布CDFの裾で係数・zのわずかな数値差が増幅されるため、係数・SE本体
-# より緩いATOLが必要（実測最大絶対誤差~2.9e-5、mroz）。
+# より緩いATOLが必要（rtolで収まらない実測最大絶対誤差~4.4e-7、mroz/hc1/expersq）。
 ATOL_P_VALUE = TOLERANCES["probit_crosscheck"]["atol_p_value"]
 
 COV_TYPES = ["classical", "opg", "hc0", "hc1"]

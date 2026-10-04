@@ -210,12 +210,12 @@ TOLERANCES: dict[str, dict[str, float]] = {
     "logit_crosscheck": {
         "rtol": 2e-4,
         "atol": ATOL_CROSSCHECK_FLOOR,
-        # marginal_effects()のstd_err（デルタ法）は係数・SE本体より数値ノイズが
-        # 1桁大きい（実測最大相対誤差~1.8e-3、mroz/opg/median/age）。
-        "rtol_margeff_se": 5e-3,
-        # p値は正規分布CDFの裾で係数・zの数値差が増幅される
-        # （実測最大絶対誤差~1.19e-5、near_separation/classical/const）。
-        "atol_p_value": 3e-5,
+        # marginal_effects()のstd_err（デルタ法）の実測最大相対誤差~8.3e-5
+        # （near_separation/opg/mean/x1）。基本のrtolと同じ値にそろえた。
+        "rtol_margeff_se": 2e-4,
+        # p値は正規分布CDFの裾で係数・zの数値差が増幅される。rtolで収まらず
+        # atolが必要になる実測最大絶対誤差~8.4e-6（near_separation/opg/x2）。
+        "atol_p_value": 2e-5,
         # near_separation（準完全分離の境界ケース）のconf_intのみ、係数・SE本体
         # より数値ノイズが大きい（実測最大相対誤差~4.05e-4、opg/x2）。
         "rtol_near_separation_conf_int": 6e-4,
@@ -223,11 +223,12 @@ TOLERANCES: dict[str, dict[str, float]] = {
     "probit_crosscheck": {
         "rtol": 2e-4,
         "atol": ATOL_CROSSCHECK_FLOOR,
-        # marginal_effects()のstd_errの数値ノイズ（実測最大相対誤差~7e-4、
-        # mroz/hc1/median付近）。logitの5e-3より小さい。
-        "rtol_margeff_se": 1e-3,
-        # p値の裾での増幅（実測最大絶対誤差~2.9e-5、mroz）。logitの3e-5と近い値。
-        "atol_p_value": 5e-5,
+        # marginal_effects()のstd_errの実測最大相対誤差~5.5e-5（mroz/opg/mean/age）。
+        # 基本のrtolと同じ値にそろえた。
+        "rtol_margeff_se": 2e-4,
+        # p値の裾での増幅。rtolで収まらずatolが必要になる実測最大絶対誤差~4.4e-7
+        # （mroz/hc1/expersq）。
+        "atol_p_value": 2e-6,
     },
     # FEのRクロスチェックはfixest。classical/hc1/hc2/hc3/cluster/dkとも、fixestの
     # `ssc()`既定に本実装の小標本補正・推論の自由度を合わせてあるため、1-way/

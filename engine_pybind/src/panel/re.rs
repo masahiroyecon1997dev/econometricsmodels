@@ -96,7 +96,9 @@ pub struct REOptions {
     /// Column name of the time identifier, used only as the Driscoll-Kraay HAC time
     /// ordering when `cov_type="dk"` (required there). Specifying it with any other
     /// `cov_type` raises `ValidationError`. It does not affect the Hausman test, which
-    /// always compares against one-way FE.
+    /// always compares against one-way FE. The periods are sorted by the text form of
+    /// the labels, so integer labels with different numbers of digits (`1, 2, ..., 12`)
+    /// sort as text; use a `Date` column or zero-padded labels.
     #[pyo3(get, set)]
     pub time: Option<String>,
 

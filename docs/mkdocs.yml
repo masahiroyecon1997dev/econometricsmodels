@@ -24,6 +24,7 @@ nav:
       - FE: api/fe.md
       - RE: api/re.md
   - Guides:
+      - Accepted data: guide/accepted-data.md
       - Validation and errors: guide/validation.md
       - Inference conventions: guide/inference-conventions.md
       - Verification: guide/verification.md

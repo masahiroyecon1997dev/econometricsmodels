@@ -78,6 +78,9 @@ class WLS:
             The estimation results.
 
         Raises:
+            TypeError: An argument has the wrong type (for example
+                `x` is a string instead of a list of column names). A
+                builtin exception, not a `ValidationError`.
             ValidationError: The input or options are invalid (a
                 column is missing, contains missing values or
                 NaN/infinity, a weight is non-positive, `weight`

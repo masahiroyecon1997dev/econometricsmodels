@@ -79,7 +79,7 @@ Issue #451 の5項目と、調査で追加で見つかった項目（N1〜N5）�
 |---|---|---|
 | 数値として使う | `y`、`x`、`weight`、IVの`x_exog`/`x_endog`/`instruments`、`dk`以外の数値列 | 整数（Int8〜Int128、UInt8〜UInt64）、浮動小数（Float16/32/64）、Boolean、Decimal |
 | 順序を持つキー | FE/REの`time`・`dk_time` | 整数、浮動小数（有限のみ）、Date、Datetime、文字列、Categorical/Enum |
-| 順序を持つ数値キー | OLS/WLS/IVの`hac_time` | 整数、浮動小数、Date、Datetime（数値化して順序だけに使う。**要確認**: HAC計算が順序だけを使い、時点の間隔を使わないこと） |
+| 順序を持つ数値キー | OLS/WLS/IVの`hac_time` | 数値用のdtype、Date、Datetime（数値化して順序だけに使う。確認済み: エンジンの`time_ordering`は並べ替えの添字を返すだけで、時点の間隔は使わない） |
 | 同一性だけのキー | `entity`、`cluster` | 整数、浮動小数（有限のみ）、文字列、Categorical/Enum、Boolean、Date |
 
 - 許可外は`ValidationError`。メッセージは列名・実際のdtype・許可する種類を含める（例: `column 'x1' has dtype String, which cannot be used as a numeric column; cast it to a numeric dtype first`）。メッセージ文言は`tests/_error_messages.py`の定数に追加し、`COLUMN_NOT_CASTABLE_TO_NUMERIC`は到達しなくなるので削除する（`cast`の`map_err`は防御用に残すかは実装時に判断）。
@@ -198,9 +198,21 @@ PyO3の`i64`/`f64`抽出は`bool`を通し、巨大な整数は`OverflowError`�
 - wheelサイズ・ビルド時間の変化（S1）をリリースメモに残す。
 - #451を閉じる前に、残項目（⑤は#452、N1は#453）への参照をコメントに残す。
 
+## 4.1 進捗（2026-10-04時点、`release/v0.8.0`にコミット済み）
+
+- S1〜S6は実装・コミット済み。S7（ドキュメント）は実装済みで、コミットはこのファイルと同じコミットに含まれる。S8のうち自動検査（pytest・cargo test・clippy・fmt・ruff・`mkdocs build --strict`）は通過。残りはレビュー用エージェントによる確認と性能の手元計測。
+- 実装中に決めた細部:
+  - `Null`型（全値が欠損の列）は、dtypeエラーにせず欠損値エラーで報告する（より分かりやすいため）。
+  - dtype名はPythonの`pl.String`等と同じ呼び名（`String`・`Date`・`Boolean`・`Decimal`等、内部パラメータは含めない）。
+  - `extract_dataframe`は型名の接頭辞ではなく`isinstance`で判定する（サブクラスも本物のDataFrameとして扱う）。
+  - 数値option: `max_iter=2**70`のように大きな正の値は有効（`i64`の上限に丸められ、収束すれば通常どおり返る）。負の巨大な値は範囲検査で`ValidationError`。`tol`はNaN・無限大も`ValidationError`にした（engineの`validate_tol`を修正）。
+  - Tobitの`lower`/`upper`、`gmm_tol`は既にNaNを弾いていたため、engine側の変更は`validate_tol`のみ。
+  - 数値optionの検証は`engine_pybind/src/option_values.rs`（`from_py_with`と手書きsetter）に集約。
+- 実測: リリースビルドの拡張モジュールは34.6MB→43.5MB（gzip後6.4MB→7.7MB）。`Cargo.lock`に推移的な依存が追加された（`ahash`・`float-cmp`ほか）ため、リリース前に依存の確認（`cargo deny`・ライセンス一覧`THIRD-PARTY-LICENSES.html`の更新）を行う。
+
 ## 5. 未解決・要確認（実装中にその都度ユーザーへ確認する。CLAUDE.md 14章）
 
-- `hac_time`にDate/Datetimeを許可してよいか（HACが順序のみを使うことの確認後）。
+- ~~`hac_time`にDate/Datetimeを許可してよいか~~: 確認済み、許可した（S2）。
 - 数値option用の型を導入する方式と、`#[setter]`手書き方式のどちらが`#[pyclass]`と整合するか。
 - 順序を持つキー・同一性だけのキーの関数を分けるか、引数で切り替えるか。
 - Decimal・Int128・Float16を許可したときの精度の注意文の表現。

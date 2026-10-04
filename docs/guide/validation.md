@@ -33,7 +33,7 @@ Null (no value) and NaN (a value that is not a number) are different things in p
 
 ### Fail early, at `fit()`
 
-Constructing a model object checks nothing. All validation happens when you call `fit()`, and again in `predict()` and the other methods that take new data. An unknown column name, for example, raises at `fit()`, not when the object is created.
+Constructing a model object checks nothing. All validation happens when you call `fit()`, and again in `predict()` and the other methods that take new data. An unknown column name, for example, raises at `fit()`, not when the object is created. The options objects check the *type* of their numeric fields when they are created or assigned (see [Accepted data](accepted-data.md#argument-types)), while the *values* (ranges, NaN) are checked at `fit()`.
 
 ### Errors rather than warnings
 
@@ -65,7 +65,7 @@ The exception class is the stable interface. The message text can change between
 
 The boundary is simple in principle: if the problem is visible without doing matrix algebra, it is a `ValidationError`, and if it only shows up while computing, it is a `ComputationError`. Some conditions have been moved from the second class to the first once they turned out to be decidable up front, for example too few clusters for a joint test. Where a case sits close to the boundary, it is listed below under the class that is raised today.
 
-One more kind of error comes from Python itself: a wrong argument *type*, such as passing `x="x1"` instead of `x=["x1"]`, a non-integer `hac_lags`, or an unknown option name, raises the built-in `TypeError`.
+A wrong argument *type*, as opposed to a wrong value, raises the built-in `TypeError`, not `ValidationError`, following the Python convention. The message names the argument and the type it got: passing `x="x1"` instead of `x=["x1"]`, a `bool` or a non-integer for an integer option such as `hac_lags`, or an options object of the wrong class are all `TypeError`. An unknown option name is a `TypeError` as well. The types each argument accepts are listed in [Accepted data](accepted-data.md#argument-types).
 
 ## When `ValidationError` is raised
 
@@ -73,11 +73,11 @@ One more kind of error comes from Python itself: a wrong argument *type*, such a
 
 | Category | Situation |
 |---|---|
-| Data type | `data` (or `new_data`) is not a `polars.DataFrame`, for example a pandas DataFrame. |
-| Columns | A named column does not exist. The same column is used in two roles (for example `y` also in `x`, or the weight column as `y`). `x` is empty, or names a column twice. With an intercept, `x` contains a column called `"const"`. |
-| Missing values | A null in any used column, or a NaN or infinite value in a numeric column. A string column whose values do not parse as numbers is reported here too. |
+| Data type | `data` (or `new_data`) is not a `polars.DataFrame`, for example a pandas DataFrame, a `polars.Series` or a `polars.LazyFrame` (call `.collect()` first). |
+| Columns | A named column does not exist. The same column is used in two roles (for example `y` also in `x`, or the weight column as `y`). `x` is empty, or names a column twice. With an intercept, `x` contains a column called `"const"`. A column has a dtype that its role does not accept, such as a string, date or categorical column used as a number (see [Accepted data](accepted-data.md#column-types-by-role)). |
+| Missing values | A null in any used column, or a NaN or infinite value in a numeric column or in a float entity, cluster or time column. A column of the `Null` dtype counts as all missing. |
 | Sample size | There are not enough observations: `n <= k`. There are no regressors. |
-| Options | `confidence_level` is outside (0, 1). An unknown `cov_type` or other option value. `hac_lags` is outside `[0, n)`. An option is set that the chosen `cov_type` or estimator does not use. |
+| Options | `confidence_level` is outside (0, 1) or NaN. An unknown `cov_type` or other option value. `hac_lags` is outside `[0, n)`, including a very large integer. `tol` or `gmm_tol` is not a positive finite number. An option is set that the chosen `cov_type` or estimator does not use. |
 | Clustering | `cov_type="cluster"` without a `cluster` column. Fewer than two clusters, or no more clusters than slope coefficients, so that the joint test is impossible. |
 | Prediction | Columns of `new_data` are missing, null or non-finite. |
 
@@ -120,10 +120,11 @@ The absence of an error says nothing about the following. They are your responsi
 - **Stationarity, outliers and influential observations.**
 - **Near-separation.** Data that are close to, but not at, separation estimate without an error. Only the detected pathology above is an error, using a heuristic threshold, and very small samples can still be misclassified.
 - **Panel structure beyond what the estimator needs.** A one-way FE model does not complain about unbalanced panels or about repeated (entity, time) pairs. Only the two-way model requires a balanced panel.
-- **Data types.** Integer and boolean columns are accepted and converted to floating point (booleans as 0 and 1), and string columns whose values parse as numbers are converted as well, without a warning.
+- **Numeric precision.** Numeric columns are converted to 64-bit floating point without a warning, so integers beyond 2^53 and decimals with many digits can lose precision. See [Accepted data](accepted-data.md#how-values-are-converted).
 
 ## Where to look next
 
+- [Accepted data](accepted-data.md): the input type, the column types accepted in each role, and the argument types.
 - [Inference conventions](inference-conventions.md): the distributions and degrees of freedom behind the reported statistics.
 - [Verification](verification.md): which reference implementations the results are compared with, including the error paths.
 - The [API reference](../api/ols.md) for the options of each method.

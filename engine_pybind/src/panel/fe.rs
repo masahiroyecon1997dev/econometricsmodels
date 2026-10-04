@@ -111,7 +111,9 @@ pub struct FEOptions {
     /// Column name of the time identifier. When set, requests two-way fixed effects
     /// (entity + time); when `None` (default), one-way (entity only). Also used as the
     /// Driscoll-Kraay HAC time ordering when `cov_type="dk"`, unless `dk_time` is set
-    /// (see `dk_time`).
+    /// (see `dk_time`). For the HAC ordering the periods are sorted by the text form of
+    /// the labels, so integer labels with different numbers of digits (`1, 2, ..., 12`)
+    /// sort as text; use a `Date` column or zero-padded labels.
     #[pyo3(get, set)]
     pub time: Option<String>,
 
@@ -125,7 +127,8 @@ pub struct FEOptions {
     /// (`time` and `dk_time` serve different purposes; see the module docstring). When
     /// set, always takes priority over `time` for the HAC computation (even with
     /// two-way effects). When `None`, falls back to `time`. Specifying it with any
-    /// other `cov_type` raises `ValidationError`.
+    /// other `cov_type` raises `ValidationError`. The periods are sorted by the text
+    /// form of the labels (see `time`).
     #[pyo3(get, set)]
     pub dk_time: Option<String>,
 

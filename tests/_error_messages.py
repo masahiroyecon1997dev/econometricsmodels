@@ -77,13 +77,18 @@ def rust_option_f64_debug(value: float | None) -> str:
 NOT_A_POLARS_DATAFRAME = (
     "'{param_name}' must be a polars.DataFrame, got {type_name}"
 )
-# `type_name`が`"polars."`で始まる（渡されたオブジェクト自体は本物のpolars
-# DataFrameなのに抽出が失敗している）場合の文言。`pyo3`/`polars`/`pyo3-polars`
-# のバージョンの組み合わせによるABI不整合等でのみ発生しうるため、通常の
-# テスト環境では再現できず対応するテストは無い（`extract_dataframe`の
-# ロジックそのものはRust側で経路を確認済み）。
+# 渡されたオブジェクト自体が本物の`polars.DataFrame`なのに変換に失敗した場合の文言。
+# `pyo3`/`polars`/`pyo3-polars`のバージョンの組み合わせによるABI不整合等でのみ
+# 発生しうるため、通常のテスト環境では再現できず対応するテストは無い
+# （`extract_dataframe`のロジックそのものはRust側で経路を確認済み）。
+# `LazyFrame`・`Series`等の他のpolarsオブジェクトはこの文言ではなく
+# `NOT_A_POLARS_DATAFRAME`になる。
 DATAFRAME_EXTRACTION_FAILED = (
     "failed to read '{param_name}' as a polars.DataFrame: {error}"
+)
+# `polars.LazyFrame`を渡した場合は、`NOT_A_POLARS_DATAFRAME`に`.collect()`の案内が付く。
+NOT_A_POLARS_DATAFRAME_LAZY = (
+    NOT_A_POLARS_DATAFRAME + "; call .collect() first"
 )
 
 # extract_f64_column: y/x/weight/hac_time の抽出で使う（engine_pybind/src/

@@ -34,27 +34,41 @@ use crate::errors::ValidationError;
 /// 本体内でこの変換を挟めないため）。
 pub fn extract_dataframe(ob: &Bound<'_, PyAny>, param_name: &str) -> PyResult<PyDataFrame> {
     ob.extract::<PyDataFrame>().map_err(|err| {
+        // 渡されたオブジェクト自体が本物の`polars.DataFrame`なのに抽出が失敗している場合
+        // （`pyo3`/`polars`/`pyo3-polars`のバージョンの組み合わせによるABI不整合等、
+        // `.claude/rules/rust-style.md`「既知のリスク」参照）は、「polars.DataFrameではない」
+        // という文言が事実に反し診断の妨げになるため、元のエラーを含めた別文言にする。
+        // `LazyFrame`・`Series`等、他のpolarsオブジェクトは通常の「DataFrameではない」扱い
+        // （`polars.`で始まる型名で一括りにすると、内部実装が漏れたメッセージになる）。
+        if is_instance_of_polars(ob, "DataFrame") {
+            return ValidationError::new_err(format!(
+                "failed to read '{param_name}' as a polars.DataFrame: {err}"
+            ));
+        }
         let type_name = ob
             .get_type()
             .fully_qualified_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|_| "unknown type".to_string());
-        // `type_name`が実際に`polars.`で始まる場合、渡されたオブジェクト自体は
-        // 本物のpolars DataFrameなのに抽出が失敗している（`pyo3`/`polars`/
-        // `pyo3-polars`のバージョンの組み合わせによるABI不整合等、
-        // `.claude/rules/rust-style.md`「既知のリスク」参照）。この場合
-        // 「polars.DataFrameではない」という文言は事実に反し診断の妨げになる
-        // ため、握りつぶさず元のエラーを含めた別文言にする。
-        if type_name.starts_with("polars.") {
-            ValidationError::new_err(format!(
-                "failed to read '{param_name}' as a polars.DataFrame: {err}"
-            ))
+        let hint = if is_instance_of_polars(ob, "LazyFrame") {
+            "; call .collect() first"
         } else {
-            ValidationError::new_err(format!(
-                "'{param_name}' must be a polars.DataFrame, got {type_name}"
-            ))
-        }
+            ""
+        };
+        ValidationError::new_err(format!(
+            "'{param_name}' must be a polars.DataFrame, got {type_name}{hint}"
+        ))
     })
+}
+
+/// `ob`が`polars.<class_name>`のインスタンスか（サブクラスを含む）。`polars`を読み込めない、
+/// またはクラスが見つからない場合は`false`。
+fn is_instance_of_polars(ob: &Bound<'_, PyAny>, class_name: &str) -> bool {
+    ob.py()
+        .import("polars")
+        .and_then(|module| module.getattr(class_name))
+        .and_then(|class| ob.is_instance(&class))
+        .unwrap_or(false)
 }
 
 /// f64として取り出す列の使われ方。使われ方によって許可するdtypeが異なる。

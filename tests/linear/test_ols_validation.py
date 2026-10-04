@@ -222,6 +222,50 @@ def test_data_not_polars_raises(dataset):
         res.augment(bad_new_data)
 
 
+def test_lazyframe_data_raises_with_collect_hint(dataset):
+    """`LazyFrame`は内部実装が漏れたメッセージではなく、`.collect()`の案内付きの
+    `ValidationError`になること（`data`・`new_data`とも）。
+    """
+    lazy = pl.DataFrame({"y": [1.0, 2.0, 3.0], "x1": [1.0, 2.0, 3.0]}).lazy()
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME_LAZY,
+            param_name="data",
+            type_name=msgs.fully_qualified_type_name(lazy),
+        ),
+    ):
+        OLS(lazy, y="y", x=["x1"]).fit()
+
+    res = our_fit(dataset)
+    lazy_new = pl.DataFrame({"x1": [1.0], "x2": [0.5]}).lazy()
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME_LAZY,
+            param_name="new_data",
+            type_name=msgs.fully_qualified_type_name(lazy_new),
+        ),
+    ):
+        res.predict(lazy_new)
+
+
+def test_series_data_raises(dataset):
+    """`polars.Series`も、内部実装が漏れたメッセージではなく通常の
+    「DataFrameではない」`ValidationError`になること。
+    """
+    series = pl.Series("y", [1.0, 2.0, 3.0])
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME,
+            param_name="data",
+            type_name=msgs.fully_qualified_type_name(series),
+        ),
+    ):
+        OLS(series, y="y", x=["x1"]).fit()
+
+
 # ── ValidationError（オプション） ──────────────────────────────────
 
 

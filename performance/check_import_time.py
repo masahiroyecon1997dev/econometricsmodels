@@ -1,11 +1,11 @@
 """`import econometricsmodels` の所要時間を監視する（パッケージ健全性）。
 
-Issue #278。`import econometricsmodels` と `import polars` をそれぞれ
+`import econometricsmodels` と `import polars` をそれぞれ
 サブプロセスで N 回計測し、両者の最小値の差分を「自前ラッパーの Python 処理
 ＋自前 `.so`（`_lib`）の dlopen / 初期化」の寄与とみなして閾値と比較する。
 
 - **差分で見る理由**: import 時間の実測はほぼ polars 支配（`-X importtime`
-  cumulative で約 98%、Issue #278 ベースライン実測）。polars は CI でも
+  cumulative で約 98%、ベースライン実測）。polars は CI でも
   リリース wheel で固定なので、`import econometricsmodels` から
   `import polars` を引くと polars 分が相殺され、自前コードの寄与だけが残る。
   絶対値ではなく差分を監視対象にする。

@@ -89,7 +89,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         groups=imbalanced_cluster_groups(n),
         suffix="_cluster_imbalanced",
     )
-    # NOTE: cluster_g2（G=2×説明変数3個）の成功パスフィクスチャは Issue #289 で
+    # NOTE: cluster_g2（G=2×説明変数3個）の成功パスフィクスチャは
     # 削除した。`rank(Ŝ)<=G-1`のため`G<=q`ではクラスターロバスト共分散が退化し、
     # `fit()`冒頭のバリデーションが ValidationError で弾く。
 
@@ -112,9 +112,7 @@ def _run_cluster_case(
     tmp_path = csv_path.with_name(csv_path.stem + suffix + ".csv")
     grouped.write_csv(tmp_path)
     return {
-        "r": run_glm_r(
-            tmp_path, formula, "cluster", cluster_col="cluster_group"
-        )
+        "r": run_glm_r(tmp_path, formula, "cluster", cluster="cluster_group")
     }
 
 
@@ -128,7 +126,7 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
             continue
         fixtures[cov_type] = {"r": run_glm_r(csv_path, MROZ_FORMULA, cov_type)}
     # NOTE: mrozの`city`（G=2）クラスターロバストSEの成功パスフィクスチャは
-    # Issue #289 で削除した（MROZ_X は7変数で`G=2 <= q=7`のため ValidationError）。
+    # 削除した（MROZ_X は7変数で`G=2 <= q=7`のため ValidationError）。
     return fixtures
 
 
@@ -180,7 +178,7 @@ def build_fixtures() -> dict:
             "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
             "clusterは合成データ（baselineシナリオ、均等疑似グループ・不均衡"
             "グループ）を含む。G<=q（傾き係数の数）のケース（旧cluster_g2・mroz/city）は"
-            "ValidationErrorになるため成功パスフィクスチャを持たない（Issue #289）。"
+            "ValidationErrorになるため成功パスフィクスチャを持たない。"
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
         ),
     }

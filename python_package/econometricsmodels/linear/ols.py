@@ -13,6 +13,8 @@ separate class; see `docs/spec/ols-spec.md`, "API引数").
 
 from __future__ import annotations
 
+from typing import Literal
+
 import polars as pl
 
 from .. import _lib
@@ -60,6 +62,9 @@ class OLS:
             The estimation results.
 
         Raises:
+            TypeError: An argument has the wrong type (for example
+                `x` is a string instead of a list of column names). A
+                builtin exception, not a `ValidationError`.
             ValidationError: The input or options are invalid (a
                 column is missing, contains missing values or
                 NaN/infinity, insufficient observations,
@@ -109,9 +114,24 @@ class OLSResults:
         return dict(zip(self._raw.param_names, self._raw.std_errors))
 
     @property
-    def t_stats(self) -> dict[str, float]:
-        """Coefficient name to t-statistic."""
-        return dict(zip(self._raw.param_names, self._raw.t_stats))
+    def test_stats(self) -> dict[str, float]:
+        """Coefficient name to test statistic (t-statistic; see
+        `stat_dist`)."""
+        return dict(zip(self._raw.param_names, self._raw.test_stats))
+
+    @property
+    def stat_dist(self) -> Literal["t", "normal"]:
+        """Distribution of `test_stats`: `"t"` (t-statistics) or
+        `"normal"` (z-statistics)."""
+        return self._raw.stat_dist
+
+    @property
+    def stat_df(self) -> int | None:
+        """Degrees of freedom of the t distribution behind `test_stats`,
+        or `None` when `stat_dist` is `"normal"`. May differ from
+        `df_resid` (e.g. cluster-robust inference uses `G - 1`), so use
+        this to recompute p-values from `test_stats`."""
+        return self._raw.stat_df
 
     @property
     def p_values(self) -> dict[str, float]:
@@ -151,14 +171,22 @@ class OLSResults:
         return self._raw.cov_type
 
     @property
+    def hac_lags_used(self) -> int | None:
+        """Number of HAC (Newey-West) lags actually used: the explicit
+        `hac_lags` if given, otherwise the value chosen automatically,
+        `floor(4 * (n / 100) ** (2 / 9))`. `None` unless
+        `cov_type="hac"`."""
+        return self._raw.hac_lags_used
+
+    @property
     def r_squared(self) -> float:
         """Coefficient of determination (R²)."""
         return self._raw.r_squared
 
     @property
-    def r_squared_adj(self) -> float:
+    def adj_r_squared(self) -> float:
         """Degrees-of-freedom-adjusted R²."""
-        return self._raw.r_squared_adj
+        return self._raw.adj_r_squared
 
     @property
     def f_statistic(self) -> float:
@@ -169,6 +197,30 @@ class OLSResults:
     def f_p_value(self) -> float:
         """P-value of the F-statistic."""
         return self._raw.f_p_value
+
+    @property
+    def f_df_num(self) -> int | None:
+        """Numerator degrees of freedom of `f_statistic` (`None` when it
+        is NaN, i.e. there are no slope coefficients)."""
+        return self._raw.f_df_num
+
+    @property
+    def f_df_denom(self) -> int | None:
+        """Denominator degrees of freedom of `f_statistic` (`None` when it
+        is NaN). May differ from `df_resid`, so use this to recompute the
+        p-value from `f_statistic`."""
+        return self._raw.f_df_denom
+
+    @property
+    def df_resid(self) -> int:
+        """Residual degrees of freedom (`n - k`)."""
+        return self._raw.df_resid
+
+    @property
+    def df_model(self) -> int:
+        """Model degrees of freedom (number of slope coefficients,
+        excluding the intercept)."""
+        return self._raw.df_model
 
     @property
     def log_likelihood(self) -> float:
@@ -196,7 +248,7 @@ class OLSResults:
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are
-            `param`, `coef`, `std_err`, `t_stat`, `p_value`,
+            `param`, `coef`, `std_err`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
         return [
@@ -204,7 +256,7 @@ class OLSResults:
                 "param": name,
                 "coef": coef,
                 "std_err": se,
-                "t_stat": t,
+                "test_stat": t,
                 "p_value": p,
                 "conf_lower": lower,
                 "conf_upper": upper,
@@ -213,7 +265,7 @@ class OLSResults:
                 self._raw.param_names,
                 self._raw.params,
                 self._raw.std_errors,
-                self._raw.t_stats,
+                self._raw.test_stats,
                 self._raw.p_values,
                 self._raw.conf_lower,
                 self._raw.conf_upper,

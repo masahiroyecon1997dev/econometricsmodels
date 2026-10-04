@@ -23,6 +23,8 @@ the `OLSResults`/`IVResults` precedent).
 
 from __future__ import annotations
 
+from typing import Literal
+
 import polars as pl
 
 from .. import _lib
@@ -86,6 +88,9 @@ class FE:
             The estimation results.
 
         Raises:
+            TypeError: An argument has the wrong type (for example
+                `x` is a string instead of a list of column names). A
+                builtin exception, not a `ValidationError`.
             ValidationError: The input or options are invalid (`x` is
                 empty, a column is missing, contains missing values or
                 NaN/infinity, `y`/`x`/`entity`/`time` overlap,
@@ -94,7 +99,16 @@ class FE:
                 unsupported for FE), an unbalanced panel with two-way
                 effects, a singleton entity/time group, or an
                 explanatory variable with zero variance after the
-                within transformation). A subclass of `ValueError`.
+                within transformation, `cov_type="dk"` without `dk_time` (the Driscoll-Kraay
+                time periods are never taken from `time`), `cov_type="dk"` with no more
+                unique time periods than regressors: the
+                Driscoll-Kraay covariance has rank at most T-1, so the
+                slope F-test cannot be computed, or `cov_type="dk"` with
+                2 time periods / `cov_type="cluster"` with 2 clusters
+                where every entity (or, with two-way effects, every
+                time period) is observed exactly once in each: the
+                covariance is then identically zero). A subclass of
+                `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. a singular within-transformed design
                 matrix). A subclass of `RuntimeError`.
@@ -145,9 +159,24 @@ class FEResults:
         return dict(zip(self._raw.param_names, self._raw.std_errors))
 
     @property
-    def t_stats(self) -> dict[str, float]:
-        """Coefficient name to t-statistic."""
-        return dict(zip(self._raw.param_names, self._raw.t_stats))
+    def test_stats(self) -> dict[str, float]:
+        """Coefficient name to test statistic (t-statistic; see
+        `stat_dist`)."""
+        return dict(zip(self._raw.param_names, self._raw.test_stats))
+
+    @property
+    def stat_dist(self) -> Literal["t", "normal"]:
+        """Distribution of `test_stats`: `"t"` (t-statistics) or
+        `"normal"` (z-statistics)."""
+        return self._raw.stat_dist
+
+    @property
+    def stat_df(self) -> int | None:
+        """Degrees of freedom of the t distribution behind `test_stats`,
+        or `None` when `stat_dist` is `"normal"`. May differ from
+        `df_resid` (cluster-robust inference uses `G - 1`, Driscoll-Kraay
+        `T - 1`), so use this to recompute p-values from `test_stats`."""
+        return self._raw.stat_df
 
     @property
     def p_values(self) -> dict[str, float]:
@@ -199,9 +228,25 @@ class FEResults:
         return self._raw.n_entities
 
     @property
+    def n_periods(self) -> int | None:
+        """Number of unique time periods (two-way effects only; `None`
+        for one-way). Two-way requires a balanced panel, so this equals
+        the number of observations per entity."""
+        return self._raw.n_periods
+
+    @property
     def cov_type(self) -> str:
         """Standard error type actually used (normalized to lowercase)."""
         return self._raw.cov_type
+
+    @property
+    def dk_bandwidth_used(self) -> int | None:
+        """Driscoll-Kraay bandwidth actually used: the explicit
+        `dk_bandwidth` if given, otherwise the value chosen automatically,
+        `floor(4 * (t / 100) ** (2 / 9))` where `t` is the number of
+        unique time periods in `FEOptions.dk_time`. `None` unless
+        `cov_type="dk"`."""
+        return self._raw.dk_bandwidth_used
 
     @property
     def f_statistic(self) -> float:
@@ -214,6 +259,21 @@ class FEResults:
     def f_p_value(self) -> float:
         """P-value of the F-statistic."""
         return self._raw.f_p_value
+
+    @property
+    def f_df_num(self) -> int | None:
+        """Numerator degrees of freedom of `f_statistic` (`None` when it
+        is NaN, i.e. there are no slope coefficients)."""
+        return self._raw.f_df_num
+
+    @property
+    def f_df_denom(self) -> int | None:
+        """Denominator degrees of freedom of `f_statistic` (`None` when it
+        is NaN). Follows `cov_type` like the t-tests (`G - 1` for
+        `cov_type="cluster"`, `T - 1` for `"dk"`, `df_resid` otherwise),
+        so it equals `stat_df` whenever `f_statistic` is not NaN. Use this
+        to recompute the p-value from `f_statistic`."""
+        return self._raw.f_df_denom
 
     @property
     def log_likelihood(self) -> float:
@@ -255,7 +315,7 @@ class FEResults:
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are
-            `param`, `coef`, `std_err`, `t_stat`, `p_value`,
+            `param`, `coef`, `std_err`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
         return [
@@ -263,7 +323,7 @@ class FEResults:
                 "param": name,
                 "coef": coef,
                 "std_err": se,
-                "t_stat": t,
+                "test_stat": t,
                 "p_value": p,
                 "conf_lower": lower,
                 "conf_upper": upper,
@@ -272,7 +332,7 @@ class FEResults:
                 self._raw.param_names,
                 self._raw.params,
                 self._raw.std_errors,
-                self._raw.t_stats,
+                self._raw.test_stats,
                 self._raw.p_values,
                 self._raw.conf_lower,
                 self._raw.conf_upper,
@@ -287,11 +347,17 @@ class FEResults:
 
         One-way: `dict[str, float]` keyed by entity id. Two-way:
         `dict[str, dict[str, float]]` with top-level keys `"entity"`/
-        `"time"`. See `docs/spec/panel-common.md`
-        section 6.6 and `_lib.FEResult.fixed_effects`'s docstring for
+        `"time"`. See `docs/spec/fe-spec.md`
+        section 3.5 and `_lib.FEResult.fixed_effects`'s docstring for
         the exact formula, including the two-way normalization
-        convention (which does not always numerically match
-        `fixest::fixef()`).
+        convention. `α_i`/`γ_t` are not individually identified in the
+        two-way case, so `γ_t` of the first period in time order (the
+        order of the values of the time column) is fixed to 0 and
+        `α_i` absorbs the overall level. The `"time"` dictionary lists
+        the periods in time order.
+        `fixest::fixef()` instead uses the first time value in
+        observation order as the reference, so the two match
+        numerically only when both choose the same reference period.
 
         Returns:
             The fixed effects, shaped as described above.

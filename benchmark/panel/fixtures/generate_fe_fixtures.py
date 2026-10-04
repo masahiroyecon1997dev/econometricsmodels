@@ -1,7 +1,7 @@
 """FEのテストフィクスチャ（tests/fixtures/benchmarks/fe.json）を生成する。
 
 `benchmark/panel/references/linearmodels_ref.py`（1回呼べば1ケース分の結果を
-返す汎用アダプタ）を全シナリオ×全cov_type×1-way/2-wayの組み合わせで呼び出し、
+返す汎用アダプタ）を全シナリオ×classical/hc1×1-way/2-wayの組み合わせで呼び出し、
 結果を1つのJSONにまとめて書き出す。
 
 このスクリプト自体は`benchmark/`側に置く（ベンチマーク生成ツールの一部）。
@@ -32,11 +32,14 @@ from benchmark.common import (
 )
 from benchmark.panel.references.linearmodels_ref import run
 
-# hc2/hc3はlinearmodels.PanelOLSが提供しないため対象外（fixestクロスチェック
-# 側のみで検証する単一参照実装の例外、`linearmodels_ref.py`モジュールdoc
-# 参照）。hacはcross_sectionally_correlatedシナリオが本来の目的（他シナリオ
-# でも動くことの確認はできるが統計的な意味は薄い、OLSのHACと同じ扱い）。
-COV_TYPES = ["classical", "hc1", "cluster", "hac"]
+# classical/hc1のみlinearmodelsと比較する。hc2/hc3はlinearmodels.PanelOLSが
+# 提供しないため対象外（fixestクロスチェック側のみで検証する単一参照実装の例外、
+# `linearmodels_ref.py`モジュールdoc参照）。cluster/dkは本実装の小標本補正が
+# fixest・Stata型（`G/(G-1)·(n-1)/(n-K)`、t分布の自由度`G-1`/`T-1`）に変わり
+# linearmodelsの`n/(n-extra_df-k)`とは一致しなくなったため、linearmodelsでは
+# なくfixestのみで検証する（`generate_fe_crosscheck_fixtures.py`、
+# `docs/spec/fe-spec.md`4章）。
+COV_TYPES = ["classical", "hc1"]
 
 # unbalancedは1-way専用（`fe-spec.md`3.1節: 2-way FEはバランスパネル必須、2-way要求時の
 # ValidationErrorはunbalanced_two_wayシナリオで別途確認する。数値比較対象外）。
@@ -49,6 +52,12 @@ TWO_WAY_SCENARIOS = [
     "heteroskedastic",
     "autocorrelated",
     "cross_sectionally_correlated",
+    "moderate_multicollinearity",
+    "high_condition_number",
+    "scale_variance_mild",
+    "many_regressors",
+    "outlier_regressor",
+    "high_variance",
 ]
 
 NUMERIC_SCENARIOS = ONE_WAY_ONLY_SCENARIOS + TWO_WAY_SCENARIOS
@@ -57,21 +66,40 @@ NUMERIC_SCENARIOS = ONE_WAY_ONLY_SCENARIOS + TWO_WAY_SCENARIOS
 # ここに含まない（いずれもValidationErrorの発生確認のみ、testing-policy.md
 # 「テストの3系統」参照。テストコード側で対応）。
 
-# 実データ（Wooldridge wagepan）。T=8年と短くDriscoll-Kraay HACの前提
-# （fixestドキュメントが20時点以上を推奨）を満たさないため対象外
-# （hacの数値照合は合成データのcross_sectionally_correlatedで十分カバーする）。
-WAGEPAN_COV_TYPES = ["classical", "hc1", "cluster"]
+# 実データ（Wooldridge wagepan）。
+WAGEPAN_COV_TYPES = ["classical", "hc1"]
+
+
+# many_regressorsのみx1..x20（他シナリオはx1, x2の既定）。
+SCENARIO_X_COLS: dict[str, list[str]] = {
+    "many_regressors": [f"x{i}" for i in range(1, 21)],
+}
 
 
 def _run_effects(scenario: str, cov_type: str, *, two_way: bool) -> dict:
     # `time_col`は常に実在の"time"列を渡す（`two_way`とは独立、
-    # `linearmodels_ref.py`モジュールdoc参照）。1-way + hacで観測順ダミーを
+    # `linearmodels_ref.py`モジュールdoc参照）。1-way + dkで観測順ダミーを
     # 使うと不均衡パネル（unbalancedシナリオ）でバンド幅・カーネル計算が
-    # 不正確になるため（実測で発覚、Issue #190）。
+    # 不正確になるため（実測で発覚）。
     return run(
         scenario,
-        ["x1", "x2"],
+        SCENARIO_X_COLS.get(scenario, ["x1", "x2"]),
         cov_type,
+        time_col="time",
+        two_way=two_way,
+        dataset_source="synthetic",
+    )
+
+
+def _run_boundary_df1_case(*, two_way: bool) -> dict:
+    """df_resid=1境界の成功パス（1-way/2-wayでそれぞれ別データ、
+    `benchmark/panel/freeze.py`参照）。"""
+    scenario = "baseline_df1_two_way" if two_way else "baseline_df1_one_way"
+    x_cols = ["x1", "x2", "x3"] if two_way else ["x1", "x2"]
+    return run(
+        scenario,
+        x_cols,
+        "classical",
         time_col="time",
         two_way=two_way,
         dataset_source="synthetic",
@@ -82,16 +110,22 @@ def build_fixtures() -> dict:
     fixtures: dict = {}
 
     for scenario in NUMERIC_SCENARIOS:
-        fixtures[scenario] = {"one_way": {}}
-        for cov_type in COV_TYPES:
-            fixtures[scenario]["one_way"][cov_type] = _run_effects(
-                scenario, cov_type, two_way=False
-            )
+        fixtures[scenario] = {
+            "one_way": {
+                cov_type: _run_effects(scenario, cov_type, two_way=False)
+                for cov_type in COV_TYPES
+            }
+        }
         if scenario in TWO_WAY_SCENARIOS:
             fixtures[scenario]["two_way"] = {
                 cov_type: _run_effects(scenario, cov_type, two_way=True)
                 for cov_type in COV_TYPES
             }
+
+    fixtures["baseline_df1"] = {
+        "one_way": _run_boundary_df1_case(two_way=False),
+        "two_way": _run_boundary_df1_case(two_way=True),
+    }
 
     fixtures["wagepan"] = {
         "one_way": {
@@ -147,10 +181,17 @@ def build_fixtures() -> dict:
             "within変換で分散ゼロになり除外、exper自体も2-way FEでentity+time"
             "効果と完全共線になるため除外している"
             "（benchmark/common/constants.pyのWAGEPAN_X参照）。"
-            "hacはwagepan（T=8）には適用しない"
-            "（Driscoll-Kraay HACはfixestドキュメントが20時点以上を推奨する"
-            "ほど時点数に依存するため、合成データのcross_sectionally_"
-            "correlatedシナリオ（T=25）でのみ数値照合する）。"
+            "cluster/dkはここに含まない（本実装の小標本補正がfixest・Stata型に"
+            "変わりlinearmodelsとは一致しないため、fixestクロスチェックのみで"
+            "検証する、モジュールdoc・COV_TYPESのコメント参照）。"
+            "moderate_multicollinearity/high_condition_number/"
+            "scale_variance_mild/many_regressors/"
+            "outlier_regressor/high_varianceは悪条件・"
+            "高次元・外れ値シナリオ（`benchmark/panel/datasets.py`参照）。"
+            "baseline_df1は自由度ちょうど1の境界成功パス。1-way"
+            "（entity=3×period=2、k=2、df_resid=6-3-2=1）と2-way"
+            "（entity=3×period=3、k=3、df_resid=9-(3+3+3-1)=1）で別データ"
+            "（fe_baseline_df1_one_way.csv/fe_baseline_df1_two_way.csv）。"
         ),
     }
     return fixtures

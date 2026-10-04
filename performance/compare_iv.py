@@ -11,7 +11,7 @@ CLAUDE.md 1章「計算コアはRustで実装し高速化」の狙いを定量�
 
 ## リファレンス実装
 
-README「Verification accuracy」の primary reference に従い linearmodels のみと
+公開ページ（`docs/guide/verification.md`）の primary reference に従い linearmodels のみと
 比較する（`benchmark/iv/references/linearmodels_ref.py` と同じ主リファレンス）。
 2SLS は `linearmodels.iv.IV2SLS`、GMM は `linearmodels.iv.IVGMM` に対応させる
 （engine cov_type ↔ linearmodels の対応は `linearmodels_ref.py` の `_COV_TYPE_MAP`
@@ -36,7 +36,7 @@ linearmodels 側の `IVGMM` + kernel が病的に遅く（n=100,000 で約40秒�
 （`docs/performance/iv.md`「計測方法」）。`hc2`/`hc3` は linearmodels 側に対応実装が
 無いため（`linearmodels_ref.py` docstring 参照）、性能比較でも扱わない。
 
-## 計測範囲の対称性（Issue #98）
+## 計測範囲の対称性
 
 engine（`engine::iv`）は係数・標準誤差と同じ `.fit()` の中で、R²・調整済みR²・
 F統計量・過剰識別検定（Sargan / Hansen J）・弱操作変数F統計量・Wu-Hausman検定・
@@ -88,10 +88,13 @@ def _fit_once_engine(ctx: FitContext):
     from econometricsmodels import IV, IVOptions
 
     if ctx.cov_type == "classical":
-        options = IVOptions(method=ctx.method, cov_type="classical")
+        options = IVOptions(estimator=ctx.method, cov_type="classical")
     elif ctx.cov_type == "hac":
         options = IVOptions(
-            method=ctx.method, cov_type="hac", hac_lags=ctx.hac_lags
+            estimator=ctx.method,
+            cov_type="hac",
+            hac_lags=ctx.hac_lags,
+            hac_time=ctx.hac_time,
         )
     else:
         raise ValueError(f"unknown cov_type: {ctx.cov_type!r}")

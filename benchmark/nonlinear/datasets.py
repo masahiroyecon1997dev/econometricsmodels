@@ -3,7 +3,7 @@
 - `generate_binary_choice_dataset`: 真の二値選択DGP（リンク関数(Xβ)からのベルヌーイ
   乱数）で2値yを持つデータ（Logit/Probit）。
 - `generate_censored_regression_dataset`: 潜在回帰 `y* = Xβ + ε` を左/右/両側に
-  打ち切った連続yを持つデータ（Tobit、Issue #227）。打ち切り比率を変えた複数シナリオ
+  打ち切った連続yを持つデータ（Tobit）。打ち切り比率を変えた複数シナリオ
   ＋誤差項構造（高分散・不均一分散）＋構造的な悪条件シナリオを持つ。詳細は同関数の
   docstring参照。
 
@@ -126,7 +126,7 @@ _NEAR_SEPARATION_BETA1 = {"logit": 20.0, "probit": 10.0}
 # と同じ倍率、実体はbenchmark/common/dgp_constants.pyに集約済み）。x1は1e6倍、x2は1e-3倍。
 
 # many_regressorsシナリオで固定する説明変数の数（benchmark/linear/datasets.pyの
-# 同名シナリオと同じ発想、test-coverage-candidates.md項目2）。OLSと異なりlogit/probit
+# 同名シナリオと同じ発想）。OLSと異なりlogit/probit
 # は線形予測子の分散がkに応じて大きくなると分離を起こしやすいため、係数の大きさは
 # OLSよりずっと小さく較正する（下記_MANY_REGRESSORS_SLOPE_MAGNITUDE参照）。
 MANY_REGRESSORS_K = 20
@@ -276,11 +276,11 @@ def generate_binary_choice_dataset(
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Tobit（打ち切り回帰）用のDGP（Issue #227）
+# Tobit（打ち切り回帰）用のDGP
 # ─────────────────────────────────────────────────────────────────────
 
 TOBIT_SCENARIOS = [
-    # 打ち切り比率を変えた左打ち切りシナリオ（Issue #227の主眼）。
+    # 打ち切り比率を変えた左打ち切りシナリオ（本DGPの主眼）。
     "light_censoring",
     "moderate_censoring",
     "heavy_censoring",
@@ -301,12 +301,12 @@ TOBIT_SCENARIOS = [
     "scale_variance",
     "perfect_multicollinearity",
     # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス
-    # （OLS/Logit/Probitの同種ケース相当、test-coverage-candidates.md項目2）。
+    # （OLS/Logit/Probitの同種ケース相当）。
     # 打ち切り境界は y* の経験分位点で決まるため、kが増えても左打ち切り30%は
     # そのまま維持される。
     "many_regressors",
-    # x1の5%を外れ値に置き換えた成功パス（OLS/Logit/Probitの同種ケース相当、
-    # test-coverage-candidates.md項目67）。打ち切り境界は y* の経験分位点で
+    # x1の5%を外れ値に置き換えた成功パス（OLS/Logit/Probitの同種ケース相当）。
+    # 打ち切り境界は y* の経験分位点で
     # 決まるため左打ち切り30%を維持する。
     "outlier_regressor",
 ]

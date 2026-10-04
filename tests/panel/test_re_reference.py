@@ -1,16 +1,23 @@
 """RE の主リファレンス（linearmodels）との数値照合。
 
 `tests/fixtures/benchmarks/re.json`（`benchmark/panel/fixtures/
-generate_re_fixtures.py`で生成）を読み込み、合成データ6シナリオ×classical/
-hc1/cluster/hac で、係数・標準誤差・検定統計量・適合度統計量を相対誤差1e-8で
+generate_re_fixtures.py`で生成）を読み込み、合成データの全シナリオ×
+classical/hc1 で、係数・標準誤差・検定統計量・適合度統計量を相対誤差1e-8で
 厳密比較する。Wooldridge実データ（wagepan）も同じフィクスチャ経由で検証する。
+
+## cluster/dkを含まない理由
+
+本実装のcluster・dkの標準誤差は、小標本補正と推論の自由度（clusterで`G-1`、
+dkで`T-1`）をStata・R型に合わせており、linearmodels（`n/(n-k)`、自由度は
+常に`df_resid`）とは一致しない（`docs/spec/re-spec.md`3.4節・4章）。この2つは
+`test_re_crosscheck.py`のplmだけで検証する。
 
 役割分担:
     - 構造・API: `test_re_api.py`
     - `ValidationError`/`ComputationError` パス: `test_re_validation.py`
     - 主リファレンス（linearmodels）との数値照合: このファイル
-    - 独立実装（R: plm）とのクロスチェック（hc2/hc3・ハウスマン検定）:
-      `test_re_crosscheck.py`
+    - 独立実装（R: plm）とのクロスチェック（hc2/hc3・cluster/dk・
+      ハウスマン検定）: `test_re_crosscheck.py`
 
 Note:
     フィクスチャ生成時と同じ入力データを、`tests/fixtures/benchmarks/data/`に
@@ -63,7 +70,9 @@ _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
 def _check_result(res, ref: dict, label: str) -> None:
     _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
     _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
-    _assert_dict_close(res.t_stats, ref["t_stats"], f"{label}/t_stats")
+    _assert_dict_close(
+        res.test_stats, ref["test_stats"], f"{label}/test_stats"
+    )
     _assert_dict_close(res.p_values, ref["p_values"], f"{label}/p_values")
 
     for name, (ref_lower, ref_upper) in ref["conf_int"].items():
@@ -76,6 +85,8 @@ def _check_result(res, ref: dict, label: str) -> None:
     assert res.df_model == ref["df_model"], f"{label}/df_model"
     assert res.n_entities == ref["n_entities"], f"{label}/n_entities"
 
+    # `f_statistic_robust`（cov_type連動のWald二次形式）と比較する。
+    # classical/hc1ともに不均衡パネルでも機械精度で一致する。
     _assert_close(res.f_statistic, ref["f_statistic"], f"{label}/f_statistic")
     _assert_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")
     _assert_close(
@@ -101,17 +112,9 @@ def _check_result(res, ref: dict, label: str) -> None:
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 @pytest.mark.parametrize("scenario", NUMERIC_SCENARIOS)
 def test_matches_linearmodels(fixtures, scenario, cov_type):
-    """`hac`は`time`（内部FE呼び出しの1-way/2-way選択とは無関係、`REOptions`
-    には`time_col`が独立に無い。`FEOptions`と違い、REの`REOptions.time`は
-    HAC時系列順序と内部FE1-way/2-way選択を兼ねる1フィールドのため、`hac`
-    ケースでも常に`time="time"`を渡す。本フィクスチャの数値比較は`REOptions.
-    time`の値に依存しない（係数・標準誤差はtimeを使わないため、
-    `_re_helpers`・`engine/src/panel/CLAUDE.md`参照）。
-    """
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
-    kwargs = {"time": "time"} if cov_type == "hac" else {}
-    options = REOptions(cov_type=cov_type, **kwargs)
+    options = REOptions(cov_type=cov_type)
     res = RE(df, y="y", x=x_cols, entity="entity", options=options).fit()
 
     _check_result(res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}")

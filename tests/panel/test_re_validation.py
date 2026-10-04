@@ -17,10 +17,10 @@ n_periods=6）は`tests/panel/conftest.py`（FEと共用、RE専用の合成デ�
 
 Note:
     `MISSING_CLUSTER_COLUMN`はFEと同じ理由で構造的に到達不能
-    （`cluster_col=None`は常に`entity`引数の列に自動フォールバックする、
+    （`cluster=None`は常に`entity`引数の列に自動フォールバックする、
     `engine_pybind/src/panel/re.rs::parse_re_cov_type`参照）。`x=[]`が
     `ValidationError`になる設計判断の経緯は`engine_pybind/src/panel/re.rs`
-    モジュールdoc「`x`の空リストを許容しない」参照（Issue #200、ユーザー
+    モジュールdoc「`x`の空リストを許容しない」参照（ユーザー
     確認済み・2026-09-20）。
 
     **RE固有の重要な注意（σ_ε²用の内部1-way FE呼び出し vs ハウスマン検定用の
@@ -30,15 +30,15 @@ Note:
     スケール差はすべて**この内部FE呼び出しが真っ先に失敗し`RE.fit()`自体が
     例外を送出する**（`REResults`クラスdocstring参照、`FeEstimator::fit`の
     失敗がそのまま伝播するため`WithinRegressionFailed`のメッセージ文言に
-    なる）。一方、ハウスマン検定専用の内部FE呼び出し（`REOptions.time`
-    設定時のみ2-way）が単独で失敗するケース（例: singleton time）は
-    `RE.fit()`自体は成功し`hausman_*`が`None`になるだけに留まる
-    （`test_re_api.py`参照）。
+    なる）。ハウスマン検定はこの1-way FE推定量を再利用するため、
+    単独で失敗するケースは無い（`hausman_*`が`None`になるのは傾き係数が
+    0個等、補助回帰が成立しない場合のみ）。
 """
 
 from __future__ import annotations
 
 import _error_messages as msgs
+import pandas as pd
 import polars as pl
 import pytest
 from _constants import DATA_DIR
@@ -91,15 +91,15 @@ def test_entity_overlaps_x_raises(fe_dataset):
         RE(fe_dataset, y="y", x=["entity", "x2"], entity="entity").fit()
 
 
-def test_y_overlaps_time_raises(fe_dataset):
-    """`time`ロールは`REOptions.time`設定時のみ存在する。"""
-    options = REOptions(time="y")
+def test_y_overlaps_dk_time_raises(fe_dataset):
+    """`dk_time`ロールは`REOptions.dk_time`設定時のみ存在する。"""
+    options = REOptions(dk_time="y")
     with pytest.raises(
         ValidationError,
         match=escaped(
             msgs.ROLE_OVERLAP_SINGLE_EQUALS_SINGLE,
             col="y",
-            later_role="time",
+            later_role="dk_time",
             earlier_role="y",
         ),
     ):
@@ -108,14 +108,14 @@ def test_y_overlaps_time_raises(fe_dataset):
         ).fit()
 
 
-def test_entity_overlaps_time_raises(fe_dataset):
-    options = REOptions(time="entity")
+def test_entity_overlaps_dk_time_raises(fe_dataset):
+    options = REOptions(dk_time="entity")
     with pytest.raises(
         ValidationError,
         match=escaped(
             msgs.ROLE_OVERLAP_SINGLE_EQUALS_SINGLE,
             col="entity",
-            later_role="time",
+            later_role="dk_time",
             earlier_role="entity",
         ),
     ):
@@ -124,24 +124,18 @@ def test_entity_overlaps_time_raises(fe_dataset):
         ).fit()
 
 
-def test_time_overlaps_x_raises(fe_dataset):
-    options = REOptions(time="time")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
-            col="time",
-            single_role="time",
-            multi_role="x",
-        ),
-    ):
-        RE(
-            fe_dataset,
-            y="y",
-            x=["time", "x2"],
-            entity="entity",
-            options=options,
-        ).fit()
+def test_dk_time_may_overlap_x(fe_dataset):
+    """`dk_time`と`x`の重複は許可する（年トレンドを説明変数に入れつつ
+    DKの時点にも使う、等は正当な使い方）。拒否するのは`y`・`entity`との重複だけ。
+    """
+    options = REOptions(cov_type="dk", dk_time="x2")
+    RE(
+        fe_dataset,
+        y="y",
+        x=["x1", "x2"],
+        entity="entity",
+        options=options,
+    ).fit()
 
 
 def test_duplicate_within_x_raises(fe_dataset):
@@ -162,6 +156,26 @@ def test_x_empty_raises(fe_dataset):
 
 
 # ── ValidationError（列の存在・欠損値） ────────────────────────────
+
+
+def test_data_not_polars_raises():
+    """`data`にpolars以外のDataFrame（pandas等）を渡すと、内部実装
+    （`pyo3-polars`の`get_columns`呼び出し）が漏れた`AttributeError`ではなく
+    `ValidationError`になること（`test_ols_validation.py`と同じ検証。REには
+    `predict()`/`augment()`が無いため`data`のみ確認する）。
+    """
+    bad = pd.DataFrame(
+        {"y": [1.0, 2.0, 3.0], "x1": [1.0, 2.0, 3.0], "entity": [0, 0, 1]}
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME,
+            param_name="data",
+            type_name=msgs.fully_qualified_type_name(bad),
+        ),
+    ):
+        RE(bad, y="y", x=["x1"], entity="entity").fit()
 
 
 def test_missing_y_column_raises(fe_dataset):
@@ -188,8 +202,8 @@ def test_missing_entity_column_raises(fe_dataset):
         RE(fe_dataset, y="y", x=["x1", "x2"], entity="nonexistent").fit()
 
 
-def test_missing_time_column_raises(fe_dataset):
-    options = REOptions(time="nonexistent")
+def test_missing_dk_time_column_raises(fe_dataset):
+    options = REOptions(dk_time="nonexistent")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
@@ -253,7 +267,7 @@ def test_group_key_column_null_values_raise(bad_col):
     }
     values[bad_col][1] = None
     df = pl.DataFrame(values)
-    options = REOptions(time="time")
+    options = REOptions(dk_time="time")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name=bad_col),
@@ -261,7 +275,7 @@ def test_group_key_column_null_values_raise(bad_col):
         RE(df, y="y", x=["x1"], entity="entity", options=options).fit()
 
 
-def test_cluster_col_null_values_raise():
+def test_cluster_null_values_raise():
     df = pl.DataFrame(
         {
             "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
@@ -270,7 +284,7 @@ def test_cluster_col_null_values_raise():
             "state": ["x", None, "y", "y", "x", "y"],
         }
     )
-    options = REOptions(cov_type="cluster", cluster_col="state")
+    options = REOptions(cov_type="cluster", cluster="state")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name="state"),
@@ -284,10 +298,7 @@ def test_cluster_col_null_values_raise():
 def test_singleton_entity_raises():
     """`fe_singleton_entity.csv`（entity "e00"のみ観測数1）は、σ_ε²推定が
     委譲する内部1-way FE推定で`PanelError::SingletonGroup`（entity側）を
-    誘発し、そのまま`RE.fit()`自体が失敗する（モジュールdoc参照。ハウスマン
-    検定専用の内部FE呼び出しが失敗して`None`にフォールバックする経路とは
-    別物、`test_re_api.py`の`test_hausman_none_for_singleton_time_two_way`
-    と対照）。
+    誘発し、そのまま`RE.fit()`自体が失敗する（モジュールdoc参照）。
     """
     df = pl.read_csv(DATA_DIR / "fe_singleton_entity.csv")
     with pytest.raises(
@@ -343,7 +354,7 @@ def test_quasi_demeaned_regression_fails_when_sigma2_eps_is_zero():
 # ── ValidationError（オプション） ──────────────────────────────────
 
 
-@pytest.mark.parametrize("cov_type", ["invalid", ""])
+@pytest.mark.parametrize("cov_type", ["invalid", "", "hac"])
 def test_unknown_cov_type_raises(fe_dataset, cov_type):
     """`unknown cov_type`の文言はFEと一字一句同じ（`UNKNOWN_COV_TYPE_FE`を
     流用、`_error_messages.py`のコメント参照）。
@@ -377,28 +388,30 @@ def test_invalid_confidence_level_raises(fe_dataset, confidence_level):
         our_fit_re(fe_dataset, options=options)
 
 
-def test_hac_requires_time_raises(fe_dataset):
-    """`REOptions`には`FEOptions.time_col`に相当する分離フィールドが無く、
-    `time`のみでHAC時系列順序を兼ねる（`engine_pybind/src/panel/re.rs`
-    モジュールdoc「`REOptions`に`time_col`が無い理由」参照）。
+def test_dk_requires_dk_time_raises(fe_dataset):
+    """`cov_type="dk"`で`dk_time`が未指定だと`ValidationError`
+    （`FEOptions.dk_time`と同じ名前・同じ意味、`engine_pybind/src/panel/re.rs`
+    モジュールdoc「`REOptions.dk_time`」参照）。
     """
-    options = REOptions(cov_type="hac")
-    with pytest.raises(ValidationError, match=escaped(msgs.HAC_REQUIRES_TIME)):
+    options = REOptions(cov_type="dk")
+    with pytest.raises(ValidationError, match=escaped(msgs.DK_REQUIRES_TIME)):
         our_fit_re(fe_dataset, options=options)
 
 
 @pytest.mark.parametrize("dk_bandwidth", [-1, 6])  # t=6（fe_datasetの時点数）
-def test_invalid_hac_bandwidth_raises(fe_dataset, dk_bandwidth):
-    options = REOptions(cov_type="hac", time="time", dk_bandwidth=dk_bandwidth)
+def test_invalid_dk_bandwidth_raises(fe_dataset, dk_bandwidth):
+    options = REOptions(
+        cov_type="dk", dk_time="time", dk_bandwidth=dk_bandwidth
+    )
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.INVALID_HAC_BANDWIDTH, bandwidth=dk_bandwidth, t=6),
+        match=escaped(msgs.INVALID_DK_BANDWIDTH, bandwidth=dk_bandwidth, t=6),
     ):
         our_fit_re(fe_dataset, options=options)
 
 
-def test_cluster_col_nonexistent_column_raises(fe_dataset):
-    options = REOptions(cov_type="cluster", cluster_col="does_not_exist")
+def test_cluster_nonexistent_column_raises(fe_dataset):
+    options = REOptions(cov_type="cluster", cluster="does_not_exist")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
@@ -421,7 +434,7 @@ def test_insufficient_clusters_raises():
             "entity": ["a", "a", "b", "b", "c", "c", "d", "d"],
         }
     ).with_columns(pl.lit(0).alias("single_cluster"))
-    options = REOptions(cov_type="cluster", cluster_col="single_cluster")
+    options = REOptions(cov_type="cluster", cluster="single_cluster")
     with pytest.raises(
         ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
     ):
@@ -432,7 +445,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error():
     """クラスター数G(=2)が傾き係数の数q(=df_model-1=2)以下は`ValidationError`
     （`CommonError::InsufficientClustersForInference`）。REは切片を持つため
     `q = df_model - 1`（FEの`q = k`とは規約が異なる、`engine/src/panel/
-    CLAUDE.md`「cov_type対応（Issue #197）」参照）。between回帰の自由度制約を
+    CLAUDE.md`「cov_type対応」参照）。between回帰の自由度制約を
     避けるため4エンティティ使う。
     """
     df = pl.DataFrame(
@@ -444,10 +457,36 @@ def test_cluster_count_at_most_slopes_raises_validation_error():
             "cluster_group": ["1", "1", "1", "1", "2", "2", "2", "2"],
         }
     )
-    options = REOptions(cov_type="cluster", cluster_col="cluster_group")
+    options = REOptions(cov_type="cluster", cluster="cluster_group")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=2),
+    ):
+        RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+
+
+def test_dk_periods_at_most_hausman_slopes_raises_validation_error():
+    """時点数t(=2)がハウスマン検定の対象数q(=k=2)以下は`ValidationError`
+    （`PanelError::InsufficientDkPeriodsForInference`）。DK共分散のrankは
+    `t-1`以下のため検定の部分行列が構造的に特異になる。RE本体は共分散を
+    反転しないが、`fit()`は常にハウスマン検定を計算するため入力から弾く。
+    データは`test_cluster_count_at_most_slopes_raises_validation_error`と同じ。
+    """
+    df = pl.DataFrame(
+        {
+            "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 9.0],
+            "x1": [1.0, 3.0, 2.0, 6.0, 4.0, 10.0, 5.0, 8.0],
+            "x2": [2.0, 5.0, 1.0, 9.0, 3.0, 7.0, 6.0, 4.0],
+            "entity": ["a", "a", "b", "b", "c", "c", "d", "d"],
+            "time": ["1", "2", "1", "2", "1", "2", "1", "2"],
+        }
+    )
+    options = REOptions(cov_type="dk", dk_time="time", dk_bandwidth=0)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE, t_periods=2, q=2
+        ),
     ):
         RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
@@ -496,3 +535,39 @@ def test_validation_error_is_value_error():
 
 def test_computation_error_is_runtime_error():
     assert issubclass(ComputationError, RuntimeError)
+
+
+# ── ValidationError（使われないオプション） ─────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("cov_type", "option", "value", "condition"),
+    [
+        ("classical", "cluster", "entity", 'cov_type="cluster"'),
+        ("dk", "cluster", "entity", 'cov_type="cluster"'),
+        ("cluster", "dk_bandwidth", 2, 'cov_type="dk"'),
+        ("classical", "dk_time", "time", 'cov_type="dk"'),
+        ("cluster", "dk_time", "time", 'cov_type="dk"'),
+    ],
+)
+def test_option_unused_by_cov_type_raises(
+    fe_dataset, cov_type, option, value, condition
+):
+    """選んだ`cov_type`で使われない`cluster`/`dk_bandwidth`/`dk_time`が指定されたら
+    黙って無視せず`ValidationError`（`dk_time`はDriscoll-Kraay HACの時点列専用で、
+    ハウスマン検定には影響しない）。
+    """
+    # dkは時点列(`dk_time`)が必須なので、他のオプションの検証だけを見るため添える。
+    extra = {"dk_time": "time"} if cov_type == "dk" else {}
+    options = REOptions(cov_type=cov_type, **extra, **{option: value})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
+    ):
+        our_fit_re(fe_dataset, options=options)
+
+
+@pytest.mark.parametrize("cov_type", ["dk", "DK"])
+def test_dk_bandwidth_used_by_dk_is_accepted(fe_dataset, cov_type):
+    options = REOptions(cov_type=cov_type, dk_time="time", dk_bandwidth=1)
+    our_fit_re(fe_dataset, options=options)

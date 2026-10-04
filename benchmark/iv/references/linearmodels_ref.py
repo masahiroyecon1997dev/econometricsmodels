@@ -2,7 +2,7 @@
 診断統計量）を生成するスクリプト。
 
 IVの主リファレンス（`docs/spec/iv-spec.md`4章参照）。
-2SLSは`run()`、GMMは`run_gmm()`（`method="gmm"`のPython配線完了後に追加、
+2SLSは`run()`、GMMは`run_gmm()`（`estimator="gmm"`のPython配線完了後に追加、
 `run_gmm()`のモジュールdocコメント参照）。
 
 合成データは`benchmark/iv/datasets.py`を直接呼ばず、`tests/fixtures/
@@ -197,7 +197,7 @@ def run(
     x_endog_cols: list[str],
     instrument_cols: list[str],
     cov_type: str,
-    cluster_col: str | None = None,
+    cluster: str | None = None,
     hac_lags: int | None = None,
     confidence_level: float = 0.95,
     dataset_source: str = "synthetic",
@@ -222,7 +222,7 @@ def run(
     cov_config: dict = {"debiased": debiased}
     hac_lag_used = None
     if cov_type == "cluster":
-        cov_config["clusters"] = pdf[cluster_col]
+        cov_config["clusters"] = pdf[cluster]
     elif cov_type == "hac":
         hac_lag_used = hac_lags if hac_lags is not None else hac_auto_lag(n)
         cov_config["kernel"] = "bartlett"
@@ -246,10 +246,10 @@ def run(
     df_resid = int(res.df_resid)
     alpha = 1.0 - confidence_level
     t_crit = float(scipy_stats.t.ppf(1 - alpha / 2, df_resid))
-    t_stats = {k: coef[k] / se[k] for k in coef}
+    test_stats = {k: coef[k] / se[k] for k in coef}
     p_values = {
         k: float(2 * (1 - scipy_stats.t.cdf(abs(v), df_resid)))
-        for k, v in t_stats.items()
+        for k, v in test_stats.items()
     }
     conf_int = {
         k: [coef[k] - t_crit * se[k], coef[k] + t_crit * se[k]] for k in coef
@@ -305,11 +305,11 @@ def run(
     result: dict = {
         "coef": coef,
         "se": se,
-        "t_stats": t_stats,
+        "test_stats": test_stats,
         "p_values": p_values,
         "conf_int": conf_int,
         "r_squared": float(res.rsquared),
-        "r_squared_adj": float(res.rsquared_adj),
+        "adj_r_squared": float(res.rsquared_adj),
         "f_statistic": f_statistic,
         "f_p_value": f_p_value,
         "nobs": int(res.nobs),
@@ -364,10 +364,10 @@ def run(
 # cov_type自体は`_COV_TYPE_MAP`をそのまま再利用できる、`run_gmm()`のモジュール
 # docコメント参照）。
 _WEIGHT_TYPE_MAP: dict[str, str] = {
-    "unadjusted": "unadjusted",
+    "classical": "unadjusted",
     "robust": "robust",
     "cluster": "clustered",
-    "kernel": "kernel",
+    "hac": "kernel",
 }
 
 
@@ -378,9 +378,9 @@ def run_gmm(
     instrument_cols: list[str],
     weight_type: str,
     cov_type: str,
-    cluster_col: str | None = None,
+    cluster: str | None = None,
     hac_lags: int | None = None,
-    gmm_iterations: int = 2,
+    iter_limit: int = 2,
     confidence_level: float = 0.95,
 ) -> dict:
     """`linearmodels.iv.IVGMM`でGMMのベンチマーク値を生成する（`run()`のGMM版）。
@@ -388,25 +388,25 @@ def run_gmm(
     ## `weight_type`の対応関係（実測して確定）
 
     `IVGMM`のコンストラクタ引数`weight_type`は`engine::iv::gmm::WeightType`と
-    同じ4値（`unadjusted`/`robust`/`kernel`は文字列そのまま、`cluster`だけ
-    `linearmodels`側は`clustered`）を取る。`_WEIGHT_TYPE_MAP`参照。
+    対応する4値（本実装の`classical`/`robust`/`cluster`/`hac`が、`linearmodels`側では
+    それぞれ`unadjusted`/`robust`/`clustered`/`kernel`）を取る。`_WEIGHT_TYPE_MAP`参照。
 
     ## `cov_type`/`debiased`の対応関係
 
     `run()`のモジュールdocコメントの表（`_COV_TYPE_MAP`）がGMMでもそのまま
-    使えることを実測確認済み（`baseline`シナリオ、`weight_type="unadjusted"`で
+    使えることを実測確認済み（`baseline`シナリオ、`weight_type="classical"`で
     `coef`/`se`が相対誤差1e-10程度以下で一致）。`hc2`/`hc3`が対象外な理由も
     `run()`と同じ（`IVGMMCovariance`が対応する`score_cov_estimator`を持たない）。
 
-    ## `gmm_iterations`と`iter_limit`/`tol`の対応関係
+    ## `iter_limit`と`iter_limit`/`tol`の対応関係
 
     `IVGMM.fit()`の反復ループは`while iters < iter_limit and norm > tol`
     （`iters`は1始まり）のため、既定の`iter_limit=2`では`tol`の値に関わらず
     必ず2回目のステップまで実行してから打ち切る（`tol`が効くのは
-    `iter_limit>=3`のときのみ）。本実装の既定`gmm_iterations=2`
-    （`gmm_convergence=None`の固定反復モード）と一致するため、`tol`は
+    `iter_limit>=3`のときのみ）。本実装の既定`gmm_type="two_step"`（`iter_limit=2`相当）
+    （`gmm_tol=None`の固定反復モード）と一致するため、`tol`は
     linearmodelsの既定値のまま渡さず気にしなくてよい。`iter_limit`に
-    `gmm_iterations`をそのまま渡す。
+    `iter_limit`をそのまま渡す。
 
     ## 検定分布・F統計量の対応関係
 
@@ -430,10 +430,10 @@ def run_gmm(
 
     `res.j_stat.stat`/`.pval`はカイ二乗検定として実装されており（`debiased`に
     連動しない）、本実装の`overid_statistic`/`overid_p_value`（Hansen J、
-    `gmm.rs`参照）とそのまま対応する。`weight_type="unadjusted"`のとき、
+    `gmm.rs`参照）とそのまま対応する。`weight_type="classical"`のとき、
     `res.j_stat.stat`が`run()`が返す`sargan_statistic`と機械精度で一致することも
     実測確認済み（本実装の`fit_computes_hansen_j_statistic_matching_two_sls_
-    sargan_when_weight_type_is_unadjusted`と同じ不変条件）。
+    sargan_when_weight_type_is_classical`と同じ不変条件）。
 
     ## Wu-Hausman検定
 
@@ -459,8 +459,8 @@ def run_gmm(
     weight_config: dict = {}
     weight_hac_lag_used = None
     if weight_type == "cluster":
-        weight_config["clusters"] = pdf[cluster_col]
-    elif weight_type == "kernel":
+        weight_config["clusters"] = pdf[cluster]
+    elif weight_type == "hac":
         weight_hac_lag_used = (
             hac_lags if hac_lags is not None else hac_auto_lag(n)
         )
@@ -475,7 +475,7 @@ def run_gmm(
     cov_config: dict = {"debiased": debiased}
     cov_hac_lag_used = None
     if cov_type == "cluster":
-        cov_config["clusters"] = pdf[cluster_col]
+        cov_config["clusters"] = pdf[cluster]
     elif cov_type == "hac":
         cov_hac_lag_used = (
             hac_lags if hac_lags is not None else hac_auto_lag(n)
@@ -483,9 +483,7 @@ def run_gmm(
         cov_config["kernel"] = "bartlett"
         cov_config["bandwidth"] = cov_hac_lag_used
 
-    res = mod.fit(
-        iter_limit=gmm_iterations, cov_type=lm_cov_type, **cov_config
-    )
+    res = mod.fit(iter_limit=iter_limit, cov_type=lm_cov_type, **cov_config)
 
     def _fix_name(name: str) -> str:
         return "const" if name == "Intercept" else name
@@ -495,10 +493,10 @@ def run_gmm(
     se = {_fix_name(k): float(v) for k, v in res.std_errors.to_dict().items()}
     alpha = 1.0 - confidence_level
     z_crit = float(scipy_stats.norm.ppf(1 - alpha / 2))
-    z_stats = {k: coef[k] / se[k] for k in coef}
+    test_stats = {k: coef[k] / se[k] for k in coef}
     p_values = {
         k: float(2 * (1 - scipy_stats.norm.cdf(abs(v))))
-        for k, v in z_stats.items()
+        for k, v in test_stats.items()
     }
     conf_int = {
         k: [coef[k] - z_crit * se[k], coef[k] + z_crit * se[k]] for k in coef
@@ -517,11 +515,11 @@ def run_gmm(
     result: dict = {
         "coef": coef,
         "se": se,
-        "z_stats": z_stats,
+        "test_stats": test_stats,
         "p_values": p_values,
         "conf_int": conf_int,
         "r_squared": float(res.rsquared),
-        "r_squared_adj": float(res.rsquared_adj),
+        "adj_r_squared": float(res.rsquared_adj),
         "f_statistic": f_statistic,
         "f_p_value": f_p_value,
         "nobs": int(res.nobs),
@@ -559,7 +557,7 @@ def run_gmm(
         "cov_type_requested": cov_type,
         "cov_type_linearmodels": lm_cov_type,
         "debiased": debiased,
-        "gmm_iterations": gmm_iterations,
+        "iter_limit": iter_limit,
         "confidence_level": confidence_level,
         "formula": formula,
         "hac_lag": cov_hac_lag_used,
@@ -575,9 +573,9 @@ if __name__ == "__main__":
     parser.add_argument("--x-exog", nargs="*", default=["x1"])
     parser.add_argument("--x-endog", nargs="*", default=["endog1"])
     parser.add_argument("--instruments", nargs="*", default=["z1", "z2"])
-    parser.add_argument("--weight-type", default="unadjusted")
+    parser.add_argument("--weight-type", default="classical")
     parser.add_argument("--cov-type", default="classical")
-    parser.add_argument("--cluster-col", default=None)
+    parser.add_argument("--cluster", default=None)
     parser.add_argument("--hac-lags", type=int, default=None)
     parser.add_argument("--gmm-iterations", type=int, default=2)
     parser.add_argument("--confidence-level", type=float, default=0.95)
@@ -591,9 +589,9 @@ if __name__ == "__main__":
             args.instruments,
             args.weight_type,
             args.cov_type,
-            args.cluster_col,
+            args.cluster,
             args.hac_lags,
-            args.gmm_iterations,
+            args.iter_limit,
             args.confidence_level,
         )
     else:
@@ -603,7 +601,7 @@ if __name__ == "__main__":
             args.x_endog,
             args.instruments,
             args.cov_type,
-            args.cluster_col,
+            args.cluster,
             args.hac_lags,
             args.confidence_level,
         )

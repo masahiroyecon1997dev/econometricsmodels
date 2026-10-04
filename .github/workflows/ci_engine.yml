@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           components: clippy, rustfmt
 
@@ -55,7 +55,7 @@ jobs:
       # "Unexpected token ... in JSON"で失敗する既知の不具合が未解決のまま残っている
       # （rustsec/audit-check#18, #33）。実際の脆弱性と無関係にCIが赤くなる偽陽性を避けるため、
       # アクションを介さず`cargo audit`をテキスト出力のまま直接実行する。
-      - uses: taiki-e/install-action@5bf6ce016fd2e72eefc647cbca1e4213f65955b8 # v2.87.5
+      - uses: taiki-e/install-action@4076c08d76dba979c11a7285295b0716c1d67908 # v2.87.15
         with:
           tool: cargo-audit
 

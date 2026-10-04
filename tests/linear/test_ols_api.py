@@ -27,14 +27,22 @@ import polars as pl
 import pytest
 import statsmodels.api as sm
 from _assertions import assert_close
+from _helpers import (
+    HAC_AUTO_LAG_SAMPLE_SIZES,
+    ROW_TIME,
+    hac_lag_frame,
+    hac_time_for,
+    with_row_time,
+)
 from _ols_helpers import our_fit, our_fit_cluster, sm_fit
 from _tolerances import TOLERANCES
-from econometricsmodels import OLS, OLSOptions
+from econometricsmodels import OLS, OLSOptions, ValidationError
+
+from benchmark.common import hac_auto_lag
 
 # predict() の statsmodels 照合も凍結フィクスチャ照合と同じ許容誤差
 # （`_tolerances.py` の "ols_reference"）で行う。`_assertions.assert_close`
-# （`tol = max(rtol*|ref|, atol)`）に統一し、独自の絶対誤差定数は持たない
-# （`refactoring-candidates-2.md` 項目53/56）。
+# （`tol = max(rtol*|ref|, atol)`）に統一し、独自の絶対誤差定数は持たない。
 _assert_close = partial(
     assert_close,
     rtol=TOLERANCES["ols_reference"]["rtol"],
@@ -46,8 +54,10 @@ _assert_close = partial(
 
 def test_hac_runs_and_returns_finite_std_errors(dataset):
     """HACが（statsmodelsとの数値照合なしで）エラーなく動作すること。"""
-    options = OLSOptions(cov_type="hac", hac_lags=2)
-    res = OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+    options = OLSOptions(cov_type="hac", hac_lags=2, hac_time=ROW_TIME)
+    res = OLS(
+        with_row_time(dataset), y="y", x=["x1", "x2"], options=options
+    ).fit()
 
     assert res.cov_type == "hac"
     for se in res.std_errors.values():
@@ -61,12 +71,43 @@ def test_hac_auto_lags_runs_and_returns_finite_std_errors(dataset):
     明示していたため、`None`がPython→Rustに正しく伝播する経路は
     未検証だった）。
     """
-    options = OLSOptions(cov_type="hac")  # hac_lags省略 = 自動計算
-    res = OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+    # hac_lags省略 = 自動計算
+    options = OLSOptions(cov_type="hac", hac_time=ROW_TIME)
+    res = OLS(
+        with_row_time(dataset), y="y", x=["x1", "x2"], options=options
+    ).fit()
 
     assert res.cov_type == "hac"
     for se in res.std_errors.values():
         assert se > 0.0
+
+
+@pytest.mark.parametrize("n", HAC_AUTO_LAG_SAMPLE_SIZES)
+def test_hac_lags_used_matches_python_auto_lag_formula(n):
+    """`hac_lags`省略時の`hac_lags_used`が、Python側の独立実装
+    （`benchmark.common.hac_auto_lag`）と複数の標本サイズで一致すること。
+    """
+    options = OLSOptions(cov_type="hac", hac_time=ROW_TIME)
+    res = OLS(hac_lag_frame(n), y="y", x=["x1", "x2"], options=options).fit()
+    assert res.hac_lags_used == hac_auto_lag(n)
+
+
+@pytest.mark.parametrize("hac_lags", [0, 3, 10])
+def test_hac_lags_used_echoes_explicit_hac_lags(dataset, hac_lags):
+    """`hac_lags`を明示指定したときは、自動計算値ではなく指定値が返ること。"""
+    options = OLSOptions(cov_type="hac", hac_lags=hac_lags, hac_time=ROW_TIME)
+    res = OLS(
+        with_row_time(dataset), y="y", x=["x1", "x2"], options=options
+    ).fit()
+    assert res.hac_lags_used == hac_lags
+
+
+@pytest.mark.parametrize("cov_type", ["classical", "hc0", "hc3"])
+def test_hac_lags_used_is_none_unless_hac(dataset, cov_type):
+    res = OLS(
+        dataset, y="y", x=["x1", "x2"], options=OLSOptions(cov_type=cov_type)
+    ).fit()
+    assert res.hac_lags_used is None
 
 
 def test_residuals_sum_near_zero(dataset):
@@ -88,7 +129,7 @@ def test_coef_table_structure(dataset):
         "param",
         "coef",
         "std_err",
-        "t_stat",
+        "test_stat",
         "p_value",
         "conf_lower",
         "conf_upper",
@@ -108,13 +149,13 @@ def test_conf_int_structure(dataset):
         assert lower < upper
 
 
-def test_params_std_errors_t_stats_p_values_share_keys(dataset):
+def test_params_std_errors_test_stats_p_values_share_keys(dataset):
     res = our_fit(dataset)
     expected_keys = {"const", "x1", "x2"}
 
     assert set(res.params.keys()) == expected_keys
     assert set(res.std_errors.keys()) == expected_keys
-    assert set(res.t_stats.keys()) == expected_keys
+    assert set(res.test_stats.keys()) == expected_keys
     assert set(res.p_values.keys()) == expected_keys
 
 
@@ -127,7 +168,7 @@ def test_n_obs_and_dep_var_name(dataset):
 # ── オプションの反映 ──────────────────────────────────────────────
 #
 # cov_type以外のOLSOptionsフィールド（include_intercept・confidence_level・
-# hac_lags=None・time_col）が、engine_pybind側の列抽出・分岐ロジックを経て
+# hac_lags=None・hac_time）が、engine_pybind側の列抽出・分岐ロジックを経て
 # 正しく反映されることを確認する。
 
 
@@ -151,31 +192,27 @@ def test_cov_type_label(dataset):
         ("hc3", "hc3"),
         ("HAC", "hac"),
         ("Hac", "hac"),
-        ("nonrobust", "nonrobust"),
-        ("NONROBUST", "nonrobust"),
     ],
 )
 def test_cov_type_is_case_insensitive(dataset, cov_type, expected_label):
     """`cov_type`が大文字小文字を区別しないこと（`engine_pybind`側の
     `parse_cov_type`のRust単体テストと対になる、Python API境界での確認。
-    テスト網羅性レビュー、Issue #231フェーズ4で判明した抜け。HACは
+    テスト網羅性レビューで判明した抜け。HACは
     `hac_lags`省略時の自動計算式で成功パスを確認する
     （テスト網羅性候補・項目35）。
     """
-    options = OLSOptions(cov_type=cov_type)
-    res = OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+    options = OLSOptions(cov_type=cov_type, **hac_time_for(cov_type))
+    res = OLS(
+        with_row_time(dataset), y="y", x=["x1", "x2"], options=options
+    ).fit()
     assert res.cov_type == expected_label
 
 
 @pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
-def test_nonrobust_is_alias_for_classical(dataset, cov_type):
-    """`"nonrobust"`が`"classical"`と同じ計算方法（標準誤差も一致）の
-    エイリアスであること。
-    """
-    res = our_fit(dataset, cov_type)
-    classical_res = our_fit(dataset, "classical")
-    for name in res.param_names:
-        assert res.std_errors[name] == classical_res.std_errors[name], name
+def test_nonrobust_is_rejected(dataset, cov_type):
+    """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
+    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
+        our_fit(dataset, cov_type)
 
 
 def test_default_options_use_classical():
@@ -209,20 +246,24 @@ def test_confidence_level_changes_interval_width(dataset):
         assert narrow_width < wide_width, name
 
 
-def test_hac_time_col_reorders_rows_before_computing_lags():
-    """`time_col`を指定すると、DataFrameの行順に関わらず時系列順で
+def test_hac_time_reorders_rows_before_computing_lags():
+    """`hac_time`を指定すると、DataFrameの行順に関わらず時系列順で
 
     ラグ付き自己共分散を計算すること。データは`engine/src/linear/ols.rs`の
     `fit_computes_hac_std_errors_respecting_time_order`と同一（時系列順で
     x=[1..5], y=[2,4,5,4,5]をtime順=[3,1,5,2,4]にシャッフルして入力し、
-    `time_col`無指定・時系列順の入力と同じ結果になることを確認する）。
-    engine_pybindの`time_col`列抽出（`extract_f64_column`）を
+    `hac_time`無指定・時系列順の入力と同じ結果になることを確認する）。
+    engine_pybindの`hac_time`列抽出（`extract_time_order_ranks`）を
     Python API境界から検証する。
     """
     ordered_df = pl.DataFrame(
-        {"y": [2.0, 4.0, 5.0, 4.0, 5.0], "x1": [1.0, 2.0, 3.0, 4.0, 5.0]}
+        {
+            "y": [2.0, 4.0, 5.0, 4.0, 5.0],
+            "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "time": [1.0, 2.0, 3.0, 4.0, 5.0],
+        }
     )
-    ordered_options = OLSOptions(cov_type="hac", hac_lags=1)
+    ordered_options = OLSOptions(cov_type="hac", hac_lags=1, hac_time="time")
     ordered_res = OLS(
         ordered_df, y="y", x=["x1"], options=ordered_options
     ).fit()
@@ -234,7 +275,7 @@ def test_hac_time_col_reorders_rows_before_computing_lags():
             "time": [3.0, 1.0, 5.0, 2.0, 4.0],
         }
     )
-    shuffled_options = OLSOptions(cov_type="hac", hac_lags=1, time_col="time")
+    shuffled_options = OLSOptions(cov_type="hac", hac_lags=1, hac_time="time")
     shuffled_res = OLS(
         shuffled_df, y="y", x=["x1"], options=shuffled_options
     ).fit()
@@ -442,8 +483,7 @@ def test_augment_without_intercept_matches_predict():
 # 後付けしたものであり、リファレンス実装（statsmodels/R）との数値一致を
 # 検証する目的には十分だが、「クラスターロバストSEが真のクラスター内相関が
 # ある状況で意図通り機能するか（通常のSEより適切に大きくなるか）」という
-# 別種の健全性は検証していなかった（旧test-coverage-candidates.md項目12、
-# 対応済みのため同ファイルからは削除済み、ユーザー確認済み）。以下はその
+# 別種の健全性は検証していなかった。以下はその
 # 健全性のみを確認する専用テストであり、他のテストと異なりリファレンス
 # 実装との数値比較は行わない。
 
@@ -491,7 +531,7 @@ def test_cluster_std_error_exceeds_classical_under_true_intra_cluster_correlatio
         df,
         y="y",
         x=["x1"],
-        options=OLSOptions(cov_type="cluster", cluster_col="cluster"),
+        options=OLSOptions(cov_type="cluster", cluster="cluster"),
     ).fit()
 
     ratio = cluster.std_errors["x1"] / classical.std_errors["x1"]

@@ -5,8 +5,7 @@
 - `freeze_scenarios`: シナリオでループしてCSV＋true_beta辞書を積み上げる。
 - `run_freeze_cli`: 各系統の `benchmark/<系統>/freeze.py` 共通の `__main__`。
 
-旧 `benchmark/_common.py` から Initiative A で関心事ごとに分割した
-（経緯は `docs/planning/specs/refactoring-issue231-progress.md`「Initiative A」節）。
+旧 `benchmark/_common.py` から関心事ごとに分割した。
 """
 
 from __future__ import annotations

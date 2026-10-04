@@ -148,17 +148,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **状態**: 未対応（優先度低、項目81〔`refactoring-candidates-2.md`〕と
   合わせて検討）
 
-### 9.【解消済み】`iv-spec.md`の前身ドキュメントの「`x_endog`/`instruments`は最低1要素を要求する見込み」という記述が実装と食い違っている
-
-→ Issue #306で対応済み（2026-09-12）。`x_endog`/`instruments`が空リストの場合を
-`ValidationError`で弾くよう実装し、設計ドキュメントの記述も確定表現に更新した（現在は`iv-spec.md`に集約済み）。
-
-### 10.【解消済み】`x_endog=[]`（内生変数ゼロ、実質OLSへの意図的な縮退）を許容し続けるべきかは設計判断が必要
-
-→ Issue #306で対応済み（2026-09-12）。「誤用を防ぐ」側を採用し、`x_endog=[]`
-（`instruments=[]`も同様）は`ValidationError`にする方針で確定・実装した。項目9と
-同一の対応。
-
 ### 11. `test_iv_fixtures.py`と`test_iv_gmm_fixtures.py`の統合可否を検討した結果、完全統合は非推奨・部分的な共通化に留めるべき
 
 - **対象**: [tests/test_iv_fixtures.py:100-155](../../../tests/test_iv_fixtures.py#L100-L155)
@@ -207,70 +196,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   ユーザー指摘、両ファイルの比較調査で確認。
 - **状態**: 未対応（優先度低。完全統合は非推奨、`_check_result`共通部分の
   部分的なヘルパー化のみ検討の余地あり）
-
-### 12.【重要な発見】IVのHC2/HC3がR `ivreg`+`sandwich`で実際に検証可能なことを実機確認した——「参照実装が無い」というドキュメント記述は現在のivregバージョンでは事実と異なる
-
-- **対象**: `iv-spec.md`の前身ドキュメント（当時: 110-116行目）
-  （「`hc2`/`hc3`は引き続き外部の参照実装で検証できない...R `ivreg`も同様
-  （`hatvalues.ivreg`の実装がソース上コメントアウトされている）」）、
-  [tests/test_iv_fixtures.py:19-22](../../../tests/test_iv_fixtures.py#L19-L22)、
-  [tests/test_iv_crosscheck.py:33-34](../../../tests/test_iv_crosscheck.py#L33-L34)、
-  [engine/src/iv/two_sls.rs:1584-1590](../../../engine/src/iv/two_sls.rs#L1584-L1590)
-  （いずれも同じ「参照実装が無い」という前提を踏襲している）
-- **内容**: ユーザー指摘（2026-08-30、「HC2/HC3はR側かpythonならpyfixest
-  などで検証できそう？Rust側だとパッケージ後の結合テストが未完のまま」）
-  を受けて、devcontainerに導入済みのR（`ivreg` 0.6.8、CLAUDE.md 10章参照）
-  で直接実機検証した。
-  - `Rscript -e 'print(ivreg:::hatvalues.ivreg)'`で実際の関数定義を確認
-    したところ、**コメントアウトされておらず、`type="stage2"`
-    （既定）で第二段階OLS回帰（`lm(y ~ X̂)`、`X̂`は第一段階の予測値）の
-    `hatvalues()`をそのまま返す、正常に動作する実装**だった（`ivreg`の
-    `NEWS`ファイルにVersion 0.6-4で`hatvalues.ivreg()`のバグ修正記録が
-    あり、少なくとも0.6-4時点で既に存在する関数）。
-  - `sandwich::vcovHC(ivreg_fit, type="HC2")`/`type="HC3"`が実際に
-    エラーなく計算できることを確認した。
-  - **本実装（`X̂`から計算するレバレッジ、`two_sls.rs`の
-    `hc_cov_params`）と同じ合成データ（`y ~ x1 + endog1 | x1 + z1 + z2`、
-    n=200）で数値を突き合わせたところ、HC2/HC3とも6桁以上の精度で一致**
-    した（実測: HC2の`endog1`のSE、本実装`0.13356919386622892`、R
-    `0.1335692`。HC3も同様）。R側の`hatvalues.ivreg(type="stage2")`が
-    第二段階回帰（`X̂`を設計行列とする`lm`）のレバレッジをそのまま使う
-    実装であることをソースで確認しており、本実装が「`X̂`のみから
-    レバレッジを計算する」（`two_sls.rs`のdocコメント）としている定義と
-    完全に一致する。
-  - **原因の推測**: 当時の設計ドキュメントの記述はIssue #166/#171時点の
-    調査に基づくが、CLAUDE.md 10章に記録されている通り`ivreg`は当初
-    Debian標準のr-baseでは依存関係を満たせず**インストール自体が
-    サイレントに失敗していた**（CRAN APTリポジトリ追加で解消）経緯が
-    ある。この調査がその失敗期間中、または古いivregバージョンに基づいて
-    行われた可能性が高い。
-- **Claudeの所感**: これは単なるテストカバレッジの話ではなく、
-  **ドキュメント上の技術的前提そのものが現状のツールチェーンでは
-  誤りになっている**、重要度の高い発見だと考える。現状のRust単体
-  テスト（`fit_computes_hc2_std_errors_matching_manual_sandwich_
-  formula`）は同じ開発者が書いた「手計算オラクル」と本実装を突き合わせる
-  だけの**自己参照的な検証**（`testing-policy.md`が警告する「独立性が
-  限定的」なパターン）に留まっていたが、今回の発見により**真に独立した
-  R `ivreg`実装との数値一致**が確認でき、この懸念を解消できる。
-  対応するなら: (1) `test_iv_crosscheck.py`に`hc2`/`hc3`のクロスチェック
-  テストを追加する（`benchmark/iv/references/run_ivreg.R`に
-  `vcovHC(type="HC2"/"HC3")`を追加）、(2) 設計ドキュメント3.1節・
-  関連するdocstring群（本項目「対象」に列挙した4箇所）の「参照実装が
-  無い」という記述を訂正する、の2段階が必要になる。ユーザー指示により
-  本セッションでは記録のみ。
-- **気づいた経緯**: 2026-08-30、`tests/test_iv_fixtures.py`解説時の
-  ユーザー指摘、R実機検証で確認（`ivreg`/`sandwich`とも devcontainerに
-  導入済みのものをそのまま使用）。
-- **状態**: 対応済み（2026-09-12）。`benchmark/iv/references/run_ivreg.R`に
-  hc2/hc3の`vcovHC(type="HC2"/"HC3")`分岐を追加し、
-  `generate_iv_crosscheck_fixtures.py`のCOV_TYPESに追加して
-  `iv_crosscheck.json`を再生成、`tests/iv/test_iv_crosscheck.py`に
-  hc2/hc3をCOV_TYPESとして追加（既存のRTOL_STRICT=1e-8でdf1境界
-  シナリオ含め全て通過、実測で許容誤差の追加緩和は不要だった）。
-  `iv-spec.md`3.1節・4章・冒頭未決着事項、`test_iv_reference.py`・
-  `test_iv_crosscheck.py`のdocstring、`engine/src/iv/two_sls.rs`・
-  `gmm.rs`のdocコメントの「参照実装が無い」という誤った記述も訂正した
-  （GMM側はivreg非対応という結論は維持し根拠のみ訂正、ユーザー承認済み）。
 
 ### 13. `wu_hausman_statistic`の`cov_type="hac"`時のNone原因調査について、R側では既に独立検証済み（Issue #233）という事実が`test_iv_fixtures.py`側のドキュメントに反映されていない
 
@@ -546,8 +471,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   良いと考える。
 - **気づいた経緯**: 2026-08-31、`tests/test_iv_crosscheck.py`解説時の
   ユーザー指摘、`grep`で確認。
-- **状態**: 未対応（`refactoring-candidates-2.md`項目51・79と統合して
-  対応するのが効率的、着手タイミングはユーザー判断待ち）
+- **状態**: 対応済み（2026-09-26調査。`tests/`・`benchmark/`・`engine`・`engine_pybind`・`python_package`に`#231`/`#227`/`Issue #`の経緯コメントは残存しておらず、過去の一斉削除で解消済み）
 
 ### 26. `test_iv_crosscheck.py`にGMMのRクロスチェックが無い件——v1時点では意図的な例外規定だったが、今後のGMM拡張（C統計量等）に合わせてテストも拡張予定
 
@@ -642,8 +566,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   `test_logit_crosscheck.py`と同じ役割分担」）は有用な情報のため残す
   という、既存の方針をそのまま適用できる。
 - **気づいた経緯**: 2026-08-31、`tests/test_tobit.py`解説時に確認。
-- **状態**: 未対応（項目25・51・79とまとめて対応するのが効率的、
-  着手タイミングはユーザー判断待ち）
+- **状態**: 対応済み（2026-09-26調査。`tests/`・`benchmark/`・`engine`・`engine_pybind`・`python_package`に`#231`/`#227`/`Issue #`の経緯コメントは残存しておらず、過去の一斉削除で解消済み）
 
 ### 29. `rel=1e-4`という許容誤差がLogit/Probit/Tobitの`test_method_option_converges_to_same_params`に同一値で直書きされている（リポジトリ全体）
 
@@ -821,15 +744,6 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
   コード全体を確認して発見。
 - **状態**: 未対応
 
-### 40.【Issue化】結果クラスの命名が頭字語の大文字小文字で不統一（`OlsResults`/`WlsResults`/`IvResults` vs `OLS`/`WLS`/`IV`）
-
-→ Issue #310として切り出し済み（2026-09-11）、2026-09-21に対応完了。`OlsResults`/
-`WlsResults`/`IvResults`/`FeResults`/`ReResults`を`OLSResults`/`WLSResults`/
-`IVResults`/`FEResults`/`REResults`へ、対応する`IvOptions`/`FeOptions`/`ReOptions`
-（本文では未言及だったが同じ不統一を抱えていたため合わせて対応）を`IVOptions`/
-`FEOptions`/`REOptions`へリネームした。Rust側（`engine_pybind`）のpyclass名自体も
-揃えた。詳細はIssueを参照。
-
 ### 41. `__version__`がバージョン文字列の3つ目の手書きソースになっている
 
 - **対象**: [python_package/econometricsmodels/__init__.py:40](../../../python_package/econometricsmodels/__init__.py#L40)
@@ -1003,7 +917,7 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 - **気づいた経緯**: 2026-09-13、`iv/iv.py`解説中、ユーザーが
   `logit.py`に`dep_var_name`が無いことを指摘。`grep`で
   `engine`/`engine_pybind`/`python_package`全層を突き合わせて確認。
-- **状態**:【Issue化】Issue #318として切り出し済み（2026-09-13）
+- **状態**:【Issue化】Issue #318として切り出し済み（2026-09-13）→ 実装漏れと判断し対応済み（2026-09-27）
 
 ### 47.【Issue化】FE: `time`引数をentityと同様にトップレベル引数にすべきか検討する → Issue #319として切り出し済み（2026-09-13）
 
@@ -1214,3 +1128,165 @@ Issue化する前の**気づいた時点での未整理のメモ**を溜める�
 できない）も既知の限界として起票時に明記し、その補強策として「Python層での属性
 一括存在チェック」導入も検討案としてIssue本文に記録した。`macro_rules!`による完全
 機械生成案（Issue #315とスコープ重複）は不採用、詳細はIssue参照。
+
+### 63. `Option<cluster_col>`から`extract_group_key_column`を呼ぶ処理が8箇所で重複している（`as_ref()`有無の違いのみ）
+
+- **対象**: [engine_pybind/src/linear/common.rs:104-108](../../../engine_pybind/src/linear/common.rs#L104-L108)
+  の`parse_cov_type`（`cluster_col: Option<&str>`のため`as_ref()`不要）、
+  [engine_pybind/src/nonlinear/common.rs:104-108](../../../engine_pybind/src/nonlinear/common.rs#L104-L108)
+  の`parse_cov_type`、[engine_pybind/src/iv/common.rs:452-456](../../../engine_pybind/src/iv/common.rs#L452-L456)
+  の`parse_iv_cov_type`、[engine_pybind/src/panel/fe.rs:303-307,315-319,390-394](../../../engine_pybind/src/panel/fe.rs#L303-L307)
+  の`parse_fe_cov_type`（cluster・hac time）と`build`（time）、
+  [engine_pybind/src/panel/re.rs:259-263,331-335](../../../engine_pybind/src/panel/re.rs#L259-L263)
+  の`parse_re_cov_type`（cluster）と`build`（time）（いずれも`cluster_col`/`time_col`が
+  `Option<String>`フィールドのため`as_ref()`が必要、計6箇所）
+- **内容**: ユーザー指摘（2026-09-23、「linearとnonlinearのparse_cov_typeのクラスターの
+  処理はほぼ同じなのでまとめたほうがいいのでは（`as_ref()`があるかないかの違いのみ）」）
+  を受けて調査したところ、指摘の2箇所だけでなく`iv`・`panel`（FE/RE）の`cov_type`/`time`
+  抽出も含めて計8箇所に同一パターンが重複していた。`col.map(|name|
+  extract_group_key_column(df, name)).transpose()?`という「値があれば抽出、無ければ
+  `None`、失敗したら即座にエラー」というロジック自体は完全に同一で、違いは元の型が
+  `Option<&str>`か`Option<String>`かのみ。`column_extraction.rs`に
+  `extract_optional_group_key_column(df: &DataFrame, col: Option<&str>) ->
+  PyResult<Option<Vec<String>>>`を追加すれば、`Option<String>`を保持する呼び出し側は
+  `.as_deref()`を渡すだけで済み、`as_ref()`有無の違い自体が吸収される。項目56（`mat_to_vec`の
+  配置）や、`predict_for`/`extract_f64_columns`/`x_column_names`/`validate_common_roles`
+  として既に対応済みの列抽出関連の重複解消と同じ「全手法共通の列抽出操作を
+  column_extraction.rsに集約する」方針の延長で、リスクは低いと考える。
+- **気づいた経緯**: 2026-09-23、`nonlinear/common.rs`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 64. `iv::common::parse_iv_cov_type`が`linear::common::parse_cov_type`と実質同一実装で重複している。実装スタイル（列抽出のinline化）もpanel側と不統一
+
+- **対象**: [engine_pybind/src/linear/common.rs:81-128](../../../engine_pybind/src/linear/common.rs#L81-L128)
+  の`parse_cov_type`、[engine_pybind/src/iv/common.rs:444-482](../../../engine_pybind/src/iv/common.rs#L444-L482)
+  の`parse_iv_cov_type`、[engine_pybind/src/panel/fe.rs:283-329](../../../engine_pybind/src/panel/fe.rs#L283-L329)
+  の`parse_fe_cov_type`
+- **内容**: ユーザー指摘（2026-09-13、「`parse_cov_type`は手法間での統一は可能か。matchの
+  中でクラスター/HACの列抽出まで行えばよりスマートに書けそう」）を受けて`release/v0.7.0`
+  時点で調査した内容（`release/v0.8.0`にはまだ未記録だったため、項目63と合わせて再記録）。
+  `iv::common::parse_iv_cov_type`は`linear::common::parse_cov_type`と使っている型
+  （`engine::linear::ols::CovType`）・matchの各アーム（文字列ラベル・エラーメッセージ）が
+  完全に同一。違いは`&IvOptions`を丸ごと受け取るか個々のフィールド値を受け取るかのみ。
+  `linear::common::parse_cov_type`は元々`OLSOptions`/`WLSOptions`という2つの独立した型に
+  共有させるため個々のフィールド値を取る設計に一般化済みであり、同名フィールド
+  （`cov_type`/`cluster_col`/`hac_lags`/`time_col`）を持つ`IvOptions`もこの関数をそのまま
+  呼べる可能性が高い（`parse_iv_cov_type`自体を削除できる）。`nonlinear::common::
+  parse_cov_type`（対応する`cov_type`の種類・型が異なる: opg/hc1まで、hac非対応）・
+  `panel::fe::parse_fe_cov_type`（hc0非対応・`Hac`の意味論がFE固有）は実際にvariant集合が
+  異なるため独立実装のままで妥当。また`panel::fe::parse_fe_cov_type`は既にmatch内で列抽出
+  まで完結させるスタイル（`"cluster" => { let groups = ...; FeCovType::Cluster { groups } }`）
+  で書かれており、`linear`/`iv`側は「match外で`cov_type_lower == "cluster"`をif判定→
+  事前計算→matchで組み立て」という同じ条件を2回書くスタイルになっているため、panel方式に
+  揃える方が可読性が高いと考える。項目63（`extract_optional_group_key_column`の導入）と
+  合わせて対応すると、`linear`/`iv`双方のmatch内での書き方がより簡潔になる。
+- **気づいた経緯**: 2026-09-13、`linear/common.rs`解説後のユーザー指摘（`release/v0.7.0`側
+  で発見・記録済みだったが、作業ブランチが`release/v0.8.0`に切り替わったため再記録）。
+- **状態**: 未対応（着手要否はユーザー判断待ち。着手する場合は`parse_iv_cov_type`削除
+  〔項目本体〕・`linear::common::parse_cov_type`の内部スタイル変更〔inline化〕・項目63の
+  `extract_optional_group_key_column`導入を合わせて検討）
+
+### 65. `LogitOptions`/`ProbitOptions`/`TobitOptions::new`の`tol`既定値解決ロジックが3箇所で一字一句重複している
+
+- **対象**: [engine_pybind/src/nonlinear/logit.rs:138-142](../../../engine_pybind/src/nonlinear/logit.rs#L138-L142)、
+  [engine_pybind/src/nonlinear/probit.rs:137-141](../../../engine_pybind/src/nonlinear/probit.rs#L137-L141)、
+  [engine_pybind/src/nonlinear/tobit.rs:151-155](../../../engine_pybind/src/nonlinear/tobit.rs#L151-L155)
+  （いずれも`#[new]`コンストラクタ内の`let tol = tol.unwrap_or(if method.eq_ignore_ascii_case
+  ("newton") { 1e-6 } else { 1e-8 });`）
+- **内容**: ユーザー指摘（2026-09-23、「ProbitOptionsのtolの分岐がprobit, tobitで重複している
+  気がする」）を受けて確認したところ、3ファイルとも一字一句同一（コメントも「同じ理由」と
+  明記済み）だった。各pyclassの`#[new]`コンストラクタ自体はフラットなkwargs surfaceを保つ
+  意図的な設計（`nonlinear/CLAUDE.md`「フィールド重複は意図的」参照）のため共通base化は
+  しないが、この既定値解決の**計算ロジックだけ**は`nonlinear/common.rs`に
+  `fn resolve_mle_tol_default(method: &str, tol: Option<f64>) -> f64`として切り出し、
+  3つのコンストラクタから呼ぶ形にできる（`parse_method`と同じ「計算ロジックのみ共有」
+  パターン）。Python公開APIの形を変えずに重複だけ解消でき、リスクは低い。
+- **気づいた経緯**: 2026-09-23、`nonlinear/logit.rs`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否はユーザー判断待ち）
+
+### 66.【要設計検討】`predict_for`の共通部分（`x_names`計算＋列抽出）がOLS/WLS/Logit/Probit/Tobitの5ファイルで重複している。Issue #347のスコープ拡張候補
+
+- **対象**: [engine_pybind/src/linear/ols.rs](../../../engine_pybind/src/linear/ols.rs)の
+  `OLSResult::predict_for`、[engine_pybind/src/linear/wls.rs](../../../engine_pybind/src/linear/wls.rs)の
+  `WLSResult::predict_for`、[engine_pybind/src/nonlinear/logit.rs:256-264](../../../engine_pybind/src/nonlinear/logit.rs#L256-L264)の
+  `LogitResult::predict_for`、`probit.rs`/`tobit.rs`の同名メソッド
+- **内容**: ユーザー指摘（2026-09-23、「`predict_for`の処理がlinear系統と全く同じである。
+  手法全体で共通している？」「プロパティやメソッドに関して抽象化や継承やダックタイピングは
+  使えない？engine_pybind/srcはできないのだろうか」）を受けて比較した。`has_intercept`
+  取得→`x_column_names`での列名計算→`extract_f64_columns`での列抽出、という前半3行は
+  5ファイルとも完全に同一構造で、最後の1行（実際の予測値計算）だけが「フリー関数へ
+  `params`/`has_intercept`を渡す」（OLS/WLS）か「estimatorのメソッド呼び出し」
+  （Logit/Probit/Tobit）かで異なる。PyO3の制約上`#[pyclass]`自体は各手法で独立した
+  具体型である必要があるが、Pythonに公開しない内部ロジックはトレイトで共有できる
+  （例: `trait PredictSource { fn param_names(&self) -> &[String]; fn has_intercept
+  (&self) -> bool; fn predict_from_columns(&self, x_columns: &[Vec<f64>]) -> Vec<f64>; }`
+  を各`*Result`が実装し、`predict_for`本体を1つの自由関数に共通化する）。これは項目62
+  （Issue #347、「`engine::nonlinear::common`への共通アクセサtrait定義＋プレーン構造体への
+  内部コンポジション＋薄い`#[getter]`委譲」という設計で合意済み）と同種の解決策であり、
+  Issue #347のスコープを「Logit/Probit/TobitのResult構築」から「OLS/WLSも含めた
+  `predict_for`の共通化」へ拡張する形で対応するのが筋が良いと考える。`z_stats`/`t_stats`の
+  ような意味自体が異なるフィールドまで無理に1つのトレイトへ統一することは狙わない
+  （Issue #347が「読み出し側アクセサ」という限定範囲に留めているのと同じ考え方）。
+- **気づいた経緯**: 2026-09-23、`nonlinear/logit.rs`解説後のユーザー指摘。
+- **状態**: 未対応（着手要否・Issue #347との統合要否はユーザー判断待ち）
+
+### 67. `ProbitResult`の`cov_type`が「小文字化のみ」で、docコメントの「正規化済み（例: `"classical"`）」と食い違う（`"nonrobust"`がそのまま返る）。`to_lowercase()`も`build_probit_input`と`fit`で重複
+
+- **対象**: [engine_pybind/src/nonlinear/probit.rs:230-231](../../../engine_pybind/src/nonlinear/probit.rs#L230-L231)（docコメント）、
+  [同:451-452](../../../engine_pybind/src/nonlinear/probit.rs#L451-L452)（`fit`の`options.cov_type.to_lowercase()`）、
+  [同:376-377](../../../engine_pybind/src/nonlinear/probit.rs#L376-L377)（`build_probit_input`側の同じ小文字化）。`logit.rs`/`tobit.rs`にも同型あり
+- **内容**: `ProbitResult.cov_type`のdocは「normalized to lowercase; e.g. `"classical"`」だが、
+  実装は単なる`to_lowercase()`のため`cov_type="NonRobust"`を渡すと`"nonrobust"`がそのまま返る
+  （`parse_cov_type`側では`classical`のエイリアスとして受理されているのに、結果には正規名が出ない）。
+  正規名を返したいなら`EngineCovType`から名前を逆引きするか、`parse_cov_type`が正規名も返す形にする。
+  また小文字化が`build_probit_input`と`fit`の2箇所で独立に行われている。
+  実際の挙動を仕様として確認してからdoc側を直すか実装側を直すか、ユーザー判断が要る。
+- **気づいた経緯**: 2026-09-26、`nonlinear/probit.rs`の`/explain-code`解説中。
+- **状態**: 未対応（挙動確認・方針はユーザー判断待ち）
+
+### 68. `engine/src/linear/ols.rs`の自由度に関するdocコメントが、Cluster時の`G-1`切り替えに追従していない
+
+- **対象**: [engine/src/linear/ols.rs:264](../../../engine/src/linear/ols.rs#L264)（`p_values`フィールド「t分布（自由度 n-k）」）、
+  [同:278](../../../engine/src/linear/ols.rs#L278)（`f_p_value`フィールド「自由度は`(k - k_constant, n - k)`」）、
+  [同:310](../../../engine/src/linear/ols.rs#L310)（`fit`のdoc「`cov_type`によらず…t分布（自由度n-k）を使う」）
+- **内容**: 実装では`cov_type=Cluster`のとき検定の自由度が`df_inference = G-1`になる（同ファイル413-454行、
+  `df_inference`フィールドのdocは正しく記載）。上記3箇所は`n-k`固定と読める記述のまま残っており、
+  ファイル内で記述が食い違っている。「通常`n-k`、Clusterのみ`G-1`」に揃えるのが自然。
+- **気づいた経緯**: 2026-10-02、`engine/src/linear/ols.rs`の`/explain-code`解説中。
+- **状態**: 未対応
+
+### 69. `engine/src/linear/ols.rs`のdocコメントが存在しないファイルを参照している（リンク切れ）＋モジュールdocが実態とずれている
+
+- **対象**: [engine/src/linear/ols.rs:314](../../../engine/src/linear/ols.rs#L314)（`benchmark/run_statsmodels_benchmark.py`）、
+  [同:852](../../../engine/src/linear/ols.rs#L852)（`docs/spec/ols-performance-notes.md`）、
+  [同:1](../../../engine/src/linear/ols.rs#L1)（モジュールdoc「OLSの入力データ…の型定義」）
+- **内容**: `benchmark/run_statsmodels_benchmark.py`は`benchmark/`の系統別再編（`benchmark/linear/...`）で、
+  `docs/spec/ols-performance-notes.md`は`docs/performance/ols.md`への移設で、いずれも現存しない。
+  また冒頭の`//!`は「入力データの型定義」とだけ書かれているが、実際はこのファイルが`OlsEstimator`
+  （推定本体・各種共分散行列・Wald検定・予測）の全実装を持っており、モジュールの説明として不足している。
+- **気づいた経緯**: 2026-10-02、`engine/src/linear/ols.rs`の`/explain-code`解説中。
+- **状態**: 未対応
+
+### 70. `engine/src/linear/CLAUDE.md`の`wald_test_last_columns`の説明「`CovType::Classical`固定」が実装と食い違う
+
+- **対象**: [engine/src/linear/CLAUDE.md](../../../engine/src/linear/CLAUDE.md)（「`OlsEstimator`は`cov_params`/`df_inference`を非公開フィールドとして保持する」項）、
+  [engine/src/iv/two_sls.rs:424-426](../../../engine/src/iv/two_sls.rs#L424-L426)
+- **内容**: CLAUDE.mdは`wald_test_last_columns`が「インスタンス自身の`cov_params`/`df_inference`
+  （＝`CovType::Classical`固定・`n-k`ベース）を前提」と書くが、唯一の呼び出し元であるWu-Hausman検定は
+  `OlsEstimator::fit(hausman_input, cov_type.clone(), ...)`とユーザー指定の`cov_type`で推定しており、
+  ロバスト共分散・Cluster時の`G-1`も使われうる。主旨（「外部で計算した`cov_params`を使いたいなら
+  `wald_f_test`を直接使う」）は正しいので、括弧内の「Classical固定・`n-k`ベース」だけを
+  「そのインスタンスの`cov_type`で計算済みの値」等に直せばよいと思われる。
+- **気づいた経緯**: 2026-10-02、`engine/src/linear/ols.rs`の`/explain-code`解説中に呼び出し元を確認して発覚。
+- **状態**: 未対応
+
+### 71. `hc_cov_params`が`Mat::from_fn`のセルごとに`match variant`と`expect`を評価している
+
+- **対象**: [engine/src/linear/ols.rs:774-791](../../../engine/src/linear/ols.rs#L774-L791)
+- **内容**: `scale_i`（行ごとのスケール係数）は列`j`に依存しないのに、`n×k`の全セルで`match variant`・
+  `leverage.as_ref().expect(...)`・`sqrt`を再評価している。先に`Vec<f64>`として`scale_i`を`n`個だけ計算し、
+  `from_fn`ではそれを掛けるだけにすれば、分岐・`expect`が1箇所にまとまり（`from_columns_impl`の
+  `sqrt_weights`事前計算と同じ形）、`expect`自体も`match`で`leverage`を束縛する形にすれば不要になる。
+  性能差は`O(nk)`の定数倍で、QR本体`O(nk²)`に比べ小さいため主目的は可読性・`expect`回避。
+- **気づいた経緯**: 2026-10-02、`engine/src/linear/ols.rs`の`/explain-code`解説中。
+- **状態**: 未対応（性能影響は要実測、着手要否はユーザー判断）

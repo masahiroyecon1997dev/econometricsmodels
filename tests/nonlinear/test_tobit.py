@@ -1,8 +1,8 @@
 """Tobit python_packageラッパーの構造・API・エラーパスのスモークテスト。
 
 主リファレンス（R survival::survreg / AER::tobit）との厳密な数値比較は別途
-実施する（`test_logit_reference.py`/`test_logit_crosscheck.py`と同じ役割分担、
-Issue #227）。ここでは`fit()`の成功パス・`coef_table()`/`predict()`/
+実施する（`test_logit_reference.py`/`test_logit_crosscheck.py`と同じ役割分担）。
+ここでは`fit()`の成功パス・`coef_table()`/`predict()`/
 `censoring_fit_check()`/`marginal_effects()`の構造・`ValidationError`/
 `ComputationError`パスのみを検証する（`test_logit_api.py`/
 `test_logit_validation.py`のTobit版）。
@@ -15,6 +15,7 @@ import math
 import random
 
 import _error_messages as msgs
+import pandas as pd
 import polars as pl
 import pytest
 from _constants import DATA_DIR
@@ -52,9 +53,9 @@ def test_default_options_use_classical_left_censored_at_zero(
     assert res.converged
 
 
-@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
-def test_method_option_converges_to_same_params(censored_dataset, method):
-    """`method`（newton/bfgs/lbfgs）はいずれも同じ最尤解に収束する。
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_method_option_converges_to_same_params(censored_dataset, solver):
+    """`solver`（newton/bfgs/lbfgs）はいずれも同じ最尤解に収束する。
 
     `engine/src/nonlinear/tobit.rs`のRust単体テストは3手法の一致を検証済み
     だが、engine_pybindの文字列→`Method`パースやpython_packageラッパーの
@@ -66,7 +67,7 @@ def test_method_option_converges_to_same_params(censored_dataset, method):
         censored_dataset,
         y="y",
         x=["x1", "x2"],
-        options=TobitOptions(method=method),
+        options=TobitOptions(solver=solver),
     ).fit()
     assert res.converged
     for name in res.param_names:
@@ -75,22 +76,22 @@ def test_method_option_converges_to_same_params(censored_dataset, method):
         )
 
 
-@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
-def test_method_label(censored_dataset, method):
-    """`res.method`が指定した`method`（正規化済み小文字）を反映すること
-    （Logit/Probitの`check_method_label`と同型、Issue #307）。
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_method_label(censored_dataset, solver):
+    """`res.solver`が指定した`solver`（正規化済み小文字）を反映すること
+    （Logit/Probitの`check_method_label`と同型）。
     """
     res = Tobit(
         censored_dataset,
         y="y",
         x=["x1", "x2"],
-        options=TobitOptions(method=method),
+        options=TobitOptions(solver=solver),
     ).fit()
-    assert res.method == method
+    assert res.solver == solver
 
 
 @pytest.mark.parametrize(
-    "method, expected_label",
+    "solver, expected_label",
     [
         ("NEWTON", "newton"),
         ("Newton", "newton"),
@@ -100,17 +101,17 @@ def test_method_label(censored_dataset, method):
         ("Lbfgs", "lbfgs"),
     ],
 )
-def test_method_is_case_insensitive(censored_dataset, method, expected_label):
-    """`method`が大文字小文字を区別しないこと（Logit/Probitの
-    `check_method_is_case_insensitive`と同型、Issue #307）。
+def test_method_is_case_insensitive(censored_dataset, solver, expected_label):
+    """`solver`が大文字小文字を区別しないこと（Logit/Probitの
+    `check_method_is_case_insensitive`と同型）。
     """
     res = Tobit(
         censored_dataset,
         y="y",
         x=["x1", "x2"],
-        options=TobitOptions(method=method),
+        options=TobitOptions(solver=solver),
     ).fit()
-    assert res.method == expected_label
+    assert res.solver == expected_label
 
 
 def test_param_names_include_const_first_and_sigma_last(censored_dataset):
@@ -132,12 +133,12 @@ def test_include_intercept_false_omits_const_and_converges(
     assert res.df_model == 2
 
 
-def test_params_std_errors_z_stats_p_values_share_keys(censored_dataset):
+def test_params_std_errors_test_stats_p_values_share_keys(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     expected_keys = {"const", "x1", "x2", "sigma"}
     assert set(res.params.keys()) == expected_keys
     assert set(res.std_errors.keys()) == expected_keys
-    assert set(res.z_stats.keys()) == expected_keys
+    assert set(res.test_stats.keys()) == expected_keys
     assert set(res.p_values.keys()) == expected_keys
 
 
@@ -160,6 +161,11 @@ def test_n_obs_matches_dataset_size(censored_dataset):
     assert res.n_obs == censored_dataset.height
 
 
+def test_dep_var_name(censored_dataset):
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    assert res.dep_var_name == "y"
+
+
 def test_coef_table_structure(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     table = res.coef_table()
@@ -170,7 +176,7 @@ def test_coef_table_structure(censored_dataset):
         "param",
         "coef",
         "std_err",
-        "z_stat",
+        "test_stat",
         "p_value",
         "conf_lower",
         "conf_upper",
@@ -222,7 +228,7 @@ def test_predict_unknown_target_raises(censored_dataset):
 def test_predict_new_data_returns_row_oriented_predictions(
     censored_dataset, target
 ):
-    """`predict(new_data=...)`（out-of-sample、Issue #131）が学習データと構造の
+    """`predict(new_data=...)`（out-of-sample）が学習データと構造の
     異なる新規データに対しても同じ行指向の形状を返すこと。
     """
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
@@ -246,15 +252,15 @@ def test_predict_missing_column_raises(censored_dataset):
 
 
 def test_predict_non_numeric_dtype_raises(censored_dataset):
-    """`test_non_numeric_dtype_raises`と同じ理由でnull経由の
-    `COLUMN_HAS_MISSING_VALUES`になる。
-    """
+    """`test_non_numeric_dtype_raises`と同じdtypeのメッセージになる。"""
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     new_data = pl.DataFrame({"x1": ["a", "b"], "x2": [1.0, 2.0]})
 
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=2),
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="x1", dtype="String"
+        ),
     ):
         res.predict(new_data=new_data)
 
@@ -290,7 +296,7 @@ def test_augment_none_returns_training_data_with_predicted_column(
 ):
     """`augment(new_data=None)`が、学習データの全列＋`"predicted_{target}"`
     列を持つDataFrameを、`predict()`と同じ予測値・元データと同じ行順で
-    返すこと（Issue #322項目4）。
+    返すこと。
     """
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
 
@@ -330,7 +336,7 @@ def test_augment_without_intercept_matches_predict(censored_dataset):
     """`include_intercept=False`でfitした場合も`augment()`が`predict()`と
     同じ予測値を返すこと（`augment()`はRust側で`predict()`とは別に
     `has_intercept`分岐を実装しているため、個別に確認する。OLSの
-    `test_augment_without_intercept_matches_predict`と同型、Issue #322項目4、
+    `test_augment_without_intercept_matches_predict`と同型、
     python-reviewer指摘）。
     """
     options = TobitOptions(include_intercept=False)
@@ -355,7 +361,7 @@ def test_augment_different_targets_do_not_collide_on_same_dataframe(
     censored_dataset,
 ):
     """`predicted_{target}`という列名にした狙い（ユーザー確認済み）:
-    Logit/Probitのような固定名`"probability"`だと、複数の`target`を
+    Logit/Probitのような固定名`"predicted_probability"`だと、複数の`target`を
     同じDataFrameに積み上げようとした2回目の`augment()`呼び出しが列名衝突で
     失敗する。`target`依存の列名ならこれが起きない。
     """
@@ -380,7 +386,7 @@ def test_augment_unknown_target_raises(censored_dataset):
 def test_augment_column_collision_raises(censored_dataset):
     """元データ（`new_data=None`）・`new_data`のいずれかに既に
     `"predicted_expected_observed"`列がある場合`ValidationError`
-    （黙って上書きしない、Issue #322項目4）。
+    （黙って上書きしない）。
     """
     df_with_predicted = censored_dataset.with_columns(
         pl.lit(0.0).alias("predicted_expected_observed")
@@ -446,12 +452,12 @@ def test_marginal_effects_default_excludes_intercept(censored_dataset):
     assert [row["param"] for row in effects] == ["x1", "x2"]
     expected_keys = {
         "param",
-        "dydx",
+        "effect",
         "std_err",
-        "z",
+        "test_stat",
         "p_value",
-        "conf_low",
-        "conf_high",
+        "conf_lower",
+        "conf_upper",
     }
     for row in effects:
         assert expected_keys <= set(row.keys())
@@ -470,9 +476,9 @@ def test_marginal_effects_mean_and_median_differ_from_overall(
     censored_dataset,
 ):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    overall = [row["dydx"] for row in res.marginal_effects(at="overall")]
-    mean = [row["dydx"] for row in res.marginal_effects(at="mean")]
-    median = [row["dydx"] for row in res.marginal_effects(at="median")]
+    overall = [row["effect"] for row in res.marginal_effects(at="overall")]
+    mean = [row["effect"] for row in res.marginal_effects(at="mean")]
+    median = [row["effect"] for row in res.marginal_effects(at="median")]
 
     assert overall != mean
     assert overall != median
@@ -586,6 +592,44 @@ def test_missing_column_raises(censored_dataset):
         Tobit(censored_dataset, y="y", x=["does_not_exist"]).fit()
 
 
+def test_data_not_polars_raises(censored_dataset):
+    """`data`/`new_data`にpolars以外のDataFrame（pandas等）を渡すと、内部実装
+    （`pyo3-polars`の`get_columns`呼び出し）が漏れた`AttributeError`ではなく
+    `ValidationError`になること（`test_ols_validation.py`と同じ検証）。
+    """
+    bad = pd.DataFrame({"y": [0.0, 1.0, 2.0], "x1": [1.0, 2.0, 3.0]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME,
+            param_name="data",
+            type_name=msgs.fully_qualified_type_name(bad),
+        ),
+    ):
+        Tobit(bad, y="y", x=["x1"]).fit()
+
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    bad_new_data = pd.DataFrame({"x1": [1.0], "x2": [0.5]})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME,
+            param_name="new_data",
+            type_name=msgs.fully_qualified_type_name(bad_new_data),
+        ),
+    ):
+        res.predict(new_data=bad_new_data)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME,
+            param_name="new_data",
+            type_name=msgs.fully_qualified_type_name(bad_new_data),
+        ),
+    ):
+        res.augment(new_data=bad_new_data)
+
+
 def test_null_values_raise():
     df = pl.DataFrame({"y": [0.0, None, 1.0], "x1": [1.0, 2.0, 3.0]})
     with pytest.raises(
@@ -639,13 +683,15 @@ def test_non_finite_values_raise(bad):
 
 
 def test_non_numeric_dtype_raises():
-    """文字列を数値キャストするとnullになるため`COLUMN_HAS_MISSING_VALUES`経路
-    になる（`test_ols_validation.py::test_non_numeric_dtype_raises`参照）。
+    """文字列列は、dtypeの時点で`ValidationError`
+    （`test_ols_validation.py::test_non_numeric_dtype_raises`参照）。
     """
     df = pl.DataFrame({"y": ["a", "b", "c"], "x1": [1.0, 2.0, 3.0]})
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=3),
+        match=escaped(
+            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="y", dtype="String"
+        ),
     ):
         Tobit(df, y="y", x=["x1"]).fit()
 
@@ -667,20 +713,20 @@ def test_unknown_cov_type_raises(censored_dataset, cov_type):
         ).fit()
 
 
-@pytest.mark.parametrize("method", ["bogus", ""])
-def test_unknown_method_raises(censored_dataset, method):
-    """未知の`method`（空文字列を含む）は`ValidationError`
+@pytest.mark.parametrize("solver", ["bogus", ""])
+def test_unknown_solver_raises(censored_dataset, solver):
+    """未知の`solver`（空文字列を含む）は`ValidationError`
     （テスト網羅性候補・項目46）。
     """
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_METHOD_NONLINEAR, other=method),
+        match=escaped(msgs.UNKNOWN_METHOD_NONLINEAR, other=solver),
     ):
         Tobit(
             censored_dataset,
             y="y",
             x=["x1", "x2"],
-            options=TobitOptions(method=method),
+            options=TobitOptions(solver=solver),
         ).fit()
 
 
@@ -780,7 +826,7 @@ def test_y_out_of_censoring_bounds_raises():
 
 def test_no_uncensored_observations_raises():
     """非打ち切り観測が1件も無い（全観測が`lower`ちょうど）場合`ValidationError`
-    （engine側の`NoUncensoredObservations`、Issue #223）。
+    （engine側の`NoUncensoredObservations`）。
     """
     df = pl.DataFrame({"y": [0.0, 0.0, 0.0, 0.0], "x1": [1.0, 2.0, 3.0, 4.0]})
     with pytest.raises(
@@ -818,9 +864,9 @@ def test_perfect_multicollinearity_raises_computation_error():
     （`tobit_perfect_multicollinearity.csv`、`x3 = 2·x1 + 3·x2`）を使う
     （テスト網羅性レビュー 観点3。旧テストは inline n=5 データだった）。
 
-    Logit とは異なり、Tobit は `ols_initial_params` の QR 検証が `method` に
+    Logit とは異なり、Tobit は `ols_initial_params` の QR 検証が `solver` に
     関わらず常に最初に実行されるため、完全な多重共線性は常にこの経路で検出される
-    （`method` を parametrize する必要が無い、`docs/spec/tobit-spec.md` 3.2節参照）。
+    （`solver` を parametrize する必要が無い、`docs/spec/tobit-spec.md` 3.2節参照）。
     """
     df = pl.read_csv(DATA_DIR / "tobit_perfect_multicollinearity.csv")
     lower, upper = _TOBIT_CENSORING_BOUNDS["perfect_multicollinearity"]
@@ -865,18 +911,18 @@ def test_non_convergence_raises_computation_error_with_tiny_max_iter(
         ).fit()
 
 
-@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
-def test_large_true_coefficient_dgp_converges_and_recovers_truth(method):
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_large_true_coefficient_dgp_converges_and_recovers_truth(solver):
     """大きい真の係数（`x1`の係数=100）でもノイズがあれば識別可能で、真値を回復する
-    （Issue #286の回帰テスト）。
+    回帰テスト。
 
-    Issue #286（`y`のスケール由来の分離ヒューリスティック誤発火）の修正前は、この
+    `y`のスケール由来の分離ヒューリスティック誤発火の修正前は、この
     DGP（`y* = 100·x1 + 0.5·x2 + N(0,1)`、n=200、左打ち切り約51%）が`run_solver`
     共有の`SeparationSuspected`（標準化パラメータノルム基準、Logit/Probitの
     `y∈{0,1}`で較正）に誤って引っかかり`ComputationError`になっていた。`y`の
     標準偏差が約65あり標準化パラメータノルムが閾値100を超えていたのが原因で、
-    真の分離ではなかった。#286（`TobitScaling`導入）と#288（Tobitでは
-    `SeparationNormCheck.Disabled`）を経て、Newton/BFGS/LBFGSのいずれでも
+    真の分離ではなかった。`TobitScaling`導入と、Tobitでは
+    `SeparationNormCheck.Disabled`とする対応を経て、Newton/BFGS/LBFGSのいずれでも
     `x1≈100`・`σ≈1`（真値`β1=100`, `σ=1`）で収束する。
 
     真の（準完全）分離が`ComputationError`になることは
@@ -893,10 +939,10 @@ def test_large_true_coefficient_dgp_converges_and_recovers_truth(method):
     df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
 
     res = Tobit(
-        df, y="y", x=["x1", "x2"], options=TobitOptions(method=method)
+        df, y="y", x=["x1", "x2"], options=TobitOptions(solver=solver)
     ).fit()
 
-    # これはリファレンス数値照合ではなく#286の回帰テスト。許容幅は「真値を回復し、
+    # これはリファレンス数値照合ではなく分離誤検知に対する回帰テスト。許容幅は「真値を回復し、
     # かつσ→0退化に倒れていない」ことだけを担保する緩いバンド。実測は3メソッドとも
     # x1≈99.98・x2≈0.5・const≈0・σ≈1.02（相互のズレは1e-3未満）だが、将来の
     # ソルバー変更でのメソッド間変動を吸収するためマージンを広く取る。σの下限0.5は
@@ -908,8 +954,8 @@ def test_large_true_coefficient_dgp_converges_and_recovers_truth(method):
     assert 0.5 < res.sigma < 2.0
 
 
-@pytest.mark.parametrize("method", ["newton", "bfgs", "lbfgs"])
-def test_true_separation_noise_free_dgp_raises_computation_error(method):
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_true_separation_noise_free_dgp_raises_computation_error(solver):
     """ノイズを除いた完全分離DGP（`y* = 100·x1 + 0.5·x2`）は`ComputationError`。
 
     Tobitの「真の」分離は、Logit/Probitのように係数が±∞へ発散するのではなく
@@ -917,12 +963,12 @@ def test_true_separation_noise_free_dgp_raises_computation_error(method):
     BFGS/L-BFGSも`ComputationError`になる（変種は問わない）。`max_iter`を
     35→2000に増やしてもNewton/BFGSは`NonConvergence`のまま。標準化パラメータ
     ノルム基準の`SeparationSuspected`はTobitでは無効
-    （Issue #288、`run_solver`に`SeparationNormCheck.Disabled`）。
+    （`run_solver`に`SeparationNormCheck.Disabled`）。
 
     **全件打ち切りとの棲み分け**: 非打ち切り観測が1件も無い（全観測が境界値
     ちょうど）ケースは`fit()`冒頭の`validate_has_uncensored_observations`が
     `ValidationError`（`NoUncensoredObservations`）で先に弾く
-    （`test_no_uncensored_observations_raises`、Issue #223）。本ケースは
+    （`test_no_uncensored_observations_raises`）。本ケースは
     非打ち切り観測が存在するため、そのバリデーションは通過し、最適化の
     非収束＝`ComputationError`（`ValueError`系ではない）として現れる。
     """
@@ -935,7 +981,7 @@ def test_true_separation_noise_free_dgp_raises_computation_error(method):
 
     with pytest.raises(ComputationError):
         Tobit(
-            df, y="y", x=["x1", "x2"], options=TobitOptions(method=method)
+            df, y="y", x=["x1", "x2"], options=TobitOptions(solver=solver)
         ).fit()
 
 
@@ -943,14 +989,14 @@ def test_quasi_separation_tiny_noise_converges_to_true_values():
     """境界レジーム（軽度の準完全分離＋ごく小さいノイズ）が正しく収束することを
     固定する。
 
-    以前（Issue #288当時）は、この境界レジームでNewtonが`max_iter`まで収束せず、
+    以前は、この境界レジームでNewtonが`max_iter`まで収束せず、
     `raise_on_non_convergence=False`のときのみ`converged=False`のまま真値近傍の
     粗い精度のパラメータを返す（既定の`raise_on_non_convergence=True`では
     `ComputationError`）という「中間レジーム」として扱っていた
-    （rust-reviewer指摘、Issue #288）。
+    （rust-reviewer指摘）。
 
     この後、`censored_contribution`（`engine/src/nonlinear/tobit.rs`）に
-    Probitの`ProbitProblem`と同型のバグ（Issue #316）——Hessian項`A(u)=λ(u+λ)`の
+    Probitの`ProbitProblem`と同型のバグ——Hessian項`A(u)=λ(u+λ)`の
     計算でクランプ済み`λ`と生の`zeta`を混在させ、`|zeta|>U_CLAMP`の領域で
     `A(u)`が負になりHessianの正定値性が崩れる——が見つかり修正された。この
     境界レジーム（打ち切り境界付近の`zeta`が`U_CLAMP`を超えやすい）はまさに
@@ -979,10 +1025,10 @@ def test_quasi_separation_tiny_noise_converges_to_true_values():
 
 def test_many_regressors_no_false_separation():
     """説明変数を15本に増やしても、健全なDGPで偽の`SeparationSuspected`無しに
-    収束する（Issue #288）。
+    収束する。
 
     `SeparationNormCheck.Disabled`採用の根拠の一つが「多変量モデルでは
-    標準化パラメータノルムが`√k`オーダーで増え、#286型の偽陽性が再発しうる」
+    標準化パラメータノルムが`√k`オーダーで増え、この種の偽陽性が再発しうる」
     （Tobitでは係数由来でもノルムが増える）。Tobitは検出自体を通らないため
     ここで`ComputationError`になってはいけない。`TobitScaling`が設計行列を
     列標準化・平均センタリングしてノルムを抑える回帰ガードでもある。
@@ -1001,7 +1047,7 @@ def test_many_regressors_no_false_separation():
     res = Tobit(df, y="y", x=[f"x{j}" for j in range(k)]).fit()
 
     assert res.converged
-    # 代表的な係数が真値近傍（厳密照合はIssue #227の数値テストの領分）。
+    # 代表的な係数が真値近傍（厳密照合は数値テストの領分）。
     assert abs(res.params["x0"] - 1.0) < 0.5
     assert abs(res.params["x1"] - (-0.7)) < 0.5
     assert 1.0 < res.sigma < 2.0
@@ -1009,12 +1055,13 @@ def test_many_regressors_no_false_separation():
 
 def test_mroz_hours_raw_scale_converges_without_false_separation():
     """実データ（Wooldridge mroz `hours`、生スケール）で偽の`SeparationSuspected`
-    無しに収束する（Issue #286の実データ回帰、#288で無効化を確定）。
+    無しに収束する（分離ヒューリスティック誤発火の実データ回帰、
+    `SeparationNormCheck.Disabled`で無効化を確定）。
 
     `hours`（0〜4950、左打ち切り約43%）を Example 17.2 の RHS 7変数で推定する。
-    `y`の標準偏差が大きく（σ̂≈1122）、#286修正前は標準化パラメータノルムが
+    `y`の標準偏差が大きく（σ̂≈1122）、修正前は標準化パラメータノルムが
     閾値100を超え`ComputationError`になっていた。R `AER::tobit`（survreg）との
-    厳密な数値照合はIssue #227の別テストの領分。ここでは「生スケールでも
+    厳密な数値照合は別テストの領分。ここでは「生スケールでも
     収束し、教科書的な係数（`educ`≈80）を返す」ことのみ確認する。
     """
     from _constants import MROZ_X
@@ -1040,10 +1087,10 @@ def test_raise_on_non_convergence_false_returns_result_without_raising(
 ):
     """`raise_on_non_convergence=False`だと未収束でも例外を投げず、
     `converged=False`の`Results`を返す。`cov_type`は`classical`以外
-    （`opg`/`hc0`/`hc1`/`cluster`）も検証する（test-coverage-candidates.md
-    項目4、`_binary_choice_checks.py`のLogit/Probit版と同じ懸念——打ち切り点
-    でのHessian/スコア評価はcov_typeの分岐によって経由する行列演算が異なる
-    ため、想定外の例外を投げず標準誤差が有限値であることまで確認する）。
+    （`opg`/`hc0`/`hc1`/`cluster`）も検証する（`_binary_choice_checks.py`の
+    Logit/Probit版と同じ懸念——打ち切り点でのHessian/スコア評価はcov_typeの
+    分岐によって経由する行列演算が異なるため、想定外の例外を投げず標準誤差が
+    有限値であることまで確認する）。
     """
     kwargs = {
         "max_iter": 1,
@@ -1051,7 +1098,7 @@ def test_raise_on_non_convergence_false_returns_result_without_raising(
         "cov_type": cov_type,
     }
     if cov_type == "cluster":
-        kwargs["cluster_col"] = "cluster"
+        kwargs["cluster"] = "cluster"
     res = Tobit(
         censored_dataset,
         y="y",
@@ -1098,7 +1145,7 @@ def test_cov_type_label(censored_dataset):
         censored_dataset,
         y="y",
         x=["x1", "x2"],
-        options=TobitOptions(cov_type="cluster", cluster_col="cluster"),
+        options=TobitOptions(cov_type="cluster", cluster="cluster"),
     ).fit()
     assert res.cov_type == "cluster"
 
@@ -1113,35 +1160,27 @@ def test_cov_type_label(censored_dataset):
         ("HC0", "hc0"),
         ("Hc1", "hc1"),
         ("CLUSTER", "cluster"),
-        ("nonrobust", "nonrobust"),
-        ("NONROBUST", "nonrobust"),
     ],
 )
 def test_cov_type_is_case_insensitive(
     censored_dataset, cov_type, expected_label
 ):
-    kwargs = {"cluster_col": "cluster"} if cov_type == "CLUSTER" else {}
+    kwargs = {"cluster": "cluster"} if cov_type == "CLUSTER" else {}
     options = TobitOptions(cov_type=cov_type, **kwargs)
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"], options=options).fit()
     assert res.cov_type == expected_label
 
 
 @pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
-def test_nonrobust_is_alias_for_classical(censored_dataset, cov_type):
-    res = Tobit(
-        censored_dataset,
-        y="y",
-        x=["x1", "x2"],
-        options=TobitOptions(cov_type=cov_type),
-    ).fit()
-    classical_res = Tobit(
-        censored_dataset,
-        y="y",
-        x=["x1", "x2"],
-        options=TobitOptions(cov_type="classical"),
-    ).fit()
-    for name in res.param_names:
-        assert res.std_errors[name] == classical_res.std_errors[name], name
+def test_nonrobust_is_rejected(censored_dataset, cov_type):
+    """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
+    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
+        Tobit(
+            censored_dataset,
+            y="y",
+            x=["x1", "x2"],
+            options=TobitOptions(cov_type=cov_type),
+        ).fit()
 
 
 def test_cluster_cov_type_requires_at_least_two_groups():
@@ -1159,7 +1198,7 @@ def test_cluster_cov_type_requires_at_least_two_groups():
             df,
             y="y",
             x=["x1"],
-            options=TobitOptions(cov_type="cluster", cluster_col="cluster"),
+            options=TobitOptions(cov_type="cluster", cluster="cluster"),
         ).fit()
 
 
@@ -1167,11 +1206,11 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
     censored_dataset,
 ):
     """クラスター数G≤傾き係数の数q（ここで`G=2 == q=2`、x1/x2）は`ValidationError`
-    （engine側の`CommonError::InsufficientClustersForInference`、Issue #289 / #287）。
+    （engine側の`CommonError::InsufficientClustersForInference`）。
 
     `rank(Ŝ)≤G-1`のため全体Wald検定のq×q部分行列がG≤qで構造的に特異になる。
     従来は`wald_chi2_test`内の`ComputationError`だったが、GもqもR行列計算なしで
-    即座に判定できるため`fit()`冒頭の`ValidationError`へ前倒しした（#287のmroz
+    即座に判定できるため`fit()`冒頭の`ValidationError`へ前倒しした（mroz
     `hours`クラスターケースがこの経路。`G<q`側はOLSの同名テストで確認）。
     """
     cluster = pl.Series(
@@ -1186,15 +1225,15 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
             df,
             y="y",
             x=["x1", "x2"],
-            options=TobitOptions(cov_type="cluster", cluster_col="cluster"),
+            options=TobitOptions(cov_type="cluster", cluster="cluster"),
         ).fit()
 
 
 def test_mroz_hours_cluster_cov_type_raises_validation_error():
-    """実データでの`G <= q`境界（#287の顕在化ケース、Issue #289で解決）。
+    """実データでの`G <= q`境界の顕在化ケース。
 
     Wooldridge mroz `hours` Tobit（Wooldridge Example 17.2、RHS 7変数 → q=7）を
-    `cluster_col="city"`（都市部居住ダミー、G=2）で推定すると`G=2 <= q=7`。
+    `cluster="city"`（都市部居住ダミー、G=2）で推定すると`G=2 <= q=7`。
     `rank(Ŝ) <= G-1 = 1`のため全体Wald検定の`7×7`部分行列が構造的に特異になり、
     `fit()`冒頭のバリデーションが`ValidationError`
     （`CommonError::InsufficientClustersForInference`）で弾く。従来は
@@ -1205,7 +1244,7 @@ def test_mroz_hours_cluster_cov_type_raises_validation_error():
     from _helpers import load_wooldridge_dataset
 
     mroz = load_wooldridge_dataset("mroz")
-    options = TobitOptions(cov_type="cluster", cluster_col="city", lower=0.0)
+    options = TobitOptions(cov_type="cluster", cluster="city", lower=0.0)
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -1216,9 +1255,8 @@ def test_mroz_hours_cluster_cov_type_raises_validation_error():
 
 
 def test_cluster_without_col_raises(censored_dataset):
-    """`cov_type="cluster"`なのに`cluster_col`未指定の場合`ValidationError`
-    （OLS/WLS/IV/Logit/Probitと同じ検証、共通化された経路。
-    test-coverage-candidates.md項目5）。
+    """`cov_type="cluster"`なのに`cluster`未指定の場合`ValidationError`
+    （OLS/WLS/IV/Logit/Probitと同じ検証、共通化された経路）。
     """
     options = TobitOptions(cov_type="cluster")
     with pytest.raises(
@@ -1227,8 +1265,8 @@ def test_cluster_without_col_raises(censored_dataset):
         Tobit(censored_dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
-def test_cluster_col_nonexistent_column_raises(censored_dataset):
-    options = TobitOptions(cov_type="cluster", cluster_col="does_not_exist")
+def test_cluster_nonexistent_column_raises(censored_dataset):
+    options = TobitOptions(cov_type="cluster", cluster="does_not_exist")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
@@ -1236,15 +1274,51 @@ def test_cluster_col_nonexistent_column_raises(censored_dataset):
         Tobit(censored_dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
-def test_cluster_col_with_null_raises(censored_dataset):
-    """`cluster_col` に null（欠損）が含まれる場合 `ValidationError`
+def test_cluster_with_null_raises(censored_dataset):
+    """`cluster` に null（欠損）が含まれる場合 `ValidationError`
     （`extract_group_key_column` の null チェック、テスト網羅性レビュー 観点5）。"""
     n = censored_dataset.height
     groups = [None] + [str(i % 5) for i in range(n - 1)]
     df = censored_dataset.with_columns(pl.Series("grp", groups, dtype=pl.Utf8))
-    options = TobitOptions(cov_type="cluster", cluster_col="grp")
+    options = TobitOptions(cov_type="cluster", cluster="grp")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name="grp"),
     ):
         Tobit(df, y="y", x=["x1", "x2"], options=options).fit()
+
+
+def test_predict_augment_take_new_data_as_first_positional_arg(
+    censored_dataset,
+):
+    """`predict`/`augment`の第1引数が`new_data`であること（他手法と同じ
+    `res.predict(new_df)`の書き方がそのまま通る）。
+    """
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
+
+    assert res.predict(new_data) == res.predict(new_data=new_data)
+    augmented = res.augment(new_data)
+    assert augmented.height == 2
+    assert "predicted_expected_observed" in augmented.columns
+
+
+@pytest.mark.parametrize("cov_type", ["classical", "opg", "hc0", "hc1"])
+def test_cluster_unused_by_cov_type_raises(censored_dataset, cov_type):
+    """`cov_type="cluster"`以外で`cluster`が指定されたら黙って無視せず
+    `ValidationError`。
+    """
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.UNUSED_OPTION,
+            option="cluster",
+            condition='cov_type="cluster"',
+        ),
+    ):
+        Tobit(
+            censored_dataset,
+            y="y",
+            x=["x1", "x2"],
+            options=TobitOptions(cov_type=cov_type, cluster="cluster"),
+        ).fit()

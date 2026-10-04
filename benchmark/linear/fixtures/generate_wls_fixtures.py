@@ -56,10 +56,9 @@ NUMERIC_SCENARIOS = [
     # n=k+1（自由度1ちょうど）の成功パス（OLSの同種ケース相当）。
     "baseline_df1",
     # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス
-    # （OLSの同種ケース相当、test-coverage-candidates.md項目2）。
+    # （OLSの同種ケース相当）。
     "many_regressors",
-    # x1の5%を外れ値に置き換えた成功パス（OLSの同種ケース相当、
-    # test-coverage-candidates.md項目67）。
+    # x1の5%を外れ値に置き換えた成功パス（OLSの同種ケース相当）。
     "outlier_regressor",
 ]
 
@@ -69,8 +68,28 @@ COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
 
 # 401ksubs（クロスセクションデータ）ではHACは時系列順が無いため対象外
 # （OLSのwage1/gpa2実データcrosscheckと同じくHC0-3のみを対象にする）。
-# クラスターはage分位ビン（_run_401ksubs_caseのcluster_col="age_bin"）で別途追加。
+# クラスターはage分位ビン（_run_401ksubs_caseのcluster="age_bin"）で別途追加。
 WOOLDRIDGE_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
+
+# クラスターロバスト共分散Ŝ=(X'X)⁻¹(Σ_g X_g'e_ge_g'X_g)(X'X)⁻¹は(X'X)⁻¹を他の
+# cov_type（classical/HC0-3/HAC）と共有するが、この(X'X)⁻¹自体が悪条件・
+# 多重共線性シナリオでは数値的に不安定になりうる（他のcov_typeでは
+# COV_TYPES経由で全シナリオ検証済みだが、クラスターは従来baselineのみ
+# だったため、この組み合わせが未検証だった。OLS側の横展開）。
+# 均等な疑似グループ（行番号%10）1パターンのみ追加確認する（グルーピング
+# パターン自体の網羅性はbaselineシナリオで既に検証済みのため重複させない）。
+CLUSTER_ILL_CONDITIONED_SCENARIOS = [
+    "high_condition_number",
+    "moderate_multicollinearity",
+]
+
+# include_intercept=False・confidence_level非既定の効果は、シナリオ依存では
+# なくオプションの配線自体の動作確認が目的のため（クラスター同様、
+# testing-policy.md「テスト用データセット」3.）、baselineシナリオのみで
+# 全cov_type（COV_TYPES + cluster）と組み合わせて確認する（OLS側の横展開、
+# ユーザー確認済み）。0.95（既定）・0.99/0.80（test_wls_api.pyの幅の単調性
+# テストで使用済み）とは異なる値として0.90を選ぶ。
+CONFIDENCE_LEVEL_NON_DEFAULT = 0.90
 
 
 def build_fixtures() -> dict:
@@ -111,7 +130,7 @@ def build_fixtures() -> dict:
                 "ComputationError）。",
                 k1=True,
             )
-            # `weight`と同じ列を`x`にも含める成功パス（Issue #277）。
+            # `weight`と同じ列を`x`にも含める成功パス。
             # 列名の重複が許容されることの数値的な確認が目的で、cov_type間の
             # 挙動差を検証する趣旨ではないためclassicalのみ（cluster系と同じ方針）。
             fixtures[scenario]["weight_in_x"] = run(
@@ -122,12 +141,62 @@ def build_fixtures() -> dict:
                 weight_col="weight",
             )
 
+            # include_intercept=False（切片なし）。全cov_type（COV_TYPES +
+            # cluster）と組み合わせて確認する（OLS側の横展開）。
+            fixtures[scenario]["no_intercept"] = {
+                cov_type: run(
+                    dataset_source="synthetic",
+                    dataset=scenario,
+                    formula=None,
+                    cov_type=cov_type,
+                    weight_col="weight",
+                    include_intercept=False,
+                )
+                for cov_type in COV_TYPES
+            }
+            fixtures[scenario]["no_intercept"]["cluster"] = _run_cluster_case(
+                include_intercept=False,
+                note="include_intercept=False（切片なし）×クラスターロバストSEの"
+                "組み合わせ確認用。均等な疑似グループ（行番号%10）のみ"
+                "（OLS側の横展開）。",
+            )
+
+            # confidence_level非既定（0.95以外）。全cov_type（COV_TYPES +
+            # cluster）と組み合わせて確認する（OLS側の横展開）。
+            fixtures[scenario]["confidence_level"] = {
+                cov_type: run(
+                    dataset_source="synthetic",
+                    dataset=scenario,
+                    formula=None,
+                    cov_type=cov_type,
+                    weight_col="weight",
+                    confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+                )
+                for cov_type in COV_TYPES
+            }
+            fixtures[scenario]["confidence_level"]["cluster"] = (
+                _run_cluster_case(
+                    confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+                    note=f"confidence_level={CONFIDENCE_LEVEL_NON_DEFAULT}"
+                    "（既定0.95以外）×クラスターロバストSEの組み合わせ確認用。"
+                    "均等な疑似グループ（行番号%10）のみ（OLS側の横展開）。",
+                )
+            )
+        elif scenario in CLUSTER_ILL_CONDITIONED_SCENARIOS:
+            fixtures[scenario]["cluster"] = _run_cluster_case(
+                scenario=scenario,
+                note=f"悪条件・多重共線性シナリオ（{scenario}）とクラスターロバストSEの"
+                "組み合わせでの数値的頑健性確認用。均等な疑似グループ（行番号%10）のみ"
+                "（グルーピングパターン自体の網羅性はbaselineシナリオで確認済み、"
+                "OLS側の横展開）。",
+            )
+
     fixtures["401ksubs"] = {
         cov_type: _run_401ksubs_case(cov_type)
         for cov_type in WOOLDRIDGE_COV_TYPES
     }
     fixtures["401ksubs"]["cluster"] = _run_401ksubs_case(
-        "cluster", cluster_col="age_bin"
+        "cluster", cluster="age_bin"
     )
 
     fixtures["_meta"] = {
@@ -147,18 +216,17 @@ def build_fixtures() -> dict:
             "401ksubsの回帰式・重み定義はdocs/spec/wls-spec.md参照。"
             "401ksubsはclassical/HC0-3（HACは時系列順が無いため対象外）と"
             "クラスター（ageの分位ビン、_add_age_bin参照）をcov_type別に持つ。"
-            "baseline.weight_in_xは、weightと同じ列をxにも含める成功パス"
-            "（Issue #277）。classicalのみ（cov_type間の挙動差の検証が"
+            "baseline.weight_in_xは、weightと同じ列をxにも含める成功パス。"
+            "classicalのみ（cov_type間の挙動差の検証が"
             "目的ではないため）。"
             "many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ"
-            "高次元シナリオ（OLSの同種ケース相当、test-coverage-candidates.md"
-            "項目2）。outlier_regressorはx1の5%を外れ値に置き換えた成功パス"
-            "（OLSの同種ケース相当、test-coverage-candidates.md項目67）。"
+            "高次元シナリオ（OLSの同種ケース相当）。"
+            "outlier_regressorはx1の5%を外れ値に置き換えた成功パス"
+            "（OLSの同種ケース相当）。"
             "クラスター系（cluster/cluster_imbalanced/cluster_g2）は従来coef/se"
-            "のみだったが、t_stats/p_values/conf_int/r_squared等のフル統計量まで"
+            "のみだったが、test_stats/p_values/conf_int/r_squared等のフル統計量まで"
             "検証範囲を広げた（_run_cluster_caseがextract_full_fit_statsを"
-            "使うよう変更、OLS側項目28対応の横展開、"
-            "test-coverage-candidates.md項目72）。あわせて_run_cluster_caseに"
+            "使うよう変更、OLS側の横展開）。あわせて_run_cluster_caseに"
             "use_t=Trueが指定されていなかった不備を修正（cluster時に既定の"
             "正規分布ではなく自由度G-1のt分布を使う本プロジェクトの方針"
             "〔docs/spec/ols-spec.md「標準誤差」〕に合わせた。coef/seは"
@@ -166,6 +234,19 @@ def build_fixtures() -> dict:
             "401ksubsも同じくextract_full_fit_statsを使うよう変更（元々"
             "use_t=Trueは指定済みで、フル統計量の手書き重複を解消したのみ、"
             "数値自体に変更なし）。"
+            "high_condition_number/moderate_multicollinearityにもcluster"
+            "エントリを追加（従来クラスター系はbaselineシナリオのみで、"
+            "悪条件・多重共線性シナリオとの組み合わせが未検証だった。"
+            "均等な疑似グループ（行番号%10）のみ。OLS側の横展開）。"
+            "baseline.no_interceptはinclude_intercept=False（切片なし）を"
+            "COV_TYPES全種＋clusterと組み合わせて確認する（従来ライブ"
+            "statsmodels比較〔ad-hocデータ1パターン〕のみだったものを、"
+            "他オプションと同じ凍結フィクスチャに統合。OLS側の横展開）。"
+            "baseline.confidence_levelはconfidence_level="
+            f"{CONFIDENCE_LEVEL_NON_DEFAULT}（既定0.95以外）をCOV_TYPES全種＋"
+            "clusterと組み合わせて確認する（従来相対比較〔幅の広さの"
+            "単調性のみ〕だったものを、具体的な数値の正しさまで検証する"
+            "よう拡張。OLS側の横展開）。"
         ),
     }
     return fixtures
@@ -175,6 +256,9 @@ def _run_cluster_case(
     groups: list | None = None,
     note: str = "決め打ちの疑似グループ（行番号%10）。統計的な意味はなく、実装の動作確認用。",
     k1: bool = False,
+    scenario: str = "baseline",
+    include_intercept: bool = True,
+    confidence_level: float = 0.95,
 ) -> dict:
     """クラスターロバストSE確認用に、疑似グループを付けて実行する。
 
@@ -182,10 +266,20 @@ def _run_cluster_case(
         groups: 各行のグループラベル。Noneなら既定（行番号%10、10均等グループ）。
         note: フィクスチャの`_meta.note`に記録する説明文。
         k1: TrueならG=2境界ケース用の説明変数1個版（synthetic_baseline_k1.csv）を使う。
+        scenario: 対象シナリオ名（`k1=True`のときは無視、常に
+            `synthetic_baseline_k1.csv`を使う）。悪条件・多重共線性シナリオ
+            とクラスターの組み合わせ確認用（OLS側の横展開）。
+        include_intercept: Falseならformulaに"- 1"を付けて切片を落とす
+            （`run()`と同じ方式。include_intercept=False×クラスターの
+            組み合わせ確認用、OLS側の横展開）。
+        confidence_level: 信頼区間の信頼水準（既定0.95以外×クラスターの
+            組み合わせ確認用、OLS側の横展開）。
     """
     import statsmodels.formula.api as smf
 
-    filename = "synthetic_baseline_k1.csv" if k1 else "synthetic_baseline.csv"
+    filename = (
+        "synthetic_baseline_k1.csv" if k1 else f"synthetic_{scenario}.csv"
+    )
     df = pl.read_csv(DATA_DIR / filename)
     pandas_df = df.to_pandas()
     pandas_df["_group"] = (
@@ -196,32 +290,34 @@ def _run_cluster_case(
 
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
     formula = "y ~ " + " + ".join(x_cols)
+    fit_formula = formula if include_intercept else f"{formula} - 1"
 
     # use_t=Trueが無いと既定で正規分布を使ってしまい、本プロジェクトのt分布
     # 統一方針・cluster時の自由度G-1（docs/spec/ols-spec.md「標準誤差」）と
-    # 一致しなくなる（OLS側で発覚したのと同型の不備、
-    # test-coverage-candidates.md項目72）。
+    # 一致しなくなる（OLS側で発覚したのと同型の不備）。
     model = smf.wls(
-        formula=formula, data=pandas_df, weights=pandas_df["weight"]
+        formula=fit_formula, data=pandas_df, weights=pandas_df["weight"]
     ).fit(
         cov_type="cluster",
         cov_kwds={"groups": pandas_df["_group"]},
         use_t=True,
     )
 
-    result = extract_full_fit_stats(model)
+    result = extract_full_fit_stats(model, confidence_level)
     result["_meta"] = {
         "reference": "statsmodels",
         "statsmodels_version": statsmodels.__version__,
         "generated_at": datetime.now(UTC).isoformat(),
         "note": note,
         "formula": formula,
+        "include_intercept": include_intercept,
+        "confidence_level": confidence_level,
         "weight_col": "weight",
     }
     return result
 
 
-def _run_401ksubs_case(cov_type: str, cluster_col: str | None = None) -> dict:
+def _run_401ksubs_case(cov_type: str, cluster: str | None = None) -> dict:
     """実データ（401ksubs、fsize==1）でのWLSベンチマーク。
 
     回帰式・重み定義はdocs/spec/wls-spec.md「テスト」で確定した内容（Wooldridge Example 8.5・8.6と同じ変数構成、
@@ -230,7 +326,7 @@ def _run_401ksubs_case(cov_type: str, cluster_col: str | None = None) -> dict:
     Args:
         cov_type: "classical"/"hc0"-"hc3"/"cluster"（HACは時系列順の無い
             クロスセクションデータのため対象外、OLSのwage1/gpa2と同じ方針）。
-        cluster_col: cov_type="cluster"のときのグループ列名
+        cluster: cov_type="cluster"のときのグループ列名
             （`age_bin`、地域等の自然なカテゴリ列が無いため年齢の分位ビンで代用。
             `_add_age_bin`参照）。
     """
@@ -249,7 +345,7 @@ def _run_401ksubs_case(cov_type: str, cluster_col: str | None = None) -> dict:
     )
     fit_kwargs: dict = {"cov_type": sm_cov_type, "use_t": True}
     if sm_cov_type == "cluster":
-        fit_kwargs["cov_kwds"] = {"groups": pandas_df[cluster_col]}
+        fit_kwargs["cov_kwds"] = {"groups": pandas_df[cluster]}
 
     model = smf.wls(
         formula=formula, data=pandas_df, weights=pandas_df["inv_inc"]

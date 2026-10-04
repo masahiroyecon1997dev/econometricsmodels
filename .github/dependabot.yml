@@ -30,3 +30,23 @@ updates:
       interval: "weekly"
     cooldown:
       default-days: 10
+
+  # .devcontainer/Dockerfileのベースイメージ（python:3.14-slim-bookworm）。
+  # Rパッケージ・R本体はDependabot非対応のため別途check_r_updates.ymlで確認する。
+  - package-ecosystem: "docker"
+    directory: "/.devcontainer"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 10
+
+  # .devcontainer/devcontainer.jsonのfeature（github-cli・claude-code）と
+  # devcontainer-lock.json。ルートを指定すれば.devcontainer/を探索する。
+  - package-ecosystem: "devcontainers"
+    directory: "/"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 10

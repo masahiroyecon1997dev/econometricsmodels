@@ -10,7 +10,7 @@ settings (CLAUDE.md section 2, `.claude/rules/python-style.md`
 
 `IVOptions` is re-exported as-is from `_lib` (not redefined as a
 separate class; same policy as `OLSOptions`/`LogitOptions`, see
-`docs/spec/ols-spec.md`, "API引数"). `IVOptions.method` selects
+`docs/spec/ols-spec.md`, "API引数"). `IVOptions.estimator` selects
 `"2sls"` (default) or `"gmm"` — a single `IV`/`IVResults` pair serves
 both methods (`docs/spec/iv-spec.md` section 1.2).
 
@@ -19,6 +19,8 @@ the `OLSResults`/`LogitResults` precedent).
 """
 
 from __future__ import annotations
+
+from typing import Literal
 
 import polars as pl
 
@@ -45,7 +47,7 @@ class IV:
             (must not overlap `x_exog`; see
             `docs/spec/iv-spec.md` section 1.1).
         options: Estimation options. Defaults to `IVOptions()`
-            (`method="2sls"`, classical, with intercept,
+            (`estimator="2sls"`, classical, with intercept,
             confidence_level=0.95) when omitted.
 
     Examples:
@@ -87,13 +89,20 @@ class IV:
             The estimation results.
 
         Raises:
+            TypeError: An argument has the wrong type (for example
+                `x` is a string instead of a list of column names). A
+                builtin exception, not a `ValidationError`.
             ValidationError: The input or options are invalid (a
                 column is missing, contains missing values or
                 NaN/infinity, `y`/`x_exog`/`x_endog`/`instruments`
                 overlap, `x_endog` or `instruments` is empty,
                 insufficient observations, `confidence_level` out of
-                range, an unknown `cov_type` or (`method="gmm"` only)
-                `weight_type` string, or too few instruments for
+                range, an unknown `cov_type` or (`estimator="gmm"` only)
+                `gmm_type`/`gmm_weight_type` string, an option the
+                chosen `estimator`/`gmm_type`/`cov_type` does not
+                use (e.g. `cluster` without `cov_type="cluster"`,
+                `gmm_max_iter` with a `gmm_type` other than
+                `"iterated"`), or too few instruments for
                 identification). A subclass of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. a singular first- or second-stage
@@ -150,16 +159,27 @@ class IVResults:
         return dict(zip(self._raw.param_names, self._raw.std_errors))
 
     @property
-    def stats(self) -> dict[str, float]:
+    def test_stats(self) -> dict[str, float]:
         """Coefficient name to test statistic.
 
-        t-statistic for `method="2sls"`, z-statistic for
-        `method="gmm"` — named generically (not `t_stats`/`z_stats`)
-        because `IVResults` is shared by both methods (mirrors the
-        `_lib.IVResult.stats` naming, `docs/spec/iv-spec.md`
-        section 2).
+        t-statistic for `estimator="2sls"`, z-statistic for
+        `estimator="gmm"`; `stat_dist` tells which.
         """
-        return dict(zip(self._raw.param_names, self._raw.stats))
+        return dict(zip(self._raw.param_names, self._raw.test_stats))
+
+    @property
+    def stat_dist(self) -> Literal["t", "normal"]:
+        """Distribution of `test_stats`: `"t"` for `estimator="2sls"`,
+        `"normal"` for `estimator="gmm"`."""
+        return self._raw.stat_dist
+
+    @property
+    def stat_df(self) -> int | None:
+        """Degrees of freedom of the t distribution behind `test_stats`,
+        or `None` when `stat_dist` is `"normal"`. May differ from
+        `df_resid` (e.g. cluster-robust inference uses `G - 1`), so use
+        this to recompute p-values from `test_stats`."""
+        return self._raw.stat_df
 
     @property
     def p_values(self) -> dict[str, float]:
@@ -208,20 +228,22 @@ class IVResults:
 
     @property
     def converged(self) -> bool:
-        """Whether GMM iteration converged (`method="gmm"` only).
+        """Whether GMM iteration converged (`estimator="gmm"` only).
 
-        Only meaningful when `IVOptions.gmm_convergence` is set (fixed
-        iteration count otherwise trivially satisfies convergence).
-        Always `True` for `method="2sls"` (2SLS is a closed-form,
-        non-iterative estimator).
+        Only meaningful for `gmm_type="iterated"`; always `True` for
+        `"one_step"`/`"two_step"` (which never check convergence) and
+        for `estimator="2sls"` (2SLS is a closed-form, non-iterative
+        estimator).
         """
         return self._raw.converged
 
     @property
-    def n_iterations(self) -> int:
-        """Number of GMM iterations actually run (`method="gmm"`
-        only). Always `1` for `method="2sls"`."""
-        return self._raw.n_iterations
+    def n_iter(self) -> int:
+        """Number of GMM estimations actually run, counting the initial
+        estimate (`estimator="gmm"` only): 1 for `"one_step"`, 2 for
+        `"two_step"`, at most `gmm_max_iter` for `"iterated"`. Always
+        `1` for `estimator="2sls"`."""
+        return self._raw.n_iter
 
     @property
     def cov_type(self) -> str:
@@ -229,17 +251,36 @@ class IVResults:
         return self._raw.cov_type
 
     @property
-    def method(self) -> str:
-        """Estimation method actually used (normalized to lowercase):
-        `"2sls"` or `"gmm"`."""
-        return self._raw.method
+    def hac_lags_used(self) -> int | None:
+        """Number of HAC (Newey-West) lags actually used: the explicit
+        `hac_lags` if given, otherwise the value chosen automatically,
+        `floor(4 * (n / 100) ** (2 / 9))`. Set when `cov_type="hac"` or,
+        for `estimator="gmm"` with `gmm_type` `"two_step"` or
+        `"iterated"`, `gmm_weight_type="hac"` (both share `hac_lags`, so
+        the value is the same); `None` otherwise."""
+        return self._raw.hac_lags_used
 
     @property
-    def weight_type(self) -> str | None:
+    def estimator(self) -> str:
+        """Estimator actually used (normalized to lowercase):
+        `"2sls"` or `"gmm"`."""
+        return self._raw.estimator
+
+    @property
+    def gmm_weight_type(self) -> str | None:
         """Weight matrix actually used for GMM point estimation
-        (normalized to lowercase). Only meaningful for `method="gmm"`;
-        always `None` for `method="2sls"`, which has no such concept."""
-        return self._raw.weight_type
+        (normalized to lowercase). Only meaningful for `estimator="gmm"`;
+        always `None` for `estimator="2sls"`, which has no such concept,
+        and for `gmm_type="one_step"`, which does not use a weight
+        type."""
+        return self._raw.gmm_weight_type
+
+    @property
+    def gmm_type(self) -> str | None:
+        """GMM estimation type actually used (normalized to
+        lowercase): `"one_step"`, `"two_step"` or `"iterated"`. Always
+        `None` for `estimator="2sls"`."""
+        return self._raw.gmm_type
 
     @property
     def r_squared(self) -> float:
@@ -247,20 +288,48 @@ class IVResults:
         return self._raw.r_squared
 
     @property
-    def r_squared_adj(self) -> float:
+    def adj_r_squared(self) -> float:
         """Degrees-of-freedom-adjusted R²."""
-        return self._raw.r_squared_adj
+        return self._raw.adj_r_squared
 
     @property
-    def f_statistic(self) -> float:
-        """F-statistic (classical F-test when `cov_type="classical"`,
-        a robust Wald test otherwise)."""
-        return self._raw.f_statistic
+    def wald_statistic(self) -> float:
+        """Wald test statistic for all slope coefficients being zero.
+
+        For `estimator="2sls"` this is the F-type statistic (the Wald
+        statistic divided by the number of slope coefficients; the
+        counterpart of `OLSResults.f_statistic`, a classical F-test when
+        `cov_type="classical"`, a robust Wald test otherwise). For
+        `estimator="gmm"` it is the undivided Wald statistic, which
+        follows a chi-squared distribution. `wald_dist` tells which.
+        """
+        return self._raw.wald_statistic
 
     @property
-    def f_p_value(self) -> float:
-        """P-value of the F-statistic."""
-        return self._raw.f_p_value
+    def wald_p_value(self) -> float:
+        """P-value of `wald_statistic` (F or chi-squared, see
+        `wald_dist`)."""
+        return self._raw.wald_p_value
+
+    @property
+    def wald_dist(self) -> Literal["f", "chi2"]:
+        """Distribution of `wald_statistic`: `"f"` (F distribution) for
+        `estimator="2sls"`, `"chi2"` (chi-squared) for `estimator="gmm"`."""
+        return self._raw.wald_dist
+
+    @property
+    def wald_df_num(self) -> int | None:
+        """Numerator degrees of freedom of `wald_statistic` (the number of
+        slope coefficients; the only degrees of freedom for `"chi2"`).
+        `None` when there are no slope coefficients."""
+        return self._raw.wald_df_num
+
+    @property
+    def wald_df_denom(self) -> int | None:
+        """Denominator degrees of freedom of `wald_statistic` for `"f"`
+        (`df_resid`, or `G - 1` with cluster-robust inference). `None` for
+        `"chi2"` and when the statistic is NaN."""
+        return self._raw.wald_df_denom
 
     @property
     def weak_instrument_f_statistics(self) -> dict[str, float]:
@@ -272,15 +341,29 @@ class IVResults:
         (homoskedastic) formula regardless of `cov_type`. Not the
         same as the plain F-statistic of the corresponding regression
         in `first_stage()`, which includes `x_exog`'s contribution
-        too. Computed the same way for both `method="2sls"` and
-        `method="gmm"`; see `docs/spec/iv-spec.md` section 3.4.
+        too. Computed the same way for both `estimator="2sls"` and
+        `estimator="gmm"`; see `docs/spec/iv-spec.md` section 3.4.
         """
         return self._raw.weak_instrument_f_statistics
 
     @property
+    def weak_instrument_f_df_num(self) -> int | None:
+        """Numerator degrees of freedom of the weak-instrument F
+        statistics (the number of excluded instruments; the same for
+        every endogenous variable)."""
+        return self._raw.weak_instrument_f_df_num
+
+    @property
+    def weak_instrument_f_df_denom(self) -> int | None:
+        """Denominator degrees of freedom of the weak-instrument F
+        statistics (residual degrees of freedom of the first-stage
+        regressions; the same for every endogenous variable)."""
+        return self._raw.weak_instrument_f_df_denom
+
+    @property
     def overid_statistic(self) -> float | None:
-        """Overidentification test statistic: Sargan (`method="2sls"`)
-        or Hansen J (`method="gmm"`).
+        """Overidentification test statistic: Sargan (`estimator="2sls"`)
+        or Hansen J (`estimator="gmm"`).
 
         `None` when just-identified (`len(instruments) ==
         len(x_endog)`, degrees of freedom 0); see
@@ -295,6 +378,13 @@ class IVResults:
         Same conditions as `overid_statistic` for when this is `None`.
         """
         return self._raw.overid_p_value
+
+    @property
+    def overid_df(self) -> int | None:
+        """Degrees of freedom of the chi-squared overidentification test
+        (`len(instruments) - len(x_endog)`). `None` under the same
+        conditions as `overid_statistic`."""
+        return self._raw.overid_df
 
     @property
     def wu_hausman_statistic(self) -> float | None:
@@ -312,11 +402,24 @@ class IVResults:
         when an instrument perfectly predicts its endogenous
         variable, or there are too few observations for the extra
         residual columns) — this does not affect the validity of
-        the other results. **Always `None` for `method="gmm"`**
+        the other results. **Always `None` for `estimator="gmm"`**
         (not implemented for GMM). See
         `docs/spec/iv-spec.md` section 3.6.
         """
         return self._raw.wu_hausman_statistic
+
+    @property
+    def wu_hausman_df_num(self) -> int | None:
+        """Numerator degrees of freedom of the Wu-Hausman F test (the
+        number of endogenous variables). `None` under the same conditions
+        as `wu_hausman_statistic`."""
+        return self._raw.wu_hausman_df_num
+
+    @property
+    def wu_hausman_df_denom(self) -> int | None:
+        """Denominator degrees of freedom of the Wu-Hausman F test.
+        `None` under the same conditions as `wu_hausman_statistic`."""
+        return self._raw.wu_hausman_df_denom
 
     @property
     def wu_hausman_p_value(self) -> float | None:
@@ -336,8 +439,7 @@ class IVResults:
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are
-            `param`, `coef`, `std_err`, `stat` (see `stats` property
-            for why this is not `t_stat`/`z_stat`), `p_value`,
+            `param`, `coef`, `std_err`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
         return [
@@ -345,16 +447,16 @@ class IVResults:
                 "param": name,
                 "coef": coef,
                 "std_err": se,
-                "stat": stat,
+                "test_stat": test_stat,
                 "p_value": p,
                 "conf_lower": lower,
                 "conf_upper": upper,
             }
-            for name, coef, se, stat, p, lower, upper in zip(
+            for name, coef, se, test_stat, p, lower, upper in zip(
                 self._raw.param_names,
                 self._raw.params,
                 self._raw.std_errors,
-                self._raw.stats,
+                self._raw.test_stats,
                 self._raw.p_values,
                 self._raw.conf_lower,
                 self._raw.conf_upper,

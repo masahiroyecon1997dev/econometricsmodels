@@ -14,26 +14,37 @@ Whether the model is one-way (entity only) or two-way (entity + time) is control
 effects require a balanced panel; an unbalanced panel with `time` set raises a
 `ValidationError`. One-way fixed effects support unbalanced panels without restriction.
 
+`FEResults.n_periods` is the number of unique time periods for two-way effects and `None` for one-way.
+
 ## Standard error types
 
 `FEOptions.cov_type` defaults to `"cluster"` (clustered on `entity`) rather than `"classical"` —
 a deliberate departure from [OLS's default](../getting-started.md#switching-the-type-of-standard-error),
 following the same convention as `fixest`: panel data almost always has within-entity serial
 correlation, and defaulting to a robust-but-not-clustered type would understate it. Supported
-values are `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"`, and `"hac"` — `"hc0"` is **not**
+values are `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"`, and `"dk"` — `"hc0"` is **not**
 supported (neither `linearmodels` nor `fixest` offer it for panel/FE models).
 
-`"hac"` is not the same Newey-West estimator as OLS's: it is a **Driscoll-Kraay** panel HAC
+`"dk"` is not the same Newey-West estimator as OLS's: it is a **Driscoll-Kraay** panel HAC
 estimator (`fixest`'s `vcov="DK"`, Stata's `xtscc`), which is robust to both cross-entity and
-within-entity correlation. Its time ordering comes from `FEOptions.time` by default, or from
-`FEOptions.time_col` when set (`time_col` always takes priority, letting the fixed effects
-structure and the HAC kernel use different time granularities). `FEOptions.dk_bandwidth` sets
+within-entity correlation. `FEOptions.dk_time` is required with `"dk"`: it names the column that
+defines the time periods. It is never taken from `FEOptions.time`, which only sets the two-way
+fixed effects, so the fixed effects and the HAC kernel may use different time granularities (for
+example quarterly fixed effects with yearly periods for the kernel). `FEOptions.dk_bandwidth` sets
 the kernel bandwidth explicitly; when omitted it is chosen automatically from the number of
-unique time periods.
+unique time periods. The bandwidth actually used is reported as `FEResults.dk_bandwidth_used`
+(`None` unless `cov_type="dk"`).
+
+The small-sample corrections and the degrees of freedom of the t and F tests follow `fixest`'s
+`ssc()` defaults: `"cluster"` scales by `G/(G-1) · (n-1)/(n-K)` and uses `G - 1` degrees of
+freedom (`G` = number of clusters), `"dk"` uses `T/(T-1)` with `T` = number of time periods in
+place of `G` and `T - 1` degrees of freedom, and the other types use `df_resid`. These differ
+from `linearmodels`, which does not apply the `G/(G-1)` factor. See
+[Inference conventions](../guide/inference-conventions.md) for the full table.
 
 ## Panel R²
 
-`FEResults` reports three separate R² values instead of OLS's single `r_squared`/`r_squared_adj`
+`FEResults` reports three separate R² values instead of OLS's single `r_squared`/`adj_r_squared`
 pair, since "the" R² is not well-defined once fixed effects are involved:
 `r_squared_within` (based on the within-transformed variables), `r_squared_between` (based on
 entity-mean variables), and `r_squared_overall` (based on the untransformed variables).

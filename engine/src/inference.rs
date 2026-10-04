@@ -8,6 +8,37 @@
 
 use statrs::distribution::ContinuousCDF;
 
+/// 検定統計量の従う分布（`test_stats`がt統計量かz統計量か、および自由度）。
+///
+/// t分布なら自由度を持ち、正規分布なら持たない、という関係を型で保証する。
+/// 自由度は`df_resid`と一致するとは限らない（例: OLSの`cov_type=Cluster`は`G-1`）ため、
+/// 利用者が`test_stats`からp値・信頼区間を再計算できるよう、実際に使った値を保持する。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatDist {
+    /// t分布（自由度`df`）。
+    T { df: usize },
+    /// 標準正規分布。
+    Normal,
+}
+
+impl StatDist {
+    /// 分布名（`"t"`または`"normal"`）。
+    pub fn name(&self) -> &'static str {
+        match self {
+            StatDist::T { .. } => "t",
+            StatDist::Normal => "normal",
+        }
+    }
+
+    /// t分布のときの自由度。正規分布なら`None`。
+    pub fn df(&self) -> Option<usize> {
+        match self {
+            StatDist::T { df } => Some(*df),
+            StatDist::Normal => None,
+        }
+    }
+}
+
 /// 単一の係数に対する検定統計量（t統計量またはz統計量）。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct InferenceStat {
@@ -54,7 +85,8 @@ where
     let p_value = if stat.is_nan() {
         f64::NAN
     } else {
-        2.0 * (1.0 - dist.cdf(stat.abs()))
+        // `1.0 - cdf`は裾でcdfが1.0に丸められp値が0になるため、生存関数`sf`を使う。
+        2.0 * dist.sf(stat.abs())
     };
     InferenceStat {
         stat,
@@ -68,6 +100,24 @@ where
 mod tests {
     use super::*;
     use statrs::distribution::{Normal, StudentsT};
+
+    #[test]
+    fn compute_inference_stat_keeps_precision_in_the_far_tail() {
+        // `1.0 - cdf`では裾でcdfが1.0に丸められp値が0.0になる（相対誤差が劣化する）ため
+        // 生存関数`sf`を使う。R: `2*pt(-40, 20)` = 1.45746965543107e-20、
+        // `2*pnorm(-20)` = 5.50724823721247e-89。
+        let t_dist = StudentsT::new(0.0, 1.0, 20.0).unwrap();
+        let crit = critical_value(&t_dist, 0.95);
+        let t_result = compute_inference_stat(&t_dist, 40.0, 1.0, crit);
+        assert!((t_result.p_value / 1.457_469_655_431_07e-20 - 1.0).abs() < 1e-8);
+        // 符号が負でも対称（`stat.abs()`を使う）。
+        let t_neg = compute_inference_stat(&t_dist, -40.0, 1.0, crit);
+        assert!((t_neg.p_value / t_result.p_value - 1.0).abs() < 1e-12);
+
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        let z_result = compute_inference_stat(&normal, 20.0, 1.0, critical_value(&normal, 0.95));
+        assert!((z_result.p_value / 5.507_248_237_212_47e-89 - 1.0).abs() < 1e-8);
+    }
 
     #[test]
     fn critical_value_matches_known_normal_quantile() {

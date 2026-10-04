@@ -1,14 +1,13 @@
 """全系統で共有する`ValidationError`メッセージのテンプレート文字列。
 
 `engine`（`CommonError`等）・`engine_pybind`（`column_extraction.rs`・
-`validation.rs`・各系統の`cov_type`/`method`文字列パース）が実際に送出する
+`validation.rs`・各系統の`cov_type`/`solver`/`estimator`文字列パース）が実際に送出する
 メッセージの正確な文字列をPythonのフォーマット文字列としてここに集約する。
 
 Rust側のメッセージ文言が正本であり（`engine/src/error.rs`・
 `engine_pybind/src/column_extraction.rs`・`engine_pybind/src/validation.rs`等）、
 このファイルはそのコピー。Rust側で文言を変更した場合はこのファイルも同時に
-更新すること（`docs/planning/specs/test-coverage-candidates.md`項目26、
-複数系統でメッセージが文字通り重複しているため直書きではなく共通化した）。
+更新すること（複数系統でメッセージが文字通り重複しているため直書きではなく共通化した）。
 
 各テストは`pytest.raises(ValidationError, match=escaped(TEMPLATE, name=...))`の
 形で使う（`escaped()`は`str.format(**kwargs)`した上で`re.escape`する。メッセージ中の
@@ -38,6 +37,25 @@ def rust_f64(value: float) -> str:
     return repr(float(value)).removesuffix(".0")
 
 
+def fully_qualified_type_name(obj: object) -> str:
+    """pyo3の`PyType::fully_qualified_name()`と同じ規則で型名を組み立てる。
+
+    `NOT_A_POLARS_DATAFRAME`の`{type_name}`はRust側でこの関数
+    （`engine_pybind/src/column_extraction.rs`の`extract_dataframe`）を
+    使って組み立てているため、テスト側も同じ規則（`__module__`が
+    `"builtins"`/`"__main__"`のときは`__qualname__`のみ、それ以外は
+    `f"{{__module__}}.{{__qualname__}}"`）で期待値を作る。pandasの
+    `__module__`の値はバージョンによって異なりうる（例:
+    3.0系は`"pandas"`、古いバージョンは`"pandas.core.frame"`）ため、
+    ハードコードせずこの関数で実行時に計算する。
+    """
+    cls = type(obj)
+    module = cls.__module__
+    if module in ("builtins", "__main__"):
+        return cls.__qualname__
+    return f"{module}.{cls.__qualname__}"
+
+
 def rust_option_f64_debug(value: float | None) -> str:
     """RustのDebug（`{:?}`）での`Option<f64>`表示を模したフォーマット。
 
@@ -51,7 +69,29 @@ def rust_option_f64_debug(value: float | None) -> str:
 
 # ── column_extraction.rs（全系統共通） ──────────────────────────────
 #
-# extract_f64_column: y/x/weight/time_col の抽出で使う（engine_pybind/src/
+# extract_dataframe: `data`/`new_data`にpolars以外のDataFrame（pandas等）が
+# 渡された場合に使う（engine_pybind/src/column_extraction.rs）。
+# `param_name`は呼び出し側で"data"（fit系）または"new_data"（predict/augment）
+# を渡す。`type_name`はPythonオブジェクトの完全修飾クラス名
+# （`type(obj).__module__ + "." + type(obj).__qualname__`相当）。
+NOT_A_POLARS_DATAFRAME = (
+    "'{param_name}' must be a polars.DataFrame, got {type_name}"
+)
+# 渡されたオブジェクト自体が本物の`polars.DataFrame`なのに変換に失敗した場合の文言。
+# `pyo3`/`polars`/`pyo3-polars`のバージョンの組み合わせによるABI不整合等でのみ
+# 発生しうるため、通常のテスト環境では再現できず対応するテストは無い
+# （`extract_dataframe`のロジックそのものはRust側で経路を確認済み）。
+# `LazyFrame`・`Series`等の他のpolarsオブジェクトはこの文言ではなく
+# `NOT_A_POLARS_DATAFRAME`になる。
+DATAFRAME_EXTRACTION_FAILED = (
+    "failed to read '{param_name}' as a polars.DataFrame: {error}"
+)
+# `polars.LazyFrame`を渡した場合は、`NOT_A_POLARS_DATAFRAME`に`.collect()`の案内が付く。
+NOT_A_POLARS_DATAFRAME_LAZY = (
+    NOT_A_POLARS_DATAFRAME + "; call .collect() first"
+)
+
+# extract_f64_column: y/x/weight/hac_time の抽出で使う（engine_pybind/src/
 # column_extraction.rs:27-75）。
 
 COLUMN_DOES_NOT_EXIST = "column '{name}' does not exist in the data"
@@ -65,16 +105,63 @@ COLUMN_HAS_NON_FINITE_VALUE = (
     "NaN and infinite values are not handled automatically; please impute "
     "or remove them before calling this function"
 )
-# `Series.cast(Float64)`自体が失敗する場合のメッセージ。polarsは数値として
-# 解釈できない文字列（`"a"`等）を非strictキャストでnullに変換するため、通常の
-# 非数値文字列テストはこの分岐ではなく`COLUMN_HAS_MISSING_VALUES`を通る
-# （実測確認済み、tests/linear/test_ols_validation.py::test_non_numeric_dtype_raises
-# 参照）。この分岐が実際にテストで踏まれるケースは現状無い。
-COLUMN_NOT_CASTABLE_TO_NUMERIC = (
-    "column '{name}' could not be cast to a numeric type (f64):"
+# 数値として使う列（y/x/weight/x_exog/x_endog/instruments）のdtypeが許可外の場合。
+# `{dtype}`はPythonの`pl.String`等と同じ呼び名（`String`・`Date`・`Categorical`等、
+# 時間単位や内側の型は含まない）。`Null`型は後続の欠損値チェックに回るため
+# このメッセージにならない。
+COLUMN_UNSUPPORTED_NUMERIC_DTYPE = (
+    "column '{name}' has dtype {dtype}, which cannot be used as a numeric "
+    "column; use an integer, float, boolean or decimal column (cast it first "
+    "if it holds numbers)"
+)
+# 行の並び順だけに使う列（HACの`hac_time`）のdtypeが許可外の場合。
+COLUMN_UNSUPPORTED_ORDER_DTYPE = (
+    "column '{name}' has dtype {dtype}, which cannot be used as a time-order "
+    "column; use an integer, float, Date or Datetime column"
 )
 
-# extract_group_key_column: cluster_col の抽出で使う（同ファイル86-111行）。
+# HAC(`cov_type="hac"`・IV GMMの`gmm_weight_type="hac"`)で`hac_time`が未指定の場合。
+# 行順を時間順とみなす暗黙の既定は置かない。`{setting}`は`hac_time`を要求している設定名
+# (`cov_type`または`gmm_weight_type`)。
+HAC_REQUIRES_HAC_TIME = (
+    "{setting}='hac' requires the `hac_time` option: the column that gives the "
+    "time order of the observations (the row order of the data is not assumed "
+    'to be the time order; add an explicit index column such as `df.with_row_index("t")` '
+    "if the rows are already in time order)"
+)
+# 行の並び順だけに使う列（HACの`hac_time`）に同じ値が複数ある場合。順序が定まらないため、
+# エンジンが行順で黙って並べる前にここで拒否する。`{first}`/`{second}`は同値の最初の
+# 2行（0始まりの行番号）。
+COLUMN_HAS_TIED_TIME_ORDER = (
+    "column '{name}' has the same value at rows {first} and {second}. A "
+    "time-order column must give every observation a distinct value, because "
+    "tied observations cannot be put in time order; make the values distinct, "
+    "or omit the time-order option to use the row order of the data"
+)
+
+# キー列のdtypeが許可外の場合。`entity`・`cluster`（同一性だけのキー）と
+# `time`・`dk_time`（時点のキー）で許可するdtypeが異なる。`{dtype}`の呼び名は
+# `COLUMN_UNSUPPORTED_NUMERIC_DTYPE`と同じ。
+COLUMN_UNSUPPORTED_IDENTITY_DTYPE = (
+    "column '{name}' has dtype {dtype}, which cannot be used as a group "
+    "identifier column; use an integer, float, string, categorical, boolean, "
+    "Date or Datetime column"
+)
+# タイムゾーン付きのDatetimeをキー列に使った場合。`{role}`は`group identifier`
+# （entity・cluster）または`time`（time・dk_time）。
+COLUMN_KEY_WITH_TIME_ZONE = (
+    "column '{name}' is a Datetime with time zone '{time_zone}', which cannot "
+    "be used as a {role} column; remove the time zone first, for example "
+    "with .dt.replace_time_zone(None) after converting to the zone you want "
+    "to keep"
+)
+COLUMN_UNSUPPORTED_TIME_DTYPE = (
+    "column '{name}' has dtype {dtype}, which cannot be used as a time "
+    "column; use an integer, float, string, categorical, Date or Datetime "
+    "column"
+)
+
+# extract_group_key_column: cluster の抽出で使う（同ファイル86-111行）。
 # 列が存在しない場合のメッセージは extract_f64_column と同文言だが、欠損値の
 # メッセージはグループキー列専用の短い文言になる点に注意。
 GROUP_KEY_COLUMN_HAS_MISSING_VALUES = "column '{name}' contains missing values"
@@ -141,14 +228,16 @@ UNKNOWN_COV_TYPE_LINEAR = (
 # ── nonlinear系統固有（Logit/Probit/Tobit） ─────────────────────────────
 
 UNKNOWN_COV_TYPE_NONLINEAR = (
-    "unknown cov_type: '{other}'. Expected one of 'classical' (or "
-    "'nonrobust'), 'opg', 'hc0', 'hc1', or 'cluster'"
+    "unknown cov_type: '{other}'. Expected one of 'classical', 'opg', "
+    "'hc0', 'hc1', or 'cluster'"
 )
 UNKNOWN_METHOD_NONLINEAR = (
-    "unknown method: '{other}'. Expected one of 'newton', 'bfgs', or 'lbfgs'"
+    "unknown solver: '{other}'. Expected one of 'newton', 'bfgs', or 'lbfgs'"
 )
-INVALID_TOL = "tol must be a positive number, got {tol}"
-INVALID_MAX_ITER = "max_iter must be a positive integer, got {max_iter}"
+INVALID_TOL = "tol must be a positive finite number, got {tol}"
+INVALID_MAX_ITER = (
+    "max_iter must be an integer between 1 and 10000, got {max_iter}"
+)
 INVALID_BINARY_Y = (
     "y at row {row} must be coded as 0.0 or 1.0 (binary outcome), got {value}"
 )
@@ -180,23 +269,40 @@ UNKNOWN_MARGINAL_EFFECTS_TARGET = (
 
 # ── IV系統固有（engine/src/iv/common.rs・engine_pybind/src/iv/common.rs） ──
 
-UNKNOWN_IV_METHOD = (
-    "unknown method: '{method}'. Expected one of '2sls' or 'gmm'"
+UNKNOWN_IV_ESTIMATOR = (
+    "unknown estimator: '{estimator}'. Expected one of '2sls' or 'gmm'"
 )
 UNKNOWN_WEIGHT_TYPE = (
-    "unknown weight_type: '{other}'. Expected one of 'unadjusted' "
-    "('homoskedastic'), 'robust' ('heteroskedastic'), 'cluster', or 'kernel'"
+    "unknown gmm_weight_type: '{other}'. Expected one of 'classical', "
+    "'robust', 'cluster', or 'hac'"
 )
 INSUFFICIENT_INSTRUMENTS = (
     "insufficient instruments for identification: {n_instruments} "
     "instrument(s) provided but {n_endog} endogenous regressor(s) require "
     "at least {n_endog} (order condition: len(instruments) >= len(x_endog))"
 )
-INVALID_GMM_ITERATIONS = (
-    "gmm_iterations must be a positive integer: got {gmm_iterations}"
+INVALID_GMM_MAX_ITER = (
+    "gmm_max_iter must be an integer between 3 (counting the initial "
+    "estimate) and 10000, got {max_iter}; for fewer than 3 use "
+    'gmm_type="two_step" for a two-step GMM'
 )
-INVALID_GMM_CONVERGENCE = (
-    "gmm_convergence must be a positive number, got {gmm_convergence}"
+UNKNOWN_GMM_TYPE = (
+    "unknown gmm_type: '{other}'. Expected one of 'one_step', 'two_step', "
+    "or 'iterated'"
+)
+# 選んだモードで使われないオプションが明示指定された場合の共通文言
+# （`engine_pybind/src/validation.rs`の`reject_unused_option`）。
+UNUSED_OPTION = (
+    "{option} is only used with {condition}, so it would be silently "
+    "ignored; set {condition} or remove {option}"
+)
+INVALID_GMM_TOL = "gmm_tol must be a positive finite number, got {gmm_tol}"
+INSUFFICIENT_CLUSTERS_FOR_WEIGHT_MATRIX = (
+    "gmm_weight_type='cluster' requires at least l clusters (l+1 if exactly "
+    "identified) for the moment weight matrix: got g={g} clusters for l={l} "
+    "instruments (including exogenous regressors), but the cluster moment "
+    "covariance has rank at most g (g-1 if exactly identified), so it is "
+    "singular"
 )
 
 # ── panel系統固有（FE、engine/src/panel/common.rs・
@@ -244,22 +350,57 @@ TWO_WAY_REQUIRES_TIME = (
     "two-way fixed effects requires the `time` option to be set"
 )
 
-# `PanelError::HacRequiresTime`（Driscoll-Kraay HAC、1-way限定で到達）。
-HAC_REQUIRES_TIME = (
-    "Driscoll-Kraay panel HAC requires the `time` option to be set"
+# RE: `PanelError::DkRequiresTime`（`cov_type="dk"`で`dk_time`が未指定）。
+DK_REQUIRES_TIME = (
+    "Driscoll-Kraay panel HAC requires the `dk_time` option to be set"
+)
+# FE: `cov_type="dk"`で`dk_time`が未指定（`time`は借用されない。1-way・2-wayとも）。
+FE_DK_REQUIRES_DK_TIME = (
+    "cov_type='dk' requires the `dk_time` option: the column that defines the "
+    "time periods of the Driscoll-Kraay estimator (it is not taken from "
+    "`time`, which only sets the two-way fixed effects)"
 )
 
-# `PanelError::InvalidHacBandwidth`。`t`は時点数（観測数`n`ではない点に
+# `PanelError::InvalidDkBandwidth`。`t`は時点数（観測数`n`ではない点に
 # 注意、OLSの`INVALID_HAC_LAGS`とは上限の意味が異なる）。
-INVALID_HAC_BANDWIDTH = (
+INVALID_DK_BANDWIDTH = (
     "bandwidth must be in the range [0, t): got {bandwidth}, t={t}"
+)
+
+# `PanelError::InsufficientDkPeriodsForInference`（`INSUFFICIENT_CLUSTERS_FOR_
+# INFERENCE`のDK版。`q`はFEでは傾き係数のF検定、REではハウスマン検定の対象数）。
+INSUFFICIENT_DK_PERIODS_FOR_INFERENCE = (
+    "cov_type='dk' requires more unique time periods than jointly tested "
+    "coefficients: got t_periods={t_periods} for q={q} coefficient(s) (the "
+    "slope F-test for FE, the Hausman test for RE), but the Driscoll-Kraay "
+    "covariance has rank at most t_periods-1, so the q×q Wald submatrix is "
+    "singular when t_periods <= q"
+)
+
+# `PanelError::DegenerateDkTwoPeriods` / `DegenerateClusterTwoGroups`（FEのみ）。
+DEGENERATE_DK_TWO_PERIODS = (
+    "cov_type='dk' with 2 unique time periods is degenerate for fixed "
+    "effects when every entity (or, with two-way effects, every time period) "
+    "is observed exactly once in each of the two periods: the within "
+    "transformation makes the two per-period scores equal, and they sum to "
+    "zero, so the Driscoll-Kraay covariance is identically zero. Use more "
+    "time periods or another cov_type"
+)
+DEGENERATE_CLUSTER_TWO_GROUPS = (
+    "cov_type='cluster' with 2 clusters is degenerate for fixed effects when "
+    "every entity (or, with two-way effects, every time period) is observed "
+    "exactly once in each cluster (e.g. clustering by time with 2 periods, "
+    "or by entity with 2 entities and two-way effects): the within "
+    "transformation makes the two cluster scores equal, and they sum to "
+    "zero, so the cluster-robust covariance is identically zero. Use more "
+    "clusters or another cov_type"
 )
 
 # FE用cov_type文字列パース（engine_pybind/src/panel/fe.rs::parse_fe_cov_type）。
 # OLS/WLS/IVの`UNKNOWN_COV_TYPE_LINEAR`と異なりhc0を含まない一覧になる。
 UNKNOWN_COV_TYPE_FE = (
     "unknown cov_type: '{other}'. Expected one of 'classical', 'hc1' "
-    "through 'hc3', 'cluster', or 'hac'"
+    "through 'hc3', 'cluster', or 'dk'"
 )
 HC0_NOT_SUPPORTED_FE = (
     "cov_type='hc0' is not supported for FE (neither linearmodels nor "
@@ -283,8 +424,8 @@ HC0_NOT_SUPPORTED_RE = (
 # 第一段階回帰由来の`ValidationError`（`InsufficientObservations`・
 # `InsufficientClustersForInference`等）は常にこのラッパー経由で観測される。
 # 構造方程式自身のqを使う`TwoSlsEstimator::fit`/`GmmEstimator::fit`冒頭の同種
-# 事前チェック（Issue #289）はPython APIからは実質到達不能（第一段階のqは
-# 識別条件`instruments>=x_endog`により常に構造方程式のq以上のため、第一段階側の
-# チェックが必ず先に発火する）——`docs/planning/specs/test-coverage-candidates.md`
-# 項目31に記録済み、修正は別Issueで検討。
+# 事前チェック（観測数・クラスター数）はPython APIからは到達不能（第一段階の
+# 回帰変数の数は識別条件`instruments>=x_endog`により常に構造方程式以上のため、
+# 第一段階側のチェックが必ず先に発火する。2SLS/GMM・classical/clusterで
+# n・Gを下げて確認済み）。これらのチェックはengineの単体テストで確認している。
 FIRST_STAGE_FAILED = "first stage regression for endogenous variable '{endog_name}' failed: {source}"

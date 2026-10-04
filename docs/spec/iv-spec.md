@@ -53,7 +53,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 | `hac_time` | `str \| None` | `None` | `cov_type="hac"`時（`gmm_weight_type="hac"`とも共用）の時系列順序列。どちらからも使われないモードで指定すると`ValidationError` |
 | `gmm_weight_type` | `str \| None` | `None` | GMMの点推定に使う重み行列（`gmm_type="two_step"`/`"iterated"`のみ。`None`は実効既定値`"classical"`）: `"classical"` / `"robust"` / `"cluster"` / `"hac"`（`cov_type`と同じ語彙。旧名`unadjusted`/`kernel`と別名`homoskedastic`/`heteroskedastic`は受け付けない）。`estimator="2sls"`と`gmm_type="one_step"`で指定すると`ValidationError` |
 | `gmm_type` | `str \| None` | `None` | GMMの推定方式（`estimator="gmm"`のみ、`None`は実効既定値`"two_step"`。`estimator="2sls"`で指定すると`ValidationError`）: `"one_step"`（1段階、重み`(Z'Z)⁻¹`のみ）/ `"two_step"`（2段階の効率的GMM）/ `"iterated"`（収束まで反復）。大文字小文字は区別しない |
-| `gmm_max_iter` | `int \| None` | `None` | `"iterated"`の最大推定回数（初回推定を含む、3以上）。`None`は実効既定値`100`。`"one_step"`/`"two_step"`/`estimator="2sls"`で指定すると`ValidationError` |
+| `gmm_max_iter` | `int \| None` | `None` | `"iterated"`の最大推定回数（初回推定を含む、3以上10000以下）。`None`は実効既定値`100`。`"one_step"`/`"two_step"`/`estimator="2sls"`で指定すると`ValidationError` |
 | `gmm_tol` | `float \| None` | `None` | `"iterated"`の収束許容誤差。`None`は実効既定値`1e-6`。`"one_step"`/`"two_step"`/`estimator="2sls"`で指定すると`ValidationError` |
 | `raise_on_non_convergence` | `bool \| None` | `None` | `gmm_type="iterated"`で収束しなければ`True`でエラー、`False`で`converged=False`のまま結果を返す。`None`は実効既定値`True`。それ以外の`gmm_type`・`estimator="2sls"`で指定すると`ValidationError` |
 
@@ -212,8 +212,9 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   のときのみ有効。`cluster`/`hac_lags`/`hac_time`は`cov_type`と`gmm_weight_type`の
   どちらか一方でも使えば有効。既定値が非`None`だったオプションは、指定有無を区別する
   ため既定値を`None`にして使われるモードでのみ実効既定値に解決する。
-- **`gmm_max_iter`は初回推定を含めて数え、3以上を必須とする**（linearmodelsの`iter_limit`と
-  同じ数え方）。上限2回の反復は「two_stepに収束判定を付けたもの」になり紛らわしいため、
+- **`gmm_max_iter`は初回推定を含めて数え、3以上10000以下を必須とする**（linearmodelsの`iter_limit`と
+  同じ数え方。上限は`max_iter`と共通の`MAX_ITER_LIMIT`で、収束しない問題が実質的に終わらなく
+  なるのを防ぐ）。上限2回の反復は「two_stepに収束判定を付けたもの」になり紛らわしいため、
   2段階が欲しい場合は`gmm_type="two_step"`を使う（エラーメッセージでも案内する）。
 - **収束判定**: 係数のelementwise・絶対誤差と相対誤差の併用（`tol = max(rtol * |前回値|,
   atol)`、`atol`は内部固定値`1e-8`）。全係数が満たして初めて収束とする。

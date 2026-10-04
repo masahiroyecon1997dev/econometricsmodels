@@ -87,7 +87,8 @@ pub struct TobitOptions {
     #[pyo3(get)]
     pub solver: String,
 
-    /// Maximum number of solver iterations.
+    /// Maximum number of solver iterations, an integer from 1 to 10,000 (anything else
+    /// raises `ValidationError`).
     #[pyo3(get)]
     pub max_iter: i64,
 

@@ -67,7 +67,7 @@ OLS(df, y="y", x="x1")
 OLS(df, y="y", x=["x1"])  # correct
 ```
 
-Numeric options are checked the same way, both when the options object is created and when an attribute is assigned. An integer option (`hac_lags`, `max_iter`, `gmm_max_iter`, `dk_bandwidth`) must be an `int`, and a real-valued option (`confidence_level`, `tol`, `gmm_tol`, `lower`, `upper`) must be an `int` or a `float`. A `bool`, a string, or `None` where a number is required raises `TypeError`: `OLSOptions(hac_lags=True)` is an error, not one lag. Whether the value is acceptable (a range, NaN, a very large integer) is checked at `fit()` and raises `ValidationError`.
+Numeric options are checked the same way, both when the options object is created and when an attribute is assigned. An integer option (`hac_lags`, `max_iter`, `gmm_max_iter`, `dk_bandwidth`) must be an `int`, and a real-valued option (`confidence_level`, `tol`, `gmm_tol`, `lower`, `upper`) must be an `int` or a `float`. A `bool`, a string, or `None` where a number is required raises `TypeError`: `OLSOptions(hac_lags=True)` is an error, not one lag. Whether the value is acceptable (a range, NaN, a very large integer) is checked at `fit()` and raises `ValidationError`. The iteration limits `max_iter` (Logit, Probit, Tobit) and `gmm_max_iter` (IV) must be between 1 and 10,000, and between 3 and 10,000: a larger value is rejected, because a problem that does not converge would run for an unbounded time and cannot be interrupted.
 
 ## Where to look next
 

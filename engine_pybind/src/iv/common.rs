@@ -192,8 +192,8 @@ pub struct IVOptions {
     pub gmm_type: Option<String>,
 
     /// Maximum number of GMM estimations for `gmm_type="iterated"`, counting the initial
-    /// estimate; must be at least 3 (use `gmm_type="two_step"` for two steps). `None`
-    /// (default) means 100. Specifying it with any other `gmm_type` or with
+    /// estimate; an integer from 3 to 10,000 (use `gmm_type="two_step"` for two steps).
+    /// `None` (default) means 100. Specifying it with any other `gmm_type` or with
     /// `estimator="2sls"` raises `ValidationError`.
     #[pyo3(get)]
     pub gmm_max_iter: Option<i64>,

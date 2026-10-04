@@ -208,6 +208,7 @@ use crate::inference;
 use crate::iv::common::{IvError, IvInput, mat_to_columns};
 use crate::linear::ols::CovType;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
+use crate::validation::MAX_ITER_LIMIT;
 use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
 /// GMMの点推定に使う重み行列の種別（`docs/spec/iv-spec.md`1.2節）。
@@ -347,7 +348,7 @@ impl GmmEstimator {
             return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
         }
         if let GmmType::Iterated { max_iter, tol, .. } = &gmm_type {
-            if *max_iter < 3 {
+            if *max_iter < 3 || *max_iter as u64 > MAX_ITER_LIMIT as u64 {
                 return Err(IvError::InvalidGmmMaxIter {
                     max_iter: *max_iter as i64,
                 });
@@ -1364,7 +1365,7 @@ mod tests {
             .unwrap()
         };
 
-        for invalid in [0_usize, 1, 2] {
+        for invalid in [0_usize, 1, 2, 10_001, 1_000_000] {
             let result = GmmEstimator::fit(
                 build_input(),
                 GmmType::Iterated {

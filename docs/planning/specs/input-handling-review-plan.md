@@ -205,9 +205,11 @@ PyO3の`i64`/`f64`抽出は`bool`を通し、巨大な整数は`OverflowError`�
   - `Null`型（全値が欠損の列）は、dtypeエラーにせず欠損値エラーで報告する（より分かりやすいため）。
   - dtype名はPythonの`pl.String`等と同じ呼び名（`String`・`Date`・`Boolean`・`Decimal`等、内部パラメータは含めない）。
   - `extract_dataframe`は型名の接頭辞ではなく`isinstance`で判定する（サブクラスも本物のDataFrameとして扱う）。
-  - 数値option: `max_iter=2**70`のように大きな正の値は有効（`i64`の上限に丸められ、収束すれば通常どおり返る）。負の巨大な値は範囲検査で`ValidationError`。`tol`はNaN・無限大も`ValidationError`にした（engineの`validate_tol`を修正）。
+  - 数値option: `max_iter`・`gmm_max_iter`は上限10,000を設けた（`engine::validation::MAX_ITER_LIMIT`。既定値の約100倍。反復中は中断できず、収束しない問題が実質的に終わらなくなるのを防ぐ）。下限は`max_iter`が1、`gmm_max_iter`が3（従来どおり）。巨大な値は`i64`の端に丸めたうえで範囲検査により`ValidationError`。`tol`はNaN・無限大も`ValidationError`にした（engineの`validate_tol`を修正）。
   - Tobitの`lower`/`upper`、`gmm_tol`は既にNaNを弾いていたため、engine側の変更は`validate_tol`のみ。
-  - 数値optionの検証は`engine_pybind/src/option_values.rs`（`from_py_with`と手書きsetter）に集約。
+  - 数値・文字列optionの検証は`engine_pybind/src/option_values.rs`（`from_py_with`と手書きsetter）に集約。文字列optionの型エラーは`fit()`の列名引数と同じ形式。
+  - タイムゾーン付きのDatetimeは、組み込んだpolarsが文字列化できないため`entity`・`cluster`・`time`・`dk_time`では拒否する（`hac_time`は許可）。タイムゾーンなしのDatetimeは同一性のキーにも許可する。
+  - レビューの指摘で`numpy.bool_`も`bool`と同じく拒否する。
 - 実測: リリースビルドの拡張モジュールは34.6MB→43.5MB（gzip後6.4MB→7.7MB）。`Cargo.lock`に推移的な依存が追加された（`ahash`・`float-cmp`ほか）ため、リリース前に依存の確認（`cargo deny`・ライセンス一覧`THIRD-PARTY-LICENSES.html`の更新）を行う。
 
 ## 5. 未解決・要確認（実装中にその都度ユーザーへ確認する。CLAUDE.md 14章）

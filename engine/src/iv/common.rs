@@ -41,6 +41,7 @@ use thiserror::Error;
 use crate::error::CommonError;
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
+use crate::validation::MAX_ITER_LIMIT;
 
 /// 2SLS/GMMの計算過程で発生しうるエラー。
 ///
@@ -103,8 +104,9 @@ pub enum IvError {
     /// 上限を初回推定を含めて数えるため、2回以下の反復は2段階GMMに収束判定を付けただけに
     /// なり紛らわしい。2段階が欲しい場合は`gmm_type="two_step"`を使う。
     #[error(
-        "gmm_max_iter must be at least 3 (counting the initial estimate), got {max_iter}; \
-         use gmm_type=\"two_step\" for a two-step GMM"
+        "gmm_max_iter must be an integer between 3 (counting the initial estimate) and {}, \
+         got {max_iter}; for fewer than 3 use gmm_type=\"two_step\" for a two-step GMM",
+        MAX_ITER_LIMIT
     )]
     InvalidGmmMaxIter { max_iter: i64 },
 

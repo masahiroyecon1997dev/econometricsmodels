@@ -216,7 +216,9 @@ UNKNOWN_METHOD_NONLINEAR = (
     "unknown solver: '{other}'. Expected one of 'newton', 'bfgs', or 'lbfgs'"
 )
 INVALID_TOL = "tol must be a positive finite number, got {tol}"
-INVALID_MAX_ITER = "max_iter must be a positive integer, got {max_iter}"
+INVALID_MAX_ITER = (
+    "max_iter must be an integer between 1 and 10000, got {max_iter}"
+)
 INVALID_BINARY_Y = (
     "y at row {row} must be coded as 0.0 or 1.0 (binary outcome), got {value}"
 )
@@ -261,8 +263,9 @@ INSUFFICIENT_INSTRUMENTS = (
     "at least {n_endog} (order condition: len(instruments) >= len(x_endog))"
 )
 INVALID_GMM_MAX_ITER = (
-    "gmm_max_iter must be at least 3 (counting the initial estimate), got "
-    '{max_iter}; use gmm_type="two_step" for a two-step GMM'
+    "gmm_max_iter must be an integer between 3 (counting the initial "
+    "estimate) and 10000, got {max_iter}; for fewer than 3 use "
+    'gmm_type="two_step" for a two-step GMM'
 )
 UNKNOWN_GMM_TYPE = (
     "unknown gmm_type: '{other}'. Expected one of 'one_step', 'two_step', "

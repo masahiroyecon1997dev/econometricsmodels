@@ -25,7 +25,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   | `confidence_level` | `float` | `0.95` | |
   | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名。他の`cov_type`で指定すると`ValidationError` |
   | `solver` | `str` | `"newton"` | `"newton"` / `"bfgs"` / `"lbfgs"`（大小無視） |
-  | `max_iter` | `int` | `35` | 正整数、以下は`InvalidMaxIter` |
+  | `max_iter` | `int` | `35` | `1`以上`10000`以下の整数（上限は`engine::validation::MAX_ITER_LIMIT`、収束しない問題が実質的に終わらなくなるのを防ぐ）。範囲外は`InvalidMaxIter` |
   | `tol` | `float` | `1e-6` | 勾配ノルム収束判定の閾値、以下は`InvalidTol` |
   | `raise_on_non_convergence` | `bool` | `True` | `False`なら未収束時も`converged=False`の結果を返す |
 

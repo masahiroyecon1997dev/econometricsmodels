@@ -86,9 +86,9 @@ A wrong argument *type*, as opposed to a wrong value, raises the built-in `TypeE
 | Method | Situation |
 |---|---|
 | WLS | A weight is zero, negative, null or NaN. The weight column is missing. |
-| Logit, Probit | `y` is not coded exactly 0 or 1. `max_iter` or `tol` is not positive. |
-| Tobit | Both censoring bounds are `None`, or the lower bound is not below the upper bound. `y` lies outside the bounds. There is no uncensored observation. `x` contains a column named `"sigma"`. |
-| IV | Fewer instruments than endogenous regressors (the order condition). `x_endog` or `instruments` is empty. GMM options are set for an estimator that does not use them, or are out of range. With `gmm_weight_type="cluster"`, there are too few clusters for the weight matrix. |
+| Logit, Probit | `y` is not coded exactly 0 or 1. `max_iter` is not an integer from 1 to 10,000, or `tol` is not a positive finite number. |
+| Tobit | `max_iter` is not an integer from 1 to 10,000, or `tol` is not a positive finite number. Both censoring bounds are `None`, or the lower bound is not below the upper bound. `y` lies outside the bounds. There is no uncensored observation. `x` contains a column named `"sigma"`. |
+| IV | Fewer instruments than endogenous regressors (the order condition). `x_endog` or `instruments` is empty. GMM options are set for an estimator that does not use them, or are out of range (`gmm_max_iter` outside 3 to 10,000, or `gmm_tol` not a positive finite number). With `gmm_weight_type="cluster"`, there are too few clusters for the weight matrix. |
 | FE | A singleton entity, or in a two-way model a singleton time period. A two-way model on an unbalanced panel, or without `time`. A regressor with no within-variation (constant over time within every entity). Too few degrees of freedom. |
 | RE | With `cov_type="cluster"`, too few clusters for the Hausman auxiliary regression. |
 | FE, RE | `cov_type="dk"` without a time column, with an invalid `dk_bandwidth`, with too few time periods for the number of coefficients tested, or with a degenerate two-period structure. |

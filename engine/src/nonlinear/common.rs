@@ -33,6 +33,7 @@ use crate::design_matrix::design_matrix_element;
 use crate::error::CommonError;
 use crate::inference;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
+use crate::validation::MAX_ITER_LIMIT;
 use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
 /// Logit/Probit/Tobitの計算過程で発生しうるエラー。
@@ -53,7 +54,10 @@ pub enum MleError {
     NonConvergence { n_iter: usize },
 
     /// `max_iter`が0以下。
-    #[error("max_iter must be a positive integer, got {max_iter}")]
+    #[error(
+        "max_iter must be an integer between 1 and {}, got {max_iter}",
+        MAX_ITER_LIMIT
+    )]
     InvalidMaxIter { max_iter: i64 },
 
     /// `tol`が0以下、またはNaN・無限大。勾配ノルムに基づく収束判定`‖∇ℓ(θ)‖ < tol`が
@@ -286,9 +290,9 @@ pub fn validate_binary_y(y: &Mat<f64>) -> Result<(), MleError> {
     Ok(())
 }
 
-/// `max_iter`が0以下の場合にエラーを返す。
+/// `max_iter`が`1..=MAX_ITER_LIMIT`の範囲外の場合にエラーを返す。
 fn validate_max_iter(max_iter: i64) -> Result<(), MleError> {
-    if max_iter <= 0 {
+    if !(1..=MAX_ITER_LIMIT).contains(&max_iter) {
         return Err(MleError::InvalidMaxIter { max_iter });
     }
     Ok(())
@@ -4769,7 +4773,7 @@ mod tests {
         );
         assert_eq!(
             MleError::InvalidMaxIter { max_iter: 0 }.to_string(),
-            "max_iter must be a positive integer, got 0"
+            "max_iter must be an integer between 1 and 10000, got 0"
         );
         assert_eq!(
             MleError::SingularHessian.to_string(),
@@ -5061,6 +5065,19 @@ mod tests {
             }
             .into())
         );
+    }
+
+    #[test]
+    fn validate_mle_options_accepts_the_max_iter_limit_and_rejects_above_it() {
+        assert_eq!(validate_mle_options(0.95, 1, 1e-8), Ok(()));
+        assert_eq!(validate_mle_options(0.95, MAX_ITER_LIMIT, 1e-8), Ok(()));
+        for invalid in [MAX_ITER_LIMIT + 1, i64::MAX, -1, i64::MIN] {
+            assert_eq!(
+                validate_mle_options(0.95, invalid, 1e-8),
+                Err(MleError::InvalidMaxIter { max_iter: invalid }),
+                "max_iter={invalid}"
+            );
+        }
     }
 
     #[test]

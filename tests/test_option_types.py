@@ -403,11 +403,31 @@ class TestMleOptionValues:
         ):
             _fit(options, df)
 
-    def test_huge_max_iter_is_accepted_as_unbounded(self, df, cls, how):
-        """大きな正の`max_iter`は有効な値（実質無制限）で、収束すれば通常どおり返る。"""
-        options = _with_value(cls, "max_iter", 2**70, how)
+    @pytest.mark.parametrize("above", [10_001, 2**70], ids=["limit+1", "2^70"])
+    def test_max_iter_above_the_limit_is_validation_error(
+        self, df, cls, how, above
+    ):
+        """`max_iter`は10,000まで。超える値（`i64`に収まらない巨大な値を含む）は
+        `ValidationError`で、メッセージには丸めた値が出る。
+        """
+        options = _with_value(cls, "max_iter", above, how)
 
-        assert _fit(options, df).converged
+        with pytest.raises(
+            ValidationError,
+            match=escaped(msgs.INVALID_MAX_ITER, max_iter=min(above, I64_MAX)),
+        ):
+            _fit(options, df)
+
+    @pytest.mark.parametrize("limit", [1, 10_000], ids=["lower", "upper"])
+    def test_max_iter_limits_are_accepted(self, df, cls, how, limit):
+        """範囲の両端（1と10,000）は有効。1回で収束しなくても`ValidationError`にはならず、
+        `raise_on_non_convergence=False`なら結果が返る。
+        """
+        options = _with_value(
+            cls, "max_iter", limit, how, raise_on_non_convergence=False
+        )
+
+        assert _fit(options, df).n_obs == N
 
     @pytest.mark.parametrize(
         ("tol", "shown"),
@@ -475,29 +495,49 @@ def test_invalid_tobit_bound_is_validation_error(df, field, bad, how):
 
 
 @pytest.mark.parametrize("how", SETTERS)
-@pytest.mark.parametrize("huge", [2**70, -(2**70)], ids=["+2^70", "-2^70"])
-def test_huge_gmm_max_iter(df, huge, how):
-    """`gmm_max_iter`が`i64`に収まらなくても`OverflowError`にならない。負の巨大な値は
-    下限（3以上）の検査で`ValidationError`、正の巨大な値は有効な値として通る。
+@pytest.mark.parametrize(
+    "invalid",
+    [-(2**70), 2, 10_001, 2**70],
+    ids=["-2^70", "2", "limit+1", "2^70"],
+)
+def test_gmm_max_iter_outside_the_range_is_validation_error(df, invalid, how):
+    """`gmm_max_iter`は3から10,000まで。範囲外（`i64`に収まらない巨大な値を含む）は
+    `OverflowError`ではなく`ValidationError`。
     """
     options = _with_value(
         IVOptions,
         "gmm_max_iter",
-        huge,
+        invalid,
         how,
         estimator="gmm",
         gmm_type="iterated",
         raise_on_non_convergence=False,
     )
 
-    if huge < 0:
-        with pytest.raises(
-            ValidationError,
-            match=escaped(msgs.INVALID_GMM_MAX_ITER, max_iter=I64_MIN),
-        ):
-            _fit(options, df)
-    else:
-        assert _fit(options, df).n_obs == N
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INVALID_GMM_MAX_ITER,
+            max_iter=max(min(invalid, I64_MAX), I64_MIN),
+        ),
+    ):
+        _fit(options, df)
+
+
+@pytest.mark.parametrize("how", SETTERS)
+@pytest.mark.parametrize("limit", [3, 10_000], ids=["lower", "upper"])
+def test_gmm_max_iter_limits_are_accepted(df, limit, how):
+    options = _with_value(
+        IVOptions,
+        "gmm_max_iter",
+        limit,
+        how,
+        estimator="gmm",
+        gmm_type="iterated",
+        raise_on_non_convergence=False,
+    )
+
+    assert _fit(options, df).n_obs == N
 
 
 @pytest.mark.parametrize("how", SETTERS)

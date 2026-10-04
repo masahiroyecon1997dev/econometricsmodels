@@ -88,8 +88,8 @@ $ARGUMENTS
    `/code-review`を省略したままコミットしない。
 
 7. **記録**
-   `docs/planning/specs/refactoring-issue231-progress.md`の該当フェーズに、変更ファイル一覧・
-   判断結果・未解決事項を追記する。
+   変更ファイル一覧・判断結果は、コミットメッセージと対応するGitHub Issue（あればコメント）に
+   残す。未解決事項はIssueに起票する（本文は英語、CLAUDE.md 5章）。進捗管理用のファイルは持たない。
 
 ## 完了条件
 
@@ -98,7 +98,7 @@ $ARGUMENTS
 - **`/code-review`を実行し、指摘への対応（適用 or 対応不要の理由記録）が完了している**
   （変更した層に関わらず必須。省略した状態で完了条件を満たしたと報告しない）
 - 破壊的操作（削除・移動）はすべて事前提示・合意を経ている
-- `docs/planning/specs/refactoring-issue231-progress.md`に記録済み
+- 判断結果・未解決事項がコミットメッセージ・GitHub Issueに残っている
 
 ## 制約
 

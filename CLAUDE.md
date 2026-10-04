@@ -105,12 +105,13 @@ econometricsmodels/
 - **リリースの流れ**: `release/vX.Y.Z` → `dev`（PR）→ `main`（PR）→ タグpush（詳細は`.claude/skills/release-publish/SKILL.md`）。
 - **マージ**: CIがgreenであることに加え、内容を確認してからmergeする（自動セルフマージはしない）。
 - **GitHub Issue**: リポジトリがpublicなため、英語で記述する（README・MkDocsと同様の理由）。対象はIssue本文のみで、セッション内の会話・コミットメッセージは対象外（引き続き日本語）。
+- **リファクタリング・テスト拡充の候補**: コード解説や実装の過程で気づいた候補は、メモファイルに溜めず、ユーザーの承認を得てGitHub Issueに直接起票する（関連する項目は1つのIssueにまとめる。既存Issueで扱える場合はコメントで追記する）。
 
 ## 6. コーディング規約
 
 詳細は `.claude/rules/rust-style.md`（engine/engine_pybind配下で自動ロード）、`.claude/rules/python-style.md`（python_package配下で自動ロード）を参照。要点: Rustはthiserror+PyErr変換・unwrap/expect回避、Pythonは型ヒント＋Googleスタイルdocstring必須・Ruff line-length=79。
 
-**コメント・ドキュメントでの参照方針**: GitHub Issue番号、および`docs/planning/specs/`配下（`refactoring-candidates.md`・`test-coverage-candidates.md`・各手法の設計ノート・進捗記録等、項目の追加・変更・削除が起こりうる内部管理ドキュメント。13章参照）への参照は、コード（Rust/Python問わず）・`Cargo.toml`等の設定ファイル・仕様書・各CLAUDE.md（ネストCLAUDE.md含む）のコメント/説明文に書き込まない。git log/GitHub側で常に追跡可能な経緯を重複記録する必然性がなく、かつ内部ドキュメントは変更・削除されうるためリンク切れ・文脈不明のノイズになる。一方、`docs/spec/`配下（実装済み手法の正式仕様書、13章参照）の節への参照は、今後も同期すべき生きた契約であるため許可する（例:「詳細は`docs/spec/ols-spec.md`「テスト」参照」）。過去形の由来説明からIssue番号を削除する際は、そこに書かれている理由（なぜそう実装したか）の文章は残す。複数Issueにまたがる経緯で、その変遷自体が非自明な価値を持つ場合はIssue番号を使わず平易な文章で要約し、単なる経緯の記録に過ぎない場合は削除する。
+**コメント・ドキュメントでの参照方針**: GitHub Issue番号、および`docs/planning/specs/`配下（各手法の設計ノート・進捗記録等、項目の追加・変更・削除が起こりうる内部管理ドキュメント。13章参照）への参照は、コード（Rust/Python問わず）・`Cargo.toml`等の設定ファイル・仕様書・各CLAUDE.md（ネストCLAUDE.md含む）のコメント/説明文に書き込まない。git log/GitHub側で常に追跡可能な経緯を重複記録する必然性がなく、かつ内部ドキュメントは変更・削除されうるためリンク切れ・文脈不明のノイズになる。一方、`docs/spec/`配下（実装済み手法の正式仕様書、13章参照）の節への参照は、今後も同期すべき生きた契約であるため許可する（例:「詳細は`docs/spec/ols-spec.md`「テスト」参照」）。過去形の由来説明からIssue番号を削除する際は、そこに書かれている理由（なぜそう実装したか）の文章は残す。複数Issueにまたがる経緯で、その変遷自体が非自明な価値を持つ場合はIssue番号を使わず平易な文章で要約し、単なる経緯の記録に過ぎない場合は削除する。
 
 ## 7. テスト方針
 
@@ -127,7 +128,7 @@ econometricsmodels/
 ## 9. ドキュメント運用
 
 - **mkdocs** + **GitHub Pages**。GitHub Actionsでビルド・デプロイを自動化。
-- `plan.md`や仕様書などの内部ドキュメントも`docs/planning/`配下に格納する。mkdocsのnavには含めない（非公開ナビゲーション）が、リポジトリ自体がMITでpublicなため、**ソースとしては誰でも閲覧可能**という前提で運用する（ユーザー確認済み）。
+- `plan.md`や仕様書などの内部ドキュメントも`docs/`配下（実装途中の設計ノートは`docs/planning/`）に格納する。mkdocsのnavには含めない（非公開ナビゲーション）が、リポジトリ自体がMITでpublicなため、**ソースとしては誰でも閲覧可能**という前提で運用する（ユーザー確認済み）。
 
 ## 10. 開発環境
 

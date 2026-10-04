@@ -35,7 +35,7 @@ paths:
 
 ## コメント運用
 
-Issue番号・内部管理ドキュメント（`refactoring-candidates.md`等）への参照可否は、CLAUDE.md 6章「コメント・ドキュメントでの参照方針」に準じる（`engine`/`engine_pybind`固有の追加規約はない）。
+Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の設計ノート等）への参照可否は、CLAUDE.md 6章「コメント・ドキュメントでの参照方針」に準じる（`engine`/`engine_pybind`固有の追加規約はない）。
 
 ## 責務分離
 

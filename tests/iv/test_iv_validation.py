@@ -1029,6 +1029,14 @@ def test_hac_time_with_tied_values_raises(
             {"estimator": "gmm", "cov_type": "hac"}, "cov_type", id="gmm_cov"
         ),
         pytest.param(
+            {"cov_type": "HAC"}, "cov_type", id="2sls_cov_type_uppercase"
+        ),
+        pytest.param(
+            {"estimator": "gmm", "cov_type": "hac", "gmm_weight_type": "hac"},
+            "cov_type",
+            id="both_missing_reports_cov_type_first",
+        ),
+        pytest.param(
             {"estimator": "gmm", "gmm_weight_type": "hac"},
             "gmm_weight_type",
             id="gmm_weight_type",

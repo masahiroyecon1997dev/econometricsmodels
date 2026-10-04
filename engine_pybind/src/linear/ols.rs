@@ -69,9 +69,10 @@ pub struct OLSOptions {
     #[pyo3(get)]
     pub hac_lags: Option<i64>,
 
-    /// Column name giving the time order for HAC when `cov_type="hac"`.
-    /// When `None`, the row order of `data` is treated as the time order.
-    /// Specifying it with any other `cov_type` raises `ValidationError`.
+    /// Column name giving the time order for HAC. Required when
+    /// `cov_type="hac"` (omitting it raises `ValidationError`): the row order
+    /// of `data` is never assumed to be the time order. Specifying it with
+    /// any other `cov_type` raises `ValidationError`.
     #[pyo3(get)]
     pub hac_time: Option<String>,
 }

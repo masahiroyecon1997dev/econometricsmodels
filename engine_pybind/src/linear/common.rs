@@ -215,6 +215,26 @@ mod tests {
     }
 
     #[test]
+    fn parse_cov_type_always_passes_time_order_for_hac() {
+        // engineの`time_order: Option`は`None`(行順)を許すが、pybindは常に`Some`で渡す。
+        let df = df!("t" => [30.0, 10.0, 20.0]).unwrap();
+        let Ok((cov_type, _)) = parse_cov_type(&df, "hac", None, Some(1), Some("t")) else {
+            panic!("expected Ok");
+        };
+        assert!(matches!(
+            cov_type,
+            EngineCovType::Hac { lags: Some(1), time_order: Some(ref ranks) }
+                if *ranks == vec![2.0, 0.0, 1.0]
+        ));
+    }
+
+    #[test]
+    fn require_hac_time_returns_column_name_or_errors() {
+        assert!(matches!(require_hac_time(Some("t"), "cov_type"), Ok("t")));
+        assert!(require_hac_time(None, "cov_type").is_err());
+    }
+
+    #[test]
     fn parse_cov_type_returns_validation_error_for_unknown_value() {
         let df = DataFrame::empty();
         assert!(parse_cov_type(&df, "bogus", None, None, None).is_err());

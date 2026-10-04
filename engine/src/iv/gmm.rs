@@ -224,7 +224,8 @@ pub enum WeightType {
     /// クラスター頑健。`groups`が`None`の場合は`CommonError::MissingClusterColumn`。
     Cluster { groups: Option<Vec<String>> },
     /// Newey-West（Bartlettカーネル）によるHAC型。`lags=None`なら`two_sls.rs`と同じ
-    /// 経験則で自動計算する。`time_order=None`なら`IvInput`の行順を時系列順とみなす。
+    /// 経験則で自動計算する。`time_order=None`なら`IvInput`の行順を時系列順とみなす（engineを直接使う
+    /// 場合の既定。`engine_pybind`は`hac_time`を必須にして常に`Some`で渡す）。
     Hac {
         lags: Option<i64>,
         time_order: Option<Vec<f64>>,
@@ -980,7 +981,7 @@ fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, IvError> {
 
 /// `weight_type=Hac`の`time_order`から、時系列の昇順に並べたときの行インデックス列を
 /// 求める（`two_sls.rs`の`time_ordering`と同型）。`None`の場合は`IvInput`の行順をそのまま
-/// 時系列順とみなす。
+/// 時系列順とみなす（engineを直接使う場合の既定。`engine_pybind`は常に`Some`で渡す）。
 ///
 /// `partial_cmp().unwrap()`について: `time_order`の値はNaN/無限大を含まないことが
 /// `engine_pybind::column_extraction`側で既に保証されている前提（`two_sls.rs`の

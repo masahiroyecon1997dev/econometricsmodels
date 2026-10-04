@@ -171,8 +171,9 @@ pub struct IVOptions {
     pub hac_lags: Option<i64>,
 
     /// Column name giving the time order for HAC, used by `cov_type="hac"` and, with
-    /// `estimator="gmm"`, by `gmm_weight_type="hac"`. Specifying it when neither uses it
-    /// raises `ValidationError`.
+    /// `estimator="gmm"`, by `gmm_weight_type="hac"`. Required when either is "hac"
+    /// (omitting it raises `ValidationError`): the row order of the data is never assumed
+    /// to be the time order. Specifying it when neither uses it raises `ValidationError`.
     #[pyo3(get)]
     pub hac_time: Option<String>,
 
@@ -1569,6 +1570,15 @@ mod tests {
                 time_order: Some(vec![2.0, 0.0, 3.0, 1.0]),
             }
         );
+    }
+
+    #[test]
+    fn parse_weight_type_requires_hac_time_for_hac_weight() {
+        let df = df!("t" => [1.0, 2.0, 3.0]).unwrap();
+        let mut options = default_options();
+        options.estimator = "gmm".to_string();
+        options.gmm_weight_type = Some("hac".to_string());
+        assert!(parse_weight_type(&df, &options).is_err());
     }
 
     #[test]

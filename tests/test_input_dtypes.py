@@ -505,7 +505,7 @@ def test_decimal_with_scale_keeps_its_value(roles_frame):
 
 # ── hac_time（順序だけに使う数値列） ────────────────────────────────
 
-# 手法/経路名 → `fit()`（時点列は既定で`t`。`hac_time=None`なら行順）。IVは
+# 手法/経路名 → `fit()`（時点列は既定で`t`、`hac_time`は必須）。IVは
 # 2SLSの`cov_type`と、GMMの`cov_type`・重み行列（`gmm_weight_type`）の3経路を持つ
 # （`hac_time`の抽出は`cov_type`側と`gmm_weight_type`側で別の関数）。
 HAC_FITS = {
@@ -834,3 +834,51 @@ def test_hac_time_matches_row_order_hac_on_sorted_rows(
 
     for name, value in expected.std_errors.items():
         assert result.std_errors[name] == pytest.approx(value, rel=1e-9)
+    _assert_hac_dependent_stats_match(result, expected)
+
+
+# HACの時間順に依存する公開統計量（残差は元の行順で返るため比較しない）。
+_HAC_SCALAR_STATS = (
+    "f_statistic",
+    "f_p_value",
+    "wald_statistic",
+    "wald_p_value",
+    "wu_hausman_statistic",
+    "wu_hausman_p_value",
+    "overid_statistic",
+    "overid_p_value",
+)
+_HAC_DICT_STATS = (
+    "p_values",
+    "test_stats",
+    "conf_int",
+    "weak_instrument_f_statistics",
+)
+
+
+def _assert_hac_dependent_stats_match(result, expected) -> None:
+    """`std_errors`以外のHAC依存の統計量（p値・信頼区間・F/Wald・IVの診断統計量・
+    第一段階）も、並べ替え済みデータの結果と一致すること。結果型ごとに持つ属性が
+    異なるため、存在する属性だけを比べる。
+    """
+    for name in _HAC_SCALAR_STATS:
+        if hasattr(expected, name):
+            assert getattr(result, name) == pytest.approx(
+                getattr(expected, name), rel=1e-9
+            ), name
+    for name in _HAC_DICT_STATS:
+        if not hasattr(expected, name):
+            continue
+        for key, value in getattr(expected, name).items():
+            assert getattr(result, name)[key] == pytest.approx(
+                value, rel=1e-9
+            ), (name, key)
+    if hasattr(expected, "first_stage"):
+        for key, stage in expected.first_stage().items():
+            actual = result.first_stage()[key]
+            for param, value in stage.std_errors.items():
+                assert actual.std_errors[param] == pytest.approx(
+                    value, rel=1e-9
+                )
+            for param, value in stage.p_values.items():
+                assert actual.p_values[param] == pytest.approx(value, rel=1e-9)

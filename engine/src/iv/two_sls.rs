@@ -762,7 +762,7 @@ fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, IvError> {
 
 /// `CovType::Hac`の`time_order`から、時系列の昇順に並べたときの行インデックス列を求める
 /// （`ols.rs`の`time_ordering`と同型）。`None`の場合は`IvInput`の行順をそのまま時系列順と
-/// みなす。
+/// みなす（engineを直接使う場合の既定。`engine_pybind`は常に`Some`で渡す）。
 ///
 /// `partial_cmp().unwrap()`について: `time_order`の値はNaN/無限大を含まないことが
 /// `engine_pybind::column_extraction`側で既に保証されている前提（`ols.rs`の

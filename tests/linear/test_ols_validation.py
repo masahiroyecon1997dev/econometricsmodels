@@ -541,6 +541,8 @@ def test_computation_error_is_runtime_error():
         ("cluster", "hac_lags", 2, 'cov_type="hac"'),
         ("classical", "hac_lags", 2, 'cov_type="hac"'),
         ("cluster", "hac_time", "x1", 'cov_type="hac"'),
+        ("classical", "hac_time", "x1", 'cov_type="hac"'),
+        ("hc1", "hac_time", "x1", 'cov_type="hac"'),
     ],
 )
 def test_option_unused_by_cov_type_raises(

@@ -251,6 +251,16 @@ class IVResults:
         return self._raw.cov_type
 
     @property
+    def hac_lags_used(self) -> int | None:
+        """Number of HAC (Newey-West) lags actually used: the explicit
+        `hac_lags` if given, otherwise the value chosen automatically,
+        `floor(4 * (n / 100) ** (2 / 9))`. Set when `cov_type="hac"` or,
+        for `estimator="gmm"` with `gmm_type` `"two_step"` or
+        `"iterated"`, `gmm_weight_type="hac"` (both share `hac_lags`, so
+        the value is the same); `None` otherwise."""
+        return self._raw.hac_lags_used
+
+    @property
     def estimator(self) -> str:
         """Estimator actually used (normalized to lowercase):
         `"2sls"` or `"gmm"`."""

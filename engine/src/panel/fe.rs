@@ -681,6 +681,10 @@ pub struct FeEstimator {
     /// `t_periods-1`（fixestの`ssc()`既定`t.df="min"`）。それ以外
     /// （Classical/HC1-3）は`df_resid`と同じ値。
     df_inference: usize,
+    /// `cov_type=Dk`のとき、実際に使われたバンド幅（`bandwidth`の明示指定値、または未指定時に
+    /// `floor(4*(t/100)^(2/9))`で自動計算した値）。`FeCovType::Dk`の`bandwidth`はユーザー指定値の
+    /// まま変更しないため別フィールドで保持する。`Dk`以外では`None`。
+    dk_bandwidth_used: Option<usize>,
     /// `time`のユニーク数。2-wayのみ`Some`、1-wayは`None`（2-wayはバランスパネル必須の
     /// ため、各entityの観測数とも一致する）。
     n_periods: Option<usize>,
@@ -845,6 +849,7 @@ impl FeEstimator {
         // （`ols::fit_allowing_no_regressors`の`df_inference`と同じ切り替えパターン、
         // ）。標準誤差のスケール計算に使う`K`（`fe_cluster_k_correction`）とは
         // 別軸の値であることに注意。
+        let mut dk_bandwidth_used = None;
         let (cov_params, df_inference) = match &cov_type {
             FeCovType::Classical => (
                 panel_classical_cov_params(&xtx_inv, ssr, df_resid, k),
@@ -938,6 +943,7 @@ impl FeEstimator {
                 let time_codes = dk_time.codes();
                 let t_periods = time_codes.n_groups();
                 let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
+                dk_bandwidth_used = Some(bw);
                 validate_dk_periods_cover_tested_coefficients(t_periods, k)?;
                 // 直前の`t_periods > k`により、ここで`t_periods=2`なら`k`は高々1。
                 if k >= 1
@@ -1026,6 +1032,7 @@ impl FeEstimator {
             df_model,
             df_resid,
             df_inference,
+            dk_bandwidth_used,
             n_periods,
             std_errors,
             test_stats,
@@ -1086,6 +1093,12 @@ impl FeEstimator {
     /// `t_periods-1`、それ以外は`df_resid`と同じ）。
     pub fn df_inference(&self) -> usize {
         self.df_inference
+    }
+
+    /// `cov_type=Dk`のとき、実際に使われたバンド幅（`bandwidth`の明示指定値、または未指定時に
+    /// 経験則で自動計算した値）。`Dk`以外は`None`。
+    pub fn dk_bandwidth_used(&self) -> Option<usize> {
+        self.dk_bandwidth_used
     }
 
     /// `time`のユニーク数（2-wayのみ`Some`、1-wayは`None`）。
@@ -3584,6 +3597,36 @@ mod tests {
         // 逆だった場合はこのテスト自体がエラーで失敗する）。使われている`time`
         // （`t_periods=3`）を使った場合の既知の値と一致することで、優先順位を確認する。
         assert!((*fe.std_errors().get(0, 0) - 0.112_778_272_530_122_7).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fe_estimator_dk_bandwidth_used_reflects_resolved_bandwidth() {
+        // `t_periods=3`の既定バンド幅は`floor(4*(3/100)^(2/9))=1`。明示指定はその値、
+        // `Dk`以外は`None`。
+        let (entity, time, x, y) = fixest_reference_input();
+        let bandwidth_used = |cov_type: FeCovType| {
+            let input = FeInput::from_columns(
+                &y,
+                std::slice::from_ref(&x),
+                vec!["x".to_string()],
+                &entity,
+                Some(&time),
+                "y".into(),
+            )
+            .unwrap();
+            FeEstimator::fit(input, FeEffects::OneWay, cov_type, 0.95)
+                .unwrap()
+                .dk_bandwidth_used()
+        };
+        let dk = |bandwidth: Option<i64>| FeCovType::Dk {
+            bandwidth,
+            time: TimeKeys::lexicographic(time.clone()),
+        };
+
+        assert_eq!(bandwidth_used(dk(None)), Some(1));
+        assert_eq!(bandwidth_used(dk(Some(0))), Some(0));
+        assert_eq!(bandwidth_used(dk(Some(2))), Some(2));
+        assert_eq!(bandwidth_used(FeCovType::Classical), None);
     }
 
     #[test]

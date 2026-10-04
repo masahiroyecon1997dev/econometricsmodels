@@ -287,6 +287,11 @@ pub struct FEResult {
     /// lowercase; e.g. "classical", "hc1", "cluster", "dk").
     #[pyo3(get)]
     pub cov_type: String,
+    /// Driscoll-Kraay bandwidth actually used: the explicit `dk_bandwidth` if given, otherwise
+    /// the value chosen automatically, `floor(4 * (t / 100) ^ (2 / 9))` where `t` is the number
+    /// of unique time periods in `dk_time`. `None` unless `cov_type="dk"`.
+    #[pyo3(get)]
+    pub dk_bandwidth_used: Option<i64>,
     #[pyo3(get)]
     pub f_statistic: f64,
     #[pyo3(get)]
@@ -555,6 +560,7 @@ pub(crate) fn fit(
         n_entities: estimator.input().n_entities(),
         n_periods: estimator.n_periods(),
         cov_type: cov_type_lower,
+        dk_bandwidth_used: estimator.dk_bandwidth_used().map(|bw| bw as i64),
         f_statistic: estimator.f_statistic(),
         f_p_value: estimator.f_p_value(),
         f_df_num: estimator.f_df().map(|(num, _)| num),

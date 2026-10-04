@@ -171,6 +171,14 @@ class OLSResults:
         return self._raw.cov_type
 
     @property
+    def hac_lags_used(self) -> int | None:
+        """Number of HAC (Newey-West) lags actually used: the explicit
+        `hac_lags` if given, otherwise the value chosen automatically,
+        `floor(4 * (n / 100) ** (2 / 9))`. `None` unless
+        `cov_type="hac"`."""
+        return self._raw.hac_lags_used
+
+    @property
     def r_squared(self) -> float:
         """Coefficient of determination (R²)."""
         return self._raw.r_squared

@@ -53,11 +53,14 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
 
 `REResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `test_stats`（**t検定**） /
 `p_values` / `conf_lower` / `conf_upper` / `param_names`（`param_names[0]`は常に`"const"`） /
-`residuals` / `dep_var_name` / `n_obs` / `df_resid` / `df_model` / `n_entities` / `cov_type` /
+`residuals` / `dep_var_name` / `n_obs` / `df_resid` / `df_model` / `n_entities` / `cov_type` / `dk_bandwidth_used` /
 `f_statistic` / `f_p_value` / `log_likelihood` / `aic` / `bic` / `r_squared_within` /
 `r_squared_between` / `r_squared_overall` / `hausman_statistic` / `hausman_p_value` /
 `hausman_df`。
 
+- **`dk_bandwidth_used`**: `cov_type="dk"`のとき実際に使われたバンド幅（FEと同じ意味、`fe-spec.md`
+  「結果構造体」参照）。`dk`以外は`None`。ハウスマン検定の補助回帰が内部で解決するバンド幅は
+  本体と同じ値だが、この項目はRE本体の`fit()`で解決した値を報告する。
 - **REは切片を持つ**ため`param_names[0]`が常に`"const"`になる（FEはwithin変換で切片が構造的
   に消えるため無い）。
 - **`estimator()`（内部委譲した`OlsEstimator`）とRE自身のgetterの使い分けはFEと同型だが

@@ -908,6 +908,10 @@ pub struct ReEstimator {
     /// `t_periods-1`（fixestの`ssc()`既定`t.df="min"`）。それ以外
     /// （Classical/HC1-3）は`df_resid`と同じ値。
     df_inference: usize,
+    /// `cov_type=Dk`のとき、実際に使われたバンド幅（`bandwidth`の明示指定値、または未指定時に
+    /// `floor(4*(t/100)^(2/9))`で自動計算した値）。`ReCovType::Dk`の`bandwidth`はユーザー指定値の
+    /// まま変更しないため別フィールドで保持する。`Dk`以外では`None`。
+    dk_bandwidth_used: Option<usize>,
     /// 残差自由度`n - k`（`re-spec.md`3.3節）。`k`は変換済み定数列を含む設計行列の
     /// 全列数（`estimator.input().k()`）。`OlsEstimator::fit`自体は`include_intercept=false`
     /// （切片も含めて`x_all`に組み立て済みのため）で呼ばれているが、`OlsInput::k()`は
@@ -1103,6 +1107,7 @@ impl ReEstimator {
             .as_ref()
             .unwrap_or(input.entity_codes());
 
+        let mut dk_bandwidth_used = None;
         let (cov_params, df_inference) = match &cov_type {
             ReCovType::Classical => (
                 panel_classical_cov_params(&xtx_inv, ssr, df_resid, df_model),
@@ -1159,6 +1164,7 @@ impl ReEstimator {
                 let time = input.time_codes().ok_or(PanelError::DkRequiresTime)?;
                 let t_periods = time.n_groups();
                 let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
+                dk_bandwidth_used = Some(bw);
                 // F統計量（傾き`q = df_model - 1`個の同時検定、分母自由度`t_periods - 1`）と
                 // ハウスマン検定（同じ時点構造のDKで`X̃`の傾き`q`個を同時検定）は、ともに
                 // `t_periods > q`が成り立たないと共分散部分行列が特異になる。
@@ -1268,6 +1274,7 @@ impl ReEstimator {
             conf_lower,
             conf_upper,
             df_inference,
+            dk_bandwidth_used,
             df_resid,
             df_model,
             f_statistic,
@@ -1354,6 +1361,12 @@ impl ReEstimator {
     /// 同じ式になる）。
     pub fn df_resid(&self) -> usize {
         self.df_resid
+    }
+
+    /// `cov_type=Dk`のとき、実際に使われたバンド幅（`bandwidth`の明示指定値、または未指定時に
+    /// 経験則で自動計算した値）。`Dk`以外は`None`。
+    pub fn dk_bandwidth_used(&self) -> Option<usize> {
+        self.dk_bandwidth_used
     }
 
     /// t検定・信頼区間に使う自由度（`cov_type=Cluster`のとき`G-1`、`Dk`のとき
@@ -2026,6 +2039,39 @@ mod tests {
         assert_eq!(re.df_resid(), 5);
         assert_eq!(re.df_inference(), 2);
         assert_eq!(re.stat_dist(), inference::StatDist::T { df: 2 });
+    }
+
+    #[test]
+    fn re_estimator_dk_bandwidth_used_reflects_resolved_bandwidth() {
+        // `t_periods=3`の既定バンド幅は`floor(4*(3/100)^(2/9))=1`。明示指定はその値、
+        // `Dk`以外は`None`。
+        let entity = strings(&["a", "a", "a", "b", "b", "c", "c"]);
+        let time = strings(&["1", "2", "3", "1", "2", "1", "2"]);
+        let bandwidth_used = |cov_type: ReCovType| {
+            let input = ReInput::from_columns(
+                &[3.0, 4.0, 7.0, 8.0, 9.0, 6.0, 10.0],
+                &[vec![1.0, 2.0, 4.0, 2.0, 3.0, 5.0, 6.0]],
+                vec!["x1".to_string()],
+                &entity,
+                Some(&time),
+                "y".into(),
+            )
+            .unwrap();
+            ReEstimator::fit(input, cov_type, 0.95)
+                .unwrap()
+                .dk_bandwidth_used()
+        };
+
+        assert_eq!(bandwidth_used(ReCovType::Dk { bandwidth: None }), Some(1));
+        assert_eq!(
+            bandwidth_used(ReCovType::Dk { bandwidth: Some(0) }),
+            Some(0)
+        );
+        assert_eq!(
+            bandwidth_used(ReCovType::Dk { bandwidth: Some(2) }),
+            Some(2)
+        );
+        assert_eq!(bandwidth_used(ReCovType::Hc1), None);
     }
 
     #[test]

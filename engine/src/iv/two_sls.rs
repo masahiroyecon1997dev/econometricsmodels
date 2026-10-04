@@ -111,6 +111,10 @@ pub struct TwoSlsEstimator {
     /// t検定・信頼区間・F検定に使った自由度。`cov_type=Cluster`のときだけ`G-1`
     /// （`fit()`のコメント参照）で、それ以外は`df_resid`と一致する。
     df_inference: usize,
+    /// `cov_type=Hac`のとき、実際に使われたラグ数（`hac_lags`の明示指定値、または未指定時に
+    /// 経験則で自動計算した値）。`CovType::Hac`の`lags`はユーザー指定値のまま変更しない
+    /// ため別フィールドで保持する。`Hac`以外では`None`。
+    hac_lags_used: Option<usize>,
     df_model: usize,
     r_squared: f64,
     adj_r_squared: f64,
@@ -279,6 +283,7 @@ impl TwoSlsEstimator {
 
         // `df_inference`はt検定・信頼区間・F検定に使う自由度。`cov_type=Cluster`のときだけ
         // `G-1`に切り替える（OLSと同じ慣行、`ols.rs`の`fit()`docコメント参照）。
+        let mut hac_lags_used = None;
         let (cov_params, df_inference) = match &cov_type {
             CovType::Classical => {
                 let sigma2 = ssr / (df_resid as f64);
@@ -302,6 +307,7 @@ impl TwoSlsEstimator {
             ),
             CovType::Hac { lags, time_order } => {
                 let lags = resolve_hac_lags(*lags, n)?;
+                hac_lags_used = Some(lags);
                 let order = time_ordering(time_order, n);
                 (
                     hac_cov_params(x_hat, &residuals, &xtx_inv, n, k, lags, &order),
@@ -503,6 +509,7 @@ impl TwoSlsEstimator {
             conf_upper,
             df_resid,
             df_inference,
+            hac_lags_used,
             df_model,
             r_squared,
             adj_r_squared,
@@ -545,6 +552,12 @@ impl TwoSlsEstimator {
     /// 使用した標準誤差の種別（呼び出し元が指定した`cov_type`）。
     pub fn cov_type(&self) -> &CovType {
         &self.cov_type
+    }
+
+    /// `cov_type=Hac`のとき、実際に使われたラグ数（`hac_lags`の明示指定値、または
+    /// 未指定時に経験則で自動計算した値）。`Hac`以外は`None`。
+    pub fn hac_lags_used(&self) -> Option<usize> {
+        self.hac_lags_used
     }
 
     /// 構造残差 `e = y - Xβ̂`（n, 1）。モジュール冒頭のdocコメント参照
@@ -1860,6 +1873,33 @@ mod tests {
                     < 1e-8
             );
         }
+    }
+
+    /// `hac_lags_used()`: `lags=None`なら経験則（`n=8`→2）、明示指定ならその値、Hac以外は
+    /// `None`。第一段階のOLSも同じ`cov_type`で推定されるため同じ値になる。
+    #[test]
+    fn hac_lags_used_reflects_resolved_lags() {
+        let fit = |cov_type: CovType| {
+            TwoSlsEstimator::fit(nontrivial_x_exog_input(), cov_type, 0.95).unwrap()
+        };
+
+        let auto = fit(CovType::Hac {
+            lags: None,
+            time_order: row_time_order(8),
+        });
+        assert_eq!(auto.hac_lags_used(), Some(2));
+        for (_, first_stage) in auto.first_stage_estimators() {
+            assert_eq!(first_stage.hac_lags_used(), Some(2));
+        }
+
+        let explicit = fit(CovType::Hac {
+            lags: Some(3),
+            time_order: row_time_order(8),
+        });
+        assert_eq!(explicit.hac_lags_used(), Some(3));
+
+        assert_eq!(fit(CovType::Classical).hac_lags_used(), None);
+        assert_eq!(fit(CovType::Hc1).hac_lags_used(), None);
     }
 
     /// `time_order`を指定した場合、行順がシャッフルされていても時系列順に並べ替えてから

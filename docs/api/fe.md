@@ -32,7 +32,8 @@ defines the time periods. It is never taken from `FEOptions.time`, which only se
 fixed effects, so the fixed effects and the HAC kernel may use different time granularities (for
 example quarterly fixed effects with yearly periods for the kernel). `FEOptions.dk_bandwidth` sets
 the kernel bandwidth explicitly; when omitted it is chosen automatically from the number of
-unique time periods.
+unique time periods. The bandwidth actually used is reported as `FEResults.dk_bandwidth_used`
+(`None` unless `cov_type="dk"`).
 
 The small-sample corrections and the degrees of freedom of the t and F tests follow `fixest`'s
 `ssc()` defaults: `"cluster"` scales by `G/(G-1) · (n-1)/(n-K)` and uses `G - 1` degrees of

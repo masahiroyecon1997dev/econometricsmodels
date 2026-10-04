@@ -199,6 +199,11 @@ pub struct OLSResult {
     /// lowercase; e.g. `"classical"`, `"hc1"`, `"hac"`, `"cluster"`).
     #[pyo3(get)]
     pub cov_type: String,
+    /// Number of HAC (Newey-West) lags actually used: the explicit `hac_lags` if given,
+    /// otherwise the value chosen automatically, `floor(4 * (n / 100) ^ (2 / 9))`.
+    /// `None` unless `cov_type="hac"`.
+    #[pyo3(get)]
+    pub hac_lags_used: Option<i64>,
     #[pyo3(get)]
     pub r_squared: f64,
     #[pyo3(get)]
@@ -434,6 +439,7 @@ pub(crate) fn ols_estimator_to_result(
         dep_var_name: estimator.input().dep_var_name().to_string(),
         n_obs: estimator.input().nobs(),
         cov_type: cov_type_lower,
+        hac_lags_used: estimator.hac_lags_used().map(|lags| lags as i64),
         r_squared: estimator.r_squared(),
         adj_r_squared: estimator.adj_r_squared(),
         f_statistic: estimator.f_statistic(),

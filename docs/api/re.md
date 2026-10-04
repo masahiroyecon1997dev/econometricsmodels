@@ -13,7 +13,8 @@ OLS's `"classical"` default that [FE](fe.md#standard-error-types) makes, and for
 reason. Supported values are `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"`, and `"dk"` —
 `"hc0"` is not supported. `"dk"` is the same Driscoll-Kraay panel estimator FE uses, and it
 requires `REOptions.dk_time`, the column that defines the time periods (the same option as
-`FEOptions.dk_time`). RE has no `time` option, since it has no two-way structure.
+`FEOptions.dk_time`). The bandwidth actually used is reported as `REResults.dk_bandwidth_used`
+(`None` unless `cov_type="dk"`). RE has no `time` option, since it has no two-way structure.
 
 The small-sample corrections and the degrees of freedom of the t tests follow the same Stata/R
 convention as FE (`fixest`'s `ssc()` defaults; `plm::vcovHC(type = "sss")` for `"cluster"`):

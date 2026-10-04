@@ -1089,9 +1089,12 @@
 - **気づいた経緯**: 2026-09-05、`HAC_MAXLAGS`（`benchmark/linear/constants.py`）の
   設計を巡るユーザーとの議論中に、IV側の自動ラグ選択式の一致がどこまで
   検証されているかを確認した過程で判明。
-- **状態**: 未対応（記録のみ、着手要否はユーザー判断待ち）。ラグ数を結果に
-  含める案は別途**Issue #282**として発行済み（これが実現すれば、本項目の
-  直接クロス言語検証テストも結果を介して書けるようになる）。
+- **状態**: 対応済み（2026-10-04、[#282](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/282)）。
+  実際に使われたラグ数を結果に露出させ（OLS/WLS/IVは`hac_lags_used`、FE/REのDKは
+  `dk_bandwidth_used`）、`tests/linear/test_ols_api.py`・`test_wls_api.py`・
+  `tests/iv/test_iv_api.py`・`tests/panel/test_fe_api.py`・`test_re_api.py`が複数の標本サイズ
+  （境界`n=51200`を含む）で`benchmark.common.hac_auto_lag`と直接比較する形で解消した
+  （上記「Claudeの所感」の標準誤差比較案ではなく、結果を介した直接比較を採用）。
 
 ### 65. IV: クラスター数`G<=q`の構造方程式向け事前チェック（Issue #289）が、Python APIからは実質到達不能
 

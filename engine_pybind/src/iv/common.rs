@@ -439,6 +439,13 @@ pub struct IVResult {
     /// lowercase; e.g. `"classical"`, `"hc1"`, `"hac"`, `"cluster"`).
     #[pyo3(get)]
     pub cov_type: String,
+    /// Number of HAC (Newey-West) lags actually used: the explicit `hac_lags` if given,
+    /// otherwise the value chosen automatically, `floor(4 * (n / 100) ^ (2 / 9))`. `Some` when
+    /// `cov_type="hac"` or, with `estimator="gmm"` and `gmm_type` `"two_step"`/`"iterated"`,
+    /// `gmm_weight_type="hac"` (both share `hac_lags`, so the value is the same); `None`
+    /// otherwise.
+    #[pyo3(get)]
+    pub hac_lags_used: Option<i64>,
     /// Estimator actually used (echoes `IVOptions.estimator`, normalized to
     /// lowercase): `"2sls"` or `"gmm"`.
     #[pyo3(get)]
@@ -991,6 +998,7 @@ pub(crate) fn fit(
             converged: estimator.converged(),
             n_iter: estimator.n_iter(),
             cov_type: cov_type_lower,
+            hac_lags_used: estimator.hac_lags_used().map(|lags| lags as i64),
             estimator: estimator_lower,
             gmm_weight_type: weight_type_lower,
             gmm_type: Some(gmm_type_lower),
@@ -1038,6 +1046,7 @@ pub(crate) fn fit(
         converged: true,
         n_iter: 1,
         cov_type: cov_type_lower,
+        hac_lags_used: estimator.hac_lags_used().map(|lags| lags as i64),
         estimator: estimator_lower,
         // `gmm_weight_type`はGMM専用の概念のため`estimator="2sls"`では常に`None`
         // （`IVResult.gmm_weight_type`のdocコメント参照）。

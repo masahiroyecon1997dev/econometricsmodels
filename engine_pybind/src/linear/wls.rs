@@ -221,6 +221,11 @@ pub struct WLSResult {
     /// lowercase; e.g. `"classical"`, `"hc1"`, `"hac"`, `"cluster"`).
     #[pyo3(get)]
     pub cov_type: String,
+    /// Number of HAC (Newey-West) lags actually used: the explicit `hac_lags` if given,
+    /// otherwise the value chosen automatically, `floor(4 * (n / 100) ^ (2 / 9))`.
+    /// `None` unless `cov_type="hac"`.
+    #[pyo3(get)]
+    pub hac_lags_used: Option<i64>,
     #[pyo3(get)]
     pub r_squared: f64,
     #[pyo3(get)]
@@ -426,6 +431,7 @@ pub fn fit(
         dep_var_name: estimator.input().dep_var_name().to_string(),
         n_obs: estimator.input().nobs(),
         cov_type: cov_type_lower,
+        hac_lags_used: estimator.hac_lags_used().map(|lags| lags as i64),
         // r_squared/adj_r_squared/log_likelihood/aic/bicは`estimator`（変換後データに対する
         // OLS）ではなく`wls_estimator`側の値を使う。元の（変換前の）y・weightsを使って
         // 計算し直したもので、`estimator`側の値は変換のヤコビアン補正等が欠けており

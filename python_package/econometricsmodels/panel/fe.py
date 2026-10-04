@@ -240,6 +240,15 @@ class FEResults:
         return self._raw.cov_type
 
     @property
+    def dk_bandwidth_used(self) -> int | None:
+        """Driscoll-Kraay bandwidth actually used: the explicit
+        `dk_bandwidth` if given, otherwise the value chosen automatically,
+        `floor(4 * (t / 100) ** (2 / 9))` where `t` is the number of
+        unique time periods in `FEOptions.dk_time`. `None` unless
+        `cov_type="dk"`."""
+        return self._raw.dk_bandwidth_used
+
+    @property
     def f_statistic(self) -> float:
         """F-statistic for the joint significance of the slope
         coefficients (classical F-test when `cov_type="classical"`, a

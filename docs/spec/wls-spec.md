@@ -42,6 +42,8 @@ WLS（Weighted Least Squares）の確定済み仕様。`engine/src/linear/wls.rs
 型としては別に定義する（重み付き残差等、WLS固有フィールドが将来追加される可能性があり、
 `OLSResult`との乖離リスクをOptions（共有）より高く見積もったため）。
 
+- `hac_lags_used`（`cov_type="hac"`のとき実際に使われたラグ数、他は`None`）は`OLSResult`と同じ
+  意味（`ols-spec.md`「結果構造体」参照）。`WlsEstimator`が内部で保持する`OlsEstimator`の値をそのまま使う。
 - `residuals`は**元スケール（unweighted）の残差** `ε_i = y_i - x_i'β̂`を公開する（statsmodelsの
   `.resid`相当）。理由: 残差プロット等の診断用途では元スケールの方が直感的で、OLSの`residuals`
   とも定義が揃う。重み付き残差（`.wresid`相当、`ε̃_i = sqrt(w_i)ε_i`）はPhase1では公開しない。

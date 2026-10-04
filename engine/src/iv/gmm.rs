@@ -276,6 +276,13 @@ pub struct GmmEstimator {
     /// 呼び出し元が指定した`cov_type`（`weight_type`とは独立、モジュール冒頭のdocコメント
     /// 「標準誤差・検定統計量（`cov_type`対応）」参照）。
     cov_type: CovType,
+    /// 実際に使われたHACラグ数（`hac_lags`の明示指定値、または未指定時に経験則で
+    /// 自動計算した値）。`cov_type=Hac`、または点推定の重み行列`weight_type=Hac`
+    /// （2段階・反復のみ）のいずれかが該当するときに`Some`、どちらも該当しなければ`None`。
+    /// 両方がHacで`lags`が異なる場合は`cov_type`側を優先する（`engine_pybind`は両者に
+    /// 同じ`hac_lags`を渡すため通常は一致する）。`CovType::Hac`/`WeightType::Hac`の
+    /// `lags`はユーザー指定値のまま変更しないため別フィールドで保持する。
+    hac_lags_used: Option<usize>,
     /// 標準誤差 (k, 1)。`cov_type`に応じたサンドイッチ型分散の対角成分の平方根。
     std_errors: Mat<f64>,
     /// z統計量 (k, 1) = params / std_errors（`docs/spec/iv-spec.md`3.2節、GMMはz分布）。
@@ -454,6 +461,7 @@ impl GmmEstimator {
         // ループ内で実際に収束条件を満たした場合のみtrueに更新する（`max_iter>=3`のため
         // 比較対象となる前回推定値は必ず存在する）。
         let mut converged = !matches!(gmm_type, GmmType::Iterated { .. });
+        let mut hac_lags_used: Option<usize> = None;
         let (max_steps, tol): (i64, Option<f64>) = match &gmm_type {
             GmmType::OneStep => (1, None),
             GmmType::TwoStep { .. } => (2, None),
@@ -469,6 +477,7 @@ impl GmmEstimator {
             let hac_precomputed = match &weight_type {
                 WeightType::Hac { lags, time_order } => {
                     let lags = resolve_hac_lags(*lags, n)?;
+                    hac_lags_used = Some(lags);
                     let order = time_ordering(time_order, n);
                     Some((lags, order))
                 }
@@ -600,6 +609,7 @@ impl GmmEstimator {
             CovType::Hc3 => gmm_hc_omega(&z, &residuals, &ztz, n, k, l, HcVariant::Hc3)?,
             CovType::Hac { lags, time_order } => {
                 let lags = resolve_hac_lags(*lags, n)?;
+                hac_lags_used = Some(lags);
                 let order = time_ordering(time_order, n);
                 // Newey-West重み付け以外の小標本補正を持たないため、点推定用の
                 // `hac_moment_covariance`と計算式が一致する（モジュール冒頭の
@@ -672,6 +682,7 @@ impl GmmEstimator {
             nobs: n,
             k,
             cov_type,
+            hac_lags_used,
             std_errors,
             test_stats,
             p_values,
@@ -762,6 +773,13 @@ impl GmmEstimator {
     /// 使用した標準誤差の種別（呼び出し元が指定した`cov_type`、`weight_type`とは独立）。
     pub fn cov_type(&self) -> &CovType {
         &self.cov_type
+    }
+
+    /// 実際に使われたHACラグ数。`cov_type=Hac`または`weight_type=Hac`のいずれかが該当する
+    /// ときに`Some`（明示指定値、または未指定時に経験則で自動計算した値）、どちらも
+    /// 該当しなければ`None`。両方がHacで`lags`が異なる場合は`cov_type`側の値。
+    pub fn hac_lags_used(&self) -> Option<usize> {
+        self.hac_lags_used
     }
 
     /// 標準誤差 (k, 1)。
@@ -2375,6 +2393,95 @@ mod tests {
                     < 1e-8
             );
         }
+    }
+
+    /// `hac_lags_used()`は`cov_type=Hac`または`weight_type=Hac`のどちらかが該当すれば
+    /// 解決後のラグ数（`n=16`の自動計算は2）、どちらも該当しなければ`None`。両方がHacで
+    /// `lags`が異なる場合は`cov_type`側を優先する。
+    #[test]
+    fn hac_lags_used_covers_cov_type_and_weight_type() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let hac = |lags: Option<i64>| CovType::Hac {
+            lags,
+            time_order: row_time_order(16),
+        };
+        let hac_weight = |lags: Option<i64>| WeightType::Hac {
+            lags,
+            time_order: row_time_order(16),
+        };
+        let lags_used = |gmm_type: GmmType, cov_type: CovType| {
+            let input = IvInput::from_columns(
+                &y,
+                &[],
+                vec![],
+                std::slice::from_ref(&x_endog),
+                vec!["endog1".to_string()],
+                &[z1.clone(), z2.clone()],
+                vec!["z1".to_string(), "z2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
+            // 収束は検証対象外（反復GMMが`max_iter`内に収束しなくてもラグは報告される）
+            GmmEstimator::fit(input, gmm_type, false, cov_type, 0.95)
+                .unwrap()
+                .hac_lags_used()
+        };
+
+        // どちらもHacでない
+        assert_eq!(lags_used(GmmType::OneStep, CovType::Classical), None);
+        assert_eq!(
+            lags_used(
+                GmmType::TwoStep {
+                    weight: WeightType::Robust
+                },
+                CovType::Hc1
+            ),
+            None
+        );
+        // `cov_type=Hac`のみ（1段階は`weight_type`を持たない）
+        assert_eq!(lags_used(GmmType::OneStep, hac(None)), Some(2));
+        assert_eq!(
+            lags_used(
+                GmmType::TwoStep {
+                    weight: WeightType::Robust
+                },
+                hac(Some(3))
+            ),
+            Some(3)
+        );
+        // `weight_type=Hac`のみ
+        assert_eq!(
+            lags_used(
+                GmmType::TwoStep {
+                    weight: hac_weight(None)
+                },
+                CovType::Classical
+            ),
+            Some(2)
+        );
+        // 反復GMMでも`weight_type=Hac`のラグが報告される
+        assert_eq!(
+            lags_used(
+                GmmType::Iterated {
+                    weight: hac_weight(None),
+                    max_iter: 5,
+                    tol: 1e-6
+                },
+                CovType::Classical
+            ),
+            Some(2)
+        );
+        // 両方Hacで`lags`が異なる場合は`cov_type`側
+        assert_eq!(
+            lags_used(
+                GmmType::TwoStep {
+                    weight: hac_weight(Some(1))
+                },
+                hac(Some(3))
+            ),
+            Some(3)
+        );
     }
 
     /// `time_order`を指定した場合、行順がシャッフルされていても時系列順に並べ替えてから

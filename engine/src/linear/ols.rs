@@ -291,6 +291,10 @@ pub struct OlsEstimator {
     /// ときだけ`G-1`になる（`fit()`のdocコメント「df_inference」参照）。`cov_params`と
     /// 同じ理由で保持している。
     df_inference: usize,
+    /// `cov_type=Hac`のとき、実際に使われたラグ数（`hac_lags`明示指定、または`None`なら
+    /// 経験則による自動計算の結果）。`CovType::Hac`の`lags`はユーザー指定値のまま
+    /// 変更しないため別フィールドで保持する。`Hac`以外では`None`。
+    hac_lags_used: Option<usize>,
 }
 
 impl OlsEstimator {
@@ -416,6 +420,7 @@ impl OlsEstimator {
         // 慣行でもある。`df_resid`自体は分散推定量`σ̂²`・調整済みR²・AIC/BIC等では
         // 引き続き`n-k`のまま使う。`docs/spec/ols-spec.md`
         // 「標準誤差」のクラスター参照）。
+        let mut hac_lags_used = None;
         let (cov_params, df_inference) = match &cov_type {
             CovType::Classical => (classical_cov_params(sigma2, &xtx_inv, k), df_resid),
             CovType::Hc0 => (
@@ -436,6 +441,7 @@ impl OlsEstimator {
             ),
             CovType::Hac { lags, time_order } => {
                 let lags = resolve_hac_lags(*lags, n)?;
+                hac_lags_used = Some(lags);
                 let order = time_ordering(time_order, n);
                 (
                     hac_cov_params(input.x(), &residuals, &xtx_inv, n, k, lags, &order),
@@ -523,6 +529,7 @@ impl OlsEstimator {
             bic,
             cov_params,
             df_inference,
+            hac_lags_used,
         })
     }
 
@@ -613,6 +620,12 @@ impl OlsEstimator {
     /// 通常は`df_resid()`だが`cov_type=Cluster`のときだけ`G-1`。
     pub fn df_inference(&self) -> usize {
         self.df_inference
+    }
+
+    /// `cov_type=Hac`のとき、実際に使われたラグ数（`hac_lags`の明示指定値、または
+    /// 未指定時に経験則で自動計算した値）。`Hac`以外は`None`。
+    pub fn hac_lags_used(&self) -> Option<usize> {
+        self.hac_lags_used
     }
 
     /// F統計量の自由度`(分子, 分母)`。傾き係数が無く`f_statistic()`がNaNのときは`None`。
@@ -1778,6 +1791,56 @@ mod tests {
         let se = estimator.std_errors();
         assert!((*se.get(0, 0) - 0.577_350_269_189_624_1).abs() < 1e-6);
         assert!((*se.get(1, 0) - 0.164_924_225_024_705_75).abs() < 1e-6);
+    }
+
+    /// `n`行の単純回帰（`y = x + (i % 7)`）を`cov_type`で推定し`hac_lags_used`を返す補助関数。
+    fn hac_lags_used_for(n: usize, cov_type: CovType) -> Option<usize> {
+        let x: Vec<f64> = (0..n).map(|i| i as f64).collect();
+        let y: Vec<f64> = (0..n).map(|i| i as f64 + (i % 7) as f64).collect();
+        let input = OlsInput::from_columns(&y, &[x], vec!["x1".to_string()], true, "y".to_string())
+            .unwrap();
+        OlsEstimator::fit(input, cov_type, 0.95)
+            .unwrap()
+            .hac_lags_used()
+    }
+
+    /// `hac_lags`未指定（`None`）なら経験則`floor(4*(n/100)^(2/9))`で解決した値が
+    /// `hac_lags_used()`に入る。`n=5`→2、`n=100`→4（`(n/100)^(2/9)=1`ちょうど）、
+    /// `n=1000`→6（`4*10^(2/9)≈6.67`）。
+    #[test]
+    fn hac_lags_used_returns_auto_selected_lags_when_lags_is_none() {
+        for (n, expected) in [(5, 2), (100, 4), (1000, 6)] {
+            let cov_type = CovType::Hac {
+                lags: None,
+                time_order: row_time_order(n),
+            };
+            assert_eq!(hac_lags_used_for(n, cov_type), Some(expected), "n={n}");
+        }
+    }
+
+    /// `hac_lags`を明示指定した場合は、自動計算値（`n=100`なら4）ではなく指定値が入る。
+    #[test]
+    fn hac_lags_used_returns_explicit_lags_when_specified() {
+        for lags in [0, 3, 10] {
+            let cov_type = CovType::Hac {
+                lags: Some(lags),
+                time_order: row_time_order(100),
+            };
+            assert_eq!(
+                hac_lags_used_for(100, cov_type),
+                Some(lags as usize),
+                "lags={lags}"
+            );
+        }
+    }
+
+    /// `cov_type`がHac以外なら`None`。
+    #[test]
+    fn hac_lags_used_is_none_for_non_hac_cov_types() {
+        for cov_type in [CovType::Classical, CovType::Hc0, CovType::Hc3] {
+            let label = format!("{cov_type:?}");
+            assert_eq!(hac_lags_used_for(20, cov_type), None, "{label}");
+        }
     }
 
     /// `time_order`を指定した場合、行順がシャッフルされていても時系列順に並べ替えてから

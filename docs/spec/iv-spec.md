@@ -78,7 +78,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 
 `IVResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `test_stats` / `stat_dist` / `stat_df` / `p_values` /
 `conf_lower` / `conf_upper` / `param_names` / `residuals` / `dep_var_name` / `n_obs` /
-`df_resid` / `df_model` / `converged` / `n_iter` / `cov_type` / `estimator` / `gmm_weight_type` /
+`df_resid` / `df_model` / `converged` / `n_iter` / `cov_type` / `hac_lags_used` / `estimator` / `gmm_weight_type` /
 `wald_statistic` / `wald_p_value` / `wald_dist` / `wald_df_num` / `wald_df_denom` /
 `r_squared` / `adj_r_squared` / `weak_instrument_f_statistics` / `weak_instrument_f_df_num` /
 `weak_instrument_f_df_denom` / `overid_df` / `wu_hausman_df_num` / `wu_hausman_df_denom` /
@@ -89,6 +89,12 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   分布は`stat_dist`（`"t"`/`"normal"`）と`stat_df`（t分布の自由度。正規分布は`None`）で示す。
   2SLSの`cov_type="cluster"`は`df_resid`ではなく`G-1`を使うため、`stat_df`は実際に使った
   自由度である（`df_resid`とは限らない）。
+- **`hac_lags_used`**: 実際に使われたHACラグ数（`hac_lags`明示指定ならその値、未指定なら経験則
+  `floor(4*(n/100)^(2/9))`の自動計算値）。`cov_type="hac"`、または`estimator="gmm"`かつ
+  `gmm_type`が`two_step`/`iterated`で`gmm_weight_type="hac"`のとき`Some`、それ以外は`None`
+  （`hac_lags`は`cov_type`と`gmm_weight_type`で共用のため、両方がHacでも値は同じ。engine層では
+  両者のラグが異なる場合`cov_type`側を優先する）。`first_stage()`の各`OLSResult`も同じ`cov_type`で
+  推定されるため、HACなら同じ値を持つ。
 - **`estimator`**: `IVOptions.estimator`を正規化した小文字文字列（`"2sls"`/`"gmm"`）。
   常に反映される。
 - **`gmm_weight_type`**: 型は`Option<String>`。`estimator="gmm"`のときだけ

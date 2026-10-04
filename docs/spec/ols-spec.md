@@ -34,7 +34,7 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
 
 `OLSResult`（`#[pyclass]`、`skip_from_py_object`）が公開する配列＋名前リスト:
 `params` / `std_errors` / `test_stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` /
-`residuals` / `dep_var_name` / `n_obs` / `cov_type`（実際に使われた種別の小文字文字列） /
+`residuals` / `dep_var_name` / `n_obs` / `cov_type`（実際に使われた種別の小文字文字列） / `hac_lags_used` /
 `r_squared` / `adj_r_squared` / `f_statistic` / `f_p_value` / `f_df_num` / `f_df_denom` /
 `df_resid` / `df_model` / `log_likelihood` / `aic` / `bic`。
 
@@ -42,6 +42,9 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
   検定に使った自由度（`df_resid`、`cov_type="cluster"`のときだけ`G-1`）。傾き係数が無く
   `f_statistic`がNaNのときは`f_df_num`/`f_df_denom`も`None`。
 
+- `hac_lags_used`: `cov_type="hac"`のとき実際に使われたラグ数`L`（`hac_lags`明示指定ならその値、
+  未指定なら経験則で自動計算した値。engineの`resolve_hac_lags`の戻り値をそのまま保持する）。
+  `hac`以外は`None`。入力`hac_lags`（`None`のまま）とは別フィールドで、ユーザー指定値は書き換えない。
 - `conf_int`は`conf_lower`/`conf_upper`の2配列に分割（engine内部表現・pyo3実装の簡潔さを優先）。
 - `k×kの分散共分散行列（cov_params）はPython側に公開しない`。`OlsEstimator`自体は非公開
   フィールドとして保持する（クレート内の他系統からの部分Wald検定の再利用のため、
@@ -240,6 +243,9 @@ $$
   `test_ols_reference.py`（statsmodels主リファレンスとの数値照合、`ols.json`＋ライブ照合）/
   `test_ols_crosscheck.py`（R独立実装、`ols_crosscheck.json`）。一般的なテスト方針は
   `.claude/rules/testing-policy.md`を参照。
+- `hac_lags_used`（自動選択ラグ数）は、`tests/linear/test_ols_api.py`が複数の標本サイズ
+  （境界`n=51200`を含む）でPython側の独立実装`benchmark.common.hac_auto_lag`と直接比較する
+  （Rust側`resolve_hac_lags`との式の一致の直接検証。WLS・IV・FE/REのDKも各`*_api.py`で同様）。
 - pyfixestはOLSの正確性検証には使わない（HC2/HC3にHC1用の小標本補正を誤って適用する既知の
   実装バグがあるため）。性能比較専用（[`../performance/ols.md`](../performance/ols.md)）。
 - 実データセット: `wage1`（`lwage ~ educ + exper + tenure`）・

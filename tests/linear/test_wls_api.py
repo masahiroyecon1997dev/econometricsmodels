@@ -19,7 +19,13 @@ from functools import partial
 import polars as pl
 import pytest
 from _assertions import assert_close
-from _helpers import ROW_TIME, hac_time_for, with_row_time
+from _helpers import (
+    HAC_AUTO_LAG_SAMPLE_SIZES,
+    ROW_TIME,
+    hac_lag_frame,
+    hac_time_for,
+    with_row_time,
+)
 from _tolerances import TOLERANCES
 from econometricsmodels import (
     OLS,
@@ -29,6 +35,8 @@ from econometricsmodels import (
     WLSOptions,
     WLSResults,
 )
+
+from benchmark.common import hac_auto_lag
 
 # predict()のstatsmodels照合は主リファレンス照合と同じ許容誤差
 # （`_tolerances.py`の"wls_reference"）で行う（`test_ols_api.py`と同じ方針、
@@ -543,3 +551,31 @@ def test_augment_without_intercept_matches_predict():
     augmented_new = res.augment(new_data)
     expected_new = [row["predicted"] for row in res.predict(new_data)]
     assert augmented_new["predicted"].to_list() == expected_new
+
+
+# ── HACの実使用ラグ数（hac_lags_used）─────────────────────────────
+
+
+@pytest.mark.parametrize("n", HAC_AUTO_LAG_SAMPLE_SIZES)
+def test_hac_lags_used_matches_python_auto_lag_formula(n):
+    """`hac_lags`省略時の`hac_lags_used`が、Python側の独立実装
+    （`benchmark.common.hac_auto_lag`）と複数の標本サイズで一致すること。
+    """
+    options = WLSOptions(cov_type="hac", hac_time=ROW_TIME)
+    res = WLS(
+        hac_lag_frame(n),
+        y="y",
+        x=["x1", "x2"],
+        weight="weight",
+        options=options,
+    ).fit()
+    assert res.hac_lags_used == hac_auto_lag(n)
+
+
+def test_hac_lags_used_echoes_explicit_hac_lags_and_is_none_unless_hac():
+    df = hac_lag_frame(50)
+    kwargs = {"y": "y", "x": ["x1", "x2"], "weight": "weight"}
+    hac = WLSOptions(cov_type="hac", hac_lags=3, hac_time=ROW_TIME)
+    assert WLS(df, options=hac, **kwargs).fit().hac_lags_used == 3
+    hc1 = WLSOptions(cov_type="hc1")
+    assert WLS(df, options=hc1, **kwargs).fit().hac_lags_used is None

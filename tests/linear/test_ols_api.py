@@ -27,10 +27,18 @@ import polars as pl
 import pytest
 import statsmodels.api as sm
 from _assertions import assert_close
-from _helpers import ROW_TIME, hac_time_for, with_row_time
+from _helpers import (
+    HAC_AUTO_LAG_SAMPLE_SIZES,
+    ROW_TIME,
+    hac_lag_frame,
+    hac_time_for,
+    with_row_time,
+)
 from _ols_helpers import our_fit, our_fit_cluster, sm_fit
 from _tolerances import TOLERANCES
 from econometricsmodels import OLS, OLSOptions, ValidationError
+
+from benchmark.common import hac_auto_lag
 
 # predict() の statsmodels 照合も凍結フィクスチャ照合と同じ許容誤差
 # （`_tolerances.py` の "ols_reference"）で行う。`_assertions.assert_close`
@@ -72,6 +80,34 @@ def test_hac_auto_lags_runs_and_returns_finite_std_errors(dataset):
     assert res.cov_type == "hac"
     for se in res.std_errors.values():
         assert se > 0.0
+
+
+@pytest.mark.parametrize("n", HAC_AUTO_LAG_SAMPLE_SIZES)
+def test_hac_lags_used_matches_python_auto_lag_formula(n):
+    """`hac_lags`省略時の`hac_lags_used`が、Python側の独立実装
+    （`benchmark.common.hac_auto_lag`）と複数の標本サイズで一致すること。
+    """
+    options = OLSOptions(cov_type="hac", hac_time=ROW_TIME)
+    res = OLS(hac_lag_frame(n), y="y", x=["x1", "x2"], options=options).fit()
+    assert res.hac_lags_used == hac_auto_lag(n)
+
+
+@pytest.mark.parametrize("hac_lags", [0, 3, 10])
+def test_hac_lags_used_echoes_explicit_hac_lags(dataset, hac_lags):
+    """`hac_lags`を明示指定したときは、自動計算値ではなく指定値が返ること。"""
+    options = OLSOptions(cov_type="hac", hac_lags=hac_lags, hac_time=ROW_TIME)
+    res = OLS(
+        with_row_time(dataset), y="y", x=["x1", "x2"], options=options
+    ).fit()
+    assert res.hac_lags_used == hac_lags
+
+
+@pytest.mark.parametrize("cov_type", ["classical", "hc0", "hc3"])
+def test_hac_lags_used_is_none_unless_hac(dataset, cov_type):
+    res = OLS(
+        dataset, y="y", x=["x1", "x2"], options=OLSOptions(cov_type=cov_type)
+    ).fit()
+    assert res.hac_lags_used is None
 
 
 def test_residuals_sum_near_zero(dataset):

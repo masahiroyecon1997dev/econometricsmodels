@@ -17,9 +17,16 @@ from __future__ import annotations
 import polars as pl
 import pytest
 from _constants import DATA_DIR
-from _helpers import ROW_TIME, hac_time_for
+from _helpers import (
+    HAC_AUTO_LAG_SAMPLE_SIZES,
+    ROW_TIME,
+    hac_lag_frame,
+    hac_time_for,
+)
 from _iv_helpers import our_fit
 from econometricsmodels import IV, IVOptions, IVResults, ValidationError
+
+from benchmark.common import hac_auto_lag
 
 # ── 成功パス・結果型 ──────────────────────────────────────────────
 
@@ -654,3 +661,68 @@ def test_gmm_only_options_default_to_none():
     assert options.gmm_max_iter is None
     assert options.gmm_tol is None
     assert options.raise_on_non_convergence is None
+
+
+# ── HACの実使用ラグ数（hac_lags_used）─────────────────────────────
+
+
+@pytest.mark.parametrize("n", HAC_AUTO_LAG_SAMPLE_SIZES)
+@pytest.mark.parametrize("estimator", ["2sls", "gmm"])
+def test_hac_lags_used_matches_python_auto_lag_formula(n, estimator):
+    """`hac_lags`省略時の`hac_lags_used`が、Python側の独立実装
+    （`benchmark.common.hac_auto_lag`）と複数の標本サイズで一致すること
+    （2SLSとGMMはRust側で別々に実装されている）。第一段階の結果も同じ値になる。
+    """
+    options = IVOptions(estimator=estimator, cov_type="hac", hac_time=ROW_TIME)
+    res = our_fit(hac_lag_frame(n), options=options)
+    assert res.hac_lags_used == hac_auto_lag(n)
+    for first_stage in res.first_stage().values():
+        assert first_stage.hac_lags_used == hac_auto_lag(n)
+
+
+@pytest.mark.parametrize("n", [20, 1000])
+@pytest.mark.parametrize("gmm_type", ["two_step", "iterated"])
+def test_hac_lags_used_with_hac_weight_type_only(n, gmm_type):
+    """GMMで`cov_type`はHacでなく`gmm_weight_type="hac"`だけでも、実際に
+    使われたラグ数が返ること。
+    """
+    options = IVOptions(
+        estimator="gmm",
+        gmm_type=gmm_type,
+        gmm_weight_type="hac",
+        hac_time=ROW_TIME,
+        # 収束は検証対象外（反復GMMが収束しなくてもラグは報告される）
+        **(
+            {"raise_on_non_convergence": False}
+            if gmm_type == "iterated"
+            else {}
+        ),
+    )
+    res = our_fit(hac_lag_frame(n), options=options)
+    assert res.cov_type == "classical"
+    assert res.hac_lags_used == hac_auto_lag(n)
+
+
+@pytest.mark.parametrize("estimator", ["2sls", "gmm"])
+def test_hac_lags_used_echoes_explicit_hac_lags(iv_dataset, estimator):
+    options = IVOptions(
+        estimator=estimator, cov_type="hac", hac_lags=3, hac_time=ROW_TIME
+    )
+    assert our_fit(iv_dataset, options=options).hac_lags_used == 3
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        IVOptions(cov_type="hc1"),
+        IVOptions(estimator="gmm", cov_type="hc1"),
+        # `one_step`は重み行列を持たないため`gmm_weight_type`は使われない。
+        IVOptions(estimator="gmm", gmm_type="one_step"),
+        IVOptions(
+            estimator="gmm", gmm_type="two_step", gmm_weight_type="robust"
+        ),
+    ],
+    ids=["2sls_hc1", "gmm_hc1", "gmm_one_step", "gmm_robust_weight"],
+)
+def test_hac_lags_used_is_none_without_hac(iv_dataset, options):
+    assert our_fit(iv_dataset, options=options).hac_lags_used is None

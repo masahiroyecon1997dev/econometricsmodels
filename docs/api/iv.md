@@ -4,7 +4,7 @@
 
 ## Standard error types
 
-`IVOptions.cov_type` supports `"classical"`, `"hc0"` through `"hc3"`, `"hac"` (with `hac_lag`/`hac_time`), and `"cluster"` (with `cluster`) — the same range as [OLS](../getting-started.md#switching-the-type-of-standard-error). `stats` (test statistics) and `p_values` use a t-test for `estimator="2sls"` and a z-test for `estimator="gmm"`.
+`IVOptions.cov_type` supports `"classical"`, `"hc0"` through `"hc3"`, `"hac"` (with `hac_lag`/`hac_time`), and `"cluster"` (with `cluster`) — the same range as [OLS](../getting-started.md#switching-the-type-of-standard-error). The number of HAC lags actually used (the explicit `hac_lags`, or the automatic value when omitted) is reported as `IVResults.hac_lags_used`; it is set when `cov_type="hac"` or, for `estimator="gmm"` with `gmm_type` `"two_step"`/`"iterated"`, `gmm_weight_type="hac"`, and `None` otherwise. `stats` (test statistics) and `p_values` use a t-test for `estimator="2sls"` and a z-test for `estimator="gmm"`.
 
 ## GMM weight type and iteration
 

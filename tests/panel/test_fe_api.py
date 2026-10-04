@@ -17,7 +17,10 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _fe_helpers import our_fit
+from _helpers import HAC_AUTO_LAG_SAMPLE_SIZES, hac_lag_panel_frame
 from econometricsmodels import FE, FEOptions, FEResults
+
+from benchmark.common import hac_auto_lag
 
 # ── 成功パス・結果型 ──────────────────────────────────────────────
 
@@ -258,3 +261,34 @@ def test_cluster_se_exceeds_classical_under_serial_correlation():
     classical_variance_sum = sum(se**2 for se in classical.std_errors.values())
     clustered_variance_sum = sum(se**2 for se in clustered.std_errors.values())
     assert clustered_variance_sum > classical_variance_sum
+
+
+# ── Driscoll-Kraayバンド幅の実使用値（dk_bandwidth_used）─────────────
+
+
+@pytest.mark.parametrize("n_periods", HAC_AUTO_LAG_SAMPLE_SIZES)
+def test_dk_bandwidth_used_matches_python_auto_lag_formula(n_periods):
+    """`dk_bandwidth`省略時の`dk_bandwidth_used`が、時点数`t`に対する
+    Python側の独立実装（`benchmark.common.hac_auto_lag`、OLSのHACと
+    同じ式を`n`ではなく`t`に適用）と一致すること。
+    """
+    df = hac_lag_panel_frame(n_periods)
+    options = FEOptions(cov_type="dk", dk_time="time")
+    res = our_fit(df, options=options)
+    assert res.dk_bandwidth_used == hac_auto_lag(n_periods)
+
+
+@pytest.mark.parametrize("dk_bandwidth", [0, 2, 5])
+def test_dk_bandwidth_used_echoes_explicit_dk_bandwidth(dk_bandwidth):
+    df = hac_lag_panel_frame(10)
+    options = FEOptions(
+        cov_type="dk", dk_time="time", dk_bandwidth=dk_bandwidth
+    )
+    assert our_fit(df, options=options).dk_bandwidth_used == dk_bandwidth
+
+
+@pytest.mark.parametrize("cov_type", ["classical", "hc1", "cluster"])
+def test_dk_bandwidth_used_is_none_unless_dk(cov_type):
+    df = hac_lag_panel_frame(10)
+    res = our_fit(df, options=FEOptions(cov_type=cov_type))
+    assert res.dk_bandwidth_used is None

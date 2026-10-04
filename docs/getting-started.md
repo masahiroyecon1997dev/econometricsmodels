@@ -45,6 +45,8 @@ options = OLSOptions(cov_type="hac", hac_time="period")
 result = OLS(df, y="y", x=["x1"], options=options).fit()
 ```
 
+When `hac_lags` is omitted, the number of lags is chosen automatically as `floor(4 * (n / 100) ** (2 / 9))`. The lag count actually used (the explicit `hac_lags` or the automatic value) is available as `result.hac_lags_used`, which is `None` for any other `cov_type`.
+
 See the [API Reference](api/ols.md) for the full list of available options.
 
 ## Retrieving results

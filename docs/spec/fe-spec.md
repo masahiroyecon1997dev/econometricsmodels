@@ -63,10 +63,13 @@ FE固有の内容のみを記載する。
 
 `FEResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `test_stats`（**t検定**） /
 `p_values` / `conf_lower` / `conf_upper` / `param_names`（切片なし） / `residuals` /
-`dep_var_name` / `n_obs` / `df_resid` / `df_model` / `n_entities` / `n_periods`（2-wayのみ、1-wayは`None`） / `cov_type` / `f_statistic` /
+`dep_var_name` / `n_obs` / `df_resid` / `df_model` / `n_entities` / `n_periods`（2-wayのみ、1-wayは`None`） / `cov_type` / `dk_bandwidth_used` / `f_statistic` /
 `f_p_value` / `f_df_num` / `f_df_denom`（`(k, df_resid)`、`k=0`で`None`） / `log_likelihood` / `aic` / `bic` / `r_squared_within` / `r_squared_between` /
 `r_squared_overall`。
 
+- **`dk_bandwidth_used`**: `cov_type="dk"`のとき実際に使われたバンド幅（`dk_bandwidth`明示指定ならその値、
+  未指定なら`resolve_dk_bandwidth`が`floor(4*(t/100)^(2/9))`で解決した値、`t`は`dk_time`のユニーク数）。
+  `dk`以外は`None`。OLS/IVの`hac_lags_used`とは基準が観測数`n`でなく時点数`t`のため別名にしている。
 - **`n_entities`は`FeInput::n_entities()`（engine側getter）から取得する**: `FeInput`が構築時に
   一度だけ作ったエンティティコード（`GroupCodes`）のユニーク数をそのまま使い、`engine_pybind`側で
   数え直さない。

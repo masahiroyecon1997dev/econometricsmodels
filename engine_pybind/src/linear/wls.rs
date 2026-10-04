@@ -24,7 +24,9 @@ use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
 use crate::column_extraction::{
     extract_dataframe, extract_f64_column, extract_f64_columns, x_column_names,
 };
-use crate::option_values::{extract_strict_float, extract_strict_opt_int};
+use crate::option_values::{
+    extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
+};
 use crate::validation::{
     RoleValue, validate_common_roles, validate_no_duplicate_roles, validate_no_existing_column,
 };
@@ -65,7 +67,7 @@ use crate::validation::{
 pub struct WLSOptions {
     /// Standard error type: one of "classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster".
     /// Case-insensitive.
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub cov_type: String,
 
     /// Whether the engine should automatically add an intercept column.
@@ -84,7 +86,7 @@ pub struct WLSOptions {
     /// Column name to use as the cluster group key when `cov_type="cluster"`.
     /// Refers to a column in `data` rather than being passed as a separate array.
     /// Specifying it with any other `cov_type` raises `ValidationError`.
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub cluster: Option<String>,
 
     /// Number of lags (bandwidth) for HAC (Newey-West) when `cov_type="hac"`.
@@ -96,7 +98,7 @@ pub struct WLSOptions {
     /// Column name giving the time order for HAC when `cov_type="hac"`.
     /// When `None`, the row order of `data` is treated as the time order.
     /// Specifying it with any other `cov_type` raises `ValidationError`.
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub hac_time: Option<String>,
 }
 
@@ -113,12 +115,12 @@ impl WLSOptions {
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
-        cov_type: String,
+        #[pyo3(from_py_with = crate::option_values::cov_type_arg)] cov_type: String,
         include_intercept: bool,
         #[pyo3(from_py_with = crate::option_values::confidence_level_arg)] confidence_level: f64,
-        cluster: Option<String>,
+        #[pyo3(from_py_with = crate::option_values::cluster_arg)] cluster: Option<String>,
         #[pyo3(from_py_with = crate::option_values::hac_lags_arg)] hac_lags: Option<i64>,
-        hac_time: Option<String>,
+        #[pyo3(from_py_with = crate::option_values::hac_time_arg)] hac_time: Option<String>,
     ) -> Self {
         Self {
             cov_type,
@@ -139,6 +141,24 @@ impl WLSOptions {
     #[setter]
     fn set_hac_lags(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
         self.hac_lags = extract_strict_opt_int(value, "hac_lags")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_cov_type(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.cov_type = extract_strict_text(value, "cov_type")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_cluster(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.cluster = extract_strict_opt_column(value, "cluster")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_hac_time(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.hac_time = extract_strict_opt_column(value, "hac_time")?;
         Ok(())
     }
 

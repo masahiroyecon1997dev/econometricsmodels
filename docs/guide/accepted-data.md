@@ -16,11 +16,11 @@ A column is read in one of four roles, and each role accepts different dtypes. A
 | Role | Arguments | Accepted dtypes |
 |---|---|---|
 | Numeric value | `y`, `x`, `weight`, `x_exog`, `x_endog`, `instruments` | Integers (`Int8` to `Int128`, `UInt8` to `UInt64`), floats (`Float16`, `Float32`, `Float64`), `Boolean`, `Decimal` |
-| Group identity | `entity`, `cluster` | Integers, floats, `String`, `Categorical`, `Enum`, `Boolean`, `Date` |
-| Time period (panel) | `time`, `dk_time` | Integers, floats, `String`, `Categorical`, `Enum`, `Date`, `Datetime` |
-| Time order (HAC) | `hac_time` | The numeric dtypes above, `Date`, `Datetime` |
+| Group identity | `entity`, `cluster` | Integers, floats, `String`, `Categorical`, `Enum`, `Boolean`, `Date`, `Datetime` (no time zone) |
+| Time period (panel) | `time`, `dk_time` | Integers, floats, `String`, `Categorical`, `Enum`, `Date`, `Datetime` (no time zone) |
+| Time order (HAC) | `hac_time` | The numeric dtypes above, `Date`, `Datetime` (with or without a time zone) |
 
-Not accepted in a numeric role: `String`, `Categorical`, `Enum`, `Date`, `Datetime`, `Time`, `Duration`, `Binary`, `List`, `Array`, `Struct`. Also not accepted as a group identity or a time period: `Time`, `Duration`, `Decimal`, `Binary`, `List`, `Array`, `Struct`. A column of the `Null` dtype (every value is missing) is reported as containing missing values, not as a dtype problem.
+Not accepted in a numeric role: `String`, `Categorical`, `Enum`, `Date`, `Datetime`, `Time`, `Duration`, `Binary`, `List`, `Array`, `Struct`. Also not accepted as a group identity or a time period: `Time`, `Duration`, `Decimal`, `Binary`, `List`, `Array`, `Struct`. A `Datetime` with a time zone is rejected as a group identity or a time period, with a message that says how to remove the zone: convert it to the zone you want to keep, then call `.dt.replace_time_zone(None)`. (`hac_time` is read as a number and accepts a time zone.) A column of the `Null` dtype (every value is missing) is reported as containing missing values, not as a dtype problem.
 
 If the numbers you want to use are stored as strings or as dates, convert them yourself so that the intent is explicit:
 
@@ -44,11 +44,11 @@ Numeric values are converted to 64-bit floating point before the estimation. Flo
 
 The conversion is silent. If the exact value matters, check the range of your data before estimating.
 
-Group identity and time period columns are compared by their text form, so only equality matters (the order of time periods is covered next). Floats are accepted but must be finite: a NaN or an infinite value in a float column of any of these roles is an error, as it is for numeric values.
+Group identity and time period columns are compared by their text form, so only equality matters (the order of time periods is covered next). Floats are accepted but must be finite: a NaN or an infinite value in a float column of any of these roles is an error, as it is for numeric values. Because the comparison is on the text form, `0.0` and `-0.0` are different groups. If such values can occur in a float key, convert the column to an integer or a string first.
 
 ## Order of time periods
 
-For `cov_type="dk"` (Driscoll–Kraay) in FE and RE, the order of the periods is taken from the sort order of the time labels **as text**. `Date` and `Datetime` columns, ISO 8601 strings and zero-padded labels sort as intended. Integer labels with different numbers of digits do not: `1, 2, ..., 12` sort as `1, 10, 11, 12, 2, ...`, which changes the standard errors without any error. The same applies to the other types that are sorted by their text: the labels of an `Enum` or a `Categorical` are sorted alphabetically, not in the order the type defines, and a `Datetime` with a time zone carries a UTC offset in its text, so periods that repeat when daylight saving time ends can come out in the wrong order. Until this is changed, give the time column a form whose text order is the time order, for example a `Date`, a `Datetime` without a time zone, or integers zero-padded in a string column. This does not affect the point estimates, other `cov_type` values, or `hac_time` (which is read as a number).
+For `cov_type="dk"` (Driscoll–Kraay) in FE and RE, the order of the periods is taken from the sort order of the time labels **as text**. `Date` and `Datetime` columns, ISO 8601 strings and zero-padded labels sort as intended. Integer labels with different numbers of digits do not: `1, 2, ..., 12` sort as `1, 10, 11, 12, 2, ...`, which changes the standard errors without any error. The same applies to the other types that are sorted by their text: the labels of an `Enum` or a `Categorical` are sorted alphabetically, not in the order the type defines. Until this is changed, give the time column a form whose text order is the time order, for example a `Date`, a `Datetime` without a time zone, or integers zero-padded in a string column. This does not affect the point estimates, other `cov_type` values, or `hac_time` (which is read as a number).
 
 ## Argument types
 

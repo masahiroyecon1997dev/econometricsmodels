@@ -84,7 +84,6 @@ TIME_FITS = {
 
 # 同一性だけのキーに使えないdtype / 時点のキーに使えないdtypeと、メッセージ中の呼び名。
 UNSUPPORTED_IDENTITY_DTYPES = [
-    (pl.Datetime, "Datetime"),
     (pl.Duration, "Duration"),
     (pl.Time, "Time"),
     (pl.Decimal(18, 0), "Decimal"),
@@ -95,7 +94,7 @@ UNSUPPORTED_IDENTITY_DTYPES = [
 ]
 UNSUPPORTED_TIME_DTYPES = [
     (pl.Boolean, "Boolean"),
-    *[x for x in UNSUPPORTED_IDENTITY_DTYPES if x[1] != "Datetime"],
+    *UNSUPPORTED_IDENTITY_DTYPES,
 ]
 
 
@@ -110,7 +109,7 @@ def _with_key(frame, column, dtype):
         expr = base.cast(pl.String).cast(dtype)
     elif dtype == pl.Date:
         expr = base.cast(pl.Int32).cast(pl.Date)
-    elif dtype in (pl.Datetime, pl.Datetime("ns")):
+    elif dtype == pl.Datetime or isinstance(dtype, pl.Datetime):
         expr = base.cast(pl.Int64).cast(dtype)
     else:
         expr = base.cast(dtype)
@@ -134,6 +133,8 @@ IDENTITY_OK = [
     pl.Categorical,
     pl.Enum([str(i) for i in range(10)]),
     pl.Date,
+    pl.Datetime,
+    pl.Datetime("ns"),
 ]
 
 
@@ -399,3 +400,65 @@ def test_row_order_does_not_change_the_dk_result():
     assert _dk_se(shuffled, "t_padded") == pytest.approx(
         _dk_se(padded, "t_padded"), rel=1e-12
     )
+
+
+# ── タイムゾーン付きのDatetime ──────────────────────────────────────
+
+
+def _aware(frame, column):
+    return frame.with_columns(
+        pl.col(column).cast(pl.Int64).cast(pl.Datetime("us", "UTC"))
+    )
+
+
+@pytest.mark.parametrize("method", list(CLUSTER_FITS))
+def test_datetime_with_time_zone_is_rejected_as_cluster(frame, method):
+    """タイムゾーン付きの`Datetime`は、対処法を示すメッセージで拒否する。"""
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_KEY_WITH_TIME_ZONE,
+            name="cluster",
+            time_zone="UTC",
+            role="group identifier",
+        ),
+    ):
+        CLUSTER_FITS[method](_aware(frame, "cluster"))
+
+
+@pytest.mark.parametrize("method", list(ENTITY_FITS))
+def test_datetime_with_time_zone_is_rejected_as_entity(frame, method):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_KEY_WITH_TIME_ZONE,
+            name="entity",
+            time_zone="UTC",
+            role="group identifier",
+        ),
+    ):
+        ENTITY_FITS[method](_aware(frame, "entity"))
+
+
+@pytest.mark.parametrize("method", list(TIME_FITS))
+def test_datetime_with_time_zone_is_rejected_as_time(frame, method):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_KEY_WITH_TIME_ZONE,
+            name="t",
+            time_zone="UTC",
+            role="time",
+        ),
+    ):
+        TIME_FITS[method](_aware(frame, "t"))
+
+
+def test_removing_the_time_zone_makes_the_column_usable(frame):
+    """メッセージが示す対処（`replace_time_zone(None)`）で、同じ結果が得られる。"""
+    expected = TIME_FITS["FE.dk_time"](frame)
+    aware = _aware(frame, "t")
+
+    naive = aware.with_columns(pl.col("t").dt.replace_time_zone(None))
+
+    _assert_same_result(TIME_FITS["FE.dk_time"](naive), expected)

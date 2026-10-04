@@ -68,7 +68,8 @@ use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
 use crate::linear::common::{build_cov_type, least_squares_error_is_computation_error, mat_to_vec};
 use crate::linear::ols::{OLSResult, ols_estimator_to_result};
 use crate::option_values::{
-    extract_strict_float, extract_strict_opt_float, extract_strict_opt_int,
+    extract_strict_float, extract_strict_opt_column, extract_strict_opt_float,
+    extract_strict_opt_int, extract_strict_opt_text, extract_strict_text,
 };
 use crate::validation::{
     RoleValue, reject_unused_option, validate_no_const_collision, validate_no_duplicate_roles,
@@ -135,13 +136,13 @@ pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
 #[derive(Debug, Clone)]
 pub struct IVOptions {
     /// Estimation estimator: "2sls" (default) or "gmm". Case-insensitive.
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub estimator: String,
 
     /// Standard error type: one of "classical", "hc0" through "hc3", "hac", "cluster".
     /// Case-insensitive. For `estimator="gmm"`, this is independent of `gmm_weight_type`
     /// (the weight matrix used for point estimation, see `gmm_weight_type` below).
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub cov_type: String,
 
     /// Whether the engine should automatically add an intercept column to `x_exog`.
@@ -158,7 +159,7 @@ pub struct IVOptions {
     /// with `estimator="gmm"`, by `gmm_weight_type="cluster"` (also when
     /// `cov_type` is not "cluster"). Specifying it when neither uses it raises
     /// `ValidationError`.
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub cluster: Option<String>,
 
     /// Number of lags (bandwidth) for HAC (Newey-West), used by `cov_type="hac"` and, with
@@ -170,7 +171,7 @@ pub struct IVOptions {
     /// Column name giving the time order for HAC, used by `cov_type="hac"` and, with
     /// `estimator="gmm"`, by `gmm_weight_type="hac"`. Specifying it when neither uses it
     /// raises `ValidationError`.
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub hac_time: Option<String>,
 
     /// Weight matrix used for GMM point estimation: one of "classical" (homoskedastic),
@@ -180,14 +181,14 @@ pub struct IVOptions {
     /// `gmm_type="one_step"` (which does not use a weight matrix) raises `ValidationError`.
     /// "cluster"/"hac" draw from the same `cluster`/`hac_lags`/`hac_time` fields as
     /// `cov_type` (no separate fields; see module docstring "GMMのgmm_weight_type").
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub gmm_weight_type: Option<String>,
 
     /// GMM estimation type: "one_step" (weight matrix `(Z'Z)^-1` only), "two_step"
     /// (efficient two-step GMM), or "iterated" (repeat until convergence).
     /// Case-insensitive. `None` (default) means "two_step" for `estimator="gmm"`.
     /// Specifying it with `estimator="2sls"` raises `ValidationError`.
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub gmm_type: Option<String>,
 
     /// Maximum number of GMM estimations for `gmm_type="iterated"`, counting the initial
@@ -232,15 +233,17 @@ impl IVOptions {
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
-        estimator: String,
-        cov_type: String,
+        #[pyo3(from_py_with = crate::option_values::estimator_arg)] estimator: String,
+        #[pyo3(from_py_with = crate::option_values::cov_type_arg)] cov_type: String,
         include_intercept: bool,
         #[pyo3(from_py_with = crate::option_values::confidence_level_arg)] confidence_level: f64,
-        cluster: Option<String>,
+        #[pyo3(from_py_with = crate::option_values::cluster_arg)] cluster: Option<String>,
         #[pyo3(from_py_with = crate::option_values::hac_lags_arg)] hac_lags: Option<i64>,
-        hac_time: Option<String>,
-        gmm_weight_type: Option<String>,
-        gmm_type: Option<String>,
+        #[pyo3(from_py_with = crate::option_values::hac_time_arg)] hac_time: Option<String>,
+        #[pyo3(from_py_with = crate::option_values::gmm_weight_type_arg)] gmm_weight_type: Option<
+            String,
+        >,
+        #[pyo3(from_py_with = crate::option_values::gmm_type_arg)] gmm_type: Option<String>,
         #[pyo3(from_py_with = crate::option_values::gmm_max_iter_arg)] gmm_max_iter: Option<i64>,
         #[pyo3(from_py_with = crate::option_values::gmm_tol_arg)] gmm_tol: Option<f64>,
         raise_on_non_convergence: Option<bool>,
@@ -282,6 +285,42 @@ impl IVOptions {
     #[setter]
     fn set_gmm_tol(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
         self.gmm_tol = extract_strict_opt_float(value, "gmm_tol")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_estimator(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.estimator = extract_strict_text(value, "estimator")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_cov_type(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.cov_type = extract_strict_text(value, "cov_type")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_cluster(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.cluster = extract_strict_opt_column(value, "cluster")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_hac_time(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.hac_time = extract_strict_opt_column(value, "hac_time")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_gmm_weight_type(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.gmm_weight_type = extract_strict_opt_text(value, "gmm_weight_type")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_gmm_type(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.gmm_type = extract_strict_opt_text(value, "gmm_type")?;
         Ok(())
     }
 

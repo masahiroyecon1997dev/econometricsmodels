@@ -563,3 +563,109 @@ def test_numpy_uint64_beyond_i64_is_validation_error(df, how):
         match=escaped(msgs.INVALID_HAC_LAGS, hac_lags=I64_MAX, n=N),
     ):
         _fit(options, df)
+
+
+# ── 文字列のoption ─────────────────────────────────────────────────
+#
+# 列名（`cluster`・`hac_time`・`time`・`dk_time`）は`fit()`の列名引数と同じ形式、
+# それ以外（`cov_type`・`solver`等の選択肢）は`must be a str`のメッセージになる。
+
+# (オプションクラス, フィールド名, 種類, `None`を許すか)。種類は`column`・`text`。
+STRING_FIELDS = [
+    (OLSOptions, "cov_type", "text", False),
+    (OLSOptions, "cluster", "column", True),
+    (OLSOptions, "hac_time", "column", True),
+    (WLSOptions, "cov_type", "text", False),
+    (WLSOptions, "cluster", "column", True),
+    (WLSOptions, "hac_time", "column", True),
+    (LogitOptions, "cov_type", "text", False),
+    (LogitOptions, "cluster", "column", True),
+    (LogitOptions, "solver", "text", False),
+    (ProbitOptions, "cov_type", "text", False),
+    (ProbitOptions, "cluster", "column", True),
+    (ProbitOptions, "solver", "text", False),
+    (TobitOptions, "cov_type", "text", False),
+    (TobitOptions, "cluster", "column", True),
+    (TobitOptions, "solver", "text", False),
+    (IVOptions, "estimator", "text", False),
+    (IVOptions, "cov_type", "text", False),
+    (IVOptions, "cluster", "column", True),
+    (IVOptions, "hac_time", "column", True),
+    (IVOptions, "gmm_weight_type", "text", True),
+    (IVOptions, "gmm_type", "text", True),
+    (FEOptions, "cov_type", "text", False),
+    (FEOptions, "time", "column", True),
+    (FEOptions, "cluster", "column", True),
+    (FEOptions, "dk_time", "column", True),
+    (REOptions, "cov_type", "text", False),
+    (REOptions, "time", "column", True),
+    (REOptions, "cluster", "column", True),
+]
+STRING_IDS = [f"{c.__name__}.{n}" for c, n, _, _ in STRING_FIELDS]
+
+
+def _string_message(name: str, kind: str, got: str) -> str:
+    noun = "a str column name" if kind == "column" else "a str"
+    return re.escape(f"'{name}' must be {noun}, got {got}")
+
+
+@pytest.mark.parametrize(
+    ("cls", "name", "kind", "nullable"), STRING_FIELDS, ids=STRING_IDS
+)
+@pytest.mark.parametrize(
+    ("value", "got"),
+    [(1, "int"), (["a"], "list"), (b"a", "bytes"), (1.5, "float")],
+    ids=["int", "list", "bytes", "float"],
+)
+def test_string_option_rejects_non_str_with_type_error(
+    cls, name, kind, nullable, value, got
+):
+    """文字列のoptionに`str`以外を渡すと、引数名と実際の型を含む`TypeError`
+    （コンストラクタ・属性代入とも）。
+    """
+    pattern = _string_message(name, kind, got)
+    with pytest.raises(TypeError, match=pattern):
+        cls(**{name: value})
+
+    with pytest.raises(TypeError, match=pattern):
+        setattr(cls(), name, value)
+
+
+@pytest.mark.parametrize(
+    ("cls", "name", "kind", "nullable"), STRING_FIELDS, ids=STRING_IDS
+)
+def test_string_option_none_handling(cls, name, kind, nullable):
+    """`None`は、`None`を許すoptionだけが受け付け、許さないoptionは`TypeError`。"""
+    if nullable:
+        assert getattr(cls(**{name: None}), name) is None
+        options = cls(**{name: "abc"})
+        setattr(options, name, None)
+        assert getattr(options, name) is None
+    else:
+        pattern = _string_message(name, kind, "NoneType")
+        with pytest.raises(TypeError, match=pattern):
+            cls(**{name: None})
+        with pytest.raises(TypeError, match=pattern):
+            setattr(cls(), name, None)
+
+
+@pytest.mark.parametrize(
+    ("cls", "name", "kind", "nullable"), STRING_FIELDS, ids=STRING_IDS
+)
+def test_string_option_stores_the_value_in_its_own_field(
+    cls, name, kind, nullable
+):
+    """正しい文字列は、コンストラクタでも属性代入でも同じフィールドに入り、
+    他のフィールドは変わらない。
+    """
+    others = {n: getattr(cls(), n) for c, n, _, _ in STRING_FIELDS if c is cls}
+
+    constructed = cls(**{name: "value_abc"})
+    assigned = cls()
+    setattr(assigned, name, "value_abc")
+
+    for options in (constructed, assigned):
+        assert getattr(options, name) == "value_abc"
+        for other, default in others.items():
+            if other != name:
+                assert getattr(options, other) == default

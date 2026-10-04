@@ -83,7 +83,9 @@ use crate::column_extraction::{
 };
 use crate::errors::ValidationError;
 use crate::linear::common::mat_to_vec;
-use crate::option_values::{extract_strict_float, extract_strict_opt_int};
+use crate::option_values::{
+    extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
+};
 use crate::validation::{
     RoleValue, reject_unused_option, validate_no_duplicate_roles,
     validate_no_duplicate_within_role, validate_x_non_empty,
@@ -100,7 +102,7 @@ pub struct FEOptions {
     /// Standard error type: one of "classical", "hc1", "hc2", "hc3", "cluster", "dk".
     /// Case-insensitive. Unlike OLS/WLS/IV, "hc0" is **not** supported (neither
     /// linearmodels nor fixest offer it for panel/FE regressions).
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub cov_type: String,
 
     /// Confidence level for confidence intervals, in the range (0, 1).
@@ -114,13 +116,13 @@ pub struct FEOptions {
     /// (see `dk_time`). For the HAC ordering the periods are sorted by the text form of
     /// the labels, so integer labels with different numbers of digits (`1, 2, ..., 12`)
     /// sort as text; use a `Date` column or zero-padded labels.
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub time: Option<String>,
 
     /// Column name to use as the cluster group key when `cov_type="cluster"`. When
     /// `None`, the `entity` argument's column is used automatically. Specifying it with
     /// any other `cov_type` raises `ValidationError`.
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub cluster: Option<String>,
 
     /// Column name giving the time order for Driscoll-Kraay HAC, independent of `time`
@@ -129,7 +131,7 @@ pub struct FEOptions {
     /// two-way effects). When `None`, falls back to `time`. Specifying it with any
     /// other `cov_type` raises `ValidationError`. The periods are sorted by the text
     /// form of the labels (see `time`).
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub dk_time: Option<String>,
 
     /// Bandwidth for Driscoll-Kraay HAC when `cov_type="dk"`. When `None`, computed
@@ -152,11 +154,11 @@ impl FEOptions {
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
-        cov_type: String,
+        #[pyo3(from_py_with = crate::option_values::cov_type_arg)] cov_type: String,
         #[pyo3(from_py_with = crate::option_values::confidence_level_arg)] confidence_level: f64,
-        time: Option<String>,
-        cluster: Option<String>,
-        dk_time: Option<String>,
+        #[pyo3(from_py_with = crate::option_values::time_arg)] time: Option<String>,
+        #[pyo3(from_py_with = crate::option_values::cluster_arg)] cluster: Option<String>,
+        #[pyo3(from_py_with = crate::option_values::dk_time_arg)] dk_time: Option<String>,
         #[pyo3(from_py_with = crate::option_values::dk_bandwidth_arg)] dk_bandwidth: Option<i64>,
     ) -> Self {
         Self {
@@ -178,6 +180,30 @@ impl FEOptions {
     #[setter]
     fn set_dk_bandwidth(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
         self.dk_bandwidth = extract_strict_opt_int(value, "dk_bandwidth")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_cov_type(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.cov_type = extract_strict_text(value, "cov_type")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_time(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.time = extract_strict_opt_column(value, "time")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_cluster(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.cluster = extract_strict_opt_column(value, "cluster")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_dk_time(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.dk_time = extract_strict_opt_column(value, "dk_time")?;
         Ok(())
     }
 

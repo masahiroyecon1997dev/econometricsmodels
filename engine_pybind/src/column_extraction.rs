@@ -305,13 +305,25 @@ enum KeyRole {
 
 /// `dtype`がキー列として使えるかを検査し、そうでなければ`ValidationError`にする。
 ///
-/// 整数・浮動小数・文字列・Categorical/Enumは両方の役割で許可する。Booleanと`Date`は
-/// 同一性のキーで、`Date`/`Datetime`は時点のキーで許可する。タイムゾーンなしの`Datetime`は
-/// 文字列表現の桁数が固定のため辞書順が時系列順に一致するが、タイムゾーン付きは文字列に
-/// UTCオフセットが付き、夏時間の終了で重複する1時間などで順序が実時刻と逆になりうる
-/// （時点の順序をdtypeの値順で扱う変更で解消する。`accepted-data.md`「Order of time
-/// periods」参照）。`Null`型は後続の欠損値チェックに回す。
+/// 整数・浮動小数・文字列・Categorical/Enum・`Date`・タイムゾーンなしの`Datetime`は両方の
+/// 役割で許可する。`Boolean`は同一性のキーだけで許可する。タイムゾーンなしの`Datetime`は
+/// 文字列表現の桁数が固定のため辞書順が時系列順に一致する。タイムゾーン付きの`Datetime`は
+/// 拒否する（組み込んだpolarsが文字列化できず、夏時間の重複する1時間の順序の問題もあるため）。
+/// `Null`型は後続の欠損値チェックに回す。
 fn check_key_dtype(name: &str, dtype: &DataType, role: KeyRole) -> PyResult<()> {
+    // タイムゾーン付きの`Datetime`は、この拡張に組み込んだpolarsがタイムゾーンを扱えず
+    // 文字列化に失敗する。原因の分からないエラーにならないよう、対処法を示して拒否する。
+    if let DataType::Datetime(_, Some(time_zone)) = dtype {
+        let role_label = match role {
+            KeyRole::Identity => "group identifier",
+            KeyRole::Time => "time",
+        };
+        return Err(ValidationError::new_err(format!(
+            "column '{name}' is a Datetime with time zone '{time_zone}', which cannot be used as a \
+             {role_label} column; remove the time zone first, for example with \
+             .dt.replace_time_zone(None) after converting to the zone you want to keep"
+        )));
+    }
     let common = dtype.is_integer()
         || dtype.is_float()
         || dtype.is_null()
@@ -320,7 +332,10 @@ fn check_key_dtype(name: &str, dtype: &DataType, role: KeyRole) -> PyResult<()> 
             DataType::String | DataType::Categorical(..) | DataType::Enum(..)
         );
     let by_role = match role {
-        KeyRole::Identity => matches!(dtype, DataType::Boolean | DataType::Date),
+        KeyRole::Identity => matches!(
+            dtype,
+            DataType::Boolean | DataType::Date | DataType::Datetime(..)
+        ),
         KeyRole::Time => matches!(dtype, DataType::Date | DataType::Datetime(..)),
     };
     if common || by_role {
@@ -330,7 +345,8 @@ fn check_key_dtype(name: &str, dtype: &DataType, role: KeyRole) -> PyResult<()> 
     let message = match role {
         KeyRole::Identity => format!(
             "column '{name}' has dtype {label}, which cannot be used as a group identifier \
-             column; use an integer, float, string, categorical, boolean or Date column"
+             column; use an integer, float, string, categorical, boolean, Date or Datetime \
+             column"
         ),
         KeyRole::Time => format!(
             "column '{name}' has dtype {label}, which cannot be used as a time column; \
@@ -468,14 +484,22 @@ mod tests {
                 assert!(check_key_dtype("k", dtype, role).is_ok(), "{dtype}");
             }
         }
-        // BooleanとDateは同一性のキーだけ、Datetimeは時点のキーだけ。
+        // Booleanは同一性のキーだけ。DateとDatetimeは両方の役割で許可する。
         assert!(check_key_dtype("k", &DataType::Boolean, KeyRole::Identity).is_ok());
         assert!(check_key_dtype("k", &DataType::Boolean, KeyRole::Time).is_err());
-        assert!(check_key_dtype("k", &DataType::Date, KeyRole::Identity).is_ok());
-        assert!(check_key_dtype("k", &DataType::Date, KeyRole::Time).is_ok());
         let datetime = DataType::Datetime(TimeUnit::Microseconds, None);
-        assert!(check_key_dtype("k", &datetime, KeyRole::Identity).is_err());
-        assert!(check_key_dtype("k", &datetime, KeyRole::Time).is_ok());
+        for role in [KeyRole::Identity, KeyRole::Time] {
+            assert!(check_key_dtype("k", &DataType::Date, role).is_ok());
+            assert!(check_key_dtype("k", &datetime, role).is_ok());
+        }
+    }
+
+    #[test]
+    fn check_key_dtype_rejects_datetime_with_time_zone() {
+        let aware = DataType::Datetime(TimeUnit::Microseconds, Some(TimeZone::UTC));
+        for role in [KeyRole::Identity, KeyRole::Time] {
+            assert!(check_key_dtype("k", &aware, role).is_err());
+        }
     }
 
     #[test]

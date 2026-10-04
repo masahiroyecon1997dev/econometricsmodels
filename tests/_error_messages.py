@@ -125,8 +125,16 @@ COLUMN_UNSUPPORTED_ORDER_DTYPE = (
 # `COLUMN_UNSUPPORTED_NUMERIC_DTYPE`と同じ。
 COLUMN_UNSUPPORTED_IDENTITY_DTYPE = (
     "column '{name}' has dtype {dtype}, which cannot be used as a group "
-    "identifier column; use an integer, float, string, categorical, boolean "
-    "or Date column"
+    "identifier column; use an integer, float, string, categorical, boolean, "
+    "Date or Datetime column"
+)
+# タイムゾーン付きのDatetimeをキー列に使った場合。`{role}`は`group identifier`
+# （entity・cluster）または`time`（time・dk_time）。
+COLUMN_KEY_WITH_TIME_ZONE = (
+    "column '{name}' is a Datetime with time zone '{time_zone}', which cannot "
+    "be used as a {role} column; remove the time zone first, for example "
+    "with .dt.replace_time_zone(None) after converting to the zone you want "
+    "to keep"
 )
 COLUMN_UNSUPPORTED_TIME_DTYPE = (
     "column '{name}' has dtype {dtype}, which cannot be used as a time "

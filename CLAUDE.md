@@ -16,7 +16,7 @@
 | 線形代数クレート | faer（pure Rust、システムBLAS/LAPACK非依存） |
 | ライセンス | MIT License |
 | 公開先 | PyPI |
-| 開発体制 | 基本一人開発（Claudeと二人三脚）。Git運用の詳細は5章参照 |
+| 開発体制 | 基本一人開発。Git運用の詳細は5章参照 |
 
 ## 2. 絶対に守るべき設計方針（非交渉事項）
 
@@ -57,7 +57,7 @@ econometricsmodels/
 │
 ├── tests/                          # pytest（statsmodels/linearmodels / R実装との答え合わせ）
 │   ├── conftest.py _assertions.py _helpers.py _tolerances.py  # 共有（系統によらず全テストが使う）
-│   ├── linear/ nonlinear/ iv/      # 系統別サブディレクトリ（benchmark/ と同じ grain）。test_<手法>*.py（Tobitはnonlinear/）
+│   ├── linear/ nonlinear/ iv/ panel/  # 系統別サブディレクトリ（benchmark/ と同じ grain）。test_<手法>*.py（Tobitはnonlinear/）
 │   └── fixtures/benchmarks/        # 固定CSV＋リファレンスJSON（コミット済み成果物）
 │
 ├── benchmark/                     # テスト用フィクスチャ生成ツール（Pythonパッケージ。pytestが収集時にimportする）
@@ -72,11 +72,11 @@ econometricsmodels/
 │   ├── guide/                     # 利用者向けの英語の公開ページ（navに掲載。受け付けるデータ・バリデーション・推論の慣習・検証・性能。詳細は13章）
 │   ├── spec/                      # 実装済み手法の数式・API仕様の正本（詳細は13章）
 │   ├── performance/               # 手法別の性能比較の開発ノート（日本語。計測方法論・既知の限界。結果表は公開ページ側。results/にJSON）
-│   └── planning/                  # plan.md・実装途中の設計ノート（詳細は9章）
+│   └── planning/                  # 実装途中の設計ノート（詳細は9章。着手中の手法が無いときは存在しない）
 │
 └── .github/workflows/
-    ├── ci_engine.yml               # cargo test / clippy / fmt（engine/配下トリガー）
-    ├── ci_python.yml               # pytest / Ruff（python_package/ engine_pybind/ 配下トリガー）
+    ├── ci_engine.yml               # cargo test / clippy / fmt（pushはengine/配下のみ、PRは常に実行）
+    ├── ci_python.yml               # pytest / Ruff（pushはpython_package/ engine_pybind/ 等の配下のみ、PRは常に実行）
     ├── cd_release.yml              # maturin-actionでのマルチOSホイールビルド・PyPI公開
     └── cd_docs.yml                  # mkdocs → GitHub Pages
 ```
@@ -87,7 +87,7 @@ econometricsmodels/
 
 「基礎から積み上げる」順に段階実装する。**一度に全フェーズ／全手法を実装しない**。フェーズ・タスク単位に細分化して、1つずつ完了させてから次に進む。
 
-フェーズ構成・手法の割り当ては `docs/plan.md` 4章を正本とする（このファイルには複製しない）。現在の実装状況・直近の着手順序はgit logおよびGitHub Issueを参照する。
+フェーズ構成・手法の割り当て・着手順序はGitHub Issueを正本とする（このファイルには複製しない）。現在の実装状況はgit logも参照する。
 
 **新しい手法の実装に着手する前に**、既存の類似手法（系統内、無ければ直近で実装した手法）の実装を`Explore`エージェント（読み取り専用の探索用サブエージェント）で調査してから着手する。設計判断・実装パターンを毎回メインセッションでファイルを読み込んで再発見するコストを避けるため。調査結果は各系統のネストCLAUDE.md（1章参照）に集約されているため、まずそちらを確認し、記載が無い・古い場合にのみ既存コードの探索に切り替える。
 
@@ -121,19 +121,19 @@ econometricsmodels/
 
 - SemVer（`X.Y.Z`）。Z=バグ修正/性能改善、Y=機能追加、X=破壊的変更。
 - **例外**: `0.x.x`のプレリリース期間中は、`Y`の変更でも破壊的変更を許容する。
-- CIはengine（Rust）とpython側でワークフローファイルを分離（`ci_engine.yml` / `ci_python.yml`）。それぞれ対応するパス配下の変更のみでトリガーし、無駄な実行を防ぐ。
+- CIはengine（Rust）とpython側でワークフローファイルを分離（`ci_engine.yml` / `ci_python.yml`）。`main`へのpushは対応するパス配下の変更のみでトリガーし、無駄な実行を防ぐ。`pull_request`はpathsフィルタを付けず常に実行する（必須ステータスチェックとして登録しており、フィルタがあるとパスに触れないPRでマージ不能になるため）。
 - マルチプラットフォーム（Linux/macOS/Windows）向けwheelビルド・配布は`cd_release.yml`（maturin-action想定）。
 - mkdocsドキュメントは`cd_docs.yml`でGitHub Pagesに自動デプロイ。
 
 ## 9. ドキュメント運用
 
 - **mkdocs** + **GitHub Pages**。GitHub Actionsでビルド・デプロイを自動化。
-- `plan.md`や仕様書などの内部ドキュメントも`docs/`配下（実装途中の設計ノートは`docs/planning/`）に格納する。mkdocsのnavには含めない（非公開ナビゲーション）が、リポジトリ自体がMITでpublicなため、**ソースとしては誰でも閲覧可能**という前提で運用する（ユーザー確認済み）。
+- 仕様書などの内部ドキュメントも`docs/`配下（実装途中の設計ノートは`docs/planning/`）に格納する。mkdocsのnavには含めない（非公開ナビゲーション）が、リポジトリ自体がMITでpublicなため、**ソースとしては誰でも閲覧可能**という前提で運用する（ユーザー確認済み）。
 
 ## 10. 開発環境
 
 - `.devcontainer/`（`devcontainer.json` / `Dockerfile` / `docker-compose.yml`）で開発環境を統一。
-- ベースイメージ: `python:3.14-slim-bookworm`。Rust（stable、clippy/rustfmt/llvm-tools）、uv、R（fixest/plm/ivreg/AER/censReg/marginaleffects等、`benchmark/`のベンチマーク生成用。Rパッケージは`Dockerfile`で`remotes::install_version()`によりバージョンをピン留めし、新版の有無は`check_r_updates.yml`が週次で確認してIssueで通知する）を導入済み。**旧経緯**: `ivreg`は当初`Dockerfile`が`install.packages()`でインストールを試みていたが実際には失敗し導入されていなかった（依存先`car`→`MatrixModels`が`Matrix>=1.6.0`（→R>=4.4）を要求するが、Debian bookworm標準のr-baseは4.2.2固定でこれを満たせなかった。`install.packages()`はベクタの一部が失敗してもRUNコマンド自体は成功扱いになるため、ビルドは通ってしまいこの状態に気づきにくかった）。CRAN公式のDebian向けAPTリポジトリ（`bookworm-cran40`、実体は最新のRリリースを追従）を追加してR 4.x系（執筆時点で4.5.3）に更新し解消した。IVのRクロスチェック（`ivreg`）に着手する際は、コンテナ再構築後に`ivreg`が実際に導入されているか（`Rscript -e 'library(ivreg)'`等）を確認してから進める。
+- ベースイメージ: `python:3.14-slim-bookworm`。Rust（stable、clippy/rustfmt/llvm-tools）、uv、R（fixest/plm/ivreg/AER/censReg/marginaleffects等、`benchmark/`のベンチマーク生成用。Rパッケージは`Dockerfile`で`remotes::install_version()`によりバージョンをピン留めし、新版の有無は`check_r_updates.yml`が週次で確認してIssueで通知する）を導入済み。**旧経緯**: `ivreg`は当初`Dockerfile`が`install.packages()`でインストールを試みていたが実際には失敗し導入されていなかった（依存先`car`→`MatrixModels`が`Matrix>=1.6.0`（→R>=4.4）を要求するが、Debian bookworm標準のr-baseは4.2.2固定でこれを満たせなかった。`install.packages()`はベクタの一部が失敗してもRUNコマンド自体は成功扱いになるため、ビルドは通ってしまいこの状態に気づきにくかった）。CRAN公式のDebian向けAPTリポジトリ（`bookworm-cran40`、実体は最新のRリリースを追従）を追加してR 4.x系（執筆時点で4.5.3）に更新し解消した。現在は`install_version()`で導入済みで、IVのRクロスチェックに使っている。Rパッケージの追加時は`install.packages()`ではなく`install_version()`を使い、導入失敗をビルドエラーとして検知できるようにする。
 - Claude Code CLIはdevcontainer.jsonの`ghcr.io/anthropics/devcontainer-features/claude-code`featureで導入（Dockerfile側での重複インストールはしない）。`gh`（GitHub CLI）は`ghcr.io/devcontainers/features/github-cli`featureで導入（`/cicd`等のコマンドが前提とするため）。
 - **トークン消費を抑えるための除外設定**: `.claude/settings.json`の`permissions.deny`/`ask`で、lockファイル・`target/`・`.venv/`・ベンチマークのフィクスチャJSON等を除外している。
 - 詳細は`.claude/settings.json`を参照。
@@ -151,7 +151,6 @@ econometricsmodels/
 
 ## 13. 関連ファイル
 
-- 方針書: `docs/plan.md`（本リポジトリの正式な方針ドキュメント。実装フェーズ・手法の割り当てもここが正本）
 - 仕様書: `docs/spec/`（実装済みの手法ごとの数式・API仕様の正本。method非依存のCI/CD・セキュリティ運用ノートも
   ここに置く、例: `ci-cd-notes.md`・`inference-conventions.md`）、`docs/planning/specs/`（実装途中の手法の設計ノート・実装ノート）。
   ある手法の実装が完了したら、その手法の仕様書は`docs/planning/specs/`から`docs/spec/`へ集約する

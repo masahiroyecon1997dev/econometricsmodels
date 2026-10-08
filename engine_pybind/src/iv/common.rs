@@ -57,6 +57,7 @@ use engine::iv::gmm::{GmmEstimator, GmmType, WeightType};
 use engine::iv::two_sls::TwoSlsEstimator;
 use engine::linear::ols::CovType as EngineCovType;
 use engine::linear::ols::OlsEstimator;
+use engine::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
@@ -958,6 +959,24 @@ pub(crate) fn fit(
             n_instruments: input.k_instruments(),
             n_endog: input.k_endog(),
         }));
+    }
+
+    // `cov_type=Cluster`でクラスター数`g`が構造方程式の傾き係数の数`q`
+    // （`k_exog + k_endog - 定数項`）以下の場合の事前チェック
+    // （`TwoSlsEstimator::fit`/`GmmEstimator::fit`冒頭と同じ）を`compute_first_stage`より
+    // 先に行う。第一段階の傾き係数の数は識別条件により構造方程式以上のため、先に
+    // 第一段階を走らせるとこのチェックが常に`FirstStageFailed`（第一段階の`q`）に
+    // 隠され、エンジン側の構造方程式チェックがPythonから到達不能になる。
+    if let EngineCovType::Cluster {
+        groups: Some(groups),
+    } = &cov_type
+    {
+        let g = validate_cluster_groups(groups, input.nobs()).map_err(common_error_to_pyerr)?;
+        validate_cluster_count_covers_slopes(
+            g,
+            input.k_exog() + input.k_endog() - usize::from(input.has_intercept()),
+        )
+        .map_err(common_error_to_pyerr)?;
     }
 
     // 第一段階回帰・弱操作変数診断は`estimator`によらず共通（モジュールdocコメント参照）。

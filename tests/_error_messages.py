@@ -419,13 +419,13 @@ HC0_NOT_SUPPORTED_RE = (
 )
 
 # `IvError::FirstStageFailed`（engine/src/iv/common.rs）。`engine_pybind::fit()`
-# （engine_pybind/src/iv/common.rs）が`TwoSlsEstimator::fit`/`GmmEstimator::fit`
+# （engine_pybind/src/iv/common.rs）は`TwoSlsEstimator::fit`/`GmmEstimator::fit`
 # を呼ぶより前に無条件で`compute_first_stage`（弱操作変数診断用）を呼ぶため、
 # 第一段階回帰由来の`ValidationError`（`InsufficientObservations`・
-# `InsufficientClustersForInference`等）は常にこのラッパー経由で観測される。
+# `InsufficientClustersForInference`等）はこのラッパー経由で観測される。
 # 構造方程式自身のqを使う`TwoSlsEstimator::fit`/`GmmEstimator::fit`冒頭の同種
-# 事前チェック（観測数・クラスター数）はPython APIからは到達不能（第一段階の
-# 回帰変数の数は識別条件`instruments>=x_endog`により常に構造方程式以上のため、
-# 第一段階側のチェックが必ず先に発火する。2SLS/GMM・classical/clusterで
-# n・Gを下げて確認済み）。これらのチェックはengineの単体テストで確認している。
+# 事前チェックのうち、クラスター数（`G<=q`）は`engine_pybind::fit()`が
+# `compute_first_stage`より前に重複して行うためラッパー無しで観測される。
+# 観測数のチェックは、第一段階の回帰変数の数が識別条件`instruments>=x_endog`により
+# 常に構造方程式以上のため、第一段階側が先に発火する（Python APIからは到達不能）。
 FIRST_STAGE_FAILED = "first stage regression for endogenous variable '{endog_name}' failed: {source}"

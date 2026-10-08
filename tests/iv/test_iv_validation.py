@@ -546,13 +546,9 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
     （`CommonError::InsufficientClustersForInference`）。
 
     `rank(Ŝ)≤G-1`のためG≤qでロバストWald/F（χ²）検定のq×q部分行列が構造的に
-    特異になる。ドキュメント上は「2SLS/GMMともに`fit()`冒頭で構造方程式のqを
-    使って弾く（第一段階回帰の`FirstStageFailed`ラップより前）」とされているが、
-    実際にはこの事前チェックはPython APIからは到達不能で、常に第一段階回帰
-    （`endog1 ~ x_exog(x1) + instruments(z1, z2)`、q=3: x1, z1, z2）の同種チェックが
-    先に`FirstStageFailed`としてラップされる（`engine_pybind::fit()`が
-    `compute_first_stage`を無条件に先に呼ぶため。`_error_messages.py`の
-    `FIRST_STAGE_FAILED`のコメント参照）。
+    特異になる。`engine_pybind::fit()`が`compute_first_stage`より前に構造方程式の
+    qで判定するため、第一段階回帰（`endog1 ~ x_exog(x1) + instruments(z1, z2)`、
+    q=3）の`FirstStageFailed`ではなく、構造方程式のq=2を含むメッセージが出る。
     `gmm_weight_type="cluster"`の重み行列`S`（l×l）が`G<l`で特異になる別軸の問題
     とは区別する。
     """
@@ -565,10 +561,35 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
     )
     with pytest.raises(
         ValidationError,
+        match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=2),
+    ):
+        our_fit(df, options=options)
+
+
+@pytest.mark.parametrize("estimator", ["2sls", "gmm"])
+def test_cluster_count_between_structural_and_first_stage_slopes_raises(
+    iv_dataset, estimator
+):
+    """構造方程式ではG>q（G=3、q=2）だが第一段階ではG≤q（q=3）の場合、
+    現状は第一段階回帰の`FirstStageFailed`（`ValidationError`）で弾かれる。
+
+    第一段階のロバストWald/F検定はクラスター数不足で特異になるが、弱操作変数F
+    統計量自体は`cov_type`に依存しない。この拒否が妥当かは未決定の設計論点で、
+    変更する場合は本テストの期待値を更新する。
+    """
+    cluster = pl.Series(
+        "cluster_group", [i % 3 for i in range(iv_dataset.height)]
+    )
+    df = iv_dataset.with_columns(cluster)
+    options = IVOptions(
+        estimator=estimator, cov_type="cluster", cluster="cluster_group"
+    )
+    with pytest.raises(
+        ValidationError,
         match=escaped(
             msgs.FIRST_STAGE_FAILED,
             endog_name="endog1",
-            source=msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE.format(g=2, q=3),
+            source=msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE.format(g=3, q=3),
         ),
     ):
         our_fit(df, options=options)

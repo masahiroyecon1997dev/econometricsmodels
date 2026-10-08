@@ -51,7 +51,8 @@ RTOL = TOLERANCES["logit_crosscheck"]["rtol"]
 ATOL = TOLERANCES["logit_crosscheck"]["atol"]
 
 # p値は標準正規分布CDFの裾で係数・zのわずかな数値差が増幅されるため、係数・SE本体
-# より緩いATOLを置く（rtolで収まらない実測最大絶対誤差~5.5e-9、baseline/opg/x1）。
+# より緩いATOLを置く（rtolで収まらない実測最大絶対誤差~7e-9、cluster_imbalanced。
+# 係数・限界効果とも）。
 ATOL_P_VALUE = TOLERANCES["logit_crosscheck"]["atol_p_value"]
 
 COV_TYPES = ["classical", "opg", "hc0", "hc1"]

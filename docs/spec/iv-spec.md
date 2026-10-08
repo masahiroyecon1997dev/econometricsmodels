@@ -167,9 +167,14 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 - **`cov_type="cluster"`はクラスター数`G`が構造方程式の傾き係数の数`q`（`k - k_constant`）
   より多くなければならない**（`G <= q`は`CommonError::InsufficientClustersForInference`＝
   `ValidationError`。`rank(Ŝ) ≤ G-1`のためロバストWald/F（χ²）検定の`q×q`
-  部分行列が構造的に特異。`fit()`冒頭で構造方程式の`q`を使って弾く。第一段階・第二段階
-  回帰の`OlsEstimator::fit`内でも同じ検証が走るが、そちらは`FirstStageFailed`/
-  `SecondStageFailed`にラップされるため区別される）。OLS/WLS/Tobit/Logit/Probit/IVで横断
+  部分行列が構造的に特異。`fit()`冒頭で構造方程式の`q`を使って弾く。判定は
+  `engine::iv::common::validate_structural_cluster_count`に集約し、`TwoSlsEstimator::fit`/
+  `GmmEstimator::fit`冒頭と`engine_pybind`の`fit`（`compute_first_stage`より前）が共有する。
+  第一段階・第二段階回帰の`OlsEstimator::fit`内でも同じ検証が走るが、そちらは
+  `FirstStageFailed`/`SecondStageFailed`にラップされるため区別される。**構造方程式では
+  `G > q`でも、第一段階の傾き係数の数`q_first = k_exog傾き + k_instruments (>= q)`が`G`以上の
+  ときは第一段階の`FirstStageFailed`（`ValidationError`）で弾かれる**（第一段階回帰の
+  ロバストWald/F検定が構造的に特異になるため。この領域の扱いは未決定の設計論点）。OLS/WLS/Tobit/Logit/Probit/IVで横断
   統一。Wu-Hausman拡張回帰は`q_aug = q + k_endog`で`G <= q_aug`になりうるが、実際に使う
   末尾`k_endog`列の部分行列は`rank(Ŝ) ≤ G-1 ≥ k_endog`なら計算可能なので`wu_hausman_*`を
   `None`へdegradeする（3.6節）。

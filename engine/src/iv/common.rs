@@ -41,7 +41,9 @@ use thiserror::Error;
 use crate::error::CommonError;
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
-use crate::validation::MAX_ITER_LIMIT;
+use crate::validation::{
+    MAX_ITER_LIMIT, validate_cluster_count_covers_slopes, validate_cluster_groups,
+};
 
 /// 2SLS/GMMの計算過程で発生しうるエラー。
 ///
@@ -418,6 +420,38 @@ pub(crate) fn without_baked_in_intercept<'a>(
     }
 }
 
+/// `cov_type=Cluster`のとき、クラスター数`g`が構造方程式の傾き係数の数`q`
+/// （`k_exog + k_endog - k_constant`）より多いことを検証する。それ以外の`cov_type`・
+/// `groups=None`（`MissingClusterColumn`は呼び出し側が別途扱う）では何もしない。
+///
+/// `rank(Ŝ) ≤ g - 1`のため`g <= q`でロバストWald/F（χ²）検定の`q×q`部分行列が構造的に
+/// 特異になる（`validate_cluster_count_covers_slopes`参照）。第一段階の傾き係数の数は
+/// 識別条件により構造方程式以上のため、`compute_first_stage`より先にこのチェックを
+/// 行わないと常に第一段階の`FirstStageFailed`（第一段階の`g`・`q`）に隠れる。
+/// `TwoSlsEstimator::fit`/`GmmEstimator::fit`冒頭と`engine_pybind`の`fit`が
+/// 同じ判定を共有するための単一の実装（`q`の式をここに集約する）。
+///
+/// # Errors
+/// - `groups`の長さが`n`と不一致、または`g < 2`: `CommonError::InsufficientClusters`等
+///   （`validate_cluster_groups`）
+/// - `g <= q`: `CommonError::InsufficientClustersForInference`
+pub fn validate_structural_cluster_count(
+    input: &IvInput,
+    cov_type: &CovType,
+) -> Result<(), IvError> {
+    if let CovType::Cluster {
+        groups: Some(groups),
+    } = cov_type
+    {
+        let g = validate_cluster_groups(groups, input.nobs())?;
+        validate_cluster_count_covers_slopes(
+            g,
+            input.k_exog() + input.k_endog() - usize::from(input.has_intercept()),
+        )?;
+    }
+    Ok(())
+}
+
 /// [`compute_first_stage`]の戻り値: 内生変数ごとの第一段階回帰（`x_endog_names`と同じ順序）、
 /// 弱操作変数診断（部分F統計量、同じく`x_endog_names`と同じ順序）。
 pub type FirstStageResult = (Vec<(String, OlsEstimator)>, Vec<(String, f64)>);
@@ -772,6 +806,91 @@ mod tests {
         assert_eq!(
             IvError::Common(CommonError::InsufficientClusters { g: 1 }).to_string(),
             "cov_type='cluster' requires at least 2 clusters, got 1"
+        );
+    }
+
+    /// `n=6`、`x_exog`(1列)・`x_endog`(1列)・`instruments`(2列)の最小入力。構造方程式の
+    /// 傾き係数の数は定数項の有無によらず`q=2`（あり: `k_exog=2`（const含む）`+ 1 - 1`、
+    /// なし: `k_exog=1 + 1 - 0`）。「常に1を引く」「引かない」のどちらの誤実装でも
+    /// `g=2`/`g=3`の境界テストが失敗する。
+    fn structural_cluster_test_input(include_intercept: bool) -> IvInput {
+        let col = |offset: f64| -> Vec<f64> { (0..6).map(|i| (i as f64) * 0.7 + offset).collect() };
+        IvInput::from_columns(
+            &col(0.0),
+            &[col(1.0)],
+            vec!["x1".to_string()],
+            &[col(2.0)],
+            vec!["endog1".to_string()],
+            &[col(3.0), col(4.0)],
+            vec!["z1".to_string(), "z2".to_string()],
+            include_intercept,
+            "y".to_string(),
+        )
+        .unwrap()
+    }
+
+    fn cluster_cov(n_groups: usize) -> CovType {
+        CovType::Cluster {
+            groups: Some((0..6).map(|i| format!("g{}", i % n_groups)).collect()),
+        }
+    }
+
+    #[test]
+    fn validate_structural_cluster_count_rejects_when_g_equals_q_with_intercept() {
+        let input = structural_cluster_test_input(true);
+        assert_eq!(
+            validate_structural_cluster_count(&input, &cluster_cov(2)),
+            Err(IvError::Common(
+                CommonError::InsufficientClustersForInference { g: 2, q: 2 }
+            ))
+        );
+    }
+
+    #[test]
+    fn validate_structural_cluster_count_accepts_when_g_exceeds_q_with_intercept() {
+        let input = structural_cluster_test_input(true);
+        assert_eq!(
+            validate_structural_cluster_count(&input, &cluster_cov(3)),
+            Ok(())
+        );
+    }
+
+    /// 定数項なしでは`k_constant=0`のため`q = k_exog + k_endog = 2`。
+    #[test]
+    fn validate_structural_cluster_count_uses_k_constant_zero_without_intercept() {
+        let input = structural_cluster_test_input(false);
+        assert_eq!(input.k_exog() + input.k_endog(), 2);
+        assert_eq!(
+            validate_structural_cluster_count(&input, &cluster_cov(2)),
+            Err(IvError::Common(
+                CommonError::InsufficientClustersForInference { g: 2, q: 2 }
+            ))
+        );
+        assert_eq!(
+            validate_structural_cluster_count(&input, &cluster_cov(3)),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn validate_structural_cluster_count_ignores_non_cluster_cov_types() {
+        let input = structural_cluster_test_input(true);
+        assert_eq!(
+            validate_structural_cluster_count(&input, &CovType::Classical),
+            Ok(())
+        );
+        assert_eq!(
+            validate_structural_cluster_count(&input, &CovType::Cluster { groups: None }),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn validate_structural_cluster_count_rejects_single_cluster() {
+        let input = structural_cluster_test_input(true);
+        assert_eq!(
+            validate_structural_cluster_count(&input, &cluster_cov(1)),
+            Err(IvError::Common(CommonError::InsufficientClusters { g: 1 }))
         );
     }
 

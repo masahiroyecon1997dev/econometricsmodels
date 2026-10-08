@@ -52,12 +52,13 @@
 
 use std::collections::HashMap;
 
-use engine::iv::common::{IvError, IvInput, compute_first_stage};
+use engine::iv::common::{
+    IvError, IvInput, compute_first_stage, validate_structural_cluster_count,
+};
 use engine::iv::gmm::{GmmEstimator, GmmType, WeightType};
 use engine::iv::two_sls::TwoSlsEstimator;
 use engine::linear::ols::CovType as EngineCovType;
 use engine::linear::ols::OlsEstimator;
-use engine::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
@@ -927,6 +928,8 @@ pub(crate) fn build_iv_input(
 /// 常に`None`（`GmmEstimator`は実装しない、モジュールdocコメント参照）。
 ///
 /// # Errors
+/// - `cov_type="cluster"`でクラスター数が構造方程式の傾き係数の数以下（または2未満）:
+///   `ValidationError`（`validate_structural_cluster_count`、`compute_first_stage`より前）
 /// - `build_iv_input`が返すエラー（列抽出・y/x_exog/x_endog/instrumentsの重複・
 ///   `"const"`列衝突・`estimator`/`cov_type`文字列の検証等）は`ValidationError`
 /// - `estimator="gmm"`で`gmm_type`/`gmm_weight_type`の文字列が不正、または`gmm_type`と
@@ -961,23 +964,12 @@ pub(crate) fn fit(
         }));
     }
 
-    // `cov_type=Cluster`でクラスター数`g`が構造方程式の傾き係数の数`q`
-    // （`k_exog + k_endog - 定数項`）以下の場合の事前チェック
-    // （`TwoSlsEstimator::fit`/`GmmEstimator::fit`冒頭と同じ）を`compute_first_stage`より
-    // 先に行う。第一段階の傾き係数の数は識別条件により構造方程式以上のため、先に
-    // 第一段階を走らせるとこのチェックが常に`FirstStageFailed`（第一段階の`q`）に
-    // 隠され、エンジン側の構造方程式チェックがPythonから到達不能になる。
-    if let EngineCovType::Cluster {
-        groups: Some(groups),
-    } = &cov_type
-    {
-        let g = validate_cluster_groups(groups, input.nobs()).map_err(common_error_to_pyerr)?;
-        validate_cluster_count_covers_slopes(
-            g,
-            input.k_exog() + input.k_endog() - usize::from(input.has_intercept()),
-        )
-        .map_err(common_error_to_pyerr)?;
-    }
+    // `cov_type=Cluster`の構造方程式の`G <= q`チェック（`TwoSlsEstimator::fit`/
+    // `GmmEstimator::fit`冒頭と同じ実装）を`compute_first_stage`より先に行う。第一段階の
+    // 傾き係数の数は識別条件により構造方程式以上のため、先に第一段階を走らせると
+    // このチェックが常に`FirstStageFailed`（第一段階の`g`・`q`）に隠れ、エンジン側の
+    // 構造方程式チェックがPythonから到達不能になる。
+    validate_structural_cluster_count(&input, &cov_type).map_err(iv_error_to_pyerr)?;
 
     // 第一段階回帰・弱操作変数診断は`estimator`によらず共通（モジュールdocコメント参照）。
     // `input`は下でestimatorごとの推定器に移動するため、参照のみで済むこの呼び出しを先に行う。

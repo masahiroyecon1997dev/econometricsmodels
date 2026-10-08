@@ -62,12 +62,12 @@ use crate::error::CommonError;
 use crate::inference;
 use crate::iv::common::{
     IvError, IvInput, compute_first_stage, mat_column_to_vec, mat_to_columns,
-    without_baked_in_intercept,
+    validate_structural_cluster_count, without_baked_in_intercept,
 };
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
-use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
+use crate::validation::validate_cluster_groups;
 use faer::linalg::matmul::matmul;
 use faer::prelude::Solve;
 use faer::{Accum, Mat, Par, Side};
@@ -191,16 +191,7 @@ impl TwoSlsEstimator {
         // 第一段階固有の傾き係数の数で判定され`FirstStageFailed`にラップされて`q`の値も
         // 構造方程式のものと食い違うため、`fit()`冒頭で構造方程式の`q`を使って明示的に
         // 弾き、`IvError::Common`として一貫させる（`compute_first_stage`より前）。
-        if let CovType::Cluster {
-            groups: Some(groups),
-        } = &cov_type
-        {
-            let g = validate_cluster_groups(groups, input.nobs())?;
-            validate_cluster_count_covers_slopes(
-                g,
-                input.k_exog() + input.k_endog() - usize::from(input.has_intercept()),
-            )?;
-        }
+        validate_structural_cluster_count(&input, &cov_type)?;
 
         // `x_exog`は`second_stage_columns`（第二段階）・`structural_columns`
         // （サンドイッチSE計算）でも同じ内容を使うため、`Mat`からの変換を一度だけ行い

@@ -205,11 +205,11 @@ use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
 
 use crate::error::CommonError;
 use crate::inference;
-use crate::iv::common::{IvError, IvInput, mat_to_columns};
+use crate::iv::common::{IvError, IvInput, mat_to_columns, validate_structural_cluster_count};
 use crate::linear::ols::CovType;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::validation::MAX_ITER_LIMIT;
-use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
+use crate::validation::validate_cluster_groups;
 
 /// GMMの点推定に使う重み行列の種別（`docs/spec/iv-spec.md`1.2節）。
 ///
@@ -396,13 +396,7 @@ impl GmmEstimator {
         // `g`・`q`は入力だけから判定できるため、点推定・SE計算より前に弾く。
         // `weight_type=Cluster`の重み行列`S`（l×l）の`G`と`l`の関係は別軸のため
         // `validate_weight_type`側で検証する。
-        if let CovType::Cluster {
-            groups: Some(groups),
-        } = &cov_type
-        {
-            let g = validate_cluster_groups(groups, n)?;
-            validate_cluster_count_covers_slopes(g, k - usize::from(input.has_intercept()))?;
-        }
+        validate_structural_cluster_count(&input, &cov_type)?;
 
         // 1段階GMMは`weight_type`を持たない（点推定・Hansen Jとも`(Z'Z)⁻¹`のみで計算する）
         // ため検証もしない。2段階・反復では点推定に使う重みの妥当性を検証する。

@@ -11,10 +11,12 @@
 
 ## Key Design Principles
 
-- **Consistent API** — Models follow a consistent interface: a DataFrame, a
-  `y` column, a list of `x` columns, and an options object in; a `.fit()`
-  call out. Moving from OLS to Logit, IV, or panel models doesn't mean
-  learning a new interface.
+- **Consistent API** — Every model follows the same conventions: a polars
+  DataFrame, column names as strings, and an options object in; a `.fit()`
+  call out, returning a result with the same accessors. Methods with extra
+  inputs (instruments for IV, an entity column for panel models) add
+  arguments, but moving from OLS to Logit, IV, or panel models doesn't mean
+  learning a new interface design.
 - **Programmatic specification and results** — Models are defined with
   explicit arguments and an options object, not a formula string. Results
   come back as Python objects (`.params`, `.std_errors`, `.p_values`,
@@ -22,9 +24,11 @@
   feed into other code. Coefficient tables (`coef_table()`) are plain lists
   of dicts that can be passed straight to polars or `json.dumps`.
 - **Explicit validation** — Invalid input is rejected rather than silently
-  dropped or repaired. Missing values, collinear columns, degenerate
-  groups, and options that would have no effect raise an error instead of
-  being quietly handled (see
+  dropped or repaired. Missing values, perfectly collinear columns,
+  degenerate groups, and options that would have no effect raise an error
+  instead of being quietly handled, and the error message states the cause
+  (for example "perfect multicollinearity detected") rather than a bare
+  "singular matrix" (see
   [Validation and errors](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/validation/)).
 - **Modern dataframe workflow** — Built for [polars](https://pola.rs/),
   with data passed to the Rust core through Arrow, avoiding unnecessary
@@ -51,8 +55,8 @@
 - Calling estimation methods from scripts, pipelines, or apps — the API is
   built for programmatic construction, not interactive formula-writing.
 - Wanting invalid input to fail loudly instead of being silently dropped or
-  repaired — missing values, collinear columns, and unusable options raise
-  an error (see
+  repaired — missing values, perfectly collinear columns, and unusable
+  options raise an error that says why (see
   [Validation and errors](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/validation/)).
 - Needing to confirm that results match statsmodels, R, or linearmodels —
   for example when migrating an existing analysis, or when you have to show
@@ -103,6 +107,18 @@ for name, model in [("OLS", OLS), ("Logit", Logit), ("Probit", Probit)]:
     print(name)
     print(result.params)
     print(result.std_errors)
+```
+
+Estimation options are passed as an options object. For example,
+cluster-robust standard errors:
+
+```python
+from econometricsmodels import OLS, OLSOptions
+
+df_grouped = df.with_columns((pl.int_range(pl.len()) % 50).alias("group"))
+options = OLSOptions(cov_type="cluster", cluster="group")
+clustered = OLS(df_grouped, y="y", x=["x1", "x2"], options=options).fit()
+print(clustered.std_errors)
 ```
 
 ## Programmatic Results & Reporting
@@ -165,8 +181,11 @@ OLS(df_missing, y="y", x=["x1", "x2"]).fit()
 # function
 ```
 
-**Collinear columns are never removed.** A perfectly collinear design raises
-an error instead of being estimated on a reduced set of regressors.
+**Perfectly collinear columns are never removed.** A perfectly collinear
+design raises an error that names the cause, instead of being estimated on a
+reduced set of regressors or failing with a bare "singular matrix". A design
+that is only numerically near-singular (for example, regressors on extremely
+different scales) raises a separate error that says so.
 
 ```python
 df_collinear = df.with_columns((pl.col("x1") * 2).alias("x1_double"))
@@ -215,9 +234,9 @@ model tests — for each supported covariance type.
 |---|---|---|---|
 | OLS | statsmodels `OLS` | R `lm` + `sandwich`/`lmtest` | 1e-8 / 1e-8 (HAC: 1e-2) |
 | WLS | statsmodels `WLS` | R `lm(weights=)` + `sandwich`/`lmtest` | 1e-8 / 1e-8 (HAC: 5e-2) |
-| Logit | statsmodels `Logit` | R `glm` + `sandwich`, `marginaleffects` | 1e-8 / 2e-4 |
-| Probit | statsmodels `Probit` | R `glm` + `sandwich`, `marginaleffects` | 1e-8 / 2e-4 |
-| Tobit | R `AER::tobit` | R `censReg` | 1e-8 / 1e-8 |
+| Logit | statsmodels `Logit` | R `glm` + `sandwich`, `marginaleffects` | 1e-8 / 1e-6 |
+| Probit | statsmodels `Probit` | R `glm` + `sandwich`, `marginaleffects` | 1e-8 / 1e-6 |
+| Tobit<sup>2</sup> | R `AER::tobit` | R `censReg` | 1e-8 / 1e-8 |
 | IV (2SLS) | linearmodels `IV2SLS` | R `ivreg` + `sandwich`/`lmtest` | 1e-8 / 1e-8 (HAC: 1e-2) |
 | IV (GMM) | linearmodels `IVGMM` | none (`ivreg` has no GMM) | 1e-8 / none |
 | FE<sup>1</sup> | linearmodels `PanelOLS`, R `fixest` | R `fixest`, R `plm` | 1e-8 / 1e-8 |
@@ -229,12 +248,20 @@ different small-sample corrections, so R (`fixest`, `plm`) is the primary
 reference for those. Which implementation checks which statistic is
 detailed on the verification page.
 
-- **Tolerance.** The relative tolerance against the primary reference is
-  1e-8 for every method (with a tiny absolute floor for values near zero);
-  for closed-form estimators the measured agreement is about 1e-14. Looser
-  values (in parentheses, and the Logit/Probit cross-check) come from
-  documented differences, such as HAC small-sample conventions, both sides
-  being iterative optimizers, or plm and linearmodels estimating the
+<sup>2</sup> There is no Python Tobit implementation, so both references are
+R packages. They are different implementations (`survreg` and `maxLik`
+based), so the second one is a genuine cross-check, but there is no
+reference from outside R. Where no Python implementation exists, two
+different R packages are used.
+
+- **Tolerance.** The target relative tolerance against the primary
+  reference is 1e-8 (with a tiny absolute floor for values near zero); for
+  closed-form estimators the measured agreement is about 1e-14. Where
+  implementations legitimately differ, looser documented values are used
+  instead: the figures in parentheses and the Logit/Probit cross-check, as
+  well as some solver options and real-data cases listed on the
+  verification page. Typical reasons are HAC small-sample conventions, both
+  sides being iterative optimizers, or plm and linearmodels estimating the
   Swamy–Arora variance components slightly differently on unbalanced
   panels. The full list of tolerances and the reasons are on the
   verification page.
@@ -258,6 +285,11 @@ The computational core is written in Rust. Speed and memory are measured for
 each implemented method at representative settings (sample size, number of
 regressors, and one or two standard-error types), not for every option
 combination.
+
+**Single-threaded.** The core currently runs its linear algebra on a single
+thread, and the reference packages were pinned to one thread as well, so the
+comparison measures the efficiency of the computation itself. Speed on many
+cores, for example for very wide models, is not covered by these numbers.
 
 Time for one `fit()` call at 1,000,000 observations, with 5 regressors and
 classical standard errors:
@@ -290,9 +322,9 @@ about 1.1 GB against about 4.0 GB for linearmodels, and OLS at about 0.32 GB
 against about 0.57 GB for statsmodels (whole-process peak, including the
 Python interpreter).
 
-Times are single-threaded, end-to-end measurements from CI on shared
-runners, so absolute values vary from run to run; the comparison between
-two packages within a run is the meaningful part. See the
+Times are end-to-end measurements from CI on shared runners, so absolute
+values vary from run to run; the comparison between two packages within a
+run is the meaningful part. See the
 [performance page](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/performance/)
 for the current numbers, measurement conditions, and known limitations, and
 the
@@ -301,9 +333,10 @@ per method.
 
 ## Limitations / Disclaimer
 
-This is a solo-maintained, pre-1.0 project. It has not yet undergone
-the years of community scrutiny and extensive edge-case testing that
-established tools such as statsmodels and the R ecosystem have. See
+This is a personal, pre-1.0 project maintained by one person. It has not
+yet undergone the years of community scrutiny and extensive edge-case
+testing that established tools such as statsmodels and the R ecosystem
+have. See
 [Numerical verification](#numerical-verification) for how estimates are
 checked. For published research or other important analyses, we recommend
 cross-checking results against a trusted, established package.

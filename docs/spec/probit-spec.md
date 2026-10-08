@@ -113,7 +113,7 @@ in-sample限定のまま。`augment(new_data=None)`もLogitと完全に同一の
 
 - 許容誤差はLogitと同じ基本方針（statsmodels主リファレンス`RTOL=1e-8`、Rクロスチェック
   `RTOL=1e-6`、`ATOL=1e-12`、実測最大~1.4e-7。R側参照値の生成方針もLogitと同じ）。個別の値を設定した項目:
-  信頼区間（下限/上限が0に近い境界での増幅、`RTOL=1e-5`、実測最大~1.8e-6）・p値（`ATOL=1e-7`）のみ
+  信頼区間（下限/上限が0に近い境界での増幅、`RTOL=1e-5`、係数は実測最大~1.8e-6、限界効果は~3.9e-6）・p値（`ATOL=1e-7`）のみ
   （`tests/_tolerances.py`の`probit_crosscheck`）。Wooldridge実データ（`mroz`）の
   クラスターロバストSE（`cluster="city"`、G=2）は`G<=q`でクラスターロバスト共分散が退化し
   `ValidationError`になるため成功パスのフィクスチャを持たず、許容誤差も設けない

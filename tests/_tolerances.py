@@ -220,29 +220,35 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # 刻み幅を変数ごとに標準偏差の1e-5倍にして解析解に合わせてある。
     # atolは`ATOL_LOGIT_PROBIT_CROSSCHECK`（1e-12）で、`|ref|`が小さい項目も
     # 純粋な相対誤差で比較する。以下の実測最大相対誤差は、atolを無視した全項目の値。
-    # Logit: 係数~4e-10、SE~3.6e-8、z~3.1e-8、conf_int~5.9e-8、限界効果effect~1.5e-9・
-    # std_err~2.9e-8。基本rtol=1e-6は最大値（conf_int）の約17倍のマージン。
+    # Logit: 係数~4e-10、SE~3.6e-8、z~3.1e-8、conf_int~6.1e-8（cluster含む）、
+    # 限界効果effect~1.5e-9・std_err~2.9e-8・z~3.3e-8・conf_int~6.1e-8。cluster
+    # （均等・不均衡）の全統計量・限界効果も同水準。基本rtol=1e-6は最大値（conf_int）の
+    # 約16倍のマージン。
     "logit_crosscheck": {
         "rtol": 1e-6,
         "atol": ATOL_LOGIT_PROBIT_CROSSCHECK,
-        # p値は正規分布CDFの裾で係数・zの数値差が増幅され、相対誤差は~1.2e-6
-        # （baseline/opg/x2）に達する。rtolで収まらずatolが必要になる実測最大絶対誤差
-        # ~5.5e-9（baseline/opg/x1）の約18倍のマージンとして1e-7を置く。
+        # p値は正規分布CDFの裾で係数・zの数値差が増幅され、相対誤差は係数~2.1e-6
+        # （cluster_imbalanced/x3）、限界効果~2.1e-6（同/overall/x3）に達する。rtolで
+        # 収まらずatolが必要になる実測最大絶対誤差~7e-9（cluster_imbalanced、係数・
+        # 限界効果とも）の約14倍のマージンとして1e-7を置く。
         "atol_p_value": 1e-7,
     },
     # Logitと同じ生成方針。実測最大相対誤差は係数~4.9e-8、SE~1.2e-7
     # （mroz/hc0/nwifeinc）、z~1.35e-7（mroz/opg/nwifeinc）、限界効果effect~5e-8・
-    # std_err~1.2e-7。基本rtol=1e-6は最大値の約7倍のマージン。
+    # std_err~1.2e-7・z~1.4e-7。cluster（均等・不均衡）の全統計量・限界効果も同水準
+    # （SE~6.8e-8）。基本rtol=1e-6は最大値の約7倍のマージン。
     "probit_crosscheck": {
         "rtol": 1e-6,
         "atol": ATOL_LOGIT_PROBIT_CROSSCHECK,
         # conf_intのみ、下限（または上限）が0に近いケースで絶対誤差が相対誤差に増幅
-        # される（実測最大相対誤差~1.8e-6、small_n/hc1/x2の下限-0.0083、絶対誤差
-        # 1.5e-8。SEは1.4e-8、係数は4.6e-9）。約5.5倍のマージン。
+        # される。係数のconf_intは実測最大相対誤差~1.8e-6（small_n/hc1/x2の下限
+        # -0.0083、絶対誤差1.5e-8。SEは1.4e-8、係数は4.6e-9）、限界効果のconf_intは
+        # ~3.9e-6（small_n/opg/mean/x2の下限0.0011、絶対誤差~4.5e-9）。後者に対する
+        # 約2.6倍のマージン。
         "rtol_conf_int": 1e-5,
-        # p値の裾での増幅（相対誤差は~3.8e-6、baseline/opg/x3）。rtolで収まらず
-        # atolが必要になる実測最大絶対誤差~1.8e-8（mroz/opg/kidsge6）の約5.7倍の
-        # マージンとして1e-7を置く。
+        # p値の裾での増幅（相対誤差は係数~4.6e-6〜限界効果~4.9e-6、cluster）。rtolで
+        # 収まらずatolが必要になる実測最大絶対誤差~1.8e-8（係数・限界効果とも
+        # mroz/opg/kidsge6）の約5.7倍のマージンとして1e-7を置く。
         "atol_p_value": 1e-7,
     },
     # FEのRクロスチェックはfixest。classical/hc1/hc2/hc3/cluster/dkとも、fixestの

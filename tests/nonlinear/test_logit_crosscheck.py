@@ -2,7 +2,8 @@
 
 `tests/fixtures/benchmarks/logit_crosscheck.json`（`benchmark/nonlinear/
 fixtures/generate_logit_crosscheck_fixtures.py`で生成）を読み込み、係数・標準誤差・
-適合度統計量・限界効果をRとクロスチェックする。役割分担は`test_logit_reference.py`
+適合度統計量・限界効果（全統計量）をRとクロスチェックする（cluster 2ケースも
+全統計量・限界効果）。役割分担は`test_logit_reference.py`
 と同じ（`.claude/rules/testing-policy.md`「リファレンス実装」参照）。
 
 Note:
@@ -28,6 +29,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+from _assertions import check_margeff
 from _constants import DATA_DIR, MROZ_X
 from _helpers import load_wooldridge_dataset, with_cluster_groups
 from _tolerances import TOLERANCES
@@ -53,7 +55,6 @@ ATOL = TOLERANCES["logit_crosscheck"]["atol"]
 ATOL_P_VALUE = TOLERANCES["logit_crosscheck"]["atol_p_value"]
 
 COV_TYPES = ["classical", "opg", "hc0", "hc1"]
-MARGEFF_AT = ["overall", "mean", "median"]
 
 # near_separationは既定tol=1e-6だとstatsmodels/Rとの一致精度が下がる境界ケース
 # （test_logit_reference.py参照）。ここでも同じ理由でtol=1e-8を明示指定する。
@@ -89,23 +90,6 @@ def _assert_dict_close(
         _assert_close(ours[name], ref_val, f"{label}/{name}", atol=atol)
 
 
-def _check_margeff(res, ref_margeff: dict, label: str) -> None:
-    for at in MARGEFF_AT:
-        effects = {row["param"]: row for row in res.marginal_effects(at=at)}
-        for name, ref_stats in ref_margeff[at].items():
-            row = effects[name]
-            _assert_close(
-                row["effect"],
-                ref_stats["effect"],
-                f"{label}/{at}/{name}/effect",
-            )
-            _assert_close(
-                row["std_err"],
-                ref_stats["std_err"],
-                f"{label}/{at}/{name}/std_err",
-            )
-
-
 def _check_result(res, ref: dict, label: str) -> None:
     _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
     _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
@@ -138,7 +122,14 @@ def _check_result(res, ref: dict, label: str) -> None:
     ):
         _assert_close(getattr(res, field), ref[field], f"{label}/{field}")
     if "margeff" in ref:
-        _check_margeff(res, ref["margeff"], label)
+        check_margeff(
+            res,
+            ref["margeff"],
+            label,
+            rtol=RTOL,
+            atol=ATOL,
+            atol_p_value=ATOL_P_VALUE,
+        )
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
@@ -162,8 +153,7 @@ def test_cluster_matches_r_glm(fixtures):
     res = Logit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
     ref = fixtures["synthetic"]["baseline"]["cluster"]["r"]
-    _assert_dict_close(res.params, ref["coef"], "cluster/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster/se")
+    _check_result(res, ref, "cluster")
 
 
 def test_cluster_imbalanced_matches_r_glm(fixtures):
@@ -174,8 +164,7 @@ def test_cluster_imbalanced_matches_r_glm(fixtures):
     res = Logit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
     ref = fixtures["synthetic"]["baseline"]["cluster_imbalanced"]["r"]
-    _assert_dict_close(res.params, ref["coef"], "cluster_imbalanced/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster_imbalanced/se")
+    _check_result(res, ref, "cluster_imbalanced")
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)

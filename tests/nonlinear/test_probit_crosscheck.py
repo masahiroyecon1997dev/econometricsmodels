@@ -2,8 +2,8 @@
 
 `tests/fixtures/benchmarks/probit_crosscheck.json`（`benchmark/nonlinear/
 fixtures/generate_probit_crosscheck_fixtures.py`で生成）を読み込み、係数・標準誤差・
-適合度統計量・限界効果をRとクロスチェックする。役割分担は`test_probit_reference.py`
-と同じ（`test_logit_crosscheck.py`と同型。
+適合度統計量・限界効果（全統計量）をRとクロスチェックする（cluster 2ケースも
+全統計量・限界効果）。役割分担は`test_probit_reference.py`と同じ（`test_logit_crosscheck.py`と同型。
 `.claude/rules/testing-policy.md`「リファレンス実装」参照）。
 
 Note:
@@ -40,6 +40,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+from _assertions import check_margeff
 from _constants import DATA_DIR, MROZ_X
 from _helpers import load_wooldridge_dataset, with_cluster_groups
 from _tolerances import TOLERANCES
@@ -61,7 +62,8 @@ RTOL = TOLERANCES["probit_crosscheck"]["rtol"]
 ATOL = TOLERANCES["probit_crosscheck"]["atol"]
 
 # conf_intは下限（または上限）が0に近いと絶対誤差が相対誤差に増幅されるため、
-# 係数・SE本体より緩いRTOLを使う（実測最大相対誤差~1.8e-6、small_n/hc1/x2の下限）。
+# 係数・SE本体より緩いRTOLを使う（実測最大相対誤差~3.9e-6、限界効果の
+# small_n/opg/mean/x2の下限。係数のconf_intは~1.8e-6）。
 RTOL_CONF_INT = TOLERANCES["probit_crosscheck"]["rtol_conf_int"]
 
 # p値は標準正規分布CDFの裾で係数・zのわずかな数値差が増幅されるため、係数・SE本体
@@ -69,7 +71,6 @@ RTOL_CONF_INT = TOLERANCES["probit_crosscheck"]["rtol_conf_int"]
 ATOL_P_VALUE = TOLERANCES["probit_crosscheck"]["atol_p_value"]
 
 COV_TYPES = ["classical", "opg", "hc0", "hc1"]
-MARGEFF_AT = ["overall", "mean", "median"]
 
 # near_separationは既定tol=1e-6だとstatsmodels/Rとの一致精度が下がる境界ケース
 # （test_probit_reference.py参照）。ここでも同じ理由でtol=1e-8を明示指定する。
@@ -108,23 +109,6 @@ def _assert_dict_close(
         )
 
 
-def _check_margeff(res, ref_margeff: dict, label: str) -> None:
-    for at in MARGEFF_AT:
-        effects = {row["param"]: row for row in res.marginal_effects(at=at)}
-        for name, ref_stats in ref_margeff[at].items():
-            row = effects[name]
-            _assert_close(
-                row["effect"],
-                ref_stats["effect"],
-                f"{label}/{at}/{name}/effect",
-            )
-            _assert_close(
-                row["std_err"],
-                ref_stats["std_err"],
-                f"{label}/{at}/{name}/std_err",
-            )
-
-
 def _check_result(res, ref: dict, label: str) -> None:
     _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
     _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
@@ -159,7 +143,15 @@ def _check_result(res, ref: dict, label: str) -> None:
     ):
         _assert_close(getattr(res, field), ref[field], f"{label}/{field}")
     if "margeff" in ref:
-        _check_margeff(res, ref["margeff"], label)
+        check_margeff(
+            res,
+            ref["margeff"],
+            label,
+            rtol=RTOL,
+            atol=ATOL,
+            rtol_conf_int=RTOL_CONF_INT,
+            atol_p_value=ATOL_P_VALUE,
+        )
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
@@ -183,8 +175,7 @@ def test_cluster_matches_r_glm(fixtures):
     res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
     ref = fixtures["synthetic"]["baseline"]["cluster"]["r"]
-    _assert_dict_close(res.params, ref["coef"], "cluster/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster/se")
+    _check_result(res, ref, "cluster")
 
 
 def test_cluster_imbalanced_matches_r_glm(fixtures):
@@ -195,8 +186,7 @@ def test_cluster_imbalanced_matches_r_glm(fixtures):
     res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
     ref = fixtures["synthetic"]["baseline"]["cluster_imbalanced"]["r"]
-    _assert_dict_close(res.params, ref["coef"], "cluster_imbalanced/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster_imbalanced/se")
+    _check_result(res, ref, "cluster_imbalanced")
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)

@@ -835,8 +835,10 @@ pub(crate) fn validate_dk_periods_cover_tested_coefficients(
 /// `time`のコード（`GroupCodes`、コード順＝時系列順、`TimeKeys`のdoc参照）で集計して
 /// `ξ_t`（時点`t`でのクロスセクション和）を求める。
 ///
-/// **`bandwidth <= t_periods`（狭義の`<`ではない）が呼び出し元の`resolve_dk_bandwidth`から
-/// 保証される**（詳細は`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
+/// **`bandwidth < t_periods`が呼び出し元の`resolve_dk_bandwidth`から保証される**
+/// （詳細は`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。上限の
+/// `bandwidth == t_periods - 1`でも最終ラグ項`l = bandwidth`を含める標準のBartlettカーネル
+/// で、この境界ではfixestと一致しない（`docs/spec/fe-spec.md`3.3節）。
 ///
 /// ラグごとの`k×k`行列積（`xi_top.transpose() * xi_bot`等）は呼び出し元の`fit()`冒頭の
 /// `ensure_serial()`が固定したグローバル`Par::Seq`に依存している（OLSの`hac_cov_params`が
@@ -1592,5 +1594,67 @@ mod tests {
         let out = quasi_demean_column(&col, &entity, &theta);
 
         assert_eq!(out, vec![13.0, 17.0, -25.0, -15.0]);
+    }
+
+    // ── panel_driscoll_kraay_cov_params ────────────────────────────────────
+
+    /// 1変数・各時点1観測の入力で、`bandwidth`ごとの未スケール`Ŝ`を標準Bartlettカーネルの
+    /// 定義式どおりに素朴な二重ループで求める（`panel_driscoll_kraay_cov_params`の
+    /// 行列積による実装とは独立な手計算）。`skip_last_lag`が真なら`l = bandwidth`の項を
+    /// 落とす（fixestの`bandwidth == T-1`での挙動の再現）。
+    fn naive_bartlett_meat(xi: &[f64], bandwidth: usize, skip_last_lag: bool) -> f64 {
+        let t_periods = xi.len();
+        let mut meat: f64 = xi.iter().map(|v| v * v).sum();
+        for l in 1..=bandwidth {
+            if skip_last_lag && l == bandwidth {
+                continue;
+            }
+            let weight = 1.0 - (l as f64) / ((bandwidth + 1) as f64);
+            let gamma: f64 = (l..t_periods).map(|t| xi[t] * xi[t - l]).sum();
+            meat += 2.0 * weight * gamma;
+        }
+        meat
+    }
+
+    #[test]
+    fn panel_driscoll_kraay_cov_params_matches_naive_bartlett_for_every_bandwidth_up_to_t_minus_1()
+    {
+        // T=5の各時点に1観測を置き、`ξ_t = e_t·x_t`を既知の値にする。`(X̃'X̃)⁻¹ = 1`・
+        // `K = 1`（スケールが`T/(T-1)`のみ）にして、`Ŝ`の定義式との直接比較にする。
+        //
+        // `bandwidth = T-1 = 4`（許容範囲の上限ちょうど）の最終ラグ項`l = 4`
+        // （`ξ_4 ξ_0`、重み`1/5`）が含まれることを固定する。fixestの`cpp_driscoll_kraay`は
+        // この境界で最大ラグを`T-2`に切り詰める（ラグの個数と最大ラグの取り違え）ため
+        // 最終ラグ項を落とし、本実装とは一致しない。本実装は標準の定義どおり含める
+        // （`docs/spec/fe-spec.md`3.3節）。`bandwidth <= T-2`ではfixestと一致する。
+        let ids: Vec<String> = (0..5).map(|t| t.to_string()).collect();
+        let time = GroupCodes::from_ids(&ids);
+        let x_values = [1.0, -2.0, 0.5, 3.0, -1.5];
+        let residuals = [0.7, 1.1, -0.4, 0.9, 2.0];
+        let x = Mat::from_fn(5, 1, |i, _| x_values[i]);
+        let xtx_inv = Mat::from_fn(1, 1, |_, _| 1.0);
+        let xi: Vec<f64> = x_values
+            .iter()
+            .zip(&residuals)
+            .map(|(x, e)| x * e)
+            .collect();
+        let scale = 5.0 / 4.0 * (4.0 / (5.0 - 1.0));
+
+        for bandwidth in 0..=4 {
+            let cov =
+                panel_driscoll_kraay_cov_params(&x, &residuals, &xtx_inv, &time, 1, bandwidth);
+            let expected = scale * naive_bartlett_meat(&xi, bandwidth, false);
+            assert!(
+                (*cov.get(0, 0) - expected).abs() < 1e-12 * expected.abs().max(1.0),
+                "bandwidth={bandwidth}: got {}, expected {expected}",
+                *cov.get(0, 0)
+            );
+        }
+
+        // 境界で最終ラグ項が寄与していること（落とした値とは異なること）を確かめる。
+        // これが成り立たないと上のループが境界での項の有無を区別できない。
+        let full = naive_bartlett_meat(&xi, 4, false);
+        let dropped = naive_bartlett_meat(&xi, 4, true);
+        assert!((full - dropped).abs() > 1e-6);
     }
 }

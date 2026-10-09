@@ -251,7 +251,8 @@ REは`plm`）のみ）。
   係数なし）。dkは`plm::vcovSCC(type = "HC0")`にfixestの補正`T/(T-1)·(n-1)/(n-k-G)`を
   手計算で掛けるため、plmが検証するのはカーネル・バンド幅の規約までで補正係数は
   fixestのみが独立に検証する。2-way・entity以外のクラスター列はplmが扱えずfixestのみ。
-  fixestが一致しない`bandwidth == t_periods - 1`はplmのみが参照値になる。
+  fixestが一致しない`bandwidth == t_periods - 1`（fixest側のoff-by-oneで最終ラグ項が落ちる。
+  `fe-spec.md`3.3節7.）はplmのみが参照値になる。
   fixestの境界ケースのうち、`G = q+1`・`G = 2`（先頭3・2 entityへの絞り込み）、
   `T = q+1`のdk、dkのバンド幅0・1、entityあたりの観測数の偏り（[2,3,5,10]期）も
   plmで検証する。plmは非entityのクラスター列を扱えないため、`G = q+1`・`G = 2`・観測数の

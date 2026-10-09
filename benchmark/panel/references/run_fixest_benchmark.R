@@ -17,8 +17,8 @@
 # dk（Driscoll-Kraay）はfixestの既定バンド幅（`n_t^0.25`）が本実装の既定
 # （`floor(4*(T/100)^(2/9))`）と異なるため、バンド幅（lag）を第4引数で明示的に
 # 渡し、時点列を第5引数で渡す。`lag == T-1`（許容範囲の上限ちょうど）では
-# fixestの内部実装が最後のラグ項を切り捨てるらしく本実装と一致しないため
-# （`fe-spec.md`3.3節の既知の制約）、`lag < T-1`で使うこと。
+# fixestの内部実装（`cpp_driscoll_kraay`）のoff-by-oneで最後のラグ項が落ち、標準の
+# Bartlettカーネルの本実装と一致しないため（`fe-spec.md`3.3節7.）、`lag < T-1`で使うこと。
 #
 # aic/bicはlinearmodels.PanelOLSが提供しないため、このスクリプト
 # （fixest::AIC()/BIC()、本実装と同じ式に数値一致することを

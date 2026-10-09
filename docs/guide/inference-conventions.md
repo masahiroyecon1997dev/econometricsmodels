@@ -37,7 +37,7 @@ The defaults below were checked against R 4.5.3 (sandwich 3.1.3, lmtest 0.9.40, 
 | `lm` + `lmtest::coeftest` with `sandwich::vcovHC` / `vcovCL` | t, `n - k` | same as OLS for HC; with clustering, `cov_type="cluster"` uses `G - 1` degrees of freedom instead of `n - k` |
 | `glm(family = binomial)` (logit / probit) | z | same as Logit / Probit |
 | `glm(family = gaussian)` | t | not applicable (use OLS) |
-| `fixest::feols` | t, `n - k`; with `cluster`, t with `G - 1` | OLS matches; FE's small-sample corrections (`cov_type="cluster"`/`"dk"`) and their degrees of freedom (`G - 1` / `t_periods - 1`) are aligned with fixest's `ssc()` defaults (`K.fixef="nonnested"` for cluster, `"full"` for `hc1`-`hc3`/`dk`) |
+| `fixest::feols` | t, `n - k`; with `cluster`, t with `G - 1` | OLS matches; FE's small-sample corrections (`cov_type="cluster"`/`"dk"`) and their degrees of freedom (`G - 1` / `t_periods - 1`) are aligned with fixest's `ssc()` defaults (`K.fixef="nonnested"` for cluster, `"full"` for `hc1`-`hc3`/`dk`). One exception: with `dk_bandwidth = t_periods - 1` fixest's `vcov = DK(...)` silently drops the last lag term (an off-by-one in its compiled code), so its standard errors differ from this package, which keeps the standard Bartlett kernel; smaller bandwidths agree |
 | `fixest::feglm` | z | same as Logit / Probit |
 | `plm` (`within`, `random`) | p-values from the normal distribution | FE and RE always use t (never normal), so p-values and confidence intervals differ; RE's `cov_type="cluster"` small-sample correction matches `plm::vcovHC(type="sss")` (Stata/R-style `G/(G-1)·(n-1)/(n-K)`) |
 | `ivreg::ivreg` | t | same as 2SLS |

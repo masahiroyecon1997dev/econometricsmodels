@@ -3668,21 +3668,16 @@ mod tests {
         // `testing-policy.md`が警告する「ループ本体がテストで一度も複数回実行されない」
         // 落とし穴と同型）。
         //
-        // **fixestの`vcov=DK(2)`とは意図的に数値比較しない**（実装時に
-        // devcontainer内のfixest 0.14.2で実地確認・rust-reviewerが追加検証済み。
-        // fixestの内部C++実装（`cpp_driscoll_kraay`）を`.Call`経由で直接叩いて分解した
-        // 結果、不一致が起きるのは「`bandwidth>=2`全般」ではなく、**`bandwidth ==
-        // t_periods - 1`（許容範囲`[0, t_periods)`の上限ちょうど）のときに限られる**
-        // ことが判明した——T=5の合成データで`bandwidth=0..=3`（いずれも`< t_periods-1`）は
-        // 本実装と`cpp_driscoll_kraay`が完全一致し、`bandwidth=4`（`=t_periods-1`）の
-        // ときだけ`cpp_driscoll_kraay`が最後のラグ項（`l=bandwidth`）を落とした値に
-        // 一致した。本テストの`t_periods=3`・`bandwidth=2`はまさにこの境界ケース
-        // （`bandwidth=2=t_periods-1`）に該当する。原因はfixest側の独立した実装詳細
-        // （バンド幅が時点数の上限ちょうどのときに意図的に最終ラグ項を切り捨てる仕様か、
-        // C++実装のoff-by-oneか未確認）。この差はこの変更が扱う小標本補正
-        // （`G/(G-1)`・`K`・推論の自由度）とは無関係な、カーネル本体の項数の話のため、
-        // 本Issueのスコープ外として別途GitHub Issue化する（利用者が許容範囲の上限
-        // ちょうどを明示指定すると、fixestと一致しない実運用上の落とし穴になりうる）。
+        // **fixestの`vcov=DK(2)`とは意図的に数値比較しない**（devcontainer内のfixest
+        // 0.14.2で実地確認済み）。本テストの`t_periods=3`・`bandwidth=2`は許容範囲
+        // `[0, t_periods)`の上限ちょうど（`bandwidth == t_periods - 1`）で、この境界では
+        // fixestが最後のラグ項（`l=bandwidth`）を落とした値を返し、標準のBartlettカーネルを
+        // 実装した本実装と一致しない。原因はfixestのC++実装`cpp_driscoll_kraay`のoff-by-one
+        // （ラグの個数`L = bandwidth + 1`に`L > T - 1`の上限を課すため、`bandwidth == T - 1`
+        // のときだけ最大ラグが`T - 2`に切り詰められる）で、`bandwidth <= t_periods - 2`では
+        // 一致する。本実装は標準カーネルを維持する（`docs/spec/fe-spec.md`3.3節7.参照）。
+        // 境界の標準カーネルは`panel_driscoll_kraay_cov_params`の単体テスト（定義式の手計算）と
+        // plmとの照合（`fe_plm_crosscheck.json`の`dk_max_bandwidth`）で検証している。
         //
         // このテスト自体は、変更していないカーネル計算（`bandwidth=1`の既定テストで
         // fixestと一致確認済みの実装）に新しい小標本補正（`(t_periods/(t_periods-1))×
@@ -3761,8 +3756,8 @@ mod tests {
         // kernel_by_new_correction`）と同様、2-way FEでもラグ項ループが複数回（l=1,2）
         // 実行されるケースを検証する（rust-reviewer指摘）。同テストのコメントの通り、
         // `bandwidth == t_periods - 1`（ここでは`2 == 3 - 1`）という境界値はfixestの
-        // 生カーネルと一致しない独立した問題があるため、fixestとの数値比較はせず
-        // 回帰ガードとして期待値を固定する。
+        // C++実装のoff-by-oneにより本実装と一致しないため（同テストのコメント参照）、
+        // fixestとの数値比較はせず回帰ガードとして期待値を固定する。
         let (entity, time, x, y) = fixest_reference_input();
         let input = FeInput::from_columns(
             &y,

@@ -37,9 +37,10 @@ entityに絞って作る）、dkの`T = q+1`、dkのバンド幅0・1、entity�
 
 ## `bandwidth == T-1`
 
-fixestは`bandwidth == T-1`で最終ラグ項を落とすため本実装と一致しない。plmは
-最終ラグを落とさず標準のBartlettカーネルと一致するので、この境界の参照値は
-このファイルだけが持つ（`dk_max_bandwidth`）。
+fixestは内部実装（`cpp_driscoll_kraay`）のoff-by-oneで`bandwidth == T-1`の最終ラグ項を
+落とすため、標準のBartlettカーネルの本実装と一致しない（`fe-spec.md`3.3節7.）。plmは
+最終ラグを落とさず本実装と一致するので、この境界の参照値はこのファイルだけが持つ
+（`dk_max_bandwidth`）。
 
 役割分担:
     - 主リファレンス（linearmodels、classical/hc1）: `test_fe_reference.py`
@@ -189,7 +190,7 @@ def test_synthetic_one_way_matches_plm(crosscheck, scenario, cov_type):
     )
 
 
-# ── bandwidth == T-1（fixestが最終ラグを落とす境界、plmのみが参照値） ─────
+# ── bandwidth == T-1（fixestのoff-by-oneで最終ラグが落ちる境界、plmのみが参照値） ──
 
 
 @pytest.mark.parametrize("scenario", MAX_BANDWIDTH_SCENARIOS)

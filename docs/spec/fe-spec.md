@@ -216,13 +216,28 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
    `Option`で、`None`なら2-wayの`time`を暗黙に借用していたが、どの列がDKの時点かを利用者が
    明示しない設計は、意図と違う列が選ばれても気づけないため廃止した。`FeInput.time()`は
    2-wayの固定効果の時間次元専用で、DKの時点列とは独立。
-7. **既知の制約**: `bandwidth`が許容範囲`[0, t_periods)`の上限ちょうど（`bandwidth ==
-   t_periods - 1`）のとき、fixestの内部C++実装（`cpp_driscoll_kraay`）が最後のラグ項を
-   切り捨てるらしいことが実地確認で判明しており、本実装（標準的なBartlett核、最後の
-   ラグ項まで含める）とはこの境界値でのみ数値が一致しない（`bandwidth < t_periods - 1`
-   では一致する）。原因未特定のため別issueで追跡する。なお`plm::vcovSCC(maxlag = T-1)`は
-   最後のラグ項を落とさず、補正係数を除いて本実装と一致する（第2リファレンスとして
-   `fe_plm_crosscheck.json`が検証する）。
+7. **`bandwidth == t_periods - 1`ではfixestと一致しない（fixest側の実装誤り、本実装は
+   標準のBartlettカーネルを維持）**: `bandwidth`が許容範囲`[0, t_periods)`の上限ちょうど
+   のとき、fixest 0.14.2の`vcov="DK"`は最後のラグ項（`l = bandwidth`）を落とした値を
+   返し、本実装（最後のラグ項まで含める）とこの境界値でのみ数値が一致する。
+   `bandwidth <= t_periods - 2`では一致する。
+   - **原因**: fixestのC++実装`cpp_driscoll_kraay`（`src/vcov_related.cpp`）の
+     off-by-one。R側はBartlett重みの長さ`bandwidth + 2`のベクトル（末尾は0）を渡し、
+     C++側は末尾の0を除いた「ラグ`0..=bandwidth`の個数」`L = bandwidth + 1`を数える。
+     続けて`if (L > T - 1) L = T - 1;`で上限を課すが、`L`は最大ラグではなく個数なので、
+     ラグの上限`T - 1`に対応する上限は`L <= T`でなければならない。`T - 1`と書かれて
+     いるため`bandwidth == T - 1`（`L = T`）だけ`L = T - 1`に切り詰められ、最大ラグが
+     `T - 2`になる。内側のループが`t < T - l`で境界を自前で処理しているためこの上限は
+     不要で、意図的な切り捨てとは考えにくい。`l = T - 1`の項`Γ_{T-1} = ξ_{T-1}'ξ_0`は
+     一般に非ゼロで、落とす数学的根拠もない。T=5の乱数スコアで`cpp_driscoll_kraay`を
+     直接呼ぶと、`bandwidth = 0..=3`は標準カーネルと機械精度で一致し、`bandwidth = 4`だけ
+     「`l = 4`の項を除いた標準カーネル」と機械精度で一致した（標準カーネルとの差は約0.3）。
+   - **方針**: fixestのこの挙動は再現しない。標準のBartlettカーネル（linearmodelsの
+     `DriscollKraay`・`plm::vcovSCC(maxlag = T-1)`と同じ）を維持する。`plm::vcovSCC`は
+     最後のラグ項を落とさず、補正係数を除いて本実装と一致する（第2リファレンスとして
+     `fe_plm_crosscheck.json`の`dk_max_bandwidth`が検証する）。エンジンの
+     `panel_driscoll_kraay_cov_params`の単体テストは、境界を含む全バンド幅を定義式の
+     手計算と照合する。fixestの`DK(lag)`とは`lag <= T - 2`で比較すること。
 
 ### 3.4 パネル固有R²（`r_squared_within`/`between`/`overall`）
 
@@ -319,4 +334,5 @@ demeanしたR²」を3種とも定義すると誤る）:
 - **2-way clustering（entity+time同時）**: v1スコープ外。
 - **Driscoll-Kraay HACのカーネル拡張**: Parzen/QSカーネルへの拡張は別issue。
 - **DKの`bandwidth == t_periods - 1`（許容範囲の上限ちょうど）でfixestと数値不一致**:
-  3.3節7.参照。原因未特定のため別issueで追跡する。
+  fixestの`cpp_driscoll_kraay`のoff-by-oneが原因で、本実装は標準カーネルを維持する
+  （3.3節7.参照）。未対応ではなく意図した差異。

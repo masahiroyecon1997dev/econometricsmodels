@@ -87,6 +87,8 @@ RUN apt update && apt install -y --no-install-recommends \
 # Tobit交差検証）を追加。両者はsandwich等を引き込むため、最終ピン留めの前に
 # upgrade="never"で導入する。numDeriv はTobit限界効果のデルタ法SEをformula非依存に検証する
 # （testing-policy.md「リファレンス実装」）ために追加。
+# momentfit はIV-GMMの独立実装によるクロスチェック（ivregはGMM非対応）。sandwichに依存する
+# ため、最終ピン留めの前にupgrade="never"で導入する。
 # maxLik（censRegの依存先、Tobit交差検証の最適化エンジン）は、censRegが依存として引き込む
 # バージョンが導入時期で変わる（フィクスチャ記録では1.5.2.2→1.6.10）ため、censRegより前に
 # 明示的にピン留めする。
@@ -100,6 +102,7 @@ RUN Rscript -e 'install.packages("remotes", repos = "https://cloud.r-project.org
     && Rscript -e 'remotes::install_version("maxLik", version = "1.6-10", upgrade = "never", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'remotes::install_version("AER", version = "1.2-17", upgrade = "never", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'remotes::install_version("censReg", version = "0.5-40", upgrade = "never", repos = "https://cloud.r-project.org")' \
+    && Rscript -e 'remotes::install_version("momentfit", version = "1.0", upgrade = "never", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'remotes::install_version("sandwich", version = "3.1.3", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'remotes::install_version("lmtest", version = "0.9.40", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'install.packages("languageserver", repos = "https://cloud.r-project.org")'

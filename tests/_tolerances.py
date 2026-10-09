@@ -213,6 +213,17 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # 専用に緩めた相対誤差（両方で共用、実測最大値にマージン）。
         "rtol_hac_wu_hausman_small_n": 0.2,
     },
+    # GMMのRクロスチェック（momentfit）。全ケースで閉形式解の機械精度一致
+    # （実測最大相対誤差: 係数2.1e-12、SE8.2e-11、z値8.3e-11、ロバストWald
+    # 2.5e-11、Hansen J1.3e-12。いずれも最大はWooldridge cardで、合成データはより
+    # 小さい。信頼区間・p値は0付近の値で相対誤差が膨らむ（信頼区間の実測最大絶対
+    # 誤差1.4e-10）ため、他のクロスチェックと共通の絶対誤差フロアを使う）。
+    # momentfitを揃えるための設定と原因は`benchmark/iv/references/run_momentfit.R`の
+    # ヘッダコメント参照。
+    "iv_gmm_crosscheck": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_CROSSCHECK_FLOOR,
+    },
     # Rのglm()は収束判定を厳しく（epsilon=1e-14）して参照値を生成している
     # （`benchmark/nonlinear/references/run_glm_crosscheck.R`参照）。既定の
     # epsilon=1e-8だと`sandwich::estfun()`が1反復前の作業重みを使い、ロバストSEの

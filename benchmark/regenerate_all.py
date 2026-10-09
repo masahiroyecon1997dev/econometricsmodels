@@ -14,7 +14,7 @@
 - 既定: 両方（CSV → JSON の順。JSONはCSVを読むため）
 
 **クロスチェック用フィクスチャ（`*_crosscheck.json`）の生成には `Rscript` が
-必要**（`sandwich` / `lmtest` / `ivreg` / `marginaleffects` 等）。Rが無い環境
+必要**（`sandwich` / `lmtest` / `ivreg` / `momentfit` / `marginaleffects` 等）。Rが無い環境
 ではそのステップのみ FAILED になり、他のステップは続行する。
 
 使用例（リポジトリルートから）:
@@ -58,6 +58,7 @@ _FIXTURE_MODULES = [
     "benchmark.nonlinear.fixtures.generate_probit_crosscheck_fixtures",
     "benchmark.nonlinear.fixtures.generate_tobit_crosscheck_fixtures",
     "benchmark.iv.fixtures.generate_iv_crosscheck_fixtures",
+    "benchmark.iv.fixtures.generate_iv_gmm_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_fe_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_fe_plm_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_re_crosscheck_fixtures",

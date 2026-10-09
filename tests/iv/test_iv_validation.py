@@ -5,7 +5,7 @@
 `.claude/rules/testing-policy.md`「テストの3系統」）。成功パスの構造・API・
 オプション反映は `test_iv_api.py`、主リファレンス（linearmodels）との数値照合は
 `test_iv_reference.py`（2SLS）・`test_iv_gmm_reference.py`（GMM）、R クロスチェックは
-`test_iv_crosscheck.py`（OLS/WLS/Logit/Probit の `test_<手法>_validation.py` 等と
+`test_iv_crosscheck.py`（2SLS）・`test_iv_gmm_crosscheck.py`（GMM）（OLS/WLS/Logit/Probit の `test_<手法>_validation.py` 等と
 同じ4分割）。
 
 `iv_dataset` フィクスチャと `our_fit` ヘルパーは `tests/iv/conftest.py`／

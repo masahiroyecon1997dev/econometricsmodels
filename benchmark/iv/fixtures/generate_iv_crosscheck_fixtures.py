@@ -284,7 +284,8 @@ def build_fixtures() -> dict:
         "note": (
             'hc2/hc3も`vcovHC(type="HC2"/"HC3")`で計算し含める（本実装と数値'
             "一致することを実機確認済み、iv-spec.md 3.1節）。GMMはivregが"
-            "対応していないため対象外（iv-spec.md4章、Rクロスチェック省略の例外規定）。"
+            "対応していないため対象外（R momentfitによるクロスチェックは"
+            "`iv_gmm_crosscheck.json`、iv-spec.md4章）。"
             "weak_instrument_f・sargan_statistic/sargan_p_valueはivregの"
             "summary(diagnostics=TRUE)が常にclassical vcovで計算する仕様のため、"
             "全cov_typeエントリで同じ値になる（実測確認済み）。just_identified"

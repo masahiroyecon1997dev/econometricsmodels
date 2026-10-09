@@ -12,6 +12,7 @@ classical/HC0/HC1/HAC（+クラスター、baselineのみ）で、係数・標�
     - 主リファレンス（linearmodels）との厳密な数値一致: このファイル（2SLS）
     - GMM の同種テスト: `test_iv_gmm_reference.py`
     - 独立実装（R `ivreg`）とのクロスチェック: `test_iv_crosscheck.py`
+    - GMM の独立実装（R `momentfit`）とのクロスチェック: `test_iv_gmm_crosscheck.py`
 
 Note:
     - `estimator="gmm"`はこのフィクスチャの対象外（フィクスチャ生成時点で

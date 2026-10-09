@@ -47,7 +47,8 @@ Note:
       cov_typeのみ、ivreg側のWald検定がF分布の分母自由度にクラスター数を
       反映しない既知の制約によりp値が一致しないため、`_check_result`の
       `check_wu_hausman_p_value=False`で統計量のみ比較する（ユーザー確認済み）。
-    - GMMはivregが対応していないため対象外（5.3節、Rクロスチェック省略の例外規定）。
+    - GMMはivregが対応していないため対象外（R momentfitによるクロスチェックは
+      `test_iv_gmm_crosscheck.py`）。
     - 第一段階回帰の結果（`first_stage()`）自体はここでは比較しない
       （`test_ols_crosscheck.py`が既にOLSの数値一致を検証済みのため、
       `test_iv_reference.py`と同じ理由）。
